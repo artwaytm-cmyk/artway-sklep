@@ -1,0 +1,24 @@
+# Konfiguracja Netlify dla sklepu Artway-TM
+# Strona statyczna (index.html) + funkcja serwerowa store (wspólna baza na Netlify Blobs)
+
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[functions]
+  node_bundler = "esbuild"
+
+# wygodny alias: /api/store działa tak samo jak /.netlify/functions/store
+[[redirects]]
+  from = "/api/store"
+  to = "/.netlify/functions/store"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Cache-Control = "no-store"
