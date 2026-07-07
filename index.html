@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.07.9">
+<meta name="artway-version" content="2026.07.07.10">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
+<link id="faviconLink" rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="14" fill="%232563eb"/%3E%3Ctext x="32" y="42" text-anchor="middle" font-size="30" font-family="Arial" font-weight="700" fill="white"%3EA%3C/text%3E%3C/svg%3E'>
 <style>
 :root{
   --bg:#f6f7fb; --panel:#ffffff; --ink:#151a24; --muted:#68718280;
@@ -562,6 +563,7 @@ const LEGACY_PRZELEW_TEKST = "przelew " + "tradycyjny";
 const KONFIG = {
   nazwaSklepu: "Artway-TM",
   pasekInfo: "🚚 Darmowa dostawa od 200 zł &nbsp;•&nbsp; 📦 Wysyłka w 24h &nbsp;•&nbsp; ↩️ 14 dni na zwrot &nbsp;•&nbsp; 🎁 Kod <b>START10</b> = −10%",
+  czasWysylki: "24 h",
   telefon: "+48 530 038 914",
   daneFirmy: {...DANE_FIRMY_DOMYSLNE},
   opisSklepu: "Sklep wielobranżowy z asortymentem od sprawdzonych dostawców. Nowe technologie, uczciwe ceny.",
@@ -603,11 +605,51 @@ const DOMYSLNE_PODSTRONY = {
   zamowienia:{nazwa:"Moje zamówienia",tytul:"📦 Moje zamówienia",opis:"Historia i bieżące informacje o Twoich zamówieniach.",szerokosc:"standard",styl:"panel",widoczna:true},
   ulubione:{nazwa:"Ulubione",tytul:"❤️ Ulubione produkty",opis:"Produkty zapisane do późniejszego sprawdzenia.",szerokosc:"wide",styl:"panel",widoczna:true}
 };
+const SEKCJE_PODSTRONY = {
+  naglowek:{nazwa:"Nagłówek strony",ikona:"🏷️"},
+  opis:{nazwa:"Opis pod nagłówkiem",ikona:"📝"},
+  tresc:{nazwa:"Główna treść",ikona:"📄"},
+  powrot:{nazwa:"Link powrotu do sklepu",ikona:"↩️"}
+};
+const DOMYSLNA_KOLEJNOSC_PODSTRONY = ["naglowek","opis","tresc","powrot"];
 function pobierzBannery(){ return Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY.map(x=>({...x})); }
 function ustawieniaPodstrony(id){ return {...(DOMYSLNE_PODSTRONY[id]||{}),...((ustawienia.podstrony||{})[id]||{})}; }
 function klasaPodstrony(id){
   const u=ustawieniaPodstrony(id);
   return `page page-${u.szerokosc||"standard"} ${u.styl==="plain"?"page-plain":""}`;
+}
+function kolejnoscSekcjiPodstrony(id){
+  const u=ustawieniaPodstrony(id);
+  const zap=Array.isArray(u.sekcjeOrder)?u.sekcjeOrder.filter(x=>SEKCJE_PODSTRONY[x]):[];
+  return [...zap,...DOMYSLNA_KOLEJNOSC_PODSTRONY.filter(x=>!zap.includes(x))];
+}
+function sekcjaPodstronyWidoczna(id,sekcja){
+  const u=ustawieniaPodstrony(id);
+  return !(Array.isArray(u.sekcjeUkryte)&&u.sekcjeUkryte.includes(sekcja));
+}
+function czasWysylki(){
+  return String(ustawienia.czasWysylki||KONFIG.czasWysylki||"24 h").trim()||"24 h";
+}
+function tekstWysylki(prefix="Wysyłka w"){
+  return `${prefix} ${czasWysylki()}`;
+}
+function pasekInfoHTML(){
+  const domyslny=`🚚 Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł &nbsp;•&nbsp; 📦 ${tekstWysylki()} &nbsp;•&nbsp; ↩️ 14 dni na zwrot &nbsp;•&nbsp; 🎁 Kod <b>START10</b> = −10%`;
+  let t=String(KONFIG.pasekInfo||domyslny);
+  t=t.replace(/Darmowa dostawa od\s*\d+(?:[,.]\d+)?\s*zł/gi,`Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł`);
+  t=t.replace(/Wysyłka w\s*\d+\s*(?:h|godziny|godzin|godz\.?)(?:\s*robocze)?/gi,tekstWysylki());
+  t=t.replace(/Wysylka w\s*\d+\s*(?:h|godziny|godzin|godz\.?)(?:\s*robocze)?/gi,tekstWysylki("Wysylka w"));
+  return t;
+}
+function domyslnyFavicon(){
+  const litera=encodeURIComponent((KONFIG.nazwaSklepu||"A").trim()[0]||"A");
+  return `data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="14" fill="%232563eb"/%3E%3Ctext x="32" y="42" text-anchor="middle" font-size="30" font-family="Arial" font-weight="700" fill="white"%3E${litera}%3C/text%3E%3C/svg%3E`;
+}
+function aktualizujFavicon(){
+  const l=document.getElementById("faviconLink"); if(!l) return;
+  const url=ustawienia.faviconObraz||domyslnyFavicon();
+  l.setAttribute("href",url);
+  l.setAttribute("type",String(url).startsWith("data:image/svg")?"image/svg+xml":"image/png");
 }
 
 /* ═══════════ REJESTR BŁĘDÓW (logi + sugestie) ═══════════
@@ -1274,6 +1316,7 @@ function zastosujUstawienia(){
   const u = ustawienia || {};
   if(u.nazwaSklepu) KONFIG.nazwaSklepu = u.nazwaSklepu;
   if(u.pasekInfo!==undefined && u.pasekInfo!=="") KONFIG.pasekInfo = u.pasekInfo;
+  if(u.czasWysylki!==undefined && u.czasWysylki!=="") KONFIG.czasWysylki = String(u.czasWysylki).trim();
   if(u.telefon) KONFIG.telefon = u.telefon;
   if(u.opisSklepu) KONFIG.opisSklepu = u.opisSklepu;
   if(u.emailSklepu) KONFIG.emailSklepu = u.emailSklepu;
@@ -1326,7 +1369,7 @@ function zastosujUstawienia(){
   $("logoA").innerHTML = ustawienia.logoObraz
     ? `<img src="${ustawienia.logoObraz}" alt="${esc(n)}" style="height:36px;display:block;max-width:190px;object-fit:contain">`
     : (i>0 ? esc(n.slice(0,i))+"<span>"+esc(n.slice(i))+"</span>" : "<span>"+esc(n)+"</span>");
-  $("topbar").innerHTML = KONFIG.pasekInfo;
+  $("topbar").innerHTML = pasekInfoHTML();
   document.title = u.seo?.tytul || KONFIG.nazwaSklepu + " — Sklep internetowy";
   const metaOpis=document.querySelector('meta[name="description"]');
   if(metaOpis&&u.seo?.opis)metaOpis.setAttribute("content",u.seo.opis);
@@ -1338,6 +1381,7 @@ function zastosujUstawienia(){
   $("topbar").style.display = u.uklad?.pasekInfoWidoczny===false ? "none" : "";
   $("searchInput").placeholder = u.tekstSzukaj || "Szukaj produktu…";
   $("footCopy").textContent = u.stopkaCopy || `© ${new Date().getFullYear()} ${KONFIG.nazwaSklepu}. Wszystkie prawa zastrzeżone.`;
+  aktualizujFavicon();
   document.querySelectorAll("[data-page-link]").forEach(a=>{
     a.style.display = ustawieniaPodstrony(a.dataset.pageLink).widoczna===false ? "none" : "";
   });
@@ -1638,7 +1682,7 @@ function widokSklep(){
   </section>`; };
   SEKCJE.zalety = () => `
   <section class="perks">
-    <div class="perk"><span class="ico">🚀</span><div><b>Szybka wysyłka</b><small>Nadanie w 24h w dni robocze</small></div></div>
+    <div class="perk"><span class="ico">🚀</span><div><b>Szybka wysyłka</b><small>${esc(tekstWysylki("Nadanie w"))} w dni robocze</small></div></div>
     <div class="perk"><span class="ico">🔒</span><div><b>Wygodne płatności</b><small>mBank Paynow, pobranie i przelew na telefon</small></div></div>
     <div class="perk"><span class="ico">↩️</span><div><b>Łatwe zwroty</b><small>14 dni na zwrot bez podania przyczyny</small></div></div>
     <div class="perk"><span class="ico">💬</span><div><b>Pomoc przed zakupem</b><small>${esc(KONFIG.emailSklepu)}</small></div></div>
@@ -1682,7 +1726,7 @@ function widokSklep(){
       <a href="#/faq">Zobacz wszystkie →</a>
     </div>
     <div class="faq-list">
-      <details><summary>Ile trwa realizacja zamówienia?</summary><p>Zamówienia przygotowujemy do wysyłki w dni robocze. Standardowy deklarowany czas nadania to 24 godziny.</p></details>
+      <details><summary>Ile trwa realizacja zamówienia?</summary><p>Zamówienia przygotowujemy do wysyłki w dni robocze. Standardowy deklarowany czas nadania to ${esc(czasWysylki())}.</p></details>
       <details><summary>Kiedy dostawa jest darmowa?</summary><p>Dostawa kurierem lub do paczkomatu jest darmowa, gdy wartość produktów po rabacie wynosi co najmniej ${KONFIG.darmowaDostawaOd} zł.</p></details>
       <details><summary>Jak zwrócić produkt?</summary><p>Na odstąpienie od umowy masz 14 dni od odbioru. Napisz na ${esc(KONFIG.emailSklepu)}, a otrzymasz dalsze instrukcje.</p></details>
     </div>
@@ -1908,9 +1952,9 @@ function widokProdukt(id){
           </div>
           ${(()=>{ const s=stanProduktu(p);
             if(s===0) return `<p style="font-size:.83rem;color:var(--danger);margin-top:1rem;font-weight:600">✖ Chwilowo niedostępny — zajrzyj wkrótce</p>`;
-            if(s!==null && s<=3) return `<p style="font-size:.83rem;color:var(--danger);margin-top:1rem;font-weight:600">🔥 Ostatnie sztuki: ${s} • wysyłka w 24 h</p>`;
-            if(s!==null) return `<p style="font-size:.83rem;color:var(--ok);margin-top:1rem;font-weight:600">✔ Dostępny: ${s} szt. • wysyłka w 24 h</p>`;
-            return `<p style="font-size:.83rem;color:var(--ok);margin-top:1rem;font-weight:600">✔ Dostępny • wysyłka w 24 h</p>`; })()}
+            if(s!==null && s<=3) return `<p style="font-size:.83rem;color:var(--danger);margin-top:1rem;font-weight:600">🔥 Ostatnie sztuki: ${s} • ${esc(tekstWysylki().toLowerCase())}</p>`;
+            if(s!==null) return `<p style="font-size:.83rem;color:var(--ok);margin-top:1rem;font-weight:600">✔ Dostępny: ${s} szt. • ${esc(tekstWysylki().toLowerCase())}</p>`;
+            return `<p style="font-size:.83rem;color:var(--ok);margin-top:1rem;font-weight:600">✔ Dostępny • ${esc(tekstWysylki().toLowerCase())}</p>`; })()}
           ${(()=>{ const o=sredniaOcen(p.id); return o?`<p style="font-size:.95rem;color:var(--accent);font-weight:700;margin-top:.3rem">${gwiazdki(o.srednia)} ${o.srednia.toFixed(1)} <small style="color:var(--muted2)">(${o.n} opinii)</small></p>`:""; })()}
         </div>
       </div>
@@ -2310,7 +2354,7 @@ function widokRegulamin(){
     <h2>§1 Postanowienia ogólne</h2><p>Sklep internetowy Artway-TM prowadzony jest przez:<br>${daneFirmyHTML()}<br>Kontakt: ${KONFIG.emailSklepu}, ${KONFIG.telefon}.</p>
     <h2>§2 Zamówienia</h2><p>Zamówienia można składać 24/7 przez stronę. Zawarcie umowy następuje z chwilą potwierdzenia zamówienia przez sklep.</p>
     <h2>§3 Ceny i płatności</h2><p>Ceny są cenami brutto (zawierają VAT). Dostępne formy płatności: ${esc(platnosciOpis())}. Przy przelewie na telefon klient wpisuje w tytule numer zamówienia.</p>
-    <h2>§4 Dostawa</h2><p>Wysyłka w 24 h w dni robocze. Koszty dostawy podane są w koszyku. Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł.</p>
+    <h2>§4 Dostawa</h2><p>${esc(tekstWysylki())} w dni robocze. Koszty dostawy podane są w koszyku. Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł.</p>
     <h2>§5 Zwroty</h2><p>Konsument ma prawo odstąpić od umowy w terminie 14 dni bez podania przyczyny.</p>
     <h2>§6 Reklamacje</h2><p>Reklamacje rozpatrujemy w ciągu 14 dni. Zgłoszenia: ${KONFIG.emailSklepu}.</p>`,"regulamin");
 }
@@ -2327,6 +2371,7 @@ function widokDostawa(){
   return stronaInfo("🚚 Dostawa i płatności", `
     <h2>Formy dostawy</h2>
     <ul>${KONFIG.dostawy.map(d=>`<li>${d.nazwa} — ${d.koszt?d.koszt+" zł":"gratis"} (${d.opis})</li>`).join("")}<li><b>Darmowa dostawa</b> (kurier/paczkomat) przy zamówieniach od ${KONFIG.darmowaDostawaOd} zł</li></ul>
+    <p><b>Deklarowany czas nadania:</b> ${esc(czasWysylki())} w dni robocze.</p>
     <h2>Formy płatności</h2>
     <ul>${dostepnePlatnosci().map(p=>`<li>${p.nazwa}${p.oplata?" (+"+p.oplata+" zł)":""}${p.id==="telefon"?` — w tytule wpisz numer zamówienia; numer: ${formatTelefonPlatnosci()}`:""}${p.id==="paynow"?` — bramka mBank Paynow`:""}</li>`).join("")}</ul>
     <h2>Kody rabatowe</h2>
@@ -2344,7 +2389,15 @@ function widokWylaczonejStrony(){
 function stronaInfo(tytul, tresc,id){
   const us=id?ustawieniaPodstrony(id):null;
   if(us?.widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
-  return `<div class="${id?klasaPodstrony(id):"page"}"><div class="panel"><h1>${us?esc(us.tytul):tytul}</h1>${us?.opis?`<p style="margin-bottom:1rem">${esc(us.opis)}</p>`:""}${tresc}<p style="margin-top:1.2rem"><a href="#/">← Wróć do sklepu</a></p></div></div>`;
+  const pageId=id||"info";
+  const bloki={
+    naglowek:`<h1>${us?esc(us.tytul):tytul}</h1>`,
+    opis:us?.opis?`<p style="margin-bottom:1rem">${esc(us.opis)}</p>`:"",
+    tresc,
+    powrot:`<p style="margin-top:1.2rem"><a href="#/">← Wróć do sklepu</a></p>`
+  };
+  const html=kolejnoscSekcjiPodstrony(pageId).filter(s=>sekcjaPodstronyWidoczna(pageId,s)).map(s=>bloki[s]||"").join("");
+  return `<div class="${id?klasaPodstrony(id):"page"}"><div class="panel">${html}</div></div>`;
 }
 
 /* ═══════════ PANEL ADMINA (tylko administrator) ═══════════
@@ -4891,6 +4944,7 @@ function widokAdminDostawy(){
         <div class="f-group"><label>Paczkomat (zł)</label><input name="kosztPaczkomat" inputmode="decimal" value="${paczkomat.koszt}"></div>
         <div class="f-group"><label>Darmowa dostawa od (zł)</label><input name="darmowaDostawaOd" inputmode="decimal" value="${KONFIG.darmowaDostawaOd}"></div>
       </div>
+      <div class="f-group" style="max-width:320px"><label>Deklarowany czas wysyłki — zmienia się wszędzie</label><input name="czasWysylki" value="${esc(czasWysylki())}" placeholder="np. 24 h, 48 h, 2 dni robocze"></div>
       <h3 class="f-sekcja">💳 Płatności i bramka</h3>
       <div class="f-group"><label>Link bramki mBank Paynow (opcjonalnie — po aktywacji konta Paynow)</label>
         <input name="linkPlatnosci" placeholder="https://paynow.pl/… albo link płatności z panelu" value="${esc(KONFIG.linkPlatnosci)}"></div>
@@ -4949,6 +5003,7 @@ function zapiszDostawy(e){
   zapiszCzescUstawien({
     linkPlatnosci: String(f.get("linkPlatnosci")).trim(),
     numerPrzelewuTelefon: numer,
+    czasWysylki: String(f.get("czasWysylki")||"").trim(),
     darmowaDostawaOd: f.get("darmowaDostawaOd"),
     kosztKurier: f.get("kosztKurier"),
     kosztPaczkomat: f.get("kosztPaczkomat"),
@@ -5016,7 +5071,16 @@ function widokAdminWyglad(){
           ${ustawienia.logoObraz?`<button class="btn danger" type="button" onclick="usunLogo()">🗑️ Usuń logo</button>`:""}
         </div>
       </div>
-      <div class="f-group"><label>Pasek na górze strony (może zawierać HTML, np. &lt;b&gt;)</label><input name="pasekInfo" value="${esc(KONFIG.pasekInfo)}"></div>
+      <div class="f-group"><label>Miniaturka w zakładce przeglądarki (favicon)</label>
+        <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
+          <img src="${esc(ustawienia.faviconObraz||domyslnyFavicon())}" style="width:34px;height:34px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--bg);padding:2px">
+          ${polePlikuHTML("wgrajFavicon(this)", "Wgraj miniaturkę")}
+          ${ustawienia.faviconObraz?`<button class="btn danger" type="button" onclick="usunFavicon()">🗑️ Usuń miniaturkę</button>`:""}
+          <small style="color:var(--muted2)">Najlepiej kwadrat PNG/JPG. Zmieni ikonę w karcie przeglądarki.</small>
+        </div>
+      </div>
+      <div class="f-group"><label>Pasek na górze strony (może zawierać HTML, np. &lt;b&gt;)</label><input name="pasekInfo" value="${esc(pasekInfoHTML())}"></div>
+      <div class="f-group" style="max-width:320px"><label>Czas wysyłki używany na całej stronie</label><input name="czasWysylki" value="${esc(czasWysylki())}" placeholder="np. 24 h, 48 h, 2 dni robocze"></div>
       <div class="f-group"><label>Tekst w wyszukiwarce</label><input name="tekstSzukaj" value="${esc(ustawienia.tekstSzukaj||"Szukaj produktu…")}"></div>
       <h3 class="f-sekcja">🖼️ Baner na stronie głównej</h3>
       <div class="f-group"><label>Mała etykieta nad tytułem</label><input name="heroEtykieta" value="${esc(h.etykieta||"ARTWAY-TM • ZAKUPY PROSTO I WYGODNIE")}"></div>
@@ -5100,6 +5164,7 @@ function zapiszWyglad(e){
       adres:String(f.get("firmaAdres")||"").trim()
     },
     pasekInfo: String(f.get("pasekInfo")),
+    czasWysylki: String(f.get("czasWysylki")||"").trim(),
     heroTytul: String(f.get("heroTytul")).trim(),
     heroOpis: String(f.get("heroOpis")).trim(),
     opisSklepu: String(f.get("opisSklepu")).trim(),
@@ -5181,6 +5246,9 @@ function usunObrazBanera(id){
 /* logo sklepu */
 function wgrajLogo(input){ wgrajObrazek(input, 420, url => zapiszCzescUstawien({logoObraz:url})); }
 function usunLogo(){ zapiszCzescUstawien({logoObraz:null}); }
+/* miniaturka karty przeglądarki */
+function wgrajFavicon(input){ wgrajObrazek(input, 96, url => zapiszCzescUstawien({faviconObraz:url})); }
+function usunFavicon(){ zapiszCzescUstawien({faviconObraz:null}); }
 /* tło baneru głównego */
 function wgrajTloHero(input){ wgrajObrazek(input, 1600, url => zapiszCzescUstawien({hero:{...(ustawienia.hero||{}), obraz:url}})); }
 function usunTloHero(){ const {obraz, ...h}=(ustawienia.hero||{}); zapiszCzescUstawien({hero:h}); }
@@ -5303,15 +5371,45 @@ function widokAdminPodstrony(){
           <option value="plain" ${u.styl==="plain"?"selected":""}>Prosty panel z ramką</option>
         </select></div>
       </div>
+      <h3 class="f-sekcja">🧭 Rozmieszczenie sekcji tej podstrony</h3>
+      <div style="display:grid;gap:.4rem;margin-bottom:.8rem">
+        ${kolejnoscSekcjiPodstrony(id).map((sid,i)=>{const s=SEKCJE_PODSTRONY[sid], wid=sekcjaPodstronyWidoczna(id,sid);return `
+        <div class="uklad-box ${wid?'':'wylaczona'}" style="margin-bottom:0">
+          <span class="uklad-nr">${i+1}</span>
+          <span style="flex:1"><b>${s.ikona} ${esc(s.nazwa)}</b></span>
+          <button class="btn ghost uklad-btn" type="button" ${i===0?"disabled":""} onclick="przesunSekcjePodstrony('${id}','${sid}',-1)">↑</button>
+          <button class="btn ghost uklad-btn" type="button" ${i===kolejnoscSekcjiPodstrony(id).length-1?"disabled":""} onclick="przesunSekcjePodstrony('${id}','${sid}',1)">↓</button>
+          <button class="btn ghost uklad-btn" type="button" onclick="przelaczSekcjePodstrony('${id}','${sid}')">${wid?"👁️":"🙈"}</button>
+        </div>`;}).join("")}
+      </div>
       <div class="diag-actions"><label class="chk-row"><input type="checkbox" name="widoczna" ${u.widoczna===false?"":"checked"} ${id==="logowanie"?"disabled":""}> ${id==="logowanie"?"Logowanie zawsze dostępne":"Widoczna dla klientów"}</label><button class="btn" type="submit">💾 Zapisz podstronę</button></div>
     </form>`;}).join("")}`);
 }
 function zapiszPodstrone(e,id){
   e.preventDefault(); const f=new FormData(e.target);
   const podstrony={...(ustawienia.podstrony||{})};
-  podstrony[id]={tytul:String(f.get("tytul")).trim(),opis:String(f.get("opis")||"").trim(),
+  const poprzednia=podstrony[id]||{};
+  podstrony[id]={...poprzednia,tytul:String(f.get("tytul")).trim(),opis:String(f.get("opis")||"").trim(),
     szerokosc:String(f.get("szerokosc")),styl:String(f.get("styl")),widoczna:id==="logowanie"?true:!!f.get("widoczna")};
   zapiszCzescUstawien({podstrony}); loguj("info","Zapisano układ podstrony "+id);
+}
+function przesunSekcjePodstrony(id,sekcja,kierunek){
+  const podstrony={...(ustawienia.podstrony||{})};
+  const u={...ustawieniaPodstrony(id)};
+  const k=kolejnoscSekcjiPodstrony(id);
+  const i=k.indexOf(sekcja), j=i+kierunek;
+  if(i<0||j<0||j>=k.length)return;
+  [k[i],k[j]]=[k[j],k[i]];
+  podstrony[id]={...u,sekcjeOrder:k};
+  zapiszCzescUstawien({podstrony});
+}
+function przelaczSekcjePodstrony(id,sekcja){
+  const podstrony={...(ustawienia.podstrony||{})};
+  const u={...ustawieniaPodstrony(id)};
+  const uk=new Set(Array.isArray(u.sekcjeUkryte)?u.sekcjeUkryte:[]);
+  uk.has(sekcja)?uk.delete(sekcja):uk.add(sekcja);
+  podstrony[id]={...u,sekcjeUkryte:[...uk]};
+  zapiszCzescUstawien({podstrony});
 }
 function resetujPodstrony(){ zapiszCzescUstawien({podstrony:{}}); }
 
