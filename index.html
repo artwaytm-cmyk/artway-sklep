@@ -854,12 +854,12 @@ async function zarejestrujUzytkownika(imie, email, haslo){
   if(u.some(x=>x.email===email)) return {ok:false, blad:"Konto z tym adresem już istnieje — zaloguj się."};
   const rekord={ imie, email, hash: await hashuj(haslo), rola:"klient", account:true, data:new Date().toISOString() };
   try{
-    if(jestAdmin()&&stanBramki.authenticated) await wywolajBramke("store-user-save",{method:"POST",body:{user:rekord}});
-    else await wywolajBramke("account-register",{method:"POST",body:{name:imie,email,password:haslo}});
+    // konto zakładane we WSPÓLNEJ bazie — działa na każdym urządzeniu
+    await chmura("account-register",{method:"POST",body:{user:rekord}});
     stanBazyCentralnej={...stanBazyCentralnej,online:true,error:""};
   }catch(bl){
-    // Brak serwerowej bazy kont (hosting statyczny / Netlify) — zapisujemy konto lokalnie.
-    loguj("ostrzezenie","Konto zapisane lokalnie (brak serwerowej bazy kont): "+bl.message);
+    if(bl.code==="exists") return {ok:false, blad:"Konto z tym adresem już istnieje — zaloguj się."};
+    loguj("ostrzezenie","Serwer kont niedostępny — konto zapisane lokalnie: "+bl.message);
   }
   u.push(rekord);
   zapiszLS("artway_uzytkownicy", u);
@@ -868,32 +868,44 @@ async function zarejestrujUzytkownika(imie, email, haslo){
 }
 async function sprawdzLogowanie(email, haslo){
   email=email.trim().toLowerCase();
-  const emailWpisany=email;
-  if(email==="admin") email = KONFIG.emailAdmina.toLowerCase();
-  try{
-    const d=await wywolajBramke("account-login",{method:"POST",body:{email:emailWpisany,password:haslo}});
-    const serwer=d.user||{}, u=pobierzUzytkownikow(), lokalny=u.find(x=>x.email===serwer.email);
-    if(lokalny) Object.assign(lokalny,serwer); else u.push(serwer);
-    if(serwer.rola==="admin"&&jestGlownymAdminem(serwer.email)){
-      const adminLokalny=u.find(x=>x.email===serwer.email);
-      if(adminLokalny) adminLokalny.hash="";
+  const adminEmail=KONFIG.emailAdmina.toLowerCase();
+  // 1) ADMINISTRATOR — hasłem jest token wspólnej bazy (ARTWAY_ADMIN_TOKEN).
+  //    Weryfikacja NA SERWERZE → działa na każdym urządzeniu i od razu łączy wspólną bazę.
+  if(email==="admin" || email===adminEmail){
+    try{
+      await chmura("login",{method:"POST",body:{password:haslo}});
+      chmuraToken=haslo; zapiszLS("artway_chmura_token",chmuraToken);
+      const lista=pobierzUzytkownikow(); const a=lista.find(x=>x.email===adminEmail);
+      if(a){ a.hash=""; zapiszLS("artway_uzytkownicy",lista); }
       domyslneHasloAdmina=false;
+      chmuraStan={...chmuraStan,dostepna:true,admin:true};
+      await synchronizujBazeCentralna(true).catch(()=>{});
+      return {ok:true, uzytkownik:{imie:"Administrator", email:adminEmail, rola:"admin"}};
+    }catch(bl){
+      // serwer niedostępny lub złe hasło → spróbuj lokalnego admin/admin (tryb offline)
     }
-    zapiszLS("artway_uzytkownicy",u);
-    stanBramki={...stanBramki,authenticated:!!d.authenticated||serwer.rola==="admin"};
-    stanBazyCentralnej={...stanBazyCentralnej,online:true,error:""};
-    return {ok:true,uzytkownik:{imie:serwer.imie||serwer.email,email:serwer.email,rola:serwer.rola||"klient"}};
-  }catch(bl){
-    // Brak serwerowej bazy kont (hosting statyczny / Netlify) — logujemy lokalnie z localStorage.
-    stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:false,error:bl.message};
   }
-  const u = pobierzUzytkownikow().find(x=>x.email===email);
-  if(!u) return {ok:false, blad:"Nie znaleziono konta z tym adresem."};
-  if(u.hash !== await hashuj(haslo)) return {ok:false, blad:"Nieprawidłowe hasło."};
+  const emailDocelowy = (email==="admin") ? adminEmail : email;
+  const hash = await hashuj(haslo);
+  // 2) KLIENT — logowanie do konta we WSPÓLNEJ bazie
+  if(email!=="admin"){
+    try{
+      const d=await chmura("account-login",{method:"POST",body:{email:emailDocelowy,hash}});
+      const serwer=d.user||{}; const lista=pobierzUzytkownikow(); const lok=lista.find(x=>x.email===serwer.email);
+      if(lok) Object.assign(lok,serwer,{hash}); else lista.push({...serwer,hash});
+      zapiszLS("artway_uzytkownicy",lista);
+      stanBazyCentralnej={...stanBazyCentralnej,online:true,error:""};
+      return {ok:true, uzytkownik:{imie:serwer.imie||serwer.email, email:serwer.email, rola:serwer.rola||"klient"}};
+    }catch(bl){ /* serwer niedostępny lub konto tylko lokalne → sprawdzamy lokalnie */ }
+  }
+  // 3) Awaryjne logowanie lokalne (offline / stare konta)
+  const u = pobierzUzytkownikow().find(x=>x.email===emailDocelowy);
+  if(!u) return {ok:false, blad:"Nieprawidłowy e-mail lub hasło."};
+  if(u.hash !== hash) return {ok:false, blad:"Nieprawidłowe hasło."};
   return {ok:true, uzytkownik:{imie:u.imie, email:u.email, rola:u.rola||"klient"}};
 }
 function ustawSesje(u){ sesja=u; zapiszLS("artway_sesja", u); odswiezUzytkownika(); }
-function wyloguj(){ void wywolajBramke("account-logout",{method:"POST",body:{}}).catch(()=>{}); stanBramki={...stanBramki,authenticated:false}; ustawSesje(null); toast("Wylogowano 👋"); location.hash="#/"; }
+function wyloguj(){ chmuraToken=""; zapiszLS("artway_chmura_token",""); chmuraStan={...chmuraStan,admin:false}; stanBramki={...stanBramki,authenticated:false}; ustawSesje(null); toast("Wylogowano 👋"); location.hash="#/"; }
 function jestGlownymAdminem(email){ return String(email||"").toLowerCase()===KONFIG.emailAdmina.toLowerCase(); }
 function kontoMaRoleAdmin(email){
   const e=String(email||"").toLowerCase();
