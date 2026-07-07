@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.07.4">
+<meta name="artway-version" content="2026.07.07.5">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <style>
@@ -1030,6 +1030,67 @@ function wyczyscPrzeterminowanyKosz(){
     zapiszLS("artway_stany",stanyProduktow);
   }
 }
+function najwyzszeIdProduktu(){
+  const liczby=[
+    ...prodBazowe.map(p=>Number(p.id)||0),
+    ...produktyDodane.map(p=>Number(p.id)||0),
+    ...koszDodanych.map(p=>Number(p.id)||0),
+    ...produktyUkryte.map(id=>Number(id)||0),
+    ...produktyDefinitywne.map(id=>Number(id)||0),
+    ...Object.keys(produktyEdytowane||{}).map(id=>Number(id)||0),
+    ...Object.keys(stanyProduktow||{}).map(id=>Number(id)||0),
+    ...Object.keys(ustawienia.mapaProduktow||{}).map(id=>Number(id)||0)
+  ];
+  return Math.max(0,...liczby);
+}
+function przeniesKluczObiektu(obj, staryId, nowyId){
+  if(!obj || typeof obj!=="object") return obj;
+  const st=String(staryId), nw=String(nowyId);
+  if(Object.prototype.hasOwnProperty.call(obj,st) && !Object.prototype.hasOwnProperty.call(obj,nw)) obj[nw]=obj[st];
+  if(Object.prototype.hasOwnProperty.call(obj,st)) delete obj[st];
+  return obj;
+}
+function podmienIdWTablicy(lista, remap){
+  if(!Array.isArray(lista) || !remap?.size) return Array.isArray(lista)?lista:[];
+  return [...new Set(lista.map(id=>remap.get(Number(id))||Number(id)).filter(id=>Number.isInteger(id)&&id>0))];
+}
+function naprawKolizjeIdProduktow(){
+  if(!prodBazowe.length || !produktyDodane.length) return false;
+  const bazoweIds=new Set(prodBazowe.map(p=>Number(p.id)).filter(id=>Number.isInteger(id)&&id>0));
+  if(!bazoweIds.size) return false;
+  const zajete=new Set([...bazoweIds,...koszDodanych.map(p=>Number(p.id)).filter(id=>Number.isInteger(id)&&id>0)]);
+  const remap=new Map();
+  let nastepne=najwyzszeIdProduktu()+1, zmiana=false;
+  const wezNoweId=()=>{while(zajete.has(nastepne))nastepne++;const id=nastepne;zajete.add(id);nastepne++;return id;};
+  produktyDodane=produktyDodane.map(p=>{
+    const id=Number(p.id), kolizjaBazowa=bazoweIds.has(id);
+    if(!Number.isInteger(id)||id<=0||zajete.has(id)){
+      const nowe=wezNoweId();
+      if((kolizjaBazowa || !Number.isInteger(id) || id<=0) && !remap.has(id)) remap.set(id,nowe);
+      zmiana=true;
+      return {...p,id:nowe};
+    }
+    zajete.add(id);
+    if(p.id!==id){ zmiana=true; return {...p,id}; }
+    return p;
+  });
+  if(!zmiana) return false;
+  for(const [stary,nowy] of remap.entries()){
+    stanyProduktow=przeniesKluczObiektu(stanyProduktow,stary,nowy);
+    if(ustawienia.mapaProduktow) ustawienia={...ustawienia,mapaProduktow:przeniesKluczObiektu({...ustawienia.mapaProduktow},stary,nowy)};
+    koszyk=(Array.isArray(koszyk)?koszyk:[]).map(x=>Number(x.id)===stary?{...x,id:nowy}:x);
+    ulubione=podmienIdWTablicy(ulubione,remap);
+    opinie=(Array.isArray(opinie)?opinie:[]).map(o=>Number(o.produktId||o.idProduktu||o.productId)===stary?{...o,produktId:nowy}:o);
+  }
+  zapiszLS("artway_produkty_dodane",produktyDodane);
+  zapiszLS("artway_stany",stanyProduktow);
+  zapiszLS("artway_koszyk",koszyk);
+  zapiszLS("artway_ulubione",ulubione);
+  zapiszLS("artway_opinie",opinie);
+  zapiszLS("artway_ustawienia",ustawienia);
+  loguj("ostrzezenie",`Naprawiono kolizje ID produktów: ${remap.size||"część"} produktów dodanych dostało bezpieczne unikalne ID`);
+  return true;
+}
 
 /* ═══════════ KONTA UŻYTKOWNIKÓW ═══════════
    Lokalna pamięć jest cache. Źródłem wspólnym dla urządzeń jest API serwerowe. */
@@ -1263,11 +1324,13 @@ function zastosujUstawienia(){
 /* ═══════════ WCZYTANIE PRODUKTÓW ═══════════
    Lista = (products.json lub zapasowa) − ukryte + dodane w panelu admina */
 function zbudujProdukty(){
+  naprawKolizjeIdProduktow();
   const zmianyKat = ustawienia.kategorie || {};
   const ukryteKat = ustawienia.ukryteKategorie || [];
   const mapa = ustawienia.mapaProduktow || {};    // zaawansowane mapowanie: id produktu → katalog
+  const dodaneIds = new Set(produktyDodane.map(p=>Number(p.id)));
   const bazowePoEdycji = prodBazowe
-    .filter(p=>!produktyUkryte.includes(p.id))
+    .filter(p=>!dodaneIds.has(Number(p.id))&&!produktyUkryte.includes(p.id))
     .map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p);
   produkty = [ ...bazowePoEdycji, ...produktyDodane ]
     .map(p => { let k = mapa[p.id] || p.kategoria;
@@ -1345,6 +1408,7 @@ async function wczytajProdukty(){
     zrodloProduktow = "zapasowe";
     loguj("info","products.json niedostępny — użyto listy zapasowej (to normalne przy otwarciu z dysku).");
   }
+  naprawKolizjeIdProduktow();
   wyczyscPrzeterminowanyKosz();
   zbudujProdukty();
   odswiezMenu();
@@ -3478,13 +3542,29 @@ let filtrStatusuProduktow = "wszystkie", filtrZrodlaProduktow = "wszystkie", fil
 let sortowanieAdminProduktow = "id";
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
+function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }
+function produktDodanyPoId(id){ return produktyDodane.find(p=>Number(p.id)===Number(id)); }
+function czyProduktAdminWKoszu(p){
+  if(!p) return false;
+  if(jestProduktemDodanym(p.id)) return false;
+  return produktyUkryte.includes(p.id);
+}
+function bazoweProduktyWKoszu(){
+  const dodaneIds=new Set(produktyDodane.map(p=>Number(p.id)));
+  return produktyUkryte
+    .filter(id=>!dodaneIds.has(Number(id))&&koszMeta[id]&&!produktyDefinitywne.includes(id))
+    .map(id=>prodBazowe.find(x=>Number(x.id)===Number(id)))
+    .filter(Boolean);
+}
 function produktyDoAdministracji(){
+  naprawKolizjeIdProduktow();
+  const dodaneIds = new Set(produktyDodane.map(p=>Number(p.id)));
   return [
-    ...prodBazowe.filter(p=>!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p),
+    ...prodBazowe.filter(p=>!dodaneIds.has(Number(p.id))&&!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p),
     ...produktyDodane
   ];
 }
-function pobierzProduktAdmin(id){ return produktyDoAdministracji().find(p=>p.id===id); }
+function pobierzProduktAdmin(id){ return produktDodanyPoId(id) || produktyDoAdministracji().find(p=>p.id===id); }
 function ustawStroneAdminProduktow(n){ stronaAdminProduktow=Math.max(1,Number(n)||1); renderuj(); }
 function ustawProduktyNaStronieAdmin(n){
   produktyNaStronieAdmin=[25,50,100,200].includes(Number(n))?Number(n):50;
@@ -3509,8 +3589,8 @@ function widokAdminProdukty(){
   let wszystkie = produktyDoAdministracji();
   if(szukajProduktow) wszystkie = wszystkie.filter(p=>produktPasujeFrazie(p,szukajProduktow));
   if(filtrProduktow!=="Wszystkie") wszystkie = wszystkie.filter(p=>p.kategoria===filtrProduktow);
-  if(filtrStatusuProduktow==="aktywne") wszystkie=wszystkie.filter(p=>!produktyUkryte.includes(p.id));
-  if(filtrStatusuProduktow==="kosz") wszystkie=wszystkie.filter(p=>produktyUkryte.includes(p.id));
+  if(filtrStatusuProduktow==="aktywne") wszystkie=wszystkie.filter(p=>!czyProduktAdminWKoszu(p));
+  if(filtrStatusuProduktow==="kosz") wszystkie=wszystkie.filter(p=>czyProduktAdminWKoszu(p));
   if(filtrZrodlaProduktow==="bazowe") wszystkie=wszystkie.filter(p=>!produktyDodane.some(x=>x.id===p.id));
   if(filtrZrodlaProduktow==="wlasne") wszystkie=wszystkie.filter(p=>produktyDodane.some(x=>x.id===p.id));
   if(filtrStanuProduktow==="dostepne") wszystkie=wszystkie.filter(p=>stanyProduktow[p.id]===undefined||Number(stanyProduktow[p.id])>0);
@@ -3522,7 +3602,7 @@ function widokAdminProdukty(){
   stronaAdminProduktow=Math.min(Math.max(1,stronaAdminProduktow),liczbaStron);
   const fragment=wszystkie.slice((stronaAdminProduktow-1)*produktyNaStronieAdmin,stronaAdminProduktow*produktyNaStronieAdmin);
   const katOpcje = [...new Set(produktyDoAdministracji().map(p=>p.kategoria))];
-  const bazoweWKoszu=produktyUkryte.filter(id=>koszMeta[id]&&!produktyDefinitywne.includes(id)).map(id=>prodBazowe.find(x=>x.id===id)).filter(Boolean);
+  const bazoweWKoszu=bazoweProduktyWKoszu();
   const liczbaWKoszu=koszDodanych.length+bazoweWKoszu.length;
   return asortymentSzkielet("produkty", `
     <div class="panel">
@@ -3584,8 +3664,8 @@ function widokAdminProdukty(){
       <div style="overflow-x:auto"><table class="log-table">
         <tr><th><input type="checkbox" onchange="zaznaczWidoczneProd(this, [${fragment.map(p=>p.id).join(",")}])" style="width:16px;height:16px" title="Zaznacz produkty na tej stronie"></th><th>ID</th><th>Produkt</th><th>Kategoria</th><th>Cena (kliknij, by zmienić)</th><th>Promocja</th><th>Stan</th><th>Zdjęcie</th><th>Akcje</th></tr>
         ${fragment.map(p=>{
-          const dodany = produktyDodane.some(x=>x.id===p.id);
-          const ukryty = produktyUkryte.includes(p.id);
+          const dodany = jestProduktemDodanym(p.id);
+          const ukryty = czyProduktAdminWKoszu(p);
           const edytowany = !!produktyEdytowane[p.id];
           return `<tr style="${ukryty?'opacity:.45':''}">
           <td><input type="checkbox" ${zaznaczoneProdukty.has(p.id)?"checked":""} onchange="przelaczZaznProd(${p.id})" style="width:16px;height:16px"></td>
@@ -3857,7 +3937,7 @@ function usunDefinitywnieBazowy(id){
   toast("Produkt usunięty definitywnie"); renderuj();
 }
 function wyczyscCalKosz(){
-  const bazowe=produktyUkryte.filter(id=>koszMeta[id]&&!produktyDefinitywne.includes(id));
+  const bazowe=bazoweProduktyWKoszu().map(p=>p.id);
   const ile=koszDodanych.length+bazowe.length;
   if(!ile||!confirm(`Definitywnie usunąć ${ile} produktów z kosza? Tej operacji nie można cofnąć.`)) return;
   koszDodanych.forEach(p=>{delete koszMeta[p.id];delete stanyProduktow[p.id];});
@@ -4191,8 +4271,8 @@ function wykonajImportProduktow(){
   try{localStorage.setItem("artway_ostatnia_kopia_importu",JSON.stringify(kopia));}catch(e){toast("⚠️ Nie udało się utworzyć kopii przed importem");return;}
   let dodane=0,zaktualizowane=0;const wejscie=d.produkty.map(p=>JSON.parse(JSON.stringify(p)));
   if(tryb==="zastap"){
-    const zajete=new Set();let nastepne=Math.max(0,...prodBazowe.map(p=>p.id),...wejscie.map(p=>Number(p.id)||0))+1;
-    for(const p of wejscie){if(!p.id||zajete.has(p.id))p.id=nastepne++;zajete.add(p.id);if(!p.ikona)p.ikona="📦";if(!p.kolor)p.kolor="#dbeafe";if(p.opis===undefined)p.opis="";}
+    const zajete=new Set(prodBazowe.map(p=>Number(p.id)).filter(id=>Number.isInteger(id)&&id>0));let nastepne=Math.max(0,...zajete,...wejscie.map(p=>Number(p.id)||0))+1;
+    for(const p of wejscie){if(!p.id||zajete.has(p.id)){while(zajete.has(nastepne))nastepne++;p.id=nastepne++;}zajete.add(p.id);if(!p.ikona)p.ikona="📦";if(!p.kolor)p.kolor="#dbeafe";if(p.opis===undefined)p.opis="";}
     produktyDodane=wejscie;
     produktyUkryte=[...new Set(prodBazowe.map(p=>p.id))];
     produktyEdytowane={};produktyDefinitywne=[...produktyUkryte];koszDodanych=[];koszMeta={};stanyProduktow={};
@@ -4201,7 +4281,7 @@ function wykonajImportProduktow(){
     dodane=wejscie.length;
   }else{
     const aktywne=produktyDoAdministracji(),poSku=new Map(aktywne.filter(p=>p.sku).map(p=>[p.sku.toLowerCase(),p]));
-    const zajete=new Set([...aktywne.map(p=>p.id),...koszDodanych.map(p=>p.id)]);let nastepne=Math.max(0,...zajete,...wejscie.map(p=>Number(p.id)||0))+1;
+    const zajete=new Set([...prodBazowe.map(p=>Number(p.id)),...aktywne.map(p=>Number(p.id)),...koszDodanych.map(p=>Number(p.id))].filter(id=>Number.isInteger(id)&&id>0));let nastepne=Math.max(0,...zajete,...wejscie.map(p=>Number(p.id)||0))+1;
     for(const p0 of wejscie){
       const poId=p0.id?aktywne.find(x=>x.id===p0.id):null,poKodzie=p0.sku?poSku.get(p0.sku.toLowerCase()):null,istniejacy=poId||poKodzie;
       if(istniejacy){
@@ -4213,7 +4293,7 @@ function wykonajImportProduktow(){
         if(Number.isInteger(p0.stan)&&p0.stan>=0)stanyProduktow[p.id]=p0.stan;
         zaktualizowane++;
       }else{
-        if(!p0.id||zajete.has(p0.id))p0.id=nastepne++;
+        if(!p0.id||zajete.has(p0.id)){while(zajete.has(nastepne))nastepne++;p0.id=nastepne++;}
         if(!p0.ikona)p0.ikona="📦";if(!p0.kolor)p0.kolor="#dbeafe";if(p0.opis===undefined)p0.opis="";
         zajete.add(p0.id);produktyDodane.push(p0);
         koszDodanych=koszDodanych.filter(x=>x.id!==p0.id);delete koszMeta[p0.id];
@@ -4393,7 +4473,7 @@ let zaznaczoneMap = new Set(), filtrMapowania = "Wszystkie";
 function widokAdminMapowanie(){
   const zmiany = ustawienia.kategorie || {};
   const mapa = ustawienia.mapaProduktow || {};
-  const wszystkie = produktyDoAdministracji().filter(p=>!produktyUkryte.includes(p.id))
+  const wszystkie = produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p))
     .map(p=>{ let k=mapa[p.id]||p.kategoria; for(let i=0;i<3&&zmiany[k];i++) k=zmiany[k]; return {...p, kategoria:k}; });
   const katalogi = wszystkieKategorie();
   const lista = filtrMapowania==="Wszystkie" ? wszystkie : wszystkie.filter(p=>p.kategoria===filtrMapowania);
@@ -4441,7 +4521,7 @@ function widokAdminMapowanie(){
 function przelaczZaznaczenieMap(id){ zaznaczoneMap.has(id) ? zaznaczoneMap.delete(id) : zaznaczoneMap.add(id); }
 function zaznaczWszystkieMapowania(){
   const zmiany = ustawienia.kategorie || {}, mapa = ustawienia.mapaProduktow || {};
-  let lista = produktyDoAdministracji().filter(p=>!produktyUkryte.includes(p.id))
+  let lista = produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p))
     .map(p=>{let k=mapa[p.id]||p.kategoria;for(let i=0;i<3&&zmiany[k];i++)k=zmiany[k];return {...p,kategoria:k};});
   if(filtrMapowania!=="Wszystkie") lista=lista.filter(p=>p.kategoria===filtrMapowania);
   lista.forEach(p=>zaznaczoneMap.add(p.id));
@@ -5433,7 +5513,7 @@ function testyDiagnostyczne(){
   const mapa=ustawienia.mapaProduktow||{}, osieroconeMap=Object.keys(mapa).filter(id=>!adminIds.has(+id));
   const osieroconyKoszyk=koszyk.filter(x=>!ids.includes(x.id)), osieroconeUlub=ulubione.filter(id=>!ids.includes(id));
   const bezZdjec=produkty.filter(p=>!p.zdjecie).length, bledneProdukty=produkty.filter(p=>!p.nazwa||!p.kategoria||!(p.cena>0));
-  const idsKosza=[...koszDodanych.map(p=>p.id),...produktyUkryte.filter(id=>koszMeta[id]&&!produktyDefinitywne.includes(id))];
+  const idsKosza=[...koszDodanych.map(p=>p.id),...bazoweProduktyWKoszu().map(p=>p.id)];
   const brakMetaKosza=idsKosza.filter(id=>!koszMeta[id]), wygasleKosza=idsKosza.filter(id=>Date.now()-Number(koszMeta[id]?.usunietoAt||Date.now())>=OKRES_KOSZA_MS);
   const pamiec=rozmiarDanychLokalnych(), zmiany=produktyDodane.length+produktyUkryte.length+produktyDefinitywne.length+Object.keys(produktyEdytowane).length+Object.keys(mapa).length;
   dodaj("Produkty","Produkty są wczytane",produkty.length?"ok":"bad",`${produkty.length} widocznych produktów`);
@@ -5599,6 +5679,8 @@ function importujKopieDanych(e){
   r.readAsText(plik);
 }
 function naprawDaneSklepu(){
+  naprawKolizjeIdProduktow();
+  zbudujProdukty();
   const widoczne=new Set(produkty.map(p=>p.id)), wszystkie=new Set(produktyDoAdministracji().map(p=>p.id));
   koszyk=koszyk.filter((x,i,a)=>widoczne.has(x.id)&&x.ile>0&&a.findIndex(y=>y.id===x.id)===i);
   ulubione=[...new Set(ulubione.filter(id=>widoczne.has(id)))];
