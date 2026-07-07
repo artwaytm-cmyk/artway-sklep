@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.07.10">
+<meta name="artway-version" content="2026.07.07.11">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <link id="faviconLink" rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="14" fill="%232563eb"/%3E%3Ctext x="32" y="42" text-anchor="middle" font-size="30" font-family="Arial" font-weight="700" fill="white"%3EA%3C/text%3E%3C/svg%3E'>
@@ -629,6 +629,10 @@ function sekcjaPodstronyWidoczna(id,sekcja){
 }
 function czasWysylki(){
   return String(ustawienia.czasWysylki||KONFIG.czasWysylki||"24 h").trim()||"24 h";
+}
+function wykryjCzasWysylkiZTekstu(tekst){
+  const m=String(tekst||"").match(/wysyłka\s+w\s*(\d+\s*(?:h|godziny|godzin|godz\.?))/i)||String(tekst||"").match(/wysylka\s+w\s*(\d+\s*(?:h|godziny|godzin|godz\.?))/i);
+  return m?m[1].replace(/\s+/g," ").trim():"";
 }
 function tekstWysylki(prefix="Wysyłka w"){
   return `${prefix} ${czasWysylki()}`;
@@ -1317,6 +1321,10 @@ function zastosujUstawienia(){
   if(u.nazwaSklepu) KONFIG.nazwaSklepu = u.nazwaSklepu;
   if(u.pasekInfo!==undefined && u.pasekInfo!=="") KONFIG.pasekInfo = u.pasekInfo;
   if(u.czasWysylki!==undefined && u.czasWysylki!=="") KONFIG.czasWysylki = String(u.czasWysylki).trim();
+  else {
+    const czasZPaska=wykryjCzasWysylkiZTekstu(u.pasekInfo||KONFIG.pasekInfo);
+    if(czasZPaska) KONFIG.czasWysylki=czasZPaska;
+  }
   if(u.telefon) KONFIG.telefon = u.telefon;
   if(u.opisSklepu) KONFIG.opisSklepu = u.opisSklepu;
   if(u.emailSklepu) KONFIG.emailSklepu = u.emailSklepu;
