@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.07.5">
+<meta name="artway-version" content="2026.07.07.6">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <style>
@@ -1043,30 +1043,15 @@ function najwyzszeIdProduktu(){
   ];
   return Math.max(0,...liczby);
 }
-function przeniesKluczObiektu(obj, staryId, nowyId){
-  if(!obj || typeof obj!=="object") return obj;
-  const st=String(staryId), nw=String(nowyId);
-  if(Object.prototype.hasOwnProperty.call(obj,st) && !Object.prototype.hasOwnProperty.call(obj,nw)) obj[nw]=obj[st];
-  if(Object.prototype.hasOwnProperty.call(obj,st)) delete obj[st];
-  return obj;
-}
-function podmienIdWTablicy(lista, remap){
-  if(!Array.isArray(lista) || !remap?.size) return Array.isArray(lista)?lista:[];
-  return [...new Set(lista.map(id=>remap.get(Number(id))||Number(id)).filter(id=>Number.isInteger(id)&&id>0))];
-}
 function naprawKolizjeIdProduktow(){
-  if(!prodBazowe.length || !produktyDodane.length) return false;
-  const bazoweIds=new Set(prodBazowe.map(p=>Number(p.id)).filter(id=>Number.isInteger(id)&&id>0));
-  if(!bazoweIds.size) return false;
-  const zajete=new Set([...bazoweIds,...koszDodanych.map(p=>Number(p.id)).filter(id=>Number.isInteger(id)&&id>0)]);
-  const remap=new Map();
+  if(!produktyDodane.length) return false;
+  const zajete=new Set();
   let nastepne=najwyzszeIdProduktu()+1, zmiana=false;
   const wezNoweId=()=>{while(zajete.has(nastepne))nastepne++;const id=nastepne;zajete.add(id);nastepne++;return id;};
   produktyDodane=produktyDodane.map(p=>{
-    const id=Number(p.id), kolizjaBazowa=bazoweIds.has(id);
+    const id=Number(p.id);
     if(!Number.isInteger(id)||id<=0||zajete.has(id)){
       const nowe=wezNoweId();
-      if((kolizjaBazowa || !Number.isInteger(id) || id<=0) && !remap.has(id)) remap.set(id,nowe);
       zmiana=true;
       return {...p,id:nowe};
     }
@@ -1075,20 +1060,8 @@ function naprawKolizjeIdProduktow(){
     return p;
   });
   if(!zmiana) return false;
-  for(const [stary,nowy] of remap.entries()){
-    stanyProduktow=przeniesKluczObiektu(stanyProduktow,stary,nowy);
-    if(ustawienia.mapaProduktow) ustawienia={...ustawienia,mapaProduktow:przeniesKluczObiektu({...ustawienia.mapaProduktow},stary,nowy)};
-    koszyk=(Array.isArray(koszyk)?koszyk:[]).map(x=>Number(x.id)===stary?{...x,id:nowy}:x);
-    ulubione=podmienIdWTablicy(ulubione,remap);
-    opinie=(Array.isArray(opinie)?opinie:[]).map(o=>Number(o.produktId||o.idProduktu||o.productId)===stary?{...o,produktId:nowy}:o);
-  }
   zapiszLS("artway_produkty_dodane",produktyDodane);
-  zapiszLS("artway_stany",stanyProduktow);
-  zapiszLS("artway_koszyk",koszyk);
-  zapiszLS("artway_ulubione",ulubione);
-  zapiszLS("artway_opinie",opinie);
-  zapiszLS("artway_ustawienia",ustawienia);
-  loguj("ostrzezenie",`Naprawiono kolizje ID produktów: ${remap.size||"część"} produktów dodanych dostało bezpieczne unikalne ID`);
+  loguj("ostrzezenie","Naprawiono wyłącznie nieprawidłowe lub powtórzone ID w produktach dodanych. ID usuniętego produktu bazowego może być ponownie użyte przez nowy produkt.");
   return true;
 }
 
@@ -4271,7 +4244,7 @@ function wykonajImportProduktow(){
   try{localStorage.setItem("artway_ostatnia_kopia_importu",JSON.stringify(kopia));}catch(e){toast("⚠️ Nie udało się utworzyć kopii przed importem");return;}
   let dodane=0,zaktualizowane=0;const wejscie=d.produkty.map(p=>JSON.parse(JSON.stringify(p)));
   if(tryb==="zastap"){
-    const zajete=new Set(prodBazowe.map(p=>Number(p.id)).filter(id=>Number.isInteger(id)&&id>0));let nastepne=Math.max(0,...zajete,...wejscie.map(p=>Number(p.id)||0))+1;
+    const zajete=new Set();let nastepne=Math.max(0,...wejscie.map(p=>Number(p.id)||0),...prodBazowe.map(p=>Number(p.id)||0))+1;
     for(const p of wejscie){if(!p.id||zajete.has(p.id)){while(zajete.has(nastepne))nastepne++;p.id=nastepne++;}zajete.add(p.id);if(!p.ikona)p.ikona="📦";if(!p.kolor)p.kolor="#dbeafe";if(p.opis===undefined)p.opis="";}
     produktyDodane=wejscie;
     produktyUkryte=[...new Set(prodBazowe.map(p=>p.id))];
@@ -4281,7 +4254,7 @@ function wykonajImportProduktow(){
     dodane=wejscie.length;
   }else{
     const aktywne=produktyDoAdministracji(),poSku=new Map(aktywne.filter(p=>p.sku).map(p=>[p.sku.toLowerCase(),p]));
-    const zajete=new Set([...prodBazowe.map(p=>Number(p.id)),...aktywne.map(p=>Number(p.id)),...koszDodanych.map(p=>Number(p.id))].filter(id=>Number.isInteger(id)&&id>0));let nastepne=Math.max(0,...zajete,...wejscie.map(p=>Number(p.id)||0))+1;
+    const zajete=new Set([...aktywne.map(p=>Number(p.id)),...koszDodanych.map(p=>Number(p.id))].filter(id=>Number.isInteger(id)&&id>0));let nastepne=Math.max(0,...prodBazowe.map(p=>Number(p.id)||0),...zajete,...wejscie.map(p=>Number(p.id)||0))+1;
     for(const p0 of wejscie){
       const poId=p0.id?aktywne.find(x=>x.id===p0.id):null,poKodzie=p0.sku?poSku.get(p0.sku.toLowerCase()):null,istniejacy=poId||poKodzie;
       if(istniejacy){
