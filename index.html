@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.07.7">
+<meta name="artway-version" content="2026.07.07.8">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <style>
@@ -3764,8 +3764,8 @@ function formularzProduktu(p, tryb){
       </div>
       <div id="podgladZdjecia">${p.zdjecie?`<img src="${esc(p.zdjecie)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`:""}</div>
       <details ${p.zdjecia?.length?"open":""} style="margin-bottom:.8rem">
-        <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🖼️ Galeria — ręczna edycja 3 zdjęć; import OVF zachowuje do 16 zdjęć</summary>
-        ${[2,3,4].map(n=>`
+        <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🖼️ Galeria — ręczna edycja do 16 zdjęć</summary>
+        ${Array.from({length:15},(_,i)=>i+2).map(n=>`
         <div class="f-group" style="margin-top:.6rem"><label>Zdjęcie ${n}</label>
           <div style="display:flex;gap:.5rem">
             <input name="zdjecie${n}" value="${esc((p.zdjecia||[])[n-2]||"")}" placeholder="https://… lub wgraj →" style="flex:1">
@@ -3837,6 +3837,9 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     ikona:String(f.get("ikona")||"").trim()||"📦",
     kolor:poprzedni.kolor||"#dbeafe"
   };
+  if(poprzedni.kategoria&&p.kategoria!==poprzedni.kategoria){
+    delete p.sciezkaKategorii;delete p.grupaKategorii;delete p.kategoriaPelna;
+  }
   const sc = parseFloat(String(f.get("staraCena")||"").replace(",","."));
   if(sc>cena) p.staraCena = +sc.toFixed(2); else delete p.staraCena;
   const zdjecie = String(f.get("zdjecie")||"").trim();
@@ -3850,9 +3853,7 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   }
   const warianty = String(f.get("warianty")||"").split(",").map(x=>x.trim()).filter(Boolean).slice(0,12);
   if(warianty.length) p.warianty = warianty; else delete p.warianty;
-  const zdjecia = ["zdjecie2","zdjecie3","zdjecie4"].map(n=>String(f.get(n)||"").trim()).filter(Boolean);
-  const dalszeZdjecia=(poprzedni.zdjecia||[]).slice(3).filter(Boolean);
-  if(dalszeZdjecia.length) zdjecia.push(...dalszeZdjecia);
+  const zdjecia = Array.from({length:15},(_,i)=>"zdjecie"+(i+2)).map(n=>String(f.get(n)||"").trim()).filter(Boolean);
   if(zdjecia.length) p.zdjecia = zdjecia; else delete p.zdjecia;
   return p;
 }
@@ -4126,28 +4127,28 @@ function normalizujNaglowekCSV(v){
 function kanonicznePoleProduktu(naglowek){
   const h=normalizujNaglowekCSV(naglowek);
   const aliasy={
-    id:["id","product_id","produkt_id"],
-    nazwa:["nazwa","name","product_name","nazwa_produktu","tytul"],
-    kategoria:["kategoria","category","katalog","catalog"],
-    cena:["cena","price","cena_zl","sale_price"],
-    staraCena:["stara_cena","old_price","regular_price","cena_regularna"],
-    stan:["stan","stock","quantity","ilosc","stan_magazynowy"],
-    sku:["sku","kod","kod_produktu","symbol"],
+    id:["id","product_id","produkt_id","item_id","id_produktu"],
+    nazwa:["nazwa","name","product_name","nazwa_produktu","tytul","title","product_title"],
+    kategoria:["kategoria","category","katalog","catalog","category_path","categorypath","breadcrumb","category_tree","category_name","categories","sciezka_kategorii"],
+    cena:["cena","price","cena_zl","sale_price","gross_price","net_price","price_gross","price_net","retail_price"],
+    staraCena:["stara_cena","old_price","regular_price","cena_regularna","oldprice","rrp","msrp"],
+    stan:["stan","stock","quantity","ilosc","stan_magazynowy","available","availability","qty"],
+    sku:["sku","kod","kod_produktu","symbol","seller_sku","item_sku","offer_sku","symbol_produktu"],
     gtin:["gtin","ean","ean13","barcode","kod_ean"],
-    externalId:["external_id","externalid","kod_zewnetrzny","supplier_id","vendor_id"],
+    externalId:["external_id","externalid","kod_zewnetrzny","supplier_id","vendor_id","ext_id","supplier_sku"],
     mpn:["mpn","manufacturer_part_number","kod_producenta"],
-    marka:["brand","marka","producent"],
-    opis:["opis","description","desc"],
+    marka:["brand","marka","producent","brand_name","manufacturer"],
+    opis:["opis","description","desc","long_description","description_html","full_description"],
     badge:["badge","etykieta","label"],
     ikona:["ikona","icon","emoji"],
-    zdjecie:["zdjecie","image","image1","image_1","image_url","url_zdjecia"],
+    zdjecie:["zdjecie","image","image1","image_1","image_url","url_zdjecia","main_image","image_url_1","photo","photo1","picture","picture1"],
     warianty:["warianty","variants","options"],
     kolor:["kolor","kolor_tla","background","background_color","card_color"],
     kolorProduktu:["color","kolor_produktu","product_color","barwa"],
     rozmiar:["size","rozmiar","wymiar","wymiary","dimensions"],
     material:["material","material_produktu","tworzywo"]
   };
-  for(let i=2;i<=16;i++) aliasy["zdjecie"+i]=["zdjecie"+i,"image"+i,"image_"+i,"image"+String(i).padStart(2,"0"),String("image_"+String(i).padStart(2,"0"))];
+  for(let i=2;i<=16;i++) aliasy["zdjecie"+i]=["zdjecie"+i,"image"+i,"image_"+i,"image"+String(i).padStart(2,"0"),String("image_"+String(i).padStart(2,"0")),"image_url_"+i,"photo"+i,"picture"+i,"url_zdjecia"+i];
   return Object.keys(aliasy).find(k=>aliasy[k].includes(h))||null;
 }
 function liczbaImportu(v){
@@ -4199,11 +4200,19 @@ function czyKolorKarty(v){
   const s=String(v||"").trim();
   return /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(s)||/^rgba?\(/i.test(s)||/^hsla?\(/i.test(s);
 }
+function rozbijSciezkeKategoriiImportu(v){
+  const tekst=String(v||"").trim();
+  if(!tekst)return {pelna:"",grupa:"",kategoria:"",poziomy:[]};
+  const czesci=tekst.split(/\s*(?:\/|\\|>|»|›|\||::)\s*/).map(x=>x.trim()).filter(Boolean);
+  if(czesci.length<=1)return {pelna:tekst,grupa:"",kategoria:tekst,poziomy:[tekst]};
+  return {pelna:tekst,grupa:czesci.slice(0,-1).join(" / "),kategoria:czesci.at(-1),poziomy:czesci};
+}
 function normalizujProduktImportu(r,nr){
   const pobierz=(...nazwy)=>{for(const n of nazwy)if(r?.[n]!==undefined&&r[n]!==null)return r[n];return "";};
   const bledy=[],ostrzezenia=[];
   const nazwa=String(pobierz("nazwa","name","product_name")).trim();
-  const kategoria=String(pobierz("kategoria","category","katalog")).trim();
+  const kategoriaInfo=rozbijSciezkeKategoriiImportu(pobierz("kategoria","category","katalog"));
+  const kategoria=kategoriaInfo.kategoria;
   const cena=liczbaImportu(pobierz("cena","price","sale_price"));
   const idRaw=pobierz("id","product_id"),id=idRaw===""||idRaw===null?null:Number(idRaw);
   if(!nazwa)bledy.push("brak nazwy");
@@ -4217,6 +4226,11 @@ function normalizujProduktImportu(r,nr){
   const galeria=Array.isArray(r?.zdjecia)?r.zdjecia:Array.isArray(r?.images)?r.images:null;
   const zdjecia=galeria?galeria.map(String).filter(Boolean):Array.from({length:15},(_,i)=>"zdjecie"+(i+2)).map(k=>String(pobierz(k)).trim()).filter(Boolean);
   const p={id,nazwa,kategoria,cena:cena===null?0:+cena.toFixed(2)};
+  if(kategoriaInfo.poziomy.length>1){
+    p.sciezkaKategorii=kategoriaInfo.poziomy;
+    p.grupaKategorii=kategoriaInfo.grupa;
+    p.kategoriaPelna=kategoriaInfo.pelna;
+  }
   const opis=String(pobierz("opis","description")).trim();if(opis)p.opis=opis;
   const ikona=String(pobierz("ikona","icon","emoji")).trim();if(ikona)p.ikona=ikona;
   const kolor=String(pobierz("kolor")).trim();if(kolor&&czyKolorKarty(kolor))p.kolor=kolor;
@@ -4247,11 +4261,12 @@ function analizujTekstImportu(tekst,nazwa="wklejone dane"){
     if(!surowe.length)throw new Error("Plik nie zawiera produktów");
     if(surowe.length>100000)throw new Error("Jednorazowo można zaimportować maksymalnie 100 000 produktów");
     const wyniki=surowe.map((r,i)=>normalizujProduktImportu(r,i+2));
-    const idy=new Map(),sku=new Map();
+    const idy=new Map(),sku=new Map(),external=new Map();
     for(const w of wyniki){
       const p=w.produkt;
       if(p.id!==null){if(idy.has(p.id))w.bledy.push(`powtórzone ID ${p.id} (także w wierszu ${idy.get(p.id)})`);else idy.set(p.id,w.nr);}
       if(p.sku){const s=p.sku.toLowerCase();if(sku.has(s))w.bledy.push(`powtórzone SKU ${p.sku} (także w wierszu ${sku.get(s)})`);else sku.set(s,w.nr);}
+      if(p.externalId){const s=p.externalId.toLowerCase();if(external.has(s))w.bledy.push(`powtórzone EXTERNAL_ID ${p.externalId} (także w wierszu ${external.get(s)})`);else external.set(s,w.nr);}
     }
     podgladImportuProduktow={
       nazwa,format,wszystkich:wyniki.length,
@@ -4286,6 +4301,27 @@ function zapiszStanProduktowPoOperacji(){
   zapiszLS("artway_stany",stanyProduktow);
   zapiszLS("artway_ustawienia",ustawienia);
 }
+function dodajSciezkiKategoriiZImportuDoMenu(lista){
+  const importowane=(Array.isArray(lista)?lista:[]).filter(p=>p?.grupaKategorii&&p?.kategoria);
+  if(!importowane.length)return 0;
+  const grupy=grupyMenuKategorii();let dodane=0;
+  const klucz=v=>normalizujSzukanyTekst(v);
+  for(const p of importowane){
+    const nazwa=String(p.grupaKategorii||"").trim(),kat=String(p.kategoria||"").trim();
+    if(!nazwa||!kat)continue;
+    let g=grupy.find(x=>klucz(x.nazwa)===klucz(nazwa));
+    if(!g){
+      g={id:"menu_import_"+prostyHash(nazwa),nazwa,ikona:ikonaKategorii(nazwa),aktywna:true,kategorie:[]};
+      grupy.push(g);
+    }
+    if(!g.kategorie.some(x=>klucz(x)===klucz(kat))){g.kategorie.push(kat);dodane++;}
+  }
+  if(dodane){
+    ustawienia.menuKategorii=grupy.map(g=>({id:g.id,nazwa:g.nazwa,ikona:g.ikona,aktywna:g.aktywna!==false,kategorie:g.kategorie||[]}));
+    ustawienia.menuPokazNieprzypisane=true;
+  }
+  return dodane;
+}
 function wykonajImportProduktow(){
   const d=podgladImportuProduktow;if(!d?.produkty?.length){toast("Najpierw przeanalizuj poprawne dane");return;}
   const tryb=$("trybImportuProduktow")?.value||"scal";
@@ -4303,10 +4339,11 @@ function wykonajImportProduktow(){
     ustawienia={...ustawienia,mapaProduktow:{}};
     dodane=wejscie.length;
   }else{
-    const aktywne=produktyDoAdministracji(),poSku=new Map(aktywne.filter(p=>p.sku).map(p=>[p.sku.toLowerCase(),p]));
+    const kluczKodu=v=>String(v||"").trim().toLowerCase();
+    const aktywne=produktyDoAdministracji(),poSku=new Map(aktywne.filter(p=>p.sku).map(p=>[kluczKodu(p.sku),p])),poExternal=new Map(aktywne.filter(p=>p.externalId).map(p=>[kluczKodu(p.externalId),p]));
     const zajete=new Set([...aktywne.map(p=>Number(p.id)),...koszDodanych.map(p=>Number(p.id))].filter(id=>Number.isInteger(id)&&id>0));let nastepne=Math.max(0,...prodBazowe.map(p=>Number(p.id)||0),...zajete,...wejscie.map(p=>Number(p.id)||0))+1;
     for(const p0 of wejscie){
-      const poId=p0.id?aktywne.find(x=>x.id===p0.id):null,poKodzie=p0.sku?poSku.get(p0.sku.toLowerCase()):null,istniejacy=poId||poKodzie;
+      const poExternalId=p0.externalId?poExternal.get(kluczKodu(p0.externalId)):null,poKodzie=p0.sku?poSku.get(kluczKodu(p0.sku)):null,poId=(!p0.externalId&&!p0.sku&&p0.id)?aktywne.find(x=>x.id===p0.id):null,istniejacy=poExternalId||poKodzie||poId;
       if(istniejacy){
         const p={...istniejacy,...p0,id:istniejacy.id};
         const i=produktyDodane.findIndex(x=>x.id===p.id);
@@ -4314,6 +4351,8 @@ function wykonajImportProduktow(){
         produktyUkryte=produktyUkryte.filter(id=>id!==p.id);produktyDefinitywne=produktyDefinitywne.filter(id=>id!==p.id);
         koszDodanych=koszDodanych.filter(x=>x.id!==p.id);delete koszMeta[p.id];
         if(Number.isInteger(p0.stan)&&p0.stan>=0)stanyProduktow[p.id]=p0.stan;
+        if(p.sku)poSku.set(kluczKodu(p.sku),p);
+        if(p.externalId)poExternal.set(kluczKodu(p.externalId),p);
         zaktualizowane++;
       }else{
         if(!p0.id||zajete.has(p0.id)){while(zajete.has(nastepne))nastepne++;p0.id=nastepne++;}
@@ -4321,16 +4360,18 @@ function wykonajImportProduktow(){
         zajete.add(p0.id);produktyDodane.push(p0);
         koszDodanych=koszDodanych.filter(x=>x.id!==p0.id);delete koszMeta[p0.id];
         if(Number.isInteger(p0.stan)&&p0.stan>=0)stanyProduktow[p0.id]=p0.stan;
-        if(p0.sku)poSku.set(p0.sku.toLowerCase(),p0);
+        if(p0.sku)poSku.set(kluczKodu(p0.sku),p0);
+        if(p0.externalId)poExternal.set(kluczKodu(p0.externalId),p0);
         aktywne.push(p0);dodane++;
       }
     }
   }
+  const menuZImportu=dodajSciezkiKategoriiZImportuDoMenu(wejscie);
   zaznaczoneProdukty.clear();zapiszStanProduktowPoOperacji();zbudujProdukty();odswiezMenu();
-  ostatniRaportImportu={dodane,zaktualizowane,pominiete:d.bledy.length,tryb,plik:d.nazwa};
+  ostatniRaportImportu={dodane,zaktualizowane,pominiete:d.bledy.length,tryb,plik:d.nazwa,menuZImportu};
   podgladImportuProduktow=null;
-  loguj("info",`Import produktów: ${dodane} dodanych, ${zaktualizowane} zaktualizowanych, ${d.bledy.length} pominiętych`);
-  toast(`Import zakończony: +${dodane}, aktualizacje ${zaktualizowane} ✅`);renderuj();
+  loguj("info",`Import produktów: ${dodane} dodanych, ${zaktualizowane} zaktualizowanych, ${d.bledy.length} pominiętych, ${menuZImportu} dopisań do menu`);
+  toast(`Import zakończony: +${dodane}, aktualizacje ${zaktualizowane}${menuZImportu?`, menu +${menuZImportu}`:""} ✅`);renderuj();
 }
 function cofnijOstatniImportProduktow(){
   const k=wczytajLS("artway_ostatnia_kopia_importu",null);
@@ -4347,6 +4388,9 @@ function produktDoEksportu(p){
   if(p.staraCena>p.cena)o.staraCena=+Number(p.staraCena).toFixed(2);
   const stan=stanProduktu(p);if(stan!==null)o.stan=stan;
   for(const k of ["sku","gtin","externalId","mpn","marka","opis","badge","ikona","kolor","kolorProduktu","rozmiar","material","zdjecie"])if(p[k]!==undefined&&p[k]!=="")o[k]=p[k];
+  if(Array.isArray(p.sciezkaKategorii)&&p.sciezkaKategorii.length)o.sciezkaKategorii=p.sciezkaKategorii;
+  if(p.grupaKategorii)o.grupaKategorii=p.grupaKategorii;
+  if(p.kategoriaPelna)o.kategoriaPelna=p.kategoriaPelna;
   if(p.zdjecia?.length)o.zdjecia=p.zdjecia.slice(0,15);
   if(p.warianty?.length)o.warianty=p.warianty;
   return o;
@@ -4393,6 +4437,7 @@ function wartoscPolaCSVProduktu(p,pole){
 }
 function wartoscPolaOVF(p,pole){
   const zdj=[p.zdjecie||"",...(p.zdjecia||[])];
+  const kategoriaPelna=Array.isArray(p.sciezkaKategorii)&&p.sciezkaKategorii.length?p.sciezkaKategorii.join("/"):p.kategoriaPelna||p.kategoria||"";
   const mapa={
     GTIN:p.gtin||"",
     EXTERNAL_ID:p.externalId||p.sku||String(p.id||""),
@@ -4401,7 +4446,7 @@ function wartoscPolaOVF(p,pole){
     PRICE:p.cena!==undefined?String(Number(p.cena||0).toFixed(2)).replace(".",","):"",
     MPN:p.mpn||p.sku||"",
     DESCRIPTION:p.opis||"",
-    CATEGORY:p.kategoria||"",
+    CATEGORY:kategoriaPelna,
     BRAND:p.marka||"",
     COLOR:p.kolorProduktu||"",
     SIZE:p.rozmiar||(p.warianty||[]).join(" | "),
@@ -5312,10 +5357,10 @@ function widokAdminEksport(){
           <option value="scal">Dodaj nowe i aktualizuj istniejące</option>
           <option value="zastap">Zastąp cały katalog importowanymi produktami</option>
         </select></div>
-        <div class="backend-note"><b>Scalanie:</b> produkt jest rozpoznawany najpierw po ID, potem po SKU. Istniejący zostanie zaktualizowany, a nowy dostanie wolne ID.<br><b>Zastąpienie:</b> obecny katalog zostanie ukryty i zastąpiony importem.</div>
+        <div class="backend-note"><b>Scalanie:</b> produkt jest rozpoznawany najpierw po EXTERNAL_ID/SKU, a dopiero potem po lokalnym ID. Istniejący zostanie zaktualizowany, a nowy dostanie wolne ID.<br><b>Zastąpienie:</b> obecny katalog zostanie ukryty i zastąpiony importem.</div>
         <p style="font-size:.82rem;color:var(--muted2)">Przed wykonaniem importu tworzona jest automatyczna kopia produktów, stanów magazynowych, kosza i mapowania.</p>
         ${kopia?`<button class="btn danger" onclick="cofnijOstatniImportProduktow()">↩️ Cofnij ostatni import (${new Date(kopia.data).toLocaleString("pl-PL")})</button>`:""}
-        ${ostatniRaportImportu?`<div class="sug" style="margin-top:.7rem"><span class="s-ico">✅</span><span><b>Ostatni import zakończony</b><br>Dodano: ${ostatniRaportImportu.dodane} • zaktualizowano: ${ostatniRaportImportu.zaktualizowane} • pominięto: ${ostatniRaportImportu.pominiete}</span></div>`:""}
+        ${ostatniRaportImportu?`<div class="sug" style="margin-top:.7rem"><span class="s-ico">✅</span><span><b>Ostatni import zakończony</b><br>Dodano: ${ostatniRaportImportu.dodane} • zaktualizowano: ${ostatniRaportImportu.zaktualizowane} • pominięto: ${ostatniRaportImportu.pominiete}${ostatniRaportImportu.menuZImportu?` • dopisano do menu: ${ostatniRaportImportu.menuZImportu}`:""}</span></div>`:""}
       </div>
     </div>
     ${p?`
@@ -5326,8 +5371,8 @@ function widokAdminEksport(){
       </div>
       ${p.bledy.length?`<div class="import-errors"><b>Pozycje pominięte:</b><br>${p.bledy.slice(0,100).map(esc).join("<br>")}${p.bledy.length>100?`<br>… i ${p.bledy.length-100} kolejnych`:""}</div>`:""}
       ${p.ostrzezenia.length?`<details><summary>Ostrzeżenia (${p.ostrzezenia.length})</summary><div class="import-errors">${p.ostrzezenia.slice(0,100).map(esc).join("<br>")}</div></details>`:""}
-      ${p.produkty.length?`<div style="overflow-x:auto"><table class="log-table"><tr><th>ID</th><th>Nazwa</th><th>Kategoria</th><th>Cena</th><th>Stan</th><th>SKU</th></tr>
-        ${p.produkty.slice(0,20).map(x=>`<tr><td>${x.id??"auto"}</td><td><b>${esc(x.nazwa)}</b></td><td>${esc(x.kategoria)}</td><td>${zl(x.cena)}</td><td>${x.stan??"∞"}</td><td>${esc(x.sku||"—")}</td></tr>`).join("")}
+      ${p.produkty.length?`<div style="overflow-x:auto"><table class="log-table"><tr><th>ID</th><th>Nazwa</th><th>Grupa menu</th><th>Katalog</th><th>Cena</th><th>Stan</th><th>EXTERNAL_ID / SKU</th><th>Zdjęcia</th></tr>
+        ${p.produkty.slice(0,20).map(x=>`<tr><td>${x.id??"auto"}</td><td><b>${esc(x.nazwa)}</b></td><td>${esc(x.grupaKategorii||"—")}</td><td>${esc(x.kategoria)}</td><td>${zl(x.cena)}</td><td>${x.stan??"∞"}</td><td>${esc(x.externalId||x.sku||"—")}</td><td>${(x.zdjecie?1:0)+(x.zdjecia?.length||0)}</td></tr>`).join("")}
       </table></div>${p.produkty.length>20?`<p class="pay-note">Podgląd pokazuje pierwsze 20 z ${p.produkty.length} poprawnych produktów.</p>`:""}
       <button class="btn" style="margin-top:.7rem" onclick="wykonajImportProduktow()">✅ Wykonaj import ${p.produkty.length} ${p.produkty.length===1?"produktu":"produktów"}</button>`:"<p>Brak poprawnych produktów do importu.</p>"}
     </div>`:""}
