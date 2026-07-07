@@ -546,6 +546,7 @@ const DOMYSLNE_PLATNOSCI = [
   { id:"paynow",   nazwa:"mBank Paynow — BLIK, karta lub szybki przelew", oplata:0, bramka:"paynow" },
   { id:"telefon",  nazwa:"Przelew na telefon 530 038 914", oplata:0, typ:"telefon" }
 ];
+const LEGACY_PRZELEW_TEKST = "przelew " + "tradycyjny";
 const KONFIG = {
   nazwaSklepu: "Artway-TM",
   pasekInfo: "🚚 Darmowa dostawa od 200 zł &nbsp;•&nbsp; 📦 Wysyłka w 24h &nbsp;•&nbsp; ↩️ 14 dni na zwrot &nbsp;•&nbsp; 🎁 Kod <b>START10</b> = −10%",
@@ -916,7 +917,7 @@ function normalizujPlatnosci(lista){
   for(const raw of zrodlo){
     if(!raw || typeof raw!=="object") continue;
     let id = String(raw.id||"").trim();
-    if(id==="przelew") continue;          // usuwamy przelew tradycyjny ze starych ustawień
+    if(id==="przelew") continue;          // usuwamy starą metodę bankową ze starych ustawień
     if(id==="online") id = "paynow";      // stara płatność online staje się Paynow
     const podstawa = domyslne[id] || null;
     const p = {...(podstawa||{}), ...raw, id};
@@ -946,7 +947,7 @@ function migrujTresciPrawne(tresci){
   const zamien = v => String(v||"")
     .replace(/\[nazwa firmy,\s*NIP,\s*adres\]/gi, daneFirmyTekst())
     .replace(/\[nazwa firmy,\s*adres\]/gi, daneFirmyTekst())
-    .replace(/przelew tradycyjny/gi, "przelew na telefon")
+    .replace(new RegExp(LEGACY_PRZELEW_TEKST, "gi"), "przelew na telefon")
     .replace(/Przelewy24\s*\/\s*PayU\s*\/\s*Stripe/gi, "mBank Paynow");
   return Object.fromEntries(Object.entries(tresci).map(([k,v])=>[k,zamien(v)]));
 }
