@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.07.2">
+<meta name="artway-version" content="2026.07.07.3">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <style>
@@ -100,7 +100,7 @@ header{position:sticky;top:0;z-index:50;background:var(--panel);border-bottom:1p
 .card-body{padding:1rem;display:flex;flex-direction:column;flex:1}
 .cat-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--brand)}
 .card h3{font-size:1rem;margin:.25rem 0 .35rem;font-weight:700}
-.card .desc{font-size:.84rem;color:var(--muted2);flex:1}
+.card .desc{font-size:.84rem;color:var(--muted2);flex:1;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;min-height:4.9em;max-height:4.9em}
 .price-row{display:flex;align-items:baseline;gap:.5rem;margin:.7rem 0 .6rem}
 .price{font-size:1.25rem;font-weight:800}
 .old-price{font-size:.85rem;color:var(--muted2);text-decoration:line-through}
@@ -883,6 +883,10 @@ const zl = n => n.toFixed(2).replace(".", ",") + " zł";
 const $ = id => document.getElementById(id);
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const jsArg = s => esc(JSON.stringify(String(s??"")));
+function skrocTekst(v, max=190){
+  const s=String(v??"").replace(/\s+/g," ").trim();
+  return s.length>max ? s.slice(0,max).replace(/\s+\S*$/,"")+"…" : s;
+}
 function tylkoCyfry(v){ return String(v??"").replace(/[^0-9]/g,""); }
 function formatTelefonPlatnosci(v=KONFIG.numerPrzelewuTelefon){
   const c = tylkoCyfry(v || NUMER_PRZELEWU_TELEFON_DOMYSLNY);
@@ -1620,7 +1624,7 @@ function normalizujSzukanyTekst(s){
 function produktPasujeFrazie(p,szukane=fraza){
   const zapytanie=normalizujSzukanyTekst(szukane);
   if(!zapytanie)return true;
-  const tekst=normalizujSzukanyTekst([p.nazwa,p.opis,p.kategoria,p.sku,(p.warianty||[]).join(" "),p.id].join(" "));
+  const tekst=normalizujSzukanyTekst([p.nazwa,p.opis,p.kategoria,p.sku,p.gtin,p.externalId,p.mpn,p.marka,p.kolorProduktu,p.rozmiar,p.material,(p.warianty||[]).join(" "),p.id].join(" "));
   return zapytanie.split(" ").filter(Boolean).every(slowo=>tekst.includes(slowo));
 }
 function sortujListeProduktow(lista,sort=sortowanie){
@@ -1677,7 +1681,7 @@ function kartaProduktu(p){
     <div class="card-body">
       <span class="cat-label">${esc(p.kategoria)}${oceny?` <span style="color:var(--accent);text-transform:none;letter-spacing:0">★ ${oceny.srednia.toFixed(1)} (${oceny.n})</span>`:""}</span>
       <h3>${esc(p.nazwa)}</h3>
-      <p class="desc">${esc(p.opis||"")}</p>
+      <p class="desc">${esc(skrocTekst(p.opis||"",190))}</p>
       <div class="price-row">
         <span class="price">${zl(p.cena)}</span>
         ${p.staraCena?`<span class="old-price">${zl(p.staraCena)}</span>`:""}
@@ -1747,6 +1751,24 @@ function widokListaSpecjalna(tytul, filtr, pusty){
 
 /* ═══════════ WIDOK: PRODUKT ═══════════ */
 let iloscProduktu = 1;
+function specyfikacjaProduktuHTML(p){
+  const wiersze=[
+    ["Marka",p.marka],
+    ["GTIN / EAN",p.gtin],
+    ["EXTERNAL_ID",p.externalId],
+    ["MPN",p.mpn],
+    ["Kolor",p.kolorProduktu],
+    ["Rozmiar / wymiary",p.rozmiar],
+    ["Materiał",p.material]
+  ].filter(([,v])=>String(v||"").trim());
+  if(!wiersze.length)return "";
+  return `<details open style="margin:.85rem 0">
+    <summary style="cursor:pointer;font-weight:800">Specyfikacja produktu</summary>
+    <table class="log-table" style="margin-top:.55rem">
+      ${wiersze.map(([k,v])=>`<tr><th style="width:170px">${esc(k)}</th><td>${esc(v)}</td></tr>`).join("")}
+    </table>
+  </details>`;
+}
 function widokProdukt(id){
   const p = produkty.find(x=>x.id===id);
   if(!p){ loguj("ostrzezenie","Otwarto nieistniejący produkt: id="+id); return `<div class="page"><div class="panel"><h1>Nie znaleziono produktu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`; }
@@ -1776,6 +1798,7 @@ function widokProdukt(id){
             ${p.staraCena?`<span class="old-price">${zl(p.staraCena)}</span>`:""}
           </div>
           <p style="color:var(--muted2)">${esc(p.opis||"")}</p>
+          ${specyfikacjaProduktuHTML(p)}
           ${p.warianty?.length?`
           <div class="f-group" style="max-width:260px;margin:.6rem 0 0"><label>Wybierz wariant *</label>
             <select id="wariantSel">${p.warianty.map(w=>`<option>${esc(w)}</option>`).join("")}</select>
@@ -3638,7 +3661,7 @@ function formularzProduktu(p, tryb){
       </div>
       <div id="podgladZdjecia">${p.zdjecie?`<img src="${esc(p.zdjecie)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`:""}</div>
       <details ${p.zdjecia?.length?"open":""} style="margin-bottom:.8rem">
-        <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🖼️ Galeria — dodatkowe zdjęcia (do 3)</summary>
+        <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🖼️ Galeria — ręczna edycja 3 zdjęć; import OVF zachowuje do 16 zdjęć</summary>
         ${[2,3,4].map(n=>`
         <div class="f-group" style="margin-top:.6rem"><label>Zdjęcie ${n}</label>
           <div style="display:flex;gap:.5rem">
@@ -3651,7 +3674,23 @@ function formularzProduktu(p, tryb){
         <div class="f-group"><label>Kod produktu (SKU) <small style="font-weight:400;color:var(--muted2)">opcjonalnie</small></label><input name="sku" value="${esc(p.sku||"")}" placeholder="np. ATM-0001" maxlength="30"></div>
         <div class="f-group"><label>Warianty <small style="font-weight:400;color:var(--muted2)">po przecinku, np. S, M, L, XL</small></label><input name="warianty" value="${esc((p.warianty||[]).join(", "))}" placeholder="np. S, M, L, XL albo Czarny, Biały"></div>
       </div>
-      <div class="f-group"><label>Opis</label><textarea name="opis" rows="4" maxlength="500">${esc(p.opis||"")}</textarea></div>
+      <details ${(p.gtin||p.externalId||p.mpn||p.marka||p.kolorProduktu||p.rozmiar||p.material)?"open":""} style="margin-bottom:.8rem">
+        <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🏷️ Dane z hurtowni / OVF</summary>
+        <div class="f-row" style="margin-top:.7rem">
+          <div class="f-group"><label>GTIN / EAN</label><input name="gtin" value="${esc(p.gtin||"")}" placeholder="np. 5901234567891"></div>
+          <div class="f-group"><label>EXTERNAL_ID</label><input name="externalId" value="${esc(p.externalId||"")}" placeholder="ID z hurtowni"></div>
+          <div class="f-group"><label>MPN</label><input name="mpn" value="${esc(p.mpn||"")}" placeholder="Kod producenta"></div>
+        </div>
+        <div class="f-row">
+          <div class="f-group"><label>Marka / BRAND</label><input name="marka" value="${esc(p.marka||"")}"></div>
+          <div class="f-group"><label>Kolor produktu / COLOR</label><input name="kolorProduktu" value="${esc(p.kolorProduktu||"")}" placeholder="np. Czarny matowy"></div>
+        </div>
+        <div class="f-row">
+          <div class="f-group"><label>Rozmiar / SIZE</label><input name="rozmiar" value="${esc(p.rozmiar||"")}" placeholder="np. XL lub 85x60x60 cm"></div>
+          <div class="f-group"><label>Materiał / MATERIAL</label><input name="material" value="${esc(p.material||"")}" placeholder="np. bawełna, karton, stal"></div>
+        </div>
+      </details>
+      <div class="f-group"><label>Opis pełny</label><textarea name="opis" rows="6" maxlength="10000">${esc(p.opis||"")}</textarea></div>
       <div class="f-group" style="max-width:240px"><label>Stan magazynowy <small style="font-weight:400;color:var(--muted2)">(puste = bez limitu)</small></label>
         <input name="stan" inputmode="numeric" placeholder="∞" value="${p.id!==undefined && stanyProduktow[p.id]!==undefined ? stanyProduktow[p.id] : ""}"></div>
       <div class="diag-actions">
@@ -3702,9 +3741,15 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   if(f.get("badge")) p.badge = String(f.get("badge")); else delete p.badge;
   const sku = String(f.get("sku")||"").trim();
   if(sku) p.sku = sku; else delete p.sku;
+  for(const [pole,nazwa] of [["gtin","gtin"],["externalId","externalId"],["mpn","mpn"],["marka","marka"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"]]){
+    const v=String(f.get(nazwa)||"").trim();
+    if(v)p[pole]=v;else delete p[pole];
+  }
   const warianty = String(f.get("warianty")||"").split(",").map(x=>x.trim()).filter(Boolean).slice(0,12);
   if(warianty.length) p.warianty = warianty; else delete p.warianty;
   const zdjecia = ["zdjecie2","zdjecie3","zdjecie4"].map(n=>String(f.get(n)||"").trim()).filter(Boolean);
+  const dalszeZdjecia=(poprzedni.zdjecia||[]).slice(3).filter(Boolean);
+  if(dalszeZdjecia.length) zdjecia.push(...dalszeZdjecia);
   if(zdjecia.length) p.zdjecia = zdjecia; else delete p.zdjecia;
   return p;
 }
@@ -3970,7 +4015,8 @@ function eksportujKlientow(){
   loguj("info","Wyeksportowano klientów ("+k.length+")");
 }
 let podgladImportuProduktow=null, ostatniRaportImportu=null;
-const POLA_CSV_PRODUKTU=["id","nazwa","kategoria","cena","stara_cena","stan","sku","opis","badge","ikona","zdjecie","zdjecie2","zdjecie3","zdjecie4","warianty","kolor"];
+const POLA_CSV_PRODUKTU=["id","nazwa","kategoria","cena","stara_cena","stan","sku","gtin","external_id","mpn","marka","opis","badge","ikona","zdjecie","zdjecie2","zdjecie3","zdjecie4","zdjecie5","zdjecie6","zdjecie7","zdjecie8","zdjecie9","zdjecie10","zdjecie11","zdjecie12","zdjecie13","zdjecie14","zdjecie15","zdjecie16","warianty","kolor","kolor_produktu","rozmiar","material"];
+const POLA_OVF_PRODUKTU=["GTIN","EXTERNAL_ID","NAME","STOCK","PRICE","MPN","DESCRIPTION","IMAGE1","IMAGE2","IMAGE3","IMAGE4","IMAGE5","IMAGE6","IMAGE7","IMAGE8","IMAGE9","IMAGE10","IMAGE11","IMAGE12","IMAGE13","IMAGE14","IMAGE15","IMAGE16","CATEGORY","BRAND","COLOR","SIZE","MATERIAL"];
 function normalizujNaglowekCSV(v){
   return normalizujSzukanyTekst(v).replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");
 }
@@ -3984,16 +4030,21 @@ function kanonicznePoleProduktu(naglowek){
     staraCena:["stara_cena","old_price","regular_price","cena_regularna"],
     stan:["stan","stock","quantity","ilosc","stan_magazynowy"],
     sku:["sku","kod","kod_produktu","symbol"],
+    gtin:["gtin","ean","ean13","barcode","kod_ean"],
+    externalId:["external_id","externalid","kod_zewnetrzny","supplier_id","vendor_id"],
+    mpn:["mpn","manufacturer_part_number","kod_producenta"],
+    marka:["brand","marka","producent"],
     opis:["opis","description","desc"],
     badge:["badge","etykieta","label"],
     ikona:["ikona","icon","emoji"],
-    zdjecie:["zdjecie","image","image_url","url_zdjecia"],
-    zdjecie2:["zdjecie2","image2","image_2"],
-    zdjecie3:["zdjecie3","image3","image_3"],
-    zdjecie4:["zdjecie4","image4","image_4"],
+    zdjecie:["zdjecie","image","image1","image_1","image_url","url_zdjecia"],
     warianty:["warianty","variants","options"],
-    kolor:["kolor","color"]
+    kolor:["kolor","kolor_tla","background","background_color","card_color"],
+    kolorProduktu:["color","kolor_produktu","product_color","barwa"],
+    rozmiar:["size","rozmiar","wymiar","wymiary","dimensions"],
+    material:["material","material_produktu","tworzywo"]
   };
+  for(let i=2;i<=16;i++) aliasy["zdjecie"+i]=["zdjecie"+i,"image"+i,"image_"+i,"image"+String(i).padStart(2,"0"),String("image_"+String(i).padStart(2,"0"))];
   return Object.keys(aliasy).find(k=>aliasy[k].includes(h))||null;
 }
 function liczbaImportu(v){
@@ -4041,6 +4092,10 @@ function tablicaWartosci(v){
   if(Array.isArray(v))return v.map(x=>String(x).trim()).filter(Boolean);
   return String(v||"").split(/\s*[|,]\s*/).map(x=>x.trim()).filter(Boolean);
 }
+function czyKolorKarty(v){
+  const s=String(v||"").trim();
+  return /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(s)||/^rgba?\(/i.test(s)||/^hsla?\(/i.test(s);
+}
 function normalizujProduktImportu(r,nr){
   const pobierz=(...nazwy)=>{for(const n of nazwy)if(r?.[n]!==undefined&&r[n]!==null)return r[n];return "";};
   const bledy=[],ostrzezenia=[];
@@ -4057,17 +4112,24 @@ function normalizujProduktImportu(r,nr){
   const stara=liczbaImportu(pobierz("staraCena","stara_cena","old_price","regular_price"));
   if(stara!==null&&cena!==null&&stara<=cena)ostrzezenia.push("stara cena pominięta, bo nie jest wyższa od ceny");
   const galeria=Array.isArray(r?.zdjecia)?r.zdjecia:Array.isArray(r?.images)?r.images:null;
-  const zdjecia=galeria?galeria.map(String).filter(Boolean):["zdjecie2","zdjecie3","zdjecie4"].map(k=>String(pobierz(k)).trim()).filter(Boolean);
+  const zdjecia=galeria?galeria.map(String).filter(Boolean):Array.from({length:15},(_,i)=>"zdjecie"+(i+2)).map(k=>String(pobierz(k)).trim()).filter(Boolean);
   const p={id,nazwa,kategoria,cena:cena===null?0:+cena.toFixed(2)};
   const opis=String(pobierz("opis","description")).trim();if(opis)p.opis=opis;
   const ikona=String(pobierz("ikona","icon","emoji")).trim();if(ikona)p.ikona=ikona;
-  const kolor=String(pobierz("kolor","color")).trim();if(kolor)p.kolor=kolor;
+  const kolor=String(pobierz("kolor")).trim();if(kolor&&czyKolorKarty(kolor))p.kolor=kolor;
+  const kolorProduktu=String(pobierz("kolorProduktu")).trim();if(kolorProduktu)p.kolorProduktu=kolorProduktu;
   if(stara!==null&&stara>cena)p.staraCena=+stara.toFixed(2);
   if(stan!==null)p.stan=stan;
-  const sku=String(pobierz("sku","kod","kod_produktu")).trim();if(sku)p.sku=sku;
+  const gtin=String(pobierz("gtin")).trim();if(gtin)p.gtin=gtin;
+  const externalId=String(pobierz("externalId")).trim();if(externalId)p.externalId=externalId;
+  const mpn=String(pobierz("mpn")).trim();if(mpn)p.mpn=mpn;
+  const marka=String(pobierz("marka")).trim();if(marka)p.marka=marka;
+  const rozmiar=String(pobierz("rozmiar")).trim();if(rozmiar)p.rozmiar=rozmiar;
+  const material=String(pobierz("material")).trim();if(material)p.material=material;
+  const sku=String(pobierz("sku","kod","kod_produktu")).trim()||externalId||mpn||gtin;if(sku)p.sku=sku;
   const badge=String(pobierz("badge","etykieta","label")).trim();if(badge)p.badge=badge;
   const zdjecie=String(pobierz("zdjecie","image","image_url")).trim();if(zdjecie)p.zdjecie=zdjecie;
-  if(zdjecia.length)p.zdjecia=zdjecia.slice(0,3);
+  if(zdjecia.length)p.zdjecia=zdjecia.slice(0,15);
   const warianty=tablicaWartosci(pobierz("warianty","variants","options"));if(warianty.length)p.warianty=warianty.slice(0,30);
   return {nr,produkt:p,bledy,ostrzezenia};
 }
@@ -4181,8 +4243,8 @@ function produktDoEksportu(p){
   const o={id:p.id,nazwa:p.nazwa,kategoria:p.kategoria,cena:+Number(p.cena).toFixed(2)};
   if(p.staraCena>p.cena)o.staraCena=+Number(p.staraCena).toFixed(2);
   const stan=stanProduktu(p);if(stan!==null)o.stan=stan;
-  for(const k of ["sku","opis","badge","ikona","kolor","zdjecie"])if(p[k]!==undefined&&p[k]!=="")o[k]=p[k];
-  if(p.zdjecia?.length)o.zdjecia=p.zdjecia.slice(0,3);
+  for(const k of ["sku","gtin","externalId","mpn","marka","opis","badge","ikona","kolor","kolorProduktu","rozmiar","material","zdjecie"])if(p[k]!==undefined&&p[k]!=="")o[k]=p[k];
+  if(p.zdjecia?.length)o.zdjecia=p.zdjecia.slice(0,15);
   if(p.warianty?.length)o.warianty=p.warianty;
   return o;
 }
@@ -4210,16 +4272,58 @@ function eksportujProduktyJSON(zakres){
 function eksportujProduktyCSV(zakres){
   zakres=zakres||$("zakresEksportuProduktow")?.value||"widoczne";
   const lista=zakresEksportuProduktow(zakres);if(!lista.length){toast("Brak produktów w wybranym zakresie");return;}
-  const csv=[POLA_CSV_PRODUKTU.join(";"),...lista.map(p=>[
-    p.id,p.nazwa,p.kategoria,String(p.cena.toFixed(2)).replace(".",","),p.staraCena?String(p.staraCena.toFixed(2)).replace(".",","):"",
-    p.stan??"",p.sku||"",p.opis||"",p.badge||"",p.ikona||"",p.zdjecie||"",...(p.zdjecia||[]).concat(["","",""]).slice(0,3),(p.warianty||[]).join(" | "),p.kolor||""
-  ].map(csvPole).join(";"))].join("\n");
+  const csv=[POLA_CSV_PRODUKTU.join(";"),...lista.map(p=>POLA_CSV_PRODUKTU.map(pole=>wartoscPolaCSVProduktu(p,pole)).map(csvPole).join(";"))].join("\n");
   const nazwa=zakres==="widoczne"?"produkty.csv":`produkty-${nazwaZakresuEksportu(zakres)}.csv`;
   pobierzPlik(nazwa,"\uFEFF"+csv,"text/csv");loguj("info",`Wyeksportowano ${nazwa} (${lista.length} produktów)`);toast(`Wyeksportowano ${lista.length} produktów do CSV`);
 }
+function wartoscPolaCSVProduktu(p,pole){
+  if(pole==="stara_cena")return p.staraCena?String(p.staraCena.toFixed(2)).replace(".",","):"";
+  if(pole==="cena")return String(Number(p.cena||0).toFixed(2)).replace(".",",");
+  if(pole==="external_id")return p.externalId||"";
+  if(pole==="kolor_produktu")return p.kolorProduktu||"";
+  if(pole==="warianty")return (p.warianty||[]).join(" | ");
+  if(pole==="stan")return p.stan??"";
+  if(pole==="zdjecie")return p.zdjecie||"";
+  const m=String(pole).match(/^zdjecie(\d+)$/);
+  if(m)return (p.zdjecia||[])[Number(m[1])-2]||"";
+  return p[pole]??"";
+}
+function wartoscPolaOVF(p,pole){
+  const zdj=[p.zdjecie||"",...(p.zdjecia||[])];
+  const mapa={
+    GTIN:p.gtin||"",
+    EXTERNAL_ID:p.externalId||p.sku||String(p.id||""),
+    NAME:p.nazwa||"",
+    STOCK:p.stan??"",
+    PRICE:p.cena!==undefined?String(Number(p.cena||0).toFixed(2)).replace(".",","):"",
+    MPN:p.mpn||p.sku||"",
+    DESCRIPTION:p.opis||"",
+    CATEGORY:p.kategoria||"",
+    BRAND:p.marka||"",
+    COLOR:p.kolorProduktu||"",
+    SIZE:p.rozmiar||(p.warianty||[]).join(" | "),
+    MATERIAL:p.material||""
+  };
+  const img=String(pole).match(/^IMAGE(\d+)$/);
+  return img ? (zdj[Number(img[1])-1]||"") : (mapa[pole]??"");
+}
+function eksportujProduktyOVF(zakres){
+  zakres=zakres||$("zakresEksportuProduktow")?.value||"widoczne";
+  const lista=zakresEksportuProduktow(zakres);if(!lista.length){toast("Brak produktów w wybranym zakresie");return;}
+  const csv=[POLA_OVF_PRODUKTU.join(","),...lista.map(p=>POLA_OVF_PRODUKTU.map(pole=>wartoscPolaOVF(p,pole)).map(csvPole).join(","))].join("\n");
+  const nazwa=zakres==="widoczne"?"produkty-ovf.xls":`produkty-ovf-${nazwaZakresuEksportu(zakres)}.xls`;
+  pobierzPlik(nazwa,"\uFEFF"+csv,"text/csv");
+  loguj("info",`Wyeksportowano ${nazwa} (${lista.length} produktów)`);
+  toast(`Wyeksportowano ${lista.length} produktów w formacie OVF`);
+}
 function pobierzSzablonProduktowCSV(){
-  const przyklad=[1,"Przykładowy produkt","Nowa kategoria","99,90","129,90",25,"SKU-001","Opis produktu","Nowość","📦","https://adres.pl/zdjecie.jpg","","","","S | M | L","#dbeafe"];
+  const przyklad=[1,"Przykładowy produkt","Nowa kategoria","99,90","129,90",25,"SKU-001","5901234567891","EXT-001","MPN-001","Marka","Opis produktu","Nowość","📦","https://adres.pl/zdjecie.jpg","","","","","","","","","","","","","","","","S | M | L","#dbeafe","Czarny","XL","Bawełna"];
   pobierzPlik("szablon-importu-produktow.csv","\uFEFF"+POLA_CSV_PRODUKTU.join(";")+"\n"+przyklad.map(csvPole).join(";"),"text/csv");
+}
+function pobierzSzablonProduktowOVF(){
+  const p={id:1,nazwa:"Przykładowa gra edukacyjna",kategoria:"Gry edukacyjne",cena:99.90,stan:25,sku:"GRA-001",externalId:"GRA-001",gtin:"5901234567891",mpn:"GRA-001",opis:"Krótki opis produktu. Pełny opis będzie widoczny na stronie produktu, a na listach pojawi się skrót.",zdjecie:"https://adres.pl/zdjecie1.jpg",zdjecia:["https://adres.pl/zdjecie2.jpg"],marka:"Artway",kolorProduktu:"Kolorowy",rozmiar:"30x20x5 cm",material:"Karton"};
+  const csv=POLA_OVF_PRODUKTU.join(",")+"\n"+POLA_OVF_PRODUKTU.map(pole=>wartoscPolaOVF(p,pole)).map(csvPole).join(",");
+  pobierzPlik("ovf-template-dla-rozszerzonego-pliku-csv-dane.xls","\uFEFF"+csv,"text/csv");
 }
 
 /* ── Katalogi produktów (kategorie) ── */
@@ -5006,14 +5110,15 @@ function widokAdminEksport(){
   return adminSzkielet("/admin/eksport", `
   <div class="panel">
     <h1>⇄ Import i eksport produktów</h1>
-    <p style="color:var(--muted2)">Obsługa dużych katalogów JSON i CSV. Import zawsze zaczyna się od analizy — żadne dane nie zmienią się przed kliknięciem „Wykonaj import”.</p>
+    <p style="color:var(--muted2)">Obsługa dużych katalogów JSON, CSV oraz OVF `.xls` zapisanego jako CSV. Import zawsze zaczyna się od analizy — żadne dane nie zmienią się przed kliknięciem „Wykonaj import”.</p>
     <div class="import-grid">
       <div class="import-box">
         <h2 style="margin-top:0">1. Wczytaj dane</h2>
-        <label class="btn" style="cursor:pointer">📁 Wybierz JSON lub CSV<input type="file" accept=".json,.csv,.txt,application/json,text/csv" onchange="wczytajPlikImportuProduktow(this)" style="display:none"></label>
+        <label class="btn" style="cursor:pointer">📁 Wybierz JSON, CSV lub OVF .xls<input type="file" accept=".json,.csv,.xls,.txt,application/json,text/csv,application/vnd.ms-excel" onchange="wczytajPlikImportuProduktow(this)" style="display:none"></label>
         <button class="btn ghost" onclick="pobierzSzablonProduktowCSV()">⬇️ Pobierz szablon CSV</button>
+        <button class="btn ghost" onclick="pobierzSzablonProduktowOVF()">⬇️ Szablon OVF .xls</button>
         <p class="pay-note" style="text-align:left">Możesz też wkleić dane z hurtowni lub arkusza:</p>
-        <textarea id="importTekstProduktow" placeholder='JSON: [{"nazwa":"Produkt","kategoria":"AGD","cena":99.90}]&#10;&#10;CSV: nazwa;kategoria;cena;stan;sku'></textarea>
+        <textarea id="importTekstProduktow" placeholder='JSON: [{"nazwa":"Produkt","kategoria":"AGD","cena":99.90}]&#10;&#10;CSV/OVF: GTIN,EXTERNAL_ID,NAME,STOCK,PRICE,MPN,DESCRIPTION,IMAGE1,CATEGORY,BRAND,COLOR,SIZE,MATERIAL'></textarea>
         <button class="btn ghost" style="margin-top:.5rem" onclick="analizujWklejonyImport()">🔎 Analizuj wklejone dane</button>
       </div>
       <div class="import-box">
@@ -5055,9 +5160,11 @@ function widokAdminEksport(){
     <div class="diag-actions">
       <button class="btn" onclick="eksportujProduktyJSON()">📤 products.json na hosting</button>
       <button class="btn ghost" onclick="eksportujProduktyCSV()">📊 Pełny CSV do Excela</button>
+      <button class="btn ghost" onclick="eksportujProduktyOVF()">📄 OVF .xls jak szablon</button>
       <button class="btn ghost" onclick="pobierzSzablonProduktowCSV()">📄 Szablon CSV</button>
+      <button class="btn ghost" onclick="pobierzSzablonProduktowOVF()">📄 Szablon OVF .xls</button>
     </div>
-    <p class="pay-note" style="text-align:left">Eksport zawiera: ID, nazwę, kategorię, ceny, stan, SKU, opis, etykietę, ikonę, zdjęcie główne, galerię, warianty i kolor. Produkty z kosza nie trafiają do pliku na hosting.</p>
+    <p class="pay-note" style="text-align:left">Eksport zawiera: ID, nazwę, kategorię, ceny, stan, SKU, GTIN/EAN, EXTERNAL_ID, MPN, markę, opis, etykietę, ikonę, zdjęcie główne, galerię do 16 zdjęć, warianty, kolor karty, kolor produktu, rozmiar i materiał. Produkty z kosza nie trafiają do pliku na hosting.</p>
   </div>
   <div class="panel">
     <h1>📦 Pozostałe eksporty i kopie</h1>
