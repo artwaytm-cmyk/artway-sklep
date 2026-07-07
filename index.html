@@ -858,9 +858,8 @@ async function zarejestrujUzytkownika(imie, email, haslo){
     else await wywolajBramke("account-register",{method:"POST",body:{name:imie,email,password:haslo}});
     stanBazyCentralnej={...stanBazyCentralnej,online:true,error:""};
   }catch(bl){
-    const lokalny=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
-    if(!lokalny) return {ok:false,blad:"Wspólna baza kont jest niedostępna: "+bl.message};
-    loguj("ostrzezenie","Rejestracja zapisana lokalnie — oczekuje na synchronizację: "+bl.message);
+    // Brak serwerowej bazy kont (hosting statyczny / Netlify) — zapisujemy konto lokalnie.
+    loguj("ostrzezenie","Konto zapisane lokalnie (brak serwerowej bazy kont): "+bl.message);
   }
   u.push(rekord);
   zapiszLS("artway_uzytkownicy", u);
@@ -885,9 +884,8 @@ async function sprawdzLogowanie(email, haslo){
     stanBazyCentralnej={...stanBazyCentralnej,online:true,error:""};
     return {ok:true,uzytkownik:{imie:serwer.imie||serwer.email,email:serwer.email,rola:serwer.rola||"klient"}};
   }catch(bl){
+    // Brak serwerowej bazy kont (hosting statyczny / Netlify) — logujemy lokalnie z localStorage.
     stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:false,error:bl.message};
-    const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
-    if(!lokalnyPodglad) return {ok:false,blad:bl.message};
   }
   const u = pobierzUzytkownikow().find(x=>x.email===email);
   if(!u) return {ok:false, blad:"Nie znaleziono konta z tym adresem."};
