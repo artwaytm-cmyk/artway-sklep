@@ -22,6 +22,7 @@ const KLUCZE_WSPOLNE = [
 const LIMIT_USTAWIEN = 4 * 1024 * 1024; // 4 MB na komplet ustawień
 const LIMIT_ZAMOWIEN = 20000;
 const LIMIT_KLIENTOW = 20000;
+const LIMIT_USUNIETYCH_ZAMOWIEN = 50000;
 
 function baza() {
   return getStore({ name: STORE_NAME, consistency: 'strong' });
@@ -70,6 +71,9 @@ function czyAdmin(req, url) {
 function tekst(v, max = 200) {
   return String(v == null ? '' : v).slice(0, max);
 }
+function numerZamowienia(v) {
+  return tekst(v, 80).trim();
+}
 
 // zostaw tylko dozwolone klucze wspólne i pilnuj rozmiaru
 function oczyscUstawienia(obj) {
@@ -83,7 +87,7 @@ function oczyscUstawienia(obj) {
 
 function normalizujZamowienie(z) {
   if (!z || typeof z !== 'object') return null;
-  const nr = tekst(z.nr, 80).trim();
+  const nr = numerZamowienia(z.nr);
   if (!nr) return null;
   z.nr = nr;
   z.ts = Number(z.ts) || Date.now();
@@ -96,6 +100,45 @@ function normalizujKlienta(u) {
   if (!email) return null;
   u.email = email;
   return u;
+}
+
+function normalizujUsunieteZamowienie(raw) {
+  const nr = numerZamowienia(raw?.nr || raw?.number || raw);
+  if (!nr) return null;
+  return {
+    nr,
+    email: tekst(raw?.email, 200).trim().toLowerCase(),
+    by: tekst(raw?.by || raw?.kto || 'unknown', 40),
+    deleted_at: tekst(raw?.deleted_at || raw?.usunietoAt || new Date().toISOString(), 80),
+  };
+}
+function mapaUsunietych(lista = []) {
+  const mapa = new Map();
+  for (const raw of Array.isArray(lista) ? lista : []) {
+    const rec = normalizujUsunieteZamowienie(raw);
+    if (rec) mapa.set(rec.nr, { ...mapa.get(rec.nr), ...rec });
+  }
+  return mapa;
+}
+async function czytajUsunieteZamowienia() {
+  const rec = await czytaj('deleted_orders', { items: [] });
+  return Array.isArray(rec.items) ? rec.items : [];
+}
+function filtrujNieusunieteZamowienia(items, usuniete) {
+  const mapa = usuniete instanceof Map ? usuniete : mapaUsunietych(usuniete);
+  return (Array.isArray(items) ? items : []).filter((z) => z && z.nr && !mapa.has(z.nr));
+}
+async function dopiszUsunieteZamowienie(raw) {
+  const rec = normalizujUsunieteZamowienie(raw);
+  if (!rec) return null;
+  const stare = await czytajUsunieteZamowienia();
+  const mapa = mapaUsunietych(stare);
+  mapa.set(rec.nr, { ...mapa.get(rec.nr), ...rec });
+  const items = [...mapa.values()]
+    .sort((a, b) => String(b.deleted_at || '').localeCompare(String(a.deleted_at || '')))
+    .slice(0, LIMIT_USUNIETYCH_ZAMOWIEN);
+  await zapisz('deleted_orders', { items, updated_at: new Date().toISOString() });
+  return rec;
 }
 
 // zdejmij ze stanu magazynowego sprzedane sztuki (po złożeniu zamówienia przez klienta)
@@ -135,13 +178,16 @@ export default async (req) => {
       const s = await czytaj('settings', { updated_at: null });
       const o = await czytaj('orders', { items: [] });
       const u = await czytaj('users', { items: [] });
+      const d = await czytaj('deleted_orders', { items: [] });
+      const aktywne = filtrujNieusunieteZamowienia(o.items || [], d.items || []);
       return odpowiedz({
         ok: true,
         configured: !!process.env.ARTWAY_ADMIN_TOKEN,
         admin: czyAdmin(req, url),
         store: {
-          orders: (o.items || []).length,
+          orders: aktywne.length,
           users: (u.items || []).length,
+          deleted_orders: (d.items || []).length,
           settings_updated_at: s.updated_at || null,
         },
       });
@@ -154,7 +200,9 @@ export default async (req) => {
       if (czyAdmin(req, url)) {
         const o = await czytaj('orders', { items: [] });
         const u = await czytaj('users', { items: [] });
-        res.orders = o.items || [];
+        const d = await czytajUsunieteZamowienia();
+        res.deleted_orders = d;
+        res.orders = filtrujNieusunieteZamowienia(o.items || [], d);
         res.users = u.items || [];
       }
       return odpowiedz(res);
@@ -180,8 +228,10 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const zam = normalizujZamowienie(body.order);
       if (!zam) return odpowiedz({ ok: false, error: 'Brak danych zamówienia' }, 422);
+      const usuniete = mapaUsunietych(await czytajUsunieteZamowienia());
+      if (usuniete.has(zam.nr)) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
       const rec = await czytaj('orders', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
+      const items = filtrujNieusunieteZamowienia(rec.items || [], usuniete);
       if (!items.some((x) => x.nr === zam.nr)) {
         items.unshift(zam);
         while (items.length > LIMIT_ZAMOWIEN) items.pop();
@@ -214,7 +264,8 @@ export default async (req) => {
       const email = tekst(url.searchParams.get('email'), 200).trim().toLowerCase();
       if (!email) return odpowiedz({ ok: true, orders: [] });
       const rec = await czytaj('orders', { items: [] });
-      const moje = (rec.items || []).filter((z) => (z.email || '').toLowerCase() === email);
+      const usuniete = await czytajUsunieteZamowienia();
+      const moje = filtrujNieusunieteZamowienia(rec.items || [], usuniete).filter((z) => (z.email || '').toLowerCase() === email);
       return odpowiedz({ ok: true, orders: moje });
     }
 
@@ -225,13 +276,20 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const przychodzaceZ = Array.isArray(body.orders) ? body.orders : [];
       const przychodzacyU = Array.isArray(body.users) ? body.users : [];
+      const przychodzaceD = Array.isArray(body.deleted_orders) ? body.deleted_orders : [];
+      const zapisaneD = await czytajUsunieteZamowienia();
+      const usunieteMapa = mapaUsunietych([...zapisaneD, ...przychodzaceD]);
+      const deletedOrders = [...usunieteMapa.values()]
+        .sort((a, b) => String(b.deleted_at || '').localeCompare(String(a.deleted_at || '')))
+        .slice(0, LIMIT_USUNIETYCH_ZAMOWIEN);
+      await zapisz('deleted_orders', { items: deletedOrders, updated_at: new Date().toISOString() });
 
       const recO = await czytaj('orders', { items: [] });
-      const orders = Array.isArray(recO.items) ? recO.items : [];
+      const orders = filtrujNieusunieteZamowienia(recO.items || [], usunieteMapa);
       const numery = new Set(orders.map((z) => z.nr));
       for (const raw of przychodzaceZ) {
         const z = normalizujZamowienie(raw);
-        if (z && !numery.has(z.nr)) { orders.unshift(z); numery.add(z.nr); }
+        if (z && !usunieteMapa.has(z.nr) && !numery.has(z.nr)) { orders.unshift(z); numery.add(z.nr); }
       }
       orders.sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
       while (orders.length > LIMIT_ZAMOWIEN) orders.pop();
@@ -247,7 +305,7 @@ export default async (req) => {
       while (users.length > LIMIT_KLIENTOW) users.pop();
       await zapisz('users', { items: users, updated_at: new Date().toISOString() });
 
-      return odpowiedz({ ok: true, orders, users, updated_at: new Date().toISOString() });
+      return odpowiedz({ ok: true, orders, users, deleted_orders: deletedOrders, updated_at: new Date().toISOString() });
     }
 
     // ─── ADMIN: zapis / usuwanie zamówienia ───
@@ -257,8 +315,10 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const zam = normalizujZamowienie(body.order);
       if (!zam) return odpowiedz({ ok: false, error: 'Brak danych zamówienia' }, 422);
+      const usuniete = mapaUsunietych(await czytajUsunieteZamowienia());
+      if (usuniete.has(zam.nr)) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
       const rec = await czytaj('orders', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
+      const items = filtrujNieusunieteZamowienia(rec.items || [], usuniete);
       const i = items.findIndex((x) => x.nr === zam.nr);
       if (i >= 0) items[i] = zam; else items.unshift(zam);
       await zapisz('orders', { items, updated_at: new Date().toISOString() });
@@ -268,10 +328,30 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const nr = tekst(body.number, 80).trim();
+      const nr = numerZamowienia(body.number || body.nr);
+      if (!nr) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia' }, 422);
+      await dopiszUsunieteZamowienie({ nr, by: 'admin' });
       const rec = await czytaj('orders', { items: [] });
       const items = (rec.items || []).filter((x) => x.nr !== nr);
       await zapisz('orders', { items, updated_at: new Date().toISOString() });
+      return odpowiedz({ ok: true, deleted: true });
+    }
+
+    // ─── KLIENT: usuwa własne zlecenie/zamówienie ───
+    if (action === 'store-order-delete-mine') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const body = await req.json().catch(() => ({}));
+      const nr = numerZamowienia(body.number || body.nr);
+      const email = tekst(body.email, 200).trim().toLowerCase();
+      if (!nr || !email) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia albo e-maila klienta' }, 422);
+      const rec = await czytaj('orders', { items: [] });
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      const zam = items.find((x) => x.nr === nr);
+      if (zam && (zam.email || '').toLowerCase() !== email) {
+        return odpowiedz({ ok: false, error: 'To zlecenie nie należy do podanego klienta', code: 'auth' }, 403);
+      }
+      await dopiszUsunieteZamowienie({ nr, email, by: 'customer' });
+      await zapisz('orders', { items: items.filter((x) => x.nr !== nr), updated_at: new Date().toISOString() });
       return odpowiedz({ ok: true, deleted: true });
     }
 
