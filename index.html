@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.07.1">
+<meta name="artway-version" content="2026.07.07.2">
 <title>Artway-TM — Sklep internetowy</title>
-<meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, płatności online.">
+<meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <style>
 :root{
   --bg:#f6f7fb; --panel:#ffffff; --ink:#151a24; --muted:#68718280;
@@ -533,10 +533,24 @@ const USTAWIENIA_PUBLICZNE = {};
 /* PUBLIC_SETTINGS_END */
 
 /* ═══════════ KONFIGURACJA ═══════════ */
+const DANE_FIRMY_DOMYSLNE = {
+  nazwa: "Artway-TM",
+  identyfikator: "5882468333",
+  nip: "5882468333",
+  pesel: "5882468333",
+  adres: ""
+};
+const NUMER_PRZELEWU_TELEFON_DOMYSLNY = "530038914";
+const DOMYSLNE_PLATNOSCI = [
+  { id:"pobranie", nazwa:"Za pobraniem — płatność przy odbiorze", oplata:5 },
+  { id:"paynow",   nazwa:"mBank Paynow — BLIK, karta lub szybki przelew", oplata:0, bramka:"paynow" },
+  { id:"telefon",  nazwa:"Przelew na telefon 530 038 914", oplata:0, typ:"telefon" }
+];
 const KONFIG = {
   nazwaSklepu: "Artway-TM",
   pasekInfo: "🚚 Darmowa dostawa od 200 zł &nbsp;•&nbsp; 📦 Wysyłka w 24h &nbsp;•&nbsp; ↩️ 14 dni na zwrot &nbsp;•&nbsp; 🎁 Kod <b>START10</b> = −10%",
-  telefon: "+48 000 000 000",
+  telefon: "+48 530 038 914",
+  daneFirmy: {...DANE_FIRMY_DOMYSLNE},
   opisSklepu: "Sklep wielobranżowy z asortymentem od sprawdzonych dostawców. Nowe technologie, uczciwe ceny.",
   heroTytul: "Wszystko, czego potrzebujesz — w jednym miejscu",
   heroOpis: "Elektronika, dom i ogród, narzędzia, odzież i sport. Nowości od sprawdzonych dostawców, atrakcyjne ceny i szybka wysyłka.",
@@ -544,9 +558,9 @@ const KONFIG = {
   emailSklepu: "artwaytm@gmail.com",
   // Konto zarejestrowane na ten adres = administrator (widzi diagnostykę):
   emailAdmina: "artwaytm@gmail.com",
-  // Płatność online jest opcją dodatkową. Po założeniu konta u operatora
-  // (Przelewy24 / PayU / Stripe) wklej tu link — opcja pojawi się sama:
+  // Płatność online przez mBank Paynow — po aktywacji bramki można wkleić link/panel płatności:
   linkPlatnosci: "",
+  numerPrzelewuTelefon: NUMER_PRZELEWU_TELEFON_DOMYSLNY,
   darmowaDostawaOd: 200,
   kodyRabatowe: { "START10": 10, "LATO15": 15 },  // kod → % rabatu
   dostawy: [
@@ -554,11 +568,7 @@ const KONFIG = {
     { id:"paczkomat", nazwa:"Paczkomat InPost", koszt:12, opis:"1–2 dni robocze" },
     { id:"odbior",    nazwa:"Odbiór osobisty",  koszt:0,  opis:"po umówieniu" }
   ],
-  platnosci: [
-    { id:"pobranie", nazwa:"Za pobraniem — płatność przy odbiorze", oplata:5 },
-    { id:"przelew",  nazwa:"Przelew tradycyjny",                    oplata:0 },
-    { id:"online",   nazwa:"Płatność online (BLIK/karta)",          oplata:0, wymagaLink:true }
-  ]
+  platnosci: DOMYSLNE_PLATNOSCI.map(p=>({...p}))
 };
 
 const DOMYSLNE_BANNERY = [
@@ -872,6 +882,108 @@ const zl = n => n.toFixed(2).replace(".", ",") + " zł";
 const $ = id => document.getElementById(id);
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const jsArg = s => esc(JSON.stringify(String(s??"")));
+function tylkoCyfry(v){ return String(v??"").replace(/[^0-9]/g,""); }
+function formatTelefonPlatnosci(v=KONFIG.numerPrzelewuTelefon){
+  const c = tylkoCyfry(v || NUMER_PRZELEWU_TELEFON_DOMYSLNY);
+  return c.length===9 ? `${c.slice(0,3)} ${c.slice(3,6)} ${c.slice(6)}` : String(v||NUMER_PRZELEWU_TELEFON_DOMYSLNY).trim();
+}
+function ustawNumerPrzelewuTelefon(v){
+  const c = tylkoCyfry(v || NUMER_PRZELEWU_TELEFON_DOMYSLNY).slice(0,15);
+  KONFIG.numerPrzelewuTelefon = c || NUMER_PRZELEWU_TELEFON_DOMYSLNY;
+  return KONFIG.numerPrzelewuTelefon;
+}
+function daneFirmy(){
+  const d = {...DANE_FIRMY_DOMYSLNE, ...(KONFIG.daneFirmy||{})};
+  const ident = tylkoCyfry(d.identyfikator || d.nip || d.pesel || DANE_FIRMY_DOMYSLNE.identyfikator);
+  d.identyfikator = ident;
+  d.nip = tylkoCyfry(d.nip || ident);
+  d.pesel = tylkoCyfry(d.pesel || ident);
+  return d;
+}
+function daneFirmyTekst(){
+  const d = daneFirmy();
+  return `${d.nazwa}${d.adres?`, ${d.adres}`:""}, identyfikator firmy (NIP/PESEL): ${d.identyfikator}`;
+}
+function daneFirmyHTML(){
+  const d = daneFirmy();
+  return `${esc(d.nazwa)}${d.adres?`, ${esc(d.adres)}`:""}<br><b>Identyfikator firmy (NIP/PESEL):</b> ${esc(d.identyfikator)}`;
+}
+function normalizujPlatnosci(lista){
+  const bazowe = DOMYSLNE_PLATNOSCI.map(p=>({...p}));
+  const domyslne = Object.fromEntries(bazowe.map(p=>[p.id,p]));
+  const wynik = [], widziane = new Set();
+  const zrodlo = Array.isArray(lista) ? lista : [];
+  for(const raw of zrodlo){
+    if(!raw || typeof raw!=="object") continue;
+    let id = String(raw.id||"").trim();
+    if(id==="przelew") continue;          // usuwamy przelew tradycyjny ze starych ustawień
+    if(id==="online") id = "paynow";      // stara płatność online staje się Paynow
+    const podstawa = domyslne[id] || null;
+    const p = {...(podstawa||{}), ...raw, id};
+    delete p.wymagaLink;
+    if(id==="paynow"){
+      p.nazwa = "mBank Paynow — BLIK, karta lub szybki przelew";
+      p.bramka = "paynow";
+    }
+    if(id==="telefon"){
+      p.nazwa = `Przelew na telefon ${formatTelefonPlatnosci()}`;
+      p.typ = "telefon";
+      p.oplata = Number(p.oplata||0);
+    }
+    if(!id || widziane.has(id)) continue;
+    widziane.add(id); wynik.push(p);
+  }
+  for(const p of bazowe){
+    if(!widziane.has(p.id)){
+      wynik.push(p.id==="telefon" ? {...p,nazwa:`Przelew na telefon ${formatTelefonPlatnosci()}`} : p);
+      widziane.add(p.id);
+    }
+  }
+  return wynik;
+}
+function migrujTresciPrawne(tresci){
+  if(!tresci || typeof tresci!=="object") return tresci || null;
+  const zamien = v => String(v||"")
+    .replace(/\[nazwa firmy,\s*NIP,\s*adres\]/gi, daneFirmyTekst())
+    .replace(/\[nazwa firmy,\s*adres\]/gi, daneFirmyTekst())
+    .replace(/przelew tradycyjny/gi, "przelew na telefon")
+    .replace(/Przelewy24\s*\/\s*PayU\s*\/\s*Stripe/gi, "mBank Paynow");
+  return Object.fromEntries(Object.entries(tresci).map(([k,v])=>[k,zamien(v)]));
+}
+function platnosciOpis(){
+  return dostepnePlatnosci().map(p=>p.nazwa).join(", ") || "brak aktywnych metod płatności";
+}
+function instrukcjaPlatnosciTekst(id, nr, kwota){
+  const kw = typeof kwota==="number" ? zl(kwota) : String(kwota||"");
+  if(id==="pobranie") return `Płatność przy odbiorze: do zapłaty ${kw}.`;
+  if(id==="telefon") return `Przelew na telefon: ${formatTelefonPlatnosci()}. W tytule/wiadomości wpisz: Zamówienie ${nr}. Kwota: ${kw}.`;
+  if(id==="paynow") return KONFIG.linkPlatnosci
+    ? `mBank Paynow: opłać zamówienie tutaj: ${KONFIG.linkPlatnosci}. W opisie płatności podaj numer zamówienia ${nr}. Kwota: ${kw}.`
+    : `mBank Paynow: wybrano płatność przez bramkę. Link płatności zostanie udostępniony po aktywacji/konfiguracji Paynow. Numer zamówienia: ${nr}. Kwota: ${kw}.`;
+  return `Płatność: ${kw}. Numer zamówienia: ${nr}.`;
+}
+function instrukcjaPlatnosciHTML(id, nr, kwota){
+  const kw = typeof kwota==="number" ? zl(kwota) : esc(kwota||"");
+  if(id==="pobranie") return `<div class="pay-note" style="font-size:.95rem">💵 <b>Zapłacisz ${kw} przy odbiorze</b> — kurierowi lub w paczkomacie. Nic więcej nie musisz robić.</div>`;
+  if(id==="telefon"){
+    const numer = formatTelefonPlatnosci(), tytul = `Zamówienie ${nr}`;
+    return `<div class="pay-note" style="font-size:.95rem">
+      📱 <b>Przelew na telefon</b><br>
+      Numer: <code>${esc(numer)}</code> &nbsp; Tytuł/wiadomość: <code>${esc(tytul)}</code><br>
+      Kwota: <b>${kw}</b>. Wyślij przelew na telefon i koniecznie wpisz numer zamówienia.
+      <div class="diag-actions" style="margin-top:.55rem">
+        <button class="btn ghost" type="button" onclick="navigator.clipboard?.writeText(${jsArg(tylkoCyfry(numer))});toast('Skopiowano numer telefonu')">Kopiuj numer</button>
+        <button class="btn ghost" type="button" onclick="navigator.clipboard?.writeText(${jsArg(tytul)});toast('Skopiowano tytuł płatności')">Kopiuj tytuł</button>
+      </div>
+    </div>`;
+  }
+  if(id==="paynow"){
+    return KONFIG.linkPlatnosci
+      ? `<a href="${esc(KONFIG.linkPlatnosci)}" target="_blank" rel="noopener" class="checkout-btn" style="display:block;text-decoration:none;text-align:center;background:var(--ok)">💳 Zapłać przez mBank Paynow ${kw}</a><p class="pay-note">W opisie płatności podaj numer zamówienia <b>${esc(nr)}</b>.</p>`
+      : `<div class="pay-note" style="font-size:.95rem">💳 <b>Wybrano mBank Paynow</b><br>Brama Paynow jest widoczna jako metoda płatności. Po wklejeniu linku/panelu Paynow w ustawieniach pojawi się przycisk szybkiej płatności. Numer zamówienia: <b>${esc(nr)}</b>, kwota: <b>${kw}</b>.</div>`;
+  }
+  return `<p class="pay-note">Płatność: <b>${kw}</b>. Numer zamówienia: <b>${esc(nr)}</b>.</p>`;
+}
 const bezpiecznyLink = s => /^(#\/|https?:\/\/|mailto:)/i.test(String(s||"")) ? String(s) : "#/";
 const OKRES_KOSZA_MS = 30*24*60*60*1000;
 function oznaczProduktWKoszu(id,typ){
@@ -1076,21 +1188,33 @@ function zastosujUstawienia(){
   if(u.telefon) KONFIG.telefon = u.telefon;
   if(u.opisSklepu) KONFIG.opisSklepu = u.opisSklepu;
   if(u.emailSklepu) KONFIG.emailSklepu = u.emailSklepu;
+  if(u.daneFirmy && typeof u.daneFirmy==="object") KONFIG.daneFirmy = {...DANE_FIRMY_DOMYSLNE, ...u.daneFirmy};
+  else KONFIG.daneFirmy = {...DANE_FIRMY_DOMYSLNE, ...(KONFIG.daneFirmy||{})};
   if(u.linkPlatnosci!==undefined) KONFIG.linkPlatnosci = u.linkPlatnosci;
+  if(u.numerPrzelewuTelefon!==undefined) ustawNumerPrzelewuTelefon(u.numerPrzelewuTelefon);
+  else ustawNumerPrzelewuTelefon(KONFIG.numerPrzelewuTelefon);
   if(u.darmowaDostawaOd!==undefined && u.darmowaDostawaOd!=="") KONFIG.darmowaDostawaOd = +u.darmowaDostawaOd;
   if(Array.isArray(u.dostawy) && u.dostawy.length) KONFIG.dostawy = u.dostawy.map(x=>({...x}));
   if(Array.isArray(u.platnosci) && u.platnosci.length) KONFIG.platnosci = u.platnosci.map(x=>({...x}));
+  KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
+  ustawienia.platnosci = KONFIG.platnosci.map(x=>({...x}));
+  ustawienia.numerPrzelewuTelefon = KONFIG.numerPrzelewuTelefon;
+  ustawienia.daneFirmy = {...daneFirmy()};
   const kurier = KONFIG.dostawy.find(d=>d.id==="kurier"), paczkomat = KONFIG.dostawy.find(d=>d.id==="paczkomat");
   if(kurier && u.kosztKurier!==undefined && u.kosztKurier!=="") kurier.koszt = +u.kosztKurier;
   if(paczkomat && u.kosztPaczkomat!==undefined && u.kosztPaczkomat!=="") paczkomat.koszt = +u.kosztPaczkomat;
-  const pobranie = KONFIG.platnosci.find(p=>p.id==="pobranie"), przelew = KONFIG.platnosci.find(p=>p.id==="przelew");
+  const pobranie = KONFIG.platnosci.find(p=>p.id==="pobranie"), paynow = KONFIG.platnosci.find(p=>p.id==="paynow"), telefon = KONFIG.platnosci.find(p=>p.id==="telefon");
   if(pobranie && u.oplataPobranie!==undefined && u.oplataPobranie!=="") pobranie.oplata = +u.oplataPobranie;
   if(pobranie && u.pobranieWl!==undefined) pobranie.wylaczona = !u.pobranieWl;
-  if(przelew && u.przelewWl!==undefined) przelew.wylaczona = !u.przelewWl;
+  if(paynow && u.paynowWl!==undefined) paynow.wylaczona = !u.paynowWl;
+  if(telefon && u.telefonWl!==undefined) telefon.wylaczona = !u.telefonWl;
+  if(telefon) telefon.nazwa = `Przelew na telefon ${formatTelefonPlatnosci()}`;
+  KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
+  ustawienia.platnosci = KONFIG.platnosci.map(x=>({...x}));
   if(u.kody) KONFIG.kodyRabatowe = {...u.kody};
   if(u.heroTytul) KONFIG.heroTytul = u.heroTytul;
   if(u.heroOpis) KONFIG.heroOpis = u.heroOpis;
-  if(Object.prototype.hasOwnProperty.call(u,"tresci")) KONFIG.tresci = u.tresci;
+  if(Object.prototype.hasOwnProperty.call(u,"tresci")){ KONFIG.tresci = migrujTresciPrawne(u.tresci); ustawienia.tresci = KONFIG.tresci; }
   const ukl = u.uklad || {};
   const szer = ["1100px","1200px","1400px"].includes(ukl.szerokosc) ? ukl.szerokosc : "1200px";
   const karta = ["200px","240px","280px"].includes(ukl.kartaMin) ? ukl.kartaMin : "240px";
@@ -1422,7 +1546,7 @@ function widokSklep(){
   SEKCJE.zalety = () => `
   <section class="perks">
     <div class="perk"><span class="ico">🚀</span><div><b>Szybka wysyłka</b><small>Nadanie w 24h w dni robocze</small></div></div>
-    <div class="perk"><span class="ico">🔒</span><div><b>Wygodne płatności</b><small>Pobranie i przelew tradycyjny</small></div></div>
+    <div class="perk"><span class="ico">🔒</span><div><b>Wygodne płatności</b><small>mBank Paynow, pobranie i przelew na telefon</small></div></div>
     <div class="perk"><span class="ico">↩️</span><div><b>Łatwe zwroty</b><small>14 dni na zwrot bez podania przyczyny</small></div></div>
     <div class="perk"><span class="ico">💬</span><div><b>Pomoc przed zakupem</b><small>${esc(KONFIG.emailSklepu)}</small></div></div>
   </section>`;
@@ -1701,7 +1825,7 @@ function widokProdukt(id){
       <h2 style="margin-top:0">Informacje o produkcie</h2>
       <div class="faq-list">
         <details open><summary>Opis</summary><p>${esc(p.opis||"Szczegółowy opis produktu zostanie wkrótce uzupełniony.")}</p></details>
-        <details><summary>Dostawa i płatność</summary><p>Dostępne metody oraz aktualne koszty sprawdzisz w koszyku. Możesz zapłacić za pobraniem lub przelewem tradycyjnym.</p></details>
+        <details><summary>Dostawa i płatność</summary><p>Dostępne metody oraz aktualne koszty sprawdzisz w koszyku. Możesz zapłacić przez mBank Paynow, za pobraniem albo przelewem na telefon.</p></details>
         <details><summary>Zwrot i reklamacja</summary><p>Masz 14 dni na odstąpienie od umowy. W przypadku problemu z produktem skontaktuj się z nami przez stronę kontaktową.</p></details>
       </div>
     </div>
@@ -1858,6 +1982,48 @@ function trackingKlientaHTML(z){
     ${problem?`<p style="margin:.45rem 0 0;color:var(--danger);font-size:.8rem"><b>Przesyłka wymaga sprawdzenia.</b> W razie potrzeby skontaktujemy się z Tobą.</p>`:""}
   </div>`;
 }
+function pozycjeZamowieniaKlientaHTML(z){
+  const dane = Array.isArray(z.pozycjeDane) && z.pozycjeDane.length ? z.pozycjeDane : [];
+  if(dane.length){
+    return `<table class="log-table" style="margin-top:.45rem">
+      <tr><th>Produkt</th><th>SKU</th><th>Ilość</th><th>Cena</th><th>Wartość</th></tr>
+      ${dane.map(p=>`<tr>
+        <td><b>${esc(p.nazwa||"Produkt")}</b>${p.wariant?`<br><small>Wariant: ${esc(p.wariant)}</small>`:""}</td>
+        <td>${esc(p.sku||"—")}</td>
+        <td>${esc(p.ilosc||1)}</td>
+        <td>${zl(Number(p.cena||0))}</td>
+        <td><b>${zl(Number(p.wartosc||0))}</b></td>
+      </tr>`).join("")}
+    </table>`;
+  }
+  const linie = Array.isArray(z.pozycje) ? z.pozycje : [];
+  return linie.length ? `<div class="order-lines">${linie.map(p=>esc(p)).join("<br>")}</div>` : `<p class="pay-note">Brak szczegółowej listy pozycji dla tego zamówienia.</p>`;
+}
+function szczegolyZamowieniaKlientaHTML(z){
+  const k=z.klient||{}, a=z.adresDostawy||{};
+  const klient=[k.imie,k.nazwisko].filter(Boolean).join(" ") || z.email || "—";
+  const adres = z.adres || [a.ulica&&`${a.ulica} ${a.nrDomu||""}${a.nrLokalu?"/"+a.nrLokalu:""}`, [a.kod,a.miasto].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "—";
+  const dostawa=[z.dostawa,z.paczkomat?`Paczkomat: ${z.paczkomat}`:""].filter(Boolean).join(" • ") || "—";
+  const razem=Number(z.razem||0), platId=z.platnoscId||"";
+  return `<details class="order-details" open style="margin-top:.7rem">
+    <summary style="cursor:pointer;font-weight:800">Szczegóły zamówienia, płatności i śledzenia</summary>
+    <div class="stat-grid" style="margin-top:.8rem">
+      <div class="stat"><b>${zl(razem)}</b><small>kwota zamówienia</small></div>
+      <div class="stat"><b>${esc(z.status||"nowe")}</b><small>status obsługi</small></div>
+      <div class="stat"><b>${esc(z.platnosc||"—")}</b><small>płatność</small></div>
+    </div>
+    <div class="f-row" style="grid-template-columns:1fr 1fr;margin-top:.85rem">
+      <div class="info-card"><span style="font-size:1.4rem">👤</span><b>Odbiorca</b><p>${esc(klient)}<br>${k.telefon?`Tel. ${esc(k.telefon)}<br>`:""}${esc(z.email||"")}${k.firma?`<br>Firma: ${esc(k.firma)}${k.nip?` • NIP: ${esc(k.nip)}`:""}`:""}</p></div>
+      <div class="info-card"><span style="font-size:1.4rem">🚚</span><b>Dostawa</b><p>${esc(dostawa)}<br>${esc(adres)}</p></div>
+    </div>
+    <h3 class="f-sekcja">🧾 Produkty</h3>
+    ${pozycjeZamowieniaKlientaHTML(z)}
+    <h3 class="f-sekcja">💳 Instrukcja płatności</h3>
+    ${instrukcjaPlatnosciHTML(platId, z.nr, razem)}
+    <h3 class="f-sekcja">📦 Śledzenie realizacji</h3>
+    ${trackingKlientaHTML(z)}
+  </details>`;
+}
 function widokZamowienia(){
   if(jestAdmin()) return `<div class="page"><div class="panel auth-box"><h1>🛡️ Konto administratora</h1><p>Historia własnych zamówień jest wyłączona dla kont administracyjnych.</p><p style="margin-top:1rem"><a class="btn" href="#/admin/zamowienia">Otwórz zamówienia klientów</a></p></div></div>`;
   if(ustawieniaPodstrony("zamowienia").widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
@@ -1871,16 +2037,17 @@ function widokZamowienia(){
     <h1>${esc(us.tytul)}</h1>
     <p style="color:var(--muted2);margin-bottom:.7rem">${esc(us.opis||"")}</p>
     ${naglowek}
+    ${zam.length?`<p class="pay-note" style="text-align:left;margin:.2rem 0 1rem">W szczegółach każdego zamówienia widzisz produkty, adres, dostawę, płatność, instrukcję opłacenia i aktualny tracking.</p>`:""}
     ${zam.length ? zam.map(z=>`
       <div class="order-box">
         <div class="order-head">
           <b>${esc(z.nr)}</b>
           <span>${esc(z.data)}</span>
           <span class="status-chip">${esc(z.status)}</span>
-          <b>${zl(z.razem)}</b>
+          <b>${zl(Number(z.razem||0))}</b>
           <button class="ci-remove" onclick="if(confirm('Usunąć zlecenie ${esc(z.nr)}? Nie wróci ono ponownie do obsługi.')) usunMojeZamowienie(${jsArg(z.nr)})" title="Usuń zlecenie">🗑️</button>
         </div>
-        <div class="order-lines">${z.pozycje.map(p=>esc(p)).join("<br>")}${trackingKlientaHTML(z)}</div>
+        ${szczegolyZamowieniaKlientaHTML(z)}
       </div>`).join("")
     : `<p>Brak zamówień. <a href="#/">Zrób pierwsze zakupy →</a></p>`}
   </div></div>`;
@@ -2007,7 +2174,7 @@ function widokFAQ(){
         <details><summary>Czy muszę zakładać konto?</summary><p>Nie. Zamówienie możesz złożyć bez rejestracji. Konto ułatwia dostęp do historii zakupów i ulubionych produktów na tym urządzeniu.</p></details>
         <details><summary>Jakie są metody dostawy?</summary><p>Możesz wybrać kuriera, paczkomat InPost albo odbiór osobisty po umówieniu. Aktualny koszt zawsze pokazuje podsumowanie zamówienia.</p></details>
         <details><summary>Kiedy dostawa jest bezpłatna?</summary><p>Dostawa kurierem lub do paczkomatu jest bezpłatna od ${KONFIG.darmowaDostawaOd} zł wartości produktów po uwzględnieniu rabatu.</p></details>
-        <details><summary>Jak mogę zapłacić?</summary><p>Aktualnie dostępna jest płatność za pobraniem oraz przelew tradycyjny. Widoczne w formularzu opcje są zawsze aktualne.</p></details>
+        <details><summary>Jak mogę zapłacić?</summary><p>Aktualne opcje płatności to: ${esc(platnosciOpis())}. Przy przelewie na telefon wpisz w tytule numer zamówienia.</p></details>
         <details><summary>Jak użyć kodu rabatowego?</summary><p>Wpisz kod w koszyku i kliknij „Zastosuj”. Wartość rabatu od razu pojawi się w podsumowaniu.</p></details>
         <details><summary>Jak zwrócić produkt?</summary><p>Na odstąpienie od umowy masz 14 dni od odbioru. Napisz na ${esc(KONFIG.emailSklepu)}, podając numer zamówienia i produkty, które chcesz zwrócić.</p></details>
         <details><summary>Jak zgłosić reklamację?</summary><p>Wyślij opis problemu, numer zamówienia i — jeśli to pomocne — zdjęcia na ${esc(KONFIG.emailSklepu)}. Otrzymasz dalsze instrukcje.</p></details>
@@ -2023,10 +2190,10 @@ function widokFAQ(){
 function widokRegulamin(){
   if(KONFIG.tresci?.regulamin) return stronaInfo("📜 Regulamin sklepu", KONFIG.tresci.regulamin,"regulamin");
   return stronaInfo("📜 Regulamin sklepu", `
-    <p><i>Szablon — uzupełnij dane swojej firmy przed startem sprzedaży.</i></p>
-    <h2>§1 Postanowienia ogólne</h2><p>Sklep internetowy Artway-TM prowadzony jest przez [nazwa firmy, NIP, adres]. Kontakt: ${KONFIG.emailSklepu}.</p>
+    <p><i>Szablon regulaminu — sprawdź go prawnie przed startem sprzedaży.</i></p>
+    <h2>§1 Postanowienia ogólne</h2><p>Sklep internetowy Artway-TM prowadzony jest przez:<br>${daneFirmyHTML()}<br>Kontakt: ${KONFIG.emailSklepu}, ${KONFIG.telefon}.</p>
     <h2>§2 Zamówienia</h2><p>Zamówienia można składać 24/7 przez stronę. Zawarcie umowy następuje z chwilą potwierdzenia zamówienia przez sklep.</p>
-    <h2>§3 Ceny i płatności</h2><p>Ceny są cenami brutto (zawierają VAT). Dostępne formy płatności: płatność online, przelew tradycyjny.</p>
+    <h2>§3 Ceny i płatności</h2><p>Ceny są cenami brutto (zawierają VAT). Dostępne formy płatności: ${esc(platnosciOpis())}. Przy przelewie na telefon klient wpisuje w tytule numer zamówienia.</p>
     <h2>§4 Dostawa</h2><p>Wysyłka w 24 h w dni robocze. Koszty dostawy podane są w koszyku. Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł.</p>
     <h2>§5 Zwroty</h2><p>Konsument ma prawo odstąpić od umowy w terminie 14 dni bez podania przyczyny.</p>
     <h2>§6 Reklamacje</h2><p>Reklamacje rozpatrujemy w ciągu 14 dni. Zgłoszenia: ${KONFIG.emailSklepu}.</p>`,"regulamin");
@@ -2034,8 +2201,8 @@ function widokRegulamin(){
 function widokPrywatnosc(){
   if(KONFIG.tresci?.prywatnosc) return stronaInfo("🔒 Polityka prywatności (RODO)", KONFIG.tresci.prywatnosc,"prywatnosc");
   return stronaInfo("🔒 Polityka prywatności (RODO)", `
-    <p><i>Szablon — uzupełnij dane administratora przed startem sprzedaży.</i></p>
-    <h2>Administrator danych</h2><p>[nazwa firmy, adres]. Kontakt: ${KONFIG.emailSklepu}.</p>
+    <p><i>Szablon polityki prywatności — sprawdź go prawnie przed startem sprzedaży.</i></p>
+    <h2>Administrator danych</h2><p>${daneFirmyHTML()}. Kontakt: ${KONFIG.emailSklepu}, ${KONFIG.telefon}.</p>
     <h2>Jakie dane zbieramy</h2><p>Dane podane w zamówieniu (imię i nazwisko, adres, e-mail, telefon) — wyłącznie w celu realizacji zamówienia. Dane konta (imię, e-mail) — w celu prowadzenia konta klienta.</p>
     <h2>Twoje prawa</h2><p>Masz prawo dostępu do danych, ich sprostowania, usunięcia, ograniczenia przetwarzania i przeniesienia. Zgłoszenia: ${KONFIG.emailSklepu}.</p>
     <h2>Pliki cookie i pamięć przeglądarki</h2><p>Strona zapisuje w pamięci przeglądarki: zawartość koszyka, ulubione, dane konta i dziennik błędów — dane te nie opuszczają Twojego urządzenia.</p>`,"prywatnosc");
@@ -2045,7 +2212,7 @@ function widokDostawa(){
     <h2>Formy dostawy</h2>
     <ul>${KONFIG.dostawy.map(d=>`<li>${d.nazwa} — ${d.koszt?d.koszt+" zł":"gratis"} (${d.opis})</li>`).join("")}<li><b>Darmowa dostawa</b> (kurier/paczkomat) przy zamówieniach od ${KONFIG.darmowaDostawaOd} zł</li></ul>
     <h2>Formy płatności</h2>
-    <ul>${dostepnePlatnosci().map(p=>`<li>${p.nazwa}${p.oplata?" (+"+p.oplata+" zł)":""}</li>`).join("")}</ul>
+    <ul>${dostepnePlatnosci().map(p=>`<li>${p.nazwa}${p.oplata?" (+"+p.oplata+" zł)":""}${p.id==="telefon"?` — w tytule wpisz numer zamówienia; numer: ${formatTelefonPlatnosci()}`:""}${p.id==="paynow"?` — bramka mBank Paynow`:""}</li>`).join("")}</ul>
     <h2>Kody rabatowe</h2>
     <p>Aktualne kody: ${Object.entries(KONFIG.kodyRabatowe).map(([k,v])=>`<b>${esc(k)}</b> (−${v}%)`).join(", ")}. Kod wpisz w koszyku.</p>`,"dostawa");
 }
@@ -4368,7 +4535,8 @@ function zmienKod(kod, procent){
 
 /* ── Dostawa i płatności ── */
 function widokAdminDostawy(){
-  const pobranie = KONFIG.platnosci.find(p=>p.id==="pobranie"), przelew = KONFIG.platnosci.find(p=>p.id==="przelew");
+  KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
+  const pobranie = KONFIG.platnosci.find(p=>p.id==="pobranie"), paynow = KONFIG.platnosci.find(p=>p.id==="paynow"), telefon = KONFIG.platnosci.find(p=>p.id==="telefon");
   const kurier = KONFIG.dostawy.find(d=>d.id==="kurier"), paczkomat = KONFIG.dostawy.find(d=>d.id==="paczkomat");
   return personalizacjaSzkielet("dostawy", `
   <div class="panel">
@@ -4381,11 +4549,14 @@ function widokAdminDostawy(){
         <div class="f-group"><label>Darmowa dostawa od (zł)</label><input name="darmowaDostawaOd" inputmode="decimal" value="${KONFIG.darmowaDostawaOd}"></div>
       </div>
       <h3 class="f-sekcja">💳 Płatności i bramka</h3>
-      <div class="f-group"><label>Link bramki płatności (Przelewy24 / PayU / Stripe) — puste = płatność online ukryta</label>
-        <input name="linkPlatnosci" placeholder="https://…" value="${esc(KONFIG.linkPlatnosci)}"></div>
+      <div class="f-group"><label>Link bramki mBank Paynow (opcjonalnie — po aktywacji konta Paynow)</label>
+        <input name="linkPlatnosci" placeholder="https://paynow.pl/… albo link płatności z panelu" value="${esc(KONFIG.linkPlatnosci)}"></div>
+      <div class="f-group" style="max-width:260px"><label>Numer do przelewu na telefon</label>
+        <input name="numerPrzelewuTelefon" inputmode="tel" value="${esc(formatTelefonPlatnosci())}"></div>
       <div class="f-row">
         <label class="chk-row"><input type="checkbox" name="pobranieWl" ${pobranie.wylaczona?"":"checked"}> 💵 Za pobraniem włączone</label>
-        <label class="chk-row"><input type="checkbox" name="przelewWl" ${przelew.wylaczona?"":"checked"}> 🏦 Przelew tradycyjny włączony</label>
+        <label class="chk-row"><input type="checkbox" name="paynowWl" ${paynow.wylaczona?"":"checked"}> 💳 mBank Paynow włączony</label>
+        <label class="chk-row"><input type="checkbox" name="telefonWl" ${telefon.wylaczona?"":"checked"}> 📱 Przelew na telefon włączony</label>
       </div>
       <div class="f-group" style="max-width:220px"><label>Opłata za pobranie (zł)</label><input name="oplataPobranie" inputmode="decimal" value="${pobranie.oplata}"></div>
       <div class="diag-actions">
@@ -4417,22 +4588,32 @@ function widokAdminDostawy(){
         <div class="f-group"><button class="btn" type="submit">➕ Dodaj</button></div>
       </div>
     </form>
-    ${KONFIG.platnosci.filter(p=>!["pobranie","przelew","online"].includes(p.id)).length?`
+    ${KONFIG.platnosci.filter(p=>!["pobranie","paynow","telefon","przelew","online"].includes(p.id)).length?`
       <table class="log-table"><tr><th>Metoda</th><th>Opłata</th><th></th></tr>
-      ${KONFIG.platnosci.filter(p=>!["pobranie","przelew","online"].includes(p.id)).map(p=>`<tr><td><b>${esc(p.nazwa)}</b></td><td>${p.oplata?zl(p.oplata):"bez opłaty"}</td><td><button class="ci-remove" onclick="usunMetodePlatnosci('${p.id}')">🗑️</button></td></tr>`).join("")}</table>`:""}
+      ${KONFIG.platnosci.filter(p=>!["pobranie","paynow","telefon","przelew","online"].includes(p.id)).map(p=>`<tr><td><b>${esc(p.nazwa)}</b></td><td>${p.oplata?zl(p.oplata):"bez opłaty"}</td><td><button class="ci-remove" onclick="usunMetodePlatnosci('${p.id}')">🗑️</button></td></tr>`).join("")}</table>`:""}
   </div>`);
 }
 function zapiszDostawy(e){
   e.preventDefault();
   const f = new FormData(e.target);
+  const numer = tylkoCyfry(f.get("numerPrzelewuTelefon") || NUMER_PRZELEWU_TELEFON_DOMYSLNY);
+  const platnosci = normalizujPlatnosci(KONFIG.platnosci).map(p=>({...p}));
+  platnosci.forEach(p=>{
+    if(p.id==="pobranie"){ p.oplata = +(parseFloat(String(f.get("oplataPobranie")).replace(",","."))||0).toFixed(2); p.wylaczona = !f.get("pobranieWl"); }
+    if(p.id==="paynow") p.wylaczona = !f.get("paynowWl");
+    if(p.id==="telefon"){ p.wylaczona = !f.get("telefonWl"); p.nazwa = `Przelew na telefon ${formatTelefonPlatnosci(numer)}`; }
+  });
   zapiszCzescUstawien({
     linkPlatnosci: String(f.get("linkPlatnosci")).trim(),
+    numerPrzelewuTelefon: numer,
     darmowaDostawaOd: f.get("darmowaDostawaOd"),
     kosztKurier: f.get("kosztKurier"),
     kosztPaczkomat: f.get("kosztPaczkomat"),
     oplataPobranie: f.get("oplataPobranie"),
     pobranieWl: !!f.get("pobranieWl"),
-    przelewWl: !!f.get("przelewWl")
+    paynowWl: !!f.get("paynowWl"),
+    telefonWl: !!f.get("telefonWl"),
+    platnosci
   });
 }
 function dodajMetodeDostawy(e){
@@ -4467,6 +4648,7 @@ function usunMetodePlatnosci(id){
 /* ── Wygląd i treści ── */
 function widokAdminWyglad(){
   const u=ustawienia.uklad||{}, h=ustawienia.hero||{};
+  const df=daneFirmy();
   return personalizacjaSzkielet("wyglad", `
   <div class="panel">
     <h1>🎨 Zaawansowany układ globalny</h1>
@@ -4478,6 +4660,12 @@ function widokAdminWyglad(){
         <div class="f-group"><label>Telefon (stopka i kontakt)</label><input name="telefon" value="${esc(KONFIG.telefon)}"></div>
       </div>
       <div class="f-group"><label>E-mail sklepu (zamówienia i kontakt)</label><input name="emailSklepu" type="email" value="${esc(KONFIG.emailSklepu)}"></div>
+      <h3 class="f-sekcja">🏢 Dane firmy do regulaminu i polityki prywatności</h3>
+      <div class="f-row">
+        <div class="f-group"><label>Nazwa firmy / sklepu</label><input name="firmaNazwa" value="${esc(df.nazwa)}"></div>
+        <div class="f-group"><label>Identyfikator firmy (NIP/PESEL)</label><input name="firmaId" inputmode="numeric" value="${esc(df.identyfikator)}"></div>
+      </div>
+      <div class="f-group"><label>Adres firmy (opcjonalnie)</label><input name="firmaAdres" value="${esc(df.adres||"")}" placeholder="Ulica, kod pocztowy, miejscowość"></div>
       <div class="f-group"><label>Logo graficzne (zamiast nazwy tekstowej)</label>
         <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
           ${ustawienia.logoObraz?`<img src="${ustawienia.logoObraz}" style="height:36px;max-width:190px;object-fit:contain;border-radius:6px;background:var(--bg);padding:2px 6px">`:`<span style="font-size:.8rem;color:var(--muted2)">brak — wyświetlana jest nazwa tekstowa</span>`}
@@ -4561,6 +4749,13 @@ function zapiszWyglad(e){
     nazwaSklepu: String(f.get("nazwaSklepu")).trim(),
     telefon: String(f.get("telefon")).trim(),
     emailSklepu: String(f.get("emailSklepu")).trim(),
+    daneFirmy:{
+      nazwa:String(f.get("firmaNazwa")||"Artway-TM").trim()||"Artway-TM",
+      identyfikator:tylkoCyfry(f.get("firmaId")||DANE_FIRMY_DOMYSLNE.identyfikator),
+      nip:tylkoCyfry(f.get("firmaId")||DANE_FIRMY_DOMYSLNE.identyfikator),
+      pesel:tylkoCyfry(f.get("firmaId")||DANE_FIRMY_DOMYSLNE.identyfikator),
+      adres:String(f.get("firmaAdres")||"").trim()
+    },
     pasekInfo: String(f.get("pasekInfo")),
     heroTytul: String(f.get("heroTytul")).trim(),
     heroOpis: String(f.get("heroOpis")).trim(),
@@ -5397,7 +5592,8 @@ function oplataPlatnosci(idPlat){
   return p ? p.oplata : 0;
 }
 function dostepnePlatnosci(){
-  return KONFIG.platnosci.filter(p => !p.wylaczona && (!p.wymagaLink || KONFIG.linkPlatnosci));
+  KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
+  return KONFIG.platnosci.filter(p => !p.wylaczona);
 }
 function formatujKod(el){
   const c = el.value.replace(/[^0-9]/g,"").slice(0,5);
@@ -5584,6 +5780,7 @@ ${pozycje.map(p=>"- "+p).join("\n")}
 ${rabat?`Rabat ${rabat.kod}: -${zl(kwotaRabatu())}\n`:""}Dostawa: ${dost.nazwa}${paczkomat} — ${dostawa?zl(dostawa):"gratis"}
 ${oplata?`Opłata za pobranie: ${zl(oplata)}\n`:""}RAZEM: ${zl(razem)}
 Płatność: ${plat.nazwa}
+${instrukcjaPlatnosciTekst(idP,nr,razem)}
 --------------------------------
 Klient: ${f.get("imie")} ${f.get("nazwisko")}${firma}
 Tel: ${f.get("phone")}
@@ -5613,7 +5810,7 @@ Uwagi: ${f.get("notes")||"brak"}`;
       klient:{imie:String(f.get("imie")||"").trim(),nazwisko:String(f.get("nazwisko")||"").trim(),telefon:String(f.get("phone")||"").trim(),
         firma:f.get("firmaChk")?String(f.get("firma")||"").trim():"",nip:f.get("firmaChk")?String(f.get("nip")||"").replace(/[^0-9]/g,""):""},
       adresDostawy:{ulica:String(f.get("ulica")||"").trim(),nrDomu:String(f.get("nrDomu")||"").trim(),nrLokalu:String(f.get("nrLokalu")||"").trim(),kod:String(f.get("kod")||"").trim(),miasto:String(f.get("miasto")||"").trim()},
-      pozycje,pozycjeDane,razem,status:"nowe",dostawa:dost.nazwa,dostawaId:idD,platnosc:plat.nazwa,platnoscId:idP,adres,
+      pozycje,pozycjeDane,razem,status:"nowe",dostawa:dost.nazwa,dostawaId:idD,platnosc:plat.nazwa,platnoscId:idP,platnoscInstrukcja:instrukcjaPlatnosciTekst(idP,nr,razem),adres,
       paczkomat:idD==="paczkomat"?String(f.get("paczkomat")||"").trim():"",uwagi:String(f.get("notes")||"").trim(),
       wysylka:{status:"nieprzygotowana",etap:"do_obslugi",priorytet:"normalny",zadania:{dane:true,kompletacja:false,etykieta:false,przekazanie:false},
         historia:[{czas:new Date().toLocaleString("pl-PL"),status:"Zamówienie utworzone",opis:"Oczekuje na potwierdzenie i przygotowanie"}],powiadomienia:[]}
@@ -5631,10 +5828,7 @@ Uwagi: ${f.get("notes")||"brak"}`;
     }
     loguj("info",`Złożono zamówienie ${nr} na ${zl(razem)} (${dost.nazwa}, ${plat.nazwa})`);
 
-    const infoPlatnosci =
-      idP==="pobranie" ? `<p class="pay-note" style="font-size:.95rem">💵 <b>Zapłacisz ${zl(razem)} przy odbiorze</b> — kurierowi lub w paczkomacie. Nic więcej nie musisz robić.</p>`
-      : idP==="online" && KONFIG.linkPlatnosci ? `<a href="${KONFIG.linkPlatnosci}" target="_blank" class="checkout-btn" style="display:block;text-decoration:none;text-align:center;background:var(--ok)">💳 Zapłać online ${zl(razem)}</a>`
-      : `<p class="pay-note">Dane do przelewu otrzymasz w wiadomości zwrotnej.</p>`;
+    const infoPlatnosci = instrukcjaPlatnosciHTML(idP,nr,razem);
 
     const mailto = `mailto:${KONFIG.emailSklepu}?subject=${encodeURIComponent("Zamówienie "+nr)}&body=${encodeURIComponent(tresc)}`;
     $("modalBox").innerHTML = `<div class="success">
