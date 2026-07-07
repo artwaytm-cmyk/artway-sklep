@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.07.8">
+<meta name="artway-version" content="2026.07.07.9">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <style>
@@ -1364,6 +1364,7 @@ function zbudujProdukty(){
 }
 /* ── Magazyn ── */
 function stanProduktu(p){ return (typeof p.stan==="number" && p.stan>=0) ? p.stan : null; }   // null = bez limitu
+function produktMaCeneSprzedazy(p){ return Number(p?.cena)>0; }
 function ustawStan(id, wartosc){
   const s = String(wartosc??"").trim();
   if(s==="") delete stanyProduktow[id];
@@ -1758,10 +1759,11 @@ function kartaProduktu(p){
   const ulub = ulubione.includes(p.id);
   const stan = stanProduktu(p);
   const oceny = sredniaOcen(p.id);
+  const brakCeny = !produktMaCeneSprzedazy(p);
   return `
   <article class="card" onclick="location.hash='#/produkt/${p.id}'">
     <div class="thumb" style="background:${p.kolor||'#eef2f7'}">
-      ${stan===0?`<span class="badge" style="background:#64748b">Wyprzedane</span>`:(p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:"")}
+      ${stan===0?`<span class="badge" style="background:#64748b">Wyprzedane</span>`:(brakCeny?`<span class="badge" style="background:#f97316">Do wyceny</span>`:(p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:""))}
       ${jestAdmin()?"":`<button class="fav-btn" onclick="event.stopPropagation();przelaczUlubione(${p.id})" aria-label="Ulubione">${ulub?"❤️":"🤍"}</button>`}
       ${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" style="width:100%;height:100%;object-fit:cover;${stan===0?'filter:grayscale(1);opacity:.6':''}" onerror="this.remove();loguj('ostrzezenie','Nie wczytano zdjęcia produktu: ${esc(p.nazwa)}')">`:(p.ikona||"📦")}
     </div>
@@ -1770,12 +1772,13 @@ function kartaProduktu(p){
       <h3>${esc(p.nazwa)}</h3>
       <p class="desc">${esc(skrocTekst(p.opis||"",190))}</p>
       <div class="price-row">
-        <span class="price">${zl(p.cena)}</span>
+        <span class="price">${brakCeny?"Cena do uzupełnienia":zl(p.cena)}</span>
         ${p.staraCena?`<span class="old-price">${zl(p.staraCena)}</span>`:""}
       </div>
+      ${brakCeny?`<p style="font-size:.76rem;color:#c2410c;font-weight:700;margin-bottom:.4rem">Produkt zaimportowany z ceną 0,00 — popraw cenę w panelu</p>`:""}
       ${stan!==null && stan>0 && stan<=3 ? `<p style="font-size:.76rem;color:var(--danger);font-weight:700;margin-bottom:.4rem">🔥 Ostatnie sztuki: ${stan}</p>`:""}
-      ${stan===0
-        ? `<button class="add-btn" disabled style="background:#94a3b8;cursor:not-allowed">Chwilowo niedostępny</button>`
+      ${stan===0||brakCeny
+        ? `<button class="add-btn" disabled style="background:#94a3b8;cursor:not-allowed">${brakCeny?"Cena do uzupełnienia":"Chwilowo niedostępny"}</button>`
         : p.warianty?.length
           ? `<button class="add-btn" onclick="event.stopPropagation();location.hash='#/produkt/${p.id}'" style="background:var(--brand2)">Wybierz wariant →</button>`
           : `<button class="add-btn" onclick="event.stopPropagation();dodaj(${p.id}, this)">Do koszyka</button>`}
@@ -1861,6 +1864,7 @@ function widokProdukt(id){
   if(!p){ loguj("ostrzezenie","Otwarto nieistniejący produkt: id="+id); return `<div class="page"><div class="panel"><h1>Nie znaleziono produktu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`; }
   iloscProduktu = 1;
   const powiazane = produkty.filter(x=>x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
+  const brakCeny = !produktMaCeneSprzedazy(p);
   return `
   <div class="page">
     <div class="crumb"><a href="#/">Sklep</a> › <a href="#/" onclick="ustawKategorie('${esc(p.kategoria)}')">${esc(p.kategoria)}</a> › ${esc(p.nazwa)}</div>
@@ -1881,9 +1885,10 @@ function widokProdukt(id){
           <h1 style="margin:.2rem 0 .6rem">${esc(p.nazwa)}</h1>
           ${p.sku?`<p style="font-size:.76rem;color:var(--muted2);margin:-.3rem 0 .4rem">Kod produktu: ${esc(p.sku)}</p>`:""}
           <div class="price-row">
-            <span class="price" style="font-size:1.7rem">${zl(p.cena)}</span>
+            <span class="price" style="font-size:1.7rem">${brakCeny?"Cena do uzupełnienia":zl(p.cena)}</span>
             ${p.staraCena?`<span class="old-price">${zl(p.staraCena)}</span>`:""}
           </div>
+          ${brakCeny?`<p class="backend-note" style="text-align:left;margin:.4rem 0">Produkt został zaimportowany z ceną 0,00. Administrator musi uzupełnić cenę przed sprzedażą.</p>`:""}
           <p style="color:var(--muted2)">${esc(p.opis||"")}</p>
           ${specyfikacjaProduktuHTML(p)}
           ${p.warianty?.length?`
@@ -1896,8 +1901,8 @@ function widokProdukt(id){
             <button onclick="zmienIloscProd(1)">+</button>
           </div>
           <div style="display:flex;gap:.7rem;flex-wrap:wrap">
-            ${stanProduktu(p)===0
-              ? `<button class="btn" disabled style="background:#94a3b8;cursor:not-allowed">Chwilowo niedostępny</button>`
+            ${stanProduktu(p)===0||brakCeny
+              ? `<button class="btn" disabled style="background:#94a3b8;cursor:not-allowed">${brakCeny?"Cena do uzupełnienia":"Chwilowo niedostępny"}</button>`
               : `<button class="btn" onclick="dodajIlosc(${p.id})">🛒 Do koszyka</button>`}
             ${jestAdmin()?"":`<button class="btn ghost" onclick="przelaczUlubione(${p.id});renderuj()">${ulubione.includes(p.id)?"❤️ W ulubionych":"🤍 Dodaj do ulubionych"}</button>`}
           </div>
@@ -4217,7 +4222,8 @@ function normalizujProduktImportu(r,nr){
   const idRaw=pobierz("id","product_id"),id=idRaw===""||idRaw===null?null:Number(idRaw);
   if(!nazwa)bledy.push("brak nazwy");
   if(!kategoria)bledy.push("brak kategorii");
-  if(!(cena>0))bledy.push("cena musi być większa od 0");
+  if(cena===null||cena<0)bledy.push("cena musi być liczbą 0 lub większą");
+  if(cena===0)ostrzezenia.push("cena 0,00 — produkt zostanie zaimportowany, ale będzie zablokowany do sprzedaży do czasu uzupełnienia ceny");
   if(id!==null&&(!Number.isInteger(id)||id<=0))bledy.push("ID musi być dodatnią liczbą całkowitą");
   const stanRaw=pobierz("stan","stock","quantity","ilosc"),stan=stanRaw===""||stanRaw===null?null:liczbaImportu(stanRaw);
   if(stan!==null&&(!Number.isInteger(stan)||stan<0))bledy.push("stan musi być liczbą całkowitą 0 lub większą");
@@ -4231,6 +4237,7 @@ function normalizujProduktImportu(r,nr){
     p.grupaKategorii=kategoriaInfo.grupa;
     p.kategoriaPelna=kategoriaInfo.pelna;
   }
+  if(cena===0)p.wymagaCeny=true;else delete p.wymagaCeny;
   const opis=String(pobierz("opis","description")).trim();if(opis)p.opis=opis;
   const ikona=String(pobierz("ikona","icon","emoji")).trim();if(ikona)p.ikona=ikona;
   const kolor=String(pobierz("kolor")).trim();if(kolor&&czyKolorKarty(kolor))p.kolor=kolor;
@@ -4388,6 +4395,7 @@ function produktDoEksportu(p){
   if(p.staraCena>p.cena)o.staraCena=+Number(p.staraCena).toFixed(2);
   const stan=stanProduktu(p);if(stan!==null)o.stan=stan;
   for(const k of ["sku","gtin","externalId","mpn","marka","opis","badge","ikona","kolor","kolorProduktu","rozmiar","material","zdjecie"])if(p[k]!==undefined&&p[k]!=="")o[k]=p[k];
+  if(p.wymagaCeny)o.wymagaCeny=true;
   if(Array.isArray(p.sciezkaKategorii)&&p.sciezkaKategorii.length)o.sciezkaKategorii=p.sciezkaKategorii;
   if(p.grupaKategorii)o.grupaKategorii=p.grupaKategorii;
   if(p.kategoriaPelna)o.kategoriaPelna=p.kategoriaPelna;
@@ -5859,6 +5867,7 @@ function ileWKoszyku(id){ return koszyk.filter(x=>x.id===id).reduce((s,x)=>s+x.i
 function dodaj(id, btn, wariant){
   wariant = wariant || null;
   const p = produkty.find(x=>x.id===id);
+  if(p&&!produktMaCeneSprzedazy(p)){ toast("⚠️ Ten produkt wymaga uzupełnienia ceny przez administratora"); return; }
   if(p?.warianty?.length && !wariant){ location.hash="#/produkt/"+id; toast("Wybierz wariant produktu"); return; }
   const stan = p ? stanProduktu(p) : null;
   if(stan!==null && ileWKoszyku(id)+1 > stan){
