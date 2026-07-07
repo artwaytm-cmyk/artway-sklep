@@ -728,7 +728,15 @@ async function chmuraWczytajStan(){
   try{
     const d = await chmura("pull");
     chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
-    if(d.settings && Object.keys(d.settings).length){ nalozWspolneUstawienia(d.settings); }
+    const revLok = Number(wczytajLS("artway_chmura_rev", 0))||0;
+    const serwerNowszy = (d.rev||0) > revLok;
+    // Klient (bez tokenu): serwer jest źródłem prawdy → zawsze nakładaj.
+    // Admin (z tokenem): nakładaj TYLKO gdy serwer ma nowszą wersję niż ostatnio zsynchronizowana —
+    // dzięki temu wczytanie strony NIE kasuje świeżych, jeszcze niewysłanych zmian admina.
+    if(d.settings && Object.keys(d.settings).length && (!chmuraToken || serwerNowszy)){
+      nalozWspolneUstawienia(d.settings);
+      zapiszLS("artway_chmura_rev", d.rev||0);
+    }
     if(Array.isArray(d.orders)){ zapiszLS("artway_zamowienia", d.orders); chmuraStan.admin=true; }
     if(Array.isArray(d.users)){ zapiszLS("artway_uzytkownicy", polaczUzytkownikowCentralnych(d.users)); chmuraStan.admin=true; }
     return true;
@@ -744,6 +752,7 @@ async function chmuraZapiszUstawienia(){
   try{
     const d = await chmura("settings", {method:"POST", body:{settings: zbierzWspolneUstawienia()}});
     chmuraStan = {...chmuraStan, dostepna:true, admin:true, rev:d.rev||chmuraStan.rev, updated_at:d.updated_at||null, error:"", ostatniZapis:Date.now()};
+    zapiszLS("artway_chmura_rev", d.rev||chmuraStan.rev);   // zapamiętaj, że to my mamy najnowszą wersję
     return true;
   }catch(e){
     chmuraStan = {...chmuraStan, error:e.message};
@@ -751,6 +760,27 @@ async function chmuraZapiszUstawienia(){
     loguj("blad","Zapis ustawień w chmurze: "+e.message);
     return false;
   }
+}
+// Ręczne WYSŁANIE całego sklepu z tego urządzenia na serwer (dla wszystkich).
+async function chmuraWyslijWszystko(){
+  if(!chmuraToken){ chmuraUstawToken(); return; }
+  toast("Wysyłanie na serwer…");
+  const okU = await chmuraZapiszUstawienia();
+  await synchronizujBazeCentralna(true).catch(()=>{});
+  if(okU) toast("📤 Cały sklep wysłany na serwer — widoczny na każdym urządzeniu ✅");
+  else toast("⚠️ Nie udało się wysłać — sprawdź hasło bazy");
+  renderuj();
+}
+// Ręczne POBRANIE sklepu z serwera i nałożenie na to urządzenie.
+async function chmuraPobierzWszystko(){
+  try{
+    const d = await chmura("pull");
+    if(d.settings && Object.keys(d.settings).length){ nalozWspolneUstawienia(d.settings); zapiszLS("artway_chmura_rev", d.rev||0); }
+    chmuraStan = {...chmuraStan, dostepna:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
+    if(chmuraToken) await synchronizujBazeCentralna(true).catch(()=>{});
+    zastosujUstawienia(); zbudujProdukty(); odswiezMenu(); odswiezKoszyk();
+    toast("📥 Pobrano sklep z serwera ✅"); renderuj();
+  }catch(e){ toast("Błąd pobierania: "+e.message); }
 }
 function chmuraUstawToken(){
   const t = prompt("Wklej hasło administratora wspólnej bazy (wartość ARTWAY_ADMIN_TOKEN ustawiona w Netlify):", chmuraToken||"");
@@ -761,10 +791,9 @@ function chmuraUstawToken(){
   (async ()=>{
     try{
       await chmura("login",{method:"POST",body:{password:chmuraToken}});
-      await chmuraWczytajStan();
-      if((chmuraStan.rev||0)===0){ await chmuraZapiszUstawienia(); }  // pierwsze urządzenie: wyślij obecne ustawienia na serwer
+      chmuraStan={...chmuraStan,dostepna:true,admin:true};
       await synchronizujBazeCentralna(true);
-      toast("Połączono ze wspólną bazą ✅");
+      toast("Połączono ze wspólną bazą ✅ — kliknij 📤 Wyślij wszystko na serwer, aby przenieść obecny wygląd na inne urządzenia.");
     }catch(e){ toast("Błąd połączenia z bazą: "+e.message); }
     renderuj();
   })();
@@ -773,14 +802,17 @@ function chmuraWyczyscToken(){ chmuraToken=""; zapiszLS("artway_chmura_token",""
 function chmuraStatusHTML(){
   const ok = chmuraStan.dostepna, adm = chmuraStan.admin && chmuraToken;
   const kolor = adm?"#166534":(ok?"#92400e":"#b91c1c"), tlo = adm?"#f0fdf4":(ok?"#fffbeb":"#fef2f2"), br = adm?"#86efac":(ok?"#fcd34d":"#fecaca");
-  const opis = adm ? `Połączono — ustawienia i zamówienia zapisują się na serwerze i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""}`
-    : ok ? "Serwer działa. Wpisz hasło administratora bazy, aby zapisywać ustawienia i widzieć zamówienia ze wszystkich urządzeń."
-    : "Brak połączenia z serwerem — sklep działa lokalnie w tej przeglądarce. Opublikuj backend na Netlify (patrz instrukcja).";
+  const opis = adm ? `<b>Połączono ✅</b> — Twoje zmiany zapisują się na serwerze automatycznie i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""}`
+    : ok ? `<b>⚠️ NIE połączono z bazą</b> — Twoje zmiany zapisują się TYLKO na tym urządzeniu i NIE są widoczne gdzie indziej. Zaloguj się jako <b>admin</b> hasłem = token bazy, albo kliknij „Wpisz hasło bazy".`
+    : "Brak połączenia z serwerem — sklep działa lokalnie w tej przeglądarce.";
   return `<div class="backend-note" style="border-color:${br};background:${tlo};color:${kolor}">
     <b>☁️ Wspólna baza:</b> ${opis}
-    ${adm?`<button class="btn ghost" style="margin-left:.5rem" onclick="synchronizujBazeCentralna()" ${chmuraStan.synchronizacja?"disabled":""}>🔄 Synchronizuj</button>
+    <div class="diag-actions" style="margin-top:.5rem">
+    ${adm?`<button class="btn" style="background:var(--brand2)" onclick="chmuraWyslijWszystko()">📤 Wyślij wszystko na serwer</button>
+      <button class="btn ghost" onclick="chmuraPobierzWszystko()">📥 Pobierz z serwera</button>
       <button class="btn ghost" onclick="chmuraWyczyscToken()">Odłącz hasło</button>`
-      :`<button class="btn" style="margin-left:.5rem" onclick="chmuraUstawToken()">🔑 Wpisz hasło bazy</button>`}
+      :`<button class="btn" onclick="chmuraUstawToken()">🔑 Wpisz hasło bazy</button>`}
+    </div>
   </div>`;
 }
 
