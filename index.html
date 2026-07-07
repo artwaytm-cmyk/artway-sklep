@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.07.6">
+<meta name="artway-version" content="2026.07.07.7">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <style>
@@ -43,6 +43,18 @@ header{position:sticky;top:0;z-index:50;background:var(--panel);border-bottom:1p
 .nav-row{max-width:1200px;margin:0 auto;padding:0 1rem .6rem;display:flex;gap:1.1rem;font-size:.88rem;flex-wrap:wrap}
 .nav-row a{color:var(--muted2);text-decoration:none;font-weight:600}
 .nav-row a:hover{color:var(--brand)}
+.nav-dd{position:relative;display:inline-flex;align-items:center}
+.nav-drop-btn{border:none;background:transparent;color:var(--muted2);font-weight:700;font-size:.88rem;padding:0;display:inline-flex;gap:.25rem;align-items:center}
+.nav-drop-btn:hover{color:var(--brand)}
+.nav-menu{position:absolute;top:100%;left:0;min-width:230px;background:var(--panel);border:1.5px solid var(--line);border-radius:14px;box-shadow:0 14px 36px rgba(21,26,36,.14);padding:.45rem;display:none;z-index:90}
+.nav-dd:hover .nav-menu,.nav-dd:focus-within .nav-menu{display:grid;gap:.1rem}
+.nav-menu a{display:flex;justify-content:space-between;gap:.8rem;padding:.5rem .65rem;border-radius:10px;white-space:nowrap}
+.nav-menu a:hover{background:var(--bg)}
+.nav-count{color:var(--muted2);font-size:.72rem;font-weight:800}
+.menu-group-box{border:1.5px solid var(--line);border-radius:14px;padding:1rem;background:var(--bg);margin:.85rem 0}
+.menu-cat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.35rem .7rem;margin-top:.7rem}
+.menu-cat-grid label{display:flex;gap:.45rem;align-items:flex-start;font-size:.82rem;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.45rem .55rem}
+.menu-cat-grid small{color:var(--muted2)}
 
 /* ── Hero ── */
 .hero{max-width:1200px;margin:1.2rem auto 0;padding:0 1rem}
@@ -1161,10 +1173,48 @@ function wszystkieKategorie(){
   const wlasne = (ustawienia.wlasneKategorie||[]).filter(k=>!ukryte.includes(k));
   return [...new Set([...zProduktow, ...wlasne])];
 }
+function liczbaProduktowWKategorii(k){ return produkty.filter(p=>p.kategoria===k).length; }
+function grupyMenuKategorii(){
+  return (Array.isArray(ustawienia.menuKategorii)?ustawienia.menuKategorii:[])
+    .map((g,i)=>({
+      id:String(g.id||("grp_"+i+"_"+prostyHash(String(g.nazwa||i)))),
+      nazwa:String(g.nazwa||"Grupa katalogów").trim()||"Grupa katalogów",
+      ikona:String(g.ikona||"🗂️").trim()||"🗂️",
+      aktywna:g.aktywna!==false,
+      kategorie:[...new Set((Array.isArray(g.kategorie)?g.kategorie:[]).map(x=>String(x).trim()).filter(Boolean))]
+    }));
+}
+function zapiszGrupyMenuKategorii(lista, ekstra={}){
+  ustawienia.menuKategorii=lista.map(g=>({id:g.id,nazwa:g.nazwa,ikona:g.ikona,aktywna:g.aktywna!==false,kategorie:g.kategorie||[]}));
+  zapiszCzescUstawien({menuKategorii:ustawienia.menuKategorii,...ekstra});
+}
+function kategoriePrzypisaneDoAktywnychGrup(kategorie){
+  const dozwolone=new Set(kategorie);
+  return new Set(grupyMenuKategorii().filter(g=>g.aktywna).flatMap(g=>g.kategorie.filter(k=>dozwolone.has(k))));
+}
+function linkKategoriiMenu(k){
+  return `<a href="#/kategoria/${encodeURIComponent(k)}"><span>${esc(k)}</span><span class="nav-count">${liczbaProduktowWKategorii(k)}</span></a>`;
+}
+function dropdownMenuKategorii(label, dzieci, ikona="🗂️"){
+  if(!dzieci.length) return "";
+  return `<span class="nav-dd"><button class="nav-drop-btn" type="button">${esc(ikona)} ${esc(label)} ▾</button><span class="nav-menu">${dzieci.map(linkKategoriiMenu).join("")}</span></span>`;
+}
 function odswiezMenu(){
   const n = $("mainNav"); if(!n) return;
+  const kategorie = wszystkieKategorie();
+  const grupy = grupyMenuKategorii();
+  const grupyHTML = grupy.filter(g=>g.aktywna).map(g=>dropdownMenuKategorii(g.nazwa, g.kategorie.filter(k=>kategorie.includes(k)), g.ikona)).join("");
+  const przypisane = kategoriePrzypisaneDoAktywnychGrup(kategorie);
+  const bezGrup = kategorie.filter(k=>!przypisane.has(k));
+  const pokazBezGrup = ustawienia.menuPokazNieprzypisane!==false;
+  const bezGrupHTML = pokazBezGrup
+    ? (grupy.length && bezGrup.length>4
+      ? dropdownMenuKategorii("Pozostałe", bezGrup, "📁")
+      : bezGrup.slice(0,grupy.length?8:10).map(k=>`<a href="#/kategoria/${encodeURIComponent(k)}">${esc(k)}</a>`).join("") + (bezGrup.length>(grupy.length?8:10)?dropdownMenuKategorii("Więcej", bezGrup.slice(grupy.length?8:10), "📁"):""))
+    : "";
   n.innerHTML = `<a href="#/">🏪 Strona główna</a>`
-    + wszystkieKategorie().slice(0,8).map(k=>`<a href="#/kategoria/${encodeURIComponent(k)}">${esc(k)}</a>`).join("")
+    + grupyHTML
+    + bezGrupHTML
     + `<a href="#/promocje">🔥 Promocje</a><a href="#/nowosci">✨ Nowości</a>`
     + (jestAdmin()?`<a href="#/admin" style="color:var(--brand2)">⚙️ Panel admina</a>`:"");
 }
@@ -4388,6 +4438,10 @@ function widokAdminKategorie(){
   const wlasne = ustawienia.wlasneKategorie || [];
   const nazwy = [...new Set([...zProduktow, ...wlasne])];
   const ukryte = ustawienia.ukryteKategorie || [];
+  const grupy = grupyMenuKategorii();
+  const pokazNieprzypisane = ustawienia.menuPokazNieprzypisane!==false;
+  const przypisane = new Set(grupy.flatMap(g=>g.kategorie).filter(k=>nazwy.includes(k)));
+  const bezGrup = nazwy.filter(k=>!przypisane.has(k));
   return asortymentSzkielet("kategorie", `
   <div class="panel">
     <h1>➕ Utwórz nowy katalog</h1>
@@ -4396,6 +4450,41 @@ function widokAdminKategorie(){
       <button class="btn" type="submit">➕ Utwórz</button>
     </form>
     <p style="font-size:.8rem;color:var(--muted2)">Nowy katalog od razu pojawi się w górnym menu sklepu i na stronie głównej. Produkty przypiszesz do niego w <a href="#/admin/mapowanie">🧩 Mapowaniu produktów</a> lub przy dodawaniu produktu.</p>
+  </div>
+  <div class="panel">
+    <div class="results-bar" style="padding:0;margin:0 0 .8rem">
+      <div><h1 style="margin:0">🧭 Wyższy poziom kategorii w menu</h1><p style="font-size:.85rem;color:var(--muted2);margin:.25rem 0 0">Poziom 1: grupa w górnym menu • Poziom 2: wybrane katalogi • Poziom 3: produkty. To porządkuje sklep przy dużej liczbie produktów.</p></div>
+      <label style="font-size:.82rem;font-weight:700;color:var(--muted2)"><input type="checkbox" ${pokazNieprzypisane?"checked":""} onchange="przelaczNieprzypisaneMenu(this.checked)"> Pokaż katalogi bez grupy w menu</label>
+    </div>
+    <form onsubmit="dodajGrupeMenuKategorii(event)" class="f-row" style="grid-template-columns:1fr 130px auto;align-items:end;margin-bottom:1rem">
+      <div class="f-group"><label>Nazwa grupy nadrzędnej</label><input required name="nazwa" placeholder="np. Gry i zabawki, Edukacja, Ogród…"></div>
+      <div class="f-group"><label>Ikona</label><input name="ikona" value="🗂️" maxlength="4"></div>
+      <div class="f-group"><button class="btn" type="submit">➕ Dodaj grupę</button></div>
+    </form>
+    ${grupy.length?grupy.map((g,i)=>{
+      const dzieci=g.kategorie.filter(k=>nazwy.includes(k));
+      const martwe=g.kategorie.filter(k=>!nazwy.includes(k));
+      return `<div class="menu-group-box" style="${g.aktywna?"":"opacity:.6"}">
+        <form onsubmit="zapiszGrupeMenuKategorii(event,${jsArg(g.id)})">
+          <div class="f-row" style="grid-template-columns:90px 1fr auto auto auto;align-items:end">
+            <div class="f-group"><label>Ikona</label><input name="ikona" value="${esc(g.ikona)}" maxlength="4"></div>
+            <div class="f-group"><label>Nazwa grupy</label><input name="nazwa" value="${esc(g.nazwa)}" required></div>
+            <label class="chk-row" style="margin:.2rem 0 .55rem"><input type="checkbox" name="aktywna" ${g.aktywna?"checked":""}> <span>Widoczna</span></label>
+            <div class="diag-actions" style="margin:0">
+              <button class="btn ghost" type="button" onclick="przesunGrupeMenuKategorii(${jsArg(g.id)},-1)" ${i===0?"disabled":""}>↑</button>
+              <button class="btn ghost" type="button" onclick="przesunGrupeMenuKategorii(${jsArg(g.id)},1)" ${i===grupy.length-1?"disabled":""}>↓</button>
+            </div>
+            <div class="diag-actions" style="margin:0"><button class="btn" type="submit">💾 Zapisz</button><button class="btn danger" type="button" onclick="if(confirm('Usunąć grupę menu? Produkty i katalogi zostaną.')) usunGrupeMenuKategorii(${jsArg(g.id)})">🗑️</button></div>
+          </div>
+        </form>
+        <p style="font-size:.82rem;color:var(--muted2);margin:.35rem 0">W grupie: <b>${dzieci.length}</b> katalogów${martwe.length?` • ${martwe.length} nieistniejących odwołań do wyczyszczenia przy zapisie`:""}</p>
+        <div class="diag-actions" style="margin:.4rem 0"><button class="btn ghost" onclick="ustawKategorieWGrupie(${jsArg(g.id)},'wszystkie')">☑ Zaznacz wszystkie</button><button class="btn ghost" onclick="ustawKategorieWGrupie(${jsArg(g.id)},'puste')">☐ Wyczyść grupę</button></div>
+        <div class="menu-cat-grid">
+          ${nazwy.map(k=>`<label><input type="checkbox" ${g.kategorie.includes(k)?"checked":""} onchange="przelaczKategorieWGrupie(${jsArg(g.id)},${jsArg(k)},this.checked)"> <span><b>${esc(k)}</b><br><small>${liczbaProduktowWKategorii(k)} produktów${przypisane.has(k)&&!g.kategorie.includes(k)?" • w innej grupie":""}</small></span></label>`).join("")}
+        </div>
+      </div>`;
+    }).join(""):`<div class="backend-note">Nie ma jeszcze grup nadrzędnych. Dodaj np. „Gry i zabawki”, a potem zaznacz katalogi, które mają się pod nią pojawić w górnym menu.</div>`}
+    ${bezGrup.length?`<p style="font-size:.82rem;color:var(--muted2);margin-top:.75rem">Katalogi bez grupy: ${bezGrup.map(esc).join(", ")}</p>`:""}
   </div>
   <div class="panel">
     <h1>🗂️ Katalogi (${nazwy.length})</h1>
@@ -4433,8 +4522,50 @@ function dodajKatalog(e){
 }
 function usunKatalog(k){
   ustawienia.wlasneKategorie = (ustawienia.wlasneKategorie||[]).filter(x=>x!==k);
+  ustawienia.menuKategorii = grupyMenuKategorii().map(g=>({...g,kategorie:g.kategorie.filter(x=>x!==k)}));
   loguj("info","Usunięto pusty katalog: "+k);
-  zapiszCzescUstawien({wlasneKategorie: ustawienia.wlasneKategorie});
+  zapiszCzescUstawien({wlasneKategorie: ustawienia.wlasneKategorie, menuKategorii: ustawienia.menuKategorii});
+}
+function dodajGrupeMenuKategorii(e){
+  e.preventDefault();
+  const f=new FormData(e.target), nazwa=String(f.get("nazwa")||"").trim(), ikona=String(f.get("ikona")||"🗂️").trim()||"🗂️";
+  if(nazwa.length<2){ toast("Podaj nazwę grupy"); return; }
+  const grupy=grupyMenuKategorii();
+  if(grupy.some(g=>g.nazwa.toLowerCase()===nazwa.toLowerCase())){ toast("Taka grupa już istnieje"); return; }
+  grupy.push({id:"grp_"+Date.now().toString(36),nazwa,ikona,aktywna:true,kategorie:[]});
+  loguj("info","Dodano grupę menu kategorii: "+nazwa);
+  zapiszGrupyMenuKategorii(grupy);
+}
+function zapiszGrupeMenuKategorii(e,id){
+  e.preventDefault();
+  const f=new FormData(e.target), grupy=grupyMenuKategorii(), dozwolone=new Set(wszystkieKategorie());
+  const i=grupy.findIndex(g=>g.id===id); if(i<0) return;
+  grupy[i]={...grupy[i],nazwa:String(f.get("nazwa")||"").trim()||grupy[i].nazwa,ikona:String(f.get("ikona")||"🗂️").trim()||"🗂️",aktywna:!!f.get("aktywna"),kategorie:grupy[i].kategorie.filter(k=>dozwolone.has(k))};
+  loguj("info","Zapisano grupę menu kategorii: "+grupy[i].nazwa);
+  zapiszGrupyMenuKategorii(grupy);
+}
+function przelaczKategorieWGrupie(id,kat,wl){
+  const grupy=grupyMenuKategorii(), i=grupy.findIndex(g=>g.id===id); if(i<0) return;
+  grupy[i].kategorie = wl ? [...new Set([...grupy[i].kategorie,kat])] : grupy[i].kategorie.filter(k=>k!==kat);
+  zapiszGrupyMenuKategorii(grupy);
+}
+function ustawKategorieWGrupie(id,tryb){
+  const grupy=grupyMenuKategorii(), i=grupy.findIndex(g=>g.id===id); if(i<0) return;
+  grupy[i].kategorie = tryb==="wszystkie" ? wszystkieKategorie() : [];
+  zapiszGrupyMenuKategorii(grupy);
+}
+function przesunGrupeMenuKategorii(id,kierunek){
+  const grupy=grupyMenuKategorii(), i=grupy.findIndex(g=>g.id===id), j=i+kierunek;
+  if(i<0||j<0||j>=grupy.length) return;
+  [grupy[i],grupy[j]]=[grupy[j],grupy[i]];
+  zapiszGrupyMenuKategorii(grupy);
+}
+function usunGrupeMenuKategorii(id){
+  zapiszGrupyMenuKategorii(grupyMenuKategorii().filter(g=>g.id!==id));
+}
+function przelaczNieprzypisaneMenu(wl){
+  ustawienia.menuPokazNieprzypisane=!!wl;
+  zapiszCzescUstawien({menuPokazNieprzypisane:ustawienia.menuPokazNieprzypisane});
 }
 function otworzDodawanieProduktu(kategoria){
   kategoriaNowegoProduktu = String(kategoria||"");
@@ -4547,8 +4678,9 @@ function zmienKategorie(stara, nowa){
   nowa = String(nowa||"").trim();
   if(!nowa || nowa===stara){ toast("Wpisz inną nazwę"); return; }
   ustawienia.kategorie = {...(ustawienia.kategorie||{}), [stara]: nowa};
+  ustawienia.menuKategorii = grupyMenuKategorii().map(g=>({...g,kategorie:g.kategorie.map(k=>k===stara?nowa:k)}));
   if(aktywnaKategoria===stara) aktywnaKategoria = nowa;
-  zapiszCzescUstawien({kategorie: ustawienia.kategorie});
+  zapiszCzescUstawien({kategorie: ustawienia.kategorie, menuKategorii: ustawienia.menuKategorii});
   loguj("info",`Zmieniono kategorię: ${stara} → ${nowa}`);
 }
 function przelaczKategorie(kat){
@@ -5388,7 +5520,8 @@ function kontrolePublikacji(){
     ?"Układ i ustawienia są przygotowane do publikacji"
     :`Masz zmiany panelu (${kluczeUstawien.length} sekcji) — opublikuj index.html bezpośrednio z panelu`,link:"#/admin/aktualizacja",akcja:"Aktualizuj stronę"});
   const zmianyLokalne = produktyDodane.length + produktyUkryte.length + Object.keys(produktyEdytowane).length
-    + Object.keys(ustawienia.mapaProduktow||{}).length + Object.keys(ustawienia.kategorie||{}).length;
+    + Object.keys(ustawienia.mapaProduktow||{}).length + Object.keys(ustawienia.kategorie||{}).length
+    + (ustawienia.menuKategorii||[]).length + (ustawienia.menuPokazNieprzypisane===false?1:0);
   const aktualnyHashProduktow=prostyHash(JSON.stringify(zakresEksportuProduktow("widoczne")));
   const produktyPrzygotowane=!zmianyLokalne||localStorage.getItem("artway_produkty_export_hash")===aktualnyHashProduktow;
   k.push({ok:produktyPrzygotowane, tekst: produktyPrzygotowane
@@ -5659,9 +5792,11 @@ function naprawDaneSklepu(){
   ulubione=[...new Set(ulubione.filter(id=>widoczne.has(id)))];
   produktyUkryte=[...new Set(produktyUkryte.filter(id=>prodBazowe.some(p=>p.id===id)))];
   const mapa={...(ustawienia.mapaProduktow||{})};Object.keys(mapa).forEach(id=>{if(!wszystkie.has(+id))delete mapa[id];});
+  const kat=new Set(wszystkieKategorie());
+  const menuKategorii=grupyMenuKategorii().map(g=>({...g,kategorie:g.kategorie.filter(k=>kat.has(k))})).filter(g=>g.nazwa);
   const uzytkownicy=pobierzUzytkownikow().filter((u,i,a)=>u.email&&a.findIndex(x=>x.email===u.email)===i);
   zapiszLS("artway_koszyk",koszyk);zapiszLS("artway_ulubione",ulubione);zapiszLS("artway_produkty_ukryte",produktyUkryte);
-  zapiszLS("artway_uzytkownicy",uzytkownicy);ustawienia={...ustawienia,mapaProduktow:mapa};zapiszLS("artway_ustawienia",ustawienia);
+  zapiszLS("artway_uzytkownicy",uzytkownicy);ustawienia={...ustawienia,mapaProduktow:mapa,menuKategorii};zapiszLS("artway_ustawienia",ustawienia);
   zbudujProdukty();odswiezKoszyk();odswiezUlubioneLicznik();loguj("info","Wykonano naprawę spójności danych");toast("Dane zostały sprawdzone i naprawione ✅");renderuj();
 }
 async function uruchomAutotest(){
