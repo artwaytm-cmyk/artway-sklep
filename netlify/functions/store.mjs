@@ -569,7 +569,7 @@ function htmlKartaEmail(tytul, body, accent = '#2563eb') {
     <div style="color:#111827;font-size:15px">${body}</div>
   </div>`;
 }
-function htmlLayoutEmail({ preheader, badge, title, intro, z, mainCta, extraCta = [], admin = false }) {
+function htmlLayoutEmail({ preheader, badge, title, intro, z, mainCta, extraCta = [], admin = false, topCard = '', platnoscKartaHtml = '', coDalejTytul = '', coDalejTekst = '', stopkaTekst = '' }) {
   const payment = instrukcjaPlatnosciEmail(z);
   const sklepUrl = linkSklepuEmail('/#/');
   const kontoUrl = linkSklepuEmail('/#/zamowienia');
@@ -578,7 +578,7 @@ function htmlLayoutEmail({ preheader, badge, title, intro, z, mainCta, extraCta 
   const telefon = tekst(k.telefon || '', 80).trim();
   const email = tekst(z?.email || '', 200).trim();
   const shippingBody = `${htmlEscape(z?.dostawa || '—')}<br><span style="color:#6b7280">${htmlEscape(adresDostawyEmail(z))}</span>${z?.paczkomat ? `<br><span style="color:#6b7280">Punkt odbioru: ${htmlEscape(z.paczkomat)}</span>` : ''}`;
-  const paymentBody = `<b>${htmlEscape(payment.tytul)}</b><br><span style="color:#374151">${htmlEscape(payment.opis)}</span><br><span style="display:inline-block;margin-top:8px;color:#111827;font-weight:800">${htmlEscape(payment.meta)}</span>`;
+  const paymentBody = platnoscKartaHtml || `<b>${htmlEscape(payment.tytul)}</b><br><span style="color:#374151">${htmlEscape(payment.opis)}</span><br><span style="display:inline-block;margin-top:8px;color:#111827;font-weight:800">${htmlEscape(payment.meta)}</span>`;
   const cta = mainCta || { label: payment.akcja, url: payment.url };
   const ctaHtml = [cta, ...extraCta].filter(Boolean).map((x, i) => emailButton(x.label, x.url, i === 0 ? '#2563eb' : '#111827')).join('');
   return `<!doctype html>
@@ -606,6 +606,7 @@ function htmlLayoutEmail({ preheader, badge, title, intro, z, mainCta, extraCta 
                 <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:18px;padding:14px 16px;margin-bottom:16px;color:#78350f">
                   <b>Numer zamówienia:</b> ${htmlEscape(z?.nr || '—')} &nbsp; • &nbsp; <b>Razem:</b> ${htmlEscape(zlSerwer(z?.razem))}
                 </div>
+                ${topCard}
                 ${admin ? htmlKartaEmail('Klient', `<b>${htmlEscape(nazwaKlientaEmail(z))}</b>${email ? `<br>${htmlEscape(email)}` : ''}${telefon ? `<br>${htmlEscape(telefon)}` : ''}`, '#7c3aed') : ''}
                 ${htmlKartaEmail('Płatność', paymentBody, '#f59e0b')}
                 ${htmlKartaEmail('Dostawa', shippingBody, '#10b981')}
@@ -614,13 +615,13 @@ function htmlLayoutEmail({ preheader, badge, title, intro, z, mainCta, extraCta 
                 <div style="text-align:right;margin:14px 0 22px;font-size:20px;font-weight:900;color:#111827">Suma: ${htmlEscape(zlSerwer(z?.razem))}</div>
                 ${z?.uwagi ? htmlKartaEmail('Uwagi do zamówienia', htmlEscape(z.uwagi), '#64748b') : ''}
                 <div style="background:#f8fafc;border-radius:18px;padding:18px;margin:20px 0">
-                  <h3 style="margin:0 0 8px;font-size:17px;color:#111827">${admin ? 'Co dalej w obsłudze?' : 'Co dalej?'}</h3>
-                  <p style="margin:0;color:#374151;line-height:1.6">${admin
+                  <h3 style="margin:0 0 8px;font-size:17px;color:#111827">${htmlEscape(coDalejTytul || (admin ? 'Co dalej w obsłudze?' : 'Co dalej?'))}</h3>
+                  <p style="margin:0;color:#374151;line-height:1.6">${coDalejTekst ? htmlEscape(coDalejTekst) : (admin
                     ? 'Sprawdź płatność, przygotuj paczkę, wygeneruj etykietę i aktualizuj status zamówienia. Klient dostanie kolejne informacje automatycznie.'
-                    : 'Przyjęliśmy zamówienie. Będziemy informować o kolejnych etapach realizacji. W każdej chwili możesz wrócić do sklepu, sprawdzić szczegóły lub dobrać kolejne produkty do zestawu.'}</p>
+                    : 'Przyjęliśmy zamówienie. Będziemy informować o kolejnych etapach realizacji. W każdej chwili możesz wrócić do sklepu, sprawdzić szczegóły lub dobrać kolejne produkty do zestawu.')}</p>
                 </div>
                 <div style="margin:22px 0 8px">${ctaHtml}${admin ? emailButton('Otwórz zamówienie w panelu', adminUrl, '#111827') : emailButton('Wróć do sklepu', sklepUrl, '#111827')}</div>
-                ${!admin ? `<p style="font-size:14px;color:#6b7280;line-height:1.6;margin:18px 0 0">Dziękujemy za zaufanie. Życzymy dobrego dnia i udanych zakupów w Artway-TM.</p>` : ''}
+                ${!admin ? `<p style="font-size:14px;color:#6b7280;line-height:1.6;margin:18px 0 0">${htmlEscape(stopkaTekst || 'Dziękujemy za zaufanie. Życzymy dobrego dnia i udanych zakupów w Artway-TM.')}</p>` : ''}
               </td>
             </tr>
             <tr>
@@ -790,48 +791,52 @@ function linkSledzeniaEmail(z) {
   };
   return mapa[w.przewoznik] || '';
 }
+// Wszystkie e-maile statusowe korzystają z TEGO SAMEGO szablonu co potwierdzenie zakupu (htmlLayoutEmail).
+const STATUS_EMAIL_CODALEJ = {
+  przygotowanie: ['Co dalej?', 'Kompletujemy Twoje produkty. Gdy paczka trafi do przewoźnika, dostaniesz e-mail z numerem do śledzenia.'],
+  nadanie: ['Śledź swoją paczkę', 'Paczka jest już w drodze. Kliknij „Śledź przesyłkę”, aby zobaczyć jej status. Damy też znać, gdy zostanie dostarczona.'],
+  dostarczenie: ['Dziękujemy za zakupy', 'Mamy nadzieję, że wszystko się podoba. Jeśli coś będzie nie tak, po prostu odpowiedz na tę wiadomość. Zapraszamy ponownie!'],
+  anulowanie: ['Masz pytania?', 'Jeśli anulowanie to pomyłka albo chcesz coś zmienić, odpowiedz na tę wiadomość — pomożemy.'],
+  zwrot: ['Co dalej?', 'Skontaktujemy się w sprawie dalszych kroków dotyczących zwracanej przesyłki.'],
+  zwrot_pieniedzy: ['Zwrot środków', 'Pieniądze wrócą na Twoje konto w ciągu kilku dni roboczych, zależnie od banku. W razie pytań odpowiedz na tę wiadomość.'],
+  problem: ['Czuwamy nad przesyłką', 'Monitorujemy sytuację u przewoźnika i przekażemy kolejną informację zaraz po jej wyjaśnieniu.'],
+};
 function htmlStatusEmail(z, typ, opcje = {}) {
   const meta = STATUS_EMAIL_META[typ] || STATUS_EMAIL_META.przygotowanie;
   const imie = tekst(z?.klient?.imie, 80).trim();
   const w = z?.wysylka || {};
   const numer = tekst(w.numer, 120).trim();
   const sledzenie = linkSledzeniaEmail(z);
-  const sklepUrl = linkSklepuEmail('/#/');
   const zamUrl = linkSklepuEmail('/#/zamowienia');
-  const kwotaZwrotu = opcje.kwota != null ? zlSerwer(opcje.kwota) : '';
+  const platnoscStatus = tekst(z?.platnoscStatus, 80).trim();
+  // Karta statusu (kolor zależny od etapu) — na górze, tuż pod numerem zamówienia
+  const statusCard = htmlKartaEmail(meta.badge, `<b>${htmlEscape(meta.title)}</b><br><span style="color:#374151">${htmlEscape(meta.opis)}</span>`, meta.accent);
   const kartaZwrot = typ === 'zwrot_pieniedzy'
-    ? htmlKartaEmail('Zwrot środków', `Kwota zwrotu: <b>${htmlEscape(kwotaZwrotu || zlSerwer(z?.razem))}</b><br><span style="color:#374151">Zwrot realizujemy tą samą metodą, którą opłacono zamówienie. Środki wrócą na konto w ciągu kilku dni roboczych, zależnie od banku.</span>`, '#0ea5e9')
+    ? htmlKartaEmail('Zwrot środków', `Kwota zwrotu: <b>${htmlEscape(opcje.kwota != null ? zlSerwer(opcje.kwota) : zlSerwer(z?.razem))}</b><br><span style="color:#374151">Zwrot realizujemy tą samą metodą, którą opłacono zamówienie.</span>`, '#0ea5e9')
     : '';
   const kartaTracking = (typ === 'nadanie' || typ === 'problem') && (numer || sledzenie)
     ? htmlKartaEmail('Śledzenie przesyłki', `${w.przewoznik ? `Przewoźnik: <b>${htmlEscape(nazwaPrzewoznikaEmail(w.przewoznik))}</b><br>` : ''}${numer ? `Numer przesyłki: <b>${htmlEscape(numer)}</b><br>` : ''}${sledzenie ? `Link: <a href="${htmlEscape(sledzenie)}" style="color:#2563eb;font-weight:800">${htmlEscape(sledzenie)}</a>` : ''}`, '#059669')
     : '';
-  const pokazProdukty = typ === 'nadanie' || typ === 'dostarczenie';
-  return `<!doctype html>
-  <html lang="pl">
-  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlEscape(meta.title)}</title></head>
-  <body style="margin:0;padding:0;background:#eef2ff;font-family:Arial,Helvetica,sans-serif;color:#111827">
-    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${htmlEscape(meta.opis)}</div>
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2ff;padding:26px 10px"><tr><td align="center">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 20px 55px rgba(37,99,235,.14)">
-        <tr><td style="background:linear-gradient(135deg,#2563eb,#6d28d9);padding:28px 28px 24px;color:#ffffff">
-          <div style="font-size:13px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;opacity:.9">${htmlEscape(meta.badge)}</div>
-          <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.18">${htmlEscape(meta.title)}</h1>
-          <p style="margin:0;font-size:16px;line-height:1.55;opacity:.96">Dzień dobry${imie ? `, ${htmlEscape(imie)}` : ''}. ${htmlEscape(meta.opis)}</p>
-        </td></tr>
-        <tr><td style="padding:26px 28px">
-          <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:18px;padding:14px 16px;margin-bottom:16px;color:#78350f">
-            <b>Numer zamówienia:</b> ${htmlEscape(z?.nr || '—')} &nbsp; • &nbsp; <b>Wartość:</b> ${htmlEscape(zlSerwer(z?.razem))}
-          </div>
-          ${kartaZwrot}
-          ${kartaTracking}
-          ${pokazProdukty ? `<h2 style="font-size:18px;margin:22px 0 10px;color:#111827">Produkty w zamówieniu</h2>${htmlProduktyEmail(z)}` : ''}
-          <div style="margin:22px 0 8px">${emailButton('Moje zamówienia', zamUrl)}${emailButton('Wróć do sklepu', sklepUrl, '#111827')}</div>
-          <p style="font-size:14px;color:#6b7280;line-height:1.6;margin:18px 0 0">Dziękujemy za zaufanie. Zapraszamy ponownie — w sklepie czekają kolejne produkty i okazje.</p>
-        </td></tr>
-        <tr><td style="background:#111827;color:#d1d5db;padding:20px 28px;font-size:13px;line-height:1.55"><b style="color:#ffffff">Artway-TM</b><br>Sklep internetowy • ${htmlEscape(sklepUrl)}<br>Wiadomość wysłana automatycznie — odpowiedź trafi do obsługi sklepu.</td></tr>
-      </table>
-    </td></tr></table>
-  </body></html>`;
+  const topCard = `${statusCard}${kartaZwrot}${kartaTracking}`;
+  // Neutralna karta płatności (bez „dokończ płatność”) — metoda, status i kwota
+  const platnoscKartaHtml = `<b>${htmlEscape(z?.platnosc || '—')}</b>${platnoscStatus ? `<br><span style="color:#374151">Status płatności: ${htmlEscape(platnoscStatus)}</span>` : ''}<br><span style="display:inline-block;margin-top:8px;color:#111827;font-weight:800">Kwota: ${htmlEscape(zlSerwer(z?.razem))}</span>`;
+  const mainCta = typ === 'nadanie' && sledzenie ? { label: 'Śledź przesyłkę', url: sledzenie } : { label: 'Moje zamówienia', url: zamUrl };
+  const extraCta = typ === 'nadanie' && sledzenie ? [{ label: 'Moje zamówienia', url: zamUrl }] : [];
+  const [cdT, cdX] = STATUS_EMAIL_CODALEJ[typ] || STATUS_EMAIL_CODALEJ.przygotowanie;
+  return htmlLayoutEmail({
+    preheader: meta.opis,
+    badge: meta.badge,
+    title: meta.title,
+    intro: `Dzień dobry${imie ? `, ${imie}` : ''}! Poniżej najważniejsze informacje o Twoim zamówieniu ${z?.nr || ''}.`,
+    z,
+    mainCta,
+    extraCta,
+    topCard,
+    platnoscKartaHtml,
+    coDalejTytul: cdT,
+    coDalejTekst: cdX,
+    stopkaTekst: 'Dziękujemy za zaufanie. Zapraszamy ponownie — w sklepie czekają kolejne produkty i okazje.',
+  });
 }
 function wiadomoscStatusowa(z, typ, opcje = {}) {
   const meta = STATUS_EMAIL_META[typ] || STATUS_EMAIL_META.przygotowanie;
@@ -958,6 +963,40 @@ export default async (req) => {
         return odpowiedz({ ok: false, error: e.message, code: e.code || 'email_error' }, e.code === 'email_not_configured' ? 503 : 502);
       }
       return odpowiedz({ ok: true, provider: r.provider, message_id: r.message_id, accepted: r.accepted || [] });
+    }
+
+    // ─── E-MAIL: ręczna wysyłka wiadomości statusowej z JEDNOLITEGO szablonu (admin) ───
+    if (action === 'send-status-email') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const nr = numerZamowienia(body.nr || body.number);
+      const typ = tekst(body.typ || body.type, 40).trim();
+      if (!nr || !typ) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia albo typu wiadomości' }, 422);
+      const rec = await czytaj('orders', { items: [] });
+      const z = (Array.isArray(rec.items) ? rec.items : []).find((x) => x.nr === nr);
+      if (!z) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
+      if (!z.email) return odpowiedz({ ok: false, error: 'Zamówienie nie ma adresu e-mail klienta', code: 'no_email' }, 422);
+      const c = emailKonfiguracja();
+      if (!c.configured) return odpowiedz({ ok: false, error: 'E-mail nie jest skonfigurowany po stronie serwera.', code: 'email_not_configured' }, 503);
+      try {
+        let r;
+        if (typ === 'potwierdzenie') {
+          const msg = wiadomoscKlientaZamowienie(z);
+          r = await wyslijEmailSMTP({ to: z.email, ...msg });
+          await dopiszHistorieEmaila(z.nr, { typ: 'potwierdzenie', status: 'wysłano', provider: r.provider, id: r.message_id, automatyczne: false });
+          r = { configured: true, sent: true, provider: r.provider, id: r.message_id };
+        } else {
+          const kwota = (body.kwota != null && body.kwota !== '') ? Number(body.kwota) : null;
+          r = await wyslijEmailStatusowy(z, typ, kwota != null ? { kwota } : {});
+          if (r && r.sent === false && r.error) return odpowiedz({ ok: false, error: r.error, code: r.error }, r.error === 'email_not_configured' ? 503 : 502);
+        }
+        const recPo = await czytaj('orders', { items: [] });
+        const zPo = (recPo.items || []).find((x) => x.nr === nr) || z;
+        return odpowiedz({ ok: true, provider: r.provider, message_id: r.id, sent: r.sent !== false, powiadomienia: zPo?.wysylka?.powiadomienia || [] });
+      } catch (e) {
+        return odpowiedz({ ok: false, error: e.message, code: e.code || 'email_error' }, e.code === 'email_not_configured' ? 503 : 502);
+      }
     }
 
     // ─── PAYNOW: konfiguracja publiczna bez sekretów ───

@@ -2894,13 +2894,11 @@ async function wyslijEmailWysylki(nr,typ,automatycznie=false){
     return false;
   }
   if(!automatycznie&&!confirm(`Wysłać „${NAZWY_EMAILI[typ]||typ}” na ${z.email} przez API?`)) return false;
-  const p=trescPowiadomienia(z,typ), klient=z.klient||{};
   try{
-    const d=await chmura("send-email",{method:"POST",body:{
-      to:z.email,to_name:[klient.imie,klient.nazwisko].filter(Boolean).join(" "),
-      subject:p.temat,text:p.body,html:p.html,order_number:z.nr,type:typ
-    },timeout:18000});
-    zapiszHistorieEmaila(nr,{typ,status:"wysłano",provider:d.provider||stanBramki.email.provider||"",id:d.message_id||"",automatyczne:automatycznie});
+    // Ten sam, jednolity szablon co potwierdzenie zakupu — budowany po stronie serwera
+    const d=await chmura("send-status-email",{method:"POST",body:{nr,typ},timeout:18000});
+    if(Array.isArray(d.powiadomienia)){ aktualizujZamowienie(nr,zam=>{ zam.wysylka=zam.wysylka||{}; zam.wysylka.powiadomienia=d.powiadomienia; }); }
+    else { zapiszHistorieEmaila(nr,{typ,status:"wysłano",provider:d.provider||stanBramki.email.provider||"",id:d.message_id||"",automatyczne:automatycznie}); }
     loguj("info",`${automatycznie?"Automatycznie wysłano":"Wysłano"} e-mail ${typ} dla ${nr} przez ${d.provider||"API"}`);
     toast(`${automatycznie?"Automatyczny e-mail":"E-mail"} wysłany ✅`);
     renderuj();
