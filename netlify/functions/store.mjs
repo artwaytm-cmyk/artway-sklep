@@ -440,29 +440,203 @@ async function wyslijEmailSMTP({ to, subject, text, html, replyTo }) {
 function zlSerwer(v) {
   return `${(Number(v) || 0).toFixed(2).replace('.', ',')} zł`;
 }
-function linieProduktow(z) {
-  if (Array.isArray(z?.pozycje) && z.pozycje.length) return z.pozycje.map((p) => `• ${tekst(p, 500)}`).join('\n');
-  if (Array.isArray(z?.pozycjeDane) && z.pozycjeDane.length) {
-    return z.pozycjeDane.map((p) => `• ${tekst(p.nazwa, 200)} × ${Number(p.ilosc) || 1} — ${zlSerwer(p.wartosc || ((Number(p.cena) || 0) * (Number(p.ilosc) || 1)))}`).join('\n');
-  }
-  return '• Pozycje zamówienia zapisane w panelu sklepu';
-}
 function htmlEscape(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-function htmlZamowienia(z, tekstWiadomosci) {
-  return `<div style="font-family:Arial,sans-serif;color:#111827;line-height:1.55">
-    <h2 style="margin:0 0 12px">Artway-TM — zamówienie ${htmlEscape(z.nr)}</h2>
-    <p>${htmlEscape(tekstWiadomosci).replace(/\n/g, '<br>')}</p>
-    <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin:16px 0">
-      <b>Produkty</b><br>${htmlEscape(linieProduktow(z)).replace(/\n/g, '<br>')}
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0">
-      <b>Razem:</b> ${htmlEscape(zlSerwer(z.razem))}<br>
-      <b>Dostawa:</b> ${htmlEscape(z.dostawa || '—')}<br>
-      <b>Płatność:</b> ${htmlEscape(z.platnosc || '—')}
-    </div>
-    <p style="font-size:13px;color:#6b7280">Wiadomość wysłana automatycznie ze sklepu Artway-TM.</p>
+function linkSklepuEmail(path = '/') {
+  const base = tekst(process.env.EMAIL_SITE_URL || 'https://artwaytm.pl', 400).trim().replace(/\/+$/, '');
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+}
+function nazwaKlientaEmail(z) {
+  const k = z?.klient || {};
+  return [k.imie, k.nazwisko].map((x) => tekst(x, 80).trim()).filter(Boolean).join(' ') || tekst(z?.email, 160).trim() || 'Klient';
+}
+function adresDostawyEmail(z) {
+  const a = z?.adresDostawy || {};
+  if (a && (a.ulica || a.kod || a.miasto)) {
+    const ulica = [a.ulica, a.nrDomu].map((x) => tekst(x, 120).trim()).filter(Boolean).join(' ');
+    const lokal = a.nrLokalu ? `/${tekst(a.nrLokalu, 30).trim()}` : '';
+    const miasto = [a.kod, a.miasto].map((x) => tekst(x, 120).trim()).filter(Boolean).join(' ');
+    return [ulica ? `${ulica}${lokal}` : '', miasto].filter(Boolean).join(', ') || '—';
+  }
+  return tekst(z?.adres || '—', 500).trim() || '—';
+}
+function produktWariantEmail(p) {
+  const wariant = p?.wariant;
+  if (!wariant) return '';
+  if (typeof wariant === 'string') return tekst(wariant, 120).trim();
+  if (typeof wariant === 'object') return [wariant.nazwa, wariant.wartosc, wariant.label].map((x) => tekst(x, 80).trim()).filter(Boolean).join(': ');
+  return '';
+}
+function produktyEmail(z) {
+  if (Array.isArray(z?.pozycjeDane) && z.pozycjeDane.length) {
+    return z.pozycjeDane.map((p) => {
+      const ilosc = Number(p.ilosc) || 1;
+      const cena = Number(p.cena) || 0;
+      const wartosc = Number(p.wartosc) || (cena * ilosc);
+      return {
+        nazwa: tekst(p.nazwa || p.name || 'Produkt', 240).trim(),
+        ilosc,
+        cena,
+        wartosc,
+        sku: tekst(p.sku || p.SKU || '', 120).trim(),
+        wariant: produktWariantEmail(p),
+      };
+    });
+  }
+  if (Array.isArray(z?.pozycje) && z.pozycje.length) {
+    return z.pozycje.map((p) => ({ nazwa: tekst(p, 500).trim(), ilosc: 1, cena: 0, wartosc: 0, sku: '', wariant: '' }));
+  }
+  return [{ nazwa: 'Pozycje zamówienia zapisane w panelu sklepu', ilosc: 1, cena: 0, wartosc: 0, sku: '', wariant: '' }];
+}
+function linieProduktow(z) {
+  return produktyEmail(z).map((p) => {
+    const meta = [p.sku ? `SKU: ${p.sku}` : '', p.wariant].filter(Boolean).join(', ');
+    const kwota = p.wartosc ? ` — ${zlSerwer(p.wartosc)}` : '';
+    return `• ${p.nazwa}${meta ? ` (${meta})` : ''} × ${p.ilosc}${kwota}`;
+  }).join('\n');
+}
+function htmlProduktyEmail(z) {
+  const rows = produktyEmail(z).map((p) => {
+    const meta = [p.sku ? `SKU: ${p.sku}` : '', p.wariant].filter(Boolean).join(' • ');
+    return `<tr>
+      <td style="padding:12px 10px;border-bottom:1px solid #e5e7eb">
+        <div style="font-weight:800;color:#111827">${htmlEscape(p.nazwa)}</div>
+        ${meta ? `<div style="font-size:12px;color:#6b7280;margin-top:3px">${htmlEscape(meta)}</div>` : ''}
+      </td>
+      <td style="padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:center;color:#374151">${htmlEscape(p.ilosc)}</td>
+      <td style="padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:800;color:#111827">${p.wartosc ? htmlEscape(zlSerwer(p.wartosc)) : '—'}</td>
+    </tr>`;
+  }).join('');
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff">
+    <thead>
+      <tr style="background:#f8fafc;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.05em">
+        <th align="left" style="padding:10px">Produkt</th>
+        <th align="center" style="padding:10px;width:70px">Ilość</th>
+        <th align="right" style="padding:10px;width:120px">Wartość</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+function instrukcjaPlatnosciEmail(z) {
+  const metoda = tekst(z?.platnosc || '—', 180).trim();
+  const kwota = zlSerwer(z?.razem);
+  if (z?.platnoscId === 'paynow') {
+    const url = tekst(z?.paynow?.redirectUrl || '', 1000).trim();
+    return {
+      tytul: 'Dokończ bezpieczną płatność online',
+      opis: url
+        ? `Kliknij przycisk i opłać zamówienie przez mBank Paynow. Po potwierdzeniu płatności od razu przejdziemy do realizacji.`
+        : `Wybrano mBank Paynow. Jeśli link płatności nie jest jeszcze widoczny, status sprawdzisz w sekcji „Moje zamówienia”.`,
+      akcja: url ? 'Zapłać przez mBank Paynow' : 'Sprawdź zamówienie',
+      url: url || linkSklepuEmail('/#/zamowienia'),
+      meta: `Kwota do zapłaty: ${kwota}`,
+    };
+  }
+  if (z?.platnoscId === 'telefon') {
+    return {
+      tytul: 'Przelew na telefon',
+      opis: z?.platnoscInstrukcja || `Wyślij ${kwota} na numer 530 038 914. W tytule lub wiadomości wpisz: Zamówienie ${z.nr}.`,
+      akcja: 'Zobacz szczegóły zamówienia',
+      url: linkSklepuEmail('/#/zamowienia'),
+      meta: `Kwota do zapłaty: ${kwota}`,
+    };
+  }
+  if (z?.platnoscId === 'pobranie') {
+    return {
+      tytul: 'Płatność przy odbiorze',
+      opis: 'Zapłacisz kurierowi przy doręczeniu. Przygotujemy paczkę i wyślemy kolejne informacje po nadaniu przesyłki.',
+      akcja: 'Zobacz szczegóły zamówienia',
+      url: linkSklepuEmail('/#/zamowienia'),
+      meta: `Wartość zamówienia: ${kwota}`,
+    };
+  }
+  return {
+    tytul: 'Płatność',
+    opis: z?.platnoscInstrukcja || `Wybrana metoda płatności: ${metoda}.`,
+    akcja: 'Zobacz szczegóły zamówienia',
+    url: linkSklepuEmail('/#/zamowienia'),
+    meta: `Wartość zamówienia: ${kwota}`,
+  };
+}
+function emailButton(label, url, kolor = '#2563eb') {
+  return `<a href="${htmlEscape(url)}" style="display:inline-block;background:${kolor};color:#ffffff;text-decoration:none;font-weight:800;border-radius:999px;padding:13px 20px;margin:4px 8px 4px 0">${htmlEscape(label)}</a>`;
+}
+function htmlKartaEmail(tytul, body, accent = '#2563eb') {
+  return `<div style="border:1px solid #e5e7eb;border-left:5px solid ${accent};border-radius:16px;background:#ffffff;padding:16px;margin:14px 0">
+    <div style="font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;font-weight:800;margin-bottom:6px">${htmlEscape(tytul)}</div>
+    <div style="color:#111827;font-size:15px">${body}</div>
   </div>`;
+}
+function htmlLayoutEmail({ preheader, badge, title, intro, z, mainCta, extraCta = [], admin = false }) {
+  const payment = instrukcjaPlatnosciEmail(z);
+  const sklepUrl = linkSklepuEmail('/#/');
+  const kontoUrl = linkSklepuEmail('/#/zamowienia');
+  const adminUrl = linkSklepuEmail(`/#/admin/zamowienie/${encodeURIComponent(z?.nr || '')}`);
+  const k = z?.klient || {};
+  const telefon = tekst(k.telefon || '', 80).trim();
+  const email = tekst(z?.email || '', 200).trim();
+  const shippingBody = `${htmlEscape(z?.dostawa || '—')}<br><span style="color:#6b7280">${htmlEscape(adresDostawyEmail(z))}</span>${z?.paczkomat ? `<br><span style="color:#6b7280">Punkt odbioru: ${htmlEscape(z.paczkomat)}</span>` : ''}`;
+  const paymentBody = `<b>${htmlEscape(payment.tytul)}</b><br><span style="color:#374151">${htmlEscape(payment.opis)}</span><br><span style="display:inline-block;margin-top:8px;color:#111827;font-weight:800">${htmlEscape(payment.meta)}</span>`;
+  const cta = mainCta || { label: payment.akcja, url: payment.url };
+  const ctaHtml = [cta, ...extraCta].filter(Boolean).map((x, i) => emailButton(x.label, x.url, i === 0 ? '#2563eb' : '#111827')).join('');
+  return `<!doctype html>
+  <html lang="pl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>${htmlEscape(title)}</title>
+  </head>
+  <body style="margin:0;padding:0;background:#eef2ff;font-family:Arial,Helvetica,sans-serif;color:#111827">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${htmlEscape(preheader || title)}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2ff;padding:26px 10px">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 20px 55px rgba(37,99,235,.14)">
+            <tr>
+              <td style="background:linear-gradient(135deg,#2563eb,#6d28d9);padding:28px 28px 24px;color:#ffffff">
+                <div style="font-size:13px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;opacity:.9">${htmlEscape(badge || 'Artway-TM')}</div>
+                <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.18">${htmlEscape(title)}</h1>
+                <p style="margin:0;font-size:16px;line-height:1.55;opacity:.96">${htmlEscape(intro)}</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:26px 28px">
+                <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:18px;padding:14px 16px;margin-bottom:16px;color:#78350f">
+                  <b>Numer zamówienia:</b> ${htmlEscape(z?.nr || '—')} &nbsp; • &nbsp; <b>Razem:</b> ${htmlEscape(zlSerwer(z?.razem))}
+                </div>
+                ${admin ? htmlKartaEmail('Klient', `<b>${htmlEscape(nazwaKlientaEmail(z))}</b>${email ? `<br>${htmlEscape(email)}` : ''}${telefon ? `<br>${htmlEscape(telefon)}` : ''}`, '#7c3aed') : ''}
+                ${htmlKartaEmail('Płatność', paymentBody, '#f59e0b')}
+                ${htmlKartaEmail('Dostawa', shippingBody, '#10b981')}
+                <h2 style="font-size:18px;margin:22px 0 10px;color:#111827">Produkty w zamówieniu</h2>
+                ${htmlProduktyEmail(z)}
+                <div style="text-align:right;margin:14px 0 22px;font-size:20px;font-weight:900;color:#111827">Suma: ${htmlEscape(zlSerwer(z?.razem))}</div>
+                ${z?.uwagi ? htmlKartaEmail('Uwagi do zamówienia', htmlEscape(z.uwagi), '#64748b') : ''}
+                <div style="background:#f8fafc;border-radius:18px;padding:18px;margin:20px 0">
+                  <h3 style="margin:0 0 8px;font-size:17px;color:#111827">${admin ? 'Co dalej w obsłudze?' : 'Co dalej?'}</h3>
+                  <p style="margin:0;color:#374151;line-height:1.6">${admin
+                    ? 'Sprawdź płatność, przygotuj paczkę, wygeneruj etykietę i aktualizuj status zamówienia. Klient dostanie kolejne informacje automatycznie.'
+                    : 'Przyjęliśmy zamówienie. Będziemy informować o kolejnych etapach realizacji. W każdej chwili możesz wrócić do sklepu, sprawdzić szczegóły lub dobrać kolejne produkty do zestawu.'}</p>
+                </div>
+                <div style="margin:22px 0 8px">${ctaHtml}${admin ? emailButton('Otwórz zamówienie w panelu', adminUrl, '#111827') : emailButton('Wróć do sklepu', sklepUrl, '#111827')}</div>
+                ${!admin ? `<p style="font-size:14px;color:#6b7280;line-height:1.6;margin:18px 0 0">Dziękujemy za zaufanie. Życzymy dobrego dnia i udanych zakupów w Artway-TM.</p>` : ''}
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#111827;color:#d1d5db;padding:20px 28px;font-size:13px;line-height:1.55">
+                <b style="color:#ffffff">Artway-TM</b><br>
+                Sklep internetowy • ${htmlEscape(linkSklepuEmail('/#/'))}<br>
+                ${admin ? 'To powiadomienie dla administratora sklepu.' : `Status zamówienia: ${htmlEscape(kontoUrl)}`}<br>
+                Wiadomość wysłana automatycznie — odpowiedź trafi do obsługi sklepu.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+  </html>`;
 }
 function wiadomoscKlientaZamowienie(z) {
   const imie = tekst(z?.klient?.imie, 80).trim();
@@ -480,10 +654,22 @@ Dostawa: ${z.dostawa || '—'}
 Płatność: ${z.platnosc || '—'}${paynow}${telefon}
 
 Status i szczegóły zamówienia sprawdzisz na stronie sklepu w sekcji „Moje zamówienia”.
+Jeśli chcesz coś domówić, wróć do sklepu — chętnie pomożemy skompletować kolejne produkty.
 
 Pozdrawiamy
 Artway-TM`;
-  return { subject: `Potwierdzenie zamówienia ${z.nr}`, text: body, html: htmlZamowienia(z, body) };
+  return {
+    subject: `Dziękujemy za zamówienie ${z.nr} — Artway-TM`,
+    text: body,
+    html: htmlLayoutEmail({
+      preheader: `Przyjęliśmy zamówienie ${z.nr}. Sprawdź podsumowanie, płatność i dostawę.`,
+      badge: 'Dziękujemy za zakupy',
+      title: `Zamówienie ${z.nr} przyjęte`,
+      intro: `Dziękujemy${imie ? `, ${imie}` : ''}! Twoje zamówienie jest już zapisane. Poniżej znajdziesz najważniejsze informacje i następny krok.`,
+      z,
+      extraCta: [{ label: 'Moje zamówienia', url: linkSklepuEmail('/#/zamowienia') }],
+    }),
+  };
 }
 function wiadomoscAdminZamowienie(z) {
   const k = z?.klient || {};
@@ -503,7 +689,19 @@ Płatność: ${z.platnosc || '—'}
 Status płatności: ${z.platnoscStatus || z?.paynow?.status || '—'}
 
 Uwagi: ${z.uwagi || 'brak'}`;
-  return { subject: `Nowe zamówienie ${z.nr} — ${zlSerwer(z.razem)}`, text: body, html: htmlZamowienia(z, body) };
+  return {
+    subject: `Nowe zamówienie ${z.nr} — ${zlSerwer(z.razem)}`,
+    text: body,
+    html: htmlLayoutEmail({
+      preheader: `Nowe zamówienie ${z.nr} na kwotę ${zlSerwer(z.razem)} czeka na obsługę.`,
+      badge: 'Panel administratora',
+      title: `Nowe zamówienie ${z.nr}`,
+      intro: `W sklepie pojawiło się nowe zamówienie. Sprawdź płatność, przygotuj wysyłkę i prowadź klienta przez kolejne etapy.`,
+      z,
+      admin: true,
+      mainCta: { label: 'Otwórz panel zamówień', url: linkSklepuEmail('/#/admin/zamowienia') },
+    }),
+  };
 }
 async function dopiszHistorieEmaila(nr, wpis) {
   const rec = await czytaj('orders', { items: [] });
