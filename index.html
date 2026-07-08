@@ -3001,7 +3001,7 @@ function zapiszUstawieniaWysylki(e){
   for(const k of String(e.target.dataset.flagi||"").split(",").filter(Boolean)) obj[k]=f.has(k);
   zapiszCzescUstawien({wysylka:{...ustawieniaWysylki(),...obj}});
 }
-let stanBramki={sprawdzono:false,online:false,configured:false,ready:false,authenticated:false,error:"",organizations:[],email:{configured:false,provider:null},store:{configured:false,writable:false,orders:0,users:0}};
+let stanBramki={sprawdzono:false,online:false,configured:false,ready:false,authenticated:false,error:"",organizations:[],email:{configured:false,provider:null},store:{configured:false,writable:false,orders:0,users:0},inpost:{configured:false,geowidgetConfigured:false,env:"production"}};
 function urlBramki(action,parametry={}){
   const baza=String(ustawieniaWysylki().apiEndpoint||"api/index.php").trim();
   const url=new URL(baza,location.href);
@@ -3136,7 +3136,8 @@ async function sprawdzBramke(cicho=false){
   let cloud=null;
   try{
     cloud=await chmura("health",{timeout:9000});
-    stanBramki={...stanBramki,sprawdzono:true,online:true,email:cloud.email||stanBramki.email,store:cloud.store||stanBramki.store,error:""};
+    stanBramki={...stanBramki,sprawdzono:true,online:true,email:cloud.email||stanBramki.email,store:cloud.store||stanBramki.store,inpost:cloud.inpost||stanBramki.inpost,error:""};
+    if(cloud.inpost) INPOST_PUBLIC=cloud.inpost;
     if(cloud.store) stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,orders:cloud.store.orders||0,users:cloud.store.users||0,updatedAt:cloud.store.settings_updated_at||cloud.store.updated_at||null,error:""};
   }catch(e){ /* Netlify może być chwilowo niedostępne — niżej próbujemy stary backend PHP */ }
   try{
@@ -3171,82 +3172,75 @@ async function rozlaczBramke(){
 }
 async function testujInPost(){
   try{
-    const d=await wywolajBramke("test");
-    const lista=d.organizations?.items||d.organizations?.organizations||d.organizations||[];
-    stanBramki={...stanBramki,online:true,configured:true,authenticated:true,error:"",organizations:Array.isArray(lista)?lista:[]};
-    toast("Połączenie OAuth z InPost działa ✅");renderuj();
+    const cfg=await pobierzInpostConfig(true);
+    stanBramki={...stanBramki,inpost:cfg||stanBramki.inpost};
+    if(cfg&&cfg.configured) toast(`InPost gotowy ✅ (${cfg.env})${cfg.geowidgetConfigured?" • mapa paczkomatów aktywna":" • brak tokenu Geowidget"}`);
+    else toast("InPost niegotowy — ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify");
+    renderuj();
   }catch(bl){stanBramki={...stanBramki,error:bl.message};toast("Test InPost: "+bl.message);renderuj();}
 }
-function daneZamowieniaDoBramki(z){
-  const w=daneWysylki(z),k=z.klient||{},a=z.adresDostawy||{};
-  return {
-    provider:"inpost",
-    order:{
-      number:z.nr,amount:z.razem,cod:z.platnoscId==="pobranie",pointId:z.paczkomat||"",
-      customer:{firstName:k.imie||"",lastName:k.nazwisko||"",email:z.email||"",phone:k.telefon||"",company:k.firma||""},
-      address:{countryCode:"PL",street:a.ulica||"",houseNumber:a.nrDomu||"",flatNumber:a.nrLokalu||"",city:a.miasto||"",postalCode:a.kod||""}
-    },
-    parcel:{weight:Number(w.waga||ustawieniaWysylki().waga||1),length:Number(w.dlugosc||ustawieniaWysylki().dlugosc||30),width:Number(w.szerokosc||ustawieniaWysylki().szerokosc||20),height:Number(w.wysokosc||ustawieniaWysylki().wysokosc||15)}
-  };
+function b64toBlob(b64,typ="application/pdf"){
+  const bin=atob(String(b64||"")); const len=bin.length; const arr=new Uint8Array(len);
+  for(let i=0;i<len;i++) arr[i]=bin.charCodeAt(i);
+  return new Blob([arr],{type:typ});
 }
 async function utworzPrzesylkeAPI(nr){
   const z=pobierzZamowienia().find(x=>x.nr===nr);
   if(!z)return toast("Nie znaleziono zamówienia");
+  if(!chmuraToken){ toast("Wpisz hasło bazy administratora"); chmuraUstawToken(); return; }
   if(!confirm(`Utworzyć prawdziwą przesyłkę InPost dla ${nr}? W trybie produkcyjnym operacja może naliczyć opłatę zgodnie z umową.`))return;
   try{
     toast("Tworzę przesyłkę InPost…");
-    const d=await wywolajBramke("create-shipment",{method:"POST",body:daneZamowieniaDoBramki(z)});
+    const d=await chmura("inpost-create",{method:"POST",body:{nr},timeout:25000});
     aktualizujZamowienie(nr,zam=>{
       const w=daneWysylki(zam);
-      w.przewoznik="inpost";w.numer=d.trackingNumber;w.etykietaUrl=d.labelUrl||"";w.etap="etykieta";w.status="utworzona";
-      w.bladIntegracji="";w.ostatniaSynchronizacja=new Date().toISOString();w.zadania={...(w.zadania||{}),dane:true,etykieta:true};
-      w.historia=[...(w.historia||[]),{czas:new Date().toLocaleString("pl-PL"),status:"Przesyłka utworzona w InPost",opis:`Numer ${d.trackingNumber}`,zewnetrzneId:d.trackingNumber}];
-      zam.wysylka=w;if(["nowe","potwierdzone","w realizacji"].includes(zam.status))zam.status="gotowe do wysyłki";
+      zam.wysylka=d.order?.wysylka?{...w,...d.order.wysylka}:{...w,przewoznik:"inpost",inpostId:d.inpostId||w.inpostId,numer:d.trackingNumber||w.numer};
+      if(d.trackingNumber&&["nowe","potwierdzone","w realizacji"].includes(zam.status))zam.status="gotowe do wysyłki";
     });
-    loguj("info",`InPost API utworzyło przesyłkę ${d.trackingNumber} dla ${nr}`);
-    toast("Przesyłka InPost utworzona ✅");renderuj();
+    loguj("info",`InPost utworzył przesyłkę ${d.inpostId||""} (${d.trackingNumber||"bez numeru"}) dla ${nr}`);
+    toast(d.trackingNumber?`Przesyłka InPost utworzona ✅ ${d.trackingNumber}`:"Przesyłka utworzona ✅ (numer po potwierdzeniu — użyj „Pobierz status”)");
+    renderuj();
   }catch(bl){
-    if(bl.code==="AUTH_REQUIRED"||bl.code==="NOT_CONFIGURED"){
-      tabWysylek="ustawienia";location.hash="#/admin/wysylki";
-      toast(bl.code==="AUTH_REQUIRED"?"Najpierw połącz sesję integracji":"Najpierw uzupełnij api/config.php");
-      return;
-    }
+    if(bl.code==="inpost_not_configured"){ toast("Najpierw skonfiguruj InPost w Netlify (INPOST_TOKEN, INPOST_ORG_ID)"); location.hash="#/admin/dostawy"; return; }
+    if(bl.code==="no_point"){ toast("Zamówienie nie ma wybranego paczkomatu (klient nie wskazał punktu)"); return; }
+    if(bl.code==="exists"){ toast("Przesyłka InPost już istnieje dla tego zamówienia"); return; }
     aktualizujZamowienie(nr,zam=>{const w=daneWysylki(zam);w.bladIntegracji=bl.message;w.etap="problem";zam.wysylka=w;});
     loguj("blad",`InPost create ${nr}: ${bl.message}`);toast("InPost: "+bl.message);renderuj();
   }
 }
-function pobierzEtykieteAPI(nr,format="A6"){
-  const z=pobierzZamowienia().find(x=>x.nr===nr),numer=z?.wysylka?.numer;
-  if(!numer)return toast("Najpierw utwórz przesyłkę i numer nadania");
-  window.open(urlBramki("label",{tracking:numer,format}),"_blank","noopener");
+async function pobierzEtykieteAPI(nr,format="A6"){
+  const z=pobierzZamowienia().find(x=>x.nr===nr);
+  if(!z?.wysylka?.inpostId)return toast("Najpierw utwórz przesyłkę InPost");
+  if(!chmuraToken){ chmuraUstawToken(); return; }
+  try{
+    toast("Pobieram etykietę InPost…");
+    const d=await chmura("inpost-label",{params:{nr,type:format},timeout:25000});
+    const url=URL.createObjectURL(b64toBlob(d.base64,"application/pdf"));
+    window.open(url,"_blank","noopener");
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    loguj("info",`Pobrano etykietę InPost ${format} dla ${nr}`);
+  }catch(bl){
+    if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost w Netlify"); return; }
+    if(bl.code==="no_shipment"){ toast("Najpierw utwórz przesyłkę InPost"); return; }
+    toast("Etykieta: "+bl.message); loguj("blad",`InPost label ${nr}: ${bl.message}`);
+  }
 }
 async function synchronizujTrackingAPI(nr){
-  const z=pobierzZamowienia().find(x=>x.nr===nr),numer=z?.wysylka?.numer;
-  if(!numer)return toast("Brak numeru przesyłki");
+  const z=pobierzZamowienia().find(x=>x.nr===nr);
+  if(!z?.wysylka?.inpostId)return toast("To zamówienie nie ma przesyłki InPost");
+  if(!chmuraToken){ chmuraUstawToken(); return; }
   try{
-    toast("Pobieram aktualny tracking…");
-    const d=await wywolajBramke("tracking",{parametry:{tracking:numer}});
-    aktualizujZamowienie(nr,zam=>{
-      const w=daneWysylki(zam),istniejace=new Set((w.historia||[]).map(h=>h.zewnetrzneId).filter(Boolean));
-      const nowe=(d.events||[]).filter(ev=>!istniejace.has(ev.id)).map(ev=>({
-        czas:ev.time?new Date(ev.time).toLocaleString("pl-PL"):new Date().toLocaleString("pl-PL"),
-        status:ev.status||ev.code,opis:[ev.code,ev.location].filter(Boolean).join(" • "),zewnetrzneId:ev.id
-      }));
-      w.historia=[...(w.historia||[]),...nowe];w.etap=d.stage||w.etap;w.status=d.rawStatus||w.status;
-      w.ostatniaSynchronizacja=new Date().toISOString();w.bladIntegracji=d.stage==="problem"?(nowe.at(-1)?.status||"Problem zgłoszony przez InPost"):"";
-      zam.wysylka=w;
-      const mapa={przekazana:"nadane",transport:"nadane",doreczenie:"w doręczeniu",dostarczona:"dostarczone",zwrot:"zwrot"};
-      if(mapa[d.stage])zam.status=mapa[d.stage];
-    });
-    loguj("info",`Zsynchronizowano tracking InPost ${numer}`);toast("Tracking zaktualizowany ✅");renderuj();
+    toast("Pobieram status z InPost…");
+    const d=await chmura("inpost-status",{params:{nr},timeout:20000});
+    aktualizujZamowienie(nr,zam=>{ if(d.order?.wysylka) zam.wysylka={...daneWysylki(zam),...d.order.wysylka}; });
+    loguj("info",`InPost status ${nr}: ${d.status||""} ${d.trackingNumber||""}`);
+    toast("Status InPost zaktualizowany ✅"+(d.status?` (${d.status})`:""));
+    renderuj();
   }catch(bl){
-    if(bl.code==="AUTH_REQUIRED"||bl.code==="NOT_CONFIGURED"){
-      tabWysylek="ustawienia";location.hash="#/admin/wysylki";
-      toast(bl.code==="AUTH_REQUIRED"?"Najpierw połącz sesję integracji":"Najpierw uzupełnij api/config.php");
-      return;
-    }
+    if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost w Netlify"); return; }
+    if(bl.code==="no_shipment"){ toast("To zamówienie nie ma przesyłki InPost"); return; }
     aktualizujZamowienie(nr,zam=>{const w=daneWysylki(zam);w.bladIntegracji=bl.message;zam.wysylka=w;});
-    loguj("blad",`InPost tracking ${nr}: ${bl.message}`);toast("Tracking: "+bl.message);renderuj();
+    loguj("blad",`InPost status ${nr}: ${bl.message}`);toast("Status: "+bl.message);renderuj();
   }
 }
 function przelaczZadanieWysylki(nr,klucz){
@@ -3372,9 +3366,18 @@ function panelAutomatyzacjiWysylek(){
 function panelUstawienBramki(){
   const u=ustawieniaWysylki();
   const stanTekst=!stanBramki.sprawdzono?"nie sprawdzono":!stanBramki.online?"backend niedostępny":!stanBramki.configured?"brak config.php / OAuth":!stanBramki.ready?"OAuth działa — uzupełnij Organization ID":stanBramki.authenticated?"połączono z sesją integracji":"backend gotowy — zaloguj integrację";
+  const ip=stanBramki.inpost||{};
+  const ipGotowy=!!ip.configured, ipMapa=!!ip.geowidgetConfigured;
   return `<div class="panel">
     <h1>⚙️ Uniwersalna bramka przewoźników</h1>
-    <div class="integration-hub"><div class="integration-hub-status"><span><b>Jeden punkt integracji</b><br><code>${esc(u.apiEndpoint)}</code></span><span class="integration-state">${esc(stanTekst)}</span></div>
+    <div class="integration-hub" style="border:2px solid ${ipGotowy?'#86efac':'#fcd34d'};background:${ipGotowy?'#f0fdf4':'#fffbeb'}">
+      <div class="integration-hub-status"><span><b>🟡 InPost (ShipX) — Netlify</b><br><small style="color:var(--muted2)">Prawdziwe przesyłki, etykiety i mapa paczkomatów — tokeny w zmiennych Netlify</small></span>
+        <span class="integration-state" style="background:${ipGotowy?'#dcfce7':'#fef3c7'};color:${ipGotowy?'#166534':'#854d0e'}">${ipGotowy?`gotowy • ${esc(ip.env||'production')}`:'brak tokenów'}</span></div>
+      <p class="ship-meta">Przesyłki ShipX: <b>${ipGotowy?"aktywne ✅":"ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify"}</b> &nbsp;•&nbsp; Mapa paczkomatów (Geowidget) u klienta: <b>${ipMapa?"aktywna ✅":"ustaw INPOST_GEOWIDGET_TOKEN"}</b></p>
+      <div class="diag-actions"><button class="btn" style="background:#ffcc00;color:#111" onclick="testujInPost()">🔎 Sprawdź InPost</button></div>
+      <div class="backend-note" style="margin-top:.6rem"><b>Wymagane zmienne Netlify:</b> <code>INPOST_TOKEN</code> (token API ShipX), <code>INPOST_ORG_ID</code> (Organization ID), <code>INPOST_GEOWIDGET_TOKEN</code> (publiczny token mapy). Opcjonalnie <code>INPOST_ENV=production</code> i <code>INPOST_SENDING_METHOD=dispatch_order</code>. Tokeny generujesz w <b>manager.paczkomaty.pl → Moje konto → API</b>.</div>
+    </div>
+    <div class="integration-hub" style="margin-top:1rem"><div class="integration-hub-status"><span><b>Jeden punkt integracji (starszy backend PHP)</b><br><code>${esc(u.apiEndpoint)}</code></span><span class="integration-state">${esc(stanTekst)}</span></div>
       <p class="ship-meta">Panel wysyła jedno standardowe zlecenie. Backend wybiera adapter przewoźnika i zwraca wspólną odpowiedź: identyfikator, numer, oficjalną etykietę oraz tracking.</p>
       <div class="diag-actions">
         <button class="btn ghost" onclick="sprawdzBramke()">🔎 Sprawdź backend PHP</button>
@@ -3393,7 +3396,7 @@ function panelUstawienBramki(){
       <div class="f-row"><div class="f-group"><label>Adres bramki backendowej</label><input name="apiEndpoint" value="${esc(u.apiEndpoint)}" placeholder="/api/shipping"></div><div class="f-group"><label>Tryb</label><select name="tryb"><option value="sandbox" ${u.tryb==="sandbox"?"selected":""}>Sandbox / testowy</option><option value="production" ${u.tryb==="production"?"selected":""}>Produkcyjny</option></select></div></div>
       <div class="backend-note"><b>Bez sekretów:</b> w tym miejscu zapisuje się tylko adres wspólnej bramki. Tokeny przewoźników pozostają na serwerze, poza publicznym katalogiem strony.</div>
       <h2>Adaptery pod jedną bramką</h2>
-      <div class="integration-grid">${Object.entries(PRZEWOZNICY).filter(([id])=>id!=="inny").map(([id,p])=>`<div class="integration-card"><b>${esc(p.nazwa)}</b><span class="integration-state">${id==="inpost"?(stanBramki.ready?"adapter gotowy do przesyłek":stanBramki.configured?"OAuth gotowy — wpisz Organization ID":"adapter PHP gotowy — uzupełnij config.php"):"adapter do dodania w kolejnym etapie"}</span><p class="ship-meta">${id==="inpost"?"OAuth 2.1 • prawdziwe zlecenie • PDF A6/A4 • tracking":"wspólny kontrakt przygotowany"}</p></div>`).join("")}</div>
+      <div class="integration-grid">${Object.entries(PRZEWOZNICY).filter(([id])=>id!=="inny").map(([id,p])=>`<div class="integration-card"><b>${esc(p.nazwa)}</b><span class="integration-state">${id==="inpost"?(ipGotowy?"adapter Netlify gotowy — przesyłki, etykiety, mapa":"ustaw tokeny InPost w Netlify"):"adapter do dodania w kolejnym etapie"}</span><p class="ship-meta">${id==="inpost"?"ShipX (Netlify) • przesyłka + numer • PDF A6/A4 • status • Geowidget":"wspólny kontrakt przygotowany"}</p></div>`).join("")}</div>
       <h2>Dane nadawcy i paczki</h2>
       <div class="f-row"><div class="f-group"><label>Domyślny przewoźnik</label><select name="przewoznik">${Object.entries(PRZEWOZNICY).map(([id,p])=>`<option value="${id}" ${u.przewoznik===id?"selected":""}>${esc(p.nazwa)}</option>`).join("")}</select></div><div class="f-group"><label>Nazwa nadawcy</label><input name="nadawca" value="${esc(u.nadawca)}"></div></div>
       <div class="f-row"><div class="f-group"><label>Ulica i numer</label><input name="ulica" value="${esc(u.ulica)}"></div><div class="f-group"><label>Kod pocztowy</label><input name="kod" value="${esc(u.kod)}"></div><div class="f-group"><label>Miasto</label><input name="miasto" value="${esc(u.miasto)}"></div></div>
@@ -3540,7 +3543,7 @@ function widokAdminZamowienie(nr){
         <div class="summary" style="margin:.5rem 0 1rem">${z.pozycje.map(p=>`<div><span>${esc(p)}</span></div>`).join("")}
           <div class="sum-total"><span>Razem</span><span>${zl(z.razem)}</span></div></div>
         <h2>Dostawa i płatność</h2>
-        <p>🚚 ${esc(z.dostawa||"—")}<br>💳 ${esc(z.platnosc||"—")}${z.platnoscId==="paynow"?`<br>Paynow: <b style="color:${paynowKolorStatusu(paynow.status)}">${esc(paynowStatusTekst(paynow.status))}</b>${paynow.paymentId?` • <code>${esc(paynow.paymentId)}</code>`:""}`:""}<br>📍 ${esc(z.adres||"—")}${z.paczkomat?`<br>📮 Punkt: <b>${esc(z.paczkomat)}</b>`:""}</p>
+        <p>🚚 ${esc(z.dostawa||"—")}<br>💳 ${esc(z.platnosc||"—")}${z.platnoscId==="paynow"?`<br>Paynow: <b style="color:${paynowKolorStatusu(paynow.status)}">${esc(paynowStatusTekst(paynow.status))}</b>${paynow.paymentId?` • <code>${esc(paynow.paymentId)}</code>`:""}`:""}<br>📍 ${esc(z.adres||"—")}${z.paczkomat?`<br>📮 Paczkomat: <b>${esc(z.paczkomat)}</b>${z.paczkomatAdres?` <small style="color:var(--muted2)">(${esc(z.paczkomatAdres)})</small>`:""}`:""}${w.inpostId?`<br>🟡 InPost: <code>${esc(w.inpostId)}</code>${w.inpostStatus?` • ${esc(w.inpostStatus)}`:""}`:""}</p>
         ${z.platnoscId==="paynow"?`<div class="diag-actions"><button class="btn ghost" type="button" onclick="odswiezStatusPaynow(${jsArg(z.nr)},${jsArg(paynow.paymentId||"")})">🔄 Odśwież Paynow</button>${paynow.redirectUrl?`<a class="btn" href="${esc(paynow.redirectUrl)}" target="_blank" rel="noopener">Otwórz link płatności</a>`:""}${String(paynow.status||"").toUpperCase()==="CONFIRMED"?`<button class="btn" type="button" style="background:#0ea5e9;color:#fff" onclick="zwrotPieniedzyPaynow(${jsArg(z.nr)})">💸 Zwrot pieniędzy przez Paynow</button>`:""}</div>`:""}
         ${Array.isArray(paynow.refunds)&&paynow.refunds.length?`<div class="backend-note" style="border-color:#7dd3fc;background:#f0f9ff;color:#075985"><b>Zwroty Paynow:</b><br>${paynow.refunds.map(r=>`${zl((Number(r.amount)||0)/100)} • <code>${esc(r.refundId||"—")}</code> • ${esc(r.status||"—")}${r.ts?` • ${esc(new Date(r.ts).toLocaleString("pl-PL"))}`:""}`).join("<br>")}</div>`:""}
       </div>
@@ -3587,8 +3590,8 @@ function widokAdminZamowienie(nr){
         <button class="btn" type="submit">💾 Zapisz przesyłkę</button>
         <button class="btn ghost" type="button" onclick="drukujEtykieteRobocza('${esc(z.nr)}')">🏷️ Etykieta robocza A6</button>
         ${urlSledzenia(z)?`<a class="btn ghost" href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">🔎 Śledź u przewoźnika</a>`:""}
-        ${przewoznik==="inpost"&&!w.numer?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI('${esc(z.nr)}')">🟡 Utwórz przesyłkę InPost API</button>`:""}
-        ${przewoznik==="inpost"&&w.numer?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="pobierzEtykieteAPI('${esc(z.nr)}','A6')">🏷️ Oficjalna etykieta InPost A6</button><button class="btn ghost" type="button" onclick="synchronizujTrackingAPI('${esc(z.nr)}')">🔄 Pobierz tracking z InPost</button>`:""}
+        ${przewoznik==="inpost"&&!w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI('${esc(z.nr)}')">🟡 Utwórz przesyłkę InPost API</button>`:""}
+        ${przewoznik==="inpost"&&w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="pobierzEtykieteAPI('${esc(z.nr)}','A6')">🏷️ Etykieta InPost A6</button><button class="btn ghost" type="button" onclick="pobierzEtykieteAPI('${esc(z.nr)}','A4')">🏷️ A4</button><button class="btn ghost" type="button" onclick="synchronizujTrackingAPI('${esc(z.nr)}')">🔄 Pobierz status z InPost</button>`:""}
         ${przewoznik!=="inpost"?`<button class="btn ghost" type="button" disabled>Oficjalna etykieta — adapter ${esc(nazwaPrzewoznika(przewoznik))} niepodłączony</button>`:""}
       </div>
     </form>
@@ -6509,8 +6512,13 @@ function otworzModal(){
         </div>
       </div>
       <div class="f-group" id="paczkomatBox" style="display:none">
-        <label>Numer paczkomatu * <small style="font-weight:400;color:var(--muted2)">(np. WAW01M — znajdziesz na inpost.pl)</small></label>
-        <input name="paczkomat" placeholder="np. WAW01M">
+        <label>Paczkomat InPost *</label>
+        <input type="hidden" name="paczkomat" id="paczkomatKod">
+        <div class="diag-actions" style="margin:.2rem 0">
+          <button type="button" class="btn" style="background:#ffcc00;color:#111;font-weight:800" onclick="otworzGeowidget()">🗺️ Wybierz paczkomat na mapie</button>
+        </div>
+        <div id="paczkomatWybrany" style="font-size:.9rem;color:var(--muted2)">Kliknij mapę i wskaż paczkomat najbliżej Twojego adresu.</div>
+        <input id="paczkomatReczny" placeholder="lub wpisz kod ręcznie, np. WAW01M" style="margin-top:.4rem;text-transform:uppercase" oninput="ustawPaczkomatReczny(this.value)">
       </div>
       <div class="f-group"><label>Uwagi do zamówienia</label><textarea name="notes" rows="2"></textarea></div>
       <div class="summary" id="orderSummary"></div>
@@ -6524,8 +6532,7 @@ function przeliczZamowienie(){
   const form = $("orderForm"); if(!form) return;
   const idD = form.delivery.value, idP = form.payment.value;
   const pBox = $("paczkomatBox");
-  if(pBox){ pBox.style.display = idD==="paczkomat" ? "" : "none";
-    form.paczkomat.required = (idD==="paczkomat"); }
+  if(pBox){ pBox.style.display = idD==="paczkomat" ? "" : "none"; }
   const suma = sumaPoRabacie(), dostawa = kosztDostawy(idD), oplata = oplataPlatnosci(idP);
   $("orderSummary").innerHTML =
     koszyk.map(x=>{const p=produkty.find(p=>p.id===x.id);
@@ -6535,6 +6542,57 @@ function przeliczZamowienie(){
     + (oplata?`<div><span>Opłata za pobranie</span><span>${zl(oplata)}</span></div>`:"")
     + `<div class="sum-total"><span>Do zapłaty</span><span>${zl(suma+dostawa+oplata)}</span></div>`;
 }
+// ─── InPost Geowidget (wybór paczkomatu na mapie) ───
+let INPOST_PUBLIC=null, geowidgetSDK=null;
+async function pobierzInpostConfig(force=false){
+  if(INPOST_PUBLIC&&!force) return INPOST_PUBLIC;
+  try{ const d=await chmura("inpost-config",{timeout:9000}); INPOST_PUBLIC=d.inpost||null; }catch(e){ INPOST_PUBLIC=null; }
+  return INPOST_PUBLIC;
+}
+function ladujGeowidgetSDK(){
+  if(geowidgetSDK) return geowidgetSDK;
+  geowidgetSDK=new Promise((res,rej)=>{
+    if(!document.getElementById("inpost-geo-css")){ const l=document.createElement("link"); l.id="inpost-geo-css"; l.rel="stylesheet"; l.href="https://geowidget.inpost.pl/inpost-geowidget.css"; document.head.appendChild(l); }
+    if(window.customElements&&window.customElements.get("inpost-geowidget")){ res(true); return; }
+    const s=document.createElement("script"); s.src="https://geowidget.inpost.pl/inpost-geowidget.js"; s.defer=true;
+    s.onload=()=>res(true); s.onerror=()=>rej(new Error("Nie udało się załadować mapy InPost")); document.head.appendChild(s);
+  });
+  return geowidgetSDK;
+}
+function ustawPaczkomatReczny(v){
+  const kod=String(v||"").trim().toUpperCase();
+  const h=$("paczkomatKod"); if(h) h.value=kod;
+  window.__paczkomatAdres="";
+  const d=$("paczkomatWybrany"); if(d) d.innerHTML = kod?`📮 Wybrany paczkomat: <b>${esc(kod)}</b>`:"Kliknij mapę i wskaż paczkomat najbliżej Twojego adresu.";
+}
+window.artwayPunktWybrany=function(point){
+  try{
+    const kod=(point&&(point.name||point.id))||"";
+    const adr=point&&point.address?[point.address.line1,point.address.line2].filter(Boolean).join(", "):((point&&point.location_description)||"");
+    const h=$("paczkomatKod"); if(h) h.value=kod;
+    const r=$("paczkomatReczny"); if(r) r.value=kod;
+    window.__paczkomatAdres=adr;
+    const d=$("paczkomatWybrany"); if(d) d.innerHTML=kod?`📮 Wybrany paczkomat: <b>${esc(kod)}</b>${adr?`<br><small>${esc(adr)}</small>`:""}`:"Kliknij mapę i wskaż paczkomat najbliżej Twojego adresu.";
+    zamknijGeowidget();
+    toast("Wybrano paczkomat "+kod);
+  }catch(e){ loguj("blad","Geowidget punkt: "+(e&&e.message||e)); }
+};
+async function otworzGeowidget(){
+  const cfg=await pobierzInpostConfig();
+  if(!cfg||!cfg.geowidgetToken){ toast("Mapa paczkomatów nie jest jeszcze skonfigurowana — wpisz kod paczkomatu ręcznie w polu poniżej"); const r=$("paczkomatReczny"); if(r) r.focus(); return; }
+  try{ await ladujGeowidgetSDK(); }catch(e){ toast(e.message||"Błąd mapy InPost"); return; }
+  const form=$("orderForm"); const cod = !!(form&&form.payment&&form.payment.value==="pobranie");
+  const config = cod ? "parcelCollectPayment" : "parcelCollect";
+  let ov=$("geoOverlay");
+  if(!ov){ ov=document.createElement("div"); ov.id="geoOverlay"; ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:2vmin"; document.body.appendChild(ov); }
+  ov.innerHTML=`<div style="background:#fff;border-radius:16px;width:min(980px,96vw);height:min(88vh,780px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:.7rem 1rem;background:#111;color:#fff">
+      <b>Wybierz paczkomat InPost</b><button type="button" onclick="zamknijGeowidget()" style="background:#ffcc00;color:#111;border:0;border-radius:8px;padding:.4rem .8rem;font-weight:800;cursor:pointer">Zamknij ✕</button></div>
+    <div style="flex:1;min-height:0"><inpost-geowidget onpoint="artwayPunktWybrany" token="${esc(cfg.geowidgetToken)}" language="pl" config="${config}" style="width:100%;height:100%;display:block"></inpost-geowidget></div>
+  </div>`;
+  ov.style.display="flex";
+}
+function zamknijGeowidget(){ const ov=$("geoOverlay"); if(ov){ ov.style.display="none"; ov.innerHTML=""; } }
 async function zlozZamowienie(e){
   e.preventDefault();
   try{
@@ -6553,6 +6611,11 @@ async function zlozZamowienie(e){
       else { loguj("ostrzezenie","Konto przy zamówieniu nieutworzone: "+w.blad); }
     }
     const idD = f.get("delivery"), idP = f.get("payment");
+    if(idD==="paczkomat" && !String(f.get("paczkomat")||"").trim()){
+      toast("⚠️ Wybierz paczkomat na mapie lub wpisz jego kod");
+      const r=$("paczkomatReczny"); if(r) r.focus();
+      return;
+    }
     const dost = KONFIG.dostawy.find(x=>x.id===idD);
     const plat = KONFIG.platnosci.find(x=>x.id===idP);
     const suma = sumaPoRabacie(), dostawa = kosztDostawy(idD), oplata = oplataPlatnosci(idP);
@@ -6603,7 +6666,7 @@ Uwagi: ${f.get("notes")||"brak"}`;
         firma:f.get("firmaChk")?String(f.get("firma")||"").trim():"",nip:f.get("firmaChk")?String(f.get("nip")||"").replace(/[^0-9]/g,""):""},
       adresDostawy:{ulica:String(f.get("ulica")||"").trim(),nrDomu:String(f.get("nrDomu")||"").trim(),nrLokalu:String(f.get("nrLokalu")||"").trim(),kod:String(f.get("kod")||"").trim(),miasto:String(f.get("miasto")||"").trim()},
       pozycje,pozycjeDane,razem,status:"nowe",dostawa:dost.nazwa,dostawaId:idD,platnosc:plat.nazwa,platnoscId:idP,platnoscInstrukcja:instrukcjaPlatnosciTekst(idP,nr,razem),adres,
-      paczkomat:idD==="paczkomat"?String(f.get("paczkomat")||"").trim():"",uwagi:String(f.get("notes")||"").trim(),
+      paczkomat:idD==="paczkomat"?String(f.get("paczkomat")||"").trim():"",paczkomatAdres:idD==="paczkomat"?String(window.__paczkomatAdres||"").trim():"",uwagi:String(f.get("notes")||"").trim(),
       wysylka:{status:"nieprzygotowana",etap:"do_obslugi",priorytet:"normalny",zadania:{dane:true,kompletacja:false,etykieta:false,przekazanie:false},
         historia:[{czas:new Date().toLocaleString("pl-PL"),status:"Zamówienie utworzone",opis:"Oczekuje na potwierdzenie i przygotowanie"}],powiadomienia:[]}
     };

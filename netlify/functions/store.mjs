@@ -908,6 +908,156 @@ async function obsluzEmailePrzejsciaStatusu(stary, nowy) {
   return { sent: wyniki.some((x) => x.sent), configured: true, wyniki, powiadomienia: zapisany?.wysylka?.powiadomienia || [] };
 }
 
+// ─── INPOST ShipX (przesyłki, etykiety, tracking) + Geowidget ───
+const INPOST_ENVY = new Set(['production', 'sandbox']);
+function inpostEnv() {
+  const env = String(process.env.INPOST_ENV || 'production').trim().toLowerCase();
+  return INPOST_ENVY.has(env) ? env : 'production';
+}
+function inpostBaseUrl() {
+  return inpostEnv() === 'sandbox' ? 'https://sandbox-api-shipx-pl.easypack24.net' : 'https://api-shipx-pl.easypack24.net';
+}
+function inpostKonfiguracja() {
+  const token = tekst(process.env.INPOST_TOKEN || process.env.INPOST_API_TOKEN || '', 4000).trim();
+  const orgId = tekst(process.env.INPOST_ORG_ID || process.env.INPOST_ORGANIZATION_ID || '', 40).trim();
+  const geowidgetToken = tekst(process.env.INPOST_GEOWIDGET_TOKEN || '', 4000).trim();
+  return {
+    token,
+    orgId,
+    geowidgetToken,
+    configured: !!(token && orgId),
+    env: inpostEnv(),
+    baseUrl: inpostBaseUrl(),
+    sendingMethod: tekst(process.env.INPOST_SENDING_METHOD || 'dispatch_order', 40).trim() || 'dispatch_order',
+  };
+}
+function inpostPublicConfig() {
+  const c = inpostKonfiguracja();
+  return {
+    configured: c.configured,
+    env: c.env,
+    geowidgetToken: c.geowidgetToken,
+    geowidgetConfigured: !!c.geowidgetToken,
+    requiredEnv: ['INPOST_TOKEN', 'INPOST_ORG_ID', 'INPOST_GEOWIDGET_TOKEN'],
+    optionalEnv: ['INPOST_ENV=production', 'INPOST_SENDING_METHOD=dispatch_order'],
+  };
+}
+async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'application/json' } = {}) {
+  const c = inpostKonfiguracja();
+  if (!c.configured) {
+    const blad = new Error('InPost nie jest skonfigurowany po stronie serwera. Ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify.');
+    blad.code = 'inpost_not_configured';
+    throw blad;
+  }
+  const headers = { 'Authorization': `Bearer ${c.token}`, 'Accept': accept, 'User-Agent': 'Artway-TM/1.0' };
+  const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
+  if (body) headers['Content-Type'] = 'application/json';
+  const r = await fetch(new URL(path, c.baseUrl).toString(), { method, headers, body });
+  const ct = r.headers.get('content-type') || '';
+  if (accept === 'application/pdf' || ct.includes('application/pdf') || ct.includes('octet-stream')) {
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      const blad = new Error(bledyInpostTekst(bezpiecznyJson(t), `InPost HTTP ${r.status}`));
+      blad.status = r.status; throw blad;
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    return { binary: true, contentType: ct || 'application/pdf', base64: buf.toString('base64') };
+  }
+  const t = await r.text();
+  const dane = bezpiecznyJson(t);
+  if (!r.ok) {
+    const blad = new Error(bledyInpostTekst(dane, `InPost HTTP ${r.status}`));
+    blad.status = r.status; blad.inpost = dane; throw blad;
+  }
+  return dane || {};
+}
+function bezpiecznyJson(t) {
+  if (!t) return null;
+  try { return JSON.parse(t); } catch (e) { return { raw: t }; }
+}
+function bledyInpostTekst(dane, fallback) {
+  if (!dane) return fallback;
+  if (dane.message && typeof dane.message === 'string') {
+    const det = dane.details && typeof dane.details === 'object'
+      ? Object.entries(dane.details).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; ')
+      : '';
+    return det ? `${dane.message} (${det})` : dane.message;
+  }
+  if (dane.error) return `${dane.error}${dane.error_description ? ': ' + dane.error_description : ''}`;
+  return fallback;
+}
+function telefonInpost(v) {
+  const cyfry = String(v || '').replace(/[^0-9]/g, '');
+  if (cyfry.length === 11 && cyfry.startsWith('48')) return cyfry.slice(2);
+  return cyfry.slice(-9);
+}
+function przesylkaShipXPayload(z, c) {
+  const k = z?.klient || {};
+  const a = z?.adresDostawy || {};
+  const w = z?.wysylka || {};
+  const doPaczkomatu = z?.dostawaId === 'paczkomat' || !!(z?.paczkomat || w?.punktKod);
+  const punkt = tekst(z?.paczkomat || w?.punktKod, 40).trim();
+  const receiver = {
+    first_name: tekst(k.imie, 80).trim() || 'Klient',
+    last_name: tekst(k.nazwisko, 80).trim() || z?.nr || '—',
+    email: tekst(z?.email || k.email, 200).trim(),
+    phone: telefonInpost(k.telefon || z?.telefon),
+  };
+  if (!doPaczkomatu) {
+    receiver.address = {
+      street: tekst(a.ulica, 120).trim() || tekst(z?.adres, 120).trim(),
+      building_number: tekst(a.nrDomu, 30).trim() || '1',
+      city: tekst(a.miasto, 80).trim(),
+      post_code: tekst(a.kod, 12).trim(),
+      country_code: 'PL',
+    };
+  }
+  // parcele: szablon (small/medium/large) albo wymiary
+  const gab = tekst(w.gabaryt, 20).trim().toLowerCase();
+  let parcel;
+  if (['small', 'medium', 'large'].includes(gab)) parcel = { template: gab };
+  else parcel = {
+    dimensions: {
+      length: String(Math.round((Number(w.dlugosc) || 30) * 10)),
+      width: String(Math.round((Number(w.szerokosc) || 20) * 10)),
+      height: String(Math.round((Number(w.wysokosc) || 15) * 10)),
+      unit: 'mm',
+    },
+    weight: { amount: String(Number(w.waga) || 1), unit: 'kg' },
+  };
+  const payload = {
+    receiver,
+    parcels: [parcel],
+    service: doPaczkomatu ? 'inpost_locker_standard' : 'inpost_courier_standard',
+    reference: tekst(z?.nr, 80),
+    custom_attributes: {
+      sending_method: doPaczkomatu ? c.sendingMethod : 'dispatch_order',
+    },
+  };
+  if (doPaczkomatu && punkt) payload.custom_attributes.target_point = punkt;
+  if (z?.platnoscId === 'pobranie') {
+    payload.cod = { amount: Number(z?.razem) || 0, currency: 'PLN' };
+    payload.insurance = { amount: Number(z?.razem) || 0, currency: 'PLN' };
+  }
+  return payload;
+}
+function numerZShipX(s) {
+  return tekst(s?.tracking_number || s?.trackingNumber || '', 120).trim();
+}
+async function zapiszPrzesylkeNaZamowieniu(nr, patch) {
+  const rec = await czytaj('orders', { items: [] });
+  const items = Array.isArray(rec.items) ? rec.items : [];
+  const i = items.findIndex((x) => x.nr === nr);
+  if (i < 0) return { stary: null, nowy: null };
+  const stary = items[i];
+  const z = { ...stary };
+  const w = { ...(z.wysylka || {}), ...patch };
+  z.wysylka = w;
+  items[i] = z;
+  await zapisz('orders', { items, updated_at: new Date().toISOString() });
+  return { stary, nowy: z };
+}
+
 export default async (req) => {
   const url = new URL(req.url);
   const action = url.searchParams.get('action') || 'health';
@@ -939,6 +1089,7 @@ export default async (req) => {
           notificationUrl: paynowKonfiguracja(req).notificationUrl,
         },
         email: emailPublicConfig(),
+        inpost: inpostPublicConfig(),
       });
     }
 
@@ -1210,6 +1361,98 @@ export default async (req) => {
         order: { nr: zPo.nr, status: zPo.status, platnoscStatus: zPo.platnoscStatus, paynow: zPo.paynow },
         powiadomienia: zPo?.wysylka?.powiadomienia || [],
       }, 201);
+    }
+
+    // ─── INPOST: konfiguracja (publiczny token Geowidget + status) ───
+    if (action === 'inpost-config') {
+      return odpowiedz({ ok: true, inpost: inpostPublicConfig() });
+    }
+
+    // ─── INPOST: utworzenie przesyłki ShipX (admin) ───
+    if (action === 'inpost-create') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const c = inpostKonfiguracja();
+      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany. Ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify.', code: 'inpost_not_configured' }, 503);
+      const body = await req.json().catch(() => ({}));
+      const nr = numerZamowienia(body.nr || body.number);
+      if (!nr) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia' }, 422);
+      const rec = await czytaj('orders', { items: [] });
+      const z = (Array.isArray(rec.items) ? rec.items : []).find((x) => x.nr === nr);
+      if (!z) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
+      if (z?.wysylka?.inpostId) return odpowiedz({ ok: false, error: `Przesyłka InPost już istnieje (${z.wysylka.inpostId}).`, code: 'exists', inpostId: z.wysylka.inpostId }, 409);
+      const doPaczkomatu = z?.dostawaId === 'paczkomat' || !!(z?.paczkomat || z?.wysylka?.punktKod);
+      if (doPaczkomatu && !tekst(z?.paczkomat || z?.wysylka?.punktKod, 40).trim()) return odpowiedz({ ok: false, error: 'Brak wybranego paczkomatu w zamówieniu (klient nie wskazał punktu).', code: 'no_point' }, 422);
+      const payload = przesylkaShipXPayload(z, c);
+      const dane = await inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}/shipments`, { method: 'POST', bodyObj: payload });
+      const inpostId = tekst(dane?.id, 60).trim();
+      const numer = numerZShipX(dane);
+      const statusShipX = tekst(dane?.status, 60).trim();
+      const teraz = new Date().toLocaleString('pl-PL');
+      const historia = [...(Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : []), { czas: teraz, status: 'Przesyłka utworzona w InPost', opis: `${inpostId ? 'ID ' + inpostId : ''}${numer ? ' • ' + numer : ''}${statusShipX ? ' • ' + statusShipX : ''}`, zewnetrzneId: inpostId }];
+      const patch = {
+        przewoznik: 'inpost',
+        inpostId,
+        inpostStatus: statusShipX,
+        numer: numer || z?.wysylka?.numer || '',
+        etap: numer ? 'etykieta' : (z?.wysylka?.etap || 'przygotowanie'),
+        bladIntegracji: '',
+        ostatniaSynchronizacja: new Date().toISOString(),
+        zaktualizowano: new Date().toISOString(),
+        historia,
+      };
+      const { stary, nowy } = await zapiszPrzesylkeNaZamowieniu(nr, patch);
+      // jeśli od razu jest numer nadania → wyślij e-mail „nadanie"
+      let email = null;
+      if (numer && !numerZShipX({ tracking_number: stary?.wysylka?.numer })) {
+        try { email = await obsluzEmailePrzejsciaStatusu({ ...stary, wysylka: { ...(stary?.wysylka || {}), numer: '' } }, nowy); } catch (e) { email = { sent: false, error: e.message }; }
+      }
+      return odpowiedz({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, email, order: { nr, wysylka: nowy?.wysylka } }, 201);
+    }
+
+    // ─── INPOST: pobranie oficjalnej etykiety PDF (admin) ───
+    if (action === 'inpost-label') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const c = inpostKonfiguracja();
+      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany.', code: 'inpost_not_configured' }, 503);
+      const nr = numerZamowienia(url.searchParams.get('nr'));
+      let inpostId = tekst(url.searchParams.get('id'), 60).trim();
+      const typ = tekst(url.searchParams.get('type'), 10).trim().toUpperCase() === 'A4' ? 'A4' : 'A6';
+      if (!inpostId && nr) {
+        const rec = await czytaj('orders', { items: [] });
+        const z = (rec.items || []).find((x) => x.nr === nr);
+        inpostId = tekst(z?.wysylka?.inpostId, 60).trim();
+      }
+      if (!inpostId) return odpowiedz({ ok: false, error: 'Brak ID przesyłki InPost — najpierw utwórz przesyłkę.', code: 'no_shipment' }, 422);
+      const pdf = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(inpostId)}/label?format=pdf&type=${typ}`, { method: 'GET', accept: 'application/pdf' });
+      return odpowiedz({ ok: true, format: 'pdf', type: typ, filename: `etykieta-inpost-${nr || inpostId}.pdf`, base64: pdf.base64 });
+    }
+
+    // ─── INPOST: synchronizacja statusu / trackingu przesyłki (admin) ───
+    if (action === 'inpost-status') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const c = inpostKonfiguracja();
+      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany.', code: 'inpost_not_configured' }, 503);
+      const nr = numerZamowienia(url.searchParams.get('nr'));
+      const rec = await czytaj('orders', { items: [] });
+      const z = (rec.items || []).find((x) => x.nr === nr);
+      const inpostId = tekst(url.searchParams.get('id') || z?.wysylka?.inpostId, 60).trim();
+      if (!inpostId) return odpowiedz({ ok: false, error: 'Brak ID przesyłki InPost.', code: 'no_shipment' }, 422);
+      const dane = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(inpostId)}`, { method: 'GET' });
+      const numer = numerZShipX(dane);
+      const statusShipX = tekst(dane?.status, 60).trim();
+      const teraz = new Date().toLocaleString('pl-PL');
+      const stareH = Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : [];
+      const wpisIstnieje = stareH.some((h) => h.opis && h.opis.includes(statusShipX));
+      const historia = (statusShipX && !wpisIstnieje) ? [...stareH, { czas: teraz, status: 'Status InPost', opis: statusShipX + (numer ? ' • ' + numer : '') }] : stareH;
+      const patch = { inpostStatus: statusShipX, numer: numer || z?.wysylka?.numer || '', ostatniaSynchronizacja: new Date().toISOString(), historia };
+      if (numer && z?.wysylka?.etap && z.wysylka.etap === 'przygotowanie') patch.etap = 'etykieta';
+      const { stary, nowy } = await zapiszPrzesylkeNaZamowieniu(nr, patch);
+      let email = null;
+      if (numer && !(stary?.wysylka?.numer)) {
+        try { email = await obsluzEmailePrzejsciaStatusu(stary, nowy); } catch (e) { email = { sent: false, error: e.message }; }
+      }
+      return odpowiedz({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, email, order: { nr, wysylka: nowy?.wysylka } });
     }
 
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
