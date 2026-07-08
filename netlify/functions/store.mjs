@@ -933,6 +933,8 @@ function inpostKonfiguracja() {
     env: inpostEnv(),
     baseUrl: inpostBaseUrl(),
     sendingMethod: tekst(process.env.INPOST_SENDING_METHOD || 'dispatch_order', 40).trim() || 'dispatch_order',
+    lockerService: tekst(process.env.INPOST_LOCKER_SERVICE || 'inpost_locker_standard', 80).trim() || 'inpost_locker_standard',
+    courierService: tekst(process.env.INPOST_COURIER_SERVICE || 'inpost_courier_standard', 80).trim() || 'inpost_courier_standard',
   };
 }
 function inpostPublicConfig() {
@@ -944,7 +946,8 @@ function inpostPublicConfig() {
     geowidgetConfigured: !!c.geowidgetToken,
     missingEnv: c.missingEnv,
     requiredEnv: ['INPOST_TOKEN', 'INPOST_ORG_ID'],
-    optionalEnv: ['INPOST_GEOWIDGET_TOKEN', 'INPOST_ENV=production', 'INPOST_SENDING_METHOD=dispatch_order'],
+    services: { locker: c.lockerService, courier: c.courierService },
+    optionalEnv: ['INPOST_GEOWIDGET_TOKEN', 'INPOST_ENV=production', 'INPOST_SENDING_METHOD=dispatch_order', 'INPOST_LOCKER_SERVICE', 'INPOST_COURIER_SERVICE'],
   };
 }
 async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'application/json' } = {}) {
@@ -1067,6 +1070,23 @@ function walidujPrzesylkeInPost(z) {
 
   return { ok: errors.length === 0, errors, doPaczkomatu, punkt, email, phone, address };
 }
+function inpostListaUslug(org) {
+  return Array.isArray(org?.services) ? org.services.map((x) => tekst(x, 80).trim()).filter(Boolean) : [];
+}
+function inpostDostepnoscUslug(c, org) {
+  const services = inpostListaUslug(org);
+  const sprawdzaj = services.length > 0;
+  return {
+    services,
+    lockerService: c.lockerService,
+    courierService: c.courierService,
+    locker: !sprawdzaj || services.includes(c.lockerService),
+    courier: !sprawdzaj || services.includes(c.courierService),
+  };
+}
+async function inpostOrganizacja(c) {
+  return inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}`, { method: 'GET' });
+}
 function przesylkaShipXPayload(z, c, walidacja = null) {
   const v = walidacja || walidujPrzesylkeInPost(z);
   const k = z?.klient || {};
@@ -1097,7 +1117,7 @@ function przesylkaShipXPayload(z, c, walidacja = null) {
   const payload = {
     receiver,
     parcels: [parcel],
-    service: v.doPaczkomatu ? 'inpost_locker_standard' : 'inpost_courier_standard',
+    service: v.doPaczkomatu ? c.lockerService : c.courierService,
     reference: tekst(z?.nr, 80),
     comments: tekst(`Artway-TM ${z?.nr || ''}`.trim(), 100),
     custom_attributes: {
@@ -1452,18 +1472,19 @@ export default async (req) => {
           inpost: inpostPublicConfig(),
         }, 503);
       }
-      const org = await inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}`, { method: 'GET' });
-      const services = Array.isArray(org?.services) ? org.services.map((x) => tekst(x, 80)).filter(Boolean) : [];
+      const org = await inpostOrganizacja(c);
+      const availability = inpostDostepnoscUslug(c, org);
       return odpowiedz({
         ok: true,
         configured: true,
         inpost: {
           ...inpostPublicConfig(),
           authenticated: true,
+          serviceAvailability: availability,
           organization: {
             id: tekst(org?.id || c.orgId, 40),
             name: tekst(org?.name || '', 160),
-            services,
+            services: availability.services,
           },
         },
       });
@@ -1492,6 +1513,26 @@ export default async (req) => {
           code: 'inpost_validation',
           details: walidacja.errors,
         }, 422);
+      }
+      let availability = null;
+      try {
+        const org = await inpostOrganizacja(c);
+        availability = inpostDostepnoscUslug(c, org);
+      } catch (e) {
+        availability = null;
+      }
+      if (availability?.services?.length) {
+        const wymaganyTyp = walidacja.doPaczkomatu ? 'locker' : 'courier';
+        const service = walidacja.doPaczkomatu ? c.lockerService : c.courierService;
+        if (!availability[wymaganyTyp]) {
+          return odpowiedz({
+            ok: false,
+            error: `Konto InPost nie ma aktywnej usługi ${service}. Włącz ją w Managerze Paczek albo ustaw inny przewoźnik dla tej dostawy.`,
+            code: 'inpost_service_unavailable',
+            service,
+            serviceAvailability: availability,
+          }, 422);
+        }
       }
       const payload = przesylkaShipXPayload(z, c, walidacja);
       const dane = await inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}/shipments`, { method: 'POST', bodyObj: payload });

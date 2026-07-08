@@ -3185,7 +3185,9 @@ async function testujInPost(){
     stanBramki={...stanBramki,inpost:ip,error:""};
     const org=ip.organization?.id?` • organizacja ${ip.organization.id}`:"";
     const uslugi=ip.organization?.services?.length?` • usługi: ${ip.organization.services.slice(0,3).join(", ")}`:"";
-    toast(`InPost ShipX połączony ✅ (${ip.env||"production"})${org}${ip.geowidgetConfigured?" • mapa aktywna":" • brak tokenu Geowidget"}${uslugi}`);
+    const av=ip.serviceAvailability||{};
+    const uwagaKurier=av.courier===false?` • kurier InPost wymaga włączenia usługi ${av.courierService||"kurierskiej"}`:"";
+    toast(`InPost ShipX połączony ✅ (${ip.env||"production"})${org}${ip.geowidgetConfigured?" • mapa aktywna":" • brak tokenu Geowidget"}${uslugi}${uwagaKurier}`);
     renderuj();
   }catch(bl){
     const ip=bl.inpost||stanBramki.inpost||{};
@@ -3221,6 +3223,7 @@ async function utworzPrzesylkeAPI(nr){
     if(bl.code==="no_point"){ toast("Zamówienie nie ma wybranego paczkomatu (klient nie wskazał punktu)"); return; }
     if(bl.code==="exists"){ toast("Przesyłka InPost już istnieje dla tego zamówienia"); return; }
     if(bl.code==="inpost_validation"){ toast("Uzupełnij dane do InPost: "+((bl.details||[]).map(x=>x.message||x).join(" • ")||bl.message)); return; }
+    if(bl.code==="inpost_service_unavailable"){ toast(bl.message||"Ta usługa InPost nie jest aktywna na koncie"); return; }
     aktualizujZamowienie(nr,zam=>{const w=daneWysylki(zam);w.bladIntegracji=bl.message;w.etap="problem";zam.wysylka=w;});
     loguj("blad",`InPost create ${nr}: ${bl.message}`);toast("InPost: "+bl.message);renderuj();
   }
@@ -3384,20 +3387,22 @@ function panelUstawienBramki(){
   const u=ustawieniaWysylki();
   const ip=stanBramki.inpost||{};
   const ipGotowy=!!ip.configured, ipMapa=!!ip.geowidgetConfigured;
+  const av=ip.serviceAvailability||{};
   const braki=Array.isArray(ip.missingEnv)&&ip.missingEnv.length?ip.missingEnv:[...(ipGotowy?[]:["INPOST_TOKEN","INPOST_ORG_ID"])];
   const orgInfo=ip.organization?.id?`Organizacja: <b>${esc(ip.organization.id)}</b>${ip.organization.name?` • ${esc(ip.organization.name)}`:""}`:"Organizacja zostanie pokazana po realnym teście API.";
+  const uslugiInfo=av.services?.length?`<br>Usługa paczkomatowa <code>${esc(av.lockerService||"inpost_locker_standard")}</code>: <b>${av.locker?"aktywna ✅":"brak"}</b> • Kurier <code>${esc(av.courierService||"inpost_courier_standard")}</code>: <b>${av.courier?"aktywny ✅":"brak / do włączenia w InPost"}</b>`:"";
   return `<div class="panel">
     <h1>⚙️ Uniwersalna bramka przewoźników</h1>
     <div class="integration-hub" style="border:2px solid ${ipGotowy?'#86efac':'#fcd34d'};background:${ipGotowy?'#f0fdf4':'#fffbeb'}">
       <div class="integration-hub-status"><span><b>🟡 InPost (ShipX) — Netlify</b><br><small style="color:var(--muted2)">Prawdziwe przesyłki, etykiety i mapa paczkomatów — tokeny w zmiennych Netlify</small></span>
         <span class="integration-state" style="background:${ipGotowy?'#dcfce7':'#fef3c7'};color:${ipGotowy?'#166534':'#854d0e'}">${ipGotowy?`tokeny obecne • ${esc(ip.env||'production')}`:`brakuje: ${esc(braki.join(", "))}`}</span></div>
-      <p class="ship-meta">Przesyłki ShipX: <b>${ipGotowy?"aktywne po pozytywnym teście ✅":"uzupełnij brakujące zmienne Netlify"}</b> &nbsp;•&nbsp; Mapa paczkomatów (Geowidget) u klienta: <b>${ipMapa?"aktywna ✅":"ustaw INPOST_GEOWIDGET_TOKEN"}</b><br>${orgInfo}</p>
+      <p class="ship-meta">Przesyłki ShipX: <b>${ipGotowy?"aktywne po pozytywnym teście ✅":"uzupełnij brakujące zmienne Netlify"}</b> &nbsp;•&nbsp; Mapa paczkomatów (Geowidget) u klienta: <b>${ipMapa?"aktywna ✅":"ustaw INPOST_GEOWIDGET_TOKEN"}</b><br>${orgInfo}${uslugiInfo}</p>
       <div class="diag-actions">
         <button class="btn ghost" onclick="sprawdzBramke()">🔎 Sprawdź Netlify</button>
         <button class="btn" style="background:#ffcc00;color:#111" onclick="testujInPost()">🟡 Test API InPost</button>
       </div>
       ${stanBramki.error?`<div class="backend-note" style="border-color:var(--danger);background:#fff1f2;color:#991b1b"><b>Błąd połączenia:</b> ${esc(stanBramki.error)}</div>`:""}
-      <div class="backend-note" style="margin-top:.6rem"><b>Wymagane dla etykiet:</b> <code>INPOST_TOKEN</code> (token API ShipX) i <code>INPOST_ORG_ID</code> (Organization ID). <b>Dla mapy paczkomatów:</b> <code>INPOST_GEOWIDGET_TOKEN</code>. Opcjonalnie: <code>INPOST_ENV=production</code> i <code>INPOST_SENDING_METHOD=dispatch_order</code>. Dane generuje się w <b>manager.paczkomaty.pl → Moje konto → API</b>.</div>
+      <div class="backend-note" style="margin-top:.6rem"><b>Wymagane dla etykiet:</b> <code>INPOST_TOKEN</code> (token API ShipX) i <code>INPOST_ORG_ID</code> (Organization ID). <b>Dla mapy paczkomatów:</b> <code>INPOST_GEOWIDGET_TOKEN</code>. Opcjonalnie: <code>INPOST_ENV=production</code>, <code>INPOST_SENDING_METHOD=dispatch_order</code>, <code>INPOST_LOCKER_SERVICE</code>, <code>INPOST_COURIER_SERVICE</code>. Dane generuje się w <b>manager.paczkomaty.pl → Moje konto → API</b>; usługi kurierskie muszą być aktywne na koncie InPost.</div>
       <details style="margin-top:.6rem"><summary style="cursor:pointer;font-weight:700">Awaryjny/stary backend PHP na hostingu</summary>
         <p class="ship-meta">Główna integracja działa przez Netlify Functions. Ten adres zostaje tylko jako informacja dla pierwszej instalacji na nazwa.pl albo awaryjnego hostingu bez Netlify: <code>${esc(u.apiEndpoint)}</code>.</p>
       </details>
@@ -6158,8 +6163,9 @@ function testyDiagnostyczne(){
     ?`${stanBazyCentralnej.orders} zamówień • ${stanBazyCentralnej.users} klientów • wspólne dla wszystkich urządzeń`
     :stanBazyCentralnej.error||"Połącz backend, aby sprawdzić i zsynchronizować wspólną bazę");
   const ipDiag=stanBramki.inpost||{};
-  dodaj("Integracje","InPost ShipX API",ipDiag.configured?"ok":"warn",ipDiag.configured
-    ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}`
+  const avDiag=ipDiag.serviceAvailability||{};
+  dodaj("Integracje","InPost ShipX API",ipDiag.configured?(avDiag.courier===false?"warn":"ok"):"warn",ipDiag.configured
+    ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}${avDiag.locker===false?" • brak usługi paczkomatowej":""}${avDiag.courier===false?" • kurier InPost nieaktywny":""}`
     :`Brakuje: ${((ipDiag.missingEnv&&ipDiag.missingEnv.length?ipDiag.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", "))}`);
   const emailDiag=!!stanBramki.email?.configured;
   dodaj("Integracje","Automatyczne e-maile",emailDiag&&chmuraToken?"ok":"warn",emailDiag
