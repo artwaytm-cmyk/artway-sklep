@@ -1121,10 +1121,16 @@ function adresInpostZamowienia(z) {
 
   return { street, building_number, flat_number, city, post_code, country_code: 'PL' };
 }
+function czyDostawaPaczkomatInPost(z) {
+  const id = tekst(z?.dostawaId, 40).trim().toLowerCase();
+  if (id === 'kurier' || id === 'kurier_inpost') return false;
+  if (id === 'paczkomat') return true;
+  return !!(z?.paczkomat || z?.wysylka?.punktKod);
+}
 function walidujPrzesylkeInPost(z) {
   const k = z?.klient || {};
   const w = z?.wysylka || {};
-  const doPaczkomatu = true;
+  const doPaczkomatu = czyDostawaPaczkomatInPost(z);
   const punkt = tekst(z?.paczkomat || w?.punktKod, 40).trim().toUpperCase();
   const email = tekst(z?.email || k.email, 200).trim().toLowerCase();
   const phone = telefonInpost(k.telefon || z?.telefon);
@@ -1786,7 +1792,7 @@ export default async (req) => {
       const z = (Array.isArray(rec.items) ? rec.items : []).find((x) => x.nr === nr);
       if (!z) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
       if (z?.wysylka?.inpostId) return odpowiedz({ ok: false, error: `Przesyłka InPost już istnieje (${z.wysylka.inpostId}).`, code: 'exists', inpostId: z.wysylka.inpostId }, 409);
-      const doPaczkomatu = true;
+      const doPaczkomatu = czyDostawaPaczkomatInPost(z);
       if (doPaczkomatu && !tekst(z?.paczkomat || z?.wysylka?.punktKod, 40).trim()) return odpowiedz({ ok: false, error: 'Brak wybranego paczkomatu w zamówieniu — uzupełnij punkt InPost przed wygenerowaniem etykiety.', code: 'no_point' }, 422);
       const walidacja = walidujPrzesylkeInPost(z);
       if (!walidacja.ok) {
@@ -1805,12 +1811,12 @@ export default async (req) => {
         availability = null;
       }
       if (availability?.services?.length) {
-        const wymaganyTyp = 'locker';
-        const service = c.lockerService;
+        const wymaganyTyp = walidacja.doPaczkomatu ? 'locker' : 'courier';
+        const service = walidacja.doPaczkomatu ? c.lockerService : c.courierService;
         if (!availability[wymaganyTyp]) {
           return odpowiedz({
             ok: false,
-            error: `Konto InPost nie ma aktywnej usługi ${service}. Włącz usługę paczkomatową w Managerze Paczek.`,
+            error: `Konto InPost nie ma aktywnej usługi ${service}. Włącz tę usługę w Managerze Paczek.`,
             code: 'inpost_service_unavailable',
             service,
             serviceAvailability: availability,
@@ -1820,12 +1826,18 @@ export default async (req) => {
       const payload = przesylkaShipXPayload(z, c, walidacja);
       const dane = await inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}/shipments`, { method: 'POST', bodyObj: payload });
       const inpostId = tekst(dane?.id, 60).trim();
-      const numer = numerZShipX(dane);
-      const statusShipX = tekst(dane?.status, 60).trim();
+      let daneAktualne = dane;
+      if (inpostId && !numerZShipX(dane)) {
+        try { daneAktualne = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(inpostId)}`, { method: 'GET' }); } catch (e) { daneAktualne = dane; }
+      }
+      const numer = numerZShipX(daneAktualne) || numerZShipX(dane);
+      const statusShipX = tekst(daneAktualne?.status || dane?.status, 60).trim();
       const teraz = new Date().toLocaleString('pl-PL');
       const historia = [...(Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : []), { czas: teraz, status: 'Przesyłka utworzona w InPost', opis: `${inpostId ? 'ID ' + inpostId : ''}${numer ? ' • ' + numer : ''}${statusShipX ? ' • ' + statusShipX : ''}`, zewnetrzneId: inpostId }];
       const patch = {
         przewoznik: 'inpost',
+        usluga: walidacja.doPaczkomatu ? 'Paczkomat 24/7' : 'Kurier InPost',
+        punktKod: walidacja.doPaczkomatu ? walidacja.punkt : '',
         inpostId,
         inpostStatus: statusShipX,
         numer: numer || z?.wysylka?.numer || '',
@@ -1833,6 +1845,7 @@ export default async (req) => {
         bladIntegracji: '',
         ostatniaSynchronizacja: new Date().toISOString(),
         zaktualizowano: new Date().toISOString(),
+        zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: !!(numer || inpostId) },
         historia,
       };
       const { stary, nowy } = await zapiszPrzesylkeNaZamowieniu(nr, patch);
@@ -1841,7 +1854,7 @@ export default async (req) => {
       if (numer && !numerZShipX({ tracking_number: stary?.wysylka?.numer })) {
         try { email = await obsluzEmailePrzejsciaStatusu({ ...stary, wysylka: { ...(stary?.wysylka || {}), numer: '' } }, nowy); } catch (e) { email = { sent: false, error: e.message }; }
       }
-      return odpowiedz({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, email, order: { nr, wysylka: nowy?.wysylka } }, 201);
+      return odpowiedz({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, email, order: { nr, status: nowy?.status, wysylka: nowy?.wysylka } }, 201);
     }
 
     // ─── INPOST: pobranie oficjalnej etykiety PDF (admin) ───

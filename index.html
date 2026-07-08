@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.08.5">
+<meta name="artway-version" content="2026.07.08.6">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <link id="faviconLink" rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="14" fill="%232563eb"/%3E%3Ctext x="32" y="42" text-anchor="middle" font-size="30" font-family="Arial" font-weight="700" fill="white"%3EA%3C/text%3E%3C/svg%3E'>
@@ -579,22 +579,29 @@ const KONFIG = {
   darmowaDostawaOd: 200,
   kodyRabatowe: { "START10": 10, "LATO15": 15 },  // kod → % rabatu
   dostawy: [
-    { id:"paczkomat", nazwa:"Paczkomat InPost 24/7", koszt:12, opis:"odbiór w wybranym paczkomacie / punkcie InPost" }
+    { id:"paczkomat", nazwa:"Paczkomat InPost 24/7", koszt:12, opis:"odbiór w wybranym paczkomacie / punkcie InPost" },
+    { id:"kurier_inpost", nazwa:"Kurier InPost", koszt:17, opis:"dostawa kurierem InPost pod wskazany adres" }
   ],
   platnosci: DOMYSLNE_PLATNOSCI.map(p=>({...p}))
 };
 const DOMYSLNA_DOSTAWA_INPOST = { id:"paczkomat", nazwa:"Paczkomat InPost 24/7", koszt:12, opis:"odbiór w wybranym paczkomacie / punkcie InPost" };
+const DOMYSLNA_DOSTAWA_INPOST_KURIER = { id:"kurier_inpost", nazwa:"Kurier InPost", koszt:17, opis:"dostawa kurierem InPost pod wskazany adres" };
 function normalizujDostawyInPost(lista){
   const zrodlo = Array.isArray(lista) ? lista : [];
-  const p = zrodlo.find(d=>d&&d.id==="paczkomat") || zrodlo.find(d=>String(d?.nazwa||"").toLowerCase().includes("inpost")) || {};
-  const kosztRaw = Number(String(p.koszt ?? "").replace(",","."));
-  const koszt = Number.isFinite(kosztRaw) ? kosztRaw : DOMYSLNA_DOSTAWA_INPOST.koszt;
-  return [{ ...DOMYSLNA_DOSTAWA_INPOST, koszt:+koszt.toFixed(2), opis:String(p.opis||DOMYSLNA_DOSTAWA_INPOST.opis).trim()||DOMYSLNA_DOSTAWA_INPOST.opis }];
+  const cena = (v, fallback) => { const n=Number(String(v ?? "").replace(",",".")); return Number.isFinite(n) ? +n.toFixed(2) : fallback; };
+  const paczkomat = zrodlo.find(d=>d&&d.id==="paczkomat") || zrodlo.find(d=>String(d?.nazwa||"").toLowerCase().includes("paczkomat")) || {};
+  const kurier = zrodlo.find(d=>d&&["kurier_inpost","kurier"].includes(d.id)) || zrodlo.find(d=>String(d?.nazwa||"").toLowerCase().includes("kurier")) || {};
+  return [
+    { ...DOMYSLNA_DOSTAWA_INPOST, koszt:cena(paczkomat.koszt, DOMYSLNA_DOSTAWA_INPOST.koszt), opis:String(paczkomat.opis||DOMYSLNA_DOSTAWA_INPOST.opis).trim()||DOMYSLNA_DOSTAWA_INPOST.opis },
+    { ...DOMYSLNA_DOSTAWA_INPOST_KURIER, koszt:cena(kurier.koszt, DOMYSLNA_DOSTAWA_INPOST_KURIER.koszt), opis:String(kurier.opis||DOMYSLNA_DOSTAWA_INPOST_KURIER.opis).trim()||DOMYSLNA_DOSTAWA_INPOST_KURIER.opis }
+  ];
 }
 function dostepneDostawy(){
   KONFIG.dostawy = normalizujDostawyInPost(KONFIG.dostawy);
   return KONFIG.dostawy;
 }
+function czyDostawaPaczkomat(id){ return String(id||"")==="paczkomat"; }
+function uslugaInpostDlaDostawy(id){ return czyDostawaPaczkomat(id) ? "Paczkomat 24/7" : "Kurier InPost"; }
 
 const DOMYSLNE_BANNERY = [
   {id:"promocje",ikona:"🔥",tytul:"Aktualne promocje",opis:"Zobacz produkty w obniżonych cenach.",przycisk:"Sprawdź promocje",link:"#/promocje",aktywny:true},
@@ -1450,9 +1457,14 @@ function zastosujUstawienia(){
   ustawienia.numerPrzelewuTelefon = KONFIG.numerPrzelewuTelefon;
   ustawienia.daneFirmy = {...daneFirmy()};
   const paczkomat = KONFIG.dostawy.find(d=>d.id==="paczkomat");
+  const kurierInpost = KONFIG.dostawy.find(d=>d.id==="kurier_inpost");
   if(paczkomat && u.kosztPaczkomat!==undefined && u.kosztPaczkomat!==""){
     const kosztPaczkomat = Number(String(u.kosztPaczkomat).replace(",","."));
     if(Number.isFinite(kosztPaczkomat)) paczkomat.koszt = +kosztPaczkomat.toFixed(2);
+  }
+  if(kurierInpost && u.kosztKurierInpost!==undefined && u.kosztKurierInpost!==""){
+    const kosztKurier = Number(String(u.kosztKurierInpost).replace(",","."));
+    if(Number.isFinite(kosztKurier)) kurierInpost.koszt = +kosztKurier.toFixed(2);
   }
   ustawienia.dostawy = KONFIG.dostawy.map(x=>({...x}));
   const pobranie = KONFIG.platnosci.find(p=>p.id==="pobranie"), paynow = KONFIG.platnosci.find(p=>p.id==="paynow"), telefon = KONFIG.platnosci.find(p=>p.id==="telefon");
@@ -1828,7 +1840,7 @@ function widokSklep(){
         <p>Artway-TM łączy różne kategorie w jednym miejscu. Stawiamy na czytelną ofertę, jasne koszty i łatwy kontakt na każdym etapie zamówienia.</p>
         <div class="check-list">
           <div class="check-item"><span>✓</span><div><b>Jasne ceny</b><br>Podsumowanie przed złożeniem zamówienia.</div></div>
-          <div class="check-item"><span>✓</span><div><b>Dostawa InPost</b><br>Jedna szybka ścieżka: paczkomat lub punkt InPost wybrany na mapie.</div></div>
+          <div class="check-item"><span>✓</span><div><b>Dostawa InPost</b><br>Paczkomat/punkt InPost albo Kurier InPost pod wskazany adres.</div></div>
           <div class="check-item"><span>✓</span><div><b>Zakupy z kontem lub bez</b><br>Ty decydujesz, jak chcesz zamówić.</div></div>
           <div class="check-item"><span>✓</span><div><b>Pomoc po zakupie</b><br>Informacje o zwrotach i reklamacjach.</div></div>
         </div>
@@ -1848,7 +1860,7 @@ function widokSklep(){
     </div>
     <div class="faq-list">
       <details><summary>Ile trwa realizacja zamówienia?</summary><p>Zamówienia przygotowujemy do wysyłki w dni robocze. Standardowy deklarowany czas nadania to ${esc(czasWysylki())}.</p></details>
-      <details><summary>Kiedy dostawa jest darmowa?</summary><p>Dostawa InPost do paczkomatu lub punktu odbioru jest darmowa, gdy wartość produktów po rabacie wynosi co najmniej ${KONFIG.darmowaDostawaOd} zł.</p></details>
+      <details><summary>Kiedy dostawa jest darmowa?</summary><p>Dostawa InPost jest darmowa, gdy wartość produktów po rabacie wynosi co najmniej ${KONFIG.darmowaDostawaOd} zł.</p></details>
       <details><summary>Jak zwrócić produkt?</summary><p>Na odstąpienie od umowy masz 14 dni od odbioru. Napisz na ${esc(KONFIG.emailSklepu)}, a otrzymasz dalsze instrukcje.</p></details>
     </div>
   </section>`;
@@ -2084,7 +2096,7 @@ function widokProdukt(id){
       <div class="info-card">
         <span style="font-size:1.5rem">🚚</span>
         <b>Dostawa InPost</b>
-        <p>W koszyku wybierzesz paczkomat lub punkt odbioru InPost. Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł.</p>
+        <p>W koszyku wybierzesz paczkomat/punkt InPost albo Kuriera InPost. Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł.</p>
       </div>
       <div class="info-card">
         <span style="font-size:1.5rem">↩️</span>
@@ -2483,7 +2495,7 @@ function widokFAQ(){
       <div class="faq-list">
         <details open><summary>Jak znaleźć odpowiedni produkt?</summary><p>Użyj wyszukiwarki w nagłówku, wybierz katalog albo skorzystaj z sortowania cenowego. Produkty możesz zapisywać na liście ulubionych.</p></details>
         <details><summary>Czy muszę zakładać konto?</summary><p>Nie. Zamówienie możesz złożyć bez rejestracji. Konto ułatwia dostęp do historii zakupów i ulubionych produktów na tym urządzeniu.</p></details>
-        <details><summary>Jakie są metody dostawy?</summary><p>Sklep realizuje wysyłkę wyłącznie przez InPost do paczkomatu lub punktu odbioru. Punkt wybierasz w koszyku na mapie albo przez wyszukiwarkę po kodzie, mieście lub nazwie paczkomatu.</p></details>
+        <details><summary>Jakie są metody dostawy?</summary><p>Sklep realizuje wysyłkę wyłącznie przez InPost: do paczkomatu/punktu odbioru albo Kurierem InPost pod adres. Przy paczkomacie punkt wybierasz w koszyku na mapie albo przez wyszukiwarkę.</p></details>
         <details><summary>Kiedy dostawa jest bezpłatna?</summary><p>Dostawa InPost jest bezpłatna od ${KONFIG.darmowaDostawaOd} zł wartości produktów po uwzględnieniu rabatu.</p></details>
         <details><summary>Jak mogę zapłacić?</summary><p>Aktualne opcje płatności to: ${esc(platnosciOpis())}. Przy przelewie na telefon wpisz w tytule numer zamówienia.</p></details>
         <details><summary>Jak użyć kodu rabatowego?</summary><p>Wpisz kod w koszyku i kliknij „Zastosuj”. Wartość rabatu od razu pojawi się w podsumowaniu.</p></details>
@@ -2522,7 +2534,7 @@ function widokDostawa(){
   return stronaInfo("🚚 Dostawa i płatności", `
     <h2>Formy dostawy</h2>
     <ul>${dostepneDostawy().map(d=>`<li>${d.nazwa} — ${d.koszt?d.koszt+" zł":"gratis"} (${d.opis})</li>`).join("")}<li><b>Darmowa dostawa InPost</b> przy zamówieniach od ${KONFIG.darmowaDostawaOd} zł</li></ul>
-    <p>Przy zamówieniu wybierasz konkretny paczkomat lub punkt InPost na mapie albo przez wyszukiwarkę punktów.</p>
+    <p>Przy zamówieniu wybierasz paczkomat/punkt InPost na mapie albo dostawę Kurierem InPost pod adres.</p>
     <p><b>Deklarowany czas nadania:</b> ${esc(czasWysylki())} w dni robocze.</p>
     <h2>Formy płatności</h2>
     <ul>${dostepnePlatnosci().map(p=>`<li>${p.nazwa}${p.oplata?" (+"+p.oplata+" zł)":""}${p.id==="telefon"?` — w tytule wpisz numer zamówienia; numer: ${formatTelefonPlatnosci()}`:""}${p.id==="paynow"?` — bramka mBank Paynow`:""}</li>`).join("")}</ul>
@@ -2562,7 +2574,7 @@ const KOLOR_STATUSU = {
   "zakończone":"#dcfce7","zwrot":"#fce7f3","zwrot pieniędzy":"#cffafe","anulowane":"#fee2e2"
 };
 const PRZEWOZNICY = {
-  inpost:{nazwa:"InPost",uslugi:["Paczkomat 24/7"],url:n=>`https://inpost.pl/sledzenie-przesylek?number=${encodeURIComponent(n)}`},
+  inpost:{nazwa:"InPost",uslugi:["Paczkomat 24/7","Kurier InPost"],url:n=>`https://inpost.pl/sledzenie-przesylek?number=${encodeURIComponent(n)}`},
   dpd:{nazwa:"DPD",uslugi:["DPD Classic","DPD Pickup","DPD pobranie"],url:n=>`https://tracktrace.dpd.com.pl/parcelDetails?p1=${encodeURIComponent(n)}`},
   dhl:{nazwa:"DHL",uslugi:["DHL Parcel","DHL POP","DHL Express"],url:n=>`https://www.dhl.com/pl-pl/home/tracking.html?tracking-id=${encodeURIComponent(n)}`},
   orlen:{nazwa:"ORLEN Paczka",uslugi:["Automat paczkowy","Punkt odbioru","Kurier"],url:()=>`https://www.orlenpaczka.pl/sledz-paczke/`},
@@ -2711,6 +2723,12 @@ function przewoznikDlaZamowienia(z){
   if(z?.wysylka?.przewoznik) return z.wysylka.przewoznik;
   return "inpost";
 }
+function czyZamowieniePaczkomat(z){
+  return czyDostawaPaczkomat(z?.dostawaId) || !!(z?.paczkomat || z?.wysylka?.punktKod);
+}
+function uslugaInpostZamowienia(z){
+  return uslugaInpostDlaDostawy(czyZamowieniePaczkomat(z) ? "paczkomat" : "kurier_inpost");
+}
 function normalizujEtapZdarzenia(status){
   const s=String(status||"").toLowerCase();
   if(s.includes("problem")||s.includes("nieud")||s.includes("opóź")) return "problem";
@@ -2754,10 +2772,13 @@ function zapiszWysylke(e,nr){
   const przed=pobierzZamowienia().find(x=>x.nr===nr), staryNumer=przed?daneWysylki(przed).numer:"";
   const z=aktualizujZamowienie(nr, zam=>{
     const stara=daneWysylki(zam);
-    const zmieniono=stara.numer!==numer||stara.przewoznik!==przewoznik||stara.usluga!==String(f.get("usluga")||"");
-    if(punktKod) zam.paczkomat=punktKod;
+    const paczkomat = czyZamowieniePaczkomat(zam);
+    const usluga = String(f.get("usluga")||stara.usluga||uslugaInpostZamowienia(zam)).trim() || uslugaInpostZamowienia(zam);
+    const zmieniono=stara.numer!==numer||stara.przewoznik!==przewoznik||stara.usluga!==usluga||stara.punktKod!==(paczkomat?punktKod:"");
+    if(paczkomat && punktKod) zam.paczkomat=punktKod;
+    if(!paczkomat){ zam.paczkomat=""; zam.paczkomatAdres=""; }
     zam.wysylka={...stara,
-      przewoznik, usluga:String(f.get("usluga")||"Paczkomat 24/7").trim()||"Paczkomat 24/7", numer, punktKod:punktKod||stara.punktKod||zam.paczkomat||"",
+      przewoznik, usluga, numer, punktKod:paczkomat?(punktKod||stara.punktKod||zam.paczkomat||""):"",
       trackingUrl:String(f.get("trackingUrl")||"").trim(),
       priorytet:String(f.get("priorytet")||stara.priorytet||"normalny"),
       operator:String(f.get("operator")||"").trim(),
@@ -3208,8 +3229,9 @@ async function testujInPost(){
     const org=ip.organization?.id?` • organizacja ${ip.organization.id}`:"";
     const uslugi=ip.organization?.services?.length?` • usługi: ${ip.organization.services.slice(0,3).join(", ")}`:"";
     const av=ip.serviceAvailability||{};
-    const uwagaPaczkomat=av.locker===false?` • usługa paczkomatowa ${av.lockerService||"inpost_locker_standard"} wymaga włączenia`:"";
-    toast(`InPost ShipX połączony ✅ (${ip.env||"production"})${org}${ip.geowidgetConfigured?" • mapa aktywna":" • brak tokenu Geowidget"}${uslugi}${uwagaPaczkomat}`);
+    const uwagaPaczkomat=av.locker===false?` • paczkomat ${av.lockerService||"inpost_locker_standard"} wymaga włączenia`:"";
+    const uwagaKurier=av.courier===false?` • kurier ${av.courierService||"inpost_courier_standard"} wymaga włączenia`:"";
+    toast(`InPost ShipX połączony ✅ (${ip.env||"production"})${org}${ip.geowidgetConfigured?" • mapa aktywna":" • brak tokenu Geowidget"}${uslugi}${uwagaPaczkomat}${uwagaKurier}`);
     renderuj();
   }catch(bl){
     const ip=bl.inpost||stanBramki.inpost||{};
@@ -3224,18 +3246,51 @@ function b64toBlob(b64,typ="application/pdf"){
   for(let i=0;i<len;i++) arr[i]=bin.charCodeAt(i);
   return new Blob([arr],{type:typ});
 }
+async function zapiszFormularzWysylkiPrzedAPI(nr){
+  const form=[...document.forms].find(f=>(String(f.getAttribute("onsubmit")||"").includes(nr) && f.querySelector('[name="usluga"]') && f.querySelector('[name="waga"]')));
+  if(!form) return null;
+  const f=new FormData(form);
+  const zapisane=aktualizujZamowienie(nr,zam=>{
+    const w=daneWysylki(zam);
+    const paczkomat=czyZamowieniePaczkomat(zam);
+    const punktKod=String(f.get("punktKod")||"").trim().toUpperCase();
+    if(paczkomat&&punktKod) zam.paczkomat=punktKod;
+    if(!paczkomat){ zam.paczkomat=""; zam.paczkomatAdres=""; }
+    zam.wysylka={...w,
+      przewoznik:"inpost",
+      usluga:String(f.get("usluga")||w.usluga||uslugaInpostZamowienia(zam)).trim()||uslugaInpostZamowienia(zam),
+      punktKod:paczkomat?(punktKod||w.punktKod||zam.paczkomat||""):"",
+      numer:String(f.get("numer")||w.numer||"").trim(),
+      trackingUrl:String(f.get("trackingUrl")||w.trackingUrl||"").trim(),
+      priorytet:String(f.get("priorytet")||w.priorytet||"normalny"),
+      operator:String(f.get("operator")||w.operator||"").trim(),
+      terminNadania:String(f.get("terminNadania")||w.terminNadania||"").trim(),
+      przewidywaneDoreczenie:String(f.get("przewidywaneDoreczenie")||w.przewidywaneDoreczenie||"").trim(),
+      waga:String(f.get("waga")||w.waga||"").trim(),
+      dlugosc:String(f.get("dlugosc")||w.dlugosc||"").trim(),
+      szerokosc:String(f.get("szerokosc")||w.szerokosc||"").trim(),
+      wysokosc:String(f.get("wysokosc")||w.wysokosc||"").trim(),
+      zadania:{...(w.zadania||{}),dane:true},
+      zaktualizowano:new Date().toISOString()
+    };
+  });
+  if(zapisane) await zapiszZamowienieCentralnie(zapisane,false);
+  return zapisane;
+}
 async function utworzPrzesylkeAPI(nr){
   const z=pobierzZamowienia().find(x=>x.nr===nr);
   if(!z)return toast("Nie znaleziono zamówienia");
   if(!chmuraToken){ toast("Wpisz hasło bazy administratora"); chmuraUstawToken(); return; }
   if(!confirm(`Utworzyć prawdziwą przesyłkę InPost dla ${nr}? W trybie produkcyjnym operacja może naliczyć opłatę zgodnie z umową.`))return;
   try{
+    await zapiszFormularzWysylkiPrzedAPI(nr);
     toast("Tworzę przesyłkę InPost…");
     const d=await chmura("inpost-create",{method:"POST",body:{nr},timeout:25000});
     aktualizujZamowienie(nr,zam=>{
       const w=daneWysylki(zam);
-      zam.wysylka=d.order?.wysylka?{...w,...d.order.wysylka}:{...w,przewoznik:"inpost",inpostId:d.inpostId||w.inpostId,numer:d.trackingNumber||w.numer};
-      if(d.trackingNumber&&["nowe","potwierdzone","w realizacji"].includes(zam.status))zam.status="gotowe do wysyłki";
+      zam.wysylka=d.order?.wysylka?{...w,...d.order.wysylka}:{...w,przewoznik:"inpost",usluga:uslugaInpostZamowienia(zam),inpostId:d.inpostId||w.inpostId,numer:d.trackingNumber||w.numer,etap:(d.trackingNumber||d.inpostId)?"etykieta":(w.etap||"przygotowanie"),zadania:{...(w.zadania||{}),dane:true,etykieta:!!(d.trackingNumber||d.inpostId)}};
+      if(d.order?.status) zam.status=d.order.status;
+      else if((d.trackingNumber||d.inpostId)&&["nowe","potwierdzone","w realizacji"].includes(zam.status))zam.status="gotowe do wysyłki";
     });
     loguj("info",`InPost utworzył przesyłkę ${d.inpostId||""} (${d.trackingNumber||"bez numeru"}) dla ${nr}`);
     toast(d.trackingNumber?`Przesyłka InPost utworzona ✅ ${d.trackingNumber}`:"Przesyłka utworzona ✅ (numer po potwierdzeniu — użyj „Pobierz status”)");
@@ -3320,7 +3375,7 @@ function kartaZleceniaWysylki(z){
       <span><a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}"><b>${esc(z.nr)}</b></a> • ${esc([z.klient?.imie,z.klient?.nazwisko].filter(Boolean).join(" ")||z.email||"gość")}</span>
       <span><span class="shipment-priority priority-${esc(w.priorytet||"normalny")}">${esc(w.priorytet||"normalny")}</span> <span class="lvl" style="background:${etap.kolor}">${etap.ikona} ${etap.nazwa}</span></span>
     </div>
-    <div class="ship-meta">🚚 ${esc(nazwaPrzewoznika(w.przewoznik||przewoznikDlaZamowienia(z)))}${w.usluga?" • "+esc(w.usluga):""} • 🔢 ${w.numer?esc(w.numer):"<b>oczekuje na etykietę</b>"}<br>
+    <div class="ship-meta">🚚 ${esc(nazwaPrzewoznika(w.przewoznik||przewoznikDlaZamowienia(z)))} • ${esc(w.usluga||uslugaInpostZamowienia(z))} • 🔢 ${w.numer?esc(w.numer):"<b>oczekuje na etykietę</b>"}<br>
       📍 ${esc(z.adres||"brak adresu")} • 👤 ${esc(w.operator||"nieprzypisane")} • <span class="${sla.klasa}">⏱ ${esc(sla.tekst)}</span>
     </div>
     <div style="margin:.5rem 0;font-size:.75rem;color:var(--muted2)">Postęp ${wykonane}/4:
@@ -3382,10 +3437,10 @@ function panelAutomatyzacjiWysylek(){
   const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&!!chmuraToken;
   return `<div class="panel">
     <h1>⚡ Automatyzacje wysyłek</h1>
-    <p style="color:var(--muted2)">Reguły obowiązują wszystkie zlecenia. Aktualnie aktywny jest jeden adapter: InPost Paczkomat.</p>
+    <p style="color:var(--muted2)">Reguły obowiązują wszystkie zlecenia. Aktywny jest jeden przewoźnik: InPost, z usługami Paczkomat i Kurier.</p>
     <form data-flagi="autoStatus,autoEmail,autoTracking,alarmSla,powiadomieniaWyjatki" onsubmit="zapiszUstawieniaWysylki(event)">
       <h2>Reguły przypisania</h2>
-      <div class="automation-row"><span><b>Paczkomat / punkt InPost</b><small style="display:block;color:var(--muted2)">Każde nowe zamówienie wymaga wybranego punktu odbioru</small></span><select name="regulaPaczkomat">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<option value="${id}" selected>${esc(p.nazwa)}</option>`).join("")}</select><span>→ zawsze</span></div>
+      <div class="automation-row"><span><b>InPost</b><small style="display:block;color:var(--muted2)">Paczkomat wymaga punktu, Kurier używa adresu dostawy</small></span><select name="regulaPaczkomat">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<option value="${id}" selected>${esc(p.nazwa)}</option>`).join("")}</select><span>→ zawsze</span></div>
       <input type="hidden" name="regulaKurier" value="inpost">
       <h2>Synchronizacja i reakcje</h2>
       <label class="chk-row"><input type="checkbox" name="autoTracking" ${u.autoTracking?"checked":""}> Automatycznie pobieraj zdarzenia i normalizuj statusy</label>
@@ -3417,7 +3472,7 @@ function panelUstawienBramki(){
   const av=ip.serviceAvailability||{};
   const braki=Array.isArray(ip.missingEnv)&&ip.missingEnv.length?ip.missingEnv:[...(ipGotowy?[]:["INPOST_TOKEN","INPOST_ORG_ID"])];
   const orgInfo=ip.organization?.id?`Organizacja: <b>${esc(ip.organization.id)}</b>${ip.organization.name?` • ${esc(ip.organization.name)}`:""}`:"Organizacja zostanie pokazana po realnym teście API.";
-  const uslugiInfo=av.services?.length?`<br>Usługa paczkomatowa <code>${esc(av.lockerService||"inpost_locker_standard")}</code>: <b>${av.locker?"aktywna ✅":"brak — włącz usługę paczkomatową w InPost"}</b>`:"";
+  const uslugiInfo=av.services?.length?`<br>Usługa paczkomatowa <code>${esc(av.lockerService||"inpost_locker_standard")}</code>: <b>${av.locker?"aktywna ✅":"brak — włącz usługę paczkomatową w InPost"}</b> • Kurier InPost <code>${esc(av.courierService||"inpost_courier_standard")}</code>: <b>${av.courier?"aktywny ✅":"brak — włącz usługę kurierską w InPost"}</b>`:"";
   return `<div class="panel">
     <h1>⚙️ Bramka InPost</h1>
     <div class="integration-hub" style="border:2px solid ${ipGotowy?'#86efac':'#fcd34d'};background:${ipGotowy?'#f0fdf4':'#fffbeb'}">
@@ -3443,7 +3498,7 @@ function panelUstawienBramki(){
       <div class="f-row"><div class="f-group"><label>Adres bramki backendowej</label><input name="apiEndpoint" value="${esc(u.apiEndpoint)}" placeholder="/api/shipping"></div><div class="f-group"><label>Tryb</label><select name="tryb"><option value="sandbox" ${u.tryb==="sandbox"?"selected":""}>Sandbox / testowy</option><option value="production" ${u.tryb==="production"?"selected":""}>Produkcyjny</option></select></div></div>
       <div class="backend-note"><b>Bez sekretów:</b> w tym miejscu zapisuje się tylko adres wspólnej bramki. Tokeny InPost pozostają na serwerze, poza publicznym katalogiem strony.</div>
       <h2>Aktywny adapter</h2>
-      <div class="integration-grid">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<div class="integration-card"><b>${esc(p.nazwa)}</b><span class="integration-state">${ipGotowy?"adapter Netlify gotowy — przesyłki, etykiety, mapa":"ustaw tokeny InPost w Netlify"}</span><p class="ship-meta">ShipX (Netlify) • przesyłka Paczkomat • numer nadania • PDF A6/A4 • status • Geowidget • webhook</p></div>`).join("")}</div>
+      <div class="integration-grid">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<div class="integration-card"><b>${esc(p.nazwa)}</b><span class="integration-state">${ipGotowy?"adapter Netlify gotowy — przesyłki, etykiety, mapa":"ustaw tokeny InPost w Netlify"}</span><p class="ship-meta">ShipX (Netlify) • Paczkomat + Kurier InPost • numer nadania • PDF A6/A4 • status • Geowidget • webhook</p></div>`).join("")}</div>
       <h2>Dane nadawcy i paczki</h2>
       <div class="f-row"><div class="f-group"><label>Domyślny przewoźnik</label><select name="przewoznik">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<option value="${id}" selected>${esc(p.nazwa)}</option>`).join("")}</select></div><div class="f-group"><label>Nazwa nadawcy</label><input name="nadawca" value="${esc(u.nadawca)}"></div></div>
       <div class="f-row"><div class="f-group"><label>Ulica i numer</label><input name="ulica" value="${esc(u.ulica)}"></div><div class="f-group"><label>Kod pocztowy</label><input name="kod" value="${esc(u.kod)}"></div><div class="f-group"><label>Miasto</label><input name="miasto" value="${esc(u.miasto)}"></div></div>
@@ -3578,6 +3633,8 @@ function widokAdminZamowienie(nr){
   const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&!!chmuraToken;
   const przewoznik="inpost";
   const uslugi=PRZEWOZNICY[przewoznik]?.uslugi||[];
+  const paczkomatZam = czyZamowieniePaczkomat(z);
+  const uslugaDomyslna = w.usluga || uslugaInpostZamowienia(z);
   const paynow=paynowDane(z);
   return adminSzkielet("/admin/zamowienia", `
   <div class="panel">
@@ -3616,7 +3673,7 @@ function widokAdminZamowienie(nr){
     <form onsubmit="zapiszWysylke(event,'${esc(z.nr)}')">
       <div class="f-row">
         <div class="f-group"><label>Przewoźnik</label><select name="przewoznik" onchange="uzupelnijUslugi(this)">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<option value="${id}" ${przewoznik===id?"selected":""}>${esc(p.nazwa)}</option>`).join("")}</select></div>
-        <div class="f-group"><label>Usługa</label><select name="usluga">${uslugi.map(x=>`<option ${w.usluga===x?"selected":""}>${esc(x)}</option>`).join("")}</select></div>
+        <div class="f-group"><label>Usługa</label><select name="usluga">${uslugi.map(x=>`<option ${uslugaDomyslna===x?"selected":""}>${esc(x)}</option>`).join("")}</select></div>
       </div>
       <div class="f-row">
         <div class="f-group"><label>Priorytet zlecenia</label><select name="priorytet"><option value="normalny" ${w.priorytet==="normalny"?"selected":""}>Normalny</option><option value="wysoki" ${w.priorytet==="wysoki"?"selected":""}>Wysoki</option><option value="pilny" ${w.priorytet==="pilny"?"selected":""}>Pilny</option></select></div>
@@ -3625,7 +3682,7 @@ function widokAdminZamowienie(nr){
         <div class="f-group"><label>Planowane doręczenie</label><input name="przewidywaneDoreczenie" type="date" value="${esc(w.przewidywaneDoreczenie)}"></div>
       </div>
       <div class="f-row">
-        <div class="f-group"><label>Punkt InPost / paczkomat *</label><input name="punktKod" value="${esc(z.paczkomat||w.punktKod||"")}" placeholder="np. WAW01M" style="text-transform:uppercase"></div>
+        ${paczkomatZam?`<div class="f-group"><label>Punkt InPost / paczkomat *</label><input name="punktKod" value="${esc(z.paczkomat||w.punktKod||"")}" placeholder="np. WAW01M" style="text-transform:uppercase"></div>`:`<input type="hidden" name="punktKod" value="">`}
         <div class="f-group"><label>Numer nadania</label><input name="numer" value="${esc(w.numer)}" placeholder="Wpisz numer otrzymany od InPost"></div>
         <div class="f-group"><label>Własny link śledzenia (opcjonalnie)</label><input name="trackingUrl" type="url" value="${esc(w.trackingUrl)}" placeholder="https://…"></div>
       </div>
@@ -5327,14 +5384,16 @@ function widokAdminDostawy(){
   KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
   const pobranie = KONFIG.platnosci.find(p=>p.id==="pobranie"), paynow = KONFIG.platnosci.find(p=>p.id==="paynow"), telefon = KONFIG.platnosci.find(p=>p.id==="telefon");
   const paczkomat = KONFIG.dostawy.find(d=>d.id==="paczkomat") || DOMYSLNA_DOSTAWA_INPOST;
+  const kurierInpost = KONFIG.dostawy.find(d=>d.id==="kurier_inpost") || DOMYSLNA_DOSTAWA_INPOST_KURIER;
   return personalizacjaSzkielet("dostawy", `
   <div class="panel">
     <h1>🚚 Dostawa i płatności</h1>
     <form onsubmit="zapiszDostawy(event)">
-      <h3 class="f-sekcja">🚚 Jedyna dostawa: InPost Paczkomat</h3>
-      <div class="backend-note" style="border-color:#facc15;background:#fffbeb;color:#713f12"><b>Aktywna jest tylko jedna metoda dostawy:</b> klient musi wybrać paczkomat lub punkt InPost. Kurier, odbiór osobisty i własne metody dostawy są wyłączone.</div>
-      <div class="f-row" style="grid-template-columns:1fr 1fr">
+      <h3 class="f-sekcja">🚚 Dostawy InPost</h3>
+      <div class="backend-note" style="border-color:#facc15;background:#fffbeb;color:#713f12"><b>Aktywne są tylko metody InPost:</b> Paczkomat/Punkt InPost oraz Kurier InPost. Inni przewoźnicy i odbiór osobisty pozostają wyłączone.</div>
+      <div class="f-row" style="grid-template-columns:1fr 1fr 1fr">
         <div class="f-group"><label>Paczkomat InPost (zł)</label><input name="kosztPaczkomat" inputmode="decimal" value="${paczkomat.koszt}"></div>
+        <div class="f-group"><label>Kurier InPost (zł)</label><input name="kosztKurierInpost" inputmode="decimal" value="${kurierInpost.koszt}"></div>
         <div class="f-group"><label>Darmowa dostawa od (zł)</label><input name="darmowaDostawaOd" inputmode="decimal" value="${KONFIG.darmowaDostawaOd}"></div>
       </div>
       <div class="f-group" style="max-width:320px"><label>Deklarowany czas wysyłki — zmienia się wszędzie</label><input name="czasWysylki" value="${esc(czasWysylki())}" placeholder="np. 24 h, 48 h, 2 dni robocze"></div>
@@ -5387,7 +5446,11 @@ function zapiszDostawy(e){
     czasWysylki: String(f.get("czasWysylki")||"").trim(),
     darmowaDostawaOd: f.get("darmowaDostawaOd"),
     kosztPaczkomat: f.get("kosztPaczkomat"),
-    dostawy: normalizujDostawyInPost([{...DOMYSLNA_DOSTAWA_INPOST,koszt:(()=>{const n=Number(String(f.get("kosztPaczkomat")).replace(",","."));return Number.isFinite(n)?n:DOMYSLNA_DOSTAWA_INPOST.koszt;})()}]),
+    kosztKurierInpost: f.get("kosztKurierInpost"),
+    dostawy: normalizujDostawyInPost([
+      {...DOMYSLNA_DOSTAWA_INPOST,koszt:(()=>{const n=Number(String(f.get("kosztPaczkomat")).replace(",","."));return Number.isFinite(n)?n:DOMYSLNA_DOSTAWA_INPOST.koszt;})()},
+      {...DOMYSLNA_DOSTAWA_INPOST_KURIER,koszt:(()=>{const n=Number(String(f.get("kosztKurierInpost")).replace(",","."));return Number.isFinite(n)?n:DOMYSLNA_DOSTAWA_INPOST_KURIER.koszt;})()}
+    ]),
     oplataPobranie: f.get("oplataPobranie"),
     pobranieWl: !!f.get("pobranieWl"),
     paynowWl: !!f.get("paynowWl"),
@@ -5399,7 +5462,7 @@ function dodajMetodeDostawy(e){
   e.preventDefault();
   KONFIG.dostawy=normalizujDostawyInPost(KONFIG.dostawy);
   zapiszCzescUstawien({dostawy:KONFIG.dostawy.map(x=>({...x}))});
-  toast("Dodatkowe metody dostawy są wyłączone — sklep wysyła tylko przez InPost Paczkomat");
+  toast("Dodatkowe metody dostawy są wyłączone — sklep wysyła tylko przez InPost");
   loguj("info","Zablokowano dodanie dodatkowej metody dostawy — aktywny tylko InPost");
 }
 function usunMetodeDostawy(id){
@@ -6170,7 +6233,7 @@ function testyDiagnostyczne(){
   dodaj("Wysyłki","Dane odbiorców",niepelneDaneWysylki?"warn":"ok",niepelneDaneWysylki?`${niepelneDaneWysylki} starszych zamówień nie ma pełnego telefonu lub adresu`:"Dane nowych zamówień są gotowe do API InPost");
   dodaj("Wysyłki","Numery nadania",bezNumeru?"warn":"ok",bezNumeru?`${bezNumeru} aktywnych zamówień czeka na numer nadania`:"Wszystkie aktywne przesyłki mają numer");
   dodaj("Wysyłki","Kolejka wyjątków",wyjatkiWysylki?"bad":"ok",wyjatkiWysylki?`${wyjatkiWysylki} przesyłek wymaga reakcji operatora`:"Brak nierozwiązanych wyjątków");
-  dodaj("Wysyłki","Reguły automatycznego wyboru",uwDiag.regulaPaczkomat==="inpost"?"ok":"bad",`Jedyna aktywna metoda: InPost Paczkomat`);
+  dodaj("Wysyłki","Reguły automatycznego wyboru",uwDiag.regulaPaczkomat==="inpost"?"ok":"bad",`Aktywne metody: InPost Paczkomat i Kurier InPost`);
   const poprawnyEndpoint=String(uwDiag.apiEndpoint||"").startsWith("/")||String(uwDiag.apiEndpoint||"").startsWith("https://")||String(uwDiag.apiEndpoint||"").startsWith("http://");
   dodaj("Integracje","Uniwersalna bramka",stanBramki.online?"ok":poprawnyEndpoint?"warn":"bad",stanBramki.online?`Netlify Functions dostępne • tryb wysyłek ${uwDiag.tryb}`:`Endpoint awaryjny ${uwDiag.apiEndpoint} • sprawdź Netlify Functions`);
   dodaj("Integracje","Centralna baza zamówień",stanBazyCentralnej.online?"ok":stanBazyCentralnej.sprawdzono?"bad":"warn",stanBazyCentralnej.online
@@ -6178,8 +6241,8 @@ function testyDiagnostyczne(){
     :stanBazyCentralnej.error||"Połącz backend, aby sprawdzić i zsynchronizować wspólną bazę");
   const ipDiag=stanBramki.inpost||{};
   const avDiag=ipDiag.serviceAvailability||{};
-  dodaj("Integracje","InPost ShipX API",ipDiag.configured?(avDiag.locker===false?"warn":"ok"):"warn",ipDiag.configured
-    ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}${ipDiag.webhookConfigured?" • webhook aktywny":" • webhook do konfiguracji"}${avDiag.locker===false?" • brak usługi paczkomatowej":""}`
+  dodaj("Integracje","InPost ShipX API",ipDiag.configured?((avDiag.locker===false||avDiag.courier===false)?"warn":"ok"):"warn",ipDiag.configured
+    ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}${ipDiag.webhookConfigured?" • webhook aktywny":" • webhook do konfiguracji"}${avDiag.locker===false?" • brak usługi paczkomatowej":""}${avDiag.courier===false?" • kurier InPost nieaktywny":""}`
     :`Brakuje: ${((ipDiag.missingEnv&&ipDiag.missingEnv.length?ipDiag.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", "))}`);
   const emailDiag=!!stanBramki.email?.configured;
   dodaj("Integracje","Automatyczne e-maile",emailDiag&&chmuraToken?"ok":"warn",emailDiag
@@ -6541,9 +6604,9 @@ function otworzModal(){
       <div class="f-row">
         <div class="f-group"><label>Dostawa</label>
           <select name="delivery" onchange="przeliczZamowienie()">
-            ${dostepneDostawy().map(d=>`<option value="${d.id}" selected>${esc(d.nazwa)} — ${d.koszt?zl(d.koszt):"gratis"} (${esc(d.opis)})</option>`).join("")}
+            ${dostepneDostawy().map(d=>`<option value="${d.id}">${esc(d.nazwa)} — ${d.koszt?zl(d.koszt):"gratis"} (${esc(d.opis)})</option>`).join("")}
           </select>
-          <small style="color:var(--muted2)">Jedyna forma dostawy w sklepie: InPost do wybranego paczkomatu lub punktu odbioru.</small>
+          <small style="color:var(--muted2)">Dostawa działa wyłącznie przez InPost: paczkomat/punkt albo Kurier InPost.</small>
         </div>
         <div class="f-group"><label>Płatność</label>
           <select name="payment" onchange="przeliczZamowienie()">
@@ -6577,10 +6640,9 @@ function otworzModal(){
 }
 function przeliczZamowienie(){
   const form = $("orderForm"); if(!form) return;
-  const idD = "paczkomat", idP = form.payment.value;
-  if(form.delivery) form.delivery.value = "paczkomat";
+  const idD = form.delivery?.value || "paczkomat", idP = form.payment.value;
   const pBox = $("paczkomatBox");
-  if(pBox){ pBox.style.display = ""; }
+  if(pBox){ pBox.style.display = czyDostawaPaczkomat(idD) ? "" : "none"; }
   const suma = sumaPoRabacie(), dostawa = kosztDostawy(idD), oplata = oplataPlatnosci(idP);
   $("orderSummary").innerHTML =
     koszyk.map(x=>{const p=produkty.find(p=>p.id===x.id);
@@ -6707,8 +6769,8 @@ async function zlozZamowienie(e){
       if(w.ok){ ustawSesje({imie:(f.get("imie")+" "+f.get("nazwisko")).trim(), email:f.get("email").trim().toLowerCase()}); toast("Konto założone! 🎉"); }
       else { loguj("ostrzezenie","Konto przy zamówieniu nieutworzone: "+w.blad); }
     }
-    const idD = "paczkomat", idP = f.get("payment");
-    if(!String(f.get("paczkomat")||"").trim()){
+    const idD = String(f.get("delivery")||"paczkomat"), idP = f.get("payment");
+    if(czyDostawaPaczkomat(idD) && !String(f.get("paczkomat")||"").trim()){
       toast("⚠️ Wybierz paczkomat na mapie lub wpisz jego kod");
       const r=$("paczkomatReczny"); if(r) r.focus();
       return;
@@ -6718,7 +6780,7 @@ async function zlozZamowienie(e){
     const suma = sumaPoRabacie(), dostawa = kosztDostawy(idD), oplata = oplataPlatnosci(idP);
     const razem = suma+dostawa+oplata;
     const nr = "ATM-" + Date.now().toString().slice(-6);
-    const paczkomat = " • Paczkomat: "+f.get("paczkomat");
+    const paczkomat = czyDostawaPaczkomat(idD) ? " • Paczkomat: "+f.get("paczkomat") : "";
     const adres = `${f.get("ulica")} ${f.get("nrDomu")}${f.get("nrLokalu")?"/"+f.get("nrLokalu"):""}, ${f.get("kod")} ${f.get("miasto")}`;
     const firma = f.get("firmaChk") ? `\nFirma: ${f.get("firma")} • NIP: ${String(f.get("nip")).replace(/[^0-9]/g,"")}` : "";
     const pozycjeDane = koszyk.map(x=>{const p=produkty.find(p=>p.id===x.id);
@@ -6763,8 +6825,8 @@ Uwagi: ${f.get("notes")||"brak"}`;
         firma:f.get("firmaChk")?String(f.get("firma")||"").trim():"",nip:f.get("firmaChk")?String(f.get("nip")||"").replace(/[^0-9]/g,""):""},
       adresDostawy:{ulica:String(f.get("ulica")||"").trim(),nrDomu:String(f.get("nrDomu")||"").trim(),nrLokalu:String(f.get("nrLokalu")||"").trim(),kod:String(f.get("kod")||"").trim(),miasto:String(f.get("miasto")||"").trim()},
       pozycje,pozycjeDane,razem,status:"nowe",dostawa:dost.nazwa,dostawaId:idD,platnosc:plat.nazwa,platnoscId:idP,platnoscInstrukcja:instrukcjaPlatnosciTekst(idP,nr,razem),adres,
-      paczkomat:String(f.get("paczkomat")||"").trim(),paczkomatAdres:String(window.__paczkomatAdres||"").trim(),uwagi:String(f.get("notes")||"").trim(),
-      wysylka:{przewoznik:"inpost",usluga:"Paczkomat 24/7",punktKod:String(f.get("paczkomat")||"").trim(),status:"nieprzygotowana",etap:"do_obslugi",priorytet:"normalny",zadania:{dane:true,kompletacja:false,etykieta:false,przekazanie:false},
+      paczkomat:czyDostawaPaczkomat(idD)?String(f.get("paczkomat")||"").trim():"",paczkomatAdres:czyDostawaPaczkomat(idD)?String(window.__paczkomatAdres||"").trim():"",uwagi:String(f.get("notes")||"").trim(),
+      wysylka:{przewoznik:"inpost",usluga:uslugaInpostDlaDostawy(idD),punktKod:czyDostawaPaczkomat(idD)?String(f.get("paczkomat")||"").trim():"",status:"nieprzygotowana",etap:"do_obslugi",priorytet:"normalny",zadania:{dane:true,kompletacja:false,etykieta:false,przekazanie:false},
         historia:[{czas:new Date().toLocaleString("pl-PL"),status:"Zamówienie utworzone",opis:"Oczekuje na potwierdzenie i przygotowanie"}],powiadomienia:[]}
     };
     zapiszZamowienie(noweZamowienie);
