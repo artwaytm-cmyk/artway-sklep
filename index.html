@@ -3666,6 +3666,36 @@ function widokAdminZamowienie(nr){
     </div>
   </div>
   <div class="panel">
+    <h2 style="margin-top:0">📇 Dane odbiorcy i adres</h2>
+    <div class="backend-note">To wszystkie dane, które podał klient przy zamówieniu. Możesz je tutaj uzupełnić lub poprawić — zapiszą się w zamówieniu, zsynchronizują z bazą i posłużą do etykiety InPost. Pola z <b>*</b> są wymagane do wygenerowania przesyłki${paczkomatZam?" do paczkomatu":" kurierem"}.</div>
+    <form onsubmit="zapiszDaneOdbiorcy(event,'${esc(z.nr)}')">
+      <div class="f-row">
+        <div class="f-group"><label>Imię</label><input name="imie" value="${esc(klient.imie||"")}"></div>
+        <div class="f-group"><label>Nazwisko</label><input name="nazwisko" value="${esc(klient.nazwisko||"")}"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-group"><label>E-mail *</label><input name="email" type="email" value="${esc(z.email||"")}"></div>
+        <div class="f-group"><label>Telefon *</label><input name="telefon" value="${esc(klient.telefon||"")}" placeholder="9 cyfr"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-group"><label>Firma (opcjonalnie)</label><input name="firma" value="${esc(klient.firma||"")}"></div>
+        <div class="f-group"><label>NIP (opcjonalnie)</label><input name="nip" value="${esc(klient.nip||"")}"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-group"><label>Ulica${paczkomatZam?"":" *"}</label><input name="ulica" value="${esc(adres.ulica||"")}"></div>
+        <div class="f-group"><label>Nr domu${paczkomatZam?"":" *"}</label><input name="nrDomu" value="${esc(adres.nrDomu||"")}"></div>
+        <div class="f-group"><label>Nr lokalu</label><input name="nrLokalu" value="${esc(adres.nrLokalu||"")}"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-group"><label>Kod pocztowy${paczkomatZam?"":" *"}</label><input name="kod" value="${esc(adres.kod||"")}" placeholder="00-000" maxlength="6" oninput="formatujKod(this)"></div>
+        <div class="f-group"><label>Miejscowość${paczkomatZam?"":" *"}</label><input name="miasto" value="${esc(adres.miasto||"")}"></div>
+      </div>
+      ${paczkomatZam?`<div class="f-row"><div class="f-group"><label>Paczkomat / punkt InPost *</label><input name="paczkomat" value="${esc(z.paczkomat||"")}" placeholder="np. WAW01M" style="text-transform:uppercase"></div><div class="f-group"><label>Adres paczkomatu (opis)</label><input name="paczkomatAdres" value="${esc(z.paczkomatAdres||"")}"></div></div>`:""}
+      <div class="f-group"><label>Uwagi do zamówienia</label><textarea name="uwagi" rows="2">${esc(z.uwagi||"")}</textarea></div>
+      <div class="diag-actions"><button class="btn" type="submit">💾 Zapisz dane odbiorcy</button></div>
+    </form>
+  </div>
+  <div class="panel">
     <h2 style="margin-top:0">🚚 Przesyłka i numer nadania</h2>
     <p><span class="lvl" style="background:${ETAPY_WYSYLKI[etapWysylki(z)].kolor};font-size:.82rem">${esc(nazwaEtapu(z))}</span> <span class="${slaWysylki(z).klasa}" style="margin-left:.4rem">⏱ ${esc(slaWysylki(z).tekst)}</span></p>
     <div class="backend-note">Przycisk etykiety roboczej tworzy dokument pomocniczy do kompletacji. Oficjalną etykietę z kodem InPost wystawia API ShipX po bezpiecznym połączeniu backendowym.</div>
@@ -3729,6 +3759,26 @@ function widokAdminZamowienie(nr){
       <button class="btn danger" onclick="if(confirm('Usunąć zamówienie ${esc(z.nr)}?')) usunZamowienie('${esc(z.nr)}')">🗑️ Usuń zamówienie</button>
     </div>
   </div>`);
+}
+function zapiszDaneOdbiorcy(e,nr){
+  e.preventDefault();
+  const f=new FormData(e.target), g=k=>String(f.get(k)||"").trim();
+  aktualizujZamowienie(nr, z=>{
+    z.klient=z.klient||{};
+    z.klient.imie=g("imie"); z.klient.nazwisko=g("nazwisko"); z.klient.telefon=g("telefon");
+    z.klient.firma=g("firma"); z.klient.nip=g("nip").replace(/[^0-9]/g,"");
+    const em=g("email").toLowerCase(); if(em) z.email=em;
+    z.adresDostawy=z.adresDostawy||{};
+    z.adresDostawy.ulica=g("ulica"); z.adresDostawy.nrDomu=g("nrDomu"); z.adresDostawy.nrLokalu=g("nrLokalu");
+    z.adresDostawy.kod=g("kod"); z.adresDostawy.miasto=g("miasto");
+    if(f.has("paczkomat")){ const kod=g("paczkomat").toUpperCase(); z.paczkomat=kod; z.paczkomatAdres=g("paczkomatAdres"); const w=daneWysylki(z); w.punktKod=kod; z.wysylka=w; }
+    z.uwagi=g("uwagi");
+    const a=z.adresDostawy;
+    z.adres=`${a.ulica} ${a.nrDomu}${a.nrLokalu?"/"+a.nrLokalu:""}, ${a.kod} ${a.miasto}`.replace(/\s+/g," ").replace(/^[,\s]+|[,\s]+$/g,"").trim();
+  });
+  loguj("info",`Zaktualizowano dane odbiorcy zamówienia ${nr}`);
+  toast("Dane odbiorcy zapisane ✅");
+  renderuj();
 }
 function zmienStatus(nr, status){
   const t = pobierzZamowienia();
