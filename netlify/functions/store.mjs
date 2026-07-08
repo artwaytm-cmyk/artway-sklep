@@ -921,11 +921,15 @@ function inpostKonfiguracja() {
   const token = tekst(process.env.INPOST_TOKEN || process.env.INPOST_API_TOKEN || '', 4000).trim();
   const orgId = tekst(process.env.INPOST_ORG_ID || process.env.INPOST_ORGANIZATION_ID || '', 40).trim();
   const geowidgetToken = tekst(process.env.INPOST_GEOWIDGET_TOKEN || '', 4000).trim();
+  const missingEnv = [];
+  if (!token) missingEnv.push('INPOST_TOKEN');
+  if (!orgId) missingEnv.push('INPOST_ORG_ID');
   return {
     token,
     orgId,
     geowidgetToken,
-    configured: !!(token && orgId),
+    configured: missingEnv.length === 0,
+    missingEnv,
     env: inpostEnv(),
     baseUrl: inpostBaseUrl(),
     sendingMethod: tekst(process.env.INPOST_SENDING_METHOD || 'dispatch_order', 40).trim() || 'dispatch_order',
@@ -938,8 +942,9 @@ function inpostPublicConfig() {
     env: c.env,
     geowidgetToken: c.geowidgetToken,
     geowidgetConfigured: !!c.geowidgetToken,
-    requiredEnv: ['INPOST_TOKEN', 'INPOST_ORG_ID', 'INPOST_GEOWIDGET_TOKEN'],
-    optionalEnv: ['INPOST_ENV=production', 'INPOST_SENDING_METHOD=dispatch_order'],
+    missingEnv: c.missingEnv,
+    requiredEnv: ['INPOST_TOKEN', 'INPOST_ORG_ID'],
+    optionalEnv: ['INPOST_GEOWIDGET_TOKEN', 'INPOST_ENV=production', 'INPOST_SENDING_METHOD=dispatch_order'],
   };
 }
 async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'application/json' } = {}) {
@@ -947,9 +952,18 @@ async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'a
   if (!c.configured) {
     const blad = new Error('InPost nie jest skonfigurowany po stronie serwera. Ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify.');
     blad.code = 'inpost_not_configured';
+    blad.status = 503;
+    blad.missingEnv = c.missingEnv;
     throw blad;
   }
-  const headers = { 'Authorization': `Bearer ${c.token}`, 'Accept': accept, 'User-Agent': 'Artway-TM/1.0' };
+  const headers = {
+    'Authorization': `Bearer ${c.token}`,
+    'Accept': accept,
+    'Accept-Language': 'pl_PL',
+    'X-User-Agent': 'Artway-TM',
+    'X-User-Agent-Version': '1.0',
+    'X-Request-ID': `artway-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`,
+  };
   const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
   if (body) headers['Content-Type'] = 'application/json';
   const r = await fetch(new URL(path, c.baseUrl).toString(), { method, headers, body });
@@ -958,7 +972,7 @@ async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'a
     if (!r.ok) {
       const t = await r.text().catch(() => '');
       const blad = new Error(bledyInpostTekst(bezpiecznyJson(t), `InPost HTTP ${r.status}`));
-      blad.status = r.status; throw blad;
+      blad.status = r.status; blad.code = 'inpost_http_error'; throw blad;
     }
     const buf = Buffer.from(await r.arrayBuffer());
     return { binary: true, contentType: ct || 'application/pdf', base64: buf.toString('base64') };
@@ -967,7 +981,7 @@ async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'a
   const dane = bezpiecznyJson(t);
   if (!r.ok) {
     const blad = new Error(bledyInpostTekst(dane, `InPost HTTP ${r.status}`));
-    blad.status = r.status; blad.inpost = dane; throw blad;
+    blad.status = r.status; blad.code = dane?.error || dane?.code || 'inpost_http_error'; blad.inpost = dane; throw blad;
   }
   return dane || {};
 }
@@ -983,6 +997,7 @@ function bledyInpostTekst(dane, fallback) {
       : '';
     return det ? `${dane.message} (${det})` : dane.message;
   }
+  if (dane.description && typeof dane.description === 'string') return dane.description;
   if (dane.error) return `${dane.error}${dane.error_description ? ': ' + dane.error_description : ''}`;
   return fallback;
 }
@@ -991,26 +1006,80 @@ function telefonInpost(v) {
   if (cyfry.length === 11 && cyfry.startsWith('48')) return cyfry.slice(2);
   return cyfry.slice(-9);
 }
-function przesylkaShipXPayload(z, c) {
-  const k = z?.klient || {};
+function emailInpostOk(v) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
+}
+function kodPocztowyInpost(v) {
+  const raw = String(v || '').replace(/\s/g, '');
+  const m = raw.match(/^(\d{2})-?(\d{3})$/);
+  return m ? `${m[1]}-${m[2]}` : raw;
+}
+function adresInpostZamowienia(z) {
   const a = z?.adresDostawy || {};
+  let street = tekst(a.ulica, 120).trim();
+  let building_number = tekst(a.nrDomu, 30).trim();
+  const flat_number = tekst(a.nrLokalu, 30).trim();
+  let post_code = kodPocztowyInpost(a.kod);
+  let city = tekst(a.miasto, 80).trim();
+
+  if ((!street || !building_number || !post_code || !city) && z?.adres) {
+    const [liniaAdresu = '', liniaMiasta = ''] = String(z.adres).split(',').map((x) => x.trim());
+    const mMiasto = liniaMiasta.match(/(\d{2}-?\d{3})\s+(.+)/);
+    if (!post_code && mMiasto) post_code = kodPocztowyInpost(mMiasto[1]);
+    if (!city && mMiasto) city = mMiasto[2].trim();
+    const mUlica = liniaAdresu.match(/^(.+?)\s+([0-9][0-9A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż/.-]*)$/);
+    if (!street && mUlica) street = mUlica[1].trim();
+    if (!building_number && mUlica) building_number = mUlica[2].trim();
+    if (!street && liniaAdresu) street = liniaAdresu;
+  }
+
+  return { street, building_number, flat_number, city, post_code, country_code: 'PL' };
+}
+function walidujPrzesylkeInPost(z) {
+  const k = z?.klient || {};
   const w = z?.wysylka || {};
   const doPaczkomatu = z?.dostawaId === 'paczkomat' || !!(z?.paczkomat || w?.punktKod);
-  const punkt = tekst(z?.paczkomat || w?.punktKod, 40).trim();
+  const punkt = tekst(z?.paczkomat || w?.punktKod, 40).trim().toUpperCase();
+  const email = tekst(z?.email || k.email, 200).trim().toLowerCase();
+  const phone = telefonInpost(k.telefon || z?.telefon);
+  const errors = [];
+
+  if (!emailInpostOk(email)) errors.push({ field: 'receiver.email', message: 'Brak poprawnego adresu e-mail odbiorcy.' });
+  if (!/^\d{9}$/.test(phone)) errors.push({ field: 'receiver.phone', message: 'Brak poprawnego polskiego numeru telefonu odbiorcy (9 cyfr).' });
+  if (doPaczkomatu && !punkt) errors.push({ field: 'custom_attributes.target_point', message: 'Brak kodu paczkomatu / punktu odbioru.' });
+
+  const address = adresInpostZamowienia(z);
+  if (!doPaczkomatu) {
+    if (!address.street) errors.push({ field: 'receiver.address.street', message: 'Brak ulicy odbiorcy.' });
+    if (!address.building_number) errors.push({ field: 'receiver.address.building_number', message: 'Brak numeru budynku odbiorcy.' });
+    if (!/^\d{2}-\d{3}$/.test(address.post_code)) errors.push({ field: 'receiver.address.post_code', message: 'Brak poprawnego kodu pocztowego odbiorcy.' });
+    if (!address.city) errors.push({ field: 'receiver.address.city', message: 'Brak miasta odbiorcy.' });
+  }
+
+  const gab = tekst(w.gabaryt, 20).trim().toLowerCase();
+  if (!['', 'small', 'medium', 'large'].includes(gab)) errors.push({ field: 'parcel.template', message: 'Gabaryt InPost może być small, medium albo large.' });
+  if (!gab) {
+    for (const [field, label, fallback] of [['dlugosc', 'długość', 30], ['szerokosc', 'szerokość', 20], ['wysokosc', 'wysokość', 15], ['waga', 'waga', 1]]) {
+      const n = Number(w[field] || fallback);
+      if (!Number.isFinite(n) || n <= 0) errors.push({ field: `parcel.${field}`, message: `Niepoprawna ${label} paczki.` });
+    }
+  }
+
+  return { ok: errors.length === 0, errors, doPaczkomatu, punkt, email, phone, address };
+}
+function przesylkaShipXPayload(z, c, walidacja = null) {
+  const v = walidacja || walidujPrzesylkeInPost(z);
+  const k = z?.klient || {};
+  const w = z?.wysylka || {};
   const receiver = {
     first_name: tekst(k.imie, 80).trim() || 'Klient',
     last_name: tekst(k.nazwisko, 80).trim() || z?.nr || '—',
-    email: tekst(z?.email || k.email, 200).trim(),
-    phone: telefonInpost(k.telefon || z?.telefon),
+    email: v.email,
+    phone: v.phone,
   };
-  if (!doPaczkomatu) {
-    receiver.address = {
-      street: tekst(a.ulica, 120).trim() || tekst(z?.adres, 120).trim(),
-      building_number: tekst(a.nrDomu, 30).trim() || '1',
-      city: tekst(a.miasto, 80).trim(),
-      post_code: tekst(a.kod, 12).trim(),
-      country_code: 'PL',
-    };
+  if (tekst(k.firma, 160).trim()) receiver.company_name = tekst(k.firma, 160).trim();
+  if (!v.doPaczkomatu) {
+    receiver.address = Object.fromEntries(Object.entries(v.address).filter(([, val]) => val));
   }
   // parcele: szablon (small/medium/large) albo wymiary
   const gab = tekst(w.gabaryt, 20).trim().toLowerCase();
@@ -1028,13 +1097,14 @@ function przesylkaShipXPayload(z, c) {
   const payload = {
     receiver,
     parcels: [parcel],
-    service: doPaczkomatu ? 'inpost_locker_standard' : 'inpost_courier_standard',
+    service: v.doPaczkomatu ? 'inpost_locker_standard' : 'inpost_courier_standard',
     reference: tekst(z?.nr, 80),
+    comments: tekst(`Artway-TM ${z?.nr || ''}`.trim(), 100),
     custom_attributes: {
-      sending_method: doPaczkomatu ? c.sendingMethod : 'dispatch_order',
+      sending_method: v.doPaczkomatu ? c.sendingMethod : 'dispatch_order',
     },
   };
-  if (doPaczkomatu && punkt) payload.custom_attributes.target_point = punkt;
+  if (v.doPaczkomatu && v.punkt) payload.custom_attributes.target_point = v.punkt;
   if (z?.platnoscId === 'pobranie') {
     payload.cod = { amount: Number(z?.razem) || 0, currency: 'PLN' };
     payload.insurance = { amount: Number(z?.razem) || 0, currency: 'PLN' };
@@ -1368,6 +1438,37 @@ export default async (req) => {
       return odpowiedz({ ok: true, inpost: inpostPublicConfig() });
     }
 
+    // ─── INPOST: realny test tokenu i organizacji ShipX (admin) ───
+    if (action === 'inpost-test') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const c = inpostKonfiguracja();
+      if (!c.configured) {
+        return odpowiedz({
+          ok: false,
+          configured: false,
+          code: 'inpost_not_configured',
+          error: 'InPost nie jest skonfigurowany. Ustaw brakujące zmienne Netlify.',
+          missingEnv: c.missingEnv,
+          inpost: inpostPublicConfig(),
+        }, 503);
+      }
+      const org = await inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}`, { method: 'GET' });
+      const services = Array.isArray(org?.services) ? org.services.map((x) => tekst(x, 80)).filter(Boolean) : [];
+      return odpowiedz({
+        ok: true,
+        configured: true,
+        inpost: {
+          ...inpostPublicConfig(),
+          authenticated: true,
+          organization: {
+            id: tekst(org?.id || c.orgId, 40),
+            name: tekst(org?.name || '', 160),
+            services,
+          },
+        },
+      });
+    }
+
     // ─── INPOST: utworzenie przesyłki ShipX (admin) ───
     if (action === 'inpost-create') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -1383,7 +1484,16 @@ export default async (req) => {
       if (z?.wysylka?.inpostId) return odpowiedz({ ok: false, error: `Przesyłka InPost już istnieje (${z.wysylka.inpostId}).`, code: 'exists', inpostId: z.wysylka.inpostId }, 409);
       const doPaczkomatu = z?.dostawaId === 'paczkomat' || !!(z?.paczkomat || z?.wysylka?.punktKod);
       if (doPaczkomatu && !tekst(z?.paczkomat || z?.wysylka?.punktKod, 40).trim()) return odpowiedz({ ok: false, error: 'Brak wybranego paczkomatu w zamówieniu (klient nie wskazał punktu).', code: 'no_point' }, 422);
-      const payload = przesylkaShipXPayload(z, c);
+      const walidacja = walidujPrzesylkeInPost(z);
+      if (!walidacja.ok) {
+        return odpowiedz({
+          ok: false,
+          error: 'Nie można utworzyć przesyłki InPost — uzupełnij dane zamówienia.',
+          code: 'inpost_validation',
+          details: walidacja.errors,
+        }, 422);
+      }
+      const payload = przesylkaShipXPayload(z, c, walidacja);
       const dane = await inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}/shipments`, { method: 'POST', bodyObj: payload });
       const inpostId = tekst(dane?.id, 60).trim();
       const numer = numerZShipX(dane);
@@ -1701,6 +1811,14 @@ export default async (req) => {
 
     return odpowiedz({ ok: false, error: 'Nieznana akcja: ' + action }, 404);
   } catch (e) {
-    return odpowiedz({ ok: false, error: 'Błąd serwera: ' + (e && e.message ? e.message : String(e)) }, 500);
+    const status = Number(e?.status) >= 400 && Number(e?.status) < 600 ? Number(e.status) : 500;
+    const body = {
+      ok: false,
+      error: e && e.message ? e.message : String(e),
+      code: e?.code || (status === 500 ? 'server_error' : 'request_error'),
+    };
+    if (Array.isArray(e?.missingEnv)) body.missingEnv = e.missingEnv;
+    if (e?.inpost?.details) body.details = e.inpost.details;
+    return odpowiedz(body, status);
   }
 };

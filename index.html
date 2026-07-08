@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.08.2">
+<meta name="artway-version" content="2026.07.08.3">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <link id="faviconLink" rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="14" fill="%232563eb"/%3E%3Ctext x="32" y="42" text-anchor="middle" font-size="30" font-family="Arial" font-weight="700" fill="white"%3EA%3C/text%3E%3C/svg%3E'>
@@ -761,7 +761,7 @@ async function chmura(action, {method="GET", body=null, params={}, timeout=9000}
   if(timer)clearTimeout(timer);
   const t = await r.text(); let d;
   try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił danych — czy backend Netlify jest opublikowany?"); }
-  if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); b.code=d.code||""; b.status=r.status; throw b; }
+  if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); Object.assign(b,d); b.code=d.code||""; b.status=r.status; throw b; }
   return d;
 }
 function nrZamowienia(v){ return String(v??"").trim().slice(0,80); }
@@ -3133,25 +3133,30 @@ function uruchomAutoSynchronizacjeChmury(){
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) automatycznaSynchronizacjaChmury("visible"); });
 }
 async function sprawdzBramke(cicho=false){
-  let cloud=null;
   try{
-    cloud=await chmura("health",{timeout:9000});
+    const cloud=await chmura("health",{timeout:9000});
     stanBramki={...stanBramki,sprawdzono:true,online:true,email:cloud.email||stanBramki.email,store:cloud.store||stanBramki.store,inpost:cloud.inpost||stanBramki.inpost,error:""};
     if(cloud.inpost) INPOST_PUBLIC=cloud.inpost;
     if(cloud.store) stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,orders:cloud.store.orders||0,users:cloud.store.users||0,updatedAt:cloud.store.settings_updated_at||cloud.store.updated_at||null,error:""};
-  }catch(e){ /* Netlify może być chwilowo niedostępne — niżej próbujemy stary backend PHP */ }
+    if(!cicho){
+      const ip=cloud.inpost||{};
+      const czesci=[];
+      czesci.push("Netlify Functions działa ✅");
+      czesci.push(cloud.email?.configured?`SMTP ${cloud.email.provider||""} gotowy`:"SMTP do konfiguracji");
+      czesci.push(ip.configured?`InPost ShipX gotowy (${ip.env||"production"})`:`InPost: brakuje ${(ip.missingEnv&&ip.missingEnv.length?ip.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")}`);
+      if(!ip.geowidgetConfigured) czesci.push("mapa paczkomatów: brak INPOST_GEOWIDGET_TOKEN");
+      toast(czesci.join(" • "));
+    }
+    if(trasa()==="/admin/wysylki"||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy") renderuj();
+    return;
+  }catch(e){ /* Netlify może być chwilowo niedostępne — niżej próbujemy awaryjny backend PHP */ }
   try{
     const d=await wywolajBramke("health");
-    stanBramki={...stanBramki,...d,email:cloud?.email||d.email||stanBramki.email,store:cloud?.store||d.store||stanBramki.store,sprawdzono:true,online:true,error:""};
-    if(!cicho) toast(d.ready?"Bramka InPost gotowa ✅":stanBramki.email?.configured?`E-mail SMTP ${stanBramki.email.provider||""} gotowy ✅`:d.configured?"OAuth gotowy — uzupełnij Organization ID":"Bramka przewoźników wymaga konfiguracji");
+    stanBramki={...stanBramki,...d,email:d.email||stanBramki.email,store:d.store||stanBramki.store,sprawdzono:true,online:true,error:""};
+    if(!cicho) toast(d.ready?"Awaryjna bramka PHP gotowa ✅":d.configured?"Awaryjna bramka PHP skonfigurowana":"Bramka przewoźników wymaga konfiguracji");
   }catch(e){
-    if(cloud){
-      stanBramki={...stanBramki,sprawdzono:true,online:true,error:e.message};
-      if(!cicho) toast(stanBramki.email?.configured?`E-mail SMTP ${stanBramki.email.provider||""} gotowy ✅`:"Netlify działa — skonfiguruj SMTP/Gmail dla e-maili");
-    }else{
-      stanBramki={...stanBramki,sprawdzono:true,online:false,error:e.message};
-      if(!cicho) toast("Bramka niedostępna — sprawdź Netlify Functions");
-    }
+    stanBramki={...stanBramki,sprawdzono:true,online:false,error:e.message};
+    if(!cicho) toast("Bramka niedostępna — sprawdź Netlify Functions");
   }
   if(trasa()==="/admin/wysylki"||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy") renderuj();
 }
@@ -3174,10 +3179,21 @@ async function testujInPost(){
   try{
     const cfg=await pobierzInpostConfig(true);
     stanBramki={...stanBramki,inpost:cfg||stanBramki.inpost};
-    if(cfg&&cfg.configured) toast(`InPost gotowy ✅ (${cfg.env})${cfg.geowidgetConfigured?" • mapa paczkomatów aktywna":" • brak tokenu Geowidget"}`);
-    else toast("InPost niegotowy — ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify");
+    if(!chmuraToken){ toast("Wpisz hasło bazy administratora, aby wykonać realny test tokenu InPost"); chmuraUstawToken(); return; }
+    const d=await chmura("inpost-test",{timeout:15000});
+    const ip=d.inpost||cfg||{};
+    stanBramki={...stanBramki,inpost:ip,error:""};
+    const org=ip.organization?.id?` • organizacja ${ip.organization.id}`:"";
+    const uslugi=ip.organization?.services?.length?` • usługi: ${ip.organization.services.slice(0,3).join(", ")}`:"";
+    toast(`InPost ShipX połączony ✅ (${ip.env||"production"})${org}${ip.geowidgetConfigured?" • mapa aktywna":" • brak tokenu Geowidget"}${uslugi}`);
     renderuj();
-  }catch(bl){stanBramki={...stanBramki,error:bl.message};toast("Test InPost: "+bl.message);renderuj();}
+  }catch(bl){
+    const ip=bl.inpost||stanBramki.inpost||{};
+    stanBramki={...stanBramki,inpost:ip,error:bl.message};
+    if(bl.code==="inpost_not_configured") toast("InPost niegotowy — brakuje: "+((bl.missingEnv&&bl.missingEnv.length?bl.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")));
+    else toast("Test InPost: "+bl.message);
+    renderuj();
+  }
 }
 function b64toBlob(b64,typ="application/pdf"){
   const bin=atob(String(b64||"")); const len=bin.length; const arr=new Uint8Array(len);
@@ -3204,6 +3220,7 @@ async function utworzPrzesylkeAPI(nr){
     if(bl.code==="inpost_not_configured"){ toast("Najpierw skonfiguruj InPost w Netlify (INPOST_TOKEN, INPOST_ORG_ID)"); location.hash="#/admin/dostawy"; return; }
     if(bl.code==="no_point"){ toast("Zamówienie nie ma wybranego paczkomatu (klient nie wskazał punktu)"); return; }
     if(bl.code==="exists"){ toast("Przesyłka InPost już istnieje dla tego zamówienia"); return; }
+    if(bl.code==="inpost_validation"){ toast("Uzupełnij dane do InPost: "+((bl.details||[]).map(x=>x.message||x).join(" • ")||bl.message)); return; }
     aktualizujZamowienie(nr,zam=>{const w=daneWysylki(zam);w.bladIntegracji=bl.message;w.etap="problem";zam.wysylka=w;});
     loguj("blad",`InPost create ${nr}: ${bl.message}`);toast("InPost: "+bl.message);renderuj();
   }
@@ -3365,27 +3382,25 @@ function panelAutomatyzacjiWysylek(){
 }
 function panelUstawienBramki(){
   const u=ustawieniaWysylki();
-  const stanTekst=!stanBramki.sprawdzono?"nie sprawdzono":!stanBramki.online?"backend niedostępny":!stanBramki.configured?"brak config.php / OAuth":!stanBramki.ready?"OAuth działa — uzupełnij Organization ID":stanBramki.authenticated?"połączono z sesją integracji":"backend gotowy — zaloguj integrację";
   const ip=stanBramki.inpost||{};
   const ipGotowy=!!ip.configured, ipMapa=!!ip.geowidgetConfigured;
+  const braki=Array.isArray(ip.missingEnv)&&ip.missingEnv.length?ip.missingEnv:[...(ipGotowy?[]:["INPOST_TOKEN","INPOST_ORG_ID"])];
+  const orgInfo=ip.organization?.id?`Organizacja: <b>${esc(ip.organization.id)}</b>${ip.organization.name?` • ${esc(ip.organization.name)}`:""}`:"Organizacja zostanie pokazana po realnym teście API.";
   return `<div class="panel">
     <h1>⚙️ Uniwersalna bramka przewoźników</h1>
     <div class="integration-hub" style="border:2px solid ${ipGotowy?'#86efac':'#fcd34d'};background:${ipGotowy?'#f0fdf4':'#fffbeb'}">
       <div class="integration-hub-status"><span><b>🟡 InPost (ShipX) — Netlify</b><br><small style="color:var(--muted2)">Prawdziwe przesyłki, etykiety i mapa paczkomatów — tokeny w zmiennych Netlify</small></span>
-        <span class="integration-state" style="background:${ipGotowy?'#dcfce7':'#fef3c7'};color:${ipGotowy?'#166534':'#854d0e'}">${ipGotowy?`gotowy • ${esc(ip.env||'production')}`:'brak tokenów'}</span></div>
-      <p class="ship-meta">Przesyłki ShipX: <b>${ipGotowy?"aktywne ✅":"ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify"}</b> &nbsp;•&nbsp; Mapa paczkomatów (Geowidget) u klienta: <b>${ipMapa?"aktywna ✅":"ustaw INPOST_GEOWIDGET_TOKEN"}</b></p>
-      <div class="diag-actions"><button class="btn" style="background:#ffcc00;color:#111" onclick="testujInPost()">🔎 Sprawdź InPost</button></div>
-      <div class="backend-note" style="margin-top:.6rem"><b>Wymagane zmienne Netlify:</b> <code>INPOST_TOKEN</code> (token API ShipX), <code>INPOST_ORG_ID</code> (Organization ID), <code>INPOST_GEOWIDGET_TOKEN</code> (publiczny token mapy). Opcjonalnie <code>INPOST_ENV=production</code> i <code>INPOST_SENDING_METHOD=dispatch_order</code>. Tokeny generujesz w <b>manager.paczkomaty.pl → Moje konto → API</b>.</div>
-    </div>
-    <div class="integration-hub" style="margin-top:1rem"><div class="integration-hub-status"><span><b>Jeden punkt integracji (starszy backend PHP)</b><br><code>${esc(u.apiEndpoint)}</code></span><span class="integration-state">${esc(stanTekst)}</span></div>
-      <p class="ship-meta">Panel wysyła jedno standardowe zlecenie. Backend wybiera adapter przewoźnika i zwraca wspólną odpowiedź: identyfikator, numer, oficjalną etykietę oraz tracking.</p>
+        <span class="integration-state" style="background:${ipGotowy?'#dcfce7':'#fef3c7'};color:${ipGotowy?'#166534':'#854d0e'}">${ipGotowy?`tokeny obecne • ${esc(ip.env||'production')}`:`brakuje: ${esc(braki.join(", "))}`}</span></div>
+      <p class="ship-meta">Przesyłki ShipX: <b>${ipGotowy?"aktywne po pozytywnym teście ✅":"uzupełnij brakujące zmienne Netlify"}</b> &nbsp;•&nbsp; Mapa paczkomatów (Geowidget) u klienta: <b>${ipMapa?"aktywna ✅":"ustaw INPOST_GEOWIDGET_TOKEN"}</b><br>${orgInfo}</p>
       <div class="diag-actions">
-        <button class="btn ghost" onclick="sprawdzBramke()">🔎 Sprawdź backend PHP</button>
-        ${stanBramki.authenticated?`<button class="btn" onclick="testujInPost()">🟡 Test OAuth InPost</button><button class="btn ghost" onclick="rozlaczBramke()">Rozłącz sesję</button>`:""}
+        <button class="btn ghost" onclick="sprawdzBramke()">🔎 Sprawdź Netlify</button>
+        <button class="btn" style="background:#ffcc00;color:#111" onclick="testujInPost()">🟡 Test API InPost</button>
       </div>
       ${stanBramki.error?`<div class="backend-note" style="border-color:var(--danger);background:#fff1f2;color:#991b1b"><b>Błąd połączenia:</b> ${esc(stanBramki.error)}</div>`:""}
-      ${stanBramki.online&&!stanBramki.authenticated?`<form onsubmit="polaczBramke(event)" style="margin-top:.75rem"><div class="f-row" style="grid-template-columns:1fr auto;align-items:end"><div class="f-group"><label>Hasło integracji z api/config.php</label><input type="password" name="apiPassword" required autocomplete="current-password" placeholder="Nie jest zapisywane w przeglądarce"></div><div class="f-group"><button class="btn" type="submit">🔐 Połącz bezpieczną sesję</button></div></div></form>`:""}
-      ${stanBramki.organizations.length?`<details style="margin-top:.6rem"><summary>Organizacje zwrócone przez InPost</summary><pre style="white-space:pre-wrap;font-size:.72rem">${esc(JSON.stringify(stanBramki.organizations,null,2))}</pre></details>`:""}
+      <div class="backend-note" style="margin-top:.6rem"><b>Wymagane dla etykiet:</b> <code>INPOST_TOKEN</code> (token API ShipX) i <code>INPOST_ORG_ID</code> (Organization ID). <b>Dla mapy paczkomatów:</b> <code>INPOST_GEOWIDGET_TOKEN</code>. Opcjonalnie: <code>INPOST_ENV=production</code> i <code>INPOST_SENDING_METHOD=dispatch_order</code>. Dane generuje się w <b>manager.paczkomaty.pl → Moje konto → API</b>.</div>
+      <details style="margin-top:.6rem"><summary style="cursor:pointer;font-weight:700">Awaryjny/stary backend PHP na hostingu</summary>
+        <p class="ship-meta">Główna integracja działa przez Netlify Functions. Ten adres zostaje tylko jako informacja dla pierwszej instalacji na nazwa.pl albo awaryjnego hostingu bez Netlify: <code>${esc(u.apiEndpoint)}</code>.</p>
+      </details>
     </div>
     <div class="integration-card" style="margin-top:1rem">
       <b>📧 Automatyczne e-maile</b>
@@ -6029,7 +6044,7 @@ function kontrolePublikacji(){
 const KROKI_PUBLIKACJI = [
   "Zalogowałem się do CloudHosting Panel nazwa.pl",
   "Wgrałem index.html, products.json i cały katalog api przez SFTP",
-  "Skopiowałem api/config.example.php jako api/config.php i wpisałem dane InPost",
+  "Ustawiłem zmienne Netlify dla SMTP, Paynow i InPost ShipX",
   "Skierowałem domenę na katalog z plikami strony",
   "Otworzyłem stronę pod własną domeną i wszystko działa",
   "Sprawdziłem stronę na telefonie",
@@ -6054,8 +6069,8 @@ function widokAdminPublikacja(){
   </div>
   <div class="panel">
     <h2 style="margin-top:0">📁 Co wgrywasz na serwer</h2>
-    <p style="font-size:.9rem;color:var(--muted2)">Przy pierwszym uruchomieniu wgraj <b>index.html</b>, <b>products.json</b> oraz cały katalog <b>api</b>. Po zainstalowaniu tej wersji kolejne zmiany układu i produktów publikujesz jednym przyciskiem w sekcji <a href="#/admin/aktualizacja"><b>⬆️ Aktualizacja strony</b></a>, bez ręcznego FTP.</p>
-    <div class="backend-note"><b>Ważne:</b> SFTP pozostaje potrzebne tylko do pierwszej instalacji publikatora albo przyszłej zmiany samego backendu PHP. Każda aktualizacja z panelu automatycznie tworzy kopię.</div>
+    <p style="font-size:.9rem;color:var(--muted2)">Przy pierwszym uruchomieniu na hostingu statycznym wgraj <b>index.html</b>, <b>products.json</b> oraz katalog <b>api</b>, jeżeli korzystasz z awaryjnego PHP. Aktualna, profesjonalna wersja sklepu używa jednak <b>Netlify Functions</b> do wspólnej bazy, e-maili, Paynow i InPost.</p>
+    <div class="backend-note"><b>Ważne:</b> GitHub/Netlify są obecnie główną ścieżką publikacji. SFTP/nazwa.pl traktuj jako hosting plików lub plan awaryjny; sekrety przewoźników i płatności pozostają w zmiennych Netlify, nie w public_html.</div>
     <h2>Publikacja na nazwa.pl</h2>
     <details open style="margin:.5rem 0"><summary style="cursor:pointer;font-weight:700">1. Połącz się bezpiecznie przez SFTP</summary>
       <ol style="font-size:.9rem;color:var(--muted2);padding-left:1.3rem;margin:.5rem 0">
@@ -6073,10 +6088,10 @@ function widokAdminPublikacja(){
       </ol></details>
     <details style="margin:.5rem 0"><summary style="cursor:pointer;font-weight:700">3. Skonfiguruj adapter InPost</summary>
       <ol style="font-size:.9rem;color:var(--muted2);padding-left:1.3rem;margin:.5rem 0">
-        <li>W katalogu api skopiuj <b>config.example.php</b> jako <b>config.php</b></li>
-        <li>Wpisz Client ID, Client Secret, Organization ID, dane nadawcy i mocne hasło integracji</li>
-        <li>Najpierw pozostaw tryb <b>stage</b>; po testach zmień go na <b>production</b></li>
-        <li>W panelu sklepu otwórz Centrum wysyłek → Bramka i ustawienia → Sprawdź backend PHP</li>
+        <li>W Parcel Manager InPost wygeneruj token API ShipX oraz publiczny token Geowidget</li>
+        <li>W Netlify ustaw: <b>INPOST_TOKEN</b>, <b>INPOST_ORG_ID</b>, opcjonalnie <b>INPOST_GEOWIDGET_TOKEN</b></li>
+        <li>Dla testów ustaw <b>INPOST_ENV=sandbox</b>; po testach zmień na <b>production</b></li>
+        <li>W panelu sklepu otwórz Centrum wysyłek → Bramka i ustawienia → Test API InPost</li>
       </ol></details>
     <details style="margin:.5rem 0"><summary style="cursor:pointer;font-weight:700">4. Skieruj domenę na katalog strony</summary>
       <ol style="font-size:.9rem;color:var(--muted2);padding-left:1.3rem;margin:.5rem 0">
@@ -6087,7 +6102,7 @@ function widokAdminPublikacja(){
       </ol></details>
     <h2>✅ Lista startowa</h2>
     ${KROKI_PUBLIKACJI.map((k,i)=>`<label class="chk-row"><input type="checkbox" ${kroki[i]?"checked":""} onchange="przelaczKrok(${i})"> ${k}</label>`).join("")}
-    <p class="pay-note" style="text-align:left;margin-top:.8rem">Pamiętaj: konta klientów i zamówienia zapisują się w przeglądarce każdego klienta. Klient musi dodatkowo kliknąć wysłanie potwierdzenia e-mail. Automatyczne przyjmowanie zamówień i wspólna baza wymagają backendu.</p>
+    <p class="pay-note" style="text-align:left;margin-top:.8rem">Pamiętaj: zamówienia, klienci i ustawienia synchronizują się przez wspólną bazę Netlify. Gdy Netlify jest niedostępne, sklep zachowuje lokalną kopię i ponowi synchronizację po odzyskaniu połączenia.</p>
   </div>`);
 }
 
@@ -6138,11 +6153,14 @@ function testyDiagnostyczne(){
   dodaj("Wysyłki","Kolejka wyjątków",wyjatkiWysylki?"bad":"ok",wyjatkiWysylki?`${wyjatkiWysylki} przesyłek wymaga reakcji operatora`:"Brak nierozwiązanych wyjątków");
   dodaj("Wysyłki","Reguły automatycznego wyboru",PRZEWOZNICY[uwDiag.regulaPaczkomat]&&PRZEWOZNICY[uwDiag.regulaKurier]?"ok":"bad",`Paczkomat: ${nazwaPrzewoznika(uwDiag.regulaPaczkomat)} • kurier: ${nazwaPrzewoznika(uwDiag.regulaKurier)}`);
   const poprawnyEndpoint=String(uwDiag.apiEndpoint||"").startsWith("/")||String(uwDiag.apiEndpoint||"").startsWith("https://")||String(uwDiag.apiEndpoint||"").startsWith("http://");
-  dodaj("Integracje","Uniwersalna bramka",poprawnyEndpoint?"warn":"bad",`Endpoint ${uwDiag.apiEndpoint} • tryb ${uwDiag.tryb}; oczekuje na backend`);
+  dodaj("Integracje","Uniwersalna bramka",stanBramki.online?"ok":poprawnyEndpoint?"warn":"bad",stanBramki.online?`Netlify Functions dostępne • tryb wysyłek ${uwDiag.tryb}`:`Endpoint awaryjny ${uwDiag.apiEndpoint} • sprawdź Netlify Functions`);
   dodaj("Integracje","Centralna baza zamówień",stanBazyCentralnej.online?"ok":stanBazyCentralnej.sprawdzono?"bad":"warn",stanBazyCentralnej.online
     ?`${stanBazyCentralnej.orders} zamówień • ${stanBazyCentralnej.users} klientów • wspólne dla wszystkich urządzeń`
     :stanBazyCentralnej.error||"Połącz backend, aby sprawdzić i zsynchronizować wspólną bazę");
-  dodaj("Integracje","API przewoźników","warn","Panel jest przygotowany; oficjalne etykiety i webhooki wymagają kont oraz kluczy API na backendzie");
+  const ipDiag=stanBramki.inpost||{};
+  dodaj("Integracje","InPost ShipX API",ipDiag.configured?"ok":"warn",ipDiag.configured
+    ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}`
+    :`Brakuje: ${((ipDiag.missingEnv&&ipDiag.missingEnv.length?ipDiag.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", "))}`);
   const emailDiag=!!stanBramki.email?.configured;
   dodaj("Integracje","Automatyczne e-maile",emailDiag&&chmuraToken?"ok":"warn",emailDiag
     ?`${stanBramki.email.provider||"SMTP"} skonfigurowany${chmuraToken?" — wysyłka automatyczna aktywna":" — wpisz hasło bazy do testów i ręcznej wysyłki"}`
