@@ -3,6 +3,7 @@
 // Endpoint: /.netlify/functions/store  (alias /api/store)
 import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
+import nodemailer from 'nodemailer';
 
 const STORE_NAME = 'artway-sklep';
 
@@ -193,6 +194,11 @@ function publicznyOrigin(req) {
 function paynowUrlPowrotu(req) {
   return tekst(process.env.PAYNOW_CONTINUE_URL, 1000).trim() || `${publicznyOrigin(req)}/#/zamowienia`;
 }
+function paynowUrlPowrotuZamowienia(req, nr) {
+  const skonfigurowany = tekst(process.env.PAYNOW_CONTINUE_URL, 1000).trim();
+  if (skonfigurowany) return skonfigurowany.replaceAll('{nr}', encodeURIComponent(nr || ''));
+  return `${publicznyOrigin(req)}/#/dziekujemy/${encodeURIComponent(nr || '')}`;
+}
 function paynowUrlPowiadomien(req) {
   return tekst(process.env.PAYNOW_NOTIFICATION_URL, 1000).trim() || `${publicznyOrigin(req)}/api/store?action=paynow-notification`;
 }
@@ -317,7 +323,7 @@ function payloadPlatnosciPaynow(z, req) {
     currency: 'PLN',
     externalId: nr,
     description: tekst(`Zamówienie ${nr} Artway-TM`, 255),
-    continueUrl: paynowUrlPowrotu(req),
+    continueUrl: paynowUrlPowrotuZamowienia(req, nr),
     buyer,
     orderItems: [{
       name: tekst(`Zamówienie ${nr}`, 120),
@@ -366,6 +372,187 @@ async function aktualizujZamowieniePaynow({ externalId = '', paymentId = '', sta
   return z;
 }
 
+function emailKonfiguracja() {
+  const providerRaw = tekst(process.env.EMAIL_PROVIDER, 40).trim().toLowerCase();
+  const host = tekst(process.env.SMTP_HOST || (providerRaw === 'gmail' ? 'smtp.gmail.com' : ''), 120).trim();
+  const port = Number(process.env.SMTP_PORT || (host === 'smtp.gmail.com' ? 465 : 587));
+  const secureRaw = tekst(process.env.SMTP_SECURE, 20).trim().toLowerCase();
+  const secure = secureRaw ? ['1', 'true', 'yes', 'tak'].includes(secureRaw) : port === 465;
+  const user = tekst(process.env.SMTP_USER || process.env.GMAIL_USER || '', 200).trim();
+  const pass = tekst(process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || '', 500).trim();
+  const provider = providerRaw || (host || user || pass ? (host === 'smtp.gmail.com' || user.endsWith('@gmail.com') ? 'gmail-smtp' : 'smtp') : '');
+  const from = tekst(process.env.EMAIL_FROM || user || 'sklepartway@gmail.com', 200).trim();
+  const fromName = tekst(process.env.EMAIL_FROM_NAME || 'Artway-TM', 120).trim();
+  const replyTo = tekst(process.env.EMAIL_REPLY_TO || from, 200).trim();
+  const adminTo = tekst(process.env.EMAIL_ADMIN_TO || process.env.EMAIL_TO || from, 200).trim();
+  return {
+    provider,
+    configured: !!(provider && host && user && pass && from),
+    host,
+    port,
+    secure,
+    user,
+    from,
+    fromName,
+    replyTo,
+    adminTo,
+  };
+}
+function emailPublicConfig() {
+  const c = emailKonfiguracja();
+  return {
+    configured: c.configured,
+    provider: c.provider || 'gmail-smtp',
+    from: c.from,
+    fromName: c.fromName,
+    adminTo: c.adminTo,
+    requiredEnv: ['EMAIL_PROVIDER=gmail', 'EMAIL_FROM', 'SMTP_USER', 'SMTP_PASS'],
+    optionalEnv: ['EMAIL_FROM_NAME', 'EMAIL_REPLY_TO', 'EMAIL_ADMIN_TO', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE'],
+  };
+}
+function adresNadawcyEmail(c = emailKonfiguracja()) {
+  const nazwa = String(c.fromName || '').replace(/"/g, '').trim();
+  return nazwa ? `"${nazwa}" <${c.from}>` : c.from;
+}
+async function wyslijEmailSMTP({ to, subject, text, html, replyTo }) {
+  const c = emailKonfiguracja();
+  if (!c.configured) {
+    const blad = new Error('E-mail nie jest skonfigurowany po stronie serwera. Ustaw SMTP_USER i SMTP_PASS w Netlify.');
+    blad.code = 'email_not_configured';
+    throw blad;
+  }
+  const transporter = nodemailer.createTransport({
+    host: c.host,
+    port: c.port,
+    secure: c.secure,
+    auth: { user: c.user, pass: process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || '' },
+  });
+  const info = await transporter.sendMail({
+    from: adresNadawcyEmail(c),
+    to,
+    replyTo: replyTo || c.replyTo,
+    subject,
+    text,
+    html,
+  });
+  return { provider: c.provider || 'smtp', message_id: info.messageId || '', accepted: info.accepted || [] };
+}
+function zlSerwer(v) {
+  return `${(Number(v) || 0).toFixed(2).replace('.', ',')} zł`;
+}
+function linieProduktow(z) {
+  if (Array.isArray(z?.pozycje) && z.pozycje.length) return z.pozycje.map((p) => `• ${tekst(p, 500)}`).join('\n');
+  if (Array.isArray(z?.pozycjeDane) && z.pozycjeDane.length) {
+    return z.pozycjeDane.map((p) => `• ${tekst(p.nazwa, 200)} × ${Number(p.ilosc) || 1} — ${zlSerwer(p.wartosc || ((Number(p.cena) || 0) * (Number(p.ilosc) || 1)))}`).join('\n');
+  }
+  return '• Pozycje zamówienia zapisane w panelu sklepu';
+}
+function htmlEscape(v) {
+  return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function htmlZamowienia(z, tekstWiadomosci) {
+  return `<div style="font-family:Arial,sans-serif;color:#111827;line-height:1.55">
+    <h2 style="margin:0 0 12px">Artway-TM — zamówienie ${htmlEscape(z.nr)}</h2>
+    <p>${htmlEscape(tekstWiadomosci).replace(/\n/g, '<br>')}</p>
+    <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin:16px 0">
+      <b>Produkty</b><br>${htmlEscape(linieProduktow(z)).replace(/\n/g, '<br>')}
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0">
+      <b>Razem:</b> ${htmlEscape(zlSerwer(z.razem))}<br>
+      <b>Dostawa:</b> ${htmlEscape(z.dostawa || '—')}<br>
+      <b>Płatność:</b> ${htmlEscape(z.platnosc || '—')}
+    </div>
+    <p style="font-size:13px;color:#6b7280">Wiadomość wysłana automatycznie ze sklepu Artway-TM.</p>
+  </div>`;
+}
+function wiadomoscKlientaZamowienie(z) {
+  const imie = tekst(z?.klient?.imie, 80).trim();
+  const paynow = z?.paynow?.redirectUrl ? `\n\nLink do płatności Paynow:\n${z.paynow.redirectUrl}` : '';
+  const telefon = z?.platnoscId === 'telefon' ? '\n\nPrzy przelewie na telefon wpisz w tytule/wiadomości numer zamówienia.' : '';
+  const body = `Dzień dobry${imie ? `, ${imie}` : ''},
+
+dziękujemy za złożenie zamówienia ${z.nr}.
+
+Produkty:
+${linieProduktow(z)}
+
+Wartość zamówienia: ${zlSerwer(z.razem)}
+Dostawa: ${z.dostawa || '—'}
+Płatność: ${z.platnosc || '—'}${paynow}${telefon}
+
+Status i szczegóły zamówienia sprawdzisz na stronie sklepu w sekcji „Moje zamówienia”.
+
+Pozdrawiamy
+Artway-TM`;
+  return { subject: `Potwierdzenie zamówienia ${z.nr}`, text: body, html: htmlZamowienia(z, body) };
+}
+function wiadomoscAdminZamowienie(z) {
+  const k = z?.klient || {};
+  const body = `Nowe zamówienie ${z.nr}
+
+Klient: ${[k.imie, k.nazwisko].filter(Boolean).join(' ') || z.email || 'gość'}
+E-mail: ${z.email || 'brak'}
+Telefon: ${k.telefon || 'brak'}
+Adres: ${z.adres || '—'}
+
+Produkty:
+${linieProduktow(z)}
+
+Razem: ${zlSerwer(z.razem)}
+Dostawa: ${z.dostawa || '—'}
+Płatność: ${z.platnosc || '—'}
+Status płatności: ${z.platnoscStatus || z?.paynow?.status || '—'}
+
+Uwagi: ${z.uwagi || 'brak'}`;
+  return { subject: `Nowe zamówienie ${z.nr} — ${zlSerwer(z.razem)}`, text: body, html: htmlZamowienia(z, body) };
+}
+async function dopiszHistorieEmaila(nr, wpis) {
+  const rec = await czytaj('orders', { items: [] });
+  const items = Array.isArray(rec.items) ? rec.items : [];
+  const i = items.findIndex((z) => z.nr === nr);
+  if (i < 0) return;
+  const z = { ...items[i] };
+  const w = z.wysylka || {};
+  w.powiadomienia = [...(Array.isArray(w.powiadomienia) ? w.powiadomienia : []), {
+    czas: new Date().toLocaleString('pl-PL'),
+    ...wpis,
+  }];
+  z.wysylka = w;
+  items[i] = z;
+  await zapisz('orders', { items, updated_at: new Date().toISOString() });
+}
+function emailJuzWyslany(z, typ) {
+  const historia = Array.isArray(z?.wysylka?.powiadomienia) ? z.wysylka.powiadomienia : [];
+  return historia.some((p) => p && p.typ === typ && p.status === 'wysłano');
+}
+async function wyslijEmaileNowegoZamowienia(z, { includeAdmin = true } = {}) {
+  const c = emailKonfiguracja();
+  if (!c.configured) return { configured: false, sent: false, error: 'email_not_configured' };
+  const wyniki = [], errors = [];
+  if (z.email && !emailJuzWyslany(z, 'potwierdzenie')) {
+    const msg = wiadomoscKlientaZamowienie(z);
+    try {
+      const r = await wyslijEmailSMTP({ to: z.email, ...msg });
+      wyniki.push({ to: 'customer', ...r });
+      await dopiszHistorieEmaila(z.nr, { typ: 'potwierdzenie', status: 'wysłano', provider: r.provider, id: r.message_id, automatyczne: true });
+    } catch (e) {
+      errors.push({ to: 'customer', error: e.message });
+      await dopiszHistorieEmaila(z.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
+    }
+  }
+  if (includeAdmin && c.adminTo && !emailJuzWyslany(z, 'admin_nowe')) {
+    const msg = wiadomoscAdminZamowienie(z);
+    try {
+      const r = await wyslijEmailSMTP({ to: c.adminTo, ...msg });
+      wyniki.push({ to: 'admin', ...r });
+      await dopiszHistorieEmaila(z.nr, { typ: 'admin_nowe', status: 'wysłano', provider: r.provider, id: r.message_id, automatyczne: true });
+    } catch (e) {
+      errors.push({ to: 'admin', error: e.message });
+      await dopiszHistorieEmaila(z.nr, { typ: 'admin_nowe', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
+    }
+  }
+  return { configured: true, sent: wyniki.length > 0, results: wyniki, errors };
+}
+
 export default async (req) => {
   const url = new URL(req.url);
   const action = url.searchParams.get('action') || 'health';
@@ -396,7 +583,31 @@ export default async (req) => {
           continueUrl: paynowKonfiguracja(req).continueUrl,
           notificationUrl: paynowKonfiguracja(req).notificationUrl,
         },
+        email: emailPublicConfig(),
       });
+    }
+
+    // ─── E-MAIL: konfiguracja bez sekretów ───
+    if (action === 'email-config') {
+      return odpowiedz({ ok: true, email: emailPublicConfig() });
+    }
+
+    // ─── E-MAIL: wysyłka administracyjna przez Netlify SMTP ───
+    if (action === 'send-email') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const to = tekst(body.to, 300).trim();
+      const subject = tekst(body.subject, 300).trim();
+      const text = tekst(body.text, 20000);
+      const html = tekst(body.html, 30000);
+      if (!to || !subject || (!text && !html)) return odpowiedz({ ok: false, error: 'Brak adresu, tematu albo treści e-maila' }, 422);
+      let r;
+      try { r = await wyslijEmailSMTP({ to, subject, text, html: html || undefined }); }
+      catch (e) {
+        return odpowiedz({ ok: false, error: e.message, code: e.code || 'email_error' }, e.code === 'email_not_configured' ? 503 : 502);
+      }
+      return odpowiedz({ ok: true, provider: r.provider, message_id: r.message_id, accepted: r.accepted || [] });
     }
 
     // ─── PAYNOW: konfiguracja publiczna bez sekretów ───
@@ -461,6 +672,12 @@ export default async (req) => {
         redirectUrl,
         env: cfg.env,
       });
+      let email = null;
+      try { email = await wyslijEmaileNowegoZamowienia(zaktualizowane || { ...zapisaneZamowienie, paynow: { paymentId, status, redirectUrl, env: cfg.env } }); }
+      catch (e) {
+        email = { configured: emailKonfiguracja().configured, sent: false, error: e.message };
+        await dopiszHistorieEmaila(zapisaneZamowienie.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
+      }
       return odpowiedz({
         ok: true,
         configured: true,
@@ -470,6 +687,7 @@ export default async (req) => {
         status,
         paymentStatus: statusPlatnosciPaynow(status),
         paynow: zaktualizowane?.paynow || { paymentId, status, redirectUrl, env: cfg.env },
+        email,
       }, 201);
     }
 
@@ -585,13 +803,21 @@ export default async (req) => {
       if (usuniete.has(zam.nr)) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
       const rec = await czytaj('orders', { items: [] });
       const items = filtrujNieusunieteZamowienia(rec.items || [], usuniete);
+      let email = null;
       if (!items.some((x) => x.nr === zam.nr)) {
         items.unshift(zam);
         while (items.length > LIMIT_ZAMOWIEN) items.pop();
         await zapisz('orders', { items, updated_at: new Date().toISOString() });
         await odejmijStany(zam);
+        if (zam.platnoscId !== 'paynow') {
+          try { email = await wyslijEmaileNowegoZamowienia(zam); }
+          catch (e) {
+            email = { configured: emailKonfiguracja().configured, sent: false, error: e.message };
+            await dopiszHistorieEmaila(zam.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
+          }
+        }
       }
-      return odpowiedz({ ok: true, stored: true, number: zam.nr });
+      return odpowiedz({ ok: true, stored: true, number: zam.nr, email });
     }
 
     // ─── KLIENT SKŁADA OPINIĘ (publiczne, do moderacji) ───

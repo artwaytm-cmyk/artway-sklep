@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.08.1">
+<meta name="artway-version" content="2026.07.08.2">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <link id="faviconLink" rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="14" fill="%232563eb"/%3E%3Ctext x="32" y="42" text-anchor="middle" font-size="30" font-family="Arial" font-weight="700" fill="white"%3EA%3C/text%3E%3C/svg%3E'>
@@ -1044,6 +1044,7 @@ function paynowKolorStatusu(status){
   if(status==="ERROR"||status==="REJECTED"||status==="EXPIRED"||status==="ABANDONED") return "var(--danger)";
   return "var(--warn)";
 }
+const paynowStatusAutosprawdzone = new Set();
 function instrukcjaPaynowHTML(nr, kwota, zam=null){
   const kw = typeof kwota==="number" ? zl(kwota) : esc(kwota||"");
   const p = paynowDane(zam);
@@ -1573,9 +1574,10 @@ function renderuj(){
     else if(t==="/nowosci") w.innerHTML = widokListaSpecjalna("✨ Nowości", p=>p.badge==="Nowość", "Brak nowości w tej chwili — zajrzyj wkrótce!");
     else if(t==="/logowanie") w.innerHTML = widokLogowanie();
     else if(t==="/rejestracja") w.innerHTML = widokRejestracja();
-    else if(t==="/konto") w.innerHTML = widokKonto();
-    else if(t==="/zamowienia") w.innerHTML = widokZamowienia();
-    else if(t==="/ulubione") w.innerHTML = widokUlubione();
+	    else if(t==="/konto") w.innerHTML = widokKonto();
+	    else if(t==="/zamowienia") w.innerHTML = widokZamowienia();
+	    else if(t.startsWith("/dziekujemy/")) w.innerHTML = widokDziekujemy(decodeURIComponent(t.split("/")[2]||""));
+	    else if(t==="/ulubione") w.innerHTML = widokUlubione();
     else if(t==="/kontakt") w.innerHTML = widokKontakt();
     else if(t==="/o-nas") w.innerHTML = widokONas();
     else if(t==="/faq") w.innerHTML = widokFAQ();
@@ -2284,6 +2286,36 @@ function widokZamowienia(){
         ${szczegolyZamowieniaKlientaHTML(z)}
       </div>`).join("")
     : `<p>Brak zamówień. <a href="#/">Zrób pierwsze zakupy →</a></p>`}
+	  </div></div>`;
+}
+function widokDziekujemy(nr){
+  const numer=nrZamowienia(nr);
+  const z=pobierzZamowienia().find(x=>x.nr===numer);
+  const razem=Number(z?.razem||0), platId=z?.platnoscId||"";
+  if(z && platId==="paynow" && z.paynow?.paymentId && !paynowStatusAutosprawdzone.has(z.nr) && !["CONFIRMED","ERROR","EXPIRED","REJECTED","ABANDONED"].includes(String(z.paynow.status||"").toUpperCase())){
+    paynowStatusAutosprawdzone.add(z.nr);
+    setTimeout(()=>odswiezStatusPaynow(z.nr,z.paynow.paymentId),700);
+  }
+  return `<div class="page"><div class="panel" style="max-width:860px;margin:auto;text-align:center">
+    <div class="big">✅</div>
+    <h1>Dziękujemy za zamówienie!</h1>
+    <p class="sub">Numer zamówienia: <b>${esc(numer||"—")}</b>${z?` • Kwota: <b>${zl(razem)}</b>`:""}</p>
+    ${z?`<div class="stat-grid" style="text-align:center;margin:1rem 0">
+      <div class="stat"><b>${esc(z.status||"nowe")}</b><small>status obsługi</small></div>
+      <div class="stat"><b>${esc(z.platnosc||"—")}</b><small>wybrana płatność</small></div>
+      <div class="stat"><b>${esc(z.platnoscId==="paynow"?paynowStatusTekst(z.paynow?.status):z.platnoscStatus||"przyjęto")}</b><small>status płatności</small></div>
+    </div>
+    <div style="text-align:left;margin-top:1rem">
+      <h3 class="f-sekcja">💳 Płatność</h3>
+      ${instrukcjaPlatnosciHTML(platId,z.nr,razem,z)}
+      <h3 class="f-sekcja">🧾 Podsumowanie</h3>
+      ${pozycjeZamowieniaKlientaHTML(z)}
+    </div>`:`<p class="pay-note">Jeżeli nie widzisz szczegółów, przejdź do „Moje zamówienia” albo zaloguj się na konto użyte przy zakupie.</p>`}
+    <p class="pay-note" style="margin-top:1rem;text-align:center">Potwierdzenie zamówienia jest wysyłane automatycznie na e-mail klienta, gdy bramka e-mail jest skonfigurowana na serwerze.</p>
+    <div class="diag-actions" style="justify-content:center;margin-top:1rem">
+      <a class="btn" href="#/zamowienia">📦 Moje zamówienia</a>
+      <a class="btn ghost" href="#/">← Wróć do sklepu</a>
+    </div>
   </div></div>`;
 }
 async function usunMojeZamowienie(nr){
@@ -2758,20 +2790,20 @@ async function wyslijEmailWysylki(nr,typ,automatycznie=false){
   const z=pobierzZamowienia().find(x=>x.nr===nr);
   if(!z?.email){toast("Brak adresu e-mail klienta");return false;}
   if(!stanBramki.email?.configured){
-    if(!automatycznie) toast("Najpierw skonfiguruj Brevo lub Resend w api/config.php");
+    if(!automatycznie) toast("Najpierw skonfiguruj SMTP/Gmail w zmiennych Netlify");
     return false;
   }
-  if(!stanBramki.authenticated){
-    if(!automatycznie) toast("Połącz bezpieczną sesję integracji w Centrum wysyłek");
+  if(!chmuraToken){
+    if(!automatycznie) chmuraUstawToken();
     return false;
   }
   if(!automatycznie&&!confirm(`Wysłać „${NAZWY_EMAILI[typ]||typ}” na ${z.email} przez API?`)) return false;
   const p=trescPowiadomienia(z,typ), klient=z.klient||{};
   try{
-    const d=await wywolajBramke("send-email",{method:"POST",body:{
+    const d=await chmura("send-email",{method:"POST",body:{
       to:z.email,to_name:[klient.imie,klient.nazwisko].filter(Boolean).join(" "),
       subject:p.temat,text:p.body,order_number:z.nr,type:typ
-    }});
+    },timeout:18000});
     zapiszHistorieEmaila(nr,{typ,status:"wysłano",provider:d.provider||stanBramki.email.provider||"",id:d.message_id||"",automatyczne:automatycznie});
     loguj("info",`${automatycznie?"Automatycznie wysłano":"Wysłano"} e-mail ${typ} dla ${nr} przez ${d.provider||"API"}`);
     toast(`${automatycznie?"Automatyczny e-mail":"E-mail"} wysłany ✅`);
@@ -2800,9 +2832,9 @@ async function obsluzAutomatycznyEmail(nr,status,typWymuszony=""){
   if(!z?.email) return;
   const historia=daneWysylki(z).powiadomienia||[];
   if(historia.some(p=>p.typ===typ&&p.status==="wysłano")) return;
-  if(!stanBramki.email?.configured||!stanBramki.authenticated){
+  if(!stanBramki.email?.configured||!chmuraToken){
     const istnieje=historia.some(p=>p.typ===typ&&String(p.status).startsWith("oczekuje"));
-    if(!istnieje) zapiszHistorieEmaila(nr,{typ,status:"oczekuje — połącz API",automatyczne:true});
+    if(!istnieje) zapiszHistorieEmaila(nr,{typ,status:"oczekuje — skonfiguruj SMTP / połącz bazę",automatyczne:true});
     renderuj();
     return;
   }
@@ -2811,10 +2843,11 @@ async function obsluzAutomatycznyEmail(nr,status,typWymuszony=""){
 async function wyslijTestEmail(e){
   e.preventDefault();
   const email=String(new FormData(e.target).get("email")||"").trim();
-  if(!stanBramki.email?.configured||!stanBramki.authenticated) return toast("Skonfiguruj e-mail i połącz sesję integracji");
+  if(!stanBramki.email?.configured) return toast("Skonfiguruj SMTP/Gmail w Netlify");
+  if(!chmuraToken){ chmuraUstawToken(); return; }
   if(!confirm(`Wysłać testową wiadomość na ${email}?`)) return;
   try{
-    const d=await wywolajBramke("send-email",{method:"POST",body:{to:email,subject:`Test automatycznych e-maili — ${KONFIG.nazwaSklepu}`,text:`To jest test poprawnej konfiguracji automatycznych wiadomości API sklepu ${KONFIG.nazwaSklepu}.`}});
+    const d=await chmura("send-email",{method:"POST",body:{to:email,subject:`Test automatycznych e-maili — ${KONFIG.nazwaSklepu}`,text:`To jest test poprawnej konfiguracji automatycznych wiadomości API sklepu ${KONFIG.nazwaSklepu}.`},timeout:18000});
     loguj("info",`Wysłano test e-mail przez ${d.provider||"API"}`);
     toast("Testowy e-mail wysłany ✅");
   }catch(bl){loguj("error","Test e-mail: "+bl.message);toast("Test e-mail nieudany: "+bl.message);}
@@ -2981,16 +3014,26 @@ function uruchomAutoSynchronizacjeChmury(){
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) automatycznaSynchronizacjaChmury("visible"); });
 }
 async function sprawdzBramke(cicho=false){
+  let cloud=null;
+  try{
+    cloud=await chmura("health",{timeout:9000});
+    stanBramki={...stanBramki,sprawdzono:true,online:true,email:cloud.email||stanBramki.email,store:cloud.store||stanBramki.store,error:""};
+    if(cloud.store) stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,orders:cloud.store.orders||0,users:cloud.store.users||0,updatedAt:cloud.store.settings_updated_at||cloud.store.updated_at||null,error:""};
+  }catch(e){ /* Netlify może być chwilowo niedostępne — niżej próbujemy stary backend PHP */ }
   try{
     const d=await wywolajBramke("health");
-    stanBramki={...stanBramki,...d,sprawdzono:true,online:true,error:""};
-    if(d.store) stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:!!d.store.configured,orders:d.store.orders||0,users:d.store.users||0,updatedAt:d.store.updated_at||null,error:d.store.error||""};
-    if(!cicho) toast(d.ready?"Bramka InPost gotowa ✅":d.email?.configured?`E-mail API ${d.email.provider||""} gotowy ✅`:d.configured?"OAuth gotowy — uzupełnij Organization ID":"Bramka działa — uzupełnij config.php");
+    stanBramki={...stanBramki,...d,email:cloud?.email||d.email||stanBramki.email,store:cloud?.store||d.store||stanBramki.store,sprawdzono:true,online:true,error:""};
+    if(!cicho) toast(d.ready?"Bramka InPost gotowa ✅":stanBramki.email?.configured?`E-mail SMTP ${stanBramki.email.provider||""} gotowy ✅`:d.configured?"OAuth gotowy — uzupełnij Organization ID":"Bramka przewoźników wymaga konfiguracji");
   }catch(e){
-    stanBramki={...stanBramki,sprawdzono:true,online:false,error:e.message};
-    if(!cicho) toast("Bramka niedostępna — sprawdź pliki API");
+    if(cloud){
+      stanBramki={...stanBramki,sprawdzono:true,online:true,error:e.message};
+      if(!cicho) toast(stanBramki.email?.configured?`E-mail SMTP ${stanBramki.email.provider||""} gotowy ✅`:"Netlify działa — skonfiguruj SMTP/Gmail dla e-maili");
+    }else{
+      stanBramki={...stanBramki,sprawdzono:true,online:false,error:e.message};
+      if(!cicho) toast("Bramka niedostępna — sprawdź Netlify Functions");
+    }
   }
-  if(trasa()==="/admin/wysylki"||trasa().startsWith("/admin/zamowienie/")) renderuj();
+  if(trasa()==="/admin/wysylki"||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy") renderuj();
 }
 async function polaczBramke(e){
   e.preventDefault();
@@ -3176,7 +3219,7 @@ function panelTrackinguWysylek(){
 }
 function panelAutomatyzacjiWysylek(){
   const u=ustawieniaWysylki();
-  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&stanBramki.authenticated;
+  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&!!chmuraToken;
   return `<div class="panel">
     <h1>⚡ Automatyzacje wysyłek</h1>
     <p style="color:var(--muted2)">Reguły obowiązują wszystkie zlecenia i wybierają adapter przewoźnika bez zmiany sposobu pracy operatora.</p>
@@ -3194,8 +3237,8 @@ function panelAutomatyzacjiWysylek(){
       <button class="btn" type="submit">💾 Zapisz automatyzacje</button>
     </form>
     <div class="backend-note" style="${emailPolaczony?"border-color:#86efac;background:#f0fdf4;color:#166534":emailGotowy?"":"border-color:#f59e0b"}">
-      <b>E-mail API:</b> ${emailPolaczony?`połączono z ${esc(stanBramki.email.provider||"dostawcą")} — automatyczne wiadomości są gotowe`:emailGotowy?`skonfigurowano ${esc(stanBramki.email.provider||"dostawcę")}, ale trzeba połączyć bezpieczną sesję integracji`:"brak konfiguracji — uzupełnij sekcję email w api/config.php i ustaw enabled na true"}.
-      ${!emailPolaczony?` <a href="#/admin/wysylki" onclick="tabWysylek='ustawienia';setTimeout(renderuj,0)">Przejdź do połączenia →</a>`:""}
+      <b>E-mail SMTP:</b> ${emailPolaczony?`skonfigurowano ${esc(stanBramki.email.provider||"SMTP")} i panel ma hasło bazy — automatyczne wiadomości są gotowe`:emailGotowy?`SMTP jest skonfigurowany, wpisz hasło bazy administratora, aby wysyłać testy i ręczne wiadomości`:"brak konfiguracji — ustaw SMTP/Gmail w zmiennych Netlify"}.
+      ${!emailPolaczony?` <a href="#/admin/dostawy">Konfiguracja e-mail →</a>`:""}
     </div>
     <form onsubmit="wyslijTestEmail(event)" style="margin-top:1rem">
       <h2>Test wiadomości API</h2>
@@ -3224,8 +3267,8 @@ function panelUstawienBramki(){
     </div>
     <div class="integration-card" style="margin-top:1rem">
       <b>📧 Automatyczne e-maile</b>
-      <span class="integration-state">${stanBramki.email?.configured?`${esc(stanBramki.email.provider||"API")} skonfigurowany${stanBramki.authenticated?" i połączony":" — zaloguj sesję"}`:"uzupełnij sekcję email w api/config.php"}</span>
-      <p class="ship-meta">Klucz API pozostaje na serwerze. Wysyłkę testową i reguły statusów znajdziesz w zakładce Automatyzacje.</p>
+      <span class="integration-state">${stanBramki.email?.configured?`${esc(stanBramki.email.provider||"SMTP")} skonfigurowany${chmuraToken?" i gotowy":" — wpisz hasło bazy do testów"}`:"ustaw SMTP/Gmail w Netlify"}</span>
+      <p class="ship-meta">Hasło SMTP pozostaje wyłącznie w zmiennych Netlify. Wysyłkę testową i reguły statusów znajdziesz w zakładce Automatyzacje.</p>
     </div>
     <form onsubmit="zapiszUstawieniaWysylki(event)" style="margin-top:1rem">
       <div class="f-row"><div class="f-group"><label>Adres bramki backendowej</label><input name="apiEndpoint" value="${esc(u.apiEndpoint)}" placeholder="/api/shipping"></div><div class="f-group"><label>Tryb</label><select name="tryb"><option value="sandbox" ${u.tryb==="sandbox"?"selected":""}>Sandbox / testowy</option><option value="production" ${u.tryb==="production"?"selected":""}>Produkcyjny</option></select></div></div>
@@ -3363,7 +3406,7 @@ function widokAdminZamowienie(nr){
   const z = pobierzZamowienia().find(x=>x.nr===nr);
   if(!z) return adminSzkielet("/admin/zamowienia", `<div class="panel"><h1>Nie znaleziono zamówienia ${esc(nr)}</h1><p><a href="#/admin/zamowienia">← Wróć do listy</a></p></div>`);
   const w=daneWysylki(z), uw=ustawieniaWysylki(), klient=z.klient||{}, adres=z.adresDostawy||{};
-  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&stanBramki.authenticated;
+  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&!!chmuraToken;
   const przewoznik=w.przewoznik||przewoznikDlaZamowienia(z);
   const uslugi=PRZEWOZNICY[przewoznik]?.uslugi||[];
   const paynow=paynowDane(z);
@@ -3441,9 +3484,9 @@ function widokAdminZamowienie(nr){
   <div class="panel">
     <h2 style="margin-top:0">✉️ Powiadomienia klienta</h2>
     <div class="backend-note" style="${emailPolaczony?"border-color:#86efac;background:#f0fdf4;color:#166534":emailGotowy?"":"border-color:#f59e0b"}">
-      <b>${emailPolaczony?"Automatyczna wysyłka API jest gotowa":emailGotowy?"Dostawca e-mail jest skonfigurowany":"Automatyczna wysyłka wymaga konfiguracji"}.</b>
-      ${emailPolaczony?` Wiadomości wysyła ${esc(stanBramki.email.provider||"dostawca API")}; wynik i identyfikator trafiają do historii.`:emailGotowy?` Połącz bezpieczną sesję integracji, aby wysyłać wiadomości.`:` Uzupełnij sekcję <code>email</code> w <code>api/config.php</code>.`}
-      ${!emailPolaczony?` <a href="#/admin/wysylki" onclick="tabWysylek='ustawienia'">Konfiguracja i połączenie →</a>`:""}
+      <b>${emailPolaczony?"Automatyczna wysyłka SMTP jest gotowa":emailGotowy?"SMTP jest skonfigurowany":"Automatyczna wysyłka wymaga konfiguracji SMTP/Gmail w Netlify"}.</b>
+      ${emailPolaczony?` Wiadomości wysyła ${esc(stanBramki.email.provider||"SMTP")}; wynik i identyfikator trafiają do historii.`:emailGotowy?` Wpisz hasło bazy administratora, aby wysyłać ręczne wiadomości.`:` Ustaw zmienne <code>SMTP_USER</code> i <code>SMTP_PASS</code> w Netlify.`}
+      ${!emailPolaczony?` <a href="#/admin/dostawy">Konfiguracja e-mail →</a>`:""}
     </div>
     <div class="diag-actions">
       ${Object.entries(NAZWY_EMAILI).map(([id,n])=>emailPolaczony
@@ -5072,6 +5115,41 @@ async function ustawUrlePaynow(){
   }
   renderuj();
 }
+function emailPanelAdminHTML(){
+  const e=stanBramki.email||{};
+  const gotowy=!!e.configured, polaczony=gotowy&&!!chmuraToken;
+  return `<div class="panel">
+    <h2 style="margin-top:0">📧 Bramka e-mail SMTP / Gmail</h2>
+    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">Automatyczne wiadomości wychodzą z serwera Netlify. Logowanie w Chrome do Gmaila nie wystarcza dla backendu — potrzebne jest hasło aplikacji Google albo dane SMTP zapisane jako sekrety Netlify.</p>
+    <div class="backend-note" style="${gotowy?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
+      <b>${gotowy?"SMTP skonfigurowany ✅":"SMTP/Gmail nie jest jeszcze skonfigurowany"}</b><br>
+      Nadawca: <code>${esc(e.from||"sklepartway@gmail.com")}</code> • Provider: <code>${esc(e.provider||"gmail-smtp")}</code><br>
+      ${polaczony?"Panel ma hasło bazy — test i ręczne wiadomości mogą być wysyłane.":gotowy?"Wpisz hasło bazy administratora, aby wysyłać testy z panelu.":"Ustaw zmienne poniżej w Netlify i zrób redeploy."}
+    </div>
+    <table class="log-table" style="margin-top:.7rem">
+      <tr><th>Zmienna Netlify</th><th>Wartość dla Gmail</th></tr>
+      <tr><td><code>EMAIL_PROVIDER</code></td><td><code>gmail</code></td></tr>
+      <tr><td><code>EMAIL_FROM</code></td><td><code>sklepartway@gmail.com</code></td></tr>
+      <tr><td><code>EMAIL_FROM_NAME</code></td><td><code>Artway-TM</code></td></tr>
+      <tr><td><code>SMTP_HOST</code></td><td><code>smtp.gmail.com</code></td></tr>
+      <tr><td><code>SMTP_PORT</code></td><td><code>465</code></td></tr>
+      <tr><td><code>SMTP_SECURE</code></td><td><code>true</code></td></tr>
+      <tr><td><code>SMTP_USER</code></td><td><code>sklepartway@gmail.com</code></td></tr>
+      <tr><td><code>SMTP_PASS</code></td><td>hasło aplikacji Google — nie zwykłe hasło do Gmaila</td></tr>
+      <tr><td><code>EMAIL_ADMIN_TO</code></td><td>adres, na który sklep wyśle powiadomienie o nowym zamówieniu</td></tr>
+    </table>
+    <form onsubmit="wyslijTestEmail(event)" style="margin-top:1rem">
+      <div class="f-row" style="grid-template-columns:1fr auto;align-items:end">
+        <div class="f-group"><label>Wyślij test na adres</label><input type="email" name="email" value="${esc(KONFIG.emailSklepu)}" required></div>
+        <div class="f-group"><button class="btn" type="submit" ${gotowy?"":"disabled"}>📧 Wyślij test</button></div>
+      </div>
+    </form>
+    <div class="diag-actions" style="margin-top:.8rem">
+      <button class="btn ghost" type="button" onclick="sprawdzBramke()">🔎 Sprawdź e-mail / Netlify</button>
+      ${chmuraToken?"":`<button class="btn ghost" type="button" onclick="chmuraUstawToken()">🔑 Wpisz hasło bazy</button>`}
+    </div>
+  </div>`;
+}
 function widokAdminDostawy(){
   KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
   const pobranie = KONFIG.platnosci.find(p=>p.id==="pobranie"), paynow = KONFIG.platnosci.find(p=>p.id==="paynow"), telefon = KONFIG.platnosci.find(p=>p.id==="telefon");
@@ -5105,6 +5183,7 @@ function widokAdminDostawy(){
 	    </form>
 	  </div>
 	  ${paynowPanelAdminHTML()}
+	  ${emailPanelAdminHTML()}
 	  <div class="panel">
 	    <h2 style="margin-top:0">➕ Dodatkowa metoda dostawy</h2>
     <form onsubmit="dodajMetodeDostawy(event)">
@@ -5942,9 +6021,9 @@ function testyDiagnostyczne(){
     :stanBazyCentralnej.error||"Połącz backend, aby sprawdzić i zsynchronizować wspólną bazę");
   dodaj("Integracje","API przewoźników","warn","Panel jest przygotowany; oficjalne etykiety i webhooki wymagają kont oraz kluczy API na backendzie");
   const emailDiag=!!stanBramki.email?.configured;
-  dodaj("Integracje","Automatyczne e-maile",emailDiag&&stanBramki.authenticated?"ok":"warn",emailDiag
-    ?`${stanBramki.email.provider||"Dostawca API"} skonfigurowany${stanBramki.authenticated?" i połączony — wysyłka automatyczna aktywna":" — połącz sesję integracji"}`
-    :"Skonfiguruj Brevo lub Resend w api/config.php");
+  dodaj("Integracje","Automatyczne e-maile",emailDiag&&chmuraToken?"ok":"warn",emailDiag
+    ?`${stanBramki.email.provider||"SMTP"} skonfigurowany${chmuraToken?" — wysyłka automatyczna aktywna":" — wpisz hasło bazy do testów i ręcznej wysyłki"}`
+    :"Skonfiguruj SMTP/Gmail w zmiennych Netlify");
   dodaj("Konfiguracja","Telefon sklepu",KONFIG.telefon.includes("000 000 000")?"warn":"ok",KONFIG.telefon);
   dodaj("Konfiguracja","Dane prawne",widokRegulamin().includes("[nazwa firmy")?"bad":"ok",widokRegulamin().includes("[nazwa firmy")?"Uzupełnij dane firmy w treściach prawnych":"Brak pól przykładowych");
   dodaj("Bezpieczeństwo","Hasło administratora",domyslneHasloAdmina?"bad":"ok",domyslneHasloAdmina?"Nadal ustawione jest hasło admin":"Hasło zostało zmienione");
@@ -6425,23 +6504,27 @@ Uwagi: ${f.get("notes")||"brak"}`;
     }
     loguj("info",`Złożono zamówienie ${nr} na ${zl(razem)} (${dost.nazwa}, ${plat.nazwa})`);
 
-    const infoPlatnosci = instrukcjaPlatnosciHTML(idP,nr,razem,noweZamowienie);
-    const bladPaynow = idP==="paynow" && paynowWynik && paynowWynik.ok===false && !paynowWynik.skipped
-      ? `<p class="pay-note" style="color:var(--danger);text-align:left">Paynow nie utworzył linku automatycznie: ${esc(paynowWynik.error||"brak konfiguracji")}. Zamówienie zostało zapisane — po uzupełnieniu konfiguracji można odświeżyć płatność w panelu.</p>` : "";
-    const trescMaila = `${tresc}${noweZamowienie.paynow?.redirectUrl ? `\nLink Paynow: ${noweZamowienie.paynow.redirectUrl}` : ""}`;
-
-    const mailto = `mailto:${KONFIG.emailSklepu}?subject=${encodeURIComponent("Zamówienie "+nr)}&body=${encodeURIComponent(trescMaila)}`;
-    $("modalBox").innerHTML = `<div class="success">
-      <div class="big">✅</div>
-      <h2>Dziękujemy za zamówienie!</h2>
-      <p class="sub">Numer zamówienia: <b>${nr}</b> • Kwota: <b>${zl(razem)}</b><br>${esc(dost.nazwa)} • ${esc(plat.nazwa)}</p>
-      <p class="pay-note" style="${zapisanoCentralnie?"color:var(--ok)":"color:var(--danger)"}">${zapisanoCentralnie?"☁️ Zamówienie zapisano we wspólnej bazie sklepu.":"⚠️ Brak połączenia z serwerem — zamówienie czeka na synchronizację."}</p>
-      <a href="${mailto}" class="checkout-btn" style="display:block;text-decoration:none;text-align:center;margin-bottom:.7rem">📧 Wyślij potwierdzenie zamówienia</a>
-      ${bladPaynow}
-      ${infoPlatnosci}
-      <p class="pay-note" style="margin-top:1rem"><a href="#/zamowienia" onclick="document.getElementById('modal').classList.remove('open')" style="color:var(--brand)">Zobacz swoje zamówienia →</a></p>
-    </div>`;
-    koszyk=[]; rabat=null; zapiszLS("artway_koszyk",koszyk); zapiszLS("artway_rabat",null); odswiezKoszyk();
+	    const infoPlatnosci = instrukcjaPlatnosciHTML(idP,nr,razem,noweZamowienie);
+	    const bladPaynow = idP==="paynow" && paynowWynik && paynowWynik.ok===false && !paynowWynik.skipped
+	      ? `<p class="pay-note" style="color:var(--danger);text-align:left">Paynow nie utworzył linku automatycznie: ${esc(paynowWynik.error||"brak konfiguracji")}. Zamówienie zostało zapisane — po uzupełnieniu konfiguracji można odświeżyć płatność w panelu.</p>` : "";
+	    const urlDziekujemy = `#/dziekujemy/${encodeURIComponent(nr)}`;
+	    const linkPaynow = noweZamowienie.paynow?.redirectUrl || (idP==="paynow" && KONFIG.linkPlatnosci ? KONFIG.linkPlatnosci : "");
+	    $("modalBox").innerHTML = `<div class="success">
+	      <div class="big">✅</div>
+	      <h2>${linkPaynow?"Przekierowujemy do płatności…":"Dziękujemy za zamówienie!"}</h2>
+	      <p class="sub">Numer zamówienia: <b>${nr}</b> • Kwota: <b>${zl(razem)}</b><br>${esc(dost.nazwa)} • ${esc(plat.nazwa)}</p>
+	      <p class="pay-note" style="${zapisanoCentralnie?"color:var(--ok)":"color:var(--danger)"}">${zapisanoCentralnie?"☁️ Zamówienie zapisano we wspólnej bazie sklepu.":"⚠️ Brak połączenia z serwerem — zamówienie czeka na synchronizację."}</p>
+	      <p class="pay-note" style="text-align:left">📧 Potwierdzenie zamówienia jest wysyłane automatycznie na e-mail klienta, jeśli bramka e-mail jest skonfigurowana.</p>
+	      ${bladPaynow}
+	      ${infoPlatnosci}
+	      <p class="pay-note" style="margin-top:1rem"><a href="${linkPaynow?esc(linkPaynow):urlDziekujemy}" onclick="document.getElementById('modal').classList.remove('open')" style="color:var(--brand)">${linkPaynow?"Przejdź do płatności teraz →":"Przejdź do podziękowania →"}</a></p>
+	    </div>`;
+	    koszyk=[]; rabat=null; zapiszLS("artway_koszyk",koszyk); zapiszLS("artway_rabat",null); odswiezKoszyk();
+	    setTimeout(()=>{
+	      $("modal")?.classList.remove("open");
+	      if(linkPaynow) location.href=linkPaynow;
+	      else location.hash=urlDziekujemy;
+	    }, linkPaynow?900:650);
   }catch(bl){
     loguj("blad","Błąd składania zamówienia: "+bl.message);
     toast("⚠️ Wystąpił błąd — zapisano w diagnostyce");
