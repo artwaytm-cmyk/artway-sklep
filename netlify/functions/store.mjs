@@ -546,7 +546,7 @@ function instrukcjaPlatnosciEmail(z) {
   if (z?.platnoscId === 'pobranie') {
     return {
       tytul: 'Płatność przy odbiorze',
-      opis: 'Zapłacisz kurierowi przy doręczeniu. Przygotujemy paczkę i wyślemy kolejne informacje po nadaniu przesyłki.',
+      opis: 'Zapłacisz przy odbiorze przesyłki InPost. Przygotujemy paczkę i wyślemy kolejne informacje po nadaniu przesyłki.',
       akcja: 'Zobacz szczegóły zamówienia',
       url: linkSklepuEmail('/#/zamowienia'),
       meta: `Wartość zamówienia: ${kwota}`,
@@ -766,7 +766,7 @@ const MAPA_STATUS_EMAIL = {
 };
 const STATUS_EMAIL_META = {
   przygotowanie: { badge: 'Realizacja zamówienia', title: 'Zamówienie jest przygotowywane', accent: '#7c3aed', opis: 'Kompletujemy produkty i przygotowujemy paczkę do wysyłki. Wkrótce przekażemy przesyłkę przewoźnikowi.', subject: (nr) => `Zamówienie ${nr} jest przygotowywane — Artway-TM` },
-  nadanie: { badge: 'Przesyłka w drodze', title: 'Twoja paczka została nadana', accent: '#059669', opis: 'Przesyłka jest już u przewoźnika. Poniżej znajdziesz numer i link do śledzenia.', subject: (nr) => `Zamówienie ${nr} zostało nadane — Artway-TM` },
+  nadanie: { badge: 'Przesyłka w drodze', title: 'Twoja paczka została nadana', accent: '#059669', opis: 'Przesyłka jest już w InPost. Poniżej znajdziesz numer i link do śledzenia.', subject: (nr) => `Zamówienie ${nr} zostało nadane — Artway-TM` },
   dostarczenie: { badge: 'Dostarczono', title: 'Przesyłka została dostarczona', accent: '#16a34a', opis: 'Mamy nadzieję, że zakupy sprawią dużo satysfakcji. Zapraszamy ponownie do Artway-TM.', subject: (nr) => `Zamówienie ${nr} zostało dostarczone — Artway-TM` },
   anulowanie: { badge: 'Aktualizacja zamówienia', title: 'Zamówienie zostało anulowane', accent: '#dc2626', opis: 'Zamówienie zostało anulowane. Jeśli to pomyłka lub masz pytania, po prostu odpowiedz na tę wiadomość.', subject: (nr) => `Zamówienie ${nr} zostało anulowane — Artway-TM` },
   zwrot: { badge: 'Zwrot przesyłki', title: 'Przesyłka wraca do nadawcy', accent: '#ea580c', opis: 'Przesyłka została oznaczona jako zwrot do nadawcy. Skontaktujemy się w sprawie dalszych kroków.', subject: (nr) => `Zwrot przesyłki dla zamówienia ${nr} — Artway-TM` },
@@ -799,7 +799,7 @@ const STATUS_EMAIL_CODALEJ = {
   anulowanie: ['Masz pytania?', 'Jeśli anulowanie to pomyłka albo chcesz coś zmienić, odpowiedz na tę wiadomość — pomożemy.'],
   zwrot: ['Co dalej?', 'Skontaktujemy się w sprawie dalszych kroków dotyczących zwracanej przesyłki.'],
   zwrot_pieniedzy: ['Zwrot środków', 'Pieniądze wrócą na Twoje konto w ciągu kilku dni roboczych, zależnie od banku. W razie pytań odpowiedz na tę wiadomość.'],
-  problem: ['Czuwamy nad przesyłką', 'Monitorujemy sytuację u przewoźnika i przekażemy kolejną informację zaraz po jej wyjaśnieniu.'],
+  problem: ['Czuwamy nad przesyłką', 'Monitorujemy sytuację w InPost i przekażemy kolejną informację zaraz po jej wyjaśnieniu.'],
 };
 function htmlStatusEmail(z, typ, opcje = {}) {
   const meta = STATUS_EMAIL_META[typ] || STATUS_EMAIL_META.przygotowanie;
@@ -917,6 +917,9 @@ function inpostEnv() {
 function inpostBaseUrl() {
   return inpostEnv() === 'sandbox' ? 'https://sandbox-api-shipx-pl.easypack24.net' : 'https://api-shipx-pl.easypack24.net';
 }
+function inpostPointsBaseUrl() {
+  return inpostEnv() === 'sandbox' ? 'https://sandbox-api-shipx-pl.easypack24.net' : 'https://api-shipx-pl.easypack24.net';
+}
 function inpostKonfiguracja() {
   const token = tekst(process.env.INPOST_TOKEN || process.env.INPOST_API_TOKEN || '', 4000).trim();
   const orgId = tekst(process.env.INPOST_ORG_ID || process.env.INPOST_ORGANIZATION_ID || '', 40).trim();
@@ -989,6 +992,85 @@ async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'a
   }
   return dane || {};
 }
+function inpostPointDto(p) {
+  const ad = p?.address_details || {};
+  const addr = p?.address || {};
+  const loc = p?.location || {};
+  return {
+    name: tekst(p?.name, 40).trim(),
+    status: tekst(p?.status, 40).trim(),
+    type: Array.isArray(p?.type) ? p.type.map((x) => tekst(x, 40).trim()).filter(Boolean) : [],
+    functions: Array.isArray(p?.functions) ? p.functions.map((x) => tekst(x, 60).trim()).filter(Boolean) : [],
+    address: [tekst(addr.line1, 120).trim(), tekst(addr.line2, 120).trim()].filter(Boolean).join(', '),
+    city: tekst(ad.city, 80).trim(),
+    postCode: tekst(ad.post_code, 12).trim(),
+    street: tekst(ad.street, 120).trim(),
+    buildingNumber: tekst(ad.building_number, 30).trim(),
+    description: [tekst(p?.location_description, 140).trim(), tekst(p?.location_description_1, 140).trim(), tekst(p?.location_description_2, 140).trim()].filter(Boolean).join(' • '),
+    openingHours: tekst(p?.opening_hours, 80).trim(),
+    location247: !!p?.location_247,
+    easyAccessZone: !!p?.easy_access_zone,
+    distance: Number.isFinite(Number(p?.distance)) ? Number(p.distance) : null,
+    latitude: Number.isFinite(Number(loc.latitude)) ? Number(loc.latitude) : null,
+    longitude: Number.isFinite(Number(loc.longitude)) ? Number(loc.longitude) : null,
+  };
+}
+async function inpostSzukajPunktow(url) {
+  const q = tekst(url.searchParams.get('q') || '', 100).trim();
+  const postCode = kodPocztowyInpost(url.searchParams.get('post_code') || url.searchParams.get('kod') || '');
+  const city = tekst(url.searchParams.get('city') || url.searchParams.get('miasto') || '', 80).trim();
+  const latRaw = url.searchParams.get('lat');
+  const lngRaw = url.searchParams.get('lng');
+  const lat = latRaw !== null && latRaw !== '' ? Number(latRaw) : NaN;
+  const lng = lngRaw !== null && lngRaw !== '' ? Number(lngRaw) : NaN;
+  const limitRaw = Number(url.searchParams.get('limit') || 12);
+  const limit = Math.min(25, Math.max(1, Number.isFinite(limitRaw) ? Math.round(limitRaw) : 12));
+  const api = new URL('/v1/points', inpostPointsBaseUrl());
+  api.searchParams.set('type', 'parcel_locker');
+  api.searchParams.set('functions', 'parcel_collect');
+  api.searchParams.set('per_page', String(limit));
+  api.searchParams.set('fields', 'name,type,status,functions,address,address_details,location_description,location_description_1,location_description_2,opening_hours,location_247,easy_access_zone,distance,location');
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    api.searchParams.set('relative_point', `${lat},${lng}`);
+    api.searchParams.set('sort_by', 'distance_to_relative_point');
+    api.searchParams.set('limit', String(limit));
+    api.searchParams.set('max_distance', '50000');
+  } else if (/^\d{2}-\d{3}$/.test(postCode)) {
+    api.searchParams.set('relative_post_code', postCode);
+    api.searchParams.set('sort_by', 'distance_to_relative_point');
+    api.searchParams.set('limit', String(limit));
+    api.searchParams.set('max_distance', '50000');
+  } else if (/^[A-Za-z]{2,5}\d[A-Za-z0-9]*$/i.test(q)) {
+    api.searchParams.set('name', q.toUpperCase());
+    api.searchParams.set('sort_by', 'name');
+  } else if (q) {
+    api.searchParams.set('city', q);
+    api.searchParams.set('sort_by', 'name');
+  } else if (city) {
+    api.searchParams.set('city', city);
+    api.searchParams.set('sort_by', 'name');
+  } else {
+    return { ok: false, error: 'Podaj nazwę miasta, kod pocztowy, nazwę paczkomatu albo współrzędne.', code: 'missing_query' };
+  }
+  const r = await fetch(api.toString(), {
+    headers: { 'Accept': 'application/json', 'Accept-Language': 'pl_PL', 'X-User-Agent': 'Artway-TM' },
+  });
+  const t = await r.text();
+  const dane = bezpiecznyJson(t) || {};
+  if (!r.ok) {
+    const blad = new Error(bledyInpostTekst(dane, `InPost Points HTTP ${r.status}`));
+    blad.status = r.status;
+    blad.code = 'inpost_points_error';
+    throw blad;
+  }
+  return {
+    ok: true,
+    count: Number(dane.count || 0),
+    page: Number(dane.page || 1),
+    perPage: Number(dane.per_page || limit),
+    points: Array.isArray(dane.items) ? dane.items.map(inpostPointDto).filter((p) => p.name && (!p.status || p.status === 'Operating')) : [],
+  };
+}
 function bezpiecznyJson(t) {
   if (!t) return null;
   try { return JSON.parse(t); } catch (e) { return { raw: t }; }
@@ -1042,7 +1124,7 @@ function adresInpostZamowienia(z) {
 function walidujPrzesylkeInPost(z) {
   const k = z?.klient || {};
   const w = z?.wysylka || {};
-  const doPaczkomatu = z?.dostawaId === 'paczkomat' || !!(z?.paczkomat || w?.punktKod);
+  const doPaczkomatu = true;
   const punkt = tekst(z?.paczkomat || w?.punktKod, 40).trim().toUpperCase();
   const email = tekst(z?.email || k.email, 200).trim().toLowerCase();
   const phone = telefonInpost(k.telefon || z?.telefon);
@@ -1623,6 +1705,12 @@ export default async (req) => {
       return odpowiedz({ ok: true, inpost: inpostPublicConfig() });
     }
 
+    // ─── INPOST: publiczne wyszukiwanie paczkomatów / punktów odbioru dla checkoutu ───
+    if (action === 'inpost-points') {
+      const dane = await inpostSzukajPunktow(url);
+      return odpowiedz(dane, dane.ok === false ? 400 : 200);
+    }
+
     // ─── INPOST: webhook z Managera Paczek / ShipX → obsługa zleceń i tracking ───
     if (action === 'inpost-webhook') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -1698,8 +1786,8 @@ export default async (req) => {
       const z = (Array.isArray(rec.items) ? rec.items : []).find((x) => x.nr === nr);
       if (!z) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
       if (z?.wysylka?.inpostId) return odpowiedz({ ok: false, error: `Przesyłka InPost już istnieje (${z.wysylka.inpostId}).`, code: 'exists', inpostId: z.wysylka.inpostId }, 409);
-      const doPaczkomatu = z?.dostawaId === 'paczkomat' || !!(z?.paczkomat || z?.wysylka?.punktKod);
-      if (doPaczkomatu && !tekst(z?.paczkomat || z?.wysylka?.punktKod, 40).trim()) return odpowiedz({ ok: false, error: 'Brak wybranego paczkomatu w zamówieniu (klient nie wskazał punktu).', code: 'no_point' }, 422);
+      const doPaczkomatu = true;
+      if (doPaczkomatu && !tekst(z?.paczkomat || z?.wysylka?.punktKod, 40).trim()) return odpowiedz({ ok: false, error: 'Brak wybranego paczkomatu w zamówieniu — uzupełnij punkt InPost przed wygenerowaniem etykiety.', code: 'no_point' }, 422);
       const walidacja = walidujPrzesylkeInPost(z);
       if (!walidacja.ok) {
         return odpowiedz({
@@ -1717,12 +1805,12 @@ export default async (req) => {
         availability = null;
       }
       if (availability?.services?.length) {
-        const wymaganyTyp = walidacja.doPaczkomatu ? 'locker' : 'courier';
-        const service = walidacja.doPaczkomatu ? c.lockerService : c.courierService;
+        const wymaganyTyp = 'locker';
+        const service = c.lockerService;
         if (!availability[wymaganyTyp]) {
           return odpowiedz({
             ok: false,
-            error: `Konto InPost nie ma aktywnej usługi ${service}. Włącz ją w Managerze Paczek albo ustaw inny przewoźnik dla tej dostawy.`,
+            error: `Konto InPost nie ma aktywnej usługi ${service}. Włącz usługę paczkomatową w Managerze Paczek.`,
             code: 'inpost_service_unavailable',
             service,
             serviceAvailability: availability,
