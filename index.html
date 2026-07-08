@@ -3648,10 +3648,6 @@ function widokAdminZamowienie(nr){
         <h2>Pozycje</h2>
         <div class="summary" style="margin:.5rem 0 1rem">${z.pozycje.map(p=>`<div><span>${esc(p)}</span></div>`).join("")}
           <div class="sum-total"><span>Razem</span><span>${zl(z.razem)}</span></div></div>
-        <h2>Dostawa i płatność</h2>
-        <p>🚚 ${esc(z.dostawa||"—")}<br>💳 ${esc(z.platnosc||"—")}${z.platnoscId==="paynow"?`<br>Paynow: <b style="color:${paynowKolorStatusu(paynow.status)}">${esc(paynowStatusTekst(paynow.status))}</b>${paynow.paymentId?` • <code>${esc(paynow.paymentId)}</code>`:""}`:""}<br>📍 ${esc(z.adres||"—")}${z.paczkomat?`<br>📮 Paczkomat: <b>${esc(z.paczkomat)}</b>${z.paczkomatAdres?` <small style="color:var(--muted2)">(${esc(z.paczkomatAdres)})</small>`:""}`:""}${w.inpostId?`<br>🟡 InPost: <code>${esc(w.inpostId)}</code>${w.inpostStatus?` • ${esc(w.inpostStatus)}`:""}`:""}</p>
-        ${z.platnoscId==="paynow"?`<div class="diag-actions"><button class="btn ghost" type="button" onclick="odswiezStatusPaynow(${jsArg(z.nr)},${jsArg(paynow.paymentId||"")})">🔄 Odśwież Paynow</button>${paynow.redirectUrl?`<a class="btn" href="${esc(paynow.redirectUrl)}" target="_blank" rel="noopener">Otwórz link płatności</a>`:""}${String(paynow.status||"").toUpperCase()==="CONFIRMED"?`<button class="btn" type="button" style="background:#0ea5e9;color:#fff" onclick="zwrotPieniedzyPaynow(${jsArg(z.nr)})">💸 Zwrot pieniędzy przez Paynow</button>`:""}</div>`:""}
-        ${Array.isArray(paynow.refunds)&&paynow.refunds.length?`<div class="backend-note" style="border-color:#7dd3fc;background:#f0f9ff;color:#075985"><b>Zwroty Paynow:</b><br>${paynow.refunds.map(r=>`${zl((Number(r.amount)||0)/100)} • <code>${esc(r.refundId||"—")}</code> • ${esc(r.status||"—")}${r.ts?` • ${esc(new Date(r.ts).toLocaleString("pl-PL"))}`:""}`).join("<br>")}</div>`:""}
       </div>
       <div class="ship-card">
         <h2 style="margin-top:0">Klient</h2>
@@ -3698,8 +3694,26 @@ function widokAdminZamowienie(nr){
     </form>
   </div>
   <div class="panel">
-    <h2 style="margin-top:0">🚚 Przesyłka i numer nadania</h2>
+    <h2 style="margin-top:0">🚚 Dostawa, przesyłka i numer nadania</h2>
     <p><span class="lvl" style="background:${ETAPY_WYSYLKI[etapWysylki(z)].kolor};font-size:.82rem">${esc(nazwaEtapu(z))}</span> <span class="${slaWysylki(z).klasa}" style="margin-left:.4rem">⏱ ${esc(slaWysylki(z).tekst)}</span></p>
+    <div class="summary" style="margin:.5rem 0 1rem">
+      <div><span>Sposób dostawy</span><span><b>${esc(z.dostawa||"—")}</b></span></div>
+      ${paczkomatZam
+        ? `<div><span>Paczkomat / punkt</span><span><b>${esc(z.paczkomat||w.punktKod||"—")}</b></span></div>${(z.paczkomatAdres||"").trim()?`<div><span>Adres punktu</span><span>${esc(czyscAdresPaczkomatu(z.paczkomatAdres))}</span></div>`:""}`
+        : `<div><span>Adres doręczenia</span><span>${esc(z.adres||"—")}</span></div>`}
+      <div><span>Numer nadania</span><span>${w.numer?`<b>${esc(w.numer)}</b>`:`<span style="color:var(--muted2)">— pojawi się po utworzeniu przesyłki</span>`}</span></div>
+      ${w.inpostId?`<div><span>Przesyłka InPost</span><span><code>${esc(w.inpostId)}</code>${w.inpostStatus?` • ${esc(w.inpostStatus)}`:""}</span></div>`:""}
+      ${urlSledzenia(z)?`<div><span>Śledzenie</span><span><a href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">otwórz link śledzenia</a></span></div>`:""}
+    </div>
+    <h3 style="margin:.6rem 0 .3rem">💳 Płatność</h3>
+    <div class="summary" style="margin:.2rem 0 1rem">
+      <div><span>Metoda</span><span><b>${esc(z.platnosc||"—")}</b></span></div>
+      <div><span>Status płatności</span><span>${esc(z.platnoscStatus||(z.platnoscId==="paynow"?paynowStatusTekst(paynow.status):"—"))}</span></div>
+      <div class="sum-total"><span>Kwota</span><span>${zl(z.razem)}</span></div>
+    </div>
+    ${z.platnoscId==="paynow"?`<div class="diag-actions"><button class="btn ghost" type="button" onclick="odswiezStatusPaynow(${jsArg(z.nr)},${jsArg(paynow.paymentId||"")})">🔄 Odśwież Paynow</button>${paynow.redirectUrl?`<a class="btn" href="${esc(paynow.redirectUrl)}" target="_blank" rel="noopener">Otwórz link płatności</a>`:""}${String(paynow.status||"").toUpperCase()==="CONFIRMED"?`<button class="btn" type="button" style="background:#0ea5e9;color:#fff" onclick="zwrotPieniedzyPaynow(${jsArg(z.nr)})">💸 Zwrot pieniędzy przez Paynow</button>`:""}</div>`:""}
+    ${Array.isArray(paynow.refunds)&&paynow.refunds.length?`<div class="backend-note" style="border-color:#7dd3fc;background:#f0f9ff;color:#075985"><b>Zwroty Paynow:</b><br>${paynow.refunds.map(r=>`${zl((Number(r.amount)||0)/100)} • <code>${esc(r.refundId||"—")}</code> • ${esc(r.status||"—")}${r.ts?` • ${esc(new Date(r.ts).toLocaleString("pl-PL"))}`:""}`).join("<br>")}</div>`:""}
+    <h3 style="margin:.8rem 0 .3rem">🏷️ Nadanie i etykieta</h3>
     <div class="backend-note">Przycisk etykiety roboczej tworzy dokument pomocniczy do kompletacji. Oficjalną etykietę z kodem InPost wystawia API ShipX po bezpiecznym połączeniu backendowym.</div>
     ${przewoznik==="inpost"?`<div class="backend-note" style="border-color:#facc15;background:#fffbeb;color:#713f12"><b>Ręczna etykieta w InPost Managerze:</b> w polu referencji/opisu wpisz dokładnie numer zamówienia <code>${esc(z.nr)}</code>. Webhook InPost automatycznie podłączy numer nadania, status i tracking do tego zlecenia.</div>`:""}
     <form onsubmit="zapiszWysylke(event,'${esc(z.nr)}')">
@@ -6729,8 +6743,19 @@ function ustawPaczkomatReczny(v){
   window.__paczkomatAdres="";
   const d=$("paczkomatWybrany"); if(d) d.innerHTML = kod?`📮 Wybrany paczkomat: <b>${esc(kod)}</b>`:"Wybierz punkt z listy, mapy albo wpisz kod ręcznie.";
 }
+function czyscAdresPaczkomatu(str){
+  const parts=String(str||"").split("•").map(s=>s.trim()).filter(Boolean);
+  const keep=[];
+  for(const p of parts){
+    const lp=p.toLowerCase();
+    if(keep.some(k=>k.toLowerCase().includes(lp))) continue;         // pomiń, jeśli już zawarte w innej części
+    for(let i=keep.length-1;i>=0;i--){ if(lp.includes(keep[i].toLowerCase())) keep.splice(i,1); } // usuń krótsze duplikaty
+    keep.push(p);
+  }
+  return keep.join(" • ");
+}
 function opisPunktuInpost(p){
-  return [p.address,[p.postCode,p.city].filter(Boolean).join(" "),p.description].filter(Boolean).join(" • ");
+  return czyscAdresPaczkomatu([p.address,[p.postCode,p.city].filter(Boolean).join(" "),p.description].filter(Boolean).join(" • "));
 }
 function wybierzPaczkomatZListy(kod, adres){
   kod=String(kod||"").trim().toUpperCase();
@@ -6781,7 +6806,7 @@ async function szukajPaczkomatow(tryb="tekst"){
 window.artwayPunktWybrany=function(point){
   try{
     const kod=(point&&(point.name||point.id))||"";
-    const adr=point&&point.address?[point.address.line1,point.address.line2].filter(Boolean).join(", "):((point&&point.location_description)||"");
+    const adr=czyscAdresPaczkomatu(point&&point.address?[point.address.line1,point.address.line2].filter(Boolean).join(" • "):((point&&point.location_description)||""));
     const h=$("paczkomatKod"); if(h) h.value=kod;
     const r=$("paczkomatReczny"); if(r) r.value=kod;
     window.__paczkomatAdres=adr;
