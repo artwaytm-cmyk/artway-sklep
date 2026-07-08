@@ -582,6 +582,7 @@ const KONFIG = {
     { id:"paczkomat", nazwa:"Paczkomat InPost 24/7", koszt:12, opis:"odbiór w wybranym paczkomacie / punkcie InPost" },
     { id:"kurier_inpost", nazwa:"Kurier InPost", koszt:17, opis:"dostawa kurierem InPost pod wskazany adres" }
   ],
+  kurierInpostAktywny: false,   // Kurier InPost wymaga umowy kurierskiej (nr Trucker); domyślnie wyłączony — działa tylko paczkomat
   platnosci: DOMYSLNE_PLATNOSCI.map(p=>({...p}))
 };
 const DOMYSLNA_DOSTAWA_INPOST = { id:"paczkomat", nazwa:"Paczkomat InPost 24/7", koszt:12, opis:"odbiór w wybranym paczkomacie / punkcie InPost" };
@@ -1448,6 +1449,7 @@ function zastosujUstawienia(){
   if(u.numerPrzelewuTelefon!==undefined) ustawNumerPrzelewuTelefon(u.numerPrzelewuTelefon);
   else ustawNumerPrzelewuTelefon(KONFIG.numerPrzelewuTelefon);
   if(u.darmowaDostawaOd!==undefined && u.darmowaDostawaOd!=="") KONFIG.darmowaDostawaOd = +u.darmowaDostawaOd;
+  if(u.kurierInpostAktywny!==undefined) KONFIG.kurierInpostAktywny = !!u.kurierInpostAktywny;
   if(Array.isArray(u.dostawy) && u.dostawy.length) KONFIG.dostawy = normalizujDostawyInPost(u.dostawy.map(x=>({...x})));
   else KONFIG.dostawy = normalizujDostawyInPost(KONFIG.dostawy);
   if(Array.isArray(u.platnosci) && u.platnosci.length) KONFIG.platnosci = u.platnosci.map(x=>({...x}));
@@ -5446,6 +5448,7 @@ function widokAdminDostawy(){
         <div class="f-group"><label>Kurier InPost (zł)</label><input name="kosztKurierInpost" inputmode="decimal" value="${kurierInpost.koszt}"></div>
         <div class="f-group"><label>Darmowa dostawa od (zł)</label><input name="darmowaDostawaOd" inputmode="decimal" value="${KONFIG.darmowaDostawaOd}"></div>
       </div>
+      <label class="chk-row"><input type="checkbox" name="kurierInpostWl" ${KONFIG.kurierInpostAktywny?"checked":""}> 🚚 Kurier InPost włączony w sklepie <small style="color:var(--muted2)">— zaznacz dopiero, gdy masz aktywną umowę kurierską InPost (nr Trucker). Wyłączony = klienci wybierają tylko paczkomat, a etykiety zawsze działają.</small></label>
       <div class="f-group" style="max-width:320px"><label>Deklarowany czas wysyłki — zmienia się wszędzie</label><input name="czasWysylki" value="${esc(czasWysylki())}" placeholder="np. 24 h, 48 h, 2 dni robocze"></div>
       <h3 class="f-sekcja">💳 Płatności i bramka</h3>
       <div class="f-group"><label>Awaryjny ręczny link mBank Paynow (opcjonalnie — gdy API nie jest jeszcze skonfigurowane)</label>
@@ -5495,6 +5498,7 @@ function zapiszDostawy(e){
     numerPrzelewuTelefon: numer,
     czasWysylki: String(f.get("czasWysylki")||"").trim(),
     darmowaDostawaOd: f.get("darmowaDostawaOd"),
+    kurierInpostAktywny: !!f.get("kurierInpostWl"),
     kosztPaczkomat: f.get("kosztPaczkomat"),
     kosztKurierInpost: f.get("kosztKurierInpost"),
     dostawy: normalizujDostawyInPost([
@@ -6654,9 +6658,9 @@ function otworzModal(){
       <div class="f-row">
         <div class="f-group"><label>Dostawa</label>
           <select name="delivery" onchange="przeliczZamowienie()">
-            ${dostepneDostawy().map(d=>`<option value="${d.id}">${esc(d.nazwa)} — ${d.koszt?zl(d.koszt):"gratis"} (${esc(d.opis)})</option>`).join("")}
+            ${dostepneDostawy().filter(d=>d.id!=="kurier_inpost"||KONFIG.kurierInpostAktywny).map(d=>`<option value="${d.id}">${esc(d.nazwa)} — ${d.koszt?zl(d.koszt):"gratis"} (${esc(d.opis)})</option>`).join("")}
           </select>
-          <small style="color:var(--muted2)">Dostawa działa wyłącznie przez InPost: paczkomat/punkt albo Kurier InPost.</small>
+          <small style="color:var(--muted2)">Dostawa przez InPost: paczkomat/punkt${KONFIG.kurierInpostAktywny?" albo Kurier InPost":""}.</small>
         </div>
         <div class="f-group"><label>Płatność</label>
           <select name="payment" onchange="przeliczZamowienie()">
