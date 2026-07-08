@@ -751,6 +751,158 @@ async function wyslijEmaileNowegoZamowienia(z, { includeAdmin = true } = {}) {
   return { configured: true, sent: wyniki.length > 0, results: wyniki, errors };
 }
 
+// ─── E-MAILE STATUSOWE (automatyczne, po stronie serwera) ───
+const MAPA_STATUS_EMAIL = {
+  'w realizacji': 'przygotowanie',
+  'gotowe do wysyłki': 'przygotowanie',
+  'nadane': 'nadanie',
+  'wysłane': 'nadanie',
+  'dostarczone': 'dostarczenie',
+  'zakończone': 'dostarczenie',
+  'zwrot': 'zwrot',
+  'zwrot pieniędzy': 'zwrot_pieniedzy',
+  'anulowane': 'anulowanie',
+};
+const STATUS_EMAIL_META = {
+  przygotowanie: { badge: 'Realizacja zamówienia', title: 'Zamówienie jest przygotowywane', accent: '#7c3aed', opis: 'Kompletujemy produkty i przygotowujemy paczkę do wysyłki. Wkrótce przekażemy przesyłkę przewoźnikowi.', subject: (nr) => `Zamówienie ${nr} jest przygotowywane — Artway-TM` },
+  nadanie: { badge: 'Przesyłka w drodze', title: 'Twoja paczka została nadana', accent: '#059669', opis: 'Przesyłka jest już u przewoźnika. Poniżej znajdziesz numer i link do śledzenia.', subject: (nr) => `Zamówienie ${nr} zostało nadane — Artway-TM` },
+  dostarczenie: { badge: 'Dostarczono', title: 'Przesyłka została dostarczona', accent: '#16a34a', opis: 'Mamy nadzieję, że zakupy sprawią dużo satysfakcji. Zapraszamy ponownie do Artway-TM.', subject: (nr) => `Zamówienie ${nr} zostało dostarczone — Artway-TM` },
+  anulowanie: { badge: 'Aktualizacja zamówienia', title: 'Zamówienie zostało anulowane', accent: '#dc2626', opis: 'Zamówienie zostało anulowane. Jeśli to pomyłka lub masz pytania, po prostu odpowiedz na tę wiadomość.', subject: (nr) => `Zamówienie ${nr} zostało anulowane — Artway-TM` },
+  zwrot: { badge: 'Zwrot przesyłki', title: 'Przesyłka wraca do nadawcy', accent: '#ea580c', opis: 'Przesyłka została oznaczona jako zwrot do nadawcy. Skontaktujemy się w sprawie dalszych kroków.', subject: (nr) => `Zwrot przesyłki dla zamówienia ${nr} — Artway-TM` },
+  zwrot_pieniedzy: { badge: 'Zwrot pieniędzy', title: 'Zwróciliśmy Ci pieniądze', accent: '#0ea5e9', opis: 'Zwrot środków został zainicjowany. Pieniądze wrócą na Twoje konto w ciągu kilku dni roboczych.', subject: (nr) => `Zwrot pieniędzy za zamówienie ${nr} — Artway-TM` },
+  problem: { badge: 'Ważna informacja', title: 'Problem z przesyłką', accent: '#dc2626', opis: 'Przewoźnik zgłosił problem dotyczący przesyłki. Monitorujemy sytuację i przekażemy kolejną informację po jej wyjaśnieniu.', subject: (nr) => `Ważna informacja o przesyłce ${nr} — Artway-TM` },
+};
+function nazwaPrzewoznikaEmail(id) {
+  return ({ inpost: 'InPost', dpd: 'DPD', dhl: 'DHL', orlen: 'ORLEN Paczka', gls: 'GLS', ups: 'UPS', pocztex: 'Pocztex', inny: 'przewoźnika' })[id] || 'przewoźnika';
+}
+function linkSledzeniaEmail(z) {
+  const w = z?.wysylka || {};
+  const wlasny = String(w.trackingUrl || '').trim();
+  if (/^https?:\/\//i.test(wlasny)) return wlasny;
+  const numer = String(w.numer || '').trim();
+  if (!numer) return '';
+  const mapa = {
+    inpost: `https://inpost.pl/sledzenie-przesylek?number=${encodeURIComponent(numer)}`,
+    dpd: `https://tracktrace.dpd.com.pl/parcelDetails?p1=${encodeURIComponent(numer)}`,
+    dhl: `https://www.dhl.com/pl-pl/home/tracking.html?tracking-id=${encodeURIComponent(numer)}`,
+    gls: `https://gls-group.com/PL/pl/sledzenie-paczek/?match=${encodeURIComponent(numer)}`,
+    ups: `https://www.ups.com/track?loc=pl_PL&tracknum=${encodeURIComponent(numer)}`,
+  };
+  return mapa[w.przewoznik] || '';
+}
+function htmlStatusEmail(z, typ, opcje = {}) {
+  const meta = STATUS_EMAIL_META[typ] || STATUS_EMAIL_META.przygotowanie;
+  const imie = tekst(z?.klient?.imie, 80).trim();
+  const w = z?.wysylka || {};
+  const numer = tekst(w.numer, 120).trim();
+  const sledzenie = linkSledzeniaEmail(z);
+  const sklepUrl = linkSklepuEmail('/#/');
+  const zamUrl = linkSklepuEmail('/#/zamowienia');
+  const kwotaZwrotu = opcje.kwota != null ? zlSerwer(opcje.kwota) : '';
+  const kartaZwrot = typ === 'zwrot_pieniedzy'
+    ? htmlKartaEmail('Zwrot środków', `Kwota zwrotu: <b>${htmlEscape(kwotaZwrotu || zlSerwer(z?.razem))}</b><br><span style="color:#374151">Zwrot realizujemy tą samą metodą, którą opłacono zamówienie. Środki wrócą na konto w ciągu kilku dni roboczych, zależnie od banku.</span>`, '#0ea5e9')
+    : '';
+  const kartaTracking = (typ === 'nadanie' || typ === 'problem') && (numer || sledzenie)
+    ? htmlKartaEmail('Śledzenie przesyłki', `${w.przewoznik ? `Przewoźnik: <b>${htmlEscape(nazwaPrzewoznikaEmail(w.przewoznik))}</b><br>` : ''}${numer ? `Numer przesyłki: <b>${htmlEscape(numer)}</b><br>` : ''}${sledzenie ? `Link: <a href="${htmlEscape(sledzenie)}" style="color:#2563eb;font-weight:800">${htmlEscape(sledzenie)}</a>` : ''}`, '#059669')
+    : '';
+  const pokazProdukty = typ === 'nadanie' || typ === 'dostarczenie';
+  return `<!doctype html>
+  <html lang="pl">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${htmlEscape(meta.title)}</title></head>
+  <body style="margin:0;padding:0;background:#eef2ff;font-family:Arial,Helvetica,sans-serif;color:#111827">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${htmlEscape(meta.opis)}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2ff;padding:26px 10px"><tr><td align="center">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 20px 55px rgba(37,99,235,.14)">
+        <tr><td style="background:linear-gradient(135deg,#2563eb,#6d28d9);padding:28px 28px 24px;color:#ffffff">
+          <div style="font-size:13px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;opacity:.9">${htmlEscape(meta.badge)}</div>
+          <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.18">${htmlEscape(meta.title)}</h1>
+          <p style="margin:0;font-size:16px;line-height:1.55;opacity:.96">Dzień dobry${imie ? `, ${htmlEscape(imie)}` : ''}. ${htmlEscape(meta.opis)}</p>
+        </td></tr>
+        <tr><td style="padding:26px 28px">
+          <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:18px;padding:14px 16px;margin-bottom:16px;color:#78350f">
+            <b>Numer zamówienia:</b> ${htmlEscape(z?.nr || '—')} &nbsp; • &nbsp; <b>Wartość:</b> ${htmlEscape(zlSerwer(z?.razem))}
+          </div>
+          ${kartaZwrot}
+          ${kartaTracking}
+          ${pokazProdukty ? `<h2 style="font-size:18px;margin:22px 0 10px;color:#111827">Produkty w zamówieniu</h2>${htmlProduktyEmail(z)}` : ''}
+          <div style="margin:22px 0 8px">${emailButton('Moje zamówienia', zamUrl)}${emailButton('Wróć do sklepu', sklepUrl, '#111827')}</div>
+          <p style="font-size:14px;color:#6b7280;line-height:1.6;margin:18px 0 0">Dziękujemy za zaufanie. Zapraszamy ponownie — w sklepie czekają kolejne produkty i okazje.</p>
+        </td></tr>
+        <tr><td style="background:#111827;color:#d1d5db;padding:20px 28px;font-size:13px;line-height:1.55"><b style="color:#ffffff">Artway-TM</b><br>Sklep internetowy • ${htmlEscape(sklepUrl)}<br>Wiadomość wysłana automatycznie — odpowiedź trafi do obsługi sklepu.</td></tr>
+      </table>
+    </td></tr></table>
+  </body></html>`;
+}
+function wiadomoscStatusowa(z, typ, opcje = {}) {
+  const meta = STATUS_EMAIL_META[typ] || STATUS_EMAIL_META.przygotowanie;
+  const imie = tekst(z?.klient?.imie, 80).trim();
+  const w = z?.wysylka || {};
+  const numer = tekst(w.numer, 120).trim();
+  const sledzenie = linkSledzeniaEmail(z);
+  const powitanie = `Dzień dobry${imie ? `, ${imie}` : ''},`;
+  let tresc = '';
+  if (typ === 'nadanie') tresc = `przesyłka dla zamówienia ${z.nr} została nadana przez ${nazwaPrzewoznikaEmail(w.przewoznik)}.${numer ? `\nNumer przesyłki: ${numer}` : ''}${sledzenie ? `\nŚledzenie: ${sledzenie}` : ''}`;
+  else if (typ === 'przygotowanie') tresc = `Twoje zamówienie ${z.nr} jest obecnie przygotowywane do wysyłki. Damy znać, gdy paczka trafi do przewoźnika.`;
+  else if (typ === 'dostarczenie') tresc = `przesyłka dla zamówienia ${z.nr} została oznaczona jako dostarczona. Dziękujemy za zakupy!`;
+  else if (typ === 'anulowanie') tresc = `zamówienie ${z.nr} zostało anulowane. Jeśli to pomyłka lub masz pytania, odpowiedz na tę wiadomość.`;
+  else if (typ === 'zwrot') tresc = `przesyłka dla zamówienia ${z.nr} została oznaczona jako zwrot do nadawcy. Skontaktujemy się w sprawie dalszych kroków.`;
+  else if (typ === 'zwrot_pieniedzy') tresc = `zwróciliśmy pieniądze za zamówienie ${z.nr}.\nKwota zwrotu: ${opcje.kwota != null ? zlSerwer(opcje.kwota) : zlSerwer(z.razem)}\nŚrodki wrócą na Twoje konto w ciągu kilku dni roboczych, zależnie od banku.`;
+  else if (typ === 'problem') tresc = `przewoźnik zgłosił problem dotyczący przesyłki dla zamówienia ${z.nr}. Monitorujemy sytuację i przekażemy kolejną informację po jej wyjaśnieniu.${numer ? `\nNumer przesyłki: ${numer}` : ''}${sledzenie ? `\nŚledzenie: ${sledzenie}` : ''}`;
+  const body = `${powitanie}\n\n${tresc}\n\nSzczegóły sprawdzisz w sekcji „Moje zamówienia”.\n\nPozdrawiamy\nArtway-TM\n${linkSklepuEmail('/#/')}`;
+  return { subject: meta.subject(z.nr), text: body, html: htmlStatusEmail(z, typ, opcje) };
+}
+async function wyslijEmailStatusowy(z, typ, opcje = {}) {
+  const c = emailKonfiguracja();
+  if (!c.configured) return { configured: false, sent: false, error: 'email_not_configured' };
+  if (!z?.email) return { configured: true, sent: false, error: 'no_email' };
+  const msg = wiadomoscStatusowa(z, typ, opcje);
+  try {
+    const r = await wyslijEmailSMTP({ to: z.email, ...msg });
+    await dopiszHistorieEmaila(z.nr, { typ, status: 'wysłano', provider: r.provider, id: r.message_id, automatyczne: true });
+    return { configured: true, sent: true, provider: r.provider, id: r.message_id };
+  } catch (e) {
+    await dopiszHistorieEmaila(z.nr, { typ, status: 'błąd wysyłki', blad: e.message, automatyczne: true });
+    return { configured: true, sent: false, error: e.message };
+  }
+}
+function polaczPowiadomienia(serwerowe, przychodzace) {
+  const a = Array.isArray(serwerowe) ? serwerowe : [];
+  const b = Array.isArray(przychodzace) ? przychodzace : [];
+  const klucz = (p) => `${p?.typ || ''}|${p?.status || ''}|${p?.czas || ''}|${p?.id || ''}`;
+  const widziane = new Set(b.map(klucz));
+  const dodatkowe = a.filter((p) => !widziane.has(klucz(p)));
+  return [...b, ...dodatkowe];
+}
+async function obsluzEmailePrzejsciaStatusu(stary, nowy) {
+  if (!nowy?.nr) return { sent: false };
+  const typy = [];
+  const numerNowy = tekst(nowy?.wysylka?.numer, 120).trim();
+  const numerStary = tekst(stary?.wysylka?.numer, 120).trim();
+  if (numerNowy && numerNowy !== numerStary) typy.push('nadanie');
+  const bladNowy = tekst(nowy?.wysylka?.bladIntegracji, 300).trim();
+  const bladStary = tekst(stary?.wysylka?.bladIntegracji, 300).trim();
+  if (bladNowy && bladNowy !== bladStary) typy.push('problem');
+  if ((stary?.status || '') !== (nowy?.status || '')) {
+    const t = MAPA_STATUS_EMAIL[nowy.status];
+    if (t && !typy.includes(t) && !(t === 'przygotowanie' && typy.includes('nadanie'))) typy.push(t);
+  }
+  if (!typy.length) return { sent: false };
+  const c = emailKonfiguracja();
+  if (!c.configured) return { sent: false, configured: false, typy };
+  // aktualny stan zamówienia z bazy (autorytatywna historia do deduplikacji)
+  const rec = await czytaj('orders', { items: [] });
+  let zapisany = (rec.items || []).find((x) => x.nr === nowy.nr) || nowy;
+  const wyniki = [];
+  for (const typ of typy) {
+    if (emailJuzWyslany(zapisany, typ)) continue;
+    const r = await wyslijEmailStatusowy(zapisany, typ);
+    wyniki.push({ typ, ...r });
+    const rec2 = await czytaj('orders', { items: [] });
+    zapisany = (rec2.items || []).find((x) => x.nr === nowy.nr) || zapisany;
+  }
+  return { sent: wyniki.some((x) => x.sent), configured: true, wyniki, powiadomienia: zapisany?.wysylka?.powiadomienia || [] };
+}
+
 export default async (req) => {
   const url = new URL(req.url);
   const action = url.searchParams.get('action') || 'health';
@@ -962,6 +1114,65 @@ export default async (req) => {
       return odpowiedz({ ok: true, configured: true, env: cfg.env, ...payload });
     }
 
+    // ─── PAYNOW: zwrot pieniędzy (refund) + automatyczny e-mail (admin) ───
+    if (action === 'paynow-refund') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const cfg = paynowKonfiguracja(req);
+      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w Netlify.', code: 'paynow_not_configured' }, 503);
+      const body = await req.json().catch(() => ({}));
+      const nr = numerZamowienia(body.nr || body.number);
+      if (!nr) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia' }, 422);
+      const rec = await czytaj('orders', { items: [] });
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      const i = items.findIndex((x) => x.nr === nr);
+      if (i < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
+      const z = { ...items[i] };
+      const paymentId = tekst(z?.paynow?.paymentId, 40).trim();
+      if (!paymentId) return odpowiedz({ ok: false, error: 'To zamówienie nie ma płatności Paynow — zwrot pieniędzy zrób w banku, a zamówienie oznacz jako „zwrot pieniędzy”.', code: 'no_payment' }, 409);
+      const statusPlat = String(z?.paynow?.status || '').toUpperCase();
+      if (statusPlat !== 'CONFIRMED') return odpowiedz({ ok: false, error: `Zwrot możliwy tylko dla opłaconej płatności (CONFIRMED). Obecny status Paynow: ${statusPlat || 'brak'}.`, code: 'not_confirmed' }, 409);
+      const pelna = grosze(z.razem);
+      const juz = (Array.isArray(z?.paynow?.refunds) ? z.paynow.refunds : []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+      const amount = (body.amount != null && body.amount !== '') ? grosze(body.amount) : (pelna - juz);
+      if (amount <= 0) return odpowiedz({ ok: false, error: 'Kwota zwrotu musi być większa od zera' }, 422);
+      if (amount + juz > pelna) return odpowiedz({ ok: false, error: `Kwota zwrotu przekracza pozostałą kwotę płatności (pozostało ${zlSerwer((pelna - juz) / 100)}).`, code: 'amount_too_large' }, 409);
+      const reasonRaw = String(body.reason || '').toUpperCase();
+      const reason = ['RMA', 'REFUND_BEFORE_14', 'REFUND_AFTER_14', 'OTHER'].includes(reasonRaw) ? reasonRaw : '';
+      const bodyObj = reason ? { amount, reason } : { amount };
+      const idempotencyKey = kluczIdempotencji('ref', `${paymentId}${Date.now()}`);
+      const dane = await paynowWywolaj(req, `/v3/payments/${encodeURIComponent(paymentId)}/refunds`, { method: 'POST', bodyObj, idempotencyKey });
+      const refundId = tekst(dane.refundId, 60);
+      const refundStatus = tekst(dane.status, 40).toUpperCase();
+      const refunds = (Array.isArray(z?.paynow?.refunds) ? z.paynow.refunds.slice() : []);
+      refunds.push({ refundId, status: refundStatus, amount, reason, ts: new Date().toISOString() });
+      const pelnyZwrot = (amount + juz) >= pelna;
+      z.paynow = { ...z.paynow, refunds, updatedAt: new Date().toISOString() };
+      z.status = 'zwrot pieniędzy';
+      z.platnoscStatus = pelnyZwrot ? 'zwrócone' : 'częściowy zwrot';
+      const w = z.wysylka || {};
+      w.historia = [...(Array.isArray(w.historia) ? w.historia : []), { czas: new Date().toLocaleString('pl-PL'), status: 'Zwrot pieniędzy Paynow', opis: `${zlSerwer(amount / 100)} • ${refundId || '—'} • ${refundStatus || '—'}` }];
+      z.wysylka = w;
+      items[i] = z;
+      await zapisz('orders', { items, updated_at: new Date().toISOString() });
+      let email = null;
+      try { email = await wyslijEmailStatusowy(z, 'zwrot_pieniedzy', { kwota: amount / 100 }); }
+      catch (e) { email = { sent: false, error: e.message }; }
+      const recPo = await czytaj('orders', { items: [] });
+      const zPo = (recPo.items || []).find((x) => x.nr === nr) || z;
+      return odpowiedz({
+        ok: true,
+        configured: true,
+        refundId,
+        status: refundStatus,
+        amount,
+        fullRefund: pelnyZwrot,
+        email,
+        order: { nr: zPo.nr, status: zPo.status, platnoscStatus: zPo.platnoscStatus, paynow: zPo.paynow },
+        powiadomienia: zPo?.wysylka?.powiadomienia || [],
+      }, 201);
+    }
+
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
     if (action === 'pull' || action === 'store-data') {
       const s = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
@@ -1097,9 +1308,18 @@ export default async (req) => {
       const rec = await czytaj('orders', { items: [] });
       const items = filtrujNieusunieteZamowienia(rec.items || [], usuniete);
       const i = items.findIndex((x) => x.nr === zam.nr);
+      const stary = i >= 0 ? items[i] : null;
+      // zachowaj serwerową historię e-maili (klient mógł mieć starszą kopię)
+      if (stary) {
+        zam.wysylka = zam.wysylka || {};
+        zam.wysylka.powiadomienia = polaczPowiadomienia(stary?.wysylka?.powiadomienia, zam.wysylka.powiadomienia);
+      }
       if (i >= 0) items[i] = zam; else items.unshift(zam);
       await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, stored: true, number: zam.nr });
+      let email = null;
+      try { email = await obsluzEmailePrzejsciaStatusu(stary, zam); }
+      catch (e) { email = { sent: false, error: e.message }; }
+      return odpowiedz({ ok: true, stored: true, number: zam.nr, email, powiadomienia: email?.powiadomienia });
     }
     if (action === 'store-order-delete') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);

@@ -1092,6 +1092,36 @@ async function odswiezStatusPaynow(nr,paymentId=""){
     loguj("blad","Paynow status: "+e.message);
   }
 }
+async function zwrotPieniedzyPaynow(nr){
+  const z=pobierzZamowienia().find(x=>x.nr===nr);
+  if(!z){ toast("Nie znaleziono zamówienia"); return; }
+  if(!chmuraToken){ toast("Wpisz hasło bazy administratora, aby zlecić zwrot"); chmuraUstawToken(); return; }
+  const pelna=Number(z.razem)||0;
+  const juz=(Array.isArray(z?.paynow?.refunds)?z.paynow.refunds:[]).reduce((s,r)=>s+(Number(r.amount)||0),0)/100;
+  const pozostalo=Math.max(0,pelna-juz);
+  const wpis=prompt(`Kwota zwrotu w zł dla ${nr} (pozostało do zwrotu: ${zl(pozostalo)}).\nZostaw domyślną wartość, aby zwrócić całą pozostałą kwotę:`, pozostalo.toFixed(2));
+  if(wpis===null) return;
+  const kwota=Number(String(wpis).replace(",",".").replace(/[^0-9.]/g,""))||0;
+  if(kwota<=0){ toast("Podaj poprawną kwotę zwrotu"); return; }
+  if(kwota>pozostalo+0.001){ toast(`Kwota przekracza pozostałe ${zl(pozostalo)}`); return; }
+  if(!confirm(`Zwrócić ${zl(kwota)} klientowi przez Paynow?\nKlient dostanie automatyczny e-mail o zwrocie pieniędzy.`)) return;
+  toast("Wysyłam zlecenie zwrotu do Paynow…");
+  try{
+    const d=await chmura("paynow-refund",{method:"POST",body:{nr,amount:kwota},timeout:25000});
+    aktualizujZamowienie(nr,zam=>{
+      zam.status="zwrot pieniędzy";
+      if(d.order?.paynow) zam.paynow={...paynowDane(zam),...d.order.paynow};
+      if(d.order?.platnoscStatus) zam.platnoscStatus=d.order.platnoscStatus;
+      if(Array.isArray(d.powiadomienia)){ zam.wysylka=zam.wysylka||{}; zam.wysylka.powiadomienia=d.powiadomienia; }
+    });
+    loguj("info",`Zwrot Paynow ${nr}: ${d.refundId||""} (${d.status||""})`);
+    toast(`Zwrot zlecony ✅ ${d.email?.sent?"E-mail wysłany":""}`);
+    renderuj();
+  }catch(e){
+    loguj("blad",`Zwrot Paynow ${nr}: ${e.message}`);
+    toast("Nie udało się zlecić zwrotu: "+e.message);
+  }
+}
 function instrukcjaPlatnosciHTML(id, nr, kwota, zam=null){
   const kw = typeof kwota==="number" ? zl(kwota) : esc(kwota||"");
   if(id==="pobranie") return `<div class="pay-note" style="font-size:.95rem">💵 <b>Zapłacisz ${kw} przy odbiorze</b> — kurierowi lub w paczkomacie. Nic więcej nie musisz robić.</div>`;
@@ -2509,11 +2539,11 @@ function stronaInfo(tytul, tresc,id){
 /* ═══════════ PANEL ADMINA (tylko administrator) ═══════════
    Podstrony: #/admin (pulpit), #/admin/zamowienia (zmiana statusów),
    #/admin/klienci, #/admin/produkty. Klienci ich nie widzą.        */
-const STATUSY = ["nowe","potwierdzone","w realizacji","gotowe do wysyłki","nadane","wysłane","w doręczeniu","dostarczone","zakończone","zwrot","anulowane"];
+const STATUSY = ["nowe","potwierdzone","w realizacji","gotowe do wysyłki","nadane","wysłane","w doręczeniu","dostarczone","zakończone","zwrot","zwrot pieniędzy","anulowane"];
 const KOLOR_STATUSU = {
   "nowe":"#dbeafe","potwierdzone":"#e0f2fe","w realizacji":"#fef3c7","gotowe do wysyłki":"#ffedd5",
   "nadane":"#e0e7ff","wysłane":"#e0e7ff","w doręczeniu":"#ede9fe","dostarczone":"#dcfce7",
-  "zakończone":"#dcfce7","zwrot":"#fce7f3","anulowane":"#fee2e2"
+  "zakończone":"#dcfce7","zwrot":"#fce7f3","zwrot pieniędzy":"#cffafe","anulowane":"#fee2e2"
 };
 const PRZEWOZNICY = {
   inpost:{nazwa:"InPost",uslugi:["Paczkomat 24/7","Kurier","Kurier pobranie"],url:n=>`https://inpost.pl/sledzenie-przesylek?number=${encodeURIComponent(n)}`},
@@ -2637,7 +2667,7 @@ function etapWysylki(z){
   const w=daneWysylki(z);
   if(w.etap&&ETAPY_WYSYLKI[w.etap]) return w.etap;
   if(z.status==="anulowane") return "anulowana";
-  if(z.status==="zwrot") return "zwrot";
+  if(z.status==="zwrot"||z.status==="zwrot pieniędzy") return "zwrot";
   if(z.status==="dostarczone"||z.status==="zakończone") return "dostarczona";
   if(z.status==="w doręczeniu") return "doreczenie";
   if(w.bladIntegracji) return "problem";
@@ -2727,7 +2757,8 @@ function zapiszWysylke(e,nr){
   if(!z) return toast("Nie znaleziono zamówienia");
   loguj("info",`Zapisano przesyłkę ${nr}: ${nazwaPrzewoznika(przewoznik)}${numer?" "+numer:""}`);
   toast("Dane przesyłki zapisane ✅"); renderuj();
-  if(numer&&numer!==staryNumer) void obsluzAutomatycznyEmail(nr,z.status,"nadanie");
+  // E-mail „nadanie" wysyła się automatycznie z serwera po zapisaniu numeru nadania (awaryjnie z panelu, gdy baza offline)
+  if(numer&&numer!==staryNumer&&!chmuraToken) void obsluzAutomatycznyEmail(nr,z.status,"nadanie");
 }
 function uzupelnijUslugi(select){
   const form=select.form, uslugi=PRZEWOZNICY[select.value]?.uslugi||[];
@@ -2749,7 +2780,8 @@ function dodajZdarzenieWysylki(e,nr){
   });
   loguj("info",`Dodano zdarzenie przesyłki ${nr}: ${status}`);
   toast("Zdarzenie dodane"); renderuj();
-  if(statusZamowienia||typEmaila) void obsluzAutomatycznyEmail(nr,statusZamowienia,typEmaila);
+  // E-mail (nadanie/dostarczenie/zwrot/problem) wysyła się automatycznie z serwera po zapisaniu zdarzenia; awaryjnie z panelu przy braku bazy
+  if((statusZamowienia||typEmaila)&&!chmuraToken) void obsluzAutomatycznyEmail(nr,statusZamowienia,typEmaila);
 }
 function trescPowiadomienia(z,typ){
   const w=daneWysylki(z), klient=z.klient||{}, imie=klient.imie||"";
@@ -2765,6 +2797,7 @@ function trescPowiadomienia(z,typ){
     dostarczenie:{temat:`Zamówienie ${z.nr} zostało dostarczone`,body:`${powitanie}\n\nprzesyłka dla zamówienia ${z.nr} została oznaczona jako dostarczona. Dziękujemy za zakupy.`},
     anulowanie:{temat:`Aktualizacja zamówienia ${z.nr}`,body:`${powitanie}\n\nzamówienie ${z.nr} zostało anulowane. W razie pytań odpowiedz na tę wiadomość.`},
     zwrot:{temat:`Zwrot przesyłki dla zamówienia ${z.nr}`,body:`${powitanie}\n\nprzesyłka dla zamówienia ${z.nr} została oznaczona jako zwrot do nadawcy. Skontaktujemy się w sprawie dalszych kroków.`},
+    zwrot_pieniedzy:{temat:`Zwrot pieniędzy za zamówienie ${z.nr}`,body:`${powitanie}\n\nzwróciliśmy pieniądze za zamówienie ${z.nr}.\nKwota zwrotu: ${zl(z.razem)}\nŚrodki wrócą na Twoje konto w ciągu kilku dni roboczych, zależnie od banku.`},
     problem:{temat:`Ważna informacja o przesyłce ${z.nr}`,body:`${powitanie}\n\nprzewoźnik zgłosił problem dotyczący przesyłki dla zamówienia ${z.nr}. Monitorujemy sytuację i przekażemy kolejną informację po jej wyjaśnieniu.${w.numer?`\nNumer przesyłki: ${w.numer}`:""}${sledzenie?`\nŚledzenie: ${sledzenie}`:""}`}
   };
   const p=warianty[typ]||warianty.potwierdzenie;
@@ -2797,6 +2830,7 @@ function htmlPowiadomieniaKlienta(z,typ,temat,body){
     dostarczenie:["Dziękujemy — przesyłka dostarczona","Mamy nadzieję, że zakupy sprawią dużo satysfakcji. Zapraszamy ponownie do Artway-TM.","#16a34a"],
     anulowanie:["Aktualizacja zamówienia","Zamówienie zostało anulowane. Jeśli to pomyłka lub masz pytania, odpowiedz na tę wiadomość.","#dc2626"],
     zwrot:["Informacja o zwrocie","Przesyłka została oznaczona jako zwrot. Skontaktujemy się w sprawie dalszych kroków.","#ea580c"],
+    zwrot_pieniedzy:["Zwróciliśmy Ci pieniądze","Zwrot środków został zainicjowany. Pieniądze wrócą na Twoje konto w ciągu kilku dni roboczych.","#0ea5e9"],
     problem:["Ważna informacja o przesyłce","Przewoźnik zgłosił problem. Monitorujemy sytuację i przekażemy kolejną informację po wyjaśnieniu.","#dc2626"]
   };
   const [naglowek,opis,kolor]=statusy[typ]||statusy.potwierdzenie;
@@ -2832,7 +2866,7 @@ function htmlPowiadomieniaKlienta(z,typ,temat,body){
     </td></tr></table>
   </body></html>`;
 }
-const NAZWY_EMAILI={potwierdzenie:"Potwierdzenie",przygotowanie:"Przygotowanie",nadanie:"Nadanie",dostarczenie:"Dostarczenie",anulowanie:"Anulowanie",zwrot:"Zwrot",problem:"Problem z przesyłką"};
+const NAZWY_EMAILI={potwierdzenie:"Potwierdzenie",przygotowanie:"Przygotowanie",nadanie:"Nadanie",dostarczenie:"Dostarczenie",anulowanie:"Anulowanie",zwrot:"Zwrot",zwrot_pieniedzy:"Zwrot pieniędzy",problem:"Problem z przesyłką"};
 function zapiszHistorieEmaila(nr,wpis){
   aktualizujZamowienie(nr,zam=>{
     const w=daneWysylki(zam);
@@ -2883,7 +2917,7 @@ function typEmailaDlaStatusu(status){
   return {
     "potwierdzone":"potwierdzenie","w realizacji":"przygotowanie","gotowe do wysyłki":"przygotowanie",
     "nadane":"nadanie","wysłane":"nadanie","dostarczone":"dostarczenie","zakończone":"dostarczenie",
-    "zwrot":"zwrot","anulowane":"anulowanie"
+    "zwrot":"zwrot","zwrot pieniędzy":"zwrot_pieniedzy","anulowane":"anulowanie"
   }[status]||"";
 }
 async function obsluzAutomatycznyEmail(nr,status,typWymuszony=""){
@@ -3037,6 +3071,11 @@ async function zapiszZamowienieCentralnie(z,publiczne=false){
     if(d?.deleted){ oznaczZamowienieUsuniete(z.nr,{by:"server"}); zapiszLS("artway_zamowienia",pobierzZamowienia()); return false; }
     stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,error:""};
     chmuraStan={...chmuraStan,dostepna:true};
+    // serwer wysyła automatyczne e-maile statusowe — wczytaj świeżą historię powiadomień
+    if(!publiczne && d && Array.isArray(d.powiadomienia)){
+      const lista=pobierzZamowienia(), lokalny=lista.find(x=>x.nr===z.nr);
+      if(lokalny){ lokalny.wysylka=lokalny.wysylka||{}; lokalny.wysylka.powiadomienia=d.powiadomienia; zapiszLS("artway_zamowienia",lista); if(typeof renderuj==="function") renderuj(); }
+    }
     return d;
   }catch(bl){
     stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:false,error:bl.message};
@@ -3504,7 +3543,8 @@ function widokAdminZamowienie(nr){
           <div class="sum-total"><span>Razem</span><span>${zl(z.razem)}</span></div></div>
         <h2>Dostawa i płatność</h2>
         <p>🚚 ${esc(z.dostawa||"—")}<br>💳 ${esc(z.platnosc||"—")}${z.platnoscId==="paynow"?`<br>Paynow: <b style="color:${paynowKolorStatusu(paynow.status)}">${esc(paynowStatusTekst(paynow.status))}</b>${paynow.paymentId?` • <code>${esc(paynow.paymentId)}</code>`:""}`:""}<br>📍 ${esc(z.adres||"—")}${z.paczkomat?`<br>📮 Punkt: <b>${esc(z.paczkomat)}</b>`:""}</p>
-        ${z.platnoscId==="paynow"?`<div class="diag-actions"><button class="btn ghost" type="button" onclick="odswiezStatusPaynow(${jsArg(z.nr)},${jsArg(paynow.paymentId||"")})">🔄 Odśwież Paynow</button>${paynow.redirectUrl?`<a class="btn" href="${esc(paynow.redirectUrl)}" target="_blank" rel="noopener">Otwórz link płatności</a>`:""}</div>`:""}
+        ${z.platnoscId==="paynow"?`<div class="diag-actions"><button class="btn ghost" type="button" onclick="odswiezStatusPaynow(${jsArg(z.nr)},${jsArg(paynow.paymentId||"")})">🔄 Odśwież Paynow</button>${paynow.redirectUrl?`<a class="btn" href="${esc(paynow.redirectUrl)}" target="_blank" rel="noopener">Otwórz link płatności</a>`:""}${String(paynow.status||"").toUpperCase()==="CONFIRMED"?`<button class="btn" type="button" style="background:#0ea5e9;color:#fff" onclick="zwrotPieniedzyPaynow(${jsArg(z.nr)})">💸 Zwrot pieniędzy przez Paynow</button>`:""}</div>`:""}
+        ${Array.isArray(paynow.refunds)&&paynow.refunds.length?`<div class="backend-note" style="border-color:#7dd3fc;background:#f0f9ff;color:#075985"><b>Zwroty Paynow:</b><br>${paynow.refunds.map(r=>`${zl((Number(r.amount)||0)/100)} • <code>${esc(r.refundId||"—")}</code> • ${esc(r.status||"—")}${r.ts?` • ${esc(new Date(r.ts).toLocaleString("pl-PL"))}`:""}`).join("<br>")}</div>`:""}
       </div>
       <div class="ship-card">
         <h2 style="margin-top:0">Klient</h2>
@@ -3590,15 +3630,15 @@ function zmienStatus(nr, status){
     const poprzedni=z.status;
     z.status = status;
     const w=daneWysylki(z);
-    const mapaEtapow={"nowe":"do_obslugi","potwierdzone":"do_obslugi","w realizacji":"przygotowanie","gotowe do wysyłki":"przygotowanie","nadane":"transport","wysłane":"transport","w doręczeniu":"doreczenie","dostarczone":"dostarczona","zakończone":"dostarczona","zwrot":"zwrot","anulowane":"anulowana"};
+    const mapaEtapow={"nowe":"do_obslugi","potwierdzone":"do_obslugi","w realizacji":"przygotowanie","gotowe do wysyłki":"przygotowanie","nadane":"transport","wysłane":"transport","w doręczeniu":"doreczenie","dostarczone":"dostarczona","zakończone":"dostarczona","zwrot":"zwrot","zwrot pieniędzy":"zwrot","anulowane":"anulowana"};
     if(mapaEtapow[status]) w.etap=mapaEtapow[status];
     w.historia=[...(w.historia||[]),{czas:new Date().toLocaleString("pl-PL"),status:"Status zamówienia",opis:`${poprzedni} → ${status}`}];
     z.wysylka=w;
     zapiszLS("artway_zamowienia", t);
-    void zapiszZamowienieCentralnie(z,false);
     loguj("info",`Zmieniono status zamówienia ${nr} → ${status}`);
     toast(`${nr}: ${status} ✅`);
-    if(poprzedni!==status) void obsluzAutomatycznyEmail(nr,status);
+    // Serwer sam wyśle e-mail statusowy przy zapisie; awaryjnie (brak połączenia z bazą) próbujemy z panelu
+    zapiszZamowienieCentralnie(z,false).then(d=>{ if(poprzedni!==status && !d) void obsluzAutomatycznyEmail(nr,status); });
   }
   renderuj();
 }
