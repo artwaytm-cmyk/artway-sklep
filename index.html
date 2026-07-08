@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.07.11">
+<meta name="artway-version" content="2026.07.08.1">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <link id="faviconLink" rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="14" fill="%232563eb"/%3E%3Ctext x="32" y="42" text-anchor="middle" font-size="30" font-family="Arial" font-weight="700" fill="white"%3EA%3C/text%3E%3C/svg%3E'>
@@ -1021,11 +1021,77 @@ function instrukcjaPlatnosciTekst(id, nr, kwota){
   if(id==="pobranie") return `Płatność przy odbiorze: do zapłaty ${kw}.`;
   if(id==="telefon") return `Przelew na telefon: ${formatTelefonPlatnosci()}. W tytule/wiadomości wpisz: Zamówienie ${nr}. Kwota: ${kw}.`;
   if(id==="paynow") return KONFIG.linkPlatnosci
-    ? `mBank Paynow: opłać zamówienie tutaj: ${KONFIG.linkPlatnosci}. W opisie płatności podaj numer zamówienia ${nr}. Kwota: ${kw}.`
-    : `mBank Paynow: wybrano płatność przez bramkę. Link płatności zostanie udostępniony po aktywacji/konfiguracji Paynow. Numer zamówienia: ${nr}. Kwota: ${kw}.`;
+    ? `mBank Paynow: opłać zamówienie tutaj: ${KONFIG.linkPlatnosci}. Numer zamówienia: ${nr}. Kwota: ${kw}.`
+    : `mBank Paynow: po złożeniu zamówienia sklep utworzy płatność i pokaże przycisk zapłaty. Numer zamówienia: ${nr}. Kwota: ${kw}.`;
   return `Płatność: ${kw}. Numer zamówienia: ${nr}.`;
 }
-function instrukcjaPlatnosciHTML(id, nr, kwota){
+function paynowDane(z){ return (z && typeof z==="object" && (z.paynow || z.platnoscPaynow)) || {}; }
+function paynowStatusTekst(status){
+  switch(String(status||"").toUpperCase()){
+    case "CONFIRMED": return "opłacone";
+    case "PENDING": return "oczekuje na potwierdzenie";
+    case "NEW": return "rozpoczęte";
+    case "EXPIRED": return "wygasła";
+    case "REJECTED": return "odrzucona";
+    case "ABANDONED": return "porzucona";
+    case "ERROR": return "błąd płatności";
+    default: return status ? String(status) : "brak statusu";
+  }
+}
+function paynowKolorStatusu(status){
+  status=String(status||"").toUpperCase();
+  if(status==="CONFIRMED") return "var(--ok)";
+  if(status==="ERROR"||status==="REJECTED"||status==="EXPIRED"||status==="ABANDONED") return "var(--danger)";
+  return "var(--warn)";
+}
+function instrukcjaPaynowHTML(nr, kwota, zam=null){
+  const kw = typeof kwota==="number" ? zl(kwota) : esc(kwota||"");
+  const p = paynowDane(zam);
+  const link = p.redirectUrl || p.redirect_url || KONFIG.linkPlatnosci || "";
+  const status = p.status || "";
+  const paymentId = p.paymentId || "";
+  const statusHtml = status ? `<p class="pay-note" style="text-align:left;margin-top:.5rem;border-left-color:${paynowKolorStatusu(status)}">Status Paynow: <b>${esc(paynowStatusTekst(status))}</b>${paymentId?` • ID: <code>${esc(paymentId)}</code>`:""}</p>` : "";
+  if(link){
+    return `<div>
+      <a href="${esc(link)}" target="_blank" rel="noopener" class="checkout-btn" style="display:block;text-decoration:none;text-align:center;background:var(--ok)">💳 Zapłać przez mBank Paynow ${kw}</a>
+      ${statusHtml || `<p class="pay-note">Płatność Paynow utworzona dla zamówienia <b>${esc(nr)}</b>.</p>`}
+      ${paymentId?`<div class="diag-actions" style="margin-top:.45rem"><button class="btn ghost" type="button" onclick="odswiezStatusPaynow(${jsArg(nr)},${jsArg(paymentId)})">🔄 Sprawdź status Paynow</button></div>`:""}
+    </div>`;
+  }
+  return `<div class="pay-note" style="font-size:.95rem;text-align:left">💳 <b>mBank Paynow</b><br>Brama jest wybrana, ale link płatności nie został jeszcze utworzony. Jeżeli zamówienie już istnieje, odśwież status albo sprawdź konfigurację Paynow w panelu admina.<br><b>Numer zamówienia:</b> ${esc(nr)} • <b>Kwota:</b> ${kw}</div>`;
+}
+async function utworzPlatnoscPaynow(zamowienie){
+  if(!zamowienie || zamowienie.platnoscId!=="paynow") return {ok:false, skipped:true};
+  try{
+    toast("Tworzę płatność Paynow…");
+    const d = await chmura("paynow-create",{method:"POST",body:{order:zamowienie},timeout:18000});
+    zamowienie.paynow = {...paynowDane(zamowienie), ...(d.paynow||{}), paymentId:d.paymentId||d.paynow?.paymentId||paynowDane(zamowienie).paymentId||"", status:d.status||d.paynow?.status||"", redirectUrl:d.redirectUrl||d.paynow?.redirectUrl||""};
+    zamowienie.platnoscStatus = d.paymentStatus || paynowStatusTekst(zamowienie.paynow.status);
+    zapiszZamowienie(zamowienie);
+    loguj("info",`Paynow: utworzono płatność ${zamowienie.paynow.paymentId||""} dla ${zamowienie.nr}`);
+    return d;
+  }catch(e){
+    loguj("blad",`Paynow: nie udało się utworzyć płatności dla ${zamowienie.nr}: ${e.message}`);
+    return {ok:false,error:e.message,code:e.code||""};
+  }
+}
+async function odswiezStatusPaynow(nr,paymentId=""){
+  try{
+    toast("Sprawdzam status Paynow…");
+    const d = await chmura("paynow-status",{params:{nr,paymentId},timeout:15000});
+    const lista=pobierzZamowienia(), i=lista.findIndex(z=>z.nr===nr);
+    if(i>=0 && d.order){
+      lista[i]={...lista[i],...d.order,paynow:{...paynowDane(lista[i]),...(d.order.paynow||{})},platnoscStatus:d.paymentStatus||d.order.platnoscStatus||lista[i].platnoscStatus};
+      zapiszLS("artway_zamowienia",lista);
+    }
+    toast("Paynow: "+paynowStatusTekst(d.status));
+    renderuj();
+  }catch(e){
+    toast("Paynow: "+e.message);
+    loguj("blad","Paynow status: "+e.message);
+  }
+}
+function instrukcjaPlatnosciHTML(id, nr, kwota, zam=null){
   const kw = typeof kwota==="number" ? zl(kwota) : esc(kwota||"");
   if(id==="pobranie") return `<div class="pay-note" style="font-size:.95rem">💵 <b>Zapłacisz ${kw} przy odbiorze</b> — kurierowi lub w paczkomacie. Nic więcej nie musisz robić.</div>`;
   if(id==="telefon"){
@@ -1041,9 +1107,7 @@ function instrukcjaPlatnosciHTML(id, nr, kwota){
     </div>`;
   }
   if(id==="paynow"){
-    return KONFIG.linkPlatnosci
-      ? `<a href="${esc(KONFIG.linkPlatnosci)}" target="_blank" rel="noopener" class="checkout-btn" style="display:block;text-decoration:none;text-align:center;background:var(--ok)">💳 Zapłać przez mBank Paynow ${kw}</a><p class="pay-note">W opisie płatności podaj numer zamówienia <b>${esc(nr)}</b>.</p>`
-      : `<div class="pay-note" style="font-size:.95rem">💳 <b>Wybrano mBank Paynow</b><br>Brama Paynow jest widoczna jako metoda płatności. Po wklejeniu linku/panelu Paynow w ustawieniach pojawi się przycisk szybkiej płatności. Numer zamówienia: <b>${esc(nr)}</b>, kwota: <b>${kw}</b>.</div>`;
+    return instrukcjaPaynowHTML(nr, kwota, zam);
   }
   return `<p class="pay-note">Płatność: <b>${kw}</b>. Numer zamówienia: <b>${esc(nr)}</b>.</p>`;
 }
@@ -1309,7 +1373,9 @@ async function zmienHaslo(e){
 function pobierzZamowienia(){ return filtrujAktywneZamowienia(wczytajLS("artway_zamowienia", [])); }
 function zapiszZamowienie(z){
   if(czyZamowienieUsuniete(z?.nr)){ loguj("ostrzezenie","Pominięto zapis wcześniej usuniętego zlecenia "+(z?.nr||"")); return false; }
-  const t=pobierzZamowienia(); t.unshift(z); zapiszLS("artway_zamowienia", t); return true;
+  const t=pobierzZamowienia(); const i=t.findIndex(x=>x.nr===z.nr);
+  if(i>=0) t[i]={...t[i],...z}; else t.unshift(z);
+  zapiszLS("artway_zamowienia", t); return true;
 }
 
 /* ═══════════ USTAWIENIA SKLEPU (panel admina → Ustawienia) ═══════════
@@ -2187,7 +2253,7 @@ function szczegolyZamowieniaKlientaHTML(z){
     <h3 class="f-sekcja">🧾 Produkty</h3>
     ${pozycjeZamowieniaKlientaHTML(z)}
     <h3 class="f-sekcja">💳 Instrukcja płatności</h3>
-    ${instrukcjaPlatnosciHTML(platId, z.nr, razem)}
+    ${instrukcjaPlatnosciHTML(platId, z.nr, razem, z)}
     <h3 class="f-sekcja">📦 Śledzenie realizacji</h3>
     ${trackingKlientaHTML(z)}
   </details>`;
@@ -3300,6 +3366,7 @@ function widokAdminZamowienie(nr){
   const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&stanBramki.authenticated;
   const przewoznik=w.przewoznik||przewoznikDlaZamowienia(z);
   const uslugi=PRZEWOZNICY[przewoznik]?.uslugi||[];
+  const paynow=paynowDane(z);
   return adminSzkielet("/admin/zamowienia", `
   <div class="panel">
     <div class="crumb"><a href="#/admin/zamowienia">Zamówienia</a> › ${esc(z.nr)}</div>
@@ -3311,7 +3378,8 @@ function widokAdminZamowienie(nr){
         <div class="summary" style="margin:.5rem 0 1rem">${z.pozycje.map(p=>`<div><span>${esc(p)}</span></div>`).join("")}
           <div class="sum-total"><span>Razem</span><span>${zl(z.razem)}</span></div></div>
         <h2>Dostawa i płatność</h2>
-        <p>🚚 ${esc(z.dostawa||"—")}<br>💳 ${esc(z.platnosc||"—")}<br>📍 ${esc(z.adres||"—")}${z.paczkomat?`<br>📮 Punkt: <b>${esc(z.paczkomat)}</b>`:""}</p>
+        <p>🚚 ${esc(z.dostawa||"—")}<br>💳 ${esc(z.platnosc||"—")}${z.platnoscId==="paynow"?`<br>Paynow: <b style="color:${paynowKolorStatusu(paynow.status)}">${esc(paynowStatusTekst(paynow.status))}</b>${paynow.paymentId?` • <code>${esc(paynow.paymentId)}</code>`:""}`:""}<br>📍 ${esc(z.adres||"—")}${z.paczkomat?`<br>📮 Punkt: <b>${esc(z.paczkomat)}</b>`:""}</p>
+        ${z.platnoscId==="paynow"?`<div class="diag-actions"><button class="btn ghost" type="button" onclick="odswiezStatusPaynow(${jsArg(z.nr)},${jsArg(paynow.paymentId||"")})">🔄 Odśwież Paynow</button>${paynow.redirectUrl?`<a class="btn" href="${esc(paynow.redirectUrl)}" target="_blank" rel="noopener">Otwórz link płatności</a>`:""}</div>`:""}
       </div>
       <div class="ship-card">
         <h2 style="margin-top:0">Klient</h2>
@@ -4938,6 +5006,72 @@ function zmienKod(kod, procent){
 }
 
 /* ── Dostawa i płatności ── */
+let stanPaynowAdmin={sprawdzono:false,configured:false,env:"production",continueUrl:"",notificationUrl:"",apiBaseUrl:"",error:""};
+function domyslneUrlePaynow(){
+  return {notificationUrl:`${location.origin}/api/store?action=paynow-notification`, continueUrl:`${location.origin}/#/zamowienia`};
+}
+function paynowStatusAdminHTML(){
+  const s=stanPaynowAdmin;
+  if(!s.sprawdzono) return `<div class="pay-note" style="text-align:left">Kliknij „Sprawdź konfigurację Paynow”, aby zobaczyć czy Netlify ma ustawione klucze API.</div>`;
+  if(s.error) return `<div class="pay-note" style="text-align:left;color:var(--danger)">Błąd sprawdzania Paynow: ${esc(s.error)}</div>`;
+  return `<div class="backend-note" style="${s.configured?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
+    <b>${s.configured?"Paynow API skonfigurowane ✅":"Paynow API nie ma jeszcze kluczy na serwerze"}</b><br>
+    Środowisko: <code>${esc(s.env||"production")}</code>${s.apiBaseUrl?` • API: <code>${esc(s.apiBaseUrl)}</code>`:""}<br>
+    ${s.configured?"Klient po wybraniu Paynow dostanie automatyczny link płatności, a webhook zaktualizuje status zamówienia.":"Ustaw w Netlify zmienne PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY, potem zrób redeploy."}
+  </div>`;
+}
+function paynowPanelAdminHTML(){
+  const urls=domyslneUrlePaynow();
+  return `<div class="panel">
+    <h2 style="margin-top:0">💳 mBank Paynow API</h2>
+    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">To jest prawdziwa integracja API. Sekrety muszą być w Netlify Environment Variables, nie w HTML ani localStorage.</p>
+    ${paynowStatusAdminHTML()}
+    <div class="f-row" style="grid-template-columns:1fr 1fr;margin-top:1rem">
+      <div class="f-group"><label>URL powiadomień / webhook Paynow</label><input readonly value="${esc(stanPaynowAdmin.notificationUrl||urls.notificationUrl)}" onclick="this.select()"></div>
+      <div class="f-group"><label>URL powrotu klienta po płatności</label><input readonly value="${esc(stanPaynowAdmin.continueUrl||urls.continueUrl)}" onclick="this.select()"></div>
+    </div>
+    <table class="log-table" style="margin-top:.7rem">
+      <tr><th>Zmienna Netlify</th><th>Co wpisać</th></tr>
+      <tr><td><code>PAYNOW_API_KEY</code></td><td>Api-Key z panelu Paynow: Settings → Shops and poses → Authentication</td></tr>
+      <tr><td><code>PAYNOW_SIGNATURE_KEY</code></td><td>Signature-Key z tego samego miejsca</td></tr>
+      <tr><td><code>PAYNOW_ENV</code></td><td><code>production</code> dla prawdziwej sprzedaży albo <code>sandbox</code> do testów</td></tr>
+      <tr><td><code>PAYNOW_CONTINUE_URL</code></td><td>Opcjonalnie: własny URL powrotu; domyślnie <code>${esc(urls.continueUrl)}</code></td></tr>
+      <tr><td><code>PAYNOW_NOTIFICATION_URL</code></td><td>Opcjonalnie: własny webhook; domyślnie <code>${esc(urls.notificationUrl)}</code></td></tr>
+    </table>
+    <div class="diag-actions" style="margin-top:.9rem">
+      <button class="btn" type="button" onclick="sprawdzPaynowKonfiguracje()">🔎 Sprawdź konfigurację Paynow</button>
+      <button class="btn ghost" type="button" onclick="ustawUrlePaynow()">🔗 Ustaw URL-e w Paynow przez API</button>
+      <a class="btn ghost" href="https://docs.paynow.pl/docs/v3/integration" target="_blank" rel="noopener">Dokumentacja Paynow</a>
+    </div>
+    <p class="pay-note" style="text-align:left;margin-top:.8rem">Po ustawieniu zmiennych w Netlify wykonaj redeploy. Dopiero wtedy przycisk „Sprawdź konfigurację” pokaże zielony status.</p>
+  </div>`;
+}
+async function sprawdzPaynowKonfiguracje(){
+  try{
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:""};
+    const d=await chmura("paynow-config",{timeout:10000});
+    stanPaynowAdmin={sprawdzono:true,configured:!!d.configured,env:d.env||"",continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:d.apiBaseUrl||"",error:""};
+    toast(d.configured?"Paynow API skonfigurowane ✅":"Brak kluczy Paynow w Netlify");
+  }catch(e){
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:e.message};
+    toast("Paynow: "+e.message);
+  }
+  renderuj();
+}
+async function ustawUrlePaynow(){
+  if(!chmuraToken){ chmuraUstawToken(); return; }
+  try{
+    toast("Ustawiam URL-e Paynow…");
+    const d=await chmura("paynow-configure-urls",{method:"POST",body:domyslneUrlePaynow(),timeout:18000});
+    stanPaynowAdmin={sprawdzono:true,configured:true,env:d.env||stanPaynowAdmin.env,continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:stanPaynowAdmin.apiBaseUrl,error:""};
+    toast("URL-e Paynow ustawione ✅");
+  }catch(e){
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:e.message};
+    toast("Nie ustawiono URL-i Paynow: "+e.message);
+    loguj("blad","Paynow configure urls: "+e.message);
+  }
+  renderuj();
+}
 function widokAdminDostawy(){
   KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
   const pobranie = KONFIG.platnosci.find(p=>p.id==="pobranie"), paynow = KONFIG.platnosci.find(p=>p.id==="paynow"), telefon = KONFIG.platnosci.find(p=>p.id==="telefon");
@@ -4954,7 +5088,7 @@ function widokAdminDostawy(){
       </div>
       <div class="f-group" style="max-width:320px"><label>Deklarowany czas wysyłki — zmienia się wszędzie</label><input name="czasWysylki" value="${esc(czasWysylki())}" placeholder="np. 24 h, 48 h, 2 dni robocze"></div>
       <h3 class="f-sekcja">💳 Płatności i bramka</h3>
-      <div class="f-group"><label>Link bramki mBank Paynow (opcjonalnie — po aktywacji konta Paynow)</label>
+      <div class="f-group"><label>Awaryjny ręczny link mBank Paynow (opcjonalnie — gdy API nie jest jeszcze skonfigurowane)</label>
         <input name="linkPlatnosci" placeholder="https://paynow.pl/… albo link płatności z panelu" value="${esc(KONFIG.linkPlatnosci)}"></div>
       <div class="f-group" style="max-width:260px"><label>Numer do przelewu na telefon</label>
         <input name="numerPrzelewuTelefon" inputmode="tel" value="${esc(formatTelefonPlatnosci())}"></div>
@@ -4968,10 +5102,11 @@ function widokAdminDostawy(){
         <button class="btn" type="submit">💾 Zapisz</button>
         <button class="btn danger" type="button" onclick="resetujUstawienia()">↩️ Przywróć wszystkie domyślne</button>
       </div>
-    </form>
-  </div>
-  <div class="panel">
-    <h2 style="margin-top:0">➕ Dodatkowa metoda dostawy</h2>
+	    </form>
+	  </div>
+	  ${paynowPanelAdminHTML()}
+	  <div class="panel">
+	    <h2 style="margin-top:0">➕ Dodatkowa metoda dostawy</h2>
     <form onsubmit="dodajMetodeDostawy(event)">
       <div class="f-row admin-four">
         <div class="f-group"><label>Nazwa</label><input required name="nazwa" placeholder="np. Kurier ekspresowy"></div>
@@ -6275,6 +6410,10 @@ Uwagi: ${f.get("notes")||"brak"}`;
     };
     zapiszZamowienie(noweZamowienie);
     const zapisanoCentralnie=await zapiszZamowienieCentralnie(noweZamowienie,true);
+    let paynowWynik=null;
+    if(idP==="paynow"){
+      paynowWynik = await utworzPlatnoscPaynow(noweZamowienie);
+    }
     if(zapisanoCentralnie&&sesja) await pobierzMojeZamowieniaCentralne(true);
     if(!zapisanoCentralnie){
       toast("⚠️ Zamówienie zapisano lokalnie, ale serwer jest niedostępny");
@@ -6286,15 +6425,19 @@ Uwagi: ${f.get("notes")||"brak"}`;
     }
     loguj("info",`Złożono zamówienie ${nr} na ${zl(razem)} (${dost.nazwa}, ${plat.nazwa})`);
 
-    const infoPlatnosci = instrukcjaPlatnosciHTML(idP,nr,razem);
+    const infoPlatnosci = instrukcjaPlatnosciHTML(idP,nr,razem,noweZamowienie);
+    const bladPaynow = idP==="paynow" && paynowWynik && paynowWynik.ok===false && !paynowWynik.skipped
+      ? `<p class="pay-note" style="color:var(--danger);text-align:left">Paynow nie utworzył linku automatycznie: ${esc(paynowWynik.error||"brak konfiguracji")}. Zamówienie zostało zapisane — po uzupełnieniu konfiguracji można odświeżyć płatność w panelu.</p>` : "";
+    const trescMaila = `${tresc}${noweZamowienie.paynow?.redirectUrl ? `\nLink Paynow: ${noweZamowienie.paynow.redirectUrl}` : ""}`;
 
-    const mailto = `mailto:${KONFIG.emailSklepu}?subject=${encodeURIComponent("Zamówienie "+nr)}&body=${encodeURIComponent(tresc)}`;
+    const mailto = `mailto:${KONFIG.emailSklepu}?subject=${encodeURIComponent("Zamówienie "+nr)}&body=${encodeURIComponent(trescMaila)}`;
     $("modalBox").innerHTML = `<div class="success">
       <div class="big">✅</div>
       <h2>Dziękujemy za zamówienie!</h2>
       <p class="sub">Numer zamówienia: <b>${nr}</b> • Kwota: <b>${zl(razem)}</b><br>${esc(dost.nazwa)} • ${esc(plat.nazwa)}</p>
       <p class="pay-note" style="${zapisanoCentralnie?"color:var(--ok)":"color:var(--danger)"}">${zapisanoCentralnie?"☁️ Zamówienie zapisano we wspólnej bazie sklepu.":"⚠️ Brak połączenia z serwerem — zamówienie czeka na synchronizację."}</p>
       <a href="${mailto}" class="checkout-btn" style="display:block;text-decoration:none;text-align:center;margin-bottom:.7rem">📧 Wyślij potwierdzenie zamówienia</a>
+      ${bladPaynow}
       ${infoPlatnosci}
       <p class="pay-note" style="margin-top:1rem"><a href="#/zamowienia" onclick="document.getElementById('modal').classList.remove('open')" style="color:var(--brand)">Zobacz swoje zamówienia →</a></p>
     </div>`;
