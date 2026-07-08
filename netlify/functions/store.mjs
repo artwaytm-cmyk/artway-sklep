@@ -947,7 +947,8 @@ function inpostPublicConfig() {
     missingEnv: c.missingEnv,
     requiredEnv: ['INPOST_TOKEN', 'INPOST_ORG_ID'],
     services: { locker: c.lockerService, courier: c.courierService },
-    optionalEnv: ['INPOST_GEOWIDGET_TOKEN', 'INPOST_ENV=production', 'INPOST_SENDING_METHOD=dispatch_order', 'INPOST_LOCKER_SERVICE', 'INPOST_COURIER_SERVICE'],
+    webhookConfigured: !!tekst(process.env.INPOST_WEBHOOK_SECRET || '', 300).trim(),
+    optionalEnv: ['INPOST_GEOWIDGET_TOKEN', 'INPOST_WEBHOOK_SECRET', 'INPOST_ENV=production', 'INPOST_SENDING_METHOD=dispatch_order', 'INPOST_LOCKER_SERVICE', 'INPOST_COURIER_SERVICE'],
   };
 }
 async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'application/json' } = {}) {
@@ -1133,6 +1134,170 @@ function przesylkaShipXPayload(z, c, walidacja = null) {
 }
 function numerZShipX(s) {
   return tekst(s?.tracking_number || s?.trackingNumber || '', 120).trim();
+}
+function inpostWebhookSecret() {
+  return tekst(process.env.INPOST_WEBHOOK_SECRET || '', 300).trim();
+}
+function inpostWebhookAutoryzowany(req, url) {
+  const secret = inpostWebhookSecret();
+  if (!secret) return false;
+  const podane = tekst(
+    req.headers.get('x-inpost-webhook-secret')
+    || req.headers.get('x-webhook-secret')
+    || req.headers.get('x-artway-webhook-token')
+    || url.searchParams.get('token')
+    || url.searchParams.get('secret')
+    || '',
+    500,
+  ).trim();
+  return !!podane && bezpiecznePorownanie(podane, secret);
+}
+function pierwszePole(obj, klucze, maxDepth = 6) {
+  if (!obj || maxDepth < 0) return '';
+  if (Array.isArray(obj)) {
+    for (const x of obj) {
+      const v = pierwszePole(x, klucze, maxDepth - 1);
+      if (v) return v;
+    }
+    return '';
+  }
+  if (typeof obj !== 'object') return '';
+  for (const k of klucze) {
+    if (obj[k] != null && typeof obj[k] !== 'object') return tekst(obj[k], 500).trim();
+  }
+  for (const v of Object.values(obj)) {
+    const r = pierwszePole(v, klucze, maxDepth - 1);
+    if (r) return r;
+  }
+  return '';
+}
+function inpostZdarzeniaZWebhooka(payload) {
+  const zrodla = [];
+  const dodaj = (x) => { if (x && typeof x === 'object') zrodla.push(x); };
+  dodaj(payload);
+  if (Array.isArray(payload)) payload.forEach(dodaj);
+  if (Array.isArray(payload?.shipments)) payload.shipments.forEach(dodaj);
+  if (Array.isArray(payload?.data)) payload.data.forEach(dodaj);
+  dodaj(payload?.shipment);
+  dodaj(payload?.parcel);
+  dodaj(payload?.data);
+  const seen = new Set();
+  return zrodla.filter((x) => {
+    const key = JSON.stringify(x).slice(0, 1000);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 10);
+}
+function inpostDaneZWebhooka(obj, shipment = null) {
+  const src = shipment || obj || {};
+  const id = tekst(
+    src?.id || src?.shipment_id || src?.shipmentId || pierwszePole(obj, ['shipment_id', 'shipmentId', 'shipmentID']),
+    80,
+  ).trim();
+  const tracking = numerZShipX(src) || pierwszePole(obj, ['tracking_number', 'trackingNumber', 'tracking', 'number', 'trackingNo']);
+  const status = tekst(src?.status || pierwszePole(obj, ['status', 'shipment_status', 'shipmentStatus', 'event', 'event_type', 'eventType']), 120).trim();
+  const reference = tekst(
+    src?.reference
+    || src?.external_customer_id
+    || src?.externalCustomerId
+    || src?.custom_attributes?.reference
+    || pierwszePole(obj, ['reference', 'external_customer_id', 'externalCustomerId', 'order_number', 'orderNumber', 'order_id', 'orderId']),
+    200,
+  ).trim();
+  const occurredAt = tekst(
+    src?.updated_at || src?.created_at || src?.timestamp || src?.event_time || src?.eventTime
+    || pierwszePole(obj, ['updated_at', 'created_at', 'timestamp', 'event_time', 'eventTime', 'datetime']),
+    120,
+  ).trim();
+  return { id, tracking, status, reference, occurredAt };
+}
+function numerZReferencji(reference, items = []) {
+  const ref = tekst(reference, 500).trim();
+  if (!ref) return '';
+  const m = ref.match(/ATM-\d{4,}/i);
+  if (m) return m[0].toUpperCase();
+  const lower = ref.toLowerCase();
+  const znalezione = items.find((z) => z?.nr && lower.includes(String(z.nr).toLowerCase()));
+  return znalezione?.nr || '';
+}
+function etapZInpostStatus(status) {
+  const s = String(status || '').toLowerCase();
+  if (!s) return {};
+  if (s.includes('delivered')) return { etap: 'dostarczona', statusZamowienia: 'dostarczone' };
+  if (s.includes('ready_to_pickup') || s.includes('out_for_delivery')) return { etap: 'doreczenie', statusZamowienia: 'w doręczeniu' };
+  if (s.includes('returned') || s.includes('return_to') || s.includes('return to') || s.includes('rejected_by_receiver')) return { etap: 'zwrot', statusZamowienia: 'zwrot' };
+  if (s.includes('canceled') || s.includes('cancelled')) return { etap: 'anulowana', statusZamowienia: 'anulowane' };
+  if (s.includes('undelivered') || s.includes('avizo') || s.includes('delay') || s.includes('missing') || s.includes('damaged')) return { etap: 'problem', blad: status };
+  if (s.includes('adopted') || s.includes('sent_from') || s.includes('collected') || s.includes('dispatched') || s.includes('confirmed')) return { etap: 'transport', statusZamowienia: 'nadane' };
+  if (s.includes('created') || s.includes('offer') || s.includes('prepared')) return { etap: 'przygotowanie' };
+  return {};
+}
+function znajdzZamowienieInpost(items, dane) {
+  const nr = numerZReferencji(dane.reference, items);
+  if (nr) return items.find((z) => z.nr === nr) || null;
+  const id = tekst(dane.id, 80).trim();
+  const tracking = tekst(dane.tracking, 120).trim();
+  if (id) {
+    const poId = items.find((z) => tekst(z?.wysylka?.inpostId, 80).trim() === id);
+    if (poId) return poId;
+  }
+  if (tracking) {
+    const poNumerze = items.find((z) => tekst(z?.wysylka?.numer, 120).trim() === tracking);
+    if (poNumerze) return poNumerze;
+  }
+  return null;
+}
+async function zapiszLogInpostWebhook(wpis) {
+  const rec = await czytaj('inpost_webhooks', { items: [] });
+  const items = Array.isArray(rec.items) ? rec.items : [];
+  items.push({ czas: new Date().toISOString(), ...wpis });
+  await zapisz('inpost_webhooks', { items: items.slice(-200), updated_at: new Date().toISOString() });
+}
+async function zastosujWebhookInpost(dane) {
+  const rec = await czytaj('orders', { items: [] });
+  const items = Array.isArray(rec.items) ? rec.items : [];
+  const znalezione = znajdzZamowienieInpost(items, dane);
+  if (!znalezione) {
+    await zapiszLogInpostWebhook({ matched: false, id: dane.id, tracking: dane.tracking, status: dane.status, reference: dane.reference });
+    return { matched: false, id: !!dane.id, tracking: !!dane.tracking, reference: !!dane.reference, status: dane.status || '' };
+  }
+  const idx = items.findIndex((x) => x.nr === znalezione.nr);
+  const stary = items[idx];
+  const nowy = { ...stary };
+  const w = { ...(nowy.wysylka || {}) };
+  const statusInfo = etapZInpostStatus(dane.status);
+  const teraz = new Date().toLocaleString('pl-PL');
+  const czas = dane.occurredAt ? new Date(dane.occurredAt).toLocaleString('pl-PL') : teraz;
+  const opis = `${dane.id ? `ID ${dane.id}` : ''}${dane.tracking ? `${dane.id ? ' • ' : ''}${dane.tracking}` : ''}${dane.reference ? ` • ref: ${dane.reference}` : ''}`;
+  const historia = Array.isArray(w.historia) ? w.historia.slice() : [];
+  const istnieje = historia.some((h) => h.status === `InPost: ${dane.status || 'aktualizacja'}` && String(h.opis || '').includes(dane.tracking || dane.id || dane.reference || ''));
+  if (!istnieje) historia.push({ czas, status: `InPost: ${dane.status || 'aktualizacja'}`, opis: opis || 'Zdarzenie z webhooka InPost', zrodlo: 'inpost-webhook' });
+  w.przewoznik = 'inpost';
+  if (dane.id) w.inpostId = dane.id;
+  if (dane.status) w.inpostStatus = dane.status;
+  if (dane.tracking) w.numer = dane.tracking;
+  if (statusInfo.etap) w.etap = statusInfo.etap;
+  if (statusInfo.blad) w.bladIntegracji = statusInfo.blad;
+  else if (w.bladIntegracji && statusInfo.etap && statusInfo.etap !== 'problem') w.bladIntegracji = '';
+  w.ostatniaSynchronizacja = new Date().toISOString();
+  w.zaktualizowano = new Date().toISOString();
+  w.historia = historia;
+  w.zadania = {
+    ...(w.zadania || {}),
+    dane: true,
+    etykieta: !!(w.inpostId || w.numer),
+    przekazanie: ['transport', 'doreczenie', 'dostarczona'].includes(w.etap) || !!w.zadania?.przekazanie,
+  };
+  nowy.wysylka = w;
+  if (statusInfo.statusZamowienia) nowy.status = statusInfo.statusZamowienia;
+  else if (dane.tracking && ['nowe', 'potwierdzone', 'w realizacji'].includes(nowy.status)) nowy.status = 'gotowe do wysyłki';
+  items[idx] = nowy;
+  await zapisz('orders', { items, updated_at: new Date().toISOString() });
+  let email = null;
+  try { email = await obsluzEmailePrzejsciaStatusu(stary, nowy); } catch (e) { email = { sent: false, error: e.message }; }
+  await zapiszLogInpostWebhook({ matched: true, nr: nowy.nr, id: dane.id, tracking: dane.tracking, status: dane.status, reference: dane.reference });
+  return { matched: true, nr: nowy.nr, tracking: w.numer || '', status: w.inpostStatus || '', etap: w.etap || '', email };
 }
 async function zapiszPrzesylkeNaZamowieniu(nr, patch) {
   const rec = await czytaj('orders', { items: [] });
@@ -1456,6 +1621,36 @@ export default async (req) => {
     // ─── INPOST: konfiguracja (publiczny token Geowidget + status) ───
     if (action === 'inpost-config') {
       return odpowiedz({ ok: true, inpost: inpostPublicConfig() });
+    }
+
+    // ─── INPOST: webhook z Managera Paczek / ShipX → obsługa zleceń i tracking ───
+    if (action === 'inpost-webhook') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!inpostWebhookSecret()) return odpowiedz({ ok: false, error: 'Brak INPOST_WEBHOOK_SECRET w Netlify.', code: 'webhook_not_configured' }, 503);
+      if (!inpostWebhookAutoryzowany(req, url)) return odpowiedz({ ok: false, error: 'Nieprawidłowy token webhooka', code: 'auth' }, 401);
+      const rawBody = await req.text();
+      let payload = {};
+      try { payload = JSON.parse(rawBody || '{}'); } catch (e) { return odpowiedz({ ok: false, error: 'Webhook InPost nie przesłał poprawnego JSON', code: 'invalid_json' }, 400); }
+      const c = inpostKonfiguracja();
+      const wyniki = [];
+      for (const event of inpostZdarzeniaZWebhooka(payload)) {
+        let dane = inpostDaneZWebhooka(event);
+        let shipment = null;
+        if (c.configured && dane.id) {
+          try {
+            shipment = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(dane.id)}`, { method: 'GET' });
+            dane = inpostDaneZWebhooka(event, shipment);
+          } catch (e) {
+            // Sam webhook nadal zapisujemy — pełne dane ShipX mogą być chwilowo niedostępne.
+          }
+        }
+        if (!dane.id && !dane.tracking && !dane.reference && !dane.status) continue;
+        wyniki.push(await zastosujWebhookInpost(dane));
+      }
+      if (!wyniki.length) {
+        await zapiszLogInpostWebhook({ matched: false, status: 'empty_payload' });
+      }
+      return odpowiedz({ ok: true, accepted: true, processed: wyniki.length, results: wyniki }, 202);
     }
 
     // ─── INPOST: realny test tokenu i organizacji ShipX (admin) ───

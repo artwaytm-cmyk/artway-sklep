@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.08.3">
+<meta name="artway-version" content="2026.07.08.4">
 <title>Artway-TM — Sklep internetowy</title>
 <meta name="description" content="Artway-TM — sklep wielobranżowy. Elektronika, dom i ogród, narzędzia, odzież, sport. Szybka dostawa, mBank Paynow i przelew na telefon.">
 <link id="faviconLink" rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="14" fill="%232563eb"/%3E%3Ctext x="32" y="42" text-anchor="middle" font-size="30" font-family="Arial" font-weight="700" fill="white"%3EA%3C/text%3E%3C/svg%3E'>
@@ -3347,7 +3347,7 @@ function panelTrackinguWysylek(){
         <td class="${sla.klasa}">${esc(sla.tekst)}${w.ostatniaSynchronizacja?`<br><small>synch. ${esc(new Date(w.ostatniaSynchronizacja).toLocaleString("pl-PL"))}</small>`:""}</td>
         <td>${urlSledzenia(z)?`<a href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">Śledź →</a>`:`<a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">Uzupełnij →</a>`}</td>
       </tr>`}).join("")}</table>`:"<p>Brak przesyłek objętych monitoringiem.</p>"}
-    <div class="backend-note"><b>Po podłączeniu backendu:</b> webhooki wszystkich przewoźników zostaną przetłumaczone na powyższe wspólne etapy, a wyjątki automatycznie trafią do kolejki „Wymaga reakcji”.</div>
+    <div class="backend-note"><b>Automatyzacja:</b> webhook InPost aktualizuje tę tabelę po zmianie statusu przesyłki. Jeśli etykieta jest tworzona ręcznie w InPost Managerze, w polu referencji/opisu wpisz numer zamówienia ze sklepu, np. <code>ATM-123456</code>.</div>
   </div>`;
 }
 function panelAutomatyzacjiWysylek(){
@@ -3386,7 +3386,7 @@ function panelAutomatyzacjiWysylek(){
 function panelUstawienBramki(){
   const u=ustawieniaWysylki();
   const ip=stanBramki.inpost||{};
-  const ipGotowy=!!ip.configured, ipMapa=!!ip.geowidgetConfigured;
+  const ipGotowy=!!ip.configured, ipMapa=!!ip.geowidgetConfigured, ipWebhook=!!ip.webhookConfigured;
   const av=ip.serviceAvailability||{};
   const braki=Array.isArray(ip.missingEnv)&&ip.missingEnv.length?ip.missingEnv:[...(ipGotowy?[]:["INPOST_TOKEN","INPOST_ORG_ID"])];
   const orgInfo=ip.organization?.id?`Organizacja: <b>${esc(ip.organization.id)}</b>${ip.organization.name?` • ${esc(ip.organization.name)}`:""}`:"Organizacja zostanie pokazana po realnym teście API.";
@@ -3396,13 +3396,13 @@ function panelUstawienBramki(){
     <div class="integration-hub" style="border:2px solid ${ipGotowy?'#86efac':'#fcd34d'};background:${ipGotowy?'#f0fdf4':'#fffbeb'}">
       <div class="integration-hub-status"><span><b>🟡 InPost (ShipX) — Netlify</b><br><small style="color:var(--muted2)">Prawdziwe przesyłki, etykiety i mapa paczkomatów — tokeny w zmiennych Netlify</small></span>
         <span class="integration-state" style="background:${ipGotowy?'#dcfce7':'#fef3c7'};color:${ipGotowy?'#166534':'#854d0e'}">${ipGotowy?`tokeny obecne • ${esc(ip.env||'production')}`:`brakuje: ${esc(braki.join(", "))}`}</span></div>
-      <p class="ship-meta">Przesyłki ShipX: <b>${ipGotowy?"aktywne po pozytywnym teście ✅":"uzupełnij brakujące zmienne Netlify"}</b> &nbsp;•&nbsp; Mapa paczkomatów (Geowidget) u klienta: <b>${ipMapa?"aktywna ✅":"ustaw INPOST_GEOWIDGET_TOKEN"}</b><br>${orgInfo}${uslugiInfo}</p>
+      <p class="ship-meta">Przesyłki ShipX: <b>${ipGotowy?"aktywne po pozytywnym teście ✅":"uzupełnij brakujące zmienne Netlify"}</b> &nbsp;•&nbsp; Mapa paczkomatów: <b>${ipMapa?"aktywna ✅":"ustaw INPOST_GEOWIDGET_TOKEN"}</b> &nbsp;•&nbsp; Webhook statusów: <b>${ipWebhook?"aktywny ✅":"ustaw INPOST_WEBHOOK_SECRET i dodaj URL w InPost"}</b><br>${orgInfo}${uslugiInfo}</p>
       <div class="diag-actions">
         <button class="btn ghost" onclick="sprawdzBramke()">🔎 Sprawdź Netlify</button>
         <button class="btn" style="background:#ffcc00;color:#111" onclick="testujInPost()">🟡 Test API InPost</button>
       </div>
       ${stanBramki.error?`<div class="backend-note" style="border-color:var(--danger);background:#fff1f2;color:#991b1b"><b>Błąd połączenia:</b> ${esc(stanBramki.error)}</div>`:""}
-      <div class="backend-note" style="margin-top:.6rem"><b>Wymagane dla etykiet:</b> <code>INPOST_TOKEN</code> (token API ShipX) i <code>INPOST_ORG_ID</code> (Organization ID). <b>Dla mapy paczkomatów:</b> <code>INPOST_GEOWIDGET_TOKEN</code>. Opcjonalnie: <code>INPOST_ENV=production</code>, <code>INPOST_SENDING_METHOD=dispatch_order</code>, <code>INPOST_LOCKER_SERVICE</code>, <code>INPOST_COURIER_SERVICE</code>. Dane generuje się w <b>manager.paczkomaty.pl → Moje konto → API</b>; usługi kurierskie muszą być aktywne na koncie InPost.</div>
+      <div class="backend-note" style="margin-top:.6rem"><b>Wymagane dla etykiet:</b> <code>INPOST_TOKEN</code> i <code>INPOST_ORG_ID</code>. <b>Dla mapy:</b> <code>INPOST_GEOWIDGET_TOKEN</code>. <b>Dla automatycznego śledzenia z Managera:</b> <code>INPOST_WEBHOOK_SECRET</code> oraz adres webhooka wpisany w InPost API. Opcjonalnie: <code>INPOST_ENV</code>, <code>INPOST_SENDING_METHOD</code>, <code>INPOST_LOCKER_SERVICE</code>, <code>INPOST_COURIER_SERVICE</code>. Przy ręcznie tworzonych etykietach wpisuj w InPost numer zamówienia w referencji, np. <code>ATM-123456</code>.</div>
       <details style="margin-top:.6rem"><summary style="cursor:pointer;font-weight:700">Awaryjny/stary backend PHP na hostingu</summary>
         <p class="ship-meta">Główna integracja działa przez Netlify Functions. Ten adres zostaje tylko jako informacja dla pierwszej instalacji na nazwa.pl albo awaryjnego hostingu bez Netlify: <code>${esc(u.apiEndpoint)}</code>.</p>
       </details>
@@ -3585,6 +3585,7 @@ function widokAdminZamowienie(nr){
     <h2 style="margin-top:0">🚚 Przesyłka i numer nadania</h2>
     <p><span class="lvl" style="background:${ETAPY_WYSYLKI[etapWysylki(z)].kolor};font-size:.82rem">${esc(nazwaEtapu(z))}</span> <span class="${slaWysylki(z).klasa}" style="margin-left:.4rem">⏱ ${esc(slaWysylki(z).tekst)}</span></p>
     <div class="backend-note">Przycisk etykiety roboczej tworzy dokument pomocniczy do kompletacji. Oficjalną etykietę z kodem przewoźnika może wystawić wyłącznie jego API po bezpiecznym połączeniu backendowym.</div>
+    ${przewoznik==="inpost"?`<div class="backend-note" style="border-color:#facc15;background:#fffbeb;color:#713f12"><b>Ręczna etykieta w InPost Managerze:</b> w polu referencji/opisu wpisz dokładnie numer zamówienia <code>${esc(z.nr)}</code>. Webhook InPost automatycznie podłączy numer nadania, status i tracking do tego zlecenia.</div>`:""}
     <form onsubmit="zapiszWysylke(event,'${esc(z.nr)}')">
       <div class="f-row">
         <div class="f-group"><label>Przewoźnik</label><select name="przewoznik" onchange="uzupelnijUslugi(this)">${Object.entries(PRZEWOZNICY).map(([id,p])=>`<option value="${id}" ${przewoznik===id?"selected":""}>${esc(p.nazwa)}</option>`).join("")}</select></div>
@@ -6165,7 +6166,7 @@ function testyDiagnostyczne(){
   const ipDiag=stanBramki.inpost||{};
   const avDiag=ipDiag.serviceAvailability||{};
   dodaj("Integracje","InPost ShipX API",ipDiag.configured?(avDiag.courier===false?"warn":"ok"):"warn",ipDiag.configured
-    ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}${avDiag.locker===false?" • brak usługi paczkomatowej":""}${avDiag.courier===false?" • kurier InPost nieaktywny":""}`
+    ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}${ipDiag.webhookConfigured?" • webhook aktywny":" • webhook do konfiguracji"}${avDiag.locker===false?" • brak usługi paczkomatowej":""}${avDiag.courier===false?" • kurier InPost nieaktywny":""}`
     :`Brakuje: ${((ipDiag.missingEnv&&ipDiag.missingEnv.length?ipDiag.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", "))}`);
   const emailDiag=!!stanBramki.email?.configured;
   dodaj("Integracje","Automatyczne e-maile",emailDiag&&chmuraToken?"ok":"warn",emailDiag
