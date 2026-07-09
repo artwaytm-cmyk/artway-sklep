@@ -3407,7 +3407,9 @@ function panelZlecenWysylkowych(){
       </select>
       <input placeholder="Szukaj: zlecenie, klient, tracking, operator…" value="${esc(szukajWysylek)}" oninput="szukajWysylek=this.value.toLowerCase();renderuj()" style="flex:1;min-width:210px;padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
       <button class="btn ghost" onclick="zastosujRegulyWysylek()">⚡ Zastosuj reguły</button>
+      <button class="btn" style="background:#ffcc00;color:#111" onclick="eksportNadaniaInpostCSV()">📄 Nadanie z pliku (InPost)</button>
     </div>
+    <div class="backend-note"><b>📄 Nadanie z pliku (awaryjne / bez umowy kurierskiej):</b> pobierz plik przyciskiem wyżej i wgraj go w InPost: <b>manager.paczkomaty.pl → Wyślij przesyłki → IMPORT Z PLIKU</b> (max 100 przesyłek naraz). Działa dla paczkomatu i kuriera. Eksportowane są zamówienia z bieżącego filtra (bez zakończonych i odbioru osobistego).</div>
     ${lista.length?lista.map(kartaZleceniaWysylki).join(""):"<p>Brak zleceń dla wybranego filtra.</p>"}
   </div>`;
 }
@@ -4629,6 +4631,52 @@ function eksportujKlientow(){
     ...k.map(x=>[x.imie,x.email,kontoMaRoleAdmin(x.email)?"administrator":"klient",new Date(x.data).toLocaleDateString("pl-PL")].map(csvPole).join(";"))].join("\n");
   pobierzPlik("klienci.csv","﻿"+csv,"text/csv");
   loguj("info","Wyeksportowano klientów ("+k.length+")");
+}
+// InPost „nadanie z pliku": eksport zamówień do CSV/TXT do wgrania w InPost Managerze
+// (manager.paczkomaty.pl → Wyślij przesyłki → IMPORT Z PLIKU). Działa dla paczkomatu i kuriera —
+// obejście/awaryjne nadawanie do czasu umowy kurierskiej. Format zgodny ze wzorem InPost.
+function eksportNadaniaInpostCSV(){
+  const czysc = v => String(v==null?"":v).replace(/[;\r\n]+/g," ").trim();
+  const telInpost = t => { const d=String(t||"").replace(/\D/g,"").replace(/^0+/,"").replace(/^48/,""); return d.length>=9 ? "+48"+d.slice(-9) : ""; };
+  const rozmiarInpost = z => { const g=String(z?.wysylka?.gabaryt||"").toLowerCase(); return g==="large"?"C":g==="medium"?"B":"A"; };
+  const paczkomatowe = z => {
+    const id=String(z?.dostawaId||"").toLowerCase();
+    if(id==="kurier"||id==="kurier_inpost") return false;
+    if(id==="paczkomat") return true;
+    return !!(z?.paczkomat||z?.wysylka?.punktKod);
+  };
+  const lista = listaWysylekPoFiltrze().filter(z=>{
+    if(["dostarczona","anulowana","zwrot"].includes(etapWysylki(z))) return false;   // już zamknięte
+    if(String(z?.dostawaId||"").toLowerCase()==="odbior") return false;                // odbiór osobisty — bez przesyłki
+    return true;
+  }).slice(0,100);   // InPost: max 100 przesyłek na jeden import
+  if(!lista.length){ toast("Brak zamówień do nadania w bieżącym filtrze"); return; }
+  const naglowek="e-mail;telefon;rozmiar;paczkomat;numer_referencyjny;dodatkowa_ochrona;za_pobraniem;imie_i_nazwisko;nazwa_firmy;ulica;kod_pocztowy;miejscowosc;typ_przesylki;paczka_w_weekend";
+  const wiersze=lista.map(z=>{
+    const k=z.klient||{}, a=z.adresDostawy||{};
+    const paczk=paczkomatowe(z);
+    const pobranie = z.platnoscId==="pobranie" ? String((Number(z.razem)||0).toFixed(2)).replace(".",",") : "";
+    const ulica = paczk ? "" : czysc(`${a.ulica||""} ${a.nrDomu||""}${a.nrLokalu?"/"+a.nrLokalu:""}`.trim());
+    return [
+      czysc(z.email||k.email),
+      telInpost(k.telefon||z.telefon),
+      rozmiarInpost(z),
+      paczk ? czysc(z.paczkomat||z.wysylka?.punktKod).toUpperCase() : "",
+      czysc(z.nr),
+      "",                                        // dodatkowa_ochrona (opcjonalnie)
+      pobranie,                                  // za_pobraniem (tylko przy płatności „pobranie")
+      paczk ? "" : czysc([k.imie,k.nazwisko].filter(Boolean).join(" ")),
+      paczk ? "" : czysc(k.firma),
+      ulica,
+      paczk ? "" : czysc(a.kod),
+      paczk ? "" : czysc(a.miasto),
+      paczk ? "paczkomat" : "kurier",
+      "NIE"
+    ].join(";");
+  });
+  pobierzPlik(`inpost-nadania-${new Date().toISOString().slice(0,10)}.csv`, [naglowek,...wiersze].join("\r\n"), "text/csv");
+  loguj("info","Eksport nadań InPost z pliku: "+lista.length+" przesyłek");
+  toast(`📄 Plik gotowy: ${lista.length} przesyłek — wgraj go w InPost (Import z pliku)`);
 }
 let podgladImportuProduktow=null, ostatniRaportImportu=null;
 const POLA_CSV_PRODUKTU=["id","nazwa","kategoria","cena","stara_cena","stan","sku","gtin","external_id","mpn","marka","opis","badge","ikona","zdjecie","zdjecie2","zdjecie3","zdjecie4","zdjecie5","zdjecie6","zdjecie7","zdjecie8","zdjecie9","zdjecie10","zdjecie11","zdjecie12","zdjecie13","zdjecie14","zdjecie15","zdjecie16","warianty","kolor","kolor_produktu","rozmiar","material"];
