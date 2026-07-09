@@ -41,6 +41,19 @@ const KONFIG = {
 const DOMYSLNA_DOSTAWA_INPOST = { id:"paczkomat", nazwa:"Paczkomat InPost 24/7", koszt:12, opis:"odbiór w wybranym paczkomacie / punkcie InPost" };
 const DOMYSLNA_DOSTAWA_INPOST_KURIER = { id:"kurier_inpost", nazwa:"Kurier InPost", koszt:20, opis:"dostawa kurierem InPost pod wskazany adres" };
 const OPLATA_PACZKA_WEEKEND = 5;
+const INPOST_DOMYSLNY_SP_NADANIA = "parcel_locker";
+const INPOST_DOMYSLNY_PUNKT_NADANIA = "BOJ01N";
+const INPOST_SP_NADANIA = {
+  parcel_locker:"Nadam w automacie Paczkomat®",
+  dispatch_order:"Przesyłkę odbierze kurier InPost",
+  pop:"Nadam w PaczkoPunkcie"
+};
+const INPOST_OCHRONA_PRESETY = [
+  {wartosc:"", etykieta:"Brak — jak domyślnie w Managerze"},
+  {wartosc:"5000", etykieta:"Do 5 000 zł"},
+  {wartosc:"10000", etykieta:"Do 10 000 zł"},
+  {wartosc:"20000", etykieta:"Do 20 000 zł"}
+];
 function normalizujDostawyInPost(lista){
   const zrodlo = Array.isArray(lista) ? lista : [];
   const cena = (v, fallback) => { const n=Number(String(v ?? "").replace(",",".")); return Number.isFinite(n) ? +n.toFixed(2) : fallback; };
@@ -58,6 +71,28 @@ function dostepneDostawy(){
 function czyDostawaPaczkomat(id){ return String(id||"")==="paczkomat"; }
 function uslugaInpostDlaDostawy(id){ return czyDostawaPaczkomat(id) ? "Paczkomat 24/7" : "Kurier InPost"; }
 function oplataPaczkaWeekend(wlaczona){ return wlaczona ? OPLATA_PACZKA_WEEKEND : 0; }
+function wartoscBoolInpost(v){
+  const s=String(v??"").trim().toLowerCase();
+  return v===true || s==="tak" || s==="true" || s==="1" || s==="yes";
+}
+function pobranieAktywneZamowienia(z,w=daneWysylki(z)){
+  if(w && Object.prototype.hasOwnProperty.call(w,"pobranieAktywne")) return wartoscBoolInpost(w.pobranieAktywne);
+  return z?.platnoscId==="pobranie";
+}
+function kwotaPobraniaZamowienia(z,w=daneWysylki(z)){
+  if(!pobranieAktywneZamowienia(z,w)) return "";
+  const zapisana=String(w?.pobranie||"").trim();
+  return zapisana || kwotaNum(z?.razem).toFixed(2);
+}
+function inpostSposobNadania(z,w=daneWysylki(z)){
+  const v=String(w?.sposobNadania||INPOST_DOMYSLNY_SP_NADANIA).trim();
+  return INPOST_SP_NADANIA[v] ? v : INPOST_DOMYSLNY_SP_NADANIA;
+}
+function inpostSposobNadaniaLabel(v){ return INPOST_SP_NADANIA[v] || INPOST_SP_NADANIA[INPOST_DOMYSLNY_SP_NADANIA]; }
+function inpostOchronaPreset(wartosc){
+  const v=String(wartosc||"").replace(",",".").replace(/\s/g,"");
+  return INPOST_OCHRONA_PRESETY.some(p=>p.wartosc===v) ? v : (v ? "custom" : "");
+}
 
 const DOMYSLNE_BANNERY = [
   {id:"promocje",ikona:"🔥",tytul:"Aktualne promocje",opis:"Zobacz produkty w obniżonych cenach.",przycisk:"Sprawdź promocje",link:"#/promocje",aktywny:true},
@@ -2724,8 +2759,13 @@ async function zapiszFormularzWysylkiPrzedAPI(nr){
     if(paczkomat&&punktKod) zam.paczkomat=punktKod;
     if(!paczkomat){ zam.paczkomat=""; zam.paczkomatAdres=""; }
     const uslugaZTypu=typ==="kurier_inpost"?"Kurier InPost":uslugaInpostZamowienia(zam);
-    const pobranieForm=String(f.get("pobranie")||w.pobranie||"").trim();
+    const pobranieAktywneForm=f.has("pobranieAktywne")
+      ? String(f.get("pobranieAktywne")||"").trim()==="tak"
+      : pobranieAktywneZamowienia(zam,w);
+    const pobranieForm=pobranieAktywneForm ? String(f.get("pobranie")||w.pobranie||kwotaNum(zam.razem).toFixed(2)).trim() : "";
     const paczkaWeekendForm=f.has("paczkaWeekend") ? String(f.get("paczkaWeekend")||"").trim()==="tak" : !!(w.paczkaWeekend||zam.paczkaWeekend);
+    const sposobNadania=String(f.get("sposobNadania")||w.sposobNadania||INPOST_DOMYSLNY_SP_NADANIA).trim();
+    const punktNadania=String(f.get("punktNadania")||w.punktNadania||INPOST_DOMYSLNY_PUNKT_NADANIA).trim().toUpperCase();
     zam.wysylka={...w,
       przewoznik:"inpost",
       usluga:String(f.get("usluga")||w.usluga||uslugaZTypu).trim()||uslugaZTypu,
@@ -2741,14 +2781,17 @@ async function zapiszFormularzWysylkiPrzedAPI(nr){
       szerokosc:String(f.get("szerokosc")||w.szerokosc||"").trim(),
       wysokosc:String(f.get("wysokosc")||w.wysokosc||"").trim(),
       ochrona:String(f.get("ochrona")||w.ochrona||"").trim(),
+      pobranieAktywne:pobranieAktywneForm,
       pobranie:pobranieForm,
       paczkaWeekend:paczkaWeekendForm,
+      sposobNadania:INPOST_SP_NADANIA[sposobNadania]?sposobNadania:INPOST_DOMYSLNY_SP_NADANIA,
+      punktNadania,
       formatEtykiety:String(f.get("formatEtykiety")||w.formatEtykiety||"A6").trim().toUpperCase()==="A4"?"A4":"A6",
       zadania:{...(w.zadania||{}),dane:true},
       zaktualizowano:new Date().toISOString()
     };
     zapiszKosztyZamowienia(zam,{dostawaId:zam.dostawaId,paczkaWeekend:zam.wysylka.paczkaWeekend});
-    if(zam.platnoscId==="pobranie" && (!pobranieForm || kwotaNum(pobranieForm)===stareRazem)) zam.wysylka.pobranie=kwotaNum(zam.razem).toFixed(2);
+    if(pobranieAktywneForm && (!pobranieForm || kwotaNum(pobranieForm)===stareRazem)) zam.wysylka.pobranie=kwotaNum(zam.razem).toFixed(2);
   });
   if(zapisane) await zapiszZamowienieCentralnie(zapisane,false);
   return zapisane;
@@ -3310,11 +3353,17 @@ function adminZamowienieSnapshotHTML(z){
   const platStatus=z.platnoscStatus||(z.platnoscId==="paynow"?paynowStatusTekst(pay.status):"—");
   const tracking=w.numer?`${w.numer}`:(w.inpostId?`${w.inpostId} • ${w.inpostStatus||"czeka"}`:"brak numeru");
   const etap=ETAPY_WYSYLKI[etapWysylki(z)]||ETAPY_WYSYLKI.do_obslugi;
+  const inpostOpcje=[
+    pobranieAktywneZamowienia(z,w)?`COD ${zl(kwotaPobraniaZamowienia(z,w))}`:"COD NIE",
+    (w.paczkaWeekend||z.paczkaWeekend)?`Weekend ${zl(OPLATA_PACZKA_WEEKEND)}`:"Weekend NIE",
+    w.ochrona?`Ochrona ${zl(w.ochrona)}`:"Ochrona NIE",
+    inpostSposobNadaniaLabel(inpostSposobNadania(z,w))
+  ].join(" • ");
   return `<div class="order-detail-grid">
     <div class="order-detail-tile"><span>👤 Klient</span><b>${esc(osoba)}</b><small>${z.email?`✉️ ${esc(z.email)}`:"bez konta"}${klient.telefon?` • 📞 ${esc(klient.telefon)}`:""}</small></div>
     <div class="order-detail-tile"><span>💳 Płatność</span><b>${esc(platnosc)}</b><small>Status: ${esc(platStatus)}${k.platnosc?` • opłata ${zl(k.platnosc)}`:""}</small></div>
     <div class="order-detail-tile"><span>🚚 Dostawa</span><b>${esc(z.dostawa||uslugaInpostZamowienia(z))}</b><small>${k.dostawa?zl(k.dostawa):"GRATIS"}${k.paczkaWeekend?` • Weekend ${zl(k.paczkaWeekend)}`:""} • ${esc(etap.nazwa||"")}</small></div>
-    <div class="order-detail-tile"><span>🏷️ Nadanie</span><b>${esc(tracking)}</b><small>${w.etykietaGotowa?"Etykieta gotowa":w.inpostId?"Czeka na potwierdzenie InPost":"Nieutworzona przesyłka"}</small></div>
+    <div class="order-detail-tile"><span>🏷️ Nadanie</span><b>${esc(tracking)}</b><small>${w.etykietaGotowa?"Etykieta gotowa":w.inpostId?"Czeka na potwierdzenie InPost":"Nieutworzona przesyłka"} • ${esc(inpostOpcje)}</small></div>
   </div>`;
 }
 function adminZamowienieStatusPanelHTML(z){
@@ -3367,6 +3416,13 @@ function widokAdminZamowienie(nr){
   const uslugaDomyslna = w.usluga || uslugaInpostZamowienia(z);
   const paynow=paynowDane(z);
   const koszty=kosztyZamowienia(z), etapInfo=ETAPY_WYSYLKI[etapWysylki(z)]||ETAPY_WYSYLKI.do_obslugi, sla=slaWysylki(z);
+  const pobranieAktywne=pobranieAktywneZamowienia(z,w);
+  const pobranieKwota=kwotaPobraniaZamowienia(z,w);
+  const paczkaWeekendAktywna=!!(w.paczkaWeekend||z.paczkaWeekend);
+  const sposobNadania=inpostSposobNadania(z,w);
+  const punktNadania=String(w.punktNadania||INPOST_DOMYSLNY_PUNKT_NADANIA).trim().toUpperCase();
+  const ochronaKwota=String(w.ochrona||"").trim();
+  const ochronaPreset=inpostOchronaPreset(ochronaKwota);
   return adminSzkielet("/admin/zamowienia", `
   <div class="panel order-detail-page">
     <div class="crumb"><a href="#/admin/zamowienia">Zamówienia</a> › ${esc(z.nr)}</div>
@@ -3448,6 +3504,28 @@ function widokAdminZamowienie(nr){
         <div class="f-group"><label>Kod pocztowy${paczkomatZam?"":" *"}</label><input name="kod" value="${esc(adres.kod||"")}" placeholder="00-000" maxlength="6" oninput="formatujKod(this)"></div>
         <div class="f-group"><label>Miejscowość${paczkomatZam?"":" *"}</label><input name="miasto" value="${esc(adres.miasto||"")}"></div>
       </div>
+      <h3 class="f-sekcja">🟡 Opcje InPost — domyślne jak w Managerze</h3>
+      <div class="inpost-default-note">Domyślnie: nadanie w automacie Paczkomat®, pobranie NIE, Paczka w Weekend NIE, ochrona brak. Te pola są zapisywane w zamówieniu, eksporcie i payloadzie API.</div>
+      <div class="inpost-options-grid">
+        <div class="f-group"><label>Zlecenie za pobraniem</label><select name="pobranieAktywne" onchange="if(this.value==='tak'&&!this.form.pobranie.value)this.form.pobranie.value='${esc(kwotaNum(z.razem).toFixed(2))}'">
+          <option value="" ${!pobranieAktywne?"selected":""}>NIE — jak w InPost</option>
+          <option value="tak" ${pobranieAktywne?"selected":""}>TAK — pobranie od klienta</option>
+        </select><small>Możesz wyłączyć nawet przy płatności „za pobraniem”, jeśli ma iść bez COD.</small></div>
+        <div class="f-group"><label>Wartość pobrania (zł)</label><input name="pobranie" inputmode="decimal" value="${esc(pobranieKwota)}" placeholder="np. ${esc(kwotaNum(z.razem).toFixed(2))}"><small>Kwota trafi do InPost jako COD tylko gdy pole obok jest ustawione na TAK.</small></div>
+        <div class="f-group"><label>Paczka w Weekend</label><select name="paczkaWeekend">
+          <option value="" ${!paczkaWeekendAktywna?"selected":""}>NIE — jak w InPost</option>
+          <option value="tak" ${paczkaWeekendAktywna?"selected":""}>TAK (+${zl(OPLATA_PACZKA_WEEKEND)})</option>
+        </select><small>Opłata jest doliczana do zamówienia, e-maili i podsumowań.</small></div>
+        <div class="f-group"><label>Sposób nadania</label><select name="sposobNadania">
+          ${Object.entries(INPOST_SP_NADANIA).map(([id,nazwa])=>`<option value="${esc(id)}" ${sposobNadania===id?"selected":""}>${esc(nazwa)}</option>`).join("")}
+        </select><small>Domyślnie zgodnie z Twoim Managerem: nadanie w automacie Paczkomat®.</small></div>
+        <div class="f-group"><label>Punkt nadania / drop-off</label><input name="punktNadania" value="${esc(punktNadania)}" placeholder="${esc(INPOST_DOMYSLNY_PUNKT_NADANIA)}" style="text-transform:uppercase"><small>Używane przy nadaniu w automacie albo PaczkoPunkcie. Domyślnie ${esc(INPOST_DOMYSLNY_PUNKT_NADANIA)}.</small></div>
+        <div class="f-group"><label>Dodatkowa ochrona</label><select name="ochronaPreset" onchange="if(this.value!=='custom')this.form.ochrona.value=this.value">
+          ${INPOST_OCHRONA_PRESETY.map(p=>`<option value="${esc(p.wartosc)}" ${ochronaPreset===p.wartosc?"selected":""}>${esc(p.etykieta)}</option>`).join("")}
+          <option value="custom" ${ochronaPreset==="custom"?"selected":""}>Własna kwota</option>
+        </select><small>Domyślnie brak ochrony. Wybierz preset lub wpisz własną kwotę.</small></div>
+        <div class="f-group"><label>Kwota ochrony / ubezpieczenia (zł)</label><input name="ochrona" inputmode="decimal" value="${esc(ochronaKwota)}" placeholder="puste = brak"></div>
+      </div>
       <details style="margin:.4rem 0"><summary style="cursor:pointer;color:var(--muted2)">Wymiary i waga (użyj, gdy nie chcesz gabarytu) oraz numer nadania ręcznie</summary>
         <div class="f-row" style="margin-top:.6rem">
           <div class="f-group"><label>Waga (kg)</label><input name="waga" type="number" step=".01" min=".01" value="${esc(w.waga||uw.waga)}"></div>
@@ -3458,11 +3536,6 @@ function widokAdminZamowienie(nr){
         <div class="f-row">
           <div class="f-group"><label>Numer nadania (ręcznie)</label><input name="numer" value="${esc(w.numer)}" placeholder="Zwykle uzupełni się automatycznie"></div>
           <div class="f-group"><label>Własny link śledzenia</label><input name="trackingUrl" type="url" value="${esc(w.trackingUrl)}" placeholder="https://…"></div>
-        </div>
-        <div class="f-row">
-          <div class="f-group"><label>Dodatkowa ochrona / ubezpieczenie (zł)</label><input name="ochrona" inputmode="decimal" value="${esc(w.ochrona||"")}" placeholder="np. 200.00"></div>
-          <div class="f-group"><label>Wartość pobrania (zł)</label><input name="pobranie" inputmode="decimal" value="${esc(w.pobranie||(z.platnoscId==="pobranie"?kwotaNum(z.razem).toFixed(2):""))}" placeholder="tylko dla pobrania"></div>
-          <div class="f-group"><label>Paczka w Weekend</label><select name="paczkaWeekend"><option value="" ${!w.paczkaWeekend?"selected":""}>NIE</option><option value="tak" ${w.paczkaWeekend?"selected":""}>TAK (+${zl(OPLATA_PACZKA_WEEKEND)})</option></select></div>
         </div>
       </details>
       <div class="f-group"><label>Uwagi do zamówienia</label><textarea name="uwagi" rows="2">${esc(z.uwagi||"")}</textarea></div>
@@ -3554,14 +3627,22 @@ function zapiszNadanie(e,nr){
     else { z.paczkomat=""; z.paczkomatAdres=""; w.punktKod=""; }
     const gab=g("gabaryt"); if(["small","medium","large"].includes(gab)) w.gabaryt=gab;
     if(g("waga")) w.waga=g("waga"); if(g("dlugosc")) w.dlugosc=g("dlugosc"); if(g("szerokosc")) w.szerokosc=g("szerokosc"); if(g("wysokosc")) w.wysokosc=g("wysokosc");
-    const pobranieForm=g("pobranie");
-    w.ochrona=g("ochrona"); w.pobranie=pobranieForm; w.paczkaWeekend=g("paczkaWeekend")==="tak"; w.formatEtykiety=g("formatEtykiety").toUpperCase()==="A4"?"A4":"A6";
+    const pobranieAktywneForm=g("pobranieAktywne")==="tak";
+    const pobranieForm=pobranieAktywneForm ? g("pobranie") : "";
+    const sposobNadania=g("sposobNadania");
+    w.ochrona=g("ochrona");
+    w.pobranieAktywne=pobranieAktywneForm;
+    w.pobranie=pobranieForm;
+    w.paczkaWeekend=g("paczkaWeekend")==="tak";
+    w.sposobNadania=INPOST_SP_NADANIA[sposobNadania]?sposobNadania:INPOST_DOMYSLNY_SP_NADANIA;
+    w.punktNadania=g("punktNadania").toUpperCase()||INPOST_DOMYSLNY_PUNKT_NADANIA;
+    w.formatEtykiety=g("formatEtykiety").toUpperCase()==="A4"?"A4":"A6";
     if(f.has("numer")) w.numer=g("numer");
     if(f.has("trackingUrl")) w.trackingUrl=g("trackingUrl");
     w.przewoznik="inpost"; w.usluga = typ==="paczkomat" ? "Paczkomat 24/7" : "Kurier InPost";
     z.wysylka=w;
     zapiszKosztyZamowienia(z,{dostawaId:typ,paczkaWeekend:w.paczkaWeekend});
-    if(z.platnoscId==="pobranie" && (!pobranieForm || kwotaNum(pobranieForm)===stareRazem)) w.pobranie=kwotaNum(z.razem).toFixed(2);
+    if(pobranieAktywneForm && (!pobranieForm || kwotaNum(pobranieForm)===stareRazem)) w.pobranie=kwotaNum(z.razem).toFixed(2);
     z.uwagi=g("uwagi");
     const a=z.adresDostawy;
     z.adres=`${a.ulica} ${a.nrDomu}${a.nrLokalu?"/"+a.nrLokalu:""}, ${a.kod} ${a.miasto}`.replace(/\s+/g," ").replace(/^[,\s]+|[,\s]+$/g,"").trim();
@@ -4427,15 +4508,17 @@ function eksportNadaniaInpostCSV(nry, format="txt"){
     return true;
   }).slice(0,100);
   if(!lista.length){ toast("Brak zamówień do nadania (sprawdź zaznaczenie lub filtr)"); return; }
-  const polaPodstawowe=["e-mail","telefon","rozmiar","paczkomat","numer_referencyjny","dodatkowa_ochrona","za_pobraniem","imie_i_nazwisko","nazwa_firmy","ulica","kod_pocztowy","miasto","typ_przesylki","paczka_w_weekend"];
+  const polaPodstawowe=["e-mail","telefon","rozmiar","paczkomat","numer_referencyjny","dodatkowa_ochrona","za_pobraniem","imie_i_nazwisko","nazwa_firmy","ulica","kod_pocztowy","miasto","typ_przesylki","sposob_nadania","punkt_nadania","paczka_w_weekend"];
   const polaRozszerzone=["uwagi","produkty","kwota_zamowienia","metoda_platnosci","sposob_dostawy","gabaryt_sklepu","waga_kg","dlugosc_cm","szerokosc_cm","wysokosc_cm","telefon_9_cyfr"];
   const pola=rozszerzony?[...polaPodstawowe,...polaRozszerzone]:polaPodstawowe;
   const wiersze=lista.map(z=>{
     const k=z.klient||{}, a=z.adresDostawy||{}, w=z.wysylka||{};
     const paczk=paczkomatoweInpost(z);
     const ulica = czysc(`${a.ulica||""} ${a.nrDomu||""}${a.nrLokalu?"/"+a.nrLokalu:""}`.trim());
-    const pobranie = kwota(w.pobranie || (z.platnoscId==="pobranie" ? z.razem : ""));
+    const pobranie = kwota(kwotaPobraniaZamowienia(z,w));
     const ochrona = kwota(w.ochrona || "");
+    const sposob=inpostSposobNadania(z,w);
+    const punktNadania=String(w.punktNadania||INPOST_DOMYSLNY_PUNKT_NADANIA).trim().toUpperCase();
     const produktyTxt = Array.isArray(z.pozycjeDane)&&z.pozycjeDane.length
       ? z.pozycjeDane.map(p=>`${p.nazwa||""}${p.sku?` SKU:${p.sku}`:""} x${p.ilosc||1}`).join(" | ")
       : (Array.isArray(z.pozycje)?z.pozycje.join(" | "):"");
@@ -4453,6 +4536,8 @@ function eksportNadaniaInpostCSV(nry, format="txt"){
       a.kod,
       a.miasto,
       paczk ? "paczkomat" : "kurier",
+      inpostSposobNadaniaLabel(sposob),
+      punktNadania,
       (w.paczkaWeekend || z.paczkaWeekend) ? "TAK" : "NIE"
     ];
     const extra=[

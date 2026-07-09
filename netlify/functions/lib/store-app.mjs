@@ -960,6 +960,8 @@ async function obsluzEmailePrzejsciaStatusu(stary, nowy) {
 
 // ─── INPOST ShipX (przesyłki, etykiety, tracking) + Geowidget ───
 const INPOST_ENVY = new Set(['production', 'sandbox']);
+const INPOST_SENDING_METHODS = new Set(['parcel_locker', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
+const INPOST_DROPOFF_METHODS = new Set(['parcel_locker', 'pok', 'pop', 'courier_pok']);
 function inpostEnv() {
   const env = String(process.env.INPOST_ENV || 'production').trim().toLowerCase();
   return INPOST_ENVY.has(env) ? env : 'production';
@@ -985,7 +987,7 @@ function inpostKonfiguracja() {
     missingEnv,
     env: inpostEnv(),
     baseUrl: inpostBaseUrl(),
-    sendingMethod: tekst(process.env.INPOST_SENDING_METHOD || 'dispatch_order', 40).trim() || 'dispatch_order',
+    sendingMethod: tekst(process.env.INPOST_SENDING_METHOD || 'parcel_locker', 40).trim() || 'parcel_locker',
     lockerService: tekst(process.env.INPOST_LOCKER_SERVICE || 'inpost_locker_standard', 80).trim() || 'inpost_locker_standard',
     courierService: tekst(process.env.INPOST_COURIER_SERVICE || 'inpost_courier_standard', 80).trim() || 'inpost_courier_standard',
   };
@@ -1001,7 +1003,7 @@ function inpostPublicConfig() {
     requiredEnv: ['INPOST_TOKEN', 'INPOST_ORG_ID'],
     services: { locker: c.lockerService, courier: c.courierService },
     webhookConfigured: !!tekst(process.env.INPOST_WEBHOOK_SECRET || '', 300).trim(),
-    optionalEnv: ['INPOST_GEOWIDGET_TOKEN', 'INPOST_WEBHOOK_SECRET', 'INPOST_ENV=production', 'INPOST_SENDING_METHOD=dispatch_order', 'INPOST_LOCKER_SERVICE', 'INPOST_COURIER_SERVICE'],
+    optionalEnv: ['INPOST_GEOWIDGET_TOKEN', 'INPOST_WEBHOOK_SECRET', 'INPOST_ENV=production', 'INPOST_SENDING_METHOD=parcel_locker', 'INPOST_LOCKER_SERVICE', 'INPOST_COURIER_SERVICE'],
   };
 }
 async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'application/json' } = {}) {
@@ -1249,6 +1251,20 @@ function inpostDostepnoscUslug(c, org) {
 async function inpostOrganizacja(c) {
   return inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}`, { method: 'GET' });
 }
+function boolInpostSerwer(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  return v === true || s === 'tak' || s === 'true' || s === '1' || s === 'yes';
+}
+function inpostPobranieAktywne(z, w) {
+  if (w && Object.prototype.hasOwnProperty.call(w, 'pobranieAktywne')) return boolInpostSerwer(w.pobranieAktywne);
+  return z?.platnoscId === 'pobranie';
+}
+function inpostSposobNadaniaZamowienia(w, c) {
+  const raw = tekst(w?.sposobNadania || '', 40).trim();
+  if (INPOST_SENDING_METHODS.has(raw)) return raw;
+  const env = tekst(c?.sendingMethod || '', 40).trim();
+  return INPOST_SENDING_METHODS.has(env) ? env : 'parcel_locker';
+}
 function przesylkaShipXPayload(z, c, walidacja = null) {
   const v = walidacja || walidujPrzesylkeInPost(z);
   const k = z?.klient || {};
@@ -1276,6 +1292,8 @@ function przesylkaShipXPayload(z, c, walidacja = null) {
     },
     weight: { amount: String(Number(w.waga) || 1), unit: 'kg' },
   };
+  const sendingMethod = inpostSposobNadaniaZamowienia(w, c);
+  const dropoffPoint = tekst(w?.punktNadania || w?.dropoffPoint || '', 40).trim().toUpperCase();
   const payload = {
     receiver,
     parcels: [parcel],
@@ -1284,16 +1302,22 @@ function przesylkaShipXPayload(z, c, walidacja = null) {
     reference: tekst(z?.nr, 80),
     comments: tekst(`Artway-TM ${z?.nr || ''}`.trim(), 100),
     custom_attributes: {
-      sending_method: v.doPaczkomatu ? c.sendingMethod : 'dispatch_order',
+      sending_method: sendingMethod,
     },
   };
   if (v.doPaczkomatu && v.punkt) payload.custom_attributes.target_point = v.punkt;
+  if (dropoffPoint && INPOST_DROPOFF_METHODS.has(sendingMethod)) payload.custom_attributes.dropoff_point = dropoffPoint;
   if (z?.paczkaWeekend || w.paczkaWeekend || kwotaSerwer(z?.oplataPaczkaWeekend || z?.koszty?.paczkaWeekend) > 0) {
     payload.end_of_week_collection = true;
   }
-  if (z?.platnoscId === 'pobranie') {
-    payload.cod = { amount: Number(z?.razem) || 0, currency: 'PLN' };
-    payload.insurance = { amount: Number(z?.razem) || 0, currency: 'PLN' };
+  const codAktywny = inpostPobranieAktywne(z, w);
+  const codKwota = codAktywny ? (kwotaSerwer(w.pobranie) || kwotaSerwer(z?.razem)) : 0;
+  if (codAktywny && codKwota > 0) {
+    payload.cod = { amount: codKwota, currency: 'PLN' };
+  }
+  const ochronaKwota = Math.max(kwotaSerwer(w.ochrona), codAktywny ? codKwota : 0);
+  if (ochronaKwota > 0) {
+    payload.insurance = { amount: ochronaKwota, currency: 'PLN' };
   }
   return payload;
 }

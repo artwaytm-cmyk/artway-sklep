@@ -81,6 +81,10 @@ requireMarkers('assets/app.js', app, [
   'orders-stat-grid',
   'order-detail-page',
   'OPLATA_PACZKA_WEEKEND = 5',
+  'INPOST_DOMYSLNY_SP_NADANIA = "parcel_locker"',
+  'name="pobranieAktywne"',
+  'name="sposobNadania"',
+  'name="punktNadania"',
   'Paczka w Weekend (+',
   'function kosztyZamowienia',
   'function utworzEtykietyZaznaczoneAPI',
@@ -116,6 +120,9 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function kosztyEmail',
   'Paczka w Weekend',
   'end_of_week_collection',
+  'dropoff_point',
+  'inpostPobranieAktywne',
+  'inpostSposobNadaniaZamowienia',
 ]);
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
