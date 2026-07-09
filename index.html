@@ -3374,7 +3374,7 @@ function kartaZleceniaWysylki(z){
   const zad=w.zadania||{}, wykonane=["dane","kompletacja","etykieta","przekazanie"].filter(k=>zad[k]).length;
   return `<div class="ship-card ${etapWysylki(z)==="problem"?"problem":""}">
     <div class="ship-card-head">
-      <span><a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}"><b>${esc(z.nr)}</b></a> • ${esc([z.klient?.imie,z.klient?.nazwisko].filter(Boolean).join(" ")||z.email||"gość")}</span>
+      <span><label style="margin-right:.4rem;cursor:pointer" title="Zaznacz do nadania z pliku"><input type="checkbox" ${zaznaczoneNadania.has(String(z.nr))?"checked":""} onchange="przelaczZaznaczenieNadania(${jsArg(z.nr)})"></label><a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}"><b>${esc(z.nr)}</b></a> • ${esc([z.klient?.imie,z.klient?.nazwisko].filter(Boolean).join(" ")||z.email||"gość")}</span>
       <span><span class="shipment-priority priority-${esc(w.priorytet||"normalny")}">${esc(w.priorytet||"normalny")}</span> <span class="lvl" style="background:${etap.kolor}">${etap.ikona} ${etap.nazwa}</span></span>
     </div>
     <div class="ship-meta">🚚 ${esc(nazwaPrzewoznika(w.przewoznik||przewoznikDlaZamowienia(z)))} • ${esc(w.usluga||uslugaInpostZamowienia(z))} • 🔢 ${w.numer?esc(w.numer):"<b>oczekuje na etykietę</b>"}<br>
@@ -3386,6 +3386,7 @@ function kartaZleceniaWysylki(z){
     ${w.bladIntegracji?`<div class="backend-note" style="border-color:var(--danger);background:#fff1f2;color:#991b1b"><b>Wyjątek:</b> ${esc(w.bladIntegracji)}</div>`:""}
     <div class="diag-actions">
       <a class="btn" href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">Obsłuż zlecenie</a>
+      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}])">📄 Z pliku</button>
       ${!w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI(${jsArg(z.nr)})">🟡 Generuj etykietę InPost</button>`:`<button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(z.nr)},'A6')">🏷️ Pobierz etykietę</button>`}
       ${w.inpostId?`<button class="btn ghost" type="button" onclick="synchronizujTrackingAPI(${jsArg(z.nr)})">🔄 Status InPost</button>`:""}
       ${urlSledzenia(z)?`<a class="btn ghost" href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">Śledź</a>`:""}
@@ -3407,9 +3408,10 @@ function panelZlecenWysylkowych(){
       </select>
       <input placeholder="Szukaj: zlecenie, klient, tracking, operator…" value="${esc(szukajWysylek)}" oninput="szukajWysylek=this.value.toLowerCase();renderuj()" style="flex:1;min-width:210px;padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
       <button class="btn ghost" onclick="zastosujRegulyWysylek()">⚡ Zastosuj reguły</button>
-      <button class="btn" style="background:#ffcc00;color:#111" onclick="eksportNadaniaInpostCSV()">📄 Nadanie z pliku (InPost)</button>
+      <label class="btn ghost" style="cursor:pointer" title="Zaznacz/odznacz wszystkie z filtra"><input type="checkbox" ${lista.length&&lista.every(z=>zaznaczoneNadania.has(String(z.nr)))?"checked":""} onchange="zaznaczWszystkieNadania(this.checked)"> Zaznacz wszystkie</label>
+      <button class="btn" style="background:#ffcc00;color:#111" onclick="eksportNadaniaInpostCSV()">📄 Nadanie z pliku${zaznaczoneNadania.size?` (${zaznaczoneNadania.size} zazn.)`:""}</button>
     </div>
-    <div class="backend-note"><b>📄 Nadanie z pliku (awaryjne / bez umowy kurierskiej):</b> pobierz plik przyciskiem wyżej i wgraj go w InPost: <b>manager.paczkomaty.pl → Wyślij przesyłki → IMPORT Z PLIKU</b> (max 100 przesyłek naraz). Działa dla paczkomatu i kuriera. Eksportowane są zamówienia z bieżącego filtra (bez zakończonych i odbioru osobistego).</div>
+    <div class="backend-note"><b>📄 Nadanie z pliku (awaryjne / bez umowy kurierskiej):</b> zaznacz zlecenia (☑ na karcie) i pobierz plik — albo bez zaznaczania pobierze wszystkie z bieżącego filtra. Plik wgraj w InPost: <b>manager.paczkomaty.pl → Wyślij przesyłki → IMPORT Z PLIKU</b> (max 100). Działa dla paczkomatu i kuriera. Pojedyncze zlecenie nadasz też przyciskiem „📄 Z pliku" na karcie lub na stronie zamówienia.</div>
     ${lista.length?lista.map(kartaZleceniaWysylki).join(""):"<p>Brak zleceń dla wybranego filtra.</p>"}
   </div>`;
 }
@@ -3729,8 +3731,9 @@ function widokAdminZamowienie(nr){
         ${!w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI('${esc(z.nr)}')">🟡 Utwórz przesyłkę InPost i pobierz numer</button>`:""}
         ${w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="pobierzEtykieteAPI('${esc(z.nr)}','A6')">🏷️ Etykieta A6</button><button class="btn ghost" type="button" onclick="pobierzEtykieteAPI('${esc(z.nr)}','A4')">🏷️ A4</button><button class="btn ghost" type="button" onclick="synchronizujTrackingAPI('${esc(z.nr)}')">🔄 Pobierz status z InPost</button>`:""}
         <button class="btn ghost" type="button" onclick="drukujEtykieteRobocza('${esc(z.nr)}')">🏷️ Etykieta robocza A6</button>
+        <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV(['${esc(z.nr)}'])">📄 Nadanie z pliku (InPost)</button>
       </div>
-      <p style="font-size:.8rem;color:var(--muted2);margin:.4rem 0 0">Najpierw „Zapisz dane", potem „Utwórz przesyłkę". Numer nadania i status pojawią się automatycznie u góry tej sekcji.</p>
+      <p style="font-size:.8rem;color:var(--muted2);margin:.4rem 0 0">Najpierw „Zapisz dane", potem „Utwórz przesyłkę" (API) — albo „📄 Nadanie z pliku" i wgraj plik w InPost Managerze. Numer nadania i status pojawią się automatycznie u góry tej sekcji.</p>
     </form>
   </div>
   <div class="panel">
@@ -4635,7 +4638,11 @@ function eksportujKlientow(){
 // InPost „nadanie z pliku": eksport zamówień do CSV/TXT do wgrania w InPost Managerze
 // (manager.paczkomaty.pl → Wyślij przesyłki → IMPORT Z PLIKU). Działa dla paczkomatu i kuriera —
 // obejście/awaryjne nadawanie do czasu umowy kurierskiej. Format zgodny ze wzorem InPost.
-function eksportNadaniaInpostCSV(){
+let zaznaczoneNadania = new Set();
+function przelaczZaznaczenieNadania(nr){ nr=String(nr); if(zaznaczoneNadania.has(nr)) zaznaczoneNadania.delete(nr); else zaznaczoneNadania.add(nr); renderuj(); }
+function zaznaczWszystkieNadania(zazn){ listaWysylekPoFiltrze().forEach(z=>zazn?zaznaczoneNadania.add(String(z.nr)):zaznaczoneNadania.delete(String(z.nr))); renderuj(); }
+// nry (opcjonalnie) = tablica numerów zamówień do eksportu (pojedyncze zlecenie / zaznaczone). Bez nry: zaznaczone albo cały filtr.
+function eksportNadaniaInpostCSV(nry){
   const czysc = v => String(v==null?"":v).replace(/[;\r\n]+/g," ").trim();
   const telInpost = t => { const d=String(t||"").replace(/\D/g,"").replace(/^0+/,"").replace(/^48/,""); return d.length>=9 ? "+48"+d.slice(-9) : ""; };
   const rozmiarInpost = z => { const g=String(z?.wysylka?.gabaryt||"").toLowerCase(); return g==="large"?"C":g==="medium"?"B":"A"; };
@@ -4645,12 +4652,17 @@ function eksportNadaniaInpostCSV(){
     if(id==="paczkomat") return true;
     return !!(z?.paczkomat||z?.wysylka?.punktKod);
   };
-  const lista = listaWysylekPoFiltrze().filter(z=>{
-    if(["dostarczona","anulowana","zwrot"].includes(etapWysylki(z))) return false;   // już zamknięte
-    if(String(z?.dostawaId||"").toLowerCase()==="odbior") return false;                // odbiór osobisty — bez przesyłki
+  const jawne = Array.isArray(nry) && nry.length;
+  let bazaZ;
+  if(jawne){ const zb=new Set(nry.map(String)); bazaZ = pobierzZamowienia().filter(z=>zb.has(String(z.nr))); }
+  else if(zaznaczoneNadania.size){ bazaZ = pobierzZamowienia().filter(z=>zaznaczoneNadania.has(String(z.nr))); }
+  else { bazaZ = listaWysylekPoFiltrze(); }
+  const lista = bazaZ.filter(z=>{
+    if(String(z?.dostawaId||"").toLowerCase()==="odbior") return false;                       // odbiór osobisty — bez przesyłki
+    if(!jawne && ["dostarczona","anulowana","zwrot"].includes(etapWysylki(z))) return false;  // przy hurcie pomijamy zamknięte
     return true;
   }).slice(0,100);   // InPost: max 100 przesyłek na jeden import
-  if(!lista.length){ toast("Brak zamówień do nadania w bieżącym filtrze"); return; }
+  if(!lista.length){ toast("Brak zamówień do nadania (sprawdź zaznaczenie lub filtr)"); return; }
   const naglowek="e-mail;telefon;rozmiar;paczkomat;numer_referencyjny;dodatkowa_ochrona;za_pobraniem;imie_i_nazwisko;nazwa_firmy;ulica;kod_pocztowy;miejscowosc;typ_przesylki;paczka_w_weekend";
   const wiersze=lista.map(z=>{
     const k=z.klient||{}, a=z.adresDostawy||{};
