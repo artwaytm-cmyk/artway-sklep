@@ -2763,14 +2763,15 @@ async function utworzPrzesylkeAPI(nr){
     await zapiszFormularzWysylkiPrzedAPI(nr);
     toast("Tworzę przesyłkę InPost…");
     const d=await chmura("inpost-create",{method:"POST",body:{nr},timeout:25000});
+    const labelReady=!!(d.labelReady||d.trackingNumber);
     aktualizujZamowienie(nr,zam=>{
       const w=daneWysylki(zam);
-      zam.wysylka=d.order?.wysylka?{...w,...d.order.wysylka}:{...w,przewoznik:"inpost",usluga:uslugaInpostZamowienia(zam),inpostId:d.inpostId||w.inpostId,numer:d.trackingNumber||w.numer,etap:(d.trackingNumber||d.inpostId)?"etykieta":(w.etap||"przygotowanie"),zadania:{...(w.zadania||{}),dane:true,etykieta:!!(d.trackingNumber||d.inpostId)}};
+      zam.wysylka=d.order?.wysylka?{...w,...d.order.wysylka}:{...w,przewoznik:"inpost",usluga:uslugaInpostZamowienia(zam),inpostId:d.inpostId||w.inpostId,numer:d.trackingNumber||w.numer,inpostStatus:d.status||w.inpostStatus,etykietaGotowa:labelReady,etap:labelReady?"etykieta":(w.etap&&w.etap!=="problem"?w.etap:"przygotowanie"),zadania:{...(w.zadania||{}),dane:true,etykieta:labelReady}};
       if(d.order?.status) zam.status=d.order.status;
-      else if((d.trackingNumber||d.inpostId)&&["nowe","potwierdzone","w realizacji"].includes(zam.status))zam.status="gotowe do wysyłki";
+      else if(labelReady&&["nowe","potwierdzone","w realizacji"].includes(zam.status))zam.status="gotowe do wysyłki";
     });
     loguj("info",`InPost utworzył przesyłkę ${d.inpostId||""} (${d.trackingNumber||"bez numeru"}) dla ${nr}`);
-    toast(d.trackingNumber?`Przesyłka InPost utworzona ✅ ${d.trackingNumber}`:"Przesyłka utworzona ✅ (numer po potwierdzeniu — użyj „Pobierz status”)");
+    toast(labelReady?`Przesyłka InPost utworzona ✅ ${d.trackingNumber||"etykieta gotowa"}`:"Przesyłka utworzona, ale InPost jeszcze potwierdza etykietę — użyj „Sprawdź status InPost” za chwilę.");
     renderuj();
   }catch(bl){
     if(bl.code==="inpost_not_configured"){ toast("Najpierw skonfiguruj InPost w Netlify (INPOST_TOKEN, INPOST_ORG_ID)"); location.hash="#/admin/dostawy"; return; }
@@ -2792,10 +2793,26 @@ async function pobierzEtykieteAPI(nr,format="A6"){
     const url=URL.createObjectURL(b64toBlob(d.base64,"application/pdf"));
     window.open(url,"_blank","noopener");
     setTimeout(()=>URL.revokeObjectURL(url),60000);
+    aktualizujZamowienie(nr,zam=>{
+      const w=daneWysylki(zam);
+      if(d.status)w.inpostStatus=d.status;
+      if(d.trackingNumber)w.numer=d.trackingNumber;
+      w.etykietaGotowa=true;
+      w.zadania={...(w.zadania||{}),dane:true,etykieta:true};
+      if(!w.etap||w.etap==="przygotowanie"||w.etap==="problem")w.etap="etykieta";
+      zam.wysylka=w;
+    });
     loguj("info",`Pobrano etykietę InPost ${format} dla ${nr}`);
+    renderuj();
   }catch(bl){
     if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost w Netlify"); return; }
     if(bl.code==="no_shipment"){ toast("Najpierw utwórz przesyłkę InPost"); return; }
+    if(bl.code==="label_not_ready"){
+      aktualizujZamowienie(nr,zam=>{ const w=daneWysylki(zam); if(bl.status)w.inpostStatus=bl.status; if(bl.trackingNumber)w.numer=bl.trackingNumber; w.etykietaGotowa=false; w.zadania={...(w.zadania||{}),dane:true,etykieta:false}; zam.wysylka=w; });
+      toast(bl.message||"InPost jeszcze nie potwierdził etykiety — sprawdź status za chwilę");
+      renderuj();
+      return;
+    }
     toast("Etykieta: "+bl.message); loguj("blad",`InPost label ${nr}: ${bl.message}`);
   }
 }
@@ -2804,10 +2821,26 @@ function wybranyFormatEtykietyInpost(nr, fallback="A6"){
   const v=String($(idEtykietyInpost(nr))?.value||fallback||"A6").toUpperCase();
   return v==="A4"?"A4":"A6";
 }
+const INPOST_STATUSY_ETYKIETA_GOTOWA = ["confirmed","dispatched_by_sender","collected_from_sender","taken_by_courier","adopted_at_source_branch","sent_from_source_branch","ready_to_pickup","out_for_delivery","delivered","returned_to_sender","return_redirected_to_sender"];
+function czyEtykietaInpostGotowa(z){
+  const w=daneWysylki(z);
+  if(w.etykietaGotowa||w.numer)return true;
+  const s=String(w.inpostStatus||"").trim().toLowerCase();
+  if(!s)return false;
+  if(INPOST_STATUSY_ETYKIETA_GOTOWA.includes(s)||s.includes("confirmed"))return true;
+  if(s.includes("created")||s.includes("offer")||s.includes("prepared")||s.includes("cancel"))return false;
+  return ["transport","doreczenie","dostarczona","zwrot"].includes(String(w.etap||"").toLowerCase());
+}
+function opisGotowosciEtykietyInpost(z){
+  const w=daneWysylki(z), status=String(w.inpostStatus||"").trim();
+  if(czyEtykietaInpostGotowa(z))return `Etykieta gotowa${w.numer?` • numer ${w.numer}`:""}${status?` • ${status}`:""}`;
+  if(w.inpostId)return `Przesyłka ma ID ${w.inpostId}, ale InPost jeszcze nie potwierdził/opłacił etykiety${status?` • status: ${status}`:""}.`;
+  return "Najpierw utwórz przesyłkę InPost.";
+}
 function pobierzWybranaEtykieteAPI(nr){ return pobierzEtykieteAPI(nr, wybranyFormatEtykietyInpost(nr)); }
 function panelEtykietInpostHTML(z){
   const w=daneWysylki(z), nr=z?.nr||"", id=idEtykietyInpost(nr), fmt=String(w.formatEtykiety||"A6").toUpperCase()==="A4"?"A4":"A6";
-  const ma=!!w.inpostId;
+  const ma=!!w.inpostId, gotowa=czyEtykietaInpostGotowa(z);
   return `<div style="border:2px solid #ffcc00;background:linear-gradient(180deg,#fff7cc,#fff);border-radius:14px;padding:.85rem 1rem;margin:.7rem 0">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:.7rem;flex-wrap:wrap">
       <div><b>🏷️ Etykiety i import InPost</b><br><small style="color:var(--muted2)">Wybierz format etykiety, pobierz PDF albo przygotuj plik importu do InPost Managera.</small></div>
@@ -2819,18 +2852,20 @@ function panelEtykietInpostHTML(z){
       </label>
     </div>
     <div class="diag-actions" style="margin-top:.7rem">
-      ${ma?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="pobierzWybranaEtykieteAPI(${jsArg(nr)})">🏷️ Pobierz wybraną etykietę</button>
+      ${ma&&gotowa?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="pobierzWybranaEtykieteAPI(${jsArg(nr)})">🏷️ Pobierz wybraną etykietę</button>
       <button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(nr)},'A6')">A6</button>
-      <button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(nr)},'A4')">A4</button>`:`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI(${jsArg(nr)})">🟡 Utwórz przesyłkę i numer</button>
+      <button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(nr)},'A4')">A4</button>`:ma?`<button class="btn ghost" type="button" disabled title="InPost musi potwierdzić/opłacić przesyłkę przed pobraniem PDF">🏷️ PDF po potwierdzeniu</button>
+      <button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="synchronizujTrackingAPI(${jsArg(nr)})">🔄 Sprawdź status InPost</button>`:`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI(${jsArg(nr)})">🟡 Utwórz przesyłkę i numer</button>
       <button class="btn ghost" type="button" disabled title="Najpierw utwórz przesyłkę InPost">PDF po nadaniu</button>`}
       <button class="btn ghost" type="button" onclick="drukujEtykieteRobocza(${jsArg(nr)})">🏷️ Robocza A6</button>
       <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(nr)}],'tab')">📄 TXT z nagłówkami InPost</button>
       <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(nr)}],'csv')">CSV przecinek</button>
       <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(nr)}],'txt')">📄 TXT średnik</button>
       <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(nr)}],'extended')">📋 CSV rozszerzony</button>
-      ${ma?`<button class="btn ghost" type="button" onclick="synchronizujTrackingAPI(${jsArg(nr)})">🔄 Status InPost</button>`:""}
+      ${ma&&gotowa?`<button class="btn ghost" type="button" onclick="synchronizujTrackingAPI(${jsArg(nr)})">🔄 Status InPost</button>`:""}
     </div>
-    <p style="font-size:.78rem;color:var(--muted2);margin:.55rem 0 0"><b>TXT z nagłówkami InPost</b> działa z ustawieniem InPost „Separator kolumn: Tabulator”. W InPost zmień tylko <b>„Czy ma nagłówki?” na TAK</b>, wtedy dopasowujesz nazwa do nazwy: e-mail → E-mail, telefon → Telefon, miasto → Miasto.</p>
+    <p style="font-size:.78rem;color:${ma&&!gotowa?"#92400e":"var(--muted2)"};margin:.55rem 0 0"><b>Status etykiety:</b> ${esc(opisGotowosciEtykietyInpost(z))}</p>
+    <p style="font-size:.78rem;color:var(--muted2);margin:.35rem 0 0"><b>TXT z nagłówkami InPost</b> działa z ustawieniem InPost „Separator kolumn: Tabulator”. W InPost zmień tylko <b>„Czy ma nagłówki?” na TAK</b>, wtedy dopasowujesz nazwa do nazwy: e-mail → E-mail, telefon → Telefon, miasto → Miasto.</p>
   </div>`;
 }
 async function synchronizujTrackingAPI(nr){
@@ -2842,7 +2877,7 @@ async function synchronizujTrackingAPI(nr){
     const d=await chmura("inpost-status",{params:{nr},timeout:20000});
     aktualizujZamowienie(nr,zam=>{ if(d.order?.wysylka) zam.wysylka={...daneWysylki(zam),...d.order.wysylka}; });
     loguj("info",`InPost status ${nr}: ${d.status||""} ${d.trackingNumber||""}`);
-    toast("Status InPost zaktualizowany ✅"+(d.status?` (${d.status})`:""));
+    toast((d.labelReady||d.trackingNumber)?"Status InPost zaktualizowany ✅ — etykieta gotowa":"Status InPost zaktualizowany — etykieta jeszcze czeka na potwierdzenie");
     renderuj();
   }catch(bl){
     if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost w Netlify"); return; }
@@ -2873,7 +2908,7 @@ async function utworzEtykietyZaznaczoneAPI(){
   if(!chmuraToken){ toast("Wpisz hasło bazy administratora"); chmuraUstawToken(); return; }
   if(!confirm(`Utworzyć przesyłki InPost (API) dla ${nry.length} zaznaczonych zleceń? W trybie produkcyjnym mogą naliczyć się opłaty zgodnie z umową.`)) return;
   let ok=0,bl=0,pom=0;
-  toast(`Tworzę etykiety InPost dla ${nry.length} zleceń…`);
+  toast(`Tworzę przesyłki InPost dla ${nry.length} zleceń…`);
   for(const nr of nry){
     const z=pobierzZamowienia().find(x=>x.nr===nr);
     if(z?.wysylka?.inpostId){ pom++; continue; }
@@ -2881,7 +2916,7 @@ async function utworzEtykietyZaznaczoneAPI(){
     catch(e){ bl++; loguj("blad",`InPost etykieta ${nr}: ${e.message}`); }
   }
   await synchronizujBazeCentralna(true).catch(()=>{});
-  toast(`🟡 Etykiety InPost: ${ok} utworzone${pom?`, ${pom} już były`:""}${bl?`, ${bl} błędów`:""}`);
+  toast(`🟡 InPost: ${ok} przesyłek zleconych${pom?`, ${pom} już było`:""}${bl?`, ${bl} błędów`:""} — PDF odblokuje się po potwierdzeniu`);
   renderuj();
 }
 function przelaczZadanieWysylki(nr,klucz){
@@ -2915,6 +2950,7 @@ function kartaZleceniaWysylki(z){
   const w=daneWysylki(z), etap=ETAPY_WYSYLKI[etapWysylki(z)], sla=slaWysylki(z);
   const koszty=kosztyZamowienia(z);
   const zad=w.zadania||{}, wykonane=["dane","kompletacja","etykieta","przekazanie"].filter(k=>zad[k]).length;
+  const etykietaGotowa=czyEtykietaInpostGotowa(z);
   const zazn=zaznaczoneNadania.has(String(z.nr)), got=gotoweDoNadaniaInpost(z), odbior=String(z?.dostawaId||"").toLowerCase()==="odbior";
   const znacznik = odbior?"":(got.ok?`<span class="lvl" style="background:#dcfce7;color:#166534" title="Dane kompletne — gotowe do nadania">✅ gotowe</span>`:`<span class="lvl" style="background:#fef3c7;color:#92400e" title="Uzupełnij dane odbiorcy przed nadaniem">⚠️ ${esc(got.powod)}</span>`);
   return `<div class="ship-card ${etapWysylki(z)==="problem"?"problem":""}" style="${zazn?"border:2px solid #ffcc00;background:#fffdf3;":""}">
@@ -2935,7 +2971,7 @@ function kartaZleceniaWysylki(z){
       <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}],'tab')">📄 TXT z nagłówkami InPost</button>
       <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}],'csv')">CSV przecinek</button>
       <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}],'txt')">TXT średnik</button>
-      ${!w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI(${jsArg(z.nr)})">🟡 Generuj etykietę InPost</button>`:`<button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(z.nr)},'A6')">🏷️ A6</button><button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(z.nr)},'A4')">🏷️ A4</button>`}
+      ${!w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI(${jsArg(z.nr)})">🟡 Generuj etykietę InPost</button>`:etykietaGotowa?`<button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(z.nr)},'A6')">🏷️ A6</button><button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(z.nr)},'A4')">🏷️ A4</button>`:`<button class="btn ghost" type="button" disabled title="${esc(opisGotowosciEtykietyInpost(z))}">🏷️ PDF po potwierdzeniu</button>`}
       ${w.inpostId?`<button class="btn ghost" type="button" onclick="synchronizujTrackingAPI(${jsArg(z.nr)})">🔄 Status InPost</button>`:""}
       ${urlSledzenia(z)?`<a class="btn ghost" href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">Śledź</a>`:""}
     </div>
