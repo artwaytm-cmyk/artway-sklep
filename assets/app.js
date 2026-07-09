@@ -48,7 +48,7 @@ function normalizujDostawyInPost(lista){
   const kurier = zrodlo.find(d=>d&&["kurier_inpost","kurier"].includes(d.id)) || zrodlo.find(d=>String(d?.nazwa||"").toLowerCase().includes("kurier")) || {};
   return [
     { ...DOMYSLNA_DOSTAWA_INPOST, koszt:cena(paczkomat.koszt, DOMYSLNA_DOSTAWA_INPOST.koszt), opis:String(paczkomat.opis||DOMYSLNA_DOSTAWA_INPOST.opis).trim()||DOMYSLNA_DOSTAWA_INPOST.opis },
-    { ...DOMYSLNA_DOSTAWA_INPOST_KURIER, koszt:20, opis:String(kurier.opis||DOMYSLNA_DOSTAWA_INPOST_KURIER.opis).trim()||DOMYSLNA_DOSTAWA_INPOST_KURIER.opis }
+    { ...DOMYSLNA_DOSTAWA_INPOST_KURIER, koszt:cena(kurier.koszt, DOMYSLNA_DOSTAWA_INPOST_KURIER.koszt), opis:String(kurier.opis||DOMYSLNA_DOSTAWA_INPOST_KURIER.opis).trim()||DOMYSLNA_DOSTAWA_INPOST_KURIER.opis }
   ];
 }
 function dostepneDostawy(){
@@ -924,7 +924,6 @@ function zastosujUstawienia(){
     const kosztKurier = Number(String(u.kosztKurierInpost).replace(",","."));
     if(Number.isFinite(kosztKurier)) kurierInpost.koszt = +kosztKurier.toFixed(2);
   }
-  if(kurierInpost) kurierInpost.koszt = 20; // wymuszone: Kurier InPost dla klienta kosztuje 20 zł
   ustawienia.dostawy = KONFIG.dostawy.map(x=>({...x}));
   ustawienia.kurierInpostAktywny = true;
   const pobranie = KONFIG.platnosci.find(p=>p.id==="pobranie"), paynow = KONFIG.platnosci.find(p=>p.id==="paynow"), telefon = KONFIG.platnosci.find(p=>p.id==="telefon");
@@ -3205,41 +3204,122 @@ function widokAdmin(){
     </div>`);
 }
 let filtrZamowien = "wszystkie", szukajZamowien = "";
-function widokAdminZamowienia(){
-  let zam = pobierzZamowienia();
-  if(filtrZamowien!=="wszystkie") zam = zam.filter(z=>z.status===filtrZamowien);
-  if(szukajZamowien) zam = zam.filter(z=>(z.nr+" "+(z.email||"")+" "+(z.adres||"")).toLowerCase().includes(szukajZamowien));
-  return adminSzkielet("/admin/zamowienia", `
-  <div class="panel">
-    <h1>📦 Zamówienia (${zam.length}) <small style="font-size:.8rem;color:var(--muted2)">suma widocznych: ${zl(zam.reduce((s,z)=>s+z.razem,0))}</small></h1>
-    <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:.6rem 0 1rem">
-      <select onchange="filtrZamowien=this.value;renderuj()" style="padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
-        <option value="wszystkie" ${filtrZamowien==="wszystkie"?"selected":""}>Wszystkie statusy</option>
-        ${STATUSY.map(s=>`<option ${s===filtrZamowien?"selected":""}>${s}</option>`).join("")}
-      </select>
-      <input placeholder="Szukaj: nr, e-mail, adres…" value="${esc(szukajZamowien)}" oninput="szukajZamowien=this.value.toLowerCase();renderuj()" style="flex:1;min-width:180px;padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
-      <button class="btn ghost" onclick="eksportujZamowienia()">📤 CSV</button>
+function klientZamowieniaLabel(z){
+  const k=z?.klient||{};
+  return [k.imie,k.nazwisko].filter(Boolean).join(" ") || z?.email || "gość";
+}
+function adminZamowienieSearchText(z){
+  const k=z?.klient||{}, w=daneWysylki(z);
+  return `${z?.nr||""} ${z?.email||""} ${k.imie||""} ${k.nazwisko||""} ${k.telefon||""} ${k.firma||""} ${z?.adres||""} ${z?.dostawa||""} ${z?.platnosc||""} ${w.numer||""} ${w.inpostId||""}`.toLowerCase();
+}
+function adminZamowieniaStatyHTML(wszystkie,zam){
+  const sumaWidocznych=zam.reduce((s,z)=>s+kwotaNum(kosztyZamowienia(z).razem||z.razem),0);
+  const nowe=wszystkie.filter(z=>z.status==="nowe").length;
+  const realizacja=wszystkie.filter(z=>["potwierdzone","w realizacji","gotowe do wysyłki"].includes(z.status)).length;
+  const bezNumeru=wszystkie.filter(z=>!["anulowane","zakończone","dostarczone"].includes(String(z.status||"").toLowerCase())&&!daneWysylki(z).numer).length;
+  const maile=wszystkie.filter(z=>(daneWysylki(z).powiadomienia||[]).length).length;
+  return `<div class="orders-stat-grid">
+    <div class="order-stat-card hot"><span>🆕</span><b>${nowe}</b><small>nowe zamówienia</small></div>
+    <div class="order-stat-card"><span>📦</span><b>${wszystkie.length}</b><small>wszystkie aktywne</small></div>
+    <div class="order-stat-card"><span>⚙️</span><b>${realizacja}</b><small>w obsłudze</small></div>
+    <div class="order-stat-card"><span>🏷️</span><b>${bezNumeru}</b><small>bez numeru nadania</small></div>
+    <div class="order-stat-card"><span>✉️</span><b>${maile}</b><small>z historią e-maili</small></div>
+    <div class="order-stat-card money"><span>💰</span><b>${zl(sumaWidocznych)}</b><small>suma widocznych</small></div>
+  </div>`;
+}
+function adminStatusyZamowienHTML(wszystkie){
+  const ile=s=>s==="wszystkie"?wszystkie.length:wszystkie.filter(z=>z.status===s).length;
+  return `<div class="orders-status-strip">
+    <button class="${filtrZamowien==="wszystkie"?"active":""}" onclick="filtrZamowien='wszystkie';renderuj()">Wszystkie <b>${ile("wszystkie")}</b></button>
+    ${STATUSY.map(s=>`<button class="${filtrZamowien===s?"active":""}" onclick="filtrZamowien=${jsArg(s)};renderuj()">${esc(s)} <b>${ile(s)}</b></button>`).join("")}
+  </div>`;
+}
+function kartaAdminZamowieniaHTML(z){
+  const k=kosztyZamowienia(z), w=daneWysylki(z), klient=klientZamowieniaLabel(z);
+  const pozycje=Array.isArray(z.pozycjeDane)&&z.pozycjeDane.length
+    ? z.pozycjeDane.map(p=>`${p.ilosc||1} × ${p.nazwa||p.produkt||p.id||"produkt"}${p.wariant?` (${p.wariant})`:""} — ${zl(p.wartosc||kwotaNum(p.cena)*(Number(p.ilosc)||1))}`)
+    : (Array.isArray(z.pozycje)?z.pozycje:["brak pozycji"]);
+  const tracking=w.numer?`${nazwaPrzewoznika(w.przewoznik||"inpost")}: ${w.numer}`:(w.inpostId?`InPost ID ${w.inpostId} — ${w.inpostStatus||"czeka na numer"}`:"bez numeru nadania");
+  const platnosc=z.platnosc||dostepnePlatnosci().find(p=>p.id===z.platnoscId)?.nazwa||"—";
+  return `<article class="order-pro-card">
+    <div class="order-pro-top">
+      <div>
+        <a class="order-pro-number" href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">${esc(z.nr)}</a>
+        <div class="order-pro-muted">${esc(z.data||"")} • ${esc(klient)}</div>
+      </div>
+      <div class="order-pro-right">
+        <select onchange="zmienStatus(${jsArg(z.nr)}, this.value)" style="background:${KOLOR_STATUSU[z.status]||'var(--bg)'}">
+          ${STATUSY.map(s=>`<option value="${esc(s)}" ${s===z.status?"selected":""}>${esc(s)}</option>`).join("")}
+        </select>
+        <b>${zl(k.razem)}</b>
+      </div>
     </div>
-    ${zam.length ? zam.map(z=>`
-      <div class="order-box">
-        <div class="order-head">
-          <a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}"><b>${esc(z.nr)}</b></a>
-          <span>${esc(z.data)}</span>
-          <select onchange="zmienStatus('${esc(z.nr)}', this.value)" style="padding:.2rem .5rem;border-radius:8px;border:1.5px solid var(--line);background:${KOLOR_STATUSU[z.status]||'var(--bg)'}">
-            ${STATUSY.map(s=>`<option ${s===z.status?"selected":""}>${s}</option>`).join("")}
-          </select>
-          <b>${zl(z.razem)}</b>
-          <button class="ci-remove" onclick="if(confirm('Usunąć zamówienie ${esc(z.nr)}?')) usunZamowienie('${esc(z.nr)}')" title="Usuń zamówienie">🗑️</button>
-        </div>
-        <div class="order-lines">
-          ${z.pozycje.map(p=>esc(p)).join("<br>")}
-          ${z.email?`<br>👤 ${esc(z.email)}`:"<br>👤 gość (bez konta)"}
-          <br>💰 Dostawa: ${zl(kosztyZamowienia(z).dostawa)}${kosztyZamowienia(z).paczkaWeekend?` • Paczka w Weekend: ${zl(kosztyZamowienia(z).paczkaWeekend)}`:""}
-          ${z.wysylka?.numer?`<br>🚚 ${esc(nazwaPrzewoznika(z.wysylka.przewoznik))}: ${esc(z.wysylka.numer)}`:"<br>🚚 bez numeru nadania"}
-          — <a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">szczegóły →</a>
-        </div>
-      </div>`).join("")
-    : `<p>Brak zamówień${filtrZamowien!=="wszystkie"||szukajZamowien?" dla tego filtra":""}.</p>`}
+    <div class="order-pro-grid">
+      <div class="order-pro-section">
+        <span class="order-pro-label">Produkty</span>
+        <p>${pozycje.slice(0,3).map(p=>esc(p)).join("<br>")}${pozycje.length>3?`<br><span style="color:var(--muted2)">+ ${pozycje.length-3} kolejnych pozycji</span>`:""}</p>
+      </div>
+      <div class="order-pro-section">
+        <span class="order-pro-label">Klient</span>
+        <p>${z.email?`✉️ ${esc(z.email)}`:"👤 gość"}${z.klient?.telefon?`<br>📞 ${esc(z.klient.telefon)}`:""}${z.klient?.firma?`<br>🏢 ${esc(z.klient.firma)}`:""}</p>
+      </div>
+      <div class="order-pro-section">
+        <span class="order-pro-label">Dostawa</span>
+        <p>🚚 ${esc(z.dostawa||uslugaInpostZamowienia(z))}<br>💰 ${k.dostawa?zl(k.dostawa):"GRATIS"}${k.paczkaWeekend?` + Weekend ${zl(k.paczkaWeekend)}`:""}<br>🏷️ ${esc(tracking)}</p>
+      </div>
+      <div class="order-pro-section">
+        <span class="order-pro-label">Płatność i adres</span>
+        <p>💳 ${esc(platnosc)}${k.platnosc?` + ${zl(k.platnosc)}`:""}<br>📍 ${esc(z.adres||"brak adresu")}</p>
+      </div>
+    </div>
+    <div class="order-pro-bottom">
+      <div class="order-pro-costs">
+        <span>Produkty <b>${zl(k.poRabacie||k.produkty)}</b></span>
+        <span>Dostawa <b>${k.dostawa?zl(k.dostawa):"GRATIS"}</b></span>
+        ${k.paczkaWeekend?`<span>Weekend <b>${zl(k.paczkaWeekend)}</b></span>`:""}
+        ${k.platnosc?`<span>Płatność <b>${zl(k.platnosc)}</b></span>`:""}
+      </div>
+      <div class="diag-actions">
+        <a class="btn" href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">Obsłuż</a>
+        <a class="btn ghost" href="#/admin/wysylki">Centrum wysyłek</a>
+        <button class="btn ghost" onclick="drukujZamowienie(${jsArg(z.nr)})">🖨️ Druk</button>
+        <button class="ci-remove" onclick="if(confirm('Usunąć zamówienie ${esc(z.nr)}?')) usunZamowienie(${jsArg(z.nr)})" title="Usuń zamówienie">🗑️</button>
+      </div>
+    </div>
+  </article>`;
+}
+function widokAdminZamowienia(){
+  const wszystkie = pobierzZamowienia();
+  let zam = wszystkie.slice();
+  if(filtrZamowien!=="wszystkie") zam = zam.filter(z=>z.status===filtrZamowien);
+  if(szukajZamowien) zam = zam.filter(z=>adminZamowienieSearchText(z).includes(szukajZamowien));
+  return adminSzkielet("/admin/zamowienia", `
+  <div class="panel orders-page">
+    <div class="orders-hero">
+      <div>
+        <span class="order-pro-label">Centrum zamówień</span>
+        <h1>📦 Zamówienia</h1>
+        <p>Pełna obsługa sprzedaży: statusy, płatności, koszty InPost, etykiety, e-maile i szybkie przejście do wysyłki.</p>
+      </div>
+      <div class="diag-actions">
+        <button class="btn ghost" onclick="synchronizujBazeCentralna(true)">🔄 Synchronizuj</button>
+        <button class="btn ghost" onclick="eksportujZamowienia()">📤 CSV</button>
+        <a class="btn" href="#/admin/wysylki">🚚 Centrum wysyłek</a>
+      </div>
+    </div>
+    ${adminZamowieniaStatyHTML(wszystkie,zam)}
+    <div class="orders-toolbar">
+      <input placeholder="Szukaj: nr, klient, e-mail, telefon, adres, tracking…" value="${esc(szukajZamowien)}" oninput="szukajZamowien=this.value.toLowerCase();renderuj()">
+      <select onchange="filtrZamowien=this.value;renderuj()">
+        <option value="wszystkie" ${filtrZamowien==="wszystkie"?"selected":""}>Wszystkie statusy</option>
+        ${STATUSY.map(s=>`<option value="${esc(s)}" ${s===filtrZamowien?"selected":""}>${esc(s)}</option>`).join("")}
+      </select>
+      ${szukajZamowien||filtrZamowien!=="wszystkie"?`<button class="btn ghost" onclick="szukajZamowien='';filtrZamowien='wszystkie';renderuj()">Wyczyść filtry</button>`:""}
+    </div>
+    ${adminStatusyZamowienHTML(wszystkie)}
+    <div class="orders-list">
+      ${zam.length ? zam.map(kartaAdminZamowieniaHTML).join("") : `<div class="order-empty"><b>Brak zamówień dla tego widoku.</b><br>Zmień filtr albo wyczyść wyszukiwarkę.</div>`}
+    </div>
   </div>`);
 }
 function widokAdminZamowienie(nr){
@@ -5225,10 +5305,10 @@ function widokAdminDostawy(){
       <div class="backend-note" style="border-color:#facc15;background:#fffbeb;color:#713f12"><b>Aktywne są tylko metody InPost:</b> Paczkomat/Punkt InPost oraz Kurier InPost. Inni przewoźnicy i odbiór osobisty pozostają wyłączone.</div>
       <div class="f-row" style="grid-template-columns:1fr 1fr 1fr">
         <div class="f-group"><label>Paczkomat InPost (zł)</label><input name="kosztPaczkomat" inputmode="decimal" value="${paczkomat.koszt}"></div>
-        <div class="f-group"><label>Kurier InPost (zł)</label><input name="kosztKurierInpost" inputmode="decimal" value="20" readonly><small style="color:var(--muted2)">Stały koszt dla klienta: 20 zł.</small></div>
+        <div class="f-group"><label>Kurier InPost (zł)</label><input name="kosztKurierInpost" inputmode="decimal" value="${kurierInpost.koszt}"><small style="color:var(--muted2)">Cena widoczna w koszyku, zamówieniach, e-mailach i eksportach.</small></div>
         <div class="f-group"><label>Darmowa dostawa od (zł)</label><input name="darmowaDostawaOd" inputmode="decimal" value="${KONFIG.darmowaDostawaOd}"></div>
       </div>
-      <div class="backend-note"><b>Dla klienta dostępne są zawsze dokładnie dwie metody:</b> Paczkomat/Punkt InPost oraz Kurier InPost za 20 zł.</div>
+      <div class="backend-note"><b>Dla klienta dostępne są zawsze dokładnie dwie metody:</b> Paczkomat/Punkt InPost oraz Kurier InPost. Ceny ustawiasz powyżej, bez edycji kodu strony.</div>
       <div class="f-group" style="max-width:320px"><label>Deklarowany czas wysyłki — zmienia się wszędzie</label><input name="czasWysylki" value="${esc(czasWysylki())}" placeholder="np. 24 h, 48 h, 2 dni robocze"></div>
       <h3 class="f-sekcja">💳 Płatności i bramka</h3>
       <div class="f-group"><label>Awaryjny ręczny link mBank Paynow (opcjonalnie — gdy API nie jest jeszcze skonfigurowane)</label>
@@ -5283,7 +5363,7 @@ function zapiszDostawy(e){
     kosztKurierInpost: f.get("kosztKurierInpost"),
     dostawy: normalizujDostawyInPost([
       {...DOMYSLNA_DOSTAWA_INPOST,koszt:(()=>{const n=Number(String(f.get("kosztPaczkomat")).replace(",","."));return Number.isFinite(n)?n:DOMYSLNA_DOSTAWA_INPOST.koszt;})()},
-      {...DOMYSLNA_DOSTAWA_INPOST_KURIER,koszt:20}
+      {...DOMYSLNA_DOSTAWA_INPOST_KURIER,koszt:(()=>{const n=Number(String(f.get("kosztKurierInpost")).replace(",","."));return Number.isFinite(n)?n:DOMYSLNA_DOSTAWA_INPOST_KURIER.koszt;})()}
     ]),
     oplataPobranie: f.get("oplataPobranie"),
     pobranieWl: !!f.get("pobranieWl"),

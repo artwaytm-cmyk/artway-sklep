@@ -75,6 +75,8 @@ requireMarkers('assets/app.js', app, [
   'e-mail","telefon","rozmiar","paczkomat","numer_referencyjny',
   'kurierInpostAktywny: true',
   'nazwa:"Kurier InPost", koszt:20',
+  'function kartaAdminZamowieniaHTML',
+  'orders-stat-grid',
   'OPLATA_PACZKA_WEEKEND = 5',
   'Paczka w Weekend (+',
   'function kosztyZamowienia',
