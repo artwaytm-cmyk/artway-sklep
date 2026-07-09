@@ -3504,27 +3504,61 @@ function widokAdminZamowienie(nr){
         <div class="f-group"><label>Kod pocztowy${paczkomatZam?"":" *"}</label><input name="kod" value="${esc(adres.kod||"")}" placeholder="00-000" maxlength="6" oninput="formatujKod(this)"></div>
         <div class="f-group"><label>Miejscowość${paczkomatZam?"":" *"}</label><input name="miasto" value="${esc(adres.miasto||"")}"></div>
       </div>
-      <h3 class="f-sekcja">🟡 Opcje InPost — domyślne jak w Managerze</h3>
-      <div class="inpost-default-note">Domyślnie: nadanie w automacie Paczkomat®, pobranie NIE, Paczka w Weekend NIE, ochrona brak. Te pola są zapisywane w zamówieniu, eksporcie i payloadzie API.</div>
-      <div class="inpost-options-grid">
-        <div class="f-group"><label>Zlecenie za pobraniem</label><select name="pobranieAktywne" onchange="if(this.value==='tak'&&!this.form.pobranie.value)this.form.pobranie.value='${esc(kwotaNum(z.razem).toFixed(2))}'">
-          <option value="" ${!pobranieAktywne?"selected":""}>NIE — jak w InPost</option>
-          <option value="tak" ${pobranieAktywne?"selected":""}>TAK — pobranie od klienta</option>
-        </select><small>Możesz wyłączyć nawet przy płatności „za pobraniem”, jeśli ma iść bez COD.</small></div>
-        <div class="f-group"><label>Wartość pobrania (zł)</label><input name="pobranie" inputmode="decimal" value="${esc(pobranieKwota)}" placeholder="np. ${esc(kwotaNum(z.razem).toFixed(2))}"><small>Kwota trafi do InPost jako COD tylko gdy pole obok jest ustawione na TAK.</small></div>
-        <div class="f-group"><label>Paczka w Weekend</label><select name="paczkaWeekend">
-          <option value="" ${!paczkaWeekendAktywna?"selected":""}>NIE — jak w InPost</option>
-          <option value="tak" ${paczkaWeekendAktywna?"selected":""}>TAK (+${zl(OPLATA_PACZKA_WEEKEND)})</option>
-        </select><small>Opłata jest doliczana do zamówienia, e-maili i podsumowań.</small></div>
-        <div class="f-group"><label>Sposób nadania</label><select name="sposobNadania">
-          ${Object.entries(INPOST_SP_NADANIA).map(([id,nazwa])=>`<option value="${esc(id)}" ${sposobNadania===id?"selected":""}>${esc(nazwa)}</option>`).join("")}
-        </select><small>Domyślnie zgodnie z Twoim Managerem: nadanie w automacie Paczkomat®.</small></div>
-        <div class="f-group"><label>Punkt nadania / drop-off</label><input name="punktNadania" value="${esc(punktNadania)}" placeholder="${esc(INPOST_DOMYSLNY_PUNKT_NADANIA)}" style="text-transform:uppercase"><small>Używane przy nadaniu w automacie albo PaczkoPunkcie. Domyślnie ${esc(INPOST_DOMYSLNY_PUNKT_NADANIA)}.</small></div>
-        <div class="f-group"><label>Dodatkowa ochrona</label><select name="ochronaPreset" onchange="if(this.value!=='custom')this.form.ochrona.value=this.value">
-          ${INPOST_OCHRONA_PRESETY.map(p=>`<option value="${esc(p.wartosc)}" ${ochronaPreset===p.wartosc?"selected":""}>${esc(p.etykieta)}</option>`).join("")}
-          <option value="custom" ${ochronaPreset==="custom"?"selected":""}>Własna kwota</option>
-        </select><small>Domyślnie brak ochrony. Wybierz preset lub wpisz własną kwotę.</small></div>
-        <div class="f-group"><label>Kwota ochrony / ubezpieczenia (zł)</label><input name="ochrona" inputmode="decimal" value="${esc(ochronaKwota)}" placeholder="puste = brak"></div>
+      <div class="inpost-manager-box">
+        <div class="inpost-manager-tabs"><span class="active">USTAWIENIA NADANIA</span><span>KOSZTY I USŁUGI</span><span>ETYKIETA</span></div>
+        <div class="inpost-manager-steps"><span>Krok 1</span><b>/</b><span>Krok 2</span><b>/</b><span>Krok 3</span><b>/</b></div>
+        <div class="inpost-manager-title">
+          <h3>Opcje InPost</h3>
+          <span class="inpost-help" title="Domyślnie jak w Managerze InPost">?</span>
+        </div>
+        <div class="inpost-manager-tip">Domyślnie: nadanie w automacie Paczkomat®, pobranie NIE, Paczka w Weekend NIE, ochrona brak. Zapis działa w zamówieniu, eksporcie i API ShipX.</div>
+        <div class="inpost-manager-grid">
+          <div class="inpost-manager-field">
+            <label>Zlecenie za pobraniem <span class="inpost-help mini">?</span></label>
+            <div><select name="pobranieAktywne" onchange="if(this.value==='tak'&&!this.form.pobranie.value)this.form.pobranie.value='${esc(kwotaNum(z.razem).toFixed(2))}'">
+              <option value="" ${!pobranieAktywne?"selected":""}>NIE — jak w InPost</option>
+              <option value="tak" ${pobranieAktywne?"selected":""}>TAK — pobranie od klienta</option>
+            </select><small>Możesz wyłączyć nawet przy płatności „za pobraniem”.</small></div>
+          </div>
+          <div class="inpost-manager-field">
+            <label>Wartość pobrania</label>
+            <div><input name="pobranie" inputmode="decimal" value="${esc(pobranieKwota)}" placeholder="np. ${esc(kwotaNum(z.razem).toFixed(2))}"><small>Kwota trafi do InPost jako COD tylko gdy pobranie = TAK.</small></div>
+          </div>
+          <div class="inpost-manager-field">
+            <label>Paczka w Weekend <span class="inpost-help mini">?</span></label>
+            <div><select name="paczkaWeekend">
+              <option value="" ${!paczkaWeekendAktywna?"selected":""}>NIE — jak w InPost</option>
+              <option value="tak" ${paczkaWeekendAktywna?"selected":""}>TAK (+${zl(OPLATA_PACZKA_WEEKEND)})</option>
+            </select><small>Opłata jest doliczana do zamówienia, e-maili i podsumowań.</small></div>
+          </div>
+          <div class="inpost-manager-field">
+            <label>Sposób nadania</label>
+            <div><select name="sposobNadania">
+              ${Object.entries(INPOST_SP_NADANIA).map(([id,nazwa])=>`<option value="${esc(id)}" ${sposobNadania===id?"selected":""}>${esc(nazwa)}</option>`).join("")}
+            </select><small>Domyślnie zgodnie z Twoim Managerem: nadanie w automacie.</small></div>
+          </div>
+          <div class="inpost-manager-field">
+            <label>Punkt nadania</label>
+            <div><input name="punktNadania" value="${esc(punktNadania)}" placeholder="${esc(INPOST_DOMYSLNY_PUNKT_NADANIA)}" style="text-transform:uppercase"><small>Drop-off dla automatu/PaczkoPunktu. Domyślnie ${esc(INPOST_DOMYSLNY_PUNKT_NADANIA)}.</small></div>
+          </div>
+          <div class="inpost-manager-field">
+            <label>Dodatkowa ochrona <span class="inpost-help mini">?</span></label>
+            <div><select name="ochronaPreset" onchange="if(this.value!=='custom')this.form.ochrona.value=this.value">
+              ${INPOST_OCHRONA_PRESETY.map(p=>`<option value="${esc(p.wartosc)}" ${ochronaPreset===p.wartosc?"selected":""}>${esc(p.etykieta)}</option>`).join("")}
+              <option value="custom" ${ochronaPreset==="custom"?"selected":""}>Własna kwota</option>
+            </select><small>Domyślnie brak ochrony. Preset albo własna kwota poniżej.</small></div>
+          </div>
+          <div class="inpost-manager-field">
+            <label>Kwota ochrony</label>
+            <div><input name="ochrona" inputmode="decimal" value="${esc(ochronaKwota)}" placeholder="puste = brak"><small>Przy pobraniu API nie obniży ochrony poniżej COD.</small></div>
+          </div>
+        </div>
+        <div class="inpost-manager-summary">
+          <span><b>Pobranie</b>${pobranieAktywne?`TAK · ${zl(pobranieKwota)}`:"NIE"}</span>
+          <span><b>Weekend</b>${paczkaWeekendAktywna?`TAK · ${zl(OPLATA_PACZKA_WEEKEND)}`:"NIE"}</span>
+          <span><b>Nadanie</b>${esc(inpostSposobNadaniaLabel(sposobNadania))}</span>
+          <span><b>Ochrona</b>${ochronaKwota?zl(ochronaKwota):"brak"}</span>
+        </div>
       </div>
       <details style="margin:.4rem 0"><summary style="cursor:pointer;color:var(--muted2)">Wymiary i waga (użyj, gdy nie chcesz gabarytu) oraz numer nadania ręcznie</summary>
         <div class="f-row" style="margin-top:.6rem">

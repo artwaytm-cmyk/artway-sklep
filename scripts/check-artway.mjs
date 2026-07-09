@@ -82,6 +82,8 @@ requireMarkers('assets/app.js', app, [
   'order-detail-page',
   'OPLATA_PACZKA_WEEKEND = 5',
   'INPOST_DOMYSLNY_SP_NADANIA = "parcel_locker"',
+  'inpost-manager-box',
+  'USTAWIENIA NADANIA',
   'name="pobranieAktywne"',
   'name="sposobNadania"',
   'name="punktNadania"',
