@@ -3664,9 +3664,11 @@ function widokAdminZamowienie(nr){
     </div>
   </div>
   <div class="panel">
-    <h2 style="margin-top:0">📇 Dane odbiorcy i adres</h2>
-    <div class="backend-note">To wszystkie dane, które podał klient przy zamówieniu. Możesz je tutaj uzupełnić lub poprawić — zapiszą się w zamówieniu, zsynchronizują z bazą i posłużą do etykiety InPost. Pola z <b>*</b> są wymagane do wygenerowania przesyłki${paczkomatZam?" do paczkomatu":" kurierem"}.</div>
-    <form onsubmit="zapiszDaneOdbiorcy(event,'${esc(z.nr)}')">
+    <h2 style="margin-top:0">🚚 Nadanie przez InPost</h2>
+    <p><span class="lvl" style="background:${ETAPY_WYSYLKI[etapWysylki(z)].kolor};font-size:.82rem">${esc(nazwaEtapu(z))}</span> <span class="${slaWysylki(z).klasa}" style="margin-left:.4rem">⏱ ${esc(slaWysylki(z).tekst)}</span>${w.numer?` &nbsp;•&nbsp; Numer nadania: <b>${esc(w.numer)}</b>`:""}${w.inpostId?` &nbsp;•&nbsp; InPost: <code>${esc(w.inpostId)}</code>${w.inpostStatus?` (${esc(w.inpostStatus)})`:""}`:""}${urlSledzenia(z)?` &nbsp;•&nbsp; <a href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">śledź</a>`:""}</p>
+    <div class="backend-note">Wszystko do nadania w jednym miejscu: dane odbiorcy, paczkomat/adres i gabaryt. Zapisz zmiany, a potem kliknij „Utwórz przesyłkę InPost". Pola z <b>*</b> są wymagane.</div>
+    <form onsubmit="zapiszNadanie(event,'${esc(z.nr)}')">
+      <h3 class="f-sekcja">👤 Odbiorca</h3>
       <div class="f-row">
         <div class="f-group"><label>Imię</label><input name="imie" value="${esc(klient.imie||"")}"></div>
         <div class="f-group"><label>Nazwisko</label><input name="nazwisko" value="${esc(klient.nazwisko||"")}"></div>
@@ -3679,6 +3681,25 @@ function widokAdminZamowienie(nr){
         <div class="f-group"><label>Firma (opcjonalnie)</label><input name="firma" value="${esc(klient.firma||"")}"></div>
         <div class="f-group"><label>NIP (opcjonalnie)</label><input name="nip" value="${esc(klient.nip||"")}"></div>
       </div>
+      <h3 class="f-sekcja">📦 Dostawa i gabaryt</h3>
+      <div class="f-row">
+        <div class="f-group"><label>Sposób dostawy</label><select name="dostawaTyp" onchange="przelaczDostawaAdmin(this)">
+          <option value="paczkomat" ${paczkomatZam?"selected":""}>Paczkomat / punkt InPost</option>
+          <option value="kurier_inpost" ${!paczkomatZam?"selected":""}>Kurier InPost</option>
+        </select></div>
+        <div class="f-group"><label>Gabaryt paczki</label><select name="gabaryt">
+          <option value="small" ${(w.gabaryt||"small")==="small"?"selected":""}>Gabaryt A — mały (8 × 38 × 64 cm)</option>
+          <option value="medium" ${w.gabaryt==="medium"?"selected":""}>Gabaryt B — średni (19 × 38 × 64 cm)</option>
+          <option value="large" ${w.gabaryt==="large"?"selected":""}>Gabaryt C — duży (41 × 38 × 64 cm)</option>
+        </select></div>
+      </div>
+      <div class="f-row" id="admPaczkomatRow" style="${paczkomatZam?"":"display:none"}">
+        <div class="f-group"><label>Paczkomat / punkt InPost *</label><input name="paczkomat" id="admPaczkomat" value="${esc(z.paczkomat||w.punktKod||"")}" placeholder="np. WAW01M" style="text-transform:uppercase"></div>
+        <div class="f-group" style="display:flex;align-items:flex-end"><button type="button" class="btn" style="background:#ffcc00;color:#111;font-weight:800" onclick="otworzGeowidgetAdmin()">🗺️ Wybierz paczkomat na mapie</button></div>
+      </div>
+      <input type="hidden" name="paczkomatAdres" id="admPaczkomatAdresVal" value="${esc(z.paczkomatAdres||"")}">
+      <div id="admPaczkomatAdres" style="font-size:.85rem;color:var(--muted2);margin:-.3rem 0 .7rem">${(z.paczkomatAdres||"").trim()?`📮 ${esc(czyscAdresPaczkomatu(z.paczkomatAdres))}`:""}</div>
+      <h3 class="f-sekcja">📍 Adres odbiorcy${paczkomatZam?" (do faktury / awaryjnie)":" *"}</h3>
       <div class="f-row">
         <div class="f-group"><label>Ulica${paczkomatZam?"":" *"}</label><input name="ulica" value="${esc(adres.ulica||"")}"></div>
         <div class="f-group"><label>Nr domu${paczkomatZam?"":" *"}</label><input name="nrDomu" value="${esc(adres.nrDomu||"")}"></div>
@@ -3688,65 +3709,37 @@ function widokAdminZamowienie(nr){
         <div class="f-group"><label>Kod pocztowy${paczkomatZam?"":" *"}</label><input name="kod" value="${esc(adres.kod||"")}" placeholder="00-000" maxlength="6" oninput="formatujKod(this)"></div>
         <div class="f-group"><label>Miejscowość${paczkomatZam?"":" *"}</label><input name="miasto" value="${esc(adres.miasto||"")}"></div>
       </div>
-      ${paczkomatZam?`<div class="f-row"><div class="f-group"><label>Paczkomat / punkt InPost *</label><input name="paczkomat" value="${esc(z.paczkomat||"")}" placeholder="np. WAW01M" style="text-transform:uppercase"></div><div class="f-group"><label>Adres paczkomatu (opis)</label><input name="paczkomatAdres" value="${esc(z.paczkomatAdres||"")}"></div></div>`:""}
+      <details style="margin:.4rem 0"><summary style="cursor:pointer;color:var(--muted2)">Wymiary i waga (użyj, gdy nie chcesz gabarytu) oraz numer nadania ręcznie</summary>
+        <div class="f-row" style="margin-top:.6rem">
+          <div class="f-group"><label>Waga (kg)</label><input name="waga" type="number" step=".01" min=".01" value="${esc(w.waga||uw.waga)}"></div>
+          <div class="f-group"><label>Długość (cm)</label><input name="dlugosc" type="number" min="1" value="${esc(w.dlugosc||uw.dlugosc)}"></div>
+          <div class="f-group"><label>Szerokość (cm)</label><input name="szerokosc" type="number" min="1" value="${esc(w.szerokosc||uw.szerokosc)}"></div>
+          <div class="f-group"><label>Wysokość (cm)</label><input name="wysokosc" type="number" min="1" value="${esc(w.wysokosc||uw.wysokosc)}"></div>
+        </div>
+        <div class="f-row">
+          <div class="f-group"><label>Numer nadania (ręcznie)</label><input name="numer" value="${esc(w.numer)}" placeholder="Zwykle uzupełni się automatycznie"></div>
+          <div class="f-group"><label>Własny link śledzenia</label><input name="trackingUrl" type="url" value="${esc(w.trackingUrl)}" placeholder="https://…"></div>
+        </div>
+      </details>
       <div class="f-group"><label>Uwagi do zamówienia</label><textarea name="uwagi" rows="2">${esc(z.uwagi||"")}</textarea></div>
-      <div class="diag-actions"><button class="btn" type="submit">💾 Zapisz dane odbiorcy</button></div>
+      <div class="diag-actions">
+        <button class="btn" type="submit">💾 Zapisz dane</button>
+        ${!w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI('${esc(z.nr)}')">🟡 Utwórz przesyłkę InPost i pobierz numer</button>`:""}
+        ${w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="pobierzEtykieteAPI('${esc(z.nr)}','A6')">🏷️ Etykieta A6</button><button class="btn ghost" type="button" onclick="pobierzEtykieteAPI('${esc(z.nr)}','A4')">🏷️ A4</button><button class="btn ghost" type="button" onclick="synchronizujTrackingAPI('${esc(z.nr)}')">🔄 Pobierz status z InPost</button>`:""}
+        <button class="btn ghost" type="button" onclick="drukujEtykieteRobocza('${esc(z.nr)}')">🏷️ Etykieta robocza A6</button>
+      </div>
+      <p style="font-size:.8rem;color:var(--muted2);margin:.4rem 0 0">Najpierw „Zapisz dane", potem „Utwórz przesyłkę". Numer nadania i status pojawią się automatycznie u góry tej sekcji.</p>
     </form>
   </div>
   <div class="panel">
-    <h2 style="margin-top:0">🚚 Dostawa, przesyłka i numer nadania</h2>
-    <p><span class="lvl" style="background:${ETAPY_WYSYLKI[etapWysylki(z)].kolor};font-size:.82rem">${esc(nazwaEtapu(z))}</span> <span class="${slaWysylki(z).klasa}" style="margin-left:.4rem">⏱ ${esc(slaWysylki(z).tekst)}</span></p>
-    <div class="summary" style="margin:.5rem 0 1rem">
-      <div><span>Sposób dostawy</span><span><b>${esc(z.dostawa||"—")}</b></span></div>
-      ${paczkomatZam
-        ? `<div><span>Paczkomat / punkt</span><span><b>${esc(z.paczkomat||w.punktKod||"—")}</b></span></div>${(z.paczkomatAdres||"").trim()?`<div><span>Adres punktu</span><span>${esc(czyscAdresPaczkomatu(z.paczkomatAdres))}</span></div>`:""}`
-        : `<div><span>Adres doręczenia</span><span>${esc(z.adres||"—")}</span></div>`}
-      <div><span>Numer nadania</span><span>${w.numer?`<b>${esc(w.numer)}</b>`:`<span style="color:var(--muted2)">— pojawi się po utworzeniu przesyłki</span>`}</span></div>
-      ${w.inpostId?`<div><span>Przesyłka InPost</span><span><code>${esc(w.inpostId)}</code>${w.inpostStatus?` • ${esc(w.inpostStatus)}`:""}</span></div>`:""}
-      ${urlSledzenia(z)?`<div><span>Śledzenie</span><span><a href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">otwórz link śledzenia</a></span></div>`:""}
-    </div>
-    <h3 style="margin:.6rem 0 .3rem">💳 Płatność</h3>
-    <div class="summary" style="margin:.2rem 0 1rem">
+    <h2 style="margin-top:0">💳 Płatność</h2>
+    <div class="summary" style="margin:.4rem 0 ${z.platnoscId==="paynow"?".8rem":"0"}">
       <div><span>Metoda</span><span><b>${esc(z.platnosc||"—")}</b></span></div>
       <div><span>Status płatności</span><span>${esc(z.platnoscStatus||(z.platnoscId==="paynow"?paynowStatusTekst(paynow.status):"—"))}</span></div>
       <div class="sum-total"><span>Kwota</span><span>${zl(z.razem)}</span></div>
     </div>
     ${z.platnoscId==="paynow"?`<div class="diag-actions"><button class="btn ghost" type="button" onclick="odswiezStatusPaynow(${jsArg(z.nr)},${jsArg(paynow.paymentId||"")})">🔄 Odśwież Paynow</button>${paynow.redirectUrl?`<a class="btn" href="${esc(paynow.redirectUrl)}" target="_blank" rel="noopener">Otwórz link płatności</a>`:""}${String(paynow.status||"").toUpperCase()==="CONFIRMED"?`<button class="btn" type="button" style="background:#0ea5e9;color:#fff" onclick="zwrotPieniedzyPaynow(${jsArg(z.nr)})">💸 Zwrot pieniędzy przez Paynow</button>`:""}</div>`:""}
     ${Array.isArray(paynow.refunds)&&paynow.refunds.length?`<div class="backend-note" style="border-color:#7dd3fc;background:#f0f9ff;color:#075985"><b>Zwroty Paynow:</b><br>${paynow.refunds.map(r=>`${zl((Number(r.amount)||0)/100)} • <code>${esc(r.refundId||"—")}</code> • ${esc(r.status||"—")}${r.ts?` • ${esc(new Date(r.ts).toLocaleString("pl-PL"))}`:""}`).join("<br>")}</div>`:""}
-    <h3 style="margin:.8rem 0 .3rem">🏷️ Nadanie i etykieta</h3>
-    <div class="backend-note">Przycisk etykiety roboczej tworzy dokument pomocniczy do kompletacji. Oficjalną etykietę z kodem InPost wystawia API ShipX po bezpiecznym połączeniu backendowym.</div>
-    ${przewoznik==="inpost"?`<div class="backend-note" style="border-color:#facc15;background:#fffbeb;color:#713f12"><b>Ręczna etykieta w InPost Managerze:</b> w polu referencji/opisu wpisz dokładnie numer zamówienia <code>${esc(z.nr)}</code>. Webhook InPost automatycznie podłączy numer nadania, status i tracking do tego zlecenia.</div>`:""}
-    <form onsubmit="zapiszWysylke(event,'${esc(z.nr)}')">
-      <div class="f-row">
-        <div class="f-group"><label>Przewoźnik</label><select name="przewoznik" onchange="uzupelnijUslugi(this)">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<option value="${id}" ${przewoznik===id?"selected":""}>${esc(p.nazwa)}</option>`).join("")}</select></div>
-        <div class="f-group"><label>Usługa</label><select name="usluga">${uslugi.map(x=>`<option ${uslugaDomyslna===x?"selected":""}>${esc(x)}</option>`).join("")}</select></div>
-      </div>
-      <div class="f-row">
-        <div class="f-group"><label>Priorytet zlecenia</label><select name="priorytet"><option value="normalny" ${w.priorytet==="normalny"?"selected":""}>Normalny</option><option value="wysoki" ${w.priorytet==="wysoki"?"selected":""}>Wysoki</option><option value="pilny" ${w.priorytet==="pilny"?"selected":""}>Pilny</option></select></div>
-        <div class="f-group"><label>Operator / osoba odpowiedzialna</label><input name="operator" value="${esc(w.operator)}" placeholder="Np. Anna"></div>
-        <div class="f-group"><label>Termin nadania</label><input name="terminNadania" type="datetime-local" value="${esc(w.terminNadania)}"></div>
-        <div class="f-group"><label>Planowane doręczenie</label><input name="przewidywaneDoreczenie" type="date" value="${esc(w.przewidywaneDoreczenie)}"></div>
-      </div>
-      <div class="f-row">
-        ${paczkomatZam?`<div class="f-group"><label>Punkt InPost / paczkomat *</label><input name="punktKod" value="${esc(z.paczkomat||w.punktKod||"")}" placeholder="np. WAW01M" style="text-transform:uppercase"></div>`:`<input type="hidden" name="punktKod" value="">`}
-        <div class="f-group"><label>Numer nadania</label><input name="numer" value="${esc(w.numer)}" placeholder="Wpisz numer otrzymany od InPost"></div>
-        <div class="f-group"><label>Własny link śledzenia (opcjonalnie)</label><input name="trackingUrl" type="url" value="${esc(w.trackingUrl)}" placeholder="https://…"></div>
-      </div>
-      <div class="f-row">
-        <div class="f-group"><label>Waga (kg)</label><input name="waga" type="number" step=".01" min=".01" value="${esc(w.waga||uw.waga)}"></div>
-        <div class="f-group"><label>Długość (cm)</label><input name="dlugosc" type="number" min="1" value="${esc(w.dlugosc||uw.dlugosc)}"></div>
-        <div class="f-group"><label>Szerokość (cm)</label><input name="szerokosc" type="number" min="1" value="${esc(w.szerokosc||uw.szerokosc)}"></div>
-        <div class="f-group"><label>Wysokość (cm)</label><input name="wysokosc" type="number" min="1" value="${esc(w.wysokosc||uw.wysokosc)}"></div>
-      </div>
-      <div class="diag-actions">
-        <button class="btn" type="submit">💾 Zapisz przesyłkę</button>
-        <button class="btn ghost" type="button" onclick="drukujEtykieteRobocza('${esc(z.nr)}')">🏷️ Etykieta robocza A6</button>
-        ${urlSledzenia(z)?`<a class="btn ghost" href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">🔎 Śledź w InPost</a>`:""}
-        ${przewoznik==="inpost"&&!w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI('${esc(z.nr)}')">🟡 Utwórz przesyłkę InPost API</button>`:""}
-        ${przewoznik==="inpost"&&w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="pobierzEtykieteAPI('${esc(z.nr)}','A6')">🏷️ Etykieta InPost A6</button><button class="btn ghost" type="button" onclick="pobierzEtykieteAPI('${esc(z.nr)}','A4')">🏷️ A4</button><button class="btn ghost" type="button" onclick="synchronizujTrackingAPI('${esc(z.nr)}')">🔄 Pobierz status z InPost</button>`:""}
-        ${przewoznik!=="inpost"?`<button class="btn ghost" type="button" disabled>Oficjalna etykieta — adapter ${esc(nazwaPrzewoznika(przewoznik))} niepodłączony</button>`:""}
-      </div>
-    </form>
   </div>
   <div class="panel">
     <h2 style="margin-top:0">📍 Historia śledzenia</h2>
@@ -3795,6 +3788,53 @@ function zapiszDaneOdbiorcy(e,nr){
   loguj("info",`Zaktualizowano dane odbiorcy zamówienia ${nr}`);
   toast("Dane odbiorcy zapisane ✅");
   renderuj();
+}
+function przelaczDostawaAdmin(sel){
+  const row=$("admPaczkomatRow"); if(row) row.style.display = sel.value==="paczkomat" ? "" : "none";
+}
+function zapiszNadanie(e,nr){
+  e.preventDefault();
+  const f=new FormData(e.target), g=k=>String(f.get(k)||"").trim();
+  aktualizujZamowienie(nr, z=>{
+    z.klient=z.klient||{};
+    z.klient.imie=g("imie"); z.klient.nazwisko=g("nazwisko"); z.klient.telefon=g("telefon");
+    z.klient.firma=g("firma"); z.klient.nip=g("nip").replace(/[^0-9]/g,"");
+    const em=g("email").toLowerCase(); if(em) z.email=em;
+    z.adresDostawy=z.adresDostawy||{};
+    z.adresDostawy.ulica=g("ulica"); z.adresDostawy.nrDomu=g("nrDomu"); z.adresDostawy.nrLokalu=g("nrLokalu");
+    z.adresDostawy.kod=g("kod"); z.adresDostawy.miasto=g("miasto");
+    const typ = g("dostawaTyp")==="kurier_inpost" ? "kurier_inpost" : "paczkomat";
+    z.dostawaId=typ;
+    z.dostawa = typ==="paczkomat" ? "Paczkomat InPost 24/7" : "Kurier InPost";
+    const w=daneWysylki(z);
+    if(typ==="paczkomat"){ const kod=g("paczkomat").toUpperCase(); z.paczkomat=kod; w.punktKod=kod; z.paczkomatAdres=g("paczkomatAdres"); }
+    else { z.paczkomat=""; z.paczkomatAdres=""; w.punktKod=""; }
+    const gab=g("gabaryt"); if(["small","medium","large"].includes(gab)) w.gabaryt=gab;
+    if(g("waga")) w.waga=g("waga"); if(g("dlugosc")) w.dlugosc=g("dlugosc"); if(g("szerokosc")) w.szerokosc=g("szerokosc"); if(g("wysokosc")) w.wysokosc=g("wysokosc");
+    if(f.has("numer")) w.numer=g("numer");
+    if(f.has("trackingUrl")) w.trackingUrl=g("trackingUrl");
+    w.przewoznik="inpost"; w.usluga = typ==="paczkomat" ? "Paczkomat 24/7" : "Kurier InPost";
+    z.wysylka=w;
+    z.uwagi=g("uwagi");
+    const a=z.adresDostawy;
+    z.adres=`${a.ulica} ${a.nrDomu}${a.nrLokalu?"/"+a.nrLokalu:""}, ${a.kod} ${a.miasto}`.replace(/\s+/g," ").replace(/^[,\s]+|[,\s]+$/g,"").trim();
+  });
+  loguj("info",`Zapisano dane nadania zamówienia ${nr}`);
+  toast("Zapisano dane nadania ✅");
+  renderuj();
+}
+async function otworzGeowidgetAdmin(){
+  const cfg=await pobierzInpostConfig();
+  if(!cfg||!cfg.geowidgetToken){ toast("Mapa paczkomatów niedostępna — wpisz kod ręcznie"); const h=$("admPaczkomat"); if(h) h.focus(); return; }
+  try{ await ladujGeowidgetSDK(); }catch(e){ toast(e.message||"Błąd mapy InPost"); return; }
+  window.__geoTarget="admin";
+  let ov=$("geoOverlay");
+  if(!ov){ ov=document.createElement("div"); ov.id="geoOverlay"; ov.style.cssText="position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:2vmin"; document.body.appendChild(ov); }
+  ov.innerHTML=`<div style="background:#fff;border-radius:16px;width:min(980px,96vw);height:min(88vh,780px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:.7rem 1rem;background:#111;color:#fff"><b>Wybierz paczkomat InPost</b><button type="button" onclick="zamknijGeowidget()" style="background:#ffcc00;color:#111;border:0;border-radius:8px;padding:.4rem .8rem;font-weight:800;cursor:pointer">Zamknij ✕</button></div>
+    <div style="flex:1;min-height:0"><inpost-geowidget onpoint="artwayPunktWybrany" token="${esc(cfg.geowidgetToken)}" language="pl" config="parcelCollect" style="width:100%;height:100%;display:block"></inpost-geowidget></div>
+  </div>`;
+  ov.style.display="flex";
 }
 function zmienStatus(nr, status){
   const t = pobierzZamowienia();
@@ -6807,6 +6847,15 @@ window.artwayPunktWybrany=function(point){
   try{
     const kod=(point&&(point.name||point.id))||"";
     const adr=czyscAdresPaczkomatu(point&&point.address?[point.address.line1,point.address.line2].filter(Boolean).join(" • "):((point&&point.location_description)||""));
+    if(window.__geoTarget==="admin"){
+      const ah=$("admPaczkomat"); if(ah) ah.value=kod;
+      const av=$("admPaczkomatAdresVal"); if(av) av.value=adr;
+      const ad=$("admPaczkomatAdres"); if(ad) ad.innerHTML=kod?`📮 ${esc(adr||kod)}`:"";
+      window.__geoTarget="";
+      zamknijGeowidget();
+      toast("Wybrano paczkomat "+kod);
+      return;
+    }
     const h=$("paczkomatKod"); if(h) h.value=kod;
     const r=$("paczkomatReczny"); if(r) r.value=kod;
     window.__paczkomatAdres=adr;
