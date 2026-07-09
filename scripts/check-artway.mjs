@@ -67,6 +67,7 @@ requireMarkers('assets/app.js', app, [
   'function utworzPrzesylkeAPI',
   'function synchronizujWszystkieStatusyAPI',
   'function eksportNadaniaInpostCSV',
+  'function panelEtykietInpostHTML',
   'function utworzEtykietyZaznaczoneAPI',
   'function pobierzInpostConfig',
   'function otworzGeowidget',
