@@ -3461,37 +3461,30 @@ function widokAdminZamowienie(nr){
       <div class="order-pro-costs"><span style="background:${etapInfo.kolor||'var(--bg)'};color:var(--ink)">${esc(nazwaEtapu(z))}</span>${w.numer?`<span>Numer <b>${esc(w.numer)}</b></span>`:""}${w.inpostId?`<span>InPost <b>${esc(w.inpostId)}</b></span>`:""}</div>
     </div>
     <p class="order-detail-lead">${w.inpostStatus?`Status InPost: ${esc(w.inpostStatus)}. `:""}${urlSledzenia(z)?`<a href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">Otwórz śledzenie przesyłki</a>`:"Najpierw zapisz dane, potem utwórz przesyłkę i etykietę."}</p>
-    <div class="backend-note">Ta sekcja jest centrum pracy z zamówieniem: dane odbiorcy, typ dostawy, paczkomat/adres, gabaryt, pobranie, Paczka w Weekend i etykieta PDF. Pola z <b>*</b> są wymagane przed utworzeniem przesyłki.</div>
-    <form class="order-form-pro shipment-manager-form" onsubmit="zapiszNadanie(event,'${esc(z.nr)}')">
-      <div class="shipment-manager-box">
-        <div class="shipment-manager-tabs">
-          <span class="active">DANE ODBIORCY</span><span>DOSTAWA</span><span>USŁUGI INPOST</span><span>ETYKIETA</span>
-        </div>
-        <div class="shipment-manager-steps"><span>Krok 1</span><b>/</b><span>Krok 2</span><b>/</b><span>Krok 3</span><b>/</b><span>Krok 4</span><b>/</b></div>
-        <div class="shipment-manager-title">
-          <div><h3>Nadanie i dane odbiorcy</h3><p>Układ jak kreator InPost, ale w kolorystyce Artway-TM. Najpierw dane, potem dostawa, usługi i etykieta.</p></div>
-          <span class="shipment-help" title="Wszystkie pola zapisują się w zamówieniu i API InPost">?</span>
-        </div>
+    <div class="backend-note">Pola z <b>*</b> są wymagane przed utworzeniem przesyłki InPost.</div>
+    <form class="order-form-pro shipment-manager-form inpost-like-form" onsubmit="zapiszNadanie(event,'${esc(z.nr)}')">
+      <div class="shipment-manager-box inpost-like-box">
+        <h3 class="inpost-like-title">Nadanie przesyłki</h3>
 
         <section class="shipment-manager-card">
-          <div class="shipment-card-title"><span>Krok 1</span><h4>👤 Odbiorca</h4></div>
+          <h4 class="inpost-like-section-title">Dane odbiorcy</h4>
           <div class="shipment-manager-grid">
             <div class="shipment-manager-field"><label>Imię</label><div><input name="imie" value="${esc(klient.imie||"")}"></div></div>
             <div class="shipment-manager-field"><label>Nazwisko</label><div><input name="nazwisko" value="${esc(klient.nazwisko||"")}"></div></div>
             <div class="shipment-manager-field"><label>E-mail *</label><div><input name="email" type="email" value="${esc(z.email||"")}"></div></div>
-            <div class="shipment-manager-field"><label>Telefon *</label><div><input name="telefon" value="${esc(klient.telefon||"")}" placeholder="9 cyfr"><small>Numer jest wymagany przez InPost.</small></div></div>
+            <div class="shipment-manager-field"><label>Telefon *</label><div><input name="telefon" value="${esc(klient.telefon||"")}" placeholder="9 cyfr"></div></div>
             <div class="shipment-manager-field"><label>Firma</label><div><input name="firma" value="${esc(klient.firma||"")}" placeholder="opcjonalnie"></div></div>
             <div class="shipment-manager-field"><label>NIP</label><div><input name="nip" value="${esc(klient.nip||"")}" placeholder="opcjonalnie"></div></div>
           </div>
         </section>
 
         <section class="shipment-manager-card">
-          <div class="shipment-card-title"><span>Krok 2</span><h4>🚚 Dostawa i gabaryt</h4></div>
+          <h4 class="inpost-like-section-title">Dostawa i gabaryt</h4>
           <div class="shipment-manager-grid">
             <div class="shipment-manager-field"><label>Sposób dostawy</label><div><select name="dostawaTyp" onchange="przelaczDostawaAdmin(this)">
               <option value="paczkomat" ${paczkomatZam?"selected":""}>Paczkomat / punkt InPost</option>
               <option value="kurier_inpost" ${!paczkomatZam?"selected":""}>Kurier InPost</option>
-            </select><small>Klient widzi tylko metody InPost ustawione w sklepie.</small></div></div>
+            </select></div></div>
             <div class="shipment-manager-field"><label>Gabaryt paczki</label><div><select name="gabaryt">
               <option value="small" ${(w.gabaryt||"small")==="small"?"selected":""}>Gabaryt A — mały (8 × 38 × 64 cm)</option>
               <option value="medium" ${w.gabaryt==="medium"?"selected":""}>Gabaryt B — średni (19 × 38 × 64 cm)</option>
@@ -3499,12 +3492,12 @@ function widokAdminZamowienie(nr){
             </select></div></div>
             <div class="shipment-manager-field span-2" id="admPaczkomatRow" style="${paczkomatZam?"":"display:none"}"><label>Paczkomat / punkt InPost *</label><div class="shipment-inline-control"><input name="paczkomat" id="admPaczkomat" value="${esc(z.paczkomat||w.punktKod||"")}" placeholder="np. WAW01M" style="text-transform:uppercase"><button type="button" class="btn" onclick="otworzGeowidgetAdmin()">🗺️ Wybierz na mapie</button></div></div>
             <input type="hidden" name="paczkomatAdres" id="admPaczkomatAdresVal" value="${esc(z.paczkomatAdres||"")}">
-            <div class="shipment-manager-note span-2" id="admPaczkomatAdres">${(z.paczkomatAdres||"").trim()?`📮 ${esc(czyscAdresPaczkomatu(z.paczkomatAdres))}`:"Punkt odbioru uzupełni się po wyborze na mapie albo wpisaniu kodu."}</div>
+            <div class="shipment-manager-note span-2" id="admPaczkomatAdres">${(z.paczkomatAdres||"").trim()?`📮 ${esc(czyscAdresPaczkomatu(z.paczkomatAdres))}`:""}</div>
           </div>
         </section>
 
         <section class="shipment-manager-card">
-          <div class="shipment-card-title"><span>Krok 3</span><h4>📍 Adres odbiorcy${paczkomatZam?" / awaryjny":" *"}</h4></div>
+          <h4 class="inpost-like-section-title">Adres odbiorcy${paczkomatZam?" / awaryjny":" *"}</h4>
           <div class="shipment-manager-grid">
             <div class="shipment-manager-field"><label>Ulica${paczkomatZam?"":" *"}</label><div><input name="ulica" value="${esc(adres.ulica||"")}"></div></div>
             <div class="shipment-manager-field"><label>Nr domu${paczkomatZam?"":" *"}</label><div><input name="nrDomu" value="${esc(adres.nrDomu||"")}"></div></div>
@@ -3515,33 +3508,26 @@ function widokAdminZamowienie(nr){
         </section>
 
         <section class="shipment-manager-card">
-          <div class="shipment-card-title"><span>Krok 4</span><h4>🧩 Usługi InPost</h4><em>domyślnie jak w Managerze InPost</em></div>
-          <div class="shipment-manager-tip">Domyślnie: nadanie w automacie Paczkomat®, pobranie NIE, Paczka w Weekend NIE, ochrona brak. Zapis działa w zamówieniu, eksporcie i API ShipX.</div>
+          <h4 class="inpost-like-section-title">Usługi InPost</h4>
           <div class="shipment-manager-grid">
-            <div class="shipment-manager-field"><label>Zlecenie za pobraniem <span class="shipment-help mini">?</span></label><div><select name="pobranieAktywne" onchange="if(this.value==='tak'&&!this.form.pobranie.value)this.form.pobranie.value='${esc(kwotaNum(z.razem).toFixed(2))}'">
+            <div class="shipment-manager-field"><label>Zlecenie za pobraniem</label><div><select name="pobranieAktywne" onchange="if(this.value==='tak'&&!this.form.pobranie.value)this.form.pobranie.value='${esc(kwotaNum(z.razem).toFixed(2))}'">
               <option value="" ${!pobranieAktywne?"selected":""}>NIE — jak w InPost</option>
               <option value="tak" ${pobranieAktywne?"selected":""}>TAK — pobranie od klienta</option>
-            </select><small>Możesz wyłączyć nawet przy płatności „za pobraniem”.</small></div></div>
-            <div class="shipment-manager-field"><label>Wartość pobrania</label><div><input name="pobranie" inputmode="decimal" value="${esc(pobranieKwota)}" placeholder="np. ${esc(kwotaNum(z.razem).toFixed(2))}"><small>Kwota trafi do InPost jako COD tylko gdy pobranie = TAK.</small></div></div>
-            <div class="shipment-manager-field"><label>Paczka w Weekend <span class="shipment-help mini">?</span></label><div><select name="paczkaWeekend">
+            </select></div></div>
+            <div class="shipment-manager-field"><label>Wartość pobrania</label><div><input name="pobranie" inputmode="decimal" value="${esc(pobranieKwota)}" placeholder="np. ${esc(kwotaNum(z.razem).toFixed(2))}"></div></div>
+            <div class="shipment-manager-field"><label>Paczka w Weekend</label><div><select name="paczkaWeekend">
               <option value="" ${!paczkaWeekendAktywna?"selected":""}>NIE — jak w InPost</option>
               <option value="tak" ${paczkaWeekendAktywna?"selected":""}>TAK (+${zl(OPLATA_PACZKA_WEEKEND)})</option>
-            </select><small>Opłata jest doliczana do zamówienia, e-maili i podsumowań.</small></div></div>
+            </select></div></div>
             <div class="shipment-manager-field"><label>Sposób nadania</label><div><select name="sposobNadania">
               ${Object.entries(INPOST_SP_NADANIA).map(([id,nazwa])=>`<option value="${esc(id)}" ${sposobNadania===id?"selected":""}>${esc(nazwa)}</option>`).join("")}
-            </select><small>Domyślnie zgodnie z Twoim Managerem: nadanie w automacie.</small></div></div>
-            <div class="shipment-manager-field"><label>Punkt nadania</label><div><input name="punktNadania" value="${esc(punktNadania)}" placeholder="${esc(INPOST_DOMYSLNY_PUNKT_NADANIA)}" style="text-transform:uppercase"><small>Drop-off dla automatu/PaczkoPunktu. Domyślnie ${esc(INPOST_DOMYSLNY_PUNKT_NADANIA)}.</small></div></div>
-            <div class="shipment-manager-field"><label>Dodatkowa ochrona <span class="shipment-help mini">?</span></label><div><select name="ochronaPreset" onchange="if(this.value!=='custom')this.form.ochrona.value=this.value">
+            </select></div></div>
+            <div class="shipment-manager-field"><label>Punkt nadania</label><div><input name="punktNadania" value="${esc(punktNadania)}" placeholder="${esc(INPOST_DOMYSLNY_PUNKT_NADANIA)}" style="text-transform:uppercase"></div></div>
+            <div class="shipment-manager-field"><label>Dodatkowa ochrona</label><div><select name="ochronaPreset" onchange="if(this.value!=='custom')this.form.ochrona.value=this.value">
               ${INPOST_OCHRONA_PRESETY.map(p=>`<option value="${esc(p.wartosc)}" ${ochronaPreset===p.wartosc?"selected":""}>${esc(p.etykieta)}</option>`).join("")}
               <option value="custom" ${ochronaPreset==="custom"?"selected":""}>Własna kwota</option>
-            </select><small>Domyślnie brak ochrony. Preset albo własna kwota poniżej.</small></div></div>
-            <div class="shipment-manager-field"><label>Kwota ochrony</label><div><input name="ochrona" inputmode="decimal" value="${esc(ochronaKwota)}" placeholder="puste = brak"><small>Przy pobraniu API nie obniży ochrony poniżej COD.</small></div></div>
-          </div>
-          <div class="shipment-manager-summary">
-            <span><b>Pobranie</b>${pobranieAktywne?`TAK · ${zl(pobranieKwota)}`:"NIE"}</span>
-            <span><b>Weekend</b>${paczkaWeekendAktywna?`TAK · ${zl(OPLATA_PACZKA_WEEKEND)}`:"NIE"}</span>
-            <span><b>Nadanie</b>${esc(inpostSposobNadaniaLabel(sposobNadania))}</span>
-            <span><b>Ochrona</b>${ochronaKwota?zl(ochronaKwota):"brak"}</span>
+            </select></div></div>
+            <div class="shipment-manager-field"><label>Kwota ochrony</label><div><input name="ochrona" inputmode="decimal" value="${esc(ochronaKwota)}" placeholder="puste = brak"></div></div>
           </div>
         </section>
 
@@ -3559,7 +3545,7 @@ function widokAdminZamowienie(nr){
         </section>
 
         <section class="shipment-manager-card">
-          <div class="shipment-card-title"><span>Krok 5</span><h4>🏷️ Etykieta i zapis</h4></div>
+          <h4 class="inpost-like-section-title">Etykieta i zapis</h4>
           <div class="shipment-manager-field full"><label>Uwagi do zamówienia</label><div><textarea name="uwagi" rows="2">${esc(z.uwagi||"")}</textarea></div></div>
           ${panelEtykietInpostHTML(z)}
         </section>
