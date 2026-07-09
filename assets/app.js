@@ -222,6 +222,9 @@ let produktyEdytowane = wczytajLS("artway_produkty_edytowane", {});
 let ustawienia = {...USTAWIENIA_PUBLICZNE, ...wczytajLS("artway_ustawienia", {})};
 let koszyk = wczytajLS("artway_koszyk", []);
 let stanyProduktow = wczytajLS("artway_stany", {});   // magazyn: id → liczba sztuk (brak wpisu = bez limitu)
+let ruchyMagazynowe = wczytajLS("artway_ruchy_magazynowe", []); // historia przyjęć, korekt i sprzedaży
+let ustawieniaMagazynu = wczytajLS("artway_magazyn_ustawienia", {});
+let szkiceFaktur = wczytajLS("artway_faktury_szkice", []); // przygotowane dokumenty pod przyszłą integrację inFakt
 let koszDodanych = wczytajLS("artway_kosz_dodane", []); // kosz: usunięte produkty własne (można przywrócić)
 let koszMeta = wczytajLS("artway_kosz_meta", {});      // id → data usunięcia i typ; automatyczne czyszczenie po 30 dniach
 let produktyDefinitywne = wczytajLS("artway_produkty_definitywne", []); // bazowe produkty usunięte po okresie kosza
@@ -245,7 +248,7 @@ let frazaListyProduktow="", sortowanieListyProduktow="default";
    na pamięci przeglądarki (localStorage) jak dotychczas. */
 const CHMURA_URL = "/.netlify/functions/store";
 const CHMURA_AUTO_SYNC_MS = 60000;
-const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_faktury_szkice","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
 let chmuraToken = (function(){ try{ return JSON.parse(localStorage.getItem("artway_chmura_token"))||""; }catch(e){ return ""; } })();
 let chmuraStan = {dostepna:false, sprawdzono:false, admin:false, rev:0, updated_at:null, error:"", ostatniZapis:0};
 let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z serwera
@@ -322,6 +325,9 @@ function zbierzWspolneUstawienia(){
     artway_produkty_ukryte: produktyUkryte,
     artway_produkty_definitywne: produktyDefinitywne,
     artway_stany: stanyProduktow,
+    artway_ruchy_magazynowe: ruchyMagazynowe,
+    artway_magazyn_ustawienia: ustawieniaMagazynu,
+    artway_faktury_szkice: szkiceFaktur,
     artway_opinie: opinie,
     artway_kosz_dodane: koszDodanych,
     artway_kosz_meta: koszMeta,
@@ -338,7 +344,9 @@ function nalozWspolneUstawienia(dane){
     const setter = {
       artway_produkty_dodane:(v)=>{produktyDodane=v;}, artway_produkty_ukryte:(v)=>{produktyUkryte=v;},
       artway_produkty_edytowane:(v)=>{produktyEdytowane=v;}, artway_produkty_definitywne:(v)=>{produktyDefinitywne=v;},
-      artway_stany:(v)=>{stanyProduktow=v;}, artway_opinie:(v)=>{opinie=v;},
+      artway_stany:(v)=>{stanyProduktow=v;}, artway_ruchy_magazynowe:(v)=>{ruchyMagazynowe=Array.isArray(v)?v:[];},
+      artway_magazyn_ustawienia:(v)=>{ustawieniaMagazynu=(v&&typeof v==="object")?v:{};}, artway_faktury_szkice:(v)=>{szkiceFaktur=Array.isArray(v)?v:[];},
+      artway_opinie:(v)=>{opinie=v;},
       artway_kosz_dodane:(v)=>{koszDodanych=v;}, artway_kosz_meta:(v)=>{koszMeta=v;},
     };
     for(const k of Object.keys(setter)){
@@ -1035,23 +1043,81 @@ function zbudujProdukty(){
 /* ── Magazyn ── */
 function stanProduktu(p){ return (typeof p.stan==="number" && p.stan>=0) ? p.stan : null; }   // null = bez limitu
 function produktMaCeneSprzedazy(p){ return Number(p?.cena)>0; }
-function ustawStan(id, wartosc){
-  const s = String(wartosc??"").trim();
+function stanMagazynuId(id){
+  if(stanyProduktow[id]===undefined || stanyProduktow[id]===null || stanyProduktow[id]==="") return null;
+  const n=Number(stanyProduktow[id]);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+}
+function produktMagazynowy(id){ return produktyDoAdministracji().find(p=>String(p.id)===String(id)) || produkty.find(p=>String(p.id)===String(id)) || null; }
+function ustawieniaMagazynuPelne(){
+  return {
+    nazwa:"Magazyn główny",
+    progNiski:5,
+    lokalizacja:"",
+    domyslnyOperator:sesja?.email||"administrator",
+    infaktTryb:"szkice",
+    infaktUwagi:"Faktury są przygotowywane jako szkice do przyszłej integracji API.",
+    ...(ustawieniaMagazynu||{})
+  };
+}
+function zapiszRuchMagazynowy(ruch){
+  const p=produktMagazynowy(ruch.produktId);
+  const rec={
+    id:"MAG-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,7),
+    data:new Date().toISOString(),
+    dataTxt:new Date().toLocaleString("pl-PL"),
+    produktId:String(ruch.produktId??""),
+    produktNazwa:ruch.produktNazwa||p?.nazwa||"Produkt",
+    sku:ruch.sku||p?.sku||"",
+    typ:String(ruch.typ||"korekta"),
+    ilosc:Number(ruch.ilosc)||0,
+    stanPrzed:ruch.stanPrzed===null?null:(Number(ruch.stanPrzed)||0),
+    stanPo:ruch.stanPo===null?null:(Number(ruch.stanPo)||0),
+    dokument:String(ruch.dokument||""),
+    powod:String(ruch.powod||""),
+    operator:String(ruch.operator||sesja?.email||"administrator")
+  };
+  ruchyMagazynowe=[rec,...(Array.isArray(ruchyMagazynowe)?ruchyMagazynowe:[])].slice(0,3000);
+  zapiszLS("artway_ruchy_magazynowe", ruchyMagazynowe);
+  return rec;
+}
+function ustawStanMagazynowy(id, wartosc, meta={}){
+  const przed=stanMagazynuId(id);
+  const s=String(wartosc??"").trim();
+  let po=null;
   if(s==="") delete stanyProduktow[id];
-  else stanyProduktow[id] = Math.max(0, parseInt(s)||0);
-  zapiszLS("artway_stany", stanyProduktow); zbudujProdukty();
-  loguj("info",`Magazyn: produkt ${id} → ${s===""?"bez limitu":stanyProduktow[id]+" szt."}`);
+  else { po=Math.max(0, parseInt(s,10)||0); stanyProduktow[id]=po; }
+  zapiszLS("artway_stany", stanyProduktow);
+  zbudujProdukty();
+  const zmieniono = przed!==po;
+  if(zmieniono) zapiszRuchMagazynowy({
+    produktId:id,
+    typ:meta.typ||"korekta",
+    ilosc:po===null ? 0 : (przed===null ? po : po-przed),
+    stanPrzed:przed,
+    stanPo:po,
+    powod:meta.powod||"Ręczna korekta stanu",
+    dokument:meta.dokument||"",
+    operator:meta.operator||sesja?.email||"administrator"
+  });
+  return {przed,po,zmieniono};
+}
+function ustawStan(id, wartosc){
+  const wynik=ustawStanMagazynowy(id, wartosc, {typ:"korekta",powod:"Edycja w tabeli produktów"});
+  loguj("info",`Magazyn: produkt ${id} → ${wynik.po===null?"bez limitu":wynik.po+" szt."}`);
   toast("Stan magazynowy zapisany ✅");
 }
-function zmniejszStany(pozycjeKoszyka){
+function zmniejszStany(pozycjeKoszyka, dokument=""){
   // sumuj sztuki per produkt (warianty liczą się razem)
   const sprzedane = {};
   for(const x of pozycjeKoszyka) sprzedane[x.id] = (sprzedane[x.id]||0) + x.ile;
   let zmiana = false;
   for(const id in sprzedane){
-    const p = produkty.find(p=>p.id===+id);
+    const p = produkty.find(p=>String(p.id)===String(id));
     if(p && stanProduktu(p)!==null){
+      const przed=stanProduktu(p), po=Math.max(0, przed - sprzedane[id]);
       stanyProduktow[id] = Math.max(0, stanProduktu(p) - sprzedane[id]);
+      zapiszRuchMagazynowy({produktId:id,produktNazwa:p.nazwa,sku:p.sku||"",typ:"sprzedaż",ilosc:-sprzedane[id],stanPrzed:przed,stanPo:po,dokument,powod:"Zamówienie klienta"});
       zmiana = true;
     }
   }
@@ -1143,6 +1209,7 @@ function renderuj(){
       else if(t==="/admin/zamowienia") w.innerHTML = widokAdminZamowienia();
       else if(t.startsWith("/admin/zamowienie/")) w.innerHTML = widokAdminZamowienie(decodeURIComponent(t.split("/")[3]||""));
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
+      else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn();
       else if(t==="/admin/asortyment" || t==="/admin/produkty") w.innerHTML = widokAdminProdukty();
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
       else if(t.startsWith("/admin/produkty/edytuj/")) w.innerHTML = widokAdminProduktEdytuj(parseInt(t.split("/")[4]));
@@ -2100,6 +2167,7 @@ const ETAPY_WYSYLKI = {
 const MENU_ADMINA = [
   ["/admin","📊 Pulpit"], ["/admin/zamowienia","📦 Zamówienia"],
   ["/admin/wysylki","🚚 Centrum wysyłek"],
+  ["/admin/magazyn","🏬 Magazyn"],
   ["/admin/asortyment","🏷️ Asortyment"],
   ["/admin/klienci","👥 Klienci"],
   ["/admin/personalizacja","🎨 Personalizacja i ustawienia"],
@@ -2110,6 +2178,7 @@ function adminSzkielet(aktywna, tresc){
   const powiadomienia = {
     "/admin/zamowienia": pobierzZamowienia().filter(z=>z.status==="nowe").length,
     "/admin/wysylki": pobierzZamowienia().filter(z=>!["anulowane","dostarczone","zakończone"].includes(z.status)&&!z.wysylka?.numer).length,
+    "/admin/magazyn": produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{const s=stanMagazynuId(p.id),prog=Number(ustawieniaMagazynuPelne().progNiski)||5;return s!==null&&s<=prog;}).length,
     "/admin/asortyment": opinie.filter(o=>o.status==="oczekuje").length
   };
   return `
@@ -3222,6 +3291,7 @@ function widokAdmin(){
       <h2>⚡ Sklep i sprzedaż</h2>
       <div class="diag-actions" style="margin-top:.4rem">
         <a class="btn" href="#/admin/wysylki">🚚 Centrum wysyłek</a>
+        <a class="btn" href="#/admin/magazyn">🏬 Magazyn</a>
         <a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
         <a class="btn ghost" href="#/admin/kategorie">🗂️ Utwórz katalog</a>
         <a class="btn ghost" href="#/admin/mapowanie">🧩 Mapuj produkty</a>
@@ -3915,6 +3985,8 @@ let filtrStatusuProduktow = "wszystkie", filtrZrodlaProduktow = "wszystkie", fil
 let sortowanieAdminProduktow = "id";
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
+let frazaMagazynu="", filtrMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1;
+let magazynNaStronie=[25,50,100,200].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
 function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }
 function produktDodanyPoId(id){ return produktyDodane.find(p=>Number(p.id)===Number(id)); }
 function czyProduktAdminWKoszu(p){
@@ -3957,6 +4029,298 @@ function sortujProduktyAdmin(lista){
     }
     return Number(a.id)-Number(b.id);
   });
+}
+function statusZamowieniaRezerwujeMagazyn(z){
+  const s=String(z?.status||"").toLowerCase();
+  return !!z && !["anulowane","dostarczone","zakończone","zwrot","zwrot pieniędzy"].includes(s);
+}
+function pozycjeZamowieniaMagazyn(z){
+  if(Array.isArray(z?.pozycjeDane)&&z.pozycjeDane.length) return z.pozycjeDane.map(p=>({
+    id:p.id, nazwa:p.nazwa||p.produkt||"Produkt", sku:p.sku||"", ilosc:Number(p.ilosc)||1, cena:kwotaNum(p.cena), wartosc:kwotaNum(p.wartosc||kwotaNum(p.cena)*(Number(p.ilosc)||1))
+  })).filter(p=>p.id!==undefined&&p.id!==null&&p.id!=="");
+  return [];
+}
+function rezerwacjeMagazynowe(){
+  const mapa={};
+  pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).forEach(z=>{
+    pozycjeZamowieniaMagazyn(z).forEach(p=>{ mapa[p.id]=(mapa[p.id]||0)+p.ilosc; });
+  });
+  return mapa;
+}
+function sprzedazMagazynowa(dni=30){
+  const mapa={}, od=Date.now()-dni*86400000;
+  pobierzZamowienia().filter(z=>String(z.status||"").toLowerCase()!=="anulowane" && (Number(z.ts)||0)>=od).forEach(z=>{
+    pozycjeZamowieniaMagazyn(z).forEach(p=>{ mapa[p.id]=(mapa[p.id]||0)+p.ilosc; });
+  });
+  return mapa;
+}
+function filtrujProduktyMagazynu(lista, rez, sprzedaz){
+  const u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
+  let out=lista.filter(p=>!czyProduktAdminWKoszu(p));
+  if(frazaMagazynu) out=out.filter(p=>produktPasujeFrazie(p,frazaMagazynu)||String(p.sku||"").toLowerCase().includes(frazaMagazynu.toLowerCase()));
+  if(filtrMagazynu==="monitorowane") out=out.filter(p=>stanMagazynuId(p.id)!==null);
+  if(filtrMagazynu==="bezlimitu") out=out.filter(p=>stanMagazynuId(p.id)===null);
+  if(filtrMagazynu==="niskie") out=out.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s>0&&s<=prog;});
+  if(filtrMagazynu==="brak") out=out.filter(p=>stanMagazynuId(p.id)===0);
+  if(filtrMagazynu==="rezerwacje") out=out.filter(p=>Number(rez[p.id]||0)>0);
+  if(filtrMagazynu==="sprzedaz") out=out.filter(p=>Number(sprzedaz[p.id]||0)>0);
+  return sortujProduktyMagazynu(out, rez, sprzedaz, prog);
+}
+function sortujProduktyMagazynu(lista, rez={}, sprzedaz={}, prog=5){
+  return [...lista].sort((a,b)=>{
+    const sa=stanMagazynuId(a.id), sb=stanMagazynuId(b.id);
+    if(sortowanieMagazynu==="nazwa") return String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
+    if(sortowanieMagazynu==="stan") return (sa===null?Number.MAX_SAFE_INTEGER:sa)-(sb===null?Number.MAX_SAFE_INTEGER:sb);
+    if(sortowanieMagazynu==="rezerwacje") return Number(rez[b.id]||0)-Number(rez[a.id]||0);
+    if(sortowanieMagazynu==="sprzedaz") return Number(sprzedaz[b.id]||0)-Number(sprzedaz[a.id]||0);
+    if(sortowanieMagazynu==="wartosc") return ((sb||0)*kwotaNum(b.cena))-((sa||0)*kwotaNum(a.cena));
+    const ra=sa===null?999999:(sa===0?0:(sa<=prog?sa:100000+sa));
+    const rb=sb===null?999999:(sb===0?0:(sb<=prog?sb:100000+sb));
+    return ra-rb || String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
+  });
+}
+function stanBadgeMagazynu(stan, prog){
+  if(stan===null) return `<span class="lvl lvl-info">bez limitu</span>`;
+  if(stan===0) return `<span class="lvl lvl-blad">brak</span>`;
+  if(stan<=prog) return `<span class="lvl lvl-ostrzezenie">niski</span>`;
+  return `<span class="lvl lvl-ok">OK</span>`;
+}
+function ustawStroneMagazynu(n){ stronaMagazynu=Math.max(1,Number(n)||1); renderuj(); }
+function ustawMagazynNaStronie(n){
+  magazynNaStronie=[25,50,100,200].includes(Number(n))?Number(n):50;
+  stronaMagazynu=1; zapiszLS("artway_magazyn_na_stronie",magazynNaStronie); renderuj();
+}
+function korygujStanMagazynu(e,id){
+  e.preventDefault();
+  const f=new FormData(e.target), stan=String(f.get("stan")??"").trim(), powod=String(f.get("powod")||"").trim()||"Korekta z panelu magazynu";
+  const wynik=ustawStanMagazynowy(id, stan, {typ:"korekta",powod});
+  loguj("info",`Magazyn: korekta ${id}, ${wynik.przed===null?"∞":wynik.przed} → ${wynik.po===null?"∞":wynik.po}`);
+  toast("Korekta magazynu zapisana ✅"); renderuj();
+}
+function szybkaKorektaMagazynu(id, delta){
+  const przed=stanMagazynuId(id);
+  if(przed===null){ toast("Najpierw wpisz konkretny stan — produkt jest bez limitu"); return; }
+  ustawStanMagazynowy(id, Math.max(0,przed+Number(delta||0)), {typ:Number(delta)>0?"przyjęcie":"korekta",powod:Number(delta)>0?"Szybkie przyjęcie":"Szybkie zmniejszenie"});
+  renderuj();
+}
+function zapiszUstawieniaMagazynu(e){
+  e.preventDefault();
+  const f=new FormData(e.target);
+  ustawieniaMagazynu={
+    ...ustawieniaMagazynu,
+    nazwa:String(f.get("nazwa")||"Magazyn główny").trim()||"Magazyn główny",
+    progNiski:Math.max(0,parseInt(f.get("progNiski"),10)||5),
+    lokalizacja:String(f.get("lokalizacja")||"").trim(),
+    domyslnyOperator:String(f.get("operator")||sesja?.email||"administrator").trim(),
+    infaktTryb:String(f.get("infaktTryb")||"szkice"),
+    infaktUwagi:String(f.get("infaktUwagi")||"").trim()
+  };
+  zapiszLS("artway_magazyn_ustawienia",ustawieniaMagazynu);
+  loguj("info","Zapisano ustawienia magazynu");
+  toast("Ustawienia magazynu zapisane ✅"); renderuj();
+}
+function eksportujMagazynCSV(){
+  const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30);
+  const rows=[["id","sku","nazwa","kategoria","stan","bez_limitu","zarezerwowane","sprzedaz_30_dni","cena_brutto","wartosc_stanu"].join(";")];
+  produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
+    const stan=stanMagazynuId(p.id), wart=stan===null?"":kwotaNum(stan*kwotaNum(p.cena)).toFixed(2).replace(".",",");
+    rows.push([p.id,p.sku||"",p.nazwa,p.kategoria,stan===null?"":stan,stan===null?"tak":"nie",rez[p.id]||0,spr[p.id]||0,kwotaNum(p.cena).toFixed(2).replace(".",","),wart].map(csvPole).join(";"));
+  });
+  pobierzPlik("magazyn-artway.csv","\uFEFF"+rows.join("\n"),"text/csv");
+  loguj("info","Wyeksportowano magazyn CSV");
+}
+function daneSzkicuFakturyZamowienia(nr){
+  const z=pobierzZamowienia().find(x=>x.nr===nr); if(!z) return null;
+  const k=z.klient||{}, a=z.adresDostawy||{}, koszty=kosztyZamowienia(z);
+  const kontrahent={
+    nazwa:k.firma||`${k.imie||""} ${k.nazwisko||""}`.trim()||z.email||"Klient",
+    nip:String(k.nip||"").replace(/[^0-9]/g,""),
+    email:z.email||"",
+    telefon:k.telefon||"",
+    adres:[a.ulica&&`${a.ulica} ${a.nrDomu||""}${a.nrLokalu?"/"+a.nrLokalu:""}`,[a.kod,a.miasto].filter(Boolean).join(" ")].filter(Boolean).join(", ")||z.adres||""
+  };
+  const pozycje=pozycjeZamowieniaMagazyn(z).map(p=>({nazwa:p.nazwa,sku:p.sku||"",ilosc:p.ilosc,cenaBrutto:kwotaNum(p.cena),wartoscBrutto:kwotaNum(p.wartosc),vat:"23%"}));
+  if(koszty.dostawa||koszty.paczkaWeekend||koszty.platnosc){
+    pozycje.push({nazwa:"Dostawa i usługi dodatkowe",sku:"DOSTAWA",ilosc:1,cenaBrutto:kwotaNum(koszty.dostawa+koszty.paczkaWeekend+koszty.platnosc),wartoscBrutto:kwotaNum(koszty.dostawa+koszty.paczkaWeekend+koszty.platnosc),vat:"23%"});
+  }
+  return {
+    id:"FV-SZKIC-"+Date.now().toString(36),
+    provider:"inFakt",
+    status:"szkic",
+    apiStatus:"nie wysłano",
+    nrZamowienia:z.nr,
+    data:new Date().toISOString(),
+    dataTxt:new Date().toLocaleString("pl-PL"),
+    sprzedawca:daneFirmy(),
+    kontrahent,
+    pozycje,
+    sumaBrutto:kwotaNum(koszty.razem),
+    waluta:"PLN",
+    uwagi:"Szkic przygotowany w panelu Artway-TM. Wysyłka do inFakt będzie aktywna po podłączeniu tokenu API."
+  };
+}
+function utworzSzkicFaktury(nr){
+  const szkic=daneSzkicuFakturyZamowienia(nr);
+  if(!szkic){ toast("Nie znaleziono zamówienia"); return; }
+  szkiceFaktur=[szkic,...szkiceFaktur.filter(x=>x.nrZamowienia!==nr)].slice(0,2000);
+  zapiszLS("artway_faktury_szkice",szkiceFaktur);
+  loguj("info","Utworzono szkic FV pod inFakt dla "+nr);
+  toast("Szkic faktury przygotowany ✅"); renderuj();
+}
+function usunSzkicFaktury(id){
+  szkiceFaktur=szkiceFaktur.filter(x=>x.id!==id);
+  zapiszLS("artway_faktury_szkice",szkiceFaktur);
+  toast("Szkic FV usunięty"); renderuj();
+}
+function zmienStatusSzkicuFaktury(id,status){
+  szkiceFaktur=szkiceFaktur.map(x=>x.id===id?{...x,status,aktualizacja:new Date().toISOString()}:x);
+  zapiszLS("artway_faktury_szkice",szkiceFaktur);
+  toast("Status szkicu FV zapisany"); renderuj();
+}
+function eksportujSzkiceFakturJSON(){
+  pobierzPlik("szkice-faktur-infakt.json",JSON.stringify(szkiceFaktur,null,2),"application/json");
+}
+function widokAdminMagazyn(){
+  const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30), u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
+  const wszystkie=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const monitorowane=wszystkie.filter(p=>stanMagazynuId(p.id)!==null);
+  const brak=wszystkie.filter(p=>stanMagazynuId(p.id)===0);
+  const niskie=wszystkie.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s>0&&s<=prog;});
+  const zarezerwowane=Object.values(rez).reduce((s,n)=>s+Number(n||0),0);
+  const wartosc=monitorowane.reduce((s,p)=>s+(stanMagazynuId(p.id)||0)*kwotaNum(p.cena),0);
+  const lista=filtrujProduktyMagazynu(wszystkie,rez,spr);
+  const liczbaStron=Math.max(1,Math.ceil(lista.length/magazynNaStronie));
+  stronaMagazynu=Math.min(Math.max(1,stronaMagazynu),liczbaStron);
+  const fragment=lista.slice((stronaMagazynu-1)*magazynNaStronie,stronaMagazynu*magazynNaStronie);
+  const zamDoFV=pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane").filter(z=>z.klient?.nip||z.klient?.firma).slice(0,20);
+  return adminSzkielet("/admin/magazyn", `
+  <div class="panel warehouse-hero-panel">
+    <div class="warehouse-hero">
+      <div>
+        <span class="cat-label">Magazyn i dokumenty</span>
+        <h1>🏬 ${esc(u.nazwa)}</h1>
+        <p>Stany, rezerwacje z zamówień, historia ruchów oraz szkice FV przygotowane pod przyszłą integrację inFakt.</p>
+      </div>
+      <div class="diag-actions">
+        <button class="btn" onclick="eksportujMagazynCSV()">📊 Eksport magazynu CSV</button>
+        <a class="btn ghost" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
+      </div>
+    </div>
+    <div class="orders-stat-grid">
+      <div class="order-stat-card"><span>📦</span><b>${monitorowane.length}</b><small>produktów ze stanem</small></div>
+      <div class="order-stat-card ${brak.length?"hot":""}"><span>⛔</span><b>${brak.length}</b><small>brak na stanie</small></div>
+      <div class="order-stat-card ${niskie.length?"hot":""}"><span>⚠️</span><b>${niskie.length}</b><small>niski stan ≤ ${prog}</small></div>
+      <div class="order-stat-card"><span>🧾</span><b>${zarezerwowane}</b><small>szt. w aktywnych zamówieniach</small></div>
+      <div class="order-stat-card money"><span>💰</span><b>${zl(wartosc)}</b><small>wartość stanów</small></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="order-section-head">
+      <div><h2 style="margin-top:0">📋 Stany produktów</h2><p class="order-detail-lead">Zmieniasz konkretny stan albo zostawiasz puste pole = produkt bez limitu.</p></div>
+      <div class="diag-actions"><button class="btn ghost" onclick="frazaMagazynu='';filtrMagazynu='wszystkie';sortowanieMagazynu='ryzyko';stronaMagazynu=1;renderuj()">Wyczyść filtry</button></div>
+    </div>
+    <div class="filter-grid warehouse-filter-grid">
+      <input placeholder="Szukaj: nazwa, SKU, ID, kategoria…" value="${esc(frazaMagazynu)}" oninput="frazaMagazynu=this.value;stronaMagazynu=1;renderuj()">
+      <select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">
+        ${[["wszystkie","Wszystkie produkty"],["monitorowane","Tylko monitorowane"],["bezlimitu","Bez limitu"],["niskie","Niski stan"],["brak","Brak na stanie"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}
+      </select>
+      <select onchange="sortowanieMagazynu=this.value;stronaMagazynu=1;renderuj()">
+        ${[["ryzyko","Sortuj: ryzyko braku"],["stan","Stan rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}
+      </select>
+      <select onchange="ustawMagazynNaStronie(this.value)">
+        ${[25,50,100,200].map(n=>`<option value="${n}" ${magazynNaStronie===n?"selected":""}>${n} na stronie</option>`).join("")}
+      </select>
+    </div>
+    <div class="results-bar">
+      <span>Znaleziono <b>${lista.length}</b> produktów. Strona ${stronaMagazynu} z ${liczbaStron}.</span>
+    </div>
+    <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
+    <div style="overflow-x:auto"><table class="log-table warehouse-table">
+      <tr><th>Produkt</th><th>Kategoria</th><th>Stan</th><th>Rezerwacje</th><th>Sprzedaż 30 dni</th><th>Wartość</th><th>Korekta</th></tr>
+      ${fragment.map(p=>{
+        const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), sp=Number(spr[p.id]||0), wart=stan===null?0:stan*kwotaNum(p.cena);
+        return `<tr>
+          <td><b>${esc(p.nazwa)}</b><br><small>ID: ${esc(p.id)}${p.sku?` • SKU: ${esc(p.sku)}`:""}</small></td>
+          <td>${esc(p.kategoria||"—")}</td>
+          <td><b>${stan===null?"∞":stan}</b> ${stanBadgeMagazynu(stan,prog)}</td>
+          <td>${r?`<b>${r}</b> szt.`:"—"}</td>
+          <td>${sp?`<b>${sp}</b> szt.`:"—"}</td>
+          <td>${stan===null?"—":zl(wart)}</td>
+          <td>
+            <form class="warehouse-adjust" onsubmit="korygujStanMagazynu(event,${jsArg(p.id)})">
+              <input name="stan" value="${stan===null?"":stan}" placeholder="∞" inputmode="numeric" title="Nowy stan">
+              <input name="powod" placeholder="powód korekty" maxlength="80">
+              <button class="btn ghost" type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},1)">+1</button>
+              <button class="btn ghost" type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},-1)">−1</button>
+              <button class="btn" type="submit">Zapisz</button>
+              <a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">Edytuj</a>
+            </form>
+          </td>
+        </tr>`;
+      }).join("")}
+    </table></div>
+    <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
+  </div>
+  <div class="warehouse-columns">
+    <div class="panel">
+      <h2 style="margin-top:0">🧾 Historia ruchów</h2>
+      <p>Ostatnie korekty, przyjęcia i sprzedaże. Pełna historia synchronizuje się we wspólnej bazie.</p>
+      <div style="overflow-x:auto"><table class="log-table">
+        <tr><th>Data</th><th>Typ</th><th>Produkt</th><th>Ilość</th><th>Stan</th><th>Dokument</th></tr>
+        ${(ruchyMagazynowe||[]).slice(0,40).map(r=>`<tr>
+          <td>${esc(r.dataTxt||new Date(r.data).toLocaleString("pl-PL"))}</td>
+          <td><span class="lvl lvl-info">${esc(r.typ)}</span></td>
+          <td><b>${esc(r.produktNazwa)}</b><br><small>${esc(r.sku||r.produktId||"")}${r.powod?` • ${esc(r.powod)}`:""}</small></td>
+          <td><b>${Number(r.ilosc)>0?"+":""}${esc(r.ilosc)}</b></td>
+          <td>${r.stanPrzed===null?"∞":esc(r.stanPrzed)} → ${r.stanPo===null?"∞":esc(r.stanPo)}</td>
+          <td>${esc(r.dokument||"—")}</td>
+        </tr>`).join("") || `<tr><td colspan="6">Brak ruchów magazynowych.</td></tr>`}
+      </table></div>
+    </div>
+    <div class="panel">
+      <h2 style="margin-top:0">⚙️ Ustawienia magazynu</h2>
+      <form onsubmit="zapiszUstawieniaMagazynu(event)">
+        <div class="f-group"><label>Nazwa magazynu</label><input name="nazwa" value="${esc(u.nazwa)}"></div>
+        <div class="f-row"><div class="f-group"><label>Próg niskiego stanu</label><input name="progNiski" inputmode="numeric" value="${esc(prog)}"></div><div class="f-group"><label>Operator domyślny</label><input name="operator" value="${esc(u.domyslnyOperator)}"></div></div>
+        <div class="f-group"><label>Lokalizacja / uwagi</label><input name="lokalizacja" value="${esc(u.lokalizacja)}" placeholder="np. regał, pomieszczenie, adres"></div>
+        <h2>🧾 inFakt / FV</h2>
+        <div class="f-group"><label>Tryb integracji</label><select name="infaktTryb"><option value="szkice" ${u.infaktTryb==="szkice"?"selected":""}>Tylko szkice w sklepie</option><option value="api" ${u.infaktTryb==="api"?"selected":""}>API inFakt po dodaniu tokenu</option></select></div>
+        <div class="f-group"><label>Uwagi do integracji</label><textarea name="infaktUwagi" rows="3">${esc(u.infaktUwagi)}</textarea></div>
+        <button class="btn" type="submit">💾 Zapisz ustawienia</button>
+      </form>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="order-section-head">
+      <div><h2 style="margin-top:0">🧾 inFakt / szkice faktur</h2><p class="order-detail-lead">Na razie sklep przygotowuje komplet danych do FV. Realna wysyłka do inFakt zostanie włączona po dodaniu tokenu API na serwerze Netlify.</p></div>
+      <button class="btn ghost" onclick="eksportujSzkiceFakturJSON()">📤 Eksport szkiców JSON</button>
+    </div>
+    <div class="warehouse-columns">
+      <div>
+        <h3>Zamówienia firmowe do przygotowania</h3>
+        <table class="log-table">
+          <tr><th>Zamówienie</th><th>Klient</th><th>NIP</th><th>Kwota</th><th>Akcja</th></tr>
+          ${zamDoFV.map(z=>{
+            const ma=szkiceFaktur.some(f=>f.nrZamowienia===z.nr);
+            return `<tr><td><a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}"><b>${esc(z.nr)}</b></a></td><td>${esc(z.klient?.firma||z.email||"")}</td><td>${esc(z.klient?.nip||"—")}</td><td>${zl(kosztyZamowienia(z).razem)}</td><td><button class="btn ${ma?"ghost":""}" onclick="utworzSzkicFaktury(${jsArg(z.nr)})">${ma?"Odśwież szkic":"Utwórz szkic FV"}</button></td></tr>`;
+          }).join("") || `<tr><td colspan="5">Brak zamówień firmowych do faktury.</td></tr>`}
+        </table>
+      </div>
+      <div>
+        <h3>Szkice FV</h3>
+        <table class="log-table">
+          <tr><th>Szkic</th><th>Kontrahent</th><th>Kwota</th><th>Status</th><th></th></tr>
+          ${szkiceFaktur.slice(0,30).map(f=>`<tr>
+            <td><b>${esc(f.nrZamowienia)}</b><br><small>${esc(f.dataTxt||"")}</small></td>
+            <td>${esc(f.kontrahent?.nazwa||"")}${f.kontrahent?.nip?`<br><small>NIP ${esc(f.kontrahent.nip)}</small>`:""}</td>
+            <td>${zl(f.sumaBrutto)}</td>
+            <td><select onchange="zmienStatusSzkicuFaktury(${jsArg(f.id)},this.value)">${["szkic","do wysłania","wystawiona poza systemem","anulowana"].map(s=>`<option value="${s}" ${f.status===s?"selected":""}>${s}</option>`).join("")}</select></td>
+            <td><button class="btn danger" onclick="if(confirm('Usunąć szkic faktury?'))usunSzkicFaktury(${jsArg(f.id)})">Usuń</button></td>
+          </tr>`).join("") || `<tr><td colspan="5">Brak szkiców faktur.</td></tr>`}
+        </table>
+      </div>
+    </div>
+  </div>`);
 }
 function widokAdminProdukty(){
   let wszystkie = produktyDoAdministracji();
@@ -4230,10 +4594,7 @@ function dodajProdukt(e){
   if(trasa()==="/admin/produkty/dodaj") location.hash="#/admin/produkty"; else renderuj();
 }
 function zapiszStanZFormularza(f, id){
-  const s = String(f.get("stan")??"").trim();
-  if(s==="") delete stanyProduktow[id];
-  else stanyProduktow[id] = Math.max(0, parseInt(s)||0);
-  zapiszLS("artway_stany", stanyProduktow);
+  ustawStanMagazynowy(id, f.get("stan"), {typ:"korekta",powod:"Formularz produktu"});
 }
 function zapiszProduktAdmin(e,id){
   e.preventDefault();
@@ -6952,7 +7313,7 @@ Uwagi: ${f.get("notes")||"brak"}`;
         void zapiszUzytkownikaCentralnie(k);
       }
     }
-    zmniejszStany(koszyk);   // magazyn: odejmij sprzedane sztuki
+    zmniejszStany(koszyk, nr);   // magazyn: odejmij sprzedane sztuki
     const emailKlienta=String(f.get("email")||"").trim().toLowerCase();
     const noweZamowienie={
       nr, data:new Date().toLocaleString("pl-PL"), ts:Date.now(), email:emailKlienta,

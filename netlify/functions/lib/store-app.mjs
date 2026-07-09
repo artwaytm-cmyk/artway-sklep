@@ -16,6 +16,9 @@ const KLUCZE_WSPOLNE = [
   'artway_produkty_ukryte',
   'artway_produkty_definitywne',
   'artway_stany',
+  'artway_ruchy_magazynowe',
+  'artway_magazyn_ustawienia',
+  'artway_faktury_szkice',
   'artway_opinie',
   'artway_kosz_dodane',
   'artway_kosz_meta',
@@ -153,19 +156,38 @@ async function odejmijStany(zamowienie) {
     const ust = await czytaj('settings', { data: {}, rev: 0 });
     const dane = ust.data || {};
     const stany = (dane.artway_stany && typeof dane.artway_stany === 'object') ? { ...dane.artway_stany } : {};
+    const ruchy = Array.isArray(dane.artway_ruchy_magazynowe) ? [...dane.artway_ruchy_magazynowe] : [];
     let zmiana = false;
     for (const p of pozycje) {
       const id = p && (p.id != null ? String(p.id) : '');
       const ile = Number(p && p.ilosc) || 0;
       if (!id || ile <= 0) continue;
       if (id in stany && stany[id] !== '' && stany[id] != null && !Number.isNaN(Number(stany[id]))) {
-        stany[id] = Math.max(0, Number(stany[id]) - ile);
+        const przed = Math.max(0, Number(stany[id]) || 0);
+        const po = Math.max(0, przed - ile);
+        stany[id] = po;
+        ruchy.unshift({
+          id: `MAG-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+          data: new Date().toISOString(),
+          dataTxt: new Date().toLocaleString('pl-PL'),
+          produktId: id,
+          produktNazwa: tekst(p.nazwa || p.produkt || id, 200),
+          sku: tekst(p.sku || '', 80),
+          typ: 'sprzedaż',
+          ilosc: -ile,
+          stanPrzed: przed,
+          stanPo: po,
+          dokument: numerZamowienia(zamowienie?.nr),
+          powod: 'Zamówienie klienta',
+          operator: 'system',
+        });
         zmiana = true;
       }
     }
     if (zmiana) {
       dane.artway_stany = stany;
-      await zapisz('settings', { ...ust, data: dane, updated_at: new Date().toISOString() });
+      dane.artway_ruchy_magazynowe = ruchy.slice(0, 3000);
+      await zapisz('settings', { ...ust, data: dane, rev: (Number(ust.rev) || 0) + 1, updated_at: new Date().toISOString() });
     }
   } catch (e) { /* stany są pomocnicze — nie blokują zamówienia */ }
 }
