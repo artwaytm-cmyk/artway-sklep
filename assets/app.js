@@ -3288,6 +3288,40 @@ function kartaAdminZamowieniaHTML(z){
     </div>
   </article>`;
 }
+function adminPozycjeZamowieniaHTML(z){
+  const dane=Array.isArray(z?.pozycjeDane)?z.pozycjeDane:[];
+  if(dane.length){
+    return `<div class="order-items-pro">${dane.map(p=>{
+      const nazwa=p.nazwa||p.produkt||p.id||"produkt", il=Number(p.ilosc)||1, cena=kwotaNum(p.cena), wartosc=kwotaNum(p.wartosc||(cena*il));
+      return `<div class="order-item-pro">
+        <div><b>${esc(nazwa)}</b>${p.wariant?`<small>Wariant: ${esc(p.wariant)}</small>`:""}${p.sku?`<small>SKU: ${esc(p.sku)}</small>`:""}</div>
+        <span>${il} × ${cena?zl(cena):"—"}</span>
+        <strong>${zl(wartosc)}</strong>
+      </div>`;
+    }).join("")}</div>`;
+  }
+  const tekstowe=Array.isArray(z?.pozycje)?z.pozycje:[];
+  return `<div class="order-items-pro">${tekstowe.length?tekstowe.map(p=>`<div class="order-item-pro"><div><b>${esc(p)}</b></div></div>`).join(""):`<div class="order-item-pro"><div><b>Brak pozycji w zamówieniu</b></div></div>`}</div>`;
+}
+function adminZamowienieSnapshotHTML(z){
+  const w=daneWysylki(z), k=kosztyZamowienia(z), klient=z?.klient||{}, pay=paynowDane(z);
+  const osoba=[klient.imie,klient.nazwisko].filter(Boolean).join(" ")||z.email||"gość";
+  const platnosc=z.platnosc||dostepnePlatnosci().find(p=>p.id===z.platnoscId)?.nazwa||"—";
+  const platStatus=z.platnoscStatus||(z.platnoscId==="paynow"?paynowStatusTekst(pay.status):"—");
+  const tracking=w.numer?`${w.numer}`:(w.inpostId?`${w.inpostId} • ${w.inpostStatus||"czeka"}`:"brak numeru");
+  const etap=ETAPY_WYSYLKI[etapWysylki(z)]||ETAPY_WYSYLKI.do_obslugi;
+  return `<div class="order-detail-grid">
+    <div class="order-detail-tile"><span>👤 Klient</span><b>${esc(osoba)}</b><small>${z.email?`✉️ ${esc(z.email)}`:"bez konta"}${klient.telefon?` • 📞 ${esc(klient.telefon)}`:""}</small></div>
+    <div class="order-detail-tile"><span>💳 Płatność</span><b>${esc(platnosc)}</b><small>Status: ${esc(platStatus)}${k.platnosc?` • opłata ${zl(k.platnosc)}`:""}</small></div>
+    <div class="order-detail-tile"><span>🚚 Dostawa</span><b>${esc(z.dostawa||uslugaInpostZamowienia(z))}</b><small>${k.dostawa?zl(k.dostawa):"GRATIS"}${k.paczkaWeekend?` • Weekend ${zl(k.paczkaWeekend)}`:""} • ${esc(etap.nazwa||"")}</small></div>
+    <div class="order-detail-tile"><span>🏷️ Nadanie</span><b>${esc(tracking)}</b><small>${w.etykietaGotowa?"Etykieta gotowa":w.inpostId?"Czeka na potwierdzenie InPost":"Nieutworzona przesyłka"}</small></div>
+  </div>`;
+}
+function adminZamowienieStatusPanelHTML(z){
+  return `<div class="order-status-flow">
+    ${STATUSY.map(s=>`<button class="${s===z.status?"active":""}" onclick="zmienStatus(${jsArg(z.nr)},${jsArg(s)})"><span>${s===z.status?"●":"○"}</span>${esc(s)}</button>`).join("")}
+  </div>`;
+}
 function widokAdminZamowienia(){
   const wszystkie = pobierzZamowienia();
   let zam = wszystkie.slice();
@@ -3332,36 +3366,47 @@ function widokAdminZamowienie(nr){
   const paczkomatZam = czyZamowieniePaczkomat(z);
   const uslugaDomyslna = w.usluga || uslugaInpostZamowienia(z);
   const paynow=paynowDane(z);
+  const koszty=kosztyZamowienia(z), etapInfo=ETAPY_WYSYLKI[etapWysylki(z)]||ETAPY_WYSYLKI.do_obslugi, sla=slaWysylki(z);
   return adminSzkielet("/admin/zamowienia", `
-  <div class="panel">
+  <div class="panel order-detail-page">
     <div class="crumb"><a href="#/admin/zamowienia">Zamówienia</a> › ${esc(z.nr)}</div>
-    <h1>📦 ${esc(z.nr)} <span class="lvl" style="background:${KOLOR_STATUSU[z.status]||'var(--bg)'};font-size:.85rem;vertical-align:middle">${esc(z.status)}</span></h1>
-    <p style="color:var(--muted2)">${esc(z.data)}</p>
-    <div class="ship-layout">
+    <div class="order-detail-hero">
       <div>
-        <h2>Pozycje</h2>
-        <div class="summary" style="margin:.5rem 0 1rem">${z.pozycje.map(p=>`<div><span>${esc(p)}</span></div>`).join("")}
-          ${podsumowanieKosztowHTML(z)}</div>
+        <span class="order-pro-label">Obsługa zamówienia</span>
+        <h1>📦 ${esc(z.nr)} <span class="lvl" style="background:${KOLOR_STATUSU[z.status]||'var(--bg)'};font-size:.85rem;vertical-align:middle">${esc(z.status)}</span></h1>
+        <p>${esc(z.data||"")} • <span class="${sla.klasa}">⏱ ${esc(sla.tekst)}</span> • etap: <b>${esc(etapInfo.nazwa||nazwaEtapu(z))}</b></p>
       </div>
-      <div class="ship-card">
-        <h2 style="margin-top:0">Klient</h2>
-        <p>${[klient.imie,klient.nazwisko].filter(Boolean).length?`👤 ${esc([klient.imie,klient.nazwisko].filter(Boolean).join(" "))}<br>`:""}
-        ${z.email?`✉️ <a href="mailto:${esc(z.email)}">${esc(z.email)}</a><br>`:"✉️ brak e-maila<br>"}
-        ${klient.telefon?`📞 ${esc(klient.telefon)}<br>`:""}
-        ${klient.firma?`🏢 ${esc(klient.firma)} • NIP ${esc(klient.nip||"—")}<br>`:""}
-        ${z.uwagi?`📝 ${esc(z.uwagi)}`:""}</p>
+      <div class="order-detail-total">
+        <small>Do zapłaty</small>
+        <b>${zl(koszty.razem)}</b>
+        <span>produkty ${zl(koszty.poRabacie||koszty.produkty)} • dostawa ${koszty.dostawa?zl(koszty.dostawa):"gratis"}</span>
       </div>
     </div>
-    <h2>Status zamówienia</h2>
-    <div class="diag-actions">
-      ${STATUSY.map(s=>`<button class="btn ${s===z.status?'':'ghost'}" onclick="zmienStatus('${esc(z.nr)}','${s}')">${s}</button>`).join("")}
+    ${adminZamowienieSnapshotHTML(z)}
+    <div class="order-detail-columns">
+      <div class="order-detail-card">
+        <div class="order-section-head"><div><span class="order-pro-label">Produkty</span><h2>🧾 Pozycje zamówienia</h2></div><b>${zl(koszty.produkty)}</b></div>
+        ${adminPozycjeZamowieniaHTML(z)}
+      </div>
+      <div class="order-detail-card">
+        <div class="order-section-head"><div><span class="order-pro-label">Finanse</span><h2>💰 Podsumowanie</h2></div></div>
+        <div class="summary" style="margin:.55rem 0">${podsumowanieKosztowHTML(z,"Razem")}</div>
+        ${z.uwagi?`<div class="backend-note"><b>Uwagi klienta:</b> ${esc(z.uwagi)}</div>`:""}
+      </div>
+    </div>
+    <div class="order-detail-card" style="margin-top:1rem">
+      <div class="order-section-head"><div><span class="order-pro-label">Status</span><h2>Zmiana statusu zamówienia</h2></div><span class="lvl" style="background:${KOLOR_STATUSU[z.status]||'var(--bg)'}">${esc(z.status)}</span></div>
+      ${adminZamowienieStatusPanelHTML(z)}
     </div>
   </div>
-  <div class="panel">
-    <h2 style="margin-top:0">🚚 Nadanie przez InPost</h2>
-    <p><span class="lvl" style="background:${ETAPY_WYSYLKI[etapWysylki(z)].kolor};font-size:.82rem">${esc(nazwaEtapu(z))}</span> <span class="${slaWysylki(z).klasa}" style="margin-left:.4rem">⏱ ${esc(slaWysylki(z).tekst)}</span>${w.numer?` &nbsp;•&nbsp; Numer nadania: <b>${esc(w.numer)}</b>`:""}${w.inpostId?` &nbsp;•&nbsp; InPost: <code>${esc(w.inpostId)}</code>${w.inpostStatus?` (${esc(w.inpostStatus)})`:""}`:""}${urlSledzenia(z)?` &nbsp;•&nbsp; <a href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">śledź</a>`:""}</p>
-    <div class="backend-note">Wszystko do nadania w jednym miejscu: dane odbiorcy, paczkomat/adres i gabaryt. Zapisz zmiany, a potem kliknij „Utwórz przesyłkę InPost". Pola z <b>*</b> są wymagane.</div>
-    <form onsubmit="zapiszNadanie(event,'${esc(z.nr)}')">
+  <div class="panel order-fulfillment-panel">
+    <div class="order-section-head">
+      <div><span class="order-pro-label">InPost / realizacja</span><h2>🚚 Nadanie i dane odbiorcy</h2></div>
+      <div class="order-pro-costs"><span style="background:${etapInfo.kolor||'var(--bg)'};color:var(--ink)">${esc(nazwaEtapu(z))}</span>${w.numer?`<span>Numer <b>${esc(w.numer)}</b></span>`:""}${w.inpostId?`<span>InPost <b>${esc(w.inpostId)}</b></span>`:""}</div>
+    </div>
+    <p class="order-detail-lead">${w.inpostStatus?`Status InPost: ${esc(w.inpostStatus)}. `:""}${urlSledzenia(z)?`<a href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">Otwórz śledzenie przesyłki</a>`:"Najpierw zapisz dane, potem utwórz przesyłkę i etykietę."}</p>
+    <div class="backend-note">Ta sekcja jest centrum pracy z zamówieniem: dane odbiorcy, typ dostawy, paczkomat/adres, gabaryt, pobranie, Paczka w Weekend i etykieta PDF. Pola z <b>*</b> są wymagane przed utworzeniem przesyłki.</div>
+    <form class="order-form-pro" onsubmit="zapiszNadanie(event,'${esc(z.nr)}')">
       <h3 class="f-sekcja">👤 Odbiorca</h3>
       <div class="f-row">
         <div class="f-group"><label>Imię</label><input name="imie" value="${esc(klient.imie||"")}"></div>
