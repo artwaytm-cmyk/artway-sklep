@@ -2809,11 +2809,12 @@ function panelEtykietInpostHTML(z){
       <button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(nr)},'A4')">A4</button>`:`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI(${jsArg(nr)})">🟡 Utwórz przesyłkę i numer</button>
       <button class="btn ghost" type="button" disabled title="Najpierw utwórz przesyłkę InPost">PDF po nadaniu</button>`}
       <button class="btn ghost" type="button" onclick="drukujEtykieteRobocza(${jsArg(nr)})">🏷️ Robocza A6</button>
+      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(nr)}],'txt')">📄 TXT InPost</button>
       <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(nr)}],'csv')">📄 CSV InPost</button>
-      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(nr)}],'tsv')">📊 TSV/Excel</button>
+      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(nr)}],'extended')">📋 CSV rozszerzony</button>
       ${ma?`<button class="btn ghost" type="button" onclick="synchronizujTrackingAPI(${jsArg(nr)})">🔄 Status InPost</button>`:""}
     </div>
-    <p style="font-size:.78rem;color:var(--muted2);margin:.55rem 0 0">Jeżeli import w InPost pokaże wszystko jako „Kolumna A”, użyj nowego <b>CSV InPost</b> albo awaryjnie <b>TSV/Excel</b>. Plik ma kolumny dokładnie pod ekran mapowania InPost.</p>
+    <p style="font-size:.78rem;color:var(--muted2);margin:.55rem 0 0">Format podstawowy jest zgodny z importerem InPost Managera: <b>.txt/.csv, UTF-8, nagłówki TAK, separator średnik (;), dokładnie 14 kolumn</b>. Kwoty są w formacie InPost, np. 38.00. CSV rozszerzony ma dodatkowe informacje tylko do kontroli/Excela.</p>
   </div>`;
 }
 async function synchronizujTrackingAPI(nr){
@@ -2913,8 +2914,8 @@ function kartaZleceniaWysylki(z){
     ${w.bladIntegracji?`<div class="backend-note" style="border-color:var(--danger);background:#fff1f2;color:#991b1b"><b>Wyjątek:</b> ${esc(w.bladIntegracji)}</div>`:""}
     <div class="diag-actions">
       <a class="btn" href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">Obsłuż zlecenie</a>
-      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}],'csv')">📄 CSV InPost</button>
-      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}],'tsv')">📊 TSV</button>
+      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}],'txt')">📄 TXT InPost</button>
+      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}],'csv')">CSV</button>
       ${!w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI(${jsArg(z.nr)})">🟡 Generuj etykietę InPost</button>`:`<button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(z.nr)},'A6')">🏷️ A6</button><button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(z.nr)},'A4')">🏷️ A4</button>`}
       ${w.inpostId?`<button class="btn ghost" type="button" onclick="synchronizujTrackingAPI(${jsArg(z.nr)})">🔄 Status InPost</button>`:""}
       ${urlSledzenia(z)?`<a class="btn ghost" href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">Śledź</a>`:""}
@@ -2944,8 +2945,9 @@ function panelZlecenWysylkowych(){
       <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;justify-content:space-between">
         <div style="font-size:1rem"><b>📄 Nadanie z pliku (InPost)</b> <span style="color:var(--muted2);font-size:.82rem">— hurtowe / awaryjne, bez umowy kurierskiej</span></div>
         <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-          <button class="btn" style="background:#ffcc00;color:#111;font-weight:800;box-shadow:0 2px 8px rgba(255,204,0,.45)" onclick="eksportNadaniaInpostCSV(null,'csv')">⬇️ CSV InPost${zaznaczoneNadania.size?` — ${zaznaczoneNadania.size} zazn.`:` — wszystkie (${doN.length})`}</button>
-          <button class="btn ghost" onclick="eksportNadaniaInpostCSV(null,'tsv')">📊 TSV/Excel</button>
+          <button class="btn" style="background:#ffcc00;color:#111;font-weight:800;box-shadow:0 2px 8px rgba(255,204,0,.45)" onclick="eksportNadaniaInpostCSV(null,'txt')">⬇️ TXT InPost${zaznaczoneNadania.size?` — ${zaznaczoneNadania.size} zazn.`:` — wszystkie (${doN.length})`}</button>
+          <button class="btn ghost" onclick="eksportNadaniaInpostCSV(null,'csv')">CSV</button>
+          <button class="btn ghost" onclick="eksportNadaniaInpostCSV(null,'extended')">📋 CSV rozszerzony</button>
         </div>
       </div>
       <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-top:.65rem">
@@ -2957,7 +2959,7 @@ function panelZlecenWysylkowych(){
         ${zaznaczoneNadania.size?`<button class="btn ghost" style="padding:.32rem .7rem;font-size:.83rem;color:#b91c1c" onclick="zaznaczoneNadania.clear();renderuj()">✖ Odznacz (${zaznaczoneNadania.size})</button>
         <button class="btn" style="padding:.32rem .7rem;font-size:.83rem;background:#ffcc00;color:#111;margin-left:auto" title="Utwórz przesyłki i etykiety InPost przez API dla zaznaczonych zleceń" onclick="utworzEtykietyZaznaczoneAPI()">🟡 Etykiety API (${zaznaczoneNadania.size})</button>`:""}
       </div>
-      <p style="font-size:.77rem;color:var(--muted2);margin:.55rem 0 0">Plik wgraj w InPost: <b>manager.paczkomaty.pl → Wyślij przesyłki → IMPORT Z PLIKU</b> (max 100). Nowy CSV używa przecinków i cudzysłowów, więc InPost powinien zobaczyć osobne kolumny zamiast jednej „Kolumna A”. Jeśli dalej nie rozdzieli — użyj TSV/Excel. Na kartach: <b style="color:#166534">✅ gotowe</b> = dane kompletne, <b style="color:#92400e">⚠️</b> = uzupełnij przed nadaniem.</p>
+      <p style="font-size:.77rem;color:var(--muted2);margin:.55rem 0 0">Plik wgraj w InPost: <b>manager.paczkomaty.pl → Wyślij przesyłki → IMPORT Z PLIKU</b> (max 100). W kroku opcji importu ustaw: <b>kodowanie UTF-8</b>, <b>Czy ma nagłówki: Tak</b>, <b>Separator: Średnik (;)</b>. Jeśli podgląd pokazuje wszystko w „Kolumna A”, to znaczy, że w InPost nie jest ustawiony separator średnik. Układ: e-mail, telefon, rozmiar, paczkomat, numer referencyjny, ochrona, pobranie, imię i nazwisko, firma, ulica, kod, miasto, typ przesyłki, weekend.</p>
     </div>
     ${lista.length?lista.map(kartaZleceniaWysylki).join(""):"<p>Brak zleceń dla wybranego filtra.</p>"}
   </div>`;
@@ -4211,20 +4213,18 @@ function gotoweDoNadaniaInpost(z){
 function zaznaczGotoweNadania(){ let n=0; listaWysylekPoFiltrze().forEach(z=>{ if(gotoweDoNadaniaInpost(z).ok){ zaznaczoneNadania.add(String(z.nr)); n++; } }); toast(n?`Zaznaczono ${n} gotowych do nadania`:"Brak gotowych zleceń w tym filtrze"); renderuj(); }
 function zaznaczTypNadania(typ){ let n=0; listaWysylekPoFiltrze().forEach(z=>{ if(String(z?.dostawaId||"").toLowerCase()==="odbior") return; const p=paczkomatoweInpost(z); if((typ==="paczkomat"&&p)||(typ==="kurier"&&!p)){ zaznaczoneNadania.add(String(z.nr)); n++; } }); toast(`Zaznaczono ${n} (${typ})`); renderuj(); }
 // nry (opcjonalnie) = tablica numerów zamówień do eksportu (pojedyncze zlecenie / zaznaczone). Bez nry: zaznaczone albo cały filtr.
-function eksportNadaniaInpostCSV(nry, format="csv"){
-  const tryb=String(format||"csv").toLowerCase();
-  const sep=tryb==="tsv" ? "\t" : ",";
-  const ext=tryb==="tsv" ? "tsv" : "csv";
-  const mime=tryb==="tsv" ? "text/tab-separated-values" : "text/csv";
+function eksportNadaniaInpostCSV(nry, format="txt"){
+  const tryb=String(format||"txt").toLowerCase();
+  const rozszerzony=tryb==="extended"||tryb==="rozszerzony";
+  const sep=";";
+  const ext=tryb==="csv"||rozszerzony ? "csv" : "txt";
+  const mime=ext==="csv" ? "text/csv" : "text/plain";
   const czysc = v => String(v==null?"":v).replace(/[\t;\r\n]+/g," ").replace(/\s+/g," ").trim();
   const telCyfry = t => String(t||"").replace(/\D/g,"").replace(/^0+/,"").replace(/^48/,"").slice(-9);
   const telInpost = t => { const d=telCyfry(t); return d.length===9 ? "+48"+d : ""; };
   const kwota = v => { const n=Number(String(v??"").replace(",",".").replace(/[^0-9.]/g,"")); return Number.isFinite(n)&&n>0 ? n.toFixed(2) : ""; };
   const rozmiarInpost = z => { const g=String(z?.wysylka?.gabaryt||"").toLowerCase(); return g==="large"?"C":g==="medium"?"B":"A"; };
-  const csv = v => {
-    const s=czysc(v);
-    return tryb==="tsv" ? s : `"${s.replace(/"/g,'""')}"`;
-  };
+  const pole = v => czysc(v);
   const jawne = Array.isArray(nry) && nry.length;
   let bazaZ;
   if(jawne){ const zb=new Set(nry.map(String)); bazaZ = pobierzZamowienia().filter(z=>zb.has(String(z.nr))); }
@@ -4236,11 +4236,9 @@ function eksportNadaniaInpostCSV(nry, format="csv"){
     return true;
   }).slice(0,100);
   if(!lista.length){ toast("Brak zamówień do nadania (sprawdź zaznaczenie lub filtr)"); return; }
-  const pola=[
-    "E-mail","Telefon","Numer referencyjny","Imię i nazwisko","Nazwa firmy","Ulica, numer budynku, numer lokalu",
-    "Dodatkowa ochrona","Wartość pobrania","Paczka w Weekend","Typ przesyłki","Rozmiar","Paczkomat® lub PaczkoPunkt","Kod pocztowy","Miasto",
-    "Uwagi","Produkty","Kwota zamówienia","Metoda płatności","Sposób dostawy","Gabaryt sklepu","Waga kg","Długość cm","Szerokość cm","Wysokość cm","Telefon 9 cyfr"
-  ];
+  const polaPodstawowe=["e-mail","telefon","rozmiar","paczkomat","numer_referencyjny","dodatkowa_ochrona","za_pobraniem","imie_i_nazwisko","nazwa_firmy","ulica","kod_pocztowy","miejscowosc","typ_przesylki","paczka_w_weekend"];
+  const polaRozszerzone=["uwagi","produkty","kwota_zamowienia","metoda_platnosci","sposob_dostawy","gabaryt_sklepu","waga_kg","dlugosc_cm","szerokosc_cm","wysokosc_cm","telefon_9_cyfr"];
+  const pola=rozszerzony?[...polaPodstawowe,...polaRozszerzone]:polaPodstawowe;
   const wiersze=lista.map(z=>{
     const k=z.klient||{}, a=z.adresDostawy||{}, w=z.wysylka||{};
     const paczk=paczkomatoweInpost(z);
@@ -4250,21 +4248,23 @@ function eksportNadaniaInpostCSV(nry, format="csv"){
     const produktyTxt = Array.isArray(z.pozycjeDane)&&z.pozycjeDane.length
       ? z.pozycjeDane.map(p=>`${p.nazwa||""}${p.sku?` SKU:${p.sku}`:""} x${p.ilosc||1}`).join(" | ")
       : (Array.isArray(z.pozycje)?z.pozycje.join(" | "):"");
-    return [
+    const podstawowe=[
       z.email||k.email,
       telInpost(k.telefon||z.telefon),
+      rozmiarInpost(z),
+      paczk ? String(z.paczkomat||w.punktKod||"").toUpperCase() : "",
       z.nr,
+      ochrona,
+      pobranie,
       [k.imie,k.nazwisko].filter(Boolean).join(" "),
       k.firma,
       ulica,
-      ochrona,
-      pobranie,
-      w.paczkaWeekend ? "TAK" : "NIE",
-      paczk ? "paczkomat" : "kurier",
-      rozmiarInpost(z),
-      paczk ? String(z.paczkomat||w.punktKod||"").toUpperCase() : "",
       a.kod,
       a.miasto,
+      paczk ? "paczkomat" : "kurier",
+      w.paczkaWeekend ? "TAK" : "NIE"
+    ];
+    const extra=[
       z.uwagi,
       produktyTxt,
       kwota(z.razem),
@@ -4276,13 +4276,15 @@ function eksportNadaniaInpostCSV(nry, format="csv"){
       w.szerokosc,
       w.wysokosc,
       telCyfry(k.telefon||z.telefon)
-    ].map(csv).join(sep);
+    ];
+    return (rozszerzony?[...podstawowe,...extra]:podstawowe).map(pole).join(sep);
   });
-  const tresc="\uFEFF"+[pola.map(csv).join(sep),...wiersze].join("\r\n");
-  pobierzPlik(`inpost-nadania-${tryb}-${new Date().toISOString().slice(0,10)}.${ext}`, tresc, mime);
+  const tresc=[pola.map(pole).join(sep),...wiersze].join("\r\n");
+  const nazwaTrybu=rozszerzony?"rozszerzony":tryb;
+  pobierzPlik(`inpost-nadania-${nazwaTrybu}-${new Date().toISOString().slice(0,10)}.${ext}`, tresc, mime);
   const npaczk=lista.filter(z=>paczkomatoweInpost(z)).length, nbrak=lista.filter(z=>!gotoweDoNadaniaInpost(z).ok).length;
-  loguj("info",`Eksport nadań InPost ${tryb}: ${lista.length} przesyłek (${npaczk} paczkomat, ${lista.length-npaczk} kurier)`);
-  toast(`📄 Plik InPost ${tryb.toUpperCase()}: ${lista.length} przesyłek — ${npaczk} paczkomat, ${lista.length-npaczk} kurier${nbrak?` • ⚠️ ${nbrak} z brakami danych`:""}`);
+  loguj("info",`Eksport nadań InPost ${nazwaTrybu}: ${lista.length} przesyłek (${npaczk} paczkomat, ${lista.length-npaczk} kurier)`);
+  toast(`📄 Plik InPost ${nazwaTrybu.toUpperCase()}: ${lista.length} przesyłek — w InPost ustaw UTF-8, nagłówki TAK, separator średnik${nbrak?` • ⚠️ ${nbrak} z brakami danych`:""}`);
 }
 let podgladImportuProduktow=null, ostatniRaportImportu=null;
 const POLA_CSV_PRODUKTU=["id","nazwa","kategoria","cena","stara_cena","stan","sku","gtin","external_id","mpn","marka","opis","badge","ikona","zdjecie","zdjecie2","zdjecie3","zdjecie4","zdjecie5","zdjecie6","zdjecie7","zdjecie8","zdjecie9","zdjecie10","zdjecie11","zdjecie12","zdjecie13","zdjecie14","zdjecie15","zdjecie16","warianty","kolor","kolor_produktu","rozmiar","material"];
