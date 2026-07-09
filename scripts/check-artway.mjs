@@ -73,6 +73,9 @@ requireMarkers('assets/app.js', app, [
   'e-mail","telefon","rozmiar","paczkomat","numer_referencyjny',
   'kurierInpostAktywny: true',
   'nazwa:"Kurier InPost", koszt:20',
+  'OPLATA_PACZKA_WEEKEND = 5',
+  'Paczka w Weekend (+',
+  'function kosztyZamowienia',
   'function utworzEtykietyZaznaczoneAPI',
   'function pobierzInpostConfig',
   'function otworzGeowidget',
@@ -100,6 +103,9 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "action === 'store-order-delete-mine'",
   "action === 'account-login'",
   "action === 'send-status-email'",
+  'function kosztyEmail',
+  'Paczka w Weekend',
+  'end_of_week_collection',
 ]);
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [

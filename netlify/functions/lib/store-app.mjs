@@ -437,8 +437,13 @@ async function wyslijEmailSMTP({ to, subject, text, html, replyTo }) {
   });
   return { provider: c.provider || 'smtp', message_id: info.messageId || '', accepted: info.accepted || [] };
 }
+const OPLATA_PACZKA_WEEKEND = 5;
+function kwotaSerwer(v) {
+  const n = Number(String(v ?? 0).replace(',', '.').replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(n) ? +n.toFixed(2) : 0;
+}
 function zlSerwer(v) {
-  return `${(Number(v) || 0).toFixed(2).replace('.', ',')} zł`;
+  return `${kwotaSerwer(v).toFixed(2).replace('.', ',')} zł`;
 }
 function htmlEscape(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -519,6 +524,51 @@ function htmlProduktyEmail(z) {
     <tbody>${rows}</tbody>
   </table>`;
 }
+function kosztyEmail(z) {
+  const k = z?.koszty || {};
+  const ma = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key) && obj[key] != null;
+  const produktyZPozycji = produktyEmail(z).reduce((s, p) => s + kwotaSerwer(p.wartosc), 0);
+  const weekendAktywny = !!(z?.paczkaWeekend || z?.wysylka?.paczkaWeekend);
+  const weekend = kwotaSerwer(ma(z, 'oplataPaczkaWeekend') ? z.oplataPaczkaWeekend : (ma(k, 'paczkaWeekend') ? k.paczkaWeekend : (weekendAktywny ? OPLATA_PACZKA_WEEKEND : 0)));
+  const platnosc = kwotaSerwer(ma(z, 'oplataPlatnosci') ? z.oplataPlatnosci : (ma(k, 'platnosc') ? k.platnosc : (z?.platnoscId === 'pobranie' ? 5 : 0)));
+  const metoda = tekst(z?.dostawaId || '', 40).trim().toLowerCase();
+  const poRabacieZapisane = ma(k, 'poRabacie') ? kwotaSerwer(k.poRabacie) : 0;
+  const kosztDomyslny = metoda === 'kurier' || metoda === 'kurier_inpost' ? 20 : 12;
+  const dostawa = ma(z, 'dostawaKoszt') || ma(k, 'dostawa')
+    ? kwotaSerwer(ma(z, 'dostawaKoszt') ? z.dostawaKoszt : k.dostawa)
+    : ((poRabacieZapisane || produktyZPozycji) >= 200 ? 0 : kosztDomyslny);
+  const razemZapisane = kwotaSerwer(z?.razem);
+  let poRabacie = poRabacieZapisane || (razemZapisane ? Math.max(0, kwotaSerwer(razemZapisane - dostawa - weekend - platnosc)) : 0);
+  const produkty = ma(k, 'produkty') ? kwotaSerwer(k.produkty) : (produktyZPozycji || poRabacie);
+  const rabat = ma(k, 'rabat') ? kwotaSerwer(k.rabat) : Math.max(0, kwotaSerwer(produkty - poRabacie));
+  if (!poRabacie) poRabacie = Math.max(0, kwotaSerwer(produkty - rabat));
+  const razem = razemZapisane || kwotaSerwer(poRabacie + dostawa + weekend + platnosc);
+  return { produkty, rabat, poRabacie, dostawa, paczkaWeekend: weekend, platnosc, razem };
+}
+function podsumowanieKosztowEmailText(z) {
+  const c = kosztyEmail(z);
+  return [
+    `Produkty: ${zlSerwer(c.produkty || c.poRabacie)}`,
+    c.rabat ? `Rabat: -${zlSerwer(c.rabat)}` : '',
+    `Dostawa: ${c.dostawa ? zlSerwer(c.dostawa) : 'GRATIS'} (${z?.dostawa || '—'})`,
+    c.paczkaWeekend ? `Paczka w Weekend: ${zlSerwer(c.paczkaWeekend)}` : '',
+    c.platnosc ? `Opłata płatności / pobrania: ${zlSerwer(c.platnosc)}` : '',
+    `Razem do zapłaty: ${zlSerwer(c.razem)}`,
+  ].filter(Boolean).join('\n');
+}
+function podsumowanieKosztowEmailHtml(z) {
+  const c = kosztyEmail(z);
+  const row = (a, b, strong = false) => `<div style="display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid #eef2f7${strong ? ';font-weight:900;font-size:17px;color:#111827' : ''}"><span>${htmlEscape(a)}</span><span>${htmlEscape(b)}</span></div>`;
+  return [
+    c.produkty ? row('Produkty', zlSerwer(c.produkty)) : '',
+    c.rabat ? row('Rabat', `-${zlSerwer(c.rabat)}`) : '',
+    c.rabat ? row('Po rabacie', zlSerwer(c.poRabacie)) : '',
+    row('Dostawa', c.dostawa ? zlSerwer(c.dostawa) : 'GRATIS'),
+    c.paczkaWeekend ? row('Paczka w Weekend', zlSerwer(c.paczkaWeekend)) : '',
+    c.platnosc ? row('Opłata płatności / pobrania', zlSerwer(c.platnosc)) : '',
+    row('Razem do zapłaty', zlSerwer(c.razem), true),
+  ].filter(Boolean).join('');
+}
 function instrukcjaPlatnosciEmail(z) {
   const metoda = tekst(z?.platnosc || '—', 180).trim();
   const kwota = zlSerwer(z?.razem);
@@ -549,7 +599,7 @@ function instrukcjaPlatnosciEmail(z) {
       opis: 'Zapłacisz przy odbiorze przesyłki InPost. Przygotujemy paczkę i wyślemy kolejne informacje po nadaniu przesyłki.',
       akcja: 'Zobacz szczegóły zamówienia',
       url: linkSklepuEmail('/#/zamowienia'),
-      meta: `Wartość zamówienia: ${kwota}`,
+      meta: `Kwota do zapłaty: ${kwota}`,
     };
   }
   return {
@@ -557,7 +607,7 @@ function instrukcjaPlatnosciEmail(z) {
     opis: z?.platnoscInstrukcja || `Wybrana metoda płatności: ${metoda}.`,
     akcja: 'Zobacz szczegóły zamówienia',
     url: linkSklepuEmail('/#/zamowienia'),
-    meta: `Wartość zamówienia: ${kwota}`,
+    meta: `Kwota do zapłaty: ${kwota}`,
   };
 }
 function emailButton(label, url, kolor = '#2563eb') {
@@ -577,7 +627,8 @@ function htmlLayoutEmail({ preheader, badge, title, intro, z, mainCta, extraCta 
   const k = z?.klient || {};
   const telefon = tekst(k.telefon || '', 80).trim();
   const email = tekst(z?.email || '', 200).trim();
-  const shippingBody = `${htmlEscape(z?.dostawa || '—')}<br><span style="color:#6b7280">${htmlEscape(adresDostawyEmail(z))}</span>${z?.paczkomat ? `<br><span style="color:#6b7280">Punkt odbioru: ${htmlEscape(z.paczkomat)}</span>` : ''}`;
+  const koszty = kosztyEmail(z);
+  const shippingBody = `${htmlEscape(z?.dostawa || '—')}<br><span style="color:#6b7280">${htmlEscape(adresDostawyEmail(z))}</span>${z?.paczkomat ? `<br><span style="color:#6b7280">Punkt odbioru: ${htmlEscape(z.paczkomat)}</span>` : ''}<br><span style="display:inline-block;margin-top:8px;font-weight:800">Koszt dostawy: ${htmlEscape(koszty.dostawa ? zlSerwer(koszty.dostawa) : 'GRATIS')}</span>${koszty.paczkaWeekend ? `<br><span style="color:#92400e;font-weight:800">Paczka w Weekend: +${htmlEscape(zlSerwer(koszty.paczkaWeekend))}</span>` : ''}`;
   const paymentBody = platnoscKartaHtml || `<b>${htmlEscape(payment.tytul)}</b><br><span style="color:#374151">${htmlEscape(payment.opis)}</span><br><span style="display:inline-block;margin-top:8px;color:#111827;font-weight:800">${htmlEscape(payment.meta)}</span>`;
   const cta = mainCta || { label: payment.akcja, url: payment.url };
   const ctaHtml = [cta, ...extraCta].filter(Boolean).map((x, i) => emailButton(x.label, x.url, i === 0 ? '#2563eb' : '#111827')).join('');
@@ -612,7 +663,8 @@ function htmlLayoutEmail({ preheader, badge, title, intro, z, mainCta, extraCta 
                 ${htmlKartaEmail('Dostawa', shippingBody, '#10b981')}
                 <h2 style="font-size:18px;margin:22px 0 10px;color:#111827">Produkty w zamówieniu</h2>
                 ${htmlProduktyEmail(z)}
-                <div style="text-align:right;margin:14px 0 22px;font-size:20px;font-weight:900;color:#111827">Suma: ${htmlEscape(zlSerwer(z?.razem))}</div>
+                ${htmlKartaEmail('Podsumowanie kosztów', podsumowanieKosztowEmailHtml(z), '#2563eb')}
+                <div style="text-align:right;margin:14px 0 22px;font-size:20px;font-weight:900;color:#111827">Do zapłaty: ${htmlEscape(zlSerwer(koszty.razem))}</div>
                 ${z?.uwagi ? htmlKartaEmail('Uwagi do zamówienia', htmlEscape(z.uwagi), '#64748b') : ''}
                 <div style="background:#f8fafc;border-radius:18px;padding:18px;margin:20px 0">
                   <h3 style="margin:0 0 8px;font-size:17px;color:#111827">${htmlEscape(coDalejTytul || (admin ? 'Co dalej w obsłudze?' : 'Co dalej?'))}</h3>
@@ -650,8 +702,7 @@ dziękujemy za złożenie zamówienia ${z.nr}.
 Produkty:
 ${linieProduktow(z)}
 
-Wartość zamówienia: ${zlSerwer(z.razem)}
-Dostawa: ${z.dostawa || '—'}
+${podsumowanieKosztowEmailText(z)}
 Płatność: ${z.platnosc || '—'}${paynow}${telefon}
 
 Status i szczegóły zamówienia sprawdzisz na stronie sklepu w sekcji „Moje zamówienia”.
@@ -684,8 +735,7 @@ Adres: ${z.adres || '—'}
 Produkty:
 ${linieProduktow(z)}
 
-Razem: ${zlSerwer(z.razem)}
-Dostawa: ${z.dostawa || '—'}
+${podsumowanieKosztowEmailText(z)}
 Płatność: ${z.platnosc || '—'}
 Status płatności: ${z.platnoscStatus || z?.paynow?.status || '—'}
 
@@ -819,7 +869,7 @@ function htmlStatusEmail(z, typ, opcje = {}) {
     : '';
   const topCard = `${statusCard}${kartaZwrot}${kartaTracking}`;
   // Neutralna karta płatności (bez „dokończ płatność”) — metoda, status i kwota
-  const platnoscKartaHtml = `<b>${htmlEscape(z?.platnosc || '—')}</b>${platnoscStatus ? `<br><span style="color:#374151">Status płatności: ${htmlEscape(platnoscStatus)}</span>` : ''}<br><span style="display:inline-block;margin-top:8px;color:#111827;font-weight:800">Kwota: ${htmlEscape(zlSerwer(z?.razem))}</span>`;
+  const platnoscKartaHtml = `<b>${htmlEscape(z?.platnosc || '—')}</b>${platnoscStatus ? `<br><span style="color:#374151">Status płatności: ${htmlEscape(platnoscStatus)}</span>` : ''}<br><span style="display:inline-block;margin-top:8px;color:#111827;font-weight:800">Kwota: ${htmlEscape(zlSerwer(kosztyEmail(z).razem))}</span>`;
   const mainCta = typ === 'nadanie' && sledzenie ? { label: 'Śledź przesyłkę', url: sledzenie } : { label: 'Moje zamówienia', url: zamUrl };
   const extraCta = typ === 'nadanie' && sledzenie ? [{ label: 'Moje zamówienia', url: zamUrl }] : [];
   const [cdT, cdX] = STATUS_EMAIL_CODALEJ[typ] || STATUS_EMAIL_CODALEJ.przygotowanie;
@@ -853,7 +903,7 @@ function wiadomoscStatusowa(z, typ, opcje = {}) {
   else if (typ === 'zwrot') tresc = `przesyłka dla zamówienia ${z.nr} została oznaczona jako zwrot do nadawcy. Skontaktujemy się w sprawie dalszych kroków.`;
   else if (typ === 'zwrot_pieniedzy') tresc = `zwróciliśmy pieniądze za zamówienie ${z.nr}.\nKwota zwrotu: ${opcje.kwota != null ? zlSerwer(opcje.kwota) : zlSerwer(z.razem)}\nŚrodki wrócą na Twoje konto w ciągu kilku dni roboczych, zależnie od banku.`;
   else if (typ === 'problem') tresc = `przewoźnik zgłosił problem dotyczący przesyłki dla zamówienia ${z.nr}. Monitorujemy sytuację i przekażemy kolejną informację po jej wyjaśnieniu.${numer ? `\nNumer przesyłki: ${numer}` : ''}${sledzenie ? `\nŚledzenie: ${sledzenie}` : ''}`;
-  const body = `${powitanie}\n\n${tresc}\n\nSzczegóły sprawdzisz w sekcji „Moje zamówienia”.\n\nPozdrawiamy\nArtway-TM\n${linkSklepuEmail('/#/')}`;
+  const body = `${powitanie}\n\n${tresc}\n\n${podsumowanieKosztowEmailText(z)}\n\nSzczegóły sprawdzisz w sekcji „Moje zamówienia”.\n\nPozdrawiamy\nArtway-TM\n${linkSklepuEmail('/#/')}`;
   return { subject: meta.subject(z.nr), text: body, html: htmlStatusEmail(z, typ, opcje) };
 }
 async function wyslijEmailStatusowy(z, typ, opcje = {}) {
@@ -1214,6 +1264,9 @@ function przesylkaShipXPayload(z, c, walidacja = null) {
     },
   };
   if (v.doPaczkomatu && v.punkt) payload.custom_attributes.target_point = v.punkt;
+  if (z?.paczkaWeekend || w.paczkaWeekend || kwotaSerwer(z?.oplataPaczkaWeekend || z?.koszty?.paczkaWeekend) > 0) {
+    payload.end_of_week_collection = true;
+  }
   if (z?.platnoscId === 'pobranie') {
     payload.cod = { amount: Number(z?.razem) || 0, currency: 'PLN' };
     payload.insurance = { amount: Number(z?.razem) || 0, currency: 'PLN' };

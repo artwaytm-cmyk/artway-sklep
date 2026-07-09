@@ -40,6 +40,7 @@ const KONFIG = {
 };
 const DOMYSLNA_DOSTAWA_INPOST = { id:"paczkomat", nazwa:"Paczkomat InPost 24/7", koszt:12, opis:"odbiór w wybranym paczkomacie / punkcie InPost" };
 const DOMYSLNA_DOSTAWA_INPOST_KURIER = { id:"kurier_inpost", nazwa:"Kurier InPost", koszt:20, opis:"dostawa kurierem InPost pod wskazany adres" };
+const OPLATA_PACZKA_WEEKEND = 5;
 function normalizujDostawyInPost(lista){
   const zrodlo = Array.isArray(lista) ? lista : [];
   const cena = (v, fallback) => { const n=Number(String(v ?? "").replace(",",".")); return Number.isFinite(n) ? +n.toFixed(2) : fallback; };
@@ -56,6 +57,7 @@ function dostepneDostawy(){
 }
 function czyDostawaPaczkomat(id){ return String(id||"")==="paczkomat"; }
 function uslugaInpostDlaDostawy(id){ return czyDostawaPaczkomat(id) ? "Paczkomat 24/7" : "Kurier InPost"; }
+function oplataPaczkaWeekend(wlaczona){ return wlaczona ? OPLATA_PACZKA_WEEKEND : 0; }
 
 const DOMYSLNE_BANNERY = [
   {id:"promocje",ikona:"🔥",tytul:"Aktualne promocje",opis:"Zobacz produkty w obniżonych cenach.",przycisk:"Sprawdź promocje",link:"#/promocje",aktywny:true},
@@ -408,7 +410,8 @@ function zapiszLS(klucz, dane){
   if(klucz==="artway_zamowienia" && Array.isArray(dane)) dane = filtrujAktywneZamowienia(dane);
   try{ localStorage.setItem(klucz, JSON.stringify(dane)); }catch(e){ loguj("ostrzezenie","Nie udało się zapisać: "+klucz); }
   if(!chmuraWczytywanie && chmuraToken && KLUCZE_WSPOLNE.includes(klucz)){ zaplanujZapisUstawien(); } }
-const zl = n => n.toFixed(2).replace(".", ",") + " zł";
+const kwotaNum = v => { const n=Number(String(v ?? 0).replace(",",".").replace(/[^0-9.-]/g,"")); return Number.isFinite(n) ? +n.toFixed(2) : 0; };
+const zl = n => kwotaNum(n).toFixed(2).replace(".", ",") + " zł";
 const $ = id => document.getElementById(id);
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const jsArg = s => esc(JSON.stringify(String(s??"")));
@@ -1753,8 +1756,9 @@ function szczegolyZamowieniaKlientaHTML(z){
   const k=z.klient||{}, a=z.adresDostawy||{};
   const klient=[k.imie,k.nazwisko].filter(Boolean).join(" ") || z.email || "—";
   const adres = z.adres || [a.ulica&&`${a.ulica} ${a.nrDomu||""}${a.nrLokalu?"/"+a.nrLokalu:""}`, [a.kod,a.miasto].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "—";
-  const dostawa=[z.dostawa,z.paczkomat?`Paczkomat: ${z.paczkomat}`:""].filter(Boolean).join(" • ") || "—";
-  const razem=Number(z.razem||0), platId=z.platnoscId||"";
+  const koszty=kosztyZamowienia(z);
+  const dostawa=[z.dostawa,z.paczkomat?`Paczkomat: ${z.paczkomat}`:"",koszty.paczkaWeekend?`Paczka w Weekend +${zl(koszty.paczkaWeekend)}`:""].filter(Boolean).join(" • ") || "—";
+  const razem=kwotaNum(z.razem), platId=z.platnoscId||"";
   return `<details class="order-details" open style="margin-top:.7rem">
     <summary style="cursor:pointer;font-weight:800">Szczegóły zamówienia, płatności i śledzenia</summary>
     <div class="stat-grid" style="margin-top:.8rem">
@@ -1768,6 +1772,8 @@ function szczegolyZamowieniaKlientaHTML(z){
     </div>
     <h3 class="f-sekcja">🧾 Produkty</h3>
     ${pozycjeZamowieniaKlientaHTML(z)}
+    <h3 class="f-sekcja">💰 Podsumowanie kosztów</h3>
+    <div class="summary" style="margin:.4rem 0 .9rem">${podsumowanieKosztowHTML(z,"Do zapłaty")}</div>
     <h3 class="f-sekcja">💳 Instrukcja płatności</h3>
     ${instrukcjaPlatnosciHTML(platId, z.nr, razem, z)}
     <h3 class="f-sekcja">📦 Śledzenie realizacji</h3>
@@ -1794,7 +1800,7 @@ function widokZamowienia(){
           <b>${esc(z.nr)}</b>
           <span>${esc(z.data)}</span>
           <span class="status-chip">${esc(z.status)}</span>
-          <b>${zl(Number(z.razem||0))}</b>
+          <b>${zl(z.razem)}</b>
           <button class="ci-remove" onclick="if(confirm('Usunąć zlecenie ${esc(z.nr)}? Nie wróci ono ponownie do obsługi.')) usunMojeZamowienie(${jsArg(z.nr)})" title="Usuń zlecenie">🗑️</button>
         </div>
         ${szczegolyZamowieniaKlientaHTML(z)}
@@ -1805,7 +1811,7 @@ function widokZamowienia(){
 function widokDziekujemy(nr){
   const numer=nrZamowienia(nr);
   const z=pobierzZamowienia().find(x=>x.nr===numer);
-  const razem=Number(z?.razem||0), platId=z?.platnoscId||"";
+  const razem=kwotaNum(z?.razem), platId=z?.platnoscId||"";
   if(z && platId==="paynow" && z.paynow?.paymentId && !paynowStatusAutosprawdzone.has(z.nr) && !["CONFIRMED","ERROR","EXPIRED","REJECTED","ABANDONED"].includes(String(z.paynow.status||"").toUpperCase())){
     paynowStatusAutosprawdzone.add(z.nr);
     setTimeout(()=>odswiezStatusPaynow(z.nr,z.paynow.paymentId),700);
@@ -1824,6 +1830,7 @@ function widokDziekujemy(nr){
       ${instrukcjaPlatnosciHTML(platId,z.nr,razem,z)}
       <h3 class="f-sekcja">🧾 Podsumowanie</h3>
       ${pozycjeZamowieniaKlientaHTML(z)}
+      <div class="summary" style="margin:.7rem 0">${podsumowanieKosztowHTML(z,"Do zapłaty")}</div>
     </div>`:`<p class="pay-note">Jeżeli nie widzisz szczegółów, przejdź do „Moje zamówienia” albo zaloguj się na konto użyte przy zakupie.</p>`}
     <p class="pay-note" style="margin-top:1rem;text-align:center">Potwierdzenie zamówienia jest wysyłane automatycznie na e-mail klienta, gdy bramka e-mail jest skonfigurowana na serwerze.</p>
     <div class="diag-actions" style="justify-content:center;margin-top:1rem">
@@ -2131,8 +2138,8 @@ function drukujZamowienie(nr){
       <table style="width:100%;border-collapse:collapse;margin:14px 0">
         <tr style="border-bottom:1px solid #999"><th style="text-align:left;padding:6px 0">Pozycja</th></tr>
         ${z.pozycje.map(p=>`<tr style="border-bottom:1px solid #ddd"><td style="padding:6px 0">${esc(p)}</td></tr>`).join("")}
-        <tr><td style="padding:10px 0;text-align:right;font-size:18px"><b>RAZEM: ${zl(z.razem)}</b></td></tr>
       </table>
+      <div class="summary" style="margin:12px 0">${podsumowanieKosztowHTML(z,"RAZEM")}</div>
       <p style="font-size:11px;color:#666">Dokument wygenerowany ${new Date().toLocaleString("pl-PL")}. Nie stanowi faktury VAT.</p>
     </div>`;
   document.body.classList.add("drukowanie");
@@ -2285,7 +2292,7 @@ function trescPowiadomienia(z,typ){
   const powitanie=`Dzień dobry${imie?", "+imie:""},`;
   const sledzenie=urlSledzenia(z);
   const pozycje=Array.isArray(z.pozycje)&&z.pozycje.length?`\n\nZamówione produkty:\n${z.pozycje.map(p=>`• ${p}`).join("\n")}`:"";
-  const podsumowanie=`\n\nWartość zamówienia: ${zl(z.razem)}\nDostawa: ${z.dostawa||"—"}\nPłatność: ${z.platnosc||"—"}`;
+  const podsumowanie=`\n\n${podsumowanieKosztowTekst(z)}\nPłatność: ${z.platnosc||"—"}`;
   const stopka=`\n\nPozdrawiamy\n${KONFIG.nazwaSklepu}\n${KONFIG.emailSklepu}`;
   const warianty={
     potwierdzenie:{temat:`Potwierdzenie zamówienia ${z.nr}`,body:`${powitanie}\n\npotwierdzamy przyjęcie zamówienia ${z.nr}.${pozycje}${podsumowanie}`},
@@ -2353,6 +2360,7 @@ function htmlPowiadomieniaKlienta(z,typ,temat,body){
             <b>Zamówienie:</b> ${esc(z.nr)} &nbsp; • &nbsp; <b>Kwota:</b> ${zl(z.razem)}
           </div>
           ${karta("Status", esc(body).replace(/\n/g,"<br>"), kolor)}
+          ${karta("Podsumowanie kosztów", podsumowanieKosztowTekst(z).split("\n").map(esc).join("<br>"), "#f59e0b")}
           ${w.numer||sledzenie?karta("Śledzenie", `${w.numer?`Numer przesyłki: <b>${esc(w.numer)}</b><br>`:""}${sledzenie?`Link śledzenia: <a href="${esc(sledzenie)}" style="color:#2563eb;font-weight:800">${esc(sledzenie)}</a>`:""}`,"#059669"):""}
           ${produktyEmailHtmlKlient(z)?`<h2 style="font-size:18px;margin:22px 0 10px;color:#111827">Produkty</h2>${produktyEmailHtmlKlient(z)}`:""}
           <div style="margin:22px 0 8px">${przycisk("Moje zamówienia",zamUrl)}${przycisk("Wróć do sklepu",sklepUrl,"#111827")}</div>
@@ -2708,6 +2716,7 @@ async function zapiszFormularzWysylkiPrzedAPI(nr){
   if(!form) return null;
   const f=new FormData(form);
   const zapisane=aktualizujZamowienie(nr,zam=>{
+    const stareRazem=kwotaNum(zam.razem);
     const w=daneWysylki(zam);
     const typ=String(f.get("dostawaTyp")||zam.dostawaId||"").trim();
     const paczkomat=typ ? typ!=="kurier_inpost" : czyZamowieniePaczkomat(zam);
@@ -2716,6 +2725,8 @@ async function zapiszFormularzWysylkiPrzedAPI(nr){
     if(paczkomat&&punktKod) zam.paczkomat=punktKod;
     if(!paczkomat){ zam.paczkomat=""; zam.paczkomatAdres=""; }
     const uslugaZTypu=typ==="kurier_inpost"?"Kurier InPost":uslugaInpostZamowienia(zam);
+    const pobranieForm=String(f.get("pobranie")||w.pobranie||"").trim();
+    const paczkaWeekendForm=f.has("paczkaWeekend") ? String(f.get("paczkaWeekend")||"").trim()==="tak" : !!(w.paczkaWeekend||zam.paczkaWeekend);
     zam.wysylka={...w,
       przewoznik:"inpost",
       usluga:String(f.get("usluga")||w.usluga||uslugaZTypu).trim()||uslugaZTypu,
@@ -2731,12 +2742,14 @@ async function zapiszFormularzWysylkiPrzedAPI(nr){
       szerokosc:String(f.get("szerokosc")||w.szerokosc||"").trim(),
       wysokosc:String(f.get("wysokosc")||w.wysokosc||"").trim(),
       ochrona:String(f.get("ochrona")||w.ochrona||"").trim(),
-      pobranie:String(f.get("pobranie")||w.pobranie||"").trim(),
-      paczkaWeekend:String(f.get("paczkaWeekend")||"").trim()==="tak",
+      pobranie:pobranieForm,
+      paczkaWeekend:paczkaWeekendForm,
       formatEtykiety:String(f.get("formatEtykiety")||w.formatEtykiety||"A6").trim().toUpperCase()==="A4"?"A4":"A6",
       zadania:{...(w.zadania||{}),dane:true},
       zaktualizowano:new Date().toISOString()
     };
+    zapiszKosztyZamowienia(zam,{dostawaId:zam.dostawaId,paczkaWeekend:zam.wysylka.paczkaWeekend});
+    if(zam.platnoscId==="pobranie" && (!pobranieForm || kwotaNum(pobranieForm)===stareRazem)) zam.wysylka.pobranie=kwotaNum(zam.razem).toFixed(2);
   });
   if(zapisane) await zapiszZamowienieCentralnie(zapisane,false);
   return zapisane;
@@ -2900,6 +2913,7 @@ function listaWysylekPoFiltrze(){
 }
 function kartaZleceniaWysylki(z){
   const w=daneWysylki(z), etap=ETAPY_WYSYLKI[etapWysylki(z)], sla=slaWysylki(z);
+  const koszty=kosztyZamowienia(z);
   const zad=w.zadania||{}, wykonane=["dane","kompletacja","etykieta","przekazanie"].filter(k=>zad[k]).length;
   const zazn=zaznaczoneNadania.has(String(z.nr)), got=gotoweDoNadaniaInpost(z), odbior=String(z?.dostawaId||"").toLowerCase()==="odbior";
   const znacznik = odbior?"":(got.ok?`<span class="lvl" style="background:#dcfce7;color:#166534" title="Dane kompletne — gotowe do nadania">✅ gotowe</span>`:`<span class="lvl" style="background:#fef3c7;color:#92400e" title="Uzupełnij dane odbiorcy przed nadaniem">⚠️ ${esc(got.powod)}</span>`);
@@ -2908,9 +2922,10 @@ function kartaZleceniaWysylki(z){
       <span><label style="margin-right:.5rem;cursor:pointer" title="Zaznacz do nadania z pliku"><input type="checkbox" style="transform:scale(1.25)" ${zazn?"checked":""} onchange="przelaczZaznaczenieNadania(${jsArg(z.nr)})"></label><a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}"><b>${esc(z.nr)}</b></a> • ${esc([z.klient?.imie,z.klient?.nazwisko].filter(Boolean).join(" ")||z.email||"gość")}</span>
       <span>${znacznik} <span class="shipment-priority priority-${esc(w.priorytet||"normalny")}">${esc(w.priorytet||"normalny")}</span> <span class="lvl" style="background:${etap.kolor}">${etap.ikona} ${etap.nazwa}</span></span>
     </div>
-    <div class="ship-meta">🚚 ${esc(nazwaPrzewoznika(w.przewoznik||przewoznikDlaZamowienia(z)))} • ${esc(w.usluga||uslugaInpostZamowienia(z))} • 🔢 ${w.numer?esc(w.numer):"<b>oczekuje na etykietę</b>"}<br>
-      📍 ${esc(z.adres||"brak adresu")} • 👤 ${esc(w.operator||"nieprzypisane")} • <span class="${sla.klasa}">⏱ ${esc(sla.tekst)}</span>
-    </div>
+	    <div class="ship-meta">🚚 ${esc(nazwaPrzewoznika(w.przewoznik||przewoznikDlaZamowienia(z)))} • ${esc(w.usluga||uslugaInpostZamowienia(z))} • 🔢 ${w.numer?esc(w.numer):"<b>oczekuje na etykietę</b>"}<br>
+	      📍 ${esc(z.adres||"brak adresu")} • 👤 ${esc(w.operator||"nieprzypisane")} • <span class="${sla.klasa}">⏱ ${esc(sla.tekst)}</span><br>
+	      💰 Dostawa: ${koszty.dostawa?zl(koszty.dostawa):"GRATIS"}${koszty.paczkaWeekend?` • Paczka w Weekend: ${zl(koszty.paczkaWeekend)}`:""} • Razem: <b>${zl(koszty.razem)}</b>
+	    </div>
     <div style="margin:.5rem 0;font-size:.75rem;color:var(--muted2)">Postęp ${wykonane}/4:
       ${[["dane","dane"],["kompletacja","kompletacja"],["etykieta","etykieta"],["przekazanie","przekazanie"]].map(([k,n])=>`<label style="margin-right:.5rem;white-space:nowrap"><input type="checkbox" ${zad[k]?"checked":""} onchange="przelaczZadanieWysylki('${esc(z.nr)}','${k}')"> ${n}</label>`).join("")}
     </div>
@@ -3183,6 +3198,7 @@ function widokAdminZamowienia(){
         <div class="order-lines">
           ${z.pozycje.map(p=>esc(p)).join("<br>")}
           ${z.email?`<br>👤 ${esc(z.email)}`:"<br>👤 gość (bez konta)"}
+          <br>💰 Dostawa: ${zl(kosztyZamowienia(z).dostawa)}${kosztyZamowienia(z).paczkaWeekend?` • Paczka w Weekend: ${zl(kosztyZamowienia(z).paczkaWeekend)}`:""}
           ${z.wysylka?.numer?`<br>🚚 ${esc(nazwaPrzewoznika(z.wysylka.przewoznik))}: ${esc(z.wysylka.numer)}`:"<br>🚚 bez numeru nadania"}
           — <a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">szczegóły →</a>
         </div>
@@ -3209,7 +3225,7 @@ function widokAdminZamowienie(nr){
       <div>
         <h2>Pozycje</h2>
         <div class="summary" style="margin:.5rem 0 1rem">${z.pozycje.map(p=>`<div><span>${esc(p)}</span></div>`).join("")}
-          <div class="sum-total"><span>Razem</span><span>${zl(z.razem)}</span></div></div>
+          ${podsumowanieKosztowHTML(z)}</div>
       </div>
       <div class="ship-card">
         <h2 style="margin-top:0">Klient</h2>
@@ -3284,8 +3300,8 @@ function widokAdminZamowienie(nr){
         </div>
         <div class="f-row">
           <div class="f-group"><label>Dodatkowa ochrona / ubezpieczenie (zł)</label><input name="ochrona" inputmode="decimal" value="${esc(w.ochrona||"")}" placeholder="np. 200.00"></div>
-          <div class="f-group"><label>Wartość pobrania (zł)</label><input name="pobranie" inputmode="decimal" value="${esc(w.pobranie||(z.platnoscId==="pobranie"?(Number(z.razem)||0).toFixed(2):""))}" placeholder="tylko dla pobrania"></div>
-          <div class="f-group"><label>Paczka w Weekend</label><select name="paczkaWeekend"><option value="" ${!w.paczkaWeekend?"selected":""}>NIE</option><option value="tak" ${w.paczkaWeekend?"selected":""}>TAK</option></select></div>
+          <div class="f-group"><label>Wartość pobrania (zł)</label><input name="pobranie" inputmode="decimal" value="${esc(w.pobranie||(z.platnoscId==="pobranie"?kwotaNum(z.razem).toFixed(2):""))}" placeholder="tylko dla pobrania"></div>
+          <div class="f-group"><label>Paczka w Weekend</label><select name="paczkaWeekend"><option value="" ${!w.paczkaWeekend?"selected":""}>NIE</option><option value="tak" ${w.paczkaWeekend?"selected":""}>TAK (+${zl(OPLATA_PACZKA_WEEKEND)})</option></select></div>
         </div>
       </details>
       <div class="f-group"><label>Uwagi do zamówienia</label><textarea name="uwagi" rows="2">${esc(z.uwagi||"")}</textarea></div>
@@ -3298,10 +3314,10 @@ function widokAdminZamowienie(nr){
   </div>
   <div class="panel">
     <h2 style="margin-top:0">💳 Płatność</h2>
-    <div class="summary" style="margin:.4rem 0 ${z.platnoscId==="paynow"?".8rem":"0"}">
-      <div><span>Metoda</span><span><b>${esc(z.platnosc||"—")}</b></span></div>
-      <div><span>Status płatności</span><span>${esc(z.platnoscStatus||(z.platnoscId==="paynow"?paynowStatusTekst(paynow.status):"—"))}</span></div>
-      <div class="sum-total"><span>Kwota</span><span>${zl(z.razem)}</span></div>
+      <div class="summary" style="margin:.4rem 0 ${z.platnoscId==="paynow"?".8rem":"0"}">
+        <div><span>Metoda</span><span><b>${esc(z.platnosc||"—")}</b></span></div>
+        <div><span>Status płatności</span><span>${esc(z.platnoscStatus||(z.platnoscId==="paynow"?paynowStatusTekst(paynow.status):"—"))}</span></div>
+      ${podsumowanieKosztowHTML(z,"Kwota")}
     </div>
     ${z.platnoscId==="paynow"?`<div class="diag-actions"><button class="btn ghost" type="button" onclick="odswiezStatusPaynow(${jsArg(z.nr)},${jsArg(paynow.paymentId||"")})">🔄 Odśwież Paynow</button>${paynow.redirectUrl?`<a class="btn" href="${esc(paynow.redirectUrl)}" target="_blank" rel="noopener">Otwórz link płatności</a>`:""}${String(paynow.status||"").toUpperCase()==="CONFIRMED"?`<button class="btn" type="button" style="background:#0ea5e9;color:#fff" onclick="zwrotPieniedzyPaynow(${jsArg(z.nr)})">💸 Zwrot pieniędzy przez Paynow</button>`:""}</div>`:""}
     ${Array.isArray(paynow.refunds)&&paynow.refunds.length?`<div class="backend-note" style="border-color:#7dd3fc;background:#f0f9ff;color:#075985"><b>Zwroty Paynow:</b><br>${paynow.refunds.map(r=>`${zl((Number(r.amount)||0)/100)} • <code>${esc(r.refundId||"—")}</code> • ${esc(r.status||"—")}${r.ts?` • ${esc(new Date(r.ts).toLocaleString("pl-PL"))}`:""}`).join("<br>")}</div>`:""}
@@ -3361,6 +3377,7 @@ function zapiszNadanie(e,nr){
   e.preventDefault();
   const f=new FormData(e.target), g=k=>String(f.get(k)||"").trim();
   aktualizujZamowienie(nr, z=>{
+    const stareRazem=kwotaNum(z.razem);
     z.klient=z.klient||{};
     z.klient.imie=g("imie"); z.klient.nazwisko=g("nazwisko"); z.klient.telefon=g("telefon");
     z.klient.firma=g("firma"); z.klient.nip=g("nip").replace(/[^0-9]/g,"");
@@ -3376,11 +3393,14 @@ function zapiszNadanie(e,nr){
     else { z.paczkomat=""; z.paczkomatAdres=""; w.punktKod=""; }
     const gab=g("gabaryt"); if(["small","medium","large"].includes(gab)) w.gabaryt=gab;
     if(g("waga")) w.waga=g("waga"); if(g("dlugosc")) w.dlugosc=g("dlugosc"); if(g("szerokosc")) w.szerokosc=g("szerokosc"); if(g("wysokosc")) w.wysokosc=g("wysokosc");
-    w.ochrona=g("ochrona"); w.pobranie=g("pobranie"); w.paczkaWeekend=g("paczkaWeekend")==="tak"; w.formatEtykiety=g("formatEtykiety").toUpperCase()==="A4"?"A4":"A6";
+    const pobranieForm=g("pobranie");
+    w.ochrona=g("ochrona"); w.pobranie=pobranieForm; w.paczkaWeekend=g("paczkaWeekend")==="tak"; w.formatEtykiety=g("formatEtykiety").toUpperCase()==="A4"?"A4":"A6";
     if(f.has("numer")) w.numer=g("numer");
     if(f.has("trackingUrl")) w.trackingUrl=g("trackingUrl");
     w.przewoznik="inpost"; w.usluga = typ==="paczkomat" ? "Paczkomat 24/7" : "Kurier InPost";
     z.wysylka=w;
+    zapiszKosztyZamowienia(z,{dostawaId:typ,paczkaWeekend:w.paczkaWeekend});
+    if(z.platnoscId==="pobranie" && (!pobranieForm || kwotaNum(pobranieForm)===stareRazem)) w.pobranie=kwotaNum(z.razem).toFixed(2);
     z.uwagi=g("uwagi");
     const a=z.adresDostawy;
     z.adres=`${a.ulica} ${a.nrDomu}${a.nrLokalu?"/"+a.nrLokalu:""}, ${a.kod} ${a.miasto}`.replace(/\s+/g," ").replace(/^[,\s]+|[,\s]+$/g,"").trim();
@@ -4184,8 +4204,8 @@ async function eksportujIndexHTML(){
 const csvPole = v => '"' + String(v??"").replace(/"/g,'""') + '"';
 function eksportujZamowienia(){
   const z = pobierzZamowienia();
-  const csv = [["nr","data","status","klient","razem_zl","dostawa","platnosc","adres","pozycje"].join(";"),
-    ...z.map(x=>[x.nr,x.data,x.status,x.email||"gość",String(x.razem.toFixed(2)).replace(".",","),x.dostawa||"",x.platnosc||"",x.adres||"",(x.pozycje||[]).join(" | ")].map(csvPole).join(";"))].join("\n");
+  const csv = [["nr","data","status","klient","produkty_zl","rabat_zl","dostawa_zl","paczka_weekend_zl","platnosc_oplata_zl","razem_zl","dostawa","platnosc","adres","pozycje"].join(";"),
+    ...z.map(x=>{const k=kosztyZamowienia(x); return [x.nr,x.data,x.status,x.email||"gość",k.produkty,k.rabat,k.dostawa,k.paczkaWeekend,k.platnosc,k.razem,x.dostawa||"",x.platnosc||"",x.adres||"",(x.pozycje||[]).join(" | ")].map(v=>typeof v==="number"?String(v.toFixed(2)).replace(".",","):v).map(csvPole).join(";");})].join("\n");
   pobierzPlik("zamowienia.csv","﻿"+csv,"text/csv");
   loguj("info","Wyeksportowano zamówienia ("+z.length+")");
 }
@@ -4272,7 +4292,7 @@ function eksportNadaniaInpostCSV(nry, format="txt"){
       a.kod,
       a.miasto,
       paczk ? "paczkomat" : "kurier",
-      w.paczkaWeekend ? "TAK" : "NIE"
+      (w.paczkaWeekend || z.paczkaWeekend) ? "TAK" : "NIE"
     ];
     const extra=[
       z.uwagi,
@@ -6256,14 +6276,71 @@ function odswiezKoszyk(){
    Dostawy i płatności konfigurujesz w KONFIG (góra pliku).
    „Za pobraniem” działa od razu — bez umów z bramkami płatności.
    Koszty przeliczają się na żywo przy zmianie opcji.             */
-function kosztDostawy(idDostawy){
+function kosztDostawyDlaKwoty(idDostawy, kwotaProdukow=sumaPoRabacie()){
   const d = dostepneDostawy().find(x=>x.id===idDostawy) || dostepneDostawy()[0];
-  if(d.koszt>0 && sumaPoRabacie()>=KONFIG.darmowaDostawaOd) return 0;
-  return d.koszt;
+  if(d.koszt>0 && kwotaNum(kwotaProdukow)>=KONFIG.darmowaDostawaOd) return 0;
+  return kwotaNum(d.koszt);
+}
+function kosztDostawy(idDostawy){
+  return kosztDostawyDlaKwoty(idDostawy, sumaPoRabacie());
 }
 function oplataPlatnosci(idPlat){
   const p = KONFIG.platnosci.find(x=>x.id===idPlat);
-  return p ? p.oplata : 0;
+  return p ? kwotaNum(p.oplata) : 0;
+}
+function kosztyZamowienia(z){
+  const k=z?.koszty||{}, ma=(obj,key)=>Object.prototype.hasOwnProperty.call(obj||{},key)&&obj[key]!=null;
+  const pozycje=Array.isArray(z?.pozycjeDane)?z.pozycjeDane:[];
+  const produktyZPozycji=pozycje.reduce((s,p)=>s+kwotaNum(p.wartosc || (kwotaNum(p.cena)*(Number(p.ilosc)||1))),0);
+  const metoda=z?.dostawaId || (czyZamowieniePaczkomat(z)?"paczkomat":"kurier_inpost");
+  const weekendAktywny=!!(z?.paczkaWeekend || z?.wysylka?.paczkaWeekend);
+  const weekend=kwotaNum(ma(z,"oplataPaczkaWeekend")?z.oplataPaczkaWeekend:(ma(k,"paczkaWeekend")?k.paczkaWeekend:oplataPaczkaWeekend(weekendAktywny)));
+  const platnosc=kwotaNum(ma(z,"oplataPlatnosci")?z.oplataPlatnosci:(ma(k,"platnosc")?k.platnosc:oplataPlatnosci(z?.platnoscId)));
+  const dostawaZapisana=ma(z,"dostawaKoszt")||ma(k,"dostawa");
+  const dostawa=dostawaZapisana ? kwotaNum(ma(z,"dostawaKoszt")?z.dostawaKoszt:k.dostawa) : kosztDostawyDlaKwoty(metoda, ma(k,"poRabacie")?k.poRabacie:produktyZPozycji);
+  const razemZapisane=kwotaNum(z?.razem);
+  let poRabacie=ma(k,"poRabacie") ? kwotaNum(k.poRabacie) : 0;
+  if(!poRabacie && razemZapisane) poRabacie=Math.max(0, kwotaNum(razemZapisane-dostawa-weekend-platnosc));
+  const produkty=ma(k,"produkty") ? kwotaNum(k.produkty) : (produktyZPozycji || poRabacie);
+  const rabat=ma(k,"rabat") ? kwotaNum(k.rabat) : Math.max(0, kwotaNum(produkty-poRabacie));
+  if(!poRabacie) poRabacie=Math.max(0, kwotaNum(produkty-rabat));
+  const razem=razemZapisane || kwotaNum(poRabacie+dostawa+weekend+platnosc);
+  return {produkty,rabat,poRabacie,dostawa,paczkaWeekend:weekend,platnosc,razem,metoda,weekendAktywny:weekend>0||weekendAktywny};
+}
+function zapiszKosztyZamowienia(z, zmiany={}){
+  const c=kosztyZamowienia(z);
+  const metoda=zmiany.dostawaId || z?.dostawaId || c.metoda || "paczkomat";
+  const weekendAktywny=Object.prototype.hasOwnProperty.call(zmiany,"paczkaWeekend") ? !!zmiany.paczkaWeekend : c.weekendAktywny;
+  const dostawa=kosztDostawyDlaKwoty(metoda, c.poRabacie);
+  const weekend=oplataPaczkaWeekend(weekendAktywny);
+  const razem=kwotaNum(c.poRabacie+dostawa+weekend+c.platnosc);
+  z.dostawaKoszt=dostawa;
+  z.oplataPaczkaWeekend=weekend;
+  z.oplataPlatnosci=c.platnosc;
+  z.paczkaWeekend=weekendAktywny;
+  z.koszty={...(z.koszty||{}),produkty:c.produkty,rabat:c.rabat,poRabacie:c.poRabacie,dostawa,paczkaWeekend:weekend,platnosc:c.platnosc,razem};
+  z.razem=razem;
+  return z.koszty;
+}
+function podsumowanieKosztowHTML(z, podpisRazem="Razem"){
+  const c=kosztyZamowienia(z);
+  return `${c.produkty?`<div><span>Produkty</span><span>${zl(c.produkty)}</span></div>`:""}
+    ${c.rabat?`<div><span>Rabat</span><span>−${zl(c.rabat)}</span></div><div><span>Po rabacie</span><span>${zl(c.poRabacie)}</span></div>`:""}
+    <div><span>Dostawa</span><span>${c.dostawa?zl(c.dostawa):"GRATIS"}</span></div>
+    ${c.paczkaWeekend?`<div><span>Paczka w Weekend</span><span>${zl(c.paczkaWeekend)}</span></div>`:""}
+    ${c.platnosc?`<div><span>Opłata płatności / pobrania</span><span>${zl(c.platnosc)}</span></div>`:""}
+    <div class="sum-total"><span>${esc(podpisRazem)}</span><span>${zl(c.razem)}</span></div>`;
+}
+function podsumowanieKosztowTekst(z){
+  const c=kosztyZamowienia(z);
+  return [
+    `Produkty: ${zl(c.produkty || c.poRabacie)}`,
+    c.rabat ? `Rabat: -${zl(c.rabat)}` : "",
+    `Dostawa: ${c.dostawa?zl(c.dostawa):"GRATIS"} (${z?.dostawa||"—"})`,
+    c.paczkaWeekend ? `Paczka w Weekend: ${zl(c.paczkaWeekend)}` : "",
+    c.platnosc ? `Opłata płatności / pobrania: ${zl(c.platnosc)}` : "",
+    `Razem do zapłaty: ${zl(c.razem)}`
+  ].filter(Boolean).join("\n");
 }
 function dostepnePlatnosci(){
   KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
@@ -6392,6 +6469,7 @@ function otworzModal(){
           </select>
         </div>
       </div>
+      <label class="chk-row"><input type="checkbox" name="paczkaWeekend" onchange="przeliczZamowienie()"> 🟡 Paczka w Weekend (+${zl(OPLATA_PACZKA_WEEKEND)}) <small style="color:var(--muted2);font-weight:600">opcjonalna usługa InPost doliczana do zamówienia</small></label>
       <div class="f-group" id="paczkomatBox" style="display:block">
         <label>Paczkomat InPost *</label>
         <input type="hidden" name="paczkomat" id="paczkomatKod">
@@ -6421,14 +6499,15 @@ function przeliczZamowienie(){
   const idD = form.delivery?.value || "paczkomat", idP = form.payment.value;
   const pBox = $("paczkomatBox");
   if(pBox){ pBox.style.display = czyDostawaPaczkomat(idD) ? "" : "none"; }
-  const suma = sumaPoRabacie(), dostawa = kosztDostawy(idD), oplata = oplataPlatnosci(idP);
+  const suma = sumaPoRabacie(), dostawa = kosztDostawy(idD), oplata = oplataPlatnosci(idP), weekend = oplataPaczkaWeekend(!!form.paczkaWeekend?.checked);
   $("orderSummary").innerHTML =
     koszyk.map(x=>{const p=produkty.find(p=>p.id===x.id);
       return `<div><span>${esc(p.nazwa)}${x.wariant?` (${esc(x.wariant)})`:""} × ${x.ile}</span><span>${zl(p.cena*x.ile)}</span></div>`;}).join("")
     + (rabat?`<div><span>Rabat (${esc(rabat.kod)})</span><span>−${zl(kwotaRabatu())}</span></div>`:"")
     + `<div><span>Dostawa</span><span>${dostawa?zl(dostawa):"GRATIS"}</span></div>`
+    + (weekend?`<div><span>Paczka w Weekend</span><span>${zl(weekend)}</span></div>`:"")
     + (oplata?`<div><span>Opłata za pobranie</span><span>${zl(oplata)}</span></div>`:"")
-    + `<div class="sum-total"><span>Do zapłaty</span><span>${zl(suma+dostawa+oplata)}</span></div>`;
+    + `<div class="sum-total"><span>Do zapłaty</span><span>${zl(suma+dostawa+oplata+weekend)}</span></div>`;
 }
 // ─── InPost Geowidget (wybór paczkomatu na mapie) ───
 let INPOST_PUBLIC=null, geowidgetSDK=null;
@@ -6575,8 +6654,9 @@ async function zlozZamowienie(e){
     }
     const dost = dostepneDostawy().find(x=>x.id===idD) || DOMYSLNA_DOSTAWA_INPOST;
     const plat = KONFIG.platnosci.find(x=>x.id===idP);
-    const suma = sumaPoRabacie(), dostawa = kosztDostawy(idD), oplata = oplataPlatnosci(idP);
-    const razem = suma+dostawa+oplata;
+    const paczkaWeekend = !!f.get("paczkaWeekend");
+    const suma = sumaPoRabacie(), dostawa = kosztDostawy(idD), oplata = oplataPlatnosci(idP), oplataWeekend = oplataPaczkaWeekend(paczkaWeekend);
+    const razem = kwotaNum(suma+dostawa+oplata+oplataWeekend);
     const nr = "ATM-" + Date.now().toString().slice(-6);
     const paczkomat = czyDostawaPaczkomat(idD) ? " • Paczkomat: "+f.get("paczkomat") : "";
     const adres = `${f.get("ulica")} ${f.get("nrDomu")}${f.get("nrLokalu")?"/"+f.get("nrLokalu"):""}, ${f.get("kod")} ${f.get("miasto")}`;
@@ -6590,6 +6670,7 @@ async function zlozZamowienie(e){
 ================================
 ${pozycje.map(p=>"- "+p).join("\n")}
 ${rabat?`Rabat ${rabat.kod}: -${zl(kwotaRabatu())}\n`:""}Dostawa: ${dost.nazwa}${paczkomat} — ${dostawa?zl(dostawa):"gratis"}
+${paczkaWeekend?`Paczka w Weekend: ${zl(oplataWeekend)}\n`:""}
 ${oplata?`Opłata za pobranie: ${zl(oplata)}\n`:""}RAZEM: ${zl(razem)}
 Płatność: ${plat.nazwa}
 ${instrukcjaPlatnosciTekst(idP,nr,razem)}
@@ -6622,9 +6703,12 @@ Uwagi: ${f.get("notes")||"brak"}`;
       klient:{imie:String(f.get("imie")||"").trim(),nazwisko:String(f.get("nazwisko")||"").trim(),telefon:String(f.get("phone")||"").trim(),
         firma:f.get("firmaChk")?String(f.get("firma")||"").trim():"",nip:f.get("firmaChk")?String(f.get("nip")||"").replace(/[^0-9]/g,""):""},
       adresDostawy:{ulica:String(f.get("ulica")||"").trim(),nrDomu:String(f.get("nrDomu")||"").trim(),nrLokalu:String(f.get("nrLokalu")||"").trim(),kod:String(f.get("kod")||"").trim(),miasto:String(f.get("miasto")||"").trim()},
-      pozycje,pozycjeDane,razem,status:"nowe",dostawa:dost.nazwa,dostawaId:idD,platnosc:plat.nazwa,platnoscId:idP,platnoscInstrukcja:instrukcjaPlatnosciTekst(idP,nr,razem),adres,
+      pozycje,pozycjeDane,razem,status:"nowe",dostawa:dost.nazwa,dostawaId:idD,dostawaKoszt:dostawa,paczkaWeekend,oplataPaczkaWeekend:oplataWeekend,
+      oplataPlatnosci:oplata,koszty:{produkty:sumaKoszyka(),rabat:kwotaRabatu(),poRabacie:suma,dostawa,paczkaWeekend:oplataWeekend,platnosc:oplata,razem},
+      platnosc:plat.nazwa,platnoscId:idP,platnoscInstrukcja:instrukcjaPlatnosciTekst(idP,nr,razem),adres,
       paczkomat:czyDostawaPaczkomat(idD)?String(f.get("paczkomat")||"").trim():"",paczkomatAdres:czyDostawaPaczkomat(idD)?String(window.__paczkomatAdres||"").trim():"",uwagi:String(f.get("notes")||"").trim(),
       wysylka:{przewoznik:"inpost",usluga:uslugaInpostDlaDostawy(idD),punktKod:czyDostawaPaczkomat(idD)?String(f.get("paczkomat")||"").trim():"",status:"nieprzygotowana",etap:"do_obslugi",priorytet:"normalny",zadania:{dane:true,kompletacja:false,etykieta:false,przekazanie:false},
+        paczkaWeekend,oplataWeekend,dodatkoweUslugi:paczkaWeekend?[{id:"paczka_weekend",nazwa:"Paczka w Weekend",koszt:oplataWeekend}]:[],
         historia:[{czas:new Date().toLocaleString("pl-PL"),status:"Zamówienie utworzone",opis:"Oczekuje na potwierdzenie i przygotowanie"}],powiadomienia:[]}
     };
     zapiszZamowienie(noweZamowienie);
