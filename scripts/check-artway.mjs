@@ -70,6 +70,8 @@ requireMarkers('assets/app.js', app, [
   'function panelEtykietInpostHTML',
   'CSV kolumny A/B/C',
   'e-mail","telefon","rozmiar","paczkomat","numer_referencyjny',
+  'kurierInpostAktywny: true',
+  'nazwa:"Kurier InPost", koszt:20',
   'function utworzEtykietyZaznaczoneAPI',
   'function pobierzInpostConfig',
   'function otworzGeowidget',
