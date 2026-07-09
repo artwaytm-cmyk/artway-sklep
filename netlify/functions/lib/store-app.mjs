@@ -1213,15 +1213,37 @@ function walidujPrzesylkeInPost(z) {
 function inpostListaUslug(org) {
   return Array.isArray(org?.services) ? org.services.map((x) => tekst(x, 80).trim()).filter(Boolean) : [];
 }
+const INPOST_LOCKER_SERVICE_FALLBACKS = [
+  'inpost_locker_standard',
+  'inpost_locker_standard_smart',
+  'inpost_locker_pass_thru',
+  'inpost_locker_allegro',
+];
+const INPOST_COURIER_SERVICE_FALLBACKS = [
+  'inpost_courier_standard',
+  'inpost_courier_c2c',
+  'inpost_courier_local_standard',
+  'inpost_courier_local_express',
+  'inpost_courier_allegro',
+];
+function inpostWybierzAktywnaUsluge(services, preferowana, fallbacks) {
+  if (!services.length) return preferowana;
+  if (services.includes(preferowana)) return preferowana;
+  return fallbacks.find((x) => services.includes(x)) || preferowana;
+}
 function inpostDostepnoscUslug(c, org) {
   const services = inpostListaUslug(org);
   const sprawdzaj = services.length > 0;
+  const lockerService = sprawdzaj ? inpostWybierzAktywnaUsluge(services, c.lockerService, INPOST_LOCKER_SERVICE_FALLBACKS) : c.lockerService;
+  const courierService = sprawdzaj ? inpostWybierzAktywnaUsluge(services, c.courierService, INPOST_COURIER_SERVICE_FALLBACKS) : c.courierService;
   return {
     services,
-    lockerService: c.lockerService,
-    courierService: c.courierService,
-    locker: !sprawdzaj || services.includes(c.lockerService),
-    courier: !sprawdzaj || services.includes(c.courierService),
+    requestedLockerService: c.lockerService,
+    requestedCourierService: c.courierService,
+    lockerService,
+    courierService,
+    locker: !sprawdzaj || services.includes(lockerService),
+    courier: !sprawdzaj || services.includes(courierService),
   };
 }
 async function inpostOrganizacja(c) {
@@ -1921,7 +1943,7 @@ export default async (req) => {
       }
       if (availability?.services?.length) {
         const wymaganyTyp = walidacja.doPaczkomatu ? 'locker' : 'courier';
-        const service = walidacja.doPaczkomatu ? c.lockerService : c.courierService;
+        const service = walidacja.doPaczkomatu ? availability.lockerService : availability.courierService;
         if (!availability[wymaganyTyp]) {
           return odpowiedz({
             ok: false,
@@ -1932,7 +1954,8 @@ export default async (req) => {
           }, 422);
         }
       }
-      const payload = przesylkaShipXPayload(z, c, walidacja);
+      const aktywneUslugi = availability ? { ...c, lockerService: availability.lockerService || c.lockerService, courierService: availability.courierService || c.courierService } : c;
+      const payload = przesylkaShipXPayload(z, aktywneUslugi, walidacja);
       const dane = await inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}/shipments`, { method: 'POST', bodyObj: payload });
       const inpostId = tekst(dane?.id, 60).trim();
       let daneAktualne = dane;
