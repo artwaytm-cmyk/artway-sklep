@@ -68,7 +68,7 @@ requireMarkers('assets/app.js', app, [
   'function synchronizujWszystkieStatusyAPI',
   'function eksportNadaniaInpostCSV',
   'function panelEtykietInpostHTML',
-  'CSV kolumny A/B/C',
+  'CSV z nagłówkami InPost',
   'e-mail","telefon","rozmiar","paczkomat","numer_referencyjny',
   'kurierInpostAktywny: true',
   'nazwa:"Kurier InPost", koszt:20',
