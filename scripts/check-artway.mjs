@@ -57,6 +57,7 @@ requireMarkers('assets/styles.css', css, [
   '.admin-page',
   '.ship-card',
   '.warehouse-hero',
+  '.ai-agent-hero',
   '.modal',
 ]);
 
@@ -65,6 +66,9 @@ requireMarkers('assets/app.js', app, [
   'function zlozZamowienie',
   'function widokAdmin',
   'function widokAdminMagazyn',
+  'function widokAdminAgentAI',
+  'artway_dostepnosc',
+  'LIMIT_POTWIERDZENIA_DOSTEPNOSCI',
   'artway_ruchy_magazynowe',
   'artway_faktury_szkice',
   'inFakt / szkice faktur',
@@ -131,6 +135,7 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'dropoff_point',
   'inpostPobranieAktywne',
   'inpostSposobNadaniaZamowienia',
+  'artway_dostepnosc',
   'artway_ruchy_magazynowe',
   'artway_faktury_szkice',
 ]);

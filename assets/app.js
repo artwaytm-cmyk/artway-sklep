@@ -222,6 +222,7 @@ let produktyEdytowane = wczytajLS("artway_produkty_edytowane", {});
 let ustawienia = {...USTAWIENIA_PUBLICZNE, ...wczytajLS("artway_ustawienia", {})};
 let koszyk = wczytajLS("artway_koszyk", []);
 let stanyProduktow = wczytajLS("artway_stany", {});   // magazyn: id → liczba sztuk (brak wpisu = bez limitu)
+let dostepnoscProduktow = wczytajLS("artway_dostepnosc", {}); // status sprzedażowy: niezależny od magazynu, widoczny klientowi
 let ruchyMagazynowe = wczytajLS("artway_ruchy_magazynowe", []); // historia przyjęć, korekt i sprzedaży
 let ustawieniaMagazynu = wczytajLS("artway_magazyn_ustawienia", {});
 let szkiceFaktur = wczytajLS("artway_faktury_szkice", []); // przygotowane dokumenty pod przyszłą integrację inFakt
@@ -248,7 +249,7 @@ let frazaListyProduktow="", sortowanieListyProduktow="default";
    na pamięci przeglądarki (localStorage) jak dotychczas. */
 const CHMURA_URL = "/.netlify/functions/store";
 const CHMURA_AUTO_SYNC_MS = 60000;
-const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_faktury_szkice","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_faktury_szkice","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
 let chmuraToken = (function(){ try{ return JSON.parse(localStorage.getItem("artway_chmura_token"))||""; }catch(e){ return ""; } })();
 let chmuraStan = {dostepna:false, sprawdzono:false, admin:false, rev:0, updated_at:null, error:"", ostatniZapis:0};
 let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z serwera
@@ -325,6 +326,7 @@ function zbierzWspolneUstawienia(){
     artway_produkty_ukryte: produktyUkryte,
     artway_produkty_definitywne: produktyDefinitywne,
     artway_stany: stanyProduktow,
+    artway_dostepnosc: dostepnoscProduktow,
     artway_ruchy_magazynowe: ruchyMagazynowe,
     artway_magazyn_ustawienia: ustawieniaMagazynu,
     artway_faktury_szkice: szkiceFaktur,
@@ -344,7 +346,8 @@ function nalozWspolneUstawienia(dane){
     const setter = {
       artway_produkty_dodane:(v)=>{produktyDodane=v;}, artway_produkty_ukryte:(v)=>{produktyUkryte=v;},
       artway_produkty_edytowane:(v)=>{produktyEdytowane=v;}, artway_produkty_definitywne:(v)=>{produktyDefinitywne=v;},
-      artway_stany:(v)=>{stanyProduktow=v;}, artway_ruchy_magazynowe:(v)=>{ruchyMagazynowe=Array.isArray(v)?v:[];},
+      artway_stany:(v)=>{stanyProduktow=v;}, artway_dostepnosc:(v)=>{dostepnoscProduktow=(v&&typeof v==="object")?v:{};},
+      artway_ruchy_magazynowe:(v)=>{ruchyMagazynowe=Array.isArray(v)?v:[];},
       artway_magazyn_ustawienia:(v)=>{ustawieniaMagazynu=(v&&typeof v==="object")?v:{};}, artway_faktury_szkice:(v)=>{szkiceFaktur=Array.isArray(v)?v:[];},
       artway_opinie:(v)=>{opinie=v;},
       artway_kosz_dodane:(v)=>{koszDodanych=v;}, artway_kosz_meta:(v)=>{koszMeta=v;},
@@ -1041,8 +1044,53 @@ function zbudujProdukty(){
     .filter(p => !ukryteKat.includes(p.kategoria));
 }
 /* ── Magazyn ── */
+const LIMIT_POTWIERDZENIA_DOSTEPNOSCI = 5;
 function stanProduktu(p){ return (typeof p.stan==="number" && p.stan>=0) ? p.stan : null; }   // null = bez limitu
 function produktMaCeneSprzedazy(p){ return Number(p?.cena)>0; }
+function wpisDostepnosciProduktu(id){
+  return (dostepnoscProduktow||{})[String(id)] || (dostepnoscProduktow||{})[id] || null;
+}
+function produktOznaczonyNiedostepny(p){
+  const d=wpisDostepnosciProduktu(p?.id);
+  return !!d && String(d.status||"").toLowerCase()==="niedostepny";
+}
+function powodNiedostepnosci(p){
+  const d=wpisDostepnosciProduktu(p?.id);
+  return String(d?.powod||"").trim();
+}
+function produktDostepnyWSprzedazy(p){
+  return !!p && produktMaCeneSprzedazy(p) && !produktOznaczonyNiedostepny(p);
+}
+function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
+  const key=String(id);
+  const s=String(status||"dostepny").toLowerCase();
+  if(s==="niedostepny"){
+    dostepnoscProduktow={...(dostepnoscProduktow||{}),[key]:{status:"niedostepny",powod:String(powod||"").trim(),data:new Date().toISOString(),operator:sesja?.email||"administrator"}};
+  }else{
+    dostepnoscProduktow={...(dostepnoscProduktow||{})};
+    delete dostepnoscProduktow[key];
+    delete dostepnoscProduktow[id];
+  }
+  zapiszLS("artway_dostepnosc",dostepnoscProduktow);
+  loguj("info",`Dostępność sprzedażowa: produkt ${id} → ${s}`);
+  toast(s==="niedostepny"?"Produkt oznaczony jako niedostępny":"Produkt dostępny w sprzedaży ✅");
+  renderuj();
+}
+function przelaczDostepnoscProduktu(id){
+  const p=produktMagazynowy(id);
+  if(!p)return;
+  if(produktOznaczonyNiedostepny(p)) ustawDostepnoscProduktu(id,"dostepny");
+  else {
+    const powod=prompt("Powód niedostępności widoczny tylko w panelu (opcjonalnie):","chwilowo niedostępny");
+    if(powod===null)return;
+    ustawDostepnoscProduktu(id,"niedostepny",powod);
+  }
+}
+function dostepnoscBadgeAdmin(p){
+  return produktOznaczonyNiedostepny(p)
+    ? `<span class="lvl lvl-blad">niedostępny w sklepie</span>${powodNiedostepnosci(p)?`<br><small>${esc(powodNiedostepnosci(p))}</small>`:""}`
+    : `<span class="lvl lvl-ok">dostępny w sklepie</span>`;
+}
 function stanMagazynuId(id){
   if(stanyProduktow[id]===undefined || stanyProduktow[id]===null || stanyProduktow[id]==="") return null;
   const n=Number(stanyProduktow[id]);
@@ -1210,6 +1258,7 @@ function renderuj(){
       else if(t.startsWith("/admin/zamowienie/")) w.innerHTML = widokAdminZamowienie(decodeURIComponent(t.split("/")[3]||""));
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
       else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn();
+      else if(t==="/admin/agent-ai") w.innerHTML = widokAdminAgentAI();
       else if(t==="/admin/asortyment" || t==="/admin/produkty") w.innerHTML = widokAdminProdukty();
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
       else if(t.startsWith("/admin/produkty/edytuj/")) w.innerHTML = widokAdminProduktEdytuj(parseInt(t.split("/")[4]));
@@ -1356,7 +1405,7 @@ function widokSklep(){
       <div class="filter-grid">
         <label>Cena od (zł)<input type="number" min="0" step=".01" value="${esc(cenaOd)}" oninput="cenaOd=this.value;stronaProduktow=1;rysuj()" placeholder="0"></label>
         <label>Cena do (zł)<input type="number" min="0" step=".01" value="${esc(cenaDo)}" oninput="cenaDo=this.value;stronaProduktow=1;rysuj()" placeholder="bez limitu"></label>
-        <label>Dostępność<select onchange="filtrDostepnosci=this.value;stronaProduktow=1;rysuj()"><option value="wszystkie">Wszystkie</option><option value="dostepne" ${filtrDostepnosci==="dostepne"?"selected":""}>Dostępne</option><option value="ostatnie" ${filtrDostepnosci==="ostatnie"?"selected":""}>Ostatnie sztuki</option><option value="brak" ${filtrDostepnosci==="brak"?"selected":""}>Wyprzedane</option></select></label>
+        <label>Dostępność<select onchange="filtrDostepnosci=this.value;stronaProduktow=1;rysuj()"><option value="wszystkie">Wszystkie</option><option value="dostepne" ${filtrDostepnosci==="dostepne"?"selected":""}>Dostępne w sprzedaży</option><option value="brak" ${filtrDostepnosci==="brak"?"selected":""}>Chwilowo niedostępne</option></select></label>
         <label>Rodzaj oferty<select onchange="filtrOferty=this.value;stronaProduktow=1;rysuj()"><option value="wszystkie">Wszystkie</option><option value="promocje" ${filtrOferty==="promocje"?"selected":""}>Promocje</option><option value="nowosci" ${filtrOferty==="nowosci"?"selected":""}>Nowości</option></select></label>
         <label>Minimalna ocena<select onchange="filtrOceny=this.value;stronaProduktow=1;rysuj()"><option value="0">Dowolna</option><option value="3" ${filtrOceny==="3"?"selected":""}>3★ i więcej</option><option value="4" ${filtrOceny==="4"?"selected":""}>4★ i więcej</option><option value="4.5" ${filtrOceny==="4.5"?"selected":""}>4,5★ i więcej</option></select></label>
       </div>
@@ -1464,11 +1513,11 @@ function sortujListeProduktow(lista,sort=sortowanie){
 function listaProduktowPoFiltrach(){
   const od=cenaOd===""?null:Number(cenaOd),doC=cenaDo===""?null:Number(cenaDo),minOcena=Number(filtrOceny||0);
   const lista=produkty.filter(p=>{
-    const stan=stanProduktu(p),ocena=sredniaOcen(p.id)?.srednia||0;
+    const ocena=sredniaOcen(p.id)?.srednia||0, niedostepny=produktOznaczonyNiedostepny(p);
     return (aktywnaKategoria==="Wszystkie"||p.kategoria===aktywnaKategoria)
       && produktPasujeFrazie(p)
       && (od===null||p.cena>=od)&&(doC===null||p.cena<=doC)
-      && (filtrDostepnosci==="wszystkie"||(filtrDostepnosci==="dostepne"&&stan!==0)||(filtrDostepnosci==="ostatnie"&&stan!==null&&stan>0&&stan<=3)||(filtrDostepnosci==="brak"&&stan===0))
+      && (filtrDostepnosci==="wszystkie"||(filtrDostepnosci==="dostepne"&&!niedostepny)||(filtrDostepnosci==="brak"&&niedostepny))
       && (filtrOferty==="wszystkie"||(filtrOferty==="promocje"&&!!p.staraCena)||(filtrOferty==="nowosci"&&p.badge==="Nowość"))
       && ocena>=minOcena;
   });
@@ -1495,15 +1544,15 @@ function wyczyscFiltryProduktow(){
 }
 function kartaProduktu(p){
   const ulub = ulubione.includes(p.id);
-  const stan = stanProduktu(p);
   const oceny = sredniaOcen(p.id);
   const brakCeny = !produktMaCeneSprzedazy(p);
+  const niedostepny = produktOznaczonyNiedostepny(p);
   return `
   <article class="card" onclick="location.hash='#/produkt/${p.id}'">
     <div class="thumb" style="background:${p.kolor||'#eef2f7'}">
-      ${stan===0?`<span class="badge" style="background:#64748b">Wyprzedane</span>`:(brakCeny?`<span class="badge" style="background:#f97316">Do wyceny</span>`:(p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:""))}
+      ${niedostepny?`<span class="badge" style="background:#64748b">Chwilowo niedostępne</span>`:(brakCeny?`<span class="badge" style="background:#f97316">Do wyceny</span>`:(p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:""))}
       ${jestAdmin()?"":`<button class="fav-btn" onclick="event.stopPropagation();przelaczUlubione(${p.id})" aria-label="Ulubione">${ulub?"❤️":"🤍"}</button>`}
-      ${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" style="width:100%;height:100%;object-fit:cover;${stan===0?'filter:grayscale(1);opacity:.6':''}" onerror="this.remove();loguj('ostrzezenie','Nie wczytano zdjęcia produktu: ${esc(p.nazwa)}')">`:(p.ikona||"📦")}
+      ${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" style="width:100%;height:100%;object-fit:cover;${niedostepny?'filter:grayscale(1);opacity:.6':''}" onerror="this.remove();loguj('ostrzezenie','Nie wczytano zdjęcia produktu: ${esc(p.nazwa)}')">`:(p.ikona||"📦")}
     </div>
     <div class="card-body">
       <span class="cat-label">${esc(p.kategoria)}${oceny?` <span style="color:var(--accent);text-transform:none;letter-spacing:0">★ ${oceny.srednia.toFixed(1)} (${oceny.n})</span>`:""}</span>
@@ -1514,8 +1563,8 @@ function kartaProduktu(p){
         ${p.staraCena?`<span class="old-price">${zl(p.staraCena)}</span>`:""}
       </div>
       ${brakCeny?`<p style="font-size:.76rem;color:#c2410c;font-weight:700;margin-bottom:.4rem">Produkt zaimportowany z ceną 0,00 — popraw cenę w panelu</p>`:""}
-      ${stan!==null && stan>0 && stan<=3 ? `<p style="font-size:.76rem;color:var(--danger);font-weight:700;margin-bottom:.4rem">🔥 Ostatnie sztuki: ${stan}</p>`:""}
-      ${stan===0||brakCeny
+      ${niedostepny?`<p style="font-size:.76rem;color:var(--danger);font-weight:700;margin-bottom:.4rem">Chwilowo niedostępne w sprzedaży</p>`:""}
+      ${niedostepny||brakCeny
         ? `<button class="add-btn" disabled style="background:#94a3b8;cursor:not-allowed">${brakCeny?"Cena do uzupełnienia":"Chwilowo niedostępny"}</button>`
         : p.warianty?.length
           ? `<button class="add-btn" onclick="event.stopPropagation();location.hash='#/produkt/${p.id}'" style="background:var(--brand2)">Wybierz wariant →</button>`
@@ -1603,6 +1652,7 @@ function widokProdukt(id){
   iloscProduktu = 1;
   const powiazane = produkty.filter(x=>x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
   const brakCeny = !produktMaCeneSprzedazy(p);
+  const niedostepny = produktOznaczonyNiedostepny(p);
   return `
   <div class="page">
     <div class="crumb"><a href="#/">Sklep</a> › <a href="#/" onclick="ustawKategorie('${esc(p.kategoria)}')">${esc(p.kategoria)}</a> › ${esc(p.nazwa)}</div>
@@ -1610,7 +1660,7 @@ function widokProdukt(id){
       <div class="prod-detail">
         <div>
           <div class="prod-thumb" style="background:${p.kolor||'#eef2f7'}">
-            ${p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:""}
+            ${niedostepny?`<span class="badge" style="background:#64748b">Chwilowo niedostępne</span>`:(p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:"")}
             ${p.zdjecie?`<img id="glowneZdjecie" src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}">`:(p.ikona||"📦")}
           </div>
           ${(p.zdjecie && p.zdjecia?.length)?`
@@ -1639,16 +1689,14 @@ function widokProdukt(id){
             <button onclick="zmienIloscProd(1)">+</button>
           </div>
           <div style="display:flex;gap:.7rem;flex-wrap:wrap">
-            ${stanProduktu(p)===0||brakCeny
+            ${niedostepny||brakCeny
               ? `<button class="btn" disabled style="background:#94a3b8;cursor:not-allowed">${brakCeny?"Cena do uzupełnienia":"Chwilowo niedostępny"}</button>`
               : `<button class="btn" onclick="dodajIlosc(${p.id})">🛒 Do koszyka</button>`}
             ${jestAdmin()?"":`<button class="btn ghost" onclick="przelaczUlubione(${p.id});renderuj()">${ulubione.includes(p.id)?"❤️ W ulubionych":"🤍 Dodaj do ulubionych"}</button>`}
           </div>
-          ${(()=>{ const s=stanProduktu(p);
-            if(s===0) return `<p style="font-size:.83rem;color:var(--danger);margin-top:1rem;font-weight:600">✖ Chwilowo niedostępny — zajrzyj wkrótce</p>`;
-            if(s!==null && s<=3) return `<p style="font-size:.83rem;color:var(--danger);margin-top:1rem;font-weight:600">🔥 Ostatnie sztuki: ${s} • ${esc(tekstWysylki().toLowerCase())}</p>`;
-            if(s!==null) return `<p style="font-size:.83rem;color:var(--ok);margin-top:1rem;font-weight:600">✔ Dostępny: ${s} szt. • ${esc(tekstWysylki().toLowerCase())}</p>`;
-            return `<p style="font-size:.83rem;color:var(--ok);margin-top:1rem;font-weight:600">✔ Dostępny • ${esc(tekstWysylki().toLowerCase())}</p>`; })()}
+          ${niedostepny
+            ? `<p style="font-size:.83rem;color:var(--danger);margin-top:1rem;font-weight:600">✖ Chwilowo niedostępny — sprawdź później albo skontaktuj się ze sklepem</p>`
+            : `<p style="font-size:.83rem;color:var(--ok);margin-top:1rem;font-weight:600">✔ Dostępny w sprzedaży • ${esc(tekstWysylki().toLowerCase())}</p>`}
           ${(()=>{ const o=sredniaOcen(p.id); return o?`<p style="font-size:.95rem;color:var(--accent);font-weight:700;margin-top:.3rem">${gwiazdki(o.srednia)} ${o.srednia.toFixed(1)} <small style="color:var(--muted2)">(${o.n} opinii)</small></p>`:""; })()}
         </div>
       </div>
@@ -2168,6 +2216,7 @@ const MENU_ADMINA = [
   ["/admin","📊 Pulpit"], ["/admin/zamowienia","📦 Zamówienia"],
   ["/admin/wysylki","🚚 Centrum wysyłek"],
   ["/admin/magazyn","🏬 Magazyn"],
+  ["/admin/agent-ai","🤖 Agent AI"],
   ["/admin/asortyment","🏷️ Asortyment"],
   ["/admin/klienci","👥 Klienci"],
   ["/admin/personalizacja","🎨 Personalizacja i ustawienia"],
@@ -2179,6 +2228,7 @@ function adminSzkielet(aktywna, tresc){
     "/admin/zamowienia": pobierzZamowienia().filter(z=>z.status==="nowe").length,
     "/admin/wysylki": pobierzZamowienia().filter(z=>!["anulowane","dostarczone","zakończone"].includes(z.status)&&!z.wysylka?.numer).length,
     "/admin/magazyn": produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{const s=stanMagazynuId(p.id),prog=Number(ustawieniaMagazynuPelne().progNiski)||5;return s!==null&&s<=prog;}).length,
+    "/admin/agent-ai": agentAIAnaliza().filter(x=>x.poziom!=="ok").length,
     "/admin/asortyment": opinie.filter(o=>o.status==="oczekuje").length
   };
   return `
@@ -3292,6 +3342,7 @@ function widokAdmin(){
       <div class="diag-actions" style="margin-top:.4rem">
         <a class="btn" href="#/admin/wysylki">🚚 Centrum wysyłek</a>
         <a class="btn" href="#/admin/magazyn">🏬 Magazyn</a>
+        <a class="btn" href="#/admin/agent-ai">🤖 Agent AI</a>
         <a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
         <a class="btn ghost" href="#/admin/kategorie">🗂️ Utwórz katalog</a>
         <a class="btn ghost" href="#/admin/mapowanie">🧩 Mapuj produkty</a>
@@ -3315,6 +3366,86 @@ function widokAdmin(){
         <p style="margin-top:.6rem"><a href="#/admin/zamowienia">Wszystkie zamówienia →</a></p>`
       : `<p style="color:var(--muted2)">Brak zamówień — gdy klienci zaczną kupować, zobaczysz je tutaj.</p>`}
     </div>`);
+}
+function agentAIAnaliza(){
+  const zam=pobierzZamowienia(), produktyAdmin=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const aktywne=zam.filter(z=>!["anulowane","zakończone","dostarczone"].includes(String(z.status||"").toLowerCase()));
+  const firmoweBezSzkicu=zam.filter(z=>(z.klient?.nip||z.klient?.firma)&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr));
+  const doPotwierdzenia=zam.filter(z=>z.wymagaPotwierdzeniaDostepnosci);
+  const bezNumeru=aktywne.filter(z=>!daneWysylki(z).numer);
+  const bezCeny=produktyAdmin.filter(p=>!produktMaCeneSprzedazy(p));
+  const niedostepne=produktyAdmin.filter(produktOznaczonyNiedostepny);
+  const bezZdjec=produktyAdmin.filter(p=>!p.zdjecie);
+  const prog=Number(ustawieniaMagazynuPelne().progNiski)||5;
+  const niskiStan=produktyAdmin.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s<=prog;});
+  const pozycje=[
+    {id:"dostepnosc",poziom:doPotwierdzenia.length?"warn":"ok",ikona:"🔎",tytul:"Zamówienia do potwierdzenia dostępności",opis:doPotwierdzenia.length?`${doPotwierdzenia.length} zamówień ma pozycje powyżej ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} szt.`:"Brak zamówień wymagających potwierdzenia ilości.",akcja:"#/admin/zamowienia"},
+    {id:"wysylki",poziom:bezNumeru.length?"warn":"ok",ikona:"🚚",tytul:"Przesyłki bez numeru nadania",opis:bezNumeru.length?`${bezNumeru.length} aktywnych zleceń czeka na numer/etykietę InPost.`:"Aktywne przesyłki mają komplet podstawowych danych.",akcja:"#/admin/wysylki"},
+    {id:"faktury",poziom:firmoweBezSzkicu.length?"warn":"ok",ikona:"🧾",tytul:"Szkice FV / inFakt",opis:firmoweBezSzkicu.length?`${firmoweBezSzkicu.length} zamówień firmowych nie ma jeszcze szkicu FV.`:"Szkice FV są przygotowane dla zamówień firmowych.",akcja:"masowe-fv"},
+    {id:"ceny",poziom:bezCeny.length?"bad":"ok",ikona:"💰",tytul:"Produkty bez ceny",opis:bezCeny.length?`${bezCeny.length} produktów wymaga uzupełnienia ceny przed sprzedażą.`:"Ceny produktów są poprawne.",akcja:"#/admin/produkty"},
+    {id:"sprzedaz",poziom:niedostepne.length?"warn":"ok",ikona:"🛒",tytul:"Produkty wyłączone ze sprzedaży",opis:niedostepne.length?`${niedostepne.length} produktów jest oznaczonych jako chwilowo niedostępne.`:"Wszystkie aktywne produkty są dostępne w sprzedaży.",akcja:"#/admin/magazyn"},
+    {id:"magazyn",poziom:niskiStan.length?"warn":"ok",ikona:"🏬",tytul:"Niski stan magazynowy",opis:niskiStan.length?`${niskiStan.length} produktów ma stan magazynowy ≤ ${prog}. To informacja tylko dla admina.`:"Stany magazynowe nie wymagają pilnej reakcji.",akcja:"#/admin/magazyn"},
+    {id:"zdjecia",poziom:bezZdjec.length?"warn":"ok",ikona:"🖼️",tytul:"Zdjęcia produktów",opis:bezZdjec.length?`${bezZdjec.length} produktów używa ikony zamiast zdjęcia.`:"Produkty mają zdjęcia.",akcja:"#/admin/produkty"},
+    {id:"integracje",poziom:(stanBramki.email?.configured&&stanBramki.inpost?.configured)!==false?"ok":"warn",ikona:"🔌",tytul:"Integracje",opis:`E-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"} • baza: ${chmuraStan.admin?"połączona":"wpisz hasło bazy"}`,akcja:"#/admin/personalizacja"}
+  ];
+  return pozycje;
+}
+function utworzSzkiceFakturMasowo(){
+  const zam=pobierzZamowienia().filter(z=>(z.klient?.nip||z.klient?.firma)&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr));
+  if(!zam.length){ toast("Brak nowych zamówień firmowych do szkiców FV"); return; }
+  const nowe=zam.map(z=>daneSzkicuFakturyZamowienia(z.nr)).filter(Boolean);
+  szkiceFaktur=[...nowe,...szkiceFaktur].slice(0,2000);
+  zapiszLS("artway_faktury_szkice",szkiceFaktur);
+  loguj("info",`Agent AI: utworzono ${nowe.length} szkiców FV`);
+  toast(`Utworzono ${nowe.length} szkiców FV ✅`);
+  renderuj();
+}
+function agentAIWykonaj(akcja){
+  if(akcja==="masowe-fv") return utworzSzkiceFakturMasowo();
+  if(akcja==="sync") return synchronizujBazeCentralna(true);
+  if(akcja==="export-magazyn") return eksportujMagazynCSV();
+}
+function widokAdminAgentAI(){
+  const analiza=agentAIAnaliza();
+  const problemy=analiza.filter(x=>x.poziom!=="ok").length;
+  const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
+  return adminSzkielet("/admin/agent-ai", `
+  <div class="panel ai-agent-panel">
+    <div class="ai-agent-hero">
+      <div>
+        <span class="cat-label">Automatyczny kontroler administratora</span>
+        <h1>🤖 Agent AI</h1>
+        <p>Agent sprawdza sklep, zamówienia, magazyn, faktury, produkty i integracje. Na razie działa bezpiecznie w panelu jako agent kontrolny i wykonuje tylko akcje kliknięte przez administratora.</p>
+      </div>
+      <div class="health-score">${score}%</div>
+    </div>
+    <div class="orders-stat-grid">
+      <div class="order-stat-card ${problemy?"hot":""}"><span>⚠️</span><b>${problemy}</b><small>zadań do sprawdzenia</small></div>
+      <div class="order-stat-card"><span>📦</span><b>${pobierzZamowienia().filter(z=>z.status==="nowe").length}</b><small>nowych zamówień</small></div>
+      <div class="order-stat-card"><span>🔎</span><b>${pobierzZamowienia().filter(z=>z.wymagaPotwierdzeniaDostepnosci).length}</b><small>potwierdzeń dostępności</small></div>
+      <div class="order-stat-card"><span>🧾</span><b>${szkiceFaktur.length}</b><small>szkiców FV</small></div>
+    </div>
+    <div class="diag-actions">
+      <button class="btn" onclick="agentAIWykonaj('sync')">🔄 Synchronizuj bazę</button>
+      <button class="btn ghost" onclick="agentAIWykonaj('masowe-fv')">🧾 Utwórz brakujące szkice FV</button>
+      <button class="btn ghost" onclick="agentAIWykonaj('export-magazyn')">📊 Eksport magazynu</button>
+      <a class="btn ghost" href="#/diagnostyka">🛠️ Diagnostyka</a>
+    </div>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Lista kontroli agenta</h2>
+    <div class="ai-task-list">
+      ${analiza.map(x=>`<div class="ai-task ${x.poziom}">
+        <div class="ai-task-ico">${x.ikona}</div>
+        <div><b>${esc(x.tytul)}</b><p>${esc(x.opis)}</p></div>
+        <div>${String(x.akcja||"").startsWith("#")?`<a class="btn ghost" href="${esc(x.akcja)}">Otwórz</a>`:x.akcja?`<button class="btn ghost" onclick="agentAIWykonaj(${jsArg(x.akcja)})">Wykonaj</button>`:`<span class="lvl lvl-ok">OK</span>`}</div>
+      </div>`).join("")}
+    </div>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Kolejny etap agenta</h2>
+    <p>Ten moduł jest przygotowany pod późniejsze podłączenie prawdziwego modelu AI po stronie serwera. Token API nie będzie trafiał do przeglądarki ani localStorage. Agent będzie mógł przygotowywać propozycje zmian, ale trwałe akcje administracyjne zostaną pod kontrolą panelu.</p>
+  </div>`);
 }
 let filtrZamowien = "wszystkie", szukajZamowien = "";
 function klientZamowieniaLabel(z){
@@ -3347,6 +3478,12 @@ function adminStatusyZamowienHTML(wszystkie){
     ${STATUSY.map(s=>`<button class="${filtrZamowien===s?"active":""}" onclick="filtrZamowien=${jsArg(s)};renderuj()">${esc(s)} <b>${ile(s)}</b></button>`).join("")}
   </div>`;
 }
+function alertDostepnosciZamowieniaHTML(z){
+  const lista=Array.isArray(z?.dostepnoscDoPotwierdzenia)?z.dostepnoscDoPotwierdzenia:[];
+  if(!z?.wymagaPotwierdzeniaDostepnosci&&!lista.length)return "";
+  const txt=lista.length?lista.map(x=>`${esc(x.nazwa||"Produkt")} × ${esc(x.ilosc||"")}`).join(", "):"większa ilość produktów";
+  return `<div class="backend-note" style="margin:.75rem 0;border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>⚠️ Potwierdzić dostępność przed realizacją:</b> ${txt}</div>`;
+}
 function kartaAdminZamowieniaHTML(z){
   const k=kosztyZamowienia(z), w=daneWysylki(z), klient=klientZamowieniaLabel(z);
   const pozycje=Array.isArray(z.pozycjeDane)&&z.pozycjeDane.length
@@ -3358,7 +3495,7 @@ function kartaAdminZamowieniaHTML(z){
     <div class="order-pro-top">
       <div>
         <a class="order-pro-number" href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">${esc(z.nr)}</a>
-        <div class="order-pro-muted">${esc(z.data||"")} • ${esc(klient)}</div>
+        <div class="order-pro-muted">${esc(z.data||"")} • ${esc(klient)} ${z.wymagaPotwierdzeniaDostepnosci?'<span class="lvl lvl-ostrzezenie">sprawdź dostępność</span>':""}</div>
       </div>
       <div class="order-pro-right">
         <select onchange="zmienStatus(${jsArg(z.nr)}, this.value)" style="background:${KOLOR_STATUSU[z.status]||'var(--bg)'}">
@@ -3385,6 +3522,7 @@ function kartaAdminZamowieniaHTML(z){
         <p>💳 ${esc(platnosc)}${k.platnosc?` + ${zl(k.platnosc)}`:""}<br>📍 ${esc(z.adres||"brak adresu")}</p>
       </div>
     </div>
+    ${alertDostepnosciZamowieniaHTML(z)}
     <div class="order-pro-bottom">
       <div class="order-pro-costs">
         <span>Produkty <b>${zl(k.poRabacie||k.produkty)}</b></span>
@@ -3509,6 +3647,7 @@ function widokAdminZamowienie(nr){
       </div>
     </div>
     ${adminZamowienieSnapshotHTML(z)}
+    ${alertDostepnosciZamowieniaHTML(z)}
     <div class="order-detail-columns">
       <div class="order-detail-card">
         <div class="order-section-head"><div><span class="order-pro-label">Produkty</span><h2>🧾 Pozycje zamówienia</h2></div><b>${zl(koszty.produkty)}</b></div>
@@ -4236,13 +4375,14 @@ function widokAdminMagazyn(){
     </div>
     <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
     <div style="overflow-x:auto"><table class="log-table warehouse-table">
-      <tr><th>Produkt</th><th>Kategoria</th><th>Stan</th><th>Rezerwacje</th><th>Sprzedaż 30 dni</th><th>Wartość</th><th>Korekta</th></tr>
+      <tr><th>Produkt</th><th>Kategoria</th><th>Stan magazynu</th><th>Dostępność w sklepie</th><th>Rezerwacje</th><th>Sprzedaż 30 dni</th><th>Wartość</th><th>Korekta</th></tr>
       ${fragment.map(p=>{
         const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), sp=Number(spr[p.id]||0), wart=stan===null?0:stan*kwotaNum(p.cena);
         return `<tr>
           <td><b>${esc(p.nazwa)}</b><br><small>ID: ${esc(p.id)}${p.sku?` • SKU: ${esc(p.sku)}`:""}</small></td>
           <td>${esc(p.kategoria||"—")}</td>
           <td><b>${stan===null?"∞":stan}</b> ${stanBadgeMagazynu(stan,prog)}</td>
+          <td>${dostepnoscBadgeAdmin(p)}<br><button class="btn ghost" type="button" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})" style="padding:.25rem .5rem;margin-top:.25rem">${produktOznaczonyNiedostepny(p)?"Włącz sprzedaż":"Wyłącz sprzedaż"}</button></td>
           <td>${r?`<b>${r}</b> szt.`:"—"}</td>
           <td>${sp?`<b>${sp}</b> szt.`:"—"}</td>
           <td>${stan===null?"—":zl(wart)}</td>
@@ -4368,10 +4508,10 @@ function widokAdminProdukty(){
           <option value="wlasne" ${filtrZrodlaProduktow==="wlasne"?"selected":""}>Dodane w panelu</option>
         </select>
         <select onchange="filtrStanuProduktow=this.value;stronaAdminProduktow=1;renderuj()">
-          <option value="wszystkie" ${filtrStanuProduktow==="wszystkie"?"selected":""}>Każdy stan</option>
-          <option value="dostepne" ${filtrStanuProduktow==="dostepne"?"selected":""}>Dostępne</option>
-          <option value="niskie" ${filtrStanuProduktow==="niskie"?"selected":""}>Niski stan (1–5)</option>
-          <option value="brak" ${filtrStanuProduktow==="brak"?"selected":""}>Brak na stanie</option>
+          <option value="wszystkie" ${filtrStanuProduktow==="wszystkie"?"selected":""}>Magazyn: każdy stan</option>
+          <option value="dostepne" ${filtrStanuProduktow==="dostepne"?"selected":""}>Magazyn: powyżej 0 / bez limitu</option>
+          <option value="niskie" ${filtrStanuProduktow==="niskie"?"selected":""}>Magazyn: niski stan (1–5)</option>
+          <option value="brak" ${filtrStanuProduktow==="brak"?"selected":""}>Magazyn: 0 szt.</option>
         </select>
         <select onchange="sortowanieAdminProduktow=this.value;stronaAdminProduktow=1;renderuj()">
           <option value="id" ${sortowanieAdminProduktow==="id"?"selected":""}>Sortuj: ID</option>
@@ -4399,7 +4539,7 @@ function widokAdminProdukty(){
         </span>
       </div>
       <div style="overflow-x:auto"><table class="log-table">
-        <tr><th><input type="checkbox" onchange="zaznaczWidoczneProd(this, [${fragment.map(p=>p.id).join(",")}])" style="width:16px;height:16px" title="Zaznacz produkty na tej stronie"></th><th>ID</th><th>Produkt</th><th>Kategoria</th><th>Cena (kliknij, by zmienić)</th><th>Promocja</th><th>Stan</th><th>Zdjęcie</th><th>Akcje</th></tr>
+        <tr><th><input type="checkbox" onchange="zaznaczWidoczneProd(this, [${fragment.map(p=>p.id).join(",")}])" style="width:16px;height:16px" title="Zaznacz produkty na tej stronie"></th><th>ID</th><th>Produkt</th><th>Kategoria</th><th>Cena (kliknij, by zmienić)</th><th>Promocja</th><th>Magazyn</th><th>Sprzedaż</th><th>Zdjęcie</th><th>Akcje</th></tr>
         ${fragment.map(p=>{
           const dodany = jestProduktemDodanym(p.id);
           const ukryty = czyProduktAdminWKoszu(p);
@@ -4411,7 +4551,8 @@ function widokAdminProdukty(){
           <td>${esc(p.kategoria)}</td>
           <td><input value="${String(p.cena.toFixed(2)).replace(".",",")}" inputmode="decimal" onchange="ustawCene(${p.id}, this.value)" style="width:80px;padding:.25rem .4rem;border:1.5px solid var(--line);border-radius:8px;text-align:right;font-weight:700"> zł</td>
           <td>${p.staraCena?`<span class="lvl lvl-blad">−${Math.round((1-p.cena/p.staraCena)*100)}%</span>`:"—"}</td>
-          <td><input value="${stanyProduktow[p.id]??""}" placeholder="∞" inputmode="numeric" onchange="ustawStan(${p.id}, this.value)" style="width:58px;padding:.25rem .4rem;border:1.5px solid var(--line);border-radius:8px;text-align:center;${stanyProduktow[p.id]===0?'background:#fee2e2':''}"></td>
+          <td><input value="${stanyProduktow[p.id]??""}" placeholder="∞" inputmode="numeric" onchange="ustawStan(${p.id}, this.value)" style="width:58px;padding:.25rem .4rem;border:1.5px solid var(--line);border-radius:8px;text-align:center;${stanyProduktow[p.id]===0?'background:#fee2e2':''}"><br><small style="color:var(--muted2)">tylko admin</small></td>
+          <td>${dostepnoscBadgeAdmin(p)}<br><button class="btn ghost" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})" style="padding:.25rem .5rem;margin-top:.25rem">${produktOznaczonyNiedostepny(p)?"Włącz sprzedaż":"Wyłącz sprzedaż"}</button></td>
           <td>${p.zdjecie?"🖼️":'<span style="color:var(--muted2)">ikona</span>'}</td>
           <td style="white-space:nowrap">
             <a class="btn ghost" href="#/admin/produkty/edytuj/${p.id}" style="padding:.3rem .55rem" title="Edytuj">✏️</a>
@@ -4651,7 +4792,9 @@ function usunDefinitywnie(id){
   zapiszLS("artway_kosz_dodane", koszDodanych);
   usunMetaKosza(id);
   delete stanyProduktow[id];
+  delete dostepnoscProduktow[String(id)];
   zapiszLS("artway_stany",stanyProduktow);
+  zapiszLS("artway_dostepnosc",dostepnoscProduktow);
   loguj("info","Usunięto definitywnie produkt id="+id);
   toast("Produkt usunięty definitywnie"); renderuj();
 }
@@ -4664,8 +4807,10 @@ function usunDefinitywnieBazowy(id){
   usunMetaKosza(id);
   delete produktyEdytowane[id];
   delete stanyProduktow[id];
+  delete dostepnoscProduktow[String(id)];
   zapiszLS("artway_produkty_edytowane",produktyEdytowane);
   zapiszLS("artway_stany",stanyProduktow);
+  zapiszLS("artway_dostepnosc",dostepnoscProduktow);
   zaznaczoneProdukty.delete(id);
   zbudujProdukty(); odswiezMenu();
   loguj("info","Usunięto definitywnie produkt bazowy id="+id);
@@ -4675,10 +4820,10 @@ function wyczyscCalKosz(){
   const bazowe=bazoweProduktyWKoszu().map(p=>p.id);
   const ile=koszDodanych.length+bazowe.length;
   if(!ile||!confirm(`Definitywnie usunąć ${ile} produktów z kosza? Tej operacji nie można cofnąć.`)) return;
-  koszDodanych.forEach(p=>{delete koszMeta[p.id];delete stanyProduktow[p.id];});
+  koszDodanych.forEach(p=>{delete koszMeta[p.id];delete stanyProduktow[p.id];delete dostepnoscProduktow[String(p.id)];});
   bazowe.forEach(id=>{
     if(!produktyDefinitywne.includes(id)) produktyDefinitywne.push(id);
-    delete koszMeta[id]; delete produktyEdytowane[id]; delete stanyProduktow[id];
+    delete koszMeta[id]; delete produktyEdytowane[id]; delete stanyProduktow[id]; delete dostepnoscProduktow[String(id)];
   });
   koszDodanych=[];
   produktyDefinitywne=[...new Set(produktyDefinitywne)];
@@ -4687,6 +4832,7 @@ function wyczyscCalKosz(){
   zapiszLS("artway_produkty_definitywne",produktyDefinitywne);
   zapiszLS("artway_produkty_edytowane",produktyEdytowane);
   zapiszLS("artway_stany",stanyProduktow);
+  zapiszLS("artway_dostepnosc",dostepnoscProduktow);
   zbudujProdukty(); odswiezMenu();
   loguj("info",`Opróżniono kosz: ${ile} produktów`);
   toast("Kosz opróżniony"); renderuj();
@@ -5120,6 +5266,7 @@ function zapiszStanProduktowPoOperacji(){
   zapiszLS("artway_kosz_dodane",koszDodanych);
   zapiszLS("artway_kosz_meta",koszMeta);
   zapiszLS("artway_stany",stanyProduktow);
+  zapiszLS("artway_dostepnosc",dostepnoscProduktow);
   zapiszLS("artway_ustawienia",ustawienia);
 }
 function dodajSciezkiKategoriiZImportuDoMenu(lista){
@@ -5147,7 +5294,7 @@ function wykonajImportProduktow(){
   const d=podgladImportuProduktow;if(!d?.produkty?.length){toast("Najpierw przeanalizuj poprawne dane");return;}
   const tryb=$("trybImportuProduktow")?.value||"scal";
   if(tryb==="zastap"&&!confirm(`Zastąpić obecny katalog ${d.produkty.length} produktami? Przed zmianą zostanie utworzona kopia do cofnięcia.`))return;
-  const kopia={data:new Date().toISOString(),produktyDodane,produktyUkryte,produktyEdytowane,produktyDefinitywne,koszDodanych,koszMeta,stanyProduktow,ustawienia};
+  const kopia={data:new Date().toISOString(),produktyDodane,produktyUkryte,produktyEdytowane,produktyDefinitywne,koszDodanych,koszMeta,stanyProduktow,dostepnoscProduktow,ustawienia};
   try{localStorage.setItem("artway_ostatnia_kopia_importu",JSON.stringify(kopia));}catch(e){toast("⚠️ Nie udało się utworzyć kopii przed importem");return;}
   let dodane=0,zaktualizowane=0;const wejscie=d.produkty.map(p=>JSON.parse(JSON.stringify(p)));
   if(tryb==="zastap"){
@@ -5199,7 +5346,7 @@ function cofnijOstatniImportProduktow(){
   if(!k){toast("Brak kopii ostatniego importu");return;}
   if(!confirm(`Cofnąć import i przywrócić stan z ${new Date(k.data).toLocaleString("pl-PL")}?`))return;
   produktyDodane=k.produktyDodane||[];produktyUkryte=k.produktyUkryte||[];produktyEdytowane=k.produktyEdytowane||{};
-  produktyDefinitywne=k.produktyDefinitywne||[];koszDodanych=k.koszDodanych||[];koszMeta=k.koszMeta||{};stanyProduktow=k.stanyProduktow||{};ustawienia=k.ustawienia||ustawienia;
+  produktyDefinitywne=k.produktyDefinitywne||[];koszDodanych=k.koszDodanych||[];koszMeta=k.koszMeta||{};stanyProduktow=k.stanyProduktow||{};dostepnoscProduktow=k.dostepnoscProduktow||{};ustawienia=k.ustawienia||ustawienia;
   zapiszStanProduktowPoOperacji();localStorage.removeItem("artway_ostatnia_kopia_importu");
   podgladImportuProduktow=null;ostatniRaportImportu=null;zbudujProdukty();odswiezMenu();
   loguj("info","Cofnięto ostatni import produktów");toast("Przywrócono stan sprzed importu ↩️");renderuj();
@@ -6823,16 +6970,38 @@ async function uruchomAutotest(){
 
 /* ═══════════ KOSZYK ═══════════ */
 function ileWKoszyku(id){ return koszyk.filter(x=>x.id===id).reduce((s,x)=>s+x.ile,0); }
+function pozycjeDoPotwierdzeniaDostepnosci(){
+  const mapa=new Map();
+  for(const x of koszyk){
+    const key=String(x.id);
+    const rec=mapa.get(key)||{id:x.id,ilosc:0,warianty:[]};
+    rec.ilosc+=Number(x.ile)||0;
+    if(x.wariant)rec.warianty.push(`${x.wariant} × ${x.ile}`);
+    mapa.set(key,rec);
+  }
+  return [...mapa.values()].filter(x=>x.ilosc>LIMIT_POTWIERDZENIA_DOSTEPNOSCI).map(x=>{
+    const p=produkty.find(p=>String(p.id)===String(x.id));
+    return {...x,nazwa:p?.nazwa||"Produkt",sku:p?.sku||""};
+  });
+}
+function potwierdzProgDostepnosci(id, nastepnaIlosc){
+  if(nastepnaIlosc<=LIMIT_POTWIERDZENIA_DOSTEPNOSCI) return true;
+  const obecnie=ileWKoszyku(id);
+  if(obecnie>LIMIT_POTWIERDZENIA_DOSTEPNOSCI) return true;
+  return confirm(`Wybrano więcej niż ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} sztuk jednego produktu. Przy takiej ilości sklep potwierdzi aktualną dostępność przed realizacją. Kontynuować?`);
+}
+function alertDostepnosciKoszykaHTML(){
+  const lista=pozycjeDoPotwierdzeniaDostepnosci();
+  if(!lista.length)return "";
+  return `<div class="backend-note" style="margin-top:.7rem;border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Potwierdzenie dostępności:</b> dla ${lista.map(x=>`${esc(x.nazwa)} × ${x.ilosc}`).join(", ")} obsługa sklepu potwierdzi aktualną dostępność przed wysyłką.</div>`;
+}
 function dodaj(id, btn, wariant){
   wariant = wariant || null;
   const p = produkty.find(x=>x.id===id);
   if(p&&!produktMaCeneSprzedazy(p)){ toast("⚠️ Ten produkt wymaga uzupełnienia ceny przez administratora"); return; }
+  if(p&&produktOznaczonyNiedostepny(p)){ toast("⚠️ Produkt jest chwilowo niedostępny"); return; }
   if(p?.warianty?.length && !wariant){ location.hash="#/produkt/"+id; toast("Wybierz wariant produktu"); return; }
-  const stan = p ? stanProduktu(p) : null;
-  if(stan!==null && ileWKoszyku(id)+1 > stan){
-    toast(stan===0 ? "⚠️ Produkt chwilowo niedostępny" : `⚠️ Na stanie zostało tylko ${stan} szt.`);
-    return;
-  }
+  if(!potwierdzProgDostepnosci(id, ileWKoszyku(id)+1)) return;
   const poz = koszyk.find(x=>x.id===id && (x.wariant||null)===wariant);
   poz ? poz.ile++ : koszyk.push({id, ile:1, ...(wariant?{wariant}:{})});
   zapiszLS("artway_koszyk", koszyk); odswiezKoszyk();
@@ -6844,8 +7013,8 @@ function zmienIloscIdx(i, d){
   const poz = koszyk[i]; if(!poz) return;
   if(d>0){
     const p = produkty.find(x=>x.id===poz.id);
-    const stan = p ? stanProduktu(p) : null;
-    if(stan!==null && ileWKoszyku(poz.id)+1 > stan){ toast(`⚠️ Na stanie jest tylko ${stan} szt.`); return; }
+    if(p&&produktOznaczonyNiedostepny(p)){ toast("⚠️ Produkt jest chwilowo niedostępny"); return; }
+    if(!potwierdzProgDostepnosci(poz.id, ileWKoszyku(poz.id)+1)) return;
   }
   poz.ile += d;
   if(poz.ile<=0) koszyk.splice(i,1);
@@ -6885,7 +7054,7 @@ function odswiezKoszyk(){
         <button onclick="zmienIloscIdx(${i},1)">+</button>
       </div>
       <button class="ci-remove" onclick="usunIdx(${i})" aria-label="Usuń">🗑️</button>
-    </div>`;}).join("")
+    </div>`;}).join("") + alertDostepnosciKoszykaHTML()
     : `<div class="cart-empty">Koszyk jest pusty.<br>Dodaj coś fajnego! 😊</div>`;
 }
 
@@ -7104,6 +7273,7 @@ function otworzModal(){
         <input id="paczkomatReczny" placeholder="Awaryjnie: wpisz kod ręcznie, np. WAW01M" style="margin-top:.55rem;text-transform:uppercase" oninput="ustawPaczkomatReczny(this.value)">
       </div>
       <div class="f-group"><label>Uwagi do zamówienia</label><textarea name="notes" rows="2"></textarea></div>
+      <div id="availabilityConfirmBox"></div>
       <div class="summary" id="orderSummary"></div>
       <button type="submit" class="checkout-btn">Zamawiam →</button>
       <p class="pay-note">Klikając, akceptujesz <a href="#/regulamin" onclick="document.getElementById('modal').classList.remove('open')">regulamin</a>. Dane służą wyłącznie realizacji zamówienia.</p>
@@ -7117,6 +7287,12 @@ function przeliczZamowienie(){
   const pBox = $("paczkomatBox");
   if(pBox){ pBox.style.display = czyDostawaPaczkomat(idD) ? "" : "none"; }
   const suma = sumaPoRabacie(), dostawa = kosztDostawy(idD), oplata = oplataPlatnosci(idP), weekend = oplataPaczkaWeekend(!!form.paczkaWeekend?.checked);
+  const box=$("availabilityConfirmBox"), potwierdzenia=pozycjeDoPotwierdzeniaDostepnosci();
+  if(box) box.innerHTML = potwierdzenia.length ? `<div class="backend-note" style="margin:.8rem 0;border-color:#fed7aa;background:#fff7ed;color:#9a3412">
+    <b>Sprawdzenie dostępności przy większej ilości</b><br>
+    Dla ${potwierdzenia.map(x=>`${esc(x.nazwa)} × ${x.ilosc}`).join(", ")} obsługa potwierdzi aktualną dostępność przed realizacją.
+    <label class="chk-row" style="margin-top:.45rem"><input type="checkbox" name="potwierdzenieDostepnosci" required> Rozumiem, że dostępność tej ilości zostanie potwierdzona przez sklep.</label>
+  </div>` : "";
   $("orderSummary").innerHTML =
     koszyk.map(x=>{const p=produkty.find(p=>p.id===x.id);
       return `<div><span>${esc(p.nazwa)}${x.wariant?` (${esc(x.wariant)})`:""} × ${x.ile}</span><span>${zl(p.cena*x.ile)}</span></div>`;}).join("")
@@ -7250,6 +7426,16 @@ async function zlozZamowienie(e){
   e.preventDefault();
   try{
     const f = new FormData(e.target);
+    const niedostepneWKoszyku=koszyk.map(x=>produkty.find(p=>p.id===x.id)).filter(p=>!p||!produktDostepnyWSprzedazy(p));
+    if(niedostepneWKoszyku.length){
+      toast("⚠️ Usuń z koszyka produkty chwilowo niedostępne lub bez ceny");
+      return;
+    }
+    const potwierdzeniaDostepnosci = pozycjeDoPotwierdzeniaDostepnosci();
+    if(potwierdzeniaDostepnosci.length && !f.get("potwierdzenieDostepnosci")){
+      toast("⚠️ Potwierdź informację o sprawdzeniu dostępności większej ilości");
+      return;
+    }
     // walidacja NIP przy fakturze
     if(f.get("firmaChk") && !walidujNip(f.get("nip"))){
       toast("⚠️ Nieprawidłowy NIP — sprawdź numer");
@@ -7289,6 +7475,7 @@ ${pozycje.map(p=>"- "+p).join("\n")}
 ${rabat?`Rabat ${rabat.kod}: -${zl(kwotaRabatu())}\n`:""}Dostawa: ${dost.nazwa}${paczkomat} — ${dostawa?zl(dostawa):"gratis"}
 ${paczkaWeekend?`Paczka w Weekend: ${zl(oplataWeekend)}\n`:""}
 ${oplata?`Opłata za pobranie: ${zl(oplata)}\n`:""}RAZEM: ${zl(razem)}
+${potwierdzeniaDostepnosci.length?`UWAGA: potwierdzić dostępność większej ilości: ${potwierdzeniaDostepnosci.map(x=>`${x.nazwa} × ${x.ilosc}`).join(", ")}\n`:""}
 Płatność: ${plat.nazwa}
 ${instrukcjaPlatnosciTekst(idP,nr,razem)}
 --------------------------------
@@ -7321,6 +7508,7 @@ Uwagi: ${f.get("notes")||"brak"}`;
         firma:f.get("firmaChk")?String(f.get("firma")||"").trim():"",nip:f.get("firmaChk")?String(f.get("nip")||"").replace(/[^0-9]/g,""):""},
       adresDostawy:{ulica:String(f.get("ulica")||"").trim(),nrDomu:String(f.get("nrDomu")||"").trim(),nrLokalu:String(f.get("nrLokalu")||"").trim(),kod:String(f.get("kod")||"").trim(),miasto:String(f.get("miasto")||"").trim()},
       pozycje,pozycjeDane,razem,status:"nowe",dostawa:dost.nazwa,dostawaId:idD,dostawaKoszt:dostawa,paczkaWeekend,oplataPaczkaWeekend:oplataWeekend,
+      wymagaPotwierdzeniaDostepnosci:potwierdzeniaDostepnosci.length>0,dostepnoscDoPotwierdzenia:potwierdzeniaDostepnosci,
       oplataPlatnosci:oplata,koszty:{produkty:sumaKoszyka(),rabat:kwotaRabatu(),poRabacie:suma,dostawa,paczkaWeekend:oplataWeekend,platnosc:oplata,razem},
       platnosc:plat.nazwa,platnoscId:idP,platnoscInstrukcja:instrukcjaPlatnosciTekst(idP,nr,razem),adres,
       paczkomat:czyDostawaPaczkomat(idD)?String(f.get("paczkomat")||"").trim():"",paczkomatAdres:czyDostawaPaczkomat(idD)?String(window.__paczkomatAdres||"").trim():"",uwagi:String(f.get("notes")||"").trim(),
