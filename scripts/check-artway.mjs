@@ -57,7 +57,10 @@ requireMarkers('assets/styles.css', css, [
   '.admin-page',
   '.ship-card',
   '.warehouse-hero',
+  '.warehouse-meta',
+  '.warehouse-plan',
   '.ai-agent-hero',
+  '.ai-restock-card',
   '.modal',
 ]);
 
@@ -69,6 +72,13 @@ requireMarkers('assets/app.js', app, [
   'function widokAdminAgentAI',
   'artway_dostepnosc',
   'LIMIT_POTWIERDZENIA_DOSTEPNOSCI',
+  'artway_magazyn_produkty',
+  'artway_agent_ai_historia',
+  'function eksportujZatowarowanieCSV',
+  'function audytMagazynuAI',
+  'function zapiszKartotekeMagazynu',
+  'Plan zatowarowania',
+  'Kartoteka magazynowa',
   'artway_ruchy_magazynowe',
   'artway_faktury_szkice',
   'inFakt / szkice faktur',
@@ -136,6 +146,8 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'inpostPobranieAktywne',
   'inpostSposobNadaniaZamowienia',
   'artway_dostepnosc',
+  'artway_magazyn_produkty',
+  'artway_agent_ai_historia',
   'artway_ruchy_magazynowe',
   'artway_faktury_szkice',
 ]);

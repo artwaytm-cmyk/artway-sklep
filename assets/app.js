@@ -225,7 +225,9 @@ let stanyProduktow = wczytajLS("artway_stany", {});   // magazyn: id → liczba 
 let dostepnoscProduktow = wczytajLS("artway_dostepnosc", {}); // status sprzedażowy: niezależny od magazynu, widoczny klientowi
 let ruchyMagazynowe = wczytajLS("artway_ruchy_magazynowe", []); // historia przyjęć, korekt i sprzedaży
 let ustawieniaMagazynu = wczytajLS("artway_magazyn_ustawienia", {});
+let magazynProdukty = wczytajLS("artway_magazyn_produkty", {}); // kartoteka magazynowa per produkt: lokalizacja, dostawca, progi i lead time
 let szkiceFaktur = wczytajLS("artway_faktury_szkice", []); // przygotowane dokumenty pod przyszłą integrację inFakt
+let agentAIHistoria = wczytajLS("artway_agent_ai_historia", []); // audyty i akcje agenta administratora
 let koszDodanych = wczytajLS("artway_kosz_dodane", []); // kosz: usunięte produkty własne (można przywrócić)
 let koszMeta = wczytajLS("artway_kosz_meta", {});      // id → data usunięcia i typ; automatyczne czyszczenie po 30 dniach
 let produktyDefinitywne = wczytajLS("artway_produkty_definitywne", []); // bazowe produkty usunięte po okresie kosza
@@ -249,7 +251,7 @@ let frazaListyProduktow="", sortowanieListyProduktow="default";
    na pamięci przeglądarki (localStorage) jak dotychczas. */
 const CHMURA_URL = "/.netlify/functions/store";
 const CHMURA_AUTO_SYNC_MS = 60000;
-const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_faktury_szkice","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_faktury_szkice","artway_agent_ai_historia","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
 let chmuraToken = (function(){ try{ return JSON.parse(localStorage.getItem("artway_chmura_token"))||""; }catch(e){ return ""; } })();
 let chmuraStan = {dostepna:false, sprawdzono:false, admin:false, rev:0, updated_at:null, error:"", ostatniZapis:0};
 let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z serwera
@@ -329,7 +331,9 @@ function zbierzWspolneUstawienia(){
     artway_dostepnosc: dostepnoscProduktow,
     artway_ruchy_magazynowe: ruchyMagazynowe,
     artway_magazyn_ustawienia: ustawieniaMagazynu,
+    artway_magazyn_produkty: magazynProdukty,
     artway_faktury_szkice: szkiceFaktur,
+    artway_agent_ai_historia: agentAIHistoria,
     artway_opinie: opinie,
     artway_kosz_dodane: koszDodanych,
     artway_kosz_meta: koszMeta,
@@ -348,7 +352,8 @@ function nalozWspolneUstawienia(dane){
       artway_produkty_edytowane:(v)=>{produktyEdytowane=v;}, artway_produkty_definitywne:(v)=>{produktyDefinitywne=v;},
       artway_stany:(v)=>{stanyProduktow=v;}, artway_dostepnosc:(v)=>{dostepnoscProduktow=(v&&typeof v==="object")?v:{};},
       artway_ruchy_magazynowe:(v)=>{ruchyMagazynowe=Array.isArray(v)?v:[];},
-      artway_magazyn_ustawienia:(v)=>{ustawieniaMagazynu=(v&&typeof v==="object")?v:{};}, artway_faktury_szkice:(v)=>{szkiceFaktur=Array.isArray(v)?v:[];},
+      artway_magazyn_ustawienia:(v)=>{ustawieniaMagazynu=(v&&typeof v==="object")?v:{};}, artway_magazyn_produkty:(v)=>{magazynProdukty=(v&&typeof v==="object")?v:{};},
+      artway_faktury_szkice:(v)=>{szkiceFaktur=Array.isArray(v)?v:[];}, artway_agent_ai_historia:(v)=>{agentAIHistoria=Array.isArray(v)?v:[];},
       artway_opinie:(v)=>{opinie=v;},
       artway_kosz_dodane:(v)=>{koszDodanych=v;}, artway_kosz_meta:(v)=>{koszMeta=v;},
     };
@@ -1103,10 +1108,120 @@ function ustawieniaMagazynuPelne(){
     progNiski:5,
     lokalizacja:"",
     domyslnyOperator:sesja?.email||"administrator",
+    domyslnyDostawca:"",
+    domyslnyLeadTime:7,
+    domyslnyZapasDni:21,
     infaktTryb:"szkice",
     infaktUwagi:"Faktury są przygotowywane jako szkice do przyszłej integracji API.",
     ...(ustawieniaMagazynu||{})
   };
+}
+function intNieujemny(v, dom=0){
+  const n=parseInt(String(v??"").replace(/[^0-9-]/g,""),10);
+  return Number.isFinite(n) ? Math.max(0,n) : dom;
+}
+function magazynMetaProduktu(id){
+  const raw=(magazynProdukty||{})[String(id)] || (magazynProdukty||{})[id] || {};
+  return raw && typeof raw==="object" ? raw : {};
+}
+function zapiszMagazynMeta(id, meta){
+  const key=String(id);
+  const czysty={
+    lokalizacja:String(meta.lokalizacja||"").trim(),
+    dostawca:String(meta.dostawca||"").trim(),
+    kod:String(meta.kod||"").trim(),
+    minStock:meta.minStock===""||meta.minStock===null||meta.minStock===undefined?"":intNieujemny(meta.minStock,0),
+    targetStock:meta.targetStock===""||meta.targetStock===null||meta.targetStock===undefined?"":intNieujemny(meta.targetStock,0),
+    leadTime:meta.leadTime===""||meta.leadTime===null||meta.leadTime===undefined?"":intNieujemny(meta.leadTime,0),
+    minZakup:meta.minZakup===""||meta.minZakup===null||meta.minZakup===undefined?"":intNieujemny(meta.minZakup,0),
+    uwagi:String(meta.uwagi||"").trim(),
+    ostatniaInwentaryzacja:String(meta.ostatniaInwentaryzacja||"").trim(),
+    aktualizacja:new Date().toISOString(),
+    operator:sesja?.email||"administrator"
+  };
+  const maDane=Object.entries(czysty).some(([k,v])=>!["aktualizacja","operator"].includes(k)&&String(v||"").trim()!=="");
+  magazynProdukty={...(magazynProdukty||{})};
+  if(maDane) magazynProdukty[key]=czysty;
+  else delete magazynProdukty[key];
+  zapiszLS("artway_magazyn_produkty",magazynProdukty);
+  return czysty;
+}
+function zapiszKartotekeMagazynu(e,id){
+  e.preventDefault();
+  const f=new FormData(e.target);
+  zapiszMagazynMeta(id,{
+    lokalizacja:f.get("lokalizacja"),
+    dostawca:f.get("dostawca"),
+    kod:f.get("kod"),
+    minStock:f.get("minStock"),
+    targetStock:f.get("targetStock"),
+    leadTime:f.get("leadTime"),
+    minZakup:f.get("minZakup"),
+    uwagi:f.get("uwagi"),
+    ostatniaInwentaryzacja:magazynMetaProduktu(id).ostatniaInwentaryzacja||""
+  });
+  loguj("info","Zapisano kartotekę magazynową produktu "+id);
+  toast("Kartoteka magazynowa zapisana ✅");
+  renderuj();
+}
+function oznaczInwentaryzacjeProduktu(id){
+  const meta=magazynMetaProduktu(id);
+  zapiszMagazynMeta(id,{...meta,ostatniaInwentaryzacja:new Date().toISOString().slice(0,10)});
+  zapiszRuchMagazynowy({produktId:id,typ:"inwentaryzacja",ilosc:0,stanPrzed:stanMagazynuId(id),stanPo:stanMagazynuId(id),powod:"Potwierdzono stan w panelu magazynu"});
+  toast("Inwentaryzacja produktu oznaczona ✅");
+  renderuj();
+}
+function progNiskiProduktu(p){
+  const u=ustawieniaMagazynuPelne(), meta=magazynMetaProduktu(p?.id);
+  return meta.minStock!=="" && meta.minStock!==undefined ? intNieujemny(meta.minStock,Number(u.progNiski)||5) : Math.max(0,Number(u.progNiski)||5);
+}
+function targetStockProduktu(p, sprzedaz30=0){
+  const u=ustawieniaMagazynuPelne(), meta=magazynMetaProduktu(p?.id), min=progNiskiProduktu(p), lead=leadTimeProduktu(p);
+  if(meta.targetStock!=="" && meta.targetStock!==undefined) return Math.max(min,intNieujemny(meta.targetStock,min));
+  const srednioDziennie=Math.max(0,Number(sprzedaz30||0)/30);
+  const zapasDni=Math.max(7,Number(u.domyslnyZapasDni)||21);
+  return Math.max(min+Math.max(3,min), Math.ceil(srednioDziennie*(lead+zapasDni)), min);
+}
+function leadTimeProduktu(p){
+  const u=ustawieniaMagazynuPelne(), meta=magazynMetaProduktu(p?.id);
+  return meta.leadTime!=="" && meta.leadTime!==undefined ? intNieujemny(meta.leadTime,Number(u.domyslnyLeadTime)||7) : Math.max(0,Number(u.domyslnyLeadTime)||7);
+}
+function dostepneSztukiMagazynu(p, rez={}){
+  const stan=stanMagazynuId(p?.id);
+  return stan===null ? null : stan-Number(rez[p.id]||0);
+}
+function sugestiaZatowarowania(p, rez={}, sprzedaz={}){
+  const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), sp=Number(sprzedaz[p.id]||0);
+  const dost=stan===null?null:stan-r, min=progNiskiProduktu(p), lead=leadTimeProduktu(p), target=targetStockProduktu(p,sp);
+  const avg=Math.max(0,sp/30), dniPokrycia=(dost===null||avg<=0)?null:Math.floor(Math.max(0,dost)/avg);
+  const meta=magazynMetaProduktu(p.id);
+  let ilosc=0, poziom="ok", powod="Stan nie wymaga zamówienia.";
+  if(stan!==null){
+    const pilne=dost<0 || stan===0 || dost<=min || (dniPokrycia!==null && dniPokrycia<=lead+3);
+    if(pilne){
+      ilosc=Math.max(target-Math.max(0,dost), min-Math.max(0,dost), intNieujemny(meta.minZakup,0));
+      if(meta.minZakup!=="" && meta.minZakup!==undefined) ilosc=Math.max(ilosc,intNieujemny(meta.minZakup,0));
+      poziom=dost<0||stan===0?"bad":"warn";
+      powod=dost<0?`Rezerwacje przekraczają stan o ${Math.abs(dost)} szt.`:(stan===0?"Brak stanu magazynowego.":`Dostępne ${dost} szt., próg ${min}.`);
+    }
+  }else{
+    powod="Produkt bez monitorowanego stanu.";
+  }
+  return {produkt:p,stan,rezerwacje:r,dostepne:dost,sprzedaz30:sp,min,lead,target,dniPokrycia,ilosc,poziom,powod,meta};
+}
+function planZatowarowania(){
+  const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30);
+  return produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>sugestiaZatowarowania(p,rez,spr)).sort((a,b)=>{
+    const pa=a.poziom==="bad"?0:a.poziom==="warn"?1:2, pb=b.poziom==="bad"?0:b.poziom==="warn"?1:2;
+    return pa-pb || Number(b.ilosc||0)-Number(a.ilosc||0) || String(a.produkt.nazwa||"").localeCompare(String(b.produkt.nazwa||""),"pl");
+  });
+}
+function potrzebyZatowarowania(){ return planZatowarowania().filter(x=>Number(x.ilosc)>0); }
+function zapiszHistorieAgenta(typ, opis, dane={}){
+  const rec={id:"AI-"+Date.now().toString(36),typ,opis,data:new Date().toISOString(),dataTxt:new Date().toLocaleString("pl-PL"),operator:sesja?.email||"administrator",dane};
+  agentAIHistoria=[rec,...(Array.isArray(agentAIHistoria)?agentAIHistoria:[])].slice(0,500);
+  zapiszLS("artway_agent_ai_historia",agentAIHistoria);
+  return rec;
 }
 function zapiszRuchMagazynowy(ruch){
   const p=produktMagazynowy(ruch.produktId);
@@ -3376,8 +3491,18 @@ function agentAIAnaliza(){
   const bezCeny=produktyAdmin.filter(p=>!produktMaCeneSprzedazy(p));
   const niedostepne=produktyAdmin.filter(produktOznaczonyNiedostepny);
   const bezZdjec=produktyAdmin.filter(p=>!p.zdjecie);
-  const prog=Number(ustawieniaMagazynuPelne().progNiski)||5;
-  const niskiStan=produktyAdmin.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s<=prog;});
+  const prog=Number(ustawieniaMagazynuPelne().progNiski)||5, rez=rezerwacjeMagazynowe();
+  const niskiStan=produktyAdmin.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s<=progNiskiProduktu(p);});
+  const plan=potrzebyZatowarowania();
+  const nadrezerwacje=produktyAdmin.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;});
+  const brakKartoteki=produktyAdmin.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
+  const bezMonitoringu=produktyAdmin.filter(p=>stanMagazynuId(p.id)===null);
+  const stareInwentaryzacje=produktyAdmin.filter(p=>{
+    const s=stanMagazynuId(p.id), d=magazynMetaProduktu(p.id).ostatniaInwentaryzacja;
+    if(s===null) return false;
+    if(!d) return true;
+    return (Date.now()-new Date(d).getTime())>90*86400000;
+  });
   const pozycje=[
     {id:"dostepnosc",poziom:doPotwierdzenia.length?"warn":"ok",ikona:"🔎",tytul:"Zamówienia do potwierdzenia dostępności",opis:doPotwierdzenia.length?`${doPotwierdzenia.length} zamówień ma pozycje powyżej ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} szt.`:"Brak zamówień wymagających potwierdzenia ilości.",akcja:"#/admin/zamowienia"},
     {id:"wysylki",poziom:bezNumeru.length?"warn":"ok",ikona:"🚚",tytul:"Przesyłki bez numeru nadania",opis:bezNumeru.length?`${bezNumeru.length} aktywnych zleceń czeka na numer/etykietę InPost.`:"Aktywne przesyłki mają komplet podstawowych danych.",akcja:"#/admin/wysylki"},
@@ -3385,6 +3510,11 @@ function agentAIAnaliza(){
     {id:"ceny",poziom:bezCeny.length?"bad":"ok",ikona:"💰",tytul:"Produkty bez ceny",opis:bezCeny.length?`${bezCeny.length} produktów wymaga uzupełnienia ceny przed sprzedażą.`:"Ceny produktów są poprawne.",akcja:"#/admin/produkty"},
     {id:"sprzedaz",poziom:niedostepne.length?"warn":"ok",ikona:"🛒",tytul:"Produkty wyłączone ze sprzedaży",opis:niedostepne.length?`${niedostepne.length} produktów jest oznaczonych jako chwilowo niedostępne.`:"Wszystkie aktywne produkty są dostępne w sprzedaży.",akcja:"#/admin/magazyn"},
     {id:"magazyn",poziom:niskiStan.length?"warn":"ok",ikona:"🏬",tytul:"Niski stan magazynowy",opis:niskiStan.length?`${niskiStan.length} produktów ma stan magazynowy ≤ ${prog}. To informacja tylko dla admina.`:"Stany magazynowe nie wymagają pilnej reakcji.",akcja:"#/admin/magazyn"},
+    {id:"zatowarowanie",poziom:plan.length?"warn":"ok",ikona:"📦",tytul:"Plan zatowarowania",opis:plan.length?`${plan.length} produktów ma sugerowane uzupełnienie. Szacowana wartość: ${zl(plan.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0))}.`:"Brak produktów wymagających zatowarowania.",akcja:"export-zakupy"},
+    {id:"nadrezerwacje",poziom:nadrezerwacje.length?"bad":"ok",ikona:"🚨",tytul:"Rezerwacje większe niż stan",opis:nadrezerwacje.length?`${nadrezerwacje.length} produktów ma więcej sztuk w aktywnych zamówieniach niż fizycznie w magazynie.`:"Nie ma nadrezerwacji magazynowych.",akcja:"#/admin/magazyn"},
+    {id:"kartoteka",poziom:brakKartoteki.length?"warn":"ok",ikona:"🗂️",tytul:"Kartoteka magazynowa",opis:brakKartoteki.length?`${brakKartoteki.length} produktów nie ma lokalizacji albo dostawcy.`:"Kartoteka magazynowa jest uzupełniona.",akcja:"kartoteka-domyslna"},
+    {id:"monitoring",poziom:bezMonitoringu.length?"warn":"ok",ikona:"📍",tytul:"Produkty bez monitorowanego stanu",opis:bezMonitoringu.length?`${bezMonitoringu.length} produktów działa bez limitu magazynowego — poprawne, jeśli to świadoma decyzja.`:"Wszystkie produkty mają monitorowany stan.",akcja:"#/admin/magazyn"},
+    {id:"inwentaryzacja",poziom:stareInwentaryzacje.length?"warn":"ok",ikona:"✅",tytul:"Inwentaryzacja",opis:stareInwentaryzacje.length?`${stareInwentaryzacje.length} monitorowanych produktów nie ma świeżej daty inwentaryzacji.`:"Inwentaryzacja monitorowanych produktów jest aktualna.",akcja:"audyt-magazynu"},
     {id:"zdjecia",poziom:bezZdjec.length?"warn":"ok",ikona:"🖼️",tytul:"Zdjęcia produktów",opis:bezZdjec.length?`${bezZdjec.length} produktów używa ikony zamiast zdjęcia.`:"Produkty mają zdjęcia.",akcja:"#/admin/produkty"},
     {id:"integracje",poziom:(stanBramki.email?.configured&&stanBramki.inpost?.configured)!==false?"ok":"warn",ikona:"🔌",tytul:"Integracje",opis:`E-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"} • baza: ${chmuraStan.admin?"połączona":"wpisz hasło bazy"}`,akcja:"#/admin/personalizacja"}
   ];
@@ -3404,11 +3534,15 @@ function agentAIWykonaj(akcja){
   if(akcja==="masowe-fv") return utworzSzkiceFakturMasowo();
   if(akcja==="sync") return synchronizujBazeCentralna(true);
   if(akcja==="export-magazyn") return eksportujMagazynCSV();
+  if(akcja==="export-zakupy") return eksportujZatowarowanieCSV();
+  if(akcja==="kartoteka-domyslna") return wypelnijDomyslnaKartotekeMagazynu();
+  if(akcja==="audyt-magazynu") return audytMagazynuAI();
 }
 function widokAdminAgentAI(){
   const analiza=agentAIAnaliza();
   const problemy=analiza.filter(x=>x.poziom!=="ok").length;
   const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
+  const plan=potrzebyZatowarowania().slice(0,8);
   return adminSzkielet("/admin/agent-ai", `
   <div class="panel ai-agent-panel">
     <div class="ai-agent-hero">
@@ -3424,14 +3558,28 @@ function widokAdminAgentAI(){
       <div class="order-stat-card"><span>📦</span><b>${pobierzZamowienia().filter(z=>z.status==="nowe").length}</b><small>nowych zamówień</small></div>
       <div class="order-stat-card"><span>🔎</span><b>${pobierzZamowienia().filter(z=>z.wymagaPotwierdzeniaDostepnosci).length}</b><small>potwierdzeń dostępności</small></div>
       <div class="order-stat-card"><span>🧾</span><b>${szkiceFaktur.length}</b><small>szkiców FV</small></div>
+      <div class="order-stat-card"><span>📦</span><b>${potrzebyZatowarowania().length}</b><small>do zatowarowania</small></div>
     </div>
-    <div class="diag-actions">
+    <div class="diag-actions agent-command-grid">
       <button class="btn" onclick="agentAIWykonaj('sync')">🔄 Synchronizuj bazę</button>
       <button class="btn ghost" onclick="agentAIWykonaj('masowe-fv')">🧾 Utwórz brakujące szkice FV</button>
       <button class="btn ghost" onclick="agentAIWykonaj('export-magazyn')">📊 Eksport magazynu</button>
+      <button class="btn ghost" onclick="agentAIWykonaj('export-zakupy')">📦 Plan zatowarowania CSV</button>
+      <button class="btn ghost" onclick="agentAIWykonaj('audyt-magazynu')">✅ Audyt magazynu JSON</button>
       <a class="btn ghost" href="#/diagnostyka">🛠️ Diagnostyka</a>
     </div>
   </div>
+  ${plan.length?`<div class="panel">
+    <div class="order-section-head"><div><h2 style="margin-top:0">📦 Najpilniejsze zatowarowanie</h2><p class="order-detail-lead">Agent liczy fizyczny stan, rezerwacje, sprzedaż z 30 dni, próg minimalny i czas dostawy.</p></div><button class="btn" onclick="agentAIWykonaj('export-zakupy')">Pobierz pełny plan</button></div>
+    <div class="ai-restock-grid">${plan.map(x=>`<div class="ai-restock-card ${x.poziom}">
+      <b>${esc(x.produkt.nazwa)}</b>
+      <small>${esc(x.produkt.sku||"ID "+x.produkt.id)} • ${esc(x.meta.dostawca||"brak dostawcy")}</small>
+      <div class="ai-restock-line"><span>Dostępne</span><b>${x.dostepne===null?"∞":esc(x.dostepne)}</b></div>
+      <div class="ai-restock-line"><span>Sprzedaż 30 dni</span><b>${esc(x.sprzedaz30)}</b></div>
+      <div class="ai-restock-line"><span>Zamówić</span><b>${esc(x.ilosc)} szt.</b></div>
+      <p>${esc(x.powod)}</p>
+    </div>`).join("")}</div>
+  </div>`:""}
   <div class="panel">
     <h2 style="margin-top:0">Lista kontroli agenta</h2>
     <div class="ai-task-list">
@@ -3441,6 +3589,13 @@ function widokAdminAgentAI(){
         <div>${String(x.akcja||"").startsWith("#")?`<a class="btn ghost" href="${esc(x.akcja)}">Otwórz</a>`:x.akcja?`<button class="btn ghost" onclick="agentAIWykonaj(${jsArg(x.akcja)})">Wykonaj</button>`:`<span class="lvl lvl-ok">OK</span>`}</div>
       </div>`).join("")}
     </div>
+  </div>
+  <div class="panel">
+    <div class="order-section-head"><div><h2 style="margin-top:0">Historia działań agenta</h2><p class="order-detail-lead">Audyty i akcje wykonywane przyciskiem administratora.</p></div></div>
+    <table class="log-table">
+      <tr><th>Data</th><th>Typ</th><th>Opis</th><th>Operator</th></tr>
+      ${(agentAIHistoria||[]).slice(0,12).map(h=>`<tr><td>${esc(h.dataTxt||"")}</td><td><span class="lvl lvl-info">${esc(h.typ||"akcja")}</span></td><td>${esc(h.opis||"")}</td><td>${esc(h.operator||"")}</td></tr>`).join("") || `<tr><td colspan="4">Brak działań agenta w historii.</td></tr>`}
+    </table>
   </div>
   <div class="panel">
     <h2 style="margin-top:0">Kolejny etap agenta</h2>
@@ -4199,13 +4354,23 @@ function filtrujProduktyMagazynu(lista, rez, sprzedaz){
   if(frazaMagazynu) out=out.filter(p=>produktPasujeFrazie(p,frazaMagazynu)||String(p.sku||"").toLowerCase().includes(frazaMagazynu.toLowerCase()));
   if(filtrMagazynu==="monitorowane") out=out.filter(p=>stanMagazynuId(p.id)!==null);
   if(filtrMagazynu==="bezlimitu") out=out.filter(p=>stanMagazynuId(p.id)===null);
-  if(filtrMagazynu==="niskie") out=out.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s>0&&s<=prog;});
+  if(filtrMagazynu==="niskie") out=out.filter(p=>{const s=stanMagazynuId(p.id), pr=progNiskiProduktu(p);return s!==null&&s>0&&s<=pr;});
   if(filtrMagazynu==="brak") out=out.filter(p=>stanMagazynuId(p.id)===0);
   if(filtrMagazynu==="rezerwacje") out=out.filter(p=>Number(rez[p.id]||0)>0);
   if(filtrMagazynu==="sprzedaz") out=out.filter(p=>Number(sprzedaz[p.id]||0)>0);
+  if(filtrMagazynu==="dozamowienia") out=out.filter(p=>Number(sugestiaZatowarowania(p,rez,sprzedaz).ilosc)>0);
+  if(filtrMagazynu==="nadrezerwacja") out=out.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;});
+  if(filtrMagazynu==="bezlokalizacji") out=out.filter(p=>!magazynMetaProduktu(p.id).lokalizacja);
+  if(filtrMagazynu==="bezdostawcy") out=out.filter(p=>!magazynMetaProduktu(p.id).dostawca);
   return sortujProduktyMagazynu(out, rez, sprzedaz, prog);
 }
 function sortujProduktyMagazynu(lista, rez={}, sprzedaz={}, prog=5){
+  const planCache=new Map();
+  const plan=p=>{
+    const key=String(p.id);
+    if(!planCache.has(key)) planCache.set(key,sugestiaZatowarowania(p,rez,sprzedaz));
+    return planCache.get(key);
+  };
   return [...lista].sort((a,b)=>{
     const sa=stanMagazynuId(a.id), sb=stanMagazynuId(b.id);
     if(sortowanieMagazynu==="nazwa") return String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
@@ -4213,6 +4378,8 @@ function sortujProduktyMagazynu(lista, rez={}, sprzedaz={}, prog=5){
     if(sortowanieMagazynu==="rezerwacje") return Number(rez[b.id]||0)-Number(rez[a.id]||0);
     if(sortowanieMagazynu==="sprzedaz") return Number(sprzedaz[b.id]||0)-Number(sprzedaz[a.id]||0);
     if(sortowanieMagazynu==="wartosc") return ((sb||0)*kwotaNum(b.cena))-((sa||0)*kwotaNum(a.cena));
+    if(sortowanieMagazynu==="dostepne") return (dostepneSztukiMagazynu(a,rez)??Number.MAX_SAFE_INTEGER)-(dostepneSztukiMagazynu(b,rez)??Number.MAX_SAFE_INTEGER);
+    if(sortowanieMagazynu==="zakup") return Number(plan(b).ilosc||0)-Number(plan(a).ilosc||0);
     const ra=sa===null?999999:(sa===0?0:(sa<=prog?sa:100000+sa));
     const rb=sb===null?999999:(sb===0?0:(sb<=prog?sb:100000+sb));
     return ra-rb || String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
@@ -4251,6 +4418,9 @@ function zapiszUstawieniaMagazynu(e){
     progNiski:Math.max(0,parseInt(f.get("progNiski"),10)||5),
     lokalizacja:String(f.get("lokalizacja")||"").trim(),
     domyslnyOperator:String(f.get("operator")||sesja?.email||"administrator").trim(),
+    domyslnyDostawca:String(f.get("domyslnyDostawca")||"").trim(),
+    domyslnyLeadTime:Math.max(0,parseInt(f.get("domyslnyLeadTime"),10)||7),
+    domyslnyZapasDni:Math.max(7,parseInt(f.get("domyslnyZapasDni"),10)||21),
     infaktTryb:String(f.get("infaktTryb")||"szkice"),
     infaktUwagi:String(f.get("infaktUwagi")||"").trim()
   };
@@ -4260,13 +4430,50 @@ function zapiszUstawieniaMagazynu(e){
 }
 function eksportujMagazynCSV(){
   const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30);
-  const rows=[["id","sku","nazwa","kategoria","stan","bez_limitu","zarezerwowane","sprzedaz_30_dni","cena_brutto","wartosc_stanu"].join(";")];
+  const rows=[["id","sku","nazwa","kategoria","stan","bez_limitu","dostepne_po_rezerwacjach","zarezerwowane","sprzedaz_30_dni","min_stock","target_stock","lead_time_dni","lokalizacja","dostawca","kod","sugerowany_zakup","cena_brutto","wartosc_stanu"].join(";")];
   produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
-    const stan=stanMagazynuId(p.id), wart=stan===null?"":kwotaNum(stan*kwotaNum(p.cena)).toFixed(2).replace(".",",");
-    rows.push([p.id,p.sku||"",p.nazwa,p.kategoria,stan===null?"":stan,stan===null?"tak":"nie",rez[p.id]||0,spr[p.id]||0,kwotaNum(p.cena).toFixed(2).replace(".",","),wart].map(csvPole).join(";"));
+    const stan=stanMagazynuId(p.id), plan=sugestiaZatowarowania(p,rez,spr), meta=magazynMetaProduktu(p.id), wart=stan===null?"":kwotaNum(stan*kwotaNum(p.cena)).toFixed(2).replace(".",",");
+    rows.push([p.id,p.sku||"",p.nazwa,p.kategoria,stan===null?"":stan,stan===null?"tak":"nie",plan.dostepne===null?"":plan.dostepne,rez[p.id]||0,spr[p.id]||0,plan.min,plan.target,plan.lead,meta.lokalizacja||"",meta.dostawca||"",meta.kod||"",plan.ilosc||0,kwotaNum(p.cena).toFixed(2).replace(".",","),wart].map(csvPole).join(";"));
   });
   pobierzPlik("magazyn-artway.csv","\uFEFF"+rows.join("\n"),"text/csv");
   loguj("info","Wyeksportowano magazyn CSV");
+}
+function eksportujZatowarowanieCSV(){
+  const plan=potrzebyZatowarowania();
+  const rows=[["id","sku","nazwa","kategoria","dostawca","lokalizacja","stan","dostepne_po_rezerwacjach","sprzedaz_30_dni","min_stock","target_stock","lead_time_dni","sugerowana_ilosc","cena_brutto","szacowana_wartosc"].join(";")];
+  plan.forEach(x=>{
+    const p=x.produkt, meta=x.meta, wart=kwotaNum((x.ilosc||0)*kwotaNum(p.cena)).toFixed(2).replace(".",",");
+    rows.push([p.id,p.sku||"",p.nazwa,p.kategoria,meta.dostawca||"",meta.lokalizacja||"",x.stan===null?"":x.stan,x.dostepne===null?"":x.dostepne,x.sprzedaz30,x.min,x.target,x.lead,x.ilosc,kwotaNum(p.cena).toFixed(2).replace(".",","),wart].map(csvPole).join(";"));
+  });
+  pobierzPlik("zatowarowanie-artway.csv","\uFEFF"+rows.join("\n"),"text/csv");
+  zapiszHistorieAgenta("zatowarowanie","Wyeksportowano plan zatowarowania",{pozycji:plan.length});
+  loguj("info","Wyeksportowano plan zatowarowania CSV");
+}
+function wypelnijDomyslnaKartotekeMagazynu(){
+  const u=ustawieniaMagazynuPelne();
+  if(!u.domyslnyDostawca&&!u.lokalizacja){ toast("Najpierw wpisz domyślnego dostawcę lub lokalizację w ustawieniach magazynu"); return; }
+  if(!confirm("Uzupełnić brakujące pola kartoteki domyślnym dostawcą/lokalizacją? Istniejących wartości nie nadpiszę.")) return;
+  let ile=0;
+  produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
+    const m=magazynMetaProduktu(p.id);
+    if((u.domyslnyDostawca&&!m.dostawca)||(u.lokalizacja&&!m.lokalizacja)){
+      zapiszMagazynMeta(p.id,{...m,dostawca:m.dostawca||u.domyslnyDostawca,lokalizacja:m.lokalizacja||u.lokalizacja});
+      ile++;
+    }
+  });
+  zapiszHistorieAgenta("kartoteka",`Uzupełniono domyślne dane kartoteki dla ${ile} produktów`,{produkty:ile});
+  toast(`Uzupełniono kartotekę: ${ile} produktów ✅`);
+  renderuj();
+}
+function audytMagazynuAI(){
+  const plan=potrzebyZatowarowania(), rez=rezerwacjeMagazynowe(), wszystkie=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const brakLok=wszystkie.filter(p=>!magazynMetaProduktu(p.id).lokalizacja).length;
+  const brakDos=wszystkie.filter(p=>!magazynMetaProduktu(p.id).dostawca).length;
+  const nad=wszystkie.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;}).length;
+  const rec=zapiszHistorieAgenta("audyt","Utworzono audyt magazynu",{produkty:wszystkie.length,doZamowienia:plan.length,brakLokalizacji:brakLok,brakDostawcy:brakDos,nadrezerwacje:nad});
+  pobierzPlik("audyt-magazynu-agent-ai.json",JSON.stringify(rec,null,2),"application/json");
+  toast("Audyt magazynu zapisany i pobrany ✅");
+  renderuj();
 }
 function daneSzkicuFakturyZamowienia(nr){
   const z=pobierzZamowienia().find(x=>x.nr===nr); if(!z) return null;
@@ -4324,9 +4531,13 @@ function widokAdminMagazyn(){
   const wszystkie=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
   const monitorowane=wszystkie.filter(p=>stanMagazynuId(p.id)!==null);
   const brak=wszystkie.filter(p=>stanMagazynuId(p.id)===0);
-  const niskie=wszystkie.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s>0&&s<=prog;});
+  const niskie=wszystkie.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s>0&&s<=progNiskiProduktu(p);});
   const zarezerwowane=Object.values(rez).reduce((s,n)=>s+Number(n||0),0);
   const wartosc=monitorowane.reduce((s,p)=>s+(stanMagazynuId(p.id)||0)*kwotaNum(p.cena),0);
+  const planZakupu=potrzebyZatowarowania();
+  const wartoscPlanu=planZakupu.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0);
+  const nadrezerwacje=wszystkie.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;});
+  const brakiKartoteki=wszystkie.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
   const lista=filtrujProduktyMagazynu(wszystkie,rez,spr);
   const liczbaStron=Math.max(1,Math.ceil(lista.length/magazynNaStronie));
   stronaMagazynu=Math.min(Math.max(1,stronaMagazynu),liczbaStron);
@@ -4342,6 +4553,8 @@ function widokAdminMagazyn(){
       </div>
       <div class="diag-actions">
         <button class="btn" onclick="eksportujMagazynCSV()">📊 Eksport magazynu CSV</button>
+        <button class="btn ghost" onclick="eksportujZatowarowanieCSV()">📦 Plan zatowarowania</button>
+        <a class="btn ghost" href="#/admin/agent-ai">🤖 Agent AI</a>
         <a class="btn ghost" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
       </div>
     </div>
@@ -4351,6 +4564,9 @@ function widokAdminMagazyn(){
       <div class="order-stat-card ${niskie.length?"hot":""}"><span>⚠️</span><b>${niskie.length}</b><small>niski stan ≤ ${prog}</small></div>
       <div class="order-stat-card"><span>🧾</span><b>${zarezerwowane}</b><small>szt. w aktywnych zamówieniach</small></div>
       <div class="order-stat-card money"><span>💰</span><b>${zl(wartosc)}</b><small>wartość stanów</small></div>
+      <div class="order-stat-card ${planZakupu.length?"hot":""}"><span>📦</span><b>${planZakupu.length}</b><small>do zatowarowania (${zl(wartoscPlanu)})</small></div>
+      <div class="order-stat-card ${nadrezerwacje.length?"hot":""}"><span>🚨</span><b>${nadrezerwacje.length}</b><small>nadrezerwacje</small></div>
+      <div class="order-stat-card ${brakiKartoteki.length?"hot":""}"><span>🗂️</span><b>${brakiKartoteki.length}</b><small>braki kartoteki</small></div>
     </div>
   </div>
   <div class="panel">
@@ -4361,10 +4577,10 @@ function widokAdminMagazyn(){
     <div class="filter-grid warehouse-filter-grid">
       <input placeholder="Szukaj: nazwa, SKU, ID, kategoria…" value="${esc(frazaMagazynu)}" oninput="frazaMagazynu=this.value;stronaMagazynu=1;renderuj()">
       <select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">
-        ${[["wszystkie","Wszystkie produkty"],["monitorowane","Tylko monitorowane"],["bezlimitu","Bez limitu"],["niskie","Niski stan"],["brak","Brak na stanie"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}
+        ${[["wszystkie","Wszystkie produkty"],["dozamowienia","Do zatowarowania"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Tylko monitorowane"],["bezlimitu","Bez limitu"],["niskie","Niski stan"],["brak","Brak na stanie"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["bezlokalizacji","Bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}
       </select>
       <select onchange="sortowanieMagazynu=this.value;stronaMagazynu=1;renderuj()">
-        ${[["ryzyko","Sortuj: ryzyko braku"],["stan","Stan rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}
+        ${[["ryzyko","Sortuj: ryzyko braku"],["zakup","Sugerowany zakup"],["dostepne","Dostępne po rezerwacji"],["stan","Stan rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}
       </select>
       <select onchange="ustawMagazynNaStronie(this.value)">
         ${[25,50,100,200].map(n=>`<option value="${n}" ${magazynNaStronie===n?"selected":""}>${n} na stronie</option>`).join("")}
@@ -4375,17 +4591,44 @@ function widokAdminMagazyn(){
     </div>
     <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
     <div style="overflow-x:auto"><table class="log-table warehouse-table">
-      <tr><th>Produkt</th><th>Kategoria</th><th>Stan magazynu</th><th>Dostępność w sklepie</th><th>Rezerwacje</th><th>Sprzedaż 30 dni</th><th>Wartość</th><th>Korekta</th></tr>
+      <tr><th>Produkt</th><th>Kategoria</th><th>Stan / dostępne</th><th>Dostępność w sklepie</th><th>Plan zatowarowania</th><th>Kartoteka magazynowa</th><th>Korekta</th></tr>
       ${fragment.map(p=>{
-        const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), sp=Number(spr[p.id]||0), wart=stan===null?0:stan*kwotaNum(p.cena);
+        const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), sp=Number(spr[p.id]||0), plan=sugestiaZatowarowania(p,rez,spr), meta=plan.meta, wart=stan===null?0:stan*kwotaNum(p.cena);
         return `<tr>
           <td><b>${esc(p.nazwa)}</b><br><small>ID: ${esc(p.id)}${p.sku?` • SKU: ${esc(p.sku)}`:""}</small></td>
           <td>${esc(p.kategoria||"—")}</td>
-          <td><b>${stan===null?"∞":stan}</b> ${stanBadgeMagazynu(stan,prog)}</td>
+          <td>
+            <b>${stan===null?"∞":stan}</b> ${stanBadgeMagazynu(stan,progNiskiProduktu(p))}
+            <br><small>Dostępne: <b>${plan.dostepne===null?"∞":esc(plan.dostepne)}</b> • rezerw.: ${r} • 30 dni: ${sp}</small>
+            <br><small>Wartość stanu: ${stan===null?"—":zl(wart)}</small>
+          </td>
           <td>${dostepnoscBadgeAdmin(p)}<br><button class="btn ghost" type="button" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})" style="padding:.25rem .5rem;margin-top:.25rem">${produktOznaczonyNiedostepny(p)?"Włącz sprzedaż":"Wyłącz sprzedaż"}</button></td>
-          <td>${r?`<b>${r}</b> szt.`:"—"}</td>
-          <td>${sp?`<b>${sp}</b> szt.`:"—"}</td>
-          <td>${stan===null?"—":zl(wart)}</td>
+          <td>
+            <div class="warehouse-plan ${plan.poziom}">
+              <b>${plan.ilosc?`Zamówić ${esc(plan.ilosc)} szt.`:"OK"}</b>
+              <small>${esc(plan.powod)}</small>
+              <small>Min: ${esc(plan.min)} • Cel: ${esc(plan.target)} • lead: ${esc(plan.lead)} dni${plan.dniPokrycia!==null?` • pokrycie: ${esc(plan.dniPokrycia)} dni`:""}</small>
+            </div>
+          </td>
+          <td>
+            <form class="warehouse-meta" onsubmit="zapiszKartotekeMagazynu(event,${jsArg(p.id)})">
+              <div class="warehouse-meta-grid">
+                <input name="lokalizacja" value="${esc(meta.lokalizacja||"")}" placeholder="lokalizacja / regał">
+                <input name="dostawca" value="${esc(meta.dostawca||"")}" placeholder="dostawca">
+                <input name="kod" value="${esc(meta.kod||p.gtin||p.ean||"")}" placeholder="EAN / kod">
+                <input name="minStock" value="${esc(meta.minStock??"")}" placeholder="min" inputmode="numeric" title="Próg minimalny produktu">
+                <input name="targetStock" value="${esc(meta.targetStock??"")}" placeholder="cel" inputmode="numeric" title="Docelowy stan">
+                <input name="leadTime" value="${esc(meta.leadTime??"")}" placeholder="lead dni" inputmode="numeric" title="Czas dostawy w dniach">
+                <input name="minZakup" value="${esc(meta.minZakup??"")}" placeholder="min zakup" inputmode="numeric" title="Minimalna ilość zakupu">
+                <input name="uwagi" value="${esc(meta.uwagi||"")}" placeholder="uwagi">
+              </div>
+              <div class="warehouse-meta-actions">
+                <small>Inwentaryzacja: ${esc(meta.ostatniaInwentaryzacja||"brak")}</small>
+                <button class="btn ghost" type="button" onclick="oznaczInwentaryzacjeProduktu(${jsArg(p.id)})">Potwierdź stan</button>
+                <button class="btn" type="submit">Zapisz kartotekę</button>
+              </div>
+            </form>
+          </td>
           <td>
             <form class="warehouse-adjust" onsubmit="korygujStanMagazynu(event,${jsArg(p.id)})">
               <input name="stan" value="${stan===null?"":stan}" placeholder="∞" inputmode="numeric" title="Nowy stan">
@@ -4423,6 +4666,8 @@ function widokAdminMagazyn(){
         <div class="f-group"><label>Nazwa magazynu</label><input name="nazwa" value="${esc(u.nazwa)}"></div>
         <div class="f-row"><div class="f-group"><label>Próg niskiego stanu</label><input name="progNiski" inputmode="numeric" value="${esc(prog)}"></div><div class="f-group"><label>Operator domyślny</label><input name="operator" value="${esc(u.domyslnyOperator)}"></div></div>
         <div class="f-group"><label>Lokalizacja / uwagi</label><input name="lokalizacja" value="${esc(u.lokalizacja)}" placeholder="np. regał, pomieszczenie, adres"></div>
+        <div class="f-row"><div class="f-group"><label>Domyślny dostawca</label><input name="domyslnyDostawca" value="${esc(u.domyslnyDostawca)}" placeholder="np. Pinkfrog / hurtownia"></div><div class="f-group"><label>Domyślny czas dostawy (dni)</label><input name="domyslnyLeadTime" inputmode="numeric" value="${esc(u.domyslnyLeadTime)}"></div></div>
+        <div class="f-row"><div class="f-group"><label>Zapas docelowy (dni)</label><input name="domyslnyZapasDni" inputmode="numeric" value="${esc(u.domyslnyZapasDni)}"></div><div class="f-group"><label>Akcja kartoteki</label><button class="btn ghost" type="button" onclick="wypelnijDomyslnaKartotekeMagazynu()">Uzupełnij braki domyślnymi danymi</button></div></div>
         <h2>🧾 inFakt / FV</h2>
         <div class="f-group"><label>Tryb integracji</label><select name="infaktTryb"><option value="szkice" ${u.infaktTryb==="szkice"?"selected":""}>Tylko szkice w sklepie</option><option value="api" ${u.infaktTryb==="api"?"selected":""}>API inFakt po dodaniu tokenu</option></select></div>
         <div class="f-group"><label>Uwagi do integracji</label><textarea name="infaktUwagi" rows="3">${esc(u.infaktUwagi)}</textarea></div>
