@@ -3482,6 +3482,197 @@ function widokAdmin(){
       : `<p style="color:var(--muted2)">Brak zamówień — gdy klienci zaczną kupować, zobaczysz je tutaj.</p>`}
     </div>`);
 }
+function agentAINormalizuj(s=""){
+  const mapa={"ą":"a","ć":"c","ę":"e","ł":"l","ń":"n","ó":"o","ś":"s","ź":"z","ż":"z"};
+  return String(s||"").toLowerCase()
+    .replace(/[ąćęłńóśźż]/g,m=>mapa[m]||m)
+    .replace(/[@#]/g," ")
+    .replace(/[^\p{L}\p{N}/._-]+/gu," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
+function agentAIMa(n,arr){ return arr.some(x=>x instanceof RegExp?x.test(n):n.includes(x)); }
+function agentAIWytnijProdukt(n){
+  let q=` ${n} `;
+  ["ile mamy","ile jest","jaki stan","stan produktu","sprawdz produkt","sprawdz","znajdz","pokaz","czy mamy","gdzie lezy","gdzie jest","lokalizacja","produkt","towar","sku","kod","na magazynie","w magazynie","w sklepie","mi","prosze"].forEach(f=>{q=q.replaceAll(` ${f} `," ");});
+  return q.replace(/\s+/g," ").trim();
+}
+function agentAIRozpoznajPolecenie(tekst=""){
+  const raw=String(tekst||"").trim(), n=agentAINormalizuj(raw);
+  if(!n) return {typ:"pomoc",raw,confidence:1};
+  const slash=n.split(/\s+/)[0].split("@")[0];
+  if(slash.startsWith("/")){
+    if(["/start","/pomoc","/help"].includes(slash)) return {typ:"pomoc",raw,confidence:1};
+    if(slash==="/status") return {typ:"status",raw,confidence:1};
+    if(slash==="/magazyn") return {typ:"magazyn",raw,confidence:1};
+    if(slash==="/braki") return {typ:"braki",raw,confidence:1};
+    if(slash==="/zamowienia") return {typ:"zamowienia",raw,confidence:1};
+    if(["/zlecenie","/zamow"].includes(slash)) return {typ:"zlecenie",tryb:n.includes("nisk")?"niskie":"braki",raw,confidence:1};
+    if(["/sprawdz","/check"].includes(slash)) return {typ:"sprawdz",raw,confidence:1};
+  }
+  if(agentAIMa(n,["pomoc","co potrafisz","jakie polecenia","co mozesz","instrukcja"])) return {typ:"pomoc",raw,confidence:.95};
+  if(agentAIMa(n,["synchronizuj","synchronizacja","odswiez baze","odswiez dane","polacz baze","zapisz na serwerze"])) return {typ:"sync",raw,confidence:.95};
+  if(agentAIMa(n,["utworz szkice fv","stworz szkice fv","brakujace szkice","faktury","infakt"])) return {typ:"faktury",raw,confidence:.9};
+  if(agentAIMa(n,["eksport magazynu","pobierz magazyn","csv magazynu"])) return {typ:"export-magazyn",raw,confidence:.9};
+  if(agentAIMa(n,["audyt magazynu","sprawdz kartoteke","audyt kartoteki"])) return {typ:"audyt-magazynu",raw,confidence:.9};
+  if(agentAIMa(n,["uzupelnij kartoteke","domyslna kartoteka","wypelnij lokalizacje","wypelnij dostawcow"])) return {typ:"kartoteka-domyslna",raw,confidence:.9};
+  if(agentAIMa(n,[
+    "przygotuj zamowienie","przygotuj zlecenie","napisz zamowienie","napisz zlecenie","zrob zamowienie","zrob zlecenie",
+    "zamowienie do producenta","zlecenie do producenta","zamowienie do dostawcy","zlecenie do dostawcy","co zamowic u producenta","co zamowic u dostawcy"
+  ])){
+    const niskie=agentAIMa(n,["nisk","niski stan","niskie stany","brak na stanie","zerowy stan","uzupelniajace","uzupelnij"]);
+    const braki=agentAIMa(n,["pod zamowienia","pod zlecenia","aktywne zamowienia","aktywne zlecenia","braki do zamowien"]);
+    return {typ:"zlecenie",tryb:niskie&&!braki?"niskie":"braki",raw,confidence:.95};
+  }
+  if(agentAIMa(n,["sprawdz teraz","sprawdz czy","sprawdz zlecenia","sprawdz zamowienia","czy wplynelo","czy wpadlo","czy jest nowe","czy sa nowe","nowe zlecenie","nowe zamowienie","jakies zlecenie wplynelo","jakies zamowienie wplynelo"])) return {typ:"sprawdz",raw,confidence:.95};
+  if(agentAIMa(n,["czego brakuje","co brakuje","braki","brakuje do zamowien","brakuje do zlecen","co trzeba domowic","co trzeba zamowic","nadrezerwacje","braki magazynowe","plan zatowarowania","plan zakupow"])) return {typ:"braki",raw,confidence:.9};
+  if(agentAIMa(n,["lista zamowien","pokaz zamowienia","pokaz zlecenia","ostatnie zamowienia","ostatnie zlecenia","ile zamowien","ile zlecen","zamowienia","zlecenia"])) return {typ:"zamowienia",raw,confidence:.86};
+  if(agentAIMa(n,["status sklepu","status strony","status agenta","czy sklep dziala","czy strona dziala","kondycja","stan systemu","backend","baza dziala","raport agenta"])) return {typ:"status",raw,confidence:.92};
+  if(agentAIMa(n,["stan magazynu","podsumowanie magazynu","raport magazynu","magazyn","ile produktow","produkty bez kartoteki","bez dostawcy","bez lokalizacji","niskie stany","brak na stanie"])) return {typ:"magazyn",raw,confidence:.85};
+  if(agentAIMa(n,["ile mamy","ile jest","jaki stan","stan produktu","sprawdz produkt","znajdz","czy mamy","gdzie lezy","gdzie jest"]) || /^sku\s+/.test(n) || /^kod\s+/.test(n)){
+    const query=agentAIWytnijProdukt(n);
+    if(query.length>=2) return {typ:"produkt",query,raw,confidence:.82};
+  }
+  if(n==="status") return {typ:"status",raw,confidence:.9};
+  if(n==="magazyn") return {typ:"magazyn",raw,confidence:.9};
+  if(n==="braki") return {typ:"braki",raw,confidence:.9};
+  if(["zamowienia","zlecenia"].includes(n)) return {typ:"zamowienia",raw,confidence:.9};
+  if(n==="zlecenie") return {typ:"zlecenie",tryb:"braki",raw,confidence:.9};
+  return {typ:"nieznane",raw,confidence:.2};
+}
+function agentAIProduktTekst(fraza=""){
+  const q=agentAINormalizuj(fraza);
+  if(!q) return "Podaj nazwę, SKU albo fragment produktu, np. „ile mamy szachy”.";
+  const slowa=q.split(" ").filter(Boolean);
+  const rez=rezerwacjeMagazynowe();
+  const lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{
+    const hay=agentAINormalizuj([p.nazwa,p.sku,p.kategoria,p.podkategoria,p.id].filter(Boolean).join(" "));
+    return hay.includes(q) || slowa.every(w=>hay.includes(w));
+  }).slice(0,8);
+  if(!lista.length) return `Nie znalazłem produktu dla: „${fraza}”. Spróbuj krótszej nazwy albo SKU.`;
+  return ["🔎 Produkty znalezione:",...lista.map(p=>{
+    const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), dost=stan===null?null:stan-r, meta=magazynMetaProduktu(p.id);
+    const dostepnosc=produktOznaczonyNiedostepny(p)?"wyłączony ze sprzedaży":"dostępny w sklepie";
+    return `• ${p.nazwa} (${p.sku||"ID "+p.id}) — stan: ${stan===null?"bez limitu":stan+" szt."}, rezerwacje: ${r}, dostępne po rezerwacjach: ${dost===null?"bez limitu":dost+" szt."}, sprzedaż: ${dostepnosc}, cena: ${zl(p.cena)}, lokalizacja: ${meta.lokalizacja||"—"}, dostawca: ${meta.dostawca||"—"}`;
+  })].join("\n");
+}
+function agentAIBrakiTekst(limit=12){
+  const plan=potrzebyZatowarowania().slice(0,limit);
+  if(!plan.length) return "📦 Braki do aktywnych zamówień: brak. Aktualne rezerwacje mieszczą się w stanie magazynowym.";
+  return ["📦 Braki do aktywnych zamówień:",...plan.map(x=>`• ${x.produkt.nazwa} (${x.produkt.sku||"ID "+x.produkt.id}) — zamówić ${x.ilosc} szt.; dostępne: ${x.dostepne}; rezerwacje: ${x.rezerwacje}; dostawca: ${x.meta.dostawca||"—"}`)].join("\n");
+}
+function agentAIZamowieniaTekst(limit=8){
+  const zam=pobierzZamowienia().slice().sort((a,b)=>(Number(b.ts)||0)-(Number(a.ts)||0));
+  const aktywne=zam.filter(statusZamowieniaRezerwujeMagazyn);
+  const nowe=zam.filter(z=>String(z.status||"").toLowerCase()==="nowe");
+  const potw=zam.filter(z=>z.wymagaPotwierdzeniaDostepnosci);
+  const bezNumeru=aktywne.filter(z=>!daneWysylki(z).numer);
+  const ostatnie=zam.slice(0,limit).map(z=>`• ${z.nr} — ${klientZamowieniaLabel(z)} — ${z.status||"nowe"} — ${zl(kosztyZamowienia(z).razem||z.razem)}`).join("\n");
+  return [`📋 Zamówienia: ${zam.length} wszystkich, ${nowe.length} nowych, ${aktywne.length} aktywnych, ${potw.length} do potwierdzenia dostępności, ${bezNumeru.length} bez numeru nadania.`,ostatnie?`\nOstatnie:\n${ostatnie}`:""].join("");
+}
+function agentAIStatusTekst(){
+  const analiza=agentAIAnaliza();
+  const problemy=analiza.filter(x=>x.poziom!=="ok");
+  const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
+  return [`🤖 Status agenta/sklepu: ${score}%`,`${problemy.length} tematów wymaga kontroli.`,`Baza: ${chmuraStan.admin?"połączona":"wymaga hasła/połączenia"} • e-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"}`,problemy.length?`\nNajważniejsze:\n${problemy.slice(0,8).map(x=>`• ${x.tytul}: ${x.opis}`).join("\n")}`:"\nBrak pilnych problemów z listy kontroli."].join("\n");
+}
+function agentAIMagazynTekst(){
+  const produktyAdmin=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const monitorowane=produktyAdmin.filter(p=>stanMagazynuId(p.id)!==null);
+  const bezMonitoringu=produktyAdmin.length-monitorowane.length;
+  const niskie=monitorowane.filter(p=>stanMagazynuId(p.id)<=progNiskiProduktu(p));
+  const niedostepne=produktyAdmin.filter(produktOznaczonyNiedostepny);
+  const braki=potrzebyZatowarowania();
+  const bezKartoteki=produktyAdmin.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
+  return [`🏬 Magazyn: ${produktyAdmin.length} produktów aktywnych w administracji.`,`Monitorowane stany: ${monitorowane.length}; bez monitoringu: ${bezMonitoringu}.`,`Niskie/brak stanu: ${niskie.length}; braki do aktywnych zamówień: ${braki.length}; wyłączone ze sprzedaży: ${niedostepne.length}; bez pełnej kartoteki: ${bezKartoteki.length}.`,niskie.length?`\nPierwsze niskie stany:\n${niskie.slice(0,8).map(p=>`• ${p.nazwa} — stan ${stanMagazynuId(p.id)} szt., próg ${progNiskiProduktu(p)}`).join("\n")}`:""].join("\n");
+}
+function agentAIZlecenieProducentaTekst(tryb="braki",limit=80){
+  let wiersze=[];
+  if(tryb==="niskie"){
+    const rez=rezerwacjeMagazynowe();
+    wiersze=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>{
+      const stan=stanMagazynuId(p.id);
+      if(stan===null) return null;
+      const r=Number(rez[p.id]||0), dost=stan-r, min=progNiskiProduktu(p), target=targetStockProduktu(p,0), meta=magazynMetaProduktu(p.id);
+      if(stan>min && dost>=min) return null;
+      return {produkt:p,ilosc:Math.max(1,target-Math.max(0,dost)),stan,rezerwacje:r,dostepne:dost,meta,powod:`stan ${stan}, dostępne po rezerwacjach ${dost}, próg ${min}`};
+    }).filter(Boolean);
+  }else{
+    wiersze=potrzebyZatowarowania().map(x=>({produkt:x.produkt,ilosc:x.ilosc,stan:x.stan,rezerwacje:x.rezerwacje,dostepne:x.dostepne,meta:x.meta,powod:x.powod}));
+  }
+  wiersze=wiersze.slice(0,limit);
+  if(!wiersze.length) return tryb==="niskie"?"Nie ma obecnie produktów pod zamówienie uzupełniające z niskich stanów.":"Nie ma obecnie braków do aktywnych zamówień.";
+  const grupy={};
+  wiersze.forEach(x=>{const d=x.meta.dostawca||"Bez przypisanego dostawcy";(grupy[d]||(grupy[d]=[])).push(x);});
+  const naglowek=tryb==="niskie"?"Szkic zamówienia uzupełniającego pod niskie stany:":"Szkic zamówienia do producenta pod braki z aktywnych zamówień:";
+  return [naglowek,...Object.entries(grupy).map(([d,items])=>`\n${d}\n${items.map(x=>`• ${x.produkt.nazwa} (${x.produkt.sku||"ID "+x.produkt.id}) — ${x.ilosc} szt. — ${x.powod}`).join("\n")}`)].join("\n");
+}
+async function agentAIWykonajPolecenie(tekst=""){
+  const intent=agentAIRozpoznajPolecenie(tekst);
+  let odpowiedz="";
+  try{
+    if(intent.typ==="pomoc"){
+      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź czy wpadło nowe zlecenie","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• ile mamy szachy?","• synchronizuj bazę","• utwórz brakujące szkice FV"].join("\n");
+    }else if(intent.typ==="sync"){
+      await synchronizujBazeCentralna(true);
+      odpowiedz="Synchronizacja bazy została uruchomiona. Dane z panelu powinny być zapisane i odświeżone na serwerze.";
+    }else if(intent.typ==="faktury"){
+      const przed=szkiceFaktur.length;
+      utworzSzkiceFakturMasowo();
+      odpowiedz=`Sprawdziłem szkice FV. Przed akcją było ich ${przed}, teraz jest ${szkiceFaktur.length}.`;
+    }else if(intent.typ==="export-magazyn"){
+      eksportujMagazynCSV();
+      odpowiedz="Eksport magazynu CSV został przygotowany do pobrania.";
+    }else if(intent.typ==="audyt-magazynu"){
+      audytMagazynuAI();
+      odpowiedz="Audyt magazynu JSON został przygotowany do pobrania.";
+    }else if(intent.typ==="kartoteka-domyslna"){
+      wypelnijDomyslnaKartotekeMagazynu();
+      odpowiedz="Uzupełniłem domyślne pola kartoteki tam, gdzie było to bezpieczne.";
+    }else if(intent.typ==="sprawdz"||intent.typ==="zamowienia"){
+      odpowiedz=agentAIZamowieniaTekst();
+    }else if(intent.typ==="zlecenie"){
+      odpowiedz=agentAIZlecenieProducentaTekst(intent.tryb||"braki");
+    }else if(intent.typ==="braki"){
+      odpowiedz=agentAIBrakiTekst();
+    }else if(intent.typ==="status"){
+      odpowiedz=agentAIStatusTekst();
+    }else if(intent.typ==="magazyn"){
+      odpowiedz=agentAIMagazynTekst();
+    }else if(intent.typ==="produkt"){
+      odpowiedz=agentAIProduktTekst(intent.query);
+    }else{
+      odpowiedz="Nie rozpoznałem polecenia. Napisz np. „sprawdź zamówienia”, „przygotuj zamówienie do producenta”, „pokaż braki”, „ile mamy [produkt]” albo „synchronizuj bazę”.";
+    }
+    zapiszHistorieAgenta("komenda",`Polecenie z panelu: ${tekst}`,{polecenie:tekst,intencja:intent.typ,tryb:intent.tryb||"",odpowiedz});
+    loguj("info",`Agent AI/panel: ${intent.typ} — ${tekst}`);
+    return {intent,odpowiedz};
+  }catch(err){
+    odpowiedz=`Nie udało się wykonać polecenia: ${err?.message||err}`;
+    zapiszHistorieAgenta("komenda",`Błąd polecenia z panelu: ${tekst}`,{polecenie:tekst,intencja:intent.typ,tryb:intent.tryb||"",odpowiedz,blad:String(err?.message||err)});
+    loguj("error",`Agent AI/panel błąd: ${err?.message||err}`);
+    return {intent,odpowiedz,blad:err};
+  }
+}
+async function agentAIPrzyjmijKomende(e){
+  if(e) e.preventDefault();
+  const input=$("agentAICommandInput"), tekst=String(input?.value||"").trim();
+  if(!tekst){ toast("Wpisz polecenie dla agenta"); return false; }
+  const btn=e?.submitter;
+  if(btn) btn.disabled=true;
+  const wynik=await agentAIWykonajPolecenie(tekst);
+  toast(wynik.blad?"Agent zapisał błąd polecenia":"Agent AI wykonał polecenie ✅");
+  if(input) input.value="";
+  renderuj();
+  setTimeout(()=>{$("agentAICommandInput")?.focus();},30);
+  return false;
+}
+function agentAIWstawKomende(tekst){
+  const input=$("agentAICommandInput");
+  if(!input) return;
+  input.value=tekst;
+  input.focus();
+}
 function agentAIAnaliza(){
   const zam=pobierzZamowienia(), produktyAdmin=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
   const aktywne=zam.filter(z=>!["anulowane","zakończone","dostarczone"].includes(String(z.status||"").toLowerCase()));
@@ -3543,6 +3734,7 @@ function widokAdminAgentAI(){
   const problemy=analiza.filter(x=>x.poziom!=="ok").length;
   const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
   const plan=potrzebyZatowarowania().slice(0,8);
+  const odpowiedziAgenta=(agentAIHistoria||[]).filter(h=>h.typ==="komenda"&&h.dane&&h.dane.odpowiedz).slice(0,5);
   return adminSzkielet("/admin/agent-ai", `
   <div class="panel ai-agent-panel">
     <div class="ai-agent-hero">
@@ -3568,6 +3760,33 @@ function widokAdminAgentAI(){
       <button class="btn ghost" onclick="agentAIWykonaj('audyt-magazynu')">✅ Audyt magazynu JSON</button>
       <a class="btn ghost" href="#/diagnostyka">🛠️ Diagnostyka</a>
     </div>
+  </div>
+  <div class="panel agent-command-panel">
+    <div class="order-section-head">
+      <div>
+        <h2 style="margin-top:0">💬 Polecenie dla agenta</h2>
+        <p class="order-detail-lead">Pisz normalnie po polsku. Agent działa na danych widocznych w panelu i wykonuje tylko bezpieczne akcje administratora.</p>
+      </div>
+      <span class="lvl lvl-info">bez tokenów w przeglądarce</span>
+    </div>
+    <form class="agent-command-form" onsubmit="return agentAIPrzyjmijKomende(event)">
+      <textarea id="agentAICommandInput" rows="3" placeholder="Np. sprawdź czy wpadło nowe zlecenie, przygotuj zamówienie do producenta, ile mamy szachy..."></textarea>
+      <div class="agent-command-actions">
+        <button class="btn" type="submit">🤖 Wykonaj polecenie</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('sprawdź czy wpadło nowe zlecenie')">Nowe zlecenia</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('przygotuj zamówienie do producenta')">Zamówienie do producenta</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('czego brakuje do zamówień')">Braki</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż stan magazynu')">Magazyn</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('synchronizuj bazę')">Synchronizacja</button>
+      </div>
+    </form>
+    <div class="agent-command-hints">Obsługiwane: zamówienia, braki, magazyn, wyszukiwanie produktu, szkic zamówienia do producenta, synchronizacja, szkice FV, eksport i audyt magazynu.</div>
+    ${odpowiedziAgenta.length?`<div class="agent-response-list">
+      ${odpowiedziAgenta.map(h=>`<div class="agent-response-card">
+        <div class="agent-response-head"><b>${esc(h.dane.polecenie||"Polecenie")}</b><small>${esc(h.dataTxt||"")}</small></div>
+        <pre class="agent-answer-pre">${esc(h.dane.odpowiedz||"")}</pre>
+      </div>`).join("")}
+    </div>`:`<p class="order-detail-lead" style="margin-bottom:0">Brak zapisanych poleceń z panelu. Wpisz pierwsze polecenie powyżej.</p>`}
   </div>
   ${plan.length?`<div class="panel">
     <div class="order-section-head"><div><h2 style="margin-top:0">📦 Braki do aktywnych zamówień</h2><p class="order-detail-lead">Agent pokazuje tylko produkty, których rezerwacje z aktywnych zamówień są większe niż fizyczny stan magazynowy.</p></div><button class="btn" onclick="agentAIWykonaj('export-zakupy')">Pobierz pełny plan</button></div>
