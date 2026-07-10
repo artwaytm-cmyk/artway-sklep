@@ -24,6 +24,7 @@ const KLUCZE_WSPOLNE = [
   'artway_faktury_szkice',
   'artway_agent_ai_historia',
   'artway_agent_ai_pamiec',
+  'artway_agent_ai_zlecenia',
   'artway_opinie',
   'artway_kosz_dodane',
   'artway_kosz_meta',
