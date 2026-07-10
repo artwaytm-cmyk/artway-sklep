@@ -247,6 +247,11 @@ let cenaOd="", cenaDo="", filtrDostepnosci="wszystkie", filtrOferty="wszystkie",
 let stronaProduktow=1, produktyNaStronie=[12,24,48,96].includes(Number(wczytajLS("artway_produkty_na_stronie",24)))?Number(wczytajLS("artway_produkty_na_stronie",24)):24;
 let stronaListyProduktow=1, produktyNaLiscie=[12,24,48,96].includes(Number(wczytajLS("artway_produkty_na_liscie",24)))?Number(wczytajLS("artway_produkty_na_liscie",24)):24;
 let frazaListyProduktow="", sortowanieListyProduktow="default";
+let allegroZamowienia = wczytajLS("artway_allegro_zamowienia_cache", []);
+let allegroOferty = wczytajLS("artway_allegro_oferty_cache", []);
+let allegroMapowania = wczytajLS("artway_allegro_mapowania_cache", {});
+let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null};
+let szukajAllegroZamowien="", szukajAllegroOfert="", filtrAllegroOfert="wszystkie";
 
 /* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
    Ustawienia sklepu, zamówienia i klienci są zapisywane na serwerze, więc są
@@ -1478,6 +1483,7 @@ function renderuj(){
       else if(t==="/admin") w.innerHTML = widokAdmin();
       else if(t==="/admin/zamowienia") w.innerHTML = widokAdminZamowienia();
       else if(t.startsWith("/admin/zamowienie/")) w.innerHTML = widokAdminZamowienie(decodeURIComponent(t.split("/")[3]||""));
+      else if(t==="/admin/allegro") w.innerHTML = widokAdminAllegro();
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
       else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn();
       else if(t==="/admin/agent-ai") w.innerHTML = widokAdminAgentAI();
@@ -2436,6 +2442,7 @@ const ETAPY_WYSYLKI = {
 };
 const MENU_ADMINA = [
   ["/admin","📊 Pulpit"], ["/admin/zamowienia","📦 Zamówienia"],
+  ["/admin/allegro","🟠 Allegro"],
   ["/admin/wysylki","🚚 Centrum wysyłek"],
   ["/admin/magazyn","🏬 Magazyn"],
   ["/admin/agent-ai","🤖 Agent AI"],
@@ -2448,6 +2455,7 @@ const MENU_ADMINA = [
 function adminSzkielet(aktywna, tresc){
   const powiadomienia = {
     "/admin/zamowienia": pobierzZamowienia().filter(z=>z.status==="nowe").length,
+    "/admin/allegro": Array.isArray(allegroZamowienia) ? allegroZamowienia.filter(z=>!["CANCELLED","READY_FOR_SHIPMENT","SENT","COMPLETED"].includes(String(z.status||z.fulfillmentStatus||"").toUpperCase())).length : 0,
     "/admin/wysylki": pobierzZamowienia().filter(z=>!["anulowane","dostarczone","zakończone"].includes(z.status)&&!z.wysylka?.numer).length,
     "/admin/magazyn": produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{const s=stanMagazynuId(p.id),prog=Number(ustawieniaMagazynuPelne().progNiski)||5;return s!==null&&s<=prog;}).length,
     "/admin/agent-ai": agentAIAnaliza().filter(x=>x.poziom!=="ok").length,
@@ -4267,7 +4275,6 @@ function widokAdminAgentAI(){
     </div>`:`<p class="order-detail-lead" style="margin-bottom:0">Brak zapisanych poleceń z panelu. Wpisz pierwsze polecenie powyżej.</p>`}
   </div>
   ${agentAIPlanOperacyjnyHTML(analiza)}
-  ${magazynTabelaOperacyjnaHTML({limit:120})}
   ${plan.length?`<div class="panel">
     <div class="order-section-head"><div><h2 style="margin-top:0">📦 Braki do aktywnych zamówień</h2><p class="order-detail-lead">Agent pokazuje tylko produkty, których rezerwacje z aktywnych zamówień są większe niż fizyczny stan magazynowy.</p></div><button class="btn" onclick="agentAIWykonaj('export-zakupy')">Pobierz pełny plan</button></div>
     <div class="ai-restock-grid">${plan.map(x=>`<div class="ai-restock-card ${x.poziom}">
@@ -4331,6 +4338,248 @@ function adminStatusyZamowienHTML(wszystkie){
     <button class="${filtrZamowien==="wszystkie"?"active":""}" onclick="filtrZamowien='wszystkie';renderuj()">Wszystkie <b>${ile("wszystkie")}</b></button>
     ${STATUSY.map(s=>`<button class="${filtrZamowien===s?"active":""}" onclick="filtrZamowien=${jsArg(s)};renderuj()">${esc(s)} <b>${ile(s)}</b></button>`).join("")}
   </div>`;
+}
+function allegroZapiszCache(){
+  zapiszLS("artway_allegro_zamowienia_cache", allegroZamowienia);
+  zapiszLS("artway_allegro_oferty_cache", allegroOferty);
+  zapiszLS("artway_allegro_mapowania_cache", allegroMapowania);
+}
+function allegroProduktIdDlaOferty(offerId){
+  const rec=(allegroMapowania||{})[String(offerId)];
+  if(rec && typeof rec==="object") return rec.productId ?? rec.produktId ?? rec.id ?? "";
+  return rec || "";
+}
+function allegroProduktDlaOferty(offerId){
+  const id=allegroProduktIdDlaOferty(offerId);
+  if(!id) return null;
+  return pobierzProduktAdmin(Number(id)) || produktyDoAdministracji().find(p=>String(p.id)===String(id)) || null;
+}
+function allegroKodProduktu(p){
+  return String(p?.sku||p?.kod||p?.externalId||p?.gtin||p?.id||"").trim();
+}
+function allegroEANProduktu(p){
+  return String(p?.gtin||p?.ean||p?.kodKreskowy||"").trim();
+}
+function allegroKodOferty(o){
+  return String(o?.externalId||o?.id||"").trim();
+}
+function allegroStatusHTML(){
+  if(!allegroStan.sprawdzono && allegroStan.ladowanie) return `<span class="lvl lvl-info">sprawdzam API</span>`;
+  if(allegroStan.connected) return `<span class="lvl lvl-ok">połączone</span>`;
+  if(allegroStan.configured) return `<span class="lvl lvl-ostrzezenie">wymaga autoryzacji</span>`;
+  return `<span class="lvl lvl-bad">brak konfiguracji</span>`;
+}
+function allegroLadujJesliTrzeba(){
+  if(allegroStan.sprawdzono || allegroStan.ladowanie) return;
+  allegroStan={...allegroStan,ladowanie:true};
+  setTimeout(()=>allegroWczytajDane(true),0);
+}
+async function allegroWczytajDane(cicho=false){
+  try{
+    const d=await chmura("allegro-data",{timeout:16000});
+    allegroStan={...(d.allegro||{}),sprawdzono:true,ladowanie:false,error:""};
+    allegroZamowienia=Array.isArray(d.orders)?d.orders:[];
+    allegroOferty=Array.isArray(d.offers)?d.offers:[];
+    allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:{};
+    allegroZapiszCache();
+    if(!cicho) toast("Dane Allegro odświeżone");
+  }catch(e){
+    allegroStan={...allegroStan,sprawdzono:true,ladowanie:false,error:e.message||String(e)};
+    if(!cicho) toast("⚠️ Allegro: "+allegroStan.error);
+  }
+  renderuj();
+}
+async function allegroPolacz(){
+  try{
+    const d=await chmura("allegro-auth-url",{timeout:12000});
+    if(!d.url) throw new Error("Serwer nie zwrócił linku autoryzacji Allegro");
+    location.href=d.url;
+  }catch(e){ toast("⚠️ Allegro: "+(e.message||e)); }
+}
+async function allegroSynchronizujZamowienia(){
+  try{
+    toast("Pobieram zamówienia Allegro…");
+    const d=await chmura("allegro-sync-orders",{method:"POST",body:{limit:100},timeout:30000});
+    allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
+    allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;
+    allegroZapiszCache();
+    toast(`Pobrano zamówienia Allegro: ${allegroZamowienia.length}`);
+    renderuj();
+  }catch(e){ toast("⚠️ Allegro zamówienia: "+(e.message||e)); }
+}
+async function allegroSynchronizujOferty(){
+  try{
+    toast("Pobieram oferty Allegro…");
+    const d=await chmura("allegro-sync-offers",{method:"POST",body:{limit:100},timeout:30000});
+    allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
+    allegroOferty=Array.isArray(d.offers)?d.offers:allegroOferty;
+    allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:allegroMapowania;
+    allegroZapiszCache();
+    toast(`Pobrano oferty Allegro: ${allegroOferty.length}`);
+    renderuj();
+  }catch(e){ toast("⚠️ Allegro oferty: "+(e.message||e)); }
+}
+async function allegroMapujOferte(offerId, productId){
+  try{
+    const id=String(productId||"").trim();
+    const d=await chmura(id?"allegro-map-offer":"allegro-unmap-offer",{method:"POST",body:{offerId,productId:id},timeout:12000});
+    allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:allegroMapowania;
+    allegroZapiszCache();
+    toast(id?"Oferta Allegro podpięta do produktu":"Mapowanie oferty usunięte");
+    renderuj();
+  }catch(e){ toast("⚠️ Mapowanie Allegro: "+(e.message||e)); }
+}
+async function allegroDodajProduktZOferty(offerId){
+  const o=allegroOferty.find(x=>String(x.id)===String(offerId));
+  if(!o){ toast("Nie znaleziono oferty Allegro"); return; }
+  const maxId=Math.max(0,...prodBazowe.map(p=>Number(p.id)||0),...produktyDodane.map(p=>Number(p.id)||0));
+  const id=maxId+1;
+  const cena=kwotaNum(o.price?.amount ?? o.price ?? 0);
+  const KOLORY=["#dbeafe","#e0e7ff","#fef3c7","#dcfce7","#fee2e2","#f3e8ff","#fce7f3","#ffedd5"];
+  const p={
+    id,
+    nazwa:o.name||`Oferta Allegro ${o.id}`,
+    kategoria:"Allegro",
+    cena,
+    opis:`Produkt utworzony z oferty Allegro ${o.id}. Uzupełnij opis, zdjęcia i kategorię docelową w Asortymencie.`,
+    ikona:"🟠",
+    badge:"Allegro",
+    kolor:KOLORY[id%KOLORY.length],
+    sku:String(o.externalId||o.id||"").trim(),
+    externalId:String(o.externalId||o.id||"").trim(),
+    allegroOfferId:String(o.id||"").trim()
+  };
+  produktyDodane.push(p);
+  zapiszLS("artway_produkty_dodane",produktyDodane);
+  zbudujProdukty();
+  await allegroMapujOferte(o.id,id);
+  toast("Produkt utworzony z Allegro i podpięty");
+}
+function allegroProduktSelectHTML(offerId){
+  const pid=String(allegroProduktIdDlaOferty(offerId)||"");
+  const lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).sort((a,b)=>String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl")).slice(0,700);
+  return `<select class="allegro-map-select" onchange="allegroMapujOferte(${jsArg(offerId)},this.value)">
+    <option value="">Nie podpięto</option>
+    ${lista.map(p=>`<option value="${esc(p.id)}" ${String(p.id)===pid?"selected":""}>${esc(allegroKodProduktu(p)||"ID "+p.id)} — ${esc(skrocTekst(p.nazwa,70))}</option>`).join("")}
+  </select>`;
+}
+function allegroWierszeZamowien(){
+  const rows=[];
+  for(const z of Array.isArray(allegroZamowienia)?allegroZamowienia:[]){
+    const items=Array.isArray(z.lineItems)&&z.lineItems.length?z.lineItems:[{offerId:"",offerName:"Brak pozycji",quantity:0}];
+    for(const it of items){
+      const prod=allegroProduktDlaOferty(it.offerId);
+      rows.push({z,it,prod,tekst:`${z.id||""} ${z.nr||""} ${z.email||""} ${z.buyerLogin||""} ${z.buyerName||""} ${z.phone||""} ${it.offerId||""} ${it.externalId||""} ${it.offerName||""} ${prod?.nazwa||""} ${prod?.sku||""} ${prod?.gtin||""}`.toLowerCase()});
+    }
+  }
+  return rows;
+}
+function allegroZamowieniaTabelaHTML(){
+  const q=String(szukajAllegroZamowien||"").toLowerCase().trim();
+  const rows=allegroWierszeZamowien().filter(r=>!q||r.tekst.includes(q)).slice(0,250);
+  return `<div class="panel allegro-section-panel">
+    <div class="order-section-head">
+      <div><h2 style="margin-top:0">📦 Zamówienia Allegro</h2><p class="order-detail-lead">Oddzielny rejestr Allegro. Pierwsze kolumny są magazynowe: kod, EAN/kod produktu, nazwa i ilość.</p></div>
+      <button class="btn" onclick="allegroSynchronizujZamowienia()">🔄 Synchronizuj zamówienia</button>
+    </div>
+    <div class="orders-toolbar allegro-toolbar">
+      <input placeholder="Szukaj: zamówienie, klient, telefon, oferta, produkt…" value="${esc(szukajAllegroZamowien)}" oninput="szukajAllegroZamowien=this.value.toLowerCase();renderuj()">
+      ${szukajAllegroZamowien?`<button class="btn ghost" onclick="szukajAllegroZamowien='';renderuj()">Wyczyść</button>`:""}
+    </div>
+    <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable allegro-orders-table">
+      <tr><th>Kod</th><th>EAN / kod prod.</th><th>Nazwa</th><th>Ilość potrzebna</th><th>Zamówienie Allegro</th><th>Klient</th><th>Status / płatność</th><th>Dostawa</th><th>Mapowanie</th></tr>
+      ${rows.map(({z,it,prod})=>`<tr class="${prod?"":"row-alert"}">
+        <td><b>${esc(allegroKodProduktu(prod)||it.externalId||it.offerId||"—")}</b><br><small>Oferta: ${esc(it.offerId||"—")}</small></td>
+        <td>${esc(allegroEANProduktu(prod)||it.externalId||"—")}</td>
+        <td><b>${esc(prod?.nazwa||it.offerName||"—")}</b><br><small>${prod?`Produkt sklepu ID ${esc(prod.id)}`:"Niepodpięta oferta Allegro"}</small></td>
+        <td><b>${esc(it.quantity||0)}</b> szt.</td>
+        <td><b>${esc(z.id||z.nr||"—")}</b><br><small>${esc(z.createdAt||z.updatedAt||"")}</small></td>
+        <td>${esc(z.buyerName||z.buyerLogin||z.email||"—")}<br><small>${esc(z.email||"")} ${z.phone?`• ${esc(z.phone)}`:""}</small></td>
+        <td><span class="lvl lvl-info">${esc(z.status||z.fulfillmentStatus||"—")}</span><br><small>${esc(z.paymentStatus||"")} • ${esc(z.total||"")}</small></td>
+        <td>${esc(z.deliveryMethod||"—")}<br><small>${esc(z.deliveryPoint||z.deliveryAddress||"")}</small></td>
+        <td>${allegroProduktSelectHTML(it.offerId||"")}</td>
+      </tr>`).join("") || `<tr><td colspan="9">Brak zamówień Allegro. Połącz konto i kliknij synchronizację.</td></tr>`}
+    </table></div>
+  </div>`;
+}
+function allegroOfertyTabelaHTML(){
+  const q=String(szukajAllegroOfert||"").toLowerCase().trim();
+  let rows=(Array.isArray(allegroOferty)?allegroOferty:[]).filter(o=>{
+    const prod=allegroProduktDlaOferty(o.id);
+    const mapped=!!prod;
+    if(filtrAllegroOfert==="podpiete"&&!mapped) return false;
+    if(filtrAllegroOfert==="niepodpiete"&&mapped) return false;
+    const txt=`${o.id||""} ${o.externalId||""} ${o.name||""} ${o.status||""} ${prod?.nazwa||""} ${prod?.sku||""}`.toLowerCase();
+    return !q||txt.includes(q);
+  }).slice(0,250);
+  return `<div class="panel allegro-section-panel">
+    <div class="order-section-head">
+      <div><h2 style="margin-top:0">🏷️ Oferty Allegro i podpinanie produktów</h2><p class="order-detail-lead">Jedna karta produktu w sklepie może mieć wiele ofert Allegro. Przy ofercie wybierasz produkt sklepu albo tworzysz nowy produkt z danych oferty.</p></div>
+      <button class="btn" onclick="allegroSynchronizujOferty()">🔄 Synchronizuj oferty</button>
+    </div>
+    <div class="orders-toolbar allegro-toolbar">
+      <input placeholder="Szukaj: oferta, nazwa, external ID, produkt…" value="${esc(szukajAllegroOfert)}" oninput="szukajAllegroOfert=this.value.toLowerCase();renderuj()">
+      <select onchange="filtrAllegroOfert=this.value;renderuj()">
+        <option value="wszystkie" ${filtrAllegroOfert==="wszystkie"?"selected":""}>Wszystkie oferty</option>
+        <option value="podpiete" ${filtrAllegroOfert==="podpiete"?"selected":""}>Tylko podpięte</option>
+        <option value="niepodpiete" ${filtrAllegroOfert==="niepodpiete"?"selected":""}>Tylko niepodpięte</option>
+      </select>
+    </div>
+    <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable allegro-offers-table">
+      <tr><th>Kod oferty</th><th>Nazwa Allegro</th><th>Cena</th><th>Stan Allegro</th><th>Status</th><th>Produkt sklepu</th><th>Akcje</th></tr>
+      ${rows.map(o=>{
+        const prod=allegroProduktDlaOferty(o.id);
+        return `<tr class="${prod?"":"row-alert"}">
+          <td><b>${esc(allegroKodOferty(o)||"—")}</b><br><small>ID: ${esc(o.id||"—")}</small></td>
+          <td><b>${esc(o.name||"—")}</b><br><small>${esc(o.categoryId?`Kategoria Allegro: ${o.categoryId}`:"")}</small></td>
+          <td>${esc(o.priceText||"—")}</td>
+          <td>${esc(o.stockAvailable??"—")}<br><small>sprzedano: ${esc(o.stockSold??"—")}</small></td>
+          <td><span class="lvl lvl-info">${esc(o.status||"—")}</span></td>
+          <td>${allegroProduktSelectHTML(o.id)}${prod?`<small class="allegro-linked-note">Podpięto: ${esc(prod.nazwa)}</small>`:""}</td>
+          <td><div class="warehouse-worktable-actions">
+            <button class="btn ghost" onclick="allegroDodajProduktZOferty(${jsArg(o.id)})">➕ Utwórz produkt</button>
+            <button class="btn ghost" onclick="window.open('https://allegro.pl/oferta/${encodeURIComponent(o.id)}','_blank','noopener')">Otwórz</button>
+          </div></td>
+        </tr>`;
+      }).join("") || `<tr><td colspan="7">Brak ofert Allegro. Połącz konto i kliknij synchronizację.</td></tr>`}
+    </table></div>
+  </div>`;
+}
+function widokAdminAllegro(){
+  allegroLadujJesliTrzeba();
+  const mapped=Object.keys(allegroMapowania||{}).length;
+  const niepodpiete=(allegroOferty||[]).filter(o=>!allegroProduktDlaOferty(o.id)).length;
+  return adminSzkielet("/admin/allegro", `
+  <div class="panel allegro-hero-panel">
+    <div class="orders-hero">
+      <div>
+        <span class="order-pro-label">Integracja marketplace</span>
+        <h1>🟠 Allegro API ${allegroStatusHTML()}</h1>
+        <p>Oddzielna obsługa zamówień Allegro, synchronizacja ofert i mapowanie ofert do tych samych produktów sklepu. Sekrety API są wyłącznie po stronie Netlify.</p>
+      </div>
+      <div class="diag-actions">
+        <button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro</button>
+        <button class="btn ghost" onclick="allegroWczytajDane()">📥 Odśwież dane</button>
+        <button class="btn ghost" onclick="window.open('https://salescenter.allegro.com/my-sales','_blank','noopener')">Otwórz Sales Center</button>
+      </div>
+    </div>
+    ${allegroStan.error?`<div class="backend-note" style="margin-top:.8rem;border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Allegro:</b> ${esc(allegroStan.error)}</div>`:""}
+    <div class="orders-stat-grid">
+      <div class="order-stat-card ${allegroStan.configured?"":"hot"}"><span>🔧</span><b>${allegroStan.configured?"OK":"BRAK"}</b><small>konfiguracja API</small></div>
+      <div class="order-stat-card ${allegroStan.connected?"":"hot"}"><span>🔐</span><b>${allegroStan.connected?"TAK":"NIE"}</b><small>autoryzacja OAuth</small></div>
+      <div class="order-stat-card hot"><span>📦</span><b>${(allegroZamowienia||[]).length}</b><small>zamówień Allegro</small></div>
+      <div class="order-stat-card"><span>🏷️</span><b>${(allegroOferty||[]).length}</b><small>ofert Allegro</small></div>
+      <div class="order-stat-card money"><span>🔗</span><b>${mapped}</b><small>podpiętych ofert</small></div>
+      <div class="order-stat-card ${niepodpiete?"hot":""}"><span>🧩</span><b>${niepodpiete}</b><small>ofert bez produktu</small></div>
+    </div>
+    <div class="allegro-config-note">
+      <b>Wymagane zmienne Netlify:</b> <code>ALLEGRO_CLIENT_ID</code>, <code>ALLEGRO_CLIENT_SECRET</code>. Opcjonalnie: <code>ALLEGRO_REDIRECT_URI</code>, <code>ALLEGRO_ENV</code>, <code>ALLEGRO_SCOPE</code>.
+      <span>Środowisko: ${esc(allegroStan.env||"production")} • ostatnia synchronizacja: ${esc(allegroStan.updated_at||"—")}</span>
+    </div>
+  </div>
+  ${allegroZamowieniaTabelaHTML()}
+  ${allegroOfertyTabelaHTML()}
+  `);
 }
 function alertDostepnosciZamowieniaHTML(z){
   const lista=Array.isArray(z?.dostepnoscDoPotwierdzenia)?z.dostepnoscDoPotwierdzenia:[];
@@ -4449,10 +4698,12 @@ function widokAdminZamowienia(){
       <div class="diag-actions">
         <button class="btn ghost" onclick="synchronizujBazeCentralna(true)">🔄 Synchronizuj</button>
         <button class="btn ghost" onclick="eksportujZamowienia()">📤 CSV</button>
+        <a class="btn ghost" href="#/admin/allegro">🟠 Allegro</a>
         <a class="btn" href="#/admin/wysylki">🚚 Centrum wysyłek</a>
       </div>
     </div>
     ${adminZamowieniaStatyHTML(wszystkie,zam)}
+    ${magazynTabelaOperacyjnaHTML({limit:220})}
     <div class="orders-toolbar">
       <input placeholder="Szukaj: nr, klient, e-mail, telefon, adres, tracking…" value="${esc(szukajZamowien)}" oninput="szukajZamowien=this.value.toLowerCase();renderuj()">
       <select onchange="filtrZamowien=this.value;renderuj()">
@@ -5314,7 +5565,6 @@ function widokAdminMagazyn(){
       </button>`).join(""):`<div class="warehouse-work-empty">✅ Brak pilnych prac magazynowych wynikających z aktywnych zamówień.</div>`}
     </div>
   </div>
-  ${magazynTabelaOperacyjnaHTML({limit:180})}
   <div class="panel warehouse-location-panel">
     <div class="order-section-head">
       <div>

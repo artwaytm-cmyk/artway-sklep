@@ -64,6 +64,15 @@ function odpowiedz(body, status = 200) {
     },
   });
 }
+function odpowiedzHtml(html, status = 200) {
+  return new Response(html, {
+    status,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
 
 function bezpiecznePorownanie(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
@@ -986,6 +995,201 @@ async function obsluzEmailePrzejsciaStatusu(stary, nowy) {
   return { sent: wyniki.some((x) => x.sent), configured: true, wyniki, powiadomienia: zapisany?.wysylka?.powiadomienia || [] };
 }
 
+// ─── ALLEGRO API (OAuth, zamówienia, oferty, mapowania) ───
+function allegroEnv() {
+  return String(process.env.ALLEGRO_ENV || 'production').trim().toLowerCase() === 'sandbox' ? 'sandbox' : 'production';
+}
+function allegroKonfiguracja(req) {
+  const env = allegroEnv();
+  const clientId = tekst(process.env.ALLEGRO_CLIENT_ID || '', 300).trim();
+  const clientSecret = tekst(process.env.ALLEGRO_CLIENT_SECRET || '', 500).trim();
+  const redirectUri = tekst(process.env.ALLEGRO_REDIRECT_URI || '', 1000).trim() || `${publicznyOrigin(req)}/api/store?action=allegro-callback`;
+  const scope = tekst(process.env.ALLEGRO_SCOPE || '', 1000).trim();
+  const authBaseUrl = env === 'sandbox' ? 'https://allegro.pl.allegrosandbox.pl' : 'https://allegro.pl';
+  const apiBaseUrl = env === 'sandbox' ? 'https://api.allegro.pl.allegrosandbox.pl' : 'https://api.allegro.pl';
+  const missingEnv = [];
+  if (!clientId) missingEnv.push('ALLEGRO_CLIENT_ID');
+  if (!clientSecret) missingEnv.push('ALLEGRO_CLIENT_SECRET');
+  return { env, clientId, clientSecret, redirectUri, scope, authBaseUrl, apiBaseUrl, configured: missingEnv.length === 0, missingEnv };
+}
+function allegroBasicAuth(c) {
+  return `Basic ${Buffer.from(`${c.clientId}:${c.clientSecret}`).toString('base64')}`;
+}
+async function allegroStatus(req) {
+  const c = allegroKonfiguracja(req);
+  const auth = await czytaj('allegro_auth', {});
+  return {
+    configured: c.configured,
+    connected: !!(auth && (auth.refresh_token || auth.access_token)),
+    env: c.env,
+    redirectUri: c.redirectUri,
+    missingEnv: c.missingEnv,
+    expires_at: auth?.expires_at || null,
+    account: auth?.account || '',
+    updated_at: auth?.updated_at || null,
+    requiredEnv: ['ALLEGRO_CLIENT_ID', 'ALLEGRO_CLIENT_SECRET'],
+    optionalEnv: ['ALLEGRO_REDIRECT_URI', 'ALLEGRO_ENV=production', 'ALLEGRO_SCOPE'],
+  };
+}
+function bledyAllegroTekst(dane, fallback) {
+  const errors = Array.isArray(dane?.errors) ? dane.errors : [];
+  const msg = errors.map((e) => [e.code || e.error, e.message, e.userMessage].filter(Boolean).join(': ')).filter(Boolean).join('; ');
+  return msg || dane?.error_description || dane?.message || fallback || 'Błąd Allegro';
+}
+async function allegroTokenRequest(req, params) {
+  const c = allegroKonfiguracja(req);
+  if (!c.configured) {
+    const blad = new Error('Allegro API nie jest skonfigurowane. Ustaw ALLEGRO_CLIENT_ID i ALLEGRO_CLIENT_SECRET w Netlify.');
+    blad.code = 'allegro_not_configured';
+    blad.status = 503;
+    blad.missingEnv = c.missingEnv;
+    throw blad;
+  }
+  const r = await fetch(`${c.authBaseUrl}/auth/oauth/token`, {
+    method: 'POST',
+    headers: {
+      'Authorization': allegroBasicAuth(c),
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json',
+      'User-Agent': 'Artway-TM/1.0 Netlify Function',
+    },
+    body: new URLSearchParams(params),
+  });
+  const textBody = await r.text();
+  let dane = {};
+  try { dane = textBody ? JSON.parse(textBody) : {}; } catch (e) { dane = { raw: textBody }; }
+  if (!r.ok) {
+    const blad = new Error(bledyAllegroTekst(dane, `Allegro OAuth HTTP ${r.status}`));
+    blad.status = r.status;
+    blad.code = dane.error || 'allegro_oauth_error';
+    blad.allegro = dane;
+    throw blad;
+  }
+  return {
+    ...dane,
+    env: c.env,
+    expires_at: Date.now() + (Math.max(60, Number(dane.expires_in) || 3600) * 1000),
+    updated_at: new Date().toISOString(),
+  };
+}
+async function allegroAccessToken(req) {
+  const c = allegroKonfiguracja(req);
+  if (!c.configured) {
+    const blad = new Error('Allegro API nie jest skonfigurowane. Ustaw ALLEGRO_CLIENT_ID i ALLEGRO_CLIENT_SECRET w Netlify.');
+    blad.code = 'allegro_not_configured';
+    blad.status = 503;
+    blad.missingEnv = c.missingEnv;
+    throw blad;
+  }
+  const auth = await czytaj('allegro_auth', {});
+  if (auth?.access_token && Number(auth.expires_at || 0) > Date.now() + 90000) return auth.access_token;
+  if (!auth?.refresh_token) {
+    const blad = new Error('Allegro nie jest autoryzowane. Kliknij „Połącz Allegro” w panelu admina.');
+    blad.code = 'allegro_not_connected';
+    blad.status = 401;
+    throw blad;
+  }
+  const odswiezony = await allegroTokenRequest(req, { grant_type: 'refresh_token', refresh_token: auth.refresh_token });
+  const zapis = { ...auth, ...odswiezony, refresh_token: odswiezony.refresh_token || auth.refresh_token };
+  await zapisz('allegro_auth', zapis);
+  return zapis.access_token;
+}
+async function allegroWywolaj(req, path, { method = 'GET', parameters = {}, bodyObj = null } = {}) {
+  const c = allegroKonfiguracja(req);
+  const token = await allegroAccessToken(req);
+  const apiUrl = new URL(path, c.apiBaseUrl);
+  for (const [k, v] of Object.entries(parameters || {})) if (v !== undefined && v !== null && v !== '') apiUrl.searchParams.set(k, String(v));
+  const headers = {
+    'Authorization': `Bearer ${token}`,
+    'Accept': 'application/vnd.allegro.public.v1+json',
+    'Accept-Language': 'pl-PL',
+    'User-Agent': 'Artway-TM/1.0 Netlify Function',
+  };
+  const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
+  if (body) headers['Content-Type'] = 'application/vnd.allegro.public.v1+json';
+  const r = await fetch(apiUrl.toString(), { method, headers, body });
+  const textBody = await r.text();
+  let dane = {};
+  try { dane = textBody ? JSON.parse(textBody) : {}; } catch (e) { dane = { raw: textBody }; }
+  if (!r.ok) {
+    const blad = new Error(bledyAllegroTekst(dane, `Allegro API HTTP ${r.status}`));
+    blad.status = r.status;
+    blad.code = dane.error || 'allegro_http_error';
+    blad.allegro = dane;
+    throw blad;
+  }
+  return dane;
+}
+function allegroKwotaText(raw) {
+  if (!raw) return '';
+  const amount = raw.amount ?? raw.value ?? raw;
+  const currency = raw.currency || 'PLN';
+  if (amount === '' || amount === null || amount === undefined) return '';
+  return `${String(amount).replace('.', ',')} ${currency}`;
+}
+function allegroNormalizujZamowienie(z) {
+  const buyer = z?.buyer || {};
+  const delivery = z?.delivery || {};
+  const address = delivery.address || {};
+  const pickup = delivery.pickupPoint || {};
+  const payment = z?.payment || {};
+  const invoice = z?.invoice || {};
+  const lineItems = Array.isArray(z?.lineItems) ? z.lineItems.map((it) => ({
+    id: tekst(it.id, 80),
+    offerId: tekst(it.offer?.id || it.offerId, 80),
+    externalId: tekst(it.offer?.external?.id || it.externalId || '', 160),
+    offerName: tekst(it.offer?.name || it.name, 300),
+    quantity: Number(it.quantity) || 0,
+    price: allegroKwotaText(it.price),
+    originalPrice: allegroKwotaText(it.originalPrice),
+    boughtAt: tekst(it.boughtAt, 80),
+  })) : [];
+  return {
+    id: tekst(z.id, 100),
+    nr: tekst(z.id, 100),
+    status: tekst(z.status || z.fulfillment?.status || '', 80),
+    fulfillmentStatus: tekst(z.fulfillment?.status || '', 80),
+    createdAt: tekst(z.createdAt || lineItems[0]?.boughtAt || '', 80),
+    updatedAt: tekst(z.updatedAt || '', 80),
+    buyerLogin: tekst(buyer.login, 200),
+    buyerName: tekst([buyer.firstName, buyer.lastName].filter(Boolean).join(' '), 250),
+    email: tekst(buyer.email, 300).trim().toLowerCase(),
+    phone: tekst(buyer.phoneNumber || address.phoneNumber, 80),
+    company: tekst(address.companyName || invoice.company?.name || '', 250),
+    deliveryMethod: tekst(delivery.method?.name || delivery.method || '', 250),
+    deliveryCost: allegroKwotaText(delivery.cost),
+    deliveryPoint: tekst(pickup.id || pickup.name || '', 160),
+    deliveryAddress: tekst([address.street, address.zipCode, address.city].filter(Boolean).join(', '), 500),
+    paymentStatus: tekst(payment.type || payment.provider || payment.finishedAt || '', 160),
+    total: allegroKwotaText(z.summary?.totalToPay || z.summary?.totalPrice || z.totalToPay),
+    invoiceRequired: !!invoice.required,
+    lineItems,
+    rawUpdatedAt: new Date().toISOString(),
+  };
+}
+function allegroNormalizujOferte(o) {
+  const price = o?.sellingMode?.price || o?.price || {};
+  const stock = o?.stock || {};
+  return {
+    id: tekst(o.id, 100),
+    name: tekst(o.name, 400),
+    externalId: tekst(o.external?.id || o.externalId || '', 160),
+    status: tekst(o.publication?.status || o.status || '', 80),
+    price: price?.amount || '',
+    priceText: allegroKwotaText(price),
+    stockAvailable: stock.available ?? '',
+    stockSold: stock.sold ?? '',
+    categoryId: tekst(o.category?.id || o.categoryId || '', 80),
+    productId: tekst(o.product?.id || o.productSet?.[0]?.product?.id || '', 120),
+    updatedAt: tekst(o.updatedAt || o.createdAt || '', 80),
+    rawUpdatedAt: new Date().toISOString(),
+  };
+}
+function allegroMapowaniaItems(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  return raw.items && typeof raw.items === 'object' ? raw.items : raw;
+}
+
 // ─── INPOST ShipX (przesyłki, etykiety, tracking) + Geowidget ───
 const INPOST_ENVY = new Set(['production', 'sandbox']);
 const INPOST_SENDING_METHODS = new Set(['parcel_locker', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
@@ -1616,6 +1820,7 @@ export default async (req) => {
         },
         email: emailPublicConfig(),
         inpost: inpostPublicConfig(),
+        allegro: await allegroStatus(req),
       });
     }
 
@@ -1887,6 +2092,114 @@ export default async (req) => {
         order: { nr: zPo.nr, status: zPo.status, platnoscStatus: zPo.platnoscStatus, paynow: zPo.paynow },
         powiadomienia: zPo?.wysylka?.powiadomienia || [],
       }, 201);
+    }
+
+    // ─── ALLEGRO: stan integracji i dane zapisane w backendzie (admin) ───
+    if (action === 'allegro-data') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const orders = await czytaj('allegro_orders', { items: [], updated_at: null });
+      const offers = await czytaj('allegro_offers', { items: [], updated_at: null });
+      const mappings = await czytaj('allegro_mappings', { items: {}, updated_at: null });
+      const status = await allegroStatus(req);
+      return odpowiedz({
+        ok: true,
+        allegro: { ...status, updated_at: orders.updated_at || offers.updated_at || status.updated_at || null },
+        orders: Array.isArray(orders.items) ? orders.items : [],
+        offers: Array.isArray(offers.items) ? offers.items : [],
+        mappings: allegroMapowaniaItems(mappings),
+      });
+    }
+
+    // ─── ALLEGRO: utworzenie linku OAuth (admin) ───
+    if (action === 'allegro-auth-url') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const c = allegroKonfiguracja(req);
+      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'Allegro API nie jest skonfigurowane. Ustaw ALLEGRO_CLIENT_ID i ALLEGRO_CLIENT_SECRET w Netlify.', code: 'allegro_not_configured', missingEnv: c.missingEnv }, 503);
+      const state = crypto.randomBytes(20).toString('hex');
+      await zapisz('allegro_oauth_state', { state, created_at: new Date().toISOString() });
+      const authUrl = new URL('/auth/oauth/authorize', c.authBaseUrl);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('client_id', c.clientId);
+      authUrl.searchParams.set('redirect_uri', c.redirectUri);
+      authUrl.searchParams.set('state', state);
+      if (c.scope) authUrl.searchParams.set('scope', c.scope);
+      return odpowiedz({ ok: true, configured: true, env: c.env, redirectUri: c.redirectUri, url: authUrl.toString() });
+    }
+
+    // ─── ALLEGRO: callback OAuth po zgodzie w Allegro ───
+    if (action === 'allegro-callback') {
+      const code = tekst(url.searchParams.get('code'), 2000).trim();
+      const state = tekst(url.searchParams.get('state'), 200).trim();
+      const err = tekst(url.searchParams.get('error') || url.searchParams.get('error_description'), 1000).trim();
+      if (err) return odpowiedzHtml(`<h1>Allegro — autoryzacja przerwana</h1><p>${err}</p><p><a href="/#/admin/allegro">Wróć do panelu Allegro</a></p>`, 400);
+      const zapisany = await czytaj('allegro_oauth_state', {});
+      if (!code || !state || state !== zapisany.state) return odpowiedzHtml('<h1>Allegro — nieprawidłowy callback</h1><p>Brakuje kodu albo stan autoryzacji jest niezgodny.</p><p><a href="/#/admin/allegro">Wróć do panelu Allegro</a></p>', 400);
+      const c = allegroKonfiguracja(req);
+      const token = await allegroTokenRequest(req, { grant_type: 'authorization_code', code, redirect_uri: c.redirectUri });
+      await zapisz('allegro_auth', token);
+      return odpowiedzHtml('<h1>Allegro połączone</h1><p>Konto Allegro zostało autoryzowane dla panelu Artway-TM. Możesz wrócić do panelu i uruchomić synchronizację zamówień oraz ofert.</p><p><a href="/#/admin/allegro">Wróć do panelu Allegro</a></p>');
+    }
+
+    // ─── ALLEGRO: synchronizacja zamówień (admin) ───
+    if (action === 'allegro-sync-orders') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const limit = Math.min(100, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 100)));
+      const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit, offset: 0 } });
+      const source = Array.isArray(dane.checkoutForms) ? dane.checkoutForms : (Array.isArray(dane.items) ? dane.items : []);
+      const items = source.map(allegroNormalizujZamowienie).filter((x) => x.id);
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length };
+      await zapisz('allegro_orders', rec);
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, updated_at: rec.updated_at });
+    }
+
+    // ─── ALLEGRO: synchronizacja ofert (admin) ───
+    if (action === 'allegro-sync-offers') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const limit = Math.min(100, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 100)));
+      let dane;
+      try {
+        dane = await allegroWywolaj(req, '/sale/offers', { parameters: { limit, offset: 0, 'publication.status': 'ACTIVE' } });
+      } catch (e) {
+        dane = await allegroWywolaj(req, '/sale/offers', { parameters: { limit, offset: 0 } });
+      }
+      const source = Array.isArray(dane.offers) ? dane.offers : (Array.isArray(dane.items) ? dane.items : []);
+      const items = source.map(allegroNormalizujOferte).filter((x) => x.id);
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length };
+      await zapisz('allegro_offers', rec);
+      const mappings = await czytaj('allegro_mappings', { items: {} });
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), offers: items, mappings: allegroMapowaniaItems(mappings), updated_at: rec.updated_at });
+    }
+
+    // ─── ALLEGRO: mapowanie oferty do produktu sklepu (admin) ───
+    if (action === 'allegro-map-offer') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const offerId = tekst(body.offerId, 100).trim();
+      const productId = tekst(body.productId, 100).trim();
+      if (!offerId || !productId) return odpowiedz({ ok: false, error: 'Brak offerId albo productId' }, 422);
+      const rec = await czytaj('allegro_mappings', { items: {} });
+      const items = allegroMapowaniaItems(rec);
+      items[offerId] = { offerId, productId, linked_at: new Date().toISOString(), operator: 'admin' };
+      await zapisz('allegro_mappings', { items, updated_at: new Date().toISOString() });
+      return odpowiedz({ ok: true, mappings: items });
+    }
+
+    if (action === 'allegro-unmap-offer') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const offerId = tekst(body.offerId, 100).trim();
+      if (!offerId) return odpowiedz({ ok: false, error: 'Brak offerId' }, 422);
+      const rec = await czytaj('allegro_mappings', { items: {} });
+      const items = allegroMapowaniaItems(rec);
+      delete items[offerId];
+      await zapisz('allegro_mappings', { items, updated_at: new Date().toISOString() });
+      return odpowiedz({ ok: true, mappings: items });
     }
 
     // ─── INPOST: konfiguracja (publiczny token Geowidget + status) ───
