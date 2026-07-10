@@ -829,7 +829,8 @@ function kontoMaRoleAdmin(email){
 }
 function jestAdmin(){ return !!sesja&&kontoMaRoleAdmin(sesja.email); }
 function odswiezUzytkownika(){
-  $("userBtn").textContent = sesja ? "👤 "+sesja.imie.split(" ")[0] : "👤 Zaloguj";
+  const nazwaSesji=sesja ? String(sesja.imie||sesja.login||sesja.email||"Konto").trim() : "";
+  $("userBtn").textContent = sesja ? "👤 "+(nazwaSesji.split(/\s+/)[0]||"Konto") : "👤 Zaloguj";
   $("userBtn").href = sesja ? "#/konto" : "#/logowanie";
   const widokKlienta=!jestAdmin();
   if($("favoritesBtn")) $("favoritesBtn").style.display=widokKlienta?"":"none";
@@ -3906,6 +3907,48 @@ function agentAIWykonaj(akcja){
   if(akcja==="kartoteka-domyslna") return wypelnijDomyslnaKartotekeMagazynu();
   if(akcja==="audyt-magazynu") return audytMagazynuAI();
 }
+function agentAIPriorytet(x){
+  if(x.poziom==="bad") return 1;
+  if(["wysylki","zatowarowanie","nadrezerwacje","dostepnosc"].includes(x.id)) return 2;
+  if(x.poziom==="warn") return 3;
+  return 9;
+}
+function agentAIOpisKroku(x){
+  const mapa={
+    dostepnosc:"Zweryfikuj dostępność pozycji powyżej limitu i wpisz decyzję przy zamówieniu.",
+    wysylki:"Uzupełnij dane InPost, wygeneruj etykietę i zapisz numer nadania.",
+    faktury:"Utwórz lub odśwież szkice FV dla zamówień firmowych.",
+    ceny:"Uzupełnij cenę przed sprzedażą, żeby klient nie złożył błędnego zamówienia.",
+    magazyn:"Sprawdź produkty z niskim stanem i zdecyduj, czy zamówić uzupełnienie.",
+    zatowarowanie:"Przygotuj zamówienie do producenta tylko pod realne braki aktywnych zamówień.",
+    nadrezerwacje:"Najpierw obsłuż nadrezerwacje — blokują kompletację zamówień.",
+    kartoteka:"Uzupełnij lokalizację, dostawcę, EAN i progi magazynowe.",
+    lokalizacje:"Utwórz brakujące lokalizacje w słowniku i przypisz je do produktów.",
+    pamiec:"Dodaj procedury, których agent ma pilnować przy kolejnych poleceniach.",
+    monitoring:"Zdecyduj, które produkty mają mieć kontrolowany stan, a które bez limitu.",
+    inwentaryzacja:"Potwierdź stan produktów bez świeżej inwentaryzacji.",
+    zdjecia:"Dodaj zdjęcia do produktów, które nadal używają samej ikony.",
+    integracje:"Sprawdź konfigurację bramki, poczty i wspólnej bazy."
+  };
+  return mapa[x.id]||"Otwórz wskazany moduł i wykonaj kontrolę.";
+}
+function agentAIPlanOperacyjnyHTML(analiza){
+  const zadania=analiza.filter(x=>x.poziom!=="ok").sort((a,b)=>agentAIPriorytet(a)-agentAIPriorytet(b)).slice(0,8);
+  const gotowe=analiza.filter(x=>x.poziom==="ok").length;
+  return `<div class="panel agent-ops-panel">
+    <div class="order-section-head">
+      <div><h2 style="margin-top:0">🧭 Plan operacyjny agenta</h2><p class="order-detail-lead">Najpierw rzeczy blokujące zamówienia, potem porządek magazynu i dane produktów.</p></div>
+      <span class="lvl ${zadania.length?"lvl-ostrzezenie":"lvl-ok"}">${zadania.length?`${zadania.length} aktywnych zadań`:"wszystko pod kontrolą"}</span>
+    </div>
+    <div class="agent-ops-grid">
+      ${zadania.length?zadania.map((x,i)=>`<div class="agent-ops-step ${x.poziom}">
+        <div class="agent-ops-no">${i+1}</div>
+        <div><b>${x.ikona} ${esc(x.tytul)}</b><p>${esc(agentAIOpisKroku(x))}</p><small>${esc(x.opis)}</small></div>
+        <div>${String(x.akcja||"").startsWith("#")?`<a class="btn ghost" href="${esc(x.akcja)}">Otwórz</a>`:x.akcja?`<button class="btn ghost" onclick="agentAIWykonaj(${jsArg(x.akcja)})">Wykonaj</button>`:`<span class="lvl lvl-info">info</span>`}</div>
+      </div>`).join(""):`<div class="agent-ops-empty">✅ Brak pilnych tematów. ${gotowe} kontroli ma status OK.</div>`}
+    </div>
+  </div>`;
+}
 function widokAdminAgentAI(){
   const analiza=agentAIAnaliza();
   const problemy=analiza.filter(x=>x.poziom!=="ok").length;
@@ -3985,6 +4028,7 @@ function widokAdminAgentAI(){
       </div>`).join("")}
     </div>`:`<p class="order-detail-lead" style="margin-bottom:0">Brak zapisanych poleceń z panelu. Wpisz pierwsze polecenie powyżej.</p>`}
   </div>
+  ${agentAIPlanOperacyjnyHTML(analiza)}
   ${plan.length?`<div class="panel">
     <div class="order-section-head"><div><h2 style="margin-top:0">📦 Braki do aktywnych zamówień</h2><p class="order-detail-lead">Agent pokazuje tylko produkty, których rezerwacje z aktywnych zamówień są większe niż fizyczny stan magazynowy.</p></div><button class="btn" onclick="agentAIWykonaj('export-zakupy')">Pobierz pełny plan</button></div>
     <div class="ai-restock-grid">${plan.map(x=>`<div class="ai-restock-card ${x.poziom}">
@@ -4967,6 +5011,12 @@ function widokAdminMagazyn(){
   const brakiKartoteki=wszystkie.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
   const lokalizacje=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(wszystkie);
   const pozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK" && !magazynLokalizacjaPoKodzie(k));
+  const lokDoKompletacji=[...new Set(pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).flatMap(z=>pozycjeZamowieniaMagazyn(z).map(p=>magazynMetaProduktu(p.id).lokalizacja||"BRAK")))].filter(Boolean);
+  const pracaMagazynu=[
+    ...nadrezerwacje.slice(0,4).map(p=>({lvl:"bad",ico:"🚨",tytul:p.nazwa,opis:`Nadrezerwacja: dostępne ${dostepneSztukiMagazynu(p,rez)} szt., rezerwacje ${rez[p.id]||0}.`,akcja:"dozamowienia"})),
+    ...planZakupu.slice(0,4).map(x=>({lvl:"warn",ico:"📦",tytul:x.produkt.nazwa,opis:`Do zamówienia: ${x.ilosc} szt. • ${x.meta.dostawca||"brak dostawcy"} • ${x.meta.lokalizacja||"brak lokalizacji"}`,akcja:"dozamowienia"})),
+    ...brakiKartoteki.slice(0,4).map(p=>({lvl:"info",ico:"🗂️",tytul:p.nazwa,opis:`Uzupełnij kartotekę: ${!magazynMetaProduktu(p.id).lokalizacja?"brak lokalizacji ":""}${!magazynMetaProduktu(p.id).dostawca?"brak dostawcy":""}.`,akcja:"bezlokalizacji"}))
+  ].slice(0,8);
   const lista=filtrujProduktyMagazynu(wszystkie,rez,spr);
   const liczbaStron=Math.max(1,Math.ceil(lista.length/magazynNaStronie));
   stronaMagazynu=Math.min(Math.max(1,stronaMagazynu),liczbaStron);
@@ -4997,6 +5047,32 @@ function widokAdminMagazyn(){
       <button class="order-stat-card stat-filter ${nadrezerwacje.length?"hot":""} ${filtrMagazynu==="nadrezerwacja"?"active":""}" type="button" onclick="ustawFiltrMagazynu('nadrezerwacja','dostepne')"><span>🚨</span><b>${nadrezerwacje.length}</b><small>nadrezerwacje</small></button>
       <button class="order-stat-card stat-filter ${brakiKartoteki.length?"hot":""} ${filtrMagazynu==="bezlokalizacji"||filtrMagazynu==="bezdostawcy"?"active":""}" type="button" onclick="ustawFiltrMagazynu('bezlokalizacji','nazwa')"><span>🗂️</span><b>${brakiKartoteki.length}</b><small>braki kartoteki</small></button>
       <button class="order-stat-card stat-filter ${pozaSlownikiem.length?"hot":""}" type="button" onclick="document.getElementById('warehouseLocationForm')?.scrollIntoView({behavior:'smooth',block:'center'})"><span>🗺️</span><b>${lokalizacje.length}</b><small>lokalizacji w słowniku</small></button>
+    </div>
+  </div>
+  <div class="panel warehouse-ops-panel">
+    <div class="order-section-head">
+      <div>
+        <h2 style="margin-top:0">🧭 Operacje magazynu dzisiaj</h2>
+        <p class="order-detail-lead">Kolejka pracy pod aktywne zamówienia: najpierw nadrezerwacje, potem braki i kartoteka.</p>
+      </div>
+      <div class="diag-actions" style="margin-top:0"><button class="btn ghost" onclick="agentAIWstawKomende('przygotuj zamówienie do producenta');location.hash='#/admin/agent-ai'">Zapytaj agenta</button></div>
+    </div>
+    <div class="warehouse-ops-grid">
+      <div class="warehouse-ops-summary">
+        <span><b>${lokDoKompletacji.length}</b><small>lokalizacji do przejścia</small></span>
+        <span><b>${planZakupu.length}</b><small>pozycji brakujących do zamówień</small></span>
+        <span><b>${brakiKartoteki.length}</b><small>braków kartoteki</small></span>
+        <span><b>${nadrezerwacje.length}</b><small>nadrezerwacji</small></span>
+      </div>
+      <div class="warehouse-pick-route">
+        <b>Trasa kompletacji</b>
+        <p>${lokDoKompletacji.length?lokDoKompletacji.map(k=>`<span>${esc(nazwaLokalizacjiMagazynu(k))}</span>`).join(""):`<span>Brak aktywnych lokalizacji w zamówieniach</span>`}</p>
+      </div>
+    </div>
+    <div class="warehouse-work-list">
+      ${pracaMagazynu.length?pracaMagazynu.map(x=>`<button class="warehouse-work-item ${x.lvl}" onclick="ustawFiltrMagazynu(${jsArg(x.akcja||"wszystkie")},'ryzyko')">
+        <span>${x.ico}</span><b>${esc(x.tytul)}</b><small>${esc(x.opis)}</small>
+      </button>`).join(""):`<div class="warehouse-work-empty">✅ Brak pilnych prac magazynowych wynikających z aktywnych zamówień.</div>`}
     </div>
   </div>
   <div class="panel warehouse-location-panel">
