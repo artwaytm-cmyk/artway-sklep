@@ -226,8 +226,10 @@ let dostepnoscProduktow = wczytajLS("artway_dostepnosc", {}); // status sprzeda�
 let ruchyMagazynowe = wczytajLS("artway_ruchy_magazynowe", []); // historia przyjęć, korekt i sprzedaży
 let ustawieniaMagazynu = wczytajLS("artway_magazyn_ustawienia", {});
 let magazynProdukty = wczytajLS("artway_magazyn_produkty", {}); // kartoteka magazynowa per produkt: lokalizacja, dostawca, progi i lead time
+let magazynLokalizacje = wczytajLS("artway_magazyn_lokalizacje", []); // słownik lokalizacji: regały, strefy, półki, stanowiska
 let szkiceFaktur = wczytajLS("artway_faktury_szkice", []); // przygotowane dokumenty pod przyszłą integrację inFakt
 let agentAIHistoria = wczytajLS("artway_agent_ai_historia", []); // audyty i akcje agenta administratora
+let agentAIPamiec = wczytajLS("artway_agent_ai_pamiec", []); // zapamiętane procedury, reguły i notatki operacyjne agenta
 let koszDodanych = wczytajLS("artway_kosz_dodane", []); // kosz: usunięte produkty własne (można przywrócić)
 let koszMeta = wczytajLS("artway_kosz_meta", {});      // id → data usunięcia i typ; automatyczne czyszczenie po 30 dniach
 let produktyDefinitywne = wczytajLS("artway_produkty_definitywne", []); // bazowe produkty usunięte po okresie kosza
@@ -251,7 +253,7 @@ let frazaListyProduktow="", sortowanieListyProduktow="default";
    na pamięci przeglądarki (localStorage) jak dotychczas. */
 const CHMURA_URL = "/.netlify/functions/store";
 const CHMURA_AUTO_SYNC_MS = 60000;
-const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_faktury_szkice","artway_agent_ai_historia","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
 let chmuraToken = (function(){ try{ return JSON.parse(localStorage.getItem("artway_chmura_token"))||""; }catch(e){ return ""; } })();
 let chmuraStan = {dostepna:false, sprawdzono:false, admin:false, rev:0, updated_at:null, error:"", ostatniZapis:0};
 let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z serwera
@@ -332,8 +334,10 @@ function zbierzWspolneUstawienia(){
     artway_ruchy_magazynowe: ruchyMagazynowe,
     artway_magazyn_ustawienia: ustawieniaMagazynu,
     artway_magazyn_produkty: magazynProdukty,
+    artway_magazyn_lokalizacje: magazynLokalizacje,
     artway_faktury_szkice: szkiceFaktur,
     artway_agent_ai_historia: agentAIHistoria,
+    artway_agent_ai_pamiec: agentAIPamiec,
     artway_opinie: opinie,
     artway_kosz_dodane: koszDodanych,
     artway_kosz_meta: koszMeta,
@@ -353,7 +357,9 @@ function nalozWspolneUstawienia(dane){
       artway_stany:(v)=>{stanyProduktow=v;}, artway_dostepnosc:(v)=>{dostepnoscProduktow=(v&&typeof v==="object")?v:{};},
       artway_ruchy_magazynowe:(v)=>{ruchyMagazynowe=Array.isArray(v)?v:[];},
       artway_magazyn_ustawienia:(v)=>{ustawieniaMagazynu=(v&&typeof v==="object")?v:{};}, artway_magazyn_produkty:(v)=>{magazynProdukty=(v&&typeof v==="object")?v:{};},
+      artway_magazyn_lokalizacje:(v)=>{magazynLokalizacje=Array.isArray(v)?v:[];},
       artway_faktury_szkice:(v)=>{szkiceFaktur=Array.isArray(v)?v:[];}, artway_agent_ai_historia:(v)=>{agentAIHistoria=Array.isArray(v)?v:[];},
+      artway_agent_ai_pamiec:(v)=>{agentAIPamiec=Array.isArray(v)?v:[];},
       artway_opinie:(v)=>{opinie=v;},
       artway_kosz_dodane:(v)=>{koszDodanych=v;}, artway_kosz_meta:(v)=>{koszMeta=v;},
     };
@@ -1145,6 +1151,103 @@ function zapiszMagazynMeta(id, meta){
   else delete magazynProdukty[key];
   zapiszLS("artway_magazyn_produkty",magazynProdukty);
   return czysty;
+}
+function kodLokalizacjiMagazynu(v=""){
+  const mapa={"ą":"a","ć":"c","ę":"e","ł":"l","ń":"n","ó":"o","ś":"s","ź":"z","ż":"z"};
+  return String(v||"").trim().toLowerCase()
+    .replace(/[ąćęłńóśźż]/g,m=>mapa[m]||m)
+    .toUpperCase()
+    .replace(/[^A-Z0-9._/-]+/g,"-")
+    .replace(/-+/g,"-")
+    .replace(/^-|-$/g,"")
+    .slice(0,40);
+}
+function magazynLokalizacjeAktywne(){
+  const lista=Array.isArray(magazynLokalizacje)?magazynLokalizacje:[];
+  return lista.filter(l=>l&&l.aktywna!==false).sort((a,b)=>(Number(a.priorytet)||9999)-(Number(b.priorytet)||9999)||String(a.kod||"").localeCompare(String(b.kod||""),"pl"));
+}
+function magazynLokalizacjaPoKodzie(kod){
+  const k=kodLokalizacjiMagazynu(kod);
+  return (Array.isArray(magazynLokalizacje)?magazynLokalizacje:[]).find(l=>kodLokalizacjiMagazynu(l.kod)===k)||null;
+}
+function nazwaLokalizacjiMagazynu(kod){
+  const l=magazynLokalizacjaPoKodzie(kod);
+  return l?`${l.kod}${l.nazwa?` — ${l.nazwa}`:""}`:String(kod||"");
+}
+function selectLokalizacjiMagazynu(value=""){
+  const v=String(value||"").trim(), aktywne=magazynLokalizacjeAktywne();
+  return `<select name="lokalizacja">
+    <option value="" ${!v?"selected":""}>— brak lokalizacji —</option>
+    ${aktywne.map(l=>`<option value="${esc(l.kod)}" ${v===l.kod?"selected":""}>${esc(l.kod)}${l.nazwa?` — ${esc(l.nazwa)}`:""}${l.strefa?` (${esc(l.strefa)})`:""}</option>`).join("")}
+    ${v&&!aktywne.some(l=>l.kod===v)?`<option value="${esc(v)}" selected>${esc(v)} — spoza słownika</option>`:""}
+  </select>`;
+}
+function statystykiLokalizacji(produktyLista=produktyDoAdministracji()){
+  const rez=rezerwacjeMagazynowe(), mapa={};
+  produktyLista.filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
+    const meta=magazynMetaProduktu(p.id), kod=String(meta.lokalizacja||"").trim()||"BRAK";
+    const stan=stanMagazynuId(p.id), rezerwacje=Number(rez[p.id]||0);
+    const rec=mapa[kod]||(mapa[kod]={kod,produkty:0,sztuki:0,rezerwacje:0,wartosc:0,brakiKartoteki:0});
+    rec.produkty++;
+    if(stan!==null){ rec.sztuki+=stan; rec.wartosc+=stan*kwotaNum(p.cena); }
+    rec.rezerwacje+=rezerwacje;
+    if(!meta.dostawca||!meta.lokalizacja) rec.brakiKartoteki++;
+  });
+  return mapa;
+}
+function zapiszLokalizacjeMagazynu(e){
+  e.preventDefault();
+  const f=new FormData(e.target);
+  const kod=kodLokalizacjiMagazynu(f.get("kod"));
+  if(!kod){ toast("Podaj kod lokalizacji, np. R1-P2"); return false; }
+  const teraz=new Date().toISOString(), istnieje=magazynLokalizacjaPoKodzie(kod);
+  const rec={
+    id:istnieje?.id||("LOC-"+Date.now().toString(36)),
+    kod,
+    nazwa:String(f.get("nazwa")||"").trim(),
+    typ:String(f.get("typ")||"regał").trim(),
+    strefa:String(f.get("strefa")||"").trim(),
+    pojemnosc:intNieujemny(f.get("pojemnosc"),0),
+    priorytet:intNieujemny(f.get("priorytet"),999),
+    uwagi:String(f.get("uwagi")||"").trim(),
+    aktywna:true,
+    utworzono:istnieje?.utworzono||teraz,
+    aktualizacja:teraz,
+    operator:sesja?.email||"administrator"
+  };
+  const bez=(Array.isArray(magazynLokalizacje)?magazynLokalizacje:[]).filter(l=>kodLokalizacjiMagazynu(l.kod)!==kod);
+  magazynLokalizacje=[rec,...bez].slice(0,1000);
+  zapiszLS("artway_magazyn_lokalizacje",magazynLokalizacje);
+  zapiszHistorieAgenta("lokalizacja",`${istnieje?"Zaktualizowano":"Utworzono"} lokalizację magazynową ${kod}`,{lokalizacja:rec});
+  toast(`${istnieje?"Zaktualizowano":"Utworzono"} lokalizację ${kod} ✅`);
+  e.target.reset();
+  renderuj();
+  return false;
+}
+function edytujLokalizacjeMagazynu(kod){
+  const l=magazynLokalizacjaPoKodzie(kod);
+  if(!l){ toast("Nie znaleziono lokalizacji"); return; }
+  const form=$("warehouseLocationForm");
+  if(!form) return;
+  ["kod","nazwa","typ","strefa","pojemnosc","priorytet","uwagi"].forEach(k=>{ if(form.elements[k]) form.elements[k].value=l[k]??""; });
+  form.scrollIntoView({behavior:"smooth",block:"center"});
+  form.elements.kod?.focus();
+}
+function usunLokalizacjeMagazynu(kod){
+  const k=kodLokalizacjiMagazynu(kod), stat=statystykiLokalizacji()[k];
+  const msg=stat&&stat.produkty?`Lokalizacja ${k} ma przypisane ${stat.produkty} produktów. Ukryć ją w słowniku? Przypisania przy produktach zostaną jako tekst.`:`Ukryć lokalizację ${k}?`;
+  if(!confirm(msg)) return;
+  magazynLokalizacje=(Array.isArray(magazynLokalizacje)?magazynLokalizacje:[]).map(l=>kodLokalizacjiMagazynu(l.kod)===k?{...l,aktywna:false,aktualizacja:new Date().toISOString()}:l);
+  zapiszLS("artway_magazyn_lokalizacje",magazynLokalizacje);
+  zapiszHistorieAgenta("lokalizacja",`Ukryto lokalizację magazynową ${k}`,{kod:k});
+  toast(`Ukryto lokalizację ${k}`);
+  renderuj();
+}
+function ustawLokalizacjeProduktu(id,kod){
+  const meta=magazynMetaProduktu(id);
+  zapiszMagazynMeta(id,{...meta,lokalizacja:String(kod||"").trim()});
+  toast("Lokalizacja produktu zapisana ✅");
+  renderuj();
 }
 function zapiszKartotekeMagazynu(e,id){
   e.preventDefault();
@@ -3497,6 +3600,50 @@ function agentAIWytnijProdukt(n){
   ["ile mamy","ile jest","jaki stan","stan produktu","sprawdz produkt","sprawdz","znajdz","pokaz","czy mamy","gdzie lezy","gdzie jest","lokalizacja","produkt","towar","sku","kod","na magazynie","w magazynie","w sklepie","mi","prosze"].forEach(f=>{q=q.replaceAll(` ${f} `," ");});
   return q.replace(/\s+/g," ").trim();
 }
+function agentAIZapiszPamiec(tresc="", meta={}){
+  const czysta=String(tresc||"").trim();
+  if(!czysta) return null;
+  let wyzwalacz=String(meta.wyzwalacz||"").trim(), akcja=String(meta.akcja||czysta).trim();
+  const m=czysta.match(/^(?:gdy|kiedy)\s+(?:napisze|napiszę|powiem|wpisze|wpiszę)\s+["„]?(.+?)["”]?\s*(?:to|->|=>|:)\s*(.+)$/i) || czysta.match(/^(.+?)\s*(?:->|=>)\s*(.+)$/);
+  if(m){ wyzwalacz=m[1].trim(); akcja=m[2].trim(); }
+  const rec={id:"MEM-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,6),tresc:czysta,wyzwalacz,akcja,typ:meta.typ||"procedura",tagi:Array.isArray(meta.tagi)?meta.tagi:[],data:new Date().toISOString(),dataTxt:new Date().toLocaleString("pl-PL"),operator:sesja?.email||"administrator"};
+  agentAIPamiec=[rec,...(Array.isArray(agentAIPamiec)?agentAIPamiec:[])].slice(0,500);
+  zapiszLS("artway_agent_ai_pamiec",agentAIPamiec);
+  zapiszHistorieAgenta("pamięć",`Agent zapamiętał: ${skrocTekst(czysta,120)}`,{pamiec:rec});
+  return rec;
+}
+function agentAIWytnijPamiec(raw=""){
+  return String(raw||"").replace(/^\s*(zapamietaj|zapamiętaj|naucz sie|naucz się|dodaj do pamieci|dodaj do pamięci|procedura)\s*[:,-]?\s*/i,"").trim();
+}
+function agentAIUsunPamiec(id){
+  const przed=(agentAIPamiec||[]).length;
+  agentAIPamiec=(agentAIPamiec||[]).filter(x=>x.id!==id);
+  zapiszLS("artway_agent_ai_pamiec",agentAIPamiec);
+  if(agentAIPamiec.length!==przed){ zapiszHistorieAgenta("pamięć","Usunięto wpis pamięci agenta",{id}); toast("Usunięto wpis pamięci"); renderuj(); }
+}
+function agentAIPamiecTekst(limit=12){
+  const lista=(agentAIPamiec||[]).slice(0,limit);
+  if(!lista.length) return "Pamięć agenta jest pusta. Napisz np. „zapamiętaj: przy niskim stanie najpierw sprawdzamy dostawcę Pinkfrog”.";
+  return ["🧠 Pamięć/procedury agenta:",...lista.map((x,i)=>`• ${i+1}. ${x.wyzwalacz?`Gdy: ${x.wyzwalacz} → `:""}${x.akcja||x.tresc} (${x.dataTxt||""})`)].join("\n");
+}
+function agentAIZnajdzPamiecDlaPolecenia(tekst=""){
+  const n=agentAINormalizuj(tekst), slowa=n.split(" ").filter(w=>w.length>2);
+  return (agentAIPamiec||[]).filter(x=>{
+    const wyz=agentAINormalizuj(x.wyzwalacz||"");
+    const hay=agentAINormalizuj([x.wyzwalacz,x.akcja,x.tresc].filter(Boolean).join(" "));
+    if(wyz && (n.includes(wyz)||wyz.includes(n))) return true;
+    const trafienia=slowa.filter(w=>hay.includes(w)).length;
+    return slowa.length>=2 && trafienia>=Math.min(3,slowa.length);
+  }).slice(0,5);
+}
+function agentAILokalizacjeTekst(){
+  const stat=statystykiLokalizacji(), aktywne=magazynLokalizacjeAktywne();
+  if(!aktywne.length) return "Nie ma jeszcze utworzonych lokalizacji magazynowych. Utwórz je w Magazyn → Lokalizacje albo napisz: „utwórz lokalizację R1-P1”.";
+  return ["🗺️ Lokalizacje magazynu:",...aktywne.map(l=>{
+    const s=stat[l.kod]||{produkty:0,sztuki:0,rezerwacje:0,wartosc:0};
+    return `• ${l.kod}${l.nazwa?` — ${l.nazwa}`:""}; typ: ${l.typ||"—"}; strefa: ${l.strefa||"—"}; produkty: ${s.produkty}; sztuki: ${s.sztuki}; rezerwacje: ${s.rezerwacje}; wartość: ${zl(s.wartosc)}`;
+  })].join("\n");
+}
 function agentAIRozpoznajPolecenie(tekst=""){
   const raw=String(tekst||"").trim(), n=agentAINormalizuj(raw);
   if(!n) return {typ:"pomoc",raw,confidence:1};
@@ -3511,6 +3658,13 @@ function agentAIRozpoznajPolecenie(tekst=""){
     if(["/sprawdz","/check"].includes(slash)) return {typ:"sprawdz",raw,confidence:1};
   }
   if(agentAIMa(n,["pomoc","co potrafisz","jakie polecenia","co mozesz","instrukcja"])) return {typ:"pomoc",raw,confidence:.95};
+  if(agentAIMa(n,["zapamietaj","zapamiętaj","naucz sie","naucz się","dodaj do pamieci","dodaj do pamięci","procedura:"])) return {typ:"pamiec-zapis",tresc:agentAIWytnijPamiec(raw),raw,confidence:.95};
+  if(agentAIMa(n,["pokaz pamiec","pokaż pamięć","co pamietasz","co pamiętasz","lista procedur","pokaz procedury","pokaż procedury"])) return {typ:"pamiec-lista",raw,confidence:.95};
+  if(agentAIMa(n,["pokaz lokalizacje","pokaż lokalizacje","lista lokalizacji","lokalizacje magazynu","mapa magazynu"])) return {typ:"lokalizacje",raw,confidence:.9};
+  if(agentAIMa(n,["utworz lokalizacje","utwórz lokalizację","dodaj lokalizacje","dodaj lokalizację"])){
+    const kod=kodLokalizacjiMagazynu(n.replace(/.*(?:utworz|utworzz|utwórz|dodaj)\s+lokalizacj[eaęi]\s*/,"").split(" ")[0]||"");
+    return {typ:"lokalizacja-dodaj",kod,raw,confidence:.82};
+  }
   if(agentAIMa(n,["synchronizuj","synchronizacja","odswiez baze","odswiez dane","polacz baze","zapisz na serwerze"])) return {typ:"sync",raw,confidence:.95};
   if(agentAIMa(n,["utworz szkice fv","stworz szkice fv","brakujace szkice","faktury","infakt"])) return {typ:"faktury",raw,confidence:.9};
   if(agentAIMa(n,["eksport magazynu","pobierz magazyn","csv magazynu"])) return {typ:"export-magazyn",raw,confidence:.9};
@@ -3553,7 +3707,7 @@ function agentAIProduktTekst(fraza=""){
   return ["🔎 Produkty znalezione:",...lista.map(p=>{
     const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), dost=stan===null?null:stan-r, meta=magazynMetaProduktu(p.id);
     const dostepnosc=produktOznaczonyNiedostepny(p)?"wyłączony ze sprzedaży":"dostępny w sklepie";
-    return `• ${p.nazwa} (${p.sku||"ID "+p.id}) — stan: ${stan===null?"bez limitu":stan+" szt."}, rezerwacje: ${r}, dostępne po rezerwacjach: ${dost===null?"bez limitu":dost+" szt."}, sprzedaż: ${dostepnosc}, cena: ${zl(p.cena)}, lokalizacja: ${meta.lokalizacja||"—"}, dostawca: ${meta.dostawca||"—"}`;
+    return `• ${p.nazwa} (${p.sku||"ID "+p.id}) — stan: ${stan===null?"bez limitu":stan+" szt."}, rezerwacje: ${r}, dostępne po rezerwacjach: ${dost===null?"bez limitu":dost+" szt."}, sprzedaż: ${dostepnosc}, cena: ${zl(p.cena)}, lokalizacja: ${meta.lokalizacja?nazwaLokalizacjiMagazynu(meta.lokalizacja):"—"}, dostawca: ${meta.dostawca||"—"}`;
   })].join("\n");
 }
 function agentAIBrakiTekst(limit=12){
@@ -3574,7 +3728,7 @@ function agentAIStatusTekst(){
   const analiza=agentAIAnaliza();
   const problemy=analiza.filter(x=>x.poziom!=="ok");
   const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
-  return [`🤖 Status agenta/sklepu: ${score}%`,`${problemy.length} tematów wymaga kontroli.`,`Baza: ${chmuraStan.admin?"połączona":"wymaga hasła/połączenia"} • e-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"}`,problemy.length?`\nNajważniejsze:\n${problemy.slice(0,8).map(x=>`• ${x.tytul}: ${x.opis}`).join("\n")}`:"\nBrak pilnych problemów z listy kontroli."].join("\n");
+  return [`🤖 Status agenta/sklepu: ${score}%`,`${problemy.length} tematów wymaga kontroli.`,`Baza: ${chmuraStan.admin?"połączona":"wymaga hasła/połączenia"} • e-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"} • pamięć: ${(agentAIPamiec||[]).length} • lokalizacje: ${magazynLokalizacjeAktywne().length}`,problemy.length?`\nNajważniejsze:\n${problemy.slice(0,8).map(x=>`• ${x.tytul}: ${x.opis}`).join("\n")}`:"\nBrak pilnych problemów z listy kontroli."].join("\n");
 }
 function agentAIMagazynTekst(){
   const produktyAdmin=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
@@ -3612,7 +3766,24 @@ async function agentAIWykonajPolecenie(tekst=""){
   let odpowiedz="";
   try{
     if(intent.typ==="pomoc"){
-      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź czy wpadło nowe zlecenie","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• ile mamy szachy?","• synchronizuj bazę","• utwórz brakujące szkice FV"].join("\n");
+      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź czy wpadło nowe zlecenie","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę Pinkfrog","• pokaż pamięć","• utwórz lokalizację R1-P1","• pokaż lokalizacje","• synchronizuj bazę","• utwórz brakujące szkice FV"].join("\n");
+    }else if(intent.typ==="pamiec-zapis"){
+      const rec=agentAIZapiszPamiec(intent.tresc||"");
+      odpowiedz=rec?`Zapamiętałem na przyszłość: ${rec.wyzwalacz?`gdy „${rec.wyzwalacz}” → `:""}${rec.akcja}`:"Nie podałeś treści do zapamiętania. Napisz np. „zapamiętaj: przy brakach najpierw sprawdź dostawcę”.";
+    }else if(intent.typ==="pamiec-lista"){
+      odpowiedz=agentAIPamiecTekst();
+    }else if(intent.typ==="lokalizacje"){
+      odpowiedz=agentAILokalizacjeTekst();
+    }else if(intent.typ==="lokalizacja-dodaj"){
+      if(!intent.kod){
+        odpowiedz="Podaj kod lokalizacji, np. „utwórz lokalizację R1-P1”.";
+      }else if(magazynLokalizacjaPoKodzie(intent.kod)){
+        odpowiedz=`Lokalizacja ${intent.kod} już istnieje. Możesz ją edytować w Magazyn → Lokalizacje.`;
+      }else{
+        magazynLokalizacje=[{id:"LOC-"+Date.now().toString(36),kod:intent.kod,nazwa:"",typ:"regał",strefa:"",pojemnosc:0,priorytet:999,uwagi:"Utworzone przez Agenta AI",aktywna:true,utworzono:new Date().toISOString(),aktualizacja:new Date().toISOString(),operator:sesja?.email||"administrator"},...(Array.isArray(magazynLokalizacje)?magazynLokalizacje:[])].slice(0,1000);
+        zapiszLS("artway_magazyn_lokalizacje",magazynLokalizacje);
+        odpowiedz=`Utworzyłem lokalizację ${intent.kod}. Uzupełnij nazwę/strefę/pojemność w Magazyn → Lokalizacje.`;
+      }
     }else if(intent.typ==="sync"){
       await synchronizujBazeCentralna(true);
       odpowiedz="Synchronizacja bazy została uruchomiona. Dane z panelu powinny być zapisane i odświeżone na serwerze.";
@@ -3642,7 +3813,10 @@ async function agentAIWykonajPolecenie(tekst=""){
     }else if(intent.typ==="produkt"){
       odpowiedz=agentAIProduktTekst(intent.query);
     }else{
-      odpowiedz="Nie rozpoznałem polecenia. Napisz np. „sprawdź zamówienia”, „przygotuj zamówienie do producenta”, „pokaż braki”, „ile mamy [produkt]” albo „synchronizuj bazę”.";
+      const pamiec=agentAIZnajdzPamiecDlaPolecenia(tekst);
+      odpowiedz=pamiec.length
+        ? ["Znalazłem pasujące zapamiętane procedury:",...pamiec.map(x=>`• ${x.wyzwalacz?`Gdy: ${x.wyzwalacz} → `:""}${x.akcja||x.tresc}`)].join("\n")
+        : "Nie rozpoznałem polecenia. Napisz np. „sprawdź zamówienia”, „przygotuj zamówienie do producenta”, „pokaż braki”, „ile mamy [produkt]”, „zapamiętaj: …” albo „synchronizuj bazę”.";
     }
     zapiszHistorieAgenta("komenda",`Polecenie z panelu: ${tekst}`,{polecenie:tekst,intencja:intent.typ,tryb:intent.tryb||"",odpowiedz});
     loguj("info",`Agent AI/panel: ${intent.typ} — ${tekst}`);
@@ -3694,6 +3868,7 @@ function agentAIAnaliza(){
     if(!d) return true;
     return (Date.now()-new Date(d).getTime())>90*86400000;
   });
+  const lokAktywne=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(produktyAdmin), lokPozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK"&&!magazynLokalizacjaPoKodzie(k));
   const pozycje=[
     {id:"dostepnosc",poziom:doPotwierdzenia.length?"warn":"ok",ikona:"🔎",tytul:"Zamówienia do potwierdzenia dostępności",opis:doPotwierdzenia.length?`${doPotwierdzenia.length} zamówień ma pozycje powyżej ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} szt.`:"Brak zamówień wymagających potwierdzenia ilości.",akcja:"#/admin/zamowienia"},
     {id:"wysylki",poziom:bezNumeru.length?"warn":"ok",ikona:"🚚",tytul:"Przesyłki bez numeru nadania",opis:bezNumeru.length?`${bezNumeru.length} aktywnych zleceń czeka na numer/etykietę InPost.`:"Aktywne przesyłki mają komplet podstawowych danych.",akcja:"#/admin/wysylki"},
@@ -3704,6 +3879,8 @@ function agentAIAnaliza(){
     {id:"zatowarowanie",poziom:plan.length?"warn":"ok",ikona:"📦",tytul:"Plan zatowarowania — braki do zamówień",opis:plan.length?`${plan.length} produktów brakuje do aktywnych zamówień. Szacowana wartość braków: ${zl(plan.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0))}.`:"Brak produktów, których brakuje do aktywnych zamówień.",akcja:"export-zakupy"},
     {id:"nadrezerwacje",poziom:nadrezerwacje.length?"bad":"ok",ikona:"🚨",tytul:"Rezerwacje większe niż stan",opis:nadrezerwacje.length?`${nadrezerwacje.length} produktów ma więcej sztuk w aktywnych zamówieniach niż fizycznie w magazynie.`:"Nie ma nadrezerwacji magazynowych.",akcja:"#/admin/magazyn"},
     {id:"kartoteka",poziom:brakKartoteki.length?"warn":"ok",ikona:"🗂️",tytul:"Kartoteka magazynowa",opis:brakKartoteki.length?`${brakKartoteki.length} produktów nie ma lokalizacji albo dostawcy.`:"Kartoteka magazynowa jest uzupełniona.",akcja:"kartoteka-domyslna"},
+    {id:"lokalizacje",poziom:(!lokAktywne.length||lokPozaSlownikiem.length)?"warn":"ok",ikona:"🗺️",tytul:"Słownik lokalizacji magazynu",opis:!lokAktywne.length?"Brak utworzonych lokalizacji magazynu.":lokPozaSlownikiem.length?`${lokPozaSlownikiem.length} lokalizacji przy produktach nie ma w słowniku.`:`Aktywne lokalizacje: ${lokAktywne.length}.`,akcja:"#/admin/magazyn"},
+    {id:"pamiec",poziom:(agentAIPamiec||[]).length?"ok":"warn",ikona:"🧠",tytul:"Pamięć i procedury agenta",opis:(agentAIPamiec||[]).length?`Agent ma ${(agentAIPamiec||[]).length} zapamiętanych procedur/notatek.`:"Agent nie ma jeszcze własnych procedur. Naucz go poleceniem „zapamiętaj: …”.",akcja:"#/admin/agent-ai"},
     {id:"monitoring",poziom:bezMonitoringu.length?"warn":"ok",ikona:"📍",tytul:"Produkty bez monitorowanego stanu",opis:bezMonitoringu.length?`${bezMonitoringu.length} produktów działa bez limitu magazynowego — poprawne, jeśli to świadoma decyzja.`:"Wszystkie produkty mają monitorowany stan.",akcja:"#/admin/magazyn"},
     {id:"inwentaryzacja",poziom:stareInwentaryzacje.length?"warn":"ok",ikona:"✅",tytul:"Inwentaryzacja",opis:stareInwentaryzacje.length?`${stareInwentaryzacje.length} monitorowanych produktów nie ma świeżej daty inwentaryzacji.`:"Inwentaryzacja monitorowanych produktów jest aktualna.",akcja:"audyt-magazynu"},
     {id:"zdjecia",poziom:bezZdjec.length?"warn":"ok",ikona:"🖼️",tytul:"Zdjęcia produktów",opis:bezZdjec.length?`${bezZdjec.length} produktów używa ikony zamiast zdjęcia.`:"Produkty mają zdjęcia.",akcja:"#/admin/produkty"},
@@ -3735,6 +3912,7 @@ function widokAdminAgentAI(){
   const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
   const plan=potrzebyZatowarowania().slice(0,8);
   const odpowiedziAgenta=(agentAIHistoria||[]).filter(h=>h.typ==="komenda"&&h.dane&&h.dane.odpowiedz).slice(0,5);
+  const pamiecAgenta=(agentAIPamiec||[]).slice(0,12);
   return adminSzkielet("/admin/agent-ai", `
   <div class="panel ai-agent-panel">
     <div class="ai-agent-hero">
@@ -3777,10 +3955,29 @@ function widokAdminAgentAI(){
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('przygotuj zamówienie do producenta')">Zamówienie do producenta</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('czego brakuje do zamówień')">Braki</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż stan magazynu')">Magazyn</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('zapamiętaj: ')">Naucz agenta</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż pamięć')">Pamięć</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż lokalizacje')">Lokalizacje</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('synchronizuj bazę')">Synchronizacja</button>
       </div>
     </form>
     <div class="agent-command-hints">Obsługiwane: zamówienia, braki, magazyn, wyszukiwanie produktu, szkic zamówienia do producenta, synchronizacja, szkice FV, eksport i audyt magazynu.</div>
+    <div class="agent-memory-grid">
+      <div class="agent-memory-card">
+        <b>Jak uczyć agenta</b>
+        <small>Przykład: <code>zapamiętaj: gdy napiszę pilne braki to pokaż braki do zamówień i przygotuj szkic do producenta</code>. Agent zapisze to jako procedurę i będzie ją podpowiadał później.</small>
+      </div>
+      <div class="agent-memory-card">
+        <b>Zapamiętane procedury: ${pamiecAgenta.length}</b>
+        <small>Pamięć synchronizuje się przez wspólną bazę razem z ustawieniami sklepu, jeśli panel jest połączony z serwerem.</small>
+      </div>
+    </div>
+    ${pamiecAgenta.length?`<div class="agent-memory-list">
+      ${pamiecAgenta.map(x=>`<div class="agent-memory-item">
+        <div><b>${esc(x.wyzwalacz||"Procedura")}</b><p>${esc(x.akcja||x.tresc)}</p><small>${esc(x.dataTxt||"")} • ${esc(x.operator||"")}</small></div>
+        <button class="btn danger" type="button" onclick="agentAIUsunPamiec(${jsArg(x.id)})">Usuń</button>
+      </div>`).join("")}
+    </div>`:""}
     ${odpowiedziAgenta.length?`<div class="agent-response-list">
       ${odpowiedziAgenta.map(h=>`<div class="agent-response-card">
         <div class="agent-response-head"><b>${esc(h.dane.polecenie||"Polecenie")}</b><small>${esc(h.dataTxt||"")}</small></div>
@@ -4570,7 +4767,11 @@ function sprzedazMagazynowa(dni=30){
 function filtrujProduktyMagazynu(lista, rez, sprzedaz){
   const u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
   let out=lista.filter(p=>!czyProduktAdminWKoszu(p));
-  if(frazaMagazynu) out=out.filter(p=>produktPasujeFrazie(p,frazaMagazynu)||String(p.sku||"").toLowerCase().includes(frazaMagazynu.toLowerCase()));
+  if(frazaMagazynu) out=out.filter(p=>{
+    const meta=magazynMetaProduktu(p.id);
+    const kartoteka=[meta.lokalizacja,nazwaLokalizacjiMagazynu(meta.lokalizacja),meta.dostawca,meta.kod,meta.uwagi].filter(Boolean).join(" ");
+    return produktPasujeFrazie(p,frazaMagazynu)||String(p.sku||"").toLowerCase().includes(frazaMagazynu.toLowerCase())||kartoteka.toLowerCase().includes(frazaMagazynu.toLowerCase());
+  });
   if(filtrMagazynu==="monitorowane") out=out.filter(p=>stanMagazynuId(p.id)!==null);
   if(filtrMagazynu==="bezlimitu") out=out.filter(p=>stanMagazynuId(p.id)===null);
   if(filtrMagazynu==="niskie") out=out.filter(p=>{const s=stanMagazynuId(p.id), pr=progNiskiProduktu(p);return s!==null&&s>0&&s<=pr;});
@@ -4764,6 +4965,8 @@ function widokAdminMagazyn(){
   const wartoscPlanu=planZakupu.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0);
   const nadrezerwacje=wszystkie.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;});
   const brakiKartoteki=wszystkie.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
+  const lokalizacje=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(wszystkie);
+  const pozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK" && !magazynLokalizacjaPoKodzie(k));
   const lista=filtrujProduktyMagazynu(wszystkie,rez,spr);
   const liczbaStron=Math.max(1,Math.ceil(lista.length/magazynNaStronie));
   stronaMagazynu=Math.min(Math.max(1,stronaMagazynu),liczbaStron);
@@ -4793,7 +4996,52 @@ function widokAdminMagazyn(){
       <button class="order-stat-card stat-filter ${planZakupu.length?"hot":""} ${filtrMagazynu==="dozamowienia"?"active":""}" type="button" onclick="ustawFiltrMagazynu('dozamowienia','zakup')"><span>📦</span><b>${planZakupu.length}</b><small>braki do zamówień (${zl(wartoscPlanu)})</small></button>
       <button class="order-stat-card stat-filter ${nadrezerwacje.length?"hot":""} ${filtrMagazynu==="nadrezerwacja"?"active":""}" type="button" onclick="ustawFiltrMagazynu('nadrezerwacja','dostepne')"><span>🚨</span><b>${nadrezerwacje.length}</b><small>nadrezerwacje</small></button>
       <button class="order-stat-card stat-filter ${brakiKartoteki.length?"hot":""} ${filtrMagazynu==="bezlokalizacji"||filtrMagazynu==="bezdostawcy"?"active":""}" type="button" onclick="ustawFiltrMagazynu('bezlokalizacji','nazwa')"><span>🗂️</span><b>${brakiKartoteki.length}</b><small>braki kartoteki</small></button>
+      <button class="order-stat-card stat-filter ${pozaSlownikiem.length?"hot":""}" type="button" onclick="document.getElementById('warehouseLocationForm')?.scrollIntoView({behavior:'smooth',block:'center'})"><span>🗺️</span><b>${lokalizacje.length}</b><small>lokalizacji w słowniku</small></button>
     </div>
+  </div>
+  <div class="panel warehouse-location-panel">
+    <div class="order-section-head">
+      <div>
+        <h2 style="margin-top:0">🗺️ Lokalizacje magazynu</h2>
+        <p class="order-detail-lead">Tworzysz słownik miejsc: regały, półki, strefy kompletacji, palety albo stanowiska. Produkty przypisujesz z listy w kartotece.</p>
+      </div>
+      <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż lokalizacje');location.hash='#/admin/agent-ai'">Zapytaj agenta</button>
+    </div>
+    <div class="warehouse-location-layout">
+      <form id="warehouseLocationForm" class="warehouse-location-form" onsubmit="return zapiszLokalizacjeMagazynu(event)">
+        <div class="warehouse-location-form-grid">
+          <div class="f-group"><label>Kod *</label><input name="kod" placeholder="np. R1-P2" required></div>
+          <div class="f-group"><label>Nazwa</label><input name="nazwa" placeholder="Regał 1 / półka 2"></div>
+          <div class="f-group"><label>Typ</label><select name="typ"><option>regał</option><option>półka</option><option>strefa</option><option>paleta</option><option>box</option><option>stanowisko pakowania</option><option>zewnętrzna</option></select></div>
+          <div class="f-group"><label>Strefa</label><input name="strefa" placeholder="np. A / szybka kompletacja"></div>
+          <div class="f-group"><label>Pojemność szt.</label><input name="pojemnosc" inputmode="numeric" placeholder="opcjonalnie"></div>
+          <div class="f-group"><label>Priorytet kompletacji</label><input name="priorytet" inputmode="numeric" placeholder="np. 10"></div>
+        </div>
+        <div class="f-group"><label>Uwagi</label><input name="uwagi" placeholder="np. produkty najczęściej kupowane, ciężkie gry, zapas sezonowy"></div>
+        <div class="diag-actions"><button class="btn" type="submit">💾 Zapisz lokalizację</button><button class="btn ghost" type="reset">Wyczyść formularz</button></div>
+      </form>
+      <div class="warehouse-location-list">
+        ${lokalizacje.map(l=>{
+          const s=statLok[l.kod]||{produkty:0,sztuki:0,rezerwacje:0,wartosc:0};
+          const zapelnienie=l.pojemnosc?Math.min(100,Math.round((s.sztuki/Math.max(1,l.pojemnosc))*100)):null;
+          return `<div class="warehouse-location-card">
+            <div class="warehouse-location-head"><b>${esc(l.kod)}</b><span class="lvl lvl-info">${esc(l.typ||"lokalizacja")}</span></div>
+            <p>${esc(l.nazwa||"Bez nazwy")}${l.strefa?` • strefa: ${esc(l.strefa)}`:""}</p>
+            <div class="warehouse-location-metrics">
+              <span><b>${s.produkty}</b><small>produktów</small></span>
+              <span><b>${s.sztuki}</b><small>sztuk</small></span>
+              <span><b>${s.rezerwacje}</b><small>rezerw.</small></span>
+              <span><b>${zl(s.wartosc)}</b><small>wartość</small></span>
+            </div>
+            ${zapelnienie!==null?`<div class="warehouse-fill"><span style="width:${zapelnienie}%"></span></div><small>Zapełnienie wg stanu: ${zapelnienie}% / ${esc(l.pojemnosc)} szt.</small>`:""}
+            ${l.uwagi?`<small>${esc(l.uwagi)}</small>`:""}
+            <div class="diag-actions"><button class="btn ghost" type="button" onclick="edytujLokalizacjeMagazynu(${jsArg(l.kod)})">Edytuj</button><button class="btn danger" type="button" onclick="usunLokalizacjeMagazynu(${jsArg(l.kod)})">Ukryj</button></div>
+          </div>`;
+        }).join("") || `<div class="warehouse-location-card"><b>Brak lokalizacji</b><p>Dodaj pierwszą lokalizację, np. R1-P1, żeby produkty można było przypisywać z listy.</p></div>`}
+      </div>
+    </div>
+    ${statLok.BRAK?.produkty?`<div class="pay-note" style="text-align:left;margin-top:.8rem">Bez lokalizacji: <b>${statLok.BRAK.produkty}</b> produktów. Użyj filtra „Bez lokalizacji”, żeby szybko uzupełnić kartotekę.</div>`:""}
+    ${pozaSlownikiem.length?`<div class="pay-note" style="text-align:left;margin-top:.6rem">Lokalizacje wpisane przy produktach, ale nieutworzone w słowniku: <b>${pozaSlownikiem.map(esc).join(", ")}</b>.</div>`:""}
   </div>
   <div class="panel">
     <div class="order-section-head">
@@ -4801,7 +5049,7 @@ function widokAdminMagazyn(){
       <div class="diag-actions"><button class="btn ghost" onclick="frazaMagazynu='';filtrMagazynu='wszystkie';sortowanieMagazynu='ryzyko';stronaMagazynu=1;renderuj()">Wyczyść filtry</button></div>
     </div>
     <div class="filter-grid warehouse-filter-grid">
-      <input placeholder="Szukaj: nazwa, SKU, ID, kategoria…" value="${esc(frazaMagazynu)}" oninput="frazaMagazynu=this.value;stronaMagazynu=1;renderuj()">
+      <input placeholder="Szukaj: nazwa, SKU, ID, kategoria, lokalizacja, dostawca…" value="${esc(frazaMagazynu)}" oninput="frazaMagazynu=this.value;stronaMagazynu=1;renderuj()">
       <select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">
         ${[["wszystkie","Wszystkie produkty"],["dozamowienia","Braki do zamówień"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Tylko monitorowane"],["bezlimitu","Bez limitu"],["niskie","Niski stan"],["brak","Brak na stanie"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["bezlokalizacji","Bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}
       </select>
@@ -4839,7 +5087,7 @@ function widokAdminMagazyn(){
           <td>
             <form class="warehouse-meta" onsubmit="zapiszKartotekeMagazynu(event,${jsArg(p.id)})">
               <div class="warehouse-meta-grid">
-                <input name="lokalizacja" value="${esc(meta.lokalizacja||"")}" placeholder="lokalizacja / regał">
+                ${selectLokalizacjiMagazynu(meta.lokalizacja||"")}
                 <input name="dostawca" value="${esc(meta.dostawca||"")}" placeholder="dostawca">
                 <input name="kod" value="${esc(meta.kod||p.gtin||p.ean||"")}" placeholder="EAN / kod">
                 <input name="minStock" value="${esc(meta.minStock??"")}" placeholder="min" inputmode="numeric" title="Próg minimalny produktu">
