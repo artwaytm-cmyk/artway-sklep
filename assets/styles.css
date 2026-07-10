@@ -357,6 +357,9 @@ body.hide-home-contact .home-contact{display:none}
 .warehouse-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;flex-wrap:wrap;padding:1.05rem;border:1.5px solid var(--line);border-radius:18px;background:linear-gradient(120deg,#f8fafc,#eff6ff);margin-bottom:1rem}
 .warehouse-hero h1{font-size:1.9rem;margin:.15rem 0 .25rem}
 .warehouse-hero p{max-width:680px}
+.stat-filter{appearance:none;text-align:left;font-family:inherit;color:inherit;cursor:pointer;transition:.16s transform,.16s box-shadow,.16s border-color}
+.stat-filter:hover{transform:translateY(-1px);box-shadow:0 10px 22px rgba(15,23,42,.08)}
+.stat-filter.active{outline:2px solid var(--brand);outline-offset:2px}
 .warehouse-filter-grid{grid-template-columns:minmax(240px,1.4fr) repeat(3,minmax(150px,1fr))}
 .warehouse-table td{vertical-align:middle}
 .warehouse-table small{color:var(--muted2)}

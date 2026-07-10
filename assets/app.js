@@ -1195,17 +1195,17 @@ function sugestiaZatowarowania(p, rez={}, sprzedaz={}){
   const dost=stan===null?null:stan-r, min=progNiskiProduktu(p), lead=leadTimeProduktu(p), target=targetStockProduktu(p,sp);
   const avg=Math.max(0,sp/30), dniPokrycia=(dost===null||avg<=0)?null:Math.floor(Math.max(0,dost)/avg);
   const meta=magazynMetaProduktu(p.id);
-  let ilosc=0, poziom="ok", powod="Stan nie wymaga zamówienia.";
+  let ilosc=0, poziom="ok", powod="Brak braków do aktywnych zamówień.";
   if(stan!==null){
-    const pilne=dost<0 || stan===0 || dost<=min || (dniPokrycia!==null && dniPokrycia<=lead+3);
-    if(pilne){
-      ilosc=Math.max(target-Math.max(0,dost), min-Math.max(0,dost), intNieujemny(meta.minZakup,0));
-      if(meta.minZakup!=="" && meta.minZakup!==undefined) ilosc=Math.max(ilosc,intNieujemny(meta.minZakup,0));
-      poziom=dost<0||stan===0?"bad":"warn";
+    if(dost<0){
+      ilosc=Math.abs(dost);
+      poziom="bad";
       powod=dost<0?`Rezerwacje przekraczają stan o ${Math.abs(dost)} szt.`:(stan===0?"Brak stanu magazynowego.":`Dostępne ${dost} szt., próg ${min}.`);
+    }else if(r>0){
+      powod=`Stan wystarcza na aktywne zamówienia. Po rezerwacjach zostaje ${dost} szt.`;
     }
   }else{
-    powod="Produkt bez monitorowanego stanu.";
+    powod="Produkt bez monitorowanego stanu — nie trafia do planu braków zamówień.";
   }
   return {produkt:p,stan,rezerwacje:r,dostepne:dost,sprzedaz30:sp,min,lead,target,dniPokrycia,ilosc,poziom,powod,meta};
 }
@@ -3510,7 +3510,7 @@ function agentAIAnaliza(){
     {id:"ceny",poziom:bezCeny.length?"bad":"ok",ikona:"💰",tytul:"Produkty bez ceny",opis:bezCeny.length?`${bezCeny.length} produktów wymaga uzupełnienia ceny przed sprzedażą.`:"Ceny produktów są poprawne.",akcja:"#/admin/produkty"},
     {id:"sprzedaz",poziom:niedostepne.length?"warn":"ok",ikona:"🛒",tytul:"Produkty wyłączone ze sprzedaży",opis:niedostepne.length?`${niedostepne.length} produktów jest oznaczonych jako chwilowo niedostępne.`:"Wszystkie aktywne produkty są dostępne w sprzedaży.",akcja:"#/admin/magazyn"},
     {id:"magazyn",poziom:niskiStan.length?"warn":"ok",ikona:"🏬",tytul:"Niski stan magazynowy",opis:niskiStan.length?`${niskiStan.length} produktów ma stan magazynowy ≤ ${prog}. To informacja tylko dla admina.`:"Stany magazynowe nie wymagają pilnej reakcji.",akcja:"#/admin/magazyn"},
-    {id:"zatowarowanie",poziom:plan.length?"warn":"ok",ikona:"📦",tytul:"Plan zatowarowania",opis:plan.length?`${plan.length} produktów ma sugerowane uzupełnienie. Szacowana wartość: ${zl(plan.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0))}.`:"Brak produktów wymagających zatowarowania.",akcja:"export-zakupy"},
+    {id:"zatowarowanie",poziom:plan.length?"warn":"ok",ikona:"📦",tytul:"Plan zatowarowania — braki do zamówień",opis:plan.length?`${plan.length} produktów brakuje do aktywnych zamówień. Szacowana wartość braków: ${zl(plan.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0))}.`:"Brak produktów, których brakuje do aktywnych zamówień.",akcja:"export-zakupy"},
     {id:"nadrezerwacje",poziom:nadrezerwacje.length?"bad":"ok",ikona:"🚨",tytul:"Rezerwacje większe niż stan",opis:nadrezerwacje.length?`${nadrezerwacje.length} produktów ma więcej sztuk w aktywnych zamówieniach niż fizycznie w magazynie.`:"Nie ma nadrezerwacji magazynowych.",akcja:"#/admin/magazyn"},
     {id:"kartoteka",poziom:brakKartoteki.length?"warn":"ok",ikona:"🗂️",tytul:"Kartoteka magazynowa",opis:brakKartoteki.length?`${brakKartoteki.length} produktów nie ma lokalizacji albo dostawcy.`:"Kartoteka magazynowa jest uzupełniona.",akcja:"kartoteka-domyslna"},
     {id:"monitoring",poziom:bezMonitoringu.length?"warn":"ok",ikona:"📍",tytul:"Produkty bez monitorowanego stanu",opis:bezMonitoringu.length?`${bezMonitoringu.length} produktów działa bez limitu magazynowego — poprawne, jeśli to świadoma decyzja.`:"Wszystkie produkty mają monitorowany stan.",akcja:"#/admin/magazyn"},
@@ -3558,7 +3558,7 @@ function widokAdminAgentAI(){
       <div class="order-stat-card"><span>📦</span><b>${pobierzZamowienia().filter(z=>z.status==="nowe").length}</b><small>nowych zamówień</small></div>
       <div class="order-stat-card"><span>🔎</span><b>${pobierzZamowienia().filter(z=>z.wymagaPotwierdzeniaDostepnosci).length}</b><small>potwierdzeń dostępności</small></div>
       <div class="order-stat-card"><span>🧾</span><b>${szkiceFaktur.length}</b><small>szkiców FV</small></div>
-      <div class="order-stat-card"><span>📦</span><b>${potrzebyZatowarowania().length}</b><small>do zatowarowania</small></div>
+      <div class="order-stat-card"><span>📦</span><b>${potrzebyZatowarowania().length}</b><small>braki do zamówień</small></div>
     </div>
     <div class="diag-actions agent-command-grid">
       <button class="btn" onclick="agentAIWykonaj('sync')">🔄 Synchronizuj bazę</button>
@@ -3570,7 +3570,7 @@ function widokAdminAgentAI(){
     </div>
   </div>
   ${plan.length?`<div class="panel">
-    <div class="order-section-head"><div><h2 style="margin-top:0">📦 Najpilniejsze zatowarowanie</h2><p class="order-detail-lead">Agent liczy fizyczny stan, rezerwacje, sprzedaż z 30 dni, próg minimalny i czas dostawy.</p></div><button class="btn" onclick="agentAIWykonaj('export-zakupy')">Pobierz pełny plan</button></div>
+    <div class="order-section-head"><div><h2 style="margin-top:0">📦 Braki do aktywnych zamówień</h2><p class="order-detail-lead">Agent pokazuje tylko produkty, których rezerwacje z aktywnych zamówień są większe niż fizyczny stan magazynowy.</p></div><button class="btn" onclick="agentAIWykonaj('export-zakupy')">Pobierz pełny plan</button></div>
     <div class="ai-restock-grid">${plan.map(x=>`<div class="ai-restock-card ${x.poziom}">
       <b>${esc(x.produkt.nazwa)}</b>
       <small>${esc(x.produkt.sku||"ID "+x.produkt.id)} • ${esc(x.meta.dostawca||"brak dostawcy")}</small>
@@ -4391,6 +4391,13 @@ function stanBadgeMagazynu(stan, prog){
   if(stan<=prog) return `<span class="lvl lvl-ostrzezenie">niski</span>`;
   return `<span class="lvl lvl-ok">OK</span>`;
 }
+function ustawFiltrMagazynu(filtr, sort="ryzyko"){
+  frazaMagazynu="";
+  filtrMagazynu=filtr||"wszystkie";
+  sortowanieMagazynu=sort||"ryzyko";
+  stronaMagazynu=1;
+  renderuj();
+}
 function ustawStroneMagazynu(n){ stronaMagazynu=Math.max(1,Number(n)||1); renderuj(); }
 function ustawMagazynNaStronie(n){
   magazynNaStronie=[25,50,100,200].includes(Number(n))?Number(n):50;
@@ -4553,20 +4560,20 @@ function widokAdminMagazyn(){
       </div>
       <div class="diag-actions">
         <button class="btn" onclick="eksportujMagazynCSV()">📊 Eksport magazynu CSV</button>
-        <button class="btn ghost" onclick="eksportujZatowarowanieCSV()">📦 Plan zatowarowania</button>
+        <button class="btn ghost" onclick="eksportujZatowarowanieCSV()">📦 Braki do zamówień</button>
         <a class="btn ghost" href="#/admin/agent-ai">🤖 Agent AI</a>
         <a class="btn ghost" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
       </div>
     </div>
     <div class="orders-stat-grid">
-      <div class="order-stat-card"><span>📦</span><b>${monitorowane.length}</b><small>produktów ze stanem</small></div>
-      <div class="order-stat-card ${brak.length?"hot":""}"><span>⛔</span><b>${brak.length}</b><small>brak na stanie</small></div>
-      <div class="order-stat-card ${niskie.length?"hot":""}"><span>⚠️</span><b>${niskie.length}</b><small>niski stan ≤ ${prog}</small></div>
-      <div class="order-stat-card"><span>🧾</span><b>${zarezerwowane}</b><small>szt. w aktywnych zamówieniach</small></div>
-      <div class="order-stat-card money"><span>💰</span><b>${zl(wartosc)}</b><small>wartość stanów</small></div>
-      <div class="order-stat-card ${planZakupu.length?"hot":""}"><span>📦</span><b>${planZakupu.length}</b><small>do zatowarowania (${zl(wartoscPlanu)})</small></div>
-      <div class="order-stat-card ${nadrezerwacje.length?"hot":""}"><span>🚨</span><b>${nadrezerwacje.length}</b><small>nadrezerwacje</small></div>
-      <div class="order-stat-card ${brakiKartoteki.length?"hot":""}"><span>🗂️</span><b>${brakiKartoteki.length}</b><small>braki kartoteki</small></div>
+      <button class="order-stat-card stat-filter ${filtrMagazynu==="monitorowane"?"active":""}" type="button" onclick="ustawFiltrMagazynu('monitorowane','stan')"><span>📦</span><b>${monitorowane.length}</b><small>produktów ze stanem</small></button>
+      <button class="order-stat-card stat-filter ${brak.length?"hot":""} ${filtrMagazynu==="brak"?"active":""}" type="button" onclick="ustawFiltrMagazynu('brak','stan')"><span>⛔</span><b>${brak.length}</b><small>brak na stanie</small></button>
+      <button class="order-stat-card stat-filter ${niskie.length?"hot":""} ${filtrMagazynu==="niskie"?"active":""}" type="button" onclick="ustawFiltrMagazynu('niskie','stan')"><span>⚠️</span><b>${niskie.length}</b><small>niski stan ≤ ${prog}</small></button>
+      <button class="order-stat-card stat-filter ${filtrMagazynu==="rezerwacje"?"active":""}" type="button" onclick="ustawFiltrMagazynu('rezerwacje','rezerwacje')"><span>🧾</span><b>${zarezerwowane}</b><small>szt. w aktywnych zamówieniach</small></button>
+      <button class="order-stat-card stat-filter money ${filtrMagazynu==="wszystkie"&&sortowanieMagazynu==="wartosc"?"active":""}" type="button" onclick="ustawFiltrMagazynu('wszystkie','wartosc')"><span>💰</span><b>${zl(wartosc)}</b><small>wartość stanów</small></button>
+      <button class="order-stat-card stat-filter ${planZakupu.length?"hot":""} ${filtrMagazynu==="dozamowienia"?"active":""}" type="button" onclick="ustawFiltrMagazynu('dozamowienia','zakup')"><span>📦</span><b>${planZakupu.length}</b><small>braki do zamówień (${zl(wartoscPlanu)})</small></button>
+      <button class="order-stat-card stat-filter ${nadrezerwacje.length?"hot":""} ${filtrMagazynu==="nadrezerwacja"?"active":""}" type="button" onclick="ustawFiltrMagazynu('nadrezerwacja','dostepne')"><span>🚨</span><b>${nadrezerwacje.length}</b><small>nadrezerwacje</small></button>
+      <button class="order-stat-card stat-filter ${brakiKartoteki.length?"hot":""} ${filtrMagazynu==="bezlokalizacji"||filtrMagazynu==="bezdostawcy"?"active":""}" type="button" onclick="ustawFiltrMagazynu('bezlokalizacji','nazwa')"><span>🗂️</span><b>${brakiKartoteki.length}</b><small>braki kartoteki</small></button>
     </div>
   </div>
   <div class="panel">
@@ -4577,10 +4584,10 @@ function widokAdminMagazyn(){
     <div class="filter-grid warehouse-filter-grid">
       <input placeholder="Szukaj: nazwa, SKU, ID, kategoria…" value="${esc(frazaMagazynu)}" oninput="frazaMagazynu=this.value;stronaMagazynu=1;renderuj()">
       <select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">
-        ${[["wszystkie","Wszystkie produkty"],["dozamowienia","Do zatowarowania"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Tylko monitorowane"],["bezlimitu","Bez limitu"],["niskie","Niski stan"],["brak","Brak na stanie"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["bezlokalizacji","Bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}
+        ${[["wszystkie","Wszystkie produkty"],["dozamowienia","Braki do zamówień"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Tylko monitorowane"],["bezlimitu","Bez limitu"],["niskie","Niski stan"],["brak","Brak na stanie"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["bezlokalizacji","Bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}
       </select>
       <select onchange="sortowanieMagazynu=this.value;stronaMagazynu=1;renderuj()">
-        ${[["ryzyko","Sortuj: ryzyko braku"],["zakup","Sugerowany zakup"],["dostepne","Dostępne po rezerwacji"],["stan","Stan rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}
+        ${[["ryzyko","Sortuj: ryzyko braku"],["zakup","Braki do zamówień"],["dostepne","Dostępne po rezerwacji"],["stan","Stan rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}
       </select>
       <select onchange="ustawMagazynNaStronie(this.value)">
         ${[25,50,100,200].map(n=>`<option value="${n}" ${magazynNaStronie===n?"selected":""}>${n} na stronie</option>`).join("")}
@@ -4591,7 +4598,7 @@ function widokAdminMagazyn(){
     </div>
     <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
     <div style="overflow-x:auto"><table class="log-table warehouse-table">
-      <tr><th>Produkt</th><th>Kategoria</th><th>Stan / dostępne</th><th>Dostępność w sklepie</th><th>Plan zatowarowania</th><th>Kartoteka magazynowa</th><th>Korekta</th></tr>
+      <tr><th>Produkt</th><th>Kategoria</th><th>Stan / dostępne</th><th>Dostępność w sklepie</th><th>Braki do zamówień</th><th>Kartoteka magazynowa</th><th>Korekta</th></tr>
       ${fragment.map(p=>{
         const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), sp=Number(spr[p.id]||0), plan=sugestiaZatowarowania(p,rez,spr), meta=plan.meta, wart=stan===null?0:stan*kwotaNum(p.cena);
         return `<tr>
