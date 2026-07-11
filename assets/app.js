@@ -4513,6 +4513,85 @@ function allegroEANProduktu(p){
 function allegroKodOferty(o){
   return String(o?.externalId||o?.id||"").trim();
 }
+function allegroKluczeKodu(v){
+  const raw=String(v||"").trim().toLowerCase();
+  if(!raw) return [];
+  const bezSpacji=raw.replace(/\s+/g,"");
+  const bezUniw=bezSpacji.replace(/[-_ ]?uniw$/,"");
+  const bezPrefixu=bezUniw.replace(/^(sku|kod|ean|gtin)[:#-]?/,"");
+  const cyfry=(bezPrefixu.match(/\d{3,}/)||[])[0]||"";
+  return [...new Set([raw,bezSpacji,bezUniw,bezPrefixu,cyfry].filter(Boolean))];
+}
+function allegroIndeksProduktowPoKodzie(){
+  const indeks=new Map(), konflikty=new Set();
+  const dodaj=(kod,p)=>{
+    for(const k of allegroKluczeKodu(kod)){
+      if(!k) continue;
+      const poprzedni=indeks.get(k);
+      if(poprzedni && String(poprzedni.id)!==String(p.id)){
+        konflikty.add(k);
+        continue;
+      }
+      indeks.set(k,p);
+    }
+  };
+  produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
+    [p.sku,p.kod,p.externalId,p.gtin,p.ean,p.kodKreskowy,p.producentKod,p.kodProducenta].forEach(k=>dodaj(k,p));
+  });
+  konflikty.forEach(k=>indeks.delete(k));
+  return indeks;
+}
+function allegroKodyZamowienDlaOferty(){
+  const mapa=new Map();
+  (Array.isArray(allegroZamowienia)?allegroZamowienia:[]).forEach(z=>{
+    (Array.isArray(z.lineItems)?z.lineItems:[]).forEach(it=>{
+      const oid=String(it.offerId||"").trim();
+      if(!oid) return;
+      if(!mapa.has(oid)) mapa.set(oid,new Set());
+      [it.externalId,it.offerName].filter(Boolean).forEach(k=>mapa.get(oid).add(k));
+    });
+  });
+  return mapa;
+}
+function allegroSugestieAutomapowania(){
+  const indeks=allegroIndeksProduktowPoKodzie();
+  const zZamowien=allegroKodyZamowienDlaOferty();
+  const wyniki=[];
+  (Array.isArray(allegroOferty)?allegroOferty:[]).forEach(o=>{
+    if(allegroProduktDlaOferty(o.id)) return;
+    const kody=[o.externalId,o.sku,o.gtin,o.ean,o.id];
+    const dodatkowe=zZamowien.get(String(o.id||""));
+    if(dodatkowe) kody.push(...dodatkowe);
+    let produkt=null, kod="";
+    for(const k of kody){
+      for(const klucz of allegroKluczeKodu(k)){
+        const p=indeks.get(klucz);
+        if(p){ produkt=p; kod=klucz; break; }
+      }
+      if(produkt) break;
+    }
+    if(produkt) wyniki.push({offerId:String(o.id), productId:String(produkt.id), produkt, oferta:o, kod});
+  });
+  return wyniki;
+}
+async function allegroAutomapujOferty(){
+  const sugestie=allegroSugestieAutomapowania();
+  if(!sugestie.length){ toast("Brak pewnych dopasowań po kodach Allegro/SKU"); return; }
+  if(!confirm(`Automatycznie podpiąć ${sugestie.length} ofert Allegro po kodach do produktów sklepu?`)) return;
+  let ok=0, bledy=0, ostatnie=null;
+  toast(`Mapuję oferty Allegro: ${sugestie.length}…`);
+  for(const s of sugestie){
+    try{
+      ostatnie=await chmura("allegro-map-offer",{method:"POST",body:{offerId:s.offerId,productId:s.productId},timeout:12000});
+      ok++;
+    }catch(e){ bledy++; }
+  }
+  if(ostatnie?.mappings&&typeof ostatnie.mappings==="object") allegroMapowania=ostatnie.mappings;
+  await allegroWczytajDane(true);
+  allegroZapiszCache();
+  toast(`Automapowanie Allegro: podpięto ${ok}${bledy?`, błędy: ${bledy}`:""}`);
+  renderuj();
+}
 function allegroStatusHTML(){
   if(!allegroStan.sprawdzono && allegroStan.ladowanie) return `<span class="lvl lvl-info">sprawdzam API</span>`;
   if(allegroStan.connected) return `<span class="lvl lvl-ok">połączone</span>`;
@@ -4654,6 +4733,7 @@ function allegroZamowieniaTabelaHTML(){
 }
 function allegroOfertyTabelaHTML(){
   const q=String(szukajAllegroOfert||"").toLowerCase().trim();
+  const autoSugestie=allegroSugestieAutomapowania().length;
   let rows=(Array.isArray(allegroOferty)?allegroOferty:[]).filter(o=>{
     const prod=allegroProduktDlaOferty(o.id);
     const mapped=!!prod;
@@ -4662,10 +4742,13 @@ function allegroOfertyTabelaHTML(){
     const txt=`${o.id||""} ${o.externalId||""} ${o.name||""} ${o.status||""} ${prod?.nazwa||""} ${prod?.sku||""}`.toLowerCase();
     return !q||txt.includes(q);
   }).slice(0,250);
-  return `<div class="panel allegro-section-panel">
+    return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">🏷️ Oferty Allegro i podpinanie produktów</h2><p class="order-detail-lead">Jedna karta produktu w sklepie może mieć wiele ofert Allegro. Przy ofercie wybierasz produkt sklepu albo tworzysz nowy produkt z danych oferty.</p></div>
-      <button class="btn" onclick="allegroSynchronizujOferty()">🔄 Synchronizuj oferty</button>
+      <div class="order-actions">
+        <button class="btn" onclick="allegroSynchronizujOferty()">🔄 Synchronizuj oferty</button>
+        <button class="btn ghost" onclick="allegroAutomapujOferty()" ${autoSugestie?"":"disabled"}>🤖 Auto-mapuj po kodach${autoSugestie?` (${autoSugestie})`:""}</button>
+      </div>
     </div>
     <div class="orders-toolbar allegro-toolbar">
       <input placeholder="Szukaj: oferta, nazwa, external ID, produkt…" value="${esc(szukajAllegroOfert)}" oninput="szukajAllegroOfert=this.value.toLowerCase();renderuj()">
