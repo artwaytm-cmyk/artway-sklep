@@ -5591,7 +5591,7 @@ function allegroKomunikacjaPanelHTML(){
       <div class="ai-task-list">${st.threads.map(allegroWatekHTML).join("") || `<p style="color:var(--muted2)">Brak pobranych wątków. Kliknij „Synchronizuj”.</p>`}</div>
     </div>
     <div class="panel-subtle" style="margin-top:1rem">
-      <div class="order-section-head"><div><h3 style="margin:0">🛟 Dyskusje i reklamacje</h3><p class="order-detail-lead">Używane jest nowe API Allegro `/sale/issues`, a nie stare `/sale/disputes`.</p></div></div>
+      <div class="order-section-head"><div><h3 style="margin:0">🛟 Dyskusje i reklamacje</h3><p class="order-detail-lead">Używane jest nowe API Allegro <code>/sale/issues</code>, a nie stare <code>/sale/disputes</code>.</p></div></div>
       <div class="ai-task-list">${st.issues.map(allegroIssueHTML).join("") || `<p style="color:var(--muted2)">Brak pobranych dyskusji/reklamacji. Kliknij „Synchronizuj”.</p>`}</div>
     </div>
   </div>`;
