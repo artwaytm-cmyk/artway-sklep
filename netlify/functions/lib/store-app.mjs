@@ -1016,7 +1016,8 @@ function allegroKonfiguracja(req) {
   const clientId = tekst(process.env.ALLEGRO_CLIENT_ID || '', 300).trim();
   const clientSecret = tekst(process.env.ALLEGRO_CLIENT_SECRET || '', 500).trim();
   const redirectUri = tekst(process.env.ALLEGRO_REDIRECT_URI || '', 1000).trim() || `${publicznyOrigin(req)}/api/store?action=allegro-callback`;
-  const scope = tekst(process.env.ALLEGRO_SCOPE || ALLEGRO_DEFAULT_SCOPE, 1000).trim();
+  const envScope = tekst(process.env.ALLEGRO_SCOPE || '', 1000).trim();
+  const scope = [...new Set(`${envScope} ${ALLEGRO_DEFAULT_SCOPE}`.split(/\s+/).map((x) => x.trim()).filter(Boolean))].join(' ');
   const authBaseUrl = env === 'sandbox' ? 'https://allegro.pl.allegrosandbox.pl' : 'https://allegro.pl';
   const apiBaseUrl = env === 'sandbox' ? 'https://api.allegro.pl.allegrosandbox.pl' : 'https://api.allegro.pl';
   const missingEnv = [];
