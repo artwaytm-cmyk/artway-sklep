@@ -251,6 +251,7 @@ let frazaListyProduktow="", sortowanieListyProduktow="default";
 let allegroZamowienia = wczytajLS("artway_allegro_zamowienia_cache", []);
 let allegroOferty = wczytajLS("artway_allegro_oferty_cache", []);
 let allegroMapowania = wczytajLS("artway_allegro_mapowania_cache", {});
+let allegroKomunikacja = wczytajLS("artway_allegro_komunikacja_cache", {threads:[],issues:[],settings:null,autoReplies:{},errors:[],updated_at:null});
 let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null};
 let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", filtrAllegroOfert="wszystkie";
 
@@ -1705,6 +1706,7 @@ function renderuj(){
       else if(t==="/admin/allegro/zamowienia") w.innerHTML = widokAdminAllegro("zamowienia");
       else if(t==="/admin/allegro/oferty") w.innerHTML = widokAdminAllegro("oferty");
       else if(t==="/admin/allegro/wystawianie") w.innerHTML = widokAdminAllegro("wystawianie");
+      else if(t==="/admin/allegro/komunikacja") w.innerHTML = widokAdminAllegro("komunikacja");
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
       else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn("pulpit");
       else if(t.startsWith("/admin/magazyn/")) w.innerHTML = widokAdminMagazyn(t.split("/")[3]||"pulpit");
@@ -2690,7 +2692,7 @@ const MENU_ADMINA = [
 function adminSzkielet(aktywna, tresc){
   const powiadomienia = {
     "/admin/zamowienia": pobierzZamowienia().filter(z=>z.status==="nowe").length,
-    "/admin/allegro": Array.isArray(allegroZamowienia) ? allegroZamowienia.filter(z=>!["CANCELLED","READY_FOR_SHIPMENT","SENT","COMPLETED"].includes(String(z.status||z.fulfillmentStatus||"").toUpperCase())).length : 0,
+    "/admin/allegro": (Array.isArray(allegroZamowienia) ? allegroZamowienia.filter(z=>!["CANCELLED","READY_FOR_SHIPMENT","SENT","COMPLETED"].includes(String(z.status||z.fulfillmentStatus||"").toUpperCase())).length : 0) + (allegroKomunikacjaStaty?.().totalNeed||0),
     "/admin/wysylki": pobierzZamowienia().filter(z=>!["anulowane","dostarczone","zakończone"].includes(z.status)&&!z.wysylka?.numer).length,
     "/admin/magazyn": produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{const s=stanMagazynuId(p.id),prog=Number(ustawieniaMagazynuPelne().progNiski)||5;return s!==null&&s<=prog;}).length,
     "/admin/agent-ai": agentAIAnaliza().filter(x=>x.poziom!=="ok").length,
@@ -4786,6 +4788,7 @@ function allegroZapiszCache(){
   zapiszLS("artway_allegro_zamowienia_cache", allegroZamowienia);
   zapiszLS("artway_allegro_oferty_cache", allegroOferty);
   zapiszLS("artway_allegro_mapowania_cache", allegroMapowania);
+  zapiszLS("artway_allegro_komunikacja_cache", allegroKomunikacja);
 }
 function allegroProduktIdDlaOferty(offerId){
   const rec=(allegroMapowania||{})[String(offerId)];
@@ -4945,6 +4948,7 @@ async function allegroWczytajDane(cicho=false){
     allegroZamowienia=Array.isArray(d.orders)?d.orders:[];
     allegroOferty=Array.isArray(d.offers)?d.offers:[];
     allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:{};
+    if(Array.isArray(d.threads)||Array.isArray(d.issues)) allegroKomunikacja={...allegroKomunikacja,threads:Array.isArray(d.threads)?d.threads:allegroKomunikacja.threads,issues:Array.isArray(d.issues)?d.issues:allegroKomunikacja.issues,settings:d.settings||allegroKomunikacja.settings,autoReplies:d.autoReplies||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:allegroKomunikacja.errors,updated_at:d.updated_at||allegroKomunikacja.updated_at};
     allegroZapiszCache();
     if(!cicho) toast("Dane Allegro odświeżone");
   }catch(e){
@@ -4982,6 +4986,56 @@ async function allegroSynchronizujOferty(){
     toast(`Pobrano oferty Allegro: ${allegroOferty.length}`);
     renderuj();
   }catch(e){ toast("⚠️ Allegro oferty: "+(e.message||e)); }
+}
+function allegroUstawieniaKomunikacjiDomyslne(){
+  return {
+    enabled:true,
+    messageCenter:true,
+    issues:true,
+    freshHours:48,
+    template:"Dzień dobry,\n\ndziękujemy za wiadomość. Potwierdzamy, że zgłoszenie trafiło do obsługi Artway-TM. Odpowiemy możliwie jak najszybciej.\n\nPozdrawiamy\nArtway-TM"
+  };
+}
+function allegroKomunikacjaUstawienia(){
+  return {...allegroUstawieniaKomunikacjiDomyslne(), ...(allegroKomunikacja?.settings||{})};
+}
+async function allegroWczytajKomunikacje(cicho=false){
+  try{
+    const d=await chmura("allegro-communications-data",{timeout:16000});
+    allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
+    allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroUstawieniaKomunikacjiDomyslne(),autoReplies:d.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],updated_at:d.updated_at||null,autoRepliesUpdatedAt:d.autoRepliesUpdatedAt||null};
+    allegroZapiszCache();
+    if(!cicho) toast("Wczytano komunikację Allegro");
+  }catch(e){ allegroStan={...allegroStan,error:e.message||String(e)}; if(!cicho) toast("⚠️ Komunikacja Allegro: "+(e.message||e)); }
+  renderuj();
+}
+async function allegroSynchronizujKomunikacje(autoReply=true){
+  try{
+    toast(autoReply?"Synchronizuję Allegro i wysyłam brakujące pierwsze odpowiedzi…":"Synchronizuję komunikację Allegro…");
+    const d=await chmura("allegro-sync-communications",{method:"POST",body:{limit:20,autoReply},timeout:45000});
+    allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
+    allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroKomunikacjaUstawienia(),autoReplies:d.autoReply?.items||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],updated_at:d.updated_at||null,autoReply:d.autoReply||null};
+    allegroZapiszCache();
+    toast(`Komunikacja Allegro: wątki ${allegroKomunikacja.threads.length}, dyskusje/reklamacje ${allegroKomunikacja.issues.length}, auto-odpowiedzi wysłane ${d.autoReply?.sent?.length||0}`);
+  }catch(e){ toast("⚠️ Synchronizacja komunikacji Allegro: "+(e.message||e)); }
+  renderuj();
+}
+async function allegroZapiszUstawieniaKomunikacji(form){
+  const fd=new FormData(form);
+  const settings={
+    enabled:fd.get("enabled")==="on",
+    messageCenter:fd.get("messageCenter")==="on",
+    issues:fd.get("issues")==="on",
+    freshHours:Number(fd.get("freshHours")||48),
+    template:String(fd.get("template")||"").trim()
+  };
+  try{
+    const d=await chmura("allegro-communications-settings",{method:"POST",body:{settings},timeout:12000});
+    allegroKomunikacja={...allegroKomunikacja,settings:d.settings||settings};
+    allegroZapiszCache();
+    toast("Zapisano ustawienia autorespondera Allegro");
+    renderuj();
+  }catch(e){ toast("⚠️ Ustawienia komunikacji Allegro: "+(e.message||e)); }
 }
 async function allegroMapujOferte(offerId, productId){
   try{
@@ -5066,6 +5120,23 @@ function allegroKategorieHTML(d){
     ${d?.errors?.length?`<small style="color:var(--muted2)">Część zapytań Allegro nie zwróciła danych: ${esc(d.errors.map(e=>e.phrase).join(", "))}</small>`:""}
   </div>`;
 }
+function allegroDraftDiagnostykaHTML(d={},msg="",brak=""){
+  const sc=d.salesConditions||{};
+  const defs=sc.defaults||{};
+  const params=Array.isArray(d.categoryParameters)?d.categoryParameters:[];
+  const supportErrors=Array.isArray(d.supportErrors)?d.supportErrors:[];
+  const allegroErrors=Array.isArray(d.allegroError?.errors)?d.allegroError.errors:[];
+  const autoParams=Array.isArray(d.draft?.parameters)?d.draft.parameters:[];
+  return `<div class="backend-note">
+    <b>${esc(msg||"Podgląd szkicu Allegro")}</b><br>
+    Braki bazowe: ${esc(brak||"brak")}<br>
+    Warunki sprzedaży: cennik dostawy <b>${esc(defs.shippingRateId||"domyślny/brak")}</b>, zwroty <b>${esc(defs.returnPolicyId||"domyślne/brak")}</b>, reklamacje <b>${esc(defs.impliedWarrantyId||"domyślne/brak")}</b>, gwarancja <b>${esc(defs.warrantyId||"domyślna/brak")}</b><br>
+    Parametry kategorii pobrane z Allegro: <b>${esc(params.length)}</b>; automatycznie dopisane do szkicu: <b>${esc(autoParams.length)}</b>.
+    ${supportErrors.length?`<div style="margin-top:.5rem;color:#9a3412"><b>Uwagi API:</b><br>${supportErrors.map(e=>`• ${esc(e.key||"API")}: ${esc(e.message||e.code||"błąd")}`).join("<br>")}</div>`:""}
+    ${allegroErrors.length?`<div style="margin-top:.5rem;color:#991b1b"><b>Błąd Allegro:</b><br>${allegroErrors.map(e=>`• ${esc(e.userMessage||e.message||e.code||"błąd")}${e.path?` <small>(${esc(e.path)})</small>`:""}`).join("<br>")}</div>`:""}
+    <details><summary>Podgląd JSON wysyłany do Allegro</summary><pre style="white-space:pre-wrap;font-size:.75rem">${esc(JSON.stringify(d.draft||d,null,2))}</pre></details>
+  </div>`;
+}
 function allegroUstawKategorieWFormularzu(id){
   const form=document.querySelector("form.product-editor-form");
   if(!form?.elements?.allegroCategoryId){ toast("Nie znaleziono pola kategorii Allegro"); return; }
@@ -5116,7 +5187,7 @@ async function allegroPrzygotujSzkicProduktu(id){
     const msg=d.ready?"Szkic jest gotowy technicznie do wysłania do Allegro.":"Szkic wymaga uzupełnienia: "+brak;
     toast("🟠 Allegro: "+msg);
     const box=document.getElementById("allegroDraftPreview");
-    if(box) box.innerHTML=`${allegroKategorieHTML(d.categorySuggestion)}<div class="backend-note"><b>${esc(msg)}</b>${cat?`<br>Dobrana kategoria: <b>${esc(cat.name)}</b> (${esc(cat.id)})`:""}<br>Braki: ${esc(brak)}<details><summary>Podgląd JSON wysyłany do Allegro</summary><pre style="white-space:pre-wrap;font-size:.75rem">${esc(JSON.stringify(d.draft,null,2))}</pre></details></div>`;
+    if(box) box.innerHTML=`${allegroKategorieHTML(d.categorySuggestion)}${cat?`<div class="backend-note">Dobrana kategoria: <b>${esc(cat.name)}</b> (${esc(cat.id)})</div>`:""}${allegroDraftDiagnostykaHTML(d,msg,brak)}`;
   }catch(e){ toast("⚠️ Szkic Allegro: "+(e.message||e)); }
 }
 async function allegroWystawProdukt(id){
@@ -5137,7 +5208,7 @@ async function allegroWystawProdukt(id){
   }catch(e){
     allegroPokazKategorieWFormularzu(e.categorySuggestion);
     const box=document.getElementById("allegroDraftPreview");
-    if(box&&e.draft) box.innerHTML=`${allegroKategorieHTML(e.categorySuggestion)}<div class="backend-note"><b>Nie utworzono oferty.</b><br>${esc(e.message||e)}<details><summary>Podgląd JSON</summary><pre style="white-space:pre-wrap;font-size:.75rem">${esc(JSON.stringify(e.draft,null,2))}</pre></details></div>`;
+    if(box&&e.draft) box.innerHTML=`${allegroKategorieHTML(e.categorySuggestion)}${allegroDraftDiagnostykaHTML(e,"Nie utworzono oferty: "+(e.message||"błąd Allegro"),(e.missing||[]).join(", ")||"—")}`;
     toast("⚠️ Wystawianie Allegro: "+(e.message||e));
   }
 }
@@ -5351,6 +5422,95 @@ function allegroWystawianiePanelHTML(){
     </table></div>
   </div>`;
 }
+function allegroDataTxt(v){
+  const t=Date.parse(v||"");
+  return t?new Date(t).toLocaleString("pl-PL"):"—";
+}
+function allegroAutoReplyKlucz(type,id){
+  return `${type}:${id}`;
+}
+function allegroKomunikacjaStaty(){
+  const threads=Array.isArray(allegroKomunikacja?.threads)?allegroKomunikacja.threads:[];
+  const issues=Array.isArray(allegroKomunikacja?.issues)?allegroKomunikacja.issues:[];
+  const replies=allegroKomunikacja?.autoReplies||{};
+  const threadNeed=threads.filter(t=>t.incomingCount&&!t.sellerCount&&!replies[allegroAutoReplyKlucz("thread",t.id)]).length;
+  const issueNeed=issues.filter(i=>i.lastMessage?.incoming&&!replies[allegroAutoReplyKlucz("issue",i.id)]).length;
+  return {threads,issues,replies,threadNeed,issueNeed,totalNeed:threadNeed+issueNeed,sent:Object.keys(replies).length};
+}
+function allegroKomunikacjaBledyHTML(){
+  const errors=Array.isArray(allegroKomunikacja?.errors)?allegroKomunikacja.errors:[];
+  if(!errors.length) return "";
+  return `<div class="backend-note" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Diagnostyka komunikacji Allegro:</b><br>${errors.map(e=>`• ${esc(e.key||"API")}: ${esc(e.message||e.code||"błąd")}${e.status?` (HTTP ${esc(e.status)})`:""}`).join("<br>")}<br><small>Jeżeli widzisz brak dostępu, połącz Allegro ponownie z pełnym zakresem: wiadomości, dyskusje/reklamacje, oferty i zamówienia.</small></div>`;
+}
+function allegroWatekHTML(t){
+  const replies=allegroKomunikacja?.autoReplies||{};
+  const sent=replies[allegroAutoReplyKlucz("thread",t.id)];
+  const last=t.lastMessage||{};
+  return `<div class="ai-task ${sent?"ok":(t.incomingCount&&!t.sellerCount?"warn":"")}" style="align-items:flex-start">
+    <div class="ai-task-ico">💬</div>
+    <div>
+      <b>${esc(t.buyerLogin||"Klient Allegro")}</b> ${sent?`<span class="lvl lvl-ok">auto wysłane</span>`:t.incomingCount&&!t.sellerCount?`<span class="lvl lvl-ostrzezenie">czeka na odpowiedź</span>`:`<span class="lvl lvl-info">monitorowane</span>`}
+      <p>${esc(skrocTekst(last.text||t.subject||"Brak treści",220))}</p>
+      <small>Wątek: ${esc(t.id)} • ostatnia: ${esc(allegroDataTxt(t.lastMessageDateTime||last.createdAt))}${sent?` • auto: ${esc(allegroDataTxt(sent.sent_at))}`:""}</small>
+    </div>
+    <div><button class="btn ghost" type="button" onclick="navigator.clipboard?.writeText(${jsArg(t.id)});toast('Skopiowano ID wątku')">Kopiuj ID</button></div>
+  </div>`;
+}
+function allegroIssueHTML(i){
+  const replies=allegroKomunikacja?.autoReplies||{};
+  const sent=replies[allegroAutoReplyKlucz("issue",i.id)];
+  const last=i.lastMessage||{};
+  return `<div class="ai-task ${sent?"ok":(last.incoming?"warn":"")}" style="align-items:flex-start">
+    <div class="ai-task-ico">🛟</div>
+    <div>
+      <b>${esc(i.type==="CLAIM"?"Reklamacja":"Dyskusja")} — ${esc(i.buyerLogin||"Klient Allegro")}</b> ${sent?`<span class="lvl lvl-ok">auto wysłane</span>`:last.incoming?`<span class="lvl lvl-ostrzezenie">od klienta</span>`:`<span class="lvl lvl-info">${esc(i.status||"status")}</span>`}
+      <p>${esc(skrocTekst(last.text||i.subject||"Brak treści",220))}</p>
+      <small>ID: ${esc(i.id)} • status: ${esc(i.status||"—")} • zamówienie: ${esc(i.orderId||"—")} • termin: ${esc(allegroDataTxt(i.dueDate))}${sent?` • auto: ${esc(allegroDataTxt(sent.sent_at))}`:""}</small>
+    </div>
+    <div><button class="btn ghost" type="button" onclick="navigator.clipboard?.writeText(${jsArg(i.id)});toast('Skopiowano ID dyskusji')">Kopiuj ID</button></div>
+  </div>`;
+}
+function allegroKomunikacjaPanelHTML(){
+  const st=allegroKomunikacjaStaty();
+  const s=allegroKomunikacjaUstawienia();
+  return `<div class="panel allegro-section-panel">
+    <div class="order-section-head">
+      <div><h2 style="margin-top:0">💬 Wiadomości, dyskusje i autoresponder Allegro</h2><p class="order-detail-lead">Panel pobiera Centrum wiadomości oraz Dyskusje/Reklamacje. Autoresponder odpowiada tylko raz na pierwszy kontakt klienta i zapisuje historię, żeby nie wysłać duplikatu.</p></div>
+      <div class="diag-actions" style="margin-top:0">
+        <button class="btn" onclick="allegroSynchronizujKomunikacje(true)">🔄 Synchronizuj i odpowiedz</button>
+        <button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">📥 Tylko pobierz</button>
+      </div>
+    </div>
+    <div class="orders-stat-grid">
+      <div class="order-stat-card ${st.threadNeed?"hot":""}"><span>💬</span><b>${st.threads.length}</b><small>wątki wiadomości</small></div>
+      <div class="order-stat-card ${st.issueNeed?"hot":""}"><span>🛟</span><b>${st.issues.length}</b><small>dyskusje/reklamacje</small></div>
+      <div class="order-stat-card ${st.totalNeed?"hot":"money"}"><span>⚡</span><b>${st.totalNeed}</b><small>czeka na pierwszą odpowiedź</small></div>
+      <div class="order-stat-card money"><span>✅</span><b>${st.sent}</b><small>auto-odpowiedzi zapisane</small></div>
+    </div>
+    ${allegroKomunikacjaBledyHTML()}
+    <form class="panel-subtle" style="margin-top:1rem" onsubmit="event.preventDefault();allegroZapiszUstawieniaKomunikacji(this)">
+      <div class="order-section-head">
+        <div><h3 style="margin:0">⚙️ Ustawienia autorespondera</h3><p class="order-detail-lead">Harmonogram Netlify sprawdza komunikację co 15 minut. Odpowiedź idzie tylko dla świeżych pierwszych wiadomości bez odpowiedzi sprzedawcy.</p></div>
+        <button class="btn" type="submit">💾 Zapisz ustawienia</button>
+      </div>
+      <div class="form-grid">
+        <label class="check"><input type="checkbox" name="enabled" ${s.enabled?"checked":""}> Autoresponder aktywny</label>
+        <label class="check"><input type="checkbox" name="messageCenter" ${s.messageCenter?"checked":""}> Centrum wiadomości</label>
+        <label class="check"><input type="checkbox" name="issues" ${s.issues?"checked":""}> Dyskusje i reklamacje</label>
+        <div class="f-group"><label>Odpowiadaj tylko na wiadomości z ostatnich godzin</label><input name="freshHours" type="number" min="1" max="168" value="${esc(s.freshHours||48)}"></div>
+      </div>
+      <div class="f-group"><label>Treść automatycznej pierwszej odpowiedzi <small style="font-weight:400;color:var(--muted2)">zmienne: {login}, {typ}</small></label><textarea name="template" rows="7" maxlength="2000">${esc(s.template||"")}</textarea></div>
+    </form>
+    <div class="panel-subtle" style="margin-top:1rem">
+      <div class="order-section-head"><div><h3 style="margin:0">💬 Centrum wiadomości</h3><p class="order-detail-lead">Najpierw najnowsze wątki. Pełna odpowiedź ręczna nadal odbywa się w Allegro, tutaj monitorujemy i wysyłamy pierwsze potwierdzenie.</p></div></div>
+      <div class="ai-task-list">${st.threads.map(allegroWatekHTML).join("") || `<p style="color:var(--muted2)">Brak pobranych wątków. Kliknij „Synchronizuj”.</p>`}</div>
+    </div>
+    <div class="panel-subtle" style="margin-top:1rem">
+      <div class="order-section-head"><div><h3 style="margin:0">🛟 Dyskusje i reklamacje</h3><p class="order-detail-lead">Używane jest nowe API Allegro `/sale/issues`, a nie stare `/sale/disputes`.</p></div></div>
+      <div class="ai-task-list">${st.issues.map(allegroIssueHTML).join("") || `<p style="color:var(--muted2)">Brak pobranych dyskusji/reklamacji. Kliknij „Synchronizuj”.</p>`}</div>
+    </div>
+  </div>`;
+}
 function adminSubnavHTML(items, aktywny){
   const safe = (items||[]).filter(x=>x&&x.id&&x.href&&x.label);
   return `<nav class="panel admin-tabs-panel module-tabs-panel" aria-label="Podsekcje panelu"><div class="shipping-tabs admin-main-tabs">${safe.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}" ${x.id===aktywny?'aria-current="page"':""} title="${esc(x.label)}"><span class="tab-label">${esc(x.label)}</span>${x.badge?`<span class="nav-badge">${esc(x.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
@@ -5418,11 +5578,13 @@ function publikacjaSubnavHTML(aktywny="kontrola"){
   ],aktywny);
 }
 function allegroSubnavHTML(aktywny="start"){
+  const st=allegroKomunikacjaStaty();
   return adminSubnavHTML([
     {id:"start",href:"#/admin/allegro",label:"Start"},
     {id:"zamowienia",href:"#/admin/allegro/zamowienia",label:"📦 Zamówienia Allegro"},
     {id:"oferty",href:"#/admin/allegro/oferty",label:"🏷️ Oferty i mapowanie"},
     {id:"wystawianie",href:"#/admin/allegro/wystawianie",label:"🟠 Wystawianie"},
+    {id:"komunikacja",href:"#/admin/allegro/komunikacja",label:"💬 Wiadomości i dyskusje",badge:st.totalNeed||""},
     {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"}
   ],aktywny);
 }
@@ -5437,6 +5599,7 @@ function allegroStartPanelHTML(mapped,niepodpiete){
         <a class="btn" href="#/admin/allegro/zamowienia">📦 Zamówienia Allegro</a>
         <a class="btn ghost" href="#/admin/allegro/oferty">🏷️ Mapuj oferty</a>
         <a class="btn ghost" href="#/admin/allegro/wystawianie">🟠 Wystaw produkt</a>
+        <a class="btn ghost" href="#/admin/allegro/komunikacja">💬 Wiadomości</a>
       </div>
     </div>
     <div class="orders-stat-grid">
@@ -5449,9 +5612,10 @@ function allegroStartPanelHTML(mapped,niepodpiete){
 }
 function widokAdminAllegro(sekcja="start"){
   allegroLadujJesliTrzeba();
+  if(sekcja==="komunikacja"&&!allegroKomunikacja?.updated_at&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
   const mapped=Object.keys(allegroMapowania||{}).length;
   const niepodpiete=(allegroOferty||[]).filter(o=>!allegroProduktDlaOferty(o.id)).length;
-  const aktywna=["zamowienia","oferty","wystawianie"].includes(sekcja)?sekcja:"start";
+  const aktywna=["zamowienia","oferty","wystawianie","komunikacja"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
   <div class="panel allegro-hero-panel">
     <div class="orders-hero">
@@ -5472,6 +5636,7 @@ function widokAdminAllegro(sekcja="start"){
       <div class="order-stat-card ${allegroStan.connected?"":"hot"}"><span>🔐</span><b>${allegroStan.connected?"TAK":"NIE"}</b><small>autoryzacja OAuth</small></div>
       <div class="order-stat-card hot"><span>📦</span><b>${(allegroZamowienia||[]).length}</b><small>zamówień Allegro</small></div>
       <div class="order-stat-card"><span>🏷️</span><b>${(allegroOferty||[]).length}</b><small>ofert Allegro</small></div>
+      <div class="order-stat-card ${allegroKomunikacjaStaty().totalNeed?"hot":""}"><span>💬</span><b>${allegroKomunikacjaStaty().totalNeed}</b><small>wiadomości do pierwszej odp.</small></div>
       <div class="order-stat-card money"><span>🔗</span><b>${mapped}</b><small>podpiętych ofert</small></div>
       <div class="order-stat-card ${niepodpiete?"hot":""}"><span>🧩</span><b>${niepodpiete}</b><small>ofert bez produktu</small></div>
     </div>
@@ -5481,7 +5646,7 @@ function widokAdminAllegro(sekcja="start"){
     </div>
     ${allegroSubnavHTML(aktywna)}
   </div>
-  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
+  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="komunikacja"?allegroKomunikacjaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
   `);
 }
 function alertDostepnosciZamowieniaHTML(z){

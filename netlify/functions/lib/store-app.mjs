@@ -1095,19 +1095,21 @@ async function allegroAccessToken(req) {
   await zapisz('allegro_auth', zapis);
   return zapis.access_token;
 }
-async function allegroWywolaj(req, path, { method = 'GET', parameters = {}, bodyObj = null } = {}) {
+const ALLEGRO_PUBLIC_JSON = 'application/vnd.allegro.public.v1+json';
+const ALLEGRO_BETA_JSON = 'application/vnd.allegro.beta.v1+json';
+async function allegroWywolaj(req, path, { method = 'GET', parameters = {}, bodyObj = null, accept = ALLEGRO_PUBLIC_JSON, contentType = null } = {}) {
   const c = allegroKonfiguracja(req);
   const token = await allegroAccessToken(req);
   const apiUrl = new URL(path, c.apiBaseUrl);
   for (const [k, v] of Object.entries(parameters || {})) if (v !== undefined && v !== null && v !== '') apiUrl.searchParams.set(k, String(v));
   const headers = {
     'Authorization': `Bearer ${token}`,
-    'Accept': 'application/vnd.allegro.public.v1+json',
+    'Accept': accept,
     'Accept-Language': 'pl-PL',
     'User-Agent': 'Artway-TM/1.0 Netlify Function',
   };
   const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
-  if (body) headers['Content-Type'] = 'application/vnd.allegro.public.v1+json';
+  if (body) headers['Content-Type'] = contentType || accept || ALLEGRO_PUBLIC_JSON;
   const r = await fetch(apiUrl.toString(), { method, headers, body });
   const textBody = await r.text();
   let dane = {};
@@ -1120,6 +1122,11 @@ async function allegroWywolaj(req, path, { method = 'GET', parameters = {}, body
     throw blad;
   }
   return dane;
+}
+function allegroLista(raw = {}, keys = []) {
+  for (const key of keys) if (Array.isArray(raw?.[key])) return raw[key];
+  if (Array.isArray(raw)) return raw;
+  return [];
 }
 function allegroKwotaText(raw) {
   if (!raw) return '';
@@ -1607,6 +1614,97 @@ async function allegroSugerujKategorie(req, product = {}, opt = {}) {
 function allegroMaKategorie(product = {}, opt = {}) {
   return !!tekst(opt.categoryId || product.allegroCategoryId || product.categoryId || '', 80).trim();
 }
+function allegroPierwszyId(lista = []) {
+  const x = (Array.isArray(lista) ? lista : []).find((item) => tekst(item?.id || item?.uuid || '', 120).trim());
+  return tekst(x?.id || x?.uuid || '', 120).trim();
+}
+function allegroNormalizujWarunki(raw = {}) {
+  return {
+    shippingRates: allegroLista(raw.shippingRates, ['shippingRates', 'items', 'rates']).map((x) => ({ id: tekst(x.id, 120), name: tekst(x.name || x.label, 250) })).filter((x) => x.id),
+    returnPolicies: allegroLista(raw.returnPolicies, ['returnPolicies', 'items', 'policies']).map((x) => ({ id: tekst(x.id, 120), name: tekst(x.name || x.label, 250) })).filter((x) => x.id),
+    impliedWarranties: allegroLista(raw.impliedWarranties, ['impliedWarranties', 'items', 'warranties']).map((x) => ({ id: tekst(x.id, 120), name: tekst(x.name || x.label, 250) })).filter((x) => x.id),
+    warranties: allegroLista(raw.warranties, ['warranties', 'items']).map((x) => ({ id: tekst(x.id, 120), name: tekst(x.name || x.label, 250) })).filter((x) => x.id),
+  };
+}
+async function allegroWarunkiSprzedazy(req) {
+  const errors = [];
+  const safe = async (path, key) => {
+    try { return await allegroWywolaj(req, path, { parameters: { limit: 100, offset: 0 } }); }
+    catch (e) { errors.push({ key, path, status: e.status || 0, code: e.code || '', message: e.message || String(e) }); return {}; }
+  };
+  const [shippingRatesRaw, returnPoliciesRaw, impliedWarrantiesRaw, warrantiesRaw] = await Promise.all([
+    safe('/sale/shipping-rates', 'shippingRates'),
+    safe('/after-sales-service-conditions/return-policies', 'returnPolicies'),
+    safe('/after-sales-service-conditions/implied-warranties', 'impliedWarranties'),
+    safe('/after-sales-service-conditions/warranties', 'warranties'),
+  ]);
+  const data = allegroNormalizujWarunki({ shippingRates: shippingRatesRaw, returnPolicies: returnPoliciesRaw, impliedWarranties: impliedWarrantiesRaw, warranties: warrantiesRaw });
+  return { ...data, defaults: {
+    shippingRateId: allegroPierwszyId(data.shippingRates),
+    returnPolicyId: allegroPierwszyId(data.returnPolicies),
+    impliedWarrantyId: allegroPierwszyId(data.impliedWarranties),
+    warrantyId: allegroPierwszyId(data.warranties),
+  }, errors };
+}
+async function allegroParametryKategorii(req, categoryId = '') {
+  const id = tekst(categoryId, 80).trim();
+  if (!id) return { parameters: [], errors: [] };
+  try {
+    const raw = await allegroWywolaj(req, `/sale/categories/${encodeURIComponent(id)}/parameters`);
+    return { parameters: Array.isArray(raw.parameters) ? raw.parameters : [], errors: [] };
+  } catch (e) {
+    return { parameters: [], errors: [{ key: 'categoryParameters', status: e.status || 0, code: e.code || '', message: e.message || String(e) }] };
+  }
+}
+function allegroParamNazwa(p = {}) {
+  return allegroNormTekst(p.name || p.id || '');
+}
+function allegroSlownikValueId(p = {}, regex) {
+  const vals = Array.isArray(p.dictionary) ? p.dictionary
+    : Array.isArray(p.values) ? p.values
+      : Array.isArray(p.restrictions?.allowedValues) ? p.restrictions.allowedValues
+        : [];
+  for (const v of vals) {
+    const label = tekst(v.value || v.name || v.label || '', 200);
+    if (regex.test(label)) return tekst(v.id || v.valueId || v.value || '', 120).trim();
+  }
+  return '';
+}
+function allegroDodajParam(out, p, value, valueId = false) {
+  const id = tekst(p?.id, 80).trim();
+  if (!id || value === undefined || value === null || value === '') return;
+  const v = String(value).trim();
+  if (!v) return;
+  if (valueId) out.push({ id, valuesIds: [v] });
+  else if (/^[a-z0-9]+_[a-z0-9-]+$/i.test(v)) out.push({ id, valuesIds: [v] });
+  else out.push({ id, values: [tekst(v, 500)] });
+}
+function allegroParametryAutomatyczne(product = {}, categoryParameters = []) {
+  const p = product || {};
+  const out = [];
+  const gtin = tekst(p.gtin || p.ean, 80).trim();
+  const kod = tekst(p.kodProducenta || p.mpn || p.externalId || p.sku, 160).trim();
+  const marka = tekst(p.marka || p.producent || 'Alexander', 160).trim();
+  for (const param of Array.isArray(categoryParameters) ? categoryParameters : []) {
+    const n = allegroParamNazwa(param);
+    if (/\bean\b|gtin|kod kreskowy/.test(n) && gtin) allegroDodajParam(out, param, gtin);
+    else if (/kod producenta|mpn|symbol producenta/.test(n) && kod) allegroDodajParam(out, param, kod);
+    else if (/marka|producent/.test(n) && marka) {
+      const dict = allegroSlownikValueId(param, new RegExp(`^${marka.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
+      allegroDodajParam(out, param, dict || marka, !!dict);
+    } else if (/^stan$|stan produktu|condition/.test(n)) {
+      const nowy = allegroSlownikValueId(param, /nowy|new/i);
+      allegroDodajParam(out, param, nowy || 'Nowy', !!nowy);
+    }
+  }
+  const seen = new Set();
+  return out.filter((x) => {
+    const key = `${x.id}:${(x.valuesIds || x.values || []).join('|')}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   const options = { ...(opt || {}) };
   let categorySuggestion = null;
@@ -1614,29 +1712,44 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     categorySuggestion = await allegroSugerujKategorie(req, product, { limit: 8 });
     if (categorySuggestion?.selected?.id) options.categoryId = categorySuggestion.selected.id;
   }
+  const categoryId = tekst(options.categoryId || product.allegroCategoryId || product.categoryId || '', 80).trim();
+  const [salesConditions, categoryParameters] = await Promise.all([
+    allegroWarunkiSprzedazy(req),
+    allegroParametryKategorii(req, categoryId),
+  ]);
+  options.salesConditions = salesConditions;
+  options.categoryParameters = categoryParameters.parameters;
   const draft = allegroDraftZProduktu(product, options);
-  return { ...draft, categorySuggestion };
+  return { ...draft, categorySuggestion, salesConditions, categoryParameters: categoryParameters.parameters, supportErrors: [...(salesConditions.errors || []), ...(categoryParameters.errors || [])] };
 }
 function allegroDraftZProduktu(product = {}, opt = {}) {
   const p = product || {};
   const categoryId = tekst(opt.categoryId || p.allegroCategoryId || p.categoryId || '', 80).trim();
   const images = [p.zdjecie, ...(Array.isArray(p.zdjecia) ? p.zdjecia : [])].filter(Boolean).slice(0, 16);
   const externalId = tekst(p.externalId || p.sku || p.kodProducenta || p.mpn || p.id || '', 120).trim();
+  const allegroProductId = tekst(p.allegroProductId || '', 120).trim();
+  const gtin = tekst(p.gtin || p.ean, 80).trim();
   const parameters = [];
-  if (p.gtin || p.ean) parameters.push({ name: 'EAN', values: [tekst(p.gtin || p.ean, 80)] });
+  if (gtin) parameters.push({ name: 'EAN', values: [gtin] });
   if (p.kodProducenta || p.mpn) parameters.push({ name: 'Kod producenta', values: [tekst(p.kodProducenta || p.mpn, 120)] });
   if (p.marka) parameters.push({ name: 'Marka', values: [tekst(p.marka, 120)] });
+  const autoParameters = allegroParametryAutomatyczne(p, opt.categoryParameters);
+  const productObj = allegroProductId
+    ? { id: allegroProductId }
+    : (!categoryId && gtin)
+      ? { id: gtin, idType: 'GTIN' }
+      : {
+          name: tekst(p.nazwa || p.name, 75).trim(),
+          category: categoryId ? { id: categoryId } : undefined,
+          parameters: [...parameters, ...autoParameters],
+          images,
+        };
   const payload = {
     name: tekst(p.nazwa || p.name, 75).trim(),
-    category: categoryId ? { id: categoryId } : undefined,
     productSet: [{
-      product: {
-        id: tekst(p.allegroProductId || '', 120).trim() || undefined,
-        name: tekst(p.nazwa || p.name, 75).trim(),
-        category: categoryId ? { id: categoryId } : undefined,
-        parameters,
-      },
+      product: productObj,
     }],
+    parameters: autoParameters,
     sellingMode: {
       format: 'BUY_NOW',
       price: { amount: String(Number(p.cena || p.price || 0).toFixed(2)), currency: 'PLN' },
@@ -1649,13 +1762,201 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
       sections: [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(tekst(p.opis || p.opisKrotki || '', 12000)).replace(/\n/g, '<br>')}</p>` }] }],
     },
   };
+  const sc = opt.salesConditions || {};
+  const defaults = sc.defaults || {};
+  if (defaults.shippingRateId) payload.delivery = { shippingRates: { id: defaults.shippingRateId } };
+  const afterSalesServices = {};
+  if (defaults.returnPolicyId) afterSalesServices.returnPolicy = { id: defaults.returnPolicyId };
+  if (defaults.impliedWarrantyId) afterSalesServices.impliedWarranty = { id: defaults.impliedWarrantyId };
+  if (defaults.warrantyId) afterSalesServices.warranty = { id: defaults.warrantyId };
+  if (Object.keys(afterSalesServices).length) payload.afterSalesServices = afterSalesServices;
   const missing = [];
   if (!payload.name) missing.push('nazwa');
-  if (!categoryId) missing.push('allegroCategoryId');
+  if (!categoryId && !allegroProductId && !gtin) missing.push('allegroCategoryId albo EAN/GTIN');
   if (!Number(p.cena || p.price || 0)) missing.push('cena');
   if (!images.length) missing.push('zdjęcia');
-  if (!(p.gtin || p.ean)) missing.push('EAN/GTIN');
+  if (!gtin && !allegroProductId) missing.push('EAN/GTIN albo ID produktu Allegro');
   return { payload: JSON.parse(JSON.stringify(payload)), missing };
+}
+
+const ALLEGRO_AUTO_REPLY_DEFAULT = `Dzień dobry,
+
+dziękujemy za wiadomość. Potwierdzamy, że zgłoszenie trafiło do obsługi Artway-TM. Odpowiemy możliwie jak najszybciej.
+
+Pozdrawiamy
+Artway-TM`;
+function allegroUstawieniaKomunikacji(raw = {}) {
+  return {
+    enabled: raw.enabled !== false,
+    messageCenter: raw.messageCenter !== false,
+    issues: raw.issues !== false,
+    freshHours: Math.max(1, Math.min(168, Number(raw.freshHours || 48))),
+    template: tekst(raw.template || ALLEGRO_AUTO_REPLY_DEFAULT, 2000).trim() || ALLEGRO_AUTO_REPLY_DEFAULT,
+  };
+}
+function allegroNormalizujWiadomosc(m = {}, fallbackThreadId = '') {
+  return {
+    id: tekst(m.id, 120),
+    threadId: tekst(m.thread?.id || fallbackThreadId, 120),
+    text: tekst(m.text || m.body || '', 3000),
+    subject: tekst(m.subject || '', 300),
+    createdAt: tekst(m.createdAt || m.created_at || '', 80),
+    authorLogin: tekst(m.author?.login || m.author?.id || '', 200),
+    incoming: m.author?.isInterlocutor === true,
+    status: tekst(m.status || '', 80),
+    offerId: tekst(m.relatesTo?.offer?.id || '', 100),
+    orderId: tekst(m.relatesTo?.order?.id || '', 120),
+    attachments: Array.isArray(m.attachments) ? m.attachments : [],
+  };
+}
+function allegroNormalizujWatek(t = {}, messages = []) {
+  const msgs = (Array.isArray(messages) ? messages : []).map((m) => allegroNormalizujWiadomosc(m, t.id));
+  const last = msgs.slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null;
+  return {
+    id: tekst(t.id, 120),
+    read: !!t.read,
+    lastMessageDateTime: tekst(t.lastMessageDateTime || t.updatedAt || last?.createdAt || '', 80),
+    buyerLogin: tekst(t.interlocutor?.login || last?.authorLogin || '', 200),
+    subject: tekst(t.subject || last?.subject || '', 300),
+    messages: msgs,
+    lastMessage: last,
+    incomingCount: msgs.filter((m) => m.incoming).length,
+    sellerCount: msgs.filter((m) => !m.incoming).length,
+  };
+}
+function allegroNormalizujIssueChatMessage(m = {}, fallbackIssueId = '') {
+  const role = String(m.author?.role || '').toUpperCase();
+  return {
+    id: tekst(m.id, 120),
+    issueId: tekst(fallbackIssueId, 120),
+    text: tekst(m.text || '', 3000),
+    createdAt: tekst(m.createdAt || '', 80),
+    authorLogin: tekst(m.author?.login || '', 200),
+    role,
+    incoming: role === 'BUYER',
+    attachments: Array.isArray(m.attachments) ? m.attachments : [],
+  };
+}
+function allegroNormalizujIssue(i = {}, chat = []) {
+  const msgs = (Array.isArray(chat) ? chat : []).map((m) => allegroNormalizujIssueChatMessage(m, i.id));
+  const last = msgs.slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null;
+  return {
+    id: tekst(i.id, 120),
+    type: tekst(i.type || '', 60),
+    status: tekst(i.currentState?.status || i.status || '', 120),
+    openedDate: tekst(i.openedDate || '', 80),
+    dueDate: tekst(i.currentState?.dueDate || i.currentState?.statusDueDate || i.decisionDueDate || '', 80),
+    subject: tekst(i.subject || i.reason?.type || '', 240),
+    buyerLogin: tekst(i.buyer?.login || i.chat?.initialMessage?.author?.login || '', 200),
+    orderId: tekst(i.checkoutForm?.id || '', 120),
+    offerId: tekst(i.offer?.id || '', 120),
+    chatActive: i.currentState?.chatActive !== false,
+    messagesCount: Number(i.chat?.messagesCount || msgs.length) || msgs.length,
+    initialMessage: i.chat?.initialMessage || null,
+    messages: msgs,
+    lastMessage: last || allegroNormalizujIssueChatMessage(i.chat?.initialMessage || {}, i.id),
+  };
+}
+function allegroJestSwieze(dateText = '', hours = 48) {
+  const t = new Date(dateText).getTime();
+  if (!Number.isFinite(t) || !t) return false;
+  return Date.now() - t <= Math.max(1, Number(hours) || 48) * 3600 * 1000;
+}
+function allegroPierwszaWiadomoscKlienta(messages = []) {
+  const sorted = (Array.isArray(messages) ? messages : []).slice().sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  return sorted.find((m) => m.incoming) || null;
+}
+function allegroMaOdpowiedzSprzedawcyPo(messages = [], msg = null) {
+  if (!msg) return false;
+  const t = new Date(msg.createdAt || 0).getTime() || 0;
+  return (Array.isArray(messages) ? messages : []).some((m) => !m.incoming && ((new Date(m.createdAt || 0).getTime() || 0) >= t));
+}
+function allegroAutoReplyText(settings = {}, item = {}, kind = 'message') {
+  const buyer = item.buyerLogin || 'Kliencie';
+  return String(settings.template || ALLEGRO_AUTO_REPLY_DEFAULT)
+    .replace(/\{login\}/g, buyer)
+    .replace(/\{typ\}/g, kind === 'issue' ? 'dyskusję/reklamację' : 'wiadomość')
+    .slice(0, 2000);
+}
+async function allegroPobierzKomunikacje(req, { limit = 20 } = {}) {
+  const safeLimit = Math.max(1, Math.min(20, Number(limit) || 20));
+  const errors = [];
+  let threadsSource = [];
+  try {
+    const threadsRaw = await allegroWywolaj(req, '/messaging/threads', { parameters: { limit: safeLimit, offset: 0 } });
+    threadsSource = allegroLista(threadsRaw, ['threads', 'items']);
+  } catch (e) {
+    errors.push({ key: 'threads', status: e.status || 0, code: e.code || '', message: e.message || String(e) });
+  }
+  const threads = [];
+  for (const t of threadsSource.slice(0, safeLimit)) {
+    const id = tekst(t.id, 120);
+    if (!id) continue;
+    let messages = [];
+    try {
+      const raw = await allegroWywolaj(req, `/messaging/threads/${encodeURIComponent(id)}/messages`, { parameters: { limit: 20, offset: 0 } });
+      messages = allegroLista(raw, ['messages', 'items']);
+    } catch {}
+    threads.push(allegroNormalizujWatek(t, messages));
+  }
+  let issuesSource = [];
+  try {
+    const issuesRaw = await allegroWywolaj(req, '/sale/issues', { parameters: { limit: safeLimit, offset: 0 }, accept: ALLEGRO_BETA_JSON });
+    issuesSource = allegroLista(issuesRaw, ['issues', 'items']);
+  } catch (e) {
+    errors.push({ key: 'issues', status: e.status || 0, code: e.code || '', message: e.message || String(e) });
+  }
+  const issues = [];
+  for (const i of issuesSource.slice(0, safeLimit)) {
+    const id = tekst(i.id, 120);
+    if (!id) continue;
+    let chat = [];
+    try {
+      const raw = await allegroWywolaj(req, `/sale/issues/${encodeURIComponent(id)}/chat`, { accept: ALLEGRO_BETA_JSON });
+      chat = allegroLista(raw, ['chat', 'messages', 'items']);
+    } catch {}
+    issues.push(allegroNormalizujIssue(i, chat));
+  }
+  return { threads, issues, errors };
+}
+async function allegroWyslijAutoOdpowiedzi(req, data, settings) {
+  const rec = await czytaj('allegro_auto_replies', { items: {}, updated_at: null });
+  const items = rec.items && typeof rec.items === 'object' ? rec.items : {};
+  const sent = [];
+  const skipped = [];
+  const s = allegroUstawieniaKomunikacji(settings);
+  const markSkip = (key, reason) => skipped.push({ key, reason });
+  if (s.enabled && s.messageCenter) {
+    for (const thread of data.threads || []) {
+      const first = allegroPierwszaWiadomoscKlienta(thread.messages);
+      const key = `thread:${thread.id}`;
+      if (!first) { markSkip(key, 'brak wiadomości klienta'); continue; }
+      if (items[key]) { markSkip(key, 'już wysłano'); continue; }
+      if (!allegroJestSwieze(first.createdAt, s.freshHours)) { markSkip(key, 'stare zgłoszenie'); continue; }
+      if (allegroMaOdpowiedzSprzedawcyPo(thread.messages, first)) { markSkip(key, 'sprzedawca już odpowiedział'); continue; }
+      const text = allegroAutoReplyText(s, thread, 'thread');
+      const res = await allegroWywolaj(req, `/messaging/threads/${encodeURIComponent(thread.id)}/messages`, { method: 'POST', bodyObj: { text, attachments: [] } });
+      items[key] = { key, type: 'thread', id: thread.id, sourceMessageId: first.id, responseId: res.id || '', sent_at: new Date().toISOString(), buyerLogin: thread.buyerLogin };
+      sent.push(items[key]);
+    }
+  }
+  if (s.enabled && s.issues) {
+    for (const issue of data.issues || []) {
+      const first = allegroPierwszaWiadomoscKlienta(issue.messages.length ? issue.messages : [issue.lastMessage].filter(Boolean));
+      const key = `issue:${issue.id}`;
+      if (!first) { markSkip(key, 'brak wiadomości klienta'); continue; }
+      if (items[key]) { markSkip(key, 'już wysłano'); continue; }
+      if (!issue.chatActive) { markSkip(key, 'czat nieaktywny'); continue; }
+      if (!allegroJestSwieze(first.createdAt, s.freshHours)) { markSkip(key, 'stare zgłoszenie'); continue; }
+      if (allegroMaOdpowiedzSprzedawcyPo(issue.messages, first)) { markSkip(key, 'sprzedawca już odpowiedział'); continue; }
+      const text = allegroAutoReplyText(s, issue, 'issue');
+      const res = await allegroWywolaj(req, `/sale/issues/${encodeURIComponent(issue.id)}/message`, { method: 'POST', accept: ALLEGRO_BETA_JSON, contentType: ALLEGRO_BETA_JSON, bodyObj: { text, attachments: [], type: 'REGULAR' } });
+      items[key] = { key, type: 'issue', id: issue.id, sourceMessageId: first.id, responseId: res.id || '', sent_at: new Date().toISOString(), buyerLogin: issue.buyerLogin };
+      sent.push(items[key]);
+    }
+  }
+  await zapisz('allegro_auto_replies', { items, updated_at: new Date().toISOString() });
+  return { sent, skipped, items };
 }
 
 // ─── INPOST ShipX (przesyłki, etykiety, tracking) + Geowidget ───
@@ -2664,7 +2965,58 @@ export default async (req) => {
       return odpowiedz({ ok: true, allegro: await allegroStatus(req), offers: items, mappings: allegroMapowaniaItems(mappings), updated_at: rec.updated_at });
     }
 
+    // ─── ALLEGRO: komunikacja z klientami i autoresponder (admin) ───
+    if (action === 'allegro-communications-data') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const comm = await czytaj('allegro_communications', { threads: [], issues: [], updated_at: null, errors: [] });
+      const settings = allegroUstawieniaKomunikacji(await czytaj('allegro_communication_settings', {}));
+      const replies = await czytaj('allegro_auto_replies', { items: {}, updated_at: null });
+      return odpowiedz({
+        ok: true,
+        allegro: await allegroStatus(req),
+        threads: Array.isArray(comm.threads) ? comm.threads : [],
+        issues: Array.isArray(comm.issues) ? comm.issues : [],
+        errors: Array.isArray(comm.errors) ? comm.errors : [],
+        updated_at: comm.updated_at || null,
+        settings,
+        autoReplies: replies.items && typeof replies.items === 'object' ? replies.items : {},
+        autoRepliesUpdatedAt: replies.updated_at || null,
+      });
+    }
+
+    if (action === 'allegro-communications-settings') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const settings = allegroUstawieniaKomunikacji(body.settings || body);
+      await zapisz('allegro_communication_settings', { ...settings, updated_at: new Date().toISOString() });
+      return odpowiedz({ ok: true, settings });
+    }
+
+    if (action === 'allegro-sync-communications') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const settings = allegroUstawieniaKomunikacji(await czytaj('allegro_communication_settings', {}));
+      const data = await allegroPobierzKomunikacje(req, { limit: body.limit || 20 });
+      let autoReply = { sent: [], skipped: [], items: {} };
+      if (body.autoReply !== false && settings.enabled) autoReply = await allegroWyslijAutoOdpowiedzi(req, data, settings);
+      const rec = { threads: data.threads, issues: data.issues, errors: data.errors || [], updated_at: new Date().toISOString(), autoReplyLastRun: autoReply.sent?.length || 0 };
+      await zapisz('allegro_communications', rec);
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), ...rec, settings, autoReply });
+    }
+
     // ─── ALLEGRO: szkic i wystawienie produktu sklepu jako oferty ───
+    if (action === 'allegro-offer-support') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const categoryId = tekst(url.searchParams.get('categoryId') || '', 80).trim();
+      const [salesConditions, categoryParameters] = await Promise.all([
+        allegroWarunkiSprzedazy(req),
+        allegroParametryKategorii(req, categoryId),
+      ]);
+      return odpowiedz({ ok: true, salesConditions, categoryParameters: categoryParameters.parameters, errors: [...(salesConditions.errors || []), ...(categoryParameters.errors || [])] });
+    }
+
     if (action === 'allegro-categories') {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const phrase = tekst(url.searchParams.get('name') || url.searchParams.get('phrase') || url.searchParams.get('q') || '', 180).trim();
@@ -2696,7 +3048,7 @@ export default async (req) => {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
       const draft = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
-      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: draft.missing.length === 0, categorySuggestion: draft.categorySuggestion });
+      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: draft.missing.length === 0, categorySuggestion: draft.categorySuggestion, salesConditions: draft.salesConditions, categoryParameters: draft.categoryParameters, supportErrors: draft.supportErrors });
     }
 
     if (action === 'allegro-create-product-offer') {
@@ -2708,10 +3060,17 @@ export default async (req) => {
       if (!draft) {
         const prepared = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
         categorySuggestion = prepared.categorySuggestion;
-        if (prepared.missing.length) return odpowiedz({ ok: false, error: `Szkic wymaga uzupełnienia: ${prepared.missing.join(', ')}`, missing: prepared.missing, draft: prepared.payload, categorySuggestion }, 422);
+        if (prepared.missing.length) return odpowiedz({ ok: false, error: `Szkic wymaga uzupełnienia: ${prepared.missing.join(', ')}`, missing: prepared.missing, draft: prepared.payload, categorySuggestion, salesConditions: prepared.salesConditions, categoryParameters: prepared.categoryParameters, supportErrors: prepared.supportErrors }, 422);
         draft = prepared.payload;
       }
-      const created = await allegroWywolaj(req, '/sale/product-offers', { method: 'POST', bodyObj: draft });
+      let created;
+      try {
+        created = await allegroWywolaj(req, '/sale/product-offers', { method: 'POST', bodyObj: draft });
+      } catch (e) {
+        e.draft = draft;
+        e.categorySuggestion = categorySuggestion;
+        throw e;
+      }
       return odpowiedz({ ok: true, offer: created, allegro: await allegroStatus(req), categorySuggestion }, 201);
     }
 
@@ -3311,6 +3670,12 @@ export default async (req) => {
     };
     if (Array.isArray(e?.missingEnv)) body.missingEnv = e.missingEnv;
     if (e?.inpost?.details) body.details = e.inpost.details;
+    if (e?.allegro) body.allegroError = e.allegro;
+    if (e?.draft) body.draft = e.draft;
+    if (e?.categorySuggestion) body.categorySuggestion = e.categorySuggestion;
+    if (e?.salesConditions) body.salesConditions = e.salesConditions;
+    if (e?.categoryParameters) body.categoryParameters = e.categoryParameters;
+    if (e?.supportErrors) body.supportErrors = e.supportErrors;
     return odpowiedz(body, status);
   }
 };
