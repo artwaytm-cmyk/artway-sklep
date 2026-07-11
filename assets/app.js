@@ -252,6 +252,7 @@ let allegroZamowienia = wczytajLS("artway_allegro_zamowienia_cache", []);
 let allegroOferty = wczytajLS("artway_allegro_oferty_cache", []);
 let allegroMapowania = wczytajLS("artway_allegro_mapowania_cache", {});
 let allegroKomunikacja = wczytajLS("artway_allegro_komunikacja_cache", {threads:[],issues:[],settings:null,autoReplies:{},errors:[],requiresReauth:false,updated_at:null});
+let zaznaczoneAllegroZamowienia = new Set();
 let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null};
 let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", filtrAllegroZamowien="do_obslugi", filtrAllegroOfert="wszystkie", allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=250;
 
@@ -4968,7 +4969,7 @@ async function allegroPolacz(){
 async function allegroSynchronizujZamowienia(){
   try{
     toast("Pobieram wyłącznie nowe i gotowe do wysłania zamówienia Allegro oraz aktualizuję znane statusy…");
-    const d=await chmura("allegro-sync-orders",{method:"POST",body:{limit:1000},timeout:60000});
+    const d=await chmura("allegro-sync-orders",{method:"POST",body:{limit:100},timeout:60000});
     allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
     allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;
     allegroZapiszCache();
@@ -4978,12 +4979,29 @@ async function allegroSynchronizujZamowienia(){
 }
 async function allegroOznaczZamowienieSprawdzone(orderId,checked=true){
   try{
-    const d=await chmura("allegro-order-checked",{method:"POST",body:{orderId,checked},timeout:12000});
+    const orderIds=Array.isArray(orderId)?orderId:[orderId];
+    const d=await chmura("allegro-order-checked",{method:"POST",body:{orderIds,checked},timeout:30000});
     allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia.map(z=>String(z.id)===String(orderId)?d.order:z);
+    orderIds.forEach(id=>zaznaczoneAllegroZamowienia.delete(String(id)));
     allegroZapiszCache();
-    toast(checked?"Zamówienie oznaczone jako sprawdzone — nie wróci do kolejki zapotrzebowania.":"Zamówienie przywrócone do bieżącej obsługi.");
+    toast(checked?`Oznaczono jako sprawdzone: ${d.changed||orderIds.length} zleceń.`:`Przywrócono do obsługi: ${d.changed||orderIds.length} zleceń.`);
     renderuj();
   }catch(e){ toast("⚠️ Status obsługi Allegro: "+(e.message||e)); }
+}
+function allegroPrzelaczZaznaczenieZamowienia(orderId,checked){
+  const id=String(orderId||"");
+  if(!id)return;
+  if(checked)zaznaczoneAllegroZamowienia.add(id);else zaznaczoneAllegroZamowienia.delete(id);
+  renderuj();
+}
+function allegroWyczyscZaznaczenieZamowien(){
+  zaznaczoneAllegroZamowienia.clear();
+  renderuj();
+}
+function allegroOznaczZaznaczoneSprawdzone(checked=true){
+  const ids=[...zaznaczoneAllegroZamowienia];
+  if(!ids.length){toast("Zaznacz co najmniej jedno zlecenie");return;}
+  allegroOznaczZamowienieSprawdzone(ids,checked);
 }
 async function allegroZmienStatusRealizacji(orderId,status){
   try{
@@ -5330,14 +5348,25 @@ function allegroWierszeZamowien(){
   }
   return rows;
 }
-function allegroZamowieniaTabelaHTML(){
+function allegroPasujaceZamowienia(){
   const q=String(szukajAllegroZamowien||"").toLowerCase().trim();
   const wszystkie=Array.isArray(allegroZamowienia)?allegroZamowienia:[];
-  const wszystkieWiersze=allegroWierszeZamowien();
-  const pasujaceIds=q?new Set(wszystkieWiersze.filter(r=>r.tekst.includes(q)).map(r=>String(r.z.id))):null;
-  const widoczneZamowienia=wszystkie.filter(allegroZamowieniePasujeDoFiltra).filter(z=>{
-    return !pasujaceIds||pasujaceIds.has(String(z.id));
-  }).slice(0,allegroLimitWidokuZamowien);
+  const pasujaceIds=q?new Set(allegroWierszeZamowien().filter(r=>r.tekst.includes(q)).map(r=>String(r.z.id))):null;
+  return wszystkie.filter(allegroZamowieniePasujeDoFiltra).filter(z=>!pasujaceIds||pasujaceIds.has(String(z.id)));
+}
+function allegroZaznaczWidoczneZamowienia(checked=true){
+  allegroPasujaceZamowienia().slice(0,allegroLimitWidokuZamowien).forEach(z=>checked?zaznaczoneAllegroZamowienia.add(String(z.id)):zaznaczoneAllegroZamowienia.delete(String(z.id)));
+  renderuj();
+}
+function allegroZaznaczWszystkiePasujaceZamowienia(){
+  allegroPasujaceZamowienia().forEach(z=>zaznaczoneAllegroZamowienia.add(String(z.id)));
+  renderuj();
+}
+function allegroZamowieniaTabelaHTML(){
+  const wszystkie=Array.isArray(allegroZamowienia)?allegroZamowienia:[];
+  const pasujaceZamowienia=allegroPasujaceZamowienia();
+  const widoczneZamowienia=pasujaceZamowienia.slice(0,allegroLimitWidokuZamowien);
+  const zaznaczone=[...zaznaczoneAllegroZamowienia].filter(id=>wszystkie.some(z=>String(z.id)===id));
   const counts={do_obslugi:0,nowe:0,do_wyslania:0,sprawdzone:0,wyslane:0,anulowane:0,wszystkie:wszystkie.length};
   wszystkie.forEach(z=>{const s=allegroStatusKolejki(z);if(counts[s]!==undefined)counts[s]++;if(["nowe","do_wyslania"].includes(s))counts.do_obslugi++;});
   const filtry=[["do_obslugi","Do obsługi"],["nowe","Nowe"],["do_wyslania","Do wysłania"],["sprawdzone","Sprawdzone"],["wyslane","Wysłane"],["anulowane","Anulowane"],["wszystkie","Wszystkie"]];
@@ -5352,6 +5381,15 @@ function allegroZamowieniaTabelaHTML(){
       <label class="allegro-view-limit">Pokaż zleceń <select onchange="allegroLimitWidokuZamowien=Number(this.value)||100;renderuj()">${[25,50,100,250,500,1000].map(n=>`<option value="${n}" ${allegroLimitWidokuZamowien===n?"selected":""}>${n}</option>`).join("")}</select></label>
       ${szukajAllegroZamowien?`<button class="btn ghost" onclick="szukajAllegroZamowien='';renderuj()">Wyczyść</button>`:""}
     </div>
+    <div class="allegro-bulk-toolbar">
+      <div><b>Zaznaczanie zleceń</b><small>${zaznaczone.length} zaznaczonych • ${pasujaceZamowienia.length} w aktualnym filtrze</small></div>
+      <button class="btn ghost" onclick="allegroZaznaczWidoczneZamowienia(true)">☑️ Zaznacz widoczne</button>
+      <button class="btn ghost" onclick="allegroZaznaczWszystkiePasujaceZamowienia()">☑️ Zaznacz wszystkie (${pasujaceZamowienia.length})</button>
+      <button class="btn ghost" onclick="allegroWyczyscZaznaczenieZamowien()" ${zaznaczone.length?"":"disabled"}>Wyczyść</button>
+      <button class="btn" onclick="allegroOznaczZaznaczoneSprawdzone(true)" ${zaznaczone.length?"":"disabled"}>✅ Produkty pobrane</button>
+      <button class="btn ghost" onclick="allegroOznaczZaznaczoneSprawdzone(false)" ${zaznaczone.length?"":"disabled"}>↩️ Przywróć do obsługi</button>
+    </div>
+    <div class="backend-note">Synchronizacja zamówień wyłącznie odczytuje aktualne dane z Allegro. Status w Allegro zmienia się tylko po kliknięciu przycisku „Zmień status w Allegro” przy konkretnym zleceniu.</div>
     <div class="allegro-order-list">${widoczneZamowienia.map(allegroZlecenieHTML).join("") || `<div class="backend-note">Brak zamówień w tym filtrze. Synchronizacja pobiera wyłącznie nowe i gotowe do wysłania.</div>`}</div>
     ${widoczneZamowienia.length>=allegroLimitWidokuZamowien?`<p class="order-detail-lead">Pokazano pierwsze ${allegroLimitWidokuZamowien} zleceń. Zwiększ limit widoku powyżej, aby zobaczyć więcej.</p>`:""}
   </div>`;
@@ -5361,9 +5399,12 @@ function allegroZlecenieHTML(z){
   const items=Array.isArray(z.lineItems)&&z.lineItems.length?z.lineItems:[];
   const sztuk=items.reduce((sum,it)=>sum+Math.max(1,Number(it.quantity)||1),0);
   const idStatus=`allegro-status-${z.id}`;
-  return `<article class="allegro-order-card ${["anulowane","wyslane","sprawdzone"].includes(s)?"is-closed":"is-active"}">
+  const aktualnyStatus=String(z.fulfillmentStatus||z.status||"NEW").toUpperCase();
+  const statusyAllegro=[["NEW","Nowe"],["PROCESSING","W realizacji"],["READY_FOR_SHIPMENT","Gotowe do wysłania"],["SENT","Wysłane"],["CANCELLED","Anulowane"]];
+  const zaznaczone=zaznaczoneAllegroZamowienia.has(String(z.id));
+  return `<article class="allegro-order-card ${zaznaczone?"is-selected ":""}${["anulowane","wyslane","sprawdzone"].includes(s)?"is-closed":"is-active"}">
     <header class="allegro-order-head">
-      <div class="allegro-order-title"><span class="allegro-order-ico">📦</span><div><b>Zlecenie ${esc(z.id||z.nr||"—")}</b><small>${esc(allegroDataTxt(z.createdAt||z.firstFetchedAt))} • ${items.length} pozycji / ${sztuk} szt. • ${esc(z.total||"—")}</small></div></div>
+      <div class="allegro-order-title"><label class="allegro-order-select" title="Zaznacz całe zlecenie"><input type="checkbox" ${zaznaczone?"checked":""} onchange="allegroPrzelaczZaznaczenieZamowienia(${jsArg(z.id)},this.checked)"></label><span class="allegro-order-ico">📦</span><div><b>Zlecenie ${esc(z.id||z.nr||"—")}</b><small>${esc(allegroDataTxt(z.createdAt||z.firstFetchedAt))} • ${items.length} pozycji / ${sztuk} szt. • ${esc(z.total||"—")}</small></div></div>
       <div class="allegro-order-state"><span class="lvl ${meta.klasa}">${esc(meta.label)}</span><small>Allegro: ${esc(z.fulfillmentStatus||z.status||"—")}</small></div>
     </header>
     <div class="allegro-order-info">
@@ -5379,7 +5420,7 @@ function allegroZlecenieHTML(z){
     </details>
     <footer class="allegro-order-actions">
       ${s==="sprawdzone"?`<button class="btn ghost" onclick="allegroOznaczZamowienieSprawdzone(${jsArg(z.id)},false)">↩️ Przywróć do obsługi</button>`:!["wyslane","anulowane"].includes(s)?`<button class="btn" onclick="allegroOznaczZamowienieSprawdzone(${jsArg(z.id)},true)">✅ Produkty pobrane — sprawdzone</button>`:""}
-      ${!["wyslane","anulowane"].includes(s)?`<select id="${esc(idStatus)}"><option value="READY_FOR_SHIPMENT">Do wysłania</option><option value="SENT">Wysłane</option><option value="CANCELLED">Anulowane</option></select><button class="btn ghost" onclick="allegroZmienStatusRealizacji(${jsArg(z.id)},document.getElementById(${jsArg(idStatus)}).value)">Zapisz status w Allegro</button>`:""}
+      ${!["wyslane","anulowane"].includes(s)?`<select id="${esc(idStatus)}" aria-label="Status Allegro zlecenia">${statusyAllegro.map(([id,label])=>`<option value="${id}" ${aktualnyStatus===id?"selected":""}>${label} (${id})</option>`).join("")}</select><button class="btn ghost" onclick="allegroZmienStatusRealizacji(${jsArg(z.id)},document.getElementById(${jsArg(idStatus)}).value)">Zmień status w Allegro</button>`:""}
     </footer>
   </article>`;
 }
@@ -5509,15 +5550,20 @@ function allegroDataTxt(v){
   const t=Date.parse(v||"");
   return t?new Date(t).toLocaleString("pl-PL"):"—";
 }
-function allegroAutoReplyKlucz(type,id){
-  return `${type}:${id}`;
+function allegroAutoReplyKlucz(type,id,sourceId=""){
+  return `${type}:${id}${sourceId?":"+sourceId:""}`;
+}
+function allegroAutoReplyDla(type,item={}){
+  const replies=allegroKomunikacja?.autoReplies||{};
+  const source=String(item.latestNewIncomingKey||item.latestNewIncoming?.id||item.latestNewIncoming?.createdAt||"");
+  return (source&&replies[allegroAutoReplyKlucz(type,item.id,source)])||replies[allegroAutoReplyKlucz(type,item.id)]||null;
 }
 function allegroKomunikacjaStaty(){
   const threads=Array.isArray(allegroKomunikacja?.threads)?allegroKomunikacja.threads:[];
   const issues=Array.isArray(allegroKomunikacja?.issues)?allegroKomunikacja.issues:[];
   const replies=allegroKomunikacja?.autoReplies||{};
-  const threadNeed=threads.filter(t=>t.incomingCount&&!t.sellerCount&&!replies[allegroAutoReplyKlucz("thread",t.id)]).length;
-  const issueNeed=issues.filter(i=>i.lastMessage?.incoming&&!replies[allegroAutoReplyKlucz("issue",i.id)]).length;
+  const threadNeed=threads.filter(t=>t.needsReply&&!allegroAutoReplyDla("thread",t)).length;
+  const issueNeed=issues.filter(i=>i.needsReply&&!allegroAutoReplyDla("issue",i)).length;
   return {threads,issues,replies,threadNeed,issueNeed,totalNeed:threadNeed+issueNeed,sent:Object.keys(replies).length};
 }
 function allegroKomunikacjaBledyHTML(){
@@ -5529,13 +5575,13 @@ function allegroKomunikacjaBledyHTML(){
   return `<div class="backend-note" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Diagnostyka komunikacji Allegro:</b><br>${errors.map(e=>`• ${esc(e.key||"API")}: ${esc(e.message||e.code||"błąd")}${e.status?` (HTTP ${esc(e.status)})`:""}`).join("<br>")}</div>`;
 }
 function allegroWatekHTML(t){
-  const replies=allegroKomunikacja?.autoReplies||{};
-  const sent=replies[allegroAutoReplyKlucz("thread",t.id)];
+  const sent=allegroAutoReplyDla("thread",t);
   const last=t.lastMessage||{};
-  return `<div class="ai-task ${sent?"ok":(t.incomingCount&&!t.sellerCount?"warn":"")}" style="align-items:flex-start">
+  const nowa=!!t.needsReply;
+  return `<div class="ai-task ${sent?"ok":(nowa?"warn":"")}" style="align-items:flex-start">
     <div class="ai-task-ico">💬</div>
     <div>
-      <b>${esc(t.buyerLogin||"Klient Allegro")}</b> ${sent?`<span class="lvl lvl-ok">auto wysłane</span>`:t.incomingCount&&!t.sellerCount?`<span class="lvl lvl-ostrzezenie">czeka na odpowiedź</span>`:`<span class="lvl lvl-info">monitorowane</span>`}
+      <b>${esc(t.buyerLogin||"Klient Allegro")}</b> ${sent?`<span class="lvl lvl-ok">odpowiedź wysłana do nowej wiadomości</span>`:nowa?`<span class="lvl lvl-ostrzezenie">nowa wiadomość — czeka</span>`:`<span class="lvl lvl-info">brak nowej wiadomości</span>`}
       <p>${esc(skrocTekst(last.text||t.subject||"Brak treści",220))}</p>
       <small>Wątek: ${esc(t.id)} • ostatnia: ${esc(allegroDataTxt(t.lastMessageDateTime||last.createdAt))}${sent?` • auto: ${esc(allegroDataTxt(sent.sent_at))}`:""}</small>
     </div>
@@ -5543,13 +5589,13 @@ function allegroWatekHTML(t){
   </div>`;
 }
 function allegroIssueHTML(i){
-  const replies=allegroKomunikacja?.autoReplies||{};
-  const sent=replies[allegroAutoReplyKlucz("issue",i.id)];
+  const sent=allegroAutoReplyDla("issue",i);
   const last=i.lastMessage||{};
-  return `<div class="ai-task ${sent?"ok":(last.incoming?"warn":"")}" style="align-items:flex-start">
+  const nowa=!!i.needsReply;
+  return `<div class="ai-task ${sent?"ok":(nowa?"warn":"")}" style="align-items:flex-start">
     <div class="ai-task-ico">🛟</div>
     <div>
-      <b>${esc(i.type==="CLAIM"?"Reklamacja":"Dyskusja")} — ${esc(i.buyerLogin||"Klient Allegro")}</b> ${sent?`<span class="lvl lvl-ok">auto wysłane</span>`:last.incoming?`<span class="lvl lvl-ostrzezenie">od klienta</span>`:`<span class="lvl lvl-info">${esc(i.status||"status")}</span>`}
+      <b>${esc(i.type==="CLAIM"?"Reklamacja":"Dyskusja")} — ${esc(i.buyerLogin||"Klient Allegro")}</b> ${sent?`<span class="lvl lvl-ok">odpowiedź wysłana do nowej wiadomości</span>`:nowa?`<span class="lvl lvl-ostrzezenie">nowa wiadomość — czeka</span>`:`<span class="lvl lvl-info">brak nowej wiadomości</span>`}
       <p>${esc(skrocTekst(last.text||i.subject||"Brak treści",220))}</p>
       <small>ID: ${esc(i.id)} • status: ${esc(i.status||"—")} • zamówienie: ${esc(i.orderId||"—")} • termin: ${esc(allegroDataTxt(i.dueDate))}${sent?` • auto: ${esc(allegroDataTxt(sent.sent_at))}`:""}</small>
     </div>
@@ -5563,9 +5609,9 @@ function allegroKomunikacjaPanelHTML(){
   const wymagaPonownegoPolaczenia=!!allegroStan.requiresReauth||(!tokenAktualny&&(allegroKomunikacja?.requiresReauth||(allegroKomunikacja?.errors||[]).some(e=>Number(e.status)===403)));
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
-      <div><h2 style="margin-top:0">💬 Wiadomości, dyskusje i autoresponder Allegro</h2><p class="order-detail-lead">Panel pobiera Centrum wiadomości oraz Dyskusje/Reklamacje. Autoresponder odpowiada tylko raz na pierwszy kontakt klienta i zapisuje historię, żeby nie wysłać duplikatu.</p></div>
+      <div><h2 style="margin-top:0">💬 Wiadomości, dyskusje i autoresponder Allegro</h2><p class="order-detail-lead">Panel pobiera Centrum wiadomości oraz Dyskusje/Reklamacje. Autoresponder reaguje wyłącznie na nowe wiadomości wykryte od poprzedniego sprawdzenia i zapisuje identyfikator każdej odpowiedzi, żeby nigdy nie wysłać duplikatu.</p></div>
       <div class="diag-actions" style="margin-top:0">
-        ${wymagaPonownegoPolaczenia?`<button class="btn" onclick="allegroPolacz()">🔐 Napraw połączenie Allegro</button>`:`<button class="btn" onclick="allegroSynchronizujKomunikacje(true)">🔄 Synchronizuj i odpowiedz</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">📥 Tylko pobierz</button>`}
+        ${wymagaPonownegoPolaczenia?`<button class="btn" onclick="allegroPolacz()">🔐 Napraw połączenie Allegro</button>`:`<button class="btn" onclick="allegroSynchronizujKomunikacje(true)">🔄 Pobierz nowe i odpowiedz</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">📥 Tylko pobierz</button>`}
       </div>
     </div>
     <div class="orders-stat-grid">
@@ -5577,7 +5623,7 @@ function allegroKomunikacjaPanelHTML(){
     ${allegroKomunikacjaBledyHTML()}
     <form class="panel-subtle" style="margin-top:1rem" onsubmit="event.preventDefault();allegroZapiszUstawieniaKomunikacji(this)">
       <div class="order-section-head">
-        <div><h3 style="margin:0">⚙️ Ustawienia autorespondera</h3><p class="order-detail-lead">Harmonogram Netlify sprawdza komunikację co 15 minut. Odpowiedź idzie tylko dla świeżych pierwszych wiadomości bez odpowiedzi sprzedawcy.</p></div>
+        <div><h3 style="margin:0">⚙️ Ustawienia autorespondera</h3><p class="order-detail-lead">Harmonogram sprawdza komunikację co 15 minut. Odpowiedź otrzymuje wyłącznie nowa wiadomość klienta, której nie było w poprzedniej synchronizacji i na którą sprzedawca jeszcze nie odpowiedział. Pierwsze uruchomienie tworzy bazę odniesienia i nie odpowiada na stare rozmowy.</p></div>
         <button class="btn" type="submit">💾 Zapisz ustawienia</button>
       </div>
       <div class="form-grid">

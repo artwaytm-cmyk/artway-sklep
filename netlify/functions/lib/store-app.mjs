@@ -1901,6 +1901,36 @@ function allegroPierwszaWiadomoscKlienta(messages = []) {
   const sorted = (Array.isArray(messages) ? messages : []).slice().sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
   return sorted.find((m) => m.incoming) || null;
 }
+function allegroKluczWiadomosci(m = {}) {
+  m = m || {};
+  return tekst(m.id || `${m.createdAt || ''}:${m.authorLogin || ''}:${m.text || ''}`, 500).trim();
+}
+function allegroNoweWiadomosciKlienta(messages = [], previousMessages = [], hasBaseline = true) {
+  if (!hasBaseline) return [];
+  const previousKeys = new Set((Array.isArray(previousMessages) ? previousMessages : []).map(allegroKluczWiadomosci).filter(Boolean));
+  return (Array.isArray(messages) ? messages : [])
+    .filter((m) => m?.incoming && allegroKluczWiadomosci(m) && !previousKeys.has(allegroKluczWiadomosci(m)))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+function allegroOznaczNowaKomunikacje(data = {}, previous = {}) {
+  const hasBaseline = !!previous?.updated_at;
+  const previousThreads = new Map((Array.isArray(previous?.threads) ? previous.threads : []).map((t) => [String(t.id), t]));
+  const previousIssues = new Map((Array.isArray(previous?.issues) ? previous.issues : []).map((i) => [String(i.id), i]));
+  const threads = (Array.isArray(data?.threads) ? data.threads : []).map((thread) => {
+    const nowe = allegroNoweWiadomosciKlienta(thread.messages, previousThreads.get(String(thread.id))?.messages, hasBaseline);
+    const latestNewIncoming = nowe[0] || null;
+    return { ...thread, newIncomingCount: nowe.length, latestNewIncoming, latestNewIncomingKey: allegroKluczWiadomosci(latestNewIncoming), needsReply: !!latestNewIncoming && !allegroMaOdpowiedzSprzedawcyPo(thread.messages, latestNewIncoming) };
+  });
+  const issues = (Array.isArray(data?.issues) ? data.issues : []).map((issue) => {
+    const wiadomosci = issue.messages?.length ? issue.messages : [issue.lastMessage].filter(Boolean);
+    const previousIssue = previousIssues.get(String(issue.id));
+    const poprzednie = previousIssue?.messages?.length ? previousIssue.messages : [previousIssue?.lastMessage].filter(Boolean);
+    const nowe = allegroNoweWiadomosciKlienta(wiadomosci, poprzednie, hasBaseline);
+    const latestNewIncoming = nowe[0] || null;
+    return { ...issue, newIncomingCount: nowe.length, latestNewIncoming, latestNewIncomingKey: allegroKluczWiadomosci(latestNewIncoming), needsReply: !!latestNewIncoming && !!issue.chatActive && !allegroMaOdpowiedzSprzedawcyPo(wiadomosci, latestNewIncoming) };
+  });
+  return { ...data, threads, issues, baselineCreated: !hasBaseline };
+}
 function allegroMaOdpowiedzSprzedawcyPo(messages = [], msg = null) {
   if (!msg) return false;
   const t = new Date(msg.createdAt || 0).getTime() || 0;
@@ -1967,11 +1997,12 @@ async function allegroWyslijAutoOdpowiedzi(req, data, settings) {
   const markSkip = (key, reason) => skipped.push({ key, reason });
   if (s.enabled && s.messageCenter) {
     for (const thread of data.threads || []) {
-      const first = allegroPierwszaWiadomoscKlienta(thread.messages);
-      const key = `thread:${thread.id}`;
-      if (!first) { markSkip(key, 'brak wiadomości klienta'); continue; }
+      const first = thread.latestNewIncoming || null;
+      const sourceKey = allegroKluczWiadomosci(first);
+      const key = `thread:${thread.id}:${sourceKey}`;
+      if (!first || !thread.needsReply) { markSkip(key, 'brak nowej wiadomości klienta'); continue; }
       if (items[key]) { markSkip(key, 'już wysłano'); continue; }
-      if (!allegroJestSwieze(first.createdAt, s.freshHours)) { markSkip(key, 'stare zgłoszenie'); continue; }
+      if (!allegroJestSwieze(first.createdAt, s.freshHours)) { markSkip(key, 'wiadomość poza oknem czasowym'); continue; }
       if (allegroMaOdpowiedzSprzedawcyPo(thread.messages, first)) { markSkip(key, 'sprzedawca już odpowiedział'); continue; }
       const text = allegroAutoReplyText(s, thread, 'thread');
       const res = await allegroWywolaj(req, `/messaging/threads/${encodeURIComponent(thread.id)}/messages`, { method: 'POST', bodyObj: { text, attachments: [] } });
@@ -1981,12 +2012,13 @@ async function allegroWyslijAutoOdpowiedzi(req, data, settings) {
   }
   if (s.enabled && s.issues) {
     for (const issue of data.issues || []) {
-      const first = allegroPierwszaWiadomoscKlienta(issue.messages.length ? issue.messages : [issue.lastMessage].filter(Boolean));
-      const key = `issue:${issue.id}`;
-      if (!first) { markSkip(key, 'brak wiadomości klienta'); continue; }
+      const first = issue.latestNewIncoming || null;
+      const sourceKey = allegroKluczWiadomosci(first);
+      const key = `issue:${issue.id}:${sourceKey}`;
+      if (!first || !issue.needsReply) { markSkip(key, 'brak nowej wiadomości klienta'); continue; }
       if (items[key]) { markSkip(key, 'już wysłano'); continue; }
       if (!issue.chatActive) { markSkip(key, 'czat nieaktywny'); continue; }
-      if (!allegroJestSwieze(first.createdAt, s.freshHours)) { markSkip(key, 'stare zgłoszenie'); continue; }
+      if (!allegroJestSwieze(first.createdAt, s.freshHours)) { markSkip(key, 'wiadomość poza oknem czasowym'); continue; }
       if (allegroMaOdpowiedzSprzedawcyPo(issue.messages, first)) { markSkip(key, 'sprzedawca już odpowiedział'); continue; }
       const text = allegroAutoReplyText(s, issue, 'issue');
       const res = await allegroWywolaj(req, `/sale/issues/${encodeURIComponent(issue.id)}/message`, { method: 'POST', accept: ALLEGRO_BETA_JSON, contentType: ALLEGRO_BETA_JSON, bodyObj: { text, attachments: [], type: 'REGULAR' } });
@@ -3033,20 +3065,27 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const orderId = tekst(body.orderId, 100).trim();
+      const orderIds = [...new Set((Array.isArray(body.orderIds) ? body.orderIds : [body.orderId]).map((id) => tekst(id, 100).trim()).filter(Boolean))].slice(0, 1000);
       const checked = body.checked !== false;
       const rec = await czytaj('allegro_orders', { items: [], updated_at: null });
       const items = Array.isArray(rec.items) ? rec.items : [];
-      const index = items.findIndex((z) => String(z.id) === orderId);
-      if (index < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia Allegro', code: 'not_found' }, 404);
-      const stare = items[index];
-      const terminal = ['wyslane', 'anulowane'].includes(allegroStatusKolejkiZamowienia(stare, {}));
-      if (terminal) return odpowiedz({ ok: false, error: 'Wysłanego lub anulowanego zamówienia nie można przywrócić do kolejki.', code: 'terminal_order' }, 409);
-      const workflowStatus = checked ? 'sprawdzone' : allegroStatusKolejkiZamowienia(stare, {});
-      items[index] = { ...stare, workflowStatus, checkedAt: checked ? new Date().toISOString() : null, workflowUpdatedAt: new Date().toISOString() };
+      if (!orderIds.length) return odpowiedz({ ok: false, error: 'Nie wybrano zamówień Allegro', code: 'validation' }, 400);
+      const wanted = new Set(orderIds);
+      let changed = 0;
+      const skipped = [];
+      for (let index = 0; index < items.length; index++) {
+        const stare = items[index];
+        if (!wanted.has(String(stare?.id || ''))) continue;
+        const terminal = ['wyslane', 'anulowane'].includes(allegroStatusKolejkiZamowienia(stare, {}));
+        if (terminal) { skipped.push({ id: stare.id, reason: 'terminal_order' }); continue; }
+        const workflowStatus = checked ? 'sprawdzone' : allegroStatusKolejkiZamowienia({ ...stare, workflowStatus: '' }, {});
+        items[index] = { ...stare, workflowStatus, checkedAt: checked ? new Date().toISOString() : null, workflowUpdatedAt: new Date().toISOString() };
+        changed++;
+      }
+      if (!changed && skipped.length === 0) return odpowiedz({ ok: false, error: 'Nie znaleziono wybranych zamówień Allegro', code: 'not_found' }, 404);
       const zapis = { ...rec, items, updated_at: new Date().toISOString() };
       await zapisz('allegro_orders', zapis);
-      return odpowiedz({ ok: true, order: items[index], orders: items, updated_at: zapis.updated_at });
+      return odpowiedz({ ok: true, order: orderIds.length === 1 ? items.find((z) => String(z.id) === orderIds[0]) : null, orders: items, changed, skipped, updated_at: zapis.updated_at });
     }
 
     // ─── ALLEGRO: zmiana statusu realizacji po stronie Allegro (admin) ───
@@ -3133,7 +3172,9 @@ export default async (req) => {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
       const settings = allegroUstawieniaKomunikacji(await czytaj('allegro_communication_settings', {}));
-      const data = await allegroPobierzKomunikacje(req, { limit: body.limit || 20 });
+      const previous = await czytaj('allegro_communications', { threads: [], issues: [], updated_at: null, errors: [] });
+      const rawData = await allegroPobierzKomunikacje(req, { limit: body.limit || 20 });
+      const data = allegroOznaczNowaKomunikacje(rawData, previous);
       let autoReply = { sent: [], skipped: [], items: {} };
       if (body.autoReply !== false && settings.enabled) autoReply = await allegroWyslijAutoOdpowiedzi(req, data, settings);
       const rec = { threads: data.threads, issues: data.issues, errors: data.errors || [], requiresReauth: !!data.requiresReauth, updated_at: new Date().toISOString(), autoReplyLastRun: autoReply.sent?.length || 0 };
