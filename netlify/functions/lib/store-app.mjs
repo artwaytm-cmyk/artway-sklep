@@ -1190,19 +1190,19 @@ function allegroZdjecia(o) {
   }
   return [...new Set(imgs.map((x) => tekst(x?.url || x, 1000).trim()).filter(Boolean))].slice(0, 16);
 }
-function allegroZamowienieDoObslugi(z) {
-  const vals = [
-    z?.status,
-    z?.fulfillmentStatus,
-    z?.deliveryStatus,
-    z?.shipmentStatus,
-    z?.statusDetails,
-  ].map((x) => String(x || '').trim().toUpperCase()).filter(Boolean);
-  const joined = vals.join(' ');
-  if (!vals.length) return true;
-  if (/\b(CANCELLED|CANCELED|ANUL|SENT|SHIPPED|DELIVERED|DONE|COMPLETED|REALIZED|ZREALIZ|RETURNED)\b/.test(joined)) return false;
-  if (/\bREADY_FOR_PROCESSING|NEW|PROCESSING|READY_FOR_SHIPMENT|BOUGHT|FILLED_IN\b/.test(joined)) return true;
-  return true;
+function allegroStatusKolejkiZamowienia(z, poprzednie = {}) {
+  const status = String(z?.status || '').trim().toUpperCase();
+  const fulfillment = String(z?.fulfillmentStatus || z?.fulfillment?.status || '').trim().toUpperCase();
+  if (status === 'CANCELLED' || fulfillment === 'CANCELLED') return 'anulowane';
+  if (['SENT', 'PICKED_UP', 'RETURNED'].includes(fulfillment)) return 'wyslane';
+  if (String(poprzednie?.workflowStatus || '').toLowerCase() === 'sprawdzone') return 'sprawdzone';
+  if (['READY_FOR_SHIPMENT', 'READY_FOR_PICKUP'].includes(fulfillment)) return 'do_wyslania';
+  return 'nowe';
+}
+function allegroZamowienieJestNoweLubDoWyslania(z) {
+  const status = String(z?.status || '').trim().toUpperCase();
+  const fulfillment = String(z?.fulfillmentStatus || z?.fulfillment?.status || '').trim().toUpperCase();
+  return status === 'READY_FOR_PROCESSING' && ['NEW', 'READY_FOR_SHIPMENT'].includes(fulfillment || 'NEW');
 }
 function allegroNormalizujZamowienie(z) {
   const buyer = z?.buyer || {};
@@ -1240,10 +1240,25 @@ function allegroNormalizujZamowienie(z) {
     paymentStatus: tekst(payment.type || payment.provider || payment.finishedAt || '', 160),
     deliveryStatus: tekst(delivery.status || z.deliveryStatus || '', 80),
     shipmentStatus: tekst(z.shipmentSummary?.status || z.shipmentStatus || '', 80),
+    revision: tekst(z.revision || z.checkoutForm?.revision || '', 160),
     total: allegroKwotaText(z.summary?.totalToPay || z.summary?.totalPrice || z.totalToPay),
     invoiceRequired: !!invoice.required,
     lineItems,
     rawUpdatedAt: new Date().toISOString(),
+  };
+}
+function allegroScalZamowienie(z, poprzednie = {}) {
+  const teraz = new Date().toISOString();
+  const surowe = !!(z?.buyer || z?.delivery || z?.summary || z?.fulfillment || z?.invoice);
+  const nowe = surowe ? allegroNormalizujZamowienie(z) : z;
+  const workflowStatus = allegroStatusKolejkiZamowienia(nowe, poprzednie);
+  return {
+    ...poprzednie,
+    ...nowe,
+    workflowStatus,
+    firstFetchedAt: poprzednie.firstFetchedAt || nowe.createdAt || teraz,
+    lastSeenAt: teraz,
+    checkedAt: workflowStatus === 'sprawdzone' ? (poprzednie.checkedAt || teraz) : null,
   };
 }
 function allegroNormalizujOferte(o) {
@@ -2929,32 +2944,108 @@ export default async (req) => {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
       const limit = Math.min(100, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 100)));
-      const statusy = ['READY_FOR_PROCESSING', 'FILLED_IN', 'BOUGHT'];
+      const statusyRealizacji = ['NEW', 'READY_FOR_SHIPMENT'];
       const pobrane = [];
-      for (const status of statusy) {
-        if (pobrane.length >= limit) break;
+      for (const fulfillmentStatus of statusyRealizacji) {
         try {
-          const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit: Math.min(100, limit), offset: 0, status } });
+          const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit: Math.min(100, limit), offset: 0, status: 'READY_FOR_PROCESSING', 'fulfillment.status': fulfillmentStatus } });
           const source = Array.isArray(dane.checkoutForms) ? dane.checkoutForms : (Array.isArray(dane.items) ? dane.items : []);
           pobrane.push(...source);
         } catch (e) {
-          if (status === statusy[0]) {
-            const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit, offset: 0 } });
+          if (fulfillmentStatus === statusyRealizacji[0]) {
+            const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit, offset: 0, status: 'READY_FOR_PROCESSING' } });
             const source = Array.isArray(dane.checkoutForms) ? dane.checkoutForms : (Array.isArray(dane.items) ? dane.items : []);
             pobrane.push(...source);
             break;
           }
         }
       }
+      const poprzedniRec = await czytaj('allegro_orders', { items: [], updated_at: null });
+      const poprzednie = Array.isArray(poprzedniRec.items) ? poprzedniRec.items : [];
+      const mapa = new Map(poprzednie.filter((x) => x?.id).map((x) => [String(x.id), x]));
       const seen = new Set();
-      const items = pobrane
+      const aktywne = pobrane
         .map(allegroNormalizujZamowienie)
         .filter((x) => x.id && !seen.has(x.id) && seen.add(x.id))
-        .filter(allegroZamowienieDoObslugi)
-        .slice(0, limit);
-      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, filtered: pobrane.length - items.length, mode: 'unfulfilled_only' };
+        .filter(allegroZamowienieJestNoweLubDoWyslania);
+      let dodane = 0;
+      for (const z of aktywne) {
+        const stare = mapa.get(String(z.id)) || {};
+        if (!stare.id) dodane++;
+        mapa.set(String(z.id), allegroScalZamowienie(z, stare));
+      }
+      const doAktualizacji = poprzednie.filter((z) => z?.id && !seen.has(String(z.id)) && !['wyslane', 'anulowane'].includes(String(z.workflowStatus || '').toLowerCase())).slice(0, limit);
+      let odswiezone = 0;
+      const batchSize = 8;
+      for (let i = 0; i < doAktualizacji.length; i += batchSize) {
+        const batch = doAktualizacji.slice(i, i + batchSize);
+        const wyniki = await Promise.all(batch.map(async (stare) => {
+          try {
+            const pelne = await allegroWywolaj(req, `/order/checkout-forms/${encodeURIComponent(stare.id)}`);
+            return allegroScalZamowienie(pelne, stare);
+          } catch (e) {
+            return { ...stare, syncError: tekst(e.message, 500), lastSyncErrorAt: new Date().toISOString() };
+          }
+        }));
+        for (const z of wyniki) {
+          mapa.set(String(z.id), z);
+          if (!z.syncError) odswiezone++;
+        }
+      }
+      const items = [...mapa.values()]
+        .map((z) => allegroScalZamowienie(z, z))
+        .sort((a, b) => String(b.firstFetchedAt || '').localeCompare(String(a.firstFetchedAt || '')))
+        .slice(0, 5000);
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: dodane, refreshed: odswiezone, filtered: pobrane.length - aktywne.length, mode: 'persistent_new_and_ready_for_shipment' };
       await zapisz('allegro_orders', rec);
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, updated_at: rec.updated_at, fetched: rec.fetched, filtered: rec.filtered, mode: rec.mode });
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode });
+    }
+
+    // ─── ALLEGRO: lokalny etap obsługi zamówienia (admin) ───
+    if (action === 'allegro-order-checked') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const orderId = tekst(body.orderId, 100).trim();
+      const checked = body.checked !== false;
+      const rec = await czytaj('allegro_orders', { items: [], updated_at: null });
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      const index = items.findIndex((z) => String(z.id) === orderId);
+      if (index < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia Allegro', code: 'not_found' }, 404);
+      const stare = items[index];
+      const terminal = ['wyslane', 'anulowane'].includes(allegroStatusKolejkiZamowienia(stare, {}));
+      if (terminal) return odpowiedz({ ok: false, error: 'Wysłanego lub anulowanego zamówienia nie można przywrócić do kolejki.', code: 'terminal_order' }, 409);
+      const workflowStatus = checked ? 'sprawdzone' : allegroStatusKolejkiZamowienia(stare, {});
+      items[index] = { ...stare, workflowStatus, checkedAt: checked ? new Date().toISOString() : null, workflowUpdatedAt: new Date().toISOString() };
+      const zapis = { ...rec, items, updated_at: new Date().toISOString() };
+      await zapisz('allegro_orders', zapis);
+      return odpowiedz({ ok: true, order: items[index], orders: items, updated_at: zapis.updated_at });
+    }
+
+    // ─── ALLEGRO: zmiana statusu realizacji po stronie Allegro (admin) ───
+    if (action === 'allegro-order-fulfillment') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const orderId = tekst(body.orderId, 100).trim();
+      const status = tekst(body.status, 80).trim().toUpperCase();
+      const dozwolone = new Set(['NEW', 'PROCESSING', 'READY_FOR_SHIPMENT', 'SENT', 'CANCELLED']);
+      if (!orderId || !dozwolone.has(status)) return odpowiedz({ ok: false, error: 'Nieprawidłowy numer zamówienia lub status Allegro', code: 'validation' }, 400);
+      const rec = await czytaj('allegro_orders', { items: [], updated_at: null });
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      const index = items.findIndex((z) => String(z.id) === orderId);
+      if (index < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia Allegro', code: 'not_found' }, 404);
+      const stare = items[index];
+      await allegroWywolaj(req, `/order/checkout-forms/${encodeURIComponent(orderId)}/fulfillment`, {
+        method: 'PUT',
+        parameters: stare.revision ? { 'checkoutForm.revision': stare.revision } : {},
+        bodyObj: { status },
+      });
+      const zmienione = allegroScalZamowienie({ ...stare, fulfillmentStatus: status, rawUpdatedAt: new Date().toISOString() }, {});
+      items[index] = { ...zmienione, workflowUpdatedAt: new Date().toISOString() };
+      const zapis = { ...rec, items, updated_at: new Date().toISOString() };
+      await zapisz('allegro_orders', zapis);
+      return odpowiedz({ ok: true, order: items[index], orders: items, updated_at: zapis.updated_at });
     }
 
     // ─── ALLEGRO: synchronizacja ofert (admin) ───
