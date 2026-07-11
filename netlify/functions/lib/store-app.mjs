@@ -1000,12 +1000,23 @@ async function obsluzEmailePrzejsciaStatusu(stary, nowy) {
 function allegroEnv() {
   return String(process.env.ALLEGRO_ENV || 'production').trim().toLowerCase() === 'sandbox' ? 'sandbox' : 'production';
 }
+const ALLEGRO_DEFAULT_SCOPE = [
+  'allegro:api:sale:offers:read',
+  'allegro:api:sale:offers:write',
+  'allegro:api:sale:settings:read',
+  'allegro:api:orders:read',
+  'allegro:api:orders:write',
+  'allegro:api:shipments:read',
+  'allegro:api:shipments:write',
+  'allegro:api:messaging',
+  'allegro:api:disputes',
+].join(' ');
 function allegroKonfiguracja(req) {
   const env = allegroEnv();
   const clientId = tekst(process.env.ALLEGRO_CLIENT_ID || '', 300).trim();
   const clientSecret = tekst(process.env.ALLEGRO_CLIENT_SECRET || '', 500).trim();
   const redirectUri = tekst(process.env.ALLEGRO_REDIRECT_URI || '', 1000).trim() || `${publicznyOrigin(req)}/api/store?action=allegro-callback`;
-  const scope = tekst(process.env.ALLEGRO_SCOPE || '', 1000).trim();
+  const scope = tekst(process.env.ALLEGRO_SCOPE || ALLEGRO_DEFAULT_SCOPE, 1000).trim();
   const authBaseUrl = env === 'sandbox' ? 'https://allegro.pl.allegrosandbox.pl' : 'https://allegro.pl';
   const apiBaseUrl = env === 'sandbox' ? 'https://api.allegro.pl.allegrosandbox.pl' : 'https://api.allegro.pl';
   const missingEnv = [];
@@ -1029,6 +1040,8 @@ async function allegroStatus(req) {
     account: auth?.account || '',
     updated_at: auth?.updated_at || null,
     requiredEnv: ['ALLEGRO_CLIENT_ID', 'ALLEGRO_CLIENT_SECRET'],
+    scope,
+    recommendedScope: ALLEGRO_DEFAULT_SCOPE,
     optionalEnv: ['ALLEGRO_REDIRECT_URI', 'ALLEGRO_ENV=production', 'ALLEGRO_SCOPE'],
   };
 }

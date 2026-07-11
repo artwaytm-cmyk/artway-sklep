@@ -5642,6 +5642,7 @@ function widokAdminAllegro(sekcja="start"){
     </div>
     <div class="allegro-config-note">
       <b>Wymagane zmienne Netlify:</b> <code>ALLEGRO_CLIENT_ID</code>, <code>ALLEGRO_CLIENT_SECRET</code>. Opcjonalnie: <code>ALLEGRO_REDIRECT_URI</code>, <code>ALLEGRO_ENV</code>, <code>ALLEGRO_SCOPE</code>.
+      <span>Jeśli przy ofertach, wiadomościach albo dyskusjach pojawi się 403, kliknij ponownie <b>Połącz Allegro</b>, żeby odświeżyć zgodę OAuth z pełnym zakresem: oferty, ustawienia sprzedaży, zamówienia, przesyłki, wiadomości i dyskusje.</span>
       <span>Środowisko: ${esc(allegroStan.env||"production")} • ostatnia synchronizacja: ${esc(allegroStan.updated_at||"—")}</span>
     </div>
     ${allegroSubnavHTML(aktywna)}
