@@ -124,6 +124,9 @@ requireMarkers('assets/app.js', app, [
   'function allegroWystawianiePanelHTML',
   'function allegroZmienCenyZaznaczonychOfert',
   'function allegroPoprawOpisyWFormularzu',
+  'function allegroAnalizaMagazynowaZamowienia',
+  'function agentAIAllegroZleceniaTekst',
+  'function potwierdzWidoczneStanyMagazynu',
 ]);
 
 requireMarkers('netlify/functions/store.mjs', storeEntry, [
@@ -162,6 +165,8 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "action === 'allegro-offer-price-change'",
   'function allegroDopasowanieOferty',
   'function allegroSekcjeOpisu',
+  'function allegroZnajdzProduktKatalogu',
+  "action === 'allegro-order-warehouse-stage'",
 ]);
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
