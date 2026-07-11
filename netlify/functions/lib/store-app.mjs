@@ -1403,15 +1403,16 @@ function kategoriaZBreadcrumbJsonLd(html = '') {
 }
 function opisProduktuZHtml(html = '', title = '') {
   const meta = metaHtml(html, 'og:description') || metaHtml(html, 'description');
-  if (meta && !/gry planszowe,\s*gry rodzinne/i.test(meta)) return tekst(stripHtml(meta), 4000);
-  const desc = (html.match(/<div\b[^>]*class=["'][^"']*\bproduct_name__block\b[^"']*\b--description\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1]
-    || (html.match(/<section\b[^>]*id=["']projector_longdescription["'][^>]*>([\s\S]*?)<\/section>/i) || [])[1]
-    || '';
-  const cleaned = stripHtml(desc);
-  if (cleaned) return tekst(cleaned, 4000);
+  const longDesc = (html.match(/<section\b[^>]*id=["']projector_longdescription["'][^>]*>([\s\S]*?)<\/section>/i) || [])[1] || '';
+  const shortDesc = (html.match(/<div\b[^>]*class=["'][^"']*\bproduct_name__block\b[^"']*\b--description\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '';
+  const cleanedLong = stripHtml(longDesc);
+  if (cleanedLong && cleanedLong.length > 80) return tekst(cleanedLong, 12000);
+  const cleanedShort = stripHtml(shortDesc);
+  if (cleanedShort) return tekst(cleanedShort, 12000);
+  if (meta && !/gry planszowe,\s*gry rodzinne/i.test(meta)) return tekst(stripHtml(meta), 12000);
   const text = stripHtml(html);
   const opisStart = text.indexOf(String(title || '').trim());
-  return opisStart >= 0 ? tekst(text.slice(opisStart + String(title || '').length, opisStart + 2200), 4000) : '';
+  return opisStart >= 0 ? tekst(text.slice(opisStart + String(title || '').length, opisStart + 8000), 12000) : '';
 }
 function obrazkiProduktuZHtml(url = '', html = '') {
   const imageSet = new Set();

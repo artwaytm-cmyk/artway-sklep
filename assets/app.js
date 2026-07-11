@@ -1361,7 +1361,7 @@ function brakiDanychProducenta(p={}, dane={}){
 function agentAIProduktZLinkuMini(p={}){
   if(!p||typeof p!=="object") return {};
   const mini={...p};
-  mini.opis=String(mini.opis||"").slice(0,1800);
+  mini.opis=String(mini.opis||"").slice(0,12000);
   mini.zdjecie=String(mini.zdjecie||"").slice(0,1000);
   mini.zdjecia=(Array.isArray(mini.zdjecia)?mini.zdjecia:[]).map(x=>String(x||"").slice(0,1000)).filter(Boolean).slice(0,8);
   if(mini.parametryProducenta) mini.parametryProducenta=Object.fromEntries(Object.entries(mini.parametryProducenta).map(([k,v])=>[k,String(v||"").slice(0,500)]).slice(0,20));
@@ -1381,13 +1381,33 @@ function agentAIZapiszLinkProducenta(url,status="oczekuje",powod="",extra={}){
 }
 function agentAIUsunLinkProducenta(ref){
   const r=String(ref||"");
-  agentAILinkiProducentow=(Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[]).filter(x=>x.id!==r&&normalizujUrlProducenta(x.url)!==normalizujUrlProducenta(r));
+  const teraz=new Date(), clean=normalizujUrlProducenta(r);
+  agentAILinkiProducentow=(Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[]).map(x=>{
+    if(x.id===r||normalizujUrlProducenta(x.url)===clean) return {...x,status:"usunieto",powod:"Usunięte ręcznie z kolejki agenta",usunieto:teraz.toISOString(),aktualizacja:teraz.toISOString(),aktualizacjaTxt:teraz.toLocaleString("pl-PL"),operator:sesja?.email||"administrator"};
+    return x;
+  }).slice(0,500);
   zapiszLS("artway_agent_ai_linki_producentow",agentAILinkiProducentow);
+  if(chmuraToken) void chmuraZapiszUstawienia();
   toast("Link usunięty z kolejki agenta");
   renderuj();
 }
+function agentAIZakonczLinkProducenta(ref, produkt={}){
+  const r=String(ref||""), clean=normalizujUrlProducenta(r), teraz=new Date();
+  let zmieniono=false;
+  agentAILinkiProducentow=(Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[]).map(x=>{
+    const pasuje=x.id===r||normalizujUrlProducenta(x.url)===clean||normalizujUrlProducenta(x.url)===normalizujUrlProducenta(produkt.sourceUrl||produkt.producentUrl||"");
+    if(!pasuje) return x;
+    zmieniono=true;
+    return {...x,status:"zamknięte",powod:"Produkt dodany do sklepu — zadanie wykonane",produktId:produkt.id||x.produktId||"",lastProductName:produkt.nazwa||x.lastProductName||"",zamknieto:teraz.toISOString(),aktualizacja:teraz.toISOString(),aktualizacjaTxt:teraz.toLocaleString("pl-PL"),operator:sesja?.email||"administrator"};
+  });
+  if(zmieniono){
+    zapiszLS("artway_agent_ai_linki_producentow",agentAILinkiProducentow);
+    if(chmuraToken) void chmuraZapiszUstawienia();
+  }
+  return zmieniono;
+}
 function agentAILinkiOczekujace(){
-  return (Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[]).filter(x=>!["pobrano","zamknięte","usunieto"].includes(String(x.status||"").toLowerCase()));
+  return (Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[]).filter(x=>!["pobrano","zamkniete","zamknięte","usunieto","usunięto"].includes(String(x.status||"").toLowerCase()));
 }
 async function agentAISprawdzLinkProducenta(ref,cicho=false){
   const lista=Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[];
@@ -1438,7 +1458,7 @@ function agentAILinkiProducentowTekst(){
   return ["🔗 Linki producentów do sprawdzenia przez agenta:",...lista.slice(0,15).map((x,i)=>`• ${i+1}. ${x.lastProductName?`${x.lastProductName} — `:""}${x.url} [${x.status||"oczekuje"}]${x.powod?` — ${x.powod}`:""}`)].join("\n");
 }
 function agentAILinkiProducentowPanelHTML(){
-  const lista=(Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[]).slice(0,25);
+  const lista=agentAILinkiOczekujace().slice(0,25);
   const ocz=agentAILinkiOczekujace().length;
   return `<div class="panel agent-link-panel">
     <div class="order-section-head">
@@ -1464,7 +1484,7 @@ function agentAILinkiProducentowPanelHTML(){
 function agentAIWypelnijNowyProduktZLinku(id){
   const rec=(agentAILinkiProducentow||[]).find(x=>x.id===id);
   if(!rec?.lastProduct){ toast("Najpierw sprawdź link, żeby agent miał dane produktu"); return; }
-  sessionStorage.setItem("artway_prefill_product",JSON.stringify(rec.lastProduct));
+  sessionStorage.setItem("artway_prefill_product",JSON.stringify({...rec.lastProduct,_agentLinkId:rec.id,_agentLinkUrl:rec.url}));
   location.hash="#/admin/produkty/dodaj";
 }
 function zapiszRuchMagazynowy(ruch){
@@ -6844,12 +6864,15 @@ function wgrajZdjecieDoPola(input, pole){
 function dodajProdukt(e){
   e.preventDefault();
   const f = new FormData(e.target);
+  let prefillMeta={};
+  try{ prefillMeta=JSON.parse(sessionStorage.getItem("artway_prefill_product")||"{}")||{}; }catch(err){ prefillMeta={}; }
   const maxId = Math.max(0, ...prodBazowe.map(p=>p.id), ...produktyDodane.map(p=>p.id));
   const KOLORY = ["#dbeafe","#e0e7ff","#fef3c7","#dcfce7","#fee2e2","#f3e8ff","#fce7f3","#ffedd5"];
   const p = daneProduktuZFormularza(f, maxId+1, {kolor:KOLORY[(maxId+1)%KOLORY.length]});
   if(!p){ toast("⚠️ Podaj poprawną cenę"); return; }
   produktyDodane.push(p); zapiszLS("artway_produkty_dodane", produktyDodane);
   zapiszStanZFormularza(f, p.id);
+  agentAIZakonczLinkProducenta(prefillMeta._agentLinkId||prefillMeta._agentLinkUrl||p.sourceUrl||p.producentUrl,p);
   try{ sessionStorage.removeItem("artway_prefill_product"); }catch(e){}
   zbudujProdukty();
   kategoriaNowegoProduktu = "";
