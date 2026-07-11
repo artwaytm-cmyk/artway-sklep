@@ -5523,7 +5523,8 @@ function allegroKomunikacjaStaty(){
 function allegroKomunikacjaBledyHTML(){
   const errors=Array.isArray(allegroKomunikacja?.errors)?allegroKomunikacja.errors:[];
   if(!errors.length) return "";
-  const brakDostepu=allegroKomunikacja?.requiresReauth||errors.some(e=>Number(e.status)===403);
+  const tokenAktualny=!!allegroStan.connected&&!allegroStan.requiresReauth;
+  const brakDostepu=!!allegroStan.requiresReauth||(!tokenAktualny&&(allegroKomunikacja?.requiresReauth||errors.some(e=>Number(e.status)===403)));
   if(brakDostepu) return `<div class="allegro-permission-alert"><div><b>🔐 Allegro blokuje wiadomości i dyskusje — HTTP 403</b><p>Token oraz deklaracja aplikacji nie mają jeszcze aktywnych uprawnień <code>allegro:api:messaging</code> i <code>allegro:api:disputes</code>. Po rozszerzeniu uprawnień aplikacji trzeba jednorazowo połączyć konto ponownie — starego refresh tokenu nie da się rozszerzyć automatycznie.</p><small>${errors.map(e=>`${esc(e.key||"API")}: ${esc(e.message||e.code||"błąd")}`).join(" • ")}</small></div><button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro ponownie</button></div>`;
   return `<div class="backend-note" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Diagnostyka komunikacji Allegro:</b><br>${errors.map(e=>`• ${esc(e.key||"API")}: ${esc(e.message||e.code||"błąd")}${e.status?` (HTTP ${esc(e.status)})`:""}`).join("<br>")}</div>`;
 }
@@ -5558,7 +5559,8 @@ function allegroIssueHTML(i){
 function allegroKomunikacjaPanelHTML(){
   const st=allegroKomunikacjaStaty();
   const s=allegroKomunikacjaUstawienia();
-  const wymagaPonownegoPolaczenia=!!allegroKomunikacja?.requiresReauth||(allegroKomunikacja?.errors||[]).some(e=>Number(e.status)===403);
+  const tokenAktualny=!!allegroStan.connected&&!allegroStan.requiresReauth;
+  const wymagaPonownegoPolaczenia=!!allegroStan.requiresReauth||(!tokenAktualny&&(allegroKomunikacja?.requiresReauth||(allegroKomunikacja?.errors||[]).some(e=>Number(e.status)===403)));
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">💬 Wiadomości, dyskusje i autoresponder Allegro</h2><p class="order-detail-lead">Panel pobiera Centrum wiadomości oraz Dyskusje/Reklamacje. Autoresponder odpowiada tylko raz na pierwszy kontakt klienta i zapisuje historię, żeby nie wysłać duplikatu.</p></div>
