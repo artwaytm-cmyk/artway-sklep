@@ -487,6 +487,69 @@ function skrocTekst(v, max=190){
   const s=String(v??"").replace(/\s+/g," ").trim();
   return s.length>max ? s.slice(0,max).replace(/\s+\S*$/,"")+"…" : s;
 }
+function zdaniaOpisu(v){
+  return String(v??"")
+    .replace(/<[^>]+>/g," ")
+    .replace(/\s+/g," ")
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map(x=>x.trim())
+    .filter(x=>x.length>18);
+}
+function agentAICzyscOpis(v,max=20000){
+  let s=String(v??"")
+    .replace(/\r/g,"\n")
+    .replace(/\t+/g," ")
+    .replace(/[ \u00a0]{2,}/g," ")
+    .replace(/\n{3,}/g,"\n\n")
+    .replace(/\s+([,.!?;:])/g,"$1")
+    .replace(/([.!?])([A-ZĄĆĘŁŃÓŚŹŻ])/g,"$1 $2")
+    .trim();
+  s=s.replace(/\b(Zawartość opakowania|W zestawie|Skład zestawu|Wymiary opakowania|Liczba graczy|Wiek graczy)\s*:/gi,"\n\n$1:");
+  s=s.replace(/\n{3,}/g,"\n\n").trim();
+  return s.length>max ? s.slice(0,max).replace(/\s+\S*$/,"")+"…" : s;
+}
+function agentAITnijDoZdania(s,max=280){
+  s=String(s||"").replace(/\s+/g," ").trim();
+  if(s.length<=max) return s;
+  const cut=s.slice(0,max+1);
+  const idx=Math.max(cut.lastIndexOf("."),cut.lastIndexOf("!"),cut.lastIndexOf("?"));
+  if(idx>90) return cut.slice(0,idx+1).trim();
+  return cut.slice(0,max).replace(/\s+\S*$/,"").trim()+"…";
+}
+function agentAIUtworzOpisKrotki(p={}){
+  const raw=String(p.opisKrotki||p.krotkiOpis||p.shortDescription||"").trim();
+  if(raw) return agentAITnijDoZdania(agentAICzyscOpis(raw,500),300);
+  const opis=agentAICzyscOpis(p.opis||"",20000);
+  const zd=zdaniaOpisu(opis).filter(x=>!/^(zawartość opakowania|skład zestawu|wymiary|ostrzeżenie)/i.test(x));
+  if(zd.length) return agentAITnijDoZdania(zd.slice(0,2).join(" "),300);
+  const kat=String(p.kategoria||"produkt").toLowerCase();
+  return agentAITnijDoZdania(`${p.nazwa||"Produkt"} to propozycja z kategorii ${kat}, przygotowana z myślą o wygodnym wyborze i szybkim zakupie w Artway-TM.`,300);
+}
+function opisKrotkiProduktu(p={}){
+  return agentAIUtworzOpisKrotki(p);
+}
+function agentAIPoprawOpisyDanychProduktu(p={}){
+  const out={...p};
+  out.opis=agentAICzyscOpis(out.opis||"",20000);
+  out.opisKrotki=agentAIUtworzOpisKrotki(out);
+  if(out.opisKrotki&&out.opis&&out.opisKrotki===out.opis) out.opisKrotki=agentAITnijDoZdania(out.opis,300);
+  return out;
+}
+function agentAIPoprawOpisyWFormularzu(form){
+  if(!form){ toast("Nie znaleziono formularza produktu"); return; }
+  const p={
+    nazwa:String(form.elements.nazwa?.value||"").trim(),
+    kategoria:String(form.elements.kategoria?.value||"").trim(),
+    opisKrotki:String(form.elements.opisKrotki?.value||"").trim(),
+    opis:String(form.elements.opis?.value||"").trim()
+  };
+  const poprawiony=agentAIPoprawOpisyDanychProduktu(p);
+  if(form.elements.opisKrotki) form.elements.opisKrotki.value=poprawiony.opisKrotki||"";
+  if(form.elements.opis) form.elements.opis.value=poprawiony.opis||"";
+  zapiszHistorieAgenta("opisy-produktow","Agent AI poprawił opisy w formularzu produktu",{nazwa:p.nazwa});
+  toast("🤖 Agent poprawił krótki i pełny opis w formularzu");
+}
 function tylkoCyfry(v){ return String(v??"").replace(/[^0-9]/g,""); }
 function formatTelefonPlatnosci(v=KONFIG.numerPrzelewuTelefon){
   const c = tylkoCyfry(v || NUMER_PRZELEWU_TELEFON_DOMYSLNY);
@@ -1353,6 +1416,7 @@ function brakiDanychProducenta(p={}, dane={}){
   if(!(p.gtin||p.ean))b.push("EAN");
   if(!(p.mpn||p.kodProducenta||p.externalId))b.push("kod producenta/MPN");
   if(!p.zdjecie)b.push("zdjęcie");
+  if(!p.opisKrotki)b.push("krótki opis");
   if(!p.opis)b.push("opis");
   if(!p.dostepnoscProducenta||p.dostepnoscProducenta==="do sprawdzenia")b.push("dostępność");
   (Array.isArray(dane.missing)?dane.missing:[]).forEach(x=>{if(x&&!b.includes(x))b.push(x);});
@@ -1361,6 +1425,7 @@ function brakiDanychProducenta(p={}, dane={}){
 function agentAIProduktZLinkuMini(p={}){
   if(!p||typeof p!=="object") return {};
   const mini={...p};
+  mini.opisKrotki=String(mini.opisKrotki||"").slice(0,500);
   mini.opis=String(mini.opis||"").slice(0,12000);
   mini.zdjecie=String(mini.zdjecie||"").slice(0,1000);
   mini.zdjecia=(Array.isArray(mini.zdjecia)?mini.zdjecia:[]).map(x=>String(x||"").slice(0,1000)).filter(Boolean).slice(0,8);
@@ -1897,7 +1962,7 @@ function normalizujSzukanyTekst(s){
 function produktPasujeFrazie(p,szukane=fraza){
   const zapytanie=normalizujSzukanyTekst(szukane);
   if(!zapytanie)return true;
-  const tekst=normalizujSzukanyTekst([p.nazwa,p.opis,p.kategoria,p.sku,p.gtin,p.externalId,p.mpn,p.marka,p.kolorProduktu,p.rozmiar,p.material,(p.warianty||[]).join(" "),p.id].join(" "));
+  const tekst=normalizujSzukanyTekst([p.nazwa,p.opisKrotki,p.opis,p.kategoria,p.sku,p.gtin,p.externalId,p.mpn,p.marka,p.kolorProduktu,p.rozmiar,p.material,(p.warianty||[]).join(" "),p.id].join(" "));
   return zapytanie.split(" ").filter(Boolean).every(slowo=>tekst.includes(slowo));
 }
 function sortujListeProduktow(lista,sort=sortowanie){
@@ -1955,7 +2020,7 @@ function kartaProduktu(p){
     <div class="card-body">
       <span class="cat-label">${esc(p.kategoria)}${oceny?` <span style="color:var(--accent);text-transform:none;letter-spacing:0">★ ${oceny.srednia.toFixed(1)} (${oceny.n})</span>`:""}</span>
       <h3>${esc(p.nazwa)}</h3>
-      <p class="desc">${esc(skrocTekst(p.opis||"",190))}</p>
+      <p class="desc">${esc(skrocTekst(opisKrotkiProduktu(p),190))}</p>
       <div class="price-row">
         <span class="price">${brakCeny?"Cena do uzupełnienia":zl(p.cena)}</span>
         ${p.staraCena?`<span class="old-price">${zl(p.staraCena)}</span>`:""}
@@ -2075,7 +2140,7 @@ function widokProdukt(id){
             ${p.staraCena?`<span class="old-price">${zl(p.staraCena)}</span>`:""}
           </div>
           ${brakCeny?`<p class="backend-note" style="text-align:left;margin:.4rem 0">Produkt został zaimportowany z ceną 0,00. Administrator musi uzupełnić cenę przed sprzedażą.</p>`:""}
-          <p style="color:var(--muted2)">${esc(p.opis||"")}</p>
+          <p style="color:var(--muted2);font-size:1.02rem;line-height:1.55">${esc(opisKrotkiProduktu(p))}</p>
           ${specyfikacjaProduktuHTML(p)}
           ${p.warianty?.length?`
           <div class="f-group" style="max-width:260px;margin:.6rem 0 0"><label>Wybierz wariant *</label>
@@ -3822,6 +3887,40 @@ function agentAILokalizacjeTekst(){
     return `• ${l.kod}${l.nazwa?` — ${l.nazwa}`:""}; typ: ${l.typ||"—"}; strefa: ${l.strefa||"—"}; produkty: ${s.produkty}; sztuki: ${s.sztuki}; rezerwacje: ${s.rezerwacje}; wartość: ${zl(s.wartosc)}`;
   })].join("\n");
 }
+function agentAIProduktyZProblememOpisu(limit=500){
+  return produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>{
+    const braki=[];
+    if(!String(p.opisKrotki||"").trim()) braki.push("brak krótkiego opisu");
+    if(!String(p.opis||"").trim()) braki.push("brak pełnego opisu");
+    if(String(p.opis||"").replace(/\s+/g," ").trim().length>450 && !/\n/.test(String(p.opis||""))) braki.push("pełny opis wymaga formatowania");
+    if(String(p.opisKrotki||"").length>360) braki.push("krótki opis jest za długi");
+    return braki.length?{produkt:p,braki}:null;
+  }).filter(Boolean).slice(0,limit);
+}
+function agentAIOpisyTekst(limit=12){
+  const lista=agentAIProduktyZProblememOpisu(limit);
+  if(!lista.length) return "Opisy produktów wyglądają poprawnie: krótkie opisy są uzupełnione, a pełne opisy nie wymagają pilnej korekty.";
+  return ["📝 Produkty do poprawy opisów:",...lista.map((x,i)=>`• ${i+1}. ${x.produkt.nazwa} — ${x.braki.join(", ")}`),"Napisz „popraw opisy produktów”, żeby agent uzupełnił krótkie opisy i uporządkował pełne opisy."].join("\n");
+}
+function agentAIPoprawOpisyProduktow(limit=40){
+  const lista=agentAIProduktyZProblememOpisu(limit);
+  let zmienione=0;
+  for(const x of lista){
+    const p=x.produkt, poprawiony=agentAIPoprawOpisyDanychProduktu(p);
+    if(JSON.stringify({a:p.opisKrotki||"",b:p.opis||""})===JSON.stringify({a:poprawiony.opisKrotki||"",b:poprawiony.opis||""})) continue;
+    const idx=produktyDodane.findIndex(d=>Number(d.id)===Number(p.id));
+    if(idx>=0) produktyDodane[idx]={...produktyDodane[idx],...poprawiony,id:p.id};
+    else produktyEdytowane[p.id]={...(produktyEdytowane[p.id]||{}),opisKrotki:poprawiony.opisKrotki,opis:poprawiony.opis};
+    zmienione++;
+  }
+  if(zmienione){
+    zapiszStanProduktowPoOperacji();
+    zbudujProdukty();
+    zapiszHistorieAgenta("opisy-produktow",`Agent AI poprawił opisy produktów: ${zmienione}`,{limit,zmienione});
+    if(chmuraToken) void chmuraZapiszUstawienia();
+  }
+  return `Agent sprawdził opisy. Poprawiono: ${zmienione}. Do kontroli po akcji: ${agentAIProduktyZProblememOpisu(500).length}.`;
+}
 function agentAIRozpoznajPolecenie(tekst=""){
   const raw=String(tekst||"").trim(), n=agentAINormalizuj(raw);
   if(!n) return {typ:"pomoc",raw,confidence:1};
@@ -3831,6 +3930,7 @@ function agentAIRozpoznajPolecenie(tekst=""){
     if(slash==="/status") return {typ:"status",raw,confidence:1};
     if(slash==="/magazyn") return {typ:"magazyn",raw,confidence:1};
     if(slash==="/braki") return {typ:"braki",raw,confidence:1};
+    if(["/opisy","/opis"].includes(slash)) return {typ:n.includes("popraw")?"opisy-popraw":"opisy",raw,confidence:1};
     if(slash==="/zamowienia") return {typ:"zamowienia",raw,confidence:1};
     if(["/zlecenie","/zamow"].includes(slash)) return {typ:"zlecenie",tryb:n.includes("nisk")?"niskie":"braki",raw,confidence:1};
     if(["/sprawdz","/check"].includes(slash)) return {typ:"sprawdz",raw,confidence:1};
@@ -3839,6 +3939,8 @@ function agentAIRozpoznajPolecenie(tekst=""){
   if(agentAIMa(n,["zapamietaj","zapamiętaj","naucz sie","naucz się","dodaj do pamieci","dodaj do pamięci","procedura:"])) return {typ:"pamiec-zapis",tresc:agentAIWytnijPamiec(raw),raw,confidence:.95};
   if(agentAIMa(n,["pokaz pamiec","pokaż pamięć","co pamietasz","co pamiętasz","lista procedur","pokaz procedury","pokaż procedury"])) return {typ:"pamiec-lista",raw,confidence:.95};
   if(agentAIMa(n,["pokaz lokalizacje","pokaż lokalizacje","lista lokalizacji","lokalizacje magazynu","mapa magazynu"])) return {typ:"lokalizacje",raw,confidence:.9};
+  if(agentAIMa(n,["popraw opisy","popraw opisy produktow","popraw opisy produktów","uporzadkuj opisy","uporządkuj opisy","wygeneruj krotkie opisy","wygeneruj krótkie opisy"])) return {typ:"opisy-popraw",raw,confidence:.94};
+  if(agentAIMa(n,["sprawdz opisy","sprawdź opisy","audyt opisow","audyt opisów","lista opisow","lista opisów","czy opisy sa dobre","czy opisy są dobre"])) return {typ:"opisy",raw,confidence:.92};
   if(agentAIMa(n,["sprawdz linki producentow","sprawdź linki producentów","pobierz linki producentow","pobierz linki producentów","pobierz produkty z linkow","pobierz produkty z linków","ponow pobieranie linkow","ponów pobieranie linków"])) return {typ:"linki-producentow-sprawdz",raw,confidence:.93};
   if(agentAIMa(n,["pokaz linki producentow","pokaż linki producentów","linki producentow","linki producentów","kolejka linkow","kolejka linków","url producenta"])) return {typ:"linki-producentow",raw,confidence:.92};
   if(agentAIMa(n,["utworz lokalizacje","utwórz lokalizację","dodaj lokalizacje","dodaj lokalizację"])){
@@ -4312,7 +4414,7 @@ async function agentAIWykonajPolecenie(tekst=""){
   let odpowiedz="";
   try{
     if(intent.typ==="pomoc"){
-      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź czy wpadło nowe zlecenie","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź linki producentów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę Pinkfrog","• pokaż pamięć","• utwórz lokalizację R1-P1","• pokaż lokalizacje","• synchronizuj bazę","• utwórz brakujące szkice FV"].join("\n");
+      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź czy wpadło nowe zlecenie","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź linki producentów","• sprawdź opisy produktów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę Pinkfrog","• pokaż pamięć","• utwórz lokalizację R1-P1","• pokaż lokalizacje","• synchronizuj bazę","• utwórz brakujące szkice FV"].join("\n");
     }else if(intent.typ==="pamiec-zapis"){
       const rec=agentAIZapiszPamiec(intent.tresc||"");
       odpowiedz=rec?`Zapamiętałem na przyszłość: ${rec.wyzwalacz?`gdy „${rec.wyzwalacz}” → `:""}${rec.akcja}`:"Nie podałeś treści do zapamiętania. Napisz np. „zapamiętaj: przy brakach najpierw sprawdź dostawcę”.";
@@ -4320,6 +4422,11 @@ async function agentAIWykonajPolecenie(tekst=""){
       odpowiedz=agentAIPamiecTekst();
     }else if(intent.typ==="lokalizacje"){
       odpowiedz=agentAILokalizacjeTekst();
+    }else if(intent.typ==="opisy"){
+      odpowiedz=agentAIOpisyTekst();
+    }else if(intent.typ==="opisy-popraw"){
+      odpowiedz=agentAIPoprawOpisyProduktow(40);
+      renderuj();
     }else if(intent.typ==="linki-producentow"){
       odpowiedz=agentAILinkiProducentowTekst();
     }else if(intent.typ==="linki-producentow-sprawdz"){
@@ -4421,6 +4528,7 @@ function agentAIAnaliza(){
   const lokAktywne=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(produktyAdmin), lokPozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK"&&!magazynLokalizacjaPoKodzie(k));
   const nadwyzki=agentAINadwyzkiDoPrzyjecia();
   const linkiProd=agentAILinkiOczekujace();
+  const opisyDoPoprawy=agentAIProduktyZProblememOpisu(500);
   const pozycje=[
     {id:"dostepnosc",poziom:doPotwierdzenia.length?"warn":"ok",ikona:"🔎",tytul:"Zamówienia do potwierdzenia dostępności",opis:doPotwierdzenia.length?`${doPotwierdzenia.length} zamówień ma pozycje powyżej ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} szt.`:"Brak zamówień wymagających potwierdzenia ilości.",akcja:"#/admin/zamowienia"},
     {id:"wysylki",poziom:bezNumeru.length?"warn":"ok",ikona:"🚚",tytul:"Przesyłki bez numeru nadania",opis:bezNumeru.length?`${bezNumeru.length} aktywnych zleceń czeka na numer/etykietę InPost.`:"Aktywne przesyłki mają komplet podstawowych danych.",akcja:"#/admin/wysylki"},
@@ -4435,6 +4543,7 @@ function agentAIAnaliza(){
     {id:"lokalizacje",poziom:(!lokAktywne.length||lokPozaSlownikiem.length)?"warn":"ok",ikona:"🗺️",tytul:"Słownik lokalizacji magazynu",opis:!lokAktywne.length?"Brak utworzonych lokalizacji magazynu.":lokPozaSlownikiem.length?`${lokPozaSlownikiem.length} lokalizacji przy produktach nie ma w słowniku.`:`Aktywne lokalizacje: ${lokAktywne.length}.`,akcja:"#/admin/magazyn"},
     {id:"pamiec",poziom:(agentAIPamiec||[]).length?"ok":"warn",ikona:"🧠",tytul:"Pamięć i procedury agenta",opis:(agentAIPamiec||[]).length?`Agent ma ${(agentAIPamiec||[]).length} zapamiętanych procedur/notatek.`:"Agent nie ma jeszcze własnych procedur. Naucz go poleceniem „zapamiętaj: …”.",akcja:"#/admin/agent-ai"},
     {id:"linki-producentow",poziom:linkiProd.length?"warn":"ok",ikona:"🔗",tytul:"Linki producentów do pobrania",opis:linkiProd.length?`${linkiProd.length} linków czeka na pobranie lub dopasowanie danych produktu.`:"Brak zaległych linków producentów.",akcja:"sprawdz-linki-producentow"},
+    {id:"opisy-produktow",poziom:opisyDoPoprawy.length?"warn":"ok",ikona:"📝",tytul:"Opisy produktów",opis:opisyDoPoprawy.length?`${opisyDoPoprawy.length} produktów wymaga krótkiego opisu albo uporządkowania pełnego opisu.`:"Krótkie i pełne opisy produktów są uporządkowane.",akcja:"popraw-opisy"},
     {id:"monitoring",poziom:bezMonitoringu.length?"warn":"ok",ikona:"📍",tytul:"Produkty bez monitorowanego stanu",opis:bezMonitoringu.length?`${bezMonitoringu.length} produktów działa bez limitu magazynowego — poprawne, jeśli to świadoma decyzja.`:"Wszystkie produkty mają monitorowany stan.",akcja:"#/admin/magazyn"},
     {id:"inwentaryzacja",poziom:stareInwentaryzacje.length?"warn":"ok",ikona:"✅",tytul:"Inwentaryzacja",opis:stareInwentaryzacje.length?`${stareInwentaryzacje.length} monitorowanych produktów nie ma świeżej daty inwentaryzacji.`:"Inwentaryzacja monitorowanych produktów jest aktualna.",akcja:"audyt-magazynu"},
     {id:"zdjecia",poziom:bezZdjec.length?"warn":"ok",ikona:"🖼️",tytul:"Zdjęcia produktów",opis:bezZdjec.length?`${bezZdjec.length} produktów używa ikony zamiast zdjęcia.`:"Produkty mają zdjęcia.",akcja:"#/admin/produkty"},
@@ -4470,6 +4579,7 @@ function agentAIWykonaj(akcja){
     return z;
   }
   if(akcja==="sprawdz-linki-producentow") return agentAISprawdzLinkiProducentow().then(t=>toast(t));
+  if(akcja==="popraw-opisy"){ const t=agentAIPoprawOpisyProduktow(40); toast(t); renderuj(); return t; }
   if(akcja==="kartoteka-domyslna") return wypelnijDomyslnaKartotekeMagazynu();
   if(akcja==="audyt-magazynu") return audytMagazynuAI();
 }
@@ -4484,6 +4594,7 @@ function agentAIOpisKroku(x){
     dostepnosc:"Zweryfikuj dostępność pozycji powyżej limitu i wpisz decyzję przy zamówieniu.",
     wysylki:"Uzupełnij dane InPost, wygeneruj etykietę i zapisz numer nadania.",
     faktury:"Utwórz lub odśwież szkice FV dla zamówień firmowych.",
+    "opisy-produktow":"Uruchom agenta opisów: uzupełni krótki opis i uporządkuje pełny opis bez zmiany danych technicznych.",
     ceny:"Uzupełnij cenę przed sprzedażą, żeby klient nie złożył błędnego zamówienia.",
     magazyn:"Sprawdź produkty z niskim stanem i zdecyduj, czy zamówić uzupełnienie.",
     zatowarowanie:"Przygotuj zamówienie do producenta tylko pod realne braki aktywnych zamówień.",
@@ -4576,6 +4687,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż pamięć')">Pamięć</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż lokalizacje')">Lokalizacje</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('sprawdź linki producentów')">Linki producentów</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('popraw opisy produktów')">Opisy produktów</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('synchronizuj bazę')">Synchronizacja</button>
       </div>
     </form>
@@ -4911,7 +5023,8 @@ async function allegroDodajProduktZOferty(offerId){
     allegroProductId:String(o.productId||"").trim()
   };
   if(o.descriptionText) p.opis=o.descriptionText;
-  produktyDodane.push(p);
+  const poprawiony=agentAIPoprawOpisyDanychProduktu(p);
+  produktyDodane.push(poprawiony);
   zapiszLS("artway_produkty_dodane",produktyDodane);
   zbudujProdukty();
   await allegroMapujOferte(o.id,id);
@@ -4928,7 +5041,7 @@ function produktRoboczyAllegroZFormularza(form,id,poprzedni={}){
   const pelny=daneProduktuZFormularza(fd,id,poprzedni);
   if(pelny) return pelny;
   const cena=parseFloat(String(fd.get("cena")||poprzedni.cena||"0").replace(",","."));
-  const p={...poprzedni,id,nazwa:String(fd.get("nazwa")||poprzedni.nazwa||"").trim(),kategoria:String(fd.get("kategoria")||poprzedni.kategoria||"").trim(),cena:Number.isFinite(cena)?cena:0,opis:String(fd.get("opis")||poprzedni.opis||"").trim()};
+  const p={...poprzedni,id,nazwa:String(fd.get("nazwa")||poprzedni.nazwa||"").trim(),kategoria:String(fd.get("kategoria")||poprzedni.kategoria||"").trim(),cena:Number.isFinite(cena)?cena:0,opisKrotki:String(fd.get("opisKrotki")||poprzedni.opisKrotki||"").trim(),opis:String(fd.get("opis")||poprzedni.opis||"").trim()};
   for(const [pole,nazwa] of [["gtin","gtin"],["ean","gtin"],["externalId","externalId"],["mpn","mpn"],["marka","marka"],["kodProducenta","kodProducenta"],["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroCategoryPhrase","allegroCategoryPhrase"],["sourceUrl","sourceUrl"],["producentUrl","producentUrl"]]){
     const v=String(fd.get(nazwa)||poprzedni[pole]||"").trim();
     if(v)p[pole]=v;
@@ -5046,6 +5159,7 @@ async function pobierzDaneProduktuZUrl(btn){
     const p=d.product||{};
     uzupelnijPoleFormularza(form,"nazwa",p.nazwa,overwrite);
     uzupelnijPoleFormularza(form,"kategoria",p.kategoria,overwrite);
+    uzupelnijPoleFormularza(form,"opisKrotki",p.opisKrotki||agentAIUtworzOpisKrotki(p),overwrite);
     uzupelnijPoleFormularza(form,"opis",p.opis,overwrite);
     uzupelnijPoleFormularza(form,"cena",p.cena,overwrite);
     uzupelnijPoleFormularza(form,"zdjecie",p.zdjecie,overwrite);
@@ -6865,6 +6979,10 @@ function formularzProduktu(p, tryb){
         </div>
         <div id="allegroDraftPreview"></div>
       </details>
+      <div class="f-group"><label>Opis krótki <small style="font-weight:400;color:var(--muted2)">widoczny na kartach i pod tytułem produktu</small></label><textarea name="opisKrotki" rows="3" maxlength="500" placeholder="Krótki, zachęcający opis w 1–2 zdaniach.">${esc(p.opisKrotki||p.krotkiOpis||"")}</textarea></div>
+      <div class="diag-actions" style="margin-top:-.35rem">
+        <button class="btn ghost" type="button" onclick="agentAIPoprawOpisyWFormularzu(this.form)">🤖 Popraw opisy stylistycznie</button>
+      </div>
       <div class="f-group"><label>Opis pełny</label><textarea name="opis" rows="9" maxlength="20000">${esc(p.opis||"")}</textarea></div>
       <div class="f-group" style="max-width:240px"><label>Stan magazynowy <small style="font-weight:400;color:var(--muted2)">(puste = bez limitu)</small></label>
         <input name="stan" inputmode="numeric" placeholder="∞" value="${p.id!==undefined && stanyProduktow[p.id]!==undefined ? stanyProduktow[p.id] : ""}"></div>
@@ -6908,6 +7026,7 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     nazwa:String(f.get("nazwa")).trim(),
     kategoria:String(f.get("kategoria")).trim()||"Inne",
     cena:+cena.toFixed(2),
+    opisKrotki:String(f.get("opisKrotki")||"").trim(),
     opis:String(f.get("opis")||"").trim(),
     ikona:String(f.get("ikona")||"").trim()||"📦",
     kolor:poprzedni.kolor||"#dbeafe"
@@ -6935,7 +7054,7 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   if(warianty.length) p.warianty = warianty; else delete p.warianty;
   const zdjecia = Array.from({length:15},(_,i)=>"zdjecie"+(i+2)).map(n=>String(f.get(n)||"").trim()).filter(Boolean);
   if(zdjecia.length) p.zdjecia = zdjecia; else delete p.zdjecia;
-  return p;
+  return agentAIPoprawOpisyDanychProduktu(p);
 }
 function wgrajZdjecieDoPola(input, pole){
   wgrajObrazek(input, 900, url => {
@@ -6956,6 +7075,7 @@ function dodajProdukt(e){
   produktyDodane.push(p); zapiszLS("artway_produkty_dodane", produktyDodane);
   zapiszStanZFormularza(f, p.id);
   agentAIZakonczLinkProducenta(prefillMeta._agentLinkId||prefillMeta._agentLinkUrl||p.sourceUrl||p.producentUrl,p);
+  zapiszHistorieAgenta("opisy-produktow",`Agent AI sprawdził opisy po dodaniu produktu: ${p.nazwa}`,{produktId:p.id,opisKrotki:!!p.opisKrotki,opis:!!p.opis});
   try{ sessionStorage.removeItem("artway_prefill_product"); }catch(e){}
   zbudujProdukty();
   kategoriaNowegoProduktu = "";
@@ -6982,6 +7102,7 @@ function zapiszProduktAdmin(e,id){
     zapiszLS("artway_produkty_edytowane", produktyEdytowane);
   }
   zbudujProdukty(); odswiezMenu();
+  zapiszHistorieAgenta("opisy-produktow",`Agent AI sprawdził opisy po edycji produktu: ${p.nazwa}`,{produktId:p.id,opisKrotki:!!p.opisKrotki,opis:!!p.opis});
   loguj("info","Zapisano zmiany produktu id="+id);
   toast("Zmiany produktu zapisane ✅");
   location.hash="#/admin/produkty";
@@ -7313,7 +7434,7 @@ function eksportNadaniaInpostCSV(nry, format="txt"){
       : `📄 Plik InPost ${nazwaTrybu.toUpperCase()}: ${lista.length} przesyłek — dla TXT ustaw w InPost separator średnik${nbrak?` • ⚠️ ${nbrak} z brakami danych`:""}`));
 }
 let podgladImportuProduktow=null, ostatniRaportImportu=null;
-const POLA_CSV_PRODUKTU=["id","nazwa","kategoria","cena","stara_cena","stan","sku","gtin","external_id","mpn","marka","opis","badge","ikona","zdjecie","zdjecie2","zdjecie3","zdjecie4","zdjecie5","zdjecie6","zdjecie7","zdjecie8","zdjecie9","zdjecie10","zdjecie11","zdjecie12","zdjecie13","zdjecie14","zdjecie15","zdjecie16","warianty","kolor","kolor_produktu","rozmiar","material"];
+const POLA_CSV_PRODUKTU=["id","nazwa","kategoria","cena","stara_cena","stan","sku","gtin","external_id","mpn","marka","opis_krotki","opis","badge","ikona","zdjecie","zdjecie2","zdjecie3","zdjecie4","zdjecie5","zdjecie6","zdjecie7","zdjecie8","zdjecie9","zdjecie10","zdjecie11","zdjecie12","zdjecie13","zdjecie14","zdjecie15","zdjecie16","warianty","kolor","kolor_produktu","rozmiar","material"];
 const POLA_OVF_PRODUKTU=["GTIN","EXTERNAL_ID","NAME","STOCK","PRICE","MPN","DESCRIPTION","IMAGE1","IMAGE2","IMAGE3","IMAGE4","IMAGE5","IMAGE6","IMAGE7","IMAGE8","IMAGE9","IMAGE10","IMAGE11","IMAGE12","IMAGE13","IMAGE14","IMAGE15","IMAGE16","CATEGORY","BRAND","COLOR","SIZE","MATERIAL"];
 function normalizujNaglowekCSV(v){
   return normalizujSzukanyTekst(v).replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");
@@ -7332,6 +7453,7 @@ function kanonicznePoleProduktu(naglowek){
     externalId:["external_id","externalid","kod_zewnetrzny","supplier_id","vendor_id","ext_id","supplier_sku"],
     mpn:["mpn","manufacturer_part_number","kod_producenta"],
     marka:["brand","marka","producent","brand_name","manufacturer"],
+    opisKrotki:["opis_krotki","krotki_opis","krótki_opis","short_description","short_desc","description_short","summary","lead"],
     opis:["opis","description","desc","long_description","description_html","full_description"],
     badge:["badge","etykieta","label"],
     ikona:["ikona","icon","emoji"],
@@ -7427,6 +7549,7 @@ function normalizujProduktImportu(r,nr){
     p.kategoriaPelna=kategoriaInfo.pelna;
   }
   if(cena===0)p.wymagaCeny=true;else delete p.wymagaCeny;
+  const opisKrotki=String(pobierz("opisKrotki","opis_krotki","short_description","summary")).trim();if(opisKrotki)p.opisKrotki=opisKrotki;
   const opis=String(pobierz("opis","description")).trim();if(opis)p.opis=opis;
   const ikona=String(pobierz("ikona","icon","emoji")).trim();if(ikona)p.ikona=ikona;
   const kolor=String(pobierz("kolor")).trim();if(kolor&&czyKolorKarty(kolor))p.kolor=kolor;
@@ -7444,7 +7567,7 @@ function normalizujProduktImportu(r,nr){
   const zdjecie=String(pobierz("zdjecie","image","image_url")).trim();if(zdjecie)p.zdjecie=zdjecie;
   if(zdjecia.length)p.zdjecia=zdjecia.slice(0,15);
   const warianty=tablicaWartosci(pobierz("warianty","variants","options"));if(warianty.length)p.warianty=warianty.slice(0,30);
-  return {nr,produkt:p,bledy,ostrzezenia};
+  return {nr,produkt:agentAIPoprawOpisyDanychProduktu(p),bledy,ostrzezenia};
 }
 function analizujTekstImportu(tekst,nazwa="wklejone dane"){
   try{
@@ -7584,7 +7707,7 @@ function produktDoEksportu(p){
   const o={id:p.id,nazwa:p.nazwa,kategoria:p.kategoria,cena:+Number(p.cena).toFixed(2)};
   if(p.staraCena>p.cena)o.staraCena=+Number(p.staraCena).toFixed(2);
   const stan=stanProduktu(p);if(stan!==null)o.stan=stan;
-  for(const k of ["sku","gtin","externalId","mpn","marka","opis","badge","ikona","kolor","kolorProduktu","rozmiar","material","zdjecie"])if(p[k]!==undefined&&p[k]!=="")o[k]=p[k];
+  for(const k of ["sku","gtin","externalId","mpn","marka","opisKrotki","opis","badge","ikona","kolor","kolorProduktu","rozmiar","material","zdjecie"])if(p[k]!==undefined&&p[k]!=="")o[k]=p[k];
   if(p.wymagaCeny)o.wymagaCeny=true;
   if(Array.isArray(p.sciezkaKategorii)&&p.sciezkaKategorii.length)o.sciezkaKategorii=p.sciezkaKategorii;
   if(p.grupaKategorii)o.grupaKategorii=p.grupaKategorii;
@@ -7625,6 +7748,7 @@ function wartoscPolaCSVProduktu(p,pole){
   if(pole==="stara_cena")return p.staraCena?String(p.staraCena.toFixed(2)).replace(".",","):"";
   if(pole==="cena")return String(Number(p.cena||0).toFixed(2)).replace(".",",");
   if(pole==="external_id")return p.externalId||"";
+  if(pole==="opis_krotki")return p.opisKrotki||opisKrotkiProduktu(p)||"";
   if(pole==="kolor_produktu")return p.kolorProduktu||"";
   if(pole==="warianty")return (p.warianty||[]).join(" | ");
   if(pole==="stan")return p.stan??"";
@@ -7663,11 +7787,11 @@ function eksportujProduktyOVF(zakres){
   toast(`Wyeksportowano ${lista.length} produktów w formacie OVF`);
 }
 function pobierzSzablonProduktowCSV(){
-  const przyklad=[1,"Przykładowy produkt","Nowa kategoria","99,90","129,90",25,"SKU-001","5901234567891","EXT-001","MPN-001","Marka","Opis produktu","Nowość","📦","https://adres.pl/zdjecie.jpg","","","","","","","","","","","","","","","","S | M | L","#dbeafe","Czarny","XL","Bawełna"];
+  const przyklad=[1,"Przykładowy produkt","Nowa kategoria","99,90","129,90",25,"SKU-001","5901234567891","EXT-001","MPN-001","Marka","Krótki opis produktu do karty sklepu.","Pełny opis produktu z najważniejszymi cechami, zastosowaniem i zawartością zestawu.","Nowość","📦","https://adres.pl/zdjecie.jpg","","","","","","","","","","","","","","","","S | M | L","#dbeafe","Czarny","XL","Bawełna"];
   pobierzPlik("szablon-importu-produktow.csv","\uFEFF"+POLA_CSV_PRODUKTU.join(";")+"\n"+przyklad.map(csvPole).join(";"),"text/csv");
 }
 function pobierzSzablonProduktowOVF(){
-  const p={id:1,nazwa:"Przykładowa gra edukacyjna",kategoria:"Gry edukacyjne",cena:99.90,stan:25,sku:"GRA-001",externalId:"GRA-001",gtin:"5901234567891",mpn:"GRA-001",opis:"Krótki opis produktu. Pełny opis będzie widoczny na stronie produktu, a na listach pojawi się skrót.",zdjecie:"https://adres.pl/zdjecie1.jpg",zdjecia:["https://adres.pl/zdjecie2.jpg"],marka:"Artway",kolorProduktu:"Kolorowy",rozmiar:"30x20x5 cm",material:"Karton"};
+  const p={id:1,nazwa:"Przykładowa gra edukacyjna",kategoria:"Gry edukacyjne",cena:99.90,stan:25,sku:"GRA-001",externalId:"GRA-001",gtin:"5901234567891",mpn:"GRA-001",opisKrotki:"Krótki opis produktu do karty sklepu.",opis:"Pełny opis będzie widoczny na stronie produktu, a na listach pojawi się skrót.",zdjecie:"https://adres.pl/zdjecie1.jpg",zdjecia:["https://adres.pl/zdjecie2.jpg"],marka:"Artway",kolorProduktu:"Kolorowy",rozmiar:"30x20x5 cm",material:"Karton"};
   const csv=POLA_OVF_PRODUKTU.join(",")+"\n"+POLA_OVF_PRODUKTU.map(pole=>wartoscPolaOVF(p,pole)).map(csvPole).join(",");
   pobierzPlik("ovf-template-dla-rozszerzonego-pliku-csv-dane.xls","\uFEFF"+csv,"text/csv");
 }
@@ -8735,7 +8859,7 @@ function widokAdminEksport(sekcja="import"){
       <button class="btn ghost" onclick="pobierzSzablonProduktowCSV()">📄 Szablon CSV</button>
       <button class="btn ghost" onclick="pobierzSzablonProduktowOVF()">📄 Szablon OVF .xls</button>
     </div>
-    <p class="pay-note" style="text-align:left">Eksport zawiera: ID, nazwę, kategorię, ceny, stan, SKU, GTIN/EAN, EXTERNAL_ID, MPN, markę, opis, etykietę, ikonę, zdjęcie główne, galerię do 16 zdjęć, warianty, kolor karty, kolor produktu, rozmiar i materiał. Produkty z kosza nie trafiają do pliku na hosting.</p>
+    <p class="pay-note" style="text-align:left">Eksport zawiera: ID, nazwę, kategorię, ceny, stan, SKU, GTIN/EAN, EXTERNAL_ID, MPN, markę, krótki opis, pełny opis, etykietę, ikonę, zdjęcie główne, galerię do 16 zdjęć, warianty, kolor karty, kolor produktu, rozmiar i materiał. Produkty z kosza nie trafiają do pliku na hosting.</p>
   </div>
   <div class="panel" style="${aktywna==="kopie"?"":"display:none"}">
     <h1>📦 Pozostałe eksporty i kopie</h1>

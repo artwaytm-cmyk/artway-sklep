@@ -1414,6 +1414,15 @@ function opisProduktuZHtml(html = '', title = '') {
   const opisStart = text.indexOf(String(title || '').trim());
   return opisStart >= 0 ? tekst(text.slice(opisStart + String(title || '').length, opisStart + 8000), 12000) : '';
 }
+function opisKrotkiProduktuZHtml(html = '', opis = '') {
+  const meta = metaHtml(html, 'og:description') || metaHtml(html, 'description');
+  const shortDesc = (html.match(/<div\b[^>]*class=["'][^"']*\bproduct_name__block\b[^"']*\b--description\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '';
+  const cleanedShort = stripHtml(shortDesc);
+  if (cleanedShort && cleanedShort.length > 20) return tekst(cleanedShort, 500);
+  if (meta && !/gry planszowe,\s*gry rodzinne/i.test(meta)) return tekst(stripHtml(meta), 500);
+  const first = String(opis || '').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).filter((x) => x.length > 20).slice(0, 2).join(' ');
+  return tekst(first || opis, 500);
+}
 function obrazkiProduktuZHtml(url = '', html = '') {
   const imageSet = new Set();
   const dodaj = (u) => {
@@ -1452,6 +1461,7 @@ function parsujProduktZHtml(url, html) {
   const niedostepny = statusNiedostepny || (!statusDostepny && /powiadom o dostępności|niedostępny|brak produktu|chwilowo niedostęp/i.test(text));
   const dostepny = statusDostepny || (!niedostepny && /produkt dostępny|\bdostępny\b|in stock|instock/i.test(text));
   const opis = opisProduktuZHtml(html, title);
+  const opisKrotki = opisKrotkiProduktuZHtml(html, opis);
   const kategoria = kategoriaZBreadcrumbJsonLd(html);
   const parametry = {
     symbol,
@@ -1469,6 +1479,7 @@ function parsujProduktZHtml(url, html) {
   if (!cena) missing.push('cena');
   if (!ean) missing.push('EAN');
   if (!zdjecia.length) missing.push('zdjęcia');
+  if (!opisKrotki) missing.push('krótki opis');
   if (!opis) missing.push('opis');
   if (!dostepny && !niedostepny) missing.push('dostępność');
   const confidence = Math.max(20, 100 - missing.length * 14);
@@ -1479,6 +1490,7 @@ function parsujProduktZHtml(url, html) {
     missing,
     product: {
       nazwa: stripHtml(title).replace(/\s+\|.*$/, ''),
+      opisKrotki,
       opis,
       cena: cena || '',
       kategoria,
@@ -1634,7 +1646,7 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
     external: externalId ? { id: externalId } : undefined,
     images: images.map((url) => ({ url: tekst(url, 1000) })),
     description: {
-      sections: [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(tekst(p.opis || '', 12000)).replace(/\n/g, '<br>')}</p>` }] }],
+      sections: [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(tekst(p.opis || p.opisKrotki || '', 12000)).replace(/\n/g, '<br>')}</p>` }] }],
     },
   };
   const missing = [];
