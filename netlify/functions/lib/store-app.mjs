@@ -1040,7 +1040,7 @@ async function allegroStatus(req) {
     account: auth?.account || '',
     updated_at: auth?.updated_at || null,
     requiredEnv: ['ALLEGRO_CLIENT_ID', 'ALLEGRO_CLIENT_SECRET'],
-    scope,
+    scope: c.scope,
     recommendedScope: ALLEGRO_DEFAULT_SCOPE,
     optionalEnv: ['ALLEGRO_REDIRECT_URI', 'ALLEGRO_ENV=production', 'ALLEGRO_SCOPE'],
   };
