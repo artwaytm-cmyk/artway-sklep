@@ -120,6 +120,10 @@ requireMarkers('assets/app.js', app, [
   'function wykonajImportProduktow',
   'function widokDiagnostyka',
   'function osadzUstawieniaWIndexie',
+  'function allegroOfertaDlaProduktuSklepu',
+  'function allegroWystawianiePanelHTML',
+  'function allegroZmienCenyZaznaczonychOfert',
+  'function allegroPoprawOpisyWFormularzu',
 ]);
 
 requireMarkers('netlify/functions/store.mjs', storeEntry, [
@@ -153,6 +157,11 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'artway_agent_ai_historia',
   'artway_ruchy_magazynowe',
   'artway_faktury_szkice',
+  "action === 'allegro-description-improve'",
+  "action === 'allegro-create-product-offer'",
+  "action === 'allegro-offer-price-change'",
+  'function allegroDopasowanieOferty',
+  'function allegroSekcjeOpisu',
 ]);
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
