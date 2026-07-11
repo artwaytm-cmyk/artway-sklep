@@ -1464,7 +1464,7 @@ function allegroSekcjeOpisu(product = {}, shortDescription = '') {
   }
   const images = [product.zdjecie, ...(Array.isArray(product.zdjecia) ? product.zdjecia : [])].filter(Boolean);
   const sections = [];
-  if (items.length) sections.push({ items });
+  for (let i = 0; i < items.length; i += 2) sections.push({ items: items.slice(i, i + 2) });
   if (images[1]) sections.push({ items: [{ type: 'IMAGE', url: tekst(images[1], 1000) }] });
   return sections.length ? sections : [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(product.nazwa || 'Produkt')}</p>` }] }];
 }
