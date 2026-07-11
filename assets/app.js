@@ -4088,6 +4088,30 @@ function agentAIPozycjeZleceniaProducenta(tryb="braki",limit=500){
     };
   });
 }
+function agentAIAktywneIlosciUProducentow(){
+  const mapa={};
+  (Array.isArray(agentAIZlecenia)?agentAIZlecenia:[])
+    .filter(z=>!["zrealizowane","anulowane"].includes(String(z.status||"").toLowerCase()))
+    .forEach(z=>(Array.isArray(z.pozycje)?z.pozycje:[]).forEach(p=>{
+      const id=String(p.produktId||"");
+      if(!id)return;
+      const pozostalo=Math.max(0,(Number(p.ilosc)||0)-(Number(p.przyjeto)||0));
+      mapa[id]=(mapa[id]||0)+pozostalo;
+    }));
+  return mapa;
+}
+function agentAIBrakiOperacyjne(){
+  const aktywne=agentAIAktywneIlosciUProducentow();
+  return agentAIPozycjeZleceniaProducenta("braki",1000).map(p=>{
+    const brak=Math.max(0,Number(p.ilosc)||0), wZleceniach=Math.max(0,Number(aktywne[String(p.produktId)]||0));
+    return {...p,brakCalkowity:brak,wZleceniach,pozostaloDoZamowienia:Math.max(0,brak-wZleceniach)};
+  });
+}
+function agentAIGrupujPoDostawcy(pozycje=[]){
+  const grupy={};
+  (Array.isArray(pozycje)?pozycje:[]).forEach(p=>{const d=String(p.dostawca||"Bez przypisanego dostawcy").trim()||"Bez przypisanego dostawcy";(grupy[d]||(grupy[d]=[])).push(p);});
+  return Object.entries(grupy).sort(([a],[b])=>a.localeCompare(b,"pl"));
+}
 function agentAIFormatZleceniaProducenta(zlecenie){
   if(!zlecenie||!Array.isArray(zlecenie.pozycje)||!zlecenie.pozycje.length) return "Nie ma pozycji do zlecenia.";
   const grupy={};
@@ -4105,7 +4129,15 @@ function agentAIFormatZleceniaProducenta(zlecenie){
   ].join("\n").trim();
 }
 function agentAIUtworzZlecenieProducenta(tryb="braki", opcje={}){
-  const pozycje=agentAIPozycjeZleceniaProducenta(tryb, opcje.limit||500);
+  let pozycje=agentAIPozycjeZleceniaProducenta(tryb, opcje.limit||500);
+  if(String(tryb||"braki").toLowerCase()==="braki"){
+    const aktywne=agentAIAktywneIlosciUProducentow();
+    pozycje=pozycje.map(p=>{
+      const brak=Math.max(0,Number(p.ilosc)||0), juz=Math.max(0,Number(aktywne[String(p.produktId)]||0)), pozostalo=Math.max(0,brak-juz);
+      return {...p,ilosc:pozostalo,iloscPotrzebna:pozostalo,brakCalkowity:brak,juzZamowiono:juz,powod:[p.powod||"",juz?`w aktywnych zleceniach: ${juz} szt.`:""].filter(Boolean).join(" • ")};
+    }).filter(p=>Number(p.ilosc)>0);
+  }
+  if(opcje.dostawca!==undefined)pozycje=pozycje.filter(p=>String(p.dostawca||"Bez przypisanego dostawcy")===String(opcje.dostawca));
   if(!pozycje.length) return null;
   const teraz=new Date(), numer=`AZ/${teraz.getFullYear()}/${String(teraz.getMonth()+1).padStart(2,"0")}/${String((Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).length+1).padStart(4,"0")}`;
   const rec={
@@ -4128,8 +4160,17 @@ function agentAIUtworzZlecenieProducenta(tryb="braki", opcje={}){
   zapiszHistorieAgenta("zlecenie",`Utworzono ${rec.numer}: ${rec.pozycje.length} pozycji / ${rec.sztuk} szt.`,{zlecenieId:rec.id,numer:rec.numer,tryb:rec.tryb,pozycje:rec.pozycje.length,sztuk:rec.sztuk});
   return rec;
 }
+function agentAIUtworzZleceniaWedlugDostawcow(dostawca=""){
+  const kandydaci=agentAIBrakiOperacyjne().filter(p=>Number(p.pozostaloDoZamowienia)>0);
+  const dostawcy=dostawca?[String(dostawca)]:agentAIGrupujPoDostawcy(kandydaci).map(([d])=>d);
+  const utworzone=[];
+  dostawcy.forEach(d=>{const z=agentAIUtworzZlecenieProducenta("braki",{dostawca:d,uwagi:`Szkic braków dla dostawcy: ${d}.`});if(z)utworzone.push(z);});
+  if(utworzone.length){toast(`Utworzono ${utworzone.length} oddzielnych zleceń według dostawców`);renderuj();}
+  else toast("Brak niepokrytych pozycji do nowego zlecenia");
+  return utworzone;
+}
 function agentAIZmienStatusZlecenia(id,status){
-  const dozwolone=["szkic","do sprawdzenia","zaakceptowane","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"];
+  const dozwolone=["szkic","do sprawdzenia","zaakceptowane","wysłane na Telegram","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"];
   const s=dozwolone.includes(status)?status:"szkic";
   let znaleziono=false;
   agentAIZlecenia=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).map(z=>{
@@ -4168,12 +4209,17 @@ function agentAIPobierzZlecenieCSV(id){
   const csv=[nag.join(";"),...(z.pozycje||[]).map(p=>[p.kod,p.ean,p.nazwa,p.ilosc,p.iloscPotrzebna,p.nadwyzka,p.dostawca,p.lokalizacja,p.cenaBrutto,p.wartoscSzacowana,(p.zamowienia||[]).join(" | ")].map(csvPole).join(";"))].join("\n");
   pobierzPlik(`zlecenie-producenta-${String(z.numer||z.id).replace(/[^a-z0-9_-]+/gi,"-")}.csv`,"\uFEFF"+csv,"text/csv");
 }
+function agentAIZlecenieTabelaDostawcyHTML(z,dostawca,pozycje){
+  const suma=pozycje.reduce((s,p)=>s+Number(p.ilosc||0),0), wartosc=pozycje.reduce((s,p)=>s+Number(p.ilosc||0)*kwotaNum(p.cenaBrutto),0);
+  return `<section class="supplier-split-card"><header><div><span class="supplier-chip">🏭 ${esc(dostawca)}</span><h4>Tabela zamówienia</h4><small>${pozycje.length} pozycji • ${suma} szt. • ${zl(wartosc)}</small></div><button class="btn telegram-btn" onclick="agentAIWyslijZlecenieTelegram(${jsArg(z.id)},${jsArg(dostawca)})">✈️ Wyślij tabelę na Telegram</button></header>
+  <div class="warehouse-worktable-wrap"><table class="log-table supplier-order-products"><tr><th>Zdjęcie</th><th>Kod</th><th>EAN</th><th>Nazwa produktu</th><th>Potrzeba</th><th>Zamawiamy</th><th>Nadwyżka</th><th>Powiązane zamówienia</th><th>Akcje</th></tr>${pozycje.map(p=>{const produkt=produktMagazynowy(p.produktId)||{};const potrzebna=Number(p.iloscPotrzebna??p.ilosc)||0, ilosc=Number(p.ilosc)||0;return `<tr><td><span class="admin-product-thumb">${produkt.zdjecie?`<img src="${esc(produkt.zdjecie)}" alt="" loading="lazy">`:`<span class="admin-product-thumb-fallback">${esc(produkt.ikona||"🎲")}</span>`}</span></td><td><b>${esc(p.kod||"—")}</b><br><small>ID ${esc(p.produktId||"—")}</small></td><td>${esc(p.ean||"—")}</td><td><b>${esc(p.nazwa||"Produkt")}</b><br><small>${p.stan===null?"stan bez limitu":`stan ${esc(p.stan||0)} • rez. ${esc(p.rezerwacje||0)}`} • ${esc(p.lokalizacja||"bez lokalizacji")}</small></td><td><b>${potrzebna}</b> szt.</td><td><div class="supplier-qty-control"><button type="button" onclick="agentAIPrzesunIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},-1)">−</button><input aria-label="Ilość zamawiana" inputmode="numeric" value="${ilosc}" onchange="agentAIUstawIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},this.value)"><button type="button" onclick="agentAIPrzesunIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},1)">+</button></div></td><td><span class="lvl ${ilosc>potrzebna?"lvl-ostrzezenie":"lvl-ok"}">${Math.max(0,ilosc-potrzebna)} szt.</span></td><td><small>${esc((p.zamowienia||[]).join(", ")||"—")}</small></td><td><div class="warehouse-worktable-actions"><button class="btn ghost" onclick="agentAIPowiekszPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)})">➕ Powiększ</button><button class="btn ghost" onclick="agentAIPrzyjmijPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)})">📥 Przyjmij</button></div></td></tr>`;}).join("")}</table></div></section>`;
+}
 function agentAIZleceniaPanelHTML(){
   const lista=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).slice().sort((a,b)=>String(b.data||"").localeCompare(String(a.data||"")));
-  const statusy=["szkic","do sprawdzenia","zaakceptowane","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"];
-  return `<div class="panel agent-orders-panel"><div class="order-section-head"><div><h2 style="margin-top:0">🧾 Zamówienia do producentów</h2><p class="order-detail-lead">Każdy dokument jest jednym zleceniem. Produkty są pozycjami wewnątrz zlecenia, a nie osobnymi zleceniami na liście.</p></div><button class="btn" onclick="const z=agentAIUtworzZlecenieProducenta('braki');if(z){toast('Utworzono '+z.numer);renderuj()}else toast('Brak produktów do zamówienia')">🤖 Nowe zlecenie z braków</button></div>
-  <div class="orders-stat-grid"><div class="order-stat-card"><span>🧾</span><b>${lista.length}</b><small>zleceń producenta</small></div><div class="order-stat-card"><span>📦</span><b>${lista.reduce((s,z)=>s+(z.pozycje||[]).length,0)}</b><small>pozycji łącznie</small></div><div class="order-stat-card"><span>🔢</span><b>${lista.reduce((s,z)=>s+Number(z.sztuk||0),0)}</b><small>sztuk łącznie</small></div><div class="order-stat-card money"><span>💰</span><b>${zl(lista.reduce((s,z)=>s+kwotaNum(z.wartoscSzacowana),0))}</b><small>wartość szacowana</small></div></div>
-  <div class="supplier-order-list">${lista.map(z=>{const zamkniete=["zrealizowane","anulowane"].includes(String(z.status||"").toLowerCase());return `<article class="supplier-order-card ${zamkniete?"is-closed":""}"><header class="supplier-order-head"><div><span class="order-pro-label">${esc(z.tryb==="niskie"?"Uzupełnienie magazynu":"Braki do zamówień")}</span><h3>${esc(z.numer||z.id)}</h3><small>${esc(z.dataTxt||allegroDataTxt(z.data))} • ${(z.pozycje||[]).length} pozycji • ${esc(z.sztuk||0)} szt. • ${zl(z.wartoscSzacowana||0)}</small></div><div class="supplier-order-status"><select onchange="agentAIZmienStatusZlecenia(${jsArg(z.id)},this.value)">${statusy.map(s=>`<option value="${s}" ${z.status===s?"selected":""}>${s}</option>`).join("")}</select><small>${esc((z.dostawcy||[]).join(", ")||"Brak dostawcy")}</small></div></header><div class="warehouse-worktable-wrap"><table class="log-table supplier-order-products"><tr><th>Zdjęcie</th><th>Kod</th><th>EAN</th><th>Nazwa</th><th>Potrzeba</th><th>Zamawiamy</th><th>Nadwyżka</th><th>Stan / lokalizacja</th><th>Akcje</th></tr>${(z.pozycje||[]).map(p=>{const produkt=produktMagazynowy(p.produktId)||{};return `<tr><td><span class="admin-product-thumb">${produkt.zdjecie?`<img src="${esc(produkt.zdjecie)}" alt="" loading="lazy">`:`<span class="admin-product-thumb-fallback">${esc(produkt.ikona||"🎲")}</span>`}</span></td><td><b>${esc(p.kod||"—")}</b></td><td>${esc(p.ean||"—")}</td><td><b>${esc(p.nazwa||"Produkt")}</b><br><small>${esc((p.zamowienia||[]).join(", "))}</small></td><td>${esc((p.iloscPotrzebna??p.ilosc)||0)} szt.</td><td><b>${esc(p.ilosc||0)} szt.</b></td><td>${esc(p.nadwyzka||0)} szt.</td><td>${p.stan===null?"bez limitu":`${esc(p.stan||0)} szt.`}<br><small>${esc(p.lokalizacja||"—")}</small></td><td><div class="warehouse-worktable-actions"><button class="btn ghost" onclick="agentAIPowiekszPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)})">➕ Powiększ</button><button class="btn ghost" onclick="agentAIPrzyjmijPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)})">📥 Przyjmij</button></div></td></tr>`;}).join("")||`<tr><td colspan="9">Brak pozycji.</td></tr>`}</table></div><footer class="supplier-order-actions"><button class="btn ghost" onclick="agentAIPobierzZlecenieCSV(${jsArg(z.id)})">📤 Pobierz całe zlecenie CSV</button><button class="btn danger" onclick="agentAIUsunZlecenie(${jsArg(z.id)})">🗑️ Usuń zlecenie</button></footer></article>`;}).join("")||`<div class="backend-note">Nie ma jeszcze zleceń producenta. Utwórz pierwsze z aktualnych braków.</div>`}</div></div>`;
+  const statusy=["szkic","do sprawdzenia","zaakceptowane","wysłane na Telegram","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"];
+  return `<div class="panel agent-orders-panel"><div class="order-section-head"><div><span class="order-pro-label">Dokumenty zakupowe</span><h2 style="margin-top:.25rem">🧾 Zamówienia do producentów</h2><p class="order-detail-lead">Każdy dostawca ma własną tabelę. Ilość można zmienić bezpośrednio w wierszu, a gotową tabelę wysłać na Telegram.</p></div><button class="btn" onclick="agentAIUtworzZleceniaWedlugDostawcow()">🤖 Utwórz oddzielnie według dostawców</button></div>
+  <div class="orders-stat-grid"><div class="order-stat-card"><span>🧾</span><b>${lista.length}</b><small>zleceń producenta</small></div><div class="order-stat-card"><span>🏭</span><b>${new Set(lista.flatMap(z=>z.dostawcy||[])).size}</b><small>dostawców</small></div><div class="order-stat-card"><span>🔢</span><b>${lista.reduce((s,z)=>s+Number(z.sztuk||0),0)}</b><small>sztuk łącznie</small></div><div class="order-stat-card money"><span>💰</span><b>${zl(lista.reduce((s,z)=>s+kwotaNum(z.wartoscSzacowana),0))}</b><small>wartość szacowana</small></div></div>
+  <div class="supplier-order-list">${lista.map(z=>{const zamkniete=["zrealizowane","anulowane"].includes(String(z.status||"").toLowerCase()),grupy=agentAIGrupujPoDostawcy(z.pozycje||[]);return `<article class="supplier-order-card ${zamkniete?"is-closed":""}"><header class="supplier-order-head"><div><span class="order-pro-label">${esc(z.tryb==="niskie"?"Uzupełnienie magazynu":"Braki do zamówień")}</span><h3>${esc(z.numer||z.id)}</h3><small>${esc(z.dataTxt||allegroDataTxt(z.data))} • ${grupy.length} dostawców • ${(z.pozycje||[]).length} pozycji • ${esc(z.sztuk||0)} szt. • ${zl(z.wartoscSzacowana||0)}</small></div><div class="supplier-order-status"><select onchange="agentAIZmienStatusZlecenia(${jsArg(z.id)},this.value)">${statusy.map(s=>`<option value="${s}" ${z.status===s?"selected":""}>${s}</option>`).join("")}</select><small>${z.telegramSentAt?`Telegram: ${esc(allegroDataTxt(z.telegramSentAt))}`:"Jeszcze niewysłane"}</small></div></header><div class="supplier-split-list">${grupy.map(([d,items])=>agentAIZlecenieTabelaDostawcyHTML(z,d,items)).join("")}</div><footer class="supplier-order-actions"><button class="btn telegram-btn" onclick="agentAIWyslijZlecenieTelegram(${jsArg(z.id)})">✈️ Wyślij wszystkie tabele na Telegram</button><button class="btn ghost" onclick="agentAIPobierzZlecenieCSV(${jsArg(z.id)})">📤 CSV całego zlecenia</button><button class="btn danger" onclick="agentAIUsunZlecenie(${jsArg(z.id)})">🗑️ Usuń zlecenie</button></footer></article>`;}).join("")||`<div class="backend-note">Nie ma jeszcze zleceń producenta. Utwórz osobne dokumenty z aktualnych braków.</div>`}</div></div>`;
 }
 function agentAIZmienPozycjeZlecenia(id, produktId, fn){
   let znaleziono=false;
@@ -4205,6 +4251,33 @@ function agentAIPowiekszPozycjeZlecenia(id, produktId){
     toast("Pozycja zlecenia powiększona. Nadwyżka będzie widoczna do przyjęcia.");
     renderuj();
   }
+}
+function agentAIUstawIloscPozycji(id,produktId,wartosc){
+  const ilosc=Math.max(0,parseInt(String(wartosc??0).replace(/[^\d-]/g,""),10)||0);
+  const ok=agentAIZmienPozycjeZlecenia(id,produktId,p=>{
+    const potrzebna=Number(p.iloscPotrzebna??p.ilosc??0)||0;
+    return {...p,ilosc,nadwyzka:Math.max(0,ilosc-potrzebna),powod:[String(p.powod||"").replace(/ • ilość ręczna: \d+ szt\.$/,""),`ilość ręczna: ${ilosc} szt.`].filter(Boolean).join(" • ")};
+  });
+  if(ok){zapiszHistorieAgenta("zlecenie",`Ustawiono ilość pozycji na ${ilosc} szt.`,{zlecenieId:id,produktId,ilosc});toast("Ilość w zamówieniu zaktualizowana");renderuj();}
+}
+function agentAIPrzesunIloscPozycji(id,produktId,delta){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  const p=(z?.pozycje||[]).find(x=>String(x.produktId)===String(produktId));
+  if(!p){toast("Nie znaleziono pozycji");return;}
+  agentAIUstawIloscPozycji(id,produktId,Math.max(0,(Number(p.ilosc)||0)+Number(delta||0)));
+}
+async function agentAIWyslijZlecenieTelegram(id,dostawca=""){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  if(!z){toast("Nie znaleziono zlecenia producenta");return;}
+  try{
+    toast("Przygotowuję tabelę i wysyłam na Telegram…");
+    const d=await chmura("telegram-send-supplier-order",{method:"POST",body:{order:z,supplier:dostawca||""},timeout:30000});
+    const teraz=d.sentAt||new Date().toISOString();
+    agentAIZlecenia=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).map(item=>String(item.id)!==String(id)?item:agentAIPodsumujZlecenie({...item,status:["szkic","do sprawdzenia","zaakceptowane"].includes(String(item.status||""))?"wysłane na Telegram":item.status,telegramSentAt:teraz,telegramSuppliers:[...new Set([...(item.telegramSuppliers||[]),...(d.suppliers||[])])],telegramMessages:[...(item.telegramMessages||[]),...(d.messageIds||[])]}));
+    zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);
+    zapiszHistorieAgenta("telegram",`Wysłano tabelę ${z.numer||z.id} na Telegram`,{zlecenieId:id,dostawcy:d.suppliers||[],wiadomosci:(d.messageIds||[]).length});
+    toast(`Telegram: wysłano ${d.tables||0} tabel ✅`);renderuj();
+  }catch(e){toast("⚠️ Telegram: "+(e.message||e));}
 }
 function agentAIPrzyjmijPozycjeZlecenia(id, produktId){
   const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
@@ -4359,53 +4432,22 @@ function akcjaWierszaOperacyjnegoHTML(x){
   </div>`;
 }
 function eksportujTabeleOperacyjnaMagazynuCSV(){
-  const rows=wierszeOperacyjneMagazynu();
-  const nag=["kod","ean","nazwa","ilosc_potrzebna","zrodlo","numer","status","klient_lub_dostawca","stan","rezerwacje","dostepne_po_rezerwacjach","lokalizacja","dostawca","powod","zamowienia_powiazane"];
-  const csv=[nag.join(";"),...rows.map(x=>[x.kod,x.ean,x.nazwa,x.ilosc,x.zrodlo,x.numer,x.status,x.klient,x.stan===null?"bez limitu":x.stan,x.rezerwacje,x.dostepne===null?"bez limitu":x.dostepne,x.lokalizacja,x.dostawca,x.powod,(x.zamowienia||[]).join(" | ")].map(csvPole).join(";"))].join("\n");
-  pobierzPlik("magazyn-zamowienia-zlecenia-agenta.csv","\uFEFF"+csv,"text/csv");
+  const braki=agentAIBrakiOperacyjne(), rows=[];
+  braki.forEach(x=>rows.push(["brak",x.dostawca,"",x.kod,x.ean,x.nazwa,x.brakCalkowity,x.wZleceniach,x.pozostaloDoZamowienia,x.stan===null?"bez limitu":x.stan,x.rezerwacje,x.lokalizacja,(x.zamowienia||[]).join(" | "),x.powod]));
+  (Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).forEach(z=>(z.pozycje||[]).forEach(p=>rows.push(["zlecenie producenta",p.dostawca,z.numer||z.id,p.kod,p.ean,p.nazwa,p.iloscPotrzebna??p.ilosc,p.ilosc,Math.max(0,Number(p.ilosc||0)-Number(p.iloscPotrzebna??p.ilosc??0)),p.stan===null?"bez limitu":p.stan,p.rezerwacje,p.lokalizacja,(p.zamowienia||[]).join(" | "),z.status||"szkic"])));
+  const nag=["sekcja","dostawca","numer_zlecenia","kod","ean","nazwa","potrzeba","zamowiono_lub_w_zleceniach","pozostalo_lub_nadwyzka","stan","rezerwacje","lokalizacja","zamowienia_powiazane","status_lub_powod"];
+  const csv=[nag.join(";"),...rows.map(r=>r.map(csvPole).join(";"))].join("\n");
+  pobierzPlik("braki-i-zamowienia-do-producentow.csv","\uFEFF"+csv,"text/csv");
   zapiszHistorieAgenta("eksport","Wyeksportowano tabelę operacyjną magazynu",{wiersze:rows.length});
 }
-function magazynTabelaOperacyjnaHTML(opcje={}){
-  const limit=Number(opcje.limit)||160, rows=wierszeOperacyjneMagazynu(), widoczne=rows.slice(0,limit);
-  const zamRows=rows.filter(x=>x.typ==="zamowienie"), aiRows=rows.filter(x=>x.typ==="agent");
-  const allegroRows=rows.filter(x=>x.typ==="allegro");
-  const nadwyzki=agentAINadwyzkiDoPrzyjecia();
-  const brakujace=rows.filter(x=>x.dostepne!==null&&Number(x.dostepne)<0).length;
-  return `<div class="panel warehouse-worktable-panel">
-    <div class="order-section-head">
-      <div>
-        <h2 style="margin-top:0">📑 Tabela operacyjna: zamówienia i zlecenia agenta</h2>
-        <p class="order-detail-lead">Pierwsze kolumny są celowo stałe: kod, EAN, nazwa i ilość potrzebna. Dalej widzisz źródło, status, stan, rezerwacje, lokalizację i dostawcę.</p>
-      </div>
-      <div class="diag-actions" style="margin-top:0">
-        <button class="btn" onclick="const z=agentAIUtworzZlecenieProducenta('braki'); if(z){toast('Utworzono '+z.numer); renderuj();} else toast('Brak pozycji do zlecenia pod aktywne zamówienia')">🤖 Utwórz zlecenie agenta</button>
-        <button class="btn ghost" onclick="eksportujTabeleOperacyjnaMagazynuCSV()">📤 CSV tabeli</button>
-      </div>
-    </div>
-    <div class="warehouse-worktable-stats">
-      <span><b>${zamRows.length}</b><small>pozycji ze sklepu</small></span>
-      <span><b>${allegroRows.length}</b><small>pozycji Allegro</small></span>
-      <span><b>${aiRows.length}</b><small>pozycji ze zleceń agenta</small></span>
-      <span><b>${nadwyzki.length}</b><small>nadwyżek do przyjęcia</small></span>
-      <span><b>${brakujace}</b><small>pozycji z brakiem po rezerwacjach</small></span>
-    </div>
-    <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable">
-      <tr><th>Kod</th><th>EAN / kod prod.</th><th>Nazwa</th><th>Ilość potrzebna</th><th>Źródło</th><th>Nr / status</th><th>Stan</th><th>Lokalizacja</th><th>Dostawca</th><th>Akcja</th></tr>
-      ${widoczne.map(x=>`<tr class="${x.dostepne!==null&&Number(x.dostepne)<0?"row-alert":""}">
-        <td><b>${esc(x.kod||x.produktId||"—")}</b><br><small>ID: ${esc(x.produktId||"—")}</small></td>
-        <td>${esc(x.ean||"—")}</td>
-        <td><b>${esc(x.nazwa)}</b><br><small>${esc(x.powod||"")}${x.zamowienia?.length?` • ${esc(x.zamowienia.join(", "))}`:""}</small></td>
-        <td><b>${esc(x.ilosc)}</b> szt.</td>
-        <td>${esc(x.zrodlo)}<br><small>${esc(x.klient||"")}</small></td>
-        <td><b>${esc(x.numer||"—")}</b><br><span class="lvl ${esc(x.statusKlasa||"lvl-info")}">${esc(x.status||"")}</span></td>
-        <td>${x.stan===null?"bez limitu":`${esc(x.stan)} szt.`}<br><small>rez.: ${esc(x.rezerwacje)} • po rez.: ${x.dostepne===null?"∞":esc(x.dostepne)}</small></td>
-        <td>${esc(x.lokalizacja?nazwaLokalizacjiMagazynu(x.lokalizacja):"—")}</td>
-        <td>${esc(x.dostawca||"—")}</td>
-        <td>${akcjaWierszaOperacyjnegoHTML(x)}</td>
-      </tr>`).join("") || `<tr><td colspan="10">Brak pozycji w zamówieniach i brak zleceń agenta.</td></tr>`}
-    </table></div>
-    ${rows.length>limit?`<p class="order-detail-lead">Pokazano ${limit} z ${rows.length} wierszy. Pełną listę pobierzesz przyciskiem CSV.</p>`:""}
-  </div>`;
+function magazynBrakiDostawcyHTML(dostawca,rows){
+  const pozostalo=rows.reduce((s,x)=>s+Number(x.pozostaloDoZamowienia||0),0), pokryte=rows.reduce((s,x)=>s+Number(x.wZleceniach||0),0);
+  return `<section class="ops-supplier-card"><header><div><span class="supplier-chip">🏭 ${esc(dostawca)}</span><h3>Braki do aktywnych zamówień</h3><small>${rows.length} produktów • pozostało ${pozostalo} szt. • w zleceniach ${pokryte} szt.</small></div><button class="btn" onclick="agentAIUtworzZleceniaWedlugDostawcow(${jsArg(dostawca)})" ${pozostalo?"":"disabled"}>🧾 Utwórz zlecenie dla dostawcy</button></header><div class="warehouse-worktable-wrap"><table class="log-table ops-shortage-table"><tr><th>Kod</th><th>EAN</th><th>Nazwa produktu</th><th>Brakuje</th><th>Już w zleceniach</th><th>Pozostało zamówić</th><th>Stan / rezerwacje</th><th>Powiązane zamówienia</th><th>Akcja</th></tr>${rows.map(x=>`<tr class="${x.pozostaloDoZamowienia>0?"row-alert":"row-covered"}"><td><b>${esc(x.kod||x.produktId||"—")}</b><br><small>ID ${esc(x.produktId||"—")}</small></td><td>${esc(x.ean||"—")}</td><td><b>${esc(x.nazwa)}</b><br><small>${esc(x.lokalizacja?nazwaLokalizacjiMagazynu(x.lokalizacja):"bez lokalizacji")}</small></td><td><b>${esc(x.brakCalkowity)}</b> szt.</td><td>${esc(x.wZleceniach)} szt.</td><td><span class="lvl ${x.pozostaloDoZamowienia>0?"lvl-ostrzezenie":"lvl-ok"}"><b>${esc(x.pozostaloDoZamowienia)}</b> szt.</span></td><td>${x.stan===null?"bez limitu":`${esc(x.stan)} szt.`}<br><small>rezerwacje ${esc(x.rezerwacje||0)} • po rez. ${x.dostepne===null?"∞":esc(x.dostepne)}</small></td><td><small>${esc((x.zamowienia||[]).join(", ")||"—")}</small></td><td><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(x.produktId)}">✏️ Produkt</a></td></tr>`).join("")}</table></div></section>`;
+}
+function magazynTabelaOperacyjnaHTML(){
+  const braki=agentAIBrakiOperacyjne(),grupy=agentAIGrupujPoDostawcy(braki),pozostalo=braki.reduce((s,x)=>s+Number(x.pozostaloDoZamowienia||0),0),wZleceniach=braki.reduce((s,x)=>s+Number(x.wZleceniach||0),0);
+  const aktywne=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).filter(z=>!["zrealizowane","anulowane"].includes(String(z.status||"").toLowerCase()));
+  return `<div class="panel warehouse-worktable-panel ops-control-center"><div class="order-section-head"><div><span class="order-pro-label">Centrum zakupów</span><h2 style="margin-top:.25rem">📑 Braki i zamówienia do producentów</h2><p class="order-detail-lead">Tabela pokazuje wyłącznie realne braki do aktywnych zamówień sklepu i Allegro. Pozycje już pokryte aktywnym zleceniem nie są zamawiane drugi raz.</p></div><div class="diag-actions" style="margin-top:0"><button class="btn" onclick="agentAIUtworzZleceniaWedlugDostawcow()" ${pozostalo?"":"disabled"}>🤖 Utwórz osobne zlecenia</button><button class="btn ghost" onclick="eksportujTabeleOperacyjnaMagazynuCSV()">📤 CSV</button></div></div><div class="orders-stat-grid"><div class="order-stat-card ${braki.length?"hot":""}"><span>⚠️</span><b>${braki.length}</b><small>produktów z brakiem</small></div><div class="order-stat-card"><span>🔢</span><b>${pozostalo}</b><small>sztuk do zamówienia</small></div><div class="order-stat-card money"><span>✅</span><b>${wZleceniach}</b><small>sztuk już w zleceniach</small></div><div class="order-stat-card"><span>🏭</span><b>${grupy.length}</b><small>dostawców</small></div><div class="order-stat-card"><span>🧾</span><b>${aktywne.length}</b><small>aktywnych zleceń</small></div></div><div class="ops-supplier-list">${grupy.map(([d,rows])=>magazynBrakiDostawcyHTML(d,rows)).join("")||`<div class="backend-note">✅ Brak realnych braków do aktywnych zamówień.</div>`}</div></div>${agentAIZleceniaPanelHTML()}`;
 }
 function agentAIZlecenieProducentaTekst(tryb="braki",limit=80){
   const rec=agentAIUtworzZlecenieProducenta(tryb,{limit});
@@ -5452,25 +5494,24 @@ function allegroOfertyTabelaHTML(){
       </select>
       <label class="allegro-view-limit">Pokaż ofert <select onchange="allegroLimitWidokuOfert=Number(this.value)||250;renderuj()">${[100,250,500,1000].map(n=>`<option value="${n}" ${allegroLimitWidokuOfert===n?"selected":""}>${n}</option>`).join("")}</select></label>
     </div>
-    <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable allegro-offers-table">
-      <tr><th>Kod oferty</th><th>Nazwa Allegro</th><th>EAN / kod prod.</th><th>Cena</th><th>Stan Allegro</th><th>Status</th><th>Zdjęcia</th><th>Produkt sklepu</th><th>Akcje</th></tr>
+    <div class="warehouse-worktable-wrap allegro-catalog-wrap"><table class="log-table warehouse-worktable allegro-offers-table">
+      <tr><th>Oferta</th><th>ID / kod oferty</th><th>EAN / kod producenta</th><th>Cena</th><th>Stan Allegro</th><th>Status</th><th>Produkt sklepu</th><th>Akcje</th></tr>
       ${rows.map(o=>{
         const prod=allegroProduktDlaOferty(o.id);
         return `<tr class="${prod?"":"row-alert"}">
+          <td><div class="allegro-offer-title-cell">${o.mainImage?`<img src="${esc(o.mainImage)}" alt="" loading="lazy">`:`<span>🏷️</span>`}<div><b>${esc(o.name||"—")}</b><small>${esc(o.categoryId?`Kategoria ${o.categoryId}`:"")}${o.brand?` • ${esc(o.brand)}`:""} • ${(o.images||[]).length||0} zdjęć</small></div></div></td>
           <td><b>${esc(allegroKodOferty(o)||"—")}</b><br><small>ID: ${esc(o.id||"—")}</small></td>
-          <td><b>${esc(o.name||"—")}</b><br><small>${esc(o.categoryId?`Kategoria Allegro: ${o.categoryId}`:"")}${o.brand?` • Marka: ${esc(o.brand)}`:""}</small></td>
           <td><b>${esc(o.ean||o.gtin||"—")}</b><br><small>${esc(o.manufacturerCode||o.producerCode||o.externalId||"—")}</small></td>
           <td>${esc(o.priceText||"—")}</td>
           <td>${esc(o.stockAvailable??"—")}<br><small>sprzedano: ${esc(o.stockSold??"—")}</small></td>
           <td><span class="lvl lvl-info">${esc(o.status||"—")}</span></td>
-          <td>${o.mainImage?`<img src="${esc(o.mainImage)}" alt="" style="width:54px;height:54px;object-fit:cover;border-radius:9px;border:1px solid var(--line)">`:`<span style="color:var(--muted2)">—</span>`}<br><small>${(o.images||[]).length||0} zdj.</small></td>
           <td>${allegroProduktSelectHTML(o.id)}${prod?`<small class="allegro-linked-note">Podpięto: ${esc(prod.nazwa)}</small>`:""}</td>
           <td><div class="warehouse-worktable-actions">
             <button class="btn ghost" onclick="allegroDodajProduktZOferty(${jsArg(o.id)})">➕ Utwórz produkt</button>
             <button class="btn ghost" onclick="window.open('https://allegro.pl/oferta/${encodeURIComponent(o.id)}','_blank','noopener')">Otwórz</button>
           </div></td>
         </tr>`;
-      }).join("") || `<tr><td colspan="9">Brak ofert Allegro. Połącz konto i kliknij synchronizację.</td></tr>`}
+      }).join("") || `<tr><td colspan="8">Brak ofert Allegro. Połącz konto i kliknij synchronizację.</td></tr>`}
     </table></div>
   </div>`;
 }
@@ -5721,6 +5762,16 @@ function allegroSubnavHTML(aktywny="start"){
     {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"}
   ],aktywny);
 }
+function allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete){
+  const cfg={
+    start:{ico:"🟠",kicker:"Centrum Allegro",title:"Pulpit integracji",opis:"Jedno miejsce do kontroli zamówień, katalogu ofert, wystawiania i komunikacji.",metryki:[["Połączenie",allegroStan.connected?"Aktywne":"Wymaga uwagi"],["Oferty",(allegroOferty||[]).length],["Zamówienia",(allegroZamowienia||[]).length]]},
+    zamowienia:{ico:"📦",kicker:"Sprzedaż",title:"Kolejka zamówień Allegro",opis:"Całe zlecenia z pozycjami, rzeczywistym statusem Allegro i bez mieszania z katalogiem produktów.",metryki:[["Do obsługi",(allegroZamowienia||[]).filter(z=>["nowe","do_wyslania"].includes(allegroStatusKolejki(z))).length],["Sprawdzone",(allegroZamowienia||[]).filter(z=>allegroStatusKolejki(z)==="sprawdzone").length],["Wysłane",(allegroZamowienia||[]).filter(z=>allegroStatusKolejki(z)==="wyslane").length]]},
+    oferty:{ico:"🏷️",kicker:"Katalog Allegro",title:"Oferty i powiązania",opis:"Profesjonalny katalog ofert z miniaturą, identyfikatorami, ceną, stanem i kontrolą powiązania z produktem sklepu.",metryki:[["Wszystkie",(allegroOferty||[]).length],["Podpięte",mapped],["Do powiązania",niepodpiete]]},
+    wystawianie:{ico:"🟠",kicker:"Publikowanie",title:"Przygotowanie ofert",opis:"Kontrola kompletności danych produktu przed utworzeniem bezpiecznego szkicu oferty.",metryki:[["Produkty",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length],["Gotowe",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroBrakiProduktuDoWystawienia(p).length).length],["Do uzupełnienia",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroBrakiProduktuDoWystawienia(p).length).length]]},
+    komunikacja:{ico:"💬",kicker:"Obsługa klienta",title:"Wiadomości i dyskusje",opis:"Nowe wiadomości, dyskusje i bezpieczny autoresponder bez odpowiedzi do starych rozmów.",metryki:[["Wątki",allegroKomunikacjaStaty().threads.length],["Dyskusje",allegroKomunikacjaStaty().issues.length],["Nowe",allegroKomunikacjaStaty().totalNeed]]}
+  }[aktywna]||{};
+  return `<section class="panel allegro-workspace-section"><div class="allegro-workspace-title"><span>${cfg.ico||"🟠"}</span><div><small>${esc(cfg.kicker||"Allegro")}</small><h2>${esc(cfg.title||"Panel Allegro")}</h2><p>${esc(cfg.opis||"")}</p></div></div><div class="allegro-workspace-metrics">${(cfg.metryki||[]).map(([l,v])=>`<div><small>${esc(l)}</small><b>${esc(v)}</b></div>`).join("")}</div></section>`;
+}
 function allegroStartPanelHTML(mapped,niepodpiete){
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
@@ -5781,6 +5832,7 @@ function widokAdminAllegro(sekcja="start"){
     </div>
     ${allegroSubnavHTML(aktywna)}
   </div>
+  ${allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete)}
   ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="komunikacja"?allegroKomunikacjaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
   `);
 }
@@ -5935,8 +5987,8 @@ function widokAdminZamowieniaTabela(){
     <div class="orders-hero">
       <div>
         <span class="order-pro-label">Tabela operacyjna</span>
-        <h1>📑 Zamówienia, Allegro i zlecenia agenta</h1>
-        <p>Jedna tabela do pracy magazynowej: kod, EAN, nazwa i ilość są na początku. Agent pokazuje tylko braki po odjęciu obecnego stanu magazynu.</p>
+        <h1>📑 Braki i zamówienia do producentów</h1>
+        <p>Profesjonalne tabele zakupowe według dostawców: kod, EAN, realny brak, ilość już zamówiona, pozostała ilość oraz dokumenty gotowe do wysłania na Telegram.</p>
       </div>
       <div class="diag-actions">
         <a class="btn ghost" href="#/admin/zamowienia">← Lista zamówień</a>

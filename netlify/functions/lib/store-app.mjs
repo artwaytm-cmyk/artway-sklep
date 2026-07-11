@@ -94,6 +94,61 @@ function czyAdmin(req, url) {
 function tekst(v, max = 200) {
   return String(v == null ? '' : v).slice(0, max);
 }
+function telegramKonfiguracja() {
+  return {
+    token: tekst(process.env.TELEGRAM_BOT_TOKEN || '', 300).trim(),
+    chatId: tekst(process.env.TELEGRAM_NOTIFY_CHAT_ID || process.env.TELEGRAM_GROUP_ID || process.env.TELEGRAM_CHAT_ID || '', 100).trim(),
+  };
+}
+function telegramHtml(v) {
+  return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function telegramKomorka(v, width) {
+  const s = String(v ?? '—').replace(/\s+/g, ' ').trim() || '—';
+  return s.length > width ? `${s.slice(0, Math.max(1, width - 1))}…` : s.padEnd(width, ' ');
+}
+function telegramTabeleZlecenia(order = {}, tylkoDostawca = '') {
+  const pozycje = (Array.isArray(order?.pozycje) ? order.pozycje : []).slice(0, 500).map((p) => ({
+    kod: tekst(p?.kod || p?.produktId || '—', 80).trim(),
+    ean: tekst(p?.ean || '—', 80).trim(),
+    nazwa: tekst(p?.nazwa || 'Produkt', 180).trim(),
+    potrzeba: Math.max(0, Number(p?.iloscPotrzebna ?? p?.ilosc) || 0),
+    ilosc: Math.max(0, Number(p?.ilosc) || 0),
+    dostawca: tekst(p?.dostawca || 'Bez przypisanego dostawcy', 120).trim() || 'Bez przypisanego dostawcy',
+    zamowienia: (Array.isArray(p?.zamowienia) ? p.zamowienia : []).slice(0, 8).map((x) => tekst(x, 80)),
+  })).filter((p) => !tylkoDostawca || p.dostawca === tylkoDostawca);
+  const grupy = new Map();
+  for (const p of pozycje) { if (!grupy.has(p.dostawca)) grupy.set(p.dostawca, []); grupy.get(p.dostawca).push(p); }
+  const wiadomosci = [];
+  for (const [dostawca, items] of grupy.entries()) {
+    for (let offset = 0; offset < items.length; offset += 18) {
+      const part = items.slice(offset, offset + 18);
+      const tabela = [
+        `${telegramKomorka('KOD', 12)} ${telegramKomorka('EAN', 14)} ${telegramKomorka('NAZWA', 24)} ${telegramKomorka('POTRZ.', 7)} ${telegramKomorka('ZAM.', 5)} ${telegramKomorka('+', 4)}`,
+        `${'-'.repeat(12)} ${'-'.repeat(14)} ${'-'.repeat(24)} ${'-'.repeat(7)} ${'-'.repeat(5)} ${'-'.repeat(4)}`,
+        ...part.map((p) => `${telegramKomorka(p.kod, 12)} ${telegramKomorka(p.ean, 14)} ${telegramKomorka(p.nazwa, 24)} ${telegramKomorka(p.potrzeba, 7)} ${telegramKomorka(p.ilosc, 5)} ${telegramKomorka(Math.max(0, p.ilosc - p.potrzeba), 4)}`),
+      ].join('\n');
+      const suma = part.reduce((s, p) => s + p.ilosc, 0);
+      const zamowienia = [...new Set(part.flatMap((p) => p.zamowienia))].slice(0, 12);
+      wiadomosci.push({
+        supplier: dostawca,
+        text: `<b>🧾 ${telegramHtml(order?.numer || order?.id || 'Zlecenie producenta')}</b>\n<b>Dostawca:</b> ${telegramHtml(dostawca)}\n<b>Status:</b> ${telegramHtml(order?.status || 'szkic')} • ${part.length} pozycji • ${suma} szt.${items.length > 18 ? ` • część ${Math.floor(offset / 18) + 1}/${Math.ceil(items.length / 18)}` : ''}\n\n<pre>${telegramHtml(tabela)}</pre>${zamowienia.length ? `\n<b>Powiązane zamówienia:</b> ${telegramHtml(zamowienia.join(', '))}` : ''}\n\nIlości można powiększyć w tabeli operacyjnej Artway-TM.`,
+      });
+    }
+  }
+  return wiadomosci;
+}
+async function wyslijTelegramHtml(text) {
+  const c = telegramKonfiguracja();
+  if (!c.token || !c.chatId) {
+    const e = new Error('Telegram nie jest skonfigurowany na serwerze. Ustaw TELEGRAM_BOT_TOKEN oraz TELEGRAM_GROUP_ID lub TELEGRAM_CHAT_ID.');
+    e.code = 'telegram_not_configured'; e.status = 503; throw e;
+  }
+  const r = await fetch(`https://api.telegram.org/bot${c.token}/sendMessage`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: c.chatId, text: String(text || '').slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true }) });
+  const dane = await r.json().catch(() => ({}));
+  if (!r.ok || !dane.ok) { const e = new Error(tekst(dane?.description || `Telegram HTTP ${r.status}`, 500)); e.code = 'telegram_error'; e.status = r.status || 502; throw e; }
+  return dane.result || {};
+}
 function numerZamowienia(v) {
   return tekst(v, 80).trim();
 }
@@ -2659,6 +2714,7 @@ export default async (req) => {
           notificationUrl: paynowKonfiguracja(req).notificationUrl,
         },
         email: emailPublicConfig(),
+        telegram: { configured: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId) },
         inpost: inpostPublicConfig(),
         allegro: await allegroStatus(req),
       });
@@ -2667,6 +2723,24 @@ export default async (req) => {
     // ─── E-MAIL: konfiguracja bez sekretów ───
     if (action === 'email-config') {
       return odpowiedz({ ok: true, email: emailPublicConfig() });
+    }
+
+    // ─── TELEGRAM: profesjonalne tabele zamówień do producentów ───
+    if (action === 'telegram-send-supplier-order') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const supplier = tekst(body.supplier || '', 120).trim();
+      const order = body.order && typeof body.order === 'object' ? body.order : {};
+      const tables = telegramTabeleZlecenia(order, supplier);
+      if (!tables.length) return odpowiedz({ ok: false, error: 'Zlecenie nie ma pozycji dla wybranego dostawcy', code: 'empty_order' }, 422);
+      const messageIds = [];
+      for (const table of tables) {
+        const sent = await wyslijTelegramHtml(table.text);
+        if (sent?.message_id != null) messageIds.push(sent.message_id);
+      }
+      const sentAt = new Date().toISOString();
+      return odpowiedz({ ok: true, sentAt, tables: tables.length, suppliers: [...new Set(tables.map((x) => x.supplier))], messageIds });
     }
 
     // ─── E-MAIL: wysyłka administracyjna przez Netlify SMTP ───
