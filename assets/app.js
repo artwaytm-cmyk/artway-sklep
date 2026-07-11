@@ -530,12 +530,59 @@ function agentAIUtworzOpisKrotki(p={}){
   const kat=String(p.kategoria||"produkt").toLowerCase();
   return agentAITnijDoZdania(`${p.nazwa||"Produkt"} to propozycja z kategorii ${kat}, przygotowana z myślą o wygodnym wyborze i szybkim zakupie w Artway-TM.`,300);
 }
+function agentAIFormatujOpisPelny(p={}){
+  const raw=agentAICzyscOpis(p.opis||"",20000);
+  if(!raw)return "";
+  const etykieta=/^(opis produktu|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)\s*:?[\s]*$/i;
+  const wejscie=raw
+    .replace(/\s*[•·▪◦]\s*/g,"\n• ")
+    .replace(/\b(Opis produktu|Najważniejsze cechy|Cechy produktu|Zawartość opakowania|W zestawie|Skład zestawu|Zasady gry|Jak grać|Wymiary|Dane techniczne|Informacje dodatkowe|Ostrzeżenie|Bezpieczeństwo)\s*:/gi,"\n\n$1\n")
+    .split(/\n{2,}/)
+    .map(x=>x.trim()).filter(Boolean);
+  const bloki=[];
+  for(const blok of wejscie){
+    const linie=blok.split(/\n+/).map(x=>x.trim()).filter(Boolean);
+    for(const linia of linie){
+      if(etykieta.test(linia)){bloki.push(linia.replace(/:$/,""));continue;}
+      if(/^[-•]\s+/.test(linia)){bloki.push("• "+linia.replace(/^[-•]\s+/,""));continue;}
+      const zd=zdaniaOpisu(linia);
+      if(zd.length>3){for(let i=0;i<zd.length;i+=2)bloki.push(zd.slice(i,i+2).join(" "));}
+      else bloki.push(linia);
+    }
+  }
+  const maNaglowek=bloki.some(x=>etykieta.test(x));
+  const wynik=maNaglowek?bloki:["Opis produktu",...bloki];
+  const fakty=[
+    p.marka?`Marka: ${p.marka}`:"",
+    (p.kodProducenta||p.mpn)?`Kod producenta: ${p.kodProducenta||p.mpn}`:"",
+    (p.gtin||p.ean)?`EAN/GTIN: ${p.gtin||p.ean}`:"",
+    p.rozmiar?`Wymiary / rozmiar: ${p.rozmiar}`:"",
+    p.material?`Materiał: ${p.material}`:""
+  ].filter(Boolean).filter(x=>!raw.toLowerCase().includes(x.toLowerCase()));
+  if(fakty.length)wynik.push("Najważniejsze informacje",...fakty.map(x=>"• "+x));
+  return wynik.join("\n\n").replace(/\n{3,}/g,"\n\n").trim();
+}
+function opisProduktuHTML(p={}){
+  const tekst=agentAIFormatujOpisPelny(p)||"Szczegółowy opis produktu zostanie wkrótce uzupełniony.";
+  const etykieta=/^(opis produktu|najważniejsze informacje|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)$/i;
+  const bloki=tekst.split(/\n{2,}/).map(x=>x.trim()).filter(Boolean);
+  let html="",lista=[];
+  const zamknijListe=()=>{if(lista.length){html+=`<ul>${lista.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`;lista=[];}};
+  for(const blok of bloki){
+    if(/^•\s+/.test(blok)){lista.push(blok.replace(/^•\s+/,""));continue;}
+    zamknijListe();
+    if(etykieta.test(blok))html+=`<h3>${esc(blok)}</h3>`;
+    else html+=`<p>${esc(blok).replace(/\n/g,"<br>")}</p>`;
+  }
+  zamknijListe();
+  return `<div class="product-description-content">${html}</div>`;
+}
 function opisKrotkiProduktu(p={}){
   return agentAIUtworzOpisKrotki(p);
 }
 function agentAIPoprawOpisyDanychProduktu(p={}){
   const out={...p};
-  out.opis=agentAICzyscOpis(out.opis||"",20000);
+  out.opis=agentAIFormatujOpisPelny(out);
   out.opisKrotki=agentAIUtworzOpisKrotki(out);
   if(out.opisKrotki&&out.opis&&out.opisKrotki===out.opis) out.opisKrotki=agentAITnijDoZdania(out.opis,300);
   return out;
@@ -564,9 +611,9 @@ async function allegroPoprawOpisyWFormularzu(btn){
     toast("🤖 Przygotowuję krótki i pełny opis oraz układ wizualny Allegro…");
     const d=await chmura("allegro-description-improve",{method:"POST",body:{product:produkt},timeout:18000});
     if(form.elements.opisKrotki) form.elements.opisKrotki.value=d.shortDescription||form.elements.opisKrotki.value||"";
-    if(form.elements.opis&&!String(form.elements.opis.value||"").trim()) form.elements.opis.value=d.fullDescription||"";
+    if(form.elements.opis&&d.fullDescription) form.elements.opis.value=d.fullDescription;
     const box=document.getElementById("allegroDescriptionPreview");
-    if(box) box.innerHTML=`<div class="backend-note"><b>✅ Opisy i układ Allegro przygotowane</b><br>Krótki opis: ${esc(d.shortDescription||"—")}<br><small>${(d.similarOffers||[]).length?`Pomocniczo przeanalizowano podobne tytuły: ${(d.similarOffers||[]).map(x=>esc(x.name)).join(", ")}. Treść nie jest kopiowana.`:"Opis utworzono z danych własnego produktu."}</small><details><summary>Podgląd sekcji wizualnych Allegro</summary><pre style="white-space:pre-wrap;font-size:.75rem">${esc(JSON.stringify(d.sections||[],null,2))}</pre></details></div>`;
+    if(box) box.innerHTML=`<div class="backend-note"><b>✅ Opisy i układ Allegro przygotowane</b><br>Krótki opis: ${esc(d.shortDescription||"—")}<br><small>${(d.similarOffers||[]).length?`Pomocniczo przeanalizowano podobne tytuły: ${(d.similarOffers||[]).map(x=>esc(x.name)).join(", ")}. Treść nie jest kopiowana.`:"Opis utworzono z danych własnego produktu."}</small></div><div class="allegro-description-preview"><div class="allegro-description-preview-head"><b>Podgląd wyglądu opisu Allegro</b><small>Akapity, nagłówki, listy i zdjęcia zostaną zapisane w tej kolejności.</small></div>${(d.sections||[]).map(s=>(s.items||[]).map(item=>item.type==="IMAGE"?`<img src="${esc(item.url||"")}" alt="Podgląd zdjęcia produktu" loading="lazy">`:`<section>${item.content||""}</section>`).join("")).join("")||`<section><p>Brak sekcji do podglądu.</p></section>`}</div>`;
     toast("🤖 Poprawiono krótki opis, pełny opis i układ sekcji Allegro");
   }catch(e){ toast("⚠️ Poprawianie opisów Allegro: "+(e.message||e)); }
   finally{ btn.disabled=false; }
@@ -2217,7 +2264,7 @@ function widokProdukt(id){
     <div class="panel" style="margin-top:1rem">
       <h2 style="margin-top:0">Informacje o produkcie</h2>
       <div class="faq-list">
-        <details open><summary>Opis</summary><p>${esc(p.opis||"Szczegółowy opis produktu zostanie wkrótce uzupełniony.")}</p></details>
+        <details open><summary>Opis</summary>${opisProduktuHTML(p)}</details>
         <details><summary>Dostawa i płatność</summary><p>Dostępne metody oraz aktualne koszty sprawdzisz w koszyku. Możesz zapłacić przez mBank Paynow, za pobraniem albo przelewem na telefon.</p></details>
         <details><summary>Zwrot i reklamacja</summary><p>Masz 14 dni na odstąpienie od umowy. W przypadku problemu z produktem skontaktuj się z nami przez stronę kontaktową.</p></details>
       </div>
@@ -5422,22 +5469,43 @@ function allegroOfertaPoId(offerId){
   return (Array.isArray(allegroOferty)?allegroOferty:[]).find(o=>String(o.id)===String(offerId))||null;
 }
 function allegroKluczPorownania(v){ return String(v||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g," ").trim(); }
-function allegroOfertaDlaProduktuSklepu(p={}){
+function allegroOfertyPasujaceDoProduktu(p={}){
   const oferty=Array.isArray(allegroOferty)?allegroOferty:[];
   const direct=String(p.allegroOfferId||"").trim();
-  if(direct){ const o=oferty.find(x=>String(x.id)===direct); if(o)return o; }
-  const mappedId=Object.values(allegroMapowania||{}).find(m=>String(m?.productId||"")===String(p.id||""))?.offerId;
-  if(mappedId){ const o=oferty.find(x=>String(x.id)===String(mappedId)); if(o)return o; }
-  const external=allegroKluczPorownania(p.externalId||p.sku||p.kodProducenta||p.mpn||p.id);
+  const pid=String(p.id??"").trim();
+  const mappedIds=new Set(Object.values(allegroMapowania||{}).filter(m=>String(m?.productId??"")===pid).map(m=>String(m?.offerId||"")).filter(Boolean));
+  const external=allegroKluczPorownania(p.externalId||p.sku||p.kodProducenta||p.mpn);
   const ean=allegroKluczPorownania(p.gtin||p.ean);
   const code=allegroKluczPorownania(p.kodProducenta||p.mpn);
-  return oferty.find(o=>(external&&allegroKluczPorownania(o.externalId)===external)||(ean&&allegroKluczPorownania(o.ean||o.gtin)===ean)||(code&&allegroKluczPorownania(o.manufacturerCode||o.producerCode)===code))||null;
+  const catalog=String(p.allegroProductId||"").trim();
+  const name=allegroKluczPorownania(p.nazwa||p.name);
+  return oferty.map(o=>{
+    let score=0,reason="";
+    if(direct&&String(o.id)===direct){score=100;reason="ID oferty";}
+    else if(mappedIds.has(String(o.id))){score=99;reason="mapowanie";}
+    else if(catalog&&String(o.productId||"")===catalog){score=97;reason="ID produktu Allegro";}
+    else if(external&&allegroKluczPorownania(o.externalId)===external){score=95;reason="SKU / external.id";}
+    else if(ean&&allegroKluczPorownania(o.ean||o.gtin)===ean){score=93;reason="EAN/GTIN";}
+    else if(code&&allegroKluczPorownania(o.manufacturerCode||o.producerCode)===code){score=90;reason="kod producenta";}
+    else if(name&&allegroKluczPorownania(o.name)===name){score=86;reason="identyczna nazwa";}
+    return score?{offer:o,score,reason}:null;
+  }).filter(Boolean).sort((a,b)=>b.score-a.score||String(a.offer.id).localeCompare(String(b.offer.id)));
+}
+function allegroAudytDuplikatow(){
+  const produkty=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const grupy=produkty.map(p=>({produkt:p,dopasowania:allegroOfertyPasujaceDoProduktu(p)})).filter(x=>x.dopasowania.length>1);
+  const offerIds=new Set(grupy.flatMap(x=>x.dopasowania.map(d=>String(d.offer.id))));
+  return {grupy,offerIds,produkty:grupy.length,oferty:offerIds.size};
+}
+function allegroOfertaDlaProduktuSklepu(p={}){
+  return allegroOfertyPasujaceDoProduktu(p)[0]?.offer||null;
 }
 function allegroStatusProduktuHTML(p={}){
-  const o=allegroOfertaDlaProduktuSklepu(p);
+  const dopasowania=allegroOfertyPasujaceDoProduktu(p),o=dopasowania[0]?.offer;
   if(!o)return `<span class="lvl lvl-ostrzezenie">brak na Allegro</span>`;
   const active=String(o.status||"").toUpperCase()==="ACTIVE";
-  return `<span class="lvl ${active?"lvl-ok":"lvl-info"}">${active?"aktywna":"na Allegro: "+(o.status||"szkic")}</span><br><small>ID ${esc(o.id)}</small>`;
+  const duplikaty=dopasowania.slice(1);
+  return `<span class="lvl ${active?"lvl-ok":"lvl-info"}">${active?"aktywna":"na Allegro: "+(o.status||"szkic")}</span>${duplikaty.length?` <span class="lvl lvl-blad" title="${esc(dopasowania.map(x=>`${x.offer.id}: ${x.reason}`).join(" • "))}">⚠️ ${dopasowania.length} ofert</span>`:""}<br><small>ID ${esc(o.id)}${duplikaty.length?` • sprawdź duplikaty`:""}</small>`;
 }
 function allegroDanePozycjiZamowienia(it={}){
   const oferta=allegroOfertaPoId(it.offerId);
@@ -5545,28 +5613,32 @@ function allegroZlecenieHTML(z){
 function allegroOfertyTabelaHTML(){
   const q=String(szukajAllegroOfert||"").toLowerCase().trim();
   const autoSugestie=allegroSugestieAutomapowania().length;
+  const audyt=allegroAudytDuplikatow();
   let rows=(Array.isArray(allegroOferty)?allegroOferty:[]).filter(o=>{
     const prod=allegroProduktDlaOferty(o.id);
     const mapped=!!prod;
     if(filtrAllegroOfert==="podpiete"&&!mapped) return false;
     if(filtrAllegroOfert==="niepodpiete"&&mapped) return false;
+    if(filtrAllegroOfert==="duplikaty"&&!audyt.offerIds.has(String(o.id))) return false;
     const txt=`${o.id||""} ${o.externalId||""} ${o.ean||""} ${o.gtin||""} ${o.manufacturerCode||""} ${o.producerCode||""} ${o.brand||""} ${o.name||""} ${o.status||""} ${prod?.nazwa||""} ${prod?.sku||""}`.toLowerCase();
     return !q||txt.includes(q);
   }).slice(0,allegroLimitWidokuOfert);
     return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
-      <div><h2 style="margin-top:0">🏷️ Oferty Allegro i podpinanie produktów</h2><p class="order-detail-lead">Jedna karta produktu w sklepie może mieć wiele ofert Allegro. Przy ofercie wybierasz produkt sklepu albo tworzysz nowy produkt z danych oferty.</p></div>
+      <div><h2 style="margin-top:0">🏷️ Oferty Allegro i podpinanie produktów</h2><p class="order-detail-lead">Jedna karta produktu powinna wskazywać jedną właściwą ofertę. Audyt porównuje ID produktu Allegro, EAN, SKU, kod producenta i nazwę, aby wykryć istniejące powtórzenia przed kolejnym wystawieniem.</p></div>
       <div class="order-actions">
         <button class="btn" onclick="allegroSynchronizujOferty()">🔄 Synchronizuj oferty</button>
         <button class="btn ghost" onclick="allegroAutomapujOferty()" ${autoSugestie?"":"disabled"}>🤖 Auto-mapuj${autoSugestie?` (${autoSugestie})`:""}</button>
       </div>
     </div>
+    ${audyt.produkty?`<div class="duplicate-audit-alert"><div><b>⚠️ Audyt wykrył ${audyt.oferty} ofert przypisanych wielokrotnie do ${audyt.produkty} produktów</b><small>Nie usuwamy ich automatycznie, ponieważ oferta może mieć sprzedaż lub historię. Otwórz filtr „Podejrzane duplikaty”, wybierz właściwą ofertę i zakończ pozostałe w Sales Center.</small></div><button class="btn ghost" onclick="filtrAllegroOfert='duplikaty';renderuj()">Pokaż duplikaty</button></div>`:`<div class="duplicate-audit-ok"><b>✅ Audyt duplikatów:</b> nie znaleziono powtarzających się ofert dla produktów sklepu.</div>`}
     <div class="orders-toolbar allegro-toolbar">
       <input placeholder="Szukaj: oferta, nazwa, EAN, kod producenta, external ID, produkt…" value="${esc(szukajAllegroOfert)}" oninput="szukajAllegroOfert=this.value.toLowerCase();renderuj()">
       <select onchange="filtrAllegroOfert=this.value;renderuj()">
         <option value="wszystkie" ${filtrAllegroOfert==="wszystkie"?"selected":""}>Wszystkie oferty</option>
         <option value="podpiete" ${filtrAllegroOfert==="podpiete"?"selected":""}>Tylko podpięte</option>
         <option value="niepodpiete" ${filtrAllegroOfert==="niepodpiete"?"selected":""}>Tylko niepodpięte</option>
+        <option value="duplikaty" ${filtrAllegroOfert==="duplikaty"?"selected":""}>Podejrzane duplikaty (${audyt.oferty})</option>
       </select>
       <label class="allegro-view-limit">Pokaż ofert <select onchange="allegroLimitWidokuOfert=Number(this.value)||250;renderuj()">${[100,250,500,1000,2500,5000,10000].map(n=>`<option value="${n}" ${allegroLimitWidokuOfert===n?"selected":""}>${n}</option>`).join("")}</select></label>
     </div>
@@ -5866,11 +5938,13 @@ function publikacjaSubnavHTML(aktywny="kontrola"){
 }
 function allegroSubnavHTML(aktywny="start"){
   const st=allegroKomunikacjaStaty();
+  const aktywneZamowienia=(allegroZamowienia||[]).filter(z=>!["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(allegroStatusKolejki(z))).length;
+  const produktyBezOferty=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroOfertaDlaProduktuSklepu(p)).length;
   return adminSubnavHTML([
-    {id:"start",href:"#/admin/allegro",label:"Start"},
-    {id:"zamowienia",href:"#/admin/allegro/zamowienia",label:"📦 Zamówienia Allegro"},
-    {id:"oferty",href:"#/admin/allegro/oferty",label:"🏷️ Oferty i mapowanie"},
-    {id:"wystawianie",href:"#/admin/allegro/wystawianie",label:"🟠 Wystawianie"},
+    {id:"start",href:"#/admin/allegro",label:"📊 Pulpit"},
+    {id:"zamowienia",href:"#/admin/allegro/zamowienia",label:"📦 Zamówienia",badge:aktywneZamowienia||""},
+    {id:"oferty",href:"#/admin/allegro/oferty",label:"🏷️ Oferty",badge:(allegroOferty||[]).length||""},
+    {id:"wystawianie",href:"#/admin/allegro/wystawianie",label:"🟠 Wystawianie",badge:produktyBezOferty||""},
     {id:"komunikacja",href:"#/admin/allegro/komunikacja",label:"💬 Wiadomości i dyskusje",badge:st.totalNeed||""},
     {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"}
   ],aktywny);
@@ -5914,12 +5988,14 @@ function widokAdminAllegro(sekcja="start"){
   const niepodpiete=(allegroOferty||[]).filter(o=>!allegroProduktDlaOferty(o.id)).length;
   const aktywna=["zamowienia","oferty","wystawianie","komunikacja"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
-  <div class="panel allegro-hero-panel">
+  <div class="module-page-stack allegro-module-page">
+  ${allegroSubnavHTML(aktywna)}
+  <div class="panel allegro-hero-panel ${aktywna==="start"?"":"is-compact"}">
     <div class="orders-hero">
       <div>
         <span class="order-pro-label">Integracja marketplace</span>
         <h1>🟠 Allegro API ${allegroStatusHTML()}</h1>
-        <p>Oddzielna kolejka zamówień Allegro bez mapowania, osobna synchronizacja ofert oraz komunikacja z klientami. Sekrety API są wyłącznie po stronie Netlify.</p>
+        <p>${aktywna==="start"?"Oddzielna kolejka zamówień Allegro bez mapowania, osobna synchronizacja ofert oraz komunikacja z klientami. Sekrety API są wyłącznie po stronie Netlify.":`Połączenie ${allegroStan.connected?"aktywne":"wymaga uwagi"} • dane konta i status synchronizacji są wspólne dla wszystkich podstron Allegro.`}</p>
       </div>
       <div class="diag-actions">
         <button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro</button>
@@ -5928,7 +6004,7 @@ function widokAdminAllegro(sekcja="start"){
       </div>
     </div>
     ${allegroStan.error?`<div class="backend-note" style="margin-top:.8rem;border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Allegro:</b> ${esc(allegroStan.error)}</div>`:""}
-    <div class="orders-stat-grid">
+    ${aktywna==="start"?`<div class="orders-stat-grid">
       <div class="order-stat-card ${allegroStan.configured?"":"hot"}"><span>🔧</span><b>${allegroStan.configured?"OK":"BRAK"}</b><small>konfiguracja API</small></div>
       <div class="order-stat-card ${allegroStan.connected?"":"hot"}"><span>🔐</span><b>${allegroStan.connected?"TAK":"NIE"}</b><small>autoryzacja OAuth</small></div>
       <div class="order-stat-card hot"><span>📦</span><b>${(allegroZamowienia||[]).length}</b><small>zamówień Allegro</small></div>
@@ -5936,17 +6012,17 @@ function widokAdminAllegro(sekcja="start"){
       <div class="order-stat-card ${allegroKomunikacjaStaty().totalNeed?"hot":""}"><span>💬</span><b>${allegroKomunikacjaStaty().totalNeed}</b><small>wiadomości do pierwszej odp.</small></div>
       <div class="order-stat-card money"><span>🔗</span><b>${mapped}</b><small>podpiętych ofert</small></div>
       <div class="order-stat-card ${niepodpiete?"hot":""}"><span>🧩</span><b>${niepodpiete}</b><small>ofert bez produktu</small></div>
-    </div>
-    <div class="allegro-config-note">
+    </div>`:""}
+    ${aktywna==="start"?`<div class="allegro-config-note">
       <b>Wymagane zmienne Netlify:</b> <code>ALLEGRO_CLIENT_ID</code>, <code>ALLEGRO_CLIENT_SECRET</code>. Opcjonalnie: <code>ALLEGRO_REDIRECT_URI</code>, <code>ALLEGRO_ENV</code>, <code>ALLEGRO_SCOPE</code>.
       <span>Jeśli przy ofertach, wiadomościach albo dyskusjach pojawi się 403, kliknij ponownie <b>Połącz Allegro</b>, żeby odświeżyć zgodę OAuth z pełnym zakresem: oferty, ustawienia sprzedaży, zamówienia, przesyłki, wiadomości i dyskusje.</span>
       <span>Środowisko: ${esc(allegroStan.env||"production")} • ostatnia synchronizacja: ${esc(allegroStan.updated_at||"—")}</span>
       ${allegroStan.requiresReauth?`<span style="color:#9a3412"><b>Brakujące zakresy aktualnego tokenu:</b> ${esc((allegroStan.missingAuthorizedScopes||[]).join(", ")||"token wymaga ponownej autoryzacji")}. Po zapisaniu uprawnień aplikacji kliknij „Połącz Allegro”.</span>`:""}
-    </div>
-    ${allegroSubnavHTML(aktywna)}
+    </div>`:""}
   </div>
   ${allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete)}
   ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="komunikacja"?allegroKomunikacjaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
+  </div>
   `);
 }
 function alertDostepnosciZamowieniaHTML(z){
@@ -7244,6 +7320,8 @@ function widokAdminMagazyn(sekcja="pulpit"){
   </div>`);
 }
 function widokAdminProdukty(){
+  allegroLadujJesliTrzeba();
+  const audytAllegro=allegroAudytDuplikatow();
   let wszystkie = produktyDoAdministracji();
   if(szukajProduktow) wszystkie = wszystkie.filter(p=>produktPasujeFrazie(p,szukajProduktow));
   if(filtrProduktow!=="Wszystkie") wszystkie = wszystkie.filter(p=>p.kategoria===filtrProduktow);
@@ -7257,6 +7335,7 @@ function widokAdminProdukty(){
   if(filtrAllegroProduktow==="aktywne") wszystkie=wszystkie.filter(p=>String(allegroOfertaDlaProduktuSklepu(p)?.status||"").toUpperCase()==="ACTIVE");
   if(filtrAllegroProduktow==="szkice") wszystkie=wszystkie.filter(p=>{const o=allegroOfertaDlaProduktuSklepu(p);return o&&String(o.status||"").toUpperCase()!=="ACTIVE";});
   if(filtrAllegroProduktow==="brak") wszystkie=wszystkie.filter(p=>!allegroOfertaDlaProduktuSklepu(p));
+  if(filtrAllegroProduktow==="duplikaty") wszystkie=wszystkie.filter(p=>allegroOfertyPasujaceDoProduktu(p).length>1);
   wszystkie=sortujProduktyAdmin(wszystkie);
   const liczbaWynikow=wszystkie.length;
   const liczbaStron=Math.max(1,Math.ceil(liczbaWynikow/produktyNaStronieAdmin));
@@ -7275,6 +7354,13 @@ function widokAdminProdukty(){
         <button class="btn ghost" onclick="eksportujProduktyJSON()">📤 products.json</button>
         <button class="btn ghost" onclick="eksportujProduktyCSV()">📤 CSV</button>
       </div>
+      <div class="orders-stat-grid assortment-audit-grid">
+        <div class="order-stat-card"><span>🏷️</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length}</b><small>aktywnych kart produktów</small></div>
+        <div class="order-stat-card money"><span>🟠</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroOfertaDlaProduktuSklepu(p)).length}</b><small>produktów połączonych z Allegro</small></div>
+        <div class="order-stat-card ${audytAllegro.produkty?"hot":"money"}"><span>${audytAllegro.produkty?"⚠️":"✅"}</span><b>${audytAllegro.produkty}</b><small>produktów z podejrzeniem duplikatu</small></div>
+        <div class="order-stat-card"><span>➕</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroOfertaDlaProduktuSklepu(p)).length}</b><small>produktów bez oferty Allegro</small></div>
+      </div>
+      ${audytAllegro.produkty?`<div class="duplicate-audit-alert"><div><b>⚠️ Kontrola Asortymentu wykryła powtarzające się oferty Allegro</b><small>${audytAllegro.produkty} produktów pasuje do ${audytAllegro.oferty} ofert. Nowe wystawienie wybierze istniejącą ofertę do aktualizacji; istniejące powtórzenia możesz sprawdzić bezpośrednio w katalogu Allegro.</small></div><button class="btn ghost" onclick="filtrAllegroProduktow='duplikaty';stronaAdminProduktow=1;renderuj()">Pokaż produkty</button><a class="btn" href="#/admin/allegro/oferty" onclick="filtrAllegroOfert='duplikaty'">Otwórz oferty</a></div>`:`<div class="duplicate-audit-ok"><b>✅ Kontrola ofert Allegro:</b> aktualny asortyment nie zawiera produktów połączonych z więcej niż jedną ofertą.</div>`}
       <div class="filter-grid" style="margin-bottom:.8rem">
         <input placeholder="Nazwa, SKU, ID, opis lub kategoria…" value="${esc(szukajProduktow)}" oninput="szukajProduktow=this.value;stronaAdminProduktow=1;renderuj()">
         <select onchange="filtrProduktow=this.value;stronaAdminProduktow=1;renderuj()">
@@ -7302,6 +7388,7 @@ function widokAdminProdukty(){
           <option value="aktywne" ${filtrAllegroProduktow==="aktywne"?"selected":""}>Allegro: aktywne</option>
           <option value="szkice" ${filtrAllegroProduktow==="szkice"?"selected":""}>Allegro: szkice / nieaktywne</option>
           <option value="brak" ${filtrAllegroProduktow==="brak"?"selected":""}>Allegro: brak oferty</option>
+          <option value="duplikaty" ${filtrAllegroProduktow==="duplikaty"?"selected":""}>Allegro: podejrzane duplikaty (${audytAllegro.produkty})</option>
         </select>
         <select onchange="sortowanieAdminProduktow=this.value;stronaAdminProduktow=1;renderuj()">
           <option value="id" ${sortowanieAdminProduktow==="id"?"selected":""}>Sortuj: ID</option>

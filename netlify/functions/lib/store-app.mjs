@@ -1396,18 +1396,22 @@ function allegroDopasowanieOferty(product = {}, offersRaw = [], mappingsRaw = {}
   const mappings = allegroMapowaniaItems(mappingsRaw);
   const pid = String(product.id ?? '').trim();
   const offerId = tekst(product.allegroOfferId, 100).trim();
-  const external = allegroNormalizujKlucz(product.externalId || product.sku || product.kodProducenta || product.mpn || product.id || '');
+  const catalogProductId = tekst(product.allegroProductId, 120).trim();
+  const external = allegroNormalizujKlucz(product.externalId || product.sku || product.kodProducenta || product.mpn || '');
   const ean = allegroNormalizujKlucz(product.gtin || product.ean || '');
   const code = allegroNormalizujKlucz(product.kodProducenta || product.mpn || '');
+  const name = allegroNormalizujKlucz(product.nazwa || product.name || '');
   const mappedOfferId = Object.values(mappings).find((m) => String(m?.productId ?? '') === pid)?.offerId || '';
   let best = null;
   for (const o of offers) {
     let score = 0, reason = '';
     if (offerId && String(o.id) === offerId) { score = 100; reason = 'zapisane ID oferty'; }
     else if (mappedOfferId && String(o.id) === String(mappedOfferId)) { score = 98; reason = 'mapowanie produktu'; }
+    else if (catalogProductId && String(o.productId || '') === catalogProductId) { score = 97; reason = 'identyczne ID produktu katalogowego Allegro'; }
     else if (external && allegroNormalizujKlucz(o.externalId) === external) { score = 95; reason = 'identyczny external.id / SKU'; }
     else if (ean && allegroNormalizujKlucz(o.ean || o.gtin) === ean) { score = 92; reason = 'identyczny EAN/GTIN'; }
     else if (code && allegroNormalizujKlucz(o.manufacturerCode || o.producerCode) === code) { score = 88; reason = 'identyczny kod producenta'; }
+    else if (name && allegroNormalizujKlucz(o.name) === name) { score = 86; reason = 'identyczna nazwa oferty'; }
     else {
       const similarity = allegroPodobienstwoNazw(product.nazwa || product.name, o.name);
       const sameCategory = product.allegroCategoryId && String(product.allegroCategoryId) === String(o.categoryId || '');
@@ -1438,12 +1442,41 @@ function allegroOpisKrotki(product = {}, podobne = []) {
   return tekst(`${product.nazwa || 'Produkt'} to starannie wybrana propozycja z kategorii ${kat}, odpowiednia na prezent i do wspólnej zabawy.${inspiracja}`, 420);
 }
 function allegroOpisPelny(product = {}, shortDescription = '') {
-  const sentences = allegroZdania(product.opis || '');
-  const base = sentences.length ? sentences.join(' ') : shortDescription;
-  const parts = base.split(/(?<=[.!?])\s+/).filter(Boolean);
   const blocks = [];
   if (shortDescription) blocks.push({ type: 'lead', text: shortDescription });
-  if (parts.length) blocks.push({ type: 'body', text: parts.slice(0, 5).join(' ') });
+  const raw = tekst(product.opis || '', 20000)
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*\/\s*(p|div|h[1-6]|li)\s*>/gi, '\n\n')
+    .replace(/<\s*li[^>]*>/gi, '• ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s*[•·▪◦]\s*/g, '\n• ')
+    .replace(/\b(Opis produktu|Najważniejsze cechy|Cechy produktu|Zawartość opakowania|W zestawie|Skład zestawu|Zasady gry|Jak grać|Wymiary|Dane techniczne|Informacje dodatkowe|Ostrzeżenie|Bezpieczeństwo)\s*:/gi, '\n\n$1\n')
+    .replace(/[ \t\u00a0]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  const heading = /^(opis produktu|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)$/i;
+  const sourceBlocks = raw.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+  let currentTitle = '';
+  for (const source of sourceBlocks) {
+    const lines = source.split(/\n+/).map((x) => x.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (heading.test(line)) { currentTitle = line; continue; }
+      if (/^•\s+/.test(line)) {
+        const last = blocks[blocks.length - 1];
+        if (last?.type === 'list' && (!currentTitle || last.title === currentTitle)) last.items.push(line.replace(/^•\s+/, ''));
+        else blocks.push({ type: 'list', title: currentTitle, items: [line.replace(/^•\s+/, '')] });
+        currentTitle = '';
+        continue;
+      }
+      const sentences = allegroZdania(line);
+      const parts = sentences.length > 3 ? Array.from({ length: Math.ceil(sentences.length / 2) }, (_, i) => sentences.slice(i * 2, i * 2 + 2).join(' ')) : [line];
+      for (const text of parts.filter(Boolean)) {
+        blocks.push({ type: 'body', title: currentTitle, text });
+        currentTitle = '';
+      }
+    }
+  }
+  if (!blocks.some((x) => x.type === 'body' || x.type === 'list') && shortDescription) blocks.push({ type: 'body', title: 'Opis produktu', text: shortDescription });
   const facts = [
     product.marka || product.producent ? `Marka: ${product.marka || product.producent}` : '',
     product.kodProducenta || product.mpn ? `Kod producenta: ${product.kodProducenta || product.mpn}` : '',
@@ -1452,20 +1485,23 @@ function allegroOpisPelny(product = {}, shortDescription = '') {
     product.material ? `Materiał: ${product.material}` : '',
   ].filter(Boolean);
   if (facts.length) blocks.push({ type: 'facts', items: facts });
-  return blocks;
+  return blocks.slice(0, 12);
 }
 function allegroSekcjeOpisu(product = {}, shortDescription = '') {
   const blocks = allegroOpisPelny(product, shortDescription);
   const items = [];
   for (const block of blocks) {
     if (block.type === 'lead') items.push({ type: 'TEXT', content: `<p><b>${htmlEscape(block.text)}</b></p>` });
-    if (block.type === 'body' && block.text !== shortDescription) items.push({ type: 'TEXT', content: `<p>${htmlEscape(block.text)}</p>` });
-    if (block.type === 'facts') items.push({ type: 'TEXT', content: `<p><b>Najważniejsze informacje</b></p><ul>${block.items.map((x) => `<li>${htmlEscape(x)}</li>`).join('')}</ul>` });
+    if (block.type === 'body' && block.text !== shortDescription) items.push({ type: 'TEXT', content: `${block.title ? `<h2>${htmlEscape(block.title)}</h2>` : ''}<p>${htmlEscape(block.text)}</p>` });
+    if (block.type === 'list') items.push({ type: 'TEXT', content: `${block.title ? `<h2>${htmlEscape(block.title)}</h2>` : ''}<ul>${block.items.map((x) => `<li>${htmlEscape(x)}</li>`).join('')}</ul>` });
+    if (block.type === 'facts') items.push({ type: 'TEXT', content: `<h2>Najważniejsze informacje</h2><ul>${block.items.map((x) => `<li>${htmlEscape(x)}</li>`).join('')}</ul>` });
   }
   const images = [product.zdjecie, ...(Array.isArray(product.zdjecia) ? product.zdjecia : [])].filter(Boolean);
   const sections = [];
-  for (const item of items) sections.push({ items: [item] });
-  if (images[1]) sections.push({ items: [{ type: 'IMAGE', url: tekst(images[1], 1000) }] });
+  for (let i = 0; i < items.length; i++) {
+    sections.push({ items: [items[i]] });
+    if (images[i + 1] && (i === 0 || i === 2 || i === 4)) sections.push({ items: [{ type: 'IMAGE', url: tekst(images[i + 1], 1000) }] });
+  }
   return sections.length ? sections : [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(product.nazwa || 'Produkt')}</p>` }] }];
 }
 function allegroPatchZDraftu(draft = {}, options = {}) {
@@ -3490,10 +3526,17 @@ export default async (req) => {
       const similarOffers = allegroPodobneOferty(product, offersRec, 5);
       const shortDescription = allegroOpisKrotki(product, similarOffers);
       const sections = allegroSekcjeOpisu(product, shortDescription);
+      const descriptionBlocks = allegroOpisPelny(product, shortDescription);
+      const fullDescription = descriptionBlocks.filter((x) => x.type !== 'lead').map((x) => {
+        if (x.type === 'body') return [x.title, x.text].filter(Boolean).join('\n\n');
+        if (x.type === 'list') return [x.title, ...(x.items || []).map((item) => `• ${item}`)].filter(Boolean).join('\n\n');
+        if (x.type === 'facts') return ['Najważniejsze informacje', ...(x.items || []).map((item) => `• ${item}`)].join('\n\n');
+        return '';
+      }).filter(Boolean).join('\n\n');
       return odpowiedz({
         ok: true,
         shortDescription,
-        fullDescription: allegroOpisPelny(product, shortDescription).filter((x) => x.type === 'body').map((x) => x.text).join('\n\n') || shortDescription,
+        fullDescription: fullDescription || shortDescription,
         sections,
         similarOffers: similarOffers.map((x) => ({ id: x.offer?.id, name: x.offer?.name, score: Number(x.score.toFixed(2)) })),
       });
@@ -3541,7 +3584,7 @@ export default async (req) => {
         const normalized = allegroNormalizujOferte({ ...(existing?.offer || {}), ...draft, ...(result || {}), id: offerId });
         const items = allegroOfertyItems(offersRec).filter((x) => String(x.id) !== offerId);
         items.unshift(normalized);
-        await zapisz('allegro_offers', { ...offersRec, items: items.slice(0, 1000), updated_at: new Date().toISOString(), count: Math.min(1000, items.length) });
+        await zapisz('allegro_offers', { ...offersRec, items: items.slice(0, 20000), updated_at: new Date().toISOString(), count: Math.min(20000, items.length), totalCount: Math.max(Number(offersRec.totalCount || 0), items.length) });
         const productId = tekst(body.product?.id, 100).trim();
         if (productId) {
           const mappingRec = await czytaj('allegro_mappings', { items: {} });
