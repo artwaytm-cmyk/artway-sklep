@@ -251,9 +251,9 @@ let frazaListyProduktow="", sortowanieListyProduktow="default";
 let allegroZamowienia = wczytajLS("artway_allegro_zamowienia_cache", []);
 let allegroOferty = wczytajLS("artway_allegro_oferty_cache", []);
 let allegroMapowania = wczytajLS("artway_allegro_mapowania_cache", {});
-let allegroKomunikacja = wczytajLS("artway_allegro_komunikacja_cache", {threads:[],issues:[],settings:null,autoReplies:{},errors:[],updated_at:null});
+let allegroKomunikacja = wczytajLS("artway_allegro_komunikacja_cache", {threads:[],issues:[],settings:null,autoReplies:{},errors:[],requiresReauth:false,updated_at:null});
 let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null};
-let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", filtrAllegroZamowien="do_obslugi", filtrAllegroOfert="wszystkie";
+let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", filtrAllegroZamowien="do_obslugi", filtrAllegroOfert="wszystkie", allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=250;
 
 /* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
    Ustawienia sklepu, zamówienia i klienci są zapisywane na serwerze, więc są
@@ -4160,6 +4160,20 @@ function agentAIPodsumujZlecenie(z){
   z.aktualizacjaTxt=new Date().toLocaleString("pl-PL");
   return z;
 }
+function agentAIPobierzZlecenieCSV(id){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  if(!z){toast("Nie znaleziono zlecenia producenta");return;}
+  const nag=["kod","ean","nazwa","ilosc","ilosc_potrzebna","nadwyzka","dostawca","lokalizacja","cena_brutto","wartosc_szacowana","powiazane_zamowienia"];
+  const csv=[nag.join(";"),...(z.pozycje||[]).map(p=>[p.kod,p.ean,p.nazwa,p.ilosc,p.iloscPotrzebna,p.nadwyzka,p.dostawca,p.lokalizacja,p.cenaBrutto,p.wartoscSzacowana,(p.zamowienia||[]).join(" | ")].map(csvPole).join(";"))].join("\n");
+  pobierzPlik(`zlecenie-producenta-${String(z.numer||z.id).replace(/[^a-z0-9_-]+/gi,"-")}.csv`,"\uFEFF"+csv,"text/csv");
+}
+function agentAIZleceniaPanelHTML(){
+  const lista=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).slice().sort((a,b)=>String(b.data||"").localeCompare(String(a.data||"")));
+  const statusy=["szkic","do sprawdzenia","zaakceptowane","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"];
+  return `<div class="panel agent-orders-panel"><div class="order-section-head"><div><h2 style="margin-top:0">🧾 Zamówienia do producentów</h2><p class="order-detail-lead">Każdy dokument jest jednym zleceniem. Produkty są pozycjami wewnątrz zlecenia, a nie osobnymi zleceniami na liście.</p></div><button class="btn" onclick="const z=agentAIUtworzZlecenieProducenta('braki');if(z){toast('Utworzono '+z.numer);renderuj()}else toast('Brak produktów do zamówienia')">🤖 Nowe zlecenie z braków</button></div>
+  <div class="orders-stat-grid"><div class="order-stat-card"><span>🧾</span><b>${lista.length}</b><small>zleceń producenta</small></div><div class="order-stat-card"><span>📦</span><b>${lista.reduce((s,z)=>s+(z.pozycje||[]).length,0)}</b><small>pozycji łącznie</small></div><div class="order-stat-card"><span>🔢</span><b>${lista.reduce((s,z)=>s+Number(z.sztuk||0),0)}</b><small>sztuk łącznie</small></div><div class="order-stat-card money"><span>💰</span><b>${zl(lista.reduce((s,z)=>s+kwotaNum(z.wartoscSzacowana),0))}</b><small>wartość szacowana</small></div></div>
+  <div class="supplier-order-list">${lista.map(z=>{const zamkniete=["zrealizowane","anulowane"].includes(String(z.status||"").toLowerCase());return `<article class="supplier-order-card ${zamkniete?"is-closed":""}"><header class="supplier-order-head"><div><span class="order-pro-label">${esc(z.tryb==="niskie"?"Uzupełnienie magazynu":"Braki do zamówień")}</span><h3>${esc(z.numer||z.id)}</h3><small>${esc(z.dataTxt||allegroDataTxt(z.data))} • ${(z.pozycje||[]).length} pozycji • ${esc(z.sztuk||0)} szt. • ${zl(z.wartoscSzacowana||0)}</small></div><div class="supplier-order-status"><select onchange="agentAIZmienStatusZlecenia(${jsArg(z.id)},this.value)">${statusy.map(s=>`<option value="${s}" ${z.status===s?"selected":""}>${s}</option>`).join("")}</select><small>${esc((z.dostawcy||[]).join(", ")||"Brak dostawcy")}</small></div></header><div class="warehouse-worktable-wrap"><table class="log-table supplier-order-products"><tr><th>Zdjęcie</th><th>Kod</th><th>EAN</th><th>Nazwa</th><th>Potrzeba</th><th>Zamawiamy</th><th>Nadwyżka</th><th>Stan / lokalizacja</th><th>Akcje</th></tr>${(z.pozycje||[]).map(p=>{const produkt=produktMagazynowy(p.produktId)||{};return `<tr><td><span class="admin-product-thumb">${produkt.zdjecie?`<img src="${esc(produkt.zdjecie)}" alt="" loading="lazy">`:`<span class="admin-product-thumb-fallback">${esc(produkt.ikona||"🎲")}</span>`}</span></td><td><b>${esc(p.kod||"—")}</b></td><td>${esc(p.ean||"—")}</td><td><b>${esc(p.nazwa||"Produkt")}</b><br><small>${esc((p.zamowienia||[]).join(", "))}</small></td><td>${esc((p.iloscPotrzebna??p.ilosc)||0)} szt.</td><td><b>${esc(p.ilosc||0)} szt.</b></td><td>${esc(p.nadwyzka||0)} szt.</td><td>${p.stan===null?"bez limitu":`${esc(p.stan||0)} szt.`}<br><small>${esc(p.lokalizacja||"—")}</small></td><td><div class="warehouse-worktable-actions"><button class="btn ghost" onclick="agentAIPowiekszPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)})">➕ Powiększ</button><button class="btn ghost" onclick="agentAIPrzyjmijPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)})">📥 Przyjmij</button></div></td></tr>`;}).join("")||`<tr><td colspan="9">Brak pozycji.</td></tr>`}</table></div><footer class="supplier-order-actions"><button class="btn ghost" onclick="agentAIPobierzZlecenieCSV(${jsArg(z.id)})">📤 Pobierz całe zlecenie CSV</button><button class="btn danger" onclick="agentAIUsunZlecenie(${jsArg(z.id)})">🗑️ Usuń zlecenie</button></footer></article>`;}).join("")||`<div class="backend-note">Nie ma jeszcze zleceń producenta. Utwórz pierwsze z aktualnych braków.</div>`}</div></div>`;
+}
 function agentAIZmienPozycjeZlecenia(id, produktId, fn){
   let znaleziono=false;
   agentAIZlecenia=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).map(z=>{
@@ -4716,7 +4730,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
       <p>${esc(x.powod)}</p>
     </div>`).join("")}</div>
   </div>`:""}</div>
-  <div style="${aktywna==="zlecenia"?"":"display:none"}">${magazynTabelaOperacyjnaHTML({limit:420})}</div>
+  <div style="${aktywna==="zlecenia"?"":"display:none"}">${agentAIZleceniaPanelHTML()}</div>
   <div class="panel" style="${aktywna==="plan"?"":"display:none"}">
     <h2 style="margin-top:0">Lista kontroli agenta</h2>
     <div class="ai-task-list">
@@ -4918,6 +4932,7 @@ async function allegroAutomapujOferty(){
 }
 function allegroStatusHTML(){
   if(!allegroStan.sprawdzono && allegroStan.ladowanie) return `<span class="lvl lvl-info">sprawdzam API</span>`;
+  if(allegroStan.connected&&allegroStan.requiresReauth) return `<span class="lvl lvl-ostrzezenie">połączone — brak części uprawnień</span>`;
   if(allegroStan.connected) return `<span class="lvl lvl-ok">połączone</span>`;
   if(allegroStan.configured) return `<span class="lvl lvl-ostrzezenie">wymaga autoryzacji</span>`;
   return `<span class="lvl lvl-bad">brak konfiguracji</span>`;
@@ -4934,7 +4949,7 @@ async function allegroWczytajDane(cicho=false){
     allegroZamowienia=Array.isArray(d.orders)?d.orders:[];
     allegroOferty=Array.isArray(d.offers)?d.offers:[];
     allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:{};
-    if(Array.isArray(d.threads)||Array.isArray(d.issues)) allegroKomunikacja={...allegroKomunikacja,threads:Array.isArray(d.threads)?d.threads:allegroKomunikacja.threads,issues:Array.isArray(d.issues)?d.issues:allegroKomunikacja.issues,settings:d.settings||allegroKomunikacja.settings,autoReplies:d.autoReplies||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:allegroKomunikacja.errors,updated_at:d.updated_at||allegroKomunikacja.updated_at};
+    if(Array.isArray(d.threads)||Array.isArray(d.issues)) allegroKomunikacja={...allegroKomunikacja,threads:Array.isArray(d.threads)?d.threads:allegroKomunikacja.threads,issues:Array.isArray(d.issues)?d.issues:allegroKomunikacja.issues,settings:d.settings||allegroKomunikacja.settings,autoReplies:d.autoReplies||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:allegroKomunikacja.errors,requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||allegroKomunikacja.updated_at};
     allegroZapiszCache();
     if(!cicho) toast("Dane Allegro odświeżone");
   }catch(e){
@@ -4953,7 +4968,7 @@ async function allegroPolacz(){
 async function allegroSynchronizujZamowienia(){
   try{
     toast("Pobieram wyłącznie nowe i gotowe do wysłania zamówienia Allegro oraz aktualizuję znane statusy…");
-    const d=await chmura("allegro-sync-orders",{method:"POST",body:{limit:100},timeout:30000});
+    const d=await chmura("allegro-sync-orders",{method:"POST",body:{limit:1000},timeout:60000});
     allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
     allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;
     allegroZapiszCache();
@@ -4982,12 +4997,12 @@ async function allegroZmienStatusRealizacji(orderId,status){
 async function allegroSynchronizujOferty(){
   try{
     toast("Pobieram oferty Allegro…");
-    const d=await chmura("allegro-sync-offers",{method:"POST",body:{limit:100,details:true},timeout:60000});
+    const d=await chmura("allegro-sync-offers",{method:"POST",body:{limit:1000,details:true,detailsLimit:300},timeout:120000});
     allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
     allegroOferty=Array.isArray(d.offers)?d.offers:allegroOferty;
     allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:allegroMapowania;
     allegroZapiszCache();
-    toast(`Pobrano oferty Allegro: ${allegroOferty.length}`);
+    toast(`Pobrano oferty Allegro: ${allegroOferty.length} • pełne szczegóły: ${d.detailedCount||0}`);
     renderuj();
   }catch(e){ toast("⚠️ Allegro oferty: "+(e.message||e)); }
 }
@@ -5007,7 +5022,7 @@ async function allegroWczytajKomunikacje(cicho=false){
   try{
     const d=await chmura("allegro-communications-data",{timeout:16000});
     allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
-    allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroUstawieniaKomunikacjiDomyslne(),autoReplies:d.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],updated_at:d.updated_at||null,autoRepliesUpdatedAt:d.autoRepliesUpdatedAt||null};
+    allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroUstawieniaKomunikacjiDomyslne(),autoReplies:d.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||null,autoRepliesUpdatedAt:d.autoRepliesUpdatedAt||null};
     allegroZapiszCache();
     if(!cicho) toast("Wczytano komunikację Allegro");
   }catch(e){ allegroStan={...allegroStan,error:e.message||String(e)}; if(!cicho) toast("⚠️ Komunikacja Allegro: "+(e.message||e)); }
@@ -5016,9 +5031,9 @@ async function allegroWczytajKomunikacje(cicho=false){
 async function allegroSynchronizujKomunikacje(autoReply=true){
   try{
     toast(autoReply?"Synchronizuję Allegro i wysyłam brakujące pierwsze odpowiedzi…":"Synchronizuję komunikację Allegro…");
-    const d=await chmura("allegro-sync-communications",{method:"POST",body:{limit:20,autoReply},timeout:45000});
+    const d=await chmura("allegro-sync-communications",{method:"POST",body:{limit:60,autoReply},timeout:90000});
     allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
-    allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroKomunikacjaUstawienia(),autoReplies:d.autoReply?.items||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],updated_at:d.updated_at||null,autoReply:d.autoReply||null};
+    allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroKomunikacjaUstawienia(),autoReplies:d.autoReply?.items||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||null,autoReply:d.autoReply||null};
     allegroZapiszCache();
     toast(`Komunikacja Allegro: wątki ${allegroKomunikacja.threads.length}, dyskusje/reklamacje ${allegroKomunikacja.issues.length}, auto-odpowiedzi wysłane ${d.autoReply?.sent?.length||0}`);
   }catch(e){ toast("⚠️ Synchronizacja komunikacji Allegro: "+(e.message||e)); }
@@ -5260,7 +5275,7 @@ async function pobierzDaneProduktuZUrl(btn){
 }
 function allegroProduktSelectHTML(offerId){
   const pid=String(allegroProduktIdDlaOferty(offerId)||"");
-  const lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).sort((a,b)=>String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl")).slice(0,700);
+  const lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).sort((a,b)=>String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl")).slice(0,1000);
   return `<select class="allegro-map-select" onchange="allegroMapujOferte(${jsArg(offerId)},this.value)">
     <option value="">Nie podpięto</option>
     ${lista.map(p=>`<option value="${esc(p.id)}" ${String(p.id)===pid?"selected":""}>${esc(allegroKodProduktu(p)||"ID "+p.id)} — ${esc(skrocTekst(p.nazwa,70))}</option>`).join("")}
@@ -5294,7 +5309,8 @@ function allegroDanePozycjiZamowienia(it={}){
     kod:String(it.externalId||oferta?.externalId||it.offerId||"").trim(),
     ean:String(oferta?.ean||oferta?.gtin||oferta?.manufacturerCode||oferta?.producerCode||"").trim(),
     nazwa:String(it.offerName||oferta?.name||"Produkt Allegro").trim(),
-    ilosc:Math.max(1,Number(it.quantity)||1)
+    ilosc:Math.max(1,Number(it.quantity)||1),
+    zdjecie:String(oferta?.mainImage||(oferta?.images||[])[0]||it.image||"").trim()
   };
 }
 function allegroZamowieniePasujeDoFiltra(z){
@@ -5321,15 +5337,10 @@ function allegroZamowieniaTabelaHTML(){
   const pasujaceIds=q?new Set(wszystkieWiersze.filter(r=>r.tekst.includes(q)).map(r=>String(r.z.id))):null;
   const widoczneZamowienia=wszystkie.filter(allegroZamowieniePasujeDoFiltra).filter(z=>{
     return !pasujaceIds||pasujaceIds.has(String(z.id));
-  }).slice(0,250);
+  }).slice(0,allegroLimitWidokuZamowien);
   const counts={do_obslugi:0,nowe:0,do_wyslania:0,sprawdzone:0,wyslane:0,anulowane:0,wszystkie:wszystkie.length};
   wszystkie.forEach(z=>{const s=allegroStatusKolejki(z);if(counts[s]!==undefined)counts[s]++;if(["nowe","do_wyslania"].includes(s))counts.do_obslugi++;});
   const filtry=[["do_obslugi","Do obsługi"],["nowe","Nowe"],["do_wyslania","Do wysłania"],["sprawdzone","Sprawdzone"],["wyslane","Wysłane"],["anulowane","Anulowane"],["wszystkie","Wszystkie"]];
-  const rows=[];
-  widoczneZamowienia.forEach(z=>{
-    const items=Array.isArray(z.lineItems)&&z.lineItems.length?z.lineItems:[{offerId:"",offerName:"Brak pozycji",quantity:0}];
-    items.forEach((it,index)=>rows.push({z,it,dane:allegroDanePozycjiZamowienia(it),index,rowspan:items.length}));
-  });
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">📦 Zamówienia Allegro</h2><p class="order-detail-lead">Samodzielna kolejka zleceń — bez mapowania do produktów sklepu. Każde zamówienie trafia tu tylko raz; kolejne synchronizacje aktualizują wyłącznie jego status.</p></div>
@@ -5338,22 +5349,39 @@ function allegroZamowieniaTabelaHTML(){
     <div class="orders-status-strip">${filtry.map(([id,label])=>`<button class="${filtrAllegroZamowien===id?"active":""}" onclick="filtrAllegroZamowien=${jsArg(id)};renderuj()">${label} <b>${counts[id]||0}</b></button>`).join("")}</div>
     <div class="orders-toolbar allegro-toolbar">
       <input placeholder="Szukaj: zamówienie, klient, telefon, kod, EAN, nazwa produktu…" value="${esc(szukajAllegroZamowien)}" oninput="szukajAllegroZamowien=this.value.toLowerCase();renderuj()">
+      <label class="allegro-view-limit">Pokaż zleceń <select onchange="allegroLimitWidokuZamowien=Number(this.value)||100;renderuj()">${[25,50,100,250,500,1000].map(n=>`<option value="${n}" ${allegroLimitWidokuZamowien===n?"selected":""}>${n}</option>`).join("")}</select></label>
       ${szukajAllegroZamowien?`<button class="btn ghost" onclick="szukajAllegroZamowien='';renderuj()">Wyczyść</button>`:""}
     </div>
-    <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable allegro-orders-table">
-      <tr><th>Kod</th><th>EAN / kod prod.</th><th>Nazwa</th><th>Ilość potrzebna</th><th>Zamówienie Allegro</th><th>Klient i dostawa</th><th>Status</th><th>Obsługa</th></tr>
-      ${rows.map(({z,it,dane,index,rowspan})=>{const meta=allegroStatusKolejkiMeta(z),s=allegroStatusKolejki(z);return `<tr class="${["anulowane","wyslane","sprawdzone"].includes(s)?"":"row-alert"}">
-        <td><b>${esc(dane.kod||"—")}</b><br><small>Oferta: ${esc(it.offerId||"—")}</small></td>
-        <td>${esc(dane.ean||"—")}</td>
-        <td><b>${esc(dane.nazwa||"—")}</b></td>
-        <td><b>${esc(dane.ilosc)}</b> szt.</td>
-        ${index===0?`<td rowspan="${rowspan}"><b>${esc(z.id||z.nr||"—")}</b><br><small>${esc(z.createdAt||z.firstFetchedAt||"")}</small><br><small>${esc(z.total||"")} • ${esc(z.paymentStatus||"")}</small></td>
-        <td rowspan="${rowspan}">${esc(z.buyerName||z.buyerLogin||z.email||"—")}<br><small>${esc(z.email||"")} ${z.phone?`• ${esc(z.phone)}`:""}</small><br><small>${esc(z.deliveryMethod||"—")} • ${esc(z.deliveryPoint||z.deliveryAddress||"")}</small></td>
-        <td rowspan="${rowspan}"><span class="lvl ${meta.klasa}">${esc(meta.label)}</span><br><small>Allegro: ${esc(z.fulfillmentStatus||z.status||"—")}</small>${z.checkedAt?`<br><small>${esc(z.checkedAt)}</small>`:""}</td>
-        <td rowspan="${rowspan}"><div class="warehouse-worktable-actions">${s==="sprawdzone"?`<button class="btn ghost" onclick="allegroOznaczZamowienieSprawdzone(${jsArg(z.id)},false)">↩️ Przywróć</button>`:!["wyslane","anulowane"].includes(s)?`<button class="btn" onclick="allegroOznaczZamowienieSprawdzone(${jsArg(z.id)},true)">✅ Produkty pobrane</button>`:""}${!["wyslane","anulowane"].includes(s)?`<select id="allegro-status-${esc(z.id)}"><option value="READY_FOR_SHIPMENT">Do wysłania</option><option value="SENT">Wysłane</option><option value="CANCELLED">Anulowane</option></select><button class="btn ghost" onclick="allegroZmienStatusRealizacji(${jsArg(z.id)},document.getElementById(${jsArg(`allegro-status-${z.id}`)}).value)">Zmień status</button>`:""}</div></td>`:""}
-      </tr>`;}).join("") || `<tr><td colspan="8">Brak zamówień w tym filtrze. Synchronizacja pobiera wyłącznie nowe i gotowe do wysłania.</td></tr>`}
-    </table></div>
+    <div class="allegro-order-list">${widoczneZamowienia.map(allegroZlecenieHTML).join("") || `<div class="backend-note">Brak zamówień w tym filtrze. Synchronizacja pobiera wyłącznie nowe i gotowe do wysłania.</div>`}</div>
+    ${widoczneZamowienia.length>=allegroLimitWidokuZamowien?`<p class="order-detail-lead">Pokazano pierwsze ${allegroLimitWidokuZamowien} zleceń. Zwiększ limit widoku powyżej, aby zobaczyć więcej.</p>`:""}
   </div>`;
+}
+function allegroZlecenieHTML(z){
+  const meta=allegroStatusKolejkiMeta(z), s=allegroStatusKolejki(z);
+  const items=Array.isArray(z.lineItems)&&z.lineItems.length?z.lineItems:[];
+  const sztuk=items.reduce((sum,it)=>sum+Math.max(1,Number(it.quantity)||1),0);
+  const idStatus=`allegro-status-${z.id}`;
+  return `<article class="allegro-order-card ${["anulowane","wyslane","sprawdzone"].includes(s)?"is-closed":"is-active"}">
+    <header class="allegro-order-head">
+      <div class="allegro-order-title"><span class="allegro-order-ico">📦</span><div><b>Zlecenie ${esc(z.id||z.nr||"—")}</b><small>${esc(allegroDataTxt(z.createdAt||z.firstFetchedAt))} • ${items.length} pozycji / ${sztuk} szt. • ${esc(z.total||"—")}</small></div></div>
+      <div class="allegro-order-state"><span class="lvl ${meta.klasa}">${esc(meta.label)}</span><small>Allegro: ${esc(z.fulfillmentStatus||z.status||"—")}</small></div>
+    </header>
+    <div class="allegro-order-info">
+      <div><b>👤 ${esc(z.buyerName||z.buyerLogin||z.email||"Klient Allegro")}</b><small>${esc(z.email||"—")} ${z.phone?`• ${esc(z.phone)}`:""}</small></div>
+      <div><b>🚚 ${esc(z.deliveryMethod||"Dostawa")}</b><small>${esc(z.deliveryPoint||z.deliveryAddress||"—")}</small></div>
+      <div><b>💳 ${esc(z.paymentStatus||"Płatność")}</b><small>${esc(z.total||"—")}</small></div>
+    </div>
+    <details class="allegro-order-products" open>
+      <summary>Produkty w zleceniu (${items.length})</summary>
+      <div class="warehouse-worktable-wrap"><table class="log-table allegro-order-products-table"><tr><th>Zdjęcie</th><th>Kod</th><th>EAN / kod producenta</th><th>Nazwa produktu</th><th>Ilość</th></tr>
+        ${items.map(it=>{const d=allegroDanePozycjiZamowienia(it);return `<tr><td>${d.zdjecie?`<img class="allegro-order-thumb" src="${esc(d.zdjecie)}" alt="" loading="lazy">`:`<span class="allegro-order-thumb fallback">🎲</span>`}</td><td><b>${esc(d.kod||"—")}</b><br><small>oferta ${esc(it.offerId||"—")}</small></td><td>${esc(d.ean||"—")}</td><td><b>${esc(d.nazwa||"—")}</b></td><td><b>${esc(d.ilosc)}</b> szt.</td></tr>`;}).join("")||`<tr><td colspan="5">Brak pozycji w zleceniu.</td></tr>`}
+      </table></div>
+    </details>
+    <footer class="allegro-order-actions">
+      ${s==="sprawdzone"?`<button class="btn ghost" onclick="allegroOznaczZamowienieSprawdzone(${jsArg(z.id)},false)">↩️ Przywróć do obsługi</button>`:!["wyslane","anulowane"].includes(s)?`<button class="btn" onclick="allegroOznaczZamowienieSprawdzone(${jsArg(z.id)},true)">✅ Produkty pobrane — sprawdzone</button>`:""}
+      ${!["wyslane","anulowane"].includes(s)?`<select id="${esc(idStatus)}"><option value="READY_FOR_SHIPMENT">Do wysłania</option><option value="SENT">Wysłane</option><option value="CANCELLED">Anulowane</option></select><button class="btn ghost" onclick="allegroZmienStatusRealizacji(${jsArg(z.id)},document.getElementById(${jsArg(idStatus)}).value)">Zapisz status w Allegro</button>`:""}
+    </footer>
+  </article>`;
 }
 function allegroOfertyTabelaHTML(){
   const q=String(szukajAllegroOfert||"").toLowerCase().trim();
@@ -5365,7 +5393,7 @@ function allegroOfertyTabelaHTML(){
     if(filtrAllegroOfert==="niepodpiete"&&mapped) return false;
     const txt=`${o.id||""} ${o.externalId||""} ${o.ean||""} ${o.gtin||""} ${o.manufacturerCode||""} ${o.producerCode||""} ${o.brand||""} ${o.name||""} ${o.status||""} ${prod?.nazwa||""} ${prod?.sku||""}`.toLowerCase();
     return !q||txt.includes(q);
-  }).slice(0,250);
+  }).slice(0,allegroLimitWidokuOfert);
     return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">🏷️ Oferty Allegro i podpinanie produktów</h2><p class="order-detail-lead">Jedna karta produktu w sklepie może mieć wiele ofert Allegro. Przy ofercie wybierasz produkt sklepu albo tworzysz nowy produkt z danych oferty.</p></div>
@@ -5381,6 +5409,7 @@ function allegroOfertyTabelaHTML(){
         <option value="podpiete" ${filtrAllegroOfert==="podpiete"?"selected":""}>Tylko podpięte</option>
         <option value="niepodpiete" ${filtrAllegroOfert==="niepodpiete"?"selected":""}>Tylko niepodpięte</option>
       </select>
+      <label class="allegro-view-limit">Pokaż ofert <select onchange="allegroLimitWidokuOfert=Number(this.value)||250;renderuj()">${[100,250,500,1000].map(n=>`<option value="${n}" ${allegroLimitWidokuOfert===n?"selected":""}>${n}</option>`).join("")}</select></label>
     </div>
     <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable allegro-offers-table">
       <tr><th>Kod oferty</th><th>Nazwa Allegro</th><th>EAN / kod prod.</th><th>Cena</th><th>Stan Allegro</th><th>Status</th><th>Zdjęcia</th><th>Produkt sklepu</th><th>Akcje</th></tr>
@@ -5494,7 +5523,9 @@ function allegroKomunikacjaStaty(){
 function allegroKomunikacjaBledyHTML(){
   const errors=Array.isArray(allegroKomunikacja?.errors)?allegroKomunikacja.errors:[];
   if(!errors.length) return "";
-  return `<div class="backend-note" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Diagnostyka komunikacji Allegro:</b><br>${errors.map(e=>`• ${esc(e.key||"API")}: ${esc(e.message||e.code||"błąd")}${e.status?` (HTTP ${esc(e.status)})`:""}`).join("<br>")}<br><small>Jeżeli widzisz brak dostępu, połącz Allegro ponownie z pełnym zakresem: wiadomości, dyskusje/reklamacje, oferty i zamówienia.</small></div>`;
+  const brakDostepu=allegroKomunikacja?.requiresReauth||errors.some(e=>Number(e.status)===403);
+  if(brakDostepu) return `<div class="allegro-permission-alert"><div><b>🔐 Allegro blokuje wiadomości i dyskusje — HTTP 403</b><p>Token oraz deklaracja aplikacji nie mają jeszcze aktywnych uprawnień <code>allegro:api:messaging</code> i <code>allegro:api:disputes</code>. Po rozszerzeniu uprawnień aplikacji trzeba jednorazowo połączyć konto ponownie — starego refresh tokenu nie da się rozszerzyć automatycznie.</p><small>${errors.map(e=>`${esc(e.key||"API")}: ${esc(e.message||e.code||"błąd")}`).join(" • ")}</small></div><button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro ponownie</button></div>`;
+  return `<div class="backend-note" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Diagnostyka komunikacji Allegro:</b><br>${errors.map(e=>`• ${esc(e.key||"API")}: ${esc(e.message||e.code||"błąd")}${e.status?` (HTTP ${esc(e.status)})`:""}`).join("<br>")}</div>`;
 }
 function allegroWatekHTML(t){
   const replies=allegroKomunikacja?.autoReplies||{};
@@ -5527,12 +5558,12 @@ function allegroIssueHTML(i){
 function allegroKomunikacjaPanelHTML(){
   const st=allegroKomunikacjaStaty();
   const s=allegroKomunikacjaUstawienia();
+  const wymagaPonownegoPolaczenia=!!allegroKomunikacja?.requiresReauth||(allegroKomunikacja?.errors||[]).some(e=>Number(e.status)===403);
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">💬 Wiadomości, dyskusje i autoresponder Allegro</h2><p class="order-detail-lead">Panel pobiera Centrum wiadomości oraz Dyskusje/Reklamacje. Autoresponder odpowiada tylko raz na pierwszy kontakt klienta i zapisuje historię, żeby nie wysłać duplikatu.</p></div>
       <div class="diag-actions" style="margin-top:0">
-        <button class="btn" onclick="allegroSynchronizujKomunikacje(true)">🔄 Synchronizuj i odpowiedz</button>
-        <button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">📥 Tylko pobierz</button>
+        ${wymagaPonownegoPolaczenia?`<button class="btn" onclick="allegroPolacz()">🔐 Napraw połączenie Allegro</button>`:`<button class="btn" onclick="allegroSynchronizujKomunikacje(true)">🔄 Synchronizuj i odpowiedz</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">📥 Tylko pobierz</button>`}
       </div>
     </div>
     <div class="orders-stat-grid">
@@ -5698,6 +5729,7 @@ function widokAdminAllegro(sekcja="start"){
       <b>Wymagane zmienne Netlify:</b> <code>ALLEGRO_CLIENT_ID</code>, <code>ALLEGRO_CLIENT_SECRET</code>. Opcjonalnie: <code>ALLEGRO_REDIRECT_URI</code>, <code>ALLEGRO_ENV</code>, <code>ALLEGRO_SCOPE</code>.
       <span>Jeśli przy ofertach, wiadomościach albo dyskusjach pojawi się 403, kliknij ponownie <b>Połącz Allegro</b>, żeby odświeżyć zgodę OAuth z pełnym zakresem: oferty, ustawienia sprzedaży, zamówienia, przesyłki, wiadomości i dyskusje.</span>
       <span>Środowisko: ${esc(allegroStan.env||"production")} • ostatnia synchronizacja: ${esc(allegroStan.updated_at||"—")}</span>
+      ${allegroStan.requiresReauth?`<span style="color:#9a3412"><b>Brakujące zakresy aktualnego tokenu:</b> ${esc((allegroStan.missingAuthorizedScopes||[]).join(", ")||"token wymaga ponownej autoryzacji")}. Po zapisaniu uprawnień aplikacji kliknij „Połącz Allegro”.</span>`:""}
     </div>
     ${allegroSubnavHTML(aktywna)}
   </div>
@@ -6405,7 +6437,7 @@ let szukajProduktow = "", filtrProduktow = "Wszystkie", kategoriaNowegoProduktu 
 let filtrStatusuProduktow = "wszystkie", filtrZrodlaProduktow = "wszystkie", filtrStanuProduktow = "wszystkie";
 let sortowanieAdminProduktow = "id";
 let stronaAdminProduktow = 1;
-let produktyNaStronieAdmin = [25,50,100,200].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
+let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
 let frazaMagazynu="", filtrMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1;
 let magazynNaStronie=[25,50,100,200].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
 function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }
@@ -6433,7 +6465,7 @@ function produktyDoAdministracji(){
 function pobierzProduktAdmin(id){ return produktDodanyPoId(id) || produktyDoAdministracji().find(p=>p.id===id); }
 function ustawStroneAdminProduktow(n){ stronaAdminProduktow=Math.max(1,Number(n)||1); renderuj(); }
 function ustawProduktyNaStronieAdmin(n){
-  produktyNaStronieAdmin=[25,50,100,200].includes(Number(n))?Number(n):50;
+  produktyNaStronieAdmin=[25,50,100,200,500,1000].includes(Number(n))?Number(n):50;
   stronaAdminProduktow=1;
   zapiszLS("artway_produkty_na_stronie_admin",produktyNaStronieAdmin);
   renderuj();
@@ -7035,7 +7067,7 @@ function widokAdminProdukty(){
         <span>Znaleziono: <b>${liczbaWynikow}</b>. Strona ${stronaAdminProduktow} z ${liczbaStron}.</span>
         <label>Na stronie:
           <select onchange="ustawProduktyNaStronieAdmin(this.value)">
-            ${[25,50,100,200].map(n=>`<option value="${n}" ${produktyNaStronieAdmin===n?"selected":""}>${n}</option>`).join("")}
+            ${[25,50,100,200,500,1000].map(n=>`<option value="${n}" ${produktyNaStronieAdmin===n?"selected":""}>${n}</option>`).join("")}
           </select>
         </label>
       </div>
@@ -7049,7 +7081,7 @@ function widokAdminProdukty(){
         </span>
       </div>
       <div style="overflow-x:auto"><table class="log-table">
-        <tr><th><input type="checkbox" onchange="zaznaczWidoczneProd(this, [${fragment.map(p=>p.id).join(",")}])" style="width:16px;height:16px" title="Zaznacz produkty na tej stronie"></th><th>ID</th><th>Produkt</th><th>Kategoria</th><th>Cena (kliknij, by zmienić)</th><th>Promocja</th><th>Magazyn</th><th>Sprzedaż</th><th>Zdjęcie</th><th>Akcje</th></tr>
+        <tr><th><input type="checkbox" onchange="zaznaczWidoczneProd(this, [${fragment.map(p=>p.id).join(",")}])" style="width:16px;height:16px" title="Zaznacz produkty na tej stronie"></th><th>ID</th><th>Miniatura</th><th>Produkt</th><th>Kategoria</th><th>Cena (kliknij, by zmienić)</th><th>Promocja</th><th>Magazyn</th><th>Sprzedaż</th><th>Akcje</th></tr>
         ${fragment.map(p=>{
           const dodany = jestProduktemDodanym(p.id);
           const ukryty = czyProduktAdminWKoszu(p);
@@ -7057,13 +7089,13 @@ function widokAdminProdukty(){
           return `<tr style="${ukryty?'opacity:.45':''}">
           <td><input type="checkbox" ${zaznaczoneProdukty.has(p.id)?"checked":""} onchange="przelaczZaznProd(${p.id})" style="width:16px;height:16px"></td>
           <td>${p.id}</td>
+          <td><span class="admin-product-thumb">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="admin-product-thumb-fallback" style="display:none">${esc(p.ikona||"📦")}</span>`:`<span class="admin-product-thumb-fallback">${esc(p.ikona||"📦")}</span>`}</span></td>
           <td>${p.ikona||"📦"} <b>${esc(p.nazwa)}</b>${dodany?' <span class="lvl lvl-info">dodany</span>':""}${edytowany?' <span class="lvl lvl-info">edytowany</span>':""}${ukryty?' <span class="lvl lvl-ostrzezenie">usunięty</span>':""}</td>
           <td>${esc(p.kategoria)}</td>
           <td><input value="${String(p.cena.toFixed(2)).replace(".",",")}" inputmode="decimal" onchange="ustawCene(${p.id}, this.value)" style="width:80px;padding:.25rem .4rem;border:1.5px solid var(--line);border-radius:8px;text-align:right;font-weight:700"> zł</td>
           <td>${p.staraCena?`<span class="lvl lvl-blad">−${Math.round((1-p.cena/p.staraCena)*100)}%</span>`:"—"}</td>
           <td><input value="${stanyProduktow[p.id]??""}" placeholder="∞" inputmode="numeric" onchange="ustawStan(${p.id}, this.value)" style="width:58px;padding:.25rem .4rem;border:1.5px solid var(--line);border-radius:8px;text-align:center;${stanyProduktow[p.id]===0?'background:#fee2e2':''}"><br><small style="color:var(--muted2)">tylko admin</small></td>
           <td>${dostepnoscBadgeAdmin(p)}<br><button class="btn ghost" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})" style="padding:.25rem .5rem;margin-top:.25rem">${produktOznaczonyNiedostepny(p)?"Włącz sprzedaż":"Wyłącz sprzedaż"}</button></td>
-          <td>${p.zdjecie?"🖼️":'<span style="color:var(--muted2)">ikona</span>'}</td>
           <td style="white-space:nowrap">
             <a class="btn ghost" href="#/admin/produkty/edytuj/${p.id}" style="padding:.3rem .55rem" title="Edytuj">✏️</a>
             <button class="btn ghost" onclick="duplikujProdukt(${p.id})" style="padding:.3rem .55rem" title="Duplikuj">📄</button>
@@ -7103,6 +7135,34 @@ function widokAdminProdukty(){
       </table>
     </div>`:""}`);
 }
+const EMOJI_ZESTAWY=[
+  {nazwa:"🎲 Gry, zabawki i edukacja",slowa:"gry zabawki planszowe edukacja puzzle",emoji:["🎲","🧩","♟️","♞","🃏","🎯","🎮","🕹️","🪀","🪁","🧸","🤖","🧠","🔤","🔢","🧮","📚","📖","✏️","🖍️","🎨","🧪","🔬","🔭","🏆","🎳","⚽","🏀","🏓","🥏"]},
+  {nazwa:"🎈 Balony, impreza i prezenty",slowa:"balony balon impreza urodziny prezent dekoracje",emoji:["🎈","🎉","🎊","🥳","🎁","🎀","🪅","🪩","🎂","🧁","🍭","🍬","✨","🌟","⭐","💫","❤️","🩷","🧡","💛","💚","🩵","💙","💜","🤍","🖤","🎵","🎶","📣","🔔"]},
+  {nazwa:"🧒 Dzieci i kreatywność",slowa:"dzieci kreatywne plastyczne",emoji:["👶","🧒","👧","👦","🍼","🛝","🎠","🎡","🏰","🦄","🐸","🐻","🐼","🐰","🐣","🦋","🌈","☀️","🌙","☁️","🌸","🌻","🍀","🖌️","✂️"]},
+  {nazwa:"📦 Sklep i dostawa",slowa:"sklep produkt paczka dostawa promocja",emoji:["📦","🛍️","🛒","🏷️","💰","💳","🧾","🚚","🚛","🚲","✈️","📍","🏪","🏬","✅","🆕","🔥","💥","📢","🔎"]},
+  {nazwa:"🏠 Dom, ogród i pozostałe",slowa:"dom ogród narzędzia elektronika sport",emoji:["🏠","🪴","🌿","🌳","🌼","💡","🔧","🧰","🔨","📏","🔦","📱","💻","⌚","📷","🎧","🔋","⚙️","🚗","🚴","🏋️","🧘","👕","👟","🎒"]}
+];
+let emojiPoleDocelowe=null;
+function emojiPoleHTML(nazwa="ikona",wartosc="",fallback="📦"){
+  return `<div class="emoji-input-row"><input name="${esc(nazwa)}" value="${esc(wartosc||"")}" placeholder="${esc(fallback)}" maxlength="8"><button class="btn ghost" type="button" onclick="otworzWyborEmoji(this,${jsArg(nazwa)})">😀 Wybierz z dużej listy</button></div>`;
+}
+function otworzWyborEmoji(btn,nazwa="ikona"){
+  const form=btn?.closest?.("form");
+  emojiPoleDocelowe=form?.elements?.[nazwa]||null;
+  if(!emojiPoleDocelowe){toast("Nie znaleziono pola ikony");return;}
+  document.getElementById("emojiPickerModal")?.remove();
+  const modal=document.createElement("div");
+  modal.id="emojiPickerModal";modal.className="emoji-picker-overlay";
+  modal.innerHTML=`<div class="emoji-picker-modal" onclick="event.stopPropagation()"><div class="emoji-picker-head"><div><h2>😀 Wybierz emoji</h2><p>Duży zestaw ikon — gry i balony są na początku.</p></div><button class="btn ghost" type="button" onclick="zamknijWyborEmoji()">✕ Zamknij</button></div><input class="emoji-picker-search" placeholder="Szukaj grupy: gry, balony, dostawa…" oninput="filtrujWyborEmoji(this.value)"><div class="emoji-picker-groups">${EMOJI_ZESTAWY.map(g=>`<section class="emoji-picker-group" data-search="${esc((g.nazwa+' '+g.slowa).toLowerCase())}"><h3>${esc(g.nazwa)}</h3><div class="emoji-picker-grid">${g.emoji.map(e=>`<button type="button" title="${esc(g.nazwa)}" onclick="wybierzEmoji(${jsArg(e)})">${esc(e)}</button>`).join("")}</div></section>`).join("")}</div></div>`;
+  modal.onclick=zamknijWyborEmoji;document.body.appendChild(modal);
+  modal.querySelector(".emoji-picker-search")?.focus();
+}
+function filtrujWyborEmoji(q){
+  const s=String(q||"").trim().toLowerCase();
+  document.querySelectorAll("#emojiPickerModal .emoji-picker-group").forEach(el=>{el.style.display=!s||String(el.dataset.search||"").includes(s)?"":"none";});
+}
+function wybierzEmoji(emoji){if(emojiPoleDocelowe){emojiPoleDocelowe.value=emoji;emojiPoleDocelowe.dispatchEvent(new Event("input",{bubbles:true}));}zamknijWyborEmoji();}
+function zamknijWyborEmoji(){document.getElementById("emojiPickerModal")?.remove();emojiPoleDocelowe=null;}
 function formularzProduktu(p, tryb){
   const wszystkie = produktyDoAdministracji();
   const edycja = tryb==="edycja";
@@ -7128,7 +7188,7 @@ function formularzProduktu(p, tryb){
         <div class="f-group"><label>Etykieta</label><select name="badge"><option value="">— brak —</option><option ${p.badge==="Nowość"?"selected":""}>Nowość</option><option ${p.badge==="Promocja"?"selected":""}>Promocja</option></select></div>
       </div>
       <div class="f-row">
-        <div class="f-group"><label>Ikona (emoji)</label><input name="ikona" value="${esc(p.ikona||"")}" placeholder="📦" maxlength="8"></div>
+        <div class="f-group"><label>Ikona (emoji)</label>${emojiPoleHTML("ikona",p.ikona||"","📦")}</div>
         <div class="f-group"><label>Zdjęcie — link lub wgraj z dysku</label>
           <div style="display:flex;gap:.5rem">
             <input name="zdjecie" value="${esc(p.zdjecie||"")}" placeholder="https://… lub wgraj →" style="flex:1">
@@ -8036,7 +8096,7 @@ function widokAdminKategorie(){
     </div>
     <form onsubmit="dodajGrupeMenuKategorii(event)" class="f-row" style="grid-template-columns:1fr 130px auto;align-items:end;margin-bottom:1rem">
       <div class="f-group"><label>Nazwa grupy nadrzędnej</label><input required name="nazwa" placeholder="np. Gry i zabawki, Edukacja, Ogród…"></div>
-      <div class="f-group"><label>Ikona</label><input name="ikona" value="🗂️" maxlength="4"></div>
+      <div class="f-group"><label>Ikona</label>${emojiPoleHTML("ikona","🗂️","🗂️")}</div>
       <div class="f-group"><button class="btn" type="submit">➕ Dodaj grupę</button></div>
     </form>
     ${grupy.length?grupy.map((g,i)=>{
@@ -8044,8 +8104,8 @@ function widokAdminKategorie(){
       const martwe=g.kategorie.filter(k=>!nazwy.includes(k));
       return `<div class="menu-group-box" style="${g.aktywna?"":"opacity:.6"}">
         <form onsubmit="zapiszGrupeMenuKategorii(event,${jsArg(g.id)})">
-          <div class="f-row" style="grid-template-columns:90px 1fr auto auto auto;align-items:end">
-            <div class="f-group"><label>Ikona</label><input name="ikona" value="${esc(g.ikona)}" maxlength="4"></div>
+          <div class="f-row" style="grid-template-columns:minmax(210px,280px) 1fr auto auto auto;align-items:end">
+            <div class="f-group"><label>Ikona</label>${emojiPoleHTML("ikona",g.ikona||"🗂️","🗂️")}</div>
             <div class="f-group"><label>Nazwa grupy</label><input name="nazwa" value="${esc(g.nazwa)}" required></div>
             <label class="chk-row" style="margin:.2rem 0 .55rem"><input type="checkbox" name="aktywna" ${g.aktywna?"checked":""}> <span>Widoczna</span></label>
             <div class="diag-actions" style="margin:0">
@@ -8843,7 +8903,7 @@ function widokAdminBannery(){
       <div class="admin-banner-head"><b>➕ Nowy baner</b><span class="lvl lvl-info">${bannery.length}/8</span></div>
       <div class="f-row">
         <div class="f-group"><label>Tytuł</label><input required name="tytul" placeholder="Np. Wakacyjna promocja"></div>
-        <div class="f-group"><label>Ikona</label><input name="ikona" value="📣" maxlength="8"></div>
+        <div class="f-group"><label>Ikona</label>${emojiPoleHTML("ikona","📣","📣")}</div>
       </div>
       <div class="f-group"><label>Opis</label><input name="opis" placeholder="Krótki opis banera"></div>
       <div class="f-row">
@@ -8866,7 +8926,7 @@ function widokAdminBannery(){
         </div>
         <div class="f-row">
           <div class="f-group"><label>Tytuł</label><input required name="tytul" value="${esc(b.tytul||"")}"></div>
-          <div class="f-group"><label>Ikona</label><input name="ikona" value="${esc(b.ikona||"📣")}" maxlength="8"></div>
+          <div class="f-group"><label>Ikona</label>${emojiPoleHTML("ikona",b.ikona||"📣","📣")}</div>
         </div>
         <div class="f-group"><label>Opis</label><input name="opis" value="${esc(b.opis||"")}"></div>
         <div class="f-row">

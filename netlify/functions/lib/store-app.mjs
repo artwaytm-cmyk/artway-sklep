@@ -1031,6 +1031,9 @@ function allegroBasicAuth(c) {
 async function allegroStatus(req) {
   const c = allegroKonfiguracja(req);
   const auth = await czytaj('allegro_auth', {});
+  const wymagane = c.scope.split(/\s+/).filter(Boolean);
+  const autoryzowane = String(auth?.scope || '').split(/\s+/).filter(Boolean);
+  const brakujaceScope = autoryzowane.length ? wymagane.filter((x) => !autoryzowane.includes(x)) : [];
   return {
     configured: c.configured,
     connected: !!(auth && (auth.refresh_token || auth.access_token)),
@@ -1042,6 +1045,9 @@ async function allegroStatus(req) {
     updated_at: auth?.updated_at || null,
     requiredEnv: ['ALLEGRO_CLIENT_ID', 'ALLEGRO_CLIENT_SECRET'],
     scope: c.scope,
+    authorizedScope: auth?.scope || '',
+    missingAuthorizedScopes: brakujaceScope,
+    requiresReauth: brakujaceScope.length > 0,
     recommendedScope: ALLEGRO_DEFAULT_SCOPE,
     optionalEnv: ['ALLEGRO_REDIRECT_URI', 'ALLEGRO_ENV=production', 'ALLEGRO_SCOPE'],
   };
@@ -1310,7 +1316,7 @@ function allegroMapowaniaItems(raw) {
 async function allegroPobierzSzczegolyOfert(req, source, limit) {
   const out = [];
   const base = source.slice(0, limit);
-  const batchSize = 8;
+  const batchSize = 25;
   for (let i = 0; i < base.length; i += batchSize) {
     const batch = base.slice(i, i + batchSize);
     const details = await Promise.all(batch.map(async (o) => {
@@ -1908,29 +1914,33 @@ function allegroAutoReplyText(settings = {}, item = {}, kind = 'message') {
     .slice(0, 2000);
 }
 async function allegroPobierzKomunikacje(req, { limit = 20 } = {}) {
-  const safeLimit = Math.max(1, Math.min(20, Number(limit) || 20));
+  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
   const errors = [];
   let threadsSource = [];
   try {
-    const threadsRaw = await allegroWywolaj(req, '/messaging/threads', { parameters: { limit: safeLimit, offset: 0 } });
-    threadsSource = allegroLista(threadsRaw, ['threads', 'items']);
+    for (let offset = 0; offset < safeLimit; offset += 20) {
+      const pageLimit = Math.min(20, safeLimit - offset);
+      const threadsRaw = await allegroWywolaj(req, '/messaging/threads', { parameters: { limit: pageLimit, offset } });
+      const page = allegroLista(threadsRaw, ['threads', 'items']);
+      threadsSource.push(...page);
+      if (page.length < pageLimit) break;
+    }
   } catch (e) {
     errors.push({ key: 'threads', status: e.status || 0, code: e.code || '', message: e.message || String(e) });
   }
-  const threads = [];
-  for (const t of threadsSource.slice(0, safeLimit)) {
+  const threads = (await Promise.all(threadsSource.slice(0, safeLimit).map(async (t) => {
     const id = tekst(t.id, 120);
-    if (!id) continue;
+    if (!id) return null;
     let messages = [];
     try {
       const raw = await allegroWywolaj(req, `/messaging/threads/${encodeURIComponent(id)}/messages`, { parameters: { limit: 20, offset: 0 } });
       messages = allegroLista(raw, ['messages', 'items']);
     } catch {}
-    threads.push(allegroNormalizujWatek(t, messages));
-  }
+    return allegroNormalizujWatek(t, messages);
+  }))).filter(Boolean);
   let issuesSource = [];
   try {
-    const issuesRaw = await allegroWywolaj(req, '/sale/issues', { parameters: { limit: safeLimit, offset: 0 }, accept: ALLEGRO_BETA_JSON });
+    const issuesRaw = await allegroWywolaj(req, '/sale/issues', { parameters: { limit: Math.min(100, safeLimit), offset: 0 }, accept: ALLEGRO_BETA_JSON });
     issuesSource = allegroLista(issuesRaw, ['issues', 'items']);
   } catch (e) {
     errors.push({ key: 'issues', status: e.status || 0, code: e.code || '', message: e.message || String(e) });
@@ -1946,7 +1956,7 @@ async function allegroPobierzKomunikacje(req, { limit = 20 } = {}) {
     } catch {}
     issues.push(allegroNormalizujIssue(i, chat));
   }
-  return { threads, issues, errors };
+  return { threads, issues, errors, requiresReauth: errors.some((e) => Number(e.status) === 403) };
 }
 async function allegroWyslijAutoOdpowiedzi(req, data, settings) {
   const rec = await czytaj('allegro_auto_replies', { items: {}, updated_at: null });
@@ -2935,7 +2945,7 @@ export default async (req) => {
       const c = allegroKonfiguracja(req);
       const token = await allegroTokenRequest(req, { grant_type: 'authorization_code', code, redirect_uri: c.redirectUri });
       await zapisz('allegro_auth', token);
-      return odpowiedzHtml('<h1>Allegro połączone</h1><p>Konto Allegro zostało autoryzowane dla panelu Artway-TM. Możesz wrócić do panelu i uruchomić synchronizację zamówień oraz ofert.</p><p><a href="/#/admin/allegro">Wróć do panelu Allegro</a></p>');
+      return odpowiedzHtml('<h1>Allegro połączone</h1><p>Konto Allegro zostało ponownie autoryzowane dla panelu Artway-TM. Możesz teraz sprawdzić oferty, wiadomości oraz dyskusje.</p><p><a href="/#/admin/allegro/komunikacja">Przejdź do wiadomości i dyskusji</a></p>');
     }
 
     // ─── ALLEGRO: synchronizacja zamówień (admin) ───
@@ -2943,21 +2953,37 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const limit = Math.min(100, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 100)));
+      const limit = Math.min(1000, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 1000)));
       const statusyRealizacji = ['NEW', 'READY_FOR_SHIPMENT'];
       const pobrane = [];
-      for (const fulfillmentStatus of statusyRealizacji) {
-        try {
-          const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit: Math.min(100, limit), offset: 0, status: 'READY_FOR_PROCESSING', 'fulfillment.status': fulfillmentStatus } });
-          const source = Array.isArray(dane.checkoutForms) ? dane.checkoutForms : (Array.isArray(dane.items) ? dane.items : []);
-          pobrane.push(...source);
-        } catch (e) {
-          if (fulfillmentStatus === statusyRealizacji[0]) {
-            const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit, offset: 0, status: 'READY_FOR_PROCESSING' } });
+      const zakonczoneStatusy = new Set();
+      let fallbackBezStatusuRealizacji = false;
+      pobieranieZamowien: for (let offset = 0; offset < 10000 && pobrane.length < limit; offset += 100) {
+        for (const fulfillmentStatus of statusyRealizacji) {
+          if (zakonczoneStatusy.has(fulfillmentStatus)) continue;
+          const pageLimit = Math.min(100, limit - pobrane.length);
+          if (pageLimit <= 0) break pobieranieZamowien;
+          try {
+            const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit: pageLimit, offset, status: 'READY_FOR_PROCESSING', 'fulfillment.status': fulfillmentStatus } });
             const source = Array.isArray(dane.checkoutForms) ? dane.checkoutForms : (Array.isArray(dane.items) ? dane.items : []);
             pobrane.push(...source);
-            break;
+            if (source.length < pageLimit) zakonczoneStatusy.add(fulfillmentStatus);
+          } catch (e) {
+            if (offset === 0 && fulfillmentStatus === statusyRealizacji[0]) fallbackBezStatusuRealizacji = true;
+            else zakonczoneStatusy.add(fulfillmentStatus);
           }
+        }
+        if (fallbackBezStatusuRealizacji || zakonczoneStatusy.size === statusyRealizacji.length) break;
+      }
+      if (fallbackBezStatusuRealizacji) {
+        pobrane.length = 0;
+        for (let offset = 0; offset < Math.min(10000, limit); offset += 100) {
+          const pageLimit = Math.min(100, limit - pobrane.length);
+          if (pageLimit <= 0) break;
+          const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit: pageLimit, offset, status: 'READY_FOR_PROCESSING' } });
+          const source = Array.isArray(dane.checkoutForms) ? dane.checkoutForms : (Array.isArray(dane.items) ? dane.items : []);
+          pobrane.push(...source);
+          if (source.length < pageLimit) break;
         }
       }
       const poprzedniRec = await czytaj('allegro_orders', { items: [], updated_at: null });
@@ -2967,7 +2993,8 @@ export default async (req) => {
       const aktywne = pobrane
         .map(allegroNormalizujZamowienie)
         .filter((x) => x.id && !seen.has(x.id) && seen.add(x.id))
-        .filter(allegroZamowienieJestNoweLubDoWyslania);
+        .filter(allegroZamowienieJestNoweLubDoWyslania)
+        .slice(0, limit);
       let dodane = 0;
       for (const z of aktywne) {
         const stare = mapa.get(String(z.id)) || {};
@@ -3053,8 +3080,9 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const limit = Math.min(100, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 100)));
+      const limit = Math.min(1000, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 1000)));
       const details = body.details !== false && url.searchParams.get('details') !== '0';
+      const detailsLimit = details ? Math.min(limit, 300, Math.max(1, Number(body.detailsLimit || 300))) : 0;
       let dane;
       try {
         dane = await allegroWywolaj(req, '/sale/offers', { parameters: { limit, offset: 0, 'publication.status': 'ACTIVE' } });
@@ -3062,12 +3090,13 @@ export default async (req) => {
         dane = await allegroWywolaj(req, '/sale/offers', { parameters: { limit, offset: 0 } });
       }
       const source = Array.isArray(dane.offers) ? dane.offers : (Array.isArray(dane.items) ? dane.items : []);
-      const pelne = details ? await allegroPobierzSzczegolyOfert(req, source, limit) : source;
-      const items = pelne.map(allegroNormalizujOferte).filter((x) => x.id);
-      const rec = { items, updated_at: new Date().toISOString(), count: items.length, details };
+      const pelne = details ? await allegroPobierzSzczegolyOfert(req, source, detailsLimit) : [];
+      const pelnePoId = new Map(pelne.filter((x) => x?.id).map((x) => [String(x.id), x]));
+      const items = source.map((o) => pelnePoId.get(String(o?.id)) || o).map(allegroNormalizujOferte).filter((x) => x.id);
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length, details, detailedCount: pelne.length, requestedLimit: limit };
       await zapisz('allegro_offers', rec);
       const mappings = await czytaj('allegro_mappings', { items: {} });
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), offers: items, mappings: allegroMapowaniaItems(mappings), updated_at: rec.updated_at });
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), offers: items, mappings: allegroMapowaniaItems(mappings), updated_at: rec.updated_at, detailedCount: rec.detailedCount, requestedLimit: rec.requestedLimit });
     }
 
     // ─── ALLEGRO: komunikacja z klientami i autoresponder (admin) ───
@@ -3086,6 +3115,7 @@ export default async (req) => {
         settings,
         autoReplies: replies.items && typeof replies.items === 'object' ? replies.items : {},
         autoRepliesUpdatedAt: replies.updated_at || null,
+        requiresReauth: Array.isArray(comm.errors) && comm.errors.some((e) => Number(e?.status) === 403),
       });
     }
 
@@ -3106,7 +3136,7 @@ export default async (req) => {
       const data = await allegroPobierzKomunikacje(req, { limit: body.limit || 20 });
       let autoReply = { sent: [], skipped: [], items: {} };
       if (body.autoReply !== false && settings.enabled) autoReply = await allegroWyslijAutoOdpowiedzi(req, data, settings);
-      const rec = { threads: data.threads, issues: data.issues, errors: data.errors || [], updated_at: new Date().toISOString(), autoReplyLastRun: autoReply.sent?.length || 0 };
+      const rec = { threads: data.threads, issues: data.issues, errors: data.errors || [], requiresReauth: !!data.requiresReauth, updated_at: new Date().toISOString(), autoReplyLastRun: autoReply.sent?.length || 0 };
       await zapisz('allegro_communications', rec);
       return odpowiedz({ ok: true, allegro: await allegroStatus(req), ...rec, settings, autoReply });
     }
