@@ -1482,8 +1482,11 @@ function renderuj(){
       if(!jestAdmin()) w.innerHTML = widokBrakDostepu();
       else if(t==="/admin") w.innerHTML = widokAdmin();
       else if(t==="/admin/zamowienia") w.innerHTML = widokAdminZamowienia();
+      else if(t==="/admin/zamowienia/tabela") w.innerHTML = widokAdminZamowieniaTabela();
       else if(t.startsWith("/admin/zamowienie/")) w.innerHTML = widokAdminZamowienie(decodeURIComponent(t.split("/")[3]||""));
       else if(t==="/admin/allegro") w.innerHTML = widokAdminAllegro();
+      else if(t==="/admin/allegro/zamowienia") w.innerHTML = widokAdminAllegro("zamowienia");
+      else if(t==="/admin/allegro/oferty") w.innerHTML = widokAdminAllegro("oferty");
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
       else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn();
       else if(t==="/admin/agent-ai") w.innerHTML = widokAdminAgentAI();
@@ -3774,6 +3777,16 @@ function mapaZamowienDlaProduktow(){
       rec.zamowienia[z.nr]=(rec.zamowienia[z.nr]||0)+(Number(p.ilosc)||0);
     });
   });
+  aktywneZamowieniaAllegro().forEach(z=>{
+    pozycjeAllegroMagazyn(z).forEach(p=>{
+      if(!p.id) return;
+      const k=String(p.id);
+      const rec=mapa[k]||(mapa[k]={ilosc:0,zamowienia:{},numery:[]});
+      rec.ilosc+=Number(p.ilosc)||0;
+      const nr=`Allegro ${z.id||z.nr||p.offerId||""}`.trim();
+      rec.zamowienia[nr]=(rec.zamowienia[nr]||0)+(Number(p.ilosc)||0);
+    });
+  });
   Object.values(mapa).forEach(rec=>{rec.numery=Object.entries(rec.zamowienia).map(([nr,ilosc])=>`${nr} × ${ilosc}`).slice(0,12);});
   return mapa;
 }
@@ -3803,6 +3816,9 @@ function agentAIPozycjeZleceniaProducenta(tryb="braki",limit=500){
       stan:x.stan===null?null:Number(x.stan||0),
       rezerwacje:Number(x.rezerwacje||0),
       dostepne:x.dostepne===null?null:Number(x.dostepne||0),
+      iloscPotrzebna:Number(x.ilosc)||0,
+      przyjeto:0,
+      nadwyzka:0,
       lokalizacja:meta.lokalizacja||"",
       dostawca:meta.dostawca||"",
       powod:x.powod||"",
@@ -3876,6 +3892,88 @@ function agentAIUsunZlecenie(id){
   toast("Usunięto szkic zlecenia agenta");
   renderuj();
 }
+function agentAIPodsumujZlecenie(z){
+  const pozycje=Array.isArray(z.pozycje)?z.pozycje:[];
+  z.sztuk=pozycje.reduce((s,p)=>s+Number(p.ilosc||0),0);
+  z.wartoscSzacowana=pozycje.reduce((s,p)=>s+kwotaNum((Number(p.ilosc)||0)*kwotaNum(p.cenaBrutto)),0);
+  z.dostawcy=[...new Set(pozycje.map(p=>p.dostawca||"Bez przypisanego dostawcy"))];
+  z.aktualizacja=new Date().toISOString();
+  z.aktualizacjaTxt=new Date().toLocaleString("pl-PL");
+  return z;
+}
+function agentAIZmienPozycjeZlecenia(id, produktId, fn){
+  let znaleziono=false;
+  agentAIZlecenia=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).map(z=>{
+    if(String(z.id)!==String(id)) return z;
+    const pozycje=(Array.isArray(z.pozycje)?z.pozycje:[]).map(p=>{
+      if(String(p.produktId)!==String(produktId)) return p;
+      znaleziono=true;
+      return fn({...p})||p;
+    });
+    return agentAIPodsumujZlecenie({...z,pozycje});
+  });
+  if(!znaleziono){ toast("Nie znaleziono pozycji w zleceniu agenta"); return false; }
+  zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);
+  return true;
+}
+function agentAIPowiekszPozycjeZlecenia(id, produktId){
+  const raw=prompt("O ile sztuk powiększyć tę pozycję? Nadwyżka zostanie oznaczona do przyjęcia na magazyn po dostawie.","1");
+  if(raw===null) return;
+  const delta=Math.max(0,parseInt(String(raw).replace(",",".").replace(/[^\d.-]/g,""),10)||0);
+  if(!delta){ toast("Podaj dodatnią liczbę sztuk"); return; }
+  const ok=agentAIZmienPozycjeZlecenia(id,produktId,p=>{
+    const potrzebna=Number(p.iloscPotrzebna ?? p.ilosc ?? 0)||0;
+    const nowa=(Number(p.ilosc)||0)+delta;
+    return {...p,ilosc:nowa,iloscPotrzebna:potrzebna,nadwyzka:Math.max(0,nowa-potrzebna),powod:[p.powod||"",`ręcznie powiększono o ${delta} szt.`].filter(Boolean).join(" • ")};
+  });
+  if(ok){
+    zapiszHistorieAgenta("zlecenie",`Powiększono pozycję zlecenia o ${delta} szt.`,{zlecenieId:id,produktId,delta});
+    toast("Pozycja zlecenia powiększona. Nadwyżka będzie widoczna do przyjęcia.");
+    renderuj();
+  }
+}
+function agentAIPrzyjmijPozycjeZlecenia(id, produktId){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  const poz=(Array.isArray(z?.pozycje)?z.pozycje:[]).find(p=>String(p.produktId)===String(produktId));
+  if(!z||!poz){ toast("Nie znaleziono pozycji do przyjęcia"); return; }
+  const pozostalo=Math.max(0,(Number(poz.ilosc)||0)-(Number(poz.przyjeto)||0));
+  if(!pozostalo){ toast("Ta pozycja jest już przyjęta"); return; }
+  const raw=prompt(`Ile sztuk przyjąć na magazyn dla: ${poz.nazwa}?`,String(pozostalo));
+  if(raw===null) return;
+  const ilosc=Math.max(0,parseInt(String(raw).replace(",",".").replace(/[^\d.-]/g,""),10)||0);
+  if(!ilosc){ toast("Podaj dodatnią liczbę sztuk"); return; }
+  if(ilosc>pozostalo && !confirm(`Wpisano ${ilosc} szt., a w zleceniu pozostało ${pozostalo}. Przyjąć mimo to?`)) return;
+  const przed=stanMagazynuId(produktId);
+  const baza=przed===null?0:Number(przed)||0;
+  ustawStanMagazynowy(produktId,baza+ilosc,{typ:"przyjęcie",powod:`Przyjęcie ze zlecenia agenta ${z.numer||z.id}`,dokument:z.numer||z.id});
+  const ok=agentAIZmienPozycjeZlecenia(id,produktId,p=>({...p,przyjeto:(Number(p.przyjeto)||0)+ilosc,ostatniePrzyjecie:new Date().toISOString(),statusPrzyjecia:(Number(p.przyjeto||0)+ilosc)>=(Number(p.ilosc)||0)?"przyjęte":"częściowo przyjęte"}));
+  if(ok){
+    agentAIZlecenia=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).map(item=>{
+      if(String(item.id)!==String(id)) return item;
+      const pozycje=Array.isArray(item.pozycje)?item.pozycje:[];
+      const wszystkie=pozycje.length&&pozycje.every(p=>(Number(p.przyjeto)||0)>=(Number(p.ilosc)||0));
+      const jakies=pozycje.some(p=>(Number(p.przyjeto)||0)>0);
+      return agentAIPodsumujZlecenie({...item,status:wszystkie?"zrealizowane":jakies?"częściowo zrealizowane":item.status});
+    });
+    zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);
+    zapiszHistorieAgenta("magazyn",`Przyjęto ${ilosc} szt. z ${z.numer||z.id} do magazynu`,{zlecenieId:id,produktId,ilosc,stanPrzed:przed});
+    toast("Przyjęto towar na magazyn ✅");
+    renderuj();
+  }
+}
+function agentAINadwyzkiDoPrzyjecia(){
+  const out=[];
+  (Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).filter(z=>!["zrealizowane","anulowane"].includes(String(z.status||"").toLowerCase())).forEach(z=>{
+    (Array.isArray(z.pozycje)?z.pozycje:[]).forEach(p=>{
+      const ilosc=Number(p.ilosc)||0, potrzebna=Number(p.iloscPotrzebna ?? ilosc)||0, przyjeto=Number(p.przyjeto)||0;
+      const nadwyzka=Math.max(0,ilosc-potrzebna);
+      const przyjetaNadwyzka=Math.max(0,przyjeto-potrzebna);
+      const doPrzyjecia=Math.max(0,nadwyzka-przyjetaNadwyzka);
+      if(doPrzyjecia>0) out.push({zlecenie:z,pozycja:p,nadwyzka,doPrzyjecia,przyjeto});
+    });
+  });
+  return out;
+}
 function statusOperacyjnyZamowienia(z){
   const s=String(z?.status||"nowe").toLowerCase();
   if(["anulowane","zwrot","zwrot pieniędzy"].includes(s)) return {priorytet:9,klasa:"lvl-blad",tekst:z.status||"anulowane"};
@@ -3914,8 +4012,42 @@ function wierszeOperacyjneMagazynu(){
       });
     });
   });
+  aktywneZamowieniaAllegro().forEach(z=>{
+    const status=String(z.status||z.fulfillmentStatus||"aktywne").trim()||"aktywne";
+    pozycjeAllegroMagazyn(z).forEach(poz=>{
+      const produktId=String(poz.id||"");
+      const p=produktId?(produktMagazynowy(produktId)||poz):poz;
+      const meta=produktId?magazynMetaProduktu(produktId):{};
+      const stan=produktId?stanMagazynuId(produktId):null;
+      const dost=produktId&&stan!==null?stan-Number(rez[produktId]||0):null;
+      rows.push({
+        zrodlo:"zamówienie Allegro",
+        typ:"allegro",
+        data:new Date(z.createdAt||z.updatedAt||0).getTime()||0,
+        priorytet:produktId?2:1,
+        status,
+        statusKlasa:produktId?"lvl-info":"lvl-ostrzezenie",
+        numer:z.id||z.nr||"Allegro",
+        klient:z.buyerName||z.buyerLogin||z.email||"Allegro",
+        produktId,
+        kod:kodOperacyjnyProduktu(p,meta)||poz.externalId||poz.offerId||"",
+        ean:eanOperacyjnyProduktu(p,meta)||poz.externalId||"",
+        nazwa:poz.nazwa||p.nazwa||"Produkt Allegro",
+        ilosc:Number(poz.ilosc)||1,
+        stan,
+        rezerwacje:produktId?Number(rez[produktId]||0):0,
+        dostepne:dost,
+        lokalizacja:meta.lokalizacja||"",
+        dostawca:meta.dostawca||"",
+        powod:produktId?"Pozycja z aktywnego zamówienia Allegro.":"Oferta Allegro nie jest jeszcze podpięta do produktu sklepu — nie może być policzona w magazynie.",
+        akcja:"#/admin/allegro/zamowienia",
+        zamowienia:[`Allegro ${z.id||z.nr||""} × ${Number(poz.ilosc)||1}`]
+      });
+    });
+  });
   (Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).forEach(z=>{
     (Array.isArray(z.pozycje)?z.pozycje:[]).forEach(p=>{
+      const ilosc=Number(p.ilosc)||0, potrzebna=Number(p.iloscPotrzebna ?? ilosc)||0, przyjeto=Number(p.przyjeto)||0;
       rows.push({
         zrodlo:"zlecenie agenta",
         typ:"agent",
@@ -3930,7 +4062,10 @@ function wierszeOperacyjneMagazynu(){
         kod:p.kod||"",
         ean:p.ean||"",
         nazwa:p.nazwa||"Produkt",
-        ilosc:Number(p.ilosc)||0,
+        ilosc,
+        iloscPotrzebna:potrzebna,
+        przyjeto,
+        nadwyzka:Math.max(0,ilosc-potrzebna),
         stan:p.stan===null?null:Number(p.stan||0),
         rezerwacje:Number(p.rezerwacje||0),
         dostepne:p.dostepne===null?null:Number(p.dostepne||0),
@@ -3943,6 +4078,16 @@ function wierszeOperacyjneMagazynu(){
   });
   return rows.sort((a,b)=>a.priorytet-b.priorytet || (b.data||0)-(a.data||0) || String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl"));
 }
+function akcjaWierszaOperacyjnegoHTML(x){
+  if(x.typ==="zamowienie") return `<a class="btn ghost" href="${esc(x.akcja)}">Otwórz</a>`;
+  if(x.typ==="allegro") return `<div class="warehouse-worktable-actions"><a class="btn ghost" href="${esc(x.akcja||"#/admin/allegro/zamowienia")}">Otwórz Allegro</a>${!x.produktId?`<a class="btn" href="#/admin/allegro/oferty">Mapuj ofertę</a>`:""}</div>`;
+  return `<div class="warehouse-worktable-actions">
+    <select onchange="agentAIZmienStatusZlecenia(${jsArg(x.zlecenieId)},this.value)">${["szkic","do sprawdzenia","zaakceptowane","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"].map(s=>`<option value="${s}" ${x.status===s?"selected":""}>${s}</option>`).join("")}</select>
+    <button class="btn ghost" onclick="agentAIPowiekszPozycjeZlecenia(${jsArg(x.zlecenieId)},${jsArg(x.produktId)})">➕ Powiększ</button>
+    <button class="btn ghost" onclick="agentAIPrzyjmijPozycjeZlecenia(${jsArg(x.zlecenieId)},${jsArg(x.produktId)})">📥 Przyjmij</button>
+    <button class="btn danger" onclick="if(confirm('Usunąć szkic zlecenia agenta?'))agentAIUsunZlecenie(${jsArg(x.zlecenieId)})">Usuń</button>
+  </div>`;
+}
 function eksportujTabeleOperacyjnaMagazynuCSV(){
   const rows=wierszeOperacyjneMagazynu();
   const nag=["kod","ean","nazwa","ilosc_potrzebna","zrodlo","numer","status","klient_lub_dostawca","stan","rezerwacje","dostepne_po_rezerwacjach","lokalizacja","dostawca","powod","zamowienia_powiazane"];
@@ -3953,6 +4098,8 @@ function eksportujTabeleOperacyjnaMagazynuCSV(){
 function magazynTabelaOperacyjnaHTML(opcje={}){
   const limit=Number(opcje.limit)||160, rows=wierszeOperacyjneMagazynu(), widoczne=rows.slice(0,limit);
   const zamRows=rows.filter(x=>x.typ==="zamowienie"), aiRows=rows.filter(x=>x.typ==="agent");
+  const allegroRows=rows.filter(x=>x.typ==="allegro");
+  const nadwyzki=agentAINadwyzkiDoPrzyjecia();
   const brakujace=rows.filter(x=>x.dostepne!==null&&Number(x.dostepne)<0).length;
   return `<div class="panel warehouse-worktable-panel">
     <div class="order-section-head">
@@ -3966,10 +4113,11 @@ function magazynTabelaOperacyjnaHTML(opcje={}){
       </div>
     </div>
     <div class="warehouse-worktable-stats">
-      <span><b>${zamRows.length}</b><small>pozycji z zamówień</small></span>
+      <span><b>${zamRows.length}</b><small>pozycji ze sklepu</small></span>
+      <span><b>${allegroRows.length}</b><small>pozycji Allegro</small></span>
       <span><b>${aiRows.length}</b><small>pozycji ze zleceń agenta</small></span>
+      <span><b>${nadwyzki.length}</b><small>nadwyżek do przyjęcia</small></span>
       <span><b>${brakujace}</b><small>pozycji z brakiem po rezerwacjach</small></span>
-      <span><b>${rows.length}</b><small>wszystkich wierszy</small></span>
     </div>
     <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable">
       <tr><th>Kod</th><th>EAN / kod prod.</th><th>Nazwa</th><th>Ilość potrzebna</th><th>Źródło</th><th>Nr / status</th><th>Stan</th><th>Lokalizacja</th><th>Dostawca</th><th>Akcja</th></tr>
@@ -3983,7 +4131,7 @@ function magazynTabelaOperacyjnaHTML(opcje={}){
         <td>${x.stan===null?"bez limitu":`${esc(x.stan)} szt.`}<br><small>rez.: ${esc(x.rezerwacje)} • po rez.: ${x.dostepne===null?"∞":esc(x.dostepne)}</small></td>
         <td>${esc(x.lokalizacja?nazwaLokalizacjiMagazynu(x.lokalizacja):"—")}</td>
         <td>${esc(x.dostawca||"—")}</td>
-        <td>${x.typ==="zamowienie"?`<a class="btn ghost" href="${esc(x.akcja)}">Otwórz</a>`:`<div class="warehouse-worktable-actions"><select onchange="agentAIZmienStatusZlecenia(${jsArg(x.zlecenieId)},this.value)">${["szkic","do sprawdzenia","zaakceptowane","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"].map(s=>`<option value="${s}" ${x.status===s?"selected":""}>${s}</option>`).join("")}</select><button class="btn danger" onclick="if(confirm('Usunąć szkic zlecenia agenta?'))agentAIUsunZlecenie(${jsArg(x.zlecenieId)})">Usuń</button></div>`}</td>
+        <td>${akcjaWierszaOperacyjnegoHTML(x)}</td>
       </tr>`).join("") || `<tr><td colspan="10">Brak pozycji w zamówieniach i brak zleceń agenta.</td></tr>`}
     </table></div>
     ${rows.length>limit?`<p class="order-detail-lead">Pokazano ${limit} z ${rows.length} wierszy. Pełną listę pobierzesz przyciskiem CSV.</p>`:""}
@@ -4102,6 +4250,7 @@ function agentAIAnaliza(){
     return (Date.now()-new Date(d).getTime())>90*86400000;
   });
   const lokAktywne=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(produktyAdmin), lokPozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK"&&!magazynLokalizacjaPoKodzie(k));
+  const nadwyzki=agentAINadwyzkiDoPrzyjecia();
   const pozycje=[
     {id:"dostepnosc",poziom:doPotwierdzenia.length?"warn":"ok",ikona:"🔎",tytul:"Zamówienia do potwierdzenia dostępności",opis:doPotwierdzenia.length?`${doPotwierdzenia.length} zamówień ma pozycje powyżej ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} szt.`:"Brak zamówień wymagających potwierdzenia ilości.",akcja:"#/admin/zamowienia"},
     {id:"wysylki",poziom:bezNumeru.length?"warn":"ok",ikona:"🚚",tytul:"Przesyłki bez numeru nadania",opis:bezNumeru.length?`${bezNumeru.length} aktywnych zleceń czeka na numer/etykietę InPost.`:"Aktywne przesyłki mają komplet podstawowych danych.",akcja:"#/admin/wysylki"},
@@ -4110,6 +4259,7 @@ function agentAIAnaliza(){
     {id:"sprzedaz",poziom:niedostepne.length?"warn":"ok",ikona:"🛒",tytul:"Produkty wyłączone ze sprzedaży",opis:niedostepne.length?`${niedostepne.length} produktów jest oznaczonych jako chwilowo niedostępne.`:"Wszystkie aktywne produkty są dostępne w sprzedaży.",akcja:"#/admin/magazyn"},
     {id:"magazyn",poziom:niskiStan.length?"warn":"ok",ikona:"🏬",tytul:"Niski stan magazynowy",opis:niskiStan.length?`${niskiStan.length} produktów ma stan magazynowy ≤ ${prog}. To informacja tylko dla admina.`:"Stany magazynowe nie wymagają pilnej reakcji.",akcja:"#/admin/magazyn"},
     {id:"zatowarowanie",poziom:plan.length?"warn":"ok",ikona:"📦",tytul:"Plan zatowarowania — braki do zamówień",opis:plan.length?`${plan.length} produktów brakuje do aktywnych zamówień. Szacowana wartość braków: ${zl(plan.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0))}.`:"Brak produktów, których brakuje do aktywnych zamówień.",akcja:"utworz-zlecenie-braki"},
+    {id:"przyjecia-nadwyzek",poziom:nadwyzki.length?"warn":"ok",ikona:"📥",tytul:"Dzienne przyjęcie nadwyżek",opis:nadwyzki.length?`${nadwyzki.length} pozycji ze zleceń agenta ma nadwyżkę do decyzji/przyjęcia na magazyn.`:"Brak nadwyżek oczekujących na przyjęcie.",akcja:"#/admin/zamowienia/tabela"},
     {id:"nadrezerwacje",poziom:nadrezerwacje.length?"bad":"ok",ikona:"🚨",tytul:"Rezerwacje większe niż stan",opis:nadrezerwacje.length?`${nadrezerwacje.length} produktów ma więcej sztuk w aktywnych zamówieniach niż fizycznie w magazynie.`:"Nie ma nadrezerwacji magazynowych.",akcja:"#/admin/magazyn"},
     {id:"kartoteka",poziom:brakKartoteki.length?"warn":"ok",ikona:"🗂️",tytul:"Kartoteka magazynowa",opis:brakKartoteki.length?`${brakKartoteki.length} produktów nie ma lokalizacji albo dostawcy.`:"Kartoteka magazynowa jest uzupełniona.",akcja:"kartoteka-domyslna"},
     {id:"lokalizacje",poziom:(!lokAktywne.length||lokPozaSlownikiem.length)?"warn":"ok",ikona:"🗺️",tytul:"Słownik lokalizacji magazynu",opis:!lokAktywne.length?"Brak utworzonych lokalizacji magazynu.":lokPozaSlownikiem.length?`${lokPozaSlownikiem.length} lokalizacji przy produktach nie ma w słowniku.`:`Aktywne lokalizacje: ${lokAktywne.length}.`,akcja:"#/admin/magazyn"},
@@ -4545,10 +4695,42 @@ function allegroOfertyTabelaHTML(){
     </table></div>
   </div>`;
 }
-function widokAdminAllegro(){
+function adminSubnavHTML(items, aktywny){
+  return `<nav class="admin-subnav">${items.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}">${esc(x.label)}</a>`).join("")}</nav>`;
+}
+function allegroSubnavHTML(aktywny="start"){
+  return adminSubnavHTML([
+    {id:"start",href:"#/admin/allegro",label:"Start"},
+    {id:"zamowienia",href:"#/admin/allegro/zamowienia",label:"📦 Zamówienia Allegro"},
+    {id:"oferty",href:"#/admin/allegro/oferty",label:"🏷️ Oferty i mapowanie"},
+    {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"}
+  ],aktywny);
+}
+function allegroStartPanelHTML(mapped,niepodpiete){
+  return `<div class="panel allegro-section-panel">
+    <div class="order-section-head">
+      <div>
+        <h2 style="margin-top:0">Panel Allegro</h2>
+        <p class="order-detail-lead">Zamówienia i oferty są rozdzielone na osobne podstrony. Oferty bez mapowania nie są liczone do magazynu, więc najpierw trzeba je podpiąć do produktu sklepu.</p>
+      </div>
+      <div class="diag-actions" style="margin-top:0">
+        <a class="btn" href="#/admin/allegro/zamowienia">📦 Zamówienia Allegro</a>
+        <a class="btn ghost" href="#/admin/allegro/oferty">🏷️ Mapuj oferty</a>
+      </div>
+    </div>
+    <div class="orders-stat-grid">
+      <div class="order-stat-card hot"><span>📦</span><b>${(allegroZamowienia||[]).length}</b><small>zamówień w cache</small></div>
+      <div class="order-stat-card"><span>🏷️</span><b>${(allegroOferty||[]).length}</b><small>ofert w cache</small></div>
+      <div class="order-stat-card money"><span>🔗</span><b>${mapped}</b><small>podpiętych ofert</small></div>
+      <div class="order-stat-card ${niepodpiete?"hot":""}"><span>🧩</span><b>${niepodpiete}</b><small>ofert bez produktu</small></div>
+    </div>
+  </div>`;
+}
+function widokAdminAllegro(sekcja="start"){
   allegroLadujJesliTrzeba();
   const mapped=Object.keys(allegroMapowania||{}).length;
   const niepodpiete=(allegroOferty||[]).filter(o=>!allegroProduktDlaOferty(o.id)).length;
+  const aktywna=["zamowienia","oferty"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
   <div class="panel allegro-hero-panel">
     <div class="orders-hero">
@@ -4576,9 +4758,9 @@ function widokAdminAllegro(){
       <b>Wymagane zmienne Netlify:</b> <code>ALLEGRO_CLIENT_ID</code>, <code>ALLEGRO_CLIENT_SECRET</code>. Opcjonalnie: <code>ALLEGRO_REDIRECT_URI</code>, <code>ALLEGRO_ENV</code>, <code>ALLEGRO_SCOPE</code>.
       <span>Środowisko: ${esc(allegroStan.env||"production")} • ostatnia synchronizacja: ${esc(allegroStan.updated_at||"—")}</span>
     </div>
+    ${allegroSubnavHTML(aktywna)}
   </div>
-  ${allegroZamowieniaTabelaHTML()}
-  ${allegroOfertyTabelaHTML()}
+  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():allegroStartPanelHTML(mapped,niepodpiete)}
   `);
 }
 function alertDostepnosciZamowieniaHTML(z){
@@ -4682,6 +4864,14 @@ function adminZamowienieStatusPanelHTML(z){
     ${STATUSY.map(s=>`<button class="${s===z.status?"active":""}" onclick="zmienStatus(${jsArg(z.nr)},${jsArg(s)})"><span>${s===z.status?"●":"○"}</span>${esc(s)}</button>`).join("")}
   </div>`;
 }
+function adminZamowieniaSubnavHTML(aktywny="lista"){
+  return adminSubnavHTML([
+    {id:"lista",href:"#/admin/zamowienia",label:"📦 Lista sklepu"},
+    {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"},
+    {id:"allegro",href:"#/admin/allegro/zamowienia",label:"🟠 Zamówienia Allegro"},
+    {id:"wysylki",href:"#/admin/wysylki",label:"🚚 Wysyłki i etykiety"}
+  ],aktywny);
+}
 function widokAdminZamowienia(){
   const wszystkie = pobierzZamowienia();
   let zam = wszystkie.slice();
@@ -4703,7 +4893,7 @@ function widokAdminZamowienia(){
       </div>
     </div>
     ${adminZamowieniaStatyHTML(wszystkie,zam)}
-    ${magazynTabelaOperacyjnaHTML({limit:220})}
+    ${adminZamowieniaSubnavHTML("lista")}
     <div class="orders-toolbar">
       <input placeholder="Szukaj: nr, klient, e-mail, telefon, adres, tracking…" value="${esc(szukajZamowien)}" oninput="szukajZamowien=this.value.toLowerCase();renderuj()">
       <select onchange="filtrZamowien=this.value;renderuj()">
@@ -4717,6 +4907,25 @@ function widokAdminZamowienia(){
       ${zam.length ? zam.map(kartaAdminZamowieniaHTML).join("") : `<div class="order-empty"><b>Brak zamówień dla tego widoku.</b><br>Zmień filtr albo wyczyść wyszukiwarkę.</div>`}
     </div>
   </div>`);
+}
+function widokAdminZamowieniaTabela(){
+  return adminSzkielet("/admin/zamowienia", `
+  <div class="panel orders-page">
+    <div class="orders-hero">
+      <div>
+        <span class="order-pro-label">Tabela operacyjna</span>
+        <h1>📑 Zamówienia, Allegro i zlecenia agenta</h1>
+        <p>Jedna tabela do pracy magazynowej: kod, EAN, nazwa i ilość są na początku. Agent pokazuje tylko braki po odjęciu obecnego stanu magazynu.</p>
+      </div>
+      <div class="diag-actions">
+        <a class="btn ghost" href="#/admin/zamowienia">← Lista zamówień</a>
+        <button class="btn ghost" onclick="synchronizujBazeCentralna(true)">🔄 Synchronizuj</button>
+      </div>
+    </div>
+    ${adminZamowieniaSubnavHTML("tabela")}
+  </div>
+  ${magazynTabelaOperacyjnaHTML({limit:420})}
+  `);
 }
 function widokAdminZamowienie(nr){
   const z = pobierzZamowienia().find(x=>x.nr===nr);
@@ -5284,10 +5493,41 @@ function pozycjeZamowieniaMagazyn(z){
   })).filter(p=>p.id!==undefined&&p.id!==null&&p.id!=="");
   return [];
 }
+const STATUSY_ALLEGRO_NIEREZERWUJACE=new Set(["cancelled","canceled","anulowane","sent","wysłane","completed","zakończone","dostarczone","returned","zwrot","refunded"]);
+function statusAllegroRezerwujeMagazyn(z){
+  if(!z) return false;
+  const vals=[z.status,z.fulfillmentStatus,z.paymentStatus].map(v=>String(v||"").toLowerCase()).filter(Boolean);
+  return !vals.some(v=>STATUSY_ALLEGRO_NIEREZERWUJACE.has(v));
+}
+function aktywneZamowieniaAllegro(){
+  return (Array.isArray(allegroZamowienia)?allegroZamowienia:[]).filter(statusAllegroRezerwujeMagazyn);
+}
+function pozycjeAllegroMagazyn(z){
+  const items=Array.isArray(z?.lineItems)?z.lineItems:[];
+  return items.map(it=>{
+    const offerId=String(it.offerId||it.offer?.id||it.id||"").trim();
+    const id=String(allegroProduktIdDlaOferty(offerId)||"").trim();
+    const prod=id?allegroProduktDlaOferty(offerId):null;
+    const ilosc=Math.max(1,Number(it.quantity??it.qty??it.quantityOrdered)||1);
+    return {
+      id,
+      offerId,
+      externalId:String(it.externalId||it.sku||"").trim(),
+      nazwa:prod?.nazwa||it.offerName||it.name||`Oferta Allegro ${offerId}`,
+      sku:prod?.sku||it.externalId||"",
+      ilosc,
+      cena:kwotaNum(it.price?.amount ?? it.price ?? it.unitPrice),
+      wartosc:kwotaNum(it.value ?? (kwotaNum(it.price?.amount ?? it.price ?? it.unitPrice)*ilosc))
+    };
+  });
+}
 function rezerwacjeMagazynowe(){
   const mapa={};
   pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).forEach(z=>{
     pozycjeZamowieniaMagazyn(z).forEach(p=>{ mapa[p.id]=(mapa[p.id]||0)+p.ilosc; });
+  });
+  aktywneZamowieniaAllegro().forEach(z=>{
+    pozycjeAllegroMagazyn(z).forEach(p=>{ if(p.id) mapa[p.id]=(mapa[p.id]||0)+p.ilosc; });
   });
   return mapa;
 }
@@ -5295,6 +5535,9 @@ function sprzedazMagazynowa(dni=30){
   const mapa={}, od=Date.now()-dni*86400000;
   pobierzZamowienia().filter(z=>String(z.status||"").toLowerCase()!=="anulowane" && (Number(z.ts)||0)>=od).forEach(z=>{
     pozycjeZamowieniaMagazyn(z).forEach(p=>{ mapa[p.id]=(mapa[p.id]||0)+p.ilosc; });
+  });
+  (Array.isArray(allegroZamowienia)?allegroZamowienia:[]).filter(z=>statusAllegroRezerwujeMagazyn(z) && (new Date(z.createdAt||z.updatedAt||0).getTime()||0)>=od).forEach(z=>{
+    pozycjeAllegroMagazyn(z).forEach(p=>{ if(p.id) mapa[p.id]=(mapa[p.id]||0)+p.ilosc; });
   });
   return mapa;
 }
