@@ -2019,7 +2019,7 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
     stock: { available: Math.max(0, Number(opt.stock ?? p.stan ?? 1) || 1) },
     publication: { status: opt.publishNow ? 'ACTIVE' : 'INACTIVE' },
     external: externalId ? { id: externalId } : undefined,
-    images: images.map((url) => ({ url: tekst(url, 1000) })),
+    images: images.map((url) => tekst(url, 1000)),
     description: { sections: Array.isArray(opt.descriptionSections) && opt.descriptionSections.length ? opt.descriptionSections : allegroSekcjeOpisu(p, opt.shortDescription || allegroOpisKrotki(p, [])) },
   };
   const sc = opt.salesConditions || {};
