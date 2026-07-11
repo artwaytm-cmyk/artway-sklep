@@ -1127,6 +1127,61 @@ function allegroKwotaText(raw) {
   if (amount === '' || amount === null || amount === undefined) return '';
   return `${String(amount).replace('.', ',')} ${currency}`;
 }
+function allegroParametry(o) {
+  const params = [];
+  if (Array.isArray(o?.parameters)) params.push(...o.parameters);
+  const ps = Array.isArray(o?.productSet) ? o.productSet : [];
+  for (const item of ps) {
+    if (Array.isArray(item?.product?.parameters)) params.push(...item.product.parameters);
+    if (Array.isArray(item?.parameters)) params.push(...item.parameters);
+  }
+  return params.filter(Boolean);
+}
+function allegroWartoscParametru(o, nazwy = []) {
+  const szukane = nazwy.map((n) => String(n || '').toLowerCase());
+  for (const p of allegroParametry(o)) {
+    const name = String(p?.name || p?.id || '').toLowerCase();
+    if (!szukane.some((n) => name === n || name.includes(n))) continue;
+    const vals = Array.isArray(p.values) ? p.values : (Array.isArray(p.valuesLabels) ? p.valuesLabels : []);
+    const v = vals.length ? vals.join(', ') : (p.value || p.rangeValue?.from || '');
+    if (v !== undefined && v !== null && String(v).trim()) return tekst(v, 300).trim();
+  }
+  return '';
+}
+function allegroOpisTekst(desc) {
+  const sections = Array.isArray(desc?.sections) ? desc.sections : [];
+  const parts = [];
+  for (const s of sections) {
+    for (const item of (Array.isArray(s?.items) ? s.items : [])) {
+      if (item?.type === 'TEXT' && item.content) parts.push(String(item.content).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+    }
+  }
+  return tekst(parts.join('\n\n'), 5000);
+}
+function allegroZdjecia(o) {
+  const imgs = [];
+  if (Array.isArray(o?.images)) imgs.push(...o.images);
+  if (Array.isArray(o?.productSet)) {
+    for (const item of o.productSet) {
+      if (Array.isArray(item?.product?.images)) imgs.push(...item.product.images);
+    }
+  }
+  return [...new Set(imgs.map((x) => tekst(x?.url || x, 1000).trim()).filter(Boolean))].slice(0, 16);
+}
+function allegroZamowienieDoObslugi(z) {
+  const vals = [
+    z?.status,
+    z?.fulfillmentStatus,
+    z?.deliveryStatus,
+    z?.shipmentStatus,
+    z?.statusDetails,
+  ].map((x) => String(x || '').trim().toUpperCase()).filter(Boolean);
+  const joined = vals.join(' ');
+  if (!vals.length) return true;
+  if (/\b(CANCELLED|CANCELED|ANUL|SENT|SHIPPED|DELIVERED|DONE|COMPLETED|REALIZED|ZREALIZ|RETURNED)\b/.test(joined)) return false;
+  if (/\bREADY_FOR_PROCESSING|NEW|PROCESSING|READY_FOR_SHIPMENT|BOUGHT|FILLED_IN\b/.test(joined)) return true;
+  return true;
+}
 function allegroNormalizujZamowienie(z) {
   const buyer = z?.buyer || {};
   const delivery = z?.delivery || {};
@@ -1161,6 +1216,8 @@ function allegroNormalizujZamowienie(z) {
     deliveryPoint: tekst(pickup.id || pickup.name || '', 160),
     deliveryAddress: tekst([address.street, address.zipCode, address.city].filter(Boolean).join(', '), 500),
     paymentStatus: tekst(payment.type || payment.provider || payment.finishedAt || '', 160),
+    deliveryStatus: tekst(delivery.status || z.deliveryStatus || '', 80),
+    shipmentStatus: tekst(z.shipmentSummary?.status || z.shipmentStatus || '', 80),
     total: allegroKwotaText(z.summary?.totalToPay || z.summary?.totalPrice || z.totalToPay),
     invoiceRequired: !!invoice.required,
     lineItems,
@@ -1170,6 +1227,10 @@ function allegroNormalizujZamowienie(z) {
 function allegroNormalizujOferte(o) {
   const price = o?.sellingMode?.price || o?.price || {};
   const stock = o?.stock || {};
+  const images = allegroZdjecia(o);
+  const ean = allegroWartoscParametru(o, ['ean', 'gtin', 'kod ean']);
+  const kodProducenta = allegroWartoscParametru(o, ['kod producenta', 'mpn', 'symbol']);
+  const marka = allegroWartoscParametru(o, ['marka', 'producent', 'brand']);
   return {
     id: tekst(o.id, 100),
     name: tekst(o.name, 400),
@@ -1181,6 +1242,26 @@ function allegroNormalizujOferte(o) {
     stockSold: stock.sold ?? '',
     categoryId: tekst(o.category?.id || o.categoryId || '', 80),
     productId: tekst(o.product?.id || o.productSet?.[0]?.product?.id || '', 120),
+    ean: tekst(ean, 80),
+    gtin: tekst(ean, 80),
+    manufacturerCode: tekst(kodProducenta, 120),
+    producerCode: tekst(kodProducenta, 120),
+    brand: tekst(marka, 160),
+    images,
+    mainImage: images[0] || '',
+    parameters: allegroParametry(o).map((p) => ({
+      id: tekst(p.id, 80),
+      name: tekst(p.name, 160),
+      values: Array.isArray(p.values) ? p.values.map((v) => tekst(v, 300)) : [],
+      valuesIds: Array.isArray(p.valuesIds) ? p.valuesIds.map((v) => tekst(v, 120)) : [],
+    })).slice(0, 120),
+    descriptionText: allegroOpisTekst(o.description),
+    productSet: Array.isArray(o.productSet) ? o.productSet.slice(0, 5) : [],
+    delivery: o.delivery || null,
+    payments: o.payments || null,
+    afterSalesServices: o.afterSalesServices || null,
+    publication: o.publication || null,
+    location: o.location || null,
     updatedAt: tekst(o.updatedAt || o.createdAt || '', 80),
     rawUpdatedAt: new Date().toISOString(),
   };
@@ -1188,6 +1269,133 @@ function allegroNormalizujOferte(o) {
 function allegroMapowaniaItems(raw) {
   if (!raw || typeof raw !== 'object') return {};
   return raw.items && typeof raw.items === 'object' ? raw.items : raw;
+}
+async function allegroPobierzSzczegolyOfert(req, source, limit) {
+  const out = [];
+  const base = source.slice(0, limit);
+  const batchSize = 8;
+  for (let i = 0; i < base.length; i += batchSize) {
+    const batch = base.slice(i, i + batchSize);
+    const details = await Promise.all(batch.map(async (o) => {
+      const id = tekst(o.id, 100);
+      if (!id) return o;
+      try {
+        return await allegroWywolaj(req, `/sale/offers/${encodeURIComponent(id)}`);
+      } catch (e) {
+        return o;
+      }
+    }));
+    out.push(...details);
+  }
+  return out;
+}
+function htmlDecode(s = '') {
+  const mapa = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' };
+  return String(s || '').replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (m) => mapa[m] || m).replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n) || 32));
+}
+function stripHtml(s = '') {
+  return htmlDecode(String(s || '').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+}
+function metaHtml(html, name) {
+  const n = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`<meta[^>]+(?:property|name)=["']${n}["'][^>]+content=["']([^"']+)["']`, 'i');
+  return htmlDecode((html.match(re) || [])[1] || '');
+}
+function absoluteUrl(base, u) {
+  try { return new URL(u, base).toString(); } catch { return ''; }
+}
+function znajdzPoEtykiecie(text, label) {
+  const re = new RegExp(`${label}\\s*[:\\n ]+([^\\n]{1,180})`, 'i');
+  return tekst((text.match(re) || [])[1] || '', 180).trim();
+}
+function parsujProduktZHtml(url, html) {
+  const text = stripHtml(html);
+  const title = metaHtml(html, 'og:title') || tekst((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1], 300);
+  const descMeta = metaHtml(html, 'description') || metaHtml(html, 'og:description');
+  const priceRaw = (text.match(/(\d{1,5}[,.]\d{2})\s*zł/i) || [])[1] || '';
+  const cena = priceRaw ? Number(priceRaw.replace(',', '.')) : 0;
+  const imageSet = new Set();
+  [metaHtml(html, 'og:image'), ...Array.from(html.matchAll(/<img[^>]+(?:src|data-src|data-lazy)=["']([^"']+)["']/gi)).map((m) => m[1])]
+    .map((u) => absoluteUrl(url, u))
+    .filter(Boolean)
+    .forEach((u) => imageSet.add(u));
+  const marka = znajdzPoEtykiecie(text, 'Marka') || 'Alexander';
+  const symbol = znajdzPoEtykiecie(text, 'Symbol');
+  const kodProducentaRaw = znajdzPoEtykiecie(text, 'Kod producenta');
+  const ean = /\b\d{8,14}\b/.test(kodProducentaRaw) ? (kodProducentaRaw.match(/\b\d{8,14}\b/) || [])[0] : '';
+  const dostepny = /produkt dostępny|dostępny/i.test(text) && !/powiadom o dostępności|niedostępny|brak produktu/i.test(text);
+  const opisStart = text.indexOf(String(title || '').trim());
+  const opis = descMeta || (opisStart >= 0 ? tekst(text.slice(opisStart, opisStart + 1800), 1800) : '');
+  const parametry = {
+    symbol,
+    kodProducenta: kodProducentaRaw,
+    wiek: znajdzPoEtykiecie(text, 'Wiek'),
+    liczbaGraczy: znajdzPoEtykiecie(text, 'Liczba graczy'),
+    wymiaryOpakowania: znajdzPoEtykiecie(text, 'Wymiary opakowania \\(dł/sz/wys\\)') || znajdzPoEtykiecie(text, 'Wymiary opakowania'),
+    wagaOpakowania: znajdzPoEtykiecie(text, 'Waga opakowania'),
+  };
+  return {
+    ok: true,
+    url,
+    product: {
+      nazwa: stripHtml(title).replace(/\s+\|.*$/, ''),
+      opis,
+      cena: cena || '',
+      zdjecie: [...imageSet][0] || '',
+      zdjecia: [...imageSet].slice(1, 16),
+      marka,
+      gtin: ean,
+      ean,
+      mpn: symbol || kodProducentaRaw,
+      kodProducenta: symbol || kodProducentaRaw,
+      externalId: symbol || '',
+      producentUrl: url,
+      sourceUrl: url,
+      dostepnoscProducenta: dostepny ? 'dostępny' : (/niedostępny|powiadom o dostępności/i.test(text) ? 'niedostępny' : 'do sprawdzenia'),
+      parametryProducenta: parametry,
+    },
+    availability: { available: dostepny, text: dostepny ? 'Produkt dostępny' : 'Do sprawdzenia' },
+  };
+}
+function allegroDraftZProduktu(product = {}, opt = {}) {
+  const p = product || {};
+  const categoryId = tekst(opt.categoryId || p.allegroCategoryId || p.categoryId || '', 80).trim();
+  const images = [p.zdjecie, ...(Array.isArray(p.zdjecia) ? p.zdjecia : [])].filter(Boolean).slice(0, 16);
+  const externalId = tekst(p.externalId || p.sku || p.kodProducenta || p.mpn || p.id || '', 120).trim();
+  const parameters = [];
+  if (p.gtin || p.ean) parameters.push({ name: 'EAN', values: [tekst(p.gtin || p.ean, 80)] });
+  if (p.kodProducenta || p.mpn) parameters.push({ name: 'Kod producenta', values: [tekst(p.kodProducenta || p.mpn, 120)] });
+  if (p.marka) parameters.push({ name: 'Marka', values: [tekst(p.marka, 120)] });
+  const payload = {
+    name: tekst(p.nazwa || p.name, 75).trim(),
+    category: categoryId ? { id: categoryId } : undefined,
+    productSet: [{
+      product: {
+        id: tekst(p.allegroProductId || '', 120).trim() || undefined,
+        name: tekst(p.nazwa || p.name, 75).trim(),
+        category: categoryId ? { id: categoryId } : undefined,
+        parameters,
+      },
+    }],
+    sellingMode: {
+      format: 'BUY_NOW',
+      price: { amount: String(Number(p.cena || p.price || 0).toFixed(2)), currency: 'PLN' },
+    },
+    stock: { available: Math.max(0, Number(opt.stock ?? p.stan ?? 1) || 1) },
+    publication: { status: opt.publishNow ? 'ACTIVE' : 'INACTIVE' },
+    external: externalId ? { id: externalId } : undefined,
+    images: images.map((url) => ({ url: tekst(url, 1000) })),
+    description: {
+      sections: [{ items: [{ type: 'TEXT', content: `<p>${tekst(p.opis || '', 8000).replace(/\n/g, '<br>')}</p>` }] }],
+    },
+  };
+  const missing = [];
+  if (!payload.name) missing.push('nazwa');
+  if (!categoryId) missing.push('allegroCategoryId');
+  if (!Number(p.cena || p.price || 0)) missing.push('cena');
+  if (!images.length) missing.push('zdjęcia');
+  if (!(p.gtin || p.ean)) missing.push('EAN/GTIN');
+  return { payload: JSON.parse(JSON.stringify(payload)), missing };
 }
 
 // ─── INPOST ShipX (przesyłki, etykiety, tracking) + Geowidget ───
@@ -2146,12 +2354,32 @@ export default async (req) => {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
       const limit = Math.min(100, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 100)));
-      const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit, offset: 0 } });
-      const source = Array.isArray(dane.checkoutForms) ? dane.checkoutForms : (Array.isArray(dane.items) ? dane.items : []);
-      const items = source.map(allegroNormalizujZamowienie).filter((x) => x.id);
-      const rec = { items, updated_at: new Date().toISOString(), count: items.length };
+      const statusy = ['READY_FOR_PROCESSING', 'FILLED_IN', 'BOUGHT'];
+      const pobrane = [];
+      for (const status of statusy) {
+        if (pobrane.length >= limit) break;
+        try {
+          const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit: Math.min(100, limit), offset: 0, status } });
+          const source = Array.isArray(dane.checkoutForms) ? dane.checkoutForms : (Array.isArray(dane.items) ? dane.items : []);
+          pobrane.push(...source);
+        } catch (e) {
+          if (status === statusy[0]) {
+            const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit, offset: 0 } });
+            const source = Array.isArray(dane.checkoutForms) ? dane.checkoutForms : (Array.isArray(dane.items) ? dane.items : []);
+            pobrane.push(...source);
+            break;
+          }
+        }
+      }
+      const seen = new Set();
+      const items = pobrane
+        .map(allegroNormalizujZamowienie)
+        .filter((x) => x.id && !seen.has(x.id) && seen.add(x.id))
+        .filter(allegroZamowienieDoObslugi)
+        .slice(0, limit);
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, filtered: pobrane.length - items.length, mode: 'unfulfilled_only' };
       await zapisz('allegro_orders', rec);
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, updated_at: rec.updated_at });
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, updated_at: rec.updated_at, fetched: rec.fetched, filtered: rec.filtered, mode: rec.mode });
     }
 
     // ─── ALLEGRO: synchronizacja ofert (admin) ───
@@ -2160,6 +2388,7 @@ export default async (req) => {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
       const limit = Math.min(100, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 100)));
+      const details = body.details !== false && url.searchParams.get('details') !== '0';
       let dane;
       try {
         dane = await allegroWywolaj(req, '/sale/offers', { parameters: { limit, offset: 0, 'publication.status': 'ACTIVE' } });
@@ -2167,11 +2396,43 @@ export default async (req) => {
         dane = await allegroWywolaj(req, '/sale/offers', { parameters: { limit, offset: 0 } });
       }
       const source = Array.isArray(dane.offers) ? dane.offers : (Array.isArray(dane.items) ? dane.items : []);
-      const items = source.map(allegroNormalizujOferte).filter((x) => x.id);
-      const rec = { items, updated_at: new Date().toISOString(), count: items.length };
+      const pelne = details ? await allegroPobierzSzczegolyOfert(req, source, limit) : source;
+      const items = pelne.map(allegroNormalizujOferte).filter((x) => x.id);
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length, details };
       await zapisz('allegro_offers', rec);
       const mappings = await czytaj('allegro_mappings', { items: {} });
       return odpowiedz({ ok: true, allegro: await allegroStatus(req), offers: items, mappings: allegroMapowaniaItems(mappings), updated_at: rec.updated_at });
+    }
+
+    // ─── ALLEGRO: szkic i wystawienie produktu sklepu jako oferty ───
+    if (action === 'allegro-offer-draft') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const draft = allegroDraftZProduktu(body.product || {}, body.options || {});
+      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: draft.missing.length === 0 });
+    }
+
+    if (action === 'allegro-create-product-offer') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const draft = body.draft && typeof body.draft === 'object' ? body.draft : allegroDraftZProduktu(body.product || {}, body.options || {}).payload;
+      const created = await allegroWywolaj(req, '/sale/product-offers', { method: 'POST', bodyObj: draft });
+      return odpowiedz({ ok: true, offer: created, allegro: await allegroStatus(req) }, 201);
+    }
+
+    // ─── PRODUCENT: pobranie danych z URL produktu (admin) ───
+    if (action === 'product-url-inspect') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const target = tekst(body.url, 1000).trim();
+      if (!/^https?:\/\//i.test(target)) return odpowiedz({ ok: false, error: 'Podaj pełny adres URL produktu' }, 422);
+      const r = await fetch(target, { headers: { 'user-agent': 'Artway-TM product importer/1.0 (+https://artwaytm.pl)', 'accept': 'text/html,application/xhtml+xml' } });
+      const html = await r.text();
+      if (!r.ok || !html) return odpowiedz({ ok: false, error: `Nie udało się pobrać strony producenta (${r.status})` }, 502);
+      return odpowiedz(parsujProduktZHtml(target, html));
     }
 
     // ─── ALLEGRO: mapowanie oferty do produktu sklepu (admin) ───

@@ -251,7 +251,7 @@ let allegroZamowienia = wczytajLS("artway_allegro_zamowienia_cache", []);
 let allegroOferty = wczytajLS("artway_allegro_oferty_cache", []);
 let allegroMapowania = wczytajLS("artway_allegro_mapowania_cache", {});
 let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null};
-let szukajAllegroZamowien="", szukajAllegroOfert="", filtrAllegroOfert="wszystkie";
+let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", filtrAllegroOfert="wszystkie";
 
 /* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
    Ustawienia sklepu, zamówienia i klienci są zapisywane na serwerze, więc są
@@ -1487,6 +1487,7 @@ function renderuj(){
       else if(t==="/admin/allegro") w.innerHTML = widokAdminAllegro();
       else if(t==="/admin/allegro/zamowienia") w.innerHTML = widokAdminAllegro("zamowienia");
       else if(t==="/admin/allegro/oferty") w.innerHTML = widokAdminAllegro("oferty");
+      else if(t==="/admin/allegro/wystawianie") w.innerHTML = widokAdminAllegro("wystawianie");
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
       else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn();
       else if(t==="/admin/agent-ai") w.innerHTML = widokAdminAgentAI();
@@ -4669,19 +4670,19 @@ async function allegroPolacz(){
 }
 async function allegroSynchronizujZamowienia(){
   try{
-    toast("Pobieram zamówienia Allegro…");
+    toast("Pobieram tylko niewysłane / niezrealizowane zamówienia Allegro…");
     const d=await chmura("allegro-sync-orders",{method:"POST",body:{limit:100},timeout:30000});
     allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
     allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;
     allegroZapiszCache();
-    toast(`Pobrano zamówienia Allegro: ${allegroZamowienia.length}`);
+    toast(`Pobrano do obsługi: ${allegroZamowienia.length}${d.filtered?` • pominięto wysłane/zrealizowane: ${d.filtered}`:""}`);
     renderuj();
   }catch(e){ toast("⚠️ Allegro zamówienia: "+(e.message||e)); }
 }
 async function allegroSynchronizujOferty(){
   try{
     toast("Pobieram oferty Allegro…");
-    const d=await chmura("allegro-sync-offers",{method:"POST",body:{limit:100},timeout:30000});
+    const d=await chmura("allegro-sync-offers",{method:"POST",body:{limit:100,details:true},timeout:60000});
     allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
     allegroOferty=Array.isArray(d.offers)?d.offers:allegroOferty;
     allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:allegroMapowania;
@@ -4718,13 +4719,92 @@ async function allegroDodajProduktZOferty(offerId){
     kolor:KOLORY[id%KOLORY.length],
     sku:String(o.externalId||o.id||"").trim(),
     externalId:String(o.externalId||o.id||"").trim(),
-    allegroOfferId:String(o.id||"").trim()
+    gtin:String(o.gtin||o.ean||"").trim(),
+    ean:String(o.ean||o.gtin||"").trim(),
+    mpn:String(o.manufacturerCode||o.producerCode||"").trim(),
+    kodProducenta:String(o.manufacturerCode||o.producerCode||"").trim(),
+    marka:String(o.brand||"").trim(),
+    zdjecie:o.mainImage||((o.images||[])[0])||"",
+    zdjecia:(o.images||[]).slice(1,16),
+    allegroOfferId:String(o.id||"").trim(),
+    allegroCategoryId:String(o.categoryId||"").trim(),
+    allegroProductId:String(o.productId||"").trim()
   };
+  if(o.descriptionText) p.opis=o.descriptionText;
   produktyDodane.push(p);
   zapiszLS("artway_produkty_dodane",produktyDodane);
   zbudujProdukty();
   await allegroMapujOferte(o.id,id);
   toast("Produkt utworzony z Allegro i podpięty");
+}
+function produktDlaAllegroZFormularza(form,id,poprzedni={}){
+  const fd=new FormData(form);
+  const dane=daneProduktuZFormularza(fd,id,poprzedni);
+  if(!dane){ toast("⚠️ Uzupełnij poprawną nazwę i cenę produktu"); return null; }
+  return dane;
+}
+async function allegroPrzygotujSzkicProduktu(id){
+  const form=document.querySelector("form.product-editor-form");
+  const produkt=id?produktDlaAllegroZFormularza(form,id,pobierzProduktAdmin(id)||{}):null;
+  if(!produkt) return;
+  try{
+    const d=await chmura("allegro-offer-draft",{method:"POST",body:{product:produkt,options:{stock:stanyProduktow[id]??1}},timeout:16000});
+    const brak=(d.missing||[]).join(", ")||"brak";
+    const msg=d.ready?"Szkic jest gotowy technicznie do wysłania do Allegro.":"Szkic wymaga uzupełnienia: "+brak;
+    toast("🟠 Allegro: "+msg);
+    const box=document.getElementById("allegroDraftPreview");
+    if(box) box.innerHTML=`<div class="backend-note"><b>${esc(msg)}</b><br>Braki: ${esc(brak)}<details><summary>Podgląd JSON wysyłany do Allegro</summary><pre style="white-space:pre-wrap;font-size:.75rem">${esc(JSON.stringify(d.draft,null,2))}</pre></details></div>`;
+  }catch(e){ toast("⚠️ Szkic Allegro: "+(e.message||e)); }
+}
+async function allegroWystawProdukt(id){
+  const form=document.querySelector("form.product-editor-form");
+  const produkt=id?produktDlaAllegroZFormularza(form,id,pobierzProduktAdmin(id)||{}):null;
+  if(!produkt) return;
+  if(!confirm("Utworzyć w Allegro NIEAKTYWNĄ ofertę/szkic z tego produktu? Przed aktywacją sprawdź kategorię, parametry i cennik w Allegro.")) return;
+  try{
+    const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:produkt,options:{stock:stanyProduktow[id]??1,publishNow:false}},timeout:30000});
+    toast("🟠 Utworzono szkic/ofertę Allegro");
+    if(d.offer?.id){
+      produktyEdytowane[id]={...(produktyEdytowane[id]||{}),allegroOfferId:String(d.offer.id)};
+      zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+      zbudujProdukty();
+      renderuj();
+    }
+  }catch(e){ toast("⚠️ Wystawianie Allegro: "+(e.message||e)); }
+}
+function uzupelnijPoleFormularza(form,nazwa,wartosc,overwrite){
+  if(wartosc===undefined||wartosc===null||wartosc==="") return;
+  const el=form.elements[nazwa];
+  if(!el) return;
+  if(overwrite||!String(el.value||"").trim()) el.value=wartosc;
+}
+async function pobierzDaneProduktuZUrl(btn){
+  const form=btn.closest("form");
+  const url=String(form?.elements?.producentUrl?.value||"").trim();
+  if(!url){ toast("⚠️ Wklej adres strony produktu producenta"); return; }
+  const overwrite=confirm("Pobrać dane z tej strony i uzupełnić brakujące pola? OK = nadpisz także już wpisane pola, Anuluj = uzupełnij tylko puste.");
+  try{
+    btn.disabled=true;
+    toast("Pobieram dane produktu ze strony producenta…");
+    const d=await chmura("product-url-inspect",{method:"POST",body:{url},timeout:30000});
+    const p=d.product||{};
+    uzupelnijPoleFormularza(form,"nazwa",p.nazwa,overwrite);
+    uzupelnijPoleFormularza(form,"opis",p.opis,overwrite);
+    uzupelnijPoleFormularza(form,"cena",p.cena,overwrite);
+    uzupelnijPoleFormularza(form,"zdjecie",p.zdjecie,overwrite);
+    (p.zdjecia||[]).slice(0,15).forEach((z,i)=>uzupelnijPoleFormularza(form,"zdjecie"+(i+2),z,overwrite));
+    uzupelnijPoleFormularza(form,"gtin",p.gtin||p.ean,overwrite);
+    uzupelnijPoleFormularza(form,"mpn",p.mpn||p.kodProducenta,overwrite);
+    uzupelnijPoleFormularza(form,"kodProducenta",p.kodProducenta||p.mpn,overwrite);
+    uzupelnijPoleFormularza(form,"externalId",p.externalId,overwrite);
+    uzupelnijPoleFormularza(form,"marka",p.marka,overwrite);
+    uzupelnijPoleFormularza(form,"dostepnoscProducenta",p.dostepnoscProducenta,overwrite);
+    uzupelnijPoleFormularza(form,"sourceUrl",p.sourceUrl||url,overwrite);
+    const pg=document.getElementById("podgladZdjecia");
+    if(pg&&form.elements.zdjecie?.value) pg.innerHTML=`<img src="${esc(form.elements.zdjecie.value)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`;
+    toast(`Dane producenta pobrane: ${p.dostepnoscProducenta||"do sprawdzenia"}`);
+  }catch(e){ toast("⚠️ Pobieranie produktu: "+(e.message||e)); }
+  finally{ btn.disabled=false; }
 }
 function allegroProduktSelectHTML(offerId){
   const pid=String(allegroProduktIdDlaOferty(offerId)||"");
@@ -4781,7 +4861,7 @@ function allegroOfertyTabelaHTML(){
     const mapped=!!prod;
     if(filtrAllegroOfert==="podpiete"&&!mapped) return false;
     if(filtrAllegroOfert==="niepodpiete"&&mapped) return false;
-    const txt=`${o.id||""} ${o.externalId||""} ${o.name||""} ${o.status||""} ${prod?.nazwa||""} ${prod?.sku||""}`.toLowerCase();
+    const txt=`${o.id||""} ${o.externalId||""} ${o.ean||""} ${o.gtin||""} ${o.manufacturerCode||""} ${o.producerCode||""} ${o.brand||""} ${o.name||""} ${o.status||""} ${prod?.nazwa||""} ${prod?.sku||""}`.toLowerCase();
     return !q||txt.includes(q);
   }).slice(0,250);
     return `<div class="panel allegro-section-panel">
@@ -4793,7 +4873,7 @@ function allegroOfertyTabelaHTML(){
       </div>
     </div>
     <div class="orders-toolbar allegro-toolbar">
-      <input placeholder="Szukaj: oferta, nazwa, external ID, produkt…" value="${esc(szukajAllegroOfert)}" oninput="szukajAllegroOfert=this.value.toLowerCase();renderuj()">
+      <input placeholder="Szukaj: oferta, nazwa, EAN, kod producenta, external ID, produkt…" value="${esc(szukajAllegroOfert)}" oninput="szukajAllegroOfert=this.value.toLowerCase();renderuj()">
       <select onchange="filtrAllegroOfert=this.value;renderuj()">
         <option value="wszystkie" ${filtrAllegroOfert==="wszystkie"?"selected":""}>Wszystkie oferty</option>
         <option value="podpiete" ${filtrAllegroOfert==="podpiete"?"selected":""}>Tylko podpięte</option>
@@ -4801,33 +4881,107 @@ function allegroOfertyTabelaHTML(){
       </select>
     </div>
     <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable allegro-offers-table">
-      <tr><th>Kod oferty</th><th>Nazwa Allegro</th><th>Cena</th><th>Stan Allegro</th><th>Status</th><th>Produkt sklepu</th><th>Akcje</th></tr>
+      <tr><th>Kod oferty</th><th>Nazwa Allegro</th><th>EAN / kod prod.</th><th>Cena</th><th>Stan Allegro</th><th>Status</th><th>Zdjęcia</th><th>Produkt sklepu</th><th>Akcje</th></tr>
       ${rows.map(o=>{
         const prod=allegroProduktDlaOferty(o.id);
         return `<tr class="${prod?"":"row-alert"}">
           <td><b>${esc(allegroKodOferty(o)||"—")}</b><br><small>ID: ${esc(o.id||"—")}</small></td>
-          <td><b>${esc(o.name||"—")}</b><br><small>${esc(o.categoryId?`Kategoria Allegro: ${o.categoryId}`:"")}</small></td>
+          <td><b>${esc(o.name||"—")}</b><br><small>${esc(o.categoryId?`Kategoria Allegro: ${o.categoryId}`:"")}${o.brand?` • Marka: ${esc(o.brand)}`:""}</small></td>
+          <td><b>${esc(o.ean||o.gtin||"—")}</b><br><small>${esc(o.manufacturerCode||o.producerCode||o.externalId||"—")}</small></td>
           <td>${esc(o.priceText||"—")}</td>
           <td>${esc(o.stockAvailable??"—")}<br><small>sprzedano: ${esc(o.stockSold??"—")}</small></td>
           <td><span class="lvl lvl-info">${esc(o.status||"—")}</span></td>
+          <td>${o.mainImage?`<img src="${esc(o.mainImage)}" alt="" style="width:54px;height:54px;object-fit:cover;border-radius:9px;border:1px solid var(--line)">`:`<span style="color:var(--muted2)">—</span>`}<br><small>${(o.images||[]).length||0} zdj.</small></td>
           <td>${allegroProduktSelectHTML(o.id)}${prod?`<small class="allegro-linked-note">Podpięto: ${esc(prod.nazwa)}</small>`:""}</td>
           <td><div class="warehouse-worktable-actions">
             <button class="btn ghost" onclick="allegroDodajProduktZOferty(${jsArg(o.id)})">➕ Utwórz produkt</button>
             <button class="btn ghost" onclick="window.open('https://allegro.pl/oferta/${encodeURIComponent(o.id)}','_blank','noopener')">Otwórz</button>
           </div></td>
         </tr>`;
-      }).join("") || `<tr><td colspan="7">Brak ofert Allegro. Połącz konto i kliknij synchronizację.</td></tr>`}
+      }).join("") || `<tr><td colspan="9">Brak ofert Allegro. Połącz konto i kliknij synchronizację.</td></tr>`}
+    </table></div>
+  </div>`;
+}
+function allegroBrakiProduktuDoWystawienia(p){
+  const braki=[];
+  if(!p.nazwa) braki.push("nazwa");
+  if(!Number(p.cena)) braki.push("cena");
+  if(!(p.gtin||p.ean)) braki.push("EAN");
+  if(!(p.kodProducenta||p.mpn||p.externalId||p.sku)) braki.push("kod producenta/SKU");
+  if(!(p.zdjecie||(p.zdjecia||[]).length)) braki.push("zdjęcie");
+  if(!p.allegroCategoryId) braki.push("ID kategorii Allegro");
+  return braki;
+}
+async function allegroPrzygotujSzkicProduktZListy(id){
+  const p=pobierzProduktAdmin(Number(id));
+  if(!p){ toast("Nie znaleziono produktu"); return; }
+  try{
+    const d=await chmura("allegro-offer-draft",{method:"POST",body:{product:p,options:{stock:stanyProduktow[p.id]??1}},timeout:16000});
+    toast(d.ready?"🟠 Szkic Allegro gotowy technicznie":"🟠 Braki: "+((d.missing||[]).join(", ")||"brak"));
+  }catch(e){ toast("⚠️ Szkic Allegro: "+(e.message||e)); }
+}
+async function allegroWystawProduktZListy(id){
+  const p=pobierzProduktAdmin(Number(id));
+  if(!p){ toast("Nie znaleziono produktu"); return; }
+  const braki=allegroBrakiProduktuDoWystawienia(p);
+  if(braki.length && !confirm(`Produkt ma braki: ${braki.join(", ")}. Mimo to spróbować utworzyć nieaktywny szkic/ofertę Allegro?`)) return;
+  if(!confirm("Utworzyć w Allegro NIEAKTYWNĄ ofertę/szkic z tego produktu?")) return;
+  try{
+    const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock:stanyProduktow[p.id]??1,publishNow:false}},timeout:30000});
+    toast("🟠 Utworzono szkic/ofertę Allegro");
+    if(d.offer?.id){
+      produktyEdytowane[p.id]={...(produktyEdytowane[p.id]||{}),allegroOfferId:String(d.offer.id)};
+      zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+      zbudujProdukty();
+      renderuj();
+    }
+  }catch(e){ toast("⚠️ Wystawianie Allegro: "+(e.message||e)); }
+}
+function allegroWystawianiePanelHTML(){
+  const q=String(szukajAllegroWystawiania||"").toLowerCase().trim();
+  const rows=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{
+    const txt=`${p.id||""} ${p.nazwa||""} ${p.sku||""} ${p.externalId||""} ${p.gtin||""} ${p.ean||""} ${p.kodProducenta||""} ${p.mpn||""} ${p.allegroOfferId||""}`.toLowerCase();
+    return !q||txt.includes(q);
+  }).slice(0,250);
+  return `<div class="panel allegro-section-panel">
+    <div class="order-section-head">
+      <div><h2 style="margin-top:0">🟠 Wystawianie produktów na Allegro</h2><p class="order-detail-lead">Tu przygotujesz szkic oferty Allegro z produktu sklepu. Najbezpieczniej twórz ofertę jako nieaktywną, sprawdź parametry w Allegro i dopiero ją aktywuj.</p></div>
+      <a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
+    </div>
+    <div class="backend-note">Do sprawnego wystawienia potrzebne są: nazwa, cena, EAN/GTIN, kod producenta/SKU, zdjęcie i ID kategorii Allegro. Dane producenta możesz pobrać w edytorze produktu przez URL.</div>
+    <div class="orders-toolbar allegro-toolbar">
+      <input placeholder="Szukaj: produkt, SKU, EAN, kod producenta, oferta Allegro…" value="${esc(szukajAllegroWystawiania)}" oninput="szukajAllegroWystawiania=this.value.toLowerCase();renderuj()">
+      ${szukajAllegroWystawiania?`<button class="btn ghost" onclick="szukajAllegroWystawiania='';renderuj()">Wyczyść</button>`:""}
+    </div>
+    <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable">
+      <tr><th>Produkt</th><th>EAN / kod prod.</th><th>Dane Allegro</th><th>Zdjęcia</th><th>Braki</th><th>Akcje</th></tr>
+      ${rows.map(p=>{
+        const braki=allegroBrakiProduktuDoWystawienia(p);
+        return `<tr class="${braki.length?"row-alert":""}">
+          <td><b>${esc(p.nazwa)}</b><br><small>ID: ${esc(p.id)}${p.sku?` • SKU: ${esc(p.sku)}`:""}</small></td>
+          <td><b>${esc(p.gtin||p.ean||"—")}</b><br><small>${esc(p.kodProducenta||p.mpn||p.externalId||"—")}</small></td>
+          <td>Kategoria: <b>${esc(p.allegroCategoryId||"—")}</b><br><small>Produkt Allegro: ${esc(p.allegroProductId||"—")} • Oferta: ${esc(p.allegroOfferId||"—")}</small></td>
+          <td>${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" style="width:54px;height:54px;object-fit:cover;border-radius:9px;border:1px solid var(--line)">`:"—"}<br><small>${(p.zdjecia||[]).length+(p.zdjecie?1:0)} zdj.</small></td>
+          <td>${braki.length?braki.map(b=>`<span class="lvl lvl-ostrzezenie">${esc(b)}</span>`).join(" "):`<span class="lvl lvl-ok">komplet bazowy</span>`}</td>
+          <td><div class="warehouse-worktable-actions">
+            <a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj dane</a>
+            <button class="btn ghost" onclick="allegroPrzygotujSzkicProduktZListy(${jsArg(p.id)})">🧾 Sprawdź szkic</button>
+            <button class="btn" onclick="allegroWystawProduktZListy(${jsArg(p.id)})">🟠 Utwórz szkic</button>
+          </div></td>
+        </tr>`;
+      }).join("") || `<tr><td colspan="6">Brak produktów.</td></tr>`}
     </table></div>
   </div>`;
 }
 function adminSubnavHTML(items, aktywny){
-  return `<nav class="admin-subnav">${items.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}">${esc(x.label)}</a>`).join("")}</nav>`;
+  return `<div class="panel admin-tabs-panel"><div class="tab-bar admin-tab-bar">${items.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}">${esc(x.label)}</a>`).join("")}</div></div>`;
 }
 function allegroSubnavHTML(aktywny="start"){
   return adminSubnavHTML([
     {id:"start",href:"#/admin/allegro",label:"Start"},
     {id:"zamowienia",href:"#/admin/allegro/zamowienia",label:"📦 Zamówienia Allegro"},
     {id:"oferty",href:"#/admin/allegro/oferty",label:"🏷️ Oferty i mapowanie"},
+    {id:"wystawianie",href:"#/admin/allegro/wystawianie",label:"🟠 Wystawianie"},
     {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"}
   ],aktywny);
 }
@@ -4841,6 +4995,7 @@ function allegroStartPanelHTML(mapped,niepodpiete){
       <div class="diag-actions" style="margin-top:0">
         <a class="btn" href="#/admin/allegro/zamowienia">📦 Zamówienia Allegro</a>
         <a class="btn ghost" href="#/admin/allegro/oferty">🏷️ Mapuj oferty</a>
+        <a class="btn ghost" href="#/admin/allegro/wystawianie">🟠 Wystaw produkt</a>
       </div>
     </div>
     <div class="orders-stat-grid">
@@ -4855,7 +5010,7 @@ function widokAdminAllegro(sekcja="start"){
   allegroLadujJesliTrzeba();
   const mapped=Object.keys(allegroMapowania||{}).length;
   const niepodpiete=(allegroOferty||[]).filter(o=>!allegroProduktDlaOferty(o.id)).length;
-  const aktywna=["zamowienia","oferty"].includes(sekcja)?sekcja:"start";
+  const aktywna=["zamowienia","oferty","wystawianie"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
   <div class="panel allegro-hero-panel">
     <div class="orders-hero">
@@ -4885,7 +5040,7 @@ function widokAdminAllegro(sekcja="start"){
     </div>
     ${allegroSubnavHTML(aktywna)}
   </div>
-  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():allegroStartPanelHTML(mapped,niepodpiete)}
+  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
   `);
 }
 function alertDostepnosciZamowieniaHTML(z){
@@ -6250,7 +6405,14 @@ function formularzProduktu(p, tryb){
   const wszystkie = produktyDoAdministracji();
   const edycja = tryb==="edycja";
   return `
-    <form onsubmit="${edycja?`zapiszProduktAdmin(event,${p.id})`:"dodajProdukt(event)"}">
+    <form class="product-editor-form" onsubmit="${edycja?`zapiszProduktAdmin(event,${p.id})`:"dodajProdukt(event)"}">
+      <div class="backend-note" style="margin-bottom:.8rem">
+        <b>Źródło producenta / automatyczne uzupełnienie:</b> wklej adres produktu producenta, np. strona Alexandra. Panel pobierze nazwę, opis, cenę, EAN/kod producenta, zdjęcia i dostępność, a brakujące dane dopisze do edytora.
+        <div class="shipment-inline-control" style="margin-top:.55rem">
+          <input name="producentUrl" value="${esc(p.producentUrl||p.sourceUrl||"")}" placeholder="https://www.sklep.alexander.com.pl/product-..." style="flex:1">
+          <button class="btn ghost" type="button" onclick="pobierzDaneProduktuZUrl(this)">🌐 Pobierz i dopasuj</button>
+        </div>
+      </div>
       <div class="f-row">
         <div class="f-group"><label>Nazwa *</label><input required name="nazwa" value="${esc(p.nazwa||"")}"></div>
         <div class="f-group"><label>Kategoria *</label><input required name="kategoria" list="katLista" placeholder="np. Elektronika" value="${esc(p.kategoria||kategoriaNowegoProduktu)}">
@@ -6300,6 +6462,24 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Rozmiar / SIZE</label><input name="rozmiar" value="${esc(p.rozmiar||"")}" placeholder="np. XL lub 85x60x60 cm"></div>
           <div class="f-group"><label>Materiał / MATERIAL</label><input name="material" value="${esc(p.material||"")}" placeholder="np. bawełna, karton, stal"></div>
         </div>
+        <div class="f-row">
+          <div class="f-group"><label>Kod producenta</label><input name="kodProducenta" value="${esc(p.kodProducenta||"")}" placeholder="np. 2282 lub kod katalogowy"></div>
+          <div class="f-group"><label>Dostępność u producenta</label><input name="dostepnoscProducenta" value="${esc(p.dostepnoscProducenta||"")}" placeholder="dostępny / niedostępny / do sprawdzenia"></div>
+          <div class="f-group"><label>URL źródłowy</label><input name="sourceUrl" value="${esc(p.sourceUrl||p.producentUrl||"")}" placeholder="strona źródłowa produktu"></div>
+        </div>
+      </details>
+      <details ${(p.allegroCategoryId||p.allegroProductId||p.allegroOfferId)?"open":""} style="margin-bottom:.8rem">
+        <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🟠 Allegro — dane do wystawienia</summary>
+        <div class="f-row" style="margin-top:.7rem">
+          <div class="f-group"><label>ID kategorii Allegro *</label><input name="allegroCategoryId" value="${esc(p.allegroCategoryId||"")}" placeholder="wymagane do wystawienia"></div>
+          <div class="f-group"><label>ID produktu Allegro</label><input name="allegroProductId" value="${esc(p.allegroProductId||"")}" placeholder="opcjonalnie, jeśli znany"></div>
+          <div class="f-group"><label>ID oferty Allegro</label><input name="allegroOfferId" value="${esc(p.allegroOfferId||"")}" placeholder="uzupełni się po wystawieniu"></div>
+        </div>
+        <div class="diag-actions">
+          ${edycja?`<button class="btn ghost" type="button" onclick="allegroPrzygotujSzkicProduktu(${jsArg(p.id)})">🧾 Sprawdź szkic Allegro</button>
+          <button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">🟠 Utwórz szkic/ofertę Allegro</button>`:`<span style="color:var(--muted2);font-size:.85rem">Najpierw zapisz produkt, potem utworzysz z niego szkic Allegro.</span>`}
+        </div>
+        <div id="allegroDraftPreview"></div>
       </details>
       <div class="f-group"><label>Opis pełny</label><textarea name="opis" rows="6" maxlength="10000">${esc(p.opis||"")}</textarea></div>
       <div class="f-group" style="max-width:240px"><label>Stan magazynowy <small style="font-weight:400;color:var(--muted2)">(puste = bez limitu)</small></label>
@@ -6355,10 +6535,15 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   if(f.get("badge")) p.badge = String(f.get("badge")); else delete p.badge;
   const sku = String(f.get("sku")||"").trim();
   if(sku) p.sku = sku; else delete p.sku;
-  for(const [pole,nazwa] of [["gtin","gtin"],["externalId","externalId"],["mpn","mpn"],["marka","marka"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"]]){
+  for(const [pole,nazwa] of [
+    ["gtin","gtin"],["externalId","externalId"],["mpn","mpn"],["marka","marka"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"],
+    ["kodProducenta","kodProducenta"],["dostepnoscProducenta","dostepnoscProducenta"],["producentUrl","producentUrl"],["sourceUrl","sourceUrl"],
+    ["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroOfferId","allegroOfferId"]
+  ]){
     const v=String(f.get(nazwa)||"").trim();
     if(v)p[pole]=v;else delete p[pole];
   }
+  if(p.gtin) p.ean=p.gtin; else delete p.ean;
   const warianty = String(f.get("warianty")||"").split(",").map(x=>x.trim()).filter(Boolean).slice(0,12);
   if(warianty.length) p.warianty = warianty; else delete p.warianty;
   const zdjecia = Array.from({length:15},(_,i)=>"zdjecie"+(i+2)).map(n=>String(f.get(n)||"").trim()).filter(Boolean);
