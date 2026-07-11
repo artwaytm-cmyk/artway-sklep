@@ -1465,9 +1465,15 @@ function allegroSekcjeOpisu(product = {}, shortDescription = '') {
 }
 function allegroPatchZDraftu(draft = {}, options = {}) {
   const out = {};
-  for (const key of ['name', 'sellingMode', 'stock', 'external', 'images', 'description', 'delivery', 'afterSalesServices', 'parameters']) {
-    if (draft[key] !== undefined) out[key] = draft[key];
-  }
+  if (draft.name) out.name = draft.name;
+  if (Number(draft.sellingMode?.price?.amount) > 0) out.sellingMode = draft.sellingMode;
+  if (draft.stock?.available !== undefined) out.stock = draft.stock;
+  if (draft.external?.id) out.external = draft.external;
+  if (Array.isArray(draft.images) && draft.images.length) out.images = draft.images;
+  if (Array.isArray(draft.description?.sections) && draft.description.sections.length) out.description = draft.description;
+  if (draft.delivery) out.delivery = draft.delivery;
+  if (draft.afterSalesServices) out.afterSalesServices = draft.afterSalesServices;
+  if (Array.isArray(draft.parameters) && draft.parameters.length) out.parameters = draft.parameters;
   if (options.publicationAction === 'activate') out.publication = { status: 'ACTIVE' };
   else if (options.publicationAction === 'deactivate') out.publication = { status: 'INACTIVE' };
   return out;
@@ -3416,7 +3422,7 @@ export default async (req) => {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
       const draft = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
-      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: draft.missing.length === 0, categorySuggestion: draft.categorySuggestion, salesConditions: draft.salesConditions, categoryParameters: draft.categoryParameters, supportErrors: draft.supportErrors, existingOffer: draft.existingOffer, similarOffers: draft.similarOffers, improvedDescriptions: draft.improvedDescriptions, operation: draft.existingOffer ? 'update' : 'create' });
+      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: !!draft.existingOffer || draft.missing.length === 0, categorySuggestion: draft.categorySuggestion, salesConditions: draft.salesConditions, categoryParameters: draft.categoryParameters, supportErrors: draft.supportErrors, existingOffer: draft.existingOffer, similarOffers: draft.similarOffers, improvedDescriptions: draft.improvedDescriptions, operation: draft.existingOffer ? 'update' : 'create' });
     }
 
     if (action === 'allegro-description-improve') {
@@ -3447,7 +3453,7 @@ export default async (req) => {
       if (!draft) {
         prepared = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
         categorySuggestion = prepared.categorySuggestion;
-        if (prepared.missing.length) return odpowiedz({ ok: false, error: `Szkic wymaga uzupełnienia: ${prepared.missing.join(', ')}`, missing: prepared.missing, draft: prepared.payload, categorySuggestion, salesConditions: prepared.salesConditions, categoryParameters: prepared.categoryParameters, supportErrors: prepared.supportErrors }, 422);
+        if (prepared.missing.length && !prepared.existingOffer) return odpowiedz({ ok: false, error: `Szkic wymaga uzupełnienia: ${prepared.missing.join(', ')}`, missing: prepared.missing, draft: prepared.payload, categorySuggestion, salesConditions: prepared.salesConditions, categoryParameters: prepared.categoryParameters, supportErrors: prepared.supportErrors }, 422);
         draft = prepared.payload;
       }
       if (!prepared) {
