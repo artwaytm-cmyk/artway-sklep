@@ -25,6 +25,7 @@ const KLUCZE_WSPOLNE = [
   'artway_agent_ai_historia',
   'artway_agent_ai_pamiec',
   'artway_agent_ai_zlecenia',
+  'artway_agent_ai_linki_producentow',
   'artway_opinie',
   'artway_kosz_dodane',
   'artway_kosz_meta',
@@ -1296,10 +1297,19 @@ function htmlDecode(s = '') {
 function stripHtml(s = '') {
   return htmlDecode(String(s || '').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
 }
-function metaHtml(html, name) {
+function attrHtml(tag = '', name = '') {
   const n = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`<meta[^>]+(?:property|name)=["']${n}["'][^>]+content=["']([^"']+)["']`, 'i');
-  return htmlDecode((html.match(re) || [])[1] || '');
+  const re = new RegExp(`\\s${n}\\s*=\\s*["']([^"']*)["']`, 'i');
+  return htmlDecode((String(tag || '').match(re) || [])[1] || '');
+}
+function metaHtml(html, name) {
+  const szukane = String(name || '').toLowerCase();
+  for (const m of String(html || '').matchAll(/<meta\b[^>]*>/gi)) {
+    const tag = m[0];
+    const key = (attrHtml(tag, 'property') || attrHtml(tag, 'name') || attrHtml(tag, 'itemprop')).toLowerCase();
+    if (key === szukane) return attrHtml(tag, 'content');
+  }
+  return '';
 }
 function absoluteUrl(base, u) {
   try { return new URL(u, base).toString(); } catch { return ''; }
@@ -1308,53 +1318,184 @@ function znajdzPoEtykiecie(text, label) {
   const re = new RegExp(`${label}\\s*[:\\n ]+([^\\n]{1,180})`, 'i');
   return tekst((text.match(re) || [])[1] || '', 180).trim();
 }
+function normalizujKluczParametru(s = '') {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function parametrySlownikoweZHtml(html = '') {
+  const out = {};
+  const source = String(html || '');
+  const starts = [...source.matchAll(/<div\b[^>]*class=["'][^"']*\bdictionary__param\b[^"']*["'][^>]*>/gi)].map((m) => m.index).filter((x) => x >= 0);
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i];
+    const end = starts[i + 1] || source.indexOf('</section>', start);
+    const seg = source.slice(start, end > start ? end : start + 3500);
+    const label = stripHtml((seg.match(/<span\b[^>]*class=["'][^"']*\bdictionary__name_txt\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) || [])[1] || '');
+    if (!label || /podmiot odpowiedzialny/i.test(label)) continue;
+    const values = [...seg.matchAll(/<[^>]*class=["'][^"']*\bdictionary__value_txt\b[^"']*["'][^>]*>([\s\S]*?)(?:<\/a>|<\/span>)/gi)]
+      .map((m) => stripHtml(m[1]))
+      .filter(Boolean);
+    const val = values.join(', ').replace(/\s+\/\s*1\s*szt\.$/i, '').trim();
+    if (val) out[normalizujKluczParametru(label)] = val;
+  }
+  return out;
+}
+function parametr(dict, labels = []) {
+  const keys = Object.keys(dict || {});
+  for (const label of labels) {
+    const n = normalizujKluczParametru(label);
+    const exact = keys.find((k) => k === n);
+    if (exact) return tekst(dict[exact], 500).trim();
+    const loose = keys.find((k) => k.includes(n) || n.includes(k));
+    if (loose) return tekst(dict[loose], 500).trim();
+  }
+  return '';
+}
+function liczbaZTekstu(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  const m = String(v).replace(/\s+/g, '').match(/(\d{1,6}(?:[,.]\d{1,2})?)/);
+  return m ? Number(m[1].replace(',', '.')) || 0 : 0;
+}
+function cenaProduktuZHtml(html = '', text = '') {
+  const kandydaci = [];
+  const dodaj = (v, weight = 1) => {
+    const n = liczbaZTekstu(v);
+    if (n > 0) kandydaci.push({ n, weight });
+  };
+  dodaj(metaHtml(html, 'product:price:amount'), 9);
+  dodaj((html.match(/id=["']projector_price_value["'][^>]*data-price=["']([^"']+)/i) || [])[1], 10);
+  dodaj((html.match(/\bprice\s*:\s*parseFloat\((\d+(?:\.\d+)?)/i) || [])[1], 9);
+  dodaj((html.match(/\bcena_raty\s*=\s*(\d+(?:\.\d+)?)/i) || [])[1], 8);
+  dodaj((html.match(/\bvalue["']?\s*:\s*["'](\d+(?:\.\d+)?)["']/i) || [])[1], 7);
+  const okolicaCeny = (html.match(/<[^>]+id=["']projector_prices_section["'][\s\S]{0,2500}/i) || [])[0] || '';
+  for (const m of okolicaCeny.matchAll(/(\d{1,5}[,.]\d{2})\s*zł/gi)) dodaj(m[1], 6);
+  for (const m of String(text || '').matchAll(/(\d{1,5}[,.]\d{2})\s*zł/gi)) dodaj(m[1], 1);
+  kandydaci.sort((a, b) => b.weight - a.weight || a.n - b.n);
+  return kandydaci[0]?.n || 0;
+}
+function jsonLdProdukty(html = '') {
+  const produkty = [];
+  const scripts = [...String(html || '').matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].map((m) => htmlDecode(m[1]).trim()).filter(Boolean);
+  const visit = (x) => {
+    if (!x) return;
+    if (Array.isArray(x)) return x.forEach(visit);
+    if (typeof x !== 'object') return;
+    const typ = Array.isArray(x['@type']) ? x['@type'].join(' ') : String(x['@type'] || '');
+    if (/Product/i.test(typ)) produkty.push(x);
+    if (x['@graph']) visit(x['@graph']);
+  };
+  for (const raw of scripts) {
+    try { visit(JSON.parse(raw)); } catch {}
+  }
+  return produkty;
+}
+function kategoriaZBreadcrumbJsonLd(html = '') {
+  for (const raw of [...String(html || '').matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].map((m) => htmlDecode(m[1]).trim())) {
+    try {
+      const x = JSON.parse(raw);
+      const typ = Array.isArray(x?.['@type']) ? x['@type'].join(' ') : String(x?.['@type'] || '');
+      if (!/BreadcrumbList/i.test(typ)) continue;
+      const items = Array.isArray(x.itemListElement) ? x.itemListElement : [];
+      const names = items.map((it) => tekst(it?.item?.name || it?.name, 160).trim()).filter(Boolean);
+      if (names.length >= 2) return names[names.length - 2] || names[names.length - 1] || '';
+    } catch {}
+  }
+  return '';
+}
+function opisProduktuZHtml(html = '', title = '') {
+  const meta = metaHtml(html, 'og:description') || metaHtml(html, 'description');
+  if (meta && !/gry planszowe,\s*gry rodzinne/i.test(meta)) return tekst(stripHtml(meta), 4000);
+  const desc = (html.match(/<div\b[^>]*class=["'][^"']*\bproduct_name__block\b[^"']*\b--description\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1]
+    || (html.match(/<section\b[^>]*id=["']projector_longdescription["'][^>]*>([\s\S]*?)<\/section>/i) || [])[1]
+    || '';
+  const cleaned = stripHtml(desc);
+  if (cleaned) return tekst(cleaned, 4000);
+  const text = stripHtml(html);
+  const opisStart = text.indexOf(String(title || '').trim());
+  return opisStart >= 0 ? tekst(text.slice(opisStart + String(title || '').length, opisStart + 2200), 4000) : '';
+}
+function obrazkiProduktuZHtml(url = '', html = '') {
+  const imageSet = new Set();
+  const dodaj = (u) => {
+    const a = absoluteUrl(url, htmlDecode(String(u || '').trim()));
+    if (!a) return;
+    if (/loader\.gif|favicon|logo|payment|platnos|bannery|standards|mask|sprite|icon-|\/icons?\//i.test(a)) return;
+    if (!/\.(jpe?g|png|webp)(?:[?#].*)?$/i.test(a)) return;
+    imageSet.add(a);
+  };
+  dodaj(metaHtml(html, 'og:image'));
+  for (const m of String(html || '').matchAll(/<link\b[^>]*rel=["']preload["'][^>]*as=["']image["'][^>]*>/gi)) dodaj(attrHtml(m[0], 'href'));
+  for (const m of String(html || '').matchAll(/<img\b[^>]*(?:src|data-src|data-lazy|data-original)=["']([^"']+)["'][^>]*>/gi)) dodaj(m[1]);
+  for (const m of String(html || '').matchAll(/(?:srcset|data-srcset)=["']([^"']+)["']/gi)) {
+    String(m[1]).split(',').map((x) => x.trim().split(/\s+/)[0]).forEach(dodaj);
+  }
+  return [...imageSet].slice(0, 16);
+}
 function parsujProduktZHtml(url, html) {
   const text = stripHtml(html);
-  const title = metaHtml(html, 'og:title') || tekst((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1], 300);
-  const descMeta = metaHtml(html, 'description') || metaHtml(html, 'og:description');
-  const priceRaw = (text.match(/(\d{1,5}[,.]\d{2})\s*zł/i) || [])[1] || '';
-  const cena = priceRaw ? Number(priceRaw.replace(',', '.')) : 0;
-  const imageSet = new Set();
-  [metaHtml(html, 'og:image'), ...Array.from(html.matchAll(/<img[^>]+(?:src|data-src|data-lazy)=["']([^"']+)["']/gi)).map((m) => m[1])]
-    .map((u) => absoluteUrl(url, u))
-    .filter(Boolean)
-    .forEach((u) => imageSet.add(u));
-  const marka = znajdzPoEtykiecie(text, 'Marka') || 'Alexander';
-  const symbol = znajdzPoEtykiecie(text, 'Symbol');
-  const kodProducentaRaw = znajdzPoEtykiecie(text, 'Kod producenta');
-  const ean = /\b\d{8,14}\b/.test(kodProducentaRaw) ? (kodProducentaRaw.match(/\b\d{8,14}\b/) || [])[0] : '';
-  const dostepny = /produkt dostępny|dostępny/i.test(text) && !/powiadom o dostępności|niedostępny|brak produktu/i.test(text);
-  const opisStart = text.indexOf(String(title || '').trim());
-  const opis = descMeta || (opisStart >= 0 ? tekst(text.slice(opisStart, opisStart + 1800), 1800) : '');
+  const ldProduct = jsonLdProdukty(html)[0] || {};
+  const dict = parametrySlownikoweZHtml(html);
+  const title = metaHtml(html, 'og:title')
+    || tekst(ldProduct.name, 300)
+    || stripHtml((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '')
+    || tekst((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1], 300);
+  const cena = cenaProduktuZHtml(html, text) || liczbaZTekstu(ldProduct?.offers?.price);
+  const zdjecia = obrazkiProduktuZHtml(url, html);
+  const marka = parametr(dict, ['Marka', 'Producent', 'Brand']) || tekst(ldProduct.brand?.name || ldProduct.brand, 160).trim() || (/alexander/i.test(url + text) ? 'Alexander' : '');
+  const symbol = parametr(dict, ['Symbol', 'Kod', 'SKU']) || tekst(ldProduct.sku, 120).trim();
+  const kodProducentaRaw = parametr(dict, ['Kod producenta', 'MPN', 'Kod katalogowy']) || tekst(ldProduct.mpn, 120).trim();
+  const eanRaw = parametr(dict, ['EAN', 'GTIN', 'Kod EAN']) || tekst(ldProduct.gtin13 || ldProduct.gtin || ldProduct.gtin12 || ldProduct.gtin14, 80).trim() || kodProducentaRaw;
+  const ean = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
+  const statusHtml = stripHtml((html.match(/id=["']projector_status_description["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '');
+  const statusDostepny = /produkt dostępny|\bdostępny\b|in stock|instock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
+  const statusNiedostepny = /powiadom o dostępności|niedostępny|brak produktu|chwilowo niedostęp|outofstock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
+  const niedostepny = statusNiedostepny || (!statusDostepny && /powiadom o dostępności|niedostępny|brak produktu|chwilowo niedostęp/i.test(text));
+  const dostepny = statusDostepny || (!niedostepny && /produkt dostępny|\bdostępny\b|in stock|instock/i.test(text));
+  const opis = opisProduktuZHtml(html, title);
+  const kategoria = kategoriaZBreadcrumbJsonLd(html);
   const parametry = {
     symbol,
     kodProducenta: kodProducentaRaw,
-    wiek: znajdzPoEtykiecie(text, 'Wiek'),
-    liczbaGraczy: znajdzPoEtykiecie(text, 'Liczba graczy'),
-    wymiaryOpakowania: znajdzPoEtykiecie(text, 'Wymiary opakowania \\(dł/sz/wys\\)') || znajdzPoEtykiecie(text, 'Wymiary opakowania'),
-    wagaOpakowania: znajdzPoEtykiecie(text, 'Waga opakowania'),
+    ean,
+    seria: parametr(dict, ['Seria']),
+    wiek: parametr(dict, ['Wiek']),
+    liczbaGraczy: parametr(dict, ['Liczba graczy']),
+    wymiaryOpakowania: parametr(dict, ['Wymiary opakowania (dł/sz/wys)', 'Wymiary opakowania']),
+    wagaOpakowania: parametr(dict, ['Waga opakowania']),
+    ostrzezenie: parametr(dict, ['Ostrzeżenie']),
   };
+  const missing = [];
+  if (!title) missing.push('nazwa');
+  if (!cena) missing.push('cena');
+  if (!ean) missing.push('EAN');
+  if (!zdjecia.length) missing.push('zdjęcia');
+  if (!opis) missing.push('opis');
+  if (!dostepny && !niedostepny) missing.push('dostępność');
+  const confidence = Math.max(20, 100 - missing.length * 14);
   return {
     ok: true,
     url,
+    confidence,
+    missing,
     product: {
       nazwa: stripHtml(title).replace(/\s+\|.*$/, ''),
       opis,
       cena: cena || '',
-      zdjecie: [...imageSet][0] || '',
-      zdjecia: [...imageSet].slice(1, 16),
+      kategoria,
+      zdjecie: zdjecia[0] || '',
+      zdjecia: zdjecia.slice(1, 16),
       marka,
       gtin: ean,
       ean,
       mpn: symbol || kodProducentaRaw,
-      kodProducenta: symbol || kodProducentaRaw,
+      kodProducenta: kodProducentaRaw || symbol,
       externalId: symbol || '',
+      rozmiar: parametry.wymiaryOpakowania || '',
       producentUrl: url,
       sourceUrl: url,
-      dostepnoscProducenta: dostepny ? 'dostępny' : (/niedostępny|powiadom o dostępności/i.test(text) ? 'niedostępny' : 'do sprawdzenia'),
+      dostepnoscProducenta: dostepny ? 'dostępny' : (niedostepny ? 'niedostępny' : 'do sprawdzenia'),
       parametryProducenta: parametry,
     },
-    availability: { available: dostepny, text: dostepny ? 'Produkt dostępny' : 'Do sprawdzenia' },
+    availability: { available: dostepny, text: statusHtml || (dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia')) },
   };
 }
 function allegroDraftZProduktu(product = {}, opt = {}) {
@@ -2429,10 +2570,17 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const target = tekst(body.url, 1000).trim();
       if (!/^https?:\/\//i.test(target)) return odpowiedz({ ok: false, error: 'Podaj pełny adres URL produktu' }, 422);
-      const r = await fetch(target, { headers: { 'user-agent': 'Artway-TM product importer/1.0 (+https://artwaytm.pl)', 'accept': 'text/html,application/xhtml+xml' } });
+      const r = await fetch(target, {
+        redirect: 'follow',
+        headers: {
+          'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+          'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'accept-language': 'pl-PL,pl;q=0.9,en;q=0.6',
+        },
+      });
       const html = await r.text();
       if (!r.ok || !html) return odpowiedz({ ok: false, error: `Nie udało się pobrać strony producenta (${r.status})` }, 502);
-      return odpowiedz(parsujProduktZHtml(target, html));
+      return odpowiedz(parsujProduktZHtml(r.url || target, html));
     }
 
     // ─── ALLEGRO: mapowanie oferty do produktu sklepu (admin) ───

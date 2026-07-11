@@ -231,6 +231,7 @@ let szkiceFaktur = wczytajLS("artway_faktury_szkice", []); // przygotowane dokum
 let agentAIHistoria = wczytajLS("artway_agent_ai_historia", []); // audyty i akcje agenta administratora
 let agentAIPamiec = wczytajLS("artway_agent_ai_pamiec", []); // zapamiętane procedury, reguły i notatki operacyjne agenta
 let agentAIZlecenia = wczytajLS("artway_agent_ai_zlecenia", []); // szkice zleceń utworzone przez agenta AI
+let agentAILinkiProducentow = wczytajLS("artway_agent_ai_linki_producentow", []); // kolejka URL-i produktów producentów do pobrania/sprawdzenia przez agenta
 let koszDodanych = wczytajLS("artway_kosz_dodane", []); // kosz: usunięte produkty własne (można przywrócić)
 let koszMeta = wczytajLS("artway_kosz_meta", {});      // id → data usunięcia i typ; automatyczne czyszczenie po 30 dniach
 let produktyDefinitywne = wczytajLS("artway_produkty_definitywne", []); // bazowe produkty usunięte po okresie kosza
@@ -259,7 +260,7 @@ let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania=""
    na pamięci przeglądarki (localStorage) jak dotychczas. */
 const CHMURA_URL = "/.netlify/functions/store";
 const CHMURA_AUTO_SYNC_MS = 60000;
-const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_linki_producentow","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
 let chmuraToken = (function(){ try{ return JSON.parse(localStorage.getItem("artway_chmura_token"))||""; }catch(e){ return ""; } })();
 let chmuraStan = {dostepna:false, sprawdzono:false, admin:false, rev:0, updated_at:null, error:"", ostatniZapis:0};
 let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z serwera
@@ -345,6 +346,7 @@ function zbierzWspolneUstawienia(){
     artway_agent_ai_historia: agentAIHistoria,
     artway_agent_ai_pamiec: agentAIPamiec,
     artway_agent_ai_zlecenia: agentAIZlecenia,
+    artway_agent_ai_linki_producentow: agentAILinkiProducentow,
     artway_opinie: opinie,
     artway_kosz_dodane: koszDodanych,
     artway_kosz_meta: koszMeta,
@@ -368,6 +370,7 @@ function nalozWspolneUstawienia(dane){
       artway_faktury_szkice:(v)=>{szkiceFaktur=Array.isArray(v)?v:[];}, artway_agent_ai_historia:(v)=>{agentAIHistoria=Array.isArray(v)?v:[];},
       artway_agent_ai_pamiec:(v)=>{agentAIPamiec=Array.isArray(v)?v:[];},
       artway_agent_ai_zlecenia:(v)=>{agentAIZlecenia=Array.isArray(v)?v:[];},
+      artway_agent_ai_linki_producentow:(v)=>{agentAILinkiProducentow=Array.isArray(v)?v:[];},
       artway_opinie:(v)=>{opinie=v;},
       artway_kosz_dodane:(v)=>{koszDodanych=v;}, artway_kosz_meta:(v)=>{koszMeta=v;},
     };
@@ -1334,6 +1337,135 @@ function zapiszHistorieAgenta(typ, opis, dane={}){
   agentAIHistoria=[rec,...(Array.isArray(agentAIHistoria)?agentAIHistoria:[])].slice(0,500);
   zapiszLS("artway_agent_ai_historia",agentAIHistoria);
   return rec;
+}
+function normalizujUrlProducenta(url=""){
+  try{
+    const u=new URL(String(url||"").trim());
+    ["query_id","utm_source","utm_medium","utm_campaign","utm_term","utm_content","fbclid","gclid"].forEach(k=>u.searchParams.delete(k));
+    u.hash="";
+    return u.toString();
+  }catch(e){ return String(url||"").trim(); }
+}
+function brakiDanychProducenta(p={}, dane={}){
+  const b=[];
+  if(!p.nazwa)b.push("nazwa");
+  if(!p.cena)b.push("cena");
+  if(!(p.gtin||p.ean))b.push("EAN");
+  if(!(p.mpn||p.kodProducenta||p.externalId))b.push("kod producenta/MPN");
+  if(!p.zdjecie)b.push("zdjęcie");
+  if(!p.opis)b.push("opis");
+  if(!p.dostepnoscProducenta||p.dostepnoscProducenta==="do sprawdzenia")b.push("dostępność");
+  (Array.isArray(dane.missing)?dane.missing:[]).forEach(x=>{if(x&&!b.includes(x))b.push(x);});
+  return b;
+}
+function agentAIProduktZLinkuMini(p={}){
+  if(!p||typeof p!=="object") return {};
+  const mini={...p};
+  mini.opis=String(mini.opis||"").slice(0,1800);
+  mini.zdjecie=String(mini.zdjecie||"").slice(0,1000);
+  mini.zdjecia=(Array.isArray(mini.zdjecia)?mini.zdjecia:[]).map(x=>String(x||"").slice(0,1000)).filter(Boolean).slice(0,8);
+  if(mini.parametryProducenta) mini.parametryProducenta=Object.fromEntries(Object.entries(mini.parametryProducenta).map(([k,v])=>[k,String(v||"").slice(0,500)]).slice(0,20));
+  return mini;
+}
+function agentAIZapiszLinkProducenta(url,status="oczekuje",powod="",extra={}){
+  const clean=normalizujUrlProducenta(url);
+  if(!/^https?:\/\//i.test(clean)) return null;
+  const teraz=new Date(), poprzednie=Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[];
+  const idx=poprzednie.findIndex(x=>normalizujUrlProducenta(x.url)===clean);
+  const baza=idx>=0?poprzednie[idx]:{id:"PURL-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,6),url:clean,dodano:teraz.toISOString(),dodanoTxt:teraz.toLocaleString("pl-PL"),proby:0};
+  const rec={...baza,...extra,url:clean,status,powod:String(powod||extra.powod||"").slice(0,500),aktualizacja:teraz.toISOString(),aktualizacjaTxt:teraz.toLocaleString("pl-PL"),operator:sesja?.email||"administrator"};
+  const lista=idx>=0?[...poprzednie.slice(0,idx),rec,...poprzednie.slice(idx+1)]:[rec,...poprzednie];
+  agentAILinkiProducentow=lista.slice(0,500);
+  zapiszLS("artway_agent_ai_linki_producentow",agentAILinkiProducentow);
+  return rec;
+}
+function agentAIUsunLinkProducenta(ref){
+  const r=String(ref||"");
+  agentAILinkiProducentow=(Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[]).filter(x=>x.id!==r&&normalizujUrlProducenta(x.url)!==normalizujUrlProducenta(r));
+  zapiszLS("artway_agent_ai_linki_producentow",agentAILinkiProducentow);
+  toast("Link usunięty z kolejki agenta");
+  renderuj();
+}
+function agentAILinkiOczekujace(){
+  return (Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[]).filter(x=>!["pobrano","zamknięte","usunieto"].includes(String(x.status||"").toLowerCase()));
+}
+async function agentAISprawdzLinkProducenta(ref,cicho=false){
+  const lista=Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[];
+  const rec=lista.find(x=>x.id===ref||normalizujUrlProducenta(x.url)===normalizujUrlProducenta(ref))||{id:"tmp",url:ref,proby:0};
+  if(!rec.url) return null;
+  const teraz=new Date();
+  try{
+    const d=await chmura("product-url-inspect",{method:"POST",body:{url:rec.url},timeout:30000});
+    const p=d.product||{}, braki=brakiDanychProducenta(p,d);
+    const status=braki.length?"do uzupełnienia":"pobrano";
+    const next=agentAIZapiszLinkProducenta(rec.url,status,braki.length?`Braki po pobraniu: ${braki.join(", ")}`:"Dane pobrane poprawnie",{
+      proby:Number(rec.proby||0)+1,
+      ostatniaProba:teraz.toISOString(),
+      ostatniaProbaTxt:teraz.toLocaleString("pl-PL"),
+      lastProductName:p.nazwa||"",
+      lastAvailability:p.dostepnoscProducenta||d.availability?.text||"",
+      lastPrice:p.cena||"",
+      lastMissing:braki,
+      lastProduct:agentAIProduktZLinkuMini(p),
+      lastError:""
+    });
+    if(!cicho) toast(status==="pobrano"?"Agent pobrał dane z linku ✅":"Agent pobrał link, ale są braki do uzupełnienia");
+    return {rec:next,dane:d,braki,status};
+  }catch(e){
+    const next=agentAIZapiszLinkProducenta(rec.url,"oczekuje",e.message||String(e),{
+      proby:Number(rec.proby||0)+1,
+      ostatniaProba:teraz.toISOString(),
+      ostatniaProbaTxt:teraz.toLocaleString("pl-PL"),
+      lastError:e.message||String(e)
+    });
+    if(!cicho) toast("Agent zapisał link do ponownego pobrania: "+(e.message||e));
+    return {rec:next,blad:e};
+  }
+}
+async function agentAISprawdzLinkiProducentow(limit=5){
+  const lista=agentAILinkiOczekujace().slice(0,limit);
+  if(!lista.length) return "Nie ma linków producentów oczekujących na pobranie.";
+  const wyniki=[];
+  for(const rec of lista) wyniki.push(await agentAISprawdzLinkProducenta(rec.id,true));
+  const ok=wyniki.filter(x=>x&&!x.blad&&!x.braki?.length).length, braki=wyniki.filter(x=>x&&!x.blad&&x.braki?.length).length, blad=wyniki.filter(x=>x?.blad).length;
+  zapiszHistorieAgenta("linki-producentow",`Agent sprawdził ${wyniki.length} linków producentów`,{ok,braki,blad});
+  renderuj();
+  return `Sprawdziłem ${wyniki.length} linków producentów. Pobrane poprawnie: ${ok}. Do uzupełnienia: ${braki}. Błędy / do ponowienia: ${blad}.`;
+}
+function agentAILinkiProducentowTekst(){
+  const lista=agentAILinkiOczekujace();
+  if(!lista.length) return "Nie ma obecnie linków producentów oczekujących na pobranie.";
+  return ["🔗 Linki producentów do sprawdzenia przez agenta:",...lista.slice(0,15).map((x,i)=>`• ${i+1}. ${x.lastProductName?`${x.lastProductName} — `:""}${x.url} [${x.status||"oczekuje"}]${x.powod?` — ${x.powod}`:""}`)].join("\n");
+}
+function agentAILinkiProducentowPanelHTML(){
+  const lista=(Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[]).slice(0,25);
+  const ocz=agentAILinkiOczekujace().length;
+  return `<div class="panel agent-link-panel">
+    <div class="order-section-head">
+      <div><h2 style="margin-top:0">🔗 Linki producentów dla agenta</h2><p class="order-detail-lead">Gdy pobieranie produktu z URL się nie uda albo dane są niepełne, link trafia tutaj. Agent może później ponowić pobranie i pokazać braki.</p></div>
+      <span class="lvl ${ocz?"lvl-ostrzezenie":"lvl-ok"}">${ocz?`${ocz} do sprawdzenia`:"brak zaległych linków"}</span>
+    </div>
+    <div class="diag-actions" style="margin-top:0">
+      <button class="btn" type="button" onclick="agentAISprawdzLinkiProducentow().then(t=>toast(t))">🤖 Sprawdź oczekujące</button>
+      <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż linki producentów do pobrania')">Wpisz komendę</button>
+    </div>
+    <div class="agent-memory-list">
+      ${lista.length?lista.map(x=>`<div class="agent-memory-item">
+        <div><b>${esc(x.lastProductName||x.url)}</b><p>${esc(x.url)}</p><small>Status: ${esc(x.status||"oczekuje")} • próby: ${esc(x.proby||0)}${x.powod?` • ${esc(x.powod)}`:""}${Array.isArray(x.lastMissing)&&x.lastMissing.length?` • braki: ${esc(x.lastMissing.join(", "))}`:""}</small></div>
+        <div class="warehouse-worktable-actions">
+          <button class="btn ghost" type="button" onclick="agentAISprawdzLinkProducenta(${jsArg(x.id)}).then(()=>renderuj())">Sprawdź</button>
+          ${x.lastProduct?`<button class="btn ghost" type="button" onclick="agentAIWypelnijNowyProduktZLinku(${jsArg(x.id)})">Dodaj produkt</button>`:""}
+          <button class="btn danger" type="button" onclick="agentAIUsunLinkProducenta(${jsArg(x.id)})">Usuń</button>
+        </div>
+      </div>`).join(""):`<div class="agent-ops-empty">Brak zapisanych linków producentów.</div>`}
+    </div>
+  </div>`;
+}
+function agentAIWypelnijNowyProduktZLinku(id){
+  const rec=(agentAILinkiProducentow||[]).find(x=>x.id===id);
+  if(!rec?.lastProduct){ toast("Najpierw sprawdź link, żeby agent miał dane produktu"); return; }
+  sessionStorage.setItem("artway_prefill_product",JSON.stringify(rec.lastProduct));
+  location.hash="#/admin/produkty/dodaj";
 }
 function zapiszRuchMagazynowy(ruch){
   const p=produktMagazynowy(ruch.produktId);
@@ -3687,6 +3819,8 @@ function agentAIRozpoznajPolecenie(tekst=""){
   if(agentAIMa(n,["zapamietaj","zapamiętaj","naucz sie","naucz się","dodaj do pamieci","dodaj do pamięci","procedura:"])) return {typ:"pamiec-zapis",tresc:agentAIWytnijPamiec(raw),raw,confidence:.95};
   if(agentAIMa(n,["pokaz pamiec","pokaż pamięć","co pamietasz","co pamiętasz","lista procedur","pokaz procedury","pokaż procedury"])) return {typ:"pamiec-lista",raw,confidence:.95};
   if(agentAIMa(n,["pokaz lokalizacje","pokaż lokalizacje","lista lokalizacji","lokalizacje magazynu","mapa magazynu"])) return {typ:"lokalizacje",raw,confidence:.9};
+  if(agentAIMa(n,["sprawdz linki producentow","sprawdź linki producentów","pobierz linki producentow","pobierz linki producentów","pobierz produkty z linkow","pobierz produkty z linków","ponow pobieranie linkow","ponów pobieranie linków"])) return {typ:"linki-producentow-sprawdz",raw,confidence:.93};
+  if(agentAIMa(n,["pokaz linki producentow","pokaż linki producentów","linki producentow","linki producentów","kolejka linkow","kolejka linków","url producenta"])) return {typ:"linki-producentow",raw,confidence:.92};
   if(agentAIMa(n,["utworz lokalizacje","utwórz lokalizację","dodaj lokalizacje","dodaj lokalizację"])){
     const kod=kodLokalizacjiMagazynu(n.replace(/.*(?:utworz|utworzz|utwórz|dodaj)\s+lokalizacj[eaęi]\s*/,"").split(" ")[0]||"");
     return {typ:"lokalizacja-dodaj",kod,raw,confidence:.82};
@@ -4158,7 +4292,7 @@ async function agentAIWykonajPolecenie(tekst=""){
   let odpowiedz="";
   try{
     if(intent.typ==="pomoc"){
-      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź czy wpadło nowe zlecenie","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę Pinkfrog","• pokaż pamięć","• utwórz lokalizację R1-P1","• pokaż lokalizacje","• synchronizuj bazę","• utwórz brakujące szkice FV"].join("\n");
+      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź czy wpadło nowe zlecenie","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź linki producentów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę Pinkfrog","• pokaż pamięć","• utwórz lokalizację R1-P1","• pokaż lokalizacje","• synchronizuj bazę","• utwórz brakujące szkice FV"].join("\n");
     }else if(intent.typ==="pamiec-zapis"){
       const rec=agentAIZapiszPamiec(intent.tresc||"");
       odpowiedz=rec?`Zapamiętałem na przyszłość: ${rec.wyzwalacz?`gdy „${rec.wyzwalacz}” → `:""}${rec.akcja}`:"Nie podałeś treści do zapamiętania. Napisz np. „zapamiętaj: przy brakach najpierw sprawdź dostawcę”.";
@@ -4166,6 +4300,10 @@ async function agentAIWykonajPolecenie(tekst=""){
       odpowiedz=agentAIPamiecTekst();
     }else if(intent.typ==="lokalizacje"){
       odpowiedz=agentAILokalizacjeTekst();
+    }else if(intent.typ==="linki-producentow"){
+      odpowiedz=agentAILinkiProducentowTekst();
+    }else if(intent.typ==="linki-producentow-sprawdz"){
+      odpowiedz=await agentAISprawdzLinkiProducentow(5);
     }else if(intent.typ==="lokalizacja-dodaj"){
       if(!intent.kod){
         odpowiedz="Podaj kod lokalizacji, np. „utwórz lokalizację R1-P1”.";
@@ -4208,7 +4346,7 @@ async function agentAIWykonajPolecenie(tekst=""){
       const pamiec=agentAIZnajdzPamiecDlaPolecenia(tekst);
       odpowiedz=pamiec.length
         ? ["Znalazłem pasujące zapamiętane procedury:",...pamiec.map(x=>`• ${x.wyzwalacz?`Gdy: ${x.wyzwalacz} → `:""}${x.akcja||x.tresc}`)].join("\n")
-        : "Nie rozpoznałem polecenia. Napisz np. „sprawdź zamówienia”, „przygotuj zamówienie do producenta”, „pokaż braki”, „ile mamy [produkt]”, „zapamiętaj: …” albo „synchronizuj bazę”.";
+        : "Nie rozpoznałem polecenia. Napisz np. „sprawdź zamówienia”, „przygotuj zamówienie do producenta”, „pokaż braki”, „sprawdź linki producentów”, „ile mamy [produkt]”, „zapamiętaj: …” albo „synchronizuj bazę”.";
     }
     zapiszHistorieAgenta("komenda",`Polecenie z panelu: ${tekst}`,{polecenie:tekst,intencja:intent.typ,tryb:intent.tryb||"",odpowiedz});
     loguj("info",`Agent AI/panel: ${intent.typ} — ${tekst}`);
@@ -4262,6 +4400,7 @@ function agentAIAnaliza(){
   });
   const lokAktywne=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(produktyAdmin), lokPozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK"&&!magazynLokalizacjaPoKodzie(k));
   const nadwyzki=agentAINadwyzkiDoPrzyjecia();
+  const linkiProd=agentAILinkiOczekujace();
   const pozycje=[
     {id:"dostepnosc",poziom:doPotwierdzenia.length?"warn":"ok",ikona:"🔎",tytul:"Zamówienia do potwierdzenia dostępności",opis:doPotwierdzenia.length?`${doPotwierdzenia.length} zamówień ma pozycje powyżej ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} szt.`:"Brak zamówień wymagających potwierdzenia ilości.",akcja:"#/admin/zamowienia"},
     {id:"wysylki",poziom:bezNumeru.length?"warn":"ok",ikona:"🚚",tytul:"Przesyłki bez numeru nadania",opis:bezNumeru.length?`${bezNumeru.length} aktywnych zleceń czeka na numer/etykietę InPost.`:"Aktywne przesyłki mają komplet podstawowych danych.",akcja:"#/admin/wysylki"},
@@ -4275,6 +4414,7 @@ function agentAIAnaliza(){
     {id:"kartoteka",poziom:brakKartoteki.length?"warn":"ok",ikona:"🗂️",tytul:"Kartoteka magazynowa",opis:brakKartoteki.length?`${brakKartoteki.length} produktów nie ma lokalizacji albo dostawcy.`:"Kartoteka magazynowa jest uzupełniona.",akcja:"kartoteka-domyslna"},
     {id:"lokalizacje",poziom:(!lokAktywne.length||lokPozaSlownikiem.length)?"warn":"ok",ikona:"🗺️",tytul:"Słownik lokalizacji magazynu",opis:!lokAktywne.length?"Brak utworzonych lokalizacji magazynu.":lokPozaSlownikiem.length?`${lokPozaSlownikiem.length} lokalizacji przy produktach nie ma w słowniku.`:`Aktywne lokalizacje: ${lokAktywne.length}.`,akcja:"#/admin/magazyn"},
     {id:"pamiec",poziom:(agentAIPamiec||[]).length?"ok":"warn",ikona:"🧠",tytul:"Pamięć i procedury agenta",opis:(agentAIPamiec||[]).length?`Agent ma ${(agentAIPamiec||[]).length} zapamiętanych procedur/notatek.`:"Agent nie ma jeszcze własnych procedur. Naucz go poleceniem „zapamiętaj: …”.",akcja:"#/admin/agent-ai"},
+    {id:"linki-producentow",poziom:linkiProd.length?"warn":"ok",ikona:"🔗",tytul:"Linki producentów do pobrania",opis:linkiProd.length?`${linkiProd.length} linków czeka na pobranie lub dopasowanie danych produktu.`:"Brak zaległych linków producentów.",akcja:"sprawdz-linki-producentow"},
     {id:"monitoring",poziom:bezMonitoringu.length?"warn":"ok",ikona:"📍",tytul:"Produkty bez monitorowanego stanu",opis:bezMonitoringu.length?`${bezMonitoringu.length} produktów działa bez limitu magazynowego — poprawne, jeśli to świadoma decyzja.`:"Wszystkie produkty mają monitorowany stan.",akcja:"#/admin/magazyn"},
     {id:"inwentaryzacja",poziom:stareInwentaryzacje.length?"warn":"ok",ikona:"✅",tytul:"Inwentaryzacja",opis:stareInwentaryzacje.length?`${stareInwentaryzacje.length} monitorowanych produktów nie ma świeżej daty inwentaryzacji.`:"Inwentaryzacja monitorowanych produktów jest aktualna.",akcja:"audyt-magazynu"},
     {id:"zdjecia",poziom:bezZdjec.length?"warn":"ok",ikona:"🖼️",tytul:"Zdjęcia produktów",opis:bezZdjec.length?`${bezZdjec.length} produktów używa ikony zamiast zdjęcia.`:"Produkty mają zdjęcia.",akcja:"#/admin/produkty"},
@@ -4309,6 +4449,7 @@ function agentAIWykonaj(akcja){
     else toast("Brak produktów do zlecenia uzupełniającego");
     return z;
   }
+  if(akcja==="sprawdz-linki-producentow") return agentAISprawdzLinkiProducentow().then(t=>toast(t));
   if(akcja==="kartoteka-domyslna") return wypelnijDomyslnaKartotekeMagazynu();
   if(akcja==="audyt-magazynu") return audytMagazynuAI();
 }
@@ -4330,6 +4471,7 @@ function agentAIOpisKroku(x){
     kartoteka:"Uzupełnij lokalizację, dostawcę, EAN i progi magazynowe.",
     lokalizacje:"Utwórz brakujące lokalizacje w słowniku i przypisz je do produktów.",
     pamiec:"Dodaj procedury, których agent ma pilnować przy kolejnych poleceniach.",
+    "linki-producentow":"Ponów pobranie URL-i producentów i sprawdź, które dane trzeba jeszcze uzupełnić w karcie produktu.",
     monitoring:"Zdecyduj, które produkty mają mieć kontrolowany stan, a które bez limitu.",
     inwentaryzacja:"Potwierdź stan produktów bez świeżej inwentaryzacji.",
     zdjecia:"Dodaj zdjęcia do produktów, które nadal używają samej ikony.",
@@ -4362,6 +4504,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
   const plan=potrzebyZatowarowania().slice(0,8);
   const odpowiedziAgenta=(agentAIHistoria||[]).filter(h=>h.typ==="komenda"&&h.dane&&h.dane.odpowiedz).slice(0,5);
   const pamiecAgenta=(agentAIPamiec||[]).slice(0,12);
+  const linkiProducentow=agentAILinkiOczekujace();
   return adminSzkielet("/admin/agent-ai", `
   ${agentAISubnavHTML(aktywna)}
   <div class="panel ai-agent-panel">
@@ -4380,6 +4523,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
       <div class="order-stat-card"><span>🧾</span><b>${szkiceFaktur.length}</b><small>szkiców FV</small></div>
       <div class="order-stat-card"><span>📦</span><b>${potrzebyZatowarowania().length}</b><small>braki do zamówień</small></div>
       <div class="order-stat-card"><span>🧠</span><b>${(agentAIZlecenia||[]).length}</b><small>zleceń agenta</small></div>
+      <div class="order-stat-card ${linkiProducentow.length?"hot":""}"><span>🔗</span><b>${linkiProducentow.length}</b><small>linków producentów</small></div>
     </div>
     <div class="diag-actions agent-command-grid">
       <button class="btn" onclick="agentAIWykonaj('sync')">🔄 Synchronizuj bazę</button>
@@ -4387,6 +4531,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
       <button class="btn ghost" onclick="agentAIWykonaj('masowe-fv')">🧾 Utwórz brakujące szkice FV</button>
       <button class="btn ghost" onclick="agentAIWykonaj('export-magazyn')">📊 Eksport magazynu</button>
       <button class="btn ghost" onclick="agentAIWykonaj('export-zakupy')">📦 Plan zatowarowania CSV</button>
+      <button class="btn ghost" onclick="agentAIWykonaj('sprawdz-linki-producentow')">🔗 Sprawdź linki producentów</button>
       <button class="btn ghost" onclick="agentAIWykonaj('audyt-magazynu')">✅ Audyt magazynu JSON</button>
       <a class="btn ghost" href="#/diagnostyka">🛠️ Diagnostyka</a>
     </div>
@@ -4410,10 +4555,11 @@ function widokAdminAgentAI(sekcja="pulpit"){
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('zapamiętaj: ')">Naucz agenta</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż pamięć')">Pamięć</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż lokalizacje')">Lokalizacje</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('sprawdź linki producentów')">Linki producentów</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('synchronizuj bazę')">Synchronizacja</button>
       </div>
     </form>
-    <div class="agent-command-hints">Obsługiwane: zamówienia, braki, magazyn, wyszukiwanie produktu, szkic zamówienia do producenta, synchronizacja, szkice FV, eksport i audyt magazynu.</div>
+    <div class="agent-command-hints">Obsługiwane: zamówienia, braki, magazyn, wyszukiwanie produktu, linki producentów, szkic zamówienia do producenta, synchronizacja, szkice FV, eksport i audyt magazynu.</div>
     <div class="agent-memory-grid">
       <div class="agent-memory-card">
         <b>Jak uczyć agenta</b>
@@ -4437,6 +4583,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
       </div>`).join("")}
     </div>`:`<p class="order-detail-lead" style="margin-bottom:0">Brak zapisanych poleceń z panelu. Wpisz pierwsze polecenie powyżej.</p>`}
   </div>
+  <div style="${["komendy","plan"].includes(aktywna)?"":"display:none"}">${agentAILinkiProducentowPanelHTML()}</div>
   <div style="${aktywna==="plan"?"":"display:none"}">${agentAIPlanOperacyjnyHTML(analiza)}
   ${plan.length?`<div class="panel">
     <div class="order-section-head"><div><h2 style="margin-top:0">📦 Braki do aktywnych zamówień</h2><p class="order-detail-lead">Agent pokazuje tylko produkty, których rezerwacje z aktywnych zamówień są większe niż fizyczny stan magazynowy.</p></div><button class="btn" onclick="agentAIWykonaj('export-zakupy')">Pobierz pełny plan</button></div>
@@ -4802,6 +4949,7 @@ async function pobierzDaneProduktuZUrl(btn){
     const d=await chmura("product-url-inspect",{method:"POST",body:{url},timeout:30000});
     const p=d.product||{};
     uzupelnijPoleFormularza(form,"nazwa",p.nazwa,overwrite);
+    uzupelnijPoleFormularza(form,"kategoria",p.kategoria,overwrite);
     uzupelnijPoleFormularza(form,"opis",p.opis,overwrite);
     uzupelnijPoleFormularza(form,"cena",p.cena,overwrite);
     uzupelnijPoleFormularza(form,"zdjecie",p.zdjecie,overwrite);
@@ -4811,12 +4959,18 @@ async function pobierzDaneProduktuZUrl(btn){
     uzupelnijPoleFormularza(form,"kodProducenta",p.kodProducenta||p.mpn,overwrite);
     uzupelnijPoleFormularza(form,"externalId",p.externalId,overwrite);
     uzupelnijPoleFormularza(form,"marka",p.marka,overwrite);
+    uzupelnijPoleFormularza(form,"rozmiar",p.rozmiar,overwrite);
     uzupelnijPoleFormularza(form,"dostepnoscProducenta",p.dostepnoscProducenta,overwrite);
     uzupelnijPoleFormularza(form,"sourceUrl",p.sourceUrl||url,overwrite);
+    const braki=brakiDanychProducenta(p,d);
+    agentAIZapiszLinkProducenta(url,braki.length?"do uzupełnienia":"pobrano",braki.length?`Pobrano częściowo — braki: ${braki.join(", ")}`:"Pobrano i dopasowano do formularza",{lastProductName:p.nazwa||"",lastProduct:agentAIProduktZLinkuMini(p),lastMissing:braki,lastAvailability:p.dostepnoscProducenta||d.availability?.text||"",lastPrice:p.cena||""});
     const pg=document.getElementById("podgladZdjecia");
     if(pg&&form.elements.zdjecie?.value) pg.innerHTML=`<img src="${esc(form.elements.zdjecie.value)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`;
-    toast(`Dane producenta pobrane: ${p.dostepnoscProducenta||"do sprawdzenia"}`);
-  }catch(e){ toast("⚠️ Pobieranie produktu: "+(e.message||e)); }
+    toast(braki.length?`Pobrano, ale agent zapisał braki: ${braki.join(", ")}`:`Dane producenta pobrane: ${p.dostepnoscProducenta||"do sprawdzenia"}`);
+  }catch(e){
+    agentAIZapiszLinkProducenta(url,"oczekuje",e.message||String(e));
+    toast("⚠️ Pobieranie produktu nieudane — link zapisany dla Agenta AI: "+(e.message||e));
+  }
   finally{ btn.disabled=false; }
 }
 function allegroProduktSelectHTML(offerId){
@@ -6534,9 +6688,10 @@ function formularzProduktu(p, tryb){
     <form class="product-editor-form" onsubmit="${edycja?`zapiszProduktAdmin(event,${p.id})`:"dodajProdukt(event)"}">
       <div class="backend-note" style="margin-bottom:.8rem">
         <b>Źródło producenta / automatyczne uzupełnienie:</b> wklej adres produktu producenta, np. strona Alexandra. Panel pobierze nazwę, opis, cenę, EAN/kod producenta, zdjęcia i dostępność, a brakujące dane dopisze do edytora.
-        <div class="shipment-inline-control" style="margin-top:.55rem">
+        <div class="shipment-inline-control product-url-control" style="margin-top:.55rem">
           <input name="producentUrl" value="${esc(p.producentUrl||p.sourceUrl||"")}" placeholder="https://www.sklep.alexander.com.pl/product-..." style="flex:1">
           <button class="btn ghost" type="button" onclick="pobierzDaneProduktuZUrl(this)">🌐 Pobierz i dopasuj</button>
+          <button class="btn ghost" type="button" onclick="const u=this.form.elements.producentUrl.value.trim(); if(u){agentAIZapiszLinkProducenta(u,'oczekuje','Dodane ręcznie z edytora produktu'); toast('Link zapisany dla Agenta AI');} else toast('Wklej link producenta')">🤖 Dla agenta</button>
         </div>
       </div>
       <div class="f-row">
@@ -6620,11 +6775,14 @@ function formularzProduktu(p, tryb){
     </form>`;
 }
 function widokAdminProduktyDodaj(){
+  let prefill={};
+  try{ prefill=JSON.parse(sessionStorage.getItem("artway_prefill_product")||"{}")||{}; }catch(e){ prefill={}; }
   return asortymentSzkielet("produkty", `
     <div class="panel">
       <div class="crumb"><a href="#/admin/produkty">Produkty</a> › Dodaj</div>
       <h1>➕ Dodaj produkt</h1>
-      ${formularzProduktu({}, "dodawanie")}
+      ${prefill.nazwa?`<div class="backend-note"><b>Agent AI przygotował dane z linku producenta.</b> Sprawdź pola i kliknij „Dodaj produkt”.</div>`:""}
+      ${formularzProduktu(prefill, "dodawanie")}
       <p style="font-size:.8rem;color:var(--muted2);margin-top:.7rem">Produkt zapisze się w tej przeglądarce i od razu pojawi w sklepie. Aby trafił na hosting dla wszystkich klientów: <b>Produkty → 📤 products.json</b> i wgraj plik na serwer. Import hurtowy z hurtowni: <b>import_produktow.py</b>.</p>
     </div>`);
 }
@@ -6692,6 +6850,7 @@ function dodajProdukt(e){
   if(!p){ toast("⚠️ Podaj poprawną cenę"); return; }
   produktyDodane.push(p); zapiszLS("artway_produkty_dodane", produktyDodane);
   zapiszStanZFormularza(f, p.id);
+  try{ sessionStorage.removeItem("artway_prefill_product"); }catch(e){}
   zbudujProdukty();
   kategoriaNowegoProduktu = "";
   loguj("info","Dodano produkt: "+p.nazwa+" ("+zl(p.cena)+")");
