@@ -4541,6 +4541,39 @@ function allegroIndeksProduktowPoKodzie(){
   konflikty.forEach(k=>indeks.delete(k));
   return indeks;
 }
+function allegroNormalizujNazwe(v){
+  return String(v||"")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .replace(/&/g," i ")
+    .replace(/[^a-z0-9]+/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
+function allegroTokenyNazwy(v){
+  const stop=new Set(["gra","gry","planszowa","planszowe","edukacyjna","edukacyjne","zabawka","zestaw","alexander","dla","oraz","plus","wersja","mini","duza","duzy","mala","maly","od","do","na","w","i","z"]);
+  return allegroNormalizujNazwe(v).split(" ").filter(t=>t.length>=3&&!stop.has(t));
+}
+function allegroDopasujProduktPoNazwie(nazwa, produktyLista){
+  const norm=allegroNormalizujNazwe(nazwa);
+  const tokeny=allegroTokenyNazwy(nazwa);
+  if(!norm || !tokeny.length) return null;
+  let najlepszy=null, drugi=0;
+  for(const p of produktyLista){
+    const pn=allegroNormalizujNazwe(p.nazwa);
+    const pt=allegroTokenyNazwy(p.nazwa);
+    if(!pn || !pt.length) continue;
+    let score=0;
+    if(pn===norm) score=1;
+    else if(pt.length>=2 && pt.every(t=>tokeny.includes(t))) score=Math.min(0.94,0.62+(pt.length/Math.max(tokeny.length,pt.length))*0.34);
+    else if(tokeny.length>=2 && tokeny.every(t=>pt.includes(t))) score=Math.min(0.9,0.58+(tokeny.length/Math.max(tokeny.length,pt.length))*0.32);
+    if(score>0){
+      if(!najlepszy || score>najlepszy.score){ drugi=najlepszy?.score||0; najlepszy={produkt:p,score}; }
+      else if(score>drugi) drugi=score;
+    }
+  }
+  return najlepszy && najlepszy.score>=0.82 && (najlepszy.score-drugi)>=0.08 ? najlepszy.produkt : null;
+}
 function allegroKodyZamowienDlaOferty(){
   const mapa=new Map();
   (Array.isArray(allegroZamowienia)?allegroZamowienia:[]).forEach(z=>{
@@ -4555,6 +4588,7 @@ function allegroKodyZamowienDlaOferty(){
 }
 function allegroSugestieAutomapowania(){
   const indeks=allegroIndeksProduktowPoKodzie();
+  const produktyLista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
   const zZamowien=allegroKodyZamowienDlaOferty();
   const wyniki=[];
   (Array.isArray(allegroOferty)?allegroOferty:[]).forEach(o=>{
@@ -4570,14 +4604,22 @@ function allegroSugestieAutomapowania(){
       }
       if(produkt) break;
     }
+    if(!produkt){
+      const nazwy=[o.name];
+      if(dodatkowe) nazwy.push(...[...dodatkowe].filter(x=>!allegroKluczeKodu(x).length || String(x).length>18));
+      for(const n of nazwy){
+        produkt=allegroDopasujProduktPoNazwie(n,produktyLista);
+        if(produkt){ kod="nazwa"; break; }
+      }
+    }
     if(produkt) wyniki.push({offerId:String(o.id), productId:String(produkt.id), produkt, oferta:o, kod});
   });
   return wyniki;
 }
 async function allegroAutomapujOferty(){
   const sugestie=allegroSugestieAutomapowania();
-  if(!sugestie.length){ toast("Brak pewnych dopasowań po kodach Allegro/SKU"); return; }
-  if(!confirm(`Automatycznie podpiąć ${sugestie.length} ofert Allegro po kodach do produktów sklepu?`)) return;
+  if(!sugestie.length){ toast("Brak pewnych dopasowań po kodach lub nazwach Allegro"); return; }
+  if(!confirm(`Automatycznie podpiąć ${sugestie.length} ofert Allegro po pewnych kodach/nazwach do produktów sklepu?`)) return;
   let ok=0, bledy=0, ostatnie=null;
   toast(`Mapuję oferty Allegro: ${sugestie.length}…`);
   for(const s of sugestie){
@@ -4747,7 +4789,7 @@ function allegroOfertyTabelaHTML(){
       <div><h2 style="margin-top:0">🏷️ Oferty Allegro i podpinanie produktów</h2><p class="order-detail-lead">Jedna karta produktu w sklepie może mieć wiele ofert Allegro. Przy ofercie wybierasz produkt sklepu albo tworzysz nowy produkt z danych oferty.</p></div>
       <div class="order-actions">
         <button class="btn" onclick="allegroSynchronizujOferty()">🔄 Synchronizuj oferty</button>
-        <button class="btn ghost" onclick="allegroAutomapujOferty()" ${autoSugestie?"":"disabled"}>🤖 Auto-mapuj po kodach${autoSugestie?` (${autoSugestie})`:""}</button>
+        <button class="btn ghost" onclick="allegroAutomapujOferty()" ${autoSugestie?"":"disabled"}>🤖 Auto-mapuj${autoSugestie?` (${autoSugestie})`:""}</button>
       </div>
     </div>
     <div class="orders-toolbar allegro-toolbar">
