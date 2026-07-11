@@ -1996,6 +1996,13 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
   if (p.kodProducenta || p.mpn) parameters.push({ name: 'Kod producenta', values: [tekst(p.kodProducenta || p.mpn, 120)] });
   if (p.marka) parameters.push({ name: 'Marka', values: [tekst(p.marka, 120)] });
   const autoParameters = allegroParametryAutomatyczne(p, opt.categoryParameters);
+  const categoryParameterTypes = new Map((Array.isArray(opt.categoryParameters) ? opt.categoryParameters : []).map((param) => [
+    String(param?.id || ''),
+    param?.options?.describesProduct,
+  ]));
+  const customParameters = Array.isArray(p.allegroParameters) ? p.allegroParameters : [];
+  const offerParameters = [...autoParameters, ...customParameters].filter((param) => categoryParameterTypes.get(String(param?.id || '')) === false);
+  const productParameters = [...autoParameters, ...customParameters].filter((param) => categoryParameterTypes.get(String(param?.id || '')) !== false);
   const productObj = allegroProductId
     ? { id: allegroProductId }
     : (!categoryId && gtin)
@@ -2003,7 +2010,7 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
       : {
           name: tekst(p.nazwa || p.name, 75).trim(),
           category: categoryId ? { id: categoryId } : undefined,
-          parameters: [...parameters.filter((x) => x.id), ...autoParameters, ...(Array.isArray(p.allegroParameters) ? p.allegroParameters : [])],
+          parameters: [...parameters.filter((x) => x.id), ...productParameters],
           images,
         };
   const payload = {
@@ -2011,7 +2018,7 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
     productSet: [{
       product: productObj,
     }],
-    parameters: autoParameters,
+    parameters: offerParameters,
     sellingMode: {
       format: 'BUY_NOW',
       price: { amount: String(Number(p.cena || p.price || 0).toFixed(2)), currency: 'PLN' },
