@@ -517,6 +517,10 @@ body.hide-home-contact .home-contact{display:none}
 .integration-card b{display:block;margin-bottom:.25rem}
 .integration-state{display:inline-block;border-radius:999px;padding:.12rem .55rem;font-size:.7rem;font-weight:800;background:#fef3c7;color:#854d0e}
 .backend-note{border-left:4px solid #f59e0b;background:#fffbeb;border-radius:8px;padding:.75rem .9rem;font-size:.84rem;color:#713f12;margin:.75rem 0}
+.allegro-category-box{border-left-color:#f59e0b}
+.allegro-category-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.65rem;align-items:center;border:1px solid rgba(245,158,11,.25);background:rgba(255,255,255,.72);border-radius:12px;padding:.62rem .7rem;margin:.5rem 0;color:#111827}
+.allegro-category-row.main{border-color:#f59e0b;background:#fff7d6}
+.allegro-category-row small{color:#6b7280}
 .shipment-manager-form{margin-top:1rem}
 .shipment-manager-box{background:var(--bg);border:1.5px solid var(--line);border-radius:14px;padding:1.05rem 1.2rem}
 .inpost-like-title{margin:.1rem 0 1rem;font-size:1.85rem;line-height:1.1;color:var(--ink);font-weight:850}

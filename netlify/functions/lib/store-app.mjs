@@ -1499,6 +1499,112 @@ function parsujProduktZHtml(url, html) {
     availability: { available: dostepny, text: statusHtml || (dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia')) },
   };
 }
+function allegroNormTekst(s = '') {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+function allegroFrazyKategorii(product = {}, opt = {}) {
+  const p = product || {};
+  const base = [
+    opt.phrase,
+    p.allegroCategoryPhrase,
+    [p.marka, p.nazwa || p.name].filter(Boolean).join(' '),
+    [p.nazwa || p.name, p.kategoria, p.kategoriaPelna].filter(Boolean).join(' '),
+    p.nazwa || p.name,
+    p.kategoriaPelna,
+    p.kategoria,
+    p.grupaKategorii,
+  ].map((x) => tekst(x, 180).trim()).filter(Boolean);
+  const allText = allegroNormTekst(base.join(' ') + ' ' + [p.opis, p.badge, p.producentUrl, p.sourceUrl].filter(Boolean).join(' '));
+  if (/\b(gra|gry|plansz|planszowa|planszowe|karcian|edukacyjn|rodzinn)\b/.test(allText)) base.push('gry planszowe', 'gry edukacyjne', 'zabawki gry');
+  if (/\b(zabaw|kreatywn|malowank|piaskow|ukladank|puzzle)\b/.test(allText)) base.push('zabawki kreatywne', 'zabawki edukacyjne');
+  return [...new Set(base.map((x) => x.replace(/\s+/g, ' ').trim()).filter((x) => x.length >= 2))].slice(0, 8);
+}
+function allegroSciezkaKategorii(rawPath) {
+  const arr = Array.isArray(rawPath) ? rawPath : [];
+  return arr.map((x) => {
+    if (typeof x === 'string') return x;
+    return tekst(x?.name || x?.id || '', 160).trim();
+  }).filter(Boolean);
+}
+function allegroNormalizujKategorie(raw = {}, phrase = '') {
+  const source = Array.isArray(raw?.matchingCategories) ? raw.matchingCategories
+    : Array.isArray(raw?.matching_categories) ? raw.matching_categories
+      : Array.isArray(raw?.categories) ? raw.categories
+        : Array.isArray(raw?.items) ? raw.items
+          : Array.isArray(raw) ? raw
+            : [];
+  return source.map((item) => {
+    const c = item?.category || item || {};
+    const path = allegroSciezkaKategorii(c.path || item.path || c.categoryPath || item.categoryPath);
+    const name = tekst(c.name || item.name || '', 180).trim();
+    if (!path.length && name) path.push(name);
+    const id = tekst(c.id || item.id || '', 80).trim();
+    return {
+      id,
+      name,
+      parentId: tekst(c.parent?.id || item.parent?.id || c.parentId || item.parentId || '', 80).trim(),
+      leaf: c.leaf ?? item.leaf ?? c.isLeaf ?? item.isLeaf ?? undefined,
+      path,
+      pathText: path.join(' › '),
+      phrase,
+      score: Number(item.score ?? item.matchScore ?? item.relevance ?? 0) || 0,
+      raw: item,
+    };
+  }).filter((x) => x.id && x.name);
+}
+function allegroOcenKategorie(product = {}, cat = {}) {
+  const p = product || {};
+  const productText = allegroNormTekst([p.nazwa || p.name, p.kategoria, p.kategoriaPelna, p.grupaKategorii, p.opis, p.marka, p.badge].join(' '));
+  const catText = allegroNormTekst([cat.name, cat.pathText].join(' '));
+  let score = Number(cat.score || 0);
+  if (cat.leaf === true) score += 45;
+  if (cat.leaf === false) score -= 35;
+  const words = [...new Set(productText.split(/\s+/).filter((w) => w.length >= 4 && !/^(oraz|ktore|ktore|jest|dla|przez|produkt|zestaw)$/.test(w)))].slice(0, 30);
+  for (const w of words) if (catText.includes(w)) score += 4;
+  if (/\b(gra|gry|plansz|karcian|edukacyjn|rodzinn)\b/.test(productText) && /\b(gra|gry|plansz|karcian|edukacyjn|zabaw)\b/.test(catText)) score += 55;
+  if (/\b(zabaw|kreatywn|malowank|puzzle|ukladank)\b/.test(productText) && /\b(zabaw|dziec|kreatywn|edukacyjn|puzzle)\b/.test(catText)) score += 35;
+  if (/\b(ksiaz|liter|slown)\b/.test(productText) && /\b(ksiaz|liter|edukacyjn|gry)\b/.test(catText)) score += 20;
+  return score;
+}
+async function allegroSugerujKategorie(req, product = {}, opt = {}) {
+  const phrases = allegroFrazyKategorii(product, opt);
+  const byId = new Map();
+  const errors = [];
+  for (const phrase of phrases) {
+    try {
+      const raw = await allegroWywolaj(req, '/sale/matching-categories', { parameters: { name: phrase } });
+      for (const cat of allegroNormalizujKategorie(raw, phrase)) {
+        const score = allegroOcenKategorie(product, cat);
+        const prev = byId.get(cat.id);
+        if (!prev || score > prev.score) byId.set(cat.id, { ...cat, score });
+      }
+    } catch (e) {
+      errors.push({ phrase, message: e.message || String(e), status: e.status || 0, code: e.code || '' });
+    }
+  }
+  const limit = Math.max(1, Math.min(20, Number(opt.limit) || 8));
+  const suggestions = [...byId.values()].sort((a, b) => b.score - a.score).slice(0, limit);
+  const selected = suggestions.find((x) => x.leaf === true) || suggestions[0] || null;
+  return { selected, suggestions, phrases, errors };
+}
+function allegroMaKategorie(product = {}, opt = {}) {
+  return !!tekst(opt.categoryId || product.allegroCategoryId || product.categoryId || '', 80).trim();
+}
+async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
+  const options = { ...(opt || {}) };
+  let categorySuggestion = null;
+  if (!allegroMaKategorie(product, options)) {
+    categorySuggestion = await allegroSugerujKategorie(req, product, { limit: 8 });
+    if (categorySuggestion?.selected?.id) options.categoryId = categorySuggestion.selected.id;
+  }
+  const draft = allegroDraftZProduktu(product, options);
+  return { ...draft, categorySuggestion };
+}
 function allegroDraftZProduktu(product = {}, opt = {}) {
   const p = product || {};
   const categoryId = tekst(opt.categoryId || p.allegroCategoryId || p.categoryId || '', 80).trim();
@@ -1528,7 +1634,7 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
     external: externalId ? { id: externalId } : undefined,
     images: images.map((url) => ({ url: tekst(url, 1000) })),
     description: {
-      sections: [{ items: [{ type: 'TEXT', content: `<p>${tekst(p.opis || '', 8000).replace(/\n/g, '<br>')}</p>` }] }],
+      sections: [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(tekst(p.opis || '', 12000)).replace(/\n/g, '<br>')}</p>` }] }],
     },
   };
   const missing = [];
@@ -2547,21 +2653,54 @@ export default async (req) => {
     }
 
     // ─── ALLEGRO: szkic i wystawienie produktu sklepu jako oferty ───
+    if (action === 'allegro-categories') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const phrase = tekst(url.searchParams.get('name') || url.searchParams.get('phrase') || url.searchParams.get('q') || '', 180).trim();
+      const parentId = tekst(url.searchParams.get('parentId') || url.searchParams.get('parent.id') || '', 80).trim();
+      const raw = phrase
+        ? await allegroWywolaj(req, '/sale/matching-categories', { parameters: { name: phrase } })
+        : await allegroWywolaj(req, '/sale/categories', { parameters: parentId ? { 'parent.id': parentId } : {} });
+      return odpowiedz({ ok: true, categories: allegroNormalizujKategorie(raw, phrase), raw });
+    }
+
+    if (action === 'allegro-category-suggest') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const result = await allegroSugerujKategorie(req, body.product || {}, { phrase: body.phrase, limit: body.limit || 10 });
+      return odpowiedz({ ok: true, ...result });
+    }
+
+    if (action === 'allegro-category-parameters') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const categoryId = tekst(url.searchParams.get('categoryId') || url.searchParams.get('id') || '', 80).trim();
+      if (!categoryId) return odpowiedz({ ok: false, error: 'Podaj categoryId' }, 422);
+      const raw = await allegroWywolaj(req, `/sale/categories/${encodeURIComponent(categoryId)}/parameters`);
+      return odpowiedz({ ok: true, categoryId, parameters: raw.parameters || [], raw });
+    }
+
     if (action === 'allegro-offer-draft') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const draft = allegroDraftZProduktu(body.product || {}, body.options || {});
-      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: draft.missing.length === 0 });
+      const draft = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
+      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: draft.missing.length === 0, categorySuggestion: draft.categorySuggestion });
     }
 
     if (action === 'allegro-create-product-offer') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const draft = body.draft && typeof body.draft === 'object' ? body.draft : allegroDraftZProduktu(body.product || {}, body.options || {}).payload;
+      let categorySuggestion = null;
+      let draft = body.draft && typeof body.draft === 'object' ? body.draft : null;
+      if (!draft) {
+        const prepared = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
+        categorySuggestion = prepared.categorySuggestion;
+        if (prepared.missing.length) return odpowiedz({ ok: false, error: `Szkic wymaga uzupełnienia: ${prepared.missing.join(', ')}`, missing: prepared.missing, draft: prepared.payload, categorySuggestion }, 422);
+        draft = prepared.payload;
+      }
       const created = await allegroWywolaj(req, '/sale/product-offers', { method: 'POST', bodyObj: draft });
-      return odpowiedz({ ok: true, offer: created, allegro: await allegroStatus(req) }, 201);
+      return odpowiedz({ ok: true, offer: created, allegro: await allegroStatus(req), categorySuggestion }, 201);
     }
 
     // ─── PRODUCENT: pobranie danych z URL produktu (admin) ───
