@@ -4987,7 +4987,8 @@ function allegroWystawianiePanelHTML(){
   </div>`;
 }
 function adminSubnavHTML(items, aktywny){
-  return `<div class="panel admin-tabs-panel"><div class="shipping-tabs admin-main-tabs">${items.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}">${esc(x.label)}${x.badge?` <span class="nav-badge">${esc(x.badge)}</span>`:""}</a>`).join("")}</div></div>`;
+  const safe = (items||[]).filter(x=>x&&x.id&&x.href&&x.label);
+  return `<nav class="panel admin-tabs-panel module-tabs-panel" aria-label="Podsekcje panelu"><div class="shipping-tabs admin-main-tabs">${safe.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}" ${x.id===aktywny?'aria-current="page"':""} title="${esc(x.label)}"><span class="tab-label">${esc(x.label)}</span>${x.badge?`<span class="nav-badge">${esc(x.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
 }
 function magazynSubnavHTML(aktywny="pulpit"){
   const produktyAktywne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
@@ -5301,6 +5302,7 @@ function widokAdminZamowienie(nr){
   const ochronaKwota=String(w.ochrona||"").trim();
   const ochronaPreset=inpostOchronaPreset(ochronaKwota);
   return adminSzkielet("/admin/zamowienia", `
+  ${adminZamowieniaSubnavHTML("lista")}
   <div class="panel order-detail-page">
     <div class="crumb"><a href="#/admin/zamowienia">Zamówienia</a> › ${esc(z.nr)}</div>
     <div class="order-detail-hero">
