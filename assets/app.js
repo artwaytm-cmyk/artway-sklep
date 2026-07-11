@@ -1493,12 +1493,21 @@ function renderuj(){
       else if(t.startsWith("/admin/magazyn/")) w.innerHTML = widokAdminMagazyn(t.split("/")[3]||"pulpit");
       else if(t==="/admin/agent-ai") w.innerHTML = widokAdminAgentAI("pulpit");
       else if(t.startsWith("/admin/agent-ai/")) w.innerHTML = widokAdminAgentAI(t.split("/")[3]||"pulpit");
+      else if(t.startsWith("/admin/asortyment/")){
+        const s=t.split("/")[3]||"produkty";
+        w.innerHTML = s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabaty():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
+      }
+      else if(t.startsWith("/admin/personalizacja/")){
+        const s=t.split("/")[3]||"wyglad";
+        w.innerHTML = s==="rozmieszczenie"?widokAdminRozmieszczenie():s==="bannery"?widokAdminBannery():s==="podstrony"?widokAdminPodstrony():s==="strony"?widokAdminStrony():s==="dostawy"?widokAdminDostawy():widokAdminWyglad();
+      }
       else if(t==="/admin/asortyment" || t==="/admin/produkty") w.innerHTML = widokAdminProdukty();
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
       else if(t.startsWith("/admin/produkty/edytuj/")) w.innerHTML = widokAdminProduktEdytuj(parseInt(t.split("/")[4]));
       else if(t==="/admin/kategorie") w.innerHTML = widokAdminKategorie();
       else if(t==="/admin/mapowanie") w.innerHTML = widokAdminMapowanie();
-      else if(t==="/admin/klienci") w.innerHTML = widokAdminKlienci();
+      else if(t==="/admin/klienci") w.innerHTML = widokAdminKlienci("lista");
+      else if(t.startsWith("/admin/klienci/")) w.innerHTML = widokAdminKlienci(t.split("/")[3]||"lista");
       else if(t.startsWith("/admin/klient/")) w.innerHTML = widokAdminKlient(decodeURIComponent(t.split("/")[3]||""));
       else if(t==="/admin/rabaty") w.innerHTML = widokAdminRabaty();
       else if(t==="/admin/opinie") w.innerHTML = widokAdminOpinie();
@@ -1508,9 +1517,12 @@ function renderuj(){
       else if(t==="/admin/bannery") w.innerHTML = widokAdminBannery();
       else if(t==="/admin/podstrony") w.innerHTML = widokAdminPodstrony();
       else if(t==="/admin/strony") w.innerHTML = widokAdminStrony();
-      else if(t==="/admin/eksport") w.innerHTML = widokAdminEksport();
-      else if(t==="/admin/aktualizacja") w.innerHTML = widokAdminAktualizacja();
-      else if(t==="/admin/publikacja") w.innerHTML = widokAdminPublikacja();
+      else if(t==="/admin/eksport") w.innerHTML = widokAdminEksport("import");
+      else if(t.startsWith("/admin/eksport/")) { const s=t.split("/")[3]||"import"; w.innerHTML = s==="aktualizacja"?widokAdminAktualizacja("status"):widokAdminEksport(s); }
+      else if(t==="/admin/aktualizacja") w.innerHTML = widokAdminAktualizacja("status");
+      else if(t.startsWith("/admin/aktualizacja/")) w.innerHTML = widokAdminAktualizacja(t.split("/")[3]||"status");
+      else if(t==="/admin/publikacja") w.innerHTML = widokAdminPublikacja("kontrola");
+      else if(t.startsWith("/admin/publikacja/")) { const s=t.split("/")[3]||"kontrola"; w.innerHTML = s==="aktualizacja"?widokAdminAktualizacja("status"):widokAdminPublikacja(s); }
       else w.innerHTML = widokAdmin();
     }
     else w.innerHTML = `<div class="page"><div class="panel"><h1>404 — nie ma takiej strony 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
@@ -3533,7 +3545,7 @@ const TABY_PERSONALIZACJI = [
 ];
 function personalizacjaSzkielet(tab, tresc){
   return adminSzkielet("/admin/personalizacja", `
-    ${adminSubnavHTML(TABY_PERSONALIZACJI.map(([id,label])=>({id,href:`#/admin/${id}`,label})),tab)}
+    ${adminSubnavHTML(TABY_PERSONALIZACJI.map(([id,label])=>({id,href:`#/admin/personalizacja/${id}`,label})),tab)}
     ${tresc}`);
 }
 /* Asortyment = produkty, katalogi, mapowanie i rabaty w JEDNYM dziale z zakładkami */
@@ -3542,7 +3554,7 @@ const TABY_ASORTYMENTU = [
 ];
 function asortymentSzkielet(tab, tresc){
   return adminSzkielet("/admin/asortyment", `
-    ${adminSubnavHTML(TABY_ASORTYMENTU.map(([id,label])=>({id,href:`#/admin/${id}`,label})),tab)}
+    ${adminSubnavHTML(TABY_ASORTYMENTU.map(([id,label])=>({id,href:`#/admin/asortyment/${id}`,label})),tab)}
     ${tresc}`);
 }
 function zapiszCzescUstawien(obj){
@@ -5005,6 +5017,40 @@ function agentAISubnavHTML(aktywny="pulpit"){
     {id:"historia",href:"#/admin/agent-ai/historia",label:"🕓 Historia"}
   ],aktywny);
 }
+function klienciSubnavHTML(aktywny="lista"){
+  const u=pobierzUzytkownikow();
+  const admini=u.filter(x=>kontoMaRoleAdmin(x.email)).length;
+  return adminSubnavHTML([
+    {id:"lista",href:"#/admin/klienci",label:"👥 Lista klientów",badge:u.length},
+    {id:"dodaj",href:"#/admin/klienci/dodaj",label:"➕ Dodaj klienta"},
+    {id:"uprawnienia",href:"#/admin/klienci/uprawnienia",label:"🛡️ Uprawnienia",badge:admini},
+    {id:"zamowienia",href:"#/admin/klienci/zamowienia",label:"📦 Zamówienia klientów"}
+  ],aktywny);
+}
+function eksportSubnavHTML(aktywny="import"){
+  return adminSubnavHTML([
+    {id:"import",href:"#/admin/eksport",label:"📥 Import produktów"},
+    {id:"eksport",href:"#/admin/eksport/eksport",label:"📤 Eksport produktów"},
+    {id:"kopie",href:"#/admin/eksport/kopie",label:"💾 Kopie i raporty"},
+    {id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja strony"}
+  ],aktywny);
+}
+function aktualizacjaSubnavHTML(aktywny="status"){
+  return adminSubnavHTML([
+    {id:"status",href:"#/admin/aktualizacja",label:"📡 Status"},
+    {id:"publikuj",href:"#/admin/aktualizacja/publikuj",label:"⬆️ Publikuj zmiany"},
+    {id:"index",href:"#/admin/aktualizacja/index",label:"📄 Nowy index.html"},
+    {id:"kopie",href:"#/admin/aktualizacja/kopie",label:"↩️ Kopie"}
+  ],aktywny);
+}
+function publikacjaSubnavHTML(aktywny="kontrola"){
+  return adminSubnavHTML([
+    {id:"kontrola",href:"#/admin/publikacja",label:"✅ Gotowość"},
+    {id:"pliki",href:"#/admin/publikacja/pliki",label:"📁 Pliki i hosting"},
+    {id:"kroki",href:"#/admin/publikacja/kroki",label:"🧭 Kroki publikacji"},
+    {id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja"}
+  ],aktywny);
+}
 function allegroSubnavHTML(aktywny="start"){
   return adminSubnavHTML([
     {id:"start",href:"#/admin/allegro",label:"Start"},
@@ -5559,12 +5605,19 @@ function zmienRoleUzytkownika(email){
   toast(maRole?"Odebrano uprawnienia administratora":"Nadano uprawnienia administratora 🛡️");
   renderuj();
 }
-function widokAdminKlienci(){
+function widokAdminKlienci(sekcja="lista"){
+  const aktywna=["lista","dodaj","uprawnienia","zamowienia"].includes(String(sekcja||""))?String(sekcja||""):"lista";
   let kl = pobierzUzytkownikow();
   if(szukajKlientow) kl = kl.filter(k=>(k.imie+" "+k.email).toLowerCase().includes(szukajKlientow));
+  if(aktywna==="uprawnienia") kl=kl.slice().sort((a,b)=>Number(kontoMaRoleAdmin(b.email))-Number(kontoMaRoleAdmin(a.email))||String(a.email).localeCompare(String(b.email),"pl"));
   const zam = pobierzZamowienia();
+  const klienciZZamowieniami=kl.map(k=>{
+    const z=zam.filter(x=>x.email===k.email);
+    return {k,z,ile:z.length,suma:z.filter(x=>x.status!=="anulowane").reduce((s,x)=>s+kwotaNum(x.razem),0),ostatnie:z.slice().sort((a,b)=>(Number(b.ts)||0)-(Number(a.ts)||0))[0]};
+  }).filter(x=>x.ile).sort((a,b)=>b.suma-a.suma);
   return adminSzkielet("/admin/klienci", `
-  <div class="panel">
+  ${klienciSubnavHTML(aktywna)}
+  <div class="panel" style="${aktywna==="dodaj"?"":"display:none"}">
     <h1>➕ Dodaj klienta (pełna kartoteka)</h1>
     <form onsubmit="dodajKlientaAdmin(event)">
       ${polaKartotekiHTML({})}
@@ -5572,10 +5625,11 @@ function widokAdminKlienci(){
     </form>
     <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">Konto trafia do wspólnej bazy serwerowej. Klient może zalogować się na dowolnym urządzeniu.</p>
   </div>
-  <div class="panel">
-    <h1>👥 Użytkownicy (${kl.length}) <button class="btn ghost" style="float:right" onclick="eksportujKlientow()">📤 CSV</button></h1>
+  <div class="panel" style="${["lista","uprawnienia"].includes(aktywna)?"":"display:none"}">
+    <h1>${aktywna==="uprawnienia"?"🛡️ Uprawnienia użytkowników":"👥 Użytkownicy"} (${kl.length}) <button class="btn ghost" style="float:right" onclick="eksportujKlientow()">📤 CSV</button></h1>
+    ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem">Tutaj szybko nadajesz lub odbierasz rolę administratora. Konto głównego właściciela i aktualnie używane konto są chronione przed przypadkową zmianą.</div>`:""}
     <input placeholder="Szukaj: imię, e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();renderuj()" style="width:100%;max-width:320px;margin:.5rem 0 .8rem;padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
-    <table class="log-table">
+    <div class="table-scroll"><table class="log-table">
       <tr><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
       ${kl.map(k=>{
         const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
@@ -5592,8 +5646,25 @@ function widokAdminKlienci(){
           ${admin?"":`<button class="ci-remove" onclick="if(confirm('Usunąć konto ${esc(k.email)}?')) usunKlienta('${esc(k.email)}')" title="Usuń konto">🗑️</button>`}
         </td>
       </tr>`;}).join("")}
-    </table>
+    </table></div>
     <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę klienta: dane kontaktowe, adres, dane firmowe, notatka, nowe hasło. Zamówienia klienta otworzysz, klikając ich liczbę.</p>
+  </div>
+  <div class="panel" style="${aktywna==="zamowienia"?"":"display:none"}">
+    <div class="order-section-head">
+      <div><h1 style="margin:0">📦 Zamówienia klientów</h1><p class="order-detail-lead">Szybki widok klientów według liczby i wartości zamówień.</p></div>
+      <a class="btn ghost" href="#/admin/zamowienia">Pełna lista zamówień</a>
+    </div>
+    <div class="table-scroll"><table class="log-table">
+      <tr><th>Klient</th><th>E-mail</th><th>Zamówień</th><th>Wartość</th><th>Ostatnie</th><th>Akcje</th></tr>
+      ${klienciZZamowieniami.map(x=>`<tr>
+        <td><a href="#/admin/klient/${encodeURIComponent(x.k.email)}"><b>${esc(x.k.imie||"Klient")}</b></a></td>
+        <td>${esc(x.k.email)}</td>
+        <td><b>${x.ile}</b></td>
+        <td>${zl(x.suma)}</td>
+        <td>${x.ostatnie?`<a href="#/admin/zamowienie/${encodeURIComponent(x.ostatnie.nr)}">${esc(x.ostatnie.nr)}</a><br><small>${esc(x.ostatnie.data||"")}</small>`:"—"}</td>
+        <td><a class="btn ghost" href="#/admin/zamowienia" onclick="szukajZamowien=${jsArg(x.k.email)};filtrZamowien='wszystkie'">Pokaż zamówienia</a></td>
+      </tr>`).join("") || `<tr><td colspan="6">Brak klientów z zamówieniami.</td></tr>`}
+    </table></div>
   </div>`);
 }
 /* ── Pełna kartoteka klienta ── */
@@ -5654,6 +5725,7 @@ function widokAdminKlient(email){
   const zam = pobierzZamowienia().filter(z=>z.email===k.email);
   const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
   return adminSzkielet("/admin/klienci", `
+  ${klienciSubnavHTML("lista")}
   <div class="panel">
     <div class="crumb"><a href="#/admin/klienci">Klienci</a> › ${esc(k.imie)}</div>
     <h1>📇 ${esc(k.imie)} ${admin?'<span class="lvl lvl-info">ADMIN</span>':""} ${k.nip?'<span class="lvl lvl-info">firma</span>':""}</h1>
@@ -8335,10 +8407,12 @@ function zapiszStrony(e){
 }
 
 /* ── Eksporty ── */
-function widokAdminEksport(){
+function widokAdminEksport(sekcja="import"){
+  const aktywna=["import","eksport","kopie","aktualizacja"].includes(String(sekcja||""))?String(sekcja||""):"import";
   const p=podgladImportuProduktow,kopia=wczytajLS("artway_ostatnia_kopia_importu",null);
   return adminSzkielet("/admin/eksport", `
-  <div class="panel">
+  ${eksportSubnavHTML(aktywna)}
+  <div class="panel" style="${aktywna==="import"?"":"display:none"}">
     <h1>⇄ Import i eksport produktów</h1>
     <p style="color:var(--muted2)">Obsługa dużych katalogów JSON, CSV oraz OVF <code>.xls</code> zapisanego jako CSV. Import zawsze zaczyna się od analizy — żadne dane nie zmienią się przed kliknięciem „Wykonaj import”.</p>
     <div class="import-grid">
@@ -8377,7 +8451,7 @@ function widokAdminEksport(){
       <button class="btn" style="margin-top:.7rem" onclick="wykonajImportProduktow()">✅ Wykonaj import ${p.produkty.length} ${p.produkty.length===1?"produktu":"produktów"}</button>`:"<p>Brak poprawnych produktów do importu.</p>"}
     </div>`:""}
   </div>
-  <div class="panel">
+  <div class="panel" style="${aktywna==="eksport"?"":"display:none"}">
     <h1>📤 Eksport produktów</h1>
     <div class="f-row" style="align-items:end">
       <div class="f-group"><label>Zakres</label><select id="zakresEksportuProduktow" onchange="$('kategoriaEksportuBox').style.display=this.value==='kategoria'?'':'none'">
@@ -8396,7 +8470,7 @@ function widokAdminEksport(){
     </div>
     <p class="pay-note" style="text-align:left">Eksport zawiera: ID, nazwę, kategorię, ceny, stan, SKU, GTIN/EAN, EXTERNAL_ID, MPN, markę, opis, etykietę, ikonę, zdjęcie główne, galerię do 16 zdjęć, warianty, kolor karty, kolor produktu, rozmiar i materiał. Produkty z kosza nie trafiają do pliku na hosting.</p>
   </div>
-  <div class="panel">
+  <div class="panel" style="${aktywna==="kopie"?"":"display:none"}">
     <h1>📦 Pozostałe eksporty i kopie</h1>
     <div class="sug"><span class="s-ico">🌍</span><span><b>Publiczny index.html</b> — po rozbiciu projektu jest lekkim szkieletem strony i zawiera zapisane ustawienia publiczne. Kod działania sklepu jest w <code>assets/app.js</code>, a wygląd w <code>assets/styles.css</code>.<br>
       <button class="btn" style="margin-top:.4rem" onclick="eksportujIndexHTML()">Pobierz index.html z ustawieniami</button></span></div>
@@ -8432,7 +8506,7 @@ async function sprawdzStatusAktualizacji(cicho=false){
     stanAktualizacji={...stanAktualizacji,sprawdzono:true,ladowanie:false,online:false,error:e.message};
     if(!cicho)toast("Nie udało się sprawdzić aktualizacji");
   }
-  if(trasa()==="/admin/aktualizacja")renderuj();
+  if(trasa().startsWith("/admin/aktualizacja"))renderuj();
 }
 async function polaczAktualizacje(e){
   e.preventDefault();const f=new FormData(e.target);
@@ -8507,10 +8581,12 @@ function statusPlikuPublikacji(nazwa,dane){
   if(!dane)return `<div class="info-card"><b>${nazwa}</b><p>brak danych</p></div>`;
   return `<div class="info-card"><b>${nazwa}</b><p>${dane.exists?"✅ istnieje":"❌ brak"} • ${dane.writable?"zapis możliwy":"brak zapisu"}<br>${dane.exists?`${formatRozmiaruPliku(dane.size)} • ${new Date(dane.modified).toLocaleString("pl-PL")}<br><code>${esc(dane.sha256||"")}</code>`:""}</p></div>`;
 }
-function widokAdminAktualizacja(){
+function widokAdminAktualizacja(sekcja="status"){
+  const aktywna=["status","publikuj","index","kopie"].includes(String(sekcja||""))?String(sekcja||""):"status";
   const s=stanAktualizacji,p=s.publisher||{},last=p.last_publication,backups=p.backups||[];
   return adminSzkielet("/admin/aktualizacja",`
-  <div class="panel">
+  ${aktualizacjaSubnavHTML(aktywna)}
+  <div class="panel" style="${aktywna==="status"?"":"display:none"}">
     <div class="admin-banner-head"><div><h1 style="margin:0">⬆️ Aktualizacja strony</h1><p style="color:var(--muted2);margin-top:.35rem">Wersja panelu: <b>${esc(document.querySelector('meta[name="artway-version"]')?.content||"—")}</b> • publikuj ustawienia i produkty; pełne aktualizacje kodu idą przez GitHub/Netlify razem z <code>assets/app.js</code> i <code>assets/styles.css</code>.</p></div>
       <button class="btn ghost" onclick="sprawdzStatusAktualizacji()" ${s.ladowanie?"disabled":""}>${s.ladowanie?"⏳ Sprawdzam…":"🔄 Odśwież status"}</button></div>
     <div class="import-summary">
@@ -8524,7 +8600,7 @@ function widokAdminAktualizacja(){
     ${p.files?`<div class="info-grid">${statusPlikuPublikacji("index.html",p.files["index.html"])}${statusPlikuPublikacji("products.json",p.files["products.json"])}</div>`:""}
     ${last?`<div class="sug" style="margin-top:.8rem"><span class="s-ico">✅</span><span><b>Ostatnia aktualizacja: ${new Date(last.published_at).toLocaleString("pl-PL")}</b><br>Pliki: ${(last.files||[]).map(esc).join(", ")}${last.note?` • ${esc(last.note)}`:""}${last.restored_from?` • przywrócono z ${esc(last.restored_from)}`:""}</span></div>`:""}
   </div>
-  <div class="panel">
+  <div class="panel" style="${aktywna==="publikuj"?"":"display:none"}">
     <h2 style="margin-top:0">Publikuj bieżące zmiany</h2>
     <form onsubmit="publikujAktualizacjeStrony(event)">
       <label class="chk-row"><input type="checkbox" name="index" checked> <span><b>index.html</b> — lekki szkielet strony i publiczne ustawienia panelu</span></label>
@@ -8534,13 +8610,13 @@ function widokAdminAktualizacja(){
     </form>
     <div class="backend-note" style="margin-top:1rem"><b>Co zostanie opublikowane?</b> Jeśli nie wybierzesz nowego pliku poniżej, panel użyje bieżącego index.html i automatycznie osadzi w nim aktualne ustawienia. Po rozbiciu kodu techniczne zmiany w JavaScript/CSS wdrażamy przez GitHub/Netlify, żeby nie pominąć żadnego pliku. Zawsze powstaje kopia poprzedniej wersji.</div>
   </div>
-  <div class="panel">
+  <div class="panel" style="${aktywna==="index"?"":"display:none"}">
     <h2 style="margin-top:0">Wgraj nową wersję index.html</h2>
     <p style="color:var(--muted2)">Ten plik jest teraz szkieletem strony. Pełna aktualizacja techniczna wymaga też plików <code>assets/app.js</code> i <code>assets/styles.css</code>, dlatego standardowo wdrażamy ją przez GitHub/Netlify.</p>
     <label class="btn ghost" style="cursor:pointer">📁 Wybierz nowy index.html<input type="file" accept=".html,text/html" onchange="wczytajIndexDoAktualizacji(this)" style="display:none"></label>
     ${wybranyIndexAktualizacji?`<div class="sug" style="margin-top:.7rem"><span class="s-ico">📄</span><span><b>${esc(wybranyIndexAktualizacji.nazwa)}</b><br>Wersja ${esc(wybranyIndexAktualizacji.wersja)} • ${formatRozmiaruPliku(wybranyIndexAktualizacji.rozmiar)} <button class="btn danger" style="margin-left:.5rem" onclick="usunWybranyIndexAktualizacji()">Usuń wybór</button></span></div>`:""}
   </div>
-  <div class="panel">
+  <div class="panel" style="${aktywna==="kopie"?"":"display:none"}">
     <h2 style="margin-top:0">Kopie i przywracanie</h2>
     ${backups.length?`<div style="overflow-x:auto"><table class="log-table"><tr><th>Data</th><th>Powód</th><th>Pliki</th><th>Akcja</th></tr>${backups.slice(0,10).map(b=>`<tr><td>${b.created?new Date(b.created).toLocaleString("pl-PL"):esc(b.id)}</td><td>${b.reason==="before-rollback"?"Przed przywróceniem":"Przed publikacją"}</td><td>${(b.files||[]).map(esc).join(", ")}</td><td><button class="btn ghost" onclick="cofnijPublikacjeStrony('${esc(b.id)}')" ${s.ladowanie?"disabled":""}>↩️ Przywróć</button></td></tr>`).join("")}</table></div>`:`<p style="color:var(--muted2)">Kopie pojawią się automatycznie po pierwszej publikacji.</p>`}
   </div>`);
@@ -8589,20 +8665,22 @@ function przelaczKrok(i){
   kroki[i] = !kroki[i];
   zapiszCzescUstawien({krokiPublikacji: kroki});
 }
-function widokAdminPublikacja(){
+function widokAdminPublikacja(sekcja="kontrola"){
+  const aktywna=["kontrola","pliki","kroki","aktualizacja"].includes(String(sekcja||""))?String(sekcja||""):"kontrola";
   const kontrole = kontrolePublikacji();
   const gotowe = kontrole.filter(x=>x.ok).length;
   const kroki = ustawienia.krokiPublikacji || {};
   return adminSzkielet("/admin/publikacja", `
-  <div class="panel">
+  ${publikacjaSubnavHTML(aktywna)}
+  <div class="panel" style="${aktywna==="kontrola"?"":"display:none"}">
     <h1>🌍 Publikacja strony</h1>
     <h2>Gotowość do startu: ${gotowe}/${kontrole.length} ${gotowe===kontrole.length?"— można publikować! 🎉":""}</h2>
     ${kontrole.map(x=>`<div class="sug" style="${x.ok?'':'background:#fef3c7'}">
       <span class="s-ico">${x.ok?"✅":"⚠️"}</span>
       <span>${x.tekst}${x.ok?"":` — <a href="${x.link}">${x.akcja} →</a>`}</span></div>`).join("")}
   </div>
-  <div class="panel">
-    <h2 style="margin-top:0">📁 Co wgrywasz na serwer</h2>
+  <div class="panel" style="${["pliki","kroki"].includes(aktywna)?"":"display:none"}">
+    <div style="${aktywna==="pliki"?"":"display:none"}"><h2 style="margin-top:0">📁 Co wgrywasz na serwer</h2>
     <p style="font-size:.9rem;color:var(--muted2)">Przy pierwszym uruchomieniu na hostingu statycznym wgraj <b>index.html</b>, <b>products.json</b> oraz katalog <b>api</b>, jeżeli korzystasz z awaryjnego PHP. Aktualna, profesjonalna wersja sklepu używa jednak <b>Netlify Functions</b> do wspólnej bazy, e-maili, Paynow i InPost.</p>
     <div class="backend-note"><b>Ważne:</b> GitHub/Netlify są obecnie główną ścieżką publikacji. SFTP/nazwa.pl traktuj jako hosting plików lub plan awaryjny; sekrety InPost i płatności pozostają w zmiennych Netlify, nie w public_html.</div>
     <h2>Publikacja na nazwa.pl</h2>
@@ -8634,9 +8712,9 @@ function widokAdminPublikacja(){
         <li>W CloudHosting Panel wskaż katalog, do którego zostały wgrane pliki</li>
         <li>Po propagacji domeny otwórz stronę i wykonaj test na komputerze oraz telefonie</li>
       </ol></details>
-    <h2>✅ Lista startowa</h2>
+    </div><div style="${aktywna==="kroki"?"":"display:none"}"><h2 style="margin-top:0">✅ Lista startowa</h2>
     ${KROKI_PUBLIKACJI.map((k,i)=>`<label class="chk-row"><input type="checkbox" ${kroki[i]?"checked":""} onchange="przelaczKrok(${i})"> ${k}</label>`).join("")}
-    <p class="pay-note" style="text-align:left;margin-top:.8rem">Pamiętaj: zamówienia, klienci i ustawienia synchronizują się przez wspólną bazę Netlify. Gdy Netlify jest niedostępne, sklep zachowuje lokalną kopię i ponowi synchronizację po odzyskaniu połączenia.</p>
+    <p class="pay-note" style="text-align:left;margin-top:.8rem">Pamiętaj: zamówienia, klienci i ustawienia synchronizują się przez wspólną bazę Netlify. Gdy Netlify jest niedostępne, sklep zachowuje lokalną kopię i ponowi synchronizację po odzyskaniu połączenia.</p></div>
   </div>`);
 }
 

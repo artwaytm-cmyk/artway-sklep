@@ -335,11 +335,15 @@ body.hide-home-contact .home-contact{display:none}
 .admin-page{max-width:1200px;margin:1.6rem auto 2.5rem;padding:0 1rem;display:grid;grid-template-columns:215px 1fr;gap:1.1rem;align-items:start}
 .admin-page>*{min-width:0}
 .admin-nav{background:var(--panel);border-radius:var(--radius);box-shadow:var(--shadow);padding:.6rem;position:sticky;top:130px;display:flex;flex-direction:column;gap:.15rem}
-.admin-nav a{padding:.5rem .8rem;border-radius:10px;text-decoration:none;color:var(--muted2);font-size:.87rem;font-weight:600}
+.admin-nav a{padding:.5rem .8rem;border-radius:10px;text-decoration:none;color:var(--muted2);font-size:.87rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:.45rem}
 .admin-nav a:hover{background:var(--bg);color:var(--brand)}
 .admin-nav a.active{background:var(--ink);color:#fff}
-.admin-tresc .panel{margin-bottom:1rem}
-.admin-tresc,.panel,.orders-stat-grid,.order-stat-card,.warehouse-hero,.warehouse-ops-grid,.warehouse-location-layout,.warehouse-columns,.warehouse-worktable-panel,.warehouse-worktable-wrap,.agent-ops-grid,.ai-task-list{min-width:0}
+.admin-tresc{min-width:0;overflow:hidden}
+.admin-tresc .panel{margin-bottom:1rem;max-width:100%;overflow-x:auto}
+.admin-tresc,.panel,.orders-stat-grid,.order-stat-card,.warehouse-hero,.warehouse-ops-grid,.warehouse-location-layout,.warehouse-columns,.warehouse-worktable-panel,.warehouse-worktable-wrap,.agent-ops-grid,.ai-task-list,.import-grid,.info-grid,.diag-actions{min-width:0}
+.table-scroll{width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.table-scroll table{min-width:760px}
+.admin-tresc img{max-width:100%;height:auto}
 .managed-banner.ma-obraz{background-size:cover;background-position:center;color:#fff;min-height:96px}
 .managed-banner.ma-obraz h3,.managed-banner.ma-obraz p,.managed-banner.ma-obraz small{color:#fff}
 .rozm-grid{display:grid;grid-template-columns:1fr 250px;gap:1.1rem;align-items:start}
@@ -715,6 +719,9 @@ footer{background:#151a24;color:#c6ccd8;margin-top:1rem}
   .admin-nav::-webkit-scrollbar{display:none}
   .admin-nav a{flex:0 0 auto;padding:.45rem .58rem;font-size:.76rem;white-space:nowrap}
   .admin-tresc .panel{margin-bottom:.75rem}
+  .admin-main-tabs{margin:-.05rem -.15rem 0;padding:.05rem .15rem .18rem;gap:.25rem}
+  .admin-main-tabs a{padding:.48rem .62rem;font-size:.78rem}
+  .table-scroll table{min-width:680px}
   .section-head{align-items:start;flex-direction:column}
   .offer-band-in,.contact-strip{align-items:flex-start;flex-direction:column}
   .check-list,.prod-extra{grid-template-columns:1fr}
@@ -741,6 +748,7 @@ footer{background:#151a24;color:#c6ccd8;margin-top:1rem}
   .agent-ops-no{width:28px;height:28px}
   .log-table{font-size:.74rem;min-width:0;width:100%}
   .admin-tresc .log-table,.page .log-table{overflow-wrap:anywhere}
+  .admin-tresc .panel>.log-table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
   .warehouse-table{min-width:980px}
   .tracking-table{min-width:720px}
   .modal{padding:.5rem}.modal-box{padding:1rem;border-radius:16px}
