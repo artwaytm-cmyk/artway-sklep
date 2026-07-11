@@ -3359,18 +3359,26 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const orderId = tekst(body.orderId, 100).trim();
+      const orderIds = [...new Set((Array.isArray(body.orderIds) ? body.orderIds : [body.orderId]).map((id) => tekst(id, 100).trim()).filter(Boolean))].slice(0, 1000);
       const stage = tekst(body.stage, 40).trim().toLowerCase();
       const allowed = new Set(['do_sprawdzenia', 'braki', 'kompletacja', 'spakowane']);
-      if (!orderId || !allowed.has(stage)) return odpowiedz({ ok: false, error: 'Nieprawidłowe zlecenie albo etap magazynu' }, 422);
+      if (!orderIds.length || !allowed.has(stage)) return odpowiedz({ ok: false, error: 'Nieprawidłowe zlecenie albo etap magazynu' }, 422);
       const rec = await czytaj('allegro_orders', { items: [], updated_at: null });
       const items = Array.isArray(rec.items) ? rec.items : [];
-      const index = items.findIndex((z) => String(z?.id || '') === orderId);
-      if (index < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono zlecenia Allegro' }, 404);
-      items[index] = { ...items[index], warehouseStage: stage, warehouseStageUpdatedAt: new Date().toISOString() };
+      const wanted = new Set(orderIds), skipped = [];
+      let changed = 0;
+      for (let index = 0; index < items.length; index++) {
+        const current = items[index];
+        if (!wanted.has(String(current?.id || ''))) continue;
+        const terminal = ['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(allegroStatusKolejkiZamowienia(current, {}));
+        if (terminal) { skipped.push({ id: current.id, reason: 'terminal_order' }); continue; }
+        items[index] = { ...current, warehouseStage: stage, warehouseStageUpdatedAt: new Date().toISOString(), workflowUpdatedAt: new Date().toISOString(), checkedAt: stage === 'do_sprawdzenia' ? null : (current.checkedAt || new Date().toISOString()) };
+        changed++;
+      }
+      if (!changed && !skipped.length) return odpowiedz({ ok: false, error: 'Nie znaleziono wybranych zleceń Allegro' }, 404);
       const zapis = { ...rec, items, updated_at: new Date().toISOString() };
       await zapisz('allegro_orders', zapis);
-      return odpowiedz({ ok: true, order: items[index], orders: items, updated_at: zapis.updated_at });
+      return odpowiedz({ ok: true, order: orderIds.length === 1 ? items.find((z) => String(z.id) === orderIds[0]) : null, orders: items, changed, skipped, stage, updated_at: zapis.updated_at });
     }
 
     // ─── ALLEGRO: zmiana statusu realizacji po stronie Allegro (admin) ───

@@ -252,6 +252,7 @@ let allegroZamowienia = wczytajLS("artway_allegro_zamowienia_cache", []);
 let allegroOferty = wczytajLS("artway_allegro_oferty_cache", []);
 let allegroMapowania = wczytajLS("artway_allegro_mapowania_cache", {});
 let allegroKomunikacja = wczytajLS("artway_allegro_komunikacja_cache", {threads:[],issues:[],settings:null,autoReplies:{},errors:[],requiresReauth:false,updated_at:null});
+let zaznaczoneZamowieniaSklepu = new Set();
 let zaznaczoneAllegroZamowienia = new Set();
 let zaznaczoneAllegroOferty = new Set();
 let allegroOstatniBladWystawienia = null;
@@ -1780,6 +1781,7 @@ function renderuj(){
       else if(t==="/admin/allegro/oferty") w.innerHTML = widokAdminAllegro("oferty");
       else if(t==="/admin/allegro/wystawianie") w.innerHTML = widokAdminAllegro("wystawianie");
       else if(t==="/admin/allegro/komunikacja") w.innerHTML = widokAdminAllegro("komunikacja");
+      else if(t==="/admin/allegro/ustawienia") w.innerHTML = widokAdminAllegro("ustawienia");
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
       else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn("pulpit");
       else if(t.startsWith("/admin/magazyn/")) w.innerHTML = widokAdminMagazyn(t.split("/")[3]||"pulpit");
@@ -4913,6 +4915,47 @@ function adminStatusyZamowienHTML(wszystkie){
     ${STATUSY.map(s=>`<button class="${filtrZamowien===s?"active":""}" onclick="filtrZamowien=${jsArg(s)};renderuj()">${esc(s)} <b>${ile(s)}</b></button>`).join("")}
   </div>`;
 }
+function adminPasujaceZamowieniaSklepu(){
+  let lista=pobierzZamowienia().slice();
+  if(filtrZamowien!=="wszystkie")lista=lista.filter(z=>z.status===filtrZamowien);
+  if(szukajZamowien)lista=lista.filter(z=>adminZamowienieSearchText(z).includes(szukajZamowien));
+  return lista;
+}
+function adminPrzelaczZaznaczenieZamowienia(nr,checked){
+  const id=String(nr||"");if(!id)return;
+  checked?zaznaczoneZamowieniaSklepu.add(id):zaznaczoneZamowieniaSklepu.delete(id);renderuj();
+}
+function adminZaznaczWidoczneZamowienia(checked=true){
+  adminPasujaceZamowieniaSklepu().forEach(z=>checked?zaznaczoneZamowieniaSklepu.add(String(z.nr)):zaznaczoneZamowieniaSklepu.delete(String(z.nr)));renderuj();
+}
+function adminWyczyscZaznaczenieZamowien(){zaznaczoneZamowieniaSklepu.clear();renderuj();}
+function zastosujStatusZamowieniaLokalnie(z,status){
+  if(!z||!STATUSY.includes(status)||z.status===status)return null;
+  const poprzedni=z.status;z.status=status;
+  const w=daneWysylki(z);
+  const mapaEtapow={"nowe":"do_obslugi","potwierdzone":"do_obslugi","w realizacji":"przygotowanie","gotowe do wysyłki":"przygotowanie","nadane":"transport","wysłane":"transport","w doręczeniu":"doreczenie","dostarczone":"dostarczona","zakończone":"dostarczona","zwrot":"zwrot","zwrot pieniędzy":"zwrot","anulowane":"anulowana"};
+  if(mapaEtapow[status])w.etap=mapaEtapow[status];
+  w.historia=[...(w.historia||[]),{czas:new Date().toLocaleString("pl-PL"),status:"Status zamówienia",opis:`${poprzedni} → ${status}`}];
+  z.wysylka=w;return {z,poprzedni,status};
+}
+async function adminMasowoZmienStatusZamowien(){
+  const status=String(document.getElementById("bulkOrderStatus")?.value||"");
+  const wybrane=new Set([...zaznaczoneZamowieniaSklepu]);
+  if(!wybrane.size){toast("Zaznacz co najmniej jedno zamówienie");return;}
+  if(!STATUSY.includes(status)){toast("Wybierz nowy status zamówień");return;}
+  const lista=pobierzZamowienia(),zmiany=[];
+  for(const z of lista)if(wybrane.has(String(z.nr))){const wynik=zastosujStatusZamowieniaLokalnie(z,status);if(wynik)zmiany.push(wynik);}
+  if(!zmiany.length){toast("Wybrane zamówienia mają już ten status");return;}
+  zapiszLS("artway_zamowienia",lista);zaznaczoneZamowieniaSklepu.clear();
+  loguj("info",`Masowa zmiana statusu ${zmiany.length} zamówień → ${status}`);renderuj();
+  toast(`Zmieniam status ${zmiany.length} zamówień → ${status}…`);
+  let bledy=0;
+  for(let i=0;i<zmiany.length;i+=5){
+    const wyniki=await Promise.allSettled(zmiany.slice(i,i+5).map(async x=>{const d=await zapiszZamowienieCentralnie(x.z,false);if(!d)await obsluzAutomatycznyEmail(x.z.nr,status);return d;}));
+    bledy+=wyniki.filter(x=>x.status==="rejected").length;
+  }
+  toast(`✅ Zmieniono ${zmiany.length} zamówień na „${status}”${bledy?` • błędy synchronizacji: ${bledy}`:""}`);
+}
 function allegroZapiszCache(){
   zapiszLS("artway_allegro_zamowienia_cache", allegroZamowienia);
   zapiszLS("artway_allegro_oferty_cache", allegroOferty.slice(0,1500));
@@ -5465,6 +5508,18 @@ function allegroEtapMagazynuMeta(z={}){return ({do_sprawdzenia:{label:"Do sprawd
 async function allegroUstawEtapMagazynu(orderId,stage){
   try{const d=await chmura("allegro-order-warehouse-stage",{method:"POST",body:{orderId,stage},timeout:18000});allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;allegroZapiszCache();toast("Etap magazynu zapisany — status Allegro pozostał bez zmian");renderuj();}catch(e){toast("⚠️ Etap magazynu: "+(e.message||e));}
 }
+async function allegroUstawEtapZaznaczonychZamowien(){
+  const stage=String(document.getElementById("bulkAllegroWarehouseStage")?.value||"");
+  const ids=[...zaznaczoneAllegroZamowienia];
+  if(!ids.length){toast("Zaznacz co najmniej jedno zlecenie Allegro");return;}
+  if(!["do_sprawdzenia","braki","kompletacja","spakowane"].includes(stage)){toast("Wybierz etap magazynowy");return;}
+  try{
+    toast(`Zmieniam etap ${ids.length} zleceń Allegro…`);
+    const d=await chmura("allegro-order-warehouse-stage",{method:"POST",body:{orderIds:ids,stage},timeout:45000});
+    allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;zaznaczoneAllegroZamowienia.clear();allegroZapiszCache();
+    toast(`✅ Zmieniono etap ${d.changed||0} zleceń${d.skipped?.length?` • pominięto zamknięte: ${d.skipped.length}`:""}. Statusy Allegro pozostały bez zmian.`);renderuj();
+  }catch(e){toast("⚠️ Masowy etap Allegro: "+(e.message||e));}
+}
 function allegroOfertaPoId(offerId){
   return (Array.isArray(allegroOferty)?allegroOferty:[]).find(o=>String(o.id)===String(offerId))||null;
 }
@@ -5570,12 +5625,12 @@ function allegroZamowieniaTabelaHTML(){
       ${szukajAllegroZamowien?`<button class="btn ghost" onclick="szukajAllegroZamowien='';renderuj()">Wyczyść</button>`:""}
     </div>
     <div class="allegro-bulk-toolbar">
-      <div><b>Zaznaczanie zleceń</b><small>${zaznaczone.length} zaznaczonych • ${pasujaceZamowienia.length} w aktualnym filtrze</small></div>
+      <div><b>Operacje na zleceniach</b><small>${zaznaczone.length} zaznaczonych • ${pasujaceZamowienia.length} w aktualnym filtrze</small></div>
       <button class="btn ghost" onclick="allegroZaznaczWidoczneZamowienia(true)">☑️ Zaznacz widoczne</button>
       <button class="btn ghost" onclick="allegroZaznaczWszystkiePasujaceZamowienia()">☑️ Zaznacz wszystkie (${pasujaceZamowienia.length})</button>
-      <button class="btn ghost" onclick="allegroWyczyscZaznaczenieZamowien()" ${zaznaczone.length?"":"disabled"}>Wyczyść</button>
-      <button class="btn" onclick="allegroOznaczZaznaczoneSprawdzone(true)" ${zaznaczone.length?"":"disabled"}>📦 Przekaż do kompletacji</button>
-      <button class="btn ghost" onclick="allegroOznaczZaznaczoneSprawdzone(false)" ${zaznaczone.length?"":"disabled"}>↩️ Do sprawdzenia</button>
+      <button class="btn ghost" onclick="allegroZaznaczWidoczneZamowienia(false)" ${zaznaczone.length?"":"disabled"}>☐ Odznacz widoczne</button>
+      <button class="btn ghost" onclick="allegroWyczyscZaznaczenieZamowien()" ${zaznaczone.length?"":"disabled"}>Wyczyść wybór</button>
+      <div class="allegro-bulk-stage"><label for="bulkAllegroWarehouseStage">Etap magazynu</label><select id="bulkAllegroWarehouseStage"><option value="">— wybierz etap —</option><option value="do_sprawdzenia">Do sprawdzenia</option><option value="braki">Braki — zamówić</option><option value="kompletacja">Kompletacja</option><option value="spakowane">Spakowane</option></select><button class="btn" onclick="allegroUstawEtapZaznaczonychZamowien()" ${zaznaczone.length?"":"disabled"}>Zastosuj do ${zaznaczone.length}</button></div>
     </div>
     <div class="backend-note"><b>Status zamówienia jest wyłącznie z Allegro i nie można go tutaj ręcznie zmienić.</b> Osobno zapisujemy etap pracy magazynu: sprawdzenie braków, zamówienie produktu, kompletacja i pakowanie.</div>
     <div class="allegro-order-list">${widoczneZamowienia.map(allegroZlecenieHTML).join("") || `<div class="backend-note">Brak zamówień w tym filtrze. Synchronizacja pobiera wyłącznie nowe i gotowe do wysłania.</div>`}</div>
@@ -5946,7 +6001,8 @@ function allegroSubnavHTML(aktywny="start"){
     {id:"oferty",href:"#/admin/allegro/oferty",label:"🏷️ Oferty",badge:(allegroOferty||[]).length||""},
     {id:"wystawianie",href:"#/admin/allegro/wystawianie",label:"🟠 Wystawianie",badge:produktyBezOferty||""},
     {id:"komunikacja",href:"#/admin/allegro/komunikacja",label:"💬 Wiadomości i dyskusje",badge:st.totalNeed||""},
-    {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"}
+    {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"},
+    {id:"ustawienia",href:"#/admin/allegro/ustawienia",label:"⚙️ Ustawienia"}
   ],aktywny);
 }
 function allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete){
@@ -5955,7 +6011,8 @@ function allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete){
     zamowienia:{ico:"📦",kicker:"Sprzedaż",title:"Kolejka zamówień Allegro",opis:"Status zawsze pochodzi z Allegro; etap sprawdzania, kompletacji i pakowania jest prowadzony osobno.",metryki:[["Do obsługi",(allegroZamowienia||[]).filter(z=>!["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(allegroStatusKolejki(z))).length],["Z brakami",(allegroZamowienia||[]).filter(z=>allegroEtapMagazynu(z)==="braki").length],["Wysłane",(allegroZamowienia||[]).filter(z=>allegroStatusKolejki(z)==="SENT").length]]},
     oferty:{ico:"🏷️",kicker:"Katalog Allegro",title:"Oferty i powiązania",opis:"Profesjonalny katalog ofert z miniaturą, identyfikatorami, ceną, stanem i kontrolą powiązania z produktem sklepu.",metryki:[["Wszystkie",(allegroOferty||[]).length],["Podpięte",mapped],["Do powiązania",niepodpiete]]},
     wystawianie:{ico:"🟠",kicker:"Publikowanie",title:"Przygotowanie ofert",opis:"Kontrola kompletności danych produktu przed utworzeniem bezpiecznego szkicu oferty.",metryki:[["Produkty",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length],["Gotowe",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroBrakiProduktuDoWystawienia(p).length).length],["Do uzupełnienia",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroBrakiProduktuDoWystawienia(p).length).length]]},
-    komunikacja:{ico:"💬",kicker:"Obsługa klienta",title:"Wiadomości i dyskusje",opis:"Nowe wiadomości, dyskusje i bezpieczny autoresponder bez odpowiedzi do starych rozmów.",metryki:[["Wątki",allegroKomunikacjaStaty().threads.length],["Dyskusje",allegroKomunikacjaStaty().issues.length],["Nowe",allegroKomunikacjaStaty().totalNeed]]}
+    komunikacja:{ico:"💬",kicker:"Obsługa klienta",title:"Wiadomości i dyskusje",opis:"Nowe wiadomości, dyskusje i bezpieczny autoresponder bez odpowiedzi do starych rozmów.",metryki:[["Wątki",allegroKomunikacjaStaty().threads.length],["Dyskusje",allegroKomunikacjaStaty().issues.length],["Nowe",allegroKomunikacjaStaty().totalNeed]]},
+    ustawienia:{ico:"⚙️",kicker:"Konfiguracja",title:"Ustawienia integracji Allegro",opis:"Połączenie OAuth, zakresy uprawnień, środowisko i kontrola synchronizacji w jednym miejscu.",metryki:[["API",allegroStan.configured?"OK":"Brak"],["OAuth",allegroStan.connected?"Połączone":"Rozłączone"],["Środowisko",allegroStan.env||"production"]]}
   }[aktywna]||{};
   return `<section class="panel allegro-workspace-section"><div class="allegro-workspace-title"><span>${cfg.ico||"🟠"}</span><div><small>${esc(cfg.kicker||"Allegro")}</small><h2>${esc(cfg.title||"Panel Allegro")}</h2><p>${esc(cfg.opis||"")}</p></div></div><div class="allegro-workspace-metrics">${(cfg.metryki||[]).map(([l,v])=>`<div><small>${esc(l)}</small><b>${esc(v)}</b></div>`).join("")}</div></section>`;
 }
@@ -5981,12 +6038,37 @@ function allegroStartPanelHTML(mapped,niepodpiete){
     </div>
   </div>`;
 }
+function allegroUstawieniaPanelHTML(){
+  return `<div class="panel allegro-section-panel">
+    <div class="order-section-head">
+      <div><h2 style="margin-top:0">⚙️ Ustawienia integracji Allegro</h2><p class="order-detail-lead">Konfiguracja techniczna znajduje się na końcu podkart, żeby nie przeszkadzała w codziennej obsłudze zamówień i ofert.</p></div>
+      <div class="diag-actions"><button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro ponownie</button><button class="btn ghost" onclick="allegroWczytajDane()">📥 Sprawdź połączenie</button></div>
+    </div>
+    <div class="orders-stat-grid">
+      <div class="order-stat-card ${allegroStan.configured?"money":"hot"}"><span>🔧</span><b>${allegroStan.configured?"OK":"BRAK"}</b><small>konfiguracja aplikacji</small></div>
+      <div class="order-stat-card ${allegroStan.connected?"money":"hot"}"><span>🔐</span><b>${allegroStan.connected?"TAK":"NIE"}</b><small>autoryzacja OAuth</small></div>
+      <div class="order-stat-card"><span>🌐</span><b>${esc(allegroStan.env||"production")}</b><small>środowisko Allegro</small></div>
+      <div class="order-stat-card ${allegroStan.requiresReauth?"hot":"money"}"><span>${allegroStan.requiresReauth?"⚠️":"✅"}</span><b>${allegroStan.requiresReauth?"ODŚWIEŻ":"PEŁNE"}</b><small>zakresy uprawnień</small></div>
+    </div>
+    <div class="allegro-config-note">
+      <b>Zmienne serwera Netlify</b>
+      <span>Wymagane: <code>ALLEGRO_CLIENT_ID</code>, <code>ALLEGRO_CLIENT_SECRET</code>. Opcjonalne: <code>ALLEGRO_REDIRECT_URI</code>, <code>ALLEGRO_ENV</code>, <code>ALLEGRO_SCOPE</code>.</span>
+      <span>Tokeny i sekrety pozostają wyłącznie na serwerze. Nie są zapisywane w przeglądarce ani w publicznych plikach strony.</span>
+      <span>Ostatnia synchronizacja: ${esc(allegroStan.updated_at||"—")}</span>
+      ${allegroStan.requiresReauth?`<span style="color:#9a3412"><b>Brakujące zakresy:</b> ${esc((allegroStan.missingAuthorizedScopes||[]).join(", ")||"token wymaga ponownej autoryzacji")}. Kliknij „Połącz Allegro ponownie”.</span>`:""}
+    </div>
+    <div class="panel-subtle" style="margin-top:1rem">
+      <div class="order-section-head"><div><h3 style="margin:0">🔄 Synchronizacja danych</h3><p class="order-detail-lead">Zamówienia zachowują oficjalne statusy Allegro. Oferty są pobierane stronami po 1000, a pełny katalog może zawierać do 10 000 pozycji w jednym uruchomieniu.</p></div></div>
+      <div class="diag-actions"><button class="btn ghost" onclick="allegroSynchronizujZamowienia()">📦 Synchronizuj zamówienia</button><button class="btn ghost" onclick="allegroSynchronizujOferty()">🏷️ Synchronizuj oferty</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">💬 Synchronizuj komunikację</button><button class="btn ghost" onclick="window.open('https://salescenter.allegro.com/my-sales','_blank','noopener')">Otwórz Sales Center</button></div>
+    </div>
+  </div>`;
+}
 function widokAdminAllegro(sekcja="start"){
   allegroLadujJesliTrzeba();
   if(sekcja==="komunikacja"&&!allegroKomunikacja?.updated_at&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
   const mapped=Object.keys(allegroMapowania||{}).length;
   const niepodpiete=(allegroOferty||[]).filter(o=>!allegroProduktDlaOferty(o.id)).length;
-  const aktywna=["zamowienia","oferty","wystawianie","komunikacja"].includes(sekcja)?sekcja:"start";
+  const aktywna=["zamowienia","oferty","wystawianie","komunikacja","ustawienia"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
   <div class="module-page-stack allegro-module-page">
   ${allegroSubnavHTML(aktywna)}
@@ -5998,7 +6080,7 @@ function widokAdminAllegro(sekcja="start"){
         <p>${aktywna==="start"?"Oddzielna kolejka zamówień Allegro bez mapowania, osobna synchronizacja ofert oraz komunikacja z klientami. Sekrety API są wyłącznie po stronie Netlify.":`Połączenie ${allegroStan.connected?"aktywne":"wymaga uwagi"} • dane konta i status synchronizacji są wspólne dla wszystkich podstron Allegro.`}</p>
       </div>
       <div class="diag-actions">
-        <button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro</button>
+        ${["start","ustawienia"].includes(aktywna)?`<button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro</button>`:`<a class="btn ghost" href="#/admin/allegro/ustawienia">⚙️ Ustawienia</a>`}
         <button class="btn ghost" onclick="allegroWczytajDane()">📥 Odśwież dane</button>
         <button class="btn ghost" onclick="window.open('https://salescenter.allegro.com/my-sales','_blank','noopener')">Otwórz Sales Center</button>
       </div>
@@ -6013,15 +6095,9 @@ function widokAdminAllegro(sekcja="start"){
       <div class="order-stat-card money"><span>🔗</span><b>${mapped}</b><small>podpiętych ofert</small></div>
       <div class="order-stat-card ${niepodpiete?"hot":""}"><span>🧩</span><b>${niepodpiete}</b><small>ofert bez produktu</small></div>
     </div>`:""}
-    ${aktywna==="start"?`<div class="allegro-config-note">
-      <b>Wymagane zmienne Netlify:</b> <code>ALLEGRO_CLIENT_ID</code>, <code>ALLEGRO_CLIENT_SECRET</code>. Opcjonalnie: <code>ALLEGRO_REDIRECT_URI</code>, <code>ALLEGRO_ENV</code>, <code>ALLEGRO_SCOPE</code>.
-      <span>Jeśli przy ofertach, wiadomościach albo dyskusjach pojawi się 403, kliknij ponownie <b>Połącz Allegro</b>, żeby odświeżyć zgodę OAuth z pełnym zakresem: oferty, ustawienia sprzedaży, zamówienia, przesyłki, wiadomości i dyskusje.</span>
-      <span>Środowisko: ${esc(allegroStan.env||"production")} • ostatnia synchronizacja: ${esc(allegroStan.updated_at||"—")}</span>
-      ${allegroStan.requiresReauth?`<span style="color:#9a3412"><b>Brakujące zakresy aktualnego tokenu:</b> ${esc((allegroStan.missingAuthorizedScopes||[]).join(", ")||"token wymaga ponownej autoryzacji")}. Po zapisaniu uprawnień aplikacji kliknij „Połącz Allegro”.</span>`:""}
-    </div>`:""}
   </div>
   ${allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete)}
-  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="komunikacja"?allegroKomunikacjaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
+  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="komunikacja"?allegroKomunikacjaPanelHTML():aktywna==="ustawienia"?allegroUstawieniaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
   </div>
   `);
 }
@@ -6033,16 +6109,18 @@ function alertDostepnosciZamowieniaHTML(z){
 }
 function kartaAdminZamowieniaHTML(z){
   const k=kosztyZamowienia(z), w=daneWysylki(z), klient=klientZamowieniaLabel(z);
+  const zaznaczone=zaznaczoneZamowieniaSklepu.has(String(z.nr));
   const pozycje=Array.isArray(z.pozycjeDane)&&z.pozycjeDane.length
     ? z.pozycjeDane.map(p=>`${p.ilosc||1} × ${p.nazwa||p.produkt||p.id||"produkt"}${p.wariant?` (${p.wariant})`:""} — ${zl(p.wartosc||kwotaNum(p.cena)*(Number(p.ilosc)||1))}`)
     : (Array.isArray(z.pozycje)?z.pozycje:["brak pozycji"]);
   const tracking=w.numer?`${nazwaPrzewoznika(w.przewoznik||"inpost")}: ${w.numer}`:(w.inpostId?`InPost ID ${w.inpostId} — ${w.inpostStatus||"czeka na numer"}`:"bez numeru nadania");
   const platnosc=z.platnosc||dostepnePlatnosci().find(p=>p.id===z.platnoscId)?.nazwa||"—";
-  return `<article class="order-pro-card">
+  return `<article class="order-pro-card ${zaznaczone?"is-selected":""}">
     <div class="order-pro-top">
-      <div>
-        <a class="order-pro-number" href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">${esc(z.nr)}</a>
-        <div class="order-pro-muted">${esc(z.data||"")} • ${esc(klient)} ${z.wymagaPotwierdzeniaDostepnosci?'<span class="lvl lvl-ostrzezenie">sprawdź dostępność</span>':""}</div>
+      <div class="order-pro-title-row">
+        <label class="order-bulk-check" title="Zaznacz całe zamówienie"><input type="checkbox" ${zaznaczone?"checked":""} onchange="adminPrzelaczZaznaczenieZamowienia(${jsArg(z.nr)},this.checked)"></label>
+        <div><a class="order-pro-number" href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">${esc(z.nr)}</a>
+        <div class="order-pro-muted">${esc(z.data||"")} • ${esc(klient)} ${z.wymagaPotwierdzeniaDostepnosci?'<span class="lvl lvl-ostrzezenie">sprawdź dostępność</span>':""}</div></div>
       </div>
       <div class="order-pro-right">
         <select onchange="zmienStatus(${jsArg(z.nr)}, this.value)" style="background:${KOLOR_STATUSU[z.status]||'var(--bg)'}">
@@ -6127,19 +6205,21 @@ function adminZamowienieStatusPanelHTML(z){
   </div>`;
 }
 function adminZamowieniaSubnavHTML(aktywny="lista"){
+  const sklep=pobierzZamowienia(),allegroAktywne=(allegroZamowienia||[]).filter(z=>!["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(allegroStatusKolejki(z))).length;
+  const doWysylki=sklep.filter(z=>!["anulowane","dostarczone","zakończone"].includes(String(z.status||"").toLowerCase())&&!daneWysylki(z).numer).length;
   return adminSubnavHTML([
-    {id:"lista",href:"#/admin/zamowienia",label:"📦 Lista sklepu"},
+    {id:"lista",href:"#/admin/zamowienia",label:"📦 Lista sklepu",badge:sklep.length||""},
+    {id:"allegro",href:"#/admin/allegro/zamowienia",label:"🟠 Zamówienia Allegro",badge:allegroAktywne||""},
     {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"},
-    {id:"allegro",href:"#/admin/allegro/zamowienia",label:"🟠 Zamówienia Allegro"},
-    {id:"wysylki",href:"#/admin/wysylki",label:"🚚 Wysyłki i etykiety"}
+    {id:"wysylki",href:"#/admin/wysylki",label:"🚚 Wysyłki i etykiety",badge:doWysylki||""}
   ],aktywny);
 }
 function widokAdminZamowienia(){
   const wszystkie = pobierzZamowienia();
-  let zam = wszystkie.slice();
-  if(filtrZamowien!=="wszystkie") zam = zam.filter(z=>z.status===filtrZamowien);
-  if(szukajZamowien) zam = zam.filter(z=>adminZamowienieSearchText(z).includes(szukajZamowien));
+  const zam = adminPasujaceZamowieniaSklepu();
+  const istniejace=new Set(wszystkie.map(z=>String(z.nr))),zaznaczone=[...zaznaczoneZamowieniaSklepu].filter(id=>istniejace.has(id));
   return adminSzkielet("/admin/zamowienia", `
+  ${adminZamowieniaSubnavHTML("lista")}
   <div class="panel orders-page">
     <div class="orders-hero">
       <div>
@@ -6155,7 +6235,6 @@ function widokAdminZamowienia(){
       </div>
     </div>
     ${adminZamowieniaStatyHTML(wszystkie,zam)}
-    ${adminZamowieniaSubnavHTML("lista")}
     <div class="orders-toolbar">
       <input placeholder="Szukaj: nr, klient, e-mail, telefon, adres, tracking…" value="${esc(szukajZamowien)}" oninput="szukajZamowien=this.value.toLowerCase();renderuj()">
       <select onchange="filtrZamowien=this.value;renderuj()">
@@ -6165,6 +6244,17 @@ function widokAdminZamowienia(){
       ${szukajZamowien||filtrZamowien!=="wszystkie"?`<button class="btn ghost" onclick="szukajZamowien='';filtrZamowien='wszystkie';renderuj()">Wyczyść filtry</button>`:""}
     </div>
     ${adminStatusyZamowienHTML(wszystkie)}
+    <div class="order-bulk-toolbar">
+      <div class="order-bulk-summary"><b>Operacje na zamówieniach</b><small>${zaznaczone.length} zaznaczonych • ${zam.length} w aktualnym widoku</small></div>
+      <button class="btn ghost" onclick="adminZaznaczWidoczneZamowienia(true)">☑️ Zaznacz widoczne (${zam.length})</button>
+      <button class="btn ghost" onclick="adminZaznaczWidoczneZamowienia(false)" ${zaznaczone.length?"":"disabled"}>☐ Odznacz widoczne</button>
+      <button class="btn ghost" onclick="adminWyczyscZaznaczenieZamowien()" ${zaznaczone.length?"":"disabled"}>Wyczyść wybór</button>
+      <div class="order-bulk-status">
+        <label for="bulkOrderStatus">Nowy status</label>
+        <select id="bulkOrderStatus"><option value="">— wybierz status —</option>${STATUSY.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select>
+        <button class="btn" onclick="adminMasowoZmienStatusZamowien()" ${zaznaczone.length?"":"disabled"}>Zastosuj do ${zaznaczone.length}</button>
+      </div>
+    </div>
     <div class="orders-list">
       ${zam.length ? zam.map(kartaAdminZamowieniaHTML).join("") : `<div class="order-empty"><b>Brak zamówień dla tego widoku.</b><br>Zmień filtr albo wyczyść wyszukiwarkę.</div>`}
     </div>
@@ -6172,6 +6262,7 @@ function widokAdminZamowienia(){
 }
 function widokAdminZamowieniaTabela(){
   return adminSzkielet("/admin/zamowienia", `
+  ${adminZamowieniaSubnavHTML("tabela")}
   <div class="panel orders-page">
     <div class="orders-hero">
       <div>
@@ -6184,7 +6275,6 @@ function widokAdminZamowieniaTabela(){
         <button class="btn ghost" onclick="synchronizujBazeCentralna(true)">🔄 Synchronizuj</button>
       </div>
     </div>
-    ${adminZamowieniaSubnavHTML("tabela")}
   </div>
   ${magazynTabelaOperacyjnaHTML({limit:420})}
   `);
@@ -6464,18 +6554,13 @@ function zmienStatus(nr, status){
   const t = pobierzZamowienia();
   const z = t.find(x=>x.nr===nr);
   if(z){
-    const poprzedni=z.status;
-    z.status = status;
-    const w=daneWysylki(z);
-    const mapaEtapow={"nowe":"do_obslugi","potwierdzone":"do_obslugi","w realizacji":"przygotowanie","gotowe do wysyłki":"przygotowanie","nadane":"transport","wysłane":"transport","w doręczeniu":"doreczenie","dostarczone":"dostarczona","zakończone":"dostarczona","zwrot":"zwrot","zwrot pieniędzy":"zwrot","anulowane":"anulowana"};
-    if(mapaEtapow[status]) w.etap=mapaEtapow[status];
-    w.historia=[...(w.historia||[]),{czas:new Date().toLocaleString("pl-PL"),status:"Status zamówienia",opis:`${poprzedni} → ${status}`}];
-    z.wysylka=w;
+    const zmiana=zastosujStatusZamowieniaLokalnie(z,status);
+    if(!zmiana){renderuj();return;}
     zapiszLS("artway_zamowienia", t);
     loguj("info",`Zmieniono status zamówienia ${nr} → ${status}`);
     toast(`${nr}: ${status} ✅`);
     // Serwer sam wyśle e-mail statusowy przy zapisie; awaryjnie (brak połączenia z bazą) próbujemy z panelu
-    zapiszZamowienieCentralnie(z,false).then(d=>{ if(poprzedni!==status && !d) void obsluzAutomatycznyEmail(nr,status); });
+    zapiszZamowienieCentralnie(z,false).then(d=>{ if(!d) void obsluzAutomatycznyEmail(nr,status); });
   }
   renderuj();
 }
