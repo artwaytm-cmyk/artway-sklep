@@ -1489,8 +1489,10 @@ function renderuj(){
       else if(t==="/admin/allegro/oferty") w.innerHTML = widokAdminAllegro("oferty");
       else if(t==="/admin/allegro/wystawianie") w.innerHTML = widokAdminAllegro("wystawianie");
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
-      else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn();
-      else if(t==="/admin/agent-ai") w.innerHTML = widokAdminAgentAI();
+      else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn("pulpit");
+      else if(t.startsWith("/admin/magazyn/")) w.innerHTML = widokAdminMagazyn(t.split("/")[3]||"pulpit");
+      else if(t==="/admin/agent-ai") w.innerHTML = widokAdminAgentAI("pulpit");
+      else if(t.startsWith("/admin/agent-ai/")) w.innerHTML = widokAdminAgentAI(t.split("/")[3]||"pulpit");
       else if(t==="/admin/asortyment" || t==="/admin/produkty") w.innerHTML = widokAdminProdukty();
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
       else if(t.startsWith("/admin/produkty/edytuj/")) w.innerHTML = widokAdminProduktEdytuj(parseInt(t.split("/")[4]));
@@ -3531,9 +3533,7 @@ const TABY_PERSONALIZACJI = [
 ];
 function personalizacjaSzkielet(tab, tresc){
   return adminSzkielet("/admin/personalizacja", `
-    <div class="panel" style="padding:.7rem .9rem">
-      <div class="tab-bar">${TABY_PERSONALIZACJI.map(([id,t])=>`<a href="#/admin/${id}" class="${tab===id?'active':''}">${t}</a>`).join("")}</div>
-    </div>
+    ${adminSubnavHTML(TABY_PERSONALIZACJI.map(([id,label])=>({id,href:`#/admin/${id}`,label})),tab)}
     ${tresc}`);
 }
 /* Asortyment = produkty, katalogi, mapowanie i rabaty w JEDNYM dziale z zakładkami */
@@ -3542,9 +3542,7 @@ const TABY_ASORTYMENTU = [
 ];
 function asortymentSzkielet(tab, tresc){
   return adminSzkielet("/admin/asortyment", `
-    <div class="panel" style="padding:.7rem .9rem">
-      <div class="tab-bar">${TABY_ASORTYMENTU.map(([id,t])=>`<a href="#/admin/${id}" class="${tab===id?'active':''}">${t}</a>`).join("")}</div>
-    </div>
+    ${adminSubnavHTML(TABY_ASORTYMENTU.map(([id,label])=>({id,href:`#/admin/${id}`,label})),tab)}
     ${tresc}`);
 }
 function zapiszCzescUstawien(obj){
@@ -4344,14 +4342,16 @@ function agentAIPlanOperacyjnyHTML(analiza){
     </div>
   </div>`;
 }
-function widokAdminAgentAI(){
+function widokAdminAgentAI(sekcja="pulpit"){
   const analiza=agentAIAnaliza();
+  const aktywna=["pulpit","komendy","plan","zlecenia","pamiec","historia"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const problemy=analiza.filter(x=>x.poziom!=="ok").length;
   const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
   const plan=potrzebyZatowarowania().slice(0,8);
   const odpowiedziAgenta=(agentAIHistoria||[]).filter(h=>h.typ==="komenda"&&h.dane&&h.dane.odpowiedz).slice(0,5);
   const pamiecAgenta=(agentAIPamiec||[]).slice(0,12);
   return adminSzkielet("/admin/agent-ai", `
+  ${agentAISubnavHTML(aktywna)}
   <div class="panel ai-agent-panel">
     <div class="ai-agent-hero">
       <div>
@@ -4379,7 +4379,7 @@ function widokAdminAgentAI(){
       <a class="btn ghost" href="#/diagnostyka">🛠️ Diagnostyka</a>
     </div>
   </div>
-  <div class="panel agent-command-panel">
+  <div class="panel agent-command-panel" style="${["komendy","pamiec"].includes(aktywna)?"":"display:none"}">
     <div class="order-section-head">
       <div>
         <h2 style="margin-top:0">💬 Polecenie dla agenta</h2>
@@ -4425,7 +4425,7 @@ function widokAdminAgentAI(){
       </div>`).join("")}
     </div>`:`<p class="order-detail-lead" style="margin-bottom:0">Brak zapisanych poleceń z panelu. Wpisz pierwsze polecenie powyżej.</p>`}
   </div>
-  ${agentAIPlanOperacyjnyHTML(analiza)}
+  <div style="${aktywna==="plan"?"":"display:none"}">${agentAIPlanOperacyjnyHTML(analiza)}
   ${plan.length?`<div class="panel">
     <div class="order-section-head"><div><h2 style="margin-top:0">📦 Braki do aktywnych zamówień</h2><p class="order-detail-lead">Agent pokazuje tylko produkty, których rezerwacje z aktywnych zamówień są większe niż fizyczny stan magazynowy.</p></div><button class="btn" onclick="agentAIWykonaj('export-zakupy')">Pobierz pełny plan</button></div>
     <div class="ai-restock-grid">${plan.map(x=>`<div class="ai-restock-card ${x.poziom}">
@@ -4436,8 +4436,9 @@ function widokAdminAgentAI(){
       <div class="ai-restock-line"><span>Zamówić</span><b>${esc(x.ilosc)} szt.</b></div>
       <p>${esc(x.powod)}</p>
     </div>`).join("")}</div>
-  </div>`:""}
-  <div class="panel">
+  </div>`:""}</div>
+  <div style="${aktywna==="zlecenia"?"":"display:none"}">${magazynTabelaOperacyjnaHTML({limit:420})}</div>
+  <div class="panel" style="${aktywna==="plan"?"":"display:none"}">
     <h2 style="margin-top:0">Lista kontroli agenta</h2>
     <div class="ai-task-list">
       ${analiza.map(x=>`<div class="ai-task ${x.poziom}">
@@ -4447,14 +4448,14 @@ function widokAdminAgentAI(){
       </div>`).join("")}
     </div>
   </div>
-  <div class="panel">
+  <div class="panel" style="${aktywna==="historia"?"":"display:none"}">
     <div class="order-section-head"><div><h2 style="margin-top:0">Historia działań agenta</h2><p class="order-detail-lead">Audyty i akcje wykonywane przyciskiem administratora.</p></div></div>
     <table class="log-table">
       <tr><th>Data</th><th>Typ</th><th>Opis</th><th>Operator</th></tr>
       ${(agentAIHistoria||[]).slice(0,12).map(h=>`<tr><td>${esc(h.dataTxt||"")}</td><td><span class="lvl lvl-info">${esc(h.typ||"akcja")}</span></td><td>${esc(h.opis||"")}</td><td>${esc(h.operator||"")}</td></tr>`).join("") || `<tr><td colspan="4">Brak działań agenta w historii.</td></tr>`}
     </table>
   </div>
-  <div class="panel">
+  <div class="panel" style="${aktywna==="historia"?"":"display:none"}">
     <h2 style="margin-top:0">Kolejny etap agenta</h2>
     <p>Ten moduł jest przygotowany pod późniejsze podłączenie prawdziwego modelu AI po stronie serwera. Token API nie będzie trafiał do przeglądarki ani localStorage. Agent będzie mógł przygotowywać propozycje zmian, ale trwałe akcje administracyjne zostaną pod kontrolą panelu.</p>
   </div>`);
@@ -4974,7 +4975,35 @@ function allegroWystawianiePanelHTML(){
   </div>`;
 }
 function adminSubnavHTML(items, aktywny){
-  return `<div class="panel admin-tabs-panel"><div class="tab-bar admin-tab-bar">${items.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}">${esc(x.label)}</a>`).join("")}</div></div>`;
+  return `<div class="panel admin-tabs-panel"><div class="shipping-tabs admin-main-tabs">${items.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}">${esc(x.label)}${x.badge?` <span class="nav-badge">${esc(x.badge)}</span>`:""}</a>`).join("")}</div></div>`;
+}
+function magazynSubnavHTML(aktywny="pulpit"){
+  const produktyAktywne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const braki=potrzebyZatowarowania().length;
+  const bezLok=produktyAktywne.filter(p=>!magazynMetaProduktu(p.id).lokalizacja).length;
+  const ruchy=(ruchyMagazynowe||[]).length;
+  return adminSubnavHTML([
+    {id:"pulpit",href:"#/admin/magazyn",label:"📊 Pulpit"},
+    {id:"stany",href:"#/admin/magazyn/stany",label:"📦 Stany produktów",badge:produktyAktywne.length},
+    {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",label:"🗺️ Lokalizacje",badge:bezLok||""},
+    {id:"plan",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:braki||""},
+    {id:"ruchy",href:"#/admin/magazyn/ruchy",label:"🧾 Ruchy / FV / ustawienia",badge:ruchy||""}
+  ],aktywny);
+}
+function agentAISubnavHTML(aktywny="pulpit"){
+  const analiza=agentAIAnaliza();
+  const problemy=analiza.filter(x=>x.poziom!=="ok").length;
+  const plan=potrzebyZatowarowania().length;
+  const zlecenia=(agentAIZlecenia||[]).length;
+  const pamiec=(agentAIPamiec||[]).length;
+  return adminSubnavHTML([
+    {id:"pulpit",href:"#/admin/agent-ai",label:"🤖 Pulpit",badge:problemy||""},
+    {id:"komendy",href:"#/admin/agent-ai/komendy",label:"💬 Komendy"},
+    {id:"plan",href:"#/admin/agent-ai/plan",label:"🧭 Plan operacyjny",badge:plan||""},
+    {id:"zlecenia",href:"#/admin/agent-ai/zlecenia",label:"📑 Zlecenia i tabela",badge:zlecenia||""},
+    {id:"pamiec",href:"#/admin/agent-ai/pamiec",label:"🧠 Pamięć",badge:pamiec||""},
+    {id:"historia",href:"#/admin/agent-ai/historia",label:"🕓 Historia"}
+  ],aktywny);
 }
 function allegroSubnavHTML(aktywny="start"){
   return adminSubnavHTML([
@@ -6010,8 +6039,9 @@ function zmienStatusSzkicuFaktury(id,status){
 function eksportujSzkiceFakturJSON(){
   pobierzPlik("szkice-faktur-infakt.json",JSON.stringify(szkiceFaktur,null,2),"application/json");
 }
-function widokAdminMagazyn(){
+function widokAdminMagazyn(sekcja="pulpit"){
   const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30), u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
+  const aktywna=["pulpit","stany","lokalizacje","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const wszystkie=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
   const monitorowane=wszystkie.filter(p=>stanMagazynuId(p.id)!==null);
   const brak=wszystkie.filter(p=>stanMagazynuId(p.id)===0);
@@ -6036,6 +6066,7 @@ function widokAdminMagazyn(){
   const fragment=lista.slice((stronaMagazynu-1)*magazynNaStronie,stronaMagazynu*magazynNaStronie);
   const zamDoFV=pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane").filter(z=>z.klient?.nip||z.klient?.firma).slice(0,20);
   return adminSzkielet("/admin/magazyn", `
+  ${magazynSubnavHTML(aktywna)}
   <div class="panel warehouse-hero-panel">
     <div class="warehouse-hero">
       <div>
@@ -6062,7 +6093,7 @@ function widokAdminMagazyn(){
       <button class="order-stat-card stat-filter ${pozaSlownikiem.length?"hot":""}" type="button" onclick="document.getElementById('warehouseLocationForm')?.scrollIntoView({behavior:'smooth',block:'center'})"><span>🗺️</span><b>${lokalizacje.length}</b><small>lokalizacji w słowniku</small></button>
     </div>
   </div>
-  <div class="panel warehouse-ops-panel">
+  <div class="panel warehouse-ops-panel" style="${aktywna==="pulpit"?"":"display:none"}">
     <div class="order-section-head">
       <div>
         <h2 style="margin-top:0">🧭 Operacje magazynu dzisiaj</h2>
@@ -6088,7 +6119,7 @@ function widokAdminMagazyn(){
       </button>`).join(""):`<div class="warehouse-work-empty">✅ Brak pilnych prac magazynowych wynikających z aktywnych zamówień.</div>`}
     </div>
   </div>
-  <div class="panel warehouse-location-panel">
+  <div class="panel warehouse-location-panel" style="${aktywna==="lokalizacje"?"":"display:none"}">
     <div class="order-section-head">
       <div>
         <h2 style="margin-top:0">🗺️ Lokalizacje magazynu</h2>
@@ -6132,7 +6163,28 @@ function widokAdminMagazyn(){
     ${statLok.BRAK?.produkty?`<div class="pay-note" style="text-align:left;margin-top:.8rem">Bez lokalizacji: <b>${statLok.BRAK.produkty}</b> produktów. Użyj filtra „Bez lokalizacji”, żeby szybko uzupełnić kartotekę.</div>`:""}
     ${pozaSlownikiem.length?`<div class="pay-note" style="text-align:left;margin-top:.6rem">Lokalizacje wpisane przy produktach, ale nieutworzone w słowniku: <b>${pozaSlownikiem.map(esc).join(", ")}</b>.</div>`:""}
   </div>
-  <div class="panel">
+  <div class="panel" style="${aktywna==="plan"?"":"display:none"}">
+    <div class="order-section-head">
+      <div><h2 style="margin-top:0">📦 Plan zatowarowania</h2><p class="order-detail-lead">Plan dotyczy tylko produktów, których brakuje do aktywnych zamówień i rezerwacji. Nadwyżka po ręcznym zwiększeniu zlecenia trafia później do magazynu.</p></div>
+      <div class="diag-actions"><button class="btn" onclick="eksportujZatowarowanieCSV()">📤 CSV planu</button><button class="btn ghost" onclick="agentAIWykonaj('utworz-zlecenie-braki')">🤖 Utwórz zlecenie agenta</button></div>
+    </div>
+    <div style="overflow-x:auto"><table class="log-table warehouse-worktable">
+      <tr><th>Kod</th><th>EAN</th><th>Nazwa</th><th>Ilość potrzebna</th><th>Stan</th><th>Rezerwacje</th><th>Dostępne</th><th>Lokalizacja</th><th>Dostawca</th><th>Powód</th></tr>
+      ${planZakupu.map(x=>`<tr class="${x.poziom==="bad"?"row-alert":""}">
+        <td><b>${esc(kodOperacyjnyProduktu(x.produkt,x.meta))}</b></td>
+        <td>${esc(eanOperacyjnyProduktu(x.produkt,x.meta)||"—")}</td>
+        <td><b>${esc(x.produkt.nazwa)}</b><br><small>${esc(x.produkt.sku||"ID "+x.produkt.id)}</small></td>
+        <td><b>${esc(x.ilosc)} szt.</b></td>
+        <td>${x.stan===null?"∞":esc(x.stan)}</td>
+        <td>${esc(x.rezerwacje)}</td>
+        <td>${x.dostepne===null?"∞":esc(x.dostepne)}</td>
+        <td>${esc(x.meta.lokalizacja?nazwaLokalizacjiMagazynu(x.meta.lokalizacja):"—")}</td>
+        <td>${esc(x.meta.dostawca||"—")}</td>
+        <td>${esc(x.powod)}</td>
+      </tr>`).join("") || `<tr><td colspan="10">Brak braków do aktywnych zamówień.</td></tr>`}
+    </table></div>
+  </div>
+  <div class="panel" style="${aktywna==="stany"?"":"display:none"}">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">📋 Stany produktów</h2><p class="order-detail-lead">Zmieniasz konkretny stan albo zostawiasz puste pole = produkt bez limitu.</p></div>
       <div class="diag-actions"><button class="btn ghost" onclick="frazaMagazynu='';filtrMagazynu='wszystkie';sortowanieMagazynu='ryzyko';stronaMagazynu=1;renderuj()">Wyczyść filtry</button></div>
@@ -6207,7 +6259,7 @@ function widokAdminMagazyn(){
     </table></div>
     <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
   </div>
-  <div class="warehouse-columns">
+  <div class="warehouse-columns" style="${aktywna==="ruchy"?"":"display:none"}">
     <div class="panel">
       <h2 style="margin-top:0">🧾 Historia ruchów</h2>
       <p>Ostatnie korekty, przyjęcia i sprzedaże. Pełna historia synchronizuje się we wspólnej bazie.</p>
@@ -6238,7 +6290,7 @@ function widokAdminMagazyn(){
       </form>
     </div>
   </div>
-  <div class="panel">
+  <div class="panel" style="${aktywna==="ruchy"?"":"display:none"}">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">🧾 inFakt / szkice faktur</h2><p class="order-detail-lead">Na razie sklep przygotowuje komplet danych do FV. Realna wysyłka do inFakt zostanie włączona po dodaniu tokenu API na serwerze Netlify.</p></div>
       <button class="btn ghost" onclick="eksportujSzkiceFakturJSON()">📤 Eksport szkiców JSON</button>

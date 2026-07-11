@@ -527,9 +527,12 @@ body.hide-home-contact .home-contact{display:none}
 .shipment-advanced summary{cursor:pointer;color:var(--ink);font-weight:900}
 .shipment-advanced .shipment-manager-grid{margin-top:.85rem}
 .shipping-tabs{display:flex;gap:.35rem;flex-wrap:wrap}
-.shipping-tabs button{border:0;background:transparent;color:var(--muted2);font-weight:750;padding:.55rem .9rem;border-radius:9px;cursor:pointer}
-.shipping-tabs button:hover{background:var(--bg);color:var(--brand)}
-.shipping-tabs button.active{background:var(--ink);color:#fff}
+.shipping-tabs button,.shipping-tabs a{border:0;background:transparent;color:var(--muted2);font-weight:750;padding:.55rem .9rem;border-radius:9px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:.35rem;white-space:nowrap}
+.shipping-tabs button:hover,.shipping-tabs a:hover{background:var(--bg);color:var(--brand)}
+.shipping-tabs button.active,.shipping-tabs a.active{background:var(--ink);color:#fff}
+.admin-main-tabs{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+.admin-main-tabs .nav-badge{background:#f59e0b;color:#fff;border-radius:999px;padding:.04rem .42rem;font-size:.72rem;font-weight:900}
+.admin-main-tabs a.active .nav-badge{background:#fbbf24;color:#111827}
 .pipeline{display:grid;grid-template-columns:repeat(6,1fr);gap:.45rem;margin:.8rem 0 1rem}
 .pipeline-step{border:1.5px solid var(--line);border-radius:11px;padding:.65rem;background:var(--panel);min-width:0}
 .pipeline-step b{display:block;font-size:1.25rem}
