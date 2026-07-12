@@ -945,3 +945,17 @@ footer{background:#151a24;color:#c6ccd8;margin-top:1rem}
 .store-duplicate-option img{width:42px;height:42px;object-fit:cover;border-radius:8px;background:#f3f4f6}
 @media(max-width:900px){.infakt-order-card{grid-template-columns:1fr 1fr}.infakt-order-card>.diag-actions{grid-column:1/-1}}
 @media(max-width:640px){.infakt-order-card{grid-template-columns:1fr}.infakt-order-card>.diag-actions{grid-column:auto}.store-duplicate-options{grid-template-columns:1fr}}
+
+/* Oddzielna opłacalność sklepu i Allegro */
+.profit-channel-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin:1rem 0}
+.profit-channel-summary article{display:flex;align-items:center;gap:.8rem;padding:1rem;border:1px solid var(--border);border-radius:16px;background:#fff}
+.profit-channel-summary article>span{display:grid;place-items:center;width:48px;height:48px;border-radius:14px;background:#eff6ff;font-size:1.4rem}
+.profit-channel-summary article.allegro>span{background:#fff7ed}
+.profit-channel-summary small,.profit-channel-summary b{display:block}.profit-channel-summary small{color:var(--muted)}
+.profit-channel-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem;margin-top:.8rem}
+.profit-channel-grid article{display:grid;gap:.25rem;padding:.8rem;border:1px solid var(--border);border-radius:13px;background:#fff}
+.profit-channel-grid article:first-child{border-left:4px solid #2563eb}.profit-channel-grid article:last-child{border-left:4px solid #f97316}
+.profit-recommendation-channel{display:grid;gap:.35rem;padding:.55rem;border:1px solid #bfdbfe;border-radius:12px;background:#eff6ff;margin-bottom:.45rem}
+.profit-recommendation-channel.allegro{border-color:#fed7aa;background:#fff7ed}
+.profitability-channel-table{min-width:1250px}
+@media(max-width:720px){.profit-channel-summary,.profit-channel-grid{grid-template-columns:1fr}.profitability-channel-table{min-width:1080px}}

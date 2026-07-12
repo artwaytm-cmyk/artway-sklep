@@ -2005,15 +2005,23 @@ function allegroOpisPelny(product = {}, shortDescription = '') {
     }
   }
   if (!blocks.some((x) => x.type === 'body' || x.type === 'list') && shortDescription) blocks.push({ type: 'body', title: 'Opis produktu', text: shortDescription });
-  const facts = [
+  const rawKey = allegroNormalizujKlucz(raw), facts = [
     product.marka || product.producent ? `Marka: ${product.marka || product.producent}` : '',
     product.kodProducenta || product.mpn ? `Kod producenta: ${product.kodProducenta || product.mpn}` : '',
     product.gtin || product.ean ? `EAN/GTIN: ${product.gtin || product.ean}` : '',
     product.rozmiar ? `Rozmiar: ${product.rozmiar}` : '',
     product.material ? `Materiał: ${product.material}` : '',
-  ].filter(Boolean);
+  ].filter(Boolean).filter((fact) => !rawKey.includes(allegroNormalizujKlucz(fact)));
   if (facts.length) blocks.push({ type: 'facts', items: facts });
   return blocks.slice(0, 12);
+}
+function allegroOpisPelnyTekst(product = {}, shortDescription = '') {
+  return allegroOpisPelny(product, shortDescription).filter((x) => x.type !== 'lead').map((x) => {
+    if (x.type === 'body') return [x.title, x.text].filter(Boolean).join('\n\n');
+    if (x.type === 'list') return [x.title, ...(x.items || []).map((item) => `• ${item}`)].filter(Boolean).join('\n\n');
+    if (x.type === 'facts') return ['Najważniejsze informacje', ...(x.items || []).map((item) => `• ${item}`)].join('\n\n');
+    return '';
+  }).filter(Boolean).join('\n\n');
 }
 function allegroSekcjeOpisu(product = {}, shortDescription = '') {
   const blocks = allegroOpisPelny(product, shortDescription);
@@ -2619,7 +2627,7 @@ function allegroUstawieniaOfert(raw = {}) {
   const requested = Number(raw?.defaultStock ?? raw?.stock ?? ALLEGRO_DEFAULT_OFFER_STOCK);
   const defaultStock = Number.isFinite(requested) ? Math.min(99999, Math.max(1, Math.floor(requested))) : ALLEGRO_DEFAULT_OFFER_STOCK;
   const producers = [...new Set((Array.isArray(raw?.producers) ? raw.producers : ALLEGRO_DEFAULT_PRODUCERS).map((x) => tekst(x, 100).trim()).filter(Boolean))].slice(0, 50);
-  return { defaultStock, republish: true, producers: producers.length ? producers : ALLEGRO_DEFAULT_PRODUCERS, autoCatalog: raw?.autoCatalog !== false, syncDescriptions: raw?.syncDescriptions !== false, autoCorrections: raw?.autoCorrections !== false, updated_at: raw?.updated_at || null };
+  return { defaultStock, republish: true, producers: producers.length ? producers : ALLEGRO_DEFAULT_PRODUCERS, autoCatalog: raw?.autoCatalog !== false, syncDescriptions: raw?.syncDescriptions !== false, autoUpdateOffers: raw?.autoUpdateOffers !== false, autoFees: raw?.autoFees !== false, autoCorrections: raw?.autoCorrections !== false, updated_at: raw?.updated_at || null };
 }
 async function allegroPobierzUstawieniaOfert() {
   return allegroUstawieniaOfert(await czytaj('allegro_offer_settings', { defaultStock: ALLEGRO_DEFAULT_OFFER_STOCK, republish: true, producers: ALLEGRO_DEFAULT_PRODUCERS, updated_at: null }));
@@ -2735,14 +2743,14 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
     allegroPobierzUstawieniaOfert(),
     czytaj('allegro_catalog_maintenance', { cursor: 0, lastRun: null }),
   ]);
-  if (offerSettings.autoCatalog === false) return { enabled: false, lastRun: previousAudit.lastRun || null };
+  if (offerSettings.autoCatalog === false && offerSettings.syncDescriptions === false && offerSettings.autoUpdateOffers === false && offerSettings.autoFees === false) return { enabled: false, lastRun: previousAudit.lastRun || null };
   const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
   const products = [...allegroAgentProduktyCentralne(data).values()].filter((p) => p && p.id !== undefined);
   const limit = Math.min(50, Math.max(1, Number(options.limit) || 10));
   const start = products.length ? Math.max(0, Number(previousAudit.cursor) || 0) % products.length : 0;
   const selected = products.length <= limit ? products : Array.from({ length: limit }, (_, index) => products[(start + index) % products.length]);
   const updater = allegroAktualizatorProduktowCentralnych(data);
-  const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, descriptions: 0, unresolved: 0, errors: [] };
+  const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, unresolved: 0, errors: [] };
   for (const product of selected) {
     try {
       const fields = {};
@@ -2751,7 +2759,7 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
         fields.producent = producer; fields.marka = producer; report.producers++;
       }
       let catalog = null;
-      if (!product.allegroProductId || !product.allegroCategoryId || (offerSettings.syncDescriptions !== false && !tekst(product.opis, 20000).trim())) {
+      if (offerSettings.autoCatalog !== false && (!product.allegroProductId || !product.allegroCategoryId || (offerSettings.syncDescriptions !== false && !tekst(product.opis, 20000).trim()))) {
         const found = await allegroZnajdzProduktKatalogu(req, { ...product, ...fields });
         catalog = found?.selected || null;
         if (catalog?.id) {
@@ -2769,12 +2777,39 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
           if ((!Array.isArray(product.zdjecia) || !product.zdjecia.length) && catalog.images?.length > 1) fields.zdjecia = catalog.images.slice(1, 16);
         }
       }
-      if (!fields.allegroCategoryId && !product.allegroCategoryId) {
+      if (offerSettings.autoCatalog !== false && !fields.allegroCategoryId && !product.allegroCategoryId) {
         const category = await allegroSugerujKategorie(req, { ...product, ...fields }, { limit: 5 });
         if (category?.selected?.id) { fields.allegroCategoryId = category.selected.id; report.categories++; }
       }
+      const styledProduct = { ...product, ...fields };
+      if (offerSettings.syncDescriptions !== false) {
+        const shortDescription = allegroOpisKrotki(styledProduct, []), fullDescription = allegroOpisPelnyTekst(styledProduct, shortDescription), sections = allegroSekcjeOpisu(styledProduct, shortDescription);
+        if (shortDescription) fields.opisKrotki = shortDescription;
+        if (fullDescription) fields.opis = fullDescription;
+        fields.allegroDescriptionSections = sections;
+        report.descriptions++;
+      }
+      if (product.allegroShippingSubsidy === undefined) fields.allegroShippingSubsidy = 3;
       if (!catalog?.id && !product.allegroProductId) report.unresolved++;
+      const finalProduct = { ...product, ...fields };
       if (Object.keys(fields).length && updater.apply(product.id, { ...fields, allegroCatalogCheckedAt: report.lastRun, allegroCatalogSource: 'automatic-maintenance' })) report.updated++;
+      if (offerSettings.autoUpdateOffers !== false) {
+        const prepared = await allegroDraftZAutoKategoria(req, finalProduct, { publicationAction: 'keep' });
+        const offerId = tekst(prepared?.existingOffer?.offer?.id || finalProduct.allegroOfferId, 100).trim();
+        if (offerId) {
+          const patch = allegroPatchZDraftu(prepared.payload, { publicationAction: 'keep' });
+          const meta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: patch, withMeta: true });
+          await allegroCzekajNaOperacjeOferty(req, meta.location);
+          report.offersUpdated++;
+          if (offerSettings.autoFees !== false) {
+            const actual = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`), price = Math.max(0, Number(finalProduct.cenaAllegro || finalProduct.cena) || 0);
+            actual.sellingMode = actual.sellingMode || { format: 'BUY_NOW' };actual.sellingMode.price = { amount: price.toFixed(2), currency: 'PLN' };
+            const preview = await allegroWywolaj(req, '/pricing/offer-fee-preview', { method: 'POST', bodyObj: { offer: actual, marketplaceId: 'allegro-pl' } }), fee = allegroPodsumujKalkulacjeOplat(preview, price);
+            updater.apply(product.id, { allegroCommissionAmount: fee.commissionAmount, allegroCommissionRate: fee.commissionRate, allegroRecurringFees: fee.recurringFees, allegroFeeTotal: fee.totalPreviewFees, allegroFeePrice: fee.salePrice, allegroFeeCurrency: fee.currency, allegroFeeDetails: { commissions: fee.commissions, quotes: fee.quotes }, allegroFeeCalculatedAt: fee.calculatedAt, allegroFeeSource: fee.source });
+            report.feesUpdated++;
+          }
+        }
+      }
     } catch (error) {
       report.errors.push({ productId: String(product.id), name: tekst(product.nazwa || product.name, 180), error: tekst(error?.message || error, 500) });
     }
@@ -2848,6 +2883,7 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     similarOffers: similarOffers.map((x) => ({ id: x.offer?.id, name: x.offer?.name, score: Number(x.score.toFixed(2)) })),
     improvedDescriptions: {
       shortDescription: options.shortDescription,
+      fullDescription: allegroOpisPelnyTekst(preparedProduct, options.shortDescription) || options.shortDescription,
       sections: options.descriptionSections,
     },
     autoFilled: {
@@ -3034,6 +3070,11 @@ async function allegroZapiszPowiazanieProduktu(product = {}, details = {}) {
   }
   if (Array.isArray(auto.zdjecia) && auto.zdjecia.length && !(product.zdjecia || []).length && !(previousEdit.zdjecia || []).length) autoPatch.zdjecia = auto.zdjecia.slice(0, 15);
   if (Array.isArray(auto.allegroParameters) && auto.allegroParameters.length && !Array.isArray(product.allegroParameters) && !Array.isArray(previousEdit.allegroParameters)) autoPatch.allegroParameters = auto.allegroParameters;
+  const improved = details.prepared?.improvedDescriptions || {};
+  if (improved.shortDescription) autoPatch.opisKrotki = tekst(improved.shortDescription, 500);
+  if (improved.fullDescription) autoPatch.opis = tekst(improved.fullDescription, 20000);
+  if (Array.isArray(improved.sections) && improved.sections.length) autoPatch.allegroDescriptionSections = improved.sections;
+  if (product.allegroShippingSubsidy === undefined && previousEdit.allegroShippingSubsidy === undefined) autoPatch.allegroShippingSubsidy = 3;
   edits[productId] = {
     ...previousEdit, ...autoPatch, allegroOfferId: offerId,
     ...(Number.isFinite(Number(details.draft?.stock?.available)) ? { allegroStock: Math.max(0, Math.floor(Number(details.draft.stock.available))) } : {}),
@@ -4934,13 +4975,7 @@ export default async (req) => {
       const similarOffers = allegroPodobneOferty(product, offersRec, 5);
       const shortDescription = allegroOpisKrotki(product, similarOffers);
       const sections = allegroSekcjeOpisu(product, shortDescription);
-      const descriptionBlocks = allegroOpisPelny(product, shortDescription);
-      const fullDescription = descriptionBlocks.filter((x) => x.type !== 'lead').map((x) => {
-        if (x.type === 'body') return [x.title, x.text].filter(Boolean).join('\n\n');
-        if (x.type === 'list') return [x.title, ...(x.items || []).map((item) => `• ${item}`)].filter(Boolean).join('\n\n');
-        if (x.type === 'facts') return ['Najważniejsze informacje', ...(x.items || []).map((item) => `• ${item}`)].join('\n\n');
-        return '';
-      }).filter(Boolean).join('\n\n');
+      const fullDescription = allegroOpisPelnyTekst(product, shortDescription);
       return odpowiedz({
         ok: true,
         shortDescription,
@@ -5019,7 +5054,7 @@ export default async (req) => {
           await allegroZapiszPowiazanieProduktu(body.product || {}, { offerId, prepared, draft });
         }
       }
-      return odpowiedz({ ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion }, existing ? 200 : 201);
+      return odpowiedz({ ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion }, existing ? 200 : 201);
     }
 
     // ─── ALLEGRO: kontrolowane rozstrzygnięcie duplikatów ofert ───

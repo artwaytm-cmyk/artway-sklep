@@ -170,7 +170,7 @@ requireMarkers('assets/app.js', app, [
   'function allegroListaProducentow',
   'function allegroProducentKanoniczny',
   'function allegroUruchomAutomatycznaKonserwacje',
-  'Opis powiązanej oferty Allegro ma być opisem w sklepie',
+  'Automatycznie poprawiaj krótki opis, pełny opis i układ',
   'function allegroDopasowaniePozycjiDoProduktu',
   'function allegroOtworzMapowaniePozycji',
   'name="cenaAllegro"',
@@ -220,6 +220,16 @@ requireMarkers('assets/app.js', app, [
   '"producent"',
   'Zrealizowane lokalnie',
   'function potwierdzWidoczneStanyMagazynu',
+  'ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI=3',
+  'function sklepRentownoscProduktu',
+  'function rentownoscKanalowaPanelHTML',
+  'function ustawRekomendowanaCeneProduktu',
+  'function automatyczniePobierzDaneZrodlaProduktu',
+  'allegroSynchronizujPowiazanyProduktPoZapisie(next,{forceFees:true})',
+  'artway_cel_marzy_sklep',
+  'artway_cel_marzy_allegro',
+  'autoUpdateOffers',
+  'autoFees',
   'function audytDuplikatowSklepu',
   'function filtrujDuplikatySklepu',
   'kanoniczneDuplikatySklepu',
@@ -343,6 +353,11 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'infakt_invoice_links',
   'send_to_ksef',
   'companyOrdersWithoutInvoice',
+  'function allegroOpisPelnyTekst',
+  'offersUpdated',
+  'feesUpdated',
+  'autoUpdateOffers',
+  'autoFees',
 ]);
 
 if (/stock:\s*\{\s*available:\s*Math\.max\(0,\s*Number\(opt\.stock\s*\?\?\s*p\.stan\s*\?\?\s*1\)\s*\|\|\s*1\)/.test(store)) {
@@ -400,6 +415,15 @@ if (!app.includes('brak lokalnego stanu nie wyłącza produktu ze sprzedaży') |
 }
 if (!app.includes('strefa → regał → półka → miejsce') && !app.includes('strefy przez regał i półkę do konkretnego miejsca')) {
   fail('assets/app.js: lokalizacje magazynu muszą mieć czytelną hierarchię strefa/regał/półka/miejsce');
+}
+if (!app.includes('allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI') || !app.includes('Domyślnie zawsze 3,00 zł.')) {
+  fail('assets/app.js: dopłata do wysyłki Allegro musi domyślnie wynosić 3 zł w danych i edytorze');
+}
+if (!app.includes('await allegroSynchronizujPowiazanyProduktPoZapisie(p,{forceFees:true})') || !app.includes('await allegroSynchronizujPowiazanyProduktPoZapisie(next,{forceFees:true})')) {
+  fail('assets/app.js: zapis produktu i ustawienie ceny Allegro muszą aktualizować ofertę oraz prowizję');
+}
+if (!store.includes("method: 'PATCH', bodyObj: patch, withMeta: true") || !store.includes("'/pricing/offer-fee-preview'") || !store.includes('allegroDescriptionSections = sections')) {
+  fail('store-app.mjs: automatyczna konserwacja musi aktualizować ofertę, opisy i kalkulację opłat');
 }
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
