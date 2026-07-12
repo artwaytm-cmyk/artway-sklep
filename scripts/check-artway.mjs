@@ -12,6 +12,7 @@ const files = [
   'netlify/functions/cron-allegro-orders.mjs',
   'netlify/functions/cron-allegro-communications.mjs',
   'netlify/functions/cron-allegro-offers.mjs',
+  'netlify/functions/cron-supplier-availability.mjs',
 ];
 
 function fail(message) {
@@ -44,6 +45,7 @@ const cron = read('netlify/functions/cron-inpost-sync.mjs');
 const cronAllegroOrders = read('netlify/functions/cron-allegro-orders.mjs');
 const cronAllegroCommunications = read('netlify/functions/cron-allegro-communications.mjs');
 const cronAllegroOffers = read('netlify/functions/cron-allegro-offers.mjs');
+const cronSupplierAvailability = read('netlify/functions/cron-supplier-availability.mjs');
 
 const version = index.match(/<meta\s+name=["']artway-version["']\s+content=["']([^"']+)/i)?.[1] || '';
 if (!version) fail('index.html: brak meta artway-version');
@@ -73,6 +75,8 @@ requireMarkers('assets/styles.css', css, [
   '.product-profit-editor',
   '.profitability-table',
   '.profitability-result',
+  '.supplier-monitor-panel',
+  '.supplier-availability',
   '.modal',
 ]);
 
@@ -180,6 +184,11 @@ requireMarkers('assets/app.js', app, [
   'function allegroRentownoscProduktu',
   'function allegroPobierzProwizjeProduktu',
   'function allegroRentownoscPanelHTML',
+  'function producentDostepnoscInfo',
+  'function agentAISprawdzDostepnoscProducentow',
+  '#/admin/magazyn/dostawcy',
+  'Próg ostrzeżenia u producenta',
+  'stan_u_producenta',
   '#/admin/allegro/rentownosc',
   'name="allegroCommissionAmount"',
   'Otwórz istniejącą ofertę',
@@ -231,6 +240,11 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function allegroPodsumujKalkulacjeOplat',
   "'/pricing/offer-fee-preview'",
   'allegro_fee_preview_audit',
+  "action === 'supplier-availability-sample'",
+  'function stanProducentaZHtml',
+  'IdoSell sizes.amount',
+  'supplier_availability_audit',
+  'producentStanHistoria',
   'function allegroDopasowanieOferty',
   'function allegroSekcjeOpisu',
   'function allegroZnajdzProduktKatalogu',
@@ -317,6 +331,13 @@ if (!feePreviewFlow.includes('commissions: summary.commissions') || !feePreviewF
 if (!app.includes('1-variableRate-target') || !app.includes('Po zmianie ceny pobierz prowizję ponownie')) {
   fail('assets/app.js: rekomendowana cena musi uwzględniać koszty procentowe i ostrzegać o ponownym przeliczeniu prowizji');
 }
+const supplierFlow = store.slice(store.indexOf("action === 'supplier-availability-sample'"), store.indexOf("action === 'allegro-map-offer'"));
+if (!supplierFlow.includes("status === 'niski'") || !supplierFlow.includes('producentAlertHash') || !supplierFlow.includes('changedAlerts') || !supplierFlow.includes('stanProducentaZrodlo')) {
+  fail('store-app.mjs: monitoring producentów musi rozpoznawać niski stan, zapisywać źródło i wysyłać alert tylko po zmianie');
+}
+if (!app.includes('brak lokalnego stanu nie wyłącza produktu ze sprzedaży') || !app.includes('Błąd pobrania nie jest traktowany jako brak')) {
+  fail('assets/app.js: stan lokalny musi być pomocniczy, a błąd strony producenta nie może oznaczać braku produktu');
+}
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
   "schedule: '0 */6 * * *'",
@@ -342,13 +363,20 @@ requireMarkers('netlify/functions/cron-allegro-offers.mjs', cronAllegroOffers, [
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
+requireMarkers('netlify/functions/cron-supplier-availability.mjs', cronSupplierAvailability, [
+  "schedule: '40 */6 * * *'",
+  'supplier-availability-sample',
+  'scheduled-supplier-availability',
+  'ARTWAY_ADMIN_TOKEN',
+]);
+
 try {
   new Function(app);
 } catch (error) {
   fail(`assets/app.js: błąd składni: ${error.message}`);
 }
 
-for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs']) {
+for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs']) {
   try {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
   } catch (error) {

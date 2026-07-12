@@ -346,7 +346,7 @@ function filtrujAktywneZamowienia(lista){
 }
 function zbierzWspolneUstawienia(){
   const katalogAllegro=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>({
-    id:p.id,nazwa:p.nazwa||"",sku:p.sku||"",externalId:p.externalId||"",gtin:p.gtin||p.ean||"",ean:p.ean||p.gtin||"",kodProducenta:p.kodProducenta||p.mpn||"",mpn:p.mpn||p.kodProducenta||"",producent:p.producent||p.marka||"",marka:p.marka||p.producent||"",cena:p.cena||0,cenaAllegro:p.cenaAllegro||0,cenaZakupu:p.cenaZakupu||0,allegroCommissionAmount:p.allegroCommissionAmount||0,allegroCommissionRate:p.allegroCommissionRate||0,allegroRecurringFees:p.allegroRecurringFees||0,allegroFeeCalculatedAt:p.allegroFeeCalculatedAt||""
+    id:p.id,nazwa:p.nazwa||"",sku:p.sku||"",externalId:p.externalId||"",gtin:p.gtin||p.ean||"",ean:p.ean||p.gtin||"",kodProducenta:p.kodProducenta||p.mpn||"",mpn:p.mpn||p.kodProducenta||"",producent:p.producent||p.marka||"",marka:p.marka||p.producent||"",cena:p.cena||0,cenaAllegro:p.cenaAllegro||0,cenaZakupu:p.cenaZakupu||0,producentUrl:p.producentUrl||p.sourceUrl||"",sourceUrl:p.sourceUrl||p.producentUrl||"",dostepnoscProducenta:p.dostepnoscProducenta||"",stanProducenta:p.stanProducenta??"",stanProducentaDokladny:!!p.stanProducentaDokladny,stanProducentaZrodlo:p.stanProducentaZrodlo||"",producentStatus:p.producentStatus||"",producentSprawdzonoAt:p.producentSprawdzonoAt||"",producentOstatniBlad:p.producentOstatniBlad||"",producentAlertAktywny:!!p.producentAlertAktywny,allegroCommissionAmount:p.allegroCommissionAmount||0,allegroCommissionRate:p.allegroCommissionRate||0,allegroRecurringFees:p.allegroRecurringFees||0,allegroFeeCalculatedAt:p.allegroFeeCalculatedAt||""
   }));
   return {
     artway_ustawienia: ustawienia,
@@ -1282,6 +1282,9 @@ function ustawieniaMagazynuPelne(){
     domyslnyDostawca:"",
     domyslnyLeadTime:7,
     domyslnyZapasDni:21,
+    progNiskiProducenta:50,
+    producentProbka:8,
+    producentMaxWiekGodz:48,
     infaktTryb:"szkice",
     infaktUwagi:"Faktury są przygotowywane jako szkice do przyszłej integracji API.",
     ...(ustawieniaMagazynu||{})
@@ -1612,6 +1615,31 @@ async function agentAISprawdzLinkiProducentow(limit=5){
   zapiszHistorieAgenta("linki-producentow",`Agent sprawdził ${wyniki.length} linków producentów`,{ok,braki,blad});
   renderuj();
   return `Sprawdziłem ${wyniki.length} linków producentów. Pobrane poprawnie: ${ok}. Do uzupełnienia: ${braki}. Błędy / do ponowienia: ${blad}.`;
+}
+function producentDostepnoscInfo(p={}){
+  const u=ustawieniaMagazynuPelne(),prog=Math.max(1,Number(u.progNiskiProducenta)||50),maxAge=Math.max(1,Number(u.producentMaxWiekGodz)||48),url=String(p.producentUrl||p.sourceUrl||"").trim(),raw=p.stanProducenta,quantity=raw===""||raw===null||raw===undefined?null:Math.max(0,Math.floor(Number(raw)||0)),checked=p.producentSprawdzonoAt||"",age=checked?Math.max(0,(Date.now()-Date.parse(checked))/3600000):Infinity,stale=!checked||!Number.isFinite(age)||age>maxAge;
+  let status=String(p.producentStatus||"").toLowerCase();
+  if(quantity===0)status="brak";else if(quantity!==null&&quantity<=prog)status="niski";else if(quantity!==null)status="dostepny";else if(/niedost/i.test(p.dostepnoscProducenta||""))status="brak";else if(/dostęp|dostep/i.test(p.dostepnoscProducenta||""))status="dostepny_nieznany";else if(!status)status="nieznany";
+  const meta={dostepny:{label:quantity===null?"dostępny":"dostępny "+quantity+" szt.",cls:"ok",ico:"🟢"},dostepny_nieznany:{label:"dostępny • ilość nieujawniona",cls:"info",ico:"🔵"},niski:{label:`niski stan: ${quantity??"—"} szt.`,cls:"warn",ico:"🟡"},brak:{label:"brak u producenta",cls:"bad",ico:"🔴"},nieznany:{label:"niepotwierdzona",cls:"unknown",ico:"⚪"},blad:{label:"błąd ostatniej próby",cls:"unknown",ico:"⚪"}}[status]||{label:"niepotwierdzona",cls:"unknown",ico:"⚪"};
+  return {url,quantity,exact:p.stanProducentaDokladny===true,status,prog,checked,ageHours:age,stale,alert:["niski","brak"].includes(status),...meta,error:p.producentOstatniBlad||"",source:p.stanProducentaZrodlo||""};
+}
+function producentDostepnoscBadgeHTML(p={},compact=false){
+  const i=producentDostepnoscInfo(p),date=i.checked?allegroDataTxt(i.checked):"nigdy";
+  return `<div class="supplier-availability ${i.cls} ${i.stale?"stale":""}"><b>${i.ico} ${esc(i.label)}</b>${compact?"":`<small>Sprawdzono: ${esc(date)}${i.stale?" • wynik nieaktualny":""}${i.source?` • ${esc(i.source)}`:""}</small>${i.error?`<em>${esc(skrocTekst(i.error,180))}</em>`:""}`}</div>`;
+}
+function produktyMonitorowaneUProducentow(){return produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&/^https?:\/\//i.test(String(p.producentUrl||p.sourceUrl||"")));}
+function statystykiDostepnosciProducentow(){
+  const products=produktyMonitorowaneUProducentow(),rows=products.map(p=>({p,i:producentDostepnoscInfo(p)}));
+  return {products,rows,dostepne:rows.filter(x=>["dostepny","dostepny_nieznany"].includes(x.i.status)&&!x.i.stale),niskie:rows.filter(x=>x.i.status==="niski"),braki:rows.filter(x=>x.i.status==="brak"),nieznane:rows.filter(x=>["nieznany","blad"].includes(x.i.status)||x.i.stale),bezLinku:produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!/^https?:\/\//i.test(String(p.producentUrl||p.sourceUrl||"")))};
+}
+async function agentAISprawdzDostepnoscProducentow(limit=null,productIds=[]){
+  const u=ustawieniaMagazynuPelne(),sample=Math.max(1,Math.min(25,Number(limit??u.producentProbka)||8)),ids=(Array.isArray(productIds)?productIds:[]).map(String);
+  try{
+    toast(ids.length?"Agent sprawdza wybrany produkt u producenta…":`Agent wyrywkowo sprawdza ${sample} produktów u producentów…`);
+    const d=await chmura("supplier-availability-sample",{method:"POST",body:{limit:sample,productIds:ids,threshold:Math.max(1,Number(u.progNiskiProducenta)||50),source:"admin-agent-ai"},timeout:120000});
+    await chmuraWczytajStan().catch(()=>{});zbudujProdukty();
+    const s=d.summary||{};toast(`✅ Sprawdzono ${s.checked||0}: dostępne ${s.available||0}, niski stan ${s.low||0}, brak ${s.unavailable||0}, niepotwierdzone ${s.unknown||0}`);renderuj();return d;
+  }catch(e){toast("⚠️ Monitoring producentów: "+(e.message||e));return null;}
 }
 function agentAILinkiProducentowTekst(){
   const lista=agentAILinkiOczekujace();
@@ -4049,6 +4077,7 @@ function agentAIRozpoznajPolecenie(tekst=""){
   if(agentAIMa(n,["pokaz lokalizacje","pokaż lokalizacje","lista lokalizacji","lokalizacje magazynu","mapa magazynu"])) return {typ:"lokalizacje",raw,confidence:.9};
   if(agentAIMa(n,["popraw opisy","popraw opisy produktow","popraw opisy produktów","uporzadkuj opisy","uporządkuj opisy","wygeneruj krotkie opisy","wygeneruj krótkie opisy"])) return {typ:"opisy-popraw",raw,confidence:.94};
   if(agentAIMa(n,["sprawdz opisy","sprawdź opisy","audyt opisow","audyt opisów","lista opisow","lista opisów","czy opisy sa dobre","czy opisy są dobre"])) return {typ:"opisy",raw,confidence:.92};
+  if(agentAIMa(n,["sprawdz dostepnosc u producentow","sprawdź dostępność u producentów","sprawdz stany producentow","sprawdź stany producentów","monitoring producentow","monitoring producentów","niski stan u producenta","braki u producentow","braki u producentów"])) return {typ:"dostepnosc-producentow-sprawdz",raw,confidence:.97};
   if(agentAIMa(n,["sprawdz linki producentow","sprawdź linki producentów","pobierz linki producentow","pobierz linki producentów","pobierz produkty z linkow","pobierz produkty z linków","ponow pobieranie linkow","ponów pobieranie linków"])) return {typ:"linki-producentow-sprawdz",raw,confidence:.93};
   if(agentAIMa(n,["pokaz linki producentow","pokaż linki producentów","linki producentow","linki producentów","kolejka linkow","kolejka linków","url producenta"])) return {typ:"linki-producentow",raw,confidence:.92};
   if(agentAIMa(n,["utworz lokalizacje","utwórz lokalizację","dodaj lokalizacje","dodaj lokalizację"])){
@@ -4714,7 +4743,7 @@ async function agentAIWykonajPolecenie(tekst=""){
   let odpowiedz="";
   try{
     if(intent.typ==="pomoc"){
-      odpowiedz=["Możesz pisać normalnie, np.:","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• sprawdź czy wpadło nowe zlecenie","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź linki producentów","• sprawdź opisy produktów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę Pinkfrog","• pokaż pamięć","• utwórz lokalizację R1-P1","• pokaż lokalizacje","• synchronizuj bazę","• utwórz brakujące szkice FV"].join("\n");
+      odpowiedz=["Możesz pisać normalnie, np.:","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• sprawdź czy wpadło nowe zlecenie","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• sprawdź linki producentów","• sprawdź opisy produktów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę Pinkfrog","• pokaż pamięć","• utwórz lokalizację R1-P1","• pokaż lokalizacje","• synchronizuj bazę","• utwórz brakujące szkice FV"].join("\n");
     }else if(intent.typ==="pamiec-zapis"){
       const rec=agentAIZapiszPamiec(intent.tresc||"");
       odpowiedz=rec?`Zapamiętałem na przyszłość: ${rec.wyzwalacz?`gdy „${rec.wyzwalacz}” → `:""}${rec.akcja}`:"Nie podałeś treści do zapamiętania. Napisz np. „zapamiętaj: przy brakach najpierw sprawdź dostawcę”.";
@@ -4731,6 +4760,9 @@ async function agentAIWykonajPolecenie(tekst=""){
       odpowiedz=agentAILinkiProducentowTekst();
     }else if(intent.typ==="linki-producentow-sprawdz"){
       odpowiedz=await agentAISprawdzLinkiProducentow(5);
+    }else if(intent.typ==="dostepnosc-producentow-sprawdz"){
+      const d=await agentAISprawdzDostepnoscProducentow();const s=d?.summary||{};
+      odpowiedz=d?`Wyrywkowo sprawdziłem ${s.checked||0} produktów u producentów. Dostępne: ${s.available||0}, niski stan: ${s.low||0}, brak: ${s.unavailable||0}, niepotwierdzone: ${s.unknown||0}. Próg ostrzeżenia: ${s.threshold||50} szt.`:"Nie udało się zakończyć monitoringu producentów.";
     }else if(intent.typ==="lokalizacja-dodaj"){
       if(!intent.kod){
         odpowiedz="Podaj kod lokalizacji, np. „utwórz lokalizację R1-P1”.";
@@ -4832,6 +4864,7 @@ function agentAIAnaliza(){
   const lokAktywne=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(produktyAdmin), lokPozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK"&&!magazynLokalizacjaPoKodzie(k));
   const nadwyzki=agentAINadwyzkiDoPrzyjecia();
   const linkiProd=agentAILinkiOczekujace();
+  const monitoringProducentow=statystykiDostepnosciProducentow(), alertyProducentow=[...monitoringProducentow.braki,...monitoringProducentow.niskie];
   const opisyDoPoprawy=agentAIProduktyZProblememOpisu(500);
   const allegroKontrola=aktywneZamowieniaAllegro().map(z=>({z,a:allegroAnalizaMagazynowaZamowienia(z)}));
   const allegroBraki=allegroKontrola.filter(x=>x.a.braki>0||x.a.nierozpoznane>0);
@@ -4846,7 +4879,8 @@ function agentAIAnaliza(){
     {id:"faktury",poziom:firmoweBezSzkicu.length?"warn":"ok",ikona:"🧾",tytul:"Szkice FV / inFakt",opis:firmoweBezSzkicu.length?`${firmoweBezSzkicu.length} zamówień firmowych nie ma jeszcze szkicu FV.`:"Szkice FV są przygotowane dla zamówień firmowych.",akcja:"masowe-fv"},
     {id:"ceny",poziom:bezCeny.length?"bad":"ok",ikona:"💰",tytul:"Produkty bez ceny",opis:bezCeny.length?`${bezCeny.length} produktów wymaga uzupełnienia ceny przed sprzedażą.`:"Ceny produktów są poprawne.",akcja:"#/admin/produkty"},
     {id:"sprzedaz",poziom:niedostepne.length?"warn":"ok",ikona:"🛒",tytul:"Produkty wyłączone ze sprzedaży",opis:niedostepne.length?`${niedostepne.length} produktów jest oznaczonych jako chwilowo niedostępne.`:"Wszystkie aktywne produkty są dostępne w sprzedaży.",akcja:"#/admin/magazyn"},
-    {id:"magazyn",poziom:niskiStan.length?"warn":"ok",ikona:"🏬",tytul:"Niski stan magazynowy",opis:niskiStan.length?`${niskiStan.length} produktów ma stan magazynowy ≤ ${prog}. To informacja tylko dla admina.`:"Stany magazynowe nie wymagają pilnej reakcji.",akcja:"#/admin/magazyn"},
+    {id:"dostepnosc-producentow",poziom:monitoringProducentow.braki.length?"bad":monitoringProducentow.niskie.length||monitoringProducentow.nieznane.length?"warn":"ok",ikona:"🏭",tytul:"Dostępność u producentów",opis:alertyProducentow.length?`${monitoringProducentow.braki.length} braków i ${monitoringProducentow.niskie.length} niskich stanów u producentów. Próg: ${ustawieniaMagazynuPelne().progNiskiProducenta} szt.`:`Monitorowanych linków: ${monitoringProducentow.products.length}; do odświeżenia lub bez potwierdzenia: ${monitoringProducentow.nieznane.length}.`,akcja:"#/admin/magazyn/dostawcy"},
+    {id:"magazyn",poziom:"ok",ikona:"🏬",tytul:"Stan lokalnego magazynu — pomocniczo",opis:niskiStan.length?`${niskiStan.length} produktów ma niski stan lokalny. Nie jest to samodzielny powód wyłączenia sprzedaży; ważniejszy jest producent i aktywne zamówienia.`:"Lokalne stany są informacją pomocniczą.",akcja:"#/admin/magazyn/stany"},
     {id:"zatowarowanie",poziom:plan.length?"warn":"ok",ikona:"📦",tytul:"Plan zatowarowania — braki do zamówień",opis:plan.length?`${plan.length} produktów brakuje do aktywnych zamówień. Szacowana wartość braków: ${zl(plan.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0))}.`:"Brak produktów, których brakuje do aktywnych zamówień.",akcja:"utworz-zlecenie-braki"},
     {id:"przyjecia-nadwyzek",poziom:nadwyzki.length?"warn":"ok",ikona:"📥",tytul:"Dzienne przyjęcie nadwyżek",opis:nadwyzki.length?`${nadwyzki.length} pozycji ze zleceń agenta ma nadwyżkę do decyzji/przyjęcia na magazyn.`:"Brak nadwyżek oczekujących na przyjęcie.",akcja:"#/admin/zamowienia/tabela"},
     {id:"nadrezerwacje",poziom:nadrezerwacje.length?"bad":"ok",ikona:"🚨",tytul:"Rezerwacje większe niż stan",opis:nadrezerwacje.length?`${nadrezerwacje.length} produktów ma więcej sztuk w aktywnych zamówieniach niż fizycznie w magazynie.`:"Nie ma nadrezerwacji magazynowych.",akcja:"#/admin/magazyn"},
@@ -4890,13 +4924,14 @@ function agentAIWykonaj(akcja){
     return docs;
   }
   if(akcja==="sprawdz-linki-producentow") return agentAISprawdzLinkiProducentow().then(t=>toast(t));
+  if(akcja==="sprawdz-dostepnosc-producentow") return agentAISprawdzDostepnoscProducentow();
   if(akcja==="popraw-opisy"){ const t=agentAIPoprawOpisyProduktow(40); toast(t); renderuj(); return t; }
   if(akcja==="kartoteka-domyslna") return wypelnijDomyslnaKartotekeMagazynu();
   if(akcja==="audyt-magazynu") return audytMagazynuAI();
 }
 function agentAIPriorytet(x){
   if(x.poziom==="bad") return 1;
-  if(["wysylki","zatowarowanie","nadrezerwacje","dostepnosc"].includes(x.id)) return 2;
+  if(["wysylki","zatowarowanie","nadrezerwacje","dostepnosc","dostepnosc-producentow"].includes(x.id)) return 2;
   if(x.poziom==="warn") return 3;
   return 9;
 }
@@ -4976,6 +5011,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
       <button class="btn ghost" onclick="agentAIWykonaj('export-magazyn')">📊 Eksport magazynu</button>
       <button class="btn ghost" onclick="agentAIWykonaj('export-zakupy')">📦 Plan zatowarowania CSV</button>
       <button class="btn ghost" onclick="agentAIWykonaj('sprawdz-linki-producentow')">🔗 Sprawdź linki producentów</button>
+      <button class="btn ghost" onclick="agentAIWykonaj('sprawdz-dostepnosc-producentow')">🏭 Wyrywkowo sprawdź stany producentów</button>
       <button class="btn ghost" onclick="agentAIWykonaj('audyt-magazynu')">✅ Audyt magazynu JSON</button>
       <a class="btn ghost" href="#/diagnostyka">🛠️ Diagnostyka</a>
     </div>
@@ -5004,7 +5040,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('synchronizuj bazę')">Synchronizacja</button>
       </div>
     </form>
-    <div class="agent-command-hints">Obsługiwane: zamówienia, braki, magazyn, wyszukiwanie produktu, linki producentów, szkic zamówienia do producenta, synchronizacja, szkice FV, eksport i audyt magazynu.</div>
+    <div class="agent-command-hints">Obsługiwane: zamówienia, braki, magazyn, wyrywkowy monitoring stanów producentów, wyszukiwanie produktu, linki producentów, szkic zamówienia do producenta, synchronizacja, szkice FV, eksport i audyt magazynu.</div>
     <div class="agent-memory-grid">
       <div class="agent-memory-card">
         <b>Jak uczyć agenta</b>
@@ -5750,11 +5786,13 @@ async function pobierzDaneProduktuZUrl(btn){
     uzupelnijPoleFormularza(form,"rozmiar",p.rozmiar,overwrite);
     uzupelnijPoleFormularza(form,"dostepnoscProducenta",p.dostepnoscProducenta,overwrite);
     uzupelnijPoleFormularza(form,"sourceUrl",p.sourceUrl||url,overwrite);
+    for(const field of ["stanProducenta","stanProducentaZrodlo","producentStatus","producentSprawdzonoAt"])uzupelnijPoleFormularza(form,field,p[field],true);
+    if(form.elements.stanProducentaDokladny)form.elements.stanProducentaDokladny.value=p.stanProducentaDokladny?"1":"";
     const braki=brakiDanychProducenta(p,d);
     agentAIZapiszLinkProducenta(url,braki.length?"do uzupełnienia":"pobrano",braki.length?`Pobrano częściowo — braki: ${braki.join(", ")}`:"Pobrano i dopasowano do formularza",{lastProductName:p.nazwa||"",lastProduct:agentAIProduktZLinkuMini(p),lastMissing:braki,lastAvailability:p.dostepnoscProducenta||d.availability?.text||"",lastPrice:p.cena||""});
     const pg=document.getElementById("podgladZdjecia");
     if(pg&&form.elements.zdjecie?.value) pg.innerHTML=`<img src="${esc(form.elements.zdjecie.value)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`;
-    toast(braki.length?`Pobrano, ale agent zapisał braki: ${braki.join(", ")}`:`Dane producenta pobrane: ${p.dostepnoscProducenta||"do sprawdzenia"}`);
+    toast(braki.length?`Pobrano, ale agent zapisał braki: ${braki.join(", ")}`:`Dane producenta pobrane: ${p.stanProducenta!==""&&p.stanProducenta!==undefined?p.stanProducenta+" szt.":p.dostepnoscProducenta||"do sprawdzenia"}`);
   }catch(e){
     agentAIZapiszLinkProducenta(url,"oczekuje",e.message||String(e));
     toast("⚠️ Pobieranie produktu nieudane — link zapisany dla Agenta AI: "+(e.message||e));
@@ -6437,10 +6475,12 @@ function adminSubnavHTML(items, aktywny){
 function magazynSubnavHTML(aktywny="pulpit"){
   const produktyAktywne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
   const braki=potrzebyZatowarowania().length;
+  const prod=statystykiDostepnosciProducentow(),alerty=prod.niskie.length+prod.braki.length;
   const bezLok=produktyAktywne.filter(p=>!magazynMetaProduktu(p.id).lokalizacja).length;
   const ruchy=(ruchyMagazynowe||[]).length;
   return adminSubnavHTML([
     {id:"pulpit",href:"#/admin/magazyn",label:"📊 Pulpit"},
+    {id:"dostawcy",href:"#/admin/magazyn/dostawcy",label:"🏭 Dostępność producentów",badge:alerty||""},
     {id:"stany",href:"#/admin/magazyn/stany",label:"📦 Stany produktów",badge:produktyAktywne.length},
     {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",label:"🗺️ Lokalizacje",badge:bezLok||""},
     {id:"plan",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:braki||""},
@@ -7359,7 +7399,7 @@ let filtrStatusuProduktow = "wszystkie", filtrZrodlaProduktow = "wszystkie", fil
 let sortowanieAdminProduktow = "id";
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
-let frazaMagazynu="", filtrMagazynu="wszystkie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1;
+let frazaMagazynu="", filtrMagazynu="wszystkie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="alerty";
 let magazynNaStronie=[25,50,100,200,500].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
 function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }
 function produktDodanyPoId(id){ return produktyDodane.find(p=>Number(p.id)===Number(id)); }
@@ -7490,6 +7530,9 @@ function filtrujProduktyMagazynu(lista, rez, sprzedaz){
   if(filtrMagazynu==="sprzedaz") out=out.filter(p=>Number(sprzedaz[p.id]||0)>0);
   if(filtrMagazynu==="dozamowienia") out=out.filter(p=>Number(sugestiaZatowarowania(p,rez,sprzedaz).ilosc)>0);
   if(filtrMagazynu==="nadrezerwacja") out=out.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;});
+  if(filtrMagazynu==="producent-niski") out=out.filter(p=>producentDostepnoscInfo(p).status==="niski");
+  if(filtrMagazynu==="producent-brak") out=out.filter(p=>producentDostepnoscInfo(p).status==="brak");
+  if(filtrMagazynu==="producent-nieznany") out=out.filter(p=>{const i=producentDostepnoscInfo(p);return !i.url||i.stale||["nieznany","blad"].includes(i.status);});
   if(filtrMagazynu==="bezlokalizacji") out=out.filter(p=>!magazynMetaProduktu(p.id).lokalizacja);
   if(filtrMagazynu==="bezdostawcy") out=out.filter(p=>!magazynMetaProduktu(p.id).dostawca);
   if(filtrDostawcyMagazynu!=="wszyscy") out=out.filter(p=>String(magazynMetaProduktu(p.id).dostawca||"")===filtrDostawcyMagazynu);
@@ -7513,6 +7556,9 @@ function sortujProduktyMagazynu(lista, rez={}, sprzedaz={}, prog=5){
     if(sortowanieMagazynu==="wartosc") return ((sb||0)*kwotaNum(b.cena))-((sa||0)*kwotaNum(a.cena));
     if(sortowanieMagazynu==="dostepne") return (dostepneSztukiMagazynu(a,rez)??Number.MAX_SAFE_INTEGER)-(dostepneSztukiMagazynu(b,rez)??Number.MAX_SAFE_INTEGER);
     if(sortowanieMagazynu==="zakup") return Number(plan(b).ilosc||0)-Number(plan(a).ilosc||0);
+    if(sortowanieMagazynu==="producent"){const rank={brak:0,niski:1,nieznany:2,blad:2,dostepny_nieznany:3,dostepny:4},ia=producentDostepnoscInfo(a),ib=producentDostepnoscInfo(b);return (rank[ia.status]??5)-(rank[ib.status]??5)||(ia.quantity??Number.MAX_SAFE_INTEGER)-(ib.quantity??Number.MAX_SAFE_INTEGER)||String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");}
+    const supplierRank={brak:0,niski:1,nieznany:2,blad:2,dostepny_nieznany:3,dostepny:4},ia=producentDostepnoscInfo(a),ib=producentDostepnoscInfo(b),supplierDiff=(supplierRank[ia.status]??5)-(supplierRank[ib.status]??5);
+    if(supplierDiff)return supplierDiff;
     const ra=sa===null?999999:(sa===0?0:(sa<=prog?sa:100000+sa));
     const rb=sb===null?999999:(sb===0?0:(sb<=prog?sb:100000+sb));
     return ra-rb || String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
@@ -7561,19 +7607,23 @@ function zapiszUstawieniaMagazynu(e){
     domyslnyDostawca:String(f.get("domyslnyDostawca")||"").trim(),
     domyslnyLeadTime:Math.max(0,parseInt(f.get("domyslnyLeadTime"),10)||7),
     domyslnyZapasDni:Math.max(7,parseInt(f.get("domyslnyZapasDni"),10)||21),
+    progNiskiProducenta:Math.max(1,parseInt(f.get("progNiskiProducenta"),10)||50),
+    producentProbka:Math.max(1,Math.min(25,parseInt(f.get("producentProbka"),10)||8)),
+    producentMaxWiekGodz:Math.max(1,parseInt(f.get("producentMaxWiekGodz"),10)||48),
     infaktTryb:String(f.get("infaktTryb")||"szkice"),
     infaktUwagi:String(f.get("infaktUwagi")||"").trim()
   };
   zapiszLS("artway_magazyn_ustawienia",ustawieniaMagazynu);
+  if(chmuraToken)void chmuraZapiszUstawienia();
   loguj("info","Zapisano ustawienia magazynu");
   toast("Ustawienia magazynu zapisane ✅"); renderuj();
 }
 function eksportujMagazynCSV(){
   const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30);
-  const rows=[["id","sku","nazwa","kategoria","stan","bez_limitu","dostepne_po_rezerwacjach","zarezerwowane","sprzedaz_30_dni","min_stock","target_stock","lead_time_dni","lokalizacja","dostawca","kod","sugerowany_zakup","cena_brutto","wartosc_stanu"].join(";")];
+  const rows=[["id","sku","nazwa","kategoria","producent","url_zrodlowy","status_u_producenta","stan_u_producenta","stan_producenta_dokladny","sprawdzono_u_producenta","stan_lokalny","bez_limitu","dostepne_po_rezerwacjach","zarezerwowane","sprzedaz_30_dni","min_stock","target_stock","lead_time_dni","lokalizacja","dostawca","kod","sugerowany_zakup","cena_brutto","wartosc_stanu"].join(";")];
   produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
     const stan=stanMagazynuId(p.id), plan=sugestiaZatowarowania(p,rez,spr), meta=magazynMetaProduktu(p.id), wart=stan===null?"":kwotaNum(stan*kwotaNum(p.cena)).toFixed(2).replace(".",",");
-    rows.push([p.id,p.sku||"",p.nazwa,p.kategoria,stan===null?"":stan,stan===null?"tak":"nie",plan.dostepne===null?"":plan.dostepne,rez[p.id]||0,spr[p.id]||0,plan.min,plan.target,plan.lead,meta.lokalizacja||"",meta.dostawca||"",meta.kod||"",plan.ilosc||0,kwotaNum(p.cena).toFixed(2).replace(".",","),wart].map(csvPole).join(";"));
+    const prod=producentDostepnoscInfo(p);rows.push([p.id,p.sku||"",p.nazwa,p.kategoria,p.producent||p.marka||"",prod.url,prod.status,prod.quantity??"",prod.exact?"tak":"nie",prod.checked,stan===null?"":stan,stan===null?"tak":"nie",plan.dostepne===null?"":plan.dostepne,rez[p.id]||0,spr[p.id]||0,plan.min,plan.target,plan.lead,meta.lokalizacja||"",meta.dostawca||"",meta.kod||"",plan.ilosc||0,kwotaNum(p.cena).toFixed(2).replace(".",","),wart].map(csvPole).join(";"));
   });
   pobierzPlik("magazyn-artway.csv","\uFEFF"+rows.join("\n"),"text/csv");
   loguj("info","Wyeksportowano magazyn CSV");
@@ -7668,8 +7718,11 @@ function eksportujSzkiceFakturJSON(){
 }
 function widokAdminMagazyn(sekcja="pulpit"){
   const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30), u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
-  const aktywna=["pulpit","stany","lokalizacje","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
+  const aktywna=["pulpit","dostawcy","stany","lokalizacje","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const wszystkie=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const supplierStats=statystykiDostepnosciProducentow(),supplierQuery=String(szukajProducentowMagazynu||"").toLowerCase().trim();
+  let supplierRows=(filtrProducentowMagazynu==="bez_linku"?supplierStats.bezLinku.map(p=>({p,i:producentDostepnoscInfo(p)})):supplierStats.rows).filter(({p,i})=>{if(supplierQuery&&!`${p.nazwa||""} ${p.sku||""} ${p.gtin||p.ean||""} ${p.producent||""} ${i.url}`.toLowerCase().includes(supplierQuery))return false;if(filtrProducentowMagazynu==="alerty"&&!i.alert)return false;if(filtrProducentowMagazynu==="niski"&&i.status!=="niski")return false;if(filtrProducentowMagazynu==="brak"&&i.status!=="brak")return false;if(filtrProducentowMagazynu==="nieznane"&&i.url&&!i.stale&&!["nieznany","blad"].includes(i.status))return false;if(filtrProducentowMagazynu==="dostepne"&&!["dostepny","dostepny_nieznany"].includes(i.status))return false;return true;});
+  const supplierRank={brak:0,niski:1,blad:2,nieznany:2,dostepny_nieznany:3,dostepny:4};supplierRows.sort((a,b)=>(supplierRank[a.i.status]??5)-(supplierRank[b.i.status]??5)||(a.i.quantity??Number.MAX_SAFE_INTEGER)-(b.i.quantity??Number.MAX_SAFE_INTEGER)||String(a.p.nazwa||"").localeCompare(String(b.p.nazwa||""),"pl"));
   const monitorowane=wszystkie.filter(p=>stanMagazynuId(p.id)!==null);
   const brak=wszystkie.filter(p=>stanMagazynuId(p.id)===0);
   const niskie=wszystkie.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s>0&&s<=progNiskiProduktu(p);});
@@ -7684,6 +7737,8 @@ function widokAdminMagazyn(sekcja="pulpit"){
   const pozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK" && !magazynLokalizacjaPoKodzie(k));
   const lokDoKompletacji=[...new Set(pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).flatMap(z=>pozycjeZamowieniaMagazyn(z).map(p=>magazynMetaProduktu(p.id).lokalizacja||"BRAK")))].filter(Boolean);
   const pracaMagazynu=[
+    ...supplierStats.braki.slice(0,4).map(({p})=>({lvl:"bad",ico:"🔴",tytul:p.nazwa,opis:"Producent zgłasza brak produktu. Sprawdź źródło i bieżące zamówienia.",href:"#/admin/magazyn/dostawcy"})),
+    ...supplierStats.niskie.slice(0,4).map(({p,i})=>({lvl:"warn",ico:"🟡",tytul:p.nazwa,opis:`Niski stan u producenta: ${i.quantity} szt. • próg ${i.prog}.`,href:"#/admin/magazyn/dostawcy"})),
     ...nadrezerwacje.slice(0,4).map(p=>({lvl:"bad",ico:"🚨",tytul:p.nazwa,opis:`Nadrezerwacja: dostępne ${dostepneSztukiMagazynu(p,rez)} szt., rezerwacje ${rez[p.id]||0}.`,akcja:"dozamowienia"})),
     ...planZakupu.slice(0,4).map(x=>({lvl:"warn",ico:"📦",tytul:x.produkt.nazwa,opis:`Do zamówienia: ${x.ilosc} szt. • ${x.meta.dostawca||"brak dostawcy"} • ${x.meta.lokalizacja||"brak lokalizacji"}`,akcja:"dozamowienia"})),
     ...brakiKartoteki.slice(0,4).map(p=>({lvl:"info",ico:"🗂️",tytul:p.nazwa,opis:`Uzupełnij kartotekę: ${!magazynMetaProduktu(p.id).lokalizacja?"brak lokalizacji ":""}${!magazynMetaProduktu(p.id).dostawca?"brak dostawcy":""}.`,akcja:"bezlokalizacji"}))
@@ -7700,19 +7755,21 @@ function widokAdminMagazyn(sekcja="pulpit"){
       <div>
         <span class="cat-label">Magazyn i dokumenty</span>
         <h1>🏬 ${esc(u.nazwa)}</h1>
-        <p>Stany, rezerwacje z zamówień, historia ruchów oraz szkice FV przygotowane pod przyszłą integrację inFakt.</p>
+        <p>Najpierw dostępność u producentów z linków źródłowych, potem braki do aktywnych zamówień. Stan lokalny pozostaje informacją pomocniczą.</p>
       </div>
       <div class="diag-actions">
         <button class="btn" onclick="eksportujMagazynCSV()">📊 Eksport magazynu CSV</button>
+        <button class="btn ghost" onclick="agentAISprawdzDostepnoscProducentow()">🏭 Sprawdź producentów</button>
         <button class="btn ghost" onclick="eksportujZatowarowanieCSV()">📦 Braki do zamówień</button>
         <a class="btn ghost" href="#/admin/agent-ai">🤖 Agent AI</a>
         <a class="btn ghost" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
       </div>
     </div>
     <div class="orders-stat-grid">
-      <button class="order-stat-card stat-filter ${filtrMagazynu==="monitorowane"?"active":""}" type="button" onclick="ustawFiltrMagazynu('monitorowane','stan')"><span>📦</span><b>${monitorowane.length}</b><small>produktów ze stanem</small></button>
-      <button class="order-stat-card stat-filter ${brak.length?"hot":""} ${filtrMagazynu==="brak"?"active":""}" type="button" onclick="ustawFiltrMagazynu('brak','stan')"><span>⛔</span><b>${brak.length}</b><small>brak na stanie</small></button>
-      <button class="order-stat-card stat-filter ${niskie.length?"hot":""} ${filtrMagazynu==="niskie"?"active":""}" type="button" onclick="ustawFiltrMagazynu('niskie','stan')"><span>⚠️</span><b>${niskie.length}</b><small>niski stan ≤ ${prog}</small></button>
+      <button class="order-stat-card stat-filter money" type="button" onclick="location.hash='#/admin/magazyn/dostawcy';filtrProducentowMagazynu='dostepne'"><span>🏭</span><b>${supplierStats.dostepne.length}</b><small>dostępne u producentów</small></button>
+      <button class="order-stat-card stat-filter ${supplierStats.niskie.length?"hot":""}" type="button" onclick="location.hash='#/admin/magazyn/dostawcy';filtrProducentowMagazynu='niski'"><span>🟡</span><b>${supplierStats.niskie.length}</b><small>niski stan u producenta ≤ ${esc(u.progNiskiProducenta)}</small></button>
+      <button class="order-stat-card stat-filter ${supplierStats.braki.length?"hot":""}" type="button" onclick="location.hash='#/admin/magazyn/dostawcy';filtrProducentowMagazynu='brak'"><span>🔴</span><b>${supplierStats.braki.length}</b><small>brak u producenta</small></button>
+      <button class="order-stat-card stat-filter ${supplierStats.nieznane.length?"hot":""}" type="button" onclick="location.hash='#/admin/magazyn/dostawcy';filtrProducentowMagazynu='nieznane'"><span>⚪</span><b>${supplierStats.nieznane.length}</b><small>niepotwierdzone / nieaktualne</small></button>
       <button class="order-stat-card stat-filter ${filtrMagazynu==="rezerwacje"?"active":""}" type="button" onclick="ustawFiltrMagazynu('rezerwacje','rezerwacje')"><span>🧾</span><b>${zarezerwowane}</b><small>szt. w aktywnych zamówieniach</small></button>
       <button class="order-stat-card stat-filter money ${filtrMagazynu==="wszystkie"&&sortowanieMagazynu==="wartosc"?"active":""}" type="button" onclick="ustawFiltrMagazynu('wszystkie','wartosc')"><span>💰</span><b>${zl(wartosc)}</b><small>wartość stanów</small></button>
       <button class="order-stat-card stat-filter ${planZakupu.length?"hot":""} ${filtrMagazynu==="dozamowienia"?"active":""}" type="button" onclick="ustawFiltrMagazynu('dozamowienia','zakup')"><span>📦</span><b>${planZakupu.length}</b><small>braki do zamówień (${zl(wartoscPlanu)})</small></button>
@@ -7720,6 +7777,16 @@ function widokAdminMagazyn(sekcja="pulpit"){
       <button class="order-stat-card stat-filter ${brakiKartoteki.length?"hot":""} ${filtrMagazynu==="bezlokalizacji"||filtrMagazynu==="bezdostawcy"?"active":""}" type="button" onclick="ustawFiltrMagazynu('bezlokalizacji','nazwa')"><span>🗂️</span><b>${brakiKartoteki.length}</b><small>braki kartoteki</small></button>
       <button class="order-stat-card stat-filter ${pozaSlownikiem.length?"hot":""}" type="button" onclick="document.getElementById('warehouseLocationForm')?.scrollIntoView({behavior:'smooth',block:'center'})"><span>🗺️</span><b>${lokalizacje.length}</b><small>lokalizacji w słowniku</small></button>
     </div>
+  </div>
+  <div class="panel supplier-monitor-panel" style="${aktywna==="dostawcy"?"":"display:none"}">
+    <div class="order-section-head">
+      <div><span class="order-pro-label">Priorytet magazynu</span><h2 style="margin-top:.25rem">🏭 Dostępność u producentów</h2><p class="order-detail-lead">Agent co 6 godzin sprawdza wyrywkową próbkę najdłużej niekontrolowanych linków. Dokładną liczbę sztuk zapisuje wyłącznie wtedy, gdy strona producenta ją ujawnia; w pozostałych przypadkach pokazuje „ilość nieujawniona”.</p></div>
+      <div class="diag-actions"><button class="btn" onclick="agentAISprawdzDostepnoscProducentow()">🤖 Sprawdź próbkę ${esc(u.producentProbka)} produktów</button><button class="btn ghost" onclick="agentAISprawdzDostepnoscProducentow(25)">Sprawdź 25 najstarszych</button></div>
+    </div>
+    <div class="orders-stat-grid supplier-monitor-stats"><div class="order-stat-card"><span>🔗</span><b>${supplierStats.products.length}</b><small>produktów z linkiem</small></div><div class="order-stat-card money"><span>🟢</span><b>${supplierStats.dostepne.length}</b><small>potwierdzona dostępność</small></div><div class="order-stat-card ${supplierStats.niskie.length?"hot":""}"><span>🟡</span><b>${supplierStats.niskie.length}</b><small>niski stan ≤ ${esc(u.progNiskiProducenta)} szt.</small></div><div class="order-stat-card ${supplierStats.braki.length?"hot":""}"><span>🔴</span><b>${supplierStats.braki.length}</b><small>brak u producenta</small></div><div class="order-stat-card ${supplierStats.nieznane.length?"hot":""}"><span>⚪</span><b>${supplierStats.nieznane.length}</b><small>nieznane / starsze niż ${esc(u.producentMaxWiekGodz)} h</small></div><div class="order-stat-card"><span>🔗</span><b>${supplierStats.bezLinku.length}</b><small>bez linku źródłowego</small></div></div>
+    <div class="supplier-monitor-toolbar"><input placeholder="Szukaj: nazwa, SKU, EAN, producent lub URL…" value="${esc(szukajProducentowMagazynu)}" oninput="szukajProducentowMagazynu=this.value;clearTimeout(window.__supplierSearch);window.__supplierSearch=setTimeout(()=>renderuj(),250)"><select onchange="filtrProducentowMagazynu=this.value;renderuj()">${[["alerty","Tylko ostrzeżenia"],["wszystkie","Wszystkie z linkiem"],["niski","Niski stan"],["brak","Brak u producenta"],["nieznane","Niepotwierdzone / nieaktualne"],["dostepne","Dostępne"],["bez_linku","Bez linku źródłowego"]].map(([v,l])=>`<option value="${v}" ${filtrProducentowMagazynu===v?"selected":""}>${l}</option>`).join("")}</select><span><b>${supplierRows.length}</b> wyników</span></div>
+    <div class="warehouse-worktable-wrap"><table class="log-table supplier-monitor-table"><tr><th>Produkt</th><th>Producent i link</th><th>Stan u producenta</th><th>Ostatnia kontrola</th><th>Historia 5 kontroli</th><th>Akcje</th></tr>${supplierRows.slice(0,500).map(({p,i})=>`<tr class="supplier-row ${i.cls}"><td><div class="allegro-offer-title-cell">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"🎲")}</span>`}<div><b>${esc(p.nazwa||"Produkt")}</b><small>SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small></div></div></td><td><b>${esc(p.producent||p.marka||"Nieprzypisany")}</b><small class="supplier-source-url">${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">Otwórz źródło ↗</a><br>${esc(i.url)}`:"Brak linku źródłowego"}</small></td><td>${producentDostepnoscBadgeHTML(p)}<small>Próg ostrzeżenia: ${esc(i.prog)} szt.</small></td><td><b>${i.checked?esc(allegroDataTxt(i.checked)):"Nigdy"}</b><br><small>${i.stale?`<span class="lvl lvl-ostrzezenie">wynik nieaktualny</span>`:`<span class="lvl lvl-ok">aktualny</span>`}${i.error?`<br>${esc(skrocTekst(i.error,180))}`:""}</small></td><td><div class="supplier-history">${(Array.isArray(p.producentStanHistoria)?p.producentStanHistoria:[]).map(h=>`<span class="${esc(h.status||"nieznany")}"><b>${h.quantity===null||h.quantity===undefined?"—":esc(h.quantity)+" szt."}</b><small>${esc(allegroDataTxt(h.at))}</small></span>`).join("")||`<small>Brak historii</small>`}</div></td><td><div class="warehouse-worktable-actions">${i.url?`<button class="btn" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź teraz</button>`:""}<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj produkt</a></div></td></tr>`).join("")||`<tr><td colspan="6">Brak produktów pasujących do filtra.</td></tr>`}</table></div>
+    <div class="backend-note allegro-info-bottom"><b>Zasada decyzji:</b> brak lokalnego stanu nie wyłącza produktu ze sprzedaży. Alarm powstaje przede wszystkim wtedy, gdy producent zgłasza brak albo ujawniony stan spada do ${esc(u.progNiskiProducenta)} szt. lub mniej. Błąd pobrania nie jest traktowany jako brak — zostaje oznaczony do ponownej kontroli.</div>
   </div>
   <div class="panel warehouse-ops-panel" style="${aktywna==="pulpit"?"":"display:none"}">
     <div class="order-section-head">
@@ -7742,7 +7809,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
       </div>
     </div>
     <div class="warehouse-work-list">
-      ${pracaMagazynu.length?pracaMagazynu.map(x=>`<button class="warehouse-work-item ${x.lvl}" onclick="ustawFiltrMagazynu(${jsArg(x.akcja||"wszystkie")},'ryzyko')">
+      ${pracaMagazynu.length?pracaMagazynu.map(x=>`<button class="warehouse-work-item ${x.lvl}" onclick="${x.href?`location.hash=${jsArg(x.href)}`:`ustawFiltrMagazynu(${jsArg(x.akcja||"wszystkie")},'ryzyko')`}">
         <span>${x.ico}</span><b>${esc(x.tytul)}</b><small>${esc(x.opis)}</small>
       </button>`).join(""):`<div class="warehouse-work-empty">✅ Brak pilnych prac magazynowych wynikających z aktywnych zamówień.</div>`}
     </div>
@@ -7814,16 +7881,16 @@ function widokAdminMagazyn(sekcja="pulpit"){
   </div>
   <div class="panel" style="${aktywna==="stany"?"":"display:none"}">
     <div class="order-section-head">
-      <div><h2 style="margin-top:0">📋 Stany produktów</h2><p class="order-detail-lead">Zmieniasz konkretny stan albo zostawiasz puste pole = produkt bez limitu.</p></div>
+      <div><h2 style="margin-top:0">📋 Stany produktów</h2><p class="order-detail-lead">Stan lokalny jest pomocniczy. Najważniejsza jest dostępność z linku producenta i realne braki do aktywnych zamówień.</p></div>
       <div class="diag-actions"><button class="btn" onclick='potwierdzWidoczneStanyMagazynu(${JSON.stringify(fragment.map(p=>p.id))})'>✅ Potwierdź widoczne stany</button><button class="btn ghost" onclick="eksportujMagazynCSV()">📤 Eksport pełny</button><button class="btn ghost" onclick="frazaMagazynu='';filtrMagazynu='wszystkie';filtrDostawcyMagazynu='wszyscy';filtrLokalizacjiMagazynu='wszystkie';filtrInwentaryzacjiMagazynu='wszystkie';sortowanieMagazynu='ryzyko';stronaMagazynu=1;renderuj()">Wyczyść filtry</button></div>
     </div>
     <div class="filter-grid warehouse-filter-grid">
       <input placeholder="Szukaj: nazwa, SKU, ID, kategoria, lokalizacja, dostawca…" value="${esc(frazaMagazynu)}" oninput="frazaMagazynu=this.value;stronaMagazynu=1;renderuj()">
       <select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">
-        ${[["wszystkie","Wszystkie produkty"],["dozamowienia","Braki do zamówień"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Tylko monitorowane"],["bezlimitu","Bez limitu"],["niskie","Niski stan"],["brak","Brak na stanie"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["bezlokalizacji","Bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}
+        ${[["wszystkie","Wszystkie produkty"],["producent-niski","Producent: niski stan"],["producent-brak","Producent: brak"],["producent-nieznany","Producent: niepotwierdzone"],["dozamowienia","Braki do zamówień"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Tylko monitorowane lokalnie"],["bezlimitu","Lokalnie bez limitu"],["niskie","Lokalny niski stan"],["brak","Lokalny stan zerowy"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["bezlokalizacji","Bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}
       </select>
       <select onchange="sortowanieMagazynu=this.value;stronaMagazynu=1;renderuj()">
-        ${[["ryzyko","Sortuj: ryzyko braku"],["zakup","Braki do zamówień"],["dostepne","Dostępne po rezerwacji"],["stan","Stan rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}
+        ${[["ryzyko","Sortuj: ryzyko producenta"],["producent","Stan u producenta"],["zakup","Braki do zamówień"],["dostepne","Dostępne po rezerwacji"],["stan","Stan lokalny rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}
       </select>
       <select onchange="ustawMagazynNaStronie(this.value)">
         ${[25,50,100,200,500].map(n=>`<option value="${n}" ${magazynNaStronie===n?"selected":""}>${n} na stronie</option>`).join("")}
@@ -7838,12 +7905,13 @@ function widokAdminMagazyn(sekcja="pulpit"){
     </div>
     <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
     <div style="overflow-x:auto"><table class="log-table warehouse-table">
-      <tr><th>Produkt i identyfikatory</th><th>Kategoria</th><th>Stan fizyczny / rezerwacje</th><th>Rotacja i pokrycie</th><th>Dostępność w sklepie</th><th>Ryzyko / zamówienie</th><th>Kartoteka magazynowa</th><th>Korekta</th></tr>
+      <tr><th>Produkt i identyfikatory</th><th>Kategoria</th><th>Producent / źródło</th><th>Stan lokalny / rezerwacje</th><th>Rotacja i pokrycie</th><th>Dostępność w sklepie</th><th>Ryzyko / zamówienie</th><th>Kartoteka magazynowa</th><th>Korekta</th></tr>
       ${fragment.map(p=>{
         const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), sp=Number(spr[p.id]||0), plan=sugestiaZatowarowania(p,rez,spr), meta=plan.meta, wart=stan===null?0:stan*kwotaNum(p.cena);
         return `<tr>
           <td><div style="display:flex;gap:.55rem;align-items:center">${p.zdjecie?`<img class="allegro-order-thumb" src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span class="allegro-order-thumb fallback">📦</span>`}<div><b>${esc(p.nazwa)}</b><br><small>ID: ${esc(p.id)} • SKU: ${esc(p.sku||"—")}<br>EAN: ${esc(p.gtin||p.ean||meta.kod||"—")}</small></div></div></td>
           <td>${esc(p.kategoria||"—")}</td>
+          <td>${producentDostepnoscBadgeHTML(p)}<div class="warehouse-worktable-actions supplier-inline-actions">${producentDostepnoscInfo(p).url?`<button class="btn ghost" type="button" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź</button><a class="btn ghost" href="${esc(producentDostepnoscInfo(p).url)}" target="_blank" rel="noopener">Źródło ↗</a>`:`<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">Dodaj link</a>`}</div></td>
           <td>
             <b>${stan===null?"∞":stan}</b> ${stanBadgeMagazynu(stan,progNiskiProduktu(p))}
             <br><small>Dostępne: <b>${plan.dostepne===null?"∞":esc(plan.dostepne)}</b> • rezerw.: ${r} • 30 dni: ${sp}</small>
@@ -7916,6 +7984,10 @@ function widokAdminMagazyn(sekcja="pulpit"){
         <div class="f-group"><label>Lokalizacja / uwagi</label><input name="lokalizacja" value="${esc(u.lokalizacja)}" placeholder="np. regał, pomieszczenie, adres"></div>
         <div class="f-row"><div class="f-group"><label>Domyślny dostawca</label><input name="domyslnyDostawca" value="${esc(u.domyslnyDostawca)}" placeholder="np. Pinkfrog / hurtownia"></div><div class="f-group"><label>Domyślny czas dostawy (dni)</label><input name="domyslnyLeadTime" inputmode="numeric" value="${esc(u.domyslnyLeadTime)}"></div></div>
         <div class="f-row"><div class="f-group"><label>Zapas docelowy (dni)</label><input name="domyslnyZapasDni" inputmode="numeric" value="${esc(u.domyslnyZapasDni)}"></div><div class="f-group"><label>Akcja kartoteki</label><button class="btn ghost" type="button" onclick="wypelnijDomyslnaKartotekeMagazynu()">Uzupełnij braki domyślnymi danymi</button></div></div>
+        <h2>🏭 Monitoring producentów</h2>
+        <p class="order-detail-lead">Automatyczny Agent AI co 6 godzin losuje spośród najdłużej niesprawdzanych linków. Telegram jest wysyłany tylko po pojawieniu się nowego niskiego stanu albo braku.</p>
+        <div class="f-row"><div class="f-group"><label>Próg ostrzeżenia u producenta (szt.)</label><input name="progNiskiProducenta" type="number" min="1" value="${esc(u.progNiskiProducenta)}"></div><div class="f-group"><label>Wielkość wyrywkowej próbki</label><input name="producentProbka" type="number" min="1" max="25" value="${esc(u.producentProbka)}"></div></div>
+        <div class="f-group"><label>Po ilu godzinach wynik uznać za nieaktualny</label><input name="producentMaxWiekGodz" type="number" min="1" value="${esc(u.producentMaxWiekGodz)}"></div>
         <h2>🧾 inFakt / FV</h2>
         <div class="f-group"><label>Tryb integracji</label><select name="infaktTryb"><option value="szkice" ${u.infaktTryb==="szkice"?"selected":""}>Tylko szkice w sklepie</option><option value="api" ${u.infaktTryb==="api"?"selected":""}>API inFakt po dodaniu tokenu</option></select></div>
         <div class="f-group"><label>Uwagi do integracji</label><textarea name="infaktUwagi" rows="3">${esc(u.infaktUwagi)}</textarea></div>
@@ -8237,6 +8309,8 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Dostępność u producenta</label><input name="dostepnoscProducenta" value="${esc(p.dostepnoscProducenta||"")}" placeholder="dostępny / niedostępny / do sprawdzenia"></div>
           <div class="f-group"><label>URL źródłowy</label><input name="sourceUrl" value="${esc(p.sourceUrl||p.producentUrl||"")}" placeholder="strona źródłowa produktu"></div>
         </div>
+        <input type="hidden" name="stanProducenta" value="${esc(p.stanProducenta??"")}"><input type="hidden" name="stanProducentaDokladny" value="${p.stanProducentaDokladny?"1":""}"><input type="hidden" name="stanProducentaZrodlo" value="${esc(p.stanProducentaZrodlo||"")}"><input type="hidden" name="producentStatus" value="${esc(p.producentStatus||"")}"><input type="hidden" name="producentSprawdzonoAt" value="${esc(p.producentSprawdzonoAt||"")}">
+        <div class="supplier-editor-status">${producentDostepnoscBadgeHTML(p)}${edycja&&/^https?:\/\//i.test(String(p.producentUrl||p.sourceUrl||""))?`<button class="btn ghost" type="button" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź stan u producenta</button>`:""}</div>
       </details>
       <details ${(p.allegroCategoryId||p.allegroProductId||p.allegroOfferId)?"open":""} style="margin-bottom:.8rem">
         <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🟠 Allegro — dane do wystawienia</summary>
@@ -8340,6 +8414,9 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     const v=String(f.get(nazwa)||"").trim();
     if(v)p[pole]=v;else delete p[pole];
   }
+  const stanProd=String(f.get("stanProducenta")??"").trim();if(stanProd!=="")p.stanProducenta=Math.max(0,Math.floor(Number(stanProd)||0));else delete p.stanProducenta;
+  p.stanProducentaDokladny=String(f.get("stanProducentaDokladny")||"")==="1";
+  for(const pole of ["stanProducentaZrodlo","producentStatus","producentSprawdzonoAt"]){const v=String(f.get(pole)||"").trim();if(v)p[pole]=v;else delete p[pole];}
   if(p.gtin) p.ean=p.gtin; else delete p.ean;
   const canonicalProducer=allegroProducentKanoniczny(p);
   if(canonicalProducer){p.producent=canonicalProducer;p.marka=canonicalProducer;}

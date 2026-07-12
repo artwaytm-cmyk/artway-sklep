@@ -2119,6 +2119,35 @@ function obrazkiProduktuZHtml(url = '', html = '') {
   }
   return [...imageSet].slice(0, 16);
 }
+function stanProducentaZHtml(html = '', ldProduct = {}) {
+  const liczba = (v) => {
+    const raw = String(v ?? '').trim();
+    if (!raw) return null;
+    const n = Number(raw.replace(',', '.'));
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+  };
+  const inventory = liczba(ldProduct?.offers?.inventoryLevel?.value ?? ldProduct?.offers?.inventoryLevel ?? ldProduct?.inventoryLevel?.value ?? ldProduct?.inventoryLevel);
+  if (inventory !== null) return { quantity: inventory, exact: true, source: 'schema.org inventoryLevel' };
+  const source = String(html || '');
+  const sizesStart = source.search(/\bsizes\s*:\s*\[/i);
+  if (sizesStart >= 0) {
+    const after = source.slice(sizesStart, sizesStart + 250000);
+    const boundary = after.search(/\n\s*subscription\s*:/i);
+    const sizesBlock = boundary > 0 ? after.slice(0, boundary) : after.slice(0, 100000);
+    const amounts = [...sizesBlock.matchAll(/(?:^|[,\s{])amount\s*:\s*["']?(\d+(?:[.,]\d+)?)/g)].map((m) => liczba(m[1])).filter((n) => n !== null && n <= 10000000);
+    if (amounts.length) return { quantity: amounts.reduce((sum, n) => sum + n, 0), exact: true, source: 'IdoSell sizes.amount', variants: amounts.length };
+  }
+  const patterns = [
+    [/\b(?:availableQuantity|stockQuantity|quantityAvailable|inventoryQuantity)\b["']?\s*[:=]\s*["']?(\d+(?:[.,]\d+)?)/i, 'pole ilości w danych strony'],
+    [/\bdata-(?:stock|quantity|available)=["'](\d+(?:[.,]\d+)?)["']/i, 'atrybut ilości produktu'],
+    [/itemprop=["']inventoryLevel["'][^>]*(?:content|value)=["'](\d+(?:[.,]\d+)?)["']/i, 'microdata inventoryLevel'],
+  ];
+  for (const [pattern, label] of patterns) {
+    const n = liczba((source.match(pattern) || [])[1]);
+    if (n !== null) return { quantity: n, exact: true, source: label };
+  }
+  return { quantity: null, exact: false, source: '' };
+}
 function parsujProduktZHtml(url, html) {
   const text = stripHtml(html);
   const ldProduct = jsonLdProdukty(html)[0] || {};
@@ -2137,8 +2166,10 @@ function parsujProduktZHtml(url, html) {
   const statusHtml = stripHtml((html.match(/id=["']projector_status_description["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '');
   const statusDostepny = /produkt dostępny|\bdostępny\b|in stock|instock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
   const statusNiedostepny = /powiadom o dostępności|niedostępny|brak produktu|chwilowo niedostęp|outofstock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
-  const niedostepny = statusNiedostepny || (!statusDostepny && /powiadom o dostępności|niedostępny|brak produktu|chwilowo niedostęp/i.test(text));
-  const dostepny = statusDostepny || (!niedostepny && /produkt dostępny|\bdostępny\b|in stock|instock/i.test(text));
+  const stanProducenta = stanProducentaZHtml(html, ldProduct);
+  const niedostepny = stanProducenta.quantity === 0 || statusNiedostepny || (!statusDostepny && /powiadom o dostępności|niedostępny|brak produktu|chwilowo niedostęp/i.test(text));
+  const dostepny = stanProducenta.quantity !== null ? stanProducenta.quantity > 0 : (statusDostepny || (!niedostepny && /produkt dostępny|\bdostępny\b|in stock|instock/i.test(text)));
+  const checkedAt = new Date().toISOString();
   const opis = opisProduktuZHtml(html, title);
   const opisKrotki = opisKrotkiProduktuZHtml(html, opis);
   const kategoria = kategoriaZBreadcrumbJsonLd(html);
@@ -2186,10 +2217,32 @@ function parsujProduktZHtml(url, html) {
       producentUrl: url,
       sourceUrl: url,
       dostepnoscProducenta: dostepny ? 'dostępny' : (niedostepny ? 'niedostępny' : 'do sprawdzenia'),
+      stanProducenta: stanProducenta.quantity === null ? '' : stanProducenta.quantity,
+      stanProducentaDokladny: stanProducenta.exact,
+      stanProducentaZrodlo: stanProducenta.source,
+      producentStatus: niedostepny ? 'brak' : (dostepny ? (stanProducenta.quantity === null ? 'dostepny_nieznany' : 'dostepny') : 'nieznany'),
+      producentSprawdzonoAt: checkedAt,
       parametryProducenta: parametry,
     },
-    availability: { available: dostepny, text: statusHtml || (dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia')) },
+    availability: { available: dostepny, text: statusHtml || (dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia')), quantity: stanProducenta.quantity, exact: stanProducenta.exact, source: stanProducenta.source, checkedAt },
   };
+}
+async function pobierzProduktProducenta(target = '') {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const r = await fetch(target, {
+      redirect: 'follow', signal: controller.signal,
+      headers: {
+        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept-language': 'pl-PL,pl;q=0.9,en;q=0.6',
+      },
+    });
+    const html = await r.text();
+    if (!r.ok || !html) { const e = new Error(`Nie udało się pobrać strony producenta (${r.status})`); e.status = 502; throw e; }
+    return parsujProduktZHtml(r.url || target, html);
+  } finally { clearTimeout(timer); }
 }
 function allegroNormTekst(s = '') {
   return String(s || '')
@@ -4797,17 +4850,100 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const target = tekst(body.url, 1000).trim();
       if (!/^https?:\/\//i.test(target)) return odpowiedz({ ok: false, error: 'Podaj pełny adres URL produktu' }, 422);
-      const r = await fetch(target, {
-        redirect: 'follow',
-        headers: {
-          'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
-          'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'accept-language': 'pl-PL,pl;q=0.9,en;q=0.6',
-        },
-      });
-      const html = await r.text();
-      if (!r.ok || !html) return odpowiedz({ ok: false, error: `Nie udało się pobrać strony producenta (${r.status})` }, 502);
-      return odpowiedz(parsujProduktZHtml(r.url || target, html));
+      return odpowiedz(await pobierzProduktProducenta(target));
+    }
+
+    // ─── PRODUCENT: wyrywkowy monitoring stanów przez Agenta AI ───
+    if (action === 'supplier-availability-sample') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
+      const warehouse = data.artway_magazyn_ustawienia && typeof data.artway_magazyn_ustawienia === 'object' ? data.artway_magazyn_ustawienia : {};
+      const threshold = Math.max(1, Math.min(1000000, Number(body.threshold ?? warehouse.progNiskiProducenta ?? 50) || 50));
+      const limit = Math.max(1, Math.min(25, Number(body.limit ?? warehouse.producentProbka ?? 8) || 8));
+      const requestedIds = new Set((Array.isArray(body.productIds) ? body.productIds : []).map((x) => tekst(x, 100).trim()).filter(Boolean));
+      const baseMap = new Map();
+      const add = (item = {}) => { const id = tekst(item.id, 100).trim(); if (id) baseMap.set(id, { ...(baseMap.get(id) || {}), ...item, id }); };
+      for (const item of Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []) add(item);
+      for (const item of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) add(item);
+      const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
+      for (const [id, item] of Object.entries(edits)) add({ ...(item || {}), id });
+      let candidates = [...baseMap.values()].filter((p) => /^https?:\/\//i.test(tekst(p.producentUrl || p.sourceUrl, 1000).trim()));
+      if (requestedIds.size) candidates = candidates.filter((p) => requestedIds.has(String(p.id)));
+      else {
+        candidates.sort((a, b) => (Date.parse(a.producentSprawdzonoAt || '') || 0) - (Date.parse(b.producentSprawdzonoAt || '') || 0));
+        const pool = candidates.slice(0, Math.max(limit, Math.min(candidates.length, limit * 4)));
+        for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+        candidates = pool;
+      }
+      candidates = candidates.slice(0, limit);
+      const checkedAt = new Date().toISOString();
+      const results = [];
+      for (let offset = 0; offset < candidates.length; offset += 4) {
+        const batch = candidates.slice(offset, offset + 4);
+        const checked = await Promise.all(batch.map(async (p) => {
+          const productId = String(p.id), sourceUrl = tekst(p.producentUrl || p.sourceUrl, 1000).trim();
+          try {
+            const parsed = await pobierzProduktProducenta(sourceUrl);
+            const quantityRaw = parsed.availability?.quantity;
+            const quantity = quantityRaw === null || quantityRaw === undefined || quantityRaw === '' ? null : Math.max(0, Math.floor(Number(quantityRaw) || 0));
+            const available = parsed.availability?.available === true;
+            const status = quantity === 0 ? 'brak' : (quantity !== null && quantity <= threshold ? 'niski' : (available ? (quantity === null ? 'dostepny_nieznany' : 'dostepny') : 'nieznany'));
+            return { ok: true, productId, name: tekst(p.nazwa || parsed.product?.nazwa || 'Produkt', 300), sourceUrl, quantity, exact: quantity !== null && parsed.availability?.exact === true, status, available, source: tekst(parsed.availability?.source || '', 120), checkedAt };
+          } catch (e) {
+            return { ok: false, productId, name: tekst(p.nazwa || 'Produkt', 300), sourceUrl, status: 'blad', error: tekst(e.message || e, 500), checkedAt };
+          }
+        }));
+        results.push(...checked);
+      }
+      const changedAlerts = [];
+      for (const result of results) {
+        const previous = edits[result.productId] && typeof edits[result.productId] === 'object' ? edits[result.productId] : {};
+        if (!result.ok) {
+          edits[result.productId] = { ...previous, producentOstatniaProbaAt: checkedAt, producentOstatniBlad: result.error };
+          continue;
+        }
+        const history = Array.isArray(previous.producentStanHistoria) ? [...previous.producentStanHistoria] : [];
+        history.unshift({ at: checkedAt, status: result.status, quantity: result.quantity, exact: result.exact });
+        const alertActive = ['niski', 'brak'].includes(result.status);
+        const alertHash = alertActive ? result.status : '';
+        if (alertActive && alertHash !== previous.producentAlertHash) changedAlerts.push(result);
+        edits[result.productId] = {
+          ...previous,
+          producentUrl: result.sourceUrl,
+          sourceUrl: result.sourceUrl,
+          dostepnoscProducenta: result.status === 'brak' ? 'niedostępny' : (result.available ? 'dostępny' : 'do sprawdzenia'),
+          stanProducenta: result.quantity === null ? '' : result.quantity,
+          stanProducentaDokladny: result.exact,
+          stanProducentaZrodlo: result.source,
+          producentStatus: result.status,
+          producentSprawdzonoAt: checkedAt,
+          producentOstatniaProbaAt: checkedAt,
+          producentOstatniBlad: '',
+          producentAlertAktywny: alertActive,
+          producentAlertHash: alertHash,
+          producentStanHistoria: history.slice(0, 5),
+        };
+      }
+      data.artway_produkty_edytowane = edits;
+      const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
+      const summary = { checked: results.length, available: results.filter((x) => ['dostepny', 'dostepny_nieznany'].includes(x.status)).length, low: results.filter((x) => x.status === 'niski').length, unavailable: results.filter((x) => x.status === 'brak').length, unknown: results.filter((x) => ['nieznany', 'blad'].includes(x.status)).length, alerts: changedAlerts.length, threshold };
+      agentHistory.unshift({ id: `AI-SUP-${Date.now().toString(36)}`, typ: 'dostepnosc-producentow', opis: `Agent wyrywkowo sprawdził ${summary.checked} produktów u producentów`, data: checkedAt, dataTxt: new Date().toLocaleString('pl-PL'), operator: tekst(body.source || 'agent-serwerowy', 100), dane: summary });
+      data.artway_agent_ai_historia = agentHistory.slice(0, 500);
+      await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: checkedAt });
+      const auditRec = await czytaj('supplier_availability_audit', { items: [], updated_at: null });
+      const audit = Array.isArray(auditRec.items) ? [...auditRec.items] : [];
+      audit.unshift(...results.map((x) => ({ id: crypto.randomUUID(), ...x, threshold, runSource: tekst(body.source || 'manual', 100) })));
+      await zapisz('supplier_availability_audit', { items: audit.slice(0, 5000), updated_at: checkedAt });
+      let telegram = { sent: false };
+      if (changedAlerts.length) {
+        const rows = changedAlerts.slice(0, 20).map((x) => `• <b>${telegramHtml(x.name)}</b> — ${x.status === 'brak' ? 'BRAK' : `${x.quantity} szt. (próg ${threshold})`}`).join('\n');
+        try { await wyslijTelegramHtml(`<b>⚠️ Agent AI: dostępność u producentów</b>\nNowe ostrzeżenia: ${changedAlerts.length}\n\n${rows}\n\nPanel: https://artwaytm.pl/#/admin/magazyn/dostawcy`); telegram = { sent: true }; }
+        catch (e) { telegram = { sent: false, error: tekst(e.message || e, 300) }; }
+      }
+      return odpowiedz({ ok: true, summary, results, checkedAt, telegram });
     }
 
     // ─── ALLEGRO: mapowanie oferty do produktu sklepu (admin) ───
