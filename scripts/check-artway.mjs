@@ -77,6 +77,8 @@ requireMarkers('assets/styles.css', css, [
   '.profitability-result',
   '.supplier-monitor-panel',
   '.supplier-availability',
+  '.supplier-priority',
+  '.warehouse-generator',
   '.modal',
 ]);
 
@@ -186,6 +188,11 @@ requireMarkers('assets/app.js', app, [
   'function allegroRentownoscPanelHTML',
   'function producentDostepnoscInfo',
   'function agentAISprawdzDostepnoscProducentow',
+  'function sprzedazKanalyMagazynowe',
+  'function priorytetDostepnosciProduktu',
+  'function generujRegalyIPolkiMagazynu',
+  'Generator struktury',
+  'Lokalizacja nadrzędna',
   '#/admin/magazyn/dostawcy',
   'Próg ostrzeżenia u producenta',
   'stan_u_producenta',
@@ -245,6 +252,8 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'IdoSell sizes.amount',
   'supplier_availability_audit',
   'producentStanHistoria',
+  'priorityChecked',
+  'activeDemand',
   'function allegroDopasowanieOferty',
   'function allegroSekcjeOpisu',
   'function allegroZnajdzProduktKatalogu',
@@ -335,8 +344,14 @@ const supplierFlow = store.slice(store.indexOf("action === 'supplier-availabilit
 if (!supplierFlow.includes("status === 'niski'") || !supplierFlow.includes('producentAlertHash') || !supplierFlow.includes('changedAlerts') || !supplierFlow.includes('stanProducentaZrodlo')) {
   fail('store-app.mjs: monitoring producentów musi rozpoznawać niski stan, zapisywać źródło i wysyłać alert tylko po zmianie');
 }
+if (!supplierFlow.includes("czytaj('orders'") || !supplierFlow.includes("czytaj('allegro_orders'") || !supplierFlow.includes('Math.ceil(limit * 0.75)') || !supplierFlow.includes('allegro30 * 5')) {
+  fail('store-app.mjs: monitoring producentów musi zawsze priorytetyzować bestsellery sklepu i Allegro oraz aktywne zamówienia');
+}
 if (!app.includes('brak lokalnego stanu nie wyłącza produktu ze sprzedaży') || !app.includes('Błąd pobrania nie jest traktowany jako brak')) {
   fail('assets/app.js: stan lokalny musi być pomocniczy, a błąd strony producenta nie może oznaczać braku produktu');
+}
+if (!app.includes('strefa → regał → półka → miejsce') && !app.includes('strefy przez regał i półkę do konkretnego miejsca')) {
+  fail('assets/app.js: lokalizacje magazynu muszą mieć czytelną hierarchię strefa/regał/półka/miejsce');
 }
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [

@@ -1,6 +1,7 @@
 // Agent AI wyrywkowo sprawdza linki źródłowe producentów co 6 godzin.
-// Najpierw wybierane są produkty najdłużej niesprawdzane, a następnie losowana
-// jest próbka. Dokładna ilość jest zapisywana tylko wtedy, gdy źródło ją ujawnia.
+// Najpierw wybierane są bestsellery Allegro/sklepu i produkty z aktywnych
+// zamówień, a resztę próbki stanowią najdłużej niesprawdzane pozycje.
+// Dokładna ilość jest zapisywana tylko wtedy, gdy źródło ją ujawnia.
 export const config = { schedule: '40 */6 * * *' };
 
 export default async () => {

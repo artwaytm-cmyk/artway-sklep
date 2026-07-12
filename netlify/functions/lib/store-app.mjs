@@ -4870,13 +4870,42 @@ export default async (req) => {
       for (const item of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) add(item);
       const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
       for (const [id, item] of Object.entries(edits)) add({ ...(item || {}), id });
-      let candidates = [...baseMap.values()].filter((p) => /^https?:\/\//i.test(tekst(p.producentUrl || p.sourceUrl, 1000).trim()));
+      const [storeOrdersRec, allegroOrdersRec, mappingsRec] = await Promise.all([
+        czytaj('orders', { items: [] }), czytaj('allegro_orders', { items: [] }), czytaj('allegro_mappings', { items: {} }),
+      ]);
+      const sales = new Map(), nowMs = Date.now(), day = 86400000, cutoff30 = nowMs - 30 * day, cutoff90 = nowMs - 90 * day;
+      const sale = (id, channel, qty, at, active = false) => {
+        const key = tekst(id, 100).trim(), n = Math.max(0, Number(qty) || 0), time = Number(at) || 0;
+        if (!key || !n) return;
+        const rec = sales.get(key) || { sklep30: 0, allegro30: 0, sklep90: 0, allegro90: 0, activeDemand: 0, score: 0 };
+        if (time >= cutoff90) rec[`${channel}90`] += n;
+        if (time >= cutoff30) rec[`${channel}30`] += n;
+        if (active) rec.activeDemand += n;
+        sales.set(key, rec);
+      };
+      const orderTime = (o = {}) => { const raw = o.ts ?? o.createdAt ?? o.firstFetchedAt ?? o.data ?? o.date ?? ''; const n = Number(raw); return Number.isFinite(n) && n > 1000000000 ? (n < 100000000000 ? n * 1000 : n) : (Date.parse(raw) || 0); };
+      for (const order of Array.isArray(storeOrdersRec.items) ? storeOrdersRec.items : []) {
+        const status = String(order?.status || '').toLowerCase(), active = !['anulowane', 'dostarczone', 'zakończone', 'zwrot', 'zwrot pieniędzy'].includes(status);
+        if (status === 'anulowane') continue;
+        for (const line of Array.isArray(order?.pozycjeDane) ? order.pozycjeDane : []) sale(line.id, 'sklep', line.ilosc || 1, orderTime(order), active);
+      }
+      const mappings = allegroMapowaniaItems(mappingsRec), offerToProduct = new Map();
+      for (const [offerId, mapping] of Object.entries(mappings)) { const id = tekst(mapping?.productId ?? mapping?.produktId ?? mapping?.id ?? mapping, 100).trim(); if (id) offerToProduct.set(String(offerId), id); }
+      for (const p of baseMap.values()) if (p.allegroOfferId) offerToProduct.set(String(p.allegroOfferId), String(p.id));
+      for (const order of Array.isArray(allegroOrdersRec.items) ? allegroOrdersRec.items : []) {
+        const active = allegroAgentZlecenieAktywne(order), status = String(order?.status || '').toUpperCase(); if (status === 'CANCELLED') continue;
+        for (const line of Array.isArray(order?.lineItems) ? order.lineItems : []) { const id = offerToProduct.get(String(line.offerId || line.offer?.id || '')); if (id) sale(id, 'allegro', line.quantity || 1, orderTime(order), active); }
+      }
+      for (const rec of sales.values()) rec.score = rec.sklep30 * 4 + rec.allegro30 * 5 + rec.sklep90 + rec.allegro90 + rec.activeDemand * 8;
+      let candidates = [...baseMap.values()].filter((p) => /^https?:\/\//i.test(tekst(p.producentUrl || p.sourceUrl, 1000).trim())).map((p) => ({ ...p, _sales: sales.get(String(p.id)) || { sklep30: 0, allegro30: 0, sklep90: 0, allegro90: 0, activeDemand: 0, score: 0 } }));
       if (requestedIds.size) candidates = candidates.filter((p) => requestedIds.has(String(p.id)));
       else {
-        candidates.sort((a, b) => (Date.parse(a.producentSprawdzonoAt || '') || 0) - (Date.parse(b.producentSprawdzonoAt || '') || 0));
-        const pool = candidates.slice(0, Math.max(limit, Math.min(candidates.length, limit * 4)));
+        const bestsellers = candidates.filter((p) => p._sales.score > 0).sort((a, b) => b._sales.score - a._sales.score || (Date.parse(a.producentSprawdzonoAt || '') || 0) - (Date.parse(b.producentSprawdzonoAt || '') || 0));
+        const priorityCount = Math.min(bestsellers.length, Math.max(1, Math.ceil(limit * 0.75))), priority = bestsellers.slice(0, priorityCount), priorityIds = new Set(priority.map((p) => String(p.id)));
+        const stale = candidates.filter((p) => !priorityIds.has(String(p.id))).sort((a, b) => (Date.parse(a.producentSprawdzonoAt || '') || 0) - (Date.parse(b.producentSprawdzonoAt || '') || 0));
+        const pool = stale.slice(0, Math.max(limit, Math.min(stale.length, limit * 4)));
         for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-        candidates = pool;
+        candidates = [...priority, ...pool.slice(0, Math.max(0, limit - priority.length))];
       }
       candidates = candidates.slice(0, limit);
       const checkedAt = new Date().toISOString();
@@ -4891,9 +4920,9 @@ export default async (req) => {
             const quantity = quantityRaw === null || quantityRaw === undefined || quantityRaw === '' ? null : Math.max(0, Math.floor(Number(quantityRaw) || 0));
             const available = parsed.availability?.available === true;
             const status = quantity === 0 ? 'brak' : (quantity !== null && quantity <= threshold ? 'niski' : (available ? (quantity === null ? 'dostepny_nieznany' : 'dostepny') : 'nieznany'));
-            return { ok: true, productId, name: tekst(p.nazwa || parsed.product?.nazwa || 'Produkt', 300), sourceUrl, quantity, exact: quantity !== null && parsed.availability?.exact === true, status, available, source: tekst(parsed.availability?.source || '', 120), checkedAt };
+            return { ok: true, productId, name: tekst(p.nazwa || parsed.product?.nazwa || 'Produkt', 300), sourceUrl, quantity, exact: quantity !== null && parsed.availability?.exact === true, status, available, source: tekst(parsed.availability?.source || '', 120), checkedAt, sales: p._sales || {} };
           } catch (e) {
-            return { ok: false, productId, name: tekst(p.nazwa || 'Produkt', 300), sourceUrl, status: 'blad', error: tekst(e.message || e, 500), checkedAt };
+            return { ok: false, productId, name: tekst(p.nazwa || 'Produkt', 300), sourceUrl, status: 'blad', error: tekst(e.message || e, 500), checkedAt, sales: p._sales || {} };
           }
         }));
         results.push(...checked);
@@ -4924,12 +4953,17 @@ export default async (req) => {
           producentOstatniBlad: '',
           producentAlertAktywny: alertActive,
           producentAlertHash: alertHash,
+          producentPriorytetWynik: Number(result.sales?.score || 0),
+          sprzedazSklep30: Number(result.sales?.sklep30 || 0),
+          sprzedazAllegro30: Number(result.sales?.allegro30 || 0),
+          sprzedazRazem30: Number(result.sales?.sklep30 || 0) + Number(result.sales?.allegro30 || 0),
+          aktywneZapotrzebowanie: Number(result.sales?.activeDemand || 0),
           producentStanHistoria: history.slice(0, 5),
         };
       }
       data.artway_produkty_edytowane = edits;
       const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
-      const summary = { checked: results.length, available: results.filter((x) => ['dostepny', 'dostepny_nieznany'].includes(x.status)).length, low: results.filter((x) => x.status === 'niski').length, unavailable: results.filter((x) => x.status === 'brak').length, unknown: results.filter((x) => ['nieznany', 'blad'].includes(x.status)).length, alerts: changedAlerts.length, threshold };
+      const summary = { checked: results.length, priorityChecked: results.filter((x) => Number(x.sales?.score || 0) > 0).length, available: results.filter((x) => ['dostepny', 'dostepny_nieznany'].includes(x.status)).length, low: results.filter((x) => x.status === 'niski').length, unavailable: results.filter((x) => x.status === 'brak').length, unknown: results.filter((x) => ['nieznany', 'blad'].includes(x.status)).length, alerts: changedAlerts.length, threshold };
       agentHistory.unshift({ id: `AI-SUP-${Date.now().toString(36)}`, typ: 'dostepnosc-producentow', opis: `Agent wyrywkowo sprawdził ${summary.checked} produktów u producentów`, data: checkedAt, dataTxt: new Date().toLocaleString('pl-PL'), operator: tekst(body.source || 'agent-serwerowy', 100), dane: summary });
       data.artway_agent_ai_historia = agentHistory.slice(0, 500);
       await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: checkedAt });
