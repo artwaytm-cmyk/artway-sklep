@@ -128,6 +128,10 @@ requireMarkers('assets/app.js', app, [
   'function allegroPoprawOpisyWFormularzu',
   'function allegroAnalizaMagazynowaZamowienia',
   'function agentAIAllegroZleceniaTekst',
+  'function allegroRozniceOfertyProduktu',
+  'function allegroZadaniaAgentaOfertHTML',
+  'function allegroAktualizujZaznaczoneOfertyDanymiSklepu',
+  '"producent"',
   'Zrealizowane lokalnie',
   'function potwierdzWidoczneStanyMagazynu',
 ]);
@@ -171,6 +175,9 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function allegroZnajdzProduktKatalogu',
   "action === 'allegro-order-warehouse-stage'",
   'function allegroAgentPrzetworzZamowienia',
+  'function allegroAutoMapujOfertyZKartoteka',
+  'function allegroZapiszZadanieAgentaOferty',
+  'function allegroCzekajNaOperacjeOferty',
   "'zrealizowane'",
 ]);
 
