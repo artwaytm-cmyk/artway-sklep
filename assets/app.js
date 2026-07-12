@@ -261,11 +261,13 @@ let allegroKomunikacja = wczytajLS("artway_allegro_komunikacja_cache", {threads:
 let zaznaczoneZamowieniaSklepu = new Set();
 let zaznaczoneAllegroZamowienia = new Set();
 let zaznaczoneAllegroOferty = new Set();
+let zaznaczoneAllegroWiadomosci = new Set();
+let zaznaczoneAllegroDyskusje = new Set();
 let allegroOstatniBladWystawienia = null;
 let allegroOstatniWynikWystawienia = null;
 let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoCorrections:true,updated_at:null}};
 let allegroOperacjaUstawien = {busy:false,done:0,total:0,stockUpdated:0,stockFailed:0,republishUpdated:0,republishFailed:0,error:""};
-let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", filtrAllegroZamowien="do_obslugi", filtrEtapuAllegroZamowien="wszystkie", filtrAllegroOfert="wszystkie", filtrAllegroWystawiania="wszystkie", allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=250, allegroLimitWystawiania=250;
+let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", szukajAllegroWiadomosci="", szukajAllegroDyskusji="", filtrAllegroZamowien="do_obslugi", filtrEtapuAllegroZamowien="wszystkie", filtrAllegroOfert="wszystkie", filtrAllegroWystawiania="wszystkie", filtrAllegroWiadomosci="wymaga", filtrAllegroDyskusji="aktywne", sortAllegroWiadomosci="najnowsze", sortAllegroDyskusje="najnowsze", allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=250, allegroLimitWystawiania=250, allegroLimitKomunikacji=50;
 
 /* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
    Ustawienia sklepu, zamówienia i klienci są zapisywane na serwerze, więc są
@@ -1799,7 +1801,8 @@ function renderuj(){
       else if(t==="/admin/allegro/zamowienia") w.innerHTML = widokAdminAllegro("zamowienia");
       else if(t==="/admin/allegro/oferty") w.innerHTML = widokAdminAllegro("oferty");
       else if(t==="/admin/allegro/wystawianie") w.innerHTML = widokAdminAllegro("wystawianie");
-      else if(t==="/admin/allegro/komunikacja") w.innerHTML = widokAdminAllegro("komunikacja");
+      else if(t==="/admin/allegro/komunikacja" || t==="/admin/allegro/wiadomosci") w.innerHTML = widokAdminAllegro("wiadomosci");
+      else if(t==="/admin/allegro/dyskusje") w.innerHTML = widokAdminAllegro("dyskusje");
       else if(t==="/admin/allegro/ustawienia") w.innerHTML = widokAdminAllegro("ustawienia");
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
       else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn("pulpit");
@@ -5402,7 +5405,7 @@ async function allegroWczytajKomunikacje(cicho=false){
 async function allegroSynchronizujKomunikacje(autoReply=true){
   try{
     toast(autoReply?"Synchronizuję Allegro i wysyłam brakujące pierwsze odpowiedzi…":"Synchronizuję komunikację Allegro…");
-    const d=await chmura("allegro-sync-communications",{method:"POST",body:{limit:20,autoReply},timeout:90000});
+    const d=await chmura("allegro-sync-communications",{method:"POST",body:{limit:100,autoReply},timeout:120000});
     allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,ladowanie:false,error:""};
     allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroKomunikacjaUstawienia(),autoReplies:d.autoReply?.items||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||null,autoReply:d.autoReply||null,sprawdzono:true};
     allegroZapiszCache();
@@ -5820,15 +5823,35 @@ function allegroOfertyPasujaceDoProduktu(p={}){
 }
 function allegroAudytDuplikatow(){
   const produkty=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
-  const grupy=produkty.map(p=>({produkt:p,dopasowania:allegroOfertyPasujaceDoProduktu(p)})).filter(x=>x.dopasowania.length>1);
+  const grupy=produkty.map(p=>({produkt:p,dopasowania:allegroOfertyPasujaceDoProduktu(p).filter(allegroDopasowanieDuplikatuAktywne)})).filter(x=>x.dopasowania.length>1);
   const offerIds=new Set(grupy.flatMap(x=>x.dopasowania.map(d=>String(d.offer.id))));
   return {grupy,offerIds,produkty:grupy.length,oferty:offerIds.size};
 }
+function allegroDopasowanieDuplikatuAktywne(d={}){const id=String(d.offer?.id||""),status=String(d.offer?.status||d.offer?.publication?.status||"").toUpperCase();return !["ENDED","ARCHIVED"].includes(status)&&allegroMapowania?.[id]?.blocked!==true;}
+function allegroDuplikatWybierzPozostaw(form,offerId){
+  form.querySelectorAll('input[name="withdrawOfferIds"]').forEach(input=>{input.disabled=String(input.value)===String(offerId);if(input.disabled)input.checked=false;});
+}
+async function allegroRozstrzygnijDuplikaty(event,productId){
+  event.preventDefault();const form=event.currentTarget,fd=new FormData(form),keepOfferId=String(fd.get("keepOfferId")||""),withdrawOfferIds=fd.getAll("withdrawOfferIds").map(String).filter(id=>id&&id!==keepOfferId);
+  if(!keepOfferId||!withdrawOfferIds.length){toast("Wskaż jedną ofertę pozostawianą i co najmniej jedną do wycofania");return;}
+  const button=form.querySelector('button[type="submit"]');if(button)button.disabled=true;
+  try{
+    toast(`Wycofuję ${withdrawOfferIds.length} duplikat(y) i zachowuję ofertę ${keepOfferId}…`);
+    const d=await chmura("allegro-resolve-duplicate",{method:"POST",body:{productId:String(productId),keepOfferId,withdrawOfferIds},timeout:120000});
+    allegroOferty=Array.isArray(d.offers)?d.offers:allegroOferty;allegroMapowania=d.mappings||allegroMapowania;
+    produktyEdytowane[productId]={...(produktyEdytowane[productId]||{}),allegroOfferId:keepOfferId,allegroDuplicateResolvedAt:d.updated_at||new Date().toISOString()};
+    zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();allegroZapiszCache();toast(`✅ Pozostawiono ${keepOfferId}; wycofano ${withdrawOfferIds.length} ofert bez usuwania ich historii`);renderuj();
+  }catch(e){toast("⚠️ Rozstrzyganie duplikatów: "+(e.message||e));if(button)button.disabled=false;}
+}
+function allegroCentrumDuplikatowHTML(audyt=allegroAudytDuplikatow()){
+  if(!audyt.grupy.length)return `<div class="duplicate-audit-ok"><b>✅ Centrum duplikatów:</b> nie ma grup wymagających decyzji administratora.</div>`;
+  return `<section class="allegro-duplicate-center"><div class="order-section-head"><div><span class="order-pro-label">Kontrolowane rozstrzygnięcie</span><h3>🧭 Centrum duplikatów (${audyt.produkty})</h3><p class="order-detail-lead">Dla każdej grupy wskaż ofertę główną oraz oferty do wycofania. System zakończy tylko zaznaczone oferty w Allegro, wyłączy ich odnawianie, zachowa historię i przypnie produkt do pozostawionej pozycji.</p></div></div><div class="allegro-duplicate-groups">${audyt.grupy.map(({produkt,dopasowania})=>{const domyslna=String(dopasowania[0]?.offer?.id||"");return `<form class="allegro-duplicate-group" onsubmit="allegroRozstrzygnijDuplikaty(event,${jsArg(produkt.id)})"><header><div class="allegro-duplicate-product">${produkt.zdjecie?`<img src="${esc(produkt.zdjecie)}" alt="">`:`<span>🎲</span>`}<div><b>${esc(produkt.nazwa||"Produkt")}</b><small>ID ${esc(produkt.id)} • SKU ${esc(produkt.sku||"—")} • EAN ${esc(produkt.gtin||produkt.ean||"—")}</small></div></div><span class="lvl lvl-blad">${dopasowania.length} pasujących ofert</span></header><div class="allegro-duplicate-options">${dopasowania.map((d,index)=>{const o=d.offer,id=String(o.id);return `<article class="allegro-duplicate-option"><div class="allegro-duplicate-offer">${o.mainImage?`<img src="${esc(o.mainImage)}" alt="" loading="lazy">`:`<span>🏷️</span>`}<div><b>${esc(o.name||"Oferta Allegro")}</b><small>ID ${esc(id)} • ${esc(o.priceText||"cena —")} • stan ${esc(o.stockAvailable??"—")} • sprzedano ${esc(o.stockSold??"—")}</small><em>Dopasowanie: ${esc(d.reason)} • pewność ${esc(d.score)}%</em></div></div><div class="allegro-duplicate-choice"><label><input type="radio" name="keepOfferId" value="${esc(id)}" ${index===0?"checked":""} onchange="allegroDuplikatWybierzPozostaw(this.form,this.value)"> <b>Pozostaw tę ofertę</b></label><label><input type="checkbox" name="withdrawOfferIds" value="${esc(id)}" ${index===0?"disabled":"checked"}> Wycofaj jako duplikat</label><a href="https://allegro.pl/oferta/${encodeURIComponent(id)}" target="_blank" rel="noopener">Otwórz ofertę ↗</a></div></article>`;}).join("")}</div><footer><span>Operacja nie usuwa sprzedaży ani historii oferty.</span><button class="btn" type="submit">Zastosuj wybraną decyzję</button></footer></form>`;}).join("")}</div></section>`;
+}
 function allegroOfertaDlaProduktuSklepu(p={}){
-  return allegroOfertyPasujaceDoProduktu(p)[0]?.offer||null;
+  const matches=allegroOfertyPasujaceDoProduktu(p);return matches.find(allegroDopasowanieDuplikatuAktywne)?.offer||matches[0]?.offer||null;
 }
 function allegroStatusProduktuHTML(p={}){
-  const dopasowania=allegroOfertyPasujaceDoProduktu(p),o=dopasowania[0]?.offer;
+  const wszystkie=allegroOfertyPasujaceDoProduktu(p),dopasowania=wszystkie.filter(allegroDopasowanieDuplikatuAktywne),o=dopasowania[0]?.offer||wszystkie[0]?.offer;
   if(!o)return `<span class="lvl lvl-ostrzezenie">brak na Allegro</span>`;
   const active=String(o.status||"").toUpperCase()==="ACTIVE";
   const duplikaty=dopasowania.slice(1);
@@ -6041,6 +6064,7 @@ function allegroOfertyTabelaHTML(){
       </select>
       <label class="allegro-view-limit">Pokaż ofert <select onchange="allegroLimitWidokuOfert=Number(this.value)||250;renderuj()">${[100,250,500,1000,2500,5000,10000].map(n=>`<option value="${n}" ${allegroLimitWidokuOfert===n?"selected":""}>${n}</option>`).join("")}</select></label>
     </div>
+    ${audyt.produkty?allegroCentrumDuplikatowHTML(audyt):""}
     <div class="warehouse-worktable-wrap allegro-catalog-wrap"><table class="log-table warehouse-worktable allegro-offers-table">
       <tr><th>Oferta</th><th>ID / kod oferty</th><th>EAN / kod producenta</th><th>Cena</th><th>Stan Allegro</th><th>Status</th><th>Produkt sklepu</th><th>Akcje</th></tr>
       ${rows.map(o=>{
@@ -6275,8 +6299,8 @@ function allegroKomunikacjaStaty(){
   const threads=Array.isArray(allegroKomunikacja?.threads)?allegroKomunikacja.threads:[];
   const issues=Array.isArray(allegroKomunikacja?.issues)?allegroKomunikacja.issues:[];
   const replies=allegroKomunikacja?.autoReplies||{};
-  const threadNeed=threads.filter(t=>t.humanReplyNeeded||t.needsReply).length;
-  const issueNeed=issues.filter(i=>i.humanReplyNeeded||i.needsReply).length;
+  const threadNeed=threads.filter(t=>!t.internalResolved&&(t.humanReplyNeeded||t.needsReply)).length;
+  const issueNeed=issues.filter(i=>!i.internalResolved&&(i.humanReplyNeeded||i.needsReply)).length;
   return {threads,issues,replies,threadNeed,issueNeed,totalNeed:threadNeed+issueNeed,sent:Object.keys(replies).length};
 }
 function allegroKomunikacjaBledyHTML(){
@@ -6310,15 +6334,42 @@ function allegroHistoriaRozmowyHTML(messages=[]){
   const sorted=(Array.isArray(messages)?messages:[]).slice().sort((a,b)=>String(a.createdAt||"").localeCompare(String(b.createdAt||""))).slice(-20);
   return `<div class="allegro-conversation">${sorted.map(m=>`<div class="allegro-message ${m.incoming?"incoming":"seller"}"><div><b>${m.incoming?`👤 ${esc(m.authorLogin||"Klient")}`:"🏪 Artway-TM"}</b><small>${esc(allegroDataTxt(m.createdAt))}</small></div><p>${esc(m.text||"Wiadomość bez treści")}</p></div>`).join("")||`<div class="backend-note">Brak treści wiadomości w lokalnym podglądzie.</div>`}</div>`;
 }
+function allegroInternalNoteId(type,id){return `allegro-internal-note-${String(type)}-${String(id).replace(/[^a-z0-9_-]/gi,"-")}`;}
+function allegroZaznaczeniaKomunikacji(type){return type==="issue"?zaznaczoneAllegroDyskusje:zaznaczoneAllegroWiadomosci;}
+function allegroPrzelaczZaznaczenieKomunikacji(type,id,checked){const set=allegroZaznaczeniaKomunikacji(type);checked?set.add(String(id)):set.delete(String(id));renderuj();}
+function allegroSzukajKomunikacje(type,value){
+  if(type==="issue")szukajAllegroDyskusji=String(value||"");else szukajAllegroWiadomosci=String(value||"");
+  clearTimeout(window.__allegroCommunicationSearchTimer);window.__allegroCommunicationSearchTimer=setTimeout(()=>{renderuj();setTimeout(()=>{const el=document.getElementById(type==="issue"?"allegroIssueSearch":"allegroThreadSearch");if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}},0);},280);
+}
+function allegroTekstKomunikacji(item={}){return `${item.id||""} ${item.buyerLogin||""} ${item.subject||""} ${item.orderId||""} ${(item.messages||[]).map(m=>`${m.authorLogin||""} ${m.text||""} ${m.orderId||""}`).join(" ")}`.toLowerCase();}
+function allegroKomunikacjaPasujaca(type="thread"){
+  const list=type==="issue"?(allegroKomunikacja?.issues||[]):(allegroKomunikacja?.threads||[]),q=String(type==="issue"?szukajAllegroDyskusji:szukajAllegroWiadomosci).toLowerCase().trim(),filter=type==="issue"?filtrAllegroDyskusji:filtrAllegroWiadomosci,sort=type==="issue"?sortAllegroDyskusje:sortAllegroWiadomosci;
+  return list.filter(item=>{
+    if(q&&!allegroTekstKomunikacji(item).includes(q))return false;
+    const need=!item.internalResolved&&!!(item.humanReplyNeeded||item.needsReply),resolved=!!item.internalResolved,status=String(item.status||"").toUpperCase(),closed=/CLOSED|RESOLVED|CANCELLED|REJECTED/.test(status)||item.chatActive===false;
+    if(filter==="wymaga"&&!need)return false;if(filter==="zalatwione"&&!resolved)return false;if(filter==="obsluzone"&&(need||resolved))return false;if(filter==="aktywne"&&closed)return false;if(filter==="zamkniete"&&!closed)return false;
+    return true;
+  }).sort((a,b)=>{const ad=Date.parse(a.lastMessageDateTime||a.lastMessage?.createdAt||a.openedDate||0)||0,bd=Date.parse(b.lastMessageDateTime||b.lastMessage?.createdAt||b.openedDate||0)||0;return sort==="najstarsze"?ad-bd:bd-ad;});
+}
+function allegroZaznaczWidocznaKomunikacje(type,checked){const set=allegroZaznaczeniaKomunikacji(type);allegroKomunikacjaPasujaca(type).slice(0,allegroLimitKomunikacji).forEach(x=>checked?set.add(String(x.id)):set.delete(String(x.id)));renderuj();}
+async function allegroOznaczSpraweWewnetrznie(type,id,resolved=true){
+  const note=String(document.getElementById(allegroInternalNoteId(type,id))?.value||"").trim();
+  try{const d=await chmura("allegro-communication-resolve",{method:"POST",body:{type,id,resolved,note},timeout:20000});allegroKomunikacja={...allegroKomunikacja,threads:d.threads||allegroKomunikacja.threads,issues:d.issues||allegroKomunikacja.issues,updated_at:d.updated_at||allegroKomunikacja.updated_at};allegroZapiszCache();toast(resolved?"✅ Sprawa oznaczona jako załatwiona wyłącznie wewnętrznie — nic nie wysłano":"↩️ Sprawa przywrócona do obsługi wewnętrznej");renderuj();}catch(e){toast("⚠️ Status wewnętrzny: "+(e.message||e));}
+}
+async function allegroOznaczZaznaczoneSprawy(type,resolved=true){
+  const set=allegroZaznaczeniaKomunikacji(type),items=[...set].map(id=>({type,id,resolved}));if(!items.length){toast("Zaznacz co najmniej jedną sprawę");return;}
+  try{const d=await chmura("allegro-communication-resolve",{method:"POST",body:{items},timeout:30000});allegroKomunikacja={...allegroKomunikacja,threads:d.threads||allegroKomunikacja.threads,issues:d.issues||allegroKomunikacja.issues,updated_at:d.updated_at||allegroKomunikacja.updated_at};set.clear();allegroZapiszCache();toast(`✅ Zmieniono ${d.results?.filter(x=>x.ok).length||0} spraw wyłącznie wewnętrznie — bez wiadomości do klientów`);renderuj();}catch(e){toast("⚠️ Operacja grupowa: "+(e.message||e));}
+}
 function allegroRozmowaHTML(type,item={},label="Wiadomość"){
-  const sent=allegroAutoReplyDla(type,item),last=item.lastMessage||{},nowa=!!(item.humanReplyNeeded||item.needsReply),fieldId=allegroReplyFieldId(type,item.id);
+  const sent=allegroAutoReplyDla(type,item),last=item.lastMessage||{},resolved=!!item.internalResolved,nowa=!resolved&&!!(item.humanReplyNeeded||item.needsReply),fieldId=allegroReplyFieldId(type,item.id),noteId=allegroInternalNoteId(type,item.id),selected=allegroZaznaczeniaKomunikacji(type).has(String(item.id));
   const messages=Array.isArray(item.messages)&&item.messages.length?item.messages:[last].filter(Boolean);
   const orderId=item.orderId||messages.find(m=>m.orderId)?.orderId||"";
-  return `<details class="allegro-conversation-card ${nowa?"needs-reply":""}" ${nowa?"open":""}>
-    <summary><span class="allegro-conversation-icon">${type==="issue"?"🛟":"💬"}</span><span><b>${esc(label)} — ${esc(item.buyerLogin||"Klient Allegro")}</b><small>${esc(skrocTekst(last.text||item.subject||"Brak treści",180))}</small></span><span>${nowa?`<span class="lvl lvl-ostrzezenie">wymaga odpowiedzi</span>`:sent?`<span class="lvl lvl-ok">pierwsza odpowiedź wysłana</span>`:`<span class="lvl lvl-info">obsłużona</span>`}</span></summary>
+  return `<details class="allegro-conversation-card ${nowa?"needs-reply":""} ${resolved?"is-internally-resolved":""}" ${nowa?"open":""}>
+    <summary><label class="allegro-communication-select" onclick="event.stopPropagation()"><input type="checkbox" ${selected?"checked":""} onchange="allegroPrzelaczZaznaczenieKomunikacji(${jsArg(type)},${jsArg(item.id)},this.checked)"></label><span class="allegro-conversation-icon">${type==="issue"?"🛟":"💬"}</span><span><b>${esc(label)} — ${esc(item.buyerLogin||"Klient Allegro")}</b><small>${esc(skrocTekst(last.text||item.subject||"Brak treści",180))}</small></span><span>${resolved?`<span class="lvl lvl-ok">✅ załatwiona wewnętrznie</span>`:nowa?`<span class="lvl lvl-ostrzezenie">wymaga odpowiedzi</span>`:sent?`<span class="lvl lvl-ok">pierwsza odpowiedź wysłana</span>`:`<span class="lvl lvl-info">obsłużona</span>`}</span></summary>
     <div class="allegro-conversation-meta"><span>ID: ${esc(item.id)}</span>${orderId?`<span>Zamówienie: ${esc(orderId)}</span>`:""}<span>Ostatnia: ${esc(allegroDataTxt(item.lastMessageDateTime||last.createdAt||item.openedDate))}</span>${item.status?`<span>Status: ${esc(item.status)}</span>`:""}</div>
+    <div class="allegro-internal-resolution"><div><b>✅ Obsługa wewnętrzna</b><small>Ta operacja nie wysyła wiadomości do klienta ani nie zmienia statusu w Allegro. Agent przestanie zgłaszać sprawę do wyjaśnienia. Nowa wiadomość klienta automatycznie otworzy ją ponownie.</small>${resolved&&item.internalResolution?.resolvedAt?`<em>Załatwiono: ${esc(allegroDataTxt(item.internalResolution.resolvedAt))}${item.internalResolution.note?` • ${esc(item.internalResolution.note)}`:""}</em>`:""}</div><input id="${esc(noteId)}" maxlength="1000" value="${esc(item.internalResolution?.note||"")}" placeholder="Notatka wewnętrzna (opcjonalnie)">${resolved?`<button class="btn ghost" type="button" onclick="allegroOznaczSpraweWewnetrznie(${jsArg(type)},${jsArg(item.id)},false)">↩️ Przywróć do obsługi</button>`:`<button class="btn" type="button" onclick="allegroOznaczSpraweWewnetrznie(${jsArg(type)},${jsArg(item.id)},true)">✅ Oznacz jako załatwioną</button>`}</div>
     ${allegroHistoriaRozmowyHTML(messages)}
-    <div class="allegro-reply-box"><label for="${esc(fieldId)}"><b>Twoja odpowiedź</b><small>Możesz poprawić propozycję Agenta AI przed wysłaniem.</small></label><textarea id="${esc(fieldId)}" rows="6" maxlength="20000" placeholder="Wpisz odpowiedź dla klienta…"></textarea><div class="diag-actions"><button class="btn ghost" type="button" onclick="allegroAgentPropozycjaOdpowiedzi(${jsArg(type)},${jsArg(item.id)})">🤖 Przygotuj propozycję</button><button class="btn" type="button" onclick="allegroWyslijOdpowiedz(${jsArg(type)},${jsArg(item.id)})">✉️ Wyślij przez Allegro</button></div></div>
+    <div class="allegro-reply-box"><label for="${esc(fieldId)}"><b>Odpowiedź wychodząca do klienta</b><small>To osobna operacja — dopiero przycisk „Wyślij przez Allegro” przekaże treść klientowi.</small></label><textarea id="${esc(fieldId)}" rows="6" maxlength="20000" placeholder="Wpisz odpowiedź dla klienta…"></textarea><div class="diag-actions"><button class="btn ghost" type="button" onclick="allegroAgentPropozycjaOdpowiedzi(${jsArg(type)},${jsArg(item.id)})">🤖 Przygotuj propozycję</button><button class="btn" type="button" onclick="allegroWyslijOdpowiedz(${jsArg(type)},${jsArg(item.id)})">✉️ Wyślij przez Allegro</button></div></div>
   </details>`;
 }
 function allegroWatekHTML(t){
@@ -6327,7 +6378,7 @@ function allegroWatekHTML(t){
 function allegroIssueHTML(i){
   return allegroRozmowaHTML("issue",i,i.type==="CLAIM"?"Reklamacja":"Dyskusja");
 }
-function allegroKomunikacjaPanelHTML(){
+function allegroKomunikacjaPanelLegacyHTML(){
   const st=allegroKomunikacjaStaty();
   const s=allegroKomunikacjaUstawienia();
   const tokenAktualny=!!allegroStan.connected&&!allegroStan.requiresReauth;
@@ -6367,6 +6418,15 @@ function allegroKomunikacjaPanelHTML(){
       <div class="f-group"><label>Treść automatycznej pierwszej odpowiedzi <small style="font-weight:400;color:var(--muted2)">zmienne: {login}, {typ}</small></label><textarea name="template" rows="7" maxlength="2000">${esc(s.template||"")}</textarea></div>
     </form>
   </div>`;
+}
+function allegroKomunikacjaUstawieniaHTML(){
+  const s=allegroKomunikacjaUstawienia();return `<form class="panel-subtle allegro-info-bottom" onsubmit="event.preventDefault();allegroZapiszUstawieniaKomunikacji(this)"><div class="order-section-head"><div><h3 style="margin:0">⚙️ Ustawienia pierwszej odpowiedzi</h3><p class="order-detail-lead">Automatyka działa wyłącznie dla nowych kontaktów. Wewnętrznie załatwione sprawy są pomijane przez Agenta, autoresponder i przypomnienia Telegram.</p></div><button class="btn" type="submit">💾 Zapisz ustawienia</button></div><div class="form-grid"><label class="check"><input type="checkbox" name="enabled" ${s.enabled?"checked":""}> Autoresponder aktywny</label><label class="check"><input type="checkbox" name="messageCenter" ${s.messageCenter?"checked":""}> Centrum wiadomości</label><label class="check"><input type="checkbox" name="issues" ${s.issues?"checked":""}> Dyskusje i reklamacje</label><label class="check"><input type="checkbox" name="telegramReminders" ${s.telegramReminders!==false?"checked":""}> Telegram tylko dla nowych spraw wymagających odpowiedzi</label><div class="f-group"><label>Okno świeżości wiadomości (godziny)</label><input name="freshHours" type="number" min="1" max="168" value="${esc(s.freshHours||48)}"></div></div><div class="f-group"><label>Treść automatycznej pierwszej odpowiedzi <small style="font-weight:400;color:var(--muted2)">zmienne: {login}, {typ}</small></label><textarea name="template" rows="7" maxlength="2000">${esc(s.template||"")}</textarea></div></form>`;
+}
+function allegroKomunikacjaPanelHTML(type="thread"){
+  const isIssue=type==="issue",st=allegroKomunikacjaStaty(),all=isIssue?st.issues:st.threads,list=allegroKomunikacjaPasujaca(type),visible=list.slice(0,allegroLimitKomunikacji),set=allegroZaznaczeniaKomunikacji(type),selected=[...set].filter(id=>all.some(x=>String(x.id)===id)),allVisible=!!visible.length&&visible.every(x=>set.has(String(x.id))),need=all.filter(x=>!x.internalResolved&&(x.humanReplyNeeded||x.needsReply)).length,resolved=all.filter(x=>x.internalResolved).length,handled=Math.max(0,all.length-need-resolved),query=isIssue?szukajAllegroDyskusji:szukajAllegroWiadomosci,filter=isIssue?filtrAllegroDyskusji:filtrAllegroWiadomosci,sort=isIssue?sortAllegroDyskusje:sortAllegroWiadomosci;
+  const tokenAktualny=!!allegroStan.connected&&!allegroStan.requiresReauth,wymagaPonownegoPolaczenia=!!allegroStan.requiresReauth||(!tokenAktualny&&(allegroKomunikacja?.requiresReauth||(allegroKomunikacja?.errors||[]).some(e=>Number(e.status)===403)));
+  const filterOptions=isIssue?[["wszystkie","Wszystkie"],["aktywne","Aktywne w Allegro"],["zamkniete","Zamknięte w Allegro"],["wymaga","Wymagają odpowiedzi"],["zalatwione","Załatwione wewnętrznie"],["obsluzone","Obsłużone"]]:[["wszystkie","Wszystkie"],["wymaga","Wymagają odpowiedzi"],["zalatwione","Załatwione wewnętrznie"],["obsluzone","Obsłużone"]];
+  return `<div class="panel allegro-section-panel allegro-communication-page"><div class="order-section-head"><div><span class="order-pro-label">${isIssue?"Zgłoszenia formalne":"Obsługa korespondencji"}</span><h2>${isIssue?"🛟 Dyskusje i reklamacje Allegro":"💬 Centrum wiadomości Allegro"}</h2><p class="order-detail-lead">${isIssue?"Dyskusje i reklamacje są oddzielone od zwykłych wiadomości. Możesz filtrować ich status Allegro, prowadzić rozmowę oraz zakończyć pracę wewnętrznie bez kontaktu z klientem.":"Przeszukuj historię po kliencie, zamówieniu, treści i identyfikatorze. Status wewnętrzny porządkuje pracę Agenta i nigdy sam nie wysyła odpowiedzi."}</p></div><div class="diag-actions">${wymagaPonownegoPolaczenia?`<button class="btn" onclick="allegroPolacz()">🔐 Napraw połączenie</button>`:""}<button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">↻ Odśwież do 100 spraw</button></div></div><div class="orders-stat-grid"><div class="order-stat-card"><span>${isIssue?"🛟":"💬"}</span><b>${all.length}</b><small>wszystkich</small></div><div class="order-stat-card ${need?"hot":""}"><span>⚡</span><b>${need}</b><small>wymaga odpowiedzi</small></div><div class="order-stat-card money"><span>✅</span><b>${resolved}</b><small>załatwionych wewnętrznie</small></div><div class="order-stat-card"><span>📁</span><b>${handled}</b><small>obsłużonych</small></div></div><div class="allegro-communication-toolbar"><input id="${isIssue?"allegroIssueSearch":"allegroThreadSearch"}" placeholder="Szukaj: klient, numer zamówienia, ID, temat lub treść…" value="${esc(query)}" oninput="allegroSzukajKomunikacje(${jsArg(type)},this.value)"><select onchange="${isIssue?"filtrAllegroDyskusji":"filtrAllegroWiadomosci"}=this.value;renderuj()">${filterOptions.map(([v,l])=>`<option value="${v}" ${filter===v?"selected":""}>${l}</option>`).join("")}</select><select onchange="${isIssue?"sortAllegroDyskusje":"sortAllegroWiadomosci"}=this.value;renderuj()"><option value="najnowsze" ${sort==="najnowsze"?"selected":""}>Najnowsze najpierw</option><option value="najstarsze" ${sort==="najstarsze"?"selected":""}>Najstarsze najpierw</option></select><label>Pokaż <select onchange="allegroLimitKomunikacji=Number(this.value)||50;renderuj()">${[20,50,100].map(n=>`<option value="${n}" ${allegroLimitKomunikacji===n?"selected":""}>${n}</option>`).join("")}</select></label></div><div class="allegro-communication-bulk"><label><input type="checkbox" ${allVisible?"checked":""} onchange="allegroZaznaczWidocznaKomunikacje(${jsArg(type)},this.checked)"> Zaznacz/odznacz widoczne (${visible.length})</label><span><b>${selected.length}</b> zaznaczonych</span><button class="btn" onclick="allegroOznaczZaznaczoneSprawy(${jsArg(type)},true)" ${selected.length?"":"disabled"}>✅ Załatw wewnętrznie</button><button class="btn ghost" onclick="allegroOznaczZaznaczoneSprawy(${jsArg(type)},false)" ${selected.length?"":"disabled"}>↩️ Przywróć do obsługi</button></div><div class="allegro-internal-banner"><b>🔒 Status wewnętrzny</b><span>Nie wysyła wiadomości, nie zamyka sprawy w Allegro i nie zmienia jej oficjalnego statusu. Wycisza jedynie alerty wewnętrzne do czasu kolejnej wiadomości klienta.</span></div><div class="ai-task-list allegro-communication-list">${visible.map(item=>isIssue?allegroIssueHTML(item):allegroWatekHTML(item)).join("")||`<div class="backend-note">Brak spraw pasujących do wyszukiwania i filtrów.</div>`}</div>${list.length>visible.length?`<p class="order-detail-lead">Pokazano ${visible.length} z ${list.length} wyników. Zwiększ limit widoku.</p>`:""}${allegroKomunikacjaBledyHTML()}${!isIssue?allegroKomunikacjaUstawieniaHTML():`<div class="backend-note allegro-info-bottom"><b>Ustawienia autorespondera</b> znajdują się na podstronie Wiadomości. Status „załatwiona wewnętrznie” zawsze ma pierwszeństwo przed automatyką.</div>`}</div>`;
 }
 function adminSubnavHTML(items, aktywny){
   const safe = (items||[]).filter(x=>x&&x.id&&x.href&&x.label);
@@ -6445,7 +6505,8 @@ function allegroSubnavHTML(aktywny="start"){
     {id:"zamowienia",href:"#/admin/allegro/zamowienia",label:"📦 Zamówienia",badge:aktywneZamowienia||""},
     {id:"oferty",href:"#/admin/allegro/oferty",label:"🏷️ Oferty",badge:(allegroOferty||[]).length||""},
     {id:"wystawianie",href:"#/admin/allegro/wystawianie",label:"🟠 Wystawianie",badge:zadaniaWystawiania||""},
-    {id:"komunikacja",href:"#/admin/allegro/komunikacja",label:"💬 Wiadomości i dyskusje",badge:st.totalNeed||""},
+    {id:"wiadomosci",href:"#/admin/allegro/wiadomosci",label:"💬 Wiadomości",badge:st.threadNeed||""},
+    {id:"dyskusje",href:"#/admin/allegro/dyskusje",label:"🛟 Dyskusje",badge:st.issueNeed||""},
     {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"},
     {id:"ustawienia",href:"#/admin/allegro/ustawienia",label:"⚙️ Ustawienia"}
   ],aktywny);
@@ -6456,7 +6517,8 @@ function allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete){
     zamowienia:{ico:"📦",kicker:"Sprzedaż",title:"Kolejka zamówień Allegro",opis:"Status zawsze pochodzi z Allegro; agent osobno prowadzi sprawdzenie stanu, lokalizacji, zamówienie u producenta i kompletację.",metryki:[["Do obsługi",(allegroZamowienia||[]).filter(statusAllegroRezerwujeMagazyn).length],["Z brakami",(allegroZamowienia||[]).filter(z=>allegroEtapMagazynu(z)==="braki").length],["Zrealizowane lokalnie",(allegroZamowienia||[]).filter(z=>allegroEtapMagazynu(z)==="zrealizowane").length]]},
     oferty:{ico:"🏷️",kicker:"Katalog Allegro",title:"Oferty i powiązania",opis:"Profesjonalny katalog ofert z miniaturą, identyfikatorami, ceną, stanem i kontrolą powiązania z produktem sklepu.",metryki:[["Wszystkie",(allegroOferty||[]).length],["Podpięte",mapped],["Do powiązania",niepodpiete]]},
     wystawianie:{ico:"🟠",kicker:"Publikowanie",title:"Przygotowanie ofert",opis:"Kontrola kompletności danych produktu przed utworzeniem bezpiecznego szkicu oferty.",metryki:[["Produkty",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length],["Gotowe",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroBrakiProduktuDoWystawienia(p).length).length],["Do uzupełnienia",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroBrakiProduktuDoWystawienia(p).length).length]]},
-    komunikacja:{ico:"💬",kicker:"Obsługa klienta",title:"Wiadomości i dyskusje",opis:"Nowe wiadomości, dyskusje i bezpieczny autoresponder bez odpowiedzi do starych rozmów.",metryki:[["Wątki",allegroKomunikacjaStaty().threads.length],["Dyskusje",allegroKomunikacjaStaty().issues.length],["Nowe",allegroKomunikacjaStaty().totalNeed]]},
+    wiadomosci:{ico:"💬",kicker:"Obsługa klienta",title:"Centrum wiadomości",opis:"Wyszukiwanie, filtry, historia korespondencji i wewnętrzne zamykanie spraw bez wysyłania wiadomości.",metryki:[["Wątki",allegroKomunikacjaStaty().threads.length],["Do odpowiedzi",allegroKomunikacjaStaty().threadNeed],["Załatwione",allegroKomunikacjaStaty().threads.filter(x=>x.internalResolved).length]]},
+    dyskusje:{ico:"🛟",kicker:"Dyskusje i reklamacje",title:"Obsługa zgłoszeń Allegro",opis:"Oddzielny rejestr dyskusji i reklamacji z filtrami oficjalnego statusu oraz statusem wewnętrznym.",metryki:[["Zgłoszenia",allegroKomunikacjaStaty().issues.length],["Do odpowiedzi",allegroKomunikacjaStaty().issueNeed],["Załatwione",allegroKomunikacjaStaty().issues.filter(x=>x.internalResolved).length]]},
     ustawienia:{ico:"⚙️",kicker:"Konfiguracja",title:"Ustawienia integracji Allegro",opis:"Połączenie OAuth, zakresy uprawnień, środowisko i kontrola synchronizacji w jednym miejscu.",metryki:[["API",allegroStan.configured?"OK":"Brak"],["OAuth",allegroStan.connected?"Połączone":"Rozłączone"],["Środowisko",allegroStan.env||"production"]]}
   }[aktywna]||{};
   return `<section class="panel allegro-workspace-section"><div class="allegro-workspace-title"><span>${cfg.ico||"🟠"}</span><div><small>${esc(cfg.kicker||"Allegro")}</small><h2>${esc(cfg.title||"Panel Allegro")}</h2><p>${esc(cfg.opis||"")}</p></div></div><div class="allegro-workspace-metrics">${(cfg.metryki||[]).map(([l,v])=>`<div><small>${esc(l)}</small><b>${esc(v)}</b></div>`).join("")}</div></section>`;
@@ -6472,7 +6534,8 @@ function allegroStartPanelHTML(mapped,niepodpiete){
         <a class="btn" href="#/admin/allegro/zamowienia">📦 Zamówienia Allegro</a>
         <a class="btn ghost" href="#/admin/allegro/oferty">🏷️ Mapuj oferty</a>
         <a class="btn ghost" href="#/admin/allegro/wystawianie">🟠 Wystaw produkt</a>
-        <a class="btn ghost" href="#/admin/allegro/komunikacja">💬 Wiadomości</a>
+        <a class="btn ghost" href="#/admin/allegro/wiadomosci">💬 Wiadomości</a>
+        <a class="btn ghost" href="#/admin/allegro/dyskusje">🛟 Dyskusje</a>
       </div>
     </div>
     <div class="orders-stat-grid">
@@ -6558,14 +6621,14 @@ function allegroUstawieniaPanelHTML(){
 }
 function widokAdminAllegro(sekcja="start"){
   allegroLadujJesliTrzeba();
-  if(sekcja==="komunikacja"&&!allegroKomunikacja?.updated_at&&!allegroKomunikacja?.sprawdzono&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
+  if(["wiadomosci","dyskusje"].includes(sekcja)&&!allegroKomunikacja?.updated_at&&!allegroKomunikacja?.sprawdzono&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
   const mapped=(allegroOferty||[]).filter(o=>allegroProduktDlaOferty(o.id)).length;
   const niepodpiete=Math.max(0,(allegroOferty||[]).length-mapped);
-  const aktywna=["zamowienia","oferty","wystawianie","komunikacja","ustawienia"].includes(sekcja)?sekcja:"start";
+  const aktywna=["zamowienia","oferty","wystawianie","wiadomosci","dyskusje","ustawienia"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
   <div class="module-page-stack allegro-module-page">
   ${allegroSubnavHTML(aktywna)}
-  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="komunikacja"?allegroKomunikacjaPanelHTML():aktywna==="ustawienia"?allegroUstawieniaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
+  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="wiadomosci"?allegroKomunikacjaPanelHTML("thread"):aktywna==="dyskusje"?allegroKomunikacjaPanelHTML("issue"):aktywna==="ustawienia"?allegroUstawieniaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
   ${allegroStan.error?`<div class="backend-note allegro-info-bottom" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Allegro:</b> ${esc(allegroStan.error)}</div>`:""}
   ${allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete)}
   </div>
@@ -7893,7 +7956,7 @@ function widokAdminProdukty(){
   if(filtrAllegroProduktow==="aktywne") wszystkie=wszystkie.filter(p=>String(allegroOfertaDlaProduktuSklepu(p)?.status||"").toUpperCase()==="ACTIVE");
   if(filtrAllegroProduktow==="szkice") wszystkie=wszystkie.filter(p=>{const o=allegroOfertaDlaProduktuSklepu(p);return o&&String(o.status||"").toUpperCase()!=="ACTIVE";});
   if(filtrAllegroProduktow==="brak") wszystkie=wszystkie.filter(p=>!allegroOfertaDlaProduktuSklepu(p));
-  if(filtrAllegroProduktow==="duplikaty") wszystkie=wszystkie.filter(p=>allegroOfertyPasujaceDoProduktu(p).length>1);
+  if(filtrAllegroProduktow==="duplikaty") wszystkie=wszystkie.filter(p=>allegroOfertyPasujaceDoProduktu(p).filter(allegroDopasowanieDuplikatuAktywne).length>1);
   wszystkie=sortujProduktyAdmin(wszystkie);
   const liczbaWynikow=wszystkie.length;
   const liczbaStron=Math.max(1,Math.ceil(liczbaWynikow/produktyNaStronieAdmin));

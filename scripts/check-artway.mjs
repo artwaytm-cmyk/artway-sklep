@@ -169,6 +169,13 @@ requireMarkers('assets/app.js', app, [
   'function allegroWyslijOdpowiedz',
   'function allegroAgentPropozycjaOdpowiedzi',
   'function allegroHistoriaRozmowyHTML',
+  'function allegroCentrumDuplikatowHTML',
+  'function allegroRozstrzygnijDuplikaty',
+  'function allegroKomunikacjaPasujaca',
+  'function allegroOznaczSpraweWewnetrznie',
+  'function allegroOznaczZaznaczoneSprawy',
+  '#/admin/allegro/wiadomosci',
+  '#/admin/allegro/dyskusje',
   'telegramReminders',
   '"producent"',
   'Zrealizowane lokalnie',
@@ -209,6 +216,7 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "action === 'allegro-description-improve'",
   "action === 'allegro-create-product-offer'",
   "action === 'allegro-offer-price-change'",
+  "action === 'allegro-resolve-duplicate'",
   'function allegroDopasowanieOferty',
   'function allegroSekcjeOpisu',
   'function allegroZnajdzProduktKatalogu',
@@ -245,6 +253,10 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'options.descriptionSections = allegroSekcjeOpisu(preparedProduct',
   "action === 'allegro-send-reply'",
   "action === 'allegro-reply-suggestion'",
+  "action === 'allegro-communication-resolve'",
+  'function allegroZastosujStatusyWewnetrzne',
+  'allegro_communication_internal_history',
+  'allegro_duplicate_resolution_audit',
   'allegro_orders_baseline_v2',
   'function allegroWyslijPrzypomnieniaTelegram',
   'humanReplyNeeded',
@@ -272,6 +284,17 @@ if (!store.includes("['zaakceptowane', 'częściowo wysłane e-mailem'].includes
 }
 if (!app.includes('została bezpiecznie dezaktywowana') || !app.includes('...(producenciKartoteka||[]).filter(p=>p.active!==false)')) {
   fail('assets/app.js: kartoteka producentów musi chronić aktywne zamówienia i zasilać listę producentów produktów');
+}
+const internalResolveFlow = store.slice(store.indexOf("action === 'allegro-communication-resolve'"), store.indexOf("action === 'allegro-communications-settings'"));
+if (!internalResolveFlow.includes('sentExternally: false') || /allegroWywolaj|wyslijTelegramHtml|wyslijEmailSMTP/.test(internalResolveFlow)) {
+  fail('store-app.mjs: wewnętrzne zamknięcie komunikacji nie może wysyłać wiadomości ani wywoływać API Allegro');
+}
+const duplicateResolutionFlow = store.slice(store.indexOf("action === 'allegro-resolve-duplicate'"), store.indexOf("action === 'allegro-offer-price-change'"));
+if (!duplicateResolutionFlow.includes("status: 'ENDED'") || !duplicateResolutionFlow.includes('keepOfferId') || !duplicateResolutionFlow.includes('withdrawOfferIds')) {
+  fail('store-app.mjs: centrum duplikatów musi wymagać wyboru oferty pozostawianej i kontrolowanie kończyć wycofywane oferty');
+}
+if (!store.includes("if (thread.internalResolved)") || !store.includes("if (issue.internalResolved)") || !store.includes("if (item.internalResolved)")) {
+  fail('store-app.mjs: Agent, autoresponder i Telegram muszą pomijać sprawy załatwione wewnętrznie');
 }
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
