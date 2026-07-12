@@ -3726,6 +3726,7 @@ export default async (req) => {
       const offers = await czytaj('allegro_offers', { items: [], updated_at: null });
       const mappings = await czytaj('allegro_mappings', { items: {}, updated_at: null });
       const offerLastError = await czytaj('allegro_offer_last_error', null);
+      const offerDefaultsAudit = await czytaj('allegro_offer_defaults_audit', { items: {}, updated_at: null });
       const status = await allegroStatus(req);
       return odpowiedz({
         ok: true,
@@ -3734,6 +3735,7 @@ export default async (req) => {
         offers: Array.isArray(offers.items) ? offers.items : [],
         mappings: allegroMapowaniaItems(mappings),
         offerLastError,
+        offerDefaultsAudit,
       });
     }
 
@@ -3965,14 +3967,26 @@ export default async (req) => {
       for (let i = 0; i < offerIds.length; i += 10) {
         const batch = offerIds.slice(i, i + 10);
         const settled = await Promise.allSettled(batch.map(async (offerId) => {
-          const meta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, {
-            method: 'PATCH', bodyObj: { stock: { available: ALLEGRO_FIXED_OFFER_STOCK }, publication: { republish: true } }, withMeta: true,
+          const stockMeta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, {
+            method: 'PATCH', bodyObj: { stock: { available: ALLEGRO_FIXED_OFFER_STOCK } }, withMeta: true,
           });
-          return { offerId, status: meta.status, location: meta.location || '' };
+          try {
+            const republishMeta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, {
+              method: 'PATCH', bodyObj: { publication: { republish: true } }, withMeta: true,
+            });
+            return { offerId, stockUpdated: true, republishUpdated: true, status: republishMeta.status, location: republishMeta.location || stockMeta.location || '' };
+          } catch (e) {
+            return { offerId, stockUpdated: true, republishUpdated: false, status: e.status || 422, code: tekst(e.code || '', 120), republishError: tekst(e.message || e, 700) };
+          }
         }));
-        settled.forEach((item, index) => results.push(item.status === 'fulfilled' ? { ok: true, ...item.value } : { ok: false, offerId: batch[index], error: tekst(item.reason?.message || item.reason, 700), code: tekst(item.reason?.code || '', 120), status: item.reason?.status || 500 }));
+        settled.forEach((item, index) => results.push(item.status === 'fulfilled' ? { ok: true, ...item.value } : { ok: false, stockUpdated: false, republishUpdated: false, offerId: batch[index], error: tekst(item.reason?.message || item.reason, 700), code: tekst(item.reason?.code || '', 120), status: item.reason?.status || 500 }));
       }
-      return odpowiedz({ ok: true, stock: ALLEGRO_FIXED_OFFER_STOCK, republish: true, requested: offerIds.length, updated: results.filter((x) => x.ok).length, failed: results.filter((x) => !x.ok).length, results });
+      const now = new Date().toISOString();
+      const auditRec = await czytaj('allegro_offer_defaults_audit', { items: {}, updated_at: null });
+      const auditItems = auditRec.items && typeof auditRec.items === 'object' ? { ...auditRec.items } : {};
+      for (const result of results) auditItems[result.offerId] = { offerId: result.offerId, stock: ALLEGRO_FIXED_OFFER_STOCK, stockUpdated: !!result.stockUpdated, republishUpdated: !!result.republishUpdated, error: tekst(result.republishError || result.error || '', 700), code: tekst(result.code || '', 120), status: result.status || 0, updatedAt: now };
+      await zapisz('allegro_offer_defaults_audit', { items: auditItems, updated_at: now });
+      return odpowiedz({ ok: true, stock: ALLEGRO_FIXED_OFFER_STOCK, republish: true, requested: offerIds.length, stockUpdated: results.filter((x) => x.stockUpdated).length, stockFailed: results.filter((x) => !x.stockUpdated).length, republishUpdated: results.filter((x) => x.republishUpdated).length, republishFailed: results.filter((x) => !x.republishUpdated).length, auditOpen: Object.values(auditItems).filter((x) => !x.stockUpdated || !x.republishUpdated).length, results });
     }
 
     // ─── ALLEGRO: komunikacja z klientami i autoresponder (admin) ───
