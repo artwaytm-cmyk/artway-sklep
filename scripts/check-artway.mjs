@@ -205,6 +205,7 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'ALLEGRO_AGENT_OFFER_PROCEDURE',
   'agentDecision:',
   'function allegroScalParametryBezDuplikatow',
+  'Number(details.draft?.stock?.available)',
   'const stockRaw = Number(opt.stock ?? p.stan ?? 0)',
   'allegroParameters: autoParameters',
   "...(!sourceImages.length ? {} : { zdjecie: sourceImages[0]",

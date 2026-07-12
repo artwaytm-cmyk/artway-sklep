@@ -2489,7 +2489,7 @@ async function allegroZapiszPowiazanieProduktu(product = {}, details = {}) {
   if (Array.isArray(auto.allegroParameters) && auto.allegroParameters.length && !Array.isArray(product.allegroParameters) && !Array.isArray(previousEdit.allegroParameters)) autoPatch.allegroParameters = auto.allegroParameters;
   edits[productId] = {
     ...previousEdit, ...autoPatch, allegroOfferId: offerId,
-    ...(Number.isFinite(Number(draft?.stock?.available)) ? { allegroStock: Math.max(0, Math.floor(Number(draft.stock.available))) } : {}),
+    ...(Number.isFinite(Number(details.draft?.stock?.available)) ? { allegroStock: Math.max(0, Math.floor(Number(details.draft.stock.available))) } : {}),
     ...(link.catalogProductId ? { allegroProductId: link.catalogProductId } : {}),
     ...(link.categoryId ? { allegroCategoryId: link.categoryId } : {}),
     ...(link.producent ? { producent: link.producent } : {}),
