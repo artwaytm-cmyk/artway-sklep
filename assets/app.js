@@ -2028,7 +2028,8 @@ async function wczytajProdukty(){
 }
 
 /* ═══════════ ROUTER (podstrony) ═══════════ */
-function trasa(){ return (location.hash || "#/").replace(/^#/,""); }
+function trasa(){ return (location.hash || "#/").replace(/^#/,"").split("?")[0]; }
+function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
 function renderuj(){
   try{
     const t = trasa();
@@ -8988,13 +8989,14 @@ function formularzProduktu(p, tryb){
 function widokAdminProduktyDodaj(){
   let prefill={};
   try{ prefill=JSON.parse(sessionStorage.getItem("artway_prefill_product")||"{}")||{}; }catch(e){ prefill={}; }
+  const linkZPolecenia=String(parametryTrasy().get("url")||"").trim();if(/^https?:\/\//i.test(linkZPolecenia)&&!prefill.producentUrl)prefill.producentUrl=linkZPolecenia;
   return asortymentSzkielet("produkty", `
     <div class="panel">
       <div class="crumb"><a href="#/admin/produkty">Produkty</a> › Dodaj</div>
       <h1>➕ Dodaj produkt</h1>
-      ${prefill.nazwa?`<div class="backend-note"><b>Agent AI przygotował dane z linku producenta.</b> Sprawdź pola i kliknij „Dodaj produkt”.</div>`:""}
+      ${prefill.nazwa?`<div class="backend-note"><b>Agent AI przygotował dane z linku producenta.</b> Sprawdź kontrolę gotowości i użyj „Dodaj produkt bezpiecznie”.</div>`:linkZPolecenia?`<div class="backend-note"><b>Link przekazany przez Agenta/Telegram.</b> Kliknij „Pobierz i dopasuj”, aby rozpocząć analizę, dobór kategorii i kontrolę duplikatów.</div>`:""}
       ${formularzProduktu(prefill, "dodawanie")}
-      <p style="font-size:.8rem;color:var(--muted2);margin-top:.7rem">Produkt zapisze się w tej przeglądarce i od razu pojawi w sklepie. Aby trafił na hosting dla wszystkich klientów: <b>Produkty → 📤 products.json</b> i wgraj plik na serwer. Import hurtowy z hurtowni: <b>import_produktow.py</b>.</p>
+      <p style="font-size:.8rem;color:var(--muted2);margin-top:.7rem">Po dodaniu produkt trafia do wspólnej bazy sklepu i jest widoczny na wszystkich urządzeniach. Agent zapisuje źródło, wynik kontroli duplikatów i kompletność danych; stan magazynowy nowego produktu pozostaje równy 0, dopóki go nie zmienisz.</p>
     </div>`);
 }
 function widokAdminProduktEdytuj(id){
