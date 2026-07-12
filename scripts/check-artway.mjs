@@ -194,6 +194,7 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function allegroCzekajNaOperacjeOferty',
   'const stockRaw = Number(opt.stock ?? p.stan ?? 0)',
   'allegroParameters: autoParameters',
+  "...(!sourceImages.length ? {} : { zdjecie: sourceImages[0]",
   "action === 'allegro-send-reply'",
   "action === 'allegro-reply-suggestion'",
   'allegro_orders_baseline_v2',

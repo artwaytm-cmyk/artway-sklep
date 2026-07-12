@@ -2294,7 +2294,7 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     ...(product.producent || product.marka || !catalogProducer ? {} : { producent: catalogProducer, marka: catalogProducer }),
     ...(product.gtin || product.ean || !catalogGtin ? {} : { gtin: catalogGtin, ean: catalogGtin }),
     ...(product.kodProducenta || product.mpn || !catalogCode ? {} : { kodProducenta: catalogCode, mpn: catalogCode }),
-    ...(product.zdjecie || !sourceImages.length ? {} : { zdjecie: sourceImages[0], zdjecia: sourceImages.slice(1, 16) }),
+    ...(!sourceImages.length ? {} : { zdjecie: sourceImages[0], zdjecia: sourceImages.slice(1, 16) }),
   };
   const requiredParameters = options.catalogProductId ? [] : allegroBrakujaceParametryWymagane(preparedProduct, categoryParameters.parameters);
   options.requiredParameters = requiredParameters;
@@ -2321,8 +2321,8 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
       ean: preparedProduct.ean || preparedProduct.gtin || '',
       kodProducenta: preparedProduct.kodProducenta || preparedProduct.mpn || '',
       mpn: preparedProduct.mpn || preparedProduct.kodProducenta || '',
-      zdjecie: preparedProduct.zdjecie || '',
-      zdjecia: Array.isArray(preparedProduct.zdjecia) ? preparedProduct.zdjecia.slice(0, 15) : [],
+      zdjecie: product.zdjecie || preparedProduct.zdjecie || '',
+      zdjecia: Array.isArray(product.zdjecia) && product.zdjecia.length ? product.zdjecia.slice(0, 15) : (Array.isArray(preparedProduct.zdjecia) ? preparedProduct.zdjecia.slice(0, 15) : []),
       allegroParameters: autoParameters,
       allegroProductId: options.catalogProductId || '',
       allegroCategoryId: effectiveCategoryId || '',

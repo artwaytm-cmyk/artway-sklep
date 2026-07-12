@@ -5445,7 +5445,7 @@ function allegroZapiszAutoUzupelnienia(p,d={}){
     allegroCategoryId:auto.allegroCategoryId||category.id||catalog.categoryId||p.allegroCategoryId||""
   };
   const next={...(produktyEdytowane[p.id]||{})};let changed=false;
-  for(const [key,value] of Object.entries(fields))if(value&&String(next[key]||p[key]||"")!==String(value)){next[key]=String(value);changed=true;}
+  for(const [key,value] of Object.entries(fields))if(value&&!next[key]&&!p[key]){next[key]=String(value);changed=true;}
   const extraImages=(Array.isArray(auto.zdjecia)?auto.zdjecia:[]).filter(Boolean).filter(x=>x!==fields.zdjecie).slice(0,15);
   if(extraImages.length&&!(Array.isArray(p.zdjecia)&&p.zdjecia.length)&&!(Array.isArray(next.zdjecia)&&next.zdjecia.length)){next.zdjecia=extraImages;changed=true;}
   if(Array.isArray(auto.allegroParameters)&&auto.allegroParameters.length&&!Array.isArray(p.allegroParameters)){next.allegroParameters=auto.allegroParameters;changed=true;}
