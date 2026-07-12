@@ -13,6 +13,7 @@ const files = [
   'netlify/functions/cron-allegro-communications.mjs',
   'netlify/functions/cron-allegro-offers.mjs',
   'netlify/functions/cron-supplier-availability.mjs',
+  'netlify/functions/cron-infakt-sync.mjs',
 ];
 
 function fail(message) {
@@ -46,6 +47,7 @@ const cronAllegroOrders = read('netlify/functions/cron-allegro-orders.mjs');
 const cronAllegroCommunications = read('netlify/functions/cron-allegro-communications.mjs');
 const cronAllegroOffers = read('netlify/functions/cron-allegro-offers.mjs');
 const cronSupplierAvailability = read('netlify/functions/cron-supplier-availability.mjs');
+const cronInfaktSync = read('netlify/functions/cron-infakt-sync.mjs');
 
 const version = index.match(/<meta\s+name=["']artway-version["']\s+content=["']([^"']+)/i)?.[1] || '';
 if (!version) fail('index.html: brak meta artway-version');
@@ -82,6 +84,9 @@ requireMarkers('assets/styles.css', css, [
   '.warehouse-stock-card',
   '.warehouse-stock-toolbar',
   '.agent-site-grid',
+  '.infakt-hero',
+  '.infakt-order-card',
+  '.store-duplicate-center',
   '.modal',
 ]);
 
@@ -104,7 +109,7 @@ requireMarkers('assets/app.js', app, [
   'Kartoteka magazynowa',
   'artway_ruchy_magazynowe',
   'artway_faktury_szkice',
-  'inFakt / szkice faktur',
+  'inFakt i faktury',
   'function widokAdminWysylki',
   'function utworzPrzesylkeAPI',
   'function synchronizujWszystkieStatusyAPI',
@@ -215,6 +220,14 @@ requireMarkers('assets/app.js', app, [
   '"producent"',
   'Zrealizowane lokalnie',
   'function potwierdzWidoczneStanyMagazynu',
+  'function audytDuplikatowSklepu',
+  'function filtrujDuplikatySklepu',
+  'kanoniczneDuplikatySklepu',
+  'artway_produkty_sortowanie_admin',
+  'EXTERNAL_ID / SKU (domyślnie)',
+  'function widokAdminInfakt',
+  '#/admin/infakt/zamowienia',
+  'inFakt i faktury',
 ]);
 
 requireMarkers('netlify/functions/store.mjs', storeEntry, [
@@ -319,6 +332,17 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "telegramKomorka('NAZWA', 30)",
   "telegramKomorka('POTRZEBNA ILOŚĆ', 16)",
   "'zrealizowane'",
+  'function infaktKonfiguracja',
+  "'X-inFakt-ApiKey'",
+  "action === 'infakt-status'",
+  "action === 'infakt-invoices'",
+  "action === 'infakt-create-invoice'",
+  "action === 'infakt-sync'",
+  "action === 'infakt-invoice-pdf'",
+  "'/api/v3/async/invoices.json'",
+  'infakt_invoice_links',
+  'send_to_ksef',
+  'companyOrdersWithoutInvoice',
 ]);
 
 if (/stock:\s*\{\s*available:\s*Math\.max\(0,\s*Number\(opt\.stock\s*\?\?\s*p\.stan\s*\?\?\s*1\)\s*\|\|\s*1\)/.test(store)) {
@@ -409,13 +433,20 @@ requireMarkers('netlify/functions/cron-supplier-availability.mjs', cronSupplierA
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
+requireMarkers('netlify/functions/cron-infakt-sync.mjs', cronInfaktSync, [
+  "schedule: '17 * * * *'",
+  'infakt-sync',
+  'INFAKT_API_KEY',
+  'ARTWAY_ADMIN_TOKEN',
+]);
+
 try {
   new Function(app);
 } catch (error) {
   fail(`assets/app.js: błąd składni: ${error.message}`);
 }
 
-for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs']) {
+for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs', 'netlify/functions/cron-infakt-sync.mjs']) {
   try {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
   } catch (error) {

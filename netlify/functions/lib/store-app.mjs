@@ -171,9 +171,9 @@ function agentZamowienieAktywne(z = {}) {
   return !['anulowane', 'dostarczone', 'zakończone', 'zwrot', 'zwrot pieniędzy'].includes(String(z.status || '').toLowerCase());
 }
 async function agentCentrumOperacyjne() {
-  const [settingsRec, ordersRec, allegroOrdersRec, communicationRec, offerErrorRec] = await Promise.all([
+  const [settingsRec, ordersRec, allegroOrdersRec, communicationRec, offerErrorRec, infaktLinksRec] = await Promise.all([
     czytaj('settings', { data: {}, updated_at: null }), czytaj('orders', { items: [] }), czytaj('allegro_orders', { items: [] }),
-    czytaj('allegro_communications', { threads: [], issues: [], updated_at: null }), czytaj('allegro_offer_last_error', null),
+    czytaj('allegro_communications', { threads: [], issues: [], updated_at: null }), czytaj('allegro_offer_last_error', null), czytaj('infakt_invoice_links', { items: {} }),
   ]);
   const data = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {};
   const orders = Array.isArray(ordersRec.items) ? ordersRec.items : [], activeOrders = orders.filter(agentZamowienieAktywne), newOrders = activeOrders.filter((x) => String(x.status || '').toLowerCase() === 'nowe');
@@ -189,6 +189,8 @@ async function agentCentrumOperacyjne() {
   const producerLinks = (Array.isArray(data.artway_agent_ai_linki_producentow) ? data.artway_agent_ai_linki_producentow : []).filter((x) => !['pobrano', 'zamkniete', 'zamknięte', 'usunieto', 'usunięto'].includes(String(x?.status || '').toLowerCase()));
   const offerTasks = (Array.isArray(data.artway_agent_ai_allegro_zadania) ? data.artway_agent_ai_allegro_zadania : []).filter((x) => !['zrealizowane', 'zamkniete', 'zamknięte', 'anulowane'].includes(String(x?.status || '').toLowerCase()));
   const supplierOrders = (Array.isArray(data.artway_agent_ai_zlecenia) ? data.artway_agent_ai_zlecenia : []).filter((x) => !['zrealizowane', 'anulowane', 'wysłane do producenta', 'wysłane do dostawcy'].includes(String(x?.status || '').toLowerCase()));
+  const invoiceLinks = infaktLinksRec?.items && typeof infaktLinksRec.items === 'object' ? infaktLinksRec.items : {}, invoiceDrafts = Array.isArray(data.artway_faktury_szkice) ? data.artway_faktury_szkice : [];
+  const companyOrdersWithoutInvoice = activeOrders.filter((x) => (x?.klient?.nip || x?.klient?.firma) && !invoiceLinks[numerZamowienia(x.nr)] && !invoiceDrafts.some((d) => numerZamowienia(d?.nrZamowienia) === numerZamowienia(x.nr)));
   const priorities = [], addPriority = (severity, area, count, title, href, action) => { if (Number(count) > 0) priorities.push({ id: `${area}-${priorities.length + 1}`, severity, area, count: Number(count), title, href, action }); };
   addPriority('critical', 'zamowienia', newOrders.length, 'Nowe zamówienia czekają na rozpoczęcie obsługi', '#/admin/zamowienia', 'Otwórz zamówienia i rozpocznij realizację.');
   addPriority('critical', 'allegro', communicationWaiting.length, 'Nowe wiadomości lub dyskusje Allegro wymagają odpowiedzi', '#/admin/allegro/wiadomosci', 'Przygotuj odpowiedź i oznacz sprawę wewnętrznie po zakończeniu.');
@@ -198,6 +200,7 @@ async function agentCentrumOperacyjne() {
   addPriority('warning', 'producent', supplierLow.length, 'Niski stan produktów u producentów', '#/admin/magazyn/dostawcy', 'Kontroluj najpierw najlepiej sprzedające się produkty.');
   addPriority('warning', 'produkty', offerTasks.length, 'Otwarte zadania wystawiania produktów na Allegro', '#/admin/allegro/wystawianie', 'Uzupełnij wymagane dane i ponów wystawienie.');
   addPriority('warning', 'producenci', supplierOrders.length, 'Otwarte dokumenty zamówień do producentów', '#/admin/agent-ai/zlecenia', 'Sprawdź aktualną rewizję przed zatwierdzeniem i wysyłką.');
+  addPriority('warning', 'faktury', companyOrdersWithoutInvoice.length, 'Zamówienia firmowe nie mają jeszcze szkicu ani faktury', '#/admin/infakt/zamowienia', 'Sprawdź dane nabywcy i utwórz dokument w inFakt.');
   addPriority('info', 'produkty', producerLinks.length, 'Linki producentów czekają na pobranie danych', '#/admin/agent-ai/plan', 'Ponów analizę linków i uzupełnij kartoteki.');
   if (offerErrorRec?.message || offerErrorRec?.error) addPriority('warning', 'allegro', 1, 'Ostatnia operacja oferty Allegro zakończyła się błędem', '#/admin/allegro/wystawianie', 'Otwórz diagnostykę oferty i przekaż braki Agentowi.');
   const severityRank = { critical: 0, warning: 1, info: 2 };
@@ -206,16 +209,16 @@ async function agentCentrumOperacyjne() {
   const score = Math.max(0, Math.min(100, 100 - critical * 14 - warnings * 5));
   return {
     ok: true, generatedAt: new Date().toISOString(), score, priorities,
-    summary: { orders: orders.length, activeOrders: activeOrders.length, newOrders: newOrders.length, shipmentsWithoutTracking: shipmentsWithoutTracking.length, allegroOrders: allegroOrders.length, activeAllegro: activeAllegro.length, communicationWaiting: communicationWaiting.length, supplierUnavailable: supplierUnavailable.length, supplierLow: supplierLow.length, producerLinks: producerLinks.length, offerTasks: offerTasks.length, supplierOrders: supplierOrders.length },
-    integrations: { email: !!emailPublicConfig().configured, telegram: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId), inpost: !!inpostPublicConfig().configured, allegro: !!(process.env.ALLEGRO_CLIENT_ID && process.env.ALLEGRO_CLIENT_SECRET) },
-    links: { agent: 'https://artwaytm.pl/#/admin/agent-ai', orders: 'https://artwaytm.pl/#/admin/zamowienia', warehouse: 'https://artwaytm.pl/#/admin/magazyn/stany', allegro: 'https://artwaytm.pl/#/admin/allegro', shipping: 'https://artwaytm.pl/#/admin/wysylki' },
+    summary: { orders: orders.length, activeOrders: activeOrders.length, newOrders: newOrders.length, shipmentsWithoutTracking: shipmentsWithoutTracking.length, allegroOrders: allegroOrders.length, activeAllegro: activeAllegro.length, communicationWaiting: communicationWaiting.length, supplierUnavailable: supplierUnavailable.length, supplierLow: supplierLow.length, producerLinks: producerLinks.length, offerTasks: offerTasks.length, supplierOrders: supplierOrders.length, companyOrdersWithoutInvoice: companyOrdersWithoutInvoice.length },
+    integrations: { email: !!emailPublicConfig().configured, telegram: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId), inpost: !!inpostPublicConfig().configured, allegro: !!(process.env.ALLEGRO_CLIENT_ID && process.env.ALLEGRO_CLIENT_SECRET), infakt: !!infaktPublicConfig().configured },
+    links: { agent: 'https://artwaytm.pl/#/admin/agent-ai', orders: 'https://artwaytm.pl/#/admin/zamowienia', warehouse: 'https://artwaytm.pl/#/admin/magazyn/stany', allegro: 'https://artwaytm.pl/#/admin/allegro', shipping: 'https://artwaytm.pl/#/admin/wysylki', invoices: 'https://artwaytm.pl/#/admin/infakt' },
   };
 }
 function agentRaportTelegramHTML(center = {}) {
   const s = center.summary || {}, items = (Array.isArray(center.priorities) ? center.priorities : []).slice(0, 8);
   const icons = { critical: '🔴', warning: '🟡', info: '🔵' };
   const rows = items.length ? items.map((x, i) => `${i + 1}. ${icons[x.severity] || '•'} <b>${telegramHtml(x.title)}</b> — ${x.count}\n   ${telegramHtml(x.action || '')}`).join('\n') : '✅ Brak aktywnych tematów wymagających reakcji.';
-  return `<b>🤖 Centrum operacyjne Artway-TM — ${center.score ?? 0}%</b>\n${telegramHtml(new Date(center.generatedAt || Date.now()).toLocaleString('pl-PL'))}\n\n<b>Sprzedaż i obsługa</b>\nSklep: ${s.newOrders || 0} nowych / ${s.activeOrders || 0} aktywnych\nAllegro: ${s.activeAllegro || 0} aktywnych • ${s.communicationWaiting || 0} spraw do odpowiedzi\nWysyłki bez numeru: ${s.shipmentsWithoutTracking || 0}\nProducent: ${s.supplierUnavailable || 0} braków • ${s.supplierLow || 0} niskich stanów\n\n<b>Najważniejsze działania</b>\n${rows}\n\n<i>Agent nie wysyła odpowiedzi klientom ani zamówień producentom bez zatwierdzenia administratora.</i>`;
+  return `<b>🤖 Centrum operacyjne Artway-TM — ${center.score ?? 0}%</b>\n${telegramHtml(new Date(center.generatedAt || Date.now()).toLocaleString('pl-PL'))}\n\n<b>Sprzedaż i obsługa</b>\nSklep: ${s.newOrders || 0} nowych / ${s.activeOrders || 0} aktywnych\nAllegro: ${s.activeAllegro || 0} aktywnych • ${s.communicationWaiting || 0} spraw do odpowiedzi\nWysyłki bez numeru: ${s.shipmentsWithoutTracking || 0}\nFaktury: ${s.companyOrdersWithoutInvoice || 0} firmowych bez dokumentu\nProducent: ${s.supplierUnavailable || 0} braków • ${s.supplierLow || 0} niskich stanów\n\n<b>Najważniejsze działania</b>\n${rows}\n\n<i>Agent nie wysyła odpowiedzi klientom ani zamówień producentom bez zatwierdzenia administratora.</i>`;
 }
 function numerZamowienia(v) {
   return tekst(v, 80).trim();
@@ -532,6 +535,49 @@ async function aktualizujZamowieniePaynow({ externalId = '', paymentId = '', sta
   await zapisz('orders', { items, updated_at: new Date().toISOString() });
   return z;
 }
+
+const INFAKT_ENVY = new Set(['production', 'sandbox']);
+function infaktKonfiguracja() {
+  const env = INFAKT_ENVY.has(String(process.env.INFAKT_ENV || '').toLowerCase()) ? String(process.env.INFAKT_ENV).toLowerCase() : 'production';
+  const apiKey = tekst(process.env.INFAKT_API_KEY || '', 500).trim();
+  return { apiKey, configured: !!apiKey, env, baseUrl: env === 'sandbox' ? 'https://api.sandbox-infakt.pl' : 'https://api.infakt.pl', paymentDays: Math.max(0, Math.min(365, Number(process.env.INFAKT_PAYMENT_DAYS || 7) || 7)), sendToKsefDefault: String(process.env.INFAKT_SEND_TO_KSEF || '').toLowerCase() === 'true' };
+}
+function infaktPublicConfig() { const c = infaktKonfiguracja(); return { configured: c.configured, env: c.env, paymentDays: c.paymentDays, sendToKsefDefault: c.sendToKsefDefault, missingEnv: c.configured ? [] : ['INFAKT_API_KEY'] }; }
+function infaktErrorText(data, fallback = 'Błąd inFakt') {
+  const errors = data?.errors || data?.error || data?.message;
+  if (typeof errors === 'string') return tekst(errors, 1000);
+  if (Array.isArray(errors)) return tekst(errors.map((x) => typeof x === 'string' ? x : x?.message || JSON.stringify(x)).join('; '), 1000);
+  if (errors && typeof errors === 'object') return tekst(Object.entries(errors).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; '), 1000);
+  return fallback;
+}
+async function infaktWywolaj(path, { method = 'GET', bodyObj = null, parameters = {}, raw = false } = {}) {
+  const c = infaktKonfiguracja();
+  if (!c.configured) { const e = new Error('inFakt nie jest skonfigurowany. Dodaj INFAKT_API_KEY po stronie serwera.'); e.code = 'infakt_not_configured'; e.status = 503; throw e; }
+  const url = new URL(path, c.baseUrl); for (const [k, v] of Object.entries(parameters || {})) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+  const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
+  const response = await fetch(url, { method, headers: { 'X-inFakt-ApiKey': c.apiKey, Accept: raw ? 'application/pdf, application/json' : 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) }, body });
+  if (raw && response.ok) return response;
+  const txt = await response.text(); let data = {}; try { data = txt ? JSON.parse(txt) : {}; } catch { data = { raw: tekst(txt, 2000) }; }
+  if (!response.ok) { const e = new Error(infaktErrorText(data, `inFakt HTTP ${response.status}`)); e.status = response.status; e.code = response.status === 401 ? 'infakt_auth' : response.status === 422 ? 'infakt_validation' : 'infakt_error'; e.infakt = data; throw e; }
+  return data;
+}
+function infaktDataISO(value = '') { const d = value ? new Date(value) : new Date(); return Number.isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10); }
+function infaktMetodaPlatnosci(z = {}) { const p = String(z.platnoscId || z.platnosc || '').toLowerCase(); if (p.includes('pobran')) return 'delivery'; if (p.includes('kart')) return 'card'; if (p.includes('gotow')) return 'cash'; return 'transfer'; }
+function infaktPayloadZamowienia(z = {}, options = {}) {
+  const client = z.klient || {}, address = z.adresDostawy || {}, company = tekst(client.firma || z.firma || '', 250).trim(), nip = String(client.nip || z.nip || '').replace(/\D/g, ''), fullName = tekst(`${client.imie || ''} ${client.nazwisko || ''}`, 200).trim(), nameParts = fullName.split(/\s+/).filter(Boolean);
+  const lines = (Array.isArray(z.pozycjeDane) ? z.pozycjeDane : []).map((p) => { const quantity = Math.max(0.001, Number(p.ilosc) || 1), unitGross = Number(p.cena) || Number(p.wartosc) / quantity || 0; return { name: tekst(p.nazwa || p.produkt || 'Produkt', 300), quantity, gross_price: grosze(unitGross), tax_symbol: String(p.vatRate || p.vat || 23).replace('%', '') || '23', unit: 'szt.', ...(p.gtin || p.ean ? { gtin: tekst(p.gtin || p.ean, 80) } : {}) }; }).filter((p) => p.gross_price > 0);
+  const deliveryGross = grosze(Number(z.kosztDostawy || 0) + Number(z.kosztPaczkaWeekend || 0) + Number(z.kosztPlatnosci || 0));
+  if (deliveryGross > 0) lines.push({ name: 'Dostawa i usługi dodatkowe', quantity: 1, gross_price: deliveryGross, tax_symbol: '23', unit: 'szt.' });
+  if (!lines.length) { const total = grosze(z.razem); if (total > 0) lines.push({ name: `Zamówienie ${tekst(z.nr, 100)}`, quantity: 1, gross_price: total, tax_symbol: '23', unit: 'szt.' }); }
+  if (!lines.length) { const e = new Error('Zamówienie nie ma pozycji o dodatniej wartości'); e.code = 'infakt_empty_invoice'; throw e; }
+  const invoiceDate = infaktDataISO(options.invoiceDate), due = new Date(`${invoiceDate}T12:00:00Z`); due.setUTCDate(due.getUTCDate() + infaktKonfiguracja().paymentDays);
+  const invoice = { status: options.status === 'paid' ? 'paid' : 'draft', currency: 'PLN', payment_method: infaktMetodaPlatnosci(z), invoice_date: invoiceDate, sale_date: infaktDataISO(z.ts || z.createdAt || invoiceDate), payment_date: due.toISOString().slice(0, 10), sale_type: 'merchandise', notes: tekst(`Zamówienie Artway-TM: ${z.nr}`, 500), client_business_activity_kind: company || nip ? 'other_business' : 'private_person', client_company_name: company || (nip ? fullName || 'Klient firmowy' : undefined), client_first_name: company ? undefined : (nameParts[0] || 'Klient'), client_last_name: company ? undefined : (nameParts.slice(1).join(' ') || 'Artway-TM'), client_tax_code: nip || undefined, client_street: tekst(address.ulica || client.ulica || '', 160) || undefined, client_street_number: tekst(address.nrDomu || client.nrDomu || '', 40) || undefined, client_flat_number: tekst(address.nrLokalu || client.nrLokalu || '', 40) || undefined, client_city: tekst(address.miasto || client.miasto || '', 120) || undefined, client_post_code: tekst(address.kod || address.kodPocztowy || client.kod || client.kodPocztowy || '', 30) || undefined, services: lines };
+  if (invoice.status === 'paid') invoice.paid_date = invoiceDate;
+  Object.keys(invoice).forEach((key) => invoice[key] === undefined && delete invoice[key]);
+  return { invoice, send_to_ksef: options.sendToKsef === true };
+}
+function infaktRef(data = {}) { return tekst(data.invoice_task_reference_number || data.task_reference_number || data.reference_number || '', 200).trim(); }
+function infaktInvoiceFromTask(data = {}) { return data.invoice || data.entity || data.result?.invoice || data.result || {}; }
 
 function emailKonfiguracja() {
   const providerRaw = tekst(process.env.EMAIL_PROVIDER, 40).trim().toLowerCase();
@@ -3964,7 +4010,88 @@ export default async (req) => {
         telegram: { configured: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId) },
         inpost: inpostPublicConfig(),
         allegro: await allegroStatus(req),
+        infakt: infaktPublicConfig(),
       });
+    }
+
+    // ─── INFAKT: faktury, statusy asynchroniczne i dokumenty ───
+    if (action === 'infakt-status') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const config = infaktPublicConfig(); let connection = null;
+      if (config.configured && url.searchParams.get('verify') === '1') {
+        try { const data = await infaktWywolaj('/api/v3/invoices.json', { parameters: { limit: 1, offset: 0, fields: 'id,uuid,number,status,invoice_date,gross_price' } }); connection = { ok: true, count: Number(data?.metainfo?.total_count ?? data?.entities?.length ?? 0) }; }
+        catch (e) { connection = { ok: false, error: tekst(e.message, 700), code: e.code || 'infakt_error' }; }
+      }
+      const links = await czytaj('infakt_invoice_links', { items: {}, updated_at: null });
+      return odpowiedz({ ok: true, config, connection, links: links.items || {}, updated_at: links.updated_at || null });
+    }
+
+    if (action === 'infakt-invoices') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 50) || 50)), offset = Math.max(0, Number(url.searchParams.get('offset') || 0) || 0);
+      const data = await infaktWywolaj('/api/v3/invoices.json', { parameters: { limit, offset, order: 'invoice_date desc', fields: 'id,uuid,number,status,invoice_date,sale_date,payment_date,paid_date,gross_price,left_to_pay,currency,client_company_name,client_first_name,client_last_name,client_tax_code,ksef_number,ksef_data' } });
+      return odpowiedz({ ok: true, invoices: Array.isArray(data.entities) ? data.entities : [], metainfo: data.metainfo || {}, config: infaktPublicConfig() });
+    }
+
+    if (action === 'infakt-create-invoice') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({})), orderNumber = numerZamowienia(body.orderNumber || body.nrZamowienia);
+      if (!orderNumber) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia', code: 'validation' }, 422);
+      const [ordersRec, linksRec] = await Promise.all([czytaj('orders', { items: [] }), czytaj('infakt_invoice_links', { items: {}, updated_at: null })]);
+      const order = (Array.isArray(ordersRec.items) ? ordersRec.items : []).find((x) => numerZamowienia(x?.nr) === orderNumber);
+      if (!order) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
+      const links = linksRec.items && typeof linksRec.items === 'object' ? { ...linksRec.items } : {}, existing = links[orderNumber];
+      if (existing && !['error', 'cancelled'].includes(String(existing.status || '').toLowerCase()) && body.force !== true) return odpowiedz({ ok: true, duplicatePrevented: true, link: existing, message: 'Faktura lub zadanie inFakt już istnieje dla tego zamówienia.' });
+      const payload = infaktPayloadZamowienia(order, { status: body.status, invoiceDate: body.invoiceDate, sendToKsef: body.sendToKsef === true });
+      const data = await infaktWywolaj('/api/v3/async/invoices.json', { method: 'POST', bodyObj: payload });
+      const reference = infaktRef(data), now = new Date().toISOString();
+      if (!reference) { const e = new Error('inFakt nie zwrócił numeru referencyjnego zadania'); e.code = 'infakt_missing_reference'; throw e; }
+      links[orderNumber] = { orderNumber, taskReference: reference, status: 'processing', processingCode: data.processing_code || 100, processingDescription: tekst(data.processing_description || 'Zlecenie przyjęte', 500), createdAt: now, updatedAt: now, sendToKsef: payload.send_to_ksef, payloadHash: crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
+      await zapisz('infakt_invoice_links', { items: links, updated_at: now });
+      return odpowiedz({ ok: true, duplicatePrevented: false, link: links[orderNumber], task: data }, 201);
+    }
+
+    if (action === 'infakt-task-status') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const reference = tekst(url.searchParams.get('reference'), 200).trim(), orderNumber = numerZamowienia(url.searchParams.get('orderNumber'));
+      if (!reference && !orderNumber) return odpowiedz({ ok: false, error: 'Brak referencji zadania', code: 'validation' }, 422);
+      const linksRec = await czytaj('infakt_invoice_links', { items: {}, updated_at: null }), links = linksRec.items && typeof linksRec.items === 'object' ? { ...linksRec.items } : {};
+      const current = orderNumber ? links[orderNumber] : Object.values(links).find((x) => x.taskReference === reference), ref = reference || current?.taskReference;
+      if (!ref) return odpowiedz({ ok: false, error: 'Nie znaleziono referencji zadania', code: 'not_found' }, 404);
+      const data = await infaktWywolaj(`/api/v3/async/invoices/status/${encodeURIComponent(ref)}.json`), invoice = infaktInvoiceFromTask(data), code = Number(data.processing_code || data.code || 0), now = new Date().toISOString();
+      const status = code === 201 || invoice?.uuid ? 'created' : code === 422 ? 'error' : 'processing', key = orderNumber || current?.orderNumber;
+      const link = { ...(current || {}), orderNumber: key || '', taskReference: ref, status, processingCode: code, processingDescription: tekst(data.processing_description || data.description || '', 700), invoiceId: invoice?.id || current?.invoiceId || null, invoiceUuid: tekst(invoice?.uuid || current?.invoiceUuid || '', 200), invoiceNumber: tekst(invoice?.number || current?.invoiceNumber || '', 120), error: status === 'error' ? infaktErrorText(data, 'Nie udało się utworzyć faktury') : '', updatedAt: now };
+      if (key) { links[key] = link; await zapisz('infakt_invoice_links', { items: links, updated_at: now }); }
+      return odpowiedz({ ok: true, status, link, task: data });
+    }
+
+    if (action === 'infakt-sync') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const linksRec = await czytaj('infakt_invoice_links', { items: {}, updated_at: null }), links = linksRec.items && typeof linksRec.items === 'object' ? { ...linksRec.items } : {}, results = [];
+      for (const [orderNumber, current] of Object.entries(links).filter(([, x]) => x?.taskReference && x.status === 'processing').slice(0, 25)) {
+        try { const data = await infaktWywolaj(`/api/v3/async/invoices/status/${encodeURIComponent(current.taskReference)}.json`), invoice = infaktInvoiceFromTask(data), code = Number(data.processing_code || data.code || 0), status = code === 201 || invoice?.uuid ? 'created' : code === 422 ? 'error' : 'processing'; links[orderNumber] = { ...current, status, processingCode: code, processingDescription: tekst(data.processing_description || '', 700), invoiceId: invoice?.id || current.invoiceId || null, invoiceUuid: tekst(invoice?.uuid || current.invoiceUuid || '', 200), invoiceNumber: tekst(invoice?.number || current.invoiceNumber || '', 120), error: status === 'error' ? infaktErrorText(data, 'Błąd tworzenia') : '', updatedAt: new Date().toISOString() }; results.push({ orderNumber, status }); }
+        catch (e) { results.push({ orderNumber, status: 'error', error: tekst(e.message, 500) }); }
+      }
+      await zapisz('infakt_invoice_links', { items: links, updated_at: new Date().toISOString() });
+      return odpowiedz({ ok: true, links, results });
+    }
+
+    if (action === 'infakt-mark-paid') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({})), uuid = tekst(body.uuid, 200).trim(), paidDate = infaktDataISO(body.paidDate);
+      if (!uuid) return odpowiedz({ ok: false, error: 'Brak UUID faktury', code: 'validation' }, 422);
+      const data = await infaktWywolaj(`/api/v3/async/invoices/${encodeURIComponent(uuid)}/paid.json`, { method: 'POST', parameters: { paid_date: paidDate }, bodyObj: { paid_date: paidDate } });
+      return odpowiedz({ ok: true, task: data, paidDate });
+    }
+
+    if (action === 'infakt-invoice-pdf') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const uuid = tekst(url.searchParams.get('uuid'), 200).trim(); if (!uuid) return odpowiedz({ ok: false, error: 'Brak UUID faktury', code: 'validation' }, 422);
+      const response = await infaktWywolaj(`/api/v3/invoices/${encodeURIComponent(uuid)}/pdf.json`, { parameters: { document_type: 'regular', locale: 'pl' }, raw: true });
+      return new Response(await response.arrayBuffer(), { status: 200, headers: { 'content-type': response.headers.get('content-type') || 'application/pdf', 'content-disposition': `inline; filename="faktura-${uuid}.pdf"`, 'cache-control': 'no-store' } });
     }
 
     // ─── E-MAIL: konfiguracja bez sekretów ───

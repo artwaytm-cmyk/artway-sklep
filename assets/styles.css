@@ -929,3 +929,19 @@ footer{background:#151a24;color:#c6ccd8;margin-top:1rem}
   .orders-stat-grid{grid-template-columns:1fr}
   .user-btn:not(.ikona){max-width:104px}
 }
+
+/* inFakt, faktury i kontrola duplikatów sklepu */
+.infakt-hero{background:linear-gradient(135deg,#fff 0%,#f6fbff 58%,#eef7ff 100%);border:1px solid #dbeafe}
+.infakt-panel{border:1px solid var(--border);overflow:hidden}
+.infakt-order-list{display:grid;gap:.65rem}
+.infakt-order-card{display:grid;grid-template-columns:minmax(220px,1.4fr) minmax(130px,.55fr) minmax(250px,1fr);gap:.8rem;align-items:center;padding:.85rem;border:1px solid var(--border);border-radius:14px;background:#fff}
+.infakt-order-card>div:first-child{display:grid;gap:.2rem;min-width:0}
+.infakt-order-card small{display:block;color:var(--muted);overflow-wrap:anywhere}
+.store-duplicate-center{display:grid;gap:.75rem;padding:.9rem;border:1px solid #fde68a;border-radius:16px;background:#fffbeb;margin-bottom:1rem}
+.store-duplicate-group{display:grid;gap:.55rem;padding:.75rem;border:1px solid #f3e1a4;border-radius:12px;background:#fff}
+.store-duplicate-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:.5rem}
+.store-duplicate-option{display:grid;grid-template-columns:42px 1fr auto;gap:.55rem;align-items:center;width:100%;padding:.55rem;border:1px solid var(--border);border-radius:11px;background:#fff;text-align:left;cursor:pointer;color:inherit}
+.store-duplicate-option:hover,.store-duplicate-option.canonical,.store-duplicate-center .allegro-duplicate-option.is-canonical{border-color:var(--primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--primary) 12%,transparent)}
+.store-duplicate-option img{width:42px;height:42px;object-fit:cover;border-radius:8px;background:#f3f4f6}
+@media(max-width:900px){.infakt-order-card{grid-template-columns:1fr 1fr}.infakt-order-card>.diag-actions{grid-column:1/-1}}
+@media(max-width:640px){.infakt-order-card{grid-template-columns:1fr}.infakt-order-card>.diag-actions{grid-column:auto}.store-duplicate-options{grid-template-columns:1fr}}

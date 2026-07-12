@@ -268,6 +268,8 @@ let allegroOstatniWynikWystawienia = null;
 let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoCorrections:true,updated_at:null}};
 let allegroOperacjaUstawien = {busy:false,done:0,total:0,stockUpdated:0,stockFailed:0,republishUpdated:0,republishFailed:0,error:""};
 let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", szukajAllegroWiadomosci="", szukajAllegroDyskusji="", szukajAllegroRentownosc="", filtrAllegroZamowien="do_obslugi", filtrEtapuAllegroZamowien="wszystkie", filtrAllegroOfert="wszystkie", filtrAllegroWystawiania="wszystkie", filtrAllegroWiadomosci="wymaga", filtrAllegroDyskusji="aktywne", filtrAllegroRentownosc="kompletne", sortAllegroWiadomosci="najnowsze", sortAllegroDyskusje="najnowsze", sortAllegroRentownosc="marza_rosnaco", allegroDocelowaMarza=20, allegroJednostkiOplatCyklicznych=10, allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=250, allegroLimitWystawiania=250, allegroLimitKomunikacji=50;
+let infaktStan={sprawdzono:false,ladowanie:false,invoicesLoaded:false,configured:false,connected:false,env:"production",error:"",links:{},updated_at:null};
+let infaktFaktury=[],szukajInfakt="",filtrInfakt="wszystkie",infaktLimit=50;
 
 /* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
    Ustawienia sklepu, zamówienia i klienci są zapisywane na serwerze, więc są
@@ -1219,6 +1221,34 @@ function zbudujProdukty(){
     .map(p => stanyProduktow[p.id]!==undefined ? {...p, stan:+stanyProduktow[p.id]} : p)
     .filter(p => !ukryteKat.includes(p.kategoria))
     .filter(p => !produktOznaczonyNiedostepny(p));
+  produkty=filtrujDuplikatySklepu(produkty);
+}
+function kluczDuplikatuProduktu(v){return String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/ł/g,"l").replace(/[^a-z0-9]+/g,"");}
+function kluczeDuplikatuProduktu(p={}){
+  const out=[];const add=(typ,v)=>{const k=kluczDuplikatuProduktu(v);if(k)out.push(`${typ}:${k}`);};
+  add("external",p.externalId);add("sku",p.sku);add("ean",p.gtin||p.ean);add("mpn",p.kodProducenta||p.mpn);
+  if(!out.length&&p.nazwa)add("nazwa",`${p.producent||p.marka||""}:${p.nazwa}`);
+  return [...new Set(out)];
+}
+function kompletnoscProduktuDlaDuplikatu(p={}){return [p.externalId,p.sku,p.gtin||p.ean,p.kodProducenta||p.mpn,p.producent||p.marka,p.zdjecie,p.opis,p.cena>0].filter(Boolean).length;}
+function audytDuplikatowSklepu(lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p))){
+  const items=(Array.isArray(lista)?lista:[]).filter(p=>p&&p.id!==undefined),byId=new Map(items.map(p=>[String(p.id),p])),parent=new Map(items.map(p=>[String(p.id),String(p.id)])),owner=new Map(),shared=new Map();
+  const find=id=>{let x=String(id);while(parent.get(x)!==x){parent.set(x,parent.get(parent.get(x)));x=parent.get(x);}return x;};
+  const union=(a,b,key)=>{let ra=find(a),rb=find(b);if(ra!==rb)parent.set(rb,ra);if(!shared.has(key))shared.set(key,new Set());shared.get(key).add(String(a));shared.get(key).add(String(b));};
+  items.forEach(p=>kluczeDuplikatuProduktu(p).forEach(key=>{if(owner.has(key))union(p.id,owner.get(key),key);else owner.set(key,String(p.id));}));
+  const groups=new Map();items.forEach(p=>{const root=find(p.id);if(!groups.has(root))groups.set(root,[]);groups.get(root).push(p);});
+  const choices=ustawienia.kanoniczneDuplikatySklepu&&typeof ustawienia.kanoniczneDuplikatySklepu==="object"?ustawienia.kanoniczneDuplikatySklepu:{};
+  const wynik=[...groups.values()].filter(g=>g.length>1).map(group=>{
+    const ids=new Set(group.map(p=>String(p.id))),keys=[...shared.entries()].filter(([,set])=>[...set].some(id=>ids.has(id))).map(([key])=>key).sort(),groupKey=keys[0]||`ids:${[...ids].sort().join("-")}`;
+    const selected=group.find(p=>String(p.id)===String(choices[groupKey]||""));
+    const canonical=selected||[...group].sort((a,b)=>kompletnoscProduktuDlaDuplikatu(b)-kompletnoscProduktuDlaDuplikatu(a)||String(a.externalId||a.sku||a.gtin||a.id).localeCompare(String(b.externalId||b.sku||b.gtin||b.id),"pl",{numeric:true})||Number(a.id)-Number(b.id))[0];
+    return {groupKey,keys,produkty:group,canonical,hidden:group.filter(p=>String(p.id)!==String(canonical.id))};
+  });
+  return {grupy:wynik,produkty:wynik.reduce((s,g)=>s+g.produkty.length,0),ukryte:wynik.reduce((s,g)=>s+g.hidden.length,0),hiddenIds:new Set(wynik.flatMap(g=>g.hidden.map(p=>String(p.id))))};
+}
+function filtrujDuplikatySklepu(lista=[]){const audit=audytDuplikatowSklepu(lista);return lista.filter(p=>!audit.hiddenIds.has(String(p.id)));}
+function ustawProduktGlownyDuplikatu(groupKey,productId){
+  ustawienia={...ustawienia,kanoniczneDuplikatySklepu:{...(ustawienia.kanoniczneDuplikatySklepu||{}),[String(groupKey)]:String(productId)}};zapiszLS("artway_ustawienia",ustawienia);zbudujProdukty();odswiezMenu();toast("Ustawiono główną kartę produktu — pozostałe kopie są ukryte w sklepie");renderuj();
 }
 /* ── Magazyn ── */
 const LIMIT_POTWIERDZENIA_DOSTEPNOSCI = 5;
@@ -1299,8 +1329,6 @@ function ustawieniaMagazynuPelne(){
     progNiskiProducenta:50,
     producentProbka:8,
     producentMaxWiekGodz:48,
-    infaktTryb:"szkice",
-    infaktUwagi:"Faktury są przygotowywane jako szkice do przyszłej integracji API.",
     ...(ustawieniaMagazynu||{})
   };
 }
@@ -1884,6 +1912,8 @@ function renderuj(){
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
       else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn("pulpit");
       else if(t.startsWith("/admin/magazyn/")) w.innerHTML = widokAdminMagazyn(t.split("/")[3]||"pulpit");
+      else if(t==="/admin/infakt") w.innerHTML = widokAdminInfakt("pulpit");
+      else if(t.startsWith("/admin/infakt/")) w.innerHTML = widokAdminInfakt(t.split("/")[3]||"pulpit");
       else if(t==="/admin/agent-ai") w.innerHTML = widokAdminAgentAI("pulpit");
       else if(t.startsWith("/admin/agent-ai/")) w.innerHTML = widokAdminAgentAI(t.split("/")[3]||"pulpit");
       else if(t.startsWith("/admin/asortyment/")){
@@ -2856,6 +2886,7 @@ const MENU_ADMINA = [
   ["/admin/allegro","🟠 Allegro"],
   ["/admin/wysylki","🚚 Centrum wysyłek"],
   ["/admin/magazyn","🏬 Magazyn"],
+  ["/admin/infakt","🧾 inFakt i faktury"],
   ["/admin/agent-ai","🤖 Agent AI"],
   ["/admin/asortyment","🏷️ Asortyment"],
   ["/admin/klienci","👥 Klienci"],
@@ -2869,6 +2900,7 @@ function adminSzkielet(aktywna, tresc){
     "/admin/allegro": (Array.isArray(allegroZamowienia) ? allegroZamowienia.filter(statusAllegroRezerwujeMagazyn).length : 0) + (allegroKomunikacjaStaty?.().totalNeed||0),
     "/admin/wysylki": pobierzZamowienia().filter(z=>!["anulowane","dostarczone","zakończone"].includes(z.status)&&!z.wysylka?.numer).length,
     "/admin/magazyn": produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{const s=stanMagazynuId(p.id),prog=Number(ustawieniaMagazynuPelne().progNiski)||5;return s!==null&&s<=prog;}).length,
+    "/admin/infakt": pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane"&&(z.klient?.nip||z.klient?.firma)&&!infaktStan.links?.[z.nr]&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length,
     "/admin/agent-ai": agentAIAnaliza().filter(x=>x.poziom!=="ok").length,
     "/admin/asortyment": opinie.filter(o=>o.status==="oczekuje").length
   };
@@ -6603,7 +6635,16 @@ function magazynSubnavHTML(aktywny="pulpit"){
     {id:"stany",href:"#/admin/magazyn/stany",label:"📦 Stany produktów",badge:produktyAktywne.length},
     {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",label:"🗺️ Lokalizacje",badge:bezLok||""},
     {id:"plan",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:braki||""},
-    {id:"ruchy",href:"#/admin/magazyn/ruchy",label:"🧾 Ruchy / FV / ustawienia",badge:ruchy||""}
+    {id:"ruchy",href:"#/admin/magazyn/ruchy",label:"🧾 Ruchy i ustawienia",badge:ruchy||""}
+  ],aktywny);
+}
+function infaktSubnavHTML(aktywny="pulpit"){
+  return adminSubnavHTML([
+    {id:"pulpit",label:"📊 Pulpit",href:"#/admin/infakt"},
+    {id:"zamowienia",label:"📦 Zamówienia do faktury",href:"#/admin/infakt/zamowienia"},
+    {id:"faktury",label:"🧾 Faktury inFakt",href:"#/admin/infakt/faktury"},
+    {id:"szkice",label:"📝 Szkice robocze",href:"#/admin/infakt/szkice"},
+    {id:"ustawienia",label:"⚙️ Integracja i KSeF",href:"#/admin/infakt/ustawienia"},
   ],aktywny);
 }
 function agentAISubnavHTML(aktywny="pulpit"){
@@ -7515,7 +7556,7 @@ function usunKlienta(email){
 }
 let szukajProduktow = "", filtrProduktow = "Wszystkie", kategoriaNowegoProduktu = "";
 let filtrStatusuProduktow = "wszystkie", filtrZrodlaProduktow = "wszystkie", filtrStanuProduktow = "wszystkie", filtrAllegroProduktow = "wszystkie";
-let sortowanieAdminProduktow = "id";
+let sortowanieAdminProduktow = ["external","id","nazwa","cena-rosnaco","cena-malejaco","stan"].includes(wczytajLS("artway_produkty_sortowanie_admin","external"))?wczytajLS("artway_produkty_sortowanie_admin","external"):"external";
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
 let frazaMagazynu="", filtrMagazynu="wszystkie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="alerty";
@@ -7550,8 +7591,13 @@ function ustawProduktyNaStronieAdmin(n){
   zapiszLS("artway_produkty_na_stronie_admin",produktyNaStronieAdmin);
   renderuj();
 }
+function ustawSortowanieAdminProduktow(v){sortowanieAdminProduktow=String(v||"external");stronaAdminProduktow=1;zapiszLS("artway_produkty_sortowanie_admin",sortowanieAdminProduktow);renderuj();}
 function sortujProduktyAdmin(lista){
   return [...lista].sort((a,b)=>{
+    if(sortowanieAdminProduktow==="external"){
+      const aa=String(a.externalId||a.sku||a.gtin||a.ean||"").trim(),bb=String(b.externalId||b.sku||b.gtin||b.ean||"").trim();
+      if(!aa&&!bb)return Number(a.id)-Number(b.id);if(!aa)return 1;if(!bb)return -1;return aa.localeCompare(bb,"pl",{numeric:true,sensitivity:"base"})||Number(a.id)-Number(b.id);
+    }
     if(sortowanieAdminProduktow==="nazwa") return a.nazwa.localeCompare(b.nazwa,"pl");
     if(sortowanieAdminProduktow==="cena-rosnaco") return a.cena-b.cena;
     if(sortowanieAdminProduktow==="cena-malejaco") return b.cena-a.cena;
@@ -7746,9 +7792,7 @@ function zapiszUstawieniaMagazynu(e){
     domyslnyZapasDni:Math.max(7,parseInt(f.get("domyslnyZapasDni"),10)||21),
     progNiskiProducenta:Math.max(1,parseInt(f.get("progNiskiProducenta"),10)||50),
     producentProbka:Math.max(1,Math.min(25,parseInt(f.get("producentProbka"),10)||8)),
-    producentMaxWiekGodz:Math.max(1,parseInt(f.get("producentMaxWiekGodz"),10)||48),
-    infaktTryb:String(f.get("infaktTryb")||"szkice"),
-    infaktUwagi:String(f.get("infaktUwagi")||"").trim()
+    producentMaxWiekGodz:Math.max(1,parseInt(f.get("producentMaxWiekGodz"),10)||48)
   };
   zapiszLS("artway_magazyn_ustawienia",ustawieniaMagazynu);
   if(chmuraToken)void chmuraZapiszUstawienia();
@@ -7853,6 +7897,48 @@ function zmienStatusSzkicuFaktury(id,status){
 function eksportujSzkiceFakturJSON(){
   pobierzPlik("szkice-faktur-infakt.json",JSON.stringify(szkiceFaktur,null,2),"application/json");
 }
+async function infaktLaduj(cicho=false,pobierzFaktury=false){
+  if(infaktStan.ladowanie)return;infaktStan={...infaktStan,ladowanie:true};
+  try{
+    const d=await chmura("infakt-status",{params:{verify:1},timeout:30000});
+    infaktStan={...infaktStan,...(d.config||{}),sprawdzono:true,ladowanie:false,connected:d.connection?.ok===true,connection:d.connection||null,links:d.links||{},updated_at:d.updated_at||null,error:d.connection?.ok===false?d.connection.error||"Błąd połączenia":""};
+    if(pobierzFaktury&&infaktStan.configured){const f=await chmura("infakt-invoices",{params:{limit:infaktLimit,offset:0},timeout:45000});infaktFaktury=Array.isArray(f.invoices)?f.invoices:[];infaktStan={...infaktStan,invoicesLoaded:true,metainfo:f.metainfo||{}};}
+    if(!cicho)toast(infaktStan.connected?"Połączenie z inFakt działa ✅":infaktStan.configured?"⚠️ Klucz inFakt wymaga sprawdzenia":"Dodaj klucz API inFakt po stronie serwera");
+  }catch(e){infaktStan={...infaktStan,sprawdzono:true,ladowanie:false,connected:false,error:e.message||String(e)};if(!cicho)toast("⚠️ inFakt: "+infaktStan.error);}
+  renderuj();
+}
+async function infaktUtworzFakture(orderNumber,{sendToKsef=false,paid=false}={}){
+  if(sendToKsef&&!confirm(`Utworzyć fakturę dla ${orderNumber} i automatycznie wysłać ją do KSeF? To jest operacja zewnętrzna.`))return;
+  try{toast(sendToKsef?"Tworzę fakturę i przekazuję ją do KSeF…":"Przekazuję szkic faktury do inFakt…");const d=await chmura("infakt-create-invoice",{method:"POST",body:{orderNumber,sendToKsef,status:paid?"paid":"draft"},timeout:60000});if(d.link)infaktStan.links={...(infaktStan.links||{}),[orderNumber]:d.link};toast(d.duplicatePrevented?"Faktura dla tego zamówienia już istnieje — nie utworzono duplikatu":`Zadanie inFakt przyjęte: ${d.link?.taskReference||"oczekuje"}`);renderuj();}catch(e){toast("⚠️ Wystawianie inFakt: "+(e.message||e));}
+}
+async function infaktSynchronizuj(){
+  try{toast("Sprawdzam zadania i faktury inFakt…");const d=await chmura("infakt-sync",{method:"POST",body:{},timeout:60000});infaktStan.links=d.links||infaktStan.links;await infaktLaduj(true,true);toast(`inFakt zsynchronizowany • sprawdzono ${d.results?.length||0} zadań`);}catch(e){toast("⚠️ Synchronizacja inFakt: "+(e.message||e));}
+}
+async function infaktPobierzPDF(uuid){
+  if(!uuid){toast("Faktura nie ma jeszcze UUID");return;}try{const url=new URL(CHMURA_URL,location.href);url.searchParams.set("action","infakt-invoice-pdf");url.searchParams.set("uuid",uuid);const r=await fetch(url,{headers:chmuraNaglowki(false)});if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||`HTTP ${r.status}`);}const blob=await r.blob(),href=URL.createObjectURL(blob);window.open(href,"_blank","noopener");setTimeout(()=>URL.revokeObjectURL(href),60000);}catch(e){toast("⚠️ PDF inFakt: "+(e.message||e));}
+}
+async function infaktOznaczOplacona(uuid){
+  if(!uuid||!confirm("Oznaczyć tę fakturę jako opłaconą w inFakt?"))return;try{await chmura("infakt-mark-paid",{method:"POST",body:{uuid,paidDate:new Date().toISOString().slice(0,10)},timeout:30000});toast("Zlecenie oznaczenia jako opłacona przyjęte");await infaktLaduj(true,true);}catch(e){toast("⚠️ inFakt: "+(e.message||e));}
+}
+function infaktStatusLinkuHTML(link={}){const s=String(link.status||"brak");return s==="created"?`<span class="lvl lvl-ok">wystawiona ${esc(link.invoiceNumber||"")}</span>`:s==="processing"?`<span class="lvl lvl-info">przetwarzanie</span>`:s==="error"?`<span class="lvl lvl-blad">błąd</span>`:`<span class="lvl lvl-ostrzezenie">brak faktury</span>`;}
+function infaktKwota(v){return zl((Number(v)||0)/100);}
+function widokAdminInfakt(sekcja="pulpit"){
+  const aktywna=["pulpit","zamowienia","faktury","szkice","ustawienia"].includes(sekcja)?sekcja:"pulpit";
+  if((!infaktStan.sprawdzono||((aktywna==="faktury"||aktywna==="pulpit")&&infaktStan.configured&&!infaktStan.invoicesLoaded))&&!infaktStan.ladowanie)setTimeout(()=>infaktLaduj(true,aktywna==="faktury"||aktywna==="pulpit"),0);
+  const orders=pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane").sort((a,b)=>(Number(b.ts)||0)-(Number(a.ts)||0));
+  const linked=infaktStan.links||{},company=orders.filter(z=>z.klient?.nip||z.klient?.firma),missing=company.filter(z=>!linked[z.nr]&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr));
+  const pending=Object.values(linked).filter(x=>x.status==="processing"),created=Object.values(linked).filter(x=>x.status==="created"),errors=Object.values(linked).filter(x=>x.status==="error");
+  const query=String(szukajInfakt||"").toLowerCase().trim();let invoices=infaktFaktury.filter(f=>!query||`${f.number||""} ${f.client_company_name||""} ${f.client_first_name||""} ${f.client_last_name||""} ${f.client_tax_code||""}`.toLowerCase().includes(query));if(filtrInfakt!=="wszystkie")invoices=invoices.filter(f=>String(f.status||"")===filtrInfakt);
+  const connection=infaktStan.connected?`<span class="lvl lvl-ok">API połączone • ${esc(infaktStan.env)}</span>`:infaktStan.configured?`<span class="lvl lvl-blad">błąd połączenia</span>`:`<span class="lvl lvl-ostrzezenie">brak INFAKT_API_KEY</span>`;
+  const hero=`${infaktSubnavHTML(aktywna)}<div class="panel infakt-hero"><div class="order-section-head"><div><span class="order-pro-label">Finanse i dokumenty sprzedaży</span><h1>🧾 inFakt i faktury</h1><p class="order-detail-lead">Oddzielny obieg: zamówienie → szkic → asynchroniczne utworzenie w inFakt → status → PDF, płatność i opcjonalny KSeF. Idempotencja blokuje drugą fakturę dla tego samego zamówienia.</p></div><div class="diag-actions">${connection}<button class="btn ghost" onclick="infaktLaduj(false,true)">↻ Sprawdź API</button>${infaktStan.configured?`<button class="btn" onclick="infaktSynchronizuj()">🔄 Synchronizuj</button>`:""}</div></div>${aktywna==="pulpit"?`<div class="orders-stat-grid"><div class="order-stat-card ${missing.length?"hot":"money"}"><span>📦</span><b>${missing.length}</b><small>firmowych bez dokumentu</small></div><div class="order-stat-card"><span>⏳</span><b>${pending.length}</b><small>zadań w toku</small></div><div class="order-stat-card money"><span>✅</span><b>${created.length}</b><small>wystawionych</small></div><div class="order-stat-card ${errors.length?"hot":""}"><span>⚠️</span><b>${errors.length}</b><small>błędów</small></div><div class="order-stat-card"><span>📝</span><b>${szkiceFaktur.length}</b><small>szkiców lokalnych</small></div></div>`:""}</div>`;
+  const orderRows=orders.filter(z=>{const text=`${z.nr||""} ${z.email||""} ${z.klient?.firma||""} ${z.klient?.nip||""}`.toLowerCase();return !query||text.includes(query);}).slice(0,200);
+  const ordersPanel=`<div class="panel infakt-panel"><div class="order-section-head"><div><h2>📦 Zamówienia do faktury</h2><p class="order-detail-lead">Faktura jest tworzona z autorytatywnego zamówienia na serwerze. Kwoty pozycji przekazujemy brutto w groszach, a inFakt wylicza netto i VAT.</p></div><input placeholder="Szukaj numeru, klienta lub NIP…" value="${esc(szukajInfakt)}" oninput="szukajInfakt=this.value;renderuj()"></div><div class="infakt-order-list">${orderRows.map(z=>{const link=linked[z.nr],draft=szkiceFaktur.find(f=>f.nrZamowienia===z.nr),firm=!!(z.klient?.nip||z.klient?.firma);return `<article class="infakt-order-card"><div><b>${esc(z.nr)}</b><small>${esc(z.klient?.firma||z.email||"Klient")} ${z.klient?.nip?`• NIP ${esc(z.klient.nip)}`:""}</small><small>${esc(z.data||"")} • ${zl(kosztyZamowienia(z).razem)} • ${firm?"faktura firmowa":"osoba prywatna"}</small></div><div>${infaktStatusLinkuHTML(link||{})}${draft?` <span class="lvl lvl-info">szkic lokalny</span>`:""}</div><div class="diag-actions"><a class="btn ghost" href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">Zamówienie</a><button class="btn ghost" onclick="utworzSzkicFaktury(${jsArg(z.nr)})">${draft?"Odśwież szkic":"Szkic lokalny"}</button>${infaktStan.configured&&!link?`<button class="btn" onclick="infaktUtworzFakture(${jsArg(z.nr)})">Wystaw w inFakt</button><button class="btn ghost" onclick="infaktUtworzFakture(${jsArg(z.nr)},{sendToKsef:true})">inFakt + KSeF</button>`:""}${link?.invoiceUuid?`<button class="btn ghost" onclick="infaktPobierzPDF(${jsArg(link.invoiceUuid)})">PDF</button>`:""}</div></article>`;}).join("")||`<div class="backend-note">Brak zamówień pasujących do wyszukiwania.</div>`}</div></div>`;
+  const invoicesPanel=`<div class="panel infakt-panel"><div class="order-section-head"><div><h2>🧾 Faktury pobrane z inFakt</h2><p class="order-detail-lead">Lista pochodzi bezpośrednio z API inFakt. PDF jest pobierany przez bezpieczny serwer — klucz API nie trafia do przeglądarki.</p></div><div class="diag-actions"><input placeholder="Numer, klient, NIP…" value="${esc(szukajInfakt)}" oninput="szukajInfakt=this.value;renderuj()"><select onchange="filtrInfakt=this.value;renderuj()">${[["wszystkie","Wszystkie"],["draft","Szkice"],["sent","Wysłane"],["printed","Wydrukowane"],["paid","Opłacone"]].map(([v,l])=>`<option value="${v}" ${filtrInfakt===v?"selected":""}>${l}</option>`).join("")}</select></div></div>${infaktStan.configured?`<div style="overflow:auto"><table class="log-table"><tr><th>Numer</th><th>Data</th><th>Kontrahent</th><th>Brutto</th><th>Status</th><th>KSeF</th><th>Akcje</th></tr>${invoices.map(f=>`<tr><td><b>${esc(f.number||"—")}</b><br><small>${esc(f.uuid||"")}</small></td><td>${esc(f.invoice_date||"—")}</td><td>${esc(f.client_company_name||`${f.client_first_name||""} ${f.client_last_name||""}`.trim()||"—")}<br><small>${esc(f.client_tax_code||"")}</small></td><td>${infaktKwota(f.gross_price)} ${esc(f.currency||"PLN")}</td><td><span class="lvl ${f.status==="paid"?"lvl-ok":"lvl-info"}">${esc(f.status||"—")}</span></td><td>${f.ksef_number?`<span class="lvl lvl-ok">${esc(f.ksef_number)}</span>`:`<span class="lvl lvl-info">${esc(f.ksef_data?.status||"nie wysłano")}</span>`}</td><td><button class="btn ghost" onclick="infaktPobierzPDF(${jsArg(f.uuid)})">PDF</button>${f.status!=="paid"?`<button class="btn ghost" onclick="infaktOznaczOplacona(${jsArg(f.uuid)})">Oznacz opłaconą</button>`:""}</td></tr>`).join("")||`<tr><td colspan="7">Brak faktur lub uruchom synchronizację.</td></tr>`}</table></div>`:`<div class="backend-note">Integracja oczekuje na bezpieczny klucz serwerowy <b>INFAKT_API_KEY</b>.</div>`}</div>`;
+  const draftsPanel=`<div class="panel infakt-panel"><div class="order-section-head"><div><h2>📝 Szkice robocze Artway-TM</h2><p class="order-detail-lead">Szkice można kontrolować przed wysłaniem. Usunięcie szkicu lokalnego nie usuwa dokumentu utworzonego już w inFakt.</p></div><button class="btn ghost" onclick="eksportujSzkiceFakturJSON()">Eksport JSON</button></div><div style="overflow:auto"><table class="log-table"><tr><th>Zamówienie</th><th>Kontrahent</th><th>Pozycje</th><th>Brutto</th><th>Status</th><th>Akcje</th></tr>${szkiceFaktur.map(f=>`<tr><td><b>${esc(f.nrZamowienia)}</b><br><small>${esc(f.dataTxt||"")}</small></td><td>${esc(f.kontrahent?.nazwa||"—")}<br><small>${esc(f.kontrahent?.nip||"")}</small></td><td>${esc(f.pozycje?.length||0)}</td><td>${zl(f.sumaBrutto)}</td><td>${infaktStatusLinkuHTML(linked[f.nrZamowienia]||{})}</td><td><button class="btn ghost" onclick="infaktUtworzFakture(${jsArg(f.nrZamowienia)})" ${infaktStan.configured&&!linked[f.nrZamowienia]?"":"disabled"}>Wyślij do inFakt</button><button class="btn danger" onclick="if(confirm('Usunąć tylko lokalny szkic?'))usunSzkicFaktury(${jsArg(f.id)})">Usuń szkic</button></td></tr>`).join("")||`<tr><td colspan="6">Brak szkiców.</td></tr>`}</table></div></div>`;
+  const settingsPanel=`<div class="panel infakt-panel"><div class="order-section-head"><div><h2>⚙️ Integracja inFakt i KSeF</h2><p class="order-detail-lead">Klucz nigdy nie jest zapisywany w HTML ani pamięci przeglądarki. Ustaw go jako zmienną środowiskową Netlify.</p></div>${connection}</div><div class="info-grid"><div class="info-card"><b>Środowisko</b><p>${esc(infaktStan.env||"production")}</p></div><div class="info-card"><b>Wymagane zakresy klucza</b><p><code>api:invoices:read</code><br><code>api:invoices:write</code></p></div><div class="info-card"><b>Zmienna serwerowa</b><p><code>INFAKT_API_KEY</code></p></div><div class="info-card"><b>KSeF</b><p>Domyślnie wyłączony; wysyłka wymaga osobnego potwierdzenia przy dokumencie.</p></div></div>${infaktStan.error?`<div class="backend-note" style="border-color:#fecaca;color:#991b1b"><b>Błąd:</b> ${esc(infaktStan.error)}</div>`:""}<div class="backend-note"><b>Bezpieczny proces:</b> system najpierw tworzy fakturę asynchronicznie jako szkic, zapisuje referencję zadania, sprawdza kod przetwarzania 100/120/140/201/422 i dopiero po otrzymaniu UUID udostępnia PDF oraz operację oznaczenia płatności.</div></div>`;
+  const content=aktywna==="zamowienia"?ordersPanel:aktywna==="faktury"?invoicesPanel:aktywna==="szkice"?draftsPanel:aktywna==="ustawienia"?settingsPanel:`${missing.length?ordersPanel:""}${invoicesPanel}`;
+  return adminSzkielet("/admin/infakt",hero+content);
+}
 function widokAdminMagazyn(sekcja="pulpit"){
   const rez=rezerwacjeMagazynowe(), kanalySpr=sprzedazKanalyMagazynowe(30), spr=kanalySpr.razem, u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
   const aktywna=["pulpit","dostawcy","stany","lokalizacje","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
@@ -7888,7 +7974,6 @@ function widokAdminMagazyn(sekcja="pulpit"){
   const liczbaStron=Math.max(1,Math.ceil(lista.length/magazynNaStronie));
   stronaMagazynu=Math.min(Math.max(1,stronaMagazynu),liczbaStron);
   const fragment=lista.slice((stronaMagazynu-1)*magazynNaStronie,stronaMagazynu*magazynNaStronie);
-  const zamDoFV=pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane").filter(z=>z.klient?.nip||z.klient?.firma).slice(0,20);
   return adminSzkielet("/admin/magazyn", `
   ${magazynSubnavHTML(aktywna)}
   <div class="panel warehouse-hero-panel ${aktywna!=="pulpit"?"is-compact":""}">
@@ -8115,53 +8200,22 @@ function widokAdminMagazyn(sekcja="pulpit"){
         <p class="order-detail-lead">Automatyczny Agent AI co 6 godzin losuje spośród najdłużej niesprawdzanych linków. Telegram jest wysyłany tylko po pojawieniu się nowego niskiego stanu albo braku.</p>
         <div class="f-row"><div class="f-group"><label>Próg ostrzeżenia u producenta (szt.)</label><input name="progNiskiProducenta" type="number" min="1" value="${esc(u.progNiskiProducenta)}"></div><div class="f-group"><label>Wielkość wyrywkowej próbki</label><input name="producentProbka" type="number" min="1" max="25" value="${esc(u.producentProbka)}"></div></div>
         <div class="f-group"><label>Po ilu godzinach wynik uznać za nieaktualny</label><input name="producentMaxWiekGodz" type="number" min="1" value="${esc(u.producentMaxWiekGodz)}"></div>
-        <h2>🧾 inFakt / FV</h2>
-        <div class="f-group"><label>Tryb integracji</label><select name="infaktTryb"><option value="szkice" ${u.infaktTryb==="szkice"?"selected":""}>Tylko szkice w sklepie</option><option value="api" ${u.infaktTryb==="api"?"selected":""}>API inFakt po dodaniu tokenu</option></select></div>
-        <div class="f-group"><label>Uwagi do integracji</label><textarea name="infaktUwagi" rows="3">${esc(u.infaktUwagi)}</textarea></div>
         <button class="btn" type="submit">💾 Zapisz ustawienia</button>
       </form>
     </div>
   </div>
-  <div class="panel" style="${aktywna==="ruchy"?"":"display:none"}">
-    <div class="order-section-head">
-      <div><h2 style="margin-top:0">🧾 inFakt / szkice faktur</h2><p class="order-detail-lead">Na razie sklep przygotowuje komplet danych do FV. Realna wysyłka do inFakt zostanie włączona po dodaniu tokenu API na serwerze Netlify.</p></div>
-      <button class="btn ghost" onclick="eksportujSzkiceFakturJSON()">📤 Eksport szkiców JSON</button>
-    </div>
-    <div class="warehouse-columns">
-      <div>
-        <h3>Zamówienia firmowe do przygotowania</h3>
-        <table class="log-table">
-          <tr><th>Zamówienie</th><th>Klient</th><th>NIP</th><th>Kwota</th><th>Akcja</th></tr>
-          ${zamDoFV.map(z=>{
-            const ma=szkiceFaktur.some(f=>f.nrZamowienia===z.nr);
-            return `<tr><td><a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}"><b>${esc(z.nr)}</b></a></td><td>${esc(z.klient?.firma||z.email||"")}</td><td>${esc(z.klient?.nip||"—")}</td><td>${zl(kosztyZamowienia(z).razem)}</td><td><button class="btn ${ma?"ghost":""}" onclick="utworzSzkicFaktury(${jsArg(z.nr)})">${ma?"Odśwież szkic":"Utwórz szkic FV"}</button></td></tr>`;
-          }).join("") || `<tr><td colspan="5">Brak zamówień firmowych do faktury.</td></tr>`}
-        </table>
-      </div>
-      <div>
-        <h3>Szkice FV</h3>
-        <table class="log-table">
-          <tr><th>Szkic</th><th>Kontrahent</th><th>Kwota</th><th>Status</th><th></th></tr>
-          ${szkiceFaktur.slice(0,30).map(f=>`<tr>
-            <td><b>${esc(f.nrZamowienia)}</b><br><small>${esc(f.dataTxt||"")}</small></td>
-            <td>${esc(f.kontrahent?.nazwa||"")}${f.kontrahent?.nip?`<br><small>NIP ${esc(f.kontrahent.nip)}</small>`:""}</td>
-            <td>${zl(f.sumaBrutto)}</td>
-            <td><select onchange="zmienStatusSzkicuFaktury(${jsArg(f.id)},this.value)">${["szkic","do wysłania","wystawiona poza systemem","anulowana"].map(s=>`<option value="${s}" ${f.status===s?"selected":""}>${s}</option>`).join("")}</select></td>
-            <td><button class="btn danger" onclick="if(confirm('Usunąć szkic faktury?'))usunSzkicFaktury(${jsArg(f.id)})">Usuń</button></td>
-          </tr>`).join("") || `<tr><td colspan="5">Brak szkiców faktur.</td></tr>`}
-        </table>
-      </div>
-    </div>
-  </div>`);
+  `);
 }
 function widokAdminProdukty(){
   allegroLadujJesliTrzeba();
   const audytAllegro=allegroAudytDuplikatow();
+  const audytSklep=audytDuplikatowSklepu();
   let wszystkie = produktyDoAdministracji();
   if(szukajProduktow) wszystkie = wszystkie.filter(p=>produktPasujeFrazie(p,szukajProduktow));
   if(filtrProduktow!=="Wszystkie") wszystkie = wszystkie.filter(p=>p.kategoria===filtrProduktow);
   if(filtrStatusuProduktow==="aktywne") wszystkie=wszystkie.filter(p=>!czyProduktAdminWKoszu(p));
   if(filtrStatusuProduktow==="kosz") wszystkie=wszystkie.filter(p=>czyProduktAdminWKoszu(p));
+  if(filtrStatusuProduktow==="duplikaty") wszystkie=wszystkie.filter(p=>audytSklep.grupy.some(g=>g.produkty.some(x=>String(x.id)===String(p.id))));
   if(filtrZrodlaProduktow==="bazowe") wszystkie=wszystkie.filter(p=>!produktyDodane.some(x=>x.id===p.id));
   if(filtrZrodlaProduktow==="wlasne") wszystkie=wszystkie.filter(p=>produktyDodane.some(x=>x.id===p.id));
   if(filtrStanuProduktow==="dostepne") wszystkie=wszystkie.filter(p=>stanyProduktow[p.id]===undefined||Number(stanyProduktow[p.id])>0);
@@ -8194,7 +8248,9 @@ function widokAdminProdukty(){
         <div class="order-stat-card money"><span>🟠</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroOfertaDlaProduktuSklepu(p)).length}</b><small>produktów połączonych z Allegro</small></div>
         <div class="order-stat-card ${audytAllegro.produkty?"hot":"money"}"><span>${audytAllegro.produkty?"⚠️":"✅"}</span><b>${audytAllegro.produkty}</b><small>produktów z podejrzeniem duplikatu</small></div>
         <div class="order-stat-card"><span>➕</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroOfertaDlaProduktuSklepu(p)).length}</b><small>produktów bez oferty Allegro</small></div>
+        <div class="order-stat-card ${audytSklep.ukryte?"hot":"money"}"><span>${audytSklep.ukryte?"🧬":"✅"}</span><b>${audytSklep.ukryte}</b><small>kopii ukrytych w sklepie</small></div>
       </div>
+      ${audytSklep.grupy.length?`<section class="allegro-duplicate-center store-duplicate-center"><div class="order-section-head"><div><span class="order-pro-label">Kontrola katalogu sklepu</span><h3>🧬 Powtarzające się produkty (${audytSklep.grupy.length} grup)</h3><p class="order-detail-lead">W sklepie publicznym widoczna jest zawsze tylko jedna karta. Wybierz pozycję główną; pozostałe rekordy pozostają w panelu i nie są kasowane.</p></div><button class="btn ghost" onclick="filtrStatusuProduktow='duplikaty';stronaAdminProduktow=1;renderuj()">Pokaż wszystkie kopie</button></div><div class="allegro-duplicate-groups">${audytSklep.grupy.slice(0,12).map(g=>`<article class="allegro-duplicate-group"><header><div><b>${esc(g.canonical.nazwa||"Produkt")}</b><small>Wspólny klucz: ${esc(g.keys.join(" • "))}</small></div><span class="lvl lvl-ostrzezenie">${g.produkty.length} kart</span></header><div class="allegro-duplicate-options">${g.produkty.map(p=>`<button type="button" class="allegro-duplicate-option ${String(p.id)===String(g.canonical.id)?"is-canonical":""}" onclick="ustawProduktGlownyDuplikatu(${jsArg(g.groupKey)},${jsArg(p.id)})"><div class="allegro-duplicate-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa)}</b><small>ID ${esc(p.id)} • EXTERNAL_ID ${esc(p.externalId||"—")} • SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small><em>${String(p.id)===String(g.canonical.id)?"✅ widoczny w sklepie":"ukryty jako kopia"}</em></div></div></button>`).join("")}</div></article>`).join("")}</div></section>`:`<div class="duplicate-audit-ok"><b>✅ Kontrola katalogu sklepu:</b> brak powtarzających się produktów po EXTERNAL_ID, SKU, EAN i kodzie producenta.</div>`}
       ${audytAllegro.produkty?`<div class="duplicate-audit-alert"><div><b>⚠️ Kontrola Asortymentu wykryła powtarzające się oferty Allegro</b><small>${audytAllegro.produkty} produktów pasuje do ${audytAllegro.oferty} ofert. Nowe wystawienie wybierze istniejącą ofertę do aktualizacji; istniejące powtórzenia możesz sprawdzić bezpośrednio w katalogu Allegro.</small></div><button class="btn ghost" onclick="filtrAllegroProduktow='duplikaty';stronaAdminProduktow=1;renderuj()">Pokaż produkty</button><a class="btn" href="#/admin/allegro/oferty" onclick="filtrAllegroOfert='duplikaty'">Otwórz oferty</a></div>`:`<div class="duplicate-audit-ok"><b>✅ Kontrola ofert Allegro:</b> aktualny asortyment nie zawiera produktów połączonych z więcej niż jedną ofertą.</div>`}
       <div class="filter-grid" style="margin-bottom:.8rem">
         <input placeholder="Nazwa, SKU, ID, opis lub kategoria…" value="${esc(szukajProduktow)}" oninput="szukajProduktow=this.value;stronaAdminProduktow=1;renderuj()">
@@ -8206,6 +8262,7 @@ function widokAdminProdukty(){
           <option value="wszystkie" ${filtrStatusuProduktow==="wszystkie"?"selected":""}>Wszystkie statusy</option>
           <option value="aktywne" ${filtrStatusuProduktow==="aktywne"?"selected":""}>Tylko aktywne</option>
           <option value="kosz" ${filtrStatusuProduktow==="kosz"?"selected":""}>Tylko w koszu</option>
+          <option value="duplikaty" ${filtrStatusuProduktow==="duplikaty"?"selected":""}>Tylko powtarzające się (${audytSklep.produkty})</option>
         </select>
         <select onchange="filtrZrodlaProduktow=this.value;stronaAdminProduktow=1;renderuj()">
           <option value="wszystkie" ${filtrZrodlaProduktow==="wszystkie"?"selected":""}>Każde źródło</option>
@@ -8225,7 +8282,8 @@ function widokAdminProdukty(){
           <option value="brak" ${filtrAllegroProduktow==="brak"?"selected":""}>Allegro: brak oferty</option>
           <option value="duplikaty" ${filtrAllegroProduktow==="duplikaty"?"selected":""}>Allegro: podejrzane duplikaty (${audytAllegro.produkty})</option>
         </select>
-        <select onchange="sortowanieAdminProduktow=this.value;stronaAdminProduktow=1;renderuj()">
+        <select onchange="ustawSortowanieAdminProduktow(this.value)">
+          <option value="external" ${sortowanieAdminProduktow==="external"?"selected":""}>EXTERNAL_ID / SKU (domyślnie)</option>
           <option value="id" ${sortowanieAdminProduktow==="id"?"selected":""}>Sortuj: ID</option>
           <option value="nazwa" ${sortowanieAdminProduktow==="nazwa"?"selected":""}>Nazwa A–Z</option>
           <option value="cena-rosnaco" ${sortowanieAdminProduktow==="cena-rosnaco"?"selected":""}>Cena rosnąco</option>
@@ -8252,7 +8310,7 @@ function widokAdminProdukty(){
         </span>
       </div>
       <div style="overflow-x:auto"><table class="log-table">
-        <tr><th><input type="checkbox" onchange="zaznaczWidoczneProd(this, [${fragment.map(p=>p.id).join(",")}])" style="width:16px;height:16px" title="Zaznacz produkty na tej stronie"></th><th>ID</th><th>Miniatura</th><th>Produkt</th><th>Producent</th><th>Kategoria</th><th>Cena (kliknij, by zmienić)</th><th>Promocja</th><th>Magazyn</th><th>Sprzedaż</th><th>Allegro</th><th>Akcje</th></tr>
+        <tr><th><input type="checkbox" onchange="zaznaczWidoczneProd(this, [${fragment.map(p=>p.id).join(",")}])" style="width:16px;height:16px" title="Zaznacz produkty na tej stronie"></th><th>ID</th><th>EXTERNAL_ID</th><th>Miniatura</th><th>Produkt</th><th>Producent</th><th>Kategoria</th><th>Cena (kliknij, by zmienić)</th><th>Promocja</th><th>Magazyn</th><th>Sprzedaż</th><th>Allegro</th><th>Akcje</th></tr>
         ${fragment.map(p=>{
           const dodany = jestProduktemDodanym(p.id);
           const ukryty = czyProduktAdminWKoszu(p);
@@ -8260,6 +8318,7 @@ function widokAdminProdukty(){
           return `<tr style="${ukryty?'opacity:.45':''}">
           <td><input type="checkbox" ${zaznaczoneProdukty.has(p.id)?"checked":""} onchange="przelaczZaznProd(${p.id})" style="width:16px;height:16px"></td>
           <td>${p.id}</td>
+          <td><b>${esc(p.externalId||p.sku||"—")}</b>${audytSklep.hiddenIds.has(String(p.id))?`<br><span class="lvl lvl-ostrzezenie">ukryta kopia</span>`:""}</td>
           <td><span class="admin-product-thumb">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="admin-product-thumb-fallback" style="display:none">${esc(p.ikona||"📦")}</span>`:`<span class="admin-product-thumb-fallback">${esc(p.ikona||"📦")}</span>`}</span></td>
           <td>${p.ikona||"📦"} <b>${esc(p.nazwa)}</b>${dodany?' <span class="lvl lvl-info">dodany</span>':""}${edytowany?' <span class="lvl lvl-info">edytowany</span>':""}${ukryty?' <span class="lvl lvl-ostrzezenie">usunięty</span>':""}</td>
           <td><b>${esc(p.producent||p.marka||"—")}</b></td>
