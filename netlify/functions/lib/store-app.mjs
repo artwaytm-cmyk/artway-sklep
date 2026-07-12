@@ -4407,16 +4407,17 @@ export default async (req) => {
           const text = await response.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
           if (!response.ok || data?.ok === false) throw new Error(tekst(data?.error || data?.message || `HTTP ${response.status}`, 500));
           const count = area === 'allegro-orders'
-            ? Number(data?.fetched ?? data?.agent?.reviewed ?? 0) || 0
+            ? (Number(data?.imported_new || 0) + Number(data?.refreshed || 0))
             : area === 'inpost'
               ? Number(data?.sprawdzone ?? data?.zmienione ?? 0) || 0
               : Number(data?.results?.length ?? data?.purchaseSync?.processedDocuments ?? data?.processed ?? 0) || 0;
-          return { area, label: definition.label, status: 'completed', count, durationMs: Date.now() - started };
+          return { area, label: definition.label, status: 'completed', count, scanned: area === 'allegro-orders' ? Number(data?.fetched || 0) : count, newItems: area === 'allegro-orders' ? Number(data?.imported_new || 0) : 0, refreshed: area === 'allegro-orders' ? Number(data?.refreshed || 0) : 0, durationMs: Date.now() - started };
         } catch (error) {
           return { area, label: definition.label, status: 'error', error: tekst(error?.message || error, 500), durationMs: Date.now() - started };
         }
       }));
-      const center = await agentCentrumOperacyjne(), run = { id: crypto.randomUUID(), source: tekst(body.source || 'admin-panel', 80), startedAt, completedAt: new Date().toISOString(), results, scoreAfter: center.score };
+      const center = await agentCentrumOperacyjne(); results.forEach((result) => { if (result.area === 'allegro-orders') result.active = Number(center.summary?.activeAllegro || 0); });
+      const run = { id: crypto.randomUUID(), source: tekst(body.source || 'admin-panel', 80), startedAt, completedAt: new Date().toISOString(), results, scoreAfter: center.score };
       const history = await czytaj('agent_action_runs', { items: [] }); history.items = [run, ...(Array.isArray(history.items) ? history.items : [])].slice(0, 100); history.updated_at = run.completedAt; await zapisz('agent_action_runs', history);
       return odpowiedz({ ok: true, allCompleted: results.every((x) => x.status === 'completed'), run, center });
     }
