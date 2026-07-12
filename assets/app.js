@@ -267,7 +267,7 @@ let allegroOstatniBladWystawienia = null;
 let allegroOstatniWynikWystawienia = null;
 let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoCorrections:true,updated_at:null}};
 let allegroOperacjaUstawien = {busy:false,done:0,total:0,stockUpdated:0,stockFailed:0,republishUpdated:0,republishFailed:0,error:""};
-let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", szukajAllegroWiadomosci="", szukajAllegroDyskusji="", filtrAllegroZamowien="do_obslugi", filtrEtapuAllegroZamowien="wszystkie", filtrAllegroOfert="wszystkie", filtrAllegroWystawiania="wszystkie", filtrAllegroWiadomosci="wymaga", filtrAllegroDyskusji="aktywne", sortAllegroWiadomosci="najnowsze", sortAllegroDyskusje="najnowsze", allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=250, allegroLimitWystawiania=250, allegroLimitKomunikacji=50;
+let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", szukajAllegroWiadomosci="", szukajAllegroDyskusji="", szukajAllegroRentownosc="", filtrAllegroZamowien="do_obslugi", filtrEtapuAllegroZamowien="wszystkie", filtrAllegroOfert="wszystkie", filtrAllegroWystawiania="wszystkie", filtrAllegroWiadomosci="wymaga", filtrAllegroDyskusji="aktywne", filtrAllegroRentownosc="kompletne", sortAllegroWiadomosci="najnowsze", sortAllegroDyskusje="najnowsze", sortAllegroRentownosc="marza_rosnaco", allegroDocelowaMarza=20, allegroJednostkiOplatCyklicznych=10, allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=250, allegroLimitWystawiania=250, allegroLimitKomunikacji=50;
 
 /* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
    Ustawienia sklepu, zamówienia i klienci są zapisywane na serwerze, więc są
@@ -346,7 +346,7 @@ function filtrujAktywneZamowienia(lista){
 }
 function zbierzWspolneUstawienia(){
   const katalogAllegro=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>({
-    id:p.id,nazwa:p.nazwa||"",sku:p.sku||"",externalId:p.externalId||"",gtin:p.gtin||p.ean||"",ean:p.ean||p.gtin||"",kodProducenta:p.kodProducenta||p.mpn||"",mpn:p.mpn||p.kodProducenta||"",producent:p.producent||p.marka||"",marka:p.marka||p.producent||"",cena:p.cena||0,cenaAllegro:p.cenaAllegro||0,cenaZakupu:p.cenaZakupu||0
+    id:p.id,nazwa:p.nazwa||"",sku:p.sku||"",externalId:p.externalId||"",gtin:p.gtin||p.ean||"",ean:p.ean||p.gtin||"",kodProducenta:p.kodProducenta||p.mpn||"",mpn:p.mpn||p.kodProducenta||"",producent:p.producent||p.marka||"",marka:p.marka||p.producent||"",cena:p.cena||0,cenaAllegro:p.cenaAllegro||0,cenaZakupu:p.cenaZakupu||0,allegroCommissionAmount:p.allegroCommissionAmount||0,allegroCommissionRate:p.allegroCommissionRate||0,allegroRecurringFees:p.allegroRecurringFees||0,allegroFeeCalculatedAt:p.allegroFeeCalculatedAt||""
   }));
   return {
     artway_ustawienia: ustawienia,
@@ -1801,6 +1801,7 @@ function renderuj(){
       else if(t==="/admin/allegro/zamowienia") w.innerHTML = widokAdminAllegro("zamowienia");
       else if(t==="/admin/allegro/oferty") w.innerHTML = widokAdminAllegro("oferty");
       else if(t==="/admin/allegro/wystawianie") w.innerHTML = widokAdminAllegro("wystawianie");
+      else if(t==="/admin/allegro/rentownosc") w.innerHTML = widokAdminAllegro("rentownosc");
       else if(t==="/admin/allegro/komunikacja" || t==="/admin/allegro/wiadomosci") w.innerHTML = widokAdminAllegro("wiadomosci");
       else if(t==="/admin/allegro/dyskusje") w.innerHTML = widokAdminAllegro("dyskusje");
       else if(t==="/admin/allegro/ustawienia") w.innerHTML = widokAdminAllegro("ustawienia");
@@ -5505,7 +5506,7 @@ function produktRoboczyAllegroZFormularza(form,id,poprzedni={}){
   const cenaAllegro=parseFloat(String(fd.get("cenaAllegro")||poprzedni.cenaAllegro||"0").replace(",","."));
   const cenaZakupu=parseFloat(String(fd.get("cenaZakupu")||poprzedni.cenaZakupu||"0").replace(",","."));
   const p={...poprzedni,id,nazwa:String(fd.get("nazwa")||poprzedni.nazwa||"").trim(),kategoria:String(fd.get("kategoria")||poprzedni.kategoria||"").trim(),cena:Number.isFinite(cena)?cena:0,...(cenaAllegro>0?{cenaAllegro:+cenaAllegro.toFixed(2)}:{}),...(cenaZakupu>=0&&String(fd.get("cenaZakupu")||"").trim()?{cenaZakupu:+cenaZakupu.toFixed(2)}:{}),opisKrotki:String(fd.get("opisKrotki")||poprzedni.opisKrotki||"").trim(),opis:String(fd.get("opis")||poprzedni.opis||"").trim()};
-  for(const [pole,nazwa] of [["gtin","gtin"],["ean","gtin"],["externalId","externalId"],["mpn","mpn"],["producent","producent"],["marka","marka"],["kodProducenta","kodProducenta"],["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroCategoryPhrase","allegroCategoryPhrase"],["sourceUrl","sourceUrl"],["producentUrl","producentUrl"]]){
+  for(const [pole,nazwa] of [["gtin","gtin"],["ean","gtin"],["externalId","externalId"],["mpn","mpn"],["producent","producent"],["marka","marka"],["kodProducenta","kodProducenta"],["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroOfferId","allegroOfferId"],["allegroCategoryPhrase","allegroCategoryPhrase"],["sourceUrl","sourceUrl"],["producentUrl","producentUrl"]]){
     const v=String(fd.get(nazwa)||poprzedni[pole]||"").trim();
     if(v)p[pole]=v;
   }
@@ -5700,6 +5701,7 @@ async function allegroWystawProdukt(id){
       produktyEdytowane[id]={...(produktyEdytowane[id]||{}),allegroOfferId:String(d.offer.id),...(selectedCat?{allegroCategoryId:String(selectedCat)}:{}),...(d.catalogMatch?.selected?.id?{allegroProductId:String(d.catalogMatch.selected.id)}:{})};
       zapiszLS("artway_produkty_edytowane",produktyEdytowane);
       allegroZastosujWynikWystawienia(produkt,d);
+      await allegroPobierzProwizjeProduktu(id,null,{silent:true}).catch(()=>null);
       await chmuraWczytajStan().catch(()=>{});
       await allegroWczytajDane(true).catch(()=>{});
       zbudujProdukty();
@@ -6505,6 +6507,7 @@ function allegroSubnavHTML(aktywny="start"){
     {id:"zamowienia",href:"#/admin/allegro/zamowienia",label:"📦 Zamówienia",badge:aktywneZamowienia||""},
     {id:"oferty",href:"#/admin/allegro/oferty",label:"🏷️ Oferty",badge:(allegroOferty||[]).length||""},
     {id:"wystawianie",href:"#/admin/allegro/wystawianie",label:"🟠 Wystawianie",badge:zadaniaWystawiania||""},
+    {id:"rentownosc",href:"#/admin/allegro/rentownosc",label:"📈 Opłacalność"},
     {id:"wiadomosci",href:"#/admin/allegro/wiadomosci",label:"💬 Wiadomości",badge:st.threadNeed||""},
     {id:"dyskusje",href:"#/admin/allegro/dyskusje",label:"🛟 Dyskusje",badge:st.issueNeed||""},
     {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"},
@@ -6517,6 +6520,7 @@ function allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete){
     zamowienia:{ico:"📦",kicker:"Sprzedaż",title:"Kolejka zamówień Allegro",opis:"Status zawsze pochodzi z Allegro; agent osobno prowadzi sprawdzenie stanu, lokalizacji, zamówienie u producenta i kompletację.",metryki:[["Do obsługi",(allegroZamowienia||[]).filter(statusAllegroRezerwujeMagazyn).length],["Z brakami",(allegroZamowienia||[]).filter(z=>allegroEtapMagazynu(z)==="braki").length],["Zrealizowane lokalnie",(allegroZamowienia||[]).filter(z=>allegroEtapMagazynu(z)==="zrealizowane").length]]},
     oferty:{ico:"🏷️",kicker:"Katalog Allegro",title:"Oferty i powiązania",opis:"Profesjonalny katalog ofert z miniaturą, identyfikatorami, ceną, stanem i kontrolą powiązania z produktem sklepu.",metryki:[["Wszystkie",(allegroOferty||[]).length],["Podpięte",mapped],["Do powiązania",niepodpiete]]},
     wystawianie:{ico:"🟠",kicker:"Publikowanie",title:"Przygotowanie ofert",opis:"Kontrola kompletności danych produktu przed utworzeniem bezpiecznego szkicu oferty.",metryki:[["Produkty",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length],["Gotowe",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroBrakiProduktuDoWystawienia(p).length).length],["Do uzupełnienia",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroBrakiProduktuDoWystawienia(p).length).length]]},
+    rentownosc:{ico:"📈",kicker:"Finanse produktu",title:"Opłacalność i wyliczenie marżowe",opis:"Prowizje z oficjalnego kalkulatora Allegro, pełny koszt jednostkowy i rekomendowane ceny dla założonego celu marży.",metryki:[["Pełne dane",produktyDoAdministracji().filter(allegroProduktMaPelneDaneMarzowe).length],["Bez prowizji",produktyDoAdministracji().filter(p=>!p.allegroFeeCalculatedAt).length],["Cel marży",`${allegroDocelowaMarza}%`]]},
     wiadomosci:{ico:"💬",kicker:"Obsługa klienta",title:"Centrum wiadomości",opis:"Wyszukiwanie, filtry, historia korespondencji i wewnętrzne zamykanie spraw bez wysyłania wiadomości.",metryki:[["Wątki",allegroKomunikacjaStaty().threads.length],["Do odpowiedzi",allegroKomunikacjaStaty().threadNeed],["Załatwione",allegroKomunikacjaStaty().threads.filter(x=>x.internalResolved).length]]},
     dyskusje:{ico:"🛟",kicker:"Dyskusje i reklamacje",title:"Obsługa zgłoszeń Allegro",opis:"Oddzielny rejestr dyskusji i reklamacji z filtrami oficjalnego statusu oraz statusem wewnętrznym.",metryki:[["Zgłoszenia",allegroKomunikacjaStaty().issues.length],["Do odpowiedzi",allegroKomunikacjaStaty().issueNeed],["Załatwione",allegroKomunikacjaStaty().issues.filter(x=>x.internalResolved).length]]},
     ustawienia:{ico:"⚙️",kicker:"Konfiguracja",title:"Ustawienia integracji Allegro",opis:"Połączenie OAuth, zakresy uprawnień, środowisko i kontrola synchronizacji w jednym miejscu.",metryki:[["API",allegroStan.configured?"OK":"Brak"],["OAuth",allegroStan.connected?"Połączone":"Rozłączone"],["Środowisko",allegroStan.env||"production"]]}
@@ -6534,6 +6538,7 @@ function allegroStartPanelHTML(mapped,niepodpiete){
         <a class="btn" href="#/admin/allegro/zamowienia">📦 Zamówienia Allegro</a>
         <a class="btn ghost" href="#/admin/allegro/oferty">🏷️ Mapuj oferty</a>
         <a class="btn ghost" href="#/admin/allegro/wystawianie">🟠 Wystaw produkt</a>
+        <a class="btn ghost" href="#/admin/allegro/rentownosc">📈 Opłacalność</a>
         <a class="btn ghost" href="#/admin/allegro/wiadomosci">💬 Wiadomości</a>
         <a class="btn ghost" href="#/admin/allegro/dyskusje">🛟 Dyskusje</a>
       </div>
@@ -6582,6 +6587,16 @@ async function allegroZapiszUstawieniaOfert(form){
 async function allegroUruchomAutomatycznaKonserwacje(){
   try{toast("🟠 Agent sprawdza katalog, opisy i producentów…");const d=await chmura("allegro-auto-maintenance",{method:"POST",body:{limit:50},timeout:180000});await chmuraWczytajStan().catch(()=>{});await allegroWczytajDane(true);const r=d.maintenance||{};toast(`✅ Sprawdzono ${r.scanned||0}, poprawiono ${r.updated||0}, katalog dopasowano dla ${r.matched||0} produktów.`);}catch(e){toast("⚠️ Automatyka katalogu Allegro: "+(e.message||e));}
 }
+function allegroProduktMaPelneDaneMarzowe(p={}){return kwotaNum(p.cenaZakupu)>0&&kwotaNum(p.cenaAllegro||p.cena)>0&&!!(p.allegroOfferId||(p.allegroCategoryId&&(p.allegroProductId||p.gtin||p.ean)))&&!!p.allegroFeeCalculatedAt;}
+function allegroRentownoscLista(){
+  const q=String(szukajAllegroRentownosc||"").toLowerCase().trim();let list=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>({p,r:allegroRentownoscProduktu(p)})).filter(({p,r})=>{if(q&&!`${p.nazwa||""} ${p.sku||""} ${p.gtin||p.ean||""} ${p.producent||""} ${p.kategoria||""}`.toLowerCase().includes(q))return false;if(filtrAllegroRentownosc==="kompletne"&&!r.dataComplete)return false;if(filtrAllegroRentownosc==="brak_prowizji"&&p.allegroFeeCalculatedAt)return false;if(filtrAllegroRentownosc==="strata"&&r.profit>=0)return false;if(filtrAllegroRentownosc==="niska"&&(!r.dataComplete||r.margin>=allegroDocelowaMarza))return false;if(filtrAllegroRentownosc==="oplacalne"&&(!r.dataComplete||r.margin<allegroDocelowaMarza))return false;return true;});
+  list.sort((a,b)=>sortAllegroRentownosc==="marza_malejaco"?b.r.margin-a.r.margin:sortAllegroRentownosc==="nazwa"?String(a.p.nazwa).localeCompare(String(b.p.nazwa),"pl"):a.r.margin-b.r.margin);return list;
+}
+function allegroScenariuszeMarzyHTML(p={}){return [10,15,20,25,30].map(target=>{const r=allegroRentownoscProduktu(p,null,target);return `<span class="${target===Number(allegroDocelowaMarza)?"active":""}"><small>${target}% marży</small><b>${r.recommended?zl(r.recommended):"—"}</b></span>`;}).join("");}
+function allegroRentownoscPanelHTML(){
+  const all=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)),complete=all.filter(allegroProduktMaPelneDaneMarzowe),rows=allegroRentownoscLista(),loss=complete.filter(p=>allegroRentownoscProduktu(p).profit<0).length,low=complete.filter(p=>{const r=allegroRentownoscProduktu(p);return r.profit>=0&&r.margin<allegroDocelowaMarza;}).length,good=complete.filter(p=>allegroRentownoscProduktu(p).margin>=allegroDocelowaMarza).length;
+  return `<div class="panel allegro-section-panel profitability-page"><div class="order-section-head"><div><span class="order-pro-label">Decyzje cenowe</span><h2>📈 Opłacalność i wyliczenie marżowe</h2><p class="order-detail-lead">Zaawansowany przelicznik dla gier i pozostałych produktów z ceną zakupu, ceną sprzedaży oraz prowizją pobraną z Allegro. Rozdziela prowizję sprzedażową, opłaty cykliczne, reklamę, pakowanie, dopłatę do dostawy i inne koszty.</p></div><button class="btn" onclick="allegroPobierzProwizjeMasowo()">🟠 Pobierz prowizje dla kompletnych produktów</button></div><div class="orders-stat-grid"><div class="order-stat-card"><span>🧮</span><b>${complete.length}</b><small>pełnych kalkulacji</small></div><div class="order-stat-card ${loss?"hot":""}"><span>🔴</span><b>${loss}</b><small>sprzedaż ze stratą</small></div><div class="order-stat-card ${low?"hot":""}"><span>🟡</span><b>${low}</b><small>poniżej celu ${allegroDocelowaMarza}%</small></div><div class="order-stat-card money"><span>🟢</span><b>${good}</b><small>osiąga cel marży</small></div></div><div class="profitability-controls"><input placeholder="Szukaj: nazwa, SKU, EAN, producent, kategoria…" value="${esc(szukajAllegroRentownosc)}" oninput="szukajAllegroRentownosc=this.value;clearTimeout(window.__profitSearch);window.__profitSearch=setTimeout(()=>renderuj(),280)"><select onchange="filtrAllegroRentownosc=this.value;renderuj()">${[["kompletne","Pełne dane"],["wszystkie","Wszystkie produkty"],["brak_prowizji","Brak pobranej prowizji"],["strata","Sprzedaż ze stratą"],["niska","Marża poniżej celu"],["oplacalne","Osiąga cel"]].map(([v,l])=>`<option value="${v}" ${filtrAllegroRentownosc===v?"selected":""}>${l}</option>`).join("")}</select><select onchange="sortAllegroRentownosc=this.value;renderuj()"><option value="marza_rosnaco" ${sortAllegroRentownosc==="marza_rosnaco"?"selected":""}>Najniższa marża</option><option value="marza_malejaco" ${sortAllegroRentownosc==="marza_malejaco"?"selected":""}>Najwyższa marża</option><option value="nazwa" ${sortAllegroRentownosc==="nazwa"?"selected":""}>Nazwa A–Z</option></select><label>Cel marży <input type="number" min="1" max="60" value="${esc(allegroDocelowaMarza)}" onchange="allegroDocelowaMarza=Math.max(1,Math.min(60,Number(this.value)||20));renderuj()">%</label><label>Opłatę cykliczną podziel na <input type="number" min="1" max="1000" value="${esc(allegroJednostkiOplatCyklicznych)}" onchange="allegroJednostkiOplatCyklicznych=Math.max(1,Number(this.value)||10);renderuj()"> szt.</label></div><div class="profitability-guide"><b>Jak czytać wynik?</b><span><i class="green"></i> marża osiąga cel</span><span><i class="yellow"></i> dodatni wynik poniżej celu</span><span><i class="red"></i> strata</span><small>Rekomendacja jest oparta na aktualnej procentowej prowizji. Po zmianie ceny pobierz prowizję ponownie, ponieważ Allegro może stosować progi lub stawki minimalne.</small></div><div class="warehouse-worktable-wrap"><table class="log-table profitability-table"><tr><th>Produkt</th><th>Dane wejściowe</th><th>Prowizja i koszty</th><th>Wynik</th><th>Rekomendowana cena</th><th>Akcje</th></tr>${rows.slice(0,500).map(({p,r})=>{const offerId=String(p.allegroOfferId||allegroOfertaDlaProduktuSklepu(p)?.id||"");const cls=!r.dataComplete?"incomplete":r.profit<0?"loss":r.margin<allegroDocelowaMarza?"warning":"profit";return `<tr class="${cls}"><td><div class="allegro-offer-title-cell">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"🎲")}</span>`}<div><b>${esc(p.nazwa||"Produkt")}</b><small>SKU ${esc(p.sku||"—")} • ${esc(p.producent||"producent —")}</small>${!r.dataComplete?`<em>Brakuje: ${[!p.cenaZakupu?"ceny zakupu":"",!p.allegroFeeCalculatedAt?"prowizji Allegro":"",!(p.allegroOfferId||p.allegroCategoryId)?"danych oferty":""].filter(Boolean).join(", ")}</em>`:""}</div></div></td><td><small>Zakup</small><b>${p.cenaZakupu?zl(p.cenaZakupu):"—"}</b><br><small>Cena Allegro</small><b>${r.price?zl(r.price):"—"}</b></td><td><small>Prowizja</small><b>${p.allegroFeeCalculatedAt?`${zl(r.commission)} (${r.commissionRate.toFixed(2)}%)`:"—"}</b><br><small>Pozostałe / szt.</small><b>${zl(r.recurringPerUnit+r.packing+r.other+r.shipping+r.ads)}</b>${p.allegroFeeCalculatedAt&&!r.feeCurrent?`<br><span class="lvl lvl-ostrzezenie">przelicz dla nowej ceny</span>`:""}</td><td><span class="profitability-result ${cls}"><b>${r.dataComplete?zl(r.profit):"—"}</b><small>marża ${r.dataComplete?r.margin.toFixed(2)+"%":"—"} • narzut ${r.dataComplete?r.markup.toFixed(2)+"%":"—"}</small><em>próg: ${r.breakEven?zl(r.breakEven):"—"}</em></span></td><td><b>${r.recommended?zl(r.recommended):"—"}</b><div class="profit-scenarios">${allegroScenariuszeMarzyHTML(p)}</div></td><td><div class="warehouse-worktable-actions"><button class="btn ghost" onclick="allegroPobierzProwizjeProduktu(${jsArg(p.id)},this)">🟠 Prowizja</button>${r.recommended?`<button class="btn" onclick="allegroUstawRekomendowanaCene(${jsArg(p.id)},${r.recommended})">Ustaw ${zl(r.recommended)}</button>`:""}<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">Edytuj</a>${offerId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(offerId)}" target="_blank" rel="noopener">Oferta ↗</a>`:""}</div></td></tr>`;}).join("")||`<tr><td colspan="6">Brak produktów pasujących do filtrów.</td></tr>`}</table></div><div class="backend-note allegro-info-bottom"><b>Ważne:</b> kalkulator pokazuje rentowność operacyjną jednej sztuki przed podatkiem dochodowym. VAT jest zapisany w kartotece jako informacja do dalszych rozszerzeń księgowych; wynik korzysta z faktycznych kwot sprzedaży, zakupu i opłat podanych w panelu.</div></div>`;
+}
 function allegroUstawieniaPanelHTML(){
   const offerStock=allegroStanOfertyProduktu(),audit=Object.values(allegroStan.offerDefaultsAudit?.items||{}),auditOpen=audit.filter(x=>!x.stockUpdated||!x.republishUpdated).length,offerSettings=allegroStan.offerSettings||{},maintenance=allegroStan.catalogMaintenance||{};
   return `<div class="panel allegro-section-panel">
@@ -6624,11 +6639,11 @@ function widokAdminAllegro(sekcja="start"){
   if(["wiadomosci","dyskusje"].includes(sekcja)&&!allegroKomunikacja?.updated_at&&!allegroKomunikacja?.sprawdzono&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
   const mapped=(allegroOferty||[]).filter(o=>allegroProduktDlaOferty(o.id)).length;
   const niepodpiete=Math.max(0,(allegroOferty||[]).length-mapped);
-  const aktywna=["zamowienia","oferty","wystawianie","wiadomosci","dyskusje","ustawienia"].includes(sekcja)?sekcja:"start";
+  const aktywna=["zamowienia","oferty","wystawianie","rentownosc","wiadomosci","dyskusje","ustawienia"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
   <div class="module-page-stack allegro-module-page">
   ${allegroSubnavHTML(aktywna)}
-  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="wiadomosci"?allegroKomunikacjaPanelHTML("thread"):aktywna==="dyskusje"?allegroKomunikacjaPanelHTML("issue"):aktywna==="ustawienia"?allegroUstawieniaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
+  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="rentownosc"?allegroRentownoscPanelHTML():aktywna==="wiadomosci"?allegroKomunikacjaPanelHTML("thread"):aktywna==="dyskusje"?allegroKomunikacjaPanelHTML("issue"):aktywna==="ustawienia"?allegroUstawieniaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
   ${allegroStan.error?`<div class="backend-note allegro-info-bottom" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Allegro:</b> ${esc(allegroStan.error)}</div>`:""}
   ${allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete)}
   </div>
@@ -8122,16 +8137,36 @@ function filtrujWyborEmoji(q){
 }
 function wybierzEmoji(emoji){if(emojiPoleDocelowe){emojiPoleDocelowe.value=emoji;emojiPoleDocelowe.dispatchEvent(new Event("input",{bubbles:true}));}zamknijWyborEmoji();}
 function zamknijWyborEmoji(){document.getElementById("emojiPickerModal")?.remove();emojiPoleDocelowe=null;}
+function allegroRentownoscProduktu(p={},priceOverride=null,targetMargin=allegroDocelowaMarza){
+  const price=kwotaNum(priceOverride??p.cenaAllegro??p.cena),purchase=kwotaNum(p.cenaZakupu),feePrice=kwotaNum(p.allegroFeePrice),savedCommission=kwotaNum(p.allegroCommissionAmount),savedRate=Math.max(0,Number(p.allegroCommissionRate)||0),commission=price>0?(feePrice&&Math.abs(feePrice-price)<.01?savedCommission:price*savedRate/100):0,recurringTotal=kwotaNum(p.allegroRecurringFees),recurringPerUnit=recurringTotal/Math.max(1,Number(allegroJednostkiOplatCyklicznych)||1),packing=kwotaNum(p.kosztPakowania),other=kwotaNum(p.allegroAdditionalCost),shipping=kwotaNum(p.allegroShippingSubsidy),adsRate=Math.max(0,Number(p.allegroAdsPercent)||0),ads=price*adsRate/100,fixed=purchase+packing+other+shipping+recurringPerUnit,variableRate=savedRate/100+adsRate/100,profit=price-purchase-commission-recurringPerUnit-packing-other-shipping-ads,margin=price>0?profit/price*100:0,markup=purchase>0?profit/purchase*100:0,breakEven=1-variableRate>0?fixed/(1-variableRate):0,target=Math.max(0,Math.min(80,Number(targetMargin)||0))/100,recommended=1-variableRate-target>0?fixed/(1-variableRate-target):0;
+  const dataComplete=purchase>0&&price>0&&!!(p.allegroOfferId||(p.allegroCategoryId&&(p.allegroProductId||p.gtin||p.ean)))&&!!p.allegroFeeCalculatedAt;
+  return {price,purchase,commission,commissionRate:savedRate,recurringTotal,recurringPerUnit,packing,other,shipping,ads,adsRate,profit:+profit.toFixed(2),margin:+margin.toFixed(2),markup:+markup.toFixed(2),breakEven:+breakEven.toFixed(2),recommended:+recommended.toFixed(2),dataComplete,feeCurrent:!!feePrice&&Math.abs(feePrice-price)<.01,positive:profit>0};
+}
+function allegroZapiszProwizjeLokalnie(productId,summary={}){
+  const patch={allegroCommissionAmount:kwotaNum(summary.commissionAmount),allegroCommissionRate:Number(summary.commissionRate)||0,allegroRecurringFees:kwotaNum(summary.recurringFees),allegroFeeTotal:kwotaNum(summary.totalPreviewFees),allegroFeePrice:kwotaNum(summary.salePrice),allegroFeeCurrency:summary.currency||"PLN",allegroFeeDetails:{commissions:summary.commissions||[],quotes:summary.quotes||[]},allegroFeeCalculatedAt:summary.calculatedAt||new Date().toISOString(),allegroFeeSource:summary.source||"allegro-offer-fee-preview"};
+  produktyEdytowane[productId]={...(produktyEdytowane[productId]||{}),...patch};zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();return patch;
+}
+async function allegroPobierzProwizjeProduktu(productId,button=null,options={}){
+  const form=button?.closest?.("form"),base=pobierzProduktAdmin(Number(productId))||produkty.find(p=>String(p.id)===String(productId))||{},product=form?produktRoboczyAllegroZFormularza(form,productId,base):base,offer=allegroOfertaDlaProduktuSklepu(product),offerId=String(product.allegroOfferId||offer?.id||"").trim(),price=kwotaNum(form?.elements?.cenaAllegro?.value)||kwotaNum(product.cenaAllegro||product.cena);
+  if(!price){toast("Uzupełnij cenę Allegro");return null;}if(button)button.disabled=true;
+  try{if(!options.silent)toast("🟠 Pobieram aktualne prowizje i opłaty z Allegro…");const d=await chmura("allegro-fee-preview",{method:"POST",body:{productId:String(productId),product,offerId,price,save:true},timeout:90000});const patch=allegroZapiszProwizjeLokalnie(productId,d.summary||{});if(form){for(const [name,value] of Object.entries({allegroCommissionAmount:patch.allegroCommissionAmount,allegroCommissionRate:patch.allegroCommissionRate,allegroRecurringFees:patch.allegroRecurringFees,allegroFeePrice:patch.allegroFeePrice,allegroFeeCalculatedAt:patch.allegroFeeCalculatedAt}))if(form.elements[name])form.elements[name].value=value;aktualizujKalkulatorCenProduktu(form);}if(!options.silent)toast(`✅ Prowizja ${zl(patch.allegroCommissionAmount)} (${Number(patch.allegroCommissionRate).toFixed(2)}%) • opłaty cykliczne ${zl(patch.allegroRecurringFees)}`);if(!form&&!options.silent)renderuj();return d;}catch(e){if(!options.silent)toast("⚠️ Kalkulator opłat Allegro: "+(e.message||e));return null;}finally{if(button)button.disabled=false;}
+}
+async function allegroPobierzProwizjeMasowo(){
+  const complete=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&kwotaNum(p.cenaZakupu)>0&&kwotaNum(p.cenaAllegro||p.cena)>0&&(p.allegroOfferId||(p.allegroCategoryId&&(p.allegroProductId||p.gtin||p.ean)))).slice(0,25);if(!complete.length){toast("Brak produktów z pełnymi danymi do kalkulacji");return;}
+  toast(`Pobieram prowizje dla ${complete.length} kompletnych produktów…`);let ok=0,fail=0;for(const p of complete){const r=await allegroPobierzProwizjeProduktu(p.id,null,{silent:true});r?ok++:fail++;}toast(`Kalkulacja prowizji zakończona: ${ok} poprawnie, ${fail} błędów`);renderuj();
+}
+function allegroUstawRekomendowanaCene(productId,price){const value=kwotaNum(price);if(!value)return;produktyEdytowane[productId]={...(produktyEdytowane[productId]||{}),cenaAllegro:value,allegroPriceRecommendedAt:new Date().toISOString()};zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();toast(`Ustawiono rekomendowaną cenę Allegro ${zl(value)}. Przelicz prowizję ponownie przed aktualizacją oferty.`);renderuj();}
 function aktualizujKalkulatorCenProduktu(form){
   if(!form)return;
   const sklep=kwotaNum(form.elements.cena?.value),allegro=kwotaNum(form.elements.cenaAllegro?.value)||sklep,zakup=kwotaNum(form.elements.cenaZakupu?.value);
   const el=form.querySelector("[data-product-margin]");if(!el)return;
-  const marzaSklep=zakup&&sklep?sklep-zakup:null,marzaAllegro=zakup&&allegro?allegro-zakup:null;
-  el.innerHTML=`<span><small>Cena sklepu</small><b>${sklep?zl(sklep):"—"}</b></span><span><small>Cena Allegro</small><b>${allegro?zl(allegro):"—"}</b></span><span><small>Marża sklepowa brutto</small><b>${marzaSklep===null?"—":zl(marzaSklep)}</b></span><span><small>Marża Allegro przed prowizją</small><b>${marzaAllegro===null?"—":zl(marzaAllegro)}</b></span>`;
+  const product={cena:sklep,cenaAllegro:allegro,cenaZakupu:zakup,allegroCommissionAmount:form.elements.allegroCommissionAmount?.value,allegroCommissionRate:form.elements.allegroCommissionRate?.value,allegroRecurringFees:form.elements.allegroRecurringFees?.value,allegroFeePrice:form.elements.allegroFeePrice?.value||allegro,kosztPakowania:form.elements.kosztPakowania?.value,allegroAdditionalCost:form.elements.allegroAdditionalCost?.value,allegroShippingSubsidy:form.elements.allegroShippingSubsidy?.value,allegroAdsPercent:form.elements.allegroAdsPercent?.value,allegroFeeCalculatedAt:form.elements.allegroFeeCalculatedAt?.value},r=allegroRentownoscProduktu(product,allegro),marzaSklep=zakup&&sklep?sklep-zakup:null;
+  el.innerHTML=`<span><small>Cena sklepu</small><b>${sklep?zl(sklep):"—"}</b></span><span><small>Cena Allegro</small><b>${allegro?zl(allegro):"—"}</b></span><span><small>Prowizja Allegro</small><b>${r.commission?`${zl(r.commission)} • ${r.commissionRate.toFixed(2)}%`:"—"}</b></span><span class="${r.profit<0?"is-negative":""}"><small>Zysk po kosztach</small><b>${zakup?`${zl(r.profit)} • ${r.margin.toFixed(1)}%`:"—"}</b></span><span><small>Cena minimalna</small><b>${zakup?zl(r.breakEven):"—"}</b></span><span><small>Sugerowana (${allegroDocelowaMarza}%)</small><b>${zakup?zl(r.recommended):"—"}</b></span>`;
 }
 function formularzProduktu(p, tryb){
   const wszystkie = produktyDoAdministracji();
   const edycja = tryb==="edycja";
+  const ofertaAllegro=allegroOfertaDlaProduktuSklepu(p),ofertaAllegroId=String(p.allegroOfferId||ofertaAllegro?.id||"").trim(),rentownosc=allegroRentownoscProduktu(p);
   return `
     <form class="product-editor-form" data-product-id="${esc(p.id||0)}" onsubmit="${edycja?`zapiszProduktAdmin(event,${p.id})`:"dodajProdukt(event)"}">
       <div class="backend-note" style="margin-bottom:.8rem">
@@ -8154,7 +8189,8 @@ function formularzProduktu(p, tryb){
         <div class="f-group"><label>Cena zakupu (zł)</label><input name="cenaZakupu" inputmode="decimal" value="${p.cenaZakupu??""}" placeholder="wewnętrzna" oninput="aktualizujKalkulatorCenProduktu(this.form)"><small>Niewidoczna dla klientów i Allegro.</small></div>
         <div class="f-group"><label>Stara cena (promocja)</label><input name="staraCena" inputmode="decimal" value="${p.staraCena??""}"></div>
       </div>
-      <div class="product-margin-preview" data-product-margin><span><small>Cena sklepu</small><b>${p.cena?zl(p.cena):"—"}</b></span><span><small>Cena Allegro</small><b>${p.cenaAllegro?zl(p.cenaAllegro):(p.cena?zl(p.cena):"—")}</b></span><span><small>Marża sklepowa brutto</small><b>${p.cenaZakupu&&p.cena?zl(p.cena-p.cenaZakupu):"—"}</b></span><span><small>Marża Allegro przed prowizją</small><b>${p.cenaZakupu&&(p.cenaAllegro||p.cena)?zl((p.cenaAllegro||p.cena)-p.cenaZakupu):"—"}</b></span></div>
+      <div class="product-margin-preview" data-product-margin><span><small>Cena sklepu</small><b>${p.cena?zl(p.cena):"—"}</b></span><span><small>Cena Allegro</small><b>${rentownosc.price?zl(rentownosc.price):"—"}</b></span><span><small>Prowizja Allegro</small><b>${p.allegroFeeCalculatedAt?`${zl(rentownosc.commission)} • ${rentownosc.commissionRate.toFixed(2)}%`:"—"}</b></span><span class="${rentownosc.profit<0?"is-negative":""}"><small>Zysk po kosztach</small><b>${p.cenaZakupu?`${zl(rentownosc.profit)} • ${rentownosc.margin.toFixed(1)}%`:"—"}</b></span><span><small>Cena minimalna</small><b>${p.cenaZakupu?zl(rentownosc.breakEven):"—"}</b></span><span><small>Sugerowana (${allegroDocelowaMarza}%)</small><b>${p.cenaZakupu?zl(rentownosc.recommended):"—"}</b></span></div>
+      <section class="product-profit-editor"><div class="order-section-head"><div><span class="order-pro-label">Dane wewnętrzne</span><h3>📈 Prowizje i koszty sprzedaży Allegro</h3><p class="order-detail-lead">Prowizja jest pobierana z oficjalnego kalkulatora Allegro dla aktualnej oferty i ceny. Opłaty cykliczne pozostają osobno.</p></div><div class="diag-actions">${edycja?`<button class="btn" type="button" onclick="allegroPobierzProwizjeProduktu(${jsArg(p.id)},this)">🟠 Pobierz prowizję</button>`:""}${ofertaAllegroId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(ofertaAllegroId)}" target="_blank" rel="noopener">↗ Otwórz ofertę</a>`:""}<a class="btn ghost" href="#/admin/allegro/rentownosc">Kalkulator marży</a></div></div><input type="hidden" name="allegroFeePrice" value="${esc(p.allegroFeePrice??p.cenaAllegro??p.cena??"")}"><div class="product-profit-fields"><div class="f-group"><label>Prowizja Allegro (zł)</label><input name="allegroCommissionAmount" inputmode="decimal" value="${esc(p.allegroCommissionAmount??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"><small>Kwota dla ceny ${p.allegroFeePrice?zl(p.allegroFeePrice):"—"}.</small></div><div class="f-group"><label>Prowizja Allegro (%)</label><input name="allegroCommissionRate" inputmode="decimal" value="${esc(p.allegroCommissionRate??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div><div class="f-group"><label>Opłaty cykliczne/promocyjne (zł)</label><input name="allegroRecurringFees" inputmode="decimal" value="${esc(p.allegroRecurringFees??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"><small>Rozliczane osobno od prowizji sprzedażowej.</small></div><div class="f-group"><label>Koszt pakowania / szt.</label><input name="kosztPakowania" inputmode="decimal" value="${esc(p.kosztPakowania??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div><div class="f-group"><label>Inne koszty / szt.</label><input name="allegroAdditionalCost" inputmode="decimal" value="${esc(p.allegroAdditionalCost??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div><div class="f-group"><label>Dopłata do wysyłki / szt.</label><input name="allegroShippingSubsidy" inputmode="decimal" value="${esc(p.allegroShippingSubsidy??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div><div class="f-group"><label>Reklama (% ceny)</label><input name="allegroAdsPercent" inputmode="decimal" value="${esc(p.allegroAdsPercent??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div><div class="f-group"><label>VAT sprzedaży (%)</label><input name="vatRate" inputmode="decimal" value="${esc(p.vatRate??23)}"></div><div class="f-group"><label>Ostatnie wyliczenie API</label><input name="allegroFeeCalculatedAt" value="${esc(p.allegroFeeCalculatedAt||"")}" readonly><small>${p.allegroFeeCalculatedAt?esc(allegroDataTxt(p.allegroFeeCalculatedAt)):"jeszcze nie pobrano"}</small></div></div><div class="profit-editor-summary"><span class="${rentownosc.profit<0?"loss":"profit"}"><small>Zysk po kosztach</small><b>${p.cenaZakupu?zl(rentownosc.profit):"—"}</b></span><span><small>Marża</small><b>${p.cenaZakupu?`${rentownosc.margin.toFixed(2)}%`:"—"}</b></span><span><small>Próg rentowności</small><b>${p.cenaZakupu?zl(rentownosc.breakEven):"—"}</b></span><span><small>Rekomendacja ${allegroDocelowaMarza}%</small><b>${p.cenaZakupu?zl(rentownosc.recommended):"—"}</b></span></div></section>
       <div class="f-row">
         <div class="f-group"><label>Etykieta</label><select name="badge"><option value="">— brak —</option><option ${p.badge==="Nowość"?"selected":""}>Nowość</option><option ${p.badge==="Promocja"?"selected":""}>Promocja</option></select></div>
         <div class="f-group"><label>Ikona (emoji)</label>${emojiPoleHTML("ikona",p.ikona||"","📦")}</div>
@@ -8222,7 +8258,7 @@ function formularzProduktu(p, tryb){
         </div>
         <div class="diag-actions">
           ${edycja?`<button class="btn ghost" type="button" onclick="allegroPrzygotujSzkicProduktu(${jsArg(p.id)})">🧾 Sprawdź szkic Allegro</button>
-          <button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">${allegroOfertaDlaProduktuSklepu(p)?"🤖 Agent: aktualizuj ofertę Allegro":"🤖 Agent: dodaj ofertę Allegro"}</button>`:`<span style="color:var(--muted2);font-size:.85rem">Najpierw zapisz produkt, potem utworzysz z niego szkic Allegro.</span>`}
+          <button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">${allegroOfertaDlaProduktuSklepu(p)?"🤖 Agent: aktualizuj ofertę Allegro":"🤖 Agent: dodaj ofertę Allegro"}</button>${ofertaAllegroId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(ofertaAllegroId)}" target="_blank" rel="noopener">↗ Otwórz istniejącą ofertę</a>`:""}`:`<span style="color:var(--muted2);font-size:.85rem">Najpierw zapisz produkt, potem utworzysz z niego szkic Allegro.</span>`}
         </div>
         <div id="allegroDraftPreview"></div>
         <div id="allegroDescriptionPreview"></div>
@@ -8289,6 +8325,8 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   if(cenaAllegro>0)p.cenaAllegro=+cenaAllegro.toFixed(2);else delete p.cenaAllegro;
   const cenaZakupu=parseFloat(String(f.get("cenaZakupu")||"").replace(",","."));
   if(cenaZakupu>=0&&String(f.get("cenaZakupu")||"").trim()!=="")p.cenaZakupu=+cenaZakupu.toFixed(2);else delete p.cenaZakupu;
+  for(const pole of ["allegroCommissionAmount","allegroCommissionRate","allegroRecurringFees","allegroFeePrice","kosztPakowania","allegroAdditionalCost","allegroShippingSubsidy","allegroAdsPercent","vatRate"]){const raw=String(f.get(pole)||"").trim(),n=Number(raw.replace(",","."));if(raw!==""&&Number.isFinite(n)&&n>=0)p[pole]=+n.toFixed(pole.includes("Rate")||pole.includes("Percent")?4:2);else if(!["vatRate"].includes(pole))delete p[pole];}
+  const feeAt=String(f.get("allegroFeeCalculatedAt")||"").trim();if(feeAt)p.allegroFeeCalculatedAt=feeAt;
   const zdjecie = String(f.get("zdjecie")||"").trim();
   if(zdjecie) p.zdjecie = zdjecie; else delete p.zdjecie;
   if(f.get("badge")) p.badge = String(f.get("badge")); else delete p.badge;
@@ -8712,7 +8750,7 @@ function eksportNadaniaInpostCSV(nry, format="txt"){
       : `📄 Plik InPost ${nazwaTrybu.toUpperCase()}: ${lista.length} przesyłek — dla TXT ustaw w InPost separator średnik${nbrak?` • ⚠️ ${nbrak} z brakami danych`:""}`));
 }
 let podgladImportuProduktow=null, ostatniRaportImportu=null;
-const POLA_CSV_PRODUKTU=["id","nazwa","kategoria","cena","stara_cena","stan","sku","gtin","external_id","mpn","marka","producent","opis_krotki","opis","badge","ikona","zdjecie","zdjecie2","zdjecie3","zdjecie4","zdjecie5","zdjecie6","zdjecie7","zdjecie8","zdjecie9","zdjecie10","zdjecie11","zdjecie12","zdjecie13","zdjecie14","zdjecie15","zdjecie16","warianty","kolor","kolor_produktu","rozmiar","material"];
+const POLA_CSV_PRODUKTU=["id","nazwa","kategoria","cena","cena_allegro","cena_zakupu","prowizja_allegro","prowizja_allegro_procent","oplaty_allegro_cykliczne","koszt_pakowania","koszt_dodatkowy_allegro","doplata_wysylki_allegro","reklama_allegro_procent","vat","stara_cena","stan","sku","gtin","external_id","mpn","marka","producent","opis_krotki","opis","badge","ikona","zdjecie","zdjecie2","zdjecie3","zdjecie4","zdjecie5","zdjecie6","zdjecie7","zdjecie8","zdjecie9","zdjecie10","zdjecie11","zdjecie12","zdjecie13","zdjecie14","zdjecie15","zdjecie16","warianty","kolor","kolor_produktu","rozmiar","material"];
 const POLA_OVF_PRODUKTU=["GTIN","EXTERNAL_ID","NAME","STOCK","PRICE","MPN","DESCRIPTION","IMAGE1","IMAGE2","IMAGE3","IMAGE4","IMAGE5","IMAGE6","IMAGE7","IMAGE8","IMAGE9","IMAGE10","IMAGE11","IMAGE12","IMAGE13","IMAGE14","IMAGE15","IMAGE16","CATEGORY","BRAND","MANUFACTURER","COLOR","SIZE","MATERIAL"];
 function normalizujNaglowekCSV(v){
   return normalizujSzukanyTekst(v).replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");
@@ -8724,6 +8762,16 @@ function kanonicznePoleProduktu(naglowek){
     nazwa:["nazwa","name","product_name","nazwa_produktu","tytul","title","product_title"],
     kategoria:["kategoria","category","katalog","catalog","category_path","categorypath","breadcrumb","category_tree","category_name","categories","sciezka_kategorii"],
     cena:["cena","price","cena_zl","sale_price","gross_price","net_price","price_gross","price_net","retail_price"],
+    cenaAllegro:["cena_allegro","allegro_price","price_allegro"],
+    cenaZakupu:["cena_zakupu","purchase_price","cost_price","buy_price"],
+    allegroCommissionAmount:["prowizja_allegro","allegro_commission","commission_amount"],
+    allegroCommissionRate:["prowizja_allegro_procent","allegro_commission_rate","commission_rate"],
+    allegroRecurringFees:["oplaty_allegro_cykliczne","allegro_recurring_fees","listing_fees"],
+    kosztPakowania:["koszt_pakowania","packaging_cost"],
+    allegroAdditionalCost:["koszt_dodatkowy_allegro","allegro_additional_cost"],
+    allegroShippingSubsidy:["doplata_wysylki_allegro","allegro_shipping_subsidy"],
+    allegroAdsPercent:["reklama_allegro_procent","allegro_ads_percent"],
+    vatRate:["vat","vat_rate","stawka_vat"],
     staraCena:["stara_cena","old_price","regular_price","cena_regularna","oldprice","rrp","msrp"],
     stan:["stan","stock","quantity","ilosc","stan_magazynowy","available","availability","qty"],
     sku:["sku","kod","kod_produktu","symbol","seller_sku","item_sku","offer_sku","symbol_produktu"],
@@ -8822,6 +8870,7 @@ function normalizujProduktImportu(r,nr){
   const galeria=Array.isArray(r?.zdjecia)?r.zdjecia:Array.isArray(r?.images)?r.images:null;
   const zdjecia=galeria?galeria.map(String).filter(Boolean):Array.from({length:15},(_,i)=>"zdjecie"+(i+2)).map(k=>String(pobierz(k)).trim()).filter(Boolean);
   const p={id,nazwa,kategoria,cena:cena===null?0:+cena.toFixed(2)};
+  for(const pole of ["cenaAllegro","cenaZakupu","allegroCommissionAmount","allegroCommissionRate","allegroRecurringFees","kosztPakowania","allegroAdditionalCost","allegroShippingSubsidy","allegroAdsPercent","vatRate"]){const value=liczbaImportu(pobierz(pole));if(value!==null&&value>=0)p[pole]=+value.toFixed(pole.includes("Rate")||pole.includes("Percent")?4:2);}
   if(kategoriaInfo.poziomy.length>1){
     p.sciezkaKategorii=kategoriaInfo.poziomy;
     p.grupaKategorii=kategoriaInfo.grupa;
@@ -8987,7 +9036,7 @@ function produktDoEksportu(p){
   const o={id:p.id,nazwa:p.nazwa,kategoria:p.kategoria,cena:+Number(p.cena).toFixed(2)};
   if(p.staraCena>p.cena)o.staraCena=+Number(p.staraCena).toFixed(2);
   const stan=stanProduktu(p);if(stan!==null)o.stan=stan;
-  for(const k of ["sku","gtin","externalId","mpn","marka","producent","opisKrotki","opis","badge","ikona","kolor","kolorProduktu","rozmiar","material","zdjecie"])if(p[k]!==undefined&&p[k]!=="")o[k]=p[k];
+  for(const k of ["cenaAllegro","cenaZakupu","allegroCommissionAmount","allegroCommissionRate","allegroRecurringFees","allegroFeePrice","allegroFeeCalculatedAt","kosztPakowania","allegroAdditionalCost","allegroShippingSubsidy","allegroAdsPercent","vatRate","sku","gtin","externalId","mpn","marka","producent","opisKrotki","opis","badge","ikona","kolor","kolorProduktu","rozmiar","material","zdjecie"])if(p[k]!==undefined&&p[k]!=="")o[k]=p[k];
   if(p.wymagaCeny)o.wymagaCeny=true;
   if(Array.isArray(p.sciezkaKategorii)&&p.sciezkaKategorii.length)o.sciezkaKategorii=p.sciezkaKategorii;
   if(p.grupaKategorii)o.grupaKategorii=p.grupaKategorii;
@@ -9028,6 +9077,8 @@ function wartoscPolaCSVProduktu(p,pole){
   if(pole==="stara_cena")return p.staraCena?String(p.staraCena.toFixed(2)).replace(".",","):"";
   if(pole==="cena")return String(Number(p.cena||0).toFixed(2)).replace(".",",");
   if(pole==="external_id")return p.externalId||"";
+  const financial={cena_allegro:"cenaAllegro",cena_zakupu:"cenaZakupu",prowizja_allegro:"allegroCommissionAmount",prowizja_allegro_procent:"allegroCommissionRate",oplaty_allegro_cykliczne:"allegroRecurringFees",koszt_pakowania:"kosztPakowania",koszt_dodatkowy_allegro:"allegroAdditionalCost",doplata_wysylki_allegro:"allegroShippingSubsidy",reklama_allegro_procent:"allegroAdsPercent",vat:"vatRate"};
+  if(financial[pole])return p[financial[pole]]??"";
   if(pole==="opis_krotki")return p.opisKrotki||opisKrotkiProduktu(p)||"";
   if(pole==="kolor_produktu")return p.kolorProduktu||"";
   if(pole==="warianty")return (p.warianty||[]).join(" | ");
@@ -9068,8 +9119,8 @@ function eksportujProduktyOVF(zakres){
   toast(`Wyeksportowano ${lista.length} produktów w formacie OVF`);
 }
 function pobierzSzablonProduktowCSV(){
-  const przyklad=[1,"Przykładowy produkt","Nowa kategoria","99,90","129,90",25,"SKU-001","5901234567891","EXT-001","MPN-001","Marka","Producent","Krótki opis produktu do karty sklepu.","Pełny opis produktu z najważniejszymi cechami, zastosowaniem i zawartością zestawu.","Nowość","📦","https://adres.pl/zdjecie.jpg","","","","","","","","","","","","","","","","S | M | L","#dbeafe","Czarny","XL","Bawełna"];
-  pobierzPlik("szablon-importu-produktow.csv","\uFEFF"+POLA_CSV_PRODUKTU.join(";")+"\n"+przyklad.map(csvPole).join(";"),"text/csv");
+  const p={id:1,nazwa:"Przykładowa gra",kategoria:"Gry edukacyjne",cena:99.90,cenaAllegro:109.90,cenaZakupu:55,allegroCommissionAmount:11,allegroCommissionRate:10,allegroRecurringFees:0,kosztPakowania:1.5,allegroAdditionalCost:0,allegroShippingSubsidy:0,allegroAdsPercent:0,vatRate:23,staraCena:129.90,stan:25,sku:"SKU-001",gtin:"5901234567891",externalId:"EXT-001",mpn:"MPN-001",marka:"Marka",producent:"Producent",opisKrotki:"Krótki opis produktu do karty sklepu.",opis:"Pełny opis produktu z najważniejszymi cechami.",badge:"Nowość",ikona:"🎲",zdjecie:"https://adres.pl/zdjecie.jpg",warianty:["S","M","L"],kolor:"#dbeafe",kolorProduktu:"Kolorowy",rozmiar:"XL",material:"Karton"};
+  pobierzPlik("szablon-importu-produktow.csv","\uFEFF"+POLA_CSV_PRODUKTU.join(";")+"\n"+POLA_CSV_PRODUKTU.map(pole=>wartoscPolaCSVProduktu(p,pole)).map(csvPole).join(";"),"text/csv");
 }
 function pobierzSzablonProduktowOVF(){
   const p={id:1,nazwa:"Przykładowa gra edukacyjna",kategoria:"Gry edukacyjne",cena:99.90,stan:25,sku:"GRA-001",externalId:"GRA-001",gtin:"5901234567891",mpn:"GRA-001",opisKrotki:"Krótki opis produktu do karty sklepu.",opis:"Pełny opis będzie widoczny na stronie produktu, a na listach pojawi się skrót.",zdjecie:"https://adres.pl/zdjecie1.jpg",zdjecia:["https://adres.pl/zdjecie2.jpg"],marka:"Artway",producent:"Artway",kolorProduktu:"Kolorowy",rozmiar:"30x20x5 cm",material:"Karton"};

@@ -70,6 +70,9 @@ requireMarkers('assets/styles.css', css, [
   '.ai-restock-card',
   '.allegro-operation-success',
   '.allegro-activate-control',
+  '.product-profit-editor',
+  '.profitability-table',
+  '.profitability-result',
   '.modal',
 ]);
 
@@ -174,6 +177,13 @@ requireMarkers('assets/app.js', app, [
   'function allegroKomunikacjaPasujaca',
   'function allegroOznaczSpraweWewnetrznie',
   'function allegroOznaczZaznaczoneSprawy',
+  'function allegroRentownoscProduktu',
+  'function allegroPobierzProwizjeProduktu',
+  'function allegroRentownoscPanelHTML',
+  '#/admin/allegro/rentownosc',
+  'name="allegroCommissionAmount"',
+  'Otwórz istniejącą ofertę',
+  'Opłacalność i wyliczenie marżowe',
   '#/admin/allegro/wiadomosci',
   '#/admin/allegro/dyskusje',
   'telegramReminders',
@@ -217,6 +227,10 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "action === 'allegro-create-product-offer'",
   "action === 'allegro-offer-price-change'",
   "action === 'allegro-resolve-duplicate'",
+  "action === 'allegro-fee-preview'",
+  'function allegroPodsumujKalkulacjeOplat',
+  "'/pricing/offer-fee-preview'",
+  'allegro_fee_preview_audit',
   'function allegroDopasowanieOferty',
   'function allegroSekcjeOpisu',
   'function allegroZnajdzProduktKatalogu',
@@ -295,6 +309,13 @@ if (!duplicateResolutionFlow.includes("status: 'ENDED'") || !duplicateResolution
 }
 if (!store.includes("if (thread.internalResolved)") || !store.includes("if (issue.internalResolved)") || !store.includes("if (item.internalResolved)")) {
   fail('store-app.mjs: Agent, autoresponder i Telegram muszą pomijać sprawy załatwione wewnętrznie');
+}
+const feePreviewFlow = store.slice(store.indexOf("action === 'allegro-fee-preview'"), store.indexOf("action === 'allegro-offer-price-change'"));
+if (!feePreviewFlow.includes('commissions: summary.commissions') || !feePreviewFlow.includes('quotes: summary.quotes') || !feePreviewFlow.includes('allegroCommissionRate')) {
+  fail('store-app.mjs: kalkulator Allegro musi osobno zapisywać prowizję sprzedażową, opłaty cykliczne i stawkę procentową');
+}
+if (!app.includes('1-variableRate-target') || !app.includes('Po zmianie ceny pobierz prowizję ponownie')) {
+  fail('assets/app.js: rekomendowana cena musi uwzględniać koszty procentowe i ostrzegać o ponownym przeliczeniu prowizji');
 }
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [

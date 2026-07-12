@@ -2692,6 +2692,27 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
   return { payload: JSON.parse(JSON.stringify(payload)), missing };
 }
 
+function allegroPodsumujKalkulacjeOplat(raw = {}, price = 0) {
+  const normalize = (item = {}, group = '') => ({ name: tekst(item.name || item.type || 'Opłata', 200), type: tekst(item.type || '', 120), group, amount: Math.max(0, Number(item.fee?.amount) || 0), currency: tekst(item.fee?.currency || 'PLN', 12), cycleDuration: tekst(item.cycleDuration || '', 80) });
+  const commissions = (Array.isArray(raw.commissions) ? raw.commissions : []).map((x) => normalize(x, 'commission'));
+  const quotes = (Array.isArray(raw.quotes) ? raw.quotes : []).map((x) => normalize(x, 'quote'));
+  const commissionAmount = Number(commissions.reduce((sum, x) => sum + x.amount, 0).toFixed(2));
+  const recurringFees = Number(quotes.reduce((sum, x) => sum + x.amount, 0).toFixed(2));
+  const salePrice = Math.max(0, Number(price) || 0);
+  return {
+    commissionAmount,
+    commissionRate: salePrice > 0 ? Number((commissionAmount / salePrice * 100).toFixed(4)) : 0,
+    recurringFees,
+    totalPreviewFees: Number((commissionAmount + recurringFees).toFixed(2)),
+    salePrice,
+    currency: commissions[0]?.currency || quotes[0]?.currency || 'PLN',
+    commissions,
+    quotes,
+    calculatedAt: new Date().toISOString(),
+    source: 'allegro-offer-fee-preview',
+  };
+}
+
 function allegroDanePowiazaniaZPrzygotowania(product = {}, prepared = {}, draft = {}) {
   const katalog = prepared?.catalogMatch?.selected || {};
   const draftProduct = draft?.productSet?.[0]?.product || {};
@@ -4705,6 +4726,45 @@ export default async (req) => {
         zapisz('allegro_duplicate_resolution_audit', { items: audit.slice(0, 2000), updated_at: now }),
       ]);
       return odpowiedz({ ok: true, productId, keepOfferId, withdrawOfferIds, results, mappings, offers: updatedOffers, updated_at: now });
+    }
+
+    // ─── ALLEGRO: kalkulator prowizji i opłat dla konkretnej oferty / produktu ───
+    if (action === 'allegro-fee-preview') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const product = body.product && typeof body.product === 'object' ? body.product : {};
+      const productId = tekst(body.productId || product.id, 100).trim();
+      const offerId = tekst(body.offerId || product.allegroOfferId, 100).trim();
+      const price = Math.max(0, Number(body.price ?? product.cenaAllegro ?? product.allegroPrice ?? product.cena ?? product.price) || 0);
+      if (!price) return odpowiedz({ ok: false, error: 'Podaj cenę Allegro większą od zera', code: 'price_required' }, 422);
+      let offer, prepared = null;
+      if (offerId) offer = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`);
+      else {
+        prepared = await allegroDraftZAutoKategoria(req, { ...product, cenaAllegro: price }, { publishNow: false });
+        if (!prepared?.payload || prepared.missing?.length) return odpowiedz({ ok: false, error: `Nie można policzyć opłat — uzupełnij: ${(prepared?.missing || ['pełne dane oferty']).join(', ')}`, code: 'incomplete_offer', missing: prepared?.missing || [] }, 422);
+        offer = prepared.payload;
+      }
+      offer = JSON.parse(JSON.stringify(offer || {}));
+      offer.sellingMode = offer.sellingMode || { format: 'BUY_NOW' };
+      offer.sellingMode.price = { amount: price.toFixed(2), currency: 'PLN' };
+      const preview = await allegroWywolaj(req, '/pricing/offer-fee-preview', { method: 'POST', bodyObj: { offer, marketplaceId: 'allegro-pl' } });
+      const summary = allegroPodsumujKalkulacjeOplat(preview, price);
+      let saved = false;
+      if (body.save !== false && productId) {
+        const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+        const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
+        const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
+        edits[productId] = { ...(edits[productId] || {}), allegroCommissionAmount: summary.commissionAmount, allegroCommissionRate: summary.commissionRate, allegroRecurringFees: summary.recurringFees, allegroFeeTotal: summary.totalPreviewFees, allegroFeePrice: summary.salePrice, allegroFeeCurrency: summary.currency, allegroFeeDetails: { commissions: summary.commissions, quotes: summary.quotes }, allegroFeeCalculatedAt: summary.calculatedAt, allegroFeeSource: summary.source, ...(offerId ? { allegroOfferId: offerId } : {}) };
+        data.artway_produkty_edytowane = edits;
+        await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: summary.calculatedAt });
+        const auditRec = await czytaj('allegro_fee_preview_audit', { items: [], updated_at: null });
+        const audit = Array.isArray(auditRec.items) ? [...auditRec.items] : [];
+        audit.unshift({ id: crypto.randomUUID(), productId, offerId, ...summary });
+        await zapisz('allegro_fee_preview_audit', { items: audit.slice(0, 5000), updated_at: summary.calculatedAt });
+        saved = true;
+      }
+      return odpowiedz({ ok: true, productId, offerId, summary, raw: preview, saved, prepared: prepared ? { missing: prepared.missing || [], categoryId: prepared.autoFilled?.allegroCategoryId || '', catalogProductId: prepared.autoFilled?.allegroProductId || '' } : null });
     }
 
     if (action === 'allegro-offer-price-change') {
