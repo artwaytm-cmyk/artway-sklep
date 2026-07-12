@@ -5238,7 +5238,7 @@ async function allegroWczytajKomunikacje(cicho=false){
 async function allegroSynchronizujKomunikacje(autoReply=true){
   try{
     toast(autoReply?"Synchronizuję Allegro i wysyłam brakujące pierwsze odpowiedzi…":"Synchronizuję komunikację Allegro…");
-    const d=await chmura("allegro-sync-communications",{method:"POST",body:{limit:60,autoReply},timeout:90000});
+    const d=await chmura("allegro-sync-communications",{method:"POST",body:{limit:20,autoReply},timeout:90000});
     allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
     allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroKomunikacjaUstawienia(),autoReplies:d.autoReply?.items||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||null,autoReply:d.autoReply||null,sprawdzono:true};
     allegroZapiszCache();
