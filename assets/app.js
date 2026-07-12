@@ -1217,7 +1217,8 @@ function zbudujProdukty(){
                 for(let i=0; i<3 && zmianyKat[k]; i++) k = zmianyKat[k];
                 return k===p.kategoria ? p : {...p, kategoria:k}; })
     .map(p => stanyProduktow[p.id]!==undefined ? {...p, stan:+stanyProduktow[p.id]} : p)
-    .filter(p => !ukryteKat.includes(p.kategoria));
+    .filter(p => !ukryteKat.includes(p.kategoria))
+    .filter(p => !produktOznaczonyNiedostepny(p));
 }
 /* ── Magazyn ── */
 const LIMIT_POTWIERDZENIA_DOSTEPNOSCI = 5;
@@ -1230,6 +1231,7 @@ function produktOznaczonyNiedostepny(p){
   const d=wpisDostepnosciProduktu(p?.id);
   return !!d && String(d.status||"").toLowerCase()==="niedostepny";
 }
+function produktAutomatycznieNiedostepny(p){const d=wpisDostepnosciProduktu(p?.id);return produktOznaczonyNiedostepny(p)&&(d?.automatic===true||d?.source==="producent-agent");}
 function powodNiedostepnosci(p){
   const d=wpisDostepnosciProduktu(p?.id);
   return String(d?.powod||"").trim();
@@ -1241,21 +1243,32 @@ function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
   const key=String(id);
   const s=String(status||"dostepny").toLowerCase();
   if(s==="niedostepny"){
-    dostepnoscProduktow={...(dostepnoscProduktow||{}),[key]:{status:"niedostepny",powod:String(powod||"").trim(),data:new Date().toISOString(),operator:sesja?.email||"administrator"}};
+    dostepnoscProduktow={...(dostepnoscProduktow||{}),[key]:{status:"niedostepny",powod:String(powod||"").trim(),data:new Date().toISOString(),operator:sesja?.email||"administrator",source:"manual",automatic:false}};
   }else{
     dostepnoscProduktow={...(dostepnoscProduktow||{})};
     delete dostepnoscProduktow[key];
     delete dostepnoscProduktow[id];
   }
   zapiszLS("artway_dostepnosc",dostepnoscProduktow);
+  zbudujProdukty();
   loguj("info",`Dostępność sprzedażowa: produkt ${id} → ${s}`);
+  if(chmuraToken) void chmura("product-sale-availability",{method:"POST",body:{productId:id,available:s!=="niedostepny",reason:String(powod||"").trim()},timeout:45000})
+    .then(d=>loguj("info",`Dostępność produktu ${id} zsynchronizowana ze sklepem i Allegro: ukryto ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`))
+    .catch(e=>{loguj("blad",`Synchronizacja dostępności produktu ${id} z Allegro: ${e.message||e}`);toast("⚠️ Sklep zapisany, ale synchronizacja Allegro wymaga ponowienia");});
   toast(s==="niedostepny"?"Produkt oznaczony jako niedostępny":"Produkt dostępny w sprzedaży ✅");
   renderuj();
 }
 function przelaczDostepnoscProduktu(id){
   const p=produktMagazynowy(id);
   if(!p)return;
-  if(produktOznaczonyNiedostepny(p)) ustawDostepnoscProduktu(id,"dostepny");
+  if(produktOznaczonyNiedostepny(p)){
+    if(produktAutomatycznieNiedostepny(p)){
+      toast("Status ustala kontrola producenta — sprawdzam dostępność ponownie");
+      agentAISprawdzDostepnoscProducentow(1,[id]);
+      return;
+    }
+    ustawDostepnoscProduktu(id,"dostepny");
+  }
   else {
     const powod=prompt("Powód niedostępności widoczny tylko w panelu (opcjonalnie):","chwilowo niedostępny");
     if(powod===null)return;
@@ -1263,8 +1276,9 @@ function przelaczDostepnoscProduktu(id){
   }
 }
 function dostepnoscBadgeAdmin(p){
+  const automat=produktAutomatycznieNiedostepny(p);
   return produktOznaczonyNiedostepny(p)
-    ? `<span class="lvl lvl-blad">niedostępny w sklepie</span>${powodNiedostepnosci(p)?`<br><small>${esc(powodNiedostepnosci(p))}</small>`:""}`
+    ? `<span class="lvl lvl-blad">niedostępny w sklepie${automat?" • automatycznie":""}</span>${powodNiedostepnosci(p)?`<br><small>${esc(powodNiedostepnosci(p))}</small>`:""}`
     : `<span class="lvl lvl-ok">dostępny w sklepie</span>`;
 }
 function stanMagazynuId(id){
@@ -5921,7 +5935,9 @@ function allegroStatusKolejkiMeta(z){
     NEW:{label:"Nowe",klasa:"lvl-ostrzezenie"},PROCESSING:{label:"W realizacji",klasa:"lvl-info"},READY_FOR_SHIPMENT:{label:"Gotowe do wysłania",klasa:"lvl-info"},READY_FOR_PICKUP:{label:"Gotowe do odbioru",klasa:"lvl-info"},SENT:{label:"Wysłane",klasa:"lvl-ok"},PICKED_UP:{label:"Odebrane",klasa:"lvl-ok"},CANCELLED:{label:"Anulowane",klasa:"lvl-blad"},SUSPENDED:{label:"Wstrzymane",klasa:"lvl-blad"},RETURNED:{label:"Zwrócone",klasa:"lvl-blad"}
   })[s]||{label:s||"NEW",klasa:"lvl-info"};
 }
-function allegroEtapMagazynu(z={}){const s=String(z.warehouseStage||"").toLowerCase();return ["do_sprawdzenia","braki","kompletacja","spakowane","zrealizowane","zamkniete"].includes(s)?s:"do_sprawdzenia";}
+function allegroLokalnyStatus(z={}){return [z.warehouseStage,z.agentStage,z.localStage,z.magazynStatus,z.localStatus].map(v=>String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/ł/g,"l"));}
+function allegroZamowienieZrealizowaneLokalnie(z={}){return allegroLokalnyStatus(z).some(s=>["zrealizowane","zamkniete","wyslane","anulowane"].includes(s))||z.agentHandled===true||z.localCompleted===true;}
+function allegroEtapMagazynu(z={}){const official=allegroStatusKolejki(z);if(["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(official))return "zamkniete";if(allegroZamowienieZrealizowaneLokalnie(z))return "zrealizowane";const s=String(z.warehouseStage||"").toLowerCase();return ["do_sprawdzenia","braki","kompletacja","spakowane"].includes(s)?s:"do_sprawdzenia";}
 function allegroEtapMagazynuMeta(z={}){return ({do_sprawdzenia:{label:"Do sprawdzenia",klasa:"lvl-ostrzezenie"},braki:{label:"Braki — zamówić",klasa:"lvl-blad"},kompletacja:{label:"Kompletacja",klasa:"lvl-info"},spakowane:{label:"Spakowane",klasa:"lvl-ok"},zrealizowane:{label:"Zrealizowane lokalnie",klasa:"lvl-ok"},zamkniete:{label:"Zamknięte przez Allegro",klasa:"lvl-ok"}})[allegroEtapMagazynu(z)];}
 async function allegroUstawEtapMagazynu(orderId,stage){
   try{const d=await chmura("allegro-order-warehouse-stage",{method:"POST",body:{orderId,stage},timeout:18000});allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;allegroZapiszCache();toast("Etap magazynu zapisany — status Allegro pozostał bez zmian");renderuj();}catch(e){toast("⚠️ Etap magazynu: "+(e.message||e));}
@@ -6055,7 +6071,7 @@ async function allegroWybierzMapowaniePozycji(offerId,productId){await allegroMa
 function allegroZamowieniePasujeDoFiltra(z){
   const s=allegroStatusKolejki(z);
   const terminal=["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(s);
-  const lokalnieZrealizowane=allegroEtapMagazynu(z)==="zrealizowane";
+  const lokalnieZrealizowane=!terminal&&allegroZamowienieZrealizowaneLokalnie(z);
   const statusOk=filtrAllegroZamowien==="wszystkie"||(filtrAllegroZamowien==="do_obslugi"?!terminal&&!lokalnieZrealizowane:filtrAllegroZamowien==="zrealizowane"?lokalnieZrealizowane:s===filtrAllegroZamowien);
   const etapOk=filtrEtapuAllegroZamowien==="wszystkie"||allegroEtapMagazynu(z)===filtrEtapuAllegroZamowien;
   return statusOk&&etapOk;
@@ -6105,7 +6121,7 @@ function allegroZamowieniaTabelaHTML(){
   const zaznaczone=[...zaznaczoneAllegroZamowienia].filter(id=>wszystkie.some(z=>String(z.id)===id));
   const wszystkieWidoczneZaznaczone=!!widoczneZamowienia.length&&widoczneZamowienia.every(z=>zaznaczoneAllegroZamowienia.has(String(z.id)));
   const counts={do_obslugi:0,zrealizowane:0,wszystkie:wszystkie.length};
-  wszystkie.forEach(z=>{const s=allegroStatusKolejki(z),done=allegroEtapMagazynu(z)==="zrealizowane";counts[s]=(counts[s]||0)+1;if(done)counts.zrealizowane++;if(!done&&!["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(s))counts.do_obslugi++;});
+  wszystkie.forEach(z=>{const s=allegroStatusKolejki(z),terminal=["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(s),done=!terminal&&allegroZamowienieZrealizowaneLokalnie(z);counts[s]=(counts[s]||0)+1;if(done)counts.zrealizowane++;if(!done&&!terminal)counts.do_obslugi++;});
   const filtry=[["do_obslugi","Do obsługi"],["NEW","Nowe"],["PROCESSING","W realizacji"],["READY_FOR_SHIPMENT","Do wysłania"],["zrealizowane","Zrealizowane lokalnie"],["SENT","Wysłane"],["CANCELLED","Anulowane"],["RETURNED","Zwrócone"],["wszystkie","Wszystkie"]];
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
@@ -6154,7 +6170,7 @@ function allegroZlecenieHTML(z){
   const sztuk=items.reduce((sum,it)=>sum+Math.max(1,Number(it.quantity)||1),0);
   const idEtap=`allegro-etap-${z.id}`;
   const zaznaczone=zaznaczoneAllegroZamowienia.has(String(z.id));
-  const lokalnieDone=allegroEtapMagazynu(z)==="zrealizowane";
+  const lokalnieDone=allegroZamowienieZrealizowaneLokalnie(z);
   return `<article class="allegro-order-card ${zaznaczone?"is-selected ":""}${["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(s)||lokalnieDone?"is-closed":"is-active"}">
     <header class="allegro-order-head">
       <div class="allegro-order-title"><label class="allegro-order-select" title="Zaznaczenie tylko do operacji grupowych"><input type="checkbox" ${zaznaczone?"checked":""} onchange="allegroPrzelaczZaznaczenieZamowienia(${jsArg(z.id)},this.checked)"></label><span class="allegro-order-ico">📦</span><div><b>Zlecenie ${esc(z.id||z.nr||"—")}</b><small>${esc(allegroDataTxt(z.createdAt||z.firstFetchedAt))} • ${items.length} pozycji / ${sztuk} szt. • ${esc(z.total||"—")}</small></div></div>
@@ -6660,7 +6676,7 @@ function allegroSubnavHTML(aktywny="start"){
 function allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete){
   const cfg={
     start:{ico:"🟠",kicker:"Centrum Allegro",title:"Pulpit integracji",opis:"Jedno miejsce do kontroli zamówień, katalogu ofert, wystawiania i komunikacji.",metryki:[["Połączenie",allegroStan.connected?"Aktywne":"Wymaga uwagi"],["Oferty",(allegroOferty||[]).length],["Zamówienia",(allegroZamowienia||[]).length]]},
-    zamowienia:{ico:"📦",kicker:"Sprzedaż",title:"Kolejka zamówień Allegro",opis:"Status zawsze pochodzi z Allegro; agent osobno prowadzi sprawdzenie stanu, lokalizacji, zamówienie u producenta i kompletację.",metryki:[["Do obsługi",(allegroZamowienia||[]).filter(statusAllegroRezerwujeMagazyn).length],["Z brakami",(allegroZamowienia||[]).filter(z=>allegroEtapMagazynu(z)==="braki").length],["Zrealizowane lokalnie",(allegroZamowienia||[]).filter(z=>allegroEtapMagazynu(z)==="zrealizowane").length]]},
+    zamowienia:{ico:"📦",kicker:"Sprzedaż",title:"Kolejka zamówień Allegro",opis:"Status zawsze pochodzi z Allegro; agent osobno prowadzi sprawdzenie stanu, lokalizacji, zamówienie u producenta i kompletację.",metryki:[["Do obsługi",(allegroZamowienia||[]).filter(statusAllegroRezerwujeMagazyn).length],["Z brakami",(allegroZamowienia||[]).filter(z=>allegroEtapMagazynu(z)==="braki").length],["Zrealizowane lokalnie",(allegroZamowienia||[]).filter(z=>allegroZamowienieZrealizowaneLokalnie(z)&&!["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(allegroStatusKolejki(z))).length]]},
     oferty:{ico:"🏷️",kicker:"Katalog Allegro",title:"Oferty i powiązania",opis:"Profesjonalny katalog ofert z miniaturą, identyfikatorami, ceną, stanem i kontrolą powiązania z produktem sklepu.",metryki:[["Wszystkie",(allegroOferty||[]).length],["Podpięte",mapped],["Do powiązania",niepodpiete]]},
     wystawianie:{ico:"🟠",kicker:"Publikowanie",title:"Przygotowanie ofert",opis:"Kontrola kompletności danych produktu przed utworzeniem bezpiecznego szkicu oferty.",metryki:[["Produkty",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length],["Gotowe",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroBrakiProduktuDoWystawienia(p).length).length],["Do uzupełnienia",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroBrakiProduktuDoWystawienia(p).length).length]]},
     rentownosc:{ico:"📈",kicker:"Finanse produktu",title:"Opłacalność i wyliczenie marżowe",opis:"Prowizje z oficjalnego kalkulatora Allegro, pełny koszt jednostkowy i rekomendowane ceny dla założonego celu marży.",metryki:[["Pełne dane",produktyDoAdministracji().filter(allegroProduktMaPelneDaneMarzowe).length],["Bez prowizji",produktyDoAdministracji().filter(p=>!p.allegroFeeCalculatedAt).length],["Cel marży",`${allegroDocelowaMarza}%`]]},
@@ -7558,7 +7574,7 @@ function pozycjeZamowieniaMagazyn(z){
   return [];
 }
 function statusAllegroRezerwujeMagazyn(z){
-  return !!z && allegroEtapMagazynu(z)!=="zrealizowane" && String(z.status||"").toUpperCase()!=="CANCELLED" && !["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(allegroStatusKolejki(z));
+  return !!z && !allegroZamowienieZrealizowaneLokalnie(z) && String(z.status||"").toUpperCase()!=="CANCELLED" && !["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(allegroStatusKolejki(z));
 }
 function aktywneZamowieniaAllegro(){
   return (Array.isArray(allegroZamowienia)?allegroZamowienia:[]).filter(statusAllegroRezerwujeMagazyn);
@@ -8063,7 +8079,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
           <div class="warehouse-stock-actions">
             <div class="warehouse-stock-stepper"><button type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},-10)" ${stan===null?"disabled":""}>−10</button><button type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},-1)" ${stan===null?"disabled":""}>−1</button><strong>${stan===null?"∞":stan}</strong><button type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},1)" ${stan===null?"disabled":""}>+1</button><button type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},10)" ${stan===null?"disabled":""}>+10</button></div>
             <form class="warehouse-stock-set" onsubmit="korygujStanMagazynu(event,${jsArg(p.id)})"><input name="stan" value="${stan===null?"":stan}" placeholder="Nowy stan / puste = ∞" inputmode="numeric"><input name="powod" placeholder="Powód korekty" maxlength="80"><button class="btn" type="submit">Zapisz stan</button></form>
-            <div class="warehouse-stock-links"><button class="btn ghost" type="button" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})">${produktOznaczonyNiedostepny(p)?"▶️ Włącz sprzedaż":"⏸️ Wyłącz sprzedaż"}</button>${pi.url?`<button class="btn ghost" type="button" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź producenta</button><a class="btn ghost" href="${esc(pi.url)}" target="_blank" rel="noopener">Źródło ↗</a>`:""}<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Produkt</a></div>
+            <div class="warehouse-stock-links"><button class="btn ghost" type="button" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})">${produktAutomatycznieNiedostepny(p)?"🔄 Sprawdź i przywróć":produktOznaczonyNiedostepny(p)?"▶️ Włącz sprzedaż":"⏸️ Wyłącz sprzedaż"}</button>${pi.url?`<button class="btn ghost" type="button" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź producenta</button><a class="btn ghost" href="${esc(pi.url)}" target="_blank" rel="noopener">Źródło ↗</a>`:""}<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Produkt</a></div>
           </div>
           <details class="warehouse-stock-details"><summary>⚙️ Kartoteka, lokalizacja i parametry zatowarowania</summary><form class="warehouse-stock-meta-form" onsubmit="zapiszKartotekeMagazynu(event,${jsArg(p.id)})"><label>Lokalizacja ${selectLokalizacjiMagazynu(meta.lokalizacja||"")}</label><label>Dostawca<input name="dostawca" value="${esc(meta.dostawca||"")}" placeholder="np. Alexander"></label><label>EAN / kod<input name="kod" value="${esc(meta.kod||p.gtin||p.ean||"")}"></label><label>Stan minimalny<input name="minStock" value="${esc(meta.minStock??"")}" inputmode="numeric"></label><label>Stan docelowy<input name="targetStock" value="${esc(meta.targetStock??"")}" inputmode="numeric"></label><label>Czas dostawy (dni)<input name="leadTime" value="${esc(meta.leadTime??"")}" inputmode="numeric"></label><label>Minimalny zakup<input name="minZakup" value="${esc(meta.minZakup??"")}" inputmode="numeric"></label><label>Uwagi<input name="uwagi" value="${esc(meta.uwagi||"")}"></label><div class="warehouse-stock-meta-buttons"><button class="btn ghost" type="button" onclick="oznaczInwentaryzacjeProduktu(${jsArg(p.id)})">✅ Potwierdź stan</button><button class="btn" type="submit">💾 Zapisz kartotekę</button></div></form></details>
         </article>`;
@@ -8251,7 +8267,7 @@ function widokAdminProdukty(){
           <td><input value="${String(p.cena.toFixed(2)).replace(".",",")}" inputmode="decimal" onchange="ustawCene(${p.id}, this.value)" style="width:80px;padding:.25rem .4rem;border:1.5px solid var(--line);border-radius:8px;text-align:right;font-weight:700"> zł</td>
           <td>${p.staraCena?`<span class="lvl lvl-blad">−${Math.round((1-p.cena/p.staraCena)*100)}%</span>`:"—"}</td>
           <td><input value="${stanyProduktow[p.id]??""}" placeholder="∞" inputmode="numeric" onchange="ustawStan(${p.id}, this.value)" style="width:58px;padding:.25rem .4rem;border:1.5px solid var(--line);border-radius:8px;text-align:center;${stanyProduktow[p.id]===0?'background:#fee2e2':''}"><br><small style="color:var(--muted2)">tylko admin</small></td>
-          <td>${dostepnoscBadgeAdmin(p)}<br><button class="btn ghost" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})" style="padding:.25rem .5rem;margin-top:.25rem">${produktOznaczonyNiedostepny(p)?"Włącz sprzedaż":"Wyłącz sprzedaż"}</button></td>
+          <td>${dostepnoscBadgeAdmin(p)}<br><button class="btn ghost" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})" style="padding:.25rem .5rem;margin-top:.25rem">${produktAutomatycznieNiedostepny(p)?"Sprawdź i przywróć":produktOznaczonyNiedostepny(p)?"Włącz sprzedaż":"Wyłącz sprzedaż"}</button></td>
           <td>${allegroStatusProduktuHTML(p)}</td>
           <td style="white-space:nowrap">
             <a class="btn ghost" href="#/admin/produkty/edytuj/${p.id}" style="padding:.3rem .55rem" title="Edytuj">✏️</a>

@@ -257,6 +257,11 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "'/pricing/offer-fee-preview'",
   'allegro_fee_preview_audit',
   "action === 'supplier-availability-sample'",
+  "action === 'product-sale-availability'",
+  'function synchronizujSprzedazZDostepnosciaProducenta',
+  'allegro_availability_automation',
+  "source: 'producent-agent'",
+  'stock: { available: 0 }',
   'function stanProducentaZHtml',
   'IdoSell sizes.amount',
   'supplier_availability_audit',
@@ -271,6 +276,7 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function allegroZnajdzProduktKatalogu',
   "action === 'allegro-order-warehouse-stage'",
   'function allegroAgentPrzetworzZamowienia',
+  'completedLocally',
   'function allegroAutoMapujOfertyZKartoteka',
   'function allegroAutoUzupelnijKatalogProduktow',
   'function allegroPowiazanieWiarygodne',
@@ -358,6 +364,12 @@ if (!supplierFlow.includes("status === 'niski'") || !supplierFlow.includes('prod
 }
 if (!supplierFlow.includes("czytaj('orders'") || !supplierFlow.includes("czytaj('allegro_orders'") || !supplierFlow.includes('Math.ceil(limit * 0.75)') || !supplierFlow.includes('allegro30 * 5')) {
   fail('store-app.mjs: monitoring producentów musi zawsze priorytetyzować bestsellery sklepu i Allegro oraz aktywne zamówienia');
+}
+if (!supplierFlow.includes('synchronizujSprzedazZDostepnosciaProducenta') || !supplierFlow.includes('saleAutomation')) {
+  fail('store-app.mjs: wynik kontroli producenta musi automatycznie ukrywać lub przywracać sprzedaż w sklepie i Allegro');
+}
+if (!app.includes('.filter(p => !produktOznaczonyNiedostepny(p))') || !app.includes('function allegroZamowienieZrealizowaneLokalnie')) {
+  fail('assets/app.js: niedostępny produkt ma być ukryty w sklepie, a zrealizowane Allegro wyłączone z obsługi');
 }
 if (!app.includes('brak lokalnego stanu nie wyłącza produktu ze sprzedaży') || !app.includes('Błąd pobrania nie jest traktowany jako brak')) {
   fail('assets/app.js: stan lokalny musi być pomocniczy, a błąd strony producenta nie może oznaczać braku produktu');
