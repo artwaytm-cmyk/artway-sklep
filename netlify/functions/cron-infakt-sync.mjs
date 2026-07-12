@@ -1,6 +1,6 @@
-// Godzinne sprawdzenie asynchronicznych zadań inFakt.
-// Harmonogram nie wystawia dokumentów samodzielnie — wyłącznie aktualizuje status
-// faktur utworzonych wcześniej i zatwierdzonych w panelu administratora.
+// Godzinne sprawdzenie asynchronicznych zadań inFakt oraz odczyt cen zakupu.
+// Harmonogram nie wystawia dokumentów samodzielnie — aktualizuje status faktur
+// utworzonych wcześniej i odczytuje pozycje kosztowe KSeF z białej listy dostawców.
 export const config = { schedule: '17 * * * *' };
 
 export default async () => {
