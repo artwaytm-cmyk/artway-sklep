@@ -2588,6 +2588,57 @@ async function pobierzProduktProducenta(target = '') {
   const primary = unique[0], alternatives = unique.slice(0, 5).map((item, index) => ({ id: `candidate-${index + 1}`, url: item.canonicalUrl || item.resolvedUrl, confidence: item.confidence, missing: item.missing || [], fieldSources: item.fieldSources || {}, product: item.product, availability: item.availability }));
   return { ...primary, requestedUrl: raw, resolvedUrl: primary.resolvedUrl, canonicalUrl: primary.canonicalUrl, repaired: bezSledzenia(raw) !== primary.resolvedUrl, needsChoice: alternatives.length > 1, alternatives, diagnostics: { candidates, attempts, successful: results.length, distinctProducts: alternatives.length, selectedReason: candidates.find((x) => x.url === primary.requestedCandidate)?.reason || 'najpełniejsze dane', retryRecommended: false } };
 }
+function kluczCacheLinkuProduktu(value = '') {
+  try {
+    const raw = String(value || '').trim().replace(/https\/\//gi, 'https://').replace(/http\/\//gi, 'http://');
+    const u = new URL(raw);
+    ['query_id', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid'].forEach((key) => u.searchParams.delete(key));
+    u.hash = '';
+    return u.toString().replace(/\/$/, '').toLowerCase();
+  } catch { return String(value || '').trim().toLowerCase(); }
+}
+function aliasyCacheWynikuLinku(target = '', result = {}) {
+  return [...new Set([
+    target,
+    result.requestedUrl,
+    result.resolvedUrl,
+    result.canonicalUrl,
+    ...(Array.isArray(result.alternatives) ? result.alternatives.flatMap((x) => [x?.url, x?.product?.sourceUrl, x?.product?.producentUrl]) : []),
+  ].map(kluczCacheLinkuProduktu).filter(Boolean))].slice(0, 20);
+}
+async function pobierzProduktProducentaZPamiecia(target = '') {
+  const cacheRec = await czytaj('product_url_cache', { items: {}, updated_at: null });
+  const items = cacheRec.items && typeof cacheRec.items === 'object' ? { ...cacheRec.items } : {};
+  const key = kluczCacheLinkuProduktu(target);
+  try {
+    const result = await pobierzProduktProducenta(target);
+    const now = new Date().toISOString();
+    items[key] = { key, aliases: aliasyCacheWynikuLinku(target, result), fetchedAt: now, result };
+    const trimmed = Object.fromEntries(Object.entries(items).sort((a, b) => String(b[1]?.fetchedAt || '').localeCompare(String(a[1]?.fetchedAt || ''))).slice(0, 250));
+    await zapisz('product_url_cache', { items: trimmed, updated_at: now });
+    return { ...result, fromCache: false, cacheSavedAt: now };
+  } catch (error) {
+    const cached = items[key] || Object.values(items).find((x) => Array.isArray(x?.aliases) && x.aliases.includes(key));
+    const ageMs = cached?.fetchedAt ? Date.now() - new Date(cached.fetchedAt).getTime() : Infinity;
+    if (cached?.result && ageMs <= 30 * 86400000 && ['product_link_unavailable', 'fetch_error'].includes(String(error?.code || 'product_link_unavailable'))) {
+      const previous = cached.result;
+      return {
+        ...previous,
+        fromCache: true,
+        stale: true,
+        cacheSavedAt: cached.fetchedAt,
+        cacheAgeHours: Math.max(0, Math.round(ageMs / 360000) / 10),
+        diagnostics: {
+          ...(previous.diagnostics || {}),
+          cacheFallback: true,
+          retryRecommended: true,
+          liveFailure: { message: tekst(error?.message || error, 500), code: tekst(error?.code || '', 120), attempts: error?.linkDiagnostics?.attempts || [] },
+        },
+      };
+    }
+    throw error;
+  }
+}
 function allegroNormTekst(s = '') {
   return String(s || '')
     .toLowerCase()
@@ -5493,7 +5544,7 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const target = tekst(body.url, 1000).trim();
       if (!/^https?:\/\//i.test(target)) return odpowiedz({ ok: false, error: 'Podaj pełny adres URL produktu' }, 422);
-      return odpowiedz(await pobierzProduktProducenta(target));
+      return odpowiedz(await pobierzProduktProducentaZPamiecia(target));
     }
 
     // ─── PRODUKT: ręczna dostępność spójna ze sklepem i Allegro ───
