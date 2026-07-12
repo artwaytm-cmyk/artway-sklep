@@ -237,6 +237,7 @@ let producenciKartoteka = wczytajLS("artway_producenci", [
   {id:"producer-godan",name:"GoDan",website:"",orderEmail:"",contactPerson:"",phone:"",address:"",nip:"",leadTimeDays:3,minimumOrder:"",paymentTerms:"",emailSubject:"Zamówienie {numer} — Artway-TM",emailIntro:"Dzień dobry,\nprzesyłamy zatwierdzone zamówienie {numer}. Prosimy o potwierdzenie dostępności i terminu realizacji.",notes:"",active:true}
 ]);
 let agentAILinkiProducentow = wczytajLS("artway_agent_ai_linki_producentow", []); // kolejka URL-i produktów producentów do pobrania/sprawdzenia przez agenta
+let agentAIImportUrlStan={busy:false,data:null,selected:0,error:""};
 let agentAIAllegroZadania = wczytajLS("artway_agent_ai_allegro_zadania", []); // braki i błędy wystawiania przekazane agentowi
 let koszDodanych = wczytajLS("artway_kosz_dodane", []); // kosz: usunięte produkty własne (można przywrócić)
 let koszMeta = wczytajLS("artway_kosz_meta", {});      // id → data usunięcia i typ; automatyczne czyszczenie po 30 dniach
@@ -1649,7 +1650,9 @@ function zapiszHistorieAgenta(typ, opis, dane={}){
 }
 function normalizujUrlProducenta(url=""){
   try{
-    const u=new URL(String(url||"").trim());
+    const raw=String(url||"").trim().replace(/https\/\//gi,"https://").replace(/http\/\//gi,"http://");
+    const starts=[...raw.matchAll(/https?:\/\//gi)].map(m=>m.index),candidate=starts.length>1?raw.slice(starts[starts.length-1]):raw;
+    const u=new URL(candidate);
     ["query_id","utm_source","utm_medium","utm_campaign","utm_term","utm_content","fbclid","gclid"].forEach(k=>u.searchParams.delete(k));
     u.hash="";
     return u.toString();
@@ -1688,6 +1691,7 @@ function agentAIZapiszLinkProducenta(url,status="oczekuje",powod="",extra={}){
   const lista=idx>=0?[...poprzednie.slice(0,idx),rec,...poprzednie.slice(idx+1)]:[rec,...poprzednie];
   agentAILinkiProducentow=lista.slice(0,500);
   zapiszLS("artway_agent_ai_linki_producentow",agentAILinkiProducentow);
+  if(chmuraToken&&!chmuraWczytywanie)zaplanujZapisUstawien();
   return rec;
 }
 function agentAIUsunLinkProducenta(ref){
@@ -1720,16 +1724,18 @@ function agentAIZakonczLinkProducenta(ref, produkt={}){
 function agentAILinkiOczekujace(){
   return (Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[]).filter(x=>!["pobrano","zamkniete","zamknięte","usunieto","usunięto"].includes(String(x.status||"").toLowerCase()));
 }
+function agentAILinkiGotoweDoPonowienia(){const now=Date.now();return agentAILinkiOczekujace().filter(x=>["oczekuje","błąd"].includes(String(x.status||"oczekuje").toLowerCase())&&(!x.nextRetryAt||Date.parse(x.nextRetryAt)<=now));}
+function agentAINastepnaProbaLinku(proby=1){const delays=[15,60,360,1440,2880],minutes=delays[Math.min(delays.length-1,Math.max(0,Number(proby||1)-1))];return new Date(Date.now()+minutes*60000).toISOString();}
 async function agentAISprawdzLinkProducenta(ref,cicho=false){
   const lista=Array.isArray(agentAILinkiProducentow)?agentAILinkiProducentow:[];
   const rec=lista.find(x=>x.id===ref||normalizujUrlProducenta(x.url)===normalizujUrlProducenta(ref))||{id:"tmp",url:ref,proby:0};
   if(!rec.url) return null;
   const teraz=new Date();
   try{
-    const d=await chmura("product-url-inspect",{method:"POST",body:{url:rec.url},timeout:30000});
+    const d=await chmura("product-url-inspect",{method:"POST",body:{url:rec.url},timeout:70000});
     const p=d.product||{}, braki=brakiDanychProducenta(p,d);
-    const status=braki.length?"do uzupełnienia":"pobrano";
-    const next=agentAIZapiszLinkProducenta(rec.url,status,braki.length?`Braki po pobraniu: ${braki.join(", ")}`:"Dane pobrane poprawnie",{
+    const status=d.needsChoice?"wymaga wyboru":braki.length?"do uzupełnienia":"pobrano";
+    const next=agentAIZapiszLinkProducenta(rec.url,status,d.needsChoice?`Agent znalazł ${d.alternatives?.length||2} różne produkty — wybierz właściwy wariant`:braki.length?`Braki po pobraniu: ${braki.join(", ")}`:"Dane pobrane poprawnie",{
       proby:Number(rec.proby||0)+1,
       ostatniaProba:teraz.toISOString(),
       ostatniaProbaTxt:teraz.toLocaleString("pl-PL"),
@@ -1738,30 +1744,40 @@ async function agentAISprawdzLinkProducenta(ref,cicho=false){
       lastPrice:p.cena||"",
       lastMissing:braki,
       lastProduct:agentAIProduktZLinkuMini(p),
+      lastCandidates:(d.alternatives||[]).map(x=>({...x,product:agentAIProduktZLinkuMini(x.product||{})})).slice(0,5),
+      linkConfidence:d.confidence||0,
+      fieldSources:d.fieldSources||{},
+      diagnostics:d.diagnostics||{},
+      resolvedUrl:d.resolvedUrl||d.canonicalUrl||rec.url,
+      nextRetryAt:null,
       lastError:""
     });
-    if(!cicho) toast(status==="pobrano"?"Agent pobrał dane z linku ✅":"Agent pobrał link, ale są braki do uzupełnienia");
+    if(!cicho) toast(status==="pobrano"?`Agent pobrał dane z linku ✅ • pewność ${d.confidence||0}%`:d.needsChoice?`Agent znalazł ${d.alternatives?.length||2} produkty — wybierz właściwy`:`Agent pobrał link, ale są braki: ${braki.join(", ")}`);
     return {rec:next,dane:d,braki,status};
   }catch(e){
+    const proby=Number(rec.proby||0)+1,nextRetryAt=agentAINastepnaProbaLinku(proby);
     const next=agentAIZapiszLinkProducenta(rec.url,"oczekuje",e.message||String(e),{
-      proby:Number(rec.proby||0)+1,
+      proby,
       ostatniaProba:teraz.toISOString(),
       ostatniaProbaTxt:teraz.toLocaleString("pl-PL"),
+      nextRetryAt,
+      failureCode:e.code||"fetch_error",
+      diagnostics:e.linkDiagnostics||{},
       lastError:e.message||String(e)
     });
-    if(!cicho) toast("Agent zapisał link do ponownego pobrania: "+(e.message||e));
+    if(!cicho) toast(`Agent zapisał link do ponowienia ${new Date(nextRetryAt).toLocaleString("pl-PL")}: ${e.message||e}`);
     return {rec:next,blad:e};
   }
 }
 async function agentAISprawdzLinkiProducentow(limit=5){
-  const lista=agentAILinkiOczekujace().slice(0,limit);
-  if(!lista.length) return "Nie ma linków producentów oczekujących na pobranie.";
+  const lista=agentAILinkiGotoweDoPonowienia().slice(0,limit);
+  if(!lista.length) return agentAILinkiOczekujace().length?"Linki są zaplanowane do późniejszego ponowienia — Agent nie powtarza teraz tych samych błędów.":"Nie ma linków producentów oczekujących na pobranie.";
   const wyniki=[];
   for(const rec of lista) wyniki.push(await agentAISprawdzLinkProducenta(rec.id,true));
-  const ok=wyniki.filter(x=>x&&!x.blad&&!x.braki?.length).length, braki=wyniki.filter(x=>x&&!x.blad&&x.braki?.length).length, blad=wyniki.filter(x=>x?.blad).length;
-  zapiszHistorieAgenta("linki-producentow",`Agent sprawdził ${wyniki.length} linków producentów`,{ok,braki,blad});
+  const wybor=wyniki.filter(x=>x?.status==="wymaga wyboru").length,ok=wyniki.filter(x=>x&&!x.blad&&x.status==="pobrano").length,braki=wyniki.filter(x=>x&&!x.blad&&x.status==="do uzupełnienia").length,blad=wyniki.filter(x=>x?.blad).length;
+  zapiszHistorieAgenta("linki-producentow",`Agent sprawdził ${wyniki.length} linków producentów`,{ok,braki,wybor,blad});
   renderuj();
-  return `Sprawdziłem ${wyniki.length} linków producentów. Pobrane poprawnie: ${ok}. Do uzupełnienia: ${braki}. Błędy / do ponowienia: ${blad}.`;
+  return `Sprawdziłem ${wyniki.length} linków producentów. Pobrane poprawnie: ${ok}. Do uzupełnienia: ${braki}. Wymagają wyboru produktu: ${wybor}. Błędy / zaplanowane ponowienie: ${blad}.`;
 }
 function producentDostepnoscInfo(p={}){
   const u=ustawieniaMagazynuPelne(),prog=Math.max(1,Number(u.progNiskiProducenta)||50),maxAge=Math.max(1,Number(u.producentMaxWiekGodz)||48),url=String(p.producentUrl||p.sourceUrl||"").trim(),raw=p.stanProducenta,quantity=raw===""||raw===null||raw===undefined?null:Math.max(0,Math.floor(Number(raw)||0)),checked=p.producentSprawdzonoAt||"",age=checked?Math.max(0,(Date.now()-Date.parse(checked))/3600000):Infinity,stale=!checked||!Number.isFinite(age)||age>maxAge;
@@ -1807,21 +1823,22 @@ function agentAILinkiProducentowPanelHTML(){
       <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż linki producentów do pobrania')">Wpisz komendę</button>
     </div>
     <div class="agent-memory-list">
-      ${lista.length?lista.map(x=>`<div class="agent-memory-item">
-        <div><b>${esc(x.lastProductName||x.url)}</b><p>${esc(x.url)}</p><small>Status: ${esc(x.status||"oczekuje")} • próby: ${esc(x.proby||0)}${x.powod?` • ${esc(x.powod)}`:""}${Array.isArray(x.lastMissing)&&x.lastMissing.length?` • braki: ${esc(x.lastMissing.join(", "))}`:""}</small></div>
+      ${lista.length?lista.map(x=>`<div class="agent-memory-item agent-link-work-item">
+        <div><b>${esc(x.lastProductName||x.url)}</b><p>${esc(x.url)}</p><small>Status: ${esc(x.status||"oczekuje")} • próby: ${esc(x.proby||0)}${x.linkConfidence?` • kompletność: ${esc(x.linkConfidence)}%`:""}${x.powod?` • ${esc(x.powod)}`:""}${Array.isArray(x.lastMissing)&&x.lastMissing.length?` • braki: ${esc(x.lastMissing.join(", "))}`:""}${x.nextRetryAt?` • następna próba: ${esc(new Date(x.nextRetryAt).toLocaleString("pl-PL"))}`:""}</small>${Array.isArray(x.lastCandidates)&&x.lastCandidates.length>1?`<div class="agent-link-candidates">${x.lastCandidates.map((c,i)=>`<button type="button" onclick="agentAIWypelnijNowyProduktZLinku(${jsArg(x.id)},${i})"><b>${esc(c.product?.nazwa||`Wariant ${i+1}`)}</b><small>${esc(c.confidence||0)}% • ${esc(c.url||"")}</small></button>`).join("")}</div>`:""}</div>
         <div class="warehouse-worktable-actions">
           <button class="btn ghost" type="button" onclick="agentAISprawdzLinkProducenta(${jsArg(x.id)}).then(()=>renderuj())">Sprawdź</button>
-          ${x.lastProduct?`<button class="btn ghost" type="button" onclick="agentAIWypelnijNowyProduktZLinku(${jsArg(x.id)})">Dodaj produkt</button>`:""}
+          ${x.lastProduct?`<button class="btn ghost" type="button" onclick="agentAIWypelnijNowyProduktZLinku(${jsArg(x.id)})">${x.lastCandidates?.length>1?"Dodaj najlepszy wariant":"Dodaj produkt"}</button>`:""}
           <button class="btn danger" type="button" onclick="agentAIUsunLinkProducenta(${jsArg(x.id)})">Usuń</button>
         </div>
       </div>`).join(""):`<div class="agent-ops-empty">Brak zapisanych linków producentów.</div>`}
     </div>
   </div>`;
 }
-function agentAIWypelnijNowyProduktZLinku(id){
+function agentAIWypelnijNowyProduktZLinku(id,candidateIndex=null){
   const rec=(agentAILinkiProducentow||[]).find(x=>x.id===id);
-  if(!rec?.lastProduct){ toast("Najpierw sprawdź link, żeby agent miał dane produktu"); return; }
-  sessionStorage.setItem("artway_prefill_product",JSON.stringify({...rec.lastProduct,_agentLinkId:rec.id,_agentLinkUrl:rec.url}));
+  const candidate=Number.isInteger(candidateIndex)?rec?.lastCandidates?.[candidateIndex]?.product:null,product=candidate||rec?.lastProduct;
+  if(!product){ toast("Najpierw sprawdź link, żeby agent miał dane produktu"); return; }
+  sessionStorage.setItem("artway_prefill_product",JSON.stringify({...product,_agentLinkId:rec.id,_agentLinkUrl:rec.lastCandidates?.[candidateIndex]?.url||rec.url}));
   location.hash="#/admin/produkty/dodaj";
 }
 function zapiszRuchMagazynowy(ruch){
@@ -4220,6 +4237,8 @@ function agentAIPoprawOpisyProduktow(limit=40){
 function agentAIRozpoznajPolecenie(tekst=""){
   const raw=String(tekst||"").trim(), n=agentAINormalizuj(raw);
   if(!n) return {typ:"pomoc",raw,confidence:1};
+  const urlMatch=raw.match(/https?:\/\/\S+/i);
+  if(urlMatch&&agentAIMa(n,["sprawdz link","sprawdź link","pobierz z link","znajdz przez link","znajdź przez link","przeanalizuj link","uzupelnij z link","uzupełnij z link"]))return {typ:"link-producenta-analiza",url:urlMatch[0],raw,confidence:.99};
   const slash=n.split(/\s+/)[0].split("@")[0];
   if(slash.startsWith("/")){
     if(["/start","/pomoc","/help"].includes(slash)) return {typ:"pomoc",raw,confidence:1};
@@ -4948,7 +4967,7 @@ async function agentAIWykonajPolecenie(tekst=""){
   let odpowiedz="";
   try{
     if(intent.typ==="pomoc"){
-      odpowiedz=["Możesz pisać normalnie, np.:","• wykonaj bezpieczny plan agenta","• sprawdź samą funkcjonalność strony","• pobierz świeże dane ze wszystkich źródeł","• ponów błędne kroki","• pokaż centrum operacyjne / co mam dziś zrobić?","• wyślij raport na Telegram","• pokaż komunikację z klientami","• sprawdź wysyłki i etykiety InPost","• audyt produktów i katalogu","• status producentów i otwartych zamówień","• diagnostyka integracji","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę","• synchronizuj bazę"].join("\n");
+      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź link https://... i znajdź dane produktu","• wykonaj bezpieczny plan agenta","• sprawdź samą funkcjonalność strony","• pobierz świeże dane ze wszystkich źródeł","• ponów błędne kroki","• pokaż centrum operacyjne / co mam dziś zrobić?","• wyślij raport na Telegram","• pokaż komunikację z klientami","• sprawdź wysyłki i etykiety InPost","• audyt produktów i katalogu","• status producentów i otwartych zamówień","• diagnostyka integracji","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę","• synchronizuj bazę"].join("\n");
     }else if(intent.typ==="plan-wykonaj"){
       odpowiedz=await agentAIWykonajPlanBezpieczny("full");
     }else if(intent.typ==="plan-data"){
@@ -4957,6 +4976,10 @@ async function agentAIWykonajPolecenie(tekst=""){
       odpowiedz=await agentAIWykonajPlanBezpieczny("health");
     }else if(intent.typ==="plan-retry"){
       odpowiedz=await agentAIWykonajPlanBezpieczny("retry");
+    }else if(intent.typ==="link-producenta-analiza"){
+      const wynik=await agentAISprawdzLinkProducenta(intent.url,true);
+      if(wynik?.blad)odpowiedz=`Nie udało się teraz odczytać linku. Zaplanowałem kolejną próbę: ${wynik.rec?.nextRetryAt?new Date(wynik.rec.nextRetryAt).toLocaleString("pl-PL"):"później"}. Powód: ${wynik.blad.message||wynik.blad}`;
+      else{const d=wynik?.dane||{},alts=d.alternatives||[];odpowiedz=[d.needsChoice?`Znalazłem ${alts.length} możliwe produkty — nie zgaduję, wybierz wariant w sekcji Linki producentów.`:`Znalazłem produkt: ${d.product?.nazwa||"bez nazwy"}.`,`Kompletność danych: ${d.confidence||0}%. Braki: ${(wynik.braki||[]).join(", ")||"brak"}.`,`EAN: ${d.product?.ean||d.product?.gtin||"—"} • kod producenta: ${d.product?.kodProducenta||d.product?.mpn||"—"}.`,`Opis: ${String(d.product?.opis||"").length} znaków • zdjęcia: ${[d.product?.zdjecie,...(d.product?.zdjecia||[])].filter(Boolean).length}.`,d.repaired?`Naprawiony adres: ${d.resolvedUrl||d.canonicalUrl}`:"",...alts.slice(0,5).map((x,i)=>`${i+1}. ${x.product?.nazwa||"Produkt"} • ${x.confidence||0}% • ${x.url}`)].filter(Boolean).join("\n");}
     }else if(intent.typ==="centrum"){
       odpowiedz=agentAICentrumTekst();
     }else if(intent.typ==="komunikacja"){
@@ -5090,7 +5113,7 @@ function agentAIAnaliza(){
   });
   const lokAktywne=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(produktyAdmin), lokPozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK"&&!magazynLokalizacjaPoKodzie(k));
   const nadwyzki=agentAINadwyzkiDoPrzyjecia();
-  const linkiProd=agentAILinkiOczekujace();
+  const linkiProd=agentAILinkiOczekujace(),linkiDoWyboru=linkiProd.filter(x=>String(x.status||"").toLowerCase()==="wymaga wyboru"),linkiDoPonowienia=agentAILinkiGotoweDoPonowienia();
   const monitoringProducentow=statystykiDostepnosciProducentow(), alertyProducentow=[...monitoringProducentow.braki,...monitoringProducentow.niskie];
   const opisyDoPoprawy=agentAIProduktyZProblememOpisu(500);
   const allegroKontrola=aktywneZamowieniaAllegro().map(z=>({z,a:allegroAnalizaMagazynowaZamowienia(z)}));
@@ -5118,7 +5141,7 @@ function agentAIAnaliza(){
     {id:"kartoteka",poziom:brakKartoteki.length?"warn":"ok",ikona:"🗂️",tytul:"Kartoteka magazynowa",opis:brakKartoteki.length?`${brakKartoteki.length} produktów nie ma lokalizacji albo dostawcy.`:"Kartoteka magazynowa jest uzupełniona.",akcja:"kartoteka-domyslna"},
     {id:"lokalizacje",poziom:(!lokAktywne.length||lokPozaSlownikiem.length)?"warn":"ok",ikona:"🗺️",tytul:"Słownik lokalizacji magazynu",opis:!lokAktywne.length?"Brak utworzonych lokalizacji magazynu.":lokPozaSlownikiem.length?`${lokPozaSlownikiem.length} lokalizacji przy produktach nie ma w słowniku.`:`Aktywne lokalizacje: ${lokAktywne.length}.`,akcja:"#/admin/magazyn"},
     {id:"pamiec",poziom:(agentAIPamiec||[]).length?"ok":"warn",ikona:"🧠",tytul:"Pamięć i procedury agenta",opis:(agentAIPamiec||[]).length?`Agent ma ${(agentAIPamiec||[]).length} zapamiętanych procedur/notatek.`:"Agent nie ma jeszcze własnych procedur. Naucz go poleceniem „zapamiętaj: …”.",akcja:"#/admin/agent-ai"},
-    {id:"linki-producentow",poziom:linkiProd.length?"warn":"ok",ikona:"🔗",tytul:"Linki producentów do pobrania",opis:linkiProd.length?`${linkiProd.length} linków czeka na pobranie lub dopasowanie danych produktu.`:"Brak zaległych linków producentów.",akcja:"sprawdz-linki-producentow"},
+    {id:"linki-producentow",poziom:linkiDoWyboru.length?"bad":linkiProd.length?"warn":"ok",ikona:"🔗",tytul:"Linki producentów do pobrania",opis:linkiProd.length?`${linkiProd.length} zadań linków: ${linkiDoWyboru.length} wymaga wyboru właściwego produktu, ${linkiDoPonowienia.length} jest gotowych do ponownego pobrania.`:"Brak zaległych linków producentów.",akcja:"sprawdz-linki-producentow"},
     {id:"opisy-produktow",poziom:opisyDoPoprawy.length?"warn":"ok",ikona:"📝",tytul:"Opisy produktów",opis:opisyDoPoprawy.length?`${opisyDoPoprawy.length} produktów wymaga krótkiego opisu albo uporządkowania pełnego opisu.`:"Krótkie i pełne opisy produktów są uporządkowane.",akcja:"popraw-opisy"},
     {id:"monitoring",poziom:bezMonitoringu.length?"warn":"ok",ikona:"📍",tytul:"Produkty bez monitorowanego stanu",opis:bezMonitoringu.length?`${bezMonitoringu.length} produktów działa bez limitu magazynowego — poprawne, jeśli to świadoma decyzja.`:"Wszystkie produkty mają monitorowany stan.",akcja:"#/admin/magazyn"},
     {id:"inwentaryzacja",poziom:stareInwentaryzacje.length?"warn":"ok",ikona:"✅",tytul:"Inwentaryzacja",opis:stareInwentaryzacje.length?`${stareInwentaryzacje.length} monitorowanych produktów nie ma świeżej daty inwentaryzacji.`:"Inwentaryzacja monitorowanych produktów jest aktualna.",akcja:"audyt-magazynu"},
@@ -5138,6 +5161,7 @@ function utworzSzkiceFakturMasowo(){
   renderuj();
 }
 function agentAIKonkretneDzialanie(x={}){
+  if(x.id==="linki-producentow"&&x.poziom==="bad")return {action:"",href:"#/admin/agent-ai/plan",label:"Wybierz właściwe produkty",done:"Każdy niejednoznaczny link ma ręcznie wybrany wariant; Agent nie zgaduje produktu.",eta:"do 30 min",mode:"approval",owner:"Administrator",requiresApproval:true};
   const automatic={
     "funkcjonalnosc-strony":{action:"plan-bezpieczny",label:"Sprawdź funkcje",done:"Baza i integracje krytyczne odpowiadają poprawnie.",eta:"1–3 min"},
     "synchronizacja-danych":{action:"plan-bezpieczny",label:"Pobierz świeże dane",done:"Sklep, Allegro, InPost i inFakt mają aktualne dane.",eta:"1–3 min"},
@@ -6130,6 +6154,21 @@ function uzupelnijPoleFormularza(form,nazwa,wartosc,overwrite){
   if(!el) return;
   if(overwrite||!String(el.value||"").trim()) el.value=wartosc;
 }
+function agentAIUzupelnijFormularzZLinku(form,p={},d={},overwrite=false,url=""){
+  uzupelnijPoleFormularza(form,"nazwa",p.nazwa,overwrite);uzupelnijPoleFormularza(form,"kategoria",p.kategoria,overwrite);uzupelnijPoleFormularza(form,"opisKrotki",p.opisKrotki||agentAIUtworzOpisKrotki(p),overwrite);uzupelnijPoleFormularza(form,"opis",p.opis,overwrite);uzupelnijPoleFormularza(form,"cena",p.cena,overwrite);uzupelnijPoleFormularza(form,"zdjecie",p.zdjecie,overwrite);(p.zdjecia||[]).slice(0,15).forEach((z,i)=>uzupelnijPoleFormularza(form,"zdjecie"+(i+2),z,overwrite));uzupelnijPoleFormularza(form,"gtin",p.gtin||p.ean,overwrite);uzupelnijPoleFormularza(form,"mpn",p.mpn||p.kodProducenta,overwrite);uzupelnijPoleFormularza(form,"kodProducenta",p.kodProducenta||p.mpn,overwrite);uzupelnijPoleFormularza(form,"externalId",p.externalId,overwrite);
+  const canonicalProducer=allegroProducentKanoniczny({...p,sourceUrl:p.sourceUrl||url,producentUrl:url});uzupelnijPoleFormularza(form,"marka",canonicalProducer||p.marka,overwrite||!!canonicalProducer);uzupelnijPoleFormularza(form,"producent",canonicalProducer||p.producent||p.marka,overwrite||!!canonicalProducer);uzupelnijPoleFormularza(form,"rozmiar",p.rozmiar,overwrite);uzupelnijPoleFormularza(form,"dostepnoscProducenta",p.dostepnoscProducenta,overwrite);uzupelnijPoleFormularza(form,"sourceUrl",p.sourceUrl||url,overwrite);for(const field of ["stanProducenta","stanProducentaZrodlo","producentStatus","producentSprawdzonoAt"])uzupelnijPoleFormularza(form,field,p[field],true);if(form.elements.stanProducentaDokladny)form.elements.stanProducentaDokladny.value=p.stanProducentaDokladny?"1":"";
+  const pg=document.getElementById("podgladZdjecia");if(pg&&form.elements.zdjecie?.value)pg.innerHTML=`<img src="${esc(form.elements.zdjecie.value)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`;
+  return brakiDanychProducenta(p,d);
+}
+function agentAIRaportLinkuHTML(d={},selected=-1){
+  const alternatives=Array.isArray(d.alternatives)?d.alternatives:[],attempts=Array.isArray(d.diagnostics?.attempts)?d.diagnostics.attempts:[],product=selected>=0?alternatives[selected]?.product:d.product||{},sources=selected>=0?alternatives[selected]?.fieldSources||{}:d.fieldSources||{},missing=selected>=0?alternatives[selected]?.missing||[]:brakiDanychProducenta(product,d),confidence=selected>=0?alternatives[selected]?.confidence||0:d.confidence||0;
+  return `<div class="product-link-agent-report ${d.needsChoice&&selected<0?"needs-choice":""}"><header><div><span>🤖 Analiza linku</span><h3>${d.needsChoice&&selected<0?`Znaleziono ${alternatives.length} możliwe produkty`:esc(product.nazwa||"Wynik analizy produktu")}</h3><small>Kompletność ${esc(confidence)}% • ${esc(d.diagnostics?.selectedReason||"najpełniejsze dane")}</small></div><span class="lvl ${missing.length?"lvl-ostrzezenie":"lvl-ok"}">${missing.length?`${missing.length} braków`:"komplet danych"}</span></header>${d.repaired?`<div class="backend-note"><b>Naprawiono lub przekierowano adres:</b> ${esc(d.resolvedUrl||d.canonicalUrl||"")}</div>`:""}${d.needsChoice&&selected<0?`<div class="product-link-candidate-grid">${alternatives.map((c,i)=>`<article>${c.product?.zdjecie?`<img src="${esc(c.product.zdjecie)}" alt="">`:`<span>📦</span>`}<div><b>${esc(c.product?.nazwa||`Wariant ${i+1}`)}</b><small>EAN ${esc(c.product?.ean||c.product?.gtin||"—")} • kod ${esc(c.product?.kodProducenta||c.product?.mpn||"—")}</small><small>${esc(c.confidence||0)}% • braki: ${esc(c.missing?.join(", ")||"brak")}</small><small>${esc(c.url||"")}</small></div><button class="btn" type="button" onclick="agentAIWybierzKandydataZLinku(${i},this)">Wybierz ten produkt</button></article>`).join("")}</div>`:`<div class="product-link-field-grid">${[["Nazwa",product.nazwa,sources.nazwa],["EAN",product.ean||product.gtin,sources.ean],["Kod",product.kodProducenta||product.mpn,sources.kod],["Cena",product.cena?zl(product.cena):"",sources.cena],["Opis",product.opis?`${String(product.opis).length} znaków`:"",sources.opis],["Zdjęcia",[product.zdjecie,...(product.zdjecia||[])].filter(Boolean).length,sources.zdjecia],["Dostępność",product.dostepnoscProducenta,sources.dostepnosc]].map(([label,value,source])=>`<span class="${value!==""&&value!==0?"ok":"missing"}"><small>${label}</small><b>${esc(value||"brak")}</b><em>${esc(source||"nie znaleziono źródła")}</em></span>`).join("")}</div>`}<details><summary>Diagnostyka pobierania (${attempts.filter(x=>x.ok).length}/${attempts.length} wariantów poprawnych)</summary><div class="product-link-attempts">${attempts.map(a=>`<span class="${a.ok?"ok":"error"}"><b>${a.ok?"✅":"⚠️"} ${esc(a.reason||"próba")}</b><small>${esc(a.url||"")}</small><small>${a.ok?`HTTP ${esc(a.status)} • ${Math.max(1,Math.round((a.durationMs||0)/1000))} s • ${esc(a.confidence||0)}%`:`${esc(a.error||"błąd")} • ${Math.max(1,Math.round((a.durationMs||0)/1000))} s`}</small></span>`).join("")}</div></details></div>`;
+}
+function agentAIWybierzKandydataZLinku(index,button){
+  const form=button?.closest("form"),d=agentAIImportUrlStan.data,c=d?.alternatives?.[index];if(!form||!c?.product)return;
+  const url=c.url||d.resolvedUrl||form.elements.producentUrl.value,overwrite=!!form.elements.nadpiszImportUrl?.checked,braki=agentAIUzupelnijFormularzZLinku(form,c.product,{...d,missing:c.missing||[]},overwrite,url);form.elements.producentUrl.value=url;agentAIImportUrlStan={...agentAIImportUrlStan,selected:index};
+  const box=form.querySelector("[data-product-link-agent-result]");if(box)box.innerHTML=agentAIRaportLinkuHTML(d,index);agentAIZapiszLinkProducenta(url,braki.length?"do uzupełnienia":"pobrano",braki.length?`Wybrano wariant — braki: ${braki.join(", ")}`:"Wybrano i dopasowano właściwy wariant",{lastProductName:c.product.nazwa||"",lastProduct:agentAIProduktZLinkuMini(c.product),lastMissing:braki,lastCandidates:d.alternatives||[],linkConfidence:c.confidence||0,diagnostics:d.diagnostics||{},resolvedUrl:url,nextRetryAt:null});toast(`✅ Wybrano: ${c.product.nazwa||"produkt"} • kompletność ${c.confidence||0}%`);
+}
 async function pobierzDaneProduktuZUrl(btn){
   const form=btn.closest("form");
   const url=String(form?.elements?.producentUrl?.value||"").trim();
@@ -6138,35 +6177,17 @@ async function pobierzDaneProduktuZUrl(btn){
   try{
     btn.disabled=true;
     toast("Pobieram dane produktu ze strony producenta…");
-    const d=await chmura("product-url-inspect",{method:"POST",body:{url},timeout:30000});
+    agentAIImportUrlStan={busy:true,data:null,selected:0,error:""};const d=await chmura("product-url-inspect",{method:"POST",body:{url},timeout:70000});agentAIImportUrlStan={busy:false,data:d,selected:d.needsChoice?-1:0,error:""};
     const p=d.product||{};
-    uzupelnijPoleFormularza(form,"nazwa",p.nazwa,overwrite);
-    uzupelnijPoleFormularza(form,"kategoria",p.kategoria,overwrite);
-    uzupelnijPoleFormularza(form,"opisKrotki",p.opisKrotki||agentAIUtworzOpisKrotki(p),overwrite);
-    uzupelnijPoleFormularza(form,"opis",p.opis,overwrite);
-    uzupelnijPoleFormularza(form,"cena",p.cena,overwrite);
-    uzupelnijPoleFormularza(form,"zdjecie",p.zdjecie,overwrite);
-    (p.zdjecia||[]).slice(0,15).forEach((z,i)=>uzupelnijPoleFormularza(form,"zdjecie"+(i+2),z,overwrite));
-    uzupelnijPoleFormularza(form,"gtin",p.gtin||p.ean,overwrite);
-    uzupelnijPoleFormularza(form,"mpn",p.mpn||p.kodProducenta,overwrite);
-    uzupelnijPoleFormularza(form,"kodProducenta",p.kodProducenta||p.mpn,overwrite);
-    uzupelnijPoleFormularza(form,"externalId",p.externalId,overwrite);
-    const canonicalProducer=allegroProducentKanoniczny({...p,sourceUrl:p.sourceUrl||url,producentUrl:url});
-    uzupelnijPoleFormularza(form,"marka",canonicalProducer||p.marka,overwrite||!!canonicalProducer);
-    uzupelnijPoleFormularza(form,"producent",canonicalProducer||p.producent||p.marka,overwrite||!!canonicalProducer);
-    uzupelnijPoleFormularza(form,"rozmiar",p.rozmiar,overwrite);
-    uzupelnijPoleFormularza(form,"dostepnoscProducenta",p.dostepnoscProducenta,overwrite);
-    uzupelnijPoleFormularza(form,"sourceUrl",p.sourceUrl||url,overwrite);
-    for(const field of ["stanProducenta","stanProducentaZrodlo","producentStatus","producentSprawdzonoAt"])uzupelnijPoleFormularza(form,field,p[field],true);
-    if(form.elements.stanProducentaDokladny)form.elements.stanProducentaDokladny.value=p.stanProducentaDokladny?"1":"";
-    const braki=brakiDanychProducenta(p,d);
-    agentAIZapiszLinkProducenta(url,braki.length?"do uzupełnienia":"pobrano",braki.length?`Pobrano częściowo — braki: ${braki.join(", ")}`:"Pobrano i dopasowano do formularza",{lastProductName:p.nazwa||"",lastProduct:agentAIProduktZLinkuMini(p),lastMissing:braki,lastAvailability:p.dostepnoscProducenta||d.availability?.text||"",lastPrice:p.cena||""});
-    const pg=document.getElementById("podgladZdjecia");
-    if(pg&&form.elements.zdjecie?.value) pg.innerHTML=`<img src="${esc(form.elements.zdjecie.value)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`;
-    toast(braki.length?`Pobrano, ale agent zapisał braki: ${braki.join(", ")}`:`Dane producenta pobrane: ${p.stanProducenta!==""&&p.stanProducenta!==undefined?p.stanProducenta+" szt.":p.dostepnoscProducenta||"do sprawdzenia"}`);
+    const braki=d.needsChoice?[]:agentAIUzupelnijFormularzZLinku(form,p,d,overwrite,d.canonicalUrl||d.resolvedUrl||url);
+    const box=form.querySelector("[data-product-link-agent-result]");if(box)box.innerHTML=agentAIRaportLinkuHTML(d,d.needsChoice?-1:0);
+    agentAIZapiszLinkProducenta(url,d.needsChoice?"wymaga wyboru":braki.length?"do uzupełnienia":"pobrano",d.needsChoice?`Znaleziono ${d.alternatives?.length||2} produkty — wybierz wariant`:braki.length?`Pobrano częściowo — braki: ${braki.join(", ")}`:"Pobrano i dopasowano do formularza",{lastProductName:p.nazwa||"",lastProduct:agentAIProduktZLinkuMini(p),lastMissing:braki,lastCandidates:(d.alternatives||[]).map(x=>({...x,product:agentAIProduktZLinkuMini(x.product||{})})),lastAvailability:p.dostepnoscProducenta||d.availability?.text||"",lastPrice:p.cena||"",linkConfidence:d.confidence||0,fieldSources:d.fieldSources||{},diagnostics:d.diagnostics||{},resolvedUrl:d.resolvedUrl||d.canonicalUrl||url,nextRetryAt:null});
+    toast(d.needsChoice?`Agent znalazł ${d.alternatives?.length||2} produkty — wybierz właściwy poniżej`:braki.length?`Pobrano ${d.confidence||0}% danych; braki: ${braki.join(", ")}`:`Dane pobrane i dopasowane • kompletność ${d.confidence||0}%`);
   }catch(e){
-    agentAIZapiszLinkProducenta(url,"oczekuje",e.message||String(e));
-    toast("⚠️ Pobieranie produktu nieudane — link zapisany dla Agenta AI: "+(e.message||e));
+    const current=(agentAILinkiProducentow||[]).find(x=>normalizujUrlProducenta(x.url)===normalizujUrlProducenta(url)),proby=Number(current?.proby||0)+1,nextRetryAt=agentAINastepnaProbaLinku(proby);agentAIImportUrlStan={busy:false,data:null,selected:-1,error:e.message||String(e)};
+    agentAIZapiszLinkProducenta(url,"oczekuje",e.message||String(e),{proby,nextRetryAt,failureCode:e.code||"fetch_error",diagnostics:e.linkDiagnostics||{},lastError:e.message||String(e)});
+    const box=form?.querySelector("[data-product-link-agent-result]");if(box)box.innerHTML=`<div class="product-link-agent-report has-error"><header><div><span>⚠️ Agent linków</span><h3>Nie udało się pobrać produktu</h3><small>${esc(e.message||e)}</small></div><span class="lvl lvl-ostrzezenie">ponowienie zaplanowane</span></header><div class="backend-note">Następna automatyczna próba: <b>${esc(new Date(nextRetryAt).toLocaleString("pl-PL"))}</b>. Możesz poprawić adres albo użyć przycisku ponownie ręcznie.</div></div>`;
+    toast(`⚠️ Link zapisany; następna próba ${new Date(nextRetryAt).toLocaleString("pl-PL")}`);
   }
   finally{ btn.disabled=false; }
 }
@@ -8762,6 +8783,7 @@ function formularzProduktu(p, tryb){
           <button class="btn ghost" type="button" onclick="const u=this.form.elements.producentUrl.value.trim(); if(u){agentAIZapiszLinkProducenta(u,'oczekuje','Dodane ręcznie z edytora produktu'); toast('Link zapisany dla Agenta AI');} else toast('Wklej link producenta')">🤖 Dla agenta</button>
         </div>
         <label style="display:inline-flex;align-items:center;gap:.4rem;margin-top:.45rem;font-size:.82rem;color:var(--muted2)"><input type="checkbox" name="nadpiszImportUrl"> Nadpisz też pola, które już są uzupełnione</label>
+        <div data-product-link-agent-result></div>
       </div>
       <div class="f-row">
         <div class="f-group"><label>Nazwa *</label><input required name="nazwa" value="${esc(p.nazwa||"")}"></div>

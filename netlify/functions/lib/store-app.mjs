@@ -2549,21 +2549,44 @@ function parsujProduktZHtml(url, html) {
   };
 }
 async function pobierzProduktProducenta(target = '') {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
-  try {
-    const r = await fetch(target, {
-      redirect: 'follow', signal: controller.signal,
-      headers: {
-        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'accept-language': 'pl-PL,pl;q=0.9,en;q=0.6',
-      },
-    });
-    const html = await r.text();
-    if (!r.ok || !html) { const e = new Error(`Nie udało się pobrać strony producenta (${r.status})`); e.status = 502; throw e; }
-    return parsujProduktZHtml(r.url || target, html);
-  } finally { clearTimeout(timer); }
+  const raw = tekst(target, 4000).trim();
+  const naprawiony = raw.replace(/https\/\//gi, 'https://').replace(/http\/\//gi, 'http://').replace(/&amp;/gi, '&').trim();
+  const bezSledzenia = (value) => { try { const u = new URL(value); ['query_id', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid'].forEach((key) => u.searchParams.delete(key)); u.hash = ''; return u.toString(); } catch { return ''; } };
+  const publiczny = (value) => { try { const h = new URL(value).hostname.toLowerCase(); if (!h || h === 'localhost' || h === '::1' || h.endsWith('.local') || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return false; const m = h.match(/^172\.(\d+)\./); return !(m && Number(m[1]) >= 16 && Number(m[1]) <= 31); } catch { return false; } };
+  const urls = [], dodaj = (value, reason = 'podany adres') => { const clean = bezSledzenia(String(value || '').replace(/[),.;]+$/, '')); if (clean && /^https?:\/\//i.test(clean) && publiczny(clean) && !urls.some((x) => x.url === clean)) urls.push({ url: clean, reason }); };
+  dodaj(naprawiony, naprawiony === raw ? 'podany adres' : 'naprawiono brakujący dwukropek');
+  const starts = [...naprawiony.matchAll(/https?:\/\//gi)].map((m) => m.index);
+  for (let i = 0; i < starts.length; i++) dodaj(naprawiony.slice(starts[i], starts[i + 1] ?? naprawiony.length), 'adres odzyskany ze sklejonego linku');
+  const origins = [...urls].map((x) => { try { const u = new URL(x.url); return /\.[a-z]{2,}$/i.test(u.hostname) ? u.origin : ''; } catch { return ''; } }).filter(Boolean);
+  const paths = [...naprawiony.matchAll(/product-pol-\d+-[^?#\s"'<>]+?\.html/gi)].map((m) => m[0]);
+  for (const origin of origins.slice(-2)) for (const path of paths) dodaj(`${origin}/${path.replace(/^\/+/, '')}`, 'odtworzono adres produktu z identyfikatora w linku');
+  if (!urls.length) { const e = new Error('Nie udało się rozpoznać poprawnego adresu URL produktu'); e.status = 422; e.code = 'invalid_product_url'; throw e; }
+  const candidateScore = (item) => { let score = item.reason.includes('identyfikatora') ? 60 : item.reason.includes('odzyskany') ? 35 : 20; try { const u = new URL(item.url); if (/\.(pl|com|eu|de)$/i.test(u.hostname)) score += 25; if (/\.p(https)?$/i.test(u.hostname)) score -= 80; } catch { score -= 100; } if ((item.url.match(/product-pol-/gi) || []).length > 1) score -= 25; return score; };
+  const candidates = urls.sort((a, b) => candidateScore(b) - candidateScore(a)).slice(0, 5), attempts = [];
+  const fetchOne = async (candidate) => {
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 18000), started = Date.now();
+    try {
+      const r = await fetch(candidate.url, { redirect: 'follow', signal: controller.signal, headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'accept-language': 'pl-PL,pl;q=0.9,en;q=0.6', 'cache-control': 'no-cache' } });
+      const html = await r.text(), resolvedUrl = r.url || candidate.url, title = stripHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
+      if (!r.ok || !html) throw Object.assign(new Error(`HTTP ${r.status || 502}`), { statusCode: r.status || 502 });
+      if (html.length < 1200 || /access denied|captcha|cloudflare|verify you are human|odmowa dostępu/i.test(`${title} ${html.slice(0, 2500)}`)) throw Object.assign(new Error('Strona zwróciła blokadę automatycznego odczytu'), { statusCode: 403 });
+      const parsed = parsujProduktZHtml(resolvedUrl, html), canonicalTag = [...html.matchAll(/<link\b[^>]*rel=["'][^"']*canonical[^"']*["'][^>]*>/gi)].map((m) => attrHtml(m[0], 'href')).find(Boolean) || metaHtml(html, 'og:url') || '', canonicalUrl = canonicalTag ? absoluteUrl(resolvedUrl, canonicalTag) : resolvedUrl;
+      const fieldSources = { nazwa: metaHtml(html, 'og:title') ? 'Open Graph' : jsonLdProdukty(html)[0]?.name ? 'schema.org' : 'nagłówek H1', opis: /projector_longdescription/i.test(html) ? 'pełny opis producenta' : metaHtml(html, 'og:description') ? 'Open Graph' : 'treść strony', cena: /projector_price_value/i.test(html) ? 'cena producenta' : jsonLdProdukty(html)[0]?.offers?.price ? 'schema.org' : 'treść strony', ean: parsed.product?.ean ? (jsonLdProdukty(html)[0]?.gtin ? 'schema.org' : 'parametry produktu') : '', kod: parsed.product?.kodProducenta ? (jsonLdProdukty(html)[0]?.mpn ? 'schema.org' : 'parametry produktu') : '', zdjecia: parsed.product?.zdjecie ? (metaHtml(html, 'og:image') ? 'Open Graph + galeria' : 'galeria produktu') : '', dostepnosc: parsed.availability?.source || (parsed.availability?.text ? 'status produktu' : '') };
+      const quality = Math.max(0, Math.min(100, Number(parsed.confidence || 0) + (String(parsed.product?.opis || '').length > 300 ? 4 : 0) + (parsed.product?.ean ? 3 : 0)));
+      attempts.push({ url: candidate.url, reason: candidate.reason, status: r.status, ok: true, resolvedUrl, canonicalUrl, bytes: html.length, durationMs: Date.now() - started, confidence: quality, missing: parsed.missing || [] });
+      return { ...parsed, confidence: quality, requestedCandidate: candidate.url, resolvedUrl, canonicalUrl, fieldSources };
+    } catch (error) {
+      attempts.push({ url: candidate.url, reason: candidate.reason, status: Number(error?.statusCode || 0), ok: false, durationMs: Date.now() - started, error: error?.name === 'AbortError' ? 'Przekroczono 18 s oczekiwania' : tekst(error?.message || error, 500) });
+      return null;
+    } finally { clearTimeout(timer); }
+  };
+  const results = (await Promise.all(candidates.map(fetchOne))).filter(Boolean);
+  if (!results.length) { const e = new Error(`Agent sprawdził ${attempts.length} wariantów adresu, ale żaden nie zwrócił danych produktu`); e.status = 502; e.code = 'product_link_unavailable'; e.linkDiagnostics = { requestedUrl: raw, candidates, attempts, retryRecommended: true }; throw e; }
+  const fingerprint = (item) => tekst(item.product?.ean || item.product?.kodProducenta || item.product?.nazwa || item.resolvedUrl, 500).toLowerCase().replace(/\s+/g, ' ').trim();
+  const usable = results.filter((item) => Number(item.confidence || 0) >= 45 && item.product?.nazwa), ranked = usable.length ? usable : results;
+  const unique = [...new Map(ranked.sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0) || (a.missing?.length || 0) - (b.missing?.length || 0)).map((item) => [fingerprint(item), item])).values()];
+  const primary = unique[0], alternatives = unique.slice(0, 5).map((item, index) => ({ id: `candidate-${index + 1}`, url: item.canonicalUrl || item.resolvedUrl, confidence: item.confidence, missing: item.missing || [], fieldSources: item.fieldSources || {}, product: item.product, availability: item.availability }));
+  return { ...primary, requestedUrl: raw, resolvedUrl: primary.resolvedUrl, canonicalUrl: primary.canonicalUrl, repaired: bezSledzenia(raw) !== primary.resolvedUrl, needsChoice: alternatives.length > 1, alternatives, diagnostics: { candidates, attempts, successful: results.length, distinctProducts: alternatives.length, selectedReason: candidates.find((x) => x.url === primary.requestedCandidate)?.reason || 'najpełniejsze dane', retryRecommended: false } };
 }
 function allegroNormTekst(s = '') {
   return String(s || '')
@@ -6252,6 +6275,7 @@ export default async (req) => {
     if (e?.catalogMatch) body.catalogMatch = e.catalogMatch;
     if (e?.supportErrors) body.supportErrors = e.supportErrors;
     if (e?.agentTask) body.agentTask = e.agentTask;
+    if (e?.linkDiagnostics) body.linkDiagnostics = e.linkDiagnostics;
     return odpowiedz(body, status);
   }
 };
