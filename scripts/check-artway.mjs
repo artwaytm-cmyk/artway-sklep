@@ -79,6 +79,8 @@ requireMarkers('assets/styles.css', css, [
   '.supplier-availability',
   '.supplier-priority',
   '.warehouse-generator',
+  '.warehouse-stock-card',
+  '.warehouse-stock-toolbar',
   '.modal',
 ]);
 
@@ -191,8 +193,11 @@ requireMarkers('assets/app.js', app, [
   'function sprzedazKanalyMagazynowe',
   'function priorytetDostepnosciProduktu',
   'function generujRegalyIPolkiMagazynu',
+  'function wyczyscFiltryStanowMagazynu',
   'Generator struktury',
   'Lokalizacja nadrzędna',
+  'Centrum kontroli zapasu',
+  'Bestsellery najpierw',
   '#/admin/magazyn/dostawcy',
   'Próg ostrzeżenia u producenta',
   'stan_u_producenta',

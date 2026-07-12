@@ -7572,6 +7572,8 @@ function filtrujProduktyMagazynu(lista, rez, sprzedaz){
   if(filtrMagazynu==="brak") out=out.filter(p=>stanMagazynuId(p.id)===0);
   if(filtrMagazynu==="rezerwacje") out=out.filter(p=>Number(rez[p.id]||0)>0);
   if(filtrMagazynu==="sprzedaz") out=out.filter(p=>Number(sprzedaz[p.id]||0)>0);
+  if(filtrMagazynu==="bestsellery") out=out.filter(p=>priorytetDostepnosciProduktu(p).score>0);
+  if(filtrMagazynu==="alerty") out=out.filter(p=>{const i=producentDostepnoscInfo(p),d=dostepneSztukiMagazynu(p,rez),plan=sugestiaZatowarowania(p,rez,sprzedaz);return i.alert||d!==null&&d<0||Number(plan.ilosc||0)>0;});
   if(filtrMagazynu==="dozamowienia") out=out.filter(p=>Number(sugestiaZatowarowania(p,rez,sprzedaz).ilosc)>0);
   if(filtrMagazynu==="nadrezerwacja") out=out.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;});
   if(filtrMagazynu==="producent-niski") out=out.filter(p=>producentDostepnoscInfo(p).status==="niski");
@@ -7597,12 +7599,15 @@ function sortujProduktyMagazynu(lista, rez={}, sprzedaz={}, prog=5){
     if(sortowanieMagazynu==="stan") return (sa===null?Number.MAX_SAFE_INTEGER:sa)-(sb===null?Number.MAX_SAFE_INTEGER:sb);
     if(sortowanieMagazynu==="rezerwacje") return Number(rez[b.id]||0)-Number(rez[a.id]||0);
     if(sortowanieMagazynu==="sprzedaz") return Number(sprzedaz[b.id]||0)-Number(sprzedaz[a.id]||0);
+    if(sortowanieMagazynu==="priorytet") return priorytetDostepnosciProduktu(b).score-priorytetDostepnosciProduktu(a).score||String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
     if(sortowanieMagazynu==="wartosc") return ((sb||0)*kwotaNum(b.cena))-((sa||0)*kwotaNum(a.cena));
     if(sortowanieMagazynu==="dostepne") return (dostepneSztukiMagazynu(a,rez)??Number.MAX_SAFE_INTEGER)-(dostepneSztukiMagazynu(b,rez)??Number.MAX_SAFE_INTEGER);
     if(sortowanieMagazynu==="zakup") return Number(plan(b).ilosc||0)-Number(plan(a).ilosc||0);
     if(sortowanieMagazynu==="producent"){const rank={brak:0,niski:1,nieznany:2,blad:2,dostepny_nieznany:3,dostepny:4},ia=producentDostepnoscInfo(a),ib=producentDostepnoscInfo(b);return (rank[ia.status]??5)-(rank[ib.status]??5)||(ia.quantity??Number.MAX_SAFE_INTEGER)-(ib.quantity??Number.MAX_SAFE_INTEGER)||String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");}
     const supplierRank={brak:0,niski:1,nieznany:2,blad:2,dostepny_nieznany:3,dostepny:4},ia=producentDostepnoscInfo(a),ib=producentDostepnoscInfo(b),supplierDiff=(supplierRank[ia.status]??5)-(supplierRank[ib.status]??5);
     if(supplierDiff)return supplierDiff;
+    const planDiff=Number(plan(b).ilosc||0)-Number(plan(a).ilosc||0);if(planDiff)return planDiff;
+    const priorityDiff=priorytetDostepnosciProduktu(b).score-priorytetDostepnosciProduktu(a).score;if(priorityDiff)return priorityDiff;
     const ra=sa===null?999999:(sa===0?0:(sa<=prog?sa:100000+sa));
     const rb=sb===null?999999:(sb===0?0:(sb<=prog?sb:100000+sb));
     return ra-rb || String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
@@ -7621,6 +7626,9 @@ function ustawFiltrMagazynu(filtr, sort="ryzyko"){
   stronaMagazynu=1;
   renderuj();
 }
+function wyczyscFiltryStanowMagazynu(){
+  frazaMagazynu="";filtrMagazynu="wszystkie";filtrDostawcyMagazynu="wszyscy";filtrLokalizacjiMagazynu="wszystkie";filtrInwentaryzacjiMagazynu="wszystkie";sortowanieMagazynu="ryzyko";stronaMagazynu=1;renderuj();
+}
 function ustawStroneMagazynu(n){ stronaMagazynu=Math.max(1,Number(n)||1); renderuj(); }
 function ustawMagazynNaStronie(n){
   magazynNaStronie=[25,50,100,200,500].includes(Number(n))?Number(n):50;
@@ -7637,7 +7645,7 @@ function szybkaKorektaMagazynu(id, delta){
   const przed=stanMagazynuId(id);
   if(przed===null){ toast("Najpierw wpisz konkretny stan — produkt jest bez limitu"); return; }
   ustawStanMagazynowy(id, Math.max(0,przed+Number(delta||0)), {typ:Number(delta)>0?"przyjęcie":"korekta",powod:Number(delta)>0?"Szybkie przyjęcie":"Szybkie zmniejszenie"});
-  renderuj();
+  toast(`Stan zmieniony: ${przed} → ${Math.max(0,przed+Number(delta||0))}`);renderuj();
 }
 function zapiszUstawieniaMagazynu(e){
   e.preventDefault();
@@ -7761,7 +7769,7 @@ function eksportujSzkiceFakturJSON(){
   pobierzPlik("szkice-faktur-infakt.json",JSON.stringify(szkiceFaktur,null,2),"application/json");
 }
 function widokAdminMagazyn(sekcja="pulpit"){
-  const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30), u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
+  const rez=rezerwacjeMagazynowe(), kanalySpr=sprzedazKanalyMagazynowe(30), spr=kanalySpr.razem, u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
   const aktywna=["pulpit","dostawcy","stany","lokalizacje","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const wszystkie=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
   const supplierStats=statystykiDostepnosciProducentow(),supplierQuery=String(szukajProducentowMagazynu||"").toLowerCase().trim();
@@ -7777,6 +7785,9 @@ function widokAdminMagazyn(sekcja="pulpit"){
   const wartoscPlanu=planZakupu.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0);
   const nadrezerwacje=wszystkie.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;});
   const brakiKartoteki=wszystkie.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
+  const bestselleryMagazynu=wszystkie.filter(p=>priorytetDostepnosciProduktu(p,kanalySpr,rez).score>0);
+  const stareInwentaryzacje=wszystkie.filter(p=>{const d=magazynMetaProduktu(p.id).ostatniaInwentaryzacja,t=d?Date.parse(d):0;return !t||Date.now()-t>90*86400000;});
+  const alertyStanow=wszystkie.filter(p=>{const i=producentDostepnoscInfo(p),d=dostepneSztukiMagazynu(p,rez),plan=sugestiaZatowarowania(p,rez,spr);return i.alert||d!==null&&d<0||Number(plan.ilosc||0)>0;});
   const lokalizacje=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(wszystkie);
   const dostawcyMag=[...new Set(wszystkie.map(p=>magazynMetaProduktu(p.id).dostawca).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pl"));
   const pozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK" && !magazynLokalizacjaPoKodzie(k));
@@ -7795,22 +7806,22 @@ function widokAdminMagazyn(sekcja="pulpit"){
   const zamDoFV=pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane").filter(z=>z.klient?.nip||z.klient?.firma).slice(0,20);
   return adminSzkielet("/admin/magazyn", `
   ${magazynSubnavHTML(aktywna)}
-  <div class="panel warehouse-hero-panel">
+  <div class="panel warehouse-hero-panel ${aktywna!=="pulpit"?"is-compact":""}">
     <div class="warehouse-hero">
       <div>
         <span class="cat-label">Magazyn i dokumenty</span>
         <h1>🏬 ${esc(u.nazwa)}</h1>
         <p>Najpierw dostępność u producentów z linków źródłowych, potem braki do aktywnych zamówień. Stan lokalny pozostaje informacją pomocniczą.</p>
       </div>
-      <div class="diag-actions">
+      ${aktywna==="pulpit"?`<div class="diag-actions">
         <button class="btn" onclick="eksportujMagazynCSV()">📊 Eksport magazynu CSV</button>
         <button class="btn ghost" onclick="agentAISprawdzDostepnoscProducentow()">🏭 Sprawdź producentów</button>
         <button class="btn ghost" onclick="eksportujZatowarowanieCSV()">📦 Braki do zamówień</button>
         <a class="btn ghost" href="#/admin/agent-ai">🤖 Agent AI</a>
         <a class="btn ghost" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
-      </div>
+      </div>`:""}
     </div>
-    <div class="orders-stat-grid">
+    <div class="orders-stat-grid" style="${aktywna==="pulpit"?"":"display:none"}">
       <button class="order-stat-card stat-filter money" type="button" onclick="location.hash='#/admin/magazyn/dostawcy';filtrProducentowMagazynu='dostepne'"><span>🏭</span><b>${supplierStats.dostepne.length}</b><small>dostępne u producentów</small></button>
       <button class="order-stat-card stat-filter ${supplierStats.niskie.length?"hot":""}" type="button" onclick="location.hash='#/admin/magazyn/dostawcy';filtrProducentowMagazynu='niski'"><span>🟡</span><b>${supplierStats.niskie.length}</b><small>niski stan u producenta ≤ ${esc(u.progNiskiProducenta)}</small></button>
       <button class="order-stat-card stat-filter ${supplierStats.braki.length?"hot":""}" type="button" onclick="location.hash='#/admin/magazyn/dostawcy';filtrProducentowMagazynu='brak'"><span>🔴</span><b>${supplierStats.braki.length}</b><small>brak u producenta</small></button>
@@ -7935,85 +7946,60 @@ function widokAdminMagazyn(sekcja="pulpit"){
       </tr>`).join("") || `<tr><td colspan="10">Brak braków do aktywnych zamówień.</td></tr>`}
     </table></div>
   </div>
-  <div class="panel" style="${aktywna==="stany"?"":"display:none"}">
-    <div class="order-section-head">
-      <div><h2 style="margin-top:0">📋 Stany produktów</h2><p class="order-detail-lead">Stan lokalny jest pomocniczy. Najważniejsza jest dostępność z linku producenta i realne braki do aktywnych zamówień.</p></div>
-      <div class="diag-actions"><button class="btn" onclick='potwierdzWidoczneStanyMagazynu(${JSON.stringify(fragment.map(p=>p.id))})'>✅ Potwierdź widoczne stany</button><button class="btn ghost" onclick="eksportujMagazynCSV()">📤 Eksport pełny</button><button class="btn ghost" onclick="frazaMagazynu='';filtrMagazynu='wszystkie';filtrDostawcyMagazynu='wszyscy';filtrLokalizacjiMagazynu='wszystkie';filtrInwentaryzacjiMagazynu='wszystkie';sortowanieMagazynu='ryzyko';stronaMagazynu=1;renderuj()">Wyczyść filtry</button></div>
+  <div class="panel warehouse-stock-page" style="${aktywna==="stany"?"":"display:none"}">
+    <div class="order-section-head warehouse-stock-head">
+      <div><span class="order-pro-label">Centrum kontroli zapasu</span><h2>📋 Stany produktów</h2><p class="order-detail-lead">Jeden czytelny widok łączy dostępność producenta, sprzedaż Allegro i sklepu, rezerwacje, fizyczny zapas, lokalizację oraz decyzję o domówieniu.</p></div>
+      <div class="diag-actions"><button class="btn" onclick='potwierdzWidoczneStanyMagazynu(${JSON.stringify(fragment.map(p=>p.id))})'>✅ Potwierdź ${fragment.length} widocznych</button><button class="btn ghost" onclick="eksportujMagazynCSV()">📤 Eksport CSV</button><button class="btn ghost" onclick="wyczyscFiltryStanowMagazynu()">Wyczyść filtry</button></div>
     </div>
-    <div class="filter-grid warehouse-filter-grid">
-      <input placeholder="Szukaj: nazwa, SKU, ID, kategoria, lokalizacja, dostawca…" value="${esc(frazaMagazynu)}" oninput="frazaMagazynu=this.value;stronaMagazynu=1;renderuj()">
-      <select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">
-        ${[["wszystkie","Wszystkie produkty"],["producent-niski","Producent: niski stan"],["producent-brak","Producent: brak"],["producent-nieznany","Producent: niepotwierdzone"],["dozamowienia","Braki do zamówień"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Tylko monitorowane lokalnie"],["bezlimitu","Lokalnie bez limitu"],["niskie","Lokalny niski stan"],["brak","Lokalny stan zerowy"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["bezlokalizacji","Bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}
-      </select>
-      <select onchange="sortowanieMagazynu=this.value;stronaMagazynu=1;renderuj()">
-        ${[["ryzyko","Sortuj: ryzyko producenta"],["producent","Stan u producenta"],["zakup","Braki do zamówień"],["dostepne","Dostępne po rezerwacji"],["stan","Stan lokalny rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}
-      </select>
-      <select onchange="ustawMagazynNaStronie(this.value)">
-        ${[25,50,100,200,500].map(n=>`<option value="${n}" ${magazynNaStronie===n?"selected":""}>${n} na stronie</option>`).join("")}
-      </select>
-      <select onchange="filtrDostawcyMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszyscy">Każdy dostawca</option>${dostawcyMag.map(d=>`<option value="${esc(d)}" ${filtrDostawcyMagazynu===d?"selected":""}>${esc(d)}</option>`).join("")}</select>
-      <select onchange="filtrLokalizacjiMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszystkie">Każda lokalizacja</option><option value="BRAK" ${filtrLokalizacjiMagazynu==="BRAK"?"selected":""}>Bez lokalizacji</option>${lokalizacje.map(l=>`<option value="${esc(l.kod)}" ${filtrLokalizacjiMagazynu===l.kod?"selected":""}>${esc(l.kod)} — ${esc(l.nazwa||l.typ)}</option>`).join("")}</select>
-      <select onchange="filtrInwentaryzacjiMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszystkie">Każda inwentaryzacja</option><option value="aktualna" ${filtrInwentaryzacjiMagazynu==="aktualna"?"selected":""}>Aktualna ≤ 90 dni</option><option value="stara" ${filtrInwentaryzacjiMagazynu==="stara"?"selected":""}>Brak / starsza niż 90 dni</option></select>
+    <div class="warehouse-stock-summary">
+      <button class="stock-summary-card ${filtrMagazynu==="bestsellery"?"active":""}" onclick="ustawFiltrMagazynu('bestsellery','priorytet')"><span>🏆</span><b>${bestselleryMagazynu.length}</b><small>bestsellerów i aktywnych</small></button>
+      <button class="stock-summary-card ${filtrMagazynu==="alerty"?"active":""} ${alertyStanow.length?"alert":""}" onclick="ustawFiltrMagazynu('alerty','ryzyko')"><span>🚨</span><b>${alertyStanow.length}</b><small>alertów operacyjnych</small></button>
+      <button class="stock-summary-card ${filtrMagazynu==="dozamowienia"?"active":""}" onclick="ustawFiltrMagazynu('dozamowienia','zakup')"><span>📦</span><b>${planZakupu.length}</b><small>produktów do zamówienia</small></button>
+      <button class="stock-summary-card ${filtrMagazynu==="nadrezerwacja"?"active":""}" onclick="ustawFiltrMagazynu('nadrezerwacja','dostepne')"><span>🧾</span><b>${nadrezerwacje.length}</b><small>nadrezerwacji</small></button>
+      <button class="stock-summary-card ${filtrMagazynu==="bezlokalizacji"?"active":""}" onclick="ustawFiltrMagazynu('bezlokalizacji','priorytet')"><span>🗺️</span><b>${brakiKartoteki.length}</b><small>niepełnych kartotek</small></button>
+      <button class="stock-summary-card ${filtrInwentaryzacjiMagazynu==="stara"?"active":""}" onclick="filtrInwentaryzacjiMagazynu='stara';stronaMagazynu=1;renderuj()"><span>📅</span><b>${stareInwentaryzacje.length}</b><small>stanów do potwierdzenia</small></button>
     </div>
-    <div class="warehouse-worktable-stats"><span><b>${monitorowane.length}</b><small>monitorowane</small></span><span><b>${brak.length}</b><small>stan zerowy</small></span><span><b>${niskie.length}</b><small>niski stan</small></span><span><b>${nadrezerwacje.length}</b><small>nadrezerwacje</small></span><span><b>${planZakupu.length}</b><small>do zamówienia</small></span><span><b>${brakiKartoteki.length}</b><small>braki kartoteki</small></span></div>
-    <div class="results-bar">
-      <span>Znaleziono <b>${lista.length}</b> produktów. Strona ${stronaMagazynu} z ${liczbaStron}.</span>
+    <div class="warehouse-stock-quickfilters" aria-label="Szybkie filtry">
+      ${[["wszystkie","Wszystkie"],["bestsellery","🏆 Bestsellery"],["producent-brak","🔴 Brak u producenta"],["producent-niski","🟡 Niski u producenta"],["dozamowienia","📦 Do zamówienia"],["rezerwacje","🧾 Z rezerwacją"],["bezlokalizacji","🗺️ Bez lokalizacji"],["bezdostawcy","🏭 Bez dostawcy"]].map(([v,t])=>`<button type="button" class="${filtrMagazynu===v?"active":""}" onclick="ustawFiltrMagazynu(${jsArg(v)},${jsArg(v==="bestsellery"?"priorytet":v==="dozamowienia"?"zakup":"ryzyko")})">${t}</button>`).join("")}
     </div>
+    <div class="warehouse-stock-toolbar">
+      <label class="warehouse-stock-search"><span>Wyszukaj produkt</span><input placeholder="Nazwa, SKU, EAN, ID, kategoria, lokalizacja lub dostawca…" value="${esc(frazaMagazynu)}" oninput="frazaMagazynu=this.value;stronaMagazynu=1;clearTimeout(window.__warehouseSearch);window.__warehouseSearch=setTimeout(()=>renderuj(),260)"></label>
+      <label><span>Status</span><select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">${[["wszystkie","Wszystkie produkty"],["alerty","Wszystkie alerty"],["bestsellery","Bestsellery / aktywne"],["producent-niski","Producent: niski stan"],["producent-brak","Producent: brak"],["producent-nieznany","Producent: niepotwierdzone"],["dozamowienia","Braki do zamówień"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Monitorowane lokalnie"],["bezlimitu","Lokalnie bez limitu"],["niskie","Lokalny niski stan"],["brak","Lokalny stan zerowy"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["bezlokalizacji","Bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
+      <label><span>Sortowanie</span><select onchange="sortowanieMagazynu=this.value;stronaMagazynu=1;renderuj()">${[["ryzyko","Priorytet operacyjny"],["priorytet","Bestsellery najpierw"],["producent","Stan u producenta"],["zakup","Największe braki"],["dostepne","Dostępne po rezerwacji"],["stan","Stan lokalny rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
+      <label><span>Dostawca</span><select onchange="filtrDostawcyMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszyscy">Każdy dostawca</option>${dostawcyMag.map(d=>`<option value="${esc(d)}" ${filtrDostawcyMagazynu===d?"selected":""}>${esc(d)}</option>`).join("")}</select></label>
+      <label><span>Lokalizacja</span><select onchange="filtrLokalizacjiMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszystkie">Każda lokalizacja</option><option value="BRAK" ${filtrLokalizacjiMagazynu==="BRAK"?"selected":""}>Bez lokalizacji</option>${lokalizacje.map(l=>`<option value="${esc(l.kod)}" ${filtrLokalizacjiMagazynu===l.kod?"selected":""}>${esc(l.kod)} — ${esc(l.nazwa||l.typ)}</option>`).join("")}</select></label>
+      <label><span>Inwentaryzacja</span><select onchange="filtrInwentaryzacjiMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszystkie">Każda data</option><option value="aktualna" ${filtrInwentaryzacjiMagazynu==="aktualna"?"selected":""}>Aktualna ≤ 90 dni</option><option value="stara" ${filtrInwentaryzacjiMagazynu==="stara"?"selected":""}>Brak / starsza niż 90 dni</option></select></label>
+      <label><span>Na stronie</span><select onchange="ustawMagazynNaStronie(this.value)">${[25,50,100,200,500].map(n=>`<option value="${n}" ${magazynNaStronie===n?"selected":""}>${n} produktów</option>`).join("")}</select></label>
+    </div>
+    <div class="warehouse-stock-results"><span>Pokazano <b>${fragment.length}</b> z <b>${lista.length}</b> produktów</span><span>Strona ${stronaMagazynu} z ${liczbaStron}</span></div>
     <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
-    <div style="overflow-x:auto"><table class="log-table warehouse-table">
-      <tr><th>Produkt i identyfikatory</th><th>Kategoria</th><th>Producent / źródło</th><th>Stan lokalny / rezerwacje</th><th>Rotacja i pokrycie</th><th>Dostępność w sklepie</th><th>Ryzyko / zamówienie</th><th>Kartoteka magazynowa</th><th>Korekta</th></tr>
+    <div class="warehouse-stock-list">
       ${fragment.map(p=>{
-        const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), sp=Number(spr[p.id]||0), plan=sugestiaZatowarowania(p,rez,spr), meta=plan.meta, wart=stan===null?0:stan*kwotaNum(p.cena);
-        return `<tr>
-          <td><div style="display:flex;gap:.55rem;align-items:center">${p.zdjecie?`<img class="allegro-order-thumb" src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span class="allegro-order-thumb fallback">📦</span>`}<div><b>${esc(p.nazwa)}</b><br><small>ID: ${esc(p.id)} • SKU: ${esc(p.sku||"—")}<br>EAN: ${esc(p.gtin||p.ean||meta.kod||"—")}</small></div></div></td>
-          <td>${esc(p.kategoria||"—")}</td>
-          <td>${producentDostepnoscBadgeHTML(p)}<div class="warehouse-worktable-actions supplier-inline-actions">${producentDostepnoscInfo(p).url?`<button class="btn ghost" type="button" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź</button><a class="btn ghost" href="${esc(producentDostepnoscInfo(p).url)}" target="_blank" rel="noopener">Źródło ↗</a>`:`<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">Dodaj link</a>`}</div></td>
-          <td>
-            <b>${stan===null?"∞":stan}</b> ${stanBadgeMagazynu(stan,progNiskiProduktu(p))}
-            <br><small>Dostępne: <b>${plan.dostepne===null?"∞":esc(plan.dostepne)}</b> • rezerw.: ${r} • 30 dni: ${sp}</small>
-            <br><small>Wartość stanu: ${stan===null?"—":zl(wart)}</small>
-          </td>
-          <td><b>${sp} szt. / 30 dni</b><br><small>średnio ${(sp/30).toFixed(2).replace(".",",")} dziennie • pokrycie: ${plan.dniPokrycia===null?"—":plan.dniPokrycia+" dni"}<br>lead time: ${plan.lead} dni • cel: ${plan.target}</small></td>
-          <td>${dostepnoscBadgeAdmin(p)}<br><button class="btn ghost" type="button" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})" style="padding:.25rem .5rem;margin-top:.25rem">${produktOznaczonyNiedostepny(p)?"Włącz sprzedaż":"Wyłącz sprzedaż"}</button></td>
-          <td>
-            <div class="warehouse-plan ${plan.poziom}">
-              <b>${plan.ilosc?`Zamówić ${esc(plan.ilosc)} szt.`:"OK"}</b>
-              <small>${esc(plan.powod)}</small>
-              <small>Min: ${esc(plan.min)} • Cel: ${esc(plan.target)} • lead: ${esc(plan.lead)} dni${plan.dniPokrycia!==null?` • pokrycie: ${esc(plan.dniPokrycia)} dni`:""}</small>
-            </div>
-          </td>
-          <td>
-            <form class="warehouse-meta" onsubmit="zapiszKartotekeMagazynu(event,${jsArg(p.id)})">
-              <div class="warehouse-meta-grid">
-                ${selectLokalizacjiMagazynu(meta.lokalizacja||"")}
-                <input name="dostawca" value="${esc(meta.dostawca||"")}" placeholder="dostawca">
-                <input name="kod" value="${esc(meta.kod||p.gtin||p.ean||"")}" placeholder="EAN / kod">
-                <input name="minStock" value="${esc(meta.minStock??"")}" placeholder="min" inputmode="numeric" title="Próg minimalny produktu">
-                <input name="targetStock" value="${esc(meta.targetStock??"")}" placeholder="cel" inputmode="numeric" title="Docelowy stan">
-                <input name="leadTime" value="${esc(meta.leadTime??"")}" placeholder="lead dni" inputmode="numeric" title="Czas dostawy w dniach">
-                <input name="minZakup" value="${esc(meta.minZakup??"")}" placeholder="min zakup" inputmode="numeric" title="Minimalna ilość zakupu">
-                <input name="uwagi" value="${esc(meta.uwagi||"")}" placeholder="uwagi">
-              </div>
-              <div class="warehouse-meta-actions">
-                <small>Inwentaryzacja: ${esc(meta.ostatniaInwentaryzacja||"brak")}</small>
-                <button class="btn ghost" type="button" onclick="oznaczInwentaryzacjeProduktu(${jsArg(p.id)})">Potwierdź stan</button>
-                <button class="btn" type="submit">Zapisz kartotekę</button>
-              </div>
-            </form>
-          </td>
-          <td>
-            <form class="warehouse-adjust" onsubmit="korygujStanMagazynu(event,${jsArg(p.id)})">
-              <input name="stan" value="${stan===null?"":stan}" placeholder="∞" inputmode="numeric" title="Nowy stan">
-              <input name="powod" placeholder="powód korekty" maxlength="80">
-              <button class="btn ghost" type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},1)">+1</button>
-              <button class="btn ghost" type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},-1)">−1</button>
-              <button class="btn" type="submit">Zapisz</button>
-              <a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">Edytuj</a>
-            </form>
-          </td>
-        </tr>`;
-      }).join("")}
-    </table></div>
+        const stan=stanMagazynuId(p.id),r=Number(rez[p.id]||0),sp=Number(spr[p.id]||0),plan=sugestiaZatowarowania(p,rez,spr),meta=plan.meta,wart=stan===null?0:stan*kwotaNum(p.cena),pi=producentDostepnoscInfo(p),priority=priorytetDostepnosciProduktu(p,kanalySpr,rez),sklep30=Number(kanalySpr.sklep[p.id]||0),allegro30=Number(kanalySpr.allegro[p.id]||0),invTime=meta.ostatniaInwentaryzacja?Date.parse(meta.ostatniaInwentaryzacja):0,invOld=!invTime||Date.now()-invTime>90*86400000;
+        const risk=pi.status==="brak"||plan.dostepne!==null&&plan.dostepne<0?"critical":pi.status==="niski"||plan.ilosc>0?"warning":pi.stale||["nieznany","blad"].includes(pi.status)?"info":"ok";
+        const riskLabel=risk==="critical"?"Pilna reakcja":risk==="warning"?"Wymaga uwagi":risk==="info"?"Do weryfikacji":"Bez alarmu";
+        return `<article class="warehouse-stock-card stock-${risk}">
+          <header class="warehouse-stock-card-head">
+            <div class="warehouse-stock-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><h3>${esc(p.nazwa)}</h3><small>SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||meta.kod||"—")} • ID ${esc(p.id)}</small><small>${esc(p.kategoria||"Bez kategorii")} • ${esc(p.producent||meta.dostawca||"Producent nieprzypisany")}</small></div></div>
+            <div class="warehouse-stock-priority ${esc(priority.level)}"><b>${priority.score?`🏆 ${priority.score} pkt`:`${risk==="ok"?"✓":"!"} ${riskLabel}`}</b><small>Sklep ${sklep30} • Allegro ${allegro30} • aktywne ${priority.active}</small></div>
+            <div class="warehouse-stock-state"><span class="stock-state-dot ${risk}"></span><div><b>${riskLabel}</b><small>${dostepnoscBadgeAdmin(p)}</small></div></div>
+          </header>
+          <div class="warehouse-stock-card-grid">
+            <section><label>Stan fizyczny</label><div class="warehouse-stock-balance"><span><b>${stan===null?"∞":stan}</b><small>na stanie</small></span><span><b>${r}</b><small>rezerwacje</small></span><span class="${plan.dostepne!==null&&plan.dostepne<0?"negative":""}"><b>${plan.dostepne===null?"∞":plan.dostepne}</b><small>dostępne</small></span></div><small>Wartość: ${stan===null?"—":zl(wart)} • ${stanBadgeMagazynu(stan,progNiskiProduktu(p))}</small></section>
+            <section><label>Producent i źródło</label>${producentDostepnoscBadgeHTML(p,true)}<small>${pi.checked?`Kontrola: ${esc(allegroDataTxt(pi.checked))}`:"Nigdy nie sprawdzano"}${pi.stale?" • wynik nieaktualny":""}</small></section>
+            <section><label>Sprzedaż i pokrycie</label><b>${sp} szt. / 30 dni</b><small>Sklep ${sklep30} • Allegro ${allegro30} • średnio ${(sp/30).toFixed(2).replace(".",",")} dziennie</small><small>Pokrycie ${plan.dniPokrycia===null?"—":plan.dniPokrycia+" dni"} • cel ${plan.target} • dostawa ${plan.lead} dni</small></section>
+            <section class="warehouse-stock-decision ${plan.poziom}"><label>Decyzja magazynowa</label><b>${plan.ilosc?`Domówić ${esc(plan.ilosc)} szt.`:"Nie trzeba domawiać"}</b><small>${esc(plan.powod)}</small><small>Minimum ${esc(plan.min)} • cel ${esc(plan.target)} • min. zakup ${esc(plan.minZakup||0)}</small></section>
+          </div>
+          <div class="warehouse-stock-location"><span>🗺️ <b>${esc(meta.lokalizacja?nazwaLokalizacjiMagazynu(meta.lokalizacja):"Brak lokalizacji")}</b></span><span>🏭 ${esc(meta.dostawca||"Brak dostawcy")}</span><span class="${invOld?"old":""}">📅 ${meta.ostatniaInwentaryzacja?`Inwentaryzacja ${esc(allegroDataTxt(meta.ostatniaInwentaryzacja))}`:"Stan nigdy niepotwierdzony"}</span></div>
+          <div class="warehouse-stock-actions">
+            <div class="warehouse-stock-stepper"><button type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},-10)" ${stan===null?"disabled":""}>−10</button><button type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},-1)" ${stan===null?"disabled":""}>−1</button><strong>${stan===null?"∞":stan}</strong><button type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},1)" ${stan===null?"disabled":""}>+1</button><button type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},10)" ${stan===null?"disabled":""}>+10</button></div>
+            <form class="warehouse-stock-set" onsubmit="korygujStanMagazynu(event,${jsArg(p.id)})"><input name="stan" value="${stan===null?"":stan}" placeholder="Nowy stan / puste = ∞" inputmode="numeric"><input name="powod" placeholder="Powód korekty" maxlength="80"><button class="btn" type="submit">Zapisz stan</button></form>
+            <div class="warehouse-stock-links"><button class="btn ghost" type="button" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})">${produktOznaczonyNiedostepny(p)?"▶️ Włącz sprzedaż":"⏸️ Wyłącz sprzedaż"}</button>${pi.url?`<button class="btn ghost" type="button" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź producenta</button><a class="btn ghost" href="${esc(pi.url)}" target="_blank" rel="noopener">Źródło ↗</a>`:""}<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Produkt</a></div>
+          </div>
+          <details class="warehouse-stock-details"><summary>⚙️ Kartoteka, lokalizacja i parametry zatowarowania</summary><form class="warehouse-stock-meta-form" onsubmit="zapiszKartotekeMagazynu(event,${jsArg(p.id)})"><label>Lokalizacja ${selectLokalizacjiMagazynu(meta.lokalizacja||"")}</label><label>Dostawca<input name="dostawca" value="${esc(meta.dostawca||"")}" placeholder="np. Alexander"></label><label>EAN / kod<input name="kod" value="${esc(meta.kod||p.gtin||p.ean||"")}"></label><label>Stan minimalny<input name="minStock" value="${esc(meta.minStock??"")}" inputmode="numeric"></label><label>Stan docelowy<input name="targetStock" value="${esc(meta.targetStock??"")}" inputmode="numeric"></label><label>Czas dostawy (dni)<input name="leadTime" value="${esc(meta.leadTime??"")}" inputmode="numeric"></label><label>Minimalny zakup<input name="minZakup" value="${esc(meta.minZakup??"")}" inputmode="numeric"></label><label>Uwagi<input name="uwagi" value="${esc(meta.uwagi||"")}"></label><div class="warehouse-stock-meta-buttons"><button class="btn ghost" type="button" onclick="oznaczInwentaryzacjeProduktu(${jsArg(p.id)})">✅ Potwierdź stan</button><button class="btn" type="submit">💾 Zapisz kartotekę</button></div></form></details>
+        </article>`;
+      }).join("")||`<div class="warehouse-stock-empty"><b>Brak produktów pasujących do filtrów</b><p>Wyczyść filtry albo zmień kryteria wyszukiwania.</p><button class="btn" onclick="wyczyscFiltryStanowMagazynu()">Pokaż wszystkie</button></div>`}
+    </div>
     <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
   </div>
   <div class="warehouse-columns" style="${aktywna==="ruchy"?"":"display:none"}">
