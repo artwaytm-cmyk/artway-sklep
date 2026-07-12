@@ -231,6 +231,11 @@ let szkiceFaktur = wczytajLS("artway_faktury_szkice", []); // przygotowane dokum
 let agentAIHistoria = wczytajLS("artway_agent_ai_historia", []); // audyty i akcje agenta administratora
 let agentAIPamiec = wczytajLS("artway_agent_ai_pamiec", []); // zapamiętane procedury, reguły i notatki operacyjne agenta
 let agentAIZlecenia = wczytajLS("artway_agent_ai_zlecenia", []); // szkice zleceń utworzone przez agenta AI
+let producenciKartoteka = wczytajLS("artway_producenci", [
+  {id:"producer-alexander",name:"Alexander",website:"https://www.sklep.alexander.com.pl",orderEmail:"",contactPerson:"",phone:"",address:"",nip:"",leadTimeDays:3,minimumOrder:"",paymentTerms:"",emailSubject:"Zamówienie {numer} — Artway-TM",emailIntro:"Dzień dobry,\nprzesyłamy zatwierdzone zamówienie {numer}. Prosimy o potwierdzenie dostępności i terminu realizacji.",notes:"",active:true},
+  {id:"producer-multigra",name:"Multigra",website:"",orderEmail:"",contactPerson:"",phone:"",address:"",nip:"",leadTimeDays:3,minimumOrder:"",paymentTerms:"",emailSubject:"Zamówienie {numer} — Artway-TM",emailIntro:"Dzień dobry,\nprzesyłamy zatwierdzone zamówienie {numer}. Prosimy o potwierdzenie dostępności i terminu realizacji.",notes:"",active:true},
+  {id:"producer-godan",name:"GoDan",website:"",orderEmail:"",contactPerson:"",phone:"",address:"",nip:"",leadTimeDays:3,minimumOrder:"",paymentTerms:"",emailSubject:"Zamówienie {numer} — Artway-TM",emailIntro:"Dzień dobry,\nprzesyłamy zatwierdzone zamówienie {numer}. Prosimy o potwierdzenie dostępności i terminu realizacji.",notes:"",active:true}
+]);
 let agentAILinkiProducentow = wczytajLS("artway_agent_ai_linki_producentow", []); // kolejka URL-i produktów producentów do pobrania/sprawdzenia przez agenta
 let agentAIAllegroZadania = wczytajLS("artway_agent_ai_allegro_zadania", []); // braki i błędy wystawiania przekazane agentowi
 let koszDodanych = wczytajLS("artway_kosz_dodane", []); // kosz: usunięte produkty własne (można przywrócić)
@@ -268,7 +273,7 @@ let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania=""
    na pamięci przeglądarki (localStorage) jak dotychczas. */
 const CHMURA_URL = "/.netlify/functions/store";
 const CHMURA_AUTO_SYNC_MS = 60000;
-const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
 let chmuraToken = (function(){ try{ return JSON.parse(localStorage.getItem("artway_chmura_token"))||""; }catch(e){ return ""; } })();
 let chmuraStan = {dostepna:false, sprawdzono:false, admin:false, rev:0, updated_at:null, error:"", ostatniZapis:0};
 let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z serwera
@@ -358,6 +363,7 @@ function zbierzWspolneUstawienia(){
     artway_agent_ai_historia: agentAIHistoria,
     artway_agent_ai_pamiec: agentAIPamiec,
     artway_agent_ai_zlecenia: agentAIZlecenia,
+    artway_producenci: producenciKartoteka,
     artway_agent_ai_linki_producentow: agentAILinkiProducentow,
     artway_agent_ai_allegro_zadania: agentAIAllegroZadania,
     artway_opinie: opinie,
@@ -383,6 +389,7 @@ function nalozWspolneUstawienia(dane){
       artway_faktury_szkice:(v)=>{szkiceFaktur=Array.isArray(v)?v:[];}, artway_agent_ai_historia:(v)=>{agentAIHistoria=Array.isArray(v)?v:[];},
       artway_agent_ai_pamiec:(v)=>{agentAIPamiec=Array.isArray(v)?v:[];},
       artway_agent_ai_zlecenia:(v)=>{agentAIZlecenia=Array.isArray(v)?v:[];},
+      artway_producenci:(v)=>{producenciKartoteka=Array.isArray(v)?v:[];},
       artway_agent_ai_linki_producentow:(v)=>{agentAILinkiProducentow=Array.isArray(v)?v:[];},
       artway_agent_ai_allegro_zadania:(v)=>{agentAIAllegroZadania=Array.isArray(v)?v:[];},
       artway_opinie:(v)=>{opinie=v;},
@@ -449,7 +456,9 @@ async function chmuraPobierzWszystko(){
     if(d.settings && Object.keys(d.settings).length){ nalozWspolneUstawienia(d.settings); zapiszLS("artway_chmura_rev", d.rev||0); }
     chmuraStan = {...chmuraStan, dostepna:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     if(chmuraToken) await synchronizujBazeCentralna(true).catch(()=>{});
-    zastosujUstawienia(); zbudujProdukty(); odswiezMenu(); odswiezKoszyk();
+    zastosujUstawienia(); zbudujProdukty();
+    if(chmuraToken)agentAIUtworzZleceniaWedlugDostawcow("",{silent:true,automatic:true});
+    odswiezMenu(); odswiezKoszyk();
     toast("📥 Pobrano sklep z serwera ✅"); renderuj();
   }catch(e){ toast("Błąd pobierania: "+e.message); }
 }
@@ -3312,8 +3321,8 @@ function odswiezPoCichejSynchronizacji(){
   const aktywny=document.activeElement, tag=aktywneTag => aktywneTag && ["INPUT","TEXTAREA","SELECT"].includes(aktywneTag.tagName);
   if(tag(aktywny)) return;
   const t=trasa();
-  const odswiezane=["/admin","/admin/zamowienia","/admin/wysylki","/zamowienia"];
-  if(!odswiezane.some(x=>t===x || (x==="/admin/wysylki"&&t.startsWith("/admin/zamowienie/")))) return;
+  const odswiezane=["/admin","/admin/zamowienia","/admin/wysylki","/admin/agent-ai","/admin/magazyn","/zamowienia"];
+  if(!odswiezane.some(x=>t===x || (["/admin/agent-ai","/admin/magazyn"].includes(x)&&t.startsWith(x+"/")) || (x==="/admin/wysylki"&&t.startsWith("/admin/zamowienie/")))) return;
   const y=window.scrollY||0;
   renderuj();
   setTimeout(()=>window.scrollTo({top:y}),0);
@@ -3332,7 +3341,9 @@ async function automatycznaSynchronizacjaChmury(powod="timer"){
       if(sesja && !jestAdmin()) ok = (await pobierzMojeZamowieniaCentralne(true)) || ok;
     }
     if(ok){
-      zastosujUstawienia(); zbudujProdukty(); odswiezMenu(); odswiezKoszyk();
+      zastosujUstawienia(); zbudujProdukty();
+      if(chmuraToken)agentAIUtworzZleceniaWedlugDostawcow("",{silent:true,automatic:true});
+      odswiezMenu(); odswiezKoszyk();
       odswiezPoCichejSynchronizacji();
     }
     return ok;
@@ -4237,6 +4248,51 @@ function agentAIFormatZleceniaProducenta(zlecenie){
     "Zlecenie zapisano w tabeli operacyjnej agenta. Nie zostało wysłane automatycznie do dostawcy."
   ].join("\n").trim();
 }
+function agentAIStatusRoboczyProducenta(status="szkic"){
+  return ["szkic","do sprawdzenia","zaakceptowane","wysłane na telegram"].includes(String(status||"szkic").toLowerCase());
+}
+function agentAIStatusZamknietyDlaNowejWersji(status=""){
+  return ["wysłane do producenta","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"].includes(String(status||"").toLowerCase());
+}
+function agentAIDostawcaZlecenia(z={}){
+  return String(z.supplier||z.dostawcy?.[0]||z.pozycje?.[0]?.dostawca||"Bez przypisanego dostawcy").trim()||"Bez przypisanego dostawcy";
+}
+function producentKlucz(v=""){return String(v||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");}
+function producentPoNazwie(name=""){
+  const key=producentKlucz(name);return (producenciKartoteka||[]).find(p=>producentKlucz(p.name||p.nazwa)===key)||null;
+}
+function producentDaneZFormularza(form,base={}){
+  const f=new FormData(form),name=String(f.get("name")||"").trim();if(!name)return null;
+  return {...base,id:base.id||`producer-${producentKlucz(name)||Date.now().toString(36)}`,name,legalName:String(f.get("legalName")||"").trim(),orderEmail:String(f.get("orderEmail")||"").trim().toLowerCase(),contactPerson:String(f.get("contactPerson")||"").trim(),phone:String(f.get("phone")||"").trim(),website:String(f.get("website")||"").trim(),address:String(f.get("address")||"").trim(),nip:String(f.get("nip")||"").trim(),leadTimeDays:Math.max(0,Number(f.get("leadTimeDays"))||0),minimumOrder:String(f.get("minimumOrder")||"").trim(),paymentTerms:String(f.get("paymentTerms")||"").trim(),emailSubject:String(f.get("emailSubject")||"").trim()||"Zamówienie {numer} — Artway-TM",emailIntro:String(f.get("emailIntro")||"").trim(),notes:String(f.get("notes")||"").trim(),active:f.get("active")==="on",updatedAt:new Date().toISOString()};
+}
+function producentDodaj(e){
+  e.preventDefault();const p=producentDaneZFormularza(e.target,{});if(!p){toast("Podaj nazwę producenta");return;}
+  if(producentPoNazwie(p.name)){toast("Producent o tej nazwie już istnieje");return;}
+  producenciKartoteka=[p,...(producenciKartoteka||[])];zapiszLS("artway_producenci",producenciKartoteka);zapiszHistorieAgenta("producent",`Dodano producenta ${p.name}`,{producentId:p.id});toast("Producent dodany ✅");renderuj();
+}
+function producentZapisz(e,id){
+  e.preventDefault();const old=(producenciKartoteka||[]).find(p=>String(p.id)===String(id));if(!old)return;
+  const p=producentDaneZFormularza(e.target,old);if(!p)return;
+  producenciKartoteka=(producenciKartoteka||[]).map(x=>String(x.id)===String(id)?p:x);zapiszLS("artway_producenci",producenciKartoteka);zapiszHistorieAgenta("producent",`Zaktualizowano kartotekę ${p.name}`,{producentId:p.id,email:!!p.orderEmail});toast("Kartoteka producenta zapisana ✅");renderuj();
+}
+function producentUsun(id){
+  const p=(producenciKartoteka||[]).find(x=>String(x.id)===String(id));if(!p)return;
+  const powiazane=(agentAIZlecenia||[]).filter(z=>producentKlucz(agentAIDostawcaZlecenia(z))===producentKlucz(p.name));
+  const aktywne=powiazane.filter(z=>!agentAIStatusZamknietyDlaNowejWersji(z.status));
+  if(aktywne.length){
+    producenciKartoteka=(producenciKartoteka||[]).map(x=>String(x.id)===String(id)?{...x,active:false,archivedAt:new Date().toISOString()}:x);
+    zapiszLS("artway_producenci",producenciKartoteka);zapiszHistorieAgenta("producent",`Dezaktywowano kartotekę ${p.name} — istnieją aktywne dokumenty`,{producentId:p.id,aktywne:aktywne.length});toast(`Kartoteka ma ${aktywne.length} aktywne zamówienie(a) — została bezpiecznie dezaktywowana`);renderuj();return;
+  }
+  producenciKartoteka=(producenciKartoteka||[]).filter(x=>String(x.id)!==String(id));zapiszLS("artway_producenci",producenciKartoteka);zapiszHistorieAgenta("producent",`Usunięto kartotekę ${p.name}`,{producentId:p.id});toast("Kartoteka producenta usunięta");renderuj();
+}
+function producentFormHTML(p={}){
+  const edit=!!p.id;return `<form class="producer-record-card" onsubmit="${edit?`producentZapisz(event,${jsArg(p.id)})`:`producentDodaj(event)`}"><div class="producer-record-head"><div><span class="supplier-chip">🏭 ${esc(p.name||"Nowy producent")}</span><h3>${edit?"Dane i kontakt":"Dodaj producenta"}</h3></div>${edit?`<span class="lvl ${p.orderEmail?"lvl-ok":"lvl-ostrzezenie"}">${p.orderEmail?"e-mail gotowy":"brak e-maila zamówień"}</span>`:""}</div><div class="producer-form-grid"><div class="f-group"><label>Nazwa producenta *</label><input name="name" required value="${esc(p.name||"")}" placeholder="np. Alexander"></div><div class="f-group"><label>Pełna nazwa firmy</label><input name="legalName" value="${esc(p.legalName||"")}"></div><div class="f-group"><label>E-mail do zamówień *</label><input name="orderEmail" type="email" value="${esc(p.orderEmail||"")}" placeholder="zamowienia@producent.pl"></div><div class="f-group"><label>Osoba kontaktowa</label><input name="contactPerson" value="${esc(p.contactPerson||"")}"></div><div class="f-group"><label>Telefon</label><input name="phone" value="${esc(p.phone||"")}"></div><div class="f-group"><label>Strona internetowa</label><input name="website" type="url" value="${esc(p.website||"")}" placeholder="https://..."></div><div class="f-group"><label>NIP</label><input name="nip" value="${esc(p.nip||"")}"></div><div class="f-group"><label>Adres</label><input name="address" value="${esc(p.address||"")}"></div><div class="f-group"><label>Standardowy czas realizacji (dni)</label><input name="leadTimeDays" type="number" min="0" value="${esc(p.leadTimeDays??3)}"></div><div class="f-group"><label>Minimum zamówienia</label><input name="minimumOrder" value="${esc(p.minimumOrder||"")}" placeholder="np. 500 zł"></div><div class="f-group"><label>Warunki płatności</label><input name="paymentTerms" value="${esc(p.paymentTerms||"")}" placeholder="np. przelew 7 dni"></div><label class="check"><input name="active" type="checkbox" ${p.active!==false?"checked":""}> Aktywny producent</label></div><details ${edit?"":"open"}><summary>Szablon e-maila i notatki</summary><div class="f-group"><label>Temat wiadomości</label><input name="emailSubject" value="${esc(p.emailSubject||"Zamówienie {numer} — Artway-TM")}"><small>Dostępne pola: {numer}, {producent}</small></div><div class="f-group"><label>Wstęp wiadomości</label><textarea name="emailIntro" rows="4">${esc(p.emailIntro||"Dzień dobry,\nprzesyłamy zatwierdzone zamówienie {numer}. Prosimy o potwierdzenie dostępności i terminu realizacji.")}</textarea></div><div class="f-group"><label>Notatki wewnętrzne</label><textarea name="notes" rows="3">${esc(p.notes||"")}</textarea></div></details><div class="producer-record-actions"><button class="btn" type="submit">${edit?"💾 Zapisz kartotekę":"➕ Dodaj producenta"}</button>${edit&&p.website?`<a class="btn ghost" href="${esc(p.website)}" target="_blank" rel="noopener">🌐 Otwórz stronę</a>`:""}${edit?`<button class="btn danger" type="button" onclick="if(confirm('Usunąć tę kartotekę producenta?'))producentUsun(${jsArg(p.id)})">Usuń</button>`:""}</div></form>`;
+}
+function producenciKartotekaPanelHTML(){
+  const list=(producenciKartoteka||[]).slice().sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"pl")),ready=list.filter(p=>p.orderEmail&&p.active!==false).length;
+  const summary=list.map(p=>{const docs=(agentAIZlecenia||[]).filter(z=>agentAIDostawcaZlecenia(z)===p.name),open=docs.filter(z=>agentAIStatusRoboczyProducenta(z.status)).length,last=docs.slice().sort((a,b)=>String(b.data||"").localeCompare(String(a.data||"")))[0];return `<div class="producer-summary-card"><div><span class="supplier-chip">🏭 ${esc(p.name)}</span><b>${esc(p.contactPerson||p.legalName||"Kontakt nieuzupełniony")}</b><small>${p.orderEmail?`✉️ ${esc(p.orderEmail)}`:"brak e-maila zamówień"}${p.phone?` • 📞 ${esc(p.phone)}`:""}</small></div><div><strong>${docs.length}</strong><small>zamówień • ${open} bieżących</small>${last?`<small>ostatnie: ${esc(last.numer||last.id)}</small>`:""}</div></div>`;}).join("");
+  return `<div class="panel producer-directory"><div class="order-section-head"><div><span class="order-pro-label">Kartoteka zakupowa</span><h2 style="margin-top:.25rem">🏭 Producenci i kontakty</h2><p class="order-detail-lead">Adres e-mail z tej kartoteki jest jedynym adresem używanym do wysyłki zatwierdzonego zamówienia. Dane, kontakty i szablony synchronizują się ze wspólną bazą.</p></div><span class="lvl ${ready===list.length&&list.length?"lvl-ok":"lvl-ostrzezenie"}">${ready}/${list.length} gotowych do e-maila</span></div><div class="producer-directory-summary">${summary||`<div class="backend-note">Brak producentów w kartotece.</div>`}</div><div class="producer-directory-list">${list.map(producentFormHTML).join("")}${producentFormHTML({})}</div></div>`;
+}
 function agentAIUtworzZlecenieProducenta(tryb="braki", opcje={}){
   let pozycje=agentAIPozycjeZleceniaProducenta(tryb, opcje.limit||500);
   if(String(tryb||"braki").toLowerCase()==="braki"){
@@ -4248,6 +4304,26 @@ function agentAIUtworzZlecenieProducenta(tryb="braki", opcje={}){
   }
   if(opcje.dostawca!==undefined)pozycje=pozycje.filter(p=>String(p.dostawca||"Bez przypisanego dostawcy")===String(opcje.dostawca));
   if(!pozycje.length) return null;
+  const supplier=String(opcje.dostawca??pozycje[0]?.dostawca??"Bez przypisanego dostawcy").trim()||"Bez przypisanego dostawcy";
+  const partial=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(z=>String(z.status||"").toLowerCase()==="częściowo wysłane e-mailem"&&agentAIDostawcaZlecenia(z)===supplier);
+  if(partial)return null;
+  const open=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(z=>agentAIStatusRoboczyProducenta(z.status)&&agentAIDostawcaZlecenia(z)===supplier);
+  if(open){
+    const now=new Date(),previousStatus=String(open.status||"szkic").toLowerCase(),previousTelegramAt=open.telegramSentAt||null;
+    const map=new Map((open.pozycje||[]).map(p=>[String(p.produktId),{...p}]));
+    for(const item of pozycje){
+      const id=String(item.produktId),old=map.get(id);
+      if(old)map.set(id,{...old,ilosc:(Number(old.ilosc)||0)+(Number(item.ilosc)||0),iloscPotrzebna:(Number(old.iloscPotrzebna??old.ilosc)||0)+(Number(item.iloscPotrzebna??item.ilosc)||0),brakCalkowity:Math.max(Number(old.brakCalkowity||0),Number(item.brakCalkowity||0)),zamowienia:[...new Set([...(old.zamowienia||[]),...(item.zamowienia||[])])],powod:[old.powod,item.powod].filter(Boolean).join(" • ")});
+      else map.set(id,{...item});
+    }
+    Object.assign(open,agentAIPodsumujZlecenie({...open,pozycje:[...map.values()],supplier,dostawcy:[supplier],revision:Math.max(1,Number(open.revision)||1)+1,lastAutoUpdateAt:now.toISOString(),updateSource:opcje.automatic?"agent-live":"administrator",historia:[...(open.historia||[]),{at:now.toISOString(),type:"live-update",text:`Dopisano ${pozycje.length} pozycji / zmian z aktualnych braków.`}].slice(-100)}));
+    if(previousTelegramAt){open.telegramLastSentAt=previousTelegramAt;delete open.telegramSentAt;}
+    if(["zaakceptowane","wysłane na telegram"].includes(previousStatus)){open.status="do sprawdzenia";delete open.approvedAt;delete open.approvedBy;delete open.approvalRevision;}
+    agentAIZlecenia=(agentAIZlecenia||[]).map(z=>String(z.id)===String(open.id)?open:z);
+    zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);
+    zapiszHistorieAgenta("zlecenie",`Zaktualizowano bieżące ${open.numer}: +${pozycje.reduce((s,p)=>s+Number(p.ilosc||0),0)} szt.`,{zlecenieId:open.id,numer:open.numer,dostawca:supplier,revision:open.revision,automatic:!!opcje.automatic});
+    return {...open,_merged:true};
+  }
   const teraz=new Date(), numer=`AZ/${teraz.getFullYear()}/${String(teraz.getMonth()+1).padStart(2,"0")}/${String((Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).length+1).padStart(4,"0")}`;
   const rec={
     id:"AZ-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,6),
@@ -4258,34 +4334,41 @@ function agentAIUtworzZlecenieProducenta(tryb="braki", opcje={}){
     data:teraz.toISOString(),
     dataTxt:teraz.toLocaleString("pl-PL"),
     operator:sesja?.email||"administrator",
+    supplier,
+    revision:1,
     pozycje,
     sztuk:pozycje.reduce((s,x)=>s+Number(x.ilosc||0),0),
     wartoscSzacowana:pozycje.reduce((s,x)=>s+kwotaNum(x.wartoscSzacowana),0),
     dostawcy:[...new Set(pozycje.map(x=>x.dostawca||"Bez przypisanego dostawcy"))],
-    uwagi:opcje.uwagi||"Szkic utworzony przez Agenta AI na podstawie aktualnych zamówień i stanów magazynowych."
+    uwagi:opcje.uwagi||"Bieżący dokument roboczy. Agent dopisuje kolejne braki aż do zatwierdzenia i skutecznej wysyłki e-mailem do producenta.",
+    historia:[{at:teraz.toISOString(),type:"created",text:"Utworzono bieżący dokument roboczy producenta."}]
   };
   agentAIZlecenia=[rec,...(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[])].slice(0,1000);
   zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);
   zapiszHistorieAgenta("zlecenie",`Utworzono ${rec.numer}: ${rec.pozycje.length} pozycji / ${rec.sztuk} szt.`,{zlecenieId:rec.id,numer:rec.numer,tryb:rec.tryb,pozycje:rec.pozycje.length,sztuk:rec.sztuk});
   return rec;
 }
-function agentAIUtworzZleceniaWedlugDostawcow(dostawca=""){
-  const kandydaci=agentAIBrakiOperacyjne().filter(p=>Number(p.pozostaloDoZamowienia)>0);
+function agentAIUtworzZleceniaWedlugDostawcow(dostawca="",opcje={}){
+  const tryb=String(opcje.tryb||"braki").toLowerCase()==="niskie"?"niskie":"braki";
+  const kandydaci=tryb==="niskie"?agentAIPozycjeZleceniaProducenta("niskie",1000):agentAIBrakiOperacyjne().filter(p=>Number(p.pozostaloDoZamowienia)>0);
   const dostawcy=dostawca?[String(dostawca)]:agentAIGrupujPoDostawcy(kandydaci).map(([d])=>d);
   const utworzone=[];
-  dostawcy.forEach(d=>{const z=agentAIUtworzZlecenieProducenta("braki",{dostawca:d,uwagi:`Szkic braków dla dostawcy: ${d}.`});if(z)utworzone.push(z);});
-  if(utworzone.length){toast(`Utworzono ${utworzone.length} oddzielnych zleceń według dostawców`);renderuj();}
-  else toast("Brak niepokrytych pozycji do nowego zlecenia");
+  dostawcy.forEach(d=>{const z=agentAIUtworzZlecenieProducenta(tryb,{dostawca:d,automatic:!!opcje.automatic,uwagi:`Bieżący dokument roboczy dla producenta: ${d}.`});if(z)utworzone.push(z);});
+  if(!opcje.silent){if(utworzone.length){const merged=utworzone.filter(z=>z._merged).length;toast(merged?`Zaktualizowano ${merged} bieżących dokumentów producentów`:`Utworzono ${utworzone.length} dokumentów producentów`);renderuj();}else toast("Brak nowych niepokrytych pozycji albo oczekuje częściowa wysyłka e-mail");}
   return utworzone;
 }
 function agentAIZmienStatusZlecenia(id,status){
-  const dozwolone=["szkic","do sprawdzenia","zaakceptowane","wysłane na Telegram","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"];
+  const dozwolone=["szkic","do sprawdzenia","zaakceptowane","częściowo zrealizowane","zrealizowane","anulowane"];
   const s=dozwolone.includes(status)?status:"szkic";
   let znaleziono=false;
   agentAIZlecenia=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).map(z=>{
     if(z.id!==id) return z;
     znaleziono=true;
-    return {...z,status:s,aktualizacja:new Date().toISOString(),aktualizacjaTxt:new Date().toLocaleString("pl-PL")};
+    const now=new Date();
+    const next={...z,status:s,aktualizacja:now.toISOString(),aktualizacjaTxt:now.toLocaleString("pl-PL"),historia:[...(z.historia||[]),{at:now.toISOString(),type:"status",text:`Status: ${z.status||"szkic"} → ${s}`}].slice(-100)};
+    if(s==="zaakceptowane"){next.approvedAt=now.toISOString();next.approvedBy=sesja?.email||"administrator";next.approvalRevision=Math.max(1,Number(next.revision)||1);}
+    else if(!agentAIStatusZamknietyDlaNowejWersji(s)){delete next.approvedAt;delete next.approvedBy;delete next.approvalRevision;}
+    return next;
   });
   if(!znaleziono){ toast("Nie znaleziono zlecenia agenta"); return; }
   zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);
@@ -4293,13 +4376,14 @@ function agentAIZmienStatusZlecenia(id,status){
   toast("Status zlecenia agenta zapisany ✅");
   renderuj();
 }
+function agentAIZatwierdzZlecenie(id){agentAIZmienStatusZlecenia(id,"zaakceptowane");}
 function agentAIUsunZlecenie(id){
-  const przed=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).length;
-  agentAIZlecenia=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).filter(z=>z.id!==id);
-  if(agentAIZlecenia.length===przed){ toast("Nie znaleziono zlecenia agenta"); return; }
+  let found=false;const now=new Date().toISOString();
+  agentAIZlecenia=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).map(z=>{if(String(z.id)!==String(id))return z;found=true;return {...z,status:"anulowane",cancelledAt:now,cancelledBy:sesja?.email||"administrator",historia:[...(z.historia||[]),{at:now,type:"cancelled",text:"Dokument anulowany przez administratora."}].slice(-100)};});
+  if(!found){ toast("Nie znaleziono zlecenia agenta"); return; }
   zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);
-  zapiszHistorieAgenta("zlecenie","Usunięto szkic zlecenia agenta",{zlecenieId:id});
-  toast("Usunięto szkic zlecenia agenta");
+  zapiszHistorieAgenta("zlecenie","Anulowano dokument producenta",{zlecenieId:id});
+  toast("Dokument anulowany i zachowany w historii");
   renderuj();
 }
 function agentAIPodsumujZlecenie(z){
@@ -4319,16 +4403,16 @@ function agentAIPobierzZlecenieCSV(id){
   pobierzPlik(`zlecenie-producenta-${String(z.numer||z.id).replace(/[^a-z0-9_-]+/gi,"-")}.csv`,"\uFEFF"+csv,"text/csv");
 }
 function agentAIZlecenieTabelaDostawcyHTML(z,dostawca,pozycje){
-  const suma=pozycje.reduce((s,p)=>s+Number(p.ilosc||0),0), wartosc=pozycje.reduce((s,p)=>s+Number(p.ilosc||0)*kwotaNum(p.cenaBrutto),0);
-  return `<section class="supplier-split-card"><header><div><span class="supplier-chip">🏭 ${esc(dostawca)}</span><h4>Tabela zamówienia</h4><small>${pozycje.length} pozycji • ${suma} szt. • ${zl(wartosc)}</small></div><button class="btn telegram-btn" onclick="agentAIWyslijZlecenieTelegram(${jsArg(z.id)},${jsArg(dostawca)})">✈️ Wyślij tabelę na Telegram</button></header>
-  <div class="warehouse-worktable-wrap"><table class="log-table supplier-order-products"><tr><th>Zdjęcie</th><th>Kod</th><th>EAN</th><th>Nazwa produktu</th><th>Potrzeba</th><th>Zamawiamy</th><th>Nadwyżka</th><th>Powiązane zamówienia</th><th>Akcje</th></tr>${pozycje.map(p=>{const produkt=produktMagazynowy(p.produktId)||{};const potrzebna=Number(p.iloscPotrzebna??p.ilosc)||0, ilosc=Number(p.ilosc)||0;return `<tr><td><span class="admin-product-thumb">${produkt.zdjecie?`<img src="${esc(produkt.zdjecie)}" alt="" loading="lazy">`:`<span class="admin-product-thumb-fallback">${esc(produkt.ikona||"🎲")}</span>`}</span></td><td><b>${esc(p.kod||"—")}</b><br><small>ID ${esc(p.produktId||"—")}</small></td><td>${esc(p.ean||"—")}</td><td><b>${esc(p.nazwa||"Produkt")}</b><br><small>${p.stan===null?"stan bez limitu":`stan ${esc(p.stan||0)} • rez. ${esc(p.rezerwacje||0)}`} • ${esc(p.lokalizacja||"bez lokalizacji")}</small></td><td><b>${potrzebna}</b> szt.</td><td><div class="supplier-qty-control"><button type="button" onclick="agentAIPrzesunIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},-1)">−</button><input aria-label="Ilość zamawiana" inputmode="numeric" value="${ilosc}" onchange="agentAIUstawIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},this.value)"><button type="button" onclick="agentAIPrzesunIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},1)">+</button></div></td><td><span class="lvl ${ilosc>potrzebna?"lvl-ostrzezenie":"lvl-ok"}">${Math.max(0,ilosc-potrzebna)} szt.</span></td><td><small>${esc((p.zamowienia||[]).join(", ")||"—")}</small></td><td><div class="warehouse-worktable-actions"><button class="btn ghost" onclick="agentAIPowiekszPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)})">➕ Powiększ</button><button class="btn ghost" onclick="agentAIPrzyjmijPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)})">📥 Przyjmij</button></div></td></tr>`;}).join("")}</table></div></section>`;
+  const suma=pozycje.reduce((s,p)=>s+Number(p.ilosc||0),0), wartosc=pozycje.reduce((s,p)=>s+Number(p.ilosc||0)*kwotaNum(p.cenaBrutto),0),producer=producentPoNazwie(dostawca),editable=agentAIStatusRoboczyProducenta(z.status);
+  return `<section class="supplier-split-card"><header><div><span class="supplier-chip">🏭 ${esc(dostawca)}</span><h4>Tabela zamówienia</h4><small>${pozycje.length} pozycji • ${suma} szt. • ${zl(wartosc)} • ${producer?.orderEmail?`✉️ ${esc(producer.orderEmail)}`:"brak e-maila w kartotece"}</small></div><div class="diag-actions"><a class="btn ghost" href="#/admin/agent-ai/producenci">Kontakt</a><button class="btn telegram-btn" onclick="agentAIWyslijZlecenieTelegram(${jsArg(z.id)},${jsArg(dostawca)})">✈️ Podgląd Telegram</button></div></header>
+  <div class="warehouse-worktable-wrap"><table class="log-table supplier-order-products"><tr><th>Zdjęcie</th><th>Kod</th><th>EAN</th><th>Nazwa produktu</th><th>Potrzeba</th><th>Zamawiamy</th><th>Nadwyżka</th><th>Powiązane zamówienia</th><th>Akcje</th></tr>${pozycje.map(p=>{const produkt=produktMagazynowy(p.produktId)||{};const potrzebna=Number(p.iloscPotrzebna??p.ilosc)||0, ilosc=Number(p.ilosc)||0;return `<tr><td><span class="admin-product-thumb">${produkt.zdjecie?`<img src="${esc(produkt.zdjecie)}" alt="" loading="lazy">`:`<span class="admin-product-thumb-fallback">${esc(produkt.ikona||"🎲")}</span>`}</span></td><td><b>${esc(p.kod||"—")}</b><br><small>ID ${esc(p.produktId||"—")}</small></td><td>${esc(p.ean||"—")}</td><td><b>${esc(p.nazwa||"Produkt")}</b><br><small>${p.stan===null?"stan bez limitu":`stan ${esc(p.stan||0)} • rez. ${esc(p.rezerwacje||0)}`} • ${esc(p.lokalizacja||"bez lokalizacji")}</small></td><td><b>${potrzebna}</b> szt.</td><td>${editable?`<div class="supplier-qty-control"><button type="button" onclick="agentAIPrzesunIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},-1)">−</button><input aria-label="Ilość zamawiana" inputmode="numeric" value="${ilosc}" onchange="agentAIUstawIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},this.value)"><button type="button" onclick="agentAIPrzesunIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},1)">+</button></div>`:`<b>${ilosc}</b> szt.<br><small>wersja zamknięta</small>`}</td><td><span class="lvl ${ilosc>potrzebna?"lvl-ostrzezenie":"lvl-ok"}">${Math.max(0,ilosc-potrzebna)} szt.</span></td><td><small>${esc((p.zamowienia||[]).join(", ")||"—")}</small></td><td><div class="warehouse-worktable-actions">${editable?`<button class="btn ghost" onclick="agentAIPowiekszPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)})">➕ Powiększ</button>`:""}<button class="btn ghost" onclick="agentAIPrzyjmijPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)})">📥 Przyjmij</button></div></td></tr>`;}).join("")}</table></div></section>`;
 }
 function agentAIZleceniaPanelHTML(){
   const lista=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).slice().sort((a,b)=>String(b.data||"").localeCompare(String(a.data||"")));
-  const statusy=["szkic","do sprawdzenia","zaakceptowane","wysłane na Telegram","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"];
-  return `<div class="panel agent-orders-panel"><div class="order-section-head"><div><span class="order-pro-label">Dokumenty zakupowe</span><h2 style="margin-top:.25rem">🧾 Zamówienia do producentów</h2><p class="order-detail-lead">Każdy dostawca ma własną tabelę. Ilość można zmienić bezpośrednio w wierszu, a gotową tabelę wysłać na Telegram.</p></div><button class="btn" onclick="agentAIUtworzZleceniaWedlugDostawcow()">🤖 Utwórz oddzielnie według dostawców</button></div>
-  <div class="orders-stat-grid"><div class="order-stat-card"><span>🧾</span><b>${lista.length}</b><small>zleceń producenta</small></div><div class="order-stat-card"><span>🏭</span><b>${new Set(lista.flatMap(z=>z.dostawcy||[])).size}</b><small>dostawców</small></div><div class="order-stat-card"><span>🔢</span><b>${lista.reduce((s,z)=>s+Number(z.sztuk||0),0)}</b><small>sztuk łącznie</small></div><div class="order-stat-card money"><span>💰</span><b>${zl(lista.reduce((s,z)=>s+kwotaNum(z.wartoscSzacowana),0))}</b><small>wartość szacowana</small></div></div>
-  <div class="supplier-order-list">${lista.map(z=>{const zamkniete=["zrealizowane","anulowane"].includes(String(z.status||"").toLowerCase()),grupy=agentAIGrupujPoDostawcy(z.pozycje||[]);return `<article class="supplier-order-card ${zamkniete?"is-closed":""}"><header class="supplier-order-head"><div><span class="order-pro-label">${esc(z.tryb==="niskie"?"Uzupełnienie magazynu":"Braki do zamówień")}</span><h3>${esc(z.numer||z.id)}</h3><small>${esc(z.dataTxt||allegroDataTxt(z.data))} • ${grupy.length} dostawców • ${(z.pozycje||[]).length} pozycji • ${esc(z.sztuk||0)} szt. • ${zl(z.wartoscSzacowana||0)}</small></div><div class="supplier-order-status"><select onchange="agentAIZmienStatusZlecenia(${jsArg(z.id)},this.value)">${statusy.map(s=>`<option value="${s}" ${z.status===s?"selected":""}>${s}</option>`).join("")}</select><small>${z.telegramSentAt?`Telegram: ${esc(allegroDataTxt(z.telegramSentAt))}`:"Jeszcze niewysłane"}</small></div></header><div class="supplier-split-list">${grupy.map(([d,items])=>agentAIZlecenieTabelaDostawcyHTML(z,d,items)).join("")}</div><footer class="supplier-order-actions"><button class="btn telegram-btn" onclick="agentAIWyslijZlecenieTelegram(${jsArg(z.id)})">✈️ Wyślij wszystkie tabele na Telegram</button><button class="btn ghost" onclick="agentAIPobierzZlecenieCSV(${jsArg(z.id)})">📤 CSV całego zlecenia</button><button class="btn danger" onclick="agentAIUsunZlecenie(${jsArg(z.id)})">🗑️ Usuń zlecenie</button></footer></article>`;}).join("")||`<div class="backend-note">Nie ma jeszcze zleceń producenta. Utwórz osobne dokumenty z aktualnych braków.</div>`}</div></div>`;
+  const statusy=["szkic","do sprawdzenia","zaakceptowane","częściowo zrealizowane","zrealizowane","anulowane"],open=lista.filter(z=>agentAIStatusRoboczyProducenta(z.status)).length,approved=lista.filter(z=>z.approvedAt&&agentAIStatusRoboczyProducenta(z.status)).length,sent=lista.filter(z=>["wysłane do producenta","wysłane do dostawcy"].includes(String(z.status||"").toLowerCase())).length;
+  return `<div class="panel agent-orders-panel"><div class="order-section-head"><div><span class="order-pro-label">Dokumenty zakupowe</span><h2 style="margin-top:.25rem">🧾 Zamówienia do producentów</h2><p class="order-detail-lead">Dla każdego producenta istnieje jeden bieżący dokument roboczy. Agent dopisuje do niego kolejne braki — także po podglądzie na Telegramie. Nowa wersja powstaje dopiero po zatwierdzeniu i skutecznej wysyłce e-mailem.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIUtworzZleceniaWedlugDostawcow()">🤖 Aktualizuj bieżące dokumenty</button><a class="btn ghost" href="#/admin/agent-ai/producenci">🏭 Producenci</a></div></div>
+  <div class="orders-stat-grid"><div class="order-stat-card hot"><span>📝</span><b>${open}</b><small>bieżących roboczych</small></div><div class="order-stat-card"><span>✅</span><b>${approved}</b><small>zatwierdzonych wersji</small></div><div class="order-stat-card money"><span>✉️</span><b>${sent}</b><small>wysłanych e-mailem</small></div><div class="order-stat-card"><span>🏭</span><b>${new Set(lista.flatMap(z=>z.dostawcy||[])).size}</b><small>producentów</small></div><div class="order-stat-card"><span>🔢</span><b>${lista.reduce((s,z)=>s+Number(z.sztuk||0),0)}</b><small>sztuk łącznie</small></div></div>
+  <div class="supplier-order-list">${lista.map(z=>{const status=String(z.status||"szkic").toLowerCase(),zamkniete=agentAIStatusZamknietyDlaNowejWersji(status),robocze=agentAIStatusRoboczyProducenta(status),grupy=agentAIGrupujPoDostawcy(z.pozycje||[]),revision=Math.max(1,Number(z.revision)||1),approvedCurrent=!!z.approvedAt&&Number(z.approvalRevision||0)===revision,missingEmail=grupy.some(([d])=>!producentPoNazwie(d)?.orderEmail);return `<article class="supplier-order-card ${zamkniete?"is-closed":""}"><header class="supplier-order-head"><div><span class="order-pro-label">${esc(z.tryb==="niskie"?"Uzupełnienie magazynu":"Braki do zamówień")} • wersja ${revision}</span><h3>${esc(z.numer||z.id)}</h3><small>${esc(z.dataTxt||allegroDataTxt(z.data))} • ${grupy.length} producentów • ${(z.pozycje||[]).length} pozycji • ${esc(z.sztuk||0)} szt. • ${zl(z.wartoscSzacowana||0)}</small></div><div class="supplier-order-status">${robocze?`<select onchange="agentAIZmienStatusZlecenia(${jsArg(z.id)},this.value)">${statusy.slice(0,3).map(s=>`<option value="${s}" ${status===s?"selected":""}>${s}</option>`).join("")}</select>`:`<span class="lvl ${status.includes("wysłane")?"lvl-ok":"lvl-info"}">${esc(z.status||"—")}</span>`}<small>${z.emailSentAt?`E-mail: ${esc(allegroDataTxt(z.emailSentAt))}`:z.telegramSentAt?`Telegram (podgląd): ${esc(allegroDataTxt(z.telegramSentAt))}`:"Dokument otwarty — oczekuje na kontrolę"}</small></div></header><div class="supplier-workflow"><span class="done">1. Bieżące braki</span><span class="${z.telegramSentAt?"done":""}">2. Podgląd Telegram</span><span class="${approvedCurrent?"done":""}">3. Zatwierdzenie wersji ${revision}</span><span class="${z.emailSentAt?"done":""}">4. E-mail do producenta</span><span class="${zamkniete?"done":""}">5. Nowa wersja dozwolona</span></div>${approvedCurrent&&robocze?`<div class="backend-note"><b>Wersja ${revision} zatwierdzona.</b> Każde automatyczne lub ręczne dopisanie pozycji cofnie dokument do ponownej kontroli.</div>`:""}<div class="supplier-split-list">${grupy.map(([d,items])=>agentAIZlecenieTabelaDostawcyHTML(z,d,items)).join("")}</div><footer class="supplier-order-actions"><button class="btn telegram-btn" onclick="agentAIWyslijZlecenieTelegram(${jsArg(z.id)})">✈️ Wyślij podgląd na Telegram</button>${robocze?`<button class="btn ghost" onclick="agentAIZatwierdzZlecenie(${jsArg(z.id)})">✅ Zatwierdź wersję ${revision}</button>`:""}<button class="btn" onclick="agentAIWyslijZlecenieEmail(${jsArg(z.id)})" ${((!approvedCurrent&&status!=="częściowo wysłane e-mailem")||missingEmail||zamkniete)?"disabled":""}>✉️ ${status==="częściowo wysłane e-mailem"?"Ponów brakujące e-maile":"Wyślij e-mailem do producenta"}</button><button class="btn ghost" onclick="agentAIPobierzZlecenieCSV(${jsArg(z.id)})">📤 CSV</button>${robocze?`<button class="btn danger" onclick="agentAIUsunZlecenie(${jsArg(z.id)})">🗑️ Usuń szkic</button>`:""}</footer>${missingEmail?`<div class="backend-note" style="border-color:#fed7aa;background:#fff7ed"><b>Brak e-maila producenta.</b> Uzupełnij kartotekę przed zatwierdzoną wysyłką.</div>`:""}</article>`;}).join("")||`<div class="backend-note">Nie ma jeszcze zamówień producenta. Agent utworzy bieżące dokumenty z aktualnych braków.</div>`}</div></div>`;
 }
 function agentAIZmienPozycjeZlecenia(id, produktId, fn){
   let znaleziono=false;
@@ -4339,7 +4423,10 @@ function agentAIZmienPozycjeZlecenia(id, produktId, fn){
       znaleziono=true;
       return fn({...p})||p;
     });
-    return agentAIPodsumujZlecenie({...z,pozycje});
+    const now=new Date(),next=agentAIPodsumujZlecenie({...z,pozycje,revision:Math.max(1,Number(z.revision)||1)+1,historia:[...(z.historia||[]),{at:now.toISOString(),type:"manual-update",text:"Zmieniono ilość pozycji — wymagane ponowne zatwierdzenie."}].slice(-100)});
+    if(next.telegramSentAt){next.telegramLastSentAt=next.telegramSentAt;delete next.telegramSentAt;}
+    if(["zaakceptowane","wysłane na Telegram"].includes(String(z.status||""))){next.status="do sprawdzenia";delete next.approvedAt;delete next.approvedBy;delete next.approvalRevision;}
+    return next;
   });
   if(!znaleziono){ toast("Nie znaleziono pozycji w zleceniu agenta"); return false; }
   zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);
@@ -4382,11 +4469,36 @@ async function agentAIWyslijZlecenieTelegram(id,dostawca=""){
     toast("Przygotowuję tabelę i wysyłam na Telegram…");
     const d=await chmura("telegram-send-supplier-order",{method:"POST",body:{order:z,supplier:dostawca||""},timeout:30000});
     const teraz=d.sentAt||new Date().toISOString();
-    agentAIZlecenia=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).map(item=>String(item.id)!==String(id)?item:agentAIPodsumujZlecenie({...item,status:["szkic","do sprawdzenia","zaakceptowane"].includes(String(item.status||""))?"wysłane na Telegram":item.status,telegramSentAt:teraz,telegramSuppliers:[...new Set([...(item.telegramSuppliers||[]),...(d.suppliers||[])])],telegramMessages:[...(item.telegramMessages||[]),...(d.messageIds||[])]}));
+    agentAIZlecenia=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).map(item=>String(item.id)!==String(id)?item:agentAIPodsumujZlecenie({...item,telegramSentAt:teraz,telegramSuppliers:[...new Set([...(item.telegramSuppliers||[]),...(d.suppliers||[])])],telegramMessages:[...(item.telegramMessages||[]),...(d.messageIds||[])],historia:[...(item.historia||[]),{at:teraz,type:"telegram-preview",text:`Wysłano podgląd na Telegram (${(d.suppliers||[]).join(", ")}). Dokument nadal pozostaje otwarty.`}].slice(-100)}));
     zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);
     zapiszHistorieAgenta("telegram",`Wysłano tabelę ${z.numer||z.id} na Telegram`,{zlecenieId:id,dostawcy:d.suppliers||[],wiadomosci:(d.messageIds||[]).length});
     toast(`Telegram: wysłano ${d.tables||0} tabel ✅`);renderuj();
   }catch(e){toast("⚠️ Telegram: "+(e.message||e));}
+}
+async function agentAIWyslijZlecenieEmail(id){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  if(!z){toast("Nie znaleziono zamówienia producenta");return;}
+  const revision=Math.max(1,Number(z.revision)||1);
+  if(!["zaakceptowane","częściowo wysłane e-mailem"].includes(String(z.status||"").toLowerCase())||!z.approvedAt||Number(z.approvalRevision||0)!==revision){toast("⚠️ Najpierw zatwierdź dokładnie tę wersję zamówienia");return;}
+  const names=[...new Set((z.pozycje||[]).map(p=>String(p.dostawca||agentAIDostawcaZlecenia(z)).trim()).filter(Boolean))];
+  const suppliers=names.map(producentPoNazwie).filter(Boolean);
+  const missing=names.filter(name=>!producentPoNazwie(name)?.orderEmail);
+  if(missing.length){toast(`⚠️ Uzupełnij e-mail zamówień w kartotece: ${missing.join(", ")}`);location.hash="#/admin/agent-ai/producenci";return;}
+  try{
+    toast("Wysyłam zatwierdzone zamówienie e-mailem do producenta…");
+    const d=await chmura("email-send-supplier-order",{method:"POST",body:{order:z,suppliers},timeout:90000});
+    const sent=(d.results||[]).filter(x=>x.sent),failed=(d.results||[]).filter(x=>!x.sent),now=d.sentAt||new Date().toISOString();
+    agentAIZlecenia=(agentAIZlecenia||[]).map(item=>{
+      if(String(item.id)!==String(id))return item;
+      const allSent=!!d.allSent;
+      return agentAIPodsumujZlecenie({...item,status:allSent?"wysłane do producenta":"częściowo wysłane e-mailem",emailSentAt:allSent?now:item.emailSentAt,emailSuppliers:[...new Set([...(item.emailSuppliers||[]),...sent.map(x=>x.supplier)])],emailMessages:[...(item.emailMessages||[]),...sent.map(x=>({supplier:x.supplier,to:x.to,messageId:x.messageId||"",sentAt:x.sentAt||now,revision,skippedDuplicate:!!x.skippedDuplicate}))].slice(-100),historia:[...(item.historia||[]),{at:now,type:allSent?"email-final":"email-partial",text:allSent?`Zatwierdzona wersja ${revision} została wysłana e-mailem do: ${sent.map(x=>x.supplier).join(", ")}.`:`Wysłano częściowo; do ponowienia: ${failed.map(x=>x.supplier).join(", ")}.`}].slice(-100),closedForUpdatesAt:allSent?now:null});
+    });
+    zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);
+    zapiszHistorieAgenta("email-producent",d.allSent?`Wysłano ${z.numer||z.id} e-mailem do producenta`:`Częściowa wysyłka ${z.numer||z.id}`,{zlecenieId:id,revision,wyslane:sent.map(x=>x.supplier),bledy:failed.map(x=>({supplier:x.supplier,error:x.error}))});
+    if(d.allSent){toast("✅ Zamówienie wysłane e-mailem. Następne braki utworzą nową wersję dokumentu.");agentAIUtworzZleceniaWedlugDostawcow("",{silent:true,automatic:true});}
+    else toast(`⚠️ Wysłano ${sent.length}, nie wysłano ${failed.length}. Ponów przyciskiem — wysłane wiadomości nie zdublują się.`);
+    renderuj();
+  }catch(e){toast("⚠️ E-mail do producenta: "+(e.message||e));}
 }
 function agentAIPrzyjmijPozycjeZlecenia(id, produktId){
   const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
@@ -4533,11 +4645,11 @@ function wierszeOperacyjneMagazynu(){
 function akcjaWierszaOperacyjnegoHTML(x){
   if(x.typ==="zamowienie") return `<a class="btn ghost" href="${esc(x.akcja)}">Otwórz</a>`;
   if(x.typ==="allegro") return `<div class="warehouse-worktable-actions"><a class="btn ghost" href="${esc(x.akcja||"#/admin/allegro/zamowienia")}">Otwórz Allegro</a><button class="btn" onclick="allegroOznaczZamowienieSprawdzone(${jsArg(x.allegroOrderId)},true)">✅ Produkty pobrane</button></div>`;
+  const doc=(agentAIZlecenia||[]).find(z=>String(z.id)===String(x.zlecenieId)),robocze=agentAIStatusRoboczyProducenta(doc?.status);
   return `<div class="warehouse-worktable-actions">
-    <select onchange="agentAIZmienStatusZlecenia(${jsArg(x.zlecenieId)},this.value)">${["szkic","do sprawdzenia","zaakceptowane","wysłane do dostawcy","częściowo zrealizowane","zrealizowane","anulowane"].map(s=>`<option value="${s}" ${x.status===s?"selected":""}>${s}</option>`).join("")}</select>
-    <button class="btn ghost" onclick="agentAIPowiekszPozycjeZlecenia(${jsArg(x.zlecenieId)},${jsArg(x.produktId)})">➕ Powiększ</button>
+    ${robocze?`<select onchange="agentAIZmienStatusZlecenia(${jsArg(x.zlecenieId)},this.value)">${["szkic","do sprawdzenia","zaakceptowane"].map(s=>`<option value="${s}" ${x.status===s?"selected":""}>${s}</option>`).join("")}</select><button class="btn ghost" onclick="agentAIPowiekszPozycjeZlecenia(${jsArg(x.zlecenieId)},${jsArg(x.produktId)})">➕ Powiększ</button>`:`<span class="lvl lvl-info">${esc(doc?.status||x.status||"zamknięte")}</span>`}
     <button class="btn ghost" onclick="agentAIPrzyjmijPozycjeZlecenia(${jsArg(x.zlecenieId)},${jsArg(x.produktId)})">📥 Przyjmij</button>
-    <button class="btn danger" onclick="if(confirm('Usunąć szkic zlecenia agenta?'))agentAIUsunZlecenie(${jsArg(x.zlecenieId)})">Usuń</button>
+    ${robocze?`<button class="btn danger" onclick="if(confirm('Anulować dokument producenta?'))agentAIUsunZlecenie(${jsArg(x.zlecenieId)})">Anuluj</button>`:""}
   </div>`;
 }
 function eksportujTabeleOperacyjnaMagazynuCSV(){
@@ -4559,9 +4671,9 @@ function magazynTabelaOperacyjnaHTML(){
   return `<div class="panel warehouse-worktable-panel ops-control-center"><div class="order-section-head"><div><span class="order-pro-label">Centrum zakupów</span><h2 style="margin-top:.25rem">📑 Braki i zamówienia do producentów</h2><p class="order-detail-lead">Tabela pokazuje wyłącznie realne braki do aktywnych zamówień sklepu i Allegro. Pozycje już pokryte aktywnym zleceniem nie są zamawiane drugi raz.</p></div><div class="diag-actions" style="margin-top:0"><button class="btn" onclick="agentAIUtworzZleceniaWedlugDostawcow()" ${pozostalo?"":"disabled"}>🤖 Utwórz osobne zlecenia</button><button class="btn ghost" onclick="eksportujTabeleOperacyjnaMagazynuCSV()">📤 CSV</button></div></div><div class="orders-stat-grid"><div class="order-stat-card ${braki.length?"hot":""}"><span>⚠️</span><b>${braki.length}</b><small>produktów z brakiem</small></div><div class="order-stat-card"><span>🔢</span><b>${pozostalo}</b><small>sztuk do zamówienia</small></div><div class="order-stat-card money"><span>✅</span><b>${wZleceniach}</b><small>sztuk już w zleceniach</small></div><div class="order-stat-card"><span>🏭</span><b>${grupy.length}</b><small>dostawców</small></div><div class="order-stat-card"><span>🧾</span><b>${aktywne.length}</b><small>aktywnych zleceń</small></div></div><div class="ops-supplier-list">${grupy.map(([d,rows])=>magazynBrakiDostawcyHTML(d,rows)).join("")||`<div class="backend-note">✅ Brak realnych braków do aktywnych zamówień.</div>`}</div></div>${agentAIZleceniaPanelHTML()}`;
 }
 function agentAIZlecenieProducentaTekst(tryb="braki",limit=80){
-  const rec=agentAIUtworzZlecenieProducenta(tryb,{limit});
-  if(!rec) return tryb==="niskie"?"Nie ma obecnie produktów pod zamówienie uzupełniające z niskich stanów.":"Nie ma obecnie braków do aktywnych zamówień.";
-  return agentAIFormatZleceniaProducenta(rec);
+  const docs=agentAIUtworzZleceniaWedlugDostawcow("",{tryb,limit,silent:true});
+  if(!docs.length) return tryb==="niskie"?"Nie ma obecnie produktów pod zamówienie uzupełniające z niskich stanów.":"Nie ma nowych braków; bieżące dokumenty producentów pozostają aktualne.";
+  return docs.map(agentAIFormatZleceniaProducenta).join("\n\n");
 }
 function agentAIProduktyDlaOfertyAllegro(fraza=""){
   const q=agentAINormalizuj(fraza),slowa=q.split(" ").filter(Boolean);
@@ -4762,16 +4874,16 @@ function agentAIWykonaj(akcja){
   if(akcja==="export-magazyn") return eksportujMagazynCSV();
   if(akcja==="export-zakupy") return eksportujZatowarowanieCSV();
   if(akcja==="utworz-zlecenie-braki"){
-    const z=agentAIUtworzZlecenieProducenta("braki");
-    if(z){ toast(`Utworzono ${z.numer} ✅`); renderuj(); }
+    const docs=agentAIUtworzZleceniaWedlugDostawcow("",{tryb:"braki",silent:true});
+    if(docs.length){ toast(`Zaktualizowano ${docs.length} dokumentów producentów ✅`); renderuj(); }
     else toast("Brak pozycji do zlecenia agenta pod aktywne zamówienia");
-    return z;
+    return docs;
   }
   if(akcja==="utworz-zlecenie-niskie"){
-    const z=agentAIUtworzZlecenieProducenta("niskie");
-    if(z){ toast(`Utworzono ${z.numer} ✅`); renderuj(); }
+    const docs=agentAIUtworzZleceniaWedlugDostawcow("",{tryb:"niskie",silent:true});
+    if(docs.length){ toast(`Zaktualizowano ${docs.length} dokumentów uzupełniających ✅`); renderuj(); }
     else toast("Brak produktów do zlecenia uzupełniającego");
-    return z;
+    return docs;
   }
   if(akcja==="sprawdz-linki-producentow") return agentAISprawdzLinkiProducentow().then(t=>toast(t));
   if(akcja==="popraw-opisy"){ const t=agentAIPoprawOpisyProduktow(40); toast(t); renderuj(); return t; }
@@ -4825,7 +4937,7 @@ function agentAIPlanOperacyjnyHTML(analiza){
 }
 function widokAdminAgentAI(sekcja="pulpit"){
   const analiza=agentAIAnaliza();
-  const aktywna=["pulpit","komendy","plan","zlecenia","pamiec","historia"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
+  const aktywna=["pulpit","komendy","plan","zlecenia","producenci","pamiec","historia"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const problemy=analiza.filter(x=>x.poziom!=="ok").length;
   const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
   const plan=potrzebyZatowarowania().slice(0,8);
@@ -4926,6 +5038,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
     </div>`).join("")}</div>
   </div>`:""}</div>
   <div style="${aktywna==="zlecenia"?"":"display:none"}">${agentAIZleceniaPanelHTML()}</div>
+  <div style="${aktywna==="producenci"?"":"display:none"}">${producenciKartotekaPanelHTML()}</div>
   <div class="panel" style="${aktywna==="plan"?"":"display:none"}">
     <h2 style="margin-top:0">Lista kontroli agenta</h2>
     <div class="ai-task-list">
@@ -5475,7 +5588,10 @@ function allegroZapiszKategorieProduktu(id,categoryId){
   return true;
 }
 function allegroTrybPublikacji(){ return String(document.getElementById("allegroPublicationAction")?.value||"keep"); }
-function allegroListaProducentow(){return [...new Set((Array.isArray(allegroStan.offerSettings?.producers)&&allegroStan.offerSettings.producers.length?allegroStan.offerSettings.producers:["Alexander","Multigra","GoDan"]).map(x=>String(x||"").trim()).filter(Boolean))];}
+function allegroListaProducentow(){
+  const ustawione=Array.isArray(allegroStan.offerSettings?.producers)&&allegroStan.offerSettings.producers.length?allegroStan.offerSettings.producers:["Alexander","Multigra","GoDan"];
+  return [...new Set([...ustawione,...(producenciKartoteka||[]).filter(p=>p.active!==false).map(p=>p.name||p.nazwa)].map(x=>String(x||"").trim()).filter(Boolean))];
+}
 function allegroProducentKanoniczny(p={}){
   const list=allegroListaProducentow(),norm=v=>String(v||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g," ").trim();
   const text=norm([p.producent,p.marka,p.nazwa,p.name,p.sourceUrl,p.producentUrl].filter(Boolean).join(" "));
@@ -6274,12 +6390,14 @@ function agentAISubnavHTML(aktywny="pulpit"){
   const problemy=analiza.filter(x=>x.poziom!=="ok").length;
   const plan=potrzebyZatowarowania().length;
   const zlecenia=(agentAIZlecenia||[]).length;
+  const producenciGotowi=(producenciKartoteka||[]).filter(p=>p.active!==false&&p.orderEmail).length;
   const pamiec=(agentAIPamiec||[]).length;
   return adminSubnavHTML([
     {id:"pulpit",href:"#/admin/agent-ai",label:"🤖 Pulpit",badge:problemy||""},
     {id:"komendy",href:"#/admin/agent-ai/komendy",label:"💬 Komendy"},
     {id:"plan",href:"#/admin/agent-ai/plan",label:"🧭 Plan operacyjny",badge:plan||""},
     {id:"zlecenia",href:"#/admin/agent-ai/zlecenia",label:"📑 Zlecenia i tabela",badge:zlecenia||""},
+    {id:"producenci",href:"#/admin/agent-ai/producenci",label:"🏭 Producenci i kontakt",badge:producenciGotowi||""},
     {id:"pamiec",href:"#/admin/agent-ai/pamiec",label:"🧠 Pamięć",badge:pamiec||""},
     {id:"historia",href:"#/admin/agent-ai/historia",label:"🕓 Historia"}
   ],aktywny);

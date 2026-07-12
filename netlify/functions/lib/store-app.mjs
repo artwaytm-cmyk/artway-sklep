@@ -26,6 +26,7 @@ const KLUCZE_WSPOLNE = [
   'artway_agent_ai_historia',
   'artway_agent_ai_pamiec',
   'artway_agent_ai_zlecenia',
+  'artway_producenci',
   'artway_agent_ai_linki_producentow',
   'artway_agent_ai_allegro_zadania',
   'artway_opinie',
@@ -134,6 +135,26 @@ function telegramTabeleZlecenia(order = {}, tylkoDostawca = '') {
     }
   }
   return wiadomosci;
+}
+function producentEmailZlecenia(order = {}, supplier = {}) {
+  const name = tekst(supplier.name || supplier.nazwa || '', 120).trim();
+  const to = tekst(supplier.orderEmail || supplier.email || '', 300).trim().toLowerCase();
+  const producerKey = (value = '') => tekst(value, 160).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const rows = (Array.isArray(order?.pozycje) ? order.pozycje : []).filter((p) => !name || producerKey(p?.dostawca) === producerKey(name)).map((p) => ({
+    kod: tekst(p?.kod || p?.produktId || '—', 80).trim() || '—',
+    ean: tekst(p?.ean || '—', 80).trim() || '—',
+    nazwa: tekst(p?.nazwa || 'Produkt', 300).trim(),
+    ilosc: Math.max(0, Number(p?.ilosc) || 0),
+  })).filter((p) => p.ilosc > 0).slice(0, 500);
+  const number = tekst(order?.numer || order?.id || 'zamówienie', 120).trim();
+  const replace = (v = '') => tekst(v, 10000).replace(/\{numer\}/gi, number).replace(/\{producent\}/gi, name || 'Producent');
+  const subject = replace(supplier.emailSubject || `Zamówienie ${number} — Artway-TM`);
+  const intro = replace(supplier.emailIntro || `Dzień dobry,\nprzesyłamy zatwierdzone zamówienie ${number}. Prosimy o potwierdzenie dostępności, terminu realizacji i warunków dostawy.`);
+  const textRows = rows.map((p, index) => `${index + 1}. ${p.kod} | ${p.ean} | ${p.nazwa} | ${p.ilosc} szt.`).join('\n');
+  const text = `${intro}\n\nKOD | EAN | NAZWA | ILOŚĆ\n${textRows}\n\nProsimy o odpowiedź z potwierdzeniem przyjęcia zamówienia.\n\nPozdrawiamy\nArtway-TM`;
+  const table = rows.map((p) => `<tr><td style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:700">${htmlEscape(p.kod)}</td><td style="padding:10px;border-bottom:1px solid #e5e7eb">${htmlEscape(p.ean)}</td><td style="padding:10px;border-bottom:1px solid #e5e7eb">${htmlEscape(p.nazwa)}</td><td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:800">${p.ilosc}</td></tr>`).join('');
+  const html = `<!doctype html><html><body style="margin:0;background:#f4f6fb;font-family:Arial,sans-serif;color:#172033"><div style="max-width:760px;margin:0 auto;padding:28px 14px"><div style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;padding:24px;border-radius:18px 18px 0 0"><div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;font-weight:700">Artway-TM • zamówienie do producenta</div><h1 style="margin:8px 0 0;font-size:26px">${htmlEscape(number)}</h1></div><div style="background:#fff;padding:24px;border-radius:0 0 18px 18px"><p style="white-space:pre-line;line-height:1.65;margin-top:0">${htmlEscape(intro)}</p><table style="width:100%;border-collapse:collapse;margin:20px 0"><thead><tr style="background:#eef2ff;text-align:left"><th style="padding:10px">Kod</th><th style="padding:10px">EAN</th><th style="padding:10px">Nazwa</th><th style="padding:10px;text-align:center">Ilość</th></tr></thead><tbody>${table}</tbody></table><div style="background:#f8fafc;border-left:4px solid #2563eb;padding:14px 16px;line-height:1.55">Prosimy o potwierdzenie przyjęcia zamówienia, dostępności produktów i przewidywanego terminu wysyłki.</div><p style="margin:24px 0 0">Pozdrawiamy serdecznie,<br><b>Artway-TM</b><br><a href="https://artwaytm.pl" style="color:#2563eb">artwaytm.pl</a></p></div></div></body></html>`;
+  return { name, to, rows, subject, text, html };
 }
 async function wyslijTelegramHtml(text) {
   const c = telegramKonfiguracja();
@@ -1611,19 +1632,23 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
     });
   }
   let dokumentyZmienione = 0;
-  const editable = new Set(['szkic', 'do sprawdzenia', 'zaakceptowane']);
+  const editable = new Set(['szkic', 'do sprawdzenia', 'zaakceptowane', 'wysłane na telegram']);
   for (const shortage of shortages) {
-    let target = supplierOrders.find((z) => editable.has(String(z.status || 'szkic').toLowerCase()) && (z.pozycje || []).some((p) => String(p.dostawca || 'Bez przypisanego dostawcy') === shortage.dostawca));
+    let target = supplierOrders.find((z) => editable.has(String(z.status || 'szkic').toLowerCase()) && String(z.supplier || z.dostawcy?.[0] || z.pozycje?.[0]?.dostawca || 'Bez przypisanego dostawcy') === shortage.dostawca);
+    const partialBlocker = supplierOrders.find((z) => String(z.status || '').toLowerCase() === 'częściowo wysłane e-mailem' && String(z.supplier || z.dostawcy?.[0] || z.pozycje?.[0]?.dostawca || '') === shortage.dostawca);
+    if (!target && partialBlocker) continue;
     if (!target) {
       const now = new Date();
       target = {
         id: `AZ-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
         numer: `AZ/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(supplierOrders.length + 1).padStart(4, '0')}`,
         typ: 'zlecenie-producent', tryb: 'braki', status: 'szkic', data: now.toISOString(), dataTxt: now.toLocaleString('pl-PL'), operator: 'Agent Allegro', pozycje: [],
-        uwagi: `Automatyczny szkic braków z nowych zleceń Allegro dla dostawcy: ${shortage.dostawca}.`,
+        supplier: shortage.dostawca, dostawcy: [shortage.dostawca], revision: 1,
+        uwagi: `Automatyczny dokument roboczy braków dla producenta: ${shortage.dostawca}. Kolejne braki są dopisywane do tej wersji aż do zatwierdzenia i wysłania e-mailem.`,
       };
       supplierOrders.unshift(target);
     }
+    const previousStatus = String(target.status || 'szkic').toLowerCase();
     const existing = target.pozycje.find((p) => String(p.produktId) === shortage.produktId);
     if (existing) {
       existing.ilosc = (Number(existing.ilosc) || 0) + shortage.ilosc;
@@ -1631,6 +1656,17 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
       existing.zamowienia = [...new Set([...(existing.zamowienia || []), ...shortage.zamowienia])].slice(0, 50);
       existing.powod = shortage.powod;
     } else target.pozycje.push(shortage);
+    target.revision = Math.max(1, Number(target.revision) || 1) + (existing || target.pozycje.length > 1 ? 1 : 0);
+    target.lastAutoUpdateAt = new Date().toISOString();
+    target.updateSource = 'agent-allegro-live';
+    if (target.telegramSentAt) { target.telegramLastSentAt = target.telegramSentAt; target.telegramSentAt = null; }
+    if (['zaakceptowane', 'wysłane na telegram'].includes(previousStatus)) {
+      target.status = 'do sprawdzenia';
+      target.approvedAt = null;
+      target.approvedBy = null;
+      target.approvalRevision = null;
+    }
+    target.historia = [...(Array.isArray(target.historia) ? target.historia : []), { at: target.lastAutoUpdateAt, type: 'auto-update', text: `Dopisano aktualny brak: ${shortage.nazwa} × ${shortage.ilosc}` }].slice(-100);
     Object.assign(target, allegroAgentPodsumujDokument(target));
     dokumentyZmienione++;
   }
@@ -3695,6 +3731,45 @@ export default async (req) => {
       }
       const sentAt = new Date().toISOString();
       return odpowiedz({ ok: true, sentAt, tables: tables.length, suppliers: [...new Set(tables.map((x) => x.supplier))], messageIds });
+    }
+
+    // ─── PRODUCENCI: zatwierdzone zamówienie e-mailem, z ochroną przed duplikatem ───
+    if (action === 'email-send-supplier-order') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const order = body.order && typeof body.order === 'object' ? body.order : {};
+      const status = tekst(order.status || '', 80).trim().toLowerCase();
+      const approvedAt = tekst(order.approvedAt || '', 80).trim();
+      const revision = Math.max(1, Number(order.revision) || 1);
+      const approvalRevision = Math.max(0, Number(order.approvalRevision) || 0);
+      if (!order.id || !approvedAt || approvalRevision !== revision || !['zaakceptowane', 'częściowo wysłane e-mailem'].includes(status)) return odpowiedz({ ok: false, error: 'Najpierw zatwierdź dokładnie aktualną wersję zamówienia producenta', code: 'approval_required' }, 422);
+      const suppliers = (Array.isArray(body.suppliers) ? body.suppliers : [body.supplier]).filter((x) => x && typeof x === 'object').slice(0, 30);
+      if (!suppliers.length) return odpowiedz({ ok: false, error: 'Brak kartoteki producenta do wysyłki', code: 'supplier_missing' }, 422);
+      const prepared = suppliers.map((supplier) => producentEmailZlecenia(order, supplier));
+      const invalid = prepared.filter((item) => !item.name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.to) || !item.rows.length);
+      if (invalid.length) return odpowiedz({ ok: false, error: `Uzupełnij e-mail zamówień i pozycje producenta: ${invalid.map((x) => x.name || 'bez nazwy').join(', ')}`, code: 'supplier_validation' }, 422);
+      const auditRec = await czytaj('supplier_order_email_audit', { items: {}, updated_at: null });
+      const auditItems = auditRec.items && typeof auditRec.items === 'object' ? { ...auditRec.items } : {};
+      const results = [];
+      for (const item of prepared) {
+        const fingerprint = crypto.createHash('sha256').update(`${order.id}|${revision}|${item.name.toLowerCase()}|${item.to}|${item.rows.map((p) => `${p.kod}:${p.ilosc}`).join('|')}`).digest('hex').slice(0, 32);
+        if (auditItems[fingerprint]?.sent === true) {
+          results.push({ supplier: item.name, to: item.to, sent: true, skippedDuplicate: true, sentAt: auditItems[fingerprint].sentAt, messageId: auditItems[fingerprint].messageId || '' });
+          continue;
+        }
+        try {
+          const sent = await wyslijEmailSMTP({ to: item.to, subject: item.subject, text: item.text, html: item.html });
+          const result = { supplier: item.name, to: item.to, sent: true, skippedDuplicate: false, sentAt: new Date().toISOString(), messageId: sent.message_id || '', provider: sent.provider || 'smtp' };
+          auditItems[fingerprint] = { ...result, orderId: tekst(order.id, 120), orderNumber: tekst(order.numer || order.id, 120), revision, fingerprint };
+          await zapisz('supplier_order_email_audit', { items: auditItems, updated_at: result.sentAt });
+          results.push(result);
+        } catch (error) {
+          results.push({ supplier: item.name, to: item.to, sent: false, error: tekst(error?.message || error, 700), code: tekst(error?.code || 'email_error', 120) });
+        }
+      }
+      const sentAt = results.filter((x) => x.sent).map((x) => x.sentAt).filter(Boolean).sort().pop() || null;
+      return odpowiedz({ ok: true, allSent: results.length > 0 && results.every((x) => x.sent), sentAt, results, revision });
     }
 
     // ─── E-MAIL: wysyłka administracyjna przez Netlify SMTP ───

@@ -145,6 +145,11 @@ requireMarkers('assets/app.js', app, [
   'function allegroStanOfertyProduktu',
   'offerDefaultsAudit',
   'function allegroZapiszUstawieniaOfert',
+  'function agentAIStatusRoboczyProducenta',
+  'function agentAIWyslijZlecenieEmail',
+  'function producenciKartotekaPanelHTML',
+  'artway_producenci',
+  'Nowa wersja powstaje dopiero po zatwierdzeniu i skutecznej wysyłce e-mailem',
   'function allegroListaProducentow',
   'function allegroProducentKanoniczny',
   'function allegroUruchomAutomatycznaKonserwacje',
@@ -214,6 +219,10 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function allegroPowiazanieWiarygodne',
   'function allegroScalSzczegolyOferty',
   "action === 'allegro-auto-maintenance'",
+  "action === 'email-send-supplier-order'",
+  'function producentEmailZlecenia',
+  'supplier_order_email_audit',
+  "'artway_producenci'",
   'allegro_catalog_maintenance',
   'ALLEGRO_DEFAULT_PRODUCERS',
   "operator: 'auto-quarantine:name-conflict'",
@@ -250,6 +259,19 @@ if (/stock:\s*\{\s*available:\s*Math\.max\(0,\s*Number\(opt\.stock\s*\?\?\s*p\.s
 }
 if (app.includes('badge:produktyBezOferty')) {
   fail('assets/app.js: licznik Allegro nie może zliczać całego katalogu produktów bez oferty');
+}
+const telegramSupplierFlow = app.slice(app.indexOf('async function agentAIWyslijZlecenieTelegram'), app.indexOf('async function agentAIWyslijZlecenieEmail'));
+if (/status\s*:\s*["'`]wysłane na Telegram/.test(telegramSupplierFlow)) {
+  fail('assets/app.js: wysyłka podglądu Telegram nie może zamykać ani zmieniać statusu dokumentu producenta');
+}
+if (!app.includes('partial=(Array.isArray(agentAIZlecenia)') || !app.includes('agentAIStatusRoboczyProducenta(z.status)')) {
+  fail('assets/app.js: brak blokady nowego dokumentu oraz scalania bieżącego zamówienia producenta');
+}
+if (!store.includes("['zaakceptowane', 'częściowo wysłane e-mailem'].includes(status)") || !store.includes('approvalRevision !== revision') || !store.includes("crypto.createHash('sha256')")) {
+  fail('store-app.mjs: wysyłka producenta musi wymagać zatwierdzenia bieżącej wersji i mieć idempotencję');
+}
+if (!app.includes('została bezpiecznie dezaktywowana') || !app.includes('...(producenciKartoteka||[]).filter(p=>p.active!==false)')) {
+  fail('assets/app.js: kartoteka producentów musi chronić aktywne zamówienia i zasilać listę producentów produktów');
 }
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
