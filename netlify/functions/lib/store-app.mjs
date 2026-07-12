@@ -665,16 +665,20 @@ function infaktCenaZakupuFields(product = {}, line = {}, invoice = {}, supplier 
 }
 async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = false } = {}) {
   const suppliers = await infaktDostawcyUstawienia(), previous = await czytaj('infakt_purchase_price_sync', { documents: {}, pendingItems: [], recentMatches: [], updated_at: null }), now = new Date().toISOString();
-  const report = { source: 'inFakt KSeF XML', available: true, startedAt: now, updated_at: now, days, scannedDocuments: 0, allowedDocuments: 0, processedDocuments: 0, lineCount: 0, matchedCount: 0, priceUpdatedCount: 0, unchangedCount: 0, pendingCount: 0, errors: [], documents: { ...(previous.documents || {}) }, pendingItems: [], recentMatches: Array.isArray(previous.recentMatches) ? previous.recentMatches.slice(0, 200) : [] };
+  const report = { source: 'inFakt KSeF XML', available: true, startedAt: now, updated_at: now, lastListAttemptAt: now, days, scannedDocuments: 0, allowedDocuments: 0, processedDocuments: 0, lineCount: 0, matchedCount: 0, priceUpdatedCount: 0, unchangedCount: 0, pendingCount: 0, errors: [], documents: { ...(previous.documents || {}) }, pendingItems: [], recentMatches: Array.isArray(previous.recentMatches) ? previous.recentMatches.slice(0, 200) : [] };
   if (!suppliers.items.length) { report.available = false; report.errors.push('Biała lista dostawców jest pusta.'); await zapisz('infakt_purchase_price_sync', report); return report; }
+  const lastAttempt = Date.parse(previous.lastListAttemptAt || ''), cooldownMs = 11 * 60 * 1000;
+  if (!force && Number.isFinite(lastAttempt) && Date.now() - lastAttempt < cooldownMs) return { ...previous, cooldown: true, nextListAt: new Date(lastAttempt + cooldownMs).toISOString(), message: 'Użyto ostatniego wyniku, aby nie przekroczyć limitu 6 listowań KSeF na godzinę.' };
   const since = new Date(Date.now() - Math.max(1, Math.min(730, Number(days) || 180)) * 86400000).toISOString().slice(0, 10);
   let listData;
   try { listData = await infaktWywolaj('/api/v3/ksef2/import/costs.json', { parameters: { offset: 0, limit: 100, order: 'Desc', 'q[invoice_date_gteq]': since } }); }
   catch (error) {
     report.available = false;
-    report.setupRequired = Number(error.status) === 422 ? 'ksef_read_access' : null;
+    report.setupRequired = null;
+    report.pendingItems = Array.isArray(previous.pendingItems) ? previous.pendingItems : [];
+    report.pendingCount = report.pendingItems.length;
     report.errors.push(Number(error.status) === 422
-      ? 'inFakt nie udostępnił pozycji KSeF (HTTP 422). Zwykłe API kosztów zwraca tylko sumy dokumentu; automatyczne ceny wymagają aktywnego odczytu KSeF na koncie inFakt.'
+      ? `inFakt chwilowo odrzucił listowanie KSeF (HTTP 422). Połączenie KSeF na koncie jest aktywne; najczęstszą przyczyną jest wspólny limit 6 listowań kosztów i przychodów na godzinę. System zachował dotychczasowe dane i ponowi próbę automatycznie. Szczegóły API: ${tekst(error.message, 240)}`
       : `Odczyt faktur kosztowych KSeF: ${tekst(error.message, 500)}`);
     await zapisz('infakt_purchase_price_sync', report); return report;
   }
@@ -686,7 +690,7 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
     const documentKey = tekst(invoice.ksef_number, 200); if (!documentKey) continue;
     const supplier = suppliers.items.find((x) => x.match === infaktNazwaDostawcy(invoice.seller_name));
     try {
-      const response = await infaktWywolaj(`/api/v3/ksef2/import/${encodeURIComponent(documentKey)}.json`, { parameters: { file_format: 'xml' }, raw: true }); let xml = await response.text();
+      const response = await infaktWywolaj(`/api/v3/ksef2/import/${encodeURIComponent(documentKey)}.json`, { parameters: { file_format: 'xml' }, raw: true, accept: 'application/xml, text/xml, application/json' }); let xml = await response.text();
       if (/^\s*\{/.test(xml)) { try { const parsed = JSON.parse(xml); xml = parsed.xml || parsed.content || parsed.file || ''; } catch { /* odpowiedź pozostanie tekstem */ } }
       const lines = infaktKsefPozycje(xml); if (!lines.length) throw new Error('Dokument XML nie zawiera rozpoznawalnych pozycji FaWiersz'); processedKeys.add(documentKey); report.lineCount += lines.length; report.processedDocuments++;
       for (const line of lines) {
@@ -721,12 +725,12 @@ function infaktErrorText(data, fallback = 'Błąd inFakt') {
   if (errors && typeof errors === 'object') return tekst(Object.entries(errors).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; '), 1000);
   return fallback;
 }
-async function infaktWywolaj(path, { method = 'GET', bodyObj = null, parameters = {}, raw = false } = {}) {
+async function infaktWywolaj(path, { method = 'GET', bodyObj = null, parameters = {}, raw = false, accept = '' } = {}) {
   const c = infaktKonfiguracja();
   if (!c.configured) { const e = new Error('inFakt nie jest skonfigurowany. Dodaj INFAKT_API_KEY po stronie serwera.'); e.code = 'infakt_not_configured'; e.status = 503; throw e; }
   const url = new URL(path, c.baseUrl); for (const [k, v] of Object.entries(parameters || {})) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
   const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
-  const response = await fetch(url, { method, headers: { 'X-inFakt-ApiKey': c.apiKey, Accept: raw ? 'application/pdf, application/json' : 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) }, body });
+  const response = await fetch(url, { method, headers: { 'X-inFakt-ApiKey': c.apiKey, Accept: accept || (raw ? 'application/pdf, application/json' : 'application/json'), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body });
   if (raw && response.ok) return response;
   const txt = await response.text(); let data = {}; try { data = txt ? JSON.parse(txt) : {}; } catch { data = { raw: tekst(txt, 2000) }; }
   if (!response.ok) { const e = new Error(infaktErrorText(data, `inFakt HTTP ${response.status}`)); e.status = response.status; e.code = response.status === 401 ? 'infakt_auth' : response.status === 422 ? 'infakt_validation' : 'infakt_error'; e.infakt = data; throw e; }
