@@ -1261,7 +1261,7 @@ function allegroEtapMagazynu(z = {}, poprzednie = {}) {
   const terminal = ['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(allegroStatusKolejkiZamowienia(z, poprzednie));
   if (terminal) return 'zamkniete';
   const zapisany = String(z?.warehouseStage || poprzednie?.warehouseStage || '').toLowerCase();
-  return ['do_sprawdzenia', 'braki', 'kompletacja', 'spakowane'].includes(zapisany) ? zapisany : 'do_sprawdzenia';
+  return ['do_sprawdzenia', 'braki', 'kompletacja', 'spakowane', 'zrealizowane'].includes(zapisany) ? zapisany : 'do_sprawdzenia';
 }
 function allegroZamowienieJestNoweLubDoWyslania(z) {
   const status = String(z?.status || '').trim().toUpperCase();
@@ -1326,6 +1326,209 @@ function allegroScalZamowienie(z, poprzednie = {}) {
     lastSeenAt: teraz,
     checkedAt: warehouseStage !== 'do_sprawdzenia' ? (poprzednie.checkedAt || teraz) : null,
   };
+}
+function allegroAgentProduktyCentralne(dane = {}) {
+  const mapa = new Map();
+  for (const p of Array.isArray(dane.artway_produkty_dodane) ? dane.artway_produkty_dodane : []) {
+    const id = String(p?.id ?? '').trim();
+    if (id) mapa.set(id, { ...p, id });
+  }
+  const edits = dane.artway_produkty_edytowane && typeof dane.artway_produkty_edytowane === 'object' ? dane.artway_produkty_edytowane : {};
+  for (const [idRaw, p] of Object.entries(edits)) {
+    const id = String(p?.id ?? idRaw).trim();
+    if (id) mapa.set(id, { ...(mapa.get(id) || {}), ...(p || {}), id });
+  }
+  return mapa;
+}
+function allegroAgentProduktDlaPozycji(line = {}, offer = {}, mappings = {}, products = new Map()) {
+  const offerId = String(line.offerId || '').trim();
+  const mapped = mappings[offerId];
+  const mappedId = String(mapped?.productId ?? mapped?.produktId ?? mapped?.id ?? mapped ?? '').trim();
+  if (mappedId) return { id: mappedId, product: products.get(mappedId) || { id: mappedId }, match: 'mapowanie oferty' };
+  const ext = allegroNormalizujKlucz(line.externalId || offer.externalId || '');
+  const ean = allegroNormalizujKlucz(offer.ean || offer.gtin || '');
+  const code = allegroNormalizujKlucz(offer.manufacturerCode || offer.producerCode || '');
+  const candidates = [...products.values()].filter((p) => {
+    const pe = allegroNormalizujKlucz(p.gtin || p.ean || '');
+    const px = allegroNormalizujKlucz(p.externalId || p.sku || '');
+    const pc = allegroNormalizujKlucz(p.kodProducenta || p.mpn || '');
+    return (ean && pe === ean) || (ext && px === ext) || (code && pc === code);
+  });
+  if (candidates.length !== 1) return null;
+  const p = candidates[0];
+  const match = ean && allegroNormalizujKlucz(p.gtin || p.ean || '') === ean ? 'EAN/GTIN' : ext && allegroNormalizujKlucz(p.externalId || p.sku || '') === ext ? 'SKU/external.id' : 'kod producenta';
+  return { id: String(p.id), product: p, match };
+}
+function allegroAgentZlecenieAktywne(z = {}) {
+  const official = allegroStatusKolejkiZamowienia(z, {});
+  return !['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(official) && String(z.warehouseStage || '').toLowerCase() !== 'zrealizowane';
+}
+function allegroAgentPodsumujDokument(z = {}) {
+  const pozycje = Array.isArray(z.pozycje) ? z.pozycje : [];
+  return {
+    ...z,
+    pozycje,
+    sztuk: pozycje.reduce((s, p) => s + Math.max(0, Number(p.ilosc) || 0), 0),
+    wartoscSzacowana: Number(pozycje.reduce((s, p) => s + Math.max(0, Number(p.ilosc) || 0) * Math.max(0, Number(p.cenaBrutto) || 0), 0).toFixed(2)),
+    dostawcy: [...new Set(pozycje.map((p) => tekst(p.dostawca || 'Bez przypisanego dostawcy', 120)))],
+    aktualizacja: new Date().toISOString(),
+  };
+}
+async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
+  const [settingsRec, offersRec, mappingsRec] = await Promise.all([
+    czytaj('settings', { data: {}, rev: 0, updated_at: null }),
+    czytaj('allegro_offers', { items: [] }),
+    czytaj('allegro_mappings', { items: {} }),
+  ]);
+  const dane = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
+  const stany = dane.artway_stany && typeof dane.artway_stany === 'object' ? dane.artway_stany : {};
+  const kartoteki = dane.artway_magazyn_produkty && typeof dane.artway_magazyn_produkty === 'object' ? dane.artway_magazyn_produkty : {};
+  const products = allegroAgentProduktyCentralne(dane);
+  const offers = new Map(allegroOfertyItems(offersRec).map((o) => [String(o.id || ''), o]));
+  const mappings = allegroMapowaniaItems(mappingsRec);
+  const aktywne = (Array.isArray(items) ? items : []).filter(allegroAgentZlecenieAktywne);
+  const noweIds = new Set((Array.isArray(options.newOrderIds) ? options.newOrderIds : []).map((id) => String(id)));
+  const swiezyLimit = Date.now() - 48 * 60 * 60 * 1000;
+  const automatyczneIds = new Set(aktywne.filter((z) => {
+    if (noweIds.has(String(z.id || z.nr || ''))) return true;
+    if (z.agentReviewedAt) return false;
+    const data = Date.parse(z.createdAt || z.firstFetchedAt || '');
+    return Number.isFinite(data) && data >= swiezyLimit;
+  }).map((z) => String(z.id || z.nr || '')));
+  const lineMatches = new Map(), reservations = new Map(), refs = new Map(), autoReservations = new Map(), autoRefs = new Map(), productDetails = new Map();
+  for (const z of aktywne) {
+    const orderId = String(z.id || z.nr || '').trim();
+    const matched = [];
+    for (const line of Array.isArray(z.lineItems) ? z.lineItems : []) {
+      const offerId = String(line.offerId || '').trim();
+      const offer = offers.get(offerId) || {};
+      const match = allegroAgentProduktDlaPozycji(line, offer, mappings, products);
+      const quantity = Math.max(1, Number(line.quantity) || 1);
+      const rec = { line, offer, match, quantity };
+      matched.push(rec);
+      if (match?.id) {
+        reservations.set(match.id, (reservations.get(match.id) || 0) + quantity);
+        if (!refs.has(match.id)) refs.set(match.id, new Map());
+        refs.get(match.id).set(orderId, (refs.get(match.id).get(orderId) || 0) + quantity);
+        if (!productDetails.has(match.id)) productDetails.set(match.id, { line, offer, match });
+        if (automatyczneIds.has(orderId)) {
+          autoReservations.set(match.id, (autoReservations.get(match.id) || 0) + quantity);
+          if (!autoRefs.has(match.id)) autoRefs.set(match.id, new Map());
+          autoRefs.get(match.id).set(orderId, (autoRefs.get(match.id).get(orderId) || 0) + quantity);
+        }
+      }
+    }
+    lineMatches.set(orderId, matched);
+  }
+  let supplierOrders = Array.isArray(dane.artway_agent_ai_zlecenia) ? dane.artway_agent_ai_zlecenia.map((z) => ({ ...z, pozycje: Array.isArray(z.pozycje) ? z.pozycje.map((p) => ({ ...p })) : [] })) : [];
+  const aktywneDokumenty = supplierOrders.filter((z) => !['zrealizowane', 'anulowane'].includes(String(z.status || '').toLowerCase()));
+  const covered = new Map();
+  for (const z of aktywneDokumenty) for (const p of z.pozycje) {
+    const id = String(p.produktId || '').trim();
+    if (id) covered.set(id, (covered.get(id) || 0) + Math.max(0, (Number(p.ilosc) || 0) - (Number(p.przyjeto) || 0)));
+  }
+  const shortages = [];
+  for (const [productId, reserved] of autoReservations.entries()) {
+    const known = Object.prototype.hasOwnProperty.call(stany, productId) && stany[productId] !== '' && stany[productId] != null && Number.isFinite(Number(stany[productId]));
+    if (!known) continue;
+    const stock = Math.max(0, Number(stany[productId]) || 0), shortage = Math.max(0, reserved - stock), remaining = Math.max(0, shortage - (covered.get(productId) || 0));
+    if (!remaining) continue;
+    const product = products.get(productId) || { id: productId };
+    const meta = kartoteki[productId] && typeof kartoteki[productId] === 'object' ? kartoteki[productId] : {};
+    const detail = productDetails.get(productId) || {}, offer = detail.offer || {}, line = detail.line || {};
+    const orderRefs = [...(autoRefs.get(productId) || new Map()).entries()].map(([nr, qty]) => `Allegro ${nr} × ${qty}`).slice(0, 30);
+    shortages.push({
+      produktId: productId,
+      kod: tekst(product.sku || product.externalId || line.externalId || offer.externalId || offer.manufacturerCode || meta.kod || productId, 120),
+      ean: tekst(product.gtin || product.ean || offer.ean || offer.gtin || '', 80),
+      nazwa: tekst(product.nazwa || product.name || line.offerName || offer.name || `Produkt ${productId}`, 300),
+      kategoria: tekst(product.kategoria || '', 160),
+      ilosc: remaining,
+      iloscPotrzebna: remaining,
+      brakCalkowity: shortage,
+      juzZamowiono: covered.get(productId) || 0,
+      stan: stock,
+      rezerwacje: reserved,
+      dostepne: stock - reserved,
+      przyjeto: 0,
+      nadwyzka: 0,
+      lokalizacja: tekst(meta.lokalizacja || '', 120),
+      dostawca: tekst(meta.dostawca || 'Bez przypisanego dostawcy', 120) || 'Bez przypisanego dostawcy',
+      powod: `Zlecenia Allegro rezerwują ${reserved} szt.; stan ${stock}; brak ${shortage} szt.`,
+      zamowienia: orderRefs,
+      cenaBrutto: Math.max(0, Number(product.cena || product.price) || 0),
+      wartoscSzacowana: Number((remaining * Math.max(0, Number(product.cena || product.price) || 0)).toFixed(2)),
+    });
+  }
+  let dokumentyZmienione = 0;
+  const editable = new Set(['szkic', 'do sprawdzenia', 'zaakceptowane']);
+  for (const shortage of shortages) {
+    let target = supplierOrders.find((z) => editable.has(String(z.status || 'szkic').toLowerCase()) && (z.pozycje || []).some((p) => String(p.dostawca || 'Bez przypisanego dostawcy') === shortage.dostawca));
+    if (!target) {
+      const now = new Date();
+      target = {
+        id: `AZ-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        numer: `AZ/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(supplierOrders.length + 1).padStart(4, '0')}`,
+        typ: 'zlecenie-producent', tryb: 'braki', status: 'szkic', data: now.toISOString(), dataTxt: now.toLocaleString('pl-PL'), operator: 'Agent Allegro', pozycje: [],
+        uwagi: `Automatyczny szkic braków z nowych zleceń Allegro dla dostawcy: ${shortage.dostawca}.`,
+      };
+      supplierOrders.unshift(target);
+    }
+    const existing = target.pozycje.find((p) => String(p.produktId) === shortage.produktId);
+    if (existing) {
+      existing.ilosc = (Number(existing.ilosc) || 0) + shortage.ilosc;
+      existing.iloscPotrzebna = (Number(existing.iloscPotrzebna) || 0) + shortage.iloscPotrzebna;
+      existing.zamowienia = [...new Set([...(existing.zamowienia || []), ...shortage.zamowienia])].slice(0, 50);
+      existing.powod = shortage.powod;
+    } else target.pozycje.push(shortage);
+    Object.assign(target, allegroAgentPodsumujDokument(target));
+    dokumentyZmienione++;
+  }
+  let refsZmienione = 0;
+  for (const z of supplierOrders) for (const p of z.pozycje || []) {
+    const orderRefs = [...(autoRefs.get(String(p.produktId)) || new Map()).entries()].map(([nr, qty]) => `Allegro ${nr} × ${qty}`);
+    if (orderRefs.length) {
+      const before = (p.zamowienia || []).length;
+      p.zamowienia = [...new Set([...(p.zamowienia || []), ...orderRefs])].slice(0, 50);
+      if (p.zamowienia.length !== before) refsZmienione++;
+    }
+  }
+  const supplierDocsByProduct = new Map();
+  for (const z of supplierOrders.filter((x) => !['zrealizowane', 'anulowane'].includes(String(x.status || '').toLowerCase()))) for (const p of z.pozycje || []) {
+    const id = String(p.produktId || '');
+    if (!id) continue;
+    if (!supplierDocsByProduct.has(id)) supplierDocsByProduct.set(id, []);
+    supplierDocsByProduct.get(id).push({ id: z.id, numer: z.numer, status: z.status, dostawca: p.dostawca, ilosc: p.ilosc });
+  }
+  const now = new Date().toISOString();
+  const updatedItems = (Array.isArray(items) ? items : []).map((z) => {
+    if (!allegroAgentZlecenieAktywne(z)) return z;
+    const orderId = String(z.id || z.nr || '');
+    const positions = (lineMatches.get(orderId) || []).map(({ line, offer, match, quantity }) => {
+      if (!match?.id) return { offerId: line.offerId, nazwa: line.offerName || offer.name || 'Produkt Allegro', ilosc: quantity, decision: 'nierozpoznany', reason: 'Brak jednoznacznego EAN/SKU lub mapowania oferty' };
+      const productId = match.id, meta = kartoteki[productId] && typeof kartoteki[productId] === 'object' ? kartoteki[productId] : {};
+      const known = Object.prototype.hasOwnProperty.call(stany, productId) && stany[productId] !== '' && stany[productId] != null && Number.isFinite(Number(stany[productId]));
+      const stock = known ? Math.max(0, Number(stany[productId]) || 0) : null, reserved = reservations.get(productId) || 0, available = stock === null ? null : stock - reserved, shortage = stock === null ? null : Math.max(0, -available);
+      const docs = supplierDocsByProduct.get(productId) || [];
+      const decision = !known ? 'sprawdz_stan' : shortage > 0 ? 'zamow_u_producenta' : !meta.lokalizacja ? 'uzupelnij_lokalizacje' : 'kompletuj';
+      return { offerId: line.offerId, productId, nazwa: line.offerName || match.product?.nazwa || offer.name || `Produkt ${productId}`, ilosc: quantity, match: match.match, stock, reserved, available, shortage, location: tekst(meta.lokalizacja || '', 120), supplier: tekst(meta.dostawca || '', 120), supplierOrders: docs, decision };
+    });
+    const nierozpoznane = positions.filter((p) => p.decision === 'nierozpoznany').length;
+    const bezStanu = positions.filter((p) => p.decision === 'sprawdz_stan').length;
+    const bezLokalizacji = positions.filter((p) => p.decision === 'uzupelnij_lokalizacje').length;
+    const braki = positions.reduce((sum, p) => sum + Math.max(0, Number(p.shortage) || 0), 0);
+    let warehouseStage = String(z.warehouseStage || 'do_sprawdzenia').toLowerCase();
+    if (!['spakowane', 'zrealizowane'].includes(warehouseStage)) warehouseStage = braki > 0 ? 'braki' : (nierozpoznane || bezStanu || bezLokalizacji) ? 'do_sprawdzenia' : 'kompletacja';
+    return { ...z, warehouseStage, warehouseStageUpdatedAt: now, agentReviewedAt: now, agentVersion: 'allegro-stock-agent-v1', agentAnalysis: { positions, nierozpoznane, bezStanu, bezLokalizacji, braki, gotowe: !nierozpoznane && !bezStanu && !bezLokalizacji && !braki } };
+  });
+  if (dokumentyZmienione || shortages.length || refsZmienione) {
+    dane.artway_agent_ai_zlecenia = supplierOrders.slice(0, 1000);
+    const historia = Array.isArray(dane.artway_agent_ai_historia) ? dane.artway_agent_ai_historia : [];
+    historia.unshift({ id: `AI-${Date.now().toString(36)}`, typ: 'allegro-magazyn', opis: `Agent sprawdził ${aktywne.length} zleceń Allegro i dopisał ${shortages.length} braków z nowych zleceń do dokumentów producentów.`, data: now, dataTxt: new Date().toLocaleString('pl-PL'), operator: 'Agent Allegro', dane: { zlecenia: aktywne.length, noweDoAutomatyzacji: automatyczneIds.size, braki: shortages.length, dokumentyZmienione } });
+    dane.artway_agent_ai_historia = historia.slice(0, 500);
+    await zapisz('settings', { ...settingsRec, data: dane, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
+  }
+  return { items: updatedItems, report: { reviewed: aktywne.length, autoEligible: automatyczneIds.size, shortagesAdded: shortages.length, supplierDocumentsChanged: dokumentyZmienione, supplierReferencesChanged: refsZmienione, unresolved: updatedItems.reduce((s, z) => s + Number(z.agentAnalysis?.nierozpoznane || 0) + Number(z.agentAnalysis?.bezStanu || 0), 0), ready: updatedItems.filter((z) => z.agentAnalysis?.gotowe).length, at: now } };
 }
 function allegroNormalizujOferte(o) {
   const price = o?.sellingMode?.price || o?.price || {};
@@ -3289,6 +3492,7 @@ export default async (req) => {
       const poprzednie = Array.isArray(poprzedniRec.items) ? poprzedniRec.items : [];
       const mapa = new Map(poprzednie.filter((x) => x?.id).map((x) => [String(x.id), x]));
       const seen = new Set();
+      const noweIds = [];
       const aktywne = pobrane
         .map(allegroNormalizujZamowienie)
         .filter((x) => x.id && !seen.has(x.id) && seen.add(x.id))
@@ -3297,7 +3501,7 @@ export default async (req) => {
       let dodane = 0;
       for (const z of aktywne) {
         const stare = mapa.get(String(z.id)) || {};
-        if (!stare.id) dodane++;
+        if (!stare.id) { dodane++; noweIds.push(String(z.id)); }
         mapa.set(String(z.id), allegroScalZamowienie(z, stare));
       }
       const doAktualizacji = poprzednie.filter((z) => z?.id && !seen.has(String(z.id)) && !['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(allegroStatusKolejkiZamowienia(z, {}))).slice(0, limit);
@@ -3318,13 +3522,21 @@ export default async (req) => {
           if (!z.syncError) odswiezone++;
         }
       }
-      const items = [...mapa.values()]
+      let items = [...mapa.values()]
         .map((z) => allegroScalZamowienie(z, z))
         .sort((a, b) => String(b.firstFetchedAt || '').localeCompare(String(a.firstFetchedAt || '')))
         .slice(0, 5000);
-      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: dodane, refreshed: odswiezone, filtered: pobrane.length - aktywne.length, mode: 'allegro_status_authoritative_warehouse_stage_separate' };
+      let agent = { reviewed: 0, shortagesAdded: 0, supplierDocumentsChanged: 0, unresolved: 0, ready: 0 };
+      try {
+        const wynikAgenta = await allegroAgentPrzetworzZamowienia(items, { newOrderIds: noweIds });
+        items = wynikAgenta.items;
+        agent = wynikAgenta.report;
+      } catch (e) {
+        agent = { ...agent, error: tekst(e.message || String(e), 500) };
+      }
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: dodane, refreshed: odswiezone, filtered: pobrane.length - aktywne.length, mode: 'allegro_status_authoritative_warehouse_stage_separate', agent };
       await zapisz('allegro_orders', rec);
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode });
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode, agent });
     }
 
     // ─── ALLEGRO: lokalny etap obsługi zamówienia (admin) ───
@@ -3361,7 +3573,7 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const orderIds = [...new Set((Array.isArray(body.orderIds) ? body.orderIds : [body.orderId]).map((id) => tekst(id, 100).trim()).filter(Boolean))].slice(0, 1000);
       const stage = tekst(body.stage, 40).trim().toLowerCase();
-      const allowed = new Set(['do_sprawdzenia', 'braki', 'kompletacja', 'spakowane']);
+      const allowed = new Set(['do_sprawdzenia', 'braki', 'kompletacja', 'spakowane', 'zrealizowane']);
       if (!orderIds.length || !allowed.has(stage)) return odpowiedz({ ok: false, error: 'Nieprawidłowe zlecenie albo etap magazynu' }, 422);
       const rec = await czytaj('allegro_orders', { items: [], updated_at: null });
       const items = Array.isArray(rec.items) ? rec.items : [];

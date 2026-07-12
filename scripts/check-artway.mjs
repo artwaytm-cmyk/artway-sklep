@@ -9,6 +9,7 @@ const files = [
   'netlify/functions/store.mjs',
   'netlify/functions/lib/store-app.mjs',
   'netlify/functions/cron-inpost-sync.mjs',
+  'netlify/functions/cron-allegro-orders.mjs',
 ];
 
 function fail(message) {
@@ -38,6 +39,7 @@ const app = read('assets/app.js');
 const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
 const cron = read('netlify/functions/cron-inpost-sync.mjs');
+const cronAllegroOrders = read('netlify/functions/cron-allegro-orders.mjs');
 
 const version = index.match(/<meta\s+name=["']artway-version["']\s+content=["']([^"']+)/i)?.[1] || '';
 if (!version) fail('index.html: brak meta artway-version');
@@ -126,6 +128,7 @@ requireMarkers('assets/app.js', app, [
   'function allegroPoprawOpisyWFormularzu',
   'function allegroAnalizaMagazynowaZamowienia',
   'function agentAIAllegroZleceniaTekst',
+  'Zrealizowane lokalnie',
   'function potwierdzWidoczneStanyMagazynu',
 ]);
 
@@ -167,11 +170,19 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function allegroSekcjeOpisu',
   'function allegroZnajdzProduktKatalogu',
   "action === 'allegro-order-warehouse-stage'",
+  'function allegroAgentPrzetworzZamowienia',
+  "'zrealizowane'",
 ]);
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
   "schedule: '0 */6 * * *'",
   'inpost-sync-all',
+  'ARTWAY_ADMIN_TOKEN',
+]);
+
+requireMarkers('netlify/functions/cron-allegro-orders.mjs', cronAllegroOrders, [
+  "schedule: '5,20,35,50 * * * *'",
+  'allegro-sync-orders',
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
@@ -181,7 +192,7 @@ try {
   fail(`assets/app.js: błąd składni: ${error.message}`);
 }
 
-for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs']) {
+for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs']) {
   try {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
   } catch (error) {
