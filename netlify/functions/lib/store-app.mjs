@@ -1379,6 +1379,10 @@ function allegroAktualizatorProduktowCentralnych(data = {}) {
     if (addedIndex.has(id)) {
       const index = addedIndex.get(id), next = update(added[index]);
       if (JSON.stringify(next) !== JSON.stringify(added[index])) { added[index] = next; localChanged = true; }
+      if (edits[id] && typeof edits[id] === 'object') {
+        const nextEdit = update(edits[id]);
+        if (JSON.stringify(nextEdit) !== JSON.stringify(edits[id])) { edits[id] = nextEdit; localChanged = true; }
+      }
     } else {
       const next = update(edits[id] || {});
       if (JSON.stringify(next) !== JSON.stringify(edits[id] || {})) { edits[id] = next; localChanged = true; }
