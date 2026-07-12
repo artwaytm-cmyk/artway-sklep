@@ -156,16 +156,66 @@ function producentEmailZlecenia(order = {}, supplier = {}) {
   const html = `<!doctype html><html><body style="margin:0;background:#f4f6fb;font-family:Arial,sans-serif;color:#172033"><div style="max-width:760px;margin:0 auto;padding:28px 14px"><div style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;padding:24px;border-radius:18px 18px 0 0"><div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;font-weight:700">Artway-TM • zamówienie do producenta</div><h1 style="margin:8px 0 0;font-size:26px">${htmlEscape(number)}</h1></div><div style="background:#fff;padding:24px;border-radius:0 0 18px 18px"><p style="white-space:pre-line;line-height:1.65;margin-top:0">${htmlEscape(intro)}</p><table style="width:100%;border-collapse:collapse;margin:20px 0"><thead><tr style="background:#eef2ff;text-align:left"><th style="padding:10px">Kod</th><th style="padding:10px">EAN</th><th style="padding:10px">Nazwa</th><th style="padding:10px;text-align:center">Ilość</th></tr></thead><tbody>${table}</tbody></table><div style="background:#f8fafc;border-left:4px solid #2563eb;padding:14px 16px;line-height:1.55">Prosimy o potwierdzenie przyjęcia zamówienia, dostępności produktów i przewidywanego terminu wysyłki.</div><p style="margin:24px 0 0">Pozdrawiamy serdecznie,<br><b>Artway-TM</b><br><a href="https://artwaytm.pl" style="color:#2563eb">artwaytm.pl</a></p></div></div></body></html>`;
   return { name, to, rows, subject, text, html };
 }
-async function wyslijTelegramHtml(text) {
+async function wyslijTelegramHtml(text, options = {}) {
   const c = telegramKonfiguracja();
   if (!c.token || !c.chatId) {
     const e = new Error('Telegram nie jest skonfigurowany na serwerze. Ustaw TELEGRAM_BOT_TOKEN oraz TELEGRAM_GROUP_ID lub TELEGRAM_CHAT_ID.');
     e.code = 'telegram_not_configured'; e.status = 503; throw e;
   }
-  const r = await fetch(`https://api.telegram.org/bot${c.token}/sendMessage`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: c.chatId, text: String(text || '').slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true }) });
+  const r = await fetch(`https://api.telegram.org/bot${c.token}/sendMessage`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: options.chatId || c.chatId, text: String(text || '').slice(0, 4090), parse_mode: 'HTML', disable_web_page_preview: true, disable_notification: options.silent === true, ...(options.replyMarkup ? { reply_markup: options.replyMarkup } : {}) }) });
   const dane = await r.json().catch(() => ({}));
   if (!r.ok || !dane.ok) { const e = new Error(tekst(dane?.description || `Telegram HTTP ${r.status}`, 500)); e.code = 'telegram_error'; e.status = r.status || 502; throw e; }
   return dane.result || {};
+}
+function agentZamowienieAktywne(z = {}) {
+  return !['anulowane', 'dostarczone', 'zakończone', 'zwrot', 'zwrot pieniędzy'].includes(String(z.status || '').toLowerCase());
+}
+async function agentCentrumOperacyjne() {
+  const [settingsRec, ordersRec, allegroOrdersRec, communicationRec, offerErrorRec] = await Promise.all([
+    czytaj('settings', { data: {}, updated_at: null }), czytaj('orders', { items: [] }), czytaj('allegro_orders', { items: [] }),
+    czytaj('allegro_communications', { threads: [], issues: [], updated_at: null }), czytaj('allegro_offer_last_error', null),
+  ]);
+  const data = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {};
+  const orders = Array.isArray(ordersRec.items) ? ordersRec.items : [], activeOrders = orders.filter(agentZamowienieAktywne), newOrders = activeOrders.filter((x) => String(x.status || '').toLowerCase() === 'nowe');
+  const shipmentsWithoutTracking = activeOrders.filter((x) => !tekst(x?.wysylka?.numer || x?.trackingNumber || '', 100).trim());
+  const allegroOrders = Array.isArray(allegroOrdersRec.items) ? allegroOrdersRec.items : [], activeAllegro = allegroOrders.filter(allegroAgentZlecenieAktywne);
+  const communications = [...(Array.isArray(communicationRec.threads) ? communicationRec.threads.map((x) => ({ ...x, type: 'thread' })) : []), ...(Array.isArray(communicationRec.issues) ? communicationRec.issues.map((x) => ({ ...x, type: 'issue' })) : [])];
+  const communicationWaiting = communications.filter((x) => !x.internalResolved && (x.needsReply || x.humanReplyNeeded || Number(x.newIncomingCount || 0) > 0));
+  const productMap = new Map(), addProduct = (p = {}) => { const id = tekst(p.id, 100).trim(); if (id) productMap.set(id, { ...(productMap.get(id) || {}), ...p, id }); };
+  for (const p of Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []) addProduct(p);
+  for (const p of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) addProduct(p);
+  for (const [id, p] of Object.entries(data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? data.artway_produkty_edytowane : {})) addProduct({ ...(p || {}), id });
+  const products = [...productMap.values()], supplierUnavailable = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'brak'), supplierLow = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'niski');
+  const producerLinks = (Array.isArray(data.artway_agent_ai_linki_producentow) ? data.artway_agent_ai_linki_producentow : []).filter((x) => !['pobrano', 'zamkniete', 'zamknięte', 'usunieto', 'usunięto'].includes(String(x?.status || '').toLowerCase()));
+  const offerTasks = (Array.isArray(data.artway_agent_ai_allegro_zadania) ? data.artway_agent_ai_allegro_zadania : []).filter((x) => !['zrealizowane', 'zamkniete', 'zamknięte', 'anulowane'].includes(String(x?.status || '').toLowerCase()));
+  const supplierOrders = (Array.isArray(data.artway_agent_ai_zlecenia) ? data.artway_agent_ai_zlecenia : []).filter((x) => !['zrealizowane', 'anulowane', 'wysłane do producenta', 'wysłane do dostawcy'].includes(String(x?.status || '').toLowerCase()));
+  const priorities = [], addPriority = (severity, area, count, title, href, action) => { if (Number(count) > 0) priorities.push({ id: `${area}-${priorities.length + 1}`, severity, area, count: Number(count), title, href, action }); };
+  addPriority('critical', 'zamowienia', newOrders.length, 'Nowe zamówienia czekają na rozpoczęcie obsługi', '#/admin/zamowienia', 'Otwórz zamówienia i rozpocznij realizację.');
+  addPriority('critical', 'allegro', communicationWaiting.length, 'Nowe wiadomości lub dyskusje Allegro wymagają odpowiedzi', '#/admin/allegro/wiadomosci', 'Przygotuj odpowiedź i oznacz sprawę wewnętrznie po zakończeniu.');
+  addPriority('critical', 'producent', supplierUnavailable.length, 'Produkty priorytetowe niedostępne u producenta', '#/admin/magazyn/dostawcy', 'Sprawdź aktywne zamówienia i alternatywne źródło dostawy.');
+  addPriority('warning', 'wysylki', shipmentsWithoutTracking.length, 'Aktywne zamówienia bez numeru nadania', '#/admin/wysylki', 'Uzupełnij dane InPost i wygeneruj etykiety.');
+  addPriority('warning', 'allegro', activeAllegro.length, 'Aktywne zamówienia Allegro do kontroli magazynowej', '#/admin/allegro/zamowienia', 'Sprawdź kompletację, braki i lokalizacje produktów.');
+  addPriority('warning', 'producent', supplierLow.length, 'Niski stan produktów u producentów', '#/admin/magazyn/dostawcy', 'Kontroluj najpierw najlepiej sprzedające się produkty.');
+  addPriority('warning', 'produkty', offerTasks.length, 'Otwarte zadania wystawiania produktów na Allegro', '#/admin/allegro/wystawianie', 'Uzupełnij wymagane dane i ponów wystawienie.');
+  addPriority('warning', 'producenci', supplierOrders.length, 'Otwarte dokumenty zamówień do producentów', '#/admin/agent-ai/zlecenia', 'Sprawdź aktualną rewizję przed zatwierdzeniem i wysyłką.');
+  addPriority('info', 'produkty', producerLinks.length, 'Linki producentów czekają na pobranie danych', '#/admin/agent-ai/plan', 'Ponów analizę linków i uzupełnij kartoteki.');
+  if (offerErrorRec?.message || offerErrorRec?.error) addPriority('warning', 'allegro', 1, 'Ostatnia operacja oferty Allegro zakończyła się błędem', '#/admin/allegro/wystawianie', 'Otwórz diagnostykę oferty i przekaż braki Agentowi.');
+  const severityRank = { critical: 0, warning: 1, info: 2 };
+  priorities.sort((a, b) => (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9) || b.count - a.count || a.title.localeCompare(b.title, 'pl'));
+  const critical = priorities.filter((x) => x.severity === 'critical').length, warnings = priorities.filter((x) => x.severity === 'warning').length;
+  const score = Math.max(0, Math.min(100, 100 - critical * 14 - warnings * 5));
+  return {
+    ok: true, generatedAt: new Date().toISOString(), score, priorities,
+    summary: { orders: orders.length, activeOrders: activeOrders.length, newOrders: newOrders.length, shipmentsWithoutTracking: shipmentsWithoutTracking.length, allegroOrders: allegroOrders.length, activeAllegro: activeAllegro.length, communicationWaiting: communicationWaiting.length, supplierUnavailable: supplierUnavailable.length, supplierLow: supplierLow.length, producerLinks: producerLinks.length, offerTasks: offerTasks.length, supplierOrders: supplierOrders.length },
+    integrations: { email: !!emailPublicConfig().configured, telegram: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId), inpost: !!inpostPublicConfig().configured, allegro: !!(process.env.ALLEGRO_CLIENT_ID && process.env.ALLEGRO_CLIENT_SECRET) },
+    links: { agent: 'https://artwaytm.pl/#/admin/agent-ai', orders: 'https://artwaytm.pl/#/admin/zamowienia', warehouse: 'https://artwaytm.pl/#/admin/magazyn/stany', allegro: 'https://artwaytm.pl/#/admin/allegro', shipping: 'https://artwaytm.pl/#/admin/wysylki' },
+  };
+}
+function agentRaportTelegramHTML(center = {}) {
+  const s = center.summary || {}, items = (Array.isArray(center.priorities) ? center.priorities : []).slice(0, 8);
+  const icons = { critical: '🔴', warning: '🟡', info: '🔵' };
+  const rows = items.length ? items.map((x, i) => `${i + 1}. ${icons[x.severity] || '•'} <b>${telegramHtml(x.title)}</b> — ${x.count}\n   ${telegramHtml(x.action || '')}`).join('\n') : '✅ Brak aktywnych tematów wymagających reakcji.';
+  return `<b>🤖 Centrum operacyjne Artway-TM — ${center.score ?? 0}%</b>\n${telegramHtml(new Date(center.generatedAt || Date.now()).toLocaleString('pl-PL'))}\n\n<b>Sprzedaż i obsługa</b>\nSklep: ${s.newOrders || 0} nowych / ${s.activeOrders || 0} aktywnych\nAllegro: ${s.activeAllegro || 0} aktywnych • ${s.communicationWaiting || 0} spraw do odpowiedzi\nWysyłki bez numeru: ${s.shipmentsWithoutTracking || 0}\nProducent: ${s.supplierUnavailable || 0} braków • ${s.supplierLow || 0} niskich stanów\n\n<b>Najważniejsze działania</b>\n${rows}\n\n<i>Agent nie wysyła odpowiedzi klientom ani zamówień producentom bez zatwierdzenia administratora.</i>`;
 }
 function numerZamowienia(v) {
   return tekst(v, 80).trim();
@@ -3824,6 +3874,22 @@ export default async (req) => {
     // ─── E-MAIL: konfiguracja bez sekretów ───
     if (action === 'email-config') {
       return odpowiedz({ ok: true, email: emailPublicConfig() });
+    }
+
+    // ─── AGENT AI: jeden kontekst operacyjny całej strony ───
+    if (action === 'agent-operations-summary') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      return odpowiedz(await agentCentrumOperacyjne());
+    }
+
+    if (action === 'telegram-send-agent-report') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const center = await agentCentrumOperacyjne();
+      const sent = await wyslijTelegramHtml(agentRaportTelegramHTML(center), {
+        replyMarkup: { inline_keyboard: [[{ text: '🤖 Agent', url: center.links.agent }, { text: '📦 Zamówienia', url: center.links.orders }], [{ text: '🏬 Magazyn', url: center.links.warehouse }, { text: '🟠 Allegro', url: center.links.allegro }], [{ text: '🚚 Wysyłki', url: center.links.shipping }]] },
+      });
+      return odpowiedz({ ok: true, sentAt: new Date().toISOString(), messageId: sent?.message_id || null, center });
     }
 
     // ─── TELEGRAM: profesjonalne tabele zamówień do producentów ───

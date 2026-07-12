@@ -81,6 +81,7 @@ requireMarkers('assets/styles.css', css, [
   '.warehouse-generator',
   '.warehouse-stock-card',
   '.warehouse-stock-toolbar',
+  '.agent-site-grid',
   '.modal',
 ]);
 
@@ -198,6 +199,9 @@ requireMarkers('assets/app.js', app, [
   'Lokalizacja nadrzędna',
   'Centrum kontroli zapasu',
   'Bestsellery najpierw',
+  'function agentAICentrumTekst',
+  'function agentAIWyslijRaportTelegram',
+  'Kontekst całej strony',
   '#/admin/magazyn/dostawcy',
   'Próg ostrzeżenia u producenta',
   'stan_u_producenta',
@@ -259,6 +263,9 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'producentStanHistoria',
   'priorityChecked',
   'activeDemand',
+  "action === 'agent-operations-summary'",
+  "action === 'telegram-send-agent-report'",
+  'agentCentrumOperacyjne',
   'function allegroDopasowanieOferty',
   'function allegroSekcjeOpisu',
   'function allegroZnajdzProduktKatalogu',

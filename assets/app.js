@@ -4102,10 +4102,23 @@ function agentAIRozpoznajPolecenie(tekst=""){
     if(slash==="/braki") return {typ:"braki",raw,confidence:1};
     if(["/opisy","/opis"].includes(slash)) return {typ:n.includes("popraw")?"opisy-popraw":"opisy",raw,confidence:1};
     if(slash==="/zamowienia") return {typ:"zamowienia",raw,confidence:1};
+    if(["/centrum","/priorytety","/dzis"].includes(slash)) return {typ:"centrum",raw,confidence:1};
+    if(["/wiadomosci","/dyskusje"].includes(slash)) return {typ:"komunikacja",raw,confidence:1};
+    if(["/wysylki","/inpost"].includes(slash)) return {typ:"wysylki",raw,confidence:1};
+    if(slash==="/produkty") return {typ:"produkty-audyt",raw,confidence:1};
+    if(["/producenci","/dostawcy"].includes(slash)) return {typ:"producenci",raw,confidence:1};
+    if(["/diagnostyka","/integracje"].includes(slash)) return {typ:"diagnostyka",raw,confidence:1};
     if(["/zlecenie","/zamow"].includes(slash)) return {typ:"zlecenie",tryb:n.includes("nisk")?"niskie":"braki",raw,confidence:1};
     if(["/sprawdz","/check"].includes(slash)) return {typ:"sprawdz",raw,confidence:1};
   }
   if(agentAIMa(n,["pomoc","co potrafisz","jakie polecenia","co mozesz","instrukcja"])) return {typ:"pomoc",raw,confidence:.95};
+  if(agentAIMa(n,["wyslij raport na telegram","wyślij raport na telegram","raport telegram","telegram raport","podsumowanie na telegram"])) return {typ:"raport-telegram",raw,confidence:.98};
+  if(agentAIMa(n,["centrum operacyjne","plan dnia","co mam zrobic","co mam zrobić","co mam dzisiaj zrobic","co mam dzisiaj zrobić","najwazniejsze zadania","najważniejsze zadania","pokaz priorytety","pokaż priorytety","co jest pilne","raport calej strony","raport całej strony"])) return {typ:"centrum",raw,confidence:.96};
+  if(agentAIMa(n,["wiadomosci allegro","wiadomości allegro","dyskusje allegro","komunikacja z klientami","pokaz komunikacje","pokaż komunikację","komunikacja allegro","komu odpisac","komu odpisać","sprawy do odpowiedzi"])) return {typ:"komunikacja",raw,confidence:.95};
+  if(agentAIMa(n,["wysylki","wysyłki","etykiety inpost","przesylki bez numeru","przesyłki bez numeru","status inpost","co wyslac","co wysłać"])) return {typ:"wysylki",raw,confidence:.93};
+  if(agentAIMa(n,["audyt produktow","audyt produktów","stan katalogu","braki danych produktow","braki danych produktów","produkty do poprawy","jak wyglada katalog","jak wygląda katalog"])) return {typ:"produkty-audyt",raw,confidence:.92};
+  if(agentAIMa(n,["status producentow","status producentów","dostawcy i producenci","zamowienia producentow","zamówienia producentów","otwarte dokumenty producentow","otwarte dokumenty producentów"])) return {typ:"producenci",raw,confidence:.92};
+  if(agentAIMa(n,["diagnostyka integracji","status integracji","sprawdz integracje","sprawdź integracje","email inpost paynow","czy integracje dzialaja","czy integracje działają"])) return {typ:"diagnostyka",raw,confidence:.94};
   if(agentAIMa(n,["zapamietaj","zapamiętaj","naucz sie","naucz się","dodaj do pamieci","dodaj do pamięci","procedura:"])) return {typ:"pamiec-zapis",tresc:agentAIWytnijPamiec(raw),raw,confidence:.95};
   if(agentAIMa(n,["pokaz pamiec","pokaż pamięć","co pamietasz","co pamiętasz","lista procedur","pokaz procedury","pokaż procedury"])) return {typ:"pamiec-lista",raw,confidence:.95};
   if(agentAIMa(n,["pokaz lokalizacje","pokaż lokalizacje","lista lokalizacji","lokalizacje magazynu","mapa magazynu"])) return {typ:"lokalizacje",raw,confidence:.9};
@@ -4193,6 +4206,33 @@ function agentAIStatusTekst(){
   const problemy=analiza.filter(x=>x.poziom!=="ok");
   const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
   return [`🤖 Status agenta/sklepu: ${score}%`,`${problemy.length} tematów wymaga kontroli.`,`Baza: ${chmuraStan.admin?"połączona":"wymaga hasła/połączenia"} • e-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"} • pamięć: ${(agentAIPamiec||[]).length} • lokalizacje: ${magazynLokalizacjeAktywne().length}`,problemy.length?`\nNajważniejsze:\n${problemy.slice(0,8).map(x=>`• ${x.tytul}: ${x.opis}`).join("\n")}`:"\nBrak pilnych problemów z listy kontroli."].join("\n");
+}
+function agentAICentrumTekst(limit=10){
+  const analiza=agentAIAnaliza(),zadania=analiza.filter(x=>x.poziom!=="ok").sort((a,b)=>agentAIPriorytet(a)-agentAIPriorytet(b)).slice(0,limit),bad=analiza.filter(x=>x.poziom==="bad").length,warn=analiza.filter(x=>x.poziom==="warn").length,score=Math.max(0,Math.round(100-bad*18-warn*8));
+  return [`🤖 Centrum operacyjne Artway-TM — ${score}%`,`Pilne: ${bad} • wymagające uwagi: ${warn} • kontrole OK: ${analiza.length-bad-warn}.`,zadania.length?`\nKolejność pracy:\n${zadania.map((x,i)=>`${i+1}. ${x.poziom==="bad"?"🔴":"🟡"} ${x.tytul}\n   ${x.opis}\n   Następny krok: ${agentAIOpisKroku(x)}`).join("\n")}`:"\n✅ Brak aktywnych tematów wymagających reakcji.","\nPolecenia szczegółowe: „pokaż komunikację”, „sprawdź wysyłki”, „audyt produktów”, „status producentów” albo „wyślij raport na Telegram”."].join("\n");
+}
+function agentAIKomunikacjaTekst(){
+  const st=allegroKomunikacjaStaty(),threads=st.threads||[],issues=st.issues||[],threadNeed=threads.filter(x=>!x.internalResolved&&(x.humanReplyNeeded||x.needsReply)).length,issueNeed=issues.filter(x=>!x.internalResolved&&(x.humanReplyNeeded||x.needsReply)).length;
+  return [`💬 Komunikacja z klientami`,`Allegro: ${threadNeed} wiadomości i ${issueNeed} dyskusji/reklamacji wymaga odpowiedzi.`,`Załatwione wewnętrznie: ${[...threads,...issues].filter(x=>x.internalResolved).length}.`,`Automatyczna odpowiedź jest wysyłana tylko przy pierwszej nowej wiadomości; dalsze odpowiedzi pozostają do zatwierdzenia administratora.`,threadNeed+issueNeed?"Otwórz Allegro → Wiadomości lub Dyskusje, sprawdź propozycję Agenta i odpowiedz klientowi.":"✅ Brak nowych spraw wymagających odpowiedzi."].join("\n");
+}
+function agentAIWysylkiTekst(){
+  const aktywne=pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn),bezNumeru=aktywne.filter(z=>!daneWysylki(z).numer),problemy=aktywne.filter(z=>daneWysylki(z).etap==="problem"||daneWysylki(z).status==="problem");
+  return [`🚚 Centrum wysyłek`,`Aktywne zamówienia: ${aktywne.length}. Bez numeru nadania: ${bezNumeru.length}. Wyjątki/problem: ${problemy.length}.`,`InPost: ${stanBramki.inpost?.configured?"połączony":"wymaga sprawdzenia konfiguracji"}.`,bezNumeru.length?`Do obsługi: ${bezNumeru.slice(0,10).map(z=>z.nr).join(", ")}.\nNastępny krok: uzupełnij odbiorcę, wybierz usługę, wygeneruj etykietę i pobierz numer nadania.`:"✅ Aktywne przesyłki mają numery nadania."].join("\n");
+}
+function agentAIProduktyAudytTekst(){
+  const produkty=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)),bezCeny=produkty.filter(p=>!produktMaCeneSprzedazy(p)),bezZdjec=produkty.filter(p=>!p.zdjecie),opisy=agentAIProduktyZProblememOpisu(1000),oferty=produkty.filter(p=>p.allegroOfferId||allegroOfertaDlaProduktuSklepu(p)?.id),zadania=allegroAktywneZadaniaAgentaOfert();
+  return [`🏷️ Audyt produktów i katalogu`,`Aktywne produkty: ${produkty.length}. Na Allegro: ${oferty.length}.`,`Bez ceny: ${bezCeny.length} • bez zdjęcia: ${bezZdjec.length} • opis do poprawy: ${opisy.length} • zadania wystawiania: ${zadania.length}.`,zadania.length?"Najpierw uzupełnij dane wymagane przez Allegro, następnie ponów wystawianie z Agenta ofert.":opisy.length?"Możesz użyć polecenia „popraw opisy produktów”.":"✅ Brak pilnych problemów katalogu."].join("\n");
+}
+function agentAIProducenciTekst(){
+  const stats=statystykiDostepnosciProducentow(),docs=(agentAIZlecenia||[]).filter(z=>!agentAIStatusZamknietyDlaNowejWersji(z.status)),producenci=(producenciKartoteka||[]).filter(p=>p.active!==false);
+  return [`🏭 Producenci i zakupy`,`Kartoteki producentów: ${producenci.length}. Otwarte dokumenty zakupowe: ${docs.length}.`,`Dostępność: ${stats.braki.length} braków • ${stats.niskie.length} niskich stanów • ${stats.nieznane.length} niepotwierdzonych.`,`Linki oczekujące na pobranie: ${agentAILinkiOczekujace().length}.`,docs.length?"Sprawdź bieżące rewizje dokumentów. Telegram jest podglądem; e-mail do producenta wymaga zatwierdzenia aktualnej wersji.":"✅ Brak otwartych dokumentów producentów."].join("\n");
+}
+function agentAIDiagnostykaTekst(){
+  return [`🛠️ Diagnostyka całej strony`,`Wspólna baza: ${chmuraStan.admin?"OK":"wymaga połączenia"}.`,`E-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"} • Allegro: ${allegroStan.connected?"OK":"sprawdź połączenie"}.`,`Paynow: ${stanBramki.paynow?.configured?"OK":"sprawdź konfigurację"} • Telegram: raport serwerowy dostępny po poprawnej konfiguracji bota.`,`Następny krok: otwórz Diagnostykę, jeżeli którakolwiek integracja nie ma statusu OK.`].join("\n");
+}
+async function agentAIWyslijRaportTelegram(){
+  toast("Agent przygotowuje raport całej strony dla Telegramu…");
+  try{const d=await chmura("telegram-send-agent-report",{method:"POST",body:{source:"admin-panel"},timeout:30000});zapiszHistorieAgenta("telegram","Wysłano raport centrum operacyjnego na Telegram",{messageId:d.messageId||"",score:d.center?.score||0,summary:d.center?.summary||{}});toast(`✅ Raport Agenta wysłany na Telegram • kondycja ${d.center?.score??"—"}%`);renderuj();return d;}catch(e){toast("⚠️ Telegram: "+(e.message||e));return null;}
 }
 function agentAIMagazynTekst(){
   const produktyAdmin=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
@@ -4777,7 +4817,21 @@ async function agentAIWykonajPolecenie(tekst=""){
   let odpowiedz="";
   try{
     if(intent.typ==="pomoc"){
-      odpowiedz=["Możesz pisać normalnie, np.:","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• sprawdź czy wpadło nowe zlecenie","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• sprawdź linki producentów","• sprawdź opisy produktów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę Pinkfrog","• pokaż pamięć","• utwórz lokalizację R1-P1","• pokaż lokalizacje","• synchronizuj bazę","• utwórz brakujące szkice FV"].join("\n");
+      odpowiedz=["Możesz pisać normalnie, np.:","• pokaż centrum operacyjne / co mam dziś zrobić?","• wyślij raport na Telegram","• pokaż komunikację z klientami","• sprawdź wysyłki i etykiety InPost","• audyt produktów i katalogu","• status producentów i otwartych zamówień","• diagnostyka integracji","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę","• synchronizuj bazę"].join("\n");
+    }else if(intent.typ==="centrum"){
+      odpowiedz=agentAICentrumTekst();
+    }else if(intent.typ==="komunikacja"){
+      odpowiedz=agentAIKomunikacjaTekst();
+    }else if(intent.typ==="wysylki"){
+      odpowiedz=agentAIWysylkiTekst();
+    }else if(intent.typ==="produkty-audyt"){
+      odpowiedz=agentAIProduktyAudytTekst();
+    }else if(intent.typ==="producenci"){
+      odpowiedz=agentAIProducenciTekst();
+    }else if(intent.typ==="diagnostyka"){
+      odpowiedz=agentAIDiagnostykaTekst();
+    }else if(intent.typ==="raport-telegram"){
+      const d=await agentAIWyslijRaportTelegram();odpowiedz=d?`Raport centrum operacyjnego został wysłany na Telegram. Kondycja strony: ${d.center?.score??"—"}%. Wiadomość zawiera przyciski do Agenta, zamówień, magazynu, Allegro i wysyłek.`:"Nie udało się wysłać raportu na Telegram.";
     }else if(intent.typ==="pamiec-zapis"){
       const rec=agentAIZapiszPamiec(intent.tresc||"");
       odpowiedz=rec?`Zapamiętałem na przyszłość: ${rec.wyzwalacz?`gdy „${rec.wyzwalacz}” → `:""}${rec.akcja}`:"Nie podałeś treści do zapamiętania. Napisz np. „zapamiętaj: przy brakach najpierw sprawdź dostawcę”.";
@@ -4962,6 +5016,7 @@ function agentAIWykonaj(akcja){
   if(akcja==="popraw-opisy"){ const t=agentAIPoprawOpisyProduktow(40); toast(t); renderuj(); return t; }
   if(akcja==="kartoteka-domyslna") return wypelnijDomyslnaKartotekeMagazynu();
   if(akcja==="audyt-magazynu") return audytMagazynuAI();
+  if(akcja==="raport-telegram") return agentAIWyslijRaportTelegram();
 }
 function agentAIPriorytet(x){
   if(x.poziom==="bad") return 1;
@@ -5017,6 +5072,9 @@ function widokAdminAgentAI(sekcja="pulpit"){
   const odpowiedziAgenta=(agentAIHistoria||[]).filter(h=>h.typ==="komenda"&&h.dane&&h.dane.odpowiedz).slice(0,5);
   const pamiecAgenta=(agentAIPamiec||[]).slice(0,12);
   const linkiProducentow=agentAILinkiOczekujace();
+  const komunikacja=allegroKomunikacjaStaty(),komunikacjaDoOdpowiedzi=[...(komunikacja.threads||[]),...(komunikacja.issues||[])].filter(x=>!x.internalResolved&&(x.humanReplyNeeded||x.needsReply)).length;
+  const aktywneWysylki=pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn),wysylkiBezNumeru=aktywneWysylki.filter(z=>!daneWysylki(z).numer).length;
+  const dokumentyProducentow=(agentAIZlecenia||[]).filter(z=>!agentAIStatusZamknietyDlaNowejWersji(z.status)).length;
   return adminSzkielet("/admin/agent-ai", `
   ${agentAISubnavHTML(aktywna)}
   <div class="panel ai-agent-panel">
@@ -5024,9 +5082,9 @@ function widokAdminAgentAI(sekcja="pulpit"){
       <div>
         <span class="cat-label">Automatyczny kontroler administratora</span>
         <h1>🤖 Agent AI</h1>
-        <p>Agent sprawdza sklep, zamówienia, magazyn, faktury, produkty i integracje. Na razie działa bezpiecznie w panelu jako agent kontrolny i wykonuje tylko akcje kliknięte przez administratora.</p>
+        <p>Jedno centrum operacyjne dla zamówień, komunikacji klientów, Allegro, InPost, magazynu, produktów, producentów, faktur i integracji. Agent porządkuje priorytety, ale działania zewnętrzne nadal wymagają decyzji administratora.</p>
       </div>
-      <div class="health-score">${score}%</div>
+      <div><div class="health-score">${score}%</div><button class="btn telegram-btn agent-report-btn" onclick="agentAIWykonaj('raport-telegram')">✈️ Raport na Telegram</button></div>
     </div>
     <div class="orders-stat-grid">
       <div class="order-stat-card ${problemy?"hot":""}"><span>⚠️</span><b>${problemy}</b><small>zadań do sprawdzenia</small></div>
@@ -5035,10 +5093,13 @@ function widokAdminAgentAI(sekcja="pulpit"){
       <div class="order-stat-card"><span>🧾</span><b>${szkiceFaktur.length}</b><small>szkiców FV</small></div>
       <div class="order-stat-card"><span>📦</span><b>${potrzebyZatowarowania().length}</b><small>braki do zamówień</small></div>
       <div class="order-stat-card"><span>🟠</span><b>${aktywneZamowieniaAllegro().filter(z=>{const a=allegroAnalizaMagazynowaZamowienia(z);return a.braki>0||a.nierozpoznane>0;}).length}</b><small>zleceń Allegro z problemem</small></div>
-      <div class="order-stat-card"><span>🧠</span><b>${(agentAIZlecenia||[]).length}</b><small>zleceń agenta</small></div>
+      <div class="order-stat-card ${komunikacjaDoOdpowiedzi?"hot":""}"><span>💬</span><b>${komunikacjaDoOdpowiedzi}</b><small>spraw do odpowiedzi</small></div>
+      <div class="order-stat-card ${wysylkiBezNumeru?"hot":""}"><span>🚚</span><b>${wysylkiBezNumeru}</b><small>wysyłek bez numeru</small></div>
+      <div class="order-stat-card"><span>🏭</span><b>${dokumentyProducentow}</b><small>otwartych dokumentów producentów</small></div>
       <div class="order-stat-card ${linkiProducentow.length?"hot":""}"><span>🔗</span><b>${linkiProducentow.length}</b><small>linków producentów</small></div>
     </div>
     <div class="diag-actions agent-command-grid">
+      <button class="btn telegram-btn" onclick="agentAIWykonaj('raport-telegram')">✈️ Wyślij pełny raport na Telegram</button>
       <button class="btn" onclick="agentAIWykonaj('sync')">🔄 Synchronizuj bazę</button>
       <button class="btn ghost" onclick="agentAIWykonaj('utworz-zlecenie-braki')">🧠 Utwórz zlecenie agenta</button>
       <button class="btn ghost" onclick="agentAIWykonaj('masowe-fv')">🧾 Utwórz brakujące szkice FV</button>
@@ -5050,7 +5111,8 @@ function widokAdminAgentAI(sekcja="pulpit"){
       <a class="btn ghost" href="#/diagnostyka">🛠️ Diagnostyka</a>
     </div>
   </div>
-  <div class="panel agent-command-panel" style="${["komendy","pamiec"].includes(aktywna)?"":"display:none"}">
+  <div class="panel agent-site-map" style="${aktywna==="pulpit"?"":"display:none"}"><div class="order-section-head"><div><span class="order-pro-label">Kontekst całej strony</span><h2>🧩 Obszary pracy Agenta</h2><p class="order-detail-lead">Każdy raport i polecenie korzysta z tych samych danych oraz kieruje do właściwej podstrony.</p></div></div><div class="agent-site-grid">${[["📦","Zamówienia",pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).length,"#/admin/zamowienia","pokaż zamówienia"],["💬","Komunikacja",komunikacjaDoOdpowiedzi,"#/admin/allegro/wiadomosci","pokaż komunikację z klientami"],["🚚","InPost",wysylkiBezNumeru,"#/admin/wysylki","sprawdź wysyłki"],["🟠","Allegro",aktywneZamowieniaAllegro().length,"#/admin/allegro","sprawdź Allegro"],["🏬","Magazyn",potrzebyZatowarowania().length,"#/admin/magazyn/stany","pokaż stan magazynu"],["🏷️","Produkty",allegroAktywneZadaniaAgentaOfert().length,"#/admin/asortyment/produkty","audyt produktów"],["🏭","Producenci",dokumentyProducentow,"#/admin/agent-ai/producenci","status producentów"],["🛠️","Integracje",stanBramki.email?.configured&&stanBramki.inpost?.configured?0:1,"#/diagnostyka","diagnostyka integracji"]].map(([ico,name,count,href,command])=>`<article><span>${ico}</span><div><b>${name}</b><small>${count?`${count} tematów aktywnych`:"bez pilnych tematów"}</small></div><a class="btn ghost" href="${href}">Otwórz</a><button class="btn ghost" onclick="location.hash='#/admin/agent-ai/komendy';setTimeout(()=>agentAIWstawKomende(${jsArg(command)}),60)">Zapytaj</button></article>`).join("")}</div></div>
+  <div class="panel agent-command-panel" style="${["pulpit","komendy","pamiec"].includes(aktywna)?"":"display:none"}">
     <div class="order-section-head">
       <div>
         <h2 style="margin-top:0">💬 Polecenie dla agenta</h2>
@@ -5062,6 +5124,13 @@ function widokAdminAgentAI(sekcja="pulpit"){
       <textarea id="agentAICommandInput" rows="3" placeholder="Np. sprawdź czy wpadło nowe zlecenie, przygotuj zamówienie do producenta, ile mamy szachy..."></textarea>
       <div class="agent-command-actions">
         <button class="btn" type="submit">🤖 Wykonaj polecenie</button>
+        <button class="btn telegram-btn" type="button" onclick="agentAIWstawKomende('wyślij raport na Telegram')">Raport Telegram</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż centrum operacyjne')">Centrum operacyjne</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż komunikację z klientami')">Komunikacja</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('sprawdź wysyłki i InPost')">Wysyłki</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('audyt produktów i katalogu')">Produkty</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('status producentów')">Producenci</button>
+        <button class="btn ghost" type="button" onclick="agentAIWstawKomende('diagnostyka integracji')">Integracje</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('sprawdź czy wpadło nowe zlecenie')">Nowe zlecenia</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('przygotuj zamówienie do producenta')">Zamówienie do producenta</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('czego brakuje do zamówień')">Braki</button>
@@ -5074,7 +5143,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('synchronizuj bazę')">Synchronizacja</button>
       </div>
     </form>
-    <div class="agent-command-hints">Obsługiwane: zamówienia, braki, magazyn, wyrywkowy monitoring stanów producentów, wyszukiwanie produktu, linki producentów, szkic zamówienia do producenta, synchronizacja, szkice FV, eksport i audyt magazynu.</div>
+    <div class="agent-command-hints">Agent rozumie kontekst całej strony: zamówienia, komunikację klientów, wysyłki InPost, Allegro, magazyn, produkty, producentów, faktury, płatności, integracje, pamięć procedur i raporty Telegram.</div>
     <div class="agent-memory-grid">
       <div class="agent-memory-card">
         <b>Jak uczyć agenta</b>
