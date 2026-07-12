@@ -4390,11 +4390,19 @@ export default async (req) => {
       return odpowiedz(await agentCentrumOperacyjne());
     }
 
+    if (action === 'agent-action-runs') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const history = await czytaj('agent_action_runs', { items: [], updated_at: null });
+      const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 30) || 30));
+      return odpowiedz({ ok: true, items: (Array.isArray(history.items) ? history.items : []).slice(0, limit), updated_at: history.updated_at || null });
+    }
+
     if (action === 'agent-run-safe-checks') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({})), requested = Array.isArray(body.areas) ? body.areas.map((x) => tekst(x, 80)) : [];
       const allowed = new Map([
+        ['site-health', { action: '', label: 'Funkcjonalność strony i integracje', local: true }],
         ['allegro-orders', { action: 'allegro-sync-orders', label: 'Zamówienia Allegro' }],
         ['inpost', { action: 'inpost-sync-all', label: 'Statusy i numery InPost' }],
         ['infakt', { action: 'infakt-sync', label: 'Zadania inFakt i ceny zakupu' }],
@@ -4403,6 +4411,10 @@ export default async (req) => {
       const results = await Promise.all(selected.map(async (area) => {
         const definition = allowed.get(area), started = Date.now();
         try {
+          if (definition.local) {
+            const center = await agentCentrumOperacyjne(), integrations = center.integrations || {}, missing = Object.entries(integrations).filter(([, ready]) => !ready).map(([name]) => name);
+            return { area, label: definition.label, status: missing.length ? 'error' : 'completed', detail: missing.length ? `Wymagają konfiguracji: ${missing.join(', ')}` : `Integracje: ${Object.keys(integrations).join(', ')} • baza i API odpowiadają`, error: missing.length ? `Wymagają konfiguracji: ${missing.join(', ')}` : '', durationMs: Date.now() - started };
+          }
           const response = await fetch(`${origin}/api/store?action=${encodeURIComponent(definition.action)}`, { method: 'POST', headers: { 'x-admin-token': adminToken, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ source: 'agent-safe-plan' }) });
           const text = await response.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
           if (!response.ok || data?.ok === false) throw new Error(tekst(data?.error || data?.message || `HTTP ${response.status}`, 500));
@@ -4417,7 +4429,7 @@ export default async (req) => {
         }
       }));
       const center = await agentCentrumOperacyjne(); results.forEach((result) => { if (result.area === 'allegro-orders') result.active = Number(center.summary?.activeAllegro || 0); });
-      const run = { id: crypto.randomUUID(), source: tekst(body.source || 'admin-panel', 80), startedAt, completedAt: new Date().toISOString(), results, scoreAfter: center.score };
+      const run = { id: crypto.randomUUID(), source: tekst(body.source || 'admin-panel', 80), profile: tekst(body.profile || 'custom', 40), startedAt, completedAt: new Date().toISOString(), durationMs: Math.max(0, Date.now() - Date.parse(startedAt)), results, completed: results.filter((x) => x.status === 'completed').length, errors: results.filter((x) => x.status === 'error').length, scoreAfter: center.score };
       const history = await czytaj('agent_action_runs', { items: [] }); history.items = [run, ...(Array.isArray(history.items) ? history.items : [])].slice(0, 100); history.updated_at = run.completedAt; await zapisz('agent_action_runs', history);
       return odpowiedz({ ok: true, allCompleted: results.every((x) => x.status === 'completed'), run, center });
     }
