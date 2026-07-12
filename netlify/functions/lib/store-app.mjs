@@ -670,7 +670,14 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
   const since = new Date(Date.now() - Math.max(1, Math.min(730, Number(days) || 180)) * 86400000).toISOString().slice(0, 10);
   let listData;
   try { listData = await infaktWywolaj('/api/v3/ksef2/import/costs.json', { parameters: { offset: 0, limit: 100, order: 'Desc', 'q[invoice_date_gteq]': since } }); }
-  catch (error) { report.available = false; report.errors.push(`Odczyt faktur kosztowych KSeF: ${tekst(error.message, 500)}`); await zapisz('infakt_purchase_price_sync', report); return report; }
+  catch (error) {
+    report.available = false;
+    report.setupRequired = Number(error.status) === 422 ? 'ksef_read_access' : null;
+    report.errors.push(Number(error.status) === 422
+      ? 'inFakt nie udostępnił pozycji KSeF (HTTP 422). Zwykłe API kosztów zwraca tylko sumy dokumentu; automatyczne ceny wymagają aktywnego odczytu KSeF na koncie inFakt.'
+      : `Odczyt faktur kosztowych KSeF: ${tekst(error.message, 500)}`);
+    await zapisz('infakt_purchase_price_sync', report); return report;
+  }
   const invoices = (Array.isArray(listData?.entities) ? listData.entities : []).filter((invoice) => { const seller = infaktNazwaDostawcy(invoice?.seller_name); return suppliers.items.some((x) => x.match === seller); });
   report.scannedDocuments = Array.isArray(listData?.entities) ? listData.entities.length : 0; report.allowedDocuments = invoices.length;
   const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null }), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = allegroAgentProduktyCentralne(data), index = infaktIndeksProduktow(products), updater = allegroAktualizatorProduktowCentralnych(data);
