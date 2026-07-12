@@ -2328,6 +2328,12 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
       allegroProductId: options.catalogProductId || '',
       allegroCategoryId: effectiveCategoryId || '',
     },
+    agentDecision: {
+      action: existingOffer ? 'update_existing' : (draft.missing.length ? 'complete_data' : 'create_inactive'),
+      existingOfferId: tekst(existingOffer?.offer?.id || '', 100),
+      duplicatePrevented: !!existingOffer,
+      reason: tekst(existingOffer?.reason || (catalogMatch?.selected?.id ? `katalog ${catalogMatch.searchedBy}` : 'brak pewnego dopasowania'), 300),
+    },
   };
 }
 function allegroDraftZProduktu(product = {}, opt = {}) {
@@ -2403,6 +2409,15 @@ function allegroDanePowiazaniaZPrzygotowania(product = {}, prepared = {}, draft 
   const producent = tekst(product.producent || product.marka || allegroWartoscParametru(katalog, ['producent', 'marka', 'brand']) || '', 160).trim();
   return { catalogProductId, categoryId, producent };
 }
+const ALLEGRO_AGENT_OFFER_PROCEDURE = [
+  'Sprawdź ID oferty i mapowanie, następnie UUID katalogu, external.id/SKU, EAN, kod producenta i identyczną nazwę.',
+  'Jeżeli oferta istnieje, połącz ją z produktem i aktualizuj zamiast tworzyć duplikat.',
+  'Dobierz katalog najpierw po EAN, potem po MPN; nazwę uznaj tylko przy wysokiej zgodności.',
+  'Uzupełnij producenta, markę, EAN, MPN, kategorię, UUID, parametry i sprawdzone zdjęcia katalogowe.',
+  'Nową ofertę zapisz jako INACTIVE; brak stanu magazynowego oznacza 0.',
+  'Po sukcesie zapisz powiązanie produkt sklepu–produkt katalogowy–oferta i zamknij zadanie.',
+  'Jeżeli brakuje danych, nie zgaduj: zapisz dokładne braki i błąd API do jednej kolejki ponowienia.',
+];
 async function allegroZapiszZadanieAgentaOferty(product = {}, details = {}) {
   const productId = tekst(product.id, 100).trim();
   if (!productId) return null;
@@ -2433,6 +2448,8 @@ async function allegroZapiszZadanieAgentaOferty(product = {}, details = {}) {
       zdjecie: auto.zdjecie || '', zdjecia: Array.isArray(auto.zdjecia) ? auto.zdjecia.slice(0, 15) : [],
       allegroParameters: Array.isArray(auto.allegroParameters) ? auto.allegroParameters : [],
     },
+    procedure: ALLEGRO_AGENT_OFFER_PROCEDURE,
+    decision: details.prepared?.agentDecision || null,
     sourceUrl: tekst(product.sourceUrl || product.producentUrl || '', 800),
     attempts: (Number(previous.attempts) || 0) + 1, createdAt: previous.createdAt || now, updatedAt: now,
   };
@@ -4057,7 +4074,7 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const draft = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
       const agentTask = draft.missing.length ? await allegroZapiszZadanieAgentaOferty(body.product || {}, { missing: draft.missing, prepared: draft, draft: draft.payload }) : null;
-      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: !!draft.existingOffer || draft.missing.length === 0, categorySuggestion: draft.categorySuggestion, salesConditions: draft.salesConditions, categoryParameters: draft.categoryParameters, requiredParameters: draft.requiredParameters, catalogMatch: draft.catalogMatch, supportErrors: draft.supportErrors, existingOffer: draft.existingOffer, similarOffers: draft.similarOffers, improvedDescriptions: draft.improvedDescriptions, autoFilled: draft.autoFilled, operation: draft.existingOffer ? 'update' : 'create', agentTask });
+      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: !!draft.existingOffer || draft.missing.length === 0, categorySuggestion: draft.categorySuggestion, salesConditions: draft.salesConditions, categoryParameters: draft.categoryParameters, requiredParameters: draft.requiredParameters, catalogMatch: draft.catalogMatch, supportErrors: draft.supportErrors, existingOffer: draft.existingOffer, similarOffers: draft.similarOffers, improvedDescriptions: draft.improvedDescriptions, autoFilled: draft.autoFilled, agentDecision: draft.agentDecision, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, operation: draft.existingOffer ? 'update' : 'create', agentTask });
     }
 
     if (action === 'allegro-description-improve') {
@@ -4097,7 +4114,7 @@ export default async (req) => {
         categorySuggestion = prepared.categorySuggestion;
         const agentTask = prepared.missing.length ? await allegroZapiszZadanieAgentaOferty(body.product || {}, { missing: prepared.missing, prepared, draft: prepared.payload }) : null;
         if (prepared.missing.length && !prepared.existingOffer) {
-          return odpowiedz({ ok: false, error: `Szkic wymaga uzupełnienia: ${prepared.missing.join(', ')}`, missing: prepared.missing, draft: prepared.payload, categorySuggestion, salesConditions: prepared.salesConditions, categoryParameters: prepared.categoryParameters, requiredParameters: prepared.requiredParameters, catalogMatch: prepared.catalogMatch, autoFilled: prepared.autoFilled, supportErrors: prepared.supportErrors, agentTask }, 422);
+          return odpowiedz({ ok: false, error: `Szkic wymaga uzupełnienia: ${prepared.missing.join(', ')}`, missing: prepared.missing, draft: prepared.payload, categorySuggestion, salesConditions: prepared.salesConditions, categoryParameters: prepared.categoryParameters, requiredParameters: prepared.requiredParameters, catalogMatch: prepared.catalogMatch, autoFilled: prepared.autoFilled, supportErrors: prepared.supportErrors, agentDecision: prepared.agentDecision, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, agentTask }, 422);
         }
         draft = prepared.payload;
       }
@@ -4152,7 +4169,7 @@ export default async (req) => {
           await allegroZapiszPowiazanieProduktu(body.product || {}, { offerId, prepared, draft });
         }
       }
-      return odpowiedz({ ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion }, existing ? 200 : 201);
+      return odpowiedz({ ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion }, existing ? 200 : 201);
     }
 
     if (action === 'allegro-offer-price-change') {

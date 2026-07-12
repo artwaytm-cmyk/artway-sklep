@@ -68,6 +68,7 @@ requireMarkers('assets/styles.css', css, [
   '.stat-filter',
   '.ai-agent-hero',
   '.ai-restock-card',
+  '.allegro-operation-success',
   '.modal',
 ]);
 
@@ -135,6 +136,11 @@ requireMarkers('assets/app.js', app, [
   'function allegroRozniceOfertyProduktu',
   'function allegroZadaniaAgentaOfertHTML',
   'function allegroAktualizujZaznaczoneOfertyDanymiSklepu',
+  'function allegroZapiszWynikOperacji',
+  'ALLEGRO_PROCEDURA_AGENTA_OFERT',
+  'Agent: aktualizuj ofertę',
+  'function agentAIWykonajOferteAllegro',
+  'wystaw Origami Kot na Allegro',
   'function allegroSynchronizujWszystko',
   'automatycznie co 6 godzin',
   'allegroZamowienia.filter(statusAllegroRezerwujeMagazyn)',
@@ -192,6 +198,8 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function allegroAutoMapujOfertyZKartoteka',
   'function allegroZapiszZadanieAgentaOferty',
   'function allegroCzekajNaOperacjeOferty',
+  'ALLEGRO_AGENT_OFFER_PROCEDURE',
+  'agentDecision:',
   'const stockRaw = Number(opt.stock ?? p.stan ?? 0)',
   'allegroParameters: autoParameters',
   "...(!sourceImages.length ? {} : { zdjecie: sourceImages[0]",
