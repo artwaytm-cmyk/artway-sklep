@@ -2250,11 +2250,13 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     if (categorySuggestion?.selected?.id) options.categoryId = categorySuggestion.selected.id;
   }
   const categoryId = tekst(options.categoryId || product.allegroCategoryId || product.categoryId || '', 80).trim();
-  const [salesConditions, categoryParameters, catalogMatch] = await Promise.all([
+  const [salesConditions, catalogMatch] = await Promise.all([
     allegroWarunkiSprzedazy(req),
-    allegroParametryKategorii(req, categoryId),
     allegroZnajdzProduktKatalogu(req, product),
   ]);
+  const effectiveCategoryId = tekst(catalogMatch?.selected?.categoryId || categoryId, 80).trim();
+  if (effectiveCategoryId) options.categoryId = effectiveCategoryId;
+  const categoryParameters = await allegroParametryKategorii(req, effectiveCategoryId);
   options.salesConditions = salesConditions;
   options.categoryParameters = categoryParameters.parameters;
   if (catalogMatch?.selected?.id) options.catalogProductId = catalogMatch.selected.id;
@@ -2280,7 +2282,7 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
       shortDescription: options.shortDescription,
       sections: options.descriptionSections,
     },
-    autoFilled: { producent: preparedProduct.producent || preparedProduct.marka || '', allegroProductId: options.catalogProductId || '', allegroCategoryId: options.categoryId || '' },
+    autoFilled: { producent: preparedProduct.producent || preparedProduct.marka || '', allegroProductId: options.catalogProductId || '', allegroCategoryId: effectiveCategoryId || '' },
   };
 }
 function allegroDraftZProduktu(product = {}, opt = {}) {
@@ -2351,7 +2353,7 @@ function allegroDanePowiazaniaZPrzygotowania(product = {}, prepared = {}, draft 
   const katalog = prepared?.catalogMatch?.selected || {};
   const draftProduct = draft?.productSet?.[0]?.product || {};
   const catalogProductId = tekst(katalog.id || (draftProduct.idType ? '' : draftProduct.id) || product.allegroProductId || '', 120).trim();
-  const categoryId = tekst(product.allegroCategoryId || prepared?.categorySuggestion?.selected?.id || katalog.categoryId || draftProduct.category?.id || '', 80).trim();
+  const categoryId = tekst(katalog.categoryId || prepared?.autoFilled?.allegroCategoryId || prepared?.categorySuggestion?.selected?.id || product.allegroCategoryId || draftProduct.category?.id || '', 80).trim();
   const producent = tekst(product.producent || product.marka || allegroWartoscParametru(katalog, ['producent', 'marka', 'brand']) || '', 160).trim();
   return { catalogProductId, categoryId, producent };
 }
