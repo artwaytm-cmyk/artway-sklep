@@ -2252,6 +2252,15 @@ function allegroParametryAutomatyczne(product = {}, categoryParameters = []) {
     return true;
   });
 }
+function allegroScalParametryBezDuplikatow(...groups) {
+  const byId = new Map();
+  for (const list of groups) for (const param of Array.isArray(list) ? list : []) {
+    const id = tekst(param?.id, 80).trim();
+    if (!id) continue;
+    byId.set(id, param);
+  }
+  return [...byId.values()];
+}
 async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   const options = { ...(opt || {}) };
   const [offersRec, mappingsRec] = await Promise.all([
@@ -2353,8 +2362,9 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
     param?.options?.describesProduct,
   ]));
   const customParameters = Array.isArray(p.allegroParameters) ? p.allegroParameters : [];
-  const offerParameters = [...autoParameters, ...customParameters].filter((param) => categoryParameterTypes.get(String(param?.id || '')) === false);
-  const productParameters = [...autoParameters, ...customParameters].filter((param) => categoryParameterTypes.get(String(param?.id || '')) !== false);
+  const mergedParameters = allegroScalParametryBezDuplikatow(autoParameters, customParameters);
+  const offerParameters = mergedParameters.filter((param) => categoryParameterTypes.get(String(param?.id || '')) === false);
+  const productParameters = mergedParameters.filter((param) => categoryParameterTypes.get(String(param?.id || '')) !== false);
   const productObj = allegroProductId
     ? { id: allegroProductId }
     : (!categoryId && gtin)
@@ -2479,6 +2489,7 @@ async function allegroZapiszPowiazanieProduktu(product = {}, details = {}) {
   if (Array.isArray(auto.allegroParameters) && auto.allegroParameters.length && !Array.isArray(product.allegroParameters) && !Array.isArray(previousEdit.allegroParameters)) autoPatch.allegroParameters = auto.allegroParameters;
   edits[productId] = {
     ...previousEdit, ...autoPatch, allegroOfferId: offerId,
+    ...(Number.isFinite(Number(draft?.stock?.available)) ? { allegroStock: Math.max(0, Math.floor(Number(draft.stock.available))) } : {}),
     ...(link.catalogProductId ? { allegroProductId: link.catalogProductId } : {}),
     ...(link.categoryId ? { allegroCategoryId: link.categoryId } : {}),
     ...(link.producent ? { producent: link.producent } : {}),

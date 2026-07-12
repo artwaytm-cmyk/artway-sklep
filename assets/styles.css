@@ -481,6 +481,9 @@ body.hide-home-contact .home-contact{display:none}
 .allegro-operation-success{justify-content:space-between;flex-wrap:wrap;margin:.85rem 0}
 .allegro-operation-success>div:first-child{display:grid;gap:.22rem;min-width:0}
 .allegro-operation-success small{display:block;overflow-wrap:anywhere}
+.allegro-activate-control{display:grid;grid-template-columns:minmax(72px,90px) auto;gap:.35rem;align-items:center;padding:.45rem;border:1px solid #86efac;border-radius:10px;background:#f0fdf4}
+.allegro-activate-control input{width:100%;min-width:0;padding:.5rem;border:1px solid var(--line);border-radius:8px}
+.allegro-activate-control small{grid-column:1/-1;color:var(--muted2);line-height:1.25}
 .assortment-audit-grid{margin:.75rem 0}
 .allegro-map-select{width:100%;min-width:220px;padding:.38rem .5rem;border:1.5px solid var(--line);border-radius:9px;background:var(--panel);font-size:.78rem}
 .allegro-linked-note{display:block;color:var(--muted2);margin-top:.25rem}
