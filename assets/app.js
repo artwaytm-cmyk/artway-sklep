@@ -270,6 +270,7 @@ let allegroOperacjaUstawien = {busy:false,done:0,total:0,stockUpdated:0,stockFai
 let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", szukajAllegroWiadomosci="", szukajAllegroDyskusji="", szukajAllegroRentownosc="", filtrAllegroZamowien="do_obslugi", filtrEtapuAllegroZamowien="wszystkie", filtrAllegroOfert="wszystkie", filtrAllegroWystawiania="wszystkie", filtrAllegroWiadomosci="wymaga", filtrAllegroDyskusji="aktywne", filtrAllegroRentownosc="kompletne", sortAllegroWiadomosci="najnowsze", sortAllegroDyskusje="najnowsze", sortAllegroRentownosc="marza_rosnaco", allegroDocelowaMarza=Math.max(1,Math.min(60,Number(ustawienia.celMarzyAllegro??wczytajLS("artway_cel_marzy_allegro",20))||20)), sklepDocelowaMarza=Math.max(1,Math.min(60,Number(ustawienia.celMarzySklep??wczytajLS("artway_cel_marzy_sklep",20))||20)), allegroJednostkiOplatCyklicznych=Math.max(1,Math.min(1000,Number(ustawienia.allegroJednostkiOplatCyklicznych)||10)), allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=250, allegroLimitWystawiania=250, allegroLimitKomunikacji=50;
 let infaktStan={sprawdzono:false,ladowanie:false,invoicesLoaded:false,costsLoaded:false,costsLoading:false,purchaseLoading:false,configured:false,connected:false,env:"production",error:"",links:{},suppliers:{items:[]},purchaseSync:{pendingItems:[],recentMatches:[]},updated_at:null};
 let infaktFaktury=[],infaktKoszty=[],szukajInfakt="",filtrInfakt="wszystkie",infaktLimit=50,infaktOkresCenZakupu=180;
+let agentAIPlanStan={busy:false,current:"",startedAt:null,completedAt:null,results:[],error:""};
 
 /* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
    Ustawienia sklepu, zamówienia i klienci są zapisywane na serwerze, więc są
@@ -4187,6 +4188,7 @@ function agentAIRozpoznajPolecenie(tekst=""){
     if(["/sprawdz","/check"].includes(slash)) return {typ:"sprawdz",raw,confidence:1};
   }
   if(agentAIMa(n,["pomoc","co potrafisz","jakie polecenia","co mozesz","instrukcja"])) return {typ:"pomoc",raw,confidence:.95};
+  if(agentAIMa(n,["wykonaj bezpieczny plan","wykonaj plan agenta","wykonaj konkretne dzialania","wykonaj konkretne działania","zrob bezpieczne dzialania","zrób bezpieczne działania","sprawdz funkcjonalnosc i pobierz dane","sprawdź funkcjonalność i pobierz dane"])) return {typ:"plan-wykonaj",raw,confidence:.99};
   if(agentAIMa(n,["wyslij raport na telegram","wyślij raport na telegram","raport telegram","telegram raport","podsumowanie na telegram"])) return {typ:"raport-telegram",raw,confidence:.98};
   if(agentAIMa(n,["centrum operacyjne","plan dnia","co mam zrobic","co mam zrobić","co mam dzisiaj zrobic","co mam dzisiaj zrobić","najwazniejsze zadania","najważniejsze zadania","pokaz priorytety","pokaż priorytety","co jest pilne","raport calej strony","raport całej strony"])) return {typ:"centrum",raw,confidence:.96};
   if(agentAIMa(n,["wiadomosci allegro","wiadomości allegro","dyskusje allegro","komunikacja z klientami","pokaz komunikacje","pokaż komunikację","komunikacja allegro","komu odpisac","komu odpisać","sprawy do odpowiedzi"])) return {typ:"komunikacja",raw,confidence:.95};
@@ -4892,7 +4894,9 @@ async function agentAIWykonajPolecenie(tekst=""){
   let odpowiedz="";
   try{
     if(intent.typ==="pomoc"){
-      odpowiedz=["Możesz pisać normalnie, np.:","• pokaż centrum operacyjne / co mam dziś zrobić?","• wyślij raport na Telegram","• pokaż komunikację z klientami","• sprawdź wysyłki i etykiety InPost","• audyt produktów i katalogu","• status producentów i otwartych zamówień","• diagnostyka integracji","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę","• synchronizuj bazę"].join("\n");
+      odpowiedz=["Możesz pisać normalnie, np.:","• wykonaj bezpieczny plan agenta","• sprawdź funkcjonalność i pobierz dane","• pokaż centrum operacyjne / co mam dziś zrobić?","• wyślij raport na Telegram","• pokaż komunikację z klientami","• sprawdź wysyłki i etykiety InPost","• audyt produktów i katalogu","• status producentów i otwartych zamówień","• diagnostyka integracji","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę","• synchronizuj bazę"].join("\n");
+    }else if(intent.typ==="plan-wykonaj"){
+      odpowiedz=await agentAIWykonajPlanBezpieczny();
     }else if(intent.typ==="centrum"){
       odpowiedz=agentAICentrumTekst();
     }else if(intent.typ==="komunikacja"){
@@ -5033,7 +5037,11 @@ function agentAIAnaliza(){
   const allegroBraki=allegroKontrola.filter(x=>x.a.braki>0||x.a.nierozpoznane>0);
   const allegroOfertaTasks=allegroAktywneZadaniaAgentaOfert();
   const allegroDefaultsIssues=Object.values(allegroStan.offerDefaultsAudit?.items||{}).filter(x=>!x.stockUpdated||!x.republishUpdated);
+  const problemyFunkcji=[!chmuraStan.dostepna?"wspólna baza":null,stanBramki.email?.configured===false?"e-mail":null,stanBramki.inpost?.configured===false?"InPost":null,allegroStan.sprawdzono&&!allegroStan.connected?"Allegro":null,infaktStan.sprawdzono&&!infaktStan.connected?"inFakt":null].filter(Boolean);
+  const syncTime=Date.parse(chmuraStan.updated_at||""),syncAge=Number.isFinite(syncTime)?Math.max(0,Math.round((Date.now()-syncTime)/60000)):null,syncStale=syncAge!==null&&syncAge>5;
   const pozycje=[
+    {id:"funkcjonalnosc-strony",poziom:problemyFunkcji.length?"bad":"ok",ikona:"🩺",tytul:"Funkcjonalność strony — priorytet 1",opis:problemyFunkcji.length?`Kontroli wymagają: ${problemyFunkcji.join(", ")}.`:`Baza i sprawdzone integracje krytyczne odpowiadają poprawnie.`,akcja:problemyFunkcji.length?"#/diagnostyka":"plan-bezpieczny"},
+    {id:"synchronizacja-danych",poziom:!chmuraStan.admin?"bad":syncStale?"warn":"ok",ikona:"🔄",tytul:"Pobieranie i świeżość danych — priorytet 2",opis:!chmuraStan.admin?"Agent nie ma aktywnego dostępu do wspólnej bazy.":syncAge===null?"Brak potwierdzonego czasu ostatniej synchronizacji.":`Ostatnia synchronizacja wspólnej bazy: ${syncAge} min temu.`,akcja:"plan-bezpieczny"},
     {id:"allegro-magazyn",poziom:allegroBraki.length?"bad":"ok",ikona:"🟠",tytul:"Zlecenia Allegro — braki i pakowanie",opis:allegroBraki.length?`${allegroBraki.length} aktywnych zleceń Allegro wymaga zamówienia brakujących sztuk albo poprawy EAN/SKU.`:`${allegroKontrola.length} aktywnych zleceń Allegro sprawdzono; stany pozwalają na kompletację.`,akcja:"#/admin/allegro/zamowienia"},
     {id:"allegro-oferty-agent",poziom:allegroOfertaTasks.length?"warn":"ok",ikona:"🏷️",tytul:"Agent ofert Allegro",opis:allegroOfertaTasks.length?`${allegroOfertaTasks.length} produktów ma zapisane braki danych albo błąd API wystawiania.`:"Brak otwartych zadań dotyczących ofert Allegro.",akcja:"#/admin/allegro/wystawianie"},
     {id:"allegro-ustawienia-ofert",poziom:allegroDefaultsIssues.length?"warn":"ok",ikona:"♻️",tytul:"Oferty Allegro — stan i wznawianie",opis:allegroDefaultsIssues.length?`${allegroDefaultsIssues.length} starszych ofert wymaga uzupełnienia danych wymaganych przez Allegro, aby włączyć automatyczne wznawianie. Domyślny stan sprzedażowy ${allegroStanOfertyProduktu()} jest niezależny od magazynu.`:`Oferty mają ustawiony domyślny stan ${allegroStanOfertyProduktu()} szt. i automatyczne wznawianie.`,akcja:"#/admin/allegro/ustawienia"},
@@ -5069,7 +5077,38 @@ function utworzSzkiceFakturMasowo(){
   toast(`Utworzono ${nowe.length} szkiców FV ✅`);
   renderuj();
 }
-function agentAIWykonaj(akcja){
+function agentAIKonkretneDzialanie(x={}){
+  const automatic={
+    "funkcjonalnosc-strony":{action:"plan-bezpieczny",label:"Sprawdź funkcje",done:"Baza i integracje krytyczne odpowiadają poprawnie.",eta:"1–3 min"},
+    "synchronizacja-danych":{action:"plan-bezpieczny",label:"Pobierz świeże dane",done:"Sklep, Allegro, InPost i inFakt mają aktualne dane.",eta:"1–3 min"},
+    faktury:{action:"masowe-fv",label:"Przygotuj szkice FV",done:"Każde zamówienie firmowe ma szkic dokumentu.",eta:"< 1 min"},
+    zatowarowanie:{action:"utworz-zlecenie-braki",label:"Aktualizuj szkice producentów",done:"Każdy realny brak jest w jednym bieżącym dokumencie producenta.",eta:"< 1 min"},
+    "linki-producentow":{action:"sprawdz-linki-producentow",label:"Sprawdź linki",done:"Każdy link ma zapisany wynik i listę brakujących danych.",eta:"1–5 min"},
+    "opisy-produktow":{action:"popraw-opisy",label:"Popraw opisy",done:"Krótki i pełny opis mają uporządkowaną strukturę.",eta:"< 2 min"},
+    kartoteka:{action:"kartoteka-domyslna",label:"Uzupełnij bezpieczne pola",done:"Produkty mają podstawową kartotekę do dalszej kontroli.",eta:"< 1 min"},
+    inwentaryzacja:{action:"audyt-magazynu",label:"Wykonaj audyt",done:"Powstał raport produktów wymagających inwentaryzacji.",eta:"< 1 min"}
+  };
+  if(automatic[x.id])return {...automatic[x.id],mode:"automatic",owner:"Agent AI",requiresApproval:false};
+  return {action:"",href:String(x.akcja||"").startsWith("#")?x.akcja:"#/admin/agent-ai/plan",label:"Otwórz i zdecyduj",done:agentAIOpisKroku(x),eta:x.poziom==="bad"?"do 30 min":"dzisiaj",mode:"approval",owner:"Administrator",requiresApproval:true};
+}
+async function agentAIWykonajPlanBezpieczny(){
+  if(agentAIPlanStan.busy)return "Bezpieczny plan Agenta jest już wykonywany.";
+  const startedAt=new Date().toISOString(),results=[];agentAIPlanStan={busy:true,current:"Kontrola funkcjonalności i synchronizacja",startedAt,completedAt:null,results:[],error:""};renderuj();
+  const add=(name,status,detail="")=>{results.push({name,status,detail:String(detail||""),at:new Date().toISOString()});agentAIPlanStan={...agentAIPlanStan,current:name,results:[...results]};renderuj();};
+  try{
+    try{const d=await chmura("agent-run-safe-checks",{method:"POST",body:{source:"admin-agent-ai",areas:["allegro-orders","inpost","infakt"]},timeout:180000});(d.run?.results||[]).forEach(x=>add(x.label,x.status,x.status==="completed"?`zsynchronizowano: ${x.count||0}`:x.error));}catch(e){add("Kontrole serwerowe","error",e.message||e);}
+    try{await synchronizujBazeCentralna(true);add("Wspólna baza sklepu","completed","pobrano i zapisano najnowszy stan");}catch(e){add("Wspólna baza sklepu","error",e.message||e);}
+    const shortages=potrzebyZatowarowania();
+    if(shortages.length){const docs=agentAIUtworzZleceniaWedlugDostawcow("",{tryb:"braki",silent:true});add("Szkice zamówień do producentów","completed",`${docs.length} dokumentów • bez wysyłania e-maili`);}else add("Szkice zamówień do producentów","skipped","brak realnych braków do aktywnych zamówień");
+    const beforeInvoices=szkiceFaktur.length,missingInvoices=pobierzZamowienia().filter(z=>(z.klient?.nip||z.klient?.firma)&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length;
+    if(missingInvoices){utworzSzkiceFakturMasowo();add("Szkice FV","completed",`utworzono ${Math.max(0,szkiceFaktur.length-beforeInvoices)} szkiców • bez wystawiania faktur`);}else add("Szkice FV","skipped","brak nowych zamówień firmowych");
+    if(agentAILinkiOczekujace().length){const text=await agentAISprawdzLinkiProducentow(3);add("Linki producentów","completed",text);}else add("Linki producentów","skipped","kolejka jest pusta");
+    const completedAt=new Date().toISOString();agentAIPlanStan={busy:false,current:"",startedAt,completedAt,results,error:""};zapiszHistorieAgenta("plan-operacyjny","Agent wykonał konkretne bezpieczne działania",{startedAt,completedAt,results});zaplanujZapisUstawien();toast(`✅ Plan Agenta: ${results.filter(x=>x.status==="completed").length} działań wykonanych`);renderuj();
+    return ["✅ Agent wykonał bezpieczny plan operacyjny.",...results.map(x=>`• ${x.status==="completed"?"✅":x.status==="skipped"?"➖":"⚠️"} ${x.name}: ${x.detail}`),"Nie wysłano e-maili, wiadomości do klientów, ofert ani etykiet bez zatwierdzenia."].join("\n");
+  }catch(e){agentAIPlanStan={...agentAIPlanStan,busy:false,current:"",completedAt:new Date().toISOString(),results,error:String(e.message||e)};zapiszHistorieAgenta("plan-operacyjny","Błąd bezpiecznego planu Agenta",{results,error:String(e.message||e)});renderuj();throw e;}
+}
+async function agentAIWykonaj(akcja){
+  if(akcja==="plan-bezpieczny") return agentAIWykonajPlanBezpieczny();
   if(akcja==="masowe-fv") return utworzSzkiceFakturMasowo();
   if(akcja==="sync") return synchronizujBazeCentralna(true);
   if(akcja==="export-magazyn") return eksportujMagazynCSV();
@@ -5094,6 +5133,8 @@ function agentAIWykonaj(akcja){
   if(akcja==="raport-telegram") return agentAIWyslijRaportTelegram();
 }
 function agentAIPriorytet(x){
+  if(x.id==="funkcjonalnosc-strony") return 0;
+  if(x.id==="synchronizacja-danych") return .5;
   if(x.poziom==="bad") return 1;
   if(["wysylki","zatowarowanie","nadrezerwacje","dostepnosc","dostepnosc-producentow"].includes(x.id)) return 2;
   if(x.poziom==="warn") return 3;
@@ -5126,15 +5167,16 @@ function agentAIPlanOperacyjnyHTML(analiza){
   const gotowe=analiza.filter(x=>x.poziom==="ok").length;
   return `<div class="panel agent-ops-panel">
     <div class="order-section-head">
-      <div><h2 style="margin-top:0">🧭 Plan operacyjny agenta</h2><p class="order-detail-lead">Najpierw rzeczy blokujące zamówienia, potem porządek magazynu i dane produktów.</p></div>
-      <span class="lvl ${zadania.length?"lvl-ostrzezenie":"lvl-ok"}">${zadania.length?`${zadania.length} aktywnych zadań`:"wszystko pod kontrolą"}</span>
+      <div><h2 style="margin-top:0">🧭 Wykonywalny plan operacyjny</h2><p class="order-detail-lead">Najpierw funkcjonalność strony i świeże dane, następnie zamówienia, wysyłki, magazyn oraz katalog. Każdy krok ma właściciela i jednoznaczny warunek zakończenia.</p></div>
+      <div class="diag-actions"><span class="lvl ${zadania.length?"lvl-ostrzezenie":"lvl-ok"}">${zadania.length?`${zadania.length} aktywnych zadań`:"wszystko pod kontrolą"}</span><button class="btn" onclick="agentAIWykonaj('plan-bezpieczny')" ${agentAIPlanStan.busy?"disabled":""}>${agentAIPlanStan.busy?"⏳ Wykonuję plan…":"▶ Wykonaj bezpieczne działania"}</button></div>
     </div>
+    ${agentAIPlanStan.busy||agentAIPlanStan.results.length?`<div class="agent-execution-status ${agentAIPlanStan.error?"has-error":""}"><div><b>${agentAIPlanStan.busy?`Agent wykonuje: ${esc(agentAIPlanStan.current||"kontrola")}`:"Ostatnie wykonanie planu"}</b><small>${agentAIPlanStan.completedAt?esc(new Date(agentAIPlanStan.completedAt).toLocaleString("pl-PL")):"operacja w toku"}</small></div><div class="agent-execution-results">${agentAIPlanStan.results.map(r=>`<span class="${esc(r.status)}"><b>${r.status==="completed"?"✅":r.status==="skipped"?"➖":"⚠️"} ${esc(r.name)}</b><small>${esc(r.detail)}</small></span>`).join("")}</div>${agentAIPlanStan.error?`<p>${esc(agentAIPlanStan.error)}</p>`:""}</div>`:""}
     <div class="agent-ops-grid">
-      ${zadania.length?zadania.map((x,i)=>`<div class="agent-ops-step ${x.poziom}">
+      ${zadania.length?zadania.map((x,i)=>{const step=agentAIKonkretneDzialanie(x);return `<div class="agent-ops-step ${x.poziom} ${step.mode}">
         <div class="agent-ops-no">${i+1}</div>
-        <div><b>${x.ikona} ${esc(x.tytul)}</b><p>${esc(agentAIOpisKroku(x))}</p><small>${esc(x.opis)}</small></div>
-        <div>${String(x.akcja||"").startsWith("#")?`<a class="btn ghost" href="${esc(x.akcja)}">Otwórz</a>`:x.akcja?`<button class="btn ghost" onclick="agentAIWykonaj(${jsArg(x.akcja)})">Wykonaj</button>`:`<span class="lvl lvl-info">info</span>`}</div>
-      </div>`).join(""):`<div class="agent-ops-empty">✅ Brak pilnych tematów. ${gotowe} kontroli ma status OK.</div>`}
+        <div><div class="agent-step-heading"><b>${x.ikona} ${esc(x.tytul)}</b><span class="lvl ${step.requiresApproval?"lvl-ostrzezenie":"lvl-ok"}">${step.requiresApproval?"🔐 decyzja":"⚙️ Agent"}</span></div><p>${esc(x.opis)}</p><div class="agent-step-definition"><span><small>KONKRETNE DZIAŁANIE</small><b>${esc(step.label)}</b></span><span><small>WŁAŚCICIEL / CZAS</small><b>${esc(step.owner)} • ${esc(step.eta)}</b></span><span><small>GOTOWE, GDY</small><b>${esc(step.done)}</b></span></div></div>
+        <div>${step.action?`<button class="btn ${step.requiresApproval?"ghost":""}" onclick="agentAIWykonaj(${jsArg(step.action)})">${esc(step.label)}</button>`:`<a class="btn ghost" href="${esc(step.href)}">${esc(step.label)}</a>`}</div>
+      </div>`;}).join(""):`<div class="agent-ops-empty">✅ Brak pilnych tematów. ${gotowe} kontroli ma status OK.</div>`}
     </div>
   </div>`;
 }
@@ -5157,9 +5199,9 @@ function widokAdminAgentAI(sekcja="pulpit"){
       <div>
         <span class="cat-label">Automatyczny kontroler administratora</span>
         <h1>🤖 Agent AI</h1>
-        <p>Jedno centrum operacyjne dla zamówień, komunikacji klientów, Allegro, InPost, magazynu, produktów, producentów, faktur i integracji. Agent porządkuje priorytety, ale działania zewnętrzne nadal wymagają decyzji administratora.</p>
+        <p>Agent najpierw pilnuje funkcjonalności strony i świeżości pobranych danych, a następnie realizuje konkretne działania dla zamówień, Allegro, InPost, magazynu, producentów i faktur. Działania zewnętrzne nadal wymagają decyzji administratora.</p>
       </div>
-      <div><div class="health-score">${score}%</div><button class="btn telegram-btn agent-report-btn" onclick="agentAIWykonaj('raport-telegram')">✈️ Raport na Telegram</button></div>
+      <div><div class="health-score">${score}%</div><button class="btn agent-report-btn" onclick="agentAIWykonaj('plan-bezpieczny')" ${agentAIPlanStan.busy?"disabled":""}>${agentAIPlanStan.busy?"⏳ Sprawdzam…":"▶ Sprawdź funkcje i pobierz dane"}</button><button class="btn telegram-btn agent-report-btn" onclick="agentAIWykonaj('raport-telegram')">✈️ Raport na Telegram</button></div>
     </div>
     <div class="orders-stat-grid">
       <div class="order-stat-card ${problemy?"hot":""}"><span>⚠️</span><b>${problemy}</b><small>zadań do sprawdzenia</small></div>
@@ -5175,6 +5217,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
     </div>
     <div class="diag-actions agent-command-grid">
       <button class="btn telegram-btn" onclick="agentAIWykonaj('raport-telegram')">✈️ Wyślij pełny raport na Telegram</button>
+      <button class="btn" onclick="agentAIWykonaj('plan-bezpieczny')" ${agentAIPlanStan.busy?"disabled":""}>▶ Wykonaj bezpieczny plan</button>
       <button class="btn" onclick="agentAIWykonaj('sync')">🔄 Synchronizuj bazę</button>
       <button class="btn ghost" onclick="agentAIWykonaj('utworz-zlecenie-braki')">🧠 Utwórz zlecenie agenta</button>
       <button class="btn ghost" onclick="agentAIWykonaj('masowe-fv')">🧾 Utwórz brakujące szkice FV</button>
@@ -5199,6 +5242,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
       <textarea id="agentAICommandInput" rows="3" placeholder="Np. sprawdź czy wpadło nowe zlecenie, przygotuj zamówienie do producenta, ile mamy szachy..."></textarea>
       <div class="agent-command-actions">
         <button class="btn" type="submit">🤖 Wykonaj polecenie</button>
+        <button class="btn" type="button" onclick="agentAIWstawKomende('wykonaj bezpieczny plan agenta')">Wykonaj plan</button>
         <button class="btn telegram-btn" type="button" onclick="agentAIWstawKomende('wyślij raport na Telegram')">Raport Telegram</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż centrum operacyjne')">Centrum operacyjne</button>
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż komunikację z klientami')">Komunikacja</button>

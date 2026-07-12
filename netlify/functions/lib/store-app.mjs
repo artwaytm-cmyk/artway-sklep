@@ -170,6 +170,34 @@ async function wyslijTelegramHtml(text, options = {}) {
 function agentZamowienieAktywne(z = {}) {
   return !['anulowane', 'dostarczone', 'zakończone', 'zwrot', 'zwrot pieniędzy'].includes(String(z.status || '').toLowerCase());
 }
+function agentPriorytetWykonawczy(priority = {}) {
+  const area = tekst(priority.area, 80), title = tekst(priority.title, 260).toLowerCase();
+  const definitions = {
+    orders_start: { actionId: 'orders_start', execution: 'approval', requiresApproval: true, deadlineMinutes: 30, owner: 'obsługa zamówień', doneWhen: 'Każde nowe zamówienie ma rozpoczętą obsługę i sprawdzoną dostępność.' },
+    allegro_reply: { actionId: 'allegro_reply', execution: 'approval', requiresApproval: true, deadlineMinutes: 60, owner: 'obsługa klienta', doneWhen: 'Klient otrzymał zatwierdzoną odpowiedź albo sprawa została zamknięta wewnętrznie.' },
+    supplier_availability: { actionId: 'supplier_availability', execution: 'safe_check', requiresApproval: false, deadlineMinutes: 120, owner: 'Agent AI', doneWhen: 'Dostępność producenta została ponownie sprawdzona, a aktywne zamówienia mają decyzję.' },
+    inpost_prepare: { actionId: 'inpost_prepare', execution: 'approval', requiresApproval: true, deadlineMinutes: 120, owner: 'centrum wysyłek', doneWhen: 'Przesyłka ma etykietę, numer nadania i zapisany status InPost.' },
+    allegro_warehouse: { actionId: 'allegro_warehouse', execution: 'draft', requiresApproval: false, deadlineMinutes: 60, owner: 'Agent AI', doneWhen: 'Pozycje zlecenia są sprawdzone, a realne braki dopisane do szkicu producenta.' },
+    allegro_offer_fix: { actionId: 'allegro_offer_fix', execution: 'approval', requiresApproval: true, deadlineMinutes: 240, owner: 'katalog Allegro', doneWhen: 'Oferta ma komplet danych i ostatnia operacja API zakończyła się sukcesem.' },
+    supplier_order_draft: { actionId: 'supplier_order_draft', execution: 'draft', requiresApproval: false, deadlineMinutes: 240, owner: 'Agent AI', doneWhen: 'Bieżący dokument producenta zawiera wszystkie niepokryte braki i czeka na zatwierdzenie.' },
+    invoice_draft: { actionId: 'invoice_draft', execution: 'draft', requiresApproval: false, deadlineMinutes: 240, owner: 'Agent AI / inFakt', doneWhen: 'Zamówienie firmowe ma szkic lub powiązaną fakturę inFakt.' },
+    producer_link_check: { actionId: 'producer_link_check', execution: 'safe_check', requiresApproval: false, deadlineMinutes: 360, owner: 'Agent AI', doneWhen: 'Link został sprawdzony, a wynik i brakujące pola zapisane przy produkcie.' },
+    site_function_check: { actionId: 'site_function_check', execution: 'safe_check', requiresApproval: false, deadlineMinutes: 15, owner: 'Agent AI', doneWhen: 'Baza oraz wszystkie wymagane integracje odpowiadają poprawnie.' },
+    data_sync: { actionId: 'data_sync', execution: 'safe_check', requiresApproval: false, deadlineMinutes: 15, owner: 'Agent AI', doneWhen: 'Dane sklepu, Allegro, InPost i inFakt mają świeży znacznik synchronizacji.' },
+  };
+  let key = 'orders_start';
+  if (area === 'system') key = 'site_function_check';
+  else if (area === 'synchronizacja') key = 'data_sync';
+  else if (title.includes('wiadomości') || title.includes('dyskusje')) key = 'allegro_reply';
+  else if (title.includes('niedostępne u producenta') || title.includes('niski stan')) key = 'supplier_availability';
+  else if (area === 'wysylki') key = 'inpost_prepare';
+  else if (title.includes('zamówienia allegro')) key = 'allegro_warehouse';
+  else if (title.includes('oferty allegro') || title.includes('operacja oferty')) key = 'allegro_offer_fix';
+  else if (area === 'producenci') key = 'supplier_order_draft';
+  else if (area === 'faktury') key = 'invoice_draft';
+  else if (title.includes('linki producentów')) key = 'producer_link_check';
+  return definitions[key];
+}
 async function agentCentrumOperacyjne() {
   const [settingsRec, ordersRec, allegroOrdersRec, communicationRec, offerErrorRec, infaktLinksRec] = await Promise.all([
     czytaj('settings', { data: {}, updated_at: null }), czytaj('orders', { items: [] }), czytaj('allegro_orders', { items: [] }),
@@ -191,7 +219,14 @@ async function agentCentrumOperacyjne() {
   const supplierOrders = (Array.isArray(data.artway_agent_ai_zlecenia) ? data.artway_agent_ai_zlecenia : []).filter((x) => !['zrealizowane', 'anulowane', 'wysłane do producenta', 'wysłane do dostawcy'].includes(String(x?.status || '').toLowerCase()));
   const invoiceLinks = infaktLinksRec?.items && typeof infaktLinksRec.items === 'object' ? infaktLinksRec.items : {}, invoiceDrafts = Array.isArray(data.artway_faktury_szkice) ? data.artway_faktury_szkice : [];
   const companyOrdersWithoutInvoice = activeOrders.filter((x) => (x?.klient?.nip || x?.klient?.firma) && !invoiceLinks[numerZamowienia(x.nr)] && !invoiceDrafts.some((d) => numerZamowienia(d?.nrZamowienia) === numerZamowienia(x.nr)));
+  const integrations = { email: !!emailPublicConfig().configured, telegram: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId), inpost: !!inpostPublicConfig().configured, allegro: !!(process.env.ALLEGRO_CLIENT_ID && process.env.ALLEGRO_CLIENT_SECRET), infakt: !!infaktPublicConfig().configured };
+  const missingIntegrations = Object.entries(integrations).filter(([, ready]) => !ready).map(([name]) => name);
+  const ageMinutes = (value) => { const parsed = Date.parse(value || ''); return Number.isFinite(parsed) ? Math.max(0, Math.round((Date.now() - parsed) / 60000)) : null; };
+  const freshness = { settings: ageMinutes(settingsRec.updated_at), orders: ageMinutes(ordersRec.updated_at), allegroOrders: ageMinutes(allegroOrdersRec.updated_at), communications: ageMinutes(communicationRec.updated_at) };
+  const staleSources = Object.entries(freshness).filter(([, age]) => age !== null && age > 180).map(([name, age]) => `${name}: ${age} min`);
   const priorities = [], addPriority = (severity, area, count, title, href, action) => { if (Number(count) > 0) priorities.push({ id: `${area}-${priorities.length + 1}`, severity, area, count: Number(count), title, href, action }); };
+  addPriority('critical', 'system', missingIntegrations.length, 'Funkcje krytyczne strony wymagają kontroli', '#/diagnostyka', `Sprawdź brakujące integracje: ${missingIntegrations.join(', ')}.`);
+  addPriority('critical', 'synchronizacja', staleSources.length, 'Dane operacyjne są nieaktualne', '#/admin/agent-ai/plan', `Uruchom bezpieczne odświeżenie: ${staleSources.join(' • ')}.`);
   addPriority('critical', 'zamowienia', newOrders.length, 'Nowe zamówienia czekają na rozpoczęcie obsługi', '#/admin/zamowienia', 'Otwórz zamówienia i rozpocznij realizację.');
   addPriority('critical', 'allegro', communicationWaiting.length, 'Nowe wiadomości lub dyskusje Allegro wymagają odpowiedzi', '#/admin/allegro/wiadomosci', 'Przygotuj odpowiedź i oznacz sprawę wewnętrznie po zakończeniu.');
   addPriority('critical', 'producent', supplierUnavailable.length, 'Produkty priorytetowe niedostępne u producenta', '#/admin/magazyn/dostawcy', 'Sprawdź aktywne zamówienia i alternatywne źródło dostawy.');
@@ -204,20 +239,21 @@ async function agentCentrumOperacyjne() {
   addPriority('info', 'produkty', producerLinks.length, 'Linki producentów czekają na pobranie danych', '#/admin/agent-ai/plan', 'Ponów analizę linków i uzupełnij kartoteki.');
   if (offerErrorRec?.message || offerErrorRec?.error) addPriority('warning', 'allegro', 1, 'Ostatnia operacja oferty Allegro zakończyła się błędem', '#/admin/allegro/wystawianie', 'Otwórz diagnostykę oferty i przekaż braki Agentowi.');
   const severityRank = { critical: 0, warning: 1, info: 2 };
+  priorities.forEach((priority) => Object.assign(priority, agentPriorytetWykonawczy(priority)));
   priorities.sort((a, b) => (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9) || b.count - a.count || a.title.localeCompare(b.title, 'pl'));
   const critical = priorities.filter((x) => x.severity === 'critical').length, warnings = priorities.filter((x) => x.severity === 'warning').length;
   const score = Math.max(0, Math.min(100, 100 - critical * 14 - warnings * 5));
   return {
     ok: true, generatedAt: new Date().toISOString(), score, priorities,
     summary: { orders: orders.length, activeOrders: activeOrders.length, newOrders: newOrders.length, shipmentsWithoutTracking: shipmentsWithoutTracking.length, allegroOrders: allegroOrders.length, activeAllegro: activeAllegro.length, communicationWaiting: communicationWaiting.length, supplierUnavailable: supplierUnavailable.length, supplierLow: supplierLow.length, producerLinks: producerLinks.length, offerTasks: offerTasks.length, supplierOrders: supplierOrders.length, companyOrdersWithoutInvoice: companyOrdersWithoutInvoice.length },
-    integrations: { email: !!emailPublicConfig().configured, telegram: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId), inpost: !!inpostPublicConfig().configured, allegro: !!(process.env.ALLEGRO_CLIENT_ID && process.env.ALLEGRO_CLIENT_SECRET), infakt: !!infaktPublicConfig().configured },
+    integrations, freshness,
     links: { agent: 'https://artwaytm.pl/#/admin/agent-ai', orders: 'https://artwaytm.pl/#/admin/zamowienia', warehouse: 'https://artwaytm.pl/#/admin/magazyn/stany', allegro: 'https://artwaytm.pl/#/admin/allegro', shipping: 'https://artwaytm.pl/#/admin/wysylki', invoices: 'https://artwaytm.pl/#/admin/infakt' },
   };
 }
 function agentRaportTelegramHTML(center = {}) {
   const s = center.summary || {}, items = (Array.isArray(center.priorities) ? center.priorities : []).slice(0, 8);
   const icons = { critical: '🔴', warning: '🟡', info: '🔵' };
-  const rows = items.length ? items.map((x, i) => `${i + 1}. ${icons[x.severity] || '•'} <b>${telegramHtml(x.title)}</b> — ${x.count}\n   ${telegramHtml(x.action || '')}`).join('\n') : '✅ Brak aktywnych tematów wymagających reakcji.';
+  const rows = items.length ? items.map((x, i) => `${i + 1}. ${icons[x.severity] || '•'} <b>${telegramHtml(x.title)}</b> — ${x.count}\n   ${x.execution === 'approval' ? '🔐 decyzja administratora' : x.execution === 'draft' ? '📝 agent przygotuje szkic' : '⚙️ agent może sprawdzić'} • termin ${x.deadlineMinutes || 240} min\n   ${telegramHtml(x.action || '')}\n   Gotowe, gdy: ${telegramHtml(x.doneWhen || 'temat zostanie zweryfikowany')}`).join('\n') : '✅ Brak aktywnych tematów wymagających reakcji.';
   return `<b>🤖 Centrum operacyjne Artway-TM — ${center.score ?? 0}%</b>\n${telegramHtml(new Date(center.generatedAt || Date.now()).toLocaleString('pl-PL'))}\n\n<b>Sprzedaż i obsługa</b>\nSklep: ${s.newOrders || 0} nowych / ${s.activeOrders || 0} aktywnych\nAllegro: ${s.activeAllegro || 0} aktywnych • ${s.communicationWaiting || 0} spraw do odpowiedzi\nWysyłki bez numeru: ${s.shipmentsWithoutTracking || 0}\nFaktury: ${s.companyOrdersWithoutInvoice || 0} firmowych bez dokumentu\nProducent: ${s.supplierUnavailable || 0} braków • ${s.supplierLow || 0} niskich stanów\n\n<b>Najważniejsze działania</b>\n${rows}\n\n<i>Agent nie wysyła odpowiedzi klientom ani zamówień producentom bez zatwierdzenia administratora.</i>`;
 }
 function numerZamowienia(v) {
@@ -4352,6 +4388,33 @@ export default async (req) => {
     if (action === 'agent-operations-summary') {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       return odpowiedz(await agentCentrumOperacyjne());
+    }
+
+    if (action === 'agent-run-safe-checks') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({})), requested = Array.isArray(body.areas) ? body.areas.map((x) => tekst(x, 80)) : [];
+      const allowed = new Map([
+        ['allegro-orders', { action: 'allegro-sync-orders', label: 'Zamówienia Allegro' }],
+        ['inpost', { action: 'inpost-sync-all', label: 'Statusy i numery InPost' }],
+        ['infakt', { action: 'infakt-sync', label: 'Zadania inFakt i ceny zakupu' }],
+      ]), selected = (requested.length ? requested : [...allowed.keys()]).filter((x) => allowed.has(x));
+      const adminToken = tokenZadania(req, url), origin = publicznyOrigin(req), startedAt = new Date().toISOString();
+      const results = await Promise.all(selected.map(async (area) => {
+        const definition = allowed.get(area), started = Date.now();
+        try {
+          const response = await fetch(`${origin}/api/store?action=${encodeURIComponent(definition.action)}`, { method: 'POST', headers: { 'x-admin-token': adminToken, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ source: 'agent-safe-plan' }) });
+          const text = await response.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
+          if (!response.ok || data?.ok === false) throw new Error(tekst(data?.error || data?.message || `HTTP ${response.status}`, 500));
+          const count = Number(data?.processed ?? data?.synced ?? data?.sprawdzone ?? data?.results?.length ?? data?.orders?.length ?? data?.items?.length ?? 0) || 0;
+          return { area, label: definition.label, status: 'completed', count, durationMs: Date.now() - started };
+        } catch (error) {
+          return { area, label: definition.label, status: 'error', error: tekst(error?.message || error, 500), durationMs: Date.now() - started };
+        }
+      }));
+      const center = await agentCentrumOperacyjne(), run = { id: crypto.randomUUID(), source: tekst(body.source || 'admin-panel', 80), startedAt, completedAt: new Date().toISOString(), results, scoreAfter: center.score };
+      const history = await czytaj('agent_action_runs', { items: [] }); history.items = [run, ...(Array.isArray(history.items) ? history.items : [])].slice(0, 100); history.updated_at = run.completedAt; await zapisz('agent_action_runs', history);
+      return odpowiedz({ ok: true, allCompleted: results.every((x) => x.status === 'completed'), run, center });
     }
 
     if (action === 'telegram-send-agent-report') {
