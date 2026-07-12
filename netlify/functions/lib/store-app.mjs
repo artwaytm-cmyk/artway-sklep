@@ -1361,7 +1361,7 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
   const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
   const products = allegroAgentProduktyCentralne(data);
   const mappings = allegroMapowaniaItems(mappingsRec), edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
-  const used = new Map(Object.values(mappings).map((m) => [String(m?.offerId || ''), String(m?.productId || '')]).filter(([o]) => o));
+  const used = new Map(Object.values(mappings).map((m) => [String(m?.offerId || ''), String(m?.productId || '')]).filter(([o, p]) => o && p && products.has(p)));
   let autoMapped = 0, refreshed = 0;
   for (const product of products.values()) {
     const match = allegroDopasowanieOferty(product, offers, mappings);
@@ -1397,7 +1397,7 @@ function allegroAgentProduktDlaPozycji(line = {}, offer = {}, mappings = {}, pro
   const mapped = mappings[offerId];
   if (mapped?.blocked === true) return null;
   const mappedId = String(mapped?.productId ?? mapped?.produktId ?? mapped?.id ?? mapped ?? '').trim();
-  if (mappedId) return { id: mappedId, product: products.get(mappedId) || { id: mappedId }, match: 'ręczne mapowanie oferty', confidence: 100 };
+  if (mappedId && products.has(mappedId)) return { id: mappedId, product: products.get(mappedId), match: 'ręczne mapowanie oferty', confidence: 100 };
   const ext = allegroNormalizujKlucz(line.externalId || offer.externalId || '');
   const ean = allegroNormalizujKlucz(offer.ean || offer.gtin || '');
   const code = allegroNormalizujKlucz(offer.manufacturerCode || offer.producerCode || '');
@@ -1471,7 +1471,9 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
       const rec = { line, offer, match, quantity };
       matched.push(rec);
       if (match?.id) {
-        if (offerId && !mappings[offerId]) {
+        const currentMapping = mappings[offerId];
+        const currentMappedId = String(currentMapping?.productId ?? currentMapping?.produktId ?? currentMapping?.id ?? currentMapping ?? '').trim();
+        if (offerId && (!mappings[offerId] || (currentMappedId && !products.has(currentMappedId)))) {
           mappings[offerId] = { offerId, productId: String(match.id), allegroProductId: tekst(offer.productId || '', 120), categoryId: tekst(offer.categoryId || '', 80), productName: tekst(match.product?.nazwa || match.product?.name || line.offerName || '', 300), linked_at: new Date().toISOString(), synced_at: new Date().toISOString(), operator: `auto-order:${match.match}`, confidence: Number(match.confidence || 0) };
           autoMapped++;
         }
@@ -1597,7 +1599,8 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
     dane.artway_agent_ai_historia = historia.slice(0, 500);
     await zapisz('settings', { ...settingsRec, data: dane, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
   }
-  return { items: updatedItems, mappings, report: { reviewed: aktywne.length, autoEligible: automatyczneIds.size, autoMapped, shortagesAdded: shortages.length, supplierDocumentsChanged: dokumentyZmienione, supplierReferencesChanged: refsZmienione, unresolved: updatedItems.reduce((s, z) => s + Number(z.agentAnalysis?.nierozpoznane || 0) + Number(z.agentAnalysis?.bezStanu || 0), 0), ready: updatedItems.filter((z) => z.agentAnalysis?.gotowe).length, at: now } };
+  const activeIds = new Set(aktywne.map((z) => String(z.id || z.nr || '')));
+  return { items: updatedItems, mappings, report: { reviewed: aktywne.length, autoEligible: automatyczneIds.size, autoMapped, shortagesAdded: shortages.length, supplierDocumentsChanged: dokumentyZmienione, supplierReferencesChanged: refsZmienione, unresolved: updatedItems.filter((z) => activeIds.has(String(z.id || z.nr || ''))).reduce((s, z) => s + Number(z.agentAnalysis?.nierozpoznane || 0) + Number(z.agentAnalysis?.bezStanu || 0), 0), ready: updatedItems.filter((z) => activeIds.has(String(z.id || z.nr || '')) && z.agentAnalysis?.gotowe).length, at: now } };
 }
 async function allegroPrzeliczZamowieniaPoMapowaniu() {
   const rec = await czytaj('allegro_orders', { items: [], updated_at: null });

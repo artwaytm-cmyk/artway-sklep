@@ -6413,8 +6413,8 @@ function allegroUstawieniaPanelHTML(){
 function widokAdminAllegro(sekcja="start"){
   allegroLadujJesliTrzeba();
   if(sekcja==="komunikacja"&&!allegroKomunikacja?.updated_at&&!allegroKomunikacja?.sprawdzono&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
-  const mapped=Object.values(allegroMapowania||{}).filter(x=>String(x?.productId??x?.produktId??x?.id??x??"").trim()).length;
-  const niepodpiete=(allegroOferty||[]).filter(o=>!allegroProduktDlaOferty(o.id)).length;
+  const mapped=(allegroOferty||[]).filter(o=>allegroProduktDlaOferty(o.id)).length;
+  const niepodpiete=Math.max(0,(allegroOferty||[]).length-mapped);
   const aktywna=["zamowienia","oferty","wystawianie","komunikacja","ustawienia"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
   <div class="module-page-stack allegro-module-page">
