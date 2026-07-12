@@ -2615,8 +2615,10 @@ async function synchronizujSprzedazZDostepnosciaProducenta(req, results = [], da
     if (!unavailable && !available) { report.unchanged++; continue; }
     const previousAvailability = availability[productId];
     const automaticAvailability = previousAvailability?.automatic === true || previousAvailability?.source === 'producent-agent';
+    const legacyTemporaryAvailability = !!previousAvailability && !previousAvailability?.source
+      && /chwilowo niedost[eę]pn|brak u producent/i.test(String(previousAvailability?.powod || ''));
     if (unavailable) {
-      if (!previousAvailability || automaticAvailability) {
+      if (!previousAvailability || automaticAvailability || legacyTemporaryAvailability) {
         availability[productId] = { status: 'niedostepny', powod: 'Automatycznie: produkt niedostępny u producenta', data: now, operator: 'agent-dostepnosci', source: 'producent-agent', automatic: true, producerStatus: result.status, producerCheckedAt: result.checkedAt || now };
         if (!previousAvailability) report.siteHidden++;
       }
