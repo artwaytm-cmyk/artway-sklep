@@ -258,7 +258,7 @@ let zaznaczoneAllegroZamowienia = new Set();
 let zaznaczoneAllegroOferty = new Set();
 let allegroOstatniBladWystawienia = null;
 let allegroOstatniWynikWystawienia = null;
-let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, offerSettings:{defaultStock:5,republish:true,updated_at:null}};
+let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoCorrections:true,updated_at:null}};
 let allegroOperacjaUstawien = {busy:false,done:0,total:0,stockUpdated:0,stockFailed:0,republishUpdated:0,republishFailed:0,error:""};
 let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", filtrAllegroZamowien="do_obslugi", filtrEtapuAllegroZamowien="wszystkie", filtrAllegroOfert="wszystkie", filtrAllegroWystawiania="wszystkie", allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=250, allegroLimitWystawiania=250;
 
@@ -5181,7 +5181,7 @@ function allegroLadujJesliTrzeba(){
 async function allegroWczytajDane(cicho=false){
   try{
     const d=await chmura("allegro-data",{timeout:16000});
-    allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,ladowanie:false,error:"",offerDefaultsAudit:d.offerDefaultsAudit||{items:{},updated_at:null},offerSettings:d.offerSettings||allegroStan.offerSettings||{defaultStock:5,republish:true,updated_at:null}};
+    allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,ladowanie:false,error:"",offerDefaultsAudit:d.offerDefaultsAudit||{items:{},updated_at:null},catalogMaintenance:d.catalogMaintenance||allegroStan.catalogMaintenance||{cursor:0,lastRun:null},offerSettings:d.offerSettings||allegroStan.offerSettings||{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoCorrections:true,updated_at:null}};
     allegroZamowienia=Array.isArray(d.orders)?d.orders:[];
     allegroOferty=Array.isArray(d.offers)?d.offers:[];
     allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:{};
@@ -5475,6 +5475,24 @@ function allegroZapiszKategorieProduktu(id,categoryId){
   return true;
 }
 function allegroTrybPublikacji(){ return String(document.getElementById("allegroPublicationAction")?.value||"keep"); }
+function allegroListaProducentow(){return [...new Set((Array.isArray(allegroStan.offerSettings?.producers)&&allegroStan.offerSettings.producers.length?allegroStan.offerSettings.producers:["Alexander","Multigra","GoDan"]).map(x=>String(x||"").trim()).filter(Boolean))];}
+function allegroProducentKanoniczny(p={}){
+  const list=allegroListaProducentow(),norm=v=>String(v||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g," ").trim();
+  const text=norm([p.producent,p.marka,p.nazwa,p.name,p.sourceUrl,p.producentUrl].filter(Boolean).join(" "));
+  const direct=list.find(name=>text.includes(norm(name)));if(direct)return direct;
+  const find=name=>list.find(x=>norm(x)===norm(name))||"";
+  if(/alexander|sklep alexander|origami 3d|maly konstruktor|constructor junior|zlotowki/.test(text))return find("Alexander");
+  if(/multigra/.test(text))return find("Multigra");
+  if(/go dan|godan|godanparty/.test(text))return find("GoDan");
+  return "";
+}
+function zapiszPolaProduktuLokalnie(id,fields={},tylkoBrakujace=false){
+  const key=String(id),idx=produktyDodane.findIndex(x=>String(x.id)===key),base=idx>=0?produktyDodane[idx]:(produktyEdytowane[key]||{}),next={...base};let changed=false;
+  for(const [field,value] of Object.entries(fields)){if(value===undefined||value===null||value==="")continue;if(tylkoBrakujace&&(next[field]!==undefined&&next[field]!==null&&String(next[field]).trim()!==""))continue;if(JSON.stringify(next[field])!==JSON.stringify(value)){next[field]=value;changed=true;}}
+  if(!changed)return false;
+  if(idx>=0){produktyDodane[idx]=next;zapiszLS("artway_produkty_dodane",produktyDodane);}else{produktyEdytowane={...produktyEdytowane,[key]:next};zapiszLS("artway_produkty_edytowane",produktyEdytowane);}
+  zbudujProdukty();return true;
+}
 function allegroZastosujWynikWystawienia(p,d={}){
   const id=String(d.offer?.id||p.allegroOfferId||"").trim();
   if(!id)return;
@@ -5505,9 +5523,10 @@ function allegroWynikOperacjiHTML(){
 function allegroZapiszAutoUzupelnienia(p,d={}){
   if(!p?.id)return false;
   const auto=d.autoFilled||{},catalog=d.catalogMatch?.selected||{},category=d.categorySuggestion?.selected||{};
+  const canonical=allegroProducentKanoniczny({...p,producent:auto.producent||p.producent,marka:auto.marka||p.marka});
   const fields={
-    producent:auto.producent||p.producent||p.marka||"",
-    marka:auto.marka||p.marka||auto.producent||p.producent||"",
+    producent:canonical||auto.producent||p.producent||p.marka||"",
+    marka:canonical||auto.marka||p.marka||auto.producent||p.producent||"",
     gtin:auto.gtin||auto.ean||(catalog.eans||[])[0]||p.gtin||p.ean||"",
     ean:auto.ean||auto.gtin||(catalog.eans||[])[0]||p.ean||p.gtin||"",
     kodProducenta:auto.kodProducenta||auto.mpn||p.kodProducenta||p.mpn||"",
@@ -5516,18 +5535,18 @@ function allegroZapiszAutoUzupelnienia(p,d={}){
     allegroProductId:auto.allegroProductId||catalog.id||p.allegroProductId||"",
     allegroCategoryId:auto.allegroCategoryId||category.id||catalog.categoryId||p.allegroCategoryId||""
   };
-  const next={...(produktyEdytowane[p.id]||{})};let changed=false;
-  for(const [key,value] of Object.entries(fields))if(value&&!next[key]&&!p[key]){next[key]=String(value);changed=true;}
+  const next={};let changed=false;
+  for(const [key,value] of Object.entries(fields))if(value&&(!p[key]||(canonical&&(key==="producent"||key==="marka")&&String(p[key])!==String(value)))){next[key]=String(value);changed=true;}
   const extraImages=(Array.isArray(auto.zdjecia)?auto.zdjecia:[]).filter(Boolean).filter(x=>x!==fields.zdjecie).slice(0,15);
-  if(extraImages.length&&!(Array.isArray(p.zdjecia)&&p.zdjecia.length)&&!(Array.isArray(next.zdjecia)&&next.zdjecia.length)){next.zdjecia=extraImages;changed=true;}
+  if(extraImages.length&&!(Array.isArray(p.zdjecia)&&p.zdjecia.length)){next.zdjecia=extraImages;changed=true;}
   if(Array.isArray(auto.allegroParameters)&&auto.allegroParameters.length&&!Array.isArray(p.allegroParameters)){next.allegroParameters=auto.allegroParameters;changed=true;}
   const form=document.querySelector("form.product-editor-form");
   if(form){
     for(const [key,value] of Object.entries(fields))uzupelnijPoleFormularza(form,key,value,false);
     extraImages.forEach((url,i)=>uzupelnijPoleFormularza(form,"zdjecie"+(i+2),url,false));
   }
-  if(changed){produktyEdytowane[p.id]=next;zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();}
-  return changed;
+  if(canonical){const producerFields={producent:canonical,marka:canonical};if(zapiszPolaProduktuLokalnie(p.id,producerFields,false))changed=true;delete next.producent;delete next.marka;}
+  return Object.keys(next).length?zapiszPolaProduktuLokalnie(p.id,next,true)||changed:changed;
 }
 async function allegroPrzygotujSzkicProduktu(id){
   const form=document.querySelector("form.product-editor-form");
@@ -5604,8 +5623,9 @@ async function pobierzDaneProduktuZUrl(btn){
     uzupelnijPoleFormularza(form,"mpn",p.mpn||p.kodProducenta,overwrite);
     uzupelnijPoleFormularza(form,"kodProducenta",p.kodProducenta||p.mpn,overwrite);
     uzupelnijPoleFormularza(form,"externalId",p.externalId,overwrite);
-    uzupelnijPoleFormularza(form,"marka",p.marka,overwrite);
-    uzupelnijPoleFormularza(form,"producent",p.producent||p.marka,overwrite);
+    const canonicalProducer=allegroProducentKanoniczny({...p,sourceUrl:p.sourceUrl||url,producentUrl:url});
+    uzupelnijPoleFormularza(form,"marka",canonicalProducer||p.marka,overwrite||!!canonicalProducer);
+    uzupelnijPoleFormularza(form,"producent",canonicalProducer||p.producent||p.marka,overwrite||!!canonicalProducer);
     uzupelnijPoleFormularza(form,"rozmiar",p.rozmiar,overwrite);
     uzupelnijPoleFormularza(form,"dostepnoscProducenta",p.dostepnoscProducenta,overwrite);
     uzupelnijPoleFormularza(form,"sourceUrl",p.sourceUrl||url,overwrite);
@@ -6369,15 +6389,20 @@ async function allegroZastosujUstawieniaDoIstniejacych(){
 async function allegroZapiszUstawieniaOfert(form){
   const fd=new FormData(form),defaultStock=Number(fd.get("defaultStock")),applyExisting=fd.get("applyExisting")==="on";
   if(!Number.isInteger(defaultStock)||defaultStock<1||defaultStock>99999){toast("Podaj stan od 1 do 99999 szt.");return;}
+  const producers=String(fd.get("producers")||"").split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean).slice(0,50);
+  if(!producers.length){toast("Dodaj przynajmniej jednego producenta.");return;}
   try{
-    const d=await chmura("allegro-offer-settings",{method:"POST",body:{defaultStock},timeout:12000});
+    const d=await chmura("allegro-offer-settings",{method:"POST",body:{defaultStock,producers,autoCatalog:fd.get("autoCatalog")==="on",syncDescriptions:fd.get("syncDescriptions")==="on",autoCorrections:fd.get("autoCorrections")==="on"},timeout:12000});
     allegroStan={...allegroStan,offerSettings:d.settings||{defaultStock,republish:true}};
-    toast(`Zapisano domyślny stan ofert Allegro: ${defaultStock} szt.`);renderuj();
+    toast(`Zapisano automatykę Allegro i ${producers.length} producentów.`);renderuj();
     if(applyExisting)await allegroZastosujUstawieniaDoIstniejacych();
   }catch(e){toast("⚠️ Ustawienia ofert Allegro: "+(e.message||e));}
 }
+async function allegroUruchomAutomatycznaKonserwacje(){
+  try{toast("🟠 Agent sprawdza katalog, opisy i producentów…");const d=await chmura("allegro-auto-maintenance",{method:"POST",body:{limit:50},timeout:180000});await chmuraWczytajStan().catch(()=>{});await allegroWczytajDane(true);const r=d.maintenance||{};toast(`✅ Sprawdzono ${r.scanned||0}, poprawiono ${r.updated||0}, katalog dopasowano dla ${r.matched||0} produktów.`);}catch(e){toast("⚠️ Automatyka katalogu Allegro: "+(e.message||e));}
+}
 function allegroUstawieniaPanelHTML(){
-  const offerStock=allegroStanOfertyProduktu(),audit=Object.values(allegroStan.offerDefaultsAudit?.items||{}),auditOpen=audit.filter(x=>!x.stockUpdated||!x.republishUpdated).length;
+  const offerStock=allegroStanOfertyProduktu(),audit=Object.values(allegroStan.offerDefaultsAudit?.items||{}),auditOpen=audit.filter(x=>!x.stockUpdated||!x.republishUpdated).length,offerSettings=allegroStan.offerSettings||{},maintenance=allegroStan.catalogMaintenance||{};
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">⚙️ Ustawienia integracji Allegro</h2><p class="order-detail-lead">Konfiguracja techniczna znajduje się na końcu podkart, żeby nie przeszkadzała w codziennej obsłudze zamówień i ofert.</p></div>
@@ -6392,6 +6417,8 @@ function allegroUstawieniaPanelHTML(){
     <form class="panel-subtle allegro-offer-settings-card" onsubmit="event.preventDefault();allegroZapiszUstawieniaOfert(this)">
       <div class="order-section-head"><div><h3 style="margin:0">📦 Domyślny stan i odnawianie ofert</h3><p class="order-detail-lead">Ta liczba trafia do każdej nowej i aktualizowanej oferty Allegro. Jest niezależna od fizycznego stanu magazynu.</p></div><button class="btn" type="submit" ${allegroOperacjaUstawien.busy?"disabled":""}>💾 Zapisz ustawienie</button></div>
       <div class="allegro-offer-settings-grid"><div class="f-group"><label>Domyślny stan każdej oferty Allegro</label><input name="defaultStock" type="number" min="1" max="99999" step="1" required value="${offerStock}"><small>Obecnie: ${offerStock} szt. Cena i stan magazynu pozostają niezależne.</small></div><div class="allegro-renewal-status"><span>♻️</span><div><b>Automatyczne wznawianie: zawsze włączone</b><small>Nowe i aktualizowane oferty otrzymują ustawienie ponownego wystawienia.</small></div></div></div>
+      <div class="f-group" style="margin-top:.85rem"><label>Dozwoleni producenci — po jednym wierszu</label><textarea name="producers" rows="4" required>${esc(allegroListaProducentow().join("\n"))}</textarea><small>Agent przypisuje wyłącznie producentów z tej listy. Rozpoznane nazwy „Origami 3D” i produkty ze sklep.alexander.com.pl są normalizowane do Alexander.</small></div>
+      <div class="diag-actions" style="align-items:flex-start"><label class="check"><input type="checkbox" name="autoCatalog" ${offerSettings.autoCatalog!==false?"checked":""}> Automatycznie dobieraj katalog i kategorię</label><label class="check"><input type="checkbox" name="syncDescriptions" ${offerSettings.syncDescriptions!==false?"checked":""}> Opis powiązanej oferty Allegro ma być opisem w sklepie</label><label class="check"><input type="checkbox" name="autoCorrections" ${offerSettings.autoCorrections!==false?"checked":""}> Kwarantanna błędnych powiązań</label></div>
       <label class="check allegro-apply-existing"><input type="checkbox" name="applyExisting"> Po zapisaniu ustaw również nowy stan i wznawianie we wszystkich ${allegroOferty.length} istniejących ofertach</label>
       ${audit.length?`<small>Ostatni audyt: ${audit.length-auditOpen} bez problemu • ${auditOpen} starszych ofert wymaga uzupełnienia danych przed włączeniem wznawiania.</small>`:""}
     </form>
@@ -6406,7 +6433,8 @@ function allegroUstawieniaPanelHTML(){
     <div class="panel-subtle" style="margin-top:1rem">
       <div class="order-section-head"><div><h3 style="margin:0">🔄 Automatyczna synchronizacja danych</h3><p class="order-detail-lead">Synchronizacja działa na serwerze także wtedy, gdy panel jest zamknięty. Zamówienia i komunikacja są sprawdzane co 15 minut, a pełny katalog ofert co 6 godzin.</p></div><button class="btn" onclick="allegroSynchronizujWszystko()">Synchronizuj wszystko teraz</button></div>
       <div class="allegro-schedule-grid"><span><b>📦 Zamówienia</b><small>automatycznie co 15 minut</small></span><span><b>💬 Wiadomości</b><small>automatycznie co 15 minut</small></span><span><b>🏷️ Oferty</b><small>automatycznie co 6 godzin</small></span></div>
-      <details class="allegro-manual-sync"><summary>Zaawansowane: uruchom tylko wybraną synchronizację</summary><div class="diag-actions"><button class="btn ghost" onclick="allegroSynchronizujZamowienia()">Zamówienia</button><button class="btn ghost" onclick="allegroSynchronizujOferty()">Oferty</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">Komunikacja</button><button class="btn ghost" onclick="window.open('https://salescenter.allegro.com/my-sales','_blank','noopener')">Otwórz Sales Center</button></div></details>
+      <div class="backend-note allegro-info-bottom"><b>Automatyczna konserwacja katalogu:</b> ${maintenance.lastRun?`ostatnio ${esc(new Date(maintenance.lastRun).toLocaleString("pl-PL"))} • sprawdzono ${esc(maintenance.scanned||0)} • poprawiono ${esc(maintenance.updated||0)}`:"uruchomi się wraz z najbliższą synchronizacją ofert"}. Obejmuje katalog, kategorię, producenta, opis i kontrolę błędnych powiązań.</div>
+      <details class="allegro-manual-sync"><summary>Zaawansowane: uruchom tylko wybraną synchronizację</summary><div class="diag-actions"><button class="btn ghost" onclick="allegroSynchronizujZamowienia()">Zamówienia</button><button class="btn ghost" onclick="allegroSynchronizujOferty()">Oferty</button><button class="btn ghost" onclick="allegroUruchomAutomatycznaKonserwacje()">Katalog, opisy i producenci</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">Komunikacja</button><button class="btn ghost" onclick="window.open('https://salescenter.allegro.com/my-sales','_blank','noopener')">Otwórz Sales Center</button></div></details>
     </div>
   </div>`;
 }
@@ -7979,7 +8007,7 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>MPN</label><input name="mpn" value="${esc(p.mpn||"")}" placeholder="Kod producenta"></div>
         </div>
         <div class="f-row">
-          <div class="f-group"><label>Producent *</label><input name="producent" value="${esc(p.producent||p.marka||"")}" placeholder="np. Alexander"></div>
+          <div class="f-group"><label>Producent *</label><input name="producent" list="allegroProducerList" value="${esc(allegroProducentKanoniczny(p)||p.producent||p.marka||"")}" placeholder="np. Alexander"><datalist id="allegroProducerList">${allegroListaProducentow().map(name=>`<option value="${esc(name)}">`).join("")}</datalist><small>Lista jest zarządzana w Allegro → Ustawienia.</small></div>
           <div class="f-group"><label>Marka / BRAND</label><input name="marka" value="${esc(p.marka||"")}"></div>
           <div class="f-group"><label>Kolor produktu / COLOR</label><input name="kolorProduktu" value="${esc(p.kolorProduktu||"")}" placeholder="np. Czarny matowy"></div>
         </div>
@@ -8094,6 +8122,8 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     if(v)p[pole]=v;else delete p[pole];
   }
   if(p.gtin) p.ean=p.gtin; else delete p.ean;
+  const canonicalProducer=allegroProducentKanoniczny(p);
+  if(canonicalProducer){p.producent=canonicalProducer;p.marka=canonicalProducer;}
   const warianty = String(f.get("warianty")||"").split(",").map(x=>x.trim()).filter(Boolean).slice(0,12);
   if(warianty.length) p.warianty = warianty; else delete p.warianty;
   const zdjecia = Array.from({length:15},(_,i)=>"zdjecie"+(i+2)).map(n=>String(f.get(n)||"").trim()).filter(Boolean);
@@ -8131,17 +8161,21 @@ function dodajProdukt(e){
   kategoriaNowegoProduktu = "";
   loguj("info","Dodano produkt: "+p.nazwa+" ("+zl(p.cena)+")");
   toast("Produkt dodany ✅");
+  setTimeout(()=>allegroSynchronizujPowiazanyProduktPoZapisie(p),0);
   if(trasa()==="/admin/produkty/dodaj") location.hash="#/admin/produkty"; else renderuj();
 }
 function zapiszStanZFormularza(f, id){
   ustawStanMagazynowy(id, String(f.get("stan")??"").trim()===""?0:f.get("stan"), {typ:"korekta",powod:"Formularz produktu"});
 }
 async function allegroSynchronizujPowiazanyProduktPoZapisie(p){
-  if(!p||!allegroOfertaDlaProduktuSklepu(p))return;
+  if(!p)return;
   try{
-    const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p),publicationAction:"keep"}},timeout:120000});
+    const draft=await chmura("allegro-offer-draft",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p)}},timeout:60000});
+    allegroZapiszAutoUzupelnienia(p,draft);
+    if(!allegroOfertaDlaProduktuSklepu(p)&&draft.operation!=="update")return;
+    const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:{...p,...(draft.autoFilled||{})},options:{stock:allegroStanOfertyProduktu(p),publicationAction:"keep"}},timeout:120000});
     allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);
-    toast("🟠 Powiązana oferta Allegro została zaktualizowana nowszymi danymi produktu");
+    toast("🟠 Powiązana oferta Allegro została automatycznie zaktualizowana");
   }catch(e){allegroOstatniBladWystawienia=e;if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Aktualizacja Allegro trafiła do Agenta AI: "+(e.message||e));}
 }
 function zapiszProduktAdmin(e,id){

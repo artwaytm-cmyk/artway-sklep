@@ -1,6 +1,7 @@
 // Harmonogram: okresowe pobieranie ofert i odtwarzanie ich powiązań z produktami sklepu.
 // Dane produktu zapisane w sklepie są wysyłane do powiązanej oferty już przy zapisie;
-// ten przebieg kontrolny odświeża stan katalogu Allegro co 6 godzin.
+// ten przebieg kontrolny co 6 godzin odświeża oferty, katalog, kategorie,
+// producentów i opisy sklepu pochodzące z wiarygodnie powiązanych ofert Allegro.
 export const config = { schedule: '25 */6 * * *' };
 
 export default async () => {
