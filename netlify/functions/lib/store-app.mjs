@@ -2296,6 +2296,7 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     ...(product.kodProducenta || product.mpn || !catalogCode ? {} : { kodProducenta: catalogCode, mpn: catalogCode }),
     ...(!sourceImages.length ? {} : { zdjecie: sourceImages[0], zdjecia: sourceImages.slice(1, 16) }),
   };
+  options.descriptionSections = allegroSekcjeOpisu(preparedProduct, options.shortDescription);
   const requiredParameters = options.catalogProductId ? [] : allegroBrakujaceParametryWymagane(preparedProduct, categoryParameters.parameters);
   options.requiredParameters = requiredParameters;
   const draft = allegroDraftZProduktu(preparedProduct, options);
