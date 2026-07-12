@@ -1944,8 +1944,14 @@ function renderuj(){
       else if(t.startsWith("/admin/magazyn/")) w.innerHTML = widokAdminMagazyn(t.split("/")[3]||"pulpit");
       else if(t==="/admin/infakt") w.innerHTML = widokAdminInfakt("pulpit");
       else if(t.startsWith("/admin/infakt/")) w.innerHTML = widokAdminInfakt(t.split("/")[3]||"pulpit");
-      else if(t==="/admin/agent-ai") w.innerHTML = widokAdminAgentAI("pulpit");
-      else if(t.startsWith("/admin/agent-ai/")) w.innerHTML = widokAdminAgentAI(t.split("/")[3]||"pulpit");
+      else if(t==="/admin/agent-ai"){
+        w.innerHTML = widokAdminAgentAI("pulpit");
+        if(!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
+      }
+      else if(t.startsWith("/admin/agent-ai/")){
+        w.innerHTML = widokAdminAgentAI(t.split("/")[3]||"pulpit");
+        if(!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
+      }
       else if(t.startsWith("/admin/asortyment/")){
         const s=t.split("/")[3]||"produkty";
         w.innerHTML = s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabaty():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
@@ -3513,7 +3519,7 @@ async function sprawdzBramke(cicho=false){
       if(!ip.geowidgetConfigured) czesci.push("mapa paczkomatów: brak INPOST_GEOWIDGET_TOKEN");
       toast(czesci.join(" • "));
     }
-    if(trasa()==="/admin/wysylki"||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy") renderuj();
+    if(trasa()==="/admin/wysylki"||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
     return;
   }catch(e){ /* Netlify może być chwilowo niedostępne — niżej próbujemy awaryjny backend PHP */ }
   try{
@@ -3524,7 +3530,7 @@ async function sprawdzBramke(cicho=false){
     stanBramki={...stanBramki,sprawdzono:true,online:false,error:e.message};
     if(!cicho) toast("Bramka niedostępna — sprawdź Netlify Functions");
   }
-  if(trasa()==="/admin/wysylki"||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy") renderuj();
+  if(trasa()==="/admin/wysylki"||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
 }
 async function polaczBramke(e){
   e.preventDefault();
@@ -5037,7 +5043,7 @@ function agentAIAnaliza(){
   const allegroBraki=allegroKontrola.filter(x=>x.a.braki>0||x.a.nierozpoznane>0);
   const allegroOfertaTasks=allegroAktywneZadaniaAgentaOfert();
   const allegroDefaultsIssues=Object.values(allegroStan.offerDefaultsAudit?.items||{}).filter(x=>!x.stockUpdated||!x.republishUpdated);
-  const problemyFunkcji=[!chmuraStan.dostepna?"wspólna baza":null,stanBramki.email?.configured===false?"e-mail":null,stanBramki.inpost?.configured===false?"InPost":null,allegroStan.sprawdzono&&!allegroStan.connected?"Allegro":null,infaktStan.sprawdzono&&!infaktStan.connected?"inFakt":null].filter(Boolean);
+  const problemyFunkcji=[!chmuraStan.dostepna?"wspólna baza":null,stanBramki.sprawdzono&&stanBramki.email?.configured===false?"e-mail":null,stanBramki.sprawdzono&&stanBramki.inpost?.configured===false?"InPost":null,allegroStan.sprawdzono&&!allegroStan.connected?"Allegro":null,infaktStan.sprawdzono&&!infaktStan.connected?"inFakt":null].filter(Boolean);
   const syncTime=Date.parse(chmuraStan.updated_at||""),syncAge=Number.isFinite(syncTime)?Math.max(0,Math.round((Date.now()-syncTime)/60000)):null,syncStale=syncAge!==null&&syncAge>5;
   const pozycje=[
     {id:"funkcjonalnosc-strony",poziom:problemyFunkcji.length?"bad":"ok",ikona:"🩺",tytul:"Funkcjonalność strony — priorytet 1",opis:problemyFunkcji.length?`Kontroli wymagają: ${problemyFunkcji.join(", ")}.`:`Baza i sprawdzone integracje krytyczne odpowiadają poprawnie.`,akcja:problemyFunkcji.length?"#/diagnostyka":"plan-bezpieczny"},
