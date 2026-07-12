@@ -1199,12 +1199,12 @@ async function allegroCzekajNaOperacjeOferty(req, location = '') {
   if (!location || !/\/operations\//.test(location)) return { completed: true, result: null, checks: 0 };
   let path = location;
   try { const u = new URL(location); path = `${u.pathname}${u.search}`; } catch (e) {}
-  for (let i = 0; i < 8; i++) {
-    if (i) await new Promise((resolve) => setTimeout(resolve, 350 + i * 75));
+  for (let i = 0; i < 18; i++) {
+    if (i) await new Promise((resolve) => setTimeout(resolve, Math.min(1000, 650 + i * 25)));
     const meta = await allegroWywolaj(req, path, { withMeta: true });
     if (meta?.data?.id || (meta.status !== 202 && Object.keys(meta?.data || {}).length)) return { completed: true, result: meta.data || {}, checks: i + 1, status: meta.status };
   }
-  return { completed: false, result: null, checks: 8, status: 202 };
+  return { completed: false, result: null, checks: 18, status: 202 };
 }
 function allegroLista(raw = {}, keys = []) {
   for (const key of keys) if (Array.isArray(raw?.[key])) return raw[key];
@@ -1765,8 +1765,9 @@ function allegroPatchZDraftu(draft = {}, options = {}) {
   if (draft.afterSalesServices) out.afterSalesServices = draft.afterSalesServices;
   if (Array.isArray(draft.parameters) && draft.parameters.length) out.parameters = draft.parameters;
   if (Array.isArray(draft.productSet) && draft.productSet[0]?.product?.id) out.productSet = draft.productSet;
-  if (options.publicationAction === 'activate') out.publication = { status: 'ACTIVE' };
-  else if (options.publicationAction === 'deactivate') out.publication = { status: 'INACTIVE' };
+  if (options.publicationAction === 'activate') out.publication = { status: 'ACTIVE', republish: true };
+  else if (options.publicationAction === 'deactivate') out.publication = { status: 'INACTIVE', republish: true };
+  else out.publication = { republish: true };
   return out;
 }
 async function allegroPobierzSzczegolyOfert(req, source, limit) {
@@ -2261,6 +2262,7 @@ function allegroScalParametryBezDuplikatow(...groups) {
   }
   return [...byId.values()];
 }
+const ALLEGRO_FIXED_OFFER_STOCK = 5;
 async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   const options = { ...(opt || {}) };
   const [offersRec, mappingsRec] = await Promise.all([
@@ -2375,7 +2377,7 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
           parameters: [...parameters.filter((x) => x.id), ...productParameters],
           images,
         };
-  const stockRaw = Number(opt.stock ?? p.stan ?? 0);
+  const stockRaw = ALLEGRO_FIXED_OFFER_STOCK;
   const payload = {
     name: tekst(p.nazwa || p.name, 75).trim(),
     productSet: [{
@@ -2387,7 +2389,7 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
       price: { amount: String(Number(p.cena || p.price || 0).toFixed(2)), currency: 'PLN' },
     },
     stock: { available: Number.isFinite(stockRaw) ? Math.max(0, Math.floor(stockRaw)) : 0 },
-    publication: { status: opt.publishNow ? 'ACTIVE' : 'INACTIVE' },
+    publication: { status: opt.publishNow ? 'ACTIVE' : 'INACTIVE', republish: true },
     external: externalId ? { id: externalId } : undefined,
     images: images.map((url) => tekst(url, 1000)),
     description: { sections: Array.isArray(opt.descriptionSections) && opt.descriptionSections.length ? opt.descriptionSections : allegroSekcjeOpisu(p, opt.shortDescription || allegroOpisKrotki(p, [])) },
@@ -3951,6 +3953,26 @@ export default async (req) => {
       await zapisz('allegro_offers', rec);
       const mappingResult = await allegroAutoMapujOfertyZKartoteka(items);
       return odpowiedz({ ok: true, allegro: await allegroStatus(req), offers: items, mappings: mappingResult.mappings, autoMapped: mappingResult.autoMapped, mappingsRefreshed: mappingResult.refreshed, updated_at: rec.updated_at, detailedCount: rec.detailedCount, requestedLimit: rec.requestedLimit, pages: rec.pages, totalCount: rec.totalCount });
+    }
+
+    if (action === 'allegro-apply-offer-defaults') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const offerIds = [...new Set((Array.isArray(body.offerIds) ? body.offerIds : []).map((x) => tekst(x, 100).trim()).filter(Boolean))].slice(0, 50);
+      if (!offerIds.length) return odpowiedz({ ok: false, error: 'Podaj identyfikatory ofert Allegro' }, 422);
+      const results = [];
+      for (let i = 0; i < offerIds.length; i += 10) {
+        const batch = offerIds.slice(i, i + 10);
+        const settled = await Promise.allSettled(batch.map(async (offerId) => {
+          const meta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, {
+            method: 'PATCH', bodyObj: { stock: { available: ALLEGRO_FIXED_OFFER_STOCK }, publication: { republish: true } }, withMeta: true,
+          });
+          return { offerId, status: meta.status, location: meta.location || '' };
+        }));
+        settled.forEach((item, index) => results.push(item.status === 'fulfilled' ? { ok: true, ...item.value } : { ok: false, offerId: batch[index], error: tekst(item.reason?.message || item.reason, 700), code: tekst(item.reason?.code || '', 120), status: item.reason?.status || 500 }));
+      }
+      return odpowiedz({ ok: true, stock: ALLEGRO_FIXED_OFFER_STOCK, republish: true, requested: offerIds.length, updated: results.filter((x) => x.ok).length, failed: results.filter((x) => !x.ok).length, results });
     }
 
     // ─── ALLEGRO: komunikacja z klientami i autoresponder (admin) ───

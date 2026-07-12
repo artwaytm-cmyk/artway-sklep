@@ -5875,12 +5875,8 @@ function allegroBrakiProduktuDoWystawienia(p){
   if(!p.allegroCategoryId) braki.push("ID kategorii Allegro");
   return braki;
 }
-function allegroStanOfertyProduktu(p={}){
-  const explicit=Number(p.allegroStock);
-  if(p.allegroStock!==undefined&&p.allegroStock!==null&&p.allegroStock!==""&&Number.isFinite(explicit))return Math.max(0,Math.floor(explicit));
-  const magazyn=stanMagazynuId(p.id);
-  return Number.isFinite(Number(magazyn))?Math.max(0,Math.floor(Number(magazyn))):0;
-}
+const ALLEGRO_STALY_STAN_OFERTY=5;
+function allegroStanOfertyProduktu(){return ALLEGRO_STALY_STAN_OFERTY;}
 function allegroRozniceOfertyProduktu(p={},o=null){
   if(!o)return ["brak oferty"];
   const roznice=[];
@@ -5959,8 +5955,7 @@ async function allegroWystawProduktZListy(id){
 }
 async function allegroAktywujProduktZListy(id){
   const p=pobierzProduktAdmin(Number(id));if(!p){toast("Nie znaleziono produktu");return;}
-  const input=document.getElementById(`allegro-activation-stock-${id}`),qty=Math.floor(Number(input?.value));
-  if(!Number.isFinite(qty)||qty<1){toast("Podaj stan oferty Allegro: minimum 1 szt. Stan magazynu nie zostanie zmieniony.");return;}
+  const qty=ALLEGRO_STALY_STAN_OFERTY;
   try{
     toast(`Aktywuję ofertę ${p.nazwa} ze stanem Allegro ${qty} szt.…`);
     const product={...p,allegroStock:qty};
@@ -6047,7 +6042,7 @@ function allegroWystawianiePanelHTML(){
             <a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj dane</a>
             <button class="btn ghost" onclick="allegroPrzygotujSzkicProduktZListy(${jsArg(p.id)})">🧾 Sprawdź szkic</button>
             <button class="btn" onclick="allegroWystawProduktZListy(${jsArg(p.id)})">${oferta?"🤖 Agent: aktualizuj ofertę":"🤖 Agent: dodaj szkic"}</button>
-            ${oferta&&String(oferta.status||"").toUpperCase()!=="ACTIVE"?`<div class="allegro-activate-control"><input id="allegro-activation-stock-${esc(p.id)}" type="number" min="1" step="1" value="${Math.max(1,allegroStanOfertyProduktu(p))}" aria-label="Stan oferty Allegro"><button class="btn" onclick="allegroAktywujProduktZListy(${jsArg(p.id)})">🚀 Aktywuj</button><small>Stan tylko na Allegro; magazyn pozostaje ${esc(stanMagazynuId(p.id))} szt.</small></div>`:""}
+            ${oferta&&String(oferta.status||"").toUpperCase()!=="ACTIVE"?`<div class="allegro-activate-control"><b>5 szt.</b><button class="btn" onclick="allegroAktywujProduktZListy(${jsArg(p.id)})">🚀 Aktywuj</button><small>Stały stan każdej oferty Allegro: 5 szt. • automatyczne wznawianie włączone • magazyn pozostaje ${esc(stanMagazynuId(p.id))} szt.</small></div>`:""}
           </div></td>
         </tr>`;
       }).join("") || `<tr><td colspan="8">Brak produktów w tym filtrze.</td></tr>`}
@@ -7898,7 +7893,7 @@ function formularzProduktu(p, tryb){
         </div>
         <div id="allegroCategoryPreview"></div>
         <div class="f-row">
-          <div class="f-group"><label>Stan oferty Allegro <small style="font-weight:400;color:var(--muted2)">(nie zmienia stanu magazynu)</small></label><input name="allegroStock" type="number" min="0" step="1" value="${esc(allegroStanOfertyProduktu(p))}" placeholder="0"></div>
+          <div class="f-group"><label>Stan oferty Allegro <small style="font-weight:400;color:var(--muted2)">(stałe 5 szt.; nie zmienia magazynu)</small></label><input name="allegroStock" type="number" value="5" readonly><small>Każda oferta otrzymuje 5 szt. i automatyczne wznawianie.</small></div>
           <div class="f-group"><label>Publikacja oferty</label><select id="allegroPublicationAction"><option value="keep">Nowa: szkic / istniejąca: zachowaj status</option><option value="activate">Aktywuj po zapisie</option><option value="deactivate">Zapisz jako nieaktywną</option></select></div>
         </div>
         <div class="diag-actions">
