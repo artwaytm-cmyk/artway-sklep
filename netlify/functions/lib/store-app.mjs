@@ -1415,8 +1415,12 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
   const now = new Date().toISOString();
   let quarantined = 0;
   if (offerSettings.autoCorrections !== false) for (const [offerId, current] of Object.entries(mappings)) {
-    const productId = String(current?.productId || '').trim(), product = products.get(productId), offer = offersById.get(String(offerId));
-    if (!product || !offer || current?.blocked === true || allegroPowiazanieWiarygodne(product, offer)) continue;
+    const productId = String(current?.productId || current?.previousProductId || '').trim(), product = products.get(productId), offer = offersById.get(String(offerId));
+    if (current?.blocked === true) {
+      if (product && (String(product.allegroOfferId || '') === String(offerId) || product.allegroMappingStatus === 'wymaga_sprawdzenia')) updater.apply(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', ...(current.conflict ? { allegroMappingConflict: current.conflict } : {}) }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
+      continue;
+    }
+    if (!product || !offer || allegroPowiazanieWiarygodne(product, offer)) continue;
     mappings[offerId] = {
       ...current, offerId, previousProductId: productId, productId: '', blocked: true,
       operator: 'auto-quarantine:name-conflict', quarantined_at: now,
