@@ -10,6 +10,8 @@ const files = [
   'netlify/functions/lib/store-app.mjs',
   'netlify/functions/cron-inpost-sync.mjs',
   'netlify/functions/cron-allegro-orders.mjs',
+  'netlify/functions/cron-allegro-communications.mjs',
+  'netlify/functions/cron-allegro-offers.mjs',
 ];
 
 function fail(message) {
@@ -40,6 +42,8 @@ const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
 const cron = read('netlify/functions/cron-inpost-sync.mjs');
 const cronAllegroOrders = read('netlify/functions/cron-allegro-orders.mjs');
+const cronAllegroCommunications = read('netlify/functions/cron-allegro-communications.mjs');
+const cronAllegroOffers = read('netlify/functions/cron-allegro-offers.mjs');
 
 const version = index.match(/<meta\s+name=["']artway-version["']\s+content=["']([^"']+)/i)?.[1] || '';
 if (!version) fail('index.html: brak meta artway-version');
@@ -131,6 +135,8 @@ requireMarkers('assets/app.js', app, [
   'function allegroRozniceOfertyProduktu',
   'function allegroZadaniaAgentaOfertHTML',
   'function allegroAktualizujZaznaczoneOfertyDanymiSklepu',
+  'function allegroSynchronizujWszystko',
+  'automatycznie co 6 godzin',
   '"producent"',
   'Zrealizowane lokalnie',
   'function potwierdzWidoczneStanyMagazynu',
@@ -178,6 +184,9 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function allegroAutoMapujOfertyZKartoteka',
   'function allegroZapiszZadanieAgentaOferty',
   'function allegroCzekajNaOperacjeOferty',
+  "telegramKomorka('KOD', 15)",
+  "telegramKomorka('NAZWA', 30)",
+  "telegramKomorka('POTRZEBNA ILOŚĆ', 16)",
   "'zrealizowane'",
 ]);
 
@@ -193,13 +202,25 @@ requireMarkers('netlify/functions/cron-allegro-orders.mjs', cronAllegroOrders, [
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
+requireMarkers('netlify/functions/cron-allegro-communications.mjs', cronAllegroCommunications, [
+  "schedule: '*/15 * * * *'",
+  'allegro-sync-communications',
+  'ARTWAY_ADMIN_TOKEN',
+]);
+
+requireMarkers('netlify/functions/cron-allegro-offers.mjs', cronAllegroOffers, [
+  "schedule: '25 */6 * * *'",
+  'allegro-sync-offers',
+  'ARTWAY_ADMIN_TOKEN',
+]);
+
 try {
   new Function(app);
 } catch (error) {
   fail(`assets/app.js: błąd składni: ${error.message}`);
 }
 
-for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs']) {
+for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs']) {
   try {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
   } catch (error) {

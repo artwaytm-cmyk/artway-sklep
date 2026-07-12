@@ -252,7 +252,7 @@ let frazaListyProduktow="", sortowanieListyProduktow="default";
 let allegroZamowienia = wczytajLS("artway_allegro_zamowienia_cache", []);
 let allegroOferty = wczytajLS("artway_allegro_oferty_cache", []);
 let allegroMapowania = wczytajLS("artway_allegro_mapowania_cache", {});
-let allegroKomunikacja = wczytajLS("artway_allegro_komunikacja_cache", {threads:[],issues:[],settings:null,autoReplies:{},errors:[],requiresReauth:false,updated_at:null});
+let allegroKomunikacja = wczytajLS("artway_allegro_komunikacja_cache", {threads:[],issues:[],settings:null,autoReplies:{},errors:[],requiresReauth:false,updated_at:null,sprawdzono:false});
 let zaznaczoneZamowieniaSklepu = new Set();
 let zaznaczoneAllegroZamowienia = new Set();
 let zaznaczoneAllegroOferty = new Set();
@@ -5137,7 +5137,7 @@ async function allegroWczytajDane(cicho=false){
     allegroOferty=Array.isArray(d.offers)?d.offers:[];
     allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:{};
     if(d.offerLastError) allegroOstatniBladWystawienia={message:d.offerLastError.message,allegroError:{errors:d.offerLastError.errors||[]},...d.offerLastError};
-    if(Array.isArray(d.threads)||Array.isArray(d.issues)) allegroKomunikacja={...allegroKomunikacja,threads:Array.isArray(d.threads)?d.threads:allegroKomunikacja.threads,issues:Array.isArray(d.issues)?d.issues:allegroKomunikacja.issues,settings:d.settings||allegroKomunikacja.settings,autoReplies:d.autoReplies||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:allegroKomunikacja.errors,requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||allegroKomunikacja.updated_at};
+    if(Array.isArray(d.threads)||Array.isArray(d.issues)) allegroKomunikacja={...allegroKomunikacja,threads:Array.isArray(d.threads)?d.threads:allegroKomunikacja.threads,issues:Array.isArray(d.issues)?d.issues:allegroKomunikacja.issues,settings:d.settings||allegroKomunikacja.settings,autoReplies:d.autoReplies||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:allegroKomunikacja.errors,requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||allegroKomunikacja.updated_at,sprawdzono:true};
     allegroZapiszCache();
     if(!cicho) toast("Dane Allegro odświeżone");
   }catch(e){
@@ -5229,10 +5229,10 @@ async function allegroWczytajKomunikacje(cicho=false){
   try{
     const d=await chmura("allegro-communications-data",{timeout:16000});
     allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
-    allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroUstawieniaKomunikacjiDomyslne(),autoReplies:d.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||null,autoRepliesUpdatedAt:d.autoRepliesUpdatedAt||null};
+    allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroUstawieniaKomunikacjiDomyslne(),autoReplies:d.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||null,autoRepliesUpdatedAt:d.autoRepliesUpdatedAt||null,sprawdzono:true};
     allegroZapiszCache();
     if(!cicho) toast("Wczytano komunikację Allegro");
-  }catch(e){ allegroStan={...allegroStan,error:e.message||String(e)}; if(!cicho) toast("⚠️ Komunikacja Allegro: "+(e.message||e)); }
+  }catch(e){ allegroStan={...allegroStan,error:e.message||String(e)};allegroKomunikacja={...allegroKomunikacja,sprawdzono:true}; if(!cicho) toast("⚠️ Komunikacja Allegro: "+(e.message||e)); }
   renderuj();
 }
 async function allegroSynchronizujKomunikacje(autoReply=true){
@@ -5240,11 +5240,20 @@ async function allegroSynchronizujKomunikacje(autoReply=true){
     toast(autoReply?"Synchronizuję Allegro i wysyłam brakujące pierwsze odpowiedzi…":"Synchronizuję komunikację Allegro…");
     const d=await chmura("allegro-sync-communications",{method:"POST",body:{limit:60,autoReply},timeout:90000});
     allegroStan={...(d.allegro||allegroStan),sprawdzono:true,ladowanie:false,error:""};
-    allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroKomunikacjaUstawienia(),autoReplies:d.autoReply?.items||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||null,autoReply:d.autoReply||null};
+    allegroKomunikacja={threads:Array.isArray(d.threads)?d.threads:[],issues:Array.isArray(d.issues)?d.issues:[],settings:d.settings||allegroKomunikacjaUstawienia(),autoReplies:d.autoReply?.items||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:[],requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||null,autoReply:d.autoReply||null,sprawdzono:true};
     allegroZapiszCache();
     toast(`Komunikacja Allegro: wątki ${allegroKomunikacja.threads.length}, dyskusje/reklamacje ${allegroKomunikacja.issues.length}, auto-odpowiedzi wysłane ${d.autoReply?.sent?.length||0}`);
   }catch(e){ toast("⚠️ Synchronizacja komunikacji Allegro: "+(e.message||e)); }
   renderuj();
+}
+async function allegroSynchronizujWszystko(){
+  try{
+    toast("Uruchamiam pełną synchronizację Allegro…");
+    await allegroSynchronizujZamowienia();
+    await allegroSynchronizujOferty();
+    await allegroSynchronizujKomunikacje(true);
+    toast("Pełna synchronizacja Allegro zakończona ✅");
+  }catch(e){toast("⚠️ Pełna synchronizacja Allegro: "+(e.message||e));}
 }
 async function allegroZapiszUstawieniaKomunikacji(form){
   const fd=new FormData(form);
@@ -5663,9 +5672,7 @@ function allegroZamowieniaTabelaHTML(){
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">📦 Zamówienia Allegro</h2><p class="order-detail-lead">Agent rozpoznaje pozycje po identyfikatorach, rezerwuje towar, pokazuje dokładną lokalizację albo dopisuje realny brak do właściwego szkicu zamówienia producenta. Oficjalny status zawsze pochodzi z Allegro.</p></div>
-      <button class="btn" onclick="allegroSynchronizujZamowienia()">🤖 Sprawdź nowe zamówienia teraz</button>
     </div>
-    <section class="allegro-stock-agent"><div class="allegro-stock-agent-head"><div><b>🤖 Agent magazynowy Allegro działa automatycznie</b><small>Nowe zlecenia są sprawdzane co 15 minut. Stare zlecenia są analizowane, ale agent nie tworzy z nich automatycznie nowych zakupów u producenta.</small></div><a class="btn ghost" href="#/admin/agent-ai/zlecenia">🧾 Zamówienia producentów</a></div><div class="allegro-stock-agent-stats"><span><b>${agentStat.gotowe}</b><small>gotowe do pobrania</small></span><span class="${agentStat.zBrakami?"alert":""}"><b>${agentStat.zBrakami}</b><small>zleceń z brakami (${agentStat.brakiSzt} szt.)</small></span><span class="${agentStat.doWyjasnienia?"warn":""}"><b>${agentStat.doWyjasnienia}</b><small>do wyjaśnienia</small></span><span><b>${agentStat.dokumenty}</b><small>aktywnych zamówień producentów</small></span></div></section>
     <div class="orders-status-strip">${filtry.map(([id,label])=>`<button class="${filtrAllegroZamowien===id?"active":""}" onclick="filtrAllegroZamowien=${jsArg(id)};renderuj()">${label} <b>${counts[id]||0}</b></button>`).join("")}</div>
     <div class="orders-toolbar allegro-toolbar">
       <input placeholder="Szukaj: zamówienie, klient, telefon, kod, EAN, nazwa produktu…" value="${esc(szukajAllegroZamowien)}" oninput="szukajAllegroZamowien=this.value.toLowerCase();renderuj()">
@@ -5681,9 +5688,10 @@ function allegroZamowieniaTabelaHTML(){
       <button class="btn ghost" onclick="allegroWyczyscZaznaczenieZamowien()" ${zaznaczone.length?"":"disabled"}>Wyczyść wybór</button>
       <div class="allegro-bulk-stage"><label for="bulkAllegroWarehouseStage">Etap magazynu</label><select id="bulkAllegroWarehouseStage"><option value="">— wybierz etap —</option><option value="do_sprawdzenia">Do sprawdzenia</option><option value="braki">Braki — zamówić</option><option value="kompletacja">Kompletacja</option><option value="spakowane">Spakowane</option><option value="zrealizowane">✅ Zrealizowane lokalnie</option></select><button class="btn" onclick="allegroUstawEtapZaznaczonychZamowien()" ${zaznaczone.length?"":"disabled"}>Zastosuj do ${zaznaczone.length}</button></div>
     </div>
-    <div class="backend-note"><b>Status zamówienia jest wyłącznie z Allegro.</b> Lokalny etap możesz zmienić ręcznie, także na „Zrealizowane lokalnie”. Tak oznaczone zlecenie znika z kolejki „Do obsługi”, przestaje rezerwować stan i nie wraca do niej przy kolejnej synchronizacji.</div>
     <div class="allegro-order-list">${widoczneZamowienia.map(allegroZlecenieHTML).join("") || `<div class="backend-note">Brak zamówień w tym filtrze. Synchronizacja pobiera wyłącznie nowe i gotowe do wysłania.</div>`}</div>
     ${widoczneZamowienia.length>=allegroLimitWidokuZamowien?`<p class="order-detail-lead">Pokazano pierwsze ${allegroLimitWidokuZamowien} zleceń. Zwiększ limit widoku powyżej, aby zobaczyć więcej.</p>`:""}
+    <section class="allegro-stock-agent allegro-info-bottom"><div class="allegro-stock-agent-head"><div><b>🤖 Agent magazynowy Allegro działa automatycznie</b><small>Nowe zlecenia są sprawdzane co 15 minut. Stare zlecenia są analizowane, ale agent nie tworzy z nich automatycznie nowych zakupów u producenta.</small></div><a class="btn ghost" href="#/admin/agent-ai/zlecenia">🧾 Zamówienia producentów</a></div><div class="allegro-stock-agent-stats"><span><b>${agentStat.gotowe}</b><small>gotowe do pobrania</small></span><span class="${agentStat.zBrakami?"alert":""}"><b>${agentStat.zBrakami}</b><small>zleceń z brakami (${agentStat.brakiSzt} szt.)</small></span><span class="${agentStat.doWyjasnienia?"warn":""}"><b>${agentStat.doWyjasnienia}</b><small>do wyjaśnienia</small></span><span><b>${agentStat.dokumenty}</b><small>aktywnych zamówień producentów</small></span></div></section>
+    <div class="backend-note allegro-info-bottom"><b>Status zamówienia jest wyłącznie z Allegro.</b> Lokalny etap możesz zmienić ręcznie, także na „Zrealizowane lokalnie”. Tak oznaczone zlecenie znika z kolejki „Do obsługi”, przestaje rezerwować stan i nie wraca do niej przy kolejnej synchronizacji.</div>
   </div>`;
 }
 function allegroStanPozycjiHTML(p={}){
@@ -5740,15 +5748,14 @@ function allegroOfertyTabelaHTML(){
     const txt=`${o.id||""} ${o.externalId||""} ${o.ean||""} ${o.gtin||""} ${o.manufacturerCode||""} ${o.producerCode||""} ${o.brand||""} ${o.name||""} ${o.status||""} ${prod?.nazwa||""} ${prod?.sku||""}`.toLowerCase();
     return !q||txt.includes(q);
   }).slice(0,allegroLimitWidokuOfert);
+  const audytHTML=audyt.produkty?`<div class="duplicate-audit-alert allegro-info-bottom"><div><b>⚠️ Audyt wykrył ${audyt.oferty} ofert przypisanych wielokrotnie do ${audyt.produkty} produktów</b><small>Nie usuwamy ich automatycznie, ponieważ oferta może mieć sprzedaż lub historię. Otwórz filtr „Podejrzane duplikaty”, wybierz właściwą ofertę i zakończ pozostałe w Sales Center.</small></div><button class="btn ghost" onclick="filtrAllegroOfert='duplikaty';renderuj()">Pokaż duplikaty</button></div>`:`<div class="duplicate-audit-ok allegro-info-bottom"><b>✅ Audyt duplikatów:</b> nie znaleziono powtarzających się ofert dla produktów sklepu.</div>`;
     return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">🏷️ Oferty Allegro i podpinanie produktów</h2><p class="order-detail-lead">Jedna karta produktu powinna wskazywać jedną właściwą ofertę. Audyt porównuje ID produktu Allegro, EAN, SKU, kod producenta i nazwę, aby wykryć istniejące powtórzenia przed kolejnym wystawieniem.</p></div>
       <div class="order-actions">
-        <button class="btn" onclick="allegroSynchronizujOferty()">🔄 Synchronizuj oferty</button>
         <button class="btn ghost" onclick="allegroAutomapujOferty()" ${autoSugestie?"":"disabled"}>🤖 Auto-mapuj${autoSugestie?` (${autoSugestie})`:""}</button>
       </div>
     </div>
-    ${audyt.produkty?`<div class="duplicate-audit-alert"><div><b>⚠️ Audyt wykrył ${audyt.oferty} ofert przypisanych wielokrotnie do ${audyt.produkty} produktów</b><small>Nie usuwamy ich automatycznie, ponieważ oferta może mieć sprzedaż lub historię. Otwórz filtr „Podejrzane duplikaty”, wybierz właściwą ofertę i zakończ pozostałe w Sales Center.</small></div><button class="btn ghost" onclick="filtrAllegroOfert='duplikaty';renderuj()">Pokaż duplikaty</button></div>`:`<div class="duplicate-audit-ok"><b>✅ Audyt duplikatów:</b> nie znaleziono powtarzających się ofert dla produktów sklepu.</div>`}
     <div class="orders-toolbar allegro-toolbar">
       <input placeholder="Szukaj: oferta, nazwa, EAN, kod producenta, external ID, produkt…" value="${esc(szukajAllegroOfert)}" oninput="szukajAllegroOfert=this.value.toLowerCase();renderuj()">
       <select onchange="filtrAllegroOfert=this.value;renderuj()">
@@ -5776,8 +5783,9 @@ function allegroOfertyTabelaHTML(){
             <button class="btn ghost" onclick="window.open('https://allegro.pl/oferta/${encodeURIComponent(o.id)}','_blank','noopener')">Otwórz</button>
           </div></td>
         </tr>`;
-      }).join("") || `<tr><td colspan="8">Brak ofert Allegro. Połącz konto i kliknij synchronizację.</td></tr>`}
+      }).join("") || `<tr><td colspan="8">Brak ofert Allegro. Połącz konto w Ustawieniach; katalog zostanie pobrany automatycznie.</td></tr>`}
     </table></div>
+    ${audytHTML}
   </div>`;
 }
 function allegroBrakiProduktuDoWystawienia(p){
@@ -5897,9 +5905,6 @@ function allegroWystawianiePanelHTML(){
       <div><h2 style="margin-top:0">🟠 Wystawianie produktów na Allegro</h2><p class="order-detail-lead">Tu przygotujesz szkic oferty Allegro z produktu sklepu. Najbezpieczniej twórz ofertę jako nieaktywną, sprawdź parametry w Allegro i dopiero ją aktywuj.</p></div>
       <a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
     </div>
-    <div class="backend-note"><b>Sklep jest źródłem najnowszych danych.</b> Powiązanie zapisuje jednocześnie produkt sklepu, produkt katalogowy Allegro i ofertę. Nazwa, cena, stan, zdjęcia, opis oraz producent są aktualizowane z kartoteki sklepu bez tworzenia duplikatu i bez zmiany statusu publikacji.</div>
-    ${allegroOstatniBladWystawienia?`<div class="allegro-permission-alert"><div><b>⚠️ Ostatnia próba wystawienia nie powiodła się</b><p>${esc(allegroOstatniBladWystawienia.message||"Błąd Allegro")}</p>${(allegroOstatniBladWystawienia.allegroError?.errors||allegroOstatniBladWystawienia.errors||[]).map(x=>`<small>• ${esc(x.userMessage||x.message||x.code||"błąd")}${x.path?` (${esc(x.path)})`:""}</small>`).join("<br>")}</div><button class="btn ghost" onclick="allegroOstatniBladWystawienia=null;renderuj()">Zamknij</button></div>`:""}
-    ${allegroZadaniaAgentaOfertHTML()}
     <div class="orders-status-strip">${[["wszystkie","Wszystkie"],["aktywne","Aktywne"],["szkice","Szkice / nieaktywne"],["brak","Brak na Allegro"],["do_aktualizacji","Do aktualizacji"],["gotowe","Gotowe"],["braki","Do uzupełnienia"]].map(([id,label])=>`<button class="${filtrAllegroWystawiania===id?"active":""}" onclick="filtrAllegroWystawiania=${jsArg(id)};renderuj()">${label} <b>${counts[id]||0}</b></button>`).join("")}</div>
     <div class="orders-toolbar allegro-toolbar">
       <input placeholder="Szukaj: produkt, SKU, EAN, kod producenta, oferta Allegro…" value="${esc(szukajAllegroWystawiania)}" oninput="szukajAllegroWystawiania=this.value.toLowerCase();renderuj()">
@@ -5907,7 +5912,7 @@ function allegroWystawianiePanelHTML(){
       <label>Po zapisie <select id="allegroPublicationAction"><option value="keep">nowa: szkic / istniejąca: bez zmiany statusu</option><option value="activate">aktywuj</option><option value="deactivate">dezaktywuj</option></select></label>
       ${szukajAllegroWystawiania?`<button class="btn ghost" onclick="szukajAllegroWystawiania='';renderuj()">Wyczyść</button>`:""}
     </div>
-    <div class="allegro-bulk-toolbar"><div><b>Operacje na ofertach Allegro</b><small>${selectedCount} zaznaczonych • sklep pozostaje źródłem danych</small></div><button class="btn ghost" onclick='allegroZaznaczOfertyProduktow(${JSON.stringify(rows.map(p=>p.id))},true)'>☑️ Zaznacz widoczne oferty</button><button class="btn" onclick="allegroAktualizujZaznaczoneOfertyDanymiSklepu()">🔄 Aktualizuj pełne dane ze sklepu</button><select id="allegroPriceMode"><option value="percent">O procent (+/−)</option><option value="amount">O kwotę (+/−)</option><option value="fixed">Ustaw cenę docelową</option></select><input id="allegroPriceValue" inputmode="decimal" placeholder="np. 10 lub -5" style="max-width:150px"><button class="btn ghost" onclick="allegroZmienCenyZaznaczonychOfert()">💰 Zmień tylko ceny</button></div>
+    <div class="allegro-bulk-toolbar"><div><b>Operacje na ofertach Allegro</b><small>${selectedCount} zaznaczonych • pełne dane synchronizują się automatycznie</small></div><button class="btn ghost" onclick='allegroZaznaczOfertyProduktow(${JSON.stringify(rows.map(p=>p.id))},true)'>☑️ Zaznacz widoczne oferty</button><select id="allegroPriceMode"><option value="percent">O procent (+/−)</option><option value="amount">O kwotę (+/−)</option><option value="fixed">Ustaw cenę docelową</option></select><input id="allegroPriceValue" inputmode="decimal" placeholder="np. 10 lub -5" style="max-width:150px"><button class="btn ghost" onclick="allegroZmienCenyZaznaczonychOfert()">💰 Zmień ceny</button></div>
     <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable">
       <tr><th>Wybór</th><th>Produkt</th><th>Producent</th><th>EAN / kod prod.</th><th>Oferta Allegro</th><th>Zdjęcia</th><th>Stan synchronizacji</th><th>Akcje</th></tr>
       ${rows.map(p=>{
@@ -5931,6 +5936,9 @@ function allegroWystawianiePanelHTML(){
       }).join("") || `<tr><td colspan="8">Brak produktów w tym filtrze.</td></tr>`}
     </table></div>
     ${pasujace.length>rows.length?`<p class="order-detail-lead">Pokazano ${rows.length} z ${pasujace.length} produktów. Zwiększ limit widoku.</p>`:""}
+    ${allegroOstatniBladWystawienia?`<div class="allegro-permission-alert allegro-info-bottom"><div><b>⚠️ Ostatnia próba wystawienia nie powiodła się</b><p>${esc(allegroOstatniBladWystawienia.message||"Błąd Allegro")}</p>${(allegroOstatniBladWystawienia.allegroError?.errors||allegroOstatniBladWystawienia.errors||[]).map(x=>`<small>• ${esc(x.userMessage||x.message||x.code||"błąd")}${x.path?` (${esc(x.path)})`:""}</small>`).join("<br>")}</div><button class="btn ghost" onclick="allegroOstatniBladWystawienia=null;renderuj()">Zamknij</button></div>`:""}
+    <div class="allegro-info-bottom">${allegroZadaniaAgentaOfertHTML()}</div>
+    <div class="backend-note allegro-info-bottom"><b>Sklep jest źródłem najnowszych danych.</b> Powiązanie zapisuje jednocześnie produkt sklepu, produkt katalogowy Allegro i ofertę. Nazwa, cena, stan, zdjęcia, opis oraz producent są aktualizowane automatycznie z kartoteki sklepu bez tworzenia duplikatu i bez zmiany statusu publikacji.</div>
   </div>`;
 }
 function allegroDataTxt(v){
@@ -5997,20 +6005,26 @@ function allegroKomunikacjaPanelHTML(){
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">💬 Wiadomości, dyskusje i autoresponder Allegro</h2><p class="order-detail-lead">Panel pobiera Centrum wiadomości oraz Dyskusje/Reklamacje. Autoresponder reaguje wyłącznie na nowe wiadomości wykryte od poprzedniego sprawdzenia i zapisuje identyfikator każdej odpowiedzi, żeby nigdy nie wysłać duplikatu.</p></div>
-      <div class="diag-actions" style="margin-top:0">
-        ${wymagaPonownegoPolaczenia?`<button class="btn" onclick="allegroPolacz()">🔐 Napraw połączenie Allegro</button>`:`<button class="btn" onclick="allegroSynchronizujKomunikacje(true)">🔄 Pobierz nowe i odpowiedz</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">📥 Tylko pobierz</button>`}
-      </div>
+      ${wymagaPonownegoPolaczenia?`<button class="btn" onclick="allegroPolacz()">🔐 Napraw połączenie Allegro</button>`:""}
     </div>
-    <div class="orders-stat-grid">
+    <div class="panel-subtle">
+      <div class="order-section-head"><div><h3 style="margin:0">💬 Centrum wiadomości</h3><p class="order-detail-lead">Najpierw najnowsze wątki. Pełna odpowiedź ręczna nadal odbywa się w Allegro, tutaj monitorujemy i wysyłamy pierwsze potwierdzenie.</p></div></div>
+      <div class="ai-task-list">${st.threads.map(allegroWatekHTML).join("") || `<p style="color:var(--muted2)">Brak pobranych wątków. Dane odświeżą się automatycznie.</p>`}</div>
+    </div>
+    <div class="panel-subtle" style="margin-top:1rem">
+      <div class="order-section-head"><div><h3 style="margin:0">🛟 Dyskusje i reklamacje</h3><p class="order-detail-lead">Używane jest nowe API Allegro <code>/sale/issues</code>, a nie stare <code>/sale/disputes</code>.</p></div></div>
+      <div class="ai-task-list">${st.issues.map(allegroIssueHTML).join("") || `<p style="color:var(--muted2)">Brak pobranych dyskusji/reklamacji. Dane odświeżą się automatycznie.</p>`}</div>
+    </div>
+    <div class="orders-stat-grid allegro-info-bottom">
       <div class="order-stat-card ${st.threadNeed?"hot":""}"><span>💬</span><b>${st.threads.length}</b><small>wątki wiadomości</small></div>
       <div class="order-stat-card ${st.issueNeed?"hot":""}"><span>🛟</span><b>${st.issues.length}</b><small>dyskusje/reklamacje</small></div>
       <div class="order-stat-card ${st.totalNeed?"hot":"money"}"><span>⚡</span><b>${st.totalNeed}</b><small>czeka na pierwszą odpowiedź</small></div>
       <div class="order-stat-card money"><span>✅</span><b>${st.sent}</b><small>auto-odpowiedzi zapisane</small></div>
     </div>
     ${allegroKomunikacjaBledyHTML()}
-    <form class="panel-subtle" style="margin-top:1rem" onsubmit="event.preventDefault();allegroZapiszUstawieniaKomunikacji(this)">
+    <form class="panel-subtle allegro-info-bottom" onsubmit="event.preventDefault();allegroZapiszUstawieniaKomunikacji(this)">
       <div class="order-section-head">
-        <div><h3 style="margin:0">⚙️ Ustawienia autorespondera</h3><p class="order-detail-lead">Harmonogram sprawdza komunikację co 15 minut. Odpowiedź otrzymuje wyłącznie nowa wiadomość klienta, której nie było w poprzedniej synchronizacji i na którą sprzedawca jeszcze nie odpowiedział. Pierwsze uruchomienie tworzy bazę odniesienia i nie odpowiada na stare rozmowy.</p></div>
+        <div><h3 style="margin:0">⚙️ Ustawienia autorespondera</h3><p class="order-detail-lead">Harmonogram sprawdza komunikację co 15 minut. Odpowiedź otrzymuje wyłącznie nowa wiadomość klienta, której nie było w poprzedniej synchronizacji i na którą sprzedawca jeszcze nie odpowiedział.</p></div>
         <button class="btn" type="submit">💾 Zapisz ustawienia</button>
       </div>
       <div class="form-grid">
@@ -6021,14 +6035,6 @@ function allegroKomunikacjaPanelHTML(){
       </div>
       <div class="f-group"><label>Treść automatycznej pierwszej odpowiedzi <small style="font-weight:400;color:var(--muted2)">zmienne: {login}, {typ}</small></label><textarea name="template" rows="7" maxlength="2000">${esc(s.template||"")}</textarea></div>
     </form>
-    <div class="panel-subtle" style="margin-top:1rem">
-      <div class="order-section-head"><div><h3 style="margin:0">💬 Centrum wiadomości</h3><p class="order-detail-lead">Najpierw najnowsze wątki. Pełna odpowiedź ręczna nadal odbywa się w Allegro, tutaj monitorujemy i wysyłamy pierwsze potwierdzenie.</p></div></div>
-      <div class="ai-task-list">${st.threads.map(allegroWatekHTML).join("") || `<p style="color:var(--muted2)">Brak pobranych wątków. Kliknij „Synchronizuj”.</p>`}</div>
-    </div>
-    <div class="panel-subtle" style="margin-top:1rem">
-      <div class="order-section-head"><div><h3 style="margin:0">🛟 Dyskusje i reklamacje</h3><p class="order-detail-lead">Używane jest nowe API Allegro <code>/sale/issues</code>, a nie stare <code>/sale/disputes</code>.</p></div></div>
-      <div class="ai-task-list">${st.issues.map(allegroIssueHTML).join("") || `<p style="color:var(--muted2)">Brak pobranych dyskusji/reklamacji. Kliknij „Synchronizuj”.</p>`}</div>
-    </div>
   </div>`;
 }
 function adminSubnavHTML(items, aktywny){
@@ -6164,46 +6170,24 @@ function allegroUstawieniaPanelHTML(){
       ${allegroStan.requiresReauth?`<span style="color:#9a3412"><b>Brakujące zakresy:</b> ${esc((allegroStan.missingAuthorizedScopes||[]).join(", ")||"token wymaga ponownej autoryzacji")}. Kliknij „Połącz Allegro ponownie”.</span>`:""}
     </div>
     <div class="panel-subtle" style="margin-top:1rem">
-      <div class="order-section-head"><div><h3 style="margin:0">🔄 Synchronizacja danych</h3><p class="order-detail-lead">Zamówienia zachowują oficjalne statusy Allegro. Oferty są pobierane stronami po 1000, a pełny katalog może zawierać do 10 000 pozycji w jednym uruchomieniu.</p></div></div>
-      <div class="diag-actions"><button class="btn ghost" onclick="allegroSynchronizujZamowienia()">📦 Synchronizuj zamówienia</button><button class="btn ghost" onclick="allegroSynchronizujOferty()">🏷️ Synchronizuj oferty</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">💬 Synchronizuj komunikację</button><button class="btn ghost" onclick="window.open('https://salescenter.allegro.com/my-sales','_blank','noopener')">Otwórz Sales Center</button></div>
+      <div class="order-section-head"><div><h3 style="margin:0">🔄 Automatyczna synchronizacja danych</h3><p class="order-detail-lead">Synchronizacja działa na serwerze także wtedy, gdy panel jest zamknięty. Zamówienia i komunikacja są sprawdzane co 15 minut, a pełny katalog ofert co 6 godzin.</p></div><button class="btn" onclick="allegroSynchronizujWszystko()">Synchronizuj wszystko teraz</button></div>
+      <div class="allegro-schedule-grid"><span><b>📦 Zamówienia</b><small>automatycznie co 15 minut</small></span><span><b>💬 Wiadomości</b><small>automatycznie co 15 minut</small></span><span><b>🏷️ Oferty</b><small>automatycznie co 6 godzin</small></span></div>
+      <details class="allegro-manual-sync"><summary>Zaawansowane: uruchom tylko wybraną synchronizację</summary><div class="diag-actions"><button class="btn ghost" onclick="allegroSynchronizujZamowienia()">Zamówienia</button><button class="btn ghost" onclick="allegroSynchronizujOferty()">Oferty</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">Komunikacja</button><button class="btn ghost" onclick="window.open('https://salescenter.allegro.com/my-sales','_blank','noopener')">Otwórz Sales Center</button></div></details>
     </div>
   </div>`;
 }
 function widokAdminAllegro(sekcja="start"){
   allegroLadujJesliTrzeba();
-  if(sekcja==="komunikacja"&&!allegroKomunikacja?.updated_at&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
+  if(sekcja==="komunikacja"&&!allegroKomunikacja?.updated_at&&!allegroKomunikacja?.sprawdzono&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
   const mapped=Object.keys(allegroMapowania||{}).length;
   const niepodpiete=(allegroOferty||[]).filter(o=>!allegroProduktDlaOferty(o.id)).length;
   const aktywna=["zamowienia","oferty","wystawianie","komunikacja","ustawienia"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
   <div class="module-page-stack allegro-module-page">
   ${allegroSubnavHTML(aktywna)}
-  <div class="panel allegro-hero-panel ${aktywna==="start"?"":"is-compact"}">
-    <div class="orders-hero">
-      <div>
-        <span class="order-pro-label">Integracja marketplace</span>
-        <h1>🟠 Allegro API ${allegroStatusHTML()}</h1>
-        <p>${aktywna==="start"?"Oddzielna kolejka zamówień Allegro bez mapowania, osobna synchronizacja ofert oraz komunikacja z klientami. Sekrety API są wyłącznie po stronie Netlify.":`Połączenie ${allegroStan.connected?"aktywne":"wymaga uwagi"} • dane konta i status synchronizacji są wspólne dla wszystkich podstron Allegro.`}</p>
-      </div>
-      <div class="diag-actions">
-        ${["start","ustawienia"].includes(aktywna)?`<button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro</button>`:`<a class="btn ghost" href="#/admin/allegro/ustawienia">⚙️ Ustawienia</a>`}
-        <button class="btn ghost" onclick="allegroWczytajDane()">📥 Odśwież dane</button>
-        <button class="btn ghost" onclick="window.open('https://salescenter.allegro.com/my-sales','_blank','noopener')">Otwórz Sales Center</button>
-      </div>
-    </div>
-    ${allegroStan.error?`<div class="backend-note" style="margin-top:.8rem;border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Allegro:</b> ${esc(allegroStan.error)}</div>`:""}
-    ${aktywna==="start"?`<div class="orders-stat-grid">
-      <div class="order-stat-card ${allegroStan.configured?"":"hot"}"><span>🔧</span><b>${allegroStan.configured?"OK":"BRAK"}</b><small>konfiguracja API</small></div>
-      <div class="order-stat-card ${allegroStan.connected?"":"hot"}"><span>🔐</span><b>${allegroStan.connected?"TAK":"NIE"}</b><small>autoryzacja OAuth</small></div>
-      <div class="order-stat-card hot"><span>📦</span><b>${(allegroZamowienia||[]).length}</b><small>zamówień Allegro</small></div>
-      <div class="order-stat-card"><span>🏷️</span><b>${(allegroOferty||[]).length}</b><small>ofert Allegro</small></div>
-      <div class="order-stat-card ${allegroKomunikacjaStaty().totalNeed?"hot":""}"><span>💬</span><b>${allegroKomunikacjaStaty().totalNeed}</b><small>wiadomości do pierwszej odp.</small></div>
-      <div class="order-stat-card money"><span>🔗</span><b>${mapped}</b><small>podpiętych ofert</small></div>
-      <div class="order-stat-card ${niepodpiete?"hot":""}"><span>🧩</span><b>${niepodpiete}</b><small>ofert bez produktu</small></div>
-    </div>`:""}
-  </div>
-  ${allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete)}
   ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="komunikacja"?allegroKomunikacjaPanelHTML():aktywna==="ustawienia"?allegroUstawieniaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
+  ${allegroStan.error?`<div class="backend-note allegro-info-bottom" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Allegro:</b> ${esc(allegroStan.error)}</div>`:""}
+  ${allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete)}
   </div>
   `);
 }
@@ -6369,20 +6353,19 @@ function widokAdminZamowienia(){
 function widokAdminZamowieniaTabela(){
   return adminSzkielet("/admin/zamowienia", `
   ${adminZamowieniaSubnavHTML("tabela")}
+  ${magazynTabelaOperacyjnaHTML({limit:420})}
   <div class="panel orders-page">
     <div class="orders-hero">
       <div>
         <span class="order-pro-label">Tabela operacyjna</span>
         <h1>📑 Braki i zamówienia do producentów</h1>
-        <p>Profesjonalne tabele zakupowe według dostawców: kod, EAN, realny brak, ilość już zamówiona, pozostała ilość oraz dokumenty gotowe do wysłania na Telegram.</p>
+        <p>Pełna tabela operacyjna pozostaje w panelu. Wiadomość wysyłana do Telegrama zawiera wyłącznie: kod, nazwę produktu i potrzebną ilość.</p>
       </div>
       <div class="diag-actions">
         <a class="btn ghost" href="#/admin/zamowienia">← Lista zamówień</a>
-        <button class="btn ghost" onclick="synchronizujBazeCentralna(true)">🔄 Synchronizuj</button>
       </div>
     </div>
   </div>
-  ${magazynTabelaOperacyjnaHTML({limit:420})}
   `);
 }
 function widokAdminZamowienie(nr){

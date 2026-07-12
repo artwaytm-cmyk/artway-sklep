@@ -111,12 +111,9 @@ function telegramKomorka(v, width) {
 function telegramTabeleZlecenia(order = {}, tylkoDostawca = '') {
   const pozycje = (Array.isArray(order?.pozycje) ? order.pozycje : []).slice(0, 500).map((p) => ({
     kod: tekst(p?.kod || p?.produktId || '—', 80).trim(),
-    ean: tekst(p?.ean || '—', 80).trim(),
     nazwa: tekst(p?.nazwa || 'Produkt', 180).trim(),
     potrzeba: Math.max(0, Number(p?.iloscPotrzebna ?? p?.ilosc) || 0),
-    ilosc: Math.max(0, Number(p?.ilosc) || 0),
     dostawca: tekst(p?.dostawca || 'Bez przypisanego dostawcy', 120).trim() || 'Bez przypisanego dostawcy',
-    zamowienia: (Array.isArray(p?.zamowienia) ? p.zamowienia : []).slice(0, 8).map((x) => tekst(x, 80)),
   })).filter((p) => !tylkoDostawca || p.dostawca === tylkoDostawca);
   const grupy = new Map();
   for (const p of pozycje) { if (!grupy.has(p.dostawca)) grupy.set(p.dostawca, []); grupy.get(p.dostawca).push(p); }
@@ -125,15 +122,13 @@ function telegramTabeleZlecenia(order = {}, tylkoDostawca = '') {
     for (let offset = 0; offset < items.length; offset += 18) {
       const part = items.slice(offset, offset + 18);
       const tabela = [
-        `${telegramKomorka('KOD', 12)} ${telegramKomorka('EAN', 14)} ${telegramKomorka('NAZWA', 24)} ${telegramKomorka('POTRZ.', 7)} ${telegramKomorka('ZAM.', 5)} ${telegramKomorka('+', 4)}`,
-        `${'-'.repeat(12)} ${'-'.repeat(14)} ${'-'.repeat(24)} ${'-'.repeat(7)} ${'-'.repeat(5)} ${'-'.repeat(4)}`,
-        ...part.map((p) => `${telegramKomorka(p.kod, 12)} ${telegramKomorka(p.ean, 14)} ${telegramKomorka(p.nazwa, 24)} ${telegramKomorka(p.potrzeba, 7)} ${telegramKomorka(p.ilosc, 5)} ${telegramKomorka(Math.max(0, p.ilosc - p.potrzeba), 4)}`),
+        `${telegramKomorka('KOD', 15)} ${telegramKomorka('NAZWA', 30)} ${telegramKomorka('POTRZEBNA ILOŚĆ', 16)}`,
+        `${'-'.repeat(15)} ${'-'.repeat(30)} ${'-'.repeat(16)}`,
+        ...part.map((p) => `${telegramKomorka(p.kod, 15)} ${telegramKomorka(p.nazwa, 30)} ${telegramKomorka(p.potrzeba, 16)}`),
       ].join('\n');
-      const suma = part.reduce((s, p) => s + p.ilosc, 0);
-      const zamowienia = [...new Set(part.flatMap((p) => p.zamowienia))].slice(0, 12);
       wiadomosci.push({
         supplier: dostawca,
-        text: `<b>🧾 ${telegramHtml(order?.numer || order?.id || 'Zlecenie producenta')}</b>\n<b>Dostawca:</b> ${telegramHtml(dostawca)}\n<b>Status:</b> ${telegramHtml(order?.status || 'szkic')} • ${part.length} pozycji • ${suma} szt.${items.length > 18 ? ` • część ${Math.floor(offset / 18) + 1}/${Math.ceil(items.length / 18)}` : ''}\n\n<pre>${telegramHtml(tabela)}</pre>${zamowienia.length ? `\n<b>Powiązane zamówienia:</b> ${telegramHtml(zamowienia.join(', '))}` : ''}\n\nIlości można powiększyć w tabeli operacyjnej Artway-TM.`,
+        text: `<b>🧾 ${telegramHtml(order?.numer || order?.id || 'Zlecenie producenta')} — ${telegramHtml(dostawca)}</b>${items.length > 18 ? `\nCzęść ${Math.floor(offset / 18) + 1}/${Math.ceil(items.length / 18)}` : ''}\n\n<pre>${telegramHtml(tabela)}</pre>`,
       });
     }
   }
