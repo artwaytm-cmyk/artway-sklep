@@ -4406,7 +4406,11 @@ export default async (req) => {
           const response = await fetch(`${origin}/api/store?action=${encodeURIComponent(definition.action)}`, { method: 'POST', headers: { 'x-admin-token': adminToken, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ source: 'agent-safe-plan' }) });
           const text = await response.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
           if (!response.ok || data?.ok === false) throw new Error(tekst(data?.error || data?.message || `HTTP ${response.status}`, 500));
-          const count = Number(data?.processed ?? data?.synced ?? data?.sprawdzone ?? data?.results?.length ?? data?.orders?.length ?? data?.items?.length ?? 0) || 0;
+          const count = area === 'allegro-orders'
+            ? Number(data?.fetched ?? data?.agent?.reviewed ?? 0) || 0
+            : area === 'inpost'
+              ? Number(data?.sprawdzone ?? data?.zmienione ?? 0) || 0
+              : Number(data?.results?.length ?? data?.purchaseSync?.processedDocuments ?? data?.processed ?? 0) || 0;
           return { area, label: definition.label, status: 'completed', count, durationMs: Date.now() - started };
         } catch (error) {
           return { area, label: definition.label, status: 'error', error: tekst(error?.message || error, 500), durationMs: Date.now() - started };
