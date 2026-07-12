@@ -540,9 +540,58 @@ const INFAKT_ENVY = new Set(['production', 'sandbox']);
 function infaktKonfiguracja() {
   const env = INFAKT_ENVY.has(String(process.env.INFAKT_ENV || '').toLowerCase()) ? String(process.env.INFAKT_ENV).toLowerCase() : 'production';
   const apiKey = tekst(process.env.INFAKT_API_KEY || '', 500).trim();
-  return { apiKey, configured: !!apiKey, env, baseUrl: env === 'sandbox' ? 'https://api.sandbox-infakt.pl' : 'https://api.infakt.pl', paymentDays: Math.max(0, Math.min(365, Number(process.env.INFAKT_PAYMENT_DAYS || 7) || 7)), sendToKsefDefault: String(process.env.INFAKT_SEND_TO_KSEF || '').toLowerCase() === 'true' };
+  return { apiKey, configured: !!apiKey, env, baseUrl: env === 'sandbox' ? 'https://api.sandbox-infakt.pl' : 'https://api.infakt.pl', paymentDays: Math.max(0, Math.min(365, Number(process.env.INFAKT_PAYMENT_DAYS || 7) || 7)) };
 }
-function infaktPublicConfig() { const c = infaktKonfiguracja(); return { configured: c.configured, env: c.env, paymentDays: c.paymentDays, sendToKsefDefault: c.sendToKsefDefault, missingEnv: c.configured ? [] : ['INFAKT_API_KEY'] }; }
+function infaktPublicConfig() {
+  const c = infaktKonfiguracja();
+  return {
+    configured: c.configured,
+    env: c.env,
+    paymentDays: c.paymentDays,
+    missingEnv: c.configured ? [] : ['INFAKT_API_KEY'],
+    requiredScopes: ['api:costs:read', 'api:invoices:read', 'api:invoices:write'],
+    blockedOperations: ['costs:write', 'accounting', 'bank_accounts:write', 'ksef:integration:write'],
+    policy: 'supplier-costs-read-and-customer-invoices-create-only',
+  };
+}
+function infaktNazwaDostawcy(v = '') {
+  return tekst(v, 240).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function infaktDostawcyDozwoleni(raw = []) {
+  const out = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const name = tekst(item?.name || item?.sellerName || item, 200).trim();
+    const sellerName = tekst(item?.sellerName || item?.apiSellerName || name, 240).trim();
+    const match = infaktNazwaDostawcy(sellerName);
+    if (!name || !match || item?.active === false) continue;
+    if (!out.some((x) => x.match === match)) out.push({ id: tekst(item?.id || match, 120), name, sellerName, match });
+  }
+  return out.slice(0, 100);
+}
+async function infaktDostawcyUstawienia() {
+  const rec = await czytaj('infakt_supplier_access', { items: [], updated_at: null });
+  return { items: infaktDostawcyDozwoleni(rec?.items), updated_at: rec?.updated_at || null };
+}
+function infaktKosztDoZwrotu(koszt = {}, dostawca = null) {
+  return {
+    uuid: tekst(koszt.uuid, 200),
+    number: tekst(koszt.number, 160),
+    seller_name: tekst(koszt.seller_name, 240),
+    description: tekst(koszt.description, 600),
+    net_price: Number(koszt.net_price) || 0,
+    gross_price: Number(koszt.gross_price) || 0,
+    tax_price: Number(koszt.tax_price) || 0,
+    currency: tekst(koszt.currency || 'PLN', 12),
+    issue_date: tekst(koszt.issue_date, 30),
+    received_date: tekst(koszt.received_date, 30),
+    due_date: tekst(koszt.due_date, 30),
+    created_at: tekst(koszt.created_at, 80),
+    category: tekst(koszt.category, 160),
+    kind: tekst(koszt.kind, 80),
+    statuses: (Array.isArray(koszt.statuses) ? koszt.statuses : []).slice(0, 20).map((s) => ({ symbol: tekst(s?.symbol, 80), name: tekst(s?.name, 120), group: tekst(s?.group, 80) })),
+    supplier: dostawca ? { id: dostawca.id, name: dostawca.name } : null,
+  };
+}
 function infaktErrorText(data, fallback = 'Błąd inFakt') {
   const errors = data?.errors || data?.error || data?.message;
   if (typeof errors === 'string') return tekst(errors, 1000);
@@ -574,7 +623,8 @@ function infaktPayloadZamowienia(z = {}, options = {}) {
   const invoice = { status: options.status === 'paid' ? 'paid' : 'draft', currency: 'PLN', payment_method: infaktMetodaPlatnosci(z), invoice_date: invoiceDate, sale_date: infaktDataISO(z.ts || z.createdAt || invoiceDate), payment_date: due.toISOString().slice(0, 10), sale_type: 'merchandise', notes: tekst(`Zamówienie Artway-TM: ${z.nr}`, 500), client_business_activity_kind: company || nip ? 'other_business' : 'private_person', client_company_name: company || (nip ? fullName || 'Klient firmowy' : undefined), client_first_name: company ? undefined : (nameParts[0] || 'Klient'), client_last_name: company ? undefined : (nameParts.slice(1).join(' ') || 'Artway-TM'), client_tax_code: nip || undefined, client_street: tekst(address.ulica || client.ulica || '', 160) || undefined, client_street_number: tekst(address.nrDomu || client.nrDomu || '', 40) || undefined, client_flat_number: tekst(address.nrLokalu || client.nrLokalu || '', 40) || undefined, client_city: tekst(address.miasto || client.miasto || '', 120) || undefined, client_post_code: tekst(address.kod || address.kodPocztowy || client.kod || client.kodPocztowy || '', 30) || undefined, services: lines };
   if (invoice.status === 'paid') invoice.paid_date = invoiceDate;
   Object.keys(invoice).forEach((key) => invoice[key] === undefined && delete invoice[key]);
-  return { invoice, send_to_ksef: options.sendToKsef === true };
+  // Integracja sklepu ma celowo wąski zakres: wystawienie FV klienta, bez operacji KSeF.
+  return { invoice, send_to_ksef: false };
 }
 function infaktRef(data = {}) { return tekst(data.invoice_task_reference_number || data.task_reference_number || data.reference_number || '', 200).trim(); }
 function infaktInvoiceFromTask(data = {}) { return data.invoice || data.entity || data.result?.invoice || data.result || {}; }
@@ -4064,14 +4114,47 @@ export default async (req) => {
         catch (e) { connection = { ok: false, error: tekst(e.message, 700), code: e.code || 'infakt_error' }; }
       }
       const links = await czytaj('infakt_invoice_links', { items: {}, updated_at: null });
-      return odpowiedz({ ok: true, config, connection, links: links.items || {}, updated_at: links.updated_at || null });
+      const suppliers = await infaktDostawcyUstawienia();
+      return odpowiedz({ ok: true, config, connection, links: links.items || {}, suppliers, updated_at: links.updated_at || null });
+    }
+
+    if (action === 'infakt-supplier-access') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      if (req.method === 'GET') return odpowiedz({ ok: true, suppliers: await infaktDostawcyUstawienia() });
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const body = await req.json().catch(() => ({})), items = infaktDostawcyDozwoleni(body.items), updated_at = new Date().toISOString();
+      await zapisz('infakt_supplier_access', { items, updated_at });
+      return odpowiedz({ ok: true, suppliers: { items, updated_at } });
+    }
+
+    if (action === 'infakt-costs') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const suppliers = await infaktDostawcyUstawienia();
+      if (!suppliers.items.length) return odpowiedz({ ok: true, costs: [], suppliers, scanned: 0, message: 'Biała lista dostawców jest pusta — żaden dokument kosztowy nie został ujawniony.' });
+      const wanted = Math.max(1, Math.min(200, Number(url.searchParams.get('limit') || 100) || 100));
+      const collected = []; let scanned = 0;
+      for (let offset = 0; offset < 500 && collected.length < wanted; offset += 100) {
+        const data = await infaktWywolaj('/api/v3/documents/costs.json', { parameters: { limit: 100, offset, order: 'created_at desc' } });
+        const entities = Array.isArray(data?.entities) ? data.entities : [];
+        scanned += entities.length;
+        for (const koszt of entities) {
+          const seller = infaktNazwaDostawcy(koszt?.seller_name), match = suppliers.items.find((x) => seller === x.match);
+          if (seller && match) collected.push(infaktKosztDoZwrotu(koszt, match));
+          if (collected.length >= wanted) break;
+        }
+        if (entities.length < 100 || !data?.metainfo?.next) break;
+      }
+      return odpowiedz({ ok: true, costs: collected, suppliers, scanned, returned: collected.length });
     }
 
     if (action === 'infakt-invoices') {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const linksRec = await czytaj('infakt_invoice_links', { items: {} }), ownUuids = new Set(Object.values(linksRec?.items || {}).map((x) => tekst(x?.invoiceUuid, 200)).filter(Boolean));
+      if (!ownUuids.size) return odpowiedz({ ok: true, invoices: [], metainfo: { count: 0, total_count: 0 }, config: infaktPublicConfig() });
       const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 50) || 50)), offset = Math.max(0, Number(url.searchParams.get('offset') || 0) || 0);
-      const data = await infaktWywolaj('/api/v3/invoices.json', { parameters: { limit, offset, order: 'invoice_date desc', fields: 'id,uuid,number,status,invoice_date,sale_date,payment_date,paid_date,gross_price,left_to_pay,currency,client_company_name,client_first_name,client_last_name,client_tax_code,ksef_number,ksef_data' } });
-      return odpowiedz({ ok: true, invoices: Array.isArray(data.entities) ? data.entities : [], metainfo: data.metainfo || {}, config: infaktPublicConfig() });
+      const data = await infaktWywolaj('/api/v3/invoices.json', { parameters: { limit: 100, offset, order: 'invoice_date desc', fields: 'id,uuid,number,status,invoice_date,sale_date,payment_date,paid_date,gross_price,left_to_pay,currency,client_company_name,client_first_name,client_last_name,client_tax_code' } });
+      const invoices = (Array.isArray(data.entities) ? data.entities : []).filter((x) => ownUuids.has(tekst(x?.uuid, 200))).slice(0, limit);
+      return odpowiedz({ ok: true, invoices, metainfo: { count: invoices.length, total_count: ownUuids.size }, config: infaktPublicConfig() });
     }
 
     if (action === 'infakt-create-invoice') {
@@ -4084,7 +4167,7 @@ export default async (req) => {
       if (!order) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
       const links = linksRec.items && typeof linksRec.items === 'object' ? { ...linksRec.items } : {}, existing = links[orderNumber];
       if (existing && !['error', 'cancelled'].includes(String(existing.status || '').toLowerCase()) && body.force !== true) return odpowiedz({ ok: true, duplicatePrevented: true, link: existing, message: 'Faktura lub zadanie inFakt już istnieje dla tego zamówienia.' });
-      const payload = infaktPayloadZamowienia(order, { status: body.status, invoiceDate: body.invoiceDate, sendToKsef: body.sendToKsef === true });
+      const payload = infaktPayloadZamowienia(order, { status: 'draft', invoiceDate: body.invoiceDate, sendToKsef: false });
       const data = await infaktWywolaj('/api/v3/async/invoices.json', { method: 'POST', bodyObj: payload });
       const reference = infaktRef(data), now = new Date().toISOString();
       if (!reference) { const e = new Error('inFakt nie zwrócił numeru referencyjnego zadania'); e.code = 'infakt_missing_reference'; throw e; }
@@ -4117,22 +4200,6 @@ export default async (req) => {
       }
       await zapisz('infakt_invoice_links', { items: links, updated_at: new Date().toISOString() });
       return odpowiedz({ ok: true, links, results });
-    }
-
-    if (action === 'infakt-mark-paid') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), uuid = tekst(body.uuid, 200).trim(), paidDate = infaktDataISO(body.paidDate);
-      if (!uuid) return odpowiedz({ ok: false, error: 'Brak UUID faktury', code: 'validation' }, 422);
-      const data = await infaktWywolaj(`/api/v3/async/invoices/${encodeURIComponent(uuid)}/paid.json`, { method: 'POST', parameters: { paid_date: paidDate }, bodyObj: { paid_date: paidDate } });
-      return odpowiedz({ ok: true, task: data, paidDate });
-    }
-
-    if (action === 'infakt-invoice-pdf') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const uuid = tekst(url.searchParams.get('uuid'), 200).trim(); if (!uuid) return odpowiedz({ ok: false, error: 'Brak UUID faktury', code: 'validation' }, 422);
-      const response = await infaktWywolaj(`/api/v3/invoices/${encodeURIComponent(uuid)}/pdf.json`, { parameters: { document_type: 'regular', locale: 'pl' }, raw: true });
-      return new Response(await response.arrayBuffer(), { status: 200, headers: { 'content-type': response.headers.get('content-type') || 'application/pdf', 'content-disposition': `inline; filename="faktura-${uuid}.pdf"`, 'cache-control': 'no-store' } });
     }
 
     // ─── E-MAIL: konfiguracja bez sekretów ───

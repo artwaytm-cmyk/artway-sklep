@@ -959,3 +959,4 @@ footer{background:#151a24;color:#c6ccd8;margin-top:1rem}
 .profit-recommendation-channel.allegro{border-color:#fed7aa;background:#fff7ed}
 .profitability-channel-table{min-width:1250px}
 @media(max-width:720px){.profit-channel-summary,.profit-channel-grid{grid-template-columns:1fr}.profitability-channel-table{min-width:1080px}}
+.infakt-supplier-access{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.7rem;margin-top:.8rem}.infakt-supplier-access .info-card{display:grid;gap:.55rem;cursor:pointer}.infakt-supplier-access input[type="text"]{width:100%}
