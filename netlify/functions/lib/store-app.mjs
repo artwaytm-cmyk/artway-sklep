@@ -175,7 +175,7 @@ function agentPriorytetWykonawczy(priority = {}) {
   const definitions = {
     orders_start: { actionId: 'orders_start', execution: 'approval', requiresApproval: true, deadlineMinutes: 30, owner: 'obsługa zamówień', doneWhen: 'Każde nowe zamówienie ma rozpoczętą obsługę i sprawdzoną dostępność.' },
     allegro_reply: { actionId: 'allegro_reply', execution: 'approval', requiresApproval: true, deadlineMinutes: 60, owner: 'obsługa klienta', doneWhen: 'Klient otrzymał zatwierdzoną odpowiedź albo sprawa została zamknięta wewnętrznie.' },
-    supplier_availability: { actionId: 'supplier_availability', execution: 'safe_check', requiresApproval: false, deadlineMinutes: 120, owner: 'Agent AI', doneWhen: 'Dostępność producenta została ponownie sprawdzona, a aktywne zamówienia mają decyzję.' },
+    supplier_availability: { actionId: 'supplier_availability', execution: 'approval', requiresApproval: true, deadlineMinutes: 120, owner: 'administrator / Agent AI', doneWhen: 'Każdy brak ma decyzję: termin dalszej sprzedaży, ukrycie albo automatyczne wznowienie.' },
     inpost_prepare: { actionId: 'inpost_prepare', execution: 'approval', requiresApproval: true, deadlineMinutes: 120, owner: 'centrum wysyłek', doneWhen: 'Przesyłka ma etykietę, numer nadania i zapisany status InPost.' },
     allegro_warehouse: { actionId: 'allegro_warehouse', execution: 'draft', requiresApproval: false, deadlineMinutes: 60, owner: 'Agent AI', doneWhen: 'Pozycje zlecenia są sprawdzone, a realne braki dopisane do szkicu producenta.' },
     allegro_offer_fix: { actionId: 'allegro_offer_fix', execution: 'approval', requiresApproval: true, deadlineMinutes: 240, owner: 'katalog Allegro', doneWhen: 'Oferta ma komplet danych i ostatnia operacja API zakończyła się sukcesem.' },
@@ -189,7 +189,7 @@ function agentPriorytetWykonawczy(priority = {}) {
   if (area === 'system') key = 'site_function_check';
   else if (area === 'synchronizacja') key = 'data_sync';
   else if (title.includes('wiadomości') || title.includes('dyskusje')) key = 'allegro_reply';
-  else if (title.includes('niedostępne u producenta') || title.includes('niski stan')) key = 'supplier_availability';
+  else if (title.includes('niedostępne u producenta') || title.includes('niski stan') || title.includes('dostępność producent')) key = 'supplier_availability';
   else if (area === 'wysylki') key = 'inpost_prepare';
   else if (title.includes('zamówienia allegro')) key = 'allegro_warehouse';
   else if (title.includes('oferty allegro') || title.includes('operacja oferty')) key = 'allegro_offer_fix';
@@ -213,7 +213,8 @@ async function agentCentrumOperacyjne() {
   for (const p of Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []) addProduct(p);
   for (const p of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) addProduct(p);
   for (const [id, p] of Object.entries(data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? data.artway_produkty_edytowane : {})) addProduct({ ...(p || {}), id });
-  const products = [...productMap.values()], supplierUnavailable = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'brak'), supplierLow = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'niski');
+  const products = [...productMap.values()], supplierUnavailable = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'brak'), supplierLow = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'niski'), availabilityDecisions = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};
+  const supplierNeedsDecision = [...supplierUnavailable, ...supplierLow].filter((p) => { const d = availabilityDecisions[String(p.id)] || {}, code = String(d.decision || d.decyzja || ''), expires = Date.parse(d.expiresAt || d.waznaDo || ''); return !code || (code === 'grace' && Number.isFinite(expires) && expires <= Date.now()); });
   const producerLinks = (Array.isArray(data.artway_agent_ai_linki_producentow) ? data.artway_agent_ai_linki_producentow : []).filter((x) => !['pobrano', 'zamkniete', 'zamknięte', 'usunieto', 'usunięto'].includes(String(x?.status || '').toLowerCase()));
   const offerTasks = (Array.isArray(data.artway_agent_ai_allegro_zadania) ? data.artway_agent_ai_allegro_zadania : []).filter((x) => !['zrealizowane', 'zamkniete', 'zamknięte', 'anulowane'].includes(String(x?.status || '').toLowerCase()));
   const supplierOrders = (Array.isArray(data.artway_agent_ai_zlecenia) ? data.artway_agent_ai_zlecenia : []).filter((x) => !['zrealizowane', 'anulowane', 'wysłane do producenta', 'wysłane do dostawcy'].includes(String(x?.status || '').toLowerCase()));
@@ -229,7 +230,7 @@ async function agentCentrumOperacyjne() {
   addPriority('critical', 'synchronizacja', staleSources.length, 'Dane operacyjne są nieaktualne', '#/admin/agent-ai/plan', `Uruchom bezpieczne odświeżenie: ${staleSources.join(' • ')}.`);
   addPriority('critical', 'zamowienia', newOrders.length, 'Nowe zamówienia czekają na rozpoczęcie obsługi', '#/admin/zamowienia', 'Otwórz zamówienia i rozpocznij realizację.');
   addPriority('critical', 'allegro', communicationWaiting.length, 'Nowe wiadomości lub dyskusje Allegro wymagają odpowiedzi', '#/admin/allegro/wiadomosci', 'Przygotuj odpowiedź i oznacz sprawę wewnętrznie po zakończeniu.');
-  addPriority('critical', 'producent', supplierUnavailable.length, 'Produkty priorytetowe niedostępne u producenta', '#/admin/magazyn/dostawcy', 'Sprawdź aktywne zamówienia i alternatywne źródło dostawy.');
+  addPriority('critical', 'producent', supplierNeedsDecision.length, 'Dostępność producentów wymaga decyzji sprzedażowej', '#/admin/magazyn/dostawcy', 'Wybierz: pozostaw 1–7 dni, ukryj, wznów po powrocie albo pozostaw ręcznie aktywny.');
   addPriority('warning', 'wysylki', shipmentsWithoutTracking.length, 'Aktywne zamówienia bez numeru nadania', '#/admin/wysylki', 'Uzupełnij dane InPost i wygeneruj etykiety.');
   addPriority('warning', 'allegro', activeAllegro.length, 'Aktywne zamówienia Allegro do kontroli magazynowej', '#/admin/allegro/zamowienia', 'Sprawdź kompletację, braki i lokalizacje produktów.');
   addPriority('warning', 'producent', supplierLow.length, 'Niski stan produktów u producentów', '#/admin/magazyn/dostawcy', 'Kontroluj najpierw najlepiej sprzedające się produkty.');
@@ -245,7 +246,7 @@ async function agentCentrumOperacyjne() {
   const score = Math.max(0, Math.min(100, 100 - critical * 14 - warnings * 5));
   return {
     ok: true, generatedAt: new Date().toISOString(), score, priorities,
-    summary: { orders: orders.length, activeOrders: activeOrders.length, newOrders: newOrders.length, shipmentsWithoutTracking: shipmentsWithoutTracking.length, allegroOrders: allegroOrders.length, activeAllegro: activeAllegro.length, communicationWaiting: communicationWaiting.length, supplierUnavailable: supplierUnavailable.length, supplierLow: supplierLow.length, producerLinks: producerLinks.length, offerTasks: offerTasks.length, supplierOrders: supplierOrders.length, companyOrdersWithoutInvoice: companyOrdersWithoutInvoice.length },
+    summary: { orders: orders.length, activeOrders: activeOrders.length, newOrders: newOrders.length, shipmentsWithoutTracking: shipmentsWithoutTracking.length, allegroOrders: allegroOrders.length, activeAllegro: activeAllegro.length, communicationWaiting: communicationWaiting.length, supplierUnavailable: supplierUnavailable.length, supplierLow: supplierLow.length, supplierNeedsDecision: supplierNeedsDecision.length, producerLinks: producerLinks.length, offerTasks: offerTasks.length, supplierOrders: supplierOrders.length, companyOrdersWithoutInvoice: companyOrdersWithoutInvoice.length },
     integrations, freshness,
     links: { agent: 'https://artwaytm.pl/#/admin/agent-ai', orders: 'https://artwaytm.pl/#/admin/zamowienia', warehouse: 'https://artwaytm.pl/#/admin/magazyn/stany', allegro: 'https://artwaytm.pl/#/admin/allegro', shipping: 'https://artwaytm.pl/#/admin/wysylki', invoices: 'https://artwaytm.pl/#/admin/infakt' },
   };
@@ -254,7 +255,7 @@ function agentRaportTelegramHTML(center = {}) {
   const s = center.summary || {}, items = (Array.isArray(center.priorities) ? center.priorities : []).slice(0, 8);
   const icons = { critical: '🔴', warning: '🟡', info: '🔵' };
   const rows = items.length ? items.map((x, i) => `${i + 1}. ${icons[x.severity] || '•'} <b>${telegramHtml(x.title)}</b> — ${x.count}\n   ${x.execution === 'approval' ? '🔐 decyzja administratora' : x.execution === 'draft' ? '📝 agent przygotuje szkic' : '⚙️ agent może sprawdzić'} • termin ${x.deadlineMinutes || 240} min\n   ${telegramHtml(x.action || '')}\n   Gotowe, gdy: ${telegramHtml(x.doneWhen || 'temat zostanie zweryfikowany')}`).join('\n') : '✅ Brak aktywnych tematów wymagających reakcji.';
-  return `<b>🤖 Centrum operacyjne Artway-TM — ${center.score ?? 0}%</b>\n${telegramHtml(new Date(center.generatedAt || Date.now()).toLocaleString('pl-PL'))}\n\n<b>Sprzedaż i obsługa</b>\nSklep: ${s.newOrders || 0} nowych / ${s.activeOrders || 0} aktywnych\nAllegro: ${s.activeAllegro || 0} aktywnych • ${s.communicationWaiting || 0} spraw do odpowiedzi\nWysyłki bez numeru: ${s.shipmentsWithoutTracking || 0}\nFaktury: ${s.companyOrdersWithoutInvoice || 0} firmowych bez dokumentu\nProducent: ${s.supplierUnavailable || 0} braków • ${s.supplierLow || 0} niskich stanów\n\n<b>Najważniejsze działania</b>\n${rows}\n\n<i>Agent nie wysyła odpowiedzi klientom ani zamówień producentom bez zatwierdzenia administratora.</i>`;
+  return `<b>🤖 Centrum operacyjne Artway-TM — ${center.score ?? 0}%</b>\n${telegramHtml(new Date(center.generatedAt || Date.now()).toLocaleString('pl-PL'))}\n\n<b>Sprzedaż i obsługa</b>\nSklep: ${s.newOrders || 0} nowych / ${s.activeOrders || 0} aktywnych\nAllegro: ${s.activeAllegro || 0} aktywnych • ${s.communicationWaiting || 0} spraw do odpowiedzi\nWysyłki bez numeru: ${s.shipmentsWithoutTracking || 0}\nFaktury: ${s.companyOrdersWithoutInvoice || 0} firmowych bez dokumentu\nProducent: ${s.supplierUnavailable || 0} braków • ${s.supplierLow || 0} niskich stanów • ${s.supplierNeedsDecision || 0} decyzji\n\n<b>Najważniejsze działania</b>\n${rows}\n\n<i>Agent nie wysyła odpowiedzi klientom ani zamówień producentom bez zatwierdzenia administratora.</i>`;
 }
 function numerZamowienia(v) {
   return tekst(v, 80).trim();
@@ -2880,16 +2881,23 @@ async function synchronizujSprzedazZDostepnosciaProducenta(req, results = [], da
     const available = !unavailable && (result.available === true || Number(result.quantity) > 0 || ['dostepny', 'dostepny_nieznany', 'niski'].includes(String(result.status || '')));
     if (!unavailable && !available) { report.unchanged++; continue; }
     const previousAvailability = availability[productId];
+    const decisionCode = String(previousAvailability?.decision || previousAvailability?.decyzja || '').toLowerCase();
+    const decisionExpiry = Date.parse(previousAvailability?.expiresAt || previousAvailability?.waznaDo || '');
+    const graceActive = decisionCode === 'grace' && Number.isFinite(decisionExpiry) && decisionExpiry > Date.now();
+    const keepSelling = graceActive || decisionCode === 'manual_available';
+    const keepHidden = decisionCode === 'hide_manual';
+    if (unavailable && keepSelling) { report.unchanged++; continue; }
+    if (available && keepHidden) { report.unchanged++; continue; }
     const automaticAvailability = previousAvailability?.automatic === true || previousAvailability?.source === 'producent-agent';
     const legacyTemporaryAvailability = !!previousAvailability && !previousAvailability?.source
       && /chwilowo niedost[eę]pn|brak u producent/i.test(String(previousAvailability?.powod || ''));
     if (unavailable) {
-      if (!previousAvailability || automaticAvailability || legacyTemporaryAvailability) {
-        availability[productId] = { status: 'niedostepny', powod: 'Automatycznie: produkt niedostępny u producenta', data: now, operator: 'agent-dostepnosci', source: 'producent-agent', automatic: true, producerStatus: result.status, producerCheckedAt: result.checkedAt || now };
-        if (!previousAvailability) report.siteHidden++;
+      if (!previousAvailability || automaticAvailability || legacyTemporaryAvailability || decisionCode === 'grace') {
+        availability[productId] = { ...(previousAvailability || {}), status: 'niedostepny', powod: decisionCode === 'grace' ? 'Minął termin pozostawienia sprzedaży — producent nadal zgłasza brak' : 'Automatycznie: produkt niedostępny u producenta', data: now, operator: 'agent-dostepnosci', source: decisionCode === 'grace' ? 'supplier-decision' : 'producent-agent', automatic: true, autoRestore: true, producerStatus: result.status, producerCheckedAt: result.checkedAt || now };
+        if (!previousAvailability || String(previousAvailability.status || '') !== 'niedostepny') report.siteHidden++;
       }
-    } else if (automaticAvailability) {
-      delete availability[productId];
+    } else if (automaticAvailability || ['grace', 'wait_available', 'manual_available'].includes(decisionCode)) {
+      if (result.preserveDecision !== true) delete availability[productId];
       report.siteRestored++;
     }
     for (const offerId of offerIdsByProduct.get(productId) || []) {
@@ -5483,6 +5491,31 @@ export default async (req) => {
       const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, [{ ok: true, productId, status: available ? 'dostepny' : 'brak', available, quantity: available ? 1 : 0, checkedAt: now }], data);
       await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
       return odpowiedz({ ok: true, productId, available, saleAutomation, updated_at: now });
+    }
+
+    // ─── PRODUKT: decyzja administratora po kontroli producenta ───
+    if (action === 'product-sale-decision') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({})), productId = tekst(body.productId, 100).trim(), decision = tekst(body.decision || 'auto', 40).toLowerCase();
+      const allowed = new Set(['auto', 'grace', 'wait_available', 'hide_manual', 'manual_available']);
+      if (!productId || !allowed.has(decision)) return odpowiedz({ ok: false, error: 'Nieprawidłowa decyzja dostępności', code: 'validation' }, 422);
+      const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null }), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? { ...data.artway_dostepnosc } : {};
+      const now = new Date(), nowIso = now.toISOString(), previous = availability[productId] && typeof availability[productId] === 'object' ? availability[productId] : {}, days = Math.max(1, Math.min(30, Number(body.days) || 1)), producerStatus = tekst(body.producerStatus || '', 40).toLowerCase(), producerUnavailable = producerStatus === 'brak', history = [{ at: nowIso, decision, days: decision === 'grace' ? days : 0, operator: 'administrator' }, ...(Array.isArray(previous.history) ? previous.history : [])].slice(0, 20);
+      const base = { data: nowIso, operator: 'administrator', source: 'supplier-decision', automatic: false, producerStatus, history };
+      if (decision === 'grace') availability[productId] = { ...base, status: 'dostepny', decision, expiresAt: new Date(now.getTime() + days * 86400000).toISOString(), autoRestore: true, powod: `Decyzja administratora: pozostaw sprzedaż przez ${days} dni` };
+      else if (decision === 'wait_available') availability[productId] = { ...base, status: 'niedostepny', decision, autoRestore: true, powod: 'Ukryty do ponownej dostępności u producenta' };
+      else if (decision === 'hide_manual') availability[productId] = { ...base, status: 'niedostepny', decision, autoRestore: false, powod: 'Ręcznie ukryty bez automatycznego wznowienia' };
+      else if (decision === 'manual_available') availability[productId] = { ...base, status: 'dostepny', decision, autoRestore: false, powod: 'Ręcznie pozostawiony w sprzedaży mimo sygnału producenta' };
+      else if (producerUnavailable) availability[productId] = { ...base, status: 'niedostepny', decision: 'auto', source: 'producent-agent', automatic: true, autoRestore: true, powod: 'Automatycznie: produkt niedostępny u producenta' };
+      else delete availability[productId];
+      data.artway_dostepnosc = availability;
+      const available = decision === 'grace' || decision === 'manual_available' || (decision === 'auto' && !producerUnavailable);
+      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, [{ ok: true, productId, status: available ? 'dostepny' : 'brak', available, quantity: available ? Math.max(1, Number(body.producerQuantity) || 1) : 0, checkedAt: nowIso, preserveDecision: true }], data);
+      const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
+      agentHistory.unshift({ id: `AI-DEC-${Date.now().toString(36)}`, typ: 'decyzja-producenta', opis: `Decyzja sprzedażowa produktu ${productId}: ${decision}${decision === 'grace' ? ` (${days} dni)` : ''}`, data: nowIso, dataTxt: now.toLocaleString('pl-PL'), operator: 'administrator', dane: { productId, decision, days, producerStatus, saleAutomation } }); data.artway_agent_ai_historia = agentHistory.slice(0, 500);
+      await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: nowIso });
+      return odpowiedz({ ok: true, productId, decision, days, available, expiresAt: availability[productId]?.expiresAt || null, saleAutomation, updated_at: nowIso });
     }
 
     // ─── PRODUCENT: wyrywkowy monitoring stanów przez Agenta AI ───
