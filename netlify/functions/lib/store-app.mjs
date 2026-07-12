@@ -2109,10 +2109,13 @@ function allegroMaKategorie(product = {}, opt = {}) {
 }
 async function allegroZnajdzProduktKatalogu(req, product = {}) {
   const gtin = tekst(product.gtin || product.ean || '', 80).trim();
-  const phrase = gtin || tekst(product.nazwa || product.name || '', 180).trim();
+  const mpn = tekst(product.kodProducenta || product.mpn || '', 160).trim();
+  const name = tekst(product.nazwa || product.name || '', 180).trim();
+  const phrase = gtin || mpn || name;
   if (!phrase) return { selected: null, products: [], searchedBy: '' };
   try {
-    const parameters = gtin ? { phrase: gtin, mode: 'GTIN', language: 'pl-PL' } : { phrase, language: 'pl-PL' };
+    const searchedBy = gtin ? 'GTIN' : (mpn ? 'MPN' : 'name');
+    const parameters = searchedBy === 'name' ? { phrase, language: 'pl-PL' } : { phrase, mode: searchedBy, language: 'pl-PL' };
     const raw = await allegroWywolaj(req, '/sale/products', { parameters });
     const source = Array.isArray(raw.products) ? raw.products : (Array.isArray(raw.items) ? raw.items : []);
     const products = source.map((p) => ({
@@ -2122,11 +2125,16 @@ async function allegroZnajdzProduktKatalogu(req, product = {}) {
       eans: Array.isArray(p.eans) ? p.eans.map((x) => tekst(x, 80)) : [],
       images: allegroZdjecia(p),
       parameters: Array.isArray(p.parameters) ? p.parameters.slice(0, 120) : [],
+      matchScore: Number(allegroPodobienstwoNazw(name, p.name).toFixed(3)),
     })).filter((p) => p.id);
-    const selected = gtin ? (products.find((p) => p.eans.includes(gtin)) || products[0] || null) : (products[0] || null);
-    return { selected, products: products.slice(0, 10), searchedBy: gtin ? 'GTIN' : 'name' };
+    const selected = searchedBy === 'GTIN'
+      ? (products.find((p) => p.eans.includes(gtin)) || products[0] || null)
+      : searchedBy === 'MPN'
+        ? (products[0] || null)
+        : (products.find((p) => p.matchScore >= 0.82) || null);
+    return { selected, products: products.slice(0, 10), searchedBy };
   } catch (e) {
-    return { selected: null, products: [], searchedBy: gtin ? 'GTIN' : 'name', error: { status: e.status || 0, code: e.code || '', message: e.message || String(e) } };
+    return { selected: null, products: [], searchedBy: gtin ? 'GTIN' : (mpn ? 'MPN' : 'name'), error: { status: e.status || 0, code: e.code || '', message: e.message || String(e) } };
   }
 }
 function allegroBrakujaceParametryWymagane(product = {}, categoryParameters = []) {
@@ -2208,6 +2216,9 @@ function allegroParametryAutomatyczne(product = {}, categoryParameters = []) {
   const gtin = tekst(p.gtin || p.ean, 80).trim();
   const kod = tekst(p.kodProducenta || p.mpn || p.externalId || p.sku, 160).trim();
   const marka = tekst(p.producent || p.marka || '', 160).trim();
+  const material = tekst(p.material || '', 160).trim();
+  const kolor = tekst(p.kolorProduktu || p.color || '', 160).trim();
+  const rozmiar = tekst(p.rozmiar || p.size || '', 160).trim();
   for (const param of Array.isArray(categoryParameters) ? categoryParameters : []) {
     const n = allegroParamNazwa(param);
     if (/\bean\b|gtin|kod kreskowy/.test(n) && gtin) allegroDodajParam(out, param, gtin);
@@ -2218,6 +2229,19 @@ function allegroParametryAutomatyczne(product = {}, categoryParameters = []) {
     } else if (/^stan$|stan produktu|condition/.test(n)) {
       const nowy = allegroSlownikValueId(param, /nowy|new/i);
       allegroDodajParam(out, param, nowy || 'Nowy', !!nowy);
+    } else if (/materiał|material/.test(n) && material) {
+      const dict = allegroSlownikValueId(param, new RegExp(`^${material.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
+      allegroDodajParam(out, param, dict || material, !!dict);
+    } else if (/kolor|color/.test(n) && kolor) {
+      const dict = allegroSlownikValueId(param, new RegExp(`^${kolor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
+      allegroDodajParam(out, param, dict || kolor, !!dict);
+    } else if (/rozmiar|size/.test(n) && rozmiar) {
+      const dict = allegroSlownikValueId(param, new RegExp(`^${rozmiar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
+      allegroDodajParam(out, param, dict || rozmiar, !!dict);
+    } else if (param?.required === true && Array.isArray(param.dictionary) && param.dictionary.length === 1) {
+      const only = param.dictionary[0];
+      const value = tekst(only?.id || only?.valueId || only?.value || '', 120).trim();
+      allegroDodajParam(out, param, value, !!(only?.id || only?.valueId));
     }
   }
   const seen = new Set();
@@ -2255,14 +2279,27 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   options.salesConditions = salesConditions;
   options.categoryParameters = categoryParameters.parameters;
   if (catalogMatch?.selected?.id) options.catalogProductId = catalogMatch.selected.id;
-  const catalogProducer = allegroWartoscParametru(catalogMatch?.selected || {}, ['producent', 'marka', 'brand']);
+  const catalog = catalogMatch?.selected || {};
+  const safeOffer = existingOffer?.offer || {};
+  const catalogProducer = allegroWartoscParametru(catalog, ['producent', 'marka', 'brand']) || tekst(safeOffer.brand || '', 160).trim();
+  const catalogCode = allegroWartoscParametru(catalog, ['kod producenta', 'mpn', 'symbol producenta']) || tekst(safeOffer.manufacturerCode || safeOffer.producerCode || '', 160).trim();
+  const catalogGtin = tekst((catalog.eans || [])[0] || safeOffer.ean || safeOffer.gtin || '', 80).trim();
+  const sourceImages = [...new Set([
+    ...(Array.isArray(catalog.images) ? catalog.images : []),
+    safeOffer.mainImage,
+    ...(Array.isArray(safeOffer.images) ? safeOffer.images : []),
+  ].map((x) => tekst(x, 1000).trim()).filter(Boolean))].slice(0, 16);
   const preparedProduct = {
     ...product,
-    ...(product.producent || product.marka || !catalogProducer ? {} : { producent: catalogProducer }),
+    ...(product.producent || product.marka || !catalogProducer ? {} : { producent: catalogProducer, marka: catalogProducer }),
+    ...(product.gtin || product.ean || !catalogGtin ? {} : { gtin: catalogGtin, ean: catalogGtin }),
+    ...(product.kodProducenta || product.mpn || !catalogCode ? {} : { kodProducenta: catalogCode, mpn: catalogCode }),
+    ...(product.zdjecie || !sourceImages.length ? {} : { zdjecie: sourceImages[0], zdjecia: sourceImages.slice(1, 16) }),
   };
-  const requiredParameters = options.catalogProductId ? [] : allegroBrakujaceParametryWymagane(product, categoryParameters.parameters);
+  const requiredParameters = options.catalogProductId ? [] : allegroBrakujaceParametryWymagane(preparedProduct, categoryParameters.parameters);
   options.requiredParameters = requiredParameters;
   const draft = allegroDraftZProduktu(preparedProduct, options);
+  const autoParameters = allegroParametryAutomatyczne(preparedProduct, categoryParameters.parameters);
   return {
     ...draft,
     categorySuggestion,
@@ -2277,7 +2314,19 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
       shortDescription: options.shortDescription,
       sections: options.descriptionSections,
     },
-    autoFilled: { producent: preparedProduct.producent || preparedProduct.marka || '', allegroProductId: options.catalogProductId || '', allegroCategoryId: effectiveCategoryId || '' },
+    autoFilled: {
+      producent: preparedProduct.producent || preparedProduct.marka || '',
+      marka: preparedProduct.marka || preparedProduct.producent || '',
+      gtin: preparedProduct.gtin || preparedProduct.ean || '',
+      ean: preparedProduct.ean || preparedProduct.gtin || '',
+      kodProducenta: preparedProduct.kodProducenta || preparedProduct.mpn || '',
+      mpn: preparedProduct.mpn || preparedProduct.kodProducenta || '',
+      zdjecie: preparedProduct.zdjecie || '',
+      zdjecia: Array.isArray(preparedProduct.zdjecia) ? preparedProduct.zdjecia.slice(0, 15) : [],
+      allegroParameters: autoParameters,
+      allegroProductId: options.catalogProductId || '',
+      allegroCategoryId: effectiveCategoryId || '',
+    },
   };
 }
 function allegroDraftZProduktu(product = {}, opt = {}) {
@@ -2309,6 +2358,7 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
           parameters: [...parameters.filter((x) => x.id), ...productParameters],
           images,
         };
+  const stockRaw = Number(opt.stock ?? p.stan ?? 0);
   const payload = {
     name: tekst(p.nazwa || p.name, 75).trim(),
     productSet: [{
@@ -2319,7 +2369,7 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
       format: 'BUY_NOW',
       price: { amount: String(Number(p.cena || p.price || 0).toFixed(2)), currency: 'PLN' },
     },
-    stock: { available: Math.max(0, Number(opt.stock ?? p.stan ?? 1) || 1) },
+    stock: { available: Number.isFinite(stockRaw) ? Math.max(0, Math.floor(stockRaw)) : 0 },
     publication: { status: opt.publishNow ? 'ACTIVE' : 'INACTIVE' },
     external: externalId ? { id: externalId } : undefined,
     images: images.map((url) => tekst(url, 1000)),
@@ -2366,13 +2416,22 @@ async function allegroZapiszZadanieAgentaOferty(product = {}, details = {}) {
   const index = tasks.findIndex((x) => String(x.productId) === productId && !['wykonane', 'anulowane'].includes(String(x.status || '').toLowerCase()));
   const previous = index >= 0 ? tasks[index] : {};
   const link = allegroDanePowiazaniaZPrzygotowania(product, details.prepared || {}, details.draft || {});
+  const auto = details.prepared?.autoFilled || {};
   const task = {
     ...previous,
     id: previous.id || `AA-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     typ: 'allegro-oferta', status: errors.length ? 'błąd API' : 'oczekuje', productId,
     productName: tekst(product.nazwa || product.name || `Produkt ${productId}`, 300),
     producent: link.producent, missing, errors,
-    suggestions: { allegroCategoryId: link.categoryId, allegroProductId: link.catalogProductId, producent: link.producent },
+    suggestions: {
+      allegroCategoryId: auto.allegroCategoryId || link.categoryId,
+      allegroProductId: auto.allegroProductId || link.catalogProductId,
+      producent: auto.producent || link.producent,
+      marka: auto.marka || '', gtin: auto.gtin || auto.ean || '', ean: auto.ean || auto.gtin || '',
+      kodProducenta: auto.kodProducenta || auto.mpn || '', mpn: auto.mpn || auto.kodProducenta || '',
+      zdjecie: auto.zdjecie || '', zdjecia: Array.isArray(auto.zdjecia) ? auto.zdjecia.slice(0, 15) : [],
+      allegroParameters: Array.isArray(auto.allegroParameters) ? auto.allegroParameters : [],
+    },
     sourceUrl: tekst(product.sourceUrl || product.producentUrl || '', 800),
     attempts: (Number(previous.attempts) || 0) + 1, createdAt: previous.createdAt || now, updatedAt: now,
   };
@@ -2391,8 +2450,17 @@ async function allegroZapiszPowiazanieProduktu(product = {}, details = {}) {
   const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
   const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
   const link = allegroDanePowiazaniaZPrzygotowania(product, details.prepared || {}, details.draft || {});
+  const auto = details.prepared?.autoFilled || {};
+  const previousEdit = edits[productId] || {};
+  const autoPatch = {};
+  for (const key of ['producent', 'marka', 'gtin', 'ean', 'kodProducenta', 'mpn', 'zdjecie']) {
+    const value = auto[key];
+    if (value && !product[key] && !previousEdit[key]) autoPatch[key] = value;
+  }
+  if (Array.isArray(auto.zdjecia) && auto.zdjecia.length && !(product.zdjecia || []).length && !(previousEdit.zdjecia || []).length) autoPatch.zdjecia = auto.zdjecia.slice(0, 15);
+  if (Array.isArray(auto.allegroParameters) && auto.allegroParameters.length && !Array.isArray(product.allegroParameters) && !Array.isArray(previousEdit.allegroParameters)) autoPatch.allegroParameters = auto.allegroParameters;
   edits[productId] = {
-    ...(edits[productId] || {}), allegroOfferId: offerId,
+    ...previousEdit, ...autoPatch, allegroOfferId: offerId,
     ...(link.catalogProductId ? { allegroProductId: link.catalogProductId } : {}),
     ...(link.categoryId ? { allegroCategoryId: link.categoryId } : {}),
     ...(link.producent ? { producent: link.producent } : {}),

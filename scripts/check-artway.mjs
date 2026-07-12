@@ -137,6 +137,10 @@ requireMarkers('assets/app.js', app, [
   'function allegroAktualizujZaznaczoneOfertyDanymiSklepu',
   'function allegroSynchronizujWszystko',
   'automatycznie co 6 godzin',
+  'allegroZamowienia.filter(statusAllegroRezerwujeMagazyn)',
+  'badge:zadaniaWystawiania',
+  'stock:stanMagazynuId',
+  'nowy produkt = 0 szt.',
   'function allegroWyslijOdpowiedz',
   'function allegroAgentPropozycjaOdpowiedzi',
   'function allegroHistoriaRozmowyHTML',
@@ -188,6 +192,8 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function allegroAutoMapujOfertyZKartoteka',
   'function allegroZapiszZadanieAgentaOferty',
   'function allegroCzekajNaOperacjeOferty',
+  'const stockRaw = Number(opt.stock ?? p.stan ?? 0)',
+  'allegroParameters: autoParameters',
   "action === 'allegro-send-reply'",
   "action === 'allegro-reply-suggestion'",
   'allegro_orders_baseline_v2',
@@ -198,6 +204,13 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "telegramKomorka('POTRZEBNA ILOŚĆ', 16)",
   "'zrealizowane'",
 ]);
+
+if (/stock:\s*\{\s*available:\s*Math\.max\(0,\s*Number\(opt\.stock\s*\?\?\s*p\.stan\s*\?\?\s*1\)\s*\|\|\s*1\)/.test(store)) {
+  fail('netlify/functions/lib/store-app.mjs: stan 0 nie może być zamieniany na 1 przy wystawianiu Allegro');
+}
+if (app.includes('badge:produktyBezOferty')) {
+  fail('assets/app.js: licznik Allegro nie może zliczać całego katalogu produktów bez oferty');
+}
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
   "schedule: '0 */6 * * *'",
