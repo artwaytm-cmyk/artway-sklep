@@ -16,6 +16,7 @@ const files = [
   'netlify/functions/cron-infakt-sync.mjs',
   'netlify/functions/cron-seo-daily.mjs',
   'netlify/functions/sitemap.mjs',
+  'netlify/functions/google-products.mjs',
   'robots.txt',
 ];
 
@@ -53,6 +54,7 @@ const cronSupplierAvailability = read('netlify/functions/cron-supplier-availabil
 const cronInfaktSync = read('netlify/functions/cron-infakt-sync.mjs');
 const cronSeoDaily = read('netlify/functions/cron-seo-daily.mjs');
 const sitemap = read('netlify/functions/sitemap.mjs');
+const googleProducts = read('netlify/functions/google-products.mjs');
 const robots = read('robots.txt');
 
 const version = index.match(/<meta\s+name=["']artway-version["']\s+content=["']([^"']+)/i)?.[1] || '';
@@ -567,6 +569,15 @@ requireMarkers('netlify/functions/sitemap.mjs', sitemap, [
   '/produkt/',
 ]);
 
+requireMarkers('netlify/functions/google-products.mjs', googleProducts, [
+  'base.google.com/ns/1.0',
+  '<g:availability>in_stock</g:availability>',
+  '<g:price>',
+  'artway_produkty_katalog',
+  'artway_dostepnosc',
+  'x-artway-items',
+]);
+
 requireMarkers('robots.txt', robots, [
   'User-agent: *',
   'Sitemap: https://artwaytm.pl/sitemap.xml',
@@ -578,7 +589,7 @@ try {
   fail(`assets/app.js: błąd składni: ${error.message}`);
 }
 
-for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs', 'netlify/functions/cron-infakt-sync.mjs', 'netlify/functions/cron-seo-daily.mjs', 'netlify/functions/sitemap.mjs']) {
+for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs', 'netlify/functions/cron-infakt-sync.mjs', 'netlify/functions/cron-seo-daily.mjs', 'netlify/functions/sitemap.mjs', 'netlify/functions/google-products.mjs']) {
   try {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
   } catch (error) {

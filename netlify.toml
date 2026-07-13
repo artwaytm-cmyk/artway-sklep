@@ -25,6 +25,12 @@
   force = true
 
 [[redirects]]
+  from = "/google-products.xml"
+  to = "/.netlify/functions/google-products"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/produkt/*"
   to = "/index.html"
   status = 200

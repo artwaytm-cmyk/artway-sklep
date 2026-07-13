@@ -1,0 +1,118 @@
+import { getStore } from '@netlify/blobs';
+
+const origin = 'https://artwaytm.pl';
+const xml = (value) => String(value ?? '').replace(/[<>&'\"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+const plain = (value, max = 5000) => String(value ?? '')
+  .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+  .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+  .replace(/<[^>]*>/g, ' ')
+  .replace(/&nbsp;/gi, ' ')
+  .replace(/&amp;/gi, '&')
+  .replace(/&quot;/gi, '"')
+  .replace(/&#39;|&apos;/gi, "'")
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, max);
+const absoluteUrl = (value) => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  try { return new URL(raw, origin).toString(); } catch (error) { return ''; }
+};
+const valueFor = (obj, names = []) => {
+  for (const name of names) if (obj?.[name] !== undefined && obj?.[name] !== null && String(obj[name]).trim()) return obj[name];
+  return '';
+};
+
+function productIsUnavailable(product, availability = {}) {
+  const record = availability?.[String(product?.id)] || availability?.[product?.id] || null;
+  if (!record) return false;
+  const decision = String(record.decision || record.decyzja || '').toLowerCase();
+  if (decision === 'manual_available') return false;
+  if (decision === 'grace') {
+    const expires = Date.parse(record.expiresAt || record.waznaDo || '');
+    return Number.isFinite(expires) && expires <= Date.now();
+  }
+  return String(record.status || '').toLowerCase() === 'niedostepny';
+}
+
+function mergeProducts(data = {}) {
+  const map = new Map();
+  const add = (product = {}) => {
+    const id = String(product.id ?? '').trim();
+    if (id) map.set(id, { ...(map.get(id) || {}), ...product, id });
+  };
+  for (const product of Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []) add(product);
+  for (const product of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) add(product);
+  for (const [id, patch] of Object.entries(data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? data.artway_produkty_edytowane : {})) add({ ...(patch || {}), id });
+  return [...map.values()];
+}
+
+export default async () => {
+  let settings = { data: {}, updated_at: null };
+  try {
+    settings = await getStore({ name: 'artway-sklep', consistency: 'strong' }).get('settings', { type: 'json' }) || settings;
+  } catch (error) { /* pusty feed nadal pozostaje prawidłowym dokumentem XML */ }
+
+  const data = settings.data && typeof settings.data === 'object' ? settings.data : {};
+  const availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};
+  const hidden = new Set([
+    ...(Array.isArray(data.artway_produkty_ukryte) ? data.artway_produkty_ukryte : []),
+    ...(Array.isArray(data.artway_produkty_definitywne) ? data.artway_produkty_definitywne : []),
+    ...(Array.isArray(data.artway_kosz_dodane) ? data.artway_kosz_dodane.map((product) => product?.id) : []),
+  ].map(String));
+
+  let excluded = 0;
+  const items = mergeProducts(data).flatMap((product) => {
+    const id = String(valueFor(product, ['externalId', 'external_id', 'sku', 'id'])).trim().slice(0, 50);
+    const title = plain(valueFor(product, ['seoTitle', 'nazwa', 'name']), 150);
+    const description = plain(valueFor(product, ['seoDescription', 'opisKrotki', 'krotkiOpis', 'opis', 'description']), 5000);
+    const image = absoluteUrl(valueFor(product, ['zdjecie', 'image', 'imageUrl']));
+    const price = Number(valueFor(product, ['cena', 'price']));
+    if (hidden.has(String(product.id)) || productIsUnavailable(product, availability) || !id || !title || !description || !image || !(price > 0)) {
+      excluded += 1;
+      return [];
+    }
+
+    const brand = plain(valueFor(product, ['producent', 'marka', 'brand']), 70);
+    const gtin = plain(valueFor(product, ['gtin', 'ean']), 50).replace(/\s+/g, '');
+    const mpn = plain(valueFor(product, ['mpn', 'kodProducenta', 'sku']), 70);
+    const category = plain(valueFor(product, ['kategoria', 'productType']), 750);
+    const weight = Number(valueFor(product, ['waga', 'weight']));
+    const identifiers = !!(gtin || mpn);
+    return [`    <item>
+      <g:id>${xml(id)}</g:id>
+      <title>${xml(title)}</title>
+      <description>${xml(description)}</description>
+      <link>${xml(`${origin}/produkt/${encodeURIComponent(product.id)}`)}</link>
+      <g:image_link>${xml(image)}</g:image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>${price.toFixed(2)} PLN</g:price>
+      <g:condition>new</g:condition>
+      ${brand ? `<g:brand>${xml(brand)}</g:brand>` : ''}
+      ${gtin ? `<g:gtin>${xml(gtin)}</g:gtin>` : ''}
+      ${mpn ? `<g:mpn>${xml(mpn)}</g:mpn>` : ''}
+      <g:identifier_exists>${identifiers ? 'yes' : 'no'}</g:identifier_exists>
+      ${category ? `<g:product_type>${xml(category)}</g:product_type>` : ''}
+      ${weight > 0 ? `<g:shipping_weight>${weight.toFixed(3)} kg</g:shipping_weight>` : ''}
+    </item>`];
+  });
+
+  const body = `<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
+  <channel>
+    <title>Artway-TM — produkty</title>
+    <link>${origin}/</link>
+    <description>Automatyczny katalog produktów Artway-TM dla bezpłatnych informacji produktowych Google.</description>
+${items.join('\n')}
+  </channel>
+</rss>`;
+
+  return new Response(body, {
+    headers: {
+      'content-type': 'application/xml; charset=utf-8',
+      'cache-control': 'public, max-age=1800',
+      'x-artway-items': String(items.length),
+      'x-artway-excluded': String(excluded),
+    },
+  });
+};
