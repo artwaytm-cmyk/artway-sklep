@@ -4187,8 +4187,10 @@ const TABY_ASORTYMENTU = [
 ];
 function asortymentSzkielet(tab, tresc){
   return adminSzkielet("/admin/asortyment", `
-    ${adminSubnavHTML(TABY_ASORTYMENTU.map(([id,label])=>({id,href:`#/admin/asortyment/${id}`,label})),tab)}
-    ${tresc}`);
+    <div class="module-page-stack assortment-module-page">
+      ${adminSubnavHTML(TABY_ASORTYMENTU.map(([id,label])=>({id,href:`#/admin/asortyment/${id}`,label})),tab)}
+      ${tresc}
+    </div>`);
 }
 
 /* Pozycjonowanie i darmowa promocja — bez płatnych API i bez sztucznych zmian treści. */
@@ -7080,6 +7082,15 @@ function allegroSzukajKomunikacje(type,value){
   if(type==="issue")szukajAllegroDyskusji=String(value||"");else szukajAllegroWiadomosci=String(value||"");
   clearTimeout(window.__allegroCommunicationSearchTimer);window.__allegroCommunicationSearchTimer=setTimeout(()=>{renderuj();setTimeout(()=>{const el=document.getElementById(type==="issue"?"allegroIssueSearch":"allegroThreadSearch");if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}},0);},280);
 }
+function allegroUstawFiltrKomunikacji(type,value){
+  if(type==="issue")filtrAllegroDyskusji=String(value||"wszystkie");else filtrAllegroWiadomosci=String(value||"wszystkie");
+  allegroLimitKomunikacji=Math.max(50,allegroLimitKomunikacji);renderuj();
+  setTimeout(()=>document.querySelector(".allegro-communication-list")?.scrollIntoView({behavior:"smooth",block:"start"}),30);
+}
+function allegroAktywujKafelkiKomunikacji(type="thread"){
+  const root=document.querySelector(".allegro-communication-page"),cards=[...(root?.querySelectorAll(":scope > .orders-stat-grid .order-stat-card")||[])],values=["wszystkie","wymaga","zalatwione","obsluzone"],current=type==="issue"?filtrAllegroDyskusji:filtrAllegroWiadomosci;
+  cards.forEach((card,index)=>{const value=values[index];if(!value)return;card.classList.add("stat-filter");card.classList.toggle("active",current===value);card.setAttribute("role","button");card.setAttribute("tabindex","0");card.setAttribute("aria-pressed",String(current===value));card.onclick=()=>allegroUstawFiltrKomunikacji(type,value);card.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();allegroUstawFiltrKomunikacji(type,value);}};});
+}
 function allegroTekstKomunikacji(item={}){return `${item.id||""} ${item.buyerLogin||""} ${item.subject||""} ${item.orderId||""} ${(item.messages||[]).map(m=>`${m.authorLogin||""} ${m.text||""} ${m.orderId||""}`).join(" ")}`.toLowerCase();}
 function allegroKomunikacjaPasujaca(type="thread"){
   const list=type==="issue"?(allegroKomunikacja?.issues||[]):(allegroKomunikacja?.threads||[]),q=String(type==="issue"?szukajAllegroDyskusji:szukajAllegroWiadomosci).toLowerCase().trim(),filter=type==="issue"?filtrAllegroDyskusji:filtrAllegroWiadomosci,sort=type==="issue"?sortAllegroDyskusje:sortAllegroWiadomosci;
@@ -7294,11 +7305,13 @@ function allegroStartPanelHTML(mapped,niepodpiete){
         <a class="btn ghost" href="#/admin/allegro/dyskusje">🛟 Dyskusje</a>
       </div>
     </div>
-    <div class="orders-stat-grid">
-      <div class="order-stat-card hot"><span>📦</span><b>${(allegroZamowienia||[]).length}</b><small>zamówień w cache</small></div>
-      <div class="order-stat-card"><span>🏷️</span><b>${(allegroOferty||[]).length}</b><small>ofert w cache</small></div>
-      <div class="order-stat-card money"><span>🔗</span><b>${mapped}</b><small>podpiętych ofert</small></div>
-      <div class="order-stat-card ${niepodpiete?"hot":""}"><span>🧩</span><b>${niepodpiete}</b><small>ofert bez produktu</small></div>
+    <div class="orders-stat-grid allegro-dashboard-links">
+      <a class="order-stat-card stat-filter hot" href="#/admin/allegro/zamowienia" onclick="filtrAllegroZamowien='do_obslugi'"><span>📦</span><b>${(allegroZamowienia||[]).filter(statusAllegroRezerwujeMagazyn).length}</b><small>zamówień do obsługi</small></a>
+      <a class="order-stat-card stat-filter" href="#/admin/allegro/oferty" onclick="filtrAllegroOfert='wszystkie'"><span>🏷️</span><b>${(allegroOferty||[]).length}</b><small>wszystkich ofert</small></a>
+      <a class="order-stat-card stat-filter money" href="#/admin/allegro/oferty" onclick="filtrAllegroOfert='poprawne'"><span>🔗</span><b>${mapped}</b><small>poprawnie podpiętych</small></a>
+      <a class="order-stat-card stat-filter ${niepodpiete?"hot":""}" href="#/admin/allegro/oferty" onclick="filtrAllegroOfert='niepodpiete'"><span>🧩</span><b>${niepodpiete}</b><small>ofert bez produktu</small></a>
+      <a class="order-stat-card stat-filter" href="#/admin/allegro/wiadomosci" onclick="filtrAllegroWiadomosci='wymaga'"><span>💬</span><b>${allegroKomunikacjaStaty().threadNeed}</b><small>wiadomości do odpowiedzi</small></a>
+      <a class="order-stat-card stat-filter" href="#/admin/allegro/dyskusje" onclick="filtrAllegroDyskusji='aktywne'"><span>🛟</span><b>${allegroKomunikacjaStaty().issues.length}</b><small>dyskusji i reklamacji</small></a>
     </div>
   </div>`;
 }
@@ -7421,6 +7434,7 @@ function allegroUstawieniaPanelHTML(){
 function widokAdminAllegro(sekcja="start"){
   allegroLadujJesliTrzeba();
   if(["wiadomosci","dyskusje"].includes(sekcja)&&!allegroKomunikacja?.updated_at&&!allegroKomunikacja?.sprawdzono&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
+  if(["wiadomosci","dyskusje"].includes(sekcja)) setTimeout(()=>allegroAktywujKafelkiKomunikacji(sekcja==="dyskusje"?"issue":"thread"),0);
   const mapped=(allegroOferty||[]).filter(o=>allegroProduktDlaOferty(o.id)).length;
   const niepodpiete=Math.max(0,(allegroOferty||[]).length-mapped);
   const aktywna=["zamowienia","oferty","wystawianie","rentownosc","wiadomosci","dyskusje","ustawienia"].includes(sekcja)?sekcja:"start";
@@ -8154,12 +8168,21 @@ function usunKlienta(email){
   renderuj();
 }
 let szukajProduktow = "", filtrProduktow = "Wszystkie", kategoriaNowegoProduktu = "";
-let filtrStatusuProduktow = "wszystkie", filtrZrodlaProduktow = "wszystkie", filtrStanuProduktow = "wszystkie", filtrAllegroProduktow = "wszystkie";
+let filtrStatusuProduktow = "aktywne", filtrZrodlaProduktow = "wszystkie", filtrStanuProduktow = "wszystkie", filtrAllegroProduktow = "wszystkie";
 let sortowanieAdminProduktow = ["external","id","nazwa","cena-rosnaco","cena-malejaco","stan"].includes(wczytajLS("artway_produkty_sortowanie_admin","external"))?wczytajLS("artway_produkty_sortowanie_admin","external"):"external";
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
 let frazaMagazynu="", filtrMagazynu="wszystkie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="decyzje";
 let magazynNaStronie=[25,50,100,200,500].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
+function ustawKafelkowyFiltrAsortymentu(typ="aktywne"){
+  szukajProduktow="";filtrProduktow="Wszystkie";filtrZrodlaProduktow="wszystkie";filtrStanuProduktow="wszystkie";filtrStatusuProduktow="aktywne";filtrAllegroProduktow="wszystkie";
+  if(typ==="allegro_polaczone")filtrAllegroProduktow="polaczone";
+  else if(typ==="allegro_duplikaty")filtrAllegroProduktow="duplikaty";
+  else if(typ==="allegro_brak")filtrAllegroProduktow="brak";
+  else if(typ==="duplikaty_sklepu")filtrStatusuProduktow="duplikaty";
+  stronaAdminProduktow=1;renderuj();
+  setTimeout(()=>document.querySelector("[data-assortment-results]")?.scrollIntoView({behavior:"smooth",block:"start"}),30);
+}
 function dokumentTymczasowyHTML(html){const tpl=document.createElement("template");tpl.innerHTML=String(html||"").trim();return tpl.content;}
 function asortymentSzukajProdukty(input){
   szukajProduktow=String(input?.value||"");stronaAdminProduktow=1;clearTimeout(window.__assortmentSearch);
@@ -8856,6 +8879,7 @@ function widokAdminProdukty(){
   if(filtrStanuProduktow==="brak") wszystkie=wszystkie.filter(p=>Number(stanyProduktow[p.id])===0);
   if(filtrAllegroProduktow==="aktywne") wszystkie=wszystkie.filter(p=>String(allegroOfertaDlaProduktuSklepu(p)?.status||"").toUpperCase()==="ACTIVE");
   if(filtrAllegroProduktow==="szkice") wszystkie=wszystkie.filter(p=>{const o=allegroOfertaDlaProduktuSklepu(p);return o&&String(o.status||"").toUpperCase()!=="ACTIVE";});
+  if(filtrAllegroProduktow==="polaczone") wszystkie=wszystkie.filter(p=>!!allegroOfertaDlaProduktuSklepu(p));
   if(filtrAllegroProduktow==="brak") wszystkie=wszystkie.filter(p=>!allegroOfertaDlaProduktuSklepu(p));
   if(filtrAllegroProduktow==="duplikaty") wszystkie=wszystkie.filter(p=>allegroOfertyPasujaceDoProduktu(p).filter(allegroDopasowanieDuplikatuAktywne).length>1);
   wszystkie=sortujProduktyAdmin(wszystkie);
@@ -8867,30 +8891,25 @@ function widokAdminProdukty(){
   const bazoweWKoszu=bazoweProduktyWKoszu();
   const liczbaWKoszu=koszDodanych.length+bazoweWKoszu.length;
   return asortymentSzkielet("produkty", `
-    <div class="panel">
-      <h1>🏷️ Produkty (${produkty.length} widocznych / ${produktyDoAdministracji().length}) <small style="font-size:.75rem;color:var(--muted2)">źródło: ${zrodloProduktow==="json"?"products.json":"lista zapasowa"} + zmiany lokalne</small></h1>
-      <div class="diag-actions" style="margin:.4rem 0 .8rem">
-        <a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
-        <a class="btn ghost" href="#/admin/produkty/z-linku">🔗 Dodaj z linku producenta</a>
-        <a class="btn ghost" href="#/admin/mapowanie">🧩 Mapuj produkty</a>
-        <a class="btn ghost" href="#/admin/eksport">⇄ Import / eksport</a>
-        <button class="btn ghost" onclick="eksportujProduktyJSON()">📤 products.json</button>
-        <button class="btn ghost" onclick="eksportujProduktyCSV()">📤 CSV</button>
-      </div>
+    <div class="panel assortment-catalog-page">
+      <header class="assortment-catalog-hero">
+        <div><span class="order-pro-label">Centralna kartoteka sprzedaży</span><h1>🏷️ Katalog produktów</h1><p>Produkty sklepu, magazynu i Allegro w jednej tabeli. Każdy kafelek poniżej jest aktywnym filtrem i pokazuje dokładnie odpowiadające mu pozycje.</p><small>${produkty.length} widocznych w sklepie • ${produktyDoAdministracji().length} wszystkich kart • źródło: ${zrodloProduktow==="json"?"products.json":"lista zapasowa"} + zmiany wspólne</small></div>
+        <div class="assortment-catalog-actions"><a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a><a class="btn ghost" href="#/admin/produkty/z-linku">🔗 Dodaj z linku</a><a class="btn ghost" href="#/admin/mapowanie">🧩 Mapowanie</a><a class="btn ghost" href="#/admin/eksport">⇄ Import / eksport</a><details><summary>Więcej operacji</summary><button class="btn ghost" onclick="eksportujProduktyJSON()">📤 products.json</button><button class="btn ghost" onclick="eksportujProduktyCSV()">📤 CSV</button></details></div>
+      </header>
       <div class="assortment-search-primary">
         <label><span>Wyszukaj w całym asortymencie</span><input data-assortment-search placeholder="Nazwa, EXTERNAL_ID, SKU, EAN, ID, opis, kategoria lub producent…" value="${esc(szukajProduktow)}" oninput="asortymentSzukajProdukty(this)" autocomplete="off"></label>
         <small>Wyniki zmieniają się bez przeładowania panelu i bez utraty kursora.</small>
       </div>
       <div class="orders-stat-grid assortment-audit-grid">
-        <div class="order-stat-card"><span>🏷️</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length}</b><small>aktywnych kart produktów</small></div>
-        <div class="order-stat-card money"><span>🟠</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroOfertaDlaProduktuSklepu(p)).length}</b><small>produktów połączonych z Allegro</small></div>
-        <div class="order-stat-card ${audytAllegro.produkty?"hot":"money"}"><span>${audytAllegro.produkty?"⚠️":"✅"}</span><b>${audytAllegro.produkty}</b><small>produktów z podejrzeniem duplikatu</small></div>
-        <div class="order-stat-card"><span>➕</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroOfertaDlaProduktuSklepu(p)).length}</b><small>produktów bez oferty Allegro</small></div>
-        <div class="order-stat-card ${audytSklep.ukryte?"hot":"money"}"><span>${audytSklep.ukryte?"🧬":"✅"}</span><b>${audytSklep.ukryte}</b><small>kopii ukrytych w sklepie</small></div>
+        <button class="order-stat-card stat-filter ${filtrStatusuProduktow==="aktywne"&&filtrAllegroProduktow==="wszystkie"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('aktywne')" aria-pressed="${filtrStatusuProduktow==="aktywne"&&filtrAllegroProduktow==="wszystkie"}"><span>🏷️</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length}</b><small>aktywne karty produktów</small></button>
+        <button class="order-stat-card stat-filter money ${filtrAllegroProduktow==="polaczone"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('allegro_polaczone')" aria-pressed="${filtrAllegroProduktow==="polaczone"}"><span>🟠</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroOfertaDlaProduktuSklepu(p)).length}</b><small>połączone z Allegro</small></button>
+        <button class="order-stat-card stat-filter ${audytAllegro.produkty?"hot":"money"} ${filtrAllegroProduktow==="duplikaty"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('allegro_duplikaty')" aria-pressed="${filtrAllegroProduktow==="duplikaty"}"><span>${audytAllegro.produkty?"⚠️":"✅"}</span><b>${audytAllegro.produkty}</b><small>podejrzenie duplikatu Allegro</small></button>
+        <button class="order-stat-card stat-filter ${filtrAllegroProduktow==="brak"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('allegro_brak')" aria-pressed="${filtrAllegroProduktow==="brak"}"><span>➕</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroOfertaDlaProduktuSklepu(p)).length}</b><small>bez oferty Allegro</small></button>
+        <button class="order-stat-card stat-filter ${audytSklep.produkty?"hot":"money"} ${filtrStatusuProduktow==="duplikaty"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('duplikaty_sklepu')" aria-pressed="${filtrStatusuProduktow==="duplikaty"}"><span>${audytSklep.produkty?"🧬":"✅"}</span><b>${audytSklep.produkty}</b><small>karty w grupach duplikatów sklepu</small></button>
       </div>
       ${audytSklep.grupy.length?`<section class="allegro-duplicate-center store-duplicate-center"><div class="order-section-head"><div><span class="order-pro-label">Porządkowanie katalogu sklepu</span><h3>🧬 Powtarzające się produkty (${audytSklep.grupy.length} grup)</h3><p class="order-detail-lead">Dla każdej grupy wybierz jedną kartę do pozostawienia. Przycisk trwałego czyszczenia usuwa wszystkie pozostałe kopie z katalogu publicznego, panelu, magazynu i wspólnej bazy.</p></div><button class="btn ghost" onclick="filtrStatusuProduktow='duplikaty';stronaAdminProduktow=1;renderuj()">Pokaż wszystkie kopie</button></div><div class="allegro-duplicate-groups">${audytSklep.grupy.slice(0,12).map(g=>`<article class="allegro-duplicate-group"><header><div><b>${esc(g.canonical.nazwa||"Produkt")}</b><small>Wspólny klucz: ${esc(g.keys.join(" • "))}</small></div><span class="lvl lvl-ostrzezenie">${g.produkty.length} kart</span></header><div class="allegro-duplicate-options">${g.produkty.map(p=>`<button type="button" class="allegro-duplicate-option ${String(p.id)===String(g.canonical.id)?"is-canonical":""}" onclick="ustawProduktGlownyDuplikatu(${jsArg(g.groupKey)},${jsArg(p.id)})"><div class="allegro-duplicate-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa)}</b><small>ID ${esc(p.id)} • EXTERNAL_ID ${esc(p.externalId||"—")} • SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small><em>${String(p.id)===String(g.canonical.id)?"✅ ta karta pozostanie":"❌ ta kopia zostanie usunięta"}</em></div></div></button>`).join("")}</div><div class="diag-actions" style="justify-content:flex-end"><button class="btn danger" onclick="usunKopieGrupyProduktuTrwale(${jsArg(g.groupKey)})">🗑️ Pozostaw 1 i usuń trwale ${g.hidden.length} kopii</button></div></article>`).join("")}</div></section>`:`<div class="duplicate-audit-ok"><b>✅ Kontrola katalogu sklepu:</b> brak powtarzających się produktów po EXTERNAL_ID, SKU, EAN i kodzie producenta.</div>`}
       ${audytAllegro.produkty?`<div class="duplicate-audit-alert"><div><b>⚠️ Kontrola Asortymentu wykryła powtarzające się oferty Allegro</b><small>${audytAllegro.produkty} produktów pasuje do ${audytAllegro.oferty} ofert. Nowe wystawienie wybierze istniejącą ofertę do aktualizacji; istniejące powtórzenia możesz sprawdzić bezpośrednio w katalogu Allegro.</small></div><button class="btn ghost" onclick="filtrAllegroProduktow='duplikaty';stronaAdminProduktow=1;renderuj()">Pokaż produkty</button><a class="btn" href="#/admin/allegro/oferty" onclick="filtrAllegroOfert='duplikaty'">Otwórz oferty</a></div>`:`<div class="duplicate-audit-ok"><b>✅ Kontrola ofert Allegro:</b> aktualny asortyment nie zawiera produktów połączonych z więcej niż jedną ofertą.</div>`}
-      <div class="filter-grid" style="margin-bottom:.8rem">
+      <section class="assortment-filter-panel"><header><div><b>🔎 Zaawansowane filtrowanie katalogu</b><small>Kafelki ustawiają gotowy filtr, a pola poniżej pozwalają go dodatkowo zawęzić.</small></div><button class="btn ghost" type="button" onclick="szukajProduktow='';filtrProduktow='Wszystkie';filtrStatusuProduktow='aktywne';filtrZrodlaProduktow='wszystkie';filtrStanuProduktow='wszystkie';filtrAllegroProduktow='wszystkie';stronaAdminProduktow=1;renderuj()">Wyczyść wszystkie</button></header><div class="filter-grid">
         <select onchange="filtrProduktow=this.value;stronaAdminProduktow=1;renderuj()">
           <option ${filtrProduktow==="Wszystkie"?"selected":""}>Wszystkie</option>
           ${katOpcje.map(k=>`<option ${k===filtrProduktow?"selected":""}>${esc(k)}</option>`).join("")}
@@ -8914,6 +8933,7 @@ function widokAdminProdukty(){
         </select>
         <select onchange="filtrAllegroProduktow=this.value;stronaAdminProduktow=1;renderuj()">
           <option value="wszystkie" ${filtrAllegroProduktow==="wszystkie"?"selected":""}>Allegro: wszystkie</option>
+          <option value="polaczone" ${filtrAllegroProduktow==="polaczone"?"selected":""}>Allegro: wszystkie połączone</option>
           <option value="aktywne" ${filtrAllegroProduktow==="aktywne"?"selected":""}>Allegro: aktywne</option>
           <option value="szkice" ${filtrAllegroProduktow==="szkice"?"selected":""}>Allegro: szkice / nieaktywne</option>
           <option value="brak" ${filtrAllegroProduktow==="brak"?"selected":""}>Allegro: brak oferty</option>
@@ -8927,7 +8947,7 @@ function widokAdminProdukty(){
           <option value="cena-malejaco" ${sortowanieAdminProduktow==="cena-malejaco"?"selected":""}>Cena malejąco</option>
           <option value="stan" ${sortowanieAdminProduktow==="stan"?"selected":""}>Najniższy stan</option>
         </select>
-      </div>
+      </div></section>
       <div data-assortment-results><div class="results-bar">
         <span>Znaleziono: <b>${liczbaWynikow}</b>. Strona ${stronaAdminProduktow} z ${liczbaStron}.</span>
         <label>Na stronie:
@@ -8946,7 +8966,7 @@ function widokAdminProdukty(){
           <button class="btn ghost" onclick="zmienCenyZaznaczonych()" style="padding:.35rem .8rem">💰 Zmień ceny</button>
         </span>
       </div>
-      <div style="overflow-x:auto"><table class="log-table">
+      <div class="assortment-table-wrap"><table class="log-table assortment-product-table">
         <tr><th><input type="checkbox" onchange="zaznaczWidoczneProd(this, [${fragment.map(p=>p.id).join(",")}])" style="width:16px;height:16px" title="Zaznacz produkty na tej stronie"></th><th>ID</th><th>EXTERNAL_ID</th><th>Miniatura</th><th>Produkt</th><th>Producent</th><th>Kategoria</th><th>Cena (kliknij, by zmienić)</th><th>Promocja</th><th>Magazyn</th><th>Sprzedaż</th><th>Allegro</th><th>Akcje</th></tr>
         ${fragment.map(p=>{
           const dodany = jestProduktemDodanym(p.id);
