@@ -16,8 +16,8 @@ test('lista KSeF zawsze wysyła pełny zakres dat i bezpieczny limit API', () =>
   });
   assert.deepEqual(parameters, {
     offset: 0,
-    limit: 25,
-    order: 'Desc',
+    limit: 20,
+    order: 'Asc',
     'q[invoice_date_gteq]': '2026-06-13',
     'q[invoice_date_lteq]': '2026-07-13',
   });

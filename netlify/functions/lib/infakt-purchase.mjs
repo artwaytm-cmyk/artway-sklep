@@ -56,6 +56,42 @@ function tekst(value, max = 400) {
   return String(value == null ? '' : value).slice(0, max).trim();
 }
 
+export function infaktNazwaDostawcy(value = '') {
+  return tekst(value, 240).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+export function infaktRdzenNazwyDostawcy(value = '') {
+  return infaktNazwaDostawcy(value)
+    .replace(/\b(spolka z ograniczona odpowiedzialnoscia|sp z oo|sp zoo|spolka akcyjna|sa|sc|s c|firma handlowa|fh|phu)\b/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+export function infaktDostawcyDozwoleni(raw = []) {
+  const result = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const name = tekst(item?.name || item?.sellerName || item, 200).trim();
+    const sellerName = tekst(item?.sellerName || item?.apiSellerName || name, 240).trim();
+    const match = infaktNazwaDostawcy(sellerName);
+    const taxCode = tekst(item?.taxCode || item?.nip || item?.sellerTaxCode, 30).replace(/\D/g, '');
+    if (!name || !match || item?.active === false) continue;
+    if (!result.some((entry) => entry.match === match || (taxCode && entry.taxCode === taxCode))) {
+      result.push({ id: tekst(item?.id || match, 120), name, sellerName, match, root: infaktRdzenNazwyDostawcy(sellerName), taxCode });
+    }
+  }
+  return result.slice(0, 100);
+}
+
+export function infaktZnajdzDostawce(invoice = {}, suppliers = []) {
+  const seller = infaktNazwaDostawcy(invoice.seller_name);
+  const root = infaktRdzenNazwyDostawcy(invoice.seller_name);
+  const taxCode = tekst(invoice.seller_tax_code, 30).replace(/\D/g, '');
+  const exact = suppliers.find((entry) => (taxCode && entry.taxCode === taxCode) || entry.match === seller);
+  if (exact) return exact;
+  if (!root || root.length < 4) return null;
+  const candidates = suppliers.filter((entry) => entry.root && (entry.root === root || entry.root.includes(root) || root.includes(entry.root)));
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 export function produktBezDanychPrywatnych(product = {}) {
   if (!product || typeof product !== 'object' || Array.isArray(product)) return product;
   const result = { ...product };
@@ -192,9 +228,9 @@ export function infaktParametryListyKsef({ days = 180, limit = 25, offset = 0, n
   const start = new Date(safeEnd.getTime() - safeDays * 86400000);
   return {
     offset: Math.max(0, Math.floor(Number(offset) || 0)),
-    // KSeF 2.0 przyjmuje na stronie najwyżej 25 dokumentów.
-    limit: Math.max(1, Math.min(25, Math.floor(Number(limit) || 25))),
-    order: 'Desc',
+    // Oficjalny przykład KSeF 2.0 używa strony po 20 dokumentów.
+    limit: Math.max(1, Math.min(20, Math.floor(Number(limit) || 20))),
+    order: 'Asc',
     'q[invoice_date_gteq]': start.toISOString().slice(0, 10),
     'q[invoice_date_lteq]': safeEnd.toISOString().slice(0, 10),
   };

@@ -47,11 +47,14 @@ import {
 } from './allegro-compliance.mjs';
 import {
   ustawieniaPubliczneBezDanychPrywatnych,
+  infaktDostawcyDozwoleni,
   infaktKsefPozycje,
   infaktListaDokumentowKsef,
+  infaktNazwaDostawcy,
   infaktNormalizujDokumentKosztowy,
   infaktParametryListyKsef,
   infaktXmlZOdpowiedzi,
+  infaktZnajdzDostawce,
 } from './infakt-purchase.mjs';
 
 const STORE_NAME = 'artway-sklep';
@@ -591,34 +594,6 @@ function infaktPublicConfig() {
     policy: 'supplier-costs-read-and-customer-invoices-create-only',
   };
 }
-function infaktNazwaDostawcy(v = '') {
-  return tekst(v, 240).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/[^a-z0-9]+/g, ' ').trim();
-}
-function infaktRdzenNazwyDostawcy(v = '') {
-  return infaktNazwaDostawcy(v)
-    .replace(/\b(spolka z ograniczona odpowiedzialnoscia|sp z oo|sp zoo|spolka akcyjna|sa|sc|s c|firma handlowa|fh|phu)\b/g, ' ')
-    .replace(/\s+/g, ' ').trim();
-}
-function infaktDostawcyDozwoleni(raw = []) {
-  const out = [];
-  for (const item of Array.isArray(raw) ? raw : []) {
-    const name = tekst(item?.name || item?.sellerName || item, 200).trim();
-    const sellerName = tekst(item?.sellerName || item?.apiSellerName || name, 240).trim();
-    const match = infaktNazwaDostawcy(sellerName);
-    const taxCode = tekst(item?.taxCode || item?.nip || item?.sellerTaxCode, 30).replace(/\D/g, '');
-    if (!name || !match || item?.active === false) continue;
-    if (!out.some((x) => x.match === match || (taxCode && x.taxCode === taxCode))) out.push({ id: tekst(item?.id || match, 120), name, sellerName, match, root: infaktRdzenNazwyDostawcy(sellerName), taxCode });
-  }
-  return out.slice(0, 100);
-}
-function infaktZnajdzDostawce(invoice = {}, suppliers = []) {
-  const seller = infaktNazwaDostawcy(invoice.seller_name), root = infaktRdzenNazwyDostawcy(invoice.seller_name), taxCode = tekst(invoice.seller_tax_code, 30).replace(/\D/g, '');
-  const exact = suppliers.find((x) => (taxCode && x.taxCode === taxCode) || x.match === seller);
-  if (exact) return exact;
-  if (!root || root.length < 4) return null;
-  const candidates = suppliers.filter((x) => x.root && (x.root === root || x.root.includes(root) || root.includes(x.root)));
-  return candidates.length === 1 ? candidates[0] : null;
-}
 async function infaktDostawcyUstawienia() {
   const rec = await czytaj('infakt_supplier_access', { items: [], updated_at: null });
   return { items: infaktDostawcyDozwoleni(rec?.items), updated_at: rec?.updated_at || null };
@@ -643,6 +618,25 @@ function infaktKosztDoZwrotu(koszt = {}, dostawca = null) {
     statuses: (Array.isArray(koszt.statuses) ? koszt.statuses : []).slice(0, 20).map((s) => ({ symbol: tekst(s?.symbol, 80), name: tekst(s?.name, 120), group: tekst(s?.group, 80) })),
     supplier: dostawca ? { id: dostawca.id, name: dostawca.name } : null,
   };
+}
+async function infaktPobierzKosztyDozwolone(suppliers = [], { wanted = 200, maxScan = 5000 } = {}) {
+  const items = [];
+  let scanned = 0;
+  const safeWanted = Math.max(1, Math.min(1000, Number(wanted) || 200));
+  const safeMaxScan = Math.max(100, Math.min(10000, Number(maxScan) || 5000));
+  for (let offset = 0; offset < safeMaxScan && items.length < safeWanted; offset += 100) {
+    const data = await infaktWywolaj('/api/v3/documents/costs.json', { parameters: { limit: 100, offset } });
+    const entities = Array.isArray(data?.entities) ? data.entities : [];
+    scanned += entities.length;
+    for (const raw of entities) {
+      const document = infaktNormalizujDokumentKosztowy(raw);
+      const supplier = infaktZnajdzDostawce(document, suppliers);
+      if (supplier) items.push({ document, supplier });
+      if (items.length >= safeWanted) break;
+    }
+    if (entities.length < 100 || !data?.metainfo?.next) break;
+  }
+  return { items, scanned };
 }
 function infaktKodKlucz(value = '') { return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 function infaktEanKlucz(value = '') { const digits = String(value || '').replace(/\D/g, ''); return digits.length >= 8 && digits.length <= 14 ? digits : ''; }
@@ -695,7 +689,33 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
   if (!suppliers.items.length) { report.available = false; report.errors.push('Biała lista dostawców jest pusta.'); await zapisz('infakt_purchase_price_sync', report); return report; }
   const lastAttempt = Date.parse(previous.lastListAttemptAt || ''), cooldownMs = 11 * 60 * 1000;
   if (!force && Number.isFinite(lastAttempt) && Date.now() - lastAttempt < cooldownMs) return { ...previous, cooldown: true, nextListAt: new Date(lastAttempt + cooldownMs).toISOString(), message: 'Użyto ostatniego wyniku, aby nie przekroczyć limitu 6 listowań KSeF na godzinę.' };
-  const listParameters = infaktParametryListyKsef({ days, limit: 25 });
+  const since = infaktParametryListyKsef({ days, limit: 20 })['q[invoice_date_gteq]'];
+  let costsResult;
+  try { costsResult = await infaktPobierzKosztyDozwolone(suppliers.items, { wanted: 1000, maxScan: 5000 }); }
+  catch (error) {
+    report.available = false;
+    report.pendingItems = Array.isArray(previous.pendingItems) ? previous.pendingItems : [];
+    report.pendingCount = report.pendingItems.length;
+    report.errors.push(`Odczyt dokumentów kosztowych inFakt: ${tekst(error.message, 500)}`);
+    await zapisz('infakt_purchase_price_sync', report); return report;
+  }
+  const invoiceDates = [...new Set(costsResult.items.map(({ document }) => tekst(document.issue_date, 10)).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= since))].sort().reverse();
+  const previousDateQueries = previous.dateQueries && typeof previous.dateQueries === 'object' ? previous.dateQueries : {};
+  const targetDate = force ? invoiceDates[0] : invoiceDates.find((date) => previousDateQueries[date]?.status !== 'processed');
+  report.costDocumentsScanned = costsResult.scanned;
+  report.allowedCostDocuments = costsResult.items.length;
+  report.availableInvoiceDates = invoiceDates.length;
+  report.dateQueries = { ...previousDateQueries };
+  if (!targetDate) {
+    report.pendingItems = Array.isArray(previous.pendingItems) ? previous.pendingItems : [];
+    report.pendingCount = report.pendingItems.length;
+    report.recentMatches = Array.isArray(previous.recentMatches) ? previous.recentMatches.slice(0, 500) : [];
+    report.message = invoiceDates.length ? 'Wszystkie znalezione dni faktur zostały już przeanalizowane.' : 'Brak faktur dozwolonych dostawców w wybranym okresie.';
+    await zapisz('infakt_purchase_price_sync', report); return report;
+  }
+  // KSeF 2.0 waliduje krótkie zakresy dat. Zapytanie o konkretny dzień
+  // wykorzystuje datę faktury odnalezioną wcześniej w dokumentach kosztowych.
+  const listParameters = { ...infaktParametryListyKsef({ days: 1, limit: 20 }), 'q[invoice_date_gteq]': targetDate, 'q[invoice_date_lteq]': targetDate };
   let listData;
   try { listData = await infaktWywolaj('/api/v3/ksef2/import/costs.json', { parameters: listParameters }); }
   catch (error) {
@@ -709,6 +729,7 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
     await zapisz('infakt_purchase_price_sync', report); return report;
   }
   report.queryRange = { from: listParameters['q[invoice_date_gteq]'], to: listParameters['q[invoice_date_lteq]'], limit: listParameters.limit };
+  report.dateQueries[targetDate] = { status: 'listed', checkedAt: now };
   const allInvoices = infaktListaDokumentowKsef(listData);
   const invoices = allInvoices.filter((invoice) => infaktZnajdzDostawce(invoice, suppliers.items));
   report.scannedDocuments = allInvoices.length; report.allowedDocuments = invoices.length;
@@ -739,6 +760,7 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
     } catch (error) { report.errors.push(`${tekst(invoice.invoice_number || documentKey, 160)}: ${tekst(error.message, 400)}`); report.documents[documentKey] = { status: 'error', error: tekst(error.message, 400), processedAt: now }; }
   }
   updater.commit(); if (updater.changed) await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
+  report.dateQueries[targetDate] = { status: report.errors.length ? 'error' : 'processed', checkedAt: now, documents: invoices.length };
   const oldPending = Array.isArray(previous.pendingItems) ? previous.pendingItems : [], newKeys = new Set(report.pendingItems.map((x) => x.itemKey)); report.pendingItems = [...report.pendingItems, ...oldPending.filter((x) => !newKeys.has(x.itemKey) && !processedKeys.has(x.ksefNumber))].slice(0, 1000); report.pendingCount = report.pendingItems.length; report.lineMappings = { ...(previous.lineMappings || {}) }; report.recentMatches = report.recentMatches.slice(0, 500); report.updated_at = new Date().toISOString();
   await zapisz('infakt_purchase_price_sync', report); return report;
 }
@@ -5034,18 +5056,9 @@ export default async (req) => {
       const suppliers = await infaktDostawcyUstawienia();
       if (!suppliers.items.length) return odpowiedz({ ok: true, costs: [], suppliers, scanned: 0, message: 'Biała lista dostawców jest pusta — żaden dokument kosztowy nie został ujawniony.' });
       const wanted = Math.max(1, Math.min(200, Number(url.searchParams.get('limit') || 100) || 100));
-      const collected = []; let scanned = 0;
-      for (let offset = 0; offset < 5000 && collected.length < wanted; offset += 100) {
-        const data = await infaktWywolaj('/api/v3/documents/costs.json', { parameters: { limit: 100, offset } });
-        const entities = Array.isArray(data?.entities) ? data.entities : [];
-        scanned += entities.length;
-        for (const koszt of entities) {
-          const normalized = infaktNormalizujDokumentKosztowy(koszt), match = infaktZnajdzDostawce(normalized, suppliers.items);
-          if (match) collected.push(infaktKosztDoZwrotu(normalized, match));
-          if (collected.length >= wanted) break;
-        }
-        if (entities.length < 100 || !data?.metainfo?.next) break;
-      }
+      const result = await infaktPobierzKosztyDozwolone(suppliers.items, { wanted, maxScan: 5000 });
+      const collected = result.items.map(({ document, supplier }) => infaktKosztDoZwrotu(document, supplier));
+      const scanned = result.scanned;
       const purchaseSync = await czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [], updated_at: null });
       return odpowiedz({ ok: true, costs: collected, suppliers, purchaseSync, scanned, returned: collected.length });
     }
