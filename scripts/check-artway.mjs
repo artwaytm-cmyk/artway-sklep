@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { allegroCheckText, allegroSanitizePlainText, allegroSanitizeDescription, allegroEnforceDraft } from '../netlify/functions/lib/allegro-compliance.mjs';
+import { infaktKsefPozycje, ustawieniaPubliczneBezDanychPrywatnych } from '../netlify/functions/lib/infakt-purchase.mjs';
 
 const files = [
   'index.html',
@@ -10,6 +11,7 @@ const files = [
   'netlify/functions/store.mjs',
   'netlify/functions/lib/store-app.mjs',
   'netlify/functions/lib/allegro-compliance.mjs',
+  'netlify/functions/lib/infakt-purchase.mjs',
   'netlify/functions/cron-inpost-sync.mjs',
   'netlify/functions/cron-allegro-orders.mjs',
   'netlify/functions/cron-allegro-communications.mjs',
@@ -49,6 +51,7 @@ const app = read('assets/app.js');
 const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
 const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
+const infaktPurchase = read('netlify/functions/lib/infakt-purchase.mjs');
 const cron = read('netlify/functions/cron-inpost-sync.mjs');
 const cronAllegroOrders = read('netlify/functions/cron-allegro-orders.mjs');
 const cronAllegroCommunications = read('netlify/functions/cron-allegro-communications.mjs');
@@ -480,7 +483,6 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'infakt_invoice_links',
   'infakt_supplier_access',
   'infakt_purchase_price_sync',
-  'function infaktKsefPozycje',
   'function infaktSynchronizujCenyZakupu',
   'wspólny limit 6 listowań kosztów i przychodów na godzinę',
   "accept: 'application/xml, text/xml, application/json'",
@@ -493,6 +495,41 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'autoUpdateOffers',
   'autoFees',
 ]);
+
+requireMarkers('netlify/functions/lib/infakt-purchase.mjs', infaktPurchase, [
+  'PRYWATNE_POLA_PRODUKTU',
+  'function produktBezDanychPrywatnych',
+  'function ustawieniaPubliczneBezDanychPrywatnych',
+  'function infaktKsefPozycje',
+  'wartość wiersza po rabatach',
+]);
+
+const ksefTestRows = infaktKsefPozycje(`<?xml version="1.0"?><Faktura><KodWaluty>PLN</KodWaluty><FaWiersz><P_7>Gra testowa 5901234123457</P_7><P_8A>szt.</P_8A><P_8B>2</P_8B><P_9A>100.00</P_9A><P_11>180.00</P_11><P_11A>221.40</P_11A><P_12>23</P_12><Indeks>ABC-123</Indeks></FaWiersz></Faktura>`);
+if (ksefTestRows.length !== 1 || ksefTestRows[0].unitNet !== 90 || ksefTestRows[0].unitGross !== 110.7 || ksefTestRows[0].ean !== '5901234123457') {
+  fail('inFakt/KSeF: cena jednej sztuki musi uwzględniać rzeczywistą wartość wiersza po rabacie oraz rozpoznawać EAN');
+}
+const ksefNetDiscountRow = infaktKsefPozycje(`<Faktura><KodWaluty>PLN</KodWaluty><FaWiersz><P_7>Gra</P_7><P_8B>2</P_8B><P_9A>100</P_9A><P_9B>123</P_9B><P_11>180</P_11><P_12>23</P_12></FaWiersz></Faktura>`)[0];
+if (!ksefNetDiscountRow || ksefNetDiscountRow.unitGross !== 110.7) {
+  fail('inFakt/KSeF: przy rabacie cena brutto musi wynikać z wartości netto wiersza, a nie z ceny katalogowej P_9B');
+}
+
+const publicSettingsTest = ustawieniaPubliczneBezDanychPrywatnych({
+  artway_produkty_dodane: [{ id: 1, nazwa: 'Gra', cena: 99, cenaZakupu: 40, cenaZakupuHistoria: [{ price: 40 }], allegroCommissionAmount: 10 }],
+  artway_produkty_edytowane: { 1: { cena: 99, cenaZakupuDokument: 'FV/1', kosztPakowania: 2 } },
+  artway_produkty_katalog: [{ id: 1, cena: 99, cenaZakupuNetto: 32.52 }],
+  artway_ustawienia: { kolor: '#fff', domyslneKosztyRentownosci: { kosztPakowania: 2 }, celMarzySklep: 20 },
+  artway_agent_ai_historia: [{ produkt: { cenaZakupu: 40 } }],
+});
+const publicSettingsJson = JSON.stringify(publicSettingsTest);
+if (publicSettingsJson.includes('cenaZakupu') || publicSettingsJson.includes('allegroCommissionAmount') || publicSettingsJson.includes('kosztPakowania') || publicSettingsJson.includes('celMarzySklep')) {
+  fail('Bezpieczeństwo: publiczne API ustawień ujawnia cenę zakupu albo wewnętrzne dane marżowe');
+}
+if (publicSettingsTest.artway_produkty_dodane[0].cena !== 99 || publicSettingsTest.artway_ustawienia.kolor !== '#fff') {
+  fail('Bezpieczeństwo: filtrowanie danych prywatnych nie może usuwać publicznej ceny sprzedaży ani wyglądu sklepu');
+}
+if ('artway_agent_ai_historia' in publicSettingsTest) {
+  fail('Bezpieczeństwo: publiczne API ustawień nie może zwracać administracyjnej historii Agenta AI');
+}
 
 if ((app.match(/<input id="oneProductUrl"/g) || []).length !== 1) {
   fail('assets/app.js: dodawanie produktu z adresu musi mieć dokładnie jedno pole URL');

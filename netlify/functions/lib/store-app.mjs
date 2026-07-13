@@ -11,6 +11,12 @@ import {
   allegroSanitizeDescription,
   allegroEnforceDraft,
 } from './allegro-compliance.mjs';
+import {
+  ustawieniaPubliczneBezDanychPrywatnych,
+  infaktKsefPozycje,
+  infaktListaDokumentowKsef,
+  infaktXmlZOdpowiedzi,
+} from './infakt-purchase.mjs';
 
 const STORE_NAME = 'artway-sklep';
 
@@ -603,16 +609,30 @@ function infaktPublicConfig() {
 function infaktNazwaDostawcy(v = '') {
   return tekst(v, 240).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/[^a-z0-9]+/g, ' ').trim();
 }
+function infaktRdzenNazwyDostawcy(v = '') {
+  return infaktNazwaDostawcy(v)
+    .replace(/\b(spolka z ograniczona odpowiedzialnoscia|sp z oo|sp zoo|spolka akcyjna|sa|sc|s c|firma handlowa|fh|phu)\b/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
 function infaktDostawcyDozwoleni(raw = []) {
   const out = [];
   for (const item of Array.isArray(raw) ? raw : []) {
     const name = tekst(item?.name || item?.sellerName || item, 200).trim();
     const sellerName = tekst(item?.sellerName || item?.apiSellerName || name, 240).trim();
     const match = infaktNazwaDostawcy(sellerName);
+    const taxCode = tekst(item?.taxCode || item?.nip || item?.sellerTaxCode, 30).replace(/\D/g, '');
     if (!name || !match || item?.active === false) continue;
-    if (!out.some((x) => x.match === match)) out.push({ id: tekst(item?.id || match, 120), name, sellerName, match });
+    if (!out.some((x) => x.match === match || (taxCode && x.taxCode === taxCode))) out.push({ id: tekst(item?.id || match, 120), name, sellerName, match, root: infaktRdzenNazwyDostawcy(sellerName), taxCode });
   }
   return out.slice(0, 100);
+}
+function infaktZnajdzDostawce(invoice = {}, suppliers = []) {
+  const seller = infaktNazwaDostawcy(invoice.seller_name), root = infaktRdzenNazwyDostawcy(invoice.seller_name), taxCode = tekst(invoice.seller_tax_code, 30).replace(/\D/g, '');
+  const exact = suppliers.find((x) => (taxCode && x.taxCode === taxCode) || x.match === seller);
+  if (exact) return exact;
+  if (!root || root.length < 4) return null;
+  const candidates = suppliers.filter((x) => x.root && (x.root === root || x.root.includes(root) || root.includes(x.root)));
+  return candidates.length === 1 ? candidates[0] : null;
 }
 async function infaktDostawcyUstawienia() {
   const rec = await czytaj('infakt_supplier_access', { items: [], updated_at: null });
@@ -637,33 +657,6 @@ function infaktKosztDoZwrotu(koszt = {}, dostawca = null) {
     statuses: (Array.isArray(koszt.statuses) ? koszt.statuses : []).slice(0, 20).map((s) => ({ symbol: tekst(s?.symbol, 80), name: tekst(s?.name, 120), group: tekst(s?.group, 80) })),
     supplier: dostawca ? { id: dostawca.id, name: dostawca.name } : null,
   };
-}
-function infaktXmlOdkoduj(value = '') {
-  return String(value || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&').replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code) || 32)).trim();
-}
-function infaktXmlPole(xml = '', name = '') {
-  const safe = String(name).replace(/[^A-Za-z0-9_]/g, ''), match = String(xml).match(new RegExp(`<(?:(?:[A-Za-z0-9_]+):)?${safe}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:(?:[A-Za-z0-9_]+):)?${safe}>`, 'i'));
-  return infaktXmlOdkoduj(match?.[1]?.replace(/<[^>]+>/g, ' ') || '');
-}
-function infaktXmlLiczba(value) {
-  const n = Number(String(value ?? '').replace(',', '.').replace(/[^0-9.-]/g, ''));
-  return Number.isFinite(n) ? n : 0;
-}
-function infaktKsefPozycje(xml = '') {
-  const rows = [...String(xml).matchAll(/<(?:(?:[A-Za-z0-9_]+):)?FaWiersz(?:\s[^>]*)?>([\s\S]*?)<\/(?:(?:[A-Za-z0-9_]+):)?FaWiersz>/gi)];
-  const currency = infaktXmlPole(xml, 'KodWaluty') || 'PLN';
-  return rows.map((match, index) => {
-    const row = match[1], quantity = Math.max(0, infaktXmlLiczba(infaktXmlPole(row, 'P_8B'))), taxRaw = infaktXmlPole(row, 'P_12'), taxRate = /^\d+(?:[.,]\d+)?$/.test(taxRaw) ? infaktXmlLiczba(taxRaw) : 0;
-    const unitNet = infaktXmlLiczba(infaktXmlPole(row, 'P_9A')), unitGrossRaw = infaktXmlLiczba(infaktXmlPole(row, 'P_9B')), lineNet = infaktXmlLiczba(infaktXmlPole(row, 'P_11')), lineGrossRaw = infaktXmlLiczba(infaktXmlPole(row, 'P_11A'));
-    const net = unitNet || (quantity > 0 ? lineNet / quantity : 0), gross = unitGrossRaw || (quantity > 0 && lineGrossRaw ? lineGrossRaw / quantity : 0) || (net > 0 ? net * (1 + taxRate / 100) : 0);
-    return {
-      row: index + 1,
-      name: tekst(infaktXmlPole(row, 'P_7') || infaktXmlPole(row, 'NazwaTowaru') || `Pozycja ${index + 1}`, 300),
-      ean: tekst(infaktXmlPole(row, 'GTIN') || infaktXmlPole(row, 'EAN'), 80).replace(/\s+/g, ''),
-      code: tekst(infaktXmlPole(row, 'Indeks') || infaktXmlPole(row, 'KodTowaru') || infaktXmlPole(row, 'SKU') || infaktXmlPole(row, 'NrKatalogowy'), 120).trim(),
-      quantity: +quantity.toFixed(4), unitNet: +net.toFixed(4), unitGross: +gross.toFixed(4), taxRate, currency,
-    };
-  }).filter((row) => row.name || row.ean || row.code);
 }
 function infaktKodKlucz(value = '') { return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 function infaktEanKlucz(value = '') { const digits = String(value || '').replace(/\D/g, ''); return digits.length >= 8 && digits.length <= 14 ? digits : ''; }
@@ -706,8 +699,9 @@ function infaktDopasujPozycje(line = {}, products = new Map(), index = {}, suppl
 }
 function infaktCenaZakupuFields(product = {}, line = {}, invoice = {}, supplier = {}, method = '') {
   const now = new Date().toISOString(), price = +Number(line.unitGross || 0).toFixed(2), history = Array.isArray(product.cenaZakupuHistoria) ? product.cenaZakupuHistoria.slice(0, 29) : [];
-  const entry = { price, net: +Number(line.unitNet || 0).toFixed(2), quantity: Number(line.quantity || 0), document: tekst(invoice.invoice_number, 120), ksefNumber: tekst(invoice.ksef_number, 180), supplier: tekst(supplier.name || invoice.seller_name, 200), date: tekst(invoice.invoice_date, 20), method, updatedAt: now };
-  return { cenaZakupu: price, cenaZakupuZrodlo: 'inFakt / KSeF', cenaZakupuDokument: entry.document, cenaZakupuKsef: entry.ksefNumber, cenaZakupuDostawca: entry.supplier, cenaZakupuDataDokumentu: entry.date, cenaZakupuDopasowanie: method, cenaZakupuZaktualizowanoAt: now, cenaZakupuHistoria: [entry, ...history.filter((x) => x?.ksefNumber !== entry.ksefNumber || Number(x?.price) !== price)].slice(0, 30) };
+  const net = +Number(line.unitNet || 0).toFixed(2), vat = Math.max(0, +(price - net).toFixed(2));
+  const entry = { price, net, vat, quantity: Number(line.quantity || 0), document: tekst(invoice.invoice_number, 120), ksefNumber: tekst(invoice.ksef_number, 180), supplier: tekst(supplier.name || invoice.seller_name, 200), date: tekst(invoice.invoice_date, 20), method, priceBasis: tekst(line.priceBasis || '', 80), updatedAt: now };
+  return { cenaZakupu: price, cenaZakupuNetto: net, cenaZakupuVat: vat, cenaZakupuWaluta: tekst(line.currency || 'PLN', 12), cenaZakupuPrywatna: true, cenaZakupuZrodlo: 'inFakt / KSeF', cenaZakupuDokument: entry.document, cenaZakupuKsef: entry.ksefNumber, cenaZakupuDostawca: entry.supplier, cenaZakupuDataDokumentu: entry.date, cenaZakupuDopasowanie: method, cenaZakupuZaktualizowanoAt: now, cenaZakupuHistoria: [entry, ...history.filter((x) => x?.ksefNumber !== entry.ksefNumber || Number(x?.price) !== price)].slice(0, 30) };
 }
 async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = false } = {}) {
   const suppliers = await infaktDostawcyUstawienia(), previous = await czytaj('infakt_purchase_price_sync', { documents: {}, pendingItems: [], recentMatches: [], updated_at: null }), now = new Date().toISOString();
@@ -728,16 +722,17 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
       : `Odczyt faktur kosztowych KSeF: ${tekst(error.message, 500)}`);
     await zapisz('infakt_purchase_price_sync', report); return report;
   }
-  const invoices = (Array.isArray(listData?.entities) ? listData.entities : []).filter((invoice) => { const seller = infaktNazwaDostawcy(invoice?.seller_name); return suppliers.items.some((x) => x.match === seller); });
-  report.scannedDocuments = Array.isArray(listData?.entities) ? listData.entities.length : 0; report.allowedDocuments = invoices.length;
+  const allInvoices = infaktListaDokumentowKsef(listData);
+  const invoices = allInvoices.filter((invoice) => infaktZnajdzDostawce(invoice, suppliers.items));
+  report.scannedDocuments = allInvoices.length; report.allowedDocuments = invoices.length;
   const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null }), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = allegroAgentProduktyCentralne(data), index = infaktIndeksProduktow(products), updater = allegroAktualizatorProduktowCentralnych(data);
   const processedKeys = new Set(), batchLimit = Math.max(1, Math.min(50, Number(limit) || 25)), selectedInvoices = (force ? invoices : invoices.filter((invoice) => report.documents[tekst(invoice?.ksef_number, 200)]?.status !== 'processed')).slice(0, batchLimit).reverse();
   for (const invoice of selectedInvoices) {
     const documentKey = tekst(invoice.ksef_number, 200); if (!documentKey) continue;
-    const supplier = suppliers.items.find((x) => x.match === infaktNazwaDostawcy(invoice.seller_name));
+    const supplier = infaktZnajdzDostawce(invoice, suppliers.items);
     try {
-      const response = await infaktWywolaj(`/api/v3/ksef2/import/${encodeURIComponent(documentKey)}.json`, { parameters: { file_format: 'xml' }, raw: true, accept: 'application/xml, text/xml, application/json' }); let xml = await response.text();
-      if (/^\s*\{/.test(xml)) { try { const parsed = JSON.parse(xml); xml = parsed.xml || parsed.content || parsed.file || ''; } catch { /* odpowiedź pozostanie tekstem */ } }
+      const response = await infaktWywolaj(`/api/v3/ksef2/import/${encodeURIComponent(documentKey)}.json`, { parameters: { file_format: 'xml' }, raw: true, accept: 'application/xml, text/xml, application/json' });
+      const xml = infaktXmlZOdpowiedzi(await response.text());
       const lines = infaktKsefPozycje(xml); if (!lines.length) throw new Error('Dokument XML nie zawiera rozpoznawalnych pozycji FaWiersz'); processedKeys.add(documentKey); report.lineCount += lines.length; report.processedDocuments++;
       for (const line of lines) {
         const itemKey = crypto.createHash('sha256').update(`${documentKey}|${line.row}|${line.ean}|${line.code}|${line.name}`).digest('hex').slice(0, 24), match = infaktDopasujPozycje(line, products, index, supplier), validPrice = line.currency === 'PLN' && line.quantity > 0 && line.unitGross > 0;
@@ -747,7 +742,7 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
           else report.unchangedCount++;
           report.matchedCount++; report.recentMatches.unshift({ itemKey, productId: String(product.id), productName: tekst(product.nazwa, 200), price: +line.unitGross.toFixed(2), quantity: line.quantity, method: match.method, confidence: match.confidence, invoiceNumber: tekst(invoice.invoice_number, 120), invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || invoice.seller_name, updatedAt: now });
         } else {
-          report.pendingItems.push({ itemKey, invoiceNumber: tekst(invoice.invoice_number, 120), ksefNumber: documentKey, invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || tekst(invoice.seller_name, 200), row: line.row, name: line.name, ean: line.ean, code: line.code, quantity: line.quantity, unitNet: line.unitNet, unitGross: line.unitGross, currency: line.currency, reason: !validPrice ? 'Brak poprawnej ceny brutto, ilości lub waluta inna niż PLN' : (match.reason || 'Brak jednoznacznego dopasowania'), suggestions: infaktSugestieNazwy(line, products, supplier) });
+          report.pendingItems.push({ itemKey, invoiceNumber: tekst(invoice.invoice_number, 120), ksefNumber: documentKey, invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || tekst(invoice.seller_name, 200), row: line.row, name: line.name, ean: line.ean, code: line.code, quantity: line.quantity, unitNet: line.unitNet, unitGross: line.unitGross, taxRate: line.taxRate, priceBasis: line.priceBasis, currency: line.currency, reason: !validPrice ? 'Brak poprawnej ceny brutto, ilości lub waluta inna niż PLN' : (match.reason || 'Brak jednoznacznego dopasowania'), suggestions: infaktSugestieNazwy(line, products, supplier) });
         }
       }
       report.documents[documentKey] = { status: 'processed', invoiceNumber: tekst(invoice.invoice_number, 120), invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || tekst(invoice.seller_name, 200), lines: lines.length, processedAt: now };
@@ -6807,8 +6802,9 @@ export default async (req) => {
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
     if (action === 'pull' || action === 'store-data') {
       const s = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-      const res = { ok: true, settings: s.data || {}, rev: s.rev || 0, updated_at: s.updated_at || null };
-      if (czyAdmin(req, url)) {
+      const admin = czyAdmin(req, url);
+      const res = { ok: true, settings: admin ? (s.data || {}) : ustawieniaPubliczneBezDanychPrywatnych(s.data || {}), rev: s.rev || 0, updated_at: s.updated_at || null };
+      if (admin) {
         const o = await czytaj('orders', { items: [] });
         const u = await czytaj('users', { items: [] });
         const d = await czytajUsunieteZamowienia();
