@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { allegroCheckText, allegroSanitizePlainText, allegroEnforceDraft } from '../netlify/functions/lib/allegro-compliance.mjs';
+import { allegroCheckText, allegroSanitizePlainText, allegroSanitizeDescription, allegroEnforceDraft } from '../netlify/functions/lib/allegro-compliance.mjs';
 
 const files = [
   'index.html',
@@ -619,6 +619,17 @@ const sanitizedAllegroText = allegroSanitizePlainText('Gra rozwija wyobraźnię.
 if (!sanitizedAllegroText.check.ok || sanitizedAllegroText.text.includes('skontaktuj')) fail('kontrola Allegro: niedozwolona treść nie została usunięta');
 const enforcedAllegroDraft = allegroEnforceDraft({ name: 'ORIGAMI 3D', description: { sections: [{ items: [{ type: 'TEXT', content: '<p>Wspaniały zestaw.</p><p>Zadzwoń przed zakupem: +48 530 038 914.</p>' }] }] } });
 if (!enforcedAllegroDraft.compliance.ok || allegroCheckText(JSON.stringify(enforcedAllegroDraft.draft.description)).ok === false) fail('kontrola Allegro: szkic po oczyszczeniu nadal jest niezgodny');
+const richAllegroDescription = allegroSanitizeDescription({ sections: [
+  { items: [{ type: 'TEXT', content: '<h1>ORIGAMI 3D</h1><p><b>Kreatywny zestaw</b> rozwija koncentrację.</p><ul><li>Bez kleju</li><li>Przed zakupem skontaktuj się z nami.</li><li>554 elementy</li></ul>' }] },
+  { items: [{ type: 'IMAGE', url: 'https://a.allegroimg.com/original/example.jpg' }] },
+  { items: [{ type: 'TEXT', content: '<h2>Zawartość</h2><p>Instrukcja i elementy papierowe.</p>' }] },
+] });
+const richAllegroJson = JSON.stringify(richAllegroDescription.description);
+if (!richAllegroDescription.check.ok || !richAllegroDescription.layoutPreserved || richAllegroDescription.description.sections.length !== 3) fail('kontrola Allegro: układ sekcji i zdjęć nie został zachowany');
+for (const marker of ['<h1>ORIGAMI 3D</h1>', '<b>Kreatywny zestaw</b>', '<ul>', '<li>Bez kleju</li>', '<li>554 elementy</li>', '<h2>Zawartość</h2>', 'https://a.allegroimg.com/original/example.jpg']) {
+  if (!richAllegroJson.includes(marker)) fail(`kontrola Allegro: korekta zgubiła element układu: ${marker}`);
+}
+if (richAllegroJson.includes('skontaktuj')) fail('kontrola Allegro: niedozwolony punkt listy nie został usunięty');
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
   "schedule: '0 */6 * * *'",

@@ -142,10 +142,112 @@ export function allegroSanitizePlainText(value = '') {
   };
 }
 
+function descriptionStats(sections = []) {
+  const items = sections.flatMap((section) => Array.isArray(section?.items) ? section.items : []);
+  return {
+    sections: sections.length,
+    textItems: items.filter((item) => item?.type === 'TEXT').length,
+    images: items.filter((item) => item?.type === 'IMAGE' && item.url).length,
+  };
+}
+
+function sanitizeUnsafeTextBlock(tag, content = '') {
+  const sanitized = allegroSanitizePlainText(content);
+  if (!sanitized.text) return { html: '', ...sanitized, changedBlocks: 1 };
+  return {
+    html: `<${tag}>${escapeHtml(sanitized.text.replace(/\s*\n\s*/g, ' '))}</${tag}>`,
+    ...sanitized,
+    changedBlocks: 1,
+  };
+}
+
+function sanitizeListBlock(tag, content = '') {
+  const items = [];
+  const removed = [];
+  let changedBlocks = 0;
+  const liPattern = /<li\b[^>]*>([\s\S]*?)<\/li\s*>/giu;
+  let match;
+  while ((match = liPattern.exec(String(content)))) {
+    const fullItem = match[0];
+    const check = allegroCheckText(fullItem);
+    if (check.ok) {
+      // Bezpieczny punkt pozostaje dokładnie taki, jak w opisie z Allegro.
+      items.push(fullItem);
+      continue;
+    }
+    const sanitized = allegroSanitizePlainText(fullItem);
+    removed.push(...sanitized.removed);
+    changedBlocks += 1;
+    if (sanitized.text) items.push(`<li>${escapeHtml(sanitized.text.replace(/\s*\n\s*/g, ' '))}</li>`);
+  }
+  // Opis bez znaczników LI traktujemy jako pojedynczy punkt, zamiast gubić treść.
+  if (!items.length && !removed.length && plainText(content)) {
+    const sanitized = allegroSanitizePlainText(content);
+    removed.push(...sanitized.removed);
+    changedBlocks += sanitized.removedCount ? 1 : 0;
+    if (sanitized.text) items.push(`<li>${escapeHtml(sanitized.text.replace(/\s*\n\s*/g, ' '))}</li>`);
+  }
+  return {
+    html: items.length ? `<${tag}>${items.join('')}</${tag}>` : '',
+    removed,
+    removedCount: removed.length,
+    changedBlocks,
+  };
+}
+
+function sanitizeAllegroRichText(content = '') {
+  const source = String(content || '');
+  if (allegroCheckText(source).ok) {
+    return { html: source, removed: [], removedCount: 0, changedBlocks: 0 };
+  }
+  const blocks = [];
+  const removed = [];
+  let changedBlocks = 0;
+  let cursor = 0;
+  const blockPattern = /<(h1|h2|p|ul|ol)\b[^>]*>([\s\S]*?)<\/\1\s*>/giu;
+  let match;
+  const appendLooseText = (value) => {
+    if (!plainText(value)) return;
+    const sanitized = sanitizeUnsafeTextBlock('p', value);
+    removed.push(...sanitized.removed);
+    changedBlocks += sanitized.changedBlocks;
+    if (sanitized.html) blocks.push(sanitized.html);
+  };
+  while ((match = blockPattern.exec(source))) {
+    appendLooseText(source.slice(cursor, match.index));
+    const tag = String(match[1]).toLowerCase();
+    const fullBlock = match[0];
+    if (allegroCheckText(fullBlock).ok) {
+      // Nagłówek, akapit albo lista bez naruszeń pozostają bajt w bajt bez zmian.
+      blocks.push(fullBlock);
+    } else if (tag === 'ul' || tag === 'ol') {
+      const sanitized = sanitizeListBlock(tag, match[2]);
+      removed.push(...sanitized.removed);
+      changedBlocks += sanitized.changedBlocks;
+      if (sanitized.html) blocks.push(sanitized.html);
+    } else {
+      const sanitized = sanitizeUnsafeTextBlock(tag, fullBlock);
+      removed.push(...sanitized.removed);
+      changedBlocks += sanitized.changedBlocks;
+      if (sanitized.html) blocks.push(sanitized.html);
+    }
+    cursor = blockPattern.lastIndex;
+  }
+  appendLooseText(source.slice(cursor));
+  return {
+    html: blocks.join(''),
+    removed,
+    removedCount: removed.length,
+    changedBlocks,
+  };
+}
+
 export function allegroSanitizeDescription(description = {}) {
   const sourceSections = Array.isArray(description?.sections) ? description.sections : [];
+  const before = descriptionStats(sourceSections);
   const sections = [];
   const removed = [];
+  let changedBlocks = 0;
   for (const sourceSection of sourceSections) {
     const items = [];
     for (const sourceItem of (Array.isArray(sourceSection?.items) ? sourceSection.items : [])) {
@@ -154,22 +256,24 @@ export function allegroSanitizeDescription(description = {}) {
         continue;
       }
       if (sourceItem?.type !== 'TEXT') continue;
-      const sanitized = allegroSanitizePlainText(sourceItem.content || '');
+      const sanitized = sanitizeAllegroRichText(sourceItem.content || '');
       removed.push(...sanitized.removed);
-      if (sanitized.text) {
-        const paragraphs = sanitized.text.split(/\n{2,}|\n/).map((part) => part.trim()).filter(Boolean);
-        items.push({ type: 'TEXT', content: paragraphs.map((part) => `<p>${escapeHtml(part)}</p>`).join('') });
-      }
+      changedBlocks += sanitized.changedBlocks;
+      if (sanitized.html) items.push({ type: 'TEXT', content: sanitized.html });
     }
     if (items.length) sections.push({ items });
   }
   const result = { sections };
+  const after = descriptionStats(sections);
   const finalText = sections.flatMap((section) => section.items || []).filter((item) => item.type === 'TEXT').map((item) => item.content || '').join('\n');
   return {
     description: result,
     removed,
     removedCount: removed.length,
     check: allegroCheckText(finalText),
+    changedBlocks,
+    layoutPreserved: before.sections === after.sections && before.textItems === after.textItems && before.images === after.images,
+    layout: { before, after },
   };
 }
 
@@ -178,10 +282,27 @@ export function allegroEnforceDraft(draft = {}) {
   let description = sanitized.description;
   if (!description.sections.some((section) => (section.items || []).some((item) => item.type === 'TEXT'))) {
     const safeName = allegroSanitizePlainText(draft.name || 'Produkt').text || 'Produkt';
-    description = { sections: [{ items: [{ type: 'TEXT', content: `<p>${escapeHtml(safeName)}</p>` }] }] };
+    // Zachowaj położenie zdjęć i pierwszego pola tekstowego także wtedy, gdy cały tekst był niedozwolony.
+    let fallbackInserted = false;
+    const rebuiltSections = (Array.isArray(draft?.description?.sections) ? draft.description.sections : []).map((section) => ({
+      items: (Array.isArray(section?.items) ? section.items : []).flatMap((item) => {
+        if (item?.type === 'IMAGE' && item.url) return [{ type: 'IMAGE', url: String(item.url) }];
+        if (item?.type === 'TEXT' && !fallbackInserted) {
+          fallbackInserted = true;
+          return [{ type: 'TEXT', content: `<p>${escapeHtml(safeName)}</p>` }];
+        }
+        return [];
+      }),
+    })).filter((section) => section.items.length);
+    if (!fallbackInserted) rebuiltSections.push({ items: [{ type: 'TEXT', content: `<p>${escapeHtml(safeName)}</p>` }] });
+    description = { sections: rebuiltSections };
   }
   const finalText = description.sections.flatMap((section) => section.items || []).filter((item) => item.type === 'TEXT').map((item) => item.content || '').join('\n');
   const finalCheck = allegroCheckText(finalText);
+  const finalLayout = { before: sanitized.layout.before, after: descriptionStats(description.sections) };
+  const layoutPreserved = finalLayout.before.sections === finalLayout.after.sections
+    && finalLayout.before.textItems === finalLayout.after.textItems
+    && finalLayout.before.images === finalLayout.after.images;
   return {
     draft: { ...draft, description },
     compliance: {
@@ -189,6 +310,9 @@ export function allegroEnforceDraft(draft = {}) {
       violations: finalCheck.violations,
       removed: sanitized.removed,
       removedCount: sanitized.removedCount,
+      changedBlocks: sanitized.changedBlocks,
+      layoutPreserved,
+      layout: finalLayout,
       policyId: ALLEGRO_COMPLIANCE_POLICY.id,
       checkedAt: new Date().toISOString(),
     },

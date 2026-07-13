@@ -2370,6 +2370,9 @@ async function allegroAudytZgodnosciOfert(req, options = {}) {
     let finalCheck = before;
     let fixed = false;
     let removedCount = 0;
+    let changedBlocks = 0;
+    let layoutPreserved = true;
+    let layout = null;
     let error = '';
     if (!before.ok && fix) {
       try {
@@ -2385,6 +2388,9 @@ async function allegroAudytZgodnosciOfert(req, options = {}) {
         finalCheck = allegroCheckText(allegroOpisTekst(verified.description));
         fixed = finalCheck.ok;
         removedCount = enforced.compliance.removedCount;
+        changedBlocks = enforced.compliance.changedBlocks;
+        layoutPreserved = enforced.compliance.layoutPreserved !== false;
+        layout = enforced.compliance.layout || null;
         cacheUpdates.set(offerId, allegroNormalizujOferte(verified));
       } catch (auditError) {
         error = tekst(auditError?.message || auditError, 700);
@@ -2398,6 +2404,9 @@ async function allegroAudytZgodnosciOfert(req, options = {}) {
       hadViolation: !before.ok,
       fixed,
       removedCount,
+      changedBlocks,
+      layoutPreserved,
+      layout,
       violations: (finalCheck.ok ? before.violations : finalCheck.violations).map((item) => ({ id: item.id, label: item.label, matches: item.matches })),
       error,
       checkedAt: now,
