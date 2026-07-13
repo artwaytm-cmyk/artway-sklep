@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   infaktKsefPozycje,
+  infaktKsefNumerZTekstu,
   infaktNormalizujDokumentKosztowy,
   infaktParametryListyKsef,
   ustawieniaPubliczneBezDanychPrywatnych,
@@ -40,10 +41,21 @@ test('dokument kosztowy rozpoznaje różne warianty pól dostawcy', () => {
   assert.equal(document.gross_price, 82277);
 });
 
+test('numer KSeF jest odczytywany z nazwy załącznika już zapisanego kosztu', () => {
+  const number = infaktKsefNumerZTekstu({ attachments: [{ file_name: 'ksef_5891439727-20260630-619677C00010-E520260630-50.pdf' }] });
+  assert.equal(number, '5891439727-20260630-619677C00010-E5');
+});
+
 test('KSeF wylicza cenę jednej sztuki z wartości wiersza po rabacie', () => {
   const [row] = infaktKsefPozycje('<Faktura><KodWaluty>PLN</KodWaluty><FaWiersz><P_7>Gra 5901234123457</P_7><P_8B>2</P_8B><P_9A>100</P_9A><P_11>180</P_11><P_12>23</P_12></FaWiersz></Faktura>');
   assert.equal(row.unitNet, 90);
   assert.equal(row.unitGross, 110.7);
+  assert.equal(row.ean, '5901234123457');
+});
+
+test('KSeF łączy GTIN z dodatkowego opisu z właściwym wierszem faktury', () => {
+  const [row] = infaktKsefPozycje('<Faktura><Fa><KodWaluty>PLN</KodWaluty><FaWiersz><NrWierszaFa>7</NrWierszaFa><P_7>Gra</P_7><P_8B>2</P_8B><P_9A>10</P_9A><P_11>20</P_11><P_12>23</P_12></FaWiersz><DodatkowyOpis><NrWiersza>7</NrWiersza><Klucz>GTIN</Klucz><Wartosc>5901234123457</Wartosc></DodatkowyOpis></Fa></Faktura>');
+  assert.equal(row.row, 7);
   assert.equal(row.ean, '5901234123457');
 });
 

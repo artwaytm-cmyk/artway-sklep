@@ -151,8 +151,18 @@ function eanZTekstu(value = '') {
 export function infaktKsefPozycje(xml = '') {
   const rows = [...String(xml).matchAll(/<(?:(?:[A-Za-z0-9_]+):)?FaWiersz(?:\s[^>]*)?>([\s\S]*?)<\/(?:(?:[A-Za-z0-9_]+):)?FaWiersz>/gi)];
   const currency = xmlPole(xml, 'KodWaluty') || 'PLN';
+  const additionalByRow = new Map();
+  for (const match of String(xml).matchAll(/<(?:(?:[A-Za-z0-9_]+):)?DodatkowyOpis(?:\s[^>]*)?>([\s\S]*?)<\/(?:(?:[A-Za-z0-9_]+):)?DodatkowyOpis>/gi)) {
+    const block = match[1], rowNumber = Math.max(0, Math.floor(xmlLiczba(xmlPole(block, 'NrWiersza'))));
+    const key = tekst(xmlPole(block, 'Klucz'), 80).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const value = tekst(xmlPole(block, 'Wartosc'), 200);
+    if (!rowNumber || !key || !value) continue;
+    additionalByRow.set(rowNumber, { ...(additionalByRow.get(rowNumber) || {}), [key]: value });
+  }
   return rows.map((match, index) => {
     const row = match[1];
+    const rowNumber = Math.max(1, Math.floor(xmlLiczba(xmlPole(row, 'NrWierszaFa'))) || index + 1);
+    const additional = additionalByRow.get(rowNumber) || {};
     const name = tekst(xmlPole(row, 'P_7') || xmlPole(row, 'NazwaTowaru') || `Pozycja ${index + 1}`, 300);
     const quantity = Math.max(0, xmlLiczba(xmlPole(row, 'P_8B')));
     const taxRaw = xmlPole(row, 'P_12');
@@ -167,11 +177,11 @@ export function infaktKsefPozycje(xml = '') {
     const gross = quantity > 0 && lineGross > 0
       ? lineGross / quantity
       : (lineNet > 0 && net > 0 ? net * (1 + taxRate / 100) : (declaredUnitGross || (net > 0 ? net * (1 + taxRate / 100) : 0)));
-    const explicitEan = tekst(xmlPole(row, 'GTIN') || xmlPole(row, 'EAN'), 80).replace(/\s+/g, '');
-    const code = tekst(xmlPole(row, 'Indeks') || xmlPole(row, 'KodTowaru') || xmlPole(row, 'SKU') || xmlPole(row, 'NrKatalogowy'), 120);
+    const explicitEan = tekst(xmlPole(row, 'GTIN') || xmlPole(row, 'EAN') || additional.GTIN || additional.EAN, 80).replace(/\s+/g, '');
+    const code = tekst(xmlPole(row, 'Indeks') || xmlPole(row, 'KodTowaru') || xmlPole(row, 'SKU') || xmlPole(row, 'NrKatalogowy') || additional.INDEKS || additional.SKU || additional.KODTOWARU, 120);
 
     return {
-      row: index + 1,
+      row: rowNumber,
       name,
       ean: explicitEan || eanZTekstu(`${code} ${name}`),
       code,
@@ -251,6 +261,13 @@ export function infaktNormalizujDokumentKosztowy(raw = {}) {
     gross_price: Number(pierwszaWartosc(raw.gross_price, raw.grossPrice)) || 0,
     tax_price: Number(pierwszaWartosc(raw.tax_price, raw.taxPrice)) || 0,
   };
+}
+
+export function infaktKsefNumerZTekstu(value = '') {
+  let source = '';
+  try { source = typeof value === 'string' ? value : JSON.stringify(value); } catch { source = String(value || ''); }
+  const match = source.match(/(\d{10}-\d{8}-[A-Z0-9]{12}-[A-Z0-9]{2})/i);
+  return match ? match[1].toUpperCase() : '';
 }
 
 function znajdzXml(value, depth = 0) {

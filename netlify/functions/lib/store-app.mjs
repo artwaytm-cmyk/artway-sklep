@@ -49,7 +49,7 @@ import {
   ustawieniaPubliczneBezDanychPrywatnych,
   infaktDostawcyDozwoleni,
   infaktKsefPozycje,
-  infaktListaDokumentowKsef,
+  infaktKsefNumerZTekstu,
   infaktNazwaDostawcy,
   infaktNormalizujDokumentKosztowy,
   infaktParametryListyKsef,
@@ -685,7 +685,7 @@ function infaktCenaZakupuFields(product = {}, line = {}, invoice = {}, supplier 
 }
 async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = false } = {}) {
   const suppliers = await infaktDostawcyUstawienia(), previous = await czytaj('infakt_purchase_price_sync', { documents: {}, pendingItems: [], recentMatches: [], updated_at: null }), now = new Date().toISOString();
-  const report = { source: 'inFakt KSeF 2.0 XML', available: true, startedAt: now, updated_at: now, lastListAttemptAt: now, days, scannedDocuments: 0, allowedDocuments: 0, processedDocuments: 0, lineCount: 0, matchedCount: 0, priceUpdatedCount: 0, unchangedCount: 0, pendingCount: 0, errors: [], documents: { ...(previous.documents || {}) }, lineMappings: { ...(previous.lineMappings || {}) }, pendingItems: [], recentMatches: Array.isArray(previous.recentMatches) ? previous.recentMatches.slice(0, 200) : [] };
+  const report = { source: 'inFakt dokument kosztowy → KSeF XML', available: true, startedAt: now, updated_at: now, lastListAttemptAt: now, days, scannedDocuments: 0, allowedDocuments: 0, processedDocuments: 0, lineCount: 0, matchedCount: 0, priceUpdatedCount: 0, unchangedCount: 0, pendingCount: 0, errors: [], documents: { ...(previous.documents || {}) }, costDocuments: { ...(previous.costDocuments || {}) }, lineMappings: { ...(previous.lineMappings || {}) }, pendingItems: [], recentMatches: Array.isArray(previous.recentMatches) ? previous.recentMatches.slice(0, 200) : [] };
   if (!suppliers.items.length) { report.available = false; report.errors.push('Biała lista dostawców jest pusta.'); await zapisz('infakt_purchase_price_sync', report); return report; }
   const lastAttempt = Date.parse(previous.lastListAttemptAt || ''), cooldownMs = 11 * 60 * 1000;
   if (!force && Number.isFinite(lastAttempt) && Date.now() - lastAttempt < cooldownMs) return { ...previous, cooldown: true, nextListAt: new Date(lastAttempt + cooldownMs).toISOString(), message: 'Użyto ostatniego wyniku, aby nie przekroczyć limitu 6 listowań KSeF na godzinę.' };
@@ -699,42 +699,47 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
     report.errors.push(`Odczyt dokumentów kosztowych inFakt: ${tekst(error.message, 500)}`);
     await zapisz('infakt_purchase_price_sync', report); return report;
   }
-  const invoiceDates = [...new Set(costsResult.items.map(({ document }) => tekst(document.issue_date, 10)).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= since))].sort().reverse();
-  const previousDateQueries = previous.dateQueries && typeof previous.dateQueries === 'object' ? previous.dateQueries : {};
-  const targetDate = force ? invoiceDates[0] : invoiceDates.find((date) => previousDateQueries[date]?.status !== 'processed');
+  const uniqueCosts = new Map();
+  for (const entry of costsResult.items) {
+    const date = tekst(entry.document.issue_date, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < since) continue;
+    const key = `${entry.supplier.id}|${entry.document.number}|${date}|${entry.document.gross_price}`;
+    if (!uniqueCosts.has(key)) uniqueCosts.set(key, entry);
+  }
+  const costCandidates = [...uniqueCosts.values()].sort((a, b) => String(b.document.issue_date).localeCompare(String(a.document.issue_date)) || String(b.document.created_at || '').localeCompare(String(a.document.created_at || '')));
+  // Pięć dokumentów na przebieg utrzymuje czas funkcji w bezpiecznym zakresie;
+  // kolejne faktury przejmie następne wykonanie godzinne.
+  const batchLimit = Math.max(1, Math.min(5, Number(limit) || 5));
+  const selectedCosts = (force ? costCandidates : costCandidates.filter(({ document }) => !['processed', 'no_ksef'].includes(report.costDocuments[tekst(document.uuid, 200)]?.status))).slice(0, batchLimit);
   report.costDocumentsScanned = costsResult.scanned;
   report.allowedCostDocuments = costsResult.items.length;
-  report.availableInvoiceDates = invoiceDates.length;
-  report.dateQueries = { ...previousDateQueries };
-  if (!targetDate) {
+  if (!selectedCosts.length) {
     report.pendingItems = Array.isArray(previous.pendingItems) ? previous.pendingItems : [];
     report.pendingCount = report.pendingItems.length;
     report.recentMatches = Array.isArray(previous.recentMatches) ? previous.recentMatches.slice(0, 500) : [];
-    report.message = invoiceDates.length ? 'Wszystkie znalezione dni faktur zostały już przeanalizowane.' : 'Brak faktur dozwolonych dostawców w wybranym okresie.';
+    report.message = costCandidates.length ? 'Wszystkie znalezione faktury KSeF zostały już przeanalizowane.' : 'Brak faktur dozwolonych dostawców w wybranym okresie.';
     await zapisz('infakt_purchase_price_sync', report); return report;
   }
-  // KSeF 2.0 waliduje krótkie zakresy dat. Zapytanie o konkretny dzień
-  // wykorzystuje datę faktury odnalezioną wcześniej w dokumentach kosztowych.
-  const listParameters = { ...infaktParametryListyKsef({ days: 1, limit: 20 }), 'q[invoice_date_gteq]': targetDate, 'q[invoice_date_lteq]': targetDate };
-  let listData;
-  try { listData = await infaktWywolaj('/api/v3/ksef2/import/costs.json', { parameters: listParameters }); }
-  catch (error) {
-    report.available = false;
-    report.setupRequired = null;
-    report.pendingItems = Array.isArray(previous.pendingItems) ? previous.pendingItems : [];
-    report.pendingCount = report.pendingItems.length;
-    report.errors.push(Number(error.status) === 422
-      ? `inFakt odrzucił listę KSeF (HTTP 422) mimo poprawnego zakresu dat i limitu 25. System zachował dotychczasowe ceny i ponowi próbę po przerwie wymaganej przez inFakt. Szczegóły API: ${tekst(error.message, 240)}`
-      : `Odczyt faktur kosztowych KSeF: ${tekst(error.message, 500)}`);
-    await zapisz('infakt_purchase_price_sync', report); return report;
+  const invoices = [];
+  for (const { document, supplier } of selectedCosts) {
+    const costKey = tekst(document.uuid, 200);
+    try {
+      const detail = await infaktWywolaj(`/api/v3/documents/costs/${encodeURIComponent(costKey)}.json`);
+      const ksefNumber = infaktKsefNumerZTekstu(detail);
+      if (!ksefNumber) {
+        report.costDocuments[costKey] = { status: 'no_ksef', invoiceNumber: document.number, invoiceDate: document.issue_date, checkedAt: now };
+        continue;
+      }
+      invoices.push({ ksef_number: ksefNumber, invoice_number: document.number, invoice_date: document.issue_date, seller_name: document.seller_name, seller_tax_code: document.seller_tax_code, sourceCostUuid: costKey, sourceSupplierId: supplier.id });
+      report.costDocuments[costKey] = { status: 'identified', ksefNumber, invoiceNumber: document.number, invoiceDate: document.issue_date, checkedAt: now };
+    } catch (error) {
+      report.errors.push(`${tekst(document.number || costKey, 160)}: odczyt szczegółów kosztu — ${tekst(error.message, 300)}`);
+      report.costDocuments[costKey] = { status: 'error', error: tekst(error.message, 300), checkedAt: now };
+    }
   }
-  report.queryRange = { from: listParameters['q[invoice_date_gteq]'], to: listParameters['q[invoice_date_lteq]'], limit: listParameters.limit };
-  report.dateQueries[targetDate] = { status: 'listed', checkedAt: now };
-  const allInvoices = infaktListaDokumentowKsef(listData);
-  const invoices = allInvoices.filter((invoice) => infaktZnajdzDostawce(invoice, suppliers.items));
-  report.scannedDocuments = allInvoices.length; report.allowedDocuments = invoices.length;
+  report.scannedDocuments = selectedCosts.length; report.allowedDocuments = invoices.length;
   const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null }), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = allegroAgentProduktyCentralne(data), index = infaktIndeksProduktow(products), updater = allegroAktualizatorProduktowCentralnych(data);
-  const processedKeys = new Set(), batchLimit = Math.max(1, Math.min(50, Number(limit) || 25)), selectedInvoices = (force ? invoices : invoices.filter((invoice) => report.documents[tekst(invoice?.ksef_number, 200)]?.status !== 'processed')).slice(0, batchLimit).reverse();
+  const processedKeys = new Set(), selectedInvoices = invoices.filter((invoice) => force || report.documents[tekst(invoice?.ksef_number, 200)]?.status !== 'processed').reverse();
   for (const invoice of selectedInvoices) {
     const documentKey = tekst(invoice.ksef_number, 200); if (!documentKey) continue;
     const supplier = infaktZnajdzDostawce(invoice, suppliers.items);
@@ -757,10 +762,10 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
         }
       }
       report.documents[documentKey] = { status: 'processed', invoiceNumber: tekst(invoice.invoice_number, 120), invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || tekst(invoice.seller_name, 200), lines: lines.length, processedAt: now };
-    } catch (error) { report.errors.push(`${tekst(invoice.invoice_number || documentKey, 160)}: ${tekst(error.message, 400)}`); report.documents[documentKey] = { status: 'error', error: tekst(error.message, 400), processedAt: now }; }
+      if (invoice.sourceCostUuid) report.costDocuments[invoice.sourceCostUuid] = { ...(report.costDocuments[invoice.sourceCostUuid] || {}), status: 'processed', lines: lines.length, processedAt: now };
+    } catch (error) { report.errors.push(`${tekst(invoice.invoice_number || documentKey, 160)}: ${tekst(error.message, 400)}`); report.documents[documentKey] = { status: 'error', error: tekst(error.message, 400), processedAt: now }; if (invoice.sourceCostUuid) report.costDocuments[invoice.sourceCostUuid] = { ...(report.costDocuments[invoice.sourceCostUuid] || {}), status: 'error', error: tekst(error.message, 400), processedAt: now }; }
   }
   updater.commit(); if (updater.changed) await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-  report.dateQueries[targetDate] = { status: report.errors.length ? 'error' : 'processed', checkedAt: now, documents: invoices.length };
   const oldPending = Array.isArray(previous.pendingItems) ? previous.pendingItems : [], newKeys = new Set(report.pendingItems.map((x) => x.itemKey)); report.pendingItems = [...report.pendingItems, ...oldPending.filter((x) => !newKeys.has(x.itemKey) && !processedKeys.has(x.ksefNumber))].slice(0, 1000); report.pendingCount = report.pendingItems.length; report.lineMappings = { ...(previous.lineMappings || {}) }; report.recentMatches = report.recentMatches.slice(0, 500); report.updated_at = new Date().toISOString();
   await zapisz('infakt_purchase_price_sync', report); return report;
 }

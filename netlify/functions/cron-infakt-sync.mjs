@@ -1,8 +1,8 @@
 // Godzinne sprawdzenie asynchronicznych zadań inFakt oraz odczyt cen zakupu.
 // Harmonogram nie wystawia dokumentów samodzielnie — aktualizuje status faktur
 // utworzonych wcześniej i odczytuje pozycje kosztowe KSeF z białej listy dostawców.
-// Lista KSeF jest pobierana jednym zapytaniem dla konkretnej daty faktury
-// (ustalonej wcześniej z kosztów), aby respektować limity inFakt i jego walidację.
+// Numer KSeF jest odczytywany z załącznika zapisanego kosztu, a następnie
+// pobierany jest bezpośrednio XML — bez limitowanej listy importu KSeF.
 export const config = { schedule: '17 * * * *' };
 
 export default async () => {
