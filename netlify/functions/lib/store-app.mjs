@@ -32,6 +32,8 @@ const KLUCZE_WSPOLNE = [
   'artway_opinie',
   'artway_kosz_dodane',
   'artway_kosz_meta',
+  'artway_seo_ustawienia',
+  'artway_seo_historia',
 ];
 
 const LIMIT_USTAWIEN = 4 * 1024 * 1024; // 4 MB na komplet ustawień
@@ -4449,6 +4451,76 @@ async function zapiszPrzesylkeNaZamowieniu(nr, patch) {
   return { stary, nowy: z };
 }
 
+function seoBezHtml(value = '') {
+  return tekst(value, 30000).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
+}
+function seoSkroc(value, max) {
+  const clean = seoBezHtml(value);
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, Math.max(1, max - 1)).replace(/\s+\S*$/, '')}…`;
+}
+function seoPropozycja(p = {}) {
+  const name = tekst(p.nazwa, 500).trim() || 'Produkt', brand = tekst(p.producent || p.marka, 200).trim(), category = tekst(p.kategoria, 200).trim();
+  let title = `${name}${brand && !name.toLowerCase().includes(brand.toLowerCase()) ? ` – ${brand}` : ''}`;
+  if (title.length < 30 && category && !title.toLowerCase().includes(category.toLowerCase())) title += ` – ${category}`;
+  if (title.length < 30) title += ' | Artway-TM';
+  title = seoSkroc(title, 60);
+  let description = seoBezHtml(p.opisKrotki || p.krotkiOpis || p.opis);
+  if (!description) description = `${name}${category ? ` z kategorii ${category}` : ''}. Sprawdź szczegóły, dostępność i bezpieczne zakupy w Artway-TM.`;
+  if (description.length < 80) description += ' Poznaj opis, aktualną cenę i warunki dostawy w sklepie Artway-TM.';
+  const keywords = [...new Set([name, category, brand, p.gtin || p.ean, p.sku].map((v) => tekst(v, 500).trim()).filter(Boolean))].slice(0, 8).join(', ');
+  return { seoTitle: title, seoDescription: seoSkroc(description, 158), seoKeywords: keywords };
+}
+function seoOcena(p = {}) {
+  const title = tekst(p.seoTitle, 500), description = tekst(p.seoDescription, 1000), full = seoBezHtml(p.opis); let score = 0;
+  if (title.length >= 30 && title.length <= 65) score += 18;
+  if (description.length >= 80 && description.length <= 165) score += 18;
+  if (full.length >= 250) score += 16;
+  if (p.zdjecie) score += 12;
+  if (p.kategoria) score += 8;
+  if (p.gtin || p.ean) score += 8;
+  if (p.producent || p.marka) score += 7;
+  if (Number(p.cena) > 0) score += 7;
+  if (p.sourceUrl || p.producentUrl) score += 3;
+  if (p.seoReviewedAt) score += 3;
+  return Math.min(100, score);
+}
+function seoProduktyCentralne(data = {}) {
+  const map = new Map(), add = (p = {}) => { const id = tekst(p.id, 100).trim(); if (id) map.set(id, { ...(map.get(id) || {}), ...p, id }); };
+  for (const p of Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []) add(p);
+  for (const p of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) add(p);
+  for (const [id, p] of Object.entries(data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? data.artway_produkty_edytowane : {})) add({ ...(p || {}), id });
+  const hidden = new Set([...(Array.isArray(data.artway_produkty_ukryte) ? data.artway_produkty_ukryte : []), ...(Array.isArray(data.artway_produkty_definitywne) ? data.artway_produkty_definitywne : []), ...(Array.isArray(data.artway_kosz_dodane) ? data.artway_kosz_dodane.map((x) => x?.id) : [])].map(String));
+  return [...map.values()].filter((p) => !hidden.has(String(p.id)));
+}
+function seoZastosujPatch(data, id, patch) {
+  const key = String(id), added = Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : [], index = added.findIndex((p) => String(p?.id) === key);
+  if (index >= 0) { data.artway_produkty_dodane = added.slice(); data.artway_produkty_dodane[index] = { ...data.artway_produkty_dodane[index], ...patch }; }
+  else { const edited = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {}; edited[key] = { ...(edited[key] || {}), ...patch }; data.artway_produkty_edytowane = edited; }
+  if (Array.isArray(data.artway_produkty_katalog)) data.artway_produkty_katalog = data.artway_produkty_katalog.map((p) => String(p?.id) === key ? { ...p, ...patch } : p);
+}
+async function seoWykonajDziennyPlan({ limit, source } = {}) {
+  const rec = await czytaj('settings', { data: {}, rev: 0 }), data = rec.data && typeof rec.data === 'object' ? { ...rec.data } : {}, config = { enabled: true, dailyLimit: 5, autoFillMissing: true, preferBestsellers: true, ...(data.artway_seo_ustawienia || {}) };
+  const amount = Math.max(1, Math.min(50, Number(limit || config.dailyLimit) || 5));
+  if (config.enabled === false && String(source || '').startsWith('scheduled')) return { processed: 0, skipped: true, reason: 'disabled' };
+  const today = new Date().toISOString().slice(0, 10), products = seoProduktyCentralne(data).map((product) => ({ product, score: seoOcena(product) })).sort((a, b) => {
+    const ap = a.product.seoPromoted || a.product.badge ? 1 : 0, bp = b.product.seoPromoted || b.product.badge ? 1 : 0;
+    if (config.preferBestsellers !== false && bp !== ap) return bp - ap;
+    return a.score - b.score || String(a.product.seoReviewedAt || '').localeCompare(String(b.product.seoReviewedAt || ''));
+  });
+  const fresh = products.filter((x) => !String(x.product.seoReviewedAt || '').startsWith(today)), selected = fresh.slice(0, amount), now = new Date().toISOString();
+  for (const item of selected) {
+    const proposal = seoPropozycja(item.product), patch = { seoReviewedAt: now, seoSource: tekst(source || 'scheduled', 100), seoScore: 0 };
+    if (config.autoFillMissing !== false) { if (!item.product.seoTitle) patch.seoTitle = proposal.seoTitle; if (!item.product.seoDescription) patch.seoDescription = proposal.seoDescription; if (!item.product.seoKeywords) patch.seoKeywords = proposal.seoKeywords; }
+    patch.seoScore = seoOcena({ ...item.product, ...patch }); seoZastosujPatch(data, item.product.id, patch);
+  }
+  data.artway_seo_ustawienia = { ...config, dailyLimit: amount, lastRunAt: now, lastRunCount: selected.length };
+  const history = Array.isArray(data.artway_seo_historia) ? data.artway_seo_historia : [];
+  data.artway_seo_historia = [{ id: `seo-${Date.now()}`, at: now, type: 'daily', source: tekst(source || 'scheduled', 100), count: selected.length, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })) }, ...history].slice(0, 500);
+  const saved = { data, rev: Number(rec.rev || 0) + 1, updated_at: now }; await zapisz('settings', saved);
+  return { processed: selected.length, limit: amount, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })), updated_at: now, rev: saved.rev };
+}
+
 export default async (req) => {
   const url = new URL(req.url);
   const action = url.searchParams.get('action') || 'health';
@@ -4456,6 +4528,12 @@ export default async (req) => {
   if (req.method === 'OPTIONS') return odpowiedz({ ok: true });
 
   try {
+    if (action === 'seo-daily-run') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({})), result = await seoWykonajDziennyPlan({ limit: body.limit, source: body.source || 'manual-admin' });
+      return odpowiedz({ ok: true, ...result });
+    }
     // ─── ZDROWIE / STATUS ───
     if (action === 'health') {
       const s = await czytaj('settings', { updated_at: null });

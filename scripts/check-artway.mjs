@@ -14,6 +14,9 @@ const files = [
   'netlify/functions/cron-allegro-offers.mjs',
   'netlify/functions/cron-supplier-availability.mjs',
   'netlify/functions/cron-infakt-sync.mjs',
+  'netlify/functions/cron-seo-daily.mjs',
+  'netlify/functions/sitemap.mjs',
+  'robots.txt',
 ];
 
 function fail(message) {
@@ -48,6 +51,9 @@ const cronAllegroCommunications = read('netlify/functions/cron-allegro-communica
 const cronAllegroOffers = read('netlify/functions/cron-allegro-offers.mjs');
 const cronSupplierAvailability = read('netlify/functions/cron-supplier-availability.mjs');
 const cronInfaktSync = read('netlify/functions/cron-infakt-sync.mjs');
+const cronSeoDaily = read('netlify/functions/cron-seo-daily.mjs');
+const sitemap = read('netlify/functions/sitemap.mjs');
+const robots = read('robots.txt');
 
 const version = index.match(/<meta\s+name=["']artway-version["']\s+content=["']([^"']+)/i)?.[1] || '';
 if (!version) fail('index.html: brak meta artway-version');
@@ -91,6 +97,9 @@ requireMarkers('assets/styles.css', css, [
   '.infakt-hero',
   '.infakt-order-card',
   '.store-duplicate-center',
+  '.assortment-search-primary',
+  '.seo-hero',
+  '.seo-technical-grid',
   '.modal',
 ]);
 
@@ -99,6 +108,14 @@ requireMarkers('assets/app.js', app, [
   'function zlozZamowienie',
   'function widokAdmin',
   'function widokAdminMagazyn',
+  'function magazynSzukajProdukty',
+  'function asortymentSzukajProdukty',
+  'function widokAdminSEO',
+  'function seoUruchomPlanDzienny',
+  'function seoEksportujFeedGoogleCSV',
+  'function seoAktualizujMetaDlaTrasy',
+  'artway_seo_ustawienia',
+  'product-seo-editor',
   'function widokAdminAgentAI',
   'artway_dostepnosc',
   'LIMIT_POTWIERDZENIA_DOSTEPNOSCI',
@@ -324,6 +341,8 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "'/pricing/offer-fee-preview'",
   'allegro_fee_preview_audit',
   "action === 'supplier-availability-sample'",
+  "action === 'seo-daily-run'",
+  'function seoWykonajDziennyPlan',
   "action === 'product-url-prepare'",
   'function przygotujPakietProduktuZLinku',
   'function produktLinkDuplikaty',
@@ -534,13 +553,32 @@ requireMarkers('netlify/functions/cron-infakt-sync.mjs', cronInfaktSync, [
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
+requireMarkers('netlify/functions/cron-seo-daily.mjs', cronSeoDaily, [
+  "schedule: '15 4 * * *'",
+  'seo-daily-run',
+  'scheduled-seo-daily',
+  'ARTWAY_ADMIN_TOKEN',
+]);
+
+requireMarkers('netlify/functions/sitemap.mjs', sitemap, [
+  'sitemaps.org/schemas/sitemap',
+  'artway_produkty_katalog',
+  'artway_produkty_ukryte',
+  '/produkt/',
+]);
+
+requireMarkers('robots.txt', robots, [
+  'User-agent: *',
+  'Sitemap: https://artwaytm.pl/sitemap.xml',
+]);
+
 try {
   new Function(app);
 } catch (error) {
   fail(`assets/app.js: błąd składni: ${error.message}`);
 }
 
-for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs', 'netlify/functions/cron-infakt-sync.mjs']) {
+for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs', 'netlify/functions/cron-infakt-sync.mjs', 'netlify/functions/cron-seo-daily.mjs', 'netlify/functions/sitemap.mjs']) {
   try {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
   } catch (error) {

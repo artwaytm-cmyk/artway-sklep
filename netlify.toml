@@ -18,6 +18,17 @@
   status = 200
   force = true
 
+[[redirects]]
+  from = "/sitemap.xml"
+  to = "/.netlify/functions/sitemap"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/produkt/*"
+  to = "/index.html"
+  status = 200
+
 [[headers]]
   for = "/.netlify/functions/*"
   [headers.values]

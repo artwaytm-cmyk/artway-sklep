@@ -244,6 +244,9 @@ let koszDodanych = wczytajLS("artway_kosz_dodane", []); // kosz: usunięte produ
 let koszMeta = wczytajLS("artway_kosz_meta", {});      // id → data usunięcia i typ; automatyczne czyszczenie po 30 dniach
 let produktyDefinitywne = wczytajLS("artway_produkty_definitywne", []); // bazowe produkty usunięte po okresie kosza
 let opinie = wczytajLS("artway_opinie", []);          // opinie klientów (moderowane w panelu)
+const SEO_USTAWIENIA_DOMYSLNE={enabled:true,dailyLimit:5,autoFillMissing:true,preferBestsellers:true,searchConsoleReady:false,merchantCenterReady:false,businessProfileReady:false,lastRunAt:"",lastRunCount:0};
+let seoUstawienia={...SEO_USTAWIENIA_DOMYSLNE,...wczytajLS("artway_seo_ustawienia",{})};
+let seoHistoria=wczytajLS("artway_seo_historia",[]);
 let ulubione = wczytajLS("artway_ulubione", []);
 let rabat = wczytajLS("artway_rabat", null);
 let sesja = wczytajLS("artway_sesja", null);
@@ -283,7 +286,7 @@ let agentAIPlanStan={busy:false,current:"",startedAt:null,completedAt:null,resul
    na pamięci przeglądarki (localStorage) jak dotychczas. */
 const CHMURA_URL = "/.netlify/functions/store";
 const CHMURA_AUTO_SYNC_MS = 60000;
-const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta","artway_seo_ustawienia","artway_seo_historia"];
 let chmuraToken = (function(){ try{ return JSON.parse(localStorage.getItem("artway_chmura_token"))||""; }catch(e){ return ""; } })();
 let chmuraStan = {dostepna:false, sprawdzono:false, admin:false, rev:0, updated_at:null, error:"", ostatniZapis:0};
 let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z serwera
@@ -354,7 +357,7 @@ function filtrujAktywneZamowienia(lista){
 }
 function zbierzWspolneUstawienia(){
   const katalogAllegro=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>({
-    id:p.id,nazwa:p.nazwa||"",sku:p.sku||"",externalId:p.externalId||"",gtin:p.gtin||p.ean||"",ean:p.ean||p.gtin||"",kodProducenta:p.kodProducenta||p.mpn||"",mpn:p.mpn||p.kodProducenta||"",producent:p.producent||p.marka||"",marka:p.marka||p.producent||"",cena:p.cena||0,cenaAllegro:p.cenaAllegro||0,cenaZakupu:p.cenaZakupu||0,producentUrl:p.producentUrl||p.sourceUrl||"",sourceUrl:p.sourceUrl||p.producentUrl||"",dostepnoscProducenta:p.dostepnoscProducenta||"",stanProducenta:p.stanProducenta??"",stanProducentaDokladny:!!p.stanProducentaDokladny,stanProducentaZrodlo:p.stanProducentaZrodlo||"",producentStatus:p.producentStatus||"",producentSprawdzonoAt:p.producentSprawdzonoAt||"",producentOstatniBlad:p.producentOstatniBlad||"",producentAlertAktywny:!!p.producentAlertAktywny,allegroCommissionAmount:p.allegroCommissionAmount||0,allegroCommissionRate:p.allegroCommissionRate||0,allegroRecurringFees:p.allegroRecurringFees||0,allegroFeeCalculatedAt:p.allegroFeeCalculatedAt||"",allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI,kosztPakowania:p.kosztPakowania||0,sklepAdditionalCost:p.sklepAdditionalCost||0,sklepPaymentPercent:p.sklepPaymentPercent||0,allegroAdditionalCost:p.allegroAdditionalCost||0,allegroAdsPercent:p.allegroAdsPercent||0
+    id:p.id,nazwa:p.nazwa||"",opisKrotki:p.opisKrotki||p.krotkiOpis||"",opis:p.opis||"",kategoria:p.kategoria||"",zdjecie:p.zdjecie||"",ikona:p.ikona||"",sku:p.sku||"",externalId:p.externalId||"",gtin:p.gtin||p.ean||"",ean:p.ean||p.gtin||"",kodProducenta:p.kodProducenta||p.mpn||"",mpn:p.mpn||p.kodProducenta||"",producent:p.producent||p.marka||"",marka:p.marka||p.producent||"",cena:p.cena||0,cenaAllegro:p.cenaAllegro||0,cenaZakupu:p.cenaZakupu||0,allegroOfferId:p.allegroOfferId||"",producentUrl:p.producentUrl||p.sourceUrl||"",sourceUrl:p.sourceUrl||p.producentUrl||"",dostepnoscProducenta:p.dostepnoscProducenta||"",stanProducenta:p.stanProducenta??"",stanProducentaDokladny:!!p.stanProducentaDokladny,stanProducentaZrodlo:p.stanProducentaZrodlo||"",producentStatus:p.producentStatus||"",producentSprawdzonoAt:p.producentSprawdzonoAt||"",producentOstatniBlad:p.producentOstatniBlad||"",producentAlertAktywny:!!p.producentAlertAktywny,allegroCommissionAmount:p.allegroCommissionAmount||0,allegroCommissionRate:p.allegroCommissionRate||0,allegroRecurringFees:p.allegroRecurringFees||0,allegroFeeCalculatedAt:p.allegroFeeCalculatedAt||"",allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI,kosztPakowania:p.kosztPakowania||0,sklepAdditionalCost:p.sklepAdditionalCost||0,sklepPaymentPercent:p.sklepPaymentPercent||0,allegroAdditionalCost:p.allegroAdditionalCost||0,allegroAdsPercent:p.allegroAdsPercent||0,seoTitle:p.seoTitle||"",seoDescription:p.seoDescription||"",seoKeywords:p.seoKeywords||"",seoScore:Number(p.seoScore)||0,seoReviewedAt:p.seoReviewedAt||"",seoPromoted:!!p.seoPromoted
   }));
   return {
     artway_ustawienia: ustawienia,
@@ -380,6 +383,8 @@ function zbierzWspolneUstawienia(){
     artway_opinie: opinie,
     artway_kosz_dodane: koszDodanych,
     artway_kosz_meta: koszMeta,
+    artway_seo_ustawienia: seoUstawienia,
+    artway_seo_historia: seoHistoria,
   };
 }
 function nalozWspolneUstawienia(dane){
@@ -409,6 +414,8 @@ function nalozWspolneUstawienia(dane){
       artway_agent_ai_allegro_zadania:(v)=>{agentAIAllegroZadania=Array.isArray(v)?v:[];},
       artway_opinie:(v)=>{opinie=v;},
       artway_kosz_dodane:(v)=>{koszDodanych=v;}, artway_kosz_meta:(v)=>{koszMeta=v;},
+      artway_seo_ustawienia:(v)=>{seoUstawienia={...SEO_USTAWIENIA_DOMYSLNE,...((v&&typeof v==="object")?v:{})};},
+      artway_seo_historia:(v)=>{seoHistoria=Array.isArray(v)?v:[];},
     };
     for(const k of Object.keys(setter)){
       if(k in dane && dane[k]!==undefined && dane[k]!==null){ setter[k](dane[k]); zapiszLS(k, dane[k]); }
@@ -2045,7 +2052,12 @@ async function wczytajProdukty(){
 }
 
 /* ═══════════ ROUTER (podstrony) ═══════════ */
-function trasa(){ return (location.hash || "#/").replace(/^#/,"").split("?")[0]; }
+function trasa(){
+  const path=String(location.pathname||"").replace(/\/+$/,"")||"/";
+  if(location.hash)return location.hash.replace(/^#/,"").split("?")[0]||"/";
+  if(/^\/produkt\/\d+$/i.test(path))return path;
+  return "/";
+}
 function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
 function renderuj(){
   try{
@@ -2102,6 +2114,8 @@ function renderuj(){
         if(!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
         if(!agentAIPlanStan.history.length&&!agentAIPlanStan.historyLoading) setTimeout(()=>agentAIPobierzHistorieWykonan(true),0);
       }
+      else if(t==="/admin/seo") w.innerHTML = widokAdminSEO("pulpit");
+      else if(t.startsWith("/admin/seo/")) w.innerHTML = widokAdminSEO(t.split("/")[3]||"pulpit");
       else if(t.startsWith("/admin/asortyment/")){
         const s=t.split("/")[3]||"produkty";
         w.innerHTML = s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabaty():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
@@ -2137,6 +2151,7 @@ function renderuj(){
     }
     else w.innerHTML = `<div class="page"><div class="panel"><h1>404 — nie ma takiej strony 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
     if(t==="/"||t==="") { rysujChipy(); rysuj(); }
+    seoAktualizujMetaDlaTrasy(t);
     if(t==="/admin/aktualizacja"&&!stanAktualizacji.sprawdzono&&!stanAktualizacji.ladowanie) setTimeout(()=>sprawdzStatusAktualizacji(true),0);
   }catch(e){
     loguj("blad", "Błąd renderowania strony: "+e.message, trasa());
@@ -3075,6 +3090,7 @@ const MENU_ADMINA = [
   ["/admin/magazyn","🏬 Magazyn"],
   ["/admin/infakt","🧾 inFakt i faktury"],
   ["/admin/agent-ai","🤖 Agent AI"],
+  ["/admin/seo","📣 Pozycjonowanie"],
   ["/admin/asortyment","🏷️ Asortyment"],
   ["/admin/klienci","👥 Klienci"],
   ["/admin/personalizacja","🎨 Personalizacja i ustawienia"],
@@ -3089,7 +3105,8 @@ function adminSzkielet(aktywna, tresc){
     "/admin/magazyn": produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{const s=stanMagazynuId(p.id),prog=Number(ustawieniaMagazynuPelne().progNiski)||5;return s!==null&&s<=prog;}).length,
     "/admin/infakt": pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane"&&(z.klient?.nip||z.klient?.firma)&&!infaktStan.links?.[z.nr]&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length,
     "/admin/agent-ai": agentAIAnalizaAktywna(agentAIAnaliza()).length,
-    "/admin/asortyment": opinie.filter(o=>o.status==="oczekuje").length
+    "/admin/asortyment": opinie.filter(o=>o.status==="oczekuje").length,
+    "/admin/seo": seoKolejkaProduktow().filter(x=>x.score<85).length
   };
   return `
   <div class="admin-page">
@@ -4170,6 +4187,84 @@ function asortymentSzkielet(tab, tresc){
   return adminSzkielet("/admin/asortyment", `
     ${adminSubnavHTML(TABY_ASORTYMENTU.map(([id,label])=>({id,href:`#/admin/asortyment/${id}`,label})),tab)}
     ${tresc}`);
+}
+
+/* Pozycjonowanie i darmowa promocja — bez płatnych API i bez sztucznych zmian treści. */
+const TABY_SEO=[
+  ["pulpit","📊 Pulpit"],["plan","🗓️ Plan dzienny"],["produkty","🏷️ Produkty SEO"],["tresci","✍️ Frazy i treści"],
+  ["promocja","📣 Darmowa promocja"],["techniczne","🛠️ Techniczne SEO"],["historia","🧾 Historia"],["ustawienia","⚙️ Ustawienia"]
+];
+function seoSzkielet(tab,tresc){return adminSzkielet("/admin/seo",`${adminSubnavHTML(TABY_SEO.map(([id,label])=>({id,href:`#/admin/seo/${id}`,label})),tab)}${tresc}`);}
+function seoTekstBezHTML(value=""){const el=document.createElement("div");el.innerHTML=String(value||"");return String(el.textContent||"").replace(/\s+/g," ").trim();}
+function seoPropozycjaProduktu(p={}){
+  const brand=String(p.producent||p.marka||"").trim(),category=String(p.kategoria||"").trim();
+  let title=[p.nazwa,brand&&!String(p.nazwa||"").toLowerCase().includes(brand.toLowerCase())?brand:""].filter(Boolean).join(" – ");if(title.length<30&&category&&!title.toLowerCase().includes(category.toLowerCase()))title+=` – ${category}`;if(title.length<30)title+=` | Artway-TM`;title=skrocTekst(title,60);
+  const source=seoTekstBezHTML(p.opisKrotki||p.krotkiOpis||p.opis||"");
+  let description=source||`${p.nazwa||"Produkt"}${category?` z kategorii ${category}`:""}. Sprawdź szczegóły, dostępność i bezpieczne zakupy w Artway-TM.`;
+  if(description.length<80)description=`${description} Poznaj opis, aktualną cenę i warunki dostawy w sklepie Artway-TM.`;
+  description=skrocTekst(description,158);
+  const keywords=[p.nazwa,category,brand,p.gtin||p.ean,p.sku].filter(Boolean).flatMap(v=>String(v).split(/[|,;/]+/)).map(v=>v.trim()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).slice(0,8).join(", ");
+  return {seoTitle:title,seoDescription:description,seoKeywords:keywords};
+}
+function seoOcenaProduktu(p={}){
+  const proposed=seoPropozycjaProduktu(p),title=String(p.seoTitle||""),desc=String(p.seoDescription||""),full=seoTekstBezHTML(p.opis||""),issues=[];let score=0;
+  if(title.length>=30&&title.length<=65)score+=18;else issues.push("tytuł SEO");
+  if(desc.length>=80&&desc.length<=165)score+=18;else issues.push("opis SEO");
+  if(full.length>=250)score+=16;else issues.push("pełny opis");
+  if(p.zdjecie)score+=12;else issues.push("zdjęcie");
+  if(p.kategoria)score+=8;else issues.push("kategoria");
+  if(p.gtin||p.ean)score+=8;else issues.push("EAN/GTIN");
+  if(p.producent||p.marka)score+=7;else issues.push("producent");
+  if(Number(p.cena)>0)score+=7;else issues.push("cena");
+  if(p.sourceUrl||p.producentUrl)score+=3;else issues.push("źródło");
+  if(p.seoReviewedAt)score+=3;
+  return {score:Math.min(100,score),issues,proposed};
+}
+function seoKolejkaProduktow(){
+  const hidden=new Set([...(produktyUkryte||[]),...(produktyDefinitywne||[]),...(koszDodanych||[]).map(x=>x.id)].map(String));
+  return produktyDoAdministracji().filter(p=>!hidden.has(String(p.id))).map(p=>({...seoOcenaProduktu(p),product:p})).sort((a,b)=>{
+    const ap=a.product.seoPromoted||a.product.badge?1:0,bp=b.product.seoPromoted||b.product.badge?1:0;
+    if(seoUstawienia.preferBestsellers!==false&&bp!==ap)return bp-ap;
+    return a.score-b.score||String(a.product.seoReviewedAt||"").localeCompare(String(b.product.seoReviewedAt||""))||String(a.product.nazwa||"").localeCompare(String(b.product.nazwa||""),"pl");
+  });
+}
+function seoZapiszLokalnie(id,patch){zapiszPolaProduktuLokalnie(id,patch,false);}
+function seoWykonajPlanLokalny(limit=seoUstawienia.dailyLimit,source="ręcznie"){
+  const amount=Math.max(1,Math.min(50,Number(limit)||5)),today=new Date().toISOString().slice(0,10),queue=seoKolejkaProduktow(),fresh=queue.filter(x=>!String(x.product.seoReviewedAt||"").startsWith(today)),selected=fresh.slice(0,amount),now=new Date().toISOString();
+  for(const item of selected){const p=item.product,proposal=item.proposed,patch={seoReviewedAt:now,seoSource:source,seoScore:seoOcenaProduktu({...p,...proposal,seoReviewedAt:now}).score};if(seoUstawienia.autoFillMissing!==false){if(!p.seoTitle)patch.seoTitle=proposal.seoTitle;if(!p.seoDescription)patch.seoDescription=proposal.seoDescription;if(!p.seoKeywords)patch.seoKeywords=proposal.seoKeywords;}seoZapiszLokalnie(p.id,patch);}
+  seoUstawienia={...seoUstawienia,lastRunAt:now,lastRunCount:selected.length};seoHistoria=[{id:`seo-${Date.now()}`,at:now,type:"daily",source,count:selected.length,products:selected.map(x=>({id:x.product.id,name:x.product.nazwa,scoreBefore:x.score}))},...(seoHistoria||[])].slice(0,500);
+  zapiszLS("artway_seo_ustawienia",seoUstawienia);zapiszLS("artway_seo_historia",seoHistoria);zaplanujZapisUstawien();zbudujProdukty();return selected;
+}
+async function seoUruchomPlanDzienny(button){
+  if(button)button.disabled=true;try{const d=await chmura("seo-daily-run",{method:"POST",body:{limit:seoUstawienia.dailyLimit,source:"manual-admin"},timeout:60000});await chmuraWczytajStan();zbudujProdukty();toast(`✅ Plan SEO: opracowano ${d.processed||0} produktów`);}catch(e){const done=seoWykonajPlanLokalny(seoUstawienia.dailyLimit,"lokalnie — synchronizacja oczekuje");toast(`✅ Plan SEO wykonany lokalnie: ${done.length} produktów`);}finally{if(button)button.disabled=false;renderuj();}
+}
+function zapiszSeoUstawienia(event){event.preventDefault();const f=new FormData(event.currentTarget),limit=Math.max(1,Math.min(50,Number(f.get("dailyLimit"))||5));seoUstawienia={...seoUstawienia,enabled:f.get("enabled")==="on",autoFillMissing:f.get("autoFillMissing")==="on",preferBestsellers:f.get("preferBestsellers")==="on",dailyLimit:limit,searchConsoleReady:f.get("searchConsoleReady")==="on",merchantCenterReady:f.get("merchantCenterReady")==="on",businessProfileReady:f.get("businessProfileReady")==="on"};zapiszLS("artway_seo_ustawienia",seoUstawienia);zaplanujZapisUstawien();toast("Ustawienia pozycjonowania zapisane ✅");renderuj();}
+function seoUstawLimit(value){const input=document.querySelector('[name="dailyLimit"]');if(input){input.value=value;input.focus();}}
+function seoPrzelaczPromowanie(id){const p=pobierzProduktAdmin(Number(id));if(!p)return;seoZapiszLokalnie(id,{seoPromoted:!p.seoPromoted,seoPromotedAt:!p.seoPromoted?new Date().toISOString():""});zaplanujZapisUstawien();zbudujProdukty();toast(!p.seoPromoted?"Produkt dodany do darmowej promocji 📣":"Produkt usunięty z planu promocji");renderuj();}
+function seoUzupelnijProdukt(id){const p=pobierzProduktAdmin(Number(id));if(!p)return;const proposal=seoPropozycjaProduktu(p),now=new Date().toISOString(),patch={seoTitle:p.seoTitle||proposal.seoTitle,seoDescription:p.seoDescription||proposal.seoDescription,seoKeywords:p.seoKeywords||proposal.seoKeywords,seoReviewedAt:now,seoSource:"ręczna kontrola SEO"};patch.seoScore=seoOcenaProduktu({...p,...patch}).score;seoZapiszLokalnie(id,patch);seoHistoria=[{id:`seo-${Date.now()}-${id}`,at:now,type:"single",source:"ręczna kontrola SEO",count:1,products:[{id:p.id,name:p.nazwa,scoreBefore:seoOcenaProduktu(p).score}]},...(seoHistoria||[])].slice(0,500);zapiszLS("artway_seo_historia",seoHistoria);zaplanujZapisUstawien();zbudujProdukty();toast("Metadane SEO produktu uzupełnione ✅");renderuj();}
+async function seoUdostepnijProdukt(id){const p=pobierzProduktAdmin(Number(id));if(!p)return;const url=`${location.origin}/produkt/${encodeURIComponent(p.id)}`,data={title:p.seoTitle||p.nazwa,text:p.seoDescription||opisKrotkiProduktu(p),url};try{if(navigator.share)await navigator.share(data);else{await navigator.clipboard.writeText(`${data.title}\n${data.text}\n${url}`);toast("Skopiowano gotowy, bezpłatny materiał promocyjny 📋");}}catch(e){if(e?.name!=="AbortError")toast("Nie udało się udostępnić materiału");}}
+function seoCSV(value){const s=String(value??"");return `"${s.replace(/"/g,'""')}"`;}
+function seoEksportujFeedGoogleCSV(){const rows=[["id","title","description","link","image_link","availability","price","brand","gtin","mpn","condition"],...produkty.filter(p=>!produktOznaczonyNiedostepny(p)&&Number(p.cena)>0).map(p=>[p.externalId||p.sku||p.id,p.seoTitle||p.nazwa,p.seoDescription||seoPropozycjaProduktu(p).seoDescription,`${location.origin}/produkt/${p.id}`,p.zdjecie||"","in_stock",`${Number(p.cena).toFixed(2)} PLN`,p.producent||p.marka||"",p.gtin||p.ean||"",p.mpn||p.kodProducenta||p.sku||"","new"])];pobierzPlik(`google-free-listings-${new Date().toISOString().slice(0,10)}.csv`,`\ufeff${rows.map(r=>r.map(seoCSV).join(",")).join("\n")}`,"text/csv");}
+function seoFiltrujTabele(value){const q=String(value||"").trim().toLowerCase();document.querySelectorAll("[data-seo-product-row]").forEach(row=>{row.hidden=!!q&&!String(row.dataset.search||"").includes(q);});}
+function seoScoreBadge(score){return `<span class="seo-score ${score>=85?"good":score>=60?"medium":"bad"}">${score}/100</span>`;}
+function seoProduktRows(items,limit=200){return items.slice(0,limit).map(x=>{const p=x.product,search=`${p.nazwa} ${p.externalId||""} ${p.sku||""} ${p.gtin||p.ean||""} ${p.kategoria||""} ${p.producent||""}`.toLowerCase();return `<tr data-seo-product-row data-search="${esc(search)}"><td>${p.zdjecie?`<img class="seo-product-thumb" src="${esc(p.zdjecie)}" alt="">`:esc(p.ikona||"📦")}</td><td><b>${esc(p.nazwa)}</b><br><small>${esc(p.externalId||p.sku||`ID ${p.id}`)} • ${esc(p.kategoria||"bez kategorii")}</small></td><td>${seoScoreBadge(x.score)}</td><td>${x.issues.length?esc(x.issues.slice(0,4).join(", ")):`<span class="lvl lvl-ok">kompletne</span>`}</td><td>${p.seoReviewedAt?esc(allegroDataTxt(p.seoReviewedAt)):"nigdy"}</td><td class="seo-row-actions"><button class="btn ghost" onclick="seoUzupelnijProdukt(${jsArg(p.id)})">✨ Uzupełnij SEO</button><button class="btn ghost" onclick="seoPrzelaczPromowanie(${jsArg(p.id)})">${p.seoPromoted?"✓ Promowany":"📣 Promuj"}</button><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj</a></td></tr>`;}).join("")||`<tr><td colspan="6">Brak produktów.</td></tr>`;}
+function seoAktualizujMetaDlaTrasy(route=trasa()){
+  const ensure=(selector,create)=>{let el=document.head.querySelector(selector);if(!el){el=document.createElement(create.tag||"meta");for(const [k,v] of Object.entries(create.attrs||{}))el.setAttribute(k,v);document.head.appendChild(el);}return el;},setMeta=(name,value,property=false)=>{const attr=property?"property":"name",el=ensure(`meta[${attr}="${name}"]`,{tag:"meta",attrs:{[attr]:name}});el.setAttribute("content",String(value||""));};
+  const baseTitle=ustawienia.nazwaSklepu||"Artway-TM",baseDesc=ustawienia.opisSklepu||"Gry, zabawki i produkty edukacyjne w sklepie Artway-TM.";let title=baseTitle,desc=baseDesc,canonical=location.origin+"/",schema={"@context":"https://schema.org","@type":"WebSite",name:baseTitle,url:canonical};
+  if(route.startsWith("/produkt/")){const p=produkty.find(x=>String(x.id)===String(route.split("/")[2]));if(p){title=p.seoTitle||`${p.nazwa} | ${baseTitle}`;desc=p.seoDescription||seoPropozycjaProduktu(p).seoDescription;canonical=`${location.origin}/produkt/${p.id}`;schema={"@context":"https://schema.org","@type":"Product",name:p.nazwa,description:seoTekstBezHTML(p.opis||desc),image:[p.zdjecie,...(p.zdjecia||[])].filter(Boolean),sku:p.sku||p.externalId||String(p.id),gtin13:p.gtin||p.ean||undefined,brand:(p.producent||p.marka)?{"@type":"Brand",name:p.producent||p.marka}:undefined,offers:{"@type":"Offer",url:canonical,priceCurrency:"PLN",price:Number(p.cena||0).toFixed(2),availability:produktOznaczonyNiedostepny(p)?"https://schema.org/OutOfStock":"https://schema.org/InStock",itemCondition:"https://schema.org/NewCondition"}};}}
+  document.title=title;setMeta("description",desc);setMeta("robots",route.startsWith("/admin")||["/logowanie","/konto","/zamowienia"].includes(route)?"noindex,nofollow":"index,follow,max-image-preview:large");setMeta("og:title",title,true);setMeta("og:description",desc,true);setMeta("og:url",canonical,true);setMeta("og:type",route.startsWith("/produkt/")?"product":"website",true);
+  let link=document.head.querySelector('link[rel="canonical"]');if(!link){link=document.createElement("link");link.rel="canonical";document.head.appendChild(link);}link.href=canonical;let script=document.getElementById("artway-seo-schema");if(!script){script=document.createElement("script");script.id="artway-seo-schema";script.type="application/ld+json";document.head.appendChild(script);}script.textContent=JSON.stringify(schema);
+}
+function widokAdminSEO(sekcja="pulpit"){
+  const tab=TABY_SEO.some(([id])=>id===sekcja)?sekcja:"pulpit",queue=seoKolejkaProduktow(),limit=Math.max(1,Math.min(50,Number(seoUstawienia.dailyLimit)||5)),daily=queue.filter(x=>!String(x.product.seoReviewedAt||"").startsWith(new Date().toISOString().slice(0,10))).slice(0,limit),good=queue.filter(x=>x.score>=85).length,missing=queue.filter(x=>x.score<60).length,promoted=queue.filter(x=>x.product.seoPromoted),avg=queue.length?Math.round(queue.reduce((s,x)=>s+x.score,0)/queue.length):0;
+  const head=`<div class="panel seo-hero"><div><span class="order-pro-label">Bezpłatny rozwój widoczności</span><h1>📣 Pozycjonowanie i promocja produktów</h1><p>Techniczne SEO, uporządkowane treści, plan małych dziennych partii oraz bezpłatne kanały Google — bez płatnych reklam i bez płatnych narzędzi.</p></div><div class="seo-hero-score"><b>${avg}%</b><small>średnia gotowość katalogu</small></div></div>`;
+  if(tab==="pulpit")return seoSzkielet(tab,`${head}<div class="orders-stat-grid seo-stat-grid"><div class="order-stat-card money"><span>✅</span><b>${good}</b><small>produktów gotowych</small></div><div class="order-stat-card ${missing?"hot":""}"><span>⚠️</span><b>${missing}</b><small>wymaga uzupełnienia</small></div><div class="order-stat-card"><span>🗓️</span><b>${daily.length}</b><small>w najbliższej partii</small></div><div class="order-stat-card"><span>📣</span><b>${promoted.length}</b><small>w darmowej promocji</small></div></div><div class="panel"><div class="order-section-head"><div><h2>Plan na dziś: ${limit} produktów</h2><p class="order-detail-lead">Najpierw produkty promowane i najlepiej sprzedające się, potem karty z największymi brakami. Automat uzupełnia wyłącznie bezpieczne pola SEO.</p></div><button class="btn" onclick="seoUruchomPlanDzienny(this)" ${seoUstawienia.enabled?"":"disabled"}>▶️ Wykonaj dzisiejszą partię</button></div><div class="seo-progress"><span style="width:${avg}%"></span></div><div style="overflow:auto"><table class="log-table"><tr><th></th><th>Produkt</th><th>Wynik</th><th>Braki</th><th>Kontrola</th><th>Akcje</th></tr>${seoProduktRows(daily,limit)}</table></div></div>`);
+  if(tab==="plan")return seoSzkielet(tab,`${head}<div class="panel"><div class="order-section-head"><div><h2>🗓️ Kolejka dzienna</h2><p class="order-detail-lead">Domyślnie 5 pozycji dziennie. Przy obecnym katalogu daje to pełny, spokojny cykl mniej więcej raz na tydzień. Nie zmieniamy treści tylko po to, by wyglądały na świeże.</p></div><button class="btn" onclick="seoUruchomPlanDzienny(this)">Uruchom ${limit} teraz</button></div><div style="overflow:auto"><table class="log-table"><tr><th></th><th>Produkt</th><th>Wynik</th><th>Braki</th><th>Ostatnio</th><th>Akcje</th></tr>${seoProduktRows(daily,limit)}</table></div></div>`);
+  if(tab==="produkty"||tab==="tresci")return seoSzkielet(tab,`${head}<div class="panel"><div class="order-section-head"><div><h2>${tab==="produkty"?"🏷️ Audyt produktów SEO":"✍️ Frazy i jakość treści"}</h2><p class="order-detail-lead">Wyszukiwanie obejmuje cały katalog. Tytuły, opisy i frazy powstają z prawdziwych danych produktu.</p></div></div><input class="seo-table-search" placeholder="Szukaj po nazwie, kodzie, EAN, kategorii lub producencie…" oninput="seoFiltrujTabele(this.value)"><div style="overflow:auto"><table class="log-table"><tr><th></th><th>Produkt</th><th>Wynik</th><th>Braki</th><th>Ostatnio</th><th>Akcje</th></tr>${seoProduktRows(queue,1000)}</table></div></div>`);
+  if(tab==="promocja")return seoSzkielet(tab,`${head}<div class="panel"><div class="order-section-head"><div><h2>📣 Darmowa promocja</h2><p class="order-detail-lead">Gotowe linki i treści do udostępnienia, bezpłatne informacje produktowe Google oraz produkty wybrane do organicznej promocji.</p></div><button class="btn" onclick="seoEksportujFeedGoogleCSV()">⬇️ Feed Google CSV</button></div><div class="seo-free-channels"><article><b>🛍️ Bezpłatne informacje Google</b><p>Eksport zawiera ID, nazwę, opis, link, zdjęcie, cenę, dostępność, markę i GTIN/MPN.</p><a class="btn ghost" href="https://merchants.google.com/" target="_blank" rel="noopener">Otwórz Merchant Center ↗</a></article><article><b>🔎 Google Search Console</b><p>Zgłoś mapę <code>${esc(location.origin)}/sitemap.xml</code> i kontroluj indeksowanie.</p><a class="btn ghost" href="https://search.google.com/search-console" target="_blank" rel="noopener">Otwórz Search Console ↗</a></article><article><b>📍 Profil Firmy Google</b><p>Publikuj wybrane produkty i aktualności w bezpłatnym profilu firmy.</p><a class="btn ghost" href="https://business.google.com/" target="_blank" rel="noopener">Otwórz Profil Firmy ↗</a></article></div><h3>Wybrane produkty (${promoted.length})</h3><div class="seo-promotion-grid">${promoted.map(x=>`<article>${x.product.zdjecie?`<img src="${esc(x.product.zdjecie)}" alt="">`:"📦"}<div><b>${esc(x.product.nazwa)}</b><small>${esc(x.product.seoDescription||x.proposed.seoDescription)}</small><div class="diag-actions"><button class="btn" onclick="seoUdostepnijProdukt(${jsArg(x.product.id)})">Udostępnij bezpłatnie</button><button class="btn ghost" onclick="seoPrzelaczPromowanie(${jsArg(x.product.id)})">Usuń z planu</button></div></div></article>`).join("")||`<div class="backend-note">Wybierz „Promuj” przy produktach w audycie SEO.</div>`}</div></div>`);
+  if(tab==="techniczne")return seoSzkielet(tab,`${head}<div class="panel"><h2>🛠️ Techniczne SEO</h2><div class="seo-technical-grid"><article><span>✅</span><b>Mapa produktów XML</b><small>Automatyczna, tylko aktywne produkty, prawdziwe daty ostatniej kontroli.</small><a class="btn ghost" href="/sitemap.xml" target="_blank">Otwórz sitemap.xml</a></article><article><span>✅</span><b>Dane Product/Offer</b><small>Nazwa, opis, zdjęcia, SKU, GTIN, marka, cena i dostępność na karcie produktu.</small><a class="btn ghost" href="https://search.google.com/test/rich-results" target="_blank" rel="noopener">Test wyników z elementami rozszerzonymi ↗</a></article><article><span>✅</span><b>Canonical i Open Graph</b><small>Każdy produkt ma własny czysty adres /produkt/ID oraz właściwe metadane.</small></article><article><span>✅</span><b>robots.txt</b><small>Sklep jest dostępny dla robotów, panel administracyjny ma noindex.</small><a class="btn ghost" href="/robots.txt" target="_blank">Otwórz robots.txt</a></article></div></div>`);
+  if(tab==="historia")return seoSzkielet(tab,`${head}<div class="panel"><h2>🧾 Historia pracy</h2><table class="log-table"><tr><th>Data</th><th>Źródło</th><th>Produkty</th><th>Szczegóły</th></tr>${(seoHistoria||[]).map(h=>`<tr><td>${esc(allegroDataTxt(h.at))}</td><td>${esc(h.source||h.type||"automat")}</td><td><b>${esc(h.count||0)}</b></td><td>${esc((h.products||[]).slice(0,8).map(x=>x.name||x.id).join(", "))}</td></tr>`).join("")||`<tr><td colspan="4">Plan nie był jeszcze uruchamiany.</td></tr>`}</table></div>`);
+  return seoSzkielet("ustawienia",`${head}<div class="panel"><form onsubmit="zapiszSeoUstawienia(event)"><div class="order-section-head"><div><h2>⚙️ Ustawienia planu</h2><p class="order-detail-lead">Limit dotyczy jednej doby i może wynosić od 1 do 50. Dla stałej pracy polecam 5; przy pierwszym porządkowaniu można użyć 20.</p></div><button class="btn" type="submit">💾 Zapisz</button></div><div class="seo-settings-grid"><label class="check"><input type="checkbox" name="enabled" ${seoUstawienia.enabled?"checked":""}> Automatyczny plan aktywny</label><label class="check"><input type="checkbox" name="autoFillMissing" ${seoUstawienia.autoFillMissing!==false?"checked":""}> Uzupełniaj tylko puste metadane SEO</label><label class="check"><input type="checkbox" name="preferBestsellers" ${seoUstawienia.preferBestsellers!==false?"checked":""}> Najpierw produkty promowane i bestsellery</label><label>Dzienny limit produktów<input name="dailyLimit" type="number" min="1" max="50" value="${esc(limit)}"><span class="seo-limit-presets"><button type="button" onclick="seoUstawLimit(5)">5</button><button type="button" onclick="seoUstawLimit(10)">10</button><button type="button" onclick="seoUstawLimit(20)">20</button></span></label></div><h3>Stan bezpłatnych kanałów</h3><div class="seo-settings-grid"><label class="check"><input type="checkbox" name="searchConsoleReady" ${seoUstawienia.searchConsoleReady?"checked":""}> Search Console skonfigurowane</label><label class="check"><input type="checkbox" name="merchantCenterReady" ${seoUstawienia.merchantCenterReady?"checked":""}> Merchant Center / bezpłatne informacje skonfigurowane</label><label class="check"><input type="checkbox" name="businessProfileReady" ${seoUstawienia.businessProfileReady?"checked":""}> Profil Firmy Google skonfigurowany</label></div><div class="backend-note"><b>Wyłącznie darmowe rozwiązania.</b> Moduł nie uruchamia reklam, nie pobiera budżetu i nie wymaga płatnego API. Ostatnie wykonanie: ${seoUstawienia.lastRunAt?esc(allegroDataTxt(seoUstawienia.lastRunAt)):"jeszcze nie było"}.</div></form></div>`);
 }
 function zapiszCzescUstawien(obj){
   ustawienia = {...ustawienia, ...obj};
@@ -8041,6 +8136,20 @@ let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
 let frazaMagazynu="", filtrMagazynu="wszystkie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="decyzje";
 let magazynNaStronie=[25,50,100,200,500].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
+function dokumentTymczasowyHTML(html){const tpl=document.createElement("template");tpl.innerHTML=String(html||"").trim();return tpl.content;}
+function asortymentSzukajProdukty(input){
+  szukajProduktow=String(input?.value||"");stronaAdminProduktow=1;clearTimeout(window.__assortmentSearch);
+  window.__assortmentSearch=setTimeout(()=>{const current=document.querySelector("[data-assortment-results]"),source=dokumentTymczasowyHTML(widokAdminProdukty()).querySelector("[data-assortment-results]");if(current&&source)current.innerHTML=source.innerHTML;},140);
+}
+function magazynSzukajProdukty(input){
+  frazaMagazynu=String(input?.value||"");stronaMagazynu=1;clearTimeout(window.__warehouseSearch);
+  window.__warehouseSearch=setTimeout(()=>{
+    const current=document.querySelector(".warehouse-stock-page"),source=dokumentTymczasowyHTML(widokAdminMagazyn("stany")).querySelector(".warehouse-stock-page");if(!current||!source)return;
+    for(const selector of [".warehouse-stock-results",".warehouse-stock-list"]){const a=current.querySelector(selector),b=source.querySelector(selector);if(a&&b)a.innerHTML=b.innerHTML;}
+    const aPages=current.querySelectorAll(":scope > .pagination"),bPages=source.querySelectorAll(":scope > .pagination");aPages.forEach((el,i)=>{if(bPages[i])el.innerHTML=bPages[i].innerHTML;});
+    const aConfirm=current.querySelector("[data-stock-confirm-visible]"),bConfirm=source.querySelector("[data-stock-confirm-visible]");if(aConfirm&&bConfirm)aConfirm.replaceWith(bConfirm);
+  },140);
+}
 function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }
 function produktDodanyPoId(id){ return produktyDodane.find(p=>Number(p.id)===Number(id)); }
 function czyProduktAdminWKoszu(p){
@@ -8619,7 +8728,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
   <div class="panel warehouse-stock-page" style="${aktywna==="stany"?"":"display:none"}">
     <div class="order-section-head warehouse-stock-head">
       <div><span class="order-pro-label">Centrum kontroli zapasu</span><h2>📋 Stany produktów</h2><p class="order-detail-lead">Jeden czytelny widok łączy dostępność producenta, sprzedaż Allegro i sklepu, rezerwacje, fizyczny zapas, lokalizację oraz decyzję o domówieniu.</p></div>
-      <div class="diag-actions"><button class="btn" onclick='potwierdzWidoczneStanyMagazynu(${JSON.stringify(fragment.map(p=>p.id))})'>✅ Potwierdź ${fragment.length} widocznych</button><button class="btn ghost" onclick="eksportujMagazynCSV()">📤 Eksport CSV</button><button class="btn ghost" onclick="wyczyscFiltryStanowMagazynu()">Wyczyść filtry</button></div>
+      <div class="diag-actions"><button class="btn" data-stock-confirm-visible onclick='potwierdzWidoczneStanyMagazynu(${JSON.stringify(fragment.map(p=>p.id))})'>✅ Potwierdź ${fragment.length} widocznych</button><button class="btn ghost" onclick="eksportujMagazynCSV()">📤 Eksport CSV</button><button class="btn ghost" onclick="wyczyscFiltryStanowMagazynu()">Wyczyść filtry</button></div>
     </div>
     <div class="warehouse-stock-summary">
       <button class="stock-summary-card ${filtrMagazynu==="bestsellery"?"active":""}" onclick="ustawFiltrMagazynu('bestsellery','priorytet')"><span>🏆</span><b>${bestselleryMagazynu.length}</b><small>bestsellerów i aktywnych</small></button>
@@ -8633,7 +8742,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
       ${[["wszystkie","Wszystkie"],["bestsellery","🏆 Bestsellery"],["producent-brak","🔴 Brak u producenta"],["producent-niski","🟡 Niski u producenta"],["dozamowienia","📦 Do zamówienia"],["rezerwacje","🧾 Z rezerwacją"],["bezlokalizacji","🗺️ Bez lokalizacji"],["bezdostawcy","🏭 Bez dostawcy"]].map(([v,t])=>`<button type="button" class="${filtrMagazynu===v?"active":""}" onclick="ustawFiltrMagazynu(${jsArg(v)},${jsArg(v==="bestsellery"?"priorytet":v==="dozamowienia"?"zakup":"ryzyko")})">${t}</button>`).join("")}
     </div>
     <div class="warehouse-stock-toolbar">
-      <label class="warehouse-stock-search"><span>Wyszukaj produkt</span><input placeholder="Nazwa, SKU, EAN, ID, kategoria, lokalizacja lub dostawca…" value="${esc(frazaMagazynu)}" oninput="frazaMagazynu=this.value;stronaMagazynu=1;clearTimeout(window.__warehouseSearch);window.__warehouseSearch=setTimeout(()=>renderuj(),260)"></label>
+      <label class="warehouse-stock-search"><span>Wyszukaj produkt</span><input data-warehouse-stock-search placeholder="Nazwa, SKU, EAN, ID, kategoria, lokalizacja lub dostawca…" value="${esc(frazaMagazynu)}" oninput="magazynSzukajProdukty(this)" autocomplete="off"></label>
       <label><span>Status</span><select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">${[["wszystkie","Wszystkie produkty"],["alerty","Wszystkie alerty"],["bestsellery","Bestsellery / aktywne"],["producent-niski","Producent: niski stan"],["producent-brak","Producent: brak"],["producent-nieznany","Producent: niepotwierdzone"],["dozamowienia","Braki do zamówień"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Monitorowane lokalnie"],["bezlimitu","Lokalnie bez limitu"],["niskie","Lokalny niski stan"],["brak","Lokalny stan zerowy"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["bezlokalizacji","Bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
       <label><span>Sortowanie</span><select onchange="sortowanieMagazynu=this.value;stronaMagazynu=1;renderuj()">${[["ryzyko","Priorytet operacyjny"],["priorytet","Bestsellery najpierw"],["producent","Stan u producenta"],["zakup","Największe braki"],["dostepne","Dostępne po rezerwacji"],["stan","Stan lokalny rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
       <label><span>Dostawca</span><select onchange="filtrDostawcyMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszyscy">Każdy dostawca</option>${dostawcyMag.map(d=>`<option value="${esc(d)}" ${filtrDostawcyMagazynu===d?"selected":""}>${esc(d)}</option>`).join("")}</select></label>
@@ -8744,6 +8853,10 @@ function widokAdminProdukty(){
         <button class="btn ghost" onclick="eksportujProduktyJSON()">📤 products.json</button>
         <button class="btn ghost" onclick="eksportujProduktyCSV()">📤 CSV</button>
       </div>
+      <div class="assortment-search-primary">
+        <label><span>Wyszukaj w całym asortymencie</span><input data-assortment-search placeholder="Nazwa, EXTERNAL_ID, SKU, EAN, ID, opis, kategoria lub producent…" value="${esc(szukajProduktow)}" oninput="asortymentSzukajProdukty(this)" autocomplete="off"></label>
+        <small>Wyniki zmieniają się bez przeładowania panelu i bez utraty kursora.</small>
+      </div>
       <div class="orders-stat-grid assortment-audit-grid">
         <div class="order-stat-card"><span>🏷️</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length}</b><small>aktywnych kart produktów</small></div>
         <div class="order-stat-card money"><span>🟠</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroOfertaDlaProduktuSklepu(p)).length}</b><small>produktów połączonych z Allegro</small></div>
@@ -8754,7 +8867,6 @@ function widokAdminProdukty(){
       ${audytSklep.grupy.length?`<section class="allegro-duplicate-center store-duplicate-center"><div class="order-section-head"><div><span class="order-pro-label">Porządkowanie katalogu sklepu</span><h3>🧬 Powtarzające się produkty (${audytSklep.grupy.length} grup)</h3><p class="order-detail-lead">Dla każdej grupy wybierz jedną kartę do pozostawienia. Przycisk trwałego czyszczenia usuwa wszystkie pozostałe kopie z katalogu publicznego, panelu, magazynu i wspólnej bazy.</p></div><button class="btn ghost" onclick="filtrStatusuProduktow='duplikaty';stronaAdminProduktow=1;renderuj()">Pokaż wszystkie kopie</button></div><div class="allegro-duplicate-groups">${audytSklep.grupy.slice(0,12).map(g=>`<article class="allegro-duplicate-group"><header><div><b>${esc(g.canonical.nazwa||"Produkt")}</b><small>Wspólny klucz: ${esc(g.keys.join(" • "))}</small></div><span class="lvl lvl-ostrzezenie">${g.produkty.length} kart</span></header><div class="allegro-duplicate-options">${g.produkty.map(p=>`<button type="button" class="allegro-duplicate-option ${String(p.id)===String(g.canonical.id)?"is-canonical":""}" onclick="ustawProduktGlownyDuplikatu(${jsArg(g.groupKey)},${jsArg(p.id)})"><div class="allegro-duplicate-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa)}</b><small>ID ${esc(p.id)} • EXTERNAL_ID ${esc(p.externalId||"—")} • SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small><em>${String(p.id)===String(g.canonical.id)?"✅ ta karta pozostanie":"❌ ta kopia zostanie usunięta"}</em></div></div></button>`).join("")}</div><div class="diag-actions" style="justify-content:flex-end"><button class="btn danger" onclick="usunKopieGrupyProduktuTrwale(${jsArg(g.groupKey)})">🗑️ Pozostaw 1 i usuń trwale ${g.hidden.length} kopii</button></div></article>`).join("")}</div></section>`:`<div class="duplicate-audit-ok"><b>✅ Kontrola katalogu sklepu:</b> brak powtarzających się produktów po EXTERNAL_ID, SKU, EAN i kodzie producenta.</div>`}
       ${audytAllegro.produkty?`<div class="duplicate-audit-alert"><div><b>⚠️ Kontrola Asortymentu wykryła powtarzające się oferty Allegro</b><small>${audytAllegro.produkty} produktów pasuje do ${audytAllegro.oferty} ofert. Nowe wystawienie wybierze istniejącą ofertę do aktualizacji; istniejące powtórzenia możesz sprawdzić bezpośrednio w katalogu Allegro.</small></div><button class="btn ghost" onclick="filtrAllegroProduktow='duplikaty';stronaAdminProduktow=1;renderuj()">Pokaż produkty</button><a class="btn" href="#/admin/allegro/oferty" onclick="filtrAllegroOfert='duplikaty'">Otwórz oferty</a></div>`:`<div class="duplicate-audit-ok"><b>✅ Kontrola ofert Allegro:</b> aktualny asortyment nie zawiera produktów połączonych z więcej niż jedną ofertą.</div>`}
       <div class="filter-grid" style="margin-bottom:.8rem">
-        <input placeholder="Nazwa, SKU, ID, opis lub kategoria…" value="${esc(szukajProduktow)}" oninput="szukajProduktow=this.value;stronaAdminProduktow=1;renderuj()">
         <select onchange="filtrProduktow=this.value;stronaAdminProduktow=1;renderuj()">
           <option ${filtrProduktow==="Wszystkie"?"selected":""}>Wszystkie</option>
           ${katOpcje.map(k=>`<option ${k===filtrProduktow?"selected":""}>${esc(k)}</option>`).join("")}
@@ -8792,7 +8904,7 @@ function widokAdminProdukty(){
           <option value="stan" ${sortowanieAdminProduktow==="stan"?"selected":""}>Najniższy stan</option>
         </select>
       </div>
-      <div class="results-bar">
+      <div data-assortment-results><div class="results-bar">
         <span>Znaleziono: <b>${liczbaWynikow}</b>. Strona ${stronaAdminProduktow} z ${liczbaStron}.</span>
         <label>Na stronie:
           <select onchange="ustawProduktyNaStronieAdmin(this.value)">
@@ -8838,7 +8950,7 @@ function widokAdminProdukty(){
           </td>
         </tr>`;}).join("")}
       </table></div>
-      <div class="pagination" style="margin:.7rem auto">${paginacjaHTML(stronaAdminProduktow,liczbaStron,"ustawStroneAdminProduktow")}</div>
+      <div class="pagination" style="margin:.7rem auto">${paginacjaHTML(stronaAdminProduktow,liczbaStron,"ustawStroneAdminProduktow")}</div></div>
       <p style="font-size:.8rem;color:var(--muted2);margin-top:.8rem">Zmiany wykonane tutaj działają od razu w tej przeglądarce. Po zakończeniu pobierz nowy <b>products.json</b> i podmień go na hostingu.</p>
     </div>
     ${liczbaWKoszu ? `
@@ -9091,6 +9203,14 @@ function formularzProduktu(p, tryb){
         <button class="btn ghost" type="button" onclick="allegroPoprawOpisyWFormularzu(this)">🟠 Popraw opisy i układ Allegro</button>
       </div>
       <div class="f-group"><label>Opis pełny</label><textarea name="opis" rows="9" maxlength="20000">${esc(p.opis||"")}</textarea></div>
+      <details ${(p.seoTitle||p.seoDescription)?"open":""} class="product-seo-editor">
+        <summary>📣 Pozycjonowanie produktu</summary>
+        <p class="order-detail-lead">Ręcznie dopracuj metadane używane przez Google i przy udostępnianiu. Automat uzupełnia tylko puste pola; nie nadpisuje Twojej treści.</p>
+        <div class="f-group"><label>Tytuł SEO <small>najlepiej 30–60 znaków</small></label><input name="seoTitle" maxlength="70" value="${esc(p.seoTitle||"")}" placeholder="Nazwa produktu – producent"></div>
+        <div class="f-group"><label>Opis SEO <small>najlepiej 80–160 znaków</small></label><textarea name="seoDescription" rows="3" maxlength="180" placeholder="Konkretny opis korzyści i zawartości produktu.">${esc(p.seoDescription||"")}</textarea></div>
+        <div class="f-group"><label>Frazy pomocnicze</label><input name="seoKeywords" maxlength="500" value="${esc(p.seoKeywords||"")}" placeholder="nazwa, kategoria, producent, kod"></div>
+        <div class="backend-note"><b>Wynik bieżącej kartoteki:</b> ${seoScoreBadge(seoOcenaProduktu(p).score)} • ostatnia kontrola: ${p.seoReviewedAt?esc(allegroDataTxt(p.seoReviewedAt)):"jeszcze nie było"}</div>
+      </details>
       <div class="f-group" style="max-width:240px"><label>Stan magazynowy <small style="font-weight:400;color:var(--muted2)">(nowy produkt = 0 szt.)</small></label>
         <input name="stan" inputmode="numeric" min="0" placeholder="0" value="${p.id!==undefined && stanyProduktow[p.id]!==undefined ? stanyProduktow[p.id] : 0}"></div>
       <div class="diag-actions">
@@ -9178,7 +9298,8 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   for(const [pole,nazwa] of [
     ["gtin","gtin"],["externalId","externalId"],["mpn","mpn"],["producent","producent"],["marka","marka"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"],
     ["kodProducenta","kodProducenta"],["dostepnoscProducenta","dostepnoscProducenta"],["producentUrl","producentUrl"],["sourceUrl","sourceUrl"],
-    ["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroOfferId","allegroOfferId"],["allegroCategoryPhrase","allegroCategoryPhrase"]
+    ["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroOfferId","allegroOfferId"],["allegroCategoryPhrase","allegroCategoryPhrase"],
+    ["seoTitle","seoTitle"],["seoDescription","seoDescription"],["seoKeywords","seoKeywords"]
   ]){
     const v=String(f.get(nazwa)||"").trim();
     if(v)p[pole]=v;else delete p[pole];
