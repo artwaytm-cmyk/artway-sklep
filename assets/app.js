@@ -2035,7 +2035,7 @@ function moderujOpinie(id, akcja){
 }
 async function wczytajProdukty(){
   try{
-    const r = await fetch("products.json", {cache:"no-store"});
+    const r = await fetch("/products.json", {cache:"no-store"});
     if(!r.ok) throw new Error("HTTP "+r.status);
     prodBazowe = await r.json();
     zrodloProduktow = "json";
@@ -9621,7 +9621,7 @@ function osadzUstawieniaWIndexie(html){
 }
 async function eksportujIndexHTML(){
   try{
-    const r=await fetch("index.html",{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);
+    const r=await fetch("/index.html",{cache:"no-store"});if(!r.ok)throw new Error("HTTP "+r.status);
     const html=osadzUstawieniaWIndexie(await r.text());
     pobierzPlik("index.html",html,"text/html");
     localStorage.setItem("artway_ustawienia_export_hash",prostyHash(JSON.stringify(ustawienia)));
@@ -11272,7 +11272,7 @@ async function publikujAktualizacjeStrony(e){
     const body={note:String(f.get("notatka")||"Aktualizacja z panelu administratora").trim()};
     if(index){
       let html=wybranyIndexAktualizacji?.html;
-      if(!html){const r=await fetch("index.html",{cache:"no-store"});if(!r.ok)throw new Error("Nie udało się pobrać bieżącego index.html");html=await r.text();}
+      if(!html){const r=await fetch("/index.html",{cache:"no-store"});if(!r.ok)throw new Error("Nie udało się pobrać bieżącego index.html");html=await r.text();}
       body.index_html=osadzUstawieniaWIndexie(html);
     }
     if(produktyPlik)body.products=zakresEksportuProduktow("widoczne");
@@ -11659,7 +11659,7 @@ async function uruchomAutotest(){
   ostatniAutotest=[];const dodaj=(nazwa,status,szczegoly)=>ostatniAutotest.push({grupa:"Autotest techniczny",nazwa,status,szczegoly});
   try{localStorage.setItem("artway_test","1");const ok=localStorage.getItem("artway_test")==="1";localStorage.removeItem("artway_test");dodaj("Zapis i odczyt pamięci",ok?"ok":"bad",ok?"Pamięć działa":"Brak możliwości zapisu");}catch(e){dodaj("Zapis i odczyt pamięci","bad",e.message);}
   try{const h=await hashuj("test");dodaj("Szyfrowanie haseł",h.length===64?"ok":"warn",h.length===64?"SHA-256 dostępne":"Użyto mechanizmu zapasowego");}catch(e){dodaj("Szyfrowanie haseł","bad",e.message);}
-  try{const r=await fetch("products.json",{cache:"no-store"}),j=r.ok?await r.json():null;dodaj("Dostęp do products.json",r.ok&&Array.isArray(j)?"ok":"bad",r.ok?`${j.length} rekordów`:`HTTP ${r.status}`);}catch(e){dodaj("Dostęp do products.json","bad",e.message);}
+  try{const r=await fetch("/products.json",{cache:"no-store"}),j=r.ok?await r.json():null;dodaj("Dostęp do products.json",r.ok&&Array.isArray(j)?"ok":"bad",r.ok?`${j.length} rekordów`:`HTTP ${r.status}`);}catch(e){dodaj("Dostęp do products.json","bad",e.message);}
   try{const widoki=[widokSklep(),widokKontakt(),widokFAQ(),widokDostawa(),widokAdminProdukty()];dodaj("Renderowanie głównych widoków",widoki.every(x=>typeof x==="string"&&x.length>100)?"ok":"bad","Sprawdzono 5 kluczowych ekranów");}catch(e){dodaj("Renderowanie głównych widoków","bad",e.message);}
   loguj("info","Wykonano pełny autotest: "+ostatniAutotest.map(x=>x.status).join(","));
   renderuj();

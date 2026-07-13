@@ -63,8 +63,8 @@ requireMarkers('index.html', index, [
   'PUBLIC_SETTINGS_START',
   'assets/styles.css',
   'assets/app.js',
-  `assets/styles.css?v=${version}`,
-  `assets/app.js?v=${version}`,
+  `/assets/styles.css?v=${version}`,
+  `/assets/app.js?v=${version}`,
 ]);
 
 requireMarkers('assets/styles.css', css, [
