@@ -37,6 +37,12 @@ test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', 
   assert.ok(publicCss.size < 70_000, `początkowy CSS urósł do ${publicCss.size} B; style panelu muszą pozostać ładowane na żądanie`);
 });
 
+test('bezpośrednie wejście gościa na trasę panelu może wyświetlić bezpieczny brak dostępu', async () => {
+  const router = await readFile('src/frontend/06-router-and-storefront.js', 'utf8');
+  assert.match(router, /const wymagaPanelu=t\.startsWith\("\/admin"\)\|\|t==="\/diagnostyka"/);
+  assert.ok(!router.includes('const wymagaPanelu=(t.startsWith("/admin")||t==="/diagnostyka")&&jestAdmin()'));
+});
+
 test('HTML startowy ma komplet podstaw technicznego SEO', async () => {
   const html = await readFile('index.html', 'utf8');
   for (const marker of ['name="description"', 'name="robots"', 'property="og:site_name"', 'name="twitter:card"', 'type="application/ld+json"', '<script defer src="/assets/app.js']) {
