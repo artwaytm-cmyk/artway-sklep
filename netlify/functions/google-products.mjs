@@ -1,4 +1,5 @@
 import { getStore } from '@netlify/blobs';
+import { mergeCatalogProducts } from './lib/domain/catalog-quality.mjs';
 
 const origin = 'https://artwaytm.pl';
 const xml = (value) => String(value ?? '').replace(/[<>&'\"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
@@ -47,18 +48,6 @@ function productIsUnavailable(product, availability = {}) {
   return String(record.status || '').toLowerCase() === 'niedostepny';
 }
 
-function mergeProducts(data = {}) {
-  const map = new Map();
-  const add = (product = {}) => {
-    const id = String(product.id ?? '').trim();
-    if (id) map.set(id, { ...(map.get(id) || {}), ...product, id });
-  };
-  for (const product of Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []) add(product);
-  for (const product of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) add(product);
-  for (const [id, patch] of Object.entries(data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? data.artway_produkty_edytowane : {})) add({ ...(patch || {}), id });
-  return [...map.values()];
-}
-
 export default async () => {
   let settings = { data: {}, updated_at: null };
   try {
@@ -74,7 +63,7 @@ export default async () => {
   ].map(String));
 
   let excluded = 0;
-  const items = mergeProducts(data).flatMap((product) => {
+  const items = mergeCatalogProducts(data).products.flatMap((product) => {
     const seo = automaticSeo(product);
     const id = String(valueFor(product, ['externalId', 'external_id', 'sku', 'id'])).trim().slice(0, 50);
     const title = seo.title;

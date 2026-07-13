@@ -15,6 +15,7 @@ const files = [
   'netlify/functions/lib/core/http.mjs',
   'netlify/functions/lib/core/store-repository.mjs',
   'netlify/functions/lib/domain/orders.mjs',
+  'netlify/functions/lib/domain/catalog-quality.mjs',
   'netlify/functions/lib/allegro-compliance.mjs',
   'netlify/functions/lib/infakt-purchase.mjs',
   'netlify/functions/cron-inpost-sync.mjs',
@@ -89,7 +90,8 @@ const version = index.match(/<meta\s+name=["']artway-version["']\s+content=["'](
 if (!version) fail('index.html: brak meta artway-version');
 
 requireMarkers('index.html', index, [
-  '<main id="widok">',
+  '<main id="widok"',
+  'class="skip-link"',
   'PUBLIC_SETTINGS_START',
   'assets/styles.css',
   'assets/app.js',
@@ -146,6 +148,7 @@ requireMarkers('połączonych assets CSS', css, [
   '.seo-bulk-toolbar',
   '.seo-product-table',
   '.modal',
+  '.catalog-quality-page',
 ]);
 
 requireMarkers('połączonych assets JS', app, [
@@ -156,6 +159,8 @@ requireMarkers('połączonych assets JS', app, [
   'function magazynSzukajProdukty',
   'function asortymentSzukajProdukty',
   'function widokAdminSEO',
+  'function widokAdminJakoscKatalogu',
+  'function katalogJakoscPobierz',
   'function seoUruchomPlanDzienny',
   'function seoEksportujFeedGoogleCSV',
   'function seoAktualizujMetaDlaTrasy',
@@ -410,7 +415,10 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'allegro_fee_preview_audit',
   "action === 'supplier-availability-sample'",
   "action === 'seo-daily-run'",
+  "action === 'catalog-quality-audit'",
   'function seoWykonajDziennyPlan',
+  'function katalogWykonajAudyt',
+  'mergeCatalogProducts',
   "action === 'product-url-prepare'",
   'function przygotujPakietProduktuZLinku',
   'export async function inspectProductUrl',
@@ -735,12 +743,14 @@ requireMarkers('netlify/functions/cron-seo-daily.mjs', cronSeoDaily, [
   "schedule: '15 4 * * *'",
   'seo-daily-run',
   'scheduled-seo-daily',
+  'catalog-quality-audit',
+  'scheduled-catalog-quality',
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
 requireMarkers('netlify/functions/sitemap.mjs', sitemap, [
   'sitemaps.org/schemas/sitemap',
-  'artway_produkty_katalog',
+  'mergeCatalogProducts',
   'artway_produkty_ukryte',
   '/produkt/',
 ]);
@@ -750,7 +760,7 @@ requireMarkers('netlify/functions/google-products.mjs', googleProducts, [
   'automaticSeo',
   '<g:availability>in_stock</g:availability>',
   '<g:price>',
-  'artway_produkty_katalog',
+  'mergeCatalogProducts',
   'artway_dostepnosc',
   'x-artway-items',
 ]);

@@ -33,6 +33,11 @@ import {
 } from './domain/orders.mjs';
 import { bezpieczneZamowienieKlienta } from './domain/checkout.mjs';
 import {
+  applySafeCatalogFixes,
+  auditCatalog,
+  mergeCatalogProducts,
+} from './domain/catalog-quality.mjs';
+import {
   ALLEGRO_COMPLIANCE_POLICY,
   allegroCheckText,
   allegroSanitizePlainText,
@@ -235,9 +240,10 @@ function agentPriorytetWykonawczy(priority = {}) {
   return definitions[key];
 }
 async function agentCentrumOperacyjne() {
-  const [settingsRec, ordersRec, allegroOrdersRec, communicationRec, offerErrorRec, infaktLinksRec] = await Promise.all([
+  const [settingsRec, ordersRec, allegroOrdersRec, communicationRec, offerErrorRec, infaktLinksRec, catalogQualityRec] = await Promise.all([
     czytaj('settings', { data: {}, updated_at: null }), czytaj('orders', { items: [] }), czytaj('allegro_orders', { items: [] }),
     czytaj('allegro_communications', { threads: [], issues: [], updated_at: null }), czytaj('allegro_offer_last_error', null), czytaj('infakt_invoice_links', { items: {} }),
+    czytaj('catalog_quality_audit', { report: null, updated_at: null }),
   ]);
   const data = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {};
   const orders = Array.isArray(ordersRec.items) ? ordersRec.items : [], activeOrders = orders.filter(agentZamowienieAktywne), newOrders = activeOrders.filter((x) => String(x.status || '').toLowerCase() === 'nowe');
@@ -245,11 +251,7 @@ async function agentCentrumOperacyjne() {
   const allegroOrders = Array.isArray(allegroOrdersRec.items) ? allegroOrdersRec.items : [], activeAllegro = allegroOrders.filter(allegroAgentZlecenieAktywne);
   const communications = [...(Array.isArray(communicationRec.threads) ? communicationRec.threads.map((x) => ({ ...x, type: 'thread' })) : []), ...(Array.isArray(communicationRec.issues) ? communicationRec.issues.map((x) => ({ ...x, type: 'issue' })) : [])];
   const communicationWaiting = communications.filter(allegroKomunikacjaWymagaOdpowiedzi);
-  const productMap = new Map(), addProduct = (p = {}) => { const id = tekst(p.id, 100).trim(); if (id) productMap.set(id, { ...(productMap.get(id) || {}), ...p, id }); };
-  for (const p of Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []) addProduct(p);
-  for (const p of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) addProduct(p);
-  for (const [id, p] of Object.entries(data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? data.artway_produkty_edytowane : {})) addProduct({ ...(p || {}), id });
-  const products = [...productMap.values()], supplierUnavailable = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'brak'), supplierLow = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'niski'), availabilityDecisions = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};
+  const products = mergeCatalogProducts(data).products, supplierUnavailable = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'brak'), supplierLow = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'niski'), availabilityDecisions = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};
   const supplierNeedsDecision = [...supplierUnavailable, ...supplierLow].filter((p) => { const d = availabilityDecisions[String(p.id)] || {}, code = String(d.decision || d.decyzja || ''), expires = Date.parse(d.expiresAt || d.waznaDo || ''); return !code || (code === 'grace' && Number.isFinite(expires) && expires <= Date.now()); });
   const producerLinks = (Array.isArray(data.artway_agent_ai_linki_producentow) ? data.artway_agent_ai_linki_producentow : []).filter((x) => !['pobrano', 'zamkniete', 'zamknięte', 'usunieto', 'usunięto'].includes(String(x?.status || '').toLowerCase()));
   const offerTasks = (Array.isArray(data.artway_agent_ai_allegro_zadania) ? data.artway_agent_ai_allegro_zadania : []).filter((x) => !['zrealizowane', 'zamkniete', 'zamknięte', 'anulowane'].includes(String(x?.status || '').toLowerCase()));
@@ -274,6 +276,8 @@ async function agentCentrumOperacyjne() {
   addPriority('warning', 'producenci', supplierOrders.length, 'Otwarte dokumenty zamówień do producentów', '#/admin/agent-ai/zlecenia', 'Sprawdź aktualną rewizję przed zatwierdzeniem i wysyłką.');
   addPriority('warning', 'faktury', companyOrdersWithoutInvoice.length, 'Zamówienia firmowe nie mają jeszcze szkicu ani faktury', '#/admin/infakt/zamowienia', 'Sprawdź dane nabywcy i utwórz dokument w inFakt.');
   addPriority('info', 'produkty', producerLinks.length, 'Linki producentów czekają na pobranie danych', '#/admin/agent-ai/plan', 'Ponów analizę linków i uzupełnij kartoteki.');
+  const qualitySummary = catalogQualityRec?.report?.summary || {};
+  addPriority('warning', 'produkty', Number(qualitySummary.critical || 0) + Number(qualitySummary.orphanEdits || 0), 'Katalog produktów wymaga kontroli jakości', '#/admin/asortyment/jakosc', 'Uruchom audyt katalogu, zastosuj bezpieczne poprawki i uzupełnij wyłącznie brakujące fakty.');
   if (offerErrorRec?.message || offerErrorRec?.error) addPriority('warning', 'allegro', 1, 'Ostatnia operacja oferty Allegro zakończyła się błędem', '#/admin/allegro/wystawianie', 'Otwórz diagnostykę oferty i przekaż braki Agentowi.');
   const severityRank = { critical: 0, warning: 1, info: 2 };
   priorities.forEach((priority) => Object.assign(priority, agentPriorytetWykonawczy(priority)));
@@ -1649,21 +1653,7 @@ function allegroScalZamowienie(z, poprzednie = {}) {
   };
 }
 function allegroAgentProduktyCentralne(dane = {}) {
-  const mapa = new Map();
-  for (const p of Array.isArray(dane.artway_produkty_katalog) ? dane.artway_produkty_katalog : []) {
-    const id = String(p?.id ?? '').trim();
-    if (id) mapa.set(id, { ...p, id });
-  }
-  for (const p of Array.isArray(dane.artway_produkty_dodane) ? dane.artway_produkty_dodane : []) {
-    const id = String(p?.id ?? '').trim();
-    if (id) mapa.set(id, { ...p, id });
-  }
-  const edits = dane.artway_produkty_edytowane && typeof dane.artway_produkty_edytowane === 'object' ? dane.artway_produkty_edytowane : {};
-  for (const [idRaw, p] of Object.entries(edits)) {
-    const id = String(p?.id ?? idRaw).trim();
-    if (id) mapa.set(id, { ...(mapa.get(id) || {}), ...(p || {}), id });
-  }
-  return mapa;
+  return mergeCatalogProducts(dane).map;
 }
 function allegroOpisKrotkiZTekstu(v = '') {
   const clean = tekst(v, 5000).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1680,7 +1670,7 @@ function allegroAktualizatorProduktowCentralnych(data = {}) {
   let changed = false;
   const apply = (idRaw, fields = {}, remove = []) => {
     const id = String(idRaw ?? '').trim();
-    if (!id) return false;
+    if (!id || (!addedIndex.has(id) && !catalogIndex.has(id))) return false;
     const clean = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
     const update = (base = {}) => {
       const next = { ...base, ...clean, id: base.id ?? (/^\d+$/.test(id) ? Number(id) : id) };
@@ -1695,7 +1685,7 @@ function allegroAktualizatorProduktowCentralnych(data = {}) {
         const nextEdit = update(edits[id]);
         if (JSON.stringify(nextEdit) !== JSON.stringify(edits[id])) { edits[id] = nextEdit; localChanged = true; }
       }
-    } else {
+    } else if (catalogIndex.has(id)) {
       const next = update(edits[id] || {});
       if (JSON.stringify(next) !== JSON.stringify(edits[id] || {})) { edits[id] = next; localChanged = true; }
     }
@@ -4879,12 +4869,7 @@ function seoOcena(p = {}) {
   return Math.min(100, score);
 }
 function seoProduktyCentralne(data = {}) {
-  const map = new Map(), add = (p = {}) => { const id = tekst(p.id, 100).trim(); if (id) map.set(id, { ...(map.get(id) || {}), ...p, id }); };
-  for (const p of Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []) add(p);
-  for (const p of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) add(p);
-  for (const [id, p] of Object.entries(data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? data.artway_produkty_edytowane : {})) add({ ...(p || {}), id });
-  const hidden = new Set([...(Array.isArray(data.artway_produkty_ukryte) ? data.artway_produkty_ukryte : []), ...(Array.isArray(data.artway_produkty_definitywne) ? data.artway_produkty_definitywne : []), ...(Array.isArray(data.artway_kosz_dodane) ? data.artway_kosz_dodane.map((x) => x?.id) : [])].map(String));
-  return [...map.values()].filter((p) => !hidden.has(String(p.id)));
+  return mergeCatalogProducts(data).activeProducts;
 }
 function seoZastosujPatch(data, id, patch) {
   const key = String(id), added = Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : [], index = added.findIndex((p) => String(p?.id) === key);
@@ -4917,6 +4902,41 @@ async function seoWykonajDziennyPlan({ limit, source } = {}) {
   return { processed: selected.length, limit: amount, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })), updated_at: now, rev: saved.rev };
 }
 
+async function katalogWykonajAudyt({ fixSafe = false, quarantineOrphans = false, source = 'manual-admin' } = {}) {
+  const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+  let data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
+  const before = auditCatalog(data);
+  let changes = [], orphanArchive = [], saved = false, rev = Number(settingsRec.rev || 0);
+  if (fixSafe) {
+    const result = applySafeCatalogFixes(data, { quarantineOrphans });
+    data = result.data;
+    changes = result.changes;
+    orphanArchive = result.orphanArchive;
+    if (changes.length || orphanArchive.length) {
+      const now = new Date().toISOString();
+      rev += 1;
+      await zapisz('settings', { ...settingsRec, data, rev, updated_at: now });
+      saved = true;
+    }
+  }
+  const report = auditCatalog(data);
+  const now = new Date().toISOString();
+  const previous = await czytaj('catalog_quality_audit', { history: [], orphanArchive: [] });
+  const history = [{
+    id: `quality-${Date.now()}`,
+    at: now,
+    source: tekst(source, 100),
+    fixed: !!fixSafe,
+    changes: changes.length,
+    quarantined: orphanArchive.length,
+    before: before.summary,
+    after: report.summary,
+  }, ...(Array.isArray(previous.history) ? previous.history : [])].slice(0, 120);
+  const archived = [...orphanArchive, ...(Array.isArray(previous.orphanArchive) ? previous.orphanArchive : [])].slice(0, 200);
+  await zapisz('catalog_quality_audit', { report, history, orphanArchive: archived, updated_at: now });
+  return { report, before: before.summary, changes, quarantined: orphanArchive.map((entry) => ({ id: entry.id, reason: entry.reason })), saved, rev, updated_at: now };
+}
+
 
 export default async (req) => {
   const url = new URL(req.url);
@@ -4927,6 +4947,18 @@ export default async (req) => {
   if (contentLength > 5 * 1024 * 1024) return odpowiedz({ ok: false, error: 'Żądanie jest zbyt duże.', code: 'payload_too_large' }, 413);
 
   try {
+    if (action === 'catalog-quality-audit') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const result = await katalogWykonajAudyt({
+        fixSafe: body.fixSafe === true,
+        quarantineOrphans: body.quarantineOrphans === true,
+        source: body.source || 'manual-admin',
+      });
+      return odpowiedz({ ok: true, ...result });
+    }
+
     if (action === 'seo-daily-run') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -6264,12 +6296,8 @@ export default async (req) => {
       const threshold = Math.max(1, Math.min(1000000, Number(body.threshold ?? warehouse.progNiskiProducenta ?? 50) || 50));
       const limit = Math.max(1, Math.min(25, Number(body.limit ?? warehouse.producentProbka ?? 8) || 8));
       const requestedIds = new Set((Array.isArray(body.productIds) ? body.productIds : []).map((x) => tekst(x, 100).trim()).filter(Boolean));
-      const baseMap = new Map();
-      const add = (item = {}) => { const id = tekst(item.id, 100).trim(); if (id) baseMap.set(id, { ...(baseMap.get(id) || {}), ...item, id }); };
-      for (const item of Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []) add(item);
-      for (const item of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) add(item);
       const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
-      for (const [id, item] of Object.entries(edits)) add({ ...(item || {}), id });
+      const baseMap = mergeCatalogProducts(data).map;
       const [storeOrdersRec, allegroOrdersRec, mappingsRec] = await Promise.all([
         czytaj('orders', { items: [] }), czytaj('allegro_orders', { items: [] }), czytaj('allegro_mappings', { items: {} }),
       ]);

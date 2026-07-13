@@ -11,6 +11,10 @@ body{font-family:'Segoe UI',system-ui,-apple-system,Roboto,sans-serif;background
 button{font-family:inherit;cursor:pointer}
 input,select,textarea{font-family:inherit;font-size:1rem}
 a{color:var(--brand)}
+.skip-link{position:fixed;top:.5rem;left:.5rem;z-index:1000;padding:.7rem 1rem;border-radius:10px;background:var(--ink);color:#fff;font-weight:800;transform:translateY(-160%);transition:transform .15s;text-decoration:none}.skip-link:focus{transform:translateY(0)}
+:focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 72%,white);outline-offset:3px}
+main:focus{outline:none}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
 
 /* ── Pasek info ── */
 .topbar{background:linear-gradient(90deg,var(--brand),var(--brand2));color:#fff;text-align:center;padding:.45rem 1rem;font-size:.85rem;font-weight:500}

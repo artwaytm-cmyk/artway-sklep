@@ -1,5 +1,5 @@
-// Codzienny, bezpłatny plan SEO. Limit i możliwość wyłączenia są zapisane
-// w panelu Pozycjonowanie → Ustawienia. Domyślnie opracowuje 5 produktów.
+// Codzienny, bezpłatny plan SEO i kontrola jakości katalogu. Limit SEO oraz
+// możliwość jego wyłączenia są zapisane w panelu Pozycjonowanie → Ustawienia.
 export const config = { schedule: '15 4 * * *' };
 
 export default async () => {
@@ -10,13 +10,18 @@ export default async () => {
     return new Response('no token');
   }
   try {
-    const response = await fetch(`${base}/.netlify/functions/store?action=seo-daily-run`, {
-      method: 'POST',
-      headers: { 'x-admin-token': token, 'content-type': 'application/json' },
-      body: JSON.stringify({ source: 'scheduled-seo-daily' }),
+    const headers = { 'x-admin-token': token, 'content-type': 'application/json' };
+    // Obie operacje zapisują wspólne ustawienia, dlatego wykonujemy je kolejno,
+    // aby kontrola jakości nie nadpisała świeżej rewizji przygotowanej przez SEO.
+    const seoResponse = await fetch(`${base}/.netlify/functions/store?action=seo-daily-run`, {
+      method: 'POST', headers, body: JSON.stringify({ source: 'scheduled-seo-daily' }),
     });
-    const body = await response.text();
-    console.log('cron-seo-daily', response.status, body.slice(0, 900));
+    const qualityResponse = await fetch(`${base}/.netlify/functions/store?action=catalog-quality-audit`, {
+      method: 'POST', headers, body: JSON.stringify({ source: 'scheduled-catalog-quality', fixSafe: true, quarantineOrphans: true }),
+    });
+    const [seoBody, qualityBody] = await Promise.all([seoResponse.text(), qualityResponse.text()]);
+    console.log('cron-seo-daily', seoResponse.status, seoBody.slice(0, 700));
+    console.log('cron-catalog-quality', qualityResponse.status, qualityBody.slice(0, 700));
   } catch (error) {
     console.log('cron-seo-daily error', error?.message || String(error));
   }

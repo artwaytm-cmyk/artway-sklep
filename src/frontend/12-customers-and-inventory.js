@@ -1148,7 +1148,7 @@ function formularzProduktu(p, tryb){
           </div>
         </div>
       </div>
-      <div id="podgladZdjecia">${p.zdjecie?`<img src="${esc(p.zdjecie)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`:""}</div>
+      <div id="podgladZdjecia">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="Podgląd ${esc(p.nazwa||'produktu')}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`:""}</div>
       <details ${p.zdjecia?.length?"open":""} style="margin-bottom:.8rem">
         <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🖼️ Galeria — ręczna edycja do 16 zdjęć</summary>
         ${Array.from({length:15},(_,i)=>i+2).map(n=>`

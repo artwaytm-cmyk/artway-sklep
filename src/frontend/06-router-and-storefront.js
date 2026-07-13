@@ -99,7 +99,7 @@ function renderuj(){
       else if(t.startsWith("/admin/seo/")) w.innerHTML = widokAdminSEO(t.split("/")[3]||"pulpit");
       else if(t.startsWith("/admin/asortyment/")){
         const s=t.split("/")[3]||"produkty";
-        w.innerHTML = s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabaty():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
+        w.innerHTML = s==="jakosc"?widokAdminJakoscKatalogu():s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabaty():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
       }
       else if(t.startsWith("/admin/personalizacja/")){
         const s=t.split("/")[3]||"wyglad";
@@ -140,7 +140,7 @@ function renderuj(){
   }
   odswiezZnacznikDiag();
 }
-window.addEventListener("hashchange", renderuj);
+window.addEventListener("hashchange",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 
 /* ═══════════ WIDOK: SKLEP (strona główna) ═══════════ */
 function ikonaKategorii(nazwa){
@@ -517,7 +517,7 @@ function widokProdukt(id){
           </div>
           ${(p.zdjecie && p.zdjecia?.length)?`
           <div style="display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap">
-            ${[p.zdjecie,...p.zdjecia].map((z,i)=>`<img src="${esc(z)}" onclick="pokazZdjecie('${esc(z)}')" style="width:62px;height:62px;object-fit:cover;border-radius:9px;border:2px solid ${i===0?'var(--brand)':'var(--line)'};cursor:pointer" onmouseover="this.style.borderColor='var(--brand)'" onmouseout="this.style.borderColor='var(--line)'">`).join("")}
+            ${[p.zdjecie,...p.zdjecia].map((z,i)=>`<img src="${esc(z)}" alt="Miniatura ${esc(p.nazwa)} — zdjęcie ${i+1}" onclick="pokazZdjecie('${esc(z)}')" style="width:62px;height:62px;object-fit:cover;border-radius:9px;border:2px solid ${i===0?'var(--brand)':'var(--line)'};cursor:pointer" onmouseover="this.style.borderColor='var(--brand)'" onmouseout="this.style.borderColor='var(--line)'">`).join("")}
           </div>`:""}
         </div>
         <div>

@@ -12,6 +12,10 @@ body{font-family:'Segoe UI',system-ui,-apple-system,Roboto,sans-serif;background
 button{font-family:inherit;cursor:pointer}
 input,select,textarea{font-family:inherit;font-size:1rem}
 a{color:var(--brand)}
+.skip-link{position:fixed;top:.5rem;left:.5rem;z-index:1000;padding:.7rem 1rem;border-radius:10px;background:var(--ink);color:#fff;font-weight:800;transform:translateY(-160%);transition:transform .15s;text-decoration:none}.skip-link:focus{transform:translateY(0)}
+:focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 72%,white);outline-offset:3px}
+main:focus{outline:none}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
 
 /* ── Pasek info ── */
 .topbar{background:linear-gradient(90deg,var(--brand),var(--brand2));color:#fff;text-align:center;padding:.45rem 1rem;font-size:.85rem;font-weight:500}
@@ -357,6 +361,7 @@ body.hide-home-contact .home-contact{display:none}
 .overlay.open{opacity:1;pointer-events:auto}
 .drawer{position:fixed;top:0;right:0;width:min(420px,100vw);height:100%;background:var(--panel);z-index:100;display:flex;flex-direction:column;transition:transform .28s ease;transform:translateX(105%);box-shadow:-8px 0 40px rgba(0,0,0,.18)}
 .drawer.open{transform:translateX(0)}
+body.has-dialog{overflow:hidden}
 .drawer-head{display:flex;align-items:center;justify-content:space-between;padding:1.1rem 1.2rem;border-bottom:1px solid var(--line)}
 .drawer-head h2{font-size:1.15rem}
 .close-x{border:none;background:none;font-size:1.5rem;color:var(--muted2);line-height:1}
@@ -387,6 +392,7 @@ body.hide-home-contact .home-contact{display:none}
 .modal{position:fixed;inset:0;z-index:110;display:none;align-items:center;justify-content:center;padding:1rem;background:rgba(15,18,25,.55)}
 .modal.open{display:flex}
 .modal-box{background:var(--panel);border-radius:20px;width:min(560px,100%);max-height:92vh;overflow-y:auto;padding:1.6rem}
+.modal-close{position:sticky;top:0;z-index:3;display:grid;place-items:center;width:42px;height:42px;margin:-.5rem -.5rem .25rem auto;border:1px solid var(--line);border-radius:11px;background:var(--panel);color:var(--ink);font-size:1.15rem;box-shadow:0 4px 12px rgba(15,23,42,.08)}
 .modal-box h2{margin-bottom:.3rem}
 .modal-box .sub{color:var(--muted2);font-size:.9rem;margin-bottom:1.1rem}
 .f-row{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}

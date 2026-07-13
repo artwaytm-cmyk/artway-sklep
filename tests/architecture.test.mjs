@@ -22,6 +22,8 @@ test('moduły źródłowe mają kontrolowany rozmiar i jednoznaczną kolejność
 test('główny backend pozostaje poniżej budżetu migracyjnego', async () => {
   const file = await stat('netlify/functions/lib/store-app.mjs');
   assert.ok(file.size < 500_000, `store-app.mjs urósł do ${file.size} B; wydziel kolejną domenę`);
+  const catalogQuality = await stat('netlify/functions/lib/domain/catalog-quality.mjs');
+  assert.ok(catalogQuality.size < 80_000, `catalog-quality.mjs urósł do ${catalogQuality.size} B; rozdziel audyt od korekt`);
 });
 
 test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', async () => {
@@ -41,4 +43,16 @@ test('HTML startowy ma komplet podstaw technicznego SEO', async () => {
     assert.ok(html.includes(marker), `index.html nie zawiera: ${marker}`);
   }
   assert.ok(!html.includes('sklep wielobranżowy'), 'opis startowy nie może reklamować nieaktualnego asortymentu');
+});
+
+test('podstawowy interfejs ma obsługę klawiatury i czytników ekranu', async () => {
+  const html = await readFile('index.html', 'utf8');
+  for (const marker of ['class="skip-link"', '<main id="widok" tabindex="-1"', 'role="dialog"', 'aria-modal="true"', 'aria-live="polite"']) {
+    assert.ok(html.includes(marker), `index.html nie zawiera zabezpieczenia dostępności: ${marker}`);
+  }
+  const frontendSources = ASSET_BUNDLES.flatMap((bundle) => bundle.sources.filter((source) => source.startsWith('src/frontend/')));
+  for (const source of frontendSources) {
+    const content = await readFile(source, 'utf8');
+    for (const match of content.matchAll(/<img\b[^>]*>/g)) assert.match(match[0], /\balt\s*=/, `${source} zawiera obraz bez tekstu alternatywnego`);
+  }
 });

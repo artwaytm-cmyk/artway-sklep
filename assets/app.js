@@ -2251,7 +2251,7 @@ function renderuj(){
       else if(t.startsWith("/admin/seo/")) w.innerHTML = widokAdminSEO(t.split("/")[3]||"pulpit");
       else if(t.startsWith("/admin/asortyment/")){
         const s=t.split("/")[3]||"produkty";
-        w.innerHTML = s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabaty():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
+        w.innerHTML = s==="jakosc"?widokAdminJakoscKatalogu():s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabaty():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
       }
       else if(t.startsWith("/admin/personalizacja/")){
         const s=t.split("/")[3]||"wyglad";
@@ -2292,7 +2292,7 @@ function renderuj(){
   }
   odswiezZnacznikDiag();
 }
-window.addEventListener("hashchange", renderuj);
+window.addEventListener("hashchange",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 
 /* ═══════════ WIDOK: SKLEP (strona główna) ═══════════ */
 function ikonaKategorii(nazwa){
@@ -2669,7 +2669,7 @@ function widokProdukt(id){
           </div>
           ${(p.zdjecie && p.zdjecia?.length)?`
           <div style="display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap">
-            ${[p.zdjecie,...p.zdjecia].map((z,i)=>`<img src="${esc(z)}" onclick="pokazZdjecie('${esc(z)}')" style="width:62px;height:62px;object-fit:cover;border-radius:9px;border:2px solid ${i===0?'var(--brand)':'var(--line)'};cursor:pointer" onmouseover="this.style.borderColor='var(--brand)'" onmouseout="this.style.borderColor='var(--line)'">`).join("")}
+            ${[p.zdjecie,...p.zdjecia].map((z,i)=>`<img src="${esc(z)}" alt="Miniatura ${esc(p.nazwa)} — zdjęcie ${i+1}" onclick="pokazZdjecie('${esc(z)}')" style="width:62px;height:62px;object-fit:cover;border-radius:9px;border:2px solid ${i===0?'var(--brand)':'var(--line)'};cursor:pointer" onmouseover="this.style.borderColor='var(--brand)'" onmouseout="this.style.borderColor='var(--line)'">`).join("")}
           </div>`:""}
         </div>
         <div>
@@ -4572,7 +4572,7 @@ function odswiezKoszyk(){
   $("cartItems").innerHTML = n ? koszyk.map((x,i)=>{
     const p = produkty.find(p=>p.id===x.id); if(!p) return "";
     return `<div class="cart-item">
-      <div class="ci-thumb" style="background:${p.kolor||'#eef2f7'}">${p.zdjecie?`<img src="${esc(p.zdjecie)}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">`:(p.ikona||"📦")}</div>
+      <div class="ci-thumb" style="background:${p.kolor||'#eef2f7'}">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">`:(p.ikona||"📦")}</div>
       <div class="ci-info"><b>${esc(p.nazwa)}</b>${x.wariant?`<small style="display:block;color:var(--brand);font-weight:700">${esc(x.wariant)}</small>`:""}<small>${zl(p.cena)} / szt.</small></div>
       <div class="qty">
         <button onclick="zmienIloscIdx(${i},-1)">−</button><span>${x.ile}</span>
@@ -4729,7 +4729,8 @@ function otworzModal(){
   const imieS = czesci[0]||"", nazwiskoS = czesci.slice(1).join(" ");
   const maFirme = !!(profil.nip && profil.firma);
   $("modalBox").innerHTML = `
-    <h2>Dane do zamówienia</h2>
+    <button type="button" class="modal-close" onclick="zamknijModalCheckout()" aria-label="Zamknij formularz zamówienia">✕</button>
+    <h2 id="checkoutTitle">Dane do zamówienia</h2>
     <p class="sub">Pola z * są wymagane. Koszty przeliczają się automatycznie.${sesja&&(profil.ulica||profil.telefon)?" Dane wstawiono z Twojego profilu.":""}</p>
     <form id="orderForm" onsubmit="zlozZamowienie(event)">
       <h3 class="f-sekcja">👤 Dane kontaktowe</h3>
@@ -4801,10 +4802,10 @@ function otworzModal(){
       <div id="availabilityConfirmBox"></div>
       <div class="summary" id="orderSummary"></div>
       <button type="submit" class="checkout-btn">Zamawiam →</button>
-      <p class="pay-note">Klikając, akceptujesz <a href="#/regulamin" onclick="document.getElementById('modal').classList.remove('open')">regulamin</a>. Dane służą wyłącznie realizacji zamówienia.</p>
+      <p class="pay-note">Klikając, akceptujesz <a href="#/regulamin" onclick="zamknijModalCheckout({restoreFocus:false})">regulamin</a>. Dane służą wyłącznie realizacji zamówienia.</p>
     </form>`;
   przeliczZamowienie();
-  $("modal").classList.add("open");
+  aktywujModalCheckout();
 }
 function przeliczZamowienie(){
   const form = $("orderForm"); if(!form) return;
@@ -5072,17 +5073,17 @@ Uwagi: ${f.get("notes")||"brak"}`;
 	    const linkPaynow = noweZamowienie.paynow?.redirectUrl || (idP==="paynow" && KONFIG.linkPlatnosci ? KONFIG.linkPlatnosci : "");
 	    $("modalBox").innerHTML = `<div class="success">
 	      <div class="big">✅</div>
-	      <h2>${linkPaynow?"Przekierowujemy do płatności…":"Dziękujemy za zamówienie!"}</h2>
+	      <h2 id="checkoutTitle">${linkPaynow?"Przekierowujemy do płatności…":"Dziękujemy za zamówienie!"}</h2>
 	      <p class="sub">Numer zamówienia: <b>${nr}</b> • Kwota: <b>${zl(razem)}</b><br>${esc(dost.nazwa)} • ${esc(plat.nazwa)}</p>
 	      <p class="pay-note" style="${zapisanoCentralnie?"color:var(--ok)":"color:var(--danger)"}">${zapisanoCentralnie?"☁️ Zamówienie zapisano we wspólnej bazie sklepu.":"⚠️ Brak połączenia z serwerem — zamówienie czeka na synchronizację."}</p>
 	      <p class="pay-note" style="text-align:left">📧 Potwierdzenie zamówienia jest wysyłane automatycznie na e-mail klienta, jeśli bramka e-mail jest skonfigurowana.</p>
 	      ${bladPaynow}
 	      ${infoPlatnosci}
-	      <p class="pay-note" style="margin-top:1rem"><a href="${linkPaynow?esc(linkPaynow):urlDziekujemy}" onclick="document.getElementById('modal').classList.remove('open')" style="color:var(--brand)">${linkPaynow?"Przejdź do płatności teraz →":"Przejdź do podziękowania →"}</a></p>
+	      <p class="pay-note" style="margin-top:1rem"><a href="${linkPaynow?esc(linkPaynow):urlDziekujemy}" onclick="zamknijModalCheckout({restoreFocus:false})" style="color:var(--brand)">${linkPaynow?"Przejdź do płatności teraz →":"Przejdź do podziękowania →"}</a></p>
 	    </div>`;
 	    koszyk=[]; rabat=null; zapiszLS("artway_koszyk",koszyk); zapiszLS("artway_rabat",null); odswiezKoszyk();
 	    setTimeout(()=>{
-	      $("modal")?.classList.remove("open");
+	      zamknijModalCheckout({restoreFocus:false});
 	      if(linkPaynow) location.href=linkPaynow;
 	      else location.hash=urlDziekujemy;
 	    }, linkPaynow?900:650);
@@ -5093,8 +5094,13 @@ Uwagi: ${f.get("notes")||"brak"}`;
 }
 
 /* ═══════════ UI ═══════════ */
-function otworzKoszyk(){ $("drawer").classList.add("open"); $("overlay").classList.add("open"); }
-function zamknijKoszyk(){ $("drawer").classList.remove("open"); $("overlay").classList.remove("open"); }
+let dialogPoprzedniFocus=null;
+function elementyFokusu(root){return [...(root?.querySelectorAll?.('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')||[])].filter(el=>!el.hidden&&el.getAttribute("aria-hidden")!=="true"&&el.offsetParent!==null);}
+function ustawBlokadeDialogu(){document.body.classList.toggle("has-dialog",$("drawer")?.classList.contains("open")||$("modal")?.classList.contains("open"));}
+function otworzKoszyk(){dialogPoprzedniFocus=document.activeElement;const drawer=$("drawer"),overlay=$("overlay");drawer.classList.add("open");drawer.setAttribute("aria-hidden","false");overlay.classList.add("open");overlay.setAttribute("aria-hidden","false");ustawBlokadeDialogu();requestAnimationFrame(()=>$("closeCart")?.focus());}
+function zamknijKoszyk({restoreFocus=true}={}){const drawer=$("drawer"),overlay=$("overlay");drawer.classList.remove("open");overlay.classList.remove("open");const target=restoreFocus&&dialogPoprzedniFocus?.isConnected?dialogPoprzedniFocus:$("widok");target?.focus?.({preventScroll:true});drawer.setAttribute("aria-hidden","true");overlay.setAttribute("aria-hidden","true");ustawBlokadeDialogu();}
+function aktywujModalCheckout(){dialogPoprzedniFocus=document.activeElement;const modal=$("modal");modal.classList.add("open");modal.setAttribute("aria-hidden","false");ustawBlokadeDialogu();requestAnimationFrame(()=>modal.querySelector("input,select,button,a[href]")?.focus()||$("modalBox")?.focus());}
+function zamknijModalCheckout({restoreFocus=true}={}){const modal=$("modal");modal.classList.remove("open");const target=restoreFocus&&dialogPoprzedniFocus?.isConnected?dialogPoprzedniFocus:$("widok");target?.focus?.({preventScroll:true});modal.setAttribute("aria-hidden","true");ustawBlokadeDialogu();}
 let toastT;
 function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show");
   clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),1800); }
@@ -5103,7 +5109,18 @@ $("cartBtn").onclick = otworzKoszyk;
 $("closeCart").onclick = zamknijKoszyk;
 $("overlay").onclick = zamknijKoszyk;
 $("checkoutBtn").onclick = otworzModal;
-$("modal").onclick = e=>{ if(e.target.id==="modal") $("modal").classList.remove("open"); };
+$("modal").onclick = e=>{ if(e.target.id==="modal") zamknijModalCheckout(); };
+document.addEventListener("keydown",event=>{
+  const modal=$("modal"),drawer=$("drawer");
+  const root=modal?.classList.contains("open")?modal:drawer?.classList.contains("open")?drawer:null;
+  if(!root)return;
+  if(event.key==="Escape"){event.preventDefault();root===modal?zamknijModalCheckout():zamknijKoszyk();return;}
+  if(event.key!=="Tab")return;
+  const focusable=elementyFokusu(root);if(!focusable.length){event.preventDefault();root.focus?.();return;}
+  const first=focusable[0],last=focusable.at(-1);
+  if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+});
 $("searchInput").oninput = e=>{
   fraza = e.target.value.toLowerCase();
   stronaProduktow = 1;

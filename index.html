@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.13.21">
+<meta name="artway-version" content="2026.07.13.22">
 <meta name="google-site-verification" content="rgyRTOc-UT4liX6mFWQyqEFF9eUnKLKy5hoMF62d40g">
 <title>Gry edukacyjne i rodzinne, zabawki | Artway-TM</title>
 <meta name="description" content="Artway-TM — gry edukacyjne i rodzinne, zestawy kreatywne oraz zabawki dla dzieci. Wygodne zakupy i dostawa InPost.">
@@ -19,12 +19,14 @@
 <meta name="twitter:title" content="Gry edukacyjne i rodzinne, zabawki | Artway-TM">
 <meta name="twitter:description" content="Gry edukacyjne i rodzinne, zestawy kreatywne oraz zabawki dla dzieci. Wygodne zakupy i dostawa InPost.">
 <link id="faviconLink" rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="14" fill="%232563eb"/%3E%3Ctext x="32" y="42" text-anchor="middle" font-size="30" font-family="Arial" font-weight="700" fill="white"%3EA%3C/text%3E%3C/svg%3E'>
-  <link rel="stylesheet" href="/assets/styles.css?v=2026.07.13.21">
+  <link rel="stylesheet" href="/assets/styles.css?v=2026.07.13.22">
   <script id="artway-seo-schema" type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"Artway-TM","url":"https://artwaytm.pl/","inLanguage":"pl-PL"},{"@type":"OnlineStore","name":"Artway-TM","url":"https://artwaytm.pl/","email":"artwaytm@gmail.com","telephone":"+48530038914"}]}</script>
 </head>
 <body>
 
-<div class="topbar" id="topbar">🚚 Darmowa dostawa od 200 zł &nbsp;•&nbsp; 📦 Wysyłka w 24h &nbsp;•&nbsp; ↩️ 14 dni na zwrot &nbsp;•&nbsp; 🎁 Kod <b>START10</b> = −10%</div>
+<a class="skip-link" href="#widok">Przejdź do głównej treści</a>
+
+<div class="topbar" id="topbar" role="note">🚚 Darmowa dostawa od 200 zł &nbsp;•&nbsp; 📦 Wysyłka w 24h &nbsp;•&nbsp; ↩️ 14 dni na zwrot &nbsp;•&nbsp; 🎁 Kod <b>START10</b> = −10%</div>
 
 <header>
   <div class="header-in">
@@ -40,16 +42,16 @@
       <button class="cart-btn" id="cartBtn">🛒 Koszyk <span class="cart-count" id="cartCount">0</span></button>
     </div>
   </div>
-  <nav class="nav-row" id="mainNav"></nav>
+  <nav class="nav-row" id="mainNav" aria-label="Główne kategorie sklepu"></nav>
 </header>
 
-<main id="widok"></main>
+<main id="widok" tabindex="-1"></main>
 
 <!-- Koszyk -->
-<div class="overlay" id="overlay"></div>
-<aside class="drawer" id="drawer" aria-label="Koszyk">
+<div class="overlay" id="overlay" aria-hidden="true"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="cartTitle" aria-hidden="true" tabindex="-1">
   <div class="drawer-head">
-    <h2>🛒 Twój koszyk</h2>
+    <h2 id="cartTitle">🛒 Twój koszyk</h2>
     <button class="close-x" id="closeCart" aria-label="Zamknij">✕</button>
   </div>
   <div class="cart-items" id="cartItems"></div>
@@ -66,8 +68,8 @@
 </aside>
 
 <!-- Modal zamówienia -->
-<div class="modal" id="modal">
-  <div class="modal-box" id="modalBox"></div>
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="checkoutTitle" aria-hidden="true">
+  <div class="modal-box" id="modalBox" tabindex="-1"></div>
 </div>
 
 <footer>
@@ -100,7 +102,7 @@
   <div class="copy" id="footCopy">© 2026 Artway-TM. Wszystkie prawa zastrzeżone.</div>
 </footer>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="obszarWydruku"></div>
 
 <script>
@@ -108,6 +110,6 @@
 const USTAWIENIA_PUBLICZNE = {};
 /* PUBLIC_SETTINGS_END */
 </script>
-  <script defer src="/assets/app.js?v=2026.07.13.21"></script>
+  <script defer src="/assets/app.js?v=2026.07.13.22"></script>
 </body>
 </html>

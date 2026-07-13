@@ -231,14 +231,14 @@ function widokAdminWyglad(){
       <div class="f-group"><label>Adres firmy (opcjonalnie)</label><input name="firmaAdres" value="${esc(df.adres||"")}" placeholder="Ulica, kod pocztowy, miejscowość"></div>
       <div class="f-group"><label>Logo graficzne (zamiast nazwy tekstowej)</label>
         <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
-          ${ustawienia.logoObraz?`<img src="${ustawienia.logoObraz}" style="height:36px;max-width:190px;object-fit:contain;border-radius:6px;background:var(--bg);padding:2px 6px">`:`<span style="font-size:.8rem;color:var(--muted2)">brak — wyświetlana jest nazwa tekstowa</span>`}
+          ${ustawienia.logoObraz?`<img src="${ustawienia.logoObraz}" alt="Podgląd logo sklepu" style="height:36px;max-width:190px;object-fit:contain;border-radius:6px;background:var(--bg);padding:2px 6px">`:`<span style="font-size:.8rem;color:var(--muted2)">brak — wyświetlana jest nazwa tekstowa</span>`}
           ${polePlikuHTML("wgrajLogo(this)", "Wgraj logo")}
           ${ustawienia.logoObraz?`<button class="btn danger" type="button" onclick="usunLogo()">🗑️ Usuń logo</button>`:""}
         </div>
       </div>
       <div class="f-group"><label>Miniaturka w zakładce przeglądarki (favicon)</label>
         <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
-          <img src="${esc(ustawienia.faviconObraz||domyslnyFavicon())}" style="width:34px;height:34px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--bg);padding:2px">
+          <img src="${esc(ustawienia.faviconObraz||domyslnyFavicon())}" alt="Podgląd ikony karty przeglądarki" style="width:34px;height:34px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--bg);padding:2px">
           ${polePlikuHTML("wgrajFavicon(this)", "Wgraj miniaturkę")}
           ${ustawienia.faviconObraz?`<button class="btn danger" type="button" onclick="usunFavicon()">🗑️ Usuń miniaturkę</button>`:""}
           <small style="color:var(--muted2)">Najlepiej kwadrat PNG/JPG. Zmieni ikonę w karcie przeglądarki.</small>
@@ -258,7 +258,7 @@ function widokAdminWyglad(){
       <div class="f-group"><label>Link drugiego przycisku</label><input name="heroLink2" value="${esc(h.link2||"#/promocje")}" placeholder="#/promocje lub https://…"></div>
       <div class="f-group"><label>Zdjęcie tła baneru (opcjonalnie — z przyciemnieniem, tekst zostaje czytelny)</label>
         <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
-          ${h.obraz?`<img src="${h.obraz}" style="width:150px;height:60px;object-fit:cover;border-radius:9px;border:1px solid var(--line)">`:`<span style="font-size:.8rem;color:var(--muted2)">brak — kolorowy gradient</span>`}
+          ${h.obraz?`<img src="${h.obraz}" alt="Podgląd tła banera głównego" style="width:150px;height:60px;object-fit:cover;border-radius:9px;border:1px solid var(--line)">`:`<span style="font-size:.8rem;color:var(--muted2)">brak — kolorowy gradient</span>`}
           ${polePlikuHTML("wgrajTloHero(this)", "Wgraj tło")}
           ${h.obraz?`<button class="btn danger" type="button" onclick="usunTloHero()">🗑️ Usuń tło</button>`:""}
         </div>
@@ -423,7 +423,7 @@ function wgrajZdjecieProduktu(input){
     const pole = form && form.zdjecie;
     if(pole) pole.value = url;
     const pg = $("podgladZdjecia");
-    if(pg) pg.innerHTML = `<img src="${url}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">`;
+    if(pg) pg.innerHTML = `<img src="${url}" alt="Podgląd zdjęcia produktu" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">`;
     toast("Zdjęcie wgrane — kliknij Zapisz/Dodaj, aby zachować ✅");
   });
 }
@@ -471,7 +471,7 @@ function widokAdminBannery(){
         </div>
         <div class="f-group"><label>Obrazek banera (opcjonalnie — zastępuje ikonę, tekst zostaje)</label>
           <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
-            ${b.obraz?`<img src="${b.obraz}" style="width:130px;height:58px;object-fit:cover;border-radius:9px;border:1px solid var(--line)">`:`<span style="font-size:.8rem;color:var(--muted2)">brak — baner z ikoną</span>`}
+            ${b.obraz?`<img src="${b.obraz}" alt="Podgląd obrazu banera" style="width:130px;height:58px;object-fit:cover;border-radius:9px;border:1px solid var(--line)">`:`<span style="font-size:.8rem;color:var(--muted2)">brak — baner z ikoną</span>`}
             ${polePlikuHTML(`wgrajObrazBanera(this,'${b.id}')`, "Wgraj obrazek")}
             ${b.obraz?`<button class="btn danger" type="button" onclick="usunObrazBanera('${b.id}')">🗑️ Usuń obrazek</button>`:""}
           </div>
