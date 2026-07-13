@@ -280,6 +280,8 @@ requireMarkers('assets/app.js', app, [
   'function widokAdminProduktyZLinku',
   'function agentAIDodajProduktTylkoZLinku',
   'function agentAIZapiszProduktZJednegoLinku',
+  'Jedno pole • pełna automatyka',
+  'Zweryfikowane źródło produktu',
   '#/admin/produkty/z-linku',
   'product-url-prepare',
   'allegroSynchronizujPowiazanyProduktPoZapisie(next,{forceFees:true})',
@@ -360,6 +362,9 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "action === 'product-url-prepare'",
   'function przygotujPakietProduktuZLinku',
   'export async function inspectProductUrl',
+  'export async function inspectProductUrlViaReader',
+  'function parsujProduktZMarkdown',
+  'bezpłatny odczyt zapasowy źródła',
   'function stripHtmlZPodzialem',
   'function produktLinkDuplikaty',
   "action === 'product-sale-availability'",
@@ -464,6 +469,10 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'autoUpdateOffers',
   'autoFees',
 ]);
+
+if ((app.match(/<input id="oneProductUrl"/g) || []).length !== 1) {
+  fail('assets/app.js: dodawanie produktu z adresu musi mieć dokładnie jedno pole URL');
+}
 
 if (/stock:\s*\{\s*available:\s*Math\.max\(0,\s*Number\(opt\.stock\s*\?\?\s*p\.stan\s*\?\?\s*1\)\s*\|\|\s*1\)/.test(store)) {
   fail('netlify/functions/lib/store-app.mjs: stan 0 nie może być zamieniany na 1 przy wystawianiu Allegro');

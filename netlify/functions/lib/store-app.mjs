@@ -1782,7 +1782,7 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
       allegroOfferId: String(offer.id),
       ...(record.allegroProductId ? { allegroProductId: record.allegroProductId } : {}),
       ...(record.categoryId ? { allegroCategoryId: record.categoryId } : {}),
-      ...(producer ? { producent: producer, marka: producer } : {}),
+      ...(producer ? { producent: producer, marka: product.marka || producer } : {}),
       allegroSyncedAt: record.synced_at, allegroSyncSource: 'offer-sync',
     };
     if (offerSettings.syncDescriptions !== false && tekst(offer.descriptionText, 20000).trim()) {
@@ -2525,13 +2525,15 @@ function parsujProduktZHtml(url, html) {
   const text = stripHtml(html);
   const ldProduct = jsonLdProdukty(html)[0] || {};
   const dict = parametrySlownikoweZHtml(html);
+  const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
   const title = metaHtml(html, 'og:title')
     || tekst(ldProduct.name, 300)
     || stripHtml((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '')
     || tekst((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1], 300);
   const cena = cenaProduktuZHtml(html, text) || liczbaZTekstu(ldProduct?.offers?.price);
   const zdjecia = obrazkiProduktuZHtml(url, html);
-  const marka = parametr(dict, ['Marka', 'Producent', 'Brand']) || tekst(ldProduct.brand?.name || ldProduct.brand, 160).trim() || (/alexander/i.test(url + text) ? 'Alexander' : '');
+  const marka = parametr(dict, ['Marka', 'Brand']) || tekst(ldProduct.brand?.name || ldProduct.brand, 160).trim() || (/alexander/i.test(url + text) ? 'Alexander' : '');
+  const producent = /(^|\.)sklep\.alexander\.com\.pl$/i.test(host) ? 'Alexander' : (parametr(dict, ['Producent', 'Manufacturer']) || marka);
   const symbol = parametr(dict, ['Symbol', 'Kod', 'SKU']) || tekst(ldProduct.sku, 120).trim();
   const kodProducentaRaw = parametr(dict, ['Kod producenta', 'MPN', 'Kod katalogowy']) || tekst(ldProduct.mpn, 120).trim();
   const eanRaw = parametr(dict, ['EAN', 'GTIN', 'Kod EAN']) || tekst(ldProduct.gtin13 || ldProduct.gtin || ldProduct.gtin12 || ldProduct.gtin14, 80).trim() || kodProducentaRaw;
@@ -2580,8 +2582,8 @@ function parsujProduktZHtml(url, html) {
       kategoria,
       zdjecie: zdjecia[0] || '',
       zdjecia: zdjecia.slice(1, 16),
-      producent: marka,
-      marka,
+      producent,
+      marka: marka || producent,
       gtin: ean,
       ean,
       mpn: kodProducenta || symbol,
@@ -2608,6 +2610,155 @@ function parsujProduktZHtml(url, html) {
     },
     availability: { available: dostepny, text: statusHtml || (dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia')), quantity: stanProducenta.quantity, exact: stanProducenta.exact, source: stanProducenta.source, checkedAt },
   };
+}
+function markdownInlineTekst(value = '') {
+  return htmlDecode(String(value || '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/<https?:\/\/[^>]+>/g, ' ')
+    .replace(/[*_`~]+/g, '')
+    .replace(/\\([\\[\]()*_#])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim());
+}
+function markdownTekstZPodzialem(value = '') {
+  return htmlDecode(String(value || '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '\n')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '• ')
+    .replace(/[*_`~]+/g, '')
+    .replace(/\\([\\[\]()*_#])/g, '$1'))
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.replace(/[\t ]+/g, ' ').trim())
+    .filter(Boolean)
+    .filter((line, index, lines) => index === 0 || line !== lines[index - 1])
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+function markdownWartoscPoEtykiecie(markdown = '', labels = []) {
+  const lines = String(markdown || '').replace(/\r/g, '').split('\n');
+  const wanted = labels.map(normalizujKluczParametru);
+  for (let i = 0; i < lines.length; i++) {
+    const current = normalizujKluczParametru(markdownInlineTekst(lines[i]));
+    if (!wanted.includes(current)) continue;
+    for (let j = i + 1; j < Math.min(lines.length, i + 6); j++) {
+      const raw = lines[j].trim();
+      if (!raw || /^!\[/.test(raw)) continue;
+      if (/^#{1,6}\s/.test(raw)) break;
+      const value = markdownInlineTekst(raw);
+      if (value) return tekst(value, 500).trim();
+    }
+  }
+  return '';
+}
+function obrazkiProduktuZMarkdown(url = '', markdown = '') {
+  const productId = (String(url).match(/product-pol-(\d+)-/i) || [])[1] || '';
+  const all = [...String(markdown || '').matchAll(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)(?:\s+[^)]*)?\)/gi)]
+    .map((m) => htmlDecode(m[1]).replace(/^http:\/\//i, 'https://'))
+    .filter((image) => /\.(?:jpe?g|png|webp)(?:[?#].*)?$/i.test(image))
+    .filter((image) => !productId || new RegExp(`(?:-|_)${productId}(?:_|-|\\.)`, 'i').test(image));
+  const preferred = all.some((image) => /\/pol_pm_/i.test(image)) ? all.filter((image) => /\/pol_pm_/i.test(image)) : all;
+  const unique = [], keys = new Set();
+  for (const image of preferred) {
+    const key = image.replace(/\/pol_(?:ps|pm|pl)_/i, '/pol_').replace(/[?#].*$/, '');
+    if (keys.has(key)) continue;
+    keys.add(key); unique.push(image);
+  }
+  return unique.slice(0, 16);
+}
+function parsujProduktZMarkdown(url, markdown) {
+  const raw = String(markdown || ''), body = raw.includes('Markdown Content:') ? raw.split('Markdown Content:').slice(1).join('Markdown Content:') : raw;
+  const titleHeader = markdownInlineTekst((raw.match(/^Title:\s*(.+)$/mi) || [])[1] || '');
+  const headings = [...body.matchAll(/^#\s+(.+)$/gm)].map((m) => ({ index: m.index, title: markdownInlineTekst(m[1]) })).filter((x) => x.title);
+  const titleHeading = headings.find((x) => titleHeader && normalizujKluczParametru(x.title) === normalizujKluczParametru(titleHeader)) || headings.find((x) => /product-pol-/i.test(url) && !/strona główna|sklep/i.test(x.title)) || headings[0];
+  const title = titleHeader || titleHeading?.title || '';
+  const productStart = Math.max(0, titleHeading?.index || 0), afterTitle = body.slice(productStart), nextProductBoundary = afterTitle.search(/\n##\s+(?:Produkty podobne|Inni kupili|Opinie|Polecane)/i);
+  const segment = nextProductBoundary > 0 ? afterTitle.slice(0, nextProductBoundary) : afterTitle.slice(0, 50000);
+  const cena = liczbaZTekstu((segment.match(/^##\s+(\d[\d\s]*[,.]\d{2})\s*zł\s*$/mi) || [])[1] || '');
+  const stockMatch = segment.match(/\*\*\s*(\d{1,8})\s*szt\.\s*\*\*/i), quantity = stockMatch ? Math.max(0, Math.floor(Number(stockMatch[1]) || 0)) : null;
+  const statusDostepny = /produkt dostępny|towar dostępny|\bdostępny\b/i.test(segment);
+  const statusNiedostepny = /powiadom o dostępności|produkt niedostępny|chwilowo niedostępny|brak produktu/i.test(segment);
+  const dostepny = quantity !== null ? quantity > 0 : (statusDostepny && !statusNiedostepny);
+  const niedostepny = quantity === 0 || statusNiedostepny;
+  const descriptionCandidates = [...segment.matchAll(/^##\s+(.+)$/gm)].map((m) => ({ index: m.index, title: markdownInlineTekst(m[1]), end: m.index + m[0].length }))
+    .filter((x) => x.title && !/^\d[\d\s]*[,.]\d{2}\s*zł$/i.test(x.title));
+  const descriptionHeading = descriptionCandidates.find((x) => x.index > (segment.search(/^##\s+\d[\d\s]*[,.]\d{2}\s*zł/m) || 0));
+  let descriptionRaw = descriptionHeading ? segment.slice(descriptionHeading.end) : '';
+  const descriptionEnd = descriptionRaw.search(/\n(?:Podmiot odpowiedzialny|Marka|Symbol|Kod producenta|EAN)\s*\n/i);
+  if (descriptionEnd > 0) descriptionRaw = descriptionRaw.slice(0, descriptionEnd);
+  let opis = tekst(markdownTekstZPodzialem([descriptionHeading?.title || '', descriptionRaw].filter(Boolean).join('\n')), 12000).trim();
+  if (opis.length < 80) opis = tekst(markdownTekstZPodzialem(segment.slice(0, 10000)), 12000).trim();
+  const opisKrotki = tekst(opis.replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).filter((x) => x.length > 20).slice(0, 2).join(' ') || opis, 500);
+  const marka = markdownWartoscPoEtykiecie(segment, ['Marka', 'Brand']);
+  const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
+  const producent = /(^|\.)sklep\.alexander\.com\.pl$/i.test(host) ? 'Alexander' : (markdownWartoscPoEtykiecie(segment, ['Producent', 'Manufacturer']) || marka);
+  const symbol = markdownWartoscPoEtykiecie(segment, ['Symbol', 'SKU', 'Kod']);
+  const kodProducentaRaw = markdownWartoscPoEtykiecie(segment, ['Kod producenta', 'MPN', 'Kod katalogowy']);
+  const eanRaw = markdownWartoscPoEtykiecie(segment, ['EAN', 'GTIN', 'Kod EAN']) || kodProducentaRaw;
+  const ean = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
+  const kodProducenta = symbol || (kodProducentaRaw && normalizujKluczParametru(kodProducentaRaw) !== normalizujKluczParametru(ean) ? kodProducentaRaw : '');
+  const zdjecia = obrazkiProduktuZMarkdown(url, body);
+  const beforeTitle = body.slice(0, productStart), crumbs = [...beforeTitle.matchAll(/^\s*\d+\.\s+\[([^\]]+)\]/gm)].map((m) => markdownInlineTekst(m[1])).filter((x) => x && !/strona główna/i.test(x));
+  const kategoria = crumbs.at(-1) || markdownWartoscPoEtykiecie(segment, ['Seria']) || marka;
+  const checkedAt = new Date().toISOString();
+  const dict = {
+    marka,
+    symbol,
+    'kod producenta': kodProducentaRaw,
+    ean,
+    seria: markdownWartoscPoEtykiecie(segment, ['Seria']),
+    wiek: markdownWartoscPoEtykiecie(segment, ['Wiek']),
+    'liczba graczy': markdownWartoscPoEtykiecie(segment, ['Liczba graczy']),
+    'wymiary opakowania': markdownWartoscPoEtykiecie(segment, ['Wymiary opakowania', 'Wymiary opakowania (dł/sz/wys)']),
+    'waga opakowania': markdownWartoscPoEtykiecie(segment, ['Waga opakowania']),
+    ostrzezenie: markdownWartoscPoEtykiecie(segment, ['Ostrzeżenie']),
+  };
+  const missing = [];
+  if (!title) missing.push('nazwa');
+  if (!cena) missing.push('cena');
+  if (!ean) missing.push('EAN');
+  if (!zdjecia.length) missing.push('zdjęcia');
+  if (!opisKrotki) missing.push('krótki opis');
+  if (!opis) missing.push('opis');
+  if (!dostepny && !niedostepny) missing.push('dostępność');
+  const confidence = Math.max(20, 100 - missing.length * 14);
+  return {
+    ok: true, url, confidence, missing,
+    product: {
+      nazwa: title.replace(/\s+\|.*$/, '').trim(), opisKrotki, opis, cena: cena || '', kategoria,
+      zdjecie: zdjecia[0] || '', zdjecia: zdjecia.slice(1, 16), producent, marka: marka || producent,
+      gtin: ean, ean, mpn: kodProducenta || symbol, kodProducenta: kodProducenta || symbol, externalId: symbol || '',
+      rozmiar: dict['wymiary opakowania'] || '', producentUrl: url, sourceUrl: url,
+      dostepnoscProducenta: dostepny ? 'dostępny' : (niedostepny ? 'niedostępny' : 'do sprawdzenia'),
+      stanProducenta: quantity === null ? '' : quantity, stanProducentaDokladny: quantity !== null,
+      stanProducentaZrodlo: quantity !== null ? 'ilość pokazana przez producenta' : 'status strony producenta',
+      producentStatus: niedostepny ? 'brak' : (dostepny ? (quantity === null ? 'dostepny_nieznany' : 'dostepny') : 'nieznany'),
+      producentSprawdzonoAt: checkedAt,
+      parametryProducenta: { symbol, kodProducenta: kodProducentaRaw, ean, seria: dict.seria, wiek: dict.wiek, liczbaGraczy: dict['liczba graczy'], wymiaryOpakowania: dict['wymiary opakowania'], wagaOpakowania: dict['waga opakowania'], ostrzezenie: dict.ostrzezenie },
+      parametryZrodla: Object.fromEntries(Object.entries(dict).filter(([, value]) => value)),
+      sourceEvidence: { url, host, fetchedAt: checkedAt, title, retrieval: 'reader-fallback', fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict).filter((key) => dict[key])].slice(0, 80) },
+    },
+    availability: { available: dostepny, text: dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia'), quantity, exact: quantity !== null, source: quantity !== null ? 'ilość pokazana przez producenta' : 'status strony producenta', checkedAt },
+  };
+}
+async function pobierzProduktZCzytnika(target = '') {
+  const source = new URL(target), readerTarget = `http://${source.host}${source.pathname}${source.search}`;
+  const readerUrl = `https://r.jina.ai/${readerTarget}`;
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 28000), started = Date.now();
+  try {
+    const r = await fetch(readerUrl, { signal: controller.signal, redirect: 'follow', headers: { accept: 'text/plain;charset=utf-8', 'accept-language': 'pl-PL,pl;q=0.9', 'cache-control': 'no-cache' } });
+    const markdown = await r.text();
+    if (!r.ok || markdown.length < 800) throw Object.assign(new Error(`Czytnik źródła: HTTP ${r.status || 502}`), { statusCode: r.status || 502 });
+    const parsed = parsujProduktZMarkdown(target, markdown);
+    if (!parsed.product?.nazwa || (!parsed.product?.ean && !parsed.product?.kodProducenta)) throw Object.assign(new Error('Czytnik nie rozpoznał jednoznacznie produktu'), { statusCode: 422 });
+    const fieldSources = { nazwa: 'nagłówek strony producenta', opis: 'pełny opis producenta', cena: 'cena producenta', ean: parsed.product.ean ? 'parametry produktu' : '', kod: parsed.product.kodProducenta ? 'parametry produktu' : '', zdjecia: parsed.product.zdjecie ? 'galeria produktu' : '', dostepnosc: parsed.availability?.source || 'status produktu' };
+    parsed.product.sourceEvidence = { ...(parsed.product.sourceEvidence || {}), requestedUrl: target, resolvedUrl: target, canonicalUrl: target, fieldSources };
+    const quality = Math.max(0, Math.min(100, Number(parsed.confidence || 0) + (String(parsed.product.opis || '').length > 300 ? 4 : 0) + (parsed.product.ean ? 3 : 0)));
+    return { ...parsed, confidence: quality, requestedCandidate: target, resolvedUrl: target, canonicalUrl: target, fieldSources, readerBytes: markdown.length, readerStatus: r.status, durationMs: Date.now() - started };
+  } finally { clearTimeout(timer); }
 }
 async function pobierzProduktProducenta(target = '') {
   const raw = tekst(target, 4000).trim();
@@ -2641,6 +2792,13 @@ async function pobierzProduktProducenta(target = '') {
       return { ...parsed, confidence: quality, requestedCandidate: candidate.url, resolvedUrl, canonicalUrl, fieldSources };
     } catch (error) {
       attempts.push({ url: candidate.url, reason: candidate.reason, status: Number(error?.statusCode || 0), ok: false, durationMs: Date.now() - started, error: error?.name === 'AbortError' ? 'Przekroczono 18 s oczekiwania' : tekst(error?.message || error, 500) });
+      try {
+        const fallback = await pobierzProduktZCzytnika(candidate.url);
+        attempts.push({ url: candidate.url, reason: 'bezpłatny odczyt zapasowy źródła', status: fallback.readerStatus || 200, ok: true, resolvedUrl: candidate.url, canonicalUrl: candidate.url, bytes: fallback.readerBytes || 0, durationMs: fallback.durationMs || 0, confidence: fallback.confidence, missing: fallback.missing || [] });
+        return fallback;
+      } catch (fallbackError) {
+        attempts.push({ url: candidate.url, reason: 'bezpłatny odczyt zapasowy źródła', status: Number(fallbackError?.statusCode || 0), ok: false, error: fallbackError?.name === 'AbortError' ? 'Przekroczono 28 s oczekiwania' : tekst(fallbackError?.message || fallbackError, 500) });
+      }
       return null;
     } finally { clearTimeout(timer); }
   };
@@ -2654,6 +2812,9 @@ async function pobierzProduktProducenta(target = '') {
 }
 export async function inspectProductUrl(target = '') {
   return pobierzProduktProducenta(target);
+}
+export async function inspectProductUrlViaReader(target = '') {
+  return pobierzProduktZCzytnika(target);
 }
 function kluczCacheLinkuProduktu(value = '') {
   try {
@@ -2766,7 +2927,7 @@ async function przygotujPakietProduktuZLinku(req, target = '', options = {}) {
   const data = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {}, products = allegroAgentProduktyCentralne(data);
   const producer = allegroRozpoznajProducenta(sourceProduct, {}, offerSettings) || tekst(sourceProduct.producent || sourceProduct.marka, 160);
   const category = produktLinkKategoriaSklepu(sourceProduct, products);
-  const baseProduct = { ...sourceProduct, ...(producer ? { producent: producer, marka: producer } : {}), ...(category.name ? { kategoria: category.name } : {}) };
+  const baseProduct = { ...sourceProduct, ...(producer ? { producent: producer, marka: sourceProduct.marka || producer } : {}), ...(category.name ? { kategoria: category.name } : {}) };
   let offerPreparation = null, offerError = null;
   try { offerPreparation = await allegroDraftZAutoKategoria(req, baseProduct, { publicationAction: 'keep' }); }
   catch (error) { offerError = { message: tekst(error?.message || error, 700), code: tekst(error?.code || '', 120), status: Number(error?.status || 0) }; }
