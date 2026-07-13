@@ -185,6 +185,38 @@ export function infaktListaDokumentowKsef(payload = {}) {
   return list.map(infaktNormalizujDokumentKsef);
 }
 
+export function infaktParametryListyKsef({ days = 180, limit = 25, offset = 0, now = new Date() } = {}) {
+  const end = now instanceof Date ? new Date(now) : new Date(now || Date.now());
+  const safeEnd = Number.isNaN(end.getTime()) ? new Date() : end;
+  const safeDays = Math.max(1, Math.min(730, Number(days) || 180));
+  const start = new Date(safeEnd.getTime() - safeDays * 86400000);
+  return {
+    offset: Math.max(0, Math.floor(Number(offset) || 0)),
+    // KSeF 2.0 przyjmuje na stronie najwyżej 25 dokumentów.
+    limit: Math.max(1, Math.min(25, Math.floor(Number(limit) || 25))),
+    order: 'Desc',
+    'q[invoice_date_gteq]': start.toISOString().slice(0, 10),
+    'q[invoice_date_lteq]': safeEnd.toISOString().slice(0, 10),
+  };
+}
+
+export function infaktNormalizujDokumentKosztowy(raw = {}) {
+  const seller = raw?.seller || raw?.supplier || raw?.contractor || {};
+  return {
+    ...raw,
+    uuid: tekst(pierwszaWartosc(raw.uuid, raw.document_uuid, raw.documentUuid, raw.id), 200),
+    number: tekst(pierwszaWartosc(raw.number, raw.invoice_number, raw.invoiceNumber, raw.document_number), 160),
+    seller_name: tekst(pierwszaWartosc(raw.seller_name, raw.sellerName, raw.supplier_name, raw.supplierName, seller.name, seller.company_name), 240),
+    seller_tax_code: tekst(pierwszaWartosc(raw.seller_tax_code, raw.sellerTaxCode, raw.supplier_tax_code, raw.supplierTaxCode, seller.tax_code, seller.nip), 30).replace(/\D/g, ''),
+    issue_date: tekst(pierwszaWartosc(raw.issue_date, raw.issueDate, raw.invoice_date, raw.invoiceDate), 30),
+    received_date: tekst(pierwszaWartosc(raw.received_date, raw.receivedDate), 30),
+    due_date: tekst(pierwszaWartosc(raw.due_date, raw.dueDate), 30),
+    net_price: Number(pierwszaWartosc(raw.net_price, raw.netPrice)) || 0,
+    gross_price: Number(pierwszaWartosc(raw.gross_price, raw.grossPrice)) || 0,
+    tax_price: Number(pierwszaWartosc(raw.tax_price, raw.taxPrice)) || 0,
+  };
+}
+
 function znajdzXml(value, depth = 0) {
   if (depth > 4 || value == null) return '';
   if (typeof value === 'string') {

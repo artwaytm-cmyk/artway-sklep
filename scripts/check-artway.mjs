@@ -517,7 +517,7 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'infakt_supplier_access',
   'infakt_purchase_price_sync',
   'function infaktSynchronizujCenyZakupu',
-  'wspólny limit 6 listowań kosztów i przychodów na godzinę',
+  'infaktParametryListyKsef',
   "accept: 'application/xml, text/xml, application/json'",
   "'api:costs:read'",
   'send_to_ksef',
