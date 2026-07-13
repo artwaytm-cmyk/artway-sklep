@@ -6,12 +6,23 @@ import nodemailer from 'nodemailer';
 import { createStoreRepository } from './core/store-repository.mjs';
 import {
   bezpiecznePorownanie,
-  czyAdmin,
+  czyAdmin as czyAdminToken,
   odpowiedz,
   odpowiedzHtml,
   tekst,
   tokenZadania,
 } from './core/http.mjs';
+import {
+  createAccountSession,
+  createOrderAccess,
+  hashPassword,
+  legacyPasswordHash,
+  publicUser,
+  rateLimit,
+  requestSession,
+  verifyOrderAccess,
+  verifyPassword,
+} from './core/security.mjs';
 import {
   filtrujNieusunieteZamowienia,
   mapaUsunietych,
@@ -20,6 +31,7 @@ import {
   normalizujZamowienie,
   numerZamowienia,
 } from './domain/orders.mjs';
+import { bezpieczneZamowienieKlienta } from './domain/checkout.mjs';
 import {
   ALLEGRO_COMPLIANCE_POLICY,
   allegroCheckText,
@@ -74,6 +86,52 @@ const LIMIT_KLIENTOW = 20000;
 const LIMIT_USUNIETYCH_ZAMOWIEN = 50000;
 const PAYNOW_ENVY = new Set(['production', 'sandbox']);
 const PAYNOW_STATUSY_KONCOWE = new Set(['CONFIRMED', 'ERROR', 'EXPIRED', 'REJECTED', 'ABANDONED']);
+
+function czyAdmin(request, url) {
+  return czyAdminToken(request, url) || requestSession(request)?.role === 'admin';
+}
+
+function ograniczRuch(request, name, limit, windowMs) {
+  const result = rateLimit(request, name, limit, windowMs);
+  if (result.ok) return null;
+  return odpowiedz({ ok: false, error: 'Zbyt wiele prób. Spróbuj ponownie później.', code: 'rate_limit', retryAfter: result.retryAfter }, 429);
+}
+
+function profilKlienta(raw = {}, email = '') {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const cleanEmail = tekst(email || source.email, 200).trim().toLowerCase();
+  if (!cleanEmail) return null;
+  return {
+    email: cleanEmail,
+    imie: tekst(source.imie, 160).trim(),
+    telefon: tekst(source.telefon, 40).trim(),
+    ulica: tekst(source.ulica, 160).trim(),
+    nrDomu: tekst(source.nrDomu, 30).trim(),
+    nrLokalu: tekst(source.nrLokalu, 30).trim(),
+    kod: tekst(source.kod, 20).trim(),
+    miasto: tekst(source.miasto, 120).trim(),
+    firma: tekst(source.firma, 200).trim(),
+    nip: tekst(source.nip, 20).replace(/\D/g, '').slice(0, 10),
+  };
+}
+
+function bezpiecznaOpinia(raw = {}) {
+  const productId = tekst(raw.produktId || raw.productId || raw.idProduktu, 100).trim();
+  const tresc = tekst(raw.tresc || raw.tekst || raw.opis, 3000).trim();
+  const ocena = Math.max(1, Math.min(5, Math.round(Number(raw.ocena || raw.rating) || 0)));
+  if (!productId || !tresc || !ocena) return null;
+  return {
+    id: crypto.randomUUID(),
+    produktId: productId,
+    imie: tekst(raw.imie || raw.autor || 'Klient', 100).trim() || 'Klient',
+    tytul: tekst(raw.tytul, 160).trim(),
+    tresc,
+    ocena,
+    data: new Date().toISOString(),
+    status: 'oczekuje',
+    serwer: true,
+  };
+}
 
 function telegramKonfiguracja() {
   return {
@@ -4859,11 +4917,14 @@ async function seoWykonajDziennyPlan({ limit, source } = {}) {
   return { processed: selected.length, limit: amount, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })), updated_at: now, rev: saved.rev };
 }
 
+
 export default async (req) => {
   const url = new URL(req.url);
   const action = url.searchParams.get('action') || 'health';
 
   if (req.method === 'OPTIONS') return odpowiedz({ ok: true });
+  const contentLength = Number(req.headers.get('content-length') || 0);
+  if (contentLength > 5 * 1024 * 1024) return odpowiedz({ ok: false, error: 'Żądanie jest zbyt duże.', code: 'payload_too_large' }, 413);
 
   try {
     if (action === 'seo-daily-run') {
@@ -4879,16 +4940,17 @@ export default async (req) => {
       const u = await czytaj('users', { items: [] });
       const d = await czytaj('deleted_orders', { items: [] });
       const aktywne = filtrujNieusunieteZamowienia(o.items || [], d.items || []);
+      const admin = czyAdmin(req, url);
       return odpowiedz({
         ok: true,
         configured: !!process.env.ARTWAY_ADMIN_TOKEN,
-        admin: czyAdmin(req, url),
-        store: {
+        admin,
+        store: admin ? {
           orders: aktywne.length,
           users: (u.items || []).length,
           deleted_orders: (d.items || []).length,
           settings_updated_at: s.updated_at || null,
-        },
+        } : { available: true, settings_updated_at: s.updated_at || null },
         paynow: {
           configured: paynowKonfiguracja(req).configured,
           env: paynowKonfiguracja(req).env,
@@ -6752,41 +6814,47 @@ export default async (req) => {
     // ─── KLIENT SKŁADA ZAMÓWIENIE (publiczne) ───
     if (action === 'store-order-create') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = ograniczRuch(req, 'order-create', 20, 60 * 60 * 1000);
+      if (limited) return limited;
       const body = await req.json().catch(() => ({}));
-      const zam = normalizujZamowienie(body.order);
-      if (!zam) return odpowiedz({ ok: false, error: 'Brak danych zamówienia' }, 422);
+      const settingsRec = await czytaj('settings', { data: {} });
+      const zam = bezpieczneZamowienieKlienta(body.order, settingsRec.data || {});
+      const session = requestSession(req);
+      if (session && session.email !== zam.email) return odpowiedz({ ok: false, error: 'Zamówienie musi należeć do zalogowanego konta.', code: 'auth' }, 403);
+      zam.status = 'nowe';
+      zam.ts = Date.now();
+      zam.data = new Date().toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' });
       const usuniete = mapaUsunietych(await czytajUsunieteZamowienia());
       if (usuniete.has(zam.nr)) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
       const rec = await czytaj('orders', { items: [] });
       const items = filtrujNieusunieteZamowienia(rec.items || [], usuniete);
       let email = null;
-      if (!items.some((x) => x.nr === zam.nr)) {
-        items.unshift(zam);
-        while (items.length > LIMIT_ZAMOWIEN) items.pop();
-        await zapisz('orders', { items, updated_at: new Date().toISOString() });
-        await odejmijStany(zam);
-        if (zam.platnoscId !== 'paynow') {
-          try { email = await wyslijEmaileNowegoZamowienia(zam); }
-          catch (e) {
-            email = { configured: emailKonfiguracja().configured, sent: false, error: e.message };
-            await dopiszHistorieEmaila(zam.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
-          }
+      if (items.some((x) => x.nr === zam.nr)) return odpowiedz({ ok: true, stored: false, duplicate: true, number: zam.nr });
+      items.unshift(zam);
+      while (items.length > LIMIT_ZAMOWIEN) items.pop();
+      await zapisz('orders', { items, updated_at: new Date().toISOString() });
+      await odejmijStany(zam);
+      if (zam.platnoscId !== 'paynow') {
+        try { email = await wyslijEmaileNowegoZamowienia(zam); }
+        catch (e) {
+          email = { configured: emailKonfiguracja().configured, sent: false, error: e.message };
+          await dopiszHistorieEmaila(zam.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
         }
       }
-      return odpowiedz({ ok: true, stored: true, number: zam.nr, email });
+      return odpowiedz({ ok: true, stored: true, number: zam.nr, email, orderAccessToken: createOrderAccess(zam) });
     }
 
     // ─── KLIENT SKŁADA OPINIĘ (publiczne, do moderacji) ───
     if (action === 'store-review-add') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = ograniczRuch(req, 'review-add', 10, 60 * 60 * 1000);
+      if (limited) return limited;
       const body = await req.json().catch(() => ({}));
-      const op = body.review;
-      if (!op || typeof op !== 'object') return odpowiedz({ ok: false, error: 'Brak danych opinii' }, 422);
+      const op = bezpiecznaOpinia(body.review);
+      if (!op) return odpowiedz({ ok: false, error: 'Opinia nie zawiera wymaganych danych.' }, 422);
       const rec = await czytaj('settings', { data: {}, rev: 0 });
       const dane = rec.data || {};
       const lista = Array.isArray(dane.artway_opinie) ? dane.artway_opinie : [];
-      op.status = 'oczekuje';
-      op.serwer = true;
       lista.unshift(op);
       while (lista.length > 5000) lista.pop();
       dane.artway_opinie = lista;
@@ -6796,7 +6864,9 @@ export default async (req) => {
 
     // ─── MOJE ZAMÓWIENIA (po e-mailu) ───
     if (action === 'store-orders-mine') {
-      const email = tekst(url.searchParams.get('email'), 200).trim().toLowerCase();
+      const session = requestSession(req);
+      const email = tekst(url.searchParams.get('email') || session?.email, 200).trim().toLowerCase();
+      if (!session || (!czyAdmin(req, url) && session.email !== email)) return odpowiedz({ ok: false, error: 'Zaloguj się, aby pobrać swoje zamówienia.', code: 'auth' }, 401);
       if (!email) return odpowiedz({ ok: true, orders: [] });
       const rec = await czytaj('orders', { items: [] });
       const usuniete = await czytajUsunieteZamowienia();
@@ -6891,9 +6961,11 @@ export default async (req) => {
       const rec = await czytaj('orders', { items: [] });
       const items = Array.isArray(rec.items) ? rec.items : [];
       const zam = items.find((x) => x.nr === nr);
-      if (zam && (zam.email || '').toLowerCase() !== email) {
-        return odpowiedz({ ok: false, error: 'To zlecenie nie należy do podanego klienta', code: 'auth' }, 403);
-      }
+      if (!zam) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia.' }, 404);
+      const session = requestSession(req);
+      const sessionOwns = !!session && session.email === email && session.email === String(zam.email || '').toLowerCase();
+      const guestOwns = verifyOrderAccess(body.orderAccessToken, zam);
+      if (!czyAdmin(req, url) && !sessionOwns && !guestOwns) return odpowiedz({ ok: false, error: 'Brak uprawnień do tego zamówienia.', code: 'auth' }, 403);
       await dopiszUsunieteZamowienie({ nr, email, by: 'customer' });
       await zapisz('orders', { items: items.filter((x) => x.nr !== nr), updated_at: new Date().toISOString() });
       return odpowiedz({ ok: true, deleted: true });
@@ -6903,14 +6975,18 @@ export default async (req) => {
     if (action === 'store-user-save' || action === 'account-profile-save') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const body = await req.json().catch(() => ({}));
-      const u = normalizujKlienta(body.user);
+      const session = requestSession(req);
+      if (action === 'store-user-save' && !czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      if (action === 'account-profile-save' && !session) return odpowiedz({ ok: false, error: 'Zaloguj się ponownie.', code: 'auth' }, 401);
+      const u = action === 'store-user-save' ? normalizujKlienta(body.user) : profilKlienta(body.user, session.email);
       if (!u) return odpowiedz({ ok: false, error: 'Brak danych klienta' }, 422);
       const rec = await czytaj('users', { items: [] });
       const items = Array.isArray(rec.items) ? rec.items : [];
       const i = items.findIndex((x) => (x.email || '').toLowerCase() === u.email);
-      if (i >= 0) items[i] = { ...items[i], ...u }; else items.push(u);
+      if (action === 'account-profile-save' && i < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono konta.', code: 'auth' }, 404);
+      if (i >= 0) items[i] = { ...items[i], ...u, email: items[i].email, rola: items[i].rola, passwordHash: items[i].passwordHash, hash: items[i].hash }; else items.push(u);
       await zapisz('users', { items, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, stored: true, email: u.email });
+      return odpowiedz({ ok: true, stored: true, email: u.email, user: i >= 0 ? publicUser(items[i]) : publicUser(u) });
     }
     if (action === 'store-user-delete') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -6926,10 +7002,13 @@ export default async (req) => {
     // ─── REJESTRACJA KLIENTA (publiczna, konto we wspólnej bazie) ───
     if (action === 'account-register') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = ograniczRuch(req, 'account-register', 5, 60 * 60 * 1000);
+      if (limited) return limited;
       const body = await req.json().catch(() => ({}));
-      const u = normalizujKlienta(body.user);
-      if (!u || !u.hash) return odpowiedz({ ok: false, error: 'Brak danych konta' }, 422);
-      u.rola = 'klient'; u.account = true;
+      const password = String(body.password || '');
+      const u = profilKlienta(body.user);
+      if (!u || password.length < 8 || password.length > 200) return odpowiedz({ ok: false, error: 'Hasło musi mieć co najmniej 8 znaków.' }, 422);
+      u.rola = 'klient'; u.account = true; u.passwordHash = await hashPassword(password); u.data = new Date().toISOString();
       const rec = await czytaj('users', { items: [] });
       const items = Array.isArray(rec.items) ? rec.items : [];
       if (items.some((x) => (x.email || '').toLowerCase() === u.email)) {
@@ -6937,20 +7016,55 @@ export default async (req) => {
       }
       items.push(u);
       await zapisz('users', { items, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, stored: true, user: { imie: u.imie || u.email, email: u.email, rola: 'klient' } });
+      const user = publicUser(u);
+      return odpowiedz({ ok: true, stored: true, user, sessionToken: createAccountSession(user) });
     }
 
     // ─── LOGOWANIE KLIENTA (publiczne, sprawdzenie hasła we wspólnej bazie) ───
     if (action === 'account-login') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = ograniczRuch(req, 'account-login', 10, 15 * 60 * 1000);
+      if (limited) return limited;
       const body = await req.json().catch(() => ({}));
       const email = tekst(body.email, 200).trim().toLowerCase();
-      const hash = tekst(body.hash, 300);
-      if (!email || !hash) return odpowiedz({ ok: false, error: 'Podaj e-mail i hasło', code: 'auth' }, 401);
+      const password = String(body.password || '');
+      if (!email || !password) return odpowiedz({ ok: false, error: 'Podaj e-mail i hasło', code: 'auth' }, 401);
       const rec = await czytaj('users', { items: [] });
-      const u = (rec.items || []).find((x) => (x.email || '').toLowerCase() === email);
-      if (!u || !u.hash || u.hash !== hash) return odpowiedz({ ok: false, error: 'Nieprawidłowy e-mail lub hasło.', code: 'auth' }, 401);
-      return odpowiedz({ ok: true, authenticated: true, user: { imie: u.imie || u.email, email: u.email, rola: u.rola || 'klient' } });
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      const u = items.find((x) => (x.email || '').toLowerCase() === email);
+      const modernOk = u?.passwordHash ? await verifyPassword(password, u.passwordHash).catch(() => false) : false;
+      const legacyOk = !u?.passwordHash && !!u?.hash && bezpiecznePorownanie(legacyPasswordHash(password), String(u.hash));
+      if (!u || (!modernOk && !legacyOk)) return odpowiedz({ ok: false, error: 'Nieprawidłowy e-mail lub hasło.', code: 'auth' }, 401);
+      if (legacyOk) {
+        u.passwordHash = await hashPassword(password);
+        delete u.hash;
+        await zapisz('users', { items, updated_at: new Date().toISOString() });
+      }
+      const user = publicUser(u);
+      return odpowiedz({ ok: true, authenticated: true, user, sessionToken: createAccountSession(user) });
+    }
+
+    if (action === 'account-password-change') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const session = requestSession(req);
+      if (!session) return odpowiedz({ ok: false, error: 'Zaloguj się ponownie.', code: 'auth' }, 401);
+      const limited = ograniczRuch(req, 'password-change', 5, 60 * 60 * 1000);
+      if (limited) return limited;
+      const body = await req.json().catch(() => ({}));
+      const currentPassword = String(body.currentPassword || body.current_password || '');
+      const newPassword = String(body.newPassword || body.new_password || '');
+      if (newPassword.length < 8 || newPassword.length > 200) return odpowiedz({ ok: false, error: 'Nowe hasło musi mieć co najmniej 8 znaków.' }, 422);
+      const rec = await czytaj('users', { items: [] });
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      const u = items.find((x) => (x.email || '').toLowerCase() === session.email);
+      const modernOk = u?.passwordHash ? await verifyPassword(currentPassword, u.passwordHash).catch(() => false) : false;
+      const legacyOk = !u?.passwordHash && !!u?.hash && bezpiecznePorownanie(legacyPasswordHash(currentPassword), String(u.hash));
+      if (!u || (!modernOk && !legacyOk)) return odpowiedz({ ok: false, error: 'Obecne hasło jest nieprawidłowe.', code: 'auth' }, 401);
+      u.passwordHash = await hashPassword(newPassword);
+      delete u.hash;
+      await zapisz('users', { items, updated_at: new Date().toISOString() });
+      const user = publicUser(u);
+      return odpowiedz({ ok: true, changed: true, user, sessionToken: createAccountSession(user) });
     }
 
     // ─── logowanie tokenem (sprawdzenie hasła administratora) ───
@@ -6961,7 +7075,8 @@ export default async (req) => {
       const env = process.env.ARTWAY_ADMIN_TOKEN || '';
       if (!env) return odpowiedz({ ok: false, error: 'Serwer nie ma ustawionego hasła (ARTWAY_ADMIN_TOKEN).', code: 'no_token' }, 503);
       if (!bezpiecznePorownanie(podane, env)) return odpowiedz({ ok: false, error: 'Nieprawidłowe hasło administratora', code: 'auth' }, 401);
-      return odpowiedz({ ok: true, authenticated: true });
+      const adminUser = { email: tekst(body.email || process.env.ARTWAY_ADMIN_EMAIL || 'artwaytm@gmail.com', 200).trim().toLowerCase(), rola: 'admin' };
+      return odpowiedz({ ok: true, authenticated: true, sessionToken: createAccountSession(adminUser) });
     }
 
     return odpowiedz({ ok: false, error: 'Nieznana akcja: ' + action }, 404);

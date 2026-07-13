@@ -476,7 +476,7 @@ async function zlozZamowienie(e){
     if(!sesja && f.get("kontoChk")){
       if(String(f.get("haslo")||"")!==String(f.get("haslo2")||"")){ toast("⚠️ Wpisane hasła do konta nie są takie same"); return; }
       const w = await zarejestrujUzytkownika(f.get("imie")+" "+f.get("nazwisko"), f.get("email"), f.get("haslo")||"");
-      if(w.ok){ ustawSesje({imie:(f.get("imie")+" "+f.get("nazwisko")).trim(), email:f.get("email").trim().toLowerCase()}); toast("Konto założone! 🎉"); }
+      if(w.ok){ ustawSesje(w.uzytkownik); toast("Konto założone! 🎉"); }
       else { loguj("ostrzezenie","Konto przy zamówieniu nieutworzone: "+w.blad); }
     }
     const idD = String(f.get("delivery")||"paczkomat"), idP = f.get("payment");
@@ -533,7 +533,7 @@ Uwagi: ${f.get("notes")||"brak"}`;
     zmniejszStany(koszyk, nr);   // magazyn: odejmij sprzedane sztuki
     const emailKlienta=String(f.get("email")||"").trim().toLowerCase();
     const noweZamowienie={
-      nr, data:new Date().toLocaleString("pl-PL"), ts:Date.now(), email:emailKlienta,
+      nr, data:new Date().toLocaleString("pl-PL"), ts:Date.now(), email:emailKlienta,rabatKod:rabat?.kod||"",
       klient:{imie:String(f.get("imie")||"").trim(),nazwisko:String(f.get("nazwisko")||"").trim(),telefon:String(f.get("phone")||"").trim(),
         firma:f.get("firmaChk")?String(f.get("firma")||"").trim():"",nip:f.get("firmaChk")?String(f.get("nip")||"").replace(/[^0-9]/g,""):""},
       adresDostawy:{ulica:String(f.get("ulica")||"").trim(),nrDomu:String(f.get("nrDomu")||"").trim(),nrLokalu:String(f.get("nrLokalu")||"").trim(),kod:String(f.get("kod")||"").trim(),miasto:String(f.get("miasto")||"").trim()},
@@ -548,6 +548,13 @@ Uwagi: ${f.get("notes")||"brak"}`;
     };
     zapiszZamowienie(noweZamowienie);
     const zapisanoCentralnie=await zapiszZamowienieCentralnie(noweZamowienie,true);
+    if(zapisanoCentralnie?.orderAccessToken){
+      noweZamowienie.orderAccessToken=zapisanoCentralnie.orderAccessToken;
+      zapiszZamowienie(noweZamowienie);
+      const dostepy=wczytajLS("artway_dostep_zamowien",{});
+      dostepy[nr]=zapisanoCentralnie.orderAccessToken;
+      zapiszLS("artway_dostep_zamowien",dostepy);
+    }
     let paynowWynik=null;
     if(idP==="paynow"){
       paynowWynik = await utworzPlatnoscPaynow(noweZamowienie);

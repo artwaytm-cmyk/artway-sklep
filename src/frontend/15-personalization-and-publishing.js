@@ -226,7 +226,7 @@ function widokAdminWyglad(){
       <h3 class="f-sekcja">🏢 Dane firmy do regulaminu i polityki prywatności</h3>
       <div class="f-row">
         <div class="f-group"><label>Nazwa firmy / sklepu</label><input name="firmaNazwa" value="${esc(df.nazwa)}"></div>
-        <div class="f-group"><label>Identyfikator firmy (NIP/PESEL)</label><input name="firmaId" inputmode="numeric" value="${esc(df.identyfikator)}"></div>
+        <div class="f-group"><label>NIP firmy</label><input name="firmaId" inputmode="numeric" maxlength="10" value="${esc(df.nip||df.identyfikator)}"></div>
       </div>
       <div class="f-group"><label>Adres firmy (opcjonalnie)</label><input name="firmaAdres" value="${esc(df.adres||"")}" placeholder="Ulica, kod pocztowy, miejscowość"></div>
       <div class="f-group"><label>Logo graficzne (zamiast nazwy tekstowej)</label>
@@ -325,7 +325,6 @@ function zapiszWyglad(e){
       nazwa:String(f.get("firmaNazwa")||"Artway-TM").trim()||"Artway-TM",
       identyfikator:tylkoCyfry(f.get("firmaId")||DANE_FIRMY_DOMYSLNE.identyfikator),
       nip:tylkoCyfry(f.get("firmaId")||DANE_FIRMY_DOMYSLNE.identyfikator),
-      pesel:tylkoCyfry(f.get("firmaId")||DANE_FIRMY_DOMYSLNE.identyfikator),
       adres:String(f.get("firmaAdres")||"").trim()
     },
     pasekInfo: String(f.get("pasekInfo")),

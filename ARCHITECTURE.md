@@ -26,6 +26,8 @@ Kod źródłowy jest podzielony według odpowiedzialności. Pliki `assets/app.js
 - Kod zależny od zewnętrznego API jest oddzielony od widoku i od reguł biznesowych.
 - Operacje zewnętrzne wymagają jawnego zatwierdzenia administratora; diagnostyka i szkice mogą działać automatycznie.
 - Sekrety są wyłącznie w zmiennych środowiskowych.
+- Tożsamość klienta wynika wyłącznie z podpisanej sesji serwerowej; e-mail lub rola przesłane w treści żądania nie stanowią uprawnienia.
+- Ceny, rabaty, koszty dostawy i status nowego zamówienia są wyliczane po stronie serwera z aktualnego katalogu.
 - Każda nowa domena dostaje testy i własny plik; po przekroczeniu około 500–800 linii należy ją ponownie podzielić.
 - Zmiana nie może omijać `npm run verify` ani publikować nieaktualnych plików wynikowych.
 

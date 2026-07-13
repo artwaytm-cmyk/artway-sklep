@@ -14,22 +14,26 @@ async function hashuj(s){
 async function zarejestrujUzytkownika(imie, email, haslo){
   imie=imie.trim(); email=email.trim().toLowerCase();
   if(!imie || !email.includes("@")) return {ok:false, blad:"Podaj poprawne imię i adres e-mail."};
-  if(haslo.length<6) return {ok:false, blad:"Hasło musi mieć co najmniej 6 znaków."};
-  const u = pobierzUzytkownikow();
-  if(u.some(x=>x.email===email)) return {ok:false, blad:"Konto z tym adresem już istnieje — zaloguj się."};
-  const rekord={ imie, email, hash: await hashuj(haslo), rola:"klient", account:true, data:new Date().toISOString() };
+  if(haslo.length<8) return {ok:false, blad:"Hasło musi mieć co najmniej 8 znaków."};
+  const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
   try{
-    // konto zakładane we WSPÓLNEJ bazie — działa na każdym urządzeniu
-    await chmura("account-register",{method:"POST",body:{user:rekord}});
+    const d=await chmura("account-register",{method:"POST",body:{user:{imie,email},password:haslo}});
+    const rekord={...(d.user||{imie,email,rola:"klient"}),token:d.sessionToken||""};
+    const u=pobierzUzytkownikow(),i=u.findIndex(x=>x.email===email);
+    if(i>=0)u[i]={...u[i],imie:rekord.imie,email:rekord.email,rola:rekord.rola,account:true};else u.push({imie:rekord.imie,email:rekord.email,rola:rekord.rola,account:true});
+    zapiszLS("artway_uzytkownicy",u);
     stanBazyCentralnej={...stanBazyCentralnej,online:true,error:""};
+    loguj("info","Zarejestrowano użytkownika: "+email);
+    return {ok:true,uzytkownik:rekord};
   }catch(bl){
     if(bl.code==="exists") return {ok:false, blad:"Konto z tym adresem już istnieje — zaloguj się."};
-    loguj("ostrzezenie","Serwer kont niedostępny — konto zapisane lokalnie: "+bl.message);
+    if(!lokalnyPodglad) return {ok:false,blad:"Nie udało się bezpiecznie utworzyć konta: "+bl.message};
+    const u=pobierzUzytkownikow();
+    if(u.some(x=>x.email===email)) return {ok:false,blad:"Konto z tym adresem już istnieje — zaloguj się."};
+    const rekord={imie,email,hash:await hashuj(haslo),rola:"klient",account:true,data:new Date().toISOString()};
+    u.push(rekord);zapiszLS("artway_uzytkownicy",u);
+    return {ok:true,uzytkownik:{imie,email,rola:"klient"}};
   }
-  u.push(rekord);
-  zapiszLS("artway_uzytkownicy", u);
-  loguj("info","Zarejestrowano użytkownika: "+email);
-  return {ok:true};
 }
 async function sprawdzLogowanie(email, haslo){
   email=email.trim().toLowerCase();
@@ -38,45 +42,54 @@ async function sprawdzLogowanie(email, haslo){
   //    Weryfikacja NA SERWERZE → działa na każdym urządzeniu i od razu łączy wspólną bazę.
   if(email==="admin" || email===adminEmail){
     try{
-      await chmura("login",{method:"POST",body:{password:haslo}});
-      chmuraToken=haslo; zapiszLS("artway_chmura_token",chmuraToken);
+      const d=await chmura("login",{method:"POST",body:{password:haslo,email:adminEmail}});
+      chmuraToken=haslo; sessionStorage.setItem("artway_chmura_token",chmuraToken); localStorage.removeItem("artway_chmura_token");
       const lista=pobierzUzytkownikow(); const a=lista.find(x=>x.email===adminEmail);
       if(a){ a.hash=""; zapiszLS("artway_uzytkownicy",lista); }
       domyslneHasloAdmina=false;
       chmuraStan={...chmuraStan,dostepna:true,admin:true};
       await synchronizujBazeCentralna(true).catch(()=>{});
-      return {ok:true, uzytkownik:{imie:"Administrator", email:adminEmail, rola:"admin"}};
+      return {ok:true, uzytkownik:{imie:"Administrator",email:adminEmail,rola:"admin",token:d.sessionToken||"",verified:true}};
     }catch(bl){
       // serwer niedostępny lub złe hasło → spróbuj lokalnego admin/admin (tryb offline)
     }
   }
   const emailDocelowy = (email==="admin") ? adminEmail : email;
-  const hash = await hashuj(haslo);
   // 2) KLIENT — logowanie do konta we WSPÓLNEJ bazie
   if(email!=="admin"){
     try{
-      const d=await chmura("account-login",{method:"POST",body:{email:emailDocelowy,hash}});
+      const d=await chmura("account-login",{method:"POST",body:{email:emailDocelowy,password:haslo}});
       const serwer=d.user||{}; const lista=pobierzUzytkownikow(); const lok=lista.find(x=>x.email===serwer.email);
-      if(lok) Object.assign(lok,serwer,{hash}); else lista.push({...serwer,hash});
+      if(lok) Object.assign(lok,serwer,{hash:""}); else lista.push({...serwer,hash:""});
       zapiszLS("artway_uzytkownicy",lista);
       stanBazyCentralnej={...stanBazyCentralnej,online:true,error:""};
-      return {ok:true, uzytkownik:{imie:serwer.imie||serwer.email, email:serwer.email, rola:serwer.rola||"klient"}};
-    }catch(bl){ /* serwer niedostępny lub konto tylko lokalne → sprawdzamy lokalnie */ }
+      return {ok:true, uzytkownik:{imie:serwer.imie||serwer.email,email:serwer.email,rola:serwer.rola||"klient",token:d.sessionToken||"",verified:true}};
+    }catch(bl){
+      const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
+      if(!lokalnyPodglad) return {ok:false,blad:bl.message||"Nieprawidłowy e-mail lub hasło."};
+    }
   }
   // 3) Awaryjne logowanie lokalne (offline / stare konta)
+  const hash = await hashuj(haslo);
   const u = pobierzUzytkownikow().find(x=>x.email===emailDocelowy);
   if(!u) return {ok:false, blad:"Nieprawidłowy e-mail lub hasło."};
   if(u.hash !== hash) return {ok:false, blad:"Nieprawidłowe hasło."};
   return {ok:true, uzytkownik:{imie:u.imie, email:u.email, rola:u.rola||"klient"}};
 }
-function ustawSesje(u){ sesja=u; zapiszLS("artway_sesja", u); odswiezUzytkownika(); }
-function wyloguj(){ chmuraToken=""; zapiszLS("artway_chmura_token",""); chmuraStan={...chmuraStan,admin:false}; stanBramki={...stanBramki,authenticated:false}; ustawSesje(null); toast("Wylogowano 👋"); location.hash="#/"; }
+function ustawSesje(u){
+  if(u&&sesja?.email===u.email&&!u.token&&sesja.token)u={...u,token:sesja.token,verified:sesja.verified};
+  sesja=u; zapiszLS("artway_sesja",u); odswiezUzytkownika();
+}
+function wyloguj(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; stanBramki={...stanBramki,authenticated:false}; ustawSesje(null); toast("Wylogowano 👋"); location.hash="#/"; }
 function jestGlownymAdminem(email){ return String(email||"").toLowerCase()===KONFIG.emailAdmina.toLowerCase(); }
 function kontoMaRoleAdmin(email){
   const e=String(email||"").toLowerCase();
   return jestGlownymAdminem(e)||pobierzUzytkownikow().some(u=>u.email===e&&u.rola==="admin");
 }
-function jestAdmin(){ return !!sesja&&kontoMaRoleAdmin(sesja.email); }
+function jestAdmin(){
+  const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
+  return !!sesja&&kontoMaRoleAdmin(sesja.email)&&(!!chmuraToken||!!sesja.token||lokalnyPodglad);
+}
 function odswiezUzytkownika(){
   const nazwaSesji=sesja ? String(sesja.imie||sesja.login||sesja.email||"Konto").trim() : "";
   $("userBtn").textContent = sesja ? "👤 "+(nazwaSesji.split(/\s+/)[0]||"Konto") : "👤 Zaloguj";
@@ -149,8 +162,15 @@ function odswiezUlubioneLicznik(){
    Na opublikowanej stronie login „admin” korzysta z hasła w api/config.php. */
 let domyslneHasloAdmina = false;
 async function zainicjujAdmina(){
+  const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
   const u = pobierzUzytkownikow();
   const email = KONFIG.emailAdmina.toLowerCase();
+  if(!lokalnyPodglad){
+    const czysta=u.filter(x=>!(x.email===email&&x.hash));
+    if(czysta.length!==u.length)zapiszLS("artway_uzytkownicy",czysta);
+    domyslneHasloAdmina=false;
+    return;
+  }
   let admin = u.find(x=>x.email===email);
   if(!admin){
     admin = { imie:"Administrator", email, hash: await hashuj("admin"), rola:"admin", data:new Date().toISOString() };
@@ -164,18 +184,20 @@ async function zmienHaslo(e){
   e.preventDefault();
   const f = new FormData(e.target);
   const nowe=String(f.get("nowe")||""),powtorz=String(f.get("nowe2")||"");
-  if(nowe.length<6){ toast("⚠️ Nowe hasło musi mieć min. 6 znaków"); return; }
+  if(nowe.length<8){ toast("⚠️ Nowe hasło musi mieć min. 8 znaków"); return; }
   if(nowe!==powtorz){ toast("⚠️ Wpisane nowe hasła nie są takie same"); return; }
   try{
-    await wywolajBramke("account-password-change",{method:"POST",body:{current_password:String(f.get("stare")||""),new_password:nowe}});
+    const d=await chmura("account-password-change",{method:"POST",body:{currentPassword:String(f.get("stare")||""),newPassword:nowe}});
+    if(d.sessionToken&&sesja)ustawSesje({...sesja,token:d.sessionToken,verified:true});
   }catch(bl){
     const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
     if(!lokalnyPodglad){toast("⚠️ Nie zmieniono hasła: "+bl.message);return;}
     const w = await sprawdzLogowanie(sesja.email, f.get("stare"));
     if(!w.ok){ toast("⚠️ Obecne hasło nieprawidłowe"); return; }
   }
+  const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
   const u = pobierzUzytkownikow(); const ja = u.find(x=>x.email===sesja.email);
-  if(ja){ja.hash = await hashuj(nowe);zapiszLS("artway_uzytkownicy", u);}
+  if(ja){ja.hash=lokalnyPodglad?await hashuj(nowe):"";zapiszLS("artway_uzytkownicy",u);}
   if(jestGlownymAdminem(sesja.email)) domyslneHasloAdmina = nowe==="admin";
   loguj("info","Zmieniono hasło konta: "+sesja.email);
   toast("Hasło zmienione ✅"); e.target.reset();

@@ -3,7 +3,6 @@ const DANE_FIRMY_DOMYSLNE = {
   nazwa: "Artway-TM",
   identyfikator: "5882468333",
   nip: "5882468333",
-  pesel: "5882468333",
   adres: "Gryfa Pomorskiego 1/A, 84-207 Bojano"
 };
 const NUMER_PRZELEWU_TELEFON_DOMYSLNY = "530038914";

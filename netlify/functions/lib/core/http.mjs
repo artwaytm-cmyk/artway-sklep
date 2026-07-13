@@ -4,9 +4,11 @@ export function odpowiedz(body, status = 200) {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
-      'access-control-allow-origin': '*',
-      'access-control-allow-headers': 'content-type, x-admin-token',
+      'access-control-allow-origin': 'https://artwaytm.pl',
+      'access-control-allow-headers': 'content-type, authorization, x-session-token, x-admin-token',
       'access-control-allow-methods': 'GET, POST, OPTIONS',
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'no-referrer',
     },
   });
 }
@@ -17,6 +19,8 @@ export function odpowiedzHtml(html, status = 200) {
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'no-referrer',
     },
   });
 }

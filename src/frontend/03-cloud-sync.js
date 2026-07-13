@@ -5,14 +5,26 @@
 const CHMURA_URL = "/.netlify/functions/store";
 const CHMURA_AUTO_SYNC_MS = 60000;
 const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta","artway_seo_ustawienia","artway_seo_historia"];
-let chmuraToken = (function(){ try{ return JSON.parse(localStorage.getItem("artway_chmura_token"))||""; }catch(e){ return ""; } })();
+let chmuraToken = (function(){
+  try{
+    const token=sessionStorage.getItem("artway_chmura_token")||"";
+    localStorage.removeItem("artway_chmura_token");
+    return token;
+  }catch(e){ return ""; }
+})();
 let chmuraStan = {dostepna:false, sprawdzono:false, admin:false, rev:0, updated_at:null, error:"", ostatniZapis:0};
 let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z serwera
 let chmuraTimerZapisu = null;
 let chmuraTimerAutoSync = null;
 let chmuraAutoSyncBusy = false;
 
-function chmuraNaglowki(json){ const h={"Accept":"application/json"}; if(json) h["Content-Type"]="application/json"; if(chmuraToken) h["x-admin-token"]=chmuraToken; return h; }
+function chmuraNaglowki(json){
+  const h={"Accept":"application/json"};
+  if(json) h["Content-Type"]="application/json";
+  if(chmuraToken) h["x-admin-token"]=chmuraToken;
+  if(sesja?.token) h.Authorization=`Bearer ${sesja.token}`;
+  return h;
+}
 async function chmura(action, {method="GET", body=null, params={}, timeout=9000}={}){
   const url = new URL(CHMURA_URL, location.href);
   url.searchParams.set("action", action);
@@ -393,16 +405,16 @@ function daneFirmy(){
   const ident = tylkoCyfry(d.identyfikator || d.nip || d.pesel || DANE_FIRMY_DOMYSLNE.identyfikator);
   d.identyfikator = ident;
   d.nip = tylkoCyfry(d.nip || ident);
-  d.pesel = tylkoCyfry(d.pesel || ident);
+  delete d.pesel;
   return d;
 }
 function daneFirmyTekst(){
   const d = daneFirmy();
-  return `${d.nazwa}${d.adres?`, ${d.adres}`:""}, identyfikator firmy (NIP/PESEL): ${d.identyfikator}`;
+  return `${d.nazwa}${d.adres?`, ${d.adres}`:""}, NIP: ${d.nip}`;
 }
 function daneFirmyHTML(){
   const d = daneFirmy();
-  return `${esc(d.nazwa)}${d.adres?`, ${esc(d.adres)}`:""}<br><b>Identyfikator firmy (NIP/PESEL):</b> ${esc(d.identyfikator)}`;
+  return `${esc(d.nazwa)}${d.adres?`, ${esc(d.adres)}`:""}<br><b>NIP:</b> ${esc(d.nip)}`;
 }
 function normalizujPlatnosci(lista){
   const bazowe = DOMYSLNE_PLATNOSCI.map(p=>({...p}));
@@ -443,7 +455,9 @@ function migrujTresciPrawne(tresci){
     .replace(/\[nazwa firmy,\s*NIP,\s*adres\]/gi, daneFirmyTekst())
     .replace(/\[nazwa firmy,\s*adres\]/gi, daneFirmyTekst())
     .replace(new RegExp(LEGACY_PRZELEW_TEKST, "gi"), "przelew na telefon")
-    .replace(/Przelewy24\s*\/\s*PayU\s*\/\s*Stripe/gi, "mBank Paynow");
+    .replace(/Przelewy24\s*\/\s*PayU\s*\/\s*Stripe/gi, "mBank Paynow")
+    .replace(/<p><i>Szablon (regulaminu|polityki prywatności)[^<]*<\/i><\/p>/gi, "")
+    .replace(/dane te nie opuszczają Twojego urządzenia/gi, "część danych pozostaje lokalnie, a dane konta i zamówień są synchronizowane z zabezpieczonym serwerem sklepu");
   return Object.fromEntries(Object.entries(tresci).map(([k,v])=>[k,zamien(v)]));
 }
 function platnosciOpis(){

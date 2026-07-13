@@ -12,7 +12,13 @@
     "check": "npm run verify"
   },
   "dependencies": {
-    "@netlify/blobs": "^10.7.0",
+    "@netlify/blobs": "^10.7.9",
     "nodemailer": "^9.0.3"
+  },
+  "overrides": {
+    "@opentelemetry/core": "2.9.0",
+    "@opentelemetry/resources": "2.9.0",
+    "@opentelemetry/sdk-trace-base": "2.9.0",
+    "@opentelemetry/sdk-trace-node": "2.9.0"
   }
 }

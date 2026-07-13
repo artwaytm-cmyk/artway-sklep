@@ -605,8 +605,8 @@ function widokRejestracja(){
     <form onsubmit="obsluzRejestracje(event)">
       <div class="f-group"><label>Imię i nazwisko</label><input required name="imie" autocomplete="name"></div>
       <div class="f-group"><label>E-mail</label><input required name="email" type="email" autocomplete="email"></div>
-      <div class="f-group"><label>Hasło (min. 6 znaków)</label><input required name="haslo" type="password" minlength="6" autocomplete="new-password"></div>
-      <div class="f-group"><label>Powtórz hasło</label><input required name="haslo2" type="password" minlength="6" autocomplete="new-password"></div>
+      <div class="f-group"><label>Hasło (min. 8 znaków)</label><input required name="haslo" type="password" minlength="8" autocomplete="new-password"></div>
+      <div class="f-group"><label>Powtórz hasło</label><input required name="haslo2" type="password" minlength="8" autocomplete="new-password"></div>
       <button class="checkout-btn" type="submit">Załóż konto</button>
     </form>
     <p class="auth-alt">Masz już konto? <a href="#/logowanie">Zaloguj się</a></p>
@@ -630,7 +630,7 @@ async function obsluzRejestracje(e){
   if(String(f.get("haslo")||"")!==String(f.get("haslo2")||"")){ $("authMsg").innerHTML='<div class="form-err">Wpisane hasła nie są takie same.</div>'; return; }
   const w = await zarejestrujUzytkownika(f.get("imie"), f.get("email"), f.get("haslo"));
   if(!w.ok){ $("authMsg").innerHTML = `<div class="form-err">${esc(w.blad)}</div>`; return; }
-  ustawSesje({imie:f.get("imie").trim(), email:f.get("email").trim().toLowerCase()});
+  ustawSesje(w.uzytkownik);
   await pobierzMojeZamowieniaCentralne(true);
   toast("Konto założone! 🎉");
   location.hash="#/konto";
@@ -818,8 +818,10 @@ async function usunMojeZamowienie(nr){
   let serwerOk=false;
   if(email){
     try{
-      await chmura("store-order-delete-mine",{method:"POST",body:{number:numer,email}});
+      const dostepy=wczytajLS("artway_dostep_zamowien",{});
+      await chmura("store-order-delete-mine",{method:"POST",body:{number:numer,email,orderAccessToken:z?.orderAccessToken||dostepy[numer]||""}});
       serwerOk=true;
+      if(dostepy[numer]){delete dostepy[numer];zapiszLS("artway_dostep_zamowien",dostepy);}
       stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,error:""};
     }catch(bl){
       stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:false,error:bl.message};
@@ -944,22 +946,26 @@ function widokFAQ(){
 function widokRegulamin(){
   if(KONFIG.tresci?.regulamin) return stronaInfo("📜 Regulamin sklepu", KONFIG.tresci.regulamin,"regulamin");
   return stronaInfo("📜 Regulamin sklepu", `
-    <p><i>Szablon regulaminu — sprawdź go prawnie przed startem sprzedaży.</i></p>
-    <h2>§1 Postanowienia ogólne</h2><p>Sklep internetowy Artway-TM prowadzony jest przez:<br>${daneFirmyHTML()}<br>Kontakt: ${KONFIG.emailSklepu}, ${KONFIG.telefon}.</p>
-    <h2>§2 Zamówienia</h2><p>Zamówienia można składać 24/7 przez stronę. Zawarcie umowy następuje z chwilą potwierdzenia zamówienia przez sklep.</p>
-    <h2>§3 Ceny i płatności</h2><p>Ceny są cenami brutto (zawierają VAT). Dostępne formy płatności: ${esc(platnosciOpis())}. Przy przelewie na telefon klient wpisuje w tytule numer zamówienia.</p>
-    <h2>§4 Dostawa</h2><p>${esc(tekstWysylki())} w dni robocze. Koszty dostawy podane są w koszyku. Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł.</p>
-    <h2>§5 Zwroty</h2><p>Konsument ma prawo odstąpić od umowy w terminie 14 dni bez podania przyczyny. Przy zwykłym odstąpieniu bezpośredni koszt odesłania produktu ponosi konsument. Koszty zwrotu produktu reklamowanego jako niezgodny z umową ponosi sprzedawca.</p>
-    <h2>§6 Reklamacje</h2><p>Reklamacje rozpatrujemy w ciągu 14 dni. Zgłoszenia: ${KONFIG.emailSklepu}.</p>`,"regulamin");
+    <p>Regulamin określa zasady sprzedaży w sklepie internetowym Artway-TM oraz prawa kupującego.</p>
+    <h2>§1 Sprzedawca i kontakt</h2><p>Sprzedawcą jest:<br>${daneFirmyHTML()}<br>E-mail: <a href="mailto:${esc(KONFIG.emailSklepu)}">${esc(KONFIG.emailSklepu)}</a><br>Telefon: ${esc(KONFIG.telefon)}.</p>
+    <h2>§2 Składanie zamówień</h2><p>Zamówienia można składać przez całą dobę. Klient wybiera produkt, ilość, sposób dostawy i płatności, podaje dane wymagane do realizacji oraz potwierdza zamówienie. Konto klienta jest dobrowolne. Informacja o przyjęciu zamówienia jest wysyłana na wskazany adres e-mail. Umowa sprzedaży zostaje zawarta po potwierdzeniu przyjęcia zamówienia przez sklep.</p>
+    <h2>§3 Ceny i płatności</h2><p>Ceny produktów są podawane w złotych polskich i są cenami brutto. Przed złożeniem zamówienia klient widzi łączną cenę produktów, rabaty, koszt dostawy, usługi dodatkowe i opłatę właściwą dla wybranej płatności. Dostępne formy płatności: ${esc(platnosciOpis())}.</p>
+    <h2>§4 Dostawa</h2><p>Dostawa jest realizowana przez InPost do wybranego paczkomatu/punktu albo kurierem pod wskazany adres. Deklarowany czas nadania: ${esc(tekstWysylki())} w dni robocze. Aktualny koszt jest zawsze pokazany przed złożeniem zamówienia; darmowa dostawa obowiązuje od ${KONFIG.darmowaDostawaOd} zł, jeśli koszyk spełnia warunki promocji.</p>
+    <h2>§5 Odstąpienie od umowy</h2><p>Konsument może odstąpić od umowy zawartej na odległość bez podania przyczyny w ciągu 14 dni od otrzymania towaru. Oświadczenie można przesłać na adres e-mail sklepu. Towar należy odesłać nie później niż 14 dni od złożenia oświadczenia. Sklep zwraca otrzymane płatności, w tym koszt najtańszego zwykłego sposobu dostawy oferowanego dla zamówienia, nie później niż w ciągu 14 dni od otrzymania oświadczenia; zwrot może zostać wstrzymany do chwili otrzymania towaru lub dowodu jego odesłania. Bezpośredni koszt zwykłego zwrotu ponosi konsument. Ustawowe wyjątki od prawa odstąpienia stosuje się tylko w przypadkach przewidzianych prawem.</p>
+    <h2>§6 Reklamacje</h2><p>Sprzedawca odpowiada za zgodność towaru z umową na zasadach wynikających z prawa konsumenckiego. Reklamację można przesłać na ${esc(KONFIG.emailSklepu)}, podając dane zamówienia, opis problemu i żądanie. Sklep odpowiada na reklamację konsumenta w terminie 14 dni od jej otrzymania. Koszty uzasadnionej reklamacji towaru niezgodnego z umową ponosi sprzedawca.</p>
+    <h2>§7 Dane osobowe i postanowienia końcowe</h2><p>Zasady przetwarzania danych opisuje Polityka prywatności. W sprawach nieuregulowanych stosuje się obowiązujące przepisy prawa polskiego, w szczególności Kodeks cywilny i ustawę o prawach konsumenta. Regulamin jest dostępny nieodpłatnie na stronie sklepu w formie umożliwiającej zapisanie i odtworzenie.</p>`,"regulamin");
 }
 function widokPrywatnosc(){
   if(KONFIG.tresci?.prywatnosc) return stronaInfo("🔒 Polityka prywatności (RODO)", KONFIG.tresci.prywatnosc,"prywatnosc");
   return stronaInfo("🔒 Polityka prywatności (RODO)", `
-    <p><i>Szablon polityki prywatności — sprawdź go prawnie przed startem sprzedaży.</i></p>
-    <h2>Administrator danych</h2><p>${daneFirmyHTML()}. Kontakt: ${KONFIG.emailSklepu}, ${KONFIG.telefon}.</p>
-    <h2>Jakie dane zbieramy</h2><p>Dane podane w zamówieniu (imię i nazwisko, adres, e-mail, telefon) — wyłącznie w celu realizacji zamówienia. Dane konta (imię, e-mail) — w celu prowadzenia konta klienta.</p>
-    <h2>Twoje prawa</h2><p>Masz prawo dostępu do danych, ich sprostowania, usunięcia, ograniczenia przetwarzania i przeniesienia. Zgłoszenia: ${KONFIG.emailSklepu}.</p>
-    <h2>Pliki cookie i pamięć przeglądarki</h2><p>Strona zapisuje w pamięci przeglądarki: zawartość koszyka, ulubione, dane konta i dziennik błędów — dane te nie opuszczają Twojego urządzenia.</p>`,"prywatnosc");
+    <h2>1. Administrator danych</h2><p>Administratorem danych osobowych jest ${daneFirmyHTML()}. W sprawach dotyczących danych można skontaktować się przez <a href="mailto:${esc(KONFIG.emailSklepu)}">${esc(KONFIG.emailSklepu)}</a> lub ${esc(KONFIG.telefon)}.</p>
+    <h2>2. Zakres, cele i podstawy przetwarzania</h2><p>Przetwarzamy dane podane przy zamówieniu: imię i nazwisko, adres, e-mail, telefon, dane dostawy, a przy zakupie firmowym także nazwę firmy i NIP. Dane są potrzebne do zawarcia i wykonania umowy, obsługi płatności, dostawy, kontaktu oraz reklamacji (art. 6 ust. 1 lit. b RODO). Dane wymagane przepisami rachunkowymi i podatkowymi przetwarzamy w celu wykonania obowiązku prawnego (art. 6 ust. 1 lit. c RODO). Dane techniczne, historia obsługi i niezbędne logi mogą być przetwarzane dla bezpieczeństwa, zapobiegania nadużyciom i ochrony roszczeń (art. 6 ust. 1 lit. f RODO).</p>
+    <h2>3. Konto klienta</h2><p>Utworzenie konta jest dobrowolne. Hasło jest przechowywane wyłącznie jako odporny kryptograficznie skrót z indywidualną solą; sklep nie przechowuje jego jawnej treści. Sesja konta jest podpisywana przez serwer i ma ograniczony czas ważności.</p>
+    <h2>4. Odbiorcy danych</h2><p>Dane otrzymują tylko podmioty niezbędne do realizacji usługi: dostawca hostingu i utrzymania systemu, operator poczty elektronicznej, InPost, wybrany przez klienta operator płatności oraz — gdy jest to potrzebne — dostawca usług księgowych lub fakturowania. Każdy odbiorca otrzymuje wyłącznie zakres potrzebny do wykonania swojego zadania.</p>
+    <h2>5. Okres przechowywania</h2><p>Dane zamówień przechowujemy przez okres realizacji umowy, obsługi reklamacji i możliwych roszczeń, a dokumentację wymaganą prawem — przez okres wynikający z przepisów podatkowych i rachunkowych. Dane konta przechowujemy do jego usunięcia, z wyjątkiem danych, które nadal muszą być przechowywane na innej podstawie prawnej. Logi bezpieczeństwa są przechowywane tylko przez czas potrzebny do wykrywania i wyjaśniania zdarzeń.</p>
+    <h2>6. Prawa użytkownika</h2><p>Możesz żądać dostępu do danych, ich sprostowania, usunięcia, ograniczenia przetwarzania i przeniesienia oraz wnieść sprzeciw wobec przetwarzania opartego na prawnie uzasadnionym interesie. Masz też prawo złożyć skargę do Prezesa Urzędu Ochrony Danych Osobowych. Żądania można wysyłać na ${esc(KONFIG.emailSklepu)}.</p>
+    <h2>7. Pamięć przeglądarki i bezpieczeństwo</h2><p>Sklep korzysta z pamięci przeglądarki do zachowania koszyka, ulubionych, ustawień interfejsu, ograniczonego dziennika diagnostycznego i podpisanej sesji konta. Dane konta, profilu i zamówień są synchronizowane z serwerem sklepu, dlatego nie pozostają wyłącznie na urządzeniu. Strona używa wyłącznie mechanizmów koniecznych do działania sklepu; jeśli w przyszłości zostaną włączone narzędzia analityczne lub marketingowe wymagające zgody, zostanie udostępniony osobny wybór zgód.</p>
+    <h2>8. Automatyzacja</h2><p>Narzędzia automatyczne i Agent AI mogą przygotowywać administratorowi propozycje operacyjne, ale nie podejmują wobec klienta decyzji wywołujących skutki prawne wyłącznie w sposób zautomatyzowany.</p>`,"prywatnosc");
 }
 function widokDostawa(){
   return stronaInfo("🚚 Dostawa i płatności", `
