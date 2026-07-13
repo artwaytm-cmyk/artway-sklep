@@ -1,4 +1,29 @@
 /* ═══════════ ROUTER (podstrony) ═══════════ */
+let adminAssetsPromise = null;
+function zaladujPanelAdmina(){
+  if(window.__artwayAdminReady) return Promise.resolve();
+  if(adminAssetsPromise) return adminAssetsPromise;
+  const version = document.querySelector('meta[name="artway-version"]')?.content || "dev";
+  const cssPromise = new Promise((resolve,reject)=>{
+    const obecny=document.getElementById("artwayAdminStyles");
+    if(obecny){ resolve(); return; }
+    const link=document.createElement("link");
+    link.id="artwayAdminStyles"; link.rel="stylesheet"; link.href=`/assets/admin.css?v=${encodeURIComponent(version)}`;
+    link.onload=()=>resolve(); link.onerror=()=>reject(new Error("Nie udało się wczytać stylów panelu administratora"));
+    document.head.appendChild(link);
+  });
+  const jsPromise = new Promise((resolve,reject)=>{
+    const obecny=document.getElementById("artwayAdminScript");
+    if(obecny){ if(window.__artwayAdminReady) resolve(); else obecny.addEventListener("load",resolve,{once:true}); return; }
+    const script=document.createElement("script");
+    script.id="artwayAdminScript"; script.src=`/assets/admin.js?v=${encodeURIComponent(version)}`;
+    script.onload=()=>{ window.__artwayAdminReady=true; resolve(); };
+    script.onerror=()=>reject(new Error("Nie udało się wczytać modułów panelu administratora"));
+    document.body.appendChild(script);
+  });
+  adminAssetsPromise=Promise.all([cssPromise,jsPromise]).catch(error=>{adminAssetsPromise=null;throw error;});
+  return adminAssetsPromise;
+}
 function trasa(){
   const path=String(location.pathname||"").replace(/\/+$/,"")||"/";
   if(location.hash)return location.hash.replace(/^#/,"").split("?")[0]||"/";
@@ -10,6 +35,15 @@ function renderuj(){
   try{
     const t = trasa();
     const w = $("widok");
+    const wymagaPanelu=(t.startsWith("/admin")||t==="/diagnostyka")&&jestAdmin();
+    if(wymagaPanelu&&!window.__artwayAdminReady){
+      w.innerHTML=`<div class="page"><div class="panel admin-loading" role="status" aria-live="polite"><h1>Ładowanie panelu administratora…</h1><p>Wczytuję moduły potrzebne tylko do obsługi sklepu.</p></div></div>`;
+      zaladujPanelAdmina().then(()=>renderuj()).catch(error=>{
+        loguj("blad",error.message,t);
+        w.innerHTML=`<div class="page"><div class="panel"><h1>Nie udało się wczytać panelu</h1><p>${esc(error.message)}</p><button class="btn" onclick="renderuj()">Spróbuj ponownie</button></div></div>`;
+      });
+      return;
+    }
     if(t.startsWith("/admin/zamowienie/")&&!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
     if(t.startsWith("/admin")&&stanBramki.authenticated&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja) setTimeout(()=>synchronizujBazeCentralna(true),0);
     window.scrollTo({top:0});

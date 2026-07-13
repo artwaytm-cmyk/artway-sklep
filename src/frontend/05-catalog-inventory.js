@@ -863,9 +863,9 @@ function moderujOpinie(id, akcja){
   loguj("info",`Moderacja opinii ${id}: ${akcja}`);
   renderuj();
 }
-async function wczytajProdukty(){
+async function pobierzBazoweProdukty(){
   try{
-    const r = await fetch("/products.json", {cache:"no-store"});
+    const r = await fetch("/products.json", {cache:"default"});
     if(!r.ok) throw new Error("HTTP "+r.status);
     prodBazowe = await r.json();
     zrodloProduktow = "json";
@@ -874,9 +874,12 @@ async function wczytajProdukty(){
     zrodloProduktow = "zapasowe";
     loguj("info","products.json niedostępny — użyto listy zapasowej (to normalne przy otwarciu z dysku).");
   }
+}
+function finalizujWczytanieProduktow(){
   naprawKolizjeIdProduktow();
   wyczyscPrzeterminowanyKosz();
   zbudujProdukty();
   odswiezMenu();
   renderuj(); odswiezKoszyk();
 }
+async function wczytajProdukty(){ await pobierzBazoweProdukty(); finalizujWczytanieProduktow(); }

@@ -218,7 +218,7 @@ function chmuraUstawToken(){
   const t = prompt("Wklej hasło administratora wspólnej bazy (wartość ARTWAY_ADMIN_TOKEN ustawiona w Netlify):", chmuraToken||"");
   if(t===null) return;
   chmuraToken = t.trim();
-  zapiszLS("artway_chmura_token", chmuraToken);
+  try{ sessionStorage.setItem("artway_chmura_token",chmuraToken); localStorage.removeItem("artway_chmura_token"); }catch(e){}
   if(!chmuraToken){ toast("Odłączono hasło bazy"); renderuj(); return; }
   (async ()=>{
     try{
@@ -230,7 +230,7 @@ function chmuraUstawToken(){
     renderuj();
   })();
 }
-function chmuraWyczyscToken(){ chmuraToken=""; zapiszLS("artway_chmura_token",""); chmuraStan={...chmuraStan,admin:false}; toast("Odłączono hasło bazy"); renderuj(); }
+function chmuraWyczyscToken(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; toast("Odłączono hasło bazy"); renderuj(); }
 function chmuraStatusHTML(){
   const ok = chmuraStan.dostepna, adm = chmuraStan.admin && chmuraToken;
   const kolor = adm?"#166534":(ok?"#92400e":"#b91c1c"), tlo = adm?"#f0fdf4":(ok?"#fffbeb":"#fef2f2"), br = adm?"#86efac":(ok?"#fcd34d":"#fecaca");

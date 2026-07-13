@@ -19,13 +19,14 @@ $("searchInput").oninput = e=>{
 
 /* ═══════════ START ═══════════ */
 (async ()=>{
-  await chmuraWczytajStan();          // pobierz wspólne ustawienia z serwera — te same na każdym urządzeniu
+  const ladowanieProduktow=pobierzBazoweProdukty();
+  await Promise.all([chmuraWczytajStan(),ladowanieProduktow]); // ustawienia i katalog pobieramy równolegle
   zastosujUstawienia();
   await zainicjujAdmina();
   await odtworzSesjeCentralna();
   odswiezUzytkownika();
   odswiezUlubioneLicznik();
   odswiezZnacznikDiag();
-  wczytajProdukty();
+  finalizujWczytanieProduktow();
   uruchomAutoSynchronizacjeChmury();
 })();

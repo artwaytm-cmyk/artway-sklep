@@ -2,7 +2,7 @@
 
 ## Zasada główna
 
-Kod źródłowy jest podzielony według odpowiedzialności. Pliki `assets/app.js` i `assets/styles.css` są wyłącznie plikami wynikowymi dla przeglądarki — nie wolno edytować ich ręcznie. Powstają poleceniem `npm run build`.
+Kod źródłowy jest podzielony według odpowiedzialności. Pliki `assets/app.js`, `assets/admin.js`, `assets/styles.css` i `assets/admin.css` są wyłącznie plikami wynikowymi dla przeglądarki — nie wolno edytować ich ręcznie. Powstają poleceniem `npm run build`. Pakiety `admin.*` są pobierane dopiero po wejściu zalogowanego administratora do panelu.
 
 ## Warstwy
 
@@ -30,5 +30,6 @@ Kod źródłowy jest podzielony według odpowiedzialności. Pliki `assets/app.js
 - Ceny, rabaty, koszty dostawy i status nowego zamówienia są wyliczane po stronie serwera z aktualnego katalogu.
 - Każda nowa domena dostaje testy i własny plik; po przekroczeniu około 500–800 linii należy ją ponownie podzielić.
 - Zmiana nie może omijać `npm run verify` ani publikować nieaktualnych plików wynikowych.
+- Funkcje administracyjne i ich style pozostają w pakietach ładowanych na żądanie; nie wolno zwiększać kosztu pierwszego wejścia klienta bez testu budżetu zasobów.
 
 Obecny podział frontendu jest etapem bezpiecznej migracji: zachowuje zgodność ze starszymi globalnymi funkcjami HTML, a jednocześnie daje kontrolowane granice. Kolejne przebudowy mogą przenosić domeny do natywnych modułów ES bez ponownego tworzenia monolitu.

@@ -7,6 +7,8 @@ const files = [
   'index.html',
   'assets/styles.css',
   'assets/app.js',
+  'assets/admin.css',
+  'assets/admin.js',
   'products.json',
   'netlify/functions/store.mjs',
   'netlify/functions/lib/store-app.mjs',
@@ -49,8 +51,12 @@ function requireMarkers(file, content, markers) {
 for (const file of files) read(file);
 
 const index = read('index.html');
-const css = read('assets/styles.css');
-const app = read('assets/app.js');
+const cssPublic = read('assets/styles.css');
+const cssAdmin = read('assets/admin.css');
+const css = `${cssPublic}\n${cssAdmin}`;
+const appPublic = read('assets/app.js');
+const appAdmin = read('assets/admin.js');
+const app = `${appPublic}\n${appAdmin}`;
 const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
 const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
@@ -66,10 +72,16 @@ const sitemap = read('netlify/functions/sitemap.mjs');
 const googleProducts = read('netlify/functions/google-products.mjs');
 const robots = read('robots.txt');
 
-requireMarkers('assets/app.js', app, [
+requireMarkers('assets/app.js', appPublic, [
   'GENERATED FILE — edit src/frontend/*.js and run npm run build',
 ]);
-requireMarkers('assets/styles.css', css, [
+requireMarkers('assets/admin.js', appAdmin, [
+  'GENERATED FILE — edit src/frontend/*.js and run npm run build',
+]);
+requireMarkers('assets/styles.css', cssPublic, [
+  'GENERATED FILE — edit src/styles/*.css and run npm run build',
+]);
+requireMarkers('assets/admin.css', cssAdmin, [
   'GENERATED FILE — edit src/styles/*.css and run npm run build',
 ]);
 
@@ -83,9 +95,12 @@ requireMarkers('index.html', index, [
   'assets/app.js',
   `/assets/styles.css?v=${version}`,
   `/assets/app.js?v=${version}`,
+  'artway-seo-schema',
+  'og:site_name',
+  'twitter:card',
 ]);
 
-requireMarkers('assets/styles.css', css, [
+requireMarkers('połączonych assets CSS', css, [
   ':root',
   '.grid',
   '.admin-page',
@@ -133,7 +148,7 @@ requireMarkers('assets/styles.css', css, [
   '.modal',
 ]);
 
-requireMarkers('assets/app.js', app, [
+requireMarkers('połączonych assets JS', app, [
   'function renderuj',
   'function zlozZamowienie',
   'function widokAdmin',
@@ -649,12 +664,12 @@ requireMarkers('netlify/functions/lib/allegro-compliance.mjs', allegroCompliance
   'allegroSanitizeDescription',
   'allegroEnforceDraft',
 ]);
-requireMarkers('assets/app.js', app, [
+requireMarkers('połączonych assets JS', app, [
   'allegroZgodnoscPanelHTML',
   'allegro-offer-compliance',
   'Blokada przed publikacją jest zawsze włączona',
 ]);
-requireMarkers('assets/styles.css', css, [
+requireMarkers('połączonych assets CSS', css, [
   '.allegro-compliance-page',
   '.allegro-compliance-guard',
   '.allegro-compliance-table',
@@ -748,7 +763,7 @@ requireMarkers('robots.txt', robots, [
 try {
   new Function(app);
 } catch (error) {
-  fail(`assets/app.js: błąd składni: ${error.message}`);
+  fail(`połączone assets JS: błąd składni: ${error.message}`);
 }
 
 for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/lib/allegro-compliance.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs', 'netlify/functions/cron-infakt-sync.mjs', 'netlify/functions/cron-seo-daily.mjs', 'netlify/functions/sitemap.mjs', 'netlify/functions/google-products.mjs']) {
