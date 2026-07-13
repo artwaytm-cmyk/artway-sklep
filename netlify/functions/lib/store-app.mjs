@@ -217,7 +217,7 @@ async function agentCentrumOperacyjne() {
   const shipmentsWithoutTracking = activeOrders.filter((x) => !tekst(x?.wysylka?.numer || x?.trackingNumber || '', 100).trim());
   const allegroOrders = Array.isArray(allegroOrdersRec.items) ? allegroOrdersRec.items : [], activeAllegro = allegroOrders.filter(allegroAgentZlecenieAktywne);
   const communications = [...(Array.isArray(communicationRec.threads) ? communicationRec.threads.map((x) => ({ ...x, type: 'thread' })) : []), ...(Array.isArray(communicationRec.issues) ? communicationRec.issues.map((x) => ({ ...x, type: 'issue' })) : [])];
-  const communicationWaiting = communications.filter((x) => !x.internalResolved && (x.needsReply || x.humanReplyNeeded || Number(x.newIncomingCount || 0) > 0));
+  const communicationWaiting = communications.filter(allegroKomunikacjaWymagaOdpowiedzi);
   const productMap = new Map(), addProduct = (p = {}) => { const id = tekst(p.id, 100).trim(); if (id) productMap.set(id, { ...(productMap.get(id) || {}), ...p, id }); };
   for (const p of Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []) addProduct(p);
   for (const p of Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : []) addProduct(p);
@@ -4001,6 +4001,12 @@ function allegroNajnowszaWiadomoscKlienta(item = {}) {
 function allegroKluczSprawyWewnetrznej(type = 'thread', id = '') {
   return `${type === 'issue' ? 'issue' : 'thread'}:${tekst(id, 120).trim()}`;
 }
+function allegroKomunikacjaWewnetrznieZalatwiona(item = {}) {
+  return item?.internalResolved === true || item?.internalResolution?.resolved === true;
+}
+function allegroKomunikacjaWymagaOdpowiedzi(item = {}) {
+  return !allegroKomunikacjaWewnetrznieZalatwiona(item) && !!(item?.needsReply || item?.humanReplyNeeded || Number(item?.newIncomingCount || 0) > 0);
+}
 function allegroZastosujStatusyWewnetrzne(data = {}, internalRec = {}) {
   const items = internalRec.items && typeof internalRec.items === 'object' ? { ...internalRec.items } : {};
   let changed = false;
@@ -4086,7 +4092,7 @@ async function allegroWyslijAutoOdpowiedzi(req, data, settings) {
       const sourceKey = allegroKluczWiadomosci(first);
       const key = `thread:${thread.id}:first-contact`;
       if (thread.cachedOlder) { markSkip(key, 'starszy wpis zachowany wyłącznie do wyszukiwania'); continue; }
-      if (thread.internalResolved) { markSkip(key, 'sprawa zamknięta wewnętrznie'); continue; }
+      if (allegroKomunikacjaWewnetrznieZalatwiona(thread)) { markSkip(key, 'sprawa zamknięta wewnętrznie'); continue; }
       if (!first || !thread.needsReply || !(thread.newIncomingKeys || []).includes(sourceKey)) { markSkip(key, 'to nie jest pierwszy kontakt w tej rozmowie'); continue; }
       if (allegroAutoReplyWyslanaDlaRozmowy(items, 'thread', thread.id)) { markSkip(key, 'pierwsza odpowiedź była już wysłana w tej rozmowie'); continue; }
       if ((thread.messages || []).some(allegroCzyWiadomoscSprzedawcy)) { markSkip(key, 'sprzedawca wcześniej uczestniczył w rozmowie'); continue; }
@@ -4105,7 +4111,7 @@ async function allegroWyslijAutoOdpowiedzi(req, data, settings) {
       const sourceKey = allegroKluczWiadomosci(first);
       const key = `issue:${issue.id}:first-contact`;
       if (issue.cachedOlder) { markSkip(key, 'starszy wpis zachowany wyłącznie do wyszukiwania'); continue; }
-      if (issue.internalResolved) { markSkip(key, 'sprawa zamknięta wewnętrznie'); continue; }
+      if (allegroKomunikacjaWewnetrznieZalatwiona(issue)) { markSkip(key, 'sprawa zamknięta wewnętrznie'); continue; }
       if (!first || !issue.needsReply || !(issue.newIncomingKeys || []).includes(sourceKey)) { markSkip(key, 'to nie jest pierwszy kontakt w tej dyskusji'); continue; }
       if (allegroAutoReplyWyslanaDlaRozmowy(items, 'issue', issue.id)) { markSkip(key, 'pierwsza odpowiedź była już wysłana w tej dyskusji'); continue; }
       if (messages.some(allegroCzyWiadomoscSprzedawcy)) { markSkip(key, 'sprzedawca wcześniej uczestniczył w dyskusji'); continue; }
@@ -4241,7 +4247,7 @@ async function allegroWyslijPrzypomnieniaTelegram(data = {}, settings = {}) {
     const sourceKey = allegroKluczWiadomosci(incoming);
     const key = `${type}:${item.id}:${sourceKey}`;
     if (item.cachedOlder) { skipped.push({ key, reason: 'starszy wpis zachowany wyłącznie do wyszukiwania' }); continue; }
-    if (item.internalResolved) { skipped.push({ key, reason: 'sprawa zamknięta wewnętrznie' }); continue; }
+    if (allegroKomunikacjaWewnetrznieZalatwiona(item)) { skipped.push({ key, reason: 'sprawa zamknięta wewnętrznie' }); continue; }
     if (!incoming || !item.humanReplyNeeded) { skipped.push({ key, reason: 'brak nowej nieobsłużonej wiadomości' }); continue; }
     if (items[key]) { skipped.push({ key, reason: 'przypomnienie już wysłane' }); continue; }
     const kind = type === 'issue' ? (item.type === 'CLAIM' ? 'reklamacja' : 'dyskusja') : 'wiadomość';

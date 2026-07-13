@@ -238,6 +238,8 @@ requireMarkers('assets/app.js', app, [
   'function allegroCentrumDuplikatowHTML',
   'function allegroRozstrzygnijDuplikaty',
   'function allegroKomunikacjaPasujaca',
+  'function allegroKomunikacjaZalatwiona',
+  'function allegroKomunikacjaWymagaOdpowiedzi',
   'function allegroOznaczSpraweWewnetrznie',
   'function allegroOznaczZaznaczoneSprawy',
   'function allegroRentownoscProduktu',
@@ -523,8 +525,12 @@ const duplicateResolutionFlow = store.slice(store.indexOf("action === 'allegro-r
 if (!duplicateResolutionFlow.includes("status: 'ENDED'") || !duplicateResolutionFlow.includes('keepOfferId') || !duplicateResolutionFlow.includes('withdrawOfferIds')) {
   fail('store-app.mjs: centrum duplikatów musi wymagać wyboru oferty pozostawianej i kontrolowanie kończyć wycofywane oferty');
 }
-if (!store.includes("if (thread.internalResolved)") || !store.includes("if (issue.internalResolved)") || !store.includes("if (item.internalResolved)")) {
+if (!store.includes('function allegroKomunikacjaWewnetrznieZalatwiona') || !store.includes('function allegroKomunikacjaWymagaOdpowiedzi') || !store.includes('allegroKomunikacjaWewnetrznieZalatwiona(thread)') || !store.includes('allegroKomunikacjaWewnetrznieZalatwiona(issue)') || !store.includes('allegroKomunikacjaWewnetrznieZalatwiona(item)')) {
   fail('store-app.mjs: Agent, autoresponder i Telegram muszą pomijać sprawy załatwione wewnętrznie');
+}
+const communicationFilterFlow = app.slice(app.indexOf('function allegroKomunikacjaPasujaca'), app.indexOf('function allegroZaznaczWidocznaKomunikacje'));
+if (!communicationFilterFlow.includes('allegroKomunikacjaWymagaOdpowiedzi(item)') || !communicationFilterFlow.includes('allegroKomunikacjaZalatwiona(item)') || !app.includes('wymaga odpowiedzi • bez załatwionych')) {
+  fail('assets/app.js: filtr i licznik wymagających odpowiedzi muszą zawsze wykluczać sprawy załatwione wewnętrznie');
 }
 if (!store.includes("!(thread.newIncomingKeys || []).includes(sourceKey)") || !store.includes("!(issue.newIncomingKeys || []).includes(sourceKey)") || !store.includes("mode: 'first-contact-only'")) {
   fail('store-app.mjs: autoresponder Allegro musi odpowiadać tylko raz na pierwszy kontakt w nowej rozmowie');
