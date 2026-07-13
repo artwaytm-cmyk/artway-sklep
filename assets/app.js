@@ -8893,7 +8893,8 @@ function formularzProduktu(p, tryb){
   p=domyslneKosztyDoProduktu(p||{},false);
   const wszystkie = produktyDoAdministracji();
   const edycja = tryb==="edycja";
-  const ofertaAllegro=allegroOfertaDlaProduktuSklepu(p),ofertaAllegroId=String(p.allegroOfferId||ofertaAllegro?.id||"").trim(),rentownosc=allegroRentownoscProduktu(p),rentownoscSklep=sklepRentownoscProduktu(p);
+  const maTozsamoscProduktu=!!(p.allegroOfferId||p.allegroProductId||p.gtin||p.ean||p.externalId||p.sku||p.nazwa);
+  const ofertaAllegro=maTozsamoscProduktu?allegroOfertaDlaProduktuSklepu(p):null,ofertaAllegroId=String(p.allegroOfferId||ofertaAllegro?.id||"").trim(),rentownosc=allegroRentownoscProduktu(p),rentownoscSklep=sklepRentownoscProduktu(p);
   return `
     <form class="product-editor-form" data-product-id="${esc(p.id||0)}" onsubmit="${edycja?`zapiszProduktAdmin(event,${p.id})`:"dodajProdukt(event)"}">
       <div class="backend-note" style="margin-bottom:.8rem">
