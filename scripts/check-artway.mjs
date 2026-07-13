@@ -104,6 +104,7 @@ requireMarkers('assets/styles.css', css, [
   '.assortment-filter-panel',
   '.allegro-dashboard-links',
   '.product-link-one-workspace',
+  '.product-link-inline-workspace',
   '.product-source-evidence',
   '.seo-hero',
   '.seo-technical-grid',
@@ -279,10 +280,11 @@ requireMarkers('assets/app.js', app, [
   'function automatyczniePobierzDaneZrodlaProduktu',
   'function widokAdminProduktyZLinku',
   'function agentAIDodajProduktTylkoZLinku',
-  'function agentAIZapiszProduktZJednegoLinku',
-  'Jedno pole • pełna automatyka',
+  'Pobierz dane z linku produktu',
+  'bez automatycznego zapisu',
+  'data-product-final-approval',
+  'Zatwierdź i dodaj produkt',
   'Zweryfikowane źródło produktu',
-  '#/admin/produkty/z-linku',
   'product-url-prepare',
   'allegroSynchronizujPowiazanyProduktPoZapisie(next,{forceFees:true})',
   'artway_cel_marzy_sklep',
@@ -543,8 +545,16 @@ if (!app.includes('await allegroSynchronizujPowiazanyProduktPoZapisie(p,{forceFe
   fail('assets/app.js: zapis produktu i ustawienie ceny Allegro muszą aktualizować ofertę oraz prowizję');
 }
 const regularProductAddFlow = app.slice(app.indexOf('function widokAdminProduktyDodaj'), app.indexOf('function widokAdminProduktyZLinku'));
-if (regularProductAddFlow.includes('sessionStorage.getItem("artway_prefill_product")') || !regularProductAddFlow.includes('sessionStorage.removeItem("artway_prefill_product")')) {
-  fail('assets/app.js: zwykły formularz „Dodaj produkt” musi usuwać stare dane Agenta i zawsze otwierać pustą kartotekę');
+if (!regularProductAddFlow.includes('agentPrepared') || !regularProductAddFlow.includes('sessionStorage.getItem("artway_prefill_product")') || !regularProductAddFlow.includes('else try{sessionStorage.removeItem("artway_prefill_product")')) {
+  fail('assets/app.js: wspólny formularz musi być pusty przy zwykłym wejściu i przyjmować wyłącznie jawnie przygotowane dane Agenta');
+}
+if (app.includes('href="#/admin/produkty/z-linku"')) {
+  fail('assets/app.js: dodawanie ręczne i z linku nie może prowadzić do osobnych stron');
+}
+const oneLinkRuntime = app.slice(app.indexOf('async function agentAIUruchomJedenLink'), app.indexOf('async function agentAIDodajProduktTylkoZLinku'));
+const oneLinkApprovalFlow = app.slice(app.indexOf('async function agentAIPrzygotujProduktZJednegoLinku'), app.indexOf('async function agentAIUruchomJedenLink'));
+if (!oneLinkRuntime.includes('agentAIPrzygotujProduktZJednegoLinku(') || !oneLinkApprovalFlow.includes('location.hash="#/admin/produkty/dodaj?agent=1"') || oneLinkApprovalFlow.includes('produktyDodane.push(')) {
+  fail('assets/app.js: odczyt linku ma tylko przygotować wspólny formularz i czekać na zatwierdzenie administratora');
 }
 const productUrlPrepareFlow = store.slice(store.indexOf('async function przygotujPakietProduktuZLinku'), store.indexOf('function allegroNormTekst'));
 if (!productUrlPrepareFlow.includes('allegroDraftZAutoKategoria') || !productUrlPrepareFlow.includes('duplicateAudit') || !productUrlPrepareFlow.includes('readyForAllegro')) {
