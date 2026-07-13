@@ -105,6 +105,9 @@ requireMarkers('assets/styles.css', css, [
   '.allegro-dashboard-links',
   '.product-link-one-workspace',
   '.product-link-inline-workspace',
+  '.product-add-control',
+  '.product-add-progress-track',
+  '.product-add-duplicate-check',
   '.product-source-evidence',
   '.seo-hero',
   '.seo-technical-grid',
@@ -282,6 +285,11 @@ requireMarkers('assets/app.js', app, [
   'function agentAIDodajProduktTylkoZLinku',
   'Pobierz dane z linku produktu',
   'bez automatycznego zapisu',
+  'function produktDodawanieAktualizuj',
+  'function produktDodawaniePotwierdzNowy',
+  'data-product-add-control',
+  'Postęp dodawania produktu',
+  'Produkt już istnieje',
   'data-product-final-approval',
   'Zatwierdź i dodaj produkt',
   'Zweryfikowane źródło produktu',
@@ -550,6 +558,13 @@ if (!regularProductAddFlow.includes('agentPrepared') || !regularProductAddFlow.i
 }
 if (app.includes('href="#/admin/produkty/z-linku"')) {
   fail('assets/app.js: dodawanie ręczne i z linku nie może prowadzić do osobnych stron');
+}
+const productAddSubmitFlow = app.slice(app.indexOf('async function dodajProdukt'), app.indexOf('async function zapiszProduktAdmin'));
+if (!productAddSubmitFlow.includes('produktDodawanieAktualizuj(e.target)') || !productAddSubmitFlow.includes('if(!kontrola?.canSubmit)') || !app.includes('data-product-duplicate-fingerprint')) {
+  fail('assets/app.js: dodanie produktu musi wymagać aktualnej kontroli duplikatów i gotowości formularza');
+}
+if (!app.includes('same EAN') && (!app.includes('ten sam EAN') || !app.includes('ten sam link producenta') || !app.includes('ten sam EXTERNAL_ID/SKU') || !app.includes('ten sam kod producenta'))) {
+  fail('assets/app.js: kontrola duplikatów musi porównywać EAN, link, EXTERNAL_ID/SKU i kod producenta');
 }
 const oneLinkRuntime = app.slice(app.indexOf('async function agentAIUruchomJedenLink'), app.indexOf('async function agentAIDodajProduktTylkoZLinku'));
 const oneLinkApprovalFlow = app.slice(app.indexOf('async function agentAIPrzygotujProduktZJednegoLinku'), app.indexOf('async function agentAIUruchomJedenLink'));

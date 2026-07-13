@@ -1744,7 +1744,60 @@ function agentAIOcenaDodaniaProduktu(p={},d={}){
 }
 function agentAIProduktZFormularzaDoOceny(form,fallback={}){
   if(!form)return fallback;const v=(name)=>String(form.elements[name]?.value||"").trim(),n=(name)=>Number(v(name).replace(",","."))||0;
-  return {...fallback,nazwa:v("nazwa")||fallback.nazwa,kategoria:v("kategoria")||fallback.kategoria,cena:n("cena")||fallback.cena,gtin:v("gtin")||fallback.gtin||fallback.ean,ean:v("gtin")||fallback.ean||fallback.gtin,externalId:v("externalId")||fallback.externalId,mpn:v("mpn")||fallback.mpn||fallback.kodProducenta,kodProducenta:v("kodProducenta")||fallback.kodProducenta||fallback.mpn,producent:v("producent")||fallback.producent,marka:v("marka")||fallback.marka,zdjecie:v("zdjecie")||fallback.zdjecie,opisKrotki:v("opisKrotki")||fallback.opisKrotki,opis:v("opis")||fallback.opis,sourceUrl:v("sourceUrl")||v("producentUrl")||fallback.sourceUrl,producentUrl:v("producentUrl")||fallback.producentUrl};
+  return {...fallback,nazwa:v("nazwa")||fallback.nazwa,kategoria:v("kategoria")||fallback.kategoria,cena:n("cena")||fallback.cena,gtin:v("gtin")||fallback.gtin||fallback.ean,ean:v("gtin")||fallback.ean||fallback.gtin,externalId:v("externalId")||fallback.externalId,sku:v("sku")||fallback.sku,mpn:v("mpn")||fallback.mpn||fallback.kodProducenta,kodProducenta:v("kodProducenta")||fallback.kodProducenta||fallback.mpn,producent:v("producent")||fallback.producent,marka:v("marka")||fallback.marka,zdjecie:v("zdjecie")||fallback.zdjecie,opisKrotki:v("opisKrotki")||fallback.opisKrotki,opis:v("opis")||fallback.opis,sourceUrl:v("producentUrl")||v("sourceUrl")||fallback.sourceUrl,producentUrl:v("producentUrl")||fallback.producentUrl};
+}
+function produktDodawanieOdciskKontroli(p={}){
+  const key=v=>agentAIKluczProduktu(v),url=normalizujUrlProducenta(p.sourceUrl||p.producentUrl||"");
+  return [key(p.nazwa),key(p.gtin||p.ean),key(p.externalId),key(p.sku),key(p.mpn),key(p.kodProducenta),key(p.producent||p.marka),url].join("|");
+}
+function produktDodawanieStanKontroli(p={},options={}){
+  const nazwa=String(p.nazwa||"").trim(),category=String(p.kategoria||"").trim(),price=Number(p.cena)||0,url=normalizujUrlProducenta(p.sourceUrl||p.producentUrl||"");
+  const preciseIdentity=!!(p.gtin||p.ean||p.externalId||p.sku||p.mpn||p.kodProducenta||(/^https?:\/\//i.test(url)&&url.length>12));
+  const hasBasis=preciseIdentity||nazwa.length>=3,fingerprint=produktDodawanieOdciskKontroli(p),duplicates=hasBasis?agentAIDuplikatyProduktu({...p,id:""}):[];
+  const blocking=duplicates.find(x=>x.blocking)||null,potential=duplicates.find(x=>!x.blocking&&(x.score>=84||x.reasons.includes("identyczna nazwa")))||null;
+  const acknowledged=!potential||String(options.ackFingerprint||"")===fingerprint,dataReady=!!(nazwa&&category&&price>0),duplicateChecked=hasBasis;
+  const duplicateReady=duplicateChecked&&!blocking&&acknowledged,canSubmit=dataReady&&duplicateReady;
+  let progress=10;if(nazwa)progress=25;if(dataReady)progress=50;if(duplicateChecked)progress=65;if(duplicateReady)progress=82;if(canSubmit)progress=92;
+  return {p,nazwa,category,price,url,preciseIdentity,hasBasis,fingerprint,duplicates,blocking,potential,acknowledged,dataReady,duplicateChecked,duplicateReady,canSubmit,progress};
+}
+function produktDodawanieDuplikatKartaHTML(x={}){
+  const p=x.product||{};
+  return `<article class="product-add-duplicate-card ${x.blocking?"blocking":"review"}">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span class="product-add-duplicate-fallback">${esc(p.ikona||"📦")}</span>`}<div><strong>#${esc(p.id)} ${esc(p.nazwa||"Produkt")}</strong><small>EAN ${esc(p.gtin||p.ean||"—")} • SKU/EXTERNAL_ID ${esc(p.sku||p.externalId||"—")} • kod ${esc(p.kodProducenta||p.mpn||"—")}</small><em>${esc((x.reasons||[]).join(" • "))} • zgodność ${esc(x.score||0)}%</em></div><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">Otwórz produkt</a></article>`;
+}
+function produktDodawanieKontrolaHTML(p={},options={}){
+  const s=produktDodawanieStanKontroli(p,options),duplicateClass=s.blocking?"blocked":s.potential&&!s.acknowledged?"review":s.duplicateChecked?"clear":"waiting";
+  const duplicateTitle=s.blocking?`Produkt już istnieje — znaleziono pewne dopasowanie #${s.blocking.product.id}`:s.potential&&!s.acknowledged?"Znaleziono bardzo podobny produkt — potrzebna Twoja decyzja":s.duplicateChecked?"Nie znaleziono pewnego duplikatu":"Kontrola duplikatów czeka na dane produktu";
+  const duplicateNote=s.blocking?"Dodanie nowej kartoteki jest zablokowane. Otwórz i edytuj istniejący produkt.":s.potential&&!s.acknowledged?"Porównaj rekord poniżej. Kontynuuj tylko wtedy, gdy to faktycznie inny produkt lub wariant.":s.duplicateChecked?`Sprawdzono ${produktyDoAdministracji().filter(x=>!czyProduktAdminWKoszu(x)).length} aktywnych kart po ${s.preciseIdentity?"EAN, kodach, SKU, linku i nazwie":"znormalizowanej nazwie"}.`:"Wpisz nazwę, EAN, SKU, kod producenta albo link źródłowy.";
+  const steps=[
+    ["1","Dane podstawowe",s.dataReady,"nazwa, kategoria i cena"],
+    ["2","Tożsamość",s.hasBasis,s.preciseIdentity?"kody lub link źródłowy":"nazwa produktu"],
+    ["3","Duplikaty",s.duplicateReady,s.blocking?`istnieje #${s.blocking.product.id}`:s.potential&&!s.acknowledged?"wymaga decyzji":s.duplicateChecked?"kontrola zakończona":"oczekuje"],
+    ["4","Zatwierdzenie",false,s.canSubmit?"przycisk jest odblokowany":"najpierw zakończ kontrolę"]
+  ];
+  return `<div class="product-add-progress-head"><div><span>Postęp dodawania produktu</span><b>${esc(s.progress)}% gotowości</b><small>${s.canSubmit?"Możesz sprawdzić formularz i zatwierdzić dodanie.":"System nie zapisze produktu, dopóki kontrola nie zostanie zakończona."}</small></div><button class="btn ghost" type="button" onclick="produktDodawanieSprawdzTeraz(this)">🔎 Sprawdź teraz</button></div><div class="product-add-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${esc(s.progress)}"><span style="width:${esc(s.progress)}%"></span></div><div class="product-add-progress-steps">${steps.map(([nr,label,ok,note],i)=>`<span class="${ok?"done":i===3&&s.canSubmit?"active":"wait"}"><b>${ok?"✓":nr}</b><span><strong>${esc(label)}</strong><small>${esc(note)}</small></span></span>`).join("")}</div><section class="product-add-duplicate-check ${duplicateClass}"><header><span>${s.blocking?"⛔":s.potential&&!s.acknowledged?"⚠️":s.duplicateChecked?"✅":"🔎"}</span><div><b>${esc(duplicateTitle)}</b><small>${esc(duplicateNote)}</small></div></header>${s.duplicates.length?`<div class="product-add-duplicate-list">${s.duplicates.slice(0,4).map(produktDodawanieDuplikatKartaHTML).join("")}</div>`:""}${s.potential&&!s.blocking&&!s.acknowledged?`<div class="product-add-duplicate-decision"><button class="btn" type="button" onclick="produktDodawaniePotwierdzNowy(this.form)">To inny produkt — zezwól na dodanie</button><small>Ta decyzja jest ważna tylko dla obecnego zestawu nazwy i kodów. Po ich zmianie kontrola wykona się ponownie.</small></div>`:""}</section>`;
+}
+function produktDodawanieAktualizuj(form){
+  if(!form||!form.querySelector("[data-product-add-control]"))return null;
+  const p=agentAIProduktZFormularzaDoOceny(form,{}),fingerprint=produktDodawanieOdciskKontroli(p),previous=String(form.dataset.productDuplicateFingerprint||"");
+  if(previous&&previous!==fingerprint)form.dataset.productDuplicateAck="";
+  form.dataset.productDuplicateFingerprint=fingerprint;
+  const state=produktDodawanieStanKontroli(p,{ackFingerprint:form.dataset.productDuplicateAck||""}),box=form.querySelector("[data-product-add-control]");
+  if(box)box.innerHTML=produktDodawanieKontrolaHTML(p,{ackFingerprint:form.dataset.productDuplicateAck||""});
+  const approval=form.querySelector("[data-product-final-approval]");if(approval){approval.disabled=!state.canSubmit;approval.title=state.canSubmit?"Kontrola zakończona — możesz zatwierdzić":"Najpierw uzupełnij dane i zakończ kontrolę duplikatów";}
+  form.dataset.productDuplicateVerified=state.duplicateReady?"1":"0";form.dataset.productReadyToAdd=state.canSubmit?"1":"0";
+  return state;
+}
+function produktDodawanieZmienione(event,form){
+  if(!form||event?.target?.closest?.("[data-product-add-control]"))return;
+  clearTimeout(window.__productDuplicateCheck);window.__productDuplicateCheck=setTimeout(()=>produktDodawanieAktualizuj(form),220);
+}
+function produktDodawanieSprawdzTeraz(button){
+  const state=produktDodawanieAktualizuj(button?.form||button?.closest("form"));if(!state)return;
+  toast(state.blocking?`Produkt już istnieje (#${state.blocking.product.id})`:state.potential&&!state.acknowledged?"Znaleziono podobny produkt — podejmij decyzję":state.canSubmit?"Kontrola zakończona — możesz zatwierdzić dodanie":"Uzupełnij brakujące dane podstawowe");
+}
+function produktDodawaniePotwierdzNowy(form){
+  if(!form)return;const p=agentAIProduktZFormularzaDoOceny(form,{}),state=produktDodawanieStanKontroli(p,{});if(state.blocking){toast(`Pewnego duplikatu #${state.blocking.product.id} nie można ominąć`);return;}
+  form.dataset.productDuplicateAck=state.fingerprint;produktDodawanieAktualizuj(form);toast("Decyzja zapisana — nadal musisz zatwierdzić dodanie produktu na dole formularza");
 }
 function agentAIProduktZLinkuMini(p={}){
   if(!p||typeof p!=="object") return {};
@@ -6414,11 +6467,12 @@ function agentAIUzupelnijFormularzZLinku(form,p={},d={},overwrite=false,url=""){
   const canonicalProducer=allegroProducentKanoniczny({...p,sourceUrl:p.sourceUrl||url,producentUrl:url});uzupelnijPoleFormularza(form,"marka",p.marka||canonicalProducer||p.producent,overwrite);uzupelnijPoleFormularza(form,"producent",canonicalProducer||p.producent||p.marka,overwrite||!!canonicalProducer);uzupelnijPoleFormularza(form,"rozmiar",p.rozmiar,overwrite);uzupelnijPoleFormularza(form,"dostepnoscProducenta",p.dostepnoscProducenta,overwrite);uzupelnijPoleFormularza(form,"producentUrl",p.producentUrl||p.sourceUrl||url,overwrite);uzupelnijPoleFormularza(form,"sourceUrl",p.sourceUrl||p.producentUrl||url,overwrite);uzupelnijPoleFormularza(form,"allegroCategoryId",p.allegroCategoryId,overwrite);uzupelnijPoleFormularza(form,"allegroProductId",p.allegroProductId,overwrite);for(const field of ["stanProducenta","stanProducentaZrodlo","producentStatus","producentSprawdzonoAt"])uzupelnijPoleFormularza(form,field,p[field],true);if(form.elements.stanProducentaDokladny)form.elements.stanProducentaDokladny.value=p.stanProducentaDokladny?"1":"";
   form.dataset.agentLinkConfidence=String(d.confidence||0);form.dataset.agentLinkSource=String(d.canonicalUrl||d.resolvedUrl||url||"");form.dataset.agentCategoryConfidence=String(category.confidence||0);
   const pg=document.getElementById("podgladZdjecia");if(pg&&form.elements.zdjecie?.value)pg.innerHTML=`<img src="${esc(form.elements.zdjecie.value)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`;
+  produktDodawanieAktualizuj(form);
   return brakiDanychProducenta(p,d);
 }
 function agentAIAudytDodaniaHTML(product={},d={}){
   const audit=agentAIOcenaDodaniaProduktu(product,d),dup=audit.blockingDuplicate;
-  return `<section class="product-link-add-audit"><div class="product-link-add-score"><span>Gotowość danych</span><b>${esc(audit.score)}%</b><small>${audit.ready?"formularz jest gotowy do Twojego zatwierdzenia":dup?`dane ${audit.dataScore}%, znaleziono możliwy duplikat`:"najpierw wykonaj wskazane czynności"}</small></div><div class="product-link-add-steps">${[["Link",!d.needsChoice,"źródło rozpoznane"],["Tożsamość",!!(product.gtin||product.ean||product.mpn||product.kodProducenta),"EAN lub kod producenta"],["Dane sklepu",!!(product.nazwa&&Number(product.cena)>0&&audit.product.kategoria),"nazwa, cena i kategoria"],["Duplikaty",!dup,dup?`produkt #${dup.product.id}`:"brak pewnego duplikatu"],["Zatwierdzenie",false,"decyzja administratora na dole formularza"]].map(([label,ok,note])=>`<span class="${ok?"ok":"wait"}"><b>${ok?"✓":"○"} ${esc(label)}</b><small>${esc(note)}</small></span>`).join("")}</div>${audit.blockers.length?`<div class="backend-note product-link-blockers"><b>Agent wskazuje problem przed zatwierdzeniem:</b> ${esc(audit.blockers.join(" • "))}</div>`:""}${audit.warnings.length?`<div class="backend-note"><b>Do późniejszego uzupełnienia:</b> ${esc(audit.warnings.join(" • "))}</div>`:""}${audit.duplicates.length?`<div class="product-link-duplicates"><b>Możliwe istniejące produkty</b>${audit.duplicates.slice(0,4).map(x=>`<article><span><strong>#${esc(x.product.id)} ${esc(x.product.nazwa||"Produkt")}</strong><small>${esc(x.reasons.join(" • "))} • zgodność ${esc(x.score)}%</small></span><button class="btn ghost" type="button" onclick="location.hash='#/admin/produkt/${encodeURIComponent(String(x.product.id))}'">Otwórz</button>${x.blocking?`<button class="btn" type="button" onclick="agentAIAktualizujIstniejacyZAnalizy(${jsArg(x.product.id)},this)">Uzupełnij istniejący</button>`:""}</article>`).join("")}</div>`:""}<div class="diag-actions">${audit.ready?`<button class="btn product-link-agent-add" type="button" onclick="agentAIDodajProduktZAnalizy(this)">Przejdź do zatwierdzenia ↓</button>`:`<button class="btn ghost" type="button" onclick="agentAIPokazPierwszyBrak(this)">Przejdź do brakujących danych</button>`}</div></section>`;
+  return `<section class="product-link-add-audit"><div class="product-link-add-score"><span>Gotowość danych</span><b>${esc(audit.score)}%</b><small>${audit.ready?"formularz jest gotowy do Twojego zatwierdzenia":dup?`dane ${audit.dataScore}%, znaleziono możliwy duplikat`:"najpierw wykonaj wskazane czynności"}</small></div><div class="product-link-add-steps">${[["Link",!d.needsChoice,"źródło rozpoznane"],["Tożsamość",!!(product.gtin||product.ean||product.mpn||product.kodProducenta),"EAN lub kod producenta"],["Dane sklepu",!!(product.nazwa&&Number(product.cena)>0&&audit.product.kategoria),"nazwa, cena i kategoria"],["Duplikaty",!dup,dup?`produkt #${dup.product.id}`:"brak pewnego duplikatu"],["Zatwierdzenie",false,"decyzja administratora na dole formularza"]].map(([label,ok,note])=>`<span class="${ok?"ok":"wait"}"><b>${ok?"✓":"○"} ${esc(label)}</b><small>${esc(note)}</small></span>`).join("")}</div>${audit.blockers.length?`<div class="backend-note product-link-blockers"><b>Agent wskazuje problem przed zatwierdzeniem:</b> ${esc(audit.blockers.join(" • "))}</div>`:""}${audit.warnings.length?`<div class="backend-note"><b>Do późniejszego uzupełnienia:</b> ${esc(audit.warnings.join(" • "))}</div>`:""}${audit.duplicates.length?`<div class="product-link-duplicates"><b>Możliwe istniejące produkty</b>${audit.duplicates.slice(0,4).map(x=>`<article><span><strong>#${esc(x.product.id)} ${esc(x.product.nazwa||"Produkt")}</strong><small>${esc(x.reasons.join(" • "))} • zgodność ${esc(x.score)}%</small></span><button class="btn ghost" type="button" onclick="location.hash='#/admin/produkty/edytuj/${encodeURIComponent(String(x.product.id))}'">Otwórz</button>${x.blocking?`<button class="btn" type="button" onclick="agentAIAktualizujIstniejacyZAnalizy(${jsArg(x.product.id)},this)">Uzupełnij istniejący</button>`:""}</article>`).join("")}</div>`:""}<div class="diag-actions">${audit.ready?`<button class="btn product-link-agent-add" type="button" onclick="agentAIDodajProduktZAnalizy(this)">Przejdź do zatwierdzenia ↓</button>`:`<button class="btn ghost" type="button" onclick="agentAIPokazPierwszyBrak(this)">Przejdź do brakujących danych</button>`}</div></section>`;
 }
 function agentAIRaportLinkuHTML(d={},selected=-1){
   const alternatives=Array.isArray(d.alternatives)?d.alternatives:[],attempts=Array.isArray(d.diagnostics?.attempts)?d.diagnostics.attempts:[],candidate=d.needsChoice&&selected>=0?alternatives[selected]:null,product=candidate?.product||d.product||{},sources=candidate?.fieldSources||d.fieldSources||{},missing=candidate?.missing||brakiDanychProducenta(product,d),confidence=candidate?.confidence||d.confidence||0,workflow=d.workflow||{},allegro=d.allegroPreparation||{},category=d.storeCategory||{};
@@ -6443,12 +6497,13 @@ function agentAIPokazPierwszyBrak(button){
 function agentAIDodajProduktZAnalizy(button){
   const form=button?.closest("form"),d=agentAIImportUrlStan.data||{},selected=agentAIImportUrlStan.selected,source=agentAIWybranyProduktImportu(d,selected),p=agentAIProduktZFormularzaDoOceny(form,source),audit=agentAIOcenaDodaniaProduktu(p,{...d,needsChoice:selected<0&&d.needsChoice});
   if(!audit.ready){toast("Agent zatrzymał dodanie: "+audit.blockers.join(" • "));return;}
+  const kontrola=produktDodawanieAktualizuj(form);if(!kontrola?.canSubmit){form?.querySelector("[data-product-add-control]")?.scrollIntoView({behavior:"smooth",block:"start"});toast(kontrola?.potential&&!kontrola.acknowledged?"Najpierw zdecyduj, czy podobna pozycja jest innym produktem":"Najpierw zakończ kontrolę danych i duplikatów");return;}
   form.dataset.agentAdd="1";form.dataset.agentLinkConfidence=String(selected>=0?d.alternatives?.[selected]?.confidence||d.confidence||0:d.confidence||0);const approval=form.querySelector("[data-product-final-approval]");approval?.scrollIntoView({behavior:"smooth",block:"center"});approval?.focus();toast("Dane są gotowe — sprawdź formularz i zatwierdź dodanie produktu");
 }
 function agentAIAktualizujIstniejacyZAnalizy(id,button){
   const d=agentAIImportUrlStan.data||{},selected=agentAIImportUrlStan.selected,source=agentAIWybranyProduktImportu(d,selected);if(!source?.nazwa){toast("Brak danych analizy do aktualizacji");return;}
   const category=agentAIDobierzKategorieProduktu(source),canonical=allegroProducentKanoniczny(source),fields={...source,kategoria:category.name||source.kategoria||"",producent:canonical||source.producent||source.marka||"",marka:source.marka||canonical||source.producent||"",agentImportAt:new Date().toISOString(),agentImportConfidence:selected>=0?d.alternatives?.[selected]?.confidence||d.confidence||0:d.confidence||0,agentImportSource:d.fromCache?"pamięć Agenta":"link producenta"};delete fields.id;
-  zapiszPolaProduktuLokalnie(id,fields,true);const updated=pobierzProduktAdmin(Number(id))||{id,...fields};agentAIZakonczLinkProducenta(updated.sourceUrl||updated.producentUrl,updated);zapiszHistorieAgenta("produkt-z-linku",`Agent uzupełnił istniejący produkt #${id}: ${updated.nazwa||source.nazwa}`,{produktId:id,zrodlo:fields.agentImportSource,confidence:fields.agentImportConfidence});if(chmuraToken)void chmuraZapiszUstawienia();toast("Istniejący produkt uzupełniony — nie utworzono duplikatu");location.hash=`#/admin/produkt/${encodeURIComponent(String(id))}`;
+  zapiszPolaProduktuLokalnie(id,fields,true);const updated=pobierzProduktAdmin(Number(id))||{id,...fields};agentAIZakonczLinkProducenta(updated.sourceUrl||updated.producentUrl,updated);zapiszHistorieAgenta("produkt-z-linku",`Agent uzupełnił istniejący produkt #${id}: ${updated.nazwa||source.nazwa}`,{produktId:id,zrodlo:fields.agentImportSource,confidence:fields.agentImportConfidence});if(chmuraToken)void chmuraZapiszUstawienia();toast("Istniejący produkt uzupełniony — nie utworzono duplikatu");location.hash=`#/admin/produkty/edytuj/${encodeURIComponent(String(id))}`;
 }
 function agentAIWariantyJednegoLinkuHTML(d={}){
   const alternatives=Array.isArray(d.alternatives)?d.alternatives:[];
@@ -6480,6 +6535,7 @@ async function pobierzDaneProduktuZUrl(btn){
   const url=String(form?.elements?.producentUrl?.value||"").trim();
   if(!url){ toast("⚠️ Wklej adres strony produktu producenta"); return; }
   const overwrite=!!form?.elements?.nadpiszImportUrl?.checked;
+  const progressBox=form?.querySelector("[data-product-link-agent-result]");if(progressBox)progressBox.innerHTML=`<div class="product-link-fetch-progress"><div><span>🤖</span><b>Agent przygotowuje produkt z linku</b><small>Źródło → dane i kody → duplikaty → gotowy formularz</small></div><div class="product-link-fetch-track"><span></span></div><div class="product-link-fetch-stages"><span class="active">1. Źródło</span><span>2. Dane</span><span>3. Duplikaty</span><span>4. Formularz</span></div></div>`;
   try{
     btn.disabled=true;
     toast("Pobieram dane produktu ze strony producenta…");
@@ -9163,11 +9219,13 @@ function formularzProduktu(p, tryb){
   p=domyslneKosztyDoProduktu(p||{},false);
   const wszystkie = produktyDoAdministracji();
   const edycja = tryb==="edycja";
+  const kontrolaDodawania=edycja?null:produktDodawanieStanKontroli(p,{});
   const maTozsamoscProduktu=!!(p.allegroOfferId||p.allegroProductId||p.gtin||p.ean||p.externalId||p.sku||p.nazwa);
   const ofertaAllegro=maTozsamoscProduktu?allegroOfertaDlaProduktuSklepu(p):null,ofertaAllegroId=String(p.allegroOfferId||ofertaAllegro?.id||"").trim(),rentownosc=allegroRentownoscProduktu(p),rentownoscSklep=sklepRentownoscProduktu(p);
   return `
-    <form class="product-editor-form" data-product-id="${esc(p.id||0)}" onsubmit="${edycja?`zapiszProduktAdmin(event,${p.id})`:"dodajProdukt(event)"}">
+    <form class="product-editor-form" data-product-id="${esc(p.id||0)}" ${!edycja?`data-product-add-form data-product-duplicate-fingerprint="${esc(kontrolaDodawania.fingerprint)}" oninput="produktDodawanieZmienione(event,this)" onchange="produktDodawanieZmienione(event,this)"`:""} onsubmit="${edycja?`zapiszProduktAdmin(event,${p.id})`:"dodajProdukt(event)"}">
       ${agentAIWdrozenieProduktuHTML(p,edycja)}
+      ${!edycja?`<section class="product-add-control" data-product-add-control>${produktDodawanieKontrolaHTML(p,{})}</section>`:""}
       ${!edycja?`<section class="product-link-one-workspace product-link-inline-workspace"><div class="order-section-head"><div><span class="order-pro-label">Opcjonalne automatyczne uzupełnienie</span><h3>🔗 Pobierz dane z linku produktu</h3><p class="order-detail-lead">Wklej adres konkretnego produktu albo od razu wypełnij formularz ręcznie. Agent jedynie uzupełni pola — nic nie zostanie dodane bez Twojego zatwierdzenia na dole formularza.</p></div><span class="lvl lvl-ok">bez automatycznego zapisu</span></div><label for="oneProductUrl">Adres konkretnego produktu</label><div class="product-link-one-input"><input id="oneProductUrl" data-one-link-url name="producentUrl" type="url" value="${esc(p.producentUrl||p.sourceUrl||"")}" placeholder="https://strona-producenta.pl/konkretny-produkt"><button class="btn" type="button" onclick="pobierzDaneProduktuZUrl(this)">🤖 Pobierz i uzupełnij formularz</button></div><label class="check product-link-overwrite"><input type="checkbox" name="nadpiszImportUrl"> Nadpisz również pola wpisane przeze mnie</label><small>Po pobraniu sprawdź nazwę, cenę, opis, zdjęcia i kody. Dopiero przycisk „Zatwierdź i dodaj produkt” zapisze kartotekę.</small><div data-product-link-agent-result></div></section>`:""}
       <div class="f-row">
         <div class="f-group"><label>Nazwa *</label><input required name="nazwa" value="${esc(p.nazwa||"")}"></div>
@@ -9274,7 +9332,7 @@ function formularzProduktu(p, tryb){
       <div class="f-group" style="max-width:240px"><label>Stan magazynowy <small style="font-weight:400;color:var(--muted2)">(nowy produkt = 0 szt.)</small></label>
         <input name="stan" inputmode="numeric" min="0" placeholder="0" value="${p.id!==undefined && stanyProduktow[p.id]!==undefined ? stanyProduktow[p.id] : 0}"></div>
       <div class="diag-actions">
-        <button class="btn" type="submit" data-product-final-approval>${edycja?"💾 Zapisz zmiany":"✅ Zatwierdź i dodaj produkt"}</button>
+        <button class="btn" type="submit" data-product-final-approval ${!edycja&&!kontrolaDodawania.canSubmit?`disabled title="Najpierw uzupełnij dane i zakończ kontrolę duplikatów"`:""}>${edycja?"💾 Zapisz zmiany":"✅ Zatwierdź i dodaj produkt"}</button>
         <a class="btn ghost" href="#/admin/produkty">Anuluj</a>
         ${edycja?`<button class="btn ghost" type="button" onclick="duplikujProdukt(${p.id})">📄 Duplikuj</button>`:""}
         ${edycja?`<button class="btn danger" type="button" onclick="if(confirm('Przenieść ten produkt do kosza na 30 dni?')){usunProduktAdmin(${p.id});location.hash='#/admin/produkty'}">🗑️ Przenieś do kosza</button>`:""}
@@ -9353,6 +9411,7 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     const v=String(f.get(nazwa)||"").trim();
     if(v)p[pole]=v;else delete p[pole];
   }
+  if(p.producentUrl)p.sourceUrl=p.producentUrl;
   const stanProd=String(f.get("stanProducenta")??"").trim();if(stanProd!=="")p.stanProducenta=Math.max(0,Math.floor(Number(stanProd)||0));else delete p.stanProducenta;
   p.stanProducentaDokladny=String(f.get("stanProducentaDokladny")||"")==="1";
   for(const pole of ["stanProducentaZrodlo","producentStatus","producentSprawdzonoAt"]){const v=String(f.get(pole)||"").trim();if(v)p[pole]=v;else delete p[pole];}
@@ -9388,11 +9447,18 @@ async function dodajProdukt(e){
   const KOLORY = ["#dbeafe","#e0e7ff","#fef3c7","#dcfce7","#fee2e2","#f3e8ff","#fce7f3","#ffedd5"];
   const p = daneProduktuZFormularza(f, maxId+1, {kolor:KOLORY[(maxId+1)%KOLORY.length]});
   if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę"); return; }
+  const kontrola=produktDodawanieAktualizuj(e.target);
+  if(!kontrola?.canSubmit){
+    if(submit)submit.disabled=false;
+    e.target.querySelector("[data-product-add-control]")?.scrollIntoView({behavior:"smooth",block:"start"});
+    toast(kontrola?.blocking?`Produkt już istnieje (#${kontrola.blocking.product.id})`:kontrola?.potential&&!kontrola.acknowledged?"Najpierw zdecyduj, czy podobna pozycja jest innym produktem":"Najpierw uzupełnij dane i zakończ kontrolę duplikatów");
+    return;
+  }
   const duplicates=agentAIDuplikatyProduktu(p),blockingDuplicate=duplicates.find(x=>x.blocking);
   if(blockingDuplicate){
     if(submit)submit.disabled=false;
     const box=e.target.querySelector("[data-product-link-agent-result]");
-    if(box)box.innerHTML=`<div class="product-link-agent-report has-error"><header><div><span>🛡️ Ochrona katalogu</span><h3>Nie utworzono duplikatu</h3><small>${esc(blockingDuplicate.reasons.join(" • "))}</small></div><span class="lvl lvl-ostrzezenie">produkt #${esc(blockingDuplicate.product.id)}</span></header><div class="diag-actions"><button class="btn" type="button" onclick="location.hash='#/admin/produkt/${encodeURIComponent(String(blockingDuplicate.product.id))}'">Otwórz istniejący produkt</button><button class="btn ghost" type="button" onclick="agentAIAktualizujIstniejacyZAnalizy(${jsArg(blockingDuplicate.product.id)},this)">Uzupełnij go danymi Agenta</button></div></div>`;
+    if(box)box.innerHTML=`<div class="product-link-agent-report has-error"><header><div><span>🛡️ Ochrona katalogu</span><h3>Nie utworzono duplikatu</h3><small>${esc(blockingDuplicate.reasons.join(" • "))}</small></div><span class="lvl lvl-ostrzezenie">produkt #${esc(blockingDuplicate.product.id)}</span></header><div class="diag-actions"><button class="btn" type="button" onclick="location.hash='#/admin/produkty/edytuj/${encodeURIComponent(String(blockingDuplicate.product.id))}'">Otwórz istniejący produkt</button><button class="btn ghost" type="button" onclick="agentAIAktualizujIstniejacyZAnalizy(${jsArg(blockingDuplicate.product.id)},this)">Uzupełnij go danymi Agenta</button></div></div>`;
     toast(`Duplikat zablokowany — istnieje już produkt #${blockingDuplicate.product.id}`);return;
   }
   if(e.target.dataset.agentAdd==="1"||e.target.dataset.agentLinkSource){p.agentImportAt=new Date().toISOString();p.agentImportConfidence=Number(e.target.dataset.agentLinkConfidence||0)||0;p.agentImportSource=agentAIImportUrlStan.data?.fromCache?"pamięć Agenta":"link producenta";p.agentImportUrl=e.target.dataset.agentLinkSource||p.sourceUrl||p.producentUrl||"";}
