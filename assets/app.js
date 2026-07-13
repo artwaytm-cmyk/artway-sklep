@@ -1804,10 +1804,11 @@ async function agentAISprawdzLinkProducenta(ref,cicho=false){
   if(!rec.url) return null;
   const teraz=new Date();
   try{
-    const d=await chmura("product-url-inspect",{method:"POST",body:{url:rec.url},timeout:70000});
-    const p=d.product||{}, braki=brakiDanychProducenta(p,d);
-    const status=d.needsChoice?"wymaga wyboru":braki.length?"do uzupełnienia":"pobrano";
-    const next=agentAIZapiszLinkProducenta(rec.url,status,d.needsChoice?`Agent znalazł ${d.alternatives?.length||2} różne produkty — wybierz właściwy wariant`:braki.length?`Braki po pobraniu: ${braki.join(", ")}`:"Dane pobrane poprawnie",{
+    const d=await chmura("product-url-prepare",{method:"POST",body:{url:rec.url},timeout:90000});
+    const p=d.product||{}, braki=brakiDanychProducenta(p,d),workflow=d.workflow||{};
+    const status=d.needsChoice?"wymaga wyboru":d.duplicateAudit?.blocking?"duplikat":workflow.readyForStore?"pobrano":"do uzupełnienia";
+    const reason=d.needsChoice?`Agent znalazł ${d.alternatives?.length||2} różne produkty — wybierz właściwy wariant`:d.duplicateAudit?.blocking?`Produkt istnieje już w sklepie: ${d.duplicateAudit.selected?.productName||d.duplicateAudit.selected?.productId||"duplikat"}`:workflow.readyForStore?`Kartoteka sklepu gotowa • Allegro ${workflow.readyForAllegro?"gotowe":"wymaga uzupełnienia"}`:`Braki po pobraniu: ${braki.join(", ")}`;
+    const next=agentAIZapiszLinkProducenta(rec.url,status,reason,{
       proby:Number(rec.proby||0)+1,
       ostatniaProba:teraz.toISOString(),
       ostatniaProbaTxt:teraz.toLocaleString("pl-PL"),
@@ -1820,11 +1821,14 @@ async function agentAISprawdzLinkProducenta(ref,cicho=false){
       linkConfidence:d.confidence||0,
       fieldSources:d.fieldSources||{},
       diagnostics:d.diagnostics||{},
+      lastWorkflow:workflow,
+      lastStoreCategory:d.storeCategory||null,
+      lastDuplicateAudit:d.duplicateAudit||null,
       resolvedUrl:d.resolvedUrl||d.canonicalUrl||rec.url,
       nextRetryAt:null,
       lastError:""
     });
-    if(!cicho) toast(status==="pobrano"?`Agent pobrał dane z linku ✅ • pewność ${d.confidence||0}%`:d.needsChoice?`Agent znalazł ${d.alternatives?.length||2} produkty — wybierz właściwy`:`Agent pobrał link, ale są braki: ${braki.join(", ")}`);
+    if(!cicho) toast(status==="pobrano"?`Agent przygotował produkt ✅ • sklep gotowy • Allegro ${workflow.readyForAllegro?"gotowe":"do uzupełnienia"}`:d.needsChoice?`Agent znalazł ${d.alternatives?.length||2} produkty — wybierz właściwy`:status==="duplikat"?"Agent zablokował utworzenie duplikatu":`Agent pobrał link, ale są braki: ${braki.join(", ")}`);
     return {rec:next,dane:d,braki,status};
   }catch(e){
     const proby=Number(rec.proby||0)+1,nextRetryAt=agentAINastepnaProbaLinku(proby);
@@ -1907,12 +1911,20 @@ function agentAILinkiProducentowPanelHTML(){
     </div>
   </div>`;
 }
-function agentAIWypelnijNowyProduktZLinku(id,candidateIndex=null){
+async function agentAIWypelnijNowyProduktZLinku(id,candidateIndex=null){
   const rec=(agentAILinkiProducentow||[]).find(x=>x.id===id);
-  const candidate=Number.isInteger(candidateIndex)?rec?.lastCandidates?.[candidateIndex]?.product:null,product=candidate||rec?.lastProduct;
-  if(!product){ toast("Najpierw sprawdź link, żeby agent miał dane produktu"); return; }
-  sessionStorage.setItem("artway_prefill_product",JSON.stringify({...product,_agentLinkId:rec.id,_agentLinkUrl:rec.lastCandidates?.[candidateIndex]?.url||rec.url}));
-  location.hash="#/admin/produkty/dodaj";
+  if(!rec?.url){toast("Nie znaleziono linku w kolejce Agenta");return;}
+  try{
+    toast("Agent przygotowuje kompletną kartotekę sklepu i Allegro…");
+    const body={url:rec.url};if(Number.isInteger(candidateIndex))body.choice=candidateIndex;
+    const d=await chmura("product-url-prepare",{method:"POST",body,timeout:90000});
+    if(d.needsChoice){toast("Wybierz właściwy wariant produktu");return;}
+    const product=d.product||rec.lastProduct;
+    if(!product){toast("Agent nie otrzymał danych produktu");return;}
+    agentAIImportUrlStan={busy:false,data:d,selected:Number.isInteger(candidateIndex)?candidateIndex:0,error:""};
+    sessionStorage.setItem("artway_prefill_product",JSON.stringify({...product,_agentLinkId:rec.id,_agentLinkUrl:d.canonicalUrl||d.resolvedUrl||rec.url,_agentPrepared:true}));
+    location.hash="#/admin/produkty/z-linku";
+  }catch(e){toast("⚠️ Przygotowanie produktu: "+(e.message||e));}
 }
 function zapiszRuchMagazynowy(ruch){
   const p=produktMagazynowy(ruch.produktId);
@@ -2097,6 +2109,7 @@ function renderuj(){
       }
       else if(t==="/admin/asortyment" || t==="/admin/produkty") w.innerHTML = widokAdminProdukty();
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
+      else if(t==="/admin/produkty/z-linku") w.innerHTML = widokAdminProduktyZLinku();
       else if(t.startsWith("/admin/produkty/edytuj/")) w.innerHTML = widokAdminProduktEdytuj(parseInt(t.split("/")[4]));
       else if(t==="/admin/kategorie") w.innerHTML = widokAdminKategorie();
       else if(t==="/admin/mapowanie") w.innerHTML = widokAdminMapowanie();
@@ -4186,6 +4199,7 @@ function widokAdmin(){
         <a class="btn" href="#/admin/magazyn">🏬 Magazyn</a>
         <a class="btn" href="#/admin/agent-ai">🤖 Agent AI</a>
         <a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
+        <a class="btn ghost" href="#/admin/produkty/z-linku">🔗 Dodaj z linku</a>
         <a class="btn ghost" href="#/admin/kategorie">🗂️ Utwórz katalog</a>
         <a class="btn ghost" href="#/admin/mapowanie">🧩 Mapuj produkty</a>
         <a class="btn ghost" href="#/admin/rabaty">🎁 Dodaj kod rabatowy</a>
@@ -6230,9 +6244,9 @@ function uzupelnijPoleFormularza(form,nazwa,wartosc,overwrite){
   if(overwrite||!String(el.value||"").trim()) el.value=wartosc;
 }
 function agentAIUzupelnijFormularzZLinku(form,p={},d={},overwrite=false,url=""){
-  const category=agentAIDobierzKategorieProduktu(p);p={...p,kategoria:category.name||p.kategoria||""};
+  const category=d.storeCategory?.name?d.storeCategory:agentAIDobierzKategorieProduktu(p);p={...p,kategoria:category.name||p.kategoria||""};
   uzupelnijPoleFormularza(form,"nazwa",p.nazwa,overwrite);uzupelnijPoleFormularza(form,"kategoria",p.kategoria,overwrite);uzupelnijPoleFormularza(form,"opisKrotki",p.opisKrotki||agentAIUtworzOpisKrotki(p),overwrite);uzupelnijPoleFormularza(form,"opis",p.opis,overwrite);uzupelnijPoleFormularza(form,"cena",p.cena,overwrite);uzupelnijPoleFormularza(form,"zdjecie",p.zdjecie,overwrite);(p.zdjecia||[]).slice(0,15).forEach((z,i)=>uzupelnijPoleFormularza(form,"zdjecie"+(i+2),z,overwrite));uzupelnijPoleFormularza(form,"gtin",p.gtin||p.ean,overwrite);uzupelnijPoleFormularza(form,"mpn",p.mpn||p.kodProducenta,overwrite);uzupelnijPoleFormularza(form,"kodProducenta",p.kodProducenta||p.mpn,overwrite);uzupelnijPoleFormularza(form,"externalId",p.externalId,overwrite);
-  const canonicalProducer=allegroProducentKanoniczny({...p,sourceUrl:p.sourceUrl||url,producentUrl:url});uzupelnijPoleFormularza(form,"marka",canonicalProducer||p.marka,overwrite||!!canonicalProducer);uzupelnijPoleFormularza(form,"producent",canonicalProducer||p.producent||p.marka,overwrite||!!canonicalProducer);uzupelnijPoleFormularza(form,"rozmiar",p.rozmiar,overwrite);uzupelnijPoleFormularza(form,"dostepnoscProducenta",p.dostepnoscProducenta,overwrite);uzupelnijPoleFormularza(form,"sourceUrl",p.sourceUrl||url,overwrite);for(const field of ["stanProducenta","stanProducentaZrodlo","producentStatus","producentSprawdzonoAt"])uzupelnijPoleFormularza(form,field,p[field],true);if(form.elements.stanProducentaDokladny)form.elements.stanProducentaDokladny.value=p.stanProducentaDokladny?"1":"";
+  const canonicalProducer=allegroProducentKanoniczny({...p,sourceUrl:p.sourceUrl||url,producentUrl:url});uzupelnijPoleFormularza(form,"marka",canonicalProducer||p.marka,overwrite||!!canonicalProducer);uzupelnijPoleFormularza(form,"producent",canonicalProducer||p.producent||p.marka,overwrite||!!canonicalProducer);uzupelnijPoleFormularza(form,"rozmiar",p.rozmiar,overwrite);uzupelnijPoleFormularza(form,"dostepnoscProducenta",p.dostepnoscProducenta,overwrite);uzupelnijPoleFormularza(form,"producentUrl",p.producentUrl||p.sourceUrl||url,overwrite);uzupelnijPoleFormularza(form,"sourceUrl",p.sourceUrl||p.producentUrl||url,overwrite);uzupelnijPoleFormularza(form,"allegroCategoryId",p.allegroCategoryId,overwrite);uzupelnijPoleFormularza(form,"allegroProductId",p.allegroProductId,overwrite);for(const field of ["stanProducenta","stanProducentaZrodlo","producentStatus","producentSprawdzonoAt"])uzupelnijPoleFormularza(form,field,p[field],true);if(form.elements.stanProducentaDokladny)form.elements.stanProducentaDokladny.value=p.stanProducentaDokladny?"1":"";
   form.dataset.agentLinkConfidence=String(d.confidence||0);form.dataset.agentLinkSource=String(d.canonicalUrl||d.resolvedUrl||url||"");form.dataset.agentCategoryConfidence=String(category.confidence||0);
   const pg=document.getElementById("podgladZdjecia");if(pg&&form.elements.zdjecie?.value)pg.innerHTML=`<img src="${esc(form.elements.zdjecie.value)}" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`;
   return brakiDanychProducenta(p,d);
@@ -6242,26 +6256,32 @@ function agentAIAudytDodaniaHTML(product={},d={}){
   return `<section class="product-link-add-audit"><div class="product-link-add-score"><span>Gotowość do dodania</span><b>${esc(audit.score)}%</b><small>${audit.ready?"produkt może zostać bezpiecznie dodany":dup?`dane ${audit.dataScore}%, zapis zablokowany jako duplikat`:"najpierw wykonaj wskazane czynności"}</small></div><div class="product-link-add-steps">${[["Link",!d.needsChoice,"źródło rozpoznane"],["Tożsamość",!!(product.gtin||product.ean||product.mpn||product.kodProducenta),"EAN lub kod producenta"],["Dane sklepu",!!(product.nazwa&&Number(product.cena)>0&&audit.product.kategoria),"nazwa, cena i kategoria"],["Duplikaty",!dup,dup?`produkt #${dup.product.id}`:"brak pewnego duplikatu"],["Publikacja",audit.ready,audit.ready?"gotowe do zapisu":"zatrzymana przez Agenta"]].map(([label,ok,note])=>`<span class="${ok?"ok":"wait"}"><b>${ok?"✓":"!"} ${esc(label)}</b><small>${esc(note)}</small></span>`).join("")}</div>${audit.blockers.length?`<div class="backend-note product-link-blockers"><b>Agent zatrzymał automatyczne dodanie:</b> ${esc(audit.blockers.join(" • "))}</div>`:""}${audit.warnings.length?`<div class="backend-note"><b>Do późniejszego uzupełnienia:</b> ${esc(audit.warnings.join(" • "))}</div>`:""}${audit.duplicates.length?`<div class="product-link-duplicates"><b>Możliwe istniejące produkty</b>${audit.duplicates.slice(0,4).map(x=>`<article><span><strong>#${esc(x.product.id)} ${esc(x.product.nazwa||"Produkt")}</strong><small>${esc(x.reasons.join(" • "))} • zgodność ${esc(x.score)}%</small></span><button class="btn ghost" type="button" onclick="location.hash='#/admin/produkt/${encodeURIComponent(String(x.product.id))}'">Otwórz</button>${x.blocking?`<button class="btn" type="button" onclick="agentAIAktualizujIstniejacyZAnalizy(${jsArg(x.product.id)},this)">Uzupełnij istniejący</button>`:""}</article>`).join("")}</div>`:""}<div class="diag-actions">${audit.ready?`<button class="btn product-link-agent-add" type="button" onclick="agentAIDodajProduktZAnalizy(this)">🤖 Dodaj produkt bezpiecznie</button>`:`<button class="btn ghost" type="button" onclick="agentAIPokazPierwszyBrak(this)">Przejdź do brakujących danych</button>`}</div></section>`;
 }
 function agentAIRaportLinkuHTML(d={},selected=-1){
-  const alternatives=Array.isArray(d.alternatives)?d.alternatives:[],attempts=Array.isArray(d.diagnostics?.attempts)?d.diagnostics.attempts:[],product=selected>=0?alternatives[selected]?.product:d.product||{},sources=selected>=0?alternatives[selected]?.fieldSources||{}:d.fieldSources||{},missing=selected>=0?alternatives[selected]?.missing||[]:brakiDanychProducenta(product,d),confidence=selected>=0?alternatives[selected]?.confidence||0:d.confidence||0;
-  return `<div class="product-link-agent-report ${d.needsChoice&&selected<0?"needs-choice":""}"><header><div><span>🤖 Analiza linku</span><h3>${d.needsChoice&&selected<0?`Znaleziono ${alternatives.length} możliwe produkty`:esc(product.nazwa||"Wynik analizy produktu")}</h3><small>Kompletność ${esc(confidence)}% • ${esc(d.fromCache?"pewny wynik z pamięci Agenta":d.diagnostics?.selectedReason||"najpełniejsze dane")}</small></div><span class="lvl ${missing.length?"lvl-ostrzezenie":"lvl-ok"}">${missing.length?`${missing.length} braków`:"komplet danych"}</span></header>${d.fromCache?`<div class="backend-note product-link-cache-note"><b>🧠 Pamięć Agenta:</b> producent chwilowo nie odpowiedział, dlatego użyto ostatniego poprawnego wyniku z ${esc(d.cacheSavedAt?new Date(d.cacheSavedAt).toLocaleString("pl-PL"):"wcześniejszej kontroli")}. Agent nadal zaplanował świeżą kontrolę.</div>`:""}${d.repaired?`<div class="backend-note"><b>Naprawiono lub przekierowano adres:</b> ${esc(d.resolvedUrl||d.canonicalUrl||"")}</div>`:""}${d.needsChoice&&selected<0?`<div class="product-link-candidate-grid">${alternatives.map((c,i)=>`<article>${c.product?.zdjecie?`<img src="${esc(c.product.zdjecie)}" alt="">`:`<span>📦</span>`}<div><b>${esc(c.product?.nazwa||`Wariant ${i+1}`)}</b><small>EAN ${esc(c.product?.ean||c.product?.gtin||"—")} • kod ${esc(c.product?.kodProducenta||c.product?.mpn||"—")}</small><small>${esc(c.confidence||0)}% • braki: ${esc(c.missing?.join(", ")||"brak")}</small><small>${esc(c.url||"")}</small></div><button class="btn" type="button" onclick="agentAIWybierzKandydataZLinku(${i},this)">Wybierz ten produkt</button></article>`).join("")}</div>`:`<div class="product-link-field-grid">${[["Nazwa",product.nazwa,sources.nazwa],["EAN",product.ean||product.gtin,sources.ean],["Kod",product.kodProducenta||product.mpn,sources.kod],["Cena",product.cena?zl(product.cena):"",sources.cena],["Opis",product.opis?`${String(product.opis).length} znaków`:"",sources.opis],["Zdjęcia",[product.zdjecie,...(product.zdjecia||[])].filter(Boolean).length,sources.zdjecia],["Dostępność",product.dostepnoscProducenta,sources.dostepnosc]].map(([label,value,source])=>`<span class="${value!==""&&value!==0?"ok":"missing"}"><small>${label}</small><b>${esc(value||"brak")}</b><em>${esc(source||"nie znaleziono źródła")}</em></span>`).join("")}</div>${agentAIAudytDodaniaHTML(product,{...d,needsChoice:false})}`}<details><summary>Diagnostyka pobierania (${attempts.filter(x=>x.ok).length}/${attempts.length} wariantów poprawnych)</summary><div class="product-link-attempts">${attempts.map(a=>`<span class="${a.ok?"ok":"error"}"><b>${a.ok?"✅":"⚠️"} ${esc(a.reason||"próba")}</b><small>${esc(a.url||"")}</small><small>${a.ok?`HTTP ${esc(a.status)} • ${Math.max(1,Math.round((a.durationMs||0)/1000))} s • ${esc(a.confidence||0)}%`:`${esc(a.error||"błąd")} • ${Math.max(1,Math.round((a.durationMs||0)/1000))} s`}</small></span>`).join("")}</div></details></div>`;
+  const alternatives=Array.isArray(d.alternatives)?d.alternatives:[],attempts=Array.isArray(d.diagnostics?.attempts)?d.diagnostics.attempts:[],candidate=d.needsChoice&&selected>=0?alternatives[selected]:null,product=candidate?.product||d.product||{},sources=candidate?.fieldSources||d.fieldSources||{},missing=candidate?.missing||brakiDanychProducenta(product,d),confidence=candidate?.confidence||d.confidence||0,workflow=d.workflow||{},allegro=d.allegroPreparation||{},category=d.storeCategory||{};
+  const preparation=!d.needsChoice?`<div class="product-link-field-grid product-link-channel-readiness"><span class="${workflow.readyForStore?"ok":"missing"}"><small>Sklep</small><b>${workflow.readyForStore?"gotowe do zapisu":"wymaga uzupełnienia"}</b><em>${esc(category.name?`${category.name} • pewność ${category.confidence||0}%`:"brak pewnej kategorii")}</em></span><span class="${workflow.readyForAllegro?"ok":"missing"}"><small>Allegro</small><b>${workflow.readyForAllegro?"szkic przygotowany":"wymaga uzupełnienia"}</b><em>${esc(product.allegroCategoryId?`kategoria ${product.allegroCategoryId}${product.allegroProductId?` • katalog ${product.allegroProductId}`:""}`:(allegro.missing||[]).join(", ")||"brak kategorii")}</em></span><span class="${d.duplicateAudit?.blocking?"missing":"ok"}"><small>Duplikaty</small><b>${d.duplicateAudit?.blocking?"zapis zablokowany":"brak pewnego duplikatu"}</b><em>${esc(d.duplicateAudit?.selected?.productName||"kontrola centralnej bazy zakończona")}</em></span></div>`:"";
+  return `<div class="product-link-agent-report ${d.needsChoice&&selected<0?"needs-choice":""}"><header><div><span>🤖 Analiza linku + przygotowanie Allegro</span><h3>${d.needsChoice&&selected<0?`Znaleziono ${alternatives.length} możliwe produkty`:esc(product.nazwa||"Wynik analizy produktu")}</h3><small>Kompletność ${esc(confidence)}% • ${esc(d.fromCache?"pewny wynik z pamięci Agenta":d.diagnostics?.selectedReason||"najpełniejsze dane")}</small></div><span class="lvl ${missing.length?"lvl-ostrzezenie":"lvl-ok"}">${workflow.readyForAllegro?"sklep + Allegro gotowe":missing.length?`${missing.length} uwag`:"komplet danych"}</span></header>${d.fromCache?`<div class="backend-note product-link-cache-note"><b>🧠 Pamięć Agenta:</b> producent chwilowo nie odpowiedział, dlatego użyto ostatniego poprawnego wyniku z ${esc(d.cacheSavedAt?new Date(d.cacheSavedAt).toLocaleString("pl-PL"):"wcześniejszej kontroli")}. Agent nadal zaplanował świeżą kontrolę.</div>`:""}${d.repaired?`<div class="backend-note"><b>Naprawiono lub przekierowano adres:</b> ${esc(d.resolvedUrl||d.canonicalUrl||"")}</div>`:""}${d.needsChoice&&selected<0?`<div class="product-link-candidate-grid">${alternatives.map((c,i)=>`<article>${c.product?.zdjecie?`<img src="${esc(c.product.zdjecie)}" alt="">`:`<span>📦</span>`}<div><b>${esc(c.product?.nazwa||`Wariant ${i+1}`)}</b><small>EAN ${esc(c.product?.ean||c.product?.gtin||"—")} • kod ${esc(c.product?.kodProducenta||c.product?.mpn||"—")}</small><small>${esc(c.confidence||0)}% • braki: ${esc(c.missing?.join(", ")||"brak")}</small><small>${esc(c.url||"")}</small></div><button class="btn" type="button" onclick="agentAIWybierzKandydataZLinku(${i},this)">Wybierz i przygotuj</button></article>`).join("")}</div>`:`${preparation}<div class="product-link-field-grid">${[["Nazwa",product.nazwa,sources.nazwa],["EAN",product.ean||product.gtin,sources.ean],["Kod",product.kodProducenta||product.mpn,sources.kod],["Cena",product.cena?zl(product.cena):"",sources.cena],["Opis",product.opis?`${String(product.opis).length} znaków`:"",sources.opis],["Zdjęcia",[product.zdjecie,...(product.zdjecia||[])].filter(Boolean).length,sources.zdjecia],["Dostępność",product.dostepnoscProducenta,sources.dostepnosc]].map(([label,value,source])=>`<span class="${value!==""&&value!==0?"ok":"missing"}"><small>${label}</small><b>${esc(value||"brak")}</b><em>${esc(source||"uzupełnione przez Agenta/katalog")}</em></span>`).join("")}</div>${agentAIAudytDodaniaHTML(product,{...d,needsChoice:false})}`}<details><summary>Diagnostyka pobierania (${attempts.filter(x=>x.ok).length}/${attempts.length} wariantów poprawnych)</summary><div class="product-link-attempts">${attempts.map(a=>`<span class="${a.ok?"ok":"error"}"><b>${a.ok?"✅":"⚠️"} ${esc(a.reason||"próba")}</b><small>${esc(a.url||"")}</small><small>${a.ok?`HTTP ${esc(a.status)} • ${Math.max(1,Math.round((a.durationMs||0)/1000))} s • ${esc(a.confidence||0)}%`:`${esc(a.error||"błąd")} • ${Math.max(1,Math.round((a.durationMs||0)/1000))} s`}</small></span>`).join("")}</div></details></div>`;
 }
-function agentAIWybierzKandydataZLinku(index,button){
-  const form=button?.closest("form"),d=agentAIImportUrlStan.data,c=d?.alternatives?.[index];if(!form||!c?.product)return;
-  const url=c.url||d.resolvedUrl||form.elements.producentUrl.value,overwrite=!!form.elements.nadpiszImportUrl?.checked,braki=agentAIUzupelnijFormularzZLinku(form,c.product,{...d,missing:c.missing||[]},overwrite,url);form.elements.producentUrl.value=url;agentAIImportUrlStan={...agentAIImportUrlStan,selected:index};
-  const box=form.querySelector("[data-product-link-agent-result]");if(box)box.innerHTML=agentAIRaportLinkuHTML(d,index);agentAIZapiszLinkProducenta(url,braki.length?"do uzupełnienia":"pobrano",braki.length?`Wybrano wariant — braki: ${braki.join(", ")}`:"Wybrano i dopasowano właściwy wariant",{lastProductName:c.product.nazwa||"",lastProduct:agentAIProduktZLinkuMini(c.product),lastMissing:braki,lastCandidates:d.alternatives||[],linkConfidence:c.confidence||0,diagnostics:d.diagnostics||{},resolvedUrl:url,nextRetryAt:null});toast(`✅ Wybrano: ${c.product.nazwa||"produkt"} • kompletność ${c.confidence||0}%`);
+async function agentAIWybierzKandydataZLinku(index,button){
+  const form=button?.closest("form"),current=agentAIImportUrlStan.data,c=current?.alternatives?.[index];if(!form||!c?.product)return;
+  const requested=current.requestedUrl||form.elements.producentUrl.value||c.url,overwrite=!!form.elements.nadpiszImportUrl?.checked;button.disabled=true;
+  try{
+    toast("Agent przygotowuje wybrany wariant i katalog Allegro…");
+    const d=await chmura("product-url-prepare",{method:"POST",body:{url:requested,choice:index},timeout:90000}),p=d.product||c.product,url=d.canonicalUrl||c.url||requested,braki=agentAIUzupelnijFormularzZLinku(form,p,d,overwrite,url);form.elements.producentUrl.value=url;agentAIImportUrlStan={busy:false,data:d,selected:index,error:""};
+    const box=form.querySelector("[data-product-link-agent-result]");if(box)box.innerHTML=agentAIRaportLinkuHTML(d,index);agentAIZapiszLinkProducenta(requested,braki.length?"do uzupełnienia":"pobrano",braki.length?`Wybrano wariant — uwagi: ${braki.join(", ")}`:"Wybrano i przygotowano właściwy wariant",{lastProductName:p.nazwa||"",lastProduct:agentAIProduktZLinkuMini(p),lastMissing:braki,lastCandidates:current.alternatives||[],linkConfidence:d.confidence||c.confidence||0,diagnostics:d.diagnostics||{},resolvedUrl:url,nextRetryAt:null});toast(`✅ Przygotowano: ${p.nazwa||"produkt"} • sklep ${d.workflow?.readyForStore?"gotowy":"do uzupełnienia"} • Allegro ${d.workflow?.readyForAllegro?"gotowe":"do uzupełnienia"}`);
+  }catch(e){toast("⚠️ Przygotowanie wariantu: "+(e.message||e));button.disabled=false;}
 }
+function agentAIWybranyProduktImportu(d={},selected=-1){return d.needsChoice&&selected>=0?d.alternatives?.[selected]?.product||d.product||{}:d.product||{};}
 function agentAIPokazPierwszyBrak(button){
-  const form=button?.closest("form"),d=agentAIImportUrlStan.data||{},selected=agentAIImportUrlStan.selected,source=selected>=0?d.alternatives?.[selected]?.product:d.product||{},p=agentAIProduktZFormularzaDoOceny(form,source),audit=agentAIOcenaDodaniaProduktu(p,{...d,needsChoice:selected<0&&d.needsChoice});
+  const form=button?.closest("form"),d=agentAIImportUrlStan.data||{},selected=agentAIImportUrlStan.selected,source=agentAIWybranyProduktImportu(d,selected),p=agentAIProduktZFormularzaDoOceny(form,source),audit=agentAIOcenaDodaniaProduktu(p,{...d,needsChoice:selected<0&&d.needsChoice});
   const text=audit.blockers[0]||audit.warnings[0]||"",name=/nazw/i.test(text)?"nazwa":/cen/i.test(text)?"cena":/kategor/i.test(text)?"kategoria":/ean/i.test(text)?"gtin":/kod/i.test(text)?"kodProducenta":/zdję/i.test(text)?"zdjecie":/krótki/i.test(text)?"opisKrotki":/opis/i.test(text)?"opis":"producentUrl",el=form?.elements?.[name];
   if(el){el.focus();el.scrollIntoView({behavior:"smooth",block:"center"});toast(`Uzupełnij: ${text}`);}else toast(text||"Wybierz najpierw właściwy wariant produktu");
 }
 function agentAIDodajProduktZAnalizy(button){
-  const form=button?.closest("form"),d=agentAIImportUrlStan.data||{},selected=agentAIImportUrlStan.selected,source=selected>=0?d.alternatives?.[selected]?.product:d.product||{},p=agentAIProduktZFormularzaDoOceny(form,source),audit=agentAIOcenaDodaniaProduktu(p,{...d,needsChoice:selected<0&&d.needsChoice});
+  const form=button?.closest("form"),d=agentAIImportUrlStan.data||{},selected=agentAIImportUrlStan.selected,source=agentAIWybranyProduktImportu(d,selected),p=agentAIProduktZFormularzaDoOceny(form,source),audit=agentAIOcenaDodaniaProduktu(p,{...d,needsChoice:selected<0&&d.needsChoice});
   if(!audit.ready){toast("Agent zatrzymał dodanie: "+audit.blockers.join(" • "));return;}
   form.dataset.agentAdd="1";form.dataset.agentLinkConfidence=String(selected>=0?d.alternatives?.[selected]?.confidence||d.confidence||0:d.confidence||0);form.requestSubmit(form.querySelector('button[type="submit"]'));
 }
 function agentAIAktualizujIstniejacyZAnalizy(id,button){
-  const d=agentAIImportUrlStan.data||{},selected=agentAIImportUrlStan.selected,source=selected>=0?d.alternatives?.[selected]?.product:d.product||{};if(!source?.nazwa){toast("Brak danych analizy do aktualizacji");return;}
+  const d=agentAIImportUrlStan.data||{},selected=agentAIImportUrlStan.selected,source=agentAIWybranyProduktImportu(d,selected);if(!source?.nazwa){toast("Brak danych analizy do aktualizacji");return;}
   const category=agentAIDobierzKategorieProduktu(source),canonical=allegroProducentKanoniczny(source),fields={...source,kategoria:category.name||source.kategoria||"",producent:canonical||source.producent||source.marka||"",marka:canonical||source.marka||source.producent||"",agentImportAt:new Date().toISOString(),agentImportConfidence:selected>=0?d.alternatives?.[selected]?.confidence||d.confidence||0:d.confidence||0,agentImportSource:d.fromCache?"pamięć Agenta":"link producenta"};delete fields.id;
   zapiszPolaProduktuLokalnie(id,fields,true);const updated=pobierzProduktAdmin(Number(id))||{id,...fields};agentAIZakonczLinkProducenta(updated.sourceUrl||updated.producentUrl,updated);zapiszHistorieAgenta("produkt-z-linku",`Agent uzupełnił istniejący produkt #${id}: ${updated.nazwa||source.nazwa}`,{produktId:id,zrodlo:fields.agentImportSource,confidence:fields.agentImportConfidence});if(chmuraToken)void chmuraZapiszUstawienia();toast("Istniejący produkt uzupełniony — nie utworzono duplikatu");location.hash=`#/admin/produkt/${encodeURIComponent(String(id))}`;
 }
@@ -6273,7 +6293,7 @@ async function pobierzDaneProduktuZUrl(btn){
   try{
     btn.disabled=true;
     toast("Pobieram dane produktu ze strony producenta…");
-    agentAIImportUrlStan={busy:true,data:null,selected:0,error:""};const d=await chmura("product-url-inspect",{method:"POST",body:{url},timeout:70000});agentAIImportUrlStan={busy:false,data:d,selected:d.needsChoice?-1:0,error:""};
+    agentAIImportUrlStan={busy:true,data:null,selected:0,error:""};const d=await chmura("product-url-prepare",{method:"POST",body:{url},timeout:90000});agentAIImportUrlStan={busy:false,data:d,selected:d.needsChoice?-1:0,error:""};
     const p=d.product||{};
     const braki=d.needsChoice?[]:agentAIUzupelnijFormularzZLinku(form,p,d,overwrite,d.canonicalUrl||d.resolvedUrl||url);
     const box=form.querySelector("[data-product-link-agent-result]");if(box)box.innerHTML=agentAIRaportLinkuHTML(d,d.needsChoice?-1:0);
@@ -8650,6 +8670,7 @@ function widokAdminProdukty(){
       <h1>🏷️ Produkty (${produkty.length} widocznych / ${produktyDoAdministracji().length}) <small style="font-size:.75rem;color:var(--muted2)">źródło: ${zrodloProduktow==="json"?"products.json":"lista zapasowa"} + zmiany lokalne</small></h1>
       <div class="diag-actions" style="margin:.4rem 0 .8rem">
         <a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
+        <a class="btn ghost" href="#/admin/produkty/z-linku">🔗 Dodaj z linku producenta</a>
         <a class="btn ghost" href="#/admin/mapowanie">🧩 Mapuj produkty</a>
         <a class="btn ghost" href="#/admin/eksport">⇄ Import / eksport</a>
         <button class="btn ghost" onclick="eksportujProduktyJSON()">📤 products.json</button>
@@ -8990,16 +9011,35 @@ function formularzProduktu(p, tryb){
     </form>`;
 }
 function widokAdminProduktyDodaj(){
-  let prefill={};
-  try{ prefill=JSON.parse(sessionStorage.getItem("artway_prefill_product")||"{}")||{}; }catch(e){ prefill={}; }
-  const linkZPolecenia=String(parametryTrasy().get("url")||"").trim();if(/^https?:\/\//i.test(linkZPolecenia)&&!prefill.producentUrl)prefill.producentUrl=linkZPolecenia;
+  try{sessionStorage.removeItem("artway_prefill_product");}catch(e){}
+  agentAIImportUrlStan={busy:false,data:null,selected:-1,error:""};
+  const category=String(parametryTrasy().get("kategoria")||"").trim();
+  kategoriaNowegoProduktu=category;
   return asortymentSzkielet("produkty", `
     <div class="panel">
       <div class="crumb"><a href="#/admin/produkty">Produkty</a> › Dodaj</div>
       <h1>➕ Dodaj produkt</h1>
-      ${prefill.nazwa?`<div class="backend-note"><b>Agent AI przygotował dane z linku producenta.</b> Sprawdź kontrolę gotowości i użyj „Dodaj produkt bezpiecznie”.</div>`:linkZPolecenia?`<div class="backend-note"><b>Link przekazany przez Agenta/Telegram.</b> Kliknij „Pobierz i dopasuj”, aby rozpocząć analizę, dobór kategorii i kontrolę duplikatów.</div>`:""}
-      ${formularzProduktu(prefill, "dodawanie")}
-      <p style="font-size:.8rem;color:var(--muted2);margin-top:.7rem">Po dodaniu produkt trafia do wspólnej bazy sklepu i jest widoczny na wszystkich urządzeniach. Agent zapisuje źródło, wynik kontroli duplikatów i kompletność danych; stan magazynowy nowego produktu pozostaje równy 0, dopóki go nie zmienisz.</p>
+      <div class="backend-note"><b>Nowa, pusta kartoteka.</b> Ten formularz nie używa danych z poprzedniego produktu ani z kolejki Agenta. Aby pobrać produkt ze strony producenta, użyj osobnej funkcji „Dodaj z linku”.</div>
+      <div class="diag-actions"><a class="btn ghost" href="#/admin/produkty/z-linku">🔗 Dodaj z linku producenta</a></div>
+      ${formularzProduktu(category?{kategoria:category}:{}, "dodawanie")}
+      <p style="font-size:.8rem;color:var(--muted2);margin-top:.7rem">Po dodaniu produkt trafia do wspólnej bazy sklepu i jest widoczny na wszystkich urządzeniach. Stan magazynowy nowego produktu pozostaje równy 0, dopóki go nie zmienisz.</p>
+    </div>`);
+}
+function widokAdminProduktyZLinku(){
+  let prefill={};
+  try{prefill=JSON.parse(sessionStorage.getItem("artway_prefill_product")||"{}")||{};}catch(e){prefill={};}
+  const linkZPolecenia=String(parametryTrasy().get("url")||prefill._agentLinkUrl||prefill.producentUrl||prefill.sourceUrl||"").trim();
+  if(/^https?:\/\//i.test(linkZPolecenia)){prefill.producentUrl=linkZPolecenia;prefill.sourceUrl=prefill.sourceUrl||linkZPolecenia;}
+  kategoriaNowegoProduktu="";
+  if(linkZPolecenia&&!prefill.nazwa)setTimeout(()=>{const button=document.querySelector('[data-auto-product-url="1"]');if(button&&!button.dataset.started){button.dataset.started="1";pobierzDaneProduktuZUrl(button);}},0);
+  else if(prefill.nazwa&&agentAIImportUrlStan.data)setTimeout(()=>{const form=document.querySelector('form.product-editor-form'),box=form?.querySelector('[data-product-link-agent-result]');if(box)box.innerHTML=agentAIRaportLinkuHTML(agentAIImportUrlStan.data,agentAIImportUrlStan.selected);},0);
+  return asortymentSzkielet("produkty", `
+    <div class="panel">
+      <div class="crumb"><a href="#/admin/produkty">Produkty</a> › Dodaj z linku</div>
+      <div class="order-section-head"><div><h1 style="margin:0">🔗 Dodaj produkt z linku</h1><p class="order-detail-lead">Agent pobiera pełne dane producenta, dopasowuje kategorię sklepu i Allegro, kontroluje duplikaty oraz przygotowuje bezpieczną kartotekę do zatwierdzenia.</p></div><a class="btn ghost" href="#/admin/produkty/dodaj">➕ Pusty formularz</a></div>
+      ${prefill.nazwa?`<div class="backend-note"><b>Agent przygotował dane produktu.</b> Zweryfikuj raport gotowości i zapisz kartotekę.</div>`:linkZPolecenia?`<div class="backend-note"><b>Rozpoczynam analizę przekazanego linku.</b> Przy wielu wariantach Agent poprosi tylko o wybór właściwego produktu.</div>`:`<div class="backend-note"><b>Wklej link produktu.</b> Dane nie zostaną zapisane bez Twojego zatwierdzenia.</div>`}
+      ${formularzProduktu(prefill, "dodawanie-z-linku").replace('onclick="pobierzDaneProduktuZUrl(this)"','data-auto-product-url="1" onclick="pobierzDaneProduktuZUrl(this)"')}
+      <p style="font-size:.8rem;color:var(--muted2);margin-top:.7rem">Nowy produkt otrzyma stan magazynowy 0. Pewny duplikat zostanie zablokowany, a Agent zaproponuje otwarcie i uzupełnienie istniejącej kartoteki.</p>
     </div>`);
 }
 function widokAdminProduktEdytuj(id){
@@ -9106,7 +9146,7 @@ async function dodajProdukt(e){
   toast("Produkt zapisany. Automat dobiera dane, kategorię, opisy i opłaty…");
   await allegroSynchronizujPowiazanyProduktPoZapisie(p,{forceFees:true});
   if(submit)submit.disabled=false;
-  if(trasa()==="/admin/produkty/dodaj") location.hash="#/admin/produkty"; else renderuj();
+  if(["/admin/produkty/dodaj","/admin/produkty/z-linku"].includes(trasa())) location.hash="#/admin/produkty"; else renderuj();
 }
 function zapiszStanZFormularza(f, id){
   ustawStanMagazynowy(id, String(f.get("stan")??"").trim()===""?0:f.get("stan"), {typ:"korekta",powod:"Formularz produktu"});
@@ -10017,8 +10057,8 @@ function przelaczNieprzypisaneMenu(wl){
   zapiszCzescUstawien({menuPokazNieprzypisane:ustawienia.menuPokazNieprzypisane});
 }
 function otworzDodawanieProduktu(kategoria){
-  kategoriaNowegoProduktu = String(kategoria||"");
-  location.hash="#/admin/produkty/dodaj";
+  const category=String(kategoria||"").trim();
+  location.hash=category?`#/admin/produkty/dodaj?kategoria=${encodeURIComponent(category)}`:"#/admin/produkty/dodaj";
 }
 
 /* ── Zaawansowane mapowanie produktów (produkt → katalog) ── */

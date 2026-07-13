@@ -238,6 +238,9 @@ requireMarkers('assets/app.js', app, [
   'function zastosujWyborCenyMarzowej',
   'Opublikuj na Allegro',
   'function automatyczniePobierzDaneZrodlaProduktu',
+  'function widokAdminProduktyZLinku',
+  '#/admin/produkty/z-linku',
+  'product-url-prepare',
   'allegroSynchronizujPowiazanyProduktPoZapisie(next,{forceFees:true})',
   'artway_cel_marzy_sklep',
   'artway_cel_marzy_allegro',
@@ -301,6 +304,9 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "'/pricing/offer-fee-preview'",
   'allegro_fee_preview_audit',
   "action === 'supplier-availability-sample'",
+  "action === 'product-url-prepare'",
+  'function przygotujPakietProduktuZLinku',
+  'function produktLinkDuplikaty',
   "action === 'product-sale-availability'",
   'function synchronizujSprzedazZDostepnosciaProducenta',
   'allegro_availability_automation',
@@ -457,6 +463,14 @@ if (!app.includes('allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMY
 }
 if (!app.includes('await allegroSynchronizujPowiazanyProduktPoZapisie(p,{forceFees:true})') || !app.includes('await allegroSynchronizujPowiazanyProduktPoZapisie(next,{forceFees:true})')) {
   fail('assets/app.js: zapis produktu i ustawienie ceny Allegro muszą aktualizować ofertę oraz prowizję');
+}
+const regularProductAddFlow = app.slice(app.indexOf('function widokAdminProduktyDodaj'), app.indexOf('function widokAdminProduktyZLinku'));
+if (regularProductAddFlow.includes('sessionStorage.getItem("artway_prefill_product")') || !regularProductAddFlow.includes('sessionStorage.removeItem("artway_prefill_product")')) {
+  fail('assets/app.js: zwykły formularz „Dodaj produkt” musi usuwać stare dane Agenta i zawsze otwierać pustą kartotekę');
+}
+const productUrlPrepareFlow = store.slice(store.indexOf('async function przygotujPakietProduktuZLinku'), store.indexOf('function allegroNormTekst'));
+if (!productUrlPrepareFlow.includes('allegroDraftZAutoKategoria') || !productUrlPrepareFlow.includes('duplicateAudit') || !productUrlPrepareFlow.includes('readyForAllegro')) {
+  fail('store-app.mjs: import z linku musi w jednym przebiegu przygotować sklep, duplikaty i Allegro');
 }
 if (!store.includes("method: 'PATCH', bodyObj: patch, withMeta: true") || !store.includes("'/pricing/offer-fee-preview'") || !store.includes('allegroDescriptionSections = sections')) {
   fail('store-app.mjs: automatyczna konserwacja musi aktualizować ofertę, opisy i kalkulację opłat');

@@ -2668,6 +2668,115 @@ async function pobierzProduktProducentaZPamiecia(target = '') {
     throw error;
   }
 }
+function produktLinkDuplikaty(product = {}, products = new Map()) {
+  const norm = allegroNormalizujKlucz;
+  const wanted = {
+    ean: norm(product.gtin || product.ean),
+    external: norm(product.externalId || product.sku),
+    code: norm(product.kodProducenta || product.mpn),
+    url: kluczCacheLinkuProduktu(product.sourceUrl || product.producentUrl),
+    name: tekst(product.nazwa || product.name, 400).trim(),
+  };
+  const out = [];
+  for (const candidate of products.values()) {
+    if (!candidate || String(candidate.id || '') === String(product.id || '')) continue;
+    const reasons = [];
+    let score = 0, blocking = false;
+    const ean = norm(candidate.gtin || candidate.ean), external = norm(candidate.externalId || candidate.sku), code = norm(candidate.kodProducenta || candidate.mpn), candidateUrl = kluczCacheLinkuProduktu(candidate.sourceUrl || candidate.producentUrl);
+    if (wanted.ean && ean === wanted.ean) { reasons.push('ten sam EAN/GTIN'); score = 100; blocking = true; }
+    if (wanted.url && candidateUrl && candidateUrl === wanted.url) { reasons.push('ten sam link producenta'); score = Math.max(score, 100); blocking = true; }
+    if (wanted.external && wanted.external.length >= 3 && external === wanted.external) { reasons.push('ten sam EXTERNAL_ID/SKU'); score = Math.max(score, 98); blocking = true; }
+    if (wanted.code && wanted.code.length >= 3 && code === wanted.code) { reasons.push('ten sam kod producenta'); score = Math.max(score, 96); blocking = true; }
+    const similarity = allegroPodobienstwoIstotne(wanted.name, candidate.nazwa || candidate.name || '');
+    if (wanted.name && norm(wanted.name) === norm(candidate.nazwa || candidate.name || '')) { reasons.push('identyczna nazwa'); score = Math.max(score, 92); }
+    else if (similarity >= 0.72) { reasons.push(`bardzo podobna nazwa ${Math.round(similarity * 100)}%`); score = Math.max(score, Math.round(72 + similarity * 18)); }
+    if (reasons.length) out.push({ productId: String(candidate.id), productName: tekst(candidate.nazwa || candidate.name, 300), ean: tekst(candidate.gtin || candidate.ean, 80), externalId: tekst(candidate.externalId || candidate.sku, 120), code: tekst(candidate.kodProducenta || candidate.mpn, 120), score, blocking, reasons });
+  }
+  return out.sort((a, b) => Number(b.blocking) - Number(a.blocking) || b.score - a.score).slice(0, 10);
+}
+function produktLinkKategoriaSklepu(product = {}, products = new Map()) {
+  const raw = tekst(product.kategoria, 180).trim(), rawKey = allegroNormalizujKlucz(raw), categories = new Map();
+  for (const candidate of products.values()) if (candidate?.kategoria) categories.set(allegroNormalizujKlucz(candidate.kategoria), String(candidate.kategoria));
+  if (rawKey && categories.has(rawKey)) return { name: categories.get(rawKey), confidence: 100, reason: 'identyczna kategoria istnieje w sklepie' };
+  const near = rawKey ? [...categories].find(([key]) => key && (key.includes(rawKey) || rawKey.includes(key))) : null;
+  if (near) return { name: near[1], confidence: 88, reason: 'dopasowano kategorię producenta do katalogu sklepu' };
+  const producer = allegroNormalizujKlucz(product.producent || product.marka), scores = new Map();
+  for (const candidate of products.values()) {
+    if (!candidate?.kategoria) continue;
+    let score = allegroPodobienstwoIstotne(product.nazwa || product.name, candidate.nazwa || candidate.name);
+    if (producer && producer === allegroNormalizujKlucz(candidate.producent || candidate.marka)) score += 0.08;
+    if (score < 0.28) continue;
+    const current = scores.get(candidate.kategoria) || { name: candidate.kategoria, score: 0, count: 0, example: candidate.nazwa || candidate.name || '' };
+    current.score = Math.max(current.score, score); current.count++; scores.set(candidate.kategoria, current);
+  }
+  const best = [...scores.values()].sort((a, b) => (b.score + Math.min(0.12, b.count * 0.02)) - (a.score + Math.min(0.12, a.count * 0.02)))[0];
+  if (best) return { name: best.name, confidence: Math.min(90, Math.round((best.score + Math.min(0.12, best.count * 0.02)) * 100)), reason: `podobny produkt w sklepie: ${tekst(best.example, 160)}` };
+  return { name: raw, confidence: raw ? 50 : 0, reason: raw ? 'kategoria producenta wymaga zatwierdzenia' : 'brak pewnej kategorii sklepu' };
+}
+async function przygotujPakietProduktuZLinku(req, target = '', options = {}) {
+  const inspected = await pobierzProduktProducentaZPamiecia(target);
+  const alternatives = Array.isArray(inspected.alternatives) ? inspected.alternatives : [];
+  const choice = Number.isInteger(options.choice) ? options.choice : null;
+  if (inspected.needsChoice && (choice === null || !alternatives[choice])) {
+    return { ...inspected, workflow: { stage: 'needs_choice', readyForStore: false, readyForAllegro: false, blockers: ['wybierz właściwy produkt ze znalezionych wariantów'], nextAction: 'choose_product' } };
+  }
+  const selected = choice !== null ? alternatives[choice] : null;
+  const sourceProduct = { ...(selected?.product || inspected.product || {}) };
+  const canonicalUrl = tekst(selected?.url || inspected.canonicalUrl || inspected.resolvedUrl || target, 1000);
+  sourceProduct.sourceUrl = canonicalUrl; sourceProduct.producentUrl = canonicalUrl;
+  const [settingsRec, offerSettings] = await Promise.all([czytaj('settings', { data: {}, rev: 0, updated_at: null }), allegroPobierzUstawieniaOfert()]);
+  const data = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {}, products = allegroAgentProduktyCentralne(data);
+  const producer = allegroRozpoznajProducenta(sourceProduct, {}, offerSettings) || tekst(sourceProduct.producent || sourceProduct.marka, 160);
+  const category = produktLinkKategoriaSklepu(sourceProduct, products);
+  const baseProduct = { ...sourceProduct, ...(producer ? { producent: producer, marka: producer } : {}), ...(category.name ? { kategoria: category.name } : {}) };
+  let offerPreparation = null, offerError = null;
+  try { offerPreparation = await allegroDraftZAutoKategoria(req, baseProduct, { publicationAction: 'keep' }); }
+  catch (error) { offerError = { message: tekst(error?.message || error, 700), code: tekst(error?.code || '', 120), status: Number(error?.status || 0) }; }
+  const auto = offerPreparation?.autoFilled || {}, improved = offerPreparation?.improvedDescriptions || {};
+  const product = {
+    ...baseProduct,
+    ...(!baseProduct.gtin && !baseProduct.ean && (auto.gtin || auto.ean) ? { gtin: auto.gtin || auto.ean, ean: auto.ean || auto.gtin } : {}),
+    ...(!baseProduct.kodProducenta && !baseProduct.mpn && (auto.kodProducenta || auto.mpn) ? { kodProducenta: auto.kodProducenta || auto.mpn, mpn: auto.mpn || auto.kodProducenta } : {}),
+    ...(!baseProduct.zdjecie && auto.zdjecie ? { zdjecie: auto.zdjecie } : {}),
+    ...((!Array.isArray(baseProduct.zdjecia) || !baseProduct.zdjecia.length) && Array.isArray(auto.zdjecia) && auto.zdjecia.length ? { zdjecia: auto.zdjecia.slice(0, 15) } : {}),
+    ...(auto.allegroProductId ? { allegroProductId: auto.allegroProductId } : {}),
+    ...(auto.allegroCategoryId ? { allegroCategoryId: auto.allegroCategoryId } : {}),
+    ...(Array.isArray(auto.allegroParameters) && auto.allegroParameters.length ? { allegroParameters: auto.allegroParameters } : {}),
+    opisKrotki: tekst(baseProduct.opisKrotki || improved.shortDescription || allegroOpisKrotkiZTekstu(baseProduct.opis), 500),
+    opis: tekst(baseProduct.opis || improved.fullDescription, 20000),
+    agentImportSource: inspected.fromCache ? 'pamięć Agenta + katalog Allegro' : 'link producenta + katalog Allegro',
+    agentImportConfidence: Number(selected?.confidence || inspected.confidence || 0),
+    agentImportUrl: canonicalUrl,
+  };
+  const duplicates = produktLinkDuplikaty(product, products), blockingDuplicate = duplicates.find((item) => item.blocking);
+  const blockers = [], warnings = [];
+  if (!tekst(product.nazwa, 300)) blockers.push('brak nazwy');
+  if (!(Number(product.cena) > 0)) blockers.push('brak poprawnej ceny');
+  if (!tekst(product.kategoria, 180)) blockers.push('brak kategorii sklepu');
+  if (blockingDuplicate) blockers.push(`produkt już istnieje w sklepie: #${blockingDuplicate.productId}`);
+  if (!(product.gtin || product.ean || product.kodProducenta || product.mpn)) warnings.push('brak EAN i kodu producenta');
+  if (!product.zdjecie) warnings.push('brak zdjęcia głównego');
+  if (tekst(product.opisKrotki, 500).length < 40) warnings.push('krótki opis wymaga uzupełnienia');
+  if (tekst(product.opis, 20000).length < 150) warnings.push('pełny opis wymaga uzupełnienia');
+  if (!product.allegroCategoryId) warnings.push('nie dobrano kategorii Allegro');
+  if (!product.allegroProductId) warnings.push('nie znaleziono produktu w katalogu Allegro');
+  if (offerError) warnings.push(`Allegro: ${offerError.message}`);
+  const offerMissing = Array.isArray(offerPreparation?.missing) ? offerPreparation.missing : [];
+  const readyForStore = !blockers.length, readyForAllegro = readyForStore && !offerError && !offerMissing.length && !!product.allegroCategoryId;
+  return {
+    ...inspected,
+    needsChoice: false,
+    product,
+    selectedChoice: choice,
+    confidence: Math.max(Number(inspected.confidence || 0), Number(selected?.confidence || 0)),
+    sourceMissing: Array.isArray(inspected.missing) ? inspected.missing : [],
+    missing: [...new Set([...blockers, ...warnings])],
+    duplicateAudit: { blocking: !!blockingDuplicate, selected: blockingDuplicate || null, items: duplicates },
+    storeCategory: category,
+    allegroPreparation: offerPreparation ? { categorySuggestion: offerPreparation.categorySuggestion || null, catalogMatch: offerPreparation.catalogMatch || null, existingOffer: offerPreparation.existingOffer || null, agentDecision: offerPreparation.agentDecision || null, missing: offerMissing, requiredParameters: offerPreparation.requiredParameters || [], supportErrors: offerPreparation.supportErrors || [] } : null,
+    workflow: { stage: blockingDuplicate ? 'duplicate' : readyForAllegro ? 'ready' : readyForStore ? 'store_ready' : 'incomplete', readyForStore, readyForAllegro, blockers, warnings, nextAction: blockingDuplicate ? 'open_existing_product' : readyForAllegro ? 'review_and_save' : 'complete_missing_fields' },
+  };
+}
 function allegroNormTekst(s = '') {
   return String(s || '')
     .toLowerCase()
@@ -5574,6 +5683,19 @@ export default async (req) => {
       const target = tekst(body.url, 1000).trim();
       if (!/^https?:\/\//i.test(target)) return odpowiedz({ ok: false, error: 'Podaj pełny adres URL produktu' }, 422);
       return odpowiedz(await pobierzProduktProducentaZPamiecia(target));
+    }
+
+    // ─── PRODUCENT + ALLEGRO: jeden kompletny pakiet do formularza produktu ───
+    if (action === 'product-url-prepare') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const target = tekst(body.url, 1000).trim();
+      if (!/^https?:\/\//i.test(target)) return odpowiedz({ ok: false, error: 'Podaj pełny adres URL produktu' }, 422);
+      const rawChoice = body.choice;
+      const choice = rawChoice === null || rawChoice === undefined || rawChoice === '' ? null : Number(rawChoice);
+      if (choice !== null && (!Number.isInteger(choice) || choice < 0 || choice > 20)) return odpowiedz({ ok: false, error: 'Nieprawidłowy wybór produktu', code: 'validation' }, 422);
+      return odpowiedz(await przygotujPakietProduktuZLinku(req, target, { choice }));
     }
 
     // ─── PRODUKT: ręczna dostępność spójna ze sklepem i Allegro ───
