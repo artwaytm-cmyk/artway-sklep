@@ -43,6 +43,7 @@ import {
   allegroSanitizePlainText,
   allegroSanitizeDescription,
   allegroEnforceDraft,
+  allegroSecureOfferWrite,
 } from './allegro-compliance.mjs';
 import {
   ustawieniaPubliczneBezDanychPrywatnych,
@@ -1496,7 +1497,10 @@ async function allegroWywolaj(req, path, { method = 'GET', parameters = {}, body
     'Accept-Language': 'pl-PL',
     'User-Agent': 'Artway-TM/1.0 Netlify Function',
   };
-  const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
+  // Fail closed: każda nowa lub przyszła ścieżka zapisu opisu przechodzi przez
+  // tę samą bramkę, nawet gdy jej autor zapomni wywołać kontrolę wcześniej.
+  const securedWrite = allegroSecureOfferWrite({ path, method, body: bodyObj });
+  const body = securedWrite.body === null ? undefined : JSON.stringify(securedWrite.body);
   if (body) headers['Content-Type'] = contentType || accept || ALLEGRO_PUBLIC_JSON;
   const r = await fetch(apiUrl.toString(), { method, headers, body });
   const textBody = await r.text();
