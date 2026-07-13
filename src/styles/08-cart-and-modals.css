@@ -1,0 +1,75 @@
+/* ── Diagnostyka ── */
+.log-table{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:.6rem}
+.log-table th,.log-table td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line);vertical-align:top}
+.log-table th{font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted2)}
+.table-scroll{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.lvl{padding:.1rem .55rem;border-radius:999px;font-size:.72rem;font-weight:700;white-space:nowrap}
+.lvl-blad{background:#fee2e2;color:var(--danger)}
+.lvl-ostrzezenie{background:#fef3c7;color:#b45309}
+.lvl-info{background:#dbeafe;color:var(--brand)}
+.lvl-ok{background:#dcfce7;color:var(--ok)}
+.sug{display:flex;gap:.7rem;align-items:flex-start;background:var(--bg);border-radius:12px;padding:.8rem 1rem;margin-bottom:.6rem;font-size:.9rem}
+.sug .s-ico{font-size:1.3rem}
+.diag-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1rem}
+
+/* ── Koszyk (szuflada) ── */
+.overlay{position:fixed;inset:0;background:rgba(15,18,25,.55);z-index:90;opacity:0;pointer-events:none;transition:.25s}
+.overlay.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;width:min(420px,100vw);height:100%;background:var(--panel);z-index:100;display:flex;flex-direction:column;transition:transform .28s ease;transform:translateX(105%);box-shadow:-8px 0 40px rgba(0,0,0,.18)}
+.drawer.open{transform:translateX(0)}
+.drawer-head{display:flex;align-items:center;justify-content:space-between;padding:1.1rem 1.2rem;border-bottom:1px solid var(--line)}
+.drawer-head h2{font-size:1.15rem}
+.close-x{border:none;background:none;font-size:1.5rem;color:var(--muted2);line-height:1}
+.cart-items{flex:1;overflow-y:auto;padding:1rem 1.2rem}
+.cart-item{display:flex;gap:.8rem;padding:.7rem 0;border-bottom:1px solid var(--line);align-items:center}
+.cart-item .ci-thumb{width:52px;height:52px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.6rem;flex-shrink:0}
+.ci-info{flex:1;min-width:0}
+.ci-info b{font-size:.88rem;display:block}
+.ci-info small{color:var(--muted2)}
+.qty{display:flex;align-items:center;gap:.4rem}
+.qty button{width:26px;height:26px;border-radius:8px;border:1.5px solid var(--line);background:var(--panel);font-weight:700}
+.qty button:hover{border-color:var(--brand);color:var(--brand)}
+.ci-remove{border:none;background:none;color:var(--danger);font-size:1.1rem}
+.cart-empty{text-align:center;color:var(--muted2);padding:2.5rem 0}
+.drawer-foot{padding:1.1rem 1.2rem;border-top:1px solid var(--line)}
+.promo-row{display:flex;gap:.5rem;margin-bottom:.8rem}
+.promo-row input{flex:1;padding:.5rem .8rem;border:1.5px solid var(--line);border-radius:10px;outline:none;background:var(--bg);text-transform:uppercase}
+.promo-row button{padding:.5rem 1rem;border:none;border-radius:10px;background:var(--ink);color:#fff;font-weight:700;font-size:.85rem}
+.rabat-info{font-size:.83rem;color:var(--ok);font-weight:700;margin-bottom:.5rem;display:flex;justify-content:space-between}
+.rabat-info button{border:none;background:none;color:var(--danger);font-size:.8rem;cursor:pointer}
+.total-row{display:flex;justify-content:space-between;font-size:1.05rem;margin-bottom:.9rem}
+.total-row b{font-size:1.3rem}
+.checkout-btn{width:100%;padding:.85rem;border:none;border-radius:12px;background:linear-gradient(90deg,var(--brand),var(--brand2));color:#fff;font-weight:800;font-size:1rem}
+.checkout-btn:disabled{opacity:.5;cursor:not-allowed}
+.free-ship{font-size:.8rem;color:var(--ok);text-align:center;margin-top:.6rem;font-weight:600}
+
+/* ── Modal zamówienia ── */
+.modal{position:fixed;inset:0;z-index:110;display:none;align-items:center;justify-content:center;padding:1rem;background:rgba(15,18,25,.55)}
+.modal.open{display:flex}
+.modal-box{background:var(--panel);border-radius:20px;width:min(560px,100%);max-height:92vh;overflow-y:auto;padding:1.6rem}
+.modal-box h2{margin-bottom:.3rem}
+.modal-box .sub{color:var(--muted2);font-size:.9rem;margin-bottom:1.1rem}
+.f-row{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+.f-row.admin-four{grid-template-columns:2fr 1fr 2fr auto;align-items:end}
+.f-row.admin-three{grid-template-columns:2fr 1fr auto;align-items:end}
+.f-group{margin-bottom:.85rem}
+.f-group label{display:block;font-size:.82rem;font-weight:700;margin-bottom:.3rem}
+.f-group input,.f-group select,.f-group textarea{width:100%;padding:.6rem .8rem;border:1.5px solid var(--line);border-radius:10px;outline:none;background:var(--bg)}
+.f-group input:focus,.f-group textarea:focus{border-color:var(--brand)}
+.f-sekcja{font-size:.95rem;margin:1.1rem 0 .6rem;padding-bottom:.35rem;border-bottom:1px solid var(--line);font-weight:700}
+.chk-row{display:flex;align-items:center;gap:.55rem;font-size:.88rem;font-weight:600;margin:.55rem 0;cursor:pointer}
+.chk-row input{width:17px;height:17px;accent-color:var(--brand)}
+.summary{background:var(--bg);border-radius:12px;padding:.9rem;font-size:.88rem;margin:1rem 0}
+.summary div{display:flex;justify-content:space-between;padding:.15rem 0}
+.summary .sum-total{border-top:1px solid var(--line);margin-top:.4rem;padding-top:.5rem;font-weight:800}
+.pay-note{font-size:.8rem;color:var(--muted2);margin-top:.7rem;text-align:center}
+.success{text-align:center;padding:1.5rem 0}
+.success .big{font-size:3.5rem}
+
+/* ── Stopka ── */
+footer{background:#151a24;color:#c6ccd8;margin-top:1rem}
+.foot-in{max-width:1200px;margin:0 auto;padding:2.2rem 1rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.5rem;font-size:.9rem}
+.foot-in h4{color:#fff;margin-bottom:.6rem}
+.foot-in a{color:#c6ccd8;text-decoration:none;display:block;padding:.15rem 0}
+.foot-in a:hover{color:#fff}
+.copy{text-align:center;padding:1rem;border-top:1px solid #2a3040;font-size:.8rem;color:#8a93a3}

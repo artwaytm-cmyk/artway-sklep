@@ -10,6 +10,9 @@ const files = [
   'products.json',
   'netlify/functions/store.mjs',
   'netlify/functions/lib/store-app.mjs',
+  'netlify/functions/lib/core/http.mjs',
+  'netlify/functions/lib/core/store-repository.mjs',
+  'netlify/functions/lib/domain/orders.mjs',
   'netlify/functions/lib/allegro-compliance.mjs',
   'netlify/functions/lib/infakt-purchase.mjs',
   'netlify/functions/cron-inpost-sync.mjs',
@@ -62,6 +65,13 @@ const cronSeoDaily = read('netlify/functions/cron-seo-daily.mjs');
 const sitemap = read('netlify/functions/sitemap.mjs');
 const googleProducts = read('netlify/functions/google-products.mjs');
 const robots = read('robots.txt');
+
+requireMarkers('assets/app.js', app, [
+  'GENERATED FILE — edit src/frontend/*.js and run npm run build',
+]);
+requireMarkers('assets/styles.css', css, [
+  'GENERATED FILE — edit src/styles/*.css and run npm run build',
+]);
 
 const version = index.match(/<meta\s+name=["']artway-version["']\s+content=["']([^"']+)/i)?.[1] || '';
 if (!version) fail('index.html: brak meta artway-version');

@@ -4,7 +4,12 @@
   "private": true,
   "description": "Sklep Artway-TM — wspólna baza (Netlify Functions + Blobs)",
   "scripts": {
-    "check": "node scripts/check-artway.mjs"
+    "build": "node scripts/build-assets.mjs",
+    "build:check": "node scripts/build-assets.mjs --check",
+    "test": "node --test tests/*.test.mjs",
+    "check:legacy": "node scripts/check-artway.mjs",
+    "verify": "npm run build:check && npm run check:legacy && npm test",
+    "check": "npm run verify"
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.0",

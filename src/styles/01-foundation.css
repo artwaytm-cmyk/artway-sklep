@@ -1,0 +1,16 @@
+:root{
+  --bg:#f6f7fb; --panel:#ffffff; --ink:#151a24; --muted:#68718280;
+  --muted2:#5b6472; --brand:#2563eb; --brand2:#7c3aed; --accent:#f59e0b;
+  --ok:#16a34a; --danger:#dc2626; --line:#e6e9f0;
+  --radius:16px; --shadow:0 4px 24px rgba(21,26,36,.07);
+  --content:1500px; --card-min:240px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:'Segoe UI',system-ui,-apple-system,Roboto,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5;overflow-x:hidden}
+button{font-family:inherit;cursor:pointer}
+input,select,textarea{font-family:inherit;font-size:1rem}
+a{color:var(--brand)}
+
+/* ── Pasek info ── */
+.topbar{background:linear-gradient(90deg,var(--brand),var(--brand2));color:#fff;text-align:center;padding:.45rem 1rem;font-size:.85rem;font-weight:500}

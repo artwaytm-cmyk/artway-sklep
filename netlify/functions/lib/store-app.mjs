@@ -1,9 +1,25 @@
 // Artway-TM — wspólna baza sklepu na Netlify Blobs
 // Funkcja serwerowa: ustawienia, zamówienia, klienci — widoczne na każdym urządzeniu.
 // Endpoint: /.netlify/functions/store  (alias /api/store)
-import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
+import { createStoreRepository } from './core/store-repository.mjs';
+import {
+  bezpiecznePorownanie,
+  czyAdmin,
+  odpowiedz,
+  odpowiedzHtml,
+  tekst,
+  tokenZadania,
+} from './core/http.mjs';
+import {
+  filtrujNieusunieteZamowienia,
+  mapaUsunietych,
+  normalizujKlienta,
+  normalizujUsunieteZamowienie,
+  normalizujZamowienie,
+  numerZamowienia,
+} from './domain/orders.mjs';
 import {
   ALLEGRO_COMPLIANCE_POLICY,
   allegroCheckText,
@@ -19,6 +35,9 @@ import {
 } from './infakt-purchase.mjs';
 
 const STORE_NAME = 'artway-sklep';
+const repository = createStoreRepository({ name: STORE_NAME });
+const czytaj = repository.read;
+const zapisz = repository.write;
 
 // Klucze wspólne (konfiguracja + katalog + ceny + stany + opinie + kosz) — zapisywane przez administratora,
 // czytane przez wszystkich (żeby sklep wyglądał tak samo na każdym urządzeniu).
@@ -56,62 +75,6 @@ const LIMIT_USUNIETYCH_ZAMOWIEN = 50000;
 const PAYNOW_ENVY = new Set(['production', 'sandbox']);
 const PAYNOW_STATUSY_KONCOWE = new Set(['CONFIRMED', 'ERROR', 'EXPIRED', 'REJECTED', 'ABANDONED']);
 
-function baza() {
-  return getStore({ name: STORE_NAME, consistency: 'strong' });
-}
-async function czytaj(klucz, domyslne) {
-  try {
-    const v = await baza().get(klucz, { type: 'json' });
-    return (v === null || v === undefined) ? domyslne : v;
-  } catch (e) {
-    return domyslne;
-  }
-}
-async function zapisz(klucz, wartosc) {
-  await baza().setJSON(klucz, wartosc);
-}
-
-function odpowiedz(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      'access-control-allow-origin': '*',
-      'access-control-allow-headers': 'content-type, x-admin-token',
-      'access-control-allow-methods': 'GET, POST, OPTIONS',
-    },
-  });
-}
-function odpowiedzHtml(html, status = 200) {
-  return new Response(html, {
-    status,
-    headers: {
-      'content-type': 'text/html; charset=utf-8',
-      'cache-control': 'no-store',
-    },
-  });
-}
-
-function bezpiecznePorownanie(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string') return false;
-  if (a.length !== b.length) return false;
-  let r = 0;
-  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return r === 0;
-}
-function tokenZadania(req, url) {
-  return req.headers.get('x-admin-token') || url.searchParams.get('token') || '';
-}
-function czyAdmin(req, url) {
-  const env = process.env.ARTWAY_ADMIN_TOKEN || '';
-  if (!env) return false;
-  return bezpiecznePorownanie(tokenZadania(req, url), env);
-}
-
-function tekst(v, max = 200) {
-  return String(v == null ? '' : v).slice(0, max);
-}
 function telegramKonfiguracja() {
   return {
     token: tekst(process.env.TELEGRAM_BOT_TOKEN || '', 300).trim(),
@@ -272,10 +235,6 @@ function agentRaportTelegramHTML(center = {}) {
   const rows = items.length ? items.map((x, i) => `${i + 1}. ${icons[x.severity] || '•'} <b>${telegramHtml(x.title)}</b> — ${x.count}\n   ${x.execution === 'approval' ? '🔐 decyzja administratora' : x.execution === 'draft' ? '📝 agent przygotuje szkic' : '⚙️ agent może sprawdzić'} • termin ${x.deadlineMinutes || 240} min\n   ${telegramHtml(x.action || '')}\n   Gotowe, gdy: ${telegramHtml(x.doneWhen || 'temat zostanie zweryfikowany')}`).join('\n') : '✅ Brak aktywnych tematów wymagających reakcji.';
   return `<b>🤖 Centrum operacyjne Artway-TM — ${center.score ?? 0}%</b>\n${telegramHtml(new Date(center.generatedAt || Date.now()).toLocaleString('pl-PL'))}\n\n<b>Sprzedaż i obsługa</b>\nSklep: ${s.newOrders || 0} nowych / ${s.activeOrders || 0} aktywnych\nAllegro: ${s.activeAllegro || 0} aktywnych • ${s.communicationWaiting || 0} spraw do odpowiedzi\nWysyłki bez numeru: ${s.shipmentsWithoutTracking || 0}\nFaktury: ${s.companyOrdersWithoutInvoice || 0} firmowych bez dokumentu\nProducent: ${s.supplierUnavailable || 0} braków • ${s.supplierLow || 0} niskich stanów • ${s.supplierNeedsDecision || 0} decyzji\n\n<b>Najważniejsze działania</b>\n${rows}\n\n<i>Agent nie wysyła odpowiedzi klientom ani zamówień producentom bez zatwierdzenia administratora.</i>`;
 }
-function numerZamowienia(v) {
-  return tekst(v, 80).trim();
-}
-
 // zostaw tylko dozwolone klucze wspólne i pilnuj rozmiaru
 function oczyscUstawienia(obj) {
   const wynik = {};
@@ -286,48 +245,9 @@ function oczyscUstawienia(obj) {
   return wynik;
 }
 
-function normalizujZamowienie(z) {
-  if (!z || typeof z !== 'object') return null;
-  const nr = numerZamowienia(z.nr);
-  if (!nr) return null;
-  z.nr = nr;
-  z.ts = Number(z.ts) || Date.now();
-  z.email = tekst(z.email, 200).trim().toLowerCase();
-  return z;
-}
-function normalizujKlienta(u) {
-  if (!u || typeof u !== 'object') return null;
-  const email = tekst(u.email, 200).trim().toLowerCase();
-  if (!email) return null;
-  u.email = email;
-  return u;
-}
-
-function normalizujUsunieteZamowienie(raw) {
-  const nr = numerZamowienia(raw?.nr || raw?.number || raw);
-  if (!nr) return null;
-  return {
-    nr,
-    email: tekst(raw?.email, 200).trim().toLowerCase(),
-    by: tekst(raw?.by || raw?.kto || 'unknown', 40),
-    deleted_at: tekst(raw?.deleted_at || raw?.usunietoAt || new Date().toISOString(), 80),
-  };
-}
-function mapaUsunietych(lista = []) {
-  const mapa = new Map();
-  for (const raw of Array.isArray(lista) ? lista : []) {
-    const rec = normalizujUsunieteZamowienie(raw);
-    if (rec) mapa.set(rec.nr, { ...mapa.get(rec.nr), ...rec });
-  }
-  return mapa;
-}
 async function czytajUsunieteZamowienia() {
   const rec = await czytaj('deleted_orders', { items: [] });
   return Array.isArray(rec.items) ? rec.items : [];
-}
-function filtrujNieusunieteZamowienia(items, usuniete) {
-  const mapa = usuniete instanceof Map ? usuniete : mapaUsunietych(usuniete);
-  return (Array.isArray(items) ? items : []).filter((z) => z && z.nr && !mapa.has(z.nr));
 }
 async function dopiszUsunieteZamowienie(raw) {
   const rec = normalizujUsunieteZamowienie(raw);

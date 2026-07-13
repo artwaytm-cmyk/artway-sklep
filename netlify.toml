@@ -2,6 +2,7 @@
 # Strona statyczna (index.html) + funkcja serwerowa store (wspólna baza na Netlify Blobs)
 
 [build]
+  command = "npm run verify"
   publish = "."
   functions = "netlify/functions"
 

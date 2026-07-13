@@ -1,3 +1,4 @@
+/* GENERATED FILE — edit src/frontend/*.js and run npm run build */
 /* ═══════════ KONFIGURACJA ═══════════ */
 const DANE_FIRMY_DOMYSLNE = {
   nazwa: "Artway-TM",
@@ -4225,6 +4226,7 @@ function widokAdminWysylki(){
   const widok=tabWysylek==="tracking"?panelTrackinguWysylek():tabWysylek==="automatyzacje"?panelAutomatyzacjiWysylek():tabWysylek==="ustawienia"?panelUstawienBramki():panelZlecenWysylkowych();
   return adminSzkielet("/admin/wysylki",nawigacjaWysylek()+widok);
 }
+
 /* Personalizacja = wszystkie ustawienia wyglądu i sklepu w JEDNYM miejscu,
    podzielone na zakładki. Stare adresy (#/admin/wyglad itd.) dalej działają
    i otwierają właściwą zakładkę.                                          */
@@ -4432,6 +4434,7 @@ function widokAdmin(){
       : `<p style="color:var(--muted2)">Brak zamówień — gdy klienci zaczną kupować, zobaczysz je tutaj.</p>`}
     </div>`);
 }
+
 function agentAINormalizuj(s=""){
   const mapa={"ą":"a","ć":"c","ę":"e","ł":"l","ń":"n","ó":"o","ś":"s","ź":"z","ż":"z"};
   return String(s||"").toLowerCase()
@@ -5841,6 +5844,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
   <div style="${aktywna==="historia"?"":"display:none"}">${agentAIHistoriaPanelHTML()}</div>`);
 }
 let filtrZamowien = "wszystkie", szukajZamowien = "";
+
 function klientZamowieniaLabel(z){
   const k=z?.klient||{};
   return [k.imie,k.nazwisko].filter(Boolean).join(" ") || z?.email || "gość";
@@ -8200,6 +8204,7 @@ function widokAdminKlienci(sekcja="lista"){
     </table></div>
   </div>`);
 }
+
 /* ── Pełna kartoteka klienta ── */
 function pobierzProfil(email){ return pobierzUzytkownikow().find(x=>x.email===String(email||"").toLowerCase()); }
 function polaKartotekiHTML(k, opcje={}){
@@ -9719,6 +9724,7 @@ function wyczyscCalKosz(){
   loguj("info",`Opróżniono kosz: ${ile} produktów`);
   toast("Kosz opróżniony"); renderuj();
 }
+
 /* ── Edycja ceny bezpośrednio w tabeli ── */
 function ustawCene(id, wartosc){
   const cena = parseFloat(String(wartosc).replace(",","."));
