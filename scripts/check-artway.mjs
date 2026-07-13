@@ -111,6 +111,9 @@ requireMarkers('assets/styles.css', css, [
   '.product-source-evidence',
   '.seo-hero',
   '.seo-technical-grid',
+  '.seo-advanced-toolbar',
+  '.seo-bulk-toolbar',
+  '.seo-product-table',
   '.modal',
 ]);
 
@@ -125,6 +128,12 @@ requireMarkers('assets/app.js', app, [
   'function seoUruchomPlanDzienny',
   'function seoEksportujFeedGoogleCSV',
   'function seoAktualizujMetaDlaTrasy',
+  'function seoFiltrujKolejke',
+  'function seoZaznaczWszystkieWyniki',
+  'function seoWykonajOperacjeZbiorcza',
+  'function seoProduktyWorkspaceHTML',
+  'autoAllProducts',
+  'seoMode',
   'artway_seo_ustawienia',
   'product-seo-editor',
   'function widokAdminAgentAI',
@@ -633,6 +642,7 @@ requireMarkers('netlify/functions/sitemap.mjs', sitemap, [
 
 requireMarkers('netlify/functions/google-products.mjs', googleProducts, [
   'base.google.com/ns/1.0',
+  'automaticSeo',
   '<g:availability>in_stock</g:availability>',
   '<g:price>',
   'artway_produkty_katalog',

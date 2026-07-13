@@ -4800,7 +4800,7 @@ function seoZastosujPatch(data, id, patch) {
   if (Array.isArray(data.artway_produkty_katalog)) data.artway_produkty_katalog = data.artway_produkty_katalog.map((p) => String(p?.id) === key ? { ...p, ...patch } : p);
 }
 async function seoWykonajDziennyPlan({ limit, source } = {}) {
-  const rec = await czytaj('settings', { data: {}, rev: 0 }), data = rec.data && typeof rec.data === 'object' ? { ...rec.data } : {}, config = { enabled: true, dailyLimit: 5, autoFillMissing: true, preferBestsellers: true, ...(data.artway_seo_ustawienia || {}) };
+  const rec = await czytaj('settings', { data: {}, rev: 0 }), data = rec.data && typeof rec.data === 'object' ? { ...rec.data } : {}, config = { enabled: true, dailyLimit: 5, autoFillMissing: true, preferBestsellers: true, ...(data.artway_seo_ustawienia || {}), autoAllProducts: true };
   const amount = Math.max(1, Math.min(50, Number(limit || config.dailyLimit) || 5));
   if (config.enabled === false && String(source || '').startsWith('scheduled')) return { processed: 0, skipped: true, reason: 'disabled' };
   const today = new Date().toISOString().slice(0, 10), products = seoProduktyCentralne(data).map((product) => ({ product, score: seoOcena(product) })).sort((a, b) => {
@@ -4810,8 +4810,11 @@ async function seoWykonajDziennyPlan({ limit, source } = {}) {
   });
   const fresh = products.filter((x) => !String(x.product.seoReviewedAt || '').startsWith(today)), selected = fresh.slice(0, amount), now = new Date().toISOString();
   for (const item of selected) {
-    const proposal = seoPropozycja(item.product), patch = { seoReviewedAt: now, seoSource: tekst(source || 'scheduled', 100), seoScore: 0 };
-    if (config.autoFillMissing !== false) { if (!item.product.seoTitle) patch.seoTitle = proposal.seoTitle; if (!item.product.seoDescription) patch.seoDescription = proposal.seoDescription; if (!item.product.seoKeywords) patch.seoKeywords = proposal.seoKeywords; }
+    const proposal = seoPropozycja(item.product), mode = item.product.seoMode === 'manual' ? 'manual' : 'auto', patch = { seoMode: mode, seoReviewedAt: now, seoSource: tekst(source || 'scheduled', 100), seoScore: 0 };
+    if (config.autoFillMissing !== false) {
+      if (mode === 'auto' && config.autoAllProducts !== false) { patch.seoTitle = proposal.seoTitle; patch.seoDescription = proposal.seoDescription; patch.seoKeywords = proposal.seoKeywords; }
+      else { if (!item.product.seoTitle) patch.seoTitle = proposal.seoTitle; if (!item.product.seoDescription) patch.seoDescription = proposal.seoDescription; if (!item.product.seoKeywords) patch.seoKeywords = proposal.seoKeywords; }
+    }
     patch.seoScore = seoOcena({ ...item.product, ...patch }); seoZastosujPatch(data, item.product.id, patch);
   }
   data.artway_seo_ustawienia = { ...config, dailyLimit: amount, lastRunAt: now, lastRunCount: selected.length };

@@ -22,6 +22,18 @@ const valueFor = (obj, names = []) => {
   for (const name of names) if (obj?.[name] !== undefined && obj?.[name] !== null && String(obj[name]).trim()) return obj[name];
   return '';
 };
+const automaticSeo = (product = {}) => {
+  const name = plain(valueFor(product, ['nazwa', 'name']), 120) || 'Produkt';
+  const category = plain(valueFor(product, ['kategoria', 'productType']), 80);
+  const brand = plain(valueFor(product, ['producent', 'marka', 'brand']), 70);
+  const storedTitle = plain(product.seoTitle, 150);
+  const storedDescription = plain(valueFor(product, ['seoDescription', 'opisKrotki', 'krotkiOpis', 'opis', 'description']), 5000);
+  let title = storedTitle || [name, brand && !name.toLowerCase().includes(brand.toLowerCase()) ? brand : ''].filter(Boolean).join(' – ');
+  if (title.length < 30 && category && !title.toLowerCase().includes(category.toLowerCase())) title += ` – ${category}`;
+  if (title.length < 30) title += ' | Artway-TM';
+  const description = storedDescription || `${name}${category ? ` z kategorii ${category}` : ''}. Sprawdź opis, aktualną cenę, dostępność i bezpieczne zakupy w Artway-TM.`;
+  return { title: title.slice(0, 150), description: description.slice(0, 5000) };
+};
 
 function productIsUnavailable(product, availability = {}) {
   const record = availability?.[String(product?.id)] || availability?.[product?.id] || null;
@@ -63,9 +75,10 @@ export default async () => {
 
   let excluded = 0;
   const items = mergeProducts(data).flatMap((product) => {
+    const seo = automaticSeo(product);
     const id = String(valueFor(product, ['externalId', 'external_id', 'sku', 'id'])).trim().slice(0, 50);
-    const title = plain(valueFor(product, ['seoTitle', 'nazwa', 'name']), 150);
-    const description = plain(valueFor(product, ['seoDescription', 'opisKrotki', 'krotkiOpis', 'opis', 'description']), 5000);
+    const title = seo.title;
+    const description = seo.description;
     const image = absoluteUrl(valueFor(product, ['zdjecie', 'image', 'imageUrl']));
     const price = Number(valueFor(product, ['cena', 'price']));
     if (hidden.has(String(product.id)) || productIsUnavailable(product, availability) || !id || !title || !description || !image || !(price > 0)) {
