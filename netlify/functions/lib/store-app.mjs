@@ -3547,7 +3547,23 @@ function allegroUstawieniaKomunikacji(raw = {}) {
     template: tekst(raw.template || ALLEGRO_AUTO_REPLY_DEFAULT, 2000).trim() || ALLEGRO_AUTO_REPLY_DEFAULT,
   };
 }
+function allegroTypAutoraWiadomosci(m = {}) {
+  const explicit = String(m.authorType || '').toLowerCase();
+  if (['buyer', 'seller', 'allegro'].includes(explicit)) return explicit;
+  const role = String(m.role || m.author?.role || m.author?.type || '').toUpperCase();
+  const login = String(m.authorLogin || m.author?.login || m.author?.id || '').trim().toLowerCase();
+  if (m.system === true || ['ADMIN', 'ALLEGRO', 'SYSTEM', 'MODERATOR'].includes(role) || /^(allegro|administrator|admin|system|moderator)([-_. ]|$)/i.test(login)) return 'allegro';
+  if (role === 'BUYER' || m.author?.isInterlocutor === true || m.incoming === true) return 'buyer';
+  if (role === 'SELLER' || m.author?.isInterlocutor === false || m.seller === true) return 'seller';
+  // Zgodność ze starszym cache: wcześniej każda wiadomość nieprzychodząca była zapisywana jako sprzedawca.
+  if (Object.prototype.hasOwnProperty.call(m, 'incoming') && m.incoming === false) return 'seller';
+  // Nieznany autor nigdy nie może uruchomić automatycznej odpowiedzi ani alertu dla obsługi.
+  return 'allegro';
+}
+function allegroCzyWiadomoscKlienta(m = {}) { return allegroTypAutoraWiadomosci(m) === 'buyer'; }
+function allegroCzyWiadomoscSprzedawcy(m = {}) { return allegroTypAutoraWiadomosci(m) === 'seller'; }
 function allegroNormalizujWiadomosc(m = {}, fallbackThreadId = '') {
+  const authorType = allegroTypAutoraWiadomosci(m);
   return {
     id: tekst(m.id, 120),
     threadId: tekst(m.thread?.id || fallbackThreadId, 120),
@@ -3555,7 +3571,11 @@ function allegroNormalizujWiadomosc(m = {}, fallbackThreadId = '') {
     subject: tekst(m.subject || '', 300),
     createdAt: tekst(m.createdAt || m.created_at || '', 80),
     authorLogin: tekst(m.author?.login || m.author?.id || '', 200),
-    incoming: m.author?.isInterlocutor === true,
+    role: tekst(m.author?.role || m.author?.type || '', 40).toUpperCase(),
+    authorType,
+    incoming: authorType === 'buyer',
+    seller: authorType === 'seller',
+    system: authorType === 'allegro',
     status: tekst(m.status || '', 80),
     offerId: tekst(m.relatesTo?.offer?.id || '', 100),
     orderId: tekst(m.relatesTo?.order?.id || '', 120),
@@ -3573,12 +3593,14 @@ function allegroNormalizujWatek(t = {}, messages = []) {
     subject: tekst(t.subject || last?.subject || '', 300),
     messages: msgs,
     lastMessage: last,
-    incomingCount: msgs.filter((m) => m.incoming).length,
-    sellerCount: msgs.filter((m) => !m.incoming).length,
+    incomingCount: msgs.filter(allegroCzyWiadomoscKlienta).length,
+    sellerCount: msgs.filter(allegroCzyWiadomoscSprzedawcy).length,
+    systemCount: msgs.filter((m) => allegroTypAutoraWiadomosci(m) === 'allegro').length,
   };
 }
 function allegroNormalizujIssueChatMessage(m = {}, fallbackIssueId = '') {
   const role = String(m.author?.role || '').toUpperCase();
+  const authorType = allegroTypAutoraWiadomosci({ ...m, role });
   return {
     id: tekst(m.id, 120),
     issueId: tekst(fallbackIssueId, 120),
@@ -3586,7 +3608,10 @@ function allegroNormalizujIssueChatMessage(m = {}, fallbackIssueId = '') {
     createdAt: tekst(m.createdAt || '', 80),
     authorLogin: tekst(m.author?.login || '', 200),
     role,
-    incoming: role === 'BUYER',
+    authorType,
+    incoming: authorType === 'buyer',
+    seller: authorType === 'seller',
+    system: authorType === 'allegro',
     attachments: Array.isArray(m.attachments) ? m.attachments : [],
   };
 }
@@ -3608,6 +3633,9 @@ function allegroNormalizujIssue(i = {}, chat = []) {
     initialMessage: i.chat?.initialMessage || null,
     messages: msgs,
     lastMessage: last || allegroNormalizujIssueChatMessage(i.chat?.initialMessage || {}, i.id),
+    incomingCount: msgs.filter(allegroCzyWiadomoscKlienta).length,
+    sellerCount: msgs.filter(allegroCzyWiadomoscSprzedawcy).length,
+    systemCount: msgs.filter((m) => allegroTypAutoraWiadomosci(m) === 'allegro').length,
   };
 }
 function allegroJestSwieze(dateText = '', hours = 48) {
@@ -3617,7 +3645,7 @@ function allegroJestSwieze(dateText = '', hours = 48) {
 }
 function allegroPierwszaWiadomoscKlienta(messages = []) {
   const sorted = (Array.isArray(messages) ? messages : []).slice().sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
-  return sorted.find((m) => m.incoming) || null;
+  return sorted.find(allegroCzyWiadomoscKlienta) || null;
 }
 function allegroKluczWiadomosci(m = {}) {
   m = m || {};
@@ -3631,7 +3659,7 @@ function allegroNoweWiadomosciKlienta(messages = [], previousMessages = [], hasB
   if (!hasBaseline) return [];
   const previousKeys = new Set((Array.isArray(previousMessages) ? previousMessages : []).map(allegroKluczWiadomosci).filter(Boolean));
   return (Array.isArray(messages) ? messages : [])
-    .filter((m) => m?.incoming && allegroKluczWiadomosci(m) && !previousKeys.has(allegroKluczWiadomosci(m)))
+    .filter((m) => allegroCzyWiadomoscKlienta(m) && allegroKluczWiadomosci(m) && !previousKeys.has(allegroKluczWiadomosci(m)))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 function allegroOznaczNowaKomunikacje(data = {}, previous = {}) {
@@ -3662,11 +3690,11 @@ function allegroOznaczNowaKomunikacje(data = {}, previous = {}) {
 function allegroMaOdpowiedzSprzedawcyPo(messages = [], msg = null) {
   if (!msg) return false;
   const t = new Date(msg.createdAt || 0).getTime() || 0;
-  return (Array.isArray(messages) ? messages : []).some((m) => !m.incoming && ((new Date(m.createdAt || 0).getTime() || 0) >= t));
+  return (Array.isArray(messages) ? messages : []).some((m) => allegroCzyWiadomoscSprzedawcy(m) && ((new Date(m.createdAt || 0).getTime() || 0) >= t));
 }
 function allegroNajnowszaWiadomoscKlienta(item = {}) {
   const messages = item.messages?.length ? item.messages : [item.lastMessage].filter(Boolean);
-  return (Array.isArray(messages) ? messages : []).filter((m) => m?.incoming).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null;
+  return (Array.isArray(messages) ? messages : []).filter(allegroCzyWiadomoscKlienta).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null;
 }
 function allegroKluczSprawyWewnetrznej(type = 'thread', id = '') {
   return `${type === 'issue' ? 'issue' : 'thread'}:${tekst(id, 120).trim()}`;
@@ -3736,7 +3764,7 @@ async function allegroPobierzKomunikacje(req, { limit = 20 } = {}) {
     if (!id) return null;
     let chat = [];
     try {
-      const raw = await allegroWywolaj(req, `/sale/issues/${encodeURIComponent(id)}/chat`, { accept: ALLEGRO_BETA_JSON });
+      const raw = await allegroWywolaj(req, `/sale/issues/${encodeURIComponent(id)}/chat`, { parameters: { limit: 100, offset: 0 }, accept: ALLEGRO_BETA_JSON });
       chat = allegroLista(raw, ['chat', 'messages', 'items']);
     } catch {}
     return allegroNormalizujIssue(i, chat);
@@ -3759,7 +3787,7 @@ async function allegroWyslijAutoOdpowiedzi(req, data, settings) {
       if (thread.internalResolved) { markSkip(key, 'sprawa zamknięta wewnętrznie'); continue; }
       if (!first || !thread.needsReply || !(thread.newIncomingKeys || []).includes(sourceKey)) { markSkip(key, 'to nie jest pierwszy kontakt w tej rozmowie'); continue; }
       if (allegroAutoReplyWyslanaDlaRozmowy(items, 'thread', thread.id)) { markSkip(key, 'pierwsza odpowiedź była już wysłana w tej rozmowie'); continue; }
-      if ((thread.messages || []).some((message) => !message.incoming)) { markSkip(key, 'sprzedawca wcześniej uczestniczył w rozmowie'); continue; }
+      if ((thread.messages || []).some(allegroCzyWiadomoscSprzedawcy)) { markSkip(key, 'sprzedawca wcześniej uczestniczył w rozmowie'); continue; }
       if (!allegroJestSwieze(first.createdAt, s.freshHours)) { markSkip(key, 'wiadomość poza oknem czasowym'); continue; }
       if (allegroMaOdpowiedzSprzedawcyPo(thread.messages, first)) { markSkip(key, 'sprzedawca już odpowiedział'); continue; }
       const text = allegroAutoReplyText(s, thread, 'thread');
@@ -3778,7 +3806,7 @@ async function allegroWyslijAutoOdpowiedzi(req, data, settings) {
       if (issue.internalResolved) { markSkip(key, 'sprawa zamknięta wewnętrznie'); continue; }
       if (!first || !issue.needsReply || !(issue.newIncomingKeys || []).includes(sourceKey)) { markSkip(key, 'to nie jest pierwszy kontakt w tej dyskusji'); continue; }
       if (allegroAutoReplyWyslanaDlaRozmowy(items, 'issue', issue.id)) { markSkip(key, 'pierwsza odpowiedź była już wysłana w tej dyskusji'); continue; }
-      if (messages.some((message) => !message.incoming)) { markSkip(key, 'sprzedawca wcześniej uczestniczył w dyskusji'); continue; }
+      if (messages.some(allegroCzyWiadomoscSprzedawcy)) { markSkip(key, 'sprzedawca wcześniej uczestniczył w dyskusji'); continue; }
       if (!issue.chatActive) { markSkip(key, 'czat nieaktywny'); continue; }
       if (!allegroJestSwieze(first.createdAt, s.freshHours)) { markSkip(key, 'wiadomość poza oknem czasowym'); continue; }
       if (allegroMaOdpowiedzSprzedawcyPo(messages, first)) { markSkip(key, 'sprzedawca już odpowiedział'); continue; }
@@ -5461,6 +5489,7 @@ export default async (req) => {
         issues: Array.isArray(applied.data.issues) ? applied.data.issues : [],
         errors: Array.isArray(comm.errors) ? comm.errors : [],
         updated_at: comm.updated_at || null,
+        lastSyncSummary: comm.lastSyncSummary || null,
         settings,
         autoReplies: replies.items && typeof replies.items === 'object' ? replies.items : {},
         autoRepliesUpdatedAt: replies.updated_at || null,
@@ -5549,7 +5578,8 @@ export default async (req) => {
       const key = type === 'issue' ? 'issues' : 'threads';
       const list = Array.isArray(comm[key]) ? [...comm[key]] : [];
       const index = list.findIndex((x) => String(x?.id) === id);
-      const normalized = type === 'issue' ? allegroNormalizujIssueChatMessage(raw, id) : allegroNormalizujWiadomosc(raw, id);
+      const normalizedRaw = type === 'issue' ? allegroNormalizujIssueChatMessage(raw, id) : allegroNormalizujWiadomosc(raw, id);
+      const normalized = { ...normalizedRaw, role: normalizedRaw.role || 'SELLER', authorType: 'seller', incoming: false, seller: true, system: false };
       if (index >= 0) {
         const current = list[index], messages = [...(Array.isArray(current.messages) ? current.messages : []), normalized].filter((m, pos, all) => !m.id || all.findIndex((x) => x.id === m.id) === pos);
         list[index] = { ...current, messages, lastMessage: normalized, read: true, needsReply: false, humanReplyNeeded: false, humanReplySource: null, newIncomingCount: 0, latestNewIncoming: null, latestNewIncomingKey: '', manualReplyAt: new Date().toISOString() };
@@ -5570,13 +5600,20 @@ export default async (req) => {
       const internalRec = await czytaj('allegro_communication_internal', { items: {}, updated_at: null });
       const internalApplied = allegroZastosujStatusyWewnetrzne(marked, internalRec);
       const data = internalApplied.data;
+      const freshCommunication = [...(data.threads || []), ...(data.issues || [])].filter((item) => !item?.cachedOlder);
+      const syncSummary = {
+        newBuyerMessages: freshCommunication.reduce((sum, item) => sum + Math.max(0, Number(item?.newIncomingCount || 0)), 0),
+        newThreads: (data.threads || []).filter((item) => !item?.cachedOlder && Number(item?.newIncomingCount || 0) > 0).length,
+        newIssues: (data.issues || []).filter((item) => !item?.cachedOlder && Number(item?.newIncomingCount || 0) > 0).length,
+        allegroSystemMessages: freshCommunication.reduce((sum, item) => sum + Math.max(0, Number(item?.systemCount || 0)), 0),
+      };
       if (internalApplied.changed) await zapisz('allegro_communication_internal', { items: internalApplied.items, updated_at: new Date().toISOString() });
       const telegramReminders = await allegroWyslijPrzypomnieniaTelegram(data, settings);
       let autoReply = { sent: [], skipped: [], items: {} };
       if (body.autoReply !== false && settings.enabled) autoReply = await allegroWyslijAutoOdpowiedzi(req, data, settings);
-      const rec = { threads: data.threads, issues: data.issues, errors: data.errors || [], requiresReauth: !!data.requiresReauth, updated_at: new Date().toISOString(), autoReplyLastRun: autoReply.sent?.length || 0 };
+      const rec = { threads: data.threads, issues: data.issues, errors: data.errors || [], requiresReauth: !!data.requiresReauth, updated_at: new Date().toISOString(), autoReplyLastRun: autoReply.sent?.length || 0, lastSyncSummary: syncSummary };
       await zapisz('allegro_communications', rec);
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), ...rec, settings, autoReply, telegramReminders });
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), ...rec, settings, autoReply, telegramReminders, syncSummary });
     }
 
     // ─── ALLEGRO: szkic i wystawienie produktu sklepu jako oferty ───
