@@ -231,6 +231,7 @@ let szkiceFaktur = wczytajLS("artway_faktury_szkice", []); // przygotowane dokum
 let agentAIHistoria = wczytajLS("artway_agent_ai_historia", []); // audyty i akcje agenta administratora
 let agentAIPamiec = wczytajLS("artway_agent_ai_pamiec", []); // zapamiętane procedury, reguły i notatki operacyjne agenta
 let agentAIZlecenia = wczytajLS("artway_agent_ai_zlecenia", []); // szkice zleceń utworzone przez agenta AI
+let agentAIPlanCykl = wczytajLS("artway_agent_ai_plan_cykl", {}); // stan open/done/resolved każdego problemu planu operacyjnego
 let producenciKartoteka = wczytajLS("artway_producenci", [
   {id:"producer-alexander",name:"Alexander",website:"https://www.sklep.alexander.com.pl",orderEmail:"",contactPerson:"",phone:"",address:"",nip:"",leadTimeDays:3,minimumOrder:"",paymentTerms:"",emailSubject:"Zamówienie {numer} — Artway-TM",emailIntro:"Dzień dobry,\nprzesyłamy zatwierdzone zamówienie {numer}. Prosimy o potwierdzenie dostępności i terminu realizacji.",notes:"",active:true},
   {id:"producer-multigra",name:"Multigra",website:"",orderEmail:"",contactPerson:"",phone:"",address:"",nip:"",leadTimeDays:3,minimumOrder:"",paymentTerms:"",emailSubject:"Zamówienie {numer} — Artway-TM",emailIntro:"Dzień dobry,\nprzesyłamy zatwierdzone zamówienie {numer}. Prosimy o potwierdzenie dostępności i terminu realizacji.",notes:"",active:true},
@@ -282,7 +283,7 @@ let agentAIPlanStan={busy:false,current:"",startedAt:null,completedAt:null,resul
    na pamięci przeglądarki (localStorage) jak dotychczas. */
 const CHMURA_URL = "/.netlify/functions/store";
 const CHMURA_AUTO_SYNC_MS = 60000;
-const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta"];
 let chmuraToken = (function(){ try{ return JSON.parse(localStorage.getItem("artway_chmura_token"))||""; }catch(e){ return ""; } })();
 let chmuraStan = {dostepna:false, sprawdzono:false, admin:false, rev:0, updated_at:null, error:"", ostatniZapis:0};
 let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z serwera
@@ -372,6 +373,7 @@ function zbierzWspolneUstawienia(){
     artway_agent_ai_historia: agentAIHistoria,
     artway_agent_ai_pamiec: agentAIPamiec,
     artway_agent_ai_zlecenia: agentAIZlecenia,
+    artway_agent_ai_plan_cykl: agentAIPlanCykl,
     artway_producenci: producenciKartoteka,
     artway_agent_ai_linki_producentow: agentAILinkiProducentow,
     artway_agent_ai_allegro_zadania: agentAIAllegroZadania,
@@ -401,6 +403,7 @@ function nalozWspolneUstawienia(dane){
       artway_faktury_szkice:(v)=>{szkiceFaktur=Array.isArray(v)?v:[];}, artway_agent_ai_historia:(v)=>{agentAIHistoria=Array.isArray(v)?v:[];},
       artway_agent_ai_pamiec:(v)=>{agentAIPamiec=Array.isArray(v)?v:[];},
       artway_agent_ai_zlecenia:(v)=>{agentAIZlecenia=Array.isArray(v)?v:[];},
+      artway_agent_ai_plan_cykl:(v)=>{agentAIPlanCykl=(v&&typeof v==="object"&&!Array.isArray(v))?v:{};},
       artway_producenci:(v)=>{producenciKartoteka=Array.isArray(v)?v:[];},
       artway_agent_ai_linki_producentow:(v)=>{agentAILinkiProducentow=Array.isArray(v)?v:[];},
       artway_agent_ai_allegro_zadania:(v)=>{agentAIAllegroZadania=Array.isArray(v)?v:[];},
@@ -3085,7 +3088,7 @@ function adminSzkielet(aktywna, tresc){
     "/admin/wysylki": pobierzZamowienia().filter(z=>!["anulowane","dostarczone","zakończone"].includes(z.status)&&!z.wysylka?.numer).length,
     "/admin/magazyn": produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{const s=stanMagazynuId(p.id),prog=Number(ustawieniaMagazynuPelne().progNiski)||5;return s!==null&&s<=prog;}).length,
     "/admin/infakt": pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane"&&(z.klient?.nip||z.klient?.firma)&&!infaktStan.links?.[z.nr]&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length,
-    "/admin/agent-ai": agentAIAnaliza().filter(x=>x.poziom!=="ok").length,
+    "/admin/agent-ai": agentAIAnalizaAktywna(agentAIAnaliza()).length,
     "/admin/asortyment": opinie.filter(o=>o.status==="oczekuje").length
   };
   return `
@@ -5178,6 +5181,58 @@ function agentAIWstawKomende(tekst){
   input.value=tekst;
   input.focus();
 }
+function agentAIHashTekstu(value=""){
+  let hash=2166136261;
+  for(const char of String(value)){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619);}
+  return (hash>>>0).toString(36);
+}
+function agentAIOdciskZadania(task={}){
+  const id=String(task.id||"zadanie"),poziom=String(task.poziom||"ok");
+  const opis=id==="synchronizacja-danych"?poziom:String(task.opis||"").replace(/\s+/g," ").trim().toLowerCase();
+  return `${id}:${agentAIHashTekstu(`${poziom}|${opis}`)}`;
+}
+function agentAIProduktyWdrozenie(){
+  const addedIds=new Set((produktyDodane||[]).map(p=>String(p.id)));
+  return produktyDoAdministracji().filter(p=>addedIds.has(String(p.id))&&p.agentOnboardingStatus&&p.agentOnboardingStatus!=="completed");
+}
+function agentAISynchronizujCyklZadan(analiza=[]){
+  const now=new Date().toISOString(),next={...(agentAIPlanCykl&&typeof agentAIPlanCykl==="object"?agentAIPlanCykl:{})};let changed=false;
+  for(const task of analiza){
+    const id=String(task.id||"");if(!id)continue;
+    const fingerprint=agentAIOdciskZadania(task),current=next[id];
+    if(task.poziom==="ok"){
+      if(current&&current.state!=="resolved"){
+        next[id]={...current,state:"resolved",resolvedAt:now,lastStatus:"ok",updatedAt:now};changed=true;
+      }
+      continue;
+    }
+    if(!current||current.state==="resolved"||current.fingerprint!==fingerprint){
+      next[id]={id,fingerprint,state:"open",title:task.tytul||id,description:task.opis||"",severity:task.poziom||"warn",firstSeenAt:now,updatedAt:now};changed=true;
+    }else if(current.title!==task.tytul||current.description!==task.opis||current.severity!==task.poziom){
+      next[id]={...current,title:task.tytul||id,description:task.opis||"",severity:task.poziom||"warn",updatedAt:now};changed=true;
+    }
+  }
+  if(changed){agentAIPlanCykl=next;zapiszLS("artway_agent_ai_plan_cykl",agentAIPlanCykl);zaplanujZapisUstawien();}
+  return next;
+}
+function agentAIAnalizaAktywna(analiza=agentAIAnaliza()){
+  const cycle=agentAISynchronizujCyklZadan(analiza);
+  return analiza.filter(task=>task.poziom!=="ok"&&!(cycle[task.id]?.state==="done"&&cycle[task.id]?.fingerprint===agentAIOdciskZadania(task)));
+}
+function agentAIOznaczZadanieWykonane(id,source="administrator"){
+  const analiza=agentAIAnaliza(),task=analiza.find(x=>String(x.id)===String(id));if(!task)return;
+  agentAISynchronizujCyklZadan(analiza);
+  const now=new Date().toISOString(),fingerprint=agentAIOdciskZadania(task),current=agentAIPlanCykl[id]||{};
+  agentAIPlanCykl={...agentAIPlanCykl,[id]:{...current,id:String(id),fingerprint,state:"done",title:task.tytul||id,description:task.opis||"",severity:task.poziom||"warn",completedAt:now,completedBy:sesja?.email||"administrator",completionSource:source,updatedAt:now}};
+  zapiszLS("artway_agent_ai_plan_cykl",agentAIPlanCykl);
+  zapiszHistorieAgenta("zadanie-wykonane",`Zakończono zadanie planu: ${task.tytul}`,{taskId:id,fingerprint,source,opis:task.opis||""});
+  zaplanujZapisUstawien();toast("✅ Zadanie przeniesiono do historii. Wróci tylko, gdy pojawi się nowy problem.");renderuj();
+}
+function agentAIPrzywrocZadanie(id){
+  const current=agentAIPlanCykl?.[id];if(!current)return;
+  agentAIPlanCykl={...agentAIPlanCykl,[id]:{...current,state:"open",reopenedAt:new Date().toISOString(),reopenedBy:sesja?.email||"administrator",updatedAt:new Date().toISOString()}};
+  zapiszLS("artway_agent_ai_plan_cykl",agentAIPlanCykl);zapiszHistorieAgenta("zadanie-przywrocone",`Przywrócono zadanie planu: ${current.title||id}`,{taskId:id});zaplanujZapisUstawien();renderuj();
+}
 function agentAIAnaliza(){
   const zam=pobierzZamowienia(), produktyAdmin=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
   const aktywne=zam.filter(z=>!["anulowane","zakończone","dostarczone"].includes(String(z.status||"").toLowerCase()));
@@ -5204,6 +5259,7 @@ function agentAIAnaliza(){
   const linkiProd=agentAILinkiOczekujace(),linkiDoWyboru=linkiProd.filter(x=>String(x.status||"").toLowerCase()==="wymaga wyboru"),linkiDoPonowienia=agentAILinkiGotoweDoPonowienia();
   const monitoringProducentow=statystykiDostepnosciProducentow(), alertyProducentow=[...monitoringProducentow.braki,...monitoringProducentow.niskie];
   const opisyDoPoprawy=agentAIProduktyZProblememOpisu(500);
+  const produktyWdrozenie=agentAIProduktyWdrozenie();
   const allegroKontrola=aktywneZamowieniaAllegro().map(z=>({z,a:allegroAnalizaMagazynowaZamowienia(z)}));
   const allegroBraki=allegroKontrola.filter(x=>x.a.braki>0||x.a.nierozpoznane>0);
   const allegroOfertaTasks=allegroAktywneZadaniaAgentaOfert();
@@ -5213,6 +5269,7 @@ function agentAIAnaliza(){
   const pozycje=[
     {id:"funkcjonalnosc-strony",poziom:problemyFunkcji.length?"bad":"ok",ikona:"🩺",tytul:"Funkcjonalność strony — priorytet 1",opis:problemyFunkcji.length?`Kontroli wymagają: ${problemyFunkcji.join(", ")}.`:`Baza i sprawdzone integracje krytyczne odpowiadają poprawnie.`,akcja:problemyFunkcji.length?"#/diagnostyka":"plan-bezpieczny"},
     {id:"synchronizacja-danych",poziom:!chmuraStan.admin?"bad":syncStale?"warn":"ok",ikona:"🔄",tytul:"Pobieranie i świeżość danych — priorytet 2",opis:!chmuraStan.admin?"Agent nie ma aktywnego dostępu do wspólnej bazy.":syncAge===null?"Brak potwierdzonego czasu ostatniej synchronizacji.":`Ostatnia synchronizacja wspólnej bazy: ${syncAge} min temu.`,akcja:"plan-bezpieczny"},
+    {id:"wdrozenie-produktow",poziom:produktyWdrozenie.some(p=>p.agentOnboardingStatus==="needs_attention")?"bad":produktyWdrozenie.length?"warn":"ok",ikona:"✨",tytul:"Nowe produkty administratora — wdrożenie Agenta",opis:produktyWdrozenie.length?`${produktyWdrozenie.length} nowych produktów wymaga dokończenia kontroli danych, duplikatów, opisów, zdjęć, producenta, kategorii sklepu lub przygotowania Allegro.`:"Każdy nowy produkt administratora przeszedł pełną kontrolę Agenta.",akcja:"#/admin/agent-ai/produkty"},
     {id:"allegro-magazyn",poziom:allegroBraki.length?"bad":"ok",ikona:"🟠",tytul:"Zlecenia Allegro — braki i pakowanie",opis:allegroBraki.length?`${allegroBraki.length} aktywnych zleceń Allegro wymaga zamówienia brakujących sztuk albo poprawy EAN/SKU.`:`${allegroKontrola.length} aktywnych zleceń Allegro sprawdzono; stany pozwalają na kompletację.`,akcja:"#/admin/allegro/zamowienia"},
     {id:"allegro-oferty-agent",poziom:allegroOfertaTasks.length?"warn":"ok",ikona:"🏷️",tytul:"Agent ofert Allegro",opis:allegroOfertaTasks.length?`${allegroOfertaTasks.length} produktów ma zapisane braki danych albo błąd API wystawiania.`:"Brak otwartych zadań dotyczących ofert Allegro.",akcja:"#/admin/allegro/wystawianie"},
     {id:"allegro-ustawienia-ofert",poziom:allegroDefaultsIssues.length?"warn":"ok",ikona:"♻️",tytul:"Oferty Allegro — stan i wznawianie",opis:allegroDefaultsIssues.length?`${allegroDefaultsIssues.length} starszych ofert wymaga uzupełnienia danych wymaganych przez Allegro, aby włączyć automatyczne wznawianie. Domyślny stan sprzedażowy ${allegroStanOfertyProduktu()} jest niezależny od magazynu.`:`Oferty mają ustawiony domyślny stan ${allegroStanOfertyProduktu()} szt. i automatyczne wznawianie.`,akcja:"#/admin/allegro/ustawienia"},
@@ -5262,6 +5319,7 @@ function agentAIKonkretneDzialanie(x={}){
   };
   if(automatic[x.id])return {...automatic[x.id],mode:"automatic",owner:"Agent AI",requiresApproval:false};
   const approval={
+    "wdrozenie-produktow":{href:"#/admin/agent-ai/produkty",label:"Dokończ nowe produkty",done:"Każdy nowy produkt ma kompletną tożsamość, opis, zdjęcia, producenta, kategorię sklepu i gotowy szkic Allegro."},
     "dostepnosc-producentow":{href:"#/admin/magazyn/dostawcy",label:"Wybierz termin lub ukrycie",done:"Każdy brak i niski stan ma decyzję: automat, termin 1–7 dni, ukrycie lub ręczne pozostawienie sprzedaży."},
     dostepnosc:{href:"#/admin/zamowienia",label:"Potwierdź lub ustaw oczekiwanie",done:"Każde zamówienie ma decyzję: potwierdzone, oczekiwanie 1–2 dni, kontakt z klientem albo brak."},
     sprzedaz:{href:"#/admin/magazyn/dostawcy",label:"Sprawdź powód i wybierz tryb",done:"Każdy wyłączony produkt ma termin albo jasną zasadę automatycznego wznowienia."},
@@ -5365,9 +5423,17 @@ async function agentAIWykonaj(akcja){
   if(akcja==="audyt-magazynu") return audytMagazynuAI();
   if(akcja==="raport-telegram") return agentAIWyslijRaportTelegram();
 }
+async function agentAIWykonajZadaniePlanu(id,akcja){
+  try{
+    await agentAIWykonaj(akcja);
+    if(String(akcja).startsWith("plan-")&&agentAIPlanStan.error)throw new Error(agentAIPlanStan.error);
+    agentAIOznaczZadanieWykonane(id,"agent-action");
+  }catch(e){toast(`⚠️ Zadanie nie zostało zamknięte: ${e.message||e}`);}
+}
 function agentAIPriorytet(x){
   if(x.id==="funkcjonalnosc-strony") return 0;
   if(x.id==="synchronizacja-danych") return .5;
+  if(x.id==="wdrozenie-produktow") return .75;
   if(x.poziom==="bad") return 1;
   if(["wysylki","zatowarowanie","nadrezerwacje","dostepnosc","dostepnosc-producentow"].includes(x.id)) return 2;
   if(x.poziom==="warn") return 3;
@@ -5379,6 +5445,7 @@ function agentAIOpisKroku(x){
     wysylki:"Uzupełnij dane InPost, wygeneruj etykietę i zapisz numer nadania.",
     faktury:"Utwórz lub odśwież szkice FV dla zamówień firmowych.",
     "opisy-produktow":"Uruchom agenta opisów: uzupełni krótki opis i uporządkuje pełny opis bez zmiany danych technicznych.",
+    "wdrozenie-produktow":"Dokończ wdrożenie produktu dodanego przez administratora: tożsamość, duplikaty, opisy, zdjęcia, producent, kategorie sklepu i Allegro.",
     ceny:"Uzupełnij cenę przed sprzedażą, żeby klient nie złożył błędnego zamówienia.",
     magazyn:"Sprawdź produkty z niskim stanem i zdecyduj, czy zamówić uzupełnienie.",
     zatowarowanie:"Przygotuj zamówienie do producenta tylko pod realne braki aktywnych zamówień.",
@@ -5408,12 +5475,12 @@ function agentAICentrumDecyzjiHTML(){
   return `<div class="panel agent-decision-center"><div class="order-section-head"><div><span class="order-pro-label">Kontrola człowieka</span><h2>🧭 Centrum decyzji administratora</h2><p class="order-detail-lead">Agent przygotowuje dane i bezpieczne propozycje, ale w miejscach wpływających na klienta, sprzedaż lub wysyłkę zawsze pokazuje konkretne warianty wyboru.</p></div><span class="lvl ${areas.some(x=>x.count)?"lvl-ostrzezenie":"lvl-ok"}">${areas.reduce((s,x)=>s+x.count,0)} otwartych decyzji</span></div><div class="agent-decision-grid">${areas.map(x=>`<article class="${x.count?"has-items":""}"><header><span>${x.icon}</span><div><b>${esc(x.title)}</b><small>${x.count?`${x.count} wymaga wyboru`:"brak otwartych decyzji"}</small></div><strong>${x.count}</strong></header><div>${x.choices.map(c=>`<span>${esc(c)}</span>`).join("")}</div><a class="btn ghost" href="${x.href}">${x.count?"Podejmij decyzje":"Otwórz moduł"}</a></article>`).join("")}</div></div>`;
 }
 function agentAIPlanOperacyjnyHTML(analiza){
-  const zadania=analiza.filter(x=>x.poziom!=="ok").sort((a,b)=>agentAIPriorytet(a)-agentAIPriorytet(b)).slice(0,8);
+  const zadania=agentAIAnalizaAktywna(analiza).sort((a,b)=>agentAIPriorytet(a)-agentAIPriorytet(b)).slice(0,12);
   const gotowe=analiza.filter(x=>x.poziom==="ok").length;
   const profiles=agentAIProfilePlanow(),selected=profiles[agentAIPlanProfil]||profiles.full,runResults=agentAIPlanStan.results||[],runDone=runResults.filter(x=>x.status==="completed"||x.status==="skipped").length,runErrors=runResults.filter(x=>x.status==="error").length;
   const expected=Math.max(runResults.length,selected.areas.length+selected.local.length),progress=agentAIPlanStan.busy?Math.min(95,Math.round((runDone+runErrors)/Math.max(1,expected)*100)):runResults.length?100:0;
   const runDuration=agentAIPlanStan.startedAt?Math.max(0,Math.round(((agentAIPlanStan.completedAt?Date.parse(agentAIPlanStan.completedAt):Date.now())-Date.parse(agentAIPlanStan.startedAt))/1000)):0;
-  const history=(agentAIPlanStan.history||[]).slice(0,5),retryCount=agentAIBledneObszary().length;
+  const history=(agentAIPlanStan.history||[]).slice(0,5),retryCount=agentAIBledneObszary().length,archive=Object.values(agentAIPlanCykl||{}).filter(x=>["done","resolved"].includes(x.state)).sort((a,b)=>String(b.completedAt||b.resolvedAt||"").localeCompare(String(a.completedAt||a.resolvedAt||""))).slice(0,12);
   return `<div class="panel agent-ops-panel">
     <div class="order-section-head">
       <div><span class="order-pro-label">Centrum wykonawcze</span><h2 style="margin-top:.2rem">🧭 Wykonywalny plan operacyjny</h2><p class="order-detail-lead">Najpierw funkcjonalność strony i świeże dane, następnie zamówienia, wysyłki, magazyn oraz katalog. Każdy krok ma właściciela, czas, wynik i jednoznaczny warunek zakończenia.</p></div>
@@ -5427,26 +5494,52 @@ function agentAIPlanOperacyjnyHTML(analiza){
       ${zadania.length?zadania.map((x,i)=>{const step=agentAIKonkretneDzialanie(x);return `<div class="agent-ops-step ${x.poziom} ${step.mode}">
         <div class="agent-ops-no">${i+1}</div>
         <div><div class="agent-step-heading"><b>${x.ikona} ${esc(x.tytul)}</b><span class="lvl ${step.requiresApproval?"lvl-ostrzezenie":"lvl-ok"}">${step.requiresApproval?"🔐 decyzja":"⚙️ Agent"}</span></div><p>${esc(x.opis)}</p><div class="agent-step-definition"><span><small>KONKRETNE DZIAŁANIE</small><b>${esc(step.label)}</b></span><span><small>WŁAŚCICIEL / CZAS</small><b>${esc(step.owner)} • ${esc(step.eta)}</b></span><span><small>GOTOWE, GDY</small><b>${esc(step.done)}</b></span></div></div>
-        <div>${step.action?`<button class="btn ${step.requiresApproval?"ghost":""}" onclick="agentAIWykonaj(${jsArg(step.action)})">${esc(step.label)}</button>`:`<a class="btn ghost" href="${esc(step.href)}">${esc(step.label)}</a>`}</div>
+        <div class="agent-task-actions">${step.action?`<button class="btn ${step.requiresApproval?"ghost":""}" onclick="agentAIWykonajZadaniePlanu(${jsArg(x.id)},${jsArg(step.action)})">${esc(step.label)}</button>`:`<a class="btn ghost" href="${esc(step.href)}">${esc(step.label)}</a>`}<button class="btn task-complete" type="button" onclick="agentAIOznaczZadanieWykonane(${jsArg(x.id)})">✓ Wykonane</button></div>
       </div>`;}).join(""):`<div class="agent-ops-empty">✅ Brak pilnych tematów. ${gotowe} kontroli ma status OK.</div>`}
     </div>
+    <details class="agent-task-archive" ${zadania.length?"":"open"}><summary>✅ Zakończone zadania (${archive.length})</summary>${archive.length?`<div class="agent-task-archive-list">${archive.map(x=>`<article><span>✓</span><div><b>${esc(x.title||x.id)}</b><small>${esc(x.completedAt?new Date(x.completedAt).toLocaleString("pl-PL"):"rozwiązane automatycznie")} • ${esc(x.completedBy||"Agent")}</small></div>${x.state==="done"?`<button class="btn ghost" onclick="agentAIPrzywrocZadanie(${jsArg(x.id)})">Przywróć</button>`:`<em>problem rozwiązany</em>`}</article>`).join("")}</div>`:`<p class="order-detail-lead">Archiwum wypełni się po oznaczeniu pierwszego zadania jako wykonane.</p>`}</details>
   </div>`;
+}
+function agentAIPodstronaNaglowekHTML(aktywna="pulpit",activeCount=0){
+  if(aktywna==="pulpit")return "";
+  const pages={
+    komendy:["💬","Komendy i odpowiedzi","Wydawaj polecenia zwykłym językiem. Odpowiedzi, wynik działania i audyt pozostają w jednym miejscu."],
+    plan:["🧭","Plan operacyjny","Widzisz wyłącznie aktywne problemy. Wykonane zadania trafiają do historii i wracają tylko po nowym zdarzeniu."],
+    produkty:["✨","Wdrożenie nowych produktów","Agent koncentruje się na produktach dodawanych przez administratora i prowadzi je od kartoteki do gotowości sklepu oraz Allegro."],
+    zlecenia:["📑","Zlecenia i tabele producentów","Bieżące dokumenty robocze, ilości, zatwierdzenia i wysyłka do producentów bez mieszania z archiwum."],
+    producenci:["🏭","Producenci i kontakt","Kartoteki dostawców, adresy zamówień, warunki współpracy i szablony korespondencji."],
+    pamiec:["🧠","Pamięć i procedury","Reguły zapisane dla Agenta. Możesz je przeglądać, usuwać i dodawać nowe przez Komendy."],
+    historia:["🕓","Historia i audyt","Zakończone zadania, wykonania planów oraz pełny rejestr działań administratora i Agenta."]
+  },page=pages[aktywna]||pages.plan;
+  return `<section class="panel agent-page-header"><div><span>${page[0]}</span><div><span class="order-pro-label">Agent AI</span><h1>${esc(page[1])}</h1><p>${esc(page[2])}</p></div></div><div><b>${activeCount}</b><small>aktywnych zadań</small></div></section>`;
+}
+function agentAIProduktyWdrozeniePanelHTML(){
+  const addedIds=new Set((produktyDodane||[]).map(p=>String(p.id))),items=produktyDoAdministracji().filter(p=>addedIds.has(String(p.id))).sort((a,b)=>String(b.createdAt||b.agentImportAt||b.id||"").localeCompare(String(a.createdAt||a.agentImportAt||a.id||""))).slice(0,100),rows=items.map(p=>({p,state:agentAIStanWdrozeniaProduktu(p),status:p.agentOnboardingStatus||"not_started"})),completed=rows.filter(x=>x.status==="completed"&&x.state.ready).length,attention=rows.filter(x=>x.status==="needs_attention"||!x.state.ready).length,processing=rows.filter(x=>x.status==="processing").length;
+  return `<section class="panel agent-product-onboarding-page"><div class="order-section-head"><div><span class="order-pro-label">Priorytet administratora</span><h2>✨ Wdrożenie nowych produktów</h2><p class="order-detail-lead">Każdy produkt przechodzi sześć kontroli. Agent nie tworzy duplikatu i nie ukrywa braków — pokazuje je przy konkretnej kartotece.</p></div><div class="diag-actions"><a class="btn" href="#/admin/produkty/dodaj">＋ Pusty produkt</a><a class="btn ghost" href="#/admin/produkty/z-linku">🔗 Dodaj z linku</a></div></div><div class="orders-stat-grid"><div class="order-stat-card ${attention?"hot":""}"><span>⚠️</span><b>${attention}</b><small>wymaga uzupełnienia</small></div><div class="order-stat-card"><span>⏳</span><b>${processing}</b><small>w trakcie kontroli</small></div><div class="order-stat-card money"><span>✅</span><b>${completed}</b><small>gotowych produktów</small></div><div class="order-stat-card"><span>📦</span><b>${rows.length}</b><small>produktów administratora</small></div></div><div class="agent-product-onboarding-list">${rows.map(({p,state,status})=>`<article class="${state.ready?"ready":"attention"}"><div class="agent-product-onboarding-main">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa||"Produkt bez nazwy")}</b><small>ID ${esc(p.id)} • EAN ${esc(p.gtin||p.ean||"—")} • ${esc(p.producent||p.marka||"producent —")}</small><em>${status==="processing"?"Agent pracuje":state.ready?"gotowy":"wymaga uzupełnienia"} • ${state.done}/${state.total} kontroli</em></div></div><div class="product-agent-checks">${state.checks.map(x=>`<span class="${x.ok?"done":"wait"}">${x.ok?"✓":"○"} ${esc(x.label)}</span>`).join("")}</div><div class="warehouse-worktable-actions"><button class="btn" onclick="agentAIUruchomWdrozenieProduktu(${jsArg(p.id)},this)" ${status==="processing"?"disabled":""}>🤖 ${status==="processing"?"Kontrola…":"Sprawdź i uzupełnij"}</button><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj</a></div></article>`).join("")||`<div class="agent-ops-empty">Nie dodano jeszcze własnych produktów. Użyj pustego formularza albo pobierania z linku producenta.</div>`}</div></section>`;
+}
+function agentAIPamiecPanelHTML(){
+  const memory=(agentAIPamiec||[]).slice(0,100);
+  return `<section class="panel agent-memory-page"><div class="order-section-head"><div><span class="order-pro-label">Procedury trwałe</span><h2>🧠 Pamięć Agenta</h2><p class="order-detail-lead">Każda reguła synchronizuje się między urządzeniami. Agent stosuje ją jako podpowiedź, ale działania zewnętrzne nadal wymagają zatwierdzenia.</p></div><a class="btn" href="#/admin/agent-ai/komendy" onclick="setTimeout(()=>agentAIWstawKomende('zapamiętaj: '),80)">＋ Naucz Agenta</a></div><div class="orders-stat-grid"><div class="order-stat-card"><span>🧠</span><b>${memory.length}</b><small>zapisanych procedur</small></div><div class="order-stat-card money"><span>☁️</span><b>${chmuraStan.admin?"TAK":"NIE"}</b><small>synchronizacja wspólna</small></div></div>${memory.length?`<div class="agent-memory-list">${memory.map(x=>`<article class="agent-memory-item"><div><b>${esc(x.wyzwalacz||"Procedura")}</b><p>${esc(x.akcja||x.tresc)}</p><small>${esc(x.dataTxt||"")} • ${esc(x.operator||"")}</small></div><button class="btn danger" type="button" onclick="agentAIUsunPamiec(${jsArg(x.id)})">Usuń</button></article>`).join("")}</div>`:`<div class="agent-ops-empty">Nie ma jeszcze zapisanych procedur. Przejdź do Komend i wpisz „zapamiętaj: …”.</div>`}</section>`;
+}
+function agentAIHistoriaPanelHTML(){
+  const archive=Object.values(agentAIPlanCykl||{}).filter(x=>["done","resolved"].includes(x.state)).sort((a,b)=>String(b.completedAt||b.resolvedAt||"").localeCompare(String(a.completedAt||a.resolvedAt||""))).slice(0,100),history=(agentAIHistoria||[]).slice(0,100),runs=(agentAIPlanStan.history||[]).slice(0,20);
+  return `<section class="panel agent-history-page"><div class="order-section-head"><div><span class="order-pro-label">Pełna rozliczalność</span><h2>🕓 Historia Agenta</h2><p class="order-detail-lead">Aktywne zadania nie mieszają się z wykonanymi. Każde zakończenie zawiera operatora i moment wykonania.</p></div><button class="btn ghost" onclick="agentAIPobierzHistorieWykonan()">↻ Odśwież audyt serwera</button></div><div class="orders-stat-grid"><div class="order-stat-card money"><span>✅</span><b>${archive.length}</b><small>zakończonych zadań</small></div><div class="order-stat-card"><span>🧭</span><b>${runs.length}</b><small>wykonań planu</small></div><div class="order-stat-card"><span>🧾</span><b>${history.length}</b><small>operacji w rejestrze</small></div></div><details class="agent-history-section" open><summary>Zakończone zadania (${archive.length})</summary>${archive.length?`<div class="agent-task-archive-list">${archive.map(x=>`<article><span>✓</span><div><b>${esc(x.title||x.id)}</b><small>${esc(new Date(x.completedAt||x.resolvedAt).toLocaleString("pl-PL"))} • ${esc(x.completedBy||"Agent")}</small><p>${esc(x.description||"")}</p></div>${x.state==="done"?`<button class="btn ghost" onclick="agentAIPrzywrocZadanie(${jsArg(x.id)})">Przywróć</button>`:`<em>rozwiązane</em>`}</article>`).join("")}</div>`:`<div class="agent-ops-empty">Brak zakończonych zadań.</div>`}</details><details class="agent-history-section"><summary>Rejestr działań (${history.length})</summary><div class="warehouse-worktable-wrap"><table class="log-table"><tr><th>Data</th><th>Typ</th><th>Opis</th><th>Operator</th></tr>${history.map(h=>`<tr><td>${esc(h.dataTxt||"")}</td><td><span class="lvl lvl-info">${esc(h.typ||"akcja")}</span></td><td>${esc(h.opis||"")}</td><td>${esc(h.operator||"")}</td></tr>`).join("")||`<tr><td colspan="4">Brak działań.</td></tr>`}</table></div></details></section>`;
 }
 function widokAdminAgentAI(sekcja="pulpit"){
   const analiza=agentAIAnaliza();
-  const aktywna=["pulpit","komendy","plan","zlecenia","producenci","pamiec","historia"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
-  const problemy=analiza.filter(x=>x.poziom!=="ok").length;
-  const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
+  const aktywna=["pulpit","komendy","plan","produkty","zlecenia","producenci","pamiec","historia"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
+  const aktywneZadania=agentAIAnalizaAktywna(analiza),problemy=aktywneZadania.length;
+  const score=Math.max(0,Math.round(100-(aktywneZadania.filter(x=>x.poziom==="bad").length*18)-(aktywneZadania.filter(x=>x.poziom==="warn").length*8)));
   const plan=potrzebyZatowarowania().slice(0,8);
   const odpowiedziAgenta=(agentAIHistoria||[]).filter(h=>h.typ==="komenda"&&h.dane&&h.dane.odpowiedz).slice(0,5);
-  const pamiecAgenta=(agentAIPamiec||[]).slice(0,12);
   const linkiProducentow=agentAILinkiOczekujace();
   const komunikacja=allegroKomunikacjaStaty(),komunikacjaDoOdpowiedzi=[...(komunikacja.threads||[]),...(komunikacja.issues||[])].filter(x=>!x.internalResolved&&(x.humanReplyNeeded||x.needsReply)).length;
   const aktywneWysylki=pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn),wysylkiBezNumeru=aktywneWysylki.filter(z=>!daneWysylki(z).numer).length;
   const dokumentyProducentow=(agentAIZlecenia||[]).filter(z=>!agentAIStatusZamknietyDlaNowejWersji(z.status)).length;
   return adminSzkielet("/admin/agent-ai", `
   ${agentAISubnavHTML(aktywna)}
-  <div class="panel ai-agent-panel">
+  ${agentAIPodstronaNaglowekHTML(aktywna,problemy)}
+  <div class="panel ai-agent-panel" style="${aktywna==="pulpit"?"":"display:none"}">
     <div class="ai-agent-hero">
       <div>
         <span class="cat-label">Automatyczny kontroler administratora</span>
@@ -5482,7 +5575,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
     </div>
   </div>
   <div class="panel agent-site-map" style="${aktywna==="pulpit"?"":"display:none"}"><div class="order-section-head"><div><span class="order-pro-label">Kontekst całej strony</span><h2>🧩 Obszary pracy Agenta</h2><p class="order-detail-lead">Każdy raport i polecenie korzysta z tych samych danych oraz kieruje do właściwej podstrony.</p></div></div><div class="agent-site-grid">${[["📦","Zamówienia",pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).length,"#/admin/zamowienia","pokaż zamówienia"],["💬","Komunikacja",komunikacjaDoOdpowiedzi,"#/admin/allegro/wiadomosci","pokaż komunikację z klientami"],["🚚","InPost",wysylkiBezNumeru,"#/admin/wysylki","sprawdź wysyłki"],["🟠","Allegro",aktywneZamowieniaAllegro().length,"#/admin/allegro","sprawdź Allegro"],["🏬","Magazyn",potrzebyZatowarowania().length,"#/admin/magazyn/stany","pokaż stan magazynu"],["🏷️","Produkty",allegroAktywneZadaniaAgentaOfert().length,"#/admin/asortyment/produkty","audyt produktów"],["🏭","Producenci",dokumentyProducentow,"#/admin/agent-ai/producenci","status producentów"],["🛠️","Integracje",stanBramki.email?.configured&&stanBramki.inpost?.configured?0:1,"#/diagnostyka","diagnostyka integracji"]].map(([ico,name,count,href,command])=>`<article><span>${ico}</span><div><b>${name}</b><small>${count?`${count} tematów aktywnych`:"bez pilnych tematów"}</small></div><a class="btn ghost" href="${href}">Otwórz</a><button class="btn ghost" onclick="location.hash='#/admin/agent-ai/komendy';setTimeout(()=>agentAIWstawKomende(${jsArg(command)}),60)">Zapytaj</button></article>`).join("")}</div></div>
-  <div class="panel agent-command-panel" style="${["pulpit","komendy","pamiec"].includes(aktywna)?"":"display:none"}">
+  <div class="panel agent-command-panel" style="${aktywna==="komendy"?"":"display:none"}">
     <div class="order-section-head">
       <div>
         <h2 style="margin-top:0">💬 Polecenie dla agenta</h2>
@@ -5515,22 +5608,6 @@ function widokAdminAgentAI(sekcja="pulpit"){
       </div>
     </form>
     <div class="agent-command-hints">Agent rozumie kontekst całej strony: zamówienia, komunikację klientów, wysyłki InPost, Allegro, magazyn, produkty, producentów, faktury, płatności, integracje, pamięć procedur i raporty Telegram.</div>
-    <div class="agent-memory-grid">
-      <div class="agent-memory-card">
-        <b>Jak uczyć agenta</b>
-        <small>Przykład: <code>zapamiętaj: gdy napiszę pilne braki to pokaż braki do zamówień i przygotuj szkic do producenta</code>. Agent zapisze to jako procedurę i będzie ją podpowiadał później.</small>
-      </div>
-      <div class="agent-memory-card">
-        <b>Zapamiętane procedury: ${pamiecAgenta.length}</b>
-        <small>Pamięć synchronizuje się przez wspólną bazę razem z ustawieniami sklepu, jeśli panel jest połączony z serwerem.</small>
-      </div>
-    </div>
-    ${pamiecAgenta.length?`<div class="agent-memory-list">
-      ${pamiecAgenta.map(x=>`<div class="agent-memory-item">
-        <div><b>${esc(x.wyzwalacz||"Procedura")}</b><p>${esc(x.akcja||x.tresc)}</p><small>${esc(x.dataTxt||"")} • ${esc(x.operator||"")}</small></div>
-        <button class="btn danger" type="button" onclick="agentAIUsunPamiec(${jsArg(x.id)})">Usuń</button>
-      </div>`).join("")}
-    </div>`:""}
     ${odpowiedziAgenta.length?`<div class="agent-response-list">
       ${odpowiedziAgenta.map(h=>`<div class="agent-response-card">
         <div class="agent-response-head"><b>${esc(h.dane.polecenie||"Polecenie")}</b><small>${esc(h.dataTxt||"")}</small></div>
@@ -5538,6 +5615,8 @@ function widokAdminAgentAI(sekcja="pulpit"){
       </div>`).join("")}
     </div>`:`<p class="order-detail-lead" style="margin-bottom:0">Brak zapisanych poleceń z panelu. Wpisz pierwsze polecenie powyżej.</p>`}
   </div>
+  <div style="${aktywna==="pamiec"?"":"display:none"}">${agentAIPamiecPanelHTML()}</div>
+  <div style="${aktywna==="produkty"?"":"display:none"}">${agentAIProduktyWdrozeniePanelHTML()}</div>
   <div style="${["komendy","plan"].includes(aktywna)?"":"display:none"}">${agentAILinkiProducentowPanelHTML()}</div>
   <div style="${aktywna==="plan"?"":"display:none"}">${agentAIPlanOperacyjnyHTML(analiza)}${agentAICentrumDecyzjiHTML()}
   ${plan.length?`<div class="panel">
@@ -5553,27 +5632,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
   </div>`:""}</div>
   <div style="${aktywna==="zlecenia"?"":"display:none"}">${agentAIZleceniaPanelHTML()}</div>
   <div style="${aktywna==="producenci"?"":"display:none"}">${producenciKartotekaPanelHTML()}</div>
-  <div class="panel" style="${aktywna==="plan"?"":"display:none"}">
-    <h2 style="margin-top:0">Lista kontroli agenta</h2>
-    <div class="ai-task-list">
-      ${analiza.map(x=>`<div class="ai-task ${x.poziom}">
-        <div class="ai-task-ico">${x.ikona}</div>
-        <div><b>${esc(x.tytul)}</b><p>${esc(x.opis)}</p></div>
-        <div>${String(x.akcja||"").startsWith("#")?`<a class="btn ghost" href="${esc(x.akcja)}">Otwórz</a>`:x.akcja?`<button class="btn ghost" onclick="agentAIWykonaj(${jsArg(x.akcja)})">Wykonaj</button>`:`<span class="lvl lvl-ok">OK</span>`}</div>
-      </div>`).join("")}
-    </div>
-  </div>
-  <div class="panel" style="${aktywna==="historia"?"":"display:none"}">
-    <div class="order-section-head"><div><h2 style="margin-top:0">Historia działań agenta</h2><p class="order-detail-lead">Audyty i akcje wykonywane przyciskiem administratora.</p></div></div>
-    <table class="log-table">
-      <tr><th>Data</th><th>Typ</th><th>Opis</th><th>Operator</th></tr>
-      ${(agentAIHistoria||[]).slice(0,12).map(h=>`<tr><td>${esc(h.dataTxt||"")}</td><td><span class="lvl lvl-info">${esc(h.typ||"akcja")}</span></td><td>${esc(h.opis||"")}</td><td>${esc(h.operator||"")}</td></tr>`).join("") || `<tr><td colspan="4">Brak działań agenta w historii.</td></tr>`}
-    </table>
-  </div>
-  <div class="panel" style="${aktywna==="historia"?"":"display:none"}">
-    <h2 style="margin-top:0">Kolejny etap agenta</h2>
-    <p>Ten moduł jest przygotowany pod późniejsze podłączenie prawdziwego modelu AI po stronie serwera. Token API nie będzie trafiał do przeglądarki ani localStorage. Agent będzie mógł przygotowywać propozycje zmian, ale trwałe akcje administracyjne zostaną pod kontrolą panelu.</p>
-  </div>`);
+  <div style="${aktywna==="historia"?"":"display:none"}">${agentAIHistoriaPanelHTML()}</div>`);
 }
 let filtrZamowien = "wszystkie", szukajZamowien = "";
 function klientZamowieniaLabel(z){
@@ -5994,7 +6053,11 @@ async function allegroDodajProduktZOferty(offerId){
     allegroOfferId:String(o.id||"").trim(),
     allegroCategoryId:String(o.categoryId||"").trim(),
     allegroProductId:String(o.productId||"").trim(),
-    allegroShippingSubsidy:ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI
+    allegroShippingSubsidy:ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI,
+    createdAt:new Date().toISOString(),
+    createdBy:sesja?.email||"administrator",
+    agentOnboardingStatus:"processing",
+    agentOnboardingStartedAt:new Date().toISOString()
   };
   if(o.descriptionText) p.opis=o.descriptionText;
   const poprawiony=agentAIPoprawOpisyDanychProduktu(p);
@@ -6002,6 +6065,9 @@ async function allegroDodajProduktZOferty(offerId){
   zapiszLS("artway_produkty_dodane",produktyDodane);
   zbudujProdukty();
   await allegroMapujOferte(o.id,id);
+  const onboardingProduct=pobierzProduktAdmin(id)||poprawiony,onboardingState=agentAIStanWdrozeniaProduktu(onboardingProduct),onboardingStatus=onboardingState.ready?"completed":"needs_attention";
+  zapiszPolaProduktuLokalnie(id,{agentOnboardingStatus:onboardingStatus,agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingCompletedAt:onboardingStatus==="completed"?new Date().toISOString():"",agentOnboardingMissing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)},false);
+  zapiszHistorieAgenta("wdrozenie-produktu",`${onboardingStatus==="completed"?"Zakończono":"Rozpoczęto"} wdrożenie produktu utworzonego z Allegro: ${poprawiony.nazwa}`,{produktId:id,status:onboardingStatus,missing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)});zaplanujZapisUstawien();
   toast("Produkt utworzony z Allegro i podpięty");
 }
 function produktDlaAllegroZFormularza(form,id,poprzedni={}){
@@ -7013,19 +7079,21 @@ function infaktSubnavHTML(aktywny="pulpit"){
 }
 function agentAISubnavHTML(aktywny="pulpit"){
   const analiza=agentAIAnaliza();
-  const problemy=analiza.filter(x=>x.poziom!=="ok").length;
-  const plan=potrzebyZatowarowania().length;
-  const zlecenia=(agentAIZlecenia||[]).length;
+  const aktywneZadania=agentAIAnalizaAktywna(analiza),problemy=aktywneZadania.length;
+  const plan=aktywneZadania.length;
+  const produktyWdrozenie=agentAIProduktyWdrozenie().length;
+  const zlecenia=(agentAIZlecenia||[]).filter(z=>!agentAIStatusZamknietyDlaNowejWersji(z.status)).length;
   const producenciGotowi=(producenciKartoteka||[]).filter(p=>p.active!==false&&p.orderEmail).length;
   const pamiec=(agentAIPamiec||[]).length;
   return adminSubnavHTML([
     {id:"pulpit",href:"#/admin/agent-ai",label:"🤖 Pulpit",badge:problemy||""},
     {id:"komendy",href:"#/admin/agent-ai/komendy",label:"💬 Komendy"},
     {id:"plan",href:"#/admin/agent-ai/plan",label:"🧭 Plan operacyjny",badge:plan||""},
+    {id:"produkty",href:"#/admin/agent-ai/produkty",label:"✨ Nowe produkty",badge:produktyWdrozenie||""},
     {id:"zlecenia",href:"#/admin/agent-ai/zlecenia",label:"📑 Zlecenia i tabela",badge:zlecenia||""},
     {id:"producenci",href:"#/admin/agent-ai/producenci",label:"🏭 Producenci i kontakt",badge:producenciGotowi||""},
     {id:"pamiec",href:"#/admin/agent-ai/pamiec",label:"🧠 Pamięć",badge:pamiec||""},
-    {id:"historia",href:"#/admin/agent-ai/historia",label:"🕓 Historia"}
+    {id:"historia",href:"#/admin/agent-ai/historia",label:"🕓 Historia",badge:Object.values(agentAIPlanCykl||{}).filter(x=>["done","resolved"].includes(x.state)).length||""}
   ],aktywny);
 }
 function klienciSubnavHTML(aktywny="lista"){
@@ -8889,6 +8957,28 @@ function aktualizujKalkulatorCenProduktu(form){
   const product={cena:sklep,cenaAllegro:allegro,cenaZakupu:zakup,allegroCommissionAmount:form.elements.allegroCommissionAmount?.value,allegroCommissionRate:form.elements.allegroCommissionRate?.value,allegroRecurringFees:form.elements.allegroRecurringFees?.value,allegroFeePrice:form.elements.allegroFeePrice?.value||allegro,kosztPakowania:form.elements.kosztPakowania?.value,sklepAdditionalCost:form.elements.sklepAdditionalCost?.value,sklepPaymentPercent:form.elements.sklepPaymentPercent?.value,allegroAdditionalCost:form.elements.allegroAdditionalCost?.value,allegroShippingSubsidy:form.elements.allegroShippingSubsidy?.value||ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI,allegroAdsPercent:form.elements.allegroAdsPercent?.value,allegroFeeCalculatedAt:form.elements.allegroFeeCalculatedAt?.value},r=allegroRentownoscProduktu(product,allegro),s=sklepRentownoscProduktu(product,sklep);
   el.innerHTML=`<span><small>Sklep • cena</small><b>${sklep?zl(sklep):"—"}</b></span><span class="${s.profit<0?"is-negative":""}"><small>Sklep • zysk/marża</small><b>${zakup?`${zl(s.profit)} • ${s.margin.toFixed(1)}%`:"—"}</b></span><span><small>Sklep • cel ${sklepDocelowaMarza}%</small><b>${zakup?zl(s.recommended):"—"}</b></span><span><small>Allegro • cena</small><b>${allegro?zl(allegro):"—"}</b></span><span><small>Allegro • prowizja</small><b>${r.commission?`${zl(r.commission)} • ${r.commissionRate.toFixed(2)}%`:"—"}</b></span><span class="${r.profit<0?"is-negative":""}"><small>Allegro • zysk/marża</small><b>${zakup?`${zl(r.profit)} • ${r.margin.toFixed(1)}%`:"—"}</b></span><span><small>Allegro • cel ${allegroDocelowaMarza}%</small><b>${zakup?zl(r.recommended):"—"}</b></span>`;
 }
+function agentAIStanWdrozeniaProduktu(p={}){
+  const checks=[
+    {id:"identity",label:"EAN lub kod",ok:!!(p.gtin||p.ean||p.mpn||p.kodProducenta)},
+    {id:"content",label:"Opis krótki i pełny",ok:!!(p.opisKrotki&&p.opis)},
+    {id:"images",label:"Zdjęcie",ok:!!p.zdjecie},
+    {id:"producer",label:"Producent",ok:!!(p.producent||p.marka)},
+    {id:"store",label:"Cena i kategoria sklepu",ok:!!(kwotaNum(p.cena)>0&&p.kategoria)},
+    {id:"allegro",label:"Kategoria/katalog Allegro",ok:!!(p.allegroCategoryId&&(p.allegroProductId||p.gtin||p.ean))}
+  ];
+  return {checks,done:checks.filter(x=>x.ok).length,total:checks.length,ready:checks.every(x=>x.ok)};
+}
+function agentAIWdrozenieProduktuHTML(p={},edycja=false){
+  const state=agentAIStanWdrozeniaProduktu(p),status=p.agentOnboardingStatus||(!p.id?"new":"not_started"),busy=status==="processing";
+  return `<section class="product-agent-onboarding ${state.ready?"is-ready":busy?"is-busy":"needs-work"}"><header><div><span class="order-pro-label">Najwyższy priorytet przy dodawaniu</span><h3>🤖 Agent wdrożenia produktu</h3><p>Agent pilnuje kompletności, duplikatów, opisów, zdjęć, producenta, kategorii sklepu i przygotowania Allegro.</p></div><strong>${state.done}/${state.total}</strong></header><div class="product-agent-checks">${state.checks.map(x=>`<span class="${x.ok?"done":"wait"}">${x.ok?"✓":"○"} ${esc(x.label)}</span>`).join("")}</div><footer><small>${state.ready?"Produkt ma komplet kluczowych danych.":busy?"Agent kończy kontrolę i uzupełnianie danych…":"Brakujące pola pozostają widoczne i trafią do planu operacyjnego Agenta."}</small>${edycja?`<button class="btn" type="button" onclick="agentAIUruchomWdrozenieProduktu(${jsArg(p.id)},this)" ${busy?"disabled":""}>${busy?"⏳ Kontrola…":"🤖 Sprawdź i uzupełnij"}</button>`:""}</footer></section>`;
+}
+async function agentAIUruchomWdrozenieProduktu(id,button=null){
+  const product=pobierzProduktAdmin(Number(id));if(!product)return null;
+  if(button)button.disabled=true;zapiszPolaProduktuLokalnie(id,{agentOnboardingStatus:"processing",agentOnboardingStartedAt:new Date().toISOString()},false);renderuj();
+  const result=await allegroSynchronizujPowiazanyProduktPoZapisie(product,{forceFees:true}),updated=pobierzProduktAdmin(Number(id))||product,state=agentAIStanWdrozeniaProduktu(updated),status=result?.ok&&state.ready?"completed":"needs_attention";
+  zapiszPolaProduktuLokalnie(id,{agentOnboardingStatus:status,agentOnboardingCompletedAt:status==="completed"?new Date().toISOString():"",agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingMissing:state.checks.filter(x=>!x.ok).map(x=>x.id)},false);
+  zapiszHistorieAgenta("wdrozenie-produktu",`${status==="completed"?"Zakończono":"Sprawdzono"} wdrożenie produktu: ${updated.nazwa||id}`,{produktId:id,status,missing:state.checks.filter(x=>!x.ok).map(x=>x.id)});zaplanujZapisUstawien();toast(status==="completed"?"✅ Agent zakończył wdrożenie produktu":"⚠️ Agent wskazał pola wymagające uzupełnienia");renderuj();return {result,status};
+}
 function formularzProduktu(p, tryb){
   p=domyslneKosztyDoProduktu(p||{},false);
   const wszystkie = produktyDoAdministracji();
@@ -8897,6 +8987,7 @@ function formularzProduktu(p, tryb){
   const ofertaAllegro=maTozsamoscProduktu?allegroOfertaDlaProduktuSklepu(p):null,ofertaAllegroId=String(p.allegroOfferId||ofertaAllegro?.id||"").trim(),rentownosc=allegroRentownoscProduktu(p),rentownoscSklep=sklepRentownoscProduktu(p);
   return `
     <form class="product-editor-form" data-product-id="${esc(p.id||0)}" onsubmit="${edycja?`zapiszProduktAdmin(event,${p.id})`:"dodajProdukt(event)"}">
+      ${agentAIWdrozenieProduktuHTML(p,edycja)}
       <div class="backend-note" style="margin-bottom:.8rem">
         <b>Źródło producenta / automatyczne uzupełnienie:</b> wklej adres produktu producenta, np. strona Alexandra. Panel pobierze nazwę, opis, cenę, EAN/kod producenta, zdjęcia i dostępność, a brakujące dane dopisze do edytora.
         <div class="shipment-inline-control product-url-control" style="margin-top:.55rem">
@@ -9135,6 +9226,7 @@ async function dodajProdukt(e){
     toast(`Duplikat zablokowany — istnieje już produkt #${blockingDuplicate.product.id}`);return;
   }
   if(e.target.dataset.agentAdd==="1"||e.target.dataset.agentLinkSource){p.agentImportAt=new Date().toISOString();p.agentImportConfidence=Number(e.target.dataset.agentLinkConfidence||0)||0;p.agentImportSource=agentAIImportUrlStan.data?.fromCache?"pamięć Agenta":"link producenta";p.agentImportUrl=e.target.dataset.agentLinkSource||p.sourceUrl||p.producentUrl||"";}
+  p.createdAt=p.createdAt||new Date().toISOString();p.createdBy=sesja?.email||"administrator";p.agentOnboardingStatus="processing";p.agentOnboardingStartedAt=new Date().toISOString();
   produktyDodane.push(p); zapiszLS("artway_produkty_dodane", produktyDodane);
   zapiszStanZFormularza(f, p.id);
   agentAIZakonczLinkProducenta(prefillMeta._agentLinkId||prefillMeta._agentLinkUrl||p.sourceUrl||p.producentUrl,p);
@@ -9145,7 +9237,9 @@ async function dodajProdukt(e){
   loguj("info","Dodano produkt: "+p.nazwa+" ("+zl(p.cena)+")");
   toast("Produkt dodany ✅");
   toast("Produkt zapisany. Automat dobiera dane, kategorię, opisy i opłaty…");
-  await allegroSynchronizujPowiazanyProduktPoZapisie(p,{forceFees:true});
+  const onboardingResult=await allegroSynchronizujPowiazanyProduktPoZapisie(p,{forceFees:true}),onboardingProduct=pobierzProduktAdmin(Number(p.id))||p,onboardingState=agentAIStanWdrozeniaProduktu(onboardingProduct),onboardingStatus=onboardingResult?.ok&&onboardingState.ready?"completed":"needs_attention";
+  zapiszPolaProduktuLokalnie(p.id,{agentOnboardingStatus:onboardingStatus,agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingCompletedAt:onboardingStatus==="completed"?new Date().toISOString():"",agentOnboardingMissing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)},false);
+  zapiszHistorieAgenta("wdrozenie-produktu",`${onboardingStatus==="completed"?"Zakończono":"Rozpoczęto"} wdrożenie nowego produktu: ${p.nazwa}`,{produktId:p.id,status:onboardingStatus,missing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)});zaplanujZapisUstawien();
   if(submit)submit.disabled=false;
   if(["/admin/produkty/dodaj","/admin/produkty/z-linku"].includes(trasa())) location.hash="#/admin/produkty"; else renderuj();
 }
@@ -9210,10 +9304,10 @@ async function zapiszProduktAdmin(e,id){
 function duplikujProdukt(id){
   const p = pobierzProduktAdmin(id); if(!p) return;
   const maxId = Math.max(0, ...prodBazowe.map(x=>x.id), ...produktyDodane.map(x=>x.id));
-  const kopia = {...p, id:maxId+1, nazwa:p.nazwa+" — kopia"};
+  const kopia = {...p,id:maxId+1,nazwa:p.nazwa+" — kopia",createdAt:new Date().toISOString(),createdBy:sesja?.email||"administrator",agentOnboardingStatus:"needs_attention",agentOnboardingStartedAt:new Date().toISOString(),agentOnboardingMissing:["identity"]};
   produktyDodane.push(kopia);
   zapiszLS("artway_produkty_dodane", produktyDodane);
-  zbudujProdukty(); loguj("info",`Zduplikowano produkt ${id} jako ${kopia.id}`);
+  zbudujProdukty();zapiszHistorieAgenta("wdrozenie-produktu",`Nowa kopia produktu wymaga kontroli Agenta: ${kopia.nazwa}`,{produktId:kopia.id,status:"needs_attention",sourceProductId:id});zaplanujZapisUstawien();loguj("info",`Zduplikowano produkt ${id} jako ${kopia.id}`);
   toast("Utworzono kopię produktu 📄");
   location.hash="#/admin/produkty/edytuj/"+kopia.id;
 }

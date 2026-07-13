@@ -84,6 +84,10 @@ requireMarkers('assets/styles.css', css, [
   '.warehouse-stock-card',
   '.warehouse-stock-toolbar',
   '.agent-site-grid',
+  '.agent-page-header',
+  '.agent-task-archive',
+  '.product-agent-onboarding',
+  '.agent-product-onboarding-list',
   '.infakt-hero',
   '.infakt-order-card',
   '.store-duplicate-center',
@@ -208,6 +212,12 @@ requireMarkers('assets/app.js', app, [
   'function agentAIWyslijRaportTelegram',
   'function agentAIWykonajPlanBezpieczny',
   'function agentAIKonkretneDzialanie',
+  'artway_agent_ai_plan_cykl',
+  'function agentAIAnalizaAktywna',
+  'function agentAIOznaczZadanieWykonane',
+  'Wróci tylko, gdy pojawi się nowy problem',
+  'function agentAIProduktyWdrozeniePanelHTML',
+  'Najwyższy priorytet przy dodawaniu',
   'Wykonaj bezpieczne działania',
   'Funkcjonalność strony — priorytet 1',
   'Pobieranie i świeżość danych — priorytet 2',
@@ -263,6 +273,16 @@ requireMarkers('assets/app.js', app, [
   'function infaktZapiszDostawcow',
   'inFakt i faktury',
 ]);
+
+if (!app.includes('"/admin/agent-ai": agentAIAnalizaAktywna(agentAIAnaliza()).length')) {
+  fail('assets/app.js: licznik Agent AI musi uwzględniać wyłącznie aktywne zadania');
+}
+if (!app.includes('akcja:"#/admin/agent-ai/produkty"') || !app.includes('href:"#/admin/agent-ai/produkty"')) {
+  fail('assets/app.js: zadanie wdrożenia produktu musi prowadzić do dedykowanej podstrony Agenta');
+}
+if (!app.includes('agentOnboardingStatus="processing"') && !app.includes('agentOnboardingStatus:"processing"')) {
+  fail('assets/app.js: nowy produkt administratora nie uruchamia priorytetowej kontroli Agenta');
+}
 
 requireMarkers('netlify/functions/store.mjs', storeEntry, [
   "import handler from './lib/store-app.mjs'",
