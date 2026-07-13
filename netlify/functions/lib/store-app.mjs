@@ -2328,6 +2328,24 @@ function htmlDecode(s = '') {
 function stripHtml(s = '') {
   return htmlDecode(String(s || '').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
 }
+function stripHtmlZPodzialem(s = '') {
+  return htmlDecode(String(s || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<li\b[^>]*>/gi, '\n• ')
+    .replace(/<\/(?:li|p|div|section|article|ul|ol|h[1-6])>/gi, '\n')
+    .replace(/<(?:p|div|section|article|ul|ol|h[1-6])\b[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' '))
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.replace(/[\t ]+/g, ' ').trim())
+    .filter(Boolean)
+    .filter((line, index, lines) => index === 0 || line !== lines[index - 1])
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 function attrHtml(tag = '', name = '') {
   const n = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`\\s${n}\\s*=\\s*["']([^"']*)["']`, 'i');
@@ -2436,9 +2454,9 @@ function opisProduktuZHtml(html = '', title = '') {
   const meta = metaHtml(html, 'og:description') || metaHtml(html, 'description');
   const longDesc = (html.match(/<section\b[^>]*id=["']projector_longdescription["'][^>]*>([\s\S]*?)<\/section>/i) || [])[1] || '';
   const shortDesc = (html.match(/<div\b[^>]*class=["'][^"']*\bproduct_name__block\b[^"']*\b--description\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '';
-  const cleanedLong = stripHtml(longDesc);
+  const cleanedLong = stripHtmlZPodzialem(longDesc);
   if (cleanedLong && cleanedLong.length > 80) return tekst(cleanedLong, 12000);
-  const cleanedShort = stripHtml(shortDesc);
+  const cleanedShort = stripHtmlZPodzialem(shortDesc);
   if (cleanedShort) return tekst(cleanedShort, 12000);
   if (meta && !/gry planszowe,\s*gry rodzinne/i.test(meta)) return tekst(stripHtml(meta), 12000);
   const text = stripHtml(html);
@@ -2464,9 +2482,12 @@ function obrazkiProduktuZHtml(url = '', html = '') {
     imageSet.add(a);
   };
   dodaj(metaHtml(html, 'og:image'));
+  const gallery = (String(html || '').match(/<section\b[^>]*id=["']projector_photos["'][^>]*>([\s\S]*?)<\/section>/i) || [])[1] || '';
+  for (const m of gallery.matchAll(/<img\b[^>]*\bdata-img_high_res=["']([^"']+)["'][^>]*>/gi)) dodaj(m[1]);
+  for (const m of gallery.matchAll(/<img\b[^>]*class=["'][^"']*\bphotos__photo\b(?![^"']*\b--nav\b)[^"']*["'][^>]*>/gi)) dodaj(attrHtml(m[0], 'data-img_high_res') || attrHtml(m[0], 'src'));
   for (const m of String(html || '').matchAll(/<link\b[^>]*rel=["']preload["'][^>]*as=["']image["'][^>]*>/gi)) dodaj(attrHtml(m[0], 'href'));
-  for (const m of String(html || '').matchAll(/<img\b[^>]*(?:src|data-src|data-lazy|data-original)=["']([^"']+)["'][^>]*>/gi)) dodaj(m[1]);
-  for (const m of String(html || '').matchAll(/(?:srcset|data-srcset)=["']([^"']+)["']/gi)) {
+  if (imageSet.size < 2) for (const m of String(html || '').matchAll(/<img\b[^>]*(?:src|data-src|data-lazy|data-original)=["']([^"']+)["'][^>]*>/gi)) dodaj(m[1]);
+  if (imageSet.size < 2) for (const m of String(html || '').matchAll(/(?:srcset|data-srcset)=["']([^"']+)["']/gi)) {
     String(m[1]).split(',').map((x) => x.trim().split(/\s+/)[0]).forEach(dodaj);
   }
   return [...imageSet].slice(0, 16);
@@ -2515,6 +2536,7 @@ function parsujProduktZHtml(url, html) {
   const kodProducentaRaw = parametr(dict, ['Kod producenta', 'MPN', 'Kod katalogowy']) || tekst(ldProduct.mpn, 120).trim();
   const eanRaw = parametr(dict, ['EAN', 'GTIN', 'Kod EAN']) || tekst(ldProduct.gtin13 || ldProduct.gtin || ldProduct.gtin12 || ldProduct.gtin14, 80).trim() || kodProducentaRaw;
   const ean = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
+  const kodProducenta = symbol || (kodProducentaRaw && normalizujKluczParametru(kodProducentaRaw) !== normalizujKluczParametru(ean) ? kodProducentaRaw : '');
   const statusHtml = stripHtml((html.match(/id=["']projector_status_description["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '');
   const statusDostepny = /produkt dostępny|\bdostępny\b|in stock|instock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
   const statusNiedostepny = /powiadom o dostępności|niedostępny|brak produktu|chwilowo niedostęp|outofstock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
@@ -2562,8 +2584,8 @@ function parsujProduktZHtml(url, html) {
       marka,
       gtin: ean,
       ean,
-      mpn: symbol || kodProducentaRaw,
-      kodProducenta: kodProducentaRaw || symbol,
+      mpn: kodProducenta || symbol,
+      kodProducenta: kodProducenta || symbol,
       externalId: symbol || '',
       rozmiar: parametry.wymiaryOpakowania || '',
       producentUrl: url,
@@ -2575,6 +2597,14 @@ function parsujProduktZHtml(url, html) {
       producentStatus: niedostepny ? 'brak' : (dostepny ? (stanProducenta.quantity === null ? 'dostepny_nieznany' : 'dostepny') : 'nieznany'),
       producentSprawdzonoAt: checkedAt,
       parametryProducenta: parametry,
+      parametryZrodla: dict,
+      sourceEvidence: {
+        url,
+        host: (() => { try { return new URL(url).hostname; } catch { return ''; } })(),
+        fetchedAt: checkedAt,
+        title: stripHtml(title),
+        fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict)].slice(0, 80),
+      },
     },
     availability: { available: dostepny, text: statusHtml || (dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia')), quantity: stanProducenta.quantity, exact: stanProducenta.exact, source: stanProducenta.source, checkedAt },
   };
@@ -2603,6 +2633,9 @@ async function pobierzProduktProducenta(target = '') {
       if (html.length < 1200 || /access denied|captcha|cloudflare|verify you are human|odmowa dostępu/i.test(`${title} ${html.slice(0, 2500)}`)) throw Object.assign(new Error('Strona zwróciła blokadę automatycznego odczytu'), { statusCode: 403 });
       const parsed = parsujProduktZHtml(resolvedUrl, html), canonicalTag = [...html.matchAll(/<link\b[^>]*rel=["'][^"']*canonical[^"']*["'][^>]*>/gi)].map((m) => attrHtml(m[0], 'href')).find(Boolean) || metaHtml(html, 'og:url') || '', canonicalUrl = canonicalTag ? absoluteUrl(resolvedUrl, canonicalTag) : resolvedUrl;
       const fieldSources = { nazwa: metaHtml(html, 'og:title') ? 'Open Graph' : jsonLdProdukty(html)[0]?.name ? 'schema.org' : 'nagłówek H1', opis: /projector_longdescription/i.test(html) ? 'pełny opis producenta' : metaHtml(html, 'og:description') ? 'Open Graph' : 'treść strony', cena: /projector_price_value/i.test(html) ? 'cena producenta' : jsonLdProdukty(html)[0]?.offers?.price ? 'schema.org' : 'treść strony', ean: parsed.product?.ean ? (jsonLdProdukty(html)[0]?.gtin ? 'schema.org' : 'parametry produktu') : '', kod: parsed.product?.kodProducenta ? (jsonLdProdukty(html)[0]?.mpn ? 'schema.org' : 'parametry produktu') : '', zdjecia: parsed.product?.zdjecie ? (metaHtml(html, 'og:image') ? 'Open Graph + galeria' : 'galeria produktu') : '', dostepnosc: parsed.availability?.source || (parsed.availability?.text ? 'status produktu' : '') };
+      parsed.product.sourceUrl = canonicalUrl;
+      parsed.product.producentUrl = canonicalUrl;
+      parsed.product.sourceEvidence = { ...(parsed.product.sourceEvidence || {}), requestedUrl: candidate.url, resolvedUrl, canonicalUrl, fetchedAt: parsed.product.producentSprawdzonoAt || new Date().toISOString(), fieldSources };
       const quality = Math.max(0, Math.min(100, Number(parsed.confidence || 0) + (String(parsed.product?.opis || '').length > 300 ? 4 : 0) + (parsed.product?.ean ? 3 : 0)));
       attempts.push({ url: candidate.url, reason: candidate.reason, status: r.status, ok: true, resolvedUrl, canonicalUrl, bytes: html.length, durationMs: Date.now() - started, confidence: quality, missing: parsed.missing || [] });
       return { ...parsed, confidence: quality, requestedCandidate: candidate.url, resolvedUrl, canonicalUrl, fieldSources };
@@ -2618,6 +2651,9 @@ async function pobierzProduktProducenta(target = '') {
   const unique = [...new Map(ranked.sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0) || (a.missing?.length || 0) - (b.missing?.length || 0)).map((item) => [fingerprint(item), item])).values()];
   const primary = unique[0], alternatives = unique.slice(0, 5).map((item, index) => ({ id: `candidate-${index + 1}`, url: item.canonicalUrl || item.resolvedUrl, confidence: item.confidence, missing: item.missing || [], fieldSources: item.fieldSources || {}, product: item.product, availability: item.availability }));
   return { ...primary, requestedUrl: raw, resolvedUrl: primary.resolvedUrl, canonicalUrl: primary.canonicalUrl, repaired: bezSledzenia(raw) !== primary.resolvedUrl, needsChoice: alternatives.length > 1, alternatives, diagnostics: { candidates, attempts, successful: results.length, distinctProducts: alternatives.length, selectedReason: candidates.find((x) => x.url === primary.requestedCandidate)?.reason || 'najpełniejsze dane', retryRecommended: false } };
+}
+export async function inspectProductUrl(target = '') {
+  return pobierzProduktProducenta(target);
 }
 function kluczCacheLinkuProduktu(value = '') {
   try {
