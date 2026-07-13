@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { allegroCheckText, allegroSanitizePlainText, allegroEnforceDraft } from '../netlify/functions/lib/allegro-compliance.mjs';
 
 const files = [
   'index.html',
@@ -8,6 +9,7 @@ const files = [
   'products.json',
   'netlify/functions/store.mjs',
   'netlify/functions/lib/store-app.mjs',
+  'netlify/functions/lib/allegro-compliance.mjs',
   'netlify/functions/cron-inpost-sync.mjs',
   'netlify/functions/cron-allegro-orders.mjs',
   'netlify/functions/cron-allegro-communications.mjs',
@@ -46,6 +48,7 @@ const css = read('assets/styles.css');
 const app = read('assets/app.js');
 const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
+const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
 const cron = read('netlify/functions/cron-inpost-sync.mjs');
 const cronAllegroOrders = read('netlify/functions/cron-allegro-orders.mjs');
 const cronAllegroCommunications = read('netlify/functions/cron-allegro-communications.mjs');
@@ -587,6 +590,29 @@ if (!productUrlPrepareFlow.includes('allegroDraftZAutoKategoria') || !productUrl
 if (!store.includes("method: 'PATCH', bodyObj: patch, withMeta: true") || !store.includes("'/pricing/offer-fee-preview'") || !store.includes('allegroDescriptionSections = sections')) {
   fail('store-app.mjs: automatyczna konserwacja musi aktualizować ofertę, opisy i kalkulację opłat');
 }
+requireMarkers('netlify/functions/lib/allegro-compliance.mjs', allegroCompliance, [
+  'ALLEGRO_COMPLIANCE_POLICY',
+  'allegroCheckText',
+  'allegroSanitizeDescription',
+  'allegroEnforceDraft',
+]);
+requireMarkers('assets/app.js', app, [
+  'allegroZgodnoscPanelHTML',
+  'allegro-offer-compliance',
+  'Blokada przed publikacją jest zawsze włączona',
+]);
+requireMarkers('assets/styles.css', css, [
+  '.allegro-compliance-page',
+  '.allegro-compliance-guard',
+  '.allegro-compliance-table',
+]);
+if (allegroCheckText('Przed zakupem skontaktuj się z nami i sprawdź dostępność.').ok) fail('kontrola Allegro: nie wykryto kontaktu przed zakupem');
+if (allegroCheckText('Napisz do nas: sklep@example.pl albo odwiedź www.example.pl.').ok) fail('kontrola Allegro: nie wykryto danych kontaktowych');
+if (!allegroCheckText('Gra rozwija wyobraźnię i sprawność manualną. Zestaw zawiera kolorowe elementy.').ok) fail('kontrola Allegro: poprawny opis został błędnie zablokowany');
+const sanitizedAllegroText = allegroSanitizePlainText('Gra rozwija wyobraźnię. Przed zakupem skontaktuj się z nami. Zestaw zawiera elementy do złożenia.');
+if (!sanitizedAllegroText.check.ok || sanitizedAllegroText.text.includes('skontaktuj')) fail('kontrola Allegro: niedozwolona treść nie została usunięta');
+const enforcedAllegroDraft = allegroEnforceDraft({ name: 'ORIGAMI 3D', description: { sections: [{ items: [{ type: 'TEXT', content: '<p>Wspaniały zestaw.</p><p>Zadzwoń przed zakupem: +48 530 038 914.</p>' }] }] } });
+if (!enforcedAllegroDraft.compliance.ok || allegroCheckText(JSON.stringify(enforcedAllegroDraft.draft.description)).ok === false) fail('kontrola Allegro: szkic po oczyszczeniu nadal jest niezgodny');
 
 requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
   "schedule: '0 */6 * * *'",
@@ -661,7 +687,7 @@ try {
   fail(`assets/app.js: błąd składni: ${error.message}`);
 }
 
-for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs', 'netlify/functions/cron-infakt-sync.mjs', 'netlify/functions/cron-seo-daily.mjs', 'netlify/functions/sitemap.mjs', 'netlify/functions/google-products.mjs']) {
+for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/lib/allegro-compliance.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs', 'netlify/functions/cron-infakt-sync.mjs', 'netlify/functions/cron-seo-daily.mjs', 'netlify/functions/sitemap.mjs', 'netlify/functions/google-products.mjs']) {
   try {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
   } catch (error) {

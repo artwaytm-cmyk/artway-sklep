@@ -4,6 +4,13 @@
 import { getStore } from '@netlify/blobs';
 import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
+import {
+  ALLEGRO_COMPLIANCE_POLICY,
+  allegroCheckText,
+  allegroSanitizePlainText,
+  allegroSanitizeDescription,
+  allegroEnforceDraft,
+} from './allegro-compliance.mjs';
 
 const STORE_NAME = 'artway-sklep';
 
@@ -2204,9 +2211,9 @@ function allegroZdania(v = '') {
   return tekst(v, 20000).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter((x) => x.length > 18);
 }
 function allegroOpisKrotki(product = {}, podobne = []) {
-  const wlasny = tekst(product.opisKrotki || product.krotkiOpis || product.shortDescription, 500).trim();
+  const wlasny = tekst(allegroSanitizePlainText(product.opisKrotki || product.krotkiOpis || product.shortDescription).text, 500).trim();
   if (wlasny) return tekst(allegroZdania(wlasny).slice(0, 2).join(' ') || wlasny, 420).trim();
-  const opis = allegroZdania(product.opis || '').filter((x) => !/^(zawartość|w zestawie|wymiary|ostrzeżenie)/i.test(x));
+  const opis = allegroZdania(allegroSanitizePlainText(product.opis || '').text).filter((x) => !/^(zawartość|w zestawie|wymiary|ostrzeżenie)/i.test(x));
   if (opis.length) return tekst(opis.slice(0, 2).join(' '), 420).trim();
   const nazwy = podobne.map((x) => x.offer?.name).filter(Boolean);
   const kat = tekst(product.kategoria || 'gry i zabawki', 120).toLowerCase();
@@ -2216,7 +2223,7 @@ function allegroOpisKrotki(product = {}, podobne = []) {
 function allegroOpisPelny(product = {}, shortDescription = '') {
   const blocks = [];
   if (shortDescription) blocks.push({ type: 'lead', text: shortDescription });
-  const raw = tekst(product.opis || '', 20000)
+  const raw = tekst(allegroSanitizePlainText(product.opis || '').text, 20000)
     .replace(/<\s*br\s*\/?>/gi, '\n')
     .replace(/<\s*\/\s*(p|div|h[1-6]|li)\s*>/gi, '\n\n')
     .replace(/<\s*li[^>]*>/gi, '• ')
@@ -2282,7 +2289,9 @@ function allegroSekcjeOpisu(product = {}, shortDescription = '') {
     sections.push({ items: [items[i]] });
     if (images[i + 1] && (i === 0 || i === 2 || i === 4)) sections.push({ items: [{ type: 'IMAGE', url: tekst(images[i + 1], 1000) }] });
   }
-  return sections.length ? sections : [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(product.nazwa || 'Produkt')}</p>` }] }];
+  const source = sections.length ? sections : [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(product.nazwa || 'Produkt')}</p>` }] }];
+  const sanitized = allegroSanitizeDescription({ sections: source });
+  return sanitized.description.sections.length ? sanitized.description.sections : [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(product.nazwa || 'Produkt')}</p>` }] }];
 }
 function allegroPatchZDraftu(draft = {}, options = {}) {
   const out = {};
@@ -2320,6 +2329,100 @@ async function allegroPobierzSzczegolyOfert(req, source, limit) {
     out.push(...details);
   }
   return out;
+}
+async function allegroAudytZgodnosciOfert(req, options = {}) {
+  const requestedIds = [...new Set((Array.isArray(options.offerIds) ? options.offerIds : [options.offerId]).map((id) => tekst(id, 100).trim()).filter(Boolean))].slice(0, 50);
+  const limit = Math.min(50, Math.max(1, Number(options.limit) || 25));
+  const fix = options.fix === true;
+  const activeOnly = options.activeOnly !== false;
+  const [offersRec, previous] = await Promise.all([
+    czytaj('allegro_offers', { items: [], updated_at: null }),
+    czytaj('allegro_compliance_audit', { items: [], summary: {}, updated_at: null }),
+  ]);
+  const cached = allegroOfertyItems(offersRec);
+  const previousById = new Map((Array.isArray(previous.items) ? previous.items : []).map((item) => [String(item?.offerId || ''), item]));
+  const candidates = cached
+    .filter((offer) => !activeOnly || ['ACTIVE', 'ACTIVATING'].includes(String(offer?.status || offer?.publication?.status || '').toUpperCase()))
+    .sort((a, b) => (Date.parse(previousById.get(String(a?.id || ''))?.checkedAt || '') || 0) - (Date.parse(previousById.get(String(b?.id || ''))?.checkedAt || '') || 0));
+  let source = requestedIds.length
+    ? requestedIds.map((id) => cached.find((offer) => String(offer?.id || '') === id) || { id })
+    : candidates.slice(0, limit);
+  if (!source.length && !requestedIds.length) {
+    const parameters = { limit, offset: 0 };
+    if (activeOnly) parameters.publicationStatus = 'ACTIVE';
+    const remote = await allegroWywolaj(req, '/sale/offers', { parameters });
+    source = (Array.isArray(remote?.offers) ? remote.offers : (Array.isArray(remote?.items) ? remote.items : [])).slice(0, limit);
+  }
+  const details = await allegroPobierzSzczegolyOfert(req, source, requestedIds.length || limit);
+  const now = new Date().toISOString();
+  const results = [];
+  const cacheUpdates = new Map();
+  for (const offer of details) {
+    const offerId = tekst(offer?.id, 100).trim();
+    const name = tekst(offer?.name || `Oferta ${offerId}`, 300).trim();
+    const status = tekst(offer?.publication?.status || offer?.status || '', 80).toUpperCase();
+    if (!offerId) continue;
+    if (offer.detailError) {
+      results.push({ offerId, name, status, ok: false, error: tekst(offer.detailError, 700), checkedAt: now });
+      continue;
+    }
+    const before = allegroCheckText(allegroOpisTekst(offer.description));
+    let finalCheck = before;
+    let fixed = false;
+    let removedCount = 0;
+    let error = '';
+    if (!before.ok && fix) {
+      try {
+        const enforced = allegroEnforceDraft({ name, description: offer.description || { sections: [] } });
+        if (!enforced.compliance.ok) {
+          const complianceError = new Error('Opis po automatycznym oczyszczeniu nadal narusza reguły zgodności');
+          complianceError.code = 'allegro_compliance_block';
+          throw complianceError;
+        }
+        const meta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: { description: enforced.draft.description }, withMeta: true });
+        await allegroCzekajNaOperacjeOferty(req, meta?.location || '');
+        const verified = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`);
+        finalCheck = allegroCheckText(allegroOpisTekst(verified.description));
+        fixed = finalCheck.ok;
+        removedCount = enforced.compliance.removedCount;
+        cacheUpdates.set(offerId, allegroNormalizujOferte(verified));
+      } catch (auditError) {
+        error = tekst(auditError?.message || auditError, 700);
+      }
+    }
+    results.push({
+      offerId,
+      name,
+      status,
+      ok: finalCheck.ok,
+      hadViolation: !before.ok,
+      fixed,
+      removedCount,
+      violations: (finalCheck.ok ? before.violations : finalCheck.violations).map((item) => ({ id: item.id, label: item.label, matches: item.matches })),
+      error,
+      checkedAt: now,
+      policyId: ALLEGRO_COMPLIANCE_POLICY.id,
+    });
+  }
+  if (cacheUpdates.size) {
+    const items = cached.map((offer) => cacheUpdates.has(String(offer?.id || '')) ? allegroScalSzczegolyOferty(offer, cacheUpdates.get(String(offer.id)), true) : offer);
+    await zapisz('allegro_offers', { ...offersRec, items, updated_at: now });
+  }
+  const merged = new Map((Array.isArray(previous.items) ? previous.items : []).map((item) => [String(item?.offerId || ''), item]));
+  for (const item of results) merged.set(String(item.offerId), item);
+  const items = [...merged.values()].filter((item) => item.offerId).sort((a, b) => String(b.checkedAt || '').localeCompare(String(a.checkedAt || ''))).slice(0, 2000);
+  const summary = {
+    checked: results.length,
+    violations: results.filter((item) => item.hadViolation).length,
+    remaining: results.filter((item) => !item.ok).length,
+    fixed: results.filter((item) => item.fixed).length,
+    errors: results.filter((item) => item.error).length,
+    allAudited: items.length,
+    allOpen: items.filter((item) => !item.ok).length,
+  };
+  const audit = { items, summary, updated_at: now, policy: ALLEGRO_COMPLIANCE_POLICY };
+  await zapisz('allegro_compliance_audit', audit);
+  return { ...audit, run: results, fix, activeOnly };
 }
 function htmlDecode(s = '') {
   const mapa = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' };
@@ -3601,7 +3704,9 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
   if (!(p.producent || p.marka)) missing.push('producent');
   if (!gtin && !allegroProductId) missing.push('EAN/GTIN albo ID produktu Allegro');
   for (const param of Array.isArray(opt.requiredParameters) ? opt.requiredParameters : []) missing.push(`parametr Allegro: ${param.name}`);
-  return { payload: JSON.parse(JSON.stringify(payload)), missing };
+  const enforced = allegroEnforceDraft(JSON.parse(JSON.stringify(payload)));
+  if (!enforced.compliance.ok) missing.push('opis niezgodny z zasadami Allegro');
+  return { payload: enforced.draft, missing: [...new Set(missing)], compliance: enforced.compliance };
 }
 
 function allegroPodsumujKalkulacjeOplat(raw = {}, price = 0) {
@@ -5376,6 +5481,7 @@ export default async (req) => {
       const offerLastError = await czytaj('allegro_offer_last_error', null);
       const offerDefaultsAudit = await czytaj('allegro_offer_defaults_audit', { items: {}, updated_at: null });
       const catalogMaintenance = await czytaj('allegro_catalog_maintenance', { cursor: 0, lastRun: null });
+      const complianceAudit = await czytaj('allegro_compliance_audit', { items: [], summary: {}, updated_at: null, policy: ALLEGRO_COMPLIANCE_POLICY });
       const offerSettings = await allegroPobierzUstawieniaOfert();
       const status = await allegroStatus(req);
       return odpowiedz({
@@ -5388,7 +5494,23 @@ export default async (req) => {
         offerDefaultsAudit,
         offerSettings,
         catalogMaintenance,
+        complianceAudit,
       });
+    }
+
+    // ─── ALLEGRO: obowiązkowa kontrola zgodności opisów (admin) ───
+    if (action === 'allegro-offer-compliance') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const audit = await allegroAudytZgodnosciOfert(req, {
+        offerId: body.offerId,
+        offerIds: body.offerIds,
+        limit: body.limit,
+        fix: body.fix === true,
+        activeOnly: body.activeOnly !== false,
+      });
+      return odpowiedz({ ok: true, ...audit });
     }
 
     if (action === 'allegro-offer-settings') {
@@ -5627,7 +5749,9 @@ export default async (req) => {
       const mappingResult = await allegroAutoMapujOfertyZKartoteka(items);
       let maintenance = null;
       if (body.maintenance === true || body.source === 'scheduled-offers-sync') maintenance = await allegroAutoUzupelnijKatalogProduktow(req, { limit: body.maintenanceLimit || 10 });
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), offers: items, mappings: mappingResult.mappings, autoMapped: mappingResult.autoMapped, mappingsRefreshed: mappingResult.refreshed, mappingsQuarantined: mappingResult.quarantined, descriptionsUpdated: mappingResult.descriptionsUpdated, producersUpdated: mappingResult.producersUpdated, productsUpdated: mappingResult.productsUpdated, maintenance, updated_at: rec.updated_at, detailedCount: rec.detailedCount, requestedLimit: rec.requestedLimit, pages: rec.pages, totalCount: rec.totalCount });
+      let compliance = null;
+      if (body.source === 'scheduled-offers-sync') compliance = await allegroAudytZgodnosciOfert(req, { limit: Math.min(20, Math.max(1, Number(body.complianceLimit) || 10)), fix: true, activeOnly: true });
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), offers: items, mappings: mappingResult.mappings, autoMapped: mappingResult.autoMapped, mappingsRefreshed: mappingResult.refreshed, mappingsQuarantined: mappingResult.quarantined, descriptionsUpdated: mappingResult.descriptionsUpdated, producersUpdated: mappingResult.producersUpdated, productsUpdated: mappingResult.productsUpdated, maintenance, compliance, updated_at: rec.updated_at, detailedCount: rec.detailedCount, requestedLimit: rec.requestedLimit, pages: rec.pages, totalCount: rec.totalCount });
     }
 
     if (action === 'allegro-auto-maintenance') {
@@ -5859,7 +5983,7 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const draft = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
       const agentTask = draft.missing.length ? await allegroZapiszZadanieAgentaOferty(body.product || {}, { missing: draft.missing, prepared: draft, draft: draft.payload }) : null;
-      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: !!draft.existingOffer || draft.missing.length === 0, categorySuggestion: draft.categorySuggestion, salesConditions: draft.salesConditions, categoryParameters: draft.categoryParameters, requiredParameters: draft.requiredParameters, catalogMatch: draft.catalogMatch, supportErrors: draft.supportErrors, existingOffer: draft.existingOffer, similarOffers: draft.similarOffers, improvedDescriptions: draft.improvedDescriptions, autoFilled: draft.autoFilled, agentDecision: draft.agentDecision, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, operation: draft.existingOffer ? 'update' : 'create', agentTask });
+      return odpowiedz({ ok: true, draft: draft.payload, missing: draft.missing, ready: (!!draft.existingOffer || draft.missing.length === 0) && draft.compliance?.ok !== false, categorySuggestion: draft.categorySuggestion, salesConditions: draft.salesConditions, categoryParameters: draft.categoryParameters, requiredParameters: draft.requiredParameters, catalogMatch: draft.catalogMatch, supportErrors: draft.supportErrors, existingOffer: draft.existingOffer, similarOffers: draft.similarOffers, improvedDescriptions: draft.improvedDescriptions, compliance: draft.compliance, autoFilled: draft.autoFilled, agentDecision: draft.agentDecision, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, operation: draft.existingOffer ? 'update' : 'create', agentTask });
     }
 
     if (action === 'allegro-description-improve') {
@@ -5877,6 +6001,7 @@ export default async (req) => {
         shortDescription,
         fullDescription: fullDescription || shortDescription,
         sections,
+        compliance: allegroEnforceDraft({ name: product.nazwa || product.name || 'Produkt', description: { sections } }).compliance,
         similarOffers: similarOffers.map((x) => ({ id: x.offer?.id, name: x.offer?.name, score: Number(x.score.toFixed(2)) })),
       });
     }
@@ -5905,6 +6030,11 @@ export default async (req) => {
         prepared = { existingOffer: allegroDopasowanieOferty(body.product || {}, offersRec, mappingsRec) };
       }
       const existing = prepared.existingOffer;
+      const complianceGate = allegroEnforceDraft(draft || {});
+      draft = complianceGate.draft;
+      if (!complianceGate.compliance.ok) {
+        return odpowiedz({ ok: false, error: 'Publikacja została zablokowana: opis nadal zawiera treść niezgodną z zasadami Allegro.', code: 'allegro_compliance_block', compliance: complianceGate.compliance, draft }, 422);
+      }
       let result, responseMeta = null, operationCheck = { completed: true, checks: 0 };
       try {
         if (existing?.offer?.id) {
@@ -5950,7 +6080,7 @@ export default async (req) => {
           await allegroZapiszPowiazanieProduktu(body.product || {}, { offerId, prepared, draft });
         }
       }
-      return odpowiedz({ ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion }, existing ? 200 : 201);
+      return odpowiedz({ ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion }, existing ? 200 : 201);
     }
 
     // ─── ALLEGRO: kontrolowane rozstrzygnięcie duplikatów ofert ───

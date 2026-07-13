@@ -271,12 +271,13 @@ let zaznaczoneAllegroOferty = new Set();
 let zaznaczoneMapowaniaAllegro = new Set();
 let zaznaczoneAllegroWiadomosci = new Set();
 let zaznaczoneAllegroDyskusje = new Set();
+let zaznaczoneAllegroZgodnosc = new Set();
 let allegroOstatniBladWystawienia = null;
 let allegroOstatniWynikWystawienia = null;
-let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,updated_at:null}};
+let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,updated_at:null}};
 let allegroOperacjaUstawien = {busy:false,done:0,total:0,stockUpdated:0,stockFailed:0,republishUpdated:0,republishFailed:0,error:""};
 let allegroMapowanieMasowe={busy:false,total:0,mapped:0,skipped:0,error:""};
-let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", szukajAllegroWiadomosci="", szukajAllegroDyskusji="", szukajAllegroRentownosc="", filtrAllegroZamowien="do_obslugi", filtrEtapuAllegroZamowien="wszystkie", filtrAllegroOfert="problemy", filtrAllegroWystawiania="wszystkie", filtrAllegroWiadomosci="wymaga", filtrAllegroDyskusji="aktywne", filtrAllegroRentownosc="kompletne", sortAllegroOfert="priorytet", sortAllegroWiadomosci="najnowsze", sortAllegroDyskusje="najnowsze", sortAllegroRentownosc="marza_rosnaco", allegroDocelowaMarza=Math.max(1,Math.min(60,Number(ustawienia.celMarzyAllegro??wczytajLS("artway_cel_marzy_allegro",20))||20)), sklepDocelowaMarza=Math.max(1,Math.min(60,Number(ustawienia.celMarzySklep??wczytajLS("artway_cel_marzy_sklep",20))||20)), allegroJednostkiOplatCyklicznych=Math.max(1,Math.min(1000,Number(ustawienia.allegroJednostkiOplatCyklicznych)||10)), allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=100, allegroLimitWystawiania=250, allegroLimitKomunikacji=50;
+let szukajAllegroZamowien="", szukajAllegroOfert="", szukajAllegroWystawiania="", szukajAllegroWiadomosci="", szukajAllegroDyskusji="", szukajAllegroRentownosc="", szukajAllegroZgodnosc="", filtrAllegroZamowien="do_obslugi", filtrEtapuAllegroZamowien="wszystkie", filtrAllegroOfert="problemy", filtrAllegroWystawiania="wszystkie", filtrAllegroWiadomosci="wymaga", filtrAllegroDyskusji="aktywne", filtrAllegroRentownosc="kompletne", filtrAllegroZgodnosc="naruszenia", sortAllegroOfert="priorytet", sortAllegroWiadomosci="najnowsze", sortAllegroDyskusje="najnowsze", sortAllegroRentownosc="marza_rosnaco", allegroZgodnoscBusy=false, allegroDocelowaMarza=Math.max(1,Math.min(60,Number(ustawienia.celMarzyAllegro??wczytajLS("artway_cel_marzy_allegro",20))||20)), sklepDocelowaMarza=Math.max(1,Math.min(60,Number(ustawienia.celMarzySklep??wczytajLS("artway_cel_marzy_sklep",20))||20)), allegroJednostkiOplatCyklicznych=Math.max(1,Math.min(1000,Number(ustawienia.allegroJednostkiOplatCyklicznych)||10)), allegroLimitWidokuZamowien=100, allegroLimitWidokuOfert=100, allegroLimitWystawiania=250, allegroLimitKomunikacji=50;
 let infaktStan={sprawdzono:false,ladowanie:false,invoicesLoaded:false,costsLoaded:false,costsLoading:false,purchaseLoading:false,configured:false,connected:false,env:"production",error:"",links:{},suppliers:{items:[]},purchaseSync:{pendingItems:[],recentMatches:[]},updated_at:null};
 let infaktFaktury=[],infaktKoszty=[],szukajInfakt="",filtrInfakt="wszystkie",infaktLimit=50,infaktOkresCenZakupu=180;
 let agentAIPlanProfil=["full","data","health"].includes(wczytajLS("artway_agent_plan_profil","full"))?wczytajLS("artway_agent_plan_profil","full"):"full";
@@ -6072,7 +6073,7 @@ function allegroLadujJesliTrzeba(){
 async function allegroWczytajDane(cicho=false){
   try{
     const d=await chmura("allegro-data",{timeout:16000});
-    allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,ladowanie:false,error:"",offerDefaultsAudit:d.offerDefaultsAudit||{items:{},updated_at:null},catalogMaintenance:d.catalogMaintenance||allegroStan.catalogMaintenance||{cursor:0,lastRun:null},offerSettings:d.offerSettings||allegroStan.offerSettings||{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,updated_at:null}};
+    allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,ladowanie:false,error:"",offerDefaultsAudit:d.offerDefaultsAudit||{items:{},updated_at:null},catalogMaintenance:d.catalogMaintenance||allegroStan.catalogMaintenance||{cursor:0,lastRun:null},complianceAudit:d.complianceAudit||allegroStan.complianceAudit||{items:[],summary:{},updated_at:null},offerSettings:d.offerSettings||allegroStan.offerSettings||{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,updated_at:null}};
     allegroZamowienia=Array.isArray(d.orders)?d.orders:[];
     allegroOferty=Array.isArray(d.offers)?d.offers:[];
     allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:{};
@@ -7394,10 +7395,46 @@ function publikacjaSubnavHTML(aktywny="kontrola"){
     {id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja"}
   ],aktywny);
 }
+function allegroZgodnoscPozycje(){
+  const items=Array.isArray(allegroStan.complianceAudit?.items)?allegroStan.complianceAudit.items:[],q=String(szukajAllegroZgodnosc||"").trim().toLowerCase();
+  return items.filter(item=>{
+    const text=[item.offerId,item.name,item.status,...(item.violations||[]).flatMap(v=>[v.label,...(v.matches||[])])].join(" ").toLowerCase();
+    const filtrOk=filtrAllegroZgodnosc==="wszystkie"||(filtrAllegroZgodnosc==="naruszenia"&&!item.ok)||(filtrAllegroZgodnosc==="naprawione"&&item.fixed)||(filtrAllegroZgodnosc==="poprawne"&&item.ok&&!item.fixed)||(filtrAllegroZgodnosc==="bledy"&&item.error);
+    return filtrOk&&(!q||text.includes(q));
+  });
+}
+function allegroZaznaczZgodnosc(ids=[],checked=true){for(const id of ids)checked?zaznaczoneAllegroZgodnosc.add(String(id)):zaznaczoneAllegroZgodnosc.delete(String(id));renderuj();}
+async function allegroAudytujZgodnosc({fix=false,offerIds=[],offerId=""}={}){
+  if(allegroZgodnoscBusy)return;
+  allegroZgodnoscBusy=true;renderuj();
+  try{
+    const body={fix,activeOnly:true,limit:50};if(offerId)body.offerId=String(offerId).trim();if(Array.isArray(offerIds)&&offerIds.length)body.offerIds=offerIds.map(String).slice(0,50);
+    const d=await chmura("allegro-offer-compliance",{method:"POST",body,timeout:180000});
+    allegroStan={...allegroStan,complianceAudit:{items:Array.isArray(d.items)?d.items:[],summary:d.summary||{},updated_at:d.updated_at||null,policy:d.policy||null}};
+    if(fix)zaznaczoneAllegroZgodnosc.clear();
+    const s=d.summary||{};toast(fix?`✅ Kontrola Allegro: naprawiono ${s.fixed||0}, pozostało ${s.remaining||0}`:`🛡️ Sprawdzono ${s.checked||0} ofert • naruszenia: ${s.violations||0}`);
+  }catch(e){toast("⚠️ Kontrola zgodności: "+(e.message||e));}
+  allegroZgodnoscBusy=false;renderuj();
+}
+function allegroSprawdzOferteZFormularza(form,fix=false){const id=String(new FormData(form).get("offerId")||"").trim();if(!id){toast("Wpisz ID oferty Allegro");return;}void allegroAudytujZgodnosc({offerId:id,fix});}
+function allegroZgodnoscPanelHTML(){
+  const audit=allegroStan.complianceAudit||{},all=Array.isArray(audit.items)?audit.items:[],items=allegroZgodnoscPozycje(),open=all.filter(x=>!x.ok).length,fixed=all.filter(x=>x.fixed).length,errors=all.filter(x=>x.error).length,selected=[...zaznaczoneAllegroZgodnosc].filter(id=>items.some(x=>String(x.offerId)===id));
+  return `<div class="panel allegro-section-panel allegro-compliance-page">
+    <div class="order-section-head"><div><span class="order-pro-label">Ochrona konta sprzedawcy</span><h2>🛡️ Zgodność ofert z zasadami Allegro</h2><p class="order-detail-lead">Każdy opis jest oczyszczany i sprawdzany przed utworzeniem albo aktualizacją oferty. Publikacja zostaje zablokowana, jeśli pozostanie zaproszenie do kontaktu, sprawdzania dostępności, negocjacji, dane kontaktowe lub odsyłacz poza Allegro.</p></div><button class="btn" ${allegroZgodnoscBusy?"disabled":""} onclick="allegroAudytujZgodnosc({fix:true})">${allegroZgodnoscBusy?"⏳ Kontroluję…":"🛡️ Sprawdź i napraw 50 ofert"}</button></div>
+    <div class="allegro-compliance-guard"><span>✅</span><div><b>Blokada przed publikacją jest zawsze włączona</b><small>Nie można jej wyłączyć ustawieniem. Automatyczna synchronizacja kontroluje kolejne aktywne oferty, a ręczny audyt pozwala natychmiast naprawić wybrany zakres.</small></div></div>
+    <div class="orders-stat-grid">${[["📋",all.length,"skontrolowanych"],["⚠️",open,"wymaga naprawy"],["✅",fixed,"naprawionych automatycznie"],["⛔",errors,"błędów API"]].map(([i,n,l])=>`<button class="order-stat-card stat-filter ${l.includes("wymaga")&&n?"hot":l.includes("naprawionych")?"money":""}" onclick="filtrAllegroZgodnosc=${jsArg(l.includes("wymaga")?"naruszenia":l.includes("naprawionych")?"naprawione":l.includes("błędów")?"bledy":"wszystkie")};renderuj()"><span>${i}</span><b>${n}</b><small>${l}</small></button>`).join("")}</div>
+    <form class="allegro-compliance-single" onsubmit="event.preventDefault();allegroSprawdzOferteZFormularza(this,false)"><div><b>Sprawdź konkretną ofertę</b><small>Wklej ID z adresu oferty, np. 12212218115.</small></div><input name="offerId" inputmode="numeric" placeholder="ID oferty Allegro" required><button class="btn ghost" type="submit" ${allegroZgodnoscBusy?"disabled":""}>Sprawdź</button><button class="btn" type="button" ${allegroZgodnoscBusy?"disabled":""} onclick="allegroSprawdzOferteZFormularza(this.form,true)">Sprawdź i napraw</button></form>
+    <div class="orders-toolbar allegro-toolbar"><input placeholder="Szukaj: nazwa, ID, wykryty zwrot…" value="${esc(szukajAllegroZgodnosc)}" oninput="szukajAllegroZgodnosc=this.value;clearTimeout(window.__allegroComplianceSearch);window.__allegroComplianceSearch=setTimeout(()=>renderuj(),250)"><select onchange="filtrAllegroZgodnosc=this.value;renderuj()">${[["naruszenia","Wymaga naprawy"],["wszystkie","Wszystkie wyniki"],["naprawione","Naprawione"],["poprawne","Zgodne"],["bledy","Błędy API"]].map(([v,l])=>`<option value="${v}" ${filtrAllegroZgodnosc===v?"selected":""}>${l}</option>`).join("")}</select><button class="btn ghost" onclick="allegroAudytujZgodnosc({fix:false})" ${allegroZgodnoscBusy?"disabled":""}>Sprawdź 50</button></div>
+    <div class="allegro-compliance-bulk"><label class="check"><input type="checkbox" onchange='allegroZaznaczZgodnosc(${JSON.stringify(items.map(x=>String(x.offerId)))},this.checked)'> Zaznacz widoczne (${items.length})</label><span>${selected.length} zaznaczonych</span><button class="btn" ${!selected.length||allegroZgodnoscBusy?"disabled":""} onclick='allegroAudytujZgodnosc({fix:true,offerIds:${JSON.stringify(selected)}})'>Napraw zaznaczone</button></div>
+    <div class="warehouse-worktable-wrap"><table class="log-table allegro-compliance-table"><tr><th></th><th>Oferta</th><th>Status</th><th>Wynik kontroli</th><th>Wykryte treści</th><th>Akcje</th></tr>${items.map(item=>`<tr class="${item.ok?"is-safe":"has-risk"}"><td><input type="checkbox" ${zaznaczoneAllegroZgodnosc.has(String(item.offerId))?"checked":""} onchange="allegroZaznaczZgodnosc([${jsArg(String(item.offerId))}],this.checked)"></td><td><b>${esc(item.name||"Oferta")}</b><small>ID ${esc(item.offerId||"—")} • ${esc(item.checkedAt?new Date(item.checkedAt).toLocaleString("pl-PL"):"—")}</small></td><td><span class="lvl ${item.error?"lvl-bad":item.ok?"lvl-ok":"lvl-ostrzezenie"}">${item.error?"błąd API":item.fixed?"naprawiona":item.ok?"zgodna":"blokada"}</span><small>${esc(item.status||"—")}</small></td><td><b>${item.ok?"Brak aktywnego naruszenia":"Wymaga oczyszczenia"}</b>${item.removedCount?`<small>Usunięto ${esc(item.removedCount)} fragmentów</small>`:""}${item.error?`<small class="compliance-error">${esc(item.error)}</small>`:""}</td><td>${(item.violations||[]).map(v=>`<span class="compliance-rule"><b>${esc(v.label)}</b><small>${esc((v.matches||[]).join(" • "))}</small></span>`).join("")||"—"}</td><td><div class="warehouse-worktable-actions"><a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(item.offerId||"")}" target="_blank" rel="noopener">Oferta ↗</a>${!item.ok?`<button class="btn" onclick="allegroAudytujZgodnosc({fix:true,offerId:${jsArg(String(item.offerId))}})" ${allegroZgodnoscBusy?"disabled":""}>Napraw</button>`:""}</div></td></tr>`).join("")||`<tr><td colspan="6">Brak wyników dla wybranego filtra. Uruchom audyt aktywnych ofert.</td></tr>`}</table></div>
+    <div class="allegro-compliance-rules"><div><b>Treści usuwane lub blokowane</b><span>kontakt przed zakupem • sprawdzanie dostępności • negocjacja ceny • e-mail • telefon • zewnętrzna strona • sprzedaż poza Allegro</span></div><div class="diag-actions"><a class="btn ghost" href="https://help.allegro.com/pl/sell/a/sprzedaz-poza-allegro-i-omijanie-oplat-aMloER9LrH8" target="_blank" rel="noopener">Oficjalna zasada ↗</a><a class="btn ghost" href="https://help.allegro.com/pl/sell/c/jak-wystawiac-oferty" target="_blank" rel="noopener">Zasady opisów ↗</a></div></div>
+  </div>`;
+}
 function allegroSubnavHTML(aktywny="start"){
   const st=allegroKomunikacjaStaty();
   const aktywneZamowienia=(allegroZamowienia||[]).filter(statusAllegroRezerwujeMagazyn).length;
   const zadaniaWystawiania=allegroAktywneZadaniaAgentaOfert().length;
+  const naruszenia=(allegroStan.complianceAudit?.items||[]).filter(x=>!x.ok).length;
   return adminSubnavHTML([
     {id:"start",href:"#/admin/allegro",label:"📊 Pulpit"},
     {id:"zamowienia",href:"#/admin/allegro/zamowienia",label:"📦 Zamówienia",badge:aktywneZamowienia||""},
@@ -7407,6 +7444,7 @@ function allegroSubnavHTML(aktywny="start"){
     {id:"wiadomosci",href:"#/admin/allegro/wiadomosci",label:"💬 Wiadomości",badge:st.threadNeed||""},
     {id:"dyskusje",href:"#/admin/allegro/dyskusje",label:"🛟 Dyskusje",badge:st.issueNeed||""},
     {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"},
+    {id:"zgodnosc",href:"#/admin/allegro/zgodnosc",label:"🛡️ Zgodność",badge:naruszenia||""},
     {id:"ustawienia",href:"#/admin/allegro/ustawienia",label:"⚙️ Ustawienia"}
   ],aktywny);
 }
@@ -7419,6 +7457,7 @@ function allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete){
     rentownosc:{ico:"📈",kicker:"Finanse produktu",title:"Opłacalność sklepu i Allegro",opis:"Dwa oddzielne modele kosztów, osobne cele marży i rekomendowane ceny. Allegro korzysta z prowizji pobieranej bezpośrednio przez API.",metryki:[["Pełne Allegro",produktyDoAdministracji().filter(allegroProduktMaPelneDaneMarzowe).length],["Bez prowizji",produktyDoAdministracji().filter(p=>!p.allegroFeeCalculatedAt).length],["Cele",`Sklep ${sklepDocelowaMarza}% • Allegro ${allegroDocelowaMarza}%`]]},
     wiadomosci:{ico:"💬",kicker:"Obsługa klienta",title:"Centrum wiadomości",opis:"Wyszukiwanie, filtry, historia korespondencji i wewnętrzne zamykanie spraw bez wysyłania wiadomości.",metryki:[["Wątki",allegroKomunikacjaStaty().threads.length],["Do odpowiedzi",allegroKomunikacjaStaty().threadNeed],["Załatwione",allegroKomunikacjaStaty().threads.filter(x=>x.internalResolved).length]]},
     dyskusje:{ico:"🛟",kicker:"Dyskusje i reklamacje",title:"Obsługa zgłoszeń Allegro",opis:"Oddzielny rejestr dyskusji i reklamacji z filtrami oficjalnego statusu oraz statusem wewnętrznym.",metryki:[["Zgłoszenia",allegroKomunikacjaStaty().issues.length],["Do odpowiedzi",allegroKomunikacjaStaty().issueNeed],["Załatwione",allegroKomunikacjaStaty().issues.filter(x=>x.internalResolved).length]]},
+    zgodnosc:{ico:"🛡️",kicker:"Bezpieczeństwo sprzedaży",title:"Kontrola zgodności ofert",opis:"Stała blokada niedozwolonych treści przed publikacją oraz audyt i bezpieczna naprawa opisów już wystawionych ofert.",metryki:[["Skontrolowane",(allegroStan.complianceAudit?.items||[]).length],["Otwarte",(allegroStan.complianceAudit?.items||[]).filter(x=>!x.ok).length],["Naprawione",(allegroStan.complianceAudit?.items||[]).filter(x=>x.fixed).length]]},
     ustawienia:{ico:"⚙️",kicker:"Konfiguracja",title:"Ustawienia integracji Allegro",opis:"Połączenie OAuth, zakresy uprawnień, środowisko i kontrola synchronizacji w jednym miejscu.",metryki:[["API",allegroStan.configured?"OK":"Brak"],["OAuth",allegroStan.connected?"Połączone":"Rozłączone"],["Środowisko",allegroStan.env||"production"]]}
   }[aktywna]||{};
   return `<section class="panel allegro-workspace-section"><div class="allegro-workspace-title"><span>${cfg.ico||"🟠"}</span><div><small>${esc(cfg.kicker||"Allegro")}</small><h2>${esc(cfg.title||"Panel Allegro")}</h2><p>${esc(cfg.opis||"")}</p></div></div><div class="allegro-workspace-metrics">${(cfg.metryki||[]).map(([l,v])=>`<div><small>${esc(l)}</small><b>${esc(v)}</b></div>`).join("")}</div></section>`;
@@ -7437,6 +7476,7 @@ function allegroStartPanelHTML(mapped,niepodpiete){
         <a class="btn ghost" href="#/admin/allegro/rentownosc">📈 Opłacalność</a>
         <a class="btn ghost" href="#/admin/allegro/wiadomosci">💬 Wiadomości</a>
         <a class="btn ghost" href="#/admin/allegro/dyskusje">🛟 Dyskusje</a>
+        <a class="btn ghost" href="#/admin/allegro/zgodnosc">🛡️ Zgodność ofert</a>
       </div>
     </div>
     <div class="orders-stat-grid allegro-dashboard-links">
@@ -7571,11 +7611,11 @@ function widokAdminAllegro(sekcja="start"){
   if(["wiadomosci","dyskusje"].includes(sekcja)) setTimeout(()=>allegroAktywujKafelkiKomunikacji(sekcja==="dyskusje"?"issue":"thread"),0);
   const mapped=(allegroOferty||[]).filter(o=>allegroProduktDlaOferty(o.id)).length;
   const niepodpiete=Math.max(0,(allegroOferty||[]).length-mapped);
-  const aktywna=["zamowienia","oferty","wystawianie","rentownosc","wiadomosci","dyskusje","ustawienia"].includes(sekcja)?sekcja:"start";
+  const aktywna=["zamowienia","oferty","wystawianie","rentownosc","wiadomosci","dyskusje","zgodnosc","ustawienia"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
   <div class="module-page-stack allegro-module-page">
   ${allegroSubnavHTML(aktywna)}
-  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="rentownosc"?rentownoscKanalowaPanelHTML():aktywna==="wiadomosci"?allegroKomunikacjaPanelHTML("thread"):aktywna==="dyskusje"?allegroKomunikacjaPanelHTML("issue"):aktywna==="ustawienia"?allegroUstawieniaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
+  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="rentownosc"?rentownoscKanalowaPanelHTML():aktywna==="wiadomosci"?allegroKomunikacjaPanelHTML("thread"):aktywna==="dyskusje"?allegroKomunikacjaPanelHTML("issue"):aktywna==="zgodnosc"?allegroZgodnoscPanelHTML():aktywna==="ustawienia"?allegroUstawieniaPanelHTML():allegroStartPanelHTML(mapped,niepodpiete)}
   ${allegroStan.error?`<div class="backend-note allegro-info-bottom" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Allegro:</b> ${esc(allegroStan.error)}</div>`:""}
   ${allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete)}
   </div>
