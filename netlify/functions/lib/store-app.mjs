@@ -3623,6 +3623,10 @@ function allegroKluczWiadomosci(m = {}) {
   m = m || {};
   return tekst(m.id || `${m.createdAt || ''}:${m.authorLogin || ''}:${m.text || ''}`, 500).trim();
 }
+function allegroAutoReplyWyslanaDlaRozmowy(items = {}, type = 'thread', id = '') {
+  const safeType = type === 'issue' ? 'issue' : 'thread', safeId = String(id || '');
+  return Object.values(items && typeof items === 'object' ? items : {}).some((entry) => entry?.type === safeType && String(entry?.id || '') === safeId);
+}
 function allegroNoweWiadomosciKlienta(messages = [], previousMessages = [], hasBaseline = true) {
   if (!hasBaseline) return [];
   const previousKeys = new Set((Array.isArray(previousMessages) ? previousMessages : []).map(allegroKluczWiadomosci).filter(Boolean));
@@ -3639,7 +3643,7 @@ function allegroOznaczNowaKomunikacje(data = {}, previous = {}) {
     const nowe = allegroNoweWiadomosciKlienta(thread.messages, previousThread.messages, hasBaseline);
     const latestNewIncoming = nowe[0] || null;
     const humanReplyNeeded = !!latestNewIncoming || (!!previousThread.humanReplyNeeded && !previousThread.manualReplyAt);
-    return { ...thread, newIncomingCount: nowe.length, latestNewIncoming, latestNewIncomingKey: allegroKluczWiadomosci(latestNewIncoming), needsReply: !!latestNewIncoming && !allegroMaOdpowiedzSprzedawcyPo(thread.messages, latestNewIncoming), humanReplyNeeded, humanReplySource: latestNewIncoming || previousThread.humanReplySource || null, manualReplyAt: latestNewIncoming ? null : (previousThread.manualReplyAt || null) };
+    return { ...thread, newIncomingCount: nowe.length, newIncomingKeys: nowe.map(allegroKluczWiadomosci), latestNewIncoming, latestNewIncomingKey: allegroKluczWiadomosci(latestNewIncoming), needsReply: !!latestNewIncoming && !allegroMaOdpowiedzSprzedawcyPo(thread.messages, latestNewIncoming), humanReplyNeeded, humanReplySource: latestNewIncoming || previousThread.humanReplySource || null, manualReplyAt: latestNewIncoming ? null : (previousThread.manualReplyAt || null) };
   });
   let issues = (Array.isArray(data?.issues) ? data.issues : []).map((issue) => {
     const wiadomosci = issue.messages?.length ? issue.messages : [issue.lastMessage].filter(Boolean);
@@ -3648,7 +3652,7 @@ function allegroOznaczNowaKomunikacje(data = {}, previous = {}) {
     const nowe = allegroNoweWiadomosciKlienta(wiadomosci, poprzednie, hasBaseline);
     const latestNewIncoming = nowe[0] || null;
     const humanReplyNeeded = !!latestNewIncoming || (!!previousIssue?.humanReplyNeeded && !previousIssue?.manualReplyAt);
-    return { ...issue, newIncomingCount: nowe.length, latestNewIncoming, latestNewIncomingKey: allegroKluczWiadomosci(latestNewIncoming), needsReply: !!latestNewIncoming && !!issue.chatActive && !allegroMaOdpowiedzSprzedawcyPo(wiadomosci, latestNewIncoming), humanReplyNeeded, humanReplySource: latestNewIncoming || previousIssue?.humanReplySource || null, manualReplyAt: latestNewIncoming ? null : (previousIssue?.manualReplyAt || null) };
+    return { ...issue, newIncomingCount: nowe.length, newIncomingKeys: nowe.map(allegroKluczWiadomosci), latestNewIncoming, latestNewIncomingKey: allegroKluczWiadomosci(latestNewIncoming), needsReply: !!latestNewIncoming && !!issue.chatActive && !allegroMaOdpowiedzSprzedawcyPo(wiadomosci, latestNewIncoming), humanReplyNeeded, humanReplySource: latestNewIncoming || previousIssue?.humanReplySource || null, manualReplyAt: latestNewIncoming ? null : (previousIssue?.manualReplyAt || null) };
   });
   const freshThreadIds = new Set(threads.map((x) => String(x.id))), freshIssueIds = new Set(issues.map((x) => String(x.id)));
   threads = [...threads, ...[...previousThreads.values()].filter((x) => !freshThreadIds.has(String(x.id))).map((x) => ({ ...x, cachedOlder: true }))].slice(0, 500);
@@ -3748,36 +3752,39 @@ async function allegroWyslijAutoOdpowiedzi(req, data, settings) {
   const markSkip = (key, reason) => skipped.push({ key, reason });
   if (s.enabled && s.messageCenter) {
     for (const thread of data.threads || []) {
-      const first = thread.latestNewIncoming || null;
+      const first = allegroPierwszaWiadomoscKlienta(thread.messages);
       const sourceKey = allegroKluczWiadomosci(first);
-      const key = `thread:${thread.id}:${sourceKey}`;
+      const key = `thread:${thread.id}:first-contact`;
       if (thread.cachedOlder) { markSkip(key, 'starszy wpis zachowany wyłącznie do wyszukiwania'); continue; }
       if (thread.internalResolved) { markSkip(key, 'sprawa zamknięta wewnętrznie'); continue; }
-      if (!first || !thread.needsReply) { markSkip(key, 'brak nowej wiadomości klienta'); continue; }
-      if (items[key]) { markSkip(key, 'już wysłano'); continue; }
+      if (!first || !thread.needsReply || !(thread.newIncomingKeys || []).includes(sourceKey)) { markSkip(key, 'to nie jest pierwszy kontakt w tej rozmowie'); continue; }
+      if (allegroAutoReplyWyslanaDlaRozmowy(items, 'thread', thread.id)) { markSkip(key, 'pierwsza odpowiedź była już wysłana w tej rozmowie'); continue; }
+      if ((thread.messages || []).some((message) => !message.incoming)) { markSkip(key, 'sprzedawca wcześniej uczestniczył w rozmowie'); continue; }
       if (!allegroJestSwieze(first.createdAt, s.freshHours)) { markSkip(key, 'wiadomość poza oknem czasowym'); continue; }
       if (allegroMaOdpowiedzSprzedawcyPo(thread.messages, first)) { markSkip(key, 'sprzedawca już odpowiedział'); continue; }
       const text = allegroAutoReplyText(s, thread, 'thread');
       const res = await allegroWywolaj(req, `/messaging/threads/${encodeURIComponent(thread.id)}/messages`, { method: 'POST', bodyObj: { text, attachments: [] } });
-      items[key] = { key, type: 'thread', id: thread.id, sourceMessageId: first.id, responseId: res.id || '', sent_at: new Date().toISOString(), buyerLogin: thread.buyerLogin };
+      items[key] = { key, type: 'thread', id: thread.id, mode: 'first-contact-only', sourceMessageId: first.id, responseId: res.id || '', sent_at: new Date().toISOString(), buyerLogin: thread.buyerLogin };
       sent.push(items[key]);
     }
   }
   if (s.enabled && s.issues) {
     for (const issue of data.issues || []) {
-      const first = issue.latestNewIncoming || null;
+      const messages = issue.messages?.length ? issue.messages : [issue.lastMessage].filter(Boolean);
+      const first = allegroPierwszaWiadomoscKlienta(messages);
       const sourceKey = allegroKluczWiadomosci(first);
-      const key = `issue:${issue.id}:${sourceKey}`;
+      const key = `issue:${issue.id}:first-contact`;
       if (issue.cachedOlder) { markSkip(key, 'starszy wpis zachowany wyłącznie do wyszukiwania'); continue; }
       if (issue.internalResolved) { markSkip(key, 'sprawa zamknięta wewnętrznie'); continue; }
-      if (!first || !issue.needsReply) { markSkip(key, 'brak nowej wiadomości klienta'); continue; }
-      if (items[key]) { markSkip(key, 'już wysłano'); continue; }
+      if (!first || !issue.needsReply || !(issue.newIncomingKeys || []).includes(sourceKey)) { markSkip(key, 'to nie jest pierwszy kontakt w tej dyskusji'); continue; }
+      if (allegroAutoReplyWyslanaDlaRozmowy(items, 'issue', issue.id)) { markSkip(key, 'pierwsza odpowiedź była już wysłana w tej dyskusji'); continue; }
+      if (messages.some((message) => !message.incoming)) { markSkip(key, 'sprzedawca wcześniej uczestniczył w dyskusji'); continue; }
       if (!issue.chatActive) { markSkip(key, 'czat nieaktywny'); continue; }
       if (!allegroJestSwieze(first.createdAt, s.freshHours)) { markSkip(key, 'wiadomość poza oknem czasowym'); continue; }
-      if (allegroMaOdpowiedzSprzedawcyPo(issue.messages, first)) { markSkip(key, 'sprzedawca już odpowiedział'); continue; }
+      if (allegroMaOdpowiedzSprzedawcyPo(messages, first)) { markSkip(key, 'sprzedawca już odpowiedział'); continue; }
       const text = allegroAutoReplyText(s, issue, 'issue');
       const res = await allegroWywolaj(req, `/sale/issues/${encodeURIComponent(issue.id)}/message`, { method: 'POST', accept: ALLEGRO_BETA_JSON, contentType: ALLEGRO_BETA_JSON, bodyObj: { text, attachments: [], type: 'REGULAR' } });
-      items[key] = { key, type: 'issue', id: issue.id, sourceMessageId: first.id, responseId: res.id || '', sent_at: new Date().toISOString(), buyerLogin: issue.buyerLogin };
+      items[key] = { key, type: 'issue', id: issue.id, mode: 'first-contact-only', sourceMessageId: first.id, responseId: res.id || '', sent_at: new Date().toISOString(), buyerLogin: issue.buyerLogin };
       sent.push(items[key]);
     }
   }
@@ -3788,36 +3795,104 @@ function allegroOrderIdKomunikacji(item = {}) {
   const messages = Array.isArray(item.messages) ? item.messages : [];
   return tekst(item.orderId || item.lastMessage?.orderId || messages.find((m) => m?.orderId)?.orderId || '', 120).trim();
 }
-function allegroKontekstOdpowiedzi(item = {}, order = null) {
+function allegroZnajdzZamowienieKomunikacji(item = {}, orders = []) {
+  const list = Array.isArray(orders) ? orders : [];
+  const directId = allegroOrderIdKomunikacji(item);
+  if (directId) return { orderId: directId, order: list.find((x) => String(x?.id || x?.nr) === directId) || null, match: 'conversation_order_id', candidates: [directId] };
+  const text = `${item.subject || ''} ${(item.messages || []).map((m) => m?.text || '').join(' ')}`.toLowerCase();
+  const inText = list.find((x) => {
+    const id = String(x?.id || x?.nr || '').trim();
+    return id.length >= 8 && text.includes(id.toLowerCase());
+  });
+  if (inText) return { orderId: String(inText.id || inText.nr), order: inText, match: 'order_id_in_message', candidates: [String(inText.id || inText.nr)] };
+  const login = String(item.buyerLogin || '').trim().toLowerCase();
+  const buyerOrders = login ? list.filter((x) => String(x?.buyerLogin || '').trim().toLowerCase() === login).sort((a, b) => String(b.createdAt || b.firstFetchedAt || '').localeCompare(String(a.createdAt || a.firstFetchedAt || ''))) : [];
+  const active = buyerOrders.filter((x) => !['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(allegroStatusKolejkiZamowienia(x, {})));
+  const selected = active.length === 1 ? active[0] : buyerOrders.length === 1 ? buyerOrders[0] : null;
+  return { orderId: selected ? String(selected.id || selected.nr) : '', order: selected, match: selected ? 'unique_buyer_order' : '', candidates: buyerOrders.slice(0, 5).map((x) => String(x.id || x.nr)) };
+}
+function allegroStatusZamowieniaOpis(status = '') {
+  return ({ NEW: 'nowe', PROCESSING: 'w realizacji', READY_FOR_SHIPMENT: 'gotowe do wysyłki', READY_FOR_PICKUP: 'gotowe do odbioru', SENT: 'wysłane', PICKED_UP: 'odebrane', CANCELLED: 'anulowane', SUSPENDED: 'wstrzymane', RETURNED: 'zwrócone' })[String(status || '').toUpperCase()] || String(status || 'brak statusu').toLowerCase();
+}
+function allegroKontekstOdpowiedzi(item = {}, order = null, checks = {}) {
   const analysis = order?.agentAnalysis || {};
   const positions = Array.isArray(analysis.positions) ? analysis.positions : [];
   const products = (Array.isArray(order?.lineItems) ? order.lineItems : []).map((x) => `${tekst(x.offerName || 'produkt', 120)} × ${Math.max(1, Number(x.quantity) || 1)}`).slice(0, 8);
   const stock = positions.map((p) => ({ name: tekst(p.nazwa || p.productName || 'produkt', 120), stock: p.stock, available: p.available, shortage: Math.max(0, Number(p.shortage) || 0), location: tekst(p.location || '', 80) }));
+  const officialStatus = allegroStatusKolejkiZamowienia(order || {}, {});
+  const shipments = Array.isArray(checks.shipments) ? checks.shipments : [];
+  const localShipping = checks.localOrder?.wysylka || {};
+  const tracking = tekst(shipments.find((x) => x?.waybill)?.waybill || localShipping.numer || checks.localOrder?.trackingNumber || '', 120).trim();
+  const carrier = tekst(shipments.find((x) => x?.waybill)?.carrierName || shipments.find((x) => x?.waybill)?.carrierId || localShipping.przewoznik || '', 120).trim();
+  const shippingStatus = tekst(order?.shipmentStatus || order?.deliveryStatus || localShipping.inpostStatus || localShipping.etap || '', 160).trim();
+  const sent = ['SENT', 'PICKED_UP'].includes(officialStatus);
+  const delivered = officialStatus === 'PICKED_UP' || /delivered|dostarcz|odebran/i.test(shippingStatus);
   return {
-    orderId: tekst(order?.id || order?.nr || allegroOrderIdKomunikacji(item), 120),
-    status: allegroStatusKolejkiZamowienia(order || {}, {}),
+    orderId: tekst(order?.id || order?.nr || checks.orderId || allegroOrderIdKomunikacji(item), 120),
+    orderFound: !!order,
+    orderMatch: checks.orderMatch || '',
+    candidateOrderIds: Array.isArray(checks.candidateOrderIds) ? checks.candidateOrderIds : [],
+    status: officialStatus,
+    statusLabel: allegroStatusZamowieniaOpis(officialStatus),
     warehouseStage: tekst(order?.warehouseStage || '', 40),
+    paymentStatus: tekst(order?.paymentStatus || '', 160),
     products,
     stock,
     ready: !!analysis.gotowe,
     shortages: stock.reduce((sum, p) => sum + p.shortage, 0),
+    shipment: { sent, delivered, tracking, carrier, status: shippingStatus, labelCreated: !!(localShipping.etykietaGotowa || localShipping.inpostId), checked: checks.shipmentsChecked === true, source: shipments.length ? 'Allegro' : (checks.localOrder ? 'InPost/sklep' : '') },
+    verifiedAt: new Date().toISOString(),
+    checks: { liveOrder: checks.liveOrderChecked === true, shipments: checks.shipmentsChecked === true, localShipping: !!checks.localOrder, warehouse: !!order?.agentAnalysis },
+    errors: Array.isArray(checks.errors) ? checks.errors.map((x) => tekst(x, 300)).slice(0, 5) : [],
   };
 }
-function allegroPropozycjaOdpowiedzi(type = 'thread', item = {}, order = null) {
+async function allegroSprawdzKontekstOdpowiedzi(req, item = {}, allegroOrders = [], storeOrders = []) {
+  const found = allegroZnajdzZamowienieKomunikacji(item, allegroOrders);
+  let order = found.order, shipments = [], liveOrderChecked = false, shipmentsChecked = false;
+  const errors = [];
+  if (found.orderId) {
+    try {
+      const raw = await allegroWywolaj(req, `/order/checkout-forms/${encodeURIComponent(found.orderId)}`, { method: 'GET' });
+      order = allegroScalZamowienie(raw, order || {});
+      liveOrderChecked = true;
+    } catch (error) { errors.push(`Zamówienie Allegro: ${error.message || error}`); }
+    try {
+      const raw = await allegroWywolaj(req, `/order/checkout-forms/${encodeURIComponent(found.orderId)}/shipments`, { method: 'GET' });
+      shipments = Array.isArray(raw?.shipments) ? raw.shipments : [];
+      shipmentsChecked = true;
+    } catch (error) { errors.push(`Przesyłki Allegro: ${error.message || error}`); }
+  }
+  const localOrder = (Array.isArray(storeOrders) ? storeOrders : []).find((x) => [x?.nr, x?.id, x?.allegroOrderId, x?.checkoutFormId].some((value) => String(value || '') === String(found.orderId || ''))) || null;
+  const context = allegroKontekstOdpowiedzi(item, order, { orderId: found.orderId, orderMatch: found.match, candidateOrderIds: found.candidates, shipments, liveOrderChecked, shipmentsChecked, localOrder, errors });
+  return { order, context };
+}
+function allegroPropozycjaOdpowiedzi(type = 'thread', item = {}, order = null, contextInput = null) {
   const buyer = tekst(item.buyerLogin || 'Kliencie', 120);
-  const context = allegroKontekstOdpowiedzi(item, order);
+  const context = contextInput || allegroKontekstOdpowiedzi(item, order);
   const last = item.humanReplySource || item.latestNewIncoming || item.lastMessage || {};
   const incoming = String(last.text || item.subject || '').toLowerCase();
   const shippingQuestion = /kiedy|wysył|pacz|dostaw|status|gdzie/.test(incoming);
   const stockQuestion = /dostępn|stan|iloś|sztuk/.test(incoming);
-  let body = 'Dziękujemy za wiadomość. Sprawdziliśmy przekazane informacje.';
-  if (context.orderId) {
-    if (context.status === 'SENT' || context.status === 'PICKED_UP') body = `Zamówienie ${context.orderId} zostało już przekazane do wysyłki. Sprawdzimy bieżący status doręczenia i w razie potrzeby wrócimy z dodatkowymi informacjami.`;
-    else if (context.shortages > 0) body = `Sprawdziliśmy zamówienie ${context.orderId}. Część produktów wymaga jeszcze potwierdzenia dostępności, dlatego weryfikujemy termin przygotowania. Przekażemy dokładną informację, gdy tylko kontrola zostanie zakończona.`;
-    else if (context.ready) body = `Sprawdziliśmy zamówienie ${context.orderId}. Produkty są dostępne do skompletowania i zamówienie jest przygotowywane do dalszej realizacji.`;
-    else body = `Sprawdziliśmy zamówienie ${context.orderId}. Jest ono obecnie w obsłudze, a agent magazynowy weryfikuje produkty i etap kompletacji.`;
-  } else if (stockQuestion) body = 'Dziękujemy za pytanie o dostępność. Sprawdzamy aktualny stan produktu i potwierdzimy możliwą ilość oraz termin realizacji.';
-  else if (shippingQuestion) body = 'Dziękujemy za wiadomość dotyczącą wysyłki. Sprawdzamy bieżący etap realizacji i przekażemy dokładną informację o terminie nadania.';
+  const paymentQuestion = /płat|zapł|przelew|zwrot.*pieni|środk/.test(incoming);
+  let body = 'Dziękujemy za wiadomość.';
+  if (!context.orderFound) {
+    body = context.candidateOrderIds?.length > 1
+      ? 'Znaleźliśmy kilka zamówień powiązanych z kontem, dlatego prosimy o podanie numeru zamówienia, którego dotyczy wiadomość. Pozwoli nam to przekazać dokładną informację bez ryzyka pomyłki.'
+      : 'Nie udało się jednoznacznie dopasować zamówienia do tej rozmowy. Prosimy o podanie numeru zamówienia, abyśmy mogli sprawdzić właściwą przesyłkę i etap realizacji.';
+  } else if (context.status === 'CANCELLED') body = `Sprawdziliśmy zamówienie ${context.orderId}. W Allegro ma ono status anulowanego.`;
+  else if (context.status === 'RETURNED') body = `Sprawdziliśmy zamówienie ${context.orderId}. W Allegro ma ono status zwróconego.`;
+  else if (shippingQuestion) {
+    if (context.shipment.delivered) body = `Sprawdziliśmy zamówienie ${context.orderId}. Przesyłka ma status odebranej${context.shipment.tracking ? `, a numer nadania to ${context.shipment.tracking}` : ''}.`;
+    else if (context.shipment.sent) body = `Sprawdziliśmy zamówienie ${context.orderId}. Jest oznaczone w Allegro jako wysłane${context.shipment.carrier ? ` przez ${context.shipment.carrier}` : ''}${context.shipment.tracking ? `. Numer nadania: ${context.shipment.tracking}` : ', ale numer nadania nie jest jeszcze widoczny w pobranych danych'}.`;
+    else if (context.shipment.tracking) body = `Sprawdziliśmy zamówienie ${context.orderId}. Nadano już numer przesyłki ${context.shipment.tracking}, jednak aktualny status Allegro (${context.statusLabel}) nie potwierdza jeszcze przekazania paczki przewoźnikowi.`;
+    else if (context.shipment.labelCreated) body = `Sprawdziliśmy zamówienie ${context.orderId}. Etykieta przesyłki została utworzona, ale zamówienie nie jest jeszcze oznaczone jako wysłane i nie ma potwierdzonego numeru nadania.`;
+    else body = `Sprawdziliśmy zamówienie ${context.orderId}. Aktualny status to „${context.statusLabel}”; nie jest jeszcze oznaczone jako wysłane i nie znaleźliśmy numeru nadania.`;
+  } else if (stockQuestion && context.shortages > 0) body = `Sprawdziliśmy zamówienie ${context.orderId} oraz stany produktów. Brakuje obecnie ${context.shortages} szt., dlatego zamówienie oczekuje na uzupełnienie lub potwierdzenie dostępności.`;
+  else if (stockQuestion && context.ready) body = `Sprawdziliśmy zamówienie ${context.orderId} oraz stany produktów. Wszystkie pozycje są gotowe do skompletowania.`;
+  else if (paymentQuestion) body = `Sprawdziliśmy zamówienie ${context.orderId}. Allegro przekazało je ze statusem „${context.statusLabel}”${context.paymentStatus ? `, a zapis płatności to „${context.paymentStatus}”` : ''}.`;
+  else if (context.shortages > 0) body = `Sprawdziliśmy zamówienie ${context.orderId}. Ma status „${context.statusLabel}”, a kontrola magazynowa wykazała brak ${context.shortages} szt. produktów.`;
+  else if (context.ready) body = `Sprawdziliśmy zamówienie ${context.orderId}. Ma status „${context.statusLabel}”, a wszystkie pozycje są gotowe do skompletowania.`;
+  else body = `Sprawdziliśmy zamówienie ${context.orderId}. Jego aktualny status w Allegro to „${context.statusLabel}”.`;
   if (type === 'issue') body += ' Zapoznaliśmy się również z treścią zgłoszenia i będziemy prowadzić dalszą obsługę w tej dyskusji.';
   return `Dzień dobry ${buyer},\n\n${body}\n\nPozdrawiamy serdecznie\nArtway-TM`;
 }
@@ -5448,14 +5523,12 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const type = body.type === 'issue' ? 'issue' : 'thread';
       const id = tekst(body.id, 120).trim();
-      const [comm, ordersRec] = await Promise.all([czytaj('allegro_communications', { threads: [], issues: [] }), czytaj('allegro_orders', { items: [] })]);
+      const [comm, ordersRec, storeOrdersRec] = await Promise.all([czytaj('allegro_communications', { threads: [], issues: [] }), czytaj('allegro_orders', { items: [] }), czytaj('orders', { items: [] })]);
       const list = type === 'issue' ? comm.issues : comm.threads;
       const item = (Array.isArray(list) ? list : []).find((x) => String(x?.id) === id);
       if (!item) return odpowiedz({ ok: false, error: 'Nie znaleziono rozmowy Allegro', code: 'not_found' }, 404);
-      const orderId = allegroOrderIdKomunikacji(item);
-      const order = (Array.isArray(ordersRec.items) ? ordersRec.items : []).find((x) => String(x?.id || x?.nr) === orderId) || null;
-      const context = allegroKontekstOdpowiedzi(item, order);
-      return odpowiedz({ ok: true, type, id, suggestion: allegroPropozycjaOdpowiedzi(type, item, order), context, basedOn: { order: !!order, warehouse: !!order?.agentAnalysis, latestMessage: !!(item.latestNewIncoming || item.lastMessage) } });
+      const checked = await allegroSprawdzKontekstOdpowiedzi(req, item, ordersRec.items, storeOrdersRec.items);
+      return odpowiedz({ ok: true, type, id, suggestion: allegroPropozycjaOdpowiedzi(type, item, checked.order, checked.context), context: checked.context, basedOn: { order: checked.context.orderFound, liveOrder: checked.context.checks.liveOrder, shipments: checked.context.checks.shipments, localShipping: checked.context.checks.localShipping, warehouse: checked.context.checks.warehouse, latestMessage: !!(item.latestNewIncoming || item.lastMessage) } });
     }
 
     if (action === 'allegro-send-reply') {

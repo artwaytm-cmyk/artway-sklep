@@ -4,7 +4,7 @@ const DANE_FIRMY_DOMYSLNE = {
   identyfikator: "5882468333",
   nip: "5882468333",
   pesel: "5882468333",
-  adres: ""
+  adres: "Gryfa Pomorskiego 1/A, 84-207 Bojano"
 };
 const NUMER_PRZELEWU_TELEFON_DOMYSLNY = "530038914";
 const DOMYSLNE_PLATNOSCI = [
@@ -3002,7 +3002,7 @@ function widokRegulamin(){
     <h2>§2 Zamówienia</h2><p>Zamówienia można składać 24/7 przez stronę. Zawarcie umowy następuje z chwilą potwierdzenia zamówienia przez sklep.</p>
     <h2>§3 Ceny i płatności</h2><p>Ceny są cenami brutto (zawierają VAT). Dostępne formy płatności: ${esc(platnosciOpis())}. Przy przelewie na telefon klient wpisuje w tytule numer zamówienia.</p>
     <h2>§4 Dostawa</h2><p>${esc(tekstWysylki())} w dni robocze. Koszty dostawy podane są w koszyku. Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł.</p>
-    <h2>§5 Zwroty</h2><p>Konsument ma prawo odstąpić od umowy w terminie 14 dni bez podania przyczyny.</p>
+    <h2>§5 Zwroty</h2><p>Konsument ma prawo odstąpić od umowy w terminie 14 dni bez podania przyczyny. Przy zwykłym odstąpieniu bezpośredni koszt odesłania produktu ponosi konsument. Koszty zwrotu produktu reklamowanego jako niezgodny z umową ponosi sprzedawca.</p>
     <h2>§6 Reklamacje</h2><p>Reklamacje rozpatrujemy w ciągu 14 dni. Zgłoszenia: ${KONFIG.emailSklepu}.</p>`,"regulamin");
 }
 function widokPrywatnosc(){
@@ -3028,8 +3028,10 @@ function widokDostawa(){
 function widokZwroty(){
   if(KONFIG.tresci?.zwroty) return stronaInfo("↩️ Zwroty i reklamacje", KONFIG.tresci.zwroty,"zwroty");
   return stronaInfo("↩️ Zwroty i reklamacje", `
-    <h2>Zwrot w 14 dni</h2><p>Możesz odstąpić od umowy w ciągu 14 dni od otrzymania przesyłki bez podania przyczyny. Napisz na ${KONFIG.emailSklepu}, odeślij towar, a my zwrócimy pieniądze w ciągu 14 dni.</p>
-    <h2>Reklamacje</h2><p>Jeśli towar ma wadę, przysługuje Ci reklamacja z tytułu rękojmi. Opisz problem i dołącz zdjęcia — odpowiemy w ciągu 14 dni.</p>`,"zwroty");
+    <h2>Zwrot w 14 dni</h2><p>Możesz odstąpić od umowy w ciągu 14 dni od otrzymania przesyłki bez podania przyczyny. Napisz na ${KONFIG.emailSklepu} i odeślij produkt pocztą lub przesyłką kurierską. Przy takim zwrocie bezpośredni koszt odesłania ponosi klient. Nie dołączamy gotowej etykiety zwrotnej.</p>
+    <h2>Zwrot pieniędzy</h2><p>Zwrot środków wykonujemy nie później niż w ciągu 14 dni od otrzymania oświadczenia. Możemy wstrzymać zwrot do chwili otrzymania produktu albo przedstawienia potwierdzenia jego odesłania.</p>
+    <h2>Wymiana</h2><p>Nie prowadzimy osobnej procedury wymiany. Możesz zwrócić produkt zgodnie z powyższymi zasadami i złożyć nowe zamówienie.</p>
+    <h2>Reklamacje</h2><p>Jeśli produkt jest niezgodny z umową, opisz problem i dołącz zdjęcia — odpowiemy w ciągu 14 dni. Uzasadnione koszty odesłania reklamowanego produktu ponosi sprzedawca.</p>`,"zwroty");
 }
 function widokWylaczonejStrony(){
   return `<div class="page page-compact"><div class="panel" style="text-align:center"><h1>Ta strona jest chwilowo wyłączona</h1><p>Wróć na stronę główną lub skontaktuj się ze sklepem.</p><p style="margin-top:1rem"><a class="btn" href="#/">← Strona główna</a></p></div></div>`;
@@ -7008,7 +7010,7 @@ function allegroAutoReplyKlucz(type,id,sourceId=""){
 function allegroAutoReplyDla(type,item={}){
   const replies=allegroKomunikacja?.autoReplies||{};
   const source=String(item.latestNewIncomingKey||item.latestNewIncoming?.id||item.latestNewIncoming?.createdAt||"");
-  return (source&&replies[allegroAutoReplyKlucz(type,item.id,source)])||replies[allegroAutoReplyKlucz(type,item.id)]||null;
+  return replies[`${type}:${item.id}:first-contact`]||(source&&replies[allegroAutoReplyKlucz(type,item.id,source)])||replies[allegroAutoReplyKlucz(type,item.id)]||Object.values(replies).find(x=>x?.type===type&&String(x?.id)===String(item.id))||null;
 }
 function allegroKomunikacjaStaty(){
   const threads=Array.isArray(allegroKomunikacja?.threads)?allegroKomunikacja.threads:[];
@@ -7027,12 +7029,25 @@ function allegroKomunikacjaBledyHTML(){
   return `<div class="backend-note" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Diagnostyka komunikacji Allegro:</b><br>${errors.map(e=>`• ${esc(e.key||"API")}: ${esc(e.message||e.code||"błąd")}${e.status?` (HTTP ${esc(e.status)})`:""}`).join("<br>")}</div>`;
 }
 function allegroReplyFieldId(type,id){return `allegro-reply-${String(type||"thread").replace(/[^a-z0-9_-]/gi,"-")}-${String(id||"").replace(/[^a-z0-9_-]/gi,"-")}`;}
+function allegroReplyContextId(type,id){return `allegro-reply-context-${String(type||"thread").replace(/[^a-z0-9_-]/gi,"-")}-${String(id||"").replace(/[^a-z0-9_-]/gi,"-")}`;}
+function allegroKontekstOdpowiedziHTML(context={}){
+  const shipment=context.shipment||{},checks=context.checks||{},errors=Array.isArray(context.errors)?context.errors:[];
+  const chips=[
+    [context.orderFound?"ok":"warn",context.orderFound?`Zamówienie ${context.orderId}`:"Brak jednoznacznego zamówienia"],
+    [checks.liveOrder?"ok":"warn",checks.liveOrder?`Status Allegro: ${context.statusLabel||context.status||"sprawdzony"}`:"Status bieżący niedostępny"],
+    [checks.shipments?"ok":"warn",shipment.tracking?`Numer nadania: ${shipment.tracking}`:shipment.sent?"Wysłane — bez numeru w danych":"Brak potwierdzonego nadania"],
+    [checks.warehouse?context.shortages>0?"bad":"ok":"info",checks.warehouse?(context.shortages>0?`Braki magazynowe: ${context.shortages} szt.`:"Magazyn sprawdzony"):"Brak analizy magazynowej"],
+    [checks.localShipping?"ok":"info",checks.localShipping?"Sprawdzono obsługę InPost w sklepie":"Brak lokalnej przesyłki"],
+  ];
+  return `<div class="allegro-agent-check-head"><b>🤖 Agent sprawdził dane przed przygotowaniem odpowiedzi</b><small>${esc(allegroDataTxt(context.verifiedAt))}</small></div><div class="allegro-agent-check-chips">${chips.map(([cls,label])=>`<span class="${cls}">${esc(label)}</span>`).join("")}</div>${errors.length?`<small class="allegro-agent-check-warning">Nie wszystkie źródła odpowiedziały: ${errors.map(esc).join(" • ")}. Propozycja nie zgaduje brakujących danych.</small>`:""}`;
+}
 async function allegroAgentPropozycjaOdpowiedzi(type,id){
   try{
-    const d=await chmura("allegro-reply-suggestion",{method:"POST",body:{type,id},timeout:18000});
+    const d=await chmura("allegro-reply-suggestion",{method:"POST",body:{type,id},timeout:30000});
     const field=document.getElementById(allegroReplyFieldId(type,id));
     if(field){field.value=d.suggestion||"";field.focus();}
-    toast(d.basedOn?.warehouse?"🤖 Agent przygotował odpowiedź na podstawie zamówienia i stanów magazynowych":"🤖 Agent przygotował bezpieczną propozycję odpowiedzi");
+    const contextBox=document.getElementById(allegroReplyContextId(type,id));if(contextBox){contextBox.innerHTML=allegroKontekstOdpowiedziHTML(d.context||{});contextBox.hidden=false;}
+    toast(d.basedOn?.shipments?"🤖 Agent sprawdził zamówienie, wysyłkę i tracking":"🤖 Agent sprawdził dostępne dane i przygotował propozycję do zatwierdzenia");
   }catch(e){toast("⚠️ Propozycja Agenta AI: "+(e.message||e));}
 }
 async function allegroWyslijOdpowiedz(type,id){
@@ -7076,7 +7091,7 @@ async function allegroOznaczZaznaczoneSprawy(type,resolved=true){
   try{const d=await chmura("allegro-communication-resolve",{method:"POST",body:{items},timeout:30000});allegroKomunikacja={...allegroKomunikacja,threads:d.threads||allegroKomunikacja.threads,issues:d.issues||allegroKomunikacja.issues,updated_at:d.updated_at||allegroKomunikacja.updated_at};set.clear();allegroZapiszCache();toast(`✅ Zmieniono ${d.results?.filter(x=>x.ok).length||0} spraw wyłącznie wewnętrznie — bez wiadomości do klientów`);renderuj();}catch(e){toast("⚠️ Operacja grupowa: "+(e.message||e));}
 }
 function allegroRozmowaHTML(type,item={},label="Wiadomość"){
-  const sent=allegroAutoReplyDla(type,item),last=item.lastMessage||{},resolved=!!item.internalResolved,nowa=!resolved&&!!(item.humanReplyNeeded||item.needsReply),fieldId=allegroReplyFieldId(type,item.id),noteId=allegroInternalNoteId(type,item.id),selected=allegroZaznaczeniaKomunikacji(type).has(String(item.id));
+  const sent=allegroAutoReplyDla(type,item),last=item.lastMessage||{},resolved=!!item.internalResolved,nowa=!resolved&&!!(item.humanReplyNeeded||item.needsReply),fieldId=allegroReplyFieldId(type,item.id),contextId=allegroReplyContextId(type,item.id),noteId=allegroInternalNoteId(type,item.id),selected=allegroZaznaczeniaKomunikacji(type).has(String(item.id));
   const messages=Array.isArray(item.messages)&&item.messages.length?item.messages:[last].filter(Boolean);
   const orderId=item.orderId||messages.find(m=>m.orderId)?.orderId||"";
   return `<details class="allegro-conversation-card ${nowa?"needs-reply":""} ${resolved?"is-internally-resolved":""}" ${nowa?"open":""}>
@@ -7084,7 +7099,7 @@ function allegroRozmowaHTML(type,item={},label="Wiadomość"){
     <div class="allegro-conversation-meta"><span>ID: ${esc(item.id)}</span>${orderId?`<span>Zamówienie: ${esc(orderId)}</span>`:""}<span>Ostatnia: ${esc(allegroDataTxt(item.lastMessageDateTime||last.createdAt||item.openedDate))}</span>${item.status?`<span>Status: ${esc(item.status)}</span>`:""}</div>
     <div class="allegro-internal-resolution"><div><b>✅ Obsługa wewnętrzna</b><small>Ta operacja nie wysyła wiadomości do klienta ani nie zmienia statusu w Allegro. Agent przestanie zgłaszać sprawę do wyjaśnienia. Nowa wiadomość klienta automatycznie otworzy ją ponownie.</small>${resolved&&item.internalResolution?.resolvedAt?`<em>Załatwiono: ${esc(allegroDataTxt(item.internalResolution.resolvedAt))}${item.internalResolution.note?` • ${esc(item.internalResolution.note)}`:""}</em>`:""}</div><input id="${esc(noteId)}" maxlength="1000" value="${esc(item.internalResolution?.note||"")}" placeholder="Notatka wewnętrzna (opcjonalnie)">${resolved?`<button class="btn ghost" type="button" onclick="allegroOznaczSpraweWewnetrznie(${jsArg(type)},${jsArg(item.id)},false)">↩️ Przywróć do obsługi</button>`:`<button class="btn" type="button" onclick="allegroOznaczSpraweWewnetrznie(${jsArg(type)},${jsArg(item.id)},true)">✅ Oznacz jako załatwioną</button>`}</div>
     ${allegroHistoriaRozmowyHTML(messages)}
-    <div class="allegro-reply-box"><label for="${esc(fieldId)}"><b>Odpowiedź wychodząca do klienta</b><small>To osobna operacja — dopiero przycisk „Wyślij przez Allegro” przekaże treść klientowi.</small></label><textarea id="${esc(fieldId)}" rows="6" maxlength="20000" placeholder="Wpisz odpowiedź dla klienta…"></textarea><div class="diag-actions"><button class="btn ghost" type="button" onclick="allegroAgentPropozycjaOdpowiedzi(${jsArg(type)},${jsArg(item.id)})">🤖 Przygotuj propozycję</button><button class="btn" type="button" onclick="allegroWyslijOdpowiedz(${jsArg(type)},${jsArg(item.id)})">✉️ Wyślij przez Allegro</button></div></div>
+    <div class="allegro-reply-box"><label for="${esc(fieldId)}"><b>Odpowiedź wychodząca do klienta</b><small>Kolejne odpowiedzi nigdy nie są wysyłane automatycznie. Agent najpierw sprawdza zamówienie, status Allegro, magazyn, przesyłkę i numer nadania; dopiero przycisk „Wyślij przez Allegro” przekaże zatwierdzoną treść klientowi.</small></label><div id="${esc(contextId)}" class="allegro-agent-check" hidden></div><textarea id="${esc(fieldId)}" rows="6" maxlength="20000" placeholder="Wpisz odpowiedź dla klienta…"></textarea><div class="diag-actions"><button class="btn ghost" type="button" onclick="allegroAgentPropozycjaOdpowiedzi(${jsArg(type)},${jsArg(item.id)})">🤖 Sprawdź zamówienie i przygotuj</button><button class="btn" type="button" onclick="allegroWyslijOdpowiedz(${jsArg(type)},${jsArg(item.id)})">✉️ Wyślij przez Allegro</button></div></div>
   </details>`;
 }
 function allegroWatekHTML(t){
@@ -7100,7 +7115,7 @@ function allegroKomunikacjaPanelLegacyHTML(){
   const wymagaPonownegoPolaczenia=!!allegroStan.requiresReauth||(!tokenAktualny&&(allegroKomunikacja?.requiresReauth||(allegroKomunikacja?.errors||[]).some(e=>Number(e.status)===403)));
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
-      <div><h2 style="margin-top:0">💬 Wiadomości, dyskusje i autoresponder Allegro</h2><p class="order-detail-lead">Panel pobiera Centrum wiadomości oraz Dyskusje/Reklamacje. Autoresponder reaguje wyłącznie na nowe wiadomości wykryte od poprzedniego sprawdzenia i zapisuje identyfikator każdej odpowiedzi, żeby nigdy nie wysłać duplikatu.</p></div>
+      <div><h2 style="margin-top:0">💬 Wiadomości, dyskusje i autoresponder Allegro</h2><p class="order-detail-lead">Autoresponder wysyła najwyżej jedną wiadomość: wyłącznie po pierwszej wiadomości klienta w całkowicie nowej rozmowie. Każdy dalszy kontakt wymaga ręcznego zatwierdzenia odpowiedzi przygotowanej po sprawdzeniu zamówienia i wysyłki.</p></div>
       ${wymagaPonownegoPolaczenia?`<button class="btn" onclick="allegroPolacz()">🔐 Napraw połączenie Allegro</button>`:""}
     </div>
     <div class="panel-subtle">
@@ -7114,13 +7129,13 @@ function allegroKomunikacjaPanelLegacyHTML(){
     <div class="orders-stat-grid allegro-info-bottom">
       <div class="order-stat-card ${st.threadNeed?"hot":""}"><span>💬</span><b>${st.threads.length}</b><small>wątki wiadomości</small></div>
       <div class="order-stat-card ${st.issueNeed?"hot":""}"><span>🛟</span><b>${st.issues.length}</b><small>dyskusje/reklamacje</small></div>
-      <div class="order-stat-card ${st.totalNeed?"hot":"money"}"><span>⚡</span><b>${st.totalNeed}</b><small>czeka na pierwszą odpowiedź</small></div>
+      <div class="order-stat-card ${st.totalNeed?"hot":"money"}"><span>⚡</span><b>${st.totalNeed}</b><small>wymaga ręcznej odpowiedzi</small></div>
       <div class="order-stat-card money"><span>✅</span><b>${st.sent}</b><small>auto-odpowiedzi zapisane</small></div>
     </div>
     ${allegroKomunikacjaBledyHTML()}
     <form class="panel-subtle allegro-info-bottom" onsubmit="event.preventDefault();allegroZapiszUstawieniaKomunikacji(this)">
       <div class="order-section-head">
-        <div><h3 style="margin:0">⚙️ Ustawienia autorespondera</h3><p class="order-detail-lead">Harmonogram sprawdza komunikację co 15 minut. Odpowiedź otrzymuje wyłącznie nowa wiadomość klienta, której nie było w poprzedniej synchronizacji i na którą sprzedawca jeszcze nie odpowiedział.</p></div>
+        <div><h3 style="margin:0">⚙️ Ustawienia autorespondera</h3><p class="order-detail-lead">Harmonogram sprawdza komunikację co 15 minut. Automat odpowiada tylko na pierwszą wiadomość klienta w nowym wątku lub nowej dyskusji. Druga i każda kolejna wiadomość nigdy nie uruchamia autorespondera.</p></div>
         <button class="btn" type="submit">💾 Zapisz ustawienia</button>
       </div>
       <div class="form-grid">
@@ -7135,7 +7150,7 @@ function allegroKomunikacjaPanelLegacyHTML(){
   </div>`;
 }
 function allegroKomunikacjaUstawieniaHTML(){
-  const s=allegroKomunikacjaUstawienia();return `<form class="panel-subtle allegro-info-bottom" onsubmit="event.preventDefault();allegroZapiszUstawieniaKomunikacji(this)"><div class="order-section-head"><div><h3 style="margin:0">⚙️ Ustawienia pierwszej odpowiedzi</h3><p class="order-detail-lead">Automatyka działa wyłącznie dla nowych kontaktów. Wewnętrznie załatwione sprawy są pomijane przez Agenta, autoresponder i przypomnienia Telegram.</p></div><button class="btn" type="submit">💾 Zapisz ustawienia</button></div><div class="form-grid"><label class="check"><input type="checkbox" name="enabled" ${s.enabled?"checked":""}> Autoresponder aktywny</label><label class="check"><input type="checkbox" name="messageCenter" ${s.messageCenter?"checked":""}> Centrum wiadomości</label><label class="check"><input type="checkbox" name="issues" ${s.issues?"checked":""}> Dyskusje i reklamacje</label><label class="check"><input type="checkbox" name="telegramReminders" ${s.telegramReminders!==false?"checked":""}> Telegram tylko dla nowych spraw wymagających odpowiedzi</label><div class="f-group"><label>Okno świeżości wiadomości (godziny)</label><input name="freshHours" type="number" min="1" max="168" value="${esc(s.freshHours||48)}"></div></div><div class="f-group"><label>Treść automatycznej pierwszej odpowiedzi <small style="font-weight:400;color:var(--muted2)">zmienne: {login}, {typ}</small></label><textarea name="template" rows="7" maxlength="2000">${esc(s.template||"")}</textarea></div></form>`;
+  const s=allegroKomunikacjaUstawienia();return `<form class="panel-subtle allegro-info-bottom" onsubmit="event.preventDefault();allegroZapiszUstawieniaKomunikacji(this)"><div class="order-section-head"><div><h3 style="margin:0">⚙️ Ustawienia pierwszej odpowiedzi</h3><p class="order-detail-lead"><b>Twarda reguła:</b> automat odpowiada tylko raz — na pierwszy kontakt w nowej rozmowie. Kolejne wiadomości wyłącznie otwierają zadanie dla obsługi i Agenta. Wewnętrznie załatwione sprawy są pomijane przez przypomnienia Telegram.</p></div><button class="btn" type="submit">💾 Zapisz ustawienia</button></div><div class="form-grid"><label class="check"><input type="checkbox" name="enabled" ${s.enabled?"checked":""}> Pierwsza odpowiedź automatyczna aktywna</label><label class="check"><input type="checkbox" name="messageCenter" ${s.messageCenter?"checked":""}> Nowe wątki Centrum wiadomości</label><label class="check"><input type="checkbox" name="issues" ${s.issues?"checked":""}> Nowe dyskusje i reklamacje</label><label class="check"><input type="checkbox" name="telegramReminders" ${s.telegramReminders!==false?"checked":""}> Telegram tylko dla nowych spraw wymagających odpowiedzi</label><div class="f-group"><label>Okno świeżości pierwszego kontaktu (godziny)</label><input name="freshHours" type="number" min="1" max="168" value="${esc(s.freshHours||48)}"></div></div><div class="f-group"><label>Treść jednorazowej odpowiedzi powitalnej <small style="font-weight:400;color:var(--muted2)">zmienne: {login}, {typ}</small></label><textarea name="template" rows="7" maxlength="2000">${esc(s.template||"")}</textarea></div></form>`;
 }
 function allegroKomunikacjaPanelHTML(type="thread"){
   const isIssue=type==="issue",st=allegroKomunikacjaStaty(),all=isIssue?st.issues:st.threads,list=allegroKomunikacjaPasujaca(type),visible=list.slice(0,allegroLimitKomunikacji),set=allegroZaznaczeniaKomunikacji(type),selected=[...set].filter(id=>all.some(x=>String(x.id)===id)),allVisible=!!visible.length&&visible.every(x=>set.has(String(x.id))),need=all.filter(x=>!x.internalResolved&&(x.humanReplyNeeded||x.needsReply)).length,resolved=all.filter(x=>x.internalResolved).length,handled=Math.max(0,all.length-need-resolved),query=isIssue?szukajAllegroDyskusji:szukajAllegroWiadomosci,filter=isIssue?filtrAllegroDyskusji:filtrAllegroWiadomosci,sort=isIssue?sortAllegroDyskusje:sortAllegroWiadomosci;

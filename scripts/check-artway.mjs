@@ -404,6 +404,10 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'options.descriptionSections = allegroSekcjeOpisu(preparedProduct',
   "action === 'allegro-send-reply'",
   "action === 'allegro-reply-suggestion'",
+  'function allegroAutoReplyWyslanaDlaRozmowy',
+  ':first-contact`',
+  'function allegroSprawdzKontekstOdpowiedzi',
+  '/order/checkout-forms/${encodeURIComponent(found.orderId)}/shipments',
   "action === 'allegro-communication-resolve'",
   'function allegroZastosujStatusyWewnetrzne',
   'allegro_communication_internal_history',
@@ -472,6 +476,12 @@ if (!duplicateResolutionFlow.includes("status: 'ENDED'") || !duplicateResolution
 }
 if (!store.includes("if (thread.internalResolved)") || !store.includes("if (issue.internalResolved)") || !store.includes("if (item.internalResolved)")) {
   fail('store-app.mjs: Agent, autoresponder i Telegram muszą pomijać sprawy załatwione wewnętrznie');
+}
+if (!store.includes("!(thread.newIncomingKeys || []).includes(sourceKey)") || !store.includes("!(issue.newIncomingKeys || []).includes(sourceKey)") || !store.includes("mode: 'first-contact-only'")) {
+  fail('store-app.mjs: autoresponder Allegro musi odpowiadać tylko raz na pierwszy kontakt w nowej rozmowie');
+}
+if (!app.includes('function allegroKontekstOdpowiedziHTML') || !app.includes('Sprawdź zamówienie i przygotuj')) {
+  fail('assets/app.js: propozycja odpowiedzi musi pokazywać kontrolę zamówienia, wysyłki i magazynu przed ręcznym wysłaniem');
 }
 const feePreviewFlow = store.slice(store.indexOf("action === 'allegro-fee-preview'"), store.indexOf("action === 'allegro-offer-price-change'"));
 if (!feePreviewFlow.includes('commissions: summary.commissions') || !feePreviewFlow.includes('quotes: summary.quotes') || !feePreviewFlow.includes('allegroCommissionRate')) {

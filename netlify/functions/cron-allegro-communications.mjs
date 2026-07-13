@@ -1,7 +1,7 @@
 // Harmonogram: automatyczne pobieranie Centrum wiadomości Allegro oraz Dyskusji/Reklamacji.
 // Uruchamia się co 15 minut i woła store?action=allegro-sync-communications.
-// Autoresponder wysyła odpowiedź tylko raz na pierwszy kontakt klienta, bo backend
-// zapisuje klucze thread:{id} i issue:{id} w allegro_auto_replies.
+// Autoresponder wysyła odpowiedź tylko raz na pierwszy kontakt klienta. Backend
+// zapisuje trwały klucz {typ}:{id}:first-contact i odrzuca każdą kolejną wiadomość.
 export const config = { schedule: '*/15 * * * *' };
 
 export default async () => {
