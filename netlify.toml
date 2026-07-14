@@ -16,11 +16,16 @@
 # sklepu pozostaje artwaytm.pl, dlatego każdy adres (również podstrona produktu)
 # trafia stałym przekierowaniem na odpowiadającą mu ścieżkę domeny głównej.
 [[redirects]]
-  from = "/*"
+  from = "https://allsklep.pl/*"
   to = "https://artwaytm.pl/:splat"
   status = 301
   force = true
-  conditions = {Host = ["allsklep.pl", "www.allsklep.pl"]}
+
+[[redirects]]
+  from = "https://www.allsklep.pl/*"
+  to = "https://artwaytm.pl/:splat"
+  status = 301
+  force = true
 
 # wygodny alias: /api/store działa tak samo jak /.netlify/functions/store
 [[redirects]]

@@ -54,11 +54,13 @@ test('HTML startowy ma komplet podstaw technicznego SEO', async () => {
 
 test('domena marketingowa przekierowuje stale na kanoniczny adres sklepu', async () => {
   const config = await readFile('netlify.toml', 'utf8');
-  const aliasRedirect = config.indexOf('conditions = {Host = ["allsklep.pl", "www.allsklep.pl"]}');
+  const apexRedirect = config.indexOf('from = "https://allsklep.pl/*"');
+  const wwwRedirect = config.indexOf('from = "https://www.allsklep.pl/*"');
   const appRewrite = config.indexOf('from = "/api/store"');
-  assert.ok(aliasRedirect >= 0, 'brakuje przekierowania obu wariantów allsklep.pl');
-  assert.ok(aliasRedirect < appRewrite, 'przekierowanie domeny musi poprzedzać wewnętrzne rewrite aplikacji');
-  assert.match(config, /to = "https:\/\/artwaytm\.pl\/:splat"[\s\S]*?status = 301[\s\S]*?force = true/);
+  assert.ok(apexRedirect >= 0 && wwwRedirect >= 0, 'brakuje przekierowania obu wariantów allsklep.pl');
+  assert.ok(apexRedirect < appRewrite && wwwRedirect < appRewrite, 'przekierowania domen muszą poprzedzać wewnętrzne rewrite aplikacji');
+  const canonicalRedirects = config.match(/to = "https:\/\/artwaytm\.pl\/:splat"[\s\S]*?status = 301[\s\S]*?force = true/g) || [];
+  assert.equal(canonicalRedirects.length, 2, 'każdy wariant domeny wymaga osobnej reguły 301');
 });
 
 test('podstawowy interfejs ma obsługę klawiatury i czytników ekranu', async () => {
