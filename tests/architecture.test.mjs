@@ -52,6 +52,15 @@ test('HTML startowy ma komplet podstaw technicznego SEO', async () => {
   assert.ok(!html.includes('sklep wielobranżowy'), 'opis startowy nie może reklamować nieaktualnego asortymentu');
 });
 
+test('domena marketingowa przekierowuje stale na kanoniczny adres sklepu', async () => {
+  const config = await readFile('netlify.toml', 'utf8');
+  const aliasRedirect = config.indexOf('conditions = {Host = ["allsklep.pl", "www.allsklep.pl"]}');
+  const appRewrite = config.indexOf('from = "/api/store"');
+  assert.ok(aliasRedirect >= 0, 'brakuje przekierowania obu wariantów allsklep.pl');
+  assert.ok(aliasRedirect < appRewrite, 'przekierowanie domeny musi poprzedzać wewnętrzne rewrite aplikacji');
+  assert.match(config, /to = "https:\/\/artwaytm\.pl\/:splat"[\s\S]*?status = 301[\s\S]*?force = true/);
+});
+
 test('podstawowy interfejs ma obsługę klawiatury i czytników ekranu', async () => {
   const html = await readFile('index.html', 'utf8');
   for (const marker of ['class="skip-link"', '<main id="widok" tabindex="-1"', 'role="dialog"', 'aria-modal="true"', 'aria-live="polite"']) {

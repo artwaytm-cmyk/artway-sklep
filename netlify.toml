@@ -12,6 +12,16 @@
 [functions]
   node_bundler = "esbuild"
 
+# allsklep.pl jest krótkim adresem marketingowym. Jedyną domeną kanoniczną
+# sklepu pozostaje artwaytm.pl, dlatego każdy adres (również podstrona produktu)
+# trafia stałym przekierowaniem na odpowiadającą mu ścieżkę domeny głównej.
+[[redirects]]
+  from = "/*"
+  to = "https://artwaytm.pl/:splat"
+  status = 301
+  force = true
+  conditions = {Host = ["allsklep.pl", "www.allsklep.pl"]}
+
 # wygodny alias: /api/store działa tak samo jak /.netlify/functions/store
 [[redirects]]
   from = "/api/store"
