@@ -1449,6 +1449,8 @@ function widokAdminAgentAI(sekcja="pulpit"){
 }
 let filtrZamowien = "wszystkie", szukajZamowien = "";
 
+const ALLEGRO_ODSWIEZANIE_PANELU_MS=60000;
+let allegroAutoOdswiezanie={busy:false,lastChecked:0,lastChanged:0,orders:0,threads:0,issues:0,offers:0,error:""};
 function klientZamowieniaLabel(z){
   const k=z?.klient||{};
   return [k.imie,k.nazwisko].filter(Boolean).join(" ") || z?.email || "gość";
@@ -1683,7 +1685,8 @@ function allegroLadujJesliTrzeba(){
   allegroStan={...allegroStan,ladowanie:true};
   setTimeout(()=>allegroWczytajDane(true),0);
 }
-async function allegroWczytajDane(cicho=false){
+async function allegroWczytajDane(cicho=false,odswiezWidok=true){
+  let ok=false;
   try{
     const d=await chmura("allegro-data",{timeout:16000});
     allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,ladowanie:false,error:"",offerDefaultsAudit:d.offerDefaultsAudit||{items:{},updated_at:null},catalogMaintenance:d.catalogMaintenance||allegroStan.catalogMaintenance||{cursor:0,lastRun:null},complianceAudit:d.complianceAudit||allegroStan.complianceAudit||{items:[],summary:{},updated_at:null},offerSettings:d.offerSettings||allegroStan.offerSettings||{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,updated_at:null}};
@@ -1693,12 +1696,31 @@ async function allegroWczytajDane(cicho=false){
     if(d.offerLastError) allegroOstatniBladWystawienia={message:d.offerLastError.message,allegroError:{errors:d.offerLastError.errors||[]},...d.offerLastError};
     if(Array.isArray(d.threads)||Array.isArray(d.issues)) allegroKomunikacja={...allegroKomunikacja,threads:Array.isArray(d.threads)?d.threads:allegroKomunikacja.threads,issues:Array.isArray(d.issues)?d.issues:allegroKomunikacja.issues,settings:d.settings||allegroKomunikacja.settings,autoReplies:d.autoReplies||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:allegroKomunikacja.errors,requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||allegroKomunikacja.updated_at,sprawdzono:true};
     allegroZapiszCache();
+    ok=true;
     if(!cicho) toast("Dane Allegro odświeżone");
   }catch(e){
     allegroStan={...allegroStan,sprawdzono:true,ladowanie:false,error:e.message||String(e)};
     if(!cicho) toast("⚠️ Allegro: "+allegroStan.error);
   }
-  renderuj();
+  if(odswiezWidok)renderuj();
+  return ok;
+}
+function allegroAktywneIdDoOdswiezenia(){return new Set((allegroZamowienia||[]).filter(allegroZamowienieAktywneLokalnie).map(z=>String(z.id||z.nr||"")).filter(Boolean));}
+function allegroOfertaIdDoOdswiezenia(){return new Set((allegroOferty||[]).map(o=>String(o.id||"")).filter(Boolean));}
+function allegroKomunikacjaKluczeDoOdswiezenia(type="thread"){const list=type==="issue"?(allegroKomunikacja?.issues||[]):(allegroKomunikacja?.threads||[]);return new Set(list.filter(allegroKomunikacjaWymagaOdpowiedzi).map(x=>{const id=String(x.id||""),last=x.latestNewIncoming||x.lastMessage||{},marker=String(x.latestNewIncomingKey||last.id||last.createdAt||x.newIncomingCount||"");return id?`${id}:${marker}`:"";}).filter(Boolean));}
+function allegroNoweIdPoOdswiezeniu(przed,po){let n=0;for(const id of po)if(!przed.has(id))n++;return n;}
+async function allegroOdswiezDaneZSerweraJesliCzas(powod="timer"){
+  if(allegroAutoOdswiezanie.busy||typeof jestAdmin!=="function"||!jestAdmin())return false;
+  if(typeof document!=="undefined"&&document.hidden&&powod==="timer")return false;
+  const teraz=Date.now(),minimalnyOdstep=powod==="timer"?ALLEGRO_ODSWIEZANIE_PANELU_MS:15000;
+  if(teraz-Number(allegroAutoOdswiezanie.lastChecked||0)<minimalnyOdstep)return false;
+  const mialDane=!!allegroStan.sprawdzono,przedOrders=allegroAktywneIdDoOdswiezenia(),przedOffers=allegroOfertaIdDoOdswiezenia(),przedThreads=allegroKomunikacjaKluczeDoOdswiezenia("thread"),przedIssues=allegroKomunikacjaKluczeDoOdswiezenia("issue");
+  allegroAutoOdswiezanie={...allegroAutoOdswiezanie,busy:true,error:""};
+  const ok=await allegroWczytajDane(true,false);
+  const orders=ok?allegroNoweIdPoOdswiezeniu(przedOrders,allegroAktywneIdDoOdswiezenia()):0,offers=ok?allegroNoweIdPoOdswiezeniu(przedOffers,allegroOfertaIdDoOdswiezenia()):0,threads=ok?allegroNoweIdPoOdswiezeniu(przedThreads,allegroKomunikacjaKluczeDoOdswiezenia("thread")):0,issues=ok?allegroNoweIdPoOdswiezeniu(przedIssues,allegroKomunikacjaKluczeDoOdswiezenia("issue")):0,changed=orders+offers+threads+issues;
+  allegroAutoOdswiezanie={busy:false,lastChecked:Date.now(),lastChanged:changed?Date.now():allegroAutoOdswiezanie.lastChanged,orders,threads,issues,offers,error:ok?"":allegroStan.error||"Nie udało się odświeżyć danych"};
+  if(ok&&mialDane&&changed)toast(`🟠 Allegro: zlecenia ${orders} • wiadomości ${threads} • dyskusje ${issues} • oferty ${offers}`);
+  return ok;
 }
 async function allegroPolacz(){
   try{
@@ -2954,18 +2976,15 @@ function adminSubnavHTML(items, aktywny){
   return `<nav class="panel admin-tabs-panel module-tabs-panel" aria-label="Podsekcje panelu"><div class="shipping-tabs admin-main-tabs">${safe.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}" ${x.id===aktywny?'aria-current="page"':""} title="${esc(x.label)}"><span class="tab-label">${esc(x.label)}</span>${x.badge?`<span class="nav-badge">${esc(x.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
 }
 function magazynSubnavHTML(aktywny="pulpit"){
-  const produktyAktywne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
-  const braki=potrzebyZatowarowania().length;
-  const prod=statystykiDostepnosciProducentow(),alerty=prod.niskie.length+prod.braki.length;
-  const bezLok=produktyAktywne.filter(p=>!magazynMetaProduktu(p.id).lokalizacja).length;
-  const ruchy=(ruchyMagazynowe||[]).length;
+  const plan=potrzebyZatowarowania(),braki=plan.length;
+  const bezLok=plan.filter(x=>!x.meta?.lokalizacja).length;
   return adminSubnavHTML([
     {id:"pulpit",href:"#/admin/magazyn",label:"📊 Pulpit"},
-    {id:"dostawcy",href:"#/admin/magazyn/dostawcy",label:"🏭 Dostępność producentów",badge:alerty||""},
-    {id:"stany",href:"#/admin/magazyn/stany",label:"📦 Stany produktów",badge:produktyAktywne.length},
+    {id:"dostawcy",href:"#/admin/magazyn/dostawcy",label:"🏭 Dostępność producentów",badge:braki||""},
+    {id:"stany",href:"#/admin/magazyn/stany",label:"📦 Stany produktów",badge:braki||""},
     {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",label:"🗺️ Lokalizacje",badge:bezLok||""},
     {id:"plan",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:braki||""},
-    {id:"ruchy",href:"#/admin/magazyn/ruchy",label:"🧾 Ruchy i ustawienia",badge:ruchy||""}
+    {id:"ruchy",href:"#/admin/magazyn/ruchy",label:"🧾 Ruchy i ustawienia"}
   ],aktywny);
 }
 function infaktSubnavHTML(aktywny="pulpit"){
@@ -3234,9 +3253,9 @@ function allegroUstawieniaPanelHTML(){
       ${allegroStan.requiresReauth?`<span style="color:#9a3412"><b>Brakujące zakresy:</b> ${esc((allegroStan.missingAuthorizedScopes||[]).join(", ")||"token wymaga ponownej autoryzacji")}. Kliknij „Połącz Allegro ponownie”.</span>`:""}
     </div>
     <div class="panel-subtle" style="margin-top:1rem">
-      <div class="order-section-head"><div><h3 style="margin:0">🔄 Automatyczna synchronizacja danych</h3><p class="order-detail-lead">Synchronizacja działa na serwerze także wtedy, gdy panel jest zamknięty. Zamówienia i komunikacja są sprawdzane co 15 minut, a pełny katalog ofert co 6 godzin.</p></div><button class="btn" onclick="allegroSynchronizujWszystko()">Synchronizuj wszystko teraz</button></div>
+      <div class="order-section-head"><div><h3 style="margin:0">🔄 Automatyczna synchronizacja danych</h3><p class="order-detail-lead">Serwer sprawdza zamówienia, wiadomości i dyskusje co 15 minut, a pełny katalog ofert co 6 godzin. Otwarty panel pobiera wyniki co ${Math.round(ALLEGRO_ODSWIEZANIE_PANELU_MS/1000)} sekund oraz po powrocie do karty — bez przerywania pisania w formularzu.</p></div><button class="btn" onclick="allegroSynchronizujWszystko()">Synchronizuj wszystko teraz</button></div>
       <div class="allegro-schedule-grid"><span><b>📦 Zamówienia</b><small>automatycznie co 15 minut</small></span><span><b>💬 Wiadomości</b><small>automatycznie co 15 minut</small></span><span><b>🏷️ Oferty</b><small>automatycznie co 6 godzin</small></span></div>
-      <div class="backend-note allegro-info-bottom"><b>Automatyczna konserwacja katalogu:</b> ${maintenance.lastRun?`ostatnio ${esc(new Date(maintenance.lastRun).toLocaleString("pl-PL"))} • sprawdzono ${esc(maintenance.scanned||0)} • poprawiono ${esc(maintenance.updated||0)}`:"uruchomi się wraz z najbliższą synchronizacją ofert"}. Obejmuje katalog, kategorię, producenta, opis i kontrolę błędnych powiązań.</div>
+      <div class="backend-note allegro-info-bottom"><b>Automatyczna konserwacja katalogu:</b> ${maintenance.lastRun?`ostatnio ${esc(new Date(maintenance.lastRun).toLocaleString("pl-PL"))} • sprawdzono ${esc(maintenance.scanned||0)} • poprawiono ${esc(maintenance.updated||0)}`:"uruchomi się wraz z najbliższą synchronizacją ofert"}. Obejmuje katalog, kategorię, producenta, opis i kontrolę błędnych powiązań.${allegroAutoOdswiezanie.lastChecked?`<br><b>Ostatni odczyt panelu:</b> ${esc(new Date(allegroAutoOdswiezanie.lastChecked).toLocaleString("pl-PL"))}${allegroAutoOdswiezanie.error?` • ${esc(allegroAutoOdswiezanie.error)}`:" • połączenie działa"}.`:""}</div>
       <details class="allegro-manual-sync"><summary>Zaawansowane: uruchom tylko wybraną synchronizację</summary><div class="diag-actions"><button class="btn ghost" onclick="allegroSynchronizujZamowienia()">Zamówienia</button><button class="btn ghost" onclick="allegroSynchronizujOferty()">Oferty</button><button class="btn ghost" onclick="allegroUruchomAutomatycznaKonserwacje()">Katalog, opisy i producenci</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">Komunikacja</button><button class="btn ghost" onclick="window.open('https://salescenter.allegro.com/my-sales','_blank','noopener')">Otwórz Sales Center</button></div></details>
     </div>
   </div>`;
@@ -4498,19 +4517,20 @@ function widokAdminMagazyn(sekcja="pulpit"){
   const zarezerwowane=Object.values(rez).reduce((s,n)=>s+Number(n||0),0);
   const wartosc=monitorowane.reduce((s,p)=>s+(stanMagazynuId(p.id)||0)*kwotaNum(p.cena),0);
   const planZakupu=potrzebyZatowarowania();
+  const planProdukty=planZakupu.map(x=>x.produkt),planIds=new Set(planProdukty.map(p=>String(p.id)));
   const wartoscPlanu=planZakupu.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0);
   const nadrezerwacje=wszystkie.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;});
-  const brakiKartoteki=wszystkie.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
+  const brakiKartoteki=planProdukty.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
   const bestselleryMagazynu=wszystkie.filter(p=>priorytetDostepnosciProduktu(p,kanalySpr,rez).score>0);
-  const stareInwentaryzacje=wszystkie.filter(p=>{const d=magazynMetaProduktu(p.id).ostatniaInwentaryzacja,t=d?Date.parse(d):0;return !t||Date.now()-t>90*86400000;});
-  const alertyStanow=wszystkie.filter(p=>{const i=producentDostepnoscInfo(p),d=dostepneSztukiMagazynu(p,rez),plan=sugestiaZatowarowania(p,rez,spr);return i.alert||d!==null&&d<0||Number(plan.ilosc||0)>0;});
+  const stareInwentaryzacje=planProdukty.filter(p=>{const d=magazynMetaProduktu(p.id).ostatniaInwentaryzacja,t=d?Date.parse(d):0;return !t||Date.now()-t>90*86400000;});
+  const alertyStanow=planProdukty;
   const lokalizacje=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(wszystkie);
   const dostawcyMag=[...new Set(wszystkie.map(p=>magazynMetaProduktu(p.id).dostawca).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pl"));
   const pozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK" && !magazynLokalizacjaPoKodzie(k));
   const lokDoKompletacji=[...new Set(pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).flatMap(z=>pozycjeZamowieniaMagazyn(z).map(p=>magazynMetaProduktu(p.id).lokalizacja||"BRAK")))].filter(Boolean);
   const pracaMagazynu=[
-    ...supplierStats.braki.slice(0,4).map(({p})=>({lvl:"bad",ico:"🔴",tytul:p.nazwa,opis:"Producent zgłasza brak produktu. Sprawdź źródło i bieżące zamówienia.",href:"#/admin/magazyn/dostawcy"})),
-    ...supplierStats.niskie.slice(0,4).map(({p,i})=>({lvl:"warn",ico:"🟡",tytul:p.nazwa,opis:`Niski stan u producenta: ${i.quantity} szt. • próg ${i.prog}.`,href:"#/admin/magazyn/dostawcy"})),
+    ...supplierStats.braki.filter(({p})=>planIds.has(String(p.id))).slice(0,4).map(({p})=>({lvl:"bad",ico:"🔴",tytul:p.nazwa,opis:"Producent zgłasza brak produktu potrzebnego do aktywnego zamówienia.",href:"#/admin/magazyn/dostawcy"})),
+    ...supplierStats.niskie.filter(({p})=>planIds.has(String(p.id))).slice(0,4).map(({p,i})=>({lvl:"warn",ico:"🟡",tytul:p.nazwa,opis:`Produkt potrzebny do zamówienia • u producenta ${i.quantity} szt. • próg ${i.prog}.`,href:"#/admin/magazyn/dostawcy"})),
     ...nadrezerwacje.slice(0,4).map(p=>({lvl:"bad",ico:"🚨",tytul:p.nazwa,opis:`Nadrezerwacja: dostępne ${dostepneSztukiMagazynu(p,rez)} szt., rezerwacje ${rez[p.id]||0}.`,akcja:"dozamowienia"})),
     ...planZakupu.slice(0,4).map(x=>({lvl:"warn",ico:"📦",tytul:x.produkt.nazwa,opis:`Do zamówienia: ${x.ilosc} szt. • ${x.meta.dostawca||"brak dostawcy"} • ${x.meta.lokalizacja||"brak lokalizacji"}`,akcja:"dozamowienia"})),
     ...brakiKartoteki.slice(0,4).map(p=>({lvl:"info",ico:"🗂️",tytul:p.nazwa,opis:`Uzupełnij kartotekę: ${!magazynMetaProduktu(p.id).lokalizacja?"brak lokalizacji ":""}${!magazynMetaProduktu(p.id).dostawca?"brak dostawcy":""}.`,akcja:"bezlokalizacji"}))

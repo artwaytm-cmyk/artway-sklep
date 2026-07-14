@@ -3248,7 +3248,7 @@ function adminSzkielet(aktywna, tresc){
     "/admin/zamowienia": pobierzZamowienia().filter(z=>z.status==="nowe").length,
     "/admin/allegro": (Array.isArray(allegroZamowienia) ? allegroZamowienia.filter(statusAllegroRezerwujeMagazyn).length : 0) + (allegroKomunikacjaStaty?.().totalNeed||0),
     "/admin/wysylki": pobierzZamowienia().filter(z=>!["anulowane","dostarczone","zakończone"].includes(z.status)&&!z.wysylka?.numer).length,
-    "/admin/magazyn": produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{const s=stanMagazynuId(p.id),prog=Number(ustawieniaMagazynuPelne().progNiski)||5;return s!==null&&s<=prog;}).length,
+    "/admin/magazyn": potrzebyZatowarowania().length,
     "/admin/infakt": pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane"&&(z.klient?.nip||z.klient?.firma)&&!infaktStan.links?.[z.nr]&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length,
     "/admin/agent-ai": agentAIAnalizaAktywna(agentAIAnaliza()).length,
     "/admin/asortyment": opinie.filter(o=>o.status==="oczekuje").length,
@@ -3783,8 +3783,8 @@ function odswiezPoCichejSynchronizacji(){
   const aktywny=document.activeElement, tag=aktywneTag => aktywneTag && ["INPUT","TEXTAREA","SELECT"].includes(aktywneTag.tagName);
   if(tag(aktywny)) return;
   const t=trasa();
-  const odswiezane=["/admin","/admin/zamowienia","/admin/wysylki","/admin/agent-ai","/admin/magazyn","/zamowienia"];
-  if(!odswiezane.some(x=>t===x || (["/admin/agent-ai","/admin/magazyn"].includes(x)&&t.startsWith(x+"/")) || (x==="/admin/wysylki"&&t.startsWith("/admin/zamowienie/")))) return;
+  const odswiezane=["/admin","/admin/zamowienia","/admin/wysylki","/admin/agent-ai","/admin/magazyn","/admin/allegro","/zamowienia"];
+  if(!odswiezane.some(x=>t===x || (["/admin/agent-ai","/admin/magazyn","/admin/allegro"].includes(x)&&t.startsWith(x+"/")) || (x==="/admin/wysylki"&&t.startsWith("/admin/zamowienie/")))) return;
   const y=window.scrollY||0;
   renderuj();
   setTimeout(()=>window.scrollTo({top:y}),0);
@@ -3802,13 +3802,16 @@ async function automatycznaSynchronizacjaChmury(powod="timer"){
       ok = await chmuraWczytajStan();
       if(sesja && !jestAdmin()) ok = (await pobierzMojeZamowieniaCentralne(true)) || ok;
     }
+    const allegroOk=typeof allegroOdswiezDaneZSerweraJesliCzas==="function"?await allegroOdswiezDaneZSerweraJesliCzas(powod):false;
     if(ok){
       zastosujUstawienia(); zbudujProdukty();
       if(chmuraToken)agentAIUtworzZleceniaWedlugDostawcow("",{silent:true,automatic:true});
       odswiezMenu(); odswiezKoszyk();
       odswiezPoCichejSynchronizacji();
+    }else if(allegroOk){
+      odswiezMenu();odswiezPoCichejSynchronizacji();
     }
-    return ok;
+    return ok||allegroOk;
   }catch(e){ return false; }
   finally{ chmuraAutoSyncBusy=false; }
 }
