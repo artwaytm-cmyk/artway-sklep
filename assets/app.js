@@ -3294,26 +3294,26 @@ const ETAPY_WYSYLKI = {
 };
 const MENU_ADMINA_PULPIT = ["/admin","📊","Pulpit","Priorytety i praca na dziś"];
 const MENU_ADMINA = [
-  {id:"sprzedaz",numer:"01",ikona:"🛒",nazwa:"Sprzedaż i klienci",elementy:[
+  {id:"sprzedaz",ikona:"🛒",nazwa:"Obsługa sprzedaży",opis:"Od zamówienia do doręczenia",elementy:[
     ["/admin/zamowienia","📦","Zamówienia sklepu","Statusy, płatności i obsługa"],
     ["/admin/allegro","🟠","Allegro","Oferty, zamówienia i komunikacja"],
+    ["/admin/wysylki","🚚","Centrum wysyłek","InPost, etykiety i tracking"],
     ["/admin/klienci","👥","Klienci","Konta, uprawnienia i historia"]
   ]},
-  {id:"towar",numer:"02",ikona:"📦",nazwa:"Produkty i logistyka",elementy:[
+  {id:"towar",ikona:"🏷️",nazwa:"Towar i dane",opis:"Katalog, stany i wymiana danych",elementy:[
     ["/admin/asortyment","🏷️","Asortyment","Produkty, katalogi i mapowanie"],
     ["/admin/magazyn","🏬","Magazyn","Stany, lokalizacje i dostawcy"],
-    ["/admin/wysylki","🚚","Centrum wysyłek","InPost, etykiety i tracking"]
+    ["/admin/eksport","⇄","Import i eksport","Przenoszenie i kontrola danych"]
   ]},
-  {id:"finanse",numer:"03",ikona:"🧾",nazwa:"Finanse i dokumenty",elementy:[
+  {id:"finanse",ikona:"🧾",nazwa:"Finanse",opis:"Koszty, faktury i rentowność",elementy:[
     ["/admin/infakt","🧾","inFakt i faktury","Koszty, dokumenty i rozliczenia"]
   ]},
-  {id:"automatyzacja",numer:"04",ikona:"🤖",nazwa:"Agent AI i SEO",elementy:[
+  {id:"rozwoj",ikona:"✨",nazwa:"Rozwój sklepu",opis:"Automatyzacja, wygląd i widoczność",elementy:[
     ["/admin/agent-ai","🤖","Agent AI","Zadania, decyzje i automaty"],
-    ["/admin/seo","📣","Pozycjonowanie","Widoczność i promocja produktów"]
+    ["/admin/seo","📣","Pozycjonowanie","Widoczność i promocja produktów"],
+    ["/admin/personalizacja","🎨","Personalizacja","Wygląd, układy i ustawienia sklepu"]
   ]},
-  {id:"system",numer:"05",ikona:"🛠️",nazwa:"System i ustawienia",elementy:[
-    ["/admin/personalizacja","🎨","Personalizacja","Wygląd, układy i ustawienia sklepu"],
-    ["/admin/eksport","⇄","Import / eksport","Przenoszenie i kontrola danych"],
+  {id:"system",ikona:"🛠️",nazwa:"System",opis:"Publikacja, wersje i diagnostyka",elementy:[
     ["/admin/aktualizacja","⬆️","Aktualizacja strony","Pliki i wersja aplikacji"],
     ["/admin/publikacja","🌍","Publikacja","Wdrożenie i status online"],
     ["/diagnostyka","🩺","Diagnostyka","Integracje, błędy i kondycja"]
@@ -3326,6 +3326,14 @@ function adminMenuPozycjaAktywna(aktywna,href){
 function adminMenuLinkHTML(pozycja,aktywna,powiadomienia,dodatkowaKlasa=""){
   const [href,ikona,nazwa,podpis]=pozycja,czyAktywna=adminMenuPozycjaAktywna(aktywna,href),licznik=powiadomienia[href]||0;
   return `<a href="#${href}" class="admin-nav-link ${dodatkowaKlasa} ${czyAktywna?"active":""}" ${czyAktywna?'aria-current="page"':""}><span class="admin-nav-link-main"><i>${ikona}</i><span><b>${esc(nazwa)}</b>${podpis?`<small>${esc(podpis)}</small>`:""}</span></span>${licznik?`<span class="nav-badge" aria-label="${licznik} aktywnych spraw">${licznik}</span>`:""}</a>`;
+}
+function adminKontekstWidoku(aktywna){
+  if(adminMenuPozycjaAktywna(aktywna,"/admin"))return {grupa:"Centrum zarządzania",ikona:MENU_ADMINA_PULPIT[1],nazwa:MENU_ADMINA_PULPIT[2],podpis:MENU_ADMINA_PULPIT[3]};
+  for(const grupa of MENU_ADMINA){const pozycja=grupa.elementy.find(p=>adminMenuPozycjaAktywna(aktywna,p[0]));if(pozycja)return {grupa:grupa.nazwa,ikona:pozycja[1],nazwa:pozycja[2],podpis:pozycja[3]||grupa.opis};}
+  return {grupa:"Panel administratora",ikona:"🛠️",nazwa:"Narzędzia systemowe",podpis:"Zarządzanie sklepem Artway-TM"};
+}
+function adminMenuMobilneHTML(aktywna,powiadomienia,kontekst){
+  return `<details class="admin-mobile-menu"><summary><span><i>☰</i><small>Menu panelu</small><b>${kontekst.ikona} ${esc(kontekst.nazwa)}</b></span><em>⌄</em></summary><div class="admin-mobile-menu-body">${adminMenuLinkHTML(MENU_ADMINA_PULPIT,aktywna,powiadomienia,"admin-mobile-home")}${MENU_ADMINA.map(grupa=>`<section><header><span>${grupa.ikona}</span><div><b>${esc(grupa.nazwa)}</b><small>${esc(grupa.opis||"")}</small></div></header><div>${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia,"admin-mobile-link")).join("")}</div></section>`).join("")}</div></details>`;
 }
 function adminMenuOtwartaGrupa(){return String(wczytajLS("artway_admin_menu_otwarta_v2","")||"");}
 function przelaczGrupeMenuAdmina(id,button){
@@ -3358,21 +3366,26 @@ function adminSzkielet(aktywna, tresc){
   const licznikOperacyjny=["/admin/zamowienia","/admin/allegro","/admin/wysylki","/admin/magazyn","/admin/infakt"].reduce((s,h)=>s+(powiadomienia[h]||0),0);
   powiadomienia["/admin"]=licznikOperacyjny;
   const otwartaGrupa=adminMenuOtwartaGrupa();
+  const kontekst=adminKontekstWidoku(aktywna);
   return `
-  <div class="admin-page">
+  <div class="admin-page" data-admin-shell>
     <aside class="admin-nav" aria-label="Główna nawigacja administratora">
-      <div class="admin-nav-heading"><span>Panel administratora</span><small>Moduły sklepu</small></div>
+      <div class="admin-nav-heading"><span class="admin-nav-brand-mark">A</span><span class="admin-nav-brand-copy"><b>Artway-TM</b><small>Centrum zarządzania</small></span><a href="#/" title="Otwórz sklep" aria-label="Otwórz stronę sklepu">↗</a></div>
       <label class="admin-nav-search"><span>🔎</span><input type="search" placeholder="Znajdź moduł…" aria-label="Znajdź moduł panelu" oninput="filtrujMenuAdmina(this)"></label>
       ${adminMenuLinkHTML(MENU_ADMINA_PULPIT,aktywna,powiadomienia,"admin-nav-home")}
       <div class="admin-nav-separator"></div>
       ${MENU_ADMINA.map(grupa=>{
         const aktywnaGrupa=grupa.elementy.some(p=>adminMenuPozycjaAktywna(aktywna,p[0])),zwinieta=!aktywnaGrupa&&otwartaGrupa!==grupa.id;
         const licznikGrupy=grupa.elementy.reduce((s,p)=>s+(powiadomienia[p[0]]||0),0);
-        return `<section class="admin-nav-group ${aktywnaGrupa?"is-active":""} ${zwinieta?"collapsed":""}" data-admin-menu-group="${esc(grupa.id)}"><button type="button" class="admin-nav-group-toggle" onclick="przelaczGrupeMenuAdmina('${esc(grupa.id)}',this)" aria-expanded="${String(!zwinieta)}"><span class="admin-nav-group-title"><small>${esc(grupa.numer)}</small><i>${grupa.ikona}</i><b>${esc(grupa.nazwa)}</b></span><span class="admin-nav-group-meta">${licznikGrupy?`<b>${licznikGrupy}</b>`:""}<em>⌄</em></span></button><div class="admin-nav-items">${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia)).join("")}</div></section>`;
+        return `<section class="admin-nav-group ${aktywnaGrupa?"is-active":""} ${zwinieta?"collapsed":""}" data-admin-menu-group="${esc(grupa.id)}"><button type="button" class="admin-nav-group-toggle" onclick="przelaczGrupeMenuAdmina('${esc(grupa.id)}',this)" aria-expanded="${String(!zwinieta)}"><span class="admin-nav-group-title"><i>${grupa.ikona}</i><span><b>${esc(grupa.nazwa)}</b><small>${esc(grupa.opis||"")}</small></span></span><span class="admin-nav-group-meta">${licznikGrupy?`<b>${licznikGrupy}</b>`:""}<em>⌄</em></span></button><div class="admin-nav-items">${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia)).join("")}</div></section>`;
       }).join("")}
       <div class="admin-nav-footer"><span class="${licznikOperacyjny?"has-work":"is-clear"}"></span><small>${licznikOperacyjny?`${licznikOperacyjny} aktywnych spraw operacyjnych`:"Brak pilnych spraw operacyjnych"}</small></div>
     </aside>
-    <div class="admin-tresc">${tresc}</div>
+    <div class="admin-tresc">
+      ${adminMenuMobilneHTML(aktywna,powiadomienia,kontekst)}
+      <header class="admin-workspace-header"><div class="admin-workspace-context"><span>${kontekst.ikona}</span><div><small>Panel administratora <i>›</i> ${esc(kontekst.grupa)}</small><b>${esc(kontekst.nazwa)}</b><em>${esc(kontekst.podpis||"")}</em></div></div><div class="admin-workspace-actions"><span class="admin-workspace-health"><i class="${licznikOperacyjny?"has-work":"is-clear"}"></i>${licznikOperacyjny?`${licznikOperacyjny} spraw`:"System gotowy"}</span>${aktywna!=="/admin"?`<a class="btn ghost" href="#/admin">📊 Pulpit</a>`:""}<a class="btn ghost" href="#/">↗ Sklep</a></div></header>
+      <div class="admin-workspace-content">${tresc}</div>
+    </div>
   </div>`;
 }
 /* Wykres sprzedaży z ostatnich 7 dni (bez bibliotek — słupki CSS) */

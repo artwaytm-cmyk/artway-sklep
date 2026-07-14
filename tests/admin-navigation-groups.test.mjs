@@ -7,11 +7,13 @@ const read=path=>readFile(new URL(path,root),"utf8");
 
 test("główne menu administratora jest pogrupowane według procesu pracy",async()=>{
   const source=await read("src/frontend/07-admin-shipping.js");
-  for(const group of ["Sprzedaż i klienci","Produkty i logistyka","Finanse i dokumenty","Agent AI i SEO","System i ustawienia"])assert.match(source,new RegExp(group));
+  for(const group of ["Obsługa sprzedaży","Towar i dane","Finanse","Rozwój sklepu","System"])assert.match(source,new RegExp(group));
   assert.ok(source.indexOf('"/admin/zamowienia"')<source.indexOf('"/admin/asortyment"'));
   assert.ok(source.indexOf('"/admin/asortyment"')<source.indexOf('"/admin/infakt"'));
   assert.ok(source.indexOf('"/admin/infakt"')<source.indexOf('"/admin/agent-ai"'));
-  assert.ok(source.indexOf('"/admin/agent-ai"')<source.indexOf('"/admin/personalizacja"'));
+  assert.ok(source.indexOf('"/admin/agent-ai"')<source.indexOf('"/admin/aktualizacja"'));
+  assert.ok(source.indexOf('"/admin/wysylki"')<source.indexOf('"/admin/klienci"'));
+  assert.ok(source.indexOf('"/admin/eksport"')<source.indexOf('"/admin/infakt"'));
 });
 
 test("grupy menu można zwijać, a aktywna trasa i liczniki pozostają widoczne",async()=>{
@@ -22,9 +24,13 @@ test("grupy menu można zwijać, a aktywna trasa i liczniki pozostają widoczne"
   assert.match(source,/aria-current="page"/);
   assert.match(source,/licznikGrupy/);
   assert.match(source,/licznikOperacyjny/);
+  assert.match(source,/function adminMenuMobilneHTML/);
+  assert.match(source,/class="admin-workspace-header"/);
+  assert.match(source,/data-admin-shell/);
   assert.match(styles,/\.admin-nav-group\.collapsed \.admin-nav-items/);
-  assert.match(styles,/max-height:calc\(100vh - 150px\)/);
+  assert.match(styles,/max-height:calc\(100vh - 142px\)/);
   assert.match(styles,/\.admin-nav-search/);
-  assert.match(responsive,/\.admin-nav-group\.collapsed \.admin-nav-items/);
-  assert.match(responsive,/display:contents/);
+  assert.match(styles,/\.admin-mobile-menu\{display:none\}/);
+  assert.match(responsive,/\.admin-mobile-menu\{display:block\}/);
+  assert.match(responsive,/\.admin-nav\{display:none\}/);
 });
