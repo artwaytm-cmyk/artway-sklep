@@ -19,15 +19,19 @@ test("otwarty panel okresowo pobiera wyniki synchronizacji Allegro bez przerywan
 });
 
 test("serwer cyklicznie sprawdza zamówienia, komunikację i katalog Allegro",async()=>{
-  const [orders,communications,offers]=await Promise.all([
+  const [orders,communications,catalog,offers]=await Promise.all([
     read("netlify/functions/cron-allegro-orders.mjs"),
     read("netlify/functions/cron-allegro-communications.mjs"),
+    read("netlify/functions/cron-allegro-catalog.mjs"),
     read("netlify/functions/cron-allegro-offers.mjs")
   ]);
   assert.match(orders,/schedule: '5,20,35,50 \* \* \* \*'/);
   assert.match(orders,/allegro-sync-orders/);
   assert.match(communications,/schedule: '\*\/15 \* \* \* \*'/);
   assert.match(communications,/allegro-sync-communications/);
+  assert.match(catalog,/schedule: '10,25,40,55 \* \* \* \*'/);
+  assert.match(catalog,/allegro-sync-offers/);
+  assert.match(catalog,/details: false/);
   assert.match(offers,/schedule: '25 \*\/6 \* \* \*'/);
   assert.match(offers,/allegro-sync-offers/);
 });
