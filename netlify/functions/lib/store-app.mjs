@@ -37,7 +37,7 @@ import {
   auditCatalog,
   mergeCatalogProducts,
 } from './domain/catalog-quality.mjs';
-import { submitIndexNow } from './domain/indexnow.mjs';
+import { eligiblePromotionProducts, runIndexNowPromotion } from './domain/indexnow.mjs';
 import {
   ALLEGRO_COMPLIANCE_POLICY,
   allegroCheckText,
@@ -4893,7 +4893,7 @@ function seoOcena(p = {}) {
   return Math.min(100, score);
 }
 function seoProduktyCentralne(data = {}) {
-  return mergeCatalogProducts(data).activeProducts;
+  return eligiblePromotionProducts(data);
 }
 function seoZastosujPatch(data, id, patch) {
   const key = String(id), added = Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : [], index = added.findIndex((p) => String(p?.id) === key);
@@ -4919,17 +4919,11 @@ async function seoWykonajDziennyPlan({ limit, source } = {}) {
     }
     patch.seoScore = seoOcena({ ...item.product, ...patch }); seoZastosujPatch(data, item.product.id, patch);
   }
-  let promotion = { submitted: false, accepted: false, status: config.indexNowEnabled === false ? 'disabled' : 'skipped', count: 0, httpStatus: null };
-  if (config.indexNowEnabled !== false && selected.length) {
-    try {
-      promotion = await submitIndexNow(['https://artwaytm.pl/', ...selected.map((item) => `https://artwaytm.pl/produkt/${encodeURIComponent(item.product.id)}`)]);
-    } catch (error) {
-      promotion = { submitted: true, accepted: false, status: 'error', count: 0, httpStatus: null, error: tekst(error?.message || error, 300) };
-    }
-  }
-  data.artway_seo_ustawienia = { ...config, dailyLimit: amount, lastRunAt: now, lastRunCount: selected.length, lastPromotionAt: promotion.submitted ? now : (config.lastPromotionAt || ''), lastPromotionStatus: promotion.submitted ? promotion.status : (config.lastPromotionStatus || promotion.status), lastPromotionCount: promotion.submitted ? promotion.count : (Number(config.lastPromotionCount) || 0), lastPromotionHttpStatus: promotion.submitted ? promotion.httpStatus : (config.lastPromotionHttpStatus || null) };
+  const fullCatalogSubmission = !config.indexNowFullCatalogAt;
+  const promotion = await runIndexNowPromotion({ catalogProducts: products.map((item) => item.product), changedProducts: selected.map((item) => item.product), config });
+  data.artway_seo_ustawienia = { ...config, dailyLimit: amount, lastRunAt: now, lastRunCount: selected.length, lastPromotionAt: promotion.submitted ? now : (config.lastPromotionAt || ''), lastPromotionStatus: promotion.submitted ? promotion.status : (config.lastPromotionStatus || promotion.status), lastPromotionCount: promotion.submitted ? promotion.count : (Number(config.lastPromotionCount) || 0), lastPromotionHttpStatus: promotion.submitted ? promotion.httpStatus : (config.lastPromotionHttpStatus || null), indexNowFullCatalogAt: fullCatalogSubmission && promotion.accepted ? now : (config.indexNowFullCatalogAt || ''), indexNowFullCatalogCount: fullCatalogSubmission && promotion.accepted ? Math.max(0, promotion.count - 1) : (Number(config.indexNowFullCatalogCount) || 0) };
   const history = Array.isArray(data.artway_seo_historia) ? data.artway_seo_historia : [];
-  data.artway_seo_historia = [{ id: `seo-${Date.now()}`, at: now, type: 'daily', source: tekst(source || 'scheduled', 100), count: selected.length, promotion: { status: promotion.status, count: promotion.count, httpStatus: promotion.httpStatus }, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })) }, ...history].slice(0, 500);
+  data.artway_seo_historia = [{ id: `seo-${Date.now()}`, at: now, type: 'daily', source: tekst(source || 'scheduled', 100), count: selected.length, promotion: { status: promotion.status, count: promotion.count, httpStatus: promotion.httpStatus, scope: promotion.scope }, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })) }, ...history].slice(0, 500);
   const saved = { data, rev: Number(rec.rev || 0) + 1, updated_at: now }; await zapisz('settings', saved);
   return { processed: selected.length, limit: amount, promotion, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })), updated_at: now, rev: saved.rev };
 }

@@ -1,3 +1,5 @@
+import { mergeCatalogProducts } from './catalog-quality.mjs';
+
 const INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
 const INDEXNOW_HOST = 'artwaytm.pl';
 const INDEXNOW_ORIGIN = `https://${INDEXNOW_HOST}`;
@@ -22,6 +24,23 @@ export function normalizeIndexNowUrls(urls = []) {
   return normalized;
 }
 
+function productIsUnavailable(product = {}, availability = {}) {
+  const record = availability?.[String(product?.id)] || availability?.[product?.id] || null;
+  if (!record) return false;
+  const decision = String(record.decision || record.decyzja || '').toLowerCase();
+  if (decision === 'manual_available') return false;
+  if (decision === 'grace') {
+    const expires = Date.parse(record.expiresAt || record.waznaDo || '');
+    return Number.isFinite(expires) && expires <= Date.now();
+  }
+  return String(record.status || '').toLowerCase() === 'niedostepny';
+}
+
+export function eligiblePromotionProducts(data = {}) {
+  const availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};
+  return mergeCatalogProducts(data).activeProducts.filter((product) => Number(product.cena) > 0 && !productIsUnavailable(product, availability));
+}
+
 export async function submitIndexNow(urls = [], { fetchImpl = globalThis.fetch } = {}) {
   const urlList = normalizeIndexNowUrls(urls);
   if (!urlList.length) return { submitted: false, accepted: false, status: 'skipped', count: 0, httpStatus: null };
@@ -34,4 +53,17 @@ export async function submitIndexNow(urls = [], { fetchImpl = globalThis.fetch }
   const accepted = response.status === 200 || response.status === 202;
   if (!accepted) throw new Error(`IndexNow odrzucił zgłoszenie (HTTP ${response.status}).`);
   return { submitted: true, accepted: true, status: 'accepted', count: urlList.length, httpStatus: response.status };
+}
+
+export async function runIndexNowPromotion({ catalogProducts = [], changedProducts = [], config = {}, fetchImpl = globalThis.fetch } = {}) {
+  const fullCatalogSubmission = !config.indexNowFullCatalogAt;
+  const scope = fullCatalogSubmission ? 'full-catalog' : 'changed-products';
+  if (config.indexNowEnabled === false) return { submitted: false, accepted: false, status: 'disabled', count: 0, httpStatus: null, scope };
+  if (!fullCatalogSubmission && !changedProducts.length) return { submitted: false, accepted: false, status: 'skipped', count: 0, httpStatus: null, scope };
+  try {
+    const products = fullCatalogSubmission ? catalogProducts : changedProducts;
+    return { ...await submitIndexNow(['https://artwaytm.pl/', ...products.map((product) => `https://artwaytm.pl/produkt/${encodeURIComponent(product.id)}`)], { fetchImpl }), scope };
+  } catch (error) {
+    return { submitted: true, accepted: false, status: 'error', count: 0, httpStatus: null, scope, error: String(error?.message || error).slice(0, 300) };
+  }
 }
