@@ -16,6 +16,8 @@ const files = [
   'netlify/functions/lib/core/store-repository.mjs',
   'netlify/functions/lib/domain/orders.mjs',
   'netlify/functions/lib/domain/catalog-quality.mjs',
+  'netlify/functions/lib/domain/telegram-communication.mjs',
+  'netlify/functions/lib/telegram-center.mjs',
   'netlify/functions/lib/allegro-compliance.mjs',
   'netlify/functions/lib/infakt-purchase.mjs',
   'netlify/functions/cron-inpost-sync.mjs',
@@ -25,6 +27,8 @@ const files = [
   'netlify/functions/cron-supplier-availability.mjs',
   'netlify/functions/cron-infakt-sync.mjs',
   'netlify/functions/cron-seo-daily.mjs',
+  'netlify/functions/cron-telegram-center.mjs',
+  'netlify/functions/telegram-webhook.mjs',
   'netlify/functions/sitemap.mjs',
   'netlify/functions/google-products.mjs',
   'robots.txt',
@@ -62,6 +66,8 @@ const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
 const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
 const infaktPurchase = read('netlify/functions/lib/infakt-purchase.mjs');
+const telegramCommunication = read('netlify/functions/lib/domain/telegram-communication.mjs');
+const telegramCenter = read('netlify/functions/lib/telegram-center.mjs');
 const cron = read('netlify/functions/cron-inpost-sync.mjs');
 const cronAllegroOrders = read('netlify/functions/cron-allegro-orders.mjs');
 const cronAllegroCommunications = read('netlify/functions/cron-allegro-communications.mjs');
@@ -69,6 +75,8 @@ const cronAllegroOffers = read('netlify/functions/cron-allegro-offers.mjs');
 const cronSupplierAvailability = read('netlify/functions/cron-supplier-availability.mjs');
 const cronInfaktSync = read('netlify/functions/cron-infakt-sync.mjs');
 const cronSeoDaily = read('netlify/functions/cron-seo-daily.mjs');
+const cronTelegramCenter = read('netlify/functions/cron-telegram-center.mjs');
+const telegramWebhook = read('netlify/functions/telegram-webhook.mjs');
 const sitemap = read('netlify/functions/sitemap.mjs');
 const googleProducts = read('netlify/functions/google-products.mjs');
 const robots = read('robots.txt');
@@ -499,9 +507,11 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'allegro_orders_baseline_v2',
   'function allegroWyslijPrzypomnieniaTelegram',
   'humanReplyNeeded',
-  "telegramKomorka('KOD', 15)",
-  "telegramKomorka('NAZWA', 30)",
-  "telegramKomorka('POTRZEBNA ILOŚĆ', 16)",
+  "action === 'telegram-center-status'",
+  "action === 'telegram-settings-save'",
+  "action === 'telegram-register-webhook'",
+  "action === 'telegram-dispatch'",
+  'telegramCenter.managedEvent',
   "'zrealizowane'",
   'function infaktKonfiguracja',
   "'X-inFakt-ApiKey'",
@@ -538,6 +548,26 @@ requireMarkers('netlify/functions/lib/infakt-purchase.mjs', infaktPurchase, [
   'function infaktKsefPozycje',
   'wartość wiersza po rabatach',
 ]);
+
+requireMarkers('netlify/functions/lib/domain/telegram-communication.mjs', telegramCommunication, [
+  'function telegramEventDecision',
+  'function telegramDigestSlot',
+  "telegramCell('KOD', 15)",
+  "telegramCell('NAZWA', 30)",
+  "telegramCell('POTRZEBNA ILOŚĆ', 16)",
+  'function telegramNaturalIntent',
+]);
+
+requireMarkers('netlify/functions/lib/telegram-center.mjs', telegramCenter, [
+  'function createTelegramCenter',
+  'async function managedEvent',
+  'async function dispatch',
+  'async function registerWebhook',
+  'async function inbound',
+]);
+
+requireMarkers('netlify/functions/cron-telegram-center.mjs', cronTelegramCenter, ["schedule: '*/15 * * * *'", "action=telegram-dispatch"]);
+requireMarkers('netlify/functions/telegram-webhook.mjs', telegramWebhook, ['x-telegram-bot-api-secret-token', 'telegram-inbound-command', 'allowedChatIds']);
 
 const ksefTestRows = infaktKsefPozycje(`<?xml version="1.0"?><Faktura><KodWaluty>PLN</KodWaluty><FaWiersz><P_7>Gra testowa 5901234123457</P_7><P_8A>szt.</P_8A><P_8B>2</P_8B><P_9A>100.00</P_9A><P_11>180.00</P_11><P_11A>221.40</P_11A><P_12>23</P_12><Indeks>ABC-123</Indeks></FaWiersz></Faktura>`);
 if (ksefTestRows.length !== 1 || ksefTestRows[0].unitNet !== 90 || ksefTestRows[0].unitGross !== 110.7 || ksefTestRows[0].ean !== '5901234123457') {
