@@ -18,9 +18,9 @@ const KONFIG = {
   czasWysylki: "24 h",
   telefon: "+48 530 038 914",
   daneFirmy: {...DANE_FIRMY_DOMYSLNE},
-  opisSklepu: "Sklep wielobranżowy z asortymentem od sprawdzonych dostawców. Nowe technologie, uczciwe ceny.",
+  opisSklepu: "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów. Czytelna oferta, uczciwe ceny i szybka wysyłka.",
   heroTytul: "Wszystko, czego potrzebujesz — w jednym miejscu",
-  heroOpis: "Elektronika, dom i ogród, narzędzia, odzież i sport. Nowości od sprawdzonych dostawców, atrakcyjne ceny i szybka wysyłka.",
+  heroOpis: "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów — między innymi Alexander, Multigra i GoDan.",
   tresci: null,   // własne treści stron (regulamin itd.) — ustawiane w panelu admina
   emailSklepu: "artwaytm@gmail.com",
   // Konto zarejestrowane na ten adres = administrator (widzi diagnostykę):
@@ -144,12 +144,28 @@ function wykryjCzasWysylkiZTekstu(tekst){
 function tekstWysylki(prefix="Wysyłka w"){
   return `${prefix} ${czasWysylki()}`;
 }
+function glownaPromocja(){
+  const kody=KONFIG.kodyRabatowe&&typeof KONFIG.kodyRabatowe==="object"?KONFIG.kodyRabatowe:{};
+  const zPaska=String(KONFIG.pasekInfo||"").match(/Kod\s*(?:<b>)?([A-Z0-9]{2,20})(?:<\/b>)?\s*=\s*[−-]?(\d{1,2})%/i);
+  const kodZPaska=String(zPaska?.[1]||"").toUpperCase(),rabatZPaska=Number(zPaska?.[2]||0);
+  if(kodZPaska&&Number(kody[kodZPaska])===rabatZPaska)return {kod:kodZPaska,procent:rabatZPaska};
+  const wybrany=String(ustawienia?.promocjaGlowna||"").toUpperCase();
+  if(wybrany&&Number(kody[wybrany])>0)return {kod:wybrany,procent:Number(kody[wybrany])};
+  const pierwszy=Object.entries(kody).find(([kod,procent])=>/^[A-Z0-9]{2,20}$/.test(kod)&&Number(procent)>0);
+  return pierwszy?{kod:pierwszy[0],procent:Number(pierwszy[1])}:null;
+}
+function tekstGlownejPromocji(){
+  const p=glownaPromocja();
+  return p?`Kod <b>${p.kod}</b> = −${p.procent}%`:"";
+}
 function pasekInfoHTML(){
-  const domyslny=`🚚 Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł &nbsp;•&nbsp; 📦 ${tekstWysylki()} &nbsp;•&nbsp; ↩️ 14 dni na zwrot &nbsp;•&nbsp; 🎁 Kod <b>START10</b> = −10%`;
+  const promocja=tekstGlownejPromocji();
+  const domyslny=`🚚 Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł &nbsp;•&nbsp; 📦 ${tekstWysylki()} &nbsp;•&nbsp; ↩️ 14 dni na zwrot${promocja?` &nbsp;•&nbsp; 🎁 ${promocja}`:""}`;
   let t=String(KONFIG.pasekInfo||domyslny);
   t=t.replace(/Darmowa dostawa od\s*\d+(?:[,.]\d+)?\s*zł/gi,`Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł`);
   t=t.replace(/Wysyłka w\s*\d+\s*(?:h|godziny|godzin|godz\.?)(?:\s*robocze)?/gi,tekstWysylki());
   t=t.replace(/Wysylka w\s*\d+\s*(?:h|godziny|godzin|godz\.?)(?:\s*robocze)?/gi,tekstWysylki("Wysylka w"));
+  if(promocja)t=t.replace(/Kod\s*(?:<b>)?[A-Z0-9]{2,20}(?:<\/b>)?\s*=\s*[−-]?\d{1,2}%/gi,promocja);
   return t;
 }
 function domyslnyFavicon(){

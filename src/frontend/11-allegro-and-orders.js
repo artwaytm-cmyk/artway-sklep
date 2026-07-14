@@ -77,10 +77,13 @@ async function adminMasowoZmienStatusZamowien(){
   toast(`✅ Zmieniono ${zmiany.length} zamówień na „${status}”${bledy?` • błędy synchronizacji: ${bledy}`:""}`);
 }
 function allegroZapiszCache(){
-  zapiszLS("artway_allegro_zamowienia_cache", allegroZamowienia);
-  zapiszLS("artway_allegro_oferty_cache", allegroOferty.slice(0,1500));
+  // Pełne rejestry pozostają w backendzie i w pamięci bieżącej sesji.
+  // Nie duplikujemy tysięcy ofert, zamówień i wiadomości w localStorage,
+  // ponieważ prowadziło to do przekroczenia limitu pamięci przeglądarki.
+  for(const klucz of ["artway_allegro_zamowienia_cache","artway_allegro_oferty_cache","artway_allegro_komunikacja_cache"]){
+    try{localStorage.removeItem(klucz);}catch(e){}
+  }
   zapiszLS("artway_allegro_mapowania_cache", allegroMapowania);
-  zapiszLS("artway_allegro_komunikacja_cache", allegroKomunikacja);
 }
 function allegroProduktIdDlaOferty(offerId){
   const rec=(allegroMapowania||{})[String(offerId)];

@@ -18,6 +18,40 @@ function zbudujProdukty(){
     .filter(p => !produktOznaczonyNiedostepny(p));
   produkty=filtrujDuplikatySklepu(produkty);
 }
+function podpisPublikacjiProduktu(p={}){
+  return JSON.stringify({
+    id:String(p.id??""),nazwa:String(p.nazwa||""),kategoria:String(p.kategoria||""),
+    cena:Number(p.cena)||0,zdjecie:String(p.zdjecie||""),ean:String(p.gtin||p.ean||""),
+    externalId:String(p.externalId||""),sku:String(p.sku||""),producent:String(p.producent||p.marka||""),
+    opisKrotki:agentAIUtworzOpisKrotki(p),opis:agentAIFormatujOpisPelny(p)
+  });
+}
+function stanPublikacjiKatalogu(){
+  const bazowe=new Map((Array.isArray(prodBazowe)?prodBazowe:[]).map(p=>[String(p.id),p]));
+  const aktualne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!produktyDefinitywne.some(id=>String(id)===String(p.id)));
+  const brakujace=[],nieaktualne=[];
+  for(const p of aktualne){
+    const baza=bazowe.get(String(p.id));
+    if(!baza)brakujace.push(p.id);
+    else if(podpisPublikacjiProduktu(baza)!==podpisPublikacjiProduktu(p))nieaktualne.push(p.id);
+  }
+  return {gotowy:zrodloProduktow==="json"&&!brakujace.length&&!nieaktualne.length,razem:aktualne.length,bazowe:bazowe.size,brakujace,nieaktualne};
+}
+function porzadkujBezpieczneReferencje(){
+  const widoczne=new Set(produkty.map(p=>String(p.id))),wszystkie=new Set([...(prodBazowe||[]),...(produktyDodane||[]),...(koszDodanych||[])].map(p=>String(p.id)));
+  const koszykPrzed=koszyk.length;
+  koszyk=koszyk.filter((x,i,a)=>widoczne.has(String(x.id))&&Number(x.ile)>0&&a.findIndex(y=>String(y.id)===String(x.id)&&String(y.wariant||"")===String(x.wariant||""))===i);
+  if(koszyk.length!==koszykPrzed)zapiszLS("artway_koszyk",koszyk);
+  const mapa={...(ustawienia.mapaProduktow||{})},usuniete=[];
+  for(const id of Object.keys(mapa))if(!wszystkie.has(String(id))){delete mapa[id];usuniete.push(id);}
+  if(usuniete.length){
+    ustawienia={...ustawienia,mapaProduktow:mapa};
+    if(typeof produktyDoAdministracji==="function")zapiszLS("artway_ustawienia",ustawienia);
+    else try{localStorage.setItem("artway_ustawienia",JSON.stringify(ustawienia));}catch(e){}
+    loguj("info",`Usunięto ${usuniete.length} osieroconych mapowań bez zmiany katalogu produktów`);
+  }
+  return {koszyk:koszykPrzed-koszyk.length,mapowania:usuniete.length};
+}
 function kluczDuplikatuProduktu(v){return String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/ł/g,"l").replace(/[^a-z0-9]+/g,"");}
 function kluczeDuplikatuProduktu(p={}){
   const out=[];const add=(typ,v)=>{const k=kluczDuplikatuProduktu(v);if(k)out.push(`${typ}:${k}`);};
@@ -869,14 +903,20 @@ function moderujOpinie(id, akcja){
 }
 async function pobierzBazoweProdukty(){
   try{
-    const r = await fetch("/products.json", {cache:"default"});
+    const wersja = document.querySelector('meta[name="artway-version"]')?.content || String(Date.now());
+    const r = await fetch(`/products.json?v=${encodeURIComponent(wersja)}`, {cache:"no-store"});
     if(!r.ok) throw new Error("HTTP "+r.status);
-    prodBazowe = await r.json();
+    const dane = await r.json();
+    if(!Array.isArray(dane)) throw new Error("products.json nie zawiera tablicy produktów");
+    const poprawne = dane.filter(p=>p&&p.id!==undefined&&String(p.nazwa||"").trim());
+    const unikalne = new Set(poprawne.map(p=>String(p.id)));
+    if(poprawne.length!==dane.length||unikalne.size!==poprawne.length) throw new Error("products.json zawiera niepoprawne lub powtórzone rekordy");
+    prodBazowe = poprawne;
     zrodloProduktow = "json";
   }catch(e){
     prodBazowe = PRODUKTY_ZAPASOWE;
     zrodloProduktow = "zapasowe";
-    loguj("info","products.json niedostępny — użyto listy zapasowej (to normalne przy otwarciu z dysku).");
+    loguj("ostrzezenie","products.json niedostępny — katalog demonstracyjny został zablokowany, aby nie pokazywać nieaktualnych produktów.");
   }
 }
 function finalizujWczytanieProduktow(){

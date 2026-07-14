@@ -233,6 +233,14 @@ async function pobierzDaneZNip(){
   await nipDoFormularza($("orderForm"), $("nipBtn"));
 }
 function otworzModal(){
+  const brakujace=koszyk.filter(x=>!produkty.some(p=>String(p.id)===String(x.id)));
+  if(brakujace.length){
+    koszyk=koszyk.filter(x=>produkty.some(p=>String(p.id)===String(x.id)));
+    zapiszLS("artway_koszyk",koszyk);odswiezKoszyk();
+    loguj("ostrzezenie",`Usunięto z koszyka ${brakujace.length} nieaktualnych pozycji przed otwarciem zamówienia`);
+    toast(brakujace.length===1?"Usunięto z koszyka produkt, który nie jest już dostępny":"Usunięto z koszyka nieaktualne produkty");
+  }
+  if(!koszyk.length){zamknijKoszyk();return;}
   zamknijKoszyk();
   window.__paczkomatAdres="";
   const profil = sesja ? (pobierzProfil(sesja.email)||{}) : {};
@@ -331,8 +339,8 @@ function przeliczZamowienie(){
     <label class="chk-row" style="margin-top:.45rem"><input type="checkbox" name="potwierdzenieDostepnosci" required> Rozumiem, że dostępność tej ilości zostanie potwierdzona przez sklep.</label>
   </div>` : "";
   $("orderSummary").innerHTML =
-    koszyk.map(x=>{const p=produkty.find(p=>p.id===x.id);
-      return `<div><span>${esc(p.nazwa)}${x.wariant?` (${esc(x.wariant)})`:""} × ${x.ile}</span><span>${zl(p.cena*x.ile)}</span></div>`;}).join("")
+    koszyk.map(x=>{const p=produkty.find(p=>String(p.id)===String(x.id));
+      return p?`<div><span>${esc(p.nazwa)}${x.wariant?` (${esc(x.wariant)})`:""} × ${x.ile}</span><span>${zl(p.cena*x.ile)}</span></div>`:"";}).join("")
     + (rabat?`<div><span>Rabat (${esc(rabat.kod)})</span><span>−${zl(kwotaRabatu())}</span></div>`:"")
     + `<div><span>Dostawa</span><span>${dostawa?zl(dostawa):"GRATIS"}</span></div>`
     + (weekend?`<div><span>Paczka w Weekend</span><span>${zl(weekend)}</span></div>`:"")
@@ -501,8 +509,9 @@ async function zlozZamowienie(e){
     const paczkomat = czyDostawaPaczkomat(idD) ? " • Paczkomat: "+f.get("paczkomat") : "";
     const adres = `${f.get("ulica")} ${f.get("nrDomu")}${f.get("nrLokalu")?"/"+f.get("nrLokalu"):""}, ${f.get("kod")} ${f.get("miasto")}`;
     const firma = f.get("firmaChk") ? `\nFirma: ${f.get("firma")} • NIP: ${String(f.get("nip")).replace(/[^0-9]/g,"")}` : "";
-    const pozycjeDane = koszyk.map(x=>{const p=produkty.find(p=>p.id===x.id);
-      return {id:p.id,nazwa:p.nazwa,sku:p.sku||"",wariant:x.wariant||"",ilosc:x.ile,cena:p.cena,wartosc:p.cena*x.ile};});
+    const pozycjeDane = koszyk.map(x=>{const p=produkty.find(p=>String(p.id)===String(x.id));
+      return p?{id:p.id,nazwa:p.nazwa,sku:p.sku||"",wariant:x.wariant||"",ilosc:x.ile,cena:p.cena,wartosc:p.cena*x.ile}:null;}).filter(Boolean);
+    if(!pozycjeDane.length)throw new Error("Koszyk nie zawiera aktualnie dostępnych produktów");
     const pozycje = pozycjeDane.map(p=>{
       return `${p.nazwa}${p.wariant?` (${p.wariant})`:""}${p.sku?` [${p.sku}]`:""} × ${p.ilosc} = ${zl(p.wartosc)}`;});
     const tresc =

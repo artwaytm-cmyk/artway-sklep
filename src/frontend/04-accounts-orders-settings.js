@@ -226,7 +226,9 @@ function zastosujUstawienia(){
     if(czasZPaska) KONFIG.czasWysylki=czasZPaska;
   }
   if(u.telefon) KONFIG.telefon = u.telefon;
-  if(u.opisSklepu) KONFIG.opisSklepu = u.opisSklepu;
+  if(u.opisSklepu) KONFIG.opisSklepu = /Sklep wielobranżowy z asortymentem od sprawdzonych dostawców\. Nowe technologie, uczciwe ceny\./i.test(String(u.opisSklepu))
+    ? "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów. Czytelna oferta, uczciwe ceny i szybka wysyłka."
+    : u.opisSklepu;
   if(u.emailSklepu) KONFIG.emailSklepu = u.emailSklepu;
   if(u.daneFirmy && typeof u.daneFirmy==="object") KONFIG.daneFirmy = {...DANE_FIRMY_DOMYSLNE, ...u.daneFirmy};
   else KONFIG.daneFirmy = {...DANE_FIRMY_DOMYSLNE, ...(KONFIG.daneFirmy||{})};
@@ -265,7 +267,9 @@ function zastosujUstawienia(){
   ustawienia.platnosci = KONFIG.platnosci.map(x=>({...x}));
   if(u.kody) KONFIG.kodyRabatowe = {...u.kody};
   if(u.heroTytul) KONFIG.heroTytul = u.heroTytul;
-  if(u.heroOpis) KONFIG.heroOpis = u.heroOpis;
+  if(u.heroOpis) KONFIG.heroOpis = /^Elektronika, dom i ogród, narzędzia, odzież i sport\./i.test(String(u.heroOpis))
+    ? "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów — między innymi Alexander, Multigra i GoDan."
+    : u.heroOpis;
   if(Object.prototype.hasOwnProperty.call(u,"tresci")){ KONFIG.tresci = migrujTresciPrawne(u.tresci); ustawienia.tresci = KONFIG.tresci; }
   const ukl = u.uklad || {};
   const szer = ["1100px","1200px","1400px"].includes(ukl.szerokosc) ? ukl.szerokosc : "1200px";

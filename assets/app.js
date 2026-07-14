@@ -19,9 +19,9 @@ const KONFIG = {
   czasWysylki: "24 h",
   telefon: "+48 530 038 914",
   daneFirmy: {...DANE_FIRMY_DOMYSLNE},
-  opisSklepu: "Sklep wielobranżowy z asortymentem od sprawdzonych dostawców. Nowe technologie, uczciwe ceny.",
+  opisSklepu: "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów. Czytelna oferta, uczciwe ceny i szybka wysyłka.",
   heroTytul: "Wszystko, czego potrzebujesz — w jednym miejscu",
-  heroOpis: "Elektronika, dom i ogród, narzędzia, odzież i sport. Nowości od sprawdzonych dostawców, atrakcyjne ceny i szybka wysyłka.",
+  heroOpis: "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów — między innymi Alexander, Multigra i GoDan.",
   tresci: null,   // własne treści stron (regulamin itd.) — ustawiane w panelu admina
   emailSklepu: "artwaytm@gmail.com",
   // Konto zarejestrowane na ten adres = administrator (widzi diagnostykę):
@@ -145,12 +145,28 @@ function wykryjCzasWysylkiZTekstu(tekst){
 function tekstWysylki(prefix="Wysyłka w"){
   return `${prefix} ${czasWysylki()}`;
 }
+function glownaPromocja(){
+  const kody=KONFIG.kodyRabatowe&&typeof KONFIG.kodyRabatowe==="object"?KONFIG.kodyRabatowe:{};
+  const zPaska=String(KONFIG.pasekInfo||"").match(/Kod\s*(?:<b>)?([A-Z0-9]{2,20})(?:<\/b>)?\s*=\s*[−-]?(\d{1,2})%/i);
+  const kodZPaska=String(zPaska?.[1]||"").toUpperCase(),rabatZPaska=Number(zPaska?.[2]||0);
+  if(kodZPaska&&Number(kody[kodZPaska])===rabatZPaska)return {kod:kodZPaska,procent:rabatZPaska};
+  const wybrany=String(ustawienia?.promocjaGlowna||"").toUpperCase();
+  if(wybrany&&Number(kody[wybrany])>0)return {kod:wybrany,procent:Number(kody[wybrany])};
+  const pierwszy=Object.entries(kody).find(([kod,procent])=>/^[A-Z0-9]{2,20}$/.test(kod)&&Number(procent)>0);
+  return pierwszy?{kod:pierwszy[0],procent:Number(pierwszy[1])}:null;
+}
+function tekstGlownejPromocji(){
+  const p=glownaPromocja();
+  return p?`Kod <b>${p.kod}</b> = −${p.procent}%`:"";
+}
 function pasekInfoHTML(){
-  const domyslny=`🚚 Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł &nbsp;•&nbsp; 📦 ${tekstWysylki()} &nbsp;•&nbsp; ↩️ 14 dni na zwrot &nbsp;•&nbsp; 🎁 Kod <b>START10</b> = −10%`;
+  const promocja=tekstGlownejPromocji();
+  const domyslny=`🚚 Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł &nbsp;•&nbsp; 📦 ${tekstWysylki()} &nbsp;•&nbsp; ↩️ 14 dni na zwrot${promocja?` &nbsp;•&nbsp; 🎁 ${promocja}`:""}`;
   let t=String(KONFIG.pasekInfo||domyslny);
   t=t.replace(/Darmowa dostawa od\s*\d+(?:[,.]\d+)?\s*zł/gi,`Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł`);
   t=t.replace(/Wysyłka w\s*\d+\s*(?:h|godziny|godzin|godz\.?)(?:\s*robocze)?/gi,tekstWysylki());
   t=t.replace(/Wysylka w\s*\d+\s*(?:h|godziny|godzin|godz\.?)(?:\s*robocze)?/gi,tekstWysylki("Wysylka w"));
+  if(promocja)t=t.replace(/Kod\s*(?:<b>)?[A-Z0-9]{2,20}(?:<\/b>)?\s*=\s*[−-]?\d{1,2}%/gi,promocja);
   return t;
 }
 function domyslnyFavicon(){
@@ -190,27 +206,8 @@ function odswiezZnacznikDiag(){
 
 /* ═══════════ PRODUKTY ═══════════
    Strona najpierw próbuje wczytać products.json. Jeśli się nie uda
-   (np. otwarta z dysku), używa listy zapasowej poniżej. */
-const PRODUKTY_ZAPASOWE = [
-  {id:1, nazwa:"Słuchawki bezprzewodowe Pro ANC", kategoria:"Elektronika", cena:189.99, staraCena:249.99, opis:"Aktywna redukcja szumów, 40 h pracy, Bluetooth 5.3.", ikona:"🎧", badge:"Promocja", kolor:"#dbeafe"},
-  {id:2, nazwa:"Smartwatch Fit X2", kategoria:"Elektronika", cena:229.00, opis:"Pomiar tętna, GPS, 100+ trybów sportowych, wodoodporny.", ikona:"⌚", badge:"Nowość", kolor:"#e0e7ff"},
-  {id:3, nazwa:"Powerbank 20000 mAh 65W", kategoria:"Elektronika", cena:119.00, opis:"Szybkie ładowanie laptopa i telefonu, USB-C PD.", ikona:"🔋", kolor:"#dbeafe"},
-  {id:4, nazwa:"Kamera IP Wi-Fi 2K", kategoria:"Elektronika", cena:99.00, staraCena:139.00, opis:"Obrót 360°, tryb nocny, wykrywanie ruchu, aplikacja PL.", ikona:"📷", badge:"Promocja", kolor:"#e0e7ff"},
-  {id:5, nazwa:"Lampa LED biurkowa z ładowarką", kategoria:"Dom i ogród", cena:79.90, opis:"3 barwy światła, ładowanie indukcyjne telefonu, port USB.", ikona:"💡", kolor:"#fef3c7"},
-  {id:6, nazwa:"Robot sprzątający SmartClean", kategoria:"Dom i ogród", cena:499.00, staraCena:649.00, opis:"Mapowanie laserowe, mopowanie, sterowanie aplikacją.", ikona:"🤖", badge:"Promocja", kolor:"#fef3c7"},
-  {id:7, nazwa:"Zestaw doniczek samopodlewających", kategoria:"Dom i ogród", cena:59.00, opis:"3 szt., system knotowy, idealne na balkon i parapet.", ikona:"🪴", kolor:"#dcfce7"},
-  {id:8, nazwa:"Girlanda solarna 10 m", kategoria:"Dom i ogród", cena:45.00, opis:"100 LED, czujnik zmierzchu, 8 trybów świecenia.", ikona:"✨", badge:"Nowość", kolor:"#dcfce7"},
-  {id:9, nazwa:"Wkrętarka akumulatorowa 21V", kategoria:"Narzędzia", cena:179.00, staraCena:219.00, opis:"2 akumulatory, walizka, 45 akcesoriów w zestawie.", ikona:"🔧", badge:"Promocja", kolor:"#fee2e2"},
-  {id:10, nazwa:"Zestaw kluczy nasadowych 108 el.", kategoria:"Narzędzia", cena:149.00, opis:"Stal CrV, grzechotki 72-zębowe, solidna walizka.", ikona:"🧰", kolor:"#fee2e2"},
-  {id:11, nazwa:"Miernik laserowy 50 m", kategoria:"Narzędzia", cena:89.00, opis:"Pomiar odległości, powierzchni i objętości, ±2 mm.", ikona:"📏", kolor:"#ffedd5"},
-  {id:12, nazwa:"Latarka czołowa LED 1200 lm", kategoria:"Narzędzia", cena:39.90, opis:"Ładowana USB, czujnik ruchu ręki, IPX5.", ikona:"🔦", kolor:"#ffedd5"},
-  {id:13, nazwa:"Kurtka softshell outdoor", kategoria:"Odzież", cena:159.00, staraCena:199.00, opis:"Membrana 8000 mm, kaptur, rozmiary S–3XL.", ikona:"🧥", badge:"Promocja", kolor:"#f3e8ff"},
-  {id:14, nazwa:"Buty trekkingowe TrailGrip", kategoria:"Odzież", cena:219.00, opis:"Podeszwa antypoślizgowa, wodoodporne, r. 36–47.", ikona:"🥾", kolor:"#f3e8ff"},
-  {id:15, nazwa:"Plecak miejski 25 l z USB", kategoria:"Odzież", cena:99.00, opis:"Kieszeń na laptopa 15,6 cala, port USB, antykradzieżowy.", ikona:"🎒", badge:"Nowość", kolor:"#fce7f3"},
-  {id:16, nazwa:"Mata do jogi premium 6 mm", kategoria:"Sport", cena:69.00, opis:"Antypoślizgowa TPE, pasek do przenoszenia.", ikona:"🧘", kolor:"#dcfce7"},
-  {id:17, nazwa:"Hantle regulowane 2×10 kg", kategoria:"Sport", cena:249.00, staraCena:299.00, opis:"Szybka regulacja obciążenia, gumowane talerze.", ikona:"🏋️", badge:"Promocja", kolor:"#dcfce7"},
-  {id:18, nazwa:"Rower — licznik GPS", kategoria:"Sport", cena:139.00, opis:"Nawigacja, czujnik kadencji, 30 h na baterii.", ikona:"🚴", kolor:"#dbeafe"}
-];
+   (np. otwarta z dysku), nie pokazuje nieaktualnych produktów demonstracyjnych. */
+const PRODUKTY_ZAPASOWE = []; // brak demonstracyjnych towarów — źródłem awaryjnym jest aktualny products.json
 
 /* ═══════════ STAN ═══════════ */
 let produkty = [];
@@ -310,6 +307,9 @@ let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z 
 let chmuraTimerZapisu = null;
 let chmuraTimerAutoSync = null;
 let chmuraAutoSyncBusy = false;
+function maUprawnieniaZapisuChmury(){
+  return !!(chmuraToken||(sesja?.token&&typeof jestAdmin==="function"&&jestAdmin()));
+}
 
 function chmuraNaglowki(json){
   const h={"Accept":"application/json"};
@@ -455,7 +455,7 @@ async function chmuraWczytajStan(){
     // Klient (bez tokenu): serwer jest źródłem prawdy → zawsze nakładaj.
     // Admin (z tokenem): nakładaj TYLKO gdy serwer ma nowszą wersję niż ostatnio zsynchronizowana —
     // dzięki temu wczytanie strony NIE kasuje świeżych, jeszcze niewysłanych zmian admina.
-    if(d.settings && Object.keys(d.settings).length && (!chmuraToken || serwerNowszy)){
+    if(d.settings && Object.keys(d.settings).length && (!maUprawnieniaZapisuChmury() || serwerNowszy)){
       nalozWspolneUstawienia(d.settings);
       zapiszLS("artway_chmura_rev", d.rev||0);
     }
@@ -466,12 +466,12 @@ async function chmuraWczytajStan(){
   }catch(e){ chmuraStan = {...chmuraStan, dostepna:false, sprawdzono:true, error:e.message}; return false; }
 }
 function zaplanujZapisUstawien(){
-  if(!chmuraToken) return;
+  if(!maUprawnieniaZapisuChmury()) return;
   clearTimeout(chmuraTimerZapisu);
   chmuraTimerZapisu = setTimeout(chmuraZapiszUstawienia, 1200);
 }
 async function chmuraZapiszUstawienia(){
-  if(!chmuraToken) return false;
+  if(!maUprawnieniaZapisuChmury()) return false;
   try{
     const d = await chmura("settings", {method:"POST", body:{settings: zbierzWspolneUstawienia()}});
     chmuraStan = {...chmuraStan, dostepna:true, admin:true, rev:d.rev||chmuraStan.rev, updated_at:d.updated_at||null, error:"", ostatniZapis:Date.now()};
@@ -486,7 +486,7 @@ async function chmuraZapiszUstawienia(){
 }
 // Ręczne WYSŁANIE całego sklepu z tego urządzenia na serwer (dla wszystkich).
 async function chmuraWyslijWszystko(){
-  if(!chmuraToken){ chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   toast("Wysyłanie na serwer…");
   const okU = await chmuraZapiszUstawienia();
   await synchronizujBazeCentralna(true).catch(()=>{});
@@ -525,7 +525,7 @@ function chmuraUstawToken(){
 }
 function chmuraWyczyscToken(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; toast("Odłączono hasło bazy"); renderuj(); }
 function chmuraStatusHTML(){
-  const ok = chmuraStan.dostepna, adm = chmuraStan.admin && chmuraToken;
+  const ok = chmuraStan.dostepna, adm = chmuraStan.admin && maUprawnieniaZapisuChmury();
   const kolor = adm?"#166534":(ok?"#92400e":"#b91c1c"), tlo = adm?"#f0fdf4":(ok?"#fffbeb":"#fef2f2"), br = adm?"#86efac":(ok?"#fcd34d":"#fecaca");
   const opis = adm ? `<b>Połączono ✅</b> — Twoje zmiany zapisują się na serwerze automatycznie i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/1000)} s.`
     : ok ? `<b>⚠️ NIE połączono z bazą</b> — Twoje zmiany zapisują się TYLKO na tym urządzeniu i NIE są widoczne gdzie indziej. Zaloguj się jako <b>admin</b> hasłem = token bazy, albo kliknij „Wpisz hasło bazy".`
@@ -541,11 +541,41 @@ function chmuraStatusHTML(){
   </div>`;
 }
 
+const KLUCZE_CIEZKICH_CACHE = [
+  "artway_allegro_oferty_cache",
+  "artway_allegro_zamowienia_cache",
+  "artway_allegro_komunikacja_cache",
+  "artway_produkty_katalog"
+];
+function rozmiarLokalnejPamieci(){
+  let n=0;
+  try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i)||"",v=localStorage.getItem(k)||"";n+=(k.length+v.length)*2;}}catch(e){}
+  return n;
+}
+function zwolnijPamiecPodreczna({wymus=false}={}){
+  const przed=rozmiarLokalnejPamieci();
+  if(!wymus&&przed<3_500_000)return {przed,po:przed,usunieto:[]};
+  const usunieto=[];
+  for(const klucz of KLUCZE_CIEZKICH_CACHE){
+    try{if(localStorage.getItem(klucz)!==null){localStorage.removeItem(klucz);usunieto.push(klucz);}}catch(e){}
+  }
+  try{
+    const logi=JSON.parse(localStorage.getItem("artway_logi")||"[]");
+    if(Array.isArray(logi)&&logi.length>80){localStorage.setItem("artway_logi",JSON.stringify(logi.slice(0,80)));usunieto.push("artway_logi:archiwum");}
+  }catch(e){}
+  return {przed,po:rozmiarLokalnejPamieci(),usunieto};
+}
 function wczytajLS(klucz, domyslne){ try{ return JSON.parse(localStorage.getItem(klucz)) ?? domyslne; }catch(e){ return domyslne; } }
 function zapiszLS(klucz, dane){
   if(klucz==="artway_zamowienia" && Array.isArray(dane)) dane = filtrujAktywneZamowienia(dane);
-  try{ localStorage.setItem(klucz, JSON.stringify(dane)); }catch(e){ loguj("ostrzezenie","Nie udało się zapisać: "+klucz); }
-  if(!chmuraWczytywanie && chmuraToken && KLUCZE_WSPOLNE.includes(klucz)){ zaplanujZapisUstawien(); } }
+  const serial=JSON.stringify(dane);
+  try{ localStorage.setItem(klucz, serial); }
+  catch(e){
+    const wynik=zwolnijPamiecPodreczna({wymus:true});
+    try{localStorage.setItem(klucz,serial);}
+    catch(e2){loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
+  }
+  if(!chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ zaplanujZapisUstawien(); } }
 const kwotaNum = v => { const n=Number(String(v ?? 0).replace(",",".").replace(/[^0-9.-]/g,"")); return Number.isFinite(n) ? +n.toFixed(2) : 0; };
 const zl = n => kwotaNum(n).toFixed(2).replace(".", ",") + " zł";
 const $ = id => document.getElementById(id);
@@ -566,6 +596,7 @@ function zdaniaOpisu(v){
 }
 function agentAICzyscOpis(v,max=20000){
   let s=String(v??"")
+    .replace(/^Domyślny opis(?: krótki| pełny)?\s*/i,"")
     .replace(/\r/g,"\n")
     .replace(/\t+/g," ")
     .replace(/[ \u00a0]{2,}/g," ")
@@ -586,7 +617,7 @@ function agentAITnijDoZdania(s,max=280){
   return cut.slice(0,max).replace(/\s+\S*$/,"").trim()+"…";
 }
 function agentAIUtworzOpisKrotki(p={}){
-  const raw=String(p.opisKrotki||p.krotkiOpis||p.shortDescription||"").trim();
+  const raw=String(p.opisKrotki||p.krotkiOpis||p.shortDescription||"").replace(/^Domyślny opis krótki\s*/i,"").trim();
   if(raw) return agentAITnijDoZdania(agentAICzyscOpis(raw,500),300);
   const opis=agentAICzyscOpis(p.opis||"",20000);
   const zd=zdaniaOpisu(opis).filter(x=>!/^(zawartość opakowania|skład zestawu|wymiary|ostrzeżenie)/i.test(x));
@@ -1186,7 +1217,9 @@ function zastosujUstawienia(){
     if(czasZPaska) KONFIG.czasWysylki=czasZPaska;
   }
   if(u.telefon) KONFIG.telefon = u.telefon;
-  if(u.opisSklepu) KONFIG.opisSklepu = u.opisSklepu;
+  if(u.opisSklepu) KONFIG.opisSklepu = /Sklep wielobranżowy z asortymentem od sprawdzonych dostawców\. Nowe technologie, uczciwe ceny\./i.test(String(u.opisSklepu))
+    ? "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów. Czytelna oferta, uczciwe ceny i szybka wysyłka."
+    : u.opisSklepu;
   if(u.emailSklepu) KONFIG.emailSklepu = u.emailSklepu;
   if(u.daneFirmy && typeof u.daneFirmy==="object") KONFIG.daneFirmy = {...DANE_FIRMY_DOMYSLNE, ...u.daneFirmy};
   else KONFIG.daneFirmy = {...DANE_FIRMY_DOMYSLNE, ...(KONFIG.daneFirmy||{})};
@@ -1225,7 +1258,9 @@ function zastosujUstawienia(){
   ustawienia.platnosci = KONFIG.platnosci.map(x=>({...x}));
   if(u.kody) KONFIG.kodyRabatowe = {...u.kody};
   if(u.heroTytul) KONFIG.heroTytul = u.heroTytul;
-  if(u.heroOpis) KONFIG.heroOpis = u.heroOpis;
+  if(u.heroOpis) KONFIG.heroOpis = /^Elektronika, dom i ogród, narzędzia, odzież i sport\./i.test(String(u.heroOpis))
+    ? "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów — między innymi Alexander, Multigra i GoDan."
+    : u.heroOpis;
   if(Object.prototype.hasOwnProperty.call(u,"tresci")){ KONFIG.tresci = migrujTresciPrawne(u.tresci); ustawienia.tresci = KONFIG.tresci; }
   const ukl = u.uklad || {};
   const szer = ["1100px","1200px","1400px"].includes(ukl.szerokosc) ? ukl.szerokosc : "1200px";
@@ -1287,6 +1322,40 @@ function zbudujProdukty(){
     .filter(p => !ukryteKat.includes(p.kategoria))
     .filter(p => !produktOznaczonyNiedostepny(p));
   produkty=filtrujDuplikatySklepu(produkty);
+}
+function podpisPublikacjiProduktu(p={}){
+  return JSON.stringify({
+    id:String(p.id??""),nazwa:String(p.nazwa||""),kategoria:String(p.kategoria||""),
+    cena:Number(p.cena)||0,zdjecie:String(p.zdjecie||""),ean:String(p.gtin||p.ean||""),
+    externalId:String(p.externalId||""),sku:String(p.sku||""),producent:String(p.producent||p.marka||""),
+    opisKrotki:agentAIUtworzOpisKrotki(p),opis:agentAIFormatujOpisPelny(p)
+  });
+}
+function stanPublikacjiKatalogu(){
+  const bazowe=new Map((Array.isArray(prodBazowe)?prodBazowe:[]).map(p=>[String(p.id),p]));
+  const aktualne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!produktyDefinitywne.some(id=>String(id)===String(p.id)));
+  const brakujace=[],nieaktualne=[];
+  for(const p of aktualne){
+    const baza=bazowe.get(String(p.id));
+    if(!baza)brakujace.push(p.id);
+    else if(podpisPublikacjiProduktu(baza)!==podpisPublikacjiProduktu(p))nieaktualne.push(p.id);
+  }
+  return {gotowy:zrodloProduktow==="json"&&!brakujace.length&&!nieaktualne.length,razem:aktualne.length,bazowe:bazowe.size,brakujace,nieaktualne};
+}
+function porzadkujBezpieczneReferencje(){
+  const widoczne=new Set(produkty.map(p=>String(p.id))),wszystkie=new Set([...(prodBazowe||[]),...(produktyDodane||[]),...(koszDodanych||[])].map(p=>String(p.id)));
+  const koszykPrzed=koszyk.length;
+  koszyk=koszyk.filter((x,i,a)=>widoczne.has(String(x.id))&&Number(x.ile)>0&&a.findIndex(y=>String(y.id)===String(x.id)&&String(y.wariant||"")===String(x.wariant||""))===i);
+  if(koszyk.length!==koszykPrzed)zapiszLS("artway_koszyk",koszyk);
+  const mapa={...(ustawienia.mapaProduktow||{})},usuniete=[];
+  for(const id of Object.keys(mapa))if(!wszystkie.has(String(id))){delete mapa[id];usuniete.push(id);}
+  if(usuniete.length){
+    ustawienia={...ustawienia,mapaProduktow:mapa};
+    if(typeof produktyDoAdministracji==="function")zapiszLS("artway_ustawienia",ustawienia);
+    else try{localStorage.setItem("artway_ustawienia",JSON.stringify(ustawienia));}catch(e){}
+    loguj("info",`Usunięto ${usuniete.length} osieroconych mapowań bez zmiany katalogu produktów`);
+  }
+  return {koszyk:koszykPrzed-koszyk.length,mapowania:usuniete.length};
 }
 function kluczDuplikatuProduktu(v){return String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/ł/g,"l").replace(/[^a-z0-9]+/g,"");}
 function kluczeDuplikatuProduktu(p={}){
@@ -2139,14 +2208,20 @@ function moderujOpinie(id, akcja){
 }
 async function pobierzBazoweProdukty(){
   try{
-    const r = await fetch("/products.json", {cache:"default"});
+    const wersja = document.querySelector('meta[name="artway-version"]')?.content || String(Date.now());
+    const r = await fetch(`/products.json?v=${encodeURIComponent(wersja)}`, {cache:"no-store"});
     if(!r.ok) throw new Error("HTTP "+r.status);
-    prodBazowe = await r.json();
+    const dane = await r.json();
+    if(!Array.isArray(dane)) throw new Error("products.json nie zawiera tablicy produktów");
+    const poprawne = dane.filter(p=>p&&p.id!==undefined&&String(p.nazwa||"").trim());
+    const unikalne = new Set(poprawne.map(p=>String(p.id)));
+    if(poprawne.length!==dane.length||unikalne.size!==poprawne.length) throw new Error("products.json zawiera niepoprawne lub powtórzone rekordy");
+    prodBazowe = poprawne;
     zrodloProduktow = "json";
   }catch(e){
     prodBazowe = PRODUKTY_ZAPASOWE;
     zrodloProduktow = "zapasowe";
-    loguj("info","products.json niedostępny — użyto listy zapasowej (to normalne przy otwarciu z dysku).");
+    loguj("ostrzezenie","products.json niedostępny — katalog demonstracyjny został zablokowany, aby nie pokazywać nieaktualnych produktów.");
   }
 }
 function finalizujWczytanieProduktow(){
@@ -2487,10 +2562,10 @@ function widokSklep(){
   <div class="pagination" id="paginacjaGora"></div>
   <div class="grid" id="grid"></div>
   <div class="pagination" id="paginacjaDol"></div>`;
-  SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {}; return `
+  SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(); return `
   <section class="offer-band">
     <div class="offer-band-in">
-      <div><h2>${esc(o.tytul||"Dobry moment na zakupy")}</h2><p>${o.opis?esc(o.opis):`Użyj kodu <b>START10</b> w koszyku i odbierz 10% rabatu na zamówienie.`}</p></div>
+      <div><h2>${esc(o.tytul||"Dobry moment na zakupy")}</h2><p>${o.opis?esc(o.opis):(promo?`Użyj kodu <b>${esc(promo.kod)}</b> w koszyku i odbierz ${esc(promo.procent)}% rabatu na zamówienie.`:"Sprawdź aktualne okazje i produkty w dobrych cenach.")}</p></div>
       <a href="${esc(bezpiecznyLink(o.link||"#/promocje"))}">${esc(o.tekstLinku||"Zobacz okazje")} →</a>
     </div>
   </section>`; };
@@ -2613,7 +2688,7 @@ function wyczyscFiltryProduktow(){
   cenaOd="";cenaDo="";filtrDostepnosci="wszystkie";filtrOferty="wszystkie";filtrOceny="0";fraza="";stronaProduktow=1;
   if($("searchInput"))$("searchInput").value="";renderuj();
 }
-function kartaProduktu(p){
+function kartaProduktu(p,index=0){
   const ulub = ulubione.includes(p.id);
   const oceny = sredniaOcen(p.id);
   const brakCeny = !produktMaCeneSprzedazy(p);
@@ -2623,7 +2698,7 @@ function kartaProduktu(p){
     <div class="thumb" style="background:${p.kolor||'#eef2f7'}">
       ${niedostepny?`<span class="badge" style="background:#64748b">Chwilowo niedostępne</span>`:(brakCeny?`<span class="badge" style="background:#f97316">Do wyceny</span>`:(p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:""))}
       ${jestAdmin()?"":`<button class="fav-btn" onclick="event.stopPropagation();przelaczUlubione(${p.id})" aria-label="Ulubione">${ulub?"❤️":"🤍"}</button>`}
-      ${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" style="width:100%;height:100%;object-fit:cover;${niedostepny?'filter:grayscale(1);opacity:.6':''}" onerror="this.remove();loguj('ostrzezenie','Nie wczytano zdjęcia produktu: ${esc(p.nazwa)}')">`:(p.ikona||"📦")}
+      ${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" loading="${index<4?'eager':'lazy'}" decoding="async" ${index<4?'fetchpriority="high"':''} style="width:100%;height:100%;object-fit:cover;${niedostepny?'filter:grayscale(1);opacity:.6':''}" onerror="this.remove();loguj('ostrzezenie','Nie wczytano zdjęcia produktu: ${esc(p.nazwa)}')">`:(p.ikona||"📦")}
     </div>
     <div class="card-body">
       <span class="cat-label">${esc(p.kategoria)}${oceny?` <span style="color:var(--accent);text-transform:none;letter-spacing:0">★ ${oceny.srednia.toFixed(1)} (${oceny.n})</span>`:""}</span>
@@ -4573,7 +4648,7 @@ function seoProduktyWorkspaceHTML(queue,tab="produkty"){
 }
 function seoAktualizujMetaDlaTrasy(route=trasa()){
   const ensure=(selector,create)=>{let el=document.head.querySelector(selector);if(!el){el=document.createElement(create.tag||"meta");for(const [k,v] of Object.entries(create.attrs||{}))el.setAttribute(k,v);document.head.appendChild(el);}return el;},setMeta=(name,value,property=false)=>{const attr=property?"property":"name",el=ensure(`meta[${attr}="${name}"]`,{tag:"meta",attrs:{[attr]:name}});el.setAttribute("content",String(value||""));};
-  const baseTitle=ustawienia.nazwaSklepu||"Artway-TM",baseDesc=ustawienia.opisSklepu||"Gry edukacyjne i rodzinne, zestawy kreatywne oraz zabawki dla dzieci.";let title=`Gry edukacyjne i rodzinne, zabawki | ${baseTitle}`,desc=baseDesc,canonical=location.origin+"/",image="",price="",schema={"@context":"https://schema.org","@graph":[{"@type":"WebSite",name:baseTitle,url:canonical,inLanguage:"pl-PL"},{"@type":"OnlineStore",name:baseTitle,url:canonical,email:ustawienia.email||"artwaytm@gmail.com",telephone:ustawienia.telefon||"+48530038914"}]};
+  const baseTitle=ustawienia.nazwaSklepu||"Artway-TM",baseDesc=ustawienia.seo?.opis||ustawienia.opisSklepu||"Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów.";let title=ustawienia.seo?.tytul||`Gry, zabawki i artykuły imprezowe | ${baseTitle}`,desc=baseDesc,canonical=location.origin+"/",image="",price="",schema={"@context":"https://schema.org","@graph":[{"@type":"WebSite",name:baseTitle,url:canonical,inLanguage:"pl-PL"},{"@type":"OnlineStore",name:baseTitle,url:canonical,email:ustawienia.email||"artwaytm@gmail.com",telephone:ustawienia.telefon||"+48530038914"}]};
   if(route.startsWith("/produkt/")){const p=produkty.find(x=>String(x.id)===String(route.split("/")[2]));if(p){const effective=seoEfektywneDaneProduktu(p);title=effective.seoTitle||`${p.nazwa} | ${baseTitle}`;desc=effective.seoDescription;canonical=`${location.origin}/produkt/${p.id}`;image=p.zdjecie||p.zdjecia?.[0]||"";price=Number(p.cena||0)>0?Number(p.cena).toFixed(2):"";schema={"@context":"https://schema.org","@graph":[{"@type":"Product",name:p.nazwa,description:seoTekstBezHTML(p.opis||desc),image:[p.zdjecie,...(p.zdjecia||[])].filter(Boolean),sku:p.sku||p.externalId||String(p.id),gtin13:p.gtin||p.ean||undefined,brand:(p.producent||p.marka)?{"@type":"Brand",name:p.producent||p.marka}:undefined,offers:{"@type":"Offer",url:canonical,priceCurrency:"PLN",price,availability:produktOznaczonyNiedostepny(p)?"https://schema.org/OutOfStock":"https://schema.org/InStock",itemCondition:"https://schema.org/NewCondition"}},{"@type":"BreadcrumbList",itemListElement:[{"@type":"ListItem",position:1,name:"Strona główna",item:location.origin+"/"},{"@type":"ListItem",position:2,name:p.nazwa,item:canonical}]}]};}}
   document.title=title;setMeta("description",desc);setMeta("robots",route.startsWith("/admin")||["/diagnostyka","/logowanie","/rejestracja","/konto","/zamowienia"].includes(route)?"noindex,nofollow":"index,follow,max-image-preview:large");setMeta("og:locale","pl_PL",true);setMeta("og:site_name",baseTitle,true);setMeta("og:title",title,true);setMeta("og:description",desc,true);setMeta("og:url",canonical,true);setMeta("og:type",route.startsWith("/produkt/")?"product":"website",true);setMeta("og:image",image,true);setMeta("twitter:card",image?"summary_large_image":"summary");setMeta("twitter:title",title);setMeta("twitter:description",desc);setMeta("twitter:image",image);setMeta("product:price:amount",price,true);setMeta("product:price:currency",price?"PLN":"",true);
   let link=document.head.querySelector('link[rel="canonical"]');if(!link){link=document.createElement("link");link.rel="canonical";document.head.appendChild(link);}link.href=canonical;let script=document.getElementById("artway-seo-schema");if(!script){script=document.createElement("script");script.id="artway-seo-schema";script.type="application/ld+json";document.head.appendChild(script);}script.textContent=JSON.stringify(schema);
@@ -4832,6 +4907,14 @@ async function pobierzDaneZNip(){
   await nipDoFormularza($("orderForm"), $("nipBtn"));
 }
 function otworzModal(){
+  const brakujace=koszyk.filter(x=>!produkty.some(p=>String(p.id)===String(x.id)));
+  if(brakujace.length){
+    koszyk=koszyk.filter(x=>produkty.some(p=>String(p.id)===String(x.id)));
+    zapiszLS("artway_koszyk",koszyk);odswiezKoszyk();
+    loguj("ostrzezenie",`Usunięto z koszyka ${brakujace.length} nieaktualnych pozycji przed otwarciem zamówienia`);
+    toast(brakujace.length===1?"Usunięto z koszyka produkt, który nie jest już dostępny":"Usunięto z koszyka nieaktualne produkty");
+  }
+  if(!koszyk.length){zamknijKoszyk();return;}
   zamknijKoszyk();
   window.__paczkomatAdres="";
   const profil = sesja ? (pobierzProfil(sesja.email)||{}) : {};
@@ -4930,8 +5013,8 @@ function przeliczZamowienie(){
     <label class="chk-row" style="margin-top:.45rem"><input type="checkbox" name="potwierdzenieDostepnosci" required> Rozumiem, że dostępność tej ilości zostanie potwierdzona przez sklep.</label>
   </div>` : "";
   $("orderSummary").innerHTML =
-    koszyk.map(x=>{const p=produkty.find(p=>p.id===x.id);
-      return `<div><span>${esc(p.nazwa)}${x.wariant?` (${esc(x.wariant)})`:""} × ${x.ile}</span><span>${zl(p.cena*x.ile)}</span></div>`;}).join("")
+    koszyk.map(x=>{const p=produkty.find(p=>String(p.id)===String(x.id));
+      return p?`<div><span>${esc(p.nazwa)}${x.wariant?` (${esc(x.wariant)})`:""} × ${x.ile}</span><span>${zl(p.cena*x.ile)}</span></div>`:"";}).join("")
     + (rabat?`<div><span>Rabat (${esc(rabat.kod)})</span><span>−${zl(kwotaRabatu())}</span></div>`:"")
     + `<div><span>Dostawa</span><span>${dostawa?zl(dostawa):"GRATIS"}</span></div>`
     + (weekend?`<div><span>Paczka w Weekend</span><span>${zl(weekend)}</span></div>`:"")
@@ -5100,8 +5183,9 @@ async function zlozZamowienie(e){
     const paczkomat = czyDostawaPaczkomat(idD) ? " • Paczkomat: "+f.get("paczkomat") : "";
     const adres = `${f.get("ulica")} ${f.get("nrDomu")}${f.get("nrLokalu")?"/"+f.get("nrLokalu"):""}, ${f.get("kod")} ${f.get("miasto")}`;
     const firma = f.get("firmaChk") ? `\nFirma: ${f.get("firma")} • NIP: ${String(f.get("nip")).replace(/[^0-9]/g,"")}` : "";
-    const pozycjeDane = koszyk.map(x=>{const p=produkty.find(p=>p.id===x.id);
-      return {id:p.id,nazwa:p.nazwa,sku:p.sku||"",wariant:x.wariant||"",ilosc:x.ile,cena:p.cena,wartosc:p.cena*x.ile};});
+    const pozycjeDane = koszyk.map(x=>{const p=produkty.find(p=>String(p.id)===String(x.id));
+      return p?{id:p.id,nazwa:p.nazwa,sku:p.sku||"",wariant:x.wariant||"",ilosc:x.ile,cena:p.cena,wartosc:p.cena*x.ile}:null;}).filter(Boolean);
+    if(!pozycjeDane.length)throw new Error("Koszyk nie zawiera aktualnie dostępnych produktów");
     const pozycje = pozycjeDane.map(p=>{
       return `${p.nazwa}${p.wariant?` (${p.wariant})`:""}${p.sku?` [${p.sku}]`:""} × ${p.ilosc} = ${zl(p.wartosc)}`;});
     const tresc =
@@ -5240,6 +5324,8 @@ $("searchInput").oninput = e=>{
 
 /* ═══════════ START ═══════════ */
 (async ()=>{
+  const porzadkowaniePamieci=zwolnijPamiecPodreczna();
+  if(porzadkowaniePamieci.usunieto.length)loguj("info",`Odciążono pamięć podręczną: ${(porzadkowaniePamieci.przed/1024).toFixed(0)} KB → ${(porzadkowaniePamieci.po/1024).toFixed(0)} KB`);
   const ladowanieProduktow=pobierzBazoweProdukty();
   await Promise.all([chmuraWczytajStan(),ladowanieProduktow]); // ustawienia i katalog pobieramy równolegle
   zastosujUstawienia();
@@ -5249,5 +5335,7 @@ $("searchInput").oninput = e=>{
   odswiezUlubioneLicznik();
   odswiezZnacznikDiag();
   finalizujWczytanieProduktow();
+  const porzadkowanieReferencji=porzadkujBezpieczneReferencje();
+  if(porzadkowanieReferencji.koszyk||porzadkowanieReferencji.mapowania){odswiezKoszyk();zbudujProdukty();}
   uruchomAutoSynchronizacjeChmury();
 })();

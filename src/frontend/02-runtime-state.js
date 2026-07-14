@@ -24,27 +24,8 @@ function odswiezZnacznikDiag(){
 
 /* ═══════════ PRODUKTY ═══════════
    Strona najpierw próbuje wczytać products.json. Jeśli się nie uda
-   (np. otwarta z dysku), używa listy zapasowej poniżej. */
-const PRODUKTY_ZAPASOWE = [
-  {id:1, nazwa:"Słuchawki bezprzewodowe Pro ANC", kategoria:"Elektronika", cena:189.99, staraCena:249.99, opis:"Aktywna redukcja szumów, 40 h pracy, Bluetooth 5.3.", ikona:"🎧", badge:"Promocja", kolor:"#dbeafe"},
-  {id:2, nazwa:"Smartwatch Fit X2", kategoria:"Elektronika", cena:229.00, opis:"Pomiar tętna, GPS, 100+ trybów sportowych, wodoodporny.", ikona:"⌚", badge:"Nowość", kolor:"#e0e7ff"},
-  {id:3, nazwa:"Powerbank 20000 mAh 65W", kategoria:"Elektronika", cena:119.00, opis:"Szybkie ładowanie laptopa i telefonu, USB-C PD.", ikona:"🔋", kolor:"#dbeafe"},
-  {id:4, nazwa:"Kamera IP Wi-Fi 2K", kategoria:"Elektronika", cena:99.00, staraCena:139.00, opis:"Obrót 360°, tryb nocny, wykrywanie ruchu, aplikacja PL.", ikona:"📷", badge:"Promocja", kolor:"#e0e7ff"},
-  {id:5, nazwa:"Lampa LED biurkowa z ładowarką", kategoria:"Dom i ogród", cena:79.90, opis:"3 barwy światła, ładowanie indukcyjne telefonu, port USB.", ikona:"💡", kolor:"#fef3c7"},
-  {id:6, nazwa:"Robot sprzątający SmartClean", kategoria:"Dom i ogród", cena:499.00, staraCena:649.00, opis:"Mapowanie laserowe, mopowanie, sterowanie aplikacją.", ikona:"🤖", badge:"Promocja", kolor:"#fef3c7"},
-  {id:7, nazwa:"Zestaw doniczek samopodlewających", kategoria:"Dom i ogród", cena:59.00, opis:"3 szt., system knotowy, idealne na balkon i parapet.", ikona:"🪴", kolor:"#dcfce7"},
-  {id:8, nazwa:"Girlanda solarna 10 m", kategoria:"Dom i ogród", cena:45.00, opis:"100 LED, czujnik zmierzchu, 8 trybów świecenia.", ikona:"✨", badge:"Nowość", kolor:"#dcfce7"},
-  {id:9, nazwa:"Wkrętarka akumulatorowa 21V", kategoria:"Narzędzia", cena:179.00, staraCena:219.00, opis:"2 akumulatory, walizka, 45 akcesoriów w zestawie.", ikona:"🔧", badge:"Promocja", kolor:"#fee2e2"},
-  {id:10, nazwa:"Zestaw kluczy nasadowych 108 el.", kategoria:"Narzędzia", cena:149.00, opis:"Stal CrV, grzechotki 72-zębowe, solidna walizka.", ikona:"🧰", kolor:"#fee2e2"},
-  {id:11, nazwa:"Miernik laserowy 50 m", kategoria:"Narzędzia", cena:89.00, opis:"Pomiar odległości, powierzchni i objętości, ±2 mm.", ikona:"📏", kolor:"#ffedd5"},
-  {id:12, nazwa:"Latarka czołowa LED 1200 lm", kategoria:"Narzędzia", cena:39.90, opis:"Ładowana USB, czujnik ruchu ręki, IPX5.", ikona:"🔦", kolor:"#ffedd5"},
-  {id:13, nazwa:"Kurtka softshell outdoor", kategoria:"Odzież", cena:159.00, staraCena:199.00, opis:"Membrana 8000 mm, kaptur, rozmiary S–3XL.", ikona:"🧥", badge:"Promocja", kolor:"#f3e8ff"},
-  {id:14, nazwa:"Buty trekkingowe TrailGrip", kategoria:"Odzież", cena:219.00, opis:"Podeszwa antypoślizgowa, wodoodporne, r. 36–47.", ikona:"🥾", kolor:"#f3e8ff"},
-  {id:15, nazwa:"Plecak miejski 25 l z USB", kategoria:"Odzież", cena:99.00, opis:"Kieszeń na laptopa 15,6 cala, port USB, antykradzieżowy.", ikona:"🎒", badge:"Nowość", kolor:"#fce7f3"},
-  {id:16, nazwa:"Mata do jogi premium 6 mm", kategoria:"Sport", cena:69.00, opis:"Antypoślizgowa TPE, pasek do przenoszenia.", ikona:"🧘", kolor:"#dcfce7"},
-  {id:17, nazwa:"Hantle regulowane 2×10 kg", kategoria:"Sport", cena:249.00, staraCena:299.00, opis:"Szybka regulacja obciążenia, gumowane talerze.", ikona:"🏋️", badge:"Promocja", kolor:"#dcfce7"},
-  {id:18, nazwa:"Rower — licznik GPS", kategoria:"Sport", cena:139.00, opis:"Nawigacja, czujnik kadencji, 30 h na baterii.", ikona:"🚴", kolor:"#dbeafe"}
-];
+   (np. otwarta z dysku), nie pokazuje nieaktualnych produktów demonstracyjnych. */
+const PRODUKTY_ZAPASOWE = []; // brak demonstracyjnych towarów — źródłem awaryjnym jest aktualny products.json
 
 /* ═══════════ STAN ═══════════ */
 let produkty = [];

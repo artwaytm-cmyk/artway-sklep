@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Artway-TM</title>
+  <rect width="512" height="512" rx="116" fill="#2563eb"/>
+  <path d="M147 376 236 125h42l88 251h-55l-18-56H218l-18 56h-53Zm87-106h43l-21-68-22 68Z" fill="#fff"/>
+  <circle cx="377" cy="138" r="47" fill="#7c3aed"/>
+  <path d="m358 138 13 13 27-31" fill="none" stroke="#fff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

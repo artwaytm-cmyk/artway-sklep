@@ -1532,10 +1532,13 @@ async function adminMasowoZmienStatusZamowien(){
   toast(`✅ Zmieniono ${zmiany.length} zamówień na „${status}”${bledy?` • błędy synchronizacji: ${bledy}`:""}`);
 }
 function allegroZapiszCache(){
-  zapiszLS("artway_allegro_zamowienia_cache", allegroZamowienia);
-  zapiszLS("artway_allegro_oferty_cache", allegroOferty.slice(0,1500));
+  // Pełne rejestry pozostają w backendzie i w pamięci bieżącej sesji.
+  // Nie duplikujemy tysięcy ofert, zamówień i wiadomości w localStorage,
+  // ponieważ prowadziło to do przekroczenia limitu pamięci przeglądarki.
+  for(const klucz of ["artway_allegro_zamowienia_cache","artway_allegro_oferty_cache","artway_allegro_komunikacja_cache"]){
+    try{localStorage.removeItem(klucz);}catch(e){}
+  }
   zapiszLS("artway_allegro_mapowania_cache", allegroMapowania);
-  zapiszLS("artway_allegro_komunikacja_cache", allegroKomunikacja);
 }
 function allegroProduktIdDlaOferty(offerId){
   const rec=(allegroMapowania||{})[String(offerId)];
@@ -6233,7 +6236,7 @@ function widokAdminKategorie(){
   const bezGrup = nazwy.filter(k=>!przypisane.has(k));
   return asortymentSzkielet("kategorie", `
   <div class="panel">
-    <h1>➕ Utwórz nowy katalog</h1>
+    <div class="order-section-head"><div><h1>➕ Utwórz nowy katalog</h1><p class="order-detail-lead">Katalogi możesz dodawać ręcznie albo przygotować bezpieczny szablon pod przyszły asortyment imprezowy.</p></div><button class="btn ghost" type="button" onclick="przygotujKatalogImprezowyGoDan()">🎈 Przygotuj GoDan i imprezy</button></div>
     <form onsubmit="dodajKatalog(event)" style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:end;margin:.6rem 0">
       <div class="f-group" style="margin:0;flex:1;min-width:200px"><label>Nazwa katalogu</label><input required name="nazwa" placeholder="np. Zabawki, AGD, Ogród…" maxlength="40"></div>
       <button class="btn" type="submit">➕ Utwórz</button>
@@ -6308,6 +6311,22 @@ function dodajKatalog(e){
   ustawienia.wlasneKategorie = [...(ustawienia.wlasneKategorie||[]), k];
   loguj("info","Utworzono katalog: "+k);
   zapiszCzescUstawien({wlasneKategorie: ustawienia.wlasneKategorie});
+}
+function przygotujKatalogImprezowyGoDan(){
+  const plan=[
+    {grupa:"Balony",ikona:"🎈",kategorie:["Balony foliowe","Balony lateksowe","Bukiety i zestawy balonów"]},
+    {grupa:"Przyjęcia i dekoracje",ikona:"🎉",kategorie:["Dekoracje imprezowe","Naczynia i akcesoria imprezowe","Świeczki i dekoracje tortu","Stroje i gadżety imprezowe"]}
+  ];
+  const dotychczas=grupyMenuKategorii(),wlasne=[...(ustawienia.wlasneKategorie||[])];let noweKategorie=0,noweGrupy=0;
+  for(const sekcja of plan){
+    for(const kat of sekcja.kategorie)if(!wlasne.some(x=>normalizujSzukanyTekst(x)===normalizujSzukanyTekst(kat))&&!wszystkieKategorie().some(x=>normalizujSzukanyTekst(x)===normalizujSzukanyTekst(kat))){wlasne.push(kat);noweKategorie++;}
+    let grupa=dotychczas.find(x=>normalizujSzukanyTekst(x.nazwa)===normalizujSzukanyTekst(sekcja.grupa));
+    if(!grupa){grupa={id:`grp_godan_${prostyHash(sekcja.grupa)}`,nazwa:sekcja.grupa,ikona:sekcja.ikona,aktywna:true,kategorie:[]};dotychczas.push(grupa);noweGrupy++;}
+    grupa.kategorie=[...new Set([...(grupa.kategorie||[]),...sekcja.kategorie])];
+  }
+  zapiszGrupyMenuKategorii(dotychczas,{wlasneKategorie:wlasne,menuPokazNieprzypisane:true});
+  loguj("info",`Przygotowano katalog imprezowy GoDan: ${noweGrupy} grup i ${noweKategorie} katalogów — bez zmiany produktów`);
+  toast(noweGrupy||noweKategorie?`🎈 Dodano ${noweKategorie} katalogów; produkty pozostały bez zmian`:"Katalog GoDan i imprezy jest już przygotowany");
 }
 function usunKatalog(k){
   ustawienia.wlasneKategorie = (ustawienia.wlasneKategorie||[]).filter(x=>x!==k);
@@ -6922,8 +6941,8 @@ function widokAdminWyglad(){
       <div class="f-group"><label>Opis sklepu w stopce</label><textarea name="opisSklepu" rows="2">${esc(KONFIG.opisSklepu)}</textarea></div>
       <div class="f-group"><label>Dolny tekst stopki</label><input name="stopkaCopy" value="${esc(ustawienia.stopkaCopy||`© ${new Date().getFullYear()} ${KONFIG.nazwaSklepu}. Wszystkie prawa zastrzeżone.`)}"></div>
       <h3 class="f-sekcja">🔎 SEO i tytuł przeglądarki</h3>
-      <div class="f-group"><label>Tytuł strony w Google i karcie przeglądarki</label><input name="seoTytul" value="${esc(ustawienia.seo?.tytul||KONFIG.nazwaSklepu+" — Sklep internetowy")}"></div>
-      <div class="f-group"><label>Opis strony dla wyszukiwarek</label><textarea name="seoOpis" rows="2">${esc(ustawienia.seo?.opis||"Sklep wielobranżowy Artway-TM. Elektronika, dom i ogród, narzędzia, odzież i sport.")}</textarea></div>
+      <div class="f-group"><label>Tytuł strony w Google i karcie przeglądarki</label><input name="seoTytul" value="${esc(ustawienia.seo?.tytul||`Gry, zabawki i artykuły imprezowe | ${KONFIG.nazwaSklepu}`)}"></div>
+      <div class="f-group"><label>Opis strony dla wyszukiwarek</label><textarea name="seoOpis" rows="2">${esc(ustawienia.seo?.opis||"Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów. Wygodne zakupy i dostawa InPost.")}</textarea></div>
       <div class="diag-actions"><button class="btn" type="submit">💾 Zapisz cały układ</button><button class="btn ghost" type="button" onclick="eksportujIndexHTML()">⬇️ Pobierz publiczny index.html</button><a class="btn ghost" href="#/">👁️ Podgląd sklepu</a></div>
     </form>
   </div>`);
@@ -7452,14 +7471,10 @@ function kontrolePublikacji(){
   k.push({ok:ustawieniaWyeksportowane,tekst:ustawieniaWyeksportowane
     ?"Układ i ustawienia są przygotowane do publikacji"
     :`Masz zmiany panelu (${kluczeUstawien.length} sekcji) — opublikuj index.html bezpośrednio z panelu`,link:"#/admin/aktualizacja",akcja:"Aktualizuj stronę"});
-  const zmianyLokalne = produktyDodane.length + produktyUkryte.length + Object.keys(produktyEdytowane).length
-    + Object.keys(ustawienia.mapaProduktow||{}).length + Object.keys(ustawienia.kategorie||{}).length
-    + (ustawienia.menuKategorii||[]).length + (ustawienia.menuPokazNieprzypisane===false?1:0);
-  const aktualnyHashProduktow=prostyHash(JSON.stringify(zakresEksportuProduktow("widoczne")));
-  const produktyPrzygotowane=!zmianyLokalne||localStorage.getItem("artway_produkty_export_hash")===aktualnyHashProduktow;
+  const publikacjaKatalogu=stanPublikacjiKatalogu(),produktyPrzygotowane=publikacjaKatalogu.gotowy;
   k.push({ok:produktyPrzygotowane, tekst: produktyPrzygotowane
-    ? "Produkty są przygotowane do publikacji"
-    : "Masz lokalne zmiany produktów/katalogów ("+zmianyLokalne+") — opublikuj products.json bezpośrednio z panelu",
+    ? `products.json zabezpiecza wszystkie ${publikacjaKatalogu.razem} kart produktów`
+    : `products.json wymaga odświeżenia • brakujące ${publikacjaKatalogu.brakujace.length} • zmienione ${publikacjaKatalogu.nieaktualne.length}`,
     link:"#/admin/aktualizacja", akcja:"Aktualizuj stronę"});
   return k;
 }
@@ -7556,7 +7571,7 @@ function testyDiagnostyczne(){
   const bezZdjec=produkty.filter(p=>!p.zdjecie).length, bledneProdukty=produkty.filter(p=>!p.nazwa||!p.kategoria||!(p.cena>0));
   const idsKosza=[...koszDodanych.map(p=>p.id),...bazoweProduktyWKoszu().map(p=>p.id)];
   const brakMetaKosza=idsKosza.filter(id=>!koszMeta[id]), wygasleKosza=idsKosza.filter(id=>Date.now()-Number(koszMeta[id]?.usunietoAt||Date.now())>=OKRES_KOSZA_MS);
-  const pamiec=rozmiarDanychLokalnych(), zmiany=produktyDodane.length+produktyUkryte.length+produktyDefinitywne.length+Object.keys(produktyEdytowane).length+Object.keys(mapa).length;
+  const pamiec=rozmiarDanychLokalnych(),publikacjaKatalogu=stanPublikacjiKatalogu();
   dodaj("Produkty","Produkty są wczytane",produkty.length?"ok":"bad",`${produkty.length} widocznych produktów`);
   dodaj("Produkty","Unikalne identyfikatory produktów",unikalne.size===ids.length?"ok":"bad",unikalne.size===ids.length?"Brak duplikatów ID":`${ids.length-unikalne.size} zduplikowanych ID`);
   dodaj("Produkty","Poprawne dane i ceny",bledneProdukty.length?"bad":"ok",bledneProdukty.length?`${bledneProdukty.length} produktów wymaga poprawy`:"Nazwy, katalogi i ceny są poprawne");
@@ -7595,10 +7610,9 @@ function testyDiagnostyczne(){
   dodaj("Bezpieczeństwo","Hasło administratora",domyslneHasloAdmina?"bad":"ok",domyslneHasloAdmina?"Nadal ustawione jest hasło admin":"Hasło zostało zmienione");
   dodaj("Bezpieczeństwo","Role kont administracyjnych",administratorzyDiag.length?"ok":"bad",`${administratorzyDiag.length} kont z rolą administratora • ${kontaDiag.length-administratorzyDiag.length} kont klientów`);
   dodaj("Publikacja","Źródło produktów",zrodloProduktow==="json"?"ok":"warn",zrodloProduktow==="json"?"products.json dostępny":"Używana jest lista zapasowa");
-  const hashProduktowDiag=prostyHash(JSON.stringify(zakresEksportuProduktow("widoczne"))),produktyGotoweDiag=!zmiany||localStorage.getItem("artway_produkty_export_hash")===hashProduktowDiag;
-  dodaj("Publikacja","Zmiany lokalne",produktyGotoweDiag?"ok":"warn",produktyGotoweDiag?"Produkty są przygotowane do publikacji":`${zmiany} zmian wymaga publikacji products.json`);
+  dodaj("Publikacja","Kopia katalogu products.json",publikacjaKatalogu.gotowy?"ok":"warn",publikacjaKatalogu.gotowy?`Zabezpiecza wszystkie ${publikacjaKatalogu.razem} kart produktów`:`Brakujące ${publikacjaKatalogu.brakujace.length} • zmienione ${publikacjaKatalogu.nieaktualne.length} • odśwież products.json`);
   dodaj("Publikacja","Aktualizacja strony bez FTP",!stanAktualizacji.sprawdzono?"warn":stanAktualizacji.online&&stanAktualizacji.enabled?"ok":stanAktualizacji.online?"warn":"bad",!stanAktualizacji.sprawdzono?"Sprawdź status w panelu Aktualizacja strony":stanAktualizacji.online&&stanAktualizacji.enabled?"Publikator backendowy jest dostępny":stanAktualizacji.online?"Backend działa, ale publisher.enabled nie jest włączony":"Backend aktualizacji jest niedostępny");
-  dodaj("Pamięć","Wykorzystanie pamięci",pamiec>4_000_000?"bad":pamiec>2_500_000?"warn":"ok",`${(pamiec/1024).toFixed(1)} KB zapisanych danych`);
+  dodaj("Pamięć","Wykorzystanie pamięci",pamiec>4_000_000?"bad":pamiec>2_500_000?"warn":"ok",`${(pamiec/1024).toFixed(1)} KB zapisanych danych • ciężkie cache Allegro nie są już dublowane lokalnie`);
   const zleBannery=pobierzBannery().filter(b=>!b.tytul||bezpiecznyLink(b.link)==="#/"&&b.link!=="#/");
   dodaj("Wygląd","Konfiguracja banerów",zleBannery.length?"warn":"ok",zleBannery.length?`${zleBannery.length} banerów wymaga sprawdzenia`:`${pobierzBannery().length} poprawnych banerów`);
   return [...t,...ostatniAutotest];

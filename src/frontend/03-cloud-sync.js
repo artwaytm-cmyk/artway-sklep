@@ -17,6 +17,9 @@ let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z 
 let chmuraTimerZapisu = null;
 let chmuraTimerAutoSync = null;
 let chmuraAutoSyncBusy = false;
+function maUprawnieniaZapisuChmury(){
+  return !!(chmuraToken||(sesja?.token&&typeof jestAdmin==="function"&&jestAdmin()));
+}
 
 function chmuraNaglowki(json){
   const h={"Accept":"application/json"};
@@ -162,7 +165,7 @@ async function chmuraWczytajStan(){
     // Klient (bez tokenu): serwer jest źródłem prawdy → zawsze nakładaj.
     // Admin (z tokenem): nakładaj TYLKO gdy serwer ma nowszą wersję niż ostatnio zsynchronizowana —
     // dzięki temu wczytanie strony NIE kasuje świeżych, jeszcze niewysłanych zmian admina.
-    if(d.settings && Object.keys(d.settings).length && (!chmuraToken || serwerNowszy)){
+    if(d.settings && Object.keys(d.settings).length && (!maUprawnieniaZapisuChmury() || serwerNowszy)){
       nalozWspolneUstawienia(d.settings);
       zapiszLS("artway_chmura_rev", d.rev||0);
     }
@@ -173,12 +176,12 @@ async function chmuraWczytajStan(){
   }catch(e){ chmuraStan = {...chmuraStan, dostepna:false, sprawdzono:true, error:e.message}; return false; }
 }
 function zaplanujZapisUstawien(){
-  if(!chmuraToken) return;
+  if(!maUprawnieniaZapisuChmury()) return;
   clearTimeout(chmuraTimerZapisu);
   chmuraTimerZapisu = setTimeout(chmuraZapiszUstawienia, 1200);
 }
 async function chmuraZapiszUstawienia(){
-  if(!chmuraToken) return false;
+  if(!maUprawnieniaZapisuChmury()) return false;
   try{
     const d = await chmura("settings", {method:"POST", body:{settings: zbierzWspolneUstawienia()}});
     chmuraStan = {...chmuraStan, dostepna:true, admin:true, rev:d.rev||chmuraStan.rev, updated_at:d.updated_at||null, error:"", ostatniZapis:Date.now()};
@@ -193,7 +196,7 @@ async function chmuraZapiszUstawienia(){
 }
 // Ręczne WYSŁANIE całego sklepu z tego urządzenia na serwer (dla wszystkich).
 async function chmuraWyslijWszystko(){
-  if(!chmuraToken){ chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   toast("Wysyłanie na serwer…");
   const okU = await chmuraZapiszUstawienia();
   await synchronizujBazeCentralna(true).catch(()=>{});
@@ -232,7 +235,7 @@ function chmuraUstawToken(){
 }
 function chmuraWyczyscToken(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; toast("Odłączono hasło bazy"); renderuj(); }
 function chmuraStatusHTML(){
-  const ok = chmuraStan.dostepna, adm = chmuraStan.admin && chmuraToken;
+  const ok = chmuraStan.dostepna, adm = chmuraStan.admin && maUprawnieniaZapisuChmury();
   const kolor = adm?"#166534":(ok?"#92400e":"#b91c1c"), tlo = adm?"#f0fdf4":(ok?"#fffbeb":"#fef2f2"), br = adm?"#86efac":(ok?"#fcd34d":"#fecaca");
   const opis = adm ? `<b>Połączono ✅</b> — Twoje zmiany zapisują się na serwerze automatycznie i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/1000)} s.`
     : ok ? `<b>⚠️ NIE połączono z bazą</b> — Twoje zmiany zapisują się TYLKO na tym urządzeniu i NIE są widoczne gdzie indziej. Zaloguj się jako <b>admin</b> hasłem = token bazy, albo kliknij „Wpisz hasło bazy".`
@@ -248,11 +251,41 @@ function chmuraStatusHTML(){
   </div>`;
 }
 
+const KLUCZE_CIEZKICH_CACHE = [
+  "artway_allegro_oferty_cache",
+  "artway_allegro_zamowienia_cache",
+  "artway_allegro_komunikacja_cache",
+  "artway_produkty_katalog"
+];
+function rozmiarLokalnejPamieci(){
+  let n=0;
+  try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i)||"",v=localStorage.getItem(k)||"";n+=(k.length+v.length)*2;}}catch(e){}
+  return n;
+}
+function zwolnijPamiecPodreczna({wymus=false}={}){
+  const przed=rozmiarLokalnejPamieci();
+  if(!wymus&&przed<3_500_000)return {przed,po:przed,usunieto:[]};
+  const usunieto=[];
+  for(const klucz of KLUCZE_CIEZKICH_CACHE){
+    try{if(localStorage.getItem(klucz)!==null){localStorage.removeItem(klucz);usunieto.push(klucz);}}catch(e){}
+  }
+  try{
+    const logi=JSON.parse(localStorage.getItem("artway_logi")||"[]");
+    if(Array.isArray(logi)&&logi.length>80){localStorage.setItem("artway_logi",JSON.stringify(logi.slice(0,80)));usunieto.push("artway_logi:archiwum");}
+  }catch(e){}
+  return {przed,po:rozmiarLokalnejPamieci(),usunieto};
+}
 function wczytajLS(klucz, domyslne){ try{ return JSON.parse(localStorage.getItem(klucz)) ?? domyslne; }catch(e){ return domyslne; } }
 function zapiszLS(klucz, dane){
   if(klucz==="artway_zamowienia" && Array.isArray(dane)) dane = filtrujAktywneZamowienia(dane);
-  try{ localStorage.setItem(klucz, JSON.stringify(dane)); }catch(e){ loguj("ostrzezenie","Nie udało się zapisać: "+klucz); }
-  if(!chmuraWczytywanie && chmuraToken && KLUCZE_WSPOLNE.includes(klucz)){ zaplanujZapisUstawien(); } }
+  const serial=JSON.stringify(dane);
+  try{ localStorage.setItem(klucz, serial); }
+  catch(e){
+    const wynik=zwolnijPamiecPodreczna({wymus:true});
+    try{localStorage.setItem(klucz,serial);}
+    catch(e2){loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
+  }
+  if(!chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ zaplanujZapisUstawien(); } }
 const kwotaNum = v => { const n=Number(String(v ?? 0).replace(",",".").replace(/[^0-9.-]/g,"")); return Number.isFinite(n) ? +n.toFixed(2) : 0; };
 const zl = n => kwotaNum(n).toFixed(2).replace(".", ",") + " zł";
 const $ = id => document.getElementById(id);
@@ -273,6 +306,7 @@ function zdaniaOpisu(v){
 }
 function agentAICzyscOpis(v,max=20000){
   let s=String(v??"")
+    .replace(/^Domyślny opis(?: krótki| pełny)?\s*/i,"")
     .replace(/\r/g,"\n")
     .replace(/\t+/g," ")
     .replace(/[ \u00a0]{2,}/g," ")
@@ -293,7 +327,7 @@ function agentAITnijDoZdania(s,max=280){
   return cut.slice(0,max).replace(/\s+\S*$/,"").trim()+"…";
 }
 function agentAIUtworzOpisKrotki(p={}){
-  const raw=String(p.opisKrotki||p.krotkiOpis||p.shortDescription||"").trim();
+  const raw=String(p.opisKrotki||p.krotkiOpis||p.shortDescription||"").replace(/^Domyślny opis krótki\s*/i,"").trim();
   if(raw) return agentAITnijDoZdania(agentAICzyscOpis(raw,500),300);
   const opis=agentAICzyscOpis(p.opis||"",20000);
   const zd=zdaniaOpisu(opis).filter(x=>!/^(zawartość opakowania|skład zestawu|wymiary|ostrzeżenie)/i.test(x));

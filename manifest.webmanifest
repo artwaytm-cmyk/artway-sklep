@@ -1,0 +1,19 @@
+{
+  "name": "Artway-TM — sklep z grami i artykułami imprezowymi",
+  "short_name": "Artway-TM",
+  "description": "Gry, zabawki kreatywne, balony i artykuły imprezowe z dostawą InPost.",
+  "lang": "pl-PL",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/icons/artway-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

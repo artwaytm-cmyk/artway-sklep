@@ -13,7 +13,7 @@ function widokAdminKategorie(){
   const bezGrup = nazwy.filter(k=>!przypisane.has(k));
   return asortymentSzkielet("kategorie", `
   <div class="panel">
-    <h1>➕ Utwórz nowy katalog</h1>
+    <div class="order-section-head"><div><h1>➕ Utwórz nowy katalog</h1><p class="order-detail-lead">Katalogi możesz dodawać ręcznie albo przygotować bezpieczny szablon pod przyszły asortyment imprezowy.</p></div><button class="btn ghost" type="button" onclick="przygotujKatalogImprezowyGoDan()">🎈 Przygotuj GoDan i imprezy</button></div>
     <form onsubmit="dodajKatalog(event)" style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:end;margin:.6rem 0">
       <div class="f-group" style="margin:0;flex:1;min-width:200px"><label>Nazwa katalogu</label><input required name="nazwa" placeholder="np. Zabawki, AGD, Ogród…" maxlength="40"></div>
       <button class="btn" type="submit">➕ Utwórz</button>
@@ -88,6 +88,22 @@ function dodajKatalog(e){
   ustawienia.wlasneKategorie = [...(ustawienia.wlasneKategorie||[]), k];
   loguj("info","Utworzono katalog: "+k);
   zapiszCzescUstawien({wlasneKategorie: ustawienia.wlasneKategorie});
+}
+function przygotujKatalogImprezowyGoDan(){
+  const plan=[
+    {grupa:"Balony",ikona:"🎈",kategorie:["Balony foliowe","Balony lateksowe","Bukiety i zestawy balonów"]},
+    {grupa:"Przyjęcia i dekoracje",ikona:"🎉",kategorie:["Dekoracje imprezowe","Naczynia i akcesoria imprezowe","Świeczki i dekoracje tortu","Stroje i gadżety imprezowe"]}
+  ];
+  const dotychczas=grupyMenuKategorii(),wlasne=[...(ustawienia.wlasneKategorie||[])];let noweKategorie=0,noweGrupy=0;
+  for(const sekcja of plan){
+    for(const kat of sekcja.kategorie)if(!wlasne.some(x=>normalizujSzukanyTekst(x)===normalizujSzukanyTekst(kat))&&!wszystkieKategorie().some(x=>normalizujSzukanyTekst(x)===normalizujSzukanyTekst(kat))){wlasne.push(kat);noweKategorie++;}
+    let grupa=dotychczas.find(x=>normalizujSzukanyTekst(x.nazwa)===normalizujSzukanyTekst(sekcja.grupa));
+    if(!grupa){grupa={id:`grp_godan_${prostyHash(sekcja.grupa)}`,nazwa:sekcja.grupa,ikona:sekcja.ikona,aktywna:true,kategorie:[]};dotychczas.push(grupa);noweGrupy++;}
+    grupa.kategorie=[...new Set([...(grupa.kategorie||[]),...sekcja.kategorie])];
+  }
+  zapiszGrupyMenuKategorii(dotychczas,{wlasneKategorie:wlasne,menuPokazNieprzypisane:true});
+  loguj("info",`Przygotowano katalog imprezowy GoDan: ${noweGrupy} grup i ${noweKategorie} katalogów — bez zmiany produktów`);
+  toast(noweGrupy||noweKategorie?`🎈 Dodano ${noweKategorie} katalogów; produkty pozostały bez zmian`:"Katalog GoDan i imprezy jest już przygotowany");
 }
 function usunKatalog(k){
   ustawienia.wlasneKategorie = (ustawienia.wlasneKategorie||[]).filter(x=>x!==k);

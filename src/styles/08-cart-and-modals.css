@@ -28,7 +28,8 @@ body.has-dialog{overflow:hidden}
 .ci-info b{font-size:.88rem;display:block}
 .ci-info small{color:var(--muted2)}
 .qty{display:flex;align-items:center;gap:.4rem}
-.qty button{width:26px;height:26px;border-radius:8px;border:1.5px solid var(--line);background:var(--panel);font-weight:700}
+.qty button{width:36px;height:36px;border-radius:8px;border:1.5px solid var(--line);background:var(--panel);font-weight:700}
+@media(max-width:560px){.qty button{width:44px;height:44px}}
 .qty button:hover{border-color:var(--brand);color:var(--brand)}
 .ci-remove{border:none;background:none;color:var(--danger);font-size:1.1rem}
 .cart-empty{text-align:center;color:var(--muted2);padding:2.5rem 0}

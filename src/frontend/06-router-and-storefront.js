@@ -327,10 +327,10 @@ function widokSklep(){
   <div class="pagination" id="paginacjaGora"></div>
   <div class="grid" id="grid"></div>
   <div class="pagination" id="paginacjaDol"></div>`;
-  SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {}; return `
+  SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(); return `
   <section class="offer-band">
     <div class="offer-band-in">
-      <div><h2>${esc(o.tytul||"Dobry moment na zakupy")}</h2><p>${o.opis?esc(o.opis):`Użyj kodu <b>START10</b> w koszyku i odbierz 10% rabatu na zamówienie.`}</p></div>
+      <div><h2>${esc(o.tytul||"Dobry moment na zakupy")}</h2><p>${o.opis?esc(o.opis):(promo?`Użyj kodu <b>${esc(promo.kod)}</b> w koszyku i odbierz ${esc(promo.procent)}% rabatu na zamówienie.`:"Sprawdź aktualne okazje i produkty w dobrych cenach.")}</p></div>
       <a href="${esc(bezpiecznyLink(o.link||"#/promocje"))}">${esc(o.tekstLinku||"Zobacz okazje")} →</a>
     </div>
   </section>`; };
@@ -453,7 +453,7 @@ function wyczyscFiltryProduktow(){
   cenaOd="";cenaDo="";filtrDostepnosci="wszystkie";filtrOferty="wszystkie";filtrOceny="0";fraza="";stronaProduktow=1;
   if($("searchInput"))$("searchInput").value="";renderuj();
 }
-function kartaProduktu(p){
+function kartaProduktu(p,index=0){
   const ulub = ulubione.includes(p.id);
   const oceny = sredniaOcen(p.id);
   const brakCeny = !produktMaCeneSprzedazy(p);
@@ -463,7 +463,7 @@ function kartaProduktu(p){
     <div class="thumb" style="background:${p.kolor||'#eef2f7'}">
       ${niedostepny?`<span class="badge" style="background:#64748b">Chwilowo niedostępne</span>`:(brakCeny?`<span class="badge" style="background:#f97316">Do wyceny</span>`:(p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:""))}
       ${jestAdmin()?"":`<button class="fav-btn" onclick="event.stopPropagation();przelaczUlubione(${p.id})" aria-label="Ulubione">${ulub?"❤️":"🤍"}</button>`}
-      ${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" style="width:100%;height:100%;object-fit:cover;${niedostepny?'filter:grayscale(1);opacity:.6':''}" onerror="this.remove();loguj('ostrzezenie','Nie wczytano zdjęcia produktu: ${esc(p.nazwa)}')">`:(p.ikona||"📦")}
+      ${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" loading="${index<4?'eager':'lazy'}" decoding="async" ${index<4?'fetchpriority="high"':''} style="width:100%;height:100%;object-fit:cover;${niedostepny?'filter:grayscale(1);opacity:.6':''}" onerror="this.remove();loguj('ostrzezenie','Nie wczytano zdjęcia produktu: ${esc(p.nazwa)}')">`:(p.ikona||"📦")}
     </div>
     <div class="card-body">
       <span class="cat-label">${esc(p.kategoria)}${oceny?` <span style="color:var(--accent);text-transform:none;letter-spacing:0">★ ${oceny.srednia.toFixed(1)} (${oceny.n})</span>`:""}</span>

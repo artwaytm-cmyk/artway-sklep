@@ -32,6 +32,11 @@
   force = true
 
 [[redirects]]
+  from = "/favicon.ico"
+  to = "/icons/artway-icon.svg"
+  status = 301
+
+[[redirects]]
   from = "/produkt/*"
   to = "/index.html"
   status = 200

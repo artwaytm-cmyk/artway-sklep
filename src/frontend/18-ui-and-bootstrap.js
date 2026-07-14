@@ -35,6 +35,8 @@ $("searchInput").oninput = e=>{
 
 /* ═══════════ START ═══════════ */
 (async ()=>{
+  const porzadkowaniePamieci=zwolnijPamiecPodreczna();
+  if(porzadkowaniePamieci.usunieto.length)loguj("info",`Odciążono pamięć podręczną: ${(porzadkowaniePamieci.przed/1024).toFixed(0)} KB → ${(porzadkowaniePamieci.po/1024).toFixed(0)} KB`);
   const ladowanieProduktow=pobierzBazoweProdukty();
   await Promise.all([chmuraWczytajStan(),ladowanieProduktow]); // ustawienia i katalog pobieramy równolegle
   zastosujUstawienia();
@@ -44,5 +46,7 @@ $("searchInput").oninput = e=>{
   odswiezUlubioneLicznik();
   odswiezZnacznikDiag();
   finalizujWczytanieProduktow();
+  const porzadkowanieReferencji=porzadkujBezpieczneReferencje();
+  if(porzadkowanieReferencji.koszyk||porzadkowanieReferencji.mapowania){odswiezKoszyk();zbudujProdukty();}
   uruchomAutoSynchronizacjeChmury();
 })();

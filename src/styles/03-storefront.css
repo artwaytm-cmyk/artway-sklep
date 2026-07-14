@@ -68,7 +68,7 @@
 .card-quantity input{min-width:0;width:100%;padding:.35rem .1rem;border:0;border-left:1px solid var(--line);border-right:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:.82rem;font-weight:850;text-align:center;appearance:textfield}
 .card-quantity input::-webkit-inner-spin-button,.card-quantity input::-webkit-outer-spin-button{margin:0;appearance:none}
 .empty{grid-column:1/-1;text-align:center;padding:3rem;color:var(--muted2)}
-@media(max-width:560px){.card-purchase{grid-template-columns:96px minmax(0,1fr);gap:.35rem}.card-quantity{grid-template-columns:28px minmax(34px,1fr) 28px}.card-quantity input{font-size:.76rem}}
+@media(max-width:560px){.card-purchase{grid-template-columns:116px minmax(0,1fr);gap:.4rem}.card-quantity{grid-template-columns:36px minmax(40px,1fr) 36px;min-height:44px}.card-quantity button{min-width:36px;min-height:44px}.card-quantity input{font-size:.8rem}}
 
 /* ── Zalety ── */
 .perks{max-width:1200px;margin:0 auto 2.5rem;padding:0 1rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem}

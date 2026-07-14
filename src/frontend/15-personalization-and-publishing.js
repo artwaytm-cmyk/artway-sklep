@@ -308,8 +308,8 @@ function widokAdminWyglad(){
       <div class="f-group"><label>Opis sklepu w stopce</label><textarea name="opisSklepu" rows="2">${esc(KONFIG.opisSklepu)}</textarea></div>
       <div class="f-group"><label>Dolny tekst stopki</label><input name="stopkaCopy" value="${esc(ustawienia.stopkaCopy||`© ${new Date().getFullYear()} ${KONFIG.nazwaSklepu}. Wszystkie prawa zastrzeżone.`)}"></div>
       <h3 class="f-sekcja">🔎 SEO i tytuł przeglądarki</h3>
-      <div class="f-group"><label>Tytuł strony w Google i karcie przeglądarki</label><input name="seoTytul" value="${esc(ustawienia.seo?.tytul||KONFIG.nazwaSklepu+" — Sklep internetowy")}"></div>
-      <div class="f-group"><label>Opis strony dla wyszukiwarek</label><textarea name="seoOpis" rows="2">${esc(ustawienia.seo?.opis||"Sklep wielobranżowy Artway-TM. Elektronika, dom i ogród, narzędzia, odzież i sport.")}</textarea></div>
+      <div class="f-group"><label>Tytuł strony w Google i karcie przeglądarki</label><input name="seoTytul" value="${esc(ustawienia.seo?.tytul||`Gry, zabawki i artykuły imprezowe | ${KONFIG.nazwaSklepu}`)}"></div>
+      <div class="f-group"><label>Opis strony dla wyszukiwarek</label><textarea name="seoOpis" rows="2">${esc(ustawienia.seo?.opis||"Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów. Wygodne zakupy i dostawa InPost.")}</textarea></div>
       <div class="diag-actions"><button class="btn" type="submit">💾 Zapisz cały układ</button><button class="btn ghost" type="button" onclick="eksportujIndexHTML()">⬇️ Pobierz publiczny index.html</button><a class="btn ghost" href="#/">👁️ Podgląd sklepu</a></div>
     </form>
   </div>`);
@@ -838,14 +838,10 @@ function kontrolePublikacji(){
   k.push({ok:ustawieniaWyeksportowane,tekst:ustawieniaWyeksportowane
     ?"Układ i ustawienia są przygotowane do publikacji"
     :`Masz zmiany panelu (${kluczeUstawien.length} sekcji) — opublikuj index.html bezpośrednio z panelu`,link:"#/admin/aktualizacja",akcja:"Aktualizuj stronę"});
-  const zmianyLokalne = produktyDodane.length + produktyUkryte.length + Object.keys(produktyEdytowane).length
-    + Object.keys(ustawienia.mapaProduktow||{}).length + Object.keys(ustawienia.kategorie||{}).length
-    + (ustawienia.menuKategorii||[]).length + (ustawienia.menuPokazNieprzypisane===false?1:0);
-  const aktualnyHashProduktow=prostyHash(JSON.stringify(zakresEksportuProduktow("widoczne")));
-  const produktyPrzygotowane=!zmianyLokalne||localStorage.getItem("artway_produkty_export_hash")===aktualnyHashProduktow;
+  const publikacjaKatalogu=stanPublikacjiKatalogu(),produktyPrzygotowane=publikacjaKatalogu.gotowy;
   k.push({ok:produktyPrzygotowane, tekst: produktyPrzygotowane
-    ? "Produkty są przygotowane do publikacji"
-    : "Masz lokalne zmiany produktów/katalogów ("+zmianyLokalne+") — opublikuj products.json bezpośrednio z panelu",
+    ? `products.json zabezpiecza wszystkie ${publikacjaKatalogu.razem} kart produktów`
+    : `products.json wymaga odświeżenia • brakujące ${publikacjaKatalogu.brakujace.length} • zmienione ${publikacjaKatalogu.nieaktualne.length}`,
     link:"#/admin/aktualizacja", akcja:"Aktualizuj stronę"});
   return k;
 }
