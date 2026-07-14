@@ -509,6 +509,7 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "action === 'infakt-costs'",
   "action === 'infakt-purchase-sync'",
   "action === 'infakt-purchase-match'",
+  "action === 'infakt-purchase-unmatch'",
   "action === 'infakt-supplier-access'",
   "action === 'infakt-create-invoice'",
   "action === 'infakt-sync'",

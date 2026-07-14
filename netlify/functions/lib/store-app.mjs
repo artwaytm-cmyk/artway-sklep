@@ -48,11 +48,17 @@ import {
 import {
   ustawieniaPubliczneBezDanychPrywatnych,
   infaktDostawcyDozwoleni,
+  infaktCenaZakupuFields,
+  infaktDopasujPozycje,
+  infaktIndeksProduktow,
   infaktKsefPozycje,
   infaktKsefNumerZTekstu,
   infaktNazwaDostawcy,
   infaktNormalizujDokumentKosztowy,
   infaktParametryListyKsef,
+  infaktMigawkaCenyZakupu,
+  infaktPrzygotujCofniecieDopasowania,
+  infaktSugestieNazwy,
   infaktXmlZOdpowiedzi,
   infaktZnajdzDostawce,
 } from './infakt-purchase.mjs';
@@ -638,51 +644,6 @@ async function infaktPobierzKosztyDozwolone(suppliers = [], { wanted = 200, maxS
   }
   return { items, scanned };
 }
-function infaktKodKlucz(value = '') { return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, ''); }
-function infaktEanKlucz(value = '') { const digits = String(value || '').replace(/\D/g, ''); return digits.length >= 8 && digits.length <= 14 ? digits : ''; }
-function infaktTokenyNazwy(value = '') {
-  const stop = new Set(['gra', 'gry', 'zestaw', 'szt', 'sztuka', 'produkt', 'dla', 'oraz', 'mini', 'duzy', 'maly', 'the', 'and']);
-  return [...new Set(infaktNazwaDostawcy(value).split(' ').filter((x) => x.length >= 3 && !stop.has(x)))];
-}
-function infaktIndeksProduktow(products = new Map()) {
-  const ean = new Map(), code = new Map(), name = new Map(), add = (map, key, product) => { if (!key) return; const list = map.get(key) || []; if (!list.some((p) => String(p.id) === String(product.id))) list.push(product); map.set(key, list); };
-  for (const product of products.values()) {
-    [product.gtin, product.ean, product.kodEan].forEach((value) => add(ean, infaktEanKlucz(value), product));
-    [product.kodProducenta, product.mpn, product.sku, product.externalId, product.kod].forEach((value) => add(code, infaktKodKlucz(value), product));
-    add(name, infaktNazwaDostawcy(product.nazwa), product);
-  }
-  return { ean, code, name };
-}
-function infaktSugestieNazwy(line = {}, products = new Map(), supplier = null) {
-  const wanted = infaktTokenyNazwy(line.name), supplierKey = infaktNazwaDostawcy(supplier?.name || '');
-  if (!wanted.length) return [];
-  return [...products.values()].map((product) => {
-    const current = infaktTokenyNazwy(product.nazwa), common = wanted.filter((x) => current.includes(x)).length, producer = infaktNazwaDostawcy(product.producent || product.marka || ''), supplierBoost = supplierKey && (producer.includes(supplierKey) || supplierKey.includes(producer)) ? 0.12 : 0;
-    return { product, score: current.length ? common / Math.max(wanted.length, current.length) + supplierBoost : 0 };
-  }).filter((x) => x.score >= 0.45).sort((a, b) => b.score - a.score).slice(0, 3).map(({ product, score }) => ({ id: String(product.id), name: tekst(product.nazwa, 200), sku: tekst(product.sku || product.externalId || product.kodProducenta, 100), ean: tekst(product.gtin || product.ean, 80), score: +Math.min(0.99, score).toFixed(2) }));
-}
-function infaktDopasujPozycje(line = {}, products = new Map(), index = {}, supplier = null) {
-  const eanKey = infaktEanKlucz(line.ean), codeKey = infaktKodKlucz(line.code);
-  if (eanKey) { const list = index.ean.get(eanKey) || []; if (list.length === 1) return { product: list[0], method: 'EAN/GTIN', confidence: 100 }; if (list.length > 1) return { conflict: true, reason: 'EAN występuje przy kilku produktach' }; }
-  if (codeKey) {
-    const list = index.code.get(codeKey) || [];
-    if (list.length === 1) return { product: list[0], method: 'kod produktu', confidence: 96 };
-    if (list.length > 1) {
-      const supplierKey = infaktNazwaDostawcy(supplier?.name || ''), sameSupplier = list.filter((p) => { const producer = infaktNazwaDostawcy(p.producent || p.marka || ''); return supplierKey && producer && (producer.includes(supplierKey) || supplierKey.includes(producer)); });
-      if (sameSupplier.length === 1) return { product: sameSupplier[0], method: 'kod + dostawca', confidence: 94 };
-      return { conflict: true, reason: 'Kod występuje przy kilku produktach' };
-    }
-  }
-  const nameKey = infaktNazwaDostawcy(line.name), nameList = index.name.get(nameKey) || [];
-  if (nameKey && nameList.length === 1) return { product: nameList[0], method: 'identyczna nazwa', confidence: 90 };
-  return { product: null, reason: eanKey || codeKey ? 'Brak produktu z takim kodem' : 'Faktura nie zawiera EAN ani kodu produktu' };
-}
-function infaktCenaZakupuFields(product = {}, line = {}, invoice = {}, supplier = {}, method = '') {
-  const now = new Date().toISOString(), price = +Number(line.unitGross || 0).toFixed(2), history = Array.isArray(product.cenaZakupuHistoria) ? product.cenaZakupuHistoria.slice(0, 29) : [];
-  const net = +Number(line.unitNet || 0).toFixed(2), vat = Math.max(0, +(price - net).toFixed(2));
-  const entry = { price, net, vat, quantity: Number(line.quantity || 0), document: tekst(invoice.invoice_number, 120), ksefNumber: tekst(invoice.ksef_number, 180), supplier: tekst(supplier.name || invoice.seller_name, 200), date: tekst(invoice.invoice_date, 20), method, priceBasis: tekst(line.priceBasis || '', 80), updatedAt: now };
-  return { cenaZakupu: price, cenaZakupuNetto: net, cenaZakupuVat: vat, cenaZakupuWaluta: tekst(line.currency || 'PLN', 12), cenaZakupuPrywatna: true, cenaZakupuZrodlo: 'inFakt / KSeF', cenaZakupuDokument: entry.document, cenaZakupuKsef: entry.ksefNumber, cenaZakupuDostawca: entry.supplier, cenaZakupuDataDokumentu: entry.date, cenaZakupuDopasowanie: method, cenaZakupuZaktualizowanoAt: now, cenaZakupuHistoria: [entry, ...history.filter((x) => x?.ksefNumber !== entry.ksefNumber || Number(x?.price) !== price)].slice(0, 30) };
-}
 async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = false } = {}) {
   const suppliers = await infaktDostawcyUstawienia(), previous = await czytaj('infakt_purchase_price_sync', { documents: {}, pendingItems: [], recentMatches: [], updated_at: null }), now = new Date().toISOString();
   const report = { source: 'inFakt dokument kosztowy → KSeF XML', available: true, startedAt: now, updated_at: now, lastListAttemptAt: now, days, scannedDocuments: 0, allowedDocuments: 0, processedDocuments: 0, lineCount: 0, matchedCount: 0, priceUpdatedCount: 0, unchangedCount: 0, pendingCount: 0, errors: [], documents: { ...(previous.documents || {}) }, costDocuments: { ...(previous.costDocuments || {}) }, lineMappings: { ...(previous.lineMappings || {}) }, pendingItems: [], recentMatches: Array.isArray(previous.recentMatches) ? previous.recentMatches.slice(0, 200) : [] };
@@ -750,15 +711,17 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
       for (const line of lines) {
         const lineSignature = crypto.createHash('sha256').update(`${supplier?.id || invoice.seller_name}|${line.ean}|${line.code}|${infaktNazwaDostawcy(line.name)}`).digest('hex').slice(0, 24);
         const itemKey = crypto.createHash('sha256').update(`${documentKey}|${line.row}|${lineSignature}`).digest('hex').slice(0, 24);
+        const sourceItem = { itemKey, lineSignature, invoiceNumber: tekst(invoice.invoice_number, 120), ksefNumber: documentKey, invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || tekst(invoice.seller_name, 200), row: line.row, name: line.name, ean: line.ean, code: line.code, quantity: line.quantity, unitNet: line.unitNet, unitGross: line.unitGross, taxRate: line.taxRate, priceBasis: line.priceBasis, currency: line.currency };
         const rememberedProduct = products.get(String(previous?.lineMappings?.[lineSignature] || ''));
         const match = rememberedProduct ? { product: rememberedProduct, method: 'zapamiętane dopasowanie dostawcy', confidence: 100 } : infaktDopasujPozycje(line, products, index, supplier), validPrice = line.currency === 'PLN' && line.quantity > 0 && line.unitGross > 0;
         if (match.product && validPrice) {
           const product = products.get(String(match.product.id)) || match.product, oldDate = String(product.cenaZakupuDataDokumentu || ''), shouldUpdate = force || !oldDate || String(invoice.invoice_date || '') >= oldDate;
+          const beforeFields = shouldUpdate ? infaktMigawkaCenyZakupu(product) : null;
           if (shouldUpdate) { const fields = infaktCenaZakupuFields(product, line, invoice, supplier, match.method); if (Number(product.cenaZakupu || 0) !== Number(fields.cenaZakupu)) report.priceUpdatedCount++; else report.unchangedCount++; updater.apply(product.id, fields); products.set(String(product.id), { ...product, ...fields }); }
           else report.unchangedCount++;
-          report.matchedCount++; report.recentMatches.unshift({ itemKey, productId: String(product.id), productName: tekst(product.nazwa, 200), price: +line.unitGross.toFixed(2), quantity: line.quantity, method: match.method, confidence: match.confidence, invoiceNumber: tekst(invoice.invoice_number, 120), invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || invoice.seller_name, updatedAt: now });
+          report.matchedCount++; report.recentMatches = report.recentMatches.filter((entry) => entry.itemKey !== itemKey || entry.status === 'reverted'); report.recentMatches.unshift({ matchId: crypto.createHash('sha256').update(`${itemKey}|${product.id}|${now}`).digest('hex').slice(0, 24), itemKey, lineSignature, productId: String(product.id), productName: tekst(product.nazwa, 200), price: +line.unitGross.toFixed(2), quantity: line.quantity, method: match.method, confidence: match.confidence, invoiceNumber: tekst(invoice.invoice_number, 120), invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || invoice.seller_name, updatedAt: now, status: 'active', priceApplied: shouldUpdate, beforeFields, sourceItem });
         } else {
-          report.pendingItems.push({ itemKey, lineSignature, invoiceNumber: tekst(invoice.invoice_number, 120), ksefNumber: documentKey, invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || tekst(invoice.seller_name, 200), row: line.row, name: line.name, ean: line.ean, code: line.code, quantity: line.quantity, unitNet: line.unitNet, unitGross: line.unitGross, taxRate: line.taxRate, priceBasis: line.priceBasis, currency: line.currency, reason: !validPrice ? 'Brak poprawnej ceny brutto, ilości lub waluta inna niż PLN' : (match.reason || 'Brak jednoznacznego dopasowania'), suggestions: infaktSugestieNazwy(line, products, supplier) });
+          report.pendingItems.push({ ...sourceItem, reason: !validPrice ? 'Brak poprawnej ceny brutto, ilości lub waluta inna niż PLN' : (match.reason || 'Brak jednoznacznego dopasowania'), suggestions: infaktSugestieNazwy(line, products, supplier) });
         }
       }
       report.documents[documentKey] = { status: 'processed', invoiceNumber: tekst(invoice.invoice_number, 120), invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || tekst(invoice.seller_name, 200), lines: lines.length, processedAt: now };
@@ -772,9 +735,31 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
 async function infaktPrzypiszCeneZakupu(itemKey = '', productId = '') {
   const [sync, settingsRec] = await Promise.all([czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [] }), czytaj('settings', { data: {}, rev: 0 })]), item = (Array.isArray(sync.pendingItems) ? sync.pendingItems : []).find((x) => x.itemKey === itemKey), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = allegroAgentProduktyCentralne(data), product = products.get(String(productId));
   if (!item) { const error = new Error('Nie znaleziono oczekującej pozycji faktury'); error.status = 404; throw error; } if (!product) { const error = new Error('Nie znaleziono produktu'); error.status = 404; throw error; } if (!(Number(item.unitGross) > 0) || item.currency !== 'PLN') { const error = new Error('Pozycja nie ma poprawnej ceny brutto w PLN'); error.status = 422; throw error; }
-  const updater = allegroAktualizatorProduktowCentralnych(data), invoice = { invoice_number: item.invoiceNumber, ksef_number: item.ksefNumber, invoice_date: item.invoiceDate, seller_name: item.supplier }, fields = infaktCenaZakupuFields(product, item, invoice, { name: item.supplier }, 'ręczne zatwierdzenie'); updater.apply(product.id, fields); updater.commit();
-  const now = new Date().toISOString(); sync.pendingItems = sync.pendingItems.filter((x) => x.itemKey !== itemKey); sync.pendingCount = sync.pendingItems.length; sync.matchedCount = (Number(sync.matchedCount) || 0) + 1; sync.priceUpdatedCount = (Number(sync.priceUpdatedCount) || 0) + 1; sync.lineMappings = { ...(sync.lineMappings || {}), ...(item.lineSignature ? { [item.lineSignature]: String(product.id) } : {}) }; sync.recentMatches = [{ itemKey, productId: String(product.id), productName: tekst(product.nazwa, 200), price: Number(item.unitGross), quantity: Number(item.quantity), method: 'ręczne zatwierdzenie', confidence: 100, invoiceNumber: item.invoiceNumber, invoiceDate: item.invoiceDate, supplier: item.supplier, updatedAt: now }, ...(Array.isArray(sync.recentMatches) ? sync.recentMatches : [])].slice(0, 500); sync.updated_at = now;
+  const updater = allegroAktualizatorProduktowCentralnych(data), beforeFields = infaktMigawkaCenyZakupu(product), invoice = { invoice_number: item.invoiceNumber, ksef_number: item.ksefNumber, invoice_date: item.invoiceDate, seller_name: item.supplier }, fields = infaktCenaZakupuFields(product, item, invoice, { name: item.supplier }, 'ręczne zatwierdzenie'); updater.apply(product.id, fields); updater.commit();
+  const now = new Date().toISOString(), matchId = crypto.createHash('sha256').update(`${itemKey}|${product.id}|${now}`).digest('hex').slice(0, 24); sync.pendingItems = sync.pendingItems.filter((x) => x.itemKey !== itemKey); sync.pendingCount = sync.pendingItems.length; sync.matchedCount = (Number(sync.matchedCount) || 0) + 1; sync.priceUpdatedCount = (Number(sync.priceUpdatedCount) || 0) + 1; sync.lineMappings = { ...(sync.lineMappings || {}), ...(item.lineSignature ? { [item.lineSignature]: String(product.id) } : {}) }; sync.recentMatches = [{ matchId, itemKey, lineSignature: item.lineSignature || '', productId: String(product.id), productName: tekst(product.nazwa, 200), price: Number(item.unitGross), quantity: Number(item.quantity), method: 'ręczne zatwierdzenie', confidence: 100, invoiceNumber: item.invoiceNumber, invoiceDate: item.invoiceDate, supplier: item.supplier, updatedAt: now, status: 'active', priceApplied: true, beforeFields, sourceItem: item }, ...(Array.isArray(sync.recentMatches) ? sync.recentMatches.filter((entry) => entry.itemKey !== itemKey || entry.status === 'reverted') : [])].slice(0, 500); sync.updated_at = now;
   await Promise.all([zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now }), zapisz('infakt_purchase_price_sync', sync)]); return { item, product: { id: String(product.id), name: product.nazwa, cenaZakupu: fields.cenaZakupu }, sync };
+}
+async function infaktCofnijDopasowanieCeny(matchId = '') {
+  const [sync, settingsRec] = await Promise.all([czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [] }), czytaj('settings', { data: {}, rev: 0 })]);
+  const matches = Array.isArray(sync.recentMatches) ? sync.recentMatches : [], index = matches.findIndex((entry) => String(entry.matchId || entry.itemKey) === String(matchId));
+  if (index < 0) { const error = new Error('Nie znaleziono dopasowania w historii'); error.status = 404; throw error; }
+  const match = matches[index];
+  if (match.status === 'reverted') { const error = new Error('To dopasowanie zostało już cofnięte'); error.status = 409; throw error; }
+  if (match.priceApplied === false) { const error = new Error('To dopasowanie nie zmieniło ceny produktu'); error.status = 409; throw error; }
+  const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, product = allegroAgentProduktyCentralne(data).get(String(match.productId));
+  if (!product) { const error = new Error('Produkt z dopasowania już nie istnieje'); error.status = 404; throw error; }
+  const rollback = infaktPrzygotujCofniecieDopasowania(product, match);
+  if (!rollback.ok) { const error = new Error(rollback.error); error.status = 409; throw error; }
+  const updater = allegroAktualizatorProduktowCentralnych(data); updater.apply(product.id, rollback.fields, rollback.remove); updater.commit();
+  sync.lineMappings = { ...(sync.lineMappings || {}) }; let removedAliases = 0;
+  if (match.lineSignature && String(sync.lineMappings[match.lineSignature] || '') === String(product.id)) { delete sync.lineMappings[match.lineSignature]; removedAliases = 1; }
+  else if (!match.lineSignature && String(match.method || '').includes('ręczne')) for (const [signature, id] of Object.entries(sync.lineMappings)) if (String(id) === String(product.id)) { delete sync.lineMappings[signature]; removedAliases++; }
+  const now = new Date().toISOString(), sourceItem = match.sourceItem && typeof match.sourceItem === 'object' ? { ...match.sourceItem, reason: 'Cofnięto wcześniejsze dopasowanie — wybierz właściwy produkt' } : null;
+  if (sourceItem?.itemKey && !(sync.pendingItems || []).some((entry) => entry.itemKey === sourceItem.itemKey)) sync.pendingItems = [sourceItem, ...(sync.pendingItems || [])].slice(0, 1000);
+  matches[index] = { ...match, status: 'reverted', revertedAt: now, removedAliases };
+  sync.recentMatches = matches; sync.pendingCount = (sync.pendingItems || []).length; sync.matchedCount = Math.max(0, (Number(sync.matchedCount) || 0) - 1); sync.updated_at = now;
+  await Promise.all([zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now }), zapisz('infakt_purchase_price_sync', sync)]);
+  return { sync, product: { id: String(product.id), name: product.nazwa }, restored: Object.prototype.hasOwnProperty.call(rollback.fields, 'cenaZakupu') ? rollback.fields.cenaZakupu : null, requiresResync: !sourceItem };
 }
 function infaktErrorText(data, fallback = 'Błąd inFakt') {
   const errors = data?.errors || data?.error || data?.message;
@@ -5079,6 +5064,13 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({})), result = await infaktPrzypiszCeneZakupu(tekst(body.itemKey, 100), tekst(body.productId, 100));
+      return odpowiedz({ ok: true, ...result });
+    }
+
+    if (action === 'infakt-purchase-unmatch') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({})), result = await infaktCofnijDopasowanieCeny(tekst(body.matchId, 100));
       return odpowiedz({ ok: true, ...result });
     }
 

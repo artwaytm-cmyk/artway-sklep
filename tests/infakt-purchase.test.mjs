@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   infaktKsefPozycje,
   infaktKsefNumerZTekstu,
+  infaktMigawkaCenyZakupu,
   infaktNormalizujDokumentKosztowy,
   infaktParametryListyKsef,
+  infaktPrzygotujCofniecieDopasowania,
   ustawieniaPubliczneBezDanychPrywatnych,
 } from '../netlify/functions/lib/infakt-purchase.mjs';
 
@@ -66,4 +68,19 @@ test('cena zakupu i jej historia nie trafiają do publicznego katalogu', () => {
   assert.equal(result.artway_produkty_dodane[0].cena, 50);
   assert.equal('cenaZakupu' in result.artway_produkty_dodane[0], false);
   assert.equal('cenaZakupuHistoria' in result.artway_produkty_dodane[0], false);
+});
+
+test('błędne dopasowanie faktury można cofnąć do dokładnej poprzedniej ceny', () => {
+  const before = { cenaZakupu: 18.5, cenaZakupuNetto: 15.04, cenaZakupuDokument: 'FV/1', cenaZakupuDataDokumentu: '2026-06-01', cenaZakupuHistoria: [{ price: 18.5, net: 15.04, document: 'FV/1', date: '2026-06-01' }] };
+  const product = { ...before, cenaZakupu: 30, cenaZakupuNetto: 24.39, cenaZakupuDokument: 'FV/2', cenaZakupuDataDokumentu: '2026-07-01' };
+  const rollback = infaktPrzygotujCofniecieDopasowania(product, { price: 30, invoiceNumber: 'FV/2', invoiceDate: '2026-07-01', beforeFields: infaktMigawkaCenyZakupu(before) });
+  assert.equal(rollback.ok, true);
+  assert.equal(rollback.fields.cenaZakupu, 18.5);
+  assert.equal(rollback.fields.cenaZakupuDokument, 'FV/1');
+});
+
+test('cofnięcie starego dopasowania nie nadpisuje nowszej ceny', () => {
+  const rollback = infaktPrzygotujCofniecieDopasowania({ cenaZakupu: 40, cenaZakupuDokument: 'FV/3', cenaZakupuDataDokumentu: '2026-07-10' }, { price: 30, invoiceNumber: 'FV/2', invoiceDate: '2026-07-01' });
+  assert.equal(rollback.ok, false);
+  assert.equal(rollback.conflict, true);
 });

@@ -34,6 +34,13 @@ export const PRYWATNE_POLA_PRODUKTU = Object.freeze([
   'allegroPriceTargetMargin',
 ]);
 
+export const POLA_CENY_ZAKUPU = Object.freeze([
+  'cenaZakupu', 'cenaZakupuNetto', 'cenaZakupuVat', 'cenaZakupuWaluta',
+  'cenaZakupuPrywatna', 'cenaZakupuZrodlo', 'cenaZakupuDokument', 'cenaZakupuKsef',
+  'cenaZakupuDostawca', 'cenaZakupuDataDokumentu', 'cenaZakupuDopasowanie',
+  'cenaZakupuZaktualizowanoAt', 'cenaZakupuHistoria',
+]);
+
 const PRYWATNE_POLA = new Set(PRYWATNE_POLA_PRODUKTU);
 const KLUCZE_LIST_PRODUKTOW = new Set(['artway_produkty_dodane', 'artway_produkty_katalog']);
 const KLUCZE_MAP_PRODUKTOW = new Set(['artway_produkty_edytowane']);
@@ -58,6 +65,75 @@ function tekst(value, max = 400) {
 
 export function infaktNazwaDostawcy(value = '') {
   return tekst(value, 240).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function infaktKodKlucz(value = '') { return tekst(value, 200).toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+function infaktEanKlucz(value = '') { const digits = tekst(value, 80).replace(/\D/g, ''); return digits.length >= 8 && digits.length <= 14 ? digits : ''; }
+function infaktTokenyNazwy(value = '') {
+  const stop = new Set(['gra', 'gry', 'zestaw', 'szt', 'sztuka', 'produkt', 'dla', 'oraz', 'mini', 'duzy', 'maly', 'the', 'and']);
+  return [...new Set(infaktNazwaDostawcy(value).split(' ').filter((x) => x.length >= 3 && !stop.has(x)))];
+}
+
+export function infaktIndeksProduktow(products = new Map()) {
+  const ean = new Map(), code = new Map(), name = new Map(), add = (map, key, product) => { if (!key) return; const list = map.get(key) || []; if (!list.some((p) => String(p.id) === String(product.id))) list.push(product); map.set(key, list); };
+  for (const product of products.values()) {
+    [product.gtin, product.ean, product.kodEan].forEach((value) => add(ean, infaktEanKlucz(value), product));
+    [product.kodProducenta, product.mpn, product.sku, product.externalId, product.kod].forEach((value) => add(code, infaktKodKlucz(value), product));
+    add(name, infaktNazwaDostawcy(product.nazwa), product);
+  }
+  return { ean, code, name };
+}
+
+export function infaktSugestieNazwy(line = {}, products = new Map(), supplier = null) {
+  const wanted = infaktTokenyNazwy(line.name), supplierKey = infaktNazwaDostawcy(supplier?.name || '');
+  if (!wanted.length) return [];
+  return [...products.values()].map((product) => {
+    const current = infaktTokenyNazwy(product.nazwa), common = wanted.filter((x) => current.includes(x)).length, producer = infaktNazwaDostawcy(product.producent || product.marka || ''), supplierBoost = supplierKey && (producer.includes(supplierKey) || supplierKey.includes(producer)) ? 0.12 : 0;
+    return { product, score: current.length ? common / Math.max(wanted.length, current.length) + supplierBoost : 0 };
+  }).filter((x) => x.score >= 0.45).sort((a, b) => b.score - a.score).slice(0, 3).map(({ product, score }) => ({ id: String(product.id), name: tekst(product.nazwa, 200), sku: tekst(product.sku || product.externalId || product.kodProducenta, 100), ean: tekst(product.gtin || product.ean, 80), score: +Math.min(0.99, score).toFixed(2) }));
+}
+
+export function infaktDopasujPozycje(line = {}, products = new Map(), index = {}, supplier = null) {
+  const eanKey = infaktEanKlucz(line.ean), codeKey = infaktKodKlucz(line.code);
+  if (eanKey) { const list = index.ean.get(eanKey) || []; if (list.length === 1) return { product: list[0], method: 'EAN/GTIN', confidence: 100 }; if (list.length > 1) return { conflict: true, reason: 'EAN występuje przy kilku produktach' }; }
+  if (codeKey) {
+    const list = index.code.get(codeKey) || [];
+    if (list.length === 1) return { product: list[0], method: 'kod produktu', confidence: 96 };
+    if (list.length > 1) {
+      const supplierKey = infaktNazwaDostawcy(supplier?.name || ''), sameSupplier = list.filter((p) => { const producer = infaktNazwaDostawcy(p.producent || p.marka || ''); return supplierKey && producer && (producer.includes(supplierKey) || supplierKey.includes(producer)); });
+      if (sameSupplier.length === 1) return { product: sameSupplier[0], method: 'kod + dostawca', confidence: 94 };
+      return { conflict: true, reason: 'Kod występuje przy kilku produktach' };
+    }
+  }
+  const nameKey = infaktNazwaDostawcy(line.name), nameList = index.name.get(nameKey) || [];
+  if (nameKey && nameList.length === 1) return { product: nameList[0], method: 'identyczna nazwa', confidence: 90 };
+  return { product: null, reason: eanKey || codeKey ? 'Brak produktu z takim kodem' : 'Faktura nie zawiera EAN ani kodu produktu' };
+}
+
+export function infaktCenaZakupuFields(product = {}, line = {}, invoice = {}, supplier = {}, method = '') {
+  const now = new Date().toISOString(), price = +Number(line.unitGross || 0).toFixed(2), history = Array.isArray(product.cenaZakupuHistoria) ? product.cenaZakupuHistoria.slice(0, 29) : [];
+  const net = +Number(line.unitNet || 0).toFixed(2), vat = Math.max(0, +(price - net).toFixed(2));
+  const entry = { price, net, vat, quantity: Number(line.quantity || 0), document: tekst(invoice.invoice_number, 120), ksefNumber: tekst(invoice.ksef_number, 180), supplier: tekst(supplier.name || invoice.seller_name, 200), date: tekst(invoice.invoice_date, 20), method, priceBasis: tekst(line.priceBasis || '', 80), updatedAt: now };
+  return { cenaZakupu: price, cenaZakupuNetto: net, cenaZakupuVat: vat, cenaZakupuWaluta: tekst(line.currency || 'PLN', 12), cenaZakupuPrywatna: true, cenaZakupuZrodlo: 'inFakt / KSeF', cenaZakupuDokument: entry.document, cenaZakupuKsef: entry.ksefNumber, cenaZakupuDostawca: entry.supplier, cenaZakupuDataDokumentu: entry.date, cenaZakupuDopasowanie: method, cenaZakupuZaktualizowanoAt: now, cenaZakupuHistoria: [entry, ...history.filter((x) => x?.ksefNumber !== entry.ksefNumber || Number(x?.price) !== price)].slice(0, 30) };
+}
+
+export function infaktMigawkaCenyZakupu(product = {}) {
+  return Object.fromEntries(POLA_CENY_ZAKUPU.filter((key) => Object.prototype.hasOwnProperty.call(product, key)).map((key) => [key, structuredClone(product[key])]));
+}
+
+export function infaktPrzygotujCofniecieDopasowania(product = {}, match = {}) {
+  const samePrice = Number(product.cenaZakupu || 0) === Number(match.price || 0);
+  const sameDocument = !match.invoiceNumber || String(product.cenaZakupuDokument || '') === String(match.invoiceNumber);
+  const sameDate = !match.invoiceDate || String(product.cenaZakupuDataDokumentu || '') === String(match.invoiceDate);
+  if (!samePrice || !sameDocument || !sameDate) return { ok: false, conflict: true, error: 'Produkt ma już nowszą cenę zakupu. Cofnięcie zostało zablokowane, aby jej nie nadpisać.' };
+  const before = match.beforeFields && typeof match.beforeFields === 'object' ? structuredClone(match.beforeFields) : null;
+  if (before) return { ok: true, fields: before, remove: POLA_CENY_ZAKUPU.filter((key) => !Object.prototype.hasOwnProperty.call(before, key)) };
+  const history = Array.isArray(product.cenaZakupuHistoria) ? structuredClone(product.cenaZakupuHistoria) : [];
+  const targetIndex = history.findIndex((entry) => Number(entry?.price || 0) === Number(match.price || 0) && (!match.invoiceNumber || String(entry?.document || '') === String(match.invoiceNumber)));
+  if (targetIndex >= 0) history.splice(targetIndex, 1);
+  const previous = history[0];
+  if (!previous) return { ok: true, fields: {}, remove: [...POLA_CENY_ZAKUPU] };
+  return { ok: true, fields: { cenaZakupu: Number(previous.price) || 0, cenaZakupuNetto: Number(previous.net) || 0, cenaZakupuVat: Number(previous.vat) || 0, cenaZakupuWaluta: product.cenaZakupuWaluta || 'PLN', cenaZakupuPrywatna: true, cenaZakupuZrodlo: 'inFakt / KSeF', cenaZakupuDokument: previous.document || '', cenaZakupuKsef: previous.ksefNumber || '', cenaZakupuDostawca: previous.supplier || '', cenaZakupuDataDokumentu: previous.date || '', cenaZakupuDopasowanie: previous.method || '', cenaZakupuZaktualizowanoAt: previous.updatedAt || '', cenaZakupuHistoria: history }, remove: [] };
 }
 
 export function infaktRdzenNazwyDostawcy(value = '') {

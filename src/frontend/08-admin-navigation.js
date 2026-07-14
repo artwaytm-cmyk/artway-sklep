@@ -21,3 +21,9 @@ function asortymentSzkielet(tab, tresc){
       ${tresc}
     </div>`);
 }
+
+/* Jeden standard wyszukiwania w całym panelu: zwijany nagłówek, opis,
+   licznik wyników i responsywna siatka. Poszczególne domeny przekazują tylko pola. */
+function adminWyszukiwaniePanelHTML({id="filtry",title="Wyszukiwanie zaawansowane",description="Wyszukuj i zawężaj wyniki bez opuszczania podstrony.",fields="",results="",active=false,open=true}={}){
+  return `<details class="admin-search-standard" data-admin-search-panel="${esc(id)}" ${(open||active)?"open":""}><summary><span><b>🔎 ${esc(title)}</b><small>${esc(description)}</small></span><span class="admin-search-summary-meta">${active?`<em>Aktywne filtry</em>`:""}${results!==""?`<strong>${esc(results)} wyników</strong>`:""}<i aria-hidden="true"></i></span></summary><div class="admin-search-standard-body">${fields}</div></details>`;
+}
