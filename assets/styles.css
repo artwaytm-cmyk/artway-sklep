@@ -500,7 +500,13 @@ footer{background:#151a24;color:#c6ccd8;margin-top:1rem}
   .admin-page{margin:.75rem auto 1.5rem;gap:.65rem}
   .admin-nav{position:static;flex-direction:row;flex-wrap:nowrap;overflow:auto hidden;max-width:100%;width:100%;gap:.25rem;padding:.4rem;border-radius:13px;scrollbar-width:none;contain:paint}
   .admin-nav::-webkit-scrollbar{display:none}
-  .admin-nav a{flex:0 0 auto;padding:.45rem .58rem;font-size:.76rem;white-space:nowrap;min-height:44px;display:inline-flex;align-items:center}
+  .admin-nav-separator,.admin-nav-group-toggle{display:none}
+  .admin-nav-group,.admin-nav-group.collapsed{display:contents;background:transparent}
+  .admin-nav-items,.admin-nav-group.collapsed .admin-nav-items{display:contents}
+  .admin-nav-link{flex:0 0 auto;padding:.45rem .58rem;font-size:.76rem;white-space:nowrap;min-height:44px;display:inline-flex;align-items:center}
+  .admin-nav-link:hover{transform:none}
+  .admin-nav-home{padding:.45rem .62rem}
+  .admin-nav-home .admin-nav-link-main small{display:none}
   .admin-tresc .panel{margin-bottom:.75rem}
   .admin-main-tabs{margin:-.05rem -.15rem 0;padding:.05rem .15rem .18rem;gap:.25rem;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
   .admin-main-tabs::-webkit-scrollbar{display:none}
