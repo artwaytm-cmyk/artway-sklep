@@ -1,4 +1,4 @@
-const ALLEGRO_ODSWIEZANIE_PANELU_MS=60000;
+const ALLEGRO_ODSWIEZANIE_PANELU_MS=15*60*1000;
 let allegroAutoOdswiezanie={busy:false,lastChecked:0,lastChanged:0,orders:0,threads:0,issues:0,offers:0,error:""};
 function klientZamowieniaLabel(z){
   const k=z?.klient||{};
@@ -261,7 +261,7 @@ function allegroNoweIdPoOdswiezeniu(przed,po){let n=0;for(const id of po)if(!prz
 async function allegroOdswiezDaneZSerweraJesliCzas(powod="timer"){
   if(allegroAutoOdswiezanie.busy||typeof jestAdmin!=="function"||!jestAdmin())return false;
   if(typeof document!=="undefined"&&document.hidden&&powod==="timer")return false;
-  const teraz=Date.now(),minimalnyOdstep=powod==="timer"?ALLEGRO_ODSWIEZANIE_PANELU_MS:15000;
+  const teraz=Date.now(),minimalnyOdstep=ALLEGRO_ODSWIEZANIE_PANELU_MS;
   if(teraz-Number(allegroAutoOdswiezanie.lastChecked||0)<minimalnyOdstep)return false;
   const mialDane=!!allegroStan.sprawdzono,przedOrders=allegroAktywneIdDoOdswiezenia(),przedOffers=allegroOfertaIdDoOdswiezenia(),przedThreads=allegroKomunikacjaKluczeDoOdswiezenia("thread"),przedIssues=allegroKomunikacjaKluczeDoOdswiezenia("issue");
   allegroAutoOdswiezanie={...allegroAutoOdswiezanie,busy:true,error:""};
@@ -1802,7 +1802,7 @@ function allegroUstawieniaPanelHTML(){
       ${allegroStan.requiresReauth?`<span style="color:#9a3412"><b>Brakujące zakresy:</b> ${esc((allegroStan.missingAuthorizedScopes||[]).join(", ")||"token wymaga ponownej autoryzacji")}. Kliknij „Połącz Allegro ponownie”.</span>`:""}
     </div>
     <div class="panel-subtle" style="margin-top:1rem">
-      <div class="order-section-head"><div><h3 style="margin:0">🔄 Automatyczna synchronizacja danych</h3><p class="order-detail-lead">Serwer sprawdza zamówienia, wiadomości i dyskusje co 15 minut, a pełny katalog ofert co 6 godzin. Otwarty panel pobiera wyniki co ${Math.round(ALLEGRO_ODSWIEZANIE_PANELU_MS/1000)} sekund oraz po powrocie do karty — bez przerywania pisania w formularzu.</p></div><button class="btn" onclick="allegroSynchronizujWszystko()">Synchronizuj wszystko teraz</button></div>
+      <div class="order-section-head"><div><h3 style="margin:0">🔄 Automatyczna synchronizacja danych</h3><p class="order-detail-lead">Serwer sprawdza zamówienia, wiadomości i dyskusje co 15 minut, a pełny katalog ofert co 6 godzin. Otwarty panel pobiera wyniki co ${Math.round(ALLEGRO_ODSWIEZANIE_PANELU_MS/60000)} minut oraz po powrocie do karty, jeśli minął ten czas — bez przerywania pisania w formularzu.</p></div><button class="btn" onclick="allegroSynchronizujWszystko()">Synchronizuj wszystko teraz</button></div>
       <div class="allegro-schedule-grid"><span><b>📦 Zamówienia</b><small>automatycznie co 15 minut</small></span><span><b>💬 Wiadomości</b><small>automatycznie co 15 minut</small></span><span><b>🏷️ Oferty</b><small>automatycznie co 6 godzin</small></span></div>
       <div class="backend-note allegro-info-bottom"><b>Automatyczna konserwacja katalogu:</b> ${maintenance.lastRun?`ostatnio ${esc(new Date(maintenance.lastRun).toLocaleString("pl-PL"))} • sprawdzono ${esc(maintenance.scanned||0)} • poprawiono ${esc(maintenance.updated||0)}`:"uruchomi się wraz z najbliższą synchronizacją ofert"}. Obejmuje katalog, kategorię, producenta, opis i kontrolę błędnych powiązań.${allegroAutoOdswiezanie.lastChecked?`<br><b>Ostatni odczyt panelu:</b> ${esc(new Date(allegroAutoOdswiezanie.lastChecked).toLocaleString("pl-PL"))}${allegroAutoOdswiezanie.error?` • ${esc(allegroAutoOdswiezanie.error)}`:" • połączenie działa"}.`:""}</div>
       <details class="allegro-manual-sync"><summary>Zaawansowane: uruchom tylko wybraną synchronizację</summary><div class="diag-actions"><button class="btn ghost" onclick="allegroSynchronizujZamowienia()">Zamówienia</button><button class="btn ghost" onclick="allegroSynchronizujOferty()">Oferty</button><button class="btn ghost" onclick="allegroUruchomAutomatycznaKonserwacje()">Katalog, opisy i producenci</button><button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">Komunikacja</button><button class="btn ghost" onclick="window.open('https://salescenter.allegro.com/my-sales','_blank','noopener')">Otwórz Sales Center</button></div></details>
