@@ -104,6 +104,10 @@ function powodNiedostepnosci(p){
 function produktDostepnyWSprzedazy(p){
   return !!p && produktMaCeneSprzedazy(p) && !produktOznaczonyNiedostepny(p);
 }
+function odswiezDostepnoscProducentowWidoku(){
+  if(typeof odswiezMonitoringProducentow==="function"&&odswiezMonitoringProducentow())return;
+  renderuj();
+}
 function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
   const key=String(id);
   const s=String(status||"dostepny").toLowerCase();
@@ -121,7 +125,7 @@ function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
     .then(d=>loguj("info",`Dostępność produktu ${id} zsynchronizowana ze sklepem i Allegro: ukryto ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`))
     .catch(e=>{loguj("blad",`Synchronizacja dostępności produktu ${id} z Allegro: ${e.message||e}`);toast("⚠️ Sklep zapisany, ale synchronizacja Allegro wymaga ponowienia");});
   toast(s==="niedostepny"?"Produkt oznaczony jako niedostępny":"Produkt dostępny w sprzedaży ✅");
-  renderuj();
+  odswiezDostepnoscProducentowWidoku();
 }
 function przelaczDostepnoscProduktu(id){
   const p=produktMagazynowy(id);
@@ -160,12 +164,12 @@ async function ustawDecyzjeProducenta(id,value="auto"){
   const p=produktMagazynowy(id);if(!p)return;
   const next=decyzjaProducentaDane(id,value),key=String(id),i=producentDostepnoscInfo(p);
   dostepnoscProduktow={...(dostepnoscProduktow||{})};if(next)dostepnoscProduktow[key]=next;else{delete dostepnoscProduktow[key];delete dostepnoscProduktow[id];}
-  zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});renderuj();
+  zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});odswiezDostepnoscProducentowWidoku();
   try{
     if(chmuraToken){const d=await chmura("product-sale-decision",{method:"POST",body:{productId:id,decision:String(value).split(":")[0],days:Number(String(value).split(":")[1])||0,producerStatus:i.status,producerQuantity:i.quantity,reason:next?.reason||"Automatyczna decyzja"},timeout:90000});await chmuraWczytajStan().catch(()=>{});zbudujProdukty();toast(`✅ Decyzja zapisana • sklep ${d.saleAutomation?.siteHidden?"ukryty":d.available?"aktywny":"zaktualizowany"} • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}
     else toast("Decyzja zapisana lokalnie — połącz wspólną bazę, aby zmienić Allegro");
   }catch(e){toast(`⚠️ Decyzja jest w panelu, ale synchronizacja serwera wymaga ponowienia: ${e.message||e}`);}
-  renderuj();
+  odswiezDostepnoscProducentowWidoku();
 }
 function zastosujWyborDecyzjiProducenta(id){const el=document.querySelector(`[data-supplier-decision="${CSS.escape(String(id))}"]`);if(el)void ustawDecyzjeProducenta(id,el.value);}
 function decyzjaProducentaPanelHTML(p={},i=producentDostepnoscInfo(p)){
@@ -718,7 +722,7 @@ async function agentAISprawdzDostepnoscProducentow(limit=null,productIds=[]){
     toast(ids.length?"Agent sprawdza wybrany produkt u producenta…":`Agent wyrywkowo sprawdza ${sample} produktów u producentów…`);
     const d=await chmura("supplier-availability-sample",{method:"POST",body:{limit:sample,productIds:ids,threshold:Math.max(1,Number(u.progNiskiProducenta)||50),source:"admin-agent-ai"},timeout:120000});
     await chmuraWczytajStan().catch(()=>{});zbudujProdukty();
-    const s=d.summary||{};toast(`✅ Sprawdzono ${s.checked||0}, w tym priorytetowych ${s.priorityChecked||0}: dostępne ${s.available||0}, niski stan ${s.low||0}, brak ${s.unavailable||0}`);renderuj();return d;
+    const s=d.summary||{};toast(`✅ Sprawdzono ${s.checked||0}, w tym priorytetowych ${s.priorityChecked||0}: dostępne ${s.available||0}, niski stan ${s.low||0}, brak ${s.unavailable||0}`);odswiezDostepnoscProducentowWidoku();return d;
   }catch(e){toast("⚠️ Monitoring producentów: "+(e.message||e));return null;}
 }
 function agentAILinkiProducentowTekst(){

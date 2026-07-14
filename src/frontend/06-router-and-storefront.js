@@ -31,10 +31,64 @@ function trasa(){
   return "/";
 }
 function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
+let ostatniaRenderowanaTrasa="";
+function kluczStabilnegoWezla(node){
+  if(!node||node.nodeType!==1)return "";
+  for(const attr of ["id","data-stable-key","data-product-row","data-product-id","data-order-id","data-order-number","data-task-id","data-item-key"]){
+    const value=node.getAttribute(attr);if(value)return `${node.tagName}:${attr}:${value}`;
+  }
+  return "";
+}
+function aktualizujAtrybutyWezla(current,next,active){
+  for(const attr of [...current.attributes])if(!next.hasAttribute(attr.name))current.removeAttribute(attr.name);
+  for(const attr of [...next.attributes])if(current.getAttribute(attr.name)!==attr.value)current.setAttribute(attr.name,attr.value);
+  const focused=current===active;
+  if(current instanceof HTMLInputElement){
+    if(["checkbox","radio"].includes(current.type)){if(!focused)current.checked=next.checked;}
+    else if(!focused)current.value=next.value;
+  }else if(current instanceof HTMLTextAreaElement){if(!focused)current.value=next.value;}
+  else if(current instanceof HTMLSelectElement){if(!focused)current.value=next.value;}
+  else if(current instanceof HTMLDetailsElement)current.open=next.open;
+}
+function aktualizujWezelStabilnie(current,next,active){
+  if(!current||!next)return;
+  if(current.nodeType!==next.nodeType||(current.nodeType===1&&current.tagName!==next.tagName)){
+    current.replaceWith(next.cloneNode(true));return;
+  }
+  if(current.nodeType===3||current.nodeType===8){if(current.nodeValue!==next.nodeValue)current.nodeValue=next.nodeValue;return;}
+  if(current.nodeType!==1)return;
+  aktualizujAtrybutyWezla(current,next,active);
+  aktualizujDzieciStabilnie(current,next,active);
+}
+function aktualizujDzieciStabilnie(current,next,active){
+  const incoming=[...next.childNodes];
+  for(let index=0;index<incoming.length;index++){
+    const wanted=incoming[index],wantedKey=kluczStabilnegoWezla(wanted);let existing=current.childNodes[index];
+    if(wantedKey&&kluczStabilnegoWezla(existing)!==wantedKey){
+      const match=[...current.childNodes].slice(index+1).find(node=>kluczStabilnegoWezla(node)===wantedKey);
+      if(match){current.insertBefore(match,existing||null);existing=match;}
+    }
+    if(!existing){current.appendChild(wanted.cloneNode(true));continue;}
+    aktualizujWezelStabilnie(existing,wanted,active);
+  }
+  while(current.childNodes.length>incoming.length)current.lastChild.remove();
+}
+function aktualizujWidokStabilnie(root,html){
+  const template=document.createElement("template");template.innerHTML=String(html||"").trim();
+  const active=document.activeElement,scrollY=window.scrollY||0,selection=active&&typeof active.selectionStart==="number"?{start:active.selectionStart,end:active.selectionEnd}:null;
+  aktualizujDzieciStabilnie(root,template.content,active);
+  if(active?.isConnected&&selection&&typeof active.setSelectionRange==="function")try{active.setSelectionRange(selection.start,selection.end);}catch(e){}
+  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY});
+}
+function odbiorcaStabilnegoWidoku(root,stabilny){
+  if(!stabilny)return root;
+  return {get innerHTML(){return root.innerHTML;},set innerHTML(html){aktualizujWidokStabilnie(root,html);}};
+}
 function renderuj(){
   try{
     const t = trasa();
-    const w = $("widok");
+    const root = $("widok"),taSamaTrasa=ostatniaRenderowanaTrasa===t&&root.childNodes.length>0;
+    const w = odbiorcaStabilnegoWidoku(root,taSamaTrasa);
     // Moduł panelu zawiera także bezpieczny widok „Brak dostępu”. Ładujemy go
     // wyłącznie po wejściu na trasę administracyjną, również dla gościa.
     const wymagaPanelu=t.startsWith("/admin")||t==="/diagnostyka";
@@ -44,11 +98,11 @@ function renderuj(){
         loguj("blad",error.message,t);
         w.innerHTML=`<div class="page"><div class="panel"><h1>Nie udało się wczytać panelu</h1><p>${esc(error.message)}</p><button class="btn" onclick="renderuj()">Spróbuj ponownie</button></div></div>`;
       });
-      return;
+      ostatniaRenderowanaTrasa=t;return;
     }
     if(t.startsWith("/admin/zamowienie/")&&!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
     if(t.startsWith("/admin")&&stanBramki.authenticated&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja) setTimeout(()=>synchronizujBazeCentralna(true),0);
-    window.scrollTo({top:0});
+    if(!taSamaTrasa)window.scrollTo({top:0});
     if(t==="/" || t==="") w.innerHTML = widokSklep();
     else if(t.startsWith("/produkt/")) w.innerHTML = widokProdukt(parseInt(t.split("/")[2]));
     else if(t.startsWith("/kategoria/")) w.innerHTML = widokKategoria(decodeURIComponent(t.split("/")[2]||""));
@@ -137,6 +191,7 @@ function renderuj(){
     if(t==="/"||t==="") { rysujChipy(); rysuj(); }
     seoAktualizujMetaDlaTrasy(t);
     if(t==="/admin/aktualizacja"&&!stanAktualizacji.sprawdzono&&!stanAktualizacji.ladowanie) setTimeout(()=>sprawdzStatusAktualizacji(true),0);
+    ostatniaRenderowanaTrasa=t;
   }catch(e){
     loguj("blad", "Błąd renderowania strony: "+e.message, trasa());
     $("widok").innerHTML = `<div class="page"><div class="panel"><h1>⚠️ Coś poszło nie tak</h1><p>Błąd został zapisany w <a href="#/diagnostyka">diagnostyce</a>.</p><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
@@ -423,7 +478,7 @@ function kartaProduktu(p){
         ? `<button class="add-btn" disabled style="background:#94a3b8;cursor:not-allowed">${brakCeny?"Cena do uzupełnienia":"Chwilowo niedostępny"}</button>`
         : p.warianty?.length
           ? `<button class="add-btn" onclick="event.stopPropagation();location.hash='#/produkt/${p.id}'" style="background:var(--brand2)">Wybierz wariant →</button>`
-          : `<button class="add-btn" onclick="event.stopPropagation();dodaj(${p.id}, this)">Do koszyka</button>`}
+          : `<div class="card-purchase" onclick="event.stopPropagation()"><div class="card-quantity" aria-label="Liczba sztuk"><button type="button" onclick="ustawIloscKarty(this.nextElementSibling,-1)" aria-label="Zmniejsz liczbę sztuk">−</button><input data-card-quantity type="number" min="1" max="99" step="1" value="1" inputmode="numeric" aria-label="Liczba sztuk produktu ${esc(p.nazwa)}" onchange="ustawIloscKarty(this)"><button type="button" onclick="ustawIloscKarty(this.previousElementSibling,1)" aria-label="Zwiększ liczbę sztuk">+</button></div><button class="add-btn" onclick="dodajZKarty(${p.id},this)">Do koszyka</button></div>`}
     </div>
   </article>`;
 }
@@ -482,7 +537,7 @@ function widokListaSpecjalna(tytul, filtr, pusty){
 }
 
 /* ═══════════ WIDOK: PRODUKT ═══════════ */
-let iloscProduktu = 1;
+let iloscProduktu = 1,ostatniProduktIlosci=null;
 function specyfikacjaProduktuHTML(p){
   const wiersze=[
     ["Marka",p.marka],
@@ -504,7 +559,7 @@ function specyfikacjaProduktuHTML(p){
 function widokProdukt(id){
   const p = produkty.find(x=>x.id===id);
   if(!p){ loguj("ostrzezenie","Otwarto nieistniejący produkt: id="+id); return `<div class="page"><div class="panel"><h1>Nie znaleziono produktu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`; }
-  iloscProduktu = 1;
+  if(String(ostatniProduktIlosci)!==String(id)){iloscProduktu=1;ostatniProduktIlosci=id;}
   const powiazane = produkty.filter(x=>x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
   const brakCeny = !produktMaCeneSprzedazy(p);
   const niedostepny = produktOznaczonyNiedostepny(p);
@@ -538,10 +593,11 @@ function widokProdukt(id){
           <div class="f-group" style="max-width:260px;margin:.6rem 0 0"><label>Wybierz wariant *</label>
             <select id="wariantSel">${p.warianty.map(w=>`<option>${esc(w)}</option>`).join("")}</select>
           </div>`:""}
-          <div class="qty-big">
-            <button onclick="zmienIloscProd(-1)">−</button>
-            <span id="prodQty">1</span>
-            <button onclick="zmienIloscProd(1)">+</button>
+          <label class="product-detail-quantity">Ilość sztuk</label>
+          <div class="qty-big" aria-label="Wybierz liczbę sztuk">
+            <button type="button" onclick="zmienIloscProd(-1)" aria-label="Zmniejsz liczbę sztuk">−</button>
+            <input id="prodQty" type="number" min="1" max="99" step="1" value="${esc(iloscProduktu)}" inputmode="numeric" aria-label="Liczba sztuk" oninput="ustawIloscProduktu(this.value)" onchange="ustawIloscProduktu(this.value)">
+            <button type="button" onclick="zmienIloscProd(1)" aria-label="Zwiększ liczbę sztuk">+</button>
           </div>
           <div style="display:flex;gap:.7rem;flex-wrap:wrap">
             ${niedostepny||brakCeny
@@ -608,10 +664,11 @@ function widokProdukt(id){
     ${powiazane.length?`<h2 class="related-h" style="padding:0;margin:1.6rem 0 .2rem">Podobne produkty</h2><div class="grid" style="padding:0;margin:.6rem 0 0">${powiazane.map(kartaProduktu).join("")}</div>`:""}
   </div>`;
 }
-function zmienIloscProd(d){ iloscProduktu=Math.max(1, iloscProduktu+d); const e=$("prodQty"); if(e) e.textContent=iloscProduktu; }
+function ustawIloscProduktu(value){iloscProduktu=Math.max(1,Math.min(99,Math.floor(Number(value)||1)));const e=$("prodQty");if(e)e.value=iloscProduktu;}
+function zmienIloscProd(d){ustawIloscProduktu(iloscProduktu+Number(d||0));}
 function dodajIlosc(id){
   const wariant = $("wariantSel")?.value || null;
-  for(let i=0;i<iloscProduktu;i++) dodaj(id, null, wariant);
+  dodajWIlosci(id,iloscProduktu,null,wariant);
 }
 function pokazZdjecie(src){ const g=$("glowneZdjecie"); if(g) g.src=src; }
 

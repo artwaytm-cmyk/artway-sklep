@@ -1373,6 +1373,10 @@ function powodNiedostepnosci(p){
 function produktDostepnyWSprzedazy(p){
   return !!p && produktMaCeneSprzedazy(p) && !produktOznaczonyNiedostepny(p);
 }
+function odswiezDostepnoscProducentowWidoku(){
+  if(typeof odswiezMonitoringProducentow==="function"&&odswiezMonitoringProducentow())return;
+  renderuj();
+}
 function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
   const key=String(id);
   const s=String(status||"dostepny").toLowerCase();
@@ -1390,7 +1394,7 @@ function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
     .then(d=>loguj("info",`Dostępność produktu ${id} zsynchronizowana ze sklepem i Allegro: ukryto ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`))
     .catch(e=>{loguj("blad",`Synchronizacja dostępności produktu ${id} z Allegro: ${e.message||e}`);toast("⚠️ Sklep zapisany, ale synchronizacja Allegro wymaga ponowienia");});
   toast(s==="niedostepny"?"Produkt oznaczony jako niedostępny":"Produkt dostępny w sprzedaży ✅");
-  renderuj();
+  odswiezDostepnoscProducentowWidoku();
 }
 function przelaczDostepnoscProduktu(id){
   const p=produktMagazynowy(id);
@@ -1429,12 +1433,12 @@ async function ustawDecyzjeProducenta(id,value="auto"){
   const p=produktMagazynowy(id);if(!p)return;
   const next=decyzjaProducentaDane(id,value),key=String(id),i=producentDostepnoscInfo(p);
   dostepnoscProduktow={...(dostepnoscProduktow||{})};if(next)dostepnoscProduktow[key]=next;else{delete dostepnoscProduktow[key];delete dostepnoscProduktow[id];}
-  zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});renderuj();
+  zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});odswiezDostepnoscProducentowWidoku();
   try{
     if(chmuraToken){const d=await chmura("product-sale-decision",{method:"POST",body:{productId:id,decision:String(value).split(":")[0],days:Number(String(value).split(":")[1])||0,producerStatus:i.status,producerQuantity:i.quantity,reason:next?.reason||"Automatyczna decyzja"},timeout:90000});await chmuraWczytajStan().catch(()=>{});zbudujProdukty();toast(`✅ Decyzja zapisana • sklep ${d.saleAutomation?.siteHidden?"ukryty":d.available?"aktywny":"zaktualizowany"} • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}
     else toast("Decyzja zapisana lokalnie — połącz wspólną bazę, aby zmienić Allegro");
   }catch(e){toast(`⚠️ Decyzja jest w panelu, ale synchronizacja serwera wymaga ponowienia: ${e.message||e}`);}
-  renderuj();
+  odswiezDostepnoscProducentowWidoku();
 }
 function zastosujWyborDecyzjiProducenta(id){const el=document.querySelector(`[data-supplier-decision="${CSS.escape(String(id))}"]`);if(el)void ustawDecyzjeProducenta(id,el.value);}
 function decyzjaProducentaPanelHTML(p={},i=producentDostepnoscInfo(p)){
@@ -1987,7 +1991,7 @@ async function agentAISprawdzDostepnoscProducentow(limit=null,productIds=[]){
     toast(ids.length?"Agent sprawdza wybrany produkt u producenta…":`Agent wyrywkowo sprawdza ${sample} produktów u producentów…`);
     const d=await chmura("supplier-availability-sample",{method:"POST",body:{limit:sample,productIds:ids,threshold:Math.max(1,Number(u.progNiskiProducenta)||50),source:"admin-agent-ai"},timeout:120000});
     await chmuraWczytajStan().catch(()=>{});zbudujProdukty();
-    const s=d.summary||{};toast(`✅ Sprawdzono ${s.checked||0}, w tym priorytetowych ${s.priorityChecked||0}: dostępne ${s.available||0}, niski stan ${s.low||0}, brak ${s.unavailable||0}`);renderuj();return d;
+    const s=d.summary||{};toast(`✅ Sprawdzono ${s.checked||0}, w tym priorytetowych ${s.priorityChecked||0}: dostępne ${s.available||0}, niski stan ${s.low||0}, brak ${s.unavailable||0}`);odswiezDostepnoscProducentowWidoku();return d;
   }catch(e){toast("⚠️ Monitoring producentów: "+(e.message||e));return null;}
 }
 function agentAILinkiProducentowTekst(){
@@ -2186,10 +2190,64 @@ function trasa(){
   return "/";
 }
 function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
+let ostatniaRenderowanaTrasa="";
+function kluczStabilnegoWezla(node){
+  if(!node||node.nodeType!==1)return "";
+  for(const attr of ["id","data-stable-key","data-product-row","data-product-id","data-order-id","data-order-number","data-task-id","data-item-key"]){
+    const value=node.getAttribute(attr);if(value)return `${node.tagName}:${attr}:${value}`;
+  }
+  return "";
+}
+function aktualizujAtrybutyWezla(current,next,active){
+  for(const attr of [...current.attributes])if(!next.hasAttribute(attr.name))current.removeAttribute(attr.name);
+  for(const attr of [...next.attributes])if(current.getAttribute(attr.name)!==attr.value)current.setAttribute(attr.name,attr.value);
+  const focused=current===active;
+  if(current instanceof HTMLInputElement){
+    if(["checkbox","radio"].includes(current.type)){if(!focused)current.checked=next.checked;}
+    else if(!focused)current.value=next.value;
+  }else if(current instanceof HTMLTextAreaElement){if(!focused)current.value=next.value;}
+  else if(current instanceof HTMLSelectElement){if(!focused)current.value=next.value;}
+  else if(current instanceof HTMLDetailsElement)current.open=next.open;
+}
+function aktualizujWezelStabilnie(current,next,active){
+  if(!current||!next)return;
+  if(current.nodeType!==next.nodeType||(current.nodeType===1&&current.tagName!==next.tagName)){
+    current.replaceWith(next.cloneNode(true));return;
+  }
+  if(current.nodeType===3||current.nodeType===8){if(current.nodeValue!==next.nodeValue)current.nodeValue=next.nodeValue;return;}
+  if(current.nodeType!==1)return;
+  aktualizujAtrybutyWezla(current,next,active);
+  aktualizujDzieciStabilnie(current,next,active);
+}
+function aktualizujDzieciStabilnie(current,next,active){
+  const incoming=[...next.childNodes];
+  for(let index=0;index<incoming.length;index++){
+    const wanted=incoming[index],wantedKey=kluczStabilnegoWezla(wanted);let existing=current.childNodes[index];
+    if(wantedKey&&kluczStabilnegoWezla(existing)!==wantedKey){
+      const match=[...current.childNodes].slice(index+1).find(node=>kluczStabilnegoWezla(node)===wantedKey);
+      if(match){current.insertBefore(match,existing||null);existing=match;}
+    }
+    if(!existing){current.appendChild(wanted.cloneNode(true));continue;}
+    aktualizujWezelStabilnie(existing,wanted,active);
+  }
+  while(current.childNodes.length>incoming.length)current.lastChild.remove();
+}
+function aktualizujWidokStabilnie(root,html){
+  const template=document.createElement("template");template.innerHTML=String(html||"").trim();
+  const active=document.activeElement,scrollY=window.scrollY||0,selection=active&&typeof active.selectionStart==="number"?{start:active.selectionStart,end:active.selectionEnd}:null;
+  aktualizujDzieciStabilnie(root,template.content,active);
+  if(active?.isConnected&&selection&&typeof active.setSelectionRange==="function")try{active.setSelectionRange(selection.start,selection.end);}catch(e){}
+  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY});
+}
+function odbiorcaStabilnegoWidoku(root,stabilny){
+  if(!stabilny)return root;
+  return {get innerHTML(){return root.innerHTML;},set innerHTML(html){aktualizujWidokStabilnie(root,html);}};
+}
 function renderuj(){
   try{
     const t = trasa();
-    const w = $("widok");
+    const root = $("widok"),taSamaTrasa=ostatniaRenderowanaTrasa===t&&root.childNodes.length>0;
+    const w = odbiorcaStabilnegoWidoku(root,taSamaTrasa);
     // Moduł panelu zawiera także bezpieczny widok „Brak dostępu”. Ładujemy go
     // wyłącznie po wejściu na trasę administracyjną, również dla gościa.
     const wymagaPanelu=t.startsWith("/admin")||t==="/diagnostyka";
@@ -2199,11 +2257,11 @@ function renderuj(){
         loguj("blad",error.message,t);
         w.innerHTML=`<div class="page"><div class="panel"><h1>Nie udało się wczytać panelu</h1><p>${esc(error.message)}</p><button class="btn" onclick="renderuj()">Spróbuj ponownie</button></div></div>`;
       });
-      return;
+      ostatniaRenderowanaTrasa=t;return;
     }
     if(t.startsWith("/admin/zamowienie/")&&!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
     if(t.startsWith("/admin")&&stanBramki.authenticated&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja) setTimeout(()=>synchronizujBazeCentralna(true),0);
-    window.scrollTo({top:0});
+    if(!taSamaTrasa)window.scrollTo({top:0});
     if(t==="/" || t==="") w.innerHTML = widokSklep();
     else if(t.startsWith("/produkt/")) w.innerHTML = widokProdukt(parseInt(t.split("/")[2]));
     else if(t.startsWith("/kategoria/")) w.innerHTML = widokKategoria(decodeURIComponent(t.split("/")[2]||""));
@@ -2292,6 +2350,7 @@ function renderuj(){
     if(t==="/"||t==="") { rysujChipy(); rysuj(); }
     seoAktualizujMetaDlaTrasy(t);
     if(t==="/admin/aktualizacja"&&!stanAktualizacji.sprawdzono&&!stanAktualizacji.ladowanie) setTimeout(()=>sprawdzStatusAktualizacji(true),0);
+    ostatniaRenderowanaTrasa=t;
   }catch(e){
     loguj("blad", "Błąd renderowania strony: "+e.message, trasa());
     $("widok").innerHTML = `<div class="page"><div class="panel"><h1>⚠️ Coś poszło nie tak</h1><p>Błąd został zapisany w <a href="#/diagnostyka">diagnostyce</a>.</p><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
@@ -2578,7 +2637,7 @@ function kartaProduktu(p){
         ? `<button class="add-btn" disabled style="background:#94a3b8;cursor:not-allowed">${brakCeny?"Cena do uzupełnienia":"Chwilowo niedostępny"}</button>`
         : p.warianty?.length
           ? `<button class="add-btn" onclick="event.stopPropagation();location.hash='#/produkt/${p.id}'" style="background:var(--brand2)">Wybierz wariant →</button>`
-          : `<button class="add-btn" onclick="event.stopPropagation();dodaj(${p.id}, this)">Do koszyka</button>`}
+          : `<div class="card-purchase" onclick="event.stopPropagation()"><div class="card-quantity" aria-label="Liczba sztuk"><button type="button" onclick="ustawIloscKarty(this.nextElementSibling,-1)" aria-label="Zmniejsz liczbę sztuk">−</button><input data-card-quantity type="number" min="1" max="99" step="1" value="1" inputmode="numeric" aria-label="Liczba sztuk produktu ${esc(p.nazwa)}" onchange="ustawIloscKarty(this)"><button type="button" onclick="ustawIloscKarty(this.previousElementSibling,1)" aria-label="Zwiększ liczbę sztuk">+</button></div><button class="add-btn" onclick="dodajZKarty(${p.id},this)">Do koszyka</button></div>`}
     </div>
   </article>`;
 }
@@ -2637,7 +2696,7 @@ function widokListaSpecjalna(tytul, filtr, pusty){
 }
 
 /* ═══════════ WIDOK: PRODUKT ═══════════ */
-let iloscProduktu = 1;
+let iloscProduktu = 1,ostatniProduktIlosci=null;
 function specyfikacjaProduktuHTML(p){
   const wiersze=[
     ["Marka",p.marka],
@@ -2659,7 +2718,7 @@ function specyfikacjaProduktuHTML(p){
 function widokProdukt(id){
   const p = produkty.find(x=>x.id===id);
   if(!p){ loguj("ostrzezenie","Otwarto nieistniejący produkt: id="+id); return `<div class="page"><div class="panel"><h1>Nie znaleziono produktu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`; }
-  iloscProduktu = 1;
+  if(String(ostatniProduktIlosci)!==String(id)){iloscProduktu=1;ostatniProduktIlosci=id;}
   const powiazane = produkty.filter(x=>x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
   const brakCeny = !produktMaCeneSprzedazy(p);
   const niedostepny = produktOznaczonyNiedostepny(p);
@@ -2693,10 +2752,11 @@ function widokProdukt(id){
           <div class="f-group" style="max-width:260px;margin:.6rem 0 0"><label>Wybierz wariant *</label>
             <select id="wariantSel">${p.warianty.map(w=>`<option>${esc(w)}</option>`).join("")}</select>
           </div>`:""}
-          <div class="qty-big">
-            <button onclick="zmienIloscProd(-1)">−</button>
-            <span id="prodQty">1</span>
-            <button onclick="zmienIloscProd(1)">+</button>
+          <label class="product-detail-quantity">Ilość sztuk</label>
+          <div class="qty-big" aria-label="Wybierz liczbę sztuk">
+            <button type="button" onclick="zmienIloscProd(-1)" aria-label="Zmniejsz liczbę sztuk">−</button>
+            <input id="prodQty" type="number" min="1" max="99" step="1" value="${esc(iloscProduktu)}" inputmode="numeric" aria-label="Liczba sztuk" oninput="ustawIloscProduktu(this.value)" onchange="ustawIloscProduktu(this.value)">
+            <button type="button" onclick="zmienIloscProd(1)" aria-label="Zwiększ liczbę sztuk">+</button>
           </div>
           <div style="display:flex;gap:.7rem;flex-wrap:wrap">
             ${niedostepny||brakCeny
@@ -2763,10 +2823,11 @@ function widokProdukt(id){
     ${powiazane.length?`<h2 class="related-h" style="padding:0;margin:1.6rem 0 .2rem">Podobne produkty</h2><div class="grid" style="padding:0;margin:.6rem 0 0">${powiazane.map(kartaProduktu).join("")}</div>`:""}
   </div>`;
 }
-function zmienIloscProd(d){ iloscProduktu=Math.max(1, iloscProduktu+d); const e=$("prodQty"); if(e) e.textContent=iloscProduktu; }
+function ustawIloscProduktu(value){iloscProduktu=Math.max(1,Math.min(99,Math.floor(Number(value)||1)));const e=$("prodQty");if(e)e.value=iloscProduktu;}
+function zmienIloscProd(d){ustawIloscProduktu(iloscProduktu+Number(d||0));}
 function dodajIlosc(id){
   const wariant = $("wariantSel")?.value || null;
-  for(let i=0;i<iloscProduktu;i++) dodaj(id, null, wariant);
+  dodajWIlosci(id,iloscProduktu,null,wariant);
 }
 function pokazZdjecie(src){ const g=$("glowneZdjecie"); if(g) g.src=src; }
 
@@ -4492,20 +4553,26 @@ function alertDostepnosciKoszykaHTML(){
   if(!lista.length)return "";
   return `<div class="backend-note" style="margin-top:.7rem;border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Potwierdzenie dostępności:</b> dla ${lista.map(x=>`${esc(x.nazwa)} × ${x.ilosc}`).join(", ")} obsługa sklepu potwierdzi aktualną dostępność przed wysyłką.</div>`;
 }
-function dodaj(id, btn, wariant){
+function normalizujIloscZakupu(value){return Math.max(1,Math.min(99,Math.floor(Number(value)||1)));}
+function ustawIloscKarty(input,delta=0){if(!input)return 1;const value=normalizujIloscZakupu(Number(input.value||1)+Number(delta||0));input.value=value;return value;}
+function dodajZKarty(id,btn){const box=btn?.closest?.(".card-purchase"),input=box?.querySelector?.("[data-card-quantity]");return dodajWIlosci(id,normalizujIloscZakupu(input?.value||1),btn,null);}
+function dodajWIlosci(id,ilosc=1,btn=null,wariant=null){
+  const ile=normalizujIloscZakupu(ilosc);
   wariant = wariant || null;
   const p = produkty.find(x=>x.id===id);
   if(p&&!produktMaCeneSprzedazy(p)){ toast("⚠️ Ten produkt wymaga uzupełnienia ceny przez administratora"); return; }
   if(p&&produktOznaczonyNiedostepny(p)){ toast("⚠️ Produkt jest chwilowo niedostępny"); return; }
   if(p?.warianty?.length && !wariant){ location.hash="#/produkt/"+id; toast("Wybierz wariant produktu"); return; }
-  if(!potwierdzProgDostepnosci(id, ileWKoszyku(id)+1)) return;
+  if(!potwierdzProgDostepnosci(id, ileWKoszyku(id)+ile)) return;
   const poz = koszyk.find(x=>x.id===id && (x.wariant||null)===wariant);
-  poz ? poz.ile++ : koszyk.push({id, ile:1, ...(wariant?{wariant}:{})});
+  poz ? poz.ile+=ile : koszyk.push({id, ile, ...(wariant?{wariant}:{})});
   zapiszLS("artway_koszyk", koszyk); odswiezKoszyk();
-  if(btn){ btn.textContent="✓ Dodano"; btn.classList.add("added");
-    setTimeout(()=>{btn.textContent="Do koszyka"; btn.classList.remove("added");},900); }
-  toast("Dodano do koszyka 🛒"+(wariant?" ("+wariant+")":""));
+  if(btn){const label=btn.dataset.originalLabel||btn.textContent;btn.dataset.originalLabel=label;btn.textContent=`✓ Dodano ${ile} szt.`;btn.classList.add("added");
+    setTimeout(()=>{if(btn.isConnected){btn.textContent=label;btn.classList.remove("added");}},1100); }
+  toast(`Dodano ${ile} ${ile===1?"sztukę":"szt."} do koszyka 🛒${wariant?" ("+wariant+")":""}`);
+  return true;
 }
+function dodaj(id,btn,wariant){return dodajWIlosci(id,1,btn,wariant);}
 function zmienIloscIdx(i, d){
   const poz = koszyk[i]; if(!poz) return;
   if(d>0){

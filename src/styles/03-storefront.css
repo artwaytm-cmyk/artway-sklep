@@ -61,7 +61,14 @@
 .add-btn{width:100%;padding:.6rem;border:none;border-radius:11px;background:var(--brand);color:#fff;font-weight:700;font-size:.92rem;transition:.15s}
 .add-btn:hover{background:#1d4ed8}
 .add-btn.added{background:var(--ok)}
+.card-purchase{display:grid;grid-template-columns:108px minmax(0,1fr);gap:.45rem;align-items:stretch;margin-top:auto}
+.card-quantity{display:grid;grid-template-columns:32px minmax(38px,1fr) 32px;align-items:stretch;border:1.5px solid var(--line);border-radius:11px;background:var(--panel);overflow:hidden}
+.card-quantity button{border:0;background:var(--bg);color:var(--ink);font-size:1rem;font-weight:850;cursor:pointer}
+.card-quantity button:hover{background:#e8eef7;color:var(--brand)}
+.card-quantity input{min-width:0;width:100%;padding:.35rem .1rem;border:0;border-left:1px solid var(--line);border-right:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;font-size:.82rem;font-weight:850;text-align:center;appearance:textfield}
+.card-quantity input::-webkit-inner-spin-button,.card-quantity input::-webkit-outer-spin-button{margin:0;appearance:none}
 .empty{grid-column:1/-1;text-align:center;padding:3rem;color:var(--muted2)}
+@media(max-width:560px){.card-purchase{grid-template-columns:96px minmax(0,1fr);gap:.35rem}.card-quantity{grid-template-columns:28px minmax(34px,1fr) 28px}.card-quantity input{font-size:.76rem}}
 
 /* ── Zalety ── */
 .perks{max-width:1200px;margin:0 auto 2.5rem;padding:0 1rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem}

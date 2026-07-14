@@ -25,20 +25,26 @@ function alertDostepnosciKoszykaHTML(){
   if(!lista.length)return "";
   return `<div class="backend-note" style="margin-top:.7rem;border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Potwierdzenie dostępności:</b> dla ${lista.map(x=>`${esc(x.nazwa)} × ${x.ilosc}`).join(", ")} obsługa sklepu potwierdzi aktualną dostępność przed wysyłką.</div>`;
 }
-function dodaj(id, btn, wariant){
+function normalizujIloscZakupu(value){return Math.max(1,Math.min(99,Math.floor(Number(value)||1)));}
+function ustawIloscKarty(input,delta=0){if(!input)return 1;const value=normalizujIloscZakupu(Number(input.value||1)+Number(delta||0));input.value=value;return value;}
+function dodajZKarty(id,btn){const box=btn?.closest?.(".card-purchase"),input=box?.querySelector?.("[data-card-quantity]");return dodajWIlosci(id,normalizujIloscZakupu(input?.value||1),btn,null);}
+function dodajWIlosci(id,ilosc=1,btn=null,wariant=null){
+  const ile=normalizujIloscZakupu(ilosc);
   wariant = wariant || null;
   const p = produkty.find(x=>x.id===id);
   if(p&&!produktMaCeneSprzedazy(p)){ toast("⚠️ Ten produkt wymaga uzupełnienia ceny przez administratora"); return; }
   if(p&&produktOznaczonyNiedostepny(p)){ toast("⚠️ Produkt jest chwilowo niedostępny"); return; }
   if(p?.warianty?.length && !wariant){ location.hash="#/produkt/"+id; toast("Wybierz wariant produktu"); return; }
-  if(!potwierdzProgDostepnosci(id, ileWKoszyku(id)+1)) return;
+  if(!potwierdzProgDostepnosci(id, ileWKoszyku(id)+ile)) return;
   const poz = koszyk.find(x=>x.id===id && (x.wariant||null)===wariant);
-  poz ? poz.ile++ : koszyk.push({id, ile:1, ...(wariant?{wariant}:{})});
+  poz ? poz.ile+=ile : koszyk.push({id, ile, ...(wariant?{wariant}:{})});
   zapiszLS("artway_koszyk", koszyk); odswiezKoszyk();
-  if(btn){ btn.textContent="✓ Dodano"; btn.classList.add("added");
-    setTimeout(()=>{btn.textContent="Do koszyka"; btn.classList.remove("added");},900); }
-  toast("Dodano do koszyka 🛒"+(wariant?" ("+wariant+")":""));
+  if(btn){const label=btn.dataset.originalLabel||btn.textContent;btn.dataset.originalLabel=label;btn.textContent=`✓ Dodano ${ile} szt.`;btn.classList.add("added");
+    setTimeout(()=>{if(btn.isConnected){btn.textContent=label;btn.classList.remove("added");}},1100); }
+  toast(`Dodano ${ile} ${ile===1?"sztukę":"szt."} do koszyka 🛒${wariant?" ("+wariant+")":""}`);
+  return true;
 }
+function dodaj(id,btn,wariant){return dodajWIlosci(id,1,btn,wariant);}
 function zmienIloscIdx(i, d){
   const poz = koszyk[i]; if(!poz) return;
   if(d>0){
