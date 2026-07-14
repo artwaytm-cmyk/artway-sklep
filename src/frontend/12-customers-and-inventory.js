@@ -234,7 +234,7 @@ function pozycjeZamowieniaMagazyn(z){
   return [];
 }
 function statusAllegroRezerwujeMagazyn(z){
-  return !!z && !allegroZamowienieZrealizowaneLokalnie(z) && String(z.status||"").toUpperCase()!=="CANCELLED" && !["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(allegroStatusKolejki(z));
+  return !!z && allegroZamowienieAktywneLokalnie(z);
 }
 function aktywneZamowieniaAllegro(){
   return (Array.isArray(allegroZamowienia)?allegroZamowienia:[]).filter(statusAllegroRezerwujeMagazyn);

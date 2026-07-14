@@ -801,7 +801,11 @@ function allegroStatusKolejkiMeta(z){
 }
 function allegroLokalnyStatus(z={}){return [z.warehouseStage,z.agentStage,z.localStage,z.magazynStatus,z.localStatus].map(v=>String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/ł/g,"l"));}
 function allegroZamowienieZrealizowaneLokalnie(z={}){return allegroLokalnyStatus(z).some(s=>["zrealizowane","zamkniete","wyslane","anulowane"].includes(s))||z.agentHandled===true||z.localCompleted===true;}
-function allegroEtapMagazynu(z={}){const official=allegroStatusKolejki(z);if(["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(official))return "zamkniete";if(allegroZamowienieZrealizowaneLokalnie(z))return "zrealizowane";const s=String(z.warehouseStage||"").toLowerCase();return ["do_sprawdzenia","braki","kompletacja","spakowane"].includes(s)?s:"do_sprawdzenia";}
+const ALLEGRO_STATUSY_ZAMKNIETE=new Set(["SENT","PICKED_UP","CANCELLED","RETURNED"]);
+function allegroZamowienieZamknieteWAllegro(z={}){return ALLEGRO_STATUSY_ZAMKNIETE.has(allegroStatusKolejki(z));}
+function allegroKategoriaKolejki(z={}){const status=allegroStatusKolejki(z);if(ALLEGRO_STATUSY_ZAMKNIETE.has(status))return status;return allegroZamowienieZrealizowaneLokalnie(z)?"zrealizowane":status;}
+function allegroZamowienieAktywneLokalnie(z={}){return !allegroZamowienieZamknieteWAllegro(z)&&!allegroZamowienieZrealizowaneLokalnie(z);}
+function allegroEtapMagazynu(z={}){if(allegroZamowienieZamknieteWAllegro(z))return "zamkniete";if(allegroZamowienieZrealizowaneLokalnie(z))return "zrealizowane";const s=String(z.warehouseStage||"").toLowerCase();return ["do_sprawdzenia","braki","kompletacja","spakowane"].includes(s)?s:"do_sprawdzenia";}
 function allegroEtapMagazynuMeta(z={}){return ({do_sprawdzenia:{label:"Do sprawdzenia",klasa:"lvl-ostrzezenie"},braki:{label:"Braki — zamówić",klasa:"lvl-blad"},kompletacja:{label:"Kompletacja",klasa:"lvl-info"},spakowane:{label:"Spakowane",klasa:"lvl-ok"},zrealizowane:{label:"Zrealizowane lokalnie",klasa:"lvl-ok"},zamkniete:{label:"Zamknięte przez Allegro",klasa:"lvl-ok"}})[allegroEtapMagazynu(z)];}
 async function allegroUstawEtapMagazynu(orderId,stage){
   try{const d=await chmura("allegro-order-warehouse-stage",{method:"POST",body:{orderId,stage},timeout:18000});allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;allegroZapiszCache();toast("Etap magazynu zapisany — status Allegro pozostał bez zmian");renderuj();}catch(e){toast("⚠️ Etap magazynu: "+(e.message||e));}
@@ -961,10 +965,8 @@ function allegroRenderujKandydatowMapowania(q=""){
 }
 async function allegroWybierzMapowaniePozycji(offerId,productId,force=false,replaceExisting=false){const result=await allegroMapujOferte(offerId,productId,{force,replaceExisting});if(result?.ok)allegroZamknijMapowaniePozycji();else allegroRenderujKandydatowMapowania(document.getElementById("allegroMappingSearch")?.value||"");}
 function allegroZamowieniePasujeDoFiltra(z){
-  const s=allegroStatusKolejki(z);
-  const terminal=["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(s);
-  const lokalnieZrealizowane=!terminal&&allegroZamowienieZrealizowaneLokalnie(z);
-  const statusOk=filtrAllegroZamowien==="wszystkie"||(filtrAllegroZamowien==="do_obslugi"?!terminal&&!lokalnieZrealizowane:filtrAllegroZamowien==="zrealizowane"?lokalnieZrealizowane:s===filtrAllegroZamowien);
+  const kategoria=allegroKategoriaKolejki(z);
+  const statusOk=filtrAllegroZamowien==="wszystkie"||(filtrAllegroZamowien==="do_obslugi"?allegroZamowienieAktywneLokalnie(z):kategoria===filtrAllegroZamowien);
   const etapOk=filtrEtapuAllegroZamowien==="wszystkie"||allegroEtapMagazynu(z)===filtrEtapuAllegroZamowien;
   return statusOk&&etapOk;
 }
@@ -1013,7 +1015,7 @@ function allegroZamowieniaTabelaHTML(){
   const zaznaczone=[...zaznaczoneAllegroZamowienia].filter(id=>wszystkie.some(z=>String(z.id)===id));
   const wszystkieWidoczneZaznaczone=!!widoczneZamowienia.length&&widoczneZamowienia.every(z=>zaznaczoneAllegroZamowienia.has(String(z.id)));
   const counts={do_obslugi:0,zrealizowane:0,wszystkie:wszystkie.length};
-  wszystkie.forEach(z=>{const s=allegroStatusKolejki(z),terminal=["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(s),done=!terminal&&allegroZamowienieZrealizowaneLokalnie(z);counts[s]=(counts[s]||0)+1;if(done)counts.zrealizowane++;if(!done&&!terminal)counts.do_obslugi++;});
+  wszystkie.forEach(z=>{const kategoria=allegroKategoriaKolejki(z);counts[kategoria]=(counts[kategoria]||0)+1;if(allegroZamowienieAktywneLokalnie(z))counts.do_obslugi++;});
   const filtry=[["do_obslugi","Do obsługi"],["NEW","Nowe"],["PROCESSING","W realizacji"],["READY_FOR_SHIPMENT","Do wysłania"],["zrealizowane","Zrealizowane lokalnie"],["SENT","Wysłane"],["CANCELLED","Anulowane"],["RETURNED","Zwrócone"],["wszystkie","Wszystkie"]];
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
@@ -1060,7 +1062,7 @@ function allegroZlecenieHTML(z){
   const idEtap=`allegro-etap-${z.id}`;
   const zaznaczone=zaznaczoneAllegroZamowienia.has(String(z.id));
   const lokalnieDone=allegroZamowienieZrealizowaneLokalnie(z);
-  return `<article class="allegro-order-card ${zaznaczone?"is-selected ":""}${["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(s)||lokalnieDone?"is-closed":"is-active"}">
+  return `<article class="allegro-order-card ${zaznaczone?"is-selected ":""}${allegroZamowienieAktywneLokalnie(z)?"is-active":"is-closed"}">
     <header class="allegro-order-head">
       <div class="allegro-order-title"><label class="allegro-order-select" title="Zaznaczenie tylko do operacji grupowych"><input type="checkbox" ${zaznaczone?"checked":""} onchange="allegroPrzelaczZaznaczenieZamowienia(${jsArg(z.id)},this.checked)"></label><span class="allegro-order-ico">📦</span><div><b>Zlecenie ${esc(z.id||z.nr||"—")}</b><small>${esc(allegroDataTxt(z.createdAt||z.firstFetchedAt))} • ${items.length} pozycji / ${sztuk} szt. • ${esc(z.total||"—")}</small></div></div>
       <div class="allegro-order-state"><span class="lvl ${meta.klasa}">Allegro: ${esc(meta.label)}</span><span class="lvl ${etap.klasa}">Magazyn: ${esc(etap.label)}</span><small>Ostatnia synchronizacja: ${esc(allegroDataTxt(z.rawUpdatedAt||z.lastSeenAt))}</small></div>
@@ -1077,7 +1079,7 @@ function allegroZlecenieHTML(z){
       </table></div>
     </details>
     <footer class="allegro-order-actions">
-      ${!["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(s)?`<span class="${analiza.gotowe?"lvl lvl-ok":"lvl lvl-blad"}">${analiza.gotowe?"✅ Wszystkie pozycje mają stan i lokalizację":`⚠️ Braki ${analiza.braki} szt. • nierozpoznane ${analiza.nierozpoznane} • bez stanu ${analiza.bezStanu} • bez lokalizacji ${analiza.bezLokalizacji}`}</span><select id="${esc(idEtap)}" aria-label="Etap magazynu">${[["do_sprawdzenia","Do sprawdzenia"],["braki","Braki — zamówić"],["kompletacja","Kompletacja"],["spakowane","Spakowane"],["zrealizowane","✅ Zrealizowane lokalnie"]].map(([id,label])=>`<option value="${id}" ${allegroEtapMagazynu(z)===id?"selected":""}>${label}</option>`).join("")}</select><button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},document.getElementById(${jsArg(idEtap)}).value)">Zapisz etap</button>${!lokalnieDone?`<button class="btn" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'zrealizowane')">✅ Oznacz jako zrealizowane</button>`:`<button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'do_sprawdzenia')">↩️ Przywróć do obsługi</button>`}`:""}
+      ${!allegroZamowienieZamknieteWAllegro(z)?`<span class="${analiza.gotowe?"lvl lvl-ok":"lvl lvl-blad"}">${analiza.gotowe?"✅ Wszystkie pozycje mają stan i lokalizację":`⚠️ Braki ${analiza.braki} szt. • nierozpoznane ${analiza.nierozpoznane} • bez stanu ${analiza.bezStanu} • bez lokalizacji ${analiza.bezLokalizacji}`}</span><select id="${esc(idEtap)}" aria-label="Etap magazynu">${[["do_sprawdzenia","Do sprawdzenia"],["braki","Braki — zamówić"],["kompletacja","Kompletacja"],["spakowane","Spakowane"],["zrealizowane","✅ Zrealizowane lokalnie"]].map(([id,label])=>`<option value="${id}" ${allegroEtapMagazynu(z)===id?"selected":""}>${label}</option>`).join("")}</select><button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},document.getElementById(${jsArg(idEtap)}).value)">Zapisz etap</button>${!lokalnieDone?`<button class="btn" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'zrealizowane')">✅ Oznacz jako zrealizowane</button>`:`<button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'do_sprawdzenia')">↩️ Przywróć do obsługi</button>`}`:""}
     </footer>
   </article>`;
 }
@@ -1634,7 +1636,7 @@ function allegroSubnavHTML(aktywny="start"){
 function allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete){
   const cfg={
     start:{ico:"🟠",kicker:"Centrum Allegro",title:"Pulpit integracji",opis:"Jedno miejsce do kontroli zamówień, katalogu ofert, wystawiania i komunikacji.",metryki:[["Połączenie",allegroStan.connected?"Aktywne":"Wymaga uwagi"],["Oferty",(allegroOferty||[]).length],["Zamówienia",(allegroZamowienia||[]).length]]},
-    zamowienia:{ico:"📦",kicker:"Sprzedaż",title:"Kolejka zamówień Allegro",opis:"Status zawsze pochodzi z Allegro; agent osobno prowadzi sprawdzenie stanu, lokalizacji, zamówienie u producenta i kompletację.",metryki:[["Do obsługi",(allegroZamowienia||[]).filter(statusAllegroRezerwujeMagazyn).length],["Z brakami",(allegroZamowienia||[]).filter(z=>allegroEtapMagazynu(z)==="braki").length],["Zrealizowane lokalnie",(allegroZamowienia||[]).filter(z=>allegroZamowienieZrealizowaneLokalnie(z)&&!["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(allegroStatusKolejki(z))).length]]},
+    zamowienia:{ico:"📦",kicker:"Sprzedaż",title:"Kolejka zamówień Allegro",opis:"Status zawsze pochodzi z Allegro; agent osobno prowadzi sprawdzenie stanu, lokalizacji, zamówienie u producenta i kompletację.",metryki:[["Do obsługi",(allegroZamowienia||[]).filter(statusAllegroRezerwujeMagazyn).length],["Z brakami",(allegroZamowienia||[]).filter(z=>allegroEtapMagazynu(z)==="braki").length],["Zrealizowane lokalnie",(allegroZamowienia||[]).filter(z=>allegroKategoriaKolejki(z)==="zrealizowane").length]]},
     oferty:{ico:"🏷️",kicker:"Katalog Allegro",title:"Oferty i powiązania",opis:"Profesjonalny katalog ofert z miniaturą, identyfikatorami, ceną, stanem i kontrolą powiązania z produktem sklepu.",metryki:[["Wszystkie",(allegroOferty||[]).length],["Podpięte",mapped],["Do powiązania",niepodpiete]]},
     wystawianie:{ico:"🟠",kicker:"Publikowanie",title:"Przygotowanie ofert",opis:"Kontrola kompletności danych produktu przed utworzeniem bezpiecznego szkicu oferty.",metryki:[["Produkty",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length],["Gotowe",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroBrakiProduktuDoWystawienia(p).length).length],["Do uzupełnienia",produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroBrakiProduktuDoWystawienia(p).length).length]]},
     rentownosc:{ico:"📈",kicker:"Finanse produktu",title:"Opłacalność sklepu i Allegro",opis:"Dwa oddzielne modele kosztów, osobne cele marży i rekomendowane ceny. Allegro korzysta z prowizji pobieranej bezpośrednio przez API.",metryki:[["Pełne Allegro",produktyDoAdministracji().filter(allegroProduktMaPelneDaneMarzowe).length],["Bez prowizji",produktyDoAdministracji().filter(p=>!p.allegroFeeCalculatedAt).length],["Cele",`Sklep ${sklepDocelowaMarza}% • Allegro ${allegroDocelowaMarza}%`]]},
@@ -1923,7 +1925,7 @@ function adminZamowienieStatusPanelHTML(z){
   </div>`;
 }
 function adminZamowieniaSubnavHTML(aktywny="lista"){
-  const sklep=pobierzZamowienia(),allegroAktywne=(allegroZamowienia||[]).filter(z=>!["SENT","PICKED_UP","CANCELLED","RETURNED"].includes(allegroStatusKolejki(z))).length;
+  const sklep=pobierzZamowienia(),allegroAktywne=(allegroZamowienia||[]).filter(allegroZamowienieAktywneLokalnie).length;
   const doWysylki=sklep.filter(z=>!["anulowane","dostarczone","zakończone"].includes(String(z.status||"").toLowerCase())&&!daneWysylki(z).numer).length;
   return adminSubnavHTML([
     {id:"lista",href:"#/admin/zamowienia",label:"📦 Lista sklepu",badge:sklep.length||""},
