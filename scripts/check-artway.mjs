@@ -162,6 +162,7 @@ requireMarkers('połączonych assets JS', app, [
   'function widokAdminJakoscKatalogu',
   'function katalogJakoscPobierz',
   'function seoUruchomPlanDzienny',
+  'indexNowEnabled',
   'function seoEksportujFeedGoogleCSV',
   'function seoAktualizujMetaDlaTrasy',
   'function seoFiltrujKolejke',

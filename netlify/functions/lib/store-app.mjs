@@ -37,6 +37,7 @@ import {
   auditCatalog,
   mergeCatalogProducts,
 } from './domain/catalog-quality.mjs';
+import { submitIndexNow } from './domain/indexnow.mjs';
 import {
   ALLEGRO_COMPLIANCE_POLICY,
   allegroCheckText,
@@ -4901,7 +4902,7 @@ function seoZastosujPatch(data, id, patch) {
   if (Array.isArray(data.artway_produkty_katalog)) data.artway_produkty_katalog = data.artway_produkty_katalog.map((p) => String(p?.id) === key ? { ...p, ...patch } : p);
 }
 async function seoWykonajDziennyPlan({ limit, source } = {}) {
-  const rec = await czytaj('settings', { data: {}, rev: 0 }), data = rec.data && typeof rec.data === 'object' ? { ...rec.data } : {}, config = { enabled: true, dailyLimit: 5, autoFillMissing: true, preferBestsellers: true, ...(data.artway_seo_ustawienia || {}), autoAllProducts: true };
+  const rec = await czytaj('settings', { data: {}, rev: 0 }), data = rec.data && typeof rec.data === 'object' ? { ...rec.data } : {}, config = { enabled: true, dailyLimit: 5, autoFillMissing: true, preferBestsellers: true, indexNowEnabled: true, ...(data.artway_seo_ustawienia || {}), autoAllProducts: true };
   const amount = Math.max(1, Math.min(50, Number(limit || config.dailyLimit) || 5));
   if (config.enabled === false && String(source || '').startsWith('scheduled')) return { processed: 0, skipped: true, reason: 'disabled' };
   const today = new Date().toISOString().slice(0, 10), products = seoProduktyCentralne(data).map((product) => ({ product, score: seoOcena(product) })).sort((a, b) => {
@@ -4918,11 +4919,19 @@ async function seoWykonajDziennyPlan({ limit, source } = {}) {
     }
     patch.seoScore = seoOcena({ ...item.product, ...patch }); seoZastosujPatch(data, item.product.id, patch);
   }
-  data.artway_seo_ustawienia = { ...config, dailyLimit: amount, lastRunAt: now, lastRunCount: selected.length };
+  let promotion = { submitted: false, accepted: false, status: config.indexNowEnabled === false ? 'disabled' : 'skipped', count: 0, httpStatus: null };
+  if (config.indexNowEnabled !== false && selected.length) {
+    try {
+      promotion = await submitIndexNow(['https://artwaytm.pl/', ...selected.map((item) => `https://artwaytm.pl/produkt/${encodeURIComponent(item.product.id)}`)]);
+    } catch (error) {
+      promotion = { submitted: true, accepted: false, status: 'error', count: 0, httpStatus: null, error: tekst(error?.message || error, 300) };
+    }
+  }
+  data.artway_seo_ustawienia = { ...config, dailyLimit: amount, lastRunAt: now, lastRunCount: selected.length, lastPromotionAt: promotion.submitted ? now : (config.lastPromotionAt || ''), lastPromotionStatus: promotion.submitted ? promotion.status : (config.lastPromotionStatus || promotion.status), lastPromotionCount: promotion.submitted ? promotion.count : (Number(config.lastPromotionCount) || 0), lastPromotionHttpStatus: promotion.submitted ? promotion.httpStatus : (config.lastPromotionHttpStatus || null) };
   const history = Array.isArray(data.artway_seo_historia) ? data.artway_seo_historia : [];
-  data.artway_seo_historia = [{ id: `seo-${Date.now()}`, at: now, type: 'daily', source: tekst(source || 'scheduled', 100), count: selected.length, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })) }, ...history].slice(0, 500);
+  data.artway_seo_historia = [{ id: `seo-${Date.now()}`, at: now, type: 'daily', source: tekst(source || 'scheduled', 100), count: selected.length, promotion: { status: promotion.status, count: promotion.count, httpStatus: promotion.httpStatus }, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })) }, ...history].slice(0, 500);
   const saved = { data, rev: Number(rec.rev || 0) + 1, updated_at: now }; await zapisz('settings', saved);
-  return { processed: selected.length, limit: amount, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })), updated_at: now, rev: saved.rev };
+  return { processed: selected.length, limit: amount, promotion, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })), updated_at: now, rev: saved.rev };
 }
 
 async function katalogWykonajAudyt({ fixSafe = false, quarantineOrphans = false, source = 'manual-admin' } = {}) {
