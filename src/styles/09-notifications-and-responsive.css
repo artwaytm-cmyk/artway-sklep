@@ -70,9 +70,9 @@
   .admin-page{margin:.75rem auto 1.5rem;gap:.65rem}
   .admin-nav{position:static;flex-direction:row;flex-wrap:nowrap;overflow:auto hidden;max-width:100%;width:100%;gap:.25rem;padding:.4rem;border-radius:13px;scrollbar-width:none;contain:paint}
   .admin-nav::-webkit-scrollbar{display:none}
-  .admin-nav-separator,.admin-nav-group-toggle{display:none}
+  .admin-nav-heading,.admin-nav-search,.admin-nav-footer,.admin-nav-separator,.admin-nav-group-toggle{display:none}
   .admin-nav-group,.admin-nav-group.collapsed{display:contents;background:transparent}
-  .admin-nav-items,.admin-nav-group.collapsed .admin-nav-items{display:contents}
+  .admin-nav-items,.admin-nav-group.collapsed .admin-nav-items,.admin-nav-group.search-open .admin-nav-items{display:contents;margin:0;padding:0;border:0}
   .admin-nav-link{flex:0 0 auto;padding:.45rem .58rem;font-size:.76rem;white-space:nowrap;min-height:44px;display:inline-flex;align-items:center}
   .admin-nav-link:hover{transform:none}
   .admin-nav-home{padding:.45rem .62rem}

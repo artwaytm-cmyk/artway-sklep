@@ -33,29 +33,31 @@ const ETAPY_WYSYLKI = {
   zwrot:{nazwa:"Zwrot",ikona:"↩️",kolor:"#fce7f3"},
   anulowana:{nazwa:"Anulowana",ikona:"⛔",kolor:"#e2e8f0"}
 };
-const MENU_ADMINA_PULPIT = ["/admin","📊","Pulpit","Centrum dowodzenia"];
+const MENU_ADMINA_PULPIT = ["/admin","📊","Pulpit","Priorytety i praca na dziś"];
 const MENU_ADMINA = [
-  {id:"sprzedaz",ikona:"🛒",nazwa:"Sprzedaż i klienci",elementy:[
-    ["/admin/zamowienia","📦","Zamówienia"],
-    ["/admin/allegro","🟠","Allegro"],
-    ["/admin/klienci","👥","Klienci"]
+  {id:"sprzedaz",numer:"01",ikona:"🛒",nazwa:"Sprzedaż i klienci",elementy:[
+    ["/admin/zamowienia","📦","Zamówienia sklepu","Statusy, płatności i obsługa"],
+    ["/admin/allegro","🟠","Allegro","Oferty, zamówienia i komunikacja"],
+    ["/admin/klienci","👥","Klienci","Konta, uprawnienia i historia"]
   ]},
-  {id:"realizacja",ikona:"⚙️",nazwa:"Realizacja i finanse",elementy:[
-    ["/admin/wysylki","🚚","Centrum wysyłek"],
-    ["/admin/magazyn","🏬","Magazyn"],
-    ["/admin/infakt","🧾","inFakt i faktury"]
+  {id:"towar",numer:"02",ikona:"📦",nazwa:"Produkty i logistyka",elementy:[
+    ["/admin/asortyment","🏷️","Asortyment","Produkty, katalogi i mapowanie"],
+    ["/admin/magazyn","🏬","Magazyn","Stany, lokalizacje i dostawcy"],
+    ["/admin/wysylki","🚚","Centrum wysyłek","InPost, etykiety i tracking"]
   ]},
-  {id:"katalog",ikona:"🏷️",nazwa:"Katalog i rozwój",elementy:[
-    ["/admin/asortyment","🏷️","Asortyment"],
-    ["/admin/seo","📣","Pozycjonowanie"],
-    ["/admin/agent-ai","🤖","Agent AI"]
+  {id:"finanse",numer:"03",ikona:"🧾",nazwa:"Finanse i dokumenty",elementy:[
+    ["/admin/infakt","🧾","inFakt i faktury","Koszty, dokumenty i rozliczenia"]
   ]},
-  {id:"system",ikona:"🛠️",nazwa:"Ustawienia systemu",elementy:[
-    ["/admin/personalizacja","🎨","Personalizacja"],
-    ["/admin/eksport","⇄","Import / eksport"],
-    ["/admin/aktualizacja","⬆️","Aktualizacja strony"],
-    ["/admin/publikacja","🌍","Publikacja"],
-    ["/diagnostyka","🩺","Diagnostyka"]
+  {id:"automatyzacja",numer:"04",ikona:"🤖",nazwa:"Agent AI i SEO",elementy:[
+    ["/admin/agent-ai","🤖","Agent AI","Zadania, decyzje i automaty"],
+    ["/admin/seo","📣","Pozycjonowanie","Widoczność i promocja produktów"]
+  ]},
+  {id:"system",numer:"05",ikona:"🛠️",nazwa:"System i ustawienia",elementy:[
+    ["/admin/personalizacja","🎨","Personalizacja","Wygląd, układy i ustawienia sklepu"],
+    ["/admin/eksport","⇄","Import / eksport","Przenoszenie i kontrola danych"],
+    ["/admin/aktualizacja","⬆️","Aktualizacja strony","Pliki i wersja aplikacji"],
+    ["/admin/publikacja","🌍","Publikacja","Wdrożenie i status online"],
+    ["/diagnostyka","🩺","Diagnostyka","Integracje, błędy i kondycja"]
   ]}
 ];
 function adminMenuPozycjaAktywna(aktywna,href){
@@ -66,11 +68,22 @@ function adminMenuLinkHTML(pozycja,aktywna,powiadomienia,dodatkowaKlasa=""){
   const [href,ikona,nazwa,podpis]=pozycja,czyAktywna=adminMenuPozycjaAktywna(aktywna,href),licznik=powiadomienia[href]||0;
   return `<a href="#${href}" class="admin-nav-link ${dodatkowaKlasa} ${czyAktywna?"active":""}" ${czyAktywna?'aria-current="page"':""}><span class="admin-nav-link-main"><i>${ikona}</i><span><b>${esc(nazwa)}</b>${podpis?`<small>${esc(podpis)}</small>`:""}</span></span>${licznik?`<span class="nav-badge" aria-label="${licznik} aktywnych spraw">${licznik}</span>`:""}</a>`;
 }
-function adminMenuStanGrup(){const stan=wczytajLS("artway_admin_menu_grupy",{});return stan&&typeof stan==="object"?stan:{};}
+function adminMenuOtwartaGrupa(){return String(wczytajLS("artway_admin_menu_otwarta_v2","")||"");}
 function przelaczGrupeMenuAdmina(id,button){
   const grupa=button?.closest?.(".admin-nav-group");if(!grupa)return;
-  const zwinieta=!grupa.classList.contains("collapsed");grupa.classList.toggle("collapsed",zwinieta);button.setAttribute("aria-expanded",String(!zwinieta));
-  const stan=adminMenuStanGrup();stan[id]=zwinieta;zapiszLS("artway_admin_menu_grupy",stan);
+  const nav=grupa.closest(".admin-nav"),otwieramy=grupa.classList.contains("collapsed");
+  nav?.querySelectorAll(".admin-nav-group").forEach(g=>{g.classList.add("collapsed");g.querySelector(".admin-nav-group-toggle")?.setAttribute("aria-expanded","false");});
+  if(otwieramy){grupa.classList.remove("collapsed");button.setAttribute("aria-expanded","true");}
+  zapiszLS("artway_admin_menu_otwarta_v2",otwieramy?id:"");
+}
+function filtrujMenuAdmina(input){
+  const nav=input?.closest?.(".admin-nav"),q=normalizujSzukanyTekst(input?.value||"");if(!nav)return;
+  nav.classList.toggle("is-searching",!!q);
+  nav.querySelectorAll(".admin-nav-group").forEach(grupa=>{
+    let trafienia=0;grupa.querySelectorAll(".admin-nav-link").forEach(link=>{const pasuje=!q||normalizujSzukanyTekst(link.textContent).includes(q);link.hidden=!pasuje;if(pasuje)trafienia++;});
+    const pasujeNaglowek=!q||normalizujSzukanyTekst(grupa.querySelector(".admin-nav-group-toggle")?.textContent||"").includes(q);grupa.hidden=!!q&&!trafienia&&!pasujeNaglowek;grupa.classList.toggle("search-open",!!q&&(trafienia>0||pasujeNaglowek));
+  });
+  nav.querySelector(".admin-nav-home")?.toggleAttribute("hidden",!!q&&!normalizujSzukanyTekst("pulpit priorytety praca dzisiaj").includes(q));
 }
 function adminSzkielet(aktywna, tresc){
   const powiadomienia = {
@@ -83,17 +96,22 @@ function adminSzkielet(aktywna, tresc){
     "/admin/asortyment": opinie.filter(o=>o.status==="oczekuje").length,
     "/admin/seo": seoKolejkaProduktow().filter(x=>x.score<85).length
   };
-  const stanGrup=adminMenuStanGrup();
+  const licznikOperacyjny=["/admin/zamowienia","/admin/allegro","/admin/wysylki","/admin/magazyn","/admin/infakt"].reduce((s,h)=>s+(powiadomienia[h]||0),0);
+  powiadomienia["/admin"]=licznikOperacyjny;
+  const otwartaGrupa=adminMenuOtwartaGrupa();
   return `
   <div class="admin-page">
     <aside class="admin-nav" aria-label="Główna nawigacja administratora">
+      <div class="admin-nav-heading"><span>Panel administratora</span><small>Moduły sklepu</small></div>
+      <label class="admin-nav-search"><span>🔎</span><input type="search" placeholder="Znajdź moduł…" aria-label="Znajdź moduł panelu" oninput="filtrujMenuAdmina(this)"></label>
       ${adminMenuLinkHTML(MENU_ADMINA_PULPIT,aktywna,powiadomienia,"admin-nav-home")}
       <div class="admin-nav-separator"></div>
       ${MENU_ADMINA.map(grupa=>{
-        const aktywnaGrupa=grupa.elementy.some(p=>adminMenuPozycjaAktywna(aktywna,p[0])),domyslnieZwinieta=stanGrup[grupa.id]===undefined&&grupa.id==="system",zwinieta=(stanGrup[grupa.id]===true||domyslnieZwinieta)&&!aktywnaGrupa;
+        const aktywnaGrupa=grupa.elementy.some(p=>adminMenuPozycjaAktywna(aktywna,p[0])),zwinieta=!aktywnaGrupa&&otwartaGrupa!==grupa.id;
         const licznikGrupy=grupa.elementy.reduce((s,p)=>s+(powiadomienia[p[0]]||0),0);
-        return `<section class="admin-nav-group ${aktywnaGrupa?"is-active":""} ${zwinieta?"collapsed":""}" data-admin-menu-group="${esc(grupa.id)}"><button type="button" class="admin-nav-group-toggle" onclick="przelaczGrupeMenuAdmina('${esc(grupa.id)}',this)" aria-expanded="${String(!zwinieta)}"><span><i>${grupa.ikona}</i>${esc(grupa.nazwa)}</span><span class="admin-nav-group-meta">${licznikGrupy?`<b>${licznikGrupy}</b>`:""}<em>⌄</em></span></button><div class="admin-nav-items">${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia)).join("")}</div></section>`;
+        return `<section class="admin-nav-group ${aktywnaGrupa?"is-active":""} ${zwinieta?"collapsed":""}" data-admin-menu-group="${esc(grupa.id)}"><button type="button" class="admin-nav-group-toggle" onclick="przelaczGrupeMenuAdmina('${esc(grupa.id)}',this)" aria-expanded="${String(!zwinieta)}"><span class="admin-nav-group-title"><small>${esc(grupa.numer)}</small><i>${grupa.ikona}</i><b>${esc(grupa.nazwa)}</b></span><span class="admin-nav-group-meta">${licznikGrupy?`<b>${licznikGrupy}</b>`:""}<em>⌄</em></span></button><div class="admin-nav-items">${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia)).join("")}</div></section>`;
       }).join("")}
+      <div class="admin-nav-footer"><span class="${licznikOperacyjny?"has-work":"is-clear"}"></span><small>${licznikOperacyjny?`${licznikOperacyjny} aktywnych spraw operacyjnych`:"Brak pilnych spraw operacyjnych"}</small></div>
     </aside>
     <div class="admin-tresc">${tresc}</div>
   </div>`;
