@@ -25,8 +25,18 @@ function asortymentSzkielet(tab, tresc){
 
 /* Jeden standard wyszukiwania w całym panelu: zwijany nagłówek, opis,
    licznik wyników i responsywna siatka. Poszczególne domeny przekazują tylko pola. */
-function adminWyszukiwaniePanelHTML({id="filtry",title="Wyszukiwanie zaawansowane",description="Wyszukuj i zawężaj wyniki bez opuszczania podstrony.",fields="",results="",active=false,open=true}={}){
-  return `<details class="admin-search-standard" data-admin-search-panel="${esc(id)}" ${(open||active)?"open":""}><summary><span><b>🔎 ${esc(title)}</b><small>${esc(description)}</small></span><span class="admin-search-summary-meta">${active?`<em>Aktywne filtry</em>`:""}${results!==""?`<strong>${esc(results)} wyników</strong>`:""}<i aria-hidden="true"></i></span></summary><div class="admin-search-standard-body">${fields}</div></details>`;
+function adminWyszukiwaniePanelHTML({id="filtry",title="Wyszukiwanie zaawansowane",description="Wyszukuj i zawężaj wyniki bez opuszczania podstrony.",fields="",actions="",results="",active=false,open=true}={}){
+  return `<details class="admin-search-standard" data-admin-search-panel="${esc(id)}" ${(open||active)?"open":""}><summary><span><b>🔎 ${esc(title)}</b><small>${esc(description)}</small></span><span class="admin-search-summary-meta">${active?`<em>Aktywne filtry</em>`:""}${results!==""?`<strong>${esc(results)} wyników</strong>`:""}<i aria-hidden="true"></i></span></summary><div class="admin-search-standard-body">${fields}${actions?`<div class="admin-search-standard-actions">${actions}</div>`:""}</div></details>`;
+}
+function adminOperacjeWynikowHTML({id="wyniki",selected=0,pageCount=0,resultCount=0,selectPage="",selectAll="",clear="",exportSelected="",exportAll="",exportLabel="CSV",extra=""}={}){
+  const n=Math.max(0,Number(selected)||0),page=Math.max(0,Number(pageCount)||0),results=Math.max(0,Number(resultCount)||0);
+  return `<div class="admin-results-operations" data-admin-results-operations="${esc(id)}"><div class="admin-results-operations-summary"><b>Operacje na wynikach</b><small>Wybrano <strong>${n}</strong> • ${results} wyników po filtrach</small></div><div class="admin-results-selection">${selectPage?`<button class="btn ghost" type="button" onclick="${selectPage}">☑️ Zaznacz stronę (${page})</button>`:""}${selectAll?`<button class="btn ghost" type="button" onclick="${selectAll}">☑️ Zaznacz wszystkie wyniki (${results})</button>`:""}${clear?`<button class="btn ghost" type="button" onclick="${clear}" ${n?"":"disabled"}>☐ Odznacz (${n})</button>`:""}</div>${exportSelected||exportAll?`<details class="admin-results-export"><summary>📤 Eksportuj plik</summary><div>${exportSelected?`<button class="btn ghost" type="button" onclick="${exportSelected}" ${n?"":"disabled"}>Zaznaczone (${n}) — ${esc(exportLabel)}</button>`:""}${exportAll?`<button class="btn ghost" type="button" onclick="${exportAll}" ${results?"":"disabled"}>Wszystkie wyniki (${results}) — ${esc(exportLabel)}</button>`:""}</div></details>`:""}${extra?`<div class="admin-results-extra">${extra}</div>`:""}</div>`;
+}
+function adminEksportujCSV(nazwa,naglowki,wiersze){
+  const quote=value=>`"${String(value??"").replace(/"/g,'""')}"`,rows=Array.isArray(wiersze)?wiersze:[];
+  if(!rows.length){toast("Brak danych do eksportu");return false;}
+  const csv=[(naglowki||[]).map(quote).join(";"),...rows.map(row=>(Array.isArray(row)?row:[]).map(quote).join(";"))].join("\n");
+  pobierzPlik(nazwa||"wyniki.csv","\uFEFF"+csv,"text/csv");toast(`Wyeksportowano ${rows.length} pozycji ✅`);return true;
 }
 
 function agentAINormalizuj(s=""){
@@ -1483,6 +1493,11 @@ function adminZaznaczWidoczneZamowienia(checked=true){
   adminPasujaceZamowieniaSklepu().forEach(z=>checked?zaznaczoneZamowieniaSklepu.add(String(z.nr)):zaznaczoneZamowieniaSklepu.delete(String(z.nr)));renderuj();
 }
 function adminWyczyscZaznaczenieZamowien(){zaznaczoneZamowieniaSklepu.clear();renderuj();}
+function adminEksportujZamowieniaZakres(zakres="filtr"){
+  const selected=new Set([...zaznaczoneZamowieniaSklepu].map(String));
+  const lista=adminPasujaceZamowieniaSklepu().filter(z=>zakres!=="zaznaczone"||selected.has(String(z.nr)));
+  eksportujZamowienia(lista,zakres==="zaznaczone"?"zamowienia-zaznaczone.csv":"zamowienia-filtrowane.csv");
+}
 function zastosujStatusZamowieniaLokalnie(z,status){
   if(!z||!STATUSY.includes(status)||z.status===status)return null;
   const poprzedni=z.status;z.status=status;
@@ -1726,6 +1741,12 @@ function allegroPrzelaczZaznaczenieZamowienia(orderId,checked){
 function allegroWyczyscZaznaczenieZamowien(){
   zaznaczoneAllegroZamowienia.clear();
   renderuj();
+}
+function allegroEksportujZamowienia(zakres="filtr"){
+  const selected=new Set([...zaznaczoneAllegroZamowienia].map(String));
+  const lista=allegroPasujaceZamowienia().filter(z=>zakres!=="zaznaczone"||selected.has(String(z.id)));
+  const rows=lista.map(z=>[z.id||z.nr||"",allegroStatusKolejki(z),z.email||"",z.buyerLogin||"",z.buyerName||"",z.phone||"",z.createdAt||z.data||"",z.warehouseStage||"",(z.lineItems||[]).map(it=>`${it.offerId||""} | ${it.offerName||it.name||""} | ${it.quantity||0} szt.`).join(" || ")]);
+  adminEksportujCSV(zakres==="zaznaczone"?"allegro-zamowienia-zaznaczone.csv":"allegro-zamowienia-filtrowane.csv",["id_zlecenia","status_allegro","email","login","klient","telefon","data","etap_magazynu","pozycje"],rows);
 }
 function allegroOznaczZaznaczoneSprawdzone(checked=true){
   const ids=[...zaznaczoneAllegroZamowienia];
@@ -2455,12 +2476,9 @@ function allegroZamowieniaTabelaHTML(){
       <label>Etap magazynu <select onchange="filtrEtapuAllegroZamowien=this.value;renderuj()">${[["wszystkie","Wszystkie etapy"],["do_sprawdzenia","Do sprawdzenia"],["braki","Braki"],["kompletacja","Kompletacja"],["spakowane","Spakowane"],["zrealizowane","Zrealizowane lokalnie"]].map(([v,l])=>`<option value="${v}" ${filtrEtapuAllegroZamowien===v?"selected":""}>${l}</option>`).join("")}</select></label>
       <label class="allegro-view-limit">Pokaż zleceń <select onchange="allegroLimitWidokuZamowien=Number(this.value)||100;renderuj()">${[25,50,100,250,500,1000].map(n=>`<option value="${n}" ${allegroLimitWidokuZamowien===n?"selected":""}>${n}</option>`).join("")}</select></label>
       ${szukajAllegroZamowien?`<button class="btn ghost" onclick="szukajAllegroZamowien='';renderuj()">Wyczyść</button>`:""}
-    </div>`})}
+    </div>`,actions:adminOperacjeWynikowHTML({id:"allegro-orders",selected:zaznaczone.length,pageCount:widoczneZamowienia.length,resultCount:pasujaceZamowienia.length,selectPage:"allegroZaznaczWidoczneZamowienia(true)",selectAll:"allegroZaznaczWszystkiePasujaceZamowienia()",clear:"allegroWyczyscZaznaczenieZamowien()",exportSelected:"allegroEksportujZamowienia('zaznaczone')",exportAll:"allegroEksportujZamowienia('filtr')"})})}
     <div class="allegro-bulk-toolbar">
       <div><b>Operacje na zleceniach</b><small>${zaznaczone.length} zaznaczonych • checkbox służy tylko do operacji grupowych</small></div>
-      <label class="allegro-select-all"><input type="checkbox" ${wszystkieWidoczneZaznaczone?"checked":""} onchange="allegroZaznaczWidoczneZamowienia(this.checked)"> Zaznacz/odznacz widoczne (${widoczneZamowienia.length})</label>
-      <button class="btn ghost" onclick="allegroZaznaczWszystkiePasujaceZamowienia()">Zaznacz cały filtr (${pasujaceZamowienia.length})</button>
-      <button class="btn ghost" onclick="allegroWyczyscZaznaczenieZamowien()" ${zaznaczone.length?"":"disabled"}>☐ Odznacz wszystko (${zaznaczone.length})</button>
       <div class="allegro-bulk-stage"><label for="bulkAllegroWarehouseStage">Etap magazynu</label><select id="bulkAllegroWarehouseStage"><option value="">— wybierz etap —</option><option value="do_sprawdzenia">Do sprawdzenia</option><option value="braki">Braki — zamówić</option><option value="kompletacja">Kompletacja</option><option value="spakowane">Spakowane</option><option value="zrealizowane">✅ Zrealizowane lokalnie</option></select><button class="btn" onclick="allegroUstawEtapZaznaczonychZamowien()" ${zaznaczone.length?"":"disabled"}>Zastosuj do ${zaznaczone.length}</button></div>
     </div>
     <div class="allegro-order-list">${widoczneZamowienia.map(allegroZlecenieHTML).join("") || `<div class="backend-note">Brak zamówień w tym filtrze. Synchronizacja pobiera wyłącznie nowe i gotowe do wysłania.</div>`}</div>
@@ -2656,7 +2674,18 @@ async function allegroAktualizujZaznaczoneOfertyDanymiSklepu(){
   toast(`Synchronizacja ofert: zaktualizowano ${ok}${bledy?` • do Agenta AI / błędy: ${bledy}`:""}`);renderuj();
 }
 function allegroPrzelaczOferteDoCeny(id,checked){const set=location.hash.startsWith("#/admin/allegro/oferty")?zaznaczoneMapowaniaAllegro:zaznaczoneAllegroOferty;checked?set.add(String(id)):set.delete(String(id));renderuj();}
-function allegroZaznaczOfertyProduktow(ids=[],checked=true){ ids.map(id=>allegroOfertaDlaProduktuSklepu(pobierzProduktAdmin(Number(id))||{})).filter(Boolean).forEach(o=>checked?zaznaczoneAllegroOferty.add(String(o.id)):zaznaczoneAllegroOferty.delete(String(o.id))); renderuj(); }
+let allegroWystawianieWynikiIds=[],allegroWystawianieStronaIds=[];
+function allegroZaznaczOfertyProduktow(ids=[],checked=true){
+  ids.forEach(raw=>{const id=String(raw),p=pobierzProduktAdmin(Number(raw)),o=p?allegroOfertaDlaProduktuSklepu(p):null;checked?zaznaczoneAllegroProduktyKatalogu.add(id):zaznaczoneAllegroProduktyKatalogu.delete(id);if(o)checked?zaznaczoneAllegroOferty.add(String(o.id)):zaznaczoneAllegroOferty.delete(String(o.id));});renderuj();
+}
+function allegroPrzelaczProduktKatalogu(id,checked){allegroZaznaczOfertyProduktow([id],checked);}
+function allegroZaznaczZakresWystawiania(zakres){allegroZaznaczOfertyProduktow(zakres==="strona"?allegroWystawianieStronaIds:allegroWystawianieWynikiIds,true);}
+function allegroWyczyscZaznaczenieOfert(){zaznaczoneAllegroProduktyKatalogu.clear();zaznaczoneAllegroOferty.clear();renderuj();}
+function allegroEksportujProduktyWystawiania(zakres="filtr"){
+  let ids=allegroWystawianieWynikiIds;
+  if(zakres==="zaznaczone")ids=[...zaznaczoneAllegroProduktyKatalogu];
+  eksportujProduktyPoIdCSV(ids,zakres==="zaznaczone"?"allegro-produkty-zaznaczone.csv":"allegro-produkty-filtrowane.csv");
+}
 async function allegroZmienCenyZaznaczonychOfert(){
   const mode=String(document.getElementById("allegroPriceMode")?.value||"percent");
   const value=Number(String(document.getElementById("allegroPriceValue")?.value||"").replace(",","."));
@@ -2687,7 +2716,8 @@ function allegroWystawianiePanelHTML(){
     return !q||txt.includes(q);
   });
   const rows=pasujace.slice(0,allegroLimitWystawiania);
-  const selectedCount=[...zaznaczoneAllegroOferty].filter(id=>allegroOferty.some(o=>String(o.id)===id)).length;
+  allegroWystawianieWynikiIds=pasujace.map(p=>p.id);allegroWystawianieStronaIds=rows.map(p=>p.id);
+  const selectedCount=[...zaznaczoneAllegroProduktyKatalogu].filter(id=>wszystkie.some(p=>String(p.id)===id)).length;
   const defaultsAudit=allegroStan.offerDefaultsAudit||{items:{},updated_at:null};
   const defaultsIssues=Object.values(defaultsAudit.items||{}).filter(x=>!x.stockUpdated||!x.republishUpdated);
   const defaultsErrors=[...new Set(defaultsIssues.map(x=>String(x.error||"").trim()).filter(Boolean))].slice(0,3);
@@ -2702,9 +2732,9 @@ function allegroWystawianiePanelHTML(){
       <label>Pokaż <select onchange="allegroLimitWystawiania=Number(this.value)||250;renderuj()">${[50,100,250,500,1000].map(n=>`<option value="${n}" ${allegroLimitWystawiania===n?"selected":""}>${n}</option>`).join("")}</select></label>
       <label>Po zapisie <select id="allegroPublicationAction"><option value="keep">nowa: szkic / istniejąca: bez zmiany statusu</option><option value="activate">aktywuj</option><option value="deactivate">dezaktywuj</option></select></label>
       ${szukajAllegroWystawiania?`<button class="btn ghost" onclick="szukajAllegroWystawiania='';renderuj()">Wyczyść</button>`:""}
-    </div>`})}
+    </div>`,actions:adminOperacjeWynikowHTML({id:"allegro-products",selected:selectedCount,pageCount:rows.length,resultCount:pasujace.length,selectPage:"allegroZaznaczZakresWystawiania('strona')",selectAll:"allegroZaznaczZakresWystawiania('filtr')",clear:"allegroWyczyscZaznaczenieOfert()",exportSelected:"allegroEksportujProduktyWystawiania('zaznaczone')",exportAll:"allegroEksportujProduktyWystawiania('filtr')"})})}
     ${allegroWynikOperacjiHTML()}
-    <div class="allegro-bulk-toolbar"><div><b>Operacje na ofertach Allegro</b><small>${selectedCount} zaznaczonych • pełne dane synchronizują się automatycznie</small></div><button class="btn ghost" onclick='allegroZaznaczOfertyProduktow(${JSON.stringify(rows.map(p=>p.id))},true)'>☑️ Zaznacz widoczne oferty</button><select id="allegroPriceMode"><option value="percent">O procent (+/−)</option><option value="amount">O kwotę (+/−)</option><option value="fixed">Ustaw cenę docelową</option></select><input id="allegroPriceValue" inputmode="decimal" placeholder="np. 10 lub -5" style="max-width:150px"><button class="btn ghost" onclick="allegroZmienCenyZaznaczonychOfert()">💰 Zmień ceny</button></div>
+    <div class="allegro-bulk-toolbar"><div><b>Operacje na ofertach Allegro</b><small>${selectedCount} zaznaczonych • pełne dane synchronizują się automatycznie</small></div><select id="allegroPriceMode"><option value="percent">O procent (+/−)</option><option value="amount">O kwotę (+/−)</option><option value="fixed">Ustaw cenę docelową</option></select><input id="allegroPriceValue" inputmode="decimal" placeholder="np. 10 lub -5" style="max-width:150px"><button class="btn ghost" onclick="allegroZmienCenyZaznaczonychOfert()">💰 Zmień ceny</button></div>
     <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable">
       <tr><th>Wybór</th><th>Produkt</th><th>Producent</th><th>EAN / kod prod.</th><th>Oferta Allegro</th><th>Zdjęcia</th><th>Stan synchronizacji</th><th>Akcje</th></tr>
       ${rows.map(p=>{
@@ -2712,7 +2742,7 @@ function allegroWystawianiePanelHTML(){
         const oferta=allegroOfertaDlaProduktuSklepu(p);
         const roznice=oferta?allegroRozniceOfertyProduktu(p,oferta):[];
         return `<tr class="${braki.length||roznice.length?"row-alert":""}">
-          <td><input type="checkbox" ${oferta&&zaznaczoneAllegroOferty.has(String(oferta.id))?"checked":""} ${oferta?`onchange="allegroPrzelaczOferteDoCeny(${jsArg(oferta.id)},this.checked)"`:"disabled"}></td>
+          <td><input type="checkbox" ${zaznaczoneAllegroProduktyKatalogu.has(String(p.id))?"checked":""} onchange="allegroPrzelaczProduktKatalogu(${jsArg(p.id)},this.checked)"></td>
           <td><b>${esc(p.nazwa)}</b><br><small>ID: ${esc(p.id)}${p.sku?` • SKU: ${esc(p.sku)}`:""}</small></td>
           <td><b>${esc(p.producent||p.marka||"—")}</b><br><small>${p.marka&&p.producent!==p.marka?`marka: ${esc(p.marka)}`:""}</small></td>
           <td><b>${esc(p.gtin||p.ean||"—")}</b><br><small>${esc(p.kodProducenta||p.mpn||p.externalId||"—")}</small></td>
@@ -3381,13 +3411,10 @@ function widokAdminZamowienia(){
         ${STATUSY.map(s=>`<option value="${esc(s)}" ${s===filtrZamowien?"selected":""}>${esc(s)}</option>`).join("")}
       </select>
       ${szukajZamowien||filtrZamowien!=="wszystkie"?`<button class="btn ghost" onclick="szukajZamowien='';filtrZamowien='wszystkie';renderuj()">Wyczyść filtry</button>`:""}
-    </div>`})}
+    </div>`,actions:adminOperacjeWynikowHTML({id:"store-orders",selected:zaznaczone.length,pageCount:zam.length,resultCount:zam.length,selectPage:"adminZaznaczWidoczneZamowienia(true)",selectAll:"adminZaznaczWidoczneZamowienia(true)",clear:"adminWyczyscZaznaczenieZamowien()",exportSelected:"adminEksportujZamowieniaZakres('zaznaczone')",exportAll:"adminEksportujZamowieniaZakres('filtr')"})})}
     ${adminStatusyZamowienHTML(wszystkie)}
     <div class="order-bulk-toolbar">
       <div class="order-bulk-summary"><b>Operacje na zamówieniach</b><small>${zaznaczone.length} zaznaczonych • ${zam.length} w aktualnym widoku</small></div>
-      <button class="btn ghost" onclick="adminZaznaczWidoczneZamowienia(true)">☑️ Zaznacz widoczne (${zam.length})</button>
-      <button class="btn ghost" onclick="adminZaznaczWidoczneZamowienia(false)" ${zaznaczone.length?"":"disabled"}>☐ Odznacz widoczne</button>
-      <button class="btn ghost" onclick="adminWyczyscZaznaczenieZamowien()" ${zaznaczone.length?"":"disabled"}>Wyczyść wybór</button>
       <div class="order-bulk-status">
         <label for="bulkOrderStatus">Nowy status</label>
         <select id="bulkOrderStatus"><option value="">— wybierz status —</option>${STATUSY.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select>
@@ -3721,7 +3748,17 @@ async function usunZamowienie(nr){
   toast("Zamówienie usunięte — nie wróci do obsługi");
   if(trasa().startsWith("/admin/zamowienie/")) location.hash="#/admin/zamowienia"; else renderuj();
 }
-let szukajKlientow = "";
+let szukajKlientow = "",klienciWynikiEmails=[];
+function klienciUstawZaznaczenie(zakres,zaznacz=true){
+  const emails=zakres==="filtr"||zakres==="strona"?klienciWynikiEmails:Array.isArray(zakres)?zakres:[];
+  emails.forEach(email=>zaznacz?zaznaczeniKlienci.add(String(email).toLowerCase()):zaznaczeniKlienci.delete(String(email).toLowerCase()));renderuj();
+}
+function klienciWyczyscZaznaczenie(){zaznaczeniKlienci.clear();renderuj();}
+function klienciEksportujZakres(zakres="filtr"){
+  const ids=zakres==="zaznaczone"?new Set([...zaznaczeniKlienci]):new Set(klienciWynikiEmails);
+  const lista=pobierzUzytkownikow().filter(k=>ids.has(String(k.email||"").toLowerCase()));
+  eksportujKlientow(lista,zakres==="zaznaczone"?"klienci-zaznaczeni.csv":"klienci-filtrowani.csv");
+}
 function zmienRoleUzytkownika(email){
   if(!jestAdmin()){ toast("Brak uprawnień"); return; }
   const e=String(email||"").toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>x.email===e);
@@ -3741,6 +3778,7 @@ function widokAdminKlienci(sekcja="lista"){
   let kl = pobierzUzytkownikow();
   if(szukajKlientow) kl = kl.filter(k=>(k.imie+" "+k.email).toLowerCase().includes(szukajKlientow));
   if(aktywna==="uprawnienia") kl=kl.slice().sort((a,b)=>Number(kontoMaRoleAdmin(b.email))-Number(kontoMaRoleAdmin(a.email))||String(a.email).localeCompare(String(b.email),"pl"));
+  klienciWynikiEmails=kl.map(k=>String(k.email||"").toLowerCase()).filter(Boolean);
   const zam = pobierzZamowienia();
   const klienciZZamowieniami=kl.map(k=>{
     const z=zam.filter(x=>x.email===k.email);
@@ -3759,13 +3797,14 @@ function widokAdminKlienci(sekcja="lista"){
   <div class="panel" style="${["lista","uprawnienia"].includes(aktywna)?"":"display:none"}">
     <h1>${aktywna==="uprawnienia"?"🛡️ Uprawnienia użytkowników":"👥 Użytkownicy"} (${kl.length}) <button class="btn ghost" style="float:right" onclick="eksportujKlientow()">📤 CSV</button></h1>
     ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem">Tutaj szybko nadajesz lub odbierasz rolę administratora. Konto głównego właściciela i aktualnie używane konto są chronione przed przypadkową zmianą.</div>`:""}
-    ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko albo adres e-mail użytkownika.",results:kl.length,active:!!szukajKlientow,open:true,fields:`<label class="search-wide">Klient<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();renderuj()"></label>${szukajKlientow?`<button class="btn ghost" onclick="szukajKlientow='';renderuj()">Wyczyść filtry</button>`:""}`})}
+    ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko albo adres e-mail użytkownika.",results:kl.length,active:!!szukajKlientow,open:true,fields:`<label class="search-wide">Klient<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();renderuj()"></label>${szukajKlientow?`<button class="btn ghost" onclick="szukajKlientow='';renderuj()">Wyczyść filtry</button>`:""}`,actions:adminOperacjeWynikowHTML({id:"customers",selected:zaznaczeniKlienci.size,pageCount:kl.length,resultCount:kl.length,selectPage:"klienciUstawZaznaczenie('strona')",selectAll:"klienciUstawZaznaczenie('filtr')",clear:"klienciWyczyscZaznaczenie()",exportSelected:"klienciEksportujZakres('zaznaczone')",exportAll:"klienciEksportujZakres('filtr')"})})}
     <div class="table-scroll"><table class="log-table">
-      <tr><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
+      <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
       ${kl.map(k=>{
         const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
         const nZam = zam.filter(z=>z.email===k.email).length;
         return `<tr>
+        <td><input type="checkbox" aria-label="Zaznacz ${esc(k.email)}" ${zaznaczeniKlienci.has(String(k.email||"").toLowerCase())?"checked":""} onchange="klienciUstawZaznaczenie([${jsArg(k.email)}],this.checked)"></td>
         <td><a href="#/admin/klient/${encodeURIComponent(k.email)}"><b>${esc(k.imie)}</b></a>${admin?' <span class="lvl lvl-info">ADMIN</span>':""}${k.nip?' <span class="lvl lvl-info">firma</span>':""}</td>
         <td>${esc(k.email)}${k.telefon?`<br><small style="color:var(--muted2)">📞 ${esc(k.telefon)}</small>`:""}</td>
         <td><span class="lvl ${admin?"lvl-info":""}">${admin?"administrator":"klient"}</span>${glowny?"<br><small>właściciel</small>":""}</td>
@@ -4214,15 +4253,26 @@ function zapiszUstawieniaMagazynu(e){
   loguj("info","Zapisano ustawienia magazynu");
   toast("Ustawienia magazynu zapisane ✅"); renderuj();
 }
-function eksportujMagazynCSV(){
+function magazynUstawZaznaczenie(zakres,zaznacz=true){
+  const ids=zakres==="strona"?magazynStronaIds:zakres==="filtr"?magazynWynikiIds:Array.isArray(zakres)?zakres:[];
+  ids.forEach(id=>zaznacz?zaznaczoneMagazynProdukty.add(String(id)):zaznaczoneMagazynProdukty.delete(String(id)));renderuj();
+}
+function magazynWyczyscZaznaczenie(){zaznaczoneMagazynProdukty.clear();renderuj();}
+function eksportujMagazynCSV(ids=null,nazwa="magazyn-artway.csv"){
   const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30);
+  const wybrane=Array.isArray(ids)?new Set(ids.map(String)):null;
   const rows=[["id","sku","nazwa","kategoria","producent","url_zrodlowy","status_u_producenta","stan_u_producenta","stan_producenta_dokladny","sprawdzono_u_producenta","stan_lokalny","bez_limitu","dostepne_po_rezerwacjach","zarezerwowane","sprzedaz_30_dni","min_stock","target_stock","lead_time_dni","lokalizacja","dostawca","kod","sugerowany_zakup","cena_brutto","wartosc_stanu"].join(";")];
-  produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
+  produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&(!wybrane||wybrane.has(String(p.id)))).forEach(p=>{
     const stan=stanMagazynuId(p.id), plan=sugestiaZatowarowania(p,rez,spr), meta=magazynMetaProduktu(p.id), wart=stan===null?"":kwotaNum(stan*kwotaNum(p.cena)).toFixed(2).replace(".",",");
     const prod=producentDostepnoscInfo(p);rows.push([p.id,p.sku||"",p.nazwa,p.kategoria,p.producent||p.marka||"",prod.url,prod.status,prod.quantity??"",prod.exact?"tak":"nie",prod.checked,stan===null?"":stan,stan===null?"tak":"nie",plan.dostepne===null?"":plan.dostepne,rez[p.id]||0,spr[p.id]||0,plan.min,plan.target,plan.lead,meta.lokalizacja||"",meta.dostawca||"",meta.kod||"",plan.ilosc||0,kwotaNum(p.cena).toFixed(2).replace(".",","),wart].map(csvPole).join(";"));
   });
-  pobierzPlik("magazyn-artway.csv","\uFEFF"+rows.join("\n"),"text/csv");
-  loguj("info","Wyeksportowano magazyn CSV");
+  if(rows.length===1){toast("Brak produktów do eksportu");return;}
+  pobierzPlik(nazwa,"\uFEFF"+rows.join("\n"),"text/csv");
+  loguj("info",`Wyeksportowano magazyn CSV (${rows.length-1} produktów)`);toast(`Wyeksportowano ${rows.length-1} produktów magazynowych ✅`);
+}
+function magazynEksportuj(zakres){
+  const ids=zakres==="zaznaczone"?[...zaznaczoneMagazynProdukty]:magazynWynikiIds;
+  eksportujMagazynCSV(ids,zakres==="zaznaczone"?"magazyn-zaznaczone.csv":"magazyn-filtrowany.csv");
 }
 function eksportujZatowarowanieCSV(){
   const plan=potrzebyZatowarowania();
@@ -4364,6 +4414,22 @@ function infaktSzukajZakupy(input,history=false){
   const value=String(input?.value||"");if(history)szukajInfaktHistoria=value;else szukajInfaktZakupy=value;
   const id=history?"infaktHistorySearch":"infaktPendingSearch";clearTimeout(window.__infaktPurchaseSearch);window.__infaktPurchaseSearch=setTimeout(()=>{renderuj();requestAnimationFrame(()=>{const el=document.getElementById(id);if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}});},180);
 }
+let infaktPendingWyniki=[],infaktHistoriaWyniki=[];
+function infaktUstawZaznaczenie(rodzaj,ids,zaznacz=true){
+  const set=rodzaj==="historia"?zaznaczoneInfaktHistoria:zaznaczoneInfaktZakupy;
+  (Array.isArray(ids)?ids:[]).forEach(id=>zaznacz?set.add(String(id)):set.delete(String(id)));renderuj();
+}
+function infaktZaznaczZakres(rodzaj,zakres){
+  const rows=rodzaj==="historia"?infaktHistoriaWyniki:infaktPendingWyniki,limit=rodzaj==="historia"?limitInfaktHistoria:limitInfaktZakupy;
+  const ids=(zakres==="strona"?rows.slice(0,limit):rows).map(x=>rodzaj==="historia"?String(x.matchId||x.itemKey):String(x.itemKey));infaktUstawZaznaczenie(rodzaj,ids,true);
+}
+function infaktWyczyscZaznaczenie(rodzaj){(rodzaj==="historia"?zaznaczoneInfaktHistoria:zaznaczoneInfaktZakupy).clear();renderuj();}
+function infaktEksportujZakres(rodzaj,zakres="filtr"){
+  const rows=rodzaj==="historia"?infaktHistoriaWyniki:infaktPendingWyniki,set=rodzaj==="historia"?zaznaczoneInfaktHistoria:zaznaczoneInfaktZakupy;
+  const lista=rows.filter(x=>zakres!=="zaznaczone"||set.has(rodzaj==="historia"?String(x.matchId||x.itemKey):String(x.itemKey)));
+  if(rodzaj==="historia")return adminEksportujCSV(zakres==="zaznaczone"?"infakt-historia-zaznaczone.csv":"infakt-historia-filtrowana.csv",["data_faktury","produkt_id","produkt","cena_zakupu","faktura","dostawca","metoda","status"],lista.map(x=>[x.invoiceDate||"",x.productId||"",x.productName||"",x.price||0,x.invoiceNumber||"",x.supplier||"",x.method||"",x.status||"active"]));
+  adminEksportujCSV(zakres==="zaznaczone"?"infakt-pozycje-zaznaczone.csv":"infakt-pozycje-filtrowane.csv",["faktura","data","dostawca","ean","kod","pozycja","ilosc","cena_netto","cena_brutto","powod"],lista.map(x=>[x.invoiceNumber||"",x.invoiceDate||"",x.supplier||"",x.ean||"",x.code||"",x.name||"",x.quantity||"",x.unitNet||0,x.unitGross||0,x.reason||""]));
+}
 function infaktCenyZakupuPanelHTML(){
   const s=infaktStan.purchaseSync||{},pendingAll=Array.isArray(s.pendingItems)?s.pendingItems:[],matchesAll=Array.isArray(s.recentMatches)?s.recentMatches:[],products=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
   const q=normalizujSzukanyTekst(szukajInfaktZakupy),terms=q.split(" ").filter(Boolean);
@@ -4382,17 +4448,18 @@ function infaktCenyZakupuPanelHTML(){
     if(filtrInfaktHistoria==="aktywne"&&reverted)return false;if(filtrInfaktHistoria==="cofniete"&&!reverted)return false;if(filtrInfaktHistoria==="reczne"&&!manual)return false;if(filtrInfaktHistoria==="automatyczne"&&(manual||reverted))return false;
     return true;
   });
+  infaktPendingWyniki=pending;infaktHistoriaWyniki=matches;
   const pendingFields=`<label class="search-wide">Pozycja faktury<input id="infaktPendingSearch" value="${esc(szukajInfaktZakupy)}" placeholder="Faktura, dostawca, EAN, kod, nazwa lub cena…" oninput="infaktSzukajZakupy(this)" autocomplete="off"></label><label>Powód decyzji<select onchange="filtrInfaktZakupy=this.value;renderuj()"><option value="wszystkie" ${filtrInfaktZakupy==="wszystkie"?"selected":""}>Wszystkie oczekujące</option><option value="bez_kodu" ${filtrInfaktZakupy==="bez_kodu"?"selected":""}>Bez EAN i kodu</option><option value="konflikty" ${filtrInfaktZakupy==="konflikty"?"selected":""}>Konflikty identyfikatorów</option><option value="sugestie" ${filtrInfaktZakupy==="sugestie"?"selected":""}>Z sugestiami agenta</option></select></label><label>Na stronie<select onchange="limitInfaktZakupy=Number(this.value)||50;renderuj()">${[25,50,100,250].map(n=>`<option value="${n}" ${limitInfaktZakupy===n?"selected":""}>${n}</option>`).join("")}</select></label><button class="btn ghost" type="button" onclick="infaktWyczyscFiltryZakupow()">Wyczyść filtry</button>`;
   const historyFields=`<label class="search-wide">Historia dopasowań<input id="infaktHistorySearch" value="${esc(szukajInfaktHistoria)}" placeholder="Produkt, ID, faktura, dostawca, metoda lub cena…" oninput="infaktSzukajZakupy(this,true)" autocomplete="off"></label><label>Status<select onchange="filtrInfaktHistoria=this.value;renderuj()"><option value="aktywne" ${filtrInfaktHistoria==="aktywne"?"selected":""}>Aktywne dopasowania</option><option value="wszystkie" ${filtrInfaktHistoria==="wszystkie"?"selected":""}>Cała historia</option><option value="reczne" ${filtrInfaktHistoria==="reczne"?"selected":""}>Tylko ręczne</option><option value="automatyczne" ${filtrInfaktHistoria==="automatyczne"?"selected":""}>Tylko automatyczne</option><option value="cofniete" ${filtrInfaktHistoria==="cofniete"?"selected":""}>Cofnięte</option></select></label><label>Na stronie<select onchange="limitInfaktHistoria=Number(this.value)||50;renderuj()">${[25,50,100,250].map(n=>`<option value="${n}" ${limitInfaktHistoria===n?"selected":""}>${n}</option>`).join("")}</select></label><button class="btn ghost" type="button" onclick="infaktWyczyscFiltryHistorii()">Wyczyść filtry</button>`;
   return `<section class="infakt-purchase-sync"><div class="order-section-head"><div><span class="order-pro-label">Automatyczna kartoteka kosztowa</span><h2>💰 Ceny zakupu z faktur dostawców</h2><p class="order-detail-lead">Najpierw EAN/GTIN, potem dokładny kod producenta lub SKU, a na końcu identyczna i unikalna nazwa. Niepewne pozycje zawsze czekają na decyzję administratora.</p></div><div class="diag-actions"><label>Okres <select onchange="infaktOkresCenZakupu=Number(this.value)||180">${[[30,"30 dni"],[90,"90 dni"],[180,"180 dni"],[365,"rok"],[730,"2 lata"]].map(([v,l])=>`<option value="${v}" ${infaktOkresCenZakupu===v?"selected":""}>${l}</option>`).join("")}</select></label><button class="btn" onclick="infaktSynchronizujCenyZakupu(false)" ${infaktStan.purchaseLoading?"disabled":""}>${infaktStan.purchaseLoading?"⏳ Analizuję…":"🔄 Pobierz i dopasuj ceny"}</button></div></div>
   <div class="orders-stat-grid"><div class="order-stat-card"><span>🧾</span><b>${s.allowedDocuments||0}</b><small>faktur dostawców</small></div><div class="order-stat-card"><span>📋</span><b>${s.lineCount||0}</b><small>pozycji</small></div><div class="order-stat-card money"><span>✅</span><b>${s.matchedCount||0}</b><small>dopasowanych</small></div><div class="order-stat-card money"><span>💰</span><b>${s.priceUpdatedCount||0}</b><small>zmienionych cen</small></div><div class="order-stat-card ${pendingAll.length?"hot":""}"><span>🔎</span><b>${pendingAll.length}</b><small>do decyzji</small></div></div>
   ${s.updated_at?`<div class="backend-note"><b>Ostatnia kontrola:</b> ${esc(allegroDataTxt(s.updated_at))} • ${esc(s.source||"inFakt KSeF XML")} • starsza faktura nie nadpisuje nowszej ceny.</div>`:`<div class="backend-note">Pierwszą synchronizację uruchom przyciskiem. Kolejne kontrole wykonuje serwer.</div>`}${s.available===false||s.errors?.length?`<div class="backend-note infakt-purchase-error"><b>Wymaga uwagi:</b> ${esc((s.errors||[]).join(" • ")||"Odczyt pozycji KSeF jest niedostępny.")}</div>`:""}
   <div class="order-section-head"><div><h3>🔎 Pozycje wymagające decyzji</h3><p class="order-detail-lead">Przed zatwierdzeniem możesz przeszukać całą kartotekę. Błędne powiązanie da się później cofnąć z historii.</p></div></div>
-  ${adminWyszukiwaniePanelHTML({id:"infakt-pending",description:"Faktura, identyfikatory, dostawca i powód braku automatycznego dopasowania.",fields:pendingFields,results:pending.length,active:!!(szukajInfaktZakupy||filtrInfaktZakupy!=="wszystkie"),open:true})}
+  ${adminWyszukiwaniePanelHTML({id:"infakt-pending",description:"Faktura, identyfikatory, dostawca i powód braku automatycznego dopasowania.",fields:pendingFields,results:pending.length,active:!!(szukajInfaktZakupy||filtrInfaktZakupy!=="wszystkie"),open:true,actions:adminOperacjeWynikowHTML({id:"infakt-pending",selected:zaznaczoneInfaktZakupy.size,pageCount:Math.min(limitInfaktZakupy,pending.length),resultCount:pending.length,selectPage:"infaktZaznaczZakres('oczekujace','strona')",selectAll:"infaktZaznaczZakres('oczekujace','filtr')",clear:"infaktWyczyscZaznaczenie('oczekujace')",exportSelected:"infaktEksportujZakres('oczekujace','zaznaczone')",exportAll:"infaktEksportujZakres('oczekujace','filtr')"})})}
   <div class="admin-search-results-line"><span>Znaleziono <b>${pending.length}</b> z ${pendingAll.length} oczekujących pozycji</span><span>Pokazano do <b>${limitInfaktZakupy}</b></span></div>
   <datalist id="infaktProductChoices">${products.map(p=>`<option value="${esc(p.id)} • ${esc(p.sku||p.externalId||p.gtin||p.ean||"bez kodu")} • ${esc(p.nazwa||"Produkt")}"></option>`).join("")}</datalist>
-  <div class="warehouse-worktable-wrap"><table class="log-table infakt-purchase-table"><tr><th>Faktura / dostawca</th><th>EAN / kod</th><th>Pozycja</th><th>Ilość</th><th>Cena zakupu</th><th>Właściwy produkt</th></tr>${pending.slice(0,limitInfaktZakupy).map(item=>`<tr><td><b>${esc(item.invoiceNumber||"—")}</b><br><small>${esc(item.invoiceDate||"")} • ${esc(item.supplier||"")}</small></td><td><b>${esc(item.ean||"—")}</b><br><small>${esc(item.code||"—")}</small></td><td><b>${esc(item.name||"Pozycja")}</b><br><small>${esc(item.reason||"")}</small>${item.suggestions?.length?`<div class="infakt-suggestions">${item.suggestions.map(x=>`<button type="button" onclick="this.closest('tr').querySelector('[data-infakt-purchase-item]').value=${jsArg(`${x.id} • ${x.sku||x.ean||""} • ${x.name}`)}">${esc(x.name)} (${Math.round((x.score||0)*100)}%)</button>`).join("")}</div>`:""}</td><td>${esc(item.quantity||"—")} szt.</td><td><b>${zl(item.unitGross||0)}</b><br><small>netto ${zl(item.unitNet||0)}</small></td><td><div class="infakt-match-control"><input list="infaktProductChoices" data-infakt-purchase-item="${esc(item.itemKey)}" placeholder="ID, SKU, EAN lub nazwa"><button class="btn" onclick="infaktPrzypiszCeneZakupu(${jsArg(item.itemKey)})">Zatwierdź</button></div></td></tr>`).join("")||`<tr><td colspan="6">Brak pozycji pasujących do filtrów.</td></tr>`}</table></div>
-  <details class="panel-subtle infakt-purchase-history" open><summary>🕓 Historia i korekty dopasowań (${matchesAll.length})</summary>${adminWyszukiwaniePanelHTML({id:"infakt-history",description:"Każda zmiana ma ślad audytowy. Cofnięcie przywraca poprzednią cenę i kieruje pozycję do ponownego wyboru.",fields:historyFields,results:matches.length,active:!!(szukajInfaktHistoria||filtrInfaktHistoria!=="aktywne"),open:false})}<div class="warehouse-worktable-wrap"><table class="log-table"><tr><th>Data faktury</th><th>Produkt</th><th>Cena</th><th>Dokument</th><th>Metoda / stan</th><th>Korekta</th></tr>${matches.slice(0,limitInfaktHistoria).map(x=>{const reverted=x.status==="reverted",canUndo=!reverted&&x.priceApplied!==false;return `<tr class="${reverted?"infakt-match-reverted":""}"><td>${esc(x.invoiceDate||"—")}</td><td><b>${esc(x.productName||x.productId||"Produkt")}</b><br><small>ID ${esc(x.productId||"—")}</small></td><td><b>${zl(x.price||0)}</b></td><td>${esc(x.invoiceNumber||"—")}<br><small>${esc(x.supplier||"")}</small></td><td><span class="lvl ${reverted?"lvl-ostrzezenie":"lvl-ok"}">${reverted?"cofnięte":esc(x.method||"kod")}</span>${x.revertedAt?`<br><small>${esc(allegroDataTxt(x.revertedAt))}</small>`:""}</td><td>${canUndo?`<button class="btn danger" onclick="infaktCofnijDopasowanie(${jsArg(x.matchId||x.itemKey)})">↩️ Cofnij i dopasuj ponownie</button>`:`<span class="lvl lvl-info">${reverted?"ślad zachowany":"cena bez zmiany"}</span>`}</td></tr>`;}).join("")||`<tr><td colspan="6">Brak dopasowań w tym filtrze.</td></tr>`}</table></div></details>
+  <div class="warehouse-worktable-wrap"><table class="log-table infakt-purchase-table"><tr><th>Wybór</th><th>Faktura / dostawca</th><th>EAN / kod</th><th>Pozycja</th><th>Ilość</th><th>Cena zakupu</th><th>Właściwy produkt</th></tr>${pending.slice(0,limitInfaktZakupy).map(item=>`<tr><td><input type="checkbox" aria-label="Zaznacz pozycję faktury" ${zaznaczoneInfaktZakupy.has(String(item.itemKey))?"checked":""} onchange="infaktUstawZaznaczenie('oczekujace',[${jsArg(item.itemKey)}],this.checked)"></td><td><b>${esc(item.invoiceNumber||"—")}</b><br><small>${esc(item.invoiceDate||"")} • ${esc(item.supplier||"")}</small></td><td><b>${esc(item.ean||"—")}</b><br><small>${esc(item.code||"—")}</small></td><td><b>${esc(item.name||"Pozycja")}</b><br><small>${esc(item.reason||"")}</small>${item.suggestions?.length?`<div class="infakt-suggestions">${item.suggestions.map(x=>`<button type="button" onclick="this.closest('tr').querySelector('[data-infakt-purchase-item]').value=${jsArg(`${x.id} • ${x.sku||x.ean||""} • ${x.name}`)}">${esc(x.name)} (${Math.round((x.score||0)*100)}%)</button>`).join("")}</div>`:""}</td><td>${esc(item.quantity||"—")} szt.</td><td><b>${zl(item.unitGross||0)}</b><br><small>netto ${zl(item.unitNet||0)}</small></td><td><div class="infakt-match-control"><input list="infaktProductChoices" data-infakt-purchase-item="${esc(item.itemKey)}" placeholder="ID, SKU, EAN lub nazwa"><button class="btn" onclick="infaktPrzypiszCeneZakupu(${jsArg(item.itemKey)})">Zatwierdź</button></div></td></tr>`).join("")||`<tr><td colspan="7">Brak pozycji pasujących do filtrów.</td></tr>`}</table></div>
+  <details class="panel-subtle infakt-purchase-history" open><summary>🕓 Historia i korekty dopasowań (${matchesAll.length})</summary>${adminWyszukiwaniePanelHTML({id:"infakt-history",description:"Każda zmiana ma ślad audytowy. Cofnięcie przywraca poprzednią cenę i kieruje pozycję do ponownego wyboru.",fields:historyFields,results:matches.length,active:!!(szukajInfaktHistoria||filtrInfaktHistoria!=="aktywne"),open:false,actions:adminOperacjeWynikowHTML({id:"infakt-history",selected:zaznaczoneInfaktHistoria.size,pageCount:Math.min(limitInfaktHistoria,matches.length),resultCount:matches.length,selectPage:"infaktZaznaczZakres('historia','strona')",selectAll:"infaktZaznaczZakres('historia','filtr')",clear:"infaktWyczyscZaznaczenie('historia')",exportSelected:"infaktEksportujZakres('historia','zaznaczone')",exportAll:"infaktEksportujZakres('historia','filtr')"})})}<div class="warehouse-worktable-wrap"><table class="log-table"><tr><th>Wybór</th><th>Data faktury</th><th>Produkt</th><th>Cena</th><th>Dokument</th><th>Metoda / stan</th><th>Korekta</th></tr>${matches.slice(0,limitInfaktHistoria).map(x=>{const reverted=x.status==="reverted",canUndo=!reverted&&x.priceApplied!==false,key=String(x.matchId||x.itemKey);return `<tr class="${reverted?"infakt-match-reverted":""}"><td><input type="checkbox" aria-label="Zaznacz wpis historii" ${zaznaczoneInfaktHistoria.has(key)?"checked":""} onchange="infaktUstawZaznaczenie('historia',[${jsArg(key)}],this.checked)"></td><td>${esc(x.invoiceDate||"—")}</td><td><b>${esc(x.productName||x.productId||"Produkt")}</b><br><small>ID ${esc(x.productId||"—")}</small></td><td><b>${zl(x.price||0)}</b></td><td>${esc(x.invoiceNumber||"—")}<br><small>${esc(x.supplier||"")}</small></td><td><span class="lvl ${reverted?"lvl-ostrzezenie":"lvl-ok"}">${reverted?"cofnięte":esc(x.method||"kod")}</span>${x.revertedAt?`<br><small>${esc(allegroDataTxt(x.revertedAt))}</small>`:""}</td><td>${canUndo?`<button class="btn danger" onclick="infaktCofnijDopasowanie(${jsArg(x.matchId||x.itemKey)})">↩️ Cofnij i dopasuj ponownie</button>`:`<span class="lvl lvl-info">${reverted?"ślad zachowany":"cena bez zmiany"}</span>`}</td></tr>`;}).join("")||`<tr><td colspan="7">Brak dopasowań w tym filtrze.</td></tr>`}</table></div></details>
   <details class="panel-subtle allegro-info-bottom"><summary>⚙️ Operacja serwisowa</summary><p class="order-detail-lead">Ponowna analiza jest potrzebna po poprawieniu kodów w historycznej fakturze lub kartotece.</p><button class="btn danger" onclick="infaktSynchronizujCenyZakupu(true)">Ponownie przeanalizuj dokumenty</button></details></section>`;
 }
 function widokAdminInfakt(sekcja="pulpit"){
@@ -4450,6 +4517,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
   const liczbaStron=Math.max(1,Math.ceil(lista.length/magazynNaStronie));
   stronaMagazynu=Math.min(Math.max(1,stronaMagazynu),liczbaStron);
   const fragment=lista.slice((stronaMagazynu-1)*magazynNaStronie,stronaMagazynu*magazynNaStronie);
+  magazynWynikiIds=lista.map(p=>p.id);magazynStronaIds=fragment.map(p=>p.id);
   return adminSzkielet("/admin/magazyn", `
   ${magazynSubnavHTML(aktywna)}
   <div class="panel warehouse-hero-panel ${aktywna!=="pulpit"?"is-compact":""}">
@@ -4616,7 +4684,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
       <label><span>Lokalizacja</span><select onchange="filtrLokalizacjiMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszystkie">Każda lokalizacja</option><option value="BRAK" ${filtrLokalizacjiMagazynu==="BRAK"?"selected":""}>Bez lokalizacji</option>${lokalizacje.map(l=>`<option value="${esc(l.kod)}" ${filtrLokalizacjiMagazynu===l.kod?"selected":""}>${esc(l.kod)} — ${esc(l.nazwa||l.typ)}</option>`).join("")}</select></label>
       <label><span>Inwentaryzacja</span><select onchange="filtrInwentaryzacjiMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszystkie">Każda data</option><option value="aktualna" ${filtrInwentaryzacjiMagazynu==="aktualna"?"selected":""}>Aktualna ≤ 90 dni</option><option value="stara" ${filtrInwentaryzacjiMagazynu==="stara"?"selected":""}>Brak / starsza niż 90 dni</option></select></label>
       <label><span>Na stronie</span><select onchange="ustawMagazynNaStronie(this.value)">${[25,50,100,200,500].map(n=>`<option value="${n}" ${magazynNaStronie===n?"selected":""}>${n} produktów</option>`).join("")}</select></label>
-    </div>`})}
+    </div>`,actions:adminOperacjeWynikowHTML({id:"warehouse-stock",selected:zaznaczoneMagazynProdukty.size,pageCount:fragment.length,resultCount:lista.length,selectPage:"magazynUstawZaznaczenie('strona')",selectAll:"magazynUstawZaznaczenie('filtr')",clear:"magazynWyczyscZaznaczenie()",exportSelected:"magazynEksportuj('zaznaczone')",exportAll:"magazynEksportuj('filtr')"})})}
     <div class="warehouse-stock-results"><span>Pokazano <b>${fragment.length}</b> z <b>${lista.length}</b> produktów</span><span>Strona ${stronaMagazynu} z ${liczbaStron}</span></div>
     <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
     <div class="warehouse-stock-list">
@@ -4624,9 +4692,9 @@ function widokAdminMagazyn(sekcja="pulpit"){
         const stan=stanMagazynuId(p.id),r=Number(rez[p.id]||0),sp=Number(spr[p.id]||0),plan=sugestiaZatowarowania(p,rez,spr),meta=plan.meta,wart=stan===null?0:stan*kwotaNum(p.cena),pi=producentDostepnoscInfo(p),priority=priorytetDostepnosciProduktu(p,kanalySpr,rez),sklep30=Number(kanalySpr.sklep[p.id]||0),allegro30=Number(kanalySpr.allegro[p.id]||0),invTime=meta.ostatniaInwentaryzacja?Date.parse(meta.ostatniaInwentaryzacja):0,invOld=!invTime||Date.now()-invTime>90*86400000;
         const risk=pi.status==="brak"||plan.dostepne!==null&&plan.dostepne<0?"critical":pi.status==="niski"||plan.ilosc>0?"warning":pi.stale||["nieznany","blad"].includes(pi.status)?"info":"ok";
         const riskLabel=risk==="critical"?"Pilna reakcja":risk==="warning"?"Wymaga uwagi":risk==="info"?"Do weryfikacji":"Bez alarmu";
-        return `<article class="warehouse-stock-card stock-${risk}">
+        return `<article class="warehouse-stock-card stock-${risk} ${zaznaczoneMagazynProdukty.has(String(p.id))?"is-selected":""}">
           <header class="warehouse-stock-card-head">
-            <div class="warehouse-stock-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><h3>${esc(p.nazwa)}</h3><small>SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||meta.kod||"—")} • ID ${esc(p.id)}</small><small>${esc(p.kategoria||"Bez kategorii")} • ${esc(p.producent||meta.dostawca||"Producent nieprzypisany")}</small></div></div>
+            <div class="warehouse-stock-product"><label class="warehouse-stock-select" title="Zaznacz produkt"><input type="checkbox" ${zaznaczoneMagazynProdukty.has(String(p.id))?"checked":""} onchange="magazynUstawZaznaczenie([${jsArg(p.id)}],this.checked)"></label>${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><h3>${esc(p.nazwa)}</h3><small>SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||meta.kod||"—")} • ID ${esc(p.id)}</small><small>${esc(p.kategoria||"Bez kategorii")} • ${esc(p.producent||meta.dostawca||"Producent nieprzypisany")}</small></div></div>
             <div class="warehouse-stock-priority ${esc(priority.level)}"><b>${priority.score?`🏆 ${priority.score} pkt`:`${risk==="ok"?"✓":"!"} ${riskLabel}`}</b><small>Sklep ${sklep30} • Allegro ${allegro30} • aktywne ${priority.active}</small></div>
             <div class="warehouse-stock-state"><span class="stock-state-dot ${risk}"></span><div><b>${riskLabel}</b><small>${dostepnoscBadgeAdmin(p)}</small></div></div>
           </header>
@@ -4707,6 +4775,7 @@ function widokAdminProdukty(){
   const liczbaStron=Math.max(1,Math.ceil(liczbaWynikow/produktyNaStronieAdmin));
   stronaAdminProduktow=Math.min(Math.max(1,stronaAdminProduktow),liczbaStron);
   const fragment=wszystkie.slice((stronaAdminProduktow-1)*produktyNaStronieAdmin,stronaAdminProduktow*produktyNaStronieAdmin);
+  asortymentWynikiIds=wszystkie.map(p=>p.id);asortymentStronaIds=fragment.map(p=>p.id);
   const katOpcje = [...new Set(produktyDoAdministracji().map(p=>p.kategoria))];
   const bazoweWKoszu=bazoweProduktyWKoszu();
   const liczbaWKoszu=koszDodanych.length+bazoweWKoszu.length;
@@ -4768,7 +4837,7 @@ function widokAdminProdukty(){
           <option value="stan" ${sortowanieAdminProduktow==="stan"?"selected":""}>Najniższy stan</option>
         </select>
         <button class="btn ghost" type="button" onclick="szukajProduktow='';filtrProduktow='Wszystkie';filtrStatusuProduktow='aktywne';filtrZrodlaProduktow='wszystkie';filtrStanuProduktow='wszystkie';filtrAllegroProduktow='wszystkie';stronaAdminProduktow=1;renderuj()">Wyczyść wszystkie</button>
-      </div></details>
+      </div><div class="admin-search-standard-actions">${adminOperacjeWynikowHTML({id:"assortment-products",selected:zaznaczoneProdukty.size,pageCount:fragment.length,resultCount:liczbaWynikow,selectPage:"asortymentZaznaczZakres('strona')",selectAll:"asortymentZaznaczZakres('filtr')",clear:"wyczyscZaznaczenieProduktow()",exportSelected:"asortymentEksportuj('zaznaczone')",exportAll:"asortymentEksportuj('filtr')"})}</div></details>
       <div data-assortment-results><div class="results-bar">
         <span>Znaleziono: <b>${liczbaWynikow}</b>. Strona ${stronaAdminProduktow} z ${liczbaStron}.</span>
         <label>Na stronie:
@@ -5444,10 +5513,21 @@ function ustawCene(id, wartosc){
 }
 /* ── Akcje masowe na produktach ── */
 let zaznaczoneProdukty = new Set();
+let asortymentWynikiIds=[],asortymentStronaIds=[];
 function przelaczZaznProd(id){ zaznaczoneProdukty.has(id) ? zaznaczoneProdukty.delete(id) : zaznaczoneProdukty.add(id); }
 function zaznaczWidoczneProd(chk, ids){
   ids.forEach(id => chk.checked ? zaznaczoneProdukty.add(id) : zaznaczoneProdukty.delete(id));
   renderuj();
+}
+function ustawZaznaczenieProduktow(ids,zaznacz=true){
+  for(const raw of Array.isArray(ids)?ids:[]){const id=Number(raw);if(!Number.isFinite(id))continue;zaznacz?zaznaczoneProdukty.add(id):zaznaczoneProdukty.delete(id);}
+  renderuj();
+}
+function wyczyscZaznaczenieProduktow(){zaznaczoneProdukty.clear();renderuj();}
+function asortymentZaznaczZakres(zakres){ustawZaznaczenieProduktow(zakres==="strona"?asortymentStronaIds:asortymentWynikiIds,true);}
+function asortymentEksportuj(zakres){
+  if(zakres==="zaznaczone")return eksportujProduktyPoIdCSV([...zaznaczoneProdukty],"produkty-zaznaczone.csv");
+  eksportujProduktyPoIdCSV(asortymentWynikiIds,"produkty-filtrowane.csv");
 }
 function usunZaznaczoneProd(){
   if(!zaznaczoneProdukty.size){ toast("Zaznacz produkty"); return; }
@@ -5549,18 +5629,18 @@ async function eksportujIndexHTML(){
   }catch(e){loguj("blad","Eksport index.html: "+e.message);toast("⚠️ Nie udało się przygotować index.html");}
 }
 const csvPole = v => '"' + String(v??"").replace(/"/g,'""') + '"';
-function eksportujZamowienia(){
-  const z = pobierzZamowienia();
+function eksportujZamowienia(wybrane=null,nazwa="zamowienia.csv"){
+  const z = Array.isArray(wybrane)?wybrane:pobierzZamowienia();
   const csv = [["nr","data","status","klient","produkty_zl","rabat_zl","dostawa_zl","paczka_weekend_zl","platnosc_oplata_zl","razem_zl","dostawa","platnosc","adres","pozycje"].join(";"),
     ...z.map(x=>{const k=kosztyZamowienia(x); return [x.nr,x.data,x.status,x.email||"gość",k.produkty,k.rabat,k.dostawa,k.paczkaWeekend,k.platnosc,k.razem,x.dostawa||"",x.platnosc||"",x.adres||"",(x.pozycje||[]).join(" | ")].map(v=>typeof v==="number"?String(v.toFixed(2)).replace(".",","):v).map(csvPole).join(";");})].join("\n");
-  pobierzPlik("zamowienia.csv","﻿"+csv,"text/csv");
+  pobierzPlik(nazwa,"﻿"+csv,"text/csv");
   loguj("info","Wyeksportowano zamówienia ("+z.length+")");
 }
-function eksportujKlientow(){
-  const k = pobierzUzytkownikow();
+function eksportujKlientow(wybrani=null,nazwa="klienci.csv"){
+  const k = Array.isArray(wybrani)?wybrani:pobierzUzytkownikow();
   const csv = [["imie_nazwisko","email","rola","data_rejestracji"].join(";"),
     ...k.map(x=>[x.imie,x.email,kontoMaRoleAdmin(x.email)?"administrator":"klient",new Date(x.data).toLocaleDateString("pl-PL")].map(csvPole).join(";"))].join("\n");
-  pobierzPlik("klienci.csv","﻿"+csv,"text/csv");
+  pobierzPlik(nazwa,"﻿"+csv,"text/csv");
   loguj("info","Wyeksportowano klientów ("+k.length+")");
 }
 // InPost „nadanie z pliku": eksport zamówień do CSV/TXT do wgrania w InPost Managerze
@@ -6000,6 +6080,13 @@ function eksportujProduktyCSV(zakres){
   const csv=[POLA_CSV_PRODUKTU.join(";"),...lista.map(p=>POLA_CSV_PRODUKTU.map(pole=>wartoscPolaCSVProduktu(p,pole)).map(csvPole).join(";"))].join("\n");
   const nazwa=zakres==="widoczne"?"produkty.csv":`produkty-${nazwaZakresuEksportu(zakres)}.csv`;
   pobierzPlik(nazwa,"\uFEFF"+csv,"text/csv");loguj("info",`Wyeksportowano ${nazwa} (${lista.length} produktów)`);toast(`Wyeksportowano ${lista.length} produktów do CSV`);
+}
+function eksportujProduktyPoIdCSV(ids,nazwa="produkty-filtrowane.csv"){
+  const wybrane=new Set((Array.isArray(ids)?ids:[]).map(String));
+  const lista=produktyDoAdministracji().filter(p=>wybrane.has(String(p.id))).map(p=>produktDoEksportu(p,true));
+  if(!lista.length){toast("Brak produktów do eksportu");return;}
+  const csv=[POLA_CSV_PRODUKTU.join(";"),...lista.map(p=>POLA_CSV_PRODUKTU.map(pole=>wartoscPolaCSVProduktu(p,pole)).map(csvPole).join(";"))].join("\n");
+  pobierzPlik(nazwa,"\uFEFF"+csv,"text/csv");loguj("info",`Wyeksportowano ${lista.length} produktów z aktualnego wyboru`);toast(`Wyeksportowano ${lista.length} produktów ✅`);
 }
 function wartoscPolaCSVProduktu(p,pole){
   if(pole==="stara_cena")return p.staraCena?String(p.staraCena.toFixed(2)).replace(".",","):"";

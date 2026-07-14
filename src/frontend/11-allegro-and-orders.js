@@ -42,6 +42,11 @@ function adminZaznaczWidoczneZamowienia(checked=true){
   adminPasujaceZamowieniaSklepu().forEach(z=>checked?zaznaczoneZamowieniaSklepu.add(String(z.nr)):zaznaczoneZamowieniaSklepu.delete(String(z.nr)));renderuj();
 }
 function adminWyczyscZaznaczenieZamowien(){zaznaczoneZamowieniaSklepu.clear();renderuj();}
+function adminEksportujZamowieniaZakres(zakres="filtr"){
+  const selected=new Set([...zaznaczoneZamowieniaSklepu].map(String));
+  const lista=adminPasujaceZamowieniaSklepu().filter(z=>zakres!=="zaznaczone"||selected.has(String(z.nr)));
+  eksportujZamowienia(lista,zakres==="zaznaczone"?"zamowienia-zaznaczone.csv":"zamowienia-filtrowane.csv");
+}
 function zastosujStatusZamowieniaLokalnie(z,status){
   if(!z||!STATUSY.includes(status)||z.status===status)return null;
   const poprzedni=z.status;z.status=status;
@@ -285,6 +290,12 @@ function allegroPrzelaczZaznaczenieZamowienia(orderId,checked){
 function allegroWyczyscZaznaczenieZamowien(){
   zaznaczoneAllegroZamowienia.clear();
   renderuj();
+}
+function allegroEksportujZamowienia(zakres="filtr"){
+  const selected=new Set([...zaznaczoneAllegroZamowienia].map(String));
+  const lista=allegroPasujaceZamowienia().filter(z=>zakres!=="zaznaczone"||selected.has(String(z.id)));
+  const rows=lista.map(z=>[z.id||z.nr||"",allegroStatusKolejki(z),z.email||"",z.buyerLogin||"",z.buyerName||"",z.phone||"",z.createdAt||z.data||"",z.warehouseStage||"",(z.lineItems||[]).map(it=>`${it.offerId||""} | ${it.offerName||it.name||""} | ${it.quantity||0} szt.`).join(" || ")]);
+  adminEksportujCSV(zakres==="zaznaczone"?"allegro-zamowienia-zaznaczone.csv":"allegro-zamowienia-filtrowane.csv",["id_zlecenia","status_allegro","email","login","klient","telefon","data","etap_magazynu","pozycje"],rows);
 }
 function allegroOznaczZaznaczoneSprawdzone(checked=true){
   const ids=[...zaznaczoneAllegroZamowienia];
@@ -1014,12 +1025,9 @@ function allegroZamowieniaTabelaHTML(){
       <label>Etap magazynu <select onchange="filtrEtapuAllegroZamowien=this.value;renderuj()">${[["wszystkie","Wszystkie etapy"],["do_sprawdzenia","Do sprawdzenia"],["braki","Braki"],["kompletacja","Kompletacja"],["spakowane","Spakowane"],["zrealizowane","Zrealizowane lokalnie"]].map(([v,l])=>`<option value="${v}" ${filtrEtapuAllegroZamowien===v?"selected":""}>${l}</option>`).join("")}</select></label>
       <label class="allegro-view-limit">Pokaż zleceń <select onchange="allegroLimitWidokuZamowien=Number(this.value)||100;renderuj()">${[25,50,100,250,500,1000].map(n=>`<option value="${n}" ${allegroLimitWidokuZamowien===n?"selected":""}>${n}</option>`).join("")}</select></label>
       ${szukajAllegroZamowien?`<button class="btn ghost" onclick="szukajAllegroZamowien='';renderuj()">Wyczyść</button>`:""}
-    </div>`})}
+    </div>`,actions:adminOperacjeWynikowHTML({id:"allegro-orders",selected:zaznaczone.length,pageCount:widoczneZamowienia.length,resultCount:pasujaceZamowienia.length,selectPage:"allegroZaznaczWidoczneZamowienia(true)",selectAll:"allegroZaznaczWszystkiePasujaceZamowienia()",clear:"allegroWyczyscZaznaczenieZamowien()",exportSelected:"allegroEksportujZamowienia('zaznaczone')",exportAll:"allegroEksportujZamowienia('filtr')"})})}
     <div class="allegro-bulk-toolbar">
       <div><b>Operacje na zleceniach</b><small>${zaznaczone.length} zaznaczonych • checkbox służy tylko do operacji grupowych</small></div>
-      <label class="allegro-select-all"><input type="checkbox" ${wszystkieWidoczneZaznaczone?"checked":""} onchange="allegroZaznaczWidoczneZamowienia(this.checked)"> Zaznacz/odznacz widoczne (${widoczneZamowienia.length})</label>
-      <button class="btn ghost" onclick="allegroZaznaczWszystkiePasujaceZamowienia()">Zaznacz cały filtr (${pasujaceZamowienia.length})</button>
-      <button class="btn ghost" onclick="allegroWyczyscZaznaczenieZamowien()" ${zaznaczone.length?"":"disabled"}>☐ Odznacz wszystko (${zaznaczone.length})</button>
       <div class="allegro-bulk-stage"><label for="bulkAllegroWarehouseStage">Etap magazynu</label><select id="bulkAllegroWarehouseStage"><option value="">— wybierz etap —</option><option value="do_sprawdzenia">Do sprawdzenia</option><option value="braki">Braki — zamówić</option><option value="kompletacja">Kompletacja</option><option value="spakowane">Spakowane</option><option value="zrealizowane">✅ Zrealizowane lokalnie</option></select><button class="btn" onclick="allegroUstawEtapZaznaczonychZamowien()" ${zaznaczone.length?"":"disabled"}>Zastosuj do ${zaznaczone.length}</button></div>
     </div>
     <div class="allegro-order-list">${widoczneZamowienia.map(allegroZlecenieHTML).join("") || `<div class="backend-note">Brak zamówień w tym filtrze. Synchronizacja pobiera wyłącznie nowe i gotowe do wysłania.</div>`}</div>
@@ -1215,7 +1223,18 @@ async function allegroAktualizujZaznaczoneOfertyDanymiSklepu(){
   toast(`Synchronizacja ofert: zaktualizowano ${ok}${bledy?` • do Agenta AI / błędy: ${bledy}`:""}`);renderuj();
 }
 function allegroPrzelaczOferteDoCeny(id,checked){const set=location.hash.startsWith("#/admin/allegro/oferty")?zaznaczoneMapowaniaAllegro:zaznaczoneAllegroOferty;checked?set.add(String(id)):set.delete(String(id));renderuj();}
-function allegroZaznaczOfertyProduktow(ids=[],checked=true){ ids.map(id=>allegroOfertaDlaProduktuSklepu(pobierzProduktAdmin(Number(id))||{})).filter(Boolean).forEach(o=>checked?zaznaczoneAllegroOferty.add(String(o.id)):zaznaczoneAllegroOferty.delete(String(o.id))); renderuj(); }
+let allegroWystawianieWynikiIds=[],allegroWystawianieStronaIds=[];
+function allegroZaznaczOfertyProduktow(ids=[],checked=true){
+  ids.forEach(raw=>{const id=String(raw),p=pobierzProduktAdmin(Number(raw)),o=p?allegroOfertaDlaProduktuSklepu(p):null;checked?zaznaczoneAllegroProduktyKatalogu.add(id):zaznaczoneAllegroProduktyKatalogu.delete(id);if(o)checked?zaznaczoneAllegroOferty.add(String(o.id)):zaznaczoneAllegroOferty.delete(String(o.id));});renderuj();
+}
+function allegroPrzelaczProduktKatalogu(id,checked){allegroZaznaczOfertyProduktow([id],checked);}
+function allegroZaznaczZakresWystawiania(zakres){allegroZaznaczOfertyProduktow(zakres==="strona"?allegroWystawianieStronaIds:allegroWystawianieWynikiIds,true);}
+function allegroWyczyscZaznaczenieOfert(){zaznaczoneAllegroProduktyKatalogu.clear();zaznaczoneAllegroOferty.clear();renderuj();}
+function allegroEksportujProduktyWystawiania(zakres="filtr"){
+  let ids=allegroWystawianieWynikiIds;
+  if(zakres==="zaznaczone")ids=[...zaznaczoneAllegroProduktyKatalogu];
+  eksportujProduktyPoIdCSV(ids,zakres==="zaznaczone"?"allegro-produkty-zaznaczone.csv":"allegro-produkty-filtrowane.csv");
+}
 async function allegroZmienCenyZaznaczonychOfert(){
   const mode=String(document.getElementById("allegroPriceMode")?.value||"percent");
   const value=Number(String(document.getElementById("allegroPriceValue")?.value||"").replace(",","."));
@@ -1246,7 +1265,8 @@ function allegroWystawianiePanelHTML(){
     return !q||txt.includes(q);
   });
   const rows=pasujace.slice(0,allegroLimitWystawiania);
-  const selectedCount=[...zaznaczoneAllegroOferty].filter(id=>allegroOferty.some(o=>String(o.id)===id)).length;
+  allegroWystawianieWynikiIds=pasujace.map(p=>p.id);allegroWystawianieStronaIds=rows.map(p=>p.id);
+  const selectedCount=[...zaznaczoneAllegroProduktyKatalogu].filter(id=>wszystkie.some(p=>String(p.id)===id)).length;
   const defaultsAudit=allegroStan.offerDefaultsAudit||{items:{},updated_at:null};
   const defaultsIssues=Object.values(defaultsAudit.items||{}).filter(x=>!x.stockUpdated||!x.republishUpdated);
   const defaultsErrors=[...new Set(defaultsIssues.map(x=>String(x.error||"").trim()).filter(Boolean))].slice(0,3);
@@ -1261,9 +1281,9 @@ function allegroWystawianiePanelHTML(){
       <label>Pokaż <select onchange="allegroLimitWystawiania=Number(this.value)||250;renderuj()">${[50,100,250,500,1000].map(n=>`<option value="${n}" ${allegroLimitWystawiania===n?"selected":""}>${n}</option>`).join("")}</select></label>
       <label>Po zapisie <select id="allegroPublicationAction"><option value="keep">nowa: szkic / istniejąca: bez zmiany statusu</option><option value="activate">aktywuj</option><option value="deactivate">dezaktywuj</option></select></label>
       ${szukajAllegroWystawiania?`<button class="btn ghost" onclick="szukajAllegroWystawiania='';renderuj()">Wyczyść</button>`:""}
-    </div>`})}
+    </div>`,actions:adminOperacjeWynikowHTML({id:"allegro-products",selected:selectedCount,pageCount:rows.length,resultCount:pasujace.length,selectPage:"allegroZaznaczZakresWystawiania('strona')",selectAll:"allegroZaznaczZakresWystawiania('filtr')",clear:"allegroWyczyscZaznaczenieOfert()",exportSelected:"allegroEksportujProduktyWystawiania('zaznaczone')",exportAll:"allegroEksportujProduktyWystawiania('filtr')"})})}
     ${allegroWynikOperacjiHTML()}
-    <div class="allegro-bulk-toolbar"><div><b>Operacje na ofertach Allegro</b><small>${selectedCount} zaznaczonych • pełne dane synchronizują się automatycznie</small></div><button class="btn ghost" onclick='allegroZaznaczOfertyProduktow(${JSON.stringify(rows.map(p=>p.id))},true)'>☑️ Zaznacz widoczne oferty</button><select id="allegroPriceMode"><option value="percent">O procent (+/−)</option><option value="amount">O kwotę (+/−)</option><option value="fixed">Ustaw cenę docelową</option></select><input id="allegroPriceValue" inputmode="decimal" placeholder="np. 10 lub -5" style="max-width:150px"><button class="btn ghost" onclick="allegroZmienCenyZaznaczonychOfert()">💰 Zmień ceny</button></div>
+    <div class="allegro-bulk-toolbar"><div><b>Operacje na ofertach Allegro</b><small>${selectedCount} zaznaczonych • pełne dane synchronizują się automatycznie</small></div><select id="allegroPriceMode"><option value="percent">O procent (+/−)</option><option value="amount">O kwotę (+/−)</option><option value="fixed">Ustaw cenę docelową</option></select><input id="allegroPriceValue" inputmode="decimal" placeholder="np. 10 lub -5" style="max-width:150px"><button class="btn ghost" onclick="allegroZmienCenyZaznaczonychOfert()">💰 Zmień ceny</button></div>
     <div class="warehouse-worktable-wrap"><table class="log-table warehouse-worktable">
       <tr><th>Wybór</th><th>Produkt</th><th>Producent</th><th>EAN / kod prod.</th><th>Oferta Allegro</th><th>Zdjęcia</th><th>Stan synchronizacji</th><th>Akcje</th></tr>
       ${rows.map(p=>{
@@ -1271,7 +1291,7 @@ function allegroWystawianiePanelHTML(){
         const oferta=allegroOfertaDlaProduktuSklepu(p);
         const roznice=oferta?allegroRozniceOfertyProduktu(p,oferta):[];
         return `<tr class="${braki.length||roznice.length?"row-alert":""}">
-          <td><input type="checkbox" ${oferta&&zaznaczoneAllegroOferty.has(String(oferta.id))?"checked":""} ${oferta?`onchange="allegroPrzelaczOferteDoCeny(${jsArg(oferta.id)},this.checked)"`:"disabled"}></td>
+          <td><input type="checkbox" ${zaznaczoneAllegroProduktyKatalogu.has(String(p.id))?"checked":""} onchange="allegroPrzelaczProduktKatalogu(${jsArg(p.id)},this.checked)"></td>
           <td><b>${esc(p.nazwa)}</b><br><small>ID: ${esc(p.id)}${p.sku?` • SKU: ${esc(p.sku)}`:""}</small></td>
           <td><b>${esc(p.producent||p.marka||"—")}</b><br><small>${p.marka&&p.producent!==p.marka?`marka: ${esc(p.marka)}`:""}</small></td>
           <td><b>${esc(p.gtin||p.ean||"—")}</b><br><small>${esc(p.kodProducenta||p.mpn||p.externalId||"—")}</small></td>
@@ -1940,13 +1960,10 @@ function widokAdminZamowienia(){
         ${STATUSY.map(s=>`<option value="${esc(s)}" ${s===filtrZamowien?"selected":""}>${esc(s)}</option>`).join("")}
       </select>
       ${szukajZamowien||filtrZamowien!=="wszystkie"?`<button class="btn ghost" onclick="szukajZamowien='';filtrZamowien='wszystkie';renderuj()">Wyczyść filtry</button>`:""}
-    </div>`})}
+    </div>`,actions:adminOperacjeWynikowHTML({id:"store-orders",selected:zaznaczone.length,pageCount:zam.length,resultCount:zam.length,selectPage:"adminZaznaczWidoczneZamowienia(true)",selectAll:"adminZaznaczWidoczneZamowienia(true)",clear:"adminWyczyscZaznaczenieZamowien()",exportSelected:"adminEksportujZamowieniaZakres('zaznaczone')",exportAll:"adminEksportujZamowieniaZakres('filtr')"})})}
     ${adminStatusyZamowienHTML(wszystkie)}
     <div class="order-bulk-toolbar">
       <div class="order-bulk-summary"><b>Operacje na zamówieniach</b><small>${zaznaczone.length} zaznaczonych • ${zam.length} w aktualnym widoku</small></div>
-      <button class="btn ghost" onclick="adminZaznaczWidoczneZamowienia(true)">☑️ Zaznacz widoczne (${zam.length})</button>
-      <button class="btn ghost" onclick="adminZaznaczWidoczneZamowienia(false)" ${zaznaczone.length?"":"disabled"}>☐ Odznacz widoczne</button>
-      <button class="btn ghost" onclick="adminWyczyscZaznaczenieZamowien()" ${zaznaczone.length?"":"disabled"}>Wyczyść wybór</button>
       <div class="order-bulk-status">
         <label for="bulkOrderStatus">Nowy status</label>
         <select id="bulkOrderStatus"><option value="">— wybierz status —</option>${STATUSY.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select>
@@ -2280,7 +2297,17 @@ async function usunZamowienie(nr){
   toast("Zamówienie usunięte — nie wróci do obsługi");
   if(trasa().startsWith("/admin/zamowienie/")) location.hash="#/admin/zamowienia"; else renderuj();
 }
-let szukajKlientow = "";
+let szukajKlientow = "",klienciWynikiEmails=[];
+function klienciUstawZaznaczenie(zakres,zaznacz=true){
+  const emails=zakres==="filtr"||zakres==="strona"?klienciWynikiEmails:Array.isArray(zakres)?zakres:[];
+  emails.forEach(email=>zaznacz?zaznaczeniKlienci.add(String(email).toLowerCase()):zaznaczeniKlienci.delete(String(email).toLowerCase()));renderuj();
+}
+function klienciWyczyscZaznaczenie(){zaznaczeniKlienci.clear();renderuj();}
+function klienciEksportujZakres(zakres="filtr"){
+  const ids=zakres==="zaznaczone"?new Set([...zaznaczeniKlienci]):new Set(klienciWynikiEmails);
+  const lista=pobierzUzytkownikow().filter(k=>ids.has(String(k.email||"").toLowerCase()));
+  eksportujKlientow(lista,zakres==="zaznaczone"?"klienci-zaznaczeni.csv":"klienci-filtrowani.csv");
+}
 function zmienRoleUzytkownika(email){
   if(!jestAdmin()){ toast("Brak uprawnień"); return; }
   const e=String(email||"").toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>x.email===e);
@@ -2300,6 +2327,7 @@ function widokAdminKlienci(sekcja="lista"){
   let kl = pobierzUzytkownikow();
   if(szukajKlientow) kl = kl.filter(k=>(k.imie+" "+k.email).toLowerCase().includes(szukajKlientow));
   if(aktywna==="uprawnienia") kl=kl.slice().sort((a,b)=>Number(kontoMaRoleAdmin(b.email))-Number(kontoMaRoleAdmin(a.email))||String(a.email).localeCompare(String(b.email),"pl"));
+  klienciWynikiEmails=kl.map(k=>String(k.email||"").toLowerCase()).filter(Boolean);
   const zam = pobierzZamowienia();
   const klienciZZamowieniami=kl.map(k=>{
     const z=zam.filter(x=>x.email===k.email);
@@ -2318,13 +2346,14 @@ function widokAdminKlienci(sekcja="lista"){
   <div class="panel" style="${["lista","uprawnienia"].includes(aktywna)?"":"display:none"}">
     <h1>${aktywna==="uprawnienia"?"🛡️ Uprawnienia użytkowników":"👥 Użytkownicy"} (${kl.length}) <button class="btn ghost" style="float:right" onclick="eksportujKlientow()">📤 CSV</button></h1>
     ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem">Tutaj szybko nadajesz lub odbierasz rolę administratora. Konto głównego właściciela i aktualnie używane konto są chronione przed przypadkową zmianą.</div>`:""}
-    ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko albo adres e-mail użytkownika.",results:kl.length,active:!!szukajKlientow,open:true,fields:`<label class="search-wide">Klient<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();renderuj()"></label>${szukajKlientow?`<button class="btn ghost" onclick="szukajKlientow='';renderuj()">Wyczyść filtry</button>`:""}`})}
+    ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko albo adres e-mail użytkownika.",results:kl.length,active:!!szukajKlientow,open:true,fields:`<label class="search-wide">Klient<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();renderuj()"></label>${szukajKlientow?`<button class="btn ghost" onclick="szukajKlientow='';renderuj()">Wyczyść filtry</button>`:""}`,actions:adminOperacjeWynikowHTML({id:"customers",selected:zaznaczeniKlienci.size,pageCount:kl.length,resultCount:kl.length,selectPage:"klienciUstawZaznaczenie('strona')",selectAll:"klienciUstawZaznaczenie('filtr')",clear:"klienciWyczyscZaznaczenie()",exportSelected:"klienciEksportujZakres('zaznaczone')",exportAll:"klienciEksportujZakres('filtr')"})})}
     <div class="table-scroll"><table class="log-table">
-      <tr><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
+      <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
       ${kl.map(k=>{
         const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
         const nZam = zam.filter(z=>z.email===k.email).length;
         return `<tr>
+        <td><input type="checkbox" aria-label="Zaznacz ${esc(k.email)}" ${zaznaczeniKlienci.has(String(k.email||"").toLowerCase())?"checked":""} onchange="klienciUstawZaznaczenie([${jsArg(k.email)}],this.checked)"></td>
         <td><a href="#/admin/klient/${encodeURIComponent(k.email)}"><b>${esc(k.imie)}</b></a>${admin?' <span class="lvl lvl-info">ADMIN</span>':""}${k.nip?' <span class="lvl lvl-info">firma</span>':""}</td>
         <td>${esc(k.email)}${k.telefon?`<br><small style="color:var(--muted2)">📞 ${esc(k.telefon)}</small>`:""}</td>
         <td><span class="lvl ${admin?"lvl-info":""}">${admin?"administrator":"klient"}</span>${glowny?"<br><small>właściciel</small>":""}</td>

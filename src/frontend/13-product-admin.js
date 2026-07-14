@@ -81,10 +81,21 @@ function ustawCene(id, wartosc){
 }
 /* ── Akcje masowe na produktach ── */
 let zaznaczoneProdukty = new Set();
+let asortymentWynikiIds=[],asortymentStronaIds=[];
 function przelaczZaznProd(id){ zaznaczoneProdukty.has(id) ? zaznaczoneProdukty.delete(id) : zaznaczoneProdukty.add(id); }
 function zaznaczWidoczneProd(chk, ids){
   ids.forEach(id => chk.checked ? zaznaczoneProdukty.add(id) : zaznaczoneProdukty.delete(id));
   renderuj();
+}
+function ustawZaznaczenieProduktow(ids,zaznacz=true){
+  for(const raw of Array.isArray(ids)?ids:[]){const id=Number(raw);if(!Number.isFinite(id))continue;zaznacz?zaznaczoneProdukty.add(id):zaznaczoneProdukty.delete(id);}
+  renderuj();
+}
+function wyczyscZaznaczenieProduktow(){zaznaczoneProdukty.clear();renderuj();}
+function asortymentZaznaczZakres(zakres){ustawZaznaczenieProduktow(zakres==="strona"?asortymentStronaIds:asortymentWynikiIds,true);}
+function asortymentEksportuj(zakres){
+  if(zakres==="zaznaczone")return eksportujProduktyPoIdCSV([...zaznaczoneProdukty],"produkty-zaznaczone.csv");
+  eksportujProduktyPoIdCSV(asortymentWynikiIds,"produkty-filtrowane.csv");
 }
 function usunZaznaczoneProd(){
   if(!zaznaczoneProdukty.size){ toast("Zaznacz produkty"); return; }
@@ -186,18 +197,18 @@ async function eksportujIndexHTML(){
   }catch(e){loguj("blad","Eksport index.html: "+e.message);toast("⚠️ Nie udało się przygotować index.html");}
 }
 const csvPole = v => '"' + String(v??"").replace(/"/g,'""') + '"';
-function eksportujZamowienia(){
-  const z = pobierzZamowienia();
+function eksportujZamowienia(wybrane=null,nazwa="zamowienia.csv"){
+  const z = Array.isArray(wybrane)?wybrane:pobierzZamowienia();
   const csv = [["nr","data","status","klient","produkty_zl","rabat_zl","dostawa_zl","paczka_weekend_zl","platnosc_oplata_zl","razem_zl","dostawa","platnosc","adres","pozycje"].join(";"),
     ...z.map(x=>{const k=kosztyZamowienia(x); return [x.nr,x.data,x.status,x.email||"gość",k.produkty,k.rabat,k.dostawa,k.paczkaWeekend,k.platnosc,k.razem,x.dostawa||"",x.platnosc||"",x.adres||"",(x.pozycje||[]).join(" | ")].map(v=>typeof v==="number"?String(v.toFixed(2)).replace(".",","):v).map(csvPole).join(";");})].join("\n");
-  pobierzPlik("zamowienia.csv","﻿"+csv,"text/csv");
+  pobierzPlik(nazwa,"﻿"+csv,"text/csv");
   loguj("info","Wyeksportowano zamówienia ("+z.length+")");
 }
-function eksportujKlientow(){
-  const k = pobierzUzytkownikow();
+function eksportujKlientow(wybrani=null,nazwa="klienci.csv"){
+  const k = Array.isArray(wybrani)?wybrani:pobierzUzytkownikow();
   const csv = [["imie_nazwisko","email","rola","data_rejestracji"].join(";"),
     ...k.map(x=>[x.imie,x.email,kontoMaRoleAdmin(x.email)?"administrator":"klient",new Date(x.data).toLocaleDateString("pl-PL")].map(csvPole).join(";"))].join("\n");
-  pobierzPlik("klienci.csv","﻿"+csv,"text/csv");
+  pobierzPlik(nazwa,"﻿"+csv,"text/csv");
   loguj("info","Wyeksportowano klientów ("+k.length+")");
 }
 // InPost „nadanie z pliku": eksport zamówień do CSV/TXT do wgrania w InPost Managerze
@@ -637,6 +648,13 @@ function eksportujProduktyCSV(zakres){
   const csv=[POLA_CSV_PRODUKTU.join(";"),...lista.map(p=>POLA_CSV_PRODUKTU.map(pole=>wartoscPolaCSVProduktu(p,pole)).map(csvPole).join(";"))].join("\n");
   const nazwa=zakres==="widoczne"?"produkty.csv":`produkty-${nazwaZakresuEksportu(zakres)}.csv`;
   pobierzPlik(nazwa,"\uFEFF"+csv,"text/csv");loguj("info",`Wyeksportowano ${nazwa} (${lista.length} produktów)`);toast(`Wyeksportowano ${lista.length} produktów do CSV`);
+}
+function eksportujProduktyPoIdCSV(ids,nazwa="produkty-filtrowane.csv"){
+  const wybrane=new Set((Array.isArray(ids)?ids:[]).map(String));
+  const lista=produktyDoAdministracji().filter(p=>wybrane.has(String(p.id))).map(p=>produktDoEksportu(p,true));
+  if(!lista.length){toast("Brak produktów do eksportu");return;}
+  const csv=[POLA_CSV_PRODUKTU.join(";"),...lista.map(p=>POLA_CSV_PRODUKTU.map(pole=>wartoscPolaCSVProduktu(p,pole)).map(csvPole).join(";"))].join("\n");
+  pobierzPlik(nazwa,"\uFEFF"+csv,"text/csv");loguj("info",`Wyeksportowano ${lista.length} produktów z aktualnego wyboru`);toast(`Wyeksportowano ${lista.length} produktów ✅`);
 }
 function wartoscPolaCSVProduktu(p,pole){
   if(pole==="stara_cena")return p.staraCena?String(p.staraCena.toFixed(2)).replace(".",","):"";
