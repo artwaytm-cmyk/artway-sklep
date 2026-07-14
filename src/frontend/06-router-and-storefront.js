@@ -92,6 +92,7 @@ function renderuj(){
     // Moduł panelu zawiera także bezpieczny widok „Brak dostępu”. Ładujemy go
     // wyłącznie po wejściu na trasę administracyjną, również dla gościa.
     const wymagaPanelu=t.startsWith("/admin")||t==="/diagnostyka";
+    document.body.classList.toggle("admin-mode",wymagaPanelu);
     if(wymagaPanelu&&!window.__artwayAdminReady){
       w.innerHTML=`<div class="page"><div class="panel admin-loading" role="status" aria-live="polite"><h1>Ładowanie panelu administratora…</h1><p>Wczytuję moduły potrzebne tylko do obsługi sklepu.</p></div></div>`;
       zaladujPanelAdmina().then(()=>renderuj()).catch(error=>{

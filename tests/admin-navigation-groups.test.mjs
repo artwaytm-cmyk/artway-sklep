@@ -27,8 +27,12 @@ test("grupy menu można zwijać, a aktywna trasa i liczniki pozostają widoczne"
   assert.match(source,/function adminMenuMobilneHTML/);
   assert.match(source,/class="admin-workspace-header"/);
   assert.match(source,/data-admin-shell/);
+  assert.match(source,/przelaczTrybMenuAdmina/);
+  assert.match(source,/artway_admin_menu_kompaktowe_v1/);
   assert.match(styles,/\.admin-nav-group\.collapsed \.admin-nav-items/);
-  assert.match(styles,/max-height:calc\(100vh - 142px\)/);
+  assert.match(styles,/height:calc\(100vh - 28px\)/);
+  assert.match(styles,/\.admin-page\.admin-nav-compact/);
+  assert.match(styles,/body\.admin-mode>\.topbar/);
   assert.match(styles,/\.admin-nav-search/);
   assert.match(styles,/\.admin-mobile-menu\{display:none\}/);
   assert.match(responsive,/\.admin-mobile-menu\{display:block\}/);

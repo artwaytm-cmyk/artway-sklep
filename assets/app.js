@@ -2252,6 +2252,7 @@ function renderuj(){
     // Moduł panelu zawiera także bezpieczny widok „Brak dostępu”. Ładujemy go
     // wyłącznie po wejściu na trasę administracyjną, również dla gościa.
     const wymagaPanelu=t.startsWith("/admin")||t==="/diagnostyka";
+    document.body.classList.toggle("admin-mode",wymagaPanelu);
     if(wymagaPanelu&&!window.__artwayAdminReady){
       w.innerHTML=`<div class="page"><div class="panel admin-loading" role="status" aria-live="polite"><h1>Ładowanie panelu administratora…</h1><p>Wczytuję moduły potrzebne tylko do obsługi sklepu.</p></div></div>`;
       zaladujPanelAdmina().then(()=>renderuj()).catch(error=>{
@@ -3325,7 +3326,7 @@ function adminMenuPozycjaAktywna(aktywna,href){
 }
 function adminMenuLinkHTML(pozycja,aktywna,powiadomienia,dodatkowaKlasa=""){
   const [href,ikona,nazwa,podpis]=pozycja,czyAktywna=adminMenuPozycjaAktywna(aktywna,href),licznik=powiadomienia[href]||0;
-  return `<a href="#${href}" class="admin-nav-link ${dodatkowaKlasa} ${czyAktywna?"active":""}" ${czyAktywna?'aria-current="page"':""}><span class="admin-nav-link-main"><i>${ikona}</i><span><b>${esc(nazwa)}</b>${podpis?`<small>${esc(podpis)}</small>`:""}</span></span>${licznik?`<span class="nav-badge" aria-label="${licznik} aktywnych spraw">${licznik}</span>`:""}</a>`;
+  return `<a href="#${href}" class="admin-nav-link ${dodatkowaKlasa} ${czyAktywna?"active":""}" title="${esc(nazwa)}${podpis?` — ${esc(podpis)}`:""}" ${czyAktywna?'aria-current="page"':""}><span class="admin-nav-link-main"><i>${ikona}</i><span><b>${esc(nazwa)}</b>${podpis?`<small>${esc(podpis)}</small>`:""}</span></span>${licznik?`<span class="nav-badge" aria-label="${licznik} aktywnych spraw">${licznik}</span>`:""}</a>`;
 }
 function adminKontekstWidoku(aktywna){
   if(adminMenuPozycjaAktywna(aktywna,"/admin"))return {grupa:"Centrum zarządzania",ikona:MENU_ADMINA_PULPIT[1],nazwa:MENU_ADMINA_PULPIT[2],podpis:MENU_ADMINA_PULPIT[3]};
@@ -3342,6 +3343,12 @@ function przelaczGrupeMenuAdmina(id,button){
   nav?.querySelectorAll(".admin-nav-group").forEach(g=>{g.classList.add("collapsed");g.querySelector(".admin-nav-group-toggle")?.setAttribute("aria-expanded","false");});
   if(otwieramy){grupa.classList.remove("collapsed");button.setAttribute("aria-expanded","true");}
   zapiszLS("artway_admin_menu_otwarta_v2",otwieramy?id:"");
+}
+function przelaczTrybMenuAdmina(button){
+  const shell=button?.closest?.("[data-admin-shell]");if(!shell)return;
+  const kompaktowy=!shell.classList.contains("admin-nav-compact");
+  shell.classList.toggle("admin-nav-compact",kompaktowy);zapiszLS("artway_admin_menu_kompaktowe_v1",kompaktowy);
+  button.setAttribute("aria-pressed",String(kompaktowy));button.textContent=kompaktowy?"⇥":"⇤";button.title=kompaktowy?"Rozwiń menu":"Zwiń menu";
 }
 function filtrujMenuAdmina(input){
   const nav=input?.closest?.(".admin-nav"),q=normalizujSzukanyTekst(input?.value||"");if(!nav)return;
@@ -3367,23 +3374,24 @@ function adminSzkielet(aktywna, tresc){
   powiadomienia["/admin"]=licznikOperacyjny;
   const otwartaGrupa=adminMenuOtwartaGrupa();
   const kontekst=adminKontekstWidoku(aktywna);
+  const menuKompaktowe=!!wczytajLS("artway_admin_menu_kompaktowe_v1",false);
   return `
-  <div class="admin-page" data-admin-shell>
+  <div class="admin-page ${menuKompaktowe?"admin-nav-compact":""}" data-admin-shell>
     <aside class="admin-nav" aria-label="Główna nawigacja administratora">
-      <div class="admin-nav-heading"><span class="admin-nav-brand-mark">A</span><span class="admin-nav-brand-copy"><b>Artway-TM</b><small>Centrum zarządzania</small></span><a href="#/" title="Otwórz sklep" aria-label="Otwórz stronę sklepu">↗</a></div>
+      <div class="admin-nav-heading"><span class="admin-nav-brand-mark">A</span><span class="admin-nav-brand-copy"><b>Artway-TM</b><small>Panel operacyjny</small></span><button type="button" onclick="przelaczTrybMenuAdmina(this)" title="${menuKompaktowe?"Rozwiń menu":"Zwiń menu"}" aria-label="Zmień szerokość menu" aria-pressed="${String(menuKompaktowe)}">${menuKompaktowe?"⇥":"⇤"}</button></div>
       <label class="admin-nav-search"><span>🔎</span><input type="search" placeholder="Znajdź moduł…" aria-label="Znajdź moduł panelu" oninput="filtrujMenuAdmina(this)"></label>
       ${adminMenuLinkHTML(MENU_ADMINA_PULPIT,aktywna,powiadomienia,"admin-nav-home")}
       <div class="admin-nav-separator"></div>
       ${MENU_ADMINA.map(grupa=>{
         const aktywnaGrupa=grupa.elementy.some(p=>adminMenuPozycjaAktywna(aktywna,p[0])),zwinieta=!aktywnaGrupa&&otwartaGrupa!==grupa.id;
         const licznikGrupy=grupa.elementy.reduce((s,p)=>s+(powiadomienia[p[0]]||0),0);
-        return `<section class="admin-nav-group ${aktywnaGrupa?"is-active":""} ${zwinieta?"collapsed":""}" data-admin-menu-group="${esc(grupa.id)}"><button type="button" class="admin-nav-group-toggle" onclick="przelaczGrupeMenuAdmina('${esc(grupa.id)}',this)" aria-expanded="${String(!zwinieta)}"><span class="admin-nav-group-title"><i>${grupa.ikona}</i><span><b>${esc(grupa.nazwa)}</b><small>${esc(grupa.opis||"")}</small></span></span><span class="admin-nav-group-meta">${licznikGrupy?`<b>${licznikGrupy}</b>`:""}<em>⌄</em></span></button><div class="admin-nav-items">${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia)).join("")}</div></section>`;
+        return `<section class="admin-nav-group ${aktywnaGrupa?"is-active":""} ${zwinieta?"collapsed":""}" data-admin-menu-group="${esc(grupa.id)}"><button type="button" class="admin-nav-group-toggle" onclick="przelaczGrupeMenuAdmina('${esc(grupa.id)}',this)" title="${esc(grupa.nazwa)} — ${esc(grupa.opis||"")}" aria-expanded="${String(!zwinieta)}"><span class="admin-nav-group-title"><i>${grupa.ikona}</i><span><b>${esc(grupa.nazwa)}</b><small>${esc(grupa.opis||"")}</small></span></span><span class="admin-nav-group-meta">${licznikGrupy?`<b>${licznikGrupy}</b>`:""}<em>⌄</em></span></button><div class="admin-nav-items">${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia)).join("")}</div></section>`;
       }).join("")}
       <div class="admin-nav-footer"><span class="${licznikOperacyjny?"has-work":"is-clear"}"></span><small>${licznikOperacyjny?`${licznikOperacyjny} aktywnych spraw operacyjnych`:"Brak pilnych spraw operacyjnych"}</small></div>
     </aside>
     <div class="admin-tresc">
       ${adminMenuMobilneHTML(aktywna,powiadomienia,kontekst)}
-      <header class="admin-workspace-header"><div class="admin-workspace-context"><span>${kontekst.ikona}</span><div><small>Panel administratora <i>›</i> ${esc(kontekst.grupa)}</small><b>${esc(kontekst.nazwa)}</b><em>${esc(kontekst.podpis||"")}</em></div></div><div class="admin-workspace-actions"><span class="admin-workspace-health"><i class="${licznikOperacyjny?"has-work":"is-clear"}"></i>${licznikOperacyjny?`${licznikOperacyjny} spraw`:"System gotowy"}</span>${aktywna!=="/admin"?`<a class="btn ghost" href="#/admin">📊 Pulpit</a>`:""}<a class="btn ghost" href="#/">↗ Sklep</a></div></header>
+      <header class="admin-workspace-header"><div class="admin-workspace-context"><span>${kontekst.ikona}</span><div><small>Panel administratora <i>›</i> ${esc(kontekst.grupa)}</small><b>${esc(kontekst.nazwa)}</b><em>${esc(kontekst.podpis||"")}</em></div></div><div class="admin-workspace-actions"><span class="admin-workspace-health"><i class="${licznikOperacyjny?"has-work":"is-clear"}"></i>${licznikOperacyjny?`${licznikOperacyjny} spraw`:"System gotowy"}</span>${aktywna!=="/admin"?`<a class="btn ghost" href="#/admin">📊 Pulpit</a>`:""}<a class="btn ghost" href="#/konto">👤 Konto</a><a class="btn ghost" href="#/">↗ Sklep</a></div></header>
       <div class="admin-workspace-content">${tresc}</div>
     </div>
   </div>`;

@@ -40,6 +40,7 @@ test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', 
 test('bezpośrednie wejście gościa na trasę panelu może wyświetlić bezpieczny brak dostępu', async () => {
   const router = await readFile('src/frontend/06-router-and-storefront.js', 'utf8');
   assert.match(router, /const wymagaPanelu=t\.startsWith\("\/admin"\)\|\|t==="\/diagnostyka"/);
+  assert.match(router, /document\.body\.classList\.toggle\("admin-mode",wymagaPanelu\)/);
   assert.ok(!router.includes('const wymagaPanelu=(t.startsWith("/admin")||t==="/diagnostyka")&&jestAdmin()'));
 });
 
