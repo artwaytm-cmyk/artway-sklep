@@ -70,7 +70,8 @@ function renderuj(){
     else if(t==="/diagnostyka") w.innerHTML = jestAdmin() ? widokDiagnostyka() : widokBrakDostepu();
     else if(t.startsWith("/admin") ){
       if(!jestAdmin()) w.innerHTML = widokBrakDostepu();
-      else if(t==="/admin") w.innerHTML = widokAdmin();
+      else if(t==="/admin" || t==="/admin/pulpit") w.innerHTML = widokAdmin("pulpit");
+      else if(t.startsWith("/admin/pulpit/")) w.innerHTML = widokAdmin(t.split("/")[3]||"pulpit");
       else if(t==="/admin/zamowienia") w.innerHTML = widokAdminZamowienia();
       else if(t==="/admin/zamowienia/tabela") w.innerHTML = widokAdminZamowieniaTabela();
       else if(t.startsWith("/admin/zamowienie/")) w.innerHTML = widokAdminZamowienie(decodeURIComponent(t.split("/")[3]||""));

@@ -33,6 +33,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/14-categories-and-mapping.js',
       'src/frontend/15-personalization-and-publishing.js',
       'src/frontend/16-diagnostics.js',
+      'src/frontend/19-admin-dashboard.js',
     ],
   },
   {
@@ -57,6 +58,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/10-infakt.css',
       'src/styles/11-profitability.css',
       'src/styles/12-allegro-compliance.css',
+      'src/styles/13-dashboard.css',
     ],
   },
 ]);

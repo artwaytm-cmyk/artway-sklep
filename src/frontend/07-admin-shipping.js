@@ -587,8 +587,8 @@ function odswiezPoCichejSynchronizacji(){
   const aktywny=document.activeElement, tag=aktywneTag => aktywneTag && ["INPUT","TEXTAREA","SELECT"].includes(aktywneTag.tagName);
   if(tag(aktywny)) return;
   const t=trasa();
-  const odswiezane=["/admin","/admin/zamowienia","/admin/wysylki","/admin/agent-ai","/admin/magazyn","/admin/allegro","/zamowienia"];
-  if(!odswiezane.some(x=>t===x || (["/admin/agent-ai","/admin/magazyn","/admin/allegro"].includes(x)&&t.startsWith(x+"/")) || (x==="/admin/wysylki"&&t.startsWith("/admin/zamowienie/")))) return;
+  const odswiezane=["/admin","/admin/pulpit","/admin/zamowienia","/admin/wysylki","/admin/agent-ai","/admin/magazyn","/admin/allegro","/zamowienia"];
+  if(!odswiezane.some(x=>t===x || (["/admin/pulpit","/admin/agent-ai","/admin/magazyn","/admin/allegro"].includes(x)&&t.startsWith(x+"/")) || (x==="/admin/wysylki"&&t.startsWith("/admin/zamowienie/")))) return;
   const y=window.scrollY||0;
   renderuj();
   setTimeout(()=>window.scrollTo({top:y}),0);

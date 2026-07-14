@@ -2225,7 +2225,8 @@ function renderuj(){
     else if(t==="/diagnostyka") w.innerHTML = jestAdmin() ? widokDiagnostyka() : widokBrakDostepu();
     else if(t.startsWith("/admin") ){
       if(!jestAdmin()) w.innerHTML = widokBrakDostepu();
-      else if(t==="/admin") w.innerHTML = widokAdmin();
+      else if(t==="/admin" || t==="/admin/pulpit") w.innerHTML = widokAdmin("pulpit");
+      else if(t.startsWith("/admin/pulpit/")) w.innerHTML = widokAdmin(t.split("/")[3]||"pulpit");
       else if(t==="/admin/zamowienia") w.innerHTML = widokAdminZamowienia();
       else if(t==="/admin/zamowienia/tabela") w.innerHTML = widokAdminZamowieniaTabela();
       else if(t.startsWith("/admin/zamowienie/")) w.innerHTML = widokAdminZamowienie(decodeURIComponent(t.split("/")[3]||""));
@@ -3783,8 +3784,8 @@ function odswiezPoCichejSynchronizacji(){
   const aktywny=document.activeElement, tag=aktywneTag => aktywneTag && ["INPUT","TEXTAREA","SELECT"].includes(aktywneTag.tagName);
   if(tag(aktywny)) return;
   const t=trasa();
-  const odswiezane=["/admin","/admin/zamowienia","/admin/wysylki","/admin/agent-ai","/admin/magazyn","/admin/allegro","/zamowienia"];
-  if(!odswiezane.some(x=>t===x || (["/admin/agent-ai","/admin/magazyn","/admin/allegro"].includes(x)&&t.startsWith(x+"/")) || (x==="/admin/wysylki"&&t.startsWith("/admin/zamowienie/")))) return;
+  const odswiezane=["/admin","/admin/pulpit","/admin/zamowienia","/admin/wysylki","/admin/agent-ai","/admin/magazyn","/admin/allegro","/zamowienia"];
+  if(!odswiezane.some(x=>t===x || (["/admin/pulpit","/admin/agent-ai","/admin/magazyn","/admin/allegro"].includes(x)&&t.startsWith(x+"/")) || (x==="/admin/wysylki"&&t.startsWith("/admin/zamowienie/")))) return;
   const y=window.scrollY||0;
   renderuj();
   setTimeout(()=>window.scrollTo({top:y}),0);
@@ -4462,53 +4463,6 @@ function zapiszCzescUstawien(obj){
   zastosujUstawienia(); zbudujProdukty(); odswiezMenu(); odswiezKoszyk();
   loguj("info","Zapisano ustawienia sklepu");
   toast("Zapisane ✅"); renderuj();
-}
-function widokAdmin(){
-  const zam = pobierzZamowienia(), kl = pobierzUzytkownikow().filter(u=>!kontoMaRoleAdmin(u.email));
-  const przychod = zam.filter(z=>z.status!=="anulowane").reduce((s,z)=>s+z.razem,0);
-  const nowe = zam.filter(z=>z.status==="nowe").length;
-  const wgStatusu = STATUSY.map(s=>[s, zam.filter(z=>z.status===s).length]).filter(x=>x[1]);
-  return adminSzkielet("/admin", `
-    <div class="panel">
-      <h1>📊 Pulpit</h1>
-      <div class="stat-grid">
-        <div class="stat" style="${nowe?'background:#fef3c7':''}"><b>${nowe}</b><small>nowych zamówień</small></div>
-        <div class="stat"><b>${zam.length}</b><small>wszystkich zamówień</small></div>
-        <div class="stat"><b>${zl(przychod)}</b><small>wartość sprzedaży</small></div>
-        <div class="stat"><b>${kl.length}</b><small>klientów</small></div>
-        <div class="stat"><b>${produkty.length}</b><small>produktów</small></div>
-      </div>
-      ${chmuraStatusHTML()}
-      ${wgStatusu.length?`<p style="font-size:.85rem;color:var(--muted2)">Zamówienia: ${wgStatusu.map(([s,n])=>`<span class="lvl" style="background:${KOLOR_STATUSU[s]}">${s}: ${n}</span>`).join(" ")}</p>`:""}
-      ${domyslneHasloAdmina?`<div class="sug" style="margin-top:1rem"><span class="s-ico">🔑</span><span><b>Masz domyślne hasło (admin)!</b> Zmień je w <a href="#/konto">Moje konto → Zmień hasło</a>, zanim wgrasz stronę do internetu.</span></div>`:""}
-      <h2>⚡ Sklep i sprzedaż</h2>
-      <div class="diag-actions" style="margin-top:.4rem">
-        <a class="btn" href="#/admin/wysylki">🚚 Centrum wysyłek</a>
-        <a class="btn" href="#/admin/magazyn">🏬 Magazyn</a>
-        <a class="btn" href="#/admin/agent-ai">🤖 Agent AI</a>
-        <a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt ręcznie lub z linku</a>
-        <a class="btn ghost" href="#/admin/kategorie">🗂️ Utwórz katalog</a>
-        <a class="btn ghost" href="#/admin/mapowanie">🧩 Mapuj produkty</a>
-        <a class="btn ghost" href="#/admin/rabaty">🎁 Dodaj kod rabatowy</a>
-      </div>
-      <h2>🎨 Wygląd i konfiguracja — wszystko w jednym miejscu</h2>
-      <div class="diag-actions" style="margin-top:.4rem">
-        <a class="btn" style="background:var(--brand2)" href="#/admin/personalizacja">🎨 Personalizacja i ustawienia</a>
-        <a class="btn" href="#/admin/aktualizacja">⬆️ Aktualizuj stronę</a>
-        <a class="btn ghost" href="#/admin/publikacja">🌍 Publikacja</a>
-        <a class="btn ghost" href="#/diagnostyka">🛠️ Sprawdź kondycję</a>
-      </div>
-    </div>
-    ${wykresSprzedazyHTML()}
-    <div class="panel">
-      <h2 style="margin-top:0">🕐 Ostatnie zamówienia</h2>
-      ${zam.length ? `<table class="mini-tab">${zam.slice(0,6).map(z=>`
-        <tr><td><a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}"><b>${esc(z.nr)}</b></a></td>
-        <td>${esc(z.data)}</td><td><span class="lvl" style="background:${KOLOR_STATUSU[z.status]||'var(--bg)'}">${esc(z.status)}</span></td>
-        <td style="text-align:right"><b>${zl(z.razem)}</b></td></tr>`).join("")}</table>
-        <p style="margin-top:.6rem"><a href="#/admin/zamowienia">Wszystkie zamówienia →</a></p>`
-      : `<p style="color:var(--muted2)">Brak zamówień — gdy klienci zaczną kupować, zobaczysz je tutaj.</p>`}
-    </div>`);
 }
 
 /* ═══════════ KOSZYK ═══════════ */
