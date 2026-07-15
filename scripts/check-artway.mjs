@@ -16,6 +16,7 @@ const files = [
   'netlify/functions/lib/core/store-repository.mjs',
   'netlify/functions/lib/domain/orders.mjs',
   'netlify/functions/lib/domain/catalog-quality.mjs',
+  'netlify/functions/lib/domain/allegro-reply-assistant.mjs',
   'netlify/functions/lib/domain/telegram-communication.mjs',
   'netlify/functions/lib/telegram-center.mjs',
   'netlify/functions/lib/telegram-router.mjs',
@@ -649,8 +650,8 @@ if (!communicationFilterFlow.includes('allegroKomunikacjaWymagaOdpowiedzi(item)'
 if (!store.includes("!(thread.newIncomingKeys || []).includes(sourceKey)") || !store.includes("!(issue.newIncomingKeys || []).includes(sourceKey)") || !store.includes("mode: 'first-contact-only'")) {
   fail('store-app.mjs: autoresponder Allegro musi odpowiadać tylko raz na pierwszy kontakt w nowej rozmowie');
 }
-if (!app.includes('function allegroKontekstOdpowiedziHTML') || !app.includes('Sprawdź zamówienie i przygotuj')) {
-  fail('assets/app.js: propozycja odpowiedzi musi pokazywać kontrolę zamówienia, wysyłki i magazynu przed ręcznym wysłaniem');
+if (!app.includes('function allegroKontekstOdpowiedziHTML') || !app.includes('Popraw stylistycznie') || !app.includes('Popraw treść według rozmowy') || !app.includes('Poprawianie nie wysyła wiadomości')) {
+  fail('assets/app.js: edytor odpowiedzi musi rozdzielać poprawę stylu, poprawę kontekstową i ręczne wysłanie');
 }
 const feePreviewFlow = store.slice(store.indexOf("action === 'allegro-fee-preview'"), store.indexOf("action === 'allegro-offer-price-change'"));
 if (!feePreviewFlow.includes('commissions: summary.commissions') || !feePreviewFlow.includes('quotes: summary.quotes') || !feePreviewFlow.includes('allegroCommissionRate')) {

@@ -3245,34 +3245,52 @@ function allegroKomunikacjaBledyHTML(){
 function allegroReplyFieldId(type,id){return `allegro-reply-${String(type||"thread").replace(/[^a-z0-9_-]/gi,"-")}-${String(id||"").replace(/[^a-z0-9_-]/gi,"-")}`;}
 function allegroReplyContextId(type,id){return `allegro-reply-context-${String(type||"thread").replace(/[^a-z0-9_-]/gi,"-")}-${String(id||"").replace(/[^a-z0-9_-]/gi,"-")}`;}
 function allegroKontekstOdpowiedziHTML(context={}){
-  const shipment=context.shipment||{},checks=context.checks||{},errors=Array.isArray(context.errors)?context.errors:[];
+  if(context.mode==="style")return `<div class="allegro-agent-check-head"><b>✨ Poprawiono wyłącznie styl wpisanego tekstu</b><small>${esc(allegroDataTxt(context.verifiedAt))}</small></div><div class="allegro-agent-check-chips"><span class="ok">bez dodawania nowych faktów</span><span class="info">tylko szkic — nic nie wysłano</span></div>`;
+  const shipment=context.shipment||{},checks=context.checks||{},errors=Array.isArray(context.errors)?context.errors:[],history=context.history||{};
+  const conversation=context.conversation||{};
   const chips=[
+    [conversation.messageCount>0?(history.live?"ok":"warn"):"warn",conversation.messageCount>0?`${history.live?"Pełna historia Allegro":"Historia z bezpiecznej kopii"}: ${conversation.messageCount} wiadomości`:`Brak historii rozmowy`],
+    [conversation.relatedConversationCount>0?"info":"ok",conversation.relatedConversationCount>0?`Poprzednie sprawy klienta: ${conversation.relatedConversationCount}`:"Brak innych spraw klienta"],
     [context.orderFound?"ok":"warn",context.orderFound?`Zamówienie ${context.orderId}`:"Brak jednoznacznego zamówienia"],
     [checks.liveOrder?"ok":"warn",checks.liveOrder?`Status Allegro: ${context.statusLabel||context.status||"sprawdzony"}`:"Status bieżący niedostępny"],
     [checks.shipments?"ok":"warn",shipment.tracking?`Numer nadania: ${shipment.tracking}`:shipment.sent?"Wysłane — bez numeru w danych":"Brak potwierdzonego nadania"],
     [checks.warehouse?context.shortages>0?"bad":"ok":"info",checks.warehouse?(context.shortages>0?`Braki magazynowe: ${context.shortages} szt.`:"Magazyn sprawdzony"):"Brak analizy magazynowej"],
     [checks.localShipping?"ok":"info",checks.localShipping?"Sprawdzono obsługę InPost w sklepie":"Brak lokalnej przesyłki"],
   ];
-  return `<div class="allegro-agent-check-head"><b>🤖 Agent sprawdził dane przed przygotowaniem odpowiedzi</b><small>${esc(allegroDataTxt(context.verifiedAt))}</small></div><div class="allegro-agent-check-chips">${chips.map(([cls,label])=>`<span class="${cls}">${esc(label)}</span>`).join("")}</div>${errors.length?`<small class="allegro-agent-check-warning">Nie wszystkie źródła odpowiedziały: ${errors.map(esc).join(" • ")}. Propozycja nie zgaduje brakujących danych.</small>`:""}`;
+  return `<div class="allegro-agent-check-head"><b>🧠 Agent dopasował szkic do całej rozmowy i danych zamówienia</b><small>${esc(allegroDataTxt(context.verifiedAt))}</small></div><div class="allegro-agent-check-chips">${chips.map(([cls,label])=>`<span class="${cls}">${esc(label)}</span>`).join("")}</div>${history.truncated?`<small class="allegro-agent-check-warning">Rozmowa przekroczyła bezpieczny limit pobierania; wykorzystano ${esc(conversation.messageCount||0)} najnowszych wiadomości.</small>`:""}${!history.live&&history.error?`<small class="allegro-agent-check-warning">Nie udało się odświeżyć pełnego archiwum Allegro. Wykorzystano zachowaną historię: ${esc(history.error)}</small>`:""}${(conversation.warnings||[]).map(warning=>`<small class="allegro-agent-check-warning">${esc(warning)}</small>`).join("")}${conversation.contradictoryReshipmentRemoved?`<small class="allegro-agent-check-warning">Usunięto propozycję kolejnej przesyłki, ponieważ klient wyraźnie jej odmówił.</small>`:""}${errors.length?`<small class="allegro-agent-check-warning">Nie wszystkie źródła odpowiedziały: ${errors.map(esc).join(" • ")}. Propozycja nie zgaduje brakujących danych.</small>`:""}`;
 }
-async function allegroAgentPropozycjaOdpowiedzi(type,id){
+async function allegroAgentPropozycjaOdpowiedzi(type,id,mode="context"){
+  const field=document.getElementById(allegroReplyFieldId(type,id));
+  const before=String(field?.value||"");
+  if(!field){toast("Nie znaleziono pola odpowiedzi");return;}
+  if(mode==="style"&&!before.trim()){toast("Najpierw wpisz treść do poprawy stylistycznej");field.focus();return;}
+  const box=field.closest(".allegro-reply-box"),buttons=[...(box?.querySelectorAll("[data-reply-improve]")||[])];
+  buttons.forEach(button=>{button.disabled=true;button.setAttribute("aria-busy","true");});
   try{
-    const d=await chmura("allegro-reply-suggestion",{method:"POST",body:{type,id},timeout:30000});
-    const field=document.getElementById(allegroReplyFieldId(type,id));
-    if(field){field.value=d.suggestion||"";field.focus();}
+    const d=await chmura("allegro-reply-suggestion",{method:"POST",body:{type,id,mode,draft:before},timeout:30000});
+    if(field){field.dataset.previousDraft=before;field.dataset.lastImprovement=mode;field.value=d.suggestion||before;field.focus();field.dispatchEvent(new Event("input",{bubbles:true}));}
     const contextBox=document.getElementById(allegroReplyContextId(type,id));if(contextBox){contextBox.innerHTML=allegroKontekstOdpowiedziHTML(d.context||{});contextBox.hidden=false;}
-    toast(d.basedOn?.shipments?"🤖 Agent sprawdził zamówienie, wysyłkę i tracking":"🤖 Agent sprawdził dostępne dane i przygotował propozycję do zatwierdzenia");
-  }catch(e){toast("⚠️ Propozycja Agenta AI: "+(e.message||e));}
+    const undo=box?.querySelector("[data-reply-undo]");if(undo)undo.hidden=false;
+    toast(mode==="style"?"✨ Poprawiono styl szkicu — nic nie wysłano":"🧠 Dopasowano szkic do całej rozmowy — sprawdź go przed wysłaniem");
+  }catch(e){toast("⚠️ Poprawa odpowiedzi przez Agenta AI: "+(e.message||e));}
+  finally{buttons.forEach(button=>{button.disabled=false;button.removeAttribute("aria-busy");});}
+}
+function allegroCofnijPopraweOdpowiedzi(type,id){
+  const field=document.getElementById(allegroReplyFieldId(type,id));if(!field||field.dataset.previousDraft===undefined)return;
+  const current=field.value;field.value=field.dataset.previousDraft;field.dataset.previousDraft=current;field.focus();field.dispatchEvent(new Event("input",{bubbles:true}));toast("↩️ Przywrócono poprzednią wersję szkicu — nic nie wysłano");
 }
 async function allegroWyslijOdpowiedz(type,id){
   const field=document.getElementById(allegroReplyFieldId(type,id));
   const text=String(field?.value||"").trim();
   if(!text){toast("Wpisz odpowiedź albo użyj propozycji Agenta AI");return;}
+  if(field.dataset.sending==="1")return;
+  const sendButton=field.closest(".allegro-reply-box")?.querySelector("[data-reply-send]");field.dataset.sending="1";if(sendButton){sendButton.disabled=true;sendButton.setAttribute("aria-busy","true");}
   try{
     const d=await chmura("allegro-send-reply",{method:"POST",body:{type,id,text},timeout:30000});
     allegroKomunikacja={...allegroKomunikacja,threads:Array.isArray(d.threads)?d.threads:allegroKomunikacja.threads,issues:Array.isArray(d.issues)?d.issues:allegroKomunikacja.issues,updated_at:d.updated_at||allegroKomunikacja.updated_at,sprawdzono:true};
     allegroZapiszCache();toast("Odpowiedź została wysłana przez Allegro ✅");renderuj();
   }catch(e){toast("⚠️ Wysyłanie odpowiedzi Allegro: "+(e.message||e));}
+  finally{field.dataset.sending="0";if(sendButton){sendButton.disabled=false;sendButton.removeAttribute("aria-busy");}}
 }
 function allegroTypAutoraHTML(m={}){
   const explicit=String(m.authorType||"").toLowerCase(),role=String(m.role||"").toUpperCase(),login=String(m.authorLogin||"").toLowerCase();
@@ -3283,7 +3301,7 @@ function allegroTypAutoraHTML(m={}){
   return "allegro";
 }
 function allegroHistoriaRozmowyHTML(messages=[]){
-  const sorted=(Array.isArray(messages)?messages:[]).slice().sort((a,b)=>String(a.createdAt||"").localeCompare(String(b.createdAt||""))).slice(-20);
+  const sorted=(Array.isArray(messages)?messages:[]).slice().sort((a,b)=>String(a.createdAt||"").localeCompare(String(b.createdAt||"")));
   return `<div class="allegro-conversation">${sorted.map(m=>{const author=allegroTypAutoraHTML(m),buyer=author==="buyer",system=author==="allegro",label=buyer?`👤 ${esc(m.authorLogin||"Klient")}`:system?"🔔 Allegro / wiadomość systemowa":"🏪 Artway-TM";return `<div class="allegro-message ${buyer?"incoming":system?"system":"seller"}"><div><b>${label}</b><small>${esc(allegroDataTxt(m.createdAt))}</small></div><p>${esc(m.text||"Wiadomość bez treści")}</p></div>`;}).join("")||`<div class="backend-note">Brak treści wiadomości w lokalnym podglądzie.</div>`}</div>`;
 }
 function allegroInternalNoteId(type,id){return `allegro-internal-note-${String(type)}-${String(id).replace(/[^a-z0-9_-]/gi,"-")}`;}
@@ -3330,7 +3348,7 @@ function allegroRozmowaHTML(type,item={},label="Wiadomość"){
     <div class="allegro-conversation-meta"><span>ID: ${esc(item.id)}</span>${orderId?`<span>Zamówienie: ${esc(orderId)}</span>`:""}<span>Ostatnia: ${esc(allegroDataTxt(item.lastMessageDateTime||last.createdAt||item.openedDate))}</span>${item.status?`<span>Status: ${esc(item.status)}</span>`:""}</div>
     <div class="allegro-internal-resolution"><div><b>✅ Obsługa wewnętrzna</b><small>Ta operacja nie wysyła wiadomości do klienta ani nie zmienia statusu w Allegro. Agent przestanie zgłaszać sprawę do wyjaśnienia. Nowa wiadomość klienta automatycznie otworzy ją ponownie.</small>${resolved&&item.internalResolution?.resolvedAt?`<em>Załatwiono: ${esc(allegroDataTxt(item.internalResolution.resolvedAt))}${item.internalResolution.note?` • ${esc(item.internalResolution.note)}`:""}</em>`:""}</div><input id="${esc(noteId)}" maxlength="1000" value="${esc(item.internalResolution?.note||"")}" placeholder="Notatka wewnętrzna (opcjonalnie)">${resolved?`<button class="btn ghost" type="button" onclick="allegroOznaczSpraweWewnetrznie(${jsArg(type)},${jsArg(item.id)},false)">↩️ Przywróć do obsługi</button>`:`<button class="btn" type="button" onclick="allegroOznaczSpraweWewnetrznie(${jsArg(type)},${jsArg(item.id)},true)">✅ Oznacz jako załatwioną</button>`}</div>
     ${allegroHistoriaRozmowyHTML(messages)}
-    <div class="allegro-reply-box"><label for="${esc(fieldId)}"><b>Odpowiedź wychodząca do klienta</b><small>Kolejne odpowiedzi nigdy nie są wysyłane automatycznie. Agent najpierw sprawdza zamówienie, status Allegro, magazyn, przesyłkę i numer nadania; dopiero przycisk „Wyślij przez Allegro” przekaże zatwierdzoną treść klientowi.</small></label><div id="${esc(contextId)}" class="allegro-agent-check" hidden></div><textarea id="${esc(fieldId)}" rows="6" maxlength="20000" placeholder="Wpisz odpowiedź dla klienta…"></textarea><div class="diag-actions"><button class="btn ghost" type="button" onclick="allegroAgentPropozycjaOdpowiedzi(${jsArg(type)},${jsArg(item.id)})">🤖 Sprawdź zamówienie i przygotuj</button><button class="btn" type="button" onclick="allegroWyslijOdpowiedz(${jsArg(type)},${jsArg(item.id)})">✉️ Wyślij przez Allegro</button></div></div>
+    <div class="allegro-reply-box"><label for="${esc(fieldId)}"><b>Odpowiedź wychodząca do klienta</b><small>Agent analizuje pełną historię tej rozmowy, a w trybie treści dodatkowo sprawdza zamówienie, status Allegro, magazyn, przesyłkę i numer nadania. Poprawa zmienia wyłącznie poniższy szkic — wiadomość wysyła dopiero osobny niebieski przycisk.</small></label><div id="${esc(contextId)}" class="allegro-agent-check" hidden></div><textarea id="${esc(fieldId)}" rows="6" maxlength="20000" placeholder="Wpisz odpowiedź dla klienta…"></textarea><div class="allegro-reply-safety"><span>🔒 Poprawianie nie wysyła wiadomości. Przed wysłaniem zawsze widzisz pełny tekst.</span><button class="btn ghost" type="button" data-reply-undo hidden onclick="allegroCofnijPopraweOdpowiedzi(${jsArg(type)},${jsArg(item.id)})">↩️ Cofnij poprawę</button></div><div class="diag-actions allegro-reply-actions"><button class="btn ghost" type="button" data-reply-improve="style" onclick="allegroAgentPropozycjaOdpowiedzi(${jsArg(type)},${jsArg(item.id)},'style')">✨ Popraw stylistycznie</button><button class="btn ghost" type="button" data-reply-improve="context" onclick="allegroAgentPropozycjaOdpowiedzi(${jsArg(type)},${jsArg(item.id)},'context')">🧠 Popraw treść według rozmowy</button><button class="btn" type="button" data-reply-send onclick="allegroWyslijOdpowiedz(${jsArg(type)},${jsArg(item.id)})">✉️ Wyślij przez Allegro</button></div></div>
   </details>`;
 }
 function allegroWatekHTML(t){
