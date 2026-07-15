@@ -56,6 +56,8 @@ import {
 } from './domain/allegro-reply-assistant.mjs';
 import { createStoreOrderSupplierReconciliation } from './store-order-supplier-reconciliation.mjs';
 import { markAllegroInventoryTransition, markAllegroInventoryTransitions, resolveAllegroBaselineCutover } from './domain/allegro-supplier-demand.mjs';
+import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
+import { mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
 import { createInventoryStockRoute } from './inventory-route.mjs';
 import { createProductLinkImportBundle } from './product-link-import-route.mjs';
@@ -1734,9 +1736,17 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
     if (!offer?.id || (used.has(String(offer.id)) && used.get(String(offer.id)) !== String(product.id))) continue;
     const current = mappings[String(offer.id)] || {};
     if (current.blocked === true) continue;
+    const validation = allegroOcenaPowiazania(product, offer);
     const record = {
       ...current, offerId: String(offer.id), productId: String(product.id), allegroProductId: tekst(offer.productId || product.allegroProductId, 120), categoryId: tekst(offer.categoryId || product.allegroCategoryId, 80),
       productName: tekst(product.nazwa || product.name, 300), linked_at: current.linked_at || new Date().toISOString(), synced_at: new Date().toISOString(), operator: current.operator || `auto:${match.reason}`,
+      confidence: validation.score,
+      reason: validation.reason,
+      evidence: validation.evidence,
+      conflicts: validation.conflicts,
+      verifiedForSupplier: current.verifiedForSupplier === true || (validation.valid && validation.score >= 88),
+      verification: current.verification || (validation.valid && validation.score >= 88 ? 'strong-identifiers' : 'catalog-sync-review'),
+      productSnapshot: mappingProductSnapshot(product, data),
     };
     if (!current.offerId) autoMapped++; else refreshed++;
     mappings[String(offer.id)] = record; used.set(String(offer.id), String(product.id));
@@ -1777,17 +1787,28 @@ function allegroAgentProduktDlaPozycji(line = {}, offer = {}, mappings = {}, pro
     const assessment = allegroOcenaPowiazania(product, { ...offer, name: offer.name || line.offerName, externalId: offer.externalId || line.externalId });
     if (assessment.valid && assessment.score >= 88) return { id: mappedId, product, match: `zweryfikowane mapowanie: ${assessment.reason}`, confidence: assessment.score, supplierMatchVerified: true, matchEvidence: assessment.evidence };
   }
+  if (mappedId && mappingVerifiedForSupplier(mapped)) {
+    return {
+      id: mappedId,
+      product: mappedProductFallback(mapped, line, offer, mappedId),
+      match: 'zatwierdzone mapowanie — kartoteka poza aktywnym katalogiem',
+      confidence: Number(mapped.confidence || 100),
+      supplierMatchVerified: true,
+      matchEvidence: Array.isArray(mapped.evidence) ? mapped.evidence : ['ręczne zatwierdzenie administratora'],
+      virtualProduct: true,
+    };
+  }
   const ext = allegroNormalizujKlucz(line.externalId || offer.externalId || '');
-  const ean = allegroNormalizujKlucz(offer.ean || offer.gtin || '');
+  const ean = offer.ean || offer.gtin || '';
   const code = allegroNormalizujKlucz(offer.manufacturerCode || offer.producerCode || '');
   const name = allegroNormalizujKlucz(line.offerName || offer.name || '');
   const candidates = [...products.values()].map((p) => {
-    const pe = allegroNormalizujKlucz(p.gtin || p.ean || '');
+    const pe = p.gtin || p.ean || '';
     const px = allegroNormalizujKlucz(p.externalId || p.sku || '');
     const pc = allegroNormalizujKlucz(p.kodProducenta || p.mpn || '');
     const pn = allegroNormalizujKlucz(p.nazwa || p.name || '');
     let score = 0, match = '';
-    if (ean && pe === ean) { score = 99; match = 'EAN/GTIN'; }
+    if (ean && pe && (gtinEquivalent(pe, ean) || allegroNormalizujKlucz(pe) === allegroNormalizujKlucz(ean))) { score = 99; match = 'EAN/GTIN'; }
     else if (ext && px === ext) { score = 96; match = 'SKU/external.id'; }
     else if (code && pc === code) { score = 93; match = 'kod producenta'; }
     else if (name && pn === name) { score = 90; match = 'identyczna nazwa'; }
@@ -1846,8 +1867,10 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
       if (match?.id) {
         const currentMapping = mappings[offerId];
         const currentMappedId = String(currentMapping?.productId ?? currentMapping?.produktId ?? currentMapping?.id ?? currentMapping ?? '').trim();
-        if (offerId && match.supplierMatchVerified === true && (!mappings[offerId] || (currentMappedId && !products.has(currentMappedId)))) {
-          mappings[offerId] = { offerId, productId: String(match.id), allegroProductId: tekst(offer.productId || '', 120), categoryId: tekst(offer.categoryId || '', 80), productName: tekst(match.product?.nazwa || match.product?.name || line.offerName || '', 300), linked_at: new Date().toISOString(), synced_at: new Date().toISOString(), operator: `auto-order:${match.match}`, confidence: Number(match.confidence || 0), verifiedForSupplier: true };
+        const requiresDurableMapping = !currentMapping || (currentMappedId && !products.has(currentMappedId))
+          || currentMapping.verifiedForSupplier !== true || !currentMapping.productSnapshot;
+        if (offerId && match.supplierMatchVerified === true && requiresDurableMapping) {
+          mappings[offerId] = { ...currentMapping, offerId, productId: String(match.id), allegroProductId: tekst(offer.productId || '', 120), categoryId: tekst(offer.categoryId || '', 80), productName: tekst(match.product?.nazwa || match.product?.name || line.offerName || '', 300), linked_at: currentMapping?.linked_at || new Date().toISOString(), synced_at: new Date().toISOString(), operator: currentMapping?.operator || `auto-order:${match.match}`, confidence: Number(match.confidence || 0), verifiedForSupplier: true, verification: currentMapping?.verification || 'strong-identifiers', productSnapshot: mappingProductSnapshot(match.product, dane) };
           autoMapped++;
         }
         reservations.set(match.id, (reservations.get(match.id) || 0) + quantity);
@@ -1875,10 +1898,12 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
       if (!match?.id) return { offerId: line.offerId, nazwa: line.offerName || offer.name || 'Produkt Allegro', ilosc: quantity, decision: 'nierozpoznany', reason: 'Brak jednoznacznego EAN/SKU lub mapowania oferty' };
       const productId = match.id, meta = kartoteki[productId] && typeof kartoteki[productId] === 'object' ? kartoteki[productId] : {};
       const known = Object.prototype.hasOwnProperty.call(stany, productId) && stany[productId] !== '' && stany[productId] != null && Number.isFinite(Number(stany[productId]));
-      const stock = known ? Math.max(0, Number(stany[productId]) || 0) : null, reserved = reservations.get(productId) || 0, available = stock === null ? null : stock - reserved, shortage = stock === null ? null : Math.max(0, -available);
+      // Brak kartoteki stanu oznacza 0 szt. do planowania zakupu. Nie może
+      // blokować zamówienia producenta dla zatwierdzonego powiązania.
+      const stock = known ? Math.max(0, Number(stany[productId]) || 0) : 0, reserved = reservations.get(productId) || 0, available = stock - reserved, shortage = Math.max(0, -available);
       const docs = supplierDocsByProduct.get(productId) || [];
-      const decision = !known ? 'sprawdz_stan' : shortage > 0 ? 'zamow_u_producenta' : !meta.lokalizacja ? 'uzupelnij_lokalizacje' : 'kompletuj';
-      return { offerId: line.offerId, productId, nazwa: line.offerName || match.product?.nazwa || offer.name || `Produkt ${productId}`, ilosc: quantity, match: match.match, confidence: Number(match.confidence || 0), supplierMatchVerified: match.supplierMatchVerified === true, stock, reserved, available, shortage, location: tekst(meta.lokalizacja || '', 120), supplier: tekst(meta.dostawca || '', 120), supplierOrders: docs, decision };
+      const decision = shortage > 0 ? 'zamow_u_producenta' : !meta.lokalizacja ? 'uzupelnij_lokalizacje' : 'kompletuj';
+      return { offerId: line.offerId, productId, nazwa: line.offerName || match.product?.nazwa || offer.name || `Produkt ${productId}`, ilosc: quantity, match: match.match, confidence: Number(match.confidence || 0), supplierMatchVerified: match.supplierMatchVerified === true, stock, stockRecordKnown: known, reserved, available, shortage, location: tekst(meta.lokalizacja || '', 120), supplier: tekst(meta.dostawca || match.product?.dostawca || match.product?.supplier || '', 120), product: match.product, supplierOrders: docs, decision };
     });
     const nierozpoznane = positions.filter((p) => p.decision === 'nierozpoznany').length;
     const bezStanu = positions.filter((p) => p.decision === 'sprawdz_stan').length;
@@ -1991,6 +2016,9 @@ function allegroMapowaniaItems(raw) {
 function allegroNormalizujKlucz(v = '') {
   return tekst(v, 500).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 }
+function allegroKluczGtin(v = '') {
+  return canonicalGtin(v) || allegroNormalizujKlucz(v);
+}
 function allegroTokeny(v = '') {
   return new Set(allegroNormalizujKlucz(v).split(/\s+/).filter((x) => x.length > 2));
 }
@@ -2013,34 +2041,7 @@ function allegroPodobienstwoIstotne(a = '', b = '') {
   return common / Math.max(aa.size, bb.size);
 }
 function allegroOcenaPowiazania(product = {}, offer = {}) {
-  const norm = allegroNormalizujKlucz;
-  const p = {
-    ean: norm(product.gtin || product.ean), external: norm(product.externalId || product.sku),
-    code: norm(product.kodProducenta || product.mpn), catalog: String(product.allegroProductId || '').trim(),
-    offerId: String(product.allegroOfferId || '').trim(), name: tekst(product.nazwa || product.name, 400).trim(),
-  };
-  const o = {
-    ean: norm(offer.ean || offer.gtin), external: norm(offer.externalId),
-    code: norm(offer.manufacturerCode || offer.producerCode), catalog: String(offer.productId || '').trim(),
-    id: String(offer.id || '').trim(), name: tekst(offer.name || offer.offerName, 400).trim(),
-  };
-  const evidence = [], conflicts = [];
-  let score = 0, reason = '';
-  const hit = (value, label) => { if (value > score) { score = value; reason = label; } evidence.push(label); };
-  if (p.ean && o.ean) p.ean === o.ean ? hit(100, 'identyczny EAN/GTIN') : conflicts.push('różny EAN/GTIN');
-  if (p.catalog && o.catalog) p.catalog === o.catalog ? hit(99, 'identyczny produkt katalogowy Allegro') : conflicts.push('różne ID produktu katalogowego');
-  if (p.external && o.external) p.external === o.external ? hit(97, 'identyczny EXTERNAL_ID/SKU') : conflicts.push('różny EXTERNAL_ID/SKU');
-  if (p.code && o.code) p.code === o.code ? hit(95, 'identyczny kod producenta') : conflicts.push('różny kod producenta');
-  const nameExact = p.name && o.name && norm(p.name) === norm(o.name);
-  const similarity = p.name && o.name ? allegroPodobienstwoIstotne(p.name, o.name) : 0;
-  if (nameExact) hit(92, 'identyczna nazwa');
-  else if (similarity >= 0.72) hit(Math.round(72 + similarity * 18), 'bardzo podobna nazwa');
-  else if (similarity >= 0.45) hit(Math.round(52 + similarity * 20), 'częściowo podobna nazwa');
-  if (p.offerId && o.id && p.offerId === o.id && !conflicts.includes('różny EAN/GTIN')) hit(Math.max(score, 70), 'zapisane ID oferty');
-  const strongConflict = conflicts.includes('różny EAN/GTIN') || (conflicts.includes('różne ID produktu katalogowego') && !!p.catalog && !!o.catalog);
-  if (strongConflict) score = Math.min(score, 35);
-  else if (conflicts.length && score < 95) score = Math.max(0, score - Math.min(25, conflicts.length * 8));
-  return { score, reason: reason || 'brak wspólnych identyfikatorów', evidence, conflicts, similarity: Math.round(similarity * 100), strongConflict, valid: score >= 65 && !strongConflict };
+  return scoreAllegroProductMapping(product, offer);
 }
 function allegroPowiazanieWiarygodne(product = {}, offer = {}) {
   const offerName = tekst(offer.name || offer.offerName, 400).trim();
@@ -2059,7 +2060,7 @@ function allegroDopasowanieOferty(product = {}, offersRaw = [], mappingsRaw = {}
   const offerId = tekst(product.allegroOfferId, 100).trim();
   const catalogProductId = tekst(product.allegroProductId, 120).trim();
   const external = allegroNormalizujKlucz(product.externalId || product.sku || product.kodProducenta || product.mpn || '');
-  const ean = allegroNormalizujKlucz(product.gtin || product.ean || '');
+  const ean = allegroKluczGtin(product.gtin || product.ean || '');
   const code = allegroNormalizujKlucz(product.kodProducenta || product.mpn || '');
   const name = allegroNormalizujKlucz(product.nazwa || product.name || '');
   const mappedOfferId = Object.values(mappings).find((m) => String(m?.productId ?? '') === pid)?.offerId || '';
@@ -2070,7 +2071,7 @@ function allegroDopasowanieOferty(product = {}, offersRaw = [], mappingsRaw = {}
     else if (mappedOfferId && String(o.id) === String(mappedOfferId) && allegroPowiazanieWiarygodne(product, o)) { score = 98; reason = 'mapowanie produktu'; }
     else if (catalogProductId && String(o.productId || '') === catalogProductId && allegroPowiazanieWiarygodne(product, o)) { score = 97; reason = 'identyczne ID produktu katalogowego Allegro'; }
     else if (external && allegroNormalizujKlucz(o.externalId) === external) { score = 95; reason = 'identyczny external.id / SKU'; }
-    else if (ean && allegroNormalizujKlucz(o.ean || o.gtin) === ean) { score = 92; reason = 'identyczny EAN/GTIN'; }
+    else if (ean && allegroKluczGtin(o.ean || o.gtin) === ean) { score = 92; reason = 'identyczny EAN/GTIN'; }
     else if (code && allegroNormalizujKlucz(o.manufacturerCode || o.producerCode) === code) { score = 88; reason = 'identyczny kod producenta'; }
     else if (name && allegroNormalizujKlucz(o.name) === name) { score = 86; reason = 'identyczna nazwa oferty'; }
     else {
@@ -6450,7 +6451,7 @@ export default async (req) => {
         if (oldProduct && String(oldProduct.allegroOfferId || '') === offerId) updater.apply(old.productId, { allegroMappingStatus: 'zmienione_ręcznie' }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
       }
       if (occupied.length && replaceExisting) for (const otherOfferId of occupied) items[otherOfferId] = { ...(items[otherOfferId] || {}), offerId: otherOfferId, previousProductId: productId, productId: '', blocked: true, operator: 'admin-replaced-by-other-offer', synced_at: now };
-      items[offerId] = { ...old, offerId, productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, synced_at: now, operator: force ? 'admin-force' : 'admin-validated', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, blocked: false };
+      items[offerId] = { ...old, offerId, productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, synced_at: now, operator: force ? 'admin-force' : 'admin-validated', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, blocked: false, verifiedForSupplier: true, verification: force ? 'admin-force' : 'admin-validated', productSnapshot: mappingProductSnapshot(product, data) };
       updater.apply(productId, { allegroOfferId: offerId, ...(offer.productId ? { allegroProductId: tekst(offer.productId, 120) } : {}), ...(offer.categoryId ? { allegroCategoryId: tekst(offer.categoryId, 80) } : {}), allegroMappingStatus: force ? 'zatwierdzone_ręcznie' : 'zweryfikowane', allegroSyncedAt: now, allegroSyncSource: 'admin-mapping' }, ['allegroMappingConflict']);
       const settingsChanged = updater.commit();
       await Promise.all([
@@ -6483,7 +6484,7 @@ export default async (req) => {
           const oldProduct = products.get(String(old.productId));
           if (oldProduct && String(oldProduct.allegroOfferId || '') === item.offerId) updater.apply(old.productId, { allegroMappingStatus: 'zmienione_automatycznie' }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
         }
-        mappings[item.offerId] = { ...old, offerId: item.offerId, productId: item.productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, synced_at: now, operator: 'admin-safe-batch', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, blocked: false };
+        mappings[item.offerId] = { ...old, offerId: item.offerId, productId: item.productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, synced_at: now, operator: 'admin-safe-batch', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, blocked: false, verifiedForSupplier: true, verification: 'admin-safe-batch', productSnapshot: mappingProductSnapshot(product, data) };
         updater.apply(item.productId, { allegroOfferId: item.offerId, ...(offer.productId ? { allegroProductId: tekst(offer.productId, 120) } : {}), ...(offer.categoryId ? { allegroCategoryId: tekst(offer.categoryId, 80) } : {}), allegroMappingStatus: 'zweryfikowane', allegroSyncedAt: now, allegroSyncSource: 'safe-batch-mapping' }, ['allegroMappingConflict']);
         occupied.set(item.productId, item.offerId);results.push({ ...item, ok: true, validation });
       }

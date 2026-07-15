@@ -817,13 +817,24 @@ function allegroOfertaPoId(offerId){
   return (Array.isArray(allegroOferty)?allegroOferty:[]).find(o=>String(o.id)===String(offerId))||null;
 }
 function allegroKluczPorownania(v){ return String(v||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g," ").trim(); }
+function allegroKanonicznyGtin(v=""){
+  const code=String(v??"").replace(/\D+/g,"");if(![8,12,13,14].includes(code.length))return"";
+  let sum=0,weight=3;for(let i=code.length-2;i>=0;i--,weight=weight===3?1:3)sum+=Number(code[i])*weight;
+  if((10-sum%10)%10!==Number(code.at(-1)))return"";return code.padStart(14,"0");
+}
+function allegroKluczGtin(v=""){return allegroKanonicznyGtin(v)||allegroKluczPorownania(v);}
+function allegroMapowanieDostawcyZweryfikowane(rec={}){return rec?.verifiedForSupplier===true||rec?.supplierOrderEligible===true||/^(admin-(?:validated|force|safe-batch|duplicate-keep)|auto-order:)/i.test(String(rec?.operator||"").trim());}
+function allegroProduktWirtualnyZMapowania(rec={},mappedId="",oferta={}){
+  const snapshot=rec?.productSnapshot&&typeof rec.productSnapshot==="object"?rec.productSnapshot:{};
+  return {...snapshot,id:mappedId,productId:mappedId,nazwa:snapshot.nazwa||snapshot.name||rec.productName||oferta.name||`Produkt ${mappedId}`,externalId:snapshot.externalId||snapshot.sku||oferta.externalId||"",ean:snapshot.ean||snapshot.gtin||oferta.ean||oferta.gtin||"",gtin:snapshot.gtin||snapshot.ean||oferta.gtin||oferta.ean||"",kodProducenta:snapshot.kodProducenta||snapshot.mpn||oferta.manufacturerCode||oferta.producerCode||"",producent:snapshot.producent||snapshot.manufacturer||snapshot.marka||snapshot.brand||oferta.brand||"",archiwalneMapowanie:true};
+}
 function allegroOfertyPasujaceDoProduktu(p={}){
   const oferty=Array.isArray(allegroOferty)?allegroOferty:[];
   const direct=String(p.allegroOfferId||"").trim();
   const pid=String(p.id??"").trim();
   const mappedIds=new Set(Object.values(allegroMapowania||{}).filter(m=>String(m?.productId??"")===pid).map(m=>String(m?.offerId||"")).filter(Boolean));
   const external=allegroKluczPorownania(p.externalId||p.sku||p.kodProducenta||p.mpn);
-  const ean=allegroKluczPorownania(p.gtin||p.ean);
+  const ean=allegroKluczGtin(p.gtin||p.ean);
   const code=allegroKluczPorownania(p.kodProducenta||p.mpn);
   const catalog=String(p.allegroProductId||"").trim();
   const name=allegroKluczPorownania(p.nazwa||p.name);
@@ -833,7 +844,7 @@ function allegroOfertyPasujaceDoProduktu(p={}){
     else if(mappedIds.has(String(o.id))){score=99;reason="mapowanie";}
     else if(catalog&&String(o.productId||"")===catalog){score=97;reason="ID produktu Allegro";}
     else if(external&&allegroKluczPorownania(o.externalId)===external){score=95;reason="SKU / external.id";}
-    else if(ean&&allegroKluczPorownania(o.ean||o.gtin)===ean){score=93;reason="EAN/GTIN";}
+    else if(ean&&allegroKluczGtin(o.ean||o.gtin)===ean){score=93;reason="EAN/GTIN";}
     else if(code&&allegroKluczPorownania(o.manufacturerCode||o.producerCode)===code){score=90;reason="kod producenta";}
     else if(name&&allegroKluczPorownania(o.name)===name){score=86;reason="identyczna nazwa";}
     return score?{offer:o,score,reason}:null;
@@ -907,7 +918,7 @@ function allegroInneOfertyProduktu(productId,excludeOfferId=""){
   return (allegroIndeksOfertWedlugProduktu().get(String(productId))||[]).filter(id=>id!==String(excludeOfferId));
 }
 function allegroOcenaMapowaniaKandydata(oferta={},produkt={}){
-  const norm=allegroKluczPorownania,p={ean:norm(produkt.gtin||produkt.ean),external:norm(produkt.externalId||produkt.sku),code:norm(produkt.kodProducenta||produkt.mpn),catalog:String(produkt.allegroProductId||""),offerId:String(produkt.allegroOfferId||""),name:String(produkt.nazwa||"")},o={ean:norm(oferta.ean||oferta.gtin),external:norm(oferta.externalId),code:norm(oferta.manufacturerCode||oferta.producerCode),catalog:String(oferta.productId||""),id:String(oferta.id||""),name:String(oferta.name||"")};
+  const norm=allegroKluczPorownania,p={ean:allegroKluczGtin(produkt.gtin||produkt.ean),external:norm(produkt.externalId||produkt.sku),code:norm(produkt.kodProducenta||produkt.mpn),catalog:String(produkt.allegroProductId||""),offerId:String(produkt.allegroOfferId||""),name:String(produkt.nazwa||"")},o={ean:allegroKluczGtin(oferta.ean||oferta.gtin),external:norm(oferta.externalId),code:norm(oferta.manufacturerCode||oferta.producerCode),catalog:String(oferta.productId||""),id:String(oferta.id||""),name:String(oferta.name||"")};
   const evidence=[],conflicts=[];let score=0,reason="";const hit=(value,label)=>{if(value>score){score=value;reason=label;}evidence.push(label);};
   if(p.ean&&o.ean)(p.ean===o.ean?hit(100,"identyczny EAN/GTIN"):conflicts.push("różny EAN/GTIN"));
   if(p.catalog&&o.catalog)(p.catalog===o.catalog?hit(99,"identyczny produkt katalogowy Allegro"):conflicts.push("różne ID produktu katalogowego"));
@@ -925,7 +936,7 @@ function allegroKandydaciMapowaniaOferty(oferta={}){
   return produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>allegroOcenaMapowaniaKandydata(oferta,p)).filter(x=>x.score>0||String(x.produkt.id)===String(allegroProduktIdDlaOferty(oferta.id))).sort((a,b)=>b.score-a.score||Number(a.occupied.length)-Number(b.occupied.length)||String(a.produkt.nazwa||"").localeCompare(String(b.produkt.nazwa||""),"pl")).slice(0,30);
 }
 function allegroAnalizaMapowaniaOferty(oferta={}){
-  const mappedId=String(allegroProduktIdDlaOferty(oferta.id)||""),mapped=mappedId?produktyDoAdministracji().find(p=>String(p.id)===mappedId)||null:null,candidates=allegroKandydaciMapowaniaOferty(oferta),current=mapped?candidates.find(x=>String(x.produkt.id)===mappedId)||allegroOcenaMapowaniaKandydata(oferta,mapped):null,available=candidates.filter(x=>!x.occupied.length||String(x.produkt.id)===mappedId),best=available[0]||null,second=available[1]||null;
+  const mappedId=String(allegroProduktIdDlaOferty(oferta.id)||""),rec=(allegroMapowania||{})[String(oferta.id)],mapped=mappedId?(produktyDoAdministracji().find(p=>String(p.id)===mappedId)||(allegroMapowanieDostawcyZweryfikowane(rec)?allegroProduktWirtualnyZMapowania(rec,mappedId,oferta):null)):null,candidates=allegroKandydaciMapowaniaOferty(oferta),current=mapped?candidates.find(x=>String(x.produkt.id)===mappedId)||allegroOcenaMapowaniaKandydata(oferta,mapped):null,available=candidates.filter(x=>!x.occupied.length||String(x.produkt.id)===mappedId),best=available[0]||null,second=available[1]||null;
   const suggestion=best&&best.valid&&best.score>=88&&(!second||best.score-second.score>=6)?best:null,different=suggestion&&mapped&&String(suggestion.produkt.id)!==mappedId,conflict=!!mapped&&(!!current?.strongConflict||Number(current?.score||0)<65||(different&&suggestion.score-Number(current?.score||0)>=12));
   const status=conflict?"konflikt":mapped?(Number(current?.score||0)>=85?"poprawne":"sprawdz"):suggestion?"sugestia":"niepodpiete";
   return {oferta,mapped,mappedId,current,candidates,best,suggestion,second,conflict,status,canAuto:!mapped&&!!suggestion&&!suggestion.occupied.length,correction:conflict&&different?suggestion:null};
@@ -934,6 +945,7 @@ function allegroDopasowaniePozycjiDoProduktu(it={}){
   const offerId=String(it.offerId||it.offer?.id||"").trim(),oferta=allegroOfertaPoId(offerId)||{},d=allegroDanePozycjiZamowienia({...it,offerId});
   const rec=(allegroMapowania||{})[offerId],blocked=rec?.blocked===true,mappedId=String(rec?.productId??rec?.produktId??rec?.id??rec??"").trim();
   const virtualOffer={...oferta,id:offerId,name:d.nazwa||oferta.name,externalId:it.externalId||oferta.externalId||d.kod,ean:oferta.ean||oferta.gtin||d.ean},candidates=allegroKandydaciMapowaniaOferty(virtualOffer).slice(0,8),current=mappedId?candidates.find(x=>String(x.produkt.id)===mappedId):null;
+  if(mappedId&&!current&&allegroMapowanieDostawcyZweryfikowane(rec)){const produkt=allegroProduktWirtualnyZMapowania(rec,mappedId,virtualOffer);return{produkt,match:"zatwierdzone powiązanie — produkt poza aktywnym katalogiem",confidence:Number(rec?.confidence||100),candidates,virtualProduct:true};}
   if(mappedId&&current?.valid&&!current.strongConflict)return{produkt:current.produkt,match:String(rec?.operator||"").startsWith("auto-order:")?String(rec.operator).replace("auto-order:",""):current.reason||"zweryfikowane mapowanie",confidence:Number(current.score||rec?.confidence||0),candidates};
   const available=candidates.filter(x=>!x.occupied.length),best=available[0],second=available[1],pewne=!blocked&&best&&best.valid&&best.score>=88&&(!second||best.score-second.score>=6);
   return {produkt:pewne?best.produkt:null,match:blocked?"automatyczne dopasowanie wyłączone ręcznie":mappedId?"obecne mapowanie jest sprzeczne z identyfikatorami":pewne?best.reason:"brak pewnego dopasowania",confidence:pewne?best.score:0,candidates,mappingConflict:!!mappedId&&!current?.valid};

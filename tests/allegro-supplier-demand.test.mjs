@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { allegroOrdersForInventoryDeduction, allegroOrdersForSupplierDemand, markAllegroInventoryTransition, markAllegroInventoryTransitions, resolveAllegroBaselineCutover } from '../netlify/functions/lib/domain/allegro-supplier-demand.mjs';
+import { reconcileSupplierOrderDrafts } from '../netlify/functions/lib/domain/supplier-order-reconciliation.mjs';
 
 const catalog = [{ id: 'P-1' }, { id: 'P-2' }];
 
@@ -47,6 +48,80 @@ test('nieistniejący produkt z przestarzałego mapowania nie tworzy osieroconego
   }], { items: { 'O-X': { productId: 'USUNIETY' } } }, [], catalog);
   assert.deepEqual(result.orders, []);
   assert.equal(result.diagnostics.skippedWeakMapping, 1);
+});
+
+test('zatwierdzone mapowanie zachowuje popyt także po zniknięciu produktu z aktywnego katalogu', () => {
+  const mapping = {
+    productId: 'ARCH-2678',
+    verifiedForSupplier: true,
+    confidence: 100,
+    productSnapshot: {
+      id: 'ARCH-2678',
+      nazwa: 'Puzzle magnetyczne Farma',
+      externalId: '2678',
+      ean: '5906018026788',
+      kodProducenta: '2678',
+      producent: 'Alexander',
+      dostawca: 'Alexander',
+    },
+  };
+  const result = allegroOrdersForSupplierDemand([{
+    id: 'ALG-VIRTUAL', status: 'READY_FOR_PROCESSING',
+    lineItems: [{ offerId: 'O-VIRTUAL', offerName: 'Puzzle magnetyczne Farma', quantity: 2 }],
+  }], { items: { 'O-VIRTUAL': mapping } }, [], catalog);
+
+  assert.equal(result.orders.length, 1);
+  assert.equal(result.orders[0].pozycjeDane[0].productId, 'ARCH-2678');
+  assert.equal(result.orders[0].pozycjeDane[0].ilosc, 2);
+  assert.equal(result.orders[0].pozycjeDane[0].virtualProduct, true);
+  assert.equal(result.orders[0].pozycjeDane[0].product.dostawca, 'Alexander');
+  assert.equal(result.orders[0].pozycjeDane[0].product.kodProducenta, '2678');
+  assert.equal(result.diagnostics.virtualProductLines, 1);
+});
+
+test('starsze ręczne mapowanie administratora jest migrowane bez ponownego klikania', () => {
+  const result = allegroOrdersForSupplierDemand([{
+    id: 'ALG-LEGACY-MANUAL', status: 'READY_FOR_PROCESSING',
+    lineItems: [{ offerId: 'O-LEGACY', offerName: 'Starszy produkt', quantity: 1 }],
+  }], { items: { 'O-LEGACY': {
+    productId: 'ARCH-LEGACY', operator: 'admin-validated', productName: 'Starszy produkt', supplier: 'Multigra', externalId: 'M-10',
+  } } }, [], catalog);
+
+  assert.equal(result.orders.length, 1);
+  assert.equal(result.orders[0].pozycjeDane[0].productId, 'ARCH-LEGACY');
+  assert.equal(result.orders[0].pozycjeDane[0].product.producent, 'Multigra');
+  assert.equal(result.orders[0].pozycjeDane[0].product.externalId, 'M-10');
+});
+
+test('produkt wirtualny trafia do planu producenta, ale nie tworzy fikcyjnego ruchu magazynowego', () => {
+  const mapping = { productId: 'ARCH-1', verifiedForSupplier: true, productSnapshot: { nazwa: 'Gra archiwalna', producent: 'Multigra' } };
+  const sent = [{ id: 'ALG-SENT-VIRTUAL', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'SENT', lineItems: [{ offerId: 'O-VIRTUAL', quantity: 1 }] }];
+  const result = allegroOrdersForInventoryDeduction(sent, { items: { 'O-VIRTUAL': mapping } }, catalog);
+  assert.deepEqual(result.orders, []);
+  assert.equal(result.diagnostics.skippedUnknownProduct, 1);
+});
+
+test('pełny przepływ tworzy szkic właściwego producenta z kodem biznesowym dla produktu spoza sklepu', () => {
+  const projected = allegroOrdersForSupplierDemand([{
+    id: 'ALG-END-TO-END', status: 'READY_FOR_PROCESSING',
+    lineItems: [{ offerId: 'O-END-TO-END', offerName: 'Produkt spoza aktywnego katalogu', quantity: 3 }],
+  }], { items: { 'O-END-TO-END': {
+    productId: 'ARCH-ALEX-2678', verifiedForSupplier: true,
+    productSnapshot: { nazwa: 'Produkt spoza aktywnego katalogu', externalId: '2678', ean: '5906018026788', producent: 'Alexander' },
+  } } }, [], catalog);
+  const plan = reconcileSupplierOrderDrafts({
+    orders: projected.orders,
+    products: catalog,
+    settings: { artway_stany: {}, artway_magazyn_produkty: {} },
+    supplierDrafts: [],
+    now: new Date('2026-07-15T22:00:00.000Z'),
+  });
+
+  assert.equal(plan.activeDrafts.length, 1);
+  assert.equal(plan.activeDrafts[0].supplier, 'Alexander');
+  assert.deepEqual(plan.activeDrafts[0].pozycje.map((line) => ({ kod: line.kod, nazwa: line.nazwa, ilosc: line.ilosc })), [
+    { kod: '2678', nazwa: 'Produkt spoza aktywnego katalogu', ilosc: 3 },
+  ]);
 });
 
 test('statusy końcowe i stare flagi obsłużenia nie wracają do popytu', () => {
