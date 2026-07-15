@@ -7,6 +7,84 @@ const ACTIONS = new Set([
   'codex-agent-claim', 'codex-agent-complete', 'codex-agent-fail', 'codex-agent-heartbeat', 'codex-agent-panel-enqueue', 'codex-agent-result',
 ]);
 
+const CODEX_FAILURE_NOTICE = '<b>⚠️ Nie udało się dokończyć tej prośby.</b>\nSpróbuj wysłać ją ponownie za chwilę.';
+
+function invalidReplyTarget(error) {
+  const status = Number(error?.status) || 0;
+  const message = String(error?.message || error || '').toLowerCase();
+  return status === 400 && /(?:reply|replied|message to be replied).*(?:not found|invalid)|message to be replied not found/.test(message);
+}
+
+async function deliverCodexFailureNotification(codexQueue, sendTelegram, sanitize) {
+  if (!codexQueue || typeof codexQueue.claimFailureNotification !== 'function') {
+    return { attempted: false, delivered: false, pending: false };
+  }
+  let leased;
+  try {
+    leased = await codexQueue.claimFailureNotification();
+  } catch (error) {
+    return { attempted: false, delivered: false, pending: true, error: sanitize(error?.message || error, 200) };
+  }
+  const notification = leased?.notification;
+  if (!notification) return { attempted: false, delivered: false, pending: false };
+  const options = {
+    chatId: notification.chatId,
+    replyTo: notification.replyTo,
+    messageThreadId: notification.messageThreadId,
+  };
+  let sent, firstError = null, withoutReply = false;
+  try {
+    sent = await sendTelegram(CODEX_FAILURE_NOTICE, options);
+  } catch (error) {
+    firstError = error;
+    // Telegram jednoznacznie odrzucił nieistniejący cel odpowiedzi, więc pierwsza
+    // próba nie mogła zostać dostarczona. Tylko w takim przypadku bezpiecznie
+    // ponawiamy od razu na tym samym czacie, lecz bez reply_parameters.
+    if (notification.replyTo && invalidReplyTarget(error)) {
+      withoutReply = true;
+      try {
+        sent = await sendTelegram(CODEX_FAILURE_NOTICE, {
+          chatId: notification.chatId,
+          messageThreadId: notification.messageThreadId,
+        });
+      } catch (fallbackError) {
+        firstError = fallbackError;
+      }
+    }
+  }
+  if (sent) {
+    try {
+      await codexQueue.ackFailureNotification({
+        id: notification.id,
+        claimToken: notification.claimToken,
+        telegramMessageId: sent?.message_id,
+      });
+      return { attempted: true, delivered: true, pending: false, withoutReply, messageId: sent?.message_id || null };
+    } catch (error) {
+      // Lease pozostaje trwały. Po jego wygaśnięciu outbox odzyska wpis CAS-em.
+      return { attempted: true, delivered: false, pending: true, error: sanitize(error?.message || error, 200) };
+    }
+  }
+  let retry = { retry: true };
+  try {
+    retry = await codexQueue.retryFailureNotification({
+      id: notification.id,
+      claimToken: notification.claimToken,
+      error: firstError?.message || firstError,
+      withoutReply,
+    });
+  } catch (error) {
+    return { attempted: true, delivered: false, pending: true, error: sanitize(error?.message || error, 200) };
+  }
+  return {
+    attempted: true,
+    delivered: false,
+    pending: retry.retry === true,
+    exhausted: retry.exhausted === true,
+    error: sanitize(firstError?.message || firstError, 200),
+  };
+}
+
 export function createTelegramRouter({ center, codexQueue, getOperationalCenter, inventoryCommand, inventoryDecisions, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text, sendTelegram = sendTelegramHtml }) {
   return async function telegramRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
@@ -19,12 +97,21 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
     const body = await req.json().catch(() => ({})), session = sessionOf(req), operator = session?.email || 'administrator';
     if (action === 'codex-agent-claim') {
       if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
-      return respond({ ok: true, ...(await codexQueue.claim(text(body.workerId || '', 160))) });
+      const claimed = await codexQueue.claim(text(body.workerId || '', 160));
+      const failureNotification = claimed.failureNotificationPending
+        ? await deliverCodexFailureNotification(codexQueue, sendTelegram, text)
+        : { attempted: false, delivered: false, pending: false };
+      return respond({ ok: true, ...claimed, failureNotification });
     }
     if (action === 'codex-agent-panel-enqueue') {
       if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
       const queued = await codexQueue.enqueue({ requestId: body.requestId, text: body.text, channel: 'panel', user: operator });
-      return respond({ ok: true, deferred: true, jobId: queued.job?.id || null, duplicate: queued.duplicate === true });
+      const deferred = ['queued', 'processing', 'delivering'].includes(queued.status);
+      return respond({
+        ok: true, deferred, status: queued.status, workerOnline: queued.workerOnline === true,
+        jobId: queued.job?.id || null, duplicate: queued.duplicate === true,
+        ...(deferred ? {} : { error: queued.status === 'failed' ? 'Agent nie wykonał tego zadania. Uruchom je ponownie.' : '' }),
+      });
     }
     if (action === 'codex-agent-heartbeat') {
       if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
@@ -64,7 +151,16 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
     }
     if (action === 'codex-agent-fail') {
       if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
-      return respond({ ok: true, ...(await codexQueue.fail(body)) });
+      const failed = await codexQueue.fail(body);
+      const failureNotification = failed.notificationPending
+        ? await deliverCodexFailureNotification(codexQueue, sendTelegram, text)
+        : { attempted: false, delivered: false, pending: false };
+      return respond({
+        ok: true, ...failed,
+        notified: failureNotification.delivered === true,
+        notificationPending: failureNotification.pending === true,
+        failureNotification,
+      });
     }
     if (action === 'telegram-settings-save') return respond({ ok: true, settings: await center.saveSettings(body.settings || body, operator) });
     if (action === 'telegram-register-webhook') return respond({ ok: true, ...(await center.registerWebhook(publicOrigin(req))) });
@@ -128,7 +224,23 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
           requestId: body.requestId, text: body.text, chatId: body.chatId, messageThreadId: body.messageThreadId,
           replyTo: body.replyTo, user: body.user, channel: 'telegram',
         });
-        return respond({ ok: true, deferred: true, jobId: queued.job?.id || null, duplicate: queued.duplicate === true });
+        const deferred = ['queued', 'processing', 'delivering'].includes(queued.status);
+        if (!deferred) {
+          const completed = queued.status === 'completed';
+          return respond({
+            ok: true, deferred: false, status: queued.status, workerOnline: queued.workerOnline === true,
+            jobId: queued.job?.id || null, duplicate: queued.duplicate === true,
+            message: completed
+              ? '✅ To polecenie zostało już obsłużone — nie uruchamiam go drugi raz.'
+              : queued.workerOnline === false
+                ? '⚠️ Agent na komputerze jest teraz offline. Polecenie nie zostało pozostawione do późniejszego wykonania. Uruchom Agenta i wyślij je ponownie.'
+                : '⚠️ Poprzednia próba nie została wykonana. Wyślij polecenie ponownie.',
+          });
+        }
+        return respond({
+          ok: true, deferred: true, status: queued.status, workerOnline: queued.workerOnline === true,
+          jobId: queued.job?.id || null, duplicate: queued.duplicate === true,
+        });
       }
       const operational = await getOperationalCenter();
       return respond({ ok: true, ...(await center.inbound(text(body.intent || body.text, 1000), operational, { text: body.text, user: body.user, chatId: body.chatId, messageThreadId: body.messageThreadId })) });

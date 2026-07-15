@@ -113,9 +113,10 @@ export function telegramActorAllowed(config = {}, actor = {}) {
   const privateChat = actor.chatType === 'private' || chatId === userId;
   if (privateChat) return chatId === userId;
   // W grupie muszą być dozwolone jednocześnie grupa i konkretny nadawca.
-  // Gdy nie ma osobnej listy userów, prywatny chat ID właściciela/dodatkowej
-  // osoby z allowedChatIds pełni także rolę dozwolonego user ID.
-  return users.size ? users.has(userId) : chats.has(userId);
+  // Jawna lista TELEGRAM_ALLOWED_USER_IDS rozszerza, a nie zastępuje
+  // prywatne ID właściciela i dodatkowych osób z allowedChatIds. Dzięki temu
+  // dopisanie członka zespołu nie odbiera dostępu wcześniej dozwolonej osobie.
+  return users.has(userId) || chats.has(userId);
 }
 
 export function telegramHtml(value) {

@@ -220,7 +220,12 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     if (!live || !config.token) return result;
     try {
       const [bot, webhook] = await Promise.all([telegramApi('getMe', {}, env), telegramApi('getWebhookInfo', {}, env)]);
-      result.bot = { id: bot?.id || null, username: bot?.username || '', name: [bot?.first_name, bot?.last_name].filter(Boolean).join(' ') };
+      result.bot = {
+        id: bot?.id || null,
+        username: bot?.username || '',
+        name: [bot?.first_name, bot?.last_name].filter(Boolean).join(' '),
+        can_read_all_group_messages: bot?.can_read_all_group_messages === true,
+      };
       result.webhook = { active: !!webhook?.url, url: webhook?.url ? 'https://artwaytm.pl/.netlify/functions/telegram-webhook' : '', pending: Number(webhook?.pending_update_count || 0), lastErrorAt: webhook?.last_error_date || null, lastError: clean(webhook?.last_error_message || '', 300) };
     } catch (error) { result.error = clean(error?.message || error, 400); }
     return result;
@@ -453,7 +458,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     const secret = telegramWebhookSecret(env); if (!secret) throw new Error('Nie można zabezpieczyć webhooka bez tokenu Telegram.');
     const url = `${String(origin || 'https://artwaytm.pl').replace(/\/$/, '')}/.netlify/functions/telegram-webhook`;
     const result = await telegramApi('setWebhook', { url, secret_token: secret, allowed_updates: ['message', 'callback_query'], drop_pending_updates: true, max_connections: 20 }, env);
-    const commands = [{ command: 'status', description: 'Najważniejsze sprawy i kondycja sklepu' }, { command: 'zamowienia', description: 'Nowe i aktywne zamówienia' }, { command: 'braki', description: 'Braki i zamówienia do producentów' }, { command: 'wiadomosci', description: 'Sprawy klientów do odpowiedzi' }, { command: 'wysylki', description: 'Wysyłki i numery InPost' }, { command: 'magazyn', description: 'Stan operacyjny magazynu' }, { command: 'settings', description: 'Ustawienia komunikacji i SLA' }, { command: 'pomoc', description: 'Przykłady zwykłych pytań' }];
+    const commands = [{ command: 'agent', description: 'Przekaż zwykłe polecenie Agentowi Codex' }, { command: 'status', description: 'Najważniejsze sprawy i kondycja sklepu' }, { command: 'zamowienia', description: 'Nowe i aktywne zamówienia' }, { command: 'braki', description: 'Braki i zamówienia do producentów' }, { command: 'wiadomosci', description: 'Sprawy klientów do odpowiedzi' }, { command: 'wysylki', description: 'Wysyłki i numery InPost' }, { command: 'magazyn', description: 'Stan operacyjny magazynu' }, { command: 'settings', description: 'Ustawienia komunikacji i SLA' }, { command: 'pomoc', description: 'Przykłady zwykłych pytań' }];
     await telegramApi('setMyCommands', { commands }, env);
     await Promise.allSettled([
       telegramApi('setMyDescription', { description: 'Centrum operacyjne Artway-TM: zamówienia, Allegro, InPost, magazyn, producenci i komunikacja zespołu.' }, env),

@@ -34,6 +34,26 @@ function html(value = '') {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+export function normalizeTelegramAgentInput(value = '', botUsername = 'magazyn_artway_bot') {
+  const username = String(botUsername || 'magazyn_artway_bot').trim().replace(/^@/, '');
+  const escapedUsername = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const mentionPattern = new RegExp(`^@${escapedUsername}(?=$|[\\s,:;.!?–—-])`, 'i');
+  const commandPattern = new RegExp(`^/agent(?:@${escapedUsername})?(?:\\s+([\\s\\S]*))?$`, 'i');
+  let text = String(value ?? '').trim(), forceCodex = false;
+
+  if (mentionPattern.test(text)) {
+    text = text.replace(mentionPattern, '').replace(/^[\s,:;.!?–—-]+/, '').trim();
+    forceCodex = true;
+  }
+  const command = text.match(commandPattern);
+  if (command) {
+    text = String(command[1] || '').trim();
+    forceCodex = true;
+  }
+  if (forceCodex && !text) text = 'Pokaż pomoc Agenta';
+  return { text, forceCodex };
+}
+
 export function parseInventoryDecisionText(value = '') {
   const match = String(value ?? '').trim().match(/^(nie\s+potwierdzam|potwierdzam)\s+(IV[a-f0-9]{14})[.!]?$/i);
   if (!match) return null;
@@ -88,7 +108,9 @@ export default async (request) => {
     await sendTelegramHtml('<b>🔒 Brak dostępu do bota.</b>', { chatId, silent: true }, process.env).catch(() => null);
     return response();
   }
-  const input = String(callback?.data || message.text || message.caption || '').trim();
+  const rawInput = String(callback?.data || message.text || message.caption || '').trim();
+  const normalizedInput = callback?.id ? { text: rawInput, forceCodex: false } : normalizeTelegramAgentInput(rawInput);
+  const input = normalizedInput.text;
   if (!input && message.voice) {
     await sendTelegramHtml('<b>🎙 Otrzymałem nagranie.</b>\nTranskrypcja jest wyłączona. Napisz krótko tekstem.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
     return response();
@@ -142,7 +164,7 @@ export default async (request) => {
         intent: telegramNaturalIntent(input), text: input, chatId, messageThreadId: message.message_thread_id || null,
         replyTo: message.message_id || null, requestId: String(update.update_id || `${chatId}:${message.message_id || ''}`),
         user: sender.username || [sender.first_name, sender.last_name].filter(Boolean).join(' '), userId,
-        source: 'telegram-webhook', deferToCodex: !input.startsWith('/'),
+        source: 'telegram-webhook', deferToCodex: normalizedInput.forceCodex || !input.startsWith('/'),
       }),
     });
     const data = await apiResponse.json().catch(() => ({}));

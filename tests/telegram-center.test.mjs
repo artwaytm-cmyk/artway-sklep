@@ -132,6 +132,22 @@ test('bot rozumie zwykłe pytania bez komend', () => {
   assert.equal(telegramNaturalIntent('Pokaż co jest teraz pilne'), 'status');
 });
 
+test('kontrola połączenia zwraca stan Privacy Mode bota', { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch, data = new Map();
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/getMe')) return new Response(JSON.stringify({ ok: true, result: { id: 7, username: 'magazyn_artway_bot', first_name: 'Magazyn Artway', can_read_all_group_messages: false } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (String(url).endsWith('/getWebhookInfo')) return new Response(JSON.stringify({ ok: true, result: { url: 'https://artwaytm.pl/.netlify/functions/telegram-webhook', pending_update_count: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    throw new Error(`Nieoczekiwane wywołanie: ${url}`);
+  };
+  try {
+    const read = async (key, fallback) => structuredClone(data.has(key) ? data.get(key) : fallback), write = async (key, value) => data.set(key, structuredClone(value));
+    const center = createTelegramCenter({ read, write, env: { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_GROUP_ID: '-100' } });
+    const view = await center.view({ priorities: [] }, true);
+    assert.equal(view.status.bot.username, 'magazyn_artway_bot');
+    assert.equal(view.status.bot.can_read_all_group_messages, false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('kolejka Telegram obejmuje tylko aktywne ostrzeżenia', () => {
   const events = telegramPriorityEvents({ priorities: [
     { actionId: 'one', severity: 'critical', count: 2, title: 'Nowe zamówienia', action: 'Sprawdź' },
