@@ -1892,6 +1892,31 @@ function alertDostepnosciZamowieniaHTML(z){
   const txt=lista.length?lista.map(x=>`${esc(x.nazwa||"Produkt")} × ${esc(x.ilosc||"")}`).join(", "):"większa ilość produktów";
   return `<div class="order-availability-decision ${decision.expired?"is-overdue":""}"><div><b>${z.wymagaPotwierdzeniaDostepnosci?"⚠️ Potwierdzić dostępność przed realizacją":"🧭 Decyzja dostępności"}</b><p>${txt}</p><small>${esc(decision.label)}${decision.expiresAt?` • termin ${esc(new Date(decision.expiresAt).toLocaleString("pl-PL"))}`:""}${decision.operator?` • ${esc(decision.operator)}`:""}</small></div><div><select data-order-availability-decision="${esc(z.nr)}"><option value="confirmed">✅ Potwierdź pełną dostępność</option><option value="wait_1">⏳ Poczekaj na producenta 1 dzień</option><option value="wait_2">⏳ Poczekaj na producenta 2 dni</option><option value="contact_client">📞 Brak pewności — kontakt z klientem</option><option value="unavailable">⛔ Potwierdzony brak produktu</option><option value="reset">🔎 Wróć do kontroli</option></select><button class="btn" type="button" onclick="zastosujWyborDecyzjiZamowienia(${jsArg(z.nr)})">Zapisz decyzję</button></div></div>`;
 }
+function adminZaopatrzenieZamowieniaDane(z={}){
+  const nr=String(z.nr||""),rezerwacje=typeof rezerwacjeMagazynowe==="function"?rezerwacjeMagazynowe():{},plan=typeof planZatowarowania==="function"?planZatowarowania():[];
+  const planMap=new Map(plan.map(x=>[String(x?.produkt?.id??""),x]));
+  const dokumenty=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).filter(doc=>String(doc?.status||"").toLowerCase()!=="anulowane");
+  return (Array.isArray(z.pozycjeDane)?z.pozycjeDane:[]).map(item=>{
+    const id=String(item?.id??item?.produktId??""),produkt=typeof produktMagazynowy==="function"?produktMagazynowy(id):null,stan=typeof stanMagazynuId==="function"?stanMagazynuId(id):null,sugestia=planMap.get(id)||{};
+    let dokument=null,pozycja=null;
+    for(const doc of dokumenty){
+      const hit=(Array.isArray(doc.pozycje)?doc.pozycje:[]).find(p=>String(p?.produktId??p?.id??"")===id&&(Array.isArray(p?.zamowienia)?p.zamowienia.map(String).includes(nr):false));
+      if(hit){dokument=doc;pozycja=hit;break;}
+    }
+    const brak=Math.max(0,Number(pozycja?.iloscPotrzebna??sugestia?.ilosc)||0),qty=Math.max(1,Number(item?.ilosc)||1),lokalizacja=magazynMetaProduktu(id)?.lokalizacja||pozycja?.lokalizacja||"";
+    return {id,nazwa:item?.nazwa||produkt?.nazwa||`Produkt ${id}`,kod:pozycja?.kod||produkt?.kodProducenta||produkt?.mpn||produkt?.externalId||produkt?.sku||"—",qty,stan,rezerwacje:Math.max(0,Number(rezerwacje[id])||0),brak,lokalizacja,dokument,pozycja};
+  });
+}
+function adminZaopatrzenieZamowieniaHTML(z={}){
+  const rows=adminZaopatrzenieZamowieniaDane(z),braki=rows.filter(x=>x.brak>0),docs=[...new Map(rows.filter(x=>x.dokument).map(x=>[String(x.dokument.id),x.dokument])).values()];
+  const statusDoc=docs.length?docs.map(d=>`${d.numer||d.id}: ${d.status||"szkic"}`).join(" • "):braki.length?"Szkic tworzy się automatycznie po synchronizacji":"Nie jest potrzebne zamówienie u producenta";
+  return `<section class="order-detail-card order-procurement-card">
+    <div class="order-section-head"><div><span class="order-pro-label">Magazyn → producent</span><h2>🏭 Kontrola realizacji produktów</h2><p class="order-detail-lead">Stan jest sprawdzany dla całej aktywnej kolejki. Zamawiamy wyłącznie rzeczywisty brak, a wysyłka do producenta czeka na zatwierdzenie aktualnej wersji.</p></div><a class="btn ${braki.length?"":"ghost"}" href="#/admin/agent-ai/zlecenia">${braki.length?"Otwórz szkic producenta":"Centrum zakupów"}</a></div>
+    <div class="procurement-flow" aria-label="Etapy zaopatrzenia"><span class="done"><b>1</b> Stan sprawdzony</span><span class="${braki.length?"active":"done"}"><b>2</b> ${braki.length?`Brak ${braki.reduce((s,x)=>s+x.brak,0)} szt.`:"Pokrycie kompletne"}</span><span class="${docs.length?"active":""}"><b>3</b> ${docs.length?"Szkic producenta":"Bez szkicu"}</span><span class="${docs.some(d=>String(d.status||"").toLowerCase().includes("wysłane do"))?"done":""}"><b>4</b> Zatwierdź i wyślij</span></div>
+    <div class="procurement-order-table"><table><thead><tr><th>Kod</th><th>Produkt</th><th>Zamówiono</th><th>Stan fizyczny</th><th>Rezerwacje</th><th>Brak łączny</th><th>Lokalizacja / dokument</th></tr></thead><tbody>${rows.map(x=>`<tr class="${x.brak>0?"needs-order":"stock-covered"}"><td><b>${esc(x.kod)}</b></td><td>${esc(x.nazwa)}</td><td>${x.qty} szt.</td><td>${x.stan===null?"niemonitorowany":`${x.stan} szt.`}</td><td>${x.rezerwacje} szt.</td><td>${x.brak>0?`<span class="lvl lvl-ostrzezenie">${x.brak} szt.</span>`:`<span class="lvl lvl-ok">0</span>`}</td><td>${x.lokalizacja?`📍 ${esc(x.lokalizacja)}<br>`:""}<small>${x.dokument?`${esc(x.dokument.numer||x.dokument.id)} • ${esc(x.dokument.status||"szkic")}`:(x.brak?"oczekuje na szkic":"zapas wystarcza")}</small></td></tr>`).join("")||`<tr><td colspan="7">Brak pozycji magazynowych w zamówieniu.</td></tr>`}</tbody></table></div>
+    <div class="backend-note ${braki.length?"":"is-ok"}"><b>${braki.length?"Dalszy etap:":"Wynik kontroli:"}</b> ${esc(statusDoc)}. ${braki.length?"Najpierw sprawdź tabelę i zatwierdź dokładną rewizję; dopiero potem system pozwoli wysłać e-mail do właściwego producenta.":"Produkty można przekazać do kompletacji bez tworzenia zlecenia zakupowego."}</div>
+  </section>`;
+}
 function kartaAdminZamowieniaHTML(z){
   const k=kosztyZamowienia(z), w=daneWysylki(z), klient=klientZamowieniaLabel(z);
   const zaznaczone=zaznaczoneZamowieniaSklepu.has(String(z.nr));
@@ -2096,6 +2121,7 @@ function widokAdminZamowienie(nr){
     </div>
     ${adminZamowienieSnapshotHTML(z)}
     ${alertDostepnosciZamowieniaHTML(z)}
+    ${adminZaopatrzenieZamowieniaHTML(z)}
     <div class="order-detail-columns">
       <div class="order-detail-card">
         <div class="order-section-head"><div><span class="order-pro-label">Produkty</span><h2>🧾 Pozycje zamówienia</h2></div><b>${zl(koszty.produkty)}</b></div>

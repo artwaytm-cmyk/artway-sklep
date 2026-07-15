@@ -236,13 +236,34 @@ function sortujProduktyAdmin(lista){
 }
 function statusZamowieniaRezerwujeMagazyn(z){
   const s=String(z?.status||"").toLowerCase();
-  return !!z && !["anulowane","dostarczone","zakończone","zwrot","zwrot pieniędzy"].includes(s);
+  return !!z && !["anulowane","cancelled","wysłane","wyslane","sent","zrealizowane","completed","dostarczone","zakończone","zwrot","zwrot pieniędzy"].includes(s);
 }
 function pozycjeZamowieniaMagazyn(z){
   if(Array.isArray(z?.pozycjeDane)&&z.pozycjeDane.length) return z.pozycjeDane.map(p=>({
     id:p.id, nazwa:p.nazwa||p.produkt||"Produkt", sku:p.sku||"", ilosc:Number(p.ilosc)||1, cena:kwotaNum(p.cena), wartosc:kwotaNum(p.wartosc||kwotaNum(p.cena)*(Number(p.ilosc)||1))
   })).filter(p=>p.id!==undefined&&p.id!==null&&p.id!=="");
   return [];
+}
+function rezerwacjeSklepuZamowienie(z, ruchy=[]){
+  const poProduktach={};
+  pozycjeZamowieniaMagazyn(z).forEach(p=>{
+    const id=String(p.id??"").trim(),ilosc=Math.max(0,Number(p.ilosc)||0);
+    if(id&&ilosc>0) poProduktach[id]=(poProduktach[id]||0)+ilosc;
+  });
+  const nr=String(z?.nr||"").trim(),requestId=nr?`order-stock:${nr}`:"";
+  if(!requestId||String(z?.inventoryMode||z?.inventory_mode||"").toLowerCase()==="reserved_until_shipment") return poProduktach;
+  const legacyPoProduktach={};
+  (Array.isArray(ruchy)?ruchy:[]).forEach(r=>{
+    if(String(r?.sourceRequestId||"").trim()!==requestId) return;
+    const id=String(r?.produktId??r?.productId??"").trim(),stanPrzed=Number(r?.stanPrzed);
+    if(!id||!Object.prototype.hasOwnProperty.call(poProduktach,id)||r?.stanPrzed===null||r?.stanPrzed===""||!Number.isFinite(stanPrzed)) return;
+    const poprzedni=legacyPoProduktach[id];
+    legacyPoProduktach[id]=poprzedni===undefined?Math.max(0,stanPrzed):Math.max(poprzedni,stanPrzed);
+  });
+  Object.entries(legacyPoProduktach).forEach(([id,stanPrzed])=>{
+    poProduktach[id]=Math.max(0,Number(poProduktach[id]||0)-stanPrzed);
+  });
+  return poProduktach;
 }
 function statusAllegroRezerwujeMagazyn(z){
   return !!z && allegroZamowienieAktywneLokalnie(z);
@@ -278,7 +299,7 @@ function rezerwacjeMagazynowe(){
   if(rezerwacjeMagazynowe._cache&&Date.now()-rezerwacjeMagazynowe._cache.at<1500)return rezerwacjeMagazynowe._cache.value;
   const mapa={};
   pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).forEach(z=>{
-    pozycjeZamowieniaMagazyn(z).forEach(p=>{ mapa[p.id]=(mapa[p.id]||0)+p.ilosc; });
+    Object.entries(rezerwacjeSklepuZamowienie(z,ruchyMagazynowe)).forEach(([id,ilosc])=>{mapa[id]=(mapa[id]||0)+Number(ilosc||0);});
   });
   aktywneZamowieniaAllegro().forEach(z=>pozycjeAllegroMagazyn(z).filter(p=>p.id!=="").forEach(p=>{mapa[p.id]=(mapa[p.id]||0)+p.ilosc;}));
   rezerwacjeMagazynowe._cache={at:Date.now(),value:mapa};

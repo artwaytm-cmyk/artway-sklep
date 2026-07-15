@@ -41,6 +41,8 @@ import { eligiblePromotionProducts, runIndexNowPromotion } from './domain/indexn
 import { createInventoryNaturalCommandHandler } from './domain/inventory-command.mjs';
 import { createInventoryDecisionService } from './domain/inventory-decisions.mjs';
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
+import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
+import { createStoreOrderSupplierReconciliation } from './store-order-supplier-reconciliation.mjs';
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
 import { createInventoryStockRoute } from './inventory-route.mjs';
 import { createProductLinkImportBundle } from './product-link-import-route.mjs';
@@ -130,6 +132,14 @@ const LIMIT_KLIENTOW = 20000;
 const LIMIT_USUNIETYCH_ZAMOWIEN = 50000;
 const PAYNOW_ENVY = new Set(['production', 'sandbox']);
 const PAYNOW_STATUSY_KONCOWE = new Set(['CONFIRMED', 'ERROR', 'EXPIRED', 'REJECTED', 'ABANDONED']);
+const storeOrderSupplierReconciliation = createStoreOrderSupplierReconciliation({
+  readVersioned: czytajWersjonowane,
+  writeIfVersion: zapiszJesliWersja,
+  mergeImportedSettings: (data) => productLinkImport.mergeSettings(data),
+  catalogProducts: (data) => mergeCatalogProducts(data).products,
+  orderLimit: LIMIT_ZAMOWIEN,
+  settingsLimit: LIMIT_USTAWIEN,
+});
 
 function czyAdmin(request, url) {
   return czyAdminToken(request, url) || requestSession(request)?.role === 'admin';
@@ -180,26 +190,12 @@ function bezpiecznaOpinia(raw = {}) {
   };
 }
 
+// Zachowujemy stabilny punkt integracyjny używany przez audyt i starsze
+// wywołania, a właściwy szablon oraz plik Optima są w osobnym module domenowym.
 function producentEmailZlecenia(order = {}, supplier = {}) {
-  const name = tekst(supplier.name || supplier.nazwa || '', 120).trim();
-  const to = tekst(supplier.orderEmail || supplier.email || '', 300).trim().toLowerCase();
-  const producerKey = (value = '') => tekst(value, 160).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const rows = (Array.isArray(order?.pozycje) ? order.pozycje : []).filter((p) => !name || producerKey(p?.dostawca) === producerKey(name)).map((p) => ({
-    kod: tekst(p?.kod || p?.produktId || '—', 80).trim() || '—',
-    ean: tekst(p?.ean || '—', 80).trim() || '—',
-    nazwa: tekst(p?.nazwa || 'Produkt', 300).trim(),
-    ilosc: Math.max(0, Number(p?.ilosc) || 0),
-  })).filter((p) => p.ilosc > 0).slice(0, 500);
-  const number = tekst(order?.numer || order?.id || 'zamówienie', 120).trim();
-  const replace = (v = '') => tekst(v, 10000).replace(/\{numer\}/gi, number).replace(/\{producent\}/gi, name || 'Producent');
-  const subject = replace(supplier.emailSubject || `Zamówienie ${number} — Artway-TM`);
-  const intro = replace(supplier.emailIntro || `Dzień dobry,\nprzesyłamy zatwierdzone zamówienie ${number}. Prosimy o potwierdzenie dostępności, terminu realizacji i warunków dostawy.`);
-  const textRows = rows.map((p, index) => `${index + 1}. ${p.kod} | ${p.ean} | ${p.nazwa} | ${p.ilosc} szt.`).join('\n');
-  const text = `${intro}\n\nKOD | EAN | NAZWA | ILOŚĆ\n${textRows}\n\nProsimy o odpowiedź z potwierdzeniem przyjęcia zamówienia.\n\nPozdrawiamy\nArtway-TM`;
-  const table = rows.map((p) => `<tr><td style="padding:10px;border-bottom:1px solid #e5e7eb;font-weight:700">${htmlEscape(p.kod)}</td><td style="padding:10px;border-bottom:1px solid #e5e7eb">${htmlEscape(p.ean)}</td><td style="padding:10px;border-bottom:1px solid #e5e7eb">${htmlEscape(p.nazwa)}</td><td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:800">${p.ilosc}</td></tr>`).join('');
-  const html = `<!doctype html><html><body style="margin:0;background:#f4f6fb;font-family:Arial,sans-serif;color:#172033"><div style="max-width:760px;margin:0 auto;padding:28px 14px"><div style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;padding:24px;border-radius:18px 18px 0 0"><div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;font-weight:700">Artway-TM • zamówienie do producenta</div><h1 style="margin:8px 0 0;font-size:26px">${htmlEscape(number)}</h1></div><div style="background:#fff;padding:24px;border-radius:0 0 18px 18px"><p style="white-space:pre-line;line-height:1.65;margin-top:0">${htmlEscape(intro)}</p><table style="width:100%;border-collapse:collapse;margin:20px 0"><thead><tr style="background:#eef2ff;text-align:left"><th style="padding:10px">Kod</th><th style="padding:10px">EAN</th><th style="padding:10px">Nazwa</th><th style="padding:10px;text-align:center">Ilość</th></tr></thead><tbody>${table}</tbody></table><div style="background:#f8fafc;border-left:4px solid #2563eb;padding:14px 16px;line-height:1.55">Prosimy o potwierdzenie przyjęcia zamówienia, dostępności produktów i przewidywanego terminu wysyłki.</div><p style="margin:24px 0 0">Pozdrawiamy serdecznie,<br><b>Artway-TM</b><br><a href="https://artwaytm.pl" style="color:#2563eb">artwaytm.pl</a></p></div></div></body></html>`;
-  return { name, to, rows, subject, text, html };
+  return renderSupplierOrderEmail(order, supplier);
 }
+
 function agentZamowienieAktywne(z = {}) {
   return !['anulowane', 'dostarczone', 'zakończone', 'zwrot', 'zwrot pieniędzy'].includes(String(z.status || '').toLowerCase());
 }
@@ -308,59 +304,6 @@ async function dopiszUsunieteZamowienie(raw) {
     .slice(0, LIMIT_USUNIETYCH_ZAMOWIEN);
   await zapisz('deleted_orders', { items, updated_at: new Date().toISOString() });
   return rec;
-}
-
-// zdejmij ze stanu magazynowego sprzedane sztuki (po złożeniu zamówienia przez klienta)
-async function odejmijStany(zamowienie) {
-  try {
-    const pozycje = Array.isArray(zamowienie?.pozycjeDane) ? zamowienie.pozycjeDane : [];
-    if (!pozycje.length) return;
-    const orderNumber = numerZamowienia(zamowienie?.nr), requestId = `order-stock:${orderNumber}`;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const ust = await czytaj('settings', { data: {}, rev: 0 });
-      const dane = ust.data || {};
-      const stany = (dane.artway_stany && typeof dane.artway_stany === 'object') ? { ...dane.artway_stany } : {};
-      const ruchy = Array.isArray(dane.artway_ruchy_magazynowe) ? [...dane.artway_ruchy_magazynowe] : [];
-      if (ruchy.some((movement) => movement?.sourceRequestId === requestId)) return;
-      let zmiana = false;
-      for (const p of pozycje) {
-        const id = p && (p.id != null ? String(p.id) : '');
-        const ile = Number(p && p.ilosc) || 0;
-        if (!id || ile <= 0) continue;
-        if (id in stany && stany[id] !== '' && stany[id] != null && !Number.isNaN(Number(stany[id]))) {
-          const przed = Math.max(0, Number(stany[id]) || 0);
-          const po = Math.max(0, przed - ile);
-          stany[id] = po;
-          ruchy.unshift({
-            id: `MAG-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-            data: new Date().toISOString(),
-            dataTxt: new Date().toLocaleString('pl-PL'),
-            produktId: id,
-            produktNazwa: tekst(p.nazwa || p.produkt || id, 200),
-            sku: tekst(p.sku || '', 80),
-            typ: 'sprzedaż',
-            ilosc: -ile,
-            stanPrzed: przed,
-            stanPo: po,
-            dokument: orderNumber,
-            powod: 'Zamówienie klienta',
-            operator: 'system',
-            sourceRequestId: requestId,
-          });
-          zmiana = true;
-        }
-      }
-      if (!zmiana) return;
-      dane.artway_stany = stany;
-      dane.artway_ruchy_magazynowe = ruchy.slice(0, 3000);
-      try {
-        await zapisz('settings', { ...ust, data: dane, rev: (Number(ust.rev) || 0) + 1, updated_at: new Date().toISOString() });
-        return;
-      } catch (error) {
-        if (error?.code !== 'settings_write_conflict' || attempt === 2) throw error;
-      }
-    }
-  } catch (e) { /* stany są pomocnicze — nie blokują zamówienia */ }
 }
 
 function sortujObiekt(obj = {}) {
@@ -823,7 +766,7 @@ function adresNadawcyEmail(c = emailKonfiguracja()) {
   const nazwa = String(c.fromName || '').replace(/"/g, '').trim();
   return nazwa ? `"${nazwa}" <${c.from}>` : c.from;
 }
-async function wyslijEmailSMTP({ to, subject, text, html, replyTo }) {
+async function wyslijEmailSMTP({ to, subject, text, html, replyTo, attachments = [] }) {
   const c = emailKonfiguracja();
   if (!c.configured) {
     const blad = new Error('E-mail nie jest skonfigurowany po stronie serwera. Ustaw SMTP_USER i SMTP_PASS w Netlify.');
@@ -843,6 +786,7 @@ async function wyslijEmailSMTP({ to, subject, text, html, replyTo }) {
     subject,
     text,
     html,
+    attachments: Array.isArray(attachments) ? attachments.slice(0, 5) : [],
   });
   return { provider: c.provider || 'smtp', message_id: info.messageId || '', accepted: info.accepted || [] };
 }
@@ -4827,10 +4771,13 @@ async function zastosujWebhookInpost(dane) {
   else if (dane.tracking && ['nowe', 'potwierdzone', 'w realizacji'].includes(nowy.status)) nowy.status = 'gotowe do wysyłki';
   items[idx] = nowy;
   await zapisz('orders', { items, updated_at: new Date().toISOString() });
+  const inventory = await storeOrderSupplierReconciliation.finalizeInventoryForOrder(nowy);
+  if (inventory.inventoryMode) nowy.inventoryMode = inventory.inventoryMode;
+  const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
   let email = null;
   try { email = await obsluzEmailePrzejsciaStatusu(stary, nowy); } catch (e) { email = { sent: false, error: e.message }; }
   await zapiszLogInpostWebhook({ matched: true, nr: nowy.nr, id: dane.id, tracking: dane.tracking, status: dane.status, reference: dane.reference });
-  return { matched: true, nr: nowy.nr, tracking: w.numer || '', status: w.inpostStatus || '', etap: w.etap || '', email };
+  return { matched: true, nr: nowy.nr, tracking: w.numer || '', status: w.inpostStatus || '', etap: w.etap || '', inventory, supplierDrafts, email };
 }
 async function zapiszPrzesylkeNaZamowieniu(nr, patch) {
   const rec = await czytaj('orders', { items: [] });
@@ -5202,23 +5149,24 @@ export default async (req) => {
       const auditItems = auditRec.items && typeof auditRec.items === 'object' ? { ...auditRec.items } : {};
       const results = [];
       for (const item of prepared) {
-        const fingerprint = crypto.createHash('sha256').update(`${order.id}|${revision}|${item.name.toLowerCase()}|${item.to}|${item.rows.map((p) => `${p.kod}:${p.ilosc}`).join('|')}`).digest('hex').slice(0, 32);
+        const fingerprint = crypto.createHash('sha256').update(`${order.id}|${revision}|${item.name.toLowerCase()}|${item.to}|${item.rows.map((p) => `${p.kod}:${p.ilosc}`).join('|')}|${item.optima?.content || ''}`).digest('hex').slice(0, 32);
         if (auditItems[fingerprint]?.sent === true) {
-          results.push({ supplier: item.name, to: item.to, sent: true, skippedDuplicate: true, sentAt: auditItems[fingerprint].sentAt, messageId: auditItems[fingerprint].messageId || '' });
+          results.push({ supplier: item.name, to: item.to, sent: true, skippedDuplicate: true, sentAt: auditItems[fingerprint].sentAt, messageId: auditItems[fingerprint].messageId || '', optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
           continue;
         }
         try {
-          const sent = await wyslijEmailSMTP({ to: item.to, subject: item.subject, text: item.text, html: item.html });
-          const result = { supplier: item.name, to: item.to, sent: true, skippedDuplicate: false, sentAt: new Date().toISOString(), messageId: sent.message_id || '', provider: sent.provider || 'smtp' };
-          auditItems[fingerprint] = { ...result, orderId: tekst(order.id, 120), orderNumber: tekst(order.numer || order.id, 120), revision, fingerprint };
-          await zapisz('supplier_order_email_audit', { items: auditItems, updated_at: result.sentAt });
-          results.push(result);
+          const sent = await wyslijEmailSMTP({ to: item.to, subject: item.subject, text: item.text, html: item.html, attachments: item.attachments });
+          const sentResult = { supplier: item.name, to: item.to, sent: true, skippedDuplicate: false, sentAt: new Date().toISOString(), messageId: sent.message_id || '', provider: sent.provider || 'smtp' };
+          auditItems[fingerprint] = { ...sentResult, orderId: tekst(order.id, 120), orderNumber: tekst(order.numer || order.id, 120), revision, fingerprint };
+          await zapisz('supplier_order_email_audit', { items: auditItems, updated_at: sentResult.sentAt });
+          results.push({ ...sentResult, optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
         } catch (error) {
-          results.push({ supplier: item.name, to: item.to, sent: false, error: tekst(error?.message || error, 700), code: tekst(error?.code || 'email_error', 120) });
+          results.push({ supplier: item.name, to: item.to, sent: false, error: tekst(error?.message || error, 700), code: tekst(error?.code || 'email_error', 120), optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
         }
       }
       const sentAt = results.filter((x) => x.sent).map((x) => x.sentAt).filter(Boolean).sort().pop() || null;
-      return odpowiedz({ ok: true, allSent: results.length > 0 && results.every((x) => x.sent), sentAt, results, revision });
+      const optimaMissingIdentifiers = results.flatMap((result) => (result.optima?.missingIdentifiers || []).map((item) => ({ supplier: result.supplier, ...item })));
+      return odpowiedz({ ok: true, allSent: results.length > 0 && results.every((x) => x.sent), sentAt, results, revision, optimaComplete: optimaMissingIdentifiers.length === 0, optimaMissingIdentifiers });
     }
 
     // ─── E-MAIL: wysyłka administracyjna przez Netlify SMTP ───
@@ -6814,6 +6762,9 @@ export default async (req) => {
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
     if (action === 'pull' || action === 'store-data') {
       const admin = czyAdmin(req, url);
+      // Wejście administratora jest bezpiecznym punktem naprawczym również
+      // dla zamówień utworzonych przed wdrożeniem automatycznych szkiców.
+      const supplierDrafts = admin ? await storeOrderSupplierReconciliation.reconcileDraftsSafely() : null;
       const [s, importedPayload] = await Promise.all([czytaj('settings', { data: {}, rev: 0, updated_at: null }), productLinkImport.payload({ requestedRev: url.searchParams.get('catalogRev'), admin })]);
       const res = { ok: true, settings: admin ? (s.data || {}) : ustawieniaPubliczneBezDanychPrywatnych(s.data || {}), rev: s.rev || 0, updated_at: s.updated_at || null };
       Object.assign(res, importedPayload);
@@ -6824,6 +6775,7 @@ export default async (req) => {
         res.deleted_orders = d;
         res.orders = filtrujNieusunieteZamowienia(o.items || [], d);
         res.users = u.items || [];
+        res.supplierDrafts = supplierDrafts;
       }
       return odpowiedz(res);
     }
@@ -6864,18 +6816,18 @@ export default async (req) => {
       const session = requestSession(req);
       if (session && session.email !== zam.email) return odpowiedz({ ok: false, error: 'Zamówienie musi należeć do zalogowanego konta.', code: 'auth' }, 403);
       zam.status = 'nowe';
+      zam.inventoryMode = 'reserved_until_shipment';
       zam.ts = Date.now();
-      zam.data = new Date().toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' });
+      zam.data = new Date(zam.ts).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' });
+      zam.inventoryReservedAt = new Date(zam.ts).toISOString();
       const usuniete = mapaUsunietych(await czytajUsunieteZamowienia());
-      if (usuniete.has(zam.nr)) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
-      const rec = await czytaj('orders', { items: [] });
-      const items = filtrujNieusunieteZamowienia(rec.items || [], usuniete);
+      const stored = await storeOrderSupplierReconciliation.saveOrder({ order: zam, deletedOrderNumbers: new Set(usuniete.keys()) });
+      if (stored.deleted) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
+      if (stored.duplicate) return odpowiedz({ ok: true, stored: false, duplicate: true, number: zam.nr });
       let email = null;
-      if (items.some((x) => x.nr === zam.nr)) return odpowiedz({ ok: true, stored: false, duplicate: true, number: zam.nr });
-      items.unshift(zam);
-      while (items.length > LIMIT_ZAMOWIEN) items.pop();
-      await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      await odejmijStany(zam);
+      // Zamówienie jest już bezpiecznie zapisane. Chwilowa awaria katalogu
+      // lub konflikt settings nie może cofnąć checkoutu klienta.
+      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
       if (zam.platnoscId !== 'paynow') {
         try { email = await wyslijEmaileNowegoZamowienia(zam); }
         catch (e) {
@@ -6883,7 +6835,7 @@ export default async (req) => {
           await dopiszHistorieEmaila(zam.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
         }
       }
-      return odpowiedz({ ok: true, stored: true, number: zam.nr, email, orderAccessToken: createOrderAccess(zam) });
+      return odpowiedz({ ok: true, stored: true, number: zam.nr, email, supplierDrafts, orderAccessToken: createOrderAccess(zam) });
     }
 
     // ─── KLIENT SKŁADA OPINIĘ (publiczne, do moderacji) ───
@@ -6972,13 +6924,19 @@ export default async (req) => {
       if (stary) {
         zam.wysylka = zam.wysylka || {};
         zam.wysylka.powiadomienia = polaczPowiadomienia(stary?.wysylka?.powiadomienia, zam.wysylka.powiadomienia);
+        zam.inventoryMode = stary.inventoryMode || zam.inventoryMode;
+        zam.inventoryReservedAt = stary.inventoryReservedAt || zam.inventoryReservedAt;
+        zam.inventoryDeductedAt = stary.inventoryDeductedAt || zam.inventoryDeductedAt;
       }
       if (i >= 0) items[i] = zam; else items.unshift(zam);
       await zapisz('orders', { items, updated_at: new Date().toISOString() });
+      const inventory = await storeOrderSupplierReconciliation.finalizeInventoryForOrder(zam);
+      if (inventory.inventoryMode) zam.inventoryMode = inventory.inventoryMode;
+      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely();
       let email = null;
       try { email = await obsluzEmailePrzejsciaStatusu(stary, zam); }
       catch (e) { email = { sent: false, error: e.message }; }
-      return odpowiedz({ ok: true, stored: true, number: zam.nr, email, powiadomienia: email?.powiadomienia });
+      return odpowiedz({ ok: true, stored: true, number: zam.nr, inventory, supplierDrafts, email, powiadomienia: email?.powiadomienia });
     }
     if (action === 'store-order-delete') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -6990,7 +6948,8 @@ export default async (req) => {
       const rec = await czytaj('orders', { items: [] });
       const items = (rec.items || []).filter((x) => x.nr !== nr);
       await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, deleted: true });
+      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
+      return odpowiedz({ ok: true, deleted: true, supplierDrafts });
     }
 
     // ─── KLIENT: usuwa własne zlecenie/zamówienie ───
@@ -7010,7 +6969,8 @@ export default async (req) => {
       if (!czyAdmin(req, url) && !sessionOwns && !guestOwns) return odpowiedz({ ok: false, error: 'Brak uprawnień do tego zamówienia.', code: 'auth' }, 403);
       await dopiszUsunieteZamowienie({ nr, email, by: 'customer' });
       await zapisz('orders', { items: items.filter((x) => x.nr !== nr), updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, deleted: true });
+      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
+      return odpowiedz({ ok: true, deleted: true, supplierDrafts });
     }
 
     // ─── ADMIN/KLIENT: zapis klienta ───

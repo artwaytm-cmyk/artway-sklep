@@ -206,7 +206,7 @@ export function telegramCell(value, width) {
 
 export function telegramSupplierTables(order = {}, onlySupplier = '') {
   const rows = (Array.isArray(order?.pozycje) ? order.pozycje : []).slice(0, 500).map((item) => ({
-    code: text(item?.kod || item?.produktId || '—', 80).trim(),
+    code: text(item?.kodProducenta || item?.mpn || item?.externalId || item?.sku || item?.kod || '—', 80).trim(),
     name: text(item?.nazwa || 'Produkt', 180).trim(),
     quantity: Math.max(0, Number(item?.iloscPotrzebna ?? item?.ilosc) || 0),
     supplier: text(item?.dostawca || 'Bez przypisanego dostawcy', 120).trim() || 'Bez przypisanego dostawcy',
