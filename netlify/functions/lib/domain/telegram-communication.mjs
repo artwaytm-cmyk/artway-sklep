@@ -7,7 +7,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   customerMessages: true,
   supplierAlerts: false,
   operationalAlerts: true,
-  digestEnabled: true,
+  digestEnabled: false,
   digestTimes: ['08:00', '16:00'],
   quietStart: '21:00',
   quietEnd: '07:00',
@@ -45,6 +45,13 @@ function boolean(value, fallback) {
 function time(value, fallback) {
   const clean = text(value, 5).trim();
   return TIME_RE.test(clean) ? clean : fallback;
+}
+
+function polishForm(value, one, few, many) {
+  const count = Math.abs(Number(value) || 0), last = count % 10, lastTwo = count % 100;
+  if (count === 1) return one;
+  if (last >= 2 && last <= 4 && !(lastTwo >= 12 && lastTwo <= 14)) return few;
+  return many;
 }
 
 export function telegramSettings(raw = {}) {
@@ -164,7 +171,7 @@ export async function sendTelegramHtml(message, options = {}, env = process.env)
     chat_id: options.chatId || config.chatId,
     text: String(message || '').slice(0, 4090),
     parse_mode: 'HTML',
-    disable_web_page_preview: true,
+    link_preview_options: { is_disabled: true },
     disable_notification: options.silent === true,
     ...(options.replyTo ? { reply_parameters: { message_id: Number(options.replyTo) } } : {}),
     ...(Number(options.messageThreadId) > 0 ? { message_thread_id: Number(options.messageThreadId) } : {}),
@@ -181,7 +188,7 @@ export async function editTelegramHtml(message, options = {}, env = process.env)
     message_id: Number(options.messageId),
     text: String(message || '').slice(0, 4090),
     parse_mode: 'HTML',
-    disable_web_page_preview: true,
+    link_preview_options: { is_disabled: true },
     ...(options.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
   }, env);
 }
@@ -280,8 +287,17 @@ export function telegramDigestSlot(settingsInput = {}, state = {}, now = new Dat
 
 export function telegramRenderEvents(events = [], heading = '🔔 Ważne sprawy Artway-TM') {
   const icons = { critical: '🔴', warning: '🟡', info: '🔵' };
-  const rows = events.map((event, index) => `${index + 1}. ${icons[event.severity] || '•'} <b>${telegramHtml(event.title)}</b> — ${Number(event.count) || 0}\n   ${telegramHtml(event.description || '')}${event.doneWhen ? `\n   Gotowe, gdy: ${telegramHtml(event.doneWhen)}` : ''}`).join('\n\n');
-  return `<b>${telegramHtml(heading)}</b>\n${telegramHtml(new Date().toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' }))}\n\n${rows || '✅ Brak nowych spraw wymagających reakcji.'}\n\n<i>Telegram pokazuje tylko najważniejsze informacje. Działania zewnętrzne zatwierdzasz w panelu.</i>`;
+  const compact = (value = '', limit = 160) => {
+    const clean = text(value, limit * 2).replace(/\s+/g, ' ').trim();
+    return clean.length > limit ? `${clean.slice(0, limit - 1).trimEnd()}…` : clean;
+  };
+  const rows = events.slice(0, 8).map((event) => {
+    const count = Math.max(1, Number(event.count) || 1), description = compact(event.description || '');
+    return `${icons[event.severity] || '•'} <b>${telegramHtml(compact(event.title || 'Sprawa', 100))}</b>${count > 1 ? ` · ${count}` : ''}${description ? `\n${telegramHtml(description)}` : ''}`;
+  }).join('\n\n');
+  return rows
+    ? `<b>${telegramHtml(heading)}</b>\n${events.length} ${polishForm(events.length, 'nowa sprawa', 'nowe sprawy', 'nowych spraw')}\n\n${rows}`
+    : `<b>${telegramHtml(heading)}</b>\n✅ Brak nowych spraw.`;
 }
 
 export function telegramWebhookSecret(env = process.env) {

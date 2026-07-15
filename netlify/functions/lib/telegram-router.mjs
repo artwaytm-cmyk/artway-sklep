@@ -38,11 +38,11 @@ export function createTelegramRouter({ center, getOperationalCenter, isAdmin, re
     if (action === 'telegram-send-note') {
       const note = text(body.text, 1500).trim();
       if (note.length < 3) return respond({ ok: false, error: 'Wpisz treść notatki do zespołu', code: 'empty_note' }, 422);
-      const sent = await center.sendManual(`<b>📌 Notatka administratora Artway-TM</b>\n\n${telegramHtml(note)}`, { kind: 'note', title: 'Notatka administratora', source: operator, silent: body.silent === true });
+      const sent = await center.sendManual(`<b>📌 Notatka</b>\n${telegramHtml(note)}`, { kind: 'note', title: 'Notatka administratora', source: operator, silent: body.silent === true });
       return respond({ ok: true, messageId: sent?.message_id || null, sentAt: new Date().toISOString() });
     }
     if (action === 'telegram-test') {
-      const sent = await center.sendManual('<b>✅ Telegram Artway-TM działa poprawnie</b>\nTo jest pojedyncza cicha wiadomość testowa. Alerty korzystają z SLA, cyklu sprawy, ciszy nocnej, deduplikacji i kolejki ponowień.', { kind: 'test', title: 'Test połączenia', source: 'admin-panel', silent: true });
+      const sent = await center.sendManual('<b>✅ Połączenie działa</b>\nCichy test został dostarczony.', { kind: 'test', title: 'Test połączenia', source: 'admin-panel', silent: true });
       return respond({ ok: true, messageId: sent?.message_id || null, sentAt: new Date().toISOString() });
     }
     if (action === 'telegram-send-agent-report') {

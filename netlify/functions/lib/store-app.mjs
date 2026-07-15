@@ -4194,20 +4194,25 @@ async function allegroWyslijPrzypomnieniaTelegram(data = {}, settings = {}) {
   for (const { type, item } of candidates) {
     const incoming = item.latestNewIncoming || null;
     const sourceKey = allegroKluczWiadomosci(incoming);
-    const key = `${type}:${item.id}:${sourceKey}`;
-    if (item.cachedOlder) { skipped.push({ key, reason: 'starszy wpis zachowany wyłącznie do wyszukiwania' }); continue; }
-    if (allegroKomunikacjaWewnetrznieZalatwiona(item)) { skipped.push({ key, reason: 'sprawa zamknięta wewnętrznie' }); continue; }
-    if (!incoming || !item.humanReplyNeeded) { skipped.push({ key, reason: 'brak nowej nieobsłużonej wiadomości' }); continue; }
-    if (items[key]) { skipped.push({ key, reason: 'przypomnienie już wysłane' }); continue; }
+    const alertKey = `${type}:${item.id}:${sourceKey}`, incidentKey = `allegro:${type}:${item.id}`;
+    if (item.cachedOlder) { skipped.push({ key: alertKey, reason: 'starszy wpis zachowany wyłącznie do wyszukiwania' }); continue; }
+    if (allegroKomunikacjaWewnetrznieZalatwiona(item)) { skipped.push({ key: alertKey, reason: 'sprawa zamknięta wewnętrznie' }); continue; }
+    if (!incoming || !item.humanReplyNeeded) { skipped.push({ key: alertKey, reason: 'brak nowej nieobsłużonej wiadomości' }); continue; }
+    if (items[alertKey]) { skipped.push({ key: alertKey, reason: 'przypomnienie już wysłane' }); continue; }
     const kind = type === 'issue' ? (item.type === 'CLAIM' ? 'reklamacja' : 'dyskusja') : 'wiadomość';
     const orderId = allegroOrderIdKomunikacji(item);
     const target = type === 'issue' ? 'dyskusje' : 'wiadomosci';
-    const text = `<b>💬 Nowa ${telegramHtml(kind)} Allegro wymaga odpowiedzi</b>\n<b>Klient:</b> ${telegramHtml(item.buyerLogin || '—')}${orderId ? `\n<b>Zamówienie:</b> ${telegramHtml(orderId)}` : ''}\n<b>Treść:</b> ${telegramHtml(tekst(incoming.text || item.subject || 'Brak treści', 500))}\n\nOtwórz: https://artwaytm.pl/#/admin/allegro/${target}`;
     try {
-      const delivery = await telegramCenter.managedEvent({ key, fingerprint: sourceKey, category: 'customer', severity: 'critical', count: 1, title: `Nowa ${kind} Allegro`, description: tekst(incoming.text || item.subject || '', 300) }, text, { source: 'allegro-communication' });
-      items[key] = { key, type, id: item.id, sourceMessageId: incoming.id || '', sent_at: delivery.sent ? new Date().toISOString() : null, skipped_at: delivery.sent ? null : new Date().toISOString(), telegramMessageId: delivery.messageId || '', policyReason: delivery.reason || '' };
-      if (delivery.sent) sent.push(items[key]); else skipped.push({ key, reason: delivery.reason || 'pominięto zgodnie z polityką Telegram' });
-    } catch (e) { skipped.push({ key, reason: tekst(e.message || String(e), 300) }); }
+      const delivery = await telegramCenter.managedEvent({
+        key: incidentKey, legacyPrefix: `${type}:${item.id}:`, fingerprint: sourceKey, category: 'customer', severity: 'critical', count: 1,
+        title: `Nowa ${kind} Allegro`, description: tekst(incoming.text || item.subject || '', 180),
+        facts: [`Klient: ${item.buyerLogin || '—'}`, orderId ? `Zam. ${orderId}` : ''].filter(Boolean), href: `https://artwaytm.pl/#/admin/allegro/${target}`,
+      }, '', { source: 'allegro-communication' });
+      if (delivery.sent || delivery.queued) {
+        items[alertKey] = { key: alertKey, incidentKey, type, id: item.id, sourceMessageId: incoming.id || '', sent_at: delivery.sent ? new Date().toISOString() : null, queued_at: delivery.queued ? new Date().toISOString() : null, telegramMessageId: delivery.messageId || '', policyReason: delivery.reason || '' };
+      }
+      if (delivery.sent) sent.push(items[alertKey]); else skipped.push({ key: alertKey, retryable: !delivery.queued, reason: delivery.queued ? 'alert zapisano do ponowienia' : (delivery.reason || 'pominięto zgodnie z polityką Telegram') });
+    } catch (e) { skipped.push({ key: alertKey, reason: tekst(e.message || String(e), 300) }); }
   }
   await zapisz('allegro_communication_telegram_alerts', { items, updated_at: new Date().toISOString() });
   return { sent, skipped, items };
@@ -6358,9 +6363,18 @@ export default async (req) => {
       await zapisz('supplier_availability_audit', { items: audit.slice(0, 5000), updated_at: checkedAt });
       let telegram = { sent: false };
       if (changedAlerts.length) {
-        const rows = changedAlerts.slice(0, 20).map((x) => `• <b>${telegramHtml(x.name)}</b> — ${x.status === 'brak' ? 'BRAK' : `${x.quantity} szt. (próg ${threshold})`}`).join('\n');
-        const automationText = `Sklep: ukryto ${saleAutomation.siteHidden || 0}, przywrócono ${saleAutomation.siteRestored || 0}\nAllegro: wstrzymano ${saleAutomation.allegroHidden || 0}, wznowiono ${saleAutomation.allegroRestored || 0}${saleAutomation.errors?.length ? `\nBłędy automatyki: ${saleAutomation.errors.length}` : ''}`;
-        try { telegram = await telegramCenter.managedEvent({ key: `supplier-availability:${changedAlerts.map((x) => `${x.productId}:${x.status}`).sort().join('|')}`, category: 'supplier', severity: 'warning', count: changedAlerts.length, title: 'Zmiana dostępności u producentów', description: automationText }, `<b>⚠️ Agent AI: dostępność u producentów</b>\nNowe ostrzeżenia: ${changedAlerts.length}\n\n${rows}\n\n<b>Automatyka sprzedaży</b>\n${automationText}\n\nPanel: https://artwaytm.pl/#/admin/magazyn/dostawcy`, { source: 'supplier-availability' }); }
+        const alertFingerprint = changedAlerts.map((x) => `${x.productId}:${x.status}`).sort().join('|');
+        const automation = [
+          saleAutomation.siteHidden ? `ukryto w sklepie: ${saleAutomation.siteHidden}` : '', saleAutomation.siteRestored ? `przywrócono w sklepie: ${saleAutomation.siteRestored}` : '',
+          saleAutomation.allegroHidden ? `wstrzymano na Allegro: ${saleAutomation.allegroHidden}` : '', saleAutomation.allegroRestored ? `wznowiono na Allegro: ${saleAutomation.allegroRestored}` : '',
+          saleAutomation.errors?.length ? `błędy automatyki: ${saleAutomation.errors.length}` : '',
+        ].filter(Boolean).join(' · ');
+        try { telegram = await telegramCenter.managedEvent({
+          key: 'supplier-availability', legacyPrefix: 'supplier-availability:', fingerprint: alertFingerprint, category: 'supplier', severity: 'warning', count: changedAlerts.length,
+          title: 'Dostępność u producentów', description: automation,
+          items: changedAlerts.slice(0, 8).map((x) => `${x.name} · ${x.status === 'brak' ? 'brak' : `${x.quantity} szt.`}`),
+          href: 'https://artwaytm.pl/#/admin/magazyn/dostawcy',
+        }, '', { source: 'supplier-availability' }); }
         catch (e) { telegram = { sent: false, error: tekst(e.message || e, 300) }; }
       }
       return odpowiedz({ ok: true, summary, results, checkedAt, saleAutomation, telegram });

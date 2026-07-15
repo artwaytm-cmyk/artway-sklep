@@ -25,17 +25,17 @@ export default async (request) => {
   const config = telegramConfig(process.env), chatId = String(message.chat.id), sender = callback?.from || message.from || {}, userId = String(sender.id || '');
   const allowed = config.allowedChatIds.has(chatId) && (!config.allowedUserIds.size || config.allowedUserIds.has(userId));
   if (!allowed) {
-    await sendTelegramHtml('<b>🔒 Ten czat nie ma dostępu do Agenta Artway-TM.</b>\nDodaj jego ID do TELEGRAM_ALLOWED_CHAT_IDS albo korzystaj z autoryzowanej grupy.', { chatId, silent: true }, process.env).catch(() => null);
+    await sendTelegramHtml('<b>🔒 Brak dostępu do bota.</b>', { chatId, silent: true }, process.env).catch(() => null);
     return response();
   }
   const input = String(callback?.data || message.text || message.caption || '').trim();
   if (!input && message.voice) {
-    await sendTelegramHtml('<b>🎙️ Wiadomość głosowa została odebrana.</b>\nTranskrypcja na serwerze jest wyłączona, aby nie generować płatnych kosztów API. Wyślij krótkie pytanie tekstem; bot rozumie zwykły język.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
+    await sendTelegramHtml('<b>🎙 Otrzymałem nagranie.</b>\nTranskrypcja jest wyłączona. Napisz krótko tekstem.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
     return response();
   }
   const token = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim();
   if (!token) {
-    await sendTelegramHtml('⚠️ Agent nie ma dostępu do danych sklepu. Brakuje konfiguracji ARTWAY_ADMIN_TOKEN na serwerze.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
+    await sendTelegramHtml('⚠️ Dane sklepu są chwilowo niedostępne.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
     return response();
   }
   try {
@@ -64,7 +64,7 @@ export default async (request) => {
       await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: String(error?.message || error).slice(0, 180), show_alert: true }, process.env).catch(() => null);
       return response();
     }
-    await sendTelegramHtml(`<b>⚠️ Nie udało się pobrać danych sklepu.</b>\n${String(error?.message || error).slice(0, 400)}`, { chatId, replyTo: message.message_id }, process.env).catch(() => null);
+    await sendTelegramHtml('<b>⚠️ Nie mogę teraz pobrać danych.</b>\nSpróbuj ponownie za chwilę.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
   }
   return response();
 };
