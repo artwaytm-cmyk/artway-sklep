@@ -105,6 +105,19 @@ export function telegramConfig(env = process.env) {
   };
 }
 
+export function telegramActorAllowed(config = {}, actor = {}) {
+  const chatId = String(actor.chatId || '').trim(), userId = String(actor.userId || '').trim();
+  const chats = config.allowedChatIds instanceof Set ? config.allowedChatIds : new Set();
+  const users = config.allowedUserIds instanceof Set ? config.allowedUserIds : new Set();
+  if (!chatId || !userId || !chats.has(chatId)) return false;
+  const privateChat = actor.chatType === 'private' || chatId === userId;
+  if (privateChat) return chatId === userId;
+  // W grupie muszą być dozwolone jednocześnie grupa i konkretny nadawca.
+  // Gdy nie ma osobnej listy userów, prywatny chat ID właściciela/dodatkowej
+  // osoby z allowedChatIds pełni także rolę dozwolonego user ID.
+  return users.size ? users.has(userId) : chats.has(userId);
+}
+
 export function telegramHtml(value) {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

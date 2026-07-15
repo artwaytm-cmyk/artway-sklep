@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {
   sendTelegramHtml,
+  telegramActorAllowed,
   telegramApi,
   telegramConfig,
   telegramNaturalIntent,
@@ -23,7 +24,7 @@ export default async (request) => {
   const update = await request.json().catch(() => ({})), callback = update.callback_query || null, message = callback?.message || update.message || null;
   if (!message?.chat?.id) return response();
   const config = telegramConfig(process.env), chatId = String(message.chat.id), sender = callback?.from || message.from || {}, userId = String(sender.id || '');
-  const allowed = config.allowedChatIds.has(chatId) && (!config.allowedUserIds.size || config.allowedUserIds.has(userId));
+  const allowed = config.allowedChatIds.has(chatId) && telegramActorAllowed(config, { chatId, userId, chatType: message.chat.type || '' });
   if (!allowed) {
     await sendTelegramHtml('<b>🔒 Brak dostępu do bota.</b>', { chatId, silent: true }, process.env).catch(() => null);
     return response();
@@ -53,11 +54,20 @@ export default async (request) => {
     }
     const apiResponse = await fetch(`${origin}/api/store?action=telegram-inbound-command`, {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': token },
-      body: JSON.stringify({ intent: telegramNaturalIntent(input), text: input, chatId, messageThreadId: message.message_thread_id || null, user: sender.username || [sender.first_name, sender.last_name].filter(Boolean).join(' ') }),
+      body: JSON.stringify({
+        intent: telegramNaturalIntent(input), text: input, chatId, messageThreadId: message.message_thread_id || null,
+        replyTo: message.message_id || null, requestId: String(update.update_id || `${chatId}:${message.message_id || ''}`),
+        user: sender.username || [sender.first_name, sender.last_name].filter(Boolean).join(' '),
+        source: 'telegram-webhook', deferToCodex: !input.startsWith('/'),
+      }),
     });
     const data = await apiResponse.json().catch(() => ({}));
     if (!apiResponse.ok || !data.ok) throw new Error(data.error || `HTTP ${apiResponse.status}`);
     if (callback?.id) await telegramApi('answerCallbackQuery', { callback_query_id: callback.id }, process.env).catch(() => null);
+    if (data.deferred) {
+      await telegramApi('sendChatAction', { chat_id: chatId, action: 'typing', ...(Number(message.message_thread_id) > 0 ? { message_thread_id: Number(message.message_thread_id) } : {}) }, process.env).catch(() => null);
+      return response();
+    }
     await sendTelegramHtml(data.message, { chatId, replyTo: message.message_id, replyMarkup: data.replyMarkup, messageThreadId: message.message_thread_id || null }, process.env);
   } catch (error) {
     if (callback?.id) {

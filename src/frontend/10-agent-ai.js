@@ -7,11 +7,128 @@ function agentAINormalizuj(s=""){
     .replace(/\s+/g," ")
     .trim();
 }
+const AGENT_AI_CONFIRMATION_WORD=/\b(?:zatwierdz\w*|potwierdz\w*|zapis\w*|akcept\w*|zaakcept\w*)\b/;
+const AGENT_AI_QUOTED_TEXT=[/„[^”\n]*”/g,/“[^”\n]*”/g,/«[^»\n]*»/g,/‹[^›\n]*›/g,/‘[^’\n]*’/g,/"[^"\n]*"/g,/'[^'\n]*'/g,/`[^`\n]*`/g];
+function agentAIKontekstPotwierdzenia(raw="",n=agentAINormalizuj(raw)){
+  const quoted=[];let outside=String(raw||"");
+  AGENT_AI_QUOTED_TEXT.forEach(pattern=>{outside=outside.replace(pattern,match=>{quoted.push(agentAINormalizuj(match.slice(1,-1)));return " ";});});
+  const outsideNormalized=agentAINormalizuj(outside),confirmationOutsideQuotes=AGENT_AI_CONFIRMATION_WORD.test(outsideNormalized);
+  const unclosedQuote=/["'„”“«»‹›‘’`]/u.test(outside),questionOrReference=/[?？]/u.test(String(raw))||/\b(?:czy|co\s+(?:oznacza|znaczy)|napisz|powiedz|odpowiedz|slowo)\b/.test(n);
+  const quotedConfirmation=quoted.some(segment=>AGENT_AI_CONFIRMATION_WORD.test(segment));
+  const quotedInventoryCommand=quoted.some(segment=>/\b\d{1,7}\s*(?:szt|sztuk|sztuki|sztuka|sztuke)\b/.test(segment)&&(/\b(?:mam|mamy)\b[\s\S]*\bna stanie\b/.test(segment)||/\b(?:ustaw|ustawiam|skoryguj|zmien|przyjmij|przyjeto|dodaj|dopisz|zwieksz|powieksz)\b/.test(segment)));
+  const negatedBefore=/\b(?:nie|bez)\b(?:\s+\w+){0,18}\s+\b(?:zatwierdz\w*|potwierdz\w*|zapis\w*|akcept\w*|zaakcept\w*)\b/.test(n);
+  const revokedAfter=/\b(?:zatwierdz\w*|potwierdz\w*|zapis\w*|akcept\w*|zaakcept\w*)\b(?:\s+\w+){0,18}\s+\b(?:ale|lecz|jednak)\b(?:\s+\w+){0,8}\s+\bnie\b/.test(n)||/\b(?:zatwierdz\w*|potwierdz\w*|zapis\w*|akcept\w*|zaakcept\w*)\b(?:\s+\w+){0,20}\s+\b(?:anuluj\w*|cofnij\w*|odwol\w*|rezygn\w*|nie\s+(?:rob\w*|wykonuj\w*|zapisuj\w*|zmieniaj\w*|ustawiaj\w*|dodawaj\w*|zatwierdzaj\w*|potwierdzaj\w*|akceptuj\w*))\b/.test(n);
+  const cancelled=/\b(?:anuluj\w*|cofnij\w*|odwol\w*|rezygn\w*)\b/.test(n);
+  const deferred=/\b(?:jutro|pojutrze|pozniej|nastepnie|dopiero|wieczorem|rano|za\s+(?:chwile|moment|\d+\s*(?:minut|godzin|dni|tygodni))|po\s+(?:weekendzie|urlopie|swietach)|w\s+(?:weekend|poniedzialek|wtorek|srode|czwartek|piatek|sobote|niedziele))\b/.test(n)||/\b(?:gdy|kiedy|jak)\b(?:\s+\w+){0,8}\s+\b(?:bedzie|bede|wroce|dostane|przyjdzie)\b/.test(n)||/\b(?:po|o)\s+\d{1,2}(?::|\.)\d{2}\b/i.test(String(raw))||/\bpo\s+godzinie\s+\d{1,2}\b/.test(n);
+  return {confirmed:confirmationOutsideQuotes&&!negatedBefore&&!revokedAfter&&!cancelled&&!deferred&&!questionOrReference&&!unclosedQuote&&!quotedInventoryCommand&&!(quotedConfirmation&&!confirmationOutsideQuotes)};
+}
 function agentAIMa(n,arr){ return arr.some(x=>x instanceof RegExp?x.test(n):n.includes(x)); }
 function agentAIWytnijProdukt(n){
   let q=` ${n} `;
   ["ile mamy","ile jest","jaki stan","stan produktu","sprawdz produkt","sprawdz","znajdz","pokaz","czy mamy","gdzie lezy","gdzie jest","lokalizacja","produkt","towar","sku","kod","na magazynie","w magazynie","w sklepie","mi","prosze"].forEach(f=>{q=q.replaceAll(` ${f} `," ");});
   return q.replace(/\s+/g," ").trim();
+}
+function agentAIParsujZmianeStanu(tekst=""){
+  const raw=String(tekst||"").trim(),n=agentAINormalizuj(raw);
+  const ilosci=[...n.matchAll(/\b(\d{1,7})\s*(?:szt|sztuk|sztuki|sztuka|sztuke)\b/g)];
+  const iloscMatch=ilosci.at(-1);
+  if(!iloscMatch||!/(?:\b(?:stan|magazyn|mam|mamy|przyjmij|przyjeto|dodaj|dopisz|zwieksz|powieksz)\b|na stanie)/.test(n))return null;
+  const increment=/\b(?:przyjmij|przyjeto|dodaj|dopisz|zwieksz|powieksz)\b(?:\s+\w+){0,5}\s+\d{1,7}\s*(?:szt|sztuk|sztuki|sztuka|sztuke)\b/.test(n);
+  const absolute=/\b(?:mam|mamy)\b[\s\S]*\bna stanie\b/.test(n)||/\b(?:ustaw|ustawiam|skoryguj|zmien)\b[\s\S]*\b(?:stan|stanie|magazyn|magazynie)\b/.test(n)||/\b(?:stan|stanie)\b[\s\S]*\b(?:wynosi|jest)\b/.test(n);
+  if(!increment&&!absolute)return null;
+  const quotedOrExplanatory=/\b(?:klient\s+napisal|wiadomosc\s+klienta|w\s+instrukcji|przyklad|cytat|zacytowal|wyjasnij|co\s+mam\s+odpowiedziec)\b/.test(n);
+  if(quotedOrExplanatory)return null;
+  const conflict=(increment&&absolute)||ilosci.length>1;
+  const confirmed=!conflict&&agentAIKontekstPotwierdzenia(raw,n).confirmed;
+  const query=n
+    .replace(/\b\d{1,7}\s*(?:szt|sztuk|sztuki|sztuka|sztuke)\b/g," ")
+    .replace(/\b(?:mam|mamy|obecnie|teraz|aktualnie|na|stanie|stan|magazynie|magazynu|produkt|produktu|towar|towaru|sprawdz|sprawdzam|zweryfikuj|i|oraz|prosze|zatwierdz|potwierdz|zapisz|ustaw|przyjmij|przyjeto|dodaj|dopisz|zwieksz|powieksz|do)\b/g," ")
+    .replace(/\s+/g," ").trim();
+  return {typ:"magazyn-stan-zmiana",mode:increment&&!absolute?"increment":"set",quantity:Number(iloscMatch[1]),confirmed,conflict,query,raw,confidence:.99};
+}
+function agentAIKluczIdentyfikatora(v=""){return agentAINormalizuj(v).replace(/[^a-z0-9]/g,"");}
+function agentAIStemNazwy(v=""){
+  const k=agentAIKluczIdentyfikatora(v);
+  return k.length>=6?k.slice(0,6):k;
+}
+function agentAIZnajdzProduktDoZmianyStanu(intent={}){
+  const q=agentAINormalizuj(intent.query||""),tokens=q.split(/\s+/).map(agentAIKluczIdentyfikatora).filter(Boolean),tokenSet=new Set(tokens);
+  const nameTokens=tokens.filter(x=>!/^\d+$/.test(x)&&x.length>=3),products=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const ranked=products.map(p=>{
+    const ids=[
+      ["EAN",p.gtin||p.ean,520],["EXTERNAL_ID",p.externalId,500],["SKU",p.sku,495],
+      ["kod producenta",p.kodProducenta||p.mpn,490],["ID",p.id,460]
+    ];
+    const identityHits=ids.map(([label,value,weight])=>({label,value:String(value??"").trim(),key:agentAIKluczIdentyfikatora(value),weight})).filter(x=>x.key&&tokenSet.has(x.key));
+    const productName=agentAINormalizuj(p.nazwa||p.name||""),productNameTokens=productName.split(/\s+/).filter(Boolean);
+    const matchedNames=nameTokens.filter(word=>productNameTokens.some(candidate=>candidate===word||agentAIStemNazwy(candidate)===agentAIStemNazwy(word)));
+    const nameRatio=nameTokens.length?matchedNames.length/nameTokens.length:0;
+    const exactName=!!q&&!!productName&&(q===productName||q.includes(productName)||productName.includes(q));
+    const identityScore=identityHits.reduce((max,x)=>Math.max(max,x.weight),0),nameScore=(exactName?160:0)+Math.round(nameRatio*120);
+    return {product:p,identityHits,matchedNames,nameRatio,exactName,score:identityScore+nameScore};
+  }).filter(x=>x.identityHits.length||x.nameRatio>=.5||x.exactName).sort((a,b)=>b.score-a.score||b.identityHits.length-a.identityHits.length||String(a.product.nazwa||"").localeCompare(String(b.product.nazwa||""),"pl"));
+  if(!ranked.length)return {status:"none",candidates:[]};
+  const best=ranked[0],second=ranked[1];
+  const strong=best.identityHits.length>0||best.exactName||best.nameRatio>=.75;
+  if(!strong||(second&&second.score===best.score))return {status:"ambiguous",candidates:ranked.slice(0,8)};
+  return {status:"one",product:best.product,evidence:best,candidates:ranked.slice(0,8)};
+}
+function agentAIProduktIdentyfikacjaTekst(p={}){
+  return `ID ${p.id||"—"} • EXTERNAL_ID ${p.externalId||"—"} • SKU ${p.sku||"—"} • EAN ${p.gtin||p.ean||"—"} • kod producenta ${p.kodProducenta||p.mpn||"—"}`;
+}
+function agentAIRequestIdKorekty(intent={},p={}){
+  const storageKey="artway_agent_inventory_request_ids",now=Date.now(),ttl=30*60*1000;
+  let entries={};
+  try{entries=JSON.parse(sessionStorage.getItem(storageKey)||"{}")||{};}catch(e){entries={};}
+  for(const [key,value] of Object.entries(entries))if(!value||now-Number(value.createdAt||0)>ttl)delete entries[key];
+  const fingerprint=[String(p.id||""),String(intent.mode||""),String(intent.quantity??""),agentAINormalizuj(intent.raw||intent.query||"")].join("|");
+  let item=entries[fingerprint];
+  if(!item?.id){
+    item={id:`panel-stock-${globalThis.crypto?.randomUUID?.()||`${now.toString(36)}-${Math.random().toString(36).slice(2)}`}`,createdAt:now};
+    entries[fingerprint]=item;
+  }
+  try{sessionStorage.setItem(storageKey,JSON.stringify(entries));}catch(e){}
+  return {id:item.id,fingerprint,storageKey};
+}
+function agentAIUsunRequestIdKorekty(request={}){
+  if(!request.fingerprint||!request.storageKey)return;
+  try{
+    const entries=JSON.parse(sessionStorage.getItem(request.storageKey)||"{}")||{};
+    delete entries[request.fingerprint];
+    sessionStorage.setItem(request.storageKey,JSON.stringify(entries));
+  }catch(e){}
+}
+async function agentAIWykonajZmianeStanu(intent={}){
+  if(intent.conflict)return "Polecenie jest niejednoznaczne: widzę jednocześnie stan bezwzględny i przyjęcie. Napisz osobno „ustaw stan …” albo „przyjmij … szt.”. Nic nie zostało zapisane.";
+  if(intent.confirmed){
+    const fresh=await chmuraWczytajStan();
+    if(!fresh)throw new Error(`Nie mogę potwierdzić aktualnej rewizji bazy: ${chmuraStan.error||"brak połączenia"}. Nie zapisano zmiany.`);
+    zbudujProdukty();
+  }
+  const match=agentAIZnajdzProduktDoZmianyStanu(intent);
+  if(match.status==="none")return `Nie znalazłem produktu jednoznacznie dla „${intent.query||intent.raw}”. Podaj nazwę wraz z ID, EXTERNAL_ID, SKU, EAN albo kodem producenta. Nie zmieniłem stanu.`;
+  if(match.status!=="one")return ["Znalazłem kilka możliwych produktów — nie zmieniam stanu bez jednoznacznego dopasowania:",...match.candidates.map(x=>`• ${x.product.nazwa} — ${agentAIProduktIdentyfikacjaTekst(x.product)}`),"Dopisz dokładny EAN, EXTERNAL_ID, SKU albo kod producenta."].join("\n");
+  const p=match.product,before=stanMagazynuId(p.id),after=intent.mode==="increment"?(before===null?null:before+intent.quantity):intent.quantity;
+  const evidence=match.evidence.identityHits.map(x=>`${x.label} ${x.value}`).join(", ")||(match.evidence.exactName?"dokładna nazwa":"zgodność nazwy");
+  if(intent.mode==="increment"&&before===null)return `Produkt został dopasowany jednoznacznie: ${p.nazwa} (${agentAIProduktIdentyfikacjaTekst(p)}), ale ma stan „bez limitu”. Najpierw ustaw konkretny stan; nie można bezpiecznie dodać ${intent.quantity} szt.`;
+  const summary=[`🔎 Dopasowanie: ${p.nazwa}`,agentAIProduktIdentyfikacjaTekst(p),`Podstawa dopasowania: ${evidence}.`,`Zmiana: ${before===null?"bez limitu":before} → ${after} szt. (${intent.mode==="increment"?`przyjęcie +${intent.quantity}`:"ustawienie stanu absolutnego"}).`];
+  if(!intent.confirmed)return [...summary,"To jest tylko podgląd. Aby zapisać, dopisz „zatwierdź”, „potwierdź”, „zapisz” albo „zaakceptuj”."].join("\n");
+  const expectedRev=Number(chmuraStan.rev)||0;
+  const request=agentAIRequestIdKorekty(intent,p),requestId=request.id;
+  const result=await chmura("inventory-stock-set",{method:"POST",body:{
+    productId:String(p.id),mode:intent.mode,quantity:intent.quantity,expectedStock:before,expectedRev,
+    confirmed:true,confirmInventory:true,source:"admin-agent-panel",reason:`Polecenie administratora: ${intent.raw}`,
+    requestId,
+    product:{id:String(p.id),name:p.nazwa||p.name||"",nazwa:p.nazwa||p.name||"",sku:p.sku||"",externalId:p.externalId||"",ean:p.gtin||p.ean||"",gtin:p.gtin||p.ean||"",kodProducenta:p.kodProducenta||p.mpn||"",mpn:p.mpn||p.kodProducenta||""}
+  },timeout:30000});
+  const refreshed=await chmuraWczytajStan();
+  if(!refreshed)throw new Error(`Stan zapisano na serwerze, ale nie udało się go ponownie odczytać: ${chmuraStan.error||"brak połączenia"}.`);
+  zbudujProdukty();
+  const verified=stanMagazynuId(p.id),expectedAfter=Number(result.after);
+  if(verified!==expectedAfter)throw new Error(`Serwer zwrócił stan ${expectedAfter}, ale kontrola po zapisie odczytała ${verified===null?"bez limitu":verified}. Odśwież dane przed kolejną zmianą.`);
+  agentAIUsunRequestIdKorekty(request);
+  const verifiedSummary=result.duplicate?[`🔎 Dopasowanie: ${p.nazwa}`,agentAIProduktIdentyfikacjaTekst(p),`✅ To samo polecenie było już zapisane; nie wykonano drugiego przyrostu.`]:summary;
+  return [...verifiedSummary,`✅ Zapisano i zweryfikowano w chmurze: ${result.before===null?"bez limitu":result.before} → ${result.after} szt.`,`Rewizja bazy: ${result.rev} • ruch magazynowy: ${result.movementId||"zapisany"}.`].join("\n");
 }
 function agentAIWytnijProduktAllegro(n=""){
   return String(n||"")
@@ -102,6 +219,8 @@ function agentAIRozpoznajPolecenie(tekst=""){
   if(!n) return {typ:"pomoc",raw,confidence:1};
   const urlMatch=raw.match(/https?:\/\/\S+/i);
   if(urlMatch&&agentAIMa(n,["sprawdz link","sprawdź link","pobierz z link","znajdz przez link","znajdź przez link","przeanalizuj link","uzupelnij z link","uzupełnij z link","dodaj produkt z link","dodaj z link","przygotuj produkt z link"]))return {typ:"link-producenta-analiza",url:urlMatch[0],addProduct:agentAIMa(n,["dodaj produkt","dodaj z link","przygotuj produkt"]),raw,confidence:.99};
+  const stockIntent=agentAIParsujZmianeStanu(raw);
+  if(stockIntent)return stockIntent;
   const slash=n.split(/\s+/)[0].split("@")[0];
   if(slash.startsWith("/")){
     if(["/start","/pomoc","/help"].includes(slash)) return {typ:"pomoc",raw,confidence:1};
@@ -825,12 +944,28 @@ async function agentAIWykonajOferteAllegro(fraza="",publicationAction="keep"){
   const finalStatus=d.offer?.publication?.status||d.offer?.status||(publicationAction==="activate"?"ACTIVE":"INACTIVE");
   return [`✅ ${updated?"Znalazłem istniejącą ofertę i ją zaktualizowałem":finalStatus==="ACTIVE"?"Utworzyłem i aktywowałem nową ofertę":"Utworzyłem nowy szkic oferty"}: ${p.nazwa}.`,`Oferta: ${d.offer?.id||"—"}; status: ${finalStatus}; stan oferty Allegro: ${stock} szt. • stan magazynu pozostał bez zmian.`,`${d.duplicatePrevented?`Duplikat zablokowany — rozpoznano po ${d.match?.reason||"danych produktu"}.`:"Zapisano nowe potrójne powiązanie."}`,`Katalog: ${d.autoFilled?.allegroProductId||d.catalogMatch?.selected?.id||"—"}; kategoria: ${d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||"—"}.`].join("\n");
 }
+async function agentAIOdpowiedzPrzezCodex(tekst=""){
+  const requestId=`panel-${Date.now().toString(36)}-${globalThis.crypto?.randomUUID?.()||Math.random().toString(36).slice(2)}`;
+  const queued=await chmura("codex-agent-panel-enqueue",{method:"POST",body:{requestId,text:String(tekst||"").slice(0,2000)},timeout:15000});
+  if(!queued?.jobId)throw new Error("Serwer nie utworzył zadania dla Codex.");
+  const box=$("agentAICommandLiveResult");
+  if(box){box.hidden=false;box.className="agent-response-card agent-command-live-result";box.innerHTML=`<div class="agent-response-head"><b>🧠 Codex analizuje polecenie</b><small>bezpieczny plan i wykonanie</small></div><pre class="agent-answer-pre">Rozpoznaję zamiar i dobieram dozwoloną operację strony…</pre>`;}
+  for(let attempt=0;attempt<45;attempt++){
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    const result=await chmura("codex-agent-result",{method:"POST",body:{id:queued.jobId},timeout:10000});
+    if(result.status==="completed")return result.response||"Codex zakończył zadanie bez treści odpowiedzi.";
+    if(result.status==="failed")throw new Error(result.error||"Codex nie wykonał zadania po trzech próbach.");
+  }
+  throw new Error("Codex nadal analizuje polecenie. Komputer z Agentem musi być włączony; spróbuj ponownie za chwilę.");
+}
 async function agentAIWykonajPolecenie(tekst=""){
   const intent=agentAIRozpoznajPolecenie(tekst);
   let odpowiedz="";
   try{
     if(intent.typ==="pomoc"){
-      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź link https://... i znajdź dane produktu","• wykonaj bezpieczny plan agenta","• sprawdź samą funkcjonalność strony","• pobierz świeże dane ze wszystkich źródeł","• ponów błędne kroki","• pokaż centrum operacyjne / co mam dziś zrobić?","• wyślij raport na Telegram","• pokaż komunikację z klientami","• sprawdź wysyłki i etykiety InPost","• audyt produktów i katalogu","• status producentów i otwartych zamówień","• diagnostyka integracji","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę","• synchronizuj bazę"].join("\n");
+      odpowiedz=["Możesz pisać normalnie, np.:","• mam obecnie na stanie Ziemniaka 1410 8 szt — podgląd bez zapisu","• mam obecnie na stanie Ziemniaka 1410 8 szt, sprawdź i zatwierdź — ustawienie stanu na 8","• przyjmij 8 szt produktu EAN 590... i zatwierdź — zwiększenie stanu o 8","• sprawdź link https://... i znajdź dane produktu","• wykonaj bezpieczny plan agenta","• sprawdź samą funkcjonalność strony","• pobierz świeże dane ze wszystkich źródeł","• ponów błędne kroki","• pokaż centrum operacyjne / co mam dziś zrobić?","• wyślij raport na Telegram","• pokaż komunikację z klientami","• sprawdź wysyłki i etykiety InPost","• audyt produktów i katalogu","• status producentów i otwartych zamówień","• diagnostyka integracji","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę","• synchronizuj bazę"].join("\n");
+    }else if(intent.typ==="magazyn-stan-zmiana"){
+      odpowiedz=await agentAIWykonajZmianeStanu(intent);
     }else if(intent.typ==="plan-wykonaj"){
       odpowiedz=await agentAIWykonajPlanBezpieczny("full");
     }else if(intent.typ==="plan-data"){
@@ -922,16 +1057,28 @@ async function agentAIWykonajPolecenie(tekst=""){
       const pamiec=agentAIZnajdzPamiecDlaPolecenia(tekst);
       odpowiedz=pamiec.length
         ? ["Znalazłem pasujące zapamiętane procedury:",...pamiec.map(x=>`• ${x.wyzwalacz?`Gdy: ${x.wyzwalacz} → `:""}${x.akcja||x.tresc}`)].join("\n")
-        : "Nie rozpoznałem polecenia. Napisz np. „sprawdź zamówienia”, „przygotuj zamówienie do producenta”, „pokaż braki”, „sprawdź linki producentów”, „ile mamy [produkt]”, „zapamiętaj: …” albo „synchronizuj bazę”.";
+        : await agentAIOdpowiedzPrzezCodex(tekst);
     }
     zapiszHistorieAgenta("komenda",`Polecenie z panelu: ${tekst}`,{polecenie:tekst,intencja:intent.typ,tryb:intent.tryb||"",odpowiedz});
     loguj("info",`Agent AI/panel: ${intent.typ} — ${tekst}`);
-    return {intent,odpowiedz};
+    return {intent,odpowiedz,stabilnyWidok:intent.typ==="magazyn-stan-zmiana"};
   }catch(err){
     odpowiedz=`Nie udało się wykonać polecenia: ${err?.message||err}`;
     zapiszHistorieAgenta("komenda",`Błąd polecenia z panelu: ${tekst}`,{polecenie:tekst,intencja:intent.typ,tryb:intent.tryb||"",odpowiedz,blad:String(err?.message||err)});
     loguj("error",`Agent AI/panel błąd: ${err?.message||err}`);
-    return {intent,odpowiedz,blad:err};
+    return {intent,odpowiedz,blad:err,stabilnyWidok:intent.typ==="magazyn-stan-zmiana"};
+  }
+}
+function agentAIPokazWynikKomendyStabilnie(wynik={}){
+  const box=$("agentAICommandLiveResult"),cloud=$("agentAICommandCloudState");
+  if(box){
+    box.hidden=false;
+    box.className=`agent-response-card agent-command-live-result${wynik.blad?" is-error":""}`;
+    box.innerHTML=`<div class="agent-response-head"><b>${wynik.blad?"⚠️ Polecenie nie zostało zapisane":"✅ Wynik polecenia magazynowego"}</b><small>${esc(new Date().toLocaleString("pl-PL"))}</small></div><pre class="agent-answer-pre">${esc(wynik.odpowiedz||"")}</pre>`;
+  }
+  if(cloud){
+    cloud.className=`lvl ${chmuraStan.dostepna?"lvl-ok":"lvl-blad"}`;
+    cloud.textContent=chmuraStan.dostepna?`chmura • rewizja ${chmuraStan.rev||0}`:"brak połączenia z chmurą";
   }
 }
 async function agentAIPrzyjmijKomende(e){
@@ -943,7 +1090,8 @@ async function agentAIPrzyjmijKomende(e){
   const wynik=await agentAIWykonajPolecenie(tekst);
   toast(wynik.blad?"Agent zapisał błąd polecenia":"Agent AI wykonał polecenie ✅");
   if(input) input.value="";
-  renderuj();
+  if(btn) btn.disabled=false;
+  if(wynik.stabilnyWidok)agentAIPokazWynikKomendyStabilnie(wynik);else renderuj();
   setTimeout(()=>{$("agentAICommandInput")?.focus();},30);
   return false;
 }
@@ -1415,10 +1563,10 @@ function widokAdminAgentAI(sekcja="pulpit"){
         <h2 style="margin-top:0">💬 Polecenie dla agenta</h2>
         <p class="order-detail-lead">Pisz normalnie po polsku. Agent działa na danych widocznych w panelu i wykonuje tylko bezpieczne akcje administratora.</p>
       </div>
-      <span class="lvl lvl-info">bez tokenów w przeglądarce</span>
+      <span id="agentAICommandCloudState" class="lvl ${chmuraStan.dostepna?"lvl-ok":"lvl-info"}">${chmuraStan.dostepna?`chmura • rewizja ${chmuraStan.rev||0}`:"łączenie z chmurą"}</span>
     </div>
     <form class="agent-command-form" onsubmit="return agentAIPrzyjmijKomende(event)">
-      <textarea id="agentAICommandInput" rows="3" placeholder="Np. sprawdź czy wpadło nowe zlecenie, przygotuj zamówienie do producenta, ile mamy szachy..."></textarea>
+      <textarea id="agentAICommandInput" rows="3" placeholder="Np. mam obecnie na stanie Ziemniaka 1410 8 szt, sprawdź i zatwierdź..."></textarea>
       <div class="agent-command-actions">
         <button class="btn" type="submit">🤖 Wykonaj polecenie</button>
         <button class="btn" type="button" onclick="agentAIWstawKomende('wykonaj bezpieczny plan agenta')">Wykonaj plan</button>
@@ -1441,7 +1589,8 @@ function widokAdminAgentAI(sekcja="pulpit"){
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('synchronizuj bazę')">Synchronizacja</button>
       </div>
     </form>
-    <div class="agent-command-hints">Agent rozumie kontekst całej strony: zamówienia, komunikację klientów, wysyłki InPost, Allegro, magazyn, produkty, producentów, faktury, płatności, integracje, pamięć procedur i raporty Telegram.</div>
+    <div class="agent-command-hints">Agent rozumie kontekst całej strony. Zmiana stanu wymaga jednoznacznego produktu i słowa „zatwierdź”, „potwierdź”, „zapisz” albo „zaakceptuj”. „Mam na stanie 8 szt.” ustawia dokładnie 8, a „przyjmij/dodaj 8 szt.” zwiększa stan o 8.</div>
+    <div id="agentAICommandLiveResult" class="agent-response-card agent-command-live-result" hidden></div>
     ${odpowiedziAgenta.length?`<div class="agent-response-list">
       ${odpowiedziAgenta.map(h=>`<div class="agent-response-card">
         <div class="agent-response-head"><b>${esc(h.dane.polecenie||"Polecenie")}</b><small>${esc(h.dataTxt||"")}</small></div>

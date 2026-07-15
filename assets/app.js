@@ -474,13 +474,16 @@ function zaplanujZapisUstawien(){
 async function chmuraZapiszUstawienia(){
   if(!maUprawnieniaZapisuChmury()) return false;
   try{
-    const d = await chmura("settings", {method:"POST", body:{settings: zbierzWspolneUstawienia()}});
+    const expectedRev=Number(chmuraStan.rev||wczytajLS("artway_chmura_rev",0));
+    if(!Number.isSafeInteger(expectedRev)||expectedRev<0)throw new Error("Brakuje aktualnej rewizji wspólnej bazy. Najpierw pobierz dane z serwera.");
+    const d = await chmura("settings", {method:"POST", body:{settings: zbierzWspolneUstawienia(),expectedRev}});
     chmuraStan = {...chmuraStan, dostepna:true, admin:true, rev:d.rev||chmuraStan.rev, updated_at:d.updated_at||null, error:"", ostatniZapis:Date.now()};
     zapiszLS("artway_chmura_rev", d.rev||chmuraStan.rev);   // zapamiętaj, że to my mamy najnowszą wersję
     return true;
   }catch(e){
     chmuraStan = {...chmuraStan, error:e.message};
     if(e.code==="auth") toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
+    else if(e.code==="settings_write_conflict") toast("⚠️ Dane na serwerze zmieniły się. Niczego nie nadpisano — pobierz aktualną wersję i ponów zmianę.");
     loguj("blad","Zapis ustawień w chmurze: "+e.message);
     return false;
   }

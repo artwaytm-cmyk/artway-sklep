@@ -1,12 +1,13 @@
-import { telegramHtml } from './domain/telegram-communication.mjs';
+import { sendTelegramHtml, telegramHtml } from './domain/telegram-communication.mjs';
 import { telegramAgentReport } from './telegram-center.mjs';
 
 const ACTIONS = new Set([
   'telegram-center-status', 'telegram-settings-save', 'telegram-register-webhook', 'telegram-dispatch', 'telegram-inbound-command',
   'telegram-incident-action', 'telegram-delivery-action', 'telegram-dashboard-refresh', 'telegram-send-note', 'telegram-test', 'telegram-send-agent-report', 'telegram-send-supplier-order',
+  'codex-agent-claim', 'codex-agent-complete', 'codex-agent-fail', 'codex-agent-heartbeat', 'codex-agent-panel-enqueue', 'codex-agent-result',
 ]);
 
-export function createTelegramRouter({ center, getOperationalCenter, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text }) {
+export function createTelegramRouter({ center, codexQueue, getOperationalCenter, inventoryCommand, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text }) {
   return async function telegramRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
     if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -16,6 +17,55 @@ export function createTelegramRouter({ center, getOperationalCenter, isAdmin, re
     }
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
     const body = await req.json().catch(() => ({})), session = sessionOf(req), operator = session?.email || 'administrator';
+    if (action === 'codex-agent-claim') {
+      if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
+      return respond({ ok: true, ...(await codexQueue.claim(text(body.workerId || '', 160))) });
+    }
+    if (action === 'codex-agent-panel-enqueue') {
+      if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
+      const queued = await codexQueue.enqueue({ requestId: body.requestId, text: body.text, channel: 'panel', user: operator });
+      return respond({ ok: true, deferred: true, jobId: queued.job?.id || null, duplicate: queued.duplicate === true });
+    }
+    if (action === 'codex-agent-heartbeat') {
+      if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
+      return respond({ ok: true, ...(await codexQueue.heartbeat(body)) });
+    }
+    if (action === 'codex-agent-result') {
+      if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
+      return respond({ ok: true, ...(await codexQueue.result(body.id)) });
+    }
+    if (action === 'codex-agent-complete') {
+      if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
+      const prepared = await codexQueue.prepareDelivery(body);
+      if (prepared.alreadyDelivered) return respond({ ok: true, delivered: true, duplicate: true });
+      if (prepared.alreadyDelivering) return respond({ ok: true, delivered: false, pending: true });
+      if (prepared.job.channel === 'panel') {
+        const completed = await codexQueue.markDelivered({ id: body.id, claimToken: body.claimToken, keepResponse: true });
+        return respond({ ok: true, ...completed, panel: true });
+      }
+      let sent;
+      try {
+        sent = await sendTelegramHtml(telegramHtml(prepared.job.response), {
+          chatId: prepared.job.chatId,
+          replyTo: prepared.job.replyTo,
+          messageThreadId: prepared.job.messageThreadId,
+        });
+      } catch (error) {
+        // Po wywołaniu zewnętrznego API nie wiemy, czy odpowiedź nie zaginęła
+        // już po przyjęciu wiadomości przez Telegram. Traktujemy wynik jako
+        // niejednoznaczny i nie ponawiamy automatycznie, aby nie wysłać duplikatu.
+        await codexQueue.fail({ id: body.id, claimToken: body.claimToken, error: error?.message || error }).catch(() => null);
+        throw error;
+      }
+      // Po sukcesie Telegram nie ponawiamy wysyłki, nawet jeśli sam zapis
+      // audytu chwilowo zawiedzie — chroni to rozmowę przed duplikatem.
+      const completed = await codexQueue.markDelivered({ id: body.id, claimToken: body.claimToken, telegramMessageId: sent?.message_id });
+      return respond({ ok: true, ...completed, messageId: sent?.message_id || null });
+    }
+    if (action === 'codex-agent-fail') {
+      if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
+      return respond({ ok: true, ...(await codexQueue.fail(body)) });
+    }
     if (action === 'telegram-settings-save') return respond({ ok: true, settings: await center.saveSettings(body.settings || body, operator) });
     if (action === 'telegram-register-webhook') return respond({ ok: true, ...(await center.registerWebhook(publicOrigin(req))) });
     if (action === 'telegram-dispatch') {
@@ -23,6 +73,15 @@ export function createTelegramRouter({ center, getOperationalCenter, isAdmin, re
       return respond({ ok: true, dispatch, center: operational });
     }
     if (action === 'telegram-inbound-command') {
+      const inventory = typeof inventoryCommand === 'function' ? await inventoryCommand(body.text || body.intent || '', { user: body.user, chatId: body.chatId, requestId: body.requestId }) : null;
+      if (inventory) return respond({ ok: true, ...inventory });
+      if (body.deferToCodex === true && body.source === 'telegram-webhook' && codexQueue) {
+        const queued = await codexQueue.enqueue({
+          requestId: body.requestId, text: body.text, chatId: body.chatId, messageThreadId: body.messageThreadId,
+          replyTo: body.replyTo, user: body.user, channel: 'telegram',
+        });
+        return respond({ ok: true, deferred: true, jobId: queued.job?.id || null, duplicate: queued.duplicate === true });
+      }
       const operational = await getOperationalCenter();
       return respond({ ok: true, ...(await center.inbound(text(body.intent || body.text, 1000), operational, { text: body.text, user: body.user, chatId: body.chatId, messageThreadId: body.messageThreadId })) });
     }

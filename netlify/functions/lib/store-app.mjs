@@ -3,7 +3,7 @@
 // Endpoint: /.netlify/functions/store  (alias /api/store)
 import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
-import { createStoreRepository } from './core/store-repository.mjs';
+import { createRevisionSafeWriter, createStoreRepository } from './core/store-repository.mjs';
 import {
   bezpiecznePorownanie,
   czyAdmin as czyAdminToken,
@@ -38,6 +38,9 @@ import {
   mergeCatalogProducts,
 } from './domain/catalog-quality.mjs';
 import { eligiblePromotionProducts, runIndexNowPromotion } from './domain/indexnow.mjs';
+import { createInventoryNaturalCommandHandler } from './domain/inventory-command.mjs';
+import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
+import { createInventoryStockRoute } from './inventory-route.mjs';
 import {
   telegramConfig as telegramKonfiguracja,
   telegramHtml,
@@ -74,9 +77,17 @@ import {
 const STORE_NAME = 'artway-sklep';
 const repository = createStoreRepository({ name: STORE_NAME });
 const czytaj = repository.read;
-const zapisz = repository.write;
+const czytajWersjonowane = repository.readVersioned;
+const zapiszJesliWersja = repository.writeIfVersion;
+const zapiszUstawieniaBezpiecznie = createRevisionSafeWriter(repository, 'settings');
+async function zapisz(key, value) {
+  if (key !== 'settings') return repository.write(key, value);
+  return zapiszUstawieniaBezpiecznie(value);
+}
 const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
-const telegramRoute = createTelegramRouter({ center: telegramCenter, getOperationalCenter: agentCentrumOperacyjne, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
+const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
 
 // Klucze wspólne (konfiguracja + katalog + ceny + stany + opinie + kosz) — zapisywane przez administratora,
 // czytane przez wszystkich (żeby sklep wyglądał tak samo na każdym urządzeniu).
@@ -123,6 +134,8 @@ function ograniczRuch(request, name, limit, windowMs) {
   if (result.ok) return null;
   return odpowiedz({ ok: false, error: 'Zbyt wiele prób. Spróbuj ponownie później.', code: 'rate_limit', retryAfter: result.retryAfter }, 429);
 }
+
+const inventoryStockRoute = createInventoryStockRoute({ isAdmin: czyAdmin, rateLimit: ograniczRuch, readVersioned: czytajWersjonowane, respond: odpowiedz, settingsLimit: LIMIT_USTAWIEN, text: tekst, writeIfVersion: zapiszJesliWersja });
 
 function profilKlienta(raw = {}, email = '') {
   const source = raw && typeof raw === 'object' ? raw : {};
@@ -295,41 +308,50 @@ async function odejmijStany(zamowienie) {
   try {
     const pozycje = Array.isArray(zamowienie?.pozycjeDane) ? zamowienie.pozycjeDane : [];
     if (!pozycje.length) return;
-    const ust = await czytaj('settings', { data: {}, rev: 0 });
-    const dane = ust.data || {};
-    const stany = (dane.artway_stany && typeof dane.artway_stany === 'object') ? { ...dane.artway_stany } : {};
-    const ruchy = Array.isArray(dane.artway_ruchy_magazynowe) ? [...dane.artway_ruchy_magazynowe] : [];
-    let zmiana = false;
-    for (const p of pozycje) {
-      const id = p && (p.id != null ? String(p.id) : '');
-      const ile = Number(p && p.ilosc) || 0;
-      if (!id || ile <= 0) continue;
-      if (id in stany && stany[id] !== '' && stany[id] != null && !Number.isNaN(Number(stany[id]))) {
-        const przed = Math.max(0, Number(stany[id]) || 0);
-        const po = Math.max(0, przed - ile);
-        stany[id] = po;
-        ruchy.unshift({
-          id: `MAG-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-          data: new Date().toISOString(),
-          dataTxt: new Date().toLocaleString('pl-PL'),
-          produktId: id,
-          produktNazwa: tekst(p.nazwa || p.produkt || id, 200),
-          sku: tekst(p.sku || '', 80),
-          typ: 'sprzedaż',
-          ilosc: -ile,
-          stanPrzed: przed,
-          stanPo: po,
-          dokument: numerZamowienia(zamowienie?.nr),
-          powod: 'Zamówienie klienta',
-          operator: 'system',
-        });
-        zmiana = true;
+    const orderNumber = numerZamowienia(zamowienie?.nr), requestId = `order-stock:${orderNumber}`;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const ust = await czytaj('settings', { data: {}, rev: 0 });
+      const dane = ust.data || {};
+      const stany = (dane.artway_stany && typeof dane.artway_stany === 'object') ? { ...dane.artway_stany } : {};
+      const ruchy = Array.isArray(dane.artway_ruchy_magazynowe) ? [...dane.artway_ruchy_magazynowe] : [];
+      if (ruchy.some((movement) => movement?.sourceRequestId === requestId)) return;
+      let zmiana = false;
+      for (const p of pozycje) {
+        const id = p && (p.id != null ? String(p.id) : '');
+        const ile = Number(p && p.ilosc) || 0;
+        if (!id || ile <= 0) continue;
+        if (id in stany && stany[id] !== '' && stany[id] != null && !Number.isNaN(Number(stany[id]))) {
+          const przed = Math.max(0, Number(stany[id]) || 0);
+          const po = Math.max(0, przed - ile);
+          stany[id] = po;
+          ruchy.unshift({
+            id: `MAG-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+            data: new Date().toISOString(),
+            dataTxt: new Date().toLocaleString('pl-PL'),
+            produktId: id,
+            produktNazwa: tekst(p.nazwa || p.produkt || id, 200),
+            sku: tekst(p.sku || '', 80),
+            typ: 'sprzedaż',
+            ilosc: -ile,
+            stanPrzed: przed,
+            stanPo: po,
+            dokument: orderNumber,
+            powod: 'Zamówienie klienta',
+            operator: 'system',
+            sourceRequestId: requestId,
+          });
+          zmiana = true;
+        }
       }
-    }
-    if (zmiana) {
+      if (!zmiana) return;
       dane.artway_stany = stany;
       dane.artway_ruchy_magazynowe = ruchy.slice(0, 3000);
-      await zapisz('settings', { ...ust, data: dane, rev: (Number(ust.rev) || 0) + 1, updated_at: new Date().toISOString() });
+      try {
+        await zapisz('settings', { ...ust, data: dane, rev: (Number(ust.rev) || 0) + 1, updated_at: new Date().toISOString() });
+        return;
+      } catch (error) {
+        if (error?.code !== 'settings_write_conflict' || attempt === 2) throw error;
+      }
     }
   } catch (e) { /* stany są pomocnicze — nie blokują zamówienia */ }
 }
@@ -4933,6 +4955,8 @@ export default async (req) => {
   try {
     const telegramResponse = await telegramRoute(req, url, action);
     if (telegramResponse) return telegramResponse;
+    const inventoryResponse = await inventoryStockRoute(req, url, action);
+    if (inventoryResponse) return inventoryResponse;
     if (action === 'catalog-quality-audit') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -6798,9 +6822,20 @@ export default async (req) => {
       const dane = oczyscUstawienia(body.settings);
       const rozmiar = JSON.stringify(dane).length;
       if (rozmiar > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
-      const prev = await czytaj('settings', { rev: 0 });
-      const rec = { data: dane, rev: (prev.rev || 0) + 1, updated_at: new Date().toISOString() };
-      await zapisz('settings', rec);
+      const expectedRev = Number(body.expectedRev);
+      if (!Number.isSafeInteger(expectedRev) || expectedRev < 0) {
+        return odpowiedz({ ok: false, error: 'Brakuje rewizji bazowej. Pobierz aktualne ustawienia przed zapisem.', code: 'settings_write_conflict' }, 409);
+      }
+      const version = await czytajWersjonowane('settings', { data: {}, rev: 0, updated_at: null });
+      const prev = version.value || { data: {}, rev: 0, updated_at: null };
+      if (Number(prev.rev || 0) !== expectedRev) {
+        return odpowiedz({ ok: false, error: 'Ustawienia zmieniły się na innym urządzeniu. Niczego nie nadpisano.', code: 'settings_write_conflict', rev: Number(prev.rev || 0) }, 409);
+      }
+      const rec = { data: dane, rev: expectedRev + 1, updated_at: new Date().toISOString() };
+      const write = await zapiszJesliWersja('settings', rec, version);
+      if (!write?.modified) {
+        return odpowiedz({ ok: false, error: 'Ustawienia zmieniły się podczas zapisu. Niczego nie nadpisano.', code: 'settings_write_conflict' }, 409);
+      }
       return odpowiedz({ ok: true, rev: rec.rev, updated_at: rec.updated_at });
     }
 
@@ -6851,7 +6886,7 @@ export default async (req) => {
       lista.unshift(op);
       while (lista.length > 5000) lista.pop();
       dane.artway_opinie = lista;
-      await zapisz('settings', { ...rec, data: dane, updated_at: new Date().toISOString() });
+      await zapisz('settings', { ...rec, data: dane, rev: (Number(rec.rev) || 0) + 1, updated_at: new Date().toISOString() });
       return odpowiedz({ ok: true, stored: true });
     }
 
