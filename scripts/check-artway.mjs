@@ -253,9 +253,10 @@ requireMarkers('połączonych assets JS', app, [
   'function allegroZapiszUstawieniaOfert',
   'function agentAIStatusRoboczyProducenta',
   'function agentAIWyslijZlecenieEmail',
+  'function agentAIUzgodnijPlanZSerwerem',
+  'supplier-order-reconcile',
   'function producenciKartotekaPanelHTML',
   'artway_producenci',
-  'Nowa wersja powstaje dopiero po zatwierdzeniu i skutecznej wysyłce e-mailem',
   'function allegroListaProducentow',
   'function allegroProducentKanoniczny',
   'function allegroUruchomAutomatycznaKonserwacje',
@@ -623,10 +624,10 @@ const telegramSupplierFlow = app.slice(app.indexOf('async function agentAIWyslij
 if (/status\s*:\s*["'`]wysłane na Telegram/.test(telegramSupplierFlow)) {
   fail('assets/app.js: wysyłka podglądu Telegram nie może zamykać ani zmieniać statusu dokumentu producenta');
 }
-if (!app.includes('partial=(Array.isArray(agentAIZlecenia)') || !app.includes('agentAIStatusRoboczyProducenta(z.status)')) {
-  fail('assets/app.js: brak blokady nowego dokumentu oraz scalania bieżącego zamówienia producenta');
+if (!app.includes('async function agentAIUzgodnijPlanZSerwerem') || !app.includes('supplier-order-reconcile') || app.includes('function agentAIUtworzZlecenieProducenta(')) {
+  fail('assets/app.js: Plan zatowarowania musi używać kanonicznego uzgadniania serwerowego bez lokalnego generatora szkiców');
 }
-if (!store.includes("['zaakceptowane', 'częściowo wysłane e-mailem'].includes(status)") || !store.includes('approvalRevision !== revision') || !store.includes("crypto.createHash('sha256')")) {
+if (!store.includes('supplierOrderPlan.beginEmailSend') || !store.includes('supplierOrderPlan.markEmailResults') || !store.includes("crypto.createHash('sha256')")) {
   fail('store-app.mjs: wysyłka producenta musi wymagać zatwierdzenia bieżącej wersji i mieć idempotencję');
 }
 if (!app.includes('została bezpiecznie dezaktywowana') || !app.includes('...(producenciKartoteka||[]).filter(p=>p.active!==false)')) {

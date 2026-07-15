@@ -4,6 +4,11 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 const source = await readFile(new URL('../src/frontend/10-agent-ai.js', import.meta.url), 'utf8');
+const routerSource = await readFile(new URL('../src/frontend/06-router-and-storefront.js', import.meta.url), 'utf8');
+const cloudSource = await readFile(new URL('../src/frontend/03-cloud-sync.js', import.meta.url), 'utf8');
+const shippingSource = await readFile(new URL('../src/frontend/07-admin-shipping.js', import.meta.url), 'utf8');
+const ordersSource = await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8');
+const inventorySource = await readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8');
 
 function fragment(start, end) {
   const from = source.indexOf(start), to = source.indexOf(end, from);
@@ -18,24 +23,63 @@ function supplierHelpers() {
   vm.runInNewContext(`${fragment('function czyEAN', 'function mapaZamowienDlaProduktow')}
 ${fragment('function agentAIDostawcaProduktu', 'function agentAIAktywneIlosciUProducentow')}
 ${fragment('function agentAIEanPoprawny', 'let agentAIModalPoprzedniFocus')}
-this.api={czyEAN,kodOperacyjnyProduktu,agentAIDostawcaProduktu,agentAIIdentyfikatorOptimaPozycji,agentAIPrzygotujOptimaZlecenie};`, context);
+this.api={czyEAN,kodOperacyjnyProduktu,agentAIDostawcaProduktu,agentAIKodPozycjiProducenta,agentAIIdentyfikatorOptimaPozycji,agentAIPrzygotujOptimaZlecenie};`, context);
   return context.api;
 }
 
-test('Optima otrzymuje EAN, potem kod producenta, zawsze z pustą ceną', () => {
-  const { agentAIPrzygotujOptimaZlecenie } = supplierHelpers();
+test('tabela i Optima używają wspólnego priorytetu jawnych kodów bez fallbacku do lokalnego ID', () => {
+  const { agentAIPrzygotujOptimaZlecenie, agentAIIdentyfikatorOptimaPozycji, agentAIKodPozycjiProducenta } = supplierHelpers();
   const result = agentAIPrzygotujOptimaZlecenie([
-    { produktId: '1', ean: '5901234123457', kodProducenta: 'A-1', nazwa: 'Gra A', ilosc: 2 },
+    { produktId: '1', externalId: 'EXT-A', sku: 'SKU-A', ean: '5901234123457', kodProducenta: 'A-1', nazwa: 'Gra A', ilosc: 2 },
     { produktId: '2', nazwa: 'Gra B', ilosc: 3 },
-    { produktId: '3', nazwa: 'Bez kodu', ilosc: 1 },
-  ], (id) => id === '2' ? { kodProducenta: 'B-7' } : {});
-  assert.equal(result.tresc, '5901234123457;2;\r\nB-7;3;');
-  assert.equal(result.wiersze[0].typ, 'EAN');
-  assert.equal(result.wiersze[1].typ, 'kod producenta');
+    { produktId: '3', ean: '5901234123457', nazwa: 'Gra C', ilosc: 1 },
+    { produktId: '4', nazwa: 'Bez kodu', ilosc: 1 },
+  ], (id) => id === '2' ? { sku: 'B-SKU', kodProducenta: 'B-7' } : {});
+  assert.equal(result.tresc, 'EXT-A;2;\r\nB-SKU;3;\r\n5901234123457;1;');
+  assert.equal(result.wiersze[0].typ, 'EXTERNAL_ID');
+  assert.equal(result.wiersze[1].typ, 'SKU');
+  assert.equal(result.wiersze[2].typ, 'EAN');
   assert.deepEqual(Array.from(result.braki, (item) => item.nazwa), ['Bez kodu']);
   assert.doesNotMatch(result.tresc, /TOWAR|ILOŚĆ|CENA|\d+[.,]\d{2}/i);
   const invalid = agentAIPrzygotujOptimaZlecenie([{ produktId: '4', ean: '5901234123458', kodProducenta: 'FALLBACK-4', nazwa: 'Błędny EAN', ilosc: 1 }], () => ({}));
   assert.equal(invalid.tresc, 'FALLBACK-4;1;');
+  const ambiguous = agentAIPrzygotujOptimaZlecenie([{ produktId: '5', kodProducenta: '2387 lub SL2871', nazwa: 'Kod niejednoznaczny', ilosc: 1 }], () => ({}));
+  assert.equal(ambiguous.tresc, '');
+  assert.deepEqual(Array.from(ambiguous.braki, (item) => item.nazwa), ['Kod niejednoznaczny']);
+  assert.deepEqual(
+    { ...agentAIIdentyfikatorOptimaPozycji({ produktId: '77', ean: '5901234123457', kodDostawcy: 'SUP-77' }, {}) },
+    { wartosc: 'SUP-77', typ: 'kod dostawcy' },
+  );
+  assert.deepEqual(
+    { ...agentAIIdentyfikatorOptimaPozycji({ produktId: '77', ean: '5901234123458', kodDostawcy: 'SUP-77', kodKatalogowy: 'CAT-77', kod: 'LEG-77' }, {}) },
+    { wartosc: 'SUP-77', typ: 'kod dostawcy' },
+  );
+  assert.deepEqual(
+    { ...agentAIIdentyfikatorOptimaPozycji({ id: '77', produktId: '77', externalId: '77', sku: '77', kodProducenta: '77', kod: '77' }, { id: '77' }) },
+    { wartosc: '77', typ: 'EXTERNAL_ID' },
+  );
+  assert.deepEqual(
+    { ...agentAIIdentyfikatorOptimaPozycji({ produktId: '77', sku: '77' }, { id: '77' }) },
+    { wartosc: '77', typ: 'SKU' },
+  );
+  assert.deepEqual(
+    { ...agentAIIdentyfikatorOptimaPozycji({ produktId: '77', kodProducenta: '77' }, { id: '77' }) },
+    { wartosc: '77', typ: 'kod producenta' },
+  );
+  assert.deepEqual(
+    { ...agentAIIdentyfikatorOptimaPozycji({ produktId: '77', kod: '77', ean: '5901234123457' }, { id: '77' }) },
+    { wartosc: '5901234123457', typ: 'EAN' },
+  );
+  assert.deepEqual(
+    { ...agentAIIdentyfikatorOptimaPozycji({ id: '77', produktId: '77', kod: '77' }, { id: '77' }) },
+    { wartosc: '', typ: '' },
+  );
+  const wspolna = { produktId: '9', ean: '5901234123457', kodDostawcy: 'SUP-9' };
+  assert.equal(agentAIKodPozycjiProducenta(wspolna, {}), agentAIIdentyfikatorOptimaPozycji(wspolna, {}).wartosc);
+  assert.match(fragment('function agentAIZlecenieTabelaDostawcyHTML', 'function agentAIEtapyZleceniaProducenta'), /agentAIStabilnyIdentyfikatorPozycji\(p,produkt\)/);
+  const shortageTable = fragment('function magazynBrakiDostawcyHTML', 'function magazynTabelaOperacyjnaHTML');
+  assert.match(shortageTable, /agentAIStabilnyIdentyfikatorPozycji\(x,produktMagazynowy\(x\.produktId\)/);
+  assert.doesNotMatch(shortageTable, /x\.kod\|\|x\.produktId|<small>ID /);
 });
 
 test('kod operacyjny i dostawca mają bezpieczną kolejność bez wewnętrznego ID', () => {
@@ -49,7 +93,7 @@ test('kod operacyjny i dostawca mają bezpieczną kolejność bez wewnętrznego 
 });
 
 test('materiały dla producenta nie zawierają cen ani wartości', () => {
-  const csv = fragment('function agentAIPobierzZlecenieCSV', 'function agentAIKodPozycjiProducenta');
+  const csv = fragment('function agentAIPobierzZlecenieCSV', 'function agentAIEanPoprawny');
   const email = fragment('function agentAIEmailProducentaHTML', 'function agentAIPodgladEmailaProducenta');
   assert.match(csv, /\["kod","nazwa","zamawiana_ilosc"\]/);
   assert.doesNotMatch(csv, /"ean"/i);
@@ -58,9 +102,15 @@ test('materiały dla producenta nie zawierają cen ani wartości', () => {
   assert.doesNotMatch(email, /EAN<\/th>|Cena|Wartość|cenaBrutto|wartoscSzacowana/);
   const supplierPanel = fragment('function agentAIZlecenieTabelaDostawcyHTML', 'function agentAIEtapyZleceniaProducenta');
   assert.doesNotMatch(supplierPanel, /cenaBrutto|wartoscSzacowana|zl\(/);
-  const sendPayload = fragment('function agentAIDaneZleceniaDoEmaila', 'async function agentAIWyslijZlecenieEmail');
-  assert.doesNotMatch(sendPayload, /cena|wartosc|lokalizacja|powod/i);
-  assert.match(sendPayload, /kodProducenta/);
+  const sendPayload = fragment('async function agentAIWyslijZlecenieEmail', 'async function agentAIPrzyjmijPozycjeZlecenia');
+  assert.match(sendPayload, /body:\{order:\{id:z\.id,revision\},suppliers:/);
+  assert.doesNotMatch(sendPayload, /body:\{order:z/);
+  const producerForm = fragment('function producentDaneZFormularza', 'function producenciKartotekaPanelHTML');
+  assert.doesNotMatch(producerForm, /name="emailSubject"|name="emailIntro"/);
+  assert.match(producerForm, /Stały bezpieczny szablon e-maila/);
+  const recipientPayload = fragment('function agentAIDaneProducentaDoEmaila', 'async function agentAIWyslijZlecenieEmail');
+  assert.match(recipientPayload, /return \{name:p\.name\|\|p\.nazwa\|\|""\}/);
+  assert.doesNotMatch(recipientPayload, /orderEmail|emailSubject|emailIntro/);
 });
 
 test('podgląd jest dialogiem z Escape, a wysyłka ma ostateczne potwierdzenie', () => {
@@ -74,29 +124,148 @@ test('podgląd jest dialogiem z Escape, a wysyłka ma ostateczne potwierdzenie',
   assert.ok(send.indexOf('if(!confirm(') < send.indexOf('chmura("email-send-supplier-order"'));
 });
 
-test('panel pokazuje cztery właściwe etapy procesu', () => {
+test('panel pokazuje cały proces aż do przyjęcia dostawy', () => {
   const steps = fragment('function agentAIEtapyZleceniaProducenta', 'function agentAIEtapyZleceniaHTML');
-  for (const label of ['Stan magazynowy', 'Szkic producenta', 'Zatwierdzenie', 'Wysłanie']) assert.match(steps, new RegExp(label));
+  for (const label of ['Stan magazynowy', 'Szkic producenta', 'Zatwierdzenie', 'Wysłanie', 'Przyjęcie']) assert.match(steps, new RegExp(label));
   assert.doesNotMatch(steps, /Telegram/);
 });
 
-test('uzgadnianie szkicu nie inkrementuje starej ilości', () => {
-  const reconcile = fragment('function agentAIUtworzZlecenieProducenta', 'function agentAIUtworzZleceniaWedlugDostawcow');
-  assert.match(reconcile, /baseRequired:potrzebna,manualExtra,nadwyzka:manualExtra,ilosc:potrzebna\+manualExtra/);
-  assert.doesNotMatch(reconcile, /Number\(old\.ilosc\)[^\n]+Number\(item\.ilosc\)/);
-  let required = 5;
+test('plan używa serwerowych akcji rewizji i nie wysyła bez osobnego potwierdzenia', () => {
+  const manual = fragment('function agentAIPlanZapiszOdpowiedzSerwera', 'function agentAIZlecenieTabelaDostawcyHTML');
+  const quantity = fragment('function agentAIPowiekszPozycjeZlecenia', 'async function agentAIWyslijZlecenieTelegram');
+  const receive = fragment('async function agentAIPrzyjmijPozycjeZlecenia', 'function agentAINadwyzkiDoPrzyjecia');
+  assert.match(manual, /supplier-order-line-upsert/);
+  assert.match(quantity, /supplier-order-line-upsert/);
+  assert.match(source, /supplier-order-approve/);
+  assert.match(receive, /supplier-order-receive/);
+  assert.match(receive, /expectedReceiptRevision/);
+  assert.match(receive, /if\(!confirm\(/);
+});
+
+test('e-mail i eksport pokazują instrukcję Optimy tylko dla Alexander i Multigra', () => {
+  const preview = fragment('function agentAIEmailProducentaHTML', 'function agentAIPodgladEmailaProducenta');
+  const table = fragment('function agentAIZlecenieTabelaDostawcyHTML', 'function agentAIEtapyZleceniaProducenta');
+  assert.match(preview, /Otwórz dokument → Ogólne → Kolektor danych → Importuj pozycje/);
+  assert.match(preview, /includes\("alexander"\).*includes\("multigra"\)/s);
+  assert.match(table, /Comarch Optima TXT/);
+  assert.match(table, /TXT bez cen/);
+  assert.doesNotMatch(table, /cenaBrutto|cenaZakupu|wartoscSzacowana|zl\(/);
+  const download = fragment('function agentAIPobierzOptimaTXT', 'function agentAIPlanZapiszOdpowiedzSerwera');
+  assert.match(download, /"\\uFEFF"\+dane\.tresc/);
+  assert.ok(download.indexOf('agentAIEksportZablokowanyPrzezBrakKodow') < download.indexOf('pobierzPlik('));
+  const csvDownload = fragment('function agentAIPobierzZlecenieCSV', 'function agentAIEanPoprawny');
+  assert.ok(csvDownload.indexOf('agentAIEksportZablokowanyPrzezBrakKodow') < csvDownload.indexOf('pobierzPlik('));
+});
+
+test('aktywne dokumenty wykluczają historię, zastąpione i puste szkice', () => {
+  const context = {};
+  vm.runInNewContext(`${fragment('function agentAIPlanDokumentAktywny', 'function agentAIPlanDokumentPasuje')}
+this.active=agentAIPlanDokumentAktywny;`, context);
+  const active = context.active;
+  assert.equal(active({ status: 'szkic', pozycje: [{ ilosc: 2 }] }), true);
+  assert.equal(active({ status: 'szkic', pozycje: [{ ilosc: 0, manualExtra: 2 }] }), true);
+  assert.equal(active({ status: 'szkic', pozycje: [] }), false);
+  assert.equal(active({ status: 'zastąpione', pozycje: [{ ilosc: 2 }] }), false);
+  assert.equal(active({ status: 'superseded', pozycje: [{ ilosc: 2 }] }), false);
+  assert.equal(active({ status: 'wyczyszczone', pozycje: [{ ilosc: 2 }] }), false);
+  assert.equal(active({ status: 'cleared', pozycje: [{ ilosc: 2 }] }), false);
+  assert.equal(active({ status: 'zrealizowane', pozycje: [{ ilosc: 2 }] }), false);
+  assert.equal(active({ status: 'anulowane', pozycje: [{ ilosc: 2 }] }), false);
+});
+
+test('kanoniczny eksport Planu ma tylko stabilny kod, nazwę i ilość bez cen oraz local ID', () => {
+  const context = { tylkoCyfry: (value) => String(value || '').replace(/\D/g, '') };
+  vm.runInNewContext(`${fragment('function agentAIEanPoprawny', 'let agentAIModalPoprzedniFocus')}
+${fragment('function agentAIPlanDokumentAktywny', 'function agentAIPlanDokumentPasuje')}
+${fragment('function agentAIPlanWierszeEksportu', 'function eksportujTabeleOperacyjnaMagazynuCSV')}
+this.exportRows=agentAIPlanWierszeEksportu;`, context);
+  const rows = context.exportRows([
+    { status: 'szkic', pozycje: [{ produktId: '101', externalId: 'EXT-101', nazwa: 'Gra A', ilosc: 2 }] },
+    { status: 'zastąpione', pozycje: [{ produktId: '102', sku: 'SKU-OLD', nazwa: 'Stary szkic', ilosc: 9 }] },
+    { status: 'szkic', pozycje: [] },
+  ], [
+    { produktId: '103', sku: 'SKU-103', nazwa: 'Gra B', pozostaloDoZamowienia: 3 },
+    { produktId: '104', kodProducenta: '2387 lub SL2871', nazwa: 'Gra bez pewnego kodu', pozostaloDoZamowienia: 1 },
+  ], () => ({}));
+  assert.deepEqual(Array.from(rows, ({ kod, nazwa, ilosc }) => ({ kod, nazwa, ilosc })), [
+    { kod: 'EXT-101', nazwa: 'Gra A', ilosc: 2 },
+    { kod: 'SKU-103', nazwa: 'Gra B', ilosc: 3 },
+    { kod: '', nazwa: 'Gra bez pewnego kodu', ilosc: 1 },
+  ]);
+  assert.equal(rows.some((row) => row.kod === '101' || row.kod === '102' || row.kod === '103' || row.kod === '104'), false);
+  const exporter = fragment('function agentAIPlanWierszeEksportu', 'function magazynBrakiDostawcyHTML');
+  assert.match(exporter, /\["kod","nazwa","ilosc"\]/);
+  assert.match(exporter, /agentAIStabilnyIdentyfikatorPozycji/);
+  assert.doesNotMatch(exporter, /cenaBrutto|cenaZakupu|wartoscSzacowana/);
+  const plan = inventorySource.slice(inventorySource.indexOf('function magazynPlanZatowarowaniaHTML'), inventorySource.indexOf('function odswiezPlanZatowarowaniaWidoku'));
+  assert.doesNotMatch(plan, /eksportujZatowarowanieCSV/);
+  assert.equal((source.match(/onclick="eksportujTabeleOperacyjnaMagazynuCSV\(\)"/g) || []).length, 1);
+});
+
+test('eksport Planu z brakującym kodem jest blokowany przed utworzeniem pliku', () => {
+  const downloads = [], modals = [];
   const context = {
-    agentAIZlecenia: [{ id: 'D-1', supplier: 'Alexander', status: 'szkic', revision: 1, pozycje: [{ produktId: 'P-1', dostawca: 'Alexander', ilosc: 5, iloscPotrzebna: 5, manualExtra: 0, nadwyzka: 0 }] }],
-    agentAIPozycjeZleceniaProducenta: () => [{ produktId: 'P-1', dostawca: 'Alexander', ilosc: required, iloscPotrzebna: required, nazwa: 'Gra' }],
-    agentAIDostawcaZlecenia: (draft) => draft.supplier,
-    agentAIStatusRoboczyProducenta: (status) => ['szkic', 'do sprawdzenia', 'zaakceptowane'].includes(status),
-    agentAIPodsumujZlecenie: (draft) => ({ ...draft, sztuk: draft.pozycje.reduce((sum, item) => sum + item.ilosc, 0) }),
-    zapiszLS: () => {}, zapiszHistorieAgenta: () => {}, sesja: { email: 'admin@test.pl' },
+    tylkoCyfry: (value) => String(value || '').replace(/\D/g, ''),
+    agentAIZlecenia: [{ status: 'szkic', pozycje: [{ produktId: '55', kod: '55', nazwa: 'Produkt bez kodu', ilosc: 2 }] }],
+    agentAIBrakiOperacyjne: () => [],
+    produktMagazynowy: () => ({}),
+    csvPole: (value) => String(value ?? ''),
+    esc: (value) => String(value ?? ''),
+    pobierzPlik: (...args) => downloads.push(args),
+    agentAIOtworzModal: (...args) => modals.push(args),
+    toast: () => {},
+    zapiszHistorieAgenta: () => {},
   };
-  vm.runInNewContext(`${reconcile}\nthis.reconcile=agentAIUtworzZlecenieProducenta;`, context);
-  assert.equal(context.reconcile('braki', { dostawca: 'Alexander' }), null);
-  required = 7;
-  assert.equal(context.reconcile('braki', { dostawca: 'Alexander' }).pozycje[0].ilosc, 7);
-  assert.equal(context.agentAIZlecenia[0].pozycje[0].ilosc, 7);
-  assert.equal(context.reconcile('braki', { dostawca: 'Alexander' }), null);
+  vm.runInNewContext(`${fragment('function agentAIEanPoprawny', 'let agentAIModalPoprzedniFocus')}
+${fragment('function agentAIPlanDokumentAktywny', 'function agentAIPlanDokumentPasuje')}
+${fragment('function agentAIPlanWierszeEksportu', 'function magazynBrakiDostawcyHTML')}
+this.runExport=eksportujTabeleOperacyjnaMagazynuCSV;`, context);
+  assert.equal(context.runExport(), false);
+  assert.equal(downloads.length, 0);
+  assert.equal(modals.length, 1);
+  assert.match(modals[0][0], /wymaga uzupełnienia kodów/);
+  assert.match(modals[0][1], /Produkt bez kodu/);
+});
+
+test('Plan zatowarowania jest jedynym pełnym centrum dokumentów producentów', () => {
+  assert.doesNotMatch(source, /#\/admin\/agent-ai\/zlecenia/);
+  assert.doesNotMatch(ordersSource, /#\/admin\/agent-ai\/zlecenia/);
+  assert.doesNotMatch(inventorySource, /#\/admin\/agent-ai\/zlecenia/);
+  assert.doesNotMatch(`${source}\n${ordersSource}\n${inventorySource}`, /#\/admin\/zamowienia\/tabela/);
+  assert.match(routerSource, /t==="\/admin\/agent-ai\/zlecenia"[\s\S]*?#\/admin\/magazyn\/plan/);
+  assert.match(routerSource, /t==="\/admin\/zamowienia\/tabela"[\s\S]*?#\/admin\/magazyn\/plan/);
+  assert.doesNotMatch(ordersSource, /magazynTabelaOperacyjnaHTML\s*\(/);
+  const planFrom = inventorySource.indexOf('function magazynPlanZatowarowaniaHTML');
+  const planTo = inventorySource.indexOf('function odswiezPlanZatowarowaniaWidoku', planFrom);
+  assert.ok(planFrom >= 0 && planTo > planFrom);
+  const plan = inventorySource.slice(planFrom, planTo);
+  assert.equal((plan.match(/magazynTabelaOperacyjnaHTML\(\)/g) || []).length, 1);
+  assert.equal((source.match(/magazynTabelaOperacyjnaHTML\s*\(/g) || []).length, 1, 'poza definicją nie może być drugiego renderu');
+  assert.match(ordersSource, /href:"#\/admin\/magazyn\/plan",label:"📦 Plan zatowarowania"/);
+});
+
+test('uzgadnianie i anulowanie szkicu mają wyłącznie kanoniczne akcje serwerowe', () => {
+  const reconcile = fragment('let agentAIPlanUzgadnianie', 'async function agentAIZatwierdzZlecenie');
+  const cancel = fragment('async function agentAIUsunZlecenie', 'function agentAIPobierzZlecenieCSV');
+  assert.match(reconcile, /chmura\("supplier-order-reconcile"/);
+  assert.match(cancel, /chmura\("supplier-order-cancel"/);
+  assert.match(cancel, /expectedRevision/);
+  assert.doesNotMatch(source, /function agentAIUtworzZlecenieProducenta|function agentAIUtworzZleceniaWedlugDostawcow/);
+  assert.doesNotMatch(source, /function agentAIZmienStatusZlecenia/);
+  assert.doesNotMatch(source, /function (?:agentAIDaneZleceniaDoEmaila|agentAIZmienPozycjeZlecenia|wierszeOperacyjneMagazynu|akcjaWierszaOperacyjnegoHTML)/);
+  assert.doesNotMatch(`${cloudSource}\n${shippingSource}`, /agentAIUtworzZleceniaWedlugDostawcow/);
+  assert.doesNotMatch(reconcile, /agentAIPozycjeZleceniaProducenta|artway_agent_ai_zlecenia/);
+});
+
+test('wyszukiwanie Planu zachowuje focus i karetę bez pełnego renderu strony', () => {
+  const search = fragment('function agentAIPlanSzukajDokumenty', 'function agentAIPlanKartaDokumentuHTML');
+  const refreshFrom = inventorySource.indexOf('function odswiezPlanZatowarowaniaWidoku');
+  const refreshTo = inventorySource.indexOf('function widokAdminMagazyn', refreshFrom);
+  const refresh = inventorySource.slice(refreshFrom, refreshTo);
+  assert.match(search, /odswiezPlanZatowarowaniaWidoku\(\)/);
+  assert.doesNotMatch(search, /renderuj\(\)/);
+  assert.match(refresh, /selectionStart/);
+  assert.match(refresh, /setSelectionRange/);
+  assert.match(refresh, /focus\(\{preventScroll:true\}\)/);
+  assert.match(source, /id="supplierPlanSearch"/);
 });

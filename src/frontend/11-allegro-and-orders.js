@@ -1030,7 +1030,7 @@ function allegroZamowieniaTabelaHTML(){
     zBrakami:analizy.filter(a=>a.braki>0).length,
     doWyjasnienia:analizy.filter(a=>a.nierozpoznane>0||a.bezStanu>0||a.bezLokalizacji>0).length,
     brakiSzt:analizy.reduce((s,a)=>s+Number(a.braki||0),0),
-    dokumenty:(agentAIZlecenia||[]).filter(z=>!["zrealizowane","anulowane"].includes(String(z.status||"").toLowerCase())).length,
+    dokumenty:(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny).length,
     pozycje:wszystkiePozycje.length,
     rozpoznane:wszystkiePozycje.filter(p=>p.produkt).length,
     reczne:wszystkiePozycje.filter(p=>String(p.match||"").includes("ręczne")).length
@@ -1059,7 +1059,7 @@ function allegroZamowieniaTabelaHTML(){
     </div>
     <div class="allegro-order-list">${widoczneZamowienia.map(allegroZlecenieHTML).join("") || `<div class="backend-note">Brak zamówień w tym filtrze. Synchronizacja pobiera wyłącznie nowe i gotowe do wysłania.</div>`}</div>
     ${widoczneZamowienia.length>=allegroLimitWidokuZamowien?`<p class="order-detail-lead">Pokazano pierwsze ${allegroLimitWidokuZamowien} zleceń. Zwiększ limit widoku powyżej, aby zobaczyć więcej.</p>`:""}
-    <section class="allegro-stock-agent allegro-info-bottom"><div class="allegro-stock-agent-head"><div><b>🤖 Agent magazynowy i mapowanie produktów</b><small>Nowe zlecenia są sprawdzane co 15 minut. Agent łączy pozycje kolejno po ręcznym powiązaniu, EAN, SKU, kodzie producenta i jednoznacznej nazwie. Niepewne dopasowania zostawia do decyzji administratora.</small></div><a class="btn ghost" href="#/admin/agent-ai/zlecenia">🧾 Zamówienia producentów</a></div><div class="allegro-stock-agent-stats allegro-mapping-stats"><span><b>${agentStat.rozpoznane}/${agentStat.pozycje}</b><small>pozycji połączonych</small></span><span><b>${agentStat.reczne}</b><small>powiązań ręcznych</small></span><span><b>${agentStat.gotowe}</b><small>zleceń gotowych</small></span><span class="${agentStat.zBrakami?"alert":""}"><b>${agentStat.zBrakami}</b><small>z brakami (${agentStat.brakiSzt} szt.)</small></span><span class="${agentStat.doWyjasnienia?"warn":""}"><b>${agentStat.doWyjasnienia}</b><small>do wyjaśnienia</small></span></div></section>
+    <section class="allegro-stock-agent allegro-info-bottom"><div class="allegro-stock-agent-head"><div><b>🤖 Agent magazynowy i mapowanie produktów</b><small>Nowe zlecenia są sprawdzane co 15 minut. Agent łączy pozycje kolejno po ręcznym powiązaniu, EAN, SKU, kodzie producenta i jednoznacznej nazwie. Niepewne dopasowania zostawia do decyzji administratora.</small></div><a class="btn ghost" href="#/admin/magazyn/plan">📦 Plan zatowarowania</a></div><div class="allegro-stock-agent-stats allegro-mapping-stats"><span><b>${agentStat.rozpoznane}/${agentStat.pozycje}</b><small>pozycji połączonych</small></span><span><b>${agentStat.reczne}</b><small>powiązań ręcznych</small></span><span><b>${agentStat.gotowe}</b><small>zleceń gotowych</small></span><span class="${agentStat.zBrakami?"alert":""}"><b>${agentStat.zBrakami}</b><small>z brakami (${agentStat.brakiSzt} szt.)</small></span><span class="${agentStat.doWyjasnienia?"warn":""}"><b>${agentStat.doWyjasnienia}</b><small>do wyjaśnienia</small></span></div></section>
     <div class="backend-note allegro-info-bottom"><b>Status zamówienia jest wyłącznie z Allegro.</b> Lokalny etap możesz zmienić ręcznie, także na „Zrealizowane lokalnie”. Tak oznaczone zlecenie znika z kolejki „Do obsługi”, przestaje rezerwować stan i nie wraca do niej przy kolejnej synchronizacji.</div>
   </div>`;
 }
@@ -1072,7 +1072,7 @@ function allegroDecyzjaAgentaHTML(p={}){
   if(p.decyzja==="nierozpoznany")return `<span class="lvl lvl-blad">sprawdź EAN/SKU</span><br><small>Agent nie połączył pozycji z kartoteką.</small>`;
   if(p.decyzja==="sprawdz_stan")return `<span class="lvl lvl-ostrzezenie">ustal stan magazynowy</span><br><a href="#/admin/magazyn/stany">Otwórz stany produktów</a>`;
   if(p.decyzja==="uzupelnij_lokalizacje")return `<span class="lvl lvl-ostrzezenie">uzupełnij lokalizację</span><br><a href="#/admin/produkty/edytuj/${encodeURIComponent(p.produkt?.id||"")}">Edytuj kartotekę</a>`;
-  if(p.decyzja==="zamow_u_producenta")return `<span class="lvl lvl-blad">zamówić ${esc(p.brak)} szt.</span><br><small>Dostawca: ${esc(p.dostawca||"nieprzypisany")}</small>${p.dokumentyProducenta?.length?`<br><a href="#/admin/agent-ai/zlecenia">🧾 ${esc(p.dokumentyProducenta.map(x=>x.numer).join(", "))}</a>`:`<br><small>Agent utworzy szkic producenta przy synchronizacji.</small>`}`;
+  if(p.decyzja==="zamow_u_producenta")return `<span class="lvl lvl-blad">zamówić ${esc(p.brak)} szt.</span><br><small>Dostawca: ${esc(p.dostawca||"nieprzypisany")}</small>${p.dokumentyProducenta?.length?`<br><a href="#/admin/magazyn/plan">🧾 ${esc(p.dokumentyProducenta.map(x=>x.numer).join(", "))}</a>`:`<br><small>Agent utworzy szkic producenta przy synchronizacji.</small>`}`;
   return `<span class="lvl lvl-ok">pobierz z magazynu</span><br><b>📍 ${esc(nazwaLokalizacjiMagazynu(p.lokalizacja))}</b>`;
 }
 function allegroMapowaniePozycjiHTML(p={}){
@@ -1551,12 +1551,13 @@ function adminSubnavHTML(items, aktywny){
 function magazynSubnavHTML(aktywny="pulpit"){
   const plan=potrzebyZatowarowania(),braki=plan.length;
   const bezLok=plan.filter(x=>!x.meta?.lokalizacja).length;
+  const dokumenty=(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny).length,planAkcje=braki+dokumenty;
   return adminSubnavHTML([
     {id:"pulpit",href:"#/admin/magazyn",label:"📊 Pulpit"},
     {id:"dostawcy",href:"#/admin/magazyn/dostawcy",label:"🏭 Dostępność producentów",badge:braki||""},
     {id:"stany",href:"#/admin/magazyn/stany",label:"📦 Stany produktów",badge:braki||""},
     {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",label:"🗺️ Lokalizacje",badge:bezLok||""},
-    {id:"plan",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:braki||""},
+    {id:"plan",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:planAkcje||""},
     {id:"ruchy",href:"#/admin/magazyn/ruchy",label:"🧾 Ruchy i ustawienia"}
   ],aktywny);
 }
@@ -1575,7 +1576,7 @@ function agentAISubnavHTML(aktywny="pulpit"){
   const aktywneZadania=agentAIAnalizaAktywna(analiza),problemy=aktywneZadania.length;
   const plan=aktywneZadania.length;
   const produktyWdrozenie=agentAIProduktyWdrozenie().length;
-  const zlecenia=(agentAIZlecenia||[]).filter(z=>!agentAIStatusZamknietyDlaNowejWersji(z.status)).length;
+  const zlecenia=(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny).length;
   const producenciGotowi=(producenciKartoteka||[]).filter(p=>p.active!==false&&p.orderEmail).length;
   const pamiec=(agentAIPamiec||[]).length;
   return adminSubnavHTML([
@@ -1583,7 +1584,7 @@ function agentAISubnavHTML(aktywny="pulpit"){
     {id:"komendy",href:"#/admin/agent-ai/komendy",label:"💬 Komendy"},
     {id:"plan",href:"#/admin/agent-ai/plan",label:"🧭 Plan operacyjny",badge:plan||""},
     {id:"produkty",href:"#/admin/agent-ai/produkty",label:"✨ Nowe produkty",badge:produktyWdrozenie||""},
-    {id:"zlecenia",href:"#/admin/agent-ai/zlecenia",label:"📑 Zlecenia i tabela",badge:zlecenia||""},
+    {id:"zakupy",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:zlecenia||""},
     {id:"producenci",href:"#/admin/agent-ai/producenci",label:"🏭 Producenci i kontakt",badge:producenciGotowi||""},
     {id:"telegram",href:"#/admin/agent-ai/telegram",label:"✈️ Telegram",badge:agentAITelegram.stats?.critical||""},
     {id:"pamiec",href:"#/admin/agent-ai/pamiec",label:"🧠 Pamięć",badge:pamiec||""},
@@ -1672,7 +1673,7 @@ function allegroSubnavHTML(aktywny="start"){
     {id:"rentownosc",href:"#/admin/allegro/rentownosc",label:"📈 Opłacalność"},
     {id:"wiadomosci",href:"#/admin/allegro/wiadomosci",label:"💬 Wiadomości",badge:st.threadNeed||""},
     {id:"dyskusje",href:"#/admin/allegro/dyskusje",label:"🛟 Dyskusje",badge:st.issueNeed||""},
-    {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"},
+    {id:"tabela",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania"},
     {id:"zgodnosc",href:"#/admin/allegro/zgodnosc",label:"🛡️ Zgodność",badge:naruszenia||""},
     {id:"ustawienia",href:"#/admin/allegro/ustawienia",label:"⚙️ Ustawienia"}
   ],aktywny);
@@ -1913,7 +1914,7 @@ function alertDostepnosciZamowieniaHTML(z){
 function adminZaopatrzenieZamowieniaDane(z={}){
   const nr=String(z.nr||""),rezerwacje=typeof rezerwacjeMagazynowe==="function"?rezerwacjeMagazynowe():{},plan=typeof planZatowarowania==="function"?planZatowarowania():[];
   const planMap=new Map(plan.map(x=>[String(x?.produkt?.id??""),x]));
-  const dokumenty=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).filter(doc=>String(doc?.status||"").toLowerCase()!=="anulowane");
+  const dokumenty=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).filter(agentAIPlanDokumentAktywny);
   return (Array.isArray(z.pozycjeDane)?z.pozycjeDane:[]).map(item=>{
     const id=String(item?.id??item?.produktId??""),produkt=typeof produktMagazynowy==="function"?produktMagazynowy(id):null,stan=typeof stanMagazynuId==="function"?stanMagazynuId(id):null,sugestia=planMap.get(id)||{};
     let dokument=null,pozycja=null;
@@ -1929,7 +1930,7 @@ function adminZaopatrzenieZamowieniaHTML(z={}){
   const rows=adminZaopatrzenieZamowieniaDane(z),braki=rows.filter(x=>x.brak>0),docs=[...new Map(rows.filter(x=>x.dokument).map(x=>[String(x.dokument.id),x.dokument])).values()];
   const statusDoc=docs.length?docs.map(d=>`${d.numer||d.id}: ${d.status||"szkic"}`).join(" • "):braki.length?"Szkic tworzy się automatycznie po synchronizacji":"Nie jest potrzebne zamówienie u producenta";
   return `<section class="order-detail-card order-procurement-card">
-    <div class="order-section-head"><div><span class="order-pro-label">Magazyn → producent</span><h2>🏭 Kontrola realizacji produktów</h2><p class="order-detail-lead">Stan jest sprawdzany dla całej aktywnej kolejki. Zamawiamy wyłącznie rzeczywisty brak, a wysyłka do producenta czeka na zatwierdzenie aktualnej wersji.</p></div><a class="btn ${braki.length?"":"ghost"}" href="#/admin/agent-ai/zlecenia">${braki.length?"Otwórz szkic producenta":"Centrum zakupów"}</a></div>
+    <div class="order-section-head"><div><span class="order-pro-label">Magazyn → producent</span><h2>🏭 Kontrola realizacji produktów</h2><p class="order-detail-lead">Stan jest sprawdzany dla całej aktywnej kolejki. Zamawiamy wyłącznie rzeczywisty brak, a wysyłka do producenta czeka na zatwierdzenie aktualnej wersji.</p></div><a class="btn ${braki.length?"":"ghost"}" href="#/admin/magazyn/plan">${braki.length?"Otwórz szkic w Planie":"Plan zatowarowania"}</a></div>
     <div class="procurement-flow" aria-label="Etapy zaopatrzenia"><span class="done"><b>1</b> Stan sprawdzony</span><span class="${braki.length?"active":"done"}"><b>2</b> ${braki.length?`Brak ${braki.reduce((s,x)=>s+x.brak,0)} szt.`:"Pokrycie kompletne"}</span><span class="${docs.length?"active":""}"><b>3</b> ${docs.length?"Szkic producenta":"Bez szkicu"}</span><span class="${docs.some(d=>String(d.status||"").toLowerCase().includes("wysłane do"))?"done":""}"><b>4</b> Zatwierdź i wyślij</span></div>
     <div class="procurement-order-table"><table><thead><tr><th>Kod</th><th>Produkt</th><th>Zamówiono</th><th>Stan fizyczny</th><th>Rezerwacje</th><th>Brak łączny</th><th>Lokalizacja / dokument</th></tr></thead><tbody>${rows.map(x=>`<tr class="${x.brak>0?"needs-order":"stock-covered"}"><td><b>${esc(x.kod)}</b></td><td>${esc(x.nazwa)}</td><td>${x.qty} szt.</td><td>${x.stan===null?"niemonitorowany":`${x.stan} szt.`}</td><td>${x.rezerwacje} szt.</td><td>${x.brak>0?`<span class="lvl lvl-ostrzezenie">${x.brak} szt.</span>`:`<span class="lvl lvl-ok">0</span>`}</td><td>${x.lokalizacja?`📍 ${esc(x.lokalizacja)}<br>`:""}<small>${x.dokument?`${esc(x.dokument.numer||x.dokument.id)} • ${esc(x.dokument.status||"szkic")}`:(x.brak?"oczekuje na szkic":"zapas wystarcza")}</small></td></tr>`).join("")||`<tr><td colspan="7">Brak pozycji magazynowych w zamówieniu.</td></tr>`}</tbody></table></div>
     <div class="backend-note ${braki.length?"":"is-ok"}"><b>${braki.length?"Dalszy etap:":"Wynik kontroli:"}</b> ${esc(statusDoc)}. ${braki.length?"Najpierw sprawdź tabelę i zatwierdź dokładną rewizję; dopiero potem system pozwoli wysłać e-mail do właściwego producenta.":"Produkty można przekazać do kompletacji bez tworzenia zlecenia zakupowego."}</div>
@@ -2038,7 +2039,7 @@ function adminZamowieniaSubnavHTML(aktywny="lista"){
   return adminSubnavHTML([
     {id:"lista",href:"#/admin/zamowienia",label:"📦 Lista sklepu",badge:sklep.length||""},
     {id:"allegro",href:"#/admin/allegro/zamowienia",label:"🟠 Zamówienia Allegro",badge:allegroAktywne||""},
-    {id:"tabela",href:"#/admin/zamowienia/tabela",label:"📑 Tabela operacyjna"},
+    {id:"tabela",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania"},
     {id:"wysylki",href:"#/admin/wysylki",label:"🚚 Wysyłki i etykiety",badge:doWysylki||""}
   ],aktywny);
 }
@@ -2084,24 +2085,6 @@ function widokAdminZamowienia(){
       ${zam.length ? zam.map(kartaAdminZamowieniaHTML).join("") : `<div class="order-empty"><b>Brak zamówień dla tego widoku.</b><br>Zmień filtr albo wyczyść wyszukiwarkę.</div>`}
     </div>
   </div>`);
-}
-function widokAdminZamowieniaTabela(){
-  return adminSzkielet("/admin/zamowienia", `
-  ${adminZamowieniaSubnavHTML("tabela")}
-  ${magazynTabelaOperacyjnaHTML({limit:420})}
-  <div class="panel orders-page">
-    <div class="orders-hero">
-      <div>
-        <span class="order-pro-label">Tabela operacyjna</span>
-        <h1>📑 Braki i zamówienia do producentów</h1>
-        <p>Pełna tabela operacyjna pozostaje w panelu. Wiadomość wysyłana do Telegrama zawiera wyłącznie: kod, nazwę produktu i potrzebną ilość.</p>
-      </div>
-      <div class="diag-actions">
-        <a class="btn ghost" href="#/admin/zamowienia">← Lista zamówień</a>
-      </div>
-    </div>
-  </div>
-  `);
 }
 function widokAdminZamowienie(nr){
   const z = pobierzZamowienia().find(x=>x.nr===nr);

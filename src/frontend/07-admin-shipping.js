@@ -679,7 +679,6 @@ async function automatycznaSynchronizacjaChmury(powod="timer"){
     const allegroOk=typeof allegroOdswiezDaneZSerweraJesliCzas==="function"?await allegroOdswiezDaneZSerweraJesliCzas(powod):false;
     if(ok){
       zastosujUstawienia(); zbudujProdukty();
-      if(chmuraToken)agentAIUtworzZleceniaWedlugDostawcow("",{silent:true,automatic:true});
       odswiezMenu(); odswiezKoszyk();
       odswiezPoCichejSynchronizacji();
     }else if(allegroOk){

@@ -28,23 +28,74 @@ export function validGtin(value = '') {
   return (10 - (sum % 10)) % 10 === expected ? digits : '';
 }
 
-function verifiedManufacturerCode(row = {}) {
+const businessIdentifier = (value) => {
+  const candidate = text(value, 80).trim();
+  if (!candidate || /^(?:-|—|brak|n\/a|null|undefined)$/i.test(candidate)) return '';
+  // Nie eksportujemy połączonych wariantów typu „2387 lub SL2871”. Taki
+  // identyfikator nie wskazuje jednoznacznie jednej kartoteki w Optimie.
+  if (/\b(?:lub|albo|or)\b/i.test(candidate)) return '';
+  return /^[\p{L}\p{N}][\p{L}\p{N}._\/-]{0,79}$/u.test(candidate) ? candidate : '';
+};
+
+const nested = (row, field) => [row, row?.product, row?.produkt]
+  .map((source) => source?.[field])
+  .find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+
+const firstNested = (row, fields = []) => fields.map((field) => nested(row, field))
+  .find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+
+/**
+ * Wybiera biznesowy identyfikator produktu do tabeli zamówienia i pliku
+ * Optimy. Kolejność jest stała: EXTERNAL_ID → SKU → kod producenta →
+ * jawny kod katalogowy → EAN/GTIN. Lokalne `id`/`produktId` nigdy nie jest
+ * samodzielnym kandydatem. Jawne EXTERNAL_ID, SKU i kod producenta pozostają
+ * kodami biznesowymi także wtedy, gdy tekstowo pokrywają się z lokalnym ID;
+ * tylko ogólne pola kodu muszą się od niego różnić.
+ */
+export function supplierProductIdentifier(row = {}) {
   const candidates = [
-    ['kodProducenta', row.kodProducenta],
-    ['mpn', row.mpn],
-    ['manufacturerCode', row.manufacturerCode],
-    ['producerCode', row.producerCode],
-    ['externalId', row.externalId],
-    ['sku', row.sku],
-    ['kod', row.kod],
+    ['external_id', nested(row, 'externalId')],
+    ['external_id', nested(row, 'external_id')],
+    ['external_id', nested(row, 'EXTERNAL_ID')],
+    ['sku', nested(row, 'sku')],
+    ['sku', nested(row, 'SKU')],
+    ['manufacturer_code', nested(row, 'kodProducenta')],
+    ['manufacturer_code', nested(row, 'mpn')],
+    ['manufacturer_code', nested(row, 'manufacturerCode')],
+    ['manufacturer_code', nested(row, 'manufacturer_code')],
+    ['manufacturer_code', nested(row, 'producerCode')],
   ];
-  for (const [field, candidate] of candidates) {
-    const value = text(candidate, 80).trim();
-    if (!value || /^(?:-|—|brak|n\/a)$/i.test(value) || /\b(?:lub|albo|or)\b/i.test(value)) continue;
-    if (field === 'kod' && value === text(row.produktId || row.productId, 80).trim()) continue;
-    if (/^[\p{L}\p{N}][\p{L}\p{N}._\/-]{0,79}$/u.test(value)) return value;
+  const internalIds = new Set([
+    row?.id, row?.produktId, row?.productId, row?.product_id, row?.internalId, row?.localId,
+    row?.product?.id, row?.product?.productId, row?.produkt?.id, row?.produkt?.produktId,
+  ].map((value) => text(value, 80).trim().toUpperCase()).filter(Boolean));
+  for (const [source, raw] of candidates) {
+    const value = businessIdentifier(raw);
+    if (!value) continue;
+    return { value, source };
   }
-  return '';
+  const fallbackCandidates = [
+    ['supplier_code', nested(row, 'supplierCode')],
+    ['supplier_code', nested(row, 'kodDostawcy')],
+    ['supplier_code', nested(row, 'catalogCode')],
+    ['supplier_code', nested(row, 'towarCode')],
+    ['stable_code', nested(row, 'kod')],
+    ['stable_code', nested(row, 'code')],
+  ];
+  for (const [source, raw] of fallbackCandidates) {
+    const value = businessIdentifier(raw);
+    if (!value || internalIds.has(value.toUpperCase())) continue;
+    return { value, source };
+  }
+  const gtin = ['ean', 'gtin', 'EAN', 'GTIN']
+    .map((field) => validGtin(nested(row, field)))
+    .find(Boolean) || '';
+  if (gtin) return { value: gtin, source: 'gtin' };
+  return { value: '', source: '' };
+}
+
+function supplierTableIdentifier(row = {}) {
+  return supplierProductIdentifier(row);
 }
 
 const decimal = (value, minimum = 0) => {
@@ -53,24 +104,28 @@ const decimal = (value, minimum = 0) => {
 };
 
 const safeFilenamePart = (value, fallback) => producerKey(value).slice(0, 80) || fallback;
+export const OPTIMA_IMPORT_INSTRUCTION = 'Otwórz dokument → Ogólne → Kolektor danych → Importuj pozycje';
 
 /**
- * Plik tekstowy importowany w Comarch ERP Optima jako: TOWAR;ILOŚĆ;CENA.
- * Plik celowo nie ma wiersza nagłówkowego. Pozycja bez pewnego identyfikatora
- * nie jest zgadywana i trafia do raportu missingIdentifiers.
+ * Plik tekstowy dla operacji: otwarty dokument → Ogólne → Kolektor danych →
+ * Importuj pozycje. Każdy wiersz ma trzy pola `TOWAR;ILOŚĆ;CENA`, ponieważ
+ * tego układu oczekuje istniejący proces Kolektora. Pole CENA zawsze pozostaje
+ * puste, więc producent nie otrzymuje ceny ani wartości zamówienia. Plik nie
+ * ma wiersza nagłówkowego. Pozycja bez pewnego identyfikatora nie jest
+ * zgadywana i trafia do raportu missingIdentifiers.
  */
 export function buildComarchOptimaTxt(rows = [], { orderNumber = '', supplierName = '' } = {}) {
   const lines = [];
   const missingIdentifiers = [];
   for (const [index, row] of (Array.isArray(rows) ? rows : []).entries()) {
-    const identifier = validGtin(row.ean || row.gtin) || verifiedManufacturerCode(row);
-    if (!identifier) {
+    const identifier = supplierProductIdentifier(row);
+    if (!identifier.value) {
       missingIdentifiers.push({
         row: index + 1,
         name: text(row.nazwa || row.name || 'Produkt', 300).trim(),
-        code: text(row.kod || row.kodProducenta || row.mpn, 80).trim(),
+        code: text(row.externalId || row.external_id || row.sku || row.kodProducenta || row.mpn || row.kod, 80).trim(),
         ean: text(row.ean || row.gtin, 40).trim(),
-        reason: 'Brak poprawnego EAN lub jednoznacznego kodu producenta',
+        reason: 'Brak jednoznacznego EXTERNAL_ID, SKU, kodu producenta, kodu katalogowego lub poprawnego EAN/GTIN',
       });
       continue;
     }
@@ -79,12 +134,16 @@ export function buildComarchOptimaTxt(rows = [], { orderNumber = '', supplierNam
     // Cena jest w Optimie opcjonalna. Zamówienia Artway-TM do producentów
     // nigdy nie przekazują cen ani wartości, dlatego trzecie pole pozostaje
     // świadomie puste również wtedy, gdy kartoteka ma cenę zakupu.
-    lines.push(`${identifier};${decimal(amount, 0)};`);
+    lines.push(`${identifier.value};${decimal(amount, 0)};`);
   }
   const filename = `zamowienie-optima-${safeFilenamePart(supplierName, 'producent')}-${safeFilenamePart(orderNumber, 'zamowienie')}.txt`;
   const content = lines.length ? `\uFEFF${lines.join('\r\n')}` : '';
   return {
     format: 'TOWAR;ILOŚĆ;CENA',
+    delimiter: ';',
+    columns: ['TOWAR', 'ILOŚĆ', 'CENA'],
+    priceColumnEmpty: true,
+    importInstruction: OPTIMA_IMPORT_INSTRUCTION,
     header: false,
     filename,
     content,
@@ -99,24 +158,58 @@ function supplierRows(order = {}, supplier = {}) {
   const family = producerFamily(name);
   return (Array.isArray(order?.pozycje) ? order.pozycje : [])
     .filter((row) => !name || producerFamily(row?.dostawca) === family)
-    .map((row) => ({
-      dostawca: text(row?.dostawca || name, 120).trim(),
-      kod: text(row?.kodProducenta || row?.mpn || row?.manufacturerCode || row?.externalId || row?.sku || row?.kod || '—', 80).trim() || '—',
-      ean: text(row?.ean || row?.gtin, 80).trim(),
-      nazwa: text(row?.nazwa || row?.name || 'Produkt', 300).trim(),
-      ilosc: Math.max(0, Number(row?.ilosc ?? row?.quantity) || 0),
-    }))
-    .filter((row) => row.ilosc > 0)
-    .slice(0, 500);
+    .map((row) => {
+      const identifier = supplierTableIdentifier(row);
+      return {
+        dostawca: text(row?.dostawca || name, 120).trim(),
+        productId: text(firstNested(row, ['produktId', 'productId', 'id']), 160).trim(),
+        kod: identifier.value || '—',
+        identifierSource: identifier.source,
+        externalId: text(firstNested(row, ['externalId', 'external_id', 'EXTERNAL_ID']), 80).trim(),
+        sku: text(firstNested(row, ['sku', 'SKU']), 80).trim(),
+        kodProducenta: text(firstNested(row, ['kodProducenta', 'mpn', 'manufacturerCode', 'manufacturer_code', 'producerCode']), 80).trim(),
+        ean: text(firstNested(row, ['ean', 'gtin', 'EAN', 'GTIN']), 40).trim(),
+        nazwa: text(row?.nazwa || row?.name || 'Produkt', 300).trim(),
+        ilosc: Math.max(0, Number(row?.ilosc ?? row?.quantity) || 0),
+      };
+    })
+    .filter((row) => row.ilosc > 0);
 }
 
 function minimalOrderEmail({ rows, number, name, to, subject, includeOptima = false }) {
   const textRows = rows.map((row) => `${row.kod} | ${row.nazwa} | ${decimal(row.ilosc)}`).join('\n');
-  const plain = `Cześć,\n\nDzisiejsze zamówienie:\n\nKod | Nazwa | Zamawiana ilość\n${textRows}\n\nPozdrowienia dla całej ekipy!\nArtway-TM`;
-  const table = rows.map((row) => `<tr><td style="padding:12px 14px;border-bottom:1px solid #e5e7eb;font-weight:700;white-space:nowrap">${escapeHtml(row.kod)}</td><td style="padding:12px 14px;border-bottom:1px solid #e5e7eb">${escapeHtml(row.nazwa)}</td><td style="padding:12px 14px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:800;white-space:nowrap">${escapeHtml(decimal(row.ilosc))}</td></tr>`).join('');
-  const html = `<!doctype html><html lang="pl"><body style="margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#172033"><div style="max-width:720px;margin:0 auto;padding:28px 14px"><div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:26px;box-shadow:0 8px 30px rgba(15,23,42,.06)"><p style="font-size:17px;margin:0 0 20px">Cześć,</p><p style="font-size:17px;margin:0 0 18px"><b>Dzisiejsze zamówienie:</b></p><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden"><thead><tr style="background:#f1f5f9;text-align:left"><th style="padding:11px 14px">Kod</th><th style="padding:11px 14px">Nazwa</th><th style="padding:11px 14px;text-align:center">Zamawiana ilość</th></tr></thead><tbody>${table}</tbody></table></div><p style="margin:24px 0 0;line-height:1.65">Pozdrowienia dla całej ekipy!<br><b>Artway-TM</b></p></div></div></body></html>`;
   const optima = includeOptima ? buildComarchOptimaTxt(rows, { orderNumber: number, supplierName: name }) : null;
+  const optimaPlain = optima?.attachment
+    ? `\n\nW załączniku znajduje się plik TXT z pozycjami zamówienia do Comarch ERP Optima.\nImport: ${OPTIMA_IMPORT_INSTRUCTION}.`
+    : '';
+  const plain = `Cześć,\n\nDzisiejsze zamówienie:\n\nIdentyfikator produktu | Nazwa | Zamawiana ilość\n${textRows}${optimaPlain}\n\nPozdrowienia dla całej ekipy!\nArtway-TM`;
+  const table = rows.map((row) => `<tr><td style="padding:12px 14px;border-bottom:1px solid #e5e7eb;font-weight:700;white-space:nowrap">${escapeHtml(row.kod)}</td><td style="padding:12px 14px;border-bottom:1px solid #e5e7eb">${escapeHtml(row.nazwa)}</td><td style="padding:12px 14px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:800;white-space:nowrap">${escapeHtml(decimal(row.ilosc))}</td></tr>`).join('');
+  const optimaHtml = optima?.attachment
+    ? `<div style="margin-top:20px;padding:16px 18px;border-radius:12px;background:#f8fafc;border:1px solid #dbe3ee;line-height:1.55"><b>Plik do Comarch ERP Optima</b><br>W załączniku znajduje się plik TXT z pozycjami zamówienia.<br><span style="color:#475569">Import: ${escapeHtml(OPTIMA_IMPORT_INSTRUCTION)}.</span></div>`
+    : '';
+  const html = `<!doctype html><html lang="pl"><body style="margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#172033"><div style="max-width:720px;margin:0 auto;padding:28px 14px"><div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:26px;box-shadow:0 8px 30px rgba(15,23,42,.06)"><p style="font-size:17px;margin:0 0 20px">Cześć,</p><p style="font-size:17px;margin:0 0 18px"><b>Dzisiejsze zamówienie:</b></p><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden"><thead><tr style="background:#f1f5f9;text-align:left"><th style="padding:11px 14px">Identyfikator produktu</th><th style="padding:11px 14px">Nazwa</th><th style="padding:11px 14px;text-align:center">Zamawiana ilość</th></tr></thead><tbody>${table}</tbody></table></div>${optimaHtml}<p style="margin:24px 0 0;line-height:1.65">Pozdrowienia dla całej ekipy!<br><b>Artway-TM</b></p></div></div></body></html>`;
   return { name, to, rows, subject, text: plain, html, optima, attachments: optima?.attachment ? [optima.attachment] : [] };
+}
+
+/** Walidacja kompletności wykonywana przed jakąkolwiek próbą SMTP. */
+export function validateSupplierOrderEmail(item = {}) {
+  const rows = Array.isArray(item.rows) ? item.rows : [];
+  const missingTableIdentifiers = rows.filter((row) => !businessIdentifier(row?.kod)).map((row) => text(row?.nazwa || 'Produkt', 300));
+  const requiresOptima = ['alexander', 'multigra'].includes(producerFamily(item.name));
+  const missingOptimaIdentifiers = (Array.isArray(item.optima?.missingIdentifiers) ? item.optima.missingIdentifiers : [])
+    .map((row) => text(row?.name || 'Produkt', 300));
+  const errors = [];
+  if (!text(item.name, 160).trim()) errors.push('Brak nazwy producenta');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text(item.to, 300).trim())) errors.push('Brak poprawnego e-maila producenta');
+  if (!rows.length) errors.push('Brak pozycji producenta');
+  if (missingTableIdentifiers.length) errors.push('Pozycje bez biznesowego identyfikatora');
+  if (requiresOptima && (missingOptimaIdentifiers.length || (rows.length > 0 && !item.optima?.attachment))) errors.push('Niekompletny plik Comarch ERP Optima');
+  return {
+    ok: errors.length === 0,
+    errors,
+    missingIdentifiers: [...new Set([...missingTableIdentifiers, ...missingOptimaIdentifiers])],
+    requiresOptima,
+  };
 }
 
 export function renderSupplierOrderEmail(order = {}, supplier = {}) {
@@ -128,8 +221,9 @@ export function renderSupplierOrderEmail(order = {}, supplier = {}) {
   // wprowadzić cenę lub wartość, których producent nigdy nie powinien dostać.
   const subject = `Zamówienie ${number} — Artway-TM`;
   const common = { rows, number, name, to, subject };
-  return minimalOrderEmail({
+  const rendered = minimalOrderEmail({
     ...common,
     includeOptima: ['alexander', 'multigra'].includes(producerFamily(name)),
   });
+  return { ...rendered, validation: validateSupplierOrderEmail(rendered) };
 }

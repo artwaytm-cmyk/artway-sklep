@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { supplierProductIdentifier } from './supplier-order-email.mjs';
 
 const DEFAULT_SETTINGS = Object.freeze({
   enabled: true,
@@ -205,8 +206,8 @@ export function telegramCell(value, width) {
 }
 
 export function telegramSupplierTables(order = {}, onlySupplier = '') {
-  const rows = (Array.isArray(order?.pozycje) ? order.pozycje : []).slice(0, 500).map((item) => ({
-    code: text(item?.kodProducenta || item?.mpn || item?.externalId || item?.sku || item?.kod || '—', 80).trim(),
+  const rows = (Array.isArray(order?.pozycje) ? order.pozycje : []).map((item) => ({
+    code: text(supplierProductIdentifier(item).value || 'BRAK KODU', 80).trim(),
     name: text(item?.nazwa || 'Produkt', 180).trim(),
     quantity: Math.max(0, Number(item?.iloscPotrzebna ?? item?.ilosc) || 0),
     supplier: text(item?.dostawca || 'Bez przypisanego dostawcy', 120).trim() || 'Bez przypisanego dostawcy',

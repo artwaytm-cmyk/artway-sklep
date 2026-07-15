@@ -64,9 +64,9 @@ test('zamówienie klienta przechodzi stan → realny brak → szkic → zatwierd
     orderEmail: 'zamowienia@example.test',
   });
   assert.match(mail.text, /1410 \| Ziemniak 1410 \| 2/);
-  assert.doesNotMatch(mail.text, /EAN|cena|wartość|zł|5901234123457/i);
-  assert.doesNotMatch(mail.html, /EAN|cena|wartość|zł|5901234123457/i);
-  assert.equal(mail.optima.content, '\uFEFF5901234123457;2;');
+  assert.doesNotMatch(mail.text, /EAN|cena|wartość|zł/i);
+  assert.doesNotMatch(mail.html, /EAN|cena|wartość|zł/i);
+  assert.equal(mail.optima.content, '\uFEFF1410;2;');
   assert.doesNotMatch(mail.optima.content, /\d+[,.]\d{2}$/);
 });
 

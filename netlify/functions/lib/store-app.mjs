@@ -42,6 +42,7 @@ import { createInventoryNaturalCommandHandler } from './domain/inventory-command
 import { createInventoryDecisionService } from './domain/inventory-decisions.mjs';
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
+import { createSupplierOrderPlanService, preserveSupplierPlanOnGenericSettings } from './supplier-order-plan-service.mjs';
 import {
   buildContextualAllegroReply,
   fetchAllegroReplyHistory,
@@ -49,6 +50,7 @@ import {
   mergeAllegroReplyHistory,
 } from './domain/allegro-reply-assistant.mjs';
 import { createStoreOrderSupplierReconciliation } from './store-order-supplier-reconciliation.mjs';
+import { markAllegroInventoryTransition, markAllegroInventoryTransitions, resolveAllegroBaselineCutover } from './domain/allegro-supplier-demand.mjs';
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
 import { createInventoryStockRoute } from './inventory-route.mjs';
 import { createProductLinkImportBundle } from './product-link-import-route.mjs';
@@ -146,6 +148,12 @@ const storeOrderSupplierReconciliation = createStoreOrderSupplierReconciliation(
   orderLimit: LIMIT_ZAMOWIEN,
   settingsLimit: LIMIT_USTAWIEN,
 });
+const supplierOrderPlan = createSupplierOrderPlanService({
+  readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,
+  mergeSettings: (data) => productLinkImport.mergeSettings(data),
+  catalogProducts: (data) => mergeCatalogProducts(data).products,
+  settingsLimit: LIMIT_USTAWIEN,
+});
 
 function czyAdmin(request, url) {
   return czyAdminToken(request, url) || requestSession(request)?.role === 'admin';
@@ -233,6 +241,11 @@ function agentPriorytetWykonawczy(priority = {}) {
   else if (title.includes('linki producentów')) key = 'producer_link_check';
   return definitions[key];
 }
+function supplierOrderHasActiveContent(draft = {}) {
+  const status = String(draft?.status || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').trim();
+  if (['zrealizowane', 'anulowane', 'wyczyszczone', 'zastapione', 'zamkniete'].includes(status)) return false;
+  return (Array.isArray(draft?.pozycje) ? draft.pozycje : []).some((line) => Math.max(0, Number(line?.ilosc) || 0) > 0);
+}
 async function agentCentrumOperacyjne() {
   const [settingsRec, ordersRec, allegroOrdersRec, communicationRec, offerErrorRec, infaktLinksRec, catalogQualityRec] = await Promise.all([
     czytaj('settings', { data: {}, updated_at: null }), czytaj('orders', { items: [] }), czytaj('allegro_orders', { items: [] }),
@@ -249,7 +262,7 @@ async function agentCentrumOperacyjne() {
   const supplierNeedsDecision = [...supplierUnavailable, ...supplierLow].filter((p) => { const d = availabilityDecisions[String(p.id)] || {}, code = String(d.decision || d.decyzja || ''), expires = Date.parse(d.expiresAt || d.waznaDo || ''); return !code || (code === 'grace' && Number.isFinite(expires) && expires <= Date.now()); });
   const producerLinks = (Array.isArray(data.artway_agent_ai_linki_producentow) ? data.artway_agent_ai_linki_producentow : []).filter((x) => !['pobrano', 'zamkniete', 'zamknięte', 'usunieto', 'usunięto'].includes(String(x?.status || '').toLowerCase()));
   const offerTasks = (Array.isArray(data.artway_agent_ai_allegro_zadania) ? data.artway_agent_ai_allegro_zadania : []).filter((x) => !['zrealizowane', 'zamkniete', 'zamknięte', 'anulowane'].includes(String(x?.status || '').toLowerCase()));
-  const supplierOrders = (Array.isArray(data.artway_agent_ai_zlecenia) ? data.artway_agent_ai_zlecenia : []).filter((x) => !['zrealizowane', 'anulowane', 'wysłane do producenta', 'wysłane do dostawcy'].includes(String(x?.status || '').toLowerCase()));
+  const supplierOrders = (Array.isArray(data.artway_agent_ai_zlecenia) ? data.artway_agent_ai_zlecenia : []).filter((x) => supplierOrderHasActiveContent(x) && !['wysłane do producenta', 'wysłane do dostawcy'].includes(String(x?.status || '').toLowerCase()));
   const invoiceLinks = infaktLinksRec?.items && typeof infaktLinksRec.items === 'object' ? infaktLinksRec.items : {}, invoiceDrafts = Array.isArray(data.artway_faktury_szkice) ? data.artway_faktury_szkice : [];
   const companyOrdersWithoutInvoice = activeOrders.filter((x) => (x?.klient?.nip || x?.klient?.firma) && !invoiceLinks[numerZamowienia(x.nr)] && !invoiceDrafts.some((d) => numerZamowienia(d?.nrZamowienia) === numerZamowienia(x.nr)));
   const integrations = { email: !!emailPublicConfig().configured, telegram: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId), inpost: !!inpostPublicConfig().configured, allegro: !!(process.env.ALLEGRO_CLIENT_ID && process.env.ALLEGRO_CLIENT_SECRET), infakt: !!infaktPublicConfig().configured };
@@ -267,7 +280,7 @@ async function agentCentrumOperacyjne() {
   addPriority('warning', 'allegro', activeAllegro.length, 'Aktywne zamówienia Allegro do kontroli magazynowej', '#/admin/allegro/zamowienia', 'Sprawdź kompletację, braki i lokalizacje produktów.');
   addPriority('warning', 'producent', supplierLow.length, 'Niski stan produktów u producentów', '#/admin/magazyn/dostawcy', 'Kontroluj najpierw najlepiej sprzedające się produkty.');
   addPriority('warning', 'produkty', offerTasks.length, 'Otwarte zadania wystawiania produktów na Allegro', '#/admin/allegro/wystawianie', 'Uzupełnij wymagane dane i ponów wystawienie.');
-  addPriority('warning', 'producenci', supplierOrders.length, 'Otwarte dokumenty zamówień do producentów', '#/admin/agent-ai/zlecenia', 'Sprawdź aktualną rewizję przed zatwierdzeniem i wysyłką.');
+  addPriority('warning', 'producenci', supplierOrders.length, 'Otwarte dokumenty zamówień do producentów', '#/admin/magazyn/plan', 'Sprawdź aktualną rewizję przed zatwierdzeniem i wysyłką.');
   addPriority('warning', 'faktury', companyOrdersWithoutInvoice.length, 'Zamówienia firmowe nie mają jeszcze szkicu ani faktury', '#/admin/infakt/zamowienia', 'Sprawdź dane nabywcy i utwórz dokument w inFakt.');
   addPriority('info', 'produkty', producerLinks.length, 'Linki producentów czekają na pobranie danych', '#/admin/agent-ai/plan', 'Ponów analizę linków i uzupełnij kartoteki.');
   const qualitySummary = catalogQualityRec?.report?.summary || {};
@@ -1768,17 +1781,6 @@ function allegroAgentZlecenieAktywne(z = {}) {
     || z.agentHandled === true || z.localCompleted === true;
   return !['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(official) && !completedLocally;
 }
-function allegroAgentPodsumujDokument(z = {}) {
-  const pozycje = Array.isArray(z.pozycje) ? z.pozycje : [];
-  return {
-    ...z,
-    pozycje,
-    sztuk: pozycje.reduce((s, p) => s + Math.max(0, Number(p.ilosc) || 0), 0),
-    wartoscSzacowana: Number(pozycje.reduce((s, p) => s + Math.max(0, Number(p.ilosc) || 0) * Math.max(0, Number(p.cenaBrutto) || 0), 0).toFixed(2)),
-    dostawcy: [...new Set(pozycje.map((p) => tekst(p.dostawca || 'Bez przypisanego dostawcy', 120)))],
-    aktualizacja: new Date().toISOString(),
-  };
-}
 async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
   const [settingsRec, offersRec, mappingsRec] = await Promise.all([
     czytaj('settings', { data: {}, rev: 0, updated_at: null }),
@@ -1800,7 +1802,7 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
     const data = Date.parse(z.createdAt || z.firstFetchedAt || '');
     return Number.isFinite(data) && data >= swiezyLimit;
   }).map((z) => String(z.id || z.nr || '')));
-  const lineMatches = new Map(), reservations = new Map(), refs = new Map(), autoReservations = new Map(), autoRefs = new Map(), productDetails = new Map();
+  const lineMatches = new Map(), reservations = new Map();
   let autoMapped = 0;
   for (const z of aktywne) {
     const orderId = String(z.id || z.nr || '').trim();
@@ -1820,108 +1822,17 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
           autoMapped++;
         }
         reservations.set(match.id, (reservations.get(match.id) || 0) + quantity);
-        if (!refs.has(match.id)) refs.set(match.id, new Map());
-        refs.get(match.id).set(orderId, (refs.get(match.id).get(orderId) || 0) + quantity);
-        if (!productDetails.has(match.id)) productDetails.set(match.id, { line, offer, match });
-        if (automatyczneIds.has(orderId)) {
-          autoReservations.set(match.id, (autoReservations.get(match.id) || 0) + quantity);
-          if (!autoRefs.has(match.id)) autoRefs.set(match.id, new Map());
-          autoRefs.get(match.id).set(orderId, (autoRefs.get(match.id).get(orderId) || 0) + quantity);
-        }
       }
     }
     lineMatches.set(orderId, matched);
   }
-  let supplierOrders = Array.isArray(dane.artway_agent_ai_zlecenia) ? dane.artway_agent_ai_zlecenia.map((z) => ({ ...z, pozycje: Array.isArray(z.pozycje) ? z.pozycje.map((p) => ({ ...p })) : [] })) : [];
-  const aktywneDokumenty = supplierOrders.filter((z) => !['zrealizowane', 'anulowane'].includes(String(z.status || '').toLowerCase()));
-  const covered = new Map();
-  for (const z of aktywneDokumenty) for (const p of z.pozycje) {
-    const id = String(p.produktId || '').trim();
-    if (id) covered.set(id, (covered.get(id) || 0) + Math.max(0, (Number(p.ilosc) || 0) - (Number(p.przyjeto) || 0)));
-  }
-  const shortages = [];
-  for (const [productId, reserved] of autoReservations.entries()) {
-    const known = Object.prototype.hasOwnProperty.call(stany, productId) && stany[productId] !== '' && stany[productId] != null && Number.isFinite(Number(stany[productId]));
-    if (!known) continue;
-    const stock = Math.max(0, Number(stany[productId]) || 0), shortage = Math.max(0, reserved - stock), remaining = Math.max(0, shortage - (covered.get(productId) || 0));
-    if (!remaining) continue;
-    const product = products.get(productId) || { id: productId };
-    const meta = kartoteki[productId] && typeof kartoteki[productId] === 'object' ? kartoteki[productId] : {};
-    const detail = productDetails.get(productId) || {}, offer = detail.offer || {}, line = detail.line || {};
-    const orderRefs = [...(autoRefs.get(productId) || new Map()).entries()].map(([nr, qty]) => `Allegro ${nr} × ${qty}`).slice(0, 30);
-    shortages.push({
-      produktId: productId,
-      kod: tekst(product.sku || product.externalId || line.externalId || offer.externalId || offer.manufacturerCode || meta.kod || productId, 120),
-      ean: tekst(product.gtin || product.ean || offer.ean || offer.gtin || '', 80),
-      nazwa: tekst(product.nazwa || product.name || line.offerName || offer.name || `Produkt ${productId}`, 300),
-      kategoria: tekst(product.kategoria || '', 160),
-      ilosc: remaining,
-      iloscPotrzebna: remaining,
-      brakCalkowity: shortage,
-      juzZamowiono: covered.get(productId) || 0,
-      stan: stock,
-      rezerwacje: reserved,
-      dostepne: stock - reserved,
-      przyjeto: 0,
-      nadwyzka: 0,
-      lokalizacja: tekst(meta.lokalizacja || '', 120),
-      dostawca: tekst(meta.dostawca || 'Bez przypisanego dostawcy', 120) || 'Bez przypisanego dostawcy',
-      powod: `Zlecenia Allegro rezerwują ${reserved} szt.; stan ${stock}; brak ${shortage} szt.`,
-      zamowienia: orderRefs,
-      cenaBrutto: Math.max(0, Number(product.cenaZakupu || product.cena || product.price) || 0),
-      wartoscSzacowana: Number((remaining * Math.max(0, Number(product.cenaZakupu || product.cena || product.price) || 0)).toFixed(2)),
-    });
-  }
-  let dokumentyZmienione = 0;
-  const editable = new Set(['szkic', 'do sprawdzenia', 'zaakceptowane', 'wysłane na telegram']);
-  for (const shortage of shortages) {
-    let target = supplierOrders.find((z) => editable.has(String(z.status || 'szkic').toLowerCase()) && String(z.supplier || z.dostawcy?.[0] || z.pozycje?.[0]?.dostawca || 'Bez przypisanego dostawcy') === shortage.dostawca);
-    const partialBlocker = supplierOrders.find((z) => String(z.status || '').toLowerCase() === 'częściowo wysłane e-mailem' && String(z.supplier || z.dostawcy?.[0] || z.pozycje?.[0]?.dostawca || '') === shortage.dostawca);
-    if (!target && partialBlocker) continue;
-    if (!target) {
-      const now = new Date();
-      target = {
-        id: `AZ-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-        numer: `AZ/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(supplierOrders.length + 1).padStart(4, '0')}`,
-        typ: 'zlecenie-producent', tryb: 'braki', status: 'szkic', data: now.toISOString(), dataTxt: now.toLocaleString('pl-PL'), operator: 'Agent Allegro', pozycje: [],
-        supplier: shortage.dostawca, dostawcy: [shortage.dostawca], revision: 1,
-        uwagi: `Automatyczny dokument roboczy braków dla producenta: ${shortage.dostawca}. Kolejne braki są dopisywane do tej wersji aż do zatwierdzenia i wysłania e-mailem.`,
-      };
-      supplierOrders.unshift(target);
-    }
-    const previousStatus = String(target.status || 'szkic').toLowerCase();
-    const existing = target.pozycje.find((p) => String(p.produktId) === shortage.produktId);
-    if (existing) {
-      existing.ilosc = (Number(existing.ilosc) || 0) + shortage.ilosc;
-      existing.iloscPotrzebna = (Number(existing.iloscPotrzebna) || 0) + shortage.iloscPotrzebna;
-      existing.zamowienia = [...new Set([...(existing.zamowienia || []), ...shortage.zamowienia])].slice(0, 50);
-      existing.powod = shortage.powod;
-    } else target.pozycje.push(shortage);
-    target.revision = Math.max(1, Number(target.revision) || 1) + (existing || target.pozycje.length > 1 ? 1 : 0);
-    target.lastAutoUpdateAt = new Date().toISOString();
-    target.updateSource = 'agent-allegro-live';
-    if (target.telegramSentAt) { target.telegramLastSentAt = target.telegramSentAt; target.telegramSentAt = null; }
-    if (['zaakceptowane', 'wysłane na telegram'].includes(previousStatus)) {
-      target.status = 'do sprawdzenia';
-      target.approvedAt = null;
-      target.approvedBy = null;
-      target.approvalRevision = null;
-    }
-    target.historia = [...(Array.isArray(target.historia) ? target.historia : []), { at: target.lastAutoUpdateAt, type: 'auto-update', text: `Dopisano aktualny brak: ${shortage.nazwa} × ${shortage.ilosc}` }].slice(-100);
-    Object.assign(target, allegroAgentPodsumujDokument(target));
-    dokumentyZmienione++;
-  }
-  let refsZmienione = 0;
-  for (const z of supplierOrders) for (const p of z.pozycje || []) {
-    const orderRefs = [...(autoRefs.get(String(p.produktId)) || new Map()).entries()].map(([nr, qty]) => `Allegro ${nr} × ${qty}`);
-    if (orderRefs.length) {
-      const before = (p.zamowienia || []).length;
-      p.zamowienia = [...new Set([...(p.zamowienia || []), ...orderRefs])].slice(0, 50);
-      if (p.zamowienia.length !== before) refsZmienione++;
-    }
-  }
+  // Dokumenty producentów są wyłącznie odczytywane tutaj do prezentacji decyzji agenta.
+  // Jedynym silnikiem, który może je zmieniać, jest kanoniczny Plan zatowarowania.
+  const supplierOrders = Array.isArray(dane.artway_agent_ai_zlecenia)
+    ? dane.artway_agent_ai_zlecenia.map((z) => ({ ...z, pozycje: Array.isArray(z.pozycje) ? z.pozycje.map((p) => ({ ...p })) : [] }))
+    : [];
   const supplierDocsByProduct = new Map();
-  for (const z of supplierOrders.filter((x) => !['zrealizowane', 'anulowane'].includes(String(x.status || '').toLowerCase()))) for (const p of z.pozycje || []) {
+  for (const z of supplierOrders.filter(supplierOrderHasActiveContent)) for (const p of z.pozycje || []) {
     const id = String(p.produktId || '');
     if (!id) continue;
     if (!supplierDocsByProduct.has(id)) supplierDocsByProduct.set(id, []);
@@ -1949,15 +1860,15 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
     return { ...z, warehouseStage, warehouseStageUpdatedAt: now, agentReviewedAt: now, agentVersion: 'allegro-stock-agent-v1', agentAnalysis: { positions, nierozpoznane, bezStanu, bezLokalizacji, braki, gotowe: !nierozpoznane && !bezStanu && !bezLokalizacji && !braki } };
   });
   if (autoMapped) await zapisz('allegro_mappings', { items: mappings, updated_at: now });
-  if (dokumentyZmienione || shortages.length || refsZmienione) {
-    dane.artway_agent_ai_zlecenia = supplierOrders.slice(0, 1000);
-    const historia = Array.isArray(dane.artway_agent_ai_historia) ? dane.artway_agent_ai_historia : [];
-    historia.unshift({ id: `AI-${Date.now().toString(36)}`, typ: 'allegro-magazyn', opis: `Agent sprawdził ${aktywne.length} zleceń Allegro i dopisał ${shortages.length} braków z nowych zleceń do dokumentów producentów.`, data: now, dataTxt: new Date().toLocaleString('pl-PL'), operator: 'Agent Allegro', dane: { zlecenia: aktywne.length, noweDoAutomatyzacji: automatyczneIds.size, braki: shortages.length, dokumentyZmienione } });
-    dane.artway_agent_ai_historia = historia.slice(0, 500);
-    await zapisz('settings', { ...settingsRec, data: dane, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-  }
   const activeIds = new Set(aktywne.map((z) => String(z.id || z.nr || '')));
-  return { items: updatedItems, mappings, report: { reviewed: aktywne.length, autoEligible: automatyczneIds.size, autoMapped, shortagesAdded: shortages.length, supplierDocumentsChanged: dokumentyZmienione, supplierReferencesChanged: refsZmienione, unresolved: updatedItems.filter((z) => activeIds.has(String(z.id || z.nr || ''))).reduce((s, z) => s + Number(z.agentAnalysis?.nierozpoznane || 0) + Number(z.agentAnalysis?.bezStanu || 0), 0), ready: updatedItems.filter((z) => activeIds.has(String(z.id || z.nr || '')) && z.agentAnalysis?.gotowe).length, at: now } };
+  return { items: updatedItems, mappings, report: { reviewed: aktywne.length, autoEligible: automatyczneIds.size, autoMapped, shortagesAdded: 0, supplierDocumentsChanged: 0, supplierReferencesChanged: 0, unresolved: updatedItems.filter((z) => activeIds.has(String(z.id || z.nr || ''))).reduce((s, z) => s + Number(z.agentAnalysis?.nierozpoznane || 0) + Number(z.agentAnalysis?.bezStanu || 0), 0), ready: updatedItems.filter((z) => activeIds.has(String(z.id || z.nr || '')) && z.agentAnalysis?.gotowe).length, at: now } };
+}
+async function allegroZapisStanIMozeUzgodnijPlan(items = []) {
+  const inventory = await storeOrderSupplierReconciliation.finalizeAllegroInventorySafely(items);
+  const supplierReconciliation = inventory.ok
+    ? await storeOrderSupplierReconciliation.reconcileDraftsSafely()
+    : { ok: false, changed: false, pendingRetry: true, code: 'allegro_inventory_pending', error: 'Plan nie został przeliczony, dopóki stan wysłanych zleceń Allegro nie zostanie bezpiecznie zdjęty.', inventory };
+  return { inventory, supplierReconciliation };
 }
 async function allegroPrzeliczZamowieniaPoMapowaniu() {
   const rec = await czytaj('allegro_orders', { items: [], updated_at: null });
@@ -1966,7 +1877,8 @@ async function allegroPrzeliczZamowieniaPoMapowaniu() {
   const updated_at = new Date().toISOString();
   const zapis = { ...rec, items: result.items, updated_at, agent: result.report };
   await zapisz('allegro_orders', zapis);
-  return { orders: result.items, agent: result.report, updated_at };
+  const plan = await allegroZapisStanIMozeUzgodnijPlan(result.items);
+  return { orders: result.items, agent: result.report, ...plan, updated_at };
 }
 function allegroNormalizujOferte(o) {
   const price = o?.sellingMode?.price || o?.price || {};
@@ -5145,23 +5057,55 @@ export default async (req) => {
       return odpowiedz({ ok: true, allCompleted: results.every((x) => x.status === 'completed'), run, center });
     }
 
+    // ─── PLAN ZATOWAROWANIA: jedna serwerowa kolejka dokumentów producentów ───
+    if (['supplier-order-line-upsert', 'supplier-order-approve', 'supplier-order-cancel', 'supplier-order-receive'].includes(action)) {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({})), actor = requestSession(req)?.email || 'administrator';
+      const method = action === 'supplier-order-line-upsert' ? 'upsert' : action === 'supplier-order-approve' ? 'approve' : action === 'supplier-order-cancel' ? 'cancel' : 'receive';
+      return odpowiedz(await supplierOrderPlan[method](body, actor));
+    }
+
+    if (action === 'supplier-order-reconcile') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const reconciliation = await storeOrderSupplierReconciliation.reconcileDraftsSafely();
+      const settings = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+      return odpowiedz({
+        ok: reconciliation.ok !== false,
+        supplierOrders: Array.isArray(settings.data?.artway_agent_ai_zlecenia) ? settings.data.artway_agent_ai_zlecenia : [],
+        rev: Math.max(0, Number(settings.rev) || 0),
+        updated_at: settings.updated_at || null,
+        reconciliation,
+      }, reconciliation.ok === false ? 409 : 200);
+    }
+
     // ─── PRODUCENCI: zatwierdzone zamówienie e-mailem, z ochroną przed duplikatem ───
     if (action === 'email-send-supplier-order') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const order = body.order && typeof body.order === 'object' ? body.order : {};
-      const status = tekst(order.status || '', 80).trim().toLowerCase();
-      const approvedAt = tekst(order.approvedAt || '', 80).trim();
+      const requested = body.order && typeof body.order === 'object' ? body.order : {};
+      const requestedSupplierNames = (Array.isArray(body.suppliers) ? body.suppliers : [body.supplier]).map((x) => tekst(x?.name || x?.nazwa || x, 160)).filter(Boolean);
+      const actor = requestSession(req)?.email || 'administrator';
+      const currentPlan = await supplierOrderPlan.beginEmailSend({ draftId: requested.id || body.draftId, expectedRevision: requested.revision ?? body.expectedRevision, requestedSupplierNames, actor });
+      const suppliers = currentPlan.supplierContacts;
+      const order = currentPlan.draft;
       const revision = Math.max(1, Number(order.revision) || 1);
-      const approvalRevision = Math.max(0, Number(order.approvalRevision) || 0);
-      if (!order.id || !approvedAt || approvalRevision !== revision || !['zaakceptowane', 'częściowo wysłane e-mailem'].includes(status)) return odpowiedz({ ok: false, error: 'Najpierw zatwierdź dokładnie aktualną wersję zamówienia producenta', code: 'approval_required' }, 422);
-      const suppliers = (Array.isArray(body.suppliers) ? body.suppliers : [body.supplier]).filter((x) => x && typeof x === 'object').slice(0, 30);
-      if (!suppliers.length) return odpowiedz({ ok: false, error: 'Brak kartoteki producenta do wysyłki', code: 'supplier_missing' }, 422);
-      const prepared = suppliers.map((supplier) => producentEmailZlecenia(order, supplier));
-      const invalid = prepared.filter((item) => !item.name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item.to) || !item.rows.length);
-      if (invalid.length) return odpowiedz({ ok: false, error: `Uzupełnij e-mail zamówień i pozycje producenta: ${invalid.map((x) => x.name || 'bez nazwy').join(', ')}`, code: 'supplier_validation' }, 422);
-      const auditRec = await czytaj('supplier_order_email_audit', { items: {}, updated_at: null });
+      let prepared, auditRec;
+      try {
+        prepared = suppliers.map((supplier) => producentEmailZlecenia(order, supplier));
+        const invalid = prepared.filter((item) => !item.validation?.ok);
+        if (invalid.length) {
+          await supplierOrderPlan.abortEmailSend({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, actor });
+          const missingIdentifiers = [...new Set(invalid.flatMap((item) => item.validation?.missingIdentifiers || []))];
+          return odpowiedz({ ok: false, error: `Uzupełnij kartotekę lub identyfikatory pozycji przed wysyłką: ${missingIdentifiers.join(', ') || invalid.map((x) => x.name || 'bez nazwy').join(', ')}`, code: 'supplier_validation', missingIdentifiers }, 422);
+        }
+        auditRec = await czytaj('supplier_order_email_audit', { items: {}, updated_at: null });
+      } catch (error) {
+        try { await supplierOrderPlan.abortEmailSend({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, actor }); } catch {}
+        throw error;
+      }
       const auditItems = auditRec.items && typeof auditRec.items === 'object' ? { ...auditRec.items } : {};
       const results = [];
       for (const item of prepared) {
@@ -5174,7 +5118,8 @@ export default async (req) => {
           const sent = await wyslijEmailSMTP({ to: item.to, subject: item.subject, text: item.text, html: item.html, attachments: item.attachments });
           const sentResult = { supplier: item.name, to: item.to, sent: true, skippedDuplicate: false, sentAt: new Date().toISOString(), messageId: sent.message_id || '', provider: sent.provider || 'smtp' };
           auditItems[fingerprint] = { ...sentResult, orderId: tekst(order.id, 120), orderNumber: tekst(order.numer || order.id, 120), revision, fingerprint };
-          await zapisz('supplier_order_email_audit', { items: auditItems, updated_at: sentResult.sentAt });
+          try { await zapisz('supplier_order_email_audit', { items: auditItems, updated_at: sentResult.sentAt }); }
+          catch (auditError) { sentResult.auditError = tekst(auditError?.message || auditError, 300); }
           results.push({ ...sentResult, optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
         } catch (error) {
           results.push({ supplier: item.name, to: item.to, sent: false, error: tekst(error?.message || error, 700), code: tekst(error?.code || 'email_error', 120), optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
@@ -5182,7 +5127,8 @@ export default async (req) => {
       }
       const sentAt = results.filter((x) => x.sent).map((x) => x.sentAt).filter(Boolean).sort().pop() || null;
       const optimaMissingIdentifiers = results.flatMap((result) => (result.optima?.missingIdentifiers || []).map((item) => ({ supplier: result.supplier, ...item })));
-      return odpowiedz({ ok: true, allSent: results.length > 0 && results.every((x) => x.sent), sentAt, results, revision, optimaComplete: optimaMissingIdentifiers.length === 0, optimaMissingIdentifiers });
+      const plan = await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results, sentAt, actor });
+      return odpowiedz({ ok: true, allSent: results.length > 0 && results.every((x) => x.sent), sentAt, results, revision, optimaComplete: optimaMissingIdentifiers.length === 0, optimaMissingIdentifiers, draft: plan.draft, supplierOrders: plan.supplierOrders, rev: plan.rev, updated_at: plan.updated_at });
     }
 
     // ─── E-MAIL: wysyłka administracyjna przez Netlify SMTP ───
@@ -5551,10 +5497,9 @@ export default async (req) => {
       const poprzedniRec = await czytaj('allegro_orders', { items: [], updated_at: null });
       const poprzednie = Array.isArray(poprzedniRec.items) ? poprzedniRec.items : [];
       const baselineRec = await czytaj('allegro_orders_baseline_v2', { baseline_at: null });
-      const baselineCreated = !baselineRec?.baseline_at;
-      const baselineAt = baselineRec?.baseline_at || new Date().toISOString();
-      if (baselineCreated) await zapisz('allegro_orders_baseline_v2', { baseline_at: baselineAt, reason: 'existing_orders_confirmed_handled', created_at: baselineAt });
-      const mapa = new Map(poprzednie.filter((x) => x?.id).map((x) => [String(x.id), x]));
+      const { baselineCreated, baselineAt, baselineMarkerMissing } = resolveAllegroBaselineCutover(baselineRec, poprzedniRec);
+      const poprzedniePoId = new Map(poprzednie.filter((x) => x?.id).map((x) => [String(x.id), x]));
+      const mapa = new Map(poprzedniePoId);
       const seen = new Set();
       const noweIds = [];
       const aktywne = pobrane
@@ -5593,12 +5538,13 @@ export default async (req) => {
       let baselineArchived = 0;
       if (baselineCreated) {
         items = items.map((z) => {
-          if (['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(allegroStatusKolejkiZamowienia(z, {}))) return z;
           baselineArchived++;
-          return { ...z, warehouseStage: 'zrealizowane', checkedAt: z.checkedAt || baselineAt, baselineArchivedAt: baselineAt, workflowUpdatedAt: baselineAt };
+          const terminal = ['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(allegroStatusKolejkiZamowienia(z, {}));
+          return { ...z, ...(terminal ? {} : { warehouseStage: 'zrealizowane', checkedAt: z.checkedAt || baselineAt }), baselineArchived: true, baselineArchivedAt: z.baselineArchivedAt || baselineAt, workflowUpdatedAt: z.workflowUpdatedAt || baselineAt };
         });
         noweIds.length = 0;
       }
+      items = markAllegroInventoryTransitions(items, poprzedniePoId, { cutover: baselineCreated });
       let agent = { reviewed: 0, shortagesAdded: 0, supplierDocumentsChanged: 0, unresolved: 0, ready: 0 }, orderMappings = null;
       try {
         const wynikAgenta = await allegroAgentPrzetworzZamowienia(items, { newOrderIds: noweIds });
@@ -5610,7 +5556,12 @@ export default async (req) => {
       }
       const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: baselineCreated ? 0 : dodane, refreshed: odswiezone, filtered: pobrane.length - aktywne.length, mode: 'allegro_status_authoritative_warehouse_stage_separate', baseline_at: baselineAt, baseline_created: baselineCreated, baseline_archived: baselineArchived, agent };
       await zapisz('allegro_orders', rec);
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, mappings: orderMappings || undefined, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode, baseline_at: rec.baseline_at, baseline_created: rec.baseline_created, baseline_archived: rec.baseline_archived, agent });
+      // Marker cutover jest commitem końcowym: awaria zapisu zamówień nie może
+      // oznaczyć baseline jako zakończonego. Ponowne archiwizowanie po awarii
+      // samego markera jest bezpieczne i idempotentne.
+      if (baselineMarkerMissing) await zapisz('allegro_orders_baseline_v2', { baseline_at: baselineAt, reason: baselineCreated ? 'existing_orders_confirmed_handled' : 'recovered_from_orders_record', created_at: baselineAt });
+      const plan = await allegroZapisStanIMozeUzgodnijPlan(items);
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, mappings: orderMappings || undefined, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode, baseline_at: rec.baseline_at, baseline_created: rec.baseline_created, baseline_archived: rec.baseline_archived, agent, ...plan });
     }
 
     // ─── ALLEGRO: lokalny etap obsługi zamówienia (admin) ───
@@ -5638,7 +5589,8 @@ export default async (req) => {
       if (!changed && skipped.length === 0) return odpowiedz({ ok: false, error: 'Nie znaleziono wybranych zamówień Allegro', code: 'not_found' }, 404);
       const zapis = { ...rec, items, updated_at: new Date().toISOString() };
       await zapisz('allegro_orders', zapis);
-      return odpowiedz({ ok: true, order: orderIds.length === 1 ? items.find((z) => String(z.id) === orderIds[0]) : null, orders: items, changed, skipped, updated_at: zapis.updated_at });
+      const plan = await allegroZapisStanIMozeUzgodnijPlan(items);
+      return odpowiedz({ ok: true, order: orderIds.length === 1 ? items.find((z) => String(z.id) === orderIds[0]) : null, orders: items, changed, skipped, ...plan, updated_at: zapis.updated_at });
     }
 
     if (action === 'allegro-order-warehouse-stage') {
@@ -5658,13 +5610,15 @@ export default async (req) => {
         if (!wanted.has(String(current?.id || ''))) continue;
         const terminal = ['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(allegroStatusKolejkiZamowienia(current, {}));
         if (terminal) { skipped.push({ id: current.id, reason: 'terminal_order' }); continue; }
-        items[index] = { ...current, warehouseStage: stage, warehouseStageUpdatedAt: new Date().toISOString(), workflowUpdatedAt: new Date().toISOString(), checkedAt: stage === 'do_sprawdzenia' ? null : (current.checkedAt || new Date().toISOString()) };
+        const next = { ...current, warehouseStage: stage, warehouseStageUpdatedAt: new Date().toISOString(), workflowUpdatedAt: new Date().toISOString(), checkedAt: stage === 'do_sprawdzenia' ? null : (current.checkedAt || new Date().toISOString()) };
+        items[index] = markAllegroInventoryTransition(next, current);
         changed++;
       }
       if (!changed && !skipped.length) return odpowiedz({ ok: false, error: 'Nie znaleziono wybranych zleceń Allegro' }, 404);
       const zapis = { ...rec, items, updated_at: new Date().toISOString() };
       await zapisz('allegro_orders', zapis);
-      return odpowiedz({ ok: true, order: orderIds.length === 1 ? items.find((z) => String(z.id) === orderIds[0]) : null, orders: items, changed, skipped, stage, updated_at: zapis.updated_at });
+      const plan = await allegroZapisStanIMozeUzgodnijPlan(items);
+      return odpowiedz({ ok: true, order: orderIds.length === 1 ? items.find((z) => String(z.id) === orderIds[0]) : null, orders: items, changed, skipped, stage, ...plan, updated_at: zapis.updated_at });
     }
 
     // ─── ALLEGRO: zmiana statusu realizacji po stronie Allegro (admin) ───
@@ -5687,10 +5641,11 @@ export default async (req) => {
         bodyObj: { status },
       });
       const zmienione = allegroScalZamowienie({ ...stare, fulfillmentStatus: status, rawUpdatedAt: new Date().toISOString() }, {});
-      items[index] = { ...zmienione, workflowUpdatedAt: new Date().toISOString() };
+      items[index] = markAllegroInventoryTransition({ ...zmienione, workflowUpdatedAt: new Date().toISOString() }, stare);
       const zapis = { ...rec, items, updated_at: new Date().toISOString() };
       await zapisz('allegro_orders', zapis);
-      return odpowiedz({ ok: true, order: items[index], orders: items, updated_at: zapis.updated_at });
+      const plan = await allegroZapisStanIMozeUzgodnijPlan(items);
+      return odpowiedz({ ok: true, order: items[index], orders: items, ...plan, updated_at: zapis.updated_at });
     }
 
     // ─── ALLEGRO: synchronizacja ofert (admin) ───
@@ -6810,9 +6765,7 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const dane = oczyscUstawienia(body.settings);
-      const rozmiar = JSON.stringify(dane).length;
-      if (rozmiar > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
+      const incoming = oczyscUstawienia(body.settings);
       const expectedRev = Number(body.expectedRev);
       if (!Number.isSafeInteger(expectedRev) || expectedRev < 0) {
         return odpowiedz({ ok: false, error: 'Brakuje rewizji bazowej. Pobierz aktualne ustawienia przed zapisem.', code: 'settings_write_conflict' }, 409);
@@ -6822,6 +6775,9 @@ export default async (req) => {
       if (Number(prev.rev || 0) !== expectedRev) {
         return odpowiedz({ ok: false, error: 'Ustawienia zmieniły się na innym urządzeniu. Niczego nie nadpisano.', code: 'settings_write_conflict', rev: Number(prev.rev || 0) }, 409);
       }
+      const dane = preserveSupplierPlanOnGenericSettings(incoming, prev.data);
+      const rozmiar = JSON.stringify(dane).length;
+      if (rozmiar > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
       const rec = { data: dane, rev: expectedRev + 1, updated_at: new Date().toISOString() };
       const write = await zapiszJesliWersja('settings', rec, version);
       if (!write?.modified) {

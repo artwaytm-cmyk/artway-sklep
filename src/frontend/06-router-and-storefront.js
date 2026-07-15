@@ -128,7 +128,10 @@ function renderuj(){
       else if(t==="/admin" || t==="/admin/pulpit") w.innerHTML = widokAdmin("pulpit");
       else if(t.startsWith("/admin/pulpit/")) w.innerHTML = widokAdmin(t.split("/")[3]||"pulpit");
       else if(t==="/admin/zamowienia") w.innerHTML = widokAdminZamowienia();
-      else if(t==="/admin/zamowienia/tabela") w.innerHTML = widokAdminZamowieniaTabela();
+      else if(t==="/admin/zamowienia/tabela"){
+        history.replaceState(null,"",`${location.pathname}${location.search}#/admin/magazyn/plan`);
+        w.innerHTML = widokAdminMagazyn("plan");
+      }
       else if(t.startsWith("/admin/zamowienie/")) w.innerHTML = widokAdminZamowienie(decodeURIComponent(t.split("/")[3]||""));
       else if(t==="/admin/allegro") w.innerHTML = widokAdminAllegro();
       else if(t==="/admin/allegro/zamowienia") w.innerHTML = widokAdminAllegro("zamowienia");
@@ -143,6 +146,10 @@ function renderuj(){
       else if(t.startsWith("/admin/magazyn/")) w.innerHTML = widokAdminMagazyn(t.split("/")[3]||"pulpit");
       else if(t==="/admin/infakt") w.innerHTML = widokAdminInfakt("pulpit");
       else if(t.startsWith("/admin/infakt/")) w.innerHTML = widokAdminInfakt(t.split("/")[3]||"pulpit");
+      else if(t==="/admin/agent-ai/zlecenia"){
+        history.replaceState(null,"",`${location.pathname}${location.search}#/admin/magazyn/plan`);
+        w.innerHTML = widokAdminMagazyn("plan");
+      }
       else if(t==="/admin/agent-ai"){
         w.innerHTML = widokAdminAgentAI("pulpit");
         if(!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);

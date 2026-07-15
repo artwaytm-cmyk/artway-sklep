@@ -35,3 +35,20 @@ test("serwer cyklicznie sprawdza zamówienia, komunikację i katalog Allegro",as
   assert.match(offers,/schedule: '25 \*\/6 \* \* \*'/);
   assert.match(offers,/allegro-sync-offers/);
 });
+
+test("marker baseline Allegro jest zapisywany dopiero po trwałym zapisie zarchiwizowanych zamówień",async()=>{
+  const backend=await read("netlify/functions/lib/store-app.mjs");
+  const start=backend.indexOf("if (action === 'allegro-sync-orders')");
+  const end=backend.indexOf("if (action === 'allegro-order-checked')",start);
+  assert.ok(start>=0&&end>start,"brak sekcji synchronizacji zamówień Allegro");
+  const route=backend.slice(start,end);
+  const ordersWrite=route.indexOf("await zapisz('allegro_orders', rec)");
+  const baselineWrite=route.indexOf("await zapisz('allegro_orders_baseline_v2'");
+  const reconciliation=route.indexOf("allegroZapisStanIMozeUzgodnijPlan(items)");
+  assert.ok(ordersWrite>=0,"brak trwałego zapisu zarchiwizowanych zamówień");
+  assert.ok(baselineWrite>ordersWrite,"marker nie może powstać przed skutecznym zapisem zamówień");
+  assert.ok(reconciliation>baselineWrite,"cutover musi zostać zatwierdzony przed dalszym uzgodnieniem Planu");
+  assert.match(route,/resolveAllegroBaselineCutover\(baselineRec, poprzedniRec\)/,"zapisany baseline_at zamówień musi umożliwiać recovery brakującego markera");
+  assert.match(route,/if \(baselineMarkerMissing\) await zapisz\('allegro_orders_baseline_v2'/,"brakujący marker musi być naprawiany także po odzyskaniu baseline z zamówień");
+  assert.equal(route.slice(0,ordersWrite).includes("zapisz('allegro_orders_baseline_v2'"),false,"awaria zapisu zamówień musi pozostawić marker nieustawiony do bezpiecznego retry");
+});

@@ -185,6 +185,15 @@ test('tabela producenta zawiera tylko kod, nazwę i potrzebną ilość', () => {
   assert.match(tables[0].text, /NAZWA/);
   assert.match(tables[0].text, /POTRZEBNA ILOŚĆ/);
   assert.doesNotMatch(tables[0].text, /123/);
+  const explicitBusiness = telegramSupplierTables({ id: 'Z-2', pozycje: [{ produktId: '18', externalId: '18', sku: '18', kodProducenta: '18', kod: '18', nazwa: 'Jawny kod biznesowy', ilosc: 2, dostawca: 'Alexander' }] });
+  assert.match(explicitBusiness[0].text, /\b18\b/);
+  assert.doesNotMatch(explicitBusiness[0].text, /BRAK KODU/);
+  const localOnly = telegramSupplierTables({ id: 'Z-3', pozycje: [{ produktId: '19', kod: '19', nazwa: 'Tylko lokalne ID', ilosc: 1, dostawca: 'Alexander' }] });
+  assert.match(localOnly[0].text, /BRAK KODU/);
+  assert.doesNotMatch(localOnly[0].text, /\b19\b/);
+  const large = telegramSupplierTables({ id: 'Z-501', pozycje: Array.from({ length: 501 }, (_value, index) => ({ externalId: `EXT-${String(index + 1).padStart(3, '0')}`, nazwa: `Produkt ${index + 1}`, ilosc: 1, dostawca: 'Alexander' })) });
+  assert.equal(large.length, 28);
+  assert.match(large.at(-1).text, /EXT-501/);
 });
 
 test('ustawienia profesjonalnego obiegu mają SLA, eskalację i opcjonalne tematy grupy', () => {

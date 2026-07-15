@@ -1,4 +1,5 @@
 import { reconcileSupplierOrderDrafts } from './domain/supplier-order-reconciliation.mjs';
+import { allegroOrdersForInventoryDeduction, allegroOrdersForSupplierDemand } from './domain/allegro-supplier-demand.mjs';
 
 const DEFAULT_ORDER_LIMIT = 20_000;
 const DEFAULT_SETTINGS_LIMIT = 4 * 1024 * 1024;
@@ -139,18 +140,23 @@ export function createStoreOrderSupplierReconciliation({
 
   async function reconcileDrafts() {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const [ordersVersion, settingsVersion] = await Promise.all([
+      const [ordersVersion, settingsVersion, allegroVersion, mappingsVersion] = await Promise.all([
         readVersioned('orders', { items: [], updated_at: null }),
         readVersioned('settings', { data: {}, rev: 0, updated_at: null }),
+        readVersioned('allegro_orders', { items: [], updated_at: null }),
+        readVersioned('allegro_mappings', { items: {}, updated_at: null }),
       ]);
       const settingsRecord = object(settingsVersion.value);
       const settings = object(settingsRecord.data);
       const mergedSettings = object(await mergeImportedSettings(settings));
-      const orders = normalizeOrderInventoryModes(array(object(ordersVersion.value).items), settings);
+      const shopOrders = array(object(ordersVersion.value).items);
+      const products = array(catalogProducts(mergedSettings));
+      const allegroDemand = allegroOrdersForSupplierDemand(array(object(allegroVersion.value).items), object(mappingsVersion.value), shopOrders, products);
+      const orders = normalizeOrderInventoryModes([...shopOrders, ...allegroDemand.orders], settings);
       const result = reconcile({
         orders,
         settings,
-        products: array(catalogProducts(mergedSettings)),
+        products,
         supplierDrafts: array(settings.artway_agent_ai_zlecenia),
         now: now(),
       });
@@ -162,7 +168,7 @@ export function createStoreOrderSupplierReconciliation({
           created: result.created,
           updated: result.updated,
           shortages: result.shortages,
-          diagnostics: result.diagnostics,
+          diagnostics: { ...result.diagnostics, allegro: allegroDemand.diagnostics },
         };
       }
       const data = { ...settings, artway_agent_ai_zlecenia: result.drafts };
@@ -190,7 +196,7 @@ export function createStoreOrderSupplierReconciliation({
           created: result.created,
           updated: result.updated,
           shortages: result.shortages,
-          diagnostics: result.diagnostics,
+          diagnostics: { ...result.diagnostics, allegro: allegroDemand.diagnostics },
         };
       }
     }
@@ -216,6 +222,66 @@ export function createStoreOrderSupplierReconciliation({
         code: text(error?.code || 'supplier_drafts_pending', 80),
         error: text(error?.message || 'Nie udało się przeliczyć szkiców producentów.', 300),
       };
+    }
+  }
+
+  async function finalizeAllegroInventory(allegroOrders = []) {
+    const [settingsVersion, mappingsVersion] = await Promise.all([
+      readVersioned('settings', { data: {}, rev: 0, updated_at: null }),
+      readVersioned('allegro_mappings', { items: {}, updated_at: null }),
+    ]);
+    const settings = object(object(settingsVersion.value).data);
+    const mergedSettings = object(await mergeImportedSettings(settings));
+    const products = array(catalogProducts(mergedSettings));
+    // Historyczne terminalne zlecenia nie mogą zostać retrospektywnie odjęte.
+    // Marker powstaje wyłącznie przy kontrolowanym przejściu active → wysłane.
+    const pendingOrders = array(allegroOrders).filter((order) => order?.inventoryDeductionPending === true);
+    const projection = allegroOrdersForInventoryDeduction(pendingOrders, object(mappingsVersion.value), products);
+    const results = [];
+    for (const order of projection.orders) {
+      try { results.push({ number: order.nr, ...(await deductInventoryOnShipment(order)) }); }
+      catch (error) {
+        results.push({ number: order.nr, ok: false, changed: false, pendingRetry: true, code: text(error?.code || 'inventory_deduction_pending', 80), error: text(error?.message || 'Nie udało się zapisać ruchu magazynowego.', 300) });
+      }
+    }
+    const failed = results.filter((result) => result.ok === false);
+    const pendingUnmapped = Math.max(0, Number(projection.diagnostics.skippedUnmapped) || 0);
+    const completedIds = new Set(results.filter((result) => result.ok !== false && result.eligible)
+      .map((result) => text(result.number).replace(/^Allegro\s+/i, '')).filter(Boolean));
+    let marked = 0;
+    if (completedIds.size) {
+      let saved = false;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const version = await readVersioned('allegro_orders', { items: [], updated_at: null });
+        const record = object(version.value), items = array(record.items), updatedAt = now().toISOString();
+        let changed = 0;
+        const nextItems = items.map((order) => {
+          const id = text(order?.id || order?.nr, 180);
+          if (!completedIds.has(id) || order?.inventoryMode === 'deducted_on_shipment') return order;
+          changed += 1;
+          return { ...order, inventoryDeductionPending: false, inventoryMode: 'deducted_on_shipment', inventoryDeductedAt: order.inventoryDeductedAt || updatedAt };
+        });
+        if (!changed) { saved = true; break; }
+        const write = await writeIfVersion('allegro_orders', { ...record, items: nextItems, updated_at: updatedAt }, version);
+        if (write?.modified) { marked = changed; saved = true; break; }
+      }
+      if (!saved) failed.push({ ok: false, code: 'allegro_inventory_marker_conflict', error: 'Nie udało się zamknąć markera ruchu Allegro.' });
+    }
+    return {
+      ok: failed.length === 0 && pendingUnmapped === 0,
+      changed: results.filter((result) => result.changed).length,
+      alreadyDeducted: results.filter((result) => result.alreadyDeducted).length,
+      pendingRetry: failed.length + pendingUnmapped,
+      marked,
+      results,
+      diagnostics: projection.diagnostics,
+    };
+  }
+
+  async function finalizeAllegroInventorySafely(allegroOrders = []) {
+    try { return await finalizeAllegroInventory(allegroOrders); }
+    catch (error) {
+      return { ok: false, changed: 0, alreadyDeducted: 0, pendingRetry: 1, results: [], code: text(error?.code || 'inventory_deduction_pending', 80), error: text(error?.message || 'Nie udało się przygotować ruchów Allegro.', 300) };
     }
   }
 
@@ -340,6 +406,8 @@ export function createStoreOrderSupplierReconciliation({
     saveOrder,
     reconcileDrafts,
     reconcileDraftsSafely,
+    finalizeAllegroInventory,
+    finalizeAllegroInventorySafely,
     deductInventoryOnShipment,
     markOrderInventoryMode,
     finalizeInventoryForOrder,

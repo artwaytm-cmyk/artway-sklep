@@ -129,6 +129,19 @@ test('retry przeliczenia jest idempotentny i nie podwaja ilości ani szkiców', 
   assert.deepEqual(second.unchanged, [first.activeDrafts[0].id]);
 });
 
+test('legacy aktywny szkic bez rewizji dostaje wersję 1 nawet bez zmiany treści', () => {
+  const initial = run({
+    orders: [order('ATM-LEGACY-REV', 1, 2)], products: [product(1)], settings: { artway_stany: { 1: 0 } },
+  });
+  const legacy = structuredClone(initial.drafts[0]);
+  delete legacy.revision;
+  const migrated = run({
+    orders: [order('ATM-LEGACY-REV', 1, 2)], products: [product(1)], settings: { artway_stany: { 1: 0 } }, supplierDrafts: [legacy],
+  });
+  assert.equal(migrated.changed, true);
+  assert.equal(migrated.activeDrafts[0].revision, 1);
+});
+
 test('zmniejszenie i anulowanie zamówienia obniża ilość, zachowując wyłącznie ręczną nadwyżkę', () => {
   const initial = run({
     orders: [order('ATM-6', 1, 5)],
@@ -184,10 +197,12 @@ test('anulowanie usuwa automatyczną pozycję, gdy nie ma ręcznej nadwyżki', (
     supplierDrafts: initial.drafts,
   });
 
-  assert.equal(result.activeDrafts.length, 1, 'pusty szkic pozostaje jako audyt przeliczenia');
-  assert.deepEqual(result.activeDrafts[0].pozycje, []);
-  assert.equal(result.activeDrafts[0].sztuk, 0);
-  assert.equal(result.activeDrafts[0].revision, 2);
+  assert.equal(result.activeDrafts.length, 0, 'pusty automatyczny dokument nie pozostaje aktywnym szkicem');
+  const archived = result.drafts.find((item) => item.id === initial.drafts[0].id);
+  assert.equal(archived.status, 'wyczyszczone');
+  assert.deepEqual(archived.pozycje, []);
+  assert.equal(archived.sztuk, 0);
+  assert.equal(archived.revision, 2);
 });
 
 test('legacy deducted_on_create używa stanPrzed i nie rezerwuje ponownie obecnego stanu', () => {
@@ -220,13 +235,16 @@ test('legacy bez ruchu nie tworzy fałszywego pełnego braku i zgłasza diagnost
   ]);
 });
 
-test('kod producenta ma pierwszeństwo, a wewnętrzne ID nigdy nie staje się kodem eksportowym', () => {
+test('wspólny priorytet wybiera EXTERNAL_ID, a wewnętrzne ID nigdy nie staje się kodem eksportowym', () => {
   const preferred = run({
     orders: [order('ATM-KOD-1', 91, 1)],
     products: [product(91, { kodProducenta: 'ALEX-91', externalId: 'EXT-91', sku: 'SKU-91' })],
     settings: { artway_stany: { 91: 0 }, artway_magazyn_produkty: { 91: { kod: 'META-91' } } },
   });
-  assert.equal(preferred.activeDrafts[0].pozycje[0].kod, 'ALEX-91');
+  assert.equal(preferred.activeDrafts[0].pozycje[0].kod, 'EXT-91');
+  assert.equal(preferred.activeDrafts[0].pozycje[0].externalId, 'EXT-91');
+  assert.equal(preferred.activeDrafts[0].pozycje[0].sku, 'SKU-91');
+  assert.equal(preferred.activeDrafts[0].pozycje[0].kodProducenta, 'ALEX-91');
 
   const withoutCode = run({
     orders: [order('ATM-KOD-2', 92, 1)],
@@ -254,6 +272,25 @@ test('wysłana i nieprzyjęta ilość pokrywa brak i nie jest zamawiana drugi ra
   assert.equal(result.shortages[0].committedQuantity, 2);
   assert.equal(result.shortages[0].requiredQuantity, 1);
   assert.equal(result.activeDrafts[0].pozycje[0].ilosc, 1);
+});
+
+test('rewizja zablokowana na czas SMTP pokrywa brak i nie tworzy drugiego szkicu', () => {
+  const sending = {
+    id: 'SENDING-1', supplier: 'Alexander', status: 'wysyłanie e-mail', revision: 4,
+    sendLock: { id: 'send-lock', revision: 4, createdAt: NOW.toISOString() },
+    pozycje: [{ produktId: '1', ilosc: 3, przyjeto: 0, dostawca: 'Alexander' }],
+  };
+  const result = run({
+    orders: [order('ATM-SMTP-RACE', 1, 4)],
+    products: [product(1)],
+    settings: { artway_stany: { 1: 1 } },
+    supplierDrafts: [sending],
+  });
+  assert.equal(result.changed, false);
+  assert.equal(result.drafts.length, 1);
+  assert.equal(result.drafts[0].id, 'SENDING-1');
+  assert.equal(result.activeDrafts.length, 0);
+  assert.deepEqual(result.shortages, []);
 });
 
 test('importowany produkt z wysokim ID jest pełnoprawnie mapowany po kluczu tekstowym', () => {

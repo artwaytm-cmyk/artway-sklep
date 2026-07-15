@@ -236,7 +236,6 @@ async function chmuraPobierzWszystko(){
     chmuraStan = {...chmuraStan, dostepna:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     if(chmuraToken) await synchronizujBazeCentralna(true).catch(()=>{});
     zastosujUstawienia(); zbudujProdukty();
-    if(chmuraToken)agentAIUtworzZleceniaWedlugDostawcow("",{silent:true,automatic:true});
     odswiezMenu(); odswiezKoszyk();
     toast("📥 Pobrano sklep z serwera ✅"); renderuj();
   }catch(e){ toast("Błąd pobierania: "+e.message); }

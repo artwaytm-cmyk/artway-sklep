@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { supplierProductIdentifier } from './supplier-order-email.mjs';
 
 const DEFAULT_SUPPLIER = 'Bez przypisanego dostawcy';
 const MAX_QUANTITY = 1_000_000;
@@ -9,7 +10,7 @@ const EDITABLE_DRAFT_STATUSES = new Set([
 ]);
 const COMMITTED_DRAFT_STATUSES = new Set([
   'wyslane do producenta', 'wyslane do dostawcy', 'czesciowo wyslane e-mailem',
-  'czesciowo zrealizowane', 'sent', 'partially sent', 'partially fulfilled',
+  'czesciowo zrealizowane', 'wysylanie e mail', 'sent', 'partially sent', 'partially fulfilled',
 ]);
 const CLOSED_ORDER_STATUSES = new Set([
   'anulowane', 'anulowany', 'cancelled', 'canceled', 'wyslane', 'nadane', 'sent', 'shipped',
@@ -168,13 +169,15 @@ export function resolveProductSupplier(product = {}, settings = {}, productId = 
 }
 
 function productCode(product = {}, meta = {}) {
-  return text(firstValue(
-    product.kodProducenta, product.mpn, product.manufacturerCode,
-    product.externalId, product.external_id, product.EXTERNAL_ID,
-    product.sku,
-    meta.kod, meta.code, product.kod,
-    '—',
-  ), 160);
+  const merged = {
+    ...meta,
+    ...product,
+    productId: productIdOf(product),
+    kod: firstValue(product.kod, meta.kod, meta.code),
+    supplierCode: firstValue(product.supplierCode, product.kodDostawcy, meta.supplierCode, meta.kodDostawcy),
+    catalogCode: firstValue(product.catalogCode, product.kodKatalogowy, meta.catalogCode, meta.kodKatalogowy),
+  };
+  return text(supplierProductIdentifier(merged).value || '—', 160);
 }
 
 function productEan(product = {}, meta = {}) {
@@ -323,13 +326,14 @@ function newDraftNumber(now, sequence) {
 }
 
 function statusAfterChange(previousStatus, empty) {
-  if (empty) return 'szkic';
+  if (empty) return 'wyczyszczone';
   const status = normalized(previousStatus);
   if (['zaakceptowane', 'approved', 'wyslane na telegram', 'telegram preview'].includes(status)) return 'do sprawdzenia';
   return EDITABLE_DRAFT_STATUSES.has(status) ? (text(previousStatus, 80) || 'szkic') : 'szkic';
 }
 
 function summarizeDraft(base, supplier, items, now, changed, historyText) {
+  const storedRevision = quantity(base.revision);
   const next = {
     ...base,
     supplier,
@@ -339,11 +343,12 @@ function summarizeDraft(base, supplier, items, now, changed, historyText) {
     sztuk: items.reduce((sum, item) => sum + draftItemQuantity(item), 0),
     tryb: base.tryb || 'braki',
     typ: base.typ || 'zlecenie-producent',
+    revision: Math.max(1, storedRevision || 1),
   };
   delete next.items;
   if (changed) {
     const timestamp = now.toISOString();
-    next.revision = Math.max(0, quantity(base.revision)) + 1;
+    next.revision = storedRevision > 0 ? storedRevision + 1 : 1;
     next.status = statusAfterChange(base.status, items.length === 0);
     next.aktualizacja = timestamp;
     next.updatedAt = timestamp;
@@ -358,6 +363,10 @@ function makeLine({ productId, product, raw, settings, supplier, required, manua
   const ordered = required + manualExtra;
   return {
     produktId: productId,
+    externalId: text(firstValue(product.externalId, product.external_id, product.EXTERNAL_ID), 160),
+    sku: text(firstValue(product.sku, product.SKU), 160),
+    kodProducenta: text(firstValue(product.kodProducenta, product.mpn, product.manufacturerCode, meta.kodProducenta), 160),
+    mpn: text(firstValue(product.mpn, product.kodProducenta, product.manufacturerCode, meta.kodProducenta), 160),
     kod: productCode(product, meta),
     ean: productEan(product, meta),
     nazwa: productName(product, raw, productId),
@@ -535,18 +544,19 @@ export function reconcileSupplierOrderDrafts(input = {}) {
     }
 
     const contentChanged = !sameContent(draftItems(primary.draft), desired.items);
+    const draftChanged = contentChanged || quantity(primary.draft.revision) < 1;
     const next = summarizeDraft(
       primary.draft,
       desired.supplier,
       desired.items,
       now,
-      contentChanged,
+      draftChanged,
       desired.items.length
         ? 'Przeliczono ilości z aktualnych aktywnych zamówień i stanu magazynowego.'
         : 'Usunięto nieaktualne braki po anulowaniu lub zmniejszeniu zamówień.',
     );
     output[primary.index] = next;
-    (contentChanged ? updated : unchanged).push(next.id);
+    (draftChanged ? updated : unchanged).push(next.id);
 
     for (const duplicate of candidates.slice(1)) {
       const replacement = { ...duplicate.draft };

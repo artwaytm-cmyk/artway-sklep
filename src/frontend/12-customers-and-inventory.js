@@ -311,7 +311,7 @@ function allegroAnalizaMagazynowaZamowienia(z){
     const stan=p.produkt?stanMagazynuId(p.produkt.id):null,meta=p.produkt?magazynMetaProduktu(p.produkt.id):{};
     const laczne=p.produkt?Number(rez[p.produkt.id]||0):0,dostepne=stan===null?null:stan-laczne;
     const brak=!p.produkt||stan===null?null:Math.max(0,-dostepne),lokalizacja=String(meta.lokalizacja||"").trim(),dostawca=String(meta.dostawca||"").trim();
-    const dokumenty=p.produkt?(agentAIZlecenia||[]).filter(doc=>!["zrealizowane","anulowane"].includes(String(doc.status||"").toLowerCase())&&(doc.pozycje||[]).some(x=>String(x.produktId)===String(p.produkt.id))).map(doc=>({id:doc.id,numer:doc.numer||doc.id,status:doc.status||"szkic"})):[];
+    const dokumenty=p.produkt?(agentAIZlecenia||[]).filter(doc=>agentAIPlanDokumentAktywny(doc)&&(doc.pozycje||[]).some(x=>String(x.produktId)===String(p.produkt.id))).map(doc=>({id:doc.id,numer:doc.numer||doc.id,status:doc.status||"szkic"})):[];
     const decyzja=!p.produkt?"nierozpoznany":stan===null?"sprawdz_stan":brak>0?"zamow_u_producenta":!lokalizacja?"uzupelnij_lokalizacje":"kompletuj";
     return {...p,stan,laczneRezerwacje:laczne,dostepne,brak,lokalizacja,dostawca,dokumentyProducenta:dokumenty,decyzja};
   });
@@ -674,6 +674,16 @@ function widokAdminInfakt(sekcja="pulpit"){
   const content=aktywna==="zamowienia"?ordersPanel:aktywna==="faktury"?invoicesPanel:aktywna==="dostawcy"?costsPanel:aktywna==="szkice"?draftsPanel:aktywna==="ustawienia"?settingsPanel:`${missing.length?ordersPanel:""}${costsPanel}`;
   return adminSzkielet("/admin/infakt",hero+content);
 }
+function magazynPlanZatowarowaniaHTML(){
+  return `<section class="panel restock-plan-intro"><div class="order-section-head"><div><span class="order-pro-label">Plan → szkic → zatwierdzenie → wysyłka → przyjęcie</span><h2>📦 Plan zatowarowania</h2><p class="order-detail-lead">Jedna kolejka łączy realne braki do aktywnych zamówień z bieżącymi szkicami Alexander, Multigra i pozostałych producentów. Tutaj dodajesz pozycje ręcznie, zmieniasz ilości, kontrolujesz bezcenowy e-mail i plik Optimy oraz przyjmujesz faktyczną dostawę wraz z nadwyżką.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIUzgodnijPlanZSerwerem()">↻ Uzgodnij szkice z brakami</button></div></div><div class="supplier-plan-guardrails"><span><b>1. Braki</b><small>tylko aktywne zamówienia</small></span><span><b>2. Szkic</b><small>jeden bieżący na producenta</small></span><span><b>3. Zatwierdzenie</b><small>konkretna rewizja</small></span><span><b>4. E-mail</b><small>wyłącznie po potwierdzeniu</small></span><span><b>5. Przyjęcie</b><small>stan rośnie o realną dostawę</small></span></div></section>${magazynTabelaOperacyjnaHTML()}`;
+}
+function odswiezPlanZatowarowaniaWidoku(){
+  const root=document.getElementById("warehouseRestockWorkspace");if(!root||typeof magazynTabelaOperacyjnaHTML!=="function")return false;
+  const aktywny=document.activeElement,focusId=aktywny&&root.contains(aktywny)?String(aktywny.id||""):"",start=typeof aktywny?.selectionStart==="number"?aktywny.selectionStart:null,end=typeof aktywny?.selectionEnd==="number"?aktywny.selectionEnd:null;
+  root.innerHTML=magazynPlanZatowarowaniaHTML();
+  if(focusId){const nastepny=document.getElementById(focusId);if(nastepny){nastepny.focus({preventScroll:true});if(start!==null&&typeof nastepny.setSelectionRange==="function")nastepny.setSelectionRange(start,end??start);}}
+  return true;
+}
 function widokAdminMagazyn(sekcja="pulpit"){
   const rez=rezerwacjeMagazynowe(), kanalySpr=sprzedazKanalyMagazynowe(30), spr=kanalySpr.razem, u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
   const aktywna=["pulpit","dostawcy","stany","lokalizacje","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
@@ -723,7 +733,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
       ${aktywna==="pulpit"?`<div class="diag-actions">
         <button class="btn" onclick="eksportujMagazynCSV()">📊 Eksport magazynu CSV</button>
         <button class="btn ghost" onclick="agentAISprawdzDostepnoscProducentow()">🏭 Sprawdź producentów</button>
-        <button class="btn ghost" onclick="eksportujZatowarowanieCSV()">📦 Braki do zamówień</button>
+        <button class="btn ghost" onclick="eksportujZatowarowanieCSV()">📊 Prognoza wartościowa (admin)</button>
         <a class="btn ghost" href="#/admin/agent-ai">🤖 Agent AI</a>
         <a class="btn ghost" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
       </div>`:""}
@@ -832,27 +842,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
     ${statLok.BRAK?.produkty?`<div class="pay-note" style="text-align:left;margin-top:.8rem">Bez lokalizacji: <b>${statLok.BRAK.produkty}</b> produktów. Użyj filtra „Bez lokalizacji”, żeby szybko uzupełnić kartotekę.</div>`:""}
     ${pozaSlownikiem.length?`<div class="pay-note" style="text-align:left;margin-top:.6rem">Lokalizacje wpisane przy produktach, ale nieutworzone w słowniku: <b>${pozaSlownikiem.map(esc).join(", ")}</b>.</div>`:""}
   </div>
-  <div class="panel" style="${aktywna==="plan"?"":"display:none"}">
-    <div class="order-section-head">
-      <div><h2 style="margin-top:0">📦 Plan zatowarowania</h2><p class="order-detail-lead">Plan dotyczy tylko produktów, których brakuje do aktywnych zamówień i rezerwacji. Nadwyżka po ręcznym zwiększeniu zlecenia trafia później do magazynu.</p></div>
-      <div class="diag-actions"><button class="btn" onclick="eksportujZatowarowanieCSV()">📤 CSV planu</button><button class="btn ghost" onclick="agentAIWykonaj('utworz-zlecenie-braki')">🤖 Utwórz zlecenie agenta</button></div>
-    </div>
-    <div style="overflow-x:auto"><table class="log-table warehouse-worktable">
-      <tr><th>Kod</th><th>EAN</th><th>Nazwa</th><th>Ilość potrzebna</th><th>Stan</th><th>Rezerwacje</th><th>Dostępne</th><th>Lokalizacja</th><th>Dostawca</th><th>Powód</th></tr>
-      ${planZakupu.map(x=>`<tr class="${x.poziom==="bad"?"row-alert":""}">
-        <td><b>${esc(kodOperacyjnyProduktu(x.produkt,x.meta))}</b></td>
-        <td>${esc(eanOperacyjnyProduktu(x.produkt,x.meta)||"—")}</td>
-        <td><b>${esc(x.produkt.nazwa)}</b><br><small>${esc(x.produkt.sku||"ID "+x.produkt.id)}</small></td>
-        <td><b>${esc(x.ilosc)} szt.</b></td>
-        <td>${x.stan===null?"∞":esc(x.stan)}</td>
-        <td>${esc(x.rezerwacje)}</td>
-        <td>${x.dostepne===null?"∞":esc(x.dostepne)}</td>
-        <td>${esc(x.meta.lokalizacja?nazwaLokalizacjiMagazynu(x.meta.lokalizacja):"—")}</td>
-        <td>${esc(x.meta.dostawca||"—")}</td>
-        <td>${esc(x.powod)}</td>
-      </tr>`).join("") || `<tr><td colspan="10">Brak braków do aktywnych zamówień.</td></tr>`}
-    </table></div>
-  </div>
+  <div id="warehouseRestockWorkspace" class="warehouse-restock-workspace" style="${aktywna==="plan"?"":"display:none"}">${magazynPlanZatowarowaniaHTML()}</div>
   <div class="panel warehouse-stock-page" style="${aktywna==="stany"?"":"display:none"}">
     <div class="order-section-head warehouse-stock-head">
       <div><span class="order-pro-label">Centrum kontroli zapasu</span><h2>📋 Stany produktów</h2><p class="order-detail-lead">Jeden czytelny widok łączy dostępność producenta, sprzedaż Allegro i sklepu, rezerwacje, fizyczny zapas, lokalizację oraz decyzję o domówieniu.</p></div>
