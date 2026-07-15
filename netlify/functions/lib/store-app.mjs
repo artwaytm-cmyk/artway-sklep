@@ -43,7 +43,8 @@ import {
   telegramHtml,
   telegramSupplierTables as telegramTabeleZlecenia,
 } from './domain/telegram-communication.mjs';
-import { createTelegramCenter, telegramAgentReport as agentRaportTelegramHTML } from './telegram-center.mjs';
+import { createTelegramCenter } from './telegram-center.mjs';
+import { createTelegramRouter } from './telegram-router.mjs';
 import {
   ALLEGRO_COMPLIANCE_POLICY,
   allegroCheckText,
@@ -75,6 +76,7 @@ const repository = createStoreRepository({ name: STORE_NAME });
 const czytaj = repository.read;
 const zapisz = repository.write;
 const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
+const telegramRoute = createTelegramRouter({ center: telegramCenter, getOperationalCenter: agentCentrumOperacyjne, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
 
 // Klucze wspólne (konfiguracja + katalog + ceny + stany + opinie + kosz) — zapisywane przez administratora,
 // czytane przez wszystkich (żeby sklep wyglądał tak samo na każdym urządzeniu).
@@ -4924,6 +4926,8 @@ export default async (req) => {
   if (contentLength > 5 * 1024 * 1024) return odpowiedz({ ok: false, error: 'Żądanie jest zbyt duże.', code: 'payload_too_large' }, 413);
 
   try {
+    const telegramResponse = await telegramRoute(req, url, action);
+    if (telegramResponse) return telegramResponse;
     if (action === 'catalog-quality-audit') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -5137,83 +5141,6 @@ export default async (req) => {
       const run = { id: crypto.randomUUID(), source: tekst(body.source || 'admin-panel', 80), profile: tekst(body.profile || 'custom', 40), startedAt, completedAt: new Date().toISOString(), durationMs: Math.max(0, Date.now() - Date.parse(startedAt)), results, completed: results.filter((x) => x.status === 'completed').length, errors: results.filter((x) => x.status === 'error').length, scoreAfter: center.score };
       const history = await czytaj('agent_action_runs', { items: [] }); history.items = [run, ...(Array.isArray(history.items) ? history.items : [])].slice(0, 100); history.updated_at = run.completedAt; await zapisz('agent_action_runs', history);
       return odpowiedz({ ok: true, allCompleted: results.every((x) => x.status === 'completed'), run, center });
-    }
-
-    if (action === 'telegram-center-status') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const center = await agentCentrumOperacyjne();
-      return odpowiedz({ ok: true, center, ...(await telegramCenter.view(center, url.searchParams.get('live') === '1')) });
-    }
-
-    if (action === 'telegram-settings-save') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const settings = await telegramCenter.saveSettings(body.settings || body, requestSession(req)?.email || 'administrator');
-      return odpowiedz({ ok: true, settings });
-    }
-
-    if (action === 'telegram-register-webhook') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      return odpowiedz({ ok: true, ...(await telegramCenter.registerWebhook(publicznyOrigin(req))) });
-    }
-
-    if (action === 'telegram-dispatch') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), center = await agentCentrumOperacyjne();
-      const dispatch = await telegramCenter.dispatch(center, { source: tekst(body.source || 'admin-panel', 80), force: body.force === true, forceDigest: body.forceDigest === true });
-      return odpowiedz({ ok: true, dispatch, center });
-    }
-
-    if (action === 'telegram-inbound-command') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), center = await agentCentrumOperacyjne();
-      return odpowiedz({ ok: true, ...(await telegramCenter.inbound(tekst(body.intent || body.text, 1000), center, { text: body.text, user: body.user, chatId: body.chatId })) });
-    }
-
-    if (action === 'telegram-send-note') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), note = tekst(body.text, 1500).trim();
-      if (note.length < 3) return odpowiedz({ ok: false, error: 'Wpisz treść notatki do zespołu', code: 'empty_note' }, 422);
-      const sent = await telegramCenter.sendManual(`<b>📌 Notatka administratora Artway-TM</b>\n\n${telegramHtml(note)}`, { kind: 'note', title: 'Notatka administratora', source: requestSession(req)?.email || 'admin-panel', silent: body.silent === true });
-      return odpowiedz({ ok: true, messageId: sent?.message_id || null, sentAt: new Date().toISOString() });
-    }
-
-    if (action === 'telegram-test') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const sent = await telegramCenter.sendManual('<b>✅ Telegram Artway-TM działa poprawnie</b>\nTo jest pojedyncza wiadomość testowa. Automatyczne alerty korzystają z filtrów, ciszy nocnej i ochrony przed duplikatami.', { kind: 'test', title: 'Test połączenia', source: 'admin-panel', silent: true });
-      return odpowiedz({ ok: true, messageId: sent?.message_id || null, sentAt: new Date().toISOString() });
-    }
-
-    if (action === 'telegram-send-agent-report') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const center = await agentCentrumOperacyjne();
-      const sent = await telegramCenter.sendManual(agentRaportTelegramHTML(center), { kind: 'report', title: 'Pełny raport centrum operacyjnego', source: 'admin-panel', replyMarkup: telegramCenter.panelButtons() });
-      return odpowiedz({ ok: true, sentAt: new Date().toISOString(), messageId: sent?.message_id || null, center });
-    }
-
-    // ─── TELEGRAM: profesjonalne tabele zamówień do producentów ───
-    if (action === 'telegram-send-supplier-order') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const supplier = tekst(body.supplier || '', 120).trim();
-      const order = body.order && typeof body.order === 'object' ? body.order : {};
-      const tables = telegramTabeleZlecenia(order, supplier);
-      if (!tables.length) return odpowiedz({ ok: false, error: 'Zlecenie nie ma pozycji dla wybranego dostawcy', code: 'empty_order' }, 422);
-      const messageIds = [];
-      for (const table of tables) {
-        const sent = await telegramCenter.sendManual(table.text, { kind: 'supplier-preview', category: 'supplier', title: `Podgląd zamówienia — ${table.supplier}`, source: 'admin-panel' });
-        if (sent?.message_id != null) messageIds.push(sent.message_id);
-      }
-      const sentAt = new Date().toISOString();
-      return odpowiedz({ ok: true, sentAt, tables: tables.length, suppliers: [...new Set(tables.map((x) => x.supplier))], messageIds });
     }
 
     // ─── PRODUCENCI: zatwierdzone zamówienie e-mailem, z ochroną przed duplikatem ───

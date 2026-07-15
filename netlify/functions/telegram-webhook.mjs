@@ -22,12 +22,12 @@ export default async (request) => {
   if (!equal(received, expected)) return response();
   const update = await request.json().catch(() => ({})), callback = update.callback_query || null, message = callback?.message || update.message || null;
   if (!message?.chat?.id) return response();
-  const config = telegramConfig(process.env), chatId = String(message.chat.id), allowed = config.allowedChatIds.has(chatId);
+  const config = telegramConfig(process.env), chatId = String(message.chat.id), sender = callback?.from || message.from || {}, userId = String(sender.id || '');
+  const allowed = config.allowedChatIds.has(chatId) && (!config.allowedUserIds.size || config.allowedUserIds.has(userId));
   if (!allowed) {
     await sendTelegramHtml('<b>🔒 Ten czat nie ma dostępu do Agenta Artway-TM.</b>\nDodaj jego ID do TELEGRAM_ALLOWED_CHAT_IDS albo korzystaj z autoryzowanej grupy.', { chatId, silent: true }, process.env).catch(() => null);
     return response();
   }
-  if (callback?.id) await telegramApi('answerCallbackQuery', { callback_query_id: callback.id }, process.env).catch(() => null);
   const input = String(callback?.data || message.text || message.caption || '').trim();
   if (!input && message.voice) {
     await sendTelegramHtml('<b>🎙️ Wiadomość głosowa została odebrana.</b>\nTranskrypcja na serwerze jest wyłączona, aby nie generować płatnych kosztów API. Wyślij krótkie pytanie tekstem; bot rozumie zwykły język.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
@@ -39,14 +39,31 @@ export default async (request) => {
     return response();
   }
   try {
-    const origin = new URL(request.url).origin, apiResponse = await fetch(`${origin}/api/store?action=telegram-inbound-command`, {
+    const origin = new URL(request.url).origin;
+    const incidentMatch = input.match(/^tg:(ack|s1|s24|resolve|reopen):([a-f0-9]{14})$/i);
+    if (callback?.id && incidentMatch) {
+      const incidentResponse = await fetch(`${origin}/api/store?action=telegram-incident-action`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': token },
+        body: JSON.stringify({ id: incidentMatch[2], incidentAction: incidentMatch[1].toLowerCase(), source: 'telegram-webhook', actor: { id: userId, username: sender.username || '', name: [sender.first_name, sender.last_name].filter(Boolean).join(' ') || sender.username || 'Telegram' } }),
+      });
+      const incidentData = await incidentResponse.json().catch(() => ({}));
+      if (!incidentResponse.ok || !incidentData.ok) throw new Error(incidentData.error || `HTTP ${incidentResponse.status}`);
+      await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: String(incidentData.notice || 'Zapisano zmianę.').slice(0, 180), show_alert: false }, process.env).catch(() => null);
+      return response();
+    }
+    const apiResponse = await fetch(`${origin}/api/store?action=telegram-inbound-command`, {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': token },
-      body: JSON.stringify({ intent: telegramNaturalIntent(input), text: input, chatId, user: message.from?.username || [message.from?.first_name, message.from?.last_name].filter(Boolean).join(' ') }),
+      body: JSON.stringify({ intent: telegramNaturalIntent(input), text: input, chatId, messageThreadId: message.message_thread_id || null, user: sender.username || [sender.first_name, sender.last_name].filter(Boolean).join(' ') }),
     });
     const data = await apiResponse.json().catch(() => ({}));
     if (!apiResponse.ok || !data.ok) throw new Error(data.error || `HTTP ${apiResponse.status}`);
-    await sendTelegramHtml(data.message, { chatId, replyTo: message.message_id, replyMarkup: data.replyMarkup }, process.env);
+    if (callback?.id) await telegramApi('answerCallbackQuery', { callback_query_id: callback.id }, process.env).catch(() => null);
+    await sendTelegramHtml(data.message, { chatId, replyTo: message.message_id, replyMarkup: data.replyMarkup, messageThreadId: message.message_thread_id || null }, process.env);
   } catch (error) {
+    if (callback?.id) {
+      await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: String(error?.message || error).slice(0, 180), show_alert: true }, process.env).catch(() => null);
+      return response();
+    }
     await sendTelegramHtml(`<b>⚠️ Nie udało się pobrać danych sklepu.</b>\n${String(error?.message || error).slice(0, 400)}`, { chatId, replyTo: message.message_id }, process.env).catch(() => null);
   }
   return response();

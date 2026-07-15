@@ -7,8 +7,11 @@ import {
   telegramPriorityEvents,
   telegramQuietNow,
   telegramSettings,
+  telegramIncidentId,
   telegramSupplierTables,
+  telegramTopicId,
 } from '../netlify/functions/lib/domain/telegram-communication.mjs';
+import { createTelegramCenter } from '../netlify/functions/lib/telegram-center.mjs';
 
 test('Telegram domyślnie wysyła tylko ważne zmiany i chroni ciszę nocną', () => {
   const settings = telegramSettings({});
@@ -63,4 +66,46 @@ test('tabela producenta zawiera tylko kod, nazwę i potrzebną ilość', () => {
   assert.match(tables[0].text, /NAZWA/);
   assert.match(tables[0].text, /POTRZEBNA ILOŚĆ/);
   assert.doesNotMatch(tables[0].text, /123/);
+});
+
+test('ustawienia profesjonalnego obiegu mają SLA, eskalację i opcjonalne tematy grupy', () => {
+  const settings = telegramSettings({ criticalSlaMinutes: 45, warningSlaMinutes: 360, topicRouting: true, topicCustomer: 12, maxEscalations: 3 });
+  assert.equal(settings.incidentWorkflow, true);
+  assert.equal(settings.autoResolve, true);
+  assert.equal(settings.criticalSlaMinutes, 45);
+  assert.equal(settings.warningSlaMinutes, 360);
+  assert.equal(settings.maxEscalations, 3);
+  assert.equal(telegramTopicId(settings, 'customer'), 12);
+  assert.equal(telegramTopicId(settings, 'operations'), 0);
+  assert.equal(telegramIncidentId('orders'), telegramIncidentId('orders'));
+  assert.notEqual(telegramIncidentId('orders'), telegramIncidentId('messages'));
+});
+
+test('sprawę można przyjąć, odłożyć, zamknąć wewnętrznie i przywrócić', async () => {
+  const data = new Map(), read = async (key, fallback) => structuredClone(data.has(key) ? data.get(key) : fallback), write = async (key, value) => data.set(key, structuredClone(value));
+  const center = createTelegramCenter({ read, write, env: {} });
+  const operational = { priorities: [{ actionId: 'orders', severity: 'critical', count: 2, title: 'Nowe zamówienia', action: 'Sprawdź zamówienia' }] };
+  const view = await center.view(operational, false), id = view.incidents[0].id;
+  let result = await center.incidentAction(id, 'ack', { id: '1', name: 'Tomasz' });
+  assert.equal(result.incident.status, 'acknowledged');
+  assert.equal(result.incident.owner.name, 'Tomasz');
+  result = await center.incidentAction(id, 's1', { id: '1', name: 'Tomasz' });
+  assert.equal(result.incident.status, 'snoozed');
+  assert.ok(Date.parse(result.incident.snoozedUntil) > Date.now());
+  result = await center.incidentAction(id, 'resolve', { id: '1', name: 'Tomasz' });
+  assert.equal(result.incident.status, 'resolved');
+  result = await center.incidentAction(id, 'reopen', { id: '1', name: 'Tomasz' });
+  assert.equal(result.incident.status, 'open');
+});
+
+test('znikający problem jest zamykany, a prawdziwa nowa zmiana ponownie go otwiera', async () => {
+  const data = new Map(), read = async (key, fallback) => structuredClone(data.has(key) ? data.get(key) : fallback), write = async (key, value) => data.set(key, structuredClone(value));
+  const center = createTelegramCenter({ read, write, env: {} });
+  const first = { priorities: [{ actionId: 'shipping', severity: 'warning', count: 1, title: 'Wysyłka bez numeru', action: 'Uzupełnij numer' }] };
+  let view = await center.view(first, false);
+  const id = view.incidents[0].id;
+  view = await center.view({ priorities: [] }, false);
+  assert.equal(view.incidents.find((item) => item.id === id).status, 'resolved');
+  view = await center.view({ priorities: [{ actionId: 'shipping', severity: 'warning', count: 2, title: 'Wysyłki bez numeru', action: 'Uzupełnij numery' }] }, false);
+  assert.equal(view.incidents.find((item) => item.id === id).status, 'open');
 });

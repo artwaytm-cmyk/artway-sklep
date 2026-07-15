@@ -16,6 +16,18 @@ const DEFAULT_SETTINGS = Object.freeze({
   repeatOpenHours: 24,
   cooldownMinutes: 720,
   maxItems: 8,
+  incidentWorkflow: true,
+  autoResolve: true,
+  slaEnabled: true,
+  criticalSlaMinutes: 60,
+  warningSlaMinutes: 240,
+  escalationEnabled: true,
+  escalationRepeatMinutes: 120,
+  maxEscalations: 2,
+  topicRouting: false,
+  topicCustomer: 0,
+  topicOperations: 0,
+  topicSupplier: 0,
   timezone: 'Europe/Warsaw',
 });
 
@@ -56,6 +68,18 @@ export function telegramSettings(raw = {}) {
     repeatOpenHours: Math.max(1, Math.min(168, Number(source.repeatOpenHours) || DEFAULT_SETTINGS.repeatOpenHours)),
     cooldownMinutes: Math.max(15, Math.min(10080, Number(source.cooldownMinutes) || DEFAULT_SETTINGS.cooldownMinutes)),
     maxItems: Math.max(3, Math.min(20, Math.floor(Number(source.maxItems) || DEFAULT_SETTINGS.maxItems))),
+    incidentWorkflow: boolean(source.incidentWorkflow, DEFAULT_SETTINGS.incidentWorkflow),
+    autoResolve: boolean(source.autoResolve, DEFAULT_SETTINGS.autoResolve),
+    slaEnabled: boolean(source.slaEnabled, DEFAULT_SETTINGS.slaEnabled),
+    criticalSlaMinutes: Math.max(15, Math.min(1440, Math.floor(Number(source.criticalSlaMinutes) || DEFAULT_SETTINGS.criticalSlaMinutes))),
+    warningSlaMinutes: Math.max(30, Math.min(10080, Math.floor(Number(source.warningSlaMinutes) || DEFAULT_SETTINGS.warningSlaMinutes))),
+    escalationEnabled: boolean(source.escalationEnabled, DEFAULT_SETTINGS.escalationEnabled),
+    escalationRepeatMinutes: Math.max(30, Math.min(10080, Math.floor(Number(source.escalationRepeatMinutes) || DEFAULT_SETTINGS.escalationRepeatMinutes))),
+    maxEscalations: Math.max(1, Math.min(5, Math.floor(Number(source.maxEscalations) || DEFAULT_SETTINGS.maxEscalations))),
+    topicRouting: boolean(source.topicRouting, DEFAULT_SETTINGS.topicRouting),
+    topicCustomer: Math.max(0, Math.floor(Number(source.topicCustomer) || 0)),
+    topicOperations: Math.max(0, Math.floor(Number(source.topicOperations) || 0)),
+    topicSupplier: Math.max(0, Math.floor(Number(source.topicSupplier) || 0)),
     timezone: 'Europe/Warsaw',
   };
 }
@@ -70,6 +94,7 @@ export function telegramConfig(env = process.env) {
       env.TELEGRAM_CHAT_ID,
       ...String(env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(','),
     ].map((value) => String(value || '').trim()).filter(Boolean)),
+    allowedUserIds: new Set(String(env.TELEGRAM_ALLOWED_USER_IDS || '').split(',').map((value) => String(value || '').trim()).filter(Boolean)),
   };
 }
 
@@ -142,8 +167,41 @@ export async function sendTelegramHtml(message, options = {}, env = process.env)
     disable_web_page_preview: true,
     disable_notification: options.silent === true,
     ...(options.replyTo ? { reply_parameters: { message_id: Number(options.replyTo) } } : {}),
+    ...(Number(options.messageThreadId) > 0 ? { message_thread_id: Number(options.messageThreadId) } : {}),
     ...(options.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
   }, env);
+}
+
+export async function editTelegramHtml(message, options = {}, env = process.env) {
+  if (!options.messageId) throw new Error('Brakuje identyfikatora wiadomości Telegram do aktualizacji.');
+  const config = telegramConfig(env);
+  if (!config.chatId && !options.chatId) throw new Error('Telegram nie ma ustawionego czatu docelowego.');
+  return telegramApi('editMessageText', {
+    chat_id: options.chatId || config.chatId,
+    message_id: Number(options.messageId),
+    text: String(message || '').slice(0, 4090),
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+    ...(options.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
+  }, env);
+}
+
+export function telegramIncidentId(value = '') {
+  return crypto.createHash('sha256').update(String(value || 'incident')).digest('hex').slice(0, 14);
+}
+
+export function telegramSlaMinutes(event = {}, settingsInput = {}) {
+  const settings = telegramSettings(settingsInput);
+  if (!settings.slaEnabled) return 0;
+  return event.severity === 'critical' ? settings.criticalSlaMinutes : settings.warningSlaMinutes;
+}
+
+export function telegramTopicId(settingsInput = {}, category = 'operations') {
+  const settings = telegramSettings(settingsInput);
+  if (!settings.topicRouting) return 0;
+  if (category === 'customer') return settings.topicCustomer;
+  if (category === 'supplier') return settings.topicSupplier;
+  return settings.topicOperations;
 }
 
 function warsawParts(now = new Date()) {
@@ -244,6 +302,7 @@ export function telegramNaturalIntent(input = '') {
   if (['/wiadomosci', '/dyskusje'].includes(first) || /wiadom|dyskus|odpis|odpowiedz/.test(normalized)) return 'communication';
   if (['/wysylki', '/inpost'].includes(first) || /wysyl|inpost|etykiet|nadani/.test(normalized)) return 'shipping';
   if (first === '/magazyn' || /magazyn|stan produkt/.test(normalized)) return 'warehouse';
+  if (first === '/settings' || /ustawien|reguly telegram|polityk/.test(normalized)) return 'settings';
   return 'unknown';
 }
 

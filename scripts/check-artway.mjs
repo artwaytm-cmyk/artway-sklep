@@ -18,6 +18,7 @@ const files = [
   'netlify/functions/lib/domain/catalog-quality.mjs',
   'netlify/functions/lib/domain/telegram-communication.mjs',
   'netlify/functions/lib/telegram-center.mjs',
+  'netlify/functions/lib/telegram-router.mjs',
   'netlify/functions/lib/allegro-compliance.mjs',
   'netlify/functions/lib/infakt-purchase.mjs',
   'netlify/functions/cron-inpost-sync.mjs',
@@ -68,6 +69,7 @@ const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
 const infaktPurchase = read('netlify/functions/lib/infakt-purchase.mjs');
 const telegramCommunication = read('netlify/functions/lib/domain/telegram-communication.mjs');
 const telegramCenter = read('netlify/functions/lib/telegram-center.mjs');
+const telegramRouter = read('netlify/functions/lib/telegram-router.mjs');
 const cron = read('netlify/functions/cron-inpost-sync.mjs');
 const cronAllegroOrders = read('netlify/functions/cron-allegro-orders.mjs');
 const cronAllegroCommunications = read('netlify/functions/cron-allegro-communications.mjs');
@@ -453,7 +455,6 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'site_function_check',
   'data_sync',
   'agent_action_runs',
-  "action === 'telegram-send-agent-report'",
   'agentCentrumOperacyjne',
   'function allegroDopasowanieOferty',
   'function allegroSekcjeOpisu',
@@ -507,10 +508,6 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'allegro_orders_baseline_v2',
   'function allegroWyslijPrzypomnieniaTelegram',
   'humanReplyNeeded',
-  "action === 'telegram-center-status'",
-  "action === 'telegram-settings-save'",
-  "action === 'telegram-register-webhook'",
-  "action === 'telegram-dispatch'",
   'telegramCenter.managedEvent',
   "'zrealizowane'",
   'function infaktKonfiguracja',
@@ -556,18 +553,33 @@ requireMarkers('netlify/functions/lib/domain/telegram-communication.mjs', telegr
   "telegramCell('NAZWA', 30)",
   "telegramCell('POTRZEBNA ILOŚĆ', 16)",
   'function telegramNaturalIntent',
+  'function telegramIncidentId',
+  'function editTelegramHtml',
 ]);
 
 requireMarkers('netlify/functions/lib/telegram-center.mjs', telegramCenter, [
   'function createTelegramCenter',
   'async function managedEvent',
   'async function dispatch',
+  'async function incidentAction',
+  'async function refreshDashboard',
   'async function registerWebhook',
   'async function inbound',
 ]);
 
+requireMarkers('netlify/functions/lib/telegram-router.mjs', telegramRouter, [
+  "'telegram-center-status'",
+  "'telegram-settings-save'",
+  "'telegram-register-webhook'",
+  "'telegram-dispatch'",
+  "'telegram-incident-action'",
+  "'telegram-delivery-action'",
+  "'telegram-dashboard-refresh'",
+  "'telegram-send-agent-report'",
+]);
+
 requireMarkers('netlify/functions/cron-telegram-center.mjs', cronTelegramCenter, ["schedule: '*/15 * * * *'", "action=telegram-dispatch"]);
-requireMarkers('netlify/functions/telegram-webhook.mjs', telegramWebhook, ['x-telegram-bot-api-secret-token', 'telegram-inbound-command', 'allowedChatIds']);
+requireMarkers('netlify/functions/telegram-webhook.mjs', telegramWebhook, ['x-telegram-bot-api-secret-token', 'telegram-inbound-command', 'telegram-incident-action', 'allowedChatIds']);
 
 const ksefTestRows = infaktKsefPozycje(`<?xml version="1.0"?><Faktura><KodWaluty>PLN</KodWaluty><FaWiersz><P_7>Gra testowa 5901234123457</P_7><P_8A>szt.</P_8A><P_8B>2</P_8B><P_9A>100.00</P_9A><P_11>180.00</P_11><P_11A>221.40</P_11A><P_12>23</P_12><Indeks>ABC-123</Indeks></FaWiersz></Faktura>`);
 if (ksefTestRows.length !== 1 || ksefTestRows[0].unitNet !== 90 || ksefTestRows[0].unitGross !== 110.7 || ksefTestRows[0].ean !== '5901234123457') {
