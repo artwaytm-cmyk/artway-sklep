@@ -1777,10 +1777,42 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
   }
   return { mappings, autoMapped, refreshed, quarantined, descriptionsUpdated, producersUpdated, productsUpdated };
 }
+function allegroAgentWirtualnyProduktOferty(line = {}, offer = {}) {
+  const offerId = tekst(line.offerId || offer.id || '', 120).trim();
+  const haystack = allegroNormalizujKlucz([
+    offer.supplier, offer.dostawca, offer.producer, offer.producent, offer.manufacturer,
+    offer.brand, offer.name, line.offerName,
+  ].filter(Boolean).join(' '));
+  const supplier = haystack.includes('alexander') ? 'Alexander'
+    : haystack.includes('multigra') ? 'Multigra'
+      : (haystack.includes('godan') || haystack.includes('go dan')) ? 'Godan' : '';
+  const externalId = tekst(line.externalId || offer.externalId || '', 160).trim();
+  const ean = tekst(offer.ean || offer.gtin || '', 80).trim();
+  const producerCode = tekst(offer.manufacturerCode || offer.producerCode || '', 160).trim();
+  if (!offerId || !supplier || !(externalId || ean || producerCode)) return null;
+  const id = `allegro-offer:${offerId}`;
+  const name = tekst(line.offerName || offer.name || `Oferta Allegro ${offerId}`, 300).trim();
+  return {
+    id,
+    product: {
+      id, productId: id, nazwa: name, name,
+      externalId, sku: externalId, ean, gtin: ean, kodProducenta: producerCode,
+      producent: supplier, marka: supplier, dostawca: supplier,
+      zdjecie: tekst(offer.mainImage || offer.images?.[0] || '', 3000),
+      allegroOfferId: offerId, allegroProductId: tekst(offer.productId || '', 120),
+      virtualFromAllegroOffer: true,
+    },
+    match: 'pełne dane oferty Allegro — produkt poza kartoteką sklepu',
+    confidence: ean ? 99 : 96,
+    supplierMatchVerified: true,
+    matchEvidence: ['oferta Allegro', supplier, externalId || producerCode || ean],
+    virtualProduct: true,
+  };
+}
 function allegroAgentProduktDlaPozycji(line = {}, offer = {}, mappings = {}, products = new Map()) {
   const offerId = String(line.offerId || '').trim();
   const mapped = mappings[offerId];
-  if (mapped?.blocked === true) return null;
+  if (mapped?.blocked === true) return allegroAgentWirtualnyProduktOferty(line, offer);
   const mappedId = String(mapped?.productId ?? mapped?.produktId ?? mapped?.id ?? mapped ?? '').trim();
   if (mappedId && products.has(mappedId)) {
     const product = products.get(mappedId);
@@ -1820,7 +1852,7 @@ function allegroAgentProduktDlaPozycji(line = {}, offer = {}, mappings = {}, pro
     return score ? { product: p, score, match } : null;
   }).filter(Boolean).sort((a, b) => b.score - a.score);
   const best = candidates[0], second = candidates[1];
-  if (!best || best.score < 88 || (second && best.score - second.score < 5)) return null;
+  if (!best || best.score < 88 || (second && best.score - second.score < 5)) return allegroAgentWirtualnyProduktOferty(line, offer);
   return { id: String(best.product.id), product: best.product, match: best.match, confidence: best.score, supplierMatchVerified: best.score >= 88 };
 }
 function allegroAgentZlecenieAktywne(z = {}) {
@@ -1869,7 +1901,7 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
         const currentMappedId = String(currentMapping?.productId ?? currentMapping?.produktId ?? currentMapping?.id ?? currentMapping ?? '').trim();
         const requiresDurableMapping = !currentMapping || (currentMappedId && !products.has(currentMappedId))
           || currentMapping.verifiedForSupplier !== true || !currentMapping.productSnapshot;
-        if (offerId && match.supplierMatchVerified === true && requiresDurableMapping) {
+        if (offerId && match.supplierMatchVerified === true && !match.virtualProduct && requiresDurableMapping) {
           mappings[offerId] = { ...currentMapping, offerId, productId: String(match.id), allegroProductId: tekst(offer.productId || '', 120), categoryId: tekst(offer.categoryId || '', 80), productName: tekst(match.product?.nazwa || match.product?.name || line.offerName || '', 300), linked_at: currentMapping?.linked_at || new Date().toISOString(), synced_at: new Date().toISOString(), operator: currentMapping?.operator || `auto-order:${match.match}`, confidence: Number(match.confidence || 0), verifiedForSupplier: true, verification: currentMapping?.verification || 'strong-identifiers', productSnapshot: mappingProductSnapshot(match.product, dane) };
           autoMapped++;
         }

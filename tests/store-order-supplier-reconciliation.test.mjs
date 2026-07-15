@@ -262,6 +262,31 @@ test('Allegro zasila ten sam Plan bez duplikatów; spakowane rezerwuje do wysył
   assert.equal(closedDrafts[0].status, 'wyczyszczone');
 });
 
+test('oferta Allegro bez produktu sklepu tworzy osobny szkic producenta z kodem oferty', async () => {
+  const repo = memoryRepository({
+    orders: { items: [] },
+    allegro_orders: { items: [{
+      id: 'ALG-MOZAIKA', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'NEW',
+      lineItems: [{ offerId: 'O-MOZAIKA', externalId: 'M0195', offerName: 'Mozaika 200 elementów - Multigra', quantity: 1 }],
+      agentAnalysis: { positions: [{ offerId: 'O-MOZAIKA', nazwa: 'Mozaika 200 elementów', ilosc: 1, decision: 'nierozpoznany' }] },
+    }] },
+    allegro_mappings: { items: { 'O-MOZAIKA': { productId: '', blocked: true, operator: 'admin-unmapped' } } },
+    allegro_offers: { items: [{
+      id: 'O-MOZAIKA', name: 'Mozaika 200 elementów - Multigra - gry dla każdego', externalId: 'M0195',
+      ean: '05906395301959', manufacturerCode: 'MG1959',
+    }] },
+    settings: { rev: 1, data: { artway_stany: {}, artway_produkty_dodane: [], artway_agent_ai_zlecenia: [] } },
+  });
+
+  const result = await service(repo).reconcileDrafts();
+  const draft = repo.records.get('settings').data.artway_agent_ai_zlecenia.find((item) => item.pozycje?.length);
+  assert.equal(result.changed, true);
+  assert.equal(draft.supplier, 'Multigra');
+  assert.deepEqual(draft.pozycje.map((line) => ({ id: line.produktId, kod: line.kod, ilosc: line.ilosc })), [
+    { id: 'allegro-offer:O-MOZAIKA', kod: 'M0195', ilosc: 1 },
+  ]);
+});
+
 test('wysłane Allegro zdejmuje zmapowany stan dokładnie raz, a kolejne zlecenie widzi rzeczywisty brak', async () => {
   const mappedPosition = (quantity = 1) => ({ offerId: 'O-1', productId: 'P-1', nazwa: 'Gra Allegro', ilosc: quantity, match: 'EAN/GTIN', confidence: 99, supplierMatchVerified: true });
   const sent = { id: 'ALG-SENT', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'SENT', inventoryDeductionPending: true, agentAnalysis: { positions: [mappedPosition()] } };

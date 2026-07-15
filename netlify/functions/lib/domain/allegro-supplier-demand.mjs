@@ -103,6 +103,87 @@ function catalogIdSet(products) {
   return new Set(products.map((product) => text(product?.id ?? product?.produktId ?? product?.productId, 160)).filter(Boolean));
 }
 
+function offerIndex(record = []) {
+  const source = Array.isArray(record)
+    ? record
+    : Array.isArray(object(record).items)
+      ? object(record).items
+      : Object.values(object(record).items || object(record));
+  return new Map(source.map((offer) => [text(offer?.id || offer?.offerId, 160), object(offer)]).filter(([id]) => id));
+}
+
+function supplierFromOffer(offer = {}, line = {}) {
+  const haystack = normalized([
+    offer.supplier, offer.dostawca, offer.producer, offer.producent, offer.manufacturer,
+    offer.brand, offer.name, line.offerName, line.name, line.nazwa,
+  ].filter(Boolean).join(' '));
+  if (haystack.includes('alexander')) return 'Alexander';
+  if (haystack.includes('multigra')) return 'Multigra';
+  if (haystack.includes('godan') || haystack.includes('go dan')) return 'Godan';
+  return '';
+}
+
+/**
+ * Oferta Allegro jest samodzielnym źródłem zakupu, gdy kartoteka sklepu nie
+ * istnieje. Nie tworzymy sztucznego mapowania do innego produktu: stabilnym ID
+ * jest wtedy ID oferty, a producent i kody pochodzą wyłącznie z oferty.
+ */
+function virtualProductFromOffer(offer = {}, line = {}) {
+  const offerId = text(line?.offerId ?? line?.offer?.id ?? offer?.id, 160);
+  const supplier = supplierFromOffer(offer, line);
+  const externalId = text(line?.externalId || offer?.externalId, 160);
+  const ean = text(offer?.ean || offer?.gtin || line?.ean || line?.gtin, 80);
+  const producerCode = text(offer?.manufacturerCode || offer?.producerCode || line?.manufacturerCode || line?.producerCode, 160);
+  if (!offerId || !supplier || !(externalId || ean || producerCode)) return null;
+  const productId = `allegro-offer:${offerId}`;
+  const name = text(line?.offerName || line?.name || line?.nazwa || offer?.name || `Oferta Allegro ${offerId}`, 300);
+  return {
+    id: productId,
+    productId,
+    nazwa: name,
+    name,
+    externalId,
+    sku: externalId,
+    ean,
+    gtin: ean,
+    kodProducenta: producerCode,
+    producent: supplier,
+    marka: supplier,
+    dostawca: supplier,
+    zdjecie: text(offer?.mainImage || array(offer?.images)[0], 3000),
+    allegroOfferId: offerId,
+    allegroProductId: text(offer?.productId, 160),
+    virtualFromAllegroOffer: true,
+  };
+}
+
+function orderLines(order = {}) {
+  const analyzed = array(order.agentAnalysis?.positions);
+  const raw = array(order.lineItems || order.items || order.pozycjeDane || order.pozycje || order.products);
+  if (!raw.length) return analyzed;
+  if (!analyzed.length) return raw;
+  const byOffer = new Map();
+  for (const position of analyzed) {
+    const offerId = text(position?.offerId ?? position?.offer?.id, 160);
+    if (!byOffer.has(offerId)) byOffer.set(offerId, []);
+    byOffer.get(offerId).push(position);
+  }
+  const merged = raw.map((line) => {
+    const offerId = text(line?.offerId ?? line?.offer?.id, 160);
+    const analyzedLine = byOffer.get(offerId)?.shift();
+    if (!analyzedLine) return line;
+    return {
+      ...line,
+      ...analyzedLine,
+      offerId: analyzedLine.offerId || line.offerId,
+      offerName: analyzedLine.offerName || analyzedLine.nazwa || line.offerName,
+      quantity: analyzedLine.quantity ?? analyzedLine.ilosc ?? line.quantity ?? line.ilosc,
+    };
+  });
+  for (const queue of byOffer.values()) merged.push(...queue);
+  return merged;
+}
+
 function virtualProductSnapshot(mapping = {}, line = {}, productId = '') {
   const snapshot = { ...object(line.product || line.produkt), ...object(mapping.productSnapshot) };
   const ean = text(snapshot.ean || snapshot.gtin || mapping.ean || line.ean || line.gtin, 80);
@@ -124,19 +205,20 @@ function virtualProductSnapshot(mapping = {}, line = {}, productId = '') {
   };
 }
 
-function demandItems(order = {}, mappings = new Map(), knownProductIds = null, diagnostics = {}, { allowVirtualProducts = false } = {}) {
+function demandItems(order = {}, mappings = new Map(), knownProductIds = null, diagnostics = {}, { allowVirtualProducts = false, offers = new Map() } = {}) {
   const analyzed = array(order.agentAnalysis?.positions);
-  const source = analyzed.length ? analyzed : array(order.lineItems || order.items || order.pozycjeDane || order.pozycje || order.products);
+  const source = orderLines(order);
   const grouped = new Map();
   for (const line of source) {
     const amount = quantity(line?.ilosc ?? line?.quantity ?? line?.qty);
     if (amount <= 0) { bump(diagnostics, 'skippedInvalidQuantity'); continue; }
     bump(diagnostics, 'requiredLines');
-    if (normalized(line?.decision) === 'nierozpoznany') { bump(diagnostics, 'skippedUnresolvedLine'); continue; }
     const offerId = text(line?.offerId ?? line?.offer?.id, 160);
     const mapping = offerId ? mappings.get(offerId) : null;
+    const offerProduct = allowVirtualProducts ? virtualProductFromOffer(offers.get(offerId) || {}, line) : null;
     // Jawne odpięcie/kwarantanna ma pierwszeństwo przed starym wynikiem analizy.
-    if (mapping && (mapping.blocked || !mapping.productId)) { bump(diagnostics, 'skippedBlockedMapping'); bump(diagnostics, 'skippedUnresolvedLine'); continue; }
+    if (mapping && (mapping.blocked || !mapping.productId) && !offerProduct) { bump(diagnostics, 'skippedBlockedMapping'); bump(diagnostics, 'skippedUnresolvedLine'); continue; }
+    if (normalized(line?.decision) === 'nierozpoznany' && !offerProduct) { bump(diagnostics, 'skippedUnresolvedLine'); continue; }
     const analyzedProductId = text(
       line?.localProductId || line?.mappedProductId || line?.storeProductId || line?.produktId
       || (analyzed.length ? line?.productId : ''),
@@ -155,7 +237,7 @@ function demandItems(order = {}, mappings = new Map(), knownProductIds = null, d
       ? analyzedProductId
       : mappingVerified
         ? mapping.productId
-        : '';
+        : offerProduct?.productId || '';
     if (!productId && (analyzedProductId || mapping?.productId)) {
       bump(diagnostics, 'skippedWeakMapping');
       bump(diagnostics, 'skippedUnresolvedLine');
@@ -164,10 +246,12 @@ function demandItems(order = {}, mappings = new Map(), knownProductIds = null, d
     if (!productId) { bump(diagnostics, 'skippedUnresolvedLine'); continue; }
     const missingFromCatalog = !!knownProductIds && !knownProductIds.has(productId);
     if (missingFromCatalog && !allowVirtualProducts) { bump(diagnostics, 'skippedUnknownProduct'); bump(diagnostics, 'skippedUnresolvedLine'); continue; }
-    if (missingFromCatalog && allowVirtualProducts && !(analysisVerified || mappingVerified)) { bump(diagnostics, 'skippedUnknownProduct'); bump(diagnostics, 'skippedUnresolvedLine'); continue; }
+    if (missingFromCatalog && allowVirtualProducts && !(analysisVerified || mappingVerified || offerProduct)) { bump(diagnostics, 'skippedUnknownProduct'); bump(diagnostics, 'skippedUnresolvedLine'); continue; }
     bump(diagnostics, 'mappedLines');
     if (missingFromCatalog) bump(diagnostics, 'virtualProductLines');
-    const virtualProduct = missingFromCatalog ? virtualProductSnapshot(mapping || {}, line, productId) : null;
+    const virtualProduct = missingFromCatalog
+      ? (offerProduct || virtualProductSnapshot(mapping || {}, line, productId))
+      : null;
     const current = grouped.get(productId) || {
       id: productId,
       productId,
@@ -185,8 +269,9 @@ function demandItems(order = {}, mappings = new Map(), knownProductIds = null, d
 }
 
 /** Przekształca Allegro do tego samego kanonicznego wejścia popytu co sklep. */
-export function allegroOrdersForSupplierDemand(allegroOrders = [], mappingsRecord = {}, shopOrders = [], catalogProducts) {
+export function allegroOrdersForSupplierDemand(allegroOrders = [], mappingsRecord = {}, shopOrders = [], catalogProducts, allegroOffers = []) {
   const mappings = mappingIndex(mappingsRecord);
+  const offers = offerIndex(allegroOffers);
   const knownProductIds = catalogIdSet(catalogProducts);
   const shopIds = new Set(array(shopOrders).flatMap((order) => [order?.nr, order?.number, order?.id, order?.sourceOrderId]).map((value) => text(value, 180)).filter(Boolean));
   const orders = [], seen = new Set();
@@ -198,7 +283,7 @@ export function allegroOrdersForSupplierDemand(allegroOrders = [], mappingsRecor
     seen.add(sourceId);
     if (!active(order)) { diagnostics.skippedFinal += 1; continue; }
     diagnostics.active += 1;
-    const items = demandItems(order, mappings, knownProductIds, diagnostics, { allowVirtualProducts: true });
+    const items = demandItems(order, mappings, knownProductIds, diagnostics, { allowVirtualProducts: true, offers });
     if (!items.length) { diagnostics.skippedUnmapped += 1; continue; }
     orders.push({
       nr: `Allegro ${sourceId}`,

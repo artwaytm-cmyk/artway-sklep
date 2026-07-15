@@ -79,6 +79,44 @@ test('zatwierdzone mapowanie zachowuje popyt także po zniknięciu produktu z ak
   assert.equal(result.diagnostics.virtualProductLines, 1);
 });
 
+test('odpięta oferta bez kartoteki sklepu nadal zasila plan z kompletnych danych Allegro', () => {
+  const result = allegroOrdersForSupplierDemand([{
+    id: 'ALG-OFFER-ONLY', status: 'READY_FOR_PROCESSING',
+    lineItems: [{ offerId: 'O-MULTI', externalId: 'M0195', offerName: 'Mozaika 200 elementów - Multigra', quantity: 2 }],
+    agentAnalysis: { positions: [{ offerId: 'O-MULTI', nazwa: 'Mozaika 200 elementów', ilosc: 2, decision: 'nierozpoznany' }] },
+  }], { items: { 'O-MULTI': { productId: '', blocked: true, operator: 'admin-unmapped' } } }, [], catalog, [{
+    id: 'O-MULTI', name: 'Mozaika 200 elementów - Multigra - gry dla każdego', externalId: 'M0195',
+    ean: '05906395301959', manufacturerCode: 'MG1959', mainImage: 'https://img.test/mozaika.jpg',
+  }]);
+
+  assert.equal(result.orders.length, 1);
+  assert.deepEqual(result.orders[0].pozycjeDane.map((line) => ({
+    id: line.productId, ilosc: line.ilosc, supplier: line.product.dostawca, code: line.product.externalId,
+  })), [{ id: 'allegro-offer:O-MULTI', ilosc: 2, supplier: 'Multigra', code: 'M0195' }]);
+  assert.equal(result.diagnostics.virtualProductLines, 1);
+  assert.equal(result.diagnostics.mappedLines, 1);
+});
+
+test('częściowa analiza nie gubi pozostałych pozycji źródłowego zamówienia', () => {
+  const result = allegroOrdersForSupplierDemand([{
+    id: 'ALG-PARTIAL-ANALYSIS', status: 'READY_FOR_PROCESSING',
+    lineItems: [
+      { offerId: 'O-1', offerName: 'Gra 1', quantity: 1 },
+      { offerId: 'O-2', offerName: 'Gra 2', quantity: 3 },
+    ],
+    agentAnalysis: { positions: [
+      { offerId: 'O-1', productId: 'P-1', nazwa: 'Gra 1', ilosc: 1, match: 'EAN/GTIN', confidence: 99, supplierMatchVerified: true },
+    ] },
+  }], { items: {
+    'O-1': { productId: 'P-1', verifiedForSupplier: true },
+    'O-2': { productId: 'P-2', verifiedForSupplier: true },
+  } }, [], catalog);
+
+  assert.deepEqual(result.orders[0].pozycjeDane.map((line) => [line.productId, line.ilosc]), [['P-1', 1], ['P-2', 3]]);
+  assert.equal(result.diagnostics.requiredLines, 2);
+  assert.equal(result.diagnostics.mappedLines, 2);
+});
+
 test('starsze ręczne mapowanie administratora jest migrowane bez ponownego klikania', () => {
   const result = allegroOrdersForSupplierDemand([{
     id: 'ALG-LEGACY-MANUAL', status: 'READY_FOR_PROCESSING',

@@ -140,18 +140,25 @@ export function createStoreOrderSupplierReconciliation({
 
   async function reconcileDrafts() {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const [ordersVersion, settingsVersion, allegroVersion, mappingsVersion] = await Promise.all([
+      const [ordersVersion, settingsVersion, allegroVersion, mappingsVersion, offersVersion] = await Promise.all([
         readVersioned('orders', { items: [], updated_at: null }),
         readVersioned('settings', { data: {}, rev: 0, updated_at: null }),
         readVersioned('allegro_orders', { items: [], updated_at: null }),
         readVersioned('allegro_mappings', { items: {}, updated_at: null }),
+        readVersioned('allegro_offers', { items: [], updated_at: null }),
       ]);
       const settingsRecord = object(settingsVersion.value);
       const settings = object(settingsRecord.data);
       const mergedSettings = object(await mergeImportedSettings(settings));
       const shopOrders = array(object(ordersVersion.value).items);
       const products = array(catalogProducts(mergedSettings));
-      const allegroDemand = allegroOrdersForSupplierDemand(array(object(allegroVersion.value).items), object(mappingsVersion.value), shopOrders, products);
+      const allegroDemand = allegroOrdersForSupplierDemand(
+        array(object(allegroVersion.value).items),
+        object(mappingsVersion.value),
+        shopOrders,
+        products,
+        array(object(offersVersion.value).items),
+      );
       const orders = normalizeOrderInventoryModes([...shopOrders, ...allegroDemand.orders], settings);
       const result = reconcile({
         orders,
