@@ -100,18 +100,25 @@ export function telegramConfig(env = process.env) {
   const explicitChats = new Set(String(env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map((value) => String(value || '').trim()).filter(Boolean));
   const explicitUsers = new Set(String(env.TELEGRAM_ALLOWED_USER_IDS || '').split(',').map((value) => String(value || '').trim()).filter(Boolean));
   const ownerBootstrap = new Set([...bootstrapChats].filter((value) => /^\d+$/.test(value)));
+  const approverBootstrap = new Set([String(env.TELEGRAM_CHAT_ID || '').trim()].filter((value) => /^[1-9]\d*$/.test(value)));
+  const explicitApprovers = new Set(String(env.TELEGRAM_APPROVER_USER_IDS || '').split(',')
+    .map((value) => String(value || '').trim()).filter((value) => /^[1-9]\d*$/.test(value)));
+  const approverUserIds = new Set([...approverBootstrap, ...explicitApprovers]);
   return {
     token: text(env.TELEGRAM_BOT_TOKEN || '', 300).trim(),
     chatId: text(env.TELEGRAM_NOTIFY_CHAT_ID || env.TELEGRAM_GROUP_ID || env.TELEGRAM_CHAT_ID || '', 100).trim(),
     allowedChatIds: new Set([...bootstrapChats, ...explicitChats]),
     allowedUserIds: explicitUsers,
+    approverUserIds,
     allowlistCounts: {
       chats: new Set([...bootstrapChats, ...explicitChats]).size,
       users: new Set([...ownerBootstrap, ...explicitUsers]).size,
+      approvers: approverUserIds.size,
       ownerBootstrap: ownerBootstrap.size,
       chatBootstrap: bootstrapChats.size,
       explicitChats: explicitChats.size,
       explicitUsers: explicitUsers.size,
+      explicitApprovers: explicitApprovers.size,
     },
   };
 }
@@ -133,8 +140,63 @@ export function telegramActorAllowed(config = {}, actor = {}) {
   return chats.has(chatId) && (users.has(userId) || chats.has(userId));
 }
 
+export function telegramApproverAllowed(config = {}, actor = {}) {
+  const userId = String(actor.userId || '').trim();
+  const approvers = config.approverUserIds instanceof Set ? config.approverUserIds : new Set();
+  return /^[1-9]\d*$/.test(userId) && approvers.has(userId);
+}
+
 export function telegramHtml(value) {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+export function telegramSafeAgentHtml(value = '', limit = 3900) {
+  const source = String(value ?? ''), maxLength = Math.max(64, Math.min(4000, Number(limit) || 3900));
+  const allowed = new Set(['b', 'strong', 'i', 'em', 'u', 's', 'code', 'pre']);
+  const stack = [];
+  let output = '', cursor = 0, truncated = false;
+  const closingLength = () => stack.reduce((sum, tag) => sum + tag.length + 3, 0);
+  const appendText = (textValue = '') => {
+    for (const character of String(textValue)) {
+      const escaped = character === '&' ? '&amp;' : character === '<' ? '&lt;' : character === '>' ? '&gt;' : character;
+      if (output.length + escaped.length + closingLength() + 1 > maxLength) {
+        truncated = true;
+        return false;
+      }
+      output += escaped;
+    }
+    return true;
+  };
+  const tagPattern = /<[^>]*>/g;
+  let match;
+  while (!truncated && (match = tagPattern.exec(source))) {
+    if (!appendText(source.slice(cursor, match.index))) break;
+    const raw = match[0], parsed = raw.match(/^<(\/)?(b|strong|i|em|u|s|code|pre)>$/i);
+    if (!parsed || !allowed.has(parsed[2].toLowerCase())) {
+      if (!appendText(raw)) break;
+    } else {
+      const tag = parsed[2].toLowerCase();
+      if (parsed[1]) {
+        if (stack.at(-1) === tag) {
+          output += `</${tag}>`;
+          stack.pop();
+        } else if (!appendText(raw)) break;
+      } else {
+        const opening = `<${tag}>`, closing = `</${tag}>`;
+        if (output.length + opening.length + closingLength() + closing.length + 1 > maxLength) {
+          truncated = true;
+          break;
+        }
+        output += opening;
+        stack.push(tag);
+      }
+    }
+    cursor = tagPattern.lastIndex;
+  }
+  if (!truncated) appendText(source.slice(cursor));
+  if (truncated && output.length + closingLength() + 1 <= maxLength) output += '…';
+  while (stack.length) output += `</${stack.pop()}>`;
+  return output;
 }
 
 export function telegramCell(value, width) {

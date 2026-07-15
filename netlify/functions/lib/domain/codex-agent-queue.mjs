@@ -12,6 +12,12 @@ const WORKER_ONLINE_MS = 75_000;
 const FAILURE_NOTIFICATION_LEASE_MS = 30_000;
 const FAILURE_NOTIFICATION_MAX_ATTEMPTS = 3;
 const FAILURE_NOTIFICATION_RETRY_MS = [10_000, 60_000];
+const MAX_REPLY_MARKUP_ROWS = 12;
+const MAX_REPLY_MARKUP_BUTTONS_PER_ROW = 4;
+const MAX_REPLY_MARKUP_BUTTONS = 24;
+const MAX_REPLY_MARKUP_TEXT = 64;
+const MAX_REPLY_MARKUP_CALLBACK_BYTES = 64;
+const TELEGRAM_INBOUND_KINDS = new Set(['text', 'command', 'callback', 'voice', 'audio']);
 
 function clean(value = '', limit = 500) {
   return String(value ?? '').trim().slice(0, limit);
@@ -37,10 +43,59 @@ function cleanMedia(value = null) {
   };
 }
 
+export function sanitizeCodexInboundKind(value = '', channel = 'telegram') {
+  if (channel === 'panel') return 'panel';
+  const kind = String(value ?? '').trim().toLowerCase();
+  return TELEGRAM_INBOUND_KINDS.has(kind) ? kind : 'text';
+}
+
+function cleanButtonText(value = '') {
+  return [...String(value ?? '')
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .trim()].slice(0, MAX_REPLY_MARKUP_TEXT).join('');
+}
+
+function allowedCallbackData(value = '') {
+  const data = String(value ?? '');
+  if (!data || Buffer.byteLength(data, 'utf8') > MAX_REPLY_MARKUP_CALLBACK_BYTES) return '';
+  if (/^iv:[cr]:IV[a-f0-9]{14}$/.test(data)) return data;
+  if (/^iv:l:IV[a-f0-9]{14}:[A-Z0-9._/-]{1,40}$/.test(data)) return data;
+  if (/^aa:[cr]:AA[a-f0-9]{12}$/.test(data)) return data;
+  return '';
+}
+
+export function sanitizeCodexReplyMarkup(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!Array.isArray(value.inline_keyboard)) return null;
+  const rows = [];
+  let buttonCount = 0;
+  for (const sourceRow of value.inline_keyboard.slice(0, MAX_REPLY_MARKUP_ROWS)) {
+    if (!Array.isArray(sourceRow)) continue;
+    const row = [];
+    for (const sourceButton of sourceRow.slice(0, MAX_REPLY_MARKUP_BUTTONS_PER_ROW)) {
+      if (buttonCount >= MAX_REPLY_MARKUP_BUTTONS) break;
+      if (!sourceButton || typeof sourceButton !== 'object' || Array.isArray(sourceButton)) continue;
+      const text = cleanButtonText(sourceButton.text), callbackData = allowedCallbackData(sourceButton.callback_data);
+      if (!text || !callbackData) continue;
+      row.push({ text, callback_data: callbackData });
+      buttonCount += 1;
+    }
+    if (row.length) rows.push(row);
+    if (buttonCount >= MAX_REPLY_MARKUP_BUTTONS) break;
+  }
+  return rows.length ? { inline_keyboard: rows } : null;
+}
+
 function asRecord(value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
-    items: Array.isArray(source.items) ? source.items.filter((item) => item && typeof item === 'object') : [],
+    items: Array.isArray(source.items) ? source.items
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => ({
+        ...item,
+        kind: sanitizeCodexInboundKind(item.kind, item.channel),
+        replyMarkup: item.status === 'delivering' ? sanitizeCodexReplyMarkup(item.replyMarkup) : null,
+      })) : [],
     updatedAt: clean(source.updatedAt, 40),
     lastWorkerPollAt: clean(source.lastWorkerPollAt, 40),
     lastWorkerHeartbeatAt: clean(source.lastWorkerHeartbeatAt, 40),
@@ -120,8 +175,10 @@ function publicJob(job = {}) {
     userId: clean(job.userId, 100),
     context: terminal ? '' : cleanContext(job.context),
     media: terminal ? null : cleanMedia(job.media),
+    replyMarkup: job.status === 'delivering' ? sanitizeCodexReplyMarkup(job.replyMarkup) : null,
     requestId: clean(job.requestId, 160),
     channel: job.channel === 'panel' ? 'panel' : 'telegram',
+    kind: sanitizeCodexInboundKind(job.kind, job.channel),
     attempts: Math.max(0, Number(job.attempts) || 0),
     expiresAt: clean(job.expiresAt, 40),
   };
@@ -172,7 +229,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
           const failed = {
             ...existing, status: 'failed', failureKind: 'worker_offline', failedAt: timestamp.toISOString(),
             lastError: 'Lokalny Agent Codex jest offline. Polecenie nie zostało pozostawione do późniejszego wykonania.',
-            text: '', context: '', media: null, response: '', claimToken: '', leaseUntil: '', workerId: '',
+            text: '', context: '', media: null, replyMarkup: null, response: '', claimToken: '', leaseUntil: '', workerId: '',
           };
           items[index] = failed;
           return { record: { items }, value: { job: publicJob(failed), duplicate: true, status: failed.status, ...presence } };
@@ -187,6 +244,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
         id: `CX-${crypto.createHash('sha256').update(requestId).digest('hex').slice(0, 20)}`,
         requestId,
         channel,
+        kind: sanitizeCodexInboundKind(input.kind, channel),
         text: offline ? '' : text,
         context: offline ? '' : cleanContext(input.context),
         media: offline ? null : media,
@@ -235,7 +293,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
           lastError: jobExpired
             ? `${panelExpired ? 'Zadanie panelu' : 'Polecenie Telegram'} wygasło przed wykonaniem. Nic nie zostało uruchomione w tle.`
             : 'Nie udało się jednoznacznie potwierdzić dostarczenia odpowiedzi; nie ponowiono jej, aby uniknąć duplikatu.',
-          text: '', context: '', media: null, response: '', claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '',
+          text: '', context: '', media: null, replyMarkup: null, response: '', claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '',
           ...(failureNotification ? { failureNotification } : {}),
         };
       });
@@ -290,6 +348,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
 
   async function prepareDelivery(input = {}) {
     const id = clean(input.id, 160), claimToken = clean(input.claimToken, 200), response = clean(input.response, 3900);
+    const replyMarkup = sanitizeCodexReplyMarkup(input.replyMarkup);
     if (!id || !claimToken || !response) throw queueError('Brakuje danych odpowiedzi Codex.', 'codex_queue_delivery_invalid', 422);
     const outcome = await change((record) => {
       const index = record.items.findIndex((item) => item.id === id);
@@ -303,12 +362,12 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
         items[index] = {
           ...current, status: 'failed', failedAt: now().toISOString(),
           lastError: 'Zadanie panelu wygasło przed zakończeniem. Wynik nie został zastosowany.',
-          text: '', context: '', media: null, response: '', claimToken: '', leaseUntil: '', workerId: '',
+          text: '', context: '', media: null, replyMarkup: null, response: '', claimToken: '', leaseUntil: '', workerId: '',
         };
         return { record: { items }, value: { expired: true } };
       }
       const deliveryStart = now();
-      const job = { ...current, status: 'delivering', response, deliveryStartedAt: deliveryStart.toISOString(), deliveryLeaseUntil: new Date(deliveryStart.getTime() + LEASE_MS).toISOString() };
+      const job = { ...current, status: 'delivering', response, replyMarkup, deliveryStartedAt: deliveryStart.toISOString(), deliveryLeaseUntil: new Date(deliveryStart.getTime() + LEASE_MS).toISOString() };
       const items = [...record.items]; items[index] = job;
       return { record: { items }, value: { job: { ...publicJob(job), response } } };
     });
@@ -344,7 +403,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
       if (current.status !== 'delivering' || current.claimToken !== claimToken) throw queueError('Wygasło prawo do zakończenia zadania.', 'codex_queue_claim_invalid');
       const job = {
         ...current, status: 'completed', deliveredAt: now().toISOString(), telegramMessageId: clean(input.telegramMessageId, 80),
-        text: '', context: '', media: null, response: input.keepResponse === true ? clean(current.response, 3900) : '', claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '',
+        text: '', context: '', media: null, replyMarkup: null, response: input.keepResponse === true ? clean(current.response, 3900) : '', claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '',
       };
       const items = [...record.items]; items[index] = job;
       return { record: { items }, value: { delivered: true, duplicate: false } };
@@ -368,7 +427,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
       const job = {
         ...current, status: exhausted ? 'failed' : 'queued', lastError: expired ? 'Zadanie wygasło przed wykonaniem. Nic nie zostało uruchomione w tle.' : (error || 'Nieznany błąd pracownika Codex'),
         failedAt: timestamp.toISOString(), notBefore: new Date(timestamp.getTime() + 10_000).toISOString(),
-        claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '', response: '',
+        claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '', response: '', replyMarkup: null,
         ...(exhausted ? { text: '', context: '', media: null } : {}),
         ...(notification ? { failureNotification: notification } : {}),
       };

@@ -1,4 +1,4 @@
-import { sendTelegramHtml, telegramHtml } from './domain/telegram-communication.mjs';
+import { sendTelegramHtml, telegramApi, telegramHtml, telegramSafeAgentHtml } from './domain/telegram-communication.mjs';
 import { telegramAgentReport } from './telegram-center.mjs';
 
 const ACTIONS = new Set([
@@ -9,6 +9,13 @@ const ACTIONS = new Set([
 ]);
 
 const CODEX_FAILURE_NOTICE = '<b>⚠️ Nie udało się dokończyć tej prośby.</b>\nSpróbuj wysłać ją ponownie za chwilę.';
+
+export function codexAgentApprovalReplyTarget(job = {}) {
+  const text = String(job.text ?? '');
+  const chatId = String(job.chatId ?? '').trim(), replyTo = Number(job.replyTo);
+  if (job.channel === 'panel' || job.kind !== 'callback' || !/^aa:[cr]:AA[a-f0-9]{12}$/.test(text) || !chatId || !Number.isInteger(replyTo) || replyTo <= 0) return null;
+  return { chatId, messageId: replyTo };
+}
 
 function invalidReplyTarget(error) {
   const status = Number(error?.status) || 0;
@@ -86,7 +93,7 @@ async function deliverCodexFailureNotification(codexQueue, sendTelegram, sanitiz
   };
 }
 
-export function createTelegramRouter({ center, codexQueue, getOperationalCenter, inventoryCommand, inventoryDecisions, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text, sendTelegram = sendTelegramHtml }) {
+export function createTelegramRouter({ center, codexQueue, getOperationalCenter, inventoryCommand, inventoryDecisions, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text, sendTelegram = sendTelegramHtml, clearTelegramReplyMarkup = ({ chatId, messageId }) => telegramApi('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }) }) {
   return async function telegramRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
     if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -110,7 +117,7 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
     }
     if (action === 'codex-agent-panel-enqueue') {
       if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
-      const queued = await codexQueue.enqueue({ requestId: body.requestId, text: body.text, channel: 'panel', user: operator });
+      const queued = await codexQueue.enqueue({ requestId: body.requestId, text: body.text, channel: 'panel', kind: 'panel', user: operator });
       const deferred = ['queued', 'processing', 'delivering'].includes(queued.status);
       return respond({
         ok: true, deferred, status: queued.status, workerOnline: queued.workerOnline === true,
@@ -137,10 +144,11 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
       }
       let sent;
       try {
-        sent = await sendTelegram(telegramHtml(prepared.job.response), {
+        sent = await sendTelegram(telegramSafeAgentHtml(prepared.job.response), {
           chatId: prepared.job.chatId,
           replyTo: prepared.job.replyTo,
           messageThreadId: prepared.job.messageThreadId,
+          replyMarkup: prepared.job.replyMarkup || undefined,
         });
       } catch (error) {
         // Po wywołaniu zewnętrznego API nie wiemy, czy odpowiedź nie zaginęła
@@ -152,6 +160,8 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
       // Po sukcesie Telegram nie ponawiamy wysyłki, nawet jeśli sam zapis
       // audytu chwilowo zawiedzie — chroni to rozmowę przed duplikatem.
       const completed = await codexQueue.markDelivered({ id: body.id, claimToken: body.claimToken, telegramMessageId: sent?.message_id });
+      const approvalTarget = codexAgentApprovalReplyTarget(prepared.job);
+      if (completed.delivered === true && approvalTarget) await clearTelegramReplyMarkup(approvalTarget).catch(() => null);
       return respond({ ok: true, ...completed, messageId: sent?.message_id || null });
     }
     if (action === 'codex-agent-fail') {
@@ -230,7 +240,7 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
       if (body.deferToCodex === true && body.source === 'telegram-webhook' && codexQueue) {
         const queued = await codexQueue.enqueue({
           requestId: body.requestId, text: body.text, chatId: body.chatId, messageThreadId: body.messageThreadId,
-          replyTo: body.replyTo, user: body.user, userId: body.userId, context: body.context, media: body.media, channel: 'telegram',
+          replyTo: body.replyTo, user: body.user, userId: body.userId, context: body.context, media: body.media, kind: body.kind, channel: 'telegram',
         });
         const deferred = ['queued', 'processing', 'delivering'].includes(queued.status);
         if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred, kind: body.kind || 'text' });

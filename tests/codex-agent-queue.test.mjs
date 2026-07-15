@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCodexAgentQueue } from '../netlify/functions/lib/domain/codex-agent-queue.mjs';
+import { createCodexAgentQueue, sanitizeCodexInboundKind, sanitizeCodexReplyMarkup } from '../netlify/functions/lib/domain/codex-agent-queue.mjs';
 
 function repository() {
   let value = { items: [], updatedAt: null }, etag = 'v1', writes = 0;
@@ -30,6 +30,7 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
   await queue.claim('mac-artway');
   const input = {
     requestId: 'update-100', text: '', chatId: '123', replyTo: 55, user: 'Artway', userId: '700',
+    kind: 'voice',
     context: `Poprzednia wiadomość\u0000\n${'x'.repeat(1800)}`,
     media: { kind: 'voice', fileId: 'telegram-file-1', mimeType: 'audio/ogg', fileName: '' },
   };
@@ -43,6 +44,7 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
   assert.match(claimed.job.text, /wiadomość głosowa/i);
   assert.equal(claimed.job.claimToken, 'claim-secret');
   assert.equal(claimed.job.userId, '700');
+  assert.equal(claimed.job.kind, 'voice');
   assert.equal(claimed.job.context.length, 1600);
   assert.equal(claimed.job.context.includes('\u0000'), false);
   assert.deepEqual(claimed.job.media, input.media);
@@ -59,6 +61,80 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
   assert.equal(completedDuplicate.duplicate, true);
   assert.equal(completedDuplicate.status, 'completed');
   assert.equal((await queue.claim('mac-artway')).job, null);
+});
+
+test('kind wejścia jest zamknięty, a literalny tekst AA pozostaje zwykłą wiadomością', async () => {
+  assert.equal(sanitizeCodexInboundKind('callback'), 'callback');
+  assert.equal(sanitizeCodexInboundKind(' CALLBACK '), 'callback');
+  assert.equal(sanitizeCodexInboundKind('callback<script>'), 'text');
+  assert.equal(sanitizeCodexInboundKind('callback', 'panel'), 'panel');
+  const repo = repository();
+  const queue = createCodexAgentQueue({ readVersioned: repo.readVersioned, writeIfVersion: repo.writeIfVersion, token: () => 'kind-claim' });
+  await queue.claim('worker');
+  await queue.enqueue({ requestId: 'literal-aa', text: 'aa:c:AAabcdef123456', chatId: '123', kind: 'text' });
+  const claimed = (await queue.claim('worker')).job;
+  assert.equal(claimed.text, 'aa:c:AAabcdef123456');
+  assert.equal(claimed.kind, 'text');
+});
+
+test('replyMarkup Agenta przepuszcza wyłącznie ograniczone przyciski decyzji i jest jednorazowy', async () => {
+  const repo = repository();
+  const queue = createCodexAgentQueue({
+    readVersioned: repo.readVersioned,
+    writeIfVersion: repo.writeIfVersion,
+    now: () => new Date('2026-07-15T12:00:00.000Z'),
+    token: () => 'approval-claim',
+  });
+  const sanitized = sanitizeCodexReplyMarkup({
+    inline_keyboard: [[
+      { text: `✅ Zatwierdź\u0000${'x'.repeat(100)}`, callback_data: 'aa:c:AAabcdef123456', url: 'https://evil.example' },
+      { text: '❌ Odrzuć', callback_data: 'aa:r:AAabcdef123456' },
+      { text: 'Incydent', callback_data: 'tg:resolve:abcdef12345678' },
+      { text: 'Link', url: 'https://example.test' },
+    ]],
+    resize_keyboard: true,
+  });
+  assert.equal(sanitized.inline_keyboard[0].length, 2);
+  assert.equal([...sanitized.inline_keyboard[0][0].text].length, 64);
+  assert.equal(sanitized.inline_keyboard[0][0].text.includes('\u0000'), false);
+  assert.deepEqual(sanitized.inline_keyboard[0][0], {
+    text: sanitized.inline_keyboard[0][0].text,
+    callback_data: 'aa:c:AAabcdef123456',
+  });
+  assert.deepEqual(sanitized.inline_keyboard[0][1], { text: '❌ Odrzuć', callback_data: 'aa:r:AAabcdef123456' });
+  assert.equal(sanitizeCodexReplyMarkup({ inline_keyboard: [[{ text: 'Za szeroko', callback_data: `aa:c:AA${'a'.repeat(60)}` }]] }), null);
+  assert.equal(sanitizeCodexReplyMarkup({ keyboard: [[{ text: 'Zwykła klawiatura' }]] }), null);
+
+  await queue.claim('worker');
+  await queue.enqueue({ requestId: 'approval-1', text: 'przygotuj decyzję', chatId: '123' });
+  const claimed = (await queue.claim('worker')).job;
+  const prepared = await queue.prepareDelivery({
+    id: claimed.id, claimToken: claimed.claimToken, response: 'Czy zatwierdzasz?',
+    replyMarkup: { inline_keyboard: [[
+      { text: '✅ Tak', callback_data: 'aa:c:AAabcdef123456' },
+      { text: '❌ Nie', callback_data: 'javascript:alert(1)' },
+    ]] },
+  });
+  assert.deepEqual(prepared.job.replyMarkup, { inline_keyboard: [[{ text: '✅ Tak', callback_data: 'aa:c:AAabcdef123456' }]] });
+  assert.deepEqual(repo.read().items[0].replyMarkup, prepared.job.replyMarkup);
+  await queue.markDelivered({ id: claimed.id, claimToken: claimed.claimToken, telegramMessageId: '501' });
+  assert.equal(repo.read().items[0].replyMarkup, null);
+});
+
+test('replyMarkup jest czyszczony także przy retry po błędzie dostawy', async () => {
+  const repo = repository();
+  const queue = createCodexAgentQueue({ readVersioned: repo.readVersioned, writeIfVersion: repo.writeIfVersion, token: () => 'retry-claim' });
+  await queue.claim('worker');
+  await queue.enqueue({ requestId: 'approval-retry', text: 'przygotuj zmianę', chatId: '123' });
+  const claimed = (await queue.claim('worker')).job;
+  await queue.prepareDelivery({
+    id: claimed.id, claimToken: claimed.claimToken, response: 'Potwierdź',
+    replyMarkup: { inline_keyboard: [[{ text: 'Tak', callback_data: 'iv:c:IVaaaaaaaaaaaaaa' }]] },
+  });
+  const failed = await queue.fail({ id: claimed.id, claimToken: claimed.claimToken, error: 'Telegram odrzucił żądanie', deliveryFailed: true });
+  assert.equal(failed.retry, true);
+  assert.equal(repo.read().items[0].status, 'queued');
+  assert.equal(repo.read().items[0].replyMarkup, null);
 });
 
 test('wygasły lease może przejąć nowy worker, a błędny token nie kończy zadania', async () => {

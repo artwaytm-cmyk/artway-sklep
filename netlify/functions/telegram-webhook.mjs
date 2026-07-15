@@ -3,6 +3,7 @@ import {
   editTelegramHtml,
   sendTelegramHtml,
   telegramActorAllowed,
+  telegramApproverAllowed,
   telegramApi,
   telegramConfig,
   telegramNaturalIntent,
@@ -129,6 +130,24 @@ export function parseInventoryDecisionText(value = '') {
   return { action: /^nie\s+/i.test(match[1]) ? 'reject' : 'confirm', id: `IV${match[2].slice(2).toLowerCase()}` };
 }
 
+export function parseAgentApprovalCallback(value = '') {
+  const match = String(value ?? '').match(/^aa:([cr]):(AA[a-f0-9]{12})$/);
+  if (!match) return null;
+  return { action: match[1] === 'c' ? 'confirm' : 'reject', id: match[2] };
+}
+
+export function telegramCallbackRoute(value = '') {
+  if (parseInventoryDecisionCallback(value)) return 'inventory';
+  if (parseAgentApprovalCallback(value)) return 'agent-approval';
+  return 'other';
+}
+
+export function telegramInventoryDecisionAllowed(action = {}, config = {}, actor = {}) {
+  if (action?.action === 'location') return true;
+  if (!['confirm', 'reject'].includes(action?.action)) return false;
+  return telegramApproverAllowed(config, actor);
+}
+
 function inventoryDecisionFinalCard(decision = {}, rejected = false) {
   if (rejected || decision.status === 'rejected') {
     return {
@@ -179,7 +198,15 @@ export default async (request) => {
     && telegramActorAllowed(config, { chatId, userId, chatType: message.chat.type || '' });
   if (!allowed) {
     await auditRejectedInbound(origin, token, inboundKind, telegramActorRef(userId, chatId, expected));
-    await notifyAccessDenied({ userId, chatId, replyTo: message.message_id || null });
+    if (callback?.id) {
+      await telegramApi('answerCallbackQuery', {
+        callback_query_id: callback.id,
+        text: 'Nie masz uprawnień do obsługi tej decyzji.',
+        show_alert: true,
+      }, process.env).catch(() => null);
+    } else {
+      await notifyAccessDenied({ userId, chatId, replyTo: message.message_id || null });
+    }
     return response();
   }
   await telegramApi('sendChatAction', {
@@ -194,6 +221,15 @@ export default async (request) => {
   try {
     const inventoryAction = callback?.id ? parseInventoryDecisionCallback(input) : parseInventoryDecisionText(input);
     if (inventoryAction) {
+      if (!telegramInventoryDecisionAllowed(inventoryAction, config, { userId })) {
+        const denied = 'Tę decyzję może zatwierdzić lub odrzucić tylko administrator zatwierdzający.';
+        if (callback?.id) {
+          await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: denied, show_alert: true }, process.env).catch(() => null);
+        } else {
+          await sendTelegramHtml(`<b>🔐 Wymagane zatwierdzenie administratora.</b>\n${html(denied)}`, { chatId, replyTo: message.message_id, messageThreadId: message.message_thread_id || null }, process.env).catch(() => null);
+        }
+        return response();
+      }
       const decisionData = await executeInventoryDecision(inventoryAction, {
         id: userId,
         name: [sender.first_name, sender.last_name].filter(Boolean).join(' ') || sender.username || 'Telegram',
@@ -217,6 +253,15 @@ export default async (request) => {
       await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: notice, show_alert: false }, process.env).catch(() => null);
       return response();
     }
+    const agentApproval = callback?.id ? parseAgentApprovalCallback(input) : null;
+    if (agentApproval && !telegramApproverAllowed(config, { userId })) {
+      await telegramApi('answerCallbackQuery', {
+        callback_query_id: callback.id,
+        text: 'Tę decyzję może zatwierdzić lub odrzucić tylko administrator zatwierdzający.',
+        show_alert: true,
+      }, process.env).catch(() => null);
+      return response();
+    }
     if (!token) {
       await sendTelegramHtml('⚠️ Dane sklepu są chwilowo niedostępne.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
       return response();
@@ -238,13 +283,24 @@ export default async (request) => {
         intent: telegramNaturalIntent(input), text: input, chatId, messageThreadId: message.message_thread_id || null,
         replyTo: message.message_id || null, requestId: String(update.update_id || `${chatId}:${message.message_id || ''}`),
         user: sender.username || [sender.first_name, sender.last_name].filter(Boolean).join(' '), userId,
-        context: telegramReplyContext(message.reply_to_message), media, kind: inboundKind,
-        source: 'telegram-webhook', deferToCodex: !callback?.id && telegramCommandRoute(input) === 'agent',
+        context: agentApproval ? cleanTelegramText(message.text || message.caption || '', 1600) : telegramReplyContext(message.reply_to_message),
+        media, kind: inboundKind,
+        source: 'telegram-webhook', deferToCodex: Boolean(agentApproval) || (!callback?.id && telegramCommandRoute(input) === 'agent'),
       }),
     });
     const data = await apiResponse.json().catch(() => ({}));
     if (!apiResponse.ok || !data.ok) throw new Error(data.error || `HTTP ${apiResponse.status}`);
-    if (callback?.id) await telegramApi('answerCallbackQuery', { callback_query_id: callback.id }, process.env).catch(() => null);
+    if (callback?.id) {
+      await telegramApi('answerCallbackQuery', {
+        callback_query_id: callback.id,
+        ...(agentApproval ? {
+          text: data.deferred
+            ? (agentApproval.action === 'confirm' ? 'Zatwierdzenie przekazane Agentowi.' : 'Odrzucenie przekazane Agentowi.')
+            : 'Agent nie przyjął tej decyzji. Spróbuj ponownie.',
+          show_alert: data.deferred !== true,
+        } : {}),
+      }, process.env).catch(() => null);
+    }
     if (data.deferred) {
       return response();
     }

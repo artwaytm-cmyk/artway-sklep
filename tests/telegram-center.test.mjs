@@ -145,7 +145,7 @@ test('kontrola połączenia zwraca stan Privacy Mode bota', { concurrency: false
     const view = await center.view({ priorities: [] }, true);
     assert.equal(view.status.bot.username, 'magazyn_artway_bot');
     assert.equal(view.status.bot.can_read_all_group_messages, false);
-    assert.deepEqual(view.status.allowlist, { chats: 1, users: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 0 });
+    assert.deepEqual(view.status.allowlist, { chats: 1, users: 0, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 0, explicitApprovers: 0 });
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -163,7 +163,7 @@ test('audyt webhooka zapisuje wyłącznie bezpieczne metadane i licznik odrzuce�
   assert.equal(view.state.health.lastRejectedKind, 'command');
   assert.equal(view.state.health.lastRejectedRef, 'abcdef1234567890abcdef12');
   assert.ok(view.state.health.lastRejectedAt);
-  assert.deepEqual(view.status.allowlist, { chats: 1, users: 2, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 2 });
+  assert.deepEqual(view.status.allowlist, { chats: 1, users: 2, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 2, explicitApprovers: 0 });
   assert.equal(JSON.stringify(view).includes('tajna treść'), false);
   assert.equal(JSON.stringify(view).includes('999'), false);
 });

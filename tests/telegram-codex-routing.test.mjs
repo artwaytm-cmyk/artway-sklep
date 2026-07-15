@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTelegramRouter } from '../netlify/functions/lib/telegram-router.mjs';
+import { codexAgentApprovalReplyTarget, createTelegramRouter } from '../netlify/functions/lib/telegram-router.mjs';
 import { createCodexAgentQueue } from '../netlify/functions/lib/domain/codex-agent-queue.mjs';
+import { telegramSafeAgentHtml } from '../netlify/functions/lib/domain/telegram-communication.mjs';
 
 test('naturalna wiadomość webhooka trafia do kolejki Codex, a nie do uproszczonej odpowiedzi', async () => {
   let queued = null, centerCalls = 0, audit = null;
@@ -36,6 +37,7 @@ test('naturalna wiadomość webhooka trafia do kolejki Codex, a nie do uproszczo
   assert.equal(queued.replyTo, 88);
   assert.equal(queued.messageThreadId, 9);
   assert.equal(queued.userId, '700');
+  assert.equal(queued.kind, 'voice');
   assert.equal(queued.context, 'Poprzednie pytanie klienta');
   assert.deepEqual(queued.media, { kind: 'voice', fileId: 'voice-1', mimeType: 'audio/ogg', fileName: '' });
   assert.deepEqual(audit, { accepted: true, deferred: true, kind: 'voice' });
@@ -64,15 +66,104 @@ function routingRequest(body = {}, action = 'telegram-inbound-command') {
   });
 }
 
-function baseRouter(codexQueue, sendTelegram = async () => ({ message_id: 1 })) {
+function baseRouter(codexQueue, sendTelegram = async () => ({ message_id: 1 }), clearTelegramReplyMarkup = async () => true) {
   return createTelegramRouter({
     center: { inbound: async () => ({ message: 'fallback' }) }, codexQueue,
     getOperationalCenter: async () => ({}), inventoryCommand: async () => null,
     isAdmin: () => true, respond: (payload, status = 200) => ({ payload, status }), sessionOf: () => null,
     publicOrigin: () => 'https://artwaytm.pl', supplierTables: () => [],
-    text: (value, limit = 500) => String(value || '').slice(0, limit), sendTelegram,
+    text: (value, limit = 500) => String(value || '').slice(0, limit), sendTelegram, clearTelegramReplyMarkup,
   });
 }
+
+test('odpowiedź Agenta zachowuje tylko bezpieczny rich text bez linków i atrybutów', () => {
+  assert.equal(
+    telegramSafeAgentHtml('<b>Gotowe</b> <code>EXTERNAL_ID: 1410</code>'),
+    '<b>Gotowe</b> <code>EXTERNAL_ID: 1410</code>',
+  );
+  const unsafe = telegramSafeAgentHtml('<a href="https://evil.example">kliknij</a> <b onclick="steal()">ważne</b> <i>bezpieczne</i>');
+  assert.equal(unsafe.includes('<a '), false);
+  assert.equal(unsafe.includes('<b onclick'), false);
+  assert.match(unsafe, /&lt;a href="https:\/\/evil\.example"&gt;kliknij&lt;\/a&gt;/);
+  assert.match(unsafe, /&lt;b onclick="steal\(\)"&gt;ważne&lt;\/b&gt;/);
+  assert.match(unsafe, /<i>bezpieczne<\/i>/);
+});
+
+test('tylko dokładny callback AA z wiarygodnym replyTo wskazuje klawiaturę do usunięcia', () => {
+  assert.deepEqual(codexAgentApprovalReplyTarget({ channel: 'telegram', kind: 'callback', text: 'aa:c:AAabcdef123456', chatId: '-200', replyTo: 77 }), { chatId: '-200', messageId: 77 });
+  for (const job of [
+    { channel: 'telegram', kind: 'callback', text: ' aa:c:AAabcdef123456', chatId: '-200', replyTo: 77 },
+    { channel: 'telegram', kind: 'callback', text: 'aa:c:AAabcdef123456 dodatkowe', chatId: '-200', replyTo: 77 },
+    { channel: 'telegram', kind: 'callback', text: 'sprawdź status', chatId: '-200', replyTo: 77 },
+    { channel: 'telegram', kind: 'text', text: 'aa:r:AAabcdef123456', chatId: '-200', replyTo: 77 },
+    { channel: 'telegram', kind: 'callback', text: 'aa:r:AAabcdef123456', chatId: '', replyTo: 77 },
+    { channel: 'telegram', kind: 'callback', text: 'aa:r:AAabcdef123456', chatId: '-200', replyTo: 0 },
+    { channel: 'panel', kind: 'panel', text: 'aa:r:AAabcdef123456', chatId: '-200', replyTo: 77 },
+  ]) assert.equal(codexAgentApprovalReplyTarget(job), null);
+});
+
+test('complete przekazuje jednorazową klawiaturę zatwierdzeń do Telegram i dopiero potem kończy zadanie', async () => {
+  const calls = [];
+  const safeMarkup = { inline_keyboard: [[
+    { text: '✅ Zatwierdź', callback_data: 'aa:c:AAabcdef123456' },
+    { text: '❌ Odrzuć', callback_data: 'aa:r:AAabcdef123456' },
+  ]] };
+  const codexQueue = {
+    prepareDelivery: async (body) => {
+      calls.push({ kind: 'prepare', body });
+      return {
+        job: {
+          channel: 'telegram', kind: 'callback', text: 'aa:c:AAabcdef123456', response: '<b>Czy zatwierdzasz zmianę?</b> <code>1410</code>', chatId: '123', replyTo: 77, messageThreadId: 9,
+          replyMarkup: safeMarkup,
+        },
+      };
+    },
+    markDelivered: async (body) => { calls.push({ kind: 'delivered', body }); return { delivered: true, duplicate: false }; },
+    fail: async () => { throw new Error('fail nie powinien zostać wywołany'); },
+  };
+  const sent = [];
+  const cleared = [];
+  const router = baseRouter(codexQueue, async (message, options) => {
+    sent.push({ message, options });
+    return { message_id: 501 };
+  }, async (target) => { cleared.push(target); calls.push({ kind: 'cleared', target }); return true; });
+  const request = routingRequest({
+    id: 'CX-approval', claimToken: 'claim-1', response: '<b>Czy zatwierdzasz zmianę?</b> <code>1410</code>',
+    replyMarkup: { inline_keyboard: [[{ text: '✅ Zatwierdź', callback_data: 'aa:c:AAabcdef123456' }]] },
+  }, 'codex-agent-complete');
+  const result = await router(request, new URL(request.url), 'codex-agent-complete');
+  assert.equal(result.payload.delivered, true);
+  assert.deepEqual(sent, [{
+    message: '<b>Czy zatwierdzasz zmianę?</b> <code>1410</code>',
+    options: {
+      chatId: '123', replyTo: 77, messageThreadId: 9,
+      replyMarkup: safeMarkup,
+    },
+  }]);
+  assert.deepEqual(sent[0].options.replyMarkup.inline_keyboard[0].map((button) => button.callback_data), [
+    'aa:c:AAabcdef123456', 'aa:r:AAabcdef123456',
+  ]);
+  assert.equal(calls[0].body.replyMarkup.inline_keyboard[0][0].callback_data, 'aa:c:AAabcdef123456');
+  assert.deepEqual(calls[1], { kind: 'delivered', body: { id: 'CX-approval', claimToken: 'claim-1', telegramMessageId: 501 } });
+  assert.deepEqual(calls[2], { kind: 'cleared', target: { chatId: '123', messageId: 77 } });
+  assert.deepEqual(cleared, [{ chatId: '123', messageId: 77 }]);
+});
+
+test('błąd dostawy odpowiedzi AA pozostawia oryginalne przyciski', async () => {
+  let failed = 0, cleared = 0;
+  const codexQueue = {
+    prepareDelivery: async () => ({ job: {
+      channel: 'telegram', kind: 'callback', text: 'aa:r:AAabcdef123456', response: 'Odrzucono', chatId: '123', replyTo: 77, replyMarkup: null,
+    } }),
+    markDelivered: async () => { throw new Error('nie wolno kończyć po błędzie wysyłki'); },
+    fail: async () => { failed += 1; return { terminal: true }; },
+  };
+  const router = baseRouter(codexQueue, async () => { throw new Error('Telegram offline'); }, async () => { cleared += 1; });
+  const request = routingRequest({ id: 'CX-failed-approval', claimToken: 'claim-2', response: 'Odrzucono' }, 'codex-agent-complete');
+  await assert.rejects(router(request, new URL(request.url), 'codex-agent-complete'), /Telegram offline/);
+  assert.equal(failed, 1);
+  assert.equal(cleared, 0);
+});
 
 test('nieaktywny worker daje jasny fallback i nie udaje deferred', async () => {
   const router = baseRouter({
