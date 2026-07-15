@@ -166,6 +166,7 @@ function renderuj(){
       else if(t==="/admin/asortyment" || t==="/admin/produkty") w.innerHTML = widokAdminProdukty();
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
       else if(t==="/admin/produkty/z-linku") w.innerHTML = widokAdminProduktyZLinku();
+      else if(t==="/admin/produkty/z-pliku") w.innerHTML = widokAdminProduktyZPliku();
       else if(t.startsWith("/admin/produkty/edytuj/")) w.innerHTML = widokAdminProduktEdytuj(parseInt(t.split("/")[4]));
       else if(t==="/admin/kategorie") w.innerHTML = widokAdminKategorie();
       else if(t==="/admin/mapowanie") w.innerHTML = widokAdminMapowanie();

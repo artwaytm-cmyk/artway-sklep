@@ -30,6 +30,16 @@ const PRODUKTY_ZAPASOWE = []; // brak demonstracyjnych towarów — źródłem a
 /* ═══════════ STAN ═══════════ */
 let produkty = [];
 let prodBazowe = [];
+const PRODUCT_LINK_IMPORT_FIRST_ID = 1000000;
+// Produkty dodane przez trwały importer plików są pobierane z osobnego,
+// dzielonego katalogu serwerowego. Nie zapisujemy ich w localStorage ani w
+// ogólnym rekordzie settings, aby duży katalog nie przekroczył limitu 4 MB.
+let produktyImportowane = [];
+function produktyBazoweWspolne(){
+  const mapa=new Map();
+  [...(Array.isArray(prodBazowe)?prodBazowe:[]),...(Array.isArray(produktyImportowane)?produktyImportowane:[])].forEach(p=>{if(p&&p.id!==undefined)mapa.set(String(p.id),p);});
+  return [...mapa.values()];
+}
 let zrodloProduktow = "zapasowe";
 let produktyDodane = wczytajLS("artway_produkty_dodane", []);
 let produktyUkryte = wczytajLS("artway_produkty_ukryte", []);

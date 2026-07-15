@@ -17,6 +17,25 @@ let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z 
 let chmuraTimerZapisu = null;
 let chmuraTimerAutoSync = null;
 let chmuraAutoSyncBusy = false;
+let chmuraKatalogImportowanyRev = "";
+async function chmuraPobierzKatalogImportowany(meta={},force=false){
+  const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
+  if(!force&&revision===chmuraKatalogImportowanyRev)return false;
+  if(!force&&typeof productLinkImportStan!=="undefined"&&productLinkImportStan.loopActive)return false;
+  if(!count){produktyImportowane=[];chmuraKatalogImportowanyRev=revision;return true;}
+  const pageSize=50,offsets=[];for(let offset=0;offset<count;offset+=pageSize)offsets.push(offset);
+  const pages=[];
+  for(let start=0;start<offsets.length;start+=4){
+    const batch=await Promise.all(offsets.slice(start,start+4).map(offset=>chmura("product-link-import-catalog",{params:{offset,limit:pageSize,catalogRev:revision},timeout:30000})));
+    pages.push(...batch);
+  }
+  if(pages.some(page=>String(page.imported_catalog_rev||"")!==revision))throw new Error("Katalog produktów zmienił się podczas pobierania — ponowię synchronizację.");
+  const imported=pages.flatMap(page=>Array.isArray(page.products)?page.products:[]).slice(0,count);
+  if(imported.length!==count)throw new Error("Katalog produktów nie jest jeszcze kompletny — ponowię synchronizację.");
+  produktyImportowane=imported;
+  chmuraKatalogImportowanyRev=revision;
+  return true;
+}
 function maUprawnieniaZapisuChmury(){
   return !!(chmuraToken||(sesja?.token&&typeof jestAdmin==="function"&&jestAdmin()));
 }
@@ -89,7 +108,7 @@ function filtrujAktywneZamowienia(lista){
   });
 }
 function zbierzWspolneUstawienia(){
-  const katalogAllegro=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>({
+  const katalogAllegro=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!jestProduktemImportowanym(p.id)).map(p=>({
     id:p.id,nazwa:p.nazwa||"",opisKrotki:p.opisKrotki||p.krotkiOpis||"",opis:p.opis||"",kategoria:p.kategoria||"",zdjecie:p.zdjecie||"",zdjecia:Array.isArray(p.zdjecia)?p.zdjecia.slice(0,15):[],ikona:p.ikona||"",sku:p.sku||"",externalId:p.externalId||"",gtin:p.gtin||p.ean||"",ean:p.ean||p.gtin||"",kodProducenta:p.kodProducenta||p.mpn||"",mpn:p.mpn||p.kodProducenta||"",producent:p.producent||p.marka||"",marka:p.marka||p.producent||"",cena:p.cena||0,cenaAllegro:p.cenaAllegro||0,cenaZakupu:p.cenaZakupu||0,allegroOfferId:p.allegroOfferId||"",producentUrl:p.producentUrl||p.sourceUrl||"",sourceUrl:p.sourceUrl||p.producentUrl||"",sourceEvidence:p.sourceEvidence||null,parametryProducenta:p.parametryProducenta||null,parametryZrodla:p.parametryZrodla||null,agentImportAt:p.agentImportAt||"",agentImportConfidence:Number(p.agentImportConfidence)||0,agentImportSource:p.agentImportSource||"",agentImportUrl:p.agentImportUrl||"",dostepnoscProducenta:p.dostepnoscProducenta||"",stanProducenta:p.stanProducenta??"",stanProducentaDokladny:!!p.stanProducentaDokladny,stanProducentaZrodlo:p.stanProducentaZrodlo||"",producentStatus:p.producentStatus||"",producentSprawdzonoAt:p.producentSprawdzonoAt||"",producentOstatniBlad:p.producentOstatniBlad||"",producentAlertAktywny:!!p.producentAlertAktywny,allegroCommissionAmount:p.allegroCommissionAmount||0,allegroCommissionRate:p.allegroCommissionRate||0,allegroRecurringFees:p.allegroRecurringFees||0,allegroFeeCalculatedAt:p.allegroFeeCalculatedAt||"",allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI,kosztPakowania:p.kosztPakowania||0,sklepAdditionalCost:p.sklepAdditionalCost||0,sklepPaymentPercent:p.sklepPaymentPercent||0,allegroAdditionalCost:p.allegroAdditionalCost||0,allegroAdsPercent:p.allegroAdsPercent||0,seoTitle:p.seoTitle||"",seoDescription:p.seoDescription||"",seoKeywords:p.seoKeywords||"",seoScore:Number(p.seoScore)||0,seoReviewedAt:p.seoReviewedAt||"",seoSource:p.seoSource||"",seoMode:p.seoMode||"auto",seoPromoted:!!p.seoPromoted
   }));
   return {
@@ -158,7 +177,8 @@ function nalozWspolneUstawienia(dane){
 }
 async function chmuraWczytajStan(){
   try{
-    const d = await chmura("pull");
+    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev}});
+    await chmuraPobierzKatalogImportowany(d);
     chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     const revLok = Number(wczytajLS("artway_chmura_rev", 0))||0;
     const serwerNowszy = (d.rev||0) > revLok;
@@ -210,7 +230,8 @@ async function chmuraWyslijWszystko(){
 // Ręczne POBRANIE sklepu z serwera i nałożenie na to urządzenie.
 async function chmuraPobierzWszystko(){
   try{
-    const d = await chmura("pull");
+    const d = await chmura("pull",{params:{catalogRev:""}});
+    await chmuraPobierzKatalogImportowany(d,true);
     if(d.settings && Object.keys(d.settings).length){ nalozWspolneUstawienia(d.settings); zapiszLS("artway_chmura_rev", d.rev||0); }
     chmuraStan = {...chmuraStan, dostepna:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     if(chmuraToken) await synchronizujBazeCentralna(true).catch(()=>{});
@@ -677,7 +698,7 @@ function najwyzszeIdProduktu(){
     ...Object.keys(produktyEdytowane||{}).map(id=>Number(id)||0),
     ...Object.keys(stanyProduktow||{}).map(id=>Number(id)||0),
     ...Object.keys(ustawienia.mapaProduktow||{}).map(id=>Number(id)||0)
-  ];
+  ].filter(id=>Number(id)>0&&Number(id)<PRODUCT_LINK_IMPORT_FIRST_ID);
   return Math.max(0,...liczby);
 }
 function naprawKolizjeIdProduktow(){

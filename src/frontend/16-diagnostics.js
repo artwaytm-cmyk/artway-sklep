@@ -196,7 +196,7 @@ function naprawDaneSklepu(){
   const widoczne=new Set(produkty.map(p=>p.id)), wszystkie=new Set(produktyDoAdministracji().map(p=>p.id));
   koszyk=koszyk.filter((x,i,a)=>widoczne.has(x.id)&&x.ile>0&&a.findIndex(y=>y.id===x.id)===i);
   ulubione=[...new Set(ulubione.filter(id=>widoczne.has(id)))];
-  produktyUkryte=[...new Set(produktyUkryte.filter(id=>prodBazowe.some(p=>p.id===id)))];
+  produktyUkryte=[...new Set(produktyUkryte.filter(id=>produktyBazoweWspolne().some(p=>p.id===id)))];
   const mapa={...(ustawienia.mapaProduktow||{})};Object.keys(mapa).forEach(id=>{if(!wszystkie.has(+id))delete mapa[id];});
   const kat=new Set(wszystkieKategorie());
   const menuKategorii=grupyMenuKategorii().map(g=>({...g,kategorie:g.kategorie.filter(k=>kat.has(k))})).filter(g=>g.nazwa);

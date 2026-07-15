@@ -6,7 +6,7 @@ function zbudujProdukty(){
   const ukryteKat = ustawienia.ukryteKategorie || [];
   const mapa = ustawienia.mapaProduktow || {};    // zaawansowane mapowanie: id produktu → katalog
   const dodaneIds = new Set(produktyDodane.map(p=>Number(p.id)));
-  const bazowePoEdycji = prodBazowe
+  const bazowePoEdycji = produktyBazoweWspolne()
     .filter(p=>!dodaneIds.has(Number(p.id))&&!produktyUkryte.includes(p.id))
     .map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p);
   produkty = [ ...bazowePoEdycji, ...produktyDodane ]
@@ -27,7 +27,7 @@ function podpisPublikacjiProduktu(p={}){
   });
 }
 function stanPublikacjiKatalogu(){
-  const bazowe=new Map((Array.isArray(prodBazowe)?prodBazowe:[]).map(p=>[String(p.id),p]));
+  const bazowe=new Map(produktyBazoweWspolne().map(p=>[String(p.id),p]));
   const aktualne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!produktyDefinitywne.some(id=>String(id)===String(p.id)));
   const brakujace=[],nieaktualne=[];
   for(const p of aktualne){
@@ -38,7 +38,7 @@ function stanPublikacjiKatalogu(){
   return {gotowy:zrodloProduktow==="json"&&!brakujace.length&&!nieaktualne.length,razem:aktualne.length,bazowe:bazowe.size,brakujace,nieaktualne};
 }
 function porzadkujBezpieczneReferencje(){
-  const widoczne=new Set(produkty.map(p=>String(p.id))),wszystkie=new Set([...(prodBazowe||[]),...(produktyDodane||[]),...(koszDodanych||[])].map(p=>String(p.id)));
+  const widoczne=new Set(produkty.map(p=>String(p.id))),wszystkie=new Set([...produktyBazoweWspolne(),...(produktyDodane||[]),...(koszDodanych||[])].map(p=>String(p.id)));
   const koszykPrzed=koszyk.length;
   koszyk=koszyk.filter((x,i,a)=>widoczne.has(String(x.id))&&Number(x.ile)>0&&a.findIndex(y=>String(y.id)===String(x.id)&&String(y.wariant||"")===String(x.wariant||""))===i);
   if(koszyk.length!==koszykPrzed)zapiszLS("artway_koszyk",koszyk);
@@ -91,7 +91,7 @@ async function usunKopieGrupyProduktuTrwale(groupKey){
   produktyDodane=produktyDodane.filter(p=>!ids.has(String(p.id)));
   koszDodanych=koszDodanych.filter(p=>!ids.has(String(p.id)));
   for(const p of usun){
-    const id=p.id,key=String(id),jestBazowy=prodBazowe.some(x=>String(x.id)===key);
+    const id=p.id,key=String(id),jestBazowy=produktyBazoweWspolne().some(x=>String(x.id)===key);
     if(jestBazowy&&!produktyDefinitywne.some(x=>String(x)===key))produktyDefinitywne.push(id);
     produktyUkryte=produktyUkryte.filter(x=>String(x)!==key);
     delete produktyEdytowane[key];delete produktyEdytowane[id];delete stanyProduktow[key];delete stanyProduktow[id];delete dostepnoscProduktow[key];delete magazynProdukty[key];delete koszMeta[key];

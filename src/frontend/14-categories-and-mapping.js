@@ -292,7 +292,7 @@ function widokAdminOpinie(){
       </select>
     </div>
     ${lista.length ? lista.map(o=>{
-      const p = produkty.find(x=>x.id===o.produktId) || [...prodBazowe,...produktyDodane].find(x=>x.id===o.produktId);
+      const p = produkty.find(x=>x.id===o.produktId) || [...produktyBazoweWspolne(),...produktyDodane].find(x=>x.id===o.produktId);
       return `<div class="order-box">
         <div class="order-head">
           <b>${esc(o.autor)}</b>

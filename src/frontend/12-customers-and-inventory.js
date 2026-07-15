@@ -186,6 +186,7 @@ function odswiezMonitoringProducentow(){
   return true;
 }
 function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }
+function jestProduktemImportowanym(id){ return produktyImportowane.some(p=>String(p.id)===String(id)); }
 function produktDodanyPoId(id){ return produktyDodane.find(p=>Number(p.id)===Number(id)); }
 function czyProduktAdminWKoszu(p){
   if(!p) return false;
@@ -196,14 +197,14 @@ function bazoweProduktyWKoszu(){
   const dodaneIds=new Set(produktyDodane.map(p=>Number(p.id)));
   return produktyUkryte
     .filter(id=>!dodaneIds.has(Number(id))&&koszMeta[id]&&!produktyDefinitywne.includes(id))
-    .map(id=>prodBazowe.find(x=>Number(x.id)===Number(id)))
+    .map(id=>produktyBazoweWspolne().find(x=>Number(x.id)===Number(id)))
     .filter(Boolean);
 }
 function produktyDoAdministracji(){
   naprawKolizjeIdProduktow();
   const dodaneIds = new Set(produktyDodane.map(p=>Number(p.id)));
   return [
-    ...prodBazowe.filter(p=>!dodaneIds.has(Number(p.id))&&!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p),
+    ...produktyBazoweWspolne().filter(p=>!dodaneIds.has(Number(p.id))&&!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p),
     ...produktyDodane
   ];
 }
@@ -931,8 +932,8 @@ function widokAdminProdukty(){
   if(filtrStatusuProduktow==="aktywne") wszystkie=wszystkie.filter(p=>!czyProduktAdminWKoszu(p));
   if(filtrStatusuProduktow==="kosz") wszystkie=wszystkie.filter(p=>czyProduktAdminWKoszu(p));
   if(filtrStatusuProduktow==="duplikaty") wszystkie=wszystkie.filter(p=>audytSklep.grupy.some(g=>g.produkty.some(x=>String(x.id)===String(p.id))));
-  if(filtrZrodlaProduktow==="bazowe") wszystkie=wszystkie.filter(p=>!produktyDodane.some(x=>x.id===p.id));
-  if(filtrZrodlaProduktow==="wlasne") wszystkie=wszystkie.filter(p=>produktyDodane.some(x=>x.id===p.id));
+  if(filtrZrodlaProduktow==="bazowe") wszystkie=wszystkie.filter(p=>!produktyDodane.some(x=>x.id===p.id)&&!jestProduktemImportowanym(p.id));
+  if(filtrZrodlaProduktow==="wlasne") wszystkie=wszystkie.filter(p=>produktyDodane.some(x=>x.id===p.id)||jestProduktemImportowanym(p.id));
   if(filtrStanuProduktow==="dostepne") wszystkie=wszystkie.filter(p=>stanyProduktow[p.id]===undefined||Number(stanyProduktow[p.id])>0);
   if(filtrStanuProduktow==="niskie") wszystkie=wszystkie.filter(p=>Number(stanyProduktow[p.id])>0&&Number(stanyProduktow[p.id])<=5);
   if(filtrStanuProduktow==="brak") wszystkie=wszystkie.filter(p=>Number(stanyProduktow[p.id])===0);
@@ -954,7 +955,7 @@ function widokAdminProdukty(){
     <div class="panel assortment-catalog-page">
       <header class="assortment-catalog-hero">
         <div><span class="order-pro-label">Centralna kartoteka sprzedaży</span><h1>🏷️ Katalog produktów</h1><p>Produkty sklepu, magazynu i Allegro w jednej tabeli. Każdy kafelek poniżej jest aktywnym filtrem i pokazuje dokładnie odpowiadające mu pozycje.</p><small>${produkty.length} widocznych w sklepie • ${produktyDoAdministracji().length} wszystkich kart • źródło: ${zrodloProduktow==="json"?"products.json":"lista zapasowa"} + zmiany wspólne</small></div>
-        <div class="assortment-catalog-actions"><a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj ręcznie lub z linku</a><a class="btn ghost" href="#/admin/mapowanie">🧩 Mapowanie</a><a class="btn ghost" href="#/admin/eksport">⇄ Import / eksport</a><details><summary>Więcej operacji</summary><button class="btn ghost" onclick="eksportujProduktyJSON()">📤 products.json</button><button class="btn ghost" onclick="eksportujProduktyCSV()">📤 CSV</button></details></div>
+        <div class="assortment-catalog-actions"><a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj ręcznie lub z linku</a><a class="btn ghost" href="#/admin/produkty/z-pliku">📄 Dodaj kolejno z pliku</a><a class="btn ghost" href="#/admin/mapowanie">🧩 Mapowanie</a><a class="btn ghost" href="#/admin/eksport">⇄ Import / eksport</a><details><summary>Więcej operacji</summary><button class="btn ghost" onclick="eksportujProduktyJSON()">📤 products.json</button><button class="btn ghost" onclick="eksportujProduktyCSV()">📤 CSV</button></details></div>
       </header>
       <div class="assortment-search-primary">
         <label><span>Wyszukaj w całym asortymencie</span><input data-assortment-search placeholder="Nazwa, EXTERNAL_ID, SKU, EAN, ID, opis, kategoria lub producent…" value="${esc(szukajProduktow)}" oninput="asortymentSzukajProdukty(this)" autocomplete="off"></label>
@@ -1426,7 +1427,7 @@ async function dodajProdukt(e){
   const f = new FormData(e.target);
   let prefillMeta={};
   try{ prefillMeta=JSON.parse(sessionStorage.getItem("artway_prefill_product")||"{}")||{}; }catch(err){ prefillMeta={}; }
-  const maxId = Math.max(0, ...prodBazowe.map(p=>p.id), ...produktyDodane.map(p=>p.id));
+  const maxId = najwyzszeIdProduktu();
   const KOLORY = ["#dbeafe","#e0e7ff","#fef3c7","#dcfce7","#fee2e2","#f3e8ff","#fce7f3","#ffedd5"];
   const p = daneProduktuZFormularza(f, maxId+1, {kolor:KOLORY[(maxId+1)%KOLORY.length]});
   if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę"); return; }
@@ -1522,7 +1523,7 @@ async function zapiszProduktAdmin(e,id){
 }
 function duplikujProdukt(id){
   const p = pobierzProduktAdmin(id); if(!p) return;
-  const maxId = Math.max(0, ...prodBazowe.map(x=>x.id), ...produktyDodane.map(x=>x.id));
+  const maxId = najwyzszeIdProduktu();
   const kopia = seoAutomatyzujDaneProduktu({...p,id:maxId+1,nazwa:p.nazwa+" — kopia",seoMode:"auto",seoTitle:"",seoDescription:"",seoKeywords:"",createdAt:new Date().toISOString(),createdBy:sesja?.email||"administrator",agentOnboardingStatus:"needs_attention",agentOnboardingStartedAt:new Date().toISOString(),agentOnboardingMissing:["identity"]},"automatycznie po utworzeniu kopii",{force:true});
   produktyDodane.push(kopia);
   zapiszLS("artway_produkty_dodane", produktyDodane);

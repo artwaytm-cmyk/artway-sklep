@@ -43,6 +43,7 @@ import { createInventoryDecisionService } from './domain/inventory-decisions.mjs
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
 import { createInventoryStockRoute } from './inventory-route.mjs';
+import { createProductLinkImportBundle } from './product-link-import-route.mjs';
 import {
   telegramConfig as telegramKonfiguracja,
   telegramHtml,
@@ -74,6 +75,7 @@ import {
   infaktSugestieNazwy,
   infaktXmlZOdpowiedzi,
   infaktZnajdzDostawce,
+  produktBezDanychPrywatnych,
 } from './infakt-purchase.mjs';
 
 const STORE_NAME = 'artway-sklep';
@@ -90,6 +92,7 @@ const inventoryDecisions = createInventoryDecisionService({ readVersioned: czyta
 const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
 const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, decisions: inventoryDecisions });
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
 const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
 
 // Klucze wspólne (konfiguracja + katalog + ceny + stany + opinie + kosz) — zapisywane przez administratora,
@@ -3054,6 +3057,7 @@ async function przygotujPakietProduktuZLinku(req, target = '', options = {}) {
     workflow: { stage: blockingDuplicate ? 'duplicate' : readyForAllegro ? 'ready' : readyForStore ? 'store_ready' : 'incomplete', readyForStore, readyForAllegro, blockers, warnings, nextAction: blockingDuplicate ? 'open_existing_product' : readyForAllegro ? 'review_and_save' : 'complete_missing_fields' },
   };
 }
+
 function allegroNormTekst(s = '') {
   return String(s || '')
     .toLowerCase()
@@ -6203,6 +6207,9 @@ export default async (req) => {
       return odpowiedz({ ok: true, commandId, command, modification, offerCount: offerIds.length }, 202);
     }
 
+    const productLinkImportResponse = await productLinkImport.route(req, url, action);
+    if (productLinkImportResponse) return productLinkImportResponse;
+
     // ─── PRODUCENT: pobranie danych z URL produktu (admin) ───
     if (action === 'product-url-inspect') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -6806,9 +6813,10 @@ export default async (req) => {
 
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
     if (action === 'pull' || action === 'store-data') {
-      const s = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
       const admin = czyAdmin(req, url);
+      const [s, importedPayload] = await Promise.all([czytaj('settings', { data: {}, rev: 0, updated_at: null }), productLinkImport.payload({ requestedRev: url.searchParams.get('catalogRev'), admin })]);
       const res = { ok: true, settings: admin ? (s.data || {}) : ustawieniaPubliczneBezDanychPrywatnych(s.data || {}), rev: s.rev || 0, updated_at: s.updated_at || null };
+      Object.assign(res, importedPayload);
       if (admin) {
         const o = await czytaj('orders', { items: [] });
         const u = await czytaj('users', { items: [] });
@@ -6852,7 +6860,7 @@ export default async (req) => {
       if (limited) return limited;
       const body = await req.json().catch(() => ({}));
       const settingsRec = await czytaj('settings', { data: {} });
-      const zam = bezpieczneZamowienieKlienta(body.order, settingsRec.data || {});
+      const zam = bezpieczneZamowienieKlienta(body.order, await productLinkImport.mergeSettings(settingsRec.data || {}));
       const session = requestSession(req);
       if (session && session.email !== zam.email) return odpowiedz({ ok: false, error: 'Zamówienie musi należeć do zalogowanego konta.', code: 'auth' }, 403);
       zam.status = 'nowe';
