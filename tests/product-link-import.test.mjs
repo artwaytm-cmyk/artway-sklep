@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createImportedProductCatalog } from '../netlify/functions/lib/domain/imported-product-catalog.mjs';
 import { createProductLinkImportService } from '../netlify/functions/lib/domain/product-link-import.mjs';
+import { createProductLinkImportPreparer } from '../netlify/functions/lib/domain/product-link-import-preparation.mjs';
 import { createProductLinkImportBundle } from '../netlify/functions/lib/product-link-import-route.mjs';
 
 function repository() {
@@ -109,6 +110,75 @@ test('processNext zapisuje dokładnie jeden produkt od razu, zanim przejdzie do 
   assert.ok(stored.every((entry) => entry.stock === 0 && entry.stan === 0));
   assert.ok(stored.every((entry) => entry.storageOrigin === 'product-link-file-import'));
   assert.ok(stored.every((entry) => entry.agentOnboardingStatus === 'needs_attention'));
+});
+
+test('jedna kolejka przyjmuje linki różnych producentów i zachowuje ich oddzielne źródła', async () => {
+  const multigraUrl = 'https://multigra.com.pl/produkt/gra-rodzinna?utm_source=plik';
+  const godanUrl = 'http://www.godanparty.pl/pl/p/Balony-zestaw/123?variant=gold';
+  const { service } = harness(async () => ({ product: product(1) }));
+  const created = await service.create({ rows: [
+    { rowNumber: 2, name: 'Gra Multigra', url: multigraUrl },
+    { rowNumber: 3, name: 'Balony GoDan', url: godanUrl },
+  ] });
+
+  assert.equal(created.summary.queued, 2);
+  assert.deepEqual(created.items.map((item) => item.url), [
+    'https://multigra.com.pl/produkt/gra-rodzinna',
+    'https://www.godanparty.pl/pl/p/Balony-zestaw/123?variant=gold',
+  ]);
+});
+
+test('serwer odrzuca lokalne i techniczne adresy zamiast pobierać je jako produkty', async () => {
+  const { service } = harness(async () => ({ product: product(1) }));
+  await assert.rejects(
+    service.create({ rows: ['http://127.0.0.1/produkt/1'] }),
+    (error) => error?.code === 'product_link_import_source_not_allowed',
+  );
+  await assert.rejects(
+    service.create({ rows: ['https://magazyn.internal/produkt/1'] }),
+    (error) => error?.code === 'product_link_import_source_not_allowed',
+  );
+});
+
+test('przygotowanie produktu zachowuje rozpoznanego producenta i nie wpisuje Alexander jako wartości zastępczej', async () => {
+  const prepare = createProductLinkImportPreparer({
+    readSettings: async () => ({ data: {} }),
+    catalog: { findDuplicate: async () => null, list: async () => [] },
+    centralProducts: () => new Map(),
+    inspect: async (sourceUrl) => ({
+      canonicalUrl: sourceUrl,
+      confidence: 92,
+      product: { nazwa: 'Balony metaliczne', cena: 12.5, producent: 'GoDan', marka: 'GoDan', opis: 'Zestaw dekoracyjnych balonów.', sourceUrl },
+    }),
+    offerSettings: async () => ({ producers: ['Alexander', 'Multigra', 'GoDan'] }),
+    recognizeProducer: (entry) => entry.producent || entry.marka || '',
+    chooseCategory: () => ({ name: 'Balony i dekoracje' }),
+    shortDescription: (value) => value,
+    text: (value, max = 1000) => String(value ?? '').trim().slice(0, max),
+    now: () => new Date('2026-07-16T12:00:00.000Z'),
+  });
+  const result = await prepare('https://www.godanparty.pl/pl/p/Balony-metaliczne/123');
+  assert.equal(result.needsReview, undefined);
+  assert.equal(result.product.producent, 'GoDan');
+  assert.equal(result.product.marka, 'GoDan');
+});
+
+test('nierozpoznany producent trafia do kontroli zamiast otrzymać błędną markę Alexander', async () => {
+  const prepare = createProductLinkImportPreparer({
+    readSettings: async () => ({ data: {} }),
+    catalog: { findDuplicate: async () => null, list: async () => [] },
+    centralProducts: () => new Map(),
+    inspect: async (sourceUrl) => ({ product: { nazwa: 'Nowy produkt', cena: 19, opis: 'Pełny opis produktu.', sourceUrl }, canonicalUrl: sourceUrl, confidence: 80 }),
+    offerSettings: async () => ({}),
+    recognizeProducer: () => '',
+    chooseCategory: () => ({ name: 'Pozostałe' }),
+    shortDescription: (value) => value,
+    text: (value, max = 1000) => String(value ?? '').trim().slice(0, max),
+  });
+  const result = await prepare('https://producent-zabawek.pl/produkt/nowy-produkt');
+  assert.equal(result.needsReview, true);
+  assert.match(result.reviewReason, /producenta lub marki/i);
+  assert.notEqual(result.product.producent, 'Alexander');
 });
 
 test('processNext nie odczytuje wszystkich shardów kolejki i zwraca tylko zmianę jednego wiersza', async () => {

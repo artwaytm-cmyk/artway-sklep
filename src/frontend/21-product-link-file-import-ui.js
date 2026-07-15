@@ -262,14 +262,14 @@ function widokAdminProduktyZPliku(){
   return asortymentSzkielet("produkty",`<section class="product-link-file-import-page" data-product-link-import-page>
     <div class="panel product-link-import-hero">
       <div class="crumb"><a href="#/admin/asortyment/produkty">Produkty</a> › Dodawanie › Z pliku linków</div>
-      <div class="product-link-import-hero-row"><div><span class="order-pro-label">Automatyczne dodawanie pojedynczo</span><h1>📄 Produkty z pliku linków</h1><p>Wczytaj plik producenta. System przejdzie link po linku: pobierze pełne dane, sprawdzi duplikat i natychmiast zapisze gotowy produkt przed przejściem do kolejnego.</p></div><span class="product-link-import-safety">🛡️ jeden link = jeden bezpieczny zapis</span></div>
+      <div class="product-link-import-hero-row"><div><span class="order-pro-label">Automatyczne dodawanie pojedynczo</span><h1>📄 Produkty z pliku linków</h1><p>Wczytaj jeden plik z linkami różnych producentów i dostawców. System rozpozna źródło osobno dla każdego wiersza, pobierze pełne dane, sprawdzi duplikat i natychmiast zapisze gotowy produkt przed przejściem do kolejnego.</p></div><span class="product-link-import-safety">🛡️ jeden link = jedno rozpoznane źródło</span></div>
       <nav class="product-link-import-local-nav" aria-label="Sposób dodawania produktu"><a href="#/admin/produkty/dodaj">✍️ Ręcznie lub z jednego linku</a><a class="active" href="#/admin/produkty/z-pliku" aria-current="page">📄 Z pliku linków</a></nav>
     </div>
     <div class="panel product-link-import-upload-panel">
       <div class="order-section-head"><div><span class="order-pro-label">Krok 1</span><h2>Wybierz plik z linkami</h2><p>Kolumna „Link do produktu” zostanie rozpoznana automatycznie. Pozostałe kolumny, np. nazwa i numer wiersza, posłużą do czytelnego raportu.</p></div></div>
       <label class="product-link-import-dropzone" data-product-link-dropzone ondragover="productLinkImportPrzeciagnij(event)" ondragleave="productLinkImportOpusc(event)" ondrop="productLinkImportUpusc(event)">
         <input data-product-link-file type="file" accept=".xlsx,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain" aria-label="Wybierz plik XLSX, CSV lub TXT z linkami produktów" aria-describedby="productLinkImportFileMeta" onchange="productLinkImportWybranoPlik(this)">
-        <span class="product-link-import-drop-icon" aria-hidden="true">⇧</span><span id="productLinkImportFileMeta" data-product-link-file-meta><b>Wybierz arkusz lub przeciągnij go tutaj</b><span>Obsługiwane: XLSX, CSV i TXT</span></span><em>Wybierz plik</em>
+        <span class="product-link-import-drop-icon" aria-hidden="true">⇧</span><span id="productLinkImportFileMeta" data-product-link-file-meta><b>Wybierz arkusz lub przeciągnij go tutaj</b><span>Obsługiwane: XLSX, CSV, TSV i TXT • linki mogą pochodzić z różnych źródeł</span></span><em>Wybierz plik</em>
       </label>
       <div class="product-link-import-notice" data-product-link-notice role="status" aria-live="polite" aria-atomic="true" hidden></div>
     </div>

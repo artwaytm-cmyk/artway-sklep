@@ -84,20 +84,22 @@ function deflatedZipWithDeclaredSize(name, source, declaredSize){
   return Buffer.concat([local, nameBytes, compressed, central, nameBytes, end]);
 }
 
-test('CSV rozpoznaje naglowki, waliduje host i usuwa duplikat kanonicznego URL', async () => {
+test('CSV rozpoznaje nagłówki, przyjmuje wielu producentów i usuwa duplikat kanonicznego URL', async () => {
   const csv = [
     'Lp.;Nazwa produktu;Link do produktu',
     '1;Produkt 0049;https://www.sklep.alexander.com.pl/product-pol-0049-Test.html?utm_source=test#sekcja',
     '2;Ta sama pozycja;https://sklep.alexander.com.pl/product-pol-0049-Test.html?query_id=2',
-    '3;Inny serwis;https://example.com/product-pol-0049-Test.html',
+    '3;Produkt Multigra;https://multigra.com.pl/produkt/gra-rodzinna?utm_campaign=test',
+    '4;Adres wewnętrzny;http://localhost/produkt/0049',
   ].join('\n');
   const result = await parseProductLinksFile(Buffer.from(csv), {fileName:'produkty.csv'});
 
-  assert.equal(result.total, 3);
-  assert.equal(result.rows.length, 1);
+  assert.equal(result.total, 4);
+  assert.equal(result.rows.length, 2);
   assert.equal(result.duplicates.length, 1);
   assert.equal(result.invalid.length, 1);
   assert.equal(result.rows[0].url, 'https://www.sklep.alexander.com.pl/product-pol-0049-Test.html');
+  assert.equal(result.rows[1].url, 'https://multigra.com.pl/produkt/gra-rodzinna');
   assert.equal(result.duplicates[0].duplicateOfRow, 2);
   assert.equal(result.invalid[0].code, 'unsupported_host');
 });
@@ -151,6 +153,16 @@ test('kanonizacja zachowuje parametry funkcjonalne i porzadkuje je stabilnie', (
   const result = canonicalProductUrl('https://sklep.alexander.com.pl/product-pol-0525-Test.html?variant=blue&utm_medium=email&size=2#opis');
   assert.equal(result.ok, true);
   assert.equal(result.url, 'https://www.sklep.alexander.com.pl/product-pol-0525-Test.html?size=2&variant=blue');
+});
+
+test('kanonizacja zachowuje domenę każdego publicznego dostawcy i odrzuca adresy techniczne', () => {
+  const godan = canonicalProductUrl('http://www.godanparty.pl/pl/p/Balony-zestaw/123?variant=gold&utm_source=feed');
+  assert.equal(godan.ok, true);
+  assert.equal(godan.url, 'https://www.godanparty.pl/pl/p/Balony-zestaw/123?variant=gold');
+  assert.equal(canonicalProductUrl('http://127.0.0.1/produkt/123').ok, false);
+  assert.equal(canonicalProductUrl('https://panel.internal/produkt/123').ok, false);
+  assert.equal(canonicalProductUrl('https://producent-zabawek.pl/?gclid=tracking').ok, false);
+  assert.equal(canonicalProductUrl('https://producent-zabawek.pl/?product_id=123').ok, true);
 });
 
 test('XLSX przerywa dekompresje po rzeczywistym limicie, gdy naglowek ZIP klamie', async () => {

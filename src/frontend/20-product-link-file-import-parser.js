@@ -10,7 +10,7 @@
   const MAX_ZIP_ENTRIES = 4096;
   const MAX_ZIP_ENTRY_BYTES = 32 * 1024 * 1024;
   const MAX_ZIP_TOTAL_BYTES = 96 * 1024 * 1024;
-  const ALLOWED_HOSTS = new Set(["sklep.alexander.com.pl", "www.sklep.alexander.com.pl"]);
+  const ALEXANDER_HOSTS = new Set(["sklep.alexander.com.pl", "www.sklep.alexander.com.pl"]);
   const TRACKING_QUERY_KEYS = new Set([
     "fbclid", "gclid", "dclid", "msclkid", "srsltid", "query_id", "queryid",
     "tracking", "tracking_id", "campaign", "campaign_id", "source", "ref", "referrer"
@@ -62,6 +62,18 @@
     return normalized.startsWith("utm_") || normalized.startsWith("mc_") || normalized.startsWith("gad_") || TRACKING_QUERY_KEYS.has(normalized);
   }
 
+  function isPublicProductHost(value){
+    const host = String(value || "").toLowerCase().replace(/\.$/, "");
+    if(!host || !host.includes(".") || host.includes(":") || /^\d+(?:\.\d+){3}$/.test(host)) return false;
+    if(["localhost", "localhost.localdomain"].includes(host)) return false;
+    if([".local", ".internal", ".localhost", ".test", ".invalid", ".example"].some((suffix) => host.endsWith(suffix))) return false;
+    if(host.length > 253 || !/^[a-z0-9.-]+$/.test(host)) return false;
+    const labels = host.split(".");
+    if(labels.some((label) => !label || label.length > 63 || label.startsWith("-") || label.endsWith("-"))) return false;
+    const tld = labels.at(-1) || "";
+    return /^[a-z]{2,63}$/i.test(tld) || /^xn--[a-z0-9-]{2,59}$/i.test(tld);
+  }
+
   function canonicalProductUrl(value){
     const raw = String(value || "").trim();
     if(!raw) return {ok:false, code:"missing_url", reason:"Brak linku do produktu."};
@@ -71,12 +83,17 @@
     if(!["http:", "https:"].includes(url.protocol)) return {ok:false, code:"invalid_protocol", reason:"Link musi uzywac protokolu HTTP lub HTTPS."};
     if(url.username || url.password) return {ok:false, code:"credentials_in_url", reason:"Link nie moze zawierac danych logowania."};
     const host = url.hostname.toLowerCase().replace(/\.$/, "");
-    if(!ALLOWED_HOSTS.has(host)) return {ok:false, code:"unsupported_host", reason:"Link nie prowadzi do sklepu Alexander."};
-    if(!url.pathname || url.pathname === "/") return {ok:false, code:"missing_product_path", reason:"Link nie wskazuje konkretnego produktu."};
+    if(!isPublicProductHost(host)) return {ok:false, code:"unsupported_host", reason:"Link musi prowadzić do publicznej strony produktu producenta lub dostawcy."};
+    if(url.port && !["80", "443"].includes(url.port)) return {ok:false, code:"unsupported_port", reason:"Link używa niedozwolonego portu."};
+    const queryLooksLikeProduct = [...url.searchParams.keys()].some((key) => /^(?:p|id|sku|product|produkt|item|offer)(?:[_-]?id)?$/i.test(key));
+    if((!url.pathname || url.pathname === "/") && !queryLooksLikeProduct) return {ok:false, code:"missing_product_path", reason:"Link nie wskazuje konkretnego produktu."};
 
-    // Oba dozwolone warianty domeny oznaczaja ten sam katalog producenta.
-    // Sciezka (w tym zera wiodace identyfikatora) pozostaje nietknieta.
-    url.hostname = "www.sklep.alexander.com.pl";
+    // Aliasy Alexander oznaczają ten sam katalog. Pozostałe domeny zachowujemy,
+    // dzięki czemu jeden plik może mieszać wielu producentów i dostawców.
+    if(ALEXANDER_HOSTS.has(host)) url.hostname = "www.sklep.alexander.com.pl";
+    else url.hostname = host;
+    url.protocol = "https:";
+    url.port = "";
     url.hash = "";
     const keptParams = [];
     for(const [key, val] of url.searchParams.entries()){
@@ -452,7 +469,7 @@
     }
     if(best) return best;
 
-    // TXT bez naglowka: wybierz kolumne, w ktorej faktycznie znajduja sie adresy Alexander.
+    // TXT bez nagłówka: wybierz kolumnę z publicznymi adresami stron produktów.
     const maxColumns = Math.max(0, ...candidates.map((row) => (row.cells || []).length));
     let detectedColumn = -1;
     let detectedCount = 0;

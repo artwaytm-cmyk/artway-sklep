@@ -10,14 +10,11 @@ const CAS_ATTEMPTS = 12;
 const LEASE_MS = 5 * 60 * 1000;
 const ITEM_STATUSES = Object.freeze(['queued', 'processing', 'added', 'skipped_existing', 'needs_review', 'failed', 'cancelled']);
 const TERMINAL = new Set(['added', 'skipped_existing', 'needs_review', 'failed', 'cancelled']);
-const ALLOWED_ALEXANDER_HOSTS = new Set([
+const ALEXANDER_HOSTS = new Set([
   'sklep.alexander.com.pl',
   'www.sklep.alexander.com.pl',
-  'alexander.com.pl',
-  'www.alexander.com.pl',
-  'alexandertoys.com',
-  'www.alexandertoys.com',
 ]);
+const BLOCKED_HOST_SUFFIXES = Object.freeze(['.local', '.internal', '.localhost', '.test', '.invalid', '.example']);
 
 const asArray = (value) => Array.isArray(value) ? value : [];
 const asObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -37,14 +34,29 @@ function dateFrom(now) {
   return Number.isFinite(value.getTime()) ? value : new Date();
 }
 
+function isPublicProductHost(value) {
+  const host = clean(value, 300).toLowerCase().replace(/\.$/, '');
+  if (!host || !host.includes('.') || host.includes(':') || /^\d+(?:\.\d+){3}$/.test(host)) return false;
+  if (host === 'localhost' || host === 'localhost.localdomain' || BLOCKED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))) return false;
+  if (host.length > 253 || !/^[a-z0-9.-]+$/.test(host)) return false;
+  const labels = host.split('.');
+  if (labels.some((label) => !label || label.length > 63 || label.startsWith('-') || label.endsWith('-'))) return false;
+  const tld = labels.at(-1) || '';
+  return /^[a-z]{2,63}$/i.test(tld) || /^xn--[a-z0-9-]{2,59}$/i.test(tld);
+}
+
 function safeUrl(value) {
   try {
     const url = new URL(clean(value, 3000));
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
-    if (!ALLOWED_ALEXANDER_HOSTS.has(url.hostname.toLowerCase())) return null;
-    if (url.username || url.password || (url.port && url.port !== '443')) return null;
+    const host = url.hostname.toLowerCase().replace(/\.$/, '');
+    if (!isPublicProductHost(host)) return null;
+    if (url.username || url.password || (url.port && !['80', '443'].includes(url.port))) return null;
+    const queryLooksLikeProduct = [...url.searchParams.keys()].some((key) => /^(?:p|id|sku|product|produkt|item|offer)(?:[_-]?id)?$/i.test(key));
+    if ((!url.pathname || url.pathname === '/') && !queryLooksLikeProduct) return null;
     url.protocol = 'https:';
-    url.hostname = url.hostname.toLowerCase();
+    url.hostname = ALEXANDER_HOSTS.has(host) ? 'www.sklep.alexander.com.pl' : host;
+    url.port = '';
     url.hash = '';
     for (const key of [...url.searchParams.keys()]) {
       if (/^(utm_.+|query_id|fbclid|gclid|ref|source)$/i.test(key)) url.searchParams.delete(key);
@@ -67,7 +79,7 @@ function normalizeRows(rows) {
   if (rows.length > MAX_ROWS) throw serviceError(`Jeden import może zawierać maksymalnie ${MAX_ROWS} linków.`, 'product_link_import_too_large', 422);
   return rows.map((row, index) => {
     const url = safeUrl(rowUrl(row));
-    if (!url) throw serviceError(`Wiersz ${index + 1} zawiera nieprawidłowy lub niedozwolony link. Import obsługuje wyłącznie źródła Alexander.`, 'product_link_import_source_not_allowed', 422);
+    if (!url) throw serviceError(`Wiersz ${index + 1} zawiera nieprawidłowy link. Wymagana jest publiczna strona konkretnego produktu producenta lub dostawcy.`, 'product_link_import_source_not_allowed', 422);
     return {
       rowNumber: Math.max(1, Number(row?.rowNumber ?? row?.lp ?? row?.Lp) || index + 1),
       name: clean(row?.name || row?.nazwa || row?.['Nazwa produktu'], 500),
