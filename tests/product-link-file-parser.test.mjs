@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { deflateRawSync } from 'node:zlib';
 
 await import('../src/frontend/20-product-link-file-import-parser.js');
@@ -161,4 +162,9 @@ test('XLSX przerywa dekompresje po rzeczywistym limicie, gdy naglowek ZIP klamie
     parseProductLinksFile(archive, {fileName:'klamliwy-rozmiar.xlsx'}),
     (error) => error?.code === 'XLSX_ENTRY_TOO_LARGE',
   );
+});
+
+test('nieaktywne sterowanie importem pozostaje niewidoczne mimo stylu przycisków', () => {
+  const css = readFileSync(new URL('../src/styles/14-product-link-import.css', import.meta.url), 'utf8');
+  assert.match(css, /\.product-link-file-import-page \[hidden\]\{display:none!important\}/);
 });
