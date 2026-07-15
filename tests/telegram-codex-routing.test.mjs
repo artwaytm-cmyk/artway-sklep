@@ -4,9 +4,12 @@ import { createTelegramRouter } from '../netlify/functions/lib/telegram-router.m
 import { createCodexAgentQueue } from '../netlify/functions/lib/domain/codex-agent-queue.mjs';
 
 test('naturalna wiadomość webhooka trafia do kolejki Codex, a nie do uproszczonej odpowiedzi', async () => {
-  let queued = null, centerCalls = 0;
+  let queued = null, centerCalls = 0, audit = null;
   const router = createTelegramRouter({
-    center: { inbound: async () => { centerCalls += 1; return { message: 'fallback' }; } },
+    center: {
+      inbound: async () => { centerCalls += 1; return { message: 'fallback' }; },
+      recordInboundAudit: async (value) => { audit = value; return value; },
+    },
     codexQueue: { enqueue: async (job) => { queued = job; return { job: { id: 'CX-test' }, duplicate: false, status: 'queued', workerOnline: true }; } },
     getOperationalCenter: async () => { centerCalls += 1; return {}; },
     inventoryCommand: async () => null,
@@ -21,7 +24,8 @@ test('naturalna wiadomość webhooka trafia do kolejki Codex, a nie do uproszczo
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       text: 'sprawdź, co wymaga dziś działania', intent: 'unknown', source: 'telegram-webhook', deferToCodex: true,
-      requestId: 'update-55', chatId: '123', replyTo: 88, user: 'Artway',
+      requestId: 'update-55', chatId: '123', messageThreadId: 9, replyTo: 88, user: 'Artway', userId: '700',
+      context: 'Poprzednie pytanie klienta', media: { kind: 'voice', fileId: 'voice-1', mimeType: 'audio/ogg', fileName: '' }, kind: 'voice',
     }),
   });
   const result = await router(request, new URL(request.url), 'telegram-inbound-command');
@@ -30,7 +34,28 @@ test('naturalna wiadomość webhooka trafia do kolejki Codex, a nie do uproszczo
   assert.equal(queued.requestId, 'update-55');
   assert.equal(queued.text, 'sprawdź, co wymaga dziś działania');
   assert.equal(queued.replyTo, 88);
+  assert.equal(queued.messageThreadId, 9);
+  assert.equal(queued.userId, '700');
+  assert.equal(queued.context, 'Poprzednie pytanie klienta');
+  assert.deepEqual(queued.media, { kind: 'voice', fileId: 'voice-1', mimeType: 'audio/ogg', fileName: '' });
+  assert.deepEqual(audit, { accepted: true, deferred: true, kind: 'voice' });
   assert.equal(centerCalls, 0);
+});
+
+test('endpoint audytu zapisuje wyłącznie metadane akceptacji albo odrzucenia', async () => {
+  let input = null;
+  const router = createTelegramRouter({
+    center: { recordInboundAudit: async (value) => { input = value; return { ...value, counts: { accepted: 1, deferred: 0, rejected: 1 } }; } },
+    codexQueue: null, getOperationalCenter: async () => ({}), inventoryCommand: async () => null,
+    isAdmin: () => true, respond: (payload, status = 200) => ({ payload, status }), sessionOf: () => null,
+    publicOrigin: () => 'https://artwaytm.pl', supplierTables: () => [],
+    text: (value, limit = 500) => String(value || '').slice(0, limit),
+  });
+  const request = routingRequest({ accepted: false, deferred: false, kind: 'voice', actorHash: 'abcdef1234567890abcdef12', text: 'TA TREŚĆ NIE MOŻE TRAFIĆ DO AUDYTU', userId: '700' }, 'telegram-inbound-audit');
+  const result = await router(request, new URL(request.url), 'telegram-inbound-audit');
+  assert.deepEqual(input, { accepted: false, deferred: false, kind: 'voice', actorHash: 'abcdef1234567890abcdef12' });
+  assert.equal(JSON.stringify(result.payload).includes('TA TREŚĆ'), false);
+  assert.equal(JSON.stringify(result.payload).includes('700'), false);
 });
 
 function routingRequest(body = {}, action = 'telegram-inbound-command') {

@@ -28,7 +28,11 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
     token: () => 'claim-secret',
   });
   await queue.claim('mac-artway');
-  const input = { requestId: 'update-100', text: 'co trzeba dziś zrobić?', chatId: '123', replyTo: 55, user: 'Artway' };
+  const input = {
+    requestId: 'update-100', text: '', chatId: '123', replyTo: 55, user: 'Artway', userId: '700',
+    context: `Poprzednia wiadomość\u0000\n${'x'.repeat(1800)}`,
+    media: { kind: 'voice', fileId: 'telegram-file-1', mimeType: 'audio/ogg', fileName: '' },
+  };
   const first = await queue.enqueue(input);
   const duplicate = await queue.enqueue(input);
   assert.equal(first.duplicate, false);
@@ -36,8 +40,12 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
   assert.equal(repo.read().items.length, 1);
 
   const claimed = await queue.claim('mac-artway');
-  assert.equal(claimed.job.text, input.text);
+  assert.match(claimed.job.text, /wiadomość głosowa/i);
   assert.equal(claimed.job.claimToken, 'claim-secret');
+  assert.equal(claimed.job.userId, '700');
+  assert.equal(claimed.job.context.length, 1600);
+  assert.equal(claimed.job.context.includes('\u0000'), false);
+  assert.deepEqual(claimed.job.media, input.media);
   const prepared = await queue.prepareDelivery({ id: claimed.job.id, claimToken: claimed.job.claimToken, response: 'Gotowe.' });
   assert.equal(prepared.job.response, 'Gotowe.');
   const delivered = await queue.markDelivered({ id: claimed.job.id, claimToken: claimed.job.claimToken, telegramMessageId: '999' });
@@ -45,6 +53,8 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
   assert.equal(repo.read().items[0].status, 'completed');
   assert.equal(repo.read().items[0].text, '');
   assert.equal(repo.read().items[0].response, '');
+  assert.equal(repo.read().items[0].context, '');
+  assert.equal(repo.read().items[0].media, null);
   const completedDuplicate = await queue.enqueue(input);
   assert.equal(completedDuplicate.duplicate, true);
   assert.equal(completedDuplicate.status, 'completed');
@@ -255,12 +265,17 @@ test('terminalny fail Telegram zapisuje trwały outbox bez treści polecenia i a
   const repo = repository();
   const queue = createCodexAgentQueue({ readVersioned: repo.readVersioned, writeIfVersion: repo.writeIfVersion, token: () => 'terminal-token' });
   await queue.claim('worker');
-  await queue.enqueue({ requestId: 'terminal-1', text: 'trudne zadanie', chatId: '123', replyTo: 77, messageThreadId: 9 });
+  await queue.enqueue({
+    requestId: 'terminal-1', text: 'trudne zadanie', chatId: '123', replyTo: 77, messageThreadId: 9,
+    context: 'poufny kontekst odpowiedzi', media: { kind: 'audio', fileId: 'secret-file', mimeType: 'audio/mpeg', fileName: 'zadanie.mp3' },
+  });
   const claimed = await queue.claim('worker');
   const first = await queue.fail({ id: claimed.job.id, claimToken: claimed.job.claimToken, error: 'koniec', expired: true });
   assert.equal(first.terminal, true);
   assert.equal(first.notificationPending, true);
   assert.equal(repo.read().items[0].text, '');
+  assert.equal(repo.read().items[0].context, '');
+  assert.equal(repo.read().items[0].media, null);
   assert.equal(JSON.stringify(repo.read().items[0].failureNotification).includes('trudne zadanie'), false);
   const repeated = await queue.fail({ id: claimed.job.id, claimToken: claimed.job.claimToken, error: 'ponowienie', expired: true });
   assert.equal(repeated.duplicate, true);

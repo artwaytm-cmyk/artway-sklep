@@ -145,7 +145,27 @@ test('kontrola połączenia zwraca stan Privacy Mode bota', { concurrency: false
     const view = await center.view({ priorities: [] }, true);
     assert.equal(view.status.bot.username, 'magazyn_artway_bot');
     assert.equal(view.status.bot.can_read_all_group_messages, false);
+    assert.deepEqual(view.status.allowlist, { chats: 1, users: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 0 });
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test('audyt webhooka zapisuje wyłącznie bezpieczne metadane i licznik odrzuceń', async () => {
+  const data = new Map();
+  const read = async (key, fallback) => structuredClone(data.has(key) ? data.get(key) : fallback);
+  const write = async (key, value) => data.set(key, structuredClone(value));
+  const center = createTelegramCenter({ read, write, env: { TELEGRAM_GROUP_ID: '-100', TELEGRAM_ALLOWED_USER_IDS: '7,8' } });
+  await center.recordInboundAudit({ accepted: true, deferred: true, kind: 'voice', text: 'tajna treść', userId: '7' });
+  await center.recordInboundAudit({ accepted: false, deferred: false, kind: 'command', actorHash: 'abcdef1234567890abcdef12', text: 'inna tajna treść', userId: '999' });
+  const view = await center.view({ priorities: [] }, false);
+  assert.equal(view.state.health.inboundAccepted, 1);
+  assert.equal(view.state.health.inboundDeferred, 1);
+  assert.equal(view.state.health.inboundRejected, 1);
+  assert.equal(view.state.health.lastRejectedKind, 'command');
+  assert.equal(view.state.health.lastRejectedRef, 'abcdef1234567890abcdef12');
+  assert.ok(view.state.health.lastRejectedAt);
+  assert.deepEqual(view.status.allowlist, { chats: 1, users: 2, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 2 });
+  assert.equal(JSON.stringify(view).includes('tajna treść'), false);
+  assert.equal(JSON.stringify(view).includes('999'), false);
 });
 
 test('kolejka Telegram obejmuje tylko aktywne ostrzeżenia', () => {

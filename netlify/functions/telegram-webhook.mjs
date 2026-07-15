@@ -34,6 +34,75 @@ function html(value = '') {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+const SERVER_LOCAL_COMMANDS = new Set(['start', 'pomoc', 'settings']);
+
+function cleanTelegramText(value = '', limit = 1600) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim()
+    .slice(0, limit);
+}
+
+export function telegramCommandRoute(value = '') {
+  const match = String(value ?? '').trim().match(/^\/([a-z0-9_]+)(?:@[a-z0-9_]+)?(?:\s|$)/i);
+  if (!match) return 'agent';
+  return SERVER_LOCAL_COMMANDS.has(match[1].toLowerCase()) ? 'local' : 'agent';
+}
+
+export function telegramReplyContext(reply = null) {
+  if (!reply || typeof reply !== 'object') return '';
+  return cleanTelegramText(reply.text || reply.caption || '', 1600);
+}
+
+export function telegramMessageMedia(message = null) {
+  if (!message || typeof message !== 'object') return null;
+  const source = message.voice || message.audio || null;
+  const kind = message.voice ? 'voice' : message.audio ? 'audio' : '';
+  const fileId = cleanTelegramText(source?.file_id || '', 500);
+  if (!source || !kind || !fileId) return null;
+  return {
+    kind,
+    fileId,
+    mimeType: cleanTelegramText(source.mime_type || '', 160),
+    fileName: cleanTelegramText(source.file_name || '', 240),
+  };
+}
+
+export function telegramInboundKind(message = null, callback = null) {
+  if (callback) return 'callback';
+  if (message?.voice) return 'voice';
+  if (message?.audio) return 'audio';
+  if (/^\//.test(String(message?.text || message?.caption || '').trim())) return 'command';
+  return 'text';
+}
+
+export function telegramActorRef(userId = '', chatId = '', secret = '') {
+  if (!String(userId).trim() || !String(chatId).trim() || !String(secret).trim()) return '';
+  return crypto.createHmac('sha256', String(secret)).update(`${String(userId).trim()}|${String(chatId).trim()}`).digest('hex').slice(0, 24);
+}
+
+async function auditRejectedInbound(origin = '', token = '', kind = 'unknown', actorHash = '') {
+  if (!origin || !token) return;
+  await fetch(`${origin}/api/store?action=telegram-inbound-audit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin-token': token },
+    body: JSON.stringify({ accepted: false, deferred: false, kind, actorHash }),
+  }).catch(() => null);
+}
+
+async function notifyAccessDenied({ userId = '', chatId = '', replyTo = null } = {}) {
+  const privateChatId = String(userId || '').trim(), sourceChatId = String(chatId || '').trim();
+  if (!privateChatId) return;
+  const privateText = `<b>🔒 Bot nie ma jeszcze przypisanego dostępu.</b>\nPrzekaż administratorowi te dane:\nID użytkownika: <code>${html(privateChatId)}</code>\nID czatu: <code>${html(sourceChatId)}</code>\nPo dodaniu do listy dostępu wyślij polecenie ponownie.`;
+  try {
+    await sendTelegramHtml(privateText, { chatId: privateChatId, silent: true }, process.env);
+    return;
+  } catch {
+    if (!sourceChatId || sourceChatId === privateChatId) return;
+  }
+  await sendTelegramHtml('<b>🔒 Nie masz jeszcze dostępu do bota.</b>\nOtwórz prywatną rozmowę z botem i wyślij <code>/start</code>. Otrzymasz tam bezpiecznie identyfikatory potrzebne administratorowi.', { chatId: sourceChatId, replyTo, silent: true }, process.env).catch(() => null);
+}
+
 export function normalizeTelegramAgentInput(value = '', botUsername = 'magazyn_artway_bot') {
   const username = String(botUsername || 'magazyn_artway_bot').trim().replace(/^@/, '');
   const escapedUsername = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -103,18 +172,25 @@ export default async (request) => {
   const update = await request.json().catch(() => ({})), callback = update.callback_query || null, message = callback?.message || update.message || null;
   if (!message?.chat?.id) return response();
   const config = telegramConfig(process.env), chatId = String(message.chat.id), sender = callback?.from || message.from || {}, userId = String(sender.id || '');
-  const allowed = config.allowedChatIds.has(chatId) && telegramActorAllowed(config, { chatId, userId, chatType: message.chat.type || '' });
+  const origin = new URL(request.url).origin, token = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim();
+  const inboundKind = telegramInboundKind(message, callback);
+  const privateExplicitUser = chatId === userId && config.allowedUserIds.has(userId);
+  const allowed = (config.allowedChatIds.has(chatId) || privateExplicitUser)
+    && telegramActorAllowed(config, { chatId, userId, chatType: message.chat.type || '' });
   if (!allowed) {
-    await sendTelegramHtml('<b>🔒 Brak dostępu do bota.</b>', { chatId, silent: true }, process.env).catch(() => null);
+    await auditRejectedInbound(origin, token, inboundKind, telegramActorRef(userId, chatId, expected));
+    await notifyAccessDenied({ userId, chatId, replyTo: message.message_id || null });
     return response();
   }
+  await telegramApi('sendChatAction', {
+    chat_id: chatId,
+    action: 'typing',
+    ...(Number(message.message_thread_id) > 0 ? { message_thread_id: Number(message.message_thread_id) } : {}),
+  }, process.env).catch(() => null);
   const rawInput = String(callback?.data || message.text || message.caption || '').trim();
   const normalizedInput = callback?.id ? { text: rawInput, forceCodex: false } : normalizeTelegramAgentInput(rawInput);
-  const input = normalizedInput.text;
-  if (!input && message.voice) {
-    await sendTelegramHtml('<b>🎙 Otrzymałem nagranie.</b>\nTranskrypcja jest wyłączona. Napisz krótko tekstem.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
-    return response();
-  }
+  const media = telegramMessageMedia(message);
+  const input = normalizedInput.text || (media ? `[Telegram: wiadomość ${media.kind === 'voice' ? 'głosowa' : 'audio'} do transkrypcji]` : '');
   try {
     const inventoryAction = callback?.id ? parseInventoryDecisionCallback(input) : parseInventoryDecisionText(input);
     if (inventoryAction) {
@@ -141,12 +217,10 @@ export default async (request) => {
       await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: notice, show_alert: false }, process.env).catch(() => null);
       return response();
     }
-    const token = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim();
     if (!token) {
       await sendTelegramHtml('⚠️ Dane sklepu są chwilowo niedostępne.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
       return response();
     }
-    const origin = new URL(request.url).origin;
     const incidentMatch = input.match(/^tg:(ack|s1|s24|resolve|reopen):([a-f0-9]{14})$/i);
     if (callback?.id && incidentMatch) {
       const incidentResponse = await fetch(`${origin}/api/store?action=telegram-incident-action`, {
@@ -164,14 +238,14 @@ export default async (request) => {
         intent: telegramNaturalIntent(input), text: input, chatId, messageThreadId: message.message_thread_id || null,
         replyTo: message.message_id || null, requestId: String(update.update_id || `${chatId}:${message.message_id || ''}`),
         user: sender.username || [sender.first_name, sender.last_name].filter(Boolean).join(' '), userId,
-        source: 'telegram-webhook', deferToCodex: normalizedInput.forceCodex || !input.startsWith('/'),
+        context: telegramReplyContext(message.reply_to_message), media, kind: inboundKind,
+        source: 'telegram-webhook', deferToCodex: !callback?.id && telegramCommandRoute(input) === 'agent',
       }),
     });
     const data = await apiResponse.json().catch(() => ({}));
     if (!apiResponse.ok || !data.ok) throw new Error(data.error || `HTTP ${apiResponse.status}`);
     if (callback?.id) await telegramApi('answerCallbackQuery', { callback_query_id: callback.id }, process.env).catch(() => null);
     if (data.deferred) {
-      await telegramApi('sendChatAction', { chat_id: chatId, action: 'typing', ...(Number(message.message_thread_id) > 0 ? { message_thread_id: Number(message.message_thread_id) } : {}) }, process.env).catch(() => null);
       return response();
     }
     await sendTelegramHtml(data.message, { chatId, replyTo: message.message_id, replyMarkup: data.replyMarkup, messageThreadId: message.message_thread_id || null }, process.env);

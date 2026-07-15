@@ -29,7 +29,11 @@ function emptyState() {
   return {
     initializedAt: '', updatedAt: '', lastDispatchAt: '', lastDigestAt: '', lastDigestSlot: '', events: {}, history: [], outbox: [],
     dashboard: { messageId: null, chatId: '', updatedAt: '', createdAt: '' },
-    health: { lastCycleAt: '', lastSuccessAt: '', lastErrorAt: '', lastError: '', consecutiveErrors: 0 },
+    health: {
+      lastCycleAt: '', lastSuccessAt: '', lastErrorAt: '', lastError: '', consecutiveErrors: 0,
+      lastWebhookAt: '', lastInboundKind: '', lastInboundStatus: '', inboundAccepted: 0, inboundDeferred: 0,
+      inboundRejected: 0, lastRejectedAt: '', lastRejectedKind: '', lastRejectedRef: '',
+    },
   };
 }
 
@@ -216,7 +220,11 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
   }
 
   async function connection(live = false) {
-    const config = telegramConfig(env), result = { configured: !!(config.token && config.chatId), chatConfigured: !!config.chatId, botConfigured: !!config.token, bot: null, webhook: null, error: '' };
+    const config = telegramConfig(env), result = {
+      configured: !!(config.token && config.chatId), chatConfigured: !!config.chatId, botConfigured: !!config.token,
+      allowlist: { ...(config.allowlistCounts || { chats: config.allowedChatIds.size, users: config.allowedUserIds.size }) },
+      bot: null, webhook: null, error: '',
+    };
     if (!live || !config.token) return result;
     try {
       const [bot, webhook] = await Promise.all([telegramApi('getMe', {}, env), telegramApi('getWebhookInfo', {}, env)]);
@@ -263,6 +271,38 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     await write(SETTINGS_KEY, { ...settings, updatedAt: nowIso(), updatedBy: clean(operator, 160) });
     const state = await loadState(); addHistory(state, { kind: 'settings', status: 'saved', title: 'Zmieniono ustawienia komunikacji', reason: `tryb ${settings.mode}`, source: operator });
     await saveState(state); return settings;
+  }
+
+  async function recordInboundAudit(input = {}) {
+    const state = await loadState(), at = nowIso(), accepted = input.accepted === true, deferred = accepted && input.deferred === true;
+    const kind = clean(input.kind || 'unknown', 40).replace(/[^a-z0-9_-]/gi, '') || 'unknown';
+    const actorRef = clean(input.actorHash || '', 64).toLowerCase().replace(/[^a-f0-9]/g, '').slice(0, 24);
+    state.health.lastWebhookAt = at;
+    state.health.lastInboundKind = kind;
+    state.health.lastInboundStatus = accepted ? (deferred ? 'deferred' : 'accepted') : 'rejected';
+    if (accepted) state.health.inboundAccepted = Math.max(0, Number(state.health.inboundAccepted) || 0) + 1;
+    if (deferred) state.health.inboundDeferred = Math.max(0, Number(state.health.inboundDeferred) || 0) + 1;
+    if (!accepted) {
+      state.health.inboundRejected = Math.max(0, Number(state.health.inboundRejected) || 0) + 1;
+      state.health.lastRejectedAt = at;
+      state.health.lastRejectedKind = kind;
+      state.health.lastRejectedRef = actorRef;
+    }
+    addHistory(state, {
+      direction: 'in', kind: 'webhook', status: state.health.lastInboundStatus, category: kind,
+      title: accepted ? (deferred ? 'Przekazano wiadomość do Agenta' : 'Obsłużono wiadomość lokalnie') : 'Odrzucono wiadomość przez kontrolę dostępu',
+      reason: !accepted && actorRef ? `ref ${actorRef}` : '',
+      source: 'telegram-webhook',
+    });
+    await saveState(state);
+    return {
+      accepted, deferred, kind, at,
+      counts: {
+        accepted: state.health.inboundAccepted,
+        deferred: state.health.inboundDeferred,
+        rejected: state.health.inboundRejected,
+      },
+    };
   }
 
   async function sendManual(message, options = {}) {
@@ -458,7 +498,31 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     const secret = telegramWebhookSecret(env); if (!secret) throw new Error('Nie można zabezpieczyć webhooka bez tokenu Telegram.');
     const url = `${String(origin || 'https://artwaytm.pl').replace(/\/$/, '')}/.netlify/functions/telegram-webhook`;
     const result = await telegramApi('setWebhook', { url, secret_token: secret, allowed_updates: ['message', 'callback_query'], drop_pending_updates: true, max_connections: 20 }, env);
-    const commands = [{ command: 'agent', description: 'Przekaż zwykłe polecenie Agentowi Codex' }, { command: 'status', description: 'Najważniejsze sprawy i kondycja sklepu' }, { command: 'zamowienia', description: 'Nowe i aktywne zamówienia' }, { command: 'braki', description: 'Braki i zamówienia do producentów' }, { command: 'wiadomosci', description: 'Sprawy klientów do odpowiedzi' }, { command: 'wysylki', description: 'Wysyłki i numery InPost' }, { command: 'magazyn', description: 'Stan operacyjny magazynu' }, { command: 'settings', description: 'Ustawienia komunikacji i SLA' }, { command: 'pomoc', description: 'Przykłady zwykłych pytań' }];
+    const commands = [
+      { command: 'agent', description: 'Przekaż zwykłe polecenie Agentowi Codex' },
+      { command: 'centrum', description: 'Centrum operacyjne sklepu' },
+      { command: 'decyzje', description: 'Decyzje oczekujące na zatwierdzenie' },
+      { command: 'raport', description: 'Przygotuj raport na żądanie' },
+      { command: 'wykonaj', description: 'Wykonaj kontrolowane zadanie' },
+      { command: 'produkty', description: 'Produkty i kartoteki' },
+      { command: 'producenci', description: 'Producenci i dostępność' },
+      { command: 'diagnostyka', description: 'Diagnostyka sklepu i integracji' },
+      { command: 'monitor', description: 'Monitoring najważniejszych spraw' },
+      { command: 'sprawdz', description: 'Sprawdź wskazaną rzecz' },
+      { command: 'zlecenie', description: 'Obsługa wskazanego zlecenia' },
+      { command: 'nadwyzki', description: 'Nadwyżki i decyzje magazynowe' },
+      { command: 'linki', description: 'Kontrola linków producentów' },
+      { command: 'opisy', description: 'Kontrola opisów produktów' },
+      { command: 'status', description: 'Najważniejsze sprawy i kondycja sklepu' },
+      { command: 'zamowienia', description: 'Nowe i aktywne zamówienia' },
+      { command: 'braki', description: 'Braki i zamówienia do producentów' },
+      { command: 'wiadomosci', description: 'Sprawy klientów do odpowiedzi' },
+      { command: 'wysylki', description: 'Wysyłki i numery InPost' },
+      { command: 'magazyn', description: 'Stan operacyjny magazynu' },
+      { command: 'start', description: 'Uruchom pomoc bota' },
+      { command: 'pomoc', description: 'Przykłady zwykłych pytań' },
+      { command: 'settings', description: 'Ustawienia komunikacji i SLA' },
+    ];
     await telegramApi('setMyCommands', { commands }, env);
     await Promise.allSettled([
       telegramApi('setMyDescription', { description: 'Centrum operacyjne Artway-TM: zamówienia, Allegro, InPost, magazyn, producenci i komunikacja zespołu.' }, env),
@@ -485,7 +549,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       message = `<b>🏬 Magazyn</b>\n${rows.join('\n') || '✅ Brak pilnych braków.'}`; showButton = rows.length > 0;
     } else if (intent === 'settings') message = '<b>⚙️ Telegram</b>\nUstawienia alertów, ciszy i SLA są w panelu.';
     else { message = '<b>🤖 Napisz zwykłym językiem</b>\nNp. „co jest pilne?”, „czy są nowe zamówienia?” albo „kto czeka na odpowiedź?”.'; showButton = false; }
-    const state = await loadState(); state.health.lastWebhookAt = nowIso(); addHistory(state, { direction: 'in', kind: 'command', status: 'handled', category: intent, title: clean(meta.text || intentInput || intent, 240), source: clean(meta.user || 'telegram', 100), chatId: meta.chatId }); await saveState(state);
+    await recordInboundAudit({ accepted: true, deferred: false, kind: 'local_command' });
     return { intent, message, replyMarkup: showButton ? panelButtons(intent) : undefined };
   }
 
@@ -500,5 +564,5 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     return { inline_keyboard: [[{ text: label, url }]] };
   }
 
-  return { connection, deliveryAction, dispatch, inbound, incidentAction, loadSettings, managedEvent, panelButtons, refreshDashboard, registerWebhook, saveSettings, sendManual, view };
+  return { connection, deliveryAction, dispatch, inbound, incidentAction, loadSettings, managedEvent, panelButtons, recordInboundAudit, refreshDashboard, registerWebhook, saveSettings, sendManual, view };
 }

@@ -17,6 +17,26 @@ function clean(value = '', limit = 500) {
   return String(value ?? '').trim().slice(0, limit);
 }
 
+function cleanContext(value = '') {
+  return String(value ?? '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim()
+    .slice(0, 1600);
+}
+
+function cleanMedia(value = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const kind = value.kind === 'voice' || value.kind === 'audio' ? value.kind : '';
+  const fileId = clean(value.fileId, 500);
+  if (!kind || !fileId) return null;
+  return {
+    kind,
+    fileId,
+    mimeType: clean(value.mimeType, 160),
+    fileName: clean(value.fileName, 240),
+  };
+}
+
 function asRecord(value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
@@ -88,6 +108,7 @@ function publicFailureNotification(job = {}) {
 }
 
 function publicJob(job = {}) {
+  const terminal = ['completed', 'failed'].includes(job.status);
   return {
     id: clean(job.id, 160),
     claimToken: clean(job.claimToken, 200),
@@ -96,6 +117,9 @@ function publicJob(job = {}) {
     messageThreadId: Number(job.messageThreadId) > 0 ? Number(job.messageThreadId) : null,
     replyTo: Number(job.replyTo) > 0 ? Number(job.replyTo) : null,
     user: clean(job.user, 160),
+    userId: clean(job.userId, 100),
+    context: terminal ? '' : cleanContext(job.context),
+    media: terminal ? null : cleanMedia(job.media),
     requestId: clean(job.requestId, 160),
     channel: job.channel === 'panel' ? 'panel' : 'telegram',
     attempts: Math.max(0, Number(job.attempts) || 0),
@@ -135,7 +159,8 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
   }
 
   async function enqueue(input = {}) {
-    const requestId = clean(input.requestId, 160), text = clean(input.text, 2000), chatId = clean(input.chatId, 100);
+    const requestId = clean(input.requestId, 160), chatId = clean(input.chatId, 100), media = cleanMedia(input.media);
+    const text = clean(input.text, 2000) || (media ? `[Telegram: wiadomość ${media.kind === 'voice' ? 'głosowa' : 'audio'} do transkrypcji]` : '');
     const channel = input.channel === 'panel' ? 'panel' : 'telegram';
     if (!requestId || !text || (channel === 'telegram' && !chatId)) throw queueError('Brakuje identyfikatora, treści albo czatu zadania Codex.', 'codex_queue_invalid_job', 422);
     return change((record) => {
@@ -147,7 +172,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
           const failed = {
             ...existing, status: 'failed', failureKind: 'worker_offline', failedAt: timestamp.toISOString(),
             lastError: 'Lokalny Agent Codex jest offline. Polecenie nie zostało pozostawione do późniejszego wykonania.',
-            text: '', response: '', claimToken: '', leaseUntil: '', workerId: '',
+            text: '', context: '', media: null, response: '', claimToken: '', leaseUntil: '', workerId: '',
           };
           items[index] = failed;
           return { record: { items }, value: { job: publicJob(failed), duplicate: true, status: failed.status, ...presence } };
@@ -163,10 +188,13 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
         requestId,
         channel,
         text: offline ? '' : text,
+        context: offline ? '' : cleanContext(input.context),
+        media: offline ? null : media,
         chatId,
         messageThreadId: Number(input.messageThreadId) > 0 ? Number(input.messageThreadId) : null,
         replyTo: Number(input.replyTo) > 0 ? Number(input.replyTo) : null,
         user: clean(input.user, 160),
+        userId: clean(input.userId, 100),
         status: offline ? 'failed' : 'queued',
         attempts: 0,
         createdAt,
@@ -207,7 +235,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
           lastError: jobExpired
             ? `${panelExpired ? 'Zadanie panelu' : 'Polecenie Telegram'} wygasło przed wykonaniem. Nic nie zostało uruchomione w tle.`
             : 'Nie udało się jednoznacznie potwierdzić dostarczenia odpowiedzi; nie ponowiono jej, aby uniknąć duplikatu.',
-          text: '', response: '', claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '',
+          text: '', context: '', media: null, response: '', claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '',
           ...(failureNotification ? { failureNotification } : {}),
         };
       });
@@ -275,7 +303,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
         items[index] = {
           ...current, status: 'failed', failedAt: now().toISOString(),
           lastError: 'Zadanie panelu wygasło przed zakończeniem. Wynik nie został zastosowany.',
-          text: '', response: '', claimToken: '', leaseUntil: '', workerId: '',
+          text: '', context: '', media: null, response: '', claimToken: '', leaseUntil: '', workerId: '',
         };
         return { record: { items }, value: { expired: true } };
       }
@@ -316,7 +344,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
       if (current.status !== 'delivering' || current.claimToken !== claimToken) throw queueError('Wygasło prawo do zakończenia zadania.', 'codex_queue_claim_invalid');
       const job = {
         ...current, status: 'completed', deliveredAt: now().toISOString(), telegramMessageId: clean(input.telegramMessageId, 80),
-        text: '', response: input.keepResponse === true ? clean(current.response, 3900) : '', claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '',
+        text: '', context: '', media: null, response: input.keepResponse === true ? clean(current.response, 3900) : '', claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '',
       };
       const items = [...record.items]; items[index] = job;
       return { record: { items }, value: { delivered: true, duplicate: false } };
@@ -341,7 +369,7 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
         ...current, status: exhausted ? 'failed' : 'queued', lastError: expired ? 'Zadanie wygasło przed wykonaniem. Nic nie zostało uruchomione w tle.' : (error || 'Nieznany błąd pracownika Codex'),
         failedAt: timestamp.toISOString(), notBefore: new Date(timestamp.getTime() + 10_000).toISOString(),
         claimToken: '', leaseUntil: '', deliveryLeaseUntil: '', workerId: '', response: '',
-        ...(exhausted ? { text: '' } : {}),
+        ...(exhausted ? { text: '', context: '', media: null } : {}),
         ...(notification ? { failureNotification: notification } : {}),
       };
       const items = [...record.items]; items[index] = job;

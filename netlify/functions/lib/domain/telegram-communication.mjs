@@ -92,16 +92,27 @@ export function telegramSettings(raw = {}) {
 }
 
 export function telegramConfig(env = process.env) {
+  const bootstrapChats = new Set([
+    env.TELEGRAM_NOTIFY_CHAT_ID,
+    env.TELEGRAM_GROUP_ID,
+    env.TELEGRAM_CHAT_ID,
+  ].map((value) => String(value || '').trim()).filter(Boolean));
+  const explicitChats = new Set(String(env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map((value) => String(value || '').trim()).filter(Boolean));
+  const explicitUsers = new Set(String(env.TELEGRAM_ALLOWED_USER_IDS || '').split(',').map((value) => String(value || '').trim()).filter(Boolean));
+  const ownerBootstrap = new Set([...bootstrapChats].filter((value) => /^\d+$/.test(value)));
   return {
     token: text(env.TELEGRAM_BOT_TOKEN || '', 300).trim(),
     chatId: text(env.TELEGRAM_NOTIFY_CHAT_ID || env.TELEGRAM_GROUP_ID || env.TELEGRAM_CHAT_ID || '', 100).trim(),
-    allowedChatIds: new Set([
-      env.TELEGRAM_NOTIFY_CHAT_ID,
-      env.TELEGRAM_GROUP_ID,
-      env.TELEGRAM_CHAT_ID,
-      ...String(env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(','),
-    ].map((value) => String(value || '').trim()).filter(Boolean)),
-    allowedUserIds: new Set(String(env.TELEGRAM_ALLOWED_USER_IDS || '').split(',').map((value) => String(value || '').trim()).filter(Boolean)),
+    allowedChatIds: new Set([...bootstrapChats, ...explicitChats]),
+    allowedUserIds: explicitUsers,
+    allowlistCounts: {
+      chats: new Set([...bootstrapChats, ...explicitChats]).size,
+      users: new Set([...ownerBootstrap, ...explicitUsers]).size,
+      ownerBootstrap: ownerBootstrap.size,
+      chatBootstrap: bootstrapChats.size,
+      explicitChats: explicitChats.size,
+      explicitUsers: explicitUsers.size,
+    },
   };
 }
 
@@ -109,14 +120,17 @@ export function telegramActorAllowed(config = {}, actor = {}) {
   const chatId = String(actor.chatId || '').trim(), userId = String(actor.userId || '').trim();
   const chats = config.allowedChatIds instanceof Set ? config.allowedChatIds : new Set();
   const users = config.allowedUserIds instanceof Set ? config.allowedUserIds : new Set();
-  if (!chatId || !userId || !chats.has(chatId)) return false;
+  if (!chatId || !userId) return false;
   const privateChat = actor.chatType === 'private' || chatId === userId;
-  if (privateChat) return chatId === userId;
+  // Jawnie dozwolony użytkownik może rozmawiać z botem również prywatnie;
+  // nie trzeba powielać tego samego ID na liście czatów. W prywatnym czacie
+  // Telegram używa identycznego ID rozmowy i użytkownika.
+  if (privateChat) return chatId === userId && (chats.has(chatId) || users.has(userId));
   // W grupie muszą być dozwolone jednocześnie grupa i konkretny nadawca.
   // Jawna lista TELEGRAM_ALLOWED_USER_IDS rozszerza, a nie zastępuje
   // prywatne ID właściciela i dodatkowych osób z allowedChatIds. Dzięki temu
   // dopisanie członka zespołu nie odbiera dostępu wcześniej dozwolonej osobie.
-  return users.has(userId) || chats.has(userId);
+  return chats.has(chatId) && (users.has(userId) || chats.has(userId));
 }
 
 export function telegramHtml(value) {

@@ -3,6 +3,7 @@ import { telegramAgentReport } from './telegram-center.mjs';
 
 const ACTIONS = new Set([
   'telegram-center-status', 'telegram-settings-save', 'telegram-register-webhook', 'telegram-dispatch', 'telegram-inbound-command',
+  'telegram-inbound-audit',
   'telegram-incident-action', 'telegram-delivery-action', 'telegram-dashboard-refresh', 'telegram-send-note', 'telegram-test', 'telegram-send-agent-report', 'telegram-send-supplier-order',
   'codex-agent-claim', 'codex-agent-complete', 'codex-agent-fail', 'codex-agent-heartbeat', 'codex-agent-panel-enqueue', 'codex-agent-result',
 ]);
@@ -95,6 +96,10 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
     }
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
     const body = await req.json().catch(() => ({})), session = sessionOf(req), operator = session?.email || 'administrator';
+    if (action === 'telegram-inbound-audit') {
+      if (!center || typeof center.recordInboundAudit !== 'function') return respond({ ok: false, error: 'Audyt Telegram nie jest dostępny', code: 'telegram_audit_unavailable' }, 503);
+      return respond({ ok: true, audit: await center.recordInboundAudit({ accepted: body.accepted === true, deferred: body.deferred === true, kind: body.kind, actorHash: body.actorHash }) });
+    }
     if (action === 'codex-agent-claim') {
       if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
       const claimed = await codexQueue.claim(text(body.workerId || '', 160));
@@ -218,13 +223,17 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
         user: body.user, userId: body.userId, chatId: body.chatId, messageThreadId: body.messageThreadId,
         requestId: body.requestId, source: body.source, channel: body.source === 'telegram-webhook' ? 'telegram' : 'panel',
       }) : null;
-      if (inventory) return respond({ ok: true, ...inventory });
+      if (inventory) {
+        if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred: false, kind: 'inventory' });
+        return respond({ ok: true, ...inventory });
+      }
       if (body.deferToCodex === true && body.source === 'telegram-webhook' && codexQueue) {
         const queued = await codexQueue.enqueue({
           requestId: body.requestId, text: body.text, chatId: body.chatId, messageThreadId: body.messageThreadId,
-          replyTo: body.replyTo, user: body.user, channel: 'telegram',
+          replyTo: body.replyTo, user: body.user, userId: body.userId, context: body.context, media: body.media, channel: 'telegram',
         });
         const deferred = ['queued', 'processing', 'delivering'].includes(queued.status);
+        if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred, kind: body.kind || 'text' });
         if (!deferred) {
           const completed = queued.status === 'completed';
           return respond({
