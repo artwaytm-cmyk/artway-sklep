@@ -7,7 +7,7 @@ const ACTIONS = new Set([
   'codex-agent-claim', 'codex-agent-complete', 'codex-agent-fail', 'codex-agent-heartbeat', 'codex-agent-panel-enqueue', 'codex-agent-result',
 ]);
 
-export function createTelegramRouter({ center, codexQueue, getOperationalCenter, inventoryCommand, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text }) {
+export function createTelegramRouter({ center, codexQueue, getOperationalCenter, inventoryCommand, inventoryDecisions, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text, sendTelegram = sendTelegramHtml }) {
   return async function telegramRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
     if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -45,7 +45,7 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
       }
       let sent;
       try {
-        sent = await sendTelegramHtml(telegramHtml(prepared.job.response), {
+        sent = await sendTelegram(telegramHtml(prepared.job.response), {
           chatId: prepared.job.chatId,
           replyTo: prepared.job.replyTo,
           messageThreadId: prepared.job.messageThreadId,
@@ -70,10 +70,58 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
     if (action === 'telegram-register-webhook') return respond({ ok: true, ...(await center.registerWebhook(publicOrigin(req))) });
     if (action === 'telegram-dispatch') {
       const operational = await getOperationalCenter(), dispatch = await center.dispatch(operational, { source: text(body.source || 'admin-panel', 80), force: body.force === true, forceDigest: body.forceDigest === true });
-      return respond({ ok: true, dispatch, center: operational });
+      let inventoryReminder = { due: false, reason: 'service_unavailable', messages: 0, decisions: 0 };
+      if (inventoryDecisions && typeof inventoryDecisions.prepareReminder === 'function') {
+        const reminder = await inventoryDecisions.prepareReminder(new Date());
+        inventoryReminder = {
+          due: reminder.due === true,
+          reason: reminder.reason,
+          slot: reminder.slot,
+          claimExpiresAt: reminder.claimExpiresAt || null,
+          messages: 0,
+          decisions: reminder.decisions?.length || 0,
+          completed: false,
+          released: false,
+          errors: [],
+        };
+        const messages = reminder.messages || [];
+        for (const message of messages) {
+          try {
+            await sendTelegram(message.text, { replyMarkup: message.replyMarkup, messageThreadId: body.messageThreadId || null });
+            inventoryReminder.messages += 1;
+          } catch (error) {
+            inventoryReminder.errors.push(text(error?.message || error, 300));
+            break;
+          }
+        }
+        if (reminder.due === true && reminder.claimToken) {
+          if (inventoryReminder.errors.length === 0 && inventoryReminder.messages === messages.length) {
+            try {
+              const completed = await inventoryDecisions.completeReminder(reminder.claimToken, new Date());
+              inventoryReminder.completed = completed?.completed === true;
+              inventoryReminder.reason = inventoryReminder.completed ? 'sent' : inventoryReminder.reason;
+            } catch (error) {
+              inventoryReminder.errors.push(text(error?.message || error, 300));
+            }
+          }
+          if (!inventoryReminder.completed && inventoryReminder.errors.length) {
+            try {
+              const released = await inventoryDecisions.releaseReminder(reminder.claimToken);
+              inventoryReminder.released = released?.released === true;
+              inventoryReminder.reason = inventoryReminder.released ? 'delivery_failed_retryable' : inventoryReminder.reason;
+            } catch (error) {
+              inventoryReminder.errors.push(text(error?.message || error, 300));
+            }
+          }
+        }
+      }
+      return respond({ ok: true, dispatch, inventoryReminder, center: operational });
     }
     if (action === 'telegram-inbound-command') {
-      const inventory = typeof inventoryCommand === 'function' ? await inventoryCommand(body.text || body.intent || '', { user: body.user, chatId: body.chatId, requestId: body.requestId }) : null;
+      const inventory = typeof inventoryCommand === 'function' ? await inventoryCommand(body.text || body.intent || '', {
+        user: body.user, userId: body.userId, chatId: body.chatId, messageThreadId: body.messageThreadId,
+        requestId: body.requestId, source: body.source, channel: body.source === 'telegram-webhook' ? 'telegram' : 'panel',
+      }) : null;
       if (inventory) return respond({ ok: true, ...inventory });
       if (body.deferToCodex === true && body.source === 'telegram-webhook' && codexQueue) {
         const queued = await codexQueue.enqueue({

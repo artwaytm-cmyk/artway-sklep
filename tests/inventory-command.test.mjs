@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createInventoryNaturalCommandHandler, matchInventoryProduct, parseInventoryNaturalCommand } from '../netlify/functions/lib/domain/inventory-command.mjs';
+import { createInventoryDecisionService, INVENTORY_DECISIONS_KEY } from '../netlify/functions/lib/domain/inventory-decisions.mjs';
 
 const products = [
   { id: 31, nazwa: 'Gorący Ziemniak Familijny', externalId: '1410', ean: '5906018014105' },
@@ -79,42 +80,63 @@ test('jednoznacznie dopasowuje EXTERNAL_ID, EAN i SKU', () => {
   assert.equal(matchInventoryProduct(products, 'GZ-MINI').product.id, 32);
 });
 
-test('handler ponawia zapis po konflikcie CAS i nie wykonuje tego samego requestId drugi raz', async () => {
-  let version = {
+test('pierwsza wiadomość i handler Agenta nie mogą wykonać końcowej decyzji magazynowej', async () => {
+  const stores = { settings: {
     value: {
       rev: 10,
       data: {
         artway_produkty_dodane: [{ id: '31', nazwa: 'Gorący Ziemniak Familijny', externalId: '1410', ean: '5906018014105' }],
         artway_stany: { 31: 1 },
         artway_ruchy_magazynowe: [],
+        artway_magazyn_produkty: { 31: { lokalizacja: 'A-R01-P01' } },
+        artway_magazyn_lokalizacje: [{ kod: 'A-R01-P01', nazwa: 'Półka 1', aktywna: true }],
       },
     },
     etag: 'etag-10',
     exists: true,
-  };
-  let writes = 0;
-  const readVersioned = async () => structuredClone(version);
-  const writeIfVersion = async (_key, record, expected) => {
-    writes += 1;
-    if (writes === 1) {
-      assert.equal(expected.etag, 'etag-10');
-      version = { value: { ...version.value, rev: 11 }, etag: 'etag-11', exists: true };
-      return { modified: false };
-    }
-    assert.equal(expected.etag, 'etag-11');
-    version = { value: structuredClone(record), etag: 'etag-12', exists: true };
+  } };
+  let etag = 20;
+  const readVersioned = async (key, fallback) => structuredClone(stores[key] || { value: fallback, etag: '', exists: false });
+  const writeIfVersion = async (key, record, expected) => {
+    const current = stores[key];
+    if (current && current.etag !== expected.etag) return { modified: false };
+    if (!current && expected.exists !== false) return { modified: false };
+    stores[key] = { value: structuredClone(record), etag: `etag-${++etag}`, exists: true };
     return { modified: true };
   };
-  const handle = createInventoryNaturalCommandHandler({ readVersioned, writeIfVersion });
-  const first = await handle('mam na stanie ziemniaka 1410 8 szt i zatwierdź', { requestId: 'telegram-123', user: 'Artway' });
-  assert.match(first.message, /Stan zatwierdzony/);
-  assert.equal(version.value.data.artway_stany['31'], 8);
-  assert.equal(version.value.data.artway_ruchy_magazynowe.length, 1);
-  assert.equal(version.value.data.artway_ruchy_magazynowe[0].sourceRequestId, 'telegram-123');
-  assert.equal(writes, 2);
+  const decisions = createInventoryDecisionService({ readVersioned, writeIfVersion });
+  const handle = createInventoryNaturalCommandHandler({ readVersioned, decisions });
+  const meta = { requestId: 'telegram-123', user: 'Artway', userId: '100', chatId: '-200', source: 'telegram-webhook' };
+  const first = await handle('mam na stanie ziemniaka 1410 8 szt i zatwierdź', meta);
+  assert.match(first.message, /Podaj lokalizację/);
+  assert.equal(stores.settings.value.data.artway_stany['31'], 1);
+  assert.equal(stores.settings.value.data.artway_ruchy_magazynowe.length, 0);
+  const draft = stores[INVENTORY_DECISIONS_KEY].value.items[0];
+  assert.equal(draft.status, 'awaiting_location');
 
-  const duplicate = await handle('mam na stanie ziemniaka 1410 8 szt i zatwierdź', { requestId: 'telegram-123', user: 'Artway' });
-  assert.match(duplicate.message, /już zapisane/);
-  assert.equal(version.value.data.artway_ruchy_magazynowe.length, 1);
-  assert.equal(writes, 2);
+  const locationQuestion = await handle(`czy lokalizacja ${draft.id} A-R01-P01?`, { ...meta, requestId: 'telegram-location-question' });
+  assert.equal(locationQuestion, null);
+  assert.equal(stores[INVENTORY_DECISIONS_KEY].value.items[0].status, 'awaiting_location');
+
+  const located = await handle('A-R01-P01', { ...meta, requestId: 'telegram-124' });
+  assert.match(located.message, /Potwierdź zmianę/);
+  assert.equal(stores.settings.value.data.artway_stany['31'], 1);
+
+  const blockedConfirmation = await handle(`potwierdzam ${draft.id}`, { ...meta, requestId: 'telegram-125' });
+  assert.match(blockedConfirmation.message, /Decyzja wymaga człowieka/);
+  const blockedRejection = await handle(`nie potwierdzam ${draft.id}`, { ...meta, requestId: 'telegram-126' });
+  assert.match(blockedRejection.message, /Decyzja wymaga człowieka/);
+  assert.equal(stores.settings.value.data.artway_stany['31'], 1);
+  assert.equal(stores.settings.value.data.artway_ruchy_magazynowe.length, 0);
+  assert.equal(stores[INVENTORY_DECISIONS_KEY].value.items[0].status, 'pending_confirmation');
+
+  const confirmed = await decisions.confirm(draft.id, { id: '100', name: 'Artway przez zweryfikowany webhook Telegrama' });
+  assert.equal(confirmed.decision.status, 'confirmed');
+  assert.equal(stores.settings.value.data.artway_stany['31'], 8);
+  assert.equal(stores.settings.value.data.artway_ruchy_magazynowe.length, 1);
+  assert.equal(stores.settings.value.data.artway_ruchy_magazynowe[0].sourceRequestId, `inventory-decision:${draft.id}`);
+
+  const duplicate = await handle('mam na stanie ziemniaka 1410 8 szt i zatwierdź', meta);
+  assert.match(duplicate.message, /wcześniej potwierdzona przez administratora/);
+  assert.equal(stores.settings.value.data.artway_ruchy_magazynowe.length, 1);
 });

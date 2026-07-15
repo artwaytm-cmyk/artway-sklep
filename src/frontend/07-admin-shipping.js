@@ -653,6 +653,7 @@ async function odtworzSesjeCentralna(){
 }
 function odswiezPoCichejSynchronizacji(){
   if(typeof document!=="undefined" && document.hidden) return;
+  if(typeof agentAIDecyzjeMagazynoweBusy!=="undefined" && agentAIDecyzjeMagazynoweBusy.size) return;
   const aktywny=document.activeElement, tag=aktywneTag => aktywneTag && ["INPUT","TEXTAREA","SELECT"].includes(aktywneTag.tagName);
   if(tag(aktywny)) return;
   const t=trasa();

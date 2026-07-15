@@ -81,3 +81,26 @@ test('odrzuca brak oczekiwanej rewizji, stanu lub ilości', () => {
     productId: '31', mode: 'set', expectedStock: 1, expectedRev: 2782, confirmed: true,
   }, NOW), (error) => error.code === 'inventory_quantity_required');
 });
+
+test('zmiana Agenta wymaga lokalizacji i zapisuje ją atomowo w ruchu oraz kartotece', () => {
+  assert.throws(() => applyInventoryStockSet(record(), {
+    productId: '31', mode: 'set', quantity: 8, expectedStock: 1, expectedRev: 2782,
+    confirmed: true, requireLocation: true, expectedLocation: 'A-R01-P01', location: '', product,
+  }, NOW), (error) => error.code === 'inventory_location_required');
+
+  assert.throws(() => applyInventoryStockSet(record(), {
+    productId: '31', mode: 'set', quantity: 8, expectedStock: 1, expectedRev: 2782,
+    confirmed: true, requireLocation: true, expectedLocation: 'A-R09-P09', location: 'A-R01-P02', product,
+  }, NOW), (error) => error.code === 'inventory_location_conflict');
+
+  const result = applyInventoryStockSet(record(), {
+    productId: '31', mode: 'set', quantity: 8, expectedStock: 1, expectedRev: 2782,
+    confirmed: true, confirmInventory: true, requireLocation: true,
+    expectedLocation: 'A-R01-P01', location: 'A-R01-P02', product,
+  }, NOW);
+  assert.equal(result.record.data.artway_magazyn_produkty['31'].lokalizacja, 'A-R01-P02');
+  assert.equal(result.record.data.artway_ruchy_magazynowe[0].lokalizacjaPrzed, 'A-R01-P01');
+  assert.equal(result.record.data.artway_ruchy_magazynowe[0].lokalizacjaPo, 'A-R01-P02');
+  assert.equal(result.result.locationBefore, 'A-R01-P01');
+  assert.equal(result.result.locationAfter, 'A-R01-P02');
+});

@@ -39,7 +39,9 @@ import {
 } from './domain/catalog-quality.mjs';
 import { eligiblePromotionProducts, runIndexNowPromotion } from './domain/indexnow.mjs';
 import { createInventoryNaturalCommandHandler } from './domain/inventory-command.mjs';
+import { createInventoryDecisionService } from './domain/inventory-decisions.mjs';
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
+import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
 import { createInventoryStockRoute } from './inventory-route.mjs';
 import {
   telegramConfig as telegramKonfiguracja,
@@ -84,10 +86,11 @@ async function zapisz(key, value) {
   if (key !== 'settings') return repository.write(key, value);
   return zapiszUstawieniaBezpiecznie(value);
 }
+const inventoryDecisions = createInventoryDecisionService({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
-const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, decisions: inventoryDecisions });
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
-const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
+const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
 
 // Klucze wspólne (konfiguracja + katalog + ceny + stany + opinie + kosz) — zapisywane przez administratora,
 // czytane przez wszystkich (żeby sklep wyglądał tak samo na każdym urządzeniu).
@@ -136,6 +139,7 @@ function ograniczRuch(request, name, limit, windowMs) {
 }
 
 const inventoryStockRoute = createInventoryStockRoute({ isAdmin: czyAdmin, rateLimit: ograniczRuch, readVersioned: czytajWersjonowane, respond: odpowiedz, settingsLimit: LIMIT_USTAWIEN, text: tekst, writeIfVersion: zapiszJesliWersja });
+const inventoryDecisionRoute = createInventoryDecisionRoute({ decisions: inventoryDecisions, isAdmin: czyAdmin, rateLimit: ograniczRuch, readVersioned: czytajWersjonowane, respond: odpowiedz, sessionOf: requestSession, text: tekst });
 
 function profilKlienta(raw = {}, email = '') {
   const source = raw && typeof raw === 'object' ? raw : {};
@@ -4955,6 +4959,8 @@ export default async (req) => {
   try {
     const telegramResponse = await telegramRoute(req, url, action);
     if (telegramResponse) return telegramResponse;
+    const inventoryDecisionResponse = await inventoryDecisionRoute(req, url, action);
+    if (inventoryDecisionResponse) return inventoryDecisionResponse;
     const inventoryResponse = await inventoryStockRoute(req, url, action);
     if (inventoryResponse) return inventoryResponse;
     if (action === 'catalog-quality-audit') {

@@ -7,6 +7,8 @@ function agentAINormalizuj(s=""){
     .replace(/\s+/g," ")
     .trim();
 }
+let agentAIDecyzjeMagazynowe={loaded:false,loading:false,items:[],locationsByProduct:{},error:"",updatedAt:""};
+const agentAIDecyzjeMagazynoweBusy=new Set();
 const AGENT_AI_CONFIRMATION_WORD=/\b(?:zatwierdz\w*|potwierdz\w*|zapis\w*|akcept\w*|zaakcept\w*)\b/;
 const AGENT_AI_QUOTED_TEXT=[/„[^”\n]*”/g,/“[^”\n]*”/g,/«[^»\n]*»/g,/‹[^›\n]*›/g,/‘[^’\n]*’/g,/"[^"\n]*"/g,/'[^'\n]*'/g,/`[^`\n]*`/g];
 function agentAIKontekstPotwierdzenia(raw="",n=agentAINormalizuj(raw)){
@@ -45,6 +47,16 @@ function agentAIParsujZmianeStanu(tekst=""){
     .replace(/\b(?:mam|mamy|obecnie|teraz|aktualnie|na|stanie|stan|magazynie|magazynu|produkt|produktu|towar|towaru|sprawdz|sprawdzam|zweryfikuj|i|oraz|prosze|zatwierdz|potwierdz|zapisz|ustaw|przyjmij|przyjeto|dodaj|dopisz|zwieksz|powieksz|do)\b/g," ")
     .replace(/\s+/g," ").trim();
   return {typ:"magazyn-stan-zmiana",mode:increment&&!absolute?"increment":"set",quantity:Number(iloscMatch[1]),confirmed,conflict,query,raw,confidence:.99};
+}
+function agentAIParsujDecyzjeMagazynowa(tekst=""){
+  const raw=String(tekst||"").trim();
+  let match=raw.match(/^(?:lokalizacja|lokacja|miejsce)\s+(IV[a-f0-9]{14})\s+([A-Za-z0-9._/-]{1,40})\s*[.!]?$/i);
+  if(match)return {typ:"magazyn-decyzja",action:"location",id:match[1],location:match[2],raw,confidence:1};
+  match=raw.match(/^(?:nie\s+potwierdzam|odrzucam|anuluj(?:ę|e)|rezygnuj(?:ę|e))\s+(IV[a-f0-9]{14})\s*[.!]?$/i);
+  if(match)return {typ:"magazyn-decyzja",action:"reject",id:match[1],raw,confidence:1};
+  match=raw.match(/^(?:potwierdzam|zatwierdzam|akceptuj(?:ę|e))\s+(IV[a-f0-9]{14})\s*[.!]?$/i);
+  if(match)return {typ:"magazyn-decyzja",action:"confirm",id:match[1],raw,confidence:1};
+  return null;
 }
 function agentAIKluczIdentyfikatora(v=""){return agentAINormalizuj(v).replace(/[^a-z0-9]/g,"");}
 function agentAIStemNazwy(v=""){
@@ -100,35 +112,106 @@ function agentAIUsunRequestIdKorekty(request={}){
 }
 async function agentAIWykonajZmianeStanu(intent={}){
   if(intent.conflict)return "Polecenie jest niejednoznaczne: widzę jednocześnie stan bezwzględny i przyjęcie. Napisz osobno „ustaw stan …” albo „przyjmij … szt.”. Nic nie zostało zapisane.";
-  if(intent.confirmed){
-    const fresh=await chmuraWczytajStan();
-    if(!fresh)throw new Error(`Nie mogę potwierdzić aktualnej rewizji bazy: ${chmuraStan.error||"brak połączenia"}. Nie zapisano zmiany.`);
-    zbudujProdukty();
-  }
   const match=agentAIZnajdzProduktDoZmianyStanu(intent);
   if(match.status==="none")return `Nie znalazłem produktu jednoznacznie dla „${intent.query||intent.raw}”. Podaj nazwę wraz z ID, EXTERNAL_ID, SKU, EAN albo kodem producenta. Nie zmieniłem stanu.`;
   if(match.status!=="one")return ["Znalazłem kilka możliwych produktów — nie zmieniam stanu bez jednoznacznego dopasowania:",...match.candidates.map(x=>`• ${x.product.nazwa} — ${agentAIProduktIdentyfikacjaTekst(x.product)}`),"Dopisz dokładny EAN, EXTERNAL_ID, SKU albo kod producenta."].join("\n");
   const p=match.product,before=stanMagazynuId(p.id),after=intent.mode==="increment"?(before===null?null:before+intent.quantity):intent.quantity;
   const evidence=match.evidence.identityHits.map(x=>`${x.label} ${x.value}`).join(", ")||(match.evidence.exactName?"dokładna nazwa":"zgodność nazwy");
   if(intent.mode==="increment"&&before===null)return `Produkt został dopasowany jednoznacznie: ${p.nazwa} (${agentAIProduktIdentyfikacjaTekst(p)}), ale ma stan „bez limitu”. Najpierw ustaw konkretny stan; nie można bezpiecznie dodać ${intent.quantity} szt.`;
-  const summary=[`🔎 Dopasowanie: ${p.nazwa}`,agentAIProduktIdentyfikacjaTekst(p),`Podstawa dopasowania: ${evidence}.`,`Zmiana: ${before===null?"bez limitu":before} → ${after} szt. (${intent.mode==="increment"?`przyjęcie +${intent.quantity}`:"ustawienie stanu absolutnego"}).`];
-  if(!intent.confirmed)return [...summary,"To jest tylko podgląd. Aby zapisać, dopisz „zatwierdź”, „potwierdź”, „zapisz” albo „zaakceptuj”."].join("\n");
-  const expectedRev=Number(chmuraStan.rev)||0;
-  const request=agentAIRequestIdKorekty(intent,p),requestId=request.id;
-  const result=await chmura("inventory-stock-set",{method:"POST",body:{
-    productId:String(p.id),mode:intent.mode,quantity:intent.quantity,expectedStock:before,expectedRev,
-    confirmed:true,confirmInventory:true,source:"admin-agent-panel",reason:`Polecenie administratora: ${intent.raw}`,
-    requestId,
-    product:{id:String(p.id),name:p.nazwa||p.name||"",nazwa:p.nazwa||p.name||"",sku:p.sku||"",externalId:p.externalId||"",ean:p.gtin||p.ean||"",gtin:p.gtin||p.ean||"",kodProducenta:p.kodProducenta||p.mpn||"",mpn:p.mpn||p.kodProducenta||""}
+  const requestId=`panel-stock-${globalThis.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
+  const result=await chmura("inventory-decision-create",{method:"POST",body:{
+    productId:String(p.id),mode:intent.mode,quantity:intent.quantity,query:intent.query,requestId,
+    source:"admin-agent-panel",channel:"panel",reason:`Polecenie administratora: ${intent.raw}`
   },timeout:30000});
-  const refreshed=await chmuraWczytajStan();
-  if(!refreshed)throw new Error(`Stan zapisano na serwerze, ale nie udało się go ponownie odczytać: ${chmuraStan.error||"brak połączenia"}.`);
-  zbudujProdukty();
-  const verified=stanMagazynuId(p.id),expectedAfter=Number(result.after);
-  if(verified!==expectedAfter)throw new Error(`Serwer zwrócił stan ${expectedAfter}, ale kontrola po zapisie odczytała ${verified===null?"bez limitu":verified}. Odśwież dane przed kolejną zmianą.`);
-  agentAIUsunRequestIdKorekty(request);
-  const verifiedSummary=result.duplicate?[`🔎 Dopasowanie: ${p.nazwa}`,agentAIProduktIdentyfikacjaTekst(p),`✅ To samo polecenie było już zapisane; nie wykonano drugiego przyrostu.`]:summary;
-  return [...verifiedSummary,`✅ Zapisano i zweryfikowano w chmurze: ${result.before===null?"bez limitu":result.before} → ${result.after} szt.`,`Rewizja bazy: ${result.rev} • ruch magazynowy: ${result.movementId||"zapisany"}.`].join("\n");
+  await agentAIDecyzjeMagazynowePobierz(true);
+  const decision=result.decision||{},serverBefore=Object.prototype.hasOwnProperty.call(decision,"expectedStock")?decision.expectedStock:before,serverAfter=Object.prototype.hasOwnProperty.call(decision,"after")?decision.after:after;
+  const summary=[`📍 Dopasowanie: ${p.nazwa}`,agentAIProduktIdentyfikacjaTekst(p),`Podstawa dopasowania: ${evidence}.`,`Plan: ${serverBefore===null?"bez limitu":serverBefore} → ${serverAfter} szt. (${intent.mode==="increment"?`przyjęcie +${intent.quantity}`:"ustawienie stanu absolutnego"}).`,`Decyzja: ${decision.id||"zapisana"}.`];
+  return [...summary,"Najpierw wybierz lokalizację produktu w karcie poniżej. Potem osobno kliknij „Potwierdzam zmianę” albo „Nie potwierdzam”.","Nic nie zostało jeszcze zmienione. Jeśli decyzja zostanie na później, Agent przypomni o niej około 16:00."].join("\n");
+}
+async function agentAIDecyzjeMagazynowePobierz(silent=false){
+  if(agentAIDecyzjeMagazynowe.loading)return agentAIDecyzjeMagazynowe;
+  agentAIDecyzjeMagazynowe.loading=true;
+  try{
+    const data=await chmura("inventory-decisions-list",{method:"POST",body:{statuses:["awaiting_location","pending_confirmation","confirming"]},timeout:20000});
+    agentAIDecyzjeMagazynowe={loaded:true,loading:false,items:Array.isArray(data.items)?data.items:[],locationsByProduct:data.locationsByProduct||{},error:"",updatedAt:new Date().toISOString()};
+  }catch(error){
+    agentAIDecyzjeMagazynowe={...agentAIDecyzjeMagazynowe,loaded:true,loading:false,error:String(error?.message||error)};
+    if(!silent)toast(`Nie udało się pobrać decyzji: ${error?.message||error}`);
+  }
+  agentAIDecyzjeMagazynoweOdswiezPanel();
+  return agentAIDecyzjeMagazynowe;
+}
+function agentAIDecyzjeMagazynoweOdswiezPanel(){
+  const box=$("agentInventoryDecisionPanel");
+  if(box)box.innerHTML=agentAIDecyzjeMagazynowePanelHTML();
+}
+function agentAIDecyzjaStanTekst(status=""){
+  return status==="awaiting_location"?"Wymaga lokalizacji":status==="pending_confirmation"?"Czeka na Twoją decyzję":status==="confirming"?"Trwa bezpieczny zapis":"Zamknięta";
+}
+function agentAIDecyzjeMagazynowePanelHTML(){
+  const state=agentAIDecyzjeMagazynowe,items=Array.isArray(state.items)?state.items:[];
+  if(state.loading&&!state.loaded)return `<section class="agent-inventory-decisions" aria-live="polite"><div class="agent-ops-empty">⏳ Pobieram decyzje magazynowe…</div></section>`;
+  if(state.error)return `<section class="agent-inventory-decisions" aria-live="polite"><div class="backend-note warn">⚠️ ${esc(state.error)} <button class="btn ghost" onclick="agentAIDecyzjeMagazynowePobierz()">Ponów</button></div></section>`;
+  if(!items.length)return `<section class="agent-inventory-decisions" aria-live="polite"><div class="order-section-head"><div><span class="order-pro-label">Bezpieczne korekty</span><h3>Decyzje magazynowe</h3></div><span class="lvl lvl-ok">brak oczekujących</span></div><div class="agent-ops-empty">✅ Nie ma zmian oczekujących na lokalizację ani potwierdzenie.</div></section>`;
+  return `<section class="agent-inventory-decisions" aria-live="polite"><div class="order-section-head"><div><span class="order-pro-label">Bezpieczne korekty</span><h3>Decyzje magazynowe (${items.length})</h3><p class="order-detail-lead">Najpierw lokalizacja, potem osobna decyzja. Brak kliknięcia oznacza brak zmiany; oczekujące pozycje wrócą w przypomnieniu około 16:00.</p></div><button class="btn ghost" onclick="agentAIDecyzjeMagazynowePobierz()">↻ Odśwież</button></div><div class="agent-inventory-decision-list">${items.map(item=>{
+    const productId=String(item.productId||item.product?.id||""),locations=state.locationsByProduct?.[productId]||[],shownLocations=locations.slice(0,200),suggested=String(item.suggestedLocation||""),before=item.expectedStock===null?"niemonitorowany":`${item.expectedStock} szt.`,after=item.after===null?"—":`${item.after} szt.`,busy=agentAIDecyzjeMagazynoweBusy.has(String(item.id)),disabled=busy?"disabled":"";
+    const options=[`<option value="">— wybierz lokalizację —</option>`,...shownLocations.map(loc=>`<option value="${esc(loc.code)}" ${suggested===loc.code?"selected":""}>${loc.current?"📍 ":""}${esc(loc.code)}${loc.name?` — ${esc(loc.name)}`:""}</option>`)].join("");
+    return `<article class="agent-inventory-decision ${esc(item.status)} ${busy?"is-busy":""}" data-inventory-decision-id="${esc(item.id)}" aria-busy="${busy?"true":"false"}"><header><div><b>${esc(item.product?.name||`Produkt ${productId}`)}</b><small>${esc(item.id)} • ID ${esc(productId)}${item.product?.externalId?` • EXTERNAL_ID ${esc(item.product.externalId)}`:""}</small></div><span class="lvl ${item.status==="pending_confirmation"?"lvl-ostrzezenie":"lvl-info"}">${busy?"Zapisuję bezpiecznie…":esc(agentAIDecyzjaStanTekst(item.status))}</span></header><div class="agent-inventory-decision-facts"><span><small>Stan przed</small><b>${esc(before)}</b></span><span><small>Stan po</small><b>${esc(after)}</b></span><span><small>Lokalizacja</small><b>${esc(item.location||suggested||"do wskazania")}</b></span></div>${item.status==="awaiting_location"?`<div class="agent-inventory-location-step"><label><span>Lokalizacja produktu</span><select id="inventoryDecisionLocation-${esc(item.id)}" ${disabled}>${options}</select>${locations.length>shownLocations.length?`<small>Pokazano pierwsze ${shownLocations.length} lokalizacji. Uporządkuj nieaktywne lokalizacje w magazynie.</small>`:""}</label>${locations.length?`<button class="btn" ${disabled} onclick="agentAIDecyzjaUstawLokalizacje(${jsArg(item.id)},this)">📍 Zapisz lokalizację i pokaż podsumowanie</button>`:busy?`<span class="btn disabled">＋ Utwórz lokalizację</span>`:`<a class="btn" href="#/admin/magazyn/lokalizacje">＋ Utwórz lokalizację</a>`}<button class="btn ghost" ${disabled} onclick="agentAIDecyzjaWykonaj(${jsArg(item.id)},'reject',this)">Nie potwierdzam</button></div>`:item.status==="pending_confirmation"?`<div class="agent-inventory-final-step"><div><b>🔐 Ostatni krok</b><small>Sprawdź stan i lokalizację. Każdy przycisk dotyczy tylko tej jednej decyzji.</small></div><button class="btn" ${disabled} onclick="agentAIDecyzjaWykonaj(${jsArg(item.id)},'confirm',this)">✅ Potwierdzam zmianę</button><button class="btn ghost" ${disabled} onclick="agentAIDecyzjaWykonaj(${jsArg(item.id)},'reject',this)">❌ Nie potwierdzam</button></div>`:`<div class="agent-inventory-final-step"><div><b>⏳ Sprawdzam zapis</b><small>Jeśli poprzednie połączenie zostało przerwane, dokończenie rozpozna istniejący ruch i nie zapisze go drugi raz.</small></div><button class="btn ghost" ${disabled} onclick="agentAIDecyzjaWykonaj(${jsArg(item.id)},'confirm',this)">↻ Sprawdź i dokończ</button></div>`}${item.lastError?`<div class="backend-note warn">${esc(item.lastError)}</div>`:""}</article>`;
+  }).join("")}</div></section>`;
+}
+function agentAIDecyzjaUstawBusy(id,busy){
+  const key=String(id||"");
+  if(busy)agentAIDecyzjeMagazynoweBusy.add(key);else agentAIDecyzjeMagazynoweBusy.delete(key);
+  agentAIDecyzjeMagazynoweOdswiezPanel();
+}
+async function agentAIDecyzjaUstawLokalizacje(id,button){
+  if(agentAIDecyzjeMagazynoweBusy.has(String(id)))return;
+  const select=$(`inventoryDecisionLocation-${id}`),location=String(select?.value||"").trim();
+  if(!location){toast("Wybierz lokalizację produktu");select?.focus();return;}
+  agentAIDecyzjaUstawBusy(id,true);let success=false;
+  try{
+    const data=await chmura("inventory-decision-location",{method:"POST",body:{id,location},timeout:20000});
+    toast("Lokalizacja zapisana. Teraz osobno potwierdź albo odrzuć zmianę.");
+    await agentAIDecyzjeMagazynowePobierz(true);
+    agentAIPokazTekstDecyzji(data.text||"Lokalizacja zapisana — oczekuje na potwierdzenie.");
+    success=true;
+  }catch(error){toast(error?.message||String(error));await agentAIDecyzjeMagazynowePobierz(true);}finally{agentAIDecyzjaUstawBusy(id,false);if(success)setTimeout(()=>document.querySelector(`[data-inventory-decision-id="${String(id)}"] .agent-inventory-final-step .btn`)?.focus(),0);}
+}
+async function agentAIDecyzjaWykonaj(id,action,button){
+  if(!["confirm","reject"].includes(action)||agentAIDecyzjeMagazynoweBusy.has(String(id)))return;
+  agentAIDecyzjaUstawBusy(id,true);
+  try{
+    const endpoint=action==="confirm"?"inventory-decision-confirm":"inventory-decision-reject";
+    const data=await chmura(endpoint,{method:"POST",body:{id},timeout:30000});
+    if(action==="confirm"){
+      const refreshed=await chmuraWczytajStan().catch(()=>false);
+      if(refreshed)zbudujProdukty();
+      toast(refreshed?"Zmiana magazynowa została zapisana i zweryfikowana ✅":"Zmiana została zapisana na serwerze, ale panel nie potwierdził odświeżenia — odśwież dane");
+    }else toast("Decyzja odrzucona — stan pozostał bez zmian");
+    await agentAIDecyzjeMagazynowePobierz(true);
+    agentAIPokazTekstDecyzji(data.text||"");
+  }catch(error){toast(error?.message||String(error));await agentAIDecyzjeMagazynowePobierz(true);}finally{agentAIDecyzjaUstawBusy(id,false);}
+}
+function agentAICzystyTekstDecyzji(text=""){
+  return String(text||"").replace(/<br\s*\/?>/gi,"\n").replace(/<\/(?:p|div)>/gi,"\n").replace(/<[^>]+>/g,"").replace(/&nbsp;/g," ").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,"&").replace(/\n{3,}/g,"\n\n").trim();
+}
+function agentAIPokazTekstDecyzji(text=""){
+  const box=$("agentAICommandLiveResult");
+  if(!box)return;
+  box.hidden=false;box.className="agent-response-card agent-command-live-result";
+  box.innerHTML=`<div class="agent-response-head"><b>🔐 Decyzja magazynowa</b><small>${esc(new Date().toLocaleString("pl-PL"))}</small></div><pre class="agent-answer-pre">${esc(agentAICzystyTekstDecyzji(text))}</pre>`;
+}
+async function agentAIWykonajDecyzjeMagazynowa(intent={}){
+  if(agentAIDecyzjeMagazynoweBusy.has(String(intent.id)))return "Ta decyzja jest właśnie bezpiecznie przetwarzana. Zaczekaj na wynik.";
+  agentAIDecyzjaUstawBusy(intent.id,true);
+  try{
+  const endpoint=intent.action==="location"?"inventory-decision-location":intent.action==="confirm"?"inventory-decision-confirm":"inventory-decision-reject";
+  const data=await chmura(endpoint,{method:"POST",body:{id:intent.id,...(intent.location?{location:intent.location}:{})},timeout:30000});
+  let refreshed=true;
+  if(intent.action==="confirm"){refreshed=await chmuraWczytajStan().catch(()=>false);if(refreshed)zbudujProdukty();}
+  await agentAIDecyzjeMagazynowePobierz(true);
+  return `${agentAICzystyTekstDecyzji(data.text||"Decyzja została obsłużona.")}${intent.action==="confirm"&&!refreshed?"\n\nZmiana jest zapisana na serwerze, ale panel nie potwierdził odświeżenia danych.":""}`;
+  }finally{agentAIDecyzjaUstawBusy(intent.id,false);}
 }
 function agentAIWytnijProduktAllegro(n=""){
   return String(n||"")
@@ -217,6 +300,8 @@ function agentAIPoprawOpisyProduktow(limit=40){
 function agentAIRozpoznajPolecenie(tekst=""){
   const raw=String(tekst||"").trim(), n=agentAINormalizuj(raw);
   if(!n) return {typ:"pomoc",raw,confidence:1};
+  const decisionIntent=agentAIParsujDecyzjeMagazynowa(raw);
+  if(decisionIntent)return decisionIntent;
   const urlMatch=raw.match(/https?:\/\/\S+/i);
   if(urlMatch&&agentAIMa(n,["sprawdz link","sprawdź link","pobierz z link","znajdz przez link","znajdź przez link","przeanalizuj link","uzupelnij z link","uzupełnij z link","dodaj produkt z link","dodaj z link","przygotuj produkt z link"]))return {typ:"link-producenta-analiza",url:urlMatch[0],addProduct:agentAIMa(n,["dodaj produkt","dodaj z link","przygotuj produkt"]),raw,confidence:.99};
   const stockIntent=agentAIParsujZmianeStanu(raw);
@@ -963,7 +1048,9 @@ async function agentAIWykonajPolecenie(tekst=""){
   let odpowiedz="";
   try{
     if(intent.typ==="pomoc"){
-      odpowiedz=["Możesz pisać normalnie, np.:","• mam obecnie na stanie Ziemniaka 1410 8 szt — podgląd bez zapisu","• mam obecnie na stanie Ziemniaka 1410 8 szt, sprawdź i zatwierdź — ustawienie stanu na 8","• przyjmij 8 szt produktu EAN 590... i zatwierdź — zwiększenie stanu o 8","• sprawdź link https://... i znajdź dane produktu","• wykonaj bezpieczny plan agenta","• sprawdź samą funkcjonalność strony","• pobierz świeże dane ze wszystkich źródeł","• ponów błędne kroki","• pokaż centrum operacyjne / co mam dziś zrobić?","• wyślij raport na Telegram","• pokaż komunikację z klientami","• sprawdź wysyłki i etykiety InPost","• audyt produktów i katalogu","• status producentów i otwartych zamówień","• diagnostyka integracji","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę","• synchronizuj bazę"].join("\n");
+      odpowiedz=["Możesz pisać normalnie, np.:","• mam obecnie na stanie Ziemniaka 1410 8 szt — Agent utworzy decyzję i zapyta o lokalizację","• przyjmij 8 szt produktu EAN 590... — po lokalizacji pojawi się osobne Potwierdzam / Nie potwierdzam","• lokalizacja IV… A-R01-P01 — przypisz miejsce do konkretnej decyzji","• potwierdzam IV… — potwierdź tylko wskazaną decyzję","• sprawdź link https://... i znajdź dane produktu","• wykonaj bezpieczny plan agenta","• sprawdź samą funkcjonalność strony","• pobierz świeże dane ze wszystkich źródeł","• ponów błędne kroki","• pokaż centrum operacyjne / co mam dziś zrobić?","• wyślij raport na Telegram","• pokaż komunikację z klientami","• sprawdź wysyłki i etykiety InPost","• audyt produktów i katalogu","• status producentów i otwartych zamówień","• diagnostyka integracji","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę","• synchronizuj bazę"].join("\n");
+    }else if(intent.typ==="magazyn-decyzja"){
+      odpowiedz=await agentAIWykonajDecyzjeMagazynowa(intent);
     }else if(intent.typ==="magazyn-stan-zmiana"){
       odpowiedz=await agentAIWykonajZmianeStanu(intent);
     }else if(intent.typ==="plan-wykonaj"){
@@ -1061,12 +1148,12 @@ async function agentAIWykonajPolecenie(tekst=""){
     }
     zapiszHistorieAgenta("komenda",`Polecenie z panelu: ${tekst}`,{polecenie:tekst,intencja:intent.typ,tryb:intent.tryb||"",odpowiedz});
     loguj("info",`Agent AI/panel: ${intent.typ} — ${tekst}`);
-    return {intent,odpowiedz,stabilnyWidok:intent.typ==="magazyn-stan-zmiana"};
+    return {intent,odpowiedz,stabilnyWidok:["magazyn-stan-zmiana","magazyn-decyzja"].includes(intent.typ)};
   }catch(err){
     odpowiedz=`Nie udało się wykonać polecenia: ${err?.message||err}`;
     zapiszHistorieAgenta("komenda",`Błąd polecenia z panelu: ${tekst}`,{polecenie:tekst,intencja:intent.typ,tryb:intent.tryb||"",odpowiedz,blad:String(err?.message||err)});
     loguj("error",`Agent AI/panel błąd: ${err?.message||err}`);
-    return {intent,odpowiedz,blad:err,stabilnyWidok:intent.typ==="magazyn-stan-zmiana"};
+    return {intent,odpowiedz,blad:err,stabilnyWidok:["magazyn-stan-zmiana","magazyn-decyzja"].includes(intent.typ)};
   }
 }
 function agentAIPokazWynikKomendyStabilnie(wynik={}){
@@ -1088,7 +1175,7 @@ async function agentAIPrzyjmijKomende(e){
   const btn=e?.submitter;
   if(btn) btn.disabled=true;
   const wynik=await agentAIWykonajPolecenie(tekst);
-  toast(wynik.blad?"Agent zapisał błąd polecenia":"Agent AI wykonał polecenie ✅");
+  toast(wynik.blad?"Agent zapisał błąd polecenia":["magazyn-stan-zmiana","magazyn-decyzja"].includes(wynik.intent?.typ)?"Agent obsłużył bezpieczny krok decyzji ✅":"Agent AI wykonał polecenie ✅");
   if(input) input.value="";
   if(btn) btn.disabled=false;
   if(wynik.stabilnyWidok)agentAIPokazWynikKomendyStabilnie(wynik);else renderuj();
@@ -1518,6 +1605,8 @@ function widokAdminAgentAI(sekcja="pulpit"){
   const aktywneWysylki=pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn),wysylkiBezNumeru=aktywneWysylki.filter(z=>!daneWysylki(z).numer).length;
   const dokumentyProducentow=(agentAIZlecenia||[]).filter(z=>!agentAIStatusZamknietyDlaNowejWersji(z.status)).length;
   if(aktywna==="telegram"&&!agentAITelegram.loaded&&!agentAITelegram.loading)setTimeout(()=>agentAITelegramPobierz(true,true),0);
+  const decyzjeAge=Date.now()-(Date.parse(agentAIDecyzjeMagazynowe.updatedAt)||0);
+  if(aktywna==="komendy"&&(!agentAIDecyzjeMagazynowe.loaded||decyzjeAge>60_000)&&!agentAIDecyzjeMagazynowe.loading)setTimeout(()=>agentAIDecyzjeMagazynowePobierz(true),0);
   return adminSzkielet("/admin/agent-ai", `
   ${agentAISubnavHTML(aktywna)}
   ${agentAIPodstronaNaglowekHTML(aktywna,problemy)}
@@ -1561,12 +1650,12 @@ function widokAdminAgentAI(sekcja="pulpit"){
     <div class="order-section-head">
       <div>
         <h2 style="margin-top:0">💬 Polecenie dla agenta</h2>
-        <p class="order-detail-lead">Pisz normalnie po polsku. Agent działa na danych widocznych w panelu i wykonuje tylko bezpieczne akcje administratora.</p>
+        <p class="order-detail-lead">Pisz normalnie po polsku. Przy zmianie stanu Agent zawsze najpierw pyta o lokalizację, a zapis wykonuje dopiero po osobnym potwierdzeniu konkretnej decyzji.</p>
       </div>
       <span id="agentAICommandCloudState" class="lvl ${chmuraStan.dostepna?"lvl-ok":"lvl-info"}">${chmuraStan.dostepna?`chmura • rewizja ${chmuraStan.rev||0}`:"łączenie z chmurą"}</span>
     </div>
     <form class="agent-command-form" onsubmit="return agentAIPrzyjmijKomende(event)">
-      <textarea id="agentAICommandInput" rows="3" placeholder="Np. mam obecnie na stanie Ziemniaka 1410 8 szt, sprawdź i zatwierdź..."></textarea>
+      <textarea id="agentAICommandInput" rows="3" placeholder="Np. mam obecnie na stanie Ziemniaka 1410 8 szt…"></textarea>
       <div class="agent-command-actions">
         <button class="btn" type="submit">🤖 Wykonaj polecenie</button>
         <button class="btn" type="button" onclick="agentAIWstawKomende('wykonaj bezpieczny plan agenta')">Wykonaj plan</button>
@@ -1589,8 +1678,9 @@ function widokAdminAgentAI(sekcja="pulpit"){
         <button class="btn ghost" type="button" onclick="agentAIWstawKomende('synchronizuj bazę')">Synchronizacja</button>
       </div>
     </form>
-    <div class="agent-command-hints">Agent rozumie kontekst całej strony. Zmiana stanu wymaga jednoznacznego produktu i słowa „zatwierdź”, „potwierdź”, „zapisz” albo „zaakceptuj”. „Mam na stanie 8 szt.” ustawia dokładnie 8, a „przyjmij/dodaj 8 szt.” zwiększa stan o 8.</div>
+    <div class="agent-command-hints">„Mam na stanie 8 szt.” ustawia dokładnie 8, a „przyjmij/dodaj 8 szt.” zwiększa stan o 8. Sama wiadomość niczego nie zapisuje — najpierw wybierasz lokalizację, potem osobno potwierdzasz albo odrzucasz każdą zmianę. Niepotwierdzone decyzje są grupowane w przypomnieniu około 16:00.</div>
     <div id="agentAICommandLiveResult" class="agent-response-card agent-command-live-result" hidden></div>
+    <div id="agentInventoryDecisionPanel">${agentAIDecyzjeMagazynowePanelHTML()}</div>
     ${odpowiedziAgenta.length?`<div class="agent-response-list">
       ${odpowiedziAgenta.map(h=>`<div class="agent-response-card">
         <div class="agent-response-head"><b>${esc(h.dane.polecenie||"Polecenie")}</b><small>${esc(h.dataTxt||"")}</small></div>

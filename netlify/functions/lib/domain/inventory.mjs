@@ -12,6 +12,14 @@ function safeText(value, limit = 240) {
   return String(value ?? '').trim().slice(0, limit);
 }
 
+function locationCode(value = '') {
+  return safeText(value, 80).toUpperCase()
+    .replace(/[^A-Z0-9._/-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
+}
+
 function integer(value, field, { min = 0, max = MAX_STOCK } = {}) {
   const number = typeof value === 'number' ? value : Number(String(value ?? '').trim());
   if (!Number.isSafeInteger(number) || number < min || number > max) {
@@ -97,6 +105,26 @@ export function applyInventoryStockSet(record = {}, input = {}, now = new Date()
   const reason = safeText(input.reason || 'Stan potwierdzony przez administratora', 300);
   const movementId = `MAG-${now.getTime().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
+  const productCards = settings.artway_magazyn_produkty && typeof settings.artway_magazyn_produkty === 'object' && !Array.isArray(settings.artway_magazyn_produkty)
+    ? { ...settings.artway_magazyn_produkty }
+    : {};
+  const oldCard = productCards[productId] && typeof productCards[productId] === 'object' ? productCards[productId] : {};
+  const locationBefore = locationCode(oldCard.lokalizacja || '');
+  const hasLocation = Object.prototype.hasOwnProperty.call(input, 'location');
+  const locationAfter = hasLocation ? locationCode(input.location) : locationBefore;
+  if (input.requireLocation === true && !locationAfter) {
+    throw inventoryError('Zmiana Agenta wymaga wskazania lokalizacji magazynowej.', 'inventory_location_required', 409);
+  }
+  if (input.requireLocation === true && !Object.prototype.hasOwnProperty.call(input, 'expectedLocation')) {
+    throw inventoryError('Brakuje oczekiwanej poprzedniej lokalizacji.', 'inventory_expected_location_required', 409);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, 'expectedLocation')) {
+    const expectedLocation = locationCode(input.expectedLocation || '');
+    if (expectedLocation !== locationBefore) {
+      throw inventoryError('Lokalizacja produktu zmieniła się od czasu przygotowania decyzji. Sprawdź produkt ponownie.', 'inventory_location_conflict', 409, { expectedLocation, actualLocation: locationBefore });
+    }
+  }
+
   const stocks = settings.artway_stany && typeof settings.artway_stany === 'object' && !Array.isArray(settings.artway_stany)
     ? { ...settings.artway_stany }
     : {};
@@ -120,15 +148,14 @@ export function applyInventoryStockSet(record = {}, input = {}, now = new Date()
     powod: reason,
     operator,
     source,
+    lokalizacjaPrzed: locationBefore,
+    lokalizacjaPo: locationAfter,
     ...(sourceRequestId ? { sourceRequestId } : {}),
   });
 
-  const productCards = settings.artway_magazyn_produkty && typeof settings.artway_magazyn_produkty === 'object' && !Array.isArray(settings.artway_magazyn_produkty)
-    ? { ...settings.artway_magazyn_produkty }
-    : {};
-  const oldCard = productCards[productId] && typeof productCards[productId] === 'object' ? productCards[productId] : {};
   productCards[productId] = {
     ...oldCard,
+    ...(hasLocation || input.requireLocation === true ? { lokalizacja: locationAfter } : {}),
     ...(input.confirmInventory === true ? { ostatniaInwentaryzacja: dateInWarsaw(now) } : {}),
     aktualizacja: timestamp,
     operator,
@@ -149,6 +176,8 @@ export function applyInventoryStockSet(record = {}, input = {}, now = new Date()
       before,
       after,
       delta,
+      locationBefore,
+      locationAfter,
       changed: before !== after,
       confirmedAt: input.confirmInventory === true ? timestamp : null,
       movementId,

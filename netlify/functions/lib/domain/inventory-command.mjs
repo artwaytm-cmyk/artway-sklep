@@ -1,3 +1,9 @@
+import { mergeCatalogProducts } from './catalog-quality.mjs';
+import {
+  renderInventoryDecisionConfirmation,
+  renderInventoryLocationPrompt,
+} from './inventory-decisions.mjs';
+
 function text(value = '', limit = 500) {
   return String(value ?? '').trim().slice(0, limit);
 }
@@ -124,67 +130,87 @@ function html(value = '') {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function stockValue(settings = {}, productId = '') {
-  const stocks = settings.artway_stany && typeof settings.artway_stany === 'object' ? settings.artway_stany : {};
-  if (!Object.prototype.hasOwnProperty.call(stocks, productId) || stocks[productId] === '' || stocks[productId] == null || !Number.isFinite(Number(stocks[productId]))) return null;
-  return Math.max(0, Math.floor(Number(stocks[productId])));
+function decisionId(value = '') {
+  return text(value, 80).match(/\b(IV[a-f0-9]{14})\b/i)?.[1] || '';
 }
 
-function previousRequest(settings = {}, requestId = '') {
-  if (!requestId || !Array.isArray(settings.artway_ruchy_magazynowe)) return null;
-  return settings.artway_ruchy_magazynowe.find((movement) => String(movement?.sourceRequestId || '') === requestId) || null;
+function decisionActor(meta = {}) {
+  return { id: text(meta.userId || '', 100), name: text(meta.user || 'administrator', 160) || 'administrator' };
 }
 
-export function createInventoryNaturalCommandHandler({ readVersioned, writeIfVersion } = {}) {
-  if (typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function') throw new Error('Inventory handler wymaga wersjonowanego repozytorium.');
+function commandCard(card = {}) {
+  return { message: card.text || '', replyMarkup: card.replyMarkup };
+}
+
+export function createInventoryNaturalCommandHandler({ readVersioned, decisions } = {}) {
+  if (typeof readVersioned !== 'function' || !decisions || typeof decisions.createDraft !== 'function') throw new Error('Inventory handler wymaga wersjonowanego repozytorium i serwisu decyzji.');
   return async function handleInventoryNaturalCommand(rawText = '', meta = {}) {
-    const command = parseInventoryNaturalCommand(rawText);
-    if (!command) return null;
-    if (command.conflict) return { intent: 'inventory', message: '<b>⚠️ Polecenie jest niejednoznaczne</b>\nWidzę jednocześnie stan bezwzględny i przyjęcie. Napisz osobno „ustaw stan …” albo „przyjmij … szt.”. Nic nie zostało zapisane.' };
-    const requestId = text(meta.requestId || '', 160), operator = text(meta.user || 'administrator', 160) || 'administrator';
-
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const version = await readVersioned('settings', { data: {}, rev: 0, updated_at: null });
-      const current = version.value || { data: {}, rev: 0, updated_at: null };
-      const data = current.data && typeof current.data === 'object' ? current.data : {};
-      const match = matchInventoryProduct(mergeCatalogProducts(data).activeProducts, command.query);
-      if (match.status === 'not_found') return { intent: 'inventory', message: `<b>⚠️ Nie znalazłem produktu</b>\nFraza: ${html(command.query)}\nNic nie zostało zapisane.` };
-      if (match.status !== 'matched') {
-        const rows = (match.alternatives || []).slice(0, 5).map((product) => `• ${html(product.nazwa || product.name || product.id)} · ID ${html(product.id)}`).join('\n');
-        return { intent: 'inventory', message: `<b>⚠️ Potrzebuję dokładniejszego kodu</b>\nPasuje więcej niż jedna kartoteka. Podaj ID, EXTERNAL_ID, EAN lub SKU.\n${rows}` };
-      }
-
-      const product = match.product, productId = String(product.id), before = stockValue(data, productId);
-      const identity = `ID ${html(productId)} · EXTERNAL_ID ${html(product.externalId || product.EXTERNAL_ID || product.mpn || '—')} · EAN ${html(product.ean || product.gtin || '—')}`;
-      const oldMovement = previousRequest(data, requestId);
-      if (oldMovement) return {
-        intent: 'inventory',
-        message: `<b>✅ To polecenie jest już zapisane</b>\n${html(product.nazwa || product.name || `Produkt ${productId}`)}\n${identity}\nStan: <b>${oldMovement.stanPrzed === null ? 'niemonitorowany' : oldMovement.stanPrzed}</b> → <b>${oldMovement.stanPo} szt.</b>`,
-        replyMarkup: { inline_keyboard: [[{ text: 'Otwórz magazyn', url: 'https://artwaytm.pl/#/admin/magazyn/stany' }]] },
-      };
-      if (command.mode === 'increment' && before === null) return { intent: 'inventory', message: `<b>⚠️ ${html(product.nazwa || product.name)}</b>\nProdukt nie ma jeszcze monitorowanego stanu. Najpierw ustaw stan bezwzględny.` };
-      const after = command.mode === 'increment' ? before + command.quantity : command.quantity;
-      if (!command.confirmed) return {
-        intent: 'inventory',
-        message: `<b>🔎 ${html(product.nazwa || product.name || `Produkt ${productId}`)}</b>\n${identity}\nStan: <b>${before === null ? 'niemonitorowany' : before}</b> → <b>${after} szt.</b>\n\nTo tylko podgląd. Dopisz „zatwierdź”, aby zapisać.`,
-      };
-
-      const mutation = applyInventoryStockSet(current, {
-        productId, mode: command.mode, quantity: command.quantity, expectedStock: before, expectedRev: Number(current.rev || 0), confirmed: true, confirmInventory: true,
-        source: 'telegram-webhook', requestId, operator, reason: `Naturalne polecenie administratora: ${text(command.raw, 300)}`,
-        product: { name: product.nazwa || product.name, sku: product.sku || '', externalId: product.externalId || product.EXTERNAL_ID || product.mpn || '', ean: product.ean || product.gtin || '' },
-      }, new Date());
-      const write = await writeIfVersion('settings', mutation.record, version);
-      if (!write?.modified) continue;
+    const raw = text(rawText, 1000), normalized = normalize(raw), id = decisionId(raw);
+    const parsedInventoryCommand = parseInventoryNaturalCommand(raw);
+    const actor = decisionActor(meta);
+    const rejectIntent = /\b(?:nie\s+potwierdz\w*|odrzuc\w*|anuluj\w*)\b/.test(normalized);
+    const confirmIntent = !rejectIntent && /\b(?:potwierdz\w*|zatwierdz\w*|akceptuj\w*)\b/.test(normalized);
+    if (id && (rejectIntent || (confirmIntent && !/\blokalizacj/.test(normalized)))) {
       return {
-        intent: 'inventory',
-        message: `<b>✅ Stan zatwierdzony</b>\n${html(mutation.result.product.name)}\n${identity}\nStan: <b>${mutation.result.before === null ? 'niemonitorowany' : mutation.result.before}</b> → <b>${mutation.result.after} szt.</b> · zmiana ${mutation.result.delta >= 0 ? '+' : ''}${mutation.result.delta}\nZapisano ruch i potwierdzenie inwentaryzacji.`,
-        replyMarkup: { inline_keyboard: [[{ text: 'Otwórz magazyn', url: 'https://artwaytm.pl/#/admin/magazyn/stany' }]] },
+        intent: 'inventory-decision',
+        message: '<b>🔐 Decyzja wymaga człowieka</b>\nKońcowe „Potwierdzam” albo „Nie potwierdzam” działa wyłącznie z przycisku lub jako dokładna odpowiedź administratora w Telegramie. Agent nie zmienił stanu magazynu.',
       };
     }
-    const error = new Error('Baza zmieniła się podczas zapisu. Spróbuj ponownie, aby uniknąć podwójnej korekty.');
-    error.code = 'inventory_write_conflict'; error.status = 409; throw error;
+
+    const locationMatch = raw.match(/^(?:lokalizacja|lokacja|miejsce)\s+(?:(IV[a-f0-9]{14})\s+)?([A-Za-z0-9._/-]{1,40})\s*[.!]?$/i);
+    const bareLocation = /^(?=.*(?:\d|[-/.]))[A-Za-z0-9._/-]{1,40}$/.test(raw) ? raw : '';
+    if (locationMatch || bareLocation) {
+      let targetId = locationMatch?.[1] || id;
+      const location = locationMatch?.[2] || bareLocation;
+      if (!targetId) {
+        const awaiting = (await decisions.list({ statuses: ['awaiting_location'] }))
+          .filter((item) => item.channel === 'telegram' && (!meta.chatId || item.chatId === String(meta.chatId)));
+        if (awaiting.length !== 1) {
+          return { intent: 'inventory-decision', message: awaiting.length
+            ? '<b>📍 Wskaż numer decyzji</b>\nCzeka kilka produktów. Napisz: „lokalizacja IV… A-R01-P01”.'
+            : '<b>📍 Brak decyzji oczekującej na lokalizację</b>\nNajpierw podaj produkt i zmianę stanu.' };
+        }
+        targetId = awaiting[0].id;
+      }
+      const result = await decisions.assignLocation(targetId, location, actor);
+      return { intent: 'inventory-decision', ...commandCard(renderInventoryDecisionConfirmation(result.decision)) };
+    }
+
+    if ((confirmIntent || rejectIntent) && !id && !parsedInventoryCommand) {
+      return { intent: 'inventory-decision', message: '<b>🔐 Każdą zmianę zatwierdzamy osobno</b>\nUżyj przycisku „Potwierdzam” albo „Nie potwierdzam” przy konkretnej decyzji. Ogólne potwierdzenie niczego nie zmieniło.' };
+    }
+
+    const command = parsedInventoryCommand;
+    if (!command) return null;
+    if (command.conflict) return { intent: 'inventory', message: '<b>⚠️ Polecenie jest niejednoznaczne</b>\nWidzę jednocześnie stan bezwzględny i przyjęcie. Napisz osobno „ustaw stan …” albo „przyjmij … szt.”. Nic nie zostało zapisane.' };
+    const requestId = text(meta.requestId || '', 160);
+    if (!requestId) throw Object.assign(new Error('Brakuje identyfikatora wiadomości. Nic nie zostało zapisane.'), { code: 'inventory_request_id_required', status: 422 });
+    const version = await readVersioned('settings', { data: {}, rev: 0, updated_at: null });
+    const current = version.value || { data: {}, rev: 0, updated_at: null };
+    const data = current.data && typeof current.data === 'object' ? current.data : {};
+    const match = matchInventoryProduct(mergeCatalogProducts(data).activeProducts, command.query);
+    if (match.status === 'not_found') return { intent: 'inventory', message: `<b>⚠️ Nie znalazłem produktu</b>\nFraza: ${html(command.query)}\nNic nie zostało zapisane.` };
+    if (match.status !== 'matched') {
+      const rows = (match.alternatives || []).slice(0, 5).map((product) => `• ${html(product.nazwa || product.name || product.id)} · ID ${html(product.id)}`).join('\n');
+      return { intent: 'inventory', message: `<b>⚠️ Potrzebuję dokładniejszego kodu</b>\nPasuje więcej niż jedna kartoteka. Podaj ID, EXTERNAL_ID, EAN lub SKU.\n${rows}` };
+    }
+    const product = match.product;
+    const result = await decisions.createDraft({
+      requestId,
+      productId: String(product.id),
+      product: { name: product.nazwa || product.name, sku: product.sku || '', externalId: product.externalId || product.EXTERNAL_ID || product.mpn || '', ean: product.ean || product.gtin || '' },
+      mode: command.mode,
+      quantity: command.quantity,
+      source: text(meta.source || 'telegram-webhook', 80),
+      channel: meta.channel === 'panel' ? 'panel' : 'telegram',
+      chatId: meta.chatId,
+      messageThreadId: meta.messageThreadId,
+      actor,
+      reason: `Naturalne polecenie administratora: ${text(command.raw, 300)}`,
+    });
+    if (result.decision.status === 'confirmed') return { intent: 'inventory-decision', message: '<b>✅ Ta decyzja była już wcześniej potwierdzona przez administratora.</b>\nAgent nie wykonał nowej zmiany.' };
+    if (result.decision.status === 'rejected') return { intent: 'inventory-decision', message: '<b>❌ Ta decyzja była już wcześniej odrzucona przez administratora.</b>\nAgent nie wykonał nowej zmiany.' };
+    if (result.decision.status === 'pending_confirmation') return { intent: 'inventory-decision', ...commandCard(renderInventoryDecisionConfirmation(result.decision)) };
+    return { intent: 'inventory-decision', ...commandCard(renderInventoryLocationPrompt(result.decision, result.locations)) };
   };
 }
-import { mergeCatalogProducts } from './catalog-quality.mjs';
-import { applyInventoryStockSet } from './inventory.mjs';
