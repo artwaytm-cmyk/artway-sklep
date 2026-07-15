@@ -44,6 +44,7 @@ import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
 import { applySupplierProcurementWorkflow } from './domain/supplier-procurement-workflow.mjs';
 import { createSupplierOrderPlanService, preserveSupplierPlanOnGenericSettings } from './supplier-order-plan-service.mjs';
+import { createSupplierOrderRoute } from './supplier-order-route.mjs';
 import {
   allegroMessagePlainText,
   buildAllegroReplyStyleProfile,
@@ -164,6 +165,18 @@ const supplierOrderPlan = createSupplierOrderPlanService({
     };
   }),
   settingsLimit: LIMIT_USTAWIEN,
+});
+const supplierOrderRoute = createSupplierOrderRoute({
+  isAdmin: czyAdmin,
+  isAllegroOrderActive: allegroAgentZlecenieAktywne,
+  plan: supplierOrderPlan,
+  read: czytaj,
+  recalculateAllegroOrders: allegroPrzeliczZamowieniaPoMapowaniu,
+  reconciliation: storeOrderSupplierReconciliation,
+  respond: odpowiedz,
+  sessionOf: requestSession,
+  syncProcurement: synchronizujEtapyZakupoweZlecen,
+  text: tekst,
 });
 
 function czyAdmin(request, url) {
@@ -5114,34 +5127,8 @@ export default async (req) => {
     }
 
     // ─── PLAN ZATOWAROWANIA: jedna serwerowa kolejka dokumentów producentów ───
-    if (['supplier-order-line-upsert', 'supplier-order-approve', 'supplier-order-cancel', 'supplier-order-receive'].includes(action)) {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), actor = requestSession(req)?.email || 'administrator';
-      const method = action === 'supplier-order-line-upsert' ? 'upsert' : action === 'supplier-order-approve' ? 'approve' : action === 'supplier-order-cancel' ? 'cancel' : 'receive';
-      const result = await supplierOrderPlan[method](body, actor);
-      const procurementWorkflow = method === 'receive'
-        ? await synchronizujEtapyZakupoweZlecen(result.supplierOrders, 'supplier-receipt')
-        : null;
-      return odpowiedz({ ...result, ...(procurementWorkflow ? { procurementWorkflow: { changed: procurementWorkflow.changed } } : {}) });
-    }
-
-    if (action === 'supplier-order-reconcile') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const reconciliation = await storeOrderSupplierReconciliation.reconcileDraftsSafely();
-      const settings = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-      const supplierOrders = Array.isArray(settings.data?.artway_agent_ai_zlecenia) ? settings.data.artway_agent_ai_zlecenia : [];
-      const procurementWorkflow = await synchronizujEtapyZakupoweZlecen(supplierOrders, 'supplier-reconcile');
-      return odpowiedz({
-        ok: reconciliation.ok !== false,
-        supplierOrders,
-        rev: Math.max(0, Number(settings.rev) || 0),
-        updated_at: settings.updated_at || null,
-        reconciliation,
-        procurementWorkflow: { changed: procurementWorkflow.changed },
-      }, reconciliation.ok === false ? 409 : 200);
-    }
+    const supplierRouteResponse = await supplierOrderRoute({ req, url, action });
+    if (supplierRouteResponse) return supplierRouteResponse;
 
     // ─── PRODUCENCI: zatwierdzone zamówienie e-mailem, z ochroną przed duplikatem ───
     if (action === 'email-send-supplier-order') {
@@ -5151,7 +5138,9 @@ export default async (req) => {
       const requested = body.order && typeof body.order === 'object' ? body.order : {};
       const requestedSupplierNames = (Array.isArray(body.suppliers) ? body.suppliers : [body.supplier]).map((x) => tekst(x?.name || x?.nazwa || x, 160)).filter(Boolean);
       const actor = requestSession(req)?.email || 'administrator';
-      const currentPlan = await supplierOrderPlan.beginEmailSend({ draftId: requested.id || body.draftId, expectedRevision: requested.revision ?? body.expectedRevision, requestedSupplierNames, actor });
+      const forceResend = body.forceResend === true;
+      const resendReason = tekst(body.resendReason || '', 500).trim();
+      const currentPlan = await supplierOrderPlan.beginEmailSend({ draftId: requested.id || body.draftId, expectedRevision: requested.revision ?? body.expectedRevision, requestedSupplierNames, actor, allowResend: forceResend, resendReason });
       const suppliers = currentPlan.supplierContacts;
       const order = currentPlan.draft;
       const revision = Math.max(1, Number(order.revision) || 1);
@@ -5160,27 +5149,40 @@ export default async (req) => {
         prepared = suppliers.map((supplier) => producentEmailZlecenia(order, supplier));
         const invalid = prepared.filter((item) => !item.validation?.ok);
         if (invalid.length) {
-          await supplierOrderPlan.abortEmailSend({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, actor });
+          await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results: [], actor, resend: forceResend, resendReason });
           const missingIdentifiers = [...new Set(invalid.flatMap((item) => item.validation?.missingIdentifiers || []))];
           return odpowiedz({ ok: false, error: `Uzupełnij kartotekę lub identyfikatory pozycji przed wysyłką: ${missingIdentifiers.join(', ') || invalid.map((x) => x.name || 'bez nazwy').join(', ')}`, code: 'supplier_validation', missingIdentifiers }, 422);
         }
         auditRec = await czytaj('supplier_order_email_audit', { items: {}, updated_at: null });
       } catch (error) {
-        try { await supplierOrderPlan.abortEmailSend({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, actor }); } catch {}
+        try { await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results: [], actor, resend: forceResend, resendReason }); } catch {}
         throw error;
       }
       const auditItems = auditRec.items && typeof auditRec.items === 'object' ? { ...auditRec.items } : {};
       const results = [];
       for (const item of prepared) {
         const fingerprint = crypto.createHash('sha256').update(`${order.id}|${revision}|${item.name.toLowerCase()}|${item.to}|${item.rows.map((p) => `${p.kod}:${p.ilosc}`).join('|')}|${item.optima?.content || ''}`).digest('hex').slice(0, 32);
-        if (auditItems[fingerprint]?.sent === true) {
+        if (!forceResend && auditItems[fingerprint]?.sent === true) {
           results.push({ supplier: item.name, to: item.to, sent: true, skippedDuplicate: true, sentAt: auditItems[fingerprint].sentAt, messageId: auditItems[fingerprint].messageId || '', optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
           continue;
         }
         try {
           const sent = await wyslijEmailSMTP({ to: item.to, subject: item.subject, text: item.text, html: item.html, attachments: item.attachments });
           const sentResult = { supplier: item.name, to: item.to, sent: true, skippedDuplicate: false, sentAt: new Date().toISOString(), messageId: sent.message_id || '', provider: sent.provider || 'smtp' };
-          auditItems[fingerprint] = { ...sentResult, orderId: tekst(order.id, 120), orderNumber: tekst(order.numer || order.id, 120), revision, fingerprint };
+          const previousAudit = auditItems[fingerprint] && typeof auditItems[fingerprint] === 'object' ? auditItems[fingerprint] : {};
+          const attempt = { ...sentResult, mode: forceResend ? 'resend' : 'send', reason: forceResend ? resendReason : '' };
+          auditItems[fingerprint] = {
+            ...previousAudit,
+            sent: true,
+            sentAt: previousAudit.sentAt || sentResult.sentAt,
+            messageId: previousAudit.messageId || sentResult.messageId,
+            provider: sentResult.provider,
+            lastSentAt: sentResult.sentAt,
+            lastMessageId: sentResult.messageId,
+            sendCount: Math.max(0, Number(previousAudit.sendCount) || 0) + 1,
+            attempts: [...(Array.isArray(previousAudit.attempts) ? previousAudit.attempts : []), attempt].slice(-50),
+            orderId: tekst(order.id, 120), orderNumber: tekst(order.numer || order.id, 120), revision, fingerprint,
+          };
           try { await zapisz('supplier_order_email_audit', { items: auditItems, updated_at: sentResult.sentAt }); }
           catch (auditError) { sentResult.auditError = tekst(auditError?.message || auditError, 300); }
           results.push({ ...sentResult, optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
@@ -5190,9 +5192,9 @@ export default async (req) => {
       }
       const sentAt = results.filter((x) => x.sent).map((x) => x.sentAt).filter(Boolean).sort().pop() || null;
       const optimaMissingIdentifiers = results.flatMap((result) => (result.optima?.missingIdentifiers || []).map((item) => ({ supplier: result.supplier, ...item })));
-      const plan = await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results, sentAt, actor });
+      const plan = await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results, sentAt, actor, resend: forceResend, resendReason });
       const procurementWorkflow = await synchronizujEtapyZakupoweZlecen(plan.supplierOrders, 'supplier-email');
-      return odpowiedz({ ok: true, allSent: results.length > 0 && results.every((x) => x.sent), sentAt, results, revision, optimaComplete: optimaMissingIdentifiers.length === 0, optimaMissingIdentifiers, draft: plan.draft, supplierOrders: plan.supplierOrders, rev: plan.rev, updated_at: plan.updated_at, procurementWorkflow: { changed: procurementWorkflow.changed } });
+      return odpowiedz({ ok: true, allSent: results.length > 0 && results.every((x) => x.sent), resent: forceResend, sentAt, results, revision, optimaComplete: optimaMissingIdentifiers.length === 0, optimaMissingIdentifiers, draft: plan.draft, supplierOrders: plan.supplierOrders, rev: plan.rev, updated_at: plan.updated_at, procurementWorkflow: { changed: procurementWorkflow.changed } });
     }
 
     // ─── E-MAIL: wysyłka administracyjna przez Netlify SMTP ───

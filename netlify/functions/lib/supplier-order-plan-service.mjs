@@ -1,6 +1,7 @@
 import {
   approveSupplierPlanDraft,
   cancelSupplierPlanDraft,
+  prepareSupplierPlanCorrection,
   receiveSupplierPlanLine,
   supplierLineIdentifiers,
   supplierLineStableKey,
@@ -166,6 +167,8 @@ export function createSupplierOrderPlanService({
         result = receiveSupplierPlanLine({ drafts, settings: data, ...body, actor, now: now() });
       } else if (kind === 'cancel') {
         result = cancelSupplierPlanDraft({ drafts, ...body, actor, now: now() });
+      } else if (kind === 'correction') {
+        result = prepareSupplierPlanCorrection({ drafts, ...body, actor, now: now() });
       } else {
         throw new TypeError('Nieznana operacja planu zatowarowania.');
       }
@@ -205,7 +208,7 @@ export function createSupplierOrderPlanService({
   }
 
   /** Blokuje zatwierdzoną rewizję przed SMTP, więc w trakcie wysyłki nie da się jej zmienić. */
-  async function beginEmailSend({ draftId, expectedRevision, requestedSupplierNames = [], actor = 'administrator' } = {}) {
+  async function beginEmailSend({ draftId, expectedRevision, requestedSupplierNames = [], actor = 'administrator', allowResend = false, resendReason = '' } = {}) {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const version = await readVersioned('settings', { data: {}, rev: 0, updated_at: null });
       const record = object(version.value), data = object(record.data);
@@ -218,7 +221,18 @@ export function createSupplierOrderPlanService({
       if (normalized(draft.status) === 'wysylanie e mail' && Number.isFinite(lockAge) && lockAge < 15 * 60 * 1000) {
         fail('Wysyłka tego dokumentu już trwa.', 'supplier_order_send_in_progress', 409);
       }
-      if (!draft.approvedAt || Number(draft.approvalRevision) !== revision || !['zaakceptowane', 'czesciowo wyslane e mailem', 'wysylanie e mail'].includes(normalized(draft.status))) {
+      const resend = allowResend === true;
+      const reason = text(resendReason, 500);
+      const currentStatus = normalized(draft.status);
+      const resendable = ['wyslane do producenta', 'wyslane do dostawcy', 'czesciowo wyslane e mailem', 'czesciowo zrealizowane', 'zrealizowane'].includes(currentStatus)
+        && !!text(draft.emailSentAt, 80);
+      if (resend && reason.length < 3) fail('Podaj powód ponownej wysyłki.', 'supplier_order_resend_reason_required');
+      if (resend && !resendable) fail('Ponowić można wyłącznie wcześniej wysłany dokument.', 'supplier_order_not_sent', 409);
+      const statusAllowed = resend
+        ? resendable
+        : ['zaakceptowane', 'czesciowo wyslane e mailem', 'wysylanie e mail'].includes(currentStatus);
+      const approvalValid = resend ? resendable : (!!draft.approvedAt && Number(draft.approvalRevision) === revision);
+      if (!approvalValid || !statusAllowed) {
         fail('Najpierw zatwierdź dokładnie aktualną wersję zamówienia producenta.', 'approval_required');
       }
       if (!array(draft.pozycje).some((line) => Number(line?.ilosc) > 0)) fail('Zamówienie producenta jest puste.', 'supplier_order_empty');
@@ -241,21 +255,21 @@ export function createSupplierOrderPlanService({
       const timestamp = now().toISOString();
       draft.revision = revision;
       const lockId = `send-${crypto.createHash('sha256').update(`${draft.id}|${revision}|${timestamp}`).digest('hex').slice(0, 18)}`;
-      draft.statusBeforeSend = draft.statusBeforeSend || (normalized(draft.status) === 'czesciowo wyslane e mailem' ? 'częściowo wysłane e-mailem' : 'zaakceptowane');
+      draft.statusBeforeSend = draft.statusBeforeSend || draft.status || 'zaakceptowane';
       draft.status = 'wysyłanie e-mail';
-      draft.sendLock = { id: lockId, revision, createdAt: timestamp, actor: text(actor, 200) || 'administrator' };
+      draft.sendLock = { id: lockId, revision, createdAt: timestamp, actor: text(actor, 200) || 'administrator', mode: resend ? 'resend' : 'send', reason: resend ? reason : '' };
       draft.updatedAt = timestamp;
       drafts[index] = draft;
       const nextData = { ...data, artway_agent_ai_zlecenia: drafts };
       if (JSON.stringify(nextData).length > settingsLimit) fail('Plan zatowarowania przekracza limit ustawień.', 'settings_too_large', 413);
       const next = { ...record, data: nextData, rev: Math.max(0, Number(record.rev) || 0) + 1, updated_at: timestamp };
       const write = await writeIfVersion('settings', next, version);
-      if (write?.modified) return { ...resultPayload({ drafts, draft }, next, true), sendLockId: lockId, supplierContacts };
+      if (write?.modified) return { ...resultPayload({ drafts, draft }, next, true), sendLockId: lockId, supplierContacts, resend, resendReason: resend ? reason : '' };
     }
     return conflict('Nie udało się zablokować rewizji do wysyłki.', 'supplier_order_write_conflict');
   }
 
-  async function markEmailResults({ draftId, expectedRevision, sendLockId, results = [], sentAt, actor = 'administrator' } = {}) {
+  async function markEmailResults({ draftId, expectedRevision, sendLockId, results = [], sentAt, actor = 'administrator', resend = false, resendReason = '' } = {}) {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const version = await readVersioned('settings', { data: {}, rev: 0, updated_at: null });
       const record = object(version.value);
@@ -268,12 +282,19 @@ export function createSupplierOrderPlanService({
       if (revision !== Number(expectedRevision)) fail('Dokument zmienił się po wysyłce. Status wymaga ponownej synchronizacji.', 'supplier_order_revision_conflict', 409, { currentRevision: revision });
       if (!sendLockId || text(draft.sendLock?.id, 160) !== text(sendLockId, 160)) fail('Blokada wysyłki wygasła lub została zastąpiona.', 'supplier_order_send_lock_conflict', 409);
       const successful = array(results).filter((result) => result?.sent);
+      const delivered = successful.filter((result) => !result?.skippedDuplicate);
       draft.revision = revision;
       const allSent = results.length > 0 && results.every((result) => result?.sent);
       const timestamp = sentAt || now().toISOString();
       draft.status = successful.length ? (allSent ? 'wysłane do producenta' : 'częściowo wysłane e-mailem') : (draft.statusBeforeSend || 'zaakceptowane');
-      if (successful.length) draft.emailSentAt = timestamp;
+      const previousSendCount = Math.max(0, Number(draft.emailSendCount) || (text(draft.emailSentAt, 80) ? 1 : 0));
+      if (successful.length) {
+        draft.emailFirstSentAt = text(draft.emailFirstSentAt || draft.emailSentAt || timestamp, 80);
+        draft.emailSentAt = timestamp;
+        draft.emailLastSentAt = timestamp;
+      }
       draft.emailSentBy = text(actor, 200) || 'administrator';
+      if (delivered.length) draft.emailSendCount = previousSendCount + 1;
       draft.receiptRevision = Math.max(0, Number(draft.receiptRevision) || 0);
       draft.sentSuppliers = [...new Set([
         ...array(draft.sentSuppliers),
@@ -286,13 +307,26 @@ export function createSupplierOrderPlanService({
         sentAt: text(result?.sentAt, 80),
         error: text(result?.error, 500),
       }));
+      draft.emailSendHistory = [...array(draft.emailSendHistory), {
+        at: timestamp,
+        revision,
+        mode: resend ? 'resend' : 'send',
+        reason: resend ? text(resendReason, 500) : '',
+        operator: text(actor, 200) || 'administrator',
+        delivered: delivered.length,
+        skippedDuplicates: successful.length - delivered.length,
+        failed: results.length - successful.length,
+        suppliers: array(results).map((result) => ({ supplier: text(result?.supplier, 160), sent: !!result?.sent, sentAt: text(result?.sentAt, 80), skippedDuplicate: !!result?.skippedDuplicate, error: text(result?.error, 300) })),
+      }].slice(-50);
       draft.updatedAt = timestamp;
       delete draft.sendLock;
       delete draft.statusBeforeSend;
       draft.historia = [...array(draft.historia), {
         at: timestamp,
         type: 'supplier-email',
-        text: allSent ? 'Wysłano zatwierdzony dokument do producenta.' : successful.length ? 'Wysłano dokument do części producentów; pozostałe wymagają ponowienia.' : 'Wysyłka nie powiodła się; dokument odblokowano bez zmiany rewizji.',
+        text: resend
+          ? allSent ? `Ponownie wysłano zatwierdzony dokument. Powód: ${text(resendReason, 400)}` : `Ponowna wysyłka nie została wykonana w całości. Powód: ${text(resendReason, 400)}`
+          : allSent ? 'Wysłano zatwierdzony dokument do producenta.' : successful.length ? 'Wysłano dokument do części producentów; pozostałe wymagają ponowienia.' : 'Wysyłka nie powiodła się; dokument odblokowano bez zmiany rewizji.',
         operator: text(actor, 200) || 'administrator',
       }].slice(-150);
       drafts[index] = draft;
@@ -313,6 +347,7 @@ export function createSupplierOrderPlanService({
     upsert: (body, actor) => mutate('upsert', body, actor),
     approve: (body, actor) => mutate('approve', body, actor),
     cancel: (body, actor) => mutate('cancel', body, actor),
+    correction: (body, actor) => mutate('correction', body, actor),
     receive: (body, actor) => mutate('receive', body, actor),
     loadApprovedForSend,
     beginEmailSend,

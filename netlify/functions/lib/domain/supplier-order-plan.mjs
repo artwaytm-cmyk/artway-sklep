@@ -9,6 +9,10 @@ const RECEIVABLE_STATUSES = new Set([
   'wyslane do producenta', 'wyslane do dostawcy', 'czesciowo wyslane e mailem',
   'czesciowo zrealizowane', 'sent', 'partially sent', 'partially fulfilled',
 ]);
+const CORRECTABLE_STATUSES = new Set([
+  'wyslane do producenta', 'wyslane do dostawcy', 'czesciowo wyslane e mailem',
+  'sent', 'partially sent',
+]);
 
 function object(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -376,6 +380,61 @@ export function cancelSupplierPlanDraft(input = {}) {
   appendHistory(draft, timestamp, 'cancelled', `Anulowano niewysłaną wersję ${revision}.`, input.actor);
   summarize(draft);
   return { drafts, draft, changed: true };
+}
+
+/**
+ * Otwiera nową rewizję korekty po wysłaniu dokumentu. Wiadomości dostarczonej
+ * do producenta nie da się usunąć, dlatego poprzednia wysyłka pozostaje w
+ * niezmiennym śladzie audytowym, a bieżący dokument wraca do kontroli.
+ */
+export function prepareSupplierPlanCorrection(input = {}) {
+  const now = nowDate(input.now);
+  const drafts = array(input.drafts).map((draft) => structuredClone(draft));
+  const draftIndex = drafts.findIndex((draft) => text(draft.id, 160) === text(input.draftId, 160));
+  if (draftIndex < 0) fail('Nie znaleziono dokumentu producenta.', 'supplier_order_not_found', 404);
+  const draft = drafts[draftIndex];
+  const revision = expectedRevision(input, draft);
+  if (!CORRECTABLE_STATUSES.has(statusKey(draft.status)) || !text(draft.emailSentAt, 80)) {
+    fail('Korektę można utworzyć wyłącznie dla wysłanego zamówienia producenta.', 'supplier_order_not_sent', 409);
+  }
+  if (draftItems(draft).some((line) => receivedOf(line) > 0)) {
+    fail('Nie można cofnąć wysyłki po rozpoczęciu przyjęcia dostawy. Utwórz osobny dokument korygujący.', 'supplier_order_receipt_started', 409);
+  }
+  const reason = text(input.reason, 500);
+  if (reason.length < 3) fail('Podaj krótki powód utworzenia korekty.', 'supplier_order_correction_reason_required');
+  const timestamp = now.toISOString();
+  const previousSend = {
+    revision,
+    status: text(draft.status, 100),
+    sentAt: text(draft.emailSentAt, 80),
+    sentBy: text(draft.emailSentBy, 200),
+    suppliers: array(draft.sentSuppliers).map((value) => text(value, 160)).filter(Boolean),
+    results: array(draft.emailResults).map((result) => ({
+      supplier: text(result?.supplier, 160),
+      sent: !!result?.sent,
+      sentAt: text(result?.sentAt, 80),
+      skippedDuplicate: !!result?.skippedDuplicate,
+    })),
+    supersededAt: timestamp,
+    supersededBy: text(input.actor, 200) || 'administrator',
+    reason,
+  };
+  draft.supersededSends = [...array(draft.supersededSends), previousSend].slice(-50);
+  draft.lastEmailSentAt = text(draft.emailSentAt, 80);
+  draft.lastEmailSentBy = text(draft.emailSentBy, 200);
+  draft.status = 'do sprawdzenia';
+  draft.revision = revision + 1;
+  draft.correctionOfRevision = revision;
+  draft.correctionReason = reason;
+  draft.correctionOpenedAt = timestamp;
+  draft.correctionOpenedBy = text(input.actor, 200) || 'administrator';
+  draft.updatedAt = timestamp;
+  draft.aktualizacja = timestamp;
+  for (const key of ['emailSentAt', 'emailSentBy', 'emailResults', 'sentSuppliers', 'sendLock', 'statusBeforeSend']) delete draft[key];
+  clearApproval(draft);
+  appendHistory(draft, timestamp, 'supplier-correction-opened', `Utworzono korektę wersji ${revision}: ${reason}`, input.actor);
+  summarize(draft);
+  return { drafts, draft, changed: true, previousSend };
 }
 
 /** Przyjmuje fizyczną dostawę; pełna ilość (także nadwyżka) zwiększa stan. */

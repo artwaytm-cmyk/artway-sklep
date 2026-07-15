@@ -699,6 +699,19 @@ async function agentAIUsunZlecenie(id){
   if(!confirm(`Anulować szkic ${z.numer||z.id}? Dokument pozostanie w historii i nie zostanie wysłany.`))return;
   try{const d=await chmura("supplier-order-cancel",{method:"POST",body:{draftId:z.id,expectedRevision:Math.max(1,Number(z.revision)||1)},timeout:45000});await agentAIPlanOdswiezPoOperacji(d,"✅ Szkic anulowany i przeniesiony do historii");}catch(e){await agentAIPlanBladOperacji(e,"Nie anulowano szkicu");}
 }
+async function agentAIPrzygotujKorekteZlecenia(id){
+  const z=(agentAIZlecenia||[]).find(x=>String(x.id)===String(id));if(!z){toast("Nie znaleziono zamówienia producenta");return;}
+  const reason=prompt("Dlaczego przygotowujesz korektę? Poprzedniego dostarczonego e-maila nie da się usunąć — pozostanie w historii audytowej.","Korekta ilości lub pozycji zamówienia");
+  if(reason===null)return;if(String(reason).trim().length<3){toast("Podaj krótki powód korekty");return;}
+  if(!confirm(`Utworzyć nową wersję korekty dokumentu ${z.numer||z.id}?\n\nPoprzednia wysyłka pozostanie w historii. Bieżący status wróci do kontroli, a po zmianach trzeba będzie ponownie zatwierdzić i wysłać dokument.`))return;
+  try{const d=await chmura("supplier-order-correction",{method:"POST",body:{draftId:z.id,expectedRevision:Math.max(1,Number(z.revision)||1),reason:String(reason).trim()},timeout:45000});await agentAIPlanOdswiezPoOperacji(d,`✅ Utworzono korektę — wersja ${Math.max(1,Number(d.draft?.revision)||1)} czeka na kontrolę`);}catch(e){await agentAIPlanBladOperacji(e,"Nie utworzono korekty");}
+}
+async function agentAIPonowEmailProducenta(id){
+  const z=(agentAIZlecenia||[]).find(x=>String(x.id)===String(id));if(!z){toast("Nie znaleziono zamówienia producenta");return;}
+  const reason=prompt("Podaj powód ponownej wysyłki identycznego dokumentu:","Producent prosi o ponowne przesłanie wiadomości");
+  if(reason===null)return;if(String(reason).trim().length<3){toast("Podaj krótki powód ponownej wysyłki");return;}
+  return agentAIWyslijZlecenieEmail(id,{forceResend:true,resendReason:String(reason).trim()});
+}
 function agentAIPobierzZlecenieCSV(id){
   const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
   if(!z){toast("Nie znaleziono zlecenia producenta");return;}
@@ -900,9 +913,15 @@ function agentAIPlanDokumentPasuje(z={}){
 }
 function agentAIPlanSzukajDokumenty(input){agentAIPlanSzukaj=String(input?.value||"");clearTimeout(window.__supplierPlanSearch);window.__supplierPlanSearch=setTimeout(()=>odswiezPlanZatowarowaniaWidoku(),180);}
 function agentAIPlanWyczyscFiltry(){agentAIPlanSzukaj="";agentAIPlanFiltrProducenta="wszyscy";agentAIPlanFiltrStatusu="aktywne";odswiezPlanZatowarowaniaWidoku();}
+function agentAIHistoriaEmailiProducentaHTML(z={}){
+  const proby=Array.isArray(z.emailSendHistory)?z.emailSendHistory:[],korekty=Array.isArray(z.supersededSends)?z.supersededSends:[];
+  if(!proby.length&&!korekty.length&&!z.emailSentAt)return "";
+  const wiersze=[...proby.map(x=>({at:x.at,typ:x.mode==="resend"?"Ponowna wysyłka":"Wysyłka",opis:`dostarczono ${Number(x.delivered)||0} • pominięto duplikaty ${Number(x.skippedDuplicates)||0} • błędy ${Number(x.failed)||0}${x.reason?` • ${x.reason}`:""}`,operator:x.operator})),...korekty.map(x=>({at:x.supersededAt,typ:`Korekta wersji ${x.revision||"—"}`,opis:x.reason||"Poprzednia wysyłka oznaczona jako zastąpiona",operator:x.supersededBy}))].sort((a,b)=>String(b.at||"").localeCompare(String(a.at||""))).slice(0,20);
+  return `<details class="supplier-email-audit"><summary>🕓 Historia wysyłek i korekt (${Math.max(1,proby.length+korekty.length)})</summary><div>${wiersze.map(x=>`<article><b>${esc(x.typ)}</b><span>${esc(allegroDataTxt(x.at))}</span><p>${esc(x.opis)}</p><small>${esc(x.operator||"administrator")}</small></article>`).join("")||`<article><b>Ostatnia wysyłka</b><span>${esc(allegroDataTxt(z.emailSentAt))}</span></article>`}</div></details>`;
+}
 function agentAIPlanKartaDokumentuHTML(z){
-  const status=String(z.status||"szkic").toLowerCase(),zamkniete=!agentAIPlanDokumentAktywny(z),robocze=!zamkniete&&agentAIStatusRoboczyProducenta(status),grupy=agentAIGrupujPoDostawcy(z.pozycje||[]),revision=Math.max(1,Number(z.revision)||1),approvedCurrent=!!z.approvedAt&&Number(z.approvalRevision||0)===revision,missingEmail=grupy.some(([d])=>!producentPoNazwie(d)?.orderEmail),zamowiono=(z.pozycje||[]).reduce((s,p)=>s+Number(p.ilosc||0),0),przyjeto=(z.pozycje||[]).reduce((s,p)=>s+Number(p.przyjeto||0),0);
-  return `<article class="supplier-order-card ${zamkniete?"is-closed":""}"><header class="supplier-order-head"><div><span class="order-pro-label">${esc(z.tryb==="niskie"?"Uzupełnienie magazynu":"Braki i pozycje ręczne")} • wersja ${revision}</span><h3>${esc(z.numer||z.id)}</h3><small>${esc(z.dataTxt||allegroDataTxt(z.data))} • ${grupy.length} producentów • ${(z.pozycje||[]).length} pozycji • ${esc(z.sztuk||zamowiono)} szt. • przyjęto ${przyjeto}</small></div><div class="supplier-order-status"><span class="lvl ${status.includes("wysłane")||status==="zrealizowane"?"lvl-ok":"lvl-info"}">${esc(z.status||"szkic")}</span><small>${z.emailSentAt?`E-mail: ${esc(allegroDataTxt(z.emailSentAt))}`:z.telegramSentAt?`Telegram (podgląd): ${esc(allegroDataTxt(z.telegramSentAt))}`:zamkniete?"Dokument historyczny — nie wymaga działania":"Dokument otwarty — oczekuje na kontrolę"}</small></div></header>${agentAIEtapyZleceniaHTML(z)}${approvedCurrent&&robocze?`<div class="backend-note"><b>Wersja ${revision} zatwierdzona.</b> Każda zmiana ilości lub nowy brak cofnie dokument do ponownej kontroli.</div>`:""}<div class="supplier-split-list">${grupy.map(([d,items])=>agentAIZlecenieTabelaDostawcyHTML(z,d,items)).join("")}</div><footer class="supplier-order-actions">${zamkniete?"":`<button class="btn telegram-btn" onclick="agentAIWyslijZlecenieTelegram(${jsArg(z.id)})">✈️ Wyślij podgląd na Telegram</button>`}${robocze&&!approvedCurrent?`<button class="btn ghost" onclick="agentAIZatwierdzZlecenie(${jsArg(z.id)})">✅ Zatwierdź wersję ${revision}</button>`:""}<button class="btn" onclick="agentAIWyslijZlecenieEmail(${jsArg(z.id)})" ${((!approvedCurrent&&status!=="częściowo wysłane e-mailem")||missingEmail||zamkniete)?"disabled":""}>✉️ ${status==="częściowo wysłane e-mailem"?"Ponów brakujące e-maile":"Wyślij e-mailem do producenta"}</button><button class="btn ghost" onclick="agentAIPobierzZlecenieCSV(${jsArg(z.id)})">📤 Tabela bez cen CSV</button>${robocze?`<button class="btn danger" onclick="agentAIUsunZlecenie(${jsArg(z.id)})">🗑️ Anuluj szkic</button>`:""}</footer>${missingEmail&&!zamkniete?`<div class="backend-note" style="border-color:#fed7aa;background:#fff7ed"><b>Brak e-maila producenta.</b> Uzupełnij kartotekę przed zatwierdzoną wysyłką.</div>`:""}</article>`;
+  const status=String(z.status||"szkic").toLowerCase(),zamkniete=!agentAIPlanDokumentAktywny(z),robocze=!zamkniete&&agentAIStatusRoboczyProducenta(status),grupy=agentAIGrupujPoDostawcy(z.pozycje||[]),revision=Math.max(1,Number(z.revision)||1),approvedCurrent=!!z.approvedAt&&Number(z.approvalRevision||0)===revision,missingEmail=grupy.some(([d])=>!producentPoNazwie(d)?.orderEmail),zamowiono=(z.pozycje||[]).reduce((s,p)=>s+Number(p.ilosc||0),0),przyjeto=(z.pozycje||[]).reduce((s,p)=>s+Number(p.przyjeto||0),0),wyslane=!!z.emailSentAt||status.includes("wysłane do")||status.includes("częściowo zrealizowane")||status==="zrealizowane",czesciowe=status==="częściowo wysłane e-mailem",pelnaWysylka=wyslane&&!czesciowe,liczbaWysylek=Math.max(Number(z.emailSendCount)||0,(Array.isArray(z.emailSendHistory)?z.emailSendHistory.filter(x=>Number(x.delivered)>0).length:0),z.emailSentAt?1:0);
+  return `<article class="supplier-order-card ${zamkniete?"is-closed":""}"><header class="supplier-order-head"><div><span class="order-pro-label">${esc(z.tryb==="niskie"?"Uzupełnienie magazynu":"Braki i pozycje ręczne")} • wersja ${revision}</span><h3>${esc(z.numer||z.id)}</h3><small>${esc(z.dataTxt||allegroDataTxt(z.data))} • ${grupy.length} producentów • ${(z.pozycje||[]).length} pozycji • ${esc(z.sztuk||zamowiono)} szt. • przyjęto ${przyjeto}</small></div><div class="supplier-order-status"><span class="lvl ${status.includes("wysłane")||status==="zrealizowane"?"lvl-ok":"lvl-info"}">${esc(z.status||"szkic")}</span><small>${z.emailSentAt?`Ostatni e-mail: ${esc(allegroDataTxt(z.emailSentAt))} • wysyłek ${liczbaWysylek}`:z.lastEmailSentAt?`Poprzednia wysyłka: ${esc(allegroDataTxt(z.lastEmailSentAt))} • trwa korekta`:z.telegramSentAt?`Telegram (podgląd): ${esc(allegroDataTxt(z.telegramSentAt))}`:zamkniete?"Dokument historyczny — nie wymaga działania":"Dokument otwarty — oczekuje na kontrolę"}</small></div></header>${agentAIEtapyZleceniaHTML(z)}${approvedCurrent&&robocze?`<div class="backend-note"><b>Wersja ${revision} zatwierdzona.</b> Każda zmiana ilości lub nowy brak cofnie dokument do ponownej kontroli.</div>`:""}${z.correctionOpenedAt&&!wyslane?`<div class="backend-note warn"><b>Trwa korekta poprzedniej wysyłki.</b> ${esc(z.correctionReason||"")} Po zmianach zatwierdź aktualną wersję i wyślij ją ponownie.</div>`:""}<div class="supplier-split-list">${grupy.map(([d,items])=>agentAIZlecenieTabelaDostawcyHTML(z,d,items)).join("")}</div><footer class="supplier-order-actions">${zamkniete?"":`<button class="btn telegram-btn" onclick="agentAIWyslijZlecenieTelegram(${jsArg(z.id)})">✈️ Wyślij podgląd na Telegram</button>`}${robocze&&!approvedCurrent?`<button class="btn ghost" onclick="agentAIZatwierdzZlecenie(${jsArg(z.id)})">✅ Zatwierdź wersję ${revision}</button>`:""}${!pelnaWysylka?`<button class="btn" onclick="agentAIWyslijZlecenieEmail(${jsArg(z.id)})" ${((!approvedCurrent&&!czesciowe)||missingEmail||zamkniete)?"disabled":""}>✉️ ${czesciowe?"Ponów brakujące e-maile":"Wyślij e-mailem do producenta"}</button>`:""}${pelnaWysylka?`<button class="btn" onclick="agentAIPonowEmailProducenta(${jsArg(z.id)})" ${missingEmail?"disabled":""}>🔁 Wyślij ponownie</button>`:""}${wyslane&&!przyjeto?`<button class="btn ghost" onclick="agentAIPrzygotujKorekteZlecenia(${jsArg(z.id)})">✏️ Utwórz korektę</button>`:""}<button class="btn ghost" onclick="agentAIPobierzZlecenieCSV(${jsArg(z.id)})">📤 Tabela bez cen CSV</button>${robocze?`<button class="btn danger" onclick="agentAIUsunZlecenie(${jsArg(z.id)})">🗑️ Anuluj szkic</button>`:""}</footer>${wyslane?`<div class="supplier-recovery-note"><b>Bezpieczne działania po wysyłce</b><span>„Wyślij ponownie” przekazuje identyczną zatwierdzoną wersję i wymaga podania powodu. „Utwórz korektę” nie usuwa dostarczonego e-maila — zachowuje go w audycie i otwiera nową wersję do edycji.</span></div>`:""}${agentAIHistoriaEmailiProducentaHTML(z)}${missingEmail&&!zamkniete?`<div class="backend-note" style="border-color:#fed7aa;background:#fff7ed"><b>Brak e-maila producenta.</b> Uzupełnij kartotekę przed zatwierdzoną wysyłką.</div>`:""}</article>`;
 }
 function agentAIZleceniaPanelHTML(){
   const wszystkie=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).slice().sort((a,b)=>String(b.data||"").localeCompare(String(a.data||""))),lista=wszystkie.filter(agentAIPlanDokumentPasuje),aktywne=lista.filter(agentAIPlanDokumentAktywny),historia=lista.filter(z=>!agentAIPlanDokumentAktywny(z)),otwarteWszystkie=wszystkie.filter(agentAIPlanDokumentAktywny),approved=otwarteWszystkie.filter(z=>z.approvedAt&&Number(z.approvalRevision||0)===Math.max(1,Number(z.revision)||1)).length,sent=otwarteWszystkie.filter(z=>z.emailSentAt||String(z.status||"").toLowerCase().includes("wysłane do")).length,pozostalo=otwarteWszystkie.reduce((s,z)=>s+(z.pozycje||[]).reduce((n,p)=>n+Math.max(0,Number(p.ilosc||0)-Number(p.przyjeto||0)),0),0),dostawcy=agentAIPlanDostawcy();
@@ -950,24 +969,27 @@ async function agentAIWyslijZlecenieTelegram(id,dostawca=""){
   }catch(e){toast("⚠️ Telegram: "+(e.message||e));}
 }
 function agentAIDaneProducentaDoEmaila(p={}){return {name:p.name||p.nazwa||""};}
-async function agentAIWyslijZlecenieEmail(id){
+async function agentAIWyslijZlecenieEmail(id,opcje={}){
   const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
   if(!z){toast("Nie znaleziono zamówienia producenta");return;}
-  const revision=Math.max(1,Number(z.revision)||1);
-  if(!["zaakceptowane","częściowo wysłane e-mailem"].includes(String(z.status||"").toLowerCase())||!z.approvedAt||Number(z.approvalRevision||0)!==revision){toast("⚠️ Najpierw zatwierdź dokładnie tę wersję zamówienia");return;}
+  const revision=Math.max(1,Number(z.revision)||1),forceResend=opcje.forceResend===true,resendReason=String(opcje.resendReason||"").trim(),status=String(z.status||"").toLowerCase();
+  const zwyklaWysylka=["zaakceptowane","częściowo wysłane e-mailem"].includes(status),ponowienie=forceResend&&!!z.emailSentAt&&["wysłane do producenta","wysłane do dostawcy","częściowo wysłane e-mailem","częściowo zrealizowane","zrealizowane"].includes(status);
+  const approvalOk=forceResend?ponowienie:(!!z.approvedAt&&Number(z.approvalRevision||0)===revision);
+  if((!zwyklaWysylka&&!ponowienie)||!approvalOk){toast(forceResend?"⚠️ Ten dokument nie ma potwierdzonej wcześniejszej wysyłki":"⚠️ Najpierw zatwierdź dokładnie tę wersję zamówienia");return;}
+  if(forceResend&&resendReason.length<3){toast("Podaj powód ponownej wysyłki");return;}
   const names=[...new Set((z.pozycje||[]).map(p=>String(p.dostawca||agentAIDostawcaZlecenia(z)).trim()).filter(Boolean))];
   const suppliers=names.map(producentPoNazwie).filter(Boolean);
   const missing=names.filter(name=>!producentPoNazwie(name)?.orderEmail);
   if(missing.length){toast(`⚠️ Uzupełnij e-mail zamówień w kartotece: ${missing.join(", ")}`);location.hash="#/admin/agent-ai/producenci";return;}
   const adresaci=suppliers.map(p=>`${p.name||p.nazwa} <${p.orderEmail}>`).join("\n"),sztuk=(z.pozycje||[]).reduce((s,p)=>s+Number(p.ilosc||0),0);
-  if(!confirm(`OSTATECZNE POTWIERDZENIE WYSYŁKI\n\nDokument: ${z.numer||z.id} • wersja ${revision}\nPozycji: ${(z.pozycje||[]).length} • sztuk: ${sztuk}\n\nAdresaci:\n${adresaci}\n\nKliknięcie OK naprawdę wyśle e-mail do producenta. Czy potwierdzasz?`)){toast("Wysyłka anulowana — żaden e-mail nie został wysłany");return;}
+  if(!confirm(`${forceResend?"OSTATECZNE POTWIERDZENIE PONOWNEJ WYSYŁKI":"OSTATECZNE POTWIERDZENIE WYSYŁKI"}\n\nDokument: ${z.numer||z.id} • wersja ${revision}\nPozycji: ${(z.pozycje||[]).length} • sztuk: ${sztuk}${forceResend?`\nPowód: ${resendReason}`:""}\n\nAdresaci:\n${adresaci}\n\nKliknięcie OK naprawdę wyśle e-mail do producenta. Czy potwierdzasz?`)){toast("Wysyłka anulowana — żaden e-mail nie został wysłany");return;}
   try{
     toast("Wysyłam zatwierdzone zamówienie e-mailem do producenta…");
-    const d=await chmura("email-send-supplier-order",{method:"POST",body:{order:{id:z.id,revision},suppliers:suppliers.map(agentAIDaneProducentaDoEmaila)},timeout:90000});
+    const d=await chmura("email-send-supplier-order",{method:"POST",body:{order:{id:z.id,revision},suppliers:suppliers.map(agentAIDaneProducentaDoEmaila),forceResend,resendReason},timeout:90000});
     const sent=(d.results||[]).filter(x=>x.sent),failed=(d.results||[]).filter(x=>!x.sent);
     if(Array.isArray(d.supplierOrders)||d.draft){
       zapiszHistorieAgenta("email-producent",d.allSent?`Wysłano ${z.numer||z.id} e-mailem do producenta`:`Częściowa wysyłka ${z.numer||z.id}`,{zlecenieId:id,revision,wyslane:sent.map(x=>x.supplier),bledy:failed.map(x=>({supplier:x.supplier,error:x.error}))});
-      await agentAIPlanOdswiezPoOperacji(d,d.allSent?"✅ Zamówienie wysłane e-mailem. Przyjęcie dostawy jest teraz dostępne.":`⚠️ Wysłano ${sent.length}, nie wysłano ${failed.length}. Ponów brakujące wiadomości.`);return;
+      await agentAIPlanOdswiezPoOperacji(d,d.allSent?(forceResend?"✅ Ponownie wysłano e-mail. Próba została zapisana w historii.":"✅ Zamówienie wysłane e-mailem. Przyjęcie dostawy jest teraz dostępne."):`⚠️ Wysłano ${sent.length}, nie wysłano ${failed.length}. Ponów brakujące wiadomości.`);return;
     }
     zapiszHistorieAgenta("email-producent",d.allSent?`Wysłano ${z.numer||z.id} e-mailem do producenta`:`Częściowa wysyłka ${z.numer||z.id}`,{zlecenieId:id,revision,wyslane:sent.map(x=>x.supplier),bledy:failed.map(x=>({supplier:x.supplier,error:x.error}))});
     await agentAIUzgodnijPlanZSerwerem({silent:true});
@@ -1743,6 +1765,42 @@ function widokAdminAgentAI(sekcja="pulpit"){
   <div style="${aktywna==="historia"?"":"display:none"}">${agentAIHistoriaPanelHTML()}</div>`);
 }
 let filtrZamowien = "wszystkie", szukajZamowien = "";
+
+// Zamówienia Allegro → jeden kanoniczny Plan zatowarowania producentów.
+async function allegroUtworzZamowienieProducenta(orderIds){
+  const ids=[...new Set((Array.isArray(orderIds)?orderIds:[orderIds]).map(String).filter(Boolean))];
+  if(!ids.length){toast("Zaznacz co najmniej jedno zamówienie Allegro");return;}
+  try{
+    toast(`Sprawdzam stan i aktualizuję Plan producentów dla ${ids.length} zamówień…`);
+    const d=await chmura("supplier-order-from-allegro",{method:"POST",body:{orderIds:ids},timeout:90000});
+    if(Array.isArray(d.orders))allegroZamowienia=d.orders;
+    if(Array.isArray(d.supplierOrders)){
+      agentAIZlecenia=d.supplierOrders;
+      const previousLoading=chmuraWczytywanie;chmuraWczytywanie=true;try{zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);}finally{chmuraWczytywanie=previousLoading;}
+    }
+    allegroZapiszCache();
+    const documents=Array.isArray(d.relatedDrafts)?d.relatedDrafts:[];
+    const message=documents.length?`✅ Plan producentów gotowy • ${documents.length} dokumentów • ${d.withShortages||0} zamówień z brakami`:(d.unresolved?`⚠️ ${d.unresolved} zamówień wymaga uzupełnienia mapowania lub stanu`:`✅ Zapas pokrywa wskazane zamówienia — nie utworzono zbędnego dokumentu`);
+    toast(message);renderuj();
+  }catch(e){toast("⚠️ Plan producenta: "+(e.message||e));}
+}
+
+async function allegroUstawEtapMagazynu(orderId,stage){
+  try{const d=await chmura("allegro-order-warehouse-stage",{method:"POST",body:{orderId,stage},timeout:18000});allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;allegroZapiszCache();toast("Etap magazynu zapisany — status Allegro pozostał bez zmian");renderuj();}catch(e){toast("⚠️ Etap magazynu: "+(e.message||e));}
+}
+
+async function allegroUstawEtapZaznaczonychZamowien(){
+  const stage=String(document.getElementById("bulkAllegroWarehouseStage")?.value||"");
+  const ids=[...zaznaczoneAllegroZamowienia];
+  if(!ids.length){toast("Zaznacz co najmniej jedno zlecenie Allegro");return;}
+  if(!["do_sprawdzenia","braki","oczekuje_na_dostawe","kompletacja","spakowane","zrealizowane"].includes(stage)){toast("Wybierz etap magazynowy");return;}
+  try{
+    toast(`Zmieniam etap ${ids.length} zleceń Allegro…`);
+    const d=await chmura("allegro-order-warehouse-stage",{method:"POST",body:{orderIds:ids,stage},timeout:45000});
+    allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;zaznaczoneAllegroZamowienia.clear();allegroZapiszCache();
+    toast(`✅ Zmieniono etap ${d.changed||0} zleceń${d.skipped?.length?` • pominięto zamknięte: ${d.skipped.length}`:""}. Statusy Allegro pozostały bez zmian.`);renderuj();
+  }catch(e){toast("⚠️ Masowy etap Allegro: "+(e.message||e));}
+}
 
 const ALLEGRO_ODSWIEZANIE_PANELU_MS=15*60*1000;
 let allegroAutoOdswiezanie={busy:false,lastChecked:0,lastChanged:0,orders:0,threads:0,issues:0,offers:0,error:""};
@@ -2578,21 +2636,6 @@ function allegroKategoriaKolejki(z={}){const status=allegroStatusKolejki(z);if(A
 function allegroZamowienieAktywneLokalnie(z={}){return !allegroZamowienieZamknieteWAllegro(z)&&!allegroZamowienieZrealizowaneLokalnie(z);}
 function allegroEtapMagazynu(z={}){if(allegroZamowienieZamknieteWAllegro(z))return "zamkniete";if(allegroZamowienieZrealizowaneLokalnie(z))return "zrealizowane";const s=String(z.warehouseStage||"").toLowerCase();return ["do_sprawdzenia","braki","oczekuje_na_dostawe","kompletacja","spakowane"].includes(s)?s:"do_sprawdzenia";}
 function allegroEtapMagazynuMeta(z={}){return ({do_sprawdzenia:{label:"Do sprawdzenia",klasa:"lvl-ostrzezenie"},braki:{label:"Braki — zamówić",klasa:"lvl-blad"},oczekuje_na_dostawe:{label:"Zamówione • oczekuje na dostawę",klasa:"lvl-info"},kompletacja:{label:"Kompletacja",klasa:"lvl-info"},spakowane:{label:"Spakowane",klasa:"lvl-ok"},zrealizowane:{label:"Zrealizowane lokalnie",klasa:"lvl-ok"},zamkniete:{label:"Zamknięte przez Allegro",klasa:"lvl-ok"}})[allegroEtapMagazynu(z)];}
-async function allegroUstawEtapMagazynu(orderId,stage){
-  try{const d=await chmura("allegro-order-warehouse-stage",{method:"POST",body:{orderId,stage},timeout:18000});allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;allegroZapiszCache();toast("Etap magazynu zapisany — status Allegro pozostał bez zmian");renderuj();}catch(e){toast("⚠️ Etap magazynu: "+(e.message||e));}
-}
-async function allegroUstawEtapZaznaczonychZamowien(){
-  const stage=String(document.getElementById("bulkAllegroWarehouseStage")?.value||"");
-  const ids=[...zaznaczoneAllegroZamowienia];
-  if(!ids.length){toast("Zaznacz co najmniej jedno zlecenie Allegro");return;}
-  if(!["do_sprawdzenia","braki","kompletacja","spakowane","zrealizowane"].includes(stage)){toast("Wybierz etap magazynowy");return;}
-  try{
-    toast(`Zmieniam etap ${ids.length} zleceń Allegro…`);
-    const d=await chmura("allegro-order-warehouse-stage",{method:"POST",body:{orderIds:ids,stage},timeout:45000});
-    allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;zaznaczoneAllegroZamowienia.clear();allegroZapiszCache();
-    toast(`✅ Zmieniono etap ${d.changed||0} zleceń${d.skipped?.length?` • pominięto zamknięte: ${d.skipped.length}`:""}. Statusy Allegro pozostały bez zmian.`);renderuj();
-  }catch(e){toast("⚠️ Masowy etap Allegro: "+(e.message||e));}
-}
 function allegroOfertaPoId(offerId){
   return (Array.isArray(allegroOferty)?allegroOferty:[]).find(o=>String(o.id)===String(offerId))||null;
 }
@@ -2801,7 +2844,7 @@ function allegroZamowieniaTabelaHTML(){
     </div>`,actions:adminOperacjeWynikowHTML({id:"allegro-orders",selected:zaznaczone.length,pageCount:widoczneZamowienia.length,resultCount:pasujaceZamowienia.length,selectPage:"allegroZaznaczWidoczneZamowienia(true)",selectAll:"allegroZaznaczWszystkiePasujaceZamowienia()",clear:"allegroWyczyscZaznaczenieZamowien()",exportSelected:"allegroEksportujZamowienia('zaznaczone')",exportAll:"allegroEksportujZamowienia('filtr')"})})}
     <div class="allegro-bulk-toolbar">
       <div><b>Operacje na zleceniach</b><small>${zaznaczone.length} zaznaczonych • checkbox służy tylko do operacji grupowych</small></div>
-      <div class="allegro-bulk-stage"><label for="bulkAllegroWarehouseStage">Etap magazynu</label><select id="bulkAllegroWarehouseStage"><option value="">— wybierz etap —</option><option value="do_sprawdzenia">Do sprawdzenia</option><option value="braki">Braki — zamówić</option><option value="kompletacja">Kompletacja</option><option value="spakowane">Spakowane</option><option value="zrealizowane">✅ Zrealizowane lokalnie</option></select><button class="btn" onclick="allegroUstawEtapZaznaczonychZamowien()" ${zaznaczone.length?"":"disabled"}>Zastosuj do ${zaznaczone.length}</button></div>
+      <div class="allegro-bulk-stage"><button class="btn" onclick='allegroUtworzZamowienieProducenta(${JSON.stringify(zaznaczone)})' ${zaznaczone.length?"":"disabled"}>🧾 Utwórz/aktualizuj plany producentów (${zaznaczone.length})</button><label for="bulkAllegroWarehouseStage">Etap magazynu</label><select id="bulkAllegroWarehouseStage"><option value="">— wybierz etap —</option><option value="do_sprawdzenia">Do sprawdzenia</option><option value="braki">Braki — zamówić</option><option value="oczekuje_na_dostawe">Zamówione — oczekuje</option><option value="kompletacja">Kompletacja</option><option value="spakowane">Spakowane</option><option value="zrealizowane">✅ Zrealizowane lokalnie</option></select><button class="btn" onclick="allegroUstawEtapZaznaczonychZamowien()" ${zaznaczone.length?"":"disabled"}>Zastosuj do ${zaznaczone.length}</button></div>
     </div>
     <div class="allegro-order-list">${widoczneZamowienia.map(allegroZlecenieHTML).join("") || `<div class="backend-note">Brak zamówień w tym filtrze. Synchronizacja pobiera wyłącznie nowe i gotowe do wysłania.</div>`}</div>
     ${widoczneZamowienia.length>=allegroLimitWidokuZamowien?`<p class="order-detail-lead">Pokazano pierwsze ${allegroLimitWidokuZamowien} zleceń. Zwiększ limit widoku powyżej, aby zobaczyć więcej.</p>`:""}
@@ -2814,11 +2857,11 @@ function allegroStanPozycjiHTML(p={}){
   if(p.stan===null)return `<span class="lvl lvl-ostrzezenie">brak kontrolowanego stanu</span><br><small>Uzupełnij stan produktu ID ${esc(p.produkt.id)} w Magazynie.</small>`;
   return `stan: <b>${esc(p.stan)}</b> szt.<br><small>łączne rezerwacje: ${esc(p.laczneRezerwacje)} • po rezerwacji: ${esc(p.dostepne)}</small>${p.lokalizacja?`<br><span class="warehouse-location-chip">📍 ${esc(nazwaLokalizacjiMagazynu(p.lokalizacja))}</span>`:`<br><small class="warehouse-location-missing">⚠️ brak lokalizacji</small>`}`;
 }
-function allegroDecyzjaAgentaHTML(p={}){
+function allegroDecyzjaAgentaHTML(p={},z={}){
   if(p.decyzja==="nierozpoznany")return `<span class="lvl lvl-blad">sprawdź EAN/SKU</span><br><small>Agent nie połączył pozycji z kartoteką.</small>`;
   if(p.decyzja==="sprawdz_stan")return `<span class="lvl lvl-ostrzezenie">ustal stan magazynowy</span><br><a href="#/admin/magazyn/stany">Otwórz stany produktów</a>`;
   if(p.decyzja==="uzupelnij_lokalizacje")return `<span class="lvl lvl-ostrzezenie">uzupełnij lokalizację</span><br><a href="#/admin/produkty/edytuj/${encodeURIComponent(p.produkt?.id||"")}">Edytuj kartotekę</a>`;
-  if(p.decyzja==="zamow_u_producenta")return `<span class="lvl lvl-blad">zamówić ${esc(p.brak)} szt.</span><br><small>Dostawca: ${esc(p.dostawca||"nieprzypisany")}</small>${p.dokumentyProducenta?.length?`<br><a href="#/admin/magazyn/plan">🧾 ${esc(p.dokumentyProducenta.map(x=>x.numer).join(", "))}</a>`:`<br><small>Agent utworzy szkic producenta przy synchronizacji.</small>`}`;
+  if(p.decyzja==="zamow_u_producenta")return `<span class="lvl lvl-blad">zamówić ${esc(p.brak)} szt.</span><br><small>Dostawca: ${esc(p.dostawca||"nieprzypisany")}</small>${p.dokumentyProducenta?.length?`<br><a href="#/admin/magazyn/plan">🧾 ${esc(p.dokumentyProducenta.map(x=>x.numer).join(", "))}</a>`:`<br><button class="btn ghost allegro-line-procurement" type="button" onclick="allegroUtworzZamowienieProducenta(${jsArg(z.id||z.nr)})">🧾 Dodaj brak do Planu</button>`}`;
   return `<span class="lvl lvl-ok">pobierz z magazynu</span><br><b>📍 ${esc(nazwaLokalizacjiMagazynu(p.lokalizacja))}</b>`;
 }
 function allegroMapowaniePozycjiHTML(p={}){
@@ -2846,11 +2889,11 @@ function allegroZlecenieHTML(z){
     <details class="allegro-order-products" open>
       <summary>Produkty w zleceniu (${items.length})</summary>
       <div class="warehouse-worktable-wrap"><table class="log-table allegro-order-products-table"><tr><th>Zdjęcie</th><th>Pozycja z Allegro</th><th>Produkt sklepu i dopasowanie</th><th>Ilość</th><th>Stan i rezerwacje</th><th>Decyzja agenta</th></tr>
-        ${analiza.pozycje.map(p=>{const d=allegroDanePozycjiZamowienia({offerId:p.offerId,offerName:p.nazwa,quantity:p.ilosc});return `<tr class="${p.decyzja!=="kompletuj"?"row-alert":""}"><td>${d.zdjecie?`<img class="allegro-order-thumb" src="${esc(d.zdjecie)}" alt="" loading="lazy">`:`<span class="allegro-order-thumb fallback">🎲</span>`}</td><td><b>${esc(p.nazwa||"—")}</b><small>Oferta: ${esc(p.offerId||"—")} • kod: ${esc(p.externalId||"—")} • EAN: ${esc(p.ean||"—")}</small></td><td>${allegroMapowaniePozycjiHTML(p)}</td><td><b>${esc(p.ilosc)}</b> szt.</td><td>${allegroStanPozycjiHTML(p)}</td><td>${allegroDecyzjaAgentaHTML(p)}</td></tr>`;}).join("")||`<tr><td colspan="6">Brak pozycji w zleceniu.</td></tr>`}
+        ${analiza.pozycje.map(p=>{const d=allegroDanePozycjiZamowienia({offerId:p.offerId,offerName:p.nazwa,quantity:p.ilosc});return `<tr class="${p.decyzja!=="kompletuj"?"row-alert":""}"><td>${d.zdjecie?`<img class="allegro-order-thumb" src="${esc(d.zdjecie)}" alt="" loading="lazy">`:`<span class="allegro-order-thumb fallback">🎲</span>`}</td><td><b>${esc(p.nazwa||"—")}</b><small>Oferta: ${esc(p.offerId||"—")} • kod: ${esc(p.externalId||"—")} • EAN: ${esc(p.ean||"—")}</small></td><td>${allegroMapowaniePozycjiHTML(p)}</td><td><b>${esc(p.ilosc)}</b> szt.</td><td>${allegroStanPozycjiHTML(p)}</td><td>${allegroDecyzjaAgentaHTML(p,z)}</td></tr>`;}).join("")||`<tr><td colspan="6">Brak pozycji w zleceniu.</td></tr>`}
       </table></div>
     </details>
     <footer class="allegro-order-actions">
-      ${!allegroZamowienieZamknieteWAllegro(z)?`<span class="${analiza.gotowe?"lvl lvl-ok":"lvl lvl-blad"}">${analiza.gotowe?"✅ Wszystkie pozycje mają stan i lokalizację":`⚠️ Braki ${analiza.braki} szt. • nierozpoznane ${analiza.nierozpoznane} • bez stanu ${analiza.bezStanu} • bez lokalizacji ${analiza.bezLokalizacji}`}</span>${z.supplierProcurement?`<span class="lvl ${z.supplierProcurement.taskStatus==="zrealizowane"?"lvl-ok":"lvl-info"}">Zakup: ${esc(z.supplierProcurement.taskStatus||"do realizacji")} • ${esc(z.supplierProcurement.receivedQuantity||0)}/${esc(z.supplierProcurement.orderedQuantity||0)} szt.</span>`:""}<select id="${esc(idEtap)}" aria-label="Etap magazynu">${[["do_sprawdzenia","Do sprawdzenia"],["braki","Braki — zamówić"],["oczekuje_na_dostawe","Zamówione — oczekuje na dostawę"],["kompletacja","Kompletacja"],["spakowane","Spakowane"],["zrealizowane","✅ Zrealizowane lokalnie"]].map(([id,label])=>`<option value="${id}" ${allegroEtapMagazynu(z)===id?"selected":""}>${label}</option>`).join("")}</select><button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},document.getElementById(${jsArg(idEtap)}).value)">Zapisz etap</button>${!lokalnieDone?`<button class="btn" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'zrealizowane')">✅ Oznacz jako zrealizowane</button>`:`<button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'do_sprawdzenia')">↩️ Przywróć do obsługi</button>`}`:""}
+      ${!allegroZamowienieZamknieteWAllegro(z)?`<span class="${analiza.gotowe?"lvl lvl-ok":"lvl lvl-blad"}">${analiza.gotowe?"✅ Wszystkie pozycje mają stan i lokalizację":`⚠️ Braki ${analiza.braki} szt. • nierozpoznane ${analiza.nierozpoznane} • bez stanu ${analiza.bezStanu} • bez lokalizacji ${analiza.bezLokalizacji}`}</span>${z.supplierProcurement?`<span class="lvl ${z.supplierProcurement.taskStatus==="zrealizowane"?"lvl-ok":"lvl-info"}">Zakup: ${esc(z.supplierProcurement.taskStatus||"do realizacji")} • ${esc(z.supplierProcurement.receivedQuantity||0)}/${esc(z.supplierProcurement.orderedQuantity||0)} szt.</span>`:""}${analiza.braki>0?`<button class="btn" onclick="allegroUtworzZamowienieProducenta(${jsArg(z.id)})">🧾 ${z.supplierProcurement?"Aktualizuj":"Utwórz"} zamówienie producenta</button>`:""}<a class="btn ghost" href="#/admin/magazyn/plan">Plan producentów</a><select id="${esc(idEtap)}" aria-label="Etap magazynu">${[["do_sprawdzenia","Do sprawdzenia"],["braki","Braki — zamówić"],["oczekuje_na_dostawe","Zamówione — oczekuje na dostawę"],["kompletacja","Kompletacja"],["spakowane","Spakowane"],["zrealizowane","✅ Zrealizowane lokalnie"]].map(([id,label])=>`<option value="${id}" ${allegroEtapMagazynu(z)===id?"selected":""}>${label}</option>`).join("")}</select><button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},document.getElementById(${jsArg(idEtap)}).value)">Zapisz etap</button>${!lokalnieDone?`<button class="btn" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'zrealizowane')">✅ Oznacz jako zrealizowane</button>`:`<button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'do_sprawdzenia')">↩️ Przywróć do obsługi</button>`}`:""}
     </footer>
   </article>`;
 }

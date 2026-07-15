@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   approveSupplierPlanDraft,
   cancelSupplierPlanDraft,
+  prepareSupplierPlanCorrection,
   receiveSupplierPlanLine,
   supplierLineIdentifiers,
   supplierLineStableKey,
@@ -182,6 +183,30 @@ test('anulowanie jest wersjonowane, zachowuje audyt i nie obejmuje wysłanego do
   assert.equal(result.draft.status, 'anulowane');
 });
 
+test('korekta wysłanego dokumentu zachowuje poprzednią wysyłkę i otwiera nową rewizję', async () => {
+  const sent = draft({
+    status: 'wysłane do producenta', emailSentAt: NOW.toISOString(), emailSentBy: 'admin@example.test',
+    approvedAt: NOW.toISOString(), approvalRevision: 3, sentSuppliers: ['Alexander'],
+    emailResults: [{ supplier: 'Alexander', sent: true, sentAt: NOW.toISOString() }],
+  });
+  const result = prepareSupplierPlanCorrection({
+    drafts: [sent], draftId: 'D-1', expectedRevision: 3,
+    reason: 'Zmiana ilości po rozmowie z producentem', actor: 'admin@example.test', now: NOW,
+  });
+  assert.equal(result.draft.status, 'do sprawdzenia');
+  assert.equal(result.draft.revision, 4);
+  assert.equal(result.draft.correctionOfRevision, 3);
+  assert.equal(result.draft.supersededSends.length, 1);
+  assert.equal(result.draft.supersededSends[0].sentAt, NOW.toISOString());
+  assert.equal(result.draft.emailSentAt, undefined);
+  assert.equal(result.draft.approvedAt, undefined);
+  assert.equal(result.draft.historia.at(-1).type, 'supplier-correction-opened');
+  assert.throws(() => prepareSupplierPlanCorrection({
+    drafts: [draft({ status: 'wysłane do producenta', emailSentAt: NOW.toISOString(), pozycje: [{ ...draft().pozycje[0], przyjeto: 1 }] })],
+    draftId: 'D-1', expectedRevision: 3, reason: 'Korekta', now: NOW,
+  }), (error) => error.code === 'supplier_order_receipt_started');
+});
+
 test('ogólny zapis settings nie może podmienić serwerowego Planu zatowarowania', () => {
   const canonical = [draft({ revision: 7, status: 'do sprawdzenia' })];
   const merged = preserveSupplierPlanOnGenericSettings(
@@ -285,6 +310,28 @@ test('serwis blokuje zatwierdzoną rewizję przed SMTP i zapisuje stan wysyłki'
   assert.equal(marked.draft.status, 'wysłane do producenta');
   assert.equal(marked.draft.emailSentBy, 'admin@example.test');
   assert.equal(marked.draft.receiptRevision, 0);
+});
+
+test('ponowienie wysłanego dokumentu wymaga powodu i zapisuje osobną próbę audytową', async () => {
+  const sent = draft({ status: 'wysłane do producenta', emailSentAt: '2026-07-15T17:00:00.000Z' });
+  const repo = memoryRepository({ rev: 4, data: { artway_agent_ai_zlecenia: [sent], artway_producenci: [producerRecord] }, updated_at: null });
+  const service = createSupplierOrderPlanService({ readVersioned: repo.readVersioned, writeIfVersion: repo.writeIfVersion, now: () => NOW });
+  await assert.rejects(
+    () => service.beginEmailSend({ draftId: 'D-1', expectedRevision: 3, allowResend: true, resendReason: '' }),
+    (error) => error.code === 'supplier_order_resend_reason_required',
+  );
+  const lock = await service.beginEmailSend({ draftId: 'D-1', expectedRevision: 3, allowResend: true, resendReason: 'Producent prosi o ponowienie' });
+  assert.equal(lock.resend, true);
+  assert.equal(lock.draft.sendLock.mode, 'resend');
+  const marked = await service.markEmailResults({
+    draftId: 'D-1', expectedRevision: 3, sendLockId: lock.sendLockId, actor: 'admin@example.test',
+    resend: true, resendReason: 'Producent prosi o ponowienie',
+    results: [{ supplier: 'Alexander', sent: true, sentAt: NOW.toISOString() }], sentAt: NOW.toISOString(),
+  });
+  assert.equal(marked.draft.status, 'wysłane do producenta');
+  assert.equal(marked.draft.emailSendCount, 2);
+  assert.equal(marked.draft.emailSendHistory.at(-1).mode, 'resend');
+  assert.equal(marked.draft.emailSendHistory.at(-1).reason, 'Producent prosi o ponowienie');
 });
 
 test('nieudana wysyłka odblokowuje zatwierdzoną rewizję bez zmiany treści', async () => {

@@ -43,6 +43,17 @@ test('częściowe i pełne przyjęcie automatycznie przesuwają dalsze etapy', (
   assert.equal(complete.warehouseStage, 'kompletacja');
 });
 
+test('otwarcie korekty cofa wyłącznie lokalny etap zakupowy do braków', () => {
+  const corrected = draft({ status: 'do sprawdzenia', emailSentAt: undefined });
+  const result = applySupplierProcurementToOrder(order({
+    warehouseStage: 'oczekuje_na_dostawe',
+    supplierProcurement: { status: 'oczekuje_na_dostawe', taskStatus: 'zrealizowane' },
+  }), [corrected]);
+  assert.equal(result.supplierProcurement.status, 'do_wyslania');
+  assert.equal(result.supplierProcurement.taskStatus, 'do_realizacji');
+  assert.equal(result.warehouseStage, 'braki');
+});
+
 test('powiązanie produktu bez dokładnej referencji zamówienia nie zmienia etapu', () => {
   const other = draft({ pozycje: [{ produktId: 'P-1', ilosc: 2, przyjeto: 2, zamowienia: ['Allegro ALG-2'] }] });
   const original = order();

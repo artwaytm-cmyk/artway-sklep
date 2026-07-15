@@ -7,8 +7,11 @@ const source = await readFile(new URL('../src/frontend/10-agent-ai.js', import.m
 const routerSource = await readFile(new URL('../src/frontend/06-router-and-storefront.js', import.meta.url), 'utf8');
 const cloudSource = await readFile(new URL('../src/frontend/03-cloud-sync.js', import.meta.url), 'utf8');
 const shippingSource = await readFile(new URL('../src/frontend/07-admin-shipping.js', import.meta.url), 'utf8');
-const ordersSource = await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8');
+const ordersSource = `${await readFile(new URL('../src/frontend/11-allegro-procurement-actions.js', import.meta.url), 'utf8')}\n${await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8')}`;
 const inventorySource = await readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8');
+const storeSource = await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8');
+const supplierRouteSource = await readFile(new URL('../netlify/functions/lib/supplier-order-route.mjs', import.meta.url), 'utf8');
+const storePlanSource = `${storeSource}\n${supplierRouteSource}`;
 
 function fragment(start, end) {
   const from = source.indexOf(start), to = source.indexOf(end, from);
@@ -123,6 +126,36 @@ test('podgląd jest dialogiem z Escape, a wysyłka ma ostateczne potwierdzenie',
   assert.match(send, /OSTATECZNE POTWIERDZENIE WYSYŁKI/);
   assert.match(send, /if\(!confirm\(/);
   assert.ok(send.indexOf('if(!confirm(') < send.indexOf('chmura("email-send-supplier-order"'));
+});
+
+test('wysłany dokument ma kontrolowane ponowienie, korektę i czytelny audyt', () => {
+  const recovery = fragment('async function agentAIPrzygotujKorekteZlecenia', 'function agentAIPobierzZlecenieCSV');
+  const send = fragment('async function agentAIWyslijZlecenieEmail', 'async function agentAIPrzyjmijPozycjeZlecenia');
+  const card = fragment('function agentAIHistoriaEmailiProducentaHTML', 'function agentAIZleceniaPanelHTML');
+  assert.match(recovery, /supplier-order-correction/);
+  assert.match(recovery, /Poprzedniego dostarczonego e-maila nie da się usunąć/);
+  assert.match(recovery, /agentAIPonowEmailProducenta/);
+  assert.match(send, /forceResend/);
+  assert.match(send, /resendReason/);
+  assert.match(send, /OSTATECZNE POTWIERDZENIE PONOWNEJ WYSYŁKI/);
+  assert.match(card, /Historia wysyłek i korekt/);
+  assert.match(card, /Wyślij ponownie/);
+  assert.match(card, /Utwórz korektę/);
+  assert.match(storeSource, /forceResend/);
+  assert.match(storeSource, /attempts: \[\.\.\.\(Array\.isArray\(previousAudit\.attempts\)/);
+  assert.match(storePlanSource, /supplier-order-correction/);
+});
+
+test('zamówienia Allegro mają jednostkowe i masowe tworzenie Planu producentów', () => {
+  assert.match(ordersSource, /function allegroUtworzZamowienieProducenta/);
+  assert.match(ordersSource, /supplier-order-from-allegro/);
+  assert.match(ordersSource, /Dodaj brak do Planu/);
+  assert.match(ordersSource, /Utwórz\/aktualizuj plany producentów/);
+  assert.match(ordersSource, /Utwórz.*zamówienie producenta/);
+  assert.match(storePlanSource, /action !== 'supplier-order-from-allegro'/);
+  assert.match(storePlanSource, /recalculateAllegroOrders\(\)/);
+  assert.match(storePlanSource, /relatedDrafts/);
+  assert.match(storePlanSource, /supplierMatchVerified === true/);
 });
 
 test('panel pokazuje cały proces aż do przyjęcia dostawy', () => {
