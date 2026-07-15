@@ -18,7 +18,14 @@ test('ustawienia synchronizacji mają bezpieczne wartości domyślne', () => {
 });
 
 test('nieobsługiwane wartości harmonogramu wracają do bezpiecznych domyślnych', () => {
-  assert.deepEqual(normalizeAllegroSyncSettings({ mappingMinScore: 42, lightSyncMinutes: 7, fullSyncHours: 2 }), ALLEGRO_SYNC_DEFAULTS);
+  assert.deepEqual(normalizeAllegroSyncSettings({ lightSyncMinutes: 7, fullSyncHours: 2 }), ALLEGRO_SYNC_DEFAULTS);
+});
+
+test('próg mapowania przyjmuje każdą wartość od 55% i pilnuje granic', () => {
+  assert.equal(normalizeAllegroSyncSettings({ mappingMinScore: 55 }).mappingMinScore, 55);
+  assert.equal(normalizeAllegroSyncSettings({ mappingMinScore: 73 }).mappingMinScore, 73);
+  assert.equal(normalizeAllegroSyncSettings({ mappingMinScore: 20 }).mappingMinScore, 55);
+  assert.equal(normalizeAllegroSyncSettings({ mappingMinScore: 140 }).mappingMinScore, 100);
 });
 
 test('lekka synchronizacja respektuje wybrany interwał', () => {

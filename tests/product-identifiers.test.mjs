@@ -52,3 +52,13 @@ test('zapisane mapowanie ma pierwszeństwo wyłącznie przy wiarygodnej ofercie'
   const match = findBestAllegroOffer(product, offers, { 'OF-1': { offerId: 'OF-1', productId: '1000287' } });
   assert.equal(match.offer.id, 'OF-2');
 });
+
+test('niższy próg od 55% udostępnia słabszą sugestię bez silnego konfliktu', () => {
+  const product = { id: 1000300, nazwa: 'Układanka edukacyjna zwierzęta leśne', producent: 'Alexander' };
+  const offers = [{ id: 'OF-55', name: 'Układanka edukacyjna zwierzęta', brand: 'Alexander' }];
+  const strict = findBestAllegroOffer(product, offers, {}, 88);
+  const broader = findBestAllegroOffer(product, offers, {}, 55);
+  assert.equal(strict, null);
+  assert.equal(broader.offer.id, 'OF-55');
+  assert.ok(broader.score >= 55);
+});

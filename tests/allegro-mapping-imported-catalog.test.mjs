@@ -17,7 +17,8 @@ test('panel ustawień zapisuje mapowanie i oba interwały synchronizacji', async
   const source = await readFile(frontendPath, 'utf8');
   assert.match(source, /name="autoMapping"/);
   assert.match(source, /name="mappingMinScore"/);
+  assert.match(source, /min="55"/);
+  assert.match(source, /this\.form\.requestSubmit\(\)/);
   assert.match(source, /name="lightSyncMinutes"/);
   assert.match(source, /name="fullSyncHours"/);
-  assert.match(source, /allegroUruchomAutomatyczneMapowanie/);
 });

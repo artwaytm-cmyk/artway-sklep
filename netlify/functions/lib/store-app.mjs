@@ -1696,18 +1696,18 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
   const usedProducts = new Set([...used.values()]);
   let autoMapped = 0, refreshed = 0, descriptionsUpdated = 0, producersUpdated = 0, productsUpdated = 0;
   for (const product of products.values()) {
-    const match = allegroDopasowanieOferty(product, offers, mappings);
+    const match = allegroDopasowanieOferty(product, offers, mappings, mappingPolicy.mappingMinScore);
     const offer = match?.offer;
     if (!offer?.id || (used.has(String(offer.id)) && used.get(String(offer.id)) !== String(product.id))) continue;
     const current = mappings[String(offer.id)] || {};
     if (current.blocked === true) continue;
     const validation = allegroOcenaPowiazania(product, offer);
     if (!current.offerId) {
-      if (mappingPolicy.autoMapping === false || !validation.valid || validation.score < mappingPolicy.mappingMinScore || usedProducts.has(String(product.id))) continue;
+      if (mappingPolicy.autoMapping === false || validation.strongConflict || validation.score < mappingPolicy.mappingMinScore || usedProducts.has(String(product.id))) continue;
       const competitor = [...products.values()]
         .filter((candidate) => String(candidate.id) !== String(product.id) && !usedProducts.has(String(candidate.id)))
         .map((candidate) => ({ candidate, validation: allegroOcenaPowiazania(candidate, offer) }))
-        .filter((entry) => entry.validation.valid && entry.validation.score >= mappingPolicy.mappingMinScore)
+        .filter((entry) => !entry.validation.strongConflict && entry.validation.score >= mappingPolicy.mappingMinScore)
         .sort((left, right) => right.validation.score - left.validation.score)[0];
       if (competitor && validation.score - competitor.validation.score < 6) continue;
     }
@@ -2059,8 +2059,8 @@ function allegroOfertyItems(raw) {
   if (Array.isArray(raw)) return raw;
   return Array.isArray(raw?.items) ? raw.items : [];
 }
-function allegroDopasowanieOferty(product = {}, offers = [], mappings = {}) {
-  return findBestAllegroOffer(product, offers, mappings);
+function allegroDopasowanieOferty(product = {}, offers = [], mappings = {}, minimumScore = 85) {
+  return findBestAllegroOffer(product, offers, mappings, minimumScore);
 }
 function allegroPodobneOferty(product = {}, offersRaw = [], limit = 5) {
   return allegroOfertyItems(offersRaw).map((o) => {

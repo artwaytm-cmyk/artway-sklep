@@ -13,9 +13,10 @@ export const ALLEGRO_SYNC_DEFAULTS = Object.freeze({
 });
 
 export function normalizeAllegroSyncSettings(raw = {}) {
+  const requestedMappingScore = integer(raw?.mappingMinScore, ALLEGRO_SYNC_DEFAULTS.mappingMinScore);
   return {
     autoMapping: raw?.autoMapping !== false,
-    mappingMinScore: oneOf(integer(raw?.mappingMinScore, ALLEGRO_SYNC_DEFAULTS.mappingMinScore), [88, 95, 100], ALLEGRO_SYNC_DEFAULTS.mappingMinScore),
+    mappingMinScore: Math.min(100, Math.max(55, requestedMappingScore)),
     lightSyncMinutes: oneOf(integer(raw?.lightSyncMinutes, ALLEGRO_SYNC_DEFAULTS.lightSyncMinutes), [15, 30, 60, 120], ALLEGRO_SYNC_DEFAULTS.lightSyncMinutes),
     fullSyncHours: oneOf(integer(raw?.fullSyncHours, ALLEGRO_SYNC_DEFAULTS.fullSyncHours), [6, 12, 24], ALLEGRO_SYNC_DEFAULTS.fullSyncHours),
   };

@@ -88,7 +88,7 @@ export function scoreAllegroProductMapping(product = {}, offer = {}) {
   return { score, reason: reason || 'brak wspólnych identyfikatorów', evidence, conflicts, similarity: Math.round(similarity * 100), strongConflict, valid: score >= 65 && !strongConflict };
 }
 
-export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw = {}) {
+export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw = {}, minimumScore = 85) {
   const offers = Array.isArray(offersRaw) ? offersRaw : (Array.isArray(offersRaw?.items) ? offersRaw.items : []);
   const mappings = mappingsRaw?.items && typeof mappingsRaw.items === 'object' ? mappingsRaw.items : (mappingsRaw || {});
   const productId = String(product.id ?? '').trim();
@@ -98,6 +98,7 @@ export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw =
   const ean = gtinKey(product.gtin || product.ean);
   const producerCode = normalize(product.kodProducenta || product.mpn);
   const name = normalize(product.nazwa || product.name);
+  const threshold = Math.min(100, Math.max(55, Number(minimumScore) || 85));
   const mappedOfferId = Object.values(mappings).find((mapping) => String(mapping?.productId ?? '') === productId)?.offerId || '';
   const credible = (offer) => {
     const hasEvidence = !!(offer?.name || offer?.offerName || offer?.productId || offer?.ean || offer?.gtin || offer?.externalId || offer?.manufacturerCode || offer?.producerCode);
@@ -117,8 +118,12 @@ export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw =
       const similarity = tokenSimilarity(product.nazwa || product.name, offer?.name);
       const sameCategory = product.allegroCategoryId && String(product.allegroCategoryId) === String(offer?.categoryId || '');
       if (similarity >= 0.82) { score = 70 + Math.round(similarity * 10) + (sameCategory ? 5 : 0); reason = 'bardzo podobna nazwa'; }
+      else {
+        const validation = scoreAllegroProductMapping(product, offer);
+        if (!validation.strongConflict && validation.score >= threshold) { score = validation.score; reason = validation.reason; }
+      }
     }
     if (score && (!best || score > best.score)) best = { offer, score, reason };
   }
-  return best?.score >= 85 ? best : null;
+  return best?.score >= threshold ? best : null;
 }
