@@ -75,13 +75,14 @@ function productId(product, fallback = '') {
   return text(product?.id ?? fallback, 100);
 }
 
-export function mergeCatalogProducts(data = {}) {
+export function mergeCatalogProducts(data = {}, importedProducts = []) {
   const map = new Map();
   const addBase = (product = {}) => {
     const id = productId(product);
     if (id) map.set(id, { ...(map.get(id) || {}), ...product, id });
   };
   for (const product of asArray(data.artway_produkty_katalog)) addBase(product);
+  for (const product of asArray(importedProducts)) addBase(product);
   for (const product of asArray(data.artway_produkty_dodane)) addBase(product);
 
   const orphanEdits = [];

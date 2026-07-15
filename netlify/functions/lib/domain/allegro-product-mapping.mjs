@@ -15,6 +15,14 @@ const significantSimilarity = (left = '', right = '') => {
   for (const token of a) if (b.has(token)) common += 1;
   return common / Math.max(a.size, b.size);
 };
+const tokenSimilarity = (left = '', right = '') => {
+  const a = new Set(normalize(left).split(/\s+/).filter((token) => token.length > 2));
+  const b = new Set(normalize(right).split(/\s+/).filter((token) => token.length > 2));
+  if (!a.size || !b.size) return 0;
+  let common = 0;
+  for (const token of a) if (b.has(token)) common += 1;
+  return common / Math.max(a.size, b.size);
+};
 
 export function mappingVerifiedForSupplier(mapping = {}) {
   if (mapping?.verifiedForSupplier === true || mapping?.supplierOrderEligible === true) return true;
@@ -78,4 +86,39 @@ export function scoreAllegroProductMapping(product = {}, offer = {}) {
   if (strongConflict) score = Math.min(score, 35);
   else if (conflicts.length && score < 95) score = Math.max(0, score - Math.min(25, conflicts.length * 8));
   return { score, reason: reason || 'brak wspólnych identyfikatorów', evidence, conflicts, similarity: Math.round(similarity * 100), strongConflict, valid: score >= 65 && !strongConflict };
+}
+
+export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw = {}) {
+  const offers = Array.isArray(offersRaw) ? offersRaw : (Array.isArray(offersRaw?.items) ? offersRaw.items : []);
+  const mappings = mappingsRaw?.items && typeof mappingsRaw.items === 'object' ? mappingsRaw.items : (mappingsRaw || {});
+  const productId = String(product.id ?? '').trim();
+  const savedOfferId = clip(product.allegroOfferId, 100);
+  const catalogProductId = clip(product.allegroProductId, 120);
+  const externalId = normalize(product.externalId || product.sku || product.kodProducenta || product.mpn);
+  const ean = gtinKey(product.gtin || product.ean);
+  const producerCode = normalize(product.kodProducenta || product.mpn);
+  const name = normalize(product.nazwa || product.name);
+  const mappedOfferId = Object.values(mappings).find((mapping) => String(mapping?.productId ?? '') === productId)?.offerId || '';
+  const credible = (offer) => {
+    const hasEvidence = !!(offer?.name || offer?.offerName || offer?.productId || offer?.ean || offer?.gtin || offer?.externalId || offer?.manufacturerCode || offer?.producerCode);
+    return !hasEvidence || scoreAllegroProductMapping(product, offer).valid;
+  };
+  let best = null;
+  for (const offer of offers) {
+    let score = 0, reason = '';
+    if (savedOfferId && String(offer?.id) === savedOfferId && credible(offer)) { score = 100; reason = 'zapisane ID oferty'; }
+    else if (mappedOfferId && String(offer?.id) === String(mappedOfferId) && credible(offer)) { score = 98; reason = 'mapowanie produktu'; }
+    else if (catalogProductId && String(offer?.productId || '') === catalogProductId && credible(offer)) { score = 97; reason = 'identyczne ID produktu katalogowego Allegro'; }
+    else if (externalId && normalize(offer?.externalId) === externalId) { score = 95; reason = 'identyczny external.id / SKU'; }
+    else if (ean && gtinKey(offer?.ean || offer?.gtin) === ean) { score = 92; reason = 'identyczny EAN/GTIN'; }
+    else if (producerCode && normalize(offer?.manufacturerCode || offer?.producerCode) === producerCode) { score = 88; reason = 'identyczny kod producenta'; }
+    else if (name && normalize(offer?.name) === name) { score = 86; reason = 'identyczna nazwa oferty'; }
+    else {
+      const similarity = tokenSimilarity(product.nazwa || product.name, offer?.name);
+      const sameCategory = product.allegroCategoryId && String(product.allegroCategoryId) === String(offer?.categoryId || '');
+      if (similarity >= 0.82) { score = 70 + Math.round(similarity * 10) + (sameCategory ? 5 : 0); reason = 'bardzo podobna nazwa'; }
+    }
+    if (score && (!best || score > best.score)) best = { offer, score, reason };
+  }
+  return best?.score >= 85 ? best : null;
 }

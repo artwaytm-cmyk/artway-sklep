@@ -35,6 +35,19 @@ test('osierocona edycja nie staje się produktem', () => {
   assert.deepEqual(merged.orphanEdits.map((entry) => entry.id), ['24']);
 });
 
+test('importowany katalog jest częścią mapowania i respektuje edycje oraz ukrycie', () => {
+  const imported = { ...completeProduct, id: 1000287, nazwa: 'Produkt z katalogu dzielonego', cena: 44.9 };
+  const merged = mergeCatalogProducts({
+    artway_produkty_edytowane: { 1000287: { cena: 47.9, allegroOfferId: '987654321' } },
+    artway_produkty_ukryte: [1000287],
+  }, [imported]);
+  assert.equal(merged.products.length, 1);
+  assert.equal(merged.map.get('1000287').cena, 47.9);
+  assert.equal(merged.map.get('1000287').allegroOfferId, '987654321');
+  assert.equal(merged.activeProducts.length, 0);
+  assert.equal(merged.orphanEdits.length, 0);
+});
+
 test('bezpieczne poprawki nie wymyślają ceny, EAN-u ani źródła', () => {
   const patch = safeCatalogPatch({ id: 2, nazwa: '  Produkt   testowy ', opis: 'To jest wystarczająco długi opis produktu. Zawiera wyłącznie fakty zapisane już w karcie i może posłużyć do utworzenia krótkiego opisu.' });
   assert.equal(patch.nazwa, 'Produkt testowy');
