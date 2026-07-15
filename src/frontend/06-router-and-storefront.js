@@ -32,6 +32,17 @@ function trasa(){
 }
 function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
 let ostatniaRenderowanaTrasa="";
+let renderowanieWidoku=false;
+let renderPonowniePoBiezacym=false;
+let renderTimerWpisywania=null;
+let renderFrameWpisywania=0;
+function zaplanujRenderPoWpisaniu(opoznienie=180){
+  clearTimeout(renderTimerWpisywania);
+  if(renderFrameWpisywania)cancelAnimationFrame(renderFrameWpisywania);
+  renderTimerWpisywania=setTimeout(()=>{
+    renderFrameWpisywania=requestAnimationFrame(()=>{renderFrameWpisywania=0;renderuj();});
+  },Math.max(80,Number(opoznienie)||180));
+}
 function kluczStabilnegoWezla(node){
   if(!node||node.nodeType!==1)return "";
   for(const attr of ["id","data-stable-key","data-product-row","data-product-id","data-order-id","data-order-number","data-task-id","data-item-key"]){
@@ -57,17 +68,21 @@ function aktualizujWezelStabilnie(current,next,active){
   }
   if(current.nodeType===3||current.nodeType===8){if(current.nodeValue!==next.nodeValue)current.nodeValue=next.nodeValue;return;}
   if(current.nodeType!==1)return;
+  if(current!==active&&typeof current.isEqualNode==="function"&&current.isEqualNode(next))return;
   aktualizujAtrybutyWezla(current,next,active);
   aktualizujDzieciStabilnie(current,next,active);
 }
 function aktualizujDzieciStabilnie(current,next,active){
   const incoming=[...next.childNodes];
+  const keyed=new Map();
+  for(const node of current.childNodes){const key=kluczStabilnegoWezla(node);if(key&&!keyed.has(key))keyed.set(key,node);}
   for(let index=0;index<incoming.length;index++){
     const wanted=incoming[index],wantedKey=kluczStabilnegoWezla(wanted);let existing=current.childNodes[index];
     if(wantedKey&&kluczStabilnegoWezla(existing)!==wantedKey){
-      const match=[...current.childNodes].slice(index+1).find(node=>kluczStabilnegoWezla(node)===wantedKey);
+      const match=keyed.get(wantedKey);
       if(match){current.insertBefore(match,existing||null);existing=match;}
     }
+    if(wantedKey)keyed.delete(wantedKey);
     if(!existing){current.appendChild(wanted.cloneNode(true));continue;}
     aktualizujWezelStabilnie(existing,wanted,active);
   }
@@ -85,6 +100,8 @@ function odbiorcaStabilnegoWidoku(root,stabilny){
   return {get innerHTML(){return root.innerHTML;},set innerHTML(html){aktualizujWidokStabilnie(root,html);}};
 }
 function renderuj(){
+  if(renderowanieWidoku){renderPonowniePoBiezacym=true;return;}
+  renderowanieWidoku=true;
   try{
     const t = trasa();
     const root = $("widok"),taSamaTrasa=ostatniaRenderowanaTrasa===t&&root.childNodes.length>0;
@@ -204,8 +221,11 @@ function renderuj(){
   }catch(e){
     loguj("blad", "Błąd renderowania strony: "+e.message, trasa());
     $("widok").innerHTML = `<div class="page"><div class="panel"><h1>⚠️ Coś poszło nie tak</h1><p>Błąd został zapisany w <a href="#/diagnostyka">diagnostyce</a>.</p><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
+  }finally{
+    renderowanieWidoku=false;
+    odswiezZnacznikDiag();
+    if(renderPonowniePoBiezacym){renderPonowniePoBiezacym=false;requestAnimationFrame(()=>renderuj());}
   }
-  odswiezZnacznikDiag();
 }
 window.addEventListener("hashchange",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 
@@ -518,7 +538,7 @@ function listaPodstronyHTML(lista,pusty){
   const start=(stronaListyProduktow-1)*produktyNaLiscie,fragment=filtrowana.slice(start,start+produktyNaLiscie);
   return `
     <div class="toolbar" style="padding:0;margin:.6rem 0">
-      <input placeholder="Szukaj w tej liście…" value="${esc(frazaListyProduktow)}" oninput="frazaListyProduktow=this.value;stronaListyProduktow=1;renderuj()" style="flex:1;min-width:200px;padding:.45rem .7rem;border:1.5px solid var(--line);border-radius:10px">
+      <input placeholder="Szukaj w tej liście…" value="${esc(frazaListyProduktow)}" oninput="frazaListyProduktow=this.value;stronaListyProduktow=1;zaplanujRenderPoWpisaniu()" style="flex:1;min-width:200px;padding:.45rem .7rem;border:1.5px solid var(--line);border-radius:10px">
       <select onchange="sortowanieListyProduktow=this.value;stronaListyProduktow=1;renderuj()"><option value="default">Domyślne</option><option value="price-asc" ${sortowanieListyProduktow==="price-asc"?"selected":""}>Cena rosnąco</option><option value="price-desc" ${sortowanieListyProduktow==="price-desc"?"selected":""}>Cena malejąco</option><option value="name" ${sortowanieListyProduktow==="name"?"selected":""}>Nazwa A–Z</option><option value="rating" ${sortowanieListyProduktow==="rating"?"selected":""}>Najlepiej oceniane</option></select>
     </div>
     <div class="results-bar" style="padding:0;margin:.5rem 0"><span>${filtrowana.length?`Znaleziono <b>${filtrowana.length}</b> • pokazano ${start+1}–${Math.min(start+produktyNaLiscie,filtrowana.length)}`:"Brak wyników"}</span><label>Na stronie: <select onchange="ustawLiczbeListyProduktow(this.value)">${[12,24,48,96].map(n=>`<option value="${n}" ${produktyNaLiscie===n?"selected":""}>${n}</option>`).join("")}</select></label></div>

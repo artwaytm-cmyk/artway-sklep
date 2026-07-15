@@ -304,7 +304,8 @@ let agentAITelegram={loading:false,loaded:false,saving:false,error:"",settings:n
    widoczne na KAŻDYM urządzeniu. Bez połączenia z serwerem sklep dalej działa
    na pamięci przeglądarki (localStorage) jak dotychczas. */
 const CHMURA_URL = "/.netlify/functions/store";
-const CHMURA_AUTO_SYNC_MS = 60000;
+const CHMURA_AUTO_SYNC_MS = 15*60*1000;
+const CHMURA_FOCUS_SYNC_MIN_MS = 5*60*1000;
 const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta","artway_seo_ustawienia","artway_seo_historia"];
 let chmuraToken = (function(){
   try{
@@ -318,6 +319,9 @@ let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z 
 let chmuraTimerZapisu = null;
 let chmuraTimerAutoSync = null;
 let chmuraAutoSyncBusy = false;
+let chmuraAutoSyncOstatniStart = 0;
+let chmuraOstatniPullZmienilDane = false;
+let chmuraOstatniaSynchronizacjaCentralnaZmienilaDane = false;
 let chmuraKatalogImportowanyRev = "";
 async function chmuraPobierzKatalogImportowany(meta={},force=false){
   const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
@@ -442,11 +446,12 @@ function zbierzWspolneUstawienia(){
 }
 function nalozWspolneUstawienia(dane){
   if(!dane || typeof dane!=="object") return false;
+  let zmieniono=false;
   chmuraWczytywanie = true;
   try{
     if(dane.artway_ustawienia && typeof dane.artway_ustawienia==="object"){
       ustawienia = {...USTAWIENIA_PUBLICZNE, ...dane.artway_ustawienia};
-      zapiszLS("artway_ustawienia", ustawienia);
+      zmieniono=zapiszLS("artway_ustawienia", ustawienia)||zmieniono;
       sklepDocelowaMarza=Math.max(1,Math.min(60,Number(ustawienia.celMarzySklep)||sklepDocelowaMarza||20));
       allegroDocelowaMarza=Math.max(1,Math.min(60,Number(ustawienia.celMarzyAllegro)||allegroDocelowaMarza||20));
       allegroJednostkiOplatCyklicznych=Math.max(1,Math.min(1000,Number(ustawienia.allegroJednostkiOplatCyklicznych)||allegroJednostkiOplatCyklicznych||10));
@@ -471,15 +476,16 @@ function nalozWspolneUstawienia(dane){
       artway_seo_historia:(v)=>{seoHistoria=Array.isArray(v)?v:[];},
     };
     for(const k of Object.keys(setter)){
-      if(k in dane && dane[k]!==undefined && dane[k]!==null){ setter[k](dane[k]); zapiszLS(k, dane[k]); }
+      if(k in dane && dane[k]!==undefined && dane[k]!==null){ setter[k](dane[k]); zmieniono=zapiszLS(k, dane[k])||zmieniono; }
     }
-    return true;
+    return zmieniono;
   } finally { chmuraWczytywanie = false; }
 }
 async function chmuraWczytajStan(){
+  chmuraOstatniPullZmienilDane=false;
   try{
     const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev}});
-    await chmuraPobierzKatalogImportowany(d);
+    chmuraOstatniPullZmienilDane=(await chmuraPobierzKatalogImportowany(d))||chmuraOstatniPullZmienilDane;
     chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     const revLok = Number(wczytajLS("artway_chmura_rev", 0))||0;
     const serwerNowszy = (d.rev||0) > revLok;
@@ -487,12 +493,12 @@ async function chmuraWczytajStan(){
     // Admin (z tokenem): nakładaj TYLKO gdy serwer ma nowszą wersję niż ostatnio zsynchronizowana —
     // dzięki temu wczytanie strony NIE kasuje świeżych, jeszcze niewysłanych zmian admina.
     if(d.settings && Object.keys(d.settings).length && (!maUprawnieniaZapisuChmury() || serwerNowszy)){
-      nalozWspolneUstawienia(d.settings);
+      chmuraOstatniPullZmienilDane=nalozWspolneUstawienia(d.settings)||chmuraOstatniPullZmienilDane;
       zapiszLS("artway_chmura_rev", d.rev||0);
     }
     if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
-    if(Array.isArray(d.orders)){ zapiszLS("artway_zamowienia", filtrujAktywneZamowienia(d.orders)); chmuraStan.admin=true; }
-    if(Array.isArray(d.users)){ zapiszLS("artway_uzytkownicy", polaczUzytkownikowCentralnych(d.users)); chmuraStan.admin=true; }
+    if(Array.isArray(d.orders)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_zamowienia", filtrujAktywneZamowienia(d.orders))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
+    if(Array.isArray(d.users)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_uzytkownicy", polaczUzytkownikowCentralnych(d.users))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
     return true;
   }catch(e){ chmuraStan = {...chmuraStan, dostepna:false, sprawdzono:true, error:e.message}; return false; }
 }
@@ -561,7 +567,7 @@ function chmuraWyczyscToken(){ chmuraToken=""; try{sessionStorage.removeItem("ar
 function chmuraStatusHTML(){
   const ok = chmuraStan.dostepna, adm = chmuraStan.admin && maUprawnieniaZapisuChmury();
   const kolor = adm?"#166534":(ok?"#92400e":"#b91c1c"), tlo = adm?"#f0fdf4":(ok?"#fffbeb":"#fef2f2"), br = adm?"#86efac":(ok?"#fcd34d":"#fecaca");
-  const opis = adm ? `<b>Połączono ✅</b> — Twoje zmiany zapisują się na serwerze automatycznie i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/1000)} s.`
+  const opis = adm ? `<b>Połączono ✅</b> — Twoje zmiany zapisują się na serwerze automatycznie i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/60000)} min.`
     : ok ? `<b>⚠️ NIE połączono z bazą</b> — Twoje zmiany zapisują się TYLKO na tym urządzeniu i NIE są widoczne gdzie indziej. Zaloguj się jako <b>admin</b> hasłem = token bazy, albo kliknij „Wpisz hasło bazy".`
     : "Brak połączenia z serwerem — sklep działa lokalnie w tej przeglądarce.";
   return `<div class="backend-note" style="border-color:${br};background:${tlo};color:${kolor}">
@@ -603,13 +609,19 @@ function wczytajLS(klucz, domyslne){ try{ return JSON.parse(localStorage.getItem
 function zapiszLS(klucz, dane){
   if(klucz==="artway_zamowienia" && Array.isArray(dane)) dane = filtrujAktywneZamowienia(dane);
   const serial=JSON.stringify(dane);
-  try{ localStorage.setItem(klucz, serial); }
+  let zmieniono=true;
+  try{
+    if(localStorage.getItem(klucz)===serial)zmieniono=false;
+    else localStorage.setItem(klucz, serial);
+  }
   catch(e){
     const wynik=zwolnijPamiecPodreczna({wymus:true});
-    try{localStorage.setItem(klucz,serial);}
-    catch(e2){loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
+    try{localStorage.setItem(klucz,serial);zmieniono=true;}
+    catch(e2){zmieniono=false;loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
   }
-  if(!chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ zaplanujZapisUstawien(); } }
+  if(zmieniono && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ zaplanujZapisUstawien(); }
+  return zmieniono;
+}
 const kwotaNum = v => { const n=Number(String(v ?? 0).replace(",",".").replace(/[^0-9.-]/g,"")); return Number.isFinite(n) ? +n.toFixed(2) : 0; };
 const zl = n => kwotaNum(n).toFixed(2).replace(".", ",") + " zł";
 const $ = id => document.getElementById(id);
@@ -2303,6 +2315,17 @@ function trasa(){
 }
 function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
 let ostatniaRenderowanaTrasa="";
+let renderowanieWidoku=false;
+let renderPonowniePoBiezacym=false;
+let renderTimerWpisywania=null;
+let renderFrameWpisywania=0;
+function zaplanujRenderPoWpisaniu(opoznienie=180){
+  clearTimeout(renderTimerWpisywania);
+  if(renderFrameWpisywania)cancelAnimationFrame(renderFrameWpisywania);
+  renderTimerWpisywania=setTimeout(()=>{
+    renderFrameWpisywania=requestAnimationFrame(()=>{renderFrameWpisywania=0;renderuj();});
+  },Math.max(80,Number(opoznienie)||180));
+}
 function kluczStabilnegoWezla(node){
   if(!node||node.nodeType!==1)return "";
   for(const attr of ["id","data-stable-key","data-product-row","data-product-id","data-order-id","data-order-number","data-task-id","data-item-key"]){
@@ -2328,17 +2351,21 @@ function aktualizujWezelStabilnie(current,next,active){
   }
   if(current.nodeType===3||current.nodeType===8){if(current.nodeValue!==next.nodeValue)current.nodeValue=next.nodeValue;return;}
   if(current.nodeType!==1)return;
+  if(current!==active&&typeof current.isEqualNode==="function"&&current.isEqualNode(next))return;
   aktualizujAtrybutyWezla(current,next,active);
   aktualizujDzieciStabilnie(current,next,active);
 }
 function aktualizujDzieciStabilnie(current,next,active){
   const incoming=[...next.childNodes];
+  const keyed=new Map();
+  for(const node of current.childNodes){const key=kluczStabilnegoWezla(node);if(key&&!keyed.has(key))keyed.set(key,node);}
   for(let index=0;index<incoming.length;index++){
     const wanted=incoming[index],wantedKey=kluczStabilnegoWezla(wanted);let existing=current.childNodes[index];
     if(wantedKey&&kluczStabilnegoWezla(existing)!==wantedKey){
-      const match=[...current.childNodes].slice(index+1).find(node=>kluczStabilnegoWezla(node)===wantedKey);
+      const match=keyed.get(wantedKey);
       if(match){current.insertBefore(match,existing||null);existing=match;}
     }
+    if(wantedKey)keyed.delete(wantedKey);
     if(!existing){current.appendChild(wanted.cloneNode(true));continue;}
     aktualizujWezelStabilnie(existing,wanted,active);
   }
@@ -2356,6 +2383,8 @@ function odbiorcaStabilnegoWidoku(root,stabilny){
   return {get innerHTML(){return root.innerHTML;},set innerHTML(html){aktualizujWidokStabilnie(root,html);}};
 }
 function renderuj(){
+  if(renderowanieWidoku){renderPonowniePoBiezacym=true;return;}
+  renderowanieWidoku=true;
   try{
     const t = trasa();
     const root = $("widok"),taSamaTrasa=ostatniaRenderowanaTrasa===t&&root.childNodes.length>0;
@@ -2475,8 +2504,11 @@ function renderuj(){
   }catch(e){
     loguj("blad", "Błąd renderowania strony: "+e.message, trasa());
     $("widok").innerHTML = `<div class="page"><div class="panel"><h1>⚠️ Coś poszło nie tak</h1><p>Błąd został zapisany w <a href="#/diagnostyka">diagnostyce</a>.</p><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
+  }finally{
+    renderowanieWidoku=false;
+    odswiezZnacznikDiag();
+    if(renderPonowniePoBiezacym){renderPonowniePoBiezacym=false;requestAnimationFrame(()=>renderuj());}
   }
-  odswiezZnacznikDiag();
 }
 window.addEventListener("hashchange",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 
@@ -2789,7 +2821,7 @@ function listaPodstronyHTML(lista,pusty){
   const start=(stronaListyProduktow-1)*produktyNaLiscie,fragment=filtrowana.slice(start,start+produktyNaLiscie);
   return `
     <div class="toolbar" style="padding:0;margin:.6rem 0">
-      <input placeholder="Szukaj w tej liście…" value="${esc(frazaListyProduktow)}" oninput="frazaListyProduktow=this.value;stronaListyProduktow=1;renderuj()" style="flex:1;min-width:200px;padding:.45rem .7rem;border:1.5px solid var(--line);border-radius:10px">
+      <input placeholder="Szukaj w tej liście…" value="${esc(frazaListyProduktow)}" oninput="frazaListyProduktow=this.value;stronaListyProduktow=1;zaplanujRenderPoWpisaniu()" style="flex:1;min-width:200px;padding:.45rem .7rem;border:1.5px solid var(--line);border-radius:10px">
       <select onchange="sortowanieListyProduktow=this.value;stronaListyProduktow=1;renderuj()"><option value="default">Domyślne</option><option value="price-asc" ${sortowanieListyProduktow==="price-asc"?"selected":""}>Cena rosnąco</option><option value="price-desc" ${sortowanieListyProduktow==="price-desc"?"selected":""}>Cena malejąco</option><option value="name" ${sortowanieListyProduktow==="name"?"selected":""}>Nazwa A–Z</option><option value="rating" ${sortowanieListyProduktow==="rating"?"selected":""}>Najlepiej oceniane</option></select>
     </div>
     <div class="results-bar" style="padding:0;margin:.5rem 0"><span>${filtrowana.length?`Znaleziono <b>${filtrowana.length}</b> • pokazano ${start+1}–${Math.min(start+produktyNaLiscie,filtrowana.length)}`:"Brak wyników"}</span><label>Na stronie: <select onchange="ustawLiczbeListyProduktow(this.value)">${[12,24,48,96].map(n=>`<option value="${n}" ${produktyNaLiscie===n?"selected":""}>${n}</option>`).join("")}</select></label></div>
@@ -3964,12 +3996,13 @@ function polaczUzytkownikowCentralnych(serwerowi){
 async function synchronizujBazeCentralna(cicho=false){
   if(stanBazyCentralnej.synchronizacja) return false;
   if(!chmuraToken){ if(!cicho) chmuraUstawToken(); return false; }
+  chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=false;
   stanBazyCentralnej={...stanBazyCentralnej,synchronizacja:true};
   try{
     const d=await chmura("store-sync",{method:"POST",body:{orders:pobierzZamowienia(),users:pobierzUzytkownikow(),deleted_orders:zamowieniaUsuniete}});
     if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
-    zapiszLS("artway_zamowienia",Array.isArray(d.orders)?filtrujAktywneZamowienia(d.orders):[]);
-    zapiszLS("artway_uzytkownicy",polaczUzytkownikowCentralnych(d.users));
+    chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=zapiszLS("artway_zamowienia",Array.isArray(d.orders)?filtrujAktywneZamowienia(d.orders):[])||chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
+    chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=zapiszLS("artway_uzytkownicy",polaczUzytkownikowCentralnych(d.users))||chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
     stanBazyCentralnej={sprawdzono:true,online:true,synchronizacja:false,orders:d.orders?.length||0,users:d.users?.length||0,updatedAt:d.updated_at||null,error:""};
     chmuraStan={...chmuraStan,dostepna:true,admin:true,updated_at:d.updated_at||chmuraStan.updated_at};
     if(!cicho) toast(`Wspólna baza zsynchronizowana ✅ (${stanBazyCentralnej.orders} zamówień)`);
@@ -4045,18 +4078,28 @@ function odswiezPoCichejSynchronizacji(){
 async function automatycznaSynchronizacjaChmury(powod="timer"){
   if(chmuraAutoSyncBusy) return false;
   if(typeof document!=="undefined" && document.hidden && powod==="timer") return false;
+  const teraz=Date.now();
+  if(powod!=="timer"&&teraz-chmuraAutoSyncOstatniStart<CHMURA_FOCUS_SYNC_MIN_MS)return false;
+  chmuraAutoSyncOstatniStart=teraz;
   chmuraAutoSyncBusy=true;
   try{
-    let ok=false;
+    let ok=false,daneZmienione=false;
     if(chmuraToken){
       ok = await synchronizujBazeCentralna(true);
-      await chmuraWczytajStan();
+      daneZmienione=chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
+      ok = (await chmuraWczytajStan()) || ok;
+      daneZmienione=chmuraOstatniPullZmienilDane||daneZmienione;
     }else{
       ok = await chmuraWczytajStan();
-      if(sesja && !jestAdmin()) ok = (await pobierzMojeZamowieniaCentralne(true)) || ok;
+      daneZmienione=chmuraOstatniPullZmienilDane;
+      if(sesja && !jestAdmin()){
+        const przed=localStorage.getItem("artway_zamowienia");
+        ok = (await pobierzMojeZamowieniaCentralne(true)) || ok;
+        daneZmienione=przed!==localStorage.getItem("artway_zamowienia")||daneZmienione;
+      }
     }
     const allegroOk=typeof allegroOdswiezDaneZSerweraJesliCzas==="function"?await allegroOdswiezDaneZSerweraJesliCzas(powod):false;
-    if(ok){
+    if(daneZmienione){
       zastosujUstawienia(); zbudujProdukty();
       odswiezMenu(); odswiezKoszyk();
       odswiezPoCichejSynchronizacji();
@@ -4069,6 +4112,7 @@ async function automatycznaSynchronizacjaChmury(powod="timer"){
 }
 function uruchomAutoSynchronizacjeChmury(){
   if(chmuraTimerAutoSync) clearInterval(chmuraTimerAutoSync);
+  chmuraAutoSyncOstatniStart=Date.now();
   chmuraTimerAutoSync=setInterval(()=>automatycznaSynchronizacjaChmury("timer"),CHMURA_AUTO_SYNC_MS);
   window.addEventListener("focus",()=>automatycznaSynchronizacjaChmury("focus"));
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) automatycznaSynchronizacjaChmury("visible"); });
@@ -4439,7 +4483,7 @@ function panelZlecenWysylkowych(){
         <option value="wszystkie" ${filtrWysylek==="wszystkie"?"selected":""}>Cała historia</option>
         ${Object.entries(ETAPY_WYSYLKI).map(([id,e])=>`<option value="${id}" ${filtrWysylek===id?"selected":""}>${e.ikona} ${e.nazwa}</option>`).join("")}
       </select>
-      <input placeholder="Szukaj: zlecenie, klient, tracking, operator…" value="${esc(szukajWysylek)}" oninput="szukajWysylek=this.value.toLowerCase();renderuj()" style="flex:1;min-width:210px;padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
+      <input placeholder="Szukaj: zlecenie, klient, tracking, operator…" value="${esc(szukajWysylek)}" oninput="szukajWysylek=this.value.toLowerCase();zaplanujRenderPoWpisaniu()" style="flex:1;min-width:210px;padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
       <button class="btn ghost" onclick="zastosujRegulyWysylek()">⚡ Zastosuj reguły</button>
     </div>`,actions:adminOperacjeWynikowHTML({id:"shipping-orders",selected:zaznaczoneNadania.size,pageCount:lista.length,resultCount:lista.length,selectPage:"zaznaczWszystkieNadania(true)",selectAll:"zaznaczWszystkieNadania(true)",clear:"wysylkiWyczyscZaznaczenie()",exportSelected:"wysylkiEksportujZakres('zaznaczone','tab')",exportAll:"wysylkiEksportujZakres('filtr','tab')",exportLabel:"TXT InPost"})})}
     <div style="border:2px solid #ffcc00;background:linear-gradient(180deg,#fffbeb,#fff);border-radius:14px;padding:.85rem 1rem;margin:.2rem 0 .9rem">

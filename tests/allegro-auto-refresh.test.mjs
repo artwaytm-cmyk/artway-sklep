@@ -6,7 +6,7 @@ const root=new URL("../",import.meta.url);
 const read=path=>readFile(new URL(path,root),"utf8");
 
 test("otwarty panel okresowo pobiera wyniki synchronizacji Allegro bez przerywania formularzy",async()=>{
-  const [allegro,cloud]=await Promise.all([read("src/frontend/11-allegro-and-orders.js"),read("src/frontend/07-admin-shipping.js")]);
+  const [allegro,cloud]=await Promise.all([read("src/frontend/11-allegro-refresh-runtime.js"),read("src/frontend/07-admin-shipping.js")]);
   assert.match(allegro,/ALLEGRO_ODSWIEZANIE_PANELU_MS=15\*60\*1000/);
   assert.match(allegro,/function allegroOdswiezDaneZSerweraJesliCzas/);
   assert.match(allegro,/allegroWczytajDane\(true,false\)/);

@@ -585,12 +585,13 @@ function polaczUzytkownikowCentralnych(serwerowi){
 async function synchronizujBazeCentralna(cicho=false){
   if(stanBazyCentralnej.synchronizacja) return false;
   if(!chmuraToken){ if(!cicho) chmuraUstawToken(); return false; }
+  chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=false;
   stanBazyCentralnej={...stanBazyCentralnej,synchronizacja:true};
   try{
     const d=await chmura("store-sync",{method:"POST",body:{orders:pobierzZamowienia(),users:pobierzUzytkownikow(),deleted_orders:zamowieniaUsuniete}});
     if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
-    zapiszLS("artway_zamowienia",Array.isArray(d.orders)?filtrujAktywneZamowienia(d.orders):[]);
-    zapiszLS("artway_uzytkownicy",polaczUzytkownikowCentralnych(d.users));
+    chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=zapiszLS("artway_zamowienia",Array.isArray(d.orders)?filtrujAktywneZamowienia(d.orders):[])||chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
+    chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=zapiszLS("artway_uzytkownicy",polaczUzytkownikowCentralnych(d.users))||chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
     stanBazyCentralnej={sprawdzono:true,online:true,synchronizacja:false,orders:d.orders?.length||0,users:d.users?.length||0,updatedAt:d.updated_at||null,error:""};
     chmuraStan={...chmuraStan,dostepna:true,admin:true,updated_at:d.updated_at||chmuraStan.updated_at};
     if(!cicho) toast(`Wspólna baza zsynchronizowana ✅ (${stanBazyCentralnej.orders} zamówień)`);
@@ -666,18 +667,28 @@ function odswiezPoCichejSynchronizacji(){
 async function automatycznaSynchronizacjaChmury(powod="timer"){
   if(chmuraAutoSyncBusy) return false;
   if(typeof document!=="undefined" && document.hidden && powod==="timer") return false;
+  const teraz=Date.now();
+  if(powod!=="timer"&&teraz-chmuraAutoSyncOstatniStart<CHMURA_FOCUS_SYNC_MIN_MS)return false;
+  chmuraAutoSyncOstatniStart=teraz;
   chmuraAutoSyncBusy=true;
   try{
-    let ok=false;
+    let ok=false,daneZmienione=false;
     if(chmuraToken){
       ok = await synchronizujBazeCentralna(true);
-      await chmuraWczytajStan();
+      daneZmienione=chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
+      ok = (await chmuraWczytajStan()) || ok;
+      daneZmienione=chmuraOstatniPullZmienilDane||daneZmienione;
     }else{
       ok = await chmuraWczytajStan();
-      if(sesja && !jestAdmin()) ok = (await pobierzMojeZamowieniaCentralne(true)) || ok;
+      daneZmienione=chmuraOstatniPullZmienilDane;
+      if(sesja && !jestAdmin()){
+        const przed=localStorage.getItem("artway_zamowienia");
+        ok = (await pobierzMojeZamowieniaCentralne(true)) || ok;
+        daneZmienione=przed!==localStorage.getItem("artway_zamowienia")||daneZmienione;
+      }
     }
     const allegroOk=typeof allegroOdswiezDaneZSerweraJesliCzas==="function"?await allegroOdswiezDaneZSerweraJesliCzas(powod):false;
-    if(ok){
+    if(daneZmienione){
       zastosujUstawienia(); zbudujProdukty();
       odswiezMenu(); odswiezKoszyk();
       odswiezPoCichejSynchronizacji();
@@ -690,6 +701,7 @@ async function automatycznaSynchronizacjaChmury(powod="timer"){
 }
 function uruchomAutoSynchronizacjeChmury(){
   if(chmuraTimerAutoSync) clearInterval(chmuraTimerAutoSync);
+  chmuraAutoSyncOstatniStart=Date.now();
   chmuraTimerAutoSync=setInterval(()=>automatycznaSynchronizacjaChmury("timer"),CHMURA_AUTO_SYNC_MS);
   window.addEventListener("focus",()=>automatycznaSynchronizacjaChmury("focus"));
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) automatycznaSynchronizacjaChmury("visible"); });
@@ -1060,7 +1072,7 @@ function panelZlecenWysylkowych(){
         <option value="wszystkie" ${filtrWysylek==="wszystkie"?"selected":""}>Cała historia</option>
         ${Object.entries(ETAPY_WYSYLKI).map(([id,e])=>`<option value="${id}" ${filtrWysylek===id?"selected":""}>${e.ikona} ${e.nazwa}</option>`).join("")}
       </select>
-      <input placeholder="Szukaj: zlecenie, klient, tracking, operator…" value="${esc(szukajWysylek)}" oninput="szukajWysylek=this.value.toLowerCase();renderuj()" style="flex:1;min-width:210px;padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
+      <input placeholder="Szukaj: zlecenie, klient, tracking, operator…" value="${esc(szukajWysylek)}" oninput="szukajWysylek=this.value.toLowerCase();zaplanujRenderPoWpisaniu()" style="flex:1;min-width:210px;padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
       <button class="btn ghost" onclick="zastosujRegulyWysylek()">⚡ Zastosuj reguły</button>
     </div>`,actions:adminOperacjeWynikowHTML({id:"shipping-orders",selected:zaznaczoneNadania.size,pageCount:lista.length,resultCount:lista.length,selectPage:"zaznaczWszystkieNadania(true)",selectAll:"zaznaczWszystkieNadania(true)",clear:"wysylkiWyczyscZaznaczenie()",exportSelected:"wysylkiEksportujZakres('zaznaczone','tab')",exportAll:"wysylkiEksportujZakres('filtr','tab')",exportLabel:"TXT InPost"})})}
     <div style="border:2px solid #ffcc00;background:linear-gradient(180deg,#fffbeb,#fff);border-radius:14px;padding:.85rem 1rem;margin:.2rem 0 .9rem">
