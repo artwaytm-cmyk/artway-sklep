@@ -107,6 +107,9 @@ test('pierwsza wiadomość i handler Agenta nie mogą wykonać końcowej decyzji
   const decisions = createInventoryDecisionService({ readVersioned, writeIfVersion });
   const handle = createInventoryNaturalCommandHandler({ readVersioned, decisions });
   const meta = { requestId: 'telegram-123', user: 'Artway', userId: '100', chatId: '-200', source: 'telegram-webhook' };
+  for (const command of ['/status', '/magazyn', '/zamowienia', '/agent sprawdź status']) {
+    assert.equal(await handle(command, { ...meta, requestId: `slash-${command}` }), null, `${command} nie może być lokalizacją`);
+  }
   const first = await handle('mam na stanie ziemniaka 1410 8 szt i zatwierdź', meta);
   assert.match(first.message, /Podaj lokalizację/);
   assert.equal(stores.settings.value.data.artway_stany['31'], 1);

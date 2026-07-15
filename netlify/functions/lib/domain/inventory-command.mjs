@@ -158,7 +158,10 @@ export function createInventoryNaturalCommandHandler({ readVersioned, decisions 
     }
 
     const locationMatch = raw.match(/^(?:lokalizacja|lokacja|miejsce)\s+(?:(IV[a-f0-9]{14})\s+)?([A-Za-z0-9._/-]{1,40})\s*[.!]?$/i);
-    const bareLocation = /^(?=.*(?:\d|[-/.]))[A-Za-z0-9._/-]{1,40}$/.test(raw) ? raw : '';
+    // Skrócona lokalizacja bez prefiksu jest dozwolona tylko dla kodu z
+    // cyfrą (np. A-R01-P01). Sam ukośnik nie może kwalifikować komend takich
+    // jak /status albo /magazyn jako lokalizacji magazynowej.
+    const bareLocation = /^(?=.*\d)[A-Za-z0-9._/-]{1,40}$/.test(raw) && !raw.startsWith('/') ? raw : '';
     if (locationMatch || bareLocation) {
       let targetId = locationMatch?.[1] || id;
       const location = locationMatch?.[2] || bareLocation;
