@@ -1,14 +1,63 @@
 const asText = (value = '', limit = 20_000) => String(value ?? '').slice(0, limit).trim();
 
-function authorType(message = {}) {
+export function classifyAllegroMessageAuthor(message = {}) {
   const explicit = String(message.authorType || '').toLowerCase();
-  const role = String(message.role || '').toUpperCase();
-  const login = String(message.authorLogin || '').toLowerCase();
-  if (['buyer', 'seller', 'allegro'].includes(explicit)) return explicit;
-  if (message.system === true || ['ADMIN', 'ALLEGRO', 'SYSTEM', 'MODERATOR'].includes(role) || /^(allegro|administrator|admin|system|moderator)([-_. ]|$)/i.test(login)) return 'allegro';
-  if (role === 'BUYER' || message.incoming === true) return 'buyer';
-  if (role === 'SELLER' || message.seller === true || message.incoming === false) return 'seller';
+  const role = String(message.role || message.author?.role || message.author?.type || '').trim().toUpperCase();
+  const login = String(message.authorLogin || message.author?.login || message.author?.id || '').trim().toLowerCase();
+  const hasInterlocutorFlag = typeof message.author?.isInterlocutor === 'boolean' || typeof message.isInterlocutor === 'boolean';
+  const isInterlocutor = typeof message.author?.isInterlocutor === 'boolean'
+    ? message.author.isInterlocutor
+    : message.isInterlocutor;
+
+  // Pola źródłowe API mają pierwszeństwo przed zapisanym wcześniej authorType.
+  // Dzięki temu stary, błędnie sklasyfikowany cache naprawia się przy kolejnym scaleniu.
+  if (role === 'BUYER') return 'buyer';
+  if (role === 'SELLER') return 'seller';
+  if (['ADMIN', 'ALLEGRO', 'SYSTEM', 'MODERATOR', 'FULFILLMENT'].includes(role)) return 'allegro';
+  // Centrum Wiadomości nie zwraca roli, lecz author.isInterlocutor.
+  if (hasInterlocutorFlag) return isInterlocutor ? 'buyer' : 'seller';
+  if (message.system === true) return 'allegro';
+  if (explicit === 'buyer' || explicit === 'seller') return explicit;
+  if (message.incoming === true) return 'buyer';
+  if (message.seller === true || message.incoming === false) return 'seller';
+  if (explicit === 'allegro') return 'allegro';
+  if (/^(administrator|admin|system|moderator|fulfillment)([-_. ]|$)/i.test(login)) return 'allegro';
   return 'allegro';
+}
+
+export function allegroMessagePlainText(value = '') {
+  return asText(value)
+    .replace(/<\s*br\s*\/?\s*>/giu, '\n')
+    .replace(/<\s*\/\s*(?:p|div|li)\s*>/giu, '\n')
+    .replace(/<[^>]+>/gu, ' ')
+    .replace(/&nbsp;|&#160;/giu, ' ')
+    .replace(/&amp;/giu, '&')
+    .replace(/&quot;/giu, '"')
+    .replace(/&#39;|&apos;/giu, "'")
+    .replace(/&lt;/giu, '<')
+    .replace(/&gt;/giu, '>')
+    .replace(/&oacute;/g, 'ó').replace(/&Oacute;/g, 'Ó')
+    .replace(/&aogon;/g, 'ą').replace(/&Aogon;/g, 'Ą')
+    .replace(/&cacute;/g, 'ć').replace(/&Cacute;/g, 'Ć')
+    .replace(/&eogon;/g, 'ę').replace(/&Eogon;/g, 'Ę')
+    .replace(/&lstrok;/g, 'ł').replace(/&Lstrok;/g, 'Ł')
+    .replace(/&nacute;/g, 'ń').replace(/&Nacute;/g, 'Ń')
+    .replace(/&sacute;/g, 'ś').replace(/&Sacute;/g, 'Ś')
+    .replace(/&zacute;/g, 'ź').replace(/&Zacute;/g, 'Ź')
+    .replace(/&zdot;/g, 'ż').replace(/&Zdot;/g, 'Ż')
+    .replace(/&ndash;/giu, '–').replace(/&mdash;/giu, '—')
+    .replace(/&#(\d{1,7});/gu, (_, number) => {
+      const code = Number(number);
+      return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
+    })
+    .replace(/&#x([0-9a-f]{1,6});/giu, (_, number) => {
+      const code = Number.parseInt(number, 16);
+      return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
+    })
+    .replace(/[ \t]+/gu, ' ')
+    .replace(/[ \t]*\n[ \t]*/gu, '\n')
+    .replace(/\n{3,}/gu, '\n\n')
+    .trim();
 }
 
 function uniqueMessages(item = {}) {
@@ -25,7 +74,7 @@ function uniqueMessages(item = {}) {
 }
 
 export function allegroReplyMessageKey(message = {}) {
-  return asText(message?.id || `${message?.createdAt || message?.created_at || ''}:${authorType(message)}:${message?.authorLogin || ''}:${message?.text || message?.body || ''}`, 5_000);
+  return asText(message?.id || `${message?.createdAt || message?.created_at || ''}:${classifyAllegroMessageAuthor(message)}:${message?.authorLogin || ''}:${message?.text || message?.body || ''}`, 5_000);
 }
 
 export function mergeAllegroReplyHistory(...sources) {
@@ -33,7 +82,7 @@ export function mergeAllegroReplyHistory(...sources) {
   for (const source of sources) {
     for (const raw of (Array.isArray(source) ? source : [])) {
       if (!raw || typeof raw !== 'object') continue;
-      const message = { ...raw, text: asText(raw.text || raw.body || '', 3_000), authorType: authorType(raw) };
+      const message = { ...raw, text: allegroMessagePlainText(raw.text || raw.body || '').slice(0, 3_000), authorType: classifyAllegroMessageAuthor(raw) };
       const key = allegroReplyMessageKey(message);
       if (!key) continue;
       byKey.set(key, byKey.has(key) ? { ...byKey.get(key), ...message } : message);
@@ -76,16 +125,17 @@ export async function fetchAllegroReplyHistory({ call, type = 'thread', id = '',
 
 export function analyzeAllegroConversation(item = {}, relatedItems = [], currentOrderId = '') {
   const messages = uniqueMessages(item);
-  const buyer = messages.filter((message) => authorType(message) === 'buyer');
-  const seller = messages.filter((message) => authorType(message) === 'seller');
-  const system = messages.filter((message) => authorType(message) === 'allegro');
-  const lastSellerIndex = messages.reduce((last, message, index) => authorType(message) === 'seller' ? index : last, -1);
-  const unansweredBuyer = messages.slice(lastSellerIndex + 1).filter((message) => authorType(message) === 'buyer');
+  const buyer = messages.filter((message) => classifyAllegroMessageAuthor(message) === 'buyer');
+  const seller = messages.filter((message) => classifyAllegroMessageAuthor(message) === 'seller');
+  const system = messages.filter((message) => classifyAllegroMessageAuthor(message) === 'allegro');
+  const lastSellerIndex = messages.reduce((last, message, index) => classifyAllegroMessageAuthor(message) === 'seller' ? index : last, -1);
+  const unansweredBuyer = messages.slice(lastSellerIndex + 1).filter((message) => classifyAllegroMessageAuthor(message) === 'buyer');
   const relevantBuyer = unansweredBuyer.length ? unansweredBuyer : buyer.slice(-1);
   const buyerText = relevantBuyer.map((message) => asText(message.text, 8_000)).join('\n').toLowerCase();
   const sellerText = seller.map((message) => asText(message.text, 8_000)).join('\n').toLowerCase();
-  const latestBuyer = buyer.at(-1) || item.latestNewIncoming || item.lastMessage || {};
-  const latestBuyerText = asText(latestBuyer.text || item.subject, 8_000).toLowerCase();
+  const cachedIncoming = classifyAllegroMessageAuthor(item.latestNewIncoming || {}) === 'buyer' ? item.latestNewIncoming : null;
+  const latestBuyer = buyer.at(-1) || cachedIncoming || {};
+  const latestBuyerText = asText(latestBuyer.text || '', 8_000).toLowerCase();
   const wantsRefund = /(?:prosz|chc|oczek|żąda|zwrot).{0,45}(?:zwrot|pieni|środk)|zwrot.{0,45}(?:pieni|środk)/i.test(buyerText);
   const rejectsReshipment = /(?:nie chc|proszę nie|bez).{0,45}(?:ponown|kolejn|żadn).{0,30}(?:wysył|przesył|pacz)|nie chc.{0,45}(?:wysył|przesył|pacz)/i.test(buyerText);
   const reportsMissingParcel = /(?:nie (?:dosta|otrzyma|widz)|brak).{0,45}(?:pacz|przesył)|pacz.{0,45}(?:nie dotar|nie było|brak)/i.test(buyerText);
@@ -94,7 +144,7 @@ export function analyzeAllegroConversation(item = {}, relatedItems = [], current
   const relatedConversations = (Array.isArray(relatedItems) ? relatedItems : [])
     .filter((related) => related && String(related.id || '') !== String(item.id || ''))
     .map((related) => {
-      const relatedMessages = uniqueMessages(related), relatedBuyer = relatedMessages.filter((message) => authorType(message) === 'buyer');
+      const relatedMessages = uniqueMessages(related), relatedBuyer = relatedMessages.filter((message) => classifyAllegroMessageAuthor(message) === 'buyer');
       const orderId = asText(related.orderId || related.lastMessage?.orderId || relatedMessages.find((message) => message?.orderId)?.orderId || '', 120);
       return {
         type: related.communicationType === 'issue' || related.type === 'issue' ? 'issue' : 'thread',
@@ -111,6 +161,7 @@ export function analyzeAllegroConversation(item = {}, relatedItems = [], current
     messages,
     messageCount: messages.length,
     buyerMessageCount: buyer.length,
+    hasBuyerMessage: buyer.length > 0 || !!cachedIncoming,
     sellerMessageCount: seller.length,
     systemMessageCount: system.length,
     unansweredBuyerCount: unansweredBuyer.length,
@@ -127,14 +178,68 @@ function capitalizeSentences(value = '') {
   return value.replace(/(^|[.!?]\s+|\n\s*)([a-ząćęłńóśźż])/gu, (_, lead, letter) => `${lead}${letter.toLocaleUpperCase('pl-PL')}`);
 }
 
-export function improvePolishReplyStyle(draft = '') {
+function mostCommon(values = [], fallback = '') {
+  const count = new Map();
+  for (const value of values.filter(Boolean)) count.set(value, (count.get(value) || 0) + 1);
+  return [...count.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || fallback;
+}
+
+export function buildAllegroReplyStyleProfile(examples = []) {
+  const clean = (Array.isArray(examples) ? examples : [])
+    .map((value) => allegroMessagePlainText(value))
+    .filter((value) => value.length >= 18 && !/zgłoszenie trafiło do obsługi Artway-TM[\s\S]*odpowiemy możliwie jak najszybciej/iu.test(value))
+    .slice(-30);
+  const greetings = clean.map((value) => value.match(/^\s*(Dzień dobry|Szanowni Państwo|Witam)[^\n,.!?]*[,.!]?/iu)?.[1]).filter(Boolean);
+  const closings = clean.map((value) => {
+    if (/Pozdrawiamy serdecznie/iu.test(value)) return 'Pozdrawiamy serdecznie,';
+    if (/Z poważaniem/iu.test(value)) return 'Z poważaniem,';
+    if (/Pozdrawiamy/iu.test(value)) return 'Pozdrawiamy,';
+    if (/Pozdrawiam/iu.test(value)) return 'Pozdrawiamy,';
+    return '';
+  }).filter(Boolean);
+  return {
+    exampleCount: clean.length,
+    greeting: mostCommon(greetings, 'Dzień dobry'),
+    closing: mostCommon(closings, 'Pozdrawiamy serdecznie,'),
+    formalAddress: clean.some((value) => /Państw(?:a|u|em|o)/u.test(value)),
+    averageLength: clean.length ? Math.round(clean.reduce((sum, value) => sum + value.length, 0) / clean.length) : 0,
+    learnedFrom: clean.length ? 'manual-seller-replies' : 'professional-default',
+  };
+}
+
+function splitProfessionalParagraphs(value = '') {
+  const rawParagraphs = value.split(/\n{2,}/u).map((part) => part.trim()).filter(Boolean);
+  const output = [];
+  for (const paragraph of rawParagraphs) {
+    if (/^(?:Dzień dobry|Szanowni Państwo|Witam)[^\n]*[,.!]?$/iu.test(paragraph) || /^(?:Pozdrawiam|Pozdrawiamy|Z poważaniem)/iu.test(paragraph)) {
+      output.push(paragraph);
+      continue;
+    }
+    const sentences = paragraph.split(/(?<=[.!?])\s+(?=[A-ZĄĆĘŁŃÓŚŹŻ])/u).filter(Boolean);
+    if (paragraph.length < 260 || sentences.length < 3) output.push(paragraph);
+    else for (let index = 0; index < sentences.length; index += 2) output.push(sentences.slice(index, index + 2).join(' '));
+  }
+  return output.join('\n\n');
+}
+
+export function improvePolishReplyStyle(draft = '', options = {}) {
   let value = asText(draft);
   if (!value) return '';
+  const profile = options?.styleProfile && typeof options.styleProfile === 'object' ? options.styleProfile : {};
   const corrections = [
     [/\bprzepraszamy\s+za\s+zaistniało\b/giu, 'przepraszamy za zaistniałą'],
     [/\bzaistniałą\s+sytuacje\b/giu, 'zaistniałą sytuację'],
-    [/\bnie\s+mamy\s+wpływ\s+za\s+dostawę\b/giu, 'nie mamy wpływu na przebieg dostawy'],
-    [/\bnie\s+mamy\s+wpływ\b/giu, 'nie mamy wpływu'],
+    [/\bza\s+tak[aą]\s+sytuacj[aeę]\b/giu, 'za tę sytuację'],
+    [/\bnie\s+mamy\s+wpływ(?:u)?\s+za\s+dostawę/giu, 'nie mamy bezpośredniego wpływu na przebieg doręczenia'],
+    [/\bprzesyłka\s+została\s+od\s+nas\s+wysłana\b/giu, 'przesyłka została przez nas nadana'],
+    [/\bnapewno\b/giu, 'na pewno'],
+    [/\bjuz\b/giu, 'już'],
+    [/\btalko\b/giu, 'tylko'],
+    [/\bpowina\b/giu, 'powinna'],
+    [/\bzostala\b/giu, 'została'],
+    [/\bzostal\b/giu, 'został'],
+    [/\bpaństwa\s+decyzje\b/giu, 'Państwa decyzję'],
+    [/\bczekamy\s+(?:tylko\s+)?na\s+Państwa\s+decyzję\b/giu, 'prosimy o informację, które rozwiązanie Państwo wybierają'],
     [/\brekpesat[ayę]\b/giu, 'rekompensaty'],
     [/\brekompesat[ayę]\b/giu, 'rekompensaty'],
     [/\bmały\s+gratis\b/giu, 'drobny upominek'],
@@ -157,7 +262,27 @@ export function improvePolishReplyStyle(draft = '') {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   value = capitalizeSentences(value);
-  value = value.replace(/(^|\n)(Pozdrawiamy serdecznie)(?![,.!])/giu, '$1$2,');
+  value = value
+    .replace(/(?:Jeszcze\s+raz\s+)?bardzo\s+przepraszamy\s+za\s+(?:zaistniałą|tę)\s+sytuację\s*,?\s*(?:ale|jednak)\s+/giu, 'Bardzo przepraszamy za zaistniałą sytuację. ')
+    .replace(/\bprzesyłka została przez nas nadana\s+(?:a|ale)\s+nie mamy bezpośredniego wpływu/giu, 'Przesyłka została przez nas nadana, jednak nie mamy bezpośredniego wpływu')
+    .replace(/(^|[.!?]\s+)Ale\s+(?=w ramach|prosimy|dziękujemy)/gu, '$1')
+    .replace(/,\s*(?=(?:zwrot|reklamacja|zamówienie|przesyłka)\b)/giu, '. ')
+    .replace(/\b(Bardzo\s+)?przepraszamy\s+za\s+(?:tę|zaistniałą)\s+sytuację(?:\s+oraz\s+wszelkie\s+niedogodności)?\.?\s+(?:Bardzo\s+)?przepraszamy[^.!?]*[.!?]?/giu, 'Bardzo przepraszamy za tę sytuację i związane z nią niedogodności.')
+    .replace(/(^|\n)(Pozdrawiamy serdecznie|Pozdrawiamy|Z poważaniem)(?![,.!])/giu, '$1$2,');
+  value = capitalizeSentences(value);
+  value = splitProfessionalParagraphs(value);
+  value = value.split(/\n{2,}/u).map((paragraph) => {
+    const trimmed = paragraph.trim();
+    if (!trimmed || /^(?:Dzień dobry|Szanowni Państwo|Witam)[,.!]?$/iu.test(trimmed) || /^(?:Pozdrawiam|Pozdrawiamy|Z poważaniem|Artway-TM)/iu.test(trimmed)) return trimmed;
+    return /[.!?]$/u.test(trimmed) ? trimmed : `${trimmed}.`;
+  }).filter(Boolean).join('\n\n');
+  if (options?.ensureReplyFrame) {
+    const greeting = String(profile.greeting || 'Dzień dobry').replace(/[,.!]+$/u, '');
+    const closing = String(profile.closing || 'Pozdrawiamy serdecznie,').replace(/[.!]+$/u, ',');
+    if (!/^(?:Dzień dobry|Szanowni Państwo|Witam)\b/iu.test(value)) value = `${greeting},\n\n${value}`;
+    if (!/(?:Pozdrawiam|Z poważaniem)[\s\S]{0,80}(?:Artway-TM)?\s*$/iu.test(value)) value = `${value}\n\n${closing}\nArtway-TM`;
+    else if (!/Artway-TM\s*$/iu.test(value)) value = `${value}\nArtway-TM`;
+  }
   return value.slice(0, 20_000);
 }
 
@@ -188,12 +313,11 @@ function baseVerifiedAnswer(context = {}, latestIncoming = '') {
   return `Zamówienie ${context.orderId} ma obecnie w Allegro status „${context.statusLabel || context.status}”.`;
 }
 
-export function buildContextualAllegroReply({ type = 'thread', item = {}, context = {}, draft = '', relatedItems = [] } = {}) {
+export function buildContextualAllegroReply({ type = 'thread', item = {}, context = {}, draft = '', relatedItems = [], styleProfile = {} } = {}) {
   const conversation = analyzeAllegroConversation(item, relatedItems, context.orderId);
   const intents = conversation.intents;
   const styledDraft = improvePolishReplyStyle(draft);
   const draftLower = styledDraft.toLowerCase();
-  const buyer = asText(item.buyerLogin || 'Kliencie', 120);
   const paragraphs = [];
   const sensitive = intents.wantsRefund || intents.rejectsReshipment || intents.reportsMissingParcel || intents.reportsReturnedParcel;
   if (sensitive) paragraphs.push('Bardzo przepraszamy za zaistniałą sytuację i związane z nią niedogodności.');
@@ -221,7 +345,7 @@ export function buildContextualAllegroReply({ type = 'thread', item = {}, contex
   if (type === 'issue') paragraphs.push('Dalszą obsługę będziemy prowadzić w tej dyskusji, aby cała historia sprawy pozostała w jednym miejscu.');
   const body = [...new Set(paragraphs.map((paragraph) => improvePolishReplyStyle(paragraph)).filter(Boolean))].join('\n\n');
   return {
-    suggestion: `Dzień dobry ${buyer},\n\n${body}\n\nPozdrawiamy serdecznie,\nArtway-TM`.slice(0, 20_000),
+    suggestion: improvePolishReplyStyle(`Dzień dobry,\n\n${body}\n\n${styleProfile.closing || 'Pozdrawiamy serdecznie,'}\nArtway-TM`, { styleProfile }).slice(0, 20_000),
     conversation: {
       messageCount: conversation.messageCount,
       buyerMessageCount: conversation.buyerMessageCount,
@@ -235,6 +359,7 @@ export function buildContextualAllegroReply({ type = 'thread', item = {}, contex
       warnings: refundClaimInDraft && !refundConfirmed ? ['Szkic zawierał niepotwierdzoną informację o wykonaniu lub zleceniu zwrotu. Agent usunął ją z odpowiedzi; status zwrotu musi pochodzić z danych płatności.'] : [],
       unverifiedRefundClaimRemoved: refundClaimInDraft && !refundConfirmed,
       contradictoryReshipmentRemoved: intents.rejectsReshipment && (intents.sellerOfferedReshipment || /gratis|upominek|ponown.{0,20}wysył|wyślemy.{0,20}pacz/i.test(draftLower)),
+      styleProfile: { exampleCount: Number(styleProfile.exampleCount || 0), learnedFrom: styleProfile.learnedFrom || 'professional-default', averageLength: Number(styleProfile.averageLength || 0) },
     },
   };
 }

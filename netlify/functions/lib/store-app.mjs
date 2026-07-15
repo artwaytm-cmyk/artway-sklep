@@ -44,7 +44,10 @@ import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
 import { createSupplierOrderPlanService, preserveSupplierPlanOnGenericSettings } from './supplier-order-plan-service.mjs';
 import {
+  allegroMessagePlainText,
+  buildAllegroReplyStyleProfile,
   buildContextualAllegroReply,
+  classifyAllegroMessageAuthor,
   fetchAllegroReplyHistory,
   improvePolishReplyStyle,
   mergeAllegroReplyHistory,
@@ -3691,17 +3694,7 @@ function allegroUstawieniaKomunikacji(raw = {}) {
   };
 }
 function allegroTypAutoraWiadomosci(m = {}) {
-  const explicit = String(m.authorType || '').toLowerCase();
-  if (['buyer', 'seller', 'allegro'].includes(explicit)) return explicit;
-  const role = String(m.role || m.author?.role || m.author?.type || '').toUpperCase();
-  const login = String(m.authorLogin || m.author?.login || m.author?.id || '').trim().toLowerCase();
-  if (m.system === true || ['ADMIN', 'ALLEGRO', 'SYSTEM', 'MODERATOR'].includes(role) || /^(allegro|administrator|admin|system|moderator)([-_. ]|$)/i.test(login)) return 'allegro';
-  if (role === 'BUYER' || m.author?.isInterlocutor === true || m.incoming === true) return 'buyer';
-  if (role === 'SELLER' || m.author?.isInterlocutor === false || m.seller === true) return 'seller';
-  // Zgodność ze starszym cache: wcześniej każda wiadomość nieprzychodząca była zapisywana jako sprzedawca.
-  if (Object.prototype.hasOwnProperty.call(m, 'incoming') && m.incoming === false) return 'seller';
-  // Nieznany autor nigdy nie może uruchomić automatycznej odpowiedzi ani alertu dla obsługi.
-  return 'allegro';
+  return classifyAllegroMessageAuthor(m);
 }
 function allegroCzyWiadomoscKlienta(m = {}) { return allegroTypAutoraWiadomosci(m) === 'buyer'; }
 function allegroCzyWiadomoscSprzedawcy(m = {}) { return allegroTypAutoraWiadomosci(m) === 'seller'; }
@@ -3710,15 +3703,17 @@ function allegroNormalizujWiadomosc(m = {}, fallbackThreadId = '') {
   return {
     id: tekst(m.id, 120),
     threadId: tekst(m.thread?.id || fallbackThreadId, 120),
-    text: tekst(m.text || m.body || '', 3000),
+    text: tekst(allegroMessagePlainText(m.text || m.body || ''), 3000),
     subject: tekst(m.subject || '', 300),
     createdAt: tekst(m.createdAt || m.created_at || '', 80),
     authorLogin: tekst(m.author?.login || m.author?.id || '', 200),
     role: tekst(m.author?.role || m.author?.type || '', 40).toUpperCase(),
+    isInterlocutor: typeof m.author?.isInterlocutor === 'boolean' ? m.author.isInterlocutor : undefined,
     authorType,
     incoming: authorType === 'buyer',
     seller: authorType === 'seller',
     system: authorType === 'allegro',
+    source: authorType === 'buyer' ? 'customer' : authorType === 'seller' ? 'artway' : 'allegro',
     status: tekst(m.status || '', 80),
     offerId: tekst(m.relatesTo?.offer?.id || '', 100),
     orderId: tekst(m.relatesTo?.order?.id || '', 120),
@@ -3747,7 +3742,7 @@ function allegroNormalizujIssueChatMessage(m = {}, fallbackIssueId = '') {
   return {
     id: tekst(m.id, 120),
     issueId: tekst(fallbackIssueId, 120),
-    text: tekst(m.text || '', 3000),
+    text: tekst(allegroMessagePlainText(m.text || ''), 3000),
     createdAt: tekst(m.createdAt || '', 80),
     authorLogin: tekst(m.author?.login || '', 200),
     role,
@@ -3755,6 +3750,7 @@ function allegroNormalizujIssueChatMessage(m = {}, fallbackIssueId = '') {
     incoming: authorType === 'buyer',
     seller: authorType === 'seller',
     system: authorType === 'allegro',
+    source: authorType === 'buyer' ? 'customer' : authorType === 'seller' ? 'artway' : 'allegro',
     attachments: Array.isArray(m.attachments) ? m.attachments : [],
   };
 }
@@ -4000,9 +3996,10 @@ function allegroZnajdzZamowienieKomunikacji(item = {}, orders = []) {
   if (inText) return { orderId: String(inText.id || inText.nr), order: inText, match: 'order_id_in_message', candidates: [String(inText.id || inText.nr)] };
   const login = String(item.buyerLogin || '').trim().toLowerCase();
   const buyerOrders = login ? list.filter((x) => String(x?.buyerLogin || '').trim().toLowerCase() === login).sort((a, b) => String(b.createdAt || b.firstFetchedAt || '').localeCompare(String(a.createdAt || a.firstFetchedAt || ''))) : [];
-  const active = buyerOrders.filter((x) => !['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(allegroStatusKolejkiZamowienia(x, {})));
-  const selected = active.length === 1 ? active[0] : buyerOrders.length === 1 ? buyerOrders[0] : null;
-  return { orderId: selected ? String(selected.id || selected.nr) : '', order: selected, match: selected ? 'unique_buyer_order' : '', candidates: buyerOrders.slice(0, 5).map((x) => String(x.id || x.nr)) };
+  // Sam login kupującego nie jest bezpiecznym kluczem powiązania — ta sama osoba może mieć
+  // kilka zamówień i kilka niezależnych wątków. Pokazujemy kandydatów, ale nie podstawiamy
+  // danych zamówienia bez identyfikatora z API lub numeru obecnego w treści rozmowy.
+  return { orderId: '', order: null, match: '', candidates: buyerOrders.slice(0, 5).map((x) => String(x.id || x.nr)) };
 }
 function allegroStatusZamowieniaOpis(status = '') {
   return ({ NEW: 'nowe', PROCESSING: 'w realizacji', READY_FOR_SHIPMENT: 'gotowe do wysyłki', READY_FOR_PICKUP: 'gotowe do odbioru', SENT: 'wysłane', PICKED_UP: 'odebrane', CANCELLED: 'anulowane', SUSPENDED: 'wstrzymane', RETURNED: 'zwrócone' })[String(status || '').toUpperCase()] || String(status || 'brak statusu').toLowerCase();
@@ -4082,6 +4079,30 @@ function allegroPoprzednieSprawyKlienta(comm = {}, currentType = 'thread', curre
     ...(Array.isArray(comm.threads) ? comm.threads : []).map((item) => ({ ...item, communicationType: 'thread' })),
     ...(Array.isArray(comm.issues) ? comm.issues : []).map((item) => ({ ...item, communicationType: 'issue' })),
   ].filter((item) => String(item.buyerLogin || '').trim().toLowerCase() === login && !(item.communicationType === currentType && String(item.id || '') === String(currentItem.id || '')));
+}
+function allegroWzorceStyluOdpowiedzi(comm = {}, memory = {}) {
+  const stored = Array.isArray(memory.items) ? memory.items : [];
+  const live = [
+    ...(Array.isArray(comm.threads) ? comm.threads : []),
+    ...(Array.isArray(comm.issues) ? comm.issues : []),
+  ].flatMap((item) => Array.isArray(item.messages) ? item.messages : [])
+    .filter(allegroCzyWiadomoscSprzedawcy)
+    .map((message) => ({ text: message.text, at: message.createdAt || '' }));
+  const examples = [...stored, ...live]
+    .filter((entry) => entry && typeof entry === 'object')
+    .sort((a, b) => String(a.at || a.sentAt || '').localeCompare(String(b.at || b.sentAt || '')))
+    .map((entry) => tekst(entry.normalizedText || entry.text || '', 20_000).trim())
+    .filter(Boolean)
+    .slice(-30);
+  return { examples, profile: buildAllegroReplyStyleProfile(examples) };
+}
+async function allegroZapamietajStylRecznejOdpowiedzi({ type = 'thread', id = '', text = '', messageId = '' } = {}) {
+  const rec = await czytaj('allegro_reply_style_memory', { items: [], updated_at: null });
+  const items = Array.isArray(rec.items) ? [...rec.items] : [];
+  const normalizedText = improvePolishReplyStyle(text, { ensureReplyFrame: true });
+  items.push({ id: crypto.randomUUID(), type, conversationId: id, messageId, text: tekst(text, 20_000), normalizedText, sentAt: new Date().toISOString(), source: 'manual-seller-reply' });
+  await zapisz('allegro_reply_style_memory', { items: items.slice(-200), updated_at: new Date().toISOString() });
+  return buildAllegroReplyStyleProfile(items.map((item) => item.normalizedText || item.text));
 }
 async function allegroWyslijPrzypomnieniaTelegram(data = {}, settings = {}) {
   const s = allegroUstawieniaKomunikacji(settings);
@@ -5811,19 +5832,26 @@ export default async (req) => {
       const id = tekst(body.id, 120).trim();
       const mode = body.mode === 'style' ? 'style' : (body.mode === 'improve' ? 'improve' : 'context');
       const draft = tekst(body.draft, 20000).trim();
-      const [comm, ordersRec, storeOrdersRec] = await Promise.all([czytaj('allegro_communications', { threads: [], issues: [] }), czytaj('allegro_orders', { items: [] }), czytaj('orders', { items: [] })]);
+      const [comm, ordersRec, storeOrdersRec, styleMemory] = await Promise.all([
+        czytaj('allegro_communications', { threads: [], issues: [] }),
+        czytaj('allegro_orders', { items: [] }),
+        czytaj('orders', { items: [] }),
+        czytaj('allegro_reply_style_memory', { items: [], updated_at: null }),
+      ]);
       const list = type === 'issue' ? comm.issues : comm.threads;
       const item = (Array.isArray(list) ? list : []).find((x) => String(x?.id) === id);
       if (!item) return odpowiedz({ ok: false, error: 'Nie znaleziono rozmowy Allegro', code: 'not_found' }, 404);
+      const learnedStyle = allegroWzorceStyluOdpowiedzi(comm, styleMemory);
       if (mode === 'style') {
         if (!draft) return odpowiedz({ ok: false, error: 'Najpierw wpisz treść, którą Agent ma poprawić stylistycznie', code: 'validation' }, 422);
-        return odpowiedz({ ok: true, type, id, mode, suggestion: improvePolishReplyStyle(draft), context: { mode, verifiedAt: new Date().toISOString(), draftOnly: true }, sentExternally: false });
+        return odpowiedz({ ok: true, type, id, mode, suggestion: improvePolishReplyStyle(draft, { ensureReplyFrame: true, styleProfile: learnedStyle.profile }), context: { mode, verifiedAt: new Date().toISOString(), draftOnly: true, styleProfile: learnedStyle.profile }, sentExternally: false });
       }
       const full = await allegroPelnaSprawaDoOdpowiedzi(req, type, item);
+      if (!allegroNajnowszaWiadomoscKlienta(full.item)) return odpowiedz({ ok: false, error: 'Ta sprawa zawiera wyłącznie komunikaty Allegro — nie ma wiadomości klienta, na którą można przygotować odpowiedź.', code: 'no_customer_message', sentExternally: false }, 422);
       const relatedItems = allegroPoprzednieSprawyKlienta(comm, type, full.item);
       const checked = await allegroSprawdzKontekstOdpowiedzi(req, full.item, ordersRec.items, storeOrdersRec.items);
-      const prepared = buildContextualAllegroReply({ type, item: full.item, context: checked.context, draft, relatedItems });
-      return odpowiedz({ ok: true, type, id, mode, suggestion: prepared.suggestion, conversation: prepared.conversation, context: { ...checked.context, mode, conversation: prepared.conversation, history: { live: full.live, pages: full.pages, truncated: full.truncated, error: full.error } }, basedOn: { order: checked.context.orderFound, liveOrder: checked.context.checks.liveOrder, shipments: checked.context.checks.shipments, localShipping: checked.context.checks.localShipping, warehouse: checked.context.checks.warehouse, wholeConversation: true, fullHistoryLive: full.live, historyPages: full.pages, historyTruncated: full.truncated, historyError: full.error, messageCount: prepared.conversation.messageCount, previousCustomerConversations: prepared.conversation.relatedConversationCount }, sentExternally: false });
+      const prepared = buildContextualAllegroReply({ type, item: full.item, context: checked.context, draft, relatedItems, styleProfile: learnedStyle.profile });
+      return odpowiedz({ ok: true, type, id, mode, suggestion: prepared.suggestion, conversation: prepared.conversation, context: { ...checked.context, mode, conversation: prepared.conversation, styleProfile: learnedStyle.profile, history: { live: full.live, pages: full.pages, truncated: full.truncated, error: full.error } }, basedOn: { order: checked.context.orderFound, liveOrder: checked.context.checks.liveOrder, shipments: checked.context.checks.shipments, localShipping: checked.context.checks.localShipping, warehouse: checked.context.checks.warehouse, wholeConversation: true, fullHistoryLive: full.live, historyPages: full.pages, historyTruncated: full.truncated, historyError: full.error, messageCount: prepared.conversation.messageCount, previousCustomerConversations: prepared.conversation.relatedConversationCount, learnedStyleExamples: learnedStyle.profile.exampleCount }, sentExternally: false });
     }
 
     if (action === 'allegro-send-reply') {
@@ -5852,7 +5880,12 @@ export default async (req) => {
       }
       const saved = { ...comm, [key]: list, updated_at: new Date().toISOString(), lastManualReply: { type, id, messageId: normalized.id || '', sent_at: new Date().toISOString() } };
       await zapisz('allegro_communications', saved);
-      return odpowiedz({ ok: true, type, id, message: normalized, threads: saved.threads || [], issues: saved.issues || [], updated_at: saved.updated_at });
+      let styleProfile = null, styleLearned = false;
+      try {
+        styleProfile = await allegroZapamietajStylRecznejOdpowiedzi({ type, id, text, messageId: normalized.id || '' });
+        styleLearned = true;
+      } catch {}
+      return odpowiedz({ ok: true, type, id, message: normalized, styleLearned, styleProfile, threads: saved.threads || [], issues: saved.issues || [], updated_at: saved.updated_at });
     }
 
     if (action === 'allegro-sync-communications') {

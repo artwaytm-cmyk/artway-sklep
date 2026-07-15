@@ -651,7 +651,7 @@ if (!communicationFilterFlow.includes('allegroKomunikacjaWymagaOdpowiedzi(item)'
 if (!store.includes("!(thread.newIncomingKeys || []).includes(sourceKey)") || !store.includes("!(issue.newIncomingKeys || []).includes(sourceKey)") || !store.includes("mode: 'first-contact-only'")) {
   fail('store-app.mjs: autoresponder Allegro musi odpowiadać tylko raz na pierwszy kontakt w nowej rozmowie');
 }
-if (!app.includes('function allegroKontekstOdpowiedziHTML') || !app.includes('Popraw stylistycznie') || !app.includes('Popraw treść według rozmowy') || !app.includes('Poprawianie nie wysyła wiadomości')) {
+if (!app.includes('function allegroKontekstOdpowiedziHTML') || !app.includes('Popraw język i układ') || !app.includes('Przygotuj profesjonalną odpowiedź') || !app.includes('Przygotowanie i poprawa tworzą tylko szkic')) {
   fail('assets/app.js: edytor odpowiedzi musi rozdzielać poprawę stylu, poprawę kontekstową i ręczne wysłanie');
 }
 const feePreviewFlow = store.slice(store.indexOf("action === 'allegro-fee-preview'"), store.indexOf("action === 'allegro-offer-price-change'"));

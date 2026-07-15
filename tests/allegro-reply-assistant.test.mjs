@@ -2,8 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  allegroMessagePlainText,
   analyzeAllegroConversation,
+  buildAllegroReplyStyleProfile,
   buildContextualAllegroReply,
+  classifyAllegroMessageAuthor,
   fetchAllegroReplyHistory,
   improvePolishReplyStyle,
   mergeAllegroReplyHistory,
@@ -24,6 +27,30 @@ test('poprawa stylistyczna porządkuje ręczny szkic bez dopisywania faktów', (
   assert.doesNotMatch(improved, /gratis|zwrot środków|wysłano|doręczono/iu);
 });
 
+test('klasyfikator używa źródłowych pól Allegro i naprawia błędny stary authorType', () => {
+  assert.equal(classifyAllegroMessageAuthor({ authorType: 'allegro', author: { login: 'qkrzaku', role: 'BUYER' } }), 'buyer');
+  assert.equal(classifyAllegroMessageAuthor({ authorType: 'allegro', author: { login: 'artway-tm', role: 'SELLER' } }), 'seller');
+  assert.equal(classifyAllegroMessageAuthor({ author: { login: 'allegro', role: 'ADMIN' } }), 'allegro');
+  assert.equal(classifyAllegroMessageAuthor({ authorType: 'allegro', author: { login: 'klient', isInterlocutor: true } }), 'buyer');
+  assert.equal(classifyAllegroMessageAuthor({ authorType: 'allegro', author: { id: 'seller-id', isInterlocutor: false } }), 'seller');
+});
+
+test('treść wiadomości jest bezpiecznie zamieniana z HTML na czytelny tekst', () => {
+  assert.equal(allegroMessagePlainText('Dzień dobry,&nbsp;<br>FV w załączniku &amp; pozdrawiam'), 'Dzień dobry,\nFV w załączniku & pozdrawiam');
+  assert.equal(allegroMessagePlainText('<strong>Allegro</strong><br><a href="https://example.test">Sprawdź</a>'), 'Allegro\nSprawdź');
+});
+
+test('profil stylu uczy się wyłącznie formy ręcznych odpowiedzi', () => {
+  const profile = buildAllegroReplyStyleProfile([
+    'Dzień dobry,\n\nPrzesyłka została nadana.\n\nPozdrawiamy serdecznie,\nArtway-TM',
+    'Dzień dobry,\n\nDziękujemy za informację.\n\nPozdrawiamy serdecznie,\nArtway-TM',
+  ]);
+  assert.equal(profile.exampleCount, 2);
+  assert.equal(profile.greeting, 'Dzień dobry');
+  assert.equal(profile.closing, 'Pozdrawiamy serdecznie,');
+  assert.equal(profile.learnedFrom, 'manual-seller-replies');
+});
+
 test('analiza uwzględnia pełną sekwencję klient–sprzedawca, a nie tylko ostatnie zdanie', () => {
   const analysis = analyzeAllegroConversation({ messages: [
     { id: '1', authorType: 'buyer', text: 'Paczka do mnie nie dotarła.' },
@@ -36,6 +63,16 @@ test('analiza uwzględnia pełną sekwencję klient–sprzedawca, a nie tylko os
   assert.equal(analysis.intents.wantsRefund, true);
   assert.equal(analysis.intents.rejectsReshipment, true);
   assert.equal(analysis.intents.sellerOfferedReshipment, true);
+});
+
+test('komunikat administratora Allegro nigdy nie staje się wiadomością klienta', () => {
+  const analysis = analyzeAllegroConversation({ messages: [
+    { id: 'admin-1', author: { login: 'allegro', role: 'ADMIN' }, text: 'Kupujący poprosił nas o pomoc.' },
+  ], lastMessage: { authorType: 'allegro', text: 'Komunikat systemowy' } });
+  assert.equal(analysis.buyerMessageCount, 0);
+  assert.equal(analysis.systemMessageCount, 1);
+  assert.equal(analysis.hasBuyerMessage, false);
+  assert.equal(analysis.latestBuyerText, '');
 });
 
 test('poprawa treści respektuje odmowę kolejnej paczki i korzysta z potwierdzonych danych', () => {
@@ -147,8 +184,8 @@ test('scalanie historii usuwa duplikaty, zachowuje nowsze pełniejsze dane i por
 });
 
 test('edytor ma dwa rozdzielone działania, cofnięcie i osobny przycisk wysyłki', () => {
-  assert.match(frontend, />✨ Popraw stylistycznie</u);
-  assert.match(frontend, />🧠 Popraw treść według rozmowy</u);
+  assert.match(frontend, />✨ Popraw język i układ</u);
+  assert.match(frontend, />🧠 Przygotuj profesjonalną odpowiedź</u);
   assert.match(frontend, /data-reply-undo hidden/u);
   assert.match(frontend, /field\.dataset\.previousDraft=before/u);
   assert.match(frontend, /buttons\.forEach\(button=>\{button\.disabled=true/u);
@@ -156,8 +193,10 @@ test('edytor ma dwa rozdzielone działania, cofnięcie i osobny przycisk wysyłk
   assert.match(frontend, /data-reply-send/u);
   assert.match(frontend, /sendButton\.disabled=true/u);
   assert.doesNotMatch(frontend, /function allegroHistoriaRozmowyHTML[\s\S]{0,350}\.slice\(-20\)/u);
-  assert.match(frontend, /Poprawianie nie wysyła wiadomości/u);
+  assert.match(frontend, /Przygotowanie i poprawa tworzą tylko szkic/u);
   assert.match(frontend, />✉️ Wyślij przez Allegro</u);
+  assert.match(frontend, /Komunikaty i działania Allegro/u);
+  assert.match(frontend, /Ostatnia wiadomość klienta/u);
 });
 
 test('endpoint poprawy zwraca wyłącznie szkic i jawnie nie wysyła niczego zewnętrznie', () => {
@@ -167,4 +206,11 @@ test('endpoint poprawy zwraca wyłącznie szkic i jawnie nie wysyła niczego zew
   assert.match(action, /allegroPelnaSprawaDoOdpowiedzi/u);
   assert.match(action, /sentExternally: false/u);
   assert.doesNotMatch(action, /method:\s*'POST'.*\/messaging\/threads|\/sale\/issues\/.*\/message/su);
+  assert.match(action, /no_customer_message/u);
+});
+
+test('backend nie przypisuje zamówienia wyłącznie po loginie kupującego', () => {
+  const matcher = backend.slice(backend.indexOf('function allegroZnajdzZamowienieKomunikacji'), backend.indexOf('function allegroStatusZamowieniaOpis'));
+  assert.doesNotMatch(matcher, /unique_buyer_order/u);
+  assert.match(matcher, /order:\s*null/u);
 });
