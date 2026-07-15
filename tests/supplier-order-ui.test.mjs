@@ -27,7 +27,7 @@ this.api={czyEAN,kodOperacyjnyProduktu,agentAIDostawcaProduktu,agentAIKodPozycji
   return context.api;
 }
 
-test('tabela i Optima używają wspólnego priorytetu jawnych kodów bez fallbacku do lokalnego ID', () => {
+test('tabela i Optima rozdzielają kod czytelny od kodu TOWAR dostawcy', () => {
   const { agentAIPrzygotujOptimaZlecenie, agentAIIdentyfikatorOptimaPozycji, agentAIKodPozycjiProducenta } = supplierHelpers();
   const result = agentAIPrzygotujOptimaZlecenie([
     { produktId: '1', externalId: 'EXT-A', sku: 'SKU-A', ean: '5901234123457', kodProducenta: 'A-1', nazwa: 'Gra A', ilosc: 2 },
@@ -35,9 +35,9 @@ test('tabela i Optima używają wspólnego priorytetu jawnych kodów bez fallbac
     { produktId: '3', ean: '5901234123457', nazwa: 'Gra C', ilosc: 1 },
     { produktId: '4', nazwa: 'Bez kodu', ilosc: 1 },
   ], (id) => id === '2' ? { sku: 'B-SKU', kodProducenta: 'B-7' } : {});
-  assert.equal(result.tresc, 'EXT-A;2;\r\nB-SKU;3;\r\n5901234123457;1;');
-  assert.equal(result.wiersze[0].typ, 'EXTERNAL_ID');
-  assert.equal(result.wiersze[1].typ, 'SKU');
+  assert.equal(result.tresc, 'A-1;2;\r\nB-7;3;\r\n5901234123457;1;');
+  assert.equal(result.wiersze[0].typ, 'kod producenta');
+  assert.equal(result.wiersze[1].typ, 'kod producenta');
   assert.equal(result.wiersze[2].typ, 'EAN');
   assert.deepEqual(Array.from(result.braki, (item) => item.nazwa), ['Bez kodu']);
   assert.doesNotMatch(result.tresc, /TOWAR|ILOŚĆ|CENA|\d+[.,]\d{2}/i);
@@ -56,11 +56,11 @@ test('tabela i Optima używają wspólnego priorytetu jawnych kodów bez fallbac
   );
   assert.deepEqual(
     { ...agentAIIdentyfikatorOptimaPozycji({ id: '77', produktId: '77', externalId: '77', sku: '77', kodProducenta: '77', kod: '77' }, { id: '77' }) },
-    { wartosc: '77', typ: 'EXTERNAL_ID' },
+    { wartosc: '77', typ: 'kod producenta' },
   );
   assert.deepEqual(
     { ...agentAIIdentyfikatorOptimaPozycji({ produktId: '77', sku: '77' }, { id: '77' }) },
-    { wartosc: '77', typ: 'SKU' },
+    { wartosc: '', typ: '' },
   );
   assert.deepEqual(
     { ...agentAIIdentyfikatorOptimaPozycji({ produktId: '77', kodProducenta: '77' }, { id: '77' }) },
@@ -74,8 +74,9 @@ test('tabela i Optima używają wspólnego priorytetu jawnych kodów bez fallbac
     { ...agentAIIdentyfikatorOptimaPozycji({ id: '77', produktId: '77', kod: '77' }, { id: '77' }) },
     { wartosc: '', typ: '' },
   );
-  const wspolna = { produktId: '9', ean: '5901234123457', kodDostawcy: 'SUP-9' };
-  assert.equal(agentAIKodPozycjiProducenta(wspolna, {}), agentAIIdentyfikatorOptimaPozycji(wspolna, {}).wartosc);
+  const wspolna = { produktId: '9', externalId: 'EXT-9', ean: '5901234123457', kodDostawcy: 'SUP-9' };
+  assert.equal(agentAIKodPozycjiProducenta(wspolna, {}), 'EXT-9');
+  assert.equal(agentAIIdentyfikatorOptimaPozycji(wspolna, {}).wartosc, 'SUP-9');
   assert.match(fragment('function agentAIZlecenieTabelaDostawcyHTML', 'function agentAIEtapyZleceniaProducenta'), /agentAIStabilnyIdentyfikatorPozycji\(p,produkt\)/);
   const shortageTable = fragment('function magazynBrakiDostawcyHTML', 'function magazynTabelaOperacyjnaHTML');
   assert.match(shortageTable, /agentAIStabilnyIdentyfikatorPozycji\(x,produktMagazynowy\(x\.produktId\)/);
@@ -98,7 +99,7 @@ test('materiały dla producenta nie zawierają cen ani wartości', () => {
   assert.match(csv, /\["kod","nazwa","zamawiana_ilosc"\]/);
   assert.doesNotMatch(csv, /"ean"/i);
   assert.doesNotMatch(csv, /cena_brutto|wartosc_szacowana|cenaZakupu/);
-  assert.match(email, /<th>Kod<\/th><th>Nazwa<\/th><th>Zamawiana ilość<\/th>/);
+  assert.match(email, /<th>Kod produktu<\/th><th>Nazwa<\/th><th>Zamawiana ilość<\/th>/);
   assert.doesNotMatch(email, /EAN<\/th>|Cena|Wartość|cenaBrutto|wartoscSzacowana/);
   const supplierPanel = fragment('function agentAIZlecenieTabelaDostawcyHTML', 'function agentAIEtapyZleceniaProducenta');
   assert.doesNotMatch(supplierPanel, /cenaBrutto|wartoscSzacowana|zl\(/);
@@ -126,7 +127,7 @@ test('podgląd jest dialogiem z Escape, a wysyłka ma ostateczne potwierdzenie',
 
 test('panel pokazuje cały proces aż do przyjęcia dostawy', () => {
   const steps = fragment('function agentAIEtapyZleceniaProducenta', 'function agentAIEtapyZleceniaHTML');
-  for (const label of ['Stan magazynowy', 'Szkic producenta', 'Zatwierdzenie', 'Wysłanie', 'Przyjęcie']) assert.match(steps, new RegExp(label));
+  for (const label of ['Stan magazynowy', 'Szkic producenta', 'Zatwierdzenie', 'Zamówienie wysłane', 'Dostawa', 'Kompletacja']) assert.match(steps, new RegExp(label));
   assert.doesNotMatch(steps, /Telegram/);
 });
 
@@ -145,13 +146,14 @@ test('plan używa serwerowych akcji rewizji i nie wysyła bez osobnego potwierdz
 test('e-mail i eksport pokazują instrukcję Optimy tylko dla Alexander i Multigra', () => {
   const preview = fragment('function agentAIEmailProducentaHTML', 'function agentAIPodgladEmailaProducenta');
   const table = fragment('function agentAIZlecenieTabelaDostawcyHTML', 'function agentAIEtapyZleceniaProducenta');
-  assert.match(preview, /Otwórz dokument → Ogólne → Kolektor danych → Importuj pozycje/);
+  assert.match(preview, /Ogólne → Kolektor danych → Importuj pozycje/);
+  assert.match(preview, /Pobieraj ceny z programu/);
   assert.match(preview, /includes\("alexander"\).*includes\("multigra"\)/s);
   assert.match(table, /Comarch Optima TXT/);
   assert.match(table, /TXT bez cen/);
   assert.doesNotMatch(table, /cenaBrutto|cenaZakupu|wartoscSzacowana|zl\(/);
   const download = fragment('function agentAIPobierzOptimaTXT', 'function agentAIPlanZapiszOdpowiedzSerwera');
-  assert.match(download, /"\\uFEFF"\+dane\.tresc/);
+  assert.doesNotMatch(download, /\\uFEFF/);
   assert.ok(download.indexOf('agentAIEksportZablokowanyPrzezBrakKodow') < download.indexOf('pobierzPlik('));
   const csvDownload = fragment('function agentAIPobierzZlecenieCSV', 'function agentAIEanPoprawny');
   assert.ok(csvDownload.indexOf('agentAIEksportZablokowanyPrzezBrakKodow') < csvDownload.indexOf('pobierzPlik('));

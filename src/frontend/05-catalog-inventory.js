@@ -399,6 +399,8 @@ function zapiszKartotekeMagazynu(e,id){
     lokalizacja:f.get("lokalizacja"),
     dostawca:f.get("dostawca"),
     kod:f.get("kod"),
+    optimaCode:f.get("optimaCode"),
+    kodDostawcy:f.get("kodDostawcy"),
     minStock:f.get("minStock"),
     targetStock:f.get("targetStock"),
     leadTime:f.get("leadTime"),

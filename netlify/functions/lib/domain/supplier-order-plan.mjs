@@ -135,6 +135,8 @@ function productLine(product = {}, input = {}, supplier = '') {
   const externalId = text(source.externalId ?? source.external_id ?? source.EXTERNAL_ID, 160);
   const sku = text(source.sku ?? source.SKU, 160);
   const kodProducenta = text(source.kodProducenta ?? source.manufacturerCode ?? source.mpn ?? source.MPN, 160);
+  const optimaCode = text(source.optimaCode ?? source.supplierOptimaCode ?? source.kodOptima ?? source.comarchCode, 160);
+  const kodDostawcy = text(source.kodDostawcy ?? source.supplierCode ?? source.vendorCode ?? source.towarCode, 160);
   const ean = text(source.ean ?? source.EAN ?? source.gtin ?? source.GTIN, 40).replace(/\D/g, '');
   const produktId = text(source.produktId ?? source.productId ?? source.id, 160);
   const rawCatalogCode = text(source.kod ?? source.code, 160);
@@ -148,6 +150,8 @@ function productLine(product = {}, input = {}, supplier = '') {
     sku,
     kodProducenta,
     mpn: kodProducenta,
+    optimaCode,
+    kodDostawcy,
     ean,
     kod,
     nazwa: text(source.nazwa ?? source.name ?? `Produkt ${produktId || kod}`, 300),
@@ -272,6 +276,8 @@ export function upsertSupplierPlanLine(input = {}) {
     sku: candidate.sku || text(existing?.sku, 160),
     kodProducenta: candidate.kodProducenta || text(existing?.kodProducenta ?? existing?.mpn, 160),
     mpn: candidate.kodProducenta || text(existing?.mpn ?? existing?.kodProducenta, 160),
+    optimaCode: candidate.optimaCode || text(existing?.optimaCode ?? existing?.supplierOptimaCode ?? existing?.kodOptima, 160),
+    kodDostawcy: candidate.kodDostawcy || text(existing?.kodDostawcy ?? existing?.supplierCode ?? existing?.vendorCode, 160),
     ean: candidate.ean || text(existing?.ean ?? existing?.gtin, 40).replace(/\D/g, ''),
     kod: candidate.kod !== '—' ? candidate.kod : (text(existing?.kod, 160) || '—'),
     nazwa: candidate.nazwa || text(existing?.nazwa ?? existing?.name, 300),

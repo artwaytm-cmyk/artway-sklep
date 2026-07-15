@@ -367,6 +367,8 @@ function makeLine({ productId, product, raw, settings, supplier, required, manua
     sku: text(firstValue(product.sku, product.SKU), 160),
     kodProducenta: text(firstValue(product.kodProducenta, product.mpn, product.manufacturerCode, meta.kodProducenta), 160),
     mpn: text(firstValue(product.mpn, product.kodProducenta, product.manufacturerCode, meta.kodProducenta), 160),
+    optimaCode: text(firstValue(product.optimaCode, product.supplierOptimaCode, product.kodOptima, meta.optimaCode, meta.supplierOptimaCode, meta.kodOptima), 160),
+    kodDostawcy: text(firstValue(product.kodDostawcy, product.supplierCode, product.vendorCode, meta.kodDostawcy, meta.supplierCode, meta.vendorCode), 160),
     kod: productCode(product, meta),
     ean: productEan(product, meta),
     nazwa: productName(product, raw, productId),

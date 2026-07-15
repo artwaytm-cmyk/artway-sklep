@@ -75,6 +75,7 @@ export function supplierProductIdentifier(row = {}) {
     return { value, source };
   }
   const fallbackCandidates = [
+    ['optima_code', firstNested(row, ['optimaCode', 'supplierOptimaCode', 'kodOptima', 'comarchCode'])],
     ['supplier_code', nested(row, 'supplierCode')],
     ['supplier_code', nested(row, 'kodDostawcy')],
     ['supplier_code', nested(row, 'catalogCode')],
@@ -86,6 +87,28 @@ export function supplierProductIdentifier(row = {}) {
     const value = businessIdentifier(raw);
     if (!value || internalIds.has(value.toUpperCase())) continue;
     return { value, source };
+  }
+  const gtin = ['ean', 'gtin', 'EAN', 'GTIN']
+    .map((field) => validGtin(nested(row, field)))
+    .find(Boolean) || '';
+  if (gtin) return { value: gtin, source: 'gtin' };
+  return { value: '', source: '' };
+}
+
+/**
+ * Identyfikator pola TOWAR dla Kolektora danych Optimy producenta. Lokalne
+ * EXTERNAL_ID/SKU sklepu nie jest automatycznie kodem kartoteki kontrahenta.
+ * Pierwszeństwo ma jawny kod Optimy/dostawcy, następnie kod producenta i EAN.
+ */
+export function comarchOptimaProductIdentifier(row = {}) {
+  const explicitCandidates = [
+    ['optima_code', firstNested(row, ['optimaCode', 'supplierOptimaCode', 'kodOptima', 'comarchCode'])],
+    ['supplier_code', firstNested(row, ['kodDostawcy', 'supplierCode', 'vendorCode', 'towarCode'])],
+    ['manufacturer_code', firstNested(row, ['kodProducenta', 'mpn', 'manufacturerCode', 'manufacturer_code', 'producerCode'])],
+  ];
+  for (const [source, raw] of explicitCandidates) {
+    const value = businessIdentifier(raw);
+    if (value) return { value, source };
   }
   const gtin = ['ean', 'gtin', 'EAN', 'GTIN']
     .map((field) => validGtin(nested(row, field)))
@@ -118,14 +141,14 @@ export function buildComarchOptimaTxt(rows = [], { orderNumber = '', supplierNam
   const lines = [];
   const missingIdentifiers = [];
   for (const [index, row] of (Array.isArray(rows) ? rows : []).entries()) {
-    const identifier = supplierProductIdentifier(row);
+    const identifier = comarchOptimaProductIdentifier(row);
     if (!identifier.value) {
       missingIdentifiers.push({
         row: index + 1,
         name: text(row.nazwa || row.name || 'Produkt', 300).trim(),
         code: text(row.externalId || row.external_id || row.sku || row.kodProducenta || row.mpn || row.kod, 80).trim(),
         ean: text(row.ean || row.gtin, 40).trim(),
-        reason: 'Brak jednoznacznego EXTERNAL_ID, SKU, kodu producenta, kodu katalogowego lub poprawnego EAN/GTIN',
+        reason: 'Brak kodu Comarch Optima/dostawcy, kodu producenta lub poprawnego EAN/GTIN',
       });
       continue;
     }
@@ -137,12 +160,13 @@ export function buildComarchOptimaTxt(rows = [], { orderNumber = '', supplierNam
     lines.push(`${identifier.value};${decimal(amount, 0)};`);
   }
   const filename = `zamowienie-optima-${safeFilenamePart(supplierName, 'producent')}-${safeFilenamePart(orderNumber, 'zamowienie')}.txt`;
-  const content = lines.length ? `\uFEFF${lines.join('\r\n')}` : '';
+  const content = lines.join('\r\n');
   return {
     format: 'TOWAR;ILOŚĆ;CENA',
     delimiter: ';',
     columns: ['TOWAR', 'ILOŚĆ', 'CENA'],
     priceColumnEmpty: true,
+    priceSourceRequired: 'program',
     importInstruction: OPTIMA_IMPORT_INSTRUCTION,
     header: false,
     filename,
@@ -168,6 +192,8 @@ function supplierRows(order = {}, supplier = {}) {
         externalId: text(firstNested(row, ['externalId', 'external_id', 'EXTERNAL_ID']), 80).trim(),
         sku: text(firstNested(row, ['sku', 'SKU']), 80).trim(),
         kodProducenta: text(firstNested(row, ['kodProducenta', 'mpn', 'manufacturerCode', 'manufacturer_code', 'producerCode']), 80).trim(),
+        optimaCode: text(firstNested(row, ['optimaCode', 'supplierOptimaCode', 'kodOptima', 'comarchCode']), 80).trim(),
+        kodDostawcy: text(firstNested(row, ['kodDostawcy', 'supplierCode', 'vendorCode', 'towarCode']), 80).trim(),
         ean: text(firstNested(row, ['ean', 'gtin', 'EAN', 'GTIN']), 40).trim(),
         nazwa: text(row?.nazwa || row?.name || 'Produkt', 300).trim(),
         ilosc: Math.max(0, Number(row?.ilosc ?? row?.quantity) || 0),
@@ -180,14 +206,15 @@ function minimalOrderEmail({ rows, number, name, to, subject, includeOptima = fa
   const textRows = rows.map((row) => `${row.kod} | ${row.nazwa} | ${decimal(row.ilosc)}`).join('\n');
   const optima = includeOptima ? buildComarchOptimaTxt(rows, { orderNumber: number, supplierName: name }) : null;
   const optimaPlain = optima?.attachment
-    ? `\n\nW załączniku znajduje się plik TXT z pozycjami zamówienia do Comarch ERP Optima.\nImport: ${OPTIMA_IMPORT_INSTRUCTION}.`
+    ? `\n\nZAŁĄCZNIK COMARCH ERP OPTIMA\n1. Otwórz lub utwórz właściwy dokument.\n2. Wybierz: ${OPTIMA_IMPORT_INSTRUCTION}.\n3. Wskaż załączony plik TXT.\n4. Koniecznie zaznacz „Pobieraj ceny z programu”.\n5. Sprawdź pozycje i zapisz dokument.\n\nPlik ma układ TOWAR;ILOŚĆ;CENA, nie ma nagłówka, a kolumna ceny jest celowo pusta.`
     : '';
-  const plain = `Cześć,\n\nDzisiejsze zamówienie:\n\nIdentyfikator produktu | Nazwa | Zamawiana ilość\n${textRows}${optimaPlain}\n\nPozdrowienia dla całej ekipy!\nArtway-TM`;
-  const table = rows.map((row) => `<tr><td style="padding:12px 14px;border-bottom:1px solid #e5e7eb;font-weight:700;white-space:nowrap">${escapeHtml(row.kod)}</td><td style="padding:12px 14px;border-bottom:1px solid #e5e7eb">${escapeHtml(row.nazwa)}</td><td style="padding:12px 14px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:800;white-space:nowrap">${escapeHtml(decimal(row.ilosc))}</td></tr>`).join('');
+  const total = rows.reduce((sum, row) => sum + Math.max(0, Number(row.ilosc) || 0), 0);
+  const plain = `Cześć,\n\nprzesyłamy dzisiejsze zamówienie ${number}.\n\nKod produktu | Nazwa | Zamawiana ilość\n${textRows}${optimaPlain}\n\nPodsumowanie: ${rows.length} pozycji, ${decimal(total)} szt.\n\nPozdrowienia dla całej ekipy!\nArtway-TM`;
+  const table = rows.map((row, index) => `<tr style="background:${index % 2 ? '#f8fafc' : '#ffffff'}"><td style="padding:13px 15px;border-bottom:1px solid #e2e8f0;font-weight:800;white-space:nowrap;color:#1e3a8a">${escapeHtml(row.kod)}</td><td style="padding:13px 15px;border-bottom:1px solid #e2e8f0">${escapeHtml(row.nazwa)}</td><td style="padding:13px 15px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:900;white-space:nowrap">${escapeHtml(decimal(row.ilosc))}</td></tr>`).join('');
   const optimaHtml = optima?.attachment
-    ? `<div style="margin-top:20px;padding:16px 18px;border-radius:12px;background:#f8fafc;border:1px solid #dbe3ee;line-height:1.55"><b>Plik do Comarch ERP Optima</b><br>W załączniku znajduje się plik TXT z pozycjami zamówienia.<br><span style="color:#475569">Import: ${escapeHtml(OPTIMA_IMPORT_INSTRUCTION)}.</span></div>`
+    ? `<div style="margin-top:22px;padding:19px 20px;border-radius:14px;background:#fffbeb;border:1px solid #fbbf24;line-height:1.6"><div style="font-size:17px;font-weight:900;color:#92400e">📎 Import do Comarch ERP Optima</div><ol style="margin:10px 0 8px;padding-left:22px;color:#334155"><li>Otwórz lub utwórz właściwy dokument.</li><li>Wybierz: <b>${escapeHtml(OPTIMA_IMPORT_INSTRUCTION)}</b>.</li><li>Wskaż załączony plik TXT.</li><li><b>Zaznacz „Pobieraj ceny z programu”.</b></li><li>Sprawdź pozycje i zapisz dokument.</li></ol><div style="padding-top:9px;border-top:1px solid #fde68a;color:#475569;font-size:13px">Układ pliku: <b>TOWAR;ILOŚĆ;CENA</b> • bez nagłówka • cena celowo pusta.</div></div>`
     : '';
-  const html = `<!doctype html><html lang="pl"><body style="margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#172033"><div style="max-width:720px;margin:0 auto;padding:28px 14px"><div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:26px;box-shadow:0 8px 30px rgba(15,23,42,.06)"><p style="font-size:17px;margin:0 0 20px">Cześć,</p><p style="font-size:17px;margin:0 0 18px"><b>Dzisiejsze zamówienie:</b></p><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden"><thead><tr style="background:#f1f5f9;text-align:left"><th style="padding:11px 14px">Identyfikator produktu</th><th style="padding:11px 14px">Nazwa</th><th style="padding:11px 14px;text-align:center">Zamawiana ilość</th></tr></thead><tbody>${table}</tbody></table></div>${optimaHtml}<p style="margin:24px 0 0;line-height:1.65">Pozdrowienia dla całej ekipy!<br><b>Artway-TM</b></p></div></div></body></html>`;
+  const html = `<!doctype html><html lang="pl"><body style="margin:0;background:#eef2f7;font-family:Arial,sans-serif;color:#172033"><div style="max-width:760px;margin:0 auto;padding:30px 14px"><div style="overflow:hidden;background:#fff;border:1px solid #dbe3ee;border-radius:20px;box-shadow:0 14px 40px rgba(15,23,42,.09)"><div style="padding:24px 28px;background:linear-gradient(135deg,#1e3a8a,#4f46e5);color:#fff"><div style="font-size:12px;letter-spacing:1.5px;font-weight:800;text-transform:uppercase;opacity:.82">Artway-TM • zamówienie do producenta</div><div style="margin-top:7px;font-size:25px;font-weight:900">${escapeHtml(number)}</div><div style="margin-top:5px;opacity:.9">${escapeHtml(name)} • ${escapeHtml(rows.length)} pozycji • ${escapeHtml(decimal(total))} szt.</div></div><div style="padding:26px 28px"><p style="font-size:17px;margin:0 0 8px">Cześć,</p><p style="font-size:16px;margin:0 0 21px;line-height:1.6">przesyłamy dzisiejsze zamówienie. Poniżej znajduje się kompletna lista produktów i ilości.</p><div style="overflow-x:auto;border:1px solid #dbe3ee;border-radius:13px"><table style="width:100%;border-collapse:collapse"><thead><tr style="background:#eaf0fb;text-align:left;color:#334155"><th style="padding:12px 15px">Kod produktu</th><th style="padding:12px 15px">Nazwa</th><th style="padding:12px 15px;text-align:center">Zamawiana ilość</th></tr></thead><tbody>${table}</tbody></table></div><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px"><span style="padding:8px 12px;border-radius:999px;background:#eff6ff;color:#1e40af;font-weight:800">${escapeHtml(rows.length)} pozycji</span><span style="padding:8px 12px;border-radius:999px;background:#ecfdf5;color:#166534;font-weight:800">${escapeHtml(decimal(total))} szt.</span></div>${optimaHtml}<p style="margin:25px 0 0;line-height:1.7;color:#334155">Pozdrowienia dla całej ekipy!<br><b style="color:#172033">Artway-TM</b></p></div></div></div></body></html>`;
   return { name, to, rows, subject, text: plain, html, optima, attachments: optima?.attachment ? [optima.attachment] : [] };
 }
 

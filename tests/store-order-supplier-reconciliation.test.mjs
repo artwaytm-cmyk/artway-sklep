@@ -218,7 +218,7 @@ test('anulowanie przed wysyłką zwalnia rezerwację bez ruchu fizycznego stanu'
 });
 
 test('Allegro zasila ten sam Plan bez duplikatów; spakowane rezerwuje do wysyłki, a status końcowy usuwa brak', async () => {
-  const position = (offerId, quantity) => ({ offerId, productId: 'P-1', nazwa: 'Gra Allegro', ilosc: quantity });
+  const position = (offerId, quantity) => ({ offerId, productId: 'P-1', nazwa: 'Gra Allegro', ilosc: quantity, match: 'EAN/GTIN', confidence: 99, supplierMatchVerified: true });
   const repo = memoryRepository({
     orders: { items: [] },
     allegro_orders: { items: [
@@ -263,7 +263,7 @@ test('Allegro zasila ten sam Plan bez duplikatów; spakowane rezerwuje do wysył
 });
 
 test('wysłane Allegro zdejmuje zmapowany stan dokładnie raz, a kolejne zlecenie widzi rzeczywisty brak', async () => {
-  const mappedPosition = (quantity = 1) => ({ offerId: 'O-1', productId: 'P-1', nazwa: 'Gra Allegro', ilosc: quantity });
+  const mappedPosition = (quantity = 1) => ({ offerId: 'O-1', productId: 'P-1', nazwa: 'Gra Allegro', ilosc: quantity, match: 'EAN/GTIN', confidence: 99, supplierMatchVerified: true });
   const sent = { id: 'ALG-SENT', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'SENT', inventoryDeductionPending: true, agentAnalysis: { positions: [mappedPosition()] } };
   const active = { id: 'ALG-ACTIVE', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'NEW', agentAnalysis: { positions: [mappedPosition()] } };
   const repo = memoryRepository({

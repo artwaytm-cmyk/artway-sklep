@@ -33,13 +33,14 @@ test('Alexander dostaje minimalną estetyczną wiadomość bez EAN w treści', (
 
   assert.equal(mail.to, 'zamowienia@example.test');
   assert.equal(mail.rows.length, 1);
-  assert.match(mail.text, /^Cześć,\n\nDzisiejsze zamówienie:/);
-  assert.match(mail.text, /Identyfikator produktu \| Nazwa \| Zamawiana ilość/);
+  assert.match(mail.text, /^Cześć,\n\nprzesyłamy dzisiejsze zamówienie/);
+  assert.match(mail.text, /Kod produktu \| Nazwa \| Zamawiana ilość/);
   assert.match(mail.text, /1748 \| Przeplatanki dla Chłopców \| 1/);
   assert.match(mail.text, /Otwórz dokument → Ogólne → Kolektor danych → Importuj pozycje/);
+  assert.match(mail.text, /Pobieraj ceny z programu/);
   assert.match(mail.text, /Pozdrowienia dla całej ekipy!\nArtway-TM$/);
   assert.doesNotMatch(mail.text, /EAN|5901234123457|potwierdzenie|termin realizacji/i);
-  assert.match(mail.html, /<th[^>]*>Identyfikator produktu<\/th><th[^>]*>Nazwa<\/th><th[^>]*>Zamawiana ilość<\/th>/);
+  assert.match(mail.html, /<th[^>]*>Kod produktu<\/th><th[^>]*>Nazwa<\/th><th[^>]*>Zamawiana ilość<\/th>/);
   assert.match(mail.html, /Otwórz dokument → Ogólne → Kolektor danych → Importuj pozycje/);
   assert.doesNotMatch(mail.html, /EAN|5901234123457|potwierdzenie|termin realizacji/i);
   assert.equal(mail.attachments.length, 1);
@@ -48,7 +49,7 @@ test('Alexander dostaje minimalną estetyczną wiadomość bez EAN w treści', (
 test('Multigra korzysta z tego samego minimalnego szablonu', () => {
   const mail = renderSupplierOrderEmail({
     id: 'AZ-2',
-    pozycje: [{ dostawca: 'Multigra', kod: 'MG-17', nazwa: 'Gra testowa', ilosc: 2 }],
+    pozycje: [{ dostawca: 'Multigra', kodProducenta: 'MG-17', kod: 'MG-17', nazwa: 'Gra testowa', ilosc: 2 }],
   }, { name: 'Multigra Sp. z o.o.', orderEmail: 'multigra@example.test' });
 
   assert.equal(mail.rows.length, 1);
@@ -74,7 +75,7 @@ test('każdy producent ma stały bezcenowy szablon i oczyszczone pozycje', () =>
   assert.equal(mail.subject, 'Zamówienie AZ-3 — Artway-TM');
   assert.match(mail.text, /GD-1 \| Balony \| 3/);
   assert.doesNotMatch(`${mail.subject}\n${mail.text}\n${mail.html}`, /9,99|wartość|marża|EAN/i);
-  assert.deepEqual(Object.keys(mail.rows[0]).sort(), ['dostawca', 'ean', 'externalId', 'identifierSource', 'ilosc', 'kod', 'kodProducenta', 'nazwa', 'productId', 'sku']);
+  assert.deepEqual(Object.keys(mail.rows[0]).sort(), ['dostawca', 'ean', 'externalId', 'identifierSource', 'ilosc', 'kod', 'kodDostawcy', 'kodProducenta', 'nazwa', 'optimaCode', 'productId', 'sku']);
   assert.equal(mail.attachments.length, 0, 'Optima jest dołączana automatycznie tylko dla Alexander i Multigra');
   assert.equal(mail.optima, null);
 });
@@ -124,7 +125,7 @@ test('tabela wiadomości i plik Optimy nigdy nie pokazują kodu równego lokalne
   assert.equal(mail.rows[0].identifierSource, 'gtin');
   assert.match(mail.text, /5901234123457 \| Produkt z kodem lokalnym \| 2/);
   assert.doesNotMatch(mail.text, /(?:^|\n)999 \|/);
-  assert.equal(mail.optima.content, '\uFEFF5901234123457;2;');
+  assert.equal(mail.optima.content, '5901234123457;2;');
   const nested = renderSupplierOrderEmail({
     id: 'AZ-NESTED-LOCAL-ID',
     pozycje: [{ product: { id: 'N-77', kod: 'N-77' }, dostawca: 'Alexander', nazwa: 'Zagnieżdżony produkt', ilosc: 1 }],
@@ -136,11 +137,11 @@ test('tabela wiadomości i plik Optimy nigdy nie pokazują kodu równego lokalne
   assert.equal(validateSupplierOrderEmail(nested).ok, false);
   const sharedPriority = renderSupplierOrderEmail({
     id: 'AZ-SHARED-PRIORITY',
-    pozycje: [{ produktId: '77', kod: 'KOD-X', ean: '5901234123457', dostawca: 'Alexander', nazwa: 'Wspólny kod', ilosc: 1 }],
+    pozycje: [{ produktId: '77', kod: 'KOD-X', optimaCode: 'OPT-X', ean: '5901234123457', dostawca: 'Alexander', nazwa: 'Wspólny kod', ilosc: 1 }],
   }, { name: 'Alexander', orderEmail: 'alexander@example.test' });
-  assert.equal(sharedPriority.rows[0].kod, 'KOD-X');
-  assert.equal(sharedPriority.rows[0].identifierSource, 'stable_code');
-  assert.equal(sharedPriority.optima.content, '\uFEFFKOD-X;1;');
+  assert.equal(sharedPriority.rows[0].kod, 'OPT-X');
+  assert.equal(sharedPriority.rows[0].identifierSource, 'optima_code');
+  assert.equal(sharedPriority.optima.content, 'OPT-X;1;');
 });
 
 test('plik Optima ma wiersze TOWAR;ILOŚĆ;CENA bez nagłówka, według biznesowego identyfikatora', () => {
@@ -162,7 +163,9 @@ test('plik Optima ma wiersze TOWAR;ILOŚĆ;CENA bez nagłówka, według biznesow
   assert.equal(optima.missingIdentifiers.length, 2);
   assert.equal(optima.missingIdentifiers[0].name, 'Do wyjaśnienia');
   assert.equal(optima.missingIdentifiers[1].name, 'Tylko wewnętrzne ID');
-  assert.equal(optima.content, '\uFEFFIGNOROWANY-KOD;2;\r\nA-1748;1;\r\nEXT-10;3;');
+  assert.equal(optima.content, '5901234123457;2;\r\nA-1748;1;\r\nMPN-10;3;');
+  assert.equal(optima.priceSourceRequired, 'program');
+  assert.equal(optima.content.charCodeAt(0) === 0xFEFF, false, 'kod pierwszego towaru nie może zawierać BOM');
   assert.doesNotMatch(optima.content, /12,50|7,25|999|0,00/, 'żadna cena nie może trafić do dokumentu producenta');
   assert.doesNotMatch(optima.content, /TOWAR|ILOŚĆ|CENA/);
   assert.equal(optima.attachment.filename, optima.filename);
@@ -171,14 +174,14 @@ test('plik Optima ma wiersze TOWAR;ILOŚĆ;CENA bez nagłówka, według biznesow
 
 test('wiadomość i załącznik zawierają wszystkie pozycje dużego szkicu bez cichego obcięcia', () => {
   const pozycje = Array.from({ length: 650 }, (_unused, index) => ({
-    dostawca: 'Alexander', externalId: `EXT-${String(index + 1).padStart(4, '0')}`,
+    dostawca: 'Alexander', externalId: `EXT-${String(index + 1).padStart(4, '0')}`, kodProducenta: `A-${String(index + 1).padStart(4, '0')}`,
     nazwa: `Produkt ${index + 1}`, ilosc: 1,
   }));
   const mail = renderSupplierOrderEmail({ id: 'AZ-650', pozycje }, { name: 'Alexander', orderEmail: 'alexander@example.test' });
   assert.equal(mail.rows.length, 650);
   assert.equal(mail.validation.ok, true);
   assert.equal(mail.optima.exportedRows, 650);
-  assert.equal(mail.optima.content.replace(/^\uFEFF/, '').split('\r\n').length, 650);
+  assert.equal(mail.optima.content.split('\r\n').length, 650);
   assert.match(mail.text, /EXT-0650 \| Produkt 650 \| 1/);
   assert.match(mail.html, /EXT-0650/);
 });

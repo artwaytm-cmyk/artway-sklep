@@ -4,12 +4,12 @@ import { allegroOrdersForInventoryDeduction, allegroOrdersForSupplierDemand, mar
 
 const catalog = [{ id: 'P-1' }, { id: 'P-2' }];
 
-test('aktywne zlecenie Allegro korzysta z kanonicznego mapowania i agreguje pozycje', () => {
+test('zweryfikowana analiza zamówienia ma pierwszeństwo przed słabym mapowaniem i agreguje pozycje', () => {
   const result = allegroOrdersForSupplierDemand([{
     id: 'ALG-1', status: 'READY_FOR_PROCESSING',
     agentAnalysis: { positions: [
-      { offerId: 'O-1', productId: 'STALE', ilosc: 2, nazwa: 'Gra' },
-      { offerId: 'O-1', productId: 'STALE', ilosc: 1, nazwa: 'Gra' },
+      { offerId: 'O-1', productId: 'P-1', ilosc: 2, nazwa: 'Gra', match: 'EAN/GTIN', confidence: 99, supplierMatchVerified: true },
+      { offerId: 'O-1', productId: 'P-1', ilosc: 1, nazwa: 'Gra', match: 'EAN/GTIN', confidence: 99, supplierMatchVerified: true },
     ] },
   }], { items: { 'O-1': { productId: 'P-1' } } }, [], catalog);
 
@@ -20,10 +20,16 @@ test('aktywne zlecenie Allegro korzysta z kanonicznego mapowania i agreguje pozy
   assert.equal(result.orders[0].pozycjeDane[0].ilosc, 3);
 });
 
-test('mapowanie awaryjne działa bez agentAnalysis, lecz blokada nie pozwala wrócić staremu dopasowaniu', () => {
+test('słabe mapowanie nie tworzy zamówienia producenta, a jawnie zweryfikowane może być fallbackiem', () => {
+  const weak = allegroOrdersForSupplierDemand([{
+    id: 'ALG-WEAK', status: 'READY_FOR_PROCESSING', lineItems: [{ offerId: 'O-2', quantity: 2 }],
+  }], { items: { 'O-2': { productId: 'P-2' } } }, [], catalog);
+  assert.equal(weak.orders.length, 0);
+  assert.equal(weak.diagnostics.skippedWeakMapping, 1);
+
   const mapped = allegroOrdersForSupplierDemand([{
     id: 'ALG-MAP', status: 'READY_FOR_PROCESSING', lineItems: [{ offerId: 'O-2', quantity: 2 }],
-  }], { items: { 'O-2': { productId: 'P-2' } } }, [], catalog);
+  }], { items: { 'O-2': { productId: 'P-2', verifiedForSupplier: true } } }, [], catalog);
   assert.equal(mapped.orders[0].pozycjeDane[0].productId, 'P-2');
 
   const blocked = allegroOrdersForSupplierDemand([{
@@ -40,7 +46,7 @@ test('nieistniejący produkt z przestarzałego mapowania nie tworzy osieroconego
     id: 'ALG-STALE', status: 'READY_FOR_PROCESSING', lineItems: [{ offerId: 'O-X', quantity: 1 }],
   }], { items: { 'O-X': { productId: 'USUNIETY' } } }, [], catalog);
   assert.deepEqual(result.orders, []);
-  assert.equal(result.diagnostics.skippedUnknownProduct, 1);
+  assert.equal(result.diagnostics.skippedWeakMapping, 1);
 });
 
 test('statusy końcowe i stare flagi obsłużenia nie wracają do popytu', () => {
@@ -66,13 +72,13 @@ test('zamówienie już obecne w zbiorze sklepu nie jest liczone drugi raz', () =
 });
 
 test('fulfillment SENT i PICKED_UP tworzy projekcję ruchu, CANCELLED nie zdejmuje stanu', () => {
-  const line = { offerId: 'O-1', productId: 'STALE', ilosc: 1, nazwa: 'Gra' };
+  const line = { offerId: 'O-1', productId: 'P-1', ilosc: 1, nazwa: 'Gra', match: 'EAN/GTIN', confidence: 99, supplierMatchVerified: true };
   const result = allegroOrdersForInventoryDeduction([
     { id: 'ALG-SENT', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'SENT', agentAnalysis: { positions: [line] } },
     { id: 'ALG-PICKED', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'PICKED_UP', agentAnalysis: { positions: [line] } },
     { id: 'ALG-LOCAL', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'PROCESSING', warehouseStage: 'zrealizowane', agentAnalysis: { positions: [line] } },
     { id: 'ALG-CANCEL', status: 'CANCELLED', fulfillmentStatus: 'CANCELLED', agentAnalysis: { positions: [line] } },
-  ], { items: { 'O-1': { productId: 'P-1' } } }, catalog);
+  ], { items: { 'O-1': { productId: 'STALE' } } }, catalog);
   assert.deepEqual(result.orders.map((order) => order.nr), ['Allegro ALG-SENT', 'Allegro ALG-PICKED', 'Allegro ALG-LOCAL']);
   assert.ok(result.orders.every((order) => order.status === 'wysłane' && order.pozycjeDane[0].productId === 'P-1'));
   assert.equal(result.diagnostics.eligible, 3);
@@ -82,7 +88,7 @@ test('częściowo zmapowana wysyłka nie zdejmuje fragmentu stanu ani nie udaje 
   const result = allegroOrdersForInventoryDeduction([{
     id: 'ALG-PARTIAL', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'SENT',
     lineItems: [{ offerId: 'O-1', quantity: 1 }, { offerId: 'O-UNKNOWN', quantity: 2 }],
-  }], { items: { 'O-1': { productId: 'P-1' } } }, catalog);
+  }], { items: { 'O-1': { productId: 'P-1', verifiedForSupplier: true } } }, catalog);
   assert.deepEqual(result.orders, []);
   assert.equal(result.diagnostics.eligible, 1);
   assert.equal(result.diagnostics.requiredLines, 2);

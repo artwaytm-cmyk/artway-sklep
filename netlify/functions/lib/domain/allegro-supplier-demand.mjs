@@ -83,6 +83,8 @@ function mappingIndex(record = {}) {
     if (offerId) map.set(String(offerId), {
       productId,
       blocked: value.blocked === true || value.quarantined === true,
+      verifiedForSupplier: value.verifiedForSupplier === true || value.supplierOrderEligible === true,
+      confidence: Math.max(0, Math.min(100, Number(value.confidence) || 0)),
     });
   }
   return map;
@@ -106,11 +108,30 @@ function demandItems(order = {}, mappings = new Map(), knownProductIds = null, d
     const mapping = offerId ? mappings.get(offerId) : null;
     // Jawne odpięcie/kwarantanna ma pierwszeństwo przed starym wynikiem analizy.
     if (mapping && (mapping.blocked || !mapping.productId)) { bump(diagnostics, 'skippedBlockedMapping'); bump(diagnostics, 'skippedUnresolvedLine'); continue; }
-    const productId = text(
-      mapping?.productId || line?.localProductId || line?.mappedProductId || line?.storeProductId || line?.produktId
+    const analyzedProductId = text(
+      line?.localProductId || line?.mappedProductId || line?.storeProductId || line?.produktId
       || (analyzed.length ? line?.productId : ''),
       160,
     );
+    const matchLabel = normalized(line?.match || line?.matchType || line?.matchReason);
+    const confidence = Math.max(0, Math.min(100, Number(line?.confidence) || 0));
+    const analysisVerified = line?.supplierMatchVerified === true
+      || (analyzed.length && confidence >= 88 && !matchLabel.includes('mapowanie'));
+    const mappingVerified = !!mapping?.verifiedForSupplier && !!mapping?.productId
+      && (!analyzedProductId || mapping.productId === analyzedProductId);
+    // Sam fakt zapisania mapowania oferty nie jest dowodem wystarczającym do
+    // złożenia zamówienia u producenta. Plan zakupowy przyjmuje wyłącznie
+    // wynik zweryfikowany EAN/SKU/kodem producenta lub jednoznaczną analizą.
+    const productId = analysisVerified
+      ? analyzedProductId
+      : mappingVerified
+        ? mapping.productId
+        : '';
+    if (!productId && (analyzedProductId || mapping?.productId)) {
+      bump(diagnostics, 'skippedWeakMapping');
+      bump(diagnostics, 'skippedUnresolvedLine');
+      continue;
+    }
     if (!productId) { bump(diagnostics, 'skippedUnresolvedLine'); continue; }
     if (knownProductIds && !knownProductIds.has(productId)) { bump(diagnostics, 'skippedUnknownProduct'); bump(diagnostics, 'skippedUnresolvedLine'); continue; }
     bump(diagnostics, 'mappedLines');
@@ -128,7 +149,7 @@ export function allegroOrdersForSupplierDemand(allegroOrders = [], mappingsRecor
   const knownProductIds = catalogIdSet(catalogProducts);
   const shopIds = new Set(array(shopOrders).flatMap((order) => [order?.nr, order?.number, order?.id, order?.sourceOrderId]).map((value) => text(value, 180)).filter(Boolean));
   const orders = [], seen = new Set();
-  const diagnostics = { scanned: 0, active: 0, converted: 0, skippedFinal: 0, skippedDuplicate: 0, skippedUnmapped: 0, skippedBlockedMapping: 0, skippedUnknownProduct: 0, skippedUnresolvedLine: 0, skippedInvalidQuantity: 0, requiredLines: 0, mappedLines: 0 };
+  const diagnostics = { scanned: 0, active: 0, converted: 0, skippedFinal: 0, skippedDuplicate: 0, skippedUnmapped: 0, skippedBlockedMapping: 0, skippedWeakMapping: 0, skippedUnknownProduct: 0, skippedUnresolvedLine: 0, skippedInvalidQuantity: 0, requiredLines: 0, mappedLines: 0 };
   for (const order of array(allegroOrders)) {
     diagnostics.scanned += 1;
     const sourceId = text(order?.id || order?.nr || order?.orderId || order?.checkoutForm?.id, 180);
@@ -155,14 +176,14 @@ export function allegroOrdersForSupplierDemand(allegroOrders = [], mappingsRecor
 export function allegroOrdersForInventoryDeduction(allegroOrders = [], mappingsRecord = {}, catalogProducts) {
   const mappings = mappingIndex(mappingsRecord);
   const knownProductIds = catalogIdSet(catalogProducts);
-  const diagnostics = { scanned: 0, eligible: 0, projected: 0, skippedNonShipment: 0, skippedUnmapped: 0, skippedBlockedMapping: 0, skippedUnknownProduct: 0, skippedUnresolvedLine: 0, skippedInvalidQuantity: 0, requiredLines: 0, mappedLines: 0 };
+  const diagnostics = { scanned: 0, eligible: 0, projected: 0, skippedNonShipment: 0, skippedUnmapped: 0, skippedBlockedMapping: 0, skippedWeakMapping: 0, skippedUnknownProduct: 0, skippedUnresolvedLine: 0, skippedInvalidQuantity: 0, requiredLines: 0, mappedLines: 0 };
   const orders = [];
   for (const order of array(allegroOrders)) {
     diagnostics.scanned += 1;
     if (!inventoryDeductionEligible(order)) { diagnostics.skippedNonShipment += 1; continue; }
     diagnostics.eligible += 1;
     const sourceId = text(order?.id || order?.nr || order?.orderId || order?.checkoutForm?.id, 180);
-    const perOrder = { skippedBlockedMapping: 0, skippedUnknownProduct: 0, skippedUnresolvedLine: 0, skippedInvalidQuantity: 0, requiredLines: 0, mappedLines: 0 };
+    const perOrder = { skippedBlockedMapping: 0, skippedWeakMapping: 0, skippedUnknownProduct: 0, skippedUnresolvedLine: 0, skippedInvalidQuantity: 0, requiredLines: 0, mappedLines: 0 };
     const items = demandItems(order, mappings, knownProductIds, perOrder);
     for (const [key, value] of Object.entries(perOrder)) bump(diagnostics, key, value);
     if (!sourceId || perOrder.requiredLines !== perOrder.mappedLines) { diagnostics.skippedUnmapped += 1; continue; }

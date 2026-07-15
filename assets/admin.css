@@ -569,6 +569,14 @@ body.admin-mode #widok{min-height:100vh;background:radial-gradient(circle at 100
 @media(max-width:520px){.filter-grid{grid-template-columns:1fr}}
 @media(max-width:760px){.procurement-flow{grid-template-columns:1fr 1fr}.order-procurement-card>.order-section-head{display:grid}.order-procurement-card>.order-section-head>.btn{width:100%}}
 @media(max-width:460px){.procurement-flow{grid-template-columns:1fr}}
+.supplier-workflow{grid-template-columns:repeat(6,minmax(115px,1fr))}
+.supplier-email-message{gap:0;padding:0;overflow:hidden;border-radius:17px;box-shadow:0 12px 32px rgba(15,23,42,.08)}
+.supplier-email-brand{display:grid;gap:.2rem;padding:1.25rem 1.4rem;background:linear-gradient(135deg,#1e3a8a,#4f46e5);color:#fff}.supplier-email-brand span{font-size:.7rem;font-weight:900;letter-spacing:.1em;text-transform:uppercase;opacity:.82}.supplier-email-brand h3{margin:0;font-size:1.45rem}.supplier-email-brand small{color:#fff;opacity:.9}
+.supplier-email-content{display:grid;gap:.85rem;padding:1.25rem 1.4rem}.supplier-email-summary{display:flex;gap:.45rem;flex-wrap:wrap}.supplier-email-summary span{padding:.4rem .65rem;border:1px solid #bfdbfe;border-radius:999px;background:#eff6ff;color:#1e40af;font-size:.76rem;font-weight:900}
+.supplier-optima-strip.is-ready{border-color:#86efac;background:#f0fdf4;color:#166534}.supplier-optima-strip.has-error{border-color:#fca5a5;background:#fff7f7;color:#991b1b}
+.supplier-optima-instruction{padding:.85rem 1rem;border-color:#fbbf24;border-radius:12px}.supplier-optima-instruction ol{display:grid;gap:.25rem;margin:.55rem 0;padding-left:1.25rem;color:#334155}.supplier-optima-instruction p{padding-top:.5rem;border-top:1px solid #fde68a;font-size:.76rem}
+@media(max-width:900px){.supplier-workflow{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:620px){.supplier-workflow{grid-template-columns:1fr}.supplier-email-content{padding:1rem}.supplier-email-brand{padding:1rem}}
 
 /* inFakt, faktury i kontrola duplikatów sklepu */
 .infakt-hero{background:linear-gradient(135deg,#fff 0%,#f6fbff 58%,#eef7ff 100%);border:1px solid #dbeafe}
