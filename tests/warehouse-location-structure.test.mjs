@@ -46,9 +46,13 @@ test('generator tworzy poprawne rekordy i nie narzuca limitu sztuk półce', () 
 });
 
 test('kreator tworzy czytelną strukturę Pakownia → Regał A → Półka 3', () => {
-  assert.match(ui, /value="Pakownia"/);
-  assert.match(ui, /value="PAK"/);
-  assert.match(ui, /Pakownia → Regał A → Półka 1/);
+  const start = ui.indexOf('function magazynKodZPrzyjaznejNazwy');
+  const end = ui.indexOf('function magazynKreatorPodglad', start);
+  const context = { kodLokalizacjiMagazynu: (value = '') => String(value).trim().toUpperCase().replace(/[^A-Z0-9-]+/g, '-') };
+  vm.runInNewContext(`${ui.slice(start, end)};this.result=[magazynKodZPrzyjaznejNazwy('strefa','','Pakownia'),magazynKodZPrzyjaznejNazwy('regał','PAKOWNIA','A'),magazynKodZPrzyjaznejNazwy('półka','PAKOWNIA-RA','3'),magazynNazwaZPrzyjaznejWartosci('półka','3')];`, context);
+  assert.deepEqual(Array.from(context.result), ['PAKOWNIA', 'PAKOWNIA-RA', 'PAKOWNIA-RA-P03', 'Półka 3']);
+  assert.match(ui, /Kody systemowe i QR są tworzone automatycznie w tle/);
+  assert.match(ui, /Tak zobaczy to pracownik/);
   assert.match(core, /nazwa:`Regał \$\{rackLabel\}`/);
   assert.match(core, /nazwa:`Półka \$\{shelfNo\}`/);
   assert.match(core, /rackMode==="numery"/);
@@ -57,17 +61,20 @@ test('kreator tworzy czytelną strukturę Pakownia → Regał A → Półka 3', 
 test('półka i miejsce mogą przechowywać nieograniczoną liczbę sztuk', () => {
   assert.match(core, /bezLimitu=f\.get\("bezLimitu"\)==="on"\|\|limit<=0/);
   assert.match(core, /pojemnosc:bezLimitu\?0:/);
-  assert.match(ui, /Bez limitu sztuk/);
-  assert.match(ui, /∞ Bez limitu sztuk/);
-  assert.match(ui, /max="500" value="0"/);
-  assert.doesNotMatch(ui, /Miejsc na półkę[\s\S]{0,120}max="30"/);
+  assert.match(ui, /Bez limitu liczby sztuk/);
+  assert.match(ui, /dowolna liczba produktów i sztuk/);
+  assert.match(core, /Math\.min\(500,intNieujemny\(f\.get\("miejsca"\),0\)\)/);
 });
 
-test('lokalizacje mają wyszukiwanie, paginację, szybkie dzieci i stałe QR', () => {
-  assert.match(ui, /MAGAZYN_LOKALIZACJE_NA_STRONIE=100/);
+test('lokalizacje mają mapę drzewa, prosty kreator i chronione kody QR', () => {
+  assert.match(ui, /MAGAZYN_DRZEWO_LIMIT=500/);
+  assert.match(ui, /function magazynDrzewoHTML/);
+  assert.match(ui, /function magazynLokalizacjaSzczegolyHTML/);
+  assert.match(ui, /function magazynOtworzKreatorLokalizacji/);
   assert.match(ui, /function przygotujPodlokalizacjeMagazynu/);
-  assert.match(ui, /Po zapisaniu kod jest chroniony, aby QR nie przestał działać/);
-  assert.match(ui, /magazynQROtworzLokalizacje/);
+  assert.match(ui, /code=original\|\|magazynKodZPrzyjaznejNazwy/);
+  assert.match(ui, /Położenie pozostaje stałe, aby istniejące QR działały/);
+  assert.match(ui, /#\/admin\/magazyn\/etykiety-qr/);
   assert.match(ui, /setTimeout\(\(\)=>renderuj\(\),180\)/);
   assert.match(view, /magazynLokalizacjePanelHTML\(lokalizacje,statLok,pozaSlownikiem\)/);
 });
@@ -76,5 +83,6 @@ test('nowy moduł i responsywne style są częścią panelu administratora', () 
   assert.match(build, /src\/frontend\/10-warehouse-locations\.js/);
   assert.match(build, /src\/styles\/20-warehouse-locations\.css/);
   assert.match(styles, /@media\(max-width:700px\)/);
-  assert.match(styles, /warehouse-generator-preview/);
+  assert.match(styles, /warehouse-location-workbench/);
+  assert.match(styles, /warehouse-location-modal/);
 });

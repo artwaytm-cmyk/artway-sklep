@@ -400,6 +400,7 @@ function zapiszLokalizacjeMagazynu(e){
 function edytujLokalizacjeMagazynu(kod){
   const l=magazynLokalizacjaPoKodzie(kod);
   if(!l){ toast("Nie znaleziono lokalizacji"); return; }
+  if(typeof magazynOtworzKreatorLokalizacji==="function"){magazynOtworzKreatorLokalizacji(l.typ,l.parentKod,l.kod);return;}
   const form=$("warehouseLocationForm");
   if(!form) return;
   ["kod","nazwa","typ","strefa","parentKod","kodKreskowy","szerokosc","glebokosc","wysokosc","maxWaga","pojemnosc","priorytet","uwagi"].forEach(k=>{ if(form.elements[k]) form.elements[k].value=l[k]??""; });

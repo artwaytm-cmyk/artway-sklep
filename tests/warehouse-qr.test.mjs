@@ -39,7 +39,8 @@ test('generator QR ma osobną podstronę magazynu i nie obciąża Planu zatowaro
   assert.doesNotMatch(plan, /magazynQRCentrumHTML\(\)/);
   assert.match(inventory, /aktywna==="etykiety-qr"[^\n]+magazynQRCentrumHTML\(\)/);
   assert.match(navigation, /id:"etykiety-qr",href:"#\/admin\/magazyn\/etykiety-qr",label:"🏷️ Etykiety i kody QR"/);
-  assert.match(locations, /magazynQROtworzLokalizacje/);
+  assert.match(locations, /#\/admin\/magazyn\/etykiety-qr/);
+  assert.match(source, /function magazynQROtworzLokalizacje/);
   assert.match(source, /Osobne centrum oznaczeń magazynowych/);
   assert.match(source, /Generator etykiet QR/);
   assert.match(source, /ATW:1:L:/);
