@@ -759,7 +759,7 @@ function widokAdminInfakt(sekcja="pulpit"){
   return adminSzkielet("/admin/infakt",hero+content);
 }
 function magazynPlanZatowarowaniaHTML(){
-  return `<section class="panel restock-plan-intro"><div class="order-section-head"><div><span class="order-pro-label">Zakupy producentów + dokumenty magazynowe</span><h2>📦 Plan zatowarowania</h2><p class="order-detail-lead">Jedno centrum łączy braki do zamówień, dokumenty producentów oraz niezależne przyjęcia PZ i rozchody WZ. Skanowanie tworzy szkic; stan zmienia dopiero świadome zatwierdzenie całego dokumentu.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIUzgodnijPlanZSerwerem()">↻ Uzgodnij szkice z brakami</button></div></div><div class="supplier-plan-guardrails"><span><b>1. Braki</b><small>aktywne zamówienia</small></span><span><b>2. Dokumenty</b><small>producent, PZ albo WZ</small></span><span><b>3. Lokalizacja QR</b><small>regał, półka lub miejsce</small></span><span><b>4. Produkty</b><small>aparat lub czytnik</small></span><span><b>5. Księgowanie</b><small>jedna operacja atomowa</small></span></div></section>${magazynQRCentrumHTML()}${magazynDokumentyPanelHTML()}${magazynTabelaOperacyjnaHTML()}`;
+  return `<section class="panel restock-plan-intro"><div class="order-section-head"><div><span class="order-pro-label">Zakupy producentów + dokumenty magazynowe</span><h2>📦 Plan zatowarowania</h2><p class="order-detail-lead">Jedno centrum łączy braki do zamówień, dokumenty producentów oraz niezależne przyjęcia PZ i rozchody WZ. Skanowanie tworzy szkic; stan zmienia dopiero świadome zatwierdzenie całego dokumentu.</p></div><div class="diag-actions"><a class="btn ghost" href="#/admin/magazyn/etykiety-qr">🏷️ Etykiety QR</a><button class="btn" onclick="agentAIUzgodnijPlanZSerwerem()">↻ Uzgodnij szkice z brakami</button></div></div><div class="supplier-plan-guardrails"><span><b>1. Braki</b><small>aktywne zamówienia</small></span><span><b>2. Dokumenty</b><small>producent, PZ albo WZ</small></span><span><b>3. Lokalizacja</b><small>QR regału, półki lub miejsca</small></span><span><b>4. Produkty</b><small>aparat lub czytnik</small></span><span><b>5. Księgowanie</b><small>jedna operacja atomowa</small></span></div></section>${magazynDokumentyPanelHTML()}${magazynTabelaOperacyjnaHTML()}`;
 }
 function odswiezPlanZatowarowaniaWidoku(){
   const root=document.getElementById("warehouseRestockWorkspace");if(!root||typeof magazynTabelaOperacyjnaHTML!=="function")return false;
@@ -770,8 +770,9 @@ function odswiezPlanZatowarowaniaWidoku(){
 }
 function widokAdminMagazyn(sekcja="pulpit"){
   allegroLadujJesliTrzeba(["pulpit","stany","plan"].includes(sekcja)?"orders":"summary");
-  const aktywna=["pulpit","dostawcy","stany","lokalizacje","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
+  const aktywna=["pulpit","dostawcy","stany","lokalizacje","etykiety-qr","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const u=ustawieniaMagazynuPelne();
+  if(aktywna==="etykiety-qr")return adminSzkielet("/admin/magazyn",`${magazynSubnavHTML(aktywna)}${magazynQRCentrumHTML()}`);
   if(aktywna==="plan")return adminSzkielet("/admin/magazyn",`
     ${magazynSubnavHTML(aktywna)}
     <div class="panel warehouse-hero-panel is-compact"><div class="warehouse-hero"><div><span class="cat-label">Magazyn i dokumenty</span><h1>🏬 ${esc(u.nazwa)}</h1><p>Plan obejmuje realne braki, zamówienia producentów oraz ręczne dokumenty przyjęcia PZ i rozchodu WZ.</p></div></div></div>

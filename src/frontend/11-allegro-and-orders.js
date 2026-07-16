@@ -1477,6 +1477,7 @@ function magazynSubnavHTML(aktywny="pulpit"){
     {id:"dostawcy",href:"#/admin/magazyn/dostawcy",label:"🏭 Dostępność producentów",badge:braki||""},
     {id:"stany",href:"#/admin/magazyn/stany",label:"📦 Stany produktów",badge:braki||""},
     {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",label:"🗺️ Lokalizacje",badge:bezLok||""},
+    {id:"etykiety-qr",href:"#/admin/magazyn/etykiety-qr",label:"🏷️ Etykiety i kody QR"},
     {id:"plan",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:planAkcje||""},
     {id:"ruchy",href:"#/admin/magazyn/ruchy",label:"🧾 Ruchy i ustawienia"}
   ],aktywny);

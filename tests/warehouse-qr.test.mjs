@@ -8,6 +8,7 @@ const source = await readFile(new URL('../src/frontend/10-warehouse-qr.js', impo
 const documents = await readFile(new URL('../src/frontend/10-warehouse-documents.js', import.meta.url), 'utf8');
 const inventory = await readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8');
 const locations = await readFile(new URL('../src/frontend/10-warehouse-locations.js', import.meta.url), 'utf8');
+const navigation = await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8');
 
 function parse(value) {
   const sandbox = {
@@ -33,9 +34,13 @@ test('QR ma wersjonowany format i rozróżnia lokalizację, produkt oraz zwykły
   assert.deepEqual(parse('5906018026788'), { type: 'code', scanCode: '5906018026788', raw: '5906018026788' });
 });
 
-test('Plan ma generator etykiet, workflow lokalizacja-produkt i przycisk QR przy lokalizacji', () => {
-  assert.match(inventory, /magazynQRCentrumHTML\(\)/);
+test('generator QR ma osobną podstronę magazynu i nie obciąża Planu zatowarowania', () => {
+  const plan = inventory.slice(inventory.indexOf('function magazynPlanZatowarowaniaHTML'), inventory.indexOf('function odswiezPlanZatowarowaniaWidoku'));
+  assert.doesNotMatch(plan, /magazynQRCentrumHTML\(\)/);
+  assert.match(inventory, /aktywna==="etykiety-qr"[^\n]+magazynQRCentrumHTML\(\)/);
+  assert.match(navigation, /id:"etykiety-qr",href:"#\/admin\/magazyn\/etykiety-qr",label:"🏷️ Etykiety i kody QR"/);
   assert.match(locations, /magazynQROtworzLokalizacje/);
+  assert.match(source, /Osobne centrum oznaczeń magazynowych/);
   assert.match(source, /Generator etykiet QR/);
   assert.match(source, /ATW:1:L:/);
   assert.match(source, /ATW:1:P:/);
@@ -47,6 +52,7 @@ test('skaner telefonu ma tryb awaryjny QR i przekazuje aktywną lokalizację do 
   assert.match(documents, /magazynDokumentSkanLokalizacje/);
   assert.match(documents, /location:item\.location/);
   assert.match(documents, /Najpierw zeskanuj QR miejsca/);
+  assert.match(documents, /#\/admin\/magazyn\/etykiety-qr/);
 });
 
 test('ciężkie bezpłatne biblioteki QR są osobnymi zasobami ładowanymi na żądanie', async () => {

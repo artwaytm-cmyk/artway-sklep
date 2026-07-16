@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Podgląd mobilnego magazynu QR</title>
+  <title>Podgląd osobnej podstrony kodów QR</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/admin.css">
 </head>
@@ -44,9 +44,7 @@
   </script>
   <script src="/assets/admin.js"></script>
   <script>
-    const previewDocument={id:"WD-PREVIEW",number:"PZ/2026/07/0021",type:"PZ",status:"draft",warehouse:"Magazyn główny",reference:"Dostawa producenta",note:"",revision:3,lines:[{lineId:"1",productId:"17",name:"Ziemniak 1410",externalId:"1410",sku:"1410",ean:"5906018014105",quantity:8,location:"A-R01-P02",matchedBy:"EAN/GTIN",scanCount:8}]};
-    magazynDokumentyStan.loaded=true;magazynDokumentyStan.items=[previewDocument];magazynDokumentyStan.selectedId=previewDocument.id;
-    document.getElementById("preview").innerHTML=`<section class="panel restock-plan-intro"><div class="order-section-head"><div><span class="order-pro-label">Podgląd procesu</span><h1>📦 Plan zatowarowania</h1><p class="order-detail-lead">Mobilne przyjęcie i rozchód z kontrolą lokalizacji.</p></div></div></section>${magazynQRCentrumHTML()}<section class="panel warehouse-documents-center">${magazynDokumentEditorHTML(previewDocument)}</section>`;
+    document.getElementById("preview").innerHTML=magazynQRCentrumHTML();
   </script>
 </body>
 </html>
