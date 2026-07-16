@@ -185,9 +185,11 @@ test('pozycje do decyzji mają edytor braków, wybór masowy i bezpieczny zapis 
   const ui = readFileSync(new URL('../src/frontend/21-product-link-file-import-ui.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../src/styles/17-product-link-review.css', import.meta.url), 'utf8');
   assert.match(ui, /function productLinkImportReviewFormHTML/);
-  assert.match(ui, /Cena sprzedaży brutto \*/);
+  assert.match(ui, /Cena sprzedaży brutto\$\{gwiazdka\("cena"\)\}/);
   assert.match(ui, /Więcej danych do poprawy/);
   assert.match(ui, /function productLinkImportMasowaDecyzja/);
+  assert.match(ui, /index\+=10/);
+  assert.match(ui, /brak nazwy/);
   assert.match(ui, /Zaznacz wszystkie w filtrze/);
   assert.match(ui, /product-link-import-review-resolve/);
   assert.match(css, /\.product-link-review-bulk/);
