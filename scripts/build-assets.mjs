@@ -36,6 +36,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/21-product-link-file-import-ui.js',
       'src/frontend/13-product-admin.js',
       'src/frontend/14-categories-and-mapping.js',
+      'src/frontend/14a-category-workspace.js',
       'src/frontend/15-personalization-and-publishing.js',
       'src/frontend/16-diagnostics.js',
       'src/frontend/19-admin-dashboard.js',
