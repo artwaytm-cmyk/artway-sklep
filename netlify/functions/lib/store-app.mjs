@@ -59,6 +59,7 @@ import { createStoreOrderSupplierReconciliation } from './store-order-supplier-r
 import { markAllegroInventoryTransition, markAllegroInventoryTransitions, resolveAllegroBaselineCutover } from './domain/allegro-supplier-demand.mjs';
 import { allegroOrderNeedsLiveRefresh, allegroOrderNeedsStatusRefresh, createAllegroOrderArchive } from './domain/allegro-order-retention.mjs';
 import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
+import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
 import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
 import { allegroNextScheduledSyncAt, allegroScheduledSyncDue, normalizeAllegroSyncSettings } from './domain/allegro-sync-policy.mjs';
@@ -1994,7 +1995,7 @@ function allegroNormalizujOferte(o) {
   const price = o?.sellingMode?.price || o?.price || {};
   const stock = o?.stock || {};
   const images = allegroZdjecia(o);
-  const ean = allegroWartoscParametru(o, ['ean', 'gtin', 'kod ean']);
+  const gtins = allegroOfferGtinCandidates(o), ean = gtins[0]?.raw || '';
   const kodProducenta = allegroWartoscParametru(o, ['kod producenta', 'mpn', 'symbol']);
   const marka = allegroWartoscParametru(o, ['marka', 'producent', 'brand']);
   return {
@@ -2010,6 +2011,8 @@ function allegroNormalizujOferte(o) {
     productId: tekst(o.product?.id || o.productSet?.[0]?.product?.id || '', 120),
     ean: tekst(ean, 80),
     gtin: tekst(ean, 80),
+    gtins: gtins.map((x) => x.raw),
+    canonicalGtins: gtins.map((x) => x.canonical),
     manufacturerCode: tekst(kodProducenta, 120),
     producerCode: tekst(kodProducenta, 120),
     brand: tekst(marka, 160),
@@ -2035,7 +2038,7 @@ function allegroNormalizujOferte(o) {
 function allegroScalSzczegolyOferty(previous = {}, next = {}, detailed = false) {
   if (detailed || !previous?.id) return next;
   const merged = { ...previous, ...next };
-  const richFields = ['productId', 'ean', 'gtin', 'manufacturerCode', 'producerCode', 'brand', 'images', 'mainImage', 'parameters', 'descriptionText', 'productSet', 'delivery', 'payments', 'afterSalesServices', 'publication', 'location'];
+  const richFields = ['productId', 'ean', 'gtin', 'gtins', 'canonicalGtins', 'manufacturerCode', 'producerCode', 'brand', 'images', 'mainImage', 'parameters', 'descriptionText', 'productSet', 'delivery', 'payments', 'afterSalesServices', 'publication', 'location'];
   for (const field of richFields) {
     const value = next[field];
     if (value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length)) merged[field] = previous[field];

@@ -44,7 +44,9 @@ test('indeks mapowania zawęża katalog 20 000 produktów bez utraty dokładnego
   const source = await readFile(new URL('../src/frontend/11-allegro-mapping-index.js', import.meta.url), 'utf8');
   const context = { allegroMapowania: {} }; vm.createContext(context); vm.runInContext(source, context);
   const products = Array.from({ length: 20_000 }, (_, index) => ({ id: index + 1, nazwa: `Gra edukacyjna pozycja ${index + 1}`, ean: String(5900000000000 + index) }));
-  const target = products[18_765], pool = context.allegroPulaProduktowMapowania({ id: 'offer', name: target.nazwa, ean: target.ean }, products);
+  const target = { ...products[18_765], ean: '5906018026788' };
+  products[18_765] = target;
+  const pool = context.allegroPulaProduktowMapowania({ id: 'offer', name: target.nazwa, gtins: ['5906018003796', '05906018026788'] }, products);
   assert.equal(pool[0].id, target.id);
   assert.ok(pool.length <= 800);
 });

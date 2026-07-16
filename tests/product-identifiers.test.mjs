@@ -26,6 +26,24 @@ test('ocena mapowania Allegro nie zgłasza konfliktu dla równoważnych GTIN', (
   assert.deepEqual(result.conflicts, []);
 });
 
+test('mapowanie rozpoznaje również alternatywne nazwy pól EAN po obu stronach', () => {
+  const result = scoreAllegroProductMapping(
+    { id: 121, nazwa: 'Gra logiczna', EAN: '5906018026788' },
+    { id: 'OF-2', name: 'Gra logiczna', canonicalGtin: '05906018026788' },
+  );
+  assert.equal(result.score, 100);
+  assert.equal(result.valid, true);
+});
+
+test('mapowanie rozpoznaje produkt, gdy właściwy EAN jest kolejnym GTIN oferty', () => {
+  const result = scoreAllegroProductMapping(
+    { id: 122, nazwa: 'Gra rodzinna', ean: '5906018026788' },
+    { id: 'OF-3', name: 'Gra rodzinna', gtins: ['5906018003796', '05906018026788'] },
+  );
+  assert.equal(result.score, 100);
+  assert.deepEqual(result.conflicts, []);
+});
+
 test('ręczne mapowanie jest trwałym dowodem, a migawka zachowuje dane zakupowe', () => {
   assert.equal(mappingVerifiedForSupplier({ operator: 'admin-validated' }), true);
   const snapshot = mappingProductSnapshot(

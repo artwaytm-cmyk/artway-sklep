@@ -3,7 +3,9 @@ import { canonicalGtin } from './product-identifiers.mjs';
 const clip = (value = '', limit = 400) => String(value ?? '').replace(/\u0000/g, '').trim().slice(0, limit);
 const normalize = (value = '') => clip(value, 500).toLowerCase().normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-const gtinKey = (value = '') => canonicalGtin(value) || normalize(value);
+const gtinKeys = (...values) => [...new Set(values.flat(Infinity).map(canonicalGtin).filter(Boolean))];
+const productGtins = (product = {}) => gtinKeys(product.canonicalGtins, product.gtins, product.canonicalGtin, product.gtin, product.ean, product.GTIN, product.EAN, product.kodKreskowy);
+const offerGtins = (offer = {}) => gtinKeys(offer.canonicalGtins, offer.gtins, offer.canonicalGtin, offer.gtin, offer.ean, offer.GTIN, offer.EAN, offer.barcode);
 const significantTokens = (value = '') => {
   const stop = new Set(['gra', 'gry', 'zabawka', 'zabawki', 'zestaw', 'alexander', 'multigra', 'godan', 'origami', 'konstruktor', 'junior', 'maly', 'mala', 'duzy', 'duza', 'dla', 'oraz', 'wersja', 'szt', 'elementow']);
   return new Set(normalize(value).split(/\s+/).filter((token) => token.length > 2 && !stop.has(token)));
@@ -60,19 +62,19 @@ export function mappedProductFallback(mapping = {}, line = {}, offer = {}, produ
 
 export function scoreAllegroProductMapping(product = {}, offer = {}) {
   const p = {
-    ean: gtinKey(product.gtin || product.ean), external: normalize(product.externalId || product.sku),
+    eans: productGtins(product), external: normalize(product.externalId || product.sku),
     code: normalize(product.kodProducenta || product.mpn), catalog: String(product.allegroProductId || '').trim(),
     offerId: String(product.allegroOfferId || '').trim(), name: clip(product.nazwa || product.name, 400),
   };
   const o = {
-    ean: gtinKey(offer.ean || offer.gtin), external: normalize(offer.externalId),
+    eans: offerGtins(offer), external: normalize(offer.externalId),
     code: normalize(offer.manufacturerCode || offer.producerCode), catalog: String(offer.productId || '').trim(),
     id: String(offer.id || '').trim(), name: clip(offer.name || offer.offerName, 400),
   };
   const evidence = [], conflicts = [];
   let score = 0, reason = '';
   const hit = (value, label) => { if (value > score) { score = value; reason = label; } evidence.push(label); };
-  if (p.ean && o.ean) p.ean === o.ean ? hit(100, 'identyczny EAN/GTIN') : conflicts.push('różny EAN/GTIN');
+  if (p.eans.length && o.eans.length) p.eans.some((ean) => o.eans.includes(ean)) ? hit(100, 'identyczny EAN/GTIN') : conflicts.push('różny EAN/GTIN');
   if (p.catalog && o.catalog) p.catalog === o.catalog ? hit(99, 'identyczny produkt katalogowy Allegro') : conflicts.push('różne ID produktu katalogowego');
   if (p.external && o.external) p.external === o.external ? hit(97, 'identyczny EXTERNAL_ID/SKU') : conflicts.push('różny EXTERNAL_ID/SKU');
   if (p.code && o.code) p.code === o.code ? hit(95, 'identyczny kod producenta') : conflicts.push('różny kod producenta');
@@ -95,7 +97,7 @@ export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw =
   const savedOfferId = clip(product.allegroOfferId, 100);
   const catalogProductId = clip(product.allegroProductId, 120);
   const externalId = normalize(product.externalId || product.sku || product.kodProducenta || product.mpn);
-  const ean = gtinKey(product.gtin || product.ean);
+  const eans = productGtins(product);
   const producerCode = normalize(product.kodProducenta || product.mpn);
   const name = normalize(product.nazwa || product.name);
   const threshold = Math.min(100, Math.max(55, Number(minimumScore) || 85));
@@ -113,7 +115,7 @@ export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw =
     else if (mappedOfferId && String(offer?.id) === String(mappedOfferId) && credible(offer)) { score = 98; reason = 'mapowanie produktu'; }
     else if (catalogProductId && String(offer?.productId || '') === catalogProductId && credible(offer)) { score = 97; reason = 'identyczne ID produktu katalogowego Allegro'; }
     else if (externalId && normalize(offer?.externalId) === externalId) { score = 95; reason = 'identyczny external.id / SKU'; }
-    else if (ean && gtinKey(offer?.ean || offer?.gtin) === ean) { score = 92; reason = 'identyczny EAN/GTIN'; }
+    else if (eans.length && offerGtins(offer).some((ean) => eans.includes(ean))) { score = 92; reason = 'identyczny EAN/GTIN'; }
     else if (producerCode && normalize(offer?.manufacturerCode || offer?.producerCode) === producerCode) { score = 88; reason = 'identyczny kod producenta'; }
     else if (name && normalize(offer?.name) === name) { score = 86; reason = 'identyczna nazwa oferty'; }
     else {
