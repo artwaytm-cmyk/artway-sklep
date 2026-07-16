@@ -147,13 +147,15 @@ function usunKlienta(email){
 }
 let szukajProduktow = "", filtrProduktow = "Wszystkie", kategoriaNowegoProduktu = "";
 let filtrStatusuProduktow = "aktywne", filtrZrodlaProduktow = "wszystkie", filtrStanuProduktow = "wszystkie", filtrAllegroProduktow = "wszystkie";
-let sortowanieAdminProduktow = ["external","id","nazwa","cena-rosnaco","cena-malejaco","stan"].includes(wczytajLS("artway_produkty_sortowanie_admin","external"))?wczytajLS("artway_produkty_sortowanie_admin","external"):"external";
+let filtrProducentaProduktow="wszyscy",filtrDanychProduktow="wszystkie",filtrSprzedazyProduktow="wszystkie",filtrPromocjiProduktow="wszystkie",cenaOdAdminProduktow="",cenaDoAdminProduktow="";
+let sortowanieAdminProduktow = ["external","id","nazwa","producent","kategoria","cena-rosnaco","cena-malejaco","stan","braki-danych","najnowsze"].includes(wczytajLS("artway_produkty_sortowanie_admin","external"))?wczytajLS("artway_produkty_sortowanie_admin","external"):"external";
+let gestoscAdminProduktow=["zwarta","wygodna"].includes(wczytajLS("artway_produkty_gestosc_admin","zwarta"))?wczytajLS("artway_produkty_gestosc_admin","zwarta"):"zwarta";
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
 let frazaMagazynu="", filtrMagazynu="wszystkie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="decyzje";
 let magazynNaStronie=[25,50,100,200,500].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
 function ustawKafelkowyFiltrAsortymentu(typ="aktywne"){
-  szukajProduktow="";filtrProduktow="Wszystkie";filtrZrodlaProduktow="wszystkie";filtrStanuProduktow="wszystkie";filtrStatusuProduktow="aktywne";filtrAllegroProduktow="wszystkie";
+  asortymentResetujFiltry(false);
   if(typ==="allegro_polaczone")filtrAllegroProduktow="polaczone";
   else if(typ==="allegro_duplikaty")filtrAllegroProduktow="duplikaty";
   else if(typ==="allegro_brak")filtrAllegroProduktow="brak";
@@ -162,10 +164,72 @@ function ustawKafelkowyFiltrAsortymentu(typ="aktywne"){
   setTimeout(()=>document.querySelector("[data-assortment-results]")?.scrollIntoView({behavior:"smooth",block:"start"}),30);
 }
 function dokumentTymczasowyHTML(html){const tpl=document.createElement("template");tpl.innerHTML=String(html||"").trim();return tpl.content;}
+function asortymentOdswiezWyniki(){
+  const source=dokumentTymczasowyHTML(widokAdminProdukty());
+  for(const selector of ["[data-assortment-results]","[data-assortment-filter-summary]","[data-assortment-active-filters]","[data-assortment-operations]"]){
+    const current=document.querySelector(selector),next=source.querySelector(selector);if(current&&next)current.innerHTML=next.innerHTML;
+  }
+}
 function asortymentSzukajProdukty(input){
   szukajProduktow=String(input?.value||"");stronaAdminProduktow=1;clearTimeout(window.__assortmentSearch);
-  window.__assortmentSearch=setTimeout(()=>{const current=document.querySelector("[data-assortment-results]"),source=dokumentTymczasowyHTML(widokAdminProdukty()).querySelector("[data-assortment-results]");if(current&&source)current.innerHTML=source.innerHTML;},140);
+  window.__assortmentSearch=setTimeout(asortymentOdswiezWyniki,160);
 }
+function asortymentBrakiDanych(p={}){
+  const braki=[];
+  if(!String(p.nazwa||"").trim())braki.push("nazwa");
+  if(!(Number(p.cena)>0))braki.push("cena");
+  if(!String(p.gtin||p.ean||"").trim())braki.push("EAN");
+  if(!String(p.zdjecie||(Array.isArray(p.zdjecia)?p.zdjecia[0]:"")||"").trim())braki.push("zdjęcie");
+  if(!String(p.opisKrotki||p.krotkiOpis||"").trim()||!String(p.opis||"").trim())braki.push("opis");
+  if(!String(p.producent||p.marka||"").trim())braki.push("producent");
+  if(!String(p.kategoria||"").trim())braki.push("kategoria");
+  if(!String(p.sourceUrl||p.producentUrl||p.urlProducenta||"").trim())braki.push("źródło");
+  return braki;
+}
+function asortymentResetujFiltry(render=true){
+  szukajProduktow="";filtrProduktow="Wszystkie";filtrStatusuProduktow="aktywne";filtrZrodlaProduktow="wszystkie";filtrStanuProduktow="wszystkie";filtrAllegroProduktow="wszystkie";filtrProducentaProduktow="wszyscy";filtrDanychProduktow="wszystkie";filtrSprzedazyProduktow="wszystkie";filtrPromocjiProduktow="wszystkie";cenaOdAdminProduktow="";cenaDoAdminProduktow="";stronaAdminProduktow=1;
+  if(render)renderuj();
+}
+function asortymentUstawFiltr(nazwa,value){
+  const v=String(value??"");
+  if(nazwa==="kategoria")filtrProduktow=v||"Wszystkie";
+  else if(nazwa==="status")filtrStatusuProduktow=v||"aktywne";
+  else if(nazwa==="zrodlo")filtrZrodlaProduktow=v||"wszystkie";
+  else if(nazwa==="stan")filtrStanuProduktow=v||"wszystkie";
+  else if(nazwa==="allegro")filtrAllegroProduktow=v||"wszystkie";
+  else if(nazwa==="producent")filtrProducentaProduktow=v||"wszyscy";
+  else if(nazwa==="dane")filtrDanychProduktow=v||"wszystkie";
+  else if(nazwa==="sprzedaz")filtrSprzedazyProduktow=v||"wszystkie";
+  else if(nazwa==="promocja")filtrPromocjiProduktow=v||"wszystkie";
+  else if(nazwa==="cenaOd")cenaOdAdminProduktow=v;
+  else if(nazwa==="cenaDo")cenaDoAdminProduktow=v;
+  stronaAdminProduktow=1;renderuj();
+}
+function asortymentUstawWidok(widok="aktywne"){
+  asortymentResetujFiltry(false);
+  if(widok==="gotowe"){filtrDanychProduktow="gotowe";filtrSprzedazyProduktow="dostepne";}
+  else if(widok==="braki")filtrDanychProduktow="braki";
+  else if(widok==="bez-allegro")filtrAllegroProduktow="brak";
+  else if(widok==="ukryte")filtrSprzedazyProduktow="niedostepne";
+  else if(widok==="promocje")filtrPromocjiProduktow="promocje";
+  else if(widok==="kosz")filtrStatusuProduktow="kosz";
+  renderuj();
+}
+function asortymentWyczyscFiltr(nazwa){
+  if(nazwa==="szukaj")szukajProduktow="";
+  else if(nazwa==="kategoria")filtrProduktow="Wszystkie";
+  else if(nazwa==="status")filtrStatusuProduktow="aktywne";
+  else if(nazwa==="zrodlo")filtrZrodlaProduktow="wszystkie";
+  else if(nazwa==="stan")filtrStanuProduktow="wszystkie";
+  else if(nazwa==="allegro")filtrAllegroProduktow="wszystkie";
+  else if(nazwa==="producent")filtrProducentaProduktow="wszyscy";
+  else if(nazwa==="dane")filtrDanychProduktow="wszystkie";
+  else if(nazwa==="sprzedaz")filtrSprzedazyProduktow="wszystkie";
+  else if(nazwa==="promocja")filtrPromocjiProduktow="wszystkie";
+  else if(nazwa==="cena"){cenaOdAdminProduktow="";cenaDoAdminProduktow="";}
+  stronaAdminProduktow=1;renderuj();
+}
+function ustawGestoscAdminProduktow(v){gestoscAdminProduktow=v==="wygodna"?"wygodna":"zwarta";zapiszLS("artway_produkty_gestosc_admin",gestoscAdminProduktow);renderuj();}
 function magazynSzukajProdukty(input){
   frazaMagazynu=String(input?.value||"");stronaMagazynu=1;clearTimeout(window.__warehouseSearch);
   window.__warehouseSearch=setTimeout(()=>{
@@ -224,12 +288,19 @@ function sortujProduktyAdmin(lista){
       if(!aa&&!bb)return Number(a.id)-Number(b.id);if(!aa)return 1;if(!bb)return -1;return aa.localeCompare(bb,"pl",{numeric:true,sensitivity:"base"})||Number(a.id)-Number(b.id);
     }
     if(sortowanieAdminProduktow==="nazwa") return a.nazwa.localeCompare(b.nazwa,"pl");
+    if(sortowanieAdminProduktow==="producent") return String(a.producent||a.marka||"").localeCompare(String(b.producent||b.marka||""),"pl",{numeric:true,sensitivity:"base"})||String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
+    if(sortowanieAdminProduktow==="kategoria") return String(a.kategoria||"").localeCompare(String(b.kategoria||""),"pl",{numeric:true,sensitivity:"base"})||String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
     if(sortowanieAdminProduktow==="cena-rosnaco") return a.cena-b.cena;
     if(sortowanieAdminProduktow==="cena-malejaco") return b.cena-a.cena;
     if(sortowanieAdminProduktow==="stan"){
       const sa=stanyProduktow[a.id]===undefined?Number.MAX_SAFE_INTEGER:Number(stanyProduktow[a.id]);
       const sb=stanyProduktow[b.id]===undefined?Number.MAX_SAFE_INTEGER:Number(stanyProduktow[b.id]);
       return sa-sb;
+    }
+    if(sortowanieAdminProduktow==="braki-danych") return asortymentBrakiDanych(b).length-asortymentBrakiDanych(a).length||String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
+    if(sortowanieAdminProduktow==="najnowsze"){
+      const da=Date.parse(a.createdAt||a.agentImportAt||a.updatedAt||0)||0,db=Date.parse(b.createdAt||b.agentImportAt||b.updatedAt||0)||0;
+      return db-da||Number(b.id)-Number(a.id);
     }
     return Number(a.id)-Number(b.id);
   });
@@ -947,144 +1018,154 @@ function widokAdminProdukty(){
   allegroLadujJesliTrzeba();
   const audytAllegro=allegroAudytDuplikatow();
   const audytSklep=audytDuplikatowSklepu();
-  let wszystkie = produktyDoAdministracji();
+  const katalogWszystkie=produktyDoAdministracji();
+  const ofertaCache=new Map(katalogWszystkie.map(p=>[String(p.id),allegroOfertaDlaProduktuSklepu(p)]));
+  const duplikatySklepuIds=new Set(audytSklep.grupy.flatMap(g=>g.produkty.map(p=>String(p.id))));
+  const duplikatyAllegroIds=new Set((audytAllegro.grupy||[]).map(g=>String(g?.produkt?.id??"")).filter(Boolean));
+  let wszystkie=[...katalogWszystkie];
   if(szukajProduktow) wszystkie = wszystkie.filter(p=>produktPasujeFrazie(p,szukajProduktow));
   if(filtrProduktow!=="Wszystkie") wszystkie = wszystkie.filter(p=>p.kategoria===filtrProduktow);
   if(filtrStatusuProduktow==="aktywne") wszystkie=wszystkie.filter(p=>!czyProduktAdminWKoszu(p));
   if(filtrStatusuProduktow==="kosz") wszystkie=wszystkie.filter(p=>czyProduktAdminWKoszu(p));
-  if(filtrStatusuProduktow==="duplikaty") wszystkie=wszystkie.filter(p=>audytSklep.grupy.some(g=>g.produkty.some(x=>String(x.id)===String(p.id))));
+  if(filtrStatusuProduktow==="duplikaty") wszystkie=wszystkie.filter(p=>duplikatySklepuIds.has(String(p.id)));
   if(filtrZrodlaProduktow==="bazowe") wszystkie=wszystkie.filter(p=>!produktyDodane.some(x=>x.id===p.id)&&!jestProduktemImportowanym(p.id));
   if(filtrZrodlaProduktow==="wlasne") wszystkie=wszystkie.filter(p=>produktyDodane.some(x=>x.id===p.id)||jestProduktemImportowanym(p.id));
   if(filtrStanuProduktow==="dostepne") wszystkie=wszystkie.filter(p=>stanyProduktow[p.id]===undefined||Number(stanyProduktow[p.id])>0);
   if(filtrStanuProduktow==="niskie") wszystkie=wszystkie.filter(p=>Number(stanyProduktow[p.id])>0&&Number(stanyProduktow[p.id])<=5);
   if(filtrStanuProduktow==="brak") wszystkie=wszystkie.filter(p=>Number(stanyProduktow[p.id])===0);
-  if(filtrAllegroProduktow==="aktywne") wszystkie=wszystkie.filter(p=>String(allegroOfertaDlaProduktuSklepu(p)?.status||"").toUpperCase()==="ACTIVE");
-  if(filtrAllegroProduktow==="szkice") wszystkie=wszystkie.filter(p=>{const o=allegroOfertaDlaProduktuSklepu(p);return o&&String(o.status||"").toUpperCase()!=="ACTIVE";});
-  if(filtrAllegroProduktow==="polaczone") wszystkie=wszystkie.filter(p=>!!allegroOfertaDlaProduktuSklepu(p));
-  if(filtrAllegroProduktow==="brak") wszystkie=wszystkie.filter(p=>!allegroOfertaDlaProduktuSklepu(p));
-  if(filtrAllegroProduktow==="duplikaty") wszystkie=wszystkie.filter(p=>allegroOfertyPasujaceDoProduktu(p).filter(allegroDopasowanieDuplikatuAktywne).length>1);
+  if(filtrAllegroProduktow==="aktywne") wszystkie=wszystkie.filter(p=>String(ofertaCache.get(String(p.id))?.status||"").toUpperCase()==="ACTIVE");
+  if(filtrAllegroProduktow==="szkice") wszystkie=wszystkie.filter(p=>{const o=ofertaCache.get(String(p.id));return o&&String(o.status||"").toUpperCase()!=="ACTIVE";});
+  if(filtrAllegroProduktow==="polaczone") wszystkie=wszystkie.filter(p=>!!ofertaCache.get(String(p.id)));
+  if(filtrAllegroProduktow==="brak") wszystkie=wszystkie.filter(p=>!ofertaCache.get(String(p.id)));
+  if(filtrAllegroProduktow==="duplikaty") wszystkie=wszystkie.filter(p=>duplikatyAllegroIds.has(String(p.id)));
+  if(filtrProducentaProduktow!=="wszyscy") wszystkie=wszystkie.filter(p=>String(p.producent||p.marka||"")===filtrProducentaProduktow);
+  if(filtrDanychProduktow==="gotowe") wszystkie=wszystkie.filter(p=>asortymentBrakiDanych(p).length===0);
+  if(filtrDanychProduktow==="braki") wszystkie=wszystkie.filter(p=>asortymentBrakiDanych(p).length>0);
+  if(filtrDanychProduktow==="ean") wszystkie=wszystkie.filter(p=>asortymentBrakiDanych(p).includes("EAN"));
+  if(filtrDanychProduktow==="zdjecie") wszystkie=wszystkie.filter(p=>asortymentBrakiDanych(p).includes("zdjęcie"));
+  if(filtrDanychProduktow==="opis") wszystkie=wszystkie.filter(p=>asortymentBrakiDanych(p).includes("opis"));
+  if(filtrDanychProduktow==="zrodlo") wszystkie=wszystkie.filter(p=>asortymentBrakiDanych(p).includes("źródło"));
+  if(filtrDanychProduktow==="producent") wszystkie=wszystkie.filter(p=>asortymentBrakiDanych(p).includes("producent"));
+  if(filtrDanychProduktow==="kategoria") wszystkie=wszystkie.filter(p=>asortymentBrakiDanych(p).includes("kategoria"));
+  if(filtrDanychProduktow==="koszt") wszystkie=wszystkie.filter(p=>!(Number(p.cenaZakupu)>0));
+  if(filtrSprzedazyProduktow==="dostepne") wszystkie=wszystkie.filter(produktDostepnyWSprzedazy);
+  if(filtrSprzedazyProduktow==="niedostepne") wszystkie=wszystkie.filter(p=>!produktDostepnyWSprzedazy(p));
+  if(filtrSprzedazyProduktow==="reczne") wszystkie=wszystkie.filter(produktOznaczonyNiedostepny);
+  if(filtrSprzedazyProduktow==="automat") wszystkie=wszystkie.filter(produktAutomatycznieNiedostepny);
+  if(filtrPromocjiProduktow==="promocje") wszystkie=wszystkie.filter(p=>Number(p.staraCena)>Number(p.cena));
+  if(filtrPromocjiProduktow==="regularne") wszystkie=wszystkie.filter(p=>!(Number(p.staraCena)>Number(p.cena)));
+  if(filtrPromocjiProduktow==="nowosci") wszystkie=wszystkie.filter(p=>String(p.badge||"").toLowerCase().includes("nowo"));
+  const cenaOd=parseFloat(String(cenaOdAdminProduktow||"").replace(",",".")),cenaDo=parseFloat(String(cenaDoAdminProduktow||"").replace(",","."));
+  if(Number.isFinite(cenaOd))wszystkie=wszystkie.filter(p=>kwotaNum(p.cena)>=cenaOd);
+  if(Number.isFinite(cenaDo))wszystkie=wszystkie.filter(p=>kwotaNum(p.cena)<=cenaDo);
   wszystkie=sortujProduktyAdmin(wszystkie);
   const liczbaWynikow=wszystkie.length;
   const liczbaStron=Math.max(1,Math.ceil(liczbaWynikow/produktyNaStronieAdmin));
   stronaAdminProduktow=Math.min(Math.max(1,stronaAdminProduktow),liczbaStron);
   const fragment=wszystkie.slice((stronaAdminProduktow-1)*produktyNaStronieAdmin,stronaAdminProduktow*produktyNaStronieAdmin);
   asortymentWynikiIds=wszystkie.map(p=>p.id);asortymentStronaIds=fragment.map(p=>p.id);
-  const katOpcje = [...new Set(produktyDoAdministracji().map(p=>p.kategoria))];
+  const katOpcje=[...new Set(katalogWszystkie.map(p=>String(p.kategoria||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pl"));
+  const producenciOpcje=[...new Set(katalogWszystkie.map(p=>String(p.producent||p.marka||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pl"));
   const bazoweWKoszu=bazoweProduktyWKoszu();
   const liczbaWKoszu=koszDodanych.length+bazoweWKoszu.length;
+  const aktywneKarty=katalogWszystkie.filter(p=>!czyProduktAdminWKoszu(p));
+  const polaczoneAllegro=aktywneKarty.filter(p=>ofertaCache.get(String(p.id))).length;
+  const zBrakami=aktywneKarty.filter(p=>asortymentBrakiDanych(p).length).length;
+  const gotoweDoSprzedazy=aktywneKarty.filter(p=>asortymentBrakiDanych(p).length===0&&produktDostepnyWSprzedazy(p)).length;
+  const ukryteSprzedazowo=aktywneKarty.filter(p=>!produktDostepnyWSprzedazy(p)).length;
+  const zakresOd=liczbaWynikow?(stronaAdminProduktow-1)*produktyNaStronieAdmin+1:0,zakresDo=liczbaWynikow?zakresOd+fragment.length-1:0;
+  const aktywneFiltry=[];
+  if(szukajProduktow)aktywneFiltry.push(["szukaj",`Fraza: ${szukajProduktow}`]);
+  if(filtrProduktow!=="Wszystkie")aktywneFiltry.push(["kategoria",`Kategoria: ${filtrProduktow}`]);
+  if(filtrProducentaProduktow!=="wszyscy")aktywneFiltry.push(["producent",`Producent: ${filtrProducentaProduktow}`]);
+  if(filtrStatusuProduktow!=="aktywne")aktywneFiltry.push(["status",`Kartoteka: ${filtrStatusuProduktow}`]);
+  if(filtrSprzedazyProduktow!=="wszystkie")aktywneFiltry.push(["sprzedaz",`Sprzedaż: ${filtrSprzedazyProduktow}`]);
+  if(filtrZrodlaProduktow!=="wszystkie")aktywneFiltry.push(["zrodlo",`Źródło: ${filtrZrodlaProduktow}`]);
+  if(filtrDanychProduktow!=="wszystkie")aktywneFiltry.push(["dane",`Dane: ${filtrDanychProduktow}`]);
+  if(filtrStanuProduktow!=="wszystkie")aktywneFiltry.push(["stan",`Magazyn: ${filtrStanuProduktow}`]);
+  if(filtrAllegroProduktow!=="wszystkie")aktywneFiltry.push(["allegro",`Allegro: ${filtrAllegroProduktow}`]);
+  if(filtrPromocjiProduktow!=="wszystkie")aktywneFiltry.push(["promocja",`Oferta: ${filtrPromocjiProduktow}`]);
+  if(cenaOdAdminProduktow||cenaDoAdminProduktow)aktywneFiltry.push(["cena",`Cena: ${cenaOdAdminProduktow||"0"}–${cenaDoAdminProduktow||"∞"} zł`]);
+  const aktywnyWidok=filtrStatusuProduktow==="kosz"?"kosz":filtrDanychProduktow==="gotowe"&&filtrSprzedazyProduktow==="dostepne"?"gotowe":filtrDanychProduktow==="braki"?"braki":filtrAllegroProduktow==="brak"?"bez-allegro":filtrSprzedazyProduktow==="niedostepne"?"ukryte":filtrPromocjiProduktow==="promocje"?"promocje":aktywneFiltry.length===0?"aktywne":"";
+  const opcje=(lista,wartosc)=>lista.map(([v,l])=>`<option value="${esc(v)}" ${String(wartosc)===String(v)?"selected":""}>${esc(l)}</option>`).join("");
   return asortymentSzkielet("produkty", `
     <div class="panel assortment-catalog-page">
       <header class="assortment-catalog-hero">
-        <div><span class="order-pro-label">Centralna kartoteka sprzedaży</span><h1>🏷️ Katalog produktów</h1><p>Produkty sklepu, magazynu i Allegro w jednej tabeli. Każdy kafelek poniżej jest aktywnym filtrem i pokazuje dokładnie odpowiadające mu pozycje.</p><small>${produkty.length} widocznych w sklepie • ${produktyDoAdministracji().length} wszystkich kart • źródło: ${zrodloProduktow==="json"?"products.json":"lista zapasowa"} + zmiany wspólne</small></div>
-        <div class="assortment-catalog-actions"><a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj ręcznie lub z linku</a><a class="btn ghost" href="#/admin/produkty/z-pliku">📄 Dodaj kolejno z pliku</a><a class="btn ghost" href="#/admin/mapowanie">🧩 Mapowanie</a><a class="btn ghost" href="#/admin/eksport">⇄ Import / eksport</a><details><summary>Więcej operacji</summary><button class="btn ghost" onclick="eksportujProduktyJSON()">📤 products.json</button><button class="btn ghost" onclick="eksportujProduktyCSV()">📤 CSV</button></details></div>
+        <div><span class="order-pro-label">Centralna kartoteka sprzedaży</span><h1>🏷️ Katalog produktów</h1><p>Jeden operacyjny widok produktów sklepu, magazynu i Allegro. Wyszukuj po wielu polach, łącz filtry i wykonuj operacje na całym wyniku bez utraty kontekstu.</p><small>${produkty.length} widocznych w sklepie • ${katalogWszystkie.length} wszystkich kart • ${producenciOpcje.length} producentów • wspólna baza danych</small></div>
+        <div class="assortment-catalog-actions"><a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a><a class="btn ghost" href="#/admin/produkty/z-pliku">📄 Import linków</a><a class="btn ghost" href="#/admin/mapowanie">🧩 Mapowanie</a><a class="btn ghost" href="#/admin/eksport">⇄ Import / eksport</a><details><summary>Więcej operacji</summary><button class="btn ghost" onclick="eksportujProduktyJSON()">📤 Eksport JSON</button><button class="btn ghost" onclick="eksportujProduktyCSV()">📤 Eksport CSV</button></details></div>
       </header>
       <div class="assortment-search-primary">
         <label><span>Wyszukaj w całym asortymencie</span><input data-assortment-search placeholder="Nazwa, EXTERNAL_ID, SKU, EAN, ID, opis, kategoria lub producent…" value="${esc(szukajProduktow)}" oninput="asortymentSzukajProdukty(this)" autocomplete="off"></label>
         <small>Wyniki zmieniają się bez przeładowania panelu i bez utraty kursora.</small>
       </div>
+      <nav class="assortment-saved-views" aria-label="Szybkie widoki katalogu">
+        ${[["aktywne","🏷️ Aktywne",aktywneKarty.length],["gotowe","✅ Gotowe do sprzedaży",gotoweDoSprzedazy],["braki","⚠️ Braki danych",zBrakami],["bez-allegro","🟠 Bez Allegro",aktywneKarty.length-polaczoneAllegro],["ukryte","⏸️ Ukryte sprzedażowo",ukryteSprzedazowo],["promocje","🔥 Promocje",aktywneKarty.filter(p=>Number(p.staraCena)>Number(p.cena)).length],["kosz","🗑️ Kosz",liczbaWKoszu]].map(([v,l,n])=>`<button type="button" class="${aktywnyWidok===v?"active":""}" onclick="asortymentUstawWidok(${jsArg(v)})"><span>${l}</span><b>${n}</b></button>`).join("")}
+      </nav>
       <div class="orders-stat-grid assortment-audit-grid">
-        <button class="order-stat-card stat-filter ${filtrStatusuProduktow==="aktywne"&&filtrAllegroProduktow==="wszystkie"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('aktywne')" aria-pressed="${filtrStatusuProduktow==="aktywne"&&filtrAllegroProduktow==="wszystkie"}"><span>🏷️</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).length}</b><small>aktywne karty produktów</small></button>
-        <button class="order-stat-card stat-filter money ${filtrAllegroProduktow==="polaczone"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('allegro_polaczone')" aria-pressed="${filtrAllegroProduktow==="polaczone"}"><span>🟠</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&allegroOfertaDlaProduktuSklepu(p)).length}</b><small>połączone z Allegro</small></button>
+        <button class="order-stat-card stat-filter ${filtrStatusuProduktow==="aktywne"&&filtrAllegroProduktow==="wszystkie"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('aktywne')" aria-pressed="${filtrStatusuProduktow==="aktywne"&&filtrAllegroProduktow==="wszystkie"}"><span>🏷️</span><b>${aktywneKarty.length}</b><small>aktywne karty produktów</small></button>
+        <button class="order-stat-card stat-filter money ${filtrAllegroProduktow==="polaczone"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('allegro_polaczone')" aria-pressed="${filtrAllegroProduktow==="polaczone"}"><span>🟠</span><b>${polaczoneAllegro}</b><small>połączone z Allegro</small></button>
         <button class="order-stat-card stat-filter ${audytAllegro.produkty?"hot":"money"} ${filtrAllegroProduktow==="duplikaty"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('allegro_duplikaty')" aria-pressed="${filtrAllegroProduktow==="duplikaty"}"><span>${audytAllegro.produkty?"⚠️":"✅"}</span><b>${audytAllegro.produkty}</b><small>podejrzenie duplikatu Allegro</small></button>
-        <button class="order-stat-card stat-filter ${filtrAllegroProduktow==="brak"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('allegro_brak')" aria-pressed="${filtrAllegroProduktow==="brak"}"><span>➕</span><b>${produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!allegroOfertaDlaProduktuSklepu(p)).length}</b><small>bez oferty Allegro</small></button>
+        <button class="order-stat-card stat-filter ${filtrAllegroProduktow==="brak"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('allegro_brak')" aria-pressed="${filtrAllegroProduktow==="brak"}"><span>➕</span><b>${aktywneKarty.length-polaczoneAllegro}</b><small>bez oferty Allegro</small></button>
         <button class="order-stat-card stat-filter ${audytSklep.produkty?"hot":"money"} ${filtrStatusuProduktow==="duplikaty"?"active":""}" type="button" onclick="ustawKafelkowyFiltrAsortymentu('duplikaty_sklepu')" aria-pressed="${filtrStatusuProduktow==="duplikaty"}"><span>${audytSklep.produkty?"🧬":"✅"}</span><b>${audytSklep.produkty}</b><small>karty w grupach duplikatów sklepu</small></button>
       </div>
-      ${audytSklep.grupy.length?`<section class="allegro-duplicate-center store-duplicate-center"><div class="order-section-head"><div><span class="order-pro-label">Porządkowanie katalogu sklepu</span><h3>🧬 Powtarzające się produkty (${audytSklep.grupy.length} grup)</h3><p class="order-detail-lead">Dla każdej grupy wybierz jedną kartę do pozostawienia. Przycisk trwałego czyszczenia usuwa wszystkie pozostałe kopie z katalogu publicznego, panelu, magazynu i wspólnej bazy.</p></div><button class="btn ghost" onclick="filtrStatusuProduktow='duplikaty';stronaAdminProduktow=1;renderuj()">Pokaż wszystkie kopie</button></div><div class="allegro-duplicate-groups">${audytSklep.grupy.slice(0,12).map(g=>`<article class="allegro-duplicate-group"><header><div><b>${esc(g.canonical.nazwa||"Produkt")}</b><small>Wspólny klucz: ${esc(g.keys.join(" • "))}</small></div><span class="lvl lvl-ostrzezenie">${g.produkty.length} kart</span></header><div class="allegro-duplicate-options">${g.produkty.map(p=>`<button type="button" class="allegro-duplicate-option ${String(p.id)===String(g.canonical.id)?"is-canonical":""}" onclick="ustawProduktGlownyDuplikatu(${jsArg(g.groupKey)},${jsArg(p.id)})"><div class="allegro-duplicate-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa)}</b><small>ID ${esc(p.id)} • EXTERNAL_ID ${esc(p.externalId||"—")} • SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small><em>${String(p.id)===String(g.canonical.id)?"✅ ta karta pozostanie":"❌ ta kopia zostanie usunięta"}</em></div></div></button>`).join("")}</div><div class="diag-actions" style="justify-content:flex-end"><button class="btn danger" onclick="usunKopieGrupyProduktuTrwale(${jsArg(g.groupKey)})">🗑️ Pozostaw 1 i usuń trwale ${g.hidden.length} kopii</button></div></article>`).join("")}</div></section>`:`<div class="duplicate-audit-ok"><b>✅ Kontrola katalogu sklepu:</b> brak powtarzających się produktów po EXTERNAL_ID, SKU, EAN i kodzie producenta.</div>`}
-      ${audytAllegro.produkty?`<div class="duplicate-audit-alert"><div><b>⚠️ Kontrola Asortymentu wykryła powtarzające się oferty Allegro</b><small>${audytAllegro.produkty} produktów pasuje do ${audytAllegro.oferty} ofert. Nowe wystawienie wybierze istniejącą ofertę do aktualizacji; istniejące powtórzenia możesz sprawdzić bezpośrednio w katalogu Allegro.</small></div><button class="btn ghost" onclick="filtrAllegroProduktow='duplikaty';stronaAdminProduktow=1;renderuj()">Pokaż produkty</button><a class="btn" href="#/admin/allegro/oferty" onclick="filtrAllegroOfert='duplikaty'">Otwórz oferty</a></div>`:`<div class="duplicate-audit-ok"><b>✅ Kontrola ofert Allegro:</b> aktualny asortyment nie zawiera produktów połączonych z więcej niż jedną ofertą.</div>`}
-      <details class="assortment-filter-panel admin-search-standard" open><summary><span><b>🔎 Wyszukiwanie zaawansowane</b><small>Kafelki ustawiają gotowy filtr, a pola poniżej pozwalają go dodatkowo zawęzić.</small></span><span class="admin-search-summary-meta"><strong>${liczbaWynikow} wyników</strong><i aria-hidden="true"></i></span></summary><div class="filter-grid admin-search-standard-body">
-        <select onchange="filtrProduktow=this.value;stronaAdminProduktow=1;renderuj()">
-          <option ${filtrProduktow==="Wszystkie"?"selected":""}>Wszystkie</option>
-          ${katOpcje.map(k=>`<option ${k===filtrProduktow?"selected":""}>${esc(k)}</option>`).join("")}
-        </select>
-        <select onchange="filtrStatusuProduktow=this.value;stronaAdminProduktow=1;renderuj()">
-          <option value="wszystkie" ${filtrStatusuProduktow==="wszystkie"?"selected":""}>Wszystkie statusy</option>
-          <option value="aktywne" ${filtrStatusuProduktow==="aktywne"?"selected":""}>Tylko aktywne</option>
-          <option value="kosz" ${filtrStatusuProduktow==="kosz"?"selected":""}>Tylko w koszu</option>
-          <option value="duplikaty" ${filtrStatusuProduktow==="duplikaty"?"selected":""}>Tylko powtarzające się (${audytSklep.produkty})</option>
-        </select>
-        <select onchange="filtrZrodlaProduktow=this.value;stronaAdminProduktow=1;renderuj()">
-          <option value="wszystkie" ${filtrZrodlaProduktow==="wszystkie"?"selected":""}>Każde źródło</option>
-          <option value="bazowe" ${filtrZrodlaProduktow==="bazowe"?"selected":""}>products.json</option>
-          <option value="wlasne" ${filtrZrodlaProduktow==="wlasne"?"selected":""}>Dodane w panelu</option>
-        </select>
-        <select onchange="filtrStanuProduktow=this.value;stronaAdminProduktow=1;renderuj()">
-          <option value="wszystkie" ${filtrStanuProduktow==="wszystkie"?"selected":""}>Magazyn: każdy stan</option>
-          <option value="dostepne" ${filtrStanuProduktow==="dostepne"?"selected":""}>Magazyn: powyżej 0 / bez limitu</option>
-          <option value="niskie" ${filtrStanuProduktow==="niskie"?"selected":""}>Magazyn: niski stan (1–5)</option>
-          <option value="brak" ${filtrStanuProduktow==="brak"?"selected":""}>Magazyn: 0 szt.</option>
-        </select>
-        <select onchange="filtrAllegroProduktow=this.value;stronaAdminProduktow=1;renderuj()">
-          <option value="wszystkie" ${filtrAllegroProduktow==="wszystkie"?"selected":""}>Allegro: wszystkie</option>
-          <option value="polaczone" ${filtrAllegroProduktow==="polaczone"?"selected":""}>Allegro: wszystkie połączone</option>
-          <option value="aktywne" ${filtrAllegroProduktow==="aktywne"?"selected":""}>Allegro: aktywne</option>
-          <option value="szkice" ${filtrAllegroProduktow==="szkice"?"selected":""}>Allegro: szkice / nieaktywne</option>
-          <option value="brak" ${filtrAllegroProduktow==="brak"?"selected":""}>Allegro: brak oferty</option>
-          <option value="duplikaty" ${filtrAllegroProduktow==="duplikaty"?"selected":""}>Allegro: podejrzane duplikaty (${audytAllegro.produkty})</option>
-        </select>
-        <select onchange="ustawSortowanieAdminProduktow(this.value)">
-          <option value="external" ${sortowanieAdminProduktow==="external"?"selected":""}>EXTERNAL_ID / SKU (domyślnie)</option>
-          <option value="id" ${sortowanieAdminProduktow==="id"?"selected":""}>Sortuj: ID</option>
-          <option value="nazwa" ${sortowanieAdminProduktow==="nazwa"?"selected":""}>Nazwa A–Z</option>
-          <option value="cena-rosnaco" ${sortowanieAdminProduktow==="cena-rosnaco"?"selected":""}>Cena rosnąco</option>
-          <option value="cena-malejaco" ${sortowanieAdminProduktow==="cena-malejaco"?"selected":""}>Cena malejąco</option>
-          <option value="stan" ${sortowanieAdminProduktow==="stan"?"selected":""}>Najniższy stan</option>
-        </select>
-        <button class="btn ghost" type="button" onclick="szukajProduktow='';filtrProduktow='Wszystkie';filtrStatusuProduktow='aktywne';filtrZrodlaProduktow='wszystkie';filtrStanuProduktow='wszystkie';filtrAllegroProduktow='wszystkie';stronaAdminProduktow=1;renderuj()">Wyczyść wszystkie</button>
-      </div><div class="admin-search-standard-actions">${adminOperacjeWynikowHTML({id:"assortment-products",selected:zaznaczoneProdukty.size,pageCount:fragment.length,resultCount:liczbaWynikow,selectPage:"asortymentZaznaczZakres('strona')",selectAll:"asortymentZaznaczZakres('filtr')",clear:"wyczyscZaznaczenieProduktow()",exportSelected:"asortymentEksportuj('zaznaczone')",exportAll:"asortymentEksportuj('filtr')"})}</div></details>
-      <div data-assortment-results><div class="results-bar">
-        <span>Znaleziono: <b>${liczbaWynikow}</b>. Strona ${stronaAdminProduktow} z ${liczbaStron}.</span>
-        <label>Na stronie:
-          <select onchange="ustawProduktyNaStronieAdmin(this.value)">
-            ${[25,50,100,200,500,1000].map(n=>`<option value="${n}" ${produktyNaStronieAdmin===n?"selected":""}>${n}</option>`).join("")}
-          </select>
-        </label>
-      </div>
-      <div class="pagination" style="margin:.7rem auto">${paginacjaHTML(stronaAdminProduktow,liczbaStron,"ustawStroneAdminProduktow")}</div>
-      <div class="masowe-akcje">
-        <b style="font-size:.85rem">Zaznaczone (${zaznaczoneProdukty.size}):</b>
-        <button class="btn danger" onclick="usunZaznaczoneProd()" style="padding:.35rem .8rem">🗑️ Usuń</button>
-        <span style="display:flex;gap:.4rem;align-items:center">
-          <select id="trybCenProduktow" style="padding:.35rem .6rem"><option value="percent">O procent (+/−)</option><option value="amount">O kwotę (+/−)</option><option value="fixed">Ustaw cenę</option></select>
-          <input id="procentCen" placeholder="np. 10 lub -5" inputmode="decimal" style="width:110px;padding:.35rem .6rem;border:1.5px solid var(--line);border-radius:9px">
-          <button class="btn ghost" onclick="zmienCenyZaznaczonych()" style="padding:.35rem .8rem">💰 Zmień ceny</button>
-        </span>
-      </div>
-      <div class="assortment-table-wrap"><table class="log-table assortment-product-table">
-        <tr><th><input type="checkbox" onchange="zaznaczWidoczneProd(this, [${fragment.map(p=>p.id).join(",")}])" style="width:16px;height:16px" title="Zaznacz produkty na tej stronie"></th><th>ID</th><th>EXTERNAL_ID</th><th>Miniatura</th><th>Produkt</th><th>Producent</th><th>Kategoria</th><th>Cena (kliknij, by zmienić)</th><th>Promocja</th><th>Magazyn</th><th>Sprzedaż</th><th>Allegro</th><th>Akcje</th></tr>
+      <details class="assortment-maintenance" ${filtrStatusuProduktow==="duplikaty"||filtrAllegroProduktow==="duplikaty"?"open":""}><summary><span><b>🧬 Kontrola duplikatów i porządkowanie</b><small>Rozwiń tylko wtedy, gdy chcesz porównać lub uporządkować powtarzające się karty.</small></span><span><strong>Sklep: ${audytSklep.produkty}</strong><strong>Allegro: ${audytAllegro.produkty}</strong></span></summary><div class="assortment-maintenance-body">
+        ${audytSklep.grupy.length?`<section class="allegro-duplicate-center store-duplicate-center"><div class="order-section-head"><div><span class="order-pro-label">Porządkowanie katalogu sklepu</span><h3>Powtarzające się produkty (${audytSklep.grupy.length} grup)</h3><p class="order-detail-lead">Wybierz kartę główną dopiero po porównaniu identyfikatorów i danych.</p></div><button class="btn ghost" onclick="asortymentUstawFiltr('status','duplikaty')">Pokaż wszystkie kopie</button></div><div class="allegro-duplicate-groups">${audytSklep.grupy.slice(0,12).map(g=>`<article class="allegro-duplicate-group"><header><div><b>${esc(g.canonical.nazwa||"Produkt")}</b><small>Wspólny klucz: ${esc(g.keys.join(" • "))}</small></div><span class="lvl lvl-ostrzezenie">${g.produkty.length} kart</span></header><div class="allegro-duplicate-options">${g.produkty.map(p=>`<button type="button" class="allegro-duplicate-option ${String(p.id)===String(g.canonical.id)?"is-canonical":""}" onclick="ustawProduktGlownyDuplikatu(${jsArg(g.groupKey)},${jsArg(p.id)})"><div class="allegro-duplicate-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa)}</b><small>ID ${esc(p.id)} • EXTERNAL_ID ${esc(p.externalId||"—")} • SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small><em>${String(p.id)===String(g.canonical.id)?"✅ karta główna":"kopia do decyzji"}</em></div></div></button>`).join("")}</div><div class="diag-actions"><button class="btn danger" onclick="usunKopieGrupyProduktuTrwale(${jsArg(g.groupKey)})">🗑️ Pozostaw 1 i usuń trwale ${g.hidden.length} kopii</button></div></article>`).join("")}</div></section>`:`<div class="duplicate-audit-ok"><b>✅ Katalog sklepu:</b> brak powtarzających się produktów.</div>`}
+        ${audytAllegro.produkty?`<div class="duplicate-audit-alert"><div><b>⚠️ Powtarzające się dopasowania Allegro</b><small>${audytAllegro.produkty} produktów pasuje do ${audytAllegro.oferty} ofert.</small></div><button class="btn ghost" onclick="asortymentUstawFiltr('allegro','duplikaty')">Pokaż produkty</button><a class="btn" href="#/admin/allegro/oferty" onclick="filtrAllegroOfert='duplikaty'">Otwórz oferty</a></div>`:`<div class="duplicate-audit-ok"><b>✅ Allegro:</b> brak produktów połączonych z więcej niż jedną ofertą.</div>`}
+      </div></details>
+      <details class="assortment-filter-panel admin-search-standard" open><summary><span><b>🔎 Wyszukiwanie zaawansowane</b><small>Łącz producenta, kategorię, kompletność danych, sprzedaż, magazyn, Allegro, ofertę i zakres ceny.</small></span><span class="admin-search-summary-meta" data-assortment-filter-summary>${aktywneFiltry.length?`<em>${aktywneFiltry.length} aktywnych</em>`:""}<strong>${liczbaWynikow} wyników</strong><i aria-hidden="true"></i></span></summary><div class="admin-search-standard-body assortment-advanced-grid">
+        <label><span>Kategoria</span><select onchange="asortymentUstawFiltr('kategoria',this.value)"><option value="Wszystkie">Wszystkie kategorie</option>${katOpcje.map(k=>`<option value="${esc(k)}" ${k===filtrProduktow?"selected":""}>${esc(k)}</option>`).join("")}</select></label>
+        <label><span>Producent</span><select onchange="asortymentUstawFiltr('producent',this.value)"><option value="wszyscy">Wszyscy producenci</option>${producenciOpcje.map(p=>`<option value="${esc(p)}" ${p===filtrProducentaProduktow?"selected":""}>${esc(p)}</option>`).join("")}</select></label>
+        <label><span>Status kartoteki</span><select onchange="asortymentUstawFiltr('status',this.value)">${opcje([["aktywne","Tylko aktywne"],["wszystkie","Aktywne i kosz"],["kosz",`Tylko w koszu (${liczbaWKoszu})`],["duplikaty",`Powtarzające się (${audytSklep.produkty})`]],filtrStatusuProduktow)}</select></label>
+        <label><span>Dostępność sprzedażowa</span><select onchange="asortymentUstawFiltr('sprzedaz',this.value)">${opcje([["wszystkie","Każda dostępność"],["dostepne","Widoczne w sprzedaży"],["niedostepne","Ukryte w sprzedaży"],["reczne","Wyłączone ręcznie"],["automat","Wyłączone automatycznie"]],filtrSprzedazyProduktow)}</select></label>
+        <label><span>Źródło kartoteki</span><select onchange="asortymentUstawFiltr('zrodlo',this.value)">${opcje([["wszystkie","Każde źródło"],["bazowe","Katalog bazowy"],["wlasne","Dodane / importowane"]],filtrZrodlaProduktow)}</select></label>
+        <label><span>Kompletność danych</span><select onchange="asortymentUstawFiltr('dane',this.value)">${opcje([["wszystkie","Każdy stan danych"],["gotowe","Kompletne kartoteki"],["braki","Dowolny brak danych"],["ean","Brak EAN"],["zdjecie","Brak zdjęcia"],["opis","Brak opisu krótkiego lub pełnego"],["producent","Brak producenta"],["kategoria","Brak kategorii"],["zrodlo","Brak linku źródłowego"],["koszt","Brak ceny zakupu (admin)"]],filtrDanychProduktow)}</select></label>
+        <label><span>Stan magazynowy</span><select onchange="asortymentUstawFiltr('stan',this.value)">${opcje([["wszystkie","Każdy stan"],["dostepne","Powyżej 0 / bez limitu"],["niskie","Niski stan (1–5)"],["brak","Brak lokalnego stanu"]],filtrStanuProduktow)}</select></label>
+        <label><span>Status Allegro</span><select onchange="asortymentUstawFiltr('allegro',this.value)">${opcje([["wszystkie","Wszystkie produkty"],["polaczone","Połączone z ofertą"],["aktywne","Aktywne oferty"],["szkice","Szkice / nieaktywne"],["brak","Bez oferty Allegro"],["duplikaty",`Podejrzane duplikaty (${audytAllegro.produkty})`]],filtrAllegroProduktow)}</select></label>
+        <label><span>Oferta i promocja</span><select onchange="asortymentUstawFiltr('promocja',this.value)">${opcje([["wszystkie","Wszystkie ceny"],["promocje","Tylko promocje"],["regularne","Bez promocji"],["nowosci","Oznaczone jako nowość"]],filtrPromocjiProduktow)}</select></label>
+        <label><span>Cena od</span><input type="number" min="0" step="0.01" inputmode="decimal" value="${esc(cenaOdAdminProduktow)}" placeholder="0,00 zł" onchange="asortymentUstawFiltr('cenaOd',this.value)"></label>
+        <label><span>Cena do</span><input type="number" min="0" step="0.01" inputmode="decimal" value="${esc(cenaDoAdminProduktow)}" placeholder="bez limitu" onchange="asortymentUstawFiltr('cenaDo',this.value)"></label>
+        <label><span>Sortowanie</span><select onchange="ustawSortowanieAdminProduktow(this.value)">${opcje([["external","EXTERNAL_ID / SKU (domyślnie)"],["id","ID produktu"],["nazwa","Nazwa A–Z"],["producent","Producent A–Z"],["kategoria","Kategoria A–Z"],["cena-rosnaco","Cena rosnąco"],["cena-malejaco","Cena malejąco"],["stan","Najniższy stan"],["braki-danych","Najwięcej braków danych"],["najnowsze","Najnowsze kartoteki"]],sortowanieAdminProduktow)}</select></label>
+        <button class="btn ghost" type="button" onclick="asortymentResetujFiltry()">Wyczyść wszystkie filtry</button>
+        <div class="assortment-filter-state admin-search-full" data-assortment-active-filters>${aktywneFiltry.length?`<b>Aktywne filtry:</b>${aktywneFiltry.map(([k,l])=>`<button type="button" onclick="asortymentWyczyscFiltr(${jsArg(k)})">${esc(l)} <span>×</span></button>`).join("")}<button class="clear-all" type="button" onclick="asortymentResetujFiltry()">Wyczyść wszystko</button>`:`<span>Brak dodatkowych filtrów — pokazujesz aktywne kartoteki.</span>`}</div>
+        <div class="admin-search-standard-actions" data-assortment-operations>${adminOperacjeWynikowHTML({id:"assortment-products",selected:zaznaczoneProdukty.size,pageCount:fragment.length,resultCount:liczbaWynikow,selectPage:"asortymentZaznaczZakres('strona')",selectAll:"asortymentZaznaczZakres('filtr')",clear:"wyczyscZaznaczenieProduktow()",exportSelected:"asortymentEksportuj('zaznaczone')",exportAll:"asortymentEksportuj('filtr')"})}</div>
+      </div></details>
+      <div data-assortment-results>
+      <div class="assortment-results-toolbar"><div><b>${liczbaWynikow} produktów</b><span>Pokazano ${zakresOd}–${zakresDo} • strona ${stronaAdminProduktow} z ${liczbaStron}</span></div><label>Na stronie<select onchange="ustawProduktyNaStronieAdmin(this.value)">${[25,50,100,200,500,1000].map(n=>`<option value="${n}" ${produktyNaStronieAdmin===n?"selected":""}>${n}</option>`).join("")}</select></label><label>Gęstość<select onchange="ustawGestoscAdminProduktow(this.value)"><option value="zwarta" ${gestoscAdminProduktow==="zwarta"?"selected":""}>Zwarta</option><option value="wygodna" ${gestoscAdminProduktow==="wygodna"?"selected":""}>Wygodna</option></select></label></div>
+      <div class="pagination">${paginacjaHTML(stronaAdminProduktow,liczbaStron,"ustawStroneAdminProduktow")}</div>
+      <div class="assortment-bulk-editor"><div><b>Zaznaczone: ${zaznaczoneProdukty.size}</b><small>Operacje dotyczą wyłącznie świadomie zaznaczonych kart.</small></div><button class="btn danger" onclick="usunZaznaczoneProd()" ${zaznaczoneProdukty.size?"":"disabled"}>🗑️ Przenieś do kosza</button><label>Zmiana cen<select id="trybCenProduktow"><option value="percent">O procent (+/−)</option><option value="amount">O kwotę (+/−)</option><option value="fixed">Ustaw cenę</option></select></label><input id="procentCen" placeholder="np. 10 lub -5" inputmode="decimal"><button class="btn ghost" onclick="zmienCenyZaznaczonych()" ${zaznaczoneProdukty.size?"":"disabled"}>💰 Zmień ceny</button></div>
+      <div class="assortment-table-wrap"><table class="log-table assortment-product-table density-${gestoscAdminProduktow}">
+        <thead><tr><th><input class="assortment-check" type="checkbox" onchange='zaznaczWidoczneProd(this, ${JSON.stringify(fragment.map(p=>p.id))})' title="Zaznacz produkty na tej stronie"></th><th>Produkt</th><th>Identyfikatory</th><th>Klasyfikacja i źródło</th><th>Ceny</th><th>Magazyn i sprzedaż</th><th>Allegro</th><th>Akcje</th></tr></thead><tbody>
         ${fragment.map(p=>{
           const dodany = jestProduktemDodanym(p.id);
           const ukryty = czyProduktAdminWKoszu(p);
           const edytowany = !!produktyEdytowane[p.id];
-          return `<tr style="${ukryty?'opacity:.45':''}">
-          <td><input type="checkbox" ${zaznaczoneProdukty.has(p.id)?"checked":""} onchange="przelaczZaznProd(${p.id})" style="width:16px;height:16px"></td>
-          <td>${p.id}</td>
-          <td><b>${esc(p.externalId||p.sku||"—")}</b>${audytSklep.hiddenIds.has(String(p.id))?`<br><span class="lvl lvl-ostrzezenie">ukryta kopia</span>`:""}</td>
-          <td><span class="admin-product-thumb">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="admin-product-thumb-fallback" style="display:none">${esc(p.ikona||"📦")}</span>`:`<span class="admin-product-thumb-fallback">${esc(p.ikona||"📦")}</span>`}</span></td>
-          <td>${p.ikona||"📦"} <b>${esc(p.nazwa)}</b>${dodany?' <span class="lvl lvl-info">dodany</span>':""}${edytowany?' <span class="lvl lvl-info">edytowany</span>':""}${ukryty?' <span class="lvl lvl-ostrzezenie">usunięty</span>':""}</td>
-          <td><b>${esc(p.producent||p.marka||"—")}</b></td>
-          <td>${esc(p.kategoria)}</td>
-          <td><input value="${String(p.cena.toFixed(2)).replace(".",",")}" inputmode="decimal" onchange="ustawCene(${p.id}, this.value)" style="width:80px;padding:.25rem .4rem;border:1.5px solid var(--line);border-radius:8px;text-align:right;font-weight:700"> zł</td>
-          <td>${p.staraCena?`<span class="lvl lvl-blad">−${Math.round((1-p.cena/p.staraCena)*100)}%</span>`:"—"}</td>
-          <td><input value="${stanyProduktow[p.id]??""}" placeholder="∞" inputmode="numeric" onchange="ustawStan(${p.id}, this.value)" style="width:58px;padding:.25rem .4rem;border:1.5px solid var(--line);border-radius:8px;text-align:center;${stanyProduktow[p.id]===0?'background:#fee2e2':''}"><br><small style="color:var(--muted2)">tylko admin</small></td>
-          <td>${dostepnoscBadgeAdmin(p)}<br><button class="btn ghost" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})" style="padding:.25rem .5rem;margin-top:.25rem">${produktAutomatycznieNiedostepny(p)?"Sprawdź i przywróć":produktOznaczonyNiedostepny(p)?"Włącz sprzedaż":"Wyłącz sprzedaż"}</button></td>
+          const braki=asortymentBrakiDanych(p),sourceUrl=String(p.sourceUrl||p.producentUrl||p.urlProducenta||"").trim(),cena=kwotaNum(p.cena),promocja=Number(p.staraCena)>cena?Math.max(0,Math.round((1-cena/Number(p.staraCena))*100)):0;
+          return `<tr class="${ukryty?"is-deleted":""} ${zaznaczoneProdukty.has(p.id)?"is-selected":""}">
+          <td><input class="assortment-check" type="checkbox" ${zaznaczoneProdukty.has(p.id)?"checked":""} onchange="przelaczZaznProd(${jsArg(p.id)})"></td>
+          <td><div class="assortment-product-cell"><span class="admin-product-thumb">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="admin-product-thumb-fallback" style="display:none">${esc(p.ikona||"📦")}</span>`:`<span class="admin-product-thumb-fallback">${esc(p.ikona||"📦")}</span>`}</span><div><b>${esc(p.nazwa||"Produkt bez nazwy")}</b><small>ID ${esc(p.id)}${dodany?" • dodany":""}${edytowany?" • edytowany":""}${ukryty?" • w koszu":""}</small><div class="assortment-data-status">${braki.length?`<span class="missing">⚠️ Braki: ${braki.slice(0,3).map(esc).join(", ")}${braki.length>3?` +${braki.length-3}`:""}</span>`:`<span class="complete">✅ Dane kompletne</span>`}${audytSklep.hiddenIds.has(String(p.id))?`<span class="duplicate">ukryta kopia</span>`:""}</div></div></div></td>
+          <td><div class="assortment-identifiers"><span><small>EXTERNAL_ID</small><b>${esc(p.externalId||"—")}</b></span><span><small>SKU</small><b>${esc(p.sku||"—")}</b></span><span><small>EAN</small><b>${esc(p.gtin||p.ean||"—")}</b></span></div></td>
+          <td><div class="assortment-classification"><b>${esc(p.producent||p.marka||"Bez producenta")}</b><span>${esc(p.kategoria||"Bez kategorii")}</span>${sourceUrl?`<a href="${esc(sourceUrl)}" target="_blank" rel="noopener">Źródło produktu ↗</a>`:`<small>Brak linku źródłowego</small>`}</div></td>
+          <td><div class="assortment-price-cell"><label><input value="${String(cena.toFixed(2)).replace(".",",")}" inputmode="decimal" onchange="ustawCene(${jsArg(p.id)},this.value)"><span>zł</span></label>${promocja?`<span class="lvl lvl-blad">Promocja −${promocja}%</span>`:`<small>Cena regularna</small>`}<small class="private-cost">Zakup (admin): <b>${Number(p.cenaZakupu)>0?zl(p.cenaZakupu):"brak"}</b></small></div></td>
+          <td><div class="assortment-stock-cell"><label><span>Stan</span><input value="${stanyProduktow[p.id]??""}" placeholder="∞" inputmode="numeric" onchange="ustawStan(${jsArg(p.id)},this.value)" class="${Number(stanyProduktow[p.id])===0?"empty":""}"></label>${dostepnoscBadgeAdmin(p)}<button class="btn ghost" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})">${produktAutomatycznieNiedostepny(p)?"Sprawdź i przywróć":produktOznaczonyNiedostepny(p)?"Włącz sprzedaż":"Wyłącz sprzedaż"}</button></div></td>
           <td>${allegroStatusProduktuHTML(p)}</td>
-          <td style="white-space:nowrap">
-            <a class="btn ghost" href="#/admin/produkty/edytuj/${p.id}" style="padding:.3rem .55rem" title="Edytuj">✏️</a>
-            <button class="btn ghost" onclick="duplikujProdukt(${p.id})" style="padding:.3rem .55rem" title="Duplikuj">📄</button>
+          <td><div class="assortment-row-actions">
+            <a class="btn" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}" title="Edytuj produkt">✏️ Edytuj</a>
+            <button class="btn ghost" onclick="duplikujProdukt(${jsArg(p.id)})" title="Duplikuj produkt">📄 Kopia</button>
             ${ukryty
-              ? `<button class="btn ghost" onclick="przywrocProdukt(${p.id})" style="padding:.3rem .55rem" title="Przywróć">↩️</button>`
-              : `<button class="btn danger" onclick="if(confirm('Usunąć produkt z oferty?')) usunProduktAdmin(${p.id})" style="padding:.3rem .55rem" title="Usuń">🗑️</button>`}
-          </td>
+              ? `<button class="btn ghost" onclick="przywrocProdukt(${jsArg(p.id)})" title="Przywróć">↩️ Przywróć</button>`
+              : `<button class="btn danger" onclick="if(confirm('Przenieść produkt do kosza?')) usunProduktAdmin(${jsArg(p.id)})" title="Przenieś do kosza">🗑️ Kosz</button>`}
+          </div></td>
         </tr>`;}).join("")}
-      </table></div>
-      <div class="pagination" style="margin:.7rem auto">${paginacjaHTML(stronaAdminProduktow,liczbaStron,"ustawStroneAdminProduktow")}</div></div>
-      <p style="font-size:.8rem;color:var(--muted2);margin-top:.8rem">Zmiany wykonane tutaj działają od razu w tej przeglądarce. Po zakończeniu pobierz nowy <b>products.json</b> i podmień go na hostingu.</p>
+        ${fragment.length?"":`<tr><td colspan="8"><div class="assortment-empty"><b>Brak produktów pasujących do filtrów</b><span>Usuń wybrane kryteria albo wróć do widoku aktywnych produktów.</span><button class="btn ghost" onclick="asortymentResetujFiltry()">Pokaż aktywne produkty</button></div></td></tr>`}
+      </tbody></table></div>
+      <div class="pagination">${paginacjaHTML(stronaAdminProduktow,liczbaStron,"ustawStroneAdminProduktow")}</div></div>
+      <p class="assortment-sync-note"><b>☁️ Wspólna baza:</b> zmiany kartotek, cen, stanów i dostępności zapisują się centralnie i są widoczne na pozostałych urządzeniach po synchronizacji. Eksport pozostaje kopią roboczą lub narzędziem do operacji hurtowych.</p>
     </div>
     ${liczbaWKoszu ? `
-    <div class="panel">
+    <div class="panel assortment-trash-panel">
       <div class="results-bar"><h2 style="margin:0">🗑️ Kosz (${liczbaWKoszu})</h2><button class="btn danger" onclick="wyczyscCalKosz()">Opróżnij kosz</button></div>
       <p style="font-size:.82rem;color:var(--muted2);margin-bottom:.6rem">Produkty pozostają w koszu przez 30 dni. W tym czasie możesz je przywrócić; później są automatycznie usuwane definitywnie.</p>
-      <table class="log-table">
+      <div class="assortment-table-wrap"><table class="log-table">
         <tr><th>Produkt</th><th>Typ</th><th>Usunięto</th><th>Wygasa</th><th>Akcje</th></tr>
         ${koszDodanych.map(p=>`<tr>
           <td>${p.ikona||"📦"} <b>${esc(p.nazwa)}</b> — ${zl(p.cena)}</td>
@@ -1104,7 +1185,7 @@ function widokAdminProdukty(){
             <button class="btn ghost" onclick="przywrocProdukt(${p.id})" style="padding:.3rem .55rem">↩️ Przywróć</button>
             <button class="btn danger" onclick="if(confirm('Usunąć DEFINITYWNIE? Tej operacji nie można cofnąć.')) usunDefinitywnieBazowy(${p.id})" style="padding:.3rem .55rem">❌ Definitywnie</button>
           </td></tr>`).join("")}
-      </table>
+      </table></div>
     </div>`:""}`);
 }
 const EMOJI_ZESTAWY=[
