@@ -23,7 +23,7 @@ function pulpitSystemy(){
 }
 
 function adminPulpitDane(){
-  const sklep=pobierzZamowienia(),sklepAktywne=sklep.filter(pulpitStatusSklepuAktywny),allegro=Array.isArray(allegroZamowienia)?allegroZamowienia:[],allegroAktywne=allegro.filter(allegroZamowienieAktywneLokalnie),komunikacja=allegroKomunikacjaStaty(),plan=potrzebyZatowarowania(),produktyAktywne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const sklep=pobierzZamowienia(),sklepAktywne=sklep.filter(pulpitStatusSklepuAktywny),allegro=allegroDaneZaladowane.orders?(Array.isArray(allegroZamowienia)?allegroZamowienia:[]):(allegroPodsumowanie.recentOrders||[]),allegroAktywneRzeczywiste=allegro.filter(allegroZamowienieAktywneLokalnie),allegroAktywne=allegroDaneZaladowane.orders?allegroAktywneRzeczywiste:Array.from({length:Number(allegroPodsumowanie.orders?.active||0)},()=>({summaryOnly:true})),komunikacja=allegroKomunikacjaStaty(),plan=potrzebyZatowarowania(),produktyAktywne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
   const wysylkiBezNumeru=sklepAktywne.filter(z=>!daneWysylki(z).numer).length,firmoweBezFaktury=sklepAktywne.filter(z=>(z.klient?.nip||z.klient?.firma)&&!infaktStan.links?.[z.nr]&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length;
   const teraz=Date.now(),siedem=7*86400000,sklep7=sklep.filter(z=>String(z.status||"").toLowerCase()!=="anulowane"&&pulpitDataMs(z)>=teraz-siedem),sklepPoprzednie7=sklep.filter(z=>String(z.status||"").toLowerCase()!=="anulowane"&&pulpitDataMs(z)>=teraz-2*siedem&&pulpitDataMs(z)<teraz-siedem),allegro7=allegro.filter(z=>!["CANCELLED","RETURNED"].includes(allegroStatusKolejki(z))&&pulpitDataMs(z)>=teraz-siedem);
   const sprzedazSklep7=sklep7.reduce((s,z)=>s+kwotaNum(z.razem),0),sprzedazAllegro7=allegro7.reduce((s,z)=>s+pulpitKwotaAllegro(z),0),sprzedazPoprzednie7=sklepPoprzednie7.reduce((s,z)=>s+kwotaNum(z.razem),0);
@@ -118,7 +118,7 @@ function adminPulpitStanSystemuHTML(d){
 
 async function adminPulpitOdswiez(pelnaKontrola=false){
   toast("Odświeżam dane pulpitu…");
-  await Promise.allSettled([chmuraWczytajStan(),allegroWczytajDane(true,false),pelnaKontrola?sprawdzBramke(true):Promise.resolve(true)]);
+  await Promise.allSettled([chmuraWczytajStan(),allegroWczytajDane(true,false,"summary"),pelnaKontrola?sprawdzBramke(true):Promise.resolve(true)]);
   zastosujUstawienia();zbudujProdukty();odswiezMenu();renderuj();toast("Pulpit odświeżony ✅");
 }
 function adminPulpitEksportujRaport(zakres="calosc"){
@@ -128,7 +128,7 @@ function adminPulpitEksportujRaport(zakres="calosc"){
 }
 
 function widokAdmin(sekcja="pulpit"){
-  if(!allegroStan.sprawdzono&&!allegroStan.ladowanie&&typeof allegroLadujJesliTrzeba==="function")setTimeout(()=>allegroLadujJesliTrzeba(),0);
+  if(typeof allegroLadujJesliTrzeba==="function")setTimeout(()=>allegroLadujJesliTrzeba("summary"),0);
   if(!stanBramki.sprawdzono)setTimeout(()=>sprawdzBramke(true),0);
   const aktywna=["pulpit","operacje","sprzedaz","alerty","system"].includes(String(sekcja||""))?String(sekcja):"pulpit",d=adminPulpitDane();
   const body=aktywna==="operacje"?adminPulpitOperacjeHTML(d):aktywna==="sprzedaz"?adminPulpitSprzedazHTML(d):aktywna==="alerty"?adminPulpitAlertyHTML(d):aktywna==="system"?adminPulpitStanSystemuHTML(d):adminPulpitPrzegladHTML(d);

@@ -1,6 +1,7 @@
 /* ═══════════ WCZYTANIE PRODUKTÓW ═══════════
    Lista = (products.json lub zapasowa) − ukryte + dodane w panelu admina */
 function zbudujProdukty(){
+  if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
   naprawKolizjeIdProduktow();
   const zmianyKat = ustawienia.kategorie || {};
   const ukryteKat = ustawienia.ukryteKategorie || [];

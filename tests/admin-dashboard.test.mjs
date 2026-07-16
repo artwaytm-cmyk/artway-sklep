@@ -41,6 +41,6 @@ test("pulpit obsługuje integracje, eksport i synchronizację bez Paynow",async(
     assert.match(dashboard,new RegExp(integration),`brak stanu ${integration}`);
   }
   assert.match(dashboard,/function adminPulpitEksportujRaport/);
-  assert.match(dashboard,/allegroWczytajDane\(true,false\)/);
+  assert.match(dashboard,/allegroWczytajDane\(true,false,"summary"\)/);
   assert.doesNotMatch(dashboard,/Paynow/i);
 });

@@ -20,7 +20,10 @@ async function allegroOdswiezDaneZSerweraJesliCzas(powod="timer"){
   if(teraz-Number(allegroAutoOdswiezanie.lastChecked||0)<minimalnyOdstep)return false;
   const mialDane=!!allegroStan.sprawdzono,przedWersja=allegroWersjaDanychDoOdswiezenia(),przedOrders=allegroAktywneIdDoOdswiezenia(),przedOffers=allegroOfertaIdDoOdswiezenia(),przedThreads=allegroKomunikacjaKluczeDoOdswiezenia("thread"),przedIssues=allegroKomunikacjaKluczeDoOdswiezenia("issue");
   allegroAutoOdswiezanie={...allegroAutoOdswiezanie,busy:true,error:""};
-  const ok=await allegroWczytajDane(true,false);
+  const zakresy=allegroDaneZaladowane.orders?["orders"]:["summary"];
+  if(allegroDaneZaladowane.offers)zakresy.push("offers");
+  const wyniki=await Promise.all(zakresy.map(zakres=>allegroWczytajDane(true,false,zakres)));
+  const ok=wyniki.every(Boolean);
   const orders=ok?allegroNoweIdPoOdswiezeniu(przedOrders,allegroAktywneIdDoOdswiezenia()):0,offers=ok?allegroNoweIdPoOdswiezeniu(przedOffers,allegroOfertaIdDoOdswiezenia()):0,threads=ok?allegroNoweIdPoOdswiezeniu(przedThreads,allegroKomunikacjaKluczeDoOdswiezenia("thread")):0,issues=ok?allegroNoweIdPoOdswiezeniu(przedIssues,allegroKomunikacjaKluczeDoOdswiezenia("issue")):0,changed=orders+offers+threads+issues,daneZmienione=ok&&przedWersja!==allegroWersjaDanychDoOdswiezenia();
   allegroAutoOdswiezanie={busy:false,lastChecked:Date.now(),lastChanged:changed?Date.now():allegroAutoOdswiezanie.lastChanged,orders,threads,issues,offers,error:ok?"":allegroStan.error||"Nie udało się odświeżyć danych"};
   if(ok&&mialDane&&changed)toast(`🟠 Allegro: zlecenia ${orders} • wiadomości ${threads} • dyskusje ${issues} • oferty ${offers}`);

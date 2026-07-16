@@ -1690,6 +1690,7 @@ function agentAIHistoriaPanelHTML(){
   return `<section class="panel agent-history-page"><div class="order-section-head"><div><span class="order-pro-label">Pełna rozliczalność</span><h2>🕓 Historia Agenta</h2><p class="order-detail-lead">Aktywne zadania nie mieszają się z wykonanymi. Każde zakończenie zawiera operatora i moment wykonania.</p></div><button class="btn ghost" onclick="agentAIPobierzHistorieWykonan()">↻ Odśwież audyt serwera</button></div><div class="orders-stat-grid"><div class="order-stat-card money"><span>✅</span><b>${archive.length}</b><small>zakończonych zadań</small></div><div class="order-stat-card"><span>🧭</span><b>${runs.length}</b><small>wykonań planu</small></div><div class="order-stat-card"><span>🧾</span><b>${history.length}</b><small>operacji w rejestrze</small></div></div><details class="agent-history-section" open><summary>Zakończone zadania (${archive.length})</summary>${archive.length?`<div class="agent-task-archive-list">${archive.map(x=>`<article><span>✓</span><div><b>${esc(x.title||x.id)}</b><small>${esc(new Date(x.completedAt||x.resolvedAt).toLocaleString("pl-PL"))} • ${esc(x.completedBy||"Agent")}</small><p>${esc(x.description||"")}</p></div>${x.state==="done"?`<button class="btn ghost" onclick="agentAIPrzywrocZadanie(${jsArg(x.id)})">Przywróć</button>`:`<em>rozwiązane</em>`}</article>`).join("")}</div>`:`<div class="agent-ops-empty">Brak zakończonych zadań.</div>`}</details><details class="agent-history-section"><summary>Rejestr działań (${history.length})</summary><div class="warehouse-worktable-wrap"><table class="log-table"><tr><th>Data</th><th>Typ</th><th>Opis</th><th>Operator</th></tr>${history.map(h=>`<tr><td>${esc(h.dataTxt||"")}</td><td><span class="lvl lvl-info">${esc(h.typ||"akcja")}</span></td><td>${esc(h.opis||"")}</td><td>${esc(h.operator||"")}</td></tr>`).join("")||`<tr><td colspan="4">Brak działań.</td></tr>`}</table></div></details></section>`;
 }
 function widokAdminAgentAI(sekcja="pulpit"){
+  allegroLadujJesliTrzeba("orders");
   const analiza=agentAIAnaliza();
   const aktywna=["pulpit","komendy","plan","produkty","zlecenia","producenci","telegram","pamiec","historia"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const aktywneZadania=agentAIAnalizaAktywna(analiza),problemy=aktywneZadania.length;
@@ -1863,7 +1864,10 @@ async function allegroOdswiezDaneZSerweraJesliCzas(powod="timer"){
   if(teraz-Number(allegroAutoOdswiezanie.lastChecked||0)<minimalnyOdstep)return false;
   const mialDane=!!allegroStan.sprawdzono,przedWersja=allegroWersjaDanychDoOdswiezenia(),przedOrders=allegroAktywneIdDoOdswiezenia(),przedOffers=allegroOfertaIdDoOdswiezenia(),przedThreads=allegroKomunikacjaKluczeDoOdswiezenia("thread"),przedIssues=allegroKomunikacjaKluczeDoOdswiezenia("issue");
   allegroAutoOdswiezanie={...allegroAutoOdswiezanie,busy:true,error:""};
-  const ok=await allegroWczytajDane(true,false);
+  const zakresy=allegroDaneZaladowane.orders?["orders"]:["summary"];
+  if(allegroDaneZaladowane.offers)zakresy.push("offers");
+  const wyniki=await Promise.all(zakresy.map(zakres=>allegroWczytajDane(true,false,zakres)));
+  const ok=wyniki.every(Boolean);
   const orders=ok?allegroNoweIdPoOdswiezeniu(przedOrders,allegroAktywneIdDoOdswiezenia()):0,offers=ok?allegroNoweIdPoOdswiezeniu(przedOffers,allegroOfertaIdDoOdswiezenia()):0,threads=ok?allegroNoweIdPoOdswiezeniu(przedThreads,allegroKomunikacjaKluczeDoOdswiezenia("thread")):0,issues=ok?allegroNoweIdPoOdswiezeniu(przedIssues,allegroKomunikacjaKluczeDoOdswiezenia("issue")):0,changed=orders+offers+threads+issues,daneZmienione=ok&&przedWersja!==allegroWersjaDanychDoOdswiezenia();
   allegroAutoOdswiezanie={busy:false,lastChecked:Date.now(),lastChanged:changed?Date.now():allegroAutoOdswiezanie.lastChanged,orders,threads,issues,offers,error:ok?"":allegroStan.error||"Nie udało się odświeżyć danych"};
   if(ok&&mialDane&&changed)toast(`🟠 Allegro: zlecenia ${orders} • wiadomości ${threads} • dyskusje ${issues} • oferty ${offers}`);
@@ -1918,6 +1922,56 @@ function allegroPrzeplywZakupowyHTML(z={}){
   ];
   return `<div class="allegro-procurement-flow">${steps.map((step,index)=>`<span class="${step.done?"done":step.current?"current":"waiting"}"><em>${step.done?"✓":index+1}</em><b>${esc(step.label)}</b><small>${esc(step.opis)}</small></span>`).join("")}</div>`;
 }
+
+/* Lekkie, miesięczne archiwum zamówień Allegro — ładowane wyłącznie na żądanie. */
+function allegroZrodloZamowien(){return filtrAllegroZamowien==="archiwum"?(allegroArchiwum.items||[]):(allegroZamowienia||[]);}
+async function allegroWczytajArchiwum(reset=true){
+  if(allegroArchiwum.busy)return;const offset=reset?0:Number(allegroArchiwum.offset||0);allegroArchiwum={...allegroArchiwum,busy:true,error:""};renderuj();
+  try{const d=await chmura("allegro-orders-archive",{params:{month:allegroArchiwum.month||"",offset,limit:100},timeout:30000}),incoming=Array.isArray(d.items)?d.items:[];allegroArchiwum={...allegroArchiwum,busy:false,loaded:true,items:reset?incoming:[...(allegroArchiwum.items||[]),...incoming],summary:d.summary||allegroArchiwum.summary,offset:offset+incoming.length,hasMore:!!d.hasMore,error:""};}
+  catch(e){allegroArchiwum={...allegroArchiwum,busy:false,error:e.message||String(e)};toast("⚠️ Archiwum Allegro: "+(e.message||e));}
+  renderuj();
+}
+function allegroUstawFiltrZamowien(id){filtrAllegroZamowien=id;if(id==="archiwum"){filtrEtapuAllegroZamowien="wszystkie";zaznaczoneAllegroZamowienia.clear();if(!allegroArchiwum.loaded)setTimeout(()=>allegroWczytajArchiwum(true),0);}renderuj();}
+
+/* Indeks kandydatów mapowania Allegro. Przy dużym katalogu nie porównujemy
+   każdej oferty z każdą kartoteką; najpierw zawężamy pulę po identyfikatorach
+   oraz istotnych tokenach nazwy. */
+let allegroIndeksKandydatowCache={source:null,byId:new Map(),ean:new Map(),external:new Map(),code:new Map(),catalog:new Map(),token:new Map()};
+function allegroIndeksKandydatowKlucz(value=""){return String(value||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/ł/g,"l").replace(/[^a-z0-9]+/g," ").trim();}
+const ALLEGRO_INDEKS_STOP=new Set(["gra","gry","zabawka","zabawki","zestaw","dla","oraz","maly","mala","duzy","duza","szt","elementow","alexander","multigra","godan"]);
+function allegroIndeksKandydatowTokeny(value=""){return [...new Set(allegroIndeksKandydatowKlucz(value).split(/\s+/).filter(token=>token.length>2&&!ALLEGRO_INDEKS_STOP.has(token)))];}
+function allegroIndeksKandydatowDodaj(map,key,product){if(!key)return;const list=map.get(key)||[];list.push(product);map.set(key,list);}
+function allegroIndeksKandydatow(products=[]){
+  if(allegroIndeksKandydatowCache.source===products)return allegroIndeksKandydatowCache;
+  const next={source:products,byId:new Map(),ean:new Map(),external:new Map(),code:new Map(),catalog:new Map(),token:new Map()};
+  for(const product of products){
+    const id=String(product?.id??"");if(!id)continue;next.byId.set(id,product);
+    allegroIndeksKandydatowDodaj(next.ean,String(product.gtin||product.ean||"").replace(/\D+/g,""),product);
+    allegroIndeksKandydatowDodaj(next.external,allegroIndeksKandydatowKlucz(product.externalId||product.sku),product);
+    allegroIndeksKandydatowDodaj(next.code,allegroIndeksKandydatowKlucz(product.kodProducenta||product.mpn),product);
+    allegroIndeksKandydatowDodaj(next.catalog,String(product.allegroProductId||""),product);
+    const tokens=allegroIndeksKandydatowTokeny(product.nazwa||product.name);
+    tokens.forEach(token=>allegroIndeksKandydatowDodaj(next.token,token,product));
+  }
+  allegroIndeksKandydatowCache=next;return next;
+}
+function allegroPulaProduktowMapowania(offer={},products=[]){
+  const index=allegroIndeksKandydatow(products),scores=new Map(),add=(list,points)=>{for(const product of list||[]){const id=String(product.id);scores.set(id,{product,score:(scores.get(id)?.score||0)+points});}};
+  add(index.ean.get(String(offer.ean||offer.gtin||"").replace(/\D+/g,"")),1000);
+  add(index.external.get(allegroIndeksKandydatowKlucz(offer.externalId)),800);
+  add(index.code.get(allegroIndeksKandydatowKlucz(offer.manufacturerCode||offer.producerCode)),700);
+  add(index.catalog.get(String(offer.productId||"")),900);
+  allegroIndeksKandydatowTokeny(offer.name).sort((a,b)=>(index.token.get(a)?.length||0)-(index.token.get(b)?.length||0)).slice(0,4).forEach(token=>add((index.token.get(token)||[]).slice(0,2000),10));
+  const mappedId=String((allegroMapowania||{})[String(offer.id||"")]?.productId??"");if(mappedId&&index.byId.has(mappedId))add([index.byId.get(mappedId)],2000);
+  return [...scores.values()].sort((a,b)=>b.score-a.score||String(a.product.id).localeCompare(String(b.product.id))).slice(0,800).map(entry=>entry.product);
+}
+function allegroKluczeKodu(v){const raw=String(v||"").trim().toLowerCase();if(!raw)return[];const bezSpacji=raw.replace(/\s+/g,""),bezUniw=bezSpacji.replace(/[-_ ]?uniw$/,""),bezPrefixu=bezUniw.replace(/^(sku|kod|ean|gtin)[:#-]?/,""),cyfry=(bezPrefixu.match(/\d{3,}/)||[])[0]||"";return [...new Set([raw,bezSpacji,bezUniw,bezPrefixu,cyfry].filter(Boolean))];}
+function allegroIndeksProduktowPoKodzie(){const indeks=new Map(),konflikty=new Set(),dodaj=(kod,p)=>{for(const k of allegroKluczeKodu(kod)){if(!k)continue;const poprzedni=indeks.get(k);if(poprzedni&&String(poprzedni.id)!==String(p.id)){konflikty.add(k);continue;}indeks.set(k,p);}};produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>[p.sku,p.kod,p.externalId,p.gtin,p.ean,p.kodKreskowy,p.producentKod,p.kodProducenta].forEach(k=>dodaj(k,p)));konflikty.forEach(k=>indeks.delete(k));return indeks;}
+function allegroNormalizujNazwe(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/&/g," i ").replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();}
+function allegroTokenyNazwy(v){const stop=new Set(["gra","gry","planszowa","planszowe","edukacyjna","edukacyjne","zabawka","zestaw","alexander","dla","oraz","plus","wersja","mini","duza","duzy","mala","maly","od","do","na","w","i","z"]);return allegroNormalizujNazwe(v).split(" ").filter(t=>t.length>=3&&!stop.has(t));}
+function allegroDopasujProduktPoNazwie(nazwa,produktyLista){const norm=allegroNormalizujNazwe(nazwa),tokeny=allegroTokenyNazwy(nazwa);if(!norm||!tokeny.length)return null;let najlepszy=null,drugi=0;for(const p of produktyLista){const pn=allegroNormalizujNazwe(p.nazwa),pt=allegroTokenyNazwy(p.nazwa);if(!pn||!pt.length)continue;let score=0;if(pn===norm)score=1;else if(pt.length>=2&&pt.every(t=>tokeny.includes(t)))score=Math.min(.94,.62+(pt.length/Math.max(tokeny.length,pt.length))*.34);else if(tokeny.length>=2&&tokeny.every(t=>pt.includes(t)))score=Math.min(.9,.58+(tokeny.length/Math.max(tokeny.length,pt.length))*.32);if(score>0){if(!najlepszy||score>najlepszy.score){drugi=najlepszy?.score||0;najlepszy={produkt:p,score};}else if(score>drugi)drugi=score;}}return najlepszy&&najlepszy.score>=.82&&(najlepszy.score-drugi)>=.08?najlepszy.produkt:null;}
+function allegroKodyZamowienDlaOferty(){const mapa=new Map();(Array.isArray(allegroZamowienia)?allegroZamowienia:[]).forEach(z=>(Array.isArray(z.lineItems)?z.lineItems:[]).forEach(it=>{const oid=String(it.offerId||"").trim();if(!oid)return;if(!mapa.has(oid))mapa.set(oid,new Set());[it.externalId,it.offerName].filter(Boolean).forEach(k=>mapa.get(oid).add(k));}));return mapa;}
+function allegroSugestieAutomapowania(){const indeks=allegroIndeksProduktowPoKodzie(),produktyLista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)),zZamowien=allegroKodyZamowienDlaOferty(),wyniki=[];(Array.isArray(allegroOferty)?allegroOferty:[]).forEach(o=>{if(allegroProduktDlaOferty(o.id))return;const kody=[o.externalId,o.sku,o.gtin,o.ean,o.id],dodatkowe=zZamowien.get(String(o.id||""));if(dodatkowe)kody.push(...dodatkowe);let produkt=null,kod="";for(const k of kody){for(const klucz of allegroKluczeKodu(k)){const p=indeks.get(klucz);if(p){produkt=p;kod=klucz;break;}}if(produkt)break;}if(!produkt){const nazwy=[o.name];if(dodatkowe)nazwy.push(...[...dodatkowe].filter(x=>!allegroKluczeKodu(x).length||String(x).length>18));for(const n of nazwy){produkt=allegroDopasujProduktPoNazwie(n,produktyLista);if(produkt){kod="nazwa";break;}}}if(produkt)wyniki.push({offerId:String(o.id),productId:String(produkt.id),produkt,oferta:o,kod});});return wyniki;}
 
 function klientZamowieniaLabel(z){
   const k=z?.klient||{};
@@ -2023,109 +2077,6 @@ function allegroEANProduktu(p){
 function allegroKodOferty(o){
   return String(o?.externalId||o?.id||"").trim();
 }
-function allegroKluczeKodu(v){
-  const raw=String(v||"").trim().toLowerCase();
-  if(!raw) return [];
-  const bezSpacji=raw.replace(/\s+/g,"");
-  const bezUniw=bezSpacji.replace(/[-_ ]?uniw$/,"");
-  const bezPrefixu=bezUniw.replace(/^(sku|kod|ean|gtin)[:#-]?/,"");
-  const cyfry=(bezPrefixu.match(/\d{3,}/)||[])[0]||"";
-  return [...new Set([raw,bezSpacji,bezUniw,bezPrefixu,cyfry].filter(Boolean))];
-}
-function allegroIndeksProduktowPoKodzie(){
-  const indeks=new Map(), konflikty=new Set();
-  const dodaj=(kod,p)=>{
-    for(const k of allegroKluczeKodu(kod)){
-      if(!k) continue;
-      const poprzedni=indeks.get(k);
-      if(poprzedni && String(poprzedni.id)!==String(p.id)){
-        konflikty.add(k);
-        continue;
-      }
-      indeks.set(k,p);
-    }
-  };
-  produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
-    [p.sku,p.kod,p.externalId,p.gtin,p.ean,p.kodKreskowy,p.producentKod,p.kodProducenta].forEach(k=>dodaj(k,p));
-  });
-  konflikty.forEach(k=>indeks.delete(k));
-  return indeks;
-}
-function allegroNormalizujNazwe(v){
-  return String(v||"")
-    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-    .toLowerCase()
-    .replace(/&/g," i ")
-    .replace(/[^a-z0-9]+/g," ")
-    .replace(/\s+/g," ")
-    .trim();
-}
-function allegroTokenyNazwy(v){
-  const stop=new Set(["gra","gry","planszowa","planszowe","edukacyjna","edukacyjne","zabawka","zestaw","alexander","dla","oraz","plus","wersja","mini","duza","duzy","mala","maly","od","do","na","w","i","z"]);
-  return allegroNormalizujNazwe(v).split(" ").filter(t=>t.length>=3&&!stop.has(t));
-}
-function allegroDopasujProduktPoNazwie(nazwa, produktyLista){
-  const norm=allegroNormalizujNazwe(nazwa);
-  const tokeny=allegroTokenyNazwy(nazwa);
-  if(!norm || !tokeny.length) return null;
-  let najlepszy=null, drugi=0;
-  for(const p of produktyLista){
-    const pn=allegroNormalizujNazwe(p.nazwa);
-    const pt=allegroTokenyNazwy(p.nazwa);
-    if(!pn || !pt.length) continue;
-    let score=0;
-    if(pn===norm) score=1;
-    else if(pt.length>=2 && pt.every(t=>tokeny.includes(t))) score=Math.min(0.94,0.62+(pt.length/Math.max(tokeny.length,pt.length))*0.34);
-    else if(tokeny.length>=2 && tokeny.every(t=>pt.includes(t))) score=Math.min(0.9,0.58+(tokeny.length/Math.max(tokeny.length,pt.length))*0.32);
-    if(score>0){
-      if(!najlepszy || score>najlepszy.score){ drugi=najlepszy?.score||0; najlepszy={produkt:p,score}; }
-      else if(score>drugi) drugi=score;
-    }
-  }
-  return najlepszy && najlepszy.score>=0.82 && (najlepszy.score-drugi)>=0.08 ? najlepszy.produkt : null;
-}
-function allegroKodyZamowienDlaOferty(){
-  const mapa=new Map();
-  (Array.isArray(allegroZamowienia)?allegroZamowienia:[]).forEach(z=>{
-    (Array.isArray(z.lineItems)?z.lineItems:[]).forEach(it=>{
-      const oid=String(it.offerId||"").trim();
-      if(!oid) return;
-      if(!mapa.has(oid)) mapa.set(oid,new Set());
-      [it.externalId,it.offerName].filter(Boolean).forEach(k=>mapa.get(oid).add(k));
-    });
-  });
-  return mapa;
-}
-function allegroSugestieAutomapowania(){
-  const indeks=allegroIndeksProduktowPoKodzie();
-  const produktyLista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
-  const zZamowien=allegroKodyZamowienDlaOferty();
-  const wyniki=[];
-  (Array.isArray(allegroOferty)?allegroOferty:[]).forEach(o=>{
-    if(allegroProduktDlaOferty(o.id)) return;
-    const kody=[o.externalId,o.sku,o.gtin,o.ean,o.id];
-    const dodatkowe=zZamowien.get(String(o.id||""));
-    if(dodatkowe) kody.push(...dodatkowe);
-    let produkt=null, kod="";
-    for(const k of kody){
-      for(const klucz of allegroKluczeKodu(k)){
-        const p=indeks.get(klucz);
-        if(p){ produkt=p; kod=klucz; break; }
-      }
-      if(produkt) break;
-    }
-    if(!produkt){
-      const nazwy=[o.name];
-      if(dodatkowe) nazwy.push(...[...dodatkowe].filter(x=>!allegroKluczeKodu(x).length || String(x).length>18));
-      for(const n of nazwy){
-        produkt=allegroDopasujProduktPoNazwie(n,produktyLista);
-        if(produkt){ kod="nazwa"; break; }
-      }
-    }
-    if(produkt) wyniki.push({offerId:String(o.id), productId:String(produkt.id), produkt, oferta:o, kod});
-  });
-  return wyniki;
-}
 async function allegroAutomapujOfertyLegacy(){
   const sugestie=allegroSugestieAutomapowania();
   if(!sugestie.length){ toast("Brak pewnych dopasowań po kodach lub nazwach Allegro"); return; }
@@ -2151,19 +2102,28 @@ function allegroStatusHTML(){
   if(allegroStan.configured) return `<span class="lvl lvl-ostrzezenie">wymaga autoryzacji</span>`;
   return `<span class="lvl lvl-bad">brak konfiguracji</span>`;
 }
-function allegroLadujJesliTrzeba(){
-  if(allegroStan.sprawdzono || allegroStan.ladowanie) return;
+function allegroZakresDanych(scope="summary"){return ["summary","orders","offers","config","all"].includes(String(scope||""))?String(scope):"summary";}
+function allegroLadujJesliTrzeba(scope="summary"){
+  const zakres=allegroZakresDanych(scope);
+  if((zakres==="all"&&allegroDaneZaladowane.orders&&allegroDaneZaladowane.offers&&allegroDaneZaladowane.config)||allegroDaneZaladowane[zakres]||allegroDaneLadowane.has(zakres))return;
   allegroStan={...allegroStan,ladowanie:true};
-  setTimeout(()=>allegroWczytajDane(true),0);
+  setTimeout(()=>allegroWczytajDane(true,true,zakres),0);
 }
-async function allegroWczytajDane(cicho=false,odswiezWidok=true){
+async function allegroWczytajDane(cicho=false,odswiezWidok=true,scope="all"){
+  const zakres=allegroZakresDanych(scope);allegroDaneLadowane.add(zakres);allegroStan={...allegroStan,ladowanie:true};
   let ok=false;
   try{
-    const d=await chmura("allegro-data",{timeout:16000});
-    allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,ladowanie:false,error:"",offerDefaultsAudit:d.offerDefaultsAudit||{items:{},updated_at:null},catalogMaintenance:d.catalogMaintenance||allegroStan.catalogMaintenance||{cursor:0,lastRun:null},complianceAudit:d.complianceAudit||allegroStan.complianceAudit||{items:[],summary:{},updated_at:null},offerSyncState:d.offerSyncState||allegroStan.offerSyncState||{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null},offerSettings:d.offerSettings||allegroStan.offerSettings||{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,updated_at:null}};
-    allegroZamowienia=Array.isArray(d.orders)?d.orders:[];
-    allegroOferty=Array.isArray(d.offers)?d.offers:[];
-    allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:{};
+    const d=await chmura("allegro-data",{params:{scope:zakres},timeout:20000});
+    allegroDaneLadowane.delete(zakres);
+    allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,ladowanie:allegroDaneLadowane.size>0,error:"",offerDefaultsAudit:d.offerDefaultsAudit||allegroStan.offerDefaultsAudit||{items:{},updated_at:null},catalogMaintenance:d.catalogMaintenance||allegroStan.catalogMaintenance||{cursor:0,lastRun:null},complianceAudit:d.complianceAudit||allegroStan.complianceAudit||{items:[],summary:{},updated_at:null},offerSyncState:d.offerSyncState||allegroStan.offerSyncState||{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null},offerSettings:d.offerSettings||allegroStan.offerSettings||{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,updated_at:null}};
+    if(Array.isArray(d.orders))allegroZamowienia=d.orders;
+    if(Array.isArray(d.offers))allegroOferty=d.offers;
+    if(d.mappings&&typeof d.mappings==="object")allegroMapowania=d.mappings;
+    if(d.summary&&typeof d.summary==="object")allegroPodsumowanie={...allegroPodsumowanie,...d.summary};
+    if(d.archive&&typeof d.archive==="object")allegroArchiwum={...allegroArchiwum,summary:{...allegroArchiwum.summary,...d.archive}};
+    allegroDaneZaladowane.summary=true;
+    if(zakres==="all"){allegroDaneZaladowane={summary:true,orders:true,offers:true,config:true};}
+    else allegroDaneZaladowane[zakres]=true;
     if(d.offerLastError) allegroOstatniBladWystawienia={message:d.offerLastError.message,allegroError:{errors:d.offerLastError.errors||[]},...d.offerLastError};
     if(Array.isArray(d.threads)||Array.isArray(d.issues)) allegroKomunikacja={...allegroKomunikacja,threads:Array.isArray(d.threads)?d.threads:allegroKomunikacja.threads,issues:Array.isArray(d.issues)?d.issues:allegroKomunikacja.issues,settings:d.settings||allegroKomunikacja.settings,autoReplies:d.autoReplies||allegroKomunikacja.autoReplies||{},errors:Array.isArray(d.errors)?d.errors:allegroKomunikacja.errors,requiresReauth:!!d.requiresReauth,updated_at:d.updated_at||allegroKomunikacja.updated_at,sprawdzono:true};
     allegroZapiszCache();
@@ -2171,7 +2131,8 @@ async function allegroWczytajDane(cicho=false,odswiezWidok=true){
     ok=true;
     if(!cicho) toast("Dane Allegro odświeżone");
   }catch(e){
-    allegroStan={...allegroStan,sprawdzono:true,ladowanie:false,error:e.message||String(e)};
+    allegroDaneLadowane.delete(zakres);
+    allegroStan={...allegroStan,sprawdzono:true,ladowanie:allegroDaneLadowane.size>0,error:e.message||String(e)};
     if(!cicho) toast("⚠️ Allegro: "+allegroStan.error);
   }
   if(odswiezWidok)renderuj();
@@ -2188,13 +2149,15 @@ async function allegroSynchronizujZamowienia(){
   try{
     toast("Pobieram zamówienia Allegro i uruchamiam kontrolę magazynową agenta…");
     await chmuraZapiszUstawienia().catch(()=>false);
-    const d=await chmura("allegro-sync-orders",{method:"POST",body:{limit:1000},timeout:120000});
+    const d=await chmura("allegro-sync-orders",{method:"POST",body:{limit:200},timeout:120000});
     allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,ladowanie:false,error:""};
     allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;
     allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:allegroMapowania;
+    if(d.archive&&typeof d.archive==="object")allegroArchiwum={...allegroArchiwum,summary:{...allegroArchiwum.summary,...d.archive}};
+    allegroDaneZaladowane.orders=true;allegroDaneZaladowane.summary=true;
     await chmuraWczytajStan();
     allegroZapiszCache();
-    toast(`Agent Allegro: nowe ${d.imported_new||0} • sprawdzone ${d.agent?.reviewed||0} • gotowe ${d.agent?.ready||0} • nowe do automatyzacji ${d.agent?.autoEligible||0} • braki dopisane ${d.agent?.shortagesAdded||0} • cały rejestr ${allegroZamowienia.length}`);
+    toast(`Agent Allegro: nowe ${d.imported_new||0} • odświeżone ${d.refreshed||0} • do obsługi ${allegroZamowienia.filter(allegroZamowienieAktywneLokalnie).length} • archiwum ${d.archive?.total||0}`);
     renderuj();
   }catch(e){ toast("⚠️ Allegro zamówienia: "+(e.message||e)); }
 }
@@ -2875,7 +2838,8 @@ function allegroOcenaMapowaniaKandydata(oferta={},produkt={}){
   return {produkt,score,reason:reason||"brak wspólnych identyfikatorów",evidence,conflicts,similarity:Math.round(similarity*100),strongConflict,occupied,valid:score>=65&&!strongConflict};
 }
 function allegroKandydaciMapowaniaOferty(oferta={}){
-  return produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>allegroOcenaMapowaniaKandydata(oferta,p)).filter(x=>x.score>0||String(x.produkt.id)===String(allegroProduktIdDlaOferty(oferta.id))).sort((a,b)=>b.score-a.score||Number(a.occupied.length)-Number(b.occupied.length)||String(a.produkt.nazwa||"").localeCompare(String(b.produkt.nazwa||""),"pl")).slice(0,30);
+  const produkty=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  return allegroPulaProduktowMapowania(oferta,produkty).map(p=>allegroOcenaMapowaniaKandydata(oferta,p)).filter(x=>x.score>0||String(x.produkt.id)===String(allegroProduktIdDlaOferty(oferta.id))).sort((a,b)=>b.score-a.score||Number(a.occupied.length)-Number(b.occupied.length)||String(a.produkt.nazwa||"").localeCompare(String(b.produkt.nazwa||""),"pl")).slice(0,30);
 }
 function allegroAnalizaMapowaniaOferty(oferta={}){
   const mappedId=String(allegroProduktIdDlaOferty(oferta.id)||""),rec=(allegroMapowania||{})[String(oferta.id)],mapped=mappedId?(produktyDoAdministracji().find(p=>String(p.id)===mappedId)||(allegroMapowanieDostawcyZweryfikowane(rec)?allegroProduktWirtualnyZMapowania(rec,mappedId,oferta):null)):null,candidates=allegroKandydaciMapowaniaOferty(oferta),current=mapped?candidates.find(x=>String(x.produkt.id)===mappedId)||allegroOcenaMapowaniaKandydata(oferta,mapped):null,available=candidates.filter(x=>!x.occupied.length||String(x.produkt.id)===mappedId),best=available[0]||null,second=available[1]||null;
@@ -2911,13 +2875,13 @@ function allegroRenderujKandydatowMapowania(q=""){
 async function allegroWybierzMapowaniePozycji(offerId,productId,force=false,replaceExisting=false){const result=await allegroMapujOferte(offerId,productId,{force,replaceExisting});if(result?.ok)allegroZamknijMapowaniePozycji();else allegroRenderujKandydatowMapowania(document.getElementById("allegroMappingSearch")?.value||"");}
 function allegroZamowieniePasujeDoFiltra(z){
   const kategoria=allegroKategoriaKolejki(z);
-  const statusOk=filtrAllegroZamowien==="wszystkie"||(filtrAllegroZamowien==="do_obslugi"?allegroZamowienieAktywneLokalnie(z):kategoria===filtrAllegroZamowien);
+  const statusOk=["wszystkie","archiwum"].includes(filtrAllegroZamowien)||(filtrAllegroZamowien==="do_obslugi"?allegroZamowienieAktywneLokalnie(z):kategoria===filtrAllegroZamowien);
   const etapOk=filtrEtapuAllegroZamowien==="wszystkie"||allegroEtapMagazynu(z)===filtrEtapuAllegroZamowien;
   return statusOk&&etapOk;
 }
-function allegroWierszeZamowien(){
+function allegroWierszeZamowien(source=allegroZrodloZamowien()){
   const rows=[];
-  for(const z of Array.isArray(allegroZamowienia)?allegroZamowienia:[]){
+  for(const z of Array.isArray(source)?source:[]){
     const items=Array.isArray(z.lineItems)&&z.lineItems.length?z.lineItems:[{offerId:"",offerName:"Brak pozycji",quantity:0}];
     for(const it of items){
       const dane=allegroDanePozycjiZamowienia(it);
@@ -2928,8 +2892,8 @@ function allegroWierszeZamowien(){
 }
 function allegroPasujaceZamowienia(){
   const q=String(szukajAllegroZamowien||"").toLowerCase().trim();
-  const wszystkie=Array.isArray(allegroZamowienia)?allegroZamowienia:[];
-  const pasujaceIds=q?new Set(allegroWierszeZamowien().filter(r=>r.tekst.includes(q)).map(r=>String(r.z.id))):null;
+  const wszystkie=allegroZrodloZamowien();
+  const pasujaceIds=q?new Set(allegroWierszeZamowien(wszystkie).filter(r=>r.tekst.includes(q)).map(r=>String(r.z.id))):null;
   return wszystkie.filter(allegroZamowieniePasujeDoFiltra).filter(z=>!pasujaceIds||pasujaceIds.has(String(z.id)));
 }
 function allegroZaznaczWidoczneZamowienia(checked=true){
@@ -2942,6 +2906,7 @@ function allegroZaznaczWszystkiePasujaceZamowienia(){
 }
 function allegroZamowieniaTabelaHTML(){
   const wszystkie=Array.isArray(allegroZamowienia)?allegroZamowienia:[];
+  const czyArchiwum=filtrAllegroZamowien==="archiwum";
   const aktywne=wszystkie.filter(statusAllegroRezerwujeMagazyn);
   const analizy=aktywne.map(z=>allegroAnalizaMagazynowaZamowienia(z));
   const wszystkiePozycje=analizy.flatMap(a=>a.pozycje||[]);
@@ -2962,23 +2927,26 @@ function allegroZamowieniaTabelaHTML(){
   const wszystkieWidoczneZaznaczone=!!widoczneZamowienia.length&&widoczneZamowienia.every(z=>zaznaczoneAllegroZamowienia.has(String(z.id)));
   const counts={do_obslugi:0,zrealizowane:0,wszystkie:wszystkie.length};
   wszystkie.forEach(z=>{const kategoria=allegroKategoriaKolejki(z);counts[kategoria]=(counts[kategoria]||0)+1;if(allegroZamowienieAktywneLokalnie(z))counts.do_obslugi++;});
-  const filtry=[["do_obslugi","📋","Do obsługi","aktywne lokalnie"],["NEW","🆕","Nowe","status z Allegro"],["PROCESSING","⚙️","W realizacji","status z Allegro"],["READY_FOR_SHIPMENT","🚚","Do wysłania","status z Allegro"],["zrealizowane","✅","Zrealizowane lokalnie","obsłużone w sklepie"],["SENT","📤","Wysłane","status z Allegro"],["CANCELLED","⛔","Anulowane","status z Allegro"],["RETURNED","↩️","Zwrócone","status z Allegro"],["wszystkie","📦","Wszystkie","pełna historia"]];
+  counts.archiwum=Number(allegroArchiwum.summary?.total||allegroPodsumowanie.orders?.archived||0);
+  const filtry=[["do_obslugi","📋","Do obsługi","aktywne lokalnie"],["NEW","🆕","Nowe","status z Allegro"],["PROCESSING","⚙️","W realizacji","status z Allegro"],["READY_FOR_SHIPMENT","🚚","Do wysłania","status z Allegro"],["zrealizowane","✅","Zrealizowane lokalnie","obsłużone w sklepie"],["SENT","📤","Wysłane","status z Allegro"],["CANCELLED","⛔","Anulowane","status z Allegro"],["RETURNED","↩️","Zwrócone","status z Allegro"],["wszystkie","📦","Ostatnie 30 dni","rejestr operacyjny"],["archiwum","🗄️","Archiwum","> 30 dni, na żądanie"]];
   return `<div class="panel allegro-section-panel">
     <div class="order-section-head">
       <div><h2 style="margin-top:0">📦 Zamówienia Allegro</h2><p class="order-detail-lead">Agent rozpoznaje pozycje po identyfikatorach, rezerwuje towar, pokazuje dokładną lokalizację albo dopisuje realny brak do właściwego szkicu zamówienia producenta. Oficjalny status zawsze pochodzi z Allegro.</p></div>
     </div>
-    <div class="orders-status-strip allegro-order-filter-cards" aria-label="Filtry statusu zamówień">${filtry.map(([id,icon,label,description])=>`<button class="${filtrAllegroZamowien===id?"active":""}" onclick="filtrAllegroZamowien=${jsArg(id)};renderuj()" aria-pressed="${filtrAllegroZamowien===id}"><span>${icon}</span><b>${counts[id]||0}</b><strong>${label}</strong><small>${description}</small></button>`).join("")}</div>
+    <div class="orders-status-strip allegro-order-filter-cards" aria-label="Filtry statusu zamówień">${filtry.map(([id,icon,label,description])=>`<button class="${filtrAllegroZamowien===id?"active":""}" onclick="allegroUstawFiltrZamowien(${jsArg(id)})" aria-pressed="${filtrAllegroZamowien===id}"><span>${icon}</span><b>${counts[id]||0}</b><strong>${label}</strong><small>${description}</small></button>`).join("")}</div>
+    ${czyArchiwum?`<div class="archive-toolbar"><div><b>🗄️ Archiwum miesięczne</b><small>Ładowane dopiero po otwarciu — nie obciąża codziennej pracy.</small></div><label>Miesiąc <select onchange="allegroArchiwum.month=this.value;allegroWczytajArchiwum(true)"><option value="">Wszystkie miesiące</option>${(allegroArchiwum.summary?.months||[]).map(x=>`<option value="${esc(x.month)}" ${allegroArchiwum.month===x.month?"selected":""}>${esc(x.month)} (${esc(x.count)})</option>`).join("")}</select></label><button class="btn ghost" onclick="allegroWczytajArchiwum(true)" ${allegroArchiwum.busy?"disabled":""}>${allegroArchiwum.busy?"⏳ Ładuję…":"↻ Odśwież archiwum"}</button></div>${allegroArchiwum.error?`<div class="backend-note">${esc(allegroArchiwum.error)}</div>`:""}`:""}
     ${adminWyszukiwaniePanelHTML({id:"allegro-orders",description:"Zlecenie, klient, telefon, kod produktu, EAN, nazwa i etap magazynowy.",results:pasujaceZamowienia.length,active:!!(szukajAllegroZamowien||filtrAllegroZamowien!=="do_obslugi"||filtrEtapuAllegroZamowien!=="wszystkie"),open:true,fields:`<div class="orders-toolbar allegro-toolbar admin-search-full">
       <input placeholder="Szukaj: zamówienie, klient, telefon, kod, EAN, nazwa produktu…" value="${esc(szukajAllegroZamowien)}" oninput="szukajAllegroZamowien=this.value.toLowerCase();zaplanujRenderPoWpisaniu()">
       <label>Etap magazynu <select onchange="filtrEtapuAllegroZamowien=this.value;renderuj()">${[["wszystkie","Wszystkie etapy"],["do_sprawdzenia","Do sprawdzenia"],["braki","Braki"],["oczekuje_na_dostawe","Oczekuje na dostawę"],["kompletacja","Oczekuje na wysyłkę"],["spakowane","Spakowane"],["zrealizowane","Zrealizowane lokalnie"]].map(([v,l])=>`<option value="${v}" ${filtrEtapuAllegroZamowien===v?"selected":""}>${l}</option>`).join("")}</select></label>
       <label class="allegro-view-limit">Pokaż zleceń <select onchange="allegroLimitWidokuZamowien=Number(this.value)||100;renderuj()">${[25,50,100,250,500,1000].map(n=>`<option value="${n}" ${allegroLimitWidokuZamowien===n?"selected":""}>${n}</option>`).join("")}</select></label>
       ${szukajAllegroZamowien?`<button class="btn ghost" onclick="szukajAllegroZamowien='';renderuj()">Wyczyść</button>`:""}
-    </div>`,actions:adminOperacjeWynikowHTML({id:"allegro-orders",selected:zaznaczone.length,pageCount:widoczneZamowienia.length,resultCount:pasujaceZamowienia.length,selectPage:"allegroZaznaczWidoczneZamowienia(true)",selectAll:"allegroZaznaczWszystkiePasujaceZamowienia()",clear:"allegroWyczyscZaznaczenieZamowien()",exportSelected:"allegroEksportujZamowienia('zaznaczone')",exportAll:"allegroEksportujZamowienia('filtr')"})})}
-    <div class="allegro-bulk-toolbar">
+    </div>`,actions:czyArchiwum?"":adminOperacjeWynikowHTML({id:"allegro-orders",selected:zaznaczone.length,pageCount:widoczneZamowienia.length,resultCount:pasujaceZamowienia.length,selectPage:"allegroZaznaczWidoczneZamowienia(true)",selectAll:"allegroZaznaczWszystkiePasujaceZamowienia()",clear:"allegroWyczyscZaznaczenieZamowien()",exportSelected:"allegroEksportujZamowienia('zaznaczone')",exportAll:"allegroEksportujZamowienia('filtr')"})})}
+    ${czyArchiwum?`<div class="backend-note"><b>Tryb tylko do odczytu.</b> Archiwalne zlecenia nie są ponownie synchronizowane, rezerwowane ani dodawane do planu producenta.</div>`:`<div class="allegro-bulk-toolbar">
       <div><b>Operacje na zleceniach</b><small>${zaznaczone.length} zaznaczonych • checkbox służy tylko do operacji grupowych</small></div>
       <div class="allegro-bulk-stage"><button class="btn" onclick='allegroUtworzZamowienieProducenta(${JSON.stringify(zaznaczone)})' ${zaznaczone.length?"":"disabled"}>🧾 Utwórz/aktualizuj plany producentów (${zaznaczone.length})</button><label for="bulkAllegroWarehouseStage">Etap magazynu</label><select id="bulkAllegroWarehouseStage"><option value="">— wybierz etap —</option><option value="do_sprawdzenia">Do sprawdzenia</option><option value="braki">Braki — zamówić</option><option value="oczekuje_na_dostawe">Zamówione — oczekuje</option><option value="kompletacja">Oczekuje na wysyłkę</option><option value="spakowane">Spakowane</option><option value="zrealizowane">✅ Zrealizowane lokalnie</option></select><button class="btn" onclick="allegroUstawEtapZaznaczonychZamowien()" ${zaznaczone.length?"":"disabled"}>Zastosuj do ${zaznaczone.length}</button></div>
-    </div>
+    </div>`}
     <div class="allegro-order-list">${widoczneZamowienia.map(allegroZlecenieHTML).join("") || `<div class="backend-note">Brak zamówień w tym filtrze. Synchronizacja pobiera wyłącznie nowe i gotowe do wysłania.</div>`}</div>
+    ${czyArchiwum&&allegroArchiwum.hasMore?`<button class="btn ghost archive-load-more" onclick="allegroWczytajArchiwum(false)" ${allegroArchiwum.busy?"disabled":""}>${allegroArchiwum.busy?"Ładuję…":"Pokaż kolejne 100"}</button>`:""}
     ${widoczneZamowienia.length>=allegroLimitWidokuZamowien?`<p class="order-detail-lead">Pokazano pierwsze ${allegroLimitWidokuZamowien} zleceń. Zwiększ limit widoku powyżej, aby zobaczyć więcej.</p>`:""}
     <section class="allegro-stock-agent allegro-info-bottom"><div class="allegro-stock-agent-head"><div><b>🤖 Agent magazynowy i mapowanie produktów</b><small>Nowe zlecenia są sprawdzane co 15 minut. Agent łączy pozycje kolejno po ręcznym powiązaniu, EAN, SKU, kodzie producenta i jednoznacznej nazwie. Niepewne dopasowania zostawia do decyzji administratora.</small></div><a class="btn ghost" href="#/admin/magazyn/plan">📦 Plan zatowarowania</a></div><div class="allegro-stock-agent-stats allegro-mapping-stats"><span><b>${agentStat.rozpoznane}/${agentStat.pozycje}</b><small>pozycji połączonych</small></span><span><b>${agentStat.reczne}</b><small>powiązań ręcznych</small></span><span><b>${agentStat.gotowe}</b><small>zleceń gotowych</small></span><span class="${agentStat.zBrakami?"alert":""}"><b>${agentStat.zBrakami}</b><small>z brakami (${agentStat.brakiSzt} szt.)</small></span><span class="${agentStat.doWyjasnienia?"warn":""}"><b>${agentStat.doWyjasnienia}</b><small>do wyjaśnienia</small></span><span class="${agentStat.lokalizacje?"warn":""}"><b>${agentStat.lokalizacje}</b><small>lokalizacji do ustalenia przez magazyn</small></span></div></section>
     <div class="backend-note allegro-info-bottom"><b>Status Allegro działa tylko w jedną stronę.</b> Sklep odczytuje jego zmianę automatycznie co 15 minut. Lokalne etapy magazynowe służą wyłącznie organizacji pracy i nigdy nie zmieniają statusu w Allegro. Po przyjęciu pełnego dokumentu producenta zlecenie przechodzi do „Oczekuje na wysyłkę” i nie zasila kolejnego zamówienia zakupowego.</div>
@@ -3002,6 +2970,7 @@ function allegroMapowaniePozycjiHTML(p={}){
 }
 function allegroZlecenieHTML(z){
   const meta=allegroStatusKolejkiMeta(z), s=allegroStatusKolejki(z);
+  const archiwalne=!!z.archivedAt;
   const etap=allegroEtapMagazynuMeta(z), analiza=allegroAnalizaMagazynowaZamowienia(z);
   const items=Array.isArray(z.lineItems)&&z.lineItems.length?z.lineItems:[];
   const sztuk=items.reduce((sum,it)=>sum+Math.max(1,Number(it.quantity)||1),0);
@@ -3010,8 +2979,8 @@ function allegroZlecenieHTML(z){
   const lokalnieDone=allegroZamowienieZrealizowaneLokalnie(z);
   return `<article class="allegro-order-card ${zaznaczone?"is-selected ":""}${allegroZamowienieAktywneLokalnie(z)?"is-active":"is-closed"}">
     <header class="allegro-order-head">
-      <div class="allegro-order-title"><label class="allegro-order-select" title="Zaznaczenie tylko do operacji grupowych"><input type="checkbox" ${zaznaczone?"checked":""} onchange="allegroPrzelaczZaznaczenieZamowienia(${jsArg(z.id)},this.checked)"></label><span class="allegro-order-ico">📦</span><div><b>Zlecenie ${esc(z.id||z.nr||"—")}</b><small>${esc(allegroDataTxt(z.createdAt||z.firstFetchedAt))} • ${items.length} pozycji / ${sztuk} szt. • ${esc(z.total||"—")}</small></div></div>
-      <div class="allegro-order-state"><span class="lvl ${meta.klasa}">Allegro: ${esc(meta.label)}</span><span class="lvl ${etap.klasa}">Magazyn: ${esc(etap.label)}</span><small>Ostatnia synchronizacja: ${esc(allegroDataTxt(z.rawUpdatedAt||z.lastSeenAt))}</small></div>
+      <div class="allegro-order-title">${archiwalne?`<span class="allegro-order-select" title="Archiwum tylko do odczytu">🗄️</span>`:`<label class="allegro-order-select" title="Zaznaczenie tylko do operacji grupowych"><input type="checkbox" ${zaznaczone?"checked":""} onchange="allegroPrzelaczZaznaczenieZamowienia(${jsArg(z.id)},this.checked)"></label>`}<span class="allegro-order-ico">📦</span><div><b>Zlecenie ${esc(z.id||z.nr||"—")}</b><small>${esc(allegroDataTxt(z.createdAt||z.firstFetchedAt))} • ${items.length} pozycji / ${sztuk} szt. • ${esc(z.total||"—")}</small></div></div>
+      <div class="allegro-order-state"><span class="lvl ${meta.klasa}">Allegro: ${esc(meta.label)}</span><span class="lvl ${etap.klasa}">Magazyn: ${esc(etap.label)}</span>${archiwalne?`<span class="lvl lvl-info">Archiwum ${esc(z.archiveMonth||"")}</span>`:""}<small>Ostatnia synchronizacja: ${esc(allegroDataTxt(z.rawUpdatedAt||z.lastSeenAt))}</small></div>
     </header>
     <div class="allegro-order-info">
       <div><b>👤 ${esc(z.buyerName||z.buyerLogin||z.email||"Klient Allegro")}</b><small>${esc(z.email||"—")} ${z.phone?`• ${esc(z.phone)}`:""}</small></div>
@@ -3026,7 +2995,7 @@ function allegroZlecenieHTML(z){
       </table></div>
     </details>
     <footer class="allegro-order-actions">
-      ${!allegroZamowienieZamknieteWAllegro(z)?`<span class="${z.supplierProcurement?.status==="dostawa_przyjeta"||analiza.gotowe?"lvl lvl-ok":"lvl lvl-blad"}">${z.supplierProcurement?.status==="dostawa_przyjeta"?`✅ Dostawa przyjęta • ${esc(z.supplierProcurement.receivedQuantity||0)}/${esc(z.supplierProcurement.orderedQuantity||0)} szt. • oczekuje na wysyłkę`:analiza.gotowe?"✅ Stan pokrywa zamówienie — można kompletować":`⚠️ Braki ${analiza.braki} szt. • nierozpoznane ${analiza.nierozpoznane} • bez stanu ${analiza.bezStanu}`}</span>${analiza.bezLokalizacji?`<span class="lvl lvl-info">📍 Magazyn ma ustalić ${esc(analiza.bezLokalizacji)} ${analiza.bezLokalizacji===1?"lokalizację":"lokalizacje"}; realizacja pozostaje aktywna.</span>`:""}${z.supplierProcurement?`<span class="lvl ${z.supplierProcurement.taskStatus==="zrealizowane"?"lvl-ok":"lvl-info"}">Dokument producenta: ${esc(z.supplierProcurement.status||"do realizacji")} • ${esc(z.supplierProcurement.receivedQuantity||0)}/${esc(z.supplierProcurement.orderedQuantity||0)} szt.</span>`:""}${analiza.braki>0&&z.supplierProcurement?.status!=="dostawa_przyjeta"?`<button class="btn" onclick="allegroUtworzZamowienieProducenta(${jsArg(z.id)})">🧾 ${z.supplierProcurement?"Aktualizuj":"Utwórz"} zamówienie producenta</button>`:""}<a class="btn ghost" href="#/admin/magazyn/plan">Plan producentów</a><select id="${esc(idEtap)}" aria-label="Etap magazynu">${[["do_sprawdzenia","Do sprawdzenia"],["braki","Braki — zamówić"],["oczekuje_na_dostawe","Zamówione — oczekuje na dostawę"],["kompletacja","Oczekuje na wysyłkę"],["spakowane","Spakowane"],["zrealizowane","✅ Zrealizowane lokalnie"]].map(([id,label])=>`<option value="${id}" ${allegroEtapMagazynu(z)===id?"selected":""}>${label}</option>`).join("")}</select><button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},document.getElementById(${jsArg(idEtap)}).value)">Zapisz etap</button>${!lokalnieDone?`<button class="btn" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'zrealizowane')">✅ Oznacz jako zrealizowane</button>`:`<button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'do_sprawdzenia')">↩️ Przywróć do obsługi</button>`}`:""}
+      ${archiwalne?`<span class="lvl lvl-info">🗄️ Zapis historyczny — bez operacji magazynowych</span>`:!allegroZamowienieZamknieteWAllegro(z)?`<span class="${z.supplierProcurement?.status==="dostawa_przyjeta"||analiza.gotowe?"lvl lvl-ok":"lvl lvl-blad"}">${z.supplierProcurement?.status==="dostawa_przyjeta"?`✅ Dostawa przyjęta • ${esc(z.supplierProcurement.receivedQuantity||0)}/${esc(z.supplierProcurement.orderedQuantity||0)} szt. • oczekuje na wysyłkę`:analiza.gotowe?"✅ Stan pokrywa zamówienie — można kompletować":`⚠️ Braki ${analiza.braki} szt. • nierozpoznane ${analiza.nierozpoznane} • bez stanu ${analiza.bezStanu}`}</span>${analiza.bezLokalizacji?`<span class="lvl lvl-info">📍 Magazyn ma ustalić ${esc(analiza.bezLokalizacji)} ${analiza.bezLokalizacji===1?"lokalizację":"lokalizacje"}; realizacja pozostaje aktywna.</span>`:""}${z.supplierProcurement?`<span class="lvl ${z.supplierProcurement.taskStatus==="zrealizowane"?"lvl-ok":"lvl-info"}">Dokument producenta: ${esc(z.supplierProcurement.status||"do realizacji")} • ${esc(z.supplierProcurement.receivedQuantity||0)}/${esc(z.supplierProcurement.orderedQuantity||0)} szt.</span>`:""}${analiza.braki>0&&z.supplierProcurement?.status!=="dostawa_przyjeta"?`<button class="btn" onclick="allegroUtworzZamowienieProducenta(${jsArg(z.id)})">🧾 ${z.supplierProcurement?"Aktualizuj":"Utwórz"} zamówienie producenta</button>`:""}<a class="btn ghost" href="#/admin/magazyn/plan">Plan producentów</a><select id="${esc(idEtap)}" aria-label="Etap magazynu">${[["do_sprawdzenia","Do sprawdzenia"],["braki","Braki — zamówić"],["oczekuje_na_dostawe","Zamówione — oczekuje na dostawę"],["kompletacja","Oczekuje na wysyłkę"],["spakowane","Spakowane"],["zrealizowane","✅ Zrealizowane lokalnie"]].map(([id,label])=>`<option value="${id}" ${allegroEtapMagazynu(z)===id?"selected":""}>${label}</option>`).join("")}</select><button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},document.getElementById(${jsArg(idEtap)}).value)">Zapisz etap</button>${!lokalnieDone?`<button class="btn" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'zrealizowane')">✅ Oznacz jako zrealizowane</button>`:`<button class="btn ghost" onclick="allegroUstawEtapMagazynu(${jsArg(z.id)},'do_sprawdzenia')">↩️ Przywróć do obsługi</button>`}`:""}
     </footer>
   </article>`;
 }
@@ -3607,9 +3576,10 @@ function allegroPanelOperacyjnyStaty(){
     if(id&&produktIds.has(String(id)))podpiete++;
   }
   const aktywneZamowienia=zamowienia.filter(statusAllegroRezerwujeMagazyn),braki=aktywneZamowienia.filter(z=>allegroEtapMagazynu(z)==="braki");
+  const liczbaOfert=allegroDaneZaladowane.offers?oferty.length:Number(allegroPodsumowanie.offers?.count||0),liczbaPodpietych=allegroDaneZaladowane.offers?podpiete:Number(allegroPodsumowanie.offers?.mapped||0),liczbaAktywnych=allegroDaneZaladowane.orders?aktywneZamowienia.length:Number(allegroPodsumowanie.orders?.active||0);
   const zadaniaWystawiania=allegroAktywneZadaniaAgentaOfert().length,naruszenia=(allegroStan.complianceAudit?.items||[]).filter(x=>!x.ok).length;
-  const pilne=aktywneZamowienia.length+komunikacja.threadNeed+komunikacja.issueNeed+naruszenia;
-  return {oferty:oferty.length,podpiete,niepodpiete:Math.max(0,oferty.length-podpiete),produkty:produkty.length,aktywneZamowienia:aktywneZamowienia.length,braki:braki.length,zadaniaWystawiania,wiadomosci:komunikacja.threadNeed,dyskusje:komunikacja.issueNeed,naruszenia,pilne,synchronizacja:allegroStan.offerSyncState||{}};
+  const pilne=liczbaAktywnych+komunikacja.threadNeed+komunikacja.issueNeed+naruszenia;
+  return {oferty:liczbaOfert,podpiete:liczbaPodpietych,niepodpiete:Math.max(0,liczbaOfert-liczbaPodpietych),produkty:produkty.length,aktywneZamowienia:liczbaAktywnych,braki:allegroDaneZaladowane.orders?braki.length:0,zadaniaWystawiania,wiadomosci:komunikacja.threadNeed,dyskusje:komunikacja.issueNeed,naruszenia,pilne,synchronizacja:allegroStan.offerSyncState||{}};
 }
 function allegroSubnavHTML(aktywny="start",st=allegroPanelOperacyjnyStaty()){
   const zadaniaWystawiania=st.zadaniaWystawiania;
@@ -3800,11 +3770,12 @@ function rentownoscKanalowaPanelHTML(){
   </div>`;
 }
 function widokAdminAllegro(sekcja="start"){
-  allegroLadujJesliTrzeba();
+  const aktywna=["zamowienia","oferty","wystawianie","rentownosc","wiadomosci","dyskusje","zgodnosc","ustawienia"].includes(sekcja)?sekcja:"start";
+  const zakres=aktywna==="zamowienia"?"orders":["oferty","wystawianie","rentownosc","zgodnosc"].includes(aktywna)?"offers":aktywna==="ustawienia"?"config":"summary";
+  allegroLadujJesliTrzeba(zakres);
   if(["wiadomosci","dyskusje"].includes(sekcja)&&!allegroKomunikacja?.updated_at&&!allegroKomunikacja?.sprawdzono&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
   if(["wiadomosci","dyskusje"].includes(sekcja)) setTimeout(()=>allegroAktywujKafelkiKomunikacji(sekcja==="dyskusje"?"issue":"thread"),0);
   const staty=allegroPanelOperacyjnyStaty(),mapped=staty.podpiete,niepodpiete=staty.niepodpiete;
-  const aktywna=["zamowienia","oferty","wystawianie","rentownosc","wiadomosci","dyskusje","zgodnosc","ustawienia"].includes(sekcja)?sekcja:"start";
   return adminSzkielet("/admin/allegro", `
   <div class="module-page-stack allegro-module-page">
   ${allegroSubnavHTML(aktywna,staty)}
@@ -4717,15 +4688,20 @@ function bazoweProduktyWKoszu(){
     .map(id=>produktyBazoweWspolne().find(x=>Number(x.id)===Number(id)))
     .filter(Boolean);
 }
+let produktyAdminCache={bazowe:null,dodane:null,edytowane:null,definitywne:null,items:[],byId:new Map()};
+function uniewaznijProduktyAdminCache(){produktyAdminCache={bazowe:null,dodane:null,edytowane:null,definitywne:null,items:[],byId:new Map()};}
 function produktyDoAdministracji(){
   naprawKolizjeIdProduktow();
+  const bazowe=produktyBazoweWspolne();
+  if(produktyAdminCache.bazowe===bazowe&&produktyAdminCache.dodane===produktyDodane&&produktyAdminCache.edytowane===produktyEdytowane&&produktyAdminCache.definitywne===produktyDefinitywne)return produktyAdminCache.items;
   const dodaneIds = new Set(produktyDodane.map(p=>Number(p.id)));
-  return [
-    ...produktyBazoweWspolne().filter(p=>!dodaneIds.has(Number(p.id))&&!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p),
+  const items=[
+    ...bazowe.filter(p=>!dodaneIds.has(Number(p.id))&&!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p),
     ...produktyDodane
   ];
+  produktyAdminCache={bazowe,dodane:produktyDodane,edytowane:produktyEdytowane,definitywne:produktyDefinitywne,items,byId:new Map(items.map(p=>[String(p.id),p]))};return items;
 }
-function pobierzProduktAdmin(id){ return produktDodanyPoId(id) || produktyDoAdministracji().find(p=>p.id===id); }
+function pobierzProduktAdmin(id){produktyDoAdministracji();return produktyAdminCache.byId.get(String(id));}
 function ustawStroneAdminProduktow(n){ stronaAdminProduktow=Math.max(1,Number(n)||1); renderuj(); }
 function ustawProduktyNaStronieAdmin(n){
   produktyNaStronieAdmin=[25,50,100,200,500,1000].includes(Number(n))?Number(n):50;
@@ -5216,6 +5192,7 @@ function odswiezPlanZatowarowaniaWidoku(){
   return true;
 }
 function widokAdminMagazyn(sekcja="pulpit"){
+  allegroLadujJesliTrzeba(["pulpit","stany","plan"].includes(sekcja)?"orders":"summary");
   const aktywna=["pulpit","dostawcy","stany","lokalizacje","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const u=ustawieniaMagazynuPelne();
   if(aktywna==="plan")return adminSzkielet("/admin/magazyn",`
@@ -5482,7 +5459,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
   `);
 }
 function widokAdminProdukty(){
-  allegroLadujJesliTrzeba();
+  allegroLadujJesliTrzeba("offers");
   const audytAllegro=allegroAudytDuplikatow();
   const audytSklep=audytDuplikatowSklepu();
   const katalogWszystkie=produktyDoAdministracji();
@@ -9626,7 +9603,7 @@ function pulpitSystemy(){
 }
 
 function adminPulpitDane(){
-  const sklep=pobierzZamowienia(),sklepAktywne=sklep.filter(pulpitStatusSklepuAktywny),allegro=Array.isArray(allegroZamowienia)?allegroZamowienia:[],allegroAktywne=allegro.filter(allegroZamowienieAktywneLokalnie),komunikacja=allegroKomunikacjaStaty(),plan=potrzebyZatowarowania(),produktyAktywne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const sklep=pobierzZamowienia(),sklepAktywne=sklep.filter(pulpitStatusSklepuAktywny),allegro=allegroDaneZaladowane.orders?(Array.isArray(allegroZamowienia)?allegroZamowienia:[]):(allegroPodsumowanie.recentOrders||[]),allegroAktywneRzeczywiste=allegro.filter(allegroZamowienieAktywneLokalnie),allegroAktywne=allegroDaneZaladowane.orders?allegroAktywneRzeczywiste:Array.from({length:Number(allegroPodsumowanie.orders?.active||0)},()=>({summaryOnly:true})),komunikacja=allegroKomunikacjaStaty(),plan=potrzebyZatowarowania(),produktyAktywne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
   const wysylkiBezNumeru=sklepAktywne.filter(z=>!daneWysylki(z).numer).length,firmoweBezFaktury=sklepAktywne.filter(z=>(z.klient?.nip||z.klient?.firma)&&!infaktStan.links?.[z.nr]&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length;
   const teraz=Date.now(),siedem=7*86400000,sklep7=sklep.filter(z=>String(z.status||"").toLowerCase()!=="anulowane"&&pulpitDataMs(z)>=teraz-siedem),sklepPoprzednie7=sklep.filter(z=>String(z.status||"").toLowerCase()!=="anulowane"&&pulpitDataMs(z)>=teraz-2*siedem&&pulpitDataMs(z)<teraz-siedem),allegro7=allegro.filter(z=>!["CANCELLED","RETURNED"].includes(allegroStatusKolejki(z))&&pulpitDataMs(z)>=teraz-siedem);
   const sprzedazSklep7=sklep7.reduce((s,z)=>s+kwotaNum(z.razem),0),sprzedazAllegro7=allegro7.reduce((s,z)=>s+pulpitKwotaAllegro(z),0),sprzedazPoprzednie7=sklepPoprzednie7.reduce((s,z)=>s+kwotaNum(z.razem),0);
@@ -9721,7 +9698,7 @@ function adminPulpitStanSystemuHTML(d){
 
 async function adminPulpitOdswiez(pelnaKontrola=false){
   toast("Odświeżam dane pulpitu…");
-  await Promise.allSettled([chmuraWczytajStan(),allegroWczytajDane(true,false),pelnaKontrola?sprawdzBramke(true):Promise.resolve(true)]);
+  await Promise.allSettled([chmuraWczytajStan(),allegroWczytajDane(true,false,"summary"),pelnaKontrola?sprawdzBramke(true):Promise.resolve(true)]);
   zastosujUstawienia();zbudujProdukty();odswiezMenu();renderuj();toast("Pulpit odświeżony ✅");
 }
 function adminPulpitEksportujRaport(zakres="calosc"){
@@ -9731,7 +9708,7 @@ function adminPulpitEksportujRaport(zakres="calosc"){
 }
 
 function widokAdmin(sekcja="pulpit"){
-  if(!allegroStan.sprawdzono&&!allegroStan.ladowanie&&typeof allegroLadujJesliTrzeba==="function")setTimeout(()=>allegroLadujJesliTrzeba(),0);
+  if(typeof allegroLadujJesliTrzeba==="function")setTimeout(()=>allegroLadujJesliTrzeba("summary"),0);
   if(!stanBramki.sprawdzono)setTimeout(()=>sprawdzBramke(true),0);
   const aktywna=["pulpit","operacje","sprzedaz","alerty","system"].includes(String(sekcja||""))?String(sekcja):"pulpit",d=adminPulpitDane();
   const body=aktywna==="operacje"?adminPulpitOperacjeHTML(d):aktywna==="sprzedaz"?adminPulpitSprzedazHTML(d):aktywna==="alerty"?adminPulpitAlertyHTML(d):aktywna==="system"?adminPulpitStanSystemuHTML(d):adminPulpitPrzegladHTML(d);

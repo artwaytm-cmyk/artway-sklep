@@ -31,7 +31,7 @@ async function chmuraPobierzKatalogImportowany(meta={},force=false){
   if(!force&&revision===chmuraKatalogImportowanyRev)return false;
   if(!force&&typeof productLinkImportStan!=="undefined"&&productLinkImportStan.loopActive)return false;
   if(!count){produktyImportowane=[];chmuraKatalogImportowanyRev=revision;return true;}
-  const pageSize=50,offsets=[];for(let offset=0;offset<count;offset+=pageSize)offsets.push(offset);
+  const pageSize=500,offsets=[];for(let offset=0;offset<count;offset+=pageSize)offsets.push(offset);
   const pages=[];
   for(let start=0;start<offsets.length;start+=4){
     const batch=await Promise.all(offsets.slice(start,start+4).map(offset=>chmura("product-link-import-catalog",{params:{offset,limit:pageSize,catalogRev:revision},timeout:30000})));

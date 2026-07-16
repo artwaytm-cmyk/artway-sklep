@@ -265,15 +265,20 @@ function bazoweProduktyWKoszu(){
     .map(id=>produktyBazoweWspolne().find(x=>Number(x.id)===Number(id)))
     .filter(Boolean);
 }
+let produktyAdminCache={bazowe:null,dodane:null,edytowane:null,definitywne:null,items:[],byId:new Map()};
+function uniewaznijProduktyAdminCache(){produktyAdminCache={bazowe:null,dodane:null,edytowane:null,definitywne:null,items:[],byId:new Map()};}
 function produktyDoAdministracji(){
   naprawKolizjeIdProduktow();
+  const bazowe=produktyBazoweWspolne();
+  if(produktyAdminCache.bazowe===bazowe&&produktyAdminCache.dodane===produktyDodane&&produktyAdminCache.edytowane===produktyEdytowane&&produktyAdminCache.definitywne===produktyDefinitywne)return produktyAdminCache.items;
   const dodaneIds = new Set(produktyDodane.map(p=>Number(p.id)));
-  return [
-    ...produktyBazoweWspolne().filter(p=>!dodaneIds.has(Number(p.id))&&!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p),
+  const items=[
+    ...bazowe.filter(p=>!dodaneIds.has(Number(p.id))&&!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p),
     ...produktyDodane
   ];
+  produktyAdminCache={bazowe,dodane:produktyDodane,edytowane:produktyEdytowane,definitywne:produktyDefinitywne,items,byId:new Map(items.map(p=>[String(p.id),p]))};return items;
 }
-function pobierzProduktAdmin(id){ return produktDodanyPoId(id) || produktyDoAdministracji().find(p=>p.id===id); }
+function pobierzProduktAdmin(id){produktyDoAdministracji();return produktyAdminCache.byId.get(String(id));}
 function ustawStroneAdminProduktow(n){ stronaAdminProduktow=Math.max(1,Number(n)||1); renderuj(); }
 function ustawProduktyNaStronieAdmin(n){
   produktyNaStronieAdmin=[25,50,100,200,500,1000].includes(Number(n))?Number(n):50;
@@ -764,6 +769,7 @@ function odswiezPlanZatowarowaniaWidoku(){
   return true;
 }
 function widokAdminMagazyn(sekcja="pulpit"){
+  allegroLadujJesliTrzeba(["pulpit","stany","plan"].includes(sekcja)?"orders":"summary");
   const aktywna=["pulpit","dostawcy","stany","lokalizacje","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const u=ustawieniaMagazynuPelne();
   if(aktywna==="plan")return adminSzkielet("/admin/magazyn",`
@@ -1030,7 +1036,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
   `);
 }
 function widokAdminProdukty(){
-  allegroLadujJesliTrzeba();
+  allegroLadujJesliTrzeba("offers");
   const audytAllegro=allegroAudytDuplikatow();
   const audytSklep=audytDuplikatowSklepu();
   const katalogWszystkie=produktyDoAdministracji();

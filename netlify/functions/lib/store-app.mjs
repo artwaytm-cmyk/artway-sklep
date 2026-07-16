@@ -57,6 +57,8 @@ import {
 } from './domain/allegro-reply-assistant.mjs';
 import { createStoreOrderSupplierReconciliation } from './store-order-supplier-reconciliation.mjs';
 import { markAllegroInventoryTransition, markAllegroInventoryTransitions, resolveAllegroBaselineCutover } from './domain/allegro-supplier-demand.mjs';
+import { allegroOrderNeedsLiveRefresh, allegroOrderNeedsStatusRefresh, createAllegroOrderArchive } from './domain/allegro-order-retention.mjs';
+import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
 import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
 import { allegroNextScheduledSyncAt, allegroScheduledSyncDue, normalizeAllegroSyncSettings } from './domain/allegro-sync-policy.mjs';
@@ -113,6 +115,8 @@ const inventoryDecisions = createInventoryDecisionService({ readVersioned: czyta
 const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
 const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, decisions: inventoryDecisions });
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const allegroOrderArchive = createAllegroOrderArchive({ read: czytaj, write: zapisz });
+const allegroDataReader = createAllegroDataReader({ read: czytaj, archive: allegroOrderArchive, getOfferSettings: allegroPobierzUstawieniaOfert, getStatus: allegroStatus, mappingItems: allegroMapowaniaItems, orderStatus: (order) => allegroStatusKolejkiZamowienia(order, {}), orderNeedsRefresh: allegroOrderNeedsLiveRefresh, nextScheduledSyncAt: allegroNextScheduledSyncAt, compliancePolicy: ALLEGRO_COMPLIANCE_POLICY });
 const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
 const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
 const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
@@ -5472,33 +5476,18 @@ export default async (req) => {
     // ─── ALLEGRO: stan integracji i dane zapisane w backendzie (admin) ───
     if (action === 'allegro-data') {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const orders = await czytaj('allegro_orders', { items: [], updated_at: null });
-      const offers = await czytaj('allegro_offers', { items: [], updated_at: null });
-      const mappings = await czytaj('allegro_mappings', { items: {}, updated_at: null });
-      const offerLastError = await czytaj('allegro_offer_last_error', null);
-      const offerDefaultsAudit = await czytaj('allegro_offer_defaults_audit', { items: {}, updated_at: null });
-      const catalogMaintenance = await czytaj('allegro_catalog_maintenance', { cursor: 0, lastRun: null });
-      const offerSyncState = await czytaj('allegro_offer_sync_state', { lastLightSyncAt: null, lastFullSyncAt: null, lastSource: null, lastResult: null });
-      const complianceAudit = await czytaj('allegro_compliance_audit', { items: [], summary: {}, updated_at: null, policy: ALLEGRO_COMPLIANCE_POLICY });
-      const offerSettings = await allegroPobierzUstawieniaOfert();
-      const status = await allegroStatus(req);
-      return odpowiedz({
-        ok: true,
-        allegro: { ...status, updated_at: orders.updated_at || offers.updated_at || status.updated_at || null },
-        orders: Array.isArray(orders.items) ? orders.items : [],
-        offers: Array.isArray(offers.items) ? offers.items : [],
-        mappings: allegroMapowaniaItems(mappings),
-        offerLastError,
-        offerDefaultsAudit,
-        offerSettings,
-        offerSyncState: {
-          ...offerSyncState,
-          nextLightSyncAt: allegroNextScheduledSyncAt(offerSyncState, offerSettings, 'light'),
-          nextFullSyncAt: allegroNextScheduledSyncAt(offerSyncState, offerSettings, 'full'),
-        },
-        catalogMaintenance,
-        complianceAudit,
+      return odpowiedz(await allegroDataReader(url.searchParams.get('scope') || 'all', req));
+    }
+
+    // ─── ALLEGRO: lekkie archiwum zamówień starszych niż 30 dni (admin) ───
+    if (action === 'allegro-orders-archive') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const page = await allegroOrderArchive.page({
+        month: tekst(url.searchParams.get('month') || '', 7),
+        offset: Number(url.searchParams.get('offset') || 0),
+        limit: Number(url.searchParams.get('limit') || 100),
       });
+      return odpowiedz({ ok: true, readOnly: true, retentionDays: 30, ...page });
     }
 
     // ─── ALLEGRO: obowiązkowa kontrola zgodności opisów (admin) ───
@@ -5563,7 +5552,7 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const limit = Math.min(1000, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 1000)));
+      const limit = Math.min(1000, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 200)));
       const pobrane = [];
       for (let offset = 0; offset < limit; offset += 100) {
         const pageLimit = Math.min(100, limit - pobrane.length);
@@ -5575,6 +5564,8 @@ export default async (req) => {
       }
       const poprzedniRec = await czytaj('allegro_orders', { items: [], updated_at: null });
       const poprzednie = Array.isArray(poprzedniRec.items) ? poprzedniRec.items : [];
+      const archiveIndex = await allegroOrderArchive.index();
+      const archivedLookup = archiveIndex.lookup && typeof archiveIndex.lookup === 'object' ? archiveIndex.lookup : {};
       const baselineRec = await czytaj('allegro_orders_baseline_v2', { baseline_at: null });
       const { baselineCreated, baselineAt, baselineMarkerMissing } = resolveAllegroBaselineCutover(baselineRec, poprzedniRec);
       const poprzedniePoId = new Map(poprzednie.filter((x) => x?.id).map((x) => [String(x.id), x]));
@@ -5584,6 +5575,7 @@ export default async (req) => {
       const aktywne = pobrane
         .map(allegroNormalizujZamowienie)
         .filter((x) => x.id && !seen.has(x.id) && seen.add(x.id))
+        .filter((x) => !archivedLookup[String(x.id)])
         .filter(allegroZamowienieJestNoweLubDoWyslania)
         .slice(0, limit);
       let dodane = 0;
@@ -5592,7 +5584,7 @@ export default async (req) => {
         if (!stare.id) { dodane++; noweIds.push(String(z.id)); }
         mapa.set(String(z.id), allegroScalZamowienie(z, stare));
       }
-      const doAktualizacji = poprzednie.filter((z) => z?.id && !seen.has(String(z.id)) && !['SENT', 'PICKED_UP', 'CANCELLED', 'RETURNED'].includes(allegroStatusKolejkiZamowienia(z, {}))).slice(0, limit);
+      const doAktualizacji = poprzednie.filter((z) => z?.id && !seen.has(String(z.id)) && allegroOrderNeedsStatusRefresh(z)).slice(0, limit);
       let odswiezone = 0;
       const batchSize = 8;
       for (let i = 0; i < doAktualizacji.length; i += batchSize) {
@@ -5633,14 +5625,16 @@ export default async (req) => {
       } catch (e) {
         agent = { ...agent, error: tekst(e.message || String(e), 500) };
       }
-      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: baselineCreated ? 0 : dodane, refreshed: odswiezone, filtered: pobrane.length - aktywne.length, mode: 'allegro_status_authoritative_warehouse_stage_separate', baseline_at: baselineAt, baseline_created: baselineCreated, baseline_archived: baselineArchived, agent };
+      const retention = await allegroOrderArchive.archive(items, { now: new Date(), retentionDays: 30 });
+      items = retention.items;
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: baselineCreated ? 0 : dodane, refreshed: odswiezone, filtered: pobrane.length - aktywne.length, mode: 'allegro_status_authoritative_warehouse_stage_separate', retention_days: 30, archive: retention.summary, archived_now: retention.archived, baseline_at: baselineAt, baseline_created: baselineCreated, baseline_archived: baselineArchived, agent };
       await zapisz('allegro_orders', rec);
       // Marker cutover jest commitem końcowym: awaria zapisu zamówień nie może
       // oznaczyć baseline jako zakończonego. Ponowne archiwizowanie po awarii
       // samego markera jest bezpieczne i idempotentne.
       if (baselineMarkerMissing) await zapisz('allegro_orders_baseline_v2', { baseline_at: baselineAt, reason: baselineCreated ? 'existing_orders_confirmed_handled' : 'recovered_from_orders_record', created_at: baselineAt });
       const plan = await allegroZapisStanIMozeUzgodnijPlan(items);
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, mappings: orderMappings || undefined, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode, baseline_at: rec.baseline_at, baseline_created: rec.baseline_created, baseline_archived: rec.baseline_archived, agent, ...plan });
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, mappings: orderMappings || undefined, archive: retention.summary, archived: retention.archived, retention_days: 30, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode, baseline_at: rec.baseline_at, baseline_created: rec.baseline_created, baseline_archived: rec.baseline_archived, agent, ...plan });
     }
 
     // ─── ALLEGRO: lokalny etap obsługi zamówienia (admin) ───

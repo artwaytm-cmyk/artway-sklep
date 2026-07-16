@@ -35,10 +35,12 @@ const PRODUCT_LINK_IMPORT_FIRST_ID = 1000000;
 // dzielonego katalogu serwerowego. Nie zapisujemy ich w localStorage ani w
 // ogólnym rekordzie settings, aby duży katalog nie przekroczył limitu 4 MB.
 let produktyImportowane = [];
+let produktyBazoweCache={bazowe:null,importowane:null,items:[]};
 function produktyBazoweWspolne(){
+  if(produktyBazoweCache.bazowe===prodBazowe&&produktyBazoweCache.importowane===produktyImportowane)return produktyBazoweCache.items;
   const mapa=new Map();
   [...(Array.isArray(prodBazowe)?prodBazowe:[]),...(Array.isArray(produktyImportowane)?produktyImportowane:[])].forEach(p=>{if(p&&p.id!==undefined)mapa.set(String(p.id),p);});
-  return [...mapa.values()];
+  const items=[...mapa.values()];produktyBazoweCache={bazowe:prodBazowe,importowane:produktyImportowane,items};return items;
 }
 let zrodloProduktow = "zapasowe";
 let produktyDodane = wczytajLS("artway_produkty_dodane", []);
@@ -105,6 +107,10 @@ let zaznaczoneAllegroZgodnosc = new Set();
 let allegroOstatniBladWystawienia = null;
 let allegroOstatniWynikWystawienia = null;
 let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSyncState:{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null,lastSource:null,lastResult:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,updated_at:null}};
+let allegroDaneZaladowane={summary:false,orders:false,offers:false,config:false};
+let allegroDaneLadowane=new Set();
+let allegroPodsumowanie={orders:{live:0,active:0,statusCounts:{},archived:0,retentionDays:30,updated_at:null},offers:{count:0,updated_at:null},recentOrders:[]};
+let allegroArchiwum={loaded:false,busy:false,items:[],summary:{total:0,months:[],retentionDays:30,updated_at:null},month:"",offset:0,hasMore:false,error:""};
 let allegroOperacjaUstawien = {busy:false,done:0,total:0,stockUpdated:0,stockFailed:0,republishUpdated:0,republishFailed:0,error:""};
 let allegroMapowanieMasowe={busy:false,total:0,mapped:0,skipped:0,error:""};
 let allegroWycofywanieOfert={busy:false,step:"idle",ids:[],reason:"admin_decision",error:"",results:[]};

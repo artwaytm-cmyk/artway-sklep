@@ -4,6 +4,7 @@ export const IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY = 'imported-product-catalog:m
 export const IMPORTED_PRODUCT_CATALOG_SHARD_PREFIX = 'imported-product-catalog:shard:v1:';
 
 const DEFAULT_SHARD_SIZE = 50;
+const MAX_PAGE_SIZE = 500;
 const FIRST_IMPORTED_PRODUCT_ID = 1_000_000;
 const MAX_CAS_ATTEMPTS = 12;
 
@@ -139,7 +140,7 @@ export function createImportedProductCatalog({ read, readVersioned, writeIfVersi
   async function page({ offset = 0, limit = DEFAULT_SHARD_SIZE } = {}) {
     const manifest = normalizeManifest(await read(IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY, {}), boundedShardSize);
     const safeOffset = Math.max(0, Math.min(manifest.count, Number(offset) || 0));
-    const safeLimit = Math.max(1, Math.min(DEFAULT_SHARD_SIZE, Number(limit) || DEFAULT_SHARD_SIZE));
+    const safeLimit = Math.max(1, Math.min(MAX_PAGE_SIZE, Number(limit) || DEFAULT_SHARD_SIZE));
     const end = Math.min(manifest.count, safeOffset + safeLimit);
     let cursor = 0;
     const selected = [];
