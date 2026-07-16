@@ -65,8 +65,24 @@ test('brak lokalizacji nie cofa zlecenia ani nie miesza się z procesem zakupu',
     warehouseStage: 'do_sprawdzenia',
     agentAnalysis: { positions: [], nierozpoznane: 0, bezStanu: 0, bezLokalizacji: 1, braki: 0, gotowe: true },
   }), [draft()]);
-  assert.equal(result.supplierProcurement.status, 'oczekuje_na_dostawe');
-  assert.equal(result.warehouseStage, 'oczekuje_na_dostawe');
+  assert.equal(result.supplierProcurement.status, 'pokryte_stanem');
+  assert.equal(result.supplierProcurement.taskStatus, 'zrealizowane');
+  assert.equal(result.warehouseStage, 'kompletacja');
+});
+
+test('stary niewysłany dokument nie tworzy braku, gdy aktualny stan pokrywa zamówienie', () => {
+  const staleDraft = draft({ status: 'do wysłania', emailSentAt: undefined });
+  const result = applySupplierProcurementToOrder(order({
+    warehouseStage: 'braki',
+    agentAnalysis: {
+      positions: [{ productId: 'P-1', shortage: 0, decision: 'kompletuj', locationMissing: true }],
+      nierozpoznane: 0, bezStanu: 0, bezLokalizacji: 1, braki: 0, gotowe: true,
+    },
+  }), [staleDraft], { at: new Date('2026-07-16T15:00:00.000Z') });
+  assert.equal(result.supplierProcurement.status, 'pokryte_stanem');
+  assert.equal(result.supplierProcurement.taskStatus, 'zrealizowane');
+  assert.equal(result.supplierProcurement.stockCoveredAt, '2026-07-16T15:00:00.000Z');
+  assert.equal(result.warehouseStage, 'kompletacja');
 });
 
 test('otwarcie korekty cofa wyłącznie lokalny etap zakupowy do braków', () => {

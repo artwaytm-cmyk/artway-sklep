@@ -69,6 +69,7 @@ export function applySupplierProcurementToOrder(order = {}, supplierDrafts = [],
   const shortagePositions = array(order.agentAnalysis?.positions)
     .filter((position) => quantity(position.shortage) > 0 || normalized(position.decision) === 'zamow u producenta');
   const requiredProductIds = new Set(shortagePositions.map(lineProductId).filter(Boolean));
+  const currentShortage = requiredProductIds.size > 0;
   const sent = related.filter((item) => sentDraft(item.draft));
   const sentProductIds = new Set(sent.map((item) => lineProductId(item.line)).filter(Boolean));
   const everyShortageCovered = requiredProductIds.size
@@ -79,6 +80,8 @@ export function applySupplierProcurementToOrder(order = {}, supplierDrafts = [],
   const allReceived = allSent && related.every((item) => item.complete);
   const procurementStatus = allReceived
     ? 'dostawa_przyjeta'
+    : !currentShortage
+      ? 'pokryte_stanem'
     : anyReceived
       ? 'czesciowo_przyjete'
       : allSent
@@ -86,7 +89,7 @@ export function applySupplierProcurementToOrder(order = {}, supplierDrafts = [],
         : sent.length
           ? 'czesciowo_wyslane'
           : 'do_wyslania';
-  const taskStatus = allSent ? 'zrealizowane' : sent.length ? 'w_realizacji' : 'do_realizacji';
+  const taskStatus = !currentShortage || allSent ? 'zrealizowane' : sent.length ? 'w_realizacji' : 'do_realizacji';
   const previous = order.supplierProcurement && typeof order.supplierProcurement === 'object' ? order.supplierProcurement : {};
   const timestamp = at instanceof Date ? at.toISOString() : text(at, 80);
   const supplierProcurement = {
@@ -98,7 +101,8 @@ export function applySupplierProcurementToOrder(order = {}, supplierDrafts = [],
     receivedLines: related.filter((item) => item.complete).length,
     orderedQuantity: related.reduce((sum, item) => sum + item.ordered, 0),
     receivedQuantity: related.reduce((sum, item) => sum + item.received, 0),
-    completedAt: allSent ? (previous.completedAt || sent.map(({ draft }) => text(draft.emailSentAt, 80)).filter(Boolean).sort().pop() || timestamp) : null,
+    completedAt: !currentShortage || allSent ? (previous.completedAt || sent.map(({ draft }) => text(draft.emailSentAt, 80)).filter(Boolean).sort().pop() || timestamp) : null,
+    stockCoveredAt: !currentShortage ? (previous.stockCoveredAt || timestamp) : null,
     deliveryCompletedAt: allReceived ? (previous.deliveryCompletedAt || timestamp) : null,
   };
 
@@ -108,6 +112,7 @@ export function applySupplierProcurementToOrder(order = {}, supplierDrafts = [],
   if (!locked) {
     if (allReceived) warehouseStage = 'kompletacja';
     else if (unresolved) warehouseStage = 'do_sprawdzenia';
+    else if (!currentShortage) warehouseStage = 'kompletacja';
     else if (allSent) warehouseStage = 'oczekuje_na_dostawe';
     else warehouseStage = 'braki';
   }
