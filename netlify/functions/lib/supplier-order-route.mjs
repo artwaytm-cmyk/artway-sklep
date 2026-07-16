@@ -4,6 +4,7 @@ const PLAN_ACTIONS = new Map([
   ['supplier-order-cancel', 'cancel'],
   ['supplier-order-correction', 'correction'],
   ['supplier-order-receive', 'receive'],
+  ['supplier-order-document-receive', 'receiveDocument'],
 ]);
 
 function list(value) {
@@ -39,7 +40,7 @@ export function createSupplierOrderRoute(options = {}) {
       const body = await req.json().catch(() => ({}));
       const actor = sessionOf(req)?.email || 'administrator';
       const result = await plan[planMethod](body, actor);
-      const workflow = ['receive', 'correction'].includes(planMethod)
+      const workflow = ['receive', 'receiveDocument', 'correction'].includes(planMethod)
         ? await syncProcurement(result.supplierOrders, planMethod === 'correction' ? 'supplier-correction' : 'supplier-receipt')
         : null;
       return respond({ ...result, ...(workflow ? { procurementWorkflow: { changed: workflow.changed } } : {}) });

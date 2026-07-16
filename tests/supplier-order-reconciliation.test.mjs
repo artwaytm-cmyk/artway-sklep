@@ -83,7 +83,8 @@ test('brak wynika z sumy rezerwacji wszystkich aktywnych zamówień', () => {
   const [line] = result.activeDrafts[0].pozycje;
   assert.equal(line.rezerwacje, 6);
   assert.equal(line.iloscPotrzebna, 3);
-  assert.deepEqual(line.zamowienia, ['ATM-2A', 'ATM-2B']);
+  assert.deepEqual(line.zamowienia, ['ATM-2B']);
+  assert.deepEqual(line.orderAllocations, { 'ATM-2B': 3 }, 'stan pokrywa pierwsze zlecenie, a zakup zostaje przypisany do rzeczywistego braku');
   assert.equal(result.diagnostics.skippedInactiveOrders, 1);
 });
 

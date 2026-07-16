@@ -91,6 +91,32 @@ function receivedOf(line = {}) {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
 
+function orderAllocationsOf(line = {}) {
+  const saved = object(line.orderAllocations);
+  const entries = Object.entries(saved)
+    .map(([reference, value]) => [text(reference, 180), Math.max(0, Math.floor(Number(value) || 0))])
+    .filter(([reference, value]) => reference && value > 0);
+  if (entries.length) return entries;
+  const references = [...new Set(array(line.zamowienia || line.orderRefs).map((value) => text(value, 180)).filter(Boolean))];
+  if (!references.length) return [];
+  const total = quantityOf(line);
+  const base = Math.floor(total / references.length);
+  let remainder = total - (base * references.length);
+  return references.map((reference) => [reference, base + (remainder-- > 0 ? 1 : 0)]).filter(([, value]) => value > 0);
+}
+
+function updateReceiptAllocations(line = {}) {
+  let remaining = receivedOf(line);
+  const allocations = {};
+  for (const [reference, ordered] of orderAllocationsOf(line)) {
+    const received = Math.min(ordered, remaining);
+    allocations[reference] = received;
+    remaining -= received;
+  }
+  line.receiptAllocations = allocations;
+  return line;
+}
+
 function identifierValue(value = '') {
   return text(value, 180).toUpperCase().replace(/\s+/g, ' ').trim();
 }
@@ -484,6 +510,7 @@ export function receiveSupplierPlanLine(input = {}) {
   line.przyjetaNadwyzka = Math.max(0, received - ordered);
   line.ostatniePrzyjecie = now.toISOString();
   line.statusPrzyjecia = received > ordered ? 'przyjęto z nadwyżką' : received === ordered ? 'przyjęte' : 'częściowo przyjęte';
+  updateReceiptAllocations(line);
   lines[lineIndex] = line;
   draft.pozycje = lines;
   draft.receiptRevision = receiptRevision + 1;
@@ -514,6 +541,131 @@ export function receiveSupplierPlanLine(input = {}) {
   settings.artway_stany = stock;
   settings.artway_ruchy_magazynowe = [movement, ...movements].slice(0, 3000);
   return { drafts, draft, settings, changed: true, duplicate: false, movement };
+}
+
+/**
+ * Przyjmuje cały dokument jednym zapisem. Domyślnie przyjmuje wszystkie
+ * pozostałe ilości; lista `receipts` służy wyłącznie do korekty braków,
+ * dostawy częściowej albo nadwyżki.
+ */
+export function receiveSupplierPlanDocument(input = {}) {
+  const now = nowDate(input.now);
+  const drafts = array(input.drafts).map((draft) => structuredClone(draft));
+  const settings = structuredClone(object(input.settings));
+  const requestId = text(input.requestId, 240);
+  if (!requestId) fail('Przyjęcie dokumentu wymaga unikalnego requestId.', 'supplier_receipt_request_id_required');
+  const draftIndex = drafts.findIndex((draft) => text(draft.id, 160) === text(input.draftId, 160));
+  if (draftIndex < 0) fail('Nie znaleziono dokumentu producenta.', 'supplier_order_not_found', 404);
+  const draft = drafts[draftIndex];
+  if (!RECEIVABLE_STATUSES.has(statusKey(draft.status)) && !text(draft.emailSentAt, 80)) {
+    fail('Towar można przyjąć dopiero z dokumentu wysłanego do producenta.', 'supplier_order_not_sent', 409);
+  }
+  const previousBatch = array(draft.receiptBatches).find((batch) => text(batch.requestId, 240) === requestId);
+  if (previousBatch) return { drafts, draft, settings, changed: false, duplicate: true, receiptBatch: previousBatch, movements: [] };
+  const receiptRevision = Math.max(0, Number(draft.receiptRevision) || 0);
+  const expected = integer(input.expectedReceiptRevision, { field: 'expectedReceiptRevision' });
+  if (expected !== receiptRevision) fail(
+    'Przyjęcia tego dokumentu zmieniły się na innym urządzeniu.',
+    'supplier_receipt_revision_conflict',
+    409,
+    { currentReceiptRevision: receiptRevision },
+  );
+
+  const correctionsProvided = Array.isArray(input.receipts);
+  const corrections = new Map();
+  for (const raw of array(input.receipts)) {
+    const key = text(raw?.lineKey, 220) || (text(raw?.productId, 160) && `product:${text(raw.productId, 160)}`);
+    if (!key) fail('Korekta przyjęcia nie wskazuje pozycji dokumentu.', 'supplier_order_line_not_found');
+    if (corrections.has(key)) fail('Ta sama pozycja występuje w korekcie więcej niż raz.', 'supplier_receipt_duplicate_line');
+    corrections.set(key, integer(raw?.quantity, { field: 'quantity' }));
+  }
+
+  const lines = draftItems(draft).map((line) => ({ ...line }));
+  if (!lines.length) fail('Dokument producenta nie ma pozycji.', 'supplier_order_empty');
+  const stock = { ...object(settings.artway_stany) };
+  const existingMovements = array(settings.artway_ruchy_magazynowe);
+  const movements = [];
+  const rows = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const lineKey = supplierLineStableKey(line) || `line:${index}`;
+    const productKey = `product:${text(line.produktId ?? line.productId, 160)}`;
+    const ordered = quantityOf(line);
+    const receivedBefore = receivedOf(line);
+    const remaining = Math.max(0, ordered - receivedBefore);
+    const amount = correctionsProvided
+      ? (corrections.has(lineKey) ? corrections.get(lineKey) : corrections.get(productKey) || 0)
+      : remaining;
+    if (amount <= 0) {
+      rows.push({ lineKey, productId: text(line.produktId ?? line.productId, 160), ordered, receivedBefore, receivedNow: 0, remaining });
+      continue;
+    }
+    const productId = text(line.produktId ?? line.productId, 160);
+    if (!productId) fail(`Pozycja „${text(line.nazwa, 220)}” nie jest połączona z kartoteką magazynową.`, 'supplier_product_not_linked');
+    const before = Math.max(0, Number(stock[productId]) || 0);
+    const after = before + amount;
+    const received = receivedBefore + amount;
+    stock[productId] = after;
+    line.przyjeto = received;
+    line.przyjetaNadwyzka = Math.max(0, received - ordered);
+    line.ostatniePrzyjecie = now.toISOString();
+    line.statusPrzyjecia = received > ordered ? 'przyjęto z nadwyżką' : received === ordered ? 'przyjęte' : 'częściowo przyjęte';
+    updateReceiptAllocations(line);
+    const sourceRequestId = `supplier-document-receipt:${requestId}:${lineKey}`;
+    const movement = {
+      id: `MAG-${crypto.createHash('sha256').update(sourceRequestId).digest('hex').slice(0, 18)}`,
+      data: now.toISOString(),
+      dataTxt: now.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' }),
+      produktId: productId,
+      produktNazwa: text(line.nazwa, 220),
+      sku: text(line.sku || line.externalId || line.kod, 120),
+      typ: 'przyjęcie',
+      ilosc: amount,
+      stanPrzed: before,
+      stanPo: after,
+      dokument: text(draft.numer || draft.id, 160),
+      powod: 'Zbiorcze przyjęcie dokumentu producenta',
+      operator: text(input.actor, 200) || 'administrator',
+      sourceRequestId,
+      supplierOrderId: text(draft.id, 160),
+      supplierLineKey: lineKey,
+      receiptBatchId: requestId,
+    };
+    movements.push(movement);
+    rows.push({ lineKey, productId, ordered, receivedBefore, receivedNow: amount, received, remaining: Math.max(0, ordered - received), overage: Math.max(0, received - ordered) });
+  }
+
+  draft.pozycje = lines;
+  draft.receiptRevision = receiptRevision + 1;
+  draft.updatedAt = now.toISOString();
+  draft.lastReceiptAt = now.toISOString();
+  const allReceived = lines.every((line) => receivedOf(line) >= quantityOf(line));
+  const receivedUnits = rows.reduce((sum, row) => sum + (row.receivedNow || 0), 0);
+  const missingLines = lines.filter((line) => receivedOf(line) < quantityOf(line)).length;
+  draft.status = allReceived ? 'zrealizowane' : 'częściowo zrealizowane';
+  const receiptBatch = {
+    id: `PRZ-${crypto.createHash('sha256').update(requestId).digest('hex').slice(0, 14)}`,
+    requestId,
+    at: now.toISOString(),
+    operator: text(input.actor, 200) || 'administrator',
+    corrected: correctionsProvided,
+    receivedUnits,
+    lines: rows,
+    missingLines,
+    completed: allReceived,
+  };
+  draft.receiptBatches = [...array(draft.receiptBatches), receiptBatch].slice(-100);
+  appendHistory(
+    draft,
+    now.toISOString(),
+    'stock-document-receipt',
+    `Przyjęto dokument: ${receivedUnits} szt. w ${movements.length} pozycjach${missingLines ? `; ${missingLines} pozycji oczekuje na dostawę` : '; dokument kompletny'}.`,
+    input.actor,
+  );
+  summarize(draft);
+  settings.artway_stany = stock;
+  settings.artway_ruchy_magazynowe = [...movements.reverse(), ...existingMovements].slice(0, 3000);
+  return { drafts, draft, settings, changed: true, duplicate: false, receiptBatch, movements };
 }
 
 export function supplierPlanDraftIsEditable(draft = {}) {

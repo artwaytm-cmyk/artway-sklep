@@ -2,6 +2,7 @@ import {
   approveSupplierPlanDraft,
   cancelSupplierPlanDraft,
   prepareSupplierPlanCorrection,
+  receiveSupplierPlanDocument,
   receiveSupplierPlanLine,
   supplierLineIdentifiers,
   supplierLineStableKey,
@@ -124,6 +125,8 @@ function resultPayload(result, record, changed) {
     updated_at: record.updated_at || null,
     ...(result.line ? { line: result.line } : {}),
     ...(result.movement ? { movement: result.movement } : {}),
+    ...(result.movements ? { movements: result.movements } : {}),
+    ...(result.receiptBatch ? { receiptBatch: result.receiptBatch } : {}),
     ...(result.duplicate ? { duplicate: true } : {}),
     ...(result.created ? { created: true } : {}),
   };
@@ -165,6 +168,8 @@ export function createSupplierOrderPlanService({
         result = approveSupplierPlanDraft({ drafts, ...body, actor, now: now() });
       } else if (kind === 'receive') {
         result = receiveSupplierPlanLine({ drafts, settings: data, ...body, actor, now: now() });
+      } else if (kind === 'receiveDocument') {
+        result = receiveSupplierPlanDocument({ drafts, settings: data, ...body, actor, now: now() });
       } else if (kind === 'cancel') {
         result = cancelSupplierPlanDraft({ drafts, ...body, actor, now: now() });
       } else if (kind === 'correction') {
@@ -173,7 +178,7 @@ export function createSupplierOrderPlanService({
         throw new TypeError('Nieznana operacja planu zatowarowania.');
       }
       if (!result.changed) return resultPayload(result, record, false);
-      const nextData = kind === 'receive'
+      const nextData = ['receive', 'receiveDocument'].includes(kind)
         ? { ...result.settings, artway_agent_ai_zlecenia: result.drafts }
         : { ...data, artway_agent_ai_zlecenia: result.drafts };
       if (JSON.stringify(nextData).length > settingsLimit) fail('Plan zatowarowania przekracza limit ustawień.', 'settings_too_large', 413);
@@ -349,6 +354,7 @@ export function createSupplierOrderPlanService({
     cancel: (body, actor) => mutate('cancel', body, actor),
     correction: (body, actor) => mutate('correction', body, actor),
     receive: (body, actor) => mutate('receive', body, actor),
+    receiveDocument: (body, actor) => mutate('receiveDocument', body, actor),
     loadApprovedForSend,
     beginEmailSend,
     markEmailResults,

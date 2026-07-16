@@ -4,6 +4,7 @@ import {
   approveSupplierPlanDraft,
   cancelSupplierPlanDraft,
   prepareSupplierPlanCorrection,
+  receiveSupplierPlanDocument,
   receiveSupplierPlanLine,
   supplierLineIdentifiers,
   supplierLineStableKey,
@@ -239,6 +240,38 @@ test('przyjęcie zwiększa stan o całą faktyczną ilość, zapisuje nadwyżkę
   assert.equal(retry.changed, false);
   assert.equal(retry.duplicate, true);
   assert.equal(retry.settings.artway_stany[1], 8);
+});
+
+test('cały dokument jest przyjmowany jednym zapisem, a korekta pozostawia brak do kolejnej dostawy', () => {
+  const sent = draft({
+    status: 'wysłane do producenta', emailSentAt: NOW.toISOString(), receiptRevision: 0,
+    pozycje: [
+      { ...draft().pozycje[0], ilosc: 2, orderAllocations: { 'Allegro ALG-1': 2 }, zamowienia: ['Allegro ALG-1'] },
+      { ...draft().pozycje[0], produktId: '2', externalId: 'MULTI-2', nazwa: 'Drugi produkt', ilosc: 3, iloscPotrzebna: 3, orderAllocations: { 'Allegro ALG-2': 3 }, zamowienia: ['Allegro ALG-2'] },
+    ],
+  });
+  const partial = receiveSupplierPlanDocument({
+    drafts: [sent], settings: { artway_stany: { 1: 1, 2: 0 }, artway_ruchy_magazynowe: [] },
+    draftId: 'D-1', requestId: 'document-1', expectedReceiptRevision: 0,
+    receipts: [
+      { lineKey: 'external:ALEX-1748', productId: '1', quantity: 2 },
+      { lineKey: 'external:MULTI-2', productId: '2', quantity: 0 },
+    ], actor: 'admin@example.test', now: NOW,
+  });
+  assert.equal(partial.settings.artway_stany[1], 3);
+  assert.equal(partial.settings.artway_stany[2], 0);
+  assert.equal(partial.draft.status, 'częściowo zrealizowane');
+  assert.equal(partial.receiptBatch.missingLines, 1);
+  assert.deepEqual(partial.draft.pozycje[0].receiptAllocations, { 'Allegro ALG-1': 2 });
+
+  const complete = receiveSupplierPlanDocument({
+    drafts: partial.drafts, settings: partial.settings, draftId: 'D-1', requestId: 'document-2',
+    expectedReceiptRevision: 1, actor: 'admin@example.test', now: new Date(NOW.getTime() + 60_000),
+  });
+  assert.equal(complete.settings.artway_stany[2], 3);
+  assert.equal(complete.draft.status, 'zrealizowane');
+  assert.equal(complete.receiptBatch.completed, true);
+  assert.deepEqual(complete.draft.pozycje[1].receiptAllocations, { 'Allegro ALG-2': 3 });
 });
 
 test('serwis zapisuje tylko istniejące źródło artway_agent_ai_zlecenia i zachowuje resztę settings', async () => {

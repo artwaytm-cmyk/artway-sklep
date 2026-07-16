@@ -297,6 +297,7 @@ function contentView(items = []) {
     manualExtra: manualExtraOf(item),
     quantity: draftItemQuantity(item),
     orders: [...new Set(array(firstValue(item.zamowienia, item.orderRefs)).map((value) => text(value, 180)).filter(Boolean))].sort(),
+    orderAllocations: Object.entries(object(item.orderAllocations)).sort(([left], [right]) => left.localeCompare(right, 'pl', { numeric: true })),
   })).sort((left, right) => left.productId.localeCompare(right.productId, 'pl', { numeric: true }));
 }
 
@@ -382,7 +383,10 @@ function makeLine({ productId, product, raw, settings, supplier, required, manua
     rezerwacje: demand.reservedQuantity,
     legacyShortage: demand.legacyShortage,
     dostepne: demand.stock - demand.reservedQuantity,
-    zamowienia: [...demand.orderRefs].sort((left, right) => left.localeCompare(right, 'pl', { numeric: true })),
+    zamowienia: Object.keys(object(demand.orderAllocations)).length
+      ? Object.keys(demand.orderAllocations).sort((left, right) => left.localeCompare(right, 'pl', { numeric: true }))
+      : [...demand.orderRefs].sort((left, right) => left.localeCompare(right, 'pl', { numeric: true })),
+    orderAllocations: { ...object(demand.orderAllocations) },
     powod: required > 0
       ? `Brak do aktywnych zamówień: ${required} szt.${manualExtra ? ` • ręczna nadwyżka: ${manualExtra} szt.` : ''}`
       : `Ręczna nadwyżka: ${manualExtra} szt.`,
@@ -420,20 +424,29 @@ export function reconcileSupplierOrderDrafts(input = {}) {
         reservedQuantity: 0,
         legacyShortage: 0,
         orderRefs: new Set(),
+        orderRequests: [],
         raw: item.raw,
       };
       record.orderRefs.add(orderId);
+      const orderRequest = {
+        orderId,
+        quantity: item.quantity,
+        mode,
+        legacyShortage: 0,
+      };
       if (mode === 'deducted_on_create') {
         const movement = movements.get(`${orderId}::${item.productId}`);
         const before = movementBefore(movement);
         if (before === null) {
           diagnostics.legacyWithoutMovement.push({ orderId, productId: item.productId, quantity: item.quantity });
         } else {
-          record.legacyShortage += Math.max(0, item.quantity - before);
+          orderRequest.legacyShortage = Math.max(0, item.quantity - before);
+          record.legacyShortage += orderRequest.legacyShortage;
         }
       } else {
         record.reservedQuantity += item.quantity;
       }
+      record.orderRequests.push(orderRequest);
       demandByProduct.set(item.productId, record);
     }
   }
@@ -442,7 +455,20 @@ export function reconcileSupplierOrderDrafts(input = {}) {
     const product = products.get(demand.productId) || object(demand.raw.product || demand.raw.produkt);
     demand.product = product;
     demand.stock = stockOf(settings, product, demand.productId);
-    demand.shortage = Math.max(0, demand.reservedQuantity - demand.stock) + demand.legacyShortage;
+    let available = demand.stock;
+    const orderAllocations = {};
+    for (const request of demand.orderRequests) {
+      let missing;
+      if (request.mode === 'deducted_on_create') missing = request.legacyShortage;
+      else {
+        const covered = Math.min(available, request.quantity);
+        available -= covered;
+        missing = request.quantity - covered;
+      }
+      if (missing > 0) orderAllocations[request.orderId] = (orderAllocations[request.orderId] || 0) + missing;
+    }
+    demand.orderAllocations = orderAllocations;
+    demand.shortage = Object.values(orderAllocations).reduce((sum, value) => sum + quantity(value), 0);
   }
 
   // Wysłane, lecz jeszcze nieprzyjęte pozycje pokrywają brak. Nie wolno ich
@@ -476,9 +502,10 @@ export function reconcileSupplierOrderDrafts(input = {}) {
   for (const productId of allProductIds) {
     const demand = demandByProduct.get(productId) || {
       productId, reservedQuantity: 0, legacyShortage: 0, orderRefs: new Set(), raw: {},
-      product: products.get(productId) || {}, stock: stockOf(settings, products.get(productId) || {}, productId), shortage: 0,
+      orderRequests: [], orderAllocations: {}, product: products.get(productId) || {}, stock: stockOf(settings, products.get(productId) || {}, productId), shortage: 0,
     };
-    const required = Math.max(0, demand.shortage - (committedByProduct.get(productId) || 0));
+    const committedQuantity = committedByProduct.get(productId) || 0;
+    const required = Math.max(0, demand.shortage - committedQuantity);
     const manualExtra = manualExtraByProduct.get(productId) || 0;
     if (required <= 0 && manualExtra <= 0) continue;
     const product = products.get(productId) || demand.product || {};
@@ -490,7 +517,18 @@ export function reconcileSupplierOrderDrafts(input = {}) {
     );
     if (supplier === DEFAULT_SUPPLIER) supplier = text(firstValue(oldLine.dostawca, oldLine.supplier), 160) || supplier;
     const raw = Object.keys(object(demand.raw)).length ? demand.raw : oldLine;
-    const line = makeLine({ productId, product, raw, settings, supplier, required, manualExtra, demand });
+    let committedRemaining = committedQuantity;
+    const remainingOrderAllocations = {};
+    for (const [reference, allocated] of Object.entries(object(demand.orderAllocations))) {
+      const covered = Math.min(committedRemaining, quantity(allocated));
+      committedRemaining -= covered;
+      const remaining = quantity(allocated) - covered;
+      if (remaining > 0) remainingOrderAllocations[reference] = remaining;
+    }
+    const line = makeLine({
+      productId, product, raw, settings, supplier, required, manualExtra,
+      demand: { ...demand, orderAllocations: remainingOrderAllocations },
+    });
     const key = draftKey(supplier);
     if (!desiredBySupplier.has(key)) desiredBySupplier.set(key, { supplier, items: [] });
     desiredBySupplier.get(key).items.push(line);

@@ -1922,7 +1922,8 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
     const bezLokalizacji = positions.filter((p) => p.decision === 'uzupelnij_lokalizacje').length;
     const braki = positions.reduce((sum, p) => sum + Math.max(0, Number(p.shortage) || 0), 0);
     let warehouseStage = String(z.warehouseStage || 'do_sprawdzenia').toLowerCase();
-    if (!['oczekuje_na_dostawe', 'spakowane', 'zrealizowane'].includes(warehouseStage)) warehouseStage = braki > 0 ? 'braki' : (nierozpoznane || bezStanu || bezLokalizacji) ? 'do_sprawdzenia' : 'kompletacja';
+    if (z.supplierProcurement?.status === 'dostawa_przyjeta') warehouseStage = 'kompletacja';
+    else if (!['oczekuje_na_dostawe', 'kompletacja', 'spakowane', 'zrealizowane'].includes(warehouseStage)) warehouseStage = braki > 0 ? 'braki' : (nierozpoznane || bezStanu || bezLokalizacji) ? 'do_sprawdzenia' : 'kompletacja';
     return { ...z, warehouseStage, warehouseStageUpdatedAt: now, agentReviewedAt: now, agentVersion: 'allegro-stock-agent-v1', agentAnalysis: { positions, nierozpoznane, bezStanu, bezLokalizacji, braki, gotowe: !nierozpoznane && !bezStanu && !bezLokalizacji && !braki } };
   });
   if (autoMapped) await zapisz('allegro_mappings', { items: mappings, updated_at: now });

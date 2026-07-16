@@ -32,9 +32,15 @@ function lineProductId(line = {}) {
   return text(line.produktId ?? line.productId ?? line.id, 160);
 }
 
-function lineReceiptState(line = {}) {
-  const ordered = quantity(line.ilosc ?? line.quantity);
-  const received = quantity(line.przyjeto ?? line.received);
+function lineReceiptState(line = {}, references = new Set()) {
+  const orderAllocations = Object.entries(line.orderAllocations || {}).filter(([reference]) => references.has(normalized(reference)));
+  const receiptAllocations = line.receiptAllocations || {};
+  const ordered = orderAllocations.length
+    ? orderAllocations.reduce((sum, [, value]) => sum + quantity(value), 0)
+    : quantity(line.ilosc ?? line.quantity);
+  const received = orderAllocations.length
+    ? orderAllocations.reduce((sum, [reference]) => sum + quantity(receiptAllocations[reference]), 0)
+    : quantity(line.przyjeto ?? line.received);
   return { ordered, received, complete: ordered > 0 && received >= ordered, partial: received > 0 && received < ordered };
 }
 
@@ -53,7 +59,7 @@ export function applySupplierProcurementToOrder(order = {}, supplierDrafts = [],
   const related = [];
   for (const draft of array(supplierDrafts)) {
     for (const line of array(draft.pozycje || draft.items)) {
-      if (lineBelongsToOrder(line, references)) related.push({ draft, line, ...lineReceiptState(line) });
+      if (lineBelongsToOrder(line, references)) related.push({ draft, line, ...lineReceiptState(line, references) });
     }
   }
   if (!related.length) return order;
@@ -100,8 +106,8 @@ export function applySupplierProcurementToOrder(order = {}, supplierDrafts = [],
     || Number(order.agentAnalysis?.bezStanu || 0) > 0
     || Number(order.agentAnalysis?.bezLokalizacji || 0) > 0;
   if (!locked) {
-    if (unresolved) warehouseStage = 'do_sprawdzenia';
-    else if (allReceived) warehouseStage = 'kompletacja';
+    if (allReceived) warehouseStage = 'kompletacja';
+    else if (unresolved) warehouseStage = 'do_sprawdzenia';
     else if (allSent) warehouseStage = 'oczekuje_na_dostawe';
     else warehouseStage = 'braki';
   }

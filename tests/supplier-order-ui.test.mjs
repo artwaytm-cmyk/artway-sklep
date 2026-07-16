@@ -160,7 +160,7 @@ test('zamówienia Allegro mają jednostkowe i masowe tworzenie Planu producentó
 
 test('panel pokazuje cały proces aż do przyjęcia dostawy', () => {
   const steps = fragment('function agentAIEtapyZleceniaProducenta', 'function agentAIEtapyZleceniaHTML');
-  for (const label of ['Stan magazynowy', 'Szkic producenta', 'Zatwierdzenie', 'Zamówienie wysłane', 'Dostawa', 'Kompletacja']) assert.match(steps, new RegExp(label));
+  for (const label of ['Stan magazynowy', 'Szkic producenta', 'Zatwierdzenie', 'Zamówienie wysłane', 'Dostawa', 'Oczekuje na wysyłkę']) assert.match(steps, new RegExp(label));
   assert.doesNotMatch(steps, /Telegram/);
 });
 
@@ -171,7 +171,9 @@ test('plan używa serwerowych akcji rewizji i nie wysyła bez osobnego potwierdz
   assert.match(manual, /supplier-order-line-upsert/);
   assert.match(quantity, /supplier-order-line-upsert/);
   assert.match(source, /supplier-order-approve/);
-  assert.match(receive, /supplier-order-receive/);
+  assert.match(receive, /supplier-order-document-receive/);
+  assert.match(source, /function agentAIPrzyjecieDokumentuHTML/);
+  assert.match(source, /Dostawa różni się od zamówienia/);
   assert.match(receive, /expectedReceiptRevision/);
   assert.match(receive, /if\(!confirm\(/);
 });

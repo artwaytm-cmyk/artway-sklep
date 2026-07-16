@@ -42,7 +42,8 @@ test('zamówienie klienta przechodzi stan → realny brak → szkic → zatwierd
   assert.equal(draft.status, 'szkic');
   assert.equal(draft.supplier, 'Alexander');
   assert.equal(draft.pozycje[0].ilosc, 2, 'do producenta trafia tylko brak ponad fizyczny stan');
-  assert.deepEqual(draft.pozycje[0].zamowienia, ['ATM-1', 'ATM-2']);
+  assert.deepEqual(draft.pozycje[0].zamowienia, ['ATM-2'], 'zakup zostaje przypisany do zlecenia, którego nie pokrył stan');
+  assert.deepEqual(draft.pozycje[0].orderAllocations, { 'ATM-2': 2 });
 
   const approved = structuredClone(shortage.drafts);
   approved[0].status = 'zaakceptowane';

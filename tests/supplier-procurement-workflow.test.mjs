@@ -43,6 +43,23 @@ test('częściowe i pełne przyjęcie automatycznie przesuwają dalsze etapy', (
   assert.equal(complete.warehouseStage, 'kompletacja');
 });
 
+test('pełne przyjęcie ma pierwszeństwo przed brakiem lokalizacji i rozlicza dokładną alokację zamówienia', () => {
+  const complete = applySupplierProcurementToOrder(order({
+    agentAnalysis: { positions: [], nierozpoznane: 0, bezStanu: 0, bezLokalizacji: 1, braki: 0 },
+  }), [draft({
+    pozycje: [{
+      produktId: 'P-1', ilosc: 5, przyjeto: 5,
+      zamowienia: ['Allegro ALG-1', 'Allegro ALG-2'],
+      orderAllocations: { 'Allegro ALG-1': 2, 'Allegro ALG-2': 3 },
+      receiptAllocations: { 'Allegro ALG-1': 2, 'Allegro ALG-2': 3 },
+    }],
+  })]);
+  assert.equal(complete.supplierProcurement.orderedQuantity, 2);
+  assert.equal(complete.supplierProcurement.receivedQuantity, 2);
+  assert.equal(complete.supplierProcurement.status, 'dostawa_przyjeta');
+  assert.equal(complete.warehouseStage, 'kompletacja');
+});
+
 test('otwarcie korekty cofa wyłącznie lokalny etap zakupowy do braków', () => {
   const corrected = draft({ status: 'do sprawdzenia', emailSentAt: undefined });
   const result = applySupplierProcurementToOrder(order({
