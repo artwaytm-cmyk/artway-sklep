@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Podgląd mobilnego magazynu QR</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <link rel="stylesheet" href="/assets/admin.css">
+</head>
+<body class="admin-mode">
+  <main id="preview" style="max-width:1180px;margin:auto;padding:1rem"></main>
+  <script>
+    const mockLocations=[
+      {kod:"A",nazwa:"Strefa A",typ:"strefa",parentKod:""},
+      {kod:"A-R01",nazwa:"Regał 01",typ:"regał",parentKod:"A"},
+      {kod:"A-R01-P01",nazwa:"Półka 01",typ:"półka",parentKod:"A-R01"},
+      {kod:"A-R01-P02",nazwa:"Półka 02",typ:"półka",parentKod:"A-R01"}
+    ];
+    const mockProducts=[
+      {id:17,nazwa:"Ziemniak 1410",externalId:"1410",sku:"1410",ean:"5906018014105",zdjecie:""},
+      {id:18,nazwa:"Origami 3D — Kwiaty",externalId:"1188",sku:"1188",ean:"5906018011883",zdjecie:""}
+    ];
+    function esc(value=""){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));}
+    function jsArg(value){return esc(JSON.stringify(String(value??"")));}
+    function kodLokalizacjiMagazynu(value=""){return String(value||"").trim().toUpperCase();}
+    function magazynLokalizacjeAktywne(){return mockLocations;}
+    function magazynLokalizacjaPoKodzie(kod){return mockLocations.find(item=>item.kod===kodLokalizacjiMagazynu(kod))||null;}
+    function sciezkaLokalizacjiMagazynu(kod){const parts=[];let item=magazynLokalizacjaPoKodzie(kod);while(item){parts.unshift(item.kod);item=item.parentKod?magazynLokalizacjaPoKodzie(item.parentKod):null;}return parts.join(" / ");}
+    function poziomLokalizacjiMagazynu(kod){return Math.max(0,sciezkaLokalizacjiMagazynu(kod).split(" / ").length-1);}
+    function nazwaLokalizacjiMagazynu(kod){const item=magazynLokalizacjaPoKodzie(kod);return item?`${item.kod} — ${item.nazwa}`:String(kod||"");}
+    function magazynMetaProduktu(id){return {lokalizacja:String(id)==="17"?"A-R01-P02":"A-R01-P01"};}
+    function produktyDoAdministracji(){return mockProducts;}
+    function czyProduktAdminWKoszu(){return false;}
+    function stanMagazynuId(id){return String(id)==="17"?8:3;}
+    function ustawieniaMagazynuPelne(){return {nazwa:"Magazyn główny"};}
+    function allegroDataTxt(){return "16.07.2026";}
+    function toast(){}
+    function pobierzPlik(){}
+    async function chmura(){return {documents:[]};}
+    function zapiszLS(){}
+    function wczytajLS(_key,fallback){return fallback;}
+    function zbudujProdukty(){}
+    let stanyProduktow={},ruchyMagazynowe=[];
+  </script>
+  <script src="/assets/admin.js"></script>
+  <script>
+    const previewDocument={id:"WD-PREVIEW",number:"PZ/2026/07/0021",type:"PZ",status:"draft",warehouse:"Magazyn główny",reference:"Dostawa producenta",note:"",revision:3,lines:[{lineId:"1",productId:"17",name:"Ziemniak 1410",externalId:"1410",sku:"1410",ean:"5906018014105",quantity:8,location:"A-R01-P02",matchedBy:"EAN/GTIN",scanCount:8}]};
+    magazynDokumentyStan.loaded=true;magazynDokumentyStan.items=[previewDocument];magazynDokumentyStan.selectedId=previewDocument.id;
+    document.getElementById("preview").innerHTML=`<section class="panel restock-plan-intro"><div class="order-section-head"><div><span class="order-pro-label">Podgląd procesu</span><h1>📦 Plan zatowarowania</h1><p class="order-detail-lead">Mobilne przyjęcie i rozchód z kontrolą lokalizacji.</p></div></div></section>${magazynQRCentrumHTML()}<section class="panel warehouse-documents-center">${magazynDokumentEditorHTML(previewDocument)}</section>`;
+  </script>
+</body>
+</html>

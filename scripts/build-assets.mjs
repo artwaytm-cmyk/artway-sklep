@@ -1,8 +1,13 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+export const VENDOR_ASSETS = Object.freeze([
+  { source: 'node_modules/jsqr/dist/jsQR.js', output: 'assets/vendor/jsQR.js' },
+  { source: 'node_modules/qrcode-generator/qrcode.js', output: 'assets/vendor/qrcode-generator.js' },
+]);
 
 export const ASSET_BUNDLES = Object.freeze([
   {
@@ -27,6 +32,7 @@ export const ASSET_BUNDLES = Object.freeze([
     sources: [
       'src/frontend/08-admin-navigation.js',
       'src/frontend/10-agent-ai.js',
+      'src/frontend/10-warehouse-qr.js',
       'src/frontend/10-warehouse-documents.js',
       'src/frontend/11-allegro-procurement-actions.js',
       'src/frontend/11-allegro-refresh-runtime.js',
@@ -76,6 +82,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/16-supplier-receipt.css',
       'src/styles/17-product-link-review.css',
       'src/styles/18-warehouse-documents.css',
+      'src/styles/19-warehouse-qr.css',
     ],
   },
 ]);
@@ -97,6 +104,17 @@ export async function buildAssets({ check = false } = {}) {
       const current = await readFile(outputPath, 'utf8').catch(() => '');
       if (current !== expected) differences.push(bundle.output);
     } else {
+      await writeFile(outputPath, expected, 'utf8');
+    }
+  }
+  for (const vendor of VENDOR_ASSETS) {
+    const expected = await readFile(path.join(ROOT, vendor.source), 'utf8');
+    const outputPath = path.join(ROOT, vendor.output);
+    if (check) {
+      const current = await readFile(outputPath, 'utf8').catch(() => '');
+      if (current !== expected) differences.push(vendor.output);
+    } else {
+      await mkdir(path.dirname(outputPath), { recursive: true });
       await writeFile(outputPath, expected, 'utf8');
     }
   }

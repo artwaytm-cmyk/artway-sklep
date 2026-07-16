@@ -21,6 +21,8 @@ test('skanowanie działa aparatem telefonu oraz polem dla czytnika USB lub Bluet
   assert.match(source, /facingMode:\{ideal:"environment"\}/);
   assert.match(source, /Czytnik USB\/Bluetooth/);
   assert.match(source, /data-warehouse-scan-input/);
+  assert.match(source, /Aktywne miejsce/);
+  assert.match(source, /QR miejsca/);
   assert.match(netlify, /Permissions-Policy = "camera=\(self\), microphone=\(\)/);
 });
 

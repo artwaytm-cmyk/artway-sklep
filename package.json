@@ -13,7 +13,9 @@
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.9",
-    "nodemailer": "^9.0.3"
+    "jsqr": "^1.4.0",
+    "nodemailer": "^9.0.3",
+    "qrcode-generator": "^1.4.4"
   },
   "overrides": {
     "@opentelemetry/core": "2.9.0",
