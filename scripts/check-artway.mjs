@@ -17,6 +17,7 @@ const files = [
   'netlify/functions/lib/core/store-repository.mjs',
   'netlify/functions/lib/domain/orders.mjs',
   'netlify/functions/lib/domain/catalog-quality.mjs',
+  'netlify/functions/lib/domain/product-sale-decisions.mjs',
   'netlify/functions/lib/domain/allegro-reply-assistant.mjs',
   'netlify/functions/lib/domain/telegram-communication.mjs',
   'netlify/functions/lib/telegram-center.mjs',
@@ -67,6 +68,7 @@ const appAdmin = read('assets/admin.js');
 const app = `${appPublic}\n${appAdmin}`;
 const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
+const productSaleDecisions = read('netlify/functions/lib/domain/product-sale-decisions.mjs');
 const allegroOfferWithdrawal = read('netlify/functions/lib/allegro-offer-withdrawal-route.mjs');
 const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
 const infaktPurchase = read('netlify/functions/lib/infakt-purchase.mjs');
@@ -444,7 +446,6 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "action === 'product-sale-availability'",
   'function synchronizujSprzedazZDostepnosciaProducenta',
   'allegro_availability_automation',
-  "source: 'producent-agent'",
   'stock: { available: 0 }',
   'function stanProducentaZHtml',
   'IdoSell sizes.amount',
@@ -538,6 +539,14 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'feesUpdated',
   'autoUpdateOffers',
   'autoFees',
+]);
+
+requireMarkers('netlify/functions/lib/domain/product-sale-decisions.mjs', productSaleDecisions, [
+  'applyProductSaleDecisionBatch',
+  "source: 'producent-agent'",
+  "'wait_available'",
+  "'hide_manual'",
+  "'manual_available'",
 ]);
 
 requireMarkers('netlify/functions/lib/allegro-offer-withdrawal-route.mjs', allegroOfferWithdrawal, [

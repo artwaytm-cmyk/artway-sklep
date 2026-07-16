@@ -60,6 +60,7 @@ import { markAllegroInventoryTransition, markAllegroInventoryTransitions, resolv
 import { allegroOrderNeedsLiveRefresh, createAllegroOrderArchive, selectAllegroStatusRefreshCandidates } from './domain/allegro-order-retention.mjs';
 import { mergeRecentAllegroOrders } from './domain/allegro-order-sync-window.mjs';
 import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
+import { applyProductSaleDecisionBatch } from './domain/product-sale-decisions.mjs';
 import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
 import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
@@ -6250,25 +6251,13 @@ export default async (req) => {
     if (action === 'product-sale-decision') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), productId = tekst(body.productId, 100).trim(), decision = tekst(body.decision || 'auto', 40).toLowerCase();
-      const allowed = new Set(['auto', 'grace', 'wait_available', 'hide_manual', 'manual_available']);
-      if (!productId || !allowed.has(decision)) return odpowiedz({ ok: false, error: 'Nieprawidłowa decyzja dostępności', code: 'validation' }, 422);
-      const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null }), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? { ...data.artway_dostepnosc } : {};
-      const now = new Date(), nowIso = now.toISOString(), previous = availability[productId] && typeof availability[productId] === 'object' ? availability[productId] : {}, days = Math.max(1, Math.min(30, Number(body.days) || 1)), producerStatus = tekst(body.producerStatus || '', 40).toLowerCase(), producerUnavailable = producerStatus === 'brak', history = [{ at: nowIso, decision, days: decision === 'grace' ? days : 0, operator: 'administrator' }, ...(Array.isArray(previous.history) ? previous.history : [])].slice(0, 20);
-      const base = { data: nowIso, operator: 'administrator', source: 'supplier-decision', automatic: false, producerStatus, history };
-      if (decision === 'grace') availability[productId] = { ...base, status: 'dostepny', decision, expiresAt: new Date(now.getTime() + days * 86400000).toISOString(), autoRestore: true, powod: `Decyzja administratora: pozostaw sprzedaż przez ${days} dni` };
-      else if (decision === 'wait_available') availability[productId] = { ...base, status: 'niedostepny', decision, autoRestore: true, powod: 'Ukryty do ponownej dostępności u producenta' };
-      else if (decision === 'hide_manual') availability[productId] = { ...base, status: 'niedostepny', decision, autoRestore: false, powod: 'Ręcznie ukryty bez automatycznego wznowienia' };
-      else if (decision === 'manual_available') availability[productId] = { ...base, status: 'dostepny', decision, autoRestore: false, powod: 'Ręcznie pozostawiony w sprzedaży mimo sygnału producenta' };
-      else if (producerUnavailable) availability[productId] = { ...base, status: 'niedostepny', decision: 'auto', source: 'producent-agent', automatic: true, autoRestore: true, powod: 'Automatycznie: produkt niedostępny u producenta' };
-      else delete availability[productId];
-      data.artway_dostepnosc = availability;
-      const available = decision === 'grace' || decision === 'manual_available' || (decision === 'auto' && !producerUnavailable);
-      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, [{ ok: true, productId, status: available ? 'dostepny' : 'brak', available, quantity: available ? Math.max(1, Number(body.producerQuantity) || 1) : 0, checkedAt: nowIso, preserveDecision: true }], data);
+      const body = await req.json().catch(() => ({})), settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+      const batch = applyProductSaleDecisionBatch({ body, data: settingsRec.data, operator: 'administrator' }), { data, results, checks, audit, nowIso } = batch;
+      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, checks, data);
       const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
-      agentHistory.unshift({ id: `AI-DEC-${Date.now().toString(36)}`, typ: 'decyzja-producenta', opis: `Decyzja sprzedażowa produktu ${productId}: ${decision}${decision === 'grace' ? ` (${days} dni)` : ''}`, data: nowIso, dataTxt: now.toLocaleString('pl-PL'), operator: 'administrator', dane: { productId, decision, days, producerStatus, saleAutomation } }); data.artway_agent_ai_historia = agentHistory.slice(0, 500);
+      audit.forEach((entry, index) => agentHistory.unshift({ id: `AI-DEC-${Date.now().toString(36)}-${index}`, ...entry, data: nowIso, dataTxt: new Date(nowIso).toLocaleString('pl-PL'), dane: { ...entry.dane, saleAutomation } }));data.artway_agent_ai_historia = agentHistory.slice(0, 500);
       await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: nowIso });
-      return odpowiedz({ ok: true, productId, decision, days, available, expiresAt: availability[productId]?.expiresAt || null, saleAutomation, updated_at: nowIso });
+      return odpowiedz({ ok: true, ...results[0], changed: results.length, results, saleAutomation, updated_at: nowIso });
     }
 
     // ─── PRODUCENT: wyrywkowy monitoring stanów przez Agenta AI ───

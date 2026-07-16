@@ -195,21 +195,50 @@ function decyzjaProducentaDane(id,value="auto"){
   if(i.status==="brak")return {...base,status:"niedostepny",decision:"auto",automatic:true,source:"producent-agent",autoRestore:true,powod:"Automatycznie: produkt niedostępny u producenta",reason:"Automatyczna decyzja wg producenta"};
   return null;
 }
+const DECYZJE_PRODUCENTA_OPCJE=[
+  ["auto","🤖 Automat według producenta"],["grace:1","⏳ Zostaw sprzedaż jeszcze 1 dzień"],["grace:2","⏳ Zostaw sprzedaż jeszcze 2 dni"],["grace:3","⏳ Zostaw sprzedaż jeszcze 3 dni"],["grace:7","⏳ Zostaw sprzedaż jeszcze 7 dni"],["wait_available","🔄 Ukryj i wznów po powrocie"],["hide_manual","⏸️ Ukryj do mojej decyzji"],["manual_available","🟠 Pozostaw aktywny bez terminu"]
+];
+function decyzjaProducentaOpcjeHTML(selected="auto"){return DECYZJE_PRODUCENTA_OPCJE.map(([value,label])=>`<option value="${esc(value)}" ${value===selected?"selected":""}>${esc(label)}</option>`).join("");}
+function decyzjaProducentaEtykieta(value="auto"){return DECYZJE_PRODUCENTA_OPCJE.find(([key])=>key===value)?.[1]||"Wybrana decyzja";}
+function zapiszDecyzjeProducentowLokalnie(ids=[],value="auto",historia=true){
+  const unique=[...new Set((Array.isArray(ids)?ids:[]).map(String))].map(produktMagazynowy).filter(Boolean);if(!unique.length)return 0;
+  dostepnoscProduktow={...(dostepnoscProduktow||{})};
+  for(const p of unique){const next=decyzjaProducentaDane(p.id,value),key=String(p.id),i=producentDostepnoscInfo(p);if(next)dostepnoscProduktow[key]=next;else{delete dostepnoscProduktow[key];delete dostepnoscProduktow[p.id];}if(historia)zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:p.id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});}
+  zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();return unique.length;
+}
 async function ustawDecyzjeProducenta(id,value="auto"){
   const p=produktMagazynowy(id);if(!p)return;
   const next=decyzjaProducentaDane(id,value),key=String(id),i=producentDostepnoscInfo(p);
   dostepnoscProduktow={...(dostepnoscProduktow||{})};if(next)dostepnoscProduktow[key]=next;else{delete dostepnoscProduktow[key];delete dostepnoscProduktow[id];}
   zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});odswiezDostepnoscProducentowWidoku();
   try{
-    if(chmuraToken){const d=await chmura("product-sale-decision",{method:"POST",body:{productId:id,decision:String(value).split(":")[0],days:Number(String(value).split(":")[1])||0,producerStatus:i.status,producerQuantity:i.quantity,reason:next?.reason||"Automatyczna decyzja"},timeout:90000});await chmuraWczytajStan().catch(()=>{});zbudujProdukty();toast(`✅ Decyzja zapisana • sklep ${d.saleAutomation?.siteHidden?"ukryty":d.available?"aktywny":"zaktualizowany"} • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}
+    if(maUprawnieniaZapisuChmury()){const d=await chmura("product-sale-decision",{method:"POST",body:{productId:id,decision:String(value).split(":")[0],days:Number(String(value).split(":")[1])||0,producerStatus:i.status,producerQuantity:i.quantity,reason:next?.reason||"Automatyczna decyzja"},timeout:90000});await chmuraWczytajStan().catch(()=>{});zbudujProdukty();toast(`✅ Decyzja zapisana • sklep ${d.saleAutomation?.siteHidden?"ukryty":d.available?"aktywny":"zaktualizowany"} • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}
     else toast("Decyzja zapisana lokalnie — połącz wspólną bazę, aby zmienić Allegro");
   }catch(e){toast(`⚠️ Decyzja jest w panelu, ale synchronizacja serwera wymaga ponowienia: ${e.message||e}`);}
   odswiezDostepnoscProducentowWidoku();
 }
 function zastosujWyborDecyzjiProducenta(id){const el=document.querySelector(`[data-supplier-decision="${CSS.escape(String(id))}"]`);if(el)void ustawDecyzjeProducenta(id,el.value);}
+function ustawZaznaczenieDostepnosciProducentow(zakres,zaznacz=true){
+  const ids=zakres==="strona"?dostepnoscProducentowStronaIds:zakres==="filtr"?dostepnoscProducentowWynikiIds:Array.isArray(zakres)?zakres:[];
+  ids.slice(0,500).forEach(id=>zaznacz?zaznaczoneDostepnoscProducentow.add(String(id)):zaznaczoneDostepnoscProducentow.delete(String(id)));if(ids.length>500)toast("Zaznaczono bezpieczną partię 500 produktów");odswiezDostepnoscProducentowWidoku();
+}
+function wyczyscZaznaczenieDostepnosciProducentow(){zaznaczoneDostepnoscProducentow.clear();odswiezDostepnoscProducentowWidoku();}
+async function zastosujGrupowaDecyzjeProducenta(){
+  const select=document.querySelector("[data-supplier-bulk-decision]"),button=document.querySelector("[data-supplier-bulk-apply]"),value=String(select?.value||"auto"),ids=[...zaznaczoneDostepnoscProducentow].filter(id=>produktMagazynowy(id)).slice(0,500);
+  if(!ids.length){toast("Zaznacz co najmniej jeden produkt");return;}if(!confirm(`${decyzjaProducentaEtykieta(value)} — zastosować do ${ids.length} zaznaczonych produktów?`))return;
+  const parts=value.split(":"),items=ids.map(id=>{const p=produktMagazynowy(id),i=producentDostepnoscInfo(p);return{productId:id,decision:parts[0],days:Number(parts[1])||0,producerStatus:i.status,producerQuantity:i.quantity};});if(button){button.disabled=true;button.textContent=`⏳ Zapisuję ${ids.length}…`;}
+  zapiszDecyzjeProducentowLokalnie(ids,value,true);odswiezDostepnoscProducentowWidoku();
+  try{
+    if(maUprawnieniaZapisuChmury()){const d=await chmura("product-sale-decision",{method:"POST",body:{items},timeout:180000});await chmuraWczytajStan().catch(()=>{});zbudujProdukty();toast(`✅ Zapisano ${d.changed||ids.length} decyzji • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}else toast(`Zapisano lokalnie ${ids.length} decyzji — połącz wspólną bazę, aby zmienić Allegro`);
+    ids.forEach(id=>zaznaczoneDostepnoscProducentow.delete(String(id)));
+  }catch(e){toast(`⚠️ Decyzje są w panelu, ale synchronizacja serwera wymaga ponowienia: ${e.message||e}`);}
+  odswiezDostepnoscProducentowWidoku();
+}
+function grupowaDecyzjaProducentaHTML(){const n=zaznaczoneDostepnoscProducentow.size;return `<div class="supplier-bulk-decision"><label><span>Decyzja dla zaznaczonych</span><select data-supplier-bulk-decision>${decyzjaProducentaOpcjeHTML("auto")}</select></label><button class="btn" type="button" data-supplier-bulk-apply onclick="zastosujGrupowaDecyzjeProducenta()" ${n?"":"disabled"}>Zastosuj do ${n}</button><small>Jedno potwierdzenie i jeden spójny zapis dla całej grupy. Sklep i powiązane oferty Allegro zmienią się dopiero po zatwierdzeniu.</small></div>`;}
 function decyzjaProducentaPanelHTML(p={},i=producentDostepnoscInfo(p)){
   const d=decyzjaProducentaInfo(p),requires=["brak","niski"].includes(i.status)&&(!d.code||d.expired);
-  return `<div class="supplier-sale-decision ${d.cls} ${requires?"requires":""}"><div><b>${d.ico} ${esc(d.label)}</b><small>${d.expiresAt?`Do ${esc(new Date(d.expiresAt).toLocaleString("pl-PL"))}`:d.reason?esc(d.reason):requires?"Wybierz dalsze działanie sprzedażowe.":"Brak aktywnego wyjątku."}</small></div><select data-supplier-decision="${esc(p.id)}"><option value="auto">🤖 Automat według producenta</option><option value="grace:1">⏳ Zostaw sprzedaż jeszcze 1 dzień</option><option value="grace:2">⏳ Zostaw sprzedaż jeszcze 2 dni</option><option value="grace:3">⏳ Zostaw sprzedaż jeszcze 3 dni</option><option value="grace:7">⏳ Zostaw sprzedaż jeszcze 7 dni</option><option value="wait_available">🔄 Ukryj i wznów po powrocie</option><option value="hide_manual">⏸️ Ukryj do mojej decyzji</option><option value="manual_available">🟠 Pozostaw aktywny bez terminu</option></select><button class="btn ${requires?"":"ghost"}" type="button" onclick="zastosujWyborDecyzjiProducenta(${jsArg(p.id)})">Zastosuj decyzję</button></div>`;
+  const selected=zaznaczoneDostepnoscProducentow.has(String(p.id));
+  return `<div class="supplier-sale-decision ${d.cls} ${requires?"requires":""} ${selected?"is-selected":""}"><label class="supplier-decision-select"><input type="checkbox" aria-label="Zaznacz ${esc(p.nazwa||"produkt")}" ${selected?"checked":""} onchange="ustawZaznaczenieDostepnosciProducentow([${jsArg(p.id)}],this.checked)"><span>${selected?"Zaznaczony do operacji grupowej":"Zaznacz produkt"}</span></label><div><b>${d.ico} ${esc(d.label)}</b><small>${d.expiresAt?`Do ${esc(new Date(d.expiresAt).toLocaleString("pl-PL"))}`:d.reason?esc(d.reason):requires?"Wybierz dalsze działanie sprzedażowe.":"Brak aktywnego wyjątku."}</small></div><select data-supplier-decision="${esc(p.id)}">${decyzjaProducentaOpcjeHTML("auto")}</select><button class="btn ${requires?"":"ghost"}" type="button" onclick="zastosujWyborDecyzjiProducenta(${jsArg(p.id)})">Zastosuj decyzję</button></div>`;
 }
 function stanMagazynuId(id){
   if(stanyProduktow[id]===undefined || stanyProduktow[id]===null || stanyProduktow[id]==="") return null;
