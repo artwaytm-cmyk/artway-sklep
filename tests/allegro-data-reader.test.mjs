@@ -50,3 +50,16 @@ test('indeks mapowania zawęża katalog 20 000 produktów bez utraty dokładnego
   assert.equal(pool[0].id, target.id);
   assert.ok(pool.length <= 800);
 });
+
+test('odwrotny indeks znajduje ofertę w katalogu 100 000 bez skanowania przy kolejnych kartach', async () => {
+  const source = await readFile(new URL('../src/frontend/11-allegro-mapping-index.js', import.meta.url), 'utf8');
+  const offers = Array.from({ length: 100_000 }, (_, index) => ({ id: `offer-${index}`, externalId: `SKU-${index}`, name: `Produkt ${index}` }));
+  const context = { allegroMapowania: {}, allegroOferty: offers }; vm.createContext(context); vm.runInContext(source, context);
+  const firstIndex = context.allegroIndeksOfert();
+  const result = context.allegroIndeksOfertKandydaci({ id: 'product-99991', externalId: 'SKU-99991', nazwa: 'Produkt 99991' });
+  const secondIndex = context.allegroIndeksOfert();
+  assert.equal(result[0].offer.id, 'offer-99991');
+  assert.equal(result[0].reason, 'SKU / external.id');
+  assert.equal(firstIndex, secondIndex);
+  assert.equal(result.length, 1);
+});

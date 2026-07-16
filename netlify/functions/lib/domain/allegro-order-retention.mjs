@@ -29,7 +29,27 @@ export function allegroOrderNeedsLiveRefresh(order = {}) {
 }
 
 export function allegroOrderNeedsStatusRefresh(order = {}) {
-  return !!orderId(order) && !TERMINAL.has(status(order)) && order.baselineArchived !== true;
+  // Status oficjalny zawsze pochodzi z Allegro. Rekord oznaczony podczas
+  // historycznego cut-over nadal może później zostać wysłany lub anulowany,
+  // dlatego lokalny marker nie może wyłączać odczytu statusu. Starsze niż
+  // okres retencji rekordy i tak trafiają do miesięcznego archiwum.
+  return !!orderId(order) && !TERMINAL.has(status(order));
+}
+
+export function selectAllegroStatusRefreshCandidates(orders = [], {
+  seenIds = new Set(),
+  limit = 24,
+} = {}) {
+  const seen = seenIds instanceof Set ? seenIds : new Set(list(seenIds).map(String));
+  const safeLimit = Math.max(0, Math.min(100, Number(limit) || 0));
+  return list(orders)
+    .filter((order) => orderId(order) && !seen.has(orderId(order)) && allegroOrderNeedsStatusRefresh(order))
+    .sort((left, right) => {
+      const leftChecked = Date.parse(left?.officialStatusCheckedAt || left?.lastSeenAt || '') || 0;
+      const rightChecked = Date.parse(right?.officialStatusCheckedAt || right?.lastSeenAt || '') || 0;
+      return leftChecked - rightChecked || orderTime(right) - orderTime(left) || orderId(left).localeCompare(orderId(right));
+    })
+    .slice(0, safeLimit);
 }
 
 export function partitionAllegroOrders(orders = [], { now = new Date(), retentionDays = 30 } = {}) {

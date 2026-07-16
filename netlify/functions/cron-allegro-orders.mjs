@@ -14,7 +14,7 @@ export default async () => {
     const response = await fetch(`${base}/.netlify/functions/store?action=allegro-sync-orders`, {
       method: 'POST',
       headers: { 'x-admin-token': token, 'content-type': 'application/json' },
-      body: JSON.stringify({ limit: 100, source: 'scheduled-stock-agent' }),
+      body: JSON.stringify({ limit: 200, source: 'scheduled-stock-agent' }),
     });
     const body = await response.text();
     console.log('cron-allegro-orders', response.status, body.slice(0, 900));

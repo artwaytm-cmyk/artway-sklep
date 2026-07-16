@@ -274,10 +274,14 @@ let cenaOd="", cenaDo="", filtrDostepnosci="wszystkie", filtrOferty="wszystkie",
 let stronaProduktow=1, produktyNaStronie=[12,24,48,96].includes(Number(wczytajLS("artway_produkty_na_stronie",24)))?Number(wczytajLS("artway_produkty_na_stronie",24)):24;
 let stronaListyProduktow=1, produktyNaLiscie=[12,24,48,96].includes(Number(wczytajLS("artway_produkty_na_liscie",24)))?Number(wczytajLS("artway_produkty_na_liscie",24)):24;
 let frazaListyProduktow="", sortowanieListyProduktow="default";
-let allegroZamowienia = wczytajLS("artway_allegro_zamowienia_cache", []);
-let allegroOferty = wczytajLS("artway_allegro_oferty_cache", []);
-let allegroMapowania = wczytajLS("artway_allegro_mapowania_cache", {});
-let allegroKomunikacja = wczytajLS("artway_allegro_komunikacja_cache", {threads:[],issues:[],settings:null,autoReplies:{},errors:[],requiresReauth:false,updated_at:null,lastSyncSummary:null,sprawdzono:false});
+let allegroZamowienia = [];
+let allegroOferty = [];
+// Duże rejestry Allegro są cache'em bieżącej sesji, nie localStorage. Przy
+// dziesiątkach tysięcy ofert parsowanie wielomegabajtowego JSON-u blokowało
+// start i przełączanie kart panelu.
+let allegroMapowania = {};
+try{["artway_allegro_zamowienia_cache","artway_allegro_oferty_cache","artway_allegro_mapowania_cache","artway_allegro_komunikacja_cache"].forEach(k=>localStorage.removeItem(k));}catch(e){}
+let allegroKomunikacja = {threads:[],issues:[],settings:null,autoReplies:{},errors:[],requiresReauth:false,updated_at:null,lastSyncSummary:null,sprawdzono:false};
 let zaznaczoneZamowieniaSklepu = new Set();
 let zaznaczoneAllegroZamowienia = new Set();
 let zaznaczoneAllegroOferty = new Set();
@@ -291,6 +295,8 @@ let allegroOstatniWynikWystawienia = null;
 let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSyncState:{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null,lastSource:null,lastResult:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,updated_at:null}};
 let allegroDaneZaladowane={summary:false,orders:false,offers:false,config:false};
 let allegroDaneLadowane=new Set();
+let allegroDaneOdczytAt={summary:0,orders:0,offers:0,config:0};
+let allegroDaneObietnice=new Map();
 let allegroPodsumowanie={orders:{live:0,active:0,statusCounts:{},archived:0,retentionDays:30,updated_at:null},offers:{count:0,updated_at:null},recentOrders:[]};
 let allegroArchiwum={loaded:false,busy:false,items:[],summary:{total:0,months:[],retentionDays:30,updated_at:null},month:"",offset:0,hasMore:false,error:""};
 let allegroOperacjaUstawien = {busy:false,done:0,total:0,stockUpdated:0,stockFailed:0,republishUpdated:0,republishFailed:0,error:""};
@@ -334,6 +340,7 @@ let chmuraBrudneKlucze = new Set();
 let chmuraZapisWToku = null;
 let chmuraZapisPonowPoZakonczeniu = false;
 let chmuraNumerMutacji = 0;
+let chmuraPobraniaWToku = new Map();
 async function chmuraPobierzKatalogImportowany(meta={},force=false){
   const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
   if(!force&&revision===chmuraKatalogImportowanyRev)return false;
@@ -367,19 +374,25 @@ async function chmura(action, {method="GET", body=null, params={}, timeout=9000}
   const url = new URL(CHMURA_URL, location.href);
   url.searchParams.set("action", action);
   for(const [k,v] of Object.entries(params)) if(v!==undefined&&v!==null&&v!=="") url.searchParams.set(k,String(v));
-  const opt = {method, headers: chmuraNaglowki(body!==null)};
-  if(body!==null) opt.body = JSON.stringify(body);
-  const ac = (typeof AbortController!=="undefined") ? new AbortController() : null;
-  let timer=null;
-  if(ac){ opt.signal=ac.signal; timer=setTimeout(()=>ac.abort(),timeout); }
-  let r;
-  try{ r = await fetch(url.toString(), opt); }
-  catch(e){ if(timer)clearTimeout(timer); throw new Error(e&&e.name==="AbortError"?"Serwer nie odpowiedział w wyznaczonym czasie":"Brak połączenia z serwerem"); }
-  if(timer)clearTimeout(timer);
-  const t = await r.text(); let d;
-  try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił danych — czy backend Netlify jest opublikowany?"); }
-  if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); Object.assign(b,d); b.code=d.code||""; b.status=r.status; throw b; }
-  return d;
+  const requestKey=method==="GET"&&body===null?url.toString():"",istniejace=requestKey?chmuraPobraniaWToku.get(requestKey):null;
+  if(istniejace)return istniejace;
+  const request=(async()=>{
+    const opt = {method, headers: chmuraNaglowki(body!==null)};
+    if(body!==null) opt.body = JSON.stringify(body);
+    const ac = (typeof AbortController!=="undefined") ? new AbortController() : null;
+    let timer=null;
+    if(ac){ opt.signal=ac.signal; timer=setTimeout(()=>ac.abort(),timeout); }
+    let r;
+    try{ r = await fetch(url.toString(), opt); }
+    catch(e){ if(timer)clearTimeout(timer); throw new Error(e&&e.name==="AbortError"?"Serwer nie odpowiedział w wyznaczonym czasie":"Brak połączenia z serwerem"); }
+    if(timer)clearTimeout(timer);
+    const t = await r.text(); let d;
+    try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił danych — czy backend Netlify jest opublikowany?"); }
+    if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); Object.assign(b,d); b.code=d.code||""; b.status=r.status; throw b; }
+    return d;
+  })();
+  if(requestKey)chmuraPobraniaWToku.set(requestKey,request);
+  try{return await request;}finally{if(requestKey&&chmuraPobraniaWToku.get(requestKey)===request)chmuraPobraniaWToku.delete(requestKey);}
 }
 function nrZamowienia(v){ return String(v??"").trim().slice(0,80); }
 function normalizujUsunieteZamowienie(raw){

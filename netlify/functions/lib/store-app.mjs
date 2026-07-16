@@ -57,7 +57,8 @@ import {
 } from './domain/allegro-reply-assistant.mjs';
 import { createStoreOrderSupplierReconciliation } from './store-order-supplier-reconciliation.mjs';
 import { markAllegroInventoryTransition, markAllegroInventoryTransitions, resolveAllegroBaselineCutover } from './domain/allegro-supplier-demand.mjs';
-import { allegroOrderNeedsLiveRefresh, allegroOrderNeedsStatusRefresh, createAllegroOrderArchive } from './domain/allegro-order-retention.mjs';
+import { allegroOrderNeedsLiveRefresh, createAllegroOrderArchive, selectAllegroStatusRefreshCandidates } from './domain/allegro-order-retention.mjs';
+import { mergeRecentAllegroOrders } from './domain/allegro-order-sync-window.mjs';
 import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
 import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
@@ -5556,11 +5557,11 @@ export default async (req) => {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
       const limit = Math.min(1000, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 200)));
-      const pobrane = [];
+      const officialCheckedAt = new Date().toISOString(), pobrane = [];
       for (let offset = 0; offset < limit; offset += 100) {
         const pageLimit = Math.min(100, limit - pobrane.length);
         if (pageLimit <= 0) break;
-        const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit: pageLimit, offset, status: 'READY_FOR_PROCESSING' } });
+        const dane = await allegroWywolaj(req, '/order/checkout-forms', { parameters: { limit: pageLimit, offset } });
         const source = Array.isArray(dane.checkoutForms) ? dane.checkoutForms : (Array.isArray(dane.items) ? dane.items : []);
         pobrane.push(...source);
         if (source.length < pageLimit) break;
@@ -5571,31 +5572,18 @@ export default async (req) => {
       const archivedLookup = archiveIndex.lookup && typeof archiveIndex.lookup === 'object' ? archiveIndex.lookup : {};
       const baselineRec = await czytaj('allegro_orders_baseline_v2', { baseline_at: null });
       const { baselineCreated, baselineAt, baselineMarkerMissing } = resolveAllegroBaselineCutover(baselineRec, poprzedniRec);
-      const poprzedniePoId = new Map(poprzednie.filter((x) => x?.id).map((x) => [String(x.id), x]));
-      const mapa = new Map(poprzedniePoId);
-      const seen = new Set();
-      const noweIds = [];
-      const aktywne = pobrane
-        .map(allegroNormalizujZamowienie)
-        .filter((x) => x.id && !seen.has(x.id) && seen.add(x.id))
-        .filter((x) => !archivedLookup[String(x.id)])
-        .filter(allegroZamowienieJestNoweLubDoWyslania)
-        .slice(0, limit);
-      let dodane = 0;
-      for (const z of aktywne) {
-        const stare = mapa.get(String(z.id)) || {};
-        if (!stare.id) { dodane++; noweIds.push(String(z.id)); }
-        mapa.set(String(z.id), allegroScalZamowienie(z, stare));
-      }
-      const doAktualizacji = poprzednie.filter((z) => z?.id && !seen.has(String(z.id)) && allegroOrderNeedsStatusRefresh(z)).slice(0, limit);
-      let odswiezone = 0;
+      const recent = mergeRecentAllegroOrders({ fetched: pobrane, previous: poprzednie, archivedLookup, normalize: allegroNormalizujZamowienie, merge: allegroScalZamowienie, isWorkItem: allegroZamowienieJestNoweLubDoWyslania, checkedAt: officialCheckedAt });
+      const { byId: mapa, previousById: poprzedniePoId, seenIds: seen, newOrderIds: noweIds } = recent;
+      const dodane = recent.imported, odswiezoneZListy = recent.refreshed, pominieteNoweTerminalne = recent.ignoredTerminal;
+      let odswiezone = odswiezoneZListy;
+      const doAktualizacji = selectAllegroStatusRefreshCandidates(poprzednie, { seenIds: seen, limit: Math.min(32, Math.max(8, Math.ceil(limit / 5))) });
       const batchSize = 8;
       for (let i = 0; i < doAktualizacji.length; i += batchSize) {
         const batch = doAktualizacji.slice(i, i + batchSize);
         const wyniki = await Promise.all(batch.map(async (stare) => {
           try {
             const pelne = await allegroWywolaj(req, `/order/checkout-forms/${encodeURIComponent(stare.id)}`);
-            return allegroScalZamowienie(pelne, stare);
+            return { ...allegroScalZamowienie(pelne, stare), officialStatusCheckedAt };
           } catch (e) {
             return { ...stare, syncError: tekst(e.message, 500), lastSyncErrorAt: new Date().toISOString() };
           }
@@ -5630,7 +5618,7 @@ export default async (req) => {
       }
       const retention = await allegroOrderArchive.archive(items, { now: new Date(), retentionDays: 30 });
       items = retention.items;
-      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: baselineCreated ? 0 : dodane, refreshed: odswiezone, filtered: pobrane.length - aktywne.length, mode: 'allegro_status_authoritative_warehouse_stage_separate', retention_days: 30, archive: retention.summary, archived_now: retention.archived, baseline_at: baselineAt, baseline_created: baselineCreated, baseline_archived: baselineArchived, agent };
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: baselineCreated ? 0 : dodane, refreshed: odswiezone, refreshed_from_recent_list: odswiezoneZListy, refreshed_individually: Math.max(0, odswiezone - odswiezoneZListy), status_refresh_candidates: doAktualizacji.length, filtered: pominieteNoweTerminalne, mode: 'allegro_status_authoritative_recent_snapshot_v2', retention_days: 30, archive: retention.summary, archived_now: retention.archived, baseline_at: baselineAt, baseline_created: baselineCreated, baseline_archived: baselineArchived, agent };
       await zapisz('allegro_orders', rec);
       // Marker cutover jest commitem końcowym: awaria zapisu zamówień nie może
       // oznaczyć baseline jako zakończonego. Ponowne archiwizowanie po awarii

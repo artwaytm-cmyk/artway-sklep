@@ -26,6 +26,7 @@ let chmuraBrudneKlucze = new Set();
 let chmuraZapisWToku = null;
 let chmuraZapisPonowPoZakonczeniu = false;
 let chmuraNumerMutacji = 0;
+let chmuraPobraniaWToku = new Map();
 async function chmuraPobierzKatalogImportowany(meta={},force=false){
   const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
   if(!force&&revision===chmuraKatalogImportowanyRev)return false;
@@ -59,19 +60,25 @@ async function chmura(action, {method="GET", body=null, params={}, timeout=9000}
   const url = new URL(CHMURA_URL, location.href);
   url.searchParams.set("action", action);
   for(const [k,v] of Object.entries(params)) if(v!==undefined&&v!==null&&v!=="") url.searchParams.set(k,String(v));
-  const opt = {method, headers: chmuraNaglowki(body!==null)};
-  if(body!==null) opt.body = JSON.stringify(body);
-  const ac = (typeof AbortController!=="undefined") ? new AbortController() : null;
-  let timer=null;
-  if(ac){ opt.signal=ac.signal; timer=setTimeout(()=>ac.abort(),timeout); }
-  let r;
-  try{ r = await fetch(url.toString(), opt); }
-  catch(e){ if(timer)clearTimeout(timer); throw new Error(e&&e.name==="AbortError"?"Serwer nie odpowiedział w wyznaczonym czasie":"Brak połączenia z serwerem"); }
-  if(timer)clearTimeout(timer);
-  const t = await r.text(); let d;
-  try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił danych — czy backend Netlify jest opublikowany?"); }
-  if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); Object.assign(b,d); b.code=d.code||""; b.status=r.status; throw b; }
-  return d;
+  const requestKey=method==="GET"&&body===null?url.toString():"",istniejace=requestKey?chmuraPobraniaWToku.get(requestKey):null;
+  if(istniejace)return istniejace;
+  const request=(async()=>{
+    const opt = {method, headers: chmuraNaglowki(body!==null)};
+    if(body!==null) opt.body = JSON.stringify(body);
+    const ac = (typeof AbortController!=="undefined") ? new AbortController() : null;
+    let timer=null;
+    if(ac){ opt.signal=ac.signal; timer=setTimeout(()=>ac.abort(),timeout); }
+    let r;
+    try{ r = await fetch(url.toString(), opt); }
+    catch(e){ if(timer)clearTimeout(timer); throw new Error(e&&e.name==="AbortError"?"Serwer nie odpowiedział w wyznaczonym czasie":"Brak połączenia z serwerem"); }
+    if(timer)clearTimeout(timer);
+    const t = await r.text(); let d;
+    try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił danych — czy backend Netlify jest opublikowany?"); }
+    if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); Object.assign(b,d); b.code=d.code||""; b.status=r.status; throw b; }
+    return d;
+  })();
+  if(requestKey)chmuraPobraniaWToku.set(requestKey,request);
+  try{return await request;}finally{if(requestKey&&chmuraPobraniaWToku.get(requestKey)===request)chmuraPobraniaWToku.delete(requestKey);}
 }
 function nrZamowienia(v){ return String(v??"").trim().slice(0,80); }
 function normalizujUsunieteZamowienie(raw){

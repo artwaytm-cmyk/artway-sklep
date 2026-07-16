@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allegroOrderNeedsLiveRefresh, allegroOrderNeedsStatusRefresh, createAllegroOrderArchive, partitionAllegroOrders } from '../netlify/functions/lib/domain/allegro-order-retention.mjs';
+import { allegroOrderNeedsLiveRefresh, allegroOrderNeedsStatusRefresh, createAllegroOrderArchive, partitionAllegroOrders, selectAllegroStatusRefreshCandidates } from '../netlify/functions/lib/domain/allegro-order-retention.mjs';
 
 const now = new Date('2026-07-16T12:00:00.000Z');
 const order = (id, createdAt, fulfillmentStatus = 'NEW', warehouseStage = 'kompletacja', extra = {}) => ({ id, createdAt, fulfillmentStatus, warehouseStage, ...extra });
@@ -19,8 +19,18 @@ test('rejestr operacyjny zachowuje 30 dni i każde nadal aktywne zamówienie', (
 
 test('lokalnie zakończone świeże zlecenie nadal odświeża oficjalny status do czasu archiwizacji', () => {
   assert.equal(allegroOrderNeedsStatusRefresh({ id: 'recent', fulfillmentStatus: 'NEW', warehouseStage: 'zrealizowane' }), true);
-  assert.equal(allegroOrderNeedsStatusRefresh({ id: 'baseline', fulfillmentStatus: 'NEW', baselineArchived: true }), false);
+  assert.equal(allegroOrderNeedsStatusRefresh({ id: 'baseline', fulfillmentStatus: 'NEW', baselineArchived: true }), true);
   assert.equal(allegroOrderNeedsStatusRefresh({ id: 'sent', fulfillmentStatus: 'SENT' }), false);
+});
+
+test('rotacyjna kontrola statusów wybiera najdawniej sprawdzane i pomija najnowsze okno', () => {
+  const selected = selectAllegroStatusRefreshCandidates([
+    { id: 'fresh-window', fulfillmentStatus: 'NEW', officialStatusCheckedAt: '2026-07-16T11:00:00Z' },
+    { id: 'oldest', fulfillmentStatus: 'NEW', officialStatusCheckedAt: '2026-07-10T11:00:00Z', baselineArchived: true },
+    { id: 'later', fulfillmentStatus: 'PROCESSING', officialStatusCheckedAt: '2026-07-12T11:00:00Z' },
+    { id: 'sent', fulfillmentStatus: 'SENT', officialStatusCheckedAt: '2026-07-01T11:00:00Z' },
+  ], { seenIds: new Set(['fresh-window']), limit: 1 });
+  assert.deepEqual(selected.map(item => item.id), ['oldest']);
 });
 
 test('archiwum jest miesięczne, idempotentne i pobierane stronami', async () => {

@@ -9,11 +9,13 @@ test("otwarty panel okresowo pobiera wyniki synchronizacji Allegro bez przerywan
   const [allegro,cloud]=await Promise.all([read("src/frontend/11-allegro-refresh-runtime.js"),read("src/frontend/07-admin-shipping.js")]);
   assert.match(allegro,/ALLEGRO_ODSWIEZANIE_PANELU_MS=15\*60\*1000/);
   assert.match(allegro,/function allegroOdswiezDaneZSerweraJesliCzas/);
-  assert.match(allegro,/allegroWczytajDane\(true,false,zakres\)/);
-  assert.match(allegro,/allegroDaneZaladowane\.orders\?\["orders"\]:\["summary"\]/);
+  assert.match(allegro,/allegroWczytajDane\(true,false,"summary"\)/);
+  assert.match(allegro,/allegroDaneZaladowane\.orders&&orderChanged/);
+  assert.match(allegro,/allegroDaneZaladowane\.offers&&offerChanged/);
+  assert.match(allegro,/allegroWersjaSerwerowaZakresu/);
   assert.match(allegro,/function allegroKomunikacjaKluczeDoOdswiezenia/);
   assert.match(allegro,/latestNewIncomingKey/);
-  assert.match(allegro,/function allegroOfertaIdDoOdswiezenia/);
+  assert.doesNotMatch(allegro,/\.map\(z=>`\$\{z\.id[^\n]+\.join\("\|"\)/);
   assert.match(cloud,/allegroOdswiezDaneZSerweraJesliCzas\(powod\)/);
   assert.match(cloud,/"\/admin\/allegro"/);
   assert.match(cloud,/\["INPUT","TEXTAREA","SELECT"\]/);

@@ -33,6 +33,48 @@ function allegroPulaProduktowMapowania(offer={},products=[]){
   const mappedId=String((allegroMapowania||{})[String(offer.id||"")]?.productId??"");if(mappedId&&index.byId.has(mappedId))add([index.byId.get(mappedId)],2000);
   return [...scores.values()].sort((a,b)=>b.score-a.score||String(a.product.id).localeCompare(String(b.product.id))).slice(0,800).map(entry=>entry.product);
 }
+
+/* Odwrotny indeks ofert dla kartoteki produktu. Bez niego audyt duplikatow,
+   rentownosc i lista produktow wykonywaly kosztowne O(produkty * oferty).
+   Indeks jest przebudowywany tylko po podmianie odpowiedzi z API. */
+let allegroIndeksOfertCache={offersSource:null,mappingsSource:null,byId:new Map(),byProduct:new Map(),byCatalog:new Map(),byExternal:new Map(),byEan:new Map(),byCode:new Map(),byName:new Map()};
+function allegroIndeksOfertDodaj(map,key,value){if(!key)return;const list=map.get(key)||[];list.push(value);map.set(key,list);}
+function allegroIndeksOfert(offers=allegroOferty,mappings=allegroMapowania){
+  const lista=Array.isArray(offers)?offers:[],mapa=mappings&&typeof mappings==="object"?mappings:{};
+  if(allegroIndeksOfertCache.offersSource===lista&&allegroIndeksOfertCache.mappingsSource===mapa)return allegroIndeksOfertCache;
+  const next={offersSource:lista,mappingsSource:mapa,byId:new Map(),byProduct:new Map(),byCatalog:new Map(),byExternal:new Map(),byEan:new Map(),byCode:new Map(),byName:new Map()};
+  for(const offer of lista){
+    const id=String(offer?.id||"").trim();if(!id)continue;next.byId.set(id,offer);
+    allegroIndeksOfertDodaj(next.byCatalog,String(offer?.productId||"").trim(),offer);
+    allegroIndeksOfertDodaj(next.byExternal,allegroIndeksKandydatowKlucz(offer?.externalId||offer?.sku),offer);
+    allegroIndeksGtins(offer).forEach(gtin=>allegroIndeksOfertDodaj(next.byEan,gtin,offer));
+    allegroIndeksOfertDodaj(next.byCode,allegroIndeksKandydatowKlucz(offer?.manufacturerCode||offer?.producerCode),offer);
+    allegroIndeksOfertDodaj(next.byName,allegroIndeksKandydatowKlucz(offer?.name),offer);
+  }
+  for(const [key,record] of Object.entries(mapa)){
+    const productId=String(record?.productId??"").trim(),offerId=String(record?.offerId||key||"").trim(),offer=next.byId.get(offerId);
+    if(productId&&offer)allegroIndeksOfertDodaj(next.byProduct,productId,offer);
+  }
+  allegroIndeksOfertCache=next;return next;
+}
+function allegroIndeksOfertKandydaci(product={}){
+  const index=allegroIndeksOfert(),wyniki=new Map(),add=(items,score,reason)=>{for(const offer of items||[]){const id=String(offer?.id||"");if(!id)continue;const previous=wyniki.get(id);if(!previous||score>previous.score)wyniki.set(id,{offer,score,reason});}};
+  const direct=String(product?.allegroOfferId||"").trim();if(direct)add([index.byId.get(direct)].filter(Boolean),100,"ID oferty");
+  add(index.byProduct.get(String(product?.id??"").trim()),99,"mapowanie");
+  add(index.byCatalog.get(String(product?.allegroProductId||"").trim()),97,"ID produktu Allegro");
+  add(index.byExternal.get(allegroIndeksKandydatowKlucz(product?.externalId||product?.sku||product?.kodProducenta||product?.mpn)),95,"SKU / external.id");
+  allegroIndeksGtins(product).forEach(gtin=>add(index.byEan.get(gtin),93,"EAN/GTIN"));
+  add(index.byCode.get(allegroIndeksKandydatowKlucz(product?.kodProducenta||product?.mpn)),90,"kod producenta");
+  add(index.byName.get(allegroIndeksKandydatowKlucz(product?.nazwa||product?.name)),86,"identyczna nazwa");
+  return [...wyniki.values()].sort((a,b)=>b.score-a.score||String(a.offer.id).localeCompare(String(b.offer.id)));
+}
+function allegroKluczPorownania(v){return String(v||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g," ").trim();}
+function allegroKanonicznyGtin(v=""){const code=String(v??"").replace(/\D+/g,"");if(![8,12,13,14].includes(code.length))return"";let sum=0,weight=3;for(let i=code.length-2;i>=0;i--,weight=weight===3?1:3)sum+=Number(code[i])*weight;if((10-sum%10)%10!==Number(code.at(-1)))return"";return code.padStart(14,"0");}
+function allegroKluczGtin(v=""){return allegroKanonicznyGtin(v)||allegroKluczPorownania(v);}
+function allegroMapowanieDostawcyZweryfikowane(rec={}){return rec?.verifiedForSupplier===true||rec?.supplierOrderEligible===true||/^(admin-(?:validated|force|safe-batch|duplicate-keep)|auto-order:)/i.test(String(rec?.operator||"").trim());}
+function allegroProduktWirtualnyZMapowania(rec={},mappedId="",oferta={}){const snapshot=rec?.productSnapshot&&typeof rec.productSnapshot==="object"?rec.productSnapshot:{};return{...snapshot,id:mappedId,productId:mappedId,nazwa:snapshot.nazwa||snapshot.name||rec.productName||oferta.name||`Produkt ${mappedId}`,externalId:snapshot.externalId||snapshot.sku||oferta.externalId||"",ean:snapshot.ean||snapshot.gtin||oferta.ean||oferta.gtin||"",gtin:snapshot.gtin||snapshot.ean||oferta.gtin||oferta.ean||"",kodProducenta:snapshot.kodProducenta||snapshot.mpn||oferta.manufacturerCode||oferta.producerCode||"",producent:snapshot.producent||snapshot.manufacturer||snapshot.marka||snapshot.brand||oferta.brand||"",archiwalneMapowanie:true};}
+function allegroOfertyPasujaceDoProduktu(p={}){return allegroIndeksOfertKandydaci(p);}
+function allegroAudytDuplikatow(){const produkty=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)),grupy=produkty.map(p=>({produkt:p,dopasowania:allegroOfertyPasujaceDoProduktu(p).filter(allegroDopasowanieDuplikatuAktywne)})).filter(x=>x.dopasowania.length>1),offerIds=new Set(grupy.flatMap(x=>x.dopasowania.map(d=>String(d.offer.id))));return{grupy,offerIds,produkty:grupy.length,oferty:offerIds.size};}
 function allegroKluczeKodu(v){const raw=String(v||"").trim().toLowerCase();if(!raw)return[];const bezSpacji=raw.replace(/\s+/g,""),bezUniw=bezSpacji.replace(/[-_ ]?uniw$/,""),bezPrefixu=bezUniw.replace(/^(sku|kod|ean|gtin)[:#-]?/,""),cyfry=(bezPrefixu.match(/\d{3,}/)||[])[0]||"";return [...new Set([raw,bezSpacji,bezUniw,bezPrefixu,cyfry].filter(Boolean))];}
 function allegroIndeksProduktowPoKodzie(){const indeks=new Map(),konflikty=new Set(),dodajKlucz=(k,p)=>{if(!k)return;const poprzedni=indeks.get(k);if(poprzedni&&String(poprzedni.id)!==String(p.id)){konflikty.add(k);return;}indeks.set(k,p);},dodaj=(kod,p)=>allegroKluczeKodu(kod).forEach(k=>dodajKlucz(k,p)),dodajGtin=(kod,p)=>{const k=allegroIndeksKanonicznyGtin(kod);if(k)dodajKlucz(`gtin:${k}`,p);};produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{[p.sku,p.kod,p.externalId,p.producentKod,p.kodProducenta].forEach(k=>dodaj(k,p));[p.gtin,p.ean,p.GTIN,p.EAN,p.kodKreskowy].forEach(k=>dodajGtin(k,p));});konflikty.forEach(k=>indeks.delete(k));return indeks;}
 function allegroNormalizujNazwe(v){return String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/&/g," i ").replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();}
