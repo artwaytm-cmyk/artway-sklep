@@ -55,6 +55,8 @@ export function preserveSupplierPlanOnGenericSettings(incoming = {}, previous = 
   return {
     ...object(incoming),
     artway_agent_ai_zlecenia: structuredClone(supplierOrders(previous)),
+    artway_dokumenty_magazynowe: structuredClone(array(object(previous).artway_dokumenty_magazynowe)),
+    artway_dokumenty_magazynowe_seq: structuredClone(object(object(previous).artway_dokumenty_magazynowe_seq)),
   };
 }
 

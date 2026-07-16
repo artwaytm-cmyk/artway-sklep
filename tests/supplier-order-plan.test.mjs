@@ -220,6 +220,13 @@ test('ogólny zapis settings nie może podmienić serwerowego Planu zatowarowani
   assert.equal(canonical[0].status, 'do sprawdzenia', 'wynik nie współdzieli referencji z poprzednim rekordem');
 });
 
+test('ogólny zapis settings zachowuje również kanoniczne dokumenty PZ/WZ', () => {
+  const previous = { artway_dokumenty_magazynowe: [{ id: 'WD-1', type: 'PZ', status: 'draft' }], artway_dokumenty_magazynowe_seq: { 'PZ:2026-07': 4 } };
+  const next = preserveSupplierPlanOnGenericSettings({ artway_stany: { 1: 5 }, artway_dokumenty_magazynowe: [] }, previous);
+  assert.deepEqual(next.artway_dokumenty_magazynowe, previous.artway_dokumenty_magazynowe);
+  assert.deepEqual(next.artway_dokumenty_magazynowe_seq, previous.artway_dokumenty_magazynowe_seq);
+});
+
 test('przyjęcie zwiększa stan o całą faktyczną ilość, zapisuje nadwyżkę i nie dubluje retry', () => {
   const sent = draft({ status: 'wysłane do producenta', emailSentAt: NOW.toISOString(), receiptRevision: 0 });
   const first = receiveSupplierPlanLine({
