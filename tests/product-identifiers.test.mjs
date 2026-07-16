@@ -64,6 +64,15 @@ test('pewne mapowanie wybiera ofertę po EAN niezależnie od wysokiego ID import
   assert.equal(match.reason, 'identyczny EAN/GTIN');
 });
 
+test('serwer zawęża duży rejestr ofert i zachowuje dopasowanie po GTIN z zerem', () => {
+  const offers = Array.from({ length: 642 }, (_, index) => ({ id: `OF-${index}`, name: `Produkt kontrolny ${index}`, externalId: `EXT-${index}` }));
+  offers[517] = { ...offers[517], name: 'Puzzle magnetyczne Farma', gtins: ['5906018003796', '05906018026788'] };
+  const product = { id: 20001, nazwa: 'Puzzle magnetyczne Farma', ean: '5906018026788' };
+  const match = findBestAllegroOffer(product, offers, {});
+  assert.equal(match.offer.id, 'OF-517');
+  assert.equal(match.reason, 'identyczny EAN/GTIN');
+});
+
 test('zapisane mapowanie ma pierwszeństwo wyłącznie przy wiarygodnej ofercie', () => {
   const product = { id: 1000287, nazwa: 'Puzzle magnetyczne Farma', ean: '5906018026788' };
   const offers = [{ id: 'OF-1', name: 'Całkiem inna gra', gtin: '5906018003796' }, { id: 'OF-2', name: 'Puzzle magnetyczne Farma', gtin: '5906018026788' }];

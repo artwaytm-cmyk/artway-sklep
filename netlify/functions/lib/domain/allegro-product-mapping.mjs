@@ -25,6 +25,45 @@ const tokenSimilarity = (left = '', right = '') => {
   for (const token of a) if (b.has(token)) common += 1;
   return common / Math.max(a.size, b.size);
 };
+const offerIndexCache = new WeakMap();
+const mappingOfferIndexCache = new WeakMap();
+const addIndex = (map, key, offer) => { if (!key) return; const list = map.get(key) || []; list.push(offer); map.set(key, list); };
+function mappedOfferForProduct(mappings = {}, productId = '') {
+  if (!mappings || typeof mappings !== 'object') return '';
+  let index = mappingOfferIndexCache.get(mappings);
+  if (!index) {
+    index = new Map(Object.values(mappings).filter((mapping) => mapping?.blocked !== true && mapping?.productId).map((mapping) => [String(mapping.productId), String(mapping.offerId || '')]));
+    mappingOfferIndexCache.set(mappings, index);
+  }
+  return index.get(String(productId)) || '';
+}
+function indexedOfferCandidates(product = {}, offers = [], mappedOfferId = '') {
+  let index = offerIndexCache.get(offers);
+  if (!index) {
+    index = { byId: new Map(), ean: new Map(), external: new Map(), code: new Map(), catalog: new Map(), name: new Map(), token: new Map() };
+    for (const offer of offers) {
+      const id = String(offer?.id || '').trim(); if (id) index.byId.set(id, offer);
+      offerGtins(offer).forEach((ean) => addIndex(index.ean, ean, offer));
+      addIndex(index.external, normalize(offer?.externalId), offer);
+      addIndex(index.code, normalize(offer?.manufacturerCode || offer?.producerCode), offer);
+      addIndex(index.catalog, String(offer?.productId || '').trim(), offer);
+      addIndex(index.name, normalize(offer?.name || offer?.offerName), offer);
+      significantTokens(offer?.name || offer?.offerName).forEach((token) => addIndex(index.token, token, offer));
+    }
+    offerIndexCache.set(offers, index);
+  }
+  const scored = new Map(), add = (list, points) => { for (const offer of list || []) { const id = String(offer?.id || ''); if (id) scored.set(id, { offer, score: (scored.get(id)?.score || 0) + points }); } };
+  add([index.byId.get(String(product?.allegroOfferId || ''))], 2000);
+  add([index.byId.get(String(mappedOfferId || ''))], 1900);
+  productGtins(product).forEach((ean) => add(index.ean.get(ean), 1000));
+  add(index.catalog.get(String(product?.allegroProductId || '').trim()), 900);
+  add(index.external.get(normalize(product?.externalId || product?.sku || product?.kodProducenta || product?.mpn)), 800);
+  add(index.code.get(normalize(product?.kodProducenta || product?.mpn)), 700);
+  add(index.name.get(normalize(product?.nazwa || product?.name)), 600);
+  [...significantTokens(product?.nazwa || product?.name)].sort((a, b) => (index.token.get(a)?.length || 0) - (index.token.get(b)?.length || 0)).slice(0, 4)
+    .forEach((token) => add((index.token.get(token) || []).slice(0, 200), 10));
+  return [...scored.values()].sort((a, b) => b.score - a.score || String(a.offer.id).localeCompare(String(b.offer.id))).slice(0, 800).map((entry) => entry.offer);
+}
 
 export function mappingVerifiedForSupplier(mapping = {}) {
   if (mapping?.verifiedForSupplier === true || mapping?.supplierOrderEligible === true) return true;
@@ -91,7 +130,7 @@ export function scoreAllegroProductMapping(product = {}, offer = {}) {
 }
 
 export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw = {}, minimumScore = 85) {
-  const offers = Array.isArray(offersRaw) ? offersRaw : (Array.isArray(offersRaw?.items) ? offersRaw.items : []);
+  const allOffers = Array.isArray(offersRaw) ? offersRaw : (Array.isArray(offersRaw?.items) ? offersRaw.items : []);
   const mappings = mappingsRaw?.items && typeof mappingsRaw.items === 'object' ? mappingsRaw.items : (mappingsRaw || {});
   const productId = String(product.id ?? '').trim();
   const savedOfferId = clip(product.allegroOfferId, 100);
@@ -101,7 +140,8 @@ export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw =
   const producerCode = normalize(product.kodProducenta || product.mpn);
   const name = normalize(product.nazwa || product.name);
   const threshold = Math.min(100, Math.max(55, Number(minimumScore) || 85));
-  const mappedOfferId = Object.values(mappings).find((mapping) => mapping?.blocked !== true && String(mapping?.productId ?? '') === productId)?.offerId || '';
+  const mappedOfferId = mappedOfferForProduct(mappings, productId);
+  const offers = indexedOfferCandidates(product, allOffers, mappedOfferId);
   const credible = (offer) => {
     const hasEvidence = !!(offer?.name || offer?.offerName || offer?.productId || offer?.ean || offer?.gtin || offer?.externalId || offer?.manufacturerCode || offer?.producerCode);
     return !hasEvidence || scoreAllegroProductMapping(product, offer).valid;
