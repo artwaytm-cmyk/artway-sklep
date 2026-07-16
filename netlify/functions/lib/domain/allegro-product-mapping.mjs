@@ -99,13 +99,15 @@ export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw =
   const producerCode = normalize(product.kodProducenta || product.mpn);
   const name = normalize(product.nazwa || product.name);
   const threshold = Math.min(100, Math.max(55, Number(minimumScore) || 85));
-  const mappedOfferId = Object.values(mappings).find((mapping) => String(mapping?.productId ?? '') === productId)?.offerId || '';
+  const mappedOfferId = Object.values(mappings).find((mapping) => mapping?.blocked !== true && String(mapping?.productId ?? '') === productId)?.offerId || '';
   const credible = (offer) => {
     const hasEvidence = !!(offer?.name || offer?.offerName || offer?.productId || offer?.ean || offer?.gtin || offer?.externalId || offer?.manufacturerCode || offer?.producerCode);
     return !hasEvidence || scoreAllegroProductMapping(product, offer).valid;
   };
   let best = null;
   for (const offer of offers) {
+    const publicationStatus = String(offer?.status || offer?.publication?.status || '').toUpperCase();
+    if (['ENDED', 'ARCHIVED'].includes(publicationStatus)) continue;
     let score = 0, reason = '';
     if (savedOfferId && String(offer?.id) === savedOfferId && credible(offer)) { score = 100; reason = 'zapisane ID oferty'; }
     else if (mappedOfferId && String(offer?.id) === String(mappedOfferId) && credible(offer)) { score = 98; reason = 'mapowanie produktu'; }

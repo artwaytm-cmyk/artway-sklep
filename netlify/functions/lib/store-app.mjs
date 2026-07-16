@@ -63,6 +63,7 @@ import { createCatalogProductUpdater as allegroAktualizatorProduktowCentralnych 
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
 import { createInventoryStockRoute } from './inventory-route.mjs';
 import { createProductLinkImportBundle } from './product-link-import-route.mjs';
+import { createAllegroOfferWithdrawalRoute } from './allegro-offer-withdrawal-route.mjs';
 import {
   telegramConfig as telegramKonfiguracja,
   telegramHtml,
@@ -112,6 +113,7 @@ const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
 const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, decisions: inventoryDecisions });
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
+const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
 const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
 
 // Klucze wspólne (konfiguracja + katalog + ceny + stany + opinie + kosz) — zapisywane przez administratora,
@@ -1786,6 +1788,10 @@ function allegroAgentWirtualnyProduktOferty(line = {}, offer = {}) {
 function allegroAgentProduktDlaPozycji(line = {}, offer = {}, mappings = {}, products = new Map()) {
   const offerId = String(line.offerId || '').trim();
   const mapped = mappings[offerId];
+  if (mapped?.blocked === true && mapped?.withdrawnAt && mapped?.previousProductId && products.has(String(mapped.previousProductId))) {
+    const archivedId = String(mapped.previousProductId), product = products.get(archivedId);
+    return { id: archivedId, product, match: 'historyczne mapowanie wycofanej oferty', confidence: Number(mapped.confidence || 100), supplierMatchVerified: true, matchEvidence: ['oferta wycofana po sprzedaży', 'zachowane mapowanie zamówienia'] };
+  }
   if (mapped?.blocked === true) return allegroAgentWirtualnyProduktOferty(line, offer);
   const mappedId = String(mapped?.productId ?? mapped?.produktId ?? mapped?.id ?? mapped ?? '').trim();
   if (mappedId && products.has(mappedId)) {
@@ -4892,6 +4898,8 @@ export default async (req) => {
     if (inventoryDecisionResponse) return inventoryDecisionResponse;
     const inventoryResponse = await inventoryStockRoute(req, url, action);
     if (inventoryResponse) return inventoryResponse;
+    const withdrawalResponse = await allegroOfferWithdrawalRoute({ req, url, action });
+    if (withdrawalResponse) return withdrawalResponse;
     if (action === 'catalog-quality-audit') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -6125,54 +6133,6 @@ export default async (req) => {
         }
       }
       return odpowiedz({ ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion }, existing ? 200 : 201);
-    }
-
-    // ─── ALLEGRO: kontrolowane rozstrzygnięcie duplikatów ofert ───
-    if (action === 'allegro-resolve-duplicate') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const productId = tekst(body.productId, 100).trim();
-      const keepOfferId = tekst(body.keepOfferId, 100).trim();
-      const withdrawOfferIds = [...new Set((Array.isArray(body.withdrawOfferIds) ? body.withdrawOfferIds : []).map((x) => tekst(x, 100).trim()).filter((x) => x && x !== keepOfferId))].slice(0, 50);
-      if (!productId || !keepOfferId || !withdrawOfferIds.length) return odpowiedz({ ok: false, error: 'Wskaż produkt, jedną ofertę pozostawianą i co najmniej jedną ofertę do wycofania', code: 'validation' }, 422);
-      const [offersRec, mappingsRec, settingsRec, auditRec] = await Promise.all([
-        czytaj('allegro_offers', { items: [], updated_at: null }),
-        czytaj('allegro_mappings', { items: {}, updated_at: null }),
-        czytaj('settings', { data: {}, rev: 0, updated_at: null }),
-        czytaj('allegro_duplicate_resolution_audit', { items: [], updated_at: null }),
-      ]);
-      const offers = allegroOfertyItems(offersRec), byId = new Map(offers.map((x) => [String(x?.id || ''), x]));
-      if (!byId.has(keepOfferId)) return odpowiedz({ ok: false, error: 'Nie znaleziono oferty wybranej do pozostawienia', code: 'keep_not_found' }, 404);
-      const missing = withdrawOfferIds.filter((id) => !byId.has(id));
-      if (missing.length) return odpowiedz({ ok: false, error: `Nie znaleziono ofert: ${missing.join(', ')}`, code: 'withdraw_not_found' }, 404);
-      const settled = await Promise.allSettled(withdrawOfferIds.map(async (offerId) => {
-        const offer = byId.get(offerId) || {};
-        if (String(offer.status || offer.publication?.status || '').toUpperCase() === 'ENDED') return { offerId, ended: true, alreadyEnded: true };
-        await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: { publication: { status: 'ENDED', republish: false } } });
-        return { offerId, ended: true, alreadyEnded: false };
-      }));
-      const results = settled.map((result, index) => result.status === 'fulfilled' ? result.value : { offerId: withdrawOfferIds[index], ended: false, error: tekst(result.reason?.message || result.reason, 700), code: tekst(result.reason?.code || '', 120), status: result.reason?.status || 500 });
-      const failed = results.filter((x) => !x.ended);
-      if (failed.length) return odpowiedz({ ok: false, error: `Nie udało się wycofać ${failed.length} ofert. Powiązania nie zostały zmienione.`, code: 'partial_withdrawal', results }, 422);
-      const now = new Date().toISOString(), mappings = allegroMapowaniaItems(mappingsRec);
-      const keepOffer = byId.get(keepOfferId) || {};
-      mappings[keepOfferId] = { ...(mappings[keepOfferId] || {}), offerId: keepOfferId, productId, allegroProductId: tekst(keepOffer.productId, 120), categoryId: tekst(keepOffer.categoryId, 80), productName: tekst(keepOffer.name, 300), linked_at: mappings[keepOfferId]?.linked_at || now, synced_at: now, operator: 'admin-duplicate-keep', duplicateResolvedAt: now };
-      for (const offerId of withdrawOfferIds) mappings[offerId] = { ...(mappings[offerId] || {}), offerId, productId: '', blocked: true, duplicateOf: keepOfferId, operator: 'admin-duplicate-withdrawn', synced_at: now, duplicateResolvedAt: now };
-      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-      const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
-      edits[productId] = { ...(edits[productId] || {}), allegroOfferId: keepOfferId, allegroProductId: tekst(keepOffer.productId || edits[productId]?.allegroProductId, 120), allegroCategoryId: tekst(keepOffer.categoryId || edits[productId]?.allegroCategoryId, 80), allegroDuplicateResolvedAt: now };
-      data.artway_produkty_edytowane = edits;
-      const updatedOffers = offers.map((offer) => withdrawOfferIds.includes(String(offer.id)) ? { ...offer, status: 'ENDED', publication: { ...(offer.publication || {}), status: 'ENDED', republish: false }, duplicateOf: keepOfferId, duplicateResolvedAt: now } : offer);
-      const audit = Array.isArray(auditRec.items) ? [...auditRec.items] : [];
-      audit.unshift({ id: crypto.randomUUID(), productId, keepOfferId, withdrawOfferIds, results, at: now, operator: 'administrator' });
-      await Promise.all([
-        zapisz('allegro_mappings', { items: mappings, updated_at: now }),
-        zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now }),
-        zapisz('allegro_offers', { ...offersRec, items: updatedOffers, updated_at: now }),
-        zapisz('allegro_duplicate_resolution_audit', { items: audit.slice(0, 2000), updated_at: now }),
-      ]);
-      return odpowiedz({ ok: true, productId, keepOfferId, withdrawOfferIds, results, mappings, offers: updatedOffers, updated_at: now });
     }
 
     // ─── ALLEGRO: kalkulator prowizji i opłat dla konkretnej oferty / produktu ───

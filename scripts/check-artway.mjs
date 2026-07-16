@@ -12,6 +12,7 @@ const files = [
   'products.json',
   'netlify/functions/store.mjs',
   'netlify/functions/lib/store-app.mjs',
+  'netlify/functions/lib/allegro-offer-withdrawal-route.mjs',
   'netlify/functions/lib/core/http.mjs',
   'netlify/functions/lib/core/store-repository.mjs',
   'netlify/functions/lib/domain/orders.mjs',
@@ -66,6 +67,7 @@ const appAdmin = read('assets/admin.js');
 const app = `${appPublic}\n${appAdmin}`;
 const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
+const allegroOfferWithdrawal = read('netlify/functions/lib/allegro-offer-withdrawal-route.mjs');
 const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
 const infaktPurchase = read('netlify/functions/lib/infakt-purchase.mjs');
 const telegramCommunication = read('netlify/functions/lib/domain/telegram-communication.mjs');
@@ -421,7 +423,6 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "action === 'allegro-description-improve'",
   "action === 'allegro-create-product-offer'",
   "action === 'allegro-offer-price-change'",
-  "action === 'allegro-resolve-duplicate'",
   "action === 'allegro-fee-preview'",
   'function allegroPodsumujKalkulacjeOplat',
   "'/pricing/offer-fee-preview'",
@@ -506,7 +507,6 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "action === 'allegro-communication-resolve'",
   'function allegroZastosujStatusyWewnetrzne',
   'allegro_communication_internal_history',
-  'allegro_duplicate_resolution_audit',
   'allegro_orders_baseline_v2',
   'function allegroWyslijPrzypomnieniaTelegram',
   'humanReplyNeeded',
@@ -538,6 +538,15 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'feesUpdated',
   'autoUpdateOffers',
   'autoFees',
+]);
+
+requireMarkers('netlify/functions/lib/allegro-offer-withdrawal-route.mjs', allegroOfferWithdrawal, [
+  "'allegro-resolve-duplicate'",
+  "'allegro-withdraw-offers'",
+  'allegro_duplicate_resolution_audit',
+  'allegro_offer_withdrawal_audit',
+  "status: 'ENDED'",
+  'republish: false',
 ]);
 
 requireMarkers('netlify/functions/lib/infakt-purchase.mjs', infaktPurchase, [
@@ -637,7 +646,7 @@ const internalResolveFlow = store.slice(store.indexOf("action === 'allegro-commu
 if (!internalResolveFlow.includes('sentExternally: false') || /allegroWywolaj|wyslijTelegramHtml|wyslijEmailSMTP/.test(internalResolveFlow)) {
   fail('store-app.mjs: wewnętrzne zamknięcie komunikacji nie może wysyłać wiadomości ani wywoływać API Allegro');
 }
-const duplicateResolutionFlow = store.slice(store.indexOf("action === 'allegro-resolve-duplicate'"), store.indexOf("action === 'allegro-offer-price-change'"));
+const duplicateResolutionFlow = allegroOfferWithdrawal;
 if (!duplicateResolutionFlow.includes("status: 'ENDED'") || !duplicateResolutionFlow.includes('keepOfferId') || !duplicateResolutionFlow.includes('withdrawOfferIds')) {
   fail('store-app.mjs: centrum duplikatów musi wymagać wyboru oferty pozostawianej i kontrolowanie kończyć wycofywane oferty');
 }

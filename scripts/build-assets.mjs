@@ -29,6 +29,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/10-agent-ai.js',
       'src/frontend/11-allegro-procurement-actions.js',
       'src/frontend/11-allegro-refresh-runtime.js',
+      'src/frontend/11-allegro-offer-management.js',
       'src/frontend/11-allegro-and-orders.js',
       'src/frontend/11-allegro-settings.js',
       'src/frontend/12-customers-and-inventory.js',

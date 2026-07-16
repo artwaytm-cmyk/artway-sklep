@@ -53,6 +53,16 @@ test('zapisane mapowanie ma pierwszeństwo wyłącznie przy wiarygodnej ofercie'
   assert.equal(match.offer.id, 'OF-2');
 });
 
+test('zakończona oferta i zablokowane mapowanie nie wracają do automatycznej aktualizacji', () => {
+  const product = { id: 1000287, nazwa: 'Puzzle magnetyczne Farma', ean: '5906018026788' };
+  const offers = [
+    { id: 'OF-OLD', name: 'Puzzle magnetyczne Farma', gtin: '5906018026788', status: 'ENDED' },
+    { id: 'OF-NEW', name: 'Puzzle magnetyczne Farma', gtin: '5906018026788', status: 'ACTIVE' },
+  ];
+  const match = findBestAllegroOffer(product, offers, { 'OF-OLD': { offerId: 'OF-OLD', productId: '1000287', blocked: true } });
+  assert.equal(match.offer.id, 'OF-NEW');
+});
+
 test('niższy próg od 55% udostępnia słabszą sugestię bez silnego konfliktu', () => {
   const product = { id: 1000300, nazwa: 'Układanka edukacyjna zwierzęta leśne', producent: 'Alexander' };
   const offers = [{ id: 'OF-55', name: 'Układanka edukacyjna zwierzęta', brand: 'Alexander' }];
