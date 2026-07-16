@@ -27,7 +27,9 @@ test('ciężkie podstrony magazynu są budowane wyłącznie dla aktywnej karty',
   const inventory = await readFile('src/frontend/12-customers-and-inventory.js', 'utf8');
   assert.match(inventory, /if\(aktywna==="plan"\)return adminSzkielet/);
   for (const section of ['dostawcy', 'pulpit', 'lokalizacje', 'stany', 'ruchy']) {
-    assert.ok(inventory.includes(`\${aktywna==="${section}"?\``), `sekcja ${section} musi być generowana warunkowo`);
+    const inline = inventory.includes(`\${aktywna==="${section}"?\``);
+    const delegated = section === 'lokalizacje' && inventory.includes('${aktywna==="lokalizacje"?magazynLokalizacjePanelHTML(');
+    assert.ok(inline || delegated, `sekcja ${section} musi być generowana warunkowo`);
   }
   assert.ok(!inventory.includes('style="${aktywna==="stany"?"":"display:none"}"'), 'lista stanów nie może powstawać jako niewidoczny DOM');
 });

@@ -890,61 +890,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
       </button>`).join(""):`<div class="warehouse-work-empty">✅ Brak pilnych prac magazynowych wynikających z aktywnych zamówień.</div>`}
     </div>
   </div>`:""}
-  ${aktywna==="lokalizacje"?`<div class="panel warehouse-location-panel">
-    <div class="order-section-head">
-      <div>
-        <span class="order-pro-label">Struktura fizyczna</span><h2 style="margin-top:.25rem">🗺️ Strefy, regały, półki i miejsca</h2>
-        <p class="order-detail-lead">Hierarchia prowadzi od strefy przez regał i półkę do konkretnego miejsca. Generator tworzy całe ciągi kodów bez ręcznego wpisywania każdej półki.</p>
-      </div>
-      <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż lokalizacje');location.hash='#/admin/agent-ai'">Zapytaj agenta</button>
-    </div>
-    <div class="warehouse-location-overview"><span><b>${lokalizacje.filter(l=>l.typ==="strefa").length}</b><small>stref</small></span><span><b>${lokalizacje.filter(l=>l.typ==="regał").length}</b><small>regałów</small></span><span><b>${lokalizacje.filter(l=>l.typ==="półka").length}</b><small>półek</small></span><span><b>${lokalizacje.filter(l=>l.typ==="miejsce").length}</b><small>miejsc</small></span><span><b>${statLok.BRAK?.produkty||0}</b><small>produktów bez miejsca</small></span></div>
-    <form class="warehouse-generator" onsubmit="return generujRegalyIPolkiMagazynu(event)">
-      <div class="order-section-head"><div><h3 style="margin:0">✨ Generator struktury</h3><p class="order-detail-lead">Przykład: strefa A, 3 regały, 5 półek i 4 miejsca utworzą kody A-R01-P01-M01 itd.</p></div><button class="btn" type="submit">✨ Utwórz całą strukturę</button></div>
-      <div class="warehouse-generator-grid"><label>Strefa <input name="strefaKod" value="A" maxlength="10" required></label><label>Nazwa strefy <input name="strefaNazwa" value="Strefa A"></label><label>Prefiks regału <input name="prefix" value="R" maxlength="8" required></label><label>Start regału <input name="startRegal" type="number" min="1" value="1"></label><label>Liczba regałów <input name="regaly" type="number" min="1" max="50" value="3"></label><label>Półki / regał <input name="polki" type="number" min="1" max="30" value="5"></label><label>Start półki <input name="startPolka" type="number" min="1" value="1"></label><label>Miejsca / półkę <input name="miejsca" type="number" min="0" max="30" value="0"><small>0 = produkt przypisujesz bezpośrednio do półki</small></label><label>Pojemność miejsca <input name="pojemnosc" type="number" min="0" placeholder="opcjonalnie"></label></div>
-    </form>
-    <div class="warehouse-location-layout">
-      <form id="warehouseLocationForm" class="warehouse-location-form" onsubmit="return zapiszLokalizacjeMagazynu(event)">
-        <h3 style="margin-top:0">✏️ Pojedyncza lokalizacja</h3><p class="order-detail-lead">Do nietypowego miejsca, palety, stanowiska albo ręcznej korekty struktury.</p>
-        <div class="warehouse-location-form-grid">
-          <div class="f-group"><label>Kod *</label><input name="kod" placeholder="np. A-R01-P02" required></div>
-          <div class="f-group"><label>Nazwa</label><input name="nazwa" placeholder="Półka 2 / gry rodzinne"></div>
-          <div class="f-group"><label>Typ</label><select name="typ"><option>miejsce</option><option>półka</option><option>regał</option><option>strefa</option><option>paleta</option><option>box</option><option>stanowisko pakowania</option><option>zewnętrzna</option></select></div>
-          <div class="f-group"><label>Lokalizacja nadrzędna</label><select name="parentKod"><option value="">— poziom główny —</option>${lokalizacje.map(l=>`<option value="${esc(l.kod)}">${"· ".repeat(poziomLokalizacjiMagazynu(l.kod))}${esc(l.kod)} — ${esc(l.nazwa||l.typ)}</option>`).join("")}</select></div>
-          <div class="f-group"><label>Strefa</label><input name="strefa" placeholder="np. A / szybka kompletacja"></div>
-          <div class="f-group"><label>Kod kreskowy lokalizacji</label><input name="kodKreskowy" placeholder="zeskanuj lub wpisz"></div>
-          <div class="f-group"><label>Pojemność szt.</label><input name="pojemnosc" inputmode="numeric" placeholder="opcjonalnie"></div>
-          <div class="f-group"><label>Priorytet kompletacji</label><input name="priorytet" inputmode="numeric" placeholder="np. 10"></div>
-          <div class="f-group"><label>Szerokość (cm)</label><input name="szerokosc" type="number" min="0"></div><div class="f-group"><label>Głębokość (cm)</label><input name="glebokosc" type="number" min="0"></div><div class="f-group"><label>Wysokość (cm)</label><input name="wysokosc" type="number" min="0"></div><div class="f-group"><label>Maks. waga (kg)</label><input name="maxWaga" inputmode="decimal"></div>
-        </div>
-        <div class="f-group"><label>Uwagi</label><input name="uwagi" placeholder="np. produkty najczęściej kupowane, ciężkie gry, zapas sezonowy"></div>
-        <div class="diag-actions"><button class="btn" type="submit">💾 Zapisz lokalizację</button><button class="btn ghost" type="reset">Wyczyść formularz</button></div>
-      </form>
-      <div class="warehouse-location-list hierarchy-list">
-        ${lokalizacje.map(l=>{
-          const s=statLok[l.kod]||{produkty:0,sztuki:0,rezerwacje:0,wartosc:0};
-          const zapelnienie=l.pojemnosc?Math.min(100,Math.round((s.sztuki/Math.max(1,l.pojemnosc))*100)):null;
-          const level=poziomLokalizacjiMagazynu(l.kod),children=lokalizacje.filter(x=>x.parentKod===l.kod).length;
-          return `<div class="warehouse-location-card hierarchy-level-${Math.min(3,level)}" style="--level:${level}">
-            <div class="warehouse-location-head"><div><small>${esc(sciezkaLokalizacjiMagazynu(l.kod))}</small><b>${esc(l.kod)}</b></div><span class="lvl lvl-info">${esc(l.typ||"lokalizacja")}</span></div>
-            <p>${esc(l.nazwa||"Bez nazwy")}${l.strefa?` • strefa: ${esc(l.strefa)}`:""}${children?` • elementów niżej: ${children}`:""}</p>
-            <div class="warehouse-location-metrics">
-              <span><b>${s.produkty}</b><small>produktów</small></span>
-              <span><b>${s.sztuki}</b><small>sztuk</small></span>
-              <span><b>${s.rezerwacje}</b><small>rezerw.</small></span>
-              <span><b>${zl(s.wartosc)}</b><small>wartość</small></span>
-            </div>
-            ${zapelnienie!==null?`<div class="warehouse-fill"><span style="width:${zapelnienie}%"></span></div><small>Zapełnienie wg stanu: ${zapelnienie}% / ${esc(l.pojemnosc)} szt.</small>`:""}
-            ${(l.szerokosc||l.glebokosc||l.wysokosc||l.maxWaga)?`<small>Wymiary: ${esc(l.szerokosc||"—")} × ${esc(l.glebokosc||"—")} × ${esc(l.wysokosc||"—")} cm • maks. ${esc(l.maxWaga||"—")} kg</small>`:""}${l.kodKreskowy?`<small>Kod kreskowy: <b>${esc(l.kodKreskowy)}</b></small>`:""}
-            ${l.uwagi?`<small>${esc(l.uwagi)}</small>`:""}
-            <div class="diag-actions"><button class="btn" type="button" onclick="magazynQROtworzLokalizacje(${jsArg(l.kod)})">🏷️ QR</button><button class="btn ghost" type="button" onclick="edytujLokalizacjeMagazynu(${jsArg(l.kod)})">Edytuj</button><button class="btn danger" type="button" onclick="usunLokalizacjeMagazynu(${jsArg(l.kod)})">Ukryj</button></div>
-          </div>`;
-        }).join("") || `<div class="warehouse-location-card"><b>Brak lokalizacji</b><p>Dodaj pierwszą lokalizację, np. R1-P1, żeby produkty można było przypisywać z listy.</p></div>`}
-      </div>
-    </div>
-    ${statLok.BRAK?.produkty?`<div class="pay-note" style="text-align:left;margin-top:.8rem">Bez lokalizacji: <b>${statLok.BRAK.produkty}</b> produktów. Użyj filtra „Bez lokalizacji”, żeby szybko uzupełnić kartotekę.</div>`:""}
-    ${pozaSlownikiem.length?`<div class="pay-note" style="text-align:left;margin-top:.6rem">Lokalizacje wpisane przy produktach, ale nieutworzone w słowniku: <b>${pozaSlownikiem.map(esc).join(", ")}</b>.</div>`:""}
-  </div>`:""}
+  ${aktywna==="lokalizacje"?magazynLokalizacjePanelHTML(lokalizacje,statLok,pozaSlownikiem):""}
   ${aktywna==="plan"?`<div id="warehouseRestockWorkspace" class="warehouse-restock-workspace">${magazynPlanZatowarowaniaHTML()}</div>`:""}
   ${aktywna==="stany"?`<div class="panel warehouse-stock-page">
     <div class="order-section-head warehouse-stock-head">

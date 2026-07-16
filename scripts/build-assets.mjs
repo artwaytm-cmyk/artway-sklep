@@ -32,6 +32,7 @@ export const ASSET_BUNDLES = Object.freeze([
     sources: [
       'src/frontend/08-admin-navigation.js',
       'src/frontend/10-agent-ai.js',
+      'src/frontend/10-warehouse-locations.js',
       'src/frontend/10-warehouse-qr.js',
       'src/frontend/10-warehouse-documents.js',
       'src/frontend/11-allegro-procurement-actions.js',
@@ -83,6 +84,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/17-product-link-review.css',
       'src/styles/18-warehouse-documents.css',
       'src/styles/19-warehouse-qr.css',
+      'src/styles/20-warehouse-locations.css',
     ],
   },
 ]);

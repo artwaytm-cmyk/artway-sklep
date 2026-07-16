@@ -7,6 +7,7 @@ import { ASSET_BUNDLES, VENDOR_ASSETS } from '../scripts/build-assets.mjs';
 const source = await readFile(new URL('../src/frontend/10-warehouse-qr.js', import.meta.url), 'utf8');
 const documents = await readFile(new URL('../src/frontend/10-warehouse-documents.js', import.meta.url), 'utf8');
 const inventory = await readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8');
+const locations = await readFile(new URL('../src/frontend/10-warehouse-locations.js', import.meta.url), 'utf8');
 
 function parse(value) {
   const sandbox = {
@@ -34,7 +35,7 @@ test('QR ma wersjonowany format i rozróżnia lokalizację, produkt oraz zwykły
 
 test('Plan ma generator etykiet, workflow lokalizacja-produkt i przycisk QR przy lokalizacji', () => {
   assert.match(inventory, /magazynQRCentrumHTML\(\)/);
-  assert.match(inventory, /magazynQROtworzLokalizacje/);
+  assert.match(locations, /magazynQROtworzLokalizacje/);
   assert.match(source, /Generator etykiet QR/);
   assert.match(source, /ATW:1:L:/);
   assert.match(source, /ATW:1:P:/);

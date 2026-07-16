@@ -319,6 +319,17 @@ function sciezkaLokalizacjiMagazynu(kod){
   return parts.join(" / ")||String(kod||"");
 }
 function poziomLokalizacjiMagazynu(kod){return Math.max(0,sciezkaLokalizacjiMagazynu(kod).split(" / ").filter(Boolean).length-1);}
+function sciezkaNazwLokalizacjiMagazynu(kod){
+  const parts=[],seen=new Set();let current=magazynLokalizacjaPoKodzie(kod),guard=0;
+  while(current&&guard++<10&&!seen.has(current.kod)){seen.add(current.kod);parts.unshift(String(current.nazwa||current.kod));current=current.parentKod?magazynLokalizacjaPoKodzie(current.parentKod):null;}
+  return parts.join(" → ")||String(kod||"");
+}
+function czyLokalizacjaBezLimitu(location){return !location||location.bezLimitu===true||!(Number(location.pojemnosc)>0);}
+function magazynLiteraRegalu(index=1){let n=Math.max(1,Math.trunc(Number(index)||1)),out="";while(n>0){n--;out=String.fromCharCode(65+n%26)+out;n=Math.floor(n/26);}return out;}
+function magazynIndeksRegalu(value="A"){
+  const text=String(value||"A").trim().toUpperCase();if(/^\d+$/.test(text))return Math.max(1,Number(text)||1);
+  return Math.max(1,[...text.replace(/[^A-Z]/g,"")].reduce((sum,char)=>sum*26+char.charCodeAt(0)-64,0)||1);
+}
 function zapiszLokalizacjeMagazynuWspolnie(opis="Zapisano lokalizacje"){
   zapiszLS("artway_magazyn_lokalizacje",magazynLokalizacje);
   zapiszHistorieAgenta("lokalizacja",opis,{liczba:magazynLokalizacjeAktywne().length});
@@ -352,7 +363,8 @@ function zapiszLokalizacjeMagazynu(e){
   const f=new FormData(e.target);
   const kod=kodLokalizacjiMagazynu(f.get("kod"));
   if(!kod){ toast("Podaj kod lokalizacji, np. R1-P2"); return false; }
-  const teraz=new Date().toISOString(), istnieje=magazynLokalizacjaPoKodzie(kod);
+  const originalKod=kodLokalizacjiMagazynu(f.get("originalKod")),teraz=new Date().toISOString(), istnieje=magazynLokalizacjaPoKodzie(originalKod||kod),limit=Number(String(f.get("pojemnosc")||"0").replace(",","."))||0,bezLimitu=f.get("bezLimitu")==="on"||limit<=0;
+  if(originalKod&&originalKod!==kod){toast("Kod zapisanej lokalizacji jest stały. Utwórz nowe miejsce, aby użyć innego kodu.");return false;}
   const rec={
     id:istnieje?.id||("LOC-"+Date.now().toString(36)),
     kod,
@@ -365,7 +377,8 @@ function zapiszLokalizacjeMagazynu(e){
     glebokosc:intNieujemny(f.get("glebokosc"),0),
     wysokosc:intNieujemny(f.get("wysokosc"),0),
     maxWaga:Math.max(0,Number(String(f.get("maxWaga")||"0").replace(",","."))||0),
-    pojemnosc:intNieujemny(f.get("pojemnosc"),0),
+    pojemnosc:bezLimitu?0:Math.max(1,Math.trunc(limit)),
+    bezLimitu,
     priorytet:intNieujemny(f.get("priorytet"),999),
     uwagi:String(f.get("uwagi")||"").trim(),
     aktywna:true,
@@ -375,11 +388,12 @@ function zapiszLokalizacjeMagazynu(e){
   };
   const bez=(Array.isArray(magazynLokalizacje)?magazynLokalizacje:[]).filter(l=>kodLokalizacjiMagazynu(l.kod)!==kod);
   if(rec.parentKod===kod){toast("Lokalizacja nie może być swoim rodzicem");return false;}
+  if(rec.parentKod&&!magazynLokalizacjaPoKodzie(rec.parentKod)){toast("Najpierw utwórz wskazaną lokalizację nadrzędną");return false;}
   if(rec.parentKod&&sciezkaLokalizacjiMagazynu(rec.parentKod).split(" / ").includes(kod)){toast("Nie można utworzyć pętli w hierarchii lokalizacji");return false;}
   magazynLokalizacje=[rec,...bez].slice(0,5000);
   zapiszLokalizacjeMagazynuWspolnie(`${istnieje?"Zaktualizowano":"Utworzono"} lokalizację magazynową ${kod}`);
   toast(`${istnieje?"Zaktualizowano":"Utworzono"} lokalizację ${kod} ✅`);
-  e.target.reset();
+  if(typeof nowaLokalizacjaMagazynu==="function")nowaLokalizacjaMagazynu();else e.target.reset();
   renderuj();
   return false;
 }
@@ -389,6 +403,10 @@ function edytujLokalizacjeMagazynu(kod){
   const form=$("warehouseLocationForm");
   if(!form) return;
   ["kod","nazwa","typ","strefa","parentKod","kodKreskowy","szerokosc","glebokosc","wysokosc","maxWaga","pojemnosc","priorytet","uwagi"].forEach(k=>{ if(form.elements[k]) form.elements[k].value=l[k]??""; });
+  if(form.elements.originalKod)form.elements.originalKod.value=l.kod;
+  if(form.elements.kod)form.elements.kod.readOnly=true;
+  if(form.elements.bezLimitu){form.elements.bezLimitu.checked=czyLokalizacjaBezLimitu(l);if(form.elements.pojemnosc)form.elements.pojemnosc.disabled=form.elements.bezLimitu.checked;}
+  form.querySelector("[data-location-form-title]")?.replaceChildren(document.createTextNode(`✏️ Edycja: ${sciezkaNazwLokalizacjiMagazynu(l.kod)}`));
   form.scrollIntoView({behavior:"smooth",block:"center"});
   form.elements.kod?.focus();
 }
@@ -402,18 +420,21 @@ function usunLokalizacjeMagazynu(kod){
   renderuj();
 }
 function generujRegalyIPolkiMagazynu(e){
-  e.preventDefault();const f=new FormData(e.target),zone=kodLokalizacjiMagazynu(f.get("strefaKod")||"A"),prefix=kodLokalizacjiMagazynu(f.get("prefix")||"R"),rackCount=Math.max(1,Math.min(50,intNieujemny(f.get("regaly"),1))),shelfCount=Math.max(1,Math.min(30,intNieujemny(f.get("polki"),5))),placeCount=Math.max(0,Math.min(30,intNieujemny(f.get("miejsca"),0))),startRack=Math.max(1,intNieujemny(f.get("startRegal"),1)),startShelf=Math.max(1,intNieujemny(f.get("startPolka"),1)),capacity=Math.max(0,intNieujemny(f.get("pojemnosc"),0)),now=new Date().toISOString();
-  if(!zone||!prefix){toast("Podaj kod strefy i prefiks regału");return false;}
-  const existing=new Map((Array.isArray(magazynLokalizacje)?magazynLokalizacje:[]).map(l=>[kodLokalizacjiMagazynu(l.kod),l])),created=[];
-  const put=(rec)=>{const old=existing.get(rec.kod);if(old&&old.aktywna!==false)return;const next={...old,id:old?.id||`LOC-${Date.now().toString(36)}-${created.length}`,aktywna:true,utworzono:old?.utworzono||now,aktualizacja:now,operator:sesja?.email||"administrator",...rec};existing.set(rec.kod,next);created.push(next);};
-  put({kod:zone,nazwa:String(f.get("strefaNazwa")||`Strefa ${zone}`).trim(),typ:"strefa",parentKod:"",strefa:zone,priorytet:1,pojemnosc:0,uwagi:"Wygenerowana struktura magazynu"});
+  // Kanoniczna hierarchia fizyczna: strefa → regał → półka → miejsce.
+  e.preventDefault();const f=new FormData(e.target),zone=kodLokalizacjiMagazynu(f.get("strefaKod")||"PAK"),zoneName=String(f.get("strefaNazwa")||"Pakownia").trim()||"Pakownia",rackMode=String(f.get("trybRegalow")||"litery"),rackCount=Math.max(1,Math.min(100,intNieujemny(f.get("regaly"),1))),shelfCount=Math.max(1,Math.min(200,intNieujemny(f.get("polki"),5))),placeCount=Math.max(0,Math.min(500,intNieujemny(f.get("miejsca"),0))),startRack=magazynIndeksRegalu(f.get("startRegal")||"A"),startShelf=Math.max(1,intNieujemny(f.get("startPolka"),1)),startPlace=Math.max(1,intNieujemny(f.get("startMiejsce"),1)),limit=Number(String(f.get("pojemnosc")||"0").replace(",","."))||0,unlimited=f.get("bezLimitu")==="on"||limit<=0,capacity=unlimited?0:Math.max(1,Math.trunc(limit)),now=new Date().toISOString();
+  if(!zone){toast("Podaj kod obszaru, np. PAK");return false;}
+  const requested=1+rackCount+rackCount*shelfCount+rackCount*shelfCount*placeCount;if(requested>5000){toast(`Wybrana struktura ma ${requested} elementów. Podziel tworzenie na mniejsze obszary (maks. 5000 elementów jednorazowo).`);return false;}
+  const existing=new Map((Array.isArray(magazynLokalizacje)?magazynLokalizacje:[]).map(l=>[kodLokalizacjiMagazynu(l.kod),l])),created=[];let overflow=false;
+  const put=(rec)=>{const old=existing.get(rec.kod);if(old&&old.aktywna!==false)return;if(!old&&existing.size>=5000){overflow=true;return;}const next={...old,id:old?.id||`LOC-${Date.now().toString(36)}-${created.length}`,aktywna:true,utworzono:old?.utworzono||now,aktualizacja:now,operator:sesja?.email||"administrator",...rec};existing.set(rec.kod,next);created.push(next);};
+  put({kod:zone,nazwa:zoneName,typ:"strefa",parentKod:"",strefa:zone,priorytet:1,pojemnosc:0,bezLimitu:true,uwagi:"Obszar wygenerowany w kreatorze struktury"});
   for(let r=0;r<rackCount;r++){
-    const rackNo=String(startRack+r).padStart(2,"0"),rack=`${zone}-${prefix}${rackNo}`;put({kod:rack,nazwa:`Regał ${rackNo}`,typ:"regał",parentKod:zone,strefa:zone,priorytet:10+r,pojemnosc:0,uwagi:""});
+    const rackLabel=rackMode==="numery"?String(startRack+r):magazynLiteraRegalu(startRack+r),rack=`${zone}-R${rackLabel}`;put({kod:rack,nazwa:`Regał ${rackLabel}`,typ:"regał",parentKod:zone,strefa:zone,priorytet:10+r,pojemnosc:0,bezLimitu:true,uwagi:""});
     for(let s=0;s<shelfCount;s++){
-      const shelfNo=String(startShelf+s).padStart(2,"0"),shelf=`${rack}-P${shelfNo}`;put({kod:shelf,nazwa:`Półka ${shelfNo}`,typ:"półka",parentKod:rack,strefa:zone,priorytet:100+r*100+s,pojemnosc:placeCount?0:capacity,uwagi:""});
-      for(let m=1;m<=placeCount;m++){const place=`${shelf}-M${String(m).padStart(2,"0")}`;put({kod:place,nazwa:`Miejsce ${String(m).padStart(2,"0")}`,typ:"miejsce",parentKod:shelf,strefa:zone,priorytet:10000+r*1000+s*100+m,pojemnosc:capacity,uwagi:""});}
+      const shelfNo=startShelf+s,shelf=`${rack}-P${String(shelfNo).padStart(2,"0")}`;put({kod:shelf,nazwa:`Półka ${shelfNo}`,typ:"półka",parentKod:rack,strefa:zone,priorytet:100+r*100+s,pojemnosc:placeCount?0:capacity,bezLimitu:placeCount?true:unlimited,uwagi:""});
+      for(let m=0;m<placeCount;m++){const placeNo=startPlace+m,place=`${shelf}-M${String(placeNo).padStart(3,"0")}`;put({kod:place,nazwa:`Miejsce ${placeNo}`,typ:"miejsce",parentKod:shelf,strefa:zone,priorytet:10000+r*100000+s*1000+m,pojemnosc:capacity,bezLimitu:unlimited,uwagi:""});}
     }
   }
+  if(overflow){toast("Struktura przekracza limit 5000 aktywnych elementów. Zmniejsz liczbę regałów, półek albo miejsc.");return false;}
   magazynLokalizacje=[...existing.values()].slice(0,5000);zapiszLokalizacjeMagazynuWspolnie(`Generator utworzył ${created.length} elementów struktury magazynu`);toast(created.length?`✅ Utworzono ${created.length} nowych elementów: strefę, regały, półki${placeCount?" i miejsca":""}`:"Wszystkie wskazane lokalizacje już istnieją");renderuj();return false;
 }
 function ustawLokalizacjeProduktu(id,kod){

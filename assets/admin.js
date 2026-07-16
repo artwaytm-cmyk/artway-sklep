@@ -1806,6 +1806,93 @@ function widokAdminAgentAI(sekcja="pulpit"){
 }
 let filtrZamowien = "wszystkie", szukajZamowien = "";
 
+/* Profesjonalna struktura lokalizacji: obszar → regał → półka → opcjonalne miejsce. */
+let magazynLokalizacjeFraza="",magazynLokalizacjeTyp="wszystkie",magazynLokalizacjeStrona=1;
+const MAGAZYN_LOKALIZACJE_NA_STRONIE=100;
+
+function magazynIkonaTypuLokalizacji(typ=""){
+  return ({strefa:"🏭",regał:"🗄️",półka:"📚",miejsce:"📍",paleta:"🟫",box:"📦","stanowisko pakowania":"🧰",zewnętrzna:"🚚"})[typ]||"📍";
+}
+function magazynTypDzieckaLokalizacji(location){return location?.typ==="strefa"?"regał":location?.typ==="regał"?"półka":location?.typ==="półka"?"miejsce":"";}
+function magazynLokalizacjeFiltrowane(list=magazynLokalizacjeAktywne()){
+  const query=String(magazynLokalizacjeFraza||"").trim().toLowerCase();
+  return list.filter(location=>(magazynLokalizacjeTyp==="wszystkie"||location.typ===magazynLokalizacjeTyp)&&(!query||`${location.kod} ${location.nazwa||""} ${location.typ||""} ${location.strefa||""} ${sciezkaNazwLokalizacjiMagazynu(location.kod)}`.toLowerCase().includes(query)));
+}
+function magazynSzukajLokalizacje(input){magazynLokalizacjeFraza=input?.value||"";magazynLokalizacjeStrona=1;clearTimeout(window.__warehouseLocationSearch);window.__warehouseLocationSearch=setTimeout(()=>renderuj(),180);}
+function magazynFiltrujLokalizacje(value){magazynLokalizacjeTyp=String(value||"wszystkie");magazynLokalizacjeStrona=1;renderuj();}
+function magazynUstawStroneLokalizacji(page){magazynLokalizacjeStrona=Math.max(1,Number(page)||1);renderuj();}
+function magazynWyczyscFiltryLokalizacji(){magazynLokalizacjeFraza="";magazynLokalizacjeTyp="wszystkie";magazynLokalizacjeStrona=1;renderuj();}
+
+function magazynUstawLimitLokalizacji(checked,input){if(input){input.disabled=!!checked;if(checked)input.value="";}const note=input?.closest(".warehouse-capacity-control")?.querySelector("small");if(note)note.textContent=checked?"Bez limitu liczby sztuk w tej lokalizacji.":"Wpisz maksymalną liczbę sztuk dla kontroli zapełnienia.";}
+function nowaLokalizacjaMagazynu(){
+  const form=$("warehouseLocationForm");if(!form)return;form.reset();
+  if(form.elements.originalKod)form.elements.originalKod.value="";if(form.elements.kod)form.elements.kod.readOnly=false;
+  if(form.elements.bezLimitu)form.elements.bezLimitu.checked=true;if(form.elements.pojemnosc){form.elements.pojemnosc.value="";form.elements.pojemnosc.disabled=true;}
+  form.querySelector("[data-location-form-title]")?.replaceChildren(document.createTextNode("✏️ Nowa pojedyncza lokalizacja"));
+  magazynUstawLimitLokalizacji(true,form.elements.pojemnosc);
+}
+function magazynNastepnaPodlokalizacja(parent,type){
+  const children=magazynLokalizacjeAktywne().filter(item=>item.parentKod===parent&&item.typ===type),numbers=children.map(item=>Number(String(item.kod||"").match(/(\d+)$/)?.[1]||0)).filter(Boolean),next=Math.max(0,...numbers)+1;
+  if(type==="regał"){let index=1,label="A",code="";do{label=magazynLiteraRegalu(index++);code=`${parent}-R${label}`;}while(magazynLokalizacjaPoKodzie(code)&&index<1000);return {kod:code,nazwa:`Regał ${label}`};}
+  if(type==="półka")return {kod:`${parent}-P${String(next).padStart(2,"0")}`,nazwa:`Półka ${next}`};
+  return {kod:`${parent}-M${String(next).padStart(3,"0")}`,nazwa:`Miejsce ${next}`};
+}
+function przygotujPodlokalizacjeMagazynu(parentKod,type=""){
+  const parent=magazynLokalizacjaPoKodzie(parentKod),childType=type||magazynTypDzieckaLokalizacji(parent);if(!parent||!childType)return;
+  nowaLokalizacjaMagazynu();const form=$("warehouseLocationForm"),next=magazynNastepnaPodlokalizacja(parent.kod,childType);if(!form)return;
+  form.elements.parentKod.value=parent.kod;form.elements.typ.value=childType;form.elements.kod.value=next.kod;form.elements.nazwa.value=next.nazwa;form.elements.strefa.value=parent.strefa||parent.kod;
+  form.scrollIntoView({behavior:"smooth",block:"center"});form.elements.nazwa?.focus();
+}
+
+function magazynGeneratorDane(form){
+  const data=new FormData(form),zone=kodLokalizacjiMagazynu(data.get("strefaKod")||"PAK"),zoneName=String(data.get("strefaNazwa")||"Pakownia").trim()||"Pakownia",mode=String(data.get("trybRegalow")||"litery"),start=magazynIndeksRegalu(data.get("startRegal")||"A"),racks=Math.max(1,Math.min(100,intNieujemny(data.get("regaly"),1))),shelves=Math.max(1,Math.min(200,intNieujemny(data.get("polki"),5))),shelfStart=Math.max(1,intNieujemny(data.get("startPolka"),1)),places=Math.max(0,Math.min(500,intNieujemny(data.get("miejsca"),0))),placeStart=Math.max(1,intNieujemny(data.get("startMiejsce"),1)),unlimited=data.get("bezLimitu")==="on";
+  const rackLabel=mode==="numery"?String(start):magazynLiteraRegalu(start),rackCode=`${zone}-R${rackLabel}`,shelfCode=`${rackCode}-P${String(shelfStart).padStart(2,"0")}`,placeCode=`${shelfCode}-M${String(placeStart).padStart(3,"0")}`;
+  return {zone,zoneName,racks,shelves,places,unlimited,total:1+racks+racks*shelves+racks*shelves*places,path:`${zoneName} → Regał ${rackLabel} → Półka ${shelfStart}${places?` → Miejsce ${placeStart}`:""}`,codes:[zone,rackCode,shelfCode,...(places?[placeCode]:[])]};
+}
+function magazynGeneratorOdswiezPodglad(form){
+  const preview=form?.querySelector("[data-warehouse-generator-preview]");if(!preview)return;const data=magazynGeneratorDane(form);
+  preview.innerHTML=`<span class="warehouse-generator-example"><small>Przykładowa ścieżka</small><b>${esc(data.path)}</b><em>${data.codes.map(esc).join(" / ")}</em></span><span><b>${data.total}</b><small>elementów struktury</small></span><span><b>${data.racks}</b><small>regałów</small></span><span><b>${data.racks*data.shelves}</b><small>półek</small></span><span><b>${data.places?data.racks*data.shelves*data.places:"—"}</b><small>${data.places?"miejsc":"bez podziału półek"}</small></span><span class="unlimited"><b>${data.unlimited?"∞":"limit"}</b><small>${data.unlimited?"sztuk bez ograniczeń":"kontrola pojemności"}</small></span>`;
+}
+
+function magazynLokalizacjaKartaHTML(location,stats,allLocations){
+  const values=stats[location.kod]||{produkty:0,sztuki:0,rezerwacje:0,wartosc:0},unlimited=czyLokalizacjaBezLimitu(location),fill=unlimited?null:Math.min(100,Math.round(values.sztuki/Math.max(1,Number(location.pojemnosc))*100)),level=poziomLokalizacjiMagazynu(location.kod),children=allLocations.filter(item=>item.parentKod===location.kod).length,childType=magazynTypDzieckaLokalizacji(location);
+  return `<article class="warehouse-location-card hierarchy-level-${Math.min(3,level)}" style="--level:${level}">
+    <header class="warehouse-location-head"><span class="warehouse-location-type-icon">${magazynIkonaTypuLokalizacji(location.typ)}</span><div><small>${esc(sciezkaNazwLokalizacjiMagazynu(location.kod))}</small><b>${esc(location.nazwa||location.kod)}</b><code>${esc(location.kod)}</code></div><span class="lvl lvl-info">${esc(location.typ||"lokalizacja")}</span></header>
+    <div class="warehouse-location-flags"><span class="capacity ${unlimited?"unlimited":"limited"}">${unlimited?"∞ Bez limitu sztuk":`Limit ${esc(location.pojemnosc)} szt.`}</span>${children?`<span>${children} ${children===1?"element niżej":"elementów niżej"}</span>`:""}${location.parentKod?`<span>Nadrzędna: ${esc(location.parentKod)}</span>`:""}</div>
+    <div class="warehouse-location-metrics"><span><b>${values.produkty}</b><small>produktów</small></span><span><b>${values.sztuki}</b><small>sztuk</small></span><span><b>${values.rezerwacje}</b><small>rezerw.</small></span><span><b>${zl(values.wartosc)}</b><small>wartość</small></span></div>
+    ${fill!==null?`<div class="warehouse-fill"><span style="width:${fill}%"></span></div><small>Zapełnienie: ${fill}% • ${values.sztuki}/${esc(location.pojemnosc)} szt.</small>`:`<small class="warehouse-unlimited-note">Liczba produktów i sztuk na tym poziomie nie jest ograniczana.</small>`}
+    ${(location.szerokosc||location.glebokosc||location.wysokosc||location.maxWaga)?`<small>Wymiary: ${esc(location.szerokosc||"—")} × ${esc(location.glebokosc||"—")} × ${esc(location.wysokosc||"—")} cm • maks. ${esc(location.maxWaga||"—")} kg</small>`:""}${location.kodKreskowy?`<small>Kod skanera: <b>${esc(location.kodKreskowy)}</b></small>`:""}${location.uwagi?`<small>${esc(location.uwagi)}</small>`:""}
+    <footer class="diag-actions">${childType?`<button class="btn" type="button" onclick="przygotujPodlokalizacjeMagazynu(${jsArg(location.kod)},${jsArg(childType)})">＋ ${childType==="regał"?"Regał":childType==="półka"?"Półka":"Miejsce"}</button>`:""}<button class="btn ghost" type="button" onclick="magazynQROtworzLokalizacje(${jsArg(location.kod)})">🏷️ QR</button><button class="btn ghost" type="button" onclick="edytujLokalizacjeMagazynu(${jsArg(location.kod)})">Edytuj</button><button class="btn danger" type="button" onclick="usunLokalizacjeMagazynu(${jsArg(location.kod)})">Ukryj</button></footer>
+  </article>`;
+}
+
+function magazynLokalizacjePanelHTML(locations,stats,outsideDictionary=[]){
+  const filtered=magazynLokalizacjeFiltrowane(locations),pages=Math.max(1,Math.ceil(filtered.length/MAGAZYN_LOKALIZACJE_NA_STRONIE));magazynLokalizacjeStrona=Math.min(magazynLokalizacjeStrona,pages);const visible=filtered.slice((magazynLokalizacjeStrona-1)*MAGAZYN_LOKALIZACJE_NA_STRONIE,magazynLokalizacjeStrona*MAGAZYN_LOKALIZACJE_NA_STRONIE);
+  const parentOptions=locations.map(location=>`<option value="${esc(location.kod)}">${"· ".repeat(poziomLokalizacjiMagazynu(location.kod))}${esc(sciezkaNazwLokalizacjiMagazynu(location.kod))} (${esc(location.kod)})</option>`).join("");
+  return `<div class="panel warehouse-location-panel professional-locations">
+    <div class="order-section-head"><div><span class="order-pro-label">Struktura fizyczna magazynu</span><h2>🗺️ Obszary, regały, półki i miejsca</h2><p class="order-detail-lead">Czytelna hierarchia pokazuje drogę pracownika, np. <b>Pakownia → Regał A → Półka 3</b>. QR pozostaje stały, a pojemność każdej półki może być nieograniczona.</p></div><button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż lokalizacje');location.hash='#/admin/agent-ai'">Zapytaj agenta</button></div>
+    <div class="warehouse-location-overview"><span><b>${locations.filter(l=>l.typ==="strefa").length}</b><small>obszarów</small></span><span><b>${locations.filter(l=>l.typ==="regał").length}</b><small>regałów</small></span><span><b>${locations.filter(l=>l.typ==="półka").length}</b><small>półek</small></span><span><b>${locations.filter(l=>l.typ==="miejsce").length}</b><small>miejsc</small></span><span><b>${stats.BRAK?.produkty||0}</b><small>produktów bez miejsca</small></span></div>
+    <form class="warehouse-generator warehouse-structure-wizard" onsubmit="return generujRegalyIPolkiMagazynu(event)" oninput="magazynGeneratorOdswiezPodglad(this)">
+      <div class="order-section-head"><div><span class="order-pro-label">Kreator całej struktury</span><h3>✨ Generator struktury magazynu</h3><p class="order-detail-lead">Istniejące elementy pozostają bez zmian. Kreator dopisze tylko brakujące kody.</p></div><button class="btn" type="submit">Utwórz strukturę</button></div>
+      <div class="warehouse-wizard-steps"><span><b>1</b> Obszar</span><span><b>2</b> Regały</span><span><b>3</b> Półki</span><span><b>4</b> Miejsca</span><span><b>5</b> Pojemność</span></div>
+      <div class="warehouse-generator-workspace"><div class="warehouse-generator-grid">
+        <label>Nazwa obszaru <input name="strefaNazwa" value="Pakownia" required><small>Widoczna nazwa dla pracownika.</small></label><label>Kod obszaru <input name="strefaKod" value="PAK" maxlength="10" required><small>Krótki, stały kod do QR.</small></label>
+        <label>Nazwy regałów <select name="trybRegalow"><option value="litery">Litery: A, B, C…</option><option value="numery">Numery: 1, 2, 3…</option></select></label><label>Pierwszy regał <input name="startRegal" value="A" maxlength="3" required></label><label>Liczba regałów <input name="regaly" type="number" min="1" max="100" value="1"></label>
+        <label>Pierwsza półka <input name="startPolka" type="number" min="1" value="1"></label><label>Półek na regał <input name="polki" type="number" min="1" max="200" value="5"></label>
+        <label>Miejsc na półkę <input name="miejsca" type="number" min="0" max="500" value="0"><small>0 = produkty bezpośrednio na półce.</small></label><label>Pierwsze miejsce <input name="startMiejsce" type="number" min="1" value="1"></label>
+        <label class="warehouse-capacity-control"><span class="warehouse-checkbox"><input name="bezLimitu" type="checkbox" checked onchange="magazynUstawLimitLokalizacji(this.checked,this.form.elements.pojemnosc)"> Bez limitu sztuk</span><input name="pojemnosc" type="number" min="1" placeholder="limit sztuk" disabled><small>Bez limitu liczby sztuk na półce lub miejscu.</small></label>
+      </div><aside class="warehouse-generator-preview" data-warehouse-generator-preview><span class="warehouse-generator-example"><small>Przykładowa ścieżka</small><b>Pakownia → Regał A → Półka 1</b><em>PAK / PAK-RA / PAK-RA-P01</em></span><span><b>7</b><small>elementów struktury</small></span><span><b>1</b><small>regał</small></span><span><b>5</b><small>półek</small></span><span><b>—</b><small>bez podziału półek</small></span><span class="unlimited"><b>∞</b><small>sztuk bez ograniczeń</small></span></aside></div>
+    </form>
+    <div class="warehouse-location-layout"><form id="warehouseLocationForm" class="warehouse-location-form professional-location-form" onsubmit="return zapiszLokalizacjeMagazynu(event)">
+      <input name="originalKod" type="hidden"><div class="order-section-head"><div><h3 data-location-form-title>✏️ Nowa pojedyncza lokalizacja</h3><p class="order-detail-lead">Do ręcznego dodania jednego elementu albo nietypowego miejsca.</p></div><button class="btn ghost" type="button" onclick="nowaLokalizacjaMagazynu()">＋ Nowa</button></div>
+      <div class="warehouse-location-form-grid"><div class="f-group"><label>Typ *</label><select name="typ"><option>strefa</option><option>regał</option><option>półka</option><option>miejsce</option><option>paleta</option><option>box</option><option>stanowisko pakowania</option><option>zewnętrzna</option></select></div><div class="f-group"><label>Lokalizacja nadrzędna</label><select name="parentKod"><option value="">— poziom główny —</option>${parentOptions}</select></div><div class="f-group"><label>Kod stały *</label><input name="kod" placeholder="np. PAK-RA-P03" required><small>Po zapisaniu kod jest chroniony, aby QR nie przestał działać.</small></div><div class="f-group"><label>Nazwa dla pracownika *</label><input name="nazwa" placeholder="np. Półka 3" required></div><div class="f-group"><label>Strefa / obszar</label><input name="strefa" placeholder="np. Pakownia"></div><div class="f-group"><label>Kod skanera</label><input name="kodKreskowy" placeholder="opcjonalny własny kod"></div><div class="f-group warehouse-capacity-control"><label class="warehouse-checkbox"><input name="bezLimitu" type="checkbox" checked onchange="magazynUstawLimitLokalizacji(this.checked,this.form.elements.pojemnosc)"> Bez limitu sztuk</label><input name="pojemnosc" type="number" min="1" placeholder="limit sztuk" disabled><small>Brak limitu nie ogranicza liczby produktów ani sztuk.</small></div><div class="f-group"><label>Priorytet kompletacji</label><input name="priorytet" inputmode="numeric" placeholder="np. 10"></div></div>
+      <details class="warehouse-location-advanced"><summary>Wymiary, maksymalna waga i uwagi</summary><div class="warehouse-location-form-grid"><div class="f-group"><label>Szerokość (cm)</label><input name="szerokosc" type="number" min="0"></div><div class="f-group"><label>Głębokość (cm)</label><input name="glebokosc" type="number" min="0"></div><div class="f-group"><label>Wysokość (cm)</label><input name="wysokosc" type="number" min="0"></div><div class="f-group"><label>Maks. waga (kg)</label><input name="maxWaga" inputmode="decimal"></div></div><div class="f-group"><label>Uwagi</label><input name="uwagi" placeholder="np. szybka kompletacja, ciężkie gry, zapas sezonowy"></div></details>
+      <div class="diag-actions"><button class="btn" type="submit">💾 Zapisz lokalizację</button><button class="btn ghost" type="button" onclick="nowaLokalizacjaMagazynu()">Wyczyść formularz</button></div>
+    </form><section class="warehouse-location-directory"><div class="warehouse-location-toolbar"><label><span>Wyszukaj lokalizację</span><input value="${esc(magazynLokalizacjeFraza)}" placeholder="Nazwa, kod, obszar lub ścieżka…" oninput="magazynSzukajLokalizacje(this)"></label><label><span>Typ</span><select onchange="magazynFiltrujLokalizacje(this.value)"><option value="wszystkie">Wszystkie typy</option>${["strefa","regał","półka","miejsce","paleta","box","stanowisko pakowania","zewnętrzna"].map(type=>`<option value="${esc(type)}" ${magazynLokalizacjeTyp===type?"selected":""}>${esc(type)}</option>`).join("")}</select></label><button class="btn ghost" type="button" onclick="magazynWyczyscFiltryLokalizacji()">Wyczyść</button></div><div class="warehouse-location-results"><span>Pokazano <b>${visible.length}</b> z <b>${filtered.length}</b></span><span>Strona ${magazynLokalizacjeStrona} z ${pages}</span></div><div class="warehouse-location-list hierarchy-list">${visible.map(location=>magazynLokalizacjaKartaHTML(location,stats,locations)).join("")||`<div class="warehouse-location-card"><b>Brak lokalizacji dla wybranych filtrów</b><p>Utwórz strukturę w kreatorze albo wyczyść filtry.</p></div>`}</div><div class="pagination">${paginacjaHTML(magazynLokalizacjeStrona,pages,"magazynUstawStroneLokalizacji")}</div></section></div>
+    ${stats.BRAK?.produkty?`<div class="pay-note warehouse-location-note">Bez lokalizacji: <b>${stats.BRAK.produkty}</b> produktów. Użyj filtra „Bez lokalizacji” w Stanach produktów.</div>`:""}${outsideDictionary.length?`<div class="pay-note warehouse-location-note">Kody przy produktach, których nie ma jeszcze w słowniku: <b>${outsideDictionary.map(esc).join(", ")}</b>.</div>`:""}
+  </div>`;
+}
+
 /* Mobilne QR magazynu. Biblioteki są ładowane dopiero przy uruchomieniu aparatu
    lub podglądu etykiet, aby nie obciążać zwykłej pracy panelu. */
 let magazynQRTryb="lokalizacje",magazynQRFraza="",magazynQRTyp="wszystkie",magazynQRFormat="62x38";
@@ -5570,61 +5657,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
       </button>`).join(""):`<div class="warehouse-work-empty">✅ Brak pilnych prac magazynowych wynikających z aktywnych zamówień.</div>`}
     </div>
   </div>`:""}
-  ${aktywna==="lokalizacje"?`<div class="panel warehouse-location-panel">
-    <div class="order-section-head">
-      <div>
-        <span class="order-pro-label">Struktura fizyczna</span><h2 style="margin-top:.25rem">🗺️ Strefy, regały, półki i miejsca</h2>
-        <p class="order-detail-lead">Hierarchia prowadzi od strefy przez regał i półkę do konkretnego miejsca. Generator tworzy całe ciągi kodów bez ręcznego wpisywania każdej półki.</p>
-      </div>
-      <button class="btn ghost" type="button" onclick="agentAIWstawKomende('pokaż lokalizacje');location.hash='#/admin/agent-ai'">Zapytaj agenta</button>
-    </div>
-    <div class="warehouse-location-overview"><span><b>${lokalizacje.filter(l=>l.typ==="strefa").length}</b><small>stref</small></span><span><b>${lokalizacje.filter(l=>l.typ==="regał").length}</b><small>regałów</small></span><span><b>${lokalizacje.filter(l=>l.typ==="półka").length}</b><small>półek</small></span><span><b>${lokalizacje.filter(l=>l.typ==="miejsce").length}</b><small>miejsc</small></span><span><b>${statLok.BRAK?.produkty||0}</b><small>produktów bez miejsca</small></span></div>
-    <form class="warehouse-generator" onsubmit="return generujRegalyIPolkiMagazynu(event)">
-      <div class="order-section-head"><div><h3 style="margin:0">✨ Generator struktury</h3><p class="order-detail-lead">Przykład: strefa A, 3 regały, 5 półek i 4 miejsca utworzą kody A-R01-P01-M01 itd.</p></div><button class="btn" type="submit">✨ Utwórz całą strukturę</button></div>
-      <div class="warehouse-generator-grid"><label>Strefa <input name="strefaKod" value="A" maxlength="10" required></label><label>Nazwa strefy <input name="strefaNazwa" value="Strefa A"></label><label>Prefiks regału <input name="prefix" value="R" maxlength="8" required></label><label>Start regału <input name="startRegal" type="number" min="1" value="1"></label><label>Liczba regałów <input name="regaly" type="number" min="1" max="50" value="3"></label><label>Półki / regał <input name="polki" type="number" min="1" max="30" value="5"></label><label>Start półki <input name="startPolka" type="number" min="1" value="1"></label><label>Miejsca / półkę <input name="miejsca" type="number" min="0" max="30" value="0"><small>0 = produkt przypisujesz bezpośrednio do półki</small></label><label>Pojemność miejsca <input name="pojemnosc" type="number" min="0" placeholder="opcjonalnie"></label></div>
-    </form>
-    <div class="warehouse-location-layout">
-      <form id="warehouseLocationForm" class="warehouse-location-form" onsubmit="return zapiszLokalizacjeMagazynu(event)">
-        <h3 style="margin-top:0">✏️ Pojedyncza lokalizacja</h3><p class="order-detail-lead">Do nietypowego miejsca, palety, stanowiska albo ręcznej korekty struktury.</p>
-        <div class="warehouse-location-form-grid">
-          <div class="f-group"><label>Kod *</label><input name="kod" placeholder="np. A-R01-P02" required></div>
-          <div class="f-group"><label>Nazwa</label><input name="nazwa" placeholder="Półka 2 / gry rodzinne"></div>
-          <div class="f-group"><label>Typ</label><select name="typ"><option>miejsce</option><option>półka</option><option>regał</option><option>strefa</option><option>paleta</option><option>box</option><option>stanowisko pakowania</option><option>zewnętrzna</option></select></div>
-          <div class="f-group"><label>Lokalizacja nadrzędna</label><select name="parentKod"><option value="">— poziom główny —</option>${lokalizacje.map(l=>`<option value="${esc(l.kod)}">${"· ".repeat(poziomLokalizacjiMagazynu(l.kod))}${esc(l.kod)} — ${esc(l.nazwa||l.typ)}</option>`).join("")}</select></div>
-          <div class="f-group"><label>Strefa</label><input name="strefa" placeholder="np. A / szybka kompletacja"></div>
-          <div class="f-group"><label>Kod kreskowy lokalizacji</label><input name="kodKreskowy" placeholder="zeskanuj lub wpisz"></div>
-          <div class="f-group"><label>Pojemność szt.</label><input name="pojemnosc" inputmode="numeric" placeholder="opcjonalnie"></div>
-          <div class="f-group"><label>Priorytet kompletacji</label><input name="priorytet" inputmode="numeric" placeholder="np. 10"></div>
-          <div class="f-group"><label>Szerokość (cm)</label><input name="szerokosc" type="number" min="0"></div><div class="f-group"><label>Głębokość (cm)</label><input name="glebokosc" type="number" min="0"></div><div class="f-group"><label>Wysokość (cm)</label><input name="wysokosc" type="number" min="0"></div><div class="f-group"><label>Maks. waga (kg)</label><input name="maxWaga" inputmode="decimal"></div>
-        </div>
-        <div class="f-group"><label>Uwagi</label><input name="uwagi" placeholder="np. produkty najczęściej kupowane, ciężkie gry, zapas sezonowy"></div>
-        <div class="diag-actions"><button class="btn" type="submit">💾 Zapisz lokalizację</button><button class="btn ghost" type="reset">Wyczyść formularz</button></div>
-      </form>
-      <div class="warehouse-location-list hierarchy-list">
-        ${lokalizacje.map(l=>{
-          const s=statLok[l.kod]||{produkty:0,sztuki:0,rezerwacje:0,wartosc:0};
-          const zapelnienie=l.pojemnosc?Math.min(100,Math.round((s.sztuki/Math.max(1,l.pojemnosc))*100)):null;
-          const level=poziomLokalizacjiMagazynu(l.kod),children=lokalizacje.filter(x=>x.parentKod===l.kod).length;
-          return `<div class="warehouse-location-card hierarchy-level-${Math.min(3,level)}" style="--level:${level}">
-            <div class="warehouse-location-head"><div><small>${esc(sciezkaLokalizacjiMagazynu(l.kod))}</small><b>${esc(l.kod)}</b></div><span class="lvl lvl-info">${esc(l.typ||"lokalizacja")}</span></div>
-            <p>${esc(l.nazwa||"Bez nazwy")}${l.strefa?` • strefa: ${esc(l.strefa)}`:""}${children?` • elementów niżej: ${children}`:""}</p>
-            <div class="warehouse-location-metrics">
-              <span><b>${s.produkty}</b><small>produktów</small></span>
-              <span><b>${s.sztuki}</b><small>sztuk</small></span>
-              <span><b>${s.rezerwacje}</b><small>rezerw.</small></span>
-              <span><b>${zl(s.wartosc)}</b><small>wartość</small></span>
-            </div>
-            ${zapelnienie!==null?`<div class="warehouse-fill"><span style="width:${zapelnienie}%"></span></div><small>Zapełnienie wg stanu: ${zapelnienie}% / ${esc(l.pojemnosc)} szt.</small>`:""}
-            ${(l.szerokosc||l.glebokosc||l.wysokosc||l.maxWaga)?`<small>Wymiary: ${esc(l.szerokosc||"—")} × ${esc(l.glebokosc||"—")} × ${esc(l.wysokosc||"—")} cm • maks. ${esc(l.maxWaga||"—")} kg</small>`:""}${l.kodKreskowy?`<small>Kod kreskowy: <b>${esc(l.kodKreskowy)}</b></small>`:""}
-            ${l.uwagi?`<small>${esc(l.uwagi)}</small>`:""}
-            <div class="diag-actions"><button class="btn" type="button" onclick="magazynQROtworzLokalizacje(${jsArg(l.kod)})">🏷️ QR</button><button class="btn ghost" type="button" onclick="edytujLokalizacjeMagazynu(${jsArg(l.kod)})">Edytuj</button><button class="btn danger" type="button" onclick="usunLokalizacjeMagazynu(${jsArg(l.kod)})">Ukryj</button></div>
-          </div>`;
-        }).join("") || `<div class="warehouse-location-card"><b>Brak lokalizacji</b><p>Dodaj pierwszą lokalizację, np. R1-P1, żeby produkty można było przypisywać z listy.</p></div>`}
-      </div>
-    </div>
-    ${statLok.BRAK?.produkty?`<div class="pay-note" style="text-align:left;margin-top:.8rem">Bez lokalizacji: <b>${statLok.BRAK.produkty}</b> produktów. Użyj filtra „Bez lokalizacji”, żeby szybko uzupełnić kartotekę.</div>`:""}
-    ${pozaSlownikiem.length?`<div class="pay-note" style="text-align:left;margin-top:.6rem">Lokalizacje wpisane przy produktach, ale nieutworzone w słowniku: <b>${pozaSlownikiem.map(esc).join(", ")}</b>.</div>`:""}
-  </div>`:""}
+  ${aktywna==="lokalizacje"?magazynLokalizacjePanelHTML(lokalizacje,statLok,pozaSlownikiem):""}
   ${aktywna==="plan"?`<div id="warehouseRestockWorkspace" class="warehouse-restock-workspace">${magazynPlanZatowarowaniaHTML()}</div>`:""}
   ${aktywna==="stany"?`<div class="panel warehouse-stock-page">
     <div class="order-section-head warehouse-stock-head">

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Podgląd profesjonalnych lokalizacji magazynu</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <link rel="stylesheet" href="/assets/admin.css">
+</head>
+<body class="admin-mode">
+  <main id="preview" style="max-width:1320px;margin:auto;padding:1rem"></main>
+  <script>
+    const mockLocations=[
+      {kod:"PAK",nazwa:"Pakownia",typ:"strefa",parentKod:"",bezLimitu:true},
+      {kod:"PAK-RA",nazwa:"Regał A",typ:"regał",parentKod:"PAK",strefa:"PAK",bezLimitu:true},
+      {kod:"PAK-RA-P01",nazwa:"Półka 1",typ:"półka",parentKod:"PAK-RA",strefa:"PAK",bezLimitu:true},
+      {kod:"PAK-RA-P02",nazwa:"Półka 2",typ:"półka",parentKod:"PAK-RA",strefa:"PAK",pojemnosc:120,bezLimitu:false},
+      {kod:"PAK-RA-P03",nazwa:"Półka 3",typ:"półka",parentKod:"PAK-RA",strefa:"PAK",bezLimitu:true}
+    ];
+    const stats={PAK:{produkty:18,sztuki:94,rezerwacje:6,wartosc:2490},"PAK-RA":{produkty:18,sztuki:94,rezerwacje:6,wartosc:2490},"PAK-RA-P01":{produkty:7,sztuki:41,rezerwacje:2,wartosc:980},"PAK-RA-P02":{produkty:6,sztuki:38,rezerwacje:3,wartosc:1010},"PAK-RA-P03":{produkty:5,sztuki:15,rezerwacje:1,wartosc:500},BRAK:{produkty:2}};
+    function esc(value=""){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));}
+    function jsArg(value){return esc(JSON.stringify(String(value??"")));}
+    function $(id){return document.getElementById(id);}
+    function kodLokalizacjiMagazynu(value=""){return String(value||"").trim().toUpperCase();}
+    function magazynLokalizacjeAktywne(){return mockLocations;}
+    function magazynLokalizacjaPoKodzie(kod){return mockLocations.find(item=>item.kod===kodLokalizacjiMagazynu(kod))||null;}
+    function sciezkaLokalizacjiMagazynu(kod){const parts=[];let item=magazynLokalizacjaPoKodzie(kod);while(item){parts.unshift(item.kod);item=item.parentKod?magazynLokalizacjaPoKodzie(item.parentKod):null;}return parts.join(" / ");}
+    function sciezkaNazwLokalizacjiMagazynu(kod){const parts=[];let item=magazynLokalizacjaPoKodzie(kod);while(item){parts.unshift(item.nazwa||item.kod);item=item.parentKod?magazynLokalizacjaPoKodzie(item.parentKod):null;}return parts.join(" → ");}
+    function poziomLokalizacjiMagazynu(kod){return Math.max(0,sciezkaLokalizacjiMagazynu(kod).split(" / ").length-1);}
+    function czyLokalizacjaBezLimitu(item){return item?.bezLimitu===true||!(Number(item?.pojemnosc)>0);}
+    function magazynLiteraRegalu(index=1){let n=Math.max(1,Number(index)||1),out="";while(n>0){n--;out=String.fromCharCode(65+n%26)+out;n=Math.floor(n/26);}return out;}
+    function magazynIndeksRegalu(value="A"){const text=String(value).toUpperCase();return /^\d+$/.test(text)?Number(text):[...text].reduce((sum,char)=>sum*26+char.charCodeAt(0)-64,0);}
+    function intNieujemny(value,fallback=0){const n=Math.trunc(Number(value));return Number.isFinite(n)&&n>=0?n:fallback;}
+    function zl(value){return `${Number(value||0).toFixed(2).replace(".",",")} zł`;}
+    function paginacjaHTML(){return "";}
+    function renderuj(){}
+    function toast(){}
+    function wczytajLS(_key,fallback){return fallback;}
+    function zapiszLS(){}
+    let stanyProduktow={},ruchyMagazynowe=[];
+  </script>
+  <script src="/assets/admin.js"></script>
+  <script>document.getElementById("preview").innerHTML=magazynLokalizacjePanelHTML(mockLocations,stats,[]);</script>
+</body>
+</html>
