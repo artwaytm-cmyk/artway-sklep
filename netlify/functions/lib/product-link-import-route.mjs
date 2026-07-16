@@ -6,7 +6,7 @@ export function createProductLinkImportRoute({ service, catalog, sanitize = (val
   if (!service || !catalog || typeof isAdmin !== 'function' || typeof respond !== 'function' || typeof text !== 'function') {
     throw new Error('Trasa importu linków wymaga serwisu, autoryzacji i odpowiedzi HTTP.');
   }
-  const actions = new Set(['product-link-import-create', 'product-link-import-status', 'product-link-import-process-next', 'product-link-import-control', 'product-link-import-catalog']);
+  const actions = new Set(['product-link-import-create', 'product-link-import-status', 'product-link-import-process-next', 'product-link-import-control', 'product-link-import-review-resolve', 'product-link-import-catalog']);
   return async function productLinkImportRoute(req, url, action) {
     if (!actions.has(action)) return null;
     if (action === 'product-link-import-catalog') {
@@ -47,6 +47,21 @@ export function createProductLinkImportRoute({ service, catalog, sanitize = (val
       const body = await req.json().catch(() => ({})), jobId = text(body.jobId, 180).trim();
       if (!jobId) return respond({ ok: false, error: 'Brak identyfikatora importu', code: 'validation' }, 422);
       return respond({ ok: true, ...(await service.processNext(jobId)) });
+    }
+
+    if (action === 'product-link-import-review-resolve') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = rateLimit?.(req, 'product-link-import-review-resolve', 600, 60 * 60 * 1000);
+      if (limited) return limited;
+      const body = await req.json().catch(() => ({})), jobId = text(body.jobId, 180).trim();
+      if (!jobId) return respond({ ok: false, error: 'Brak identyfikatora importu', code: 'validation' }, 422);
+      const session = sessionOf?.(req);
+      return respond({ ok: true, ...(await service.resolveReviews({
+        jobId,
+        items: Array.isArray(body.items) ? body.items : [],
+        commonPatch: body.commonPatch && typeof body.commonPatch === 'object' ? body.commonPatch : {},
+        actor: text(session?.email || adminEmail() || 'administrator', 200),
+      })) });
     }
 
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);

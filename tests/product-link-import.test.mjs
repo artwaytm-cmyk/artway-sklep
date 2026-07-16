@@ -273,7 +273,7 @@ test('create jest idempotentne dla tego samego zestawu linków i nie tworzy drug
   assert.equal(repo.keys().filter((key) => key.includes('product-link-import:items')).length, 1);
 });
 
-test('needsReview nie zapisuje produktu ani danych pomocniczych extraProducts w zadaniu', async () => {
+test('needsReview zapisuje bezpieczny szkic do decyzji, ale nigdy danych pomocniczych extraProducts', async () => {
   const { catalog, service } = harness(async () => ({
     needsReview: true,
     reviewReason: 'Znaleziono dwa warianty produktu.',
@@ -285,6 +285,74 @@ test('needsReview nie zapisuje produktu ani danych pomocniczych extraProducts w 
   assert.equal(result.processedItem.status, 'needs_review');
   assert.match(result.processedItem.reason, /dwa warianty/i);
   assert.equal(JSON.stringify(result).includes('nie zapisuj'), false);
+  assert.equal(result.processedItem.reviewDraft.nazwa, 'Produkt 1');
+  assert.equal(result.processedItem.reviewDraft.cena, 21);
+  assert.ok(Array.isArray(result.processedItem.missingFields));
+  assert.equal((await catalog.list()).length, 0);
+});
+
+test('administrator uzupełnia brakującą cenę i dodaje produkt bez ponownego importu pliku', async () => {
+  const { catalog, service } = harness(async (sourceUrl) => ({
+    needsReview: true,
+    reviewReason: 'Nie udało się pewnie ustalić: ceny sprzedaży.',
+    product: product(1, { cena: 0, kategoria: 'Gry edukacyjne', sourceUrl }),
+    extraProducts: [],
+  }));
+  const created = await service.create({ rows: [url(1)] });
+  const reviewed = await service.processNext(created.job.id);
+  assert.equal(reviewed.processedItem.status, 'needs_review');
+  assert.equal(reviewed.processedItem.reviewDraft.cena, 0);
+  assert.deepEqual(reviewed.processedItem.missingFields, ['cena sprzedaży']);
+
+  const resolved = await service.resolveReviews({
+    jobId: created.job.id,
+    items: [{ itemId: reviewed.processedItem.id, patch: { cena: '29,90' } }],
+    actor: 'admin@example.test',
+  });
+  assert.equal(resolved.resolved, 1);
+  assert.equal(resolved.stillNeedsReview, 0);
+  assert.equal(resolved.items[0].status, 'added');
+  const [saved] = await catalog.list();
+  assert.equal(saved.cena, 29.9);
+  assert.equal(saved.nazwa, 'Produkt 1');
+  assert.equal(Object.hasOwn(saved, 'reviewResolvedBy'), false, 'dane administratora nie trafiają do kartoteki produktu');
+});
+
+test('operacja masowa uzupełnia wspólne braki, zachowując indywidualne nazwy i kody', async () => {
+  const { catalog, service } = harness(async (sourceUrl) => {
+    const id = Number(sourceUrl.match(/product-pol-(\d+)/)?.[1]);
+    return { needsReview: true, reviewReason: 'Brak ceny.', product: product(id, { cena: 0, kategoria: '', sourceUrl }) };
+  });
+  const created = await service.create({ rows: [url(1), url(2)] });
+  const first = await service.processNext(created.job.id), second = await service.processNext(created.job.id);
+  const resolved = await service.resolveReviews({
+    jobId: created.job.id,
+    items: [{ itemId: first.processedItem.id }, { itemId: second.processedItem.id }],
+    commonPatch: { cena: 34.5, kategoria: 'Gry rodzinne', ikona: '🎲' },
+    actor: 'admin@example.test',
+  });
+  assert.equal(resolved.resolved, 2);
+  assert.equal(resolved.summary.needs_review, 0);
+  const products = await catalog.list();
+  assert.deepEqual(products.map((entry) => entry.nazwa), ['Produkt 1', 'Produkt 2']);
+  assert.ok(products.every((entry) => entry.cena === 34.5 && entry.kategoria === 'Gry rodzinne'));
+});
+
+test('niepełna decyzja pozostaje w kolejce i zachowuje już wpisaną wartość', async () => {
+  const { catalog, service } = harness(async (sourceUrl) => ({
+    needsReview: true,
+    product: product(1, { cena: 0, producent: '', marka: '', kategoria: 'Gry', sourceUrl }),
+  }));
+  const created = await service.create({ rows: [url(1)] }), reviewed = await service.processNext(created.job.id);
+  const unresolved = await service.resolveReviews({
+    jobId: created.job.id,
+    items: [{ itemId: reviewed.processedItem.id, patch: { cena: 25 } }],
+  });
+  assert.equal(unresolved.resolved, 0);
+  assert.equal(unresolved.stillNeedsReview, 1);
+  assert.equal(unresolved.items[0].status, 'needs_review');
+  assert.equal(unresolved.items[0].reviewDraft.cena, 25);
+  assert.match(unresolved.items[0].reason, /producent/i);
   assert.equal((await catalog.list()).length, 0);
 });
 

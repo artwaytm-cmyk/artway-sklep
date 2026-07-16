@@ -71,6 +71,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/14-product-link-import.css',
       'src/styles/15-product-actions.css',
       'src/styles/16-supplier-receipt.css',
+      'src/styles/17-product-link-review.css',
     ],
   },
 ]);

@@ -10,6 +10,10 @@ const CAS_ATTEMPTS = 12;
 const LEASE_MS = 5 * 60 * 1000;
 const ITEM_STATUSES = Object.freeze(['queued', 'processing', 'added', 'skipped_existing', 'needs_review', 'failed', 'cancelled']);
 const TERMINAL = new Set(['added', 'skipped_existing', 'needs_review', 'failed', 'cancelled']);
+const REVIEW_PATCH_FIELDS = new Set([
+  'nazwa', 'cena', 'producent', 'marka', 'kategoria', 'opisKrotki', 'opis',
+  'ikona', 'kolor', 'zdjecie', 'ean', 'gtin', 'externalId', 'sku', 'kodProducenta', 'mpn',
+]);
 const ALEXANDER_HOSTS = new Set([
   'sklep.alexander.com.pl',
   'www.sklep.alexander.com.pl',
@@ -117,6 +121,59 @@ function normalizeJob(value = {}) {
   };
 }
 
+function reviewDraft(value = {}, sourceUrl = '') {
+  const source = asObject(value);
+  const draft = {
+    nazwa: clean(source.nazwa || source.name, 500),
+    cena: Number(source.cena || source.price) > 0 ? Math.round(Number(source.cena || source.price) * 100) / 100 : 0,
+    producent: clean(source.producent || source.manufacturer || source.marka || source.brand, 160),
+    marka: clean(source.marka || source.brand || source.producent || source.manufacturer, 160),
+    kategoria: clean(source.kategoria || source.category, 180),
+    opisKrotki: clean(source.opisKrotki || source.shortDescription, 500),
+    opis: clean(source.opis || source.description, 6000),
+    ikona: clean(source.ikona || '🎲', 20),
+    kolor: clean(source.kolor || '#dbeafe', 30),
+    zdjecie: clean(source.zdjecie || source.image || source.imageUrl, 3000),
+    ean: clean(source.ean || source.gtin || source.EAN || source.GTIN, 40).replace(/\D/g, ''),
+    gtin: clean(source.gtin || source.ean || source.GTIN || source.EAN, 40).replace(/\D/g, ''),
+    externalId: clean(source.externalId || source.external_id || source.sku, 160),
+    sku: clean(source.sku || source.externalId || source.external_id, 160),
+    kodProducenta: clean(source.kodProducenta || source.mpn || source.manufacturerCode, 160),
+    mpn: clean(source.mpn || source.kodProducenta || source.manufacturerCode, 160),
+    sourceUrl: clean(source.sourceUrl || source.producentUrl || sourceUrl, 3000),
+    producentUrl: clean(source.producentUrl || source.sourceUrl || sourceUrl, 3000),
+  };
+  const images = asArray(source.zdjecia || source.images).map((entry) => clean(entry, 3000)).filter(Boolean).slice(0, 8);
+  if (images.length) draft.zdjecia = images;
+  return draft;
+}
+
+function reviewPatch(value = {}) {
+  const source = asObject(value), patch = {};
+  for (const field of REVIEW_PATCH_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(source, field)) continue;
+    if (field === 'cena') {
+      const number = Number(String(source[field] ?? '').replace(',', '.'));
+      if (!Number.isFinite(number) || number < 0 || number > 1_000_000) throw serviceError('Cena musi być liczbą od 0 do 1 000 000 zł.', 'product_link_import_review_price_invalid', 422);
+      patch.cena = Math.round(number * 100) / 100;
+    } else {
+      const limits = { opis: 6000, opisKrotki: 500, zdjecie: 3000, nazwa: 500 };
+      patch[field] = clean(source[field], limits[field] || 180);
+    }
+  }
+  return patch;
+}
+
+function reviewMissing(product = {}) {
+  const missing = [];
+  if (!clean(product.nazwa, 300)) missing.push('nazwa');
+  if (!(Number(product.cena) > 0)) missing.push('cena sprzedaży');
+  if (!clean(product.producent || product.marka, 160)) missing.push('producent lub marka');
+  if (!clean(product.kategoria, 180)) missing.push('kategoria sklepu');
+  if (!safeUrl(product.sourceUrl || product.producentUrl)) missing.push('link źródłowy');
+  return missing;
+}
+
 function publicItem(item = {}) {
   const result = {
     id: clean(item.id, 220),
@@ -131,6 +188,10 @@ function publicItem(item = {}) {
   if (item.duplicateProductId !== undefined && item.duplicateProductId !== null && item.duplicateProductId !== '') result.duplicateProductId = item.duplicateProductId;
   if (clean(item.reason, 1000)) result.reason = clean(item.reason, 1000);
   if (clean(item.error, 1000)) result.error = clean(item.error, 1000);
+  if (item.status === 'needs_review') {
+    result.reviewDraft = reviewDraft(item.reviewDraft, item.url);
+    result.missingFields = asArray(item.missingFields).map((entry) => clean(entry, 100)).filter(Boolean).slice(0, 20);
+  }
   return result;
 }
 
@@ -364,6 +425,10 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
         ...(patch.duplicateProductId !== undefined ? { duplicateProductId: patch.duplicateProductId } : {}),
         ...(clean(patch.reason, 1000) ? { reason: clean(patch.reason, 1000) } : {}),
         ...(clean(patch.error, 1000) ? { error: clean(patch.error, 1000) } : {}),
+        ...(status === 'needs_review' ? {
+          reviewDraft: reviewDraft(patch.reviewDraft, item.url),
+          missingFields: asArray(patch.missingFields).map((entry) => clean(entry, 100)).filter(Boolean).slice(0, 20),
+        } : {}),
       };
       return { summary: nextSummary, completedItems: { ...current.completedItems, [item.id]: recorded } };
     });
@@ -390,6 +455,10 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
       ...(item.duplicateProductId !== undefined ? { duplicateProductId: item.duplicateProductId } : {}),
       ...(clean(item.reason, 1000) ? { reason: clean(item.reason, 1000) } : {}),
       ...(clean(item.error, 1000) ? { error: clean(item.error, 1000) } : {}),
+      ...(item.status === 'needs_review' ? {
+        reviewDraft: reviewDraft(item.reviewDraft, item.url),
+        missingFields: asArray(item.missingFields).map((entry) => clean(entry, 100)).filter(Boolean).slice(0, 20),
+      } : {}),
     };
     return updateJob(jobId, (job) => ({
       summary: stats,
@@ -424,7 +493,13 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
         const packageValue = asObject(prepared);
         const product = packageValue.product && typeof packageValue.product === 'object' ? packageValue.product : prepared;
         if (packageValue.needsReview || !product || typeof product !== 'object' || Array.isArray(product)) {
-          terminalPatch = { status: 'needs_review', reason: clean(packageValue.reviewReason, 1000) || 'Dane produktu wymagają decyzji administratora.' };
+          const draft = reviewDraft(product, claim.item.url), missingFields = reviewMissing(draft);
+          terminalPatch = {
+            status: 'needs_review',
+            reason: clean(packageValue.reviewReason, 1000) || `Uzupełnij: ${missingFields.join(', ') || 'dane wymagające decyzji'}.`,
+            reviewDraft: draft,
+            missingFields,
+          };
         } else {
           const result = await catalog.add(product, {
             sourceUrl: claim.item.url,
@@ -493,5 +568,103 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
     return snapshot(jobId, { retried });
   }
 
-  return Object.freeze({ create, status, processNext, pause, resume, cancel, retryFailures });
+  async function findReviewItem(job, itemId) {
+    for (const descriptor of job.itemShards) {
+      const record = await read(descriptor.key, { items: [] });
+      const item = asArray(record?.items).find((entry) => clean(entry?.id, 220) === itemId);
+      if (item) return { descriptor, item };
+    }
+    return null;
+  }
+
+  /** Uzupełnia pojedyncze lub zaznaczone szkice i dodaje tylko kompletne produkty. */
+  async function resolveReviews({ jobId = '', items = [], commonPatch = {}, actor = 'administrator' } = {}) {
+    const safeJobId = clean(jobId, 180), job = normalizeJob(await read(jobKey(safeJobId), null));
+    if (!job.id) throw serviceError('Nie znaleziono importu linków.', 'product_link_import_not_found', 404);
+    if (asArray(items).length > 200) throw serviceError('Jedna operacja masowa może obejmować maksymalnie 200 produktów.', 'product_link_import_review_too_large', 422);
+    const decisions = asArray(items).map((entry) => ({
+      itemId: clean(entry?.itemId || entry?.id, 220),
+      patch: reviewPatch({ ...asObject(commonPatch), ...asObject(entry?.patch) }),
+    })).filter((entry) => entry.itemId);
+    if (!decisions.length) throw serviceError('Zaznacz co najmniej jedną pozycję do uzupełnienia.', 'product_link_import_review_empty', 422);
+    const unique = new Set(), results = [];
+    for (const decision of decisions) {
+      if (unique.has(decision.itemId)) continue;
+      unique.add(decision.itemId);
+      const located = await findReviewItem(job, decision.itemId);
+      if (!located) { results.push({ itemId: decision.itemId, status: 'not_found' }); continue; }
+      const current = located.item;
+      if (current.status !== 'needs_review') { results.push({ itemId: decision.itemId, status: current.status, skipped: true }); continue; }
+      let prepared = {}, preparationError = '';
+      try {
+        prepared = asObject(await prepareProduct(current.url, {
+          jobId: job.id, itemId: current.id, rowNumber: current.rowNumber, name: current.name, review: true,
+        }));
+      } catch (error) {
+        preparationError = clean(error?.message || 'Nie udało się ponownie pobrać źródła.', 500);
+      }
+      const preparedProduct = asObject(prepared.product && typeof prepared.product === 'object' ? prepared.product : prepared);
+      const storedDraft = reviewDraft(current.reviewDraft, current.url);
+      const storedValues = Object.fromEntries(Object.entries(storedDraft).filter(([field, value]) => {
+        if (field === 'cena') return Number(value) > 0;
+        if (Array.isArray(value)) return value.length > 0;
+        if (['ikona', 'kolor', 'sourceUrl', 'producentUrl'].includes(field)) return !!value;
+        return clean(value, 10).length > 0;
+      }));
+      const product = {
+        ...preparedProduct,
+        ...reviewDraft(preparedProduct, current.url),
+        ...storedValues,
+        ...decision.patch,
+        sourceUrl: current.url,
+        producentUrl: current.url,
+      };
+      if (!product.marka && product.producent) product.marka = product.producent;
+      if (!product.producent && product.marka) product.producent = product.marka;
+      if (!product.gtin && product.ean) product.gtin = product.ean;
+      if (!product.ean && product.gtin) product.ean = product.gtin;
+      if (!product.mpn && product.kodProducenta) product.mpn = product.kodProducenta;
+      if (!product.kodProducenta && product.mpn) product.kodProducenta = product.mpn;
+      const missingFields = reviewMissing(product);
+      if (missingFields.length) {
+        const reason = `Nadal uzupełnij: ${missingFields.join(', ')}.${preparationError ? ` Źródło: ${preparationError}` : ''}`;
+        await updateShard(located.descriptor.key, (shardItems) => {
+          const index = shardItems.findIndex((entry) => clean(entry?.id, 220) === decision.itemId && entry.status === 'needs_review');
+          if (index < 0) return null;
+          const nextItems = [...shardItems];
+          nextItems[index] = { ...nextItems[index], reviewDraft: product, missingFields, reason, updatedAt: isoNow() };
+          return { items: nextItems, value: nextItems[index] };
+        });
+        results.push({ itemId: decision.itemId, status: 'needs_review', missingFields });
+        continue;
+      }
+      const catalogResult = await catalog.add(product, {
+        sourceUrl: current.url,
+        importItemKey: current.id,
+        extraProducts: asArray(prepared.extraProducts),
+      });
+      const nextStatus = catalogResult.added || catalogResult.idempotent ? 'added' : 'skipped_existing';
+      const saved = await updateShard(located.descriptor.key, (shardItems) => {
+        const index = shardItems.findIndex((entry) => clean(entry?.id, 220) === decision.itemId && entry.status === 'needs_review');
+        if (index < 0) return null;
+        const nextItems = [...shardItems];
+        nextItems[index] = {
+          ...nextItems[index], status: nextStatus,
+          ...(nextStatus === 'added' ? { productId: catalogResult.product?.id } : { duplicateProductId: catalogResult.product?.id }),
+          reason: nextStatus === 'added' ? 'Uzupełniono braki i dodano po decyzji administratora.' : clean(catalogResult.reason, 300) || 'Pewny duplikat produktu.',
+          error: '', missingFields: [], reviewDraft: undefined, reviewedAt: isoNow(), reviewedBy: clean(actor, 200) || 'administrator', updatedAt: isoNow(),
+        };
+        return { items: nextItems, value: nextItems[index] };
+      });
+      results.push({ itemId: decision.itemId, status: saved.value?.status || nextStatus, productId: catalogResult.product?.id });
+    }
+    await reconcileProgress(job.id);
+    return snapshot(job.id, {
+      reviewResults: results,
+      resolved: results.filter((entry) => ['added', 'skipped_existing'].includes(entry.status)).length,
+      stillNeedsReview: results.filter((entry) => entry.status === 'needs_review').length,
+    });
+  }
+
+  return Object.freeze({ create, status, processNext, pause, resume, cancel, retryFailures, resolveReviews });
 }
