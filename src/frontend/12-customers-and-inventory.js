@@ -153,6 +153,7 @@ let gestoscAdminProduktow=["zwarta","wygodna"].includes(wczytajLS("artway_produk
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
 let frazaMagazynu="", filtrMagazynu="wszystkie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="decyzje";
+let magazynLokalizacjeZamowienIds=new Set();
 let magazynNaStronie=[25,50,100,200,500].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
 function ustawKafelkowyFiltrAsortymentu(typ="aktywne"){
   asortymentResetujFiltry(false);
@@ -376,6 +377,12 @@ function rezerwacjeMagazynowe(){
   rezerwacjeMagazynowe._cache={at:Date.now(),value:mapa};
   return mapa;
 }
+function klasyfikujPozycjeDoKompletacji({produkt=null,stan=null,brak=0,lokalizacja=""}={}){
+  if(!produkt)return {decyzja:"nierozpoznany",gotowe:false,brakLokalizacji:false};
+  if(stan===null)return {decyzja:"sprawdz_stan",gotowe:false,brakLokalizacji:false};
+  if(Number(brak)>0)return {decyzja:"zamow_u_producenta",gotowe:false,brakLokalizacji:false};
+  return {decyzja:"kompletuj",gotowe:true,brakLokalizacji:!String(lokalizacja||"").trim()};
+}
 function allegroAnalizaMagazynowaZamowienia(z){
   const rez=rezerwacjeMagazynowe();
   const pozycje=pozycjeAllegroMagazyn(z).map(p=>{
@@ -383,11 +390,11 @@ function allegroAnalizaMagazynowaZamowienia(z){
     const laczne=p.produkt?Number(rez[p.produkt.id]||0):0,dostepne=stan===null?null:stan-laczne;
     const brak=!p.produkt||stan===null?null:Math.max(0,-dostepne),lokalizacja=String(meta.lokalizacja||"").trim(),dostawca=String(meta.dostawca||"").trim();
     const dokumenty=p.produkt?(agentAIZlecenia||[]).filter(doc=>agentAIPlanDokumentAktywny(doc)&&(doc.pozycje||[]).some(x=>String(x.produktId)===String(p.produkt.id))).map(doc=>({id:doc.id,numer:doc.numer||doc.id,status:doc.status||"szkic"})):[];
-    const decyzja=!p.produkt?"nierozpoznany":stan===null?"sprawdz_stan":brak>0?"zamow_u_producenta":!lokalizacja?"uzupelnij_lokalizacje":"kompletuj";
-    return {...p,stan,laczneRezerwacje:laczne,dostepne,brak,lokalizacja,dostawca,dokumentyProducenta:dokumenty,decyzja};
+    const klasyfikacja=klasyfikujPozycjeDoKompletacji({produkt:p.produkt,stan,brak,lokalizacja});
+    return {...p,stan,laczneRezerwacje:laczne,dostepne,brak,lokalizacja,dostawca,dokumentyProducenta:dokumenty,...klasyfikacja};
   });
-  const nierozpoznane=pozycje.filter(p=>!p.produkt).length,bezStanu=pozycje.filter(p=>p.produkt&&p.stan===null).length,bezLokalizacji=pozycje.filter(p=>p.produkt&&p.stan!==null&&!p.brak&&!p.lokalizacja).length,braki=pozycje.reduce((s,p)=>s+Number(p.brak||0),0);
-  return {pozycje,nierozpoznane,bezStanu,bezLokalizacji,braki,gotowe:nierozpoznane===0&&bezStanu===0&&bezLokalizacji===0&&braki===0};
+  const nierozpoznane=pozycje.filter(p=>!p.produkt).length,bezStanu=pozycje.filter(p=>p.produkt&&p.stan===null).length,bezLokalizacji=pozycje.filter(p=>p.brakLokalizacji).length,braki=pozycje.reduce((s,p)=>s+Number(p.brak||0),0);
+  return {pozycje,nierozpoznane,bezStanu,bezLokalizacji,braki,locationTasks:bezLokalizacji,gotowe:nierozpoznane===0&&bezStanu===0&&braki===0,fulfillmentReady:nierozpoznane===0&&bezStanu===0&&braki===0};
 }
 function dataZamowieniaMs(z={}){const raw=z.ts??z.createdAt??z.firstFetchedAt??z.data??z.date??"",n=Number(raw);return Number.isFinite(n)&&n>1e9?(n<1e11?n*1000:n):(Date.parse(raw)||0);}
 function sprzedazKanalyMagazynowe(dni=30){
@@ -428,6 +435,7 @@ function filtrujProduktyMagazynu(lista, rez, sprzedaz){
   if(filtrMagazynu==="producent-brak") out=out.filter(p=>producentDostepnoscInfo(p).status==="brak");
   if(filtrMagazynu==="producent-nieznany") out=out.filter(p=>{const i=producentDostepnoscInfo(p);return !i.url||i.stale||["nieznany","blad"].includes(i.status);});
   if(filtrMagazynu==="bezlokalizacji") out=out.filter(p=>!magazynMetaProduktu(p.id).lokalizacja);
+  if(filtrMagazynu==="lokalizacje-zamowien") out=out.filter(p=>magazynLokalizacjeZamowienIds.has(String(p.id)));
   if(filtrMagazynu==="bezdostawcy") out=out.filter(p=>!magazynMetaProduktu(p.id).dostawca);
   if(filtrDostawcyMagazynu!=="wszyscy") out=out.filter(p=>String(magazynMetaProduktu(p.id).dostawca||"")===filtrDostawcyMagazynu);
   if(filtrLokalizacjiMagazynu!=="wszystkie") out=out.filter(p=>String(magazynMetaProduktu(p.id).lokalizacja||"BRAK")===filtrLokalizacjiMagazynu);
@@ -779,20 +787,25 @@ function widokAdminMagazyn(sekcja="pulpit"){
   const planProdukty=planZakupu.map(x=>x.produkt),planIds=new Set(planProdukty.map(p=>String(p.id)));
   const wartoscPlanu=planZakupu.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0);
   const nadrezerwacje=wymagaStanow?wszystkie.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;}):[];
-  const brakiKartoteki=planProdukty.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
+  const brakiDostawcyPlanu=planProdukty.filter(p=>!magazynMetaProduktu(p.id).dostawca);
   const bestselleryMagazynu=aktywna==="stany"?wszystkie.filter(p=>priorytetDostepnosciProduktu(p,kanalySpr,rez).score>0):[];
   const stareInwentaryzacje=aktywna==="stany"?planProdukty.filter(p=>{const d=magazynMetaProduktu(p.id).ostatniaInwentaryzacja,t=d?Date.parse(d):0;return !t||Date.now()-t>90*86400000;}):[];
   const alertyStanow=planProdukty;
   const wymagaLokalizacji=aktywna==="pulpit"||aktywna==="stany"||aktywna==="lokalizacje",lokalizacje=wymagaLokalizacji?magazynLokalizacjeAktywne():[],statLok=wymagaLokalizacji?statystykiLokalizacji(wszystkie):{};
   const dostawcyMag=aktywna==="stany"?[...new Set(wszystkie.map(p=>magazynMetaProduktu(p.id).dostawca).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pl")):[];
   const pozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK" && !magazynLokalizacjaPoKodzie(k));
-  const lokDoKompletacji=aktywna==="pulpit"?[...new Set(pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).flatMap(z=>pozycjeZamowieniaMagazyn(z).map(p=>magazynMetaProduktu(p.id).lokalizacja||"BRAK")))].filter(Boolean):[];
+  const pozycjeAktywnychZamowien=wymagaStanow?[...pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).flatMap(pozycjeZamowieniaMagazyn),...aktywneZamowieniaAllegro().flatMap(pozycjeAllegroMagazyn).filter(p=>p.id!=="")]:[];
+  const aktywneIds=[...new Set(pozycjeAktywnychZamowien.map(p=>String(p.id)).filter(Boolean))],produktyAktywne=aktywneIds.map(produktMagazynowy).filter(Boolean);
+  const lokalizacjeDoUstalenia=wymagaStanow?produktyAktywne.filter(p=>{const stan=stanMagazynuId(p.id);return stan!==null&&stan>=Number(rez[p.id]||0)&&!magazynMetaProduktu(p.id).lokalizacja;}):[];
+  if(wymagaStanow)magazynLokalizacjeZamowienIds=new Set(lokalizacjeDoUstalenia.map(p=>String(p.id)));
+  const lokDoKompletacji=aktywna==="pulpit"?[...new Set(produktyAktywne.map(p=>magazynMetaProduktu(p.id).lokalizacja).filter(Boolean))]:[];
   const pracaMagazynu=aktywna==="pulpit"?[
     ...supplierStats.braki.filter(({p})=>planIds.has(String(p.id))).slice(0,4).map(({p})=>({lvl:"bad",ico:"🔴",tytul:p.nazwa,opis:"Producent zgłasza brak produktu potrzebnego do aktywnego zamówienia.",href:"#/admin/magazyn/dostawcy"})),
     ...supplierStats.niskie.filter(({p})=>planIds.has(String(p.id))).slice(0,4).map(({p,i})=>({lvl:"warn",ico:"🟡",tytul:p.nazwa,opis:`Produkt potrzebny do zamówienia • u producenta ${i.quantity} szt. • próg ${i.prog}.`,href:"#/admin/magazyn/dostawcy"})),
     ...nadrezerwacje.slice(0,4).map(p=>({lvl:"bad",ico:"🚨",tytul:p.nazwa,opis:`Nadrezerwacja: dostępne ${dostepneSztukiMagazynu(p,rez)} szt., rezerwacje ${rez[p.id]||0}.`,akcja:"dozamowienia"})),
-    ...planZakupu.slice(0,4).map(x=>({lvl:"warn",ico:"📦",tytul:x.produkt.nazwa,opis:`Do zamówienia: ${x.ilosc} szt. • ${x.meta.dostawca||"brak dostawcy"} • ${x.meta.lokalizacja||"brak lokalizacji"}`,akcja:"dozamowienia"})),
-    ...brakiKartoteki.slice(0,4).map(p=>({lvl:"info",ico:"🗂️",tytul:p.nazwa,opis:`Uzupełnij kartotekę: ${!magazynMetaProduktu(p.id).lokalizacja?"brak lokalizacji ":""}${!magazynMetaProduktu(p.id).dostawca?"brak dostawcy":""}.`,akcja:"bezlokalizacji"}))
+    ...planZakupu.slice(0,4).map(x=>({lvl:"warn",ico:"📦",tytul:x.produkt.nazwa,opis:`Do zamówienia: ${x.ilosc} szt. • dostawca: ${x.meta.dostawca||"do przypisania"}.`,akcja:"dozamowienia"})),
+    ...lokalizacjeDoUstalenia.slice(0,4).map(p=>({lvl:"info",ico:"📍",tytul:p.nazwa,opis:`Stan pokrywa aktywne zamówienia. Towar jest zarezerwowany; ustal wyłącznie jego fizyczną lokalizację.`,akcja:"lokalizacje-zamowien"})),
+    ...brakiDostawcyPlanu.slice(0,4).map(p=>({lvl:"info",ico:"🏭",tytul:p.nazwa,opis:"Realny brak do zamówienia nie ma przypisanego dostawcy.",akcja:"bezdostawcy"}))
   ].slice(0,8):[];
   let lista=[],liczbaStron=1,fragment=[];
   if(aktywna==="stany"){
@@ -828,7 +841,8 @@ function widokAdminMagazyn(sekcja="pulpit"){
       <button class="order-stat-card stat-filter money ${filtrMagazynu==="wszystkie"&&sortowanieMagazynu==="wartosc"?"active":""}" type="button" onclick="ustawFiltrMagazynu('wszystkie','wartosc')"><span>💰</span><b>${zl(wartosc)}</b><small>wartość stanów</small></button>
       <button class="order-stat-card stat-filter ${planZakupu.length?"hot":""} ${filtrMagazynu==="dozamowienia"?"active":""}" type="button" onclick="ustawFiltrMagazynu('dozamowienia','zakup')"><span>📦</span><b>${planZakupu.length}</b><small>braki do zamówień (${zl(wartoscPlanu)})</small></button>
       <button class="order-stat-card stat-filter ${nadrezerwacje.length?"hot":""} ${filtrMagazynu==="nadrezerwacja"?"active":""}" type="button" onclick="ustawFiltrMagazynu('nadrezerwacja','dostepne')"><span>🚨</span><b>${nadrezerwacje.length}</b><small>nadrezerwacje</small></button>
-      <button class="order-stat-card stat-filter ${brakiKartoteki.length?"hot":""} ${filtrMagazynu==="bezlokalizacji"||filtrMagazynu==="bezdostawcy"?"active":""}" type="button" onclick="ustawFiltrMagazynu('bezlokalizacji','nazwa')"><span>🗂️</span><b>${brakiKartoteki.length}</b><small>braki kartoteki</small></button>
+      <button class="order-stat-card stat-filter ${lokalizacjeDoUstalenia.length?"hot":""} ${filtrMagazynu==="lokalizacje-zamowien"?"active":""}" type="button" onclick="ustawFiltrMagazynu('lokalizacje-zamowien','priorytet')"><span>📍</span><b>${lokalizacjeDoUstalenia.length}</b><small>lokalizacje do ustalenia • nie blokują realizacji</small></button>
+      <button class="order-stat-card stat-filter ${brakiDostawcyPlanu.length?"hot":""} ${filtrMagazynu==="bezdostawcy"?"active":""}" type="button" onclick="ustawFiltrMagazynu('bezdostawcy','zakup')"><span>🏭</span><b>${brakiDostawcyPlanu.length}</b><small>brak dostawcy w Planie</small></button>
       <button class="order-stat-card stat-filter ${pozaSlownikiem.length?"hot":""}" type="button" onclick="document.getElementById('warehouseLocationForm')?.scrollIntoView({behavior:'smooth',block:'center'})"><span>🗺️</span><b>${lokalizacje.length}</b><small>lokalizacji w słowniku</small></button>
     </div>
   </div>
@@ -854,12 +868,13 @@ function widokAdminMagazyn(sekcja="pulpit"){
       <div class="warehouse-ops-summary">
         <span><b>${lokDoKompletacji.length}</b><small>lokalizacji do przejścia</small></span>
         <span><b>${planZakupu.length}</b><small>pozycji brakujących do zamówień</small></span>
-        <span><b>${brakiKartoteki.length}</b><small>braków kartoteki</small></span>
+        <span><b>${lokalizacjeDoUstalenia.length}</b><small>lokalizacji do ustalenia przez magazyn</small></span>
+        <span><b>${brakiDostawcyPlanu.length}</b><small>braków dostawcy w Planie</small></span>
         <span><b>${nadrezerwacje.length}</b><small>nadrezerwacji</small></span>
       </div>
       <div class="warehouse-pick-route">
         <b>Trasa kompletacji</b>
-        <p>${lokDoKompletacji.length?lokDoKompletacji.map(k=>`<span>${esc(nazwaLokalizacjiMagazynu(k))}</span>`).join(""):`<span>Brak aktywnych lokalizacji w zamówieniach</span>`}</p>
+        <p>${lokDoKompletacji.length?lokDoKompletacji.map(k=>`<span>${esc(nazwaLokalizacjiMagazynu(k))}</span>`).join(""):lokalizacjeDoUstalenia.length?`<span>Towar jest zarezerwowany — lokalizacje są w osobnej kolejce magazynu</span>`:`<span>Brak aktywnej trasy kompletacji</span>`}</p>
       </div>
     </div>
     <div class="warehouse-work-list">
@@ -934,15 +949,15 @@ function widokAdminMagazyn(sekcja="pulpit"){
       <button class="stock-summary-card ${filtrMagazynu==="alerty"?"active":""} ${alertyStanow.length?"alert":""}" onclick="ustawFiltrMagazynu('alerty','ryzyko')"><span>🚨</span><b>${alertyStanow.length}</b><small>alertów operacyjnych</small></button>
       <button class="stock-summary-card ${filtrMagazynu==="dozamowienia"?"active":""}" onclick="ustawFiltrMagazynu('dozamowienia','zakup')"><span>📦</span><b>${planZakupu.length}</b><small>produktów do zamówienia</small></button>
       <button class="stock-summary-card ${filtrMagazynu==="nadrezerwacja"?"active":""}" onclick="ustawFiltrMagazynu('nadrezerwacja','dostepne')"><span>🧾</span><b>${nadrezerwacje.length}</b><small>nadrezerwacji</small></button>
-      <button class="stock-summary-card ${filtrMagazynu==="bezlokalizacji"?"active":""}" onclick="ustawFiltrMagazynu('bezlokalizacji','priorytet')"><span>🗺️</span><b>${brakiKartoteki.length}</b><small>niepełnych kartotek</small></button>
+      <button class="stock-summary-card ${filtrMagazynu==="lokalizacje-zamowien"?"active":""}" onclick="ustawFiltrMagazynu('lokalizacje-zamowien','priorytet')"><span>🗺️</span><b>${lokalizacjeDoUstalenia.length}</b><small>lokalizacje aktywnych zamówień</small></button>
       <button class="stock-summary-card ${filtrInwentaryzacjiMagazynu==="stara"?"active":""}" onclick="filtrInwentaryzacjiMagazynu='stara';stronaMagazynu=1;renderuj()"><span>📅</span><b>${stareInwentaryzacje.length}</b><small>stanów do potwierdzenia</small></button>
     </div>
     <div class="warehouse-stock-quickfilters" aria-label="Szybkie filtry">
-      ${[["wszystkie","Wszystkie"],["bestsellery","🏆 Bestsellery"],["producent-brak","🔴 Brak u producenta"],["producent-niski","🟡 Niski u producenta"],["dozamowienia","📦 Do zamówienia"],["rezerwacje","🧾 Z rezerwacją"],["bezlokalizacji","🗺️ Bez lokalizacji"],["bezdostawcy","🏭 Bez dostawcy"]].map(([v,t])=>`<button type="button" class="${filtrMagazynu===v?"active":""}" onclick="ustawFiltrMagazynu(${jsArg(v)},${jsArg(v==="bestsellery"?"priorytet":v==="dozamowienia"?"zakup":"ryzyko")})">${t}</button>`).join("")}
+      ${[["wszystkie","Wszystkie"],["bestsellery","🏆 Bestsellery"],["producent-brak","🔴 Brak u producenta"],["producent-niski","🟡 Niski u producenta"],["dozamowienia","📦 Do zamówienia"],["rezerwacje","🧾 Z rezerwacją"],["lokalizacje-zamowien","📍 Lokalizacja do zamówień"],["bezlokalizacji","🗺️ Wszystkie bez lokalizacji"],["bezdostawcy","🏭 Bez dostawcy"]].map(([v,t])=>`<button type="button" class="${filtrMagazynu===v?"active":""}" onclick="ustawFiltrMagazynu(${jsArg(v)},${jsArg(v==="bestsellery"?"priorytet":v==="dozamowienia"?"zakup":"ryzyko")})">${t}</button>`).join("")}
     </div>
     ${adminWyszukiwaniePanelHTML({id:"warehouse-stock",description:"Nazwa i identyfikatory produktu, status, dostawca, lokalizacja, inwentaryzacja oraz sortowanie.",results:lista.length,active:!!(frazaMagazynu||filtrMagazynu!=="wszystkie"||filtrDostawcyMagazynu!=="wszyscy"||filtrLokalizacjiMagazynu!=="wszystkie"||filtrInwentaryzacjiMagazynu!=="wszystkie"),open:true,fields:`<div class="warehouse-stock-toolbar admin-search-full">
       <label class="warehouse-stock-search"><span>Wyszukaj produkt</span><input data-warehouse-stock-search placeholder="Nazwa, SKU, EAN, ID, kategoria, lokalizacja lub dostawca…" value="${esc(frazaMagazynu)}" oninput="magazynSzukajProdukty(this)" autocomplete="off"></label>
-      <label><span>Status</span><select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">${[["wszystkie","Wszystkie produkty"],["alerty","Wszystkie alerty"],["bestsellery","Bestsellery / aktywne"],["producent-niski","Producent: niski stan"],["producent-brak","Producent: brak"],["producent-nieznany","Producent: niepotwierdzone"],["dozamowienia","Braki do zamówień"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Monitorowane lokalnie"],["bezlimitu","Lokalnie bez limitu"],["niskie","Lokalny niski stan"],["brak","Lokalny stan zerowy"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["bezlokalizacji","Bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
+      <label><span>Status</span><select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">${[["wszystkie","Wszystkie produkty"],["alerty","Wszystkie alerty"],["bestsellery","Bestsellery / aktywne"],["producent-niski","Producent: niski stan"],["producent-brak","Producent: brak"],["producent-nieznany","Producent: niepotwierdzone"],["dozamowienia","Braki do zamówień"],["nadrezerwacja","Nadrezerwacje"],["monitorowane","Monitorowane lokalnie"],["bezlimitu","Lokalnie bez limitu"],["niskie","Lokalny niski stan"],["brak","Lokalny stan zerowy"],["rezerwacje","Z rezerwacją"],["sprzedaz","Sprzedane 30 dni"],["lokalizacje-zamowien","Lokalizacja do aktywnych zamówień"],["bezlokalizacji","Wszystkie bez lokalizacji"],["bezdostawcy","Bez dostawcy"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
       <label><span>Sortowanie</span><select onchange="sortowanieMagazynu=this.value;stronaMagazynu=1;renderuj()">${[["ryzyko","Priorytet operacyjny"],["priorytet","Bestsellery najpierw"],["producent","Stan u producenta"],["zakup","Największe braki"],["dostepne","Dostępne po rezerwacji"],["stan","Stan lokalny rosnąco"],["nazwa","Nazwa A–Z"],["rezerwacje","Rezerwacje"],["sprzedaz","Sprzedaż 30 dni"],["wartosc","Wartość stanu"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
       <label><span>Dostawca</span><select onchange="filtrDostawcyMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszyscy">Każdy dostawca</option>${dostawcyMag.map(d=>`<option value="${esc(d)}" ${filtrDostawcyMagazynu===d?"selected":""}>${esc(d)}</option>`).join("")}</select></label>
       <label><span>Lokalizacja</span><select onchange="filtrLokalizacjiMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszystkie">Każda lokalizacja</option><option value="BRAK" ${filtrLokalizacjiMagazynu==="BRAK"?"selected":""}>Bez lokalizacji</option>${lokalizacje.map(l=>`<option value="${esc(l.kod)}" ${filtrLokalizacjiMagazynu===l.kod?"selected":""}>${esc(l.kod)} — ${esc(l.nazwa||l.typ)}</option>`).join("")}</select></label>

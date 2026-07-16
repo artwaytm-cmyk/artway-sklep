@@ -1,3 +1,5 @@
+import { warehouseAnalysisNeedsInvestigation } from './order-warehouse-readiness.mjs';
+
 const array = (value) => (Array.isArray(value) ? value : []);
 const text = (value = '', limit = 220) => String(value ?? '').replace(/\u0000/g, '').trim().slice(0, limit);
 const normalized = (value = '') => text(value, 180).toLowerCase().normalize('NFD')
@@ -102,9 +104,7 @@ export function applySupplierProcurementToOrder(order = {}, supplierDrafts = [],
 
   let warehouseStage = text(order.warehouseStage, 50).toLowerCase() || 'do_sprawdzenia';
   const locked = LOCKED_LOCAL.has(warehouseStage) || TERMINAL_ALLEGRO.has(officialStatus(order));
-  const unresolved = Number(order.agentAnalysis?.nierozpoznane || 0) > 0
-    || Number(order.agentAnalysis?.bezStanu || 0) > 0
-    || Number(order.agentAnalysis?.bezLokalizacji || 0) > 0;
+  const unresolved = warehouseAnalysisNeedsInvestigation(order.agentAnalysis);
   if (!locked) {
     if (allReceived) warehouseStage = 'kompletacja';
     else if (unresolved) warehouseStage = 'do_sprawdzenia';

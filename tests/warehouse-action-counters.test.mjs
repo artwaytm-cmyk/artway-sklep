@@ -14,10 +14,12 @@ test("liczniki nawigacji magazynu pokazują wyłącznie braki do aktywnych zamó
   assert.match(warehouse,/"\/admin\/magazyn": potrzebyZatowarowania\(\)\.length/);
 });
 
-test("zadania kartoteki i producentów są ograniczone do produktów faktycznie brakujących",async()=>{
+test("zakupy producentów i lokalizacje magazynowe mają odrębne zakresy",async()=>{
   const warehouse=await read("src/frontend/12-customers-and-inventory.js");
   assert.match(warehouse,/const planProdukty=planZakupu\.map\(x=>x\.produkt\),planIds=new Set/);
-  assert.match(warehouse,/const brakiKartoteki=planProdukty\.filter/);
+  assert.match(warehouse,/const brakiDostawcyPlanu=planProdukty\.filter/);
+  assert.match(warehouse,/const lokalizacjeDoUstalenia=/);
+  assert.match(warehouse,/filtrMagazynu==="lokalizacje-zamowien"/);
   assert.match(warehouse,/const alertyStanow=planProdukty/);
   assert.match(warehouse,/supplierStats\.braki\.filter\(\(\{p\}\)=>planIds\.has/);
   assert.match(warehouse,/supplierStats\.niskie\.filter\(\(\{p\}\)=>planIds\.has/);

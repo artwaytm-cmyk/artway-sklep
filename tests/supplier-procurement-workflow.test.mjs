@@ -60,6 +60,15 @@ test('pełne przyjęcie ma pierwszeństwo przed brakiem lokalizacji i rozlicza d
   assert.equal(complete.warehouseStage, 'kompletacja');
 });
 
+test('brak lokalizacji nie cofa zlecenia ani nie miesza się z procesem zakupu', () => {
+  const result = applySupplierProcurementToOrder(order({
+    warehouseStage: 'do_sprawdzenia',
+    agentAnalysis: { positions: [], nierozpoznane: 0, bezStanu: 0, bezLokalizacji: 1, braki: 0, gotowe: true },
+  }), [draft()]);
+  assert.equal(result.supplierProcurement.status, 'oczekuje_na_dostawe');
+  assert.equal(result.warehouseStage, 'oczekuje_na_dostawe');
+});
+
 test('otwarcie korekty cofa wyłącznie lokalny etap zakupowy do braków', () => {
   const corrected = draft({ status: 'do sprawdzenia', emailSentAt: undefined });
   const result = applySupplierProcurementToOrder(order({

@@ -43,6 +43,7 @@ import { createInventoryDecisionService } from './domain/inventory-decisions.mjs
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
 import { applySupplierProcurementWorkflow } from './domain/supplier-procurement-workflow.mjs';
+import { classifyWarehousePosition, summarizeWarehousePositions, warehouseAnalysisNeedsInvestigation } from './domain/order-warehouse-readiness.mjs';
 import { createSupplierOrderPlanService, preserveSupplierPlanOnGenericSettings } from './supplier-order-plan-service.mjs';
 import { createSupplierOrderRoute } from './supplier-order-route.mjs';
 import {
@@ -251,6 +252,7 @@ function agentPriorytetWykonawczy(priority = {}) {
     supplier_availability: { actionId: 'supplier_availability', execution: 'approval', requiresApproval: true, deadlineMinutes: 120, owner: 'administrator / Agent AI', doneWhen: 'Każdy brak ma decyzję: termin dalszej sprzedaży, ukrycie albo automatyczne wznowienie.' },
     inpost_prepare: { actionId: 'inpost_prepare', execution: 'approval', requiresApproval: true, deadlineMinutes: 120, owner: 'centrum wysyłek', doneWhen: 'Przesyłka ma etykietę, numer nadania i zapisany status InPost.' },
     allegro_warehouse: { actionId: 'allegro_warehouse', execution: 'draft', requiresApproval: false, deadlineMinutes: 60, owner: 'Agent AI', doneWhen: 'Pozycje zlecenia są sprawdzone, a realne braki dopisane do szkicu producenta.' },
+    warehouse_location: { actionId: 'warehouse_location', execution: 'draft', requiresApproval: false, deadlineMinutes: 240, owner: 'magazyn', doneWhen: 'Towar pozostaje zarezerwowany do zamówienia, a magazyn przypisał mu fizyczną lokalizację.' },
     allegro_offer_fix: { actionId: 'allegro_offer_fix', execution: 'approval', requiresApproval: true, deadlineMinutes: 240, owner: 'katalog Allegro', doneWhen: 'Oferta ma komplet danych i ostatnia operacja API zakończyła się sukcesem.' },
     supplier_order_draft: { actionId: 'supplier_order_draft', execution: 'draft', requiresApproval: false, deadlineMinutes: 240, owner: 'Agent AI', doneWhen: 'Bieżący dokument producenta zawiera wszystkie niepokryte braki i czeka na zatwierdzenie.' },
     invoice_draft: { actionId: 'invoice_draft', execution: 'draft', requiresApproval: false, deadlineMinutes: 240, owner: 'Agent AI / inFakt', doneWhen: 'Zamówienie firmowe ma szkic lub powiązaną fakturę inFakt.' },
@@ -264,6 +266,7 @@ function agentPriorytetWykonawczy(priority = {}) {
   else if (title.includes('wiadomości') || title.includes('dyskusje')) key = 'allegro_reply';
   else if (title.includes('niedostępne u producenta') || title.includes('niski stan') || title.includes('dostępność producent')) key = 'supplier_availability';
   else if (area === 'wysylki') key = 'inpost_prepare';
+  else if (area === 'magazyn') key = 'warehouse_location';
   else if (title.includes('zamówienia allegro')) key = 'allegro_warehouse';
   else if (title.includes('oferty allegro') || title.includes('operacja oferty')) key = 'allegro_offer_fix';
   else if (area === 'producenci') key = 'supplier_order_draft';
@@ -286,6 +289,22 @@ async function agentCentrumOperacyjne() {
   const orders = Array.isArray(ordersRec.items) ? ordersRec.items : [], activeOrders = orders.filter(agentZamowienieAktywne), newOrders = activeOrders.filter((x) => String(x.status || '').toLowerCase() === 'nowe');
   const shipmentsWithoutTracking = activeOrders.filter((x) => !tekst(x?.wysylka?.numer || x?.trackingNumber || '', 100).trim());
   const allegroOrders = Array.isArray(allegroOrdersRec.items) ? allegroOrdersRec.items : [], activeAllegro = allegroOrders.filter(allegroAgentZlecenieAktywne);
+  const stock = data.artway_stany && typeof data.artway_stany === 'object' ? data.artway_stany : {};
+  const warehouseCards = data.artway_magazyn_produkty && typeof data.artway_magazyn_produkty === 'object' ? data.artway_magazyn_produkty : {};
+  const activeDemand = new Map(), demandReferences = new Map();
+  const addDemand = (productId, amount, reference) => {
+    const id = tekst(productId, 120).trim(), quantity = Math.max(0, Number(amount) || 0);
+    if (!id || !quantity) return;
+    activeDemand.set(id, (activeDemand.get(id) || 0) + quantity);
+    if (!demandReferences.has(id)) demandReferences.set(id, new Set());
+    demandReferences.get(id).add(tekst(reference, 160));
+  };
+  for (const order of activeOrders) for (const line of Array.isArray(order.pozycjeDane) ? order.pozycjeDane : []) addDemand(line?.id, line?.ilosc, order.nr);
+  for (const order of activeAllegro) for (const line of Array.isArray(order.agentAnalysis?.positions) ? order.agentAnalysis.positions : []) addDemand(line?.productId, line?.ilosc || line?.quantity, order.id || order.nr);
+  const warehouseLocationTasks = [...activeDemand.entries()].filter(([productId, demand]) => {
+    const known = Object.prototype.hasOwnProperty.call(stock, productId) && stock[productId] !== '' && stock[productId] != null && Number.isFinite(Number(stock[productId]));
+    return known && Number(stock[productId]) >= demand && !tekst(warehouseCards[productId]?.lokalizacja || warehouseCards[productId]?.location, 120).trim();
+  }).map(([productId, demand]) => ({ productId, demand, orders: [...(demandReferences.get(productId) || [])].filter(Boolean) }));
   const communications = [...(Array.isArray(communicationRec.threads) ? communicationRec.threads.map((x) => ({ ...x, type: 'thread' })) : []), ...(Array.isArray(communicationRec.issues) ? communicationRec.issues.map((x) => ({ ...x, type: 'issue' })) : [])];
   const communicationWaiting = communications.filter(allegroKomunikacjaWymagaOdpowiedzi);
   const products = mergeCatalogProducts(data).products, supplierUnavailable = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'brak'), supplierLow = products.filter((p) => String(p.producentStatus || '').toLowerCase() === 'niski'), availabilityDecisions = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};
@@ -307,7 +326,8 @@ async function agentCentrumOperacyjne() {
   addPriority('critical', 'allegro', communicationWaiting.length, 'Nowe wiadomości lub dyskusje Allegro wymagają odpowiedzi', '#/admin/allegro/wiadomosci', 'Przygotuj odpowiedź i oznacz sprawę wewnętrznie po zakończeniu.');
   addPriority('critical', 'producent', supplierNeedsDecision.length, 'Dostępność producentów wymaga decyzji sprzedażowej', '#/admin/magazyn/dostawcy', 'Wybierz: pozostaw 1–7 dni, ukryj, wznów po powrocie albo pozostaw ręcznie aktywny.');
   addPriority('warning', 'wysylki', shipmentsWithoutTracking.length, 'Aktywne zamówienia bez numeru nadania', '#/admin/wysylki', 'Uzupełnij dane InPost i wygeneruj etykiety.');
-  addPriority('warning', 'allegro', activeAllegro.length, 'Aktywne zamówienia Allegro do kontroli magazynowej', '#/admin/allegro/zamowienia', 'Sprawdź kompletację, braki i lokalizacje produktów.');
+  addPriority('warning', 'allegro', activeAllegro.length, 'Aktywne zamówienia Allegro do kontroli magazynowej', '#/admin/allegro/zamowienia', 'Sprawdź rozpoznanie pozycji i realne braki. Lokalizacje obsługuje osobna kolejka magazynu.');
+  addPriority('warning', 'magazyn', warehouseLocationTasks.length, 'Towar w aktywnych zamówieniach bez lokalizacji', '#/admin/magazyn/stany', 'Ustal fizyczne miejsce produktu. Towar pozostaje zarezerwowany i nie blokuje realizacji zamówienia.');
   addPriority('warning', 'producent', supplierLow.length, 'Niski stan produktów u producentów', '#/admin/magazyn/dostawcy', 'Kontroluj najpierw najlepiej sprzedające się produkty.');
   addPriority('warning', 'produkty', offerTasks.length, 'Otwarte zadania wystawiania produktów na Allegro', '#/admin/allegro/wystawianie', 'Uzupełnij wymagane dane i ponów wystawienie.');
   addPriority('warning', 'producenci', supplierOrders.length, 'Otwarte dokumenty zamówień do producentów', '#/admin/magazyn/plan', 'Sprawdź aktualną rewizję przed zatwierdzeniem i wysyłką.');
@@ -323,7 +343,7 @@ async function agentCentrumOperacyjne() {
   const score = Math.max(0, Math.min(100, 100 - critical * 14 - warnings * 5));
   return {
     ok: true, generatedAt: new Date().toISOString(), score, priorities,
-    summary: { orders: orders.length, activeOrders: activeOrders.length, newOrders: newOrders.length, shipmentsWithoutTracking: shipmentsWithoutTracking.length, allegroOrders: allegroOrders.length, activeAllegro: activeAllegro.length, communicationWaiting: communicationWaiting.length, supplierUnavailable: supplierUnavailable.length, supplierLow: supplierLow.length, supplierNeedsDecision: supplierNeedsDecision.length, producerLinks: producerLinks.length, offerTasks: offerTasks.length, supplierOrders: supplierOrders.length, companyOrdersWithoutInvoice: companyOrdersWithoutInvoice.length },
+    summary: { orders: orders.length, activeOrders: activeOrders.length, newOrders: newOrders.length, shipmentsWithoutTracking: shipmentsWithoutTracking.length, allegroOrders: allegroOrders.length, activeAllegro: activeAllegro.length, warehouseLocationTasks: warehouseLocationTasks.length, communicationWaiting: communicationWaiting.length, supplierUnavailable: supplierUnavailable.length, supplierLow: supplierLow.length, supplierNeedsDecision: supplierNeedsDecision.length, producerLinks: producerLinks.length, offerTasks: offerTasks.length, supplierOrders: supplierOrders.length, companyOrdersWithoutInvoice: companyOrdersWithoutInvoice.length },
     integrations, freshness,
     links: { agent: 'https://artwaytm.pl/#/admin/agent-ai', orders: 'https://artwaytm.pl/#/admin/zamowienia', warehouse: 'https://artwaytm.pl/#/admin/magazyn/stany', allegro: 'https://artwaytm.pl/#/admin/allegro', shipping: 'https://artwaytm.pl/#/admin/wysylki', invoices: 'https://artwaytm.pl/#/admin/infakt' },
   };
@@ -1914,17 +1934,14 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
       // blokować zamówienia producenta dla zatwierdzonego powiązania.
       const stock = known ? Math.max(0, Number(stany[productId]) || 0) : 0, reserved = reservations.get(productId) || 0, available = stock - reserved, shortage = Math.max(0, -available);
       const docs = supplierDocsByProduct.get(productId) || [];
-      const decision = shortage > 0 ? 'zamow_u_producenta' : !meta.lokalizacja ? 'uzupelnij_lokalizacje' : 'kompletuj';
-      return { offerId: line.offerId, productId, nazwa: line.offerName || match.product?.nazwa || offer.name || `Produkt ${productId}`, ilosc: quantity, match: match.match, confidence: Number(match.confidence || 0), supplierMatchVerified: match.supplierMatchVerified === true, stock, stockRecordKnown: known, reserved, available, shortage, location: tekst(meta.lokalizacja || '', 120), supplier: tekst(meta.dostawca || match.product?.dostawca || match.product?.supplier || '', 120), product: match.product, supplierOrders: docs, decision };
+      const location = tekst(meta.lokalizacja || '', 120), classification = classifyWarehousePosition({ matched: true, stockKnown: known, shortage, location });
+      return { offerId: line.offerId, productId, nazwa: line.offerName || match.product?.nazwa || offer.name || `Produkt ${productId}`, ilosc: quantity, match: match.match, confidence: Number(match.confidence || 0), supplierMatchVerified: match.supplierMatchVerified === true, stock, stockRecordKnown: known, reserved, available, shortage, location, supplier: tekst(meta.dostawca || match.product?.dostawca || match.product?.supplier || '', 120), product: match.product, supplierOrders: docs, decision: classification.decision, locationMissing: classification.locationMissing, fulfillmentReady: classification.fulfillmentReady };
     });
-    const nierozpoznane = positions.filter((p) => p.decision === 'nierozpoznany').length;
-    const bezStanu = positions.filter((p) => p.decision === 'sprawdz_stan').length;
-    const bezLokalizacji = positions.filter((p) => p.decision === 'uzupelnij_lokalizacje').length;
-    const braki = positions.reduce((sum, p) => sum + Math.max(0, Number(p.shortage) || 0), 0);
+    const analysis = summarizeWarehousePositions(positions);
     let warehouseStage = String(z.warehouseStage || 'do_sprawdzenia').toLowerCase();
     if (z.supplierProcurement?.status === 'dostawa_przyjeta') warehouseStage = 'kompletacja';
-    else if (!['oczekuje_na_dostawe', 'kompletacja', 'spakowane', 'zrealizowane'].includes(warehouseStage)) warehouseStage = braki > 0 ? 'braki' : (nierozpoznane || bezStanu || bezLokalizacji) ? 'do_sprawdzenia' : 'kompletacja';
-    return { ...z, warehouseStage, warehouseStageUpdatedAt: now, agentReviewedAt: now, agentVersion: 'allegro-stock-agent-v1', agentAnalysis: { positions, nierozpoznane, bezStanu, bezLokalizacji, braki, gotowe: !nierozpoznane && !bezStanu && !bezLokalizacji && !braki } };
+    else if (!['oczekuje_na_dostawe', 'kompletacja', 'spakowane', 'zrealizowane'].includes(warehouseStage)) warehouseStage = analysis.braki > 0 ? 'braki' : warehouseAnalysisNeedsInvestigation(analysis) ? 'do_sprawdzenia' : 'kompletacja';
+    return { ...z, warehouseStage, warehouseStageUpdatedAt: now, agentReviewedAt: now, agentVersion: 'allegro-stock-agent-v2', agentAnalysis: { positions, ...analysis } };
   });
   if (autoMapped) await zapisz('allegro_mappings', { items: mappings, updated_at: now });
   const activeIds = new Set(aktywne.map((z) => String(z.id || z.nr || '')));

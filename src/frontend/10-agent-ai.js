@@ -415,8 +415,8 @@ function agentAIAllegroZleceniaTekst(limit=12){
   const aktywne=aktywneZamowieniaAllegro();
   const analizy=aktywne.map(z=>({z,a:allegroAnalizaMagazynowaZamowienia(z)}));
   const braki=analizy.filter(x=>x.a.braki>0), nierozpoznane=analizy.filter(x=>x.a.nierozpoznane>0), bezStanu=analizy.filter(x=>x.a.bezStanu>0), bezLokalizacji=analizy.filter(x=>x.a.bezLokalizacji>0), gotowe=analizy.filter(x=>x.a.gotowe);
-  const rows=analizy.slice(0,limit).map(x=>{const lok=x.a.pozycje.filter(p=>p.decyzja==="kompletuj").map(p=>p.lokalizacja?nazwaLokalizacjiMagazynu(p.lokalizacja):"").filter(Boolean);return `• ${x.z.id} • Allegro: ${allegroStatusKolejkiMeta(x.z).label} • magazyn: ${allegroEtapMagazynuMeta(x.z).label} • ${x.a.gotowe?`pobierz z: ${[...new Set(lok)].join(", ")||"lokalizacja do uzupełnienia"}`:`braki ${x.a.braki} szt., nierozpoznane ${x.a.nierozpoznane}, bez stanu ${x.a.bezStanu}, bez lokalizacji ${x.a.bezLokalizacji}`}`;});
-  return [`📦 Kontrola zleceń Allegro: ${aktywne.length} aktywnych, ${gotowe.length} gotowych do kompletacji, ${braki.length} z brakami, ${nierozpoznane.length} nierozpoznanych, ${bezStanu.length} bez stanu i ${bezLokalizacji.length} bez lokalizacji.`,...rows,braki.length?"Agent dopisuje braki z nowych zleceń do właściwego szkicu producenta; stare zlecenia nie tworzą automatycznie zakupów.":"Nie ma braków wymagających zamówienia u producenta."].join("\n");
+  const rows=analizy.slice(0,limit).map(x=>{const lok=x.a.pozycje.filter(p=>p.decyzja==="kompletuj").map(p=>p.lokalizacja?nazwaLokalizacjiMagazynu(p.lokalizacja):"").filter(Boolean);return `• ${x.z.id} • Allegro: ${allegroStatusKolejkiMeta(x.z).label} • magazyn: ${allegroEtapMagazynuMeta(x.z).label} • ${x.a.gotowe?(x.a.bezLokalizacji?"towar zarezerwowany, lokalizację ustala magazyn":`pobierz z: ${[...new Set(lok)].join(", ")}`):`braki ${x.a.braki} szt., nierozpoznane ${x.a.nierozpoznane}, bez stanu ${x.a.bezStanu}`}`;});
+  return [`📦 Kontrola zleceń Allegro: ${aktywne.length} aktywnych, ${gotowe.length} gotowych do kompletacji, ${braki.length} z brakami, ${nierozpoznane.length} nierozpoznanych i ${bezStanu.length} bez stanu.`,`📍 Osobna kolejka magazynu: ${bezLokalizacji.length} zleceń ma towar bez ustalonej lokalizacji; nie blokuje to rezerwacji ani realizacji.`,...rows,braki.length?"Agent dopisuje wyłącznie realne braki z nowych zleceń do właściwego szkicu producenta; lokalizacja nigdy nie tworzy zakupu.":"Nie ma braków wymagających zamówienia u producenta."].join("\n");
 }
 function agentAIStatusTekst(){
   const analiza=agentAIAnaliza();
@@ -458,8 +458,8 @@ function agentAIMagazynTekst(){
   const niskie=monitorowane.filter(p=>stanMagazynuId(p.id)<=progNiskiProduktu(p));
   const niedostepne=produktyAdmin.filter(produktOznaczonyNiedostepny);
   const braki=potrzebyZatowarowania();
-  const bezKartoteki=produktyAdmin.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
-  return [`🏬 Magazyn: ${produktyAdmin.length} produktów aktywnych w administracji.`,`Monitorowane stany: ${monitorowane.length}; bez monitoringu: ${bezMonitoringu}.`,`Niskie/brak stanu: ${niskie.length}; braki do aktywnych zamówień: ${braki.length}; wyłączone ze sprzedaży: ${niedostepne.length}; bez pełnej kartoteki: ${bezKartoteki.length}.`,niskie.length?`\nPierwsze niskie stany:\n${niskie.slice(0,8).map(p=>`• ${p.nazwa} — stan ${stanMagazynuId(p.id)} szt., próg ${progNiskiProduktu(p)}`).join("\n")}`:""].join("\n");
+  const bezLokalizacji=produktyAdmin.filter(p=>!magazynMetaProduktu(p.id).lokalizacja),bezDostawcy=braki.filter(x=>!x.meta?.dostawca);
+  return [`🏬 Magazyn: ${produktyAdmin.length} produktów aktywnych w administracji.`,`Monitorowane stany: ${monitorowane.length}; bez monitoringu: ${bezMonitoringu}.`,`Realne braki do aktywnych zamówień: ${braki.length}; bez dostawcy w Planie: ${bezDostawcy.length}; lokalizacje do utrzymania przez magazyn: ${bezLokalizacji.length}; wyłączone ze sprzedaży: ${niedostepne.length}.`,niskie.length?`\nPierwsze niskie stany:\n${niskie.slice(0,8).map(p=>`• ${p.nazwa} — stan ${stanMagazynuId(p.id)} szt., próg ${progNiskiProduktu(p)}`).join("\n")}`:""].join("\n");
 }
 function czyEAN(v){
   const c=tylkoCyfry(v);
@@ -1310,9 +1310,9 @@ function agentAIAnaliza(){
   const bezZdjec=produktyAdmin.filter(p=>!p.zdjecie);
   const prog=Number(ustawieniaMagazynuPelne().progNiski)||5, rez=rezerwacjeMagazynowe();
   const niskiStan=produktyAdmin.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s<=progNiskiProduktu(p);});
-  const plan=potrzebyZatowarowania();
+  const plan=potrzebyZatowarowania(),planIds=new Set(plan.map(x=>String(x.produkt?.id||"")));
   const nadrezerwacje=produktyAdmin.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;});
-  const brakKartoteki=produktyAdmin.filter(p=>!magazynMetaProduktu(p.id).lokalizacja||!magazynMetaProduktu(p.id).dostawca);
+  const brakKartoteki=produktyAdmin.filter(p=>planIds.has(String(p.id))&&!magazynMetaProduktu(p.id).dostawca);
   const bezMonitoringu=produktyAdmin.filter(p=>stanMagazynuId(p.id)===null);
   const stareInwentaryzacje=produktyAdmin.filter(p=>{
     const s=stanMagazynuId(p.id), d=magazynMetaProduktu(p.id).ostatniaInwentaryzacja;
@@ -1328,6 +1328,9 @@ function agentAIAnaliza(){
   const produktyWdrozenie=agentAIProduktyWdrozenie();
   const allegroKontrola=aktywneZamowieniaAllegro().map(z=>({z,a:allegroAnalizaMagazynowaZamowienia(z)}));
   const allegroBraki=allegroKontrola.filter(x=>x.a.braki>0||x.a.nierozpoznane>0);
+  const lokalizacjeDoUstalenia=new Map(),dodajBrakLokalizacji=p=>{const id=String(p?.produkt?.id??p?.id??"");if(id&&!lokalizacjeDoUstalenia.has(id))lokalizacjeDoUstalenia.set(id,p.produkt||produktMagazynowy(id)||{id,nazwa:p.nazwa||`Produkt ${id}`});};
+  allegroKontrola.flatMap(x=>x.a.pozycje||[]).filter(p=>p.brakLokalizacji).forEach(dodajBrakLokalizacji);
+  aktywne.flatMap(z=>pozycjeZamowieniaMagazyn(z)).forEach(p=>{const stan=stanMagazynuId(p.id),meta=magazynMetaProduktu(p.id);if(stan!==null&&stan>=Number(rez[p.id]||0)&&!meta.lokalizacja)dodajBrakLokalizacji(p);});
   const allegroOfertaTasks=allegroAktywneZadaniaAgentaOfert();
   const allegroDefaultsIssues=Object.values(allegroStan.offerDefaultsAudit?.items||{}).filter(x=>!x.stockUpdated||!x.republishUpdated);
   const problemyFunkcji=[!chmuraStan.dostepna?"wspólna baza":null,stanBramki.sprawdzono&&stanBramki.email?.configured===false?"e-mail":null,stanBramki.sprawdzono&&stanBramki.inpost?.configured===false?"InPost":null,allegroStan.sprawdzono&&!allegroStan.connected?"Allegro":null,infaktStan.sprawdzono&&!infaktStan.connected?"inFakt":null].filter(Boolean);
@@ -1337,6 +1340,7 @@ function agentAIAnaliza(){
     {id:"synchronizacja-danych",poziom:!chmuraStan.admin?"bad":syncStale?"warn":"ok",ikona:"🔄",tytul:"Pobieranie i świeżość danych — priorytet 2",opis:!chmuraStan.admin?"Agent nie ma aktywnego dostępu do wspólnej bazy.":syncAge===null?"Brak potwierdzonego czasu ostatniej synchronizacji.":`Ostatnia synchronizacja wspólnej bazy: ${syncAge} min temu.`,akcja:"plan-bezpieczny"},
     {id:"wdrozenie-produktow",poziom:produktyWdrozenie.some(p=>p.agentOnboardingStatus==="needs_attention")?"bad":produktyWdrozenie.length?"warn":"ok",ikona:"✨",tytul:"Nowe produkty administratora — wdrożenie Agenta",opis:produktyWdrozenie.length?`${produktyWdrozenie.length} nowych produktów wymaga dokończenia kontroli danych, duplikatów, opisów, zdjęć, producenta, kategorii sklepu lub przygotowania Allegro.`:"Każdy nowy produkt administratora przeszedł pełną kontrolę Agenta.",akcja:"#/admin/agent-ai/produkty"},
     {id:"allegro-magazyn",poziom:allegroBraki.length?"bad":"ok",ikona:"🟠",tytul:"Zlecenia Allegro — braki i pakowanie",opis:allegroBraki.length?`${allegroBraki.length} aktywnych zleceń Allegro wymaga zamówienia brakujących sztuk albo poprawy EAN/SKU.`:`${allegroKontrola.length} aktywnych zleceń Allegro sprawdzono; stany pozwalają na kompletację.`,akcja:"#/admin/allegro/zamowienia"},
+    {id:"lokalizacje-kompletacja",poziom:lokalizacjeDoUstalenia.size?"warn":"ok",ikona:"📍",tytul:"Magazyn — lokalizacje do kompletacji",opis:lokalizacjeDoUstalenia.size?`${lokalizacjeDoUstalenia.size} produktów z aktywnych zamówień ma pokrycie w stanie, ale nie ma przypisanego miejsca. Towar pozostaje zarezerwowany; magazyn ustala lokalizację osobno.`:"Towar do aktywnych zamówień ma przypisane lokalizacje albo nie wymaga jeszcze kompletacji.",akcja:"#/admin/magazyn/stany"},
     {id:"allegro-oferty-agent",poziom:allegroOfertaTasks.length?"warn":"ok",ikona:"🏷️",tytul:"Agent ofert Allegro",opis:allegroOfertaTasks.length?`${allegroOfertaTasks.length} produktów ma zapisane braki danych albo błąd API wystawiania.`:"Brak otwartych zadań dotyczących ofert Allegro.",akcja:"#/admin/allegro/wystawianie"},
     {id:"allegro-ustawienia-ofert",poziom:allegroDefaultsIssues.length?"warn":"ok",ikona:"♻️",tytul:"Oferty Allegro — stan i wznawianie",opis:allegroDefaultsIssues.length?`${allegroDefaultsIssues.length} starszych ofert wymaga uzupełnienia danych wymaganych przez Allegro, aby włączyć automatyczne wznawianie. Domyślny stan sprzedażowy ${allegroStanOfertyProduktu()} jest niezależny od magazynu.`:`Oferty mają ustawiony domyślny stan ${allegroStanOfertyProduktu()} szt. i automatyczne wznawianie.`,akcja:"#/admin/allegro/ustawienia"},
     {id:"dostepnosc",poziom:doPotwierdzenia.length?"warn":"ok",ikona:"🔎",tytul:"Zamówienia do potwierdzenia dostępności",opis:doPotwierdzenia.length?`${doPotwierdzenia.length} zamówień ma pozycje powyżej ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} szt.`:"Brak zamówień wymagających potwierdzenia ilości.",akcja:"#/admin/zamowienia"},
@@ -1349,7 +1353,7 @@ function agentAIAnaliza(){
     {id:"zatowarowanie",poziom:plan.length?"warn":"ok",ikona:"📦",tytul:"Plan zatowarowania — braki do zamówień",opis:plan.length?`${plan.length} produktów brakuje do aktywnych zamówień. Szacowana wartość braków: ${zl(plan.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0))}.`:"Brak produktów, których brakuje do aktywnych zamówień.",akcja:"utworz-zlecenie-braki"},
     {id:"przyjecia-nadwyzek",poziom:nadwyzki.length?"warn":"ok",ikona:"📥",tytul:"Dzienne przyjęcie nadwyżek",opis:nadwyzki.length?`${nadwyzki.length} pozycji ze zleceń agenta ma nadwyżkę do decyzji/przyjęcia na magazyn.`:"Brak nadwyżek oczekujących na przyjęcie.",akcja:"#/admin/magazyn/plan"},
     {id:"nadrezerwacje",poziom:nadrezerwacje.length?"bad":"ok",ikona:"🚨",tytul:"Rezerwacje większe niż stan",opis:nadrezerwacje.length?`${nadrezerwacje.length} produktów ma więcej sztuk w aktywnych zamówieniach niż fizycznie w magazynie.`:"Nie ma nadrezerwacji magazynowych.",akcja:"#/admin/magazyn"},
-    {id:"kartoteka",poziom:brakKartoteki.length?"warn":"ok",ikona:"🗂️",tytul:"Kartoteka magazynowa",opis:brakKartoteki.length?`${brakKartoteki.length} produktów nie ma lokalizacji albo dostawcy.`:"Kartoteka magazynowa jest uzupełniona.",akcja:"kartoteka-domyslna"},
+    {id:"kartoteka",poziom:brakKartoteki.length?"warn":"ok",ikona:"🗂️",tytul:"Kartoteka zakupowa",opis:brakKartoteki.length?`${brakKartoteki.length} produktów z realnym brakiem nie ma przypisanego dostawcy.`:"Każdy realny brak ma dane potrzebne do Planu zatowarowania.",akcja:"#/admin/magazyn/stany"},
     {id:"lokalizacje",poziom:(!lokAktywne.length||lokPozaSlownikiem.length)?"warn":"ok",ikona:"🗺️",tytul:"Słownik lokalizacji magazynu",opis:!lokAktywne.length?"Brak utworzonych lokalizacji magazynu.":lokPozaSlownikiem.length?`${lokPozaSlownikiem.length} lokalizacji przy produktach nie ma w słowniku.`:`Aktywne lokalizacje: ${lokAktywne.length}.`,akcja:"#/admin/magazyn"},
     {id:"pamiec",poziom:(agentAIPamiec||[]).length?"ok":"warn",ikona:"🧠",tytul:"Pamięć i procedury agenta",opis:(agentAIPamiec||[]).length?`Agent ma ${(agentAIPamiec||[]).length} zapamiętanych procedur/notatek.`:"Agent nie ma jeszcze własnych procedur. Naucz go poleceniem „zapamiętaj: …”.",akcja:"#/admin/agent-ai"},
     {id:"linki-producentow",poziom:linkiDoWyboru.length?"bad":linkiProd.length?"warn":"ok",ikona:"🔗",tytul:"Linki producentów do pobrania",opis:linkiProd.length?`${linkiProd.length} zadań linków: ${linkiDoWyboru.length} wymaga wyboru właściwego produktu, ${linkiDoPonowienia.length} jest gotowych do ponownego pobrania.`:"Brak zaległych linków producentów.",akcja:"sprawdz-linki-producentow"},
@@ -1504,8 +1508,9 @@ function agentAIOpisKroku(x){
     magazyn:"Sprawdź produkty z niskim stanem i zdecyduj, czy zamówić uzupełnienie.",
     zatowarowanie:"Przygotuj zamówienie do producenta tylko pod realne braki aktywnych zamówień.",
     nadrezerwacje:"Najpierw obsłuż nadrezerwacje — blokują kompletację zamówień.",
-    kartoteka:"Uzupełnij lokalizację, dostawcę, EAN i progi magazynowe.",
-    lokalizacje:"Utwórz brakujące lokalizacje w słowniku i przypisz je do produktów.",
+    kartoteka:"Uzupełnij dostawcę wyłącznie dla realnych braków obecnych w Planie zatowarowania.",
+    "lokalizacje-kompletacja":"Magazyn przypisuje miejsce towarom z aktywnych zamówień; rezerwacja i kompletacja pozostają aktywne.",
+    lokalizacje:"Utwórz brakujące lokalizacje w słowniku i przypisz je do produktów jako osobne zadanie magazynu.",
     pamiec:"Dodaj procedury, których agent ma pilnować przy kolejnych poleceniach.",
     "linki-producentow":"Ponów pobranie URL-i producentów i sprawdź, które dane trzeba jeszcze uzupełnić w karcie produktu.",
     "allegro-oferty-agent":"Uzupełnij automatyczne sugestie producenta, kategorii i produktu katalogowego; pozostałe braki otwórz w edytorze produktu.",
