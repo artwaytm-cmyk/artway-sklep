@@ -324,6 +324,10 @@ let chmuraAutoSyncOstatniStart = 0;
 let chmuraOstatniPullZmienilDane = false;
 let chmuraOstatniaSynchronizacjaCentralnaZmienilaDane = false;
 let chmuraKatalogImportowanyRev = "";
+let chmuraBrudneKlucze = new Set();
+let chmuraZapisWToku = null;
+let chmuraZapisPonowPoZakonczeniu = false;
+let chmuraNumerMutacji = 0;
 async function chmuraPobierzKatalogImportowany(meta={},force=false){
   const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
   if(!force&&revision===chmuraKatalogImportowanyRev)return false;
@@ -482,6 +486,10 @@ function nalozWspolneUstawienia(dane){
     return zmieniono;
   } finally { chmuraWczytywanie = false; }
 }
+function chmuraPominBrudneDaneSerwera(dane={}){
+  if(!maUprawnieniaZapisuChmury()||!chmuraBrudneKlucze.size)return dane;
+  return Object.fromEntries(Object.entries(dane||{}).filter(([klucz])=>!chmuraBrudneKlucze.has(klucz)));
+}
 async function chmuraWczytajStan(){
   chmuraOstatniPullZmienilDane=false;
   try{
@@ -494,7 +502,7 @@ async function chmuraWczytajStan(){
     // Admin (z tokenem): nakładaj TYLKO gdy serwer ma nowszą wersję niż ostatnio zsynchronizowana —
     // dzięki temu wczytanie strony NIE kasuje świeżych, jeszcze niewysłanych zmian admina.
     if(d.settings && Object.keys(d.settings).length && (!maUprawnieniaZapisuChmury() || serwerNowszy)){
-      chmuraOstatniPullZmienilDane=nalozWspolneUstawienia(d.settings)||chmuraOstatniPullZmienilDane;
+      chmuraOstatniPullZmienilDane=nalozWspolneUstawienia(chmuraPominBrudneDaneSerwera(d.settings))||chmuraOstatniPullZmienilDane;
       zapiszLS("artway_chmura_rev", d.rev||0);
     }
     if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
@@ -508,28 +516,38 @@ function zaplanujZapisUstawien(){
   clearTimeout(chmuraTimerZapisu);
   chmuraTimerZapisu = setTimeout(chmuraZapiszUstawienia, 1200);
 }
-async function chmuraZapiszUstawienia(){
+async function chmuraZapiszUstawienia(opcje={}){
   if(!maUprawnieniaZapisuChmury()) return false;
-  try{
-    const expectedRev=Number(chmuraStan.rev||wczytajLS("artway_chmura_rev",0));
-    if(!Number.isSafeInteger(expectedRev)||expectedRev<0)throw new Error("Brakuje aktualnej rewizji wspólnej bazy. Najpierw pobierz dane z serwera.");
-    const d = await chmura("settings", {method:"POST", body:{settings: zbierzWspolneUstawienia(),expectedRev}});
-    chmuraStan = {...chmuraStan, dostepna:true, admin:true, rev:d.rev||chmuraStan.rev, updated_at:d.updated_at||null, error:"", ostatniZapis:Date.now()};
-    zapiszLS("artway_chmura_rev", d.rev||chmuraStan.rev);   // zapamiętaj, że to my mamy najnowszą wersję
-    return true;
-  }catch(e){
-    chmuraStan = {...chmuraStan, error:e.message};
-    if(e.code==="auth") toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
-    else if(e.code==="settings_write_conflict") toast("⚠️ Dane na serwerze zmieniły się. Niczego nie nadpisano — pobierz aktualną wersję i ponów zmianę.");
-    loguj("blad","Zapis ustawień w chmurze: "+e.message);
-    return false;
+  if(chmuraZapisWToku){chmuraZapisPonowPoZakonczeniu=true;return chmuraZapisWToku;}
+  chmuraZapisWToku=(async()=>{
+    const snapshot=zbierzWspolneUstawienia(),klucze=(opcje.all===true?KLUCZE_WSPOLNE:[...chmuraBrudneKlucze]).filter(k=>Object.prototype.hasOwnProperty.call(snapshot,k));
+    if(!klucze.length)return true;
+    const patch=Object.fromEntries(klucze.map(k=>[k,snapshot[k]])),odciski=Object.fromEntries(klucze.map(k=>[k,JSON.stringify(snapshot[k])]));
+    const expectedRev=Number(chmuraStan.rev||wczytajLS("artway_chmura_rev",0))||0,mutationId=`web-${Date.now().toString(36)}-${(++chmuraNumerMutacji).toString(36)}`;
+    try{
+      const d=await chmura("settings",{method:"POST",body:{mode:"patch",patch,expectedRev,mutationId},timeout:30000});
+      chmuraStan={...chmuraStan,dostepna:true,admin:true,rev:d.rev||chmuraStan.rev,updated_at:d.updated_at||null,error:"",ostatniZapis:Date.now()};
+      localStorage.setItem("artway_chmura_rev",JSON.stringify(d.rev||chmuraStan.rev));
+      const teraz=zbierzWspolneUstawienia();
+      for(const k of klucze)if(JSON.stringify(teraz[k])===odciski[k])chmuraBrudneKlucze.delete(k);
+      return true;
+    }catch(e){
+      chmuraStan={...chmuraStan,error:e.message};
+      if(e.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
+      else if(e.code==="settings_write_conflict")toast("⚠️ Serwer jest zajęty inną zmianą — dane lokalne zostały zachowane i zapis zostanie ponowiony.");
+      loguj("blad","Zapis ustawień w chmurze: "+e.message);return false;
+    }
+  })();
+  try{return await chmuraZapisWToku;}finally{
+    chmuraZapisWToku=null;
+    if(chmuraBrudneKlucze.size||chmuraZapisPonowPoZakonczeniu){chmuraZapisPonowPoZakonczeniu=false;clearTimeout(chmuraTimerZapisu);chmuraTimerZapisu=setTimeout(chmuraZapiszUstawienia,1200);}
   }
 }
 // Ręczne WYSŁANIE całego sklepu z tego urządzenia na serwer (dla wszystkich).
 async function chmuraWyslijWszystko(){
   if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   toast("Wysyłanie na serwer…");
-  const okU = await chmuraZapiszUstawienia();
+  const okU = await chmuraZapiszUstawienia({all:true});
   await synchronizujBazeCentralna(true).catch(()=>{});
   if(okU) toast("📤 Cały sklep wysłany na serwer — widoczny na każdym urządzeniu ✅");
   else toast("⚠️ Nie udało się wysłać — sprawdź hasło bazy");
@@ -540,6 +558,7 @@ async function chmuraPobierzWszystko(){
   try{
     const d = await chmura("pull",{params:{catalogRev:""}});
     await chmuraPobierzKatalogImportowany(d,true);
+    chmuraBrudneKlucze.clear();
     if(d.settings && Object.keys(d.settings).length){ nalozWspolneUstawienia(d.settings); zapiszLS("artway_chmura_rev", d.rev||0); }
     chmuraStan = {...chmuraStan, dostepna:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     if(chmuraToken) await synchronizujBazeCentralna(true).catch(()=>{});
@@ -620,7 +639,7 @@ function zapiszLS(klucz, dane){
     try{localStorage.setItem(klucz,serial);zmieniono=true;}
     catch(e2){zmieniono=false;loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
   }
-  if(zmieniono && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ zaplanujZapisUstawien(); }
+  if(zmieniono && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
   return zmieniono;
 }
 const kwotaNum = v => { const n=Number(String(v ?? 0).replace(",",".").replace(/[^0-9.-]/g,"")); return Number.isFinite(n) ? +n.toFixed(2) : 0; };

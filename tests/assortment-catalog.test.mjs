@@ -52,3 +52,18 @@ test("układ katalogu jest responsywny i wspiera zwartą tabelę",async()=>{
   }
   assert.match(css,/@media\(max-width:620px\).*assortment-advanced-grid/);
 });
+
+test("katalog ma kolejkę Agenta i potwierdzane decyzje masowe Allegro",async()=>{
+  const catalog=await read("src/frontend/12-customers-and-inventory.js"),actions=await read("src/frontend/12a-product-actions.js"),css=await read("src/styles/15-product-actions.css");
+  assert.match(catalog,/data-product-agent-center/);
+  assert.match(catalog,/asortymentMenuDzialanProduktuHTML\(p\)/);
+  for(const marker of ["Pełna kontrola i uzupełnienie","Odśwież dane producenta","Przygotuj / sprawdź szkic","Pobierz prowizje i opłaty","Aktualizuj istniejące oferty","Opublikuj / aktywuj sprzedaż","Zakończ powiązane oferty"]){
+    assert.match(actions,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));
+  }
+  assert.match(actions,/Agent nie wykona tej operacji samodzielnie/);
+  assert.match(actions,/data-external-product-confirm/);
+  assert.match(actions,/Promise\.all\(Array\.from\(\{length:Math\.min\(2,products\.length\)\},worker\)\)/);
+  assert.match(css,/\.product-action-center/);
+  assert.match(css,/\.product-external-confirm/);
+  assert.match(css,/@media\(max-width:620px\)/);
+});

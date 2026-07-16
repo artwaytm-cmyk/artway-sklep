@@ -6827,6 +6827,20 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
+      if (body.mode === 'patch') {
+        const patch = oczyscUstawienia(body.patch), changedKeys = Object.keys(patch), mutationId = tekst(body.mutationId, 120);
+        if (!changedKeys.length) return odpowiedz({ ok: true, unchanged: true, changedKeys: [] });
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const version = await czytajWersjonowane('settings', { data: {}, rev: 0, updated_at: null }), prev = version.value || { data: {}, rev: 0, updated_at: null };
+          if (mutationId && prev.last_mutation_id === mutationId) return odpowiedz({ ok: true, duplicatePrevented: true, changedKeys, rev: prev.rev, updated_at: prev.updated_at });
+          const dane = preserveSupplierPlanOnGenericSettings({ ...(prev.data || {}), ...patch }, prev.data), updated_at = new Date().toISOString();
+          if (JSON.stringify(dane).length > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
+          const rec = { ...prev, data: dane, rev: Number(prev.rev || 0) + 1, updated_at, last_mutation_id: mutationId || undefined };
+          const write = await zapiszJesliWersja('settings', rec, version);
+          if (write?.modified) return odpowiedz({ ok: true, changedKeys, rev: rec.rev, updated_at, rebased: Number(body.expectedRev) !== Number(prev.rev || 0) });
+        }
+        return odpowiedz({ ok: false, error: 'Serwer równolegle zapisuje inne dane. Zmiana nie została utracona — ponów zapis.', code: 'settings_write_conflict' }, 409);
+      }
       const incoming = oczyscUstawienia(body.settings);
       const expectedRev = Number(body.expectedRev);
       if (!Number.isSafeInteger(expectedRev) || expectedRev < 0) {

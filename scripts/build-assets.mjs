@@ -33,6 +33,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/11-allegro-and-orders.js',
       'src/frontend/11-allegro-settings.js',
       'src/frontend/12-customers-and-inventory.js',
+      'src/frontend/12a-product-actions.js',
       'src/frontend/20-product-link-file-import-parser.js',
       'src/frontend/21-product-link-file-import-ui.js',
       'src/frontend/13-product-admin.js',
@@ -67,6 +68,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/12-allegro-compliance.css',
       'src/styles/13-dashboard.css',
       'src/styles/14-product-link-import.css',
+      'src/styles/15-product-actions.css',
     ],
   },
 ]);

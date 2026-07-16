@@ -82,16 +82,16 @@ function ustawCene(id, wartosc){
 /* ── Akcje masowe na produktach ── */
 let zaznaczoneProdukty = new Set();
 let asortymentWynikiIds=[],asortymentStronaIds=[];
-function przelaczZaznProd(id){ zaznaczoneProdukty.has(id) ? zaznaczoneProdukty.delete(id) : zaznaczoneProdukty.add(id); }
+function przelaczZaznProd(id){ zaznaczoneProdukty.has(id) ? zaznaczoneProdukty.delete(id) : zaznaczoneProdukty.add(id); asortymentOdswiezStanZaznaczenia(); }
 function zaznaczWidoczneProd(chk, ids){
   ids.forEach(id => chk.checked ? zaznaczoneProdukty.add(id) : zaznaczoneProdukty.delete(id));
-  renderuj();
+  asortymentOdswiezStanZaznaczenia();
 }
 function ustawZaznaczenieProduktow(ids,zaznacz=true){
   for(const raw of Array.isArray(ids)?ids:[]){const id=Number(raw);if(!Number.isFinite(id))continue;zaznacz?zaznaczoneProdukty.add(id):zaznaczoneProdukty.delete(id);}
-  renderuj();
+  asortymentOdswiezStanZaznaczenia();
 }
-function wyczyscZaznaczenieProduktow(){zaznaczoneProdukty.clear();renderuj();}
+function wyczyscZaznaczenieProduktow(){zaznaczoneProdukty.clear();asortymentOdswiezStanZaznaczenia();}
 function asortymentZaznaczZakres(zakres){ustawZaznaczenieProduktow(zakres==="strona"?asortymentStronaIds:asortymentWynikiIds,true);}
 function asortymentEksportuj(zakres){
   if(zakres==="zaznaczone")return eksportujProduktyPoIdCSV([...zaznaczoneProdukty],"produkty-zaznaczone.csv");

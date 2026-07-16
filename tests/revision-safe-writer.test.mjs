@@ -36,10 +36,20 @@ test('świeży następny rekord jest zapisywany warunkowo po ETag', async () => 
   assert.equal(current.value.rev, 5);
 });
 
-test('pełny zapis ustawień przesyła i egzekwuje oczekiwaną rewizję', () => {
+test('zwykły zapis wysyła tylko zmienione dziedziny i serwer scala je warunkowo', () => {
   const frontend = fs.readFileSync(new URL('../src/frontend/03-cloud-sync.js', import.meta.url), 'utf8');
   const backend = fs.readFileSync(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8');
-  assert.match(frontend, /body:\{settings:\s*zbierzWspolneUstawienia\(\),expectedRev\}/);
+  assert.match(frontend, /chmuraBrudneKlucze = new Set\(\)/);
+  assert.match(frontend, /body:\{mode:"patch",patch,expectedRev,mutationId\}/);
+  assert.match(frontend, /chmuraPominBrudneDaneSerwera/);
+  assert.match(backend, /if \(body\.mode === 'patch'\)/);
+  assert.match(backend, /\.\.\.\(prev\.data \|\| \{\}\), \.\.\.patch/);
+  assert.match(backend, /last_mutation_id === mutationId/);
+  assert.match(backend, /for \(let attempt = 0; attempt < 5; attempt\+\+\)/);
+});
+
+test('ręczny zgodnościowy pełny zapis nadal egzekwuje oczekiwaną rewizję', () => {
+  const backend = fs.readFileSync(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8');
   assert.match(backend, /const expectedRev = Number\(body\.expectedRev\)/);
   assert.match(backend, /Number\(prev\.rev \|\| 0\) !== expectedRev/);
   assert.match(backend, /zapiszJesliWersja\('settings', rec, version\)/);

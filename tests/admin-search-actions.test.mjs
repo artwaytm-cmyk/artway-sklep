@@ -11,7 +11,8 @@ test("wspólny panel wyszukiwania obsługuje wybór i eksport zakresu",async()=>
   assert.match(navigation,/Zaznacz stronę/);
   assert.match(navigation,/Zaznacz wszystkie wyniki/);
   assert.match(navigation,/Eksportuj plik/);
-  assert.match(navigation,/Zaznaczone \(\$\{n\}\)/);
+  assert.match(navigation,/Zaznaczone \(<span data-admin-selected-count>\$\{n\}<\/span>\)/);
+  assert.match(navigation,/data-admin-selected-required/);
   assert.match(navigation,/Wszystkie wyniki \(\$\{results\}\)/);
 });
 
