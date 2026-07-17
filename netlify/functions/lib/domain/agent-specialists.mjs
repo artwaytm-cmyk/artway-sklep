@@ -16,59 +16,68 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-17.1';
+const PROMPT_VERSION = '2026-07-18.1';
 const NEVER_AUTOMATIC = Object.freeze(['wysyłanie wiadomości', 'publikacja Allegro', 'zmiana ceny', 'zmiana stanu', 'usuwanie', 'zamówienie u producenta']);
 
 const SPECIALISTS = Object.freeze({
   product_content: {
+    assistantId: 'asst_bi27lcqG4p4pGx5TouNEE94J',
     icon: '✨', label: 'Redaktor produktu', area: 'Katalog i sklep',
     description: 'Tworzy spójny tytuł, krótki i pełny opis oraz pola SEO wyłącznie z przekazanych faktów.',
     fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
     rules: 'Zachowaj dokładną nazwę handlową produktu; poprawiaj ją tylko przy oczywistej literówce. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach.',
   },
   allegro_offer: {
+    assistantId: 'asst_16UEvdbo3boUso6xyYeANYnQ',
     icon: '🟠', label: 'Redaktor oferty Allegro', area: 'Allegro',
     description: 'Przygotowuje tytuł i układ opisu zgodny z zasadami Allegro, bez kontaktu i sprzedaży poza platformą.',
     fields: ['allegro_title', 'allegro_description', 'selling_points', 'missing_parameters'],
     rules: 'Nigdy nie dodawaj telefonu, e-maila, adresu strony, prośby o kontakt, negocjowania ceny ani zachęty do zakupu poza Allegro. Opis: wyłącznie p, h2, ul, li i strong, bez linków.',
   },
   customer_reply: {
+    assistantId: 'asst_M2ZRdoHVzQ0jIzYZ3TCLwcoI',
     icon: '💬', label: 'Opiekun klienta', area: 'Wiadomości i dyskusje',
     description: 'Układa serdeczny szkic odpowiedzi na podstawie całej rozmowy, zamówienia i potwierdzonego statusu przesyłki.',
     fields: ['subject', 'reply'],
     rules: 'Nie obiecuj zwrotu, ponownej wysyłki, terminu ani statusu, którego nie potwierdzają fakty. To zawsze szkic do zatwierdzenia.',
   },
   seo_promotion: {
+    assistantId: 'asst_LM0aFCDpHHXGgWI28ZdLHjJw',
     icon: '🔎', label: 'Specjalista SEO', area: 'Pozycjonowanie',
     description: 'Przygotowuje naturalne frazy, meta dane i plan bezpłatnej promocji bez upychania słów kluczowych.',
     fields: ['seo_title', 'meta_description', 'keywords', 'slug', 'internal_link_anchor', 'promotion_plan'],
     rules: 'Nie twórz niepotwierdzonych przewag, bestsellerów ani obietnic. Używaj marki Allegro wyłącznie opisowo i zgodnie z kontekstem.',
   },
   campaign_copy: {
+    assistantId: 'asst_yr8O2brC4yJ9KFmDFpmWQNPB',
     icon: '📣', label: 'Strateg promocji', area: 'Promocje i kody rabatowe',
     description: 'Buduje gotowy zestaw tekstów kampanii i bezpłatny plan promocji dla wskazanych produktów.',
     fields: ['campaign_name', 'headline', 'subheadline', 'cta', 'store_announcement', 'social_post', 'promotion_plan'],
     rules: 'Kod, rabat, daty i warunki muszą pochodzić z faktów. Jeśli ich brak, wskaż je jako brak zamiast wymyślać.',
   },
   banner_copy: {
+    assistantId: 'asst_4dPRadSuHeusSVkuzvFe9TKg',
     icon: '🎨', label: 'Dyrektor bannera', area: 'Grafiki AI',
     description: 'Z krótkiej intencji tworzy precyzyjny brief grafiki oraz tekst nakładany przez stronę.',
     fields: ['headline', 'subheadline', 'cta', 'image_brief', 'mobile_crop_guidance', 'alt_text'],
     rules: 'Brief nie może prosić modelu obrazu o generowanie liter. Teksty są nakładane osobno przez sklep. Nie kopiuj chronionych postaci ani marek.',
   },
   supplier_message: {
+    assistantId: 'asst_63UuzQm4UNsjileYU7Wue7pd',
     icon: '🏭', label: 'Koordynator producenta', area: 'Plan zatowarowania',
     description: 'Redaguje krótki e-mail do producenta wokół kanonicznej tabeli zamówienia.',
     fields: ['subject', 'intro', 'closing', 'import_instruction'],
     rules: 'Nie dodawaj cen, marż ani stanów. Nie zmieniaj kodów, nazw i ilości z tabeli. Treść ma być krótka i serdeczna.',
   },
   catalog_quality: {
+    assistantId: 'asst_0iw94LI9kTcnLpiOUzr8VnPj',
     icon: '🛡️', label: 'Kontroler jakości', area: 'Audyt treści',
     description: 'Wykrywa sprzeczności, duplikaty tekstu, braki i ryzykowne sformułowania, nie zapisując zmian samodzielnie.',
     fields: ['assessment', 'recommended_changes', 'compliance_notes'],
     rules: 'Oddziel błędy pewne od podejrzeń. Nie oznaczaj duplikatu bez jednoznacznych identyfikatorów lub bardzo mocnych dowodów.',
   },
   operations_supervisor: {
+    assistantId: 'asst_fgnFEmmPmCSsqEiO9uIgO3Kh',
     icon: '🧭', label: 'Koordynator operacyjny', area: 'Nadzór sklepu',
     description: 'Porządkuje wykryte ryzyka, wskazuje jedną rekomendację i czytelne warianty decyzji administratora.',
     fields: ['priority', 'problem', 'recommended_action', 'alternative_action', 'decision_question'],
@@ -90,8 +99,11 @@ const RESULT_SCHEMA = Object.freeze({
           key: { type: 'string' },
           label: { type: 'string' },
           value: { type: 'string' },
+          current_value: { type: 'string', description: 'Bieżąca wartość przekazana w faktach albo pusty tekst.' },
+          reason: { type: 'string', description: 'Konkretna przyczyna proponowanej zmiany.' },
+          evidence: { type: 'string', description: 'Fakt źródłowy będący podstawą zmiany albo informacja, że jest to redakcja istniejącej treści.' },
         },
-        required: ['key', 'label', 'value'],
+        required: ['key', 'label', 'value', 'current_value', 'reason', 'evidence'],
         additionalProperties: false,
       },
     },
@@ -183,6 +195,9 @@ function normalizeDecision(raw = {}, timestamp = new Date().toISOString()) {
     href: clean(raw.href, 300), runId: clean(raw.runId, 120), createdAt: clean(raw.createdAt, 40) || timestamp,
     updatedAt: clean(raw.updatedAt, 40) || timestamp, snoozedUntil: clean(raw.snoozedUntil, 40),
     resolvedAt: clean(raw.resolvedAt, 40), resolvedBy: clean(raw.resolvedBy, 120), resolutionNote: clean(raw.resolutionNote, 500),
+    operationId: clean(raw.operationId, 120), executionStatus: ['idle', 'running', 'completed', 'failed'].includes(raw.executionStatus) ? raw.executionStatus : 'idle',
+    attemptCount: number(raw.attemptCount, 0, 0, 100), startedAt: clean(raw.startedAt, 40), completedAt: clean(raw.completedAt, 40),
+    lastError: safeError(raw.lastError), lastErrorCode: clean(raw.lastErrorCode, 120), appliedFields: (Array.isArray(raw.appliedFields) ? raw.appliedFields : []).map((item) => clean(item, 80)).filter(Boolean).slice(0, 30),
   };
 }
 
@@ -210,6 +225,9 @@ function normalizeResult(raw = {}, specialist) {
     key: clean(field?.key, 80).toLowerCase().replace(/[^a-z0-9_]/g, '_'),
     label: clean(field?.label, 120),
     value: clean(field?.value, 30000),
+    currentValue: clean(field?.current_value ?? field?.currentValue, 30000),
+    reason: clean(field?.reason, 700),
+    evidence: clean(field?.evidence, 700),
   })).filter((field) => field.key && field.value && allowed.has(field.key) && !seen.has(field.key) && seen.add(field.key));
   const list = (value, limit = 20) => (Array.isArray(value) ? value : []).map((item) => clean(item, 500)).filter(Boolean).slice(0, limit);
   const missingFacts = list(raw.missingFacts);
@@ -301,9 +319,38 @@ function communicationFacts(item = {}, type = 'thread') {
   return sanitizeContext({ type, subject: item.subject || item.topic, orderId: item.orderId || item.checkoutFormId, status: item.status, chatActive: item.chatActive, messages });
 }
 
-export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY, model = process.env.OPENAI_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-5-nano', now = () => new Date() } = {}) {
+export function createAgentSpecialists({
+  readVersioned, writeIfVersion, fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY,
+  model = process.env.OPENAI_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-5-nano', now = () => new Date(),
+  platformAgentsEnabled = process.env.OPENAI_PLATFORM_AGENTS !== 'false' && !String(apiKey || '').startsWith('test-'),
+} = {}) {
   if (typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function') throw new Error('Specjaliści GPT wymagają wersjonowanego repozytorium.');
   if (typeof fetchImpl !== 'function') throw new Error('Specjaliści GPT wymagają klienta HTTP.');
+  const platformProfiles = new Map();
+
+  async function platformAgentProfile(specialist, definition) {
+    if (!platformAgentsEnabled || !definition?.assistantId || !clean(apiKey, 500)) return null;
+    const cached = platformProfiles.get(specialist);
+    if (cached && now().getTime() - cached.checkedAt < 6 * 60 * 60_000) return cached;
+    try {
+      const response = await fetchImpl(`https://api.openai.com/v1/assistants/${encodeURIComponent(definition.assistantId)}`, {
+        headers: { authorization: `Bearer ${apiKey}`, 'OpenAI-Beta': 'assistants=v2' }, signal: AbortSignal.timeout(20_000),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw responseError(response, payload);
+      const profile = {
+        id: clean(payload.id, 120), name: clean(payload.name, 180) || definition.label,
+        model: clean(payload.model, 80), instructions: clean(payload.instructions, 12_000),
+        checkedAt: now().getTime(), available: true,
+      };
+      platformProfiles.set(specialist, profile);
+      return profile;
+    } catch (error) {
+      const profile = { id: definition.assistantId, name: definition.label, model: '', instructions: '', checkedAt: now().getTime(), available: false, error: safeError(error?.message || error) };
+      platformProfiles.set(specialist, profile);
+      return profile;
+    }
+  }
 
   async function change(key, fallback, mutator) {
     for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
@@ -346,23 +393,61 @@ export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImp
 
   async function updateDecision(id = '', action = '', raw = {}, actor = {}) {
     const safeId = clean(id, 120), safeAction = clean(action, 40), timestamp = now().toISOString(), who = clean(actor?.email || actor?.name || actor?.source || 'administrator', 120);
-    const previous = await readState(), decision = previous.decisions.find((item) => item?.id === safeId);
-    if (!decision) throw Object.assign(new Error('Nie znaleziono decyzji Agenta.'), { code: 'agent_decision_not_found', status: 404 });
-    if (safeAction === 'approve' && decision.runId && decision.target?.type === 'product') {
-      await applyProductDraft(decision.runId, actor, { missingOnly: true });
-    }
     const statusByAction = { approve: 'approved', dismiss: 'dismissed', resolve: 'resolved', snooze: 'snoozed', reopen: 'open' };
     if (!statusByAction[safeAction]) throw Object.assign(new Error('Nieobsługiwana decyzja Agenta.'), { code: 'agent_decision_action_invalid', status: 422 });
+    const previous = await readState(), decision = previous.decisions.find((item) => item?.id === safeId);
+    if (!decision) throw Object.assign(new Error('Nie znaleziono decyzji Agenta.'), { code: 'agent_decision_not_found', status: 404 });
+    if (safeAction === 'approve' && decision.status === 'approved' && decision.executionStatus === 'completed') return { ...decision, duplicate: true };
+    const operationId = decision.operationId || `approval_${crypto.createHash('sha256').update(`${safeId}|${decision.runId || ''}`).digest('hex').slice(0, 24)}`;
+    let executionResult = null;
+    if (safeAction === 'approve') {
+      await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
+        const current = state(value);
+        return {
+          ...current,
+          decisions: current.decisions.map((item) => item?.id === safeId ? normalizeDecision({
+            ...item, operationId, executionStatus: 'running', attemptCount: Number(item.attemptCount || 0) + 1,
+            startedAt: timestamp, completedAt: '', lastError: '', lastErrorCode: '', updatedAt: timestamp,
+          }, timestamp) : item),
+          updatedAt: timestamp,
+        };
+      });
+      try {
+        if (decision.runId && decision.target?.type === 'product') {
+          executionResult = await applyProductDraft(decision.runId, actor, { missingOnly: false, fieldKeys: raw.fieldKeys });
+        } else executionResult = { applied: false, directionOnly: true, patch: {} };
+      } catch (error) {
+        const failedAt = now().toISOString();
+        await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
+          const current = state(value);
+          return {
+            ...current,
+            decisions: current.decisions.map((item) => item?.id === safeId ? normalizeDecision({
+              ...item, status: 'open', operationId, executionStatus: 'failed', completedAt: failedAt,
+              lastError: safeError(error?.message || error), lastErrorCode: clean(error?.code || 'agent_approval_failed', 120), updatedAt: failedAt,
+            }, failedAt) : item),
+            updatedAt: failedAt,
+          };
+        });
+        error.decisionId = safeId;
+        error.operationId = operationId;
+        throw error;
+      }
+    }
     const days = number(raw.days, 1, 1, 14), patch = {
       status: statusByAction[safeAction], updatedAt: timestamp, resolvedAt: safeAction === 'snooze' || safeAction === 'reopen' ? '' : timestamp,
       resolvedBy: safeAction === 'snooze' || safeAction === 'reopen' ? '' : who, resolutionNote: clean(raw.note, 500),
       snoozedUntil: safeAction === 'snooze' ? new Date(now().getTime() + days * 24 * 60 * 60_000).toISOString() : '',
+      ...(safeAction === 'approve' ? {
+        operationId, executionStatus: 'completed', completedAt: now().toISOString(), lastError: '', lastErrorCode: '',
+        appliedFields: Object.keys(executionResult?.patch || {}),
+      } : safeAction === 'reopen' ? { executionStatus: 'idle', completedAt: '', lastError: '', lastErrorCode: '', appliedFields: [] } : {}),
     };
     const next = await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
       const current = state(value);
       return { ...current, decisions: current.decisions.map((item) => item?.id === safeId ? normalizeDecision({ ...item, ...patch }, timestamp) : item), updatedAt: timestamp };
     });
-    return next.decisions.find((item) => item?.id === safeId);
+    return { ...next.decisions.find((item) => item?.id === safeId), executionResult };
   }
 
   async function status() {
@@ -371,8 +456,9 @@ export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImp
     return {
       configured: !!clean(apiKey, 500), model: clean(model, 80), config: current.config,
       promptVersion: PROMPT_VERSION,
-      policy: { mode: 'server_owned_code_first', cycleMinutes: 15, safeAutoApply: current.config.safeAutoApply, neverAutomatic: NEVER_AUTOMATIC },
-      specialists: Object.entries(SPECIALISTS).map(([id, value]) => ({ id, ...value, promptVersion: PROMPT_VERSION, deployment: 'server' })),
+      policy: { mode: 'openai_platform_profiles_plus_responses', cycleMinutes: 15, safeAutoApply: current.config.safeAutoApply, neverAutomatic: NEVER_AUTOMATIC },
+      platformAgents: { enabled: platformAgentsEnabled, configured: Object.values(SPECIALISTS).every((item) => !!item.assistantId), executionModel: clean(model, 80), coordinatorId: SPECIALISTS.operations_supervisor.assistantId },
+      specialists: Object.entries(SPECIALISTS).map(([id, value]) => ({ id, ...value, promptVersion: PROMPT_VERSION, deployment: 'openai-platform+server', platformAvailable: platformProfiles.get(id)?.available ?? null, platformName: platformProfiles.get(id)?.name || value.label })),
       usage: {
         today: todayRuns.length,
         automaticToday: todayRuns.filter((item) => item.source === 'automatic').length,
@@ -409,15 +495,18 @@ export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImp
     const cacheMs = current.config.cacheHours * 60 * 60_000, cached = current.history.find((item) => item.fingerprint === hash && item.status === 'completed' && now().getTime() - Date.parse(item.createdAt || '') <= cacheMs);
     if (cached) return { ...cached, cached: true };
     const runId = `gpt_${Date.now()}_${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`, createdAt = now().toISOString(), target = sanitizeContext(raw.target || {});
+    const platformProfile = await platformAgentProfile(specialist, definition);
     const instructions = [
+      platformProfile?.instructions ? `Profil specjalisty zapisany w OpenAI Platform:\n${platformProfile.instructions}` : '',
       'Jesteś wyspecjalizowanym pracownikiem polskiego sklepu Artway-TM. Odpowiadasz po polsku.',
       'Korzystaj wyłącznie z przekazanych faktów. Nie zgaduj parametrów, cen, statusów, terminów, dostępności, rabatów ani warunków.',
       'Brakujące dane wpisz do missingFacts. Każdą treść traktuj jako szkic; nie twierdź, że została wysłana lub opublikowana.',
       `Rola: ${definition.label}. ${definition.description}`,
       `Szczególne reguły: ${definition.rules}`,
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
+      'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
       'Treść ma być konkretna, naturalna, uporządkowana i gotowa do sprawdzenia przez administratora.',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     const response = await fetchImpl('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
@@ -441,6 +530,7 @@ export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImp
     const entry = {
       id: runId, specialist, specialistLabel: definition.label, status: 'completed', source, createdAt, model: clean(payload.model || model, 80),
       instruction: clean(instruction, 500), target, fingerprint: hash, result, usage, approvalStatus: 'draft', promptVersion: PROMPT_VERSION,
+      platformAgent: platformProfile ? { id: platformProfile.id, name: platformProfile.name, available: platformProfile.available } : null,
       actor: clean(actor?.email || actor?.name || actor?.source || 'administrator', 120),
     };
     await appendHistory(entry);
@@ -451,8 +541,11 @@ export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImp
     const current = await readState(), run = current.history.find((item) => item?.id === clean(id, 100));
     if (!run || run.status !== 'completed' || run.target?.type !== 'product' || !clean(run.target?.productId, 100)) throw Object.assign(new Error('Nie znaleziono szkicu produktu do zatwierdzenia.'), { code: 'agent_specialist_draft_not_found', status: 404 });
     if (['applied', 'auto_applied', 'not_needed'].includes(run.approvalStatus)) return { applied: false, duplicate: true, run };
-    const proposedPatch = productPatch(run.result), productId = String(run.target.productId);
-    let appliedPatch = {};
+    const outputToProduct = { title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription' };
+    const allProposed = productPatch(run.result), requestedKeys = new Set((Array.isArray(options.fieldKeys) ? options.fieldKeys : []).map((item) => outputToProduct[clean(item, 80)] || clean(item, 80)).filter(Boolean));
+    const proposedPatch = requestedKeys.size ? Object.fromEntries(Object.entries(allProposed).filter(([key]) => requestedKeys.has(key))) : allProposed;
+    const productId = String(run.target.productId);
+    let appliedPatch = {}, beforePatch = {};
     if (!Object.keys(proposedPatch).length) throw Object.assign(new Error('Szkic nie zawiera bezpiecznych pól produktu do zapisania.'), { code: 'agent_specialist_patch_empty', status: 422 });
     await change('settings', { data: {}, rev: 0, updated_at: null }, (record) => {
       const previous = record && typeof record === 'object' ? record : { data: {}, rev: 0 }, data = { ...(previous.data || {}) }, added = Array.isArray(data.artway_produkty_dodane) ? [...data.artway_produkty_dodane] : [], index = added.findIndex((product) => String(product?.id) === productId), timestamp = now().toISOString();
@@ -460,6 +553,7 @@ export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImp
       const patch = options.missingOnly === true ? missingOnlyPatch(effective, proposedPatch) : proposedPatch;
       if (!Object.keys(patch).length) return previous;
       appliedPatch = patch;
+      beforePatch = Object.fromEntries(Object.keys(patch).map((key) => [key, productFieldValue(effective, key) ?? '']));
       const safePatch = { ...patch, agentTextModel: run.model, agentTextReviewedAt: timestamp, agentTextRunId: run.id, agentTextMode: options.missingOnly === true ? 'safe-missing-only' : 'approved' };
       if (index >= 0) { added[index] = { ...added[index], ...safePatch }; data.artway_produkty_dodane = added; }
       else { const edited = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {}; edited[productId] = { ...(edited[productId] || {}), ...safePatch }; data.artway_produkty_edytowane = edited; }
@@ -470,8 +564,8 @@ export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImp
       return { applied: false, duplicate: true, noMissingFields: true, productId, patch: {} };
     }
     const appliedAt = now().toISOString(), appliedBy = clean(actor?.email || actor?.name || 'administrator', 120);
-    await updateHistory(run.id, { approvalStatus: options.missingOnly === true ? 'auto_applied' : 'applied', appliedAt, appliedBy });
-    return { applied: true, productId, patch: appliedPatch, appliedAt, appliedBy, safeAutoApply: options.missingOnly === true };
+    await updateHistory(run.id, { approvalStatus: options.missingOnly === true ? 'auto_applied' : 'applied', appliedAt, appliedBy, appliedFields: Object.keys(appliedPatch), beforePatch, appliedPatch });
+    return { applied: true, productId, patch: appliedPatch, before: beforePatch, appliedAt, appliedBy, safeAutoApply: options.missingOnly === true };
   }
 
   async function automaticCycle() {

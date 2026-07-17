@@ -121,6 +121,8 @@ async function allegroAutomapujOfertyLegacy(){
 }
 function allegroStatusHTML(){
   if(!allegroStan.sprawdzono && allegroStan.ladowanie) return `<span class="lvl lvl-info">sprawdzam API</span>`;
+  if(allegroStan.credentialsInvalid) return `<span class="lvl lvl-bad">błędne dane aplikacji</span>`;
+  if(allegroStan.authError) return `<span class="lvl lvl-bad">połączenie wymaga naprawy</span>`;
   if(allegroStan.connected&&allegroStan.requiresReauth) return `<span class="lvl lvl-ostrzezenie">połączone — brak części uprawnień</span>`;
   if(allegroStan.connected) return `<span class="lvl lvl-ok">połączone</span>`;
   if(allegroStan.configured) return `<span class="lvl lvl-ostrzezenie">wymaga autoryzacji</span>`;

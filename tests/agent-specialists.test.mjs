@@ -116,6 +116,34 @@ test('decyzję można odłożyć i nie wraca ona do otwartych przed terminem', a
   assert.equal((await service.status()).decisions.length, 0);
 });
 
+test('zatwierdzenie konkretnej rekomendacji nadpisuje wybrane pole, zapisuje audyt i nie wykonuje się drugi raz', async () => {
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 51, nazwa: 'Gra', producent: 'Alexander', opisKrotki: 'Stary opis', opis: '' }] }, rev: 1 } });
+  const payload = openAiPayload([{ key: 'short_description', label: 'Opis krótki', value: 'Nowy, uporządkowany opis.', current_value: 'Stary opis', reason: 'Lepsza czytelność', evidence: 'Redakcja istniejącej treści' }]);
+  payload.output[0].content[0].text = JSON.stringify({ ...JSON.parse(payload.output[0].content[0].text), confidence: 0.8, complianceStatus: 'needs_review' });
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } }) });
+  await service.automaticCycle();
+  const open = (await service.status()).decisions.find((item) => item.target?.productId === '51' && item.kind === 'product_content_review');
+  assert.ok(open);
+  const approved = await service.updateDecision(open.id, 'approve', { fieldKeys: ['short_description'] }, { email: 'admin@example.com' });
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.executionStatus, 'completed');
+  assert.deepEqual(approved.appliedFields, ['opisKrotki']);
+  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opisKrotki, 'Nowy, uporządkowany opis.');
+  const duplicate = await service.updateDecision(open.id, 'approve', { fieldKeys: ['short_description'] }, { email: 'admin@example.com' });
+  assert.equal(duplicate.duplicate, true);
+});
+
+test('nieudane zatwierdzenie pozostaje otwarte z dokładnym kodem błędu i można je ponowić', async () => {
+  const repo = memoryRepository({ agent_specialists_state: { config: {}, history: [], decisions: [{ id: 'd-fail', fingerprint: 'fp-fail', kind: 'product_content_review', specialist: 'product_content', status: 'open', runId: 'missing-run', target: { type: 'product', productId: '404' }, createdAt: '2026-07-17T10:00:00.000Z', updatedAt: '2026-07-17T10:00:00.000Z' }] } });
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response('{}', { status: 500 }) });
+  await assert.rejects(() => service.updateDecision('d-fail', 'approve', { fieldKeys: ['short_description'] }, { email: 'admin@example.com' }), (error) => error.code === 'agent_specialist_draft_not_found');
+  const failed = (await service.status()).decisions.find((item) => item.id === 'd-fail');
+  assert.equal(failed.status, 'open');
+  assert.equal(failed.executionStatus, 'failed');
+  assert.equal(failed.lastErrorCode, 'agent_specialist_draft_not_found');
+  assert.match(failed.lastError, /Nie znaleziono szkicu/i);
+});
+
 test('trasa wymaga administratora i nigdy nie deklaruje automatycznej publikacji', async () => {
   const service = { status: async () => ({ configured: true }), run: async () => ({ id: 'gpt-1' }), configure: async (value) => value, applyProductDraft: async () => ({ applied: true }), automaticCycle: async () => ({ prepared: [] }) };
   const respond = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });

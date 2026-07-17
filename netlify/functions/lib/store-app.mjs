@@ -41,6 +41,7 @@ import { createInventoryDecisionService } from './domain/inventory-decisions.mjs
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createAgentRuntime } from './domain/agent-runtime.mjs';
 import { createAgentSpecialists } from './domain/agent-specialists.mjs';
+import { buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester } from './domain/allegro-operation-receipts.mjs';
 import { createAgentSpecialistRoute } from './agent-specialist-route.mjs';
 import { createAiBannerGenerator } from './domain/ai-banner-generator.mjs';
 import { createAiBannerRoute } from './ai-banner-route.mjs';
@@ -138,6 +139,9 @@ const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersi
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const agentSpecialists = createAgentSpecialists({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const allegroOperationReceipts = createAllegroOperationReceipts({ read: czytaj, write: zapisz, text: tekst });
+const allegroTokenRequest = createAllegroTokenRequester({ configure: allegroKonfiguracja, errorText: bledyAllegroTekst });
+const allegroAccessToken = createAllegroTokenAccess({ configure: allegroKonfiguracja, read: czytaj, write: zapisz, requestToken: allegroTokenRequest, text: tekst });
 const agentSpecialistRoute = createAgentSpecialistRoute({ service: agentSpecialists, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession });
 const aiBannerGenerator = createAiBannerGenerator({ read: czytaj, write: zapisz, remove: repository.delete });
 const aiBannerRoute = createAiBannerRoute({ generator: aiBannerGenerator, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, configured: () => !!process.env.OPENAI_API_KEY, model: () => process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2' });
@@ -1413,95 +1417,15 @@ function allegroKonfiguracja(req) {
   if (!clientSecret) missingEnv.push('ALLEGRO_CLIENT_SECRET');
   return { env, clientId, clientSecret, redirectUri, scope, authBaseUrl, apiBaseUrl, configured: missingEnv.length === 0, missingEnv };
 }
-function allegroBasicAuth(c) {
-  return `Basic ${Buffer.from(`${c.clientId}:${c.clientSecret}`).toString('base64')}`;
-}
 async function allegroStatus(req) {
   const c = allegroKonfiguracja(req);
   const auth = await czytaj('allegro_auth', {});
-  const wymagane = c.scope.split(/\s+/).filter(Boolean);
-  const autoryzowane = String(auth?.scope || '').split(/\s+/).filter(Boolean);
-  const brakujaceScope = autoryzowane.length ? wymagane.filter((x) => !autoryzowane.includes(x)) : [];
-  return {
-    configured: c.configured,
-    connected: !!(auth && (auth.refresh_token || auth.access_token)),
-    env: c.env,
-    redirectUri: c.redirectUri,
-    missingEnv: c.missingEnv,
-    expires_at: auth?.expires_at || null,
-    account: auth?.account || '',
-    updated_at: auth?.updated_at || null,
-    requiredEnv: ['ALLEGRO_CLIENT_ID', 'ALLEGRO_CLIENT_SECRET'],
-    scope: c.scope,
-    authorizedScope: auth?.scope || '',
-    missingAuthorizedScopes: brakujaceScope,
-    requiresReauth: brakujaceScope.length > 0,
-    recommendedScope: ALLEGRO_DEFAULT_SCOPE,
-    optionalEnv: ['ALLEGRO_REDIRECT_URI', 'ALLEGRO_ENV=production', 'ALLEGRO_SCOPE'],
-  };
+  return buildAllegroConnectionStatus({ configuration: c, auth, requiredScope: c.scope, recommendedScope: ALLEGRO_DEFAULT_SCOPE, text: tekst });
 }
 function bledyAllegroTekst(dane, fallback) {
   const errors = Array.isArray(dane?.errors) ? dane.errors : [];
   const msg = errors.map((e) => [e.code || e.error, e.message, e.userMessage].filter(Boolean).join(': ')).filter(Boolean).join('; ');
   return msg || dane?.error_description || dane?.message || fallback || 'Błąd Allegro';
-}
-async function allegroTokenRequest(req, params) {
-  const c = allegroKonfiguracja(req);
-  if (!c.configured) {
-    const blad = new Error('Allegro API nie jest skonfigurowane. Ustaw ALLEGRO_CLIENT_ID i ALLEGRO_CLIENT_SECRET w Netlify.');
-    blad.code = 'allegro_not_configured';
-    blad.status = 503;
-    blad.missingEnv = c.missingEnv;
-    throw blad;
-  }
-  const r = await fetch(`${c.authBaseUrl}/auth/oauth/token`, {
-    method: 'POST',
-    headers: {
-      'Authorization': allegroBasicAuth(c),
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Accept': 'application/json',
-      'User-Agent': 'Artway-TM/1.0 Netlify Function',
-    },
-    body: new URLSearchParams(params),
-  });
-  const textBody = await r.text();
-  let dane = {};
-  try { dane = textBody ? JSON.parse(textBody) : {}; } catch (e) { dane = { raw: textBody }; }
-  if (!r.ok) {
-    const blad = new Error(bledyAllegroTekst(dane, `Allegro OAuth HTTP ${r.status}`));
-    blad.status = r.status;
-    blad.code = dane.error || 'allegro_oauth_error';
-    blad.allegro = dane;
-    throw blad;
-  }
-  return {
-    ...dane,
-    env: c.env,
-    expires_at: Date.now() + (Math.max(60, Number(dane.expires_in) || 3600) * 1000),
-    updated_at: new Date().toISOString(),
-  };
-}
-async function allegroAccessToken(req) {
-  const c = allegroKonfiguracja(req);
-  if (!c.configured) {
-    const blad = new Error('Allegro API nie jest skonfigurowane. Ustaw ALLEGRO_CLIENT_ID i ALLEGRO_CLIENT_SECRET w Netlify.');
-    blad.code = 'allegro_not_configured';
-    blad.status = 503;
-    blad.missingEnv = c.missingEnv;
-    throw blad;
-  }
-  const auth = await czytaj('allegro_auth', {});
-  if (auth?.access_token && Number(auth.expires_at || 0) > Date.now() + 90000) return auth.access_token;
-  if (!auth?.refresh_token) {
-    const blad = new Error('Allegro nie jest autoryzowane. Kliknij „Połącz Allegro” w panelu admina.');
-    blad.code = 'allegro_not_connected';
-    blad.status = 401;
-    throw blad;
-  }
-  const odswiezony = await allegroTokenRequest(req, { grant_type: 'refresh_token', refresh_token: auth.refresh_token });
-  const zapis = { ...auth, ...odswiezony, refresh_token: odswiezony.refresh_token || auth.refresh_token };
-  await zapisz('allegro_auth', zapis);
-  return zapis.access_token;
 }
 const ALLEGRO_PUBLIC_JSON = 'application/vnd.allegro.public.v1+json';
 const ALLEGRO_BETA_JSON = 'application/vnd.allegro.beta.v1+json';
@@ -5531,6 +5455,14 @@ export default async (req) => {
       return odpowiedz({ ok: true, settings });
     }
 
+    if (action === 'allegro-connection-check') {
+      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      await allegroAccessToken(req);
+      const status = await allegroStatus(req);
+      return odpowiedz({ ok: true, allegro: status, ready: status.connected === true && status.requiresReauth !== true });
+    }
+
     // ─── ALLEGRO: utworzenie linku OAuth (admin) ───
     if (action === 'allegro-auth-url') {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -6075,6 +6007,10 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
+      const approval = body.approval && typeof body.approval === 'object' ? body.approval : null;
+      const requestProductId = tekst(body.product?.id || '', 100).trim();
+      const approvalHandle = allegroOperationReceipts.validate({ approval, productId: requestProductId });
+      const approvalOperationId = approvalHandle?.operationId || '';
       const offerSettings = await allegroPobierzUstawieniaOfert();
       const mappedOfferId = tekst(body.mappedOfferId, 100).trim();
       let mappedExisting = null;
@@ -6109,6 +6045,8 @@ export default async (req) => {
       if (!complianceGate.compliance.ok) {
         return odpowiedz({ ok: false, error: 'Publikacja została zablokowana: opis nadal zawiera treść niezgodną z zasadami Allegro.', code: 'allegro_compliance_block', compliance: complianceGate.compliance, draft }, 422);
       }
+      const receiptStart = await allegroOperationReceipts.begin(approvalHandle, { action: approval?.action || body.options?.publicationAction || 'keep', approvedBy: (requestSession(req) || {})?.email || 'administrator' });
+      if (receiptStart.kind === 'duplicate') return odpowiedz(receiptStart.response, receiptStart.httpStatus);
       let result, responseMeta = null, operationCheck = { completed: true, checks: 0 };
       try {
         if (existing?.offer?.id) {
@@ -6127,6 +6065,7 @@ export default async (req) => {
         e.catalogMatch = prepared?.catalogMatch || null;
         e.agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, { missing: prepared?.missing || [], errors: e.allegro?.errors || [{ code: e.code, message: e.message }], prepared, draft });
         await zapisz('allegro_offer_last_error', { at: new Date().toISOString(), productId: tekst(body.product?.id, 100), productName: tekst(body.product?.nazwa || body.product?.name, 300), message: tekst(e.message, 1000), status: e.status || 500, code: e.code || '', errors: Array.isArray(e.allegro?.errors) ? e.allegro.errors.slice(0, 20) : [], missing: prepared?.missing || [], requiredParameters: prepared?.requiredParameters || [], catalogMatch: prepared?.catalogMatch || null });
+        await allegroOperationReceipts.fail(approvalHandle, e);
         throw e;
       }
       const locationOfferId = String(responseMeta?.location || '').match(/\/sale\/product-offers\/([^/?]+)/)?.[1] || '';
@@ -6135,6 +6074,7 @@ export default async (req) => {
         const e = new Error('Allegro przyjęło operację, ale nie zwróciło identyfikatora oferty. Zadanie zapisano dla Agenta AI.');
         e.status = 502; e.code = 'allegro_missing_offer_id'; e.draft = draft; e.categorySuggestion = categorySuggestion; e.catalogMatch = prepared?.catalogMatch || null;
         e.agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, { errors: [{ code: e.code, message: e.message }], prepared, draft });
+        await allegroOperationReceipts.fail(approvalHandle, e);
         throw e;
       }
       await zapisz('allegro_offer_last_error', null);
@@ -6155,7 +6095,9 @@ export default async (req) => {
           await allegroZapiszPowiazanieProduktu(body.product || {}, { offerId, prepared, draft });
         }
       }
-      return odpowiedz({ ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion }, existing ? 200 : 201);
+      const responseBody = { ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { id: approvalOperationId, status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion };
+      await allegroOperationReceipts.complete(approvalHandle, { offerId, httpStatus: existing ? 200 : 201, response: responseBody });
+      return odpowiedz(responseBody, existing ? 200 : 201);
     }
 
     // ─── ALLEGRO: kalkulator prowizji i opłat dla konkretnej oferty / produktu ───
