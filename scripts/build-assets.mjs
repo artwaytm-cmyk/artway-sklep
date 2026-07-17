@@ -57,6 +57,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/15-personalization-and-publishing.js',
       'src/frontend/15a-home-promotions-workspace.js',
       'src/frontend/15b-banner-icon-studio.js',
+      'src/frontend/15c-campaign-studio-pro.js',
       'src/frontend/16-diagnostics.js',
       'src/frontend/19-admin-dashboard.js',
     ],
@@ -94,6 +95,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/21-warehouse-workspace.css',
       'src/styles/22-home-promotions.css',
       'src/styles/23-banner-icon-studio.css',
+      'src/styles/24-campaign-studio-pro.css',
     ],
   },
 ]);

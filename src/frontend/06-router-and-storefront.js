@@ -333,11 +333,12 @@ function bannerUkrytyPrzezKlienta(id){try{return sessionStorage.getItem(`artway_
 function zamknijBannerSklepu(event,id){event.preventDefault();event.stopPropagation();try{sessionStorage.setItem(`artway_banner_hidden_${id}`,"1");}catch(e){}event.currentTarget.closest(".managed-banner-shell")?.remove();}
 function bannerSklepuHTML(b){
   const n=normalizujBaner(b),type=esc(n.typ),width=esc(n.szerokosc),height=esc(n.wysokosc),mobile=esc(n.mobileMode);
-  const shade=Math.max(0,Math.min(90,Number(n.przyciemnienie)||68))/100,position=esc(n.pozycjaObrazu||"center");
+  const shade=Math.max(0,Math.min(90,Number(n.przyciemnienie)||68))/100,fx=Number(n.focalX),fy=Number(n.focalY),x=Number.isFinite(fx)?Math.max(0,Math.min(100,fx)):50,y=Number.isFinite(fy)?Math.max(0,Math.min(100,fy)):50,position=`${x}% ${y}%`,direction=n.kierunekNakladki==="prawo"?"270deg":n.kierunekNakladki==="dookola"?"135deg":"90deg";
+  const content=Math.max(30,Math.min(100,Number(n.szerokoscTresci)||62)),padding=Math.max(8,Math.min(48,Number(n.odstep)||18)),radius=Math.max(0,Math.min(40,Number(n.promien)||14));
   return `<article class="managed-banner-shell banner-type-${type} banner-width-${width} banner-height-${height} banner-mobile-${mobile} ${n.przyklejony?"is-sticky":""}">
-    <a class="managed-banner ${n.obraz?'ma-obraz':''} banner-${esc(n.styl||"karta")} align-${esc(n.wyrownanie||"lewo")} audience-${esc(n.odbiorcy||"wszyscy")} anim-${esc(n.animacja||"brak")}" href="${esc(bezpiecznyLink(n.link))}" ${n.obraz?`aria-label="${esc(n.obrazAlt||n.tytul||"Banner")}" style="background-image:linear-gradient(90deg,rgba(15,18,25,${shade}),rgba(15,18,25,${Math.max(.12,shade-.4)})),url('${esc(n.obraz)}');background-position:${position}"`:""}>
+    <a class="managed-banner ${n.obraz?'ma-obraz':''} banner-${esc(n.styl||"karta")} align-${esc(n.wyrownanie||"lewo")} audience-${esc(n.odbiorcy||"wszyscy")} anim-${esc(n.animacja||"brak")}" href="${esc(bezpiecznyLink(n.link))}" ${n.obraz?`aria-label="${esc(n.obrazAlt||n.tytul||"Banner")}" style="background-image:linear-gradient(${direction},rgba(15,18,25,${shade}),rgba(15,18,25,${Math.max(.08,shade-.42)})),url('${esc(n.obraz)}');background-position:${position};--banner-content:${content}%;--banner-padding:${padding}px;--banner-radius:${radius}px"`:`style="--banner-content:${content}%;--banner-padding:${padding}px;--banner-radius:${radius}px"`}>
       ${n.obraz?"":`<span class="banner-icon">${esc(n.ikona||"📣")}</span>`}
-      <span>${n.etykieta?`<em class="managed-banner-badge">${esc(n.etykieta)}</em>`:""}<h3>${esc(n.tytul||"")}</h3><p>${esc(n.opis||"")}</p>${n.kodRabatowy?`<strong class="managed-banner-code">Kod: ${esc(n.kodRabatowy)}</strong>`:""}<small>${esc(n.przycisk||"Dowiedz się więcej")} →</small></span>
+      <span class="managed-banner-content">${n.etykieta?`<em class="managed-banner-badge">${esc(n.etykieta)}</em>`:""}<h3>${esc(n.tytul||"")}</h3><p>${esc(n.opis||"")}</p>${n.kodRabatowy?`<strong class="managed-banner-code">Kod: ${esc(n.kodRabatowy)}</strong>`:""}<small class="managed-banner-cta cta-${esc(n.stylPrzycisku||"pelny")}">${esc(n.przycisk||"Dowiedz się więcej")} →</small></span>
     </a>${n.zamykany?`<button class="managed-banner-close" type="button" aria-label="Zamknij banner" onclick="zamknijBannerSklepu(event,${jsArg(n.id)})">×</button>`:""}
   </article>`;
 }
@@ -383,16 +384,16 @@ function widokSklep(){
   const kategorie = wszystkieKategorie();
   const promki = produkty.filter(p=>p.staraCena).length;
   const nowosci = produkty.filter(p=>p.badge==="Nowość").length;
-  const hero = ustawienia.hero || {},oferta=ustawieniaOfertyGlownej();
+  const hero = ustawienia.hero || {},oferta=ustawieniaOfertyGlownej(),heroFx=Number(hero.focalX),heroFy=Number(hero.focalY),heroX=Number.isFinite(heroFx)?Math.max(0,Math.min(100,heroFx)):50,heroY=Number.isFinite(heroFy)?Math.max(0,Math.min(100,heroFy)):50,heroShade=Math.max(0,Math.min(90,Number(hero.przyciemnienie)||76))/100,heroMin=hero.wysokosc==="niski"?280:hero.wysokosc==="wysoki"?460:360;
   const SEKCJE = {};
   SEKCJE.hero = () => `${banneryHome("nad-hero")}
-  <section class="hero">
-    <div class="hero-in" ${hero.obraz?`style="background-image:linear-gradient(120deg,rgba(30,41,59,.88),rgba(49,46,129,.78) 60%,rgba(91,33,182,.68)),url('${esc(hero.obraz)}');background-position:${esc(hero.pozycjaObrazu||"center")};background-size:cover"`:""}>
+  <section class="hero hero-mobile-${esc(hero.mobileMode||"kompaktowy")}">
+    <div class="hero-in hero-align-${esc(hero.wyrownanie||"lewo")}" style="min-height:${heroMin}px;${hero.obraz?`background-image:linear-gradient(120deg,rgba(30,41,59,${heroShade}),rgba(49,46,129,${Math.max(.22,heroShade-.25)}) 60%,rgba(91,33,182,${Math.max(.15,heroShade-.35)})),url('${esc(hero.obraz)}');background-position:${heroX}% ${heroY}%;background-size:cover`:""}">
       <span class="hero-eyebrow">${esc(hero.etykieta||"ARTWAY-TM • ZAKUPY PROSTO I WYGODNIE")}</span>
       <h1>${esc(KONFIG.heroTytul)}</h1>
       <p>${esc(KONFIG.heroOpis)}</p>
       <div class="hero-actions">
-        <a href="#produkty" onclick="document.querySelector('.catalog-head')?.scrollIntoView({behavior:'smooth'});return false;">${esc(hero.przycisk1||"Zobacz ofertę")} ↓</a>
+        <a href="${esc(bezpiecznyLink(hero.link1||"#produkty"))}" ${String(hero.link1||"#produkty")==="#produkty"?`onclick="document.querySelector('.catalog-head')?.scrollIntoView({behavior:'smooth'});return false;"`:""}>${esc(hero.przycisk1||"Zobacz ofertę")} ↓</a>
         <a class="hero-link-alt" href="${esc(bezpiecznyLink(hero.link2||"#/promocje"))}">${esc(hero.przycisk2||"Sprawdź promocje")}</a>
       </div>
       <div class="hero-meta">
@@ -456,9 +457,9 @@ function widokSklep(){
   <div class="grid" id="grid"></div>
   <div class="pagination" id="paginacjaDol"></div>
   ${oferta.wyborDzialu!=="ukryty"&&oferta.wyborDzialu!=="nad-produktami"?`<div class="home-department-picker"><span>Wybierz dział oferty</span><div id="chips" class="home-category-chips"></div></div>`:""}${banneryHome("pod-produktami")}`;
-  SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(),kod=o.kodRabatowy||promo?.kod||""; return `
-  <section class="offer-band offer-band-${esc(o.mobileMode||"kompaktowy")}">
-    <div class="offer-band-in" ${o.obraz?`style="background-image:linear-gradient(90deg,rgba(30,41,59,.88),rgba(49,46,129,.68)),url('${esc(o.obraz)}');background-position:${esc(o.pozycjaObrazu||"center")};background-size:cover"`:""}>
+  SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(),kod=o.kodRabatowy||promo?.kod||"",fx=Number(o.focalX),fy=Number(o.focalY),x=Number.isFinite(fx)?Math.max(0,Math.min(100,fx)):50,y=Number.isFinite(fy)?Math.max(0,Math.min(100,fy)):50,shade=Math.max(0,Math.min(90,Number(o.przyciemnienie)||72))/100,min=o.wysokosc==="niski"?90:o.wysokosc==="wysoki"?190:130; return `
+  <section class="offer-band offer-band-${esc(o.mobileMode||"kompaktowy")} ${o.przyklejony?"offer-band-sticky":""}">
+    <div class="offer-band-in" style="min-height:${min}px;${o.obraz?`background-image:linear-gradient(90deg,rgba(30,41,59,${shade}),rgba(49,46,129,${Math.max(.18,shade-.28)})),url('${esc(o.obraz)}');background-position:${x}% ${y}%;background-size:cover`:""}">
       <span class="offer-band-icon">${esc(o.ikona||"🎁")}</span><div>${o.etykieta?`<small>${esc(o.etykieta)}</small>`:""}<h2>${esc(o.tytul||"Dobry moment na zakupy")}</h2><p>${o.opis?esc(o.opis):(kod?`Użyj kodu <b>${esc(kod)}</b>${promo?.procent?` w koszyku i odbierz ${esc(promo.procent)}% rabatu na zamówienie.`:" w koszyku."}`:"Sprawdź aktualne okazje i produkty w dobrych cenach.")}</p></div>
       <a href="${esc(bezpiecznyLink(o.link||"#/promocje"))}">${esc(o.tekstLinku||"Zobacz okazje")} →</a>
     </div>

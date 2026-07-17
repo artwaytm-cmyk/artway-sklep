@@ -76,3 +76,29 @@ test('usunięte kody rabatowe nie wracają z konfiguracji starszego modułu', as
   assert.ok(config.includes('maZapisaneReguly'));
   assert.ok(config.includes('maZapisaneReguly?{}'));
 });
+
+test('studio kampanii pro zapisuje rzeczywiste parametry kompozycji i pokazuje trzy urządzenia', async () => {
+  const [studio, storefront, styles] = await Promise.all([
+    readFile('src/frontend/15c-campaign-studio-pro.js', 'utf8'),
+    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('src/styles/24-campaign-studio-pro.css', 'utf8'),
+  ]);
+  for (const marker of ['Reżyser kampanii AI', 'format', 'composition', 'palette', 'focalX', 'focalY', 'szerokoscTresci', "bannerProDevice(this,'mobile')"]) assert.ok(studio.includes(marker), marker);
+  for (const marker of ['kierunekNakladki', '--banner-content', 'managed-banner-cta']) assert.ok(storefront.includes(marker), marker);
+  for (const marker of ['data-device="mobile"', 'managed-banner-content', 'campaign-surface-map']) assert.ok(styles.includes(marker), marker);
+});
+
+test('kody rabatowe mają potwierdzony zapis serwerowy, tester i operacje grupowe', async () => {
+  const studio = await readFile('src/frontend/15c-campaign-studio-pro.js', 'utf8');
+  for (const marker of ['await chmuraZapiszUstawienia()', 'Tester kodu', 'rabatProMasowo', 'Zaznacz widoczne', 'Eksportuj', 'Utwórz i zapisz na serwerze']) assert.ok(studio.includes(marker), marker);
+});
+
+test('studio ikon nie obiecuje przezroczystości, gdy model jej nie obsługuje', async () => {
+  const [studio, generator] = await Promise.all([
+    readFile('src/frontend/15c-campaign-studio-pro.js', 'utf8'),
+    readFile('netlify/functions/lib/domain/ai-banner-generator.mjs', 'utf8'),
+  ]);
+  assert.ok(studio.includes('jasnym tle zgodnym ze sklepem'));
+  assert.ok(generator.includes("/^gpt-image-2(?:$|-)/i"));
+  assert.ok(generator.includes("background: layout.background"));
+});

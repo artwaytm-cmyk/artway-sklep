@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAiBannerPrompt, createAiBannerGenerator, normalizeAiBannerRequest } from '../netlify/functions/lib/domain/ai-banner-generator.mjs';
+import { aiImageRequestLayout, buildAiBannerPrompt, createAiBannerGenerator, normalizeAiBannerRequest } from '../netlify/functions/lib/domain/ai-banner-generator.mjs';
 
 function memoryRepository() {
   const data = new Map();
@@ -21,7 +21,7 @@ test('brief bannera jest normalizowany, a prompt rezerwuje miejsce na tekst HTML
   assert.match(prompt, /balonami/);
 });
 
-test('tryb ikony tworzy kwadratową grafikę z przezroczystym tłem i bez tekstu', async () => {
+test('tryb ikony tworzy kwadratową grafikę bez tekstu i dopasowuje tło do modelu', async () => {
   const input = normalizeAiBannerRequest({ kind: 'icon', iconUse: 'category', brief: 'Kolorowe gry rodzinne', subject: 'pionki i kostka', style: 'radosny' });
   assert.equal(input.kind, 'icon');
   assert.match(buildAiBannerPrompt(input), /rozmiarze 32–64 px/);
@@ -36,9 +36,15 @@ test('tryb ikony tworzy kwadratową grafikę z przezroczystym tłem i bez tekstu
   });
   const asset = await generator.generate(input);
   assert.equal(requests[0].size, '1024x1024');
-  assert.equal(requests[0].background, 'transparent');
+  assert.equal(requests[0].background, 'opaque');
+  assert.equal(asset.background, 'opaque');
   assert.equal(asset.kind, 'icon');
   assert.equal(asset.iconUse, 'category');
+});
+
+test('układ generatora zachowuje format kampanii i nie wysyła niewspieranego tła', () => {
+  assert.deepEqual(aiImageRequestLayout({ kind: 'banner', format: 'portrait' }, 'gpt-image-2'), { size: '1024x1536', background: 'opaque', transparentSupported: false });
+  assert.deepEqual(aiImageRequestLayout({ kind: 'icon', format: 'square' }, 'gpt-image-1'), { size: '1024x1024', background: 'transparent', transparentSupported: true });
 });
 
 test('generator wykonuje prawdziwe wywołanie Images API i zapisuje obraz osobno od ustawień', async () => {
