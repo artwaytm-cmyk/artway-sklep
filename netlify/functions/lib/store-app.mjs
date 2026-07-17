@@ -157,6 +157,7 @@ const LIMIT_USTAWIEN = 4 * 1024 * 1024; // 4 MB na komplet ustawień
 const LIMIT_ZAMOWIEN = 20000;
 const LIMIT_KLIENTOW = 20000;
 const LIMIT_USUNIETYCH_ZAMOWIEN = 50000;
+const BACKUP_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_./-]{0,199}$/;
 const PAYNOW_ENVY = new Set(['production', 'sandbox']);
 const PAYNOW_STATUSY_KONCOWE = new Set(['CONFIRMED', 'ERROR', 'EXPIRED', 'REJECTED', 'ABANDONED']);
 const storeOrderSupplierReconciliation = createStoreOrderSupplierReconciliation({
@@ -4975,6 +4976,26 @@ export default async (req) => {
         allegro: await allegroStatus(req),
         infakt: infaktPublicConfig(),
       });
+    }
+
+    // ─── KOPIA MIGRACYJNA — odczyt tylko dla administratora, bez zmian w danych ───
+    if (action === 'store-backup-manifest') {
+      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const entries = await repository.listKeys();
+      return odpowiedz({ ok: true, store: STORE_NAME, createdAt: new Date().toISOString(), entries });
+    }
+
+    if (action === 'store-backup-entry') {
+      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const key = String(url.searchParams.get('key') || '');
+      const expectedEtag = String(url.searchParams.get('etag') || '');
+      if (!BACKUP_KEY_PATTERN.test(key) || !expectedEtag) return odpowiedz({ ok: false, error: 'Nieprawidłowy klucz lub brak wersji kopii.', code: 'invalid_backup_request' }, 400);
+      const entry = await repository.readVersioned(key, null);
+      if (!entry.exists) return odpowiedz({ ok: false, error: 'Nie znaleziono wpisu kopii.', code: 'backup_entry_missing' }, 404);
+      if (String(entry.etag || '') !== expectedEtag) return odpowiedz({ ok: false, error: 'Dane zmieniły się podczas wykonywania kopii. Rozpocznij eksport ponownie.', code: 'backup_changed' }, 409);
+      return odpowiedz({ ok: true, key, etag: entry.etag, value: entry.value });
     }
 
     // ─── INFAKT: faktury, statusy asynchroniczne i dokumenty ───

@@ -1,7 +1,8 @@
-import { getStore } from '@netlify/blobs';
+import { createStoreRepository } from './lib/core/store-repository.mjs';
 import { mergeCatalogProducts } from './lib/domain/catalog-quality.mjs';
 
 const origin = 'https://artwaytm.pl';
+const repository = createStoreRepository({ name: 'artway-sklep' });
 const xml = (value) => String(value ?? '').replace(/[<>&'\"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
 function productIsUnavailable(product, availability = {}) {
   const record = availability?.[String(product?.id)] || availability?.[product?.id] || null;
@@ -17,7 +18,7 @@ function productIsUnavailable(product, availability = {}) {
 
 export default async () => {
   let settings = { data: {}, updated_at: null };
-  try { settings = await getStore({ name: 'artway-sklep', consistency: 'strong' }).get('settings', { type: 'json' }) || settings; } catch (error) { /* pusta mapa nadal jest prawidłowa */ }
+  try { settings = await repository.read('settings', settings); } catch (error) { /* pusta mapa nadal jest prawidłowa */ }
   const data = settings.data && typeof settings.data === 'object' ? settings.data : {};
   const availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};
   const hidden = new Set([...(Array.isArray(data.artway_produkty_ukryte) ? data.artway_produkty_ukryte : []), ...(Array.isArray(data.artway_produkty_definitywne) ? data.artway_produkty_definitywne : []), ...(Array.isArray(data.artway_kosz_dodane) ? data.artway_kosz_dodane.map((p) => p?.id) : [])].map(String));
