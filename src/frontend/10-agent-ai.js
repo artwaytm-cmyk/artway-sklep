@@ -1563,6 +1563,7 @@ function agentAIPodstronaNaglowekHTML(aktywna="pulpit",activeCount=0){
   if(aktywna==="pulpit")return "";
   const pages={
     komendy:["💬","Komendy i odpowiedzi","Wydawaj polecenia zwykłym językiem. Odpowiedzi, wynik działania i audyt pozostają w jednym miejscu."],
+    specjalisci:["✦","Specjaliści GPT-5 nano","Konkretne role do opisów, odpowiedzi, SEO, promocji, bannerów, Allegro i kontroli jakości z historią oraz kontrolą kosztów."],
     plan:["🧭","Plan operacyjny","Widzisz wyłącznie aktywne problemy. Wykonane zadania trafiają do historii i wracają tylko po nowym zdarzeniu."],
     produkty:["✨","Wdrożenie nowych produktów","Agent koncentruje się na produktach dodawanych przez administratora i prowadzi je od kartoteki do gotowości sklepu oraz Allegro."],
     zlecenia:["📑","Zlecenia i tabele producentów","Bieżące dokumenty robocze, ilości, zatwierdzenia i wysyłka do producentów bez mieszania z archiwum."],
@@ -1633,6 +1634,55 @@ function agentAIRuntimePanelHTML(){
     <section class="panel agent-runtime-activity"><div class="order-section-head"><div><span class="order-pro-label">Dziennik na żywo</span><h2>Ostatnie działania</h2><p class="order-detail-lead">Bez treści prywatnych i sekretów — wyłącznie etap, źródło, wynik i czas.</p></div><a class="btn ghost" href="#/admin/agent-ai/historia">Pełna historia</a></div><div>${activity.slice(0,12).map(item=>`<article class="${esc(item.status)}"><span>${item.status==="success"?"✓":item.status==="warning"?"!":item.status==="error"?"×":item.status==="running"?"⋯":"•"}</span><div><b>${esc(item.title||"Zdarzenie Agenta")}</b><small>${esc(item.detail||item.source||"")}</small></div><time>${esc(agentAIRuntimeCzas(item.at))}</time></article>`).join("")||`<div class="agent-ops-empty">Dziennik zapełni się podczas następnego cyklu lub polecenia.</div>`}</div></section>
   </section>`;
 }
+async function agentAISpecjalisciPobierz(silent=true){
+  if(agentAISpecjalisci.loading)return agentAISpecjalisci.data;
+  agentAISpecjalisci={...agentAISpecjalisci,loading:true,error:""};if(!silent)renderuj();
+  try{const data=await chmura("agent-specialists-status",{timeout:30000});agentAISpecjalisci={...agentAISpecjalisci,loading:false,loaded:true,error:"",data};}
+  catch(error){agentAISpecjalisci={...agentAISpecjalisci,loading:false,loaded:true,error:String(error?.message||error)};}
+  if(!silent)renderuj();return agentAISpecjalisci.data;
+}
+async function agentAISpecjalistaWykonaj(specialist,context={},instruction="",target={},options={}){
+  const response=await chmura("agent-specialist-run",{method:"POST",body:{specialist,context,instruction,target,source:options.source||"manual"},timeout:120000});
+  const run=response.run||null;agentAISpecjalisci={...agentAISpecjalisci,activeRun:run};
+  if(agentAISpecjalisci.data&&run)agentAISpecjalisci.data={...agentAISpecjalisci.data,history:[run,...(agentAISpecjalisci.data.history||[]).filter(item=>item.id!==run.id)]};
+  return run;
+}
+function agentAISpecjalistaPola(result={}){return Object.fromEntries((Array.isArray(result.fields)?result.fields:[]).map(field=>[String(field.key||""),String(field.value||"")]));}
+async function agentAISpecjalistaProduktWdrozenie(product={}){
+  const facts={id:product.id,name:product.nazwa,category:product.kategoria,producer:product.producent||product.marka,ean:product.gtin||product.ean,producerCode:product.kodProducenta||product.mpn,price:product.cena,shortDescription:product.opisKrotki||product.krotkiOpis,fullDescription:product.opis,parameters:product.parametry||product.parameters,age:product.wiek,players:product.gracze,sourceUrl:product.sourceUrl||product.producentUrl,seoTitle:product.seoTitle,seoDescription:product.seoDescription};
+  const run=await agentAISpecjalistaWykonaj("product_content",{product:facts},"Uporządkuj i uzupełnij treści produktu. Zachowaj dokładną nazwę handlową, kody i wszystkie potwierdzone fakty. Nie dopisuj nieznanych parametrów.",{type:"product",productId:String(product.id),name:String(product.nazwa||"")});
+  if(run?.result?.fields?.length){await chmura("agent-specialist-apply",{method:"POST",body:{id:run.id},timeout:45000});run.approvalStatus="applied";await chmuraWczytajStan().catch(()=>{});}
+  return run;
+}
+function agentAISpecjalistaWynikHTML(run={},compact=false){
+  const result=run.result||{},fields=Array.isArray(result.fields)?result.fields:[],warnings=[...(result.warnings||[]),...(result.missingFacts||[]).map(item=>`Brak faktu: ${item}`)],status=result.complianceStatus||"needs_review";
+  return `<article class="agent-specialist-result ${esc(status)}"><header><div><span>${run.source==="automatic"?"⚙️":"✍️"}</span><div><b>${esc(result.title||run.specialistLabel||"Szkic GPT-5 nano")}</b><small>${esc(run.specialistLabel||run.specialist||"")} • ${esc(run.model||"gpt-5-nano")} • ${esc(agentAIRuntimeCzas(run.createdAt))}${run.cached?" • pamięć wyniku":""}</small></div></div><span class="lvl ${status==="ready"?"lvl-ok":status==="blocked_missing_facts"?"lvl-blad":"lvl-ostrzezenie"}">${status==="ready"?"gotowy do decyzji":status==="blocked_missing_facts"?"brak faktów":"sprawdź szkic"}</span></header>${result.summary?`<p>${esc(result.summary)}</p>`:""}${fields.length?`<div class="agent-specialist-fields">${fields.map(field=>`<section><small>${esc(field.label||field.key)}</small><pre>${esc(field.value||"")}</pre></section>`).join("")}</div>`:""}${!compact&&result.content?`<details><summary>Główna treść</summary><pre>${esc(result.content)}</pre></details>`:""}${warnings.length?`<div class="agent-specialist-warnings">${warnings.map(item=>`<span>⚠️ ${esc(item)}</span>`).join("")}</div>`:""}<footer><span>Pewność: <b>${Math.round(Number(result.confidence||0)*100)}%</b></span><span>Tokeny: <b>${esc(run.usage?.totalTokens||0)}</b></span>${run.target?.type==="product"&&run.approvalStatus!=="applied"?`<button class="btn" onclick="agentAISpecjalistaZatwierdzProdukt(${jsArg(run.id)},this)">✅ Zatwierdź treści produktu</button>`:run.approvalStatus==="applied"?`<span class="lvl lvl-ok">zapisano w produkcie</span>`:""}</footer></article>`;
+}
+async function agentAISpecjalistaFormularz(e){
+  e?.preventDefault();const form=e.currentTarget,specialist=String(form.elements.specialist?.value||"product_content"),instruction=String(form.elements.instruction?.value||"").trim(),material=String(form.elements.material?.value||"").trim();
+  if(!material){toast("Wpisz fakty lub materiał wejściowy");return false;}agentAISpecjalisci={...agentAISpecjalisci,running:true,error:""};renderuj();
+  try{const run=await agentAISpecjalistaWykonaj(specialist,{material},instruction,{});toast(run.cached?"✅ Użyto aktualnego, sprawdzonego szkicu":"✅ GPT-5 nano przygotował szkic do zatwierdzenia");await agentAISpecjalisciPobierz(true);}
+  catch(error){agentAISpecjalisci={...agentAISpecjalisci,error:String(error?.message||error)};toast("⚠️ GPT-5 nano: "+(error?.message||error));}
+  finally{agentAISpecjalisci={...agentAISpecjalisci,running:false};renderuj();}return false;
+}
+async function agentAISpecjalistaZatwierdzProdukt(id,button=null){
+  if(button)button.disabled=true;try{const data=await chmura("agent-specialist-apply",{method:"POST",body:{id},timeout:45000});await chmuraWczytajStan().catch(()=>{});const run=(agentAISpecjalisci.data?.history||[]).find(item=>item.id===id);if(run)run.approvalStatus="applied";toast(data.result?.duplicate?"ℹ️ Ten szkic był już zapisany":"✅ Zatwierdzone treści zapisano w produkcie");renderuj();}
+  catch(error){toast("⚠️ Zatwierdzenie szkicu: "+(error?.message||error));if(button)button.disabled=false;}
+}
+async function agentAISpecjalisciZapiszUstawienia(e){
+  e?.preventDefault();const form=e.currentTarget,f=new FormData(form),config={enabled:f.get("enabled")==="on",automaticEnabled:f.get("automaticEnabled")==="on",dailyLimit:Number(f.get("dailyLimit")||60),automaticDailyLimit:Number(f.get("automaticDailyLimit")||10),automaticBatchSize:Number(f.get("automaticBatchSize")||2),cacheHours:Number(f.get("cacheHours")||24)};agentAISpecjalisci={...agentAISpecjalisci,saving:true};renderuj();
+  try{await chmura("agent-specialists-config",{method:"POST",body:{config},timeout:30000});toast("✅ Zapisano kontrolę kosztów i automatykę GPT-5 nano");await agentAISpecjalisciPobierz(true);}catch(error){toast("⚠️ Ustawienia GPT: "+(error?.message||error));}finally{agentAISpecjalisci={...agentAISpecjalisci,saving:false};renderuj();}return false;
+}
+async function agentAISpecjalisciCykl(){
+  agentAISpecjalisci={...agentAISpecjalisci,running:true};renderuj();try{const data=await chmura("agent-specialist-auto-cycle",{method:"POST",body:{source:"admin-manual"},timeout:180000}),count=data.cycle?.prepared?.filter(item=>item.status==="prepared").length||0;toast(count?`✅ Przygotowano ${count} nowe szkice produktów`:`ℹ️ ${data.cycle?.reason==="no_candidates"?"Brak nowych produktów wymagających szkicu":"Cykl nie przygotował nowych szkiców"}`);await agentAISpecjalisciPobierz(true);}catch(error){toast("⚠️ Cykl GPT: "+(error?.message||error));}finally{agentAISpecjalisci={...agentAISpecjalisci,running:false};renderuj();}
+}
+function agentAISpecjalisciPanelHTML(){
+  const state=agentAISpecjalisci,data=state.data||{},specialists=Array.isArray(data.specialists)?data.specialists:[],history=Array.isArray(data.history)?data.history:[],usage=data.usage||{},cfg=data.config||{enabled:true,automaticEnabled:true,dailyLimit:60,automaticDailyLimit:10,automaticBatchSize:2,cacheHours:24};
+  if(state.loading&&!state.loaded)return `<section class="panel agent-specialists-page"><div class="agent-runtime-loading"><i></i><div><b>Uruchamiam zespół GPT-5 nano…</b><small>Pobieram role, limity i szkice.</small></div></div></section>`;
+  if(state.error&&!data.specialists)return `<section class="panel"><div class="backend-note warn"><b>Nie udało się uruchomić specjalistów.</b><p>${esc(state.error)}</p><button class="btn" onclick="agentAISpecjalisciPobierz(false)">Ponów</button></div></section>`;
+  const active=state.activeRun||history[0];
+  return `<section class="agent-specialists-page"><section class="panel agent-specialists-hero"><div><span class="order-pro-label">Prawdziwe wywołania Responses API</span><h2>✦ Zespół specjalistów GPT-5 nano</h2><p>Każda rola ma osobne zasady, wynik strukturalny i historię. Automatyka tworzy szkice w tle; publikacja, wysłanie lub zapis produktu pozostają kontrolowaną decyzją.</p></div><div><strong>${esc(data.model||"gpt-5-nano")}</strong><span class="lvl ${data.configured?"lvl-ok":"lvl-blad"}">${data.configured?"API połączone":"brak konfiguracji"}</span><button class="btn" onclick="agentAISpecjalisciCykl()" ${state.running?"disabled":""}>${state.running?"⏳ Pracuję…":"▶ Przygotuj bezpieczne szkice"}</button></div></section><div class="orders-stat-grid"><div class="order-stat-card money"><span>✦</span><b>${specialists.length}</b><small>konkretnych specjalistów</small></div><div class="order-stat-card"><span>📅</span><b>${esc(usage.today||0)} / ${esc(cfg.dailyLimit||60)}</b><small>wywołań dzisiaj</small></div><div class="order-stat-card"><span>⚙️</span><b>${esc(usage.automaticToday||0)} / ${esc(cfg.automaticDailyLimit||10)}</b><small>szkiców automatycznych</small></div><div class="order-stat-card"><span>🪙</span><b>${esc((usage.inputTokens||0)+(usage.outputTokens||0))}</b><small>tokenów dzisiaj</small></div></div><div class="agent-specialist-grid">${specialists.map(item=>`<article><span>${esc(item.icon||"✦")}</span><div><b>${esc(item.label)}</b><small>${esc(item.area)}</small><p>${esc(item.description)}</p></div><button class="btn ghost" onclick="document.querySelector('[name=specialist]').value=${jsArg(item.id)};document.querySelector('[name=material]').focus()">Użyj</button></article>`).join("")}</div><div class="agent-specialist-workspace"><form class="panel agent-specialist-form" onsubmit="return agentAISpecjalistaFormularz(event)"><div class="order-section-head"><div><span class="order-pro-label">Nowe zadanie</span><h2>Przygotuj treść lub plan</h2><p class="order-detail-lead">Podaj tylko potwierdzone fakty. Model sam wybierze strukturę wymaganych pól.</p></div></div><label>Specjalista<select name="specialist">${specialists.map(item=>`<option value="${esc(item.id)}">${esc(item.icon)} ${esc(item.label)} • ${esc(item.area)}</option>`).join("")}</select></label><label>Co ma przygotować?<input name="instruction" maxlength="3000" placeholder="Np. przygotuj kampanię weekendową i tekst bannera"></label><label>Fakty i materiał wejściowy<textarea name="material" rows="8" maxlength="12000" placeholder="Produkt, grupa odbiorców, potwierdzony rabat, daty, obecny opis lub treść wiadomości…"></textarea></label><button class="btn" type="submit" ${state.running?"disabled":""}>${state.running?"⏳ GPT-5 nano przygotowuje…":"✦ Utwórz profesjonalny szkic"}</button><small>Nic nie jest automatycznie wysyłane klientowi, producentowi ani publikowane w sklepie lub Allegro.</small></form><aside>${active?agentAISpecjalistaWynikHTML(active):`<section class="panel agent-specialist-empty"><span>✦</span><b>Wynik pojawi się tutaj</b><p>Wybierz rolę i podaj fakty albo uruchom automatyczne przygotowanie szkiców produktów.</p></section>`}</aside></div><form class="panel agent-specialist-settings" onsubmit="return agentAISpecjalisciZapiszUstawienia(event)"><div class="order-section-head"><div><span class="order-pro-label">Koszt i automatyka</span><h2>Kontrolowane użycie GPT-5 nano</h2><p class="order-detail-lead">Pamięć wyniku zapobiega płaceniu drugi raz za identyczne zadanie.</p></div><button class="btn" type="submit" ${state.saving?"disabled":""}>${state.saving?"⏳ Zapisuję…":"💾 Zapisz ustawienia"}</button></div><div><label><input type="checkbox" name="enabled" ${cfg.enabled!==false?"checked":""}> Specjaliści aktywni</label><label><input type="checkbox" name="automaticEnabled" ${cfg.automaticEnabled!==false?"checked":""}> Twórz szkice w tle</label><label>Limit wszystkich / dzień<input type="number" name="dailyLimit" min="1" max="200" value="${esc(cfg.dailyLimit||60)}"></label><label>Automatyczne / dzień<input type="number" name="automaticDailyLimit" min="0" max="100" value="${esc(cfg.automaticDailyLimit??10)}"></label><label>Produktów na cykl<input type="number" name="automaticBatchSize" min="1" max="5" value="${esc(cfg.automaticBatchSize||2)}"></label><label>Pamięć wyniku (godz.)<input type="number" name="cacheHours" min="1" max="168" value="${esc(cfg.cacheHours||24)}"></label></div></form><section class="panel agent-specialist-history"><div class="order-section-head"><div><span class="order-pro-label">Szkice i audyt</span><h2>Ostatnia praca specjalistów</h2><p class="order-detail-lead">Automatyczne szkice produktów możesz zatwierdzić pojedynczo. Inne wyniki pozostają materiałem roboczym.</p></div><button class="btn ghost" onclick="agentAISpecjalisciPobierz(false)">↻ Odśwież</button></div><div>${history.slice(0,30).map(run=>agentAISpecjalistaWynikHTML(run,true)).join("")||`<div class="agent-ops-empty">Pierwsze szkice pojawią się po uruchomieniu specjalisty lub następnym cyklu Agenta.</div>`}</div></section></section>`;
+}
 async function agentAITelegramPobierz(live=false,silent=false){
   if(agentAITelegram.loading)return;
   agentAITelegram={...agentAITelegram,loading:true,error:""};if(!silent)renderuj();
@@ -1699,7 +1749,7 @@ function agentAIHistoriaPanelHTML(){
 function widokAdminAgentAI(sekcja="pulpit"){
   allegroLadujJesliTrzeba("orders");
   const analiza=agentAIAnaliza();
-  const aktywna=["pulpit","komendy","plan","produkty","zlecenia","producenci","telegram","pamiec","historia"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
+  const aktywna=["pulpit","komendy","specjalisci","plan","produkty","zlecenia","producenci","telegram","pamiec","historia"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const aktywneZadania=agentAIAnalizaAktywna(analiza),problemy=aktywneZadania.length;
   const score=Math.max(0,Math.round(100-(aktywneZadania.filter(x=>x.poziom==="bad").length*18)-(aktywneZadania.filter(x=>x.poziom==="warn").length*8)));
   const plan=potrzebyZatowarowania().slice(0,8);
@@ -1712,6 +1762,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
   if(aktywna==="pulpit"&&(!agentAIRuntime.loaded||runtimeAge>15000)&&!agentAIRuntime.loading)setTimeout(()=>agentAIRuntimePobierz(true),0);
   if(aktywna==="pulpit")setTimeout(()=>agentAIRuntimePolling(),0);
   if(aktywna==="telegram"&&!agentAITelegram.loaded&&!agentAITelegram.loading)setTimeout(()=>agentAITelegramPobierz(true,true),0);
+  if(aktywna==="specjalisci"&&!agentAISpecjalisci.loaded&&!agentAISpecjalisci.loading)setTimeout(()=>agentAISpecjalisciPobierz(false),0);
   const decyzjeAge=Date.now()-(Date.parse(agentAIDecyzjeMagazynowe.updatedAt)||0);
   if(aktywna==="komendy"&&(!agentAIDecyzjeMagazynowe.loaded||decyzjeAge>60_000)&&!agentAIDecyzjeMagazynowe.loading)setTimeout(()=>agentAIDecyzjeMagazynowePobierz(true),0);
   return adminSzkielet("/admin/agent-ai", `
@@ -1797,6 +1848,7 @@ function widokAdminAgentAI(sekcja="pulpit"){
     </div>`:`<p class="order-detail-lead" style="margin-bottom:0">Brak zapisanych poleceń z panelu. Wpisz pierwsze polecenie powyżej.</p>`}
   </div>
   <div style="${aktywna==="pamiec"?"":"display:none"}">${agentAIPamiecPanelHTML()}</div>
+  <div style="${aktywna==="specjalisci"?"":"display:none"}">${agentAISpecjalisciPanelHTML()}</div>
   <div style="${aktywna==="produkty"?"":"display:none"}">${agentAIProduktyWdrozeniePanelHTML()}</div>
   <div style="${["komendy","plan"].includes(aktywna)?"":"display:none"}">${agentAILinkiProducentowPanelHTML()}</div>
   <div style="${aktywna==="plan"?"":"display:none"}">${agentAIPlanOperacyjnyHTML(analiza)}${agentAICentrumDecyzjiHTML()}

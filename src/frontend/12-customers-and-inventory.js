@@ -1294,9 +1294,10 @@ function agentAIWdrozenieProduktuHTML(p={},edycja=false){
 async function agentAIUruchomWdrozenieProduktu(id,button=null){
   const product=pobierzProduktAdmin(Number(id));if(!product)return null;
   if(button)button.disabled=true;zapiszPolaProduktuLokalnie(id,{agentOnboardingStatus:"processing",agentOnboardingStartedAt:new Date().toISOString()},false);renderuj();
-  const result=await allegroSynchronizujPowiazanyProduktPoZapisie(product,{forceFees:true}),updated=pobierzProduktAdmin(Number(id))||product,state=agentAIStanWdrozeniaProduktu(updated),status=result?.ok&&state.ready?"completed":"needs_attention";
+  let textRun=null,textError="";try{textRun=await agentAISpecjalistaProduktWdrozenie(product);}catch(error){textError=String(error?.message||error);}
+  const enriched=pobierzProduktAdmin(Number(id))||product,result=await allegroSynchronizujPowiazanyProduktPoZapisie(enriched,{forceFees:true}),updated=pobierzProduktAdmin(Number(id))||enriched,state=agentAIStanWdrozeniaProduktu(updated),status=result?.ok&&state.ready?"completed":"needs_attention";
   zapiszPolaProduktuLokalnie(id,{agentOnboardingStatus:status,agentOnboardingCompletedAt:status==="completed"?new Date().toISOString():"",agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingMissing:state.checks.filter(x=>!x.ok).map(x=>x.id)},false);
-  zapiszHistorieAgenta("wdrozenie-produktu",`${status==="completed"?"Zakończono":"Sprawdzono"} wdrożenie produktu: ${updated.nazwa||id}`,{produktId:id,status,missing:state.checks.filter(x=>!x.ok).map(x=>x.id)});zaplanujZapisUstawien();toast(status==="completed"?"✅ Agent zakończył wdrożenie produktu":"⚠️ Agent wskazał pola wymagające uzupełnienia");renderuj();return {result,status};
+  zapiszHistorieAgenta("wdrozenie-produktu",`${status==="completed"?"Zakończono":"Sprawdzono"} wdrożenie produktu: ${updated.nazwa||id}`,{produktId:id,status,textRunId:textRun?.id||"",textError,missing:state.checks.filter(x=>!x.ok).map(x=>x.id)});zaplanujZapisUstawien();toast(status==="completed"?"✅ GPT-5 nano i Agent zakończyli wdrożenie produktu":textError?`⚠️ Kontrola produktu wykonana; redaktor GPT: ${textError}`:"⚠️ Agent wskazał pola wymagające uzupełnienia");renderuj();return {result,status,textRun,textError};
 }
 function formularzProduktu(p, tryb){
   p=domyslneKosztyDoProduktu(p||{},false);

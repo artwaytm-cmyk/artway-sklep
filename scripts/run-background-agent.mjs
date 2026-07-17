@@ -11,6 +11,7 @@ const tasks = [
   ['oferty-lekkie', 'allegro-sync-offers', { limit: 10000, details: false, source: 'scheduled-catalog-refresh' }],
   ['oferty-pelne', 'allegro-sync-offers', { limit: 10000, details: true, detailsLimit: 1000, source: 'scheduled-offers-sync' }],
   ['agent-autonomiczny', 'allegro-autonomous-agent-cycle', { source: 'vps-systemd-timer', maxActions: 10 }],
+  ['tresci-gpt-nano', 'agent-specialist-auto-cycle', { source: 'vps-systemd-timer' }],
   ['zamowienia', 'allegro-sync-orders', { limit: 200, source: 'scheduled-stock-agent' }],
   ['komunikacja', 'allegro-sync-communications', { limit: 20, autoReply: true, source: 'scheduled-communications' }],
 ];
@@ -19,6 +20,7 @@ const taskLabels = {
   'oferty-lekkie': 'Szybka kontrola ofert Allegro',
   'oferty-pelne': 'Pełna aktualizacja danych ofert',
   'agent-autonomiczny': 'Autonomiczna kontrola katalogu',
+  'tresci-gpt-nano': 'Szkice treści przez specjalistów GPT-5 nano',
   zamowienia: 'Nowe zamówienia i stany Allegro',
   komunikacja: 'Nowe wiadomości i dyskusje',
 };
@@ -60,7 +62,7 @@ async function run(label, action, body) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data?.ok === false) throw new Error(String(data?.error || `HTTP ${response.status}`).slice(0, 500));
     const state = data?.state || {};
-    const result = { label, ok: true, skipped: !!data?.skipped, durationMs: Date.now() - started, count: Number(data?.count ?? data?.fetched ?? data?.offers?.length) || 0, mapped: Number(data?.autoMapped ?? state?.mapping?.autoMapped) || 0, duplicatesEnded: Number(state?.duplicateOffersEnded) || 0, review: Number(state?.reviewCount) || 0 };
+    const result = { label, ok: true, skipped: !!(data?.skipped || data?.cycle?.skipped), durationMs: Date.now() - started, count: Number(data?.count ?? data?.fetched ?? data?.offers?.length ?? data?.cycle?.prepared?.length) || 0, mapped: Number(data?.autoMapped ?? state?.mapping?.autoMapped) || 0, duplicatesEnded: Number(state?.duplicateOffersEnded) || 0, review: Number(state?.reviewCount) || 0 };
     await report('cycle_step', {
       step: {
         id: label,

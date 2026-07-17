@@ -40,6 +40,8 @@ import { createInventoryNaturalCommandHandler } from './domain/inventory-command
 import { createInventoryDecisionService } from './domain/inventory-decisions.mjs';
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createAgentRuntime } from './domain/agent-runtime.mjs';
+import { createAgentSpecialists } from './domain/agent-specialists.mjs';
+import { createAgentSpecialistRoute } from './agent-specialist-route.mjs';
 import { createAiBannerGenerator } from './domain/ai-banner-generator.mjs';
 import { createAiBannerRoute } from './ai-banner-route.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
@@ -134,6 +136,8 @@ const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
 const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, decisions: inventoryDecisions });
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const agentSpecialists = createAgentSpecialists({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const agentSpecialistRoute = createAgentSpecialistRoute({ service: agentSpecialists, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession });
 const aiBannerGenerator = createAiBannerGenerator({ read: czytaj, write: zapisz, remove: repository.delete });
 const aiBannerRoute = createAiBannerRoute({ generator: aiBannerGenerator, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, configured: () => !!process.env.OPENAI_API_KEY, model: () => process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2' });
 const allegroOrderArchive = createAllegroOrderArchive({ read: czytaj, write: zapisz });
@@ -4926,6 +4930,8 @@ export default async (req) => {
     if (withdrawalResponse) return withdrawalResponse;
     const aiBannerResponse = await aiBannerRoute(req, url, action);
     if (aiBannerResponse) return aiBannerResponse;
+    const agentSpecialistResponse = await agentSpecialistRoute(req, url, action);
+    if (agentSpecialistResponse) return agentSpecialistResponse;
     if (action === 'catalog-quality-audit') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);

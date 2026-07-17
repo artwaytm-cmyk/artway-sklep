@@ -1278,7 +1278,8 @@ async function allegroAgentPropozycjaOdpowiedzi(type,id,mode="context"){
   buttons.forEach(button=>{button.disabled=true;button.setAttribute("aria-busy","true");});
   try{
     const d=await chmura("allegro-reply-suggestion",{method:"POST",body:{type,id,mode,draft:before},timeout:30000});
-    if(field){field.dataset.previousDraft=before;field.dataset.lastImprovement=mode;field.value=d.suggestion||before;field.focus();field.dispatchEvent(new Event("input",{bubbles:true}));}
+    let suggestion=d.suggestion||before;try{const textRun=await agentAISpecjalistaWykonaj("customer_reply",{draft:suggestion,verifiedContext:d.context||{},mode},mode==="style"?"Popraw profesjonalnie styl wpisanego szkicu, zachowując jego znaczenie i wyłącznie potwierdzone fakty.":"Przygotuj serdeczną, konkretną odpowiedź na podstawie sprawdzonego kontekstu. Nie obiecuj niczego bez potwierdzenia.",{},{}),fields=agentAISpecjalistaPola(textRun?.result||{});suggestion=fields.reply||textRun?.result?.content||suggestion;}catch(textError){console.warn("GPT-5 nano reply fallback",textError);}
+    if(field){field.dataset.previousDraft=before;field.dataset.lastImprovement=mode;field.value=suggestion;field.focus();field.dispatchEvent(new Event("input",{bubbles:true}));}
     const contextBox=document.getElementById(allegroReplyContextId(type,id));if(contextBox){contextBox.innerHTML=allegroKontekstOdpowiedziHTML(d.context||{});contextBox.hidden=false;}
     const undo=box?.querySelector("[data-reply-undo]");if(undo)undo.hidden=false;
     toast(mode==="style"?"✨ Poprawiono styl szkicu — nic nie wysłano":"🧠 Dopasowano szkic do całej rozmowy — sprawdź go przed wysłaniem");
@@ -1480,6 +1481,7 @@ function agentAISubnavHTML(aktywny="pulpit"){
   return adminSubnavHTML([
     {id:"pulpit",href:"#/admin/agent-ai",label:"🤖 Pulpit",badge:problemy||""},
     {id:"komendy",href:"#/admin/agent-ai/komendy",label:"💬 Komendy"},
+    {id:"specjalisci",href:"#/admin/agent-ai/specjalisci",label:"✦ Specjaliści GPT"},
     {id:"plan",href:"#/admin/agent-ai/plan",label:"🧭 Plan operacyjny",badge:plan||""},
     {id:"produkty",href:"#/admin/agent-ai/produkty",label:"✨ Nowe produkty",badge:produktyWdrozenie||""},
     {id:"zakupy",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:zlecenia||""},
