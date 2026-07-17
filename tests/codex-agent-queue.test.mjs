@@ -63,6 +63,23 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
   assert.equal((await queue.claim('mac-artway')).job, null);
 });
 
+test('status kolejki pokazuje jednego aktywnego workera bez ujawniania jego identyfikatora', async () => {
+  const repo = repository();
+  let time = new Date('2026-07-17T12:00:00.000Z');
+  const queue = createCodexAgentQueue({
+    readVersioned: repo.readVersioned,
+    writeIfVersion: repo.writeIfVersion,
+    now: () => new Date(time),
+  });
+  await queue.claim('sekretny-worker-vps');
+  const online = await queue.status();
+  assert.equal(online.workerOnline, true);
+  assert.equal(online.active, 0);
+  assert.equal(Object.hasOwn(online, 'workerId'), false);
+  time = new Date(time.getTime() + 76_000);
+  assert.equal((await queue.status()).workerOnline, false);
+});
+
 test('kind wejścia jest zamknięty, a literalny tekst AA pozostaje zwykłą wiadomością', async () => {
   assert.equal(sanitizeCodexInboundKind('callback'), 'callback');
   assert.equal(sanitizeCodexInboundKind(' CALLBACK '), 'callback');

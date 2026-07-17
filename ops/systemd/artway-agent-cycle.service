@@ -1,0 +1,19 @@
+[Unit]
+Description=Artway autonomous shop and Allegro agent cycle
+After=network-online.target postgresql.service artway-backend.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+EnvironmentFile=/srv/artway/shop/.env.netlify
+EnvironmentFile=-/srv/artway/agent/.env
+Environment=ARTWAY_LOCAL_API_ORIGIN=http://127.0.0.1:3000
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/run-background-agent.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+TimeoutStartSec=12min

@@ -7,6 +7,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VENDOR_ASSETS = Object.freeze([
   { source: 'node_modules/jsqr/dist/jsQR.js', output: 'assets/vendor/jsQR.js' },
   { source: 'node_modules/qrcode-generator/qrcode.js', output: 'assets/vendor/qrcode-generator.js' },
+  { source: 'node_modules/@zxing/browser/umd/zxing-browser.min.js', output: 'assets/vendor/zxing-browser.min.js' },
 ]);
 
 export const ASSET_BUNDLES = Object.freeze([
@@ -23,6 +24,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/07-admin-shipping.js',
       'src/frontend/09-seo.js',
       'src/frontend/17-cart-and-checkout.js',
+      'src/frontend/18-pwa.js',
       'src/frontend/18-ui-and-bootstrap.js',
     ],
   },
@@ -41,6 +43,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/11-allegro-order-workflow-ui.js',
       'src/frontend/11-allegro-order-archive-ui.js',
       'src/frontend/11-allegro-mapping-index.js',
+      'src/frontend/11-order-location-ui.js',
       'src/frontend/11-allegro-and-orders.js',
       'src/frontend/11-allegro-settings.js',
       'src/frontend/12-customers-and-inventory.js',
@@ -51,6 +54,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/14-categories-and-mapping.js',
       'src/frontend/14a-category-workspace.js',
       'src/frontend/15-personalization-and-publishing.js',
+      'src/frontend/15a-home-promotions-workspace.js',
       'src/frontend/16-diagnostics.js',
       'src/frontend/19-admin-dashboard.js',
     ],
@@ -85,6 +89,8 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/18-warehouse-documents.css',
       'src/styles/19-warehouse-qr.css',
       'src/styles/20-warehouse-locations.css',
+      'src/styles/21-warehouse-workspace.css',
+      'src/styles/22-home-promotions.css',
     ],
   },
 ]);

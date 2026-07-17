@@ -21,10 +21,24 @@ import {
 const SETTINGS_KEY = 'telegram_communication_settings';
 const STATE_KEY = 'telegram_communication_state';
 const OPEN_STATES = new Set(['open', 'acknowledged', 'snoozed']);
+const TELEGRAM_PANEL_ORIGIN = 'https://artwaytm.pl/';
 
 function clean(value = '', limit = 500) { return String(value ?? '').replace(/\u0000/g, '').slice(0, limit); }
 function nowIso() { return new Date().toISOString(); }
 function plusMinutes(iso, minutes) { return new Date(Date.parse(iso) + Math.max(0, Number(minutes) || 0) * 60000).toISOString(); }
+
+export function telegramPanelUrl(value = '', fallback = 'https://artwaytm.pl/#/admin/agent-ai/telegram') {
+  try {
+    const url = new URL(clean(value, 500).trim() || fallback, TELEGRAM_PANEL_ORIGIN);
+    if (url.protocol !== 'https:' || !['artwaytm.pl', 'www.artwaytm.pl'].includes(url.hostname)) return fallback;
+    url.hostname = 'artwaytm.pl';
+    url.username = '';
+    url.password = '';
+    return url.toString();
+  } catch {
+    return fallback;
+  }
+}
 function emptyState() {
   return {
     initializedAt: '', updatedAt: '', lastDispatchAt: '', lastDigestAt: '', lastDigestSlot: '', events: {}, history: [], outbox: [],
@@ -147,7 +161,7 @@ export function telegramIncidentCard(record = {}, heading = '') {
 }
 
 export function telegramIncidentKeyboard(record = {}) {
-  const id = record.id || telegramIncidentId(record.key), open = { text: 'Otwórz', url: record.href || 'https://artwaytm.pl/#/admin/agent-ai/telegram' };
+  const id = record.id || telegramIncidentId(record.key), open = { text: 'Otwórz', url: telegramPanelUrl(record.href) };
   if (record.workflowEnabled === false) return { inline_keyboard: [[open]] };
   if (record.status === 'resolved') return { inline_keyboard: [[{ text: '↩ Przywróć', callback_data: `tg:reopen:${id}` }, open]] };
   if (record.status === 'open') return { inline_keyboard: [[{ text: '👤 Przyjmuję', callback_data: `tg:ack:${id}` }, open]] };
@@ -227,7 +241,13 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     };
     if (!live || !config.token) return result;
     try {
-      const [bot, webhook] = await Promise.all([telegramApi('getMe', {}, env), telegramApi('getWebhookInfo', {}, env)]);
+      const [bot, webhook, target] = await Promise.all([
+        telegramApi('getMe', {}, env),
+        telegramApi('getWebhookInfo', {}, env),
+        config.chatId
+          ? telegramApi('getChat', { chat_id: config.chatId }, env).then((chat) => ({ reachable: true, type: clean(chat?.type || '', 40), name: clean(chat?.title || chat?.first_name || '', 120), error: '' })).catch((error) => ({ reachable: false, type: '', name: '', error: clean(error?.message || error, 240) }))
+          : Promise.resolve({ reachable: false, type: '', name: '', error: 'Brak kanału docelowego' }),
+      ]);
       result.bot = {
         id: bot?.id || null,
         username: bot?.username || '',
@@ -235,6 +255,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
         can_read_all_group_messages: bot?.can_read_all_group_messages === true,
       };
       result.webhook = { active: !!webhook?.url, url: webhook?.url ? 'https://artwaytm.pl/.netlify/functions/telegram-webhook' : '', pending: Number(webhook?.pending_update_count || 0), lastErrorAt: webhook?.last_error_date || null, lastError: clean(webhook?.last_error_message || '', 300) };
+      result.target = target;
     } catch (error) { result.error = clean(error?.message || error, 400); }
     return result;
   }
@@ -351,12 +372,14 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
 
   async function processOutbox(state, settings) {
     let sent = 0, failed = 0;
+    const deliveredIncidentIds = [];
     for (const item of state.outbox.filter((entry) => entry.status === 'retry' && Date.parse(entry.nextAttemptAt || '') <= Date.now()).slice(0, 5)) {
       const record = Object.values(state.events).find((event) => event.id === item.incidentId);
       if (!record || record.status === 'resolved') { item.status = 'cancelled'; continue; }
       try {
         const result = await deliverIncident(record, settings, item.heading); record.messageId = result?.message_id || record.messageId; record.chatId = String(result?.chat?.id || record.chatId || '');
         record.sentAt = nowIso(); item.status = 'sent'; item.sentAt = nowIso(); sent += 1;
+        deliveredIncidentIds.push(record.id);
         addHistory(state, { kind: 'retry', status: 'sent', category: record.category, severity: record.severity, title: record.title, messageId: record.messageId, incidentId: record.id, source: 'delivery-queue' });
       } catch (error) {
         item.attempts = Number(item.attempts || 0) + 1; item.lastError = clean(error?.message || error, 400); failed += 1;
@@ -364,7 +387,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       }
     }
     state.outbox = state.outbox.filter((item) => item.status !== 'sent' && item.status !== 'cancelled').slice(0, 100);
-    return { sent, failed };
+    return { sent, failed, deliveredIncidentIds };
   }
 
   async function managedEvent(eventInput = {}, message = '', options = {}) {
@@ -423,6 +446,13 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     const [settings, state] = await Promise.all([loadSettings(), loadState()]), events = telegramPriorityEvents(center), timestamp = nowIso(), previousEvents = { ...(state.events || {}) };
     state.lastDispatchAt = timestamp; state.health.lastCycleAt = timestamp; const retry = await processOutbox(state, settings); const autoResolved = syncIncidents(state, events, settings, timestamp);
     for (const record of autoResolved.filter((item) => item.messageId).slice(0, 10)) await editIncidentMessage(record);
+    if (options.retryOnly === true) {
+      state.health.lastSuccessAt = timestamp;
+      state.health.consecutiveErrors = 0;
+      state.health.lastError = '';
+      await saveState(state);
+      return { sent: retry.sent > 0, delivered: [], urgent: 0, digest: 0, escalated: 0, resolved: autoResolved.length, retry, events: events.length, quietNow: telegramQuietNow(settings), reason: retry.sent ? 'ponowiono wyłącznie wcześniej niedostarczone alerty' : 'brak alertów gotowych do ponowienia' };
+    }
     if (!state.initializedAt && !options.force) {
       state.initializedAt = timestamp; for (const event of events) state.events[event.key].digestFingerprint = event.fingerprint;
       state.health.lastSuccessAt = timestamp; state.health.consecutiveErrors = 0; addHistory(state, { kind: 'baseline', status: 'saved', title: 'Utworzono punkt odniesienia bez wysyłania starych alertów', reason: `${events.length} aktywnych spraw`, source: options.source || 'schedule' });
@@ -451,8 +481,10 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
         digestSent = digestRecords.length; state.lastDigestAt = timestamp; state.lastDigestSlot = slot; addHistory(state, { kind: 'digest', status: 'sent', category: 'operations', severity: 'info', title: `Raport zbiorczy: ${digestRecords.length} spraw`, messageId: sent?.message_id, source: options.source || 'schedule' });
       } catch (error) { addHistory(state, { kind: 'digest', status: 'error', title: 'Raport zbiorczy', reason: error?.message || error, source: options.source || 'schedule' }); }
     }
+    const deliveredThisCycle = new Set([...(retry.deliveredIncidentIds || []), ...delivered]);
     const escalated = [];
     if (settings.escalationEnabled && !telegramQuietNow(settings)) for (const record of Object.values(state.events).filter((item) => item.severity === 'critical' && incidentOverdue(item)).slice(0, settings.maxItems)) {
+      if (deliveredThisCycle.has(record.id)) continue;
       const elapsed = (Date.now() - Date.parse(record.lastEscalatedAt || 0)) / 60000;
       if (record.escalationLevel >= settings.maxEscalations || (record.lastEscalatedAt && elapsed < settings.escalationRepeatMinutes)) continue;
       try {

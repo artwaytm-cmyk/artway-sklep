@@ -36,12 +36,61 @@ let renderowanieWidoku=false;
 let renderPonowniePoBiezacym=false;
 let renderTimerWpisywania=null;
 let renderFrameWpisywania=0;
+const ADMIN_CACHE_PODSTRON_LIMIT=8;
+const ADMIN_CACHE_PODSTRON_MAX_WEZLOW=12000;
+const ADMIN_CACHE_PODSTRON_MAX_LACZNIE=24000;
 function zaplanujRenderPoWpisaniu(opoznienie=180){
   clearTimeout(renderTimerWpisywania);
   if(renderFrameWpisywania)cancelAnimationFrame(renderFrameWpisywania);
   renderTimerWpisywania=setTimeout(()=>{
     renderFrameWpisywania=requestAnimationFrame(()=>{renderFrameWpisywania=0;renderuj();});
   },Math.max(80,Number(opoznienie)||180));
+}
+function adminTrasaCacheowalna(route=""){
+  const value=String(route||"");
+  return value.startsWith("/admin")&&!value.startsWith("/admin/zamowienie/")&&!value.startsWith("/admin/produkty/edytuj/")&&!value.startsWith("/admin/produkty/dodaj")&&!value.startsWith("/admin/produkty/z-linku");
+}
+function adminKontenerTresci(shell){return shell?.querySelector(":scope > .admin-tresc")||null;}
+function adminTrescBezposrednia(shell){return adminKontenerTresci(shell)?.querySelector(":scope > .admin-workspace-content")||null;}
+function adminLiczbaWezlowCache(){let total=0;for(const entry of adminCachePodstron.values())total+=Number(entry?.nodes)||0;return total;}
+function adminZapiszPodstroneWCache(root,route){
+  if(!adminTrasaCacheowalna(route)||!root)return false;
+  const shell=root.querySelector(":scope > .admin-page"),workspace=adminTrescBezposrednia(shell);
+  if(!shell||!workspace)return false;
+  const nodes=workspace.getElementsByTagName("*").length;
+  if(nodes>ADMIN_CACHE_PODSTRON_MAX_WEZLOW)return false;
+  adminCachePodstron.delete(route);
+  workspace.remove();
+  adminCachePodstron.set(route,{workspace,nodes,header:shell.querySelector(":scope > .admin-tresc > .admin-workspace-header")?.cloneNode(true)||null,mobile:shell.querySelector(":scope > .admin-tresc > .admin-mobile-menu")?.cloneNode(true)||null,revision:adminRewizjaDanych,scrollY:window.scrollY||0,savedAt:Date.now()});
+  while(adminCachePodstron.size>ADMIN_CACHE_PODSTRON_LIMIT||adminLiczbaWezlowCache()>ADMIN_CACHE_PODSTRON_MAX_LACZNIE)adminCachePodstron.delete(adminCachePodstron.keys().next().value);
+  return true;
+}
+function adminAktualizujAktywnaNawigacje(shell,route){
+  const nav=shell?.querySelector(".admin-nav");if(!nav)return;
+  shell.querySelectorAll(".admin-nav .admin-nav-link[href],.pwa-admin-bottom-nav a[href]").forEach(link=>{
+    const href=String(link.getAttribute("href")||"").replace(/^#/,"");
+    const active=typeof adminMenuPozycjaAktywna==="function"?adminMenuPozycjaAktywna(route,href):route===href;
+    link.classList.toggle("active",active);if(active)link.setAttribute("aria-current","page");else link.removeAttribute("aria-current");
+  });
+  const open=typeof adminMenuOtwartaGrupa==="function"?adminMenuOtwartaGrupa():"";
+  nav.querySelectorAll(".admin-nav-group").forEach(group=>{
+    const active=!!group.querySelector(".admin-nav-link.active"),expanded=active||String(group.dataset.adminMenuGroup||"")===String(open||"");
+    group.classList.toggle("is-active",active);group.classList.toggle("collapsed",!expanded);
+    group.querySelector(".admin-nav-group-toggle")?.setAttribute("aria-expanded",String(expanded));
+  });
+}
+function adminPrzywrocPodstroneZCache(root,route){
+  const entry=adminCachePodstron.get(route);if(!entry)return false;
+  adminCachePodstron.delete(route);
+  if(entry.revision!==adminRewizjaDanych)return false;
+  const shell=root?.querySelector(":scope > .admin-page");if(!shell)return false;
+  const container=adminKontenerTresci(shell),current=adminTrescBezposrednia(shell);if(!container)return false;
+  if(current)current.replaceWith(entry.workspace);else container.appendChild(entry.workspace);
+  const currentHeader=container.querySelector(":scope > .admin-workspace-header");if(entry.header&&currentHeader)aktualizujWezelStabilnie(currentHeader,entry.header,document.activeElement);
+  const currentMobile=container.querySelector(":scope > .admin-mobile-menu");if(entry.mobile&&currentMobile)aktualizujWezelStabilnie(currentMobile,entry.mobile,document.activeElement);
+  adminAktualizujAktywnaNawigacje(shell,route);
+  requestAnimationFrame(()=>window.scrollTo({top:Math.max(0,Number(entry.scrollY)||0)}));
+  return true;
 }
 function kluczStabilnegoWezla(node){
   if(!node||node.nodeType!==1)return "";
@@ -95,17 +144,51 @@ function aktualizujWidokStabilnie(root,html){
   if(active?.isConnected&&selection&&typeof active.setSelectionRange==="function")try{active.setSelectionRange(selection.start,selection.end);}catch(e){}
   if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY});
 }
-function odbiorcaStabilnegoWidoku(root,stabilny){
-  if(!stabilny)return root;
-  return {get innerHTML(){return root.innerHTML;},set innerHTML(html){aktualizujWidokStabilnie(root,html);}};
+function aktualizujPanelAdminaStabilnie(root,html,taSamaTrasa=false){
+  const template=document.createElement("template");template.innerHTML=String(html||"").trim();
+  const next=[...template.content.children].find(node=>node.classList?.contains("admin-page"))||null,current=root.querySelector(":scope > .admin-page");
+  if(!next||!current)return false;
+  aktualizujAtrybutyWezla(current,next,document.activeElement);
+  const currentNav=current.querySelector(":scope > .admin-nav"),nextNav=next.querySelector(":scope > .admin-nav");
+  if(currentNav&&nextNav)aktualizujWezelStabilnie(currentNav,nextNav,document.activeElement);
+  const currentBottom=current.querySelector(":scope > .pwa-admin-bottom-nav"),nextBottom=next.querySelector(":scope > .pwa-admin-bottom-nav");
+  if(currentBottom&&nextBottom)aktualizujWezelStabilnie(currentBottom,nextBottom,document.activeElement);
+  const currentContainer=adminKontenerTresci(current),nextContainer=adminKontenerTresci(next);
+  const currentMobile=currentContainer?.querySelector(":scope > .admin-mobile-menu"),nextMobile=nextContainer?.querySelector(":scope > .admin-mobile-menu");
+  if(currentMobile&&nextMobile)aktualizujWezelStabilnie(currentMobile,nextMobile,document.activeElement);
+  const currentHeader=currentContainer?.querySelector(":scope > .admin-workspace-header"),nextHeader=nextContainer?.querySelector(":scope > .admin-workspace-header");
+  if(currentHeader&&nextHeader)aktualizujWezelStabilnie(currentHeader,nextHeader,document.activeElement);
+  const nextWorkspace=adminTrescBezposrednia(next),currentWorkspace=adminTrescBezposrednia(current);
+  if(nextWorkspace){
+    if(currentWorkspace&&taSamaTrasa)aktualizujWezelStabilnie(currentWorkspace,nextWorkspace,document.activeElement);
+    else if(currentWorkspace)currentWorkspace.replaceWith(nextWorkspace.cloneNode(true));
+    else currentContainer?.appendChild(nextWorkspace.cloneNode(true));
+  }
+  return true;
+}
+function odbiorcaStabilnegoWidoku(root,stabilny,panelAdmin=false,taSamaTrasa=false){
+  if(!stabilny&&!panelAdmin)return root;
+  return {get innerHTML(){return root.innerHTML;},set innerHTML(html){
+    if(panelAdmin&&aktualizujPanelAdminaStabilnie(root,html,taSamaTrasa))return;
+    if(stabilny)aktualizujWidokStabilnie(root,html);else root.innerHTML=html;
+  }};
 }
 function renderuj(){
   if(renderowanieWidoku){renderPonowniePoBiezacym=true;return;}
   renderowanieWidoku=true;
   try{
     const t = trasa();
-    const root = $("widok"),taSamaTrasa=ostatniaRenderowanaTrasa===t&&root.childNodes.length>0;
-    const w = odbiorcaStabilnegoWidoku(root,taSamaTrasa);
+    const root = $("widok"),poprzedniaTrasa=ostatniaRenderowanaTrasa,taSamaTrasa=ostatniaRenderowanaTrasa===t&&root.childNodes.length>0;
+    const przejsciePanelu=!taSamaTrasa&&t.startsWith("/admin")&&poprzedniaTrasa.startsWith("/admin")&&root.childNodes.length>0;
+    if(przejsciePanelu){
+      adminZapiszPodstroneWCache(root,poprzedniaTrasa);
+      if(adminPrzywrocPodstroneZCache(root,t)){
+        document.body.classList.add("admin-mode");seoAktualizujMetaDlaTrasy(t);ostatniaRenderowanaTrasa=t;return;
+      }
+    }
+    const panelAdmin=t.startsWith("/admin")&&poprzedniaTrasa.startsWith("/admin")&&root.querySelector(":scope > .admin-page");
+    const wStabilny = odbiorcaStabilnegoWidoku(root,taSamaTrasa);
+    const w = panelAdmin?odbiorcaStabilnegoWidoku(root,true,true,taSamaTrasa):wStabilny;
     // Moduł panelu zawiera także bezpieczny widok „Brak dostępu”. Ładujemy go
     // wyłącznie po wejściu na trasę administracyjną, również dla gościa.
     const wymagaPanelu=t.startsWith("/admin")||t==="/diagnostyka";
@@ -181,11 +264,11 @@ function renderuj(){
       else if(t.startsWith("/admin/seo/")) w.innerHTML = widokAdminSEO(t.split("/")[3]||"pulpit");
       else if(t.startsWith("/admin/asortyment/")){
         const s=t.split("/")[3]||"produkty";
-        w.innerHTML = s==="jakosc"?widokAdminJakoscKatalogu():s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabaty():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
+        w.innerHTML = s==="jakosc"?widokAdminJakoscKatalogu():s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabatyZaawansowane():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
       }
       else if(t.startsWith("/admin/personalizacja/")){
-        const s=t.split("/")[3]||"wyglad";
-        w.innerHTML = s==="rozmieszczenie"?widokAdminRozmieszczenie():s==="bannery"?widokAdminBannery():s==="podstrony"?widokAdminPodstrony():s==="strony"?widokAdminStrony():s==="dostawy"?widokAdminDostawy():widokAdminWyglad();
+        const s=t.split("/")[3]||"home";
+        w.innerHTML = s==="home"?widokAdminStronaGlowna():s==="rozmieszczenie"?widokAdminRozmieszczenie():s==="bannery"?widokAdminBanneryZaawansowane():s==="podstrony"?widokAdminPodstrony():s==="strony"?widokAdminStrony():s==="dostawy"?widokAdminDostawy():widokAdminWyglad();
       }
       else if(t==="/admin/asortyment" || t==="/admin/produkty") w.innerHTML = widokAdminProdukty();
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
@@ -197,12 +280,13 @@ function renderuj(){
       else if(t==="/admin/klienci") w.innerHTML = widokAdminKlienci("lista");
       else if(t.startsWith("/admin/klienci/")) w.innerHTML = widokAdminKlienci(t.split("/")[3]||"lista");
       else if(t.startsWith("/admin/klient/")) w.innerHTML = widokAdminKlient(decodeURIComponent(t.split("/")[3]||""));
-      else if(t==="/admin/rabaty") w.innerHTML = widokAdminRabaty();
+      else if(t==="/admin/rabaty") w.innerHTML = widokAdminRabatyZaawansowane();
       else if(t==="/admin/opinie") w.innerHTML = widokAdminOpinie();
       else if(t==="/admin/dostawy" || t==="/admin/ustawienia") w.innerHTML = widokAdminDostawy();
-      else if(t==="/admin/personalizacja" || t==="/admin/wyglad") w.innerHTML = widokAdminWyglad();
+      else if(t==="/admin/personalizacja") w.innerHTML = widokAdminStronaGlowna();
+      else if(t==="/admin/wyglad") w.innerHTML = widokAdminWyglad();
       else if(t==="/admin/rozmieszczenie") w.innerHTML = widokAdminRozmieszczenie();
-      else if(t==="/admin/bannery") w.innerHTML = widokAdminBannery();
+      else if(t==="/admin/bannery") w.innerHTML = widokAdminBanneryZaawansowane();
       else if(t==="/admin/podstrony") w.innerHTML = widokAdminPodstrony();
       else if(t==="/admin/strony") w.innerHTML = widokAdminStrony();
       else if(t==="/admin/eksport") w.innerHTML = widokAdminEksport("import");
@@ -245,12 +329,17 @@ function opisKategorii(nazwa){
   return mapa[nazwa] || "Zobacz wszystkie produkty dostępne w tym katalogu.";
 }
 function banneryHome(){
-  const lista=pobierzBannery().filter(b=>b.aktywny!==false);
+  const teraz=Date.now();
+  const lista=pobierzBannery().filter(b=>{
+    if(b.aktywny===false)return false;
+    const start=b.start?Date.parse(b.start):NaN,koniec=b.koniec?Date.parse(b.koniec):NaN;
+    return (!Number.isFinite(start)||teraz>=start)&&(!Number.isFinite(koniec)||teraz<=koniec);
+  });
   if(!lista.length) return "";
   return `<section class="managed-banners">${lista.map(b=>`
-    <a class="managed-banner ${b.obraz?'ma-obraz':''}" href="${esc(bezpiecznyLink(b.link))}" ${b.obraz?`style="background-image:linear-gradient(90deg,rgba(15,18,25,.74),rgba(15,18,25,.28)),url('${b.obraz}')"`:""}>
+    <a class="managed-banner ${b.obraz?'ma-obraz':''} banner-${esc(b.styl||"karta")} banner-${esc(b.rozmiar||"standard")} align-${esc(b.wyrownanie||"lewo")} audience-${esc(b.odbiorcy||"wszyscy")}" href="${esc(bezpiecznyLink(b.link))}" ${b.obraz?`style="background-image:linear-gradient(90deg,rgba(15,18,25,.78),rgba(15,18,25,.26)),url('${esc(b.obraz)}')"`:""}>
       ${b.obraz?"":`<span class="banner-icon">${esc(b.ikona||"📣")}</span>`}
-      <span><h3>${esc(b.tytul||"")}</h3><p>${esc(b.opis||"")}</p><small>${esc(b.przycisk||"Dowiedz się więcej")} →</small></span>
+      <span>${b.etykieta?`<em class="managed-banner-badge">${esc(b.etykieta)}</em>`:""}<h3>${esc(b.tytul||"")}</h3><p>${esc(b.opis||"")}</p>${b.kodRabatowy?`<strong class="managed-banner-code">Kod: ${esc(b.kodRabatowy)}</strong>`:""}<small>${esc(b.przycisk||"Dowiedz się więcej")} →</small></span>
     </a>`).join("")}</section>`;
 }
 /* ── Sekcje strony głównej: kolejność i widoczność ustawiane wizualnie
@@ -267,10 +356,12 @@ const SEKCJE_GLOWNEJ = {
   faq:        { nazwa:"Najczęstsze pytania",         ikona:"❓" },
   kontakt:    { nazwa:"Końcowa sekcja kontaktu",     ikona:"💬" }
 };
-const DOMYSLNA_KOLEJNOSC_SEKCJI = ["hero","banery","kategorie","produkty","pasekOferty","zalety","kroki","onas","faq","kontakt"];
+const DOMYSLNA_KOLEJNOSC_SEKCJI = ["hero","banery","produkty","kategorie","pasekOferty","zalety","kroki","onas","faq","kontakt"];
 function kolejnoscSekcji(){
   const zap = Array.isArray(ustawienia.kolejnoscSekcji) ? ustawienia.kolejnoscSekcji.filter(id=>SEKCJE_GLOWNEJ[id]) : [];
-  return [...zap, ...DOMYSLNA_KOLEJNOSC_SEKCJI.filter(id=>!zap.includes(id))];
+  const wynik=[...zap, ...DOMYSLNA_KOLEJNOSC_SEKCJI.filter(id=>!zap.includes(id))],produktyIndex=wynik.indexOf("produkty"),kategorieIndex=wynik.indexOf("kategorie");
+  if(produktyIndex>=0&&kategorieIndex>=0&&kategorieIndex<produktyIndex){wynik.splice(kategorieIndex,1);wynik.splice(wynik.indexOf("produkty")+1,0,"kategorie");}
+  return wynik;
 }
 function sekcjaWidoczna(id){
   if((ustawienia.sekcjeUkryte||[]).includes(id)) return false;
@@ -283,7 +374,7 @@ function widokSklep(){
   const kategorie = wszystkieKategorie();
   const promki = produkty.filter(p=>p.staraCena).length;
   const nowosci = produkty.filter(p=>p.badge==="Nowość").length;
-  const hero = ustawienia.hero || {};
+  const hero = ustawienia.hero || {},oferta=ustawieniaOfertyGlownej();
   const SEKCJE = {};
   SEKCJE.hero = () => `
   <section class="hero">
@@ -311,7 +402,7 @@ function widokSklep(){
       <a href="#produkty" onclick="document.querySelector('.catalog-head')?.scrollIntoView({behavior:'smooth'});return false;">Cała oferta →</a>
     </div>
     <div class="category-grid">
-      ${kategorie.map(k=>`
+      ${(Array.isArray(oferta.kategorie)&&oferta.kategorie.length?kategorie.filter(k=>oferta.kategorie.includes(k)):kategorie).map(k=>`
         <a class="category-tile" href="#/kategoria/${encodeURIComponent(k)}">
           <span class="category-ico">${ikonaKategorii(k)}</span>
           <b>${esc(k)}</b>
@@ -323,12 +414,12 @@ function widokSklep(){
   SEKCJE.produkty = () => `
   <div class="catalog-head" id="produkty">
     <div class="section-head">
-      <div><h2>Cała oferta</h2><p>Porównaj produkty, dodaj wybrane do ulubionych albo od razu przejdź do koszyka.</p></div>
-      <span style="font-size:.85rem;color:var(--muted2)">${promki} promocji • ${nowosci} nowości</span>
+      <div><h2>${esc(oferta.tytul||"Cała oferta")}</h2><p>${esc(oferta.opis||"")}</p></div>
+      ${oferta.liczniki===false?"":`<span style="font-size:.85rem;color:var(--muted2)">${promki} promocji • ${nowosci} nowości</span>`}
     </div>
   </div>
   <div class="toolbar">
-    <div id="chips" style="display:flex;flex-wrap:wrap;gap:.6rem"></div>
+    ${oferta.wyborDzialu==="nad-produktami"?`<div id="chips" class="home-category-chips"></div>`:""}
     <select id="sortSelect" onchange="sortowanie=this.value;stronaProduktow=1;rysuj()" aria-label="Sortowanie">
       <option value="default" ${sortowanie==="default"?"selected":""}>Sortuj: domyślnie</option>
       <option value="price-asc" ${sortowanie==="price-asc"?"selected":""}>Cena: od najniższej</option>
@@ -338,7 +429,7 @@ function widokSklep(){
       <option value="newest" ${sortowanie==="newest"?"selected":""}>Najnowsze</option>
     </select>
   </div>
-  <div class="catalog-tools">
+  <div class="catalog-tools" ${oferta.filtryZaawansowane===false?`style="display:none"`:""}>
     <details class="advanced-search" ${(cenaOd||cenaDo||filtrDostepnosci!=="wszystkie"||filtrOferty!=="wszystkie"||filtrOceny!=="0")?"open":""}>
       <summary>🔎 Zaawansowane wyszukiwanie i filtry</summary>
       <div class="filter-grid">
@@ -354,7 +445,8 @@ function widokSklep(){
   <div class="results-bar"><span id="wynikowProdukty"></span><label>Na stronie: <select onchange="ustawProduktyNaStronie(this.value)">${[12,24,48,96].map(n=>`<option value="${n}" ${produktyNaStronie===n?"selected":""}>${n}</option>`).join("")}</select></label></div>
   <div class="pagination" id="paginacjaGora"></div>
   <div class="grid" id="grid"></div>
-  <div class="pagination" id="paginacjaDol"></div>`;
+  <div class="pagination" id="paginacjaDol"></div>
+  ${oferta.wyborDzialu!=="ukryty"&&oferta.wyborDzialu!=="nad-produktami"?`<div class="home-department-picker"><span>Wybierz dział oferty</span><div id="chips" class="home-category-chips"></div></div>`:""}`;
   SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(); return `
   <section class="offer-band">
     <div class="offer-band-in">
@@ -450,17 +542,18 @@ function sortujListeProduktow(lista,sort=sortowanie){
   return lista;
 }
 function listaProduktowPoFiltrach(){
-  const od=cenaOd===""?null:Number(cenaOd),doC=cenaDo===""?null:Number(cenaDo),minOcena=Number(filtrOceny||0);
+  const od=cenaOd===""?null:Number(cenaOd),doC=cenaDo===""?null:Number(cenaDo),minOcena=Number(filtrOceny||0),oferta=ustawieniaOfertyGlownej();
   const lista=produkty.filter(p=>{
     const ocena=sredniaOcen(p.id)?.srednia||0, niedostepny=produktOznaczonyNiedostepny(p);
-    return (aktywnaKategoria==="Wszystkie"||p.kategoria===aktywnaKategoria)
+    const zakres=oferta.zakres==="promocje"?!!p.staraCena:oferta.zakres==="nowosci"?p.badge==="Nowość":oferta.zakres==="kategoria"?p.kategoria===oferta.kategoria:oferta.zakres==="wybrane"?oferta.produkty.includes(String(p.id)):true;
+    return zakres&&(aktywnaKategoria==="Wszystkie"||p.kategoria===aktywnaKategoria)
       && produktPasujeFrazie(p)
       && (od===null||p.cena>=od)&&(doC===null||p.cena<=doC)
       && (filtrDostepnosci==="wszystkie"||(filtrDostepnosci==="dostepne"&&!niedostepny)||(filtrDostepnosci==="brak"&&niedostepny))
       && (filtrOferty==="wszystkie"||(filtrOferty==="promocje"&&!!p.staraCena)||(filtrOferty==="nowosci"&&p.badge==="Nowość"))
       && ocena>=minOcena;
   });
-  return sortujListeProduktow(lista);
+  return sortujListeProduktow(lista,sortowanie==="default"?(oferta.sortowanie||"default"):sortowanie);
 }
 function paginacjaHTML(strona,liczbaStron,fn){
   if(liczbaStron<=1)return "";
@@ -1091,6 +1184,7 @@ function widokPrywatnosc(){
     <h2>8. Automatyzacja</h2><p>Narzędzia automatyczne i Agent AI mogą przygotowywać administratorowi propozycje operacyjne, ale nie podejmują wobec klienta decyzji wywołujących skutki prawne wyłącznie w sposób zautomatyzowany.</p>`,"prywatnosc");
 }
 function widokDostawa(){
+  const publiczneKody=regulyRabatowe().filter(r=>r.publiczny&&regulaRabatowaStatus(r).aktywna);
   return stronaInfo("🚚 Dostawa i płatności", `
     <h2>Formy dostawy</h2>
     <ul>${dostepneDostawy().map(d=>`<li>${d.nazwa} — ${d.koszt?d.koszt+" zł":"gratis"} (${d.opis})</li>`).join("")}<li><b>Darmowa dostawa InPost</b> przy zamówieniach od ${KONFIG.darmowaDostawaOd} zł</li></ul>
@@ -1099,7 +1193,7 @@ function widokDostawa(){
     <h2>Formy płatności</h2>
     <ul>${dostepnePlatnosci().map(p=>`<li>${p.nazwa}${p.oplata?" (+"+p.oplata+" zł)":""}${p.id==="telefon"?` — w tytule wpisz numer zamówienia; numer: ${formatTelefonPlatnosci()}`:""}${p.id==="paynow"?` — bramka mBank Paynow`:""}</li>`).join("")}</ul>
     <h2>Kody rabatowe</h2>
-    <p>Aktualne kody: ${Object.entries(KONFIG.kodyRabatowe).map(([k,v])=>`<b>${esc(k)}</b> (−${v}%)`).join(", ")}. Kod wpisz w koszyku.</p>`,"dostawa");
+    <p>${publiczneKody.length?`Aktualne kody: ${publiczneKody.map(r=>`<b>${esc(r.kod)}</b> (${r.typ==="darmowa_dostawa"?"darmowa dostawa":r.typ==="kwota"?`−${zl(r.wartosc)}`:`−${Number(r.wartosc)||0}%`})`).join(", ")}. Kod wpisz w koszyku.`:"Aktualne promocje i warunki są zawsze widoczne w koszyku oraz na stronie głównej."}</p>`,"dostawa");
 }
 function widokZwroty(){
   if(KONFIG.tresci?.zwroty) return stronaInfo("↩️ Zwroty i reklamacje", KONFIG.tresci.zwroty,"zwroty");

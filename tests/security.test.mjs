@@ -64,3 +64,45 @@ test('zamówienia nie można utworzyć dla produktu spoza aktywnego katalogu', (
     nr: 'ATM-123456', email: 'klient@example.com', pozycjeDane: [{ id: 999, ilosc: 1 }],
   }, { artway_produkty_katalog: [] }), /nie jest dostępny/);
 });
+
+test('kontrolowany stan magazynowy znosi zbędne potwierdzenie większej ilości', () => {
+  const base = {
+    nr: 'ATM-STOCK8', email: 'klient@example.com', pozycjeDane: [{ id: 7, ilosc: 8 }],
+    klient: { imie: 'Jan', nazwisko: 'Kowalski', telefon: '500600700' },
+    adresDostawy: { ulica: 'Testowa', nrDomu: '1', kod: '00-001', miasto: 'Warszawa' },
+    dostawaId: 'paczkomat', paczkomat: 'WAW01A', platnoscId: 'telefon',
+  };
+  const settings = { artway_produkty_katalog: [{ id: 7, nazwa: 'Gra testowa', cena: 20 }], artway_stany: { 7: 8 } };
+  const covered = bezpieczneZamowienieKlienta(base, settings);
+  assert.equal(covered.wymagaPotwierdzeniaDostepnosci, false);
+  const shortage = bezpieczneZamowienieKlienta({ ...base, nr: 'ATM-STOCK9', pozycjeDane: [{ id: 7, ilosc: 9 }] }, settings);
+  assert.equal(shortage.wymagaPotwierdzeniaDostepnosci, true);
+  assert.deepEqual(shortage.dostepnoscDoPotwierdzenia[0], { id: 7, nazwa: 'Gra testowa', ilosc: 9, stanMagazynowy: 8 });
+});
+
+test('backend niezależnie nalicza zaawansowane reguły rabatowe', () => {
+  const base = {
+    nr: 'ATM-RABAT1', email: 'klient@example.com', rabatKod: 'gry20', pozycjeDane: [{ id: 7, ilosc: 1 }, { id: 8, ilosc: 1 }],
+    klient: { imie: 'Jan', nazwisko: 'Kowalski', telefon: '500600700' },
+    adresDostawy: { ulica: 'Testowa', nrDomu: '1', kod: '00-001', miasto: 'Warszawa' },
+    dostawaId: 'paczkomat', paczkomat: 'WAW01A', platnoscId: 'telefon',
+  };
+  const settings = {
+    artway_produkty_katalog: [{ id: 7, nazwa: 'Gra', kategoria: 'Gry', cena: 100 }, { id: 8, nazwa: 'Balon', kategoria: 'Balony', cena: 50 }],
+    artway_ustawienia: {
+      darmowaDostawaOd: 200,
+      kodyRabatoweZaawansowane: [
+        { kod: 'GRY20', typ: 'procent', wartosc: 20, zakres: 'kategorie', kategorie: ['Gry'], maxRabat: 15, aktywny: true },
+        { kod: 'WYSYLKA0', typ: 'darmowa_dostawa', zakres: 'wszystkie', aktywny: true },
+      ],
+    },
+  };
+  const discount = bezpieczneZamowienieKlienta(base, settings);
+  assert.equal(discount.koszty.rabat, 15);
+  assert.equal(discount.razem, 147);
+  assert.equal(discount.rabatKod, 'GRY20');
+  const freeShipping = bezpieczneZamowienieKlienta({ ...base, nr: 'ATM-RABAT2', rabatKod: 'wysylka0' }, settings);
+  assert.equal(freeShipping.koszty.dostawa, 0);
+  assert.equal(freeShipping.razem, 150);
+  assert.equal(freeShipping.rabatTyp, 'darmowa_dostawa');
+});

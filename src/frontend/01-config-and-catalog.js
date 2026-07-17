@@ -120,6 +120,49 @@ const SEKCJE_PODSTRONY = {
 };
 const DOMYSLNA_KOLEJNOSC_PODSTRONY = ["naglowek","opis","tresc","powrot"];
 function pobierzBannery(){ return Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY.map(x=>({...x})); }
+function ustawieniaOfertyGlownej(){
+  const source=ustawienia.ofertaGlowna&&typeof ustawienia.ofertaGlowna==="object"?ustawienia.ofertaGlowna:{};
+  return {
+    tytul:"Cała oferta",
+    opis:"Porównaj produkty, dodaj wybrane do ulubionych albo od razu przejdź do koszyka.",
+    zakres:"wszystkie",
+    kategoria:"",
+    produkty:[],
+    sortowanie:"default",
+    naStronie:24,
+    wyborDzialu:"pod-produktami",
+    filtryZaawansowane:true,
+    liczniki:true,
+    ...source,
+    produkty:Array.isArray(source.produkty)?source.produkty.map(String):[]
+  };
+}
+function regulyRabatowe(){
+  const advanced=Array.isArray(ustawienia.kodyRabatoweZaawansowane)?ustawienia.kodyRabatoweZaawansowane:[];
+  const result=[],seen=new Set();
+  for(const raw of advanced){
+    const kod=String(raw?.kod||"").trim().toUpperCase();if(!/^[A-Z0-9_-]{2,30}$/.test(kod)||seen.has(kod))continue;
+    seen.add(kod);result.push({typ:"procent",wartosc:0,minKoszyk:0,maxRabat:0,zakres:"wszystkie",kategorie:[],produkty:[],aktywny:true,publiczny:false,...raw,kod});
+  }
+  for(const [kod,procent] of Object.entries(KONFIG.kodyRabatowe||{})){
+    const key=String(kod).toUpperCase();if(seen.has(key))continue;
+    result.push({kod:key,typ:"procent",wartosc:Number(procent)||0,minKoszyk:0,maxRabat:0,zakres:"wszystkie",kategorie:[],produkty:[],aktywny:true,publiczny:true});
+  }
+  return result;
+}
+function regulaRabatowaStatus(regula,teraz=Date.now()){
+  if(!regula||regula.aktywny===false)return {aktywna:false,powod:"Kod jest wyłączony"};
+  const start=regula.start?Date.parse(regula.start):NaN,koniec=regula.koniec?Date.parse(regula.koniec):NaN;
+  if(Number.isFinite(start)&&teraz<start)return {aktywna:false,powod:"Kod nie jest jeszcze aktywny"};
+  if(Number.isFinite(koniec)&&teraz>koniec)return {aktywna:false,powod:"Kod stracił ważność"};
+  const limit=Math.max(0,Number(regula.limitUzyc)||0),uzycia=Math.max(0,Number(regula.uzycia)||0);
+  if(limit&&uzycia>=limit)return {aktywna:false,powod:"Limit użyć kodu został wyczerpany"};
+  return {aktywna:true,powod:""};
+}
+function znajdzReguleRabatowa(kod){
+  const key=String(kod||"").trim().toUpperCase();
+  return regulyRabatowe().find(x=>x.kod===key)||null;
+}
 function ustawieniaPodstrony(id){ return {...(DOMYSLNE_PODSTRONY[id]||{}),...((ustawienia.podstrony||{})[id]||{})}; }
 function klasaPodstrony(id){
   const u=ustawieniaPodstrony(id);
@@ -150,6 +193,8 @@ function glownaPromocja(){
   const kodZPaska=String(zPaska?.[1]||"").toUpperCase(),rabatZPaska=Number(zPaska?.[2]||0);
   if(kodZPaska&&Number(kody[kodZPaska])===rabatZPaska)return {kod:kodZPaska,procent:rabatZPaska};
   const wybrany=String(ustawienia?.promocjaGlowna||"").toUpperCase();
+  const regula=znajdzReguleRabatowa(wybrany)||regulyRabatowe().find(x=>x.publiczny&&x.typ==="procent"&&regulaRabatowaStatus(x).aktywna);
+  if(regula&&regula.typ==="procent"&&Number(regula.wartosc)>0)return {kod:regula.kod,procent:Number(regula.wartosc)};
   if(wybrany&&Number(kody[wybrany])>0)return {kod:wybrany,procent:Number(kody[wybrany])};
   const pierwszy=Object.entries(kody).find(([kod,procent])=>/^[A-Z0-9]{2,20}$/.test(kod)&&Number(procent)>0);
   return pierwszy?{kod:pierwszy[0],procent:Number(pierwszy[1])}:null;

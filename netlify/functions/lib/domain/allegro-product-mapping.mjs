@@ -4,8 +4,29 @@ const clip = (value = '', limit = 400) => String(value ?? '').replace(/\u0000/g,
 const normalize = (value = '') => clip(value, 500).toLowerCase().normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 const gtinKeys = (...values) => [...new Set(values.flat(Infinity).map(canonicalGtin).filter(Boolean))];
-const productGtins = (product = {}) => gtinKeys(product.canonicalGtins, product.gtins, product.canonicalGtin, product.gtin, product.ean, product.GTIN, product.EAN, product.kodKreskowy);
-const offerGtins = (offer = {}) => gtinKeys(offer.canonicalGtins, offer.gtins, offer.canonicalGtin, offer.gtin, offer.ean, offer.GTIN, offer.EAN, offer.barcode);
+const parameterGtins = (source = {}) => {
+  const out = [];
+  const read = (parameters = []) => {
+    for (const parameter of Array.isArray(parameters) ? parameters : []) {
+      const name = normalize(parameter?.name || parameter?.label || parameter?.key);
+      const id = String(parameter?.id || '').trim();
+      if (parameter?.options?.isGTIN === true || ['225693', '245669', '245673'].includes(id) || /(^| )(ean|gtin|isbn|issn|kod kreskowy)( |$)/.test(name)) {
+        out.push(parameter?.values, parameter?.valuesLabels, parameter?.value);
+      }
+    }
+  };
+  read(source?.parameters);
+  read(source?.product?.parameters);
+  for (const item of Array.isArray(source?.productSet) ? source.productSet : []) read(item?.product?.parameters);
+  return out;
+};
+const productGtins = (product = {}) => gtinKeys(
+  product.canonicalGtins, product.gtins, product.canonicalGtin, product.gtin, product.ean, product.GTIN, product.EAN, product.kodKreskowy,
+  product.parametryProducenta?.ean, product.parametryProducenta?.gtin, product.parametryProducenta?.kodKreskowy, product.parametryProducenta?.kodProducenta,
+  product.parametryZrodla?.ean, product.parametryZrodla?.gtin, product.parametryZrodla?.['kod kreskowy'], product.parametryZrodla?.['kod producenta'],
+  parameterGtins(product),
+);
+const offerGtins = (offer = {}) => gtinKeys(offer.canonicalGtins, offer.gtins, offer.canonicalGtin, offer.gtin, offer.ean, offer.GTIN, offer.EAN, offer.barcode, parameterGtins(offer));
 const significantTokens = (value = '') => {
   const stop = new Set(['gra', 'gry', 'zabawka', 'zabawki', 'zestaw', 'alexander', 'multigra', 'godan', 'origami', 'konstruktor', 'junior', 'maly', 'mala', 'duzy', 'duza', 'dla', 'oraz', 'wersja', 'szt', 'elementow']);
   return new Set(normalize(value).split(/\s+/).filter((token) => token.length > 2 && !stop.has(token)));
@@ -72,7 +93,12 @@ export function mappingVerifiedForSupplier(mapping = {}) {
 export function mappingProductSnapshot(product = {}, data = {}) {
   const id = String(product.id ?? product.produktId ?? product.productId ?? '').trim();
   const warehouse = data?.artway_magazyn_produkty?.[id] && typeof data.artway_magazyn_produkty[id] === 'object' ? data.artway_magazyn_produkty[id] : {};
-  const ean = clip(product.gtin || product.ean || product.GTIN || product.EAN, 80);
+  const rawGtins = [
+    product.gtin, product.ean, product.GTIN, product.EAN, product.kodKreskowy,
+    product.parametryProducenta?.ean, product.parametryProducenta?.gtin, product.parametryProducenta?.kodKreskowy, product.parametryProducenta?.kodProducenta,
+    product.parametryZrodla?.ean, product.parametryZrodla?.gtin, product.parametryZrodla?.['kod kreskowy'], product.parametryZrodla?.['kod producenta'],
+  ].flat(Infinity).filter((value) => canonicalGtin(value));
+  const ean = clip(rawGtins[0] || '', 80);
   return {
     id, productId: id, nazwa: clip(product.nazwa || product.name, 300),
     externalId: clip(product.externalId || product.sku, 160), sku: clip(product.sku || product.externalId, 160),
@@ -110,23 +136,73 @@ export function scoreAllegroProductMapping(product = {}, offer = {}) {
     code: normalize(offer.manufacturerCode || offer.producerCode), catalog: String(offer.productId || '').trim(),
     id: String(offer.id || '').trim(), name: clip(offer.name || offer.offerName, 400),
   };
-  const evidence = [], conflicts = [];
+  const evidence = [], conflicts = [], warnings = [];
   let score = 0, reason = '';
   const hit = (value, label) => { if (value > score) { score = value; reason = label; } evidence.push(label); };
-  if (p.eans.length && o.eans.length) p.eans.some((ean) => o.eans.includes(ean)) ? hit(100, 'identyczny EAN/GTIN') : conflicts.push('różny EAN/GTIN');
-  if (p.catalog && o.catalog) p.catalog === o.catalog ? hit(99, 'identyczny produkt katalogowy Allegro') : conflicts.push('różne ID produktu katalogowego');
-  if (p.external && o.external) p.external === o.external ? hit(97, 'identyczny EXTERNAL_ID/SKU') : conflicts.push('różny EXTERNAL_ID/SKU');
-  if (p.code && o.code) p.code === o.code ? hit(95, 'identyczny kod producenta') : conflicts.push('różny kod producenta');
+  const eanMatch = p.eans.length && o.eans.length && p.eans.some((ean) => o.eans.includes(ean));
+  const eanMismatch = p.eans.length && o.eans.length && !eanMatch;
+  const catalogMatch = !!(p.catalog && o.catalog && p.catalog === o.catalog);
+  const catalogMismatch = !!(p.catalog && o.catalog && !catalogMatch);
+  const externalMatch = !!(p.external && o.external && p.external === o.external);
+  const codeMatch = !!(p.code && o.code && p.code === o.code);
+  if (eanMatch) hit(100, 'identyczny EAN/GTIN');
+  if (catalogMatch) hit(99, 'identyczny produkt katalogowy Allegro');
+  if (externalMatch) hit(97, 'identyczny EXTERNAL_ID/SKU');
+  if (codeMatch) hit(95, 'identyczny kod producenta');
   const exact = p.name && o.name && normalize(p.name) === normalize(o.name);
   const similarity = p.name && o.name ? significantSimilarity(p.name, o.name) : 0;
   if (exact) hit(92, 'identyczna nazwa');
   else if (similarity >= 0.72) hit(Math.round(72 + similarity * 18), 'bardzo podobna nazwa');
   else if (similarity >= 0.45) hit(Math.round(52 + similarity * 20), 'częściowo podobna nazwa');
-  if (p.offerId && o.id && p.offerId === o.id && !conflicts.includes('różny EAN/GTIN')) hit(Math.max(score, 70), 'zapisane ID oferty');
-  const strongConflict = conflicts.includes('różny EAN/GTIN') || (conflicts.includes('różne ID produktu katalogowego') && !!p.catalog && !!o.catalog);
+  const savedOfferMatch = !!(p.offerId && o.id && p.offerId === o.id);
+  if (savedOfferMatch) hit(Math.max(score, 98), 'zapisane ID oferty');
+
+  // Brak pola nigdy nie jest niezgodnością. Rozbieżny EAN również nie może
+  // zniszczyć kilku niezależnych, mocnych dowodów (np. UUID katalogu + MPN +
+  // identyczna nazwa). Wtedy to kartoteka EAN wymaga korekty, a nie mapowanie.
+  const independentIdentity = catalogMatch || savedOfferMatch || (codeMatch && (exact || similarity >= 0.72)) || (externalMatch && exact);
+  if (eanMismatch) {
+    if (independentIdentity) warnings.push('EAN w kartotece różni się — tożsamość potwierdzają silniejsze dowody');
+    else conflicts.push('różny EAN/GTIN');
+  }
+  if (catalogMismatch) {
+    if (eanMatch || savedOfferMatch || (codeMatch && exact)) warnings.push('różne ID produktu katalogowego — sprawdź aktualność UUID');
+    else conflicts.push('różne ID produktu katalogowego');
+  }
+  if (p.code && o.code && !codeMatch && (eanMatch || catalogMatch || savedOfferMatch)) warnings.push('kod producenta różni się — sprawdź kartotekę');
+  const strongConflict = conflicts.includes('różny EAN/GTIN') || conflicts.includes('różne ID produktu katalogowego');
   if (strongConflict) score = Math.min(score, 35);
-  else if (conflicts.length && score < 95) score = Math.max(0, score - Math.min(25, conflicts.length * 8));
-  return { score, reason: reason || 'brak wspólnych identyfikatorów', evidence, conflicts, similarity: Math.round(similarity * 100), strongConflict, valid: score >= 65 && !strongConflict };
+  return {
+    score, reason: reason || 'brak wspólnych identyfikatorów', evidence, conflicts, warnings,
+    similarity: Math.round(similarity * 100), strongConflict, valid: score >= 65 && !strongConflict,
+    identity: score >= 95 ? 'pewna' : score >= 88 ? 'wysoka' : score >= 65 ? 'do potwierdzenia' : 'brak pewności',
+  };
+}
+
+export function reassessBlockedAllegroMapping({ current = {}, product = {}, offer = {}, mappings = {}, offersById = new Map(), minimumScore = 85, now = new Date().toISOString() } = {}) {
+  if (current?.blocked !== true || !/^auto-(?:quarantine|duplicate-offer)/i.test(String(current?.operator || '')) || !product?.id || !offer?.id) return null;
+  const productId = String(product.id), offerId = String(offer.id), validation = scoreAllegroProductMapping(product, offer);
+  const occupied = Object.values(mappings).find((mapping) => {
+    if (mapping?.blocked === true || String(mapping?.offerId || '') === offerId || String(mapping?.productId || '') !== productId) return false;
+    const publication = offersById.get(String(mapping?.offerId || ''));
+    return !['ENDED', 'ARCHIVED'].includes(String(publication?.status || publication?.publication?.status || '').toUpperCase());
+  });
+  if (validation.valid && validation.score >= Math.max(55, Number(minimumScore) || 85)) {
+    return occupied ? {
+      ...current, confidence: validation.score, reason: validation.reason, evidence: validation.evidence,
+      conflicts: validation.conflicts, warnings: validation.warnings, operator: 'auto-duplicate-offer',
+      duplicateOfferId: String(occupied.offerId || ''), reassessed_at: now,
+    } : {
+      ...current, productId, blocked: false, confidence: validation.score, reason: validation.reason,
+      evidence: validation.evidence, conflicts: validation.conflicts, warnings: validation.warnings,
+      operator: `auto-recovered:${validation.reason}`, verification: validation.score >= 88 ? 'strong-identifiers' : 'catalog-sync-review',
+      verifiedForSupplier: validation.score >= 88, duplicateOfferId: '', conflict: null, reassessed_at: now, synced_at: now,
+    };
+  }
+  return Number(current.confidence || 0) === Number(validation.score || 0) ? null : {
+    ...current, confidence: validation.score, reason: validation.reason, evidence: validation.evidence,
+    conflicts: validation.conflicts, warnings: validation.warnings, reassessed_at: now,
+  };
 }
 
 export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw = {}, minimumScore = 85) {

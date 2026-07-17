@@ -18,6 +18,7 @@ import {
   telegramDashboardCard,
   telegramIncidentCard,
   telegramIncidentKeyboard,
+  telegramPanelUrl,
 } from '../netlify/functions/lib/telegram-center.mjs';
 
 test('Telegram domyślnie wysyła tylko ważne zmiany i chroni ciszę nocną', () => {
@@ -63,6 +64,13 @@ test('nowoczesna karta Telegram pokazuje decyzję bez technicznego szumu', () =>
   const buttons = telegramIncidentKeyboard({ id: 'abcdef12345678', status: 'open', href: 'https://artwaytm.pl/#/admin/allegro/wiadomosci' }).inline_keyboard.flat();
   assert.equal(buttons.length, 2);
   assert.deepEqual(buttons.map((item) => item.text), ['👤 Przyjmuję', 'Otwórz']);
+});
+
+test('przyciski spraw zawsze zamieniają wewnętrzne trasy na pełny bezpieczny URL', () => {
+  assert.equal(telegramPanelUrl('#/admin/allegro/wiadomosci'), 'https://artwaytm.pl/#/admin/allegro/wiadomosci');
+  assert.equal(telegramIncidentKeyboard({ id: 'abcdef12345678', status: 'open', href: '#/admin/agent-ai/plan' }).inline_keyboard[0][1].url, 'https://artwaytm.pl/#/admin/agent-ai/plan');
+  assert.equal(telegramPanelUrl('javascript:alert(1)'), 'https://artwaytm.pl/#/admin/agent-ai/telegram');
+  assert.equal(telegramPanelUrl('https://evil.example/phishing'), 'https://artwaytm.pl/#/admin/agent-ai/telegram');
 });
 
 test('digest i raport ręczny pomijają puste metryki oraz długie instrukcje', () => {
@@ -126,6 +134,33 @@ test('alert pominięty przy wyłączonej komunikacji pozostaje do ponownej oceny
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('udane ponowienie alertu nie wysyła drugiej eskalacji tej samej sprawy w tym samym cyklu', { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch, calls = [], data = new Map();
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), body: JSON.parse(options.body || '{}') });
+    return new Response(JSON.stringify({ ok: true, result: { message_id: calls.length, chat: { id: -100 } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const operational = { priorities: [{ actionId: 'retry-once', severity: 'critical', count: 1, title: 'Pilna sprawa', action: 'Sprawdź', href: '#/admin/agent-ai/plan' }] };
+    const event = telegramPriorityEvents(operational)[0], id = telegramIncidentId(event.key);
+    data.set('telegram_communication_settings', telegramSettings({ enabled: true, quietStart: '00:00', quietEnd: '00:00', escalationEnabled: true }));
+    data.set('telegram_communication_state', {
+      initializedAt: '2026-07-17T08:00:00.000Z', events: {
+        [event.key]: { ...event, id, status: 'open', firstSeenAt: '2026-07-17T08:00:00.000Z', lastSeenAt: '2026-07-17T08:00:00.000Z', dueAt: '2026-07-17T08:30:00.000Z', escalationLevel: 0, workflowEnabled: true },
+      },
+      history: [], outbox: [{ id: 'retry-1', incidentId: id, key: event.key, status: 'retry', attempts: 1, nextAttemptAt: '2026-07-17T08:10:00.000Z', createdAt: '2026-07-17T08:05:00.000Z' }],
+      dashboard: {}, health: {},
+    });
+    const read = async (key, fallback) => structuredClone(data.has(key) ? data.get(key) : fallback), write = async (key, value) => data.set(key, structuredClone(value));
+    const center = createTelegramCenter({ read, write, env: { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_GROUP_ID: '-100' } });
+    const result = await center.dispatch(operational, { source: 'test', retryOnly: true });
+    assert.equal(result.retry.sent, 1);
+    assert.equal(result.escalated, 0);
+    assert.equal(calls.filter((item) => item.url.endsWith('/sendMessage')).length, 1);
+    assert.equal(calls[0].body.reply_markup.inline_keyboard[0][1].url, 'https://artwaytm.pl/#/admin/agent-ai/plan');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('bot rozumie zwykłe pytania bez komend', () => {
   assert.equal(telegramNaturalIntent('Czy mamy jakieś nowe zamówienia?'), 'orders');
   assert.equal(telegramNaturalIntent('Kto czeka na odpowiedź?'), 'communication');
@@ -137,6 +172,7 @@ test('kontrola połączenia zwraca stan Privacy Mode bota', { concurrency: false
   globalThis.fetch = async (url) => {
     if (String(url).endsWith('/getMe')) return new Response(JSON.stringify({ ok: true, result: { id: 7, username: 'magazyn_artway_bot', first_name: 'Magazyn Artway', can_read_all_group_messages: false } }), { status: 200, headers: { 'content-type': 'application/json' } });
     if (String(url).endsWith('/getWebhookInfo')) return new Response(JSON.stringify({ ok: true, result: { url: 'https://artwaytm.pl/.netlify/functions/telegram-webhook', pending_update_count: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (String(url).endsWith('/getChat')) return new Response(JSON.stringify({ ok: true, result: { id: -100, type: 'group', title: 'Magazyn Artway' } }), { status: 200, headers: { 'content-type': 'application/json' } });
     throw new Error(`Nieoczekiwane wywołanie: ${url}`);
   };
   try {
@@ -145,6 +181,7 @@ test('kontrola połączenia zwraca stan Privacy Mode bota', { concurrency: false
     const view = await center.view({ priorities: [] }, true);
     assert.equal(view.status.bot.username, 'magazyn_artway_bot');
     assert.equal(view.status.bot.can_read_all_group_messages, false);
+    assert.deepEqual(view.status.target, { reachable: true, type: 'group', name: 'Magazyn Artway', error: '' });
     assert.deepEqual(view.status.allowlist, { chats: 1, users: 0, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 0, explicitApprovers: 0 });
   } finally { globalThis.fetch = originalFetch; }
 });

@@ -292,6 +292,8 @@ function zastosujUstawienia(){
   KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
   ustawienia.platnosci = KONFIG.platnosci.map(x=>({...x}));
   if(u.kody) KONFIG.kodyRabatowe = {...u.kody};
+  const ofertaGlowna=ustawieniaOfertyGlownej();
+  if(!localStorage.getItem("artway_produkty_na_stronie")&&[12,24,48,96].includes(Number(ofertaGlowna.naStronie)))produktyNaStronie=Number(ofertaGlowna.naStronie);
   if(u.heroTytul) KONFIG.heroTytul = u.heroTytul;
   if(u.heroOpis) KONFIG.heroOpis = /^Elektronika, dom i ogród, narzędzia, odzież i sport\./i.test(String(u.heroOpis))
     ? "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów — między innymi Alexander, Multigra i GoDan."

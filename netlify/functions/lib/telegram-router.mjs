@@ -6,6 +6,7 @@ const ACTIONS = new Set([
   'telegram-inbound-audit',
   'telegram-incident-action', 'telegram-delivery-action', 'telegram-dashboard-refresh', 'telegram-send-note', 'telegram-test', 'telegram-send-agent-report', 'telegram-send-supplier-order',
   'codex-agent-claim', 'codex-agent-complete', 'codex-agent-fail', 'codex-agent-heartbeat', 'codex-agent-panel-enqueue', 'codex-agent-result',
+  'agent-runtime-status', 'agent-runtime-report',
 ]);
 
 const CODEX_FAILURE_NOTICE = '<b>⚠️ Nie udało się dokończyć tej prośby.</b>\nSpróbuj wysłać ją ponownie za chwilę.';
@@ -93,19 +94,36 @@ async function deliverCodexFailureNotification(codexQueue, sendTelegram, sanitiz
   };
 }
 
-export function createTelegramRouter({ center, codexQueue, getOperationalCenter, inventoryCommand, inventoryDecisions, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text, sendTelegram = sendTelegramHtml, clearTelegramReplyMarkup = ({ chatId, messageId }) => telegramApi('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }) }) {
+export function createTelegramRouter({ center, codexQueue, agentRuntime, getOperationalCenter, inventoryCommand, inventoryDecisions, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text, sendTelegram = sendTelegramHtml, clearTelegramReplyMarkup = ({ chatId, messageId }) => telegramApi('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }) }) {
   return async function telegramRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
     if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
     if (action === 'telegram-center-status') {
-      const operational = await getOperationalCenter();
-      return respond({ ok: true, center: operational, ...(await center.view(operational, url.searchParams.get('live') === '1')) });
+      const [operational, agentWorker] = await Promise.all([
+        getOperationalCenter(),
+        codexQueue && typeof codexQueue.status === 'function'
+          ? codexQueue.status()
+          : Promise.resolve({ workerOnline: false, workerLastSeenAt: '', counts: {}, active: 0 }),
+      ]);
+      return respond({ ok: true, center: operational, agentWorker, ...(await center.view(operational, url.searchParams.get('live') === '1')) });
+    }
+    if (action === 'agent-runtime-status') {
+      if (!agentRuntime || typeof agentRuntime.status !== 'function') return respond({ ok: false, error: 'Rejestr pracy Agenta nie jest dostępny', code: 'agent_runtime_unavailable' }, 503);
+      const queue = codexQueue && typeof codexQueue.status === 'function'
+        ? await codexQueue.status()
+        : { workerOnline: false, workerLastSeenAt: '', counts: {}, active: 0 };
+      return respond({ ok: true, runtime: await agentRuntime.status(queue) });
     }
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
     const body = await req.json().catch(() => ({})), session = sessionOf(req), operator = session?.email || 'administrator';
     if (action === 'telegram-inbound-audit') {
       if (!center || typeof center.recordInboundAudit !== 'function') return respond({ ok: false, error: 'Audyt Telegram nie jest dostępny', code: 'telegram_audit_unavailable' }, 503);
       return respond({ ok: true, audit: await center.recordInboundAudit({ accepted: body.accepted === true, deferred: body.deferred === true, kind: body.kind, actorHash: body.actorHash }) });
+    }
+    if (action === 'agent-runtime-report') {
+      if (!agentRuntime || typeof agentRuntime.report !== 'function') return respond({ ok: false, error: 'Rejestr pracy Agenta nie jest dostępny', code: 'agent_runtime_unavailable' }, 503);
+      const runtime = await agentRuntime.report(body);
+      return respond({ ok: true, updatedAt: runtime.updatedAt });
     }
     if (action === 'codex-agent-claim') {
       if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
@@ -180,7 +198,7 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
     if (action === 'telegram-settings-save') return respond({ ok: true, settings: await center.saveSettings(body.settings || body, operator) });
     if (action === 'telegram-register-webhook') return respond({ ok: true, ...(await center.registerWebhook(publicOrigin(req))) });
     if (action === 'telegram-dispatch') {
-      const operational = await getOperationalCenter(), dispatch = await center.dispatch(operational, { source: text(body.source || 'admin-panel', 80), force: body.force === true, forceDigest: body.forceDigest === true });
+      const operational = await getOperationalCenter(), dispatch = await center.dispatch(operational, { source: text(body.source || 'admin-panel', 80), force: body.force === true, forceDigest: body.forceDigest === true, retryOnly: body.retryOnly === true });
       let inventoryReminder = { due: false, reason: 'service_unavailable', messages: 0, decisions: 0 };
       if (inventoryDecisions && typeof inventoryDecisions.prepareReminder === 'function') {
         const reminder = await inventoryDecisions.prepareReminder(new Date());

@@ -53,17 +53,36 @@ test("układ katalogu jest responsywny i wspiera zwartą tabelę",async()=>{
   assert.match(css,/@media\(max-width:620px\).*assortment-advanced-grid/);
 });
 
-test("katalog ma kolejkę Agenta i potwierdzane decyzje masowe Allegro",async()=>{
+test("katalog ma kolejkę Agenta, trwałe przygotowanie i potwierdzane decyzje Allegro",async()=>{
   const catalog=await read("src/frontend/12-customers-and-inventory.js"),actions=await read("src/frontend/12a-product-actions.js"),css=await read("src/styles/15-product-actions.css");
   assert.match(catalog,/data-product-agent-center/);
   assert.match(catalog,/asortymentMenuDzialanProduktuHTML\(p\)/);
-  for(const marker of ["Pełna kontrola i uzupełnienie","Odśwież dane producenta","Przygotuj / sprawdź szkic","Pobierz prowizje i opłaty","Aktualizuj istniejące oferty","Opublikuj / aktywuj sprzedaż","Zakończ powiązane oferty"]){
+  for(const marker of ["Przygotuj i zapisz do Allegro","Wystaw gotowe na Allegro","Pełna kontrola i uzupełnienie","Odśwież dane producenta","Przygotuj / sprawdź szkic","Pobierz prowizje i opłaty","Aktualizuj istniejące oferty","Opublikuj / aktywuj sprzedaż","Zakończ powiązane oferty"]){
     assert.match(actions,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));
   }
-  assert.match(actions,/Agent nie wykona tej operacji samodzielnie/);
+  assert.match(actions,/Ostateczna publikacja nastąpi dopiero po tym potwierdzeniu/);
   assert.match(actions,/data-external-product-confirm/);
   assert.match(actions,/Promise\.all\(Array\.from\(\{length:Math\.min\(2,products\.length\)\},worker\)\)/);
+  assert.match(actions,/async function asortymentPrzygotujProduktDoAllegro/);
+  assert.match(actions,/allegro-description-improve/);
+  assert.match(actions,/allegroAgentPreparationStatus/);
+  assert.match(actions,/allegroAgentSavedFields/);
+  assert.match(actions,/if\(!preparation\.ready\)throw new Error/);
+  assert.match(actions,/draft:preparedDraft/);
+  assert.match(actions,/Konkretny zapis Agenta/);
+  assert.match(catalog,/Przygotuj i zapisz dane do Allegro/);
   assert.match(css,/\.product-action-center/);
+  assert.match(css,/\.product-agent-results/);
+  assert.match(css,/\.product-allegro-preparation/);
   assert.match(css,/\.product-external-confirm/);
   assert.match(css,/@media\(max-width:620px\)/);
+});
+
+test("opis zapisywany po przygotowaniu korzysta z końcowych bezpiecznych sekcji Allegro",async()=>{
+  const source=await read("src/frontend/11-allegro-and-orders.js");
+  assert.match(source,/function allegroTekstZBezpiecznychSekcji/);
+  assert.match(source,/d\.draft\?\.description\?\.sections/);
+  assert.match(source,/force\.allegroDescriptionSections=safeSections/);
+  assert.match(source,/asortymentPrzygotujProduktDoAllegro/);
+  assert.match(source,/Oferta nie została wysłana — uzupełnij wskazane braki/);
 });

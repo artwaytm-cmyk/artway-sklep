@@ -1,19 +1,56 @@
 {
-  "name": "Artway-TM — sklep z grami i artykułami imprezowymi",
+  "id": "/?app=admin",
+  "name": "Artway-TM — Panel administratora",
   "short_name": "Artway-TM",
-  "description": "Gry, zabawki kreatywne, balony i artykuły imprezowe z dostawą InPost.",
+  "description": "Mobilny panel zarządzania sklepem, zamówieniami, magazynem i wysyłkami Artway-TM.",
   "lang": "pl-PL",
-  "start_url": "/",
+  "start_url": "/?app=admin#/admin",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
   "background_color": "#f5f7fb",
   "theme_color": "#2563eb",
+  "categories": ["business", "productivity", "shopping"],
+  "prefer_related_applications": false,
   "icons": [
+    {
+      "src": "/icons/artway-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/artway-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
     {
       "src": "/icons/artway-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Pulpit administratora",
+      "short_name": "Pulpit",
+      "url": "/?app=admin#/admin",
+      "icons": [{"src": "/icons/artway-icon-192.png", "sizes": "192x192"}]
+    },
+    {
+      "name": "Skaner magazynowy",
+      "short_name": "Skaner",
+      "url": "/?app=admin&scanner=1#/admin/magazyn/plan",
+      "icons": [{"src": "/icons/artway-icon-192.png", "sizes": "192x192"}]
+    },
+    {
+      "name": "Centrum wysyłek",
+      "short_name": "Wysyłki",
+      "url": "/?app=admin#/admin/wysylki",
+      "icons": [{"src": "/icons/artway-icon-192.png", "sizes": "192x192"}]
     }
   ]
 }

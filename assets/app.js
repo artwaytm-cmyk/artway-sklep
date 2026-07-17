@@ -121,6 +121,49 @@ const SEKCJE_PODSTRONY = {
 };
 const DOMYSLNA_KOLEJNOSC_PODSTRONY = ["naglowek","opis","tresc","powrot"];
 function pobierzBannery(){ return Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY.map(x=>({...x})); }
+function ustawieniaOfertyGlownej(){
+  const source=ustawienia.ofertaGlowna&&typeof ustawienia.ofertaGlowna==="object"?ustawienia.ofertaGlowna:{};
+  return {
+    tytul:"Cała oferta",
+    opis:"Porównaj produkty, dodaj wybrane do ulubionych albo od razu przejdź do koszyka.",
+    zakres:"wszystkie",
+    kategoria:"",
+    produkty:[],
+    sortowanie:"default",
+    naStronie:24,
+    wyborDzialu:"pod-produktami",
+    filtryZaawansowane:true,
+    liczniki:true,
+    ...source,
+    produkty:Array.isArray(source.produkty)?source.produkty.map(String):[]
+  };
+}
+function regulyRabatowe(){
+  const advanced=Array.isArray(ustawienia.kodyRabatoweZaawansowane)?ustawienia.kodyRabatoweZaawansowane:[];
+  const result=[],seen=new Set();
+  for(const raw of advanced){
+    const kod=String(raw?.kod||"").trim().toUpperCase();if(!/^[A-Z0-9_-]{2,30}$/.test(kod)||seen.has(kod))continue;
+    seen.add(kod);result.push({typ:"procent",wartosc:0,minKoszyk:0,maxRabat:0,zakres:"wszystkie",kategorie:[],produkty:[],aktywny:true,publiczny:false,...raw,kod});
+  }
+  for(const [kod,procent] of Object.entries(KONFIG.kodyRabatowe||{})){
+    const key=String(kod).toUpperCase();if(seen.has(key))continue;
+    result.push({kod:key,typ:"procent",wartosc:Number(procent)||0,minKoszyk:0,maxRabat:0,zakres:"wszystkie",kategorie:[],produkty:[],aktywny:true,publiczny:true});
+  }
+  return result;
+}
+function regulaRabatowaStatus(regula,teraz=Date.now()){
+  if(!regula||regula.aktywny===false)return {aktywna:false,powod:"Kod jest wyłączony"};
+  const start=regula.start?Date.parse(regula.start):NaN,koniec=regula.koniec?Date.parse(regula.koniec):NaN;
+  if(Number.isFinite(start)&&teraz<start)return {aktywna:false,powod:"Kod nie jest jeszcze aktywny"};
+  if(Number.isFinite(koniec)&&teraz>koniec)return {aktywna:false,powod:"Kod stracił ważność"};
+  const limit=Math.max(0,Number(regula.limitUzyc)||0),uzycia=Math.max(0,Number(regula.uzycia)||0);
+  if(limit&&uzycia>=limit)return {aktywna:false,powod:"Limit użyć kodu został wyczerpany"};
+  return {aktywna:true,powod:""};
+}
+function znajdzReguleRabatowa(kod){
+  const key=String(kod||"").trim().toUpperCase();
+  return regulyRabatowe().find(x=>x.kod===key)||null;
+}
 function ustawieniaPodstrony(id){ return {...(DOMYSLNE_PODSTRONY[id]||{}),...((ustawienia.podstrony||{})[id]||{})}; }
 function klasaPodstrony(id){
   const u=ustawieniaPodstrony(id);
@@ -151,6 +194,8 @@ function glownaPromocja(){
   const kodZPaska=String(zPaska?.[1]||"").toUpperCase(),rabatZPaska=Number(zPaska?.[2]||0);
   if(kodZPaska&&Number(kody[kodZPaska])===rabatZPaska)return {kod:kodZPaska,procent:rabatZPaska};
   const wybrany=String(ustawienia?.promocjaGlowna||"").toUpperCase();
+  const regula=znajdzReguleRabatowa(wybrany)||regulyRabatowe().find(x=>x.publiczny&&x.typ==="procent"&&regulaRabatowaStatus(x).aktywna);
+  if(regula&&regula.typ==="procent"&&Number(regula.wartosc)>0)return {kod:regula.kod,procent:Number(regula.wartosc)};
   if(wybrany&&Number(kody[wybrany])>0)return {kod:wybrany,procent:Number(kody[wybrany])};
   const pierwszy=Object.entries(kody).find(([kod,procent])=>/^[A-Z0-9]{2,20}$/.test(kod)&&Number(procent)>0);
   return pierwszy?{kod:pierwszy[0],procent:Number(pierwszy[1])}:null;
@@ -292,7 +337,7 @@ let zaznaczoneAllegroDyskusje = new Set();
 let zaznaczoneAllegroZgodnosc = new Set();
 let allegroOstatniBladWystawienia = null;
 let allegroOstatniWynikWystawienia = null;
-let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSyncState:{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null,lastSource:null,lastResult:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,updated_at:null}};
+let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, autonomousAgent:{enabled:true,status:"waiting",completedAt:null,nextRunAt:null,mapping:{},stats:{},duplicateGroupsResolved:0,duplicateOffersEnded:0,reviewCount:0}, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSyncState:{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null,lastSource:null,lastResult:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autonomousAgentMinutes:15,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,updated_at:null}};
 let allegroDaneZaladowane={summary:false,orders:false,offers:false,config:false};
 let allegroDaneLadowane=new Set();
 let allegroDaneOdczytAt={summary:0,orders:0,offers:0,config:0};
@@ -310,6 +355,7 @@ let szukajInfaktZakupy="",filtrInfaktZakupy="wszystkie",limitInfaktZakupy=50,szu
 let zaznaczoneInfaktZakupy=new Set(),zaznaczoneInfaktHistoria=new Set(),zaznaczoneMagazynProdukty=new Set(),magazynWynikiIds=[],magazynStronaIds=[],zaznaczoneDostepnoscProducentow=new Set(),dostepnoscProducentowWynikiIds=[],dostepnoscProducentowStronaIds=[],zaznaczeniKlienci=new Set();
 let agentAIPlanProfil=["full","data","health"].includes(wczytajLS("artway_agent_plan_profil","full"))?wczytajLS("artway_agent_plan_profil","full"):"full";
 let agentAIPlanStan={busy:false,current:"",startedAt:null,completedAt:null,results:[],error:"",profile:agentAIPlanProfil,runId:"",history:[],historyLoading:false};
+let agentAIRuntime={loading:false,loaded:false,error:"",runtime:null,updatedAt:0,pollTimer:null};
 let agentAITelegram={loading:false,loaded:false,saving:false,error:"",settings:null,status:null,stats:{},state:{},events:[],history:[],quietNow:false};
 
 /* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
@@ -512,10 +558,11 @@ function chmuraPominBrudneDaneSerwera(dane={}){
 async function chmuraWczytajStan(){
   chmuraOstatniPullZmienilDane=false;
   try{
-    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev}});
+    const lokalnaRewizja=Math.max(0,Number(wczytajLS("artway_chmura_rev",0))||0);
+    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
     chmuraOstatniPullZmienilDane=(await chmuraPobierzKatalogImportowany(d))||chmuraOstatniPullZmienilDane;
     chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
-    const revLok = Number(wczytajLS("artway_chmura_rev", 0))||0;
+    const revLok = lokalnaRewizja;
     const serwerNowszy = (d.rev||0) > revLok;
     // Klient (bez tokenu): serwer jest źródłem prawdy → zawsze nakładaj.
     // Admin (z tokenem): nakładaj TYLKO gdy serwer ma nowszą wersję niż ostatnio zsynchronizowana —
@@ -645,6 +692,24 @@ function zwolnijPamiecPodreczna({wymus=false}={}){
   return {przed,po:rozmiarLokalnejPamieci(),usunieto};
 }
 function wczytajLS(klucz, domyslne){ try{ return JSON.parse(localStorage.getItem(klucz)) ?? domyslne; }catch(e){ return domyslne; } }
+// Rewizja danych zasila lekki cache podstron administratora. Zmieniamy ją
+// wyłącznie dla danych biznesowych, nie dla kosmetycznych preferencji widoku.
+var adminRewizjaDanych = 0;
+var adminCachePodstron = new Map();
+const ADMIN_KLUCZE_WIDOKU = new Set([
+  "artway_admin_menu_otwarta_v2","artway_admin_menu_kompaktowe_v1",
+  "artway_produkty_na_stronie_admin","artway_produkty_gestosc_admin",
+  "artway_produkty_sortowanie_admin","artway_seo_na_stronie"
+]);
+function kluczZmieniaDaneAdmina(klucz=""){
+  if(ADMIN_KLUCZE_WIDOKU.has(klucz))return false;
+  return ["artway_ustawienia","artway_produkty","artway_zamowienia","artway_uzytkownicy","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn","artway_faktury","artway_agent","artway_producenci","artway_opinie","artway_kosz","artway_seo"].some(prefix=>String(klucz).startsWith(prefix));
+}
+function uniewaznijCachePodstronAdmina(){
+  adminRewizjaDanych++;
+  adminCachePodstron.clear();
+  if(typeof uniewaznijAdminMenuStatCache==="function")uniewaznijAdminMenuStatCache();
+}
 function zapiszLS(klucz, dane){
   if(klucz==="artway_zamowienia" && Array.isArray(dane)) dane = filtrujAktywneZamowienia(dane);
   const serial=JSON.stringify(dane);
@@ -658,6 +723,7 @@ function zapiszLS(klucz, dane){
     try{localStorage.setItem(klucz,serial);zmieniono=true;}
     catch(e2){zmieniono=false;loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
   }
+  if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina();
   if(zmieniono && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
   return zmieniono;
 }
@@ -1368,6 +1434,8 @@ function zastosujUstawienia(){
   KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
   ustawienia.platnosci = KONFIG.platnosci.map(x=>({...x}));
   if(u.kody) KONFIG.kodyRabatowe = {...u.kody};
+  const ofertaGlowna=ustawieniaOfertyGlownej();
+  if(!localStorage.getItem("artway_produkty_na_stronie")&&[12,24,48,96].includes(Number(ofertaGlowna.naStronie)))produktyNaStronie=Number(ofertaGlowna.naStronie);
   if(u.heroTytul) KONFIG.heroTytul = u.heroTytul;
   if(u.heroOpis) KONFIG.heroOpis = /^Elektronika, dom i ogród, narzędzia, odzież i sport\./i.test(String(u.heroOpis))
     ? "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów — między innymi Alexander, Multigra i GoDan."
@@ -2436,12 +2504,61 @@ let renderowanieWidoku=false;
 let renderPonowniePoBiezacym=false;
 let renderTimerWpisywania=null;
 let renderFrameWpisywania=0;
+const ADMIN_CACHE_PODSTRON_LIMIT=8;
+const ADMIN_CACHE_PODSTRON_MAX_WEZLOW=12000;
+const ADMIN_CACHE_PODSTRON_MAX_LACZNIE=24000;
 function zaplanujRenderPoWpisaniu(opoznienie=180){
   clearTimeout(renderTimerWpisywania);
   if(renderFrameWpisywania)cancelAnimationFrame(renderFrameWpisywania);
   renderTimerWpisywania=setTimeout(()=>{
     renderFrameWpisywania=requestAnimationFrame(()=>{renderFrameWpisywania=0;renderuj();});
   },Math.max(80,Number(opoznienie)||180));
+}
+function adminTrasaCacheowalna(route=""){
+  const value=String(route||"");
+  return value.startsWith("/admin")&&!value.startsWith("/admin/zamowienie/")&&!value.startsWith("/admin/produkty/edytuj/")&&!value.startsWith("/admin/produkty/dodaj")&&!value.startsWith("/admin/produkty/z-linku");
+}
+function adminKontenerTresci(shell){return shell?.querySelector(":scope > .admin-tresc")||null;}
+function adminTrescBezposrednia(shell){return adminKontenerTresci(shell)?.querySelector(":scope > .admin-workspace-content")||null;}
+function adminLiczbaWezlowCache(){let total=0;for(const entry of adminCachePodstron.values())total+=Number(entry?.nodes)||0;return total;}
+function adminZapiszPodstroneWCache(root,route){
+  if(!adminTrasaCacheowalna(route)||!root)return false;
+  const shell=root.querySelector(":scope > .admin-page"),workspace=adminTrescBezposrednia(shell);
+  if(!shell||!workspace)return false;
+  const nodes=workspace.getElementsByTagName("*").length;
+  if(nodes>ADMIN_CACHE_PODSTRON_MAX_WEZLOW)return false;
+  adminCachePodstron.delete(route);
+  workspace.remove();
+  adminCachePodstron.set(route,{workspace,nodes,header:shell.querySelector(":scope > .admin-tresc > .admin-workspace-header")?.cloneNode(true)||null,mobile:shell.querySelector(":scope > .admin-tresc > .admin-mobile-menu")?.cloneNode(true)||null,revision:adminRewizjaDanych,scrollY:window.scrollY||0,savedAt:Date.now()});
+  while(adminCachePodstron.size>ADMIN_CACHE_PODSTRON_LIMIT||adminLiczbaWezlowCache()>ADMIN_CACHE_PODSTRON_MAX_LACZNIE)adminCachePodstron.delete(adminCachePodstron.keys().next().value);
+  return true;
+}
+function adminAktualizujAktywnaNawigacje(shell,route){
+  const nav=shell?.querySelector(".admin-nav");if(!nav)return;
+  shell.querySelectorAll(".admin-nav .admin-nav-link[href],.pwa-admin-bottom-nav a[href]").forEach(link=>{
+    const href=String(link.getAttribute("href")||"").replace(/^#/,"");
+    const active=typeof adminMenuPozycjaAktywna==="function"?adminMenuPozycjaAktywna(route,href):route===href;
+    link.classList.toggle("active",active);if(active)link.setAttribute("aria-current","page");else link.removeAttribute("aria-current");
+  });
+  const open=typeof adminMenuOtwartaGrupa==="function"?adminMenuOtwartaGrupa():"";
+  nav.querySelectorAll(".admin-nav-group").forEach(group=>{
+    const active=!!group.querySelector(".admin-nav-link.active"),expanded=active||String(group.dataset.adminMenuGroup||"")===String(open||"");
+    group.classList.toggle("is-active",active);group.classList.toggle("collapsed",!expanded);
+    group.querySelector(".admin-nav-group-toggle")?.setAttribute("aria-expanded",String(expanded));
+  });
+}
+function adminPrzywrocPodstroneZCache(root,route){
+  const entry=adminCachePodstron.get(route);if(!entry)return false;
+  adminCachePodstron.delete(route);
+  if(entry.revision!==adminRewizjaDanych)return false;
+  const shell=root?.querySelector(":scope > .admin-page");if(!shell)return false;
+  const container=adminKontenerTresci(shell),current=adminTrescBezposrednia(shell);if(!container)return false;
+  if(current)current.replaceWith(entry.workspace);else container.appendChild(entry.workspace);
+  const currentHeader=container.querySelector(":scope > .admin-workspace-header");if(entry.header&&currentHeader)aktualizujWezelStabilnie(currentHeader,entry.header,document.activeElement);
+  const currentMobile=container.querySelector(":scope > .admin-mobile-menu");if(entry.mobile&&currentMobile)aktualizujWezelStabilnie(currentMobile,entry.mobile,document.activeElement);
+  adminAktualizujAktywnaNawigacje(shell,route);
+  requestAnimationFrame(()=>window.scrollTo({top:Math.max(0,Number(entry.scrollY)||0)}));
+  return true;
 }
 function kluczStabilnegoWezla(node){
   if(!node||node.nodeType!==1)return "";
@@ -2495,17 +2612,51 @@ function aktualizujWidokStabilnie(root,html){
   if(active?.isConnected&&selection&&typeof active.setSelectionRange==="function")try{active.setSelectionRange(selection.start,selection.end);}catch(e){}
   if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY});
 }
-function odbiorcaStabilnegoWidoku(root,stabilny){
-  if(!stabilny)return root;
-  return {get innerHTML(){return root.innerHTML;},set innerHTML(html){aktualizujWidokStabilnie(root,html);}};
+function aktualizujPanelAdminaStabilnie(root,html,taSamaTrasa=false){
+  const template=document.createElement("template");template.innerHTML=String(html||"").trim();
+  const next=[...template.content.children].find(node=>node.classList?.contains("admin-page"))||null,current=root.querySelector(":scope > .admin-page");
+  if(!next||!current)return false;
+  aktualizujAtrybutyWezla(current,next,document.activeElement);
+  const currentNav=current.querySelector(":scope > .admin-nav"),nextNav=next.querySelector(":scope > .admin-nav");
+  if(currentNav&&nextNav)aktualizujWezelStabilnie(currentNav,nextNav,document.activeElement);
+  const currentBottom=current.querySelector(":scope > .pwa-admin-bottom-nav"),nextBottom=next.querySelector(":scope > .pwa-admin-bottom-nav");
+  if(currentBottom&&nextBottom)aktualizujWezelStabilnie(currentBottom,nextBottom,document.activeElement);
+  const currentContainer=adminKontenerTresci(current),nextContainer=adminKontenerTresci(next);
+  const currentMobile=currentContainer?.querySelector(":scope > .admin-mobile-menu"),nextMobile=nextContainer?.querySelector(":scope > .admin-mobile-menu");
+  if(currentMobile&&nextMobile)aktualizujWezelStabilnie(currentMobile,nextMobile,document.activeElement);
+  const currentHeader=currentContainer?.querySelector(":scope > .admin-workspace-header"),nextHeader=nextContainer?.querySelector(":scope > .admin-workspace-header");
+  if(currentHeader&&nextHeader)aktualizujWezelStabilnie(currentHeader,nextHeader,document.activeElement);
+  const nextWorkspace=adminTrescBezposrednia(next),currentWorkspace=adminTrescBezposrednia(current);
+  if(nextWorkspace){
+    if(currentWorkspace&&taSamaTrasa)aktualizujWezelStabilnie(currentWorkspace,nextWorkspace,document.activeElement);
+    else if(currentWorkspace)currentWorkspace.replaceWith(nextWorkspace.cloneNode(true));
+    else currentContainer?.appendChild(nextWorkspace.cloneNode(true));
+  }
+  return true;
+}
+function odbiorcaStabilnegoWidoku(root,stabilny,panelAdmin=false,taSamaTrasa=false){
+  if(!stabilny&&!panelAdmin)return root;
+  return {get innerHTML(){return root.innerHTML;},set innerHTML(html){
+    if(panelAdmin&&aktualizujPanelAdminaStabilnie(root,html,taSamaTrasa))return;
+    if(stabilny)aktualizujWidokStabilnie(root,html);else root.innerHTML=html;
+  }};
 }
 function renderuj(){
   if(renderowanieWidoku){renderPonowniePoBiezacym=true;return;}
   renderowanieWidoku=true;
   try{
     const t = trasa();
-    const root = $("widok"),taSamaTrasa=ostatniaRenderowanaTrasa===t&&root.childNodes.length>0;
-    const w = odbiorcaStabilnegoWidoku(root,taSamaTrasa);
+    const root = $("widok"),poprzedniaTrasa=ostatniaRenderowanaTrasa,taSamaTrasa=ostatniaRenderowanaTrasa===t&&root.childNodes.length>0;
+    const przejsciePanelu=!taSamaTrasa&&t.startsWith("/admin")&&poprzedniaTrasa.startsWith("/admin")&&root.childNodes.length>0;
+    if(przejsciePanelu){
+      adminZapiszPodstroneWCache(root,poprzedniaTrasa);
+      if(adminPrzywrocPodstroneZCache(root,t)){
+        document.body.classList.add("admin-mode");seoAktualizujMetaDlaTrasy(t);ostatniaRenderowanaTrasa=t;return;
+      }
+    }
+    const panelAdmin=t.startsWith("/admin")&&poprzedniaTrasa.startsWith("/admin")&&root.querySelector(":scope > .admin-page");
+    const wStabilny = odbiorcaStabilnegoWidoku(root,taSamaTrasa);
+    const w = panelAdmin?odbiorcaStabilnegoWidoku(root,true,true,taSamaTrasa):wStabilny;
     // Moduł panelu zawiera także bezpieczny widok „Brak dostępu”. Ładujemy go
     // wyłącznie po wejściu na trasę administracyjną, również dla gościa.
     const wymagaPanelu=t.startsWith("/admin")||t==="/diagnostyka";
@@ -2581,11 +2732,11 @@ function renderuj(){
       else if(t.startsWith("/admin/seo/")) w.innerHTML = widokAdminSEO(t.split("/")[3]||"pulpit");
       else if(t.startsWith("/admin/asortyment/")){
         const s=t.split("/")[3]||"produkty";
-        w.innerHTML = s==="jakosc"?widokAdminJakoscKatalogu():s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabaty():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
+        w.innerHTML = s==="jakosc"?widokAdminJakoscKatalogu():s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabatyZaawansowane():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
       }
       else if(t.startsWith("/admin/personalizacja/")){
-        const s=t.split("/")[3]||"wyglad";
-        w.innerHTML = s==="rozmieszczenie"?widokAdminRozmieszczenie():s==="bannery"?widokAdminBannery():s==="podstrony"?widokAdminPodstrony():s==="strony"?widokAdminStrony():s==="dostawy"?widokAdminDostawy():widokAdminWyglad();
+        const s=t.split("/")[3]||"home";
+        w.innerHTML = s==="home"?widokAdminStronaGlowna():s==="rozmieszczenie"?widokAdminRozmieszczenie():s==="bannery"?widokAdminBanneryZaawansowane():s==="podstrony"?widokAdminPodstrony():s==="strony"?widokAdminStrony():s==="dostawy"?widokAdminDostawy():widokAdminWyglad();
       }
       else if(t==="/admin/asortyment" || t==="/admin/produkty") w.innerHTML = widokAdminProdukty();
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
@@ -2597,12 +2748,13 @@ function renderuj(){
       else if(t==="/admin/klienci") w.innerHTML = widokAdminKlienci("lista");
       else if(t.startsWith("/admin/klienci/")) w.innerHTML = widokAdminKlienci(t.split("/")[3]||"lista");
       else if(t.startsWith("/admin/klient/")) w.innerHTML = widokAdminKlient(decodeURIComponent(t.split("/")[3]||""));
-      else if(t==="/admin/rabaty") w.innerHTML = widokAdminRabaty();
+      else if(t==="/admin/rabaty") w.innerHTML = widokAdminRabatyZaawansowane();
       else if(t==="/admin/opinie") w.innerHTML = widokAdminOpinie();
       else if(t==="/admin/dostawy" || t==="/admin/ustawienia") w.innerHTML = widokAdminDostawy();
-      else if(t==="/admin/personalizacja" || t==="/admin/wyglad") w.innerHTML = widokAdminWyglad();
+      else if(t==="/admin/personalizacja") w.innerHTML = widokAdminStronaGlowna();
+      else if(t==="/admin/wyglad") w.innerHTML = widokAdminWyglad();
       else if(t==="/admin/rozmieszczenie") w.innerHTML = widokAdminRozmieszczenie();
-      else if(t==="/admin/bannery") w.innerHTML = widokAdminBannery();
+      else if(t==="/admin/bannery") w.innerHTML = widokAdminBanneryZaawansowane();
       else if(t==="/admin/podstrony") w.innerHTML = widokAdminPodstrony();
       else if(t==="/admin/strony") w.innerHTML = widokAdminStrony();
       else if(t==="/admin/eksport") w.innerHTML = widokAdminEksport("import");
@@ -2645,12 +2797,17 @@ function opisKategorii(nazwa){
   return mapa[nazwa] || "Zobacz wszystkie produkty dostępne w tym katalogu.";
 }
 function banneryHome(){
-  const lista=pobierzBannery().filter(b=>b.aktywny!==false);
+  const teraz=Date.now();
+  const lista=pobierzBannery().filter(b=>{
+    if(b.aktywny===false)return false;
+    const start=b.start?Date.parse(b.start):NaN,koniec=b.koniec?Date.parse(b.koniec):NaN;
+    return (!Number.isFinite(start)||teraz>=start)&&(!Number.isFinite(koniec)||teraz<=koniec);
+  });
   if(!lista.length) return "";
   return `<section class="managed-banners">${lista.map(b=>`
-    <a class="managed-banner ${b.obraz?'ma-obraz':''}" href="${esc(bezpiecznyLink(b.link))}" ${b.obraz?`style="background-image:linear-gradient(90deg,rgba(15,18,25,.74),rgba(15,18,25,.28)),url('${b.obraz}')"`:""}>
+    <a class="managed-banner ${b.obraz?'ma-obraz':''} banner-${esc(b.styl||"karta")} banner-${esc(b.rozmiar||"standard")} align-${esc(b.wyrownanie||"lewo")} audience-${esc(b.odbiorcy||"wszyscy")}" href="${esc(bezpiecznyLink(b.link))}" ${b.obraz?`style="background-image:linear-gradient(90deg,rgba(15,18,25,.78),rgba(15,18,25,.26)),url('${esc(b.obraz)}')"`:""}>
       ${b.obraz?"":`<span class="banner-icon">${esc(b.ikona||"📣")}</span>`}
-      <span><h3>${esc(b.tytul||"")}</h3><p>${esc(b.opis||"")}</p><small>${esc(b.przycisk||"Dowiedz się więcej")} →</small></span>
+      <span>${b.etykieta?`<em class="managed-banner-badge">${esc(b.etykieta)}</em>`:""}<h3>${esc(b.tytul||"")}</h3><p>${esc(b.opis||"")}</p>${b.kodRabatowy?`<strong class="managed-banner-code">Kod: ${esc(b.kodRabatowy)}</strong>`:""}<small>${esc(b.przycisk||"Dowiedz się więcej")} →</small></span>
     </a>`).join("")}</section>`;
 }
 /* ── Sekcje strony głównej: kolejność i widoczność ustawiane wizualnie
@@ -2667,10 +2824,12 @@ const SEKCJE_GLOWNEJ = {
   faq:        { nazwa:"Najczęstsze pytania",         ikona:"❓" },
   kontakt:    { nazwa:"Końcowa sekcja kontaktu",     ikona:"💬" }
 };
-const DOMYSLNA_KOLEJNOSC_SEKCJI = ["hero","banery","kategorie","produkty","pasekOferty","zalety","kroki","onas","faq","kontakt"];
+const DOMYSLNA_KOLEJNOSC_SEKCJI = ["hero","banery","produkty","kategorie","pasekOferty","zalety","kroki","onas","faq","kontakt"];
 function kolejnoscSekcji(){
   const zap = Array.isArray(ustawienia.kolejnoscSekcji) ? ustawienia.kolejnoscSekcji.filter(id=>SEKCJE_GLOWNEJ[id]) : [];
-  return [...zap, ...DOMYSLNA_KOLEJNOSC_SEKCJI.filter(id=>!zap.includes(id))];
+  const wynik=[...zap, ...DOMYSLNA_KOLEJNOSC_SEKCJI.filter(id=>!zap.includes(id))],produktyIndex=wynik.indexOf("produkty"),kategorieIndex=wynik.indexOf("kategorie");
+  if(produktyIndex>=0&&kategorieIndex>=0&&kategorieIndex<produktyIndex){wynik.splice(kategorieIndex,1);wynik.splice(wynik.indexOf("produkty")+1,0,"kategorie");}
+  return wynik;
 }
 function sekcjaWidoczna(id){
   if((ustawienia.sekcjeUkryte||[]).includes(id)) return false;
@@ -2683,7 +2842,7 @@ function widokSklep(){
   const kategorie = wszystkieKategorie();
   const promki = produkty.filter(p=>p.staraCena).length;
   const nowosci = produkty.filter(p=>p.badge==="Nowość").length;
-  const hero = ustawienia.hero || {};
+  const hero = ustawienia.hero || {},oferta=ustawieniaOfertyGlownej();
   const SEKCJE = {};
   SEKCJE.hero = () => `
   <section class="hero">
@@ -2711,7 +2870,7 @@ function widokSklep(){
       <a href="#produkty" onclick="document.querySelector('.catalog-head')?.scrollIntoView({behavior:'smooth'});return false;">Cała oferta →</a>
     </div>
     <div class="category-grid">
-      ${kategorie.map(k=>`
+      ${(Array.isArray(oferta.kategorie)&&oferta.kategorie.length?kategorie.filter(k=>oferta.kategorie.includes(k)):kategorie).map(k=>`
         <a class="category-tile" href="#/kategoria/${encodeURIComponent(k)}">
           <span class="category-ico">${ikonaKategorii(k)}</span>
           <b>${esc(k)}</b>
@@ -2723,12 +2882,12 @@ function widokSklep(){
   SEKCJE.produkty = () => `
   <div class="catalog-head" id="produkty">
     <div class="section-head">
-      <div><h2>Cała oferta</h2><p>Porównaj produkty, dodaj wybrane do ulubionych albo od razu przejdź do koszyka.</p></div>
-      <span style="font-size:.85rem;color:var(--muted2)">${promki} promocji • ${nowosci} nowości</span>
+      <div><h2>${esc(oferta.tytul||"Cała oferta")}</h2><p>${esc(oferta.opis||"")}</p></div>
+      ${oferta.liczniki===false?"":`<span style="font-size:.85rem;color:var(--muted2)">${promki} promocji • ${nowosci} nowości</span>`}
     </div>
   </div>
   <div class="toolbar">
-    <div id="chips" style="display:flex;flex-wrap:wrap;gap:.6rem"></div>
+    ${oferta.wyborDzialu==="nad-produktami"?`<div id="chips" class="home-category-chips"></div>`:""}
     <select id="sortSelect" onchange="sortowanie=this.value;stronaProduktow=1;rysuj()" aria-label="Sortowanie">
       <option value="default" ${sortowanie==="default"?"selected":""}>Sortuj: domyślnie</option>
       <option value="price-asc" ${sortowanie==="price-asc"?"selected":""}>Cena: od najniższej</option>
@@ -2738,7 +2897,7 @@ function widokSklep(){
       <option value="newest" ${sortowanie==="newest"?"selected":""}>Najnowsze</option>
     </select>
   </div>
-  <div class="catalog-tools">
+  <div class="catalog-tools" ${oferta.filtryZaawansowane===false?`style="display:none"`:""}>
     <details class="advanced-search" ${(cenaOd||cenaDo||filtrDostepnosci!=="wszystkie"||filtrOferty!=="wszystkie"||filtrOceny!=="0")?"open":""}>
       <summary>🔎 Zaawansowane wyszukiwanie i filtry</summary>
       <div class="filter-grid">
@@ -2754,7 +2913,8 @@ function widokSklep(){
   <div class="results-bar"><span id="wynikowProdukty"></span><label>Na stronie: <select onchange="ustawProduktyNaStronie(this.value)">${[12,24,48,96].map(n=>`<option value="${n}" ${produktyNaStronie===n?"selected":""}>${n}</option>`).join("")}</select></label></div>
   <div class="pagination" id="paginacjaGora"></div>
   <div class="grid" id="grid"></div>
-  <div class="pagination" id="paginacjaDol"></div>`;
+  <div class="pagination" id="paginacjaDol"></div>
+  ${oferta.wyborDzialu!=="ukryty"&&oferta.wyborDzialu!=="nad-produktami"?`<div class="home-department-picker"><span>Wybierz dział oferty</span><div id="chips" class="home-category-chips"></div></div>`:""}`;
   SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(); return `
   <section class="offer-band">
     <div class="offer-band-in">
@@ -2850,17 +3010,18 @@ function sortujListeProduktow(lista,sort=sortowanie){
   return lista;
 }
 function listaProduktowPoFiltrach(){
-  const od=cenaOd===""?null:Number(cenaOd),doC=cenaDo===""?null:Number(cenaDo),minOcena=Number(filtrOceny||0);
+  const od=cenaOd===""?null:Number(cenaOd),doC=cenaDo===""?null:Number(cenaDo),minOcena=Number(filtrOceny||0),oferta=ustawieniaOfertyGlownej();
   const lista=produkty.filter(p=>{
     const ocena=sredniaOcen(p.id)?.srednia||0, niedostepny=produktOznaczonyNiedostepny(p);
-    return (aktywnaKategoria==="Wszystkie"||p.kategoria===aktywnaKategoria)
+    const zakres=oferta.zakres==="promocje"?!!p.staraCena:oferta.zakres==="nowosci"?p.badge==="Nowość":oferta.zakres==="kategoria"?p.kategoria===oferta.kategoria:oferta.zakres==="wybrane"?oferta.produkty.includes(String(p.id)):true;
+    return zakres&&(aktywnaKategoria==="Wszystkie"||p.kategoria===aktywnaKategoria)
       && produktPasujeFrazie(p)
       && (od===null||p.cena>=od)&&(doC===null||p.cena<=doC)
       && (filtrDostepnosci==="wszystkie"||(filtrDostepnosci==="dostepne"&&!niedostepny)||(filtrDostepnosci==="brak"&&niedostepny))
       && (filtrOferty==="wszystkie"||(filtrOferty==="promocje"&&!!p.staraCena)||(filtrOferty==="nowosci"&&p.badge==="Nowość"))
       && ocena>=minOcena;
   });
-  return sortujListeProduktow(lista);
+  return sortujListeProduktow(lista,sortowanie==="default"?(oferta.sortowanie||"default"):sortowanie);
 }
 function paginacjaHTML(strona,liczbaStron,fn){
   if(liczbaStron<=1)return "";
@@ -3491,6 +3652,7 @@ function widokPrywatnosc(){
     <h2>8. Automatyzacja</h2><p>Narzędzia automatyczne i Agent AI mogą przygotowywać administratorowi propozycje operacyjne, ale nie podejmują wobec klienta decyzji wywołujących skutki prawne wyłącznie w sposób zautomatyzowany.</p>`,"prywatnosc");
 }
 function widokDostawa(){
+  const publiczneKody=regulyRabatowe().filter(r=>r.publiczny&&regulaRabatowaStatus(r).aktywna);
   return stronaInfo("🚚 Dostawa i płatności", `
     <h2>Formy dostawy</h2>
     <ul>${dostepneDostawy().map(d=>`<li>${d.nazwa} — ${d.koszt?d.koszt+" zł":"gratis"} (${d.opis})</li>`).join("")}<li><b>Darmowa dostawa InPost</b> przy zamówieniach od ${KONFIG.darmowaDostawaOd} zł</li></ul>
@@ -3499,7 +3661,7 @@ function widokDostawa(){
     <h2>Formy płatności</h2>
     <ul>${dostepnePlatnosci().map(p=>`<li>${p.nazwa}${p.oplata?" (+"+p.oplata+" zł)":""}${p.id==="telefon"?` — w tytule wpisz numer zamówienia; numer: ${formatTelefonPlatnosci()}`:""}${p.id==="paynow"?` — bramka mBank Paynow`:""}</li>`).join("")}</ul>
     <h2>Kody rabatowe</h2>
-    <p>Aktualne kody: ${Object.entries(KONFIG.kodyRabatowe).map(([k,v])=>`<b>${esc(k)}</b> (−${v}%)`).join(", ")}. Kod wpisz w koszyku.</p>`,"dostawa");
+    <p>${publiczneKody.length?`Aktualne kody: ${publiczneKody.map(r=>`<b>${esc(r.kod)}</b> (${r.typ==="darmowa_dostawa"?"darmowa dostawa":r.typ==="kwota"?`−${zl(r.wartosc)}`:`−${Number(r.wartosc)||0}%`})`).join(", ")}. Kod wpisz w koszyku.`:"Aktualne promocje i warunki są zawsze widoczne w koszyku oraz na stronie głównej."}</p>`,"dostawa");
 }
 function widokZwroty(){
   if(KONFIG.tresci?.zwroty) return stronaInfo("↩️ Zwroty i reklamacje", KONFIG.tresci.zwroty,"zwroty");
@@ -3602,8 +3764,12 @@ function adminKontekstWidoku(aktywna){
   return {grupa:"Panel administratora",ikona:"🛠️",nazwa:"Narzędzia systemowe",podpis:"Zarządzanie sklepem Artway-TM"};
 }
 function adminMenuMobilneHTML(aktywna,powiadomienia,kontekst){
-  return `<details class="admin-mobile-menu"><summary><span><i>☰</i><small>Menu panelu</small><b>${kontekst.ikona} ${esc(kontekst.nazwa)}</b></span><em>⌄</em></summary><div class="admin-mobile-menu-body">${adminMenuLinkHTML(MENU_ADMINA_PULPIT,aktywna,powiadomienia,"admin-mobile-home")}${MENU_ADMINA.map(grupa=>`<section><header><span>${grupa.ikona}</span><div><b>${esc(grupa.nazwa)}</b><small>${esc(grupa.opis||"")}</small></div></header><div>${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia,"admin-mobile-link")).join("")}</div></section>`).join("")}</div></details>`;
+  return `<details class="admin-mobile-menu" ontoggle="if(!this.open&&this.classList.contains('pwa-sheet-open'))pwaZamknijMenuAdmina()"><summary><span><i>☰</i><small>Menu panelu</small><b>${kontekst.ikona} ${esc(kontekst.nazwa)}</b></span><em>⌄</em></summary><div class="admin-mobile-menu-body" onclick="if(event.target.closest('a'))pwaZamknijMenuAdmina()">${adminMenuLinkHTML(MENU_ADMINA_PULPIT,aktywna,powiadomienia,"admin-mobile-home")}${MENU_ADMINA.map(grupa=>`<section><header><span>${grupa.ikona}</span><div><b>${esc(grupa.nazwa)}</b><small>${esc(grupa.opis||"")}</small></div></header><div>${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia,"admin-mobile-link")).join("")}</div></section>`).join("")}</div></details>`;
 }
+function adminPwaDolneMenuPozycjaHTML(href,icon,label,aktywna,powiadomienia){const active=adminMenuPozycjaAktywna(aktywna,href),count=powiadomienia[href]||0;return `<a href="#${href}" class="pwa-admin-bottom-link ${active?"active":""}" ${active?'aria-current="page"':""} onclick="pwaZamknijMenuAdmina()"><i>${icon}</i><span>${esc(label)}</span>${count?`<b>${count}</b>`:""}</a>`;}
+function adminPwaDolneMenuHTML(aktywna,powiadomienia){return `<nav class="pwa-admin-bottom-nav" aria-label="Menu aplikacji administratora">${adminPwaDolneMenuPozycjaHTML("/admin","📊","Pulpit",aktywna,powiadomienia)}${adminPwaDolneMenuPozycjaHTML("/admin/zamowienia","📦","Zamówienia",aktywna,powiadomienia)}${adminPwaDolneMenuPozycjaHTML("/admin/magazyn","🏬","Magazyn",aktywna,powiadomienia)}<button type="button" class="pwa-admin-bottom-link" onclick="pwaZamknijMenuAdmina();magazynGlobalnySkanerOtworz()"><i>📷</i><span>Skanuj</span></button><button type="button" class="pwa-admin-bottom-link pwa-admin-more" onclick="pwaPrzelaczMenuAdmina(this)" aria-expanded="false"><i>☰</i><span>Menu</span></button></nav>`;}
+function pwaZamknijMenuAdmina(){const menu=document.querySelector(".admin-mobile-menu");if(menu){menu.open=false;menu.classList.remove("pwa-sheet-open");}document.body.classList.remove("pwa-admin-menu-open");document.querySelector(".pwa-admin-more")?.setAttribute("aria-expanded","false");}
+function pwaPrzelaczMenuAdmina(button){const menu=document.querySelector(".admin-mobile-menu");if(!menu)return;const open=!menu.classList.contains("pwa-sheet-open");menu.open=open;menu.classList.toggle("pwa-sheet-open",open);document.body.classList.toggle("pwa-admin-menu-open",open);button?.setAttribute("aria-expanded",String(open));}
 function adminMenuOtwartaGrupa(){return String(wczytajLS("artway_admin_menu_otwarta_v2","")||"");}
 function przelaczGrupeMenuAdmina(id,button){
   const grupa=button?.closest?.(".admin-nav-group");if(!grupa)return;
@@ -3627,8 +3793,14 @@ function filtrujMenuAdmina(input){
   });
   nav.querySelector(".admin-nav-home")?.toggleAttribute("hidden",!!q&&!normalizujSzukanyTekst("pulpit priorytety praca dzisiaj").includes(q));
 }
-function adminSzkielet(aktywna, tresc){
-  const powiadomienia = {
+let adminMenuStatCache={revision:-1,expiresAt:0,powiadomienia:null,licznikOperacyjny:0};
+function uniewaznijAdminMenuStatCache(){adminMenuStatCache={revision:-1,expiresAt:0,powiadomienia:null,licznikOperacyjny:0};}
+function adminMenuStatystyki(){
+  const now=Date.now();
+  if(adminMenuStatCache.powiadomienia&&adminMenuStatCache.revision===adminRewizjaDanych&&now<adminMenuStatCache.expiresAt){
+    return {powiadomienia:{...adminMenuStatCache.powiadomienia},licznikOperacyjny:adminMenuStatCache.licznikOperacyjny};
+  }
+  const powiadomienia={
     "/admin/zamowienia": pobierzZamowienia().filter(z=>z.status==="nowe").length,
     "/admin/allegro": (Array.isArray(allegroZamowienia) ? allegroZamowienia.filter(statusAllegroRezerwujeMagazyn).length : 0) + (allegroKomunikacjaStaty?.().totalNeed||0),
     "/admin/wysylki": pobierzZamowienia().filter(z=>!["anulowane","dostarczone","zakończone"].includes(z.status)&&!z.wysylka?.numer).length,
@@ -3640,6 +3812,11 @@ function adminSzkielet(aktywna, tresc){
   };
   const licznikOperacyjny=["/admin/zamowienia","/admin/allegro","/admin/wysylki","/admin/magazyn","/admin/infakt"].reduce((s,h)=>s+(powiadomienia[h]||0),0);
   powiadomienia["/admin"]=licznikOperacyjny;
+  adminMenuStatCache={revision:adminRewizjaDanych,expiresAt:now+15000,powiadomienia:{...powiadomienia},licznikOperacyjny};
+  return {powiadomienia,licznikOperacyjny};
+}
+function adminSzkielet(aktywna, tresc){
+  const {powiadomienia,licznikOperacyjny}=adminMenuStatystyki();
   const otwartaGrupa=adminMenuOtwartaGrupa();
   const kontekst=adminKontekstWidoku(aktywna);
   const menuKompaktowe=!!wczytajLS("artway_admin_menu_kompaktowe_v1",false);
@@ -3657,12 +3834,13 @@ function adminSzkielet(aktywna, tresc){
       }).join("")}
       <div class="admin-nav-footer"><span class="${licznikOperacyjny?"has-work":"is-clear"}"></span><small>${licznikOperacyjny?`${licznikOperacyjny} aktywnych spraw operacyjnych`:"Brak pilnych spraw operacyjnych"}</small></div>
     </aside>
-    <div class="admin-tresc">
+	    <div class="admin-tresc">
       ${adminMenuMobilneHTML(aktywna,powiadomienia,kontekst)}
-      <header class="admin-workspace-header"><div class="admin-workspace-context"><span>${kontekst.ikona}</span><div><small>Panel administratora <i>›</i> ${esc(kontekst.grupa)}</small><b>${esc(kontekst.nazwa)}</b><em>${esc(kontekst.podpis||"")}</em></div></div><div class="admin-workspace-actions"><span class="admin-workspace-health"><i class="${licznikOperacyjny?"has-work":"is-clear"}"></i>${licznikOperacyjny?`${licznikOperacyjny} spraw`:"System gotowy"}</span>${aktywna!=="/admin"?`<a class="btn ghost" href="#/admin">📊 Pulpit</a>`:""}<a class="btn ghost" href="#/konto">👤 Konto</a><a class="btn ghost" href="#/">↗ Sklep</a></div></header>
-      <div class="admin-workspace-content">${tresc}</div>
-    </div>
-  </div>`;
+      <header class="admin-workspace-header"><div class="admin-workspace-context"><span>${kontekst.ikona}</span><div><small>Panel administratora <i>›</i> ${esc(kontekst.grupa)}</small><b>${esc(kontekst.nazwa)}</b><em>${esc(kontekst.podpis||"")}</em></div></div><div class="admin-workspace-actions"><span class="admin-workspace-health"><i class="${licznikOperacyjny?"has-work":"is-clear"}"></i>${licznikOperacyjny?`${licznikOperacyjny} spraw`:"System gotowy"}</span><button class="btn ghost admin-global-scanner" type="button" onclick="magazynGlobalnySkanerOtworz()">📷 Skaner</button>${typeof pwaPrzyciskInstalacjiHTML==="function"?pwaPrzyciskInstalacjiHTML():""}${aktywna!=="/admin"?`<a class="btn ghost" href="#/admin">📊 Pulpit</a>`:""}<a class="btn ghost" href="#/konto">👤 Konto</a><a class="btn ghost" href="#/">↗ Sklep</a></div></header>
+	      <div class="admin-workspace-content">${tresc}</div>
+	    </div>
+	    ${adminPwaDolneMenuHTML(aktywna,powiadomienia)}
+	  </div>`;
 }
 /* Wykres sprzedaży z ostatnich 7 dni (bez bibliotek — słupki CSS) */
 function sprzedaz7dni(){
@@ -4879,6 +5057,14 @@ function zapiszCzescUstawien(obj){
 
 /* ═══════════ KOSZYK ═══════════ */
 function ileWKoszyku(id){ return koszyk.filter(x=>x.id===id).reduce((s,x)=>s+x.ile,0); }
+function kontrolowanyStanDlaZakupu(id){
+  if(!Object.prototype.hasOwnProperty.call(stanyProduktow||{},id)||stanyProduktow[id]===null||stanyProduktow[id]==="")return null;
+  const n=Number(stanyProduktow[id]);return Number.isFinite(n)?Math.max(0,Math.floor(n)):null;
+}
+function wymagaPotwierdzeniaIlosci(id,ilosc){
+  const qty=Math.max(0,Number(ilosc)||0),stan=kontrolowanyStanDlaZakupu(id);
+  return qty>LIMIT_POTWIERDZENIA_DOSTEPNOSCI&&(stan===null||qty>stan);
+}
 function pozycjeDoPotwierdzeniaDostepnosci(){
   const mapa=new Map();
   for(const x of koszyk){
@@ -4888,16 +5074,17 @@ function pozycjeDoPotwierdzeniaDostepnosci(){
     if(x.wariant)rec.warianty.push(`${x.wariant} × ${x.ile}`);
     mapa.set(key,rec);
   }
-  return [...mapa.values()].filter(x=>x.ilosc>LIMIT_POTWIERDZENIA_DOSTEPNOSCI).map(x=>{
+  return [...mapa.values()].filter(x=>wymagaPotwierdzeniaIlosci(x.id,x.ilosc)).map(x=>{
     const p=produkty.find(p=>String(p.id)===String(x.id));
-    return {...x,nazwa:p?.nazwa||"Produkt",sku:p?.sku||""};
+    return {...x,nazwa:p?.nazwa||"Produkt",sku:p?.sku||"",stanMagazynowy:kontrolowanyStanDlaZakupu(x.id)};
   });
 }
 function potwierdzProgDostepnosci(id, nastepnaIlosc){
-  if(nastepnaIlosc<=LIMIT_POTWIERDZENIA_DOSTEPNOSCI) return true;
+  if(!wymagaPotwierdzeniaIlosci(id,nastepnaIlosc)) return true;
   const obecnie=ileWKoszyku(id);
-  if(obecnie>LIMIT_POTWIERDZENIA_DOSTEPNOSCI) return true;
-  return confirm(`Wybrano więcej niż ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} sztuk jednego produktu. Przy takiej ilości sklep potwierdzi aktualną dostępność przed realizacją. Kontynuować?`);
+  if(wymagaPotwierdzeniaIlosci(id,obecnie)) return true;
+  const stan=kontrolowanyStanDlaZakupu(id),opis=stan===null?`więcej niż ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} sztuk`:`${nastepnaIlosc} szt., przy aktualnym stanie ${stan} szt.`;
+  return confirm(`Wybrano ${opis}. Sklep potwierdzi brakującą ilość przed realizacją. Kontynuować?`);
 }
 function alertDostepnosciKoszykaHTML(){
   const lista=pozycjeDoPotwierdzeniaDostepnosci();
@@ -4941,12 +5128,31 @@ function usun(id){ koszyk = koszyk.filter(x=>x.id!==id); zapiszLS("artway_koszyk
 function sumaKoszyka(){
   return koszyk.reduce((s,x)=>{ const p=produkty.find(p=>p.id===x.id); return s+(p?p.cena*x.ile:0); },0);
 }
-function kwotaRabatu(){ return rabat ? sumaKoszyka()*rabat.procent/100 : 0; }
+function produktObjetyRegulaRabatowa(p,regula){
+  if(!p||!regula)return false;
+  if(regula.zakres==="kategorie")return (regula.kategorie||[]).includes(p.kategoria);
+  if(regula.zakres==="produkty")return (regula.produkty||[]).map(String).includes(String(p.id));
+  return true;
+}
+function wynikRegulyRabatowej(regula){
+  if(!regula)return {ok:false,powod:"Nieznany kod rabatowy",kwota:0,darmowaDostawa:false};
+  const status=regulaRabatowaStatus(regula);if(!status.aktywna)return {ok:false,powod:status.powod,kwota:0,darmowaDostawa:false};
+  const suma=sumaKoszyka(),minimum=Math.max(0,Number(regula.minKoszyk)||0);
+  if(suma<minimum)return {ok:false,powod:`Minimalna wartość koszyka dla tego kodu to ${zl(minimum)}`,kwota:0,darmowaDostawa:false};
+  const podstawa=koszyk.reduce((sum,x)=>{const p=produkty.find(p=>String(p.id)===String(x.id));return sum+(produktObjetyRegulaRabatowa(p,regula)?Number(p.cena||0)*Number(x.ile||0):0);},0);
+  if(!podstawa&&regula.typ!=="darmowa_dostawa")return {ok:false,powod:"Kod nie obejmuje produktów znajdujących się w koszyku",kwota:0,darmowaDostawa:false};
+  let kwota=regula.typ==="kwota"?Math.min(podstawa,Math.max(0,Number(regula.wartosc)||0)):regula.typ==="procent"?podstawa*Math.max(0,Math.min(100,Number(regula.wartosc)||0))/100:0;
+  const limit=Math.max(0,Number(regula.maxRabat)||0);if(limit)kwota=Math.min(kwota,limit);
+  return {ok:true,powod:"",kwota:+Math.max(0,kwota).toFixed(2),darmowaDostawa:regula.typ==="darmowa_dostawa",podstawa};
+}
+function aktywnaRegulaRabatowa(){return rabat?znajdzReguleRabatowa(rabat.kod):null;}
+function kwotaRabatu(){ const wynik=wynikRegulyRabatowej(aktywnaRegulaRabatowa());return wynik.ok?wynik.kwota:0; }
 function sumaPoRabacie(){ return Math.max(0, sumaKoszyka()-kwotaRabatu()); }
 function zastosujKod(){
   const kod = ($("promoInput")?.value||"").trim().toUpperCase();
-  if(KONFIG.kodyRabatowe[kod]){ rabat={kod, procent:KONFIG.kodyRabatowe[kod]}; zapiszLS("artway_rabat", rabat); toast(`Kod ${kod} aktywny: −${rabat.procent}% 🎉`); }
-  else { toast("Nieznany kod rabatowy 😕"); loguj("info","Próba użycia nieznanego kodu: "+kod); }
+  const regula=znajdzReguleRabatowa(kod),wynik=wynikRegulyRabatowej(regula);
+  if(wynik.ok){rabat={kod:regula.kod,typ:regula.typ,wartosc:Number(regula.wartosc)||0};zapiszLS("artway_rabat",rabat);toast(regula.typ==="darmowa_dostawa"?`Kod ${kod} aktywny: darmowa dostawa 🎉`:`Kod ${kod} aktywny: −${zl(wynik.kwota)} 🎉`);}
+  else { toast(`${wynik.powod||"Nieznany kod rabatowy"} 😕`); loguj("info","Nieudana próba użycia kodu "+kod+": "+(wynik.powod||"nieznany")); }
   odswiezKoszyk();
 }
 function usunRabat(){ rabat=null; zapiszLS("artway_rabat", null); odswiezKoszyk(); }
@@ -4956,7 +5162,9 @@ function odswiezKoszyk(){
   const suma = sumaPoRabacie();
   $("cartTotal").textContent = zl(suma);
   $("checkoutBtn").disabled = !n;
-  $("rabatBox").innerHTML = rabat ? `<div class="rabat-info"><span>🎁 Kod ${esc(rabat.kod)}: −${zl(kwotaRabatu())}</span><button onclick="usunRabat()">usuń</button></div>` : "";
+  const regulaRabatu=aktywnaRegulaRabatowa(),wynikRabatu=wynikRegulyRabatowej(regulaRabatu);
+  if(rabat&&!wynikRabatu.ok){rabat=null;zapiszLS("artway_rabat",null);}
+  $("rabatBox").innerHTML = rabat ? `<div class="rabat-info"><span>🎁 Kod ${esc(rabat.kod)}: ${wynikRabatu.darmowaDostawa?"darmowa dostawa":"−"+zl(wynikRabatu.kwota)}</span><button onclick="usunRabat()">usuń</button></div>` : "";
   $("freeShip").textContent = suma>=KONFIG.darmowaDostawaOd ? "🎉 Masz darmową dostawę!"
     : suma>0 ? `Do darmowej dostawy brakuje ${zl(KONFIG.darmowaDostawaOd-suma)}` : "";
   $("cartItems").innerHTML = n ? koszyk.map((x,i)=>{
@@ -4979,6 +5187,8 @@ function odswiezKoszyk(){
    Koszty przeliczają się na żywo przy zmianie opcji.             */
 function kosztDostawyDlaKwoty(idDostawy, kwotaProdukow=sumaPoRabacie()){
   const d = dostepneDostawy().find(x=>x.id===idDostawy) || dostepneDostawy()[0];
+  const wynik=wynikRegulyRabatowej(aktywnaRegulaRabatowa());
+  if(wynik.ok&&wynik.darmowaDostawa)return 0;
   if(d.koszt>0 && kwotaNum(kwotaProdukow)>=KONFIG.darmowaDostawaOd) return 0;
   return kwotaNum(d.koszt);
 }
@@ -5220,7 +5430,7 @@ function przeliczZamowienie(){
   $("orderSummary").innerHTML =
     koszyk.map(x=>{const p=produkty.find(p=>String(p.id)===String(x.id));
       return p?`<div><span>${esc(p.nazwa)}${x.wariant?` (${esc(x.wariant)})`:""} × ${x.ile}</span><span>${zl(p.cena*x.ile)}</span></div>`:"";}).join("")
-    + (rabat?`<div><span>Rabat (${esc(rabat.kod)})</span><span>−${zl(kwotaRabatu())}</span></div>`:"")
+    + (rabat?`<div><span>Kod (${esc(rabat.kod)})</span><span>${wynikRegulyRabatowej(aktywnaRegulaRabatowa()).darmowaDostawa?"Darmowa dostawa":"−"+zl(kwotaRabatu())}</span></div>`:"")
     + `<div><span>Dostawa</span><span>${dostawa?zl(dostawa):"GRATIS"}</span></div>`
     + (weekend?`<div><span>Paczka w Weekend</span><span>${zl(weekend)}</span></div>`:"")
     + (oplata?`<div><span>Opłata za pobranie</span><span>${zl(oplata)}</span></div>`:"")
@@ -5397,7 +5607,7 @@ async function zlozZamowienie(e){
 `NOWE ZAMÓWIENIE ${nr}
 ================================
 ${pozycje.map(p=>"- "+p).join("\n")}
-${rabat?`Rabat ${rabat.kod}: -${zl(kwotaRabatu())}\n`:""}Dostawa: ${dost.nazwa}${paczkomat} — ${dostawa?zl(dostawa):"gratis"}
+${rabat?`Kod ${rabat.kod}: ${wynikRegulyRabatowej(aktywnaRegulaRabatowa()).darmowaDostawa?"darmowa dostawa":"-"+zl(kwotaRabatu())}\n`:""}Dostawa: ${dost.nazwa}${paczkomat} — ${dostawa?zl(dostawa):"gratis"}
 ${paczkaWeekend?`Paczka w Weekend: ${zl(oplataWeekend)}\n`:""}
 ${oplata?`Opłata za pobranie: ${zl(oplata)}\n`:""}RAZEM: ${zl(razem)}
 ${potwierdzeniaDostepnosci.length?`UWAGA: potwierdzić dostępność większej ilości: ${potwierdzeniaDostepnosci.map(x=>`${x.nazwa} × ${x.ilosc}`).join(", ")}\n`:""}
@@ -5491,6 +5701,50 @@ Uwagi: ${f.get("notes")||"brak"}`;
     toast("⚠️ Wystąpił błąd — zapisano w diagnostyce");
   }
 }
+
+/* Instalowalny panel administratora (PWA). Aplikacja używa dokładnie tego
+   samego panelu i API co strona, dlatego nie tworzy drugiej kopii danych. */
+let pwaOdroczoneZaproszenie=null;
+
+function pwaDzialaJakoAplikacja(){
+  return window.matchMedia?.("(display-mode: standalone)")?.matches||window.navigator.standalone===true;
+}
+function pwaUstawTrybWyswietlania(){const standalone=pwaDzialaJakoAplikacja();document.documentElement.classList.toggle("artway-pwa-standalone",standalone);document.body?.classList.toggle("artway-pwa-standalone",standalone);if(!standalone&&typeof pwaZamknijMenuAdmina==="function")pwaZamknijMenuAdmina();return standalone;}
+function pwaIOS(){return /iphone|ipad|ipod/i.test(navigator.userAgent||"");}
+function pwaPrzyciskInstalacjiHTML(){
+  return `<button class="btn ghost admin-pwa-install" type="button" onclick="pwaZainstalujPanelAdmina()" ${pwaDzialaJakoAplikacja()?"hidden":""}>📲 Zainstaluj</button>`;
+}
+function pwaOdswiezPrzyciski(){
+  document.querySelectorAll(".admin-pwa-install").forEach(button=>{button.hidden=pwaDzialaJakoAplikacja();button.classList.toggle("is-ready",!!pwaOdroczoneZaproszenie);});
+}
+function pwaZamknijInstrukcje(){document.getElementById("adminPwaHelp")?.remove();}
+function pwaPokazInstrukcje(){
+  pwaZamknijInstrukcje();
+  const ios=pwaIOS(),dialog=document.createElement("div");dialog.id="adminPwaHelp";dialog.className="admin-pwa-help";
+  dialog.innerHTML=`<section role="dialog" aria-modal="true" aria-labelledby="adminPwaHelpTitle"><button class="admin-pwa-help-close" type="button" onclick="pwaZamknijInstrukcje()" aria-label="Zamknij">✕</button><span class="admin-pwa-help-icon">📲</span><h2 id="adminPwaHelpTitle">Zainstaluj panel Artway-TM</h2><p>${ios?"W Safari wybierz przycisk <b>Udostępnij</b>, a następnie <b>Do ekranu początkowego</b> i potwierdź <b>Dodaj</b>.":"Otwórz menu przeglądarki i wybierz <b>Zainstaluj aplikację</b> albo <b>Dodaj do ekranu głównego</b>."}</p><small>Po instalacji panel otworzy się jak aplikacja: z własną ikoną, bez paska adresu i ze skrótami do najważniejszych modułów.</small><button class="btn" type="button" onclick="pwaZamknijInstrukcje()">Rozumiem</button></section>`;
+  dialog.addEventListener("click",event=>{if(event.target===dialog)pwaZamknijInstrukcje();});document.body.appendChild(dialog);dialog.querySelector("button")?.focus();
+}
+async function pwaZainstalujPanelAdmina(){
+  if(pwaDzialaJakoAplikacja()){toast("Panel jest już uruchomiony jako aplikacja");return;}
+  if(!pwaOdroczoneZaproszenie){pwaPokazInstrukcje();return;}
+  const prompt=pwaOdroczoneZaproszenie;pwaOdroczoneZaproszenie=null;await prompt.prompt();
+  const result=await prompt.userChoice.catch(()=>({outcome:"dismissed"}));
+  if(result.outcome==="accepted")toast("✅ Panel Artway-TM został dodany do telefonu");
+  pwaOdswiezPrzyciski();
+}
+async function pwaZarejestrujAplikacje(){
+  if(!("serviceWorker" in navigator)||!window.isSecureContext)return;
+  try{await navigator.serviceWorker.register("/sw.js",{scope:"/",updateViaCache:"none"});}
+  catch(error){console.warn("Nie udało się zarejestrować aplikacji PWA",error);}
+}
+function pwaUruchomSkrotSkanera(){
+  const params=new URLSearchParams(location.search);if(params.get("scanner")!=="1")return;
+  let attempts=0;const timer=setInterval(()=>{attempts++;if(typeof magazynGlobalnySkanerOtworz==="function"){clearInterval(timer);params.delete("scanner");const query=params.toString();history.replaceState(null,"",`${location.pathname}${query?`?${query}`:""}${location.hash}`);void magazynGlobalnySkanerOtworz();}else if(attempts>30)clearInterval(timer);},250);
+}
+window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();pwaOdroczoneZaproszenie=event;pwaOdswiezPrzyciski();});
+window.addEventListener("appinstalled",()=>{pwaOdroczoneZaproszenie=null;pwaUstawTrybWyswietlania();pwaOdswiezPrzyciski();});
+window.matchMedia?.("(display-mode: standalone)")?.addEventListener?.("change",()=>{pwaUstawTrybWyswietlania();pwaOdswiezPrzyciski();});
+window.addEventListener("DOMContentLoaded",()=>{pwaUstawTrybWyswietlania();void pwaZarejestrujAplikacje();pwaUruchomSkrotSkanera();});
 
 /* ═══════════ UI ═══════════ */
 let dialogPoprzedniFocus=null;

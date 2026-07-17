@@ -21,6 +21,23 @@ test('router scala szybkie renderowania i nie skanuje wielokrotnie całego DOM',
   assert.match(router, /current\.isEqualNode\(next\)/);
   assert.match(router, /const keyed=new Map\(\);/);
   assert.match(router, /function zaplanujRenderPoWpisaniu\(opoznienie=180\)/);
+  assert.match(router, /admin-workspace-content/);
+  assert.match(router, /ADMIN_CACHE_PODSTRON_MAX_LACZNIE=24000/);
+  assert.match(router, /currentContainer\?\.appendChild\(nextWorkspace\.cloneNode\(true\)\)/);
+  assert.doesNotMatch(router, /else current\.appendChild\(nextWorkspace\.cloneNode\(true\)\)/);
+});
+
+test('powtórne wejście do panelu pobiera tylko rewizję zamiast wielomegabajtowego snapshotu', async () => {
+  const [cloud, backend] = await Promise.all([
+    readFile('src/frontend/03-cloud-sync.js', 'utf8'),
+    readFile('netlify/functions/lib/store-app.mjs', 'utf8'),
+  ]);
+  assert.match(cloud, /settingsRev:lokalnaRewizja/);
+  assert.match(backend, /settings_unchanged: true/);
+  assert.match(backend, /key !== 'artway_produkty_katalog'/);
+  assert.match(backend, /requestedSettingsRev === rev/);
+  const pullStart=backend.indexOf("if (action === 'pull' || action === 'store-data')"),pullEnd=backend.indexOf("if (action === 'settings')",pullStart),pullRoute=backend.slice(pullStart,pullEnd);
+  assert.doesNotMatch(pullRoute, /reconcileDraftsSafely/);
 });
 
 test('ciężkie podstrony magazynu są budowane wyłącznie dla aktywnej karty', async () => {

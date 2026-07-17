@@ -1,6 +1,3 @@
-// Artway-TM — wspólna baza sklepu na Netlify Blobs
-// Funkcja serwerowa: ustawienia, zamówienia, klienci — widoczne na każdym urządzeniu.
-// Endpoint: /.netlify/functions/store  (alias /api/store)
 import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { createRevisionSafeWriter, createStoreRepository } from './core/store-repository.mjs';
@@ -32,6 +29,7 @@ import {
   numerZamowienia,
 } from './domain/orders.mjs';
 import { bezpieczneZamowienieKlienta } from './domain/checkout.mjs';
+import { MAPA_STATUS_EMAIL, STATUS_EMAIL_CODALEJ, STATUS_EMAIL_META } from './domain/order-email-content.mjs';
 import {
   applySafeCatalogFixes,
   auditCatalog,
@@ -41,6 +39,9 @@ import { eligiblePromotionProducts, runIndexNowPromotion } from './domain/indexn
 import { createInventoryNaturalCommandHandler } from './domain/inventory-command.mjs';
 import { createInventoryDecisionService } from './domain/inventory-decisions.mjs';
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
+import { createAgentRuntime } from './domain/agent-runtime.mjs';
+import { createAiBannerGenerator } from './domain/ai-banner-generator.mjs';
+import { createAiBannerRoute } from './ai-banner-route.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
 import { applySupplierProcurementWorkflow } from './domain/supplier-procurement-workflow.mjs';
 import { classifyWarehousePosition, summarizeWarehousePositions, warehouseAnalysisNeedsInvestigation } from './domain/order-warehouse-readiness.mjs';
@@ -63,7 +64,7 @@ import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
 import { applyProductSaleDecisionBatch } from './domain/product-sale-decisions.mjs';
 import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
-import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
+import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, reassessBlockedAllegroMapping, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
 import { allegroNextScheduledSyncAt, allegroScheduledSyncDue, normalizeAllegroSyncSettings } from './domain/allegro-sync-policy.mjs';
 import { createCatalogProductUpdater as allegroAktualizatorProduktowCentralnych } from './domain/catalog-product-updater.mjs';
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
@@ -114,18 +115,33 @@ async function zapisz(key, value) {
   if (key !== 'settings') return repository.write(key, value);
   return zapiszUstawieniaBezpiecznie(value);
 }
+async function zwiekszLicznikKoduRabatowego(kod = '') {
+  const code = tekst(kod, 30).trim().toUpperCase(); if (!code) return false;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const version = await czytajWersjonowane('settings', { data: {}, rev: 0, updated_at: null });
+    const previous = version.value || { data: {}, rev: 0, updated_at: null }, data = { ...(previous.data || {}) };
+    const config = { ...(data.artway_ustawienia || {}) }, rules = Array.isArray(config.kodyRabatoweZaawansowane) ? config.kodyRabatoweZaawansowane.map((rule) => ({ ...rule })) : [];
+    const index = rules.findIndex((rule) => tekst(rule?.kod, 30).trim().toUpperCase() === code); if (index < 0) return false;
+    rules[index].uzycia = Math.max(0, Number(rules[index].uzycia) || 0) + 1;
+    config.kodyRabatoweZaawansowane = rules; data.artway_ustawienia = config;
+    const record = { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: new Date().toISOString() };
+    const write = await zapiszJesliWersja('settings', record, version); if (write?.modified) return true;
+  }
+  return false;
+}
 const inventoryDecisions = createInventoryDecisionService({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
 const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, decisions: inventoryDecisions });
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const aiBannerGenerator = createAiBannerGenerator({ read: czytaj, write: zapisz, remove: repository.delete });
+const aiBannerRoute = createAiBannerRoute({ generator: aiBannerGenerator, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, configured: () => !!process.env.OPENAI_API_KEY, model: () => process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2' });
 const allegroOrderArchive = createAllegroOrderArchive({ read: czytaj, write: zapisz });
 const allegroDataReader = createAllegroDataReader({ read: czytaj, archive: allegroOrderArchive, getOfferSettings: allegroPobierzUstawieniaOfert, getStatus: allegroStatus, mappingItems: allegroMapowaniaItems, orderStatus: (order) => allegroStatusKolejkiZamowienia(order, {}), orderNeedsRefresh: allegroOrderNeedsLiveRefresh, nextScheduledSyncAt: allegroNextScheduledSyncAt, compliancePolicy: ALLEGRO_COMPLIANCE_POLICY });
 const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
-const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
-const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
+const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ autoMapOffers: allegroAutoMapujOfertyZKartoteka, callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
+const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, agentRuntime, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
 
-// Klucze wspólne (konfiguracja + katalog + ceny + stany + opinie + kosz) — zapisywane przez administratora,
-// czytane przez wszystkich (żeby sklep wyglądał tak samo na każdym urządzeniu).
 const KLUCZE_WSPOLNE = [
   'artway_ustawienia',
   'artway_produkty_dodane',
@@ -157,6 +173,7 @@ const LIMIT_USTAWIEN = 4 * 1024 * 1024; // 4 MB na komplet ustawień
 const LIMIT_ZAMOWIEN = 20000;
 const LIMIT_KLIENTOW = 20000;
 const LIMIT_USUNIETYCH_ZAMOWIEN = 50000;
+const BACKUP_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_./-]{0,199}$/;
 const PAYNOW_ENVY = new Set(['production', 'sandbox']);
 const PAYNOW_STATUSY_KONCOWE = new Set(['CONFIRMED', 'ERROR', 'EXPIRED', 'REJECTED', 'ABANDONED']);
 const storeOrderSupplierReconciliation = createStoreOrderSupplierReconciliation({
@@ -853,10 +870,13 @@ async function wyslijEmailSMTP({ to, subject, text, html, replyTo, attachments =
     host: c.host,
     port: c.port,
     secure: c.secure,
+    requireTLS: !c.secure,
+    tls: { minVersion: 'TLSv1.2' },
     auth: { user: c.user, pass: process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || '' },
   });
   const info = await transporter.sendMail({
     from: adresNadawcyEmail(c),
+    envelope: { from: c.user, to },
     to,
     replyTo: replyTo || c.replyTo,
     subject,
@@ -978,6 +998,7 @@ function podsumowanieKosztowEmailText(z) {
   const c = kosztyEmail(z);
   return [
     `Produkty: ${zlSerwer(c.produkty || c.poRabacie)}`,
+    z?.rabatKod ? `Kod promocyjny: ${tekst(z.rabatKod, 30)}${z?.rabatTyp === 'darmowa_dostawa' ? ' — darmowa dostawa' : ''}` : '',
     c.rabat ? `Rabat: -${zlSerwer(c.rabat)}` : '',
     `Dostawa: ${c.dostawa ? zlSerwer(c.dostawa) : 'GRATIS'} (${z?.dostawa || '—'})`,
     c.paczkaWeekend ? `Paczka w Weekend: ${zlSerwer(c.paczkaWeekend)}` : '',
@@ -990,6 +1011,7 @@ function podsumowanieKosztowEmailHtml(z) {
   const row = (a, b, strong = false) => `<div style="display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid #eef2f7${strong ? ';font-weight:900;font-size:17px;color:#111827' : ''}"><span>${htmlEscape(a)}</span><span>${htmlEscape(b)}</span></div>`;
   return [
     c.produkty ? row('Produkty', zlSerwer(c.produkty)) : '',
+    z?.rabatKod ? row('Kod promocyjny', `${tekst(z.rabatKod, 30)}${z?.rabatTyp === 'darmowa_dostawa' ? ' — darmowa dostawa' : ''}`) : '',
     c.rabat ? row('Rabat', `-${zlSerwer(c.rabat)}`) : '',
     c.rabat ? row('Po rabacie', zlSerwer(c.poRabacie)) : '',
     row('Dostawa', c.dostawa ? zlSerwer(c.dostawa) : 'GRATIS'),
@@ -1099,7 +1121,7 @@ function htmlLayoutEmail({ preheader, badge, title, intro, z, mainCta, extraCta 
                   <h3 style="margin:0 0 8px;font-size:17px;color:#111827">${htmlEscape(coDalejTytul || (admin ? 'Co dalej w obsłudze?' : 'Co dalej?'))}</h3>
                   <p style="margin:0;color:#374151;line-height:1.6">${coDalejTekst ? htmlEscape(coDalejTekst) : (admin
                     ? 'Sprawdź płatność, przygotuj paczkę, wygeneruj etykietę i aktualizuj status zamówienia. Klient dostanie kolejne informacje automatycznie.'
-                    : 'Przyjęliśmy zamówienie. Będziemy informować o kolejnych etapach realizacji. W każdej chwili możesz wrócić do sklepu, sprawdzić szczegóły lub dobrać kolejne produkty do zestawu.')}</p>
+                    : 'Przyjęliśmy zamówienie. Będziemy informować o kolejnych etapach realizacji. Szczegóły są zawsze dostępne w sekcji „Moje zamówienia”.')}</p>
                 </div>
                 <div style="margin:22px 0 8px">${ctaHtml}${admin ? emailButton('Otwórz zamówienie w panelu', adminUrl, '#111827') : emailButton('Wróć do sklepu', sklepUrl, '#111827')}</div>
                 ${!admin ? `<p style="font-size:14px;color:#6b7280;line-height:1.6;margin:18px 0 0">${htmlEscape(stopkaTekst || 'Dziękujemy za zaufanie. Życzymy dobrego dnia i udanych zakupów w Artway-TM.')}</p>` : ''}
@@ -1135,8 +1157,6 @@ ${podsumowanieKosztowEmailText(z)}
 Płatność: ${z.platnosc || '—'}${paynow}${telefon}
 
 Status i szczegóły zamówienia sprawdzisz na stronie sklepu w sekcji „Moje zamówienia”.
-Jeśli chcesz coś domówić, wróć do sklepu — chętnie pomożemy skompletować kolejne produkty.
-
 Pozdrawiamy
 Artway-TM`;
   return {
@@ -1231,27 +1251,6 @@ async function wyslijEmaileNowegoZamowienia(z, { includeAdmin = true } = {}) {
   return { configured: true, sent: wyniki.length > 0, results: wyniki, errors };
 }
 
-// ─── E-MAILE STATUSOWE (automatyczne, po stronie serwera) ───
-const MAPA_STATUS_EMAIL = {
-  'w realizacji': 'przygotowanie',
-  'gotowe do wysyłki': 'przygotowanie',
-  'nadane': 'nadanie',
-  'wysłane': 'nadanie',
-  'dostarczone': 'dostarczenie',
-  'zakończone': 'dostarczenie',
-  'zwrot': 'zwrot',
-  'zwrot pieniędzy': 'zwrot_pieniedzy',
-  'anulowane': 'anulowanie',
-};
-const STATUS_EMAIL_META = {
-  przygotowanie: { badge: 'Realizacja zamówienia', title: 'Zamówienie jest przygotowywane', accent: '#7c3aed', opis: 'Kompletujemy produkty i przygotowujemy paczkę do wysyłki. Wkrótce przekażemy przesyłkę przewoźnikowi.', subject: (nr) => `Zamówienie ${nr} jest przygotowywane — Artway-TM` },
-  nadanie: { badge: 'Przesyłka w drodze', title: 'Twoja paczka została nadana', accent: '#059669', opis: 'Przesyłka jest już w InPost. Poniżej znajdziesz numer i link do śledzenia.', subject: (nr) => `Zamówienie ${nr} zostało nadane — Artway-TM` },
-  dostarczenie: { badge: 'Dostarczono', title: 'Przesyłka została dostarczona', accent: '#16a34a', opis: 'Mamy nadzieję, że zakupy sprawią dużo satysfakcji. Zapraszamy ponownie do Artway-TM.', subject: (nr) => `Zamówienie ${nr} zostało dostarczone — Artway-TM` },
-  anulowanie: { badge: 'Aktualizacja zamówienia', title: 'Zamówienie zostało anulowane', accent: '#dc2626', opis: 'Zamówienie zostało anulowane. Jeśli to pomyłka lub masz pytania, po prostu odpowiedz na tę wiadomość.', subject: (nr) => `Zamówienie ${nr} zostało anulowane — Artway-TM` },
-  zwrot: { badge: 'Zwrot przesyłki', title: 'Przesyłka wraca do nadawcy', accent: '#ea580c', opis: 'Przesyłka została oznaczona jako zwrot do nadawcy. Skontaktujemy się w sprawie dalszych kroków.', subject: (nr) => `Zwrot przesyłki dla zamówienia ${nr} — Artway-TM` },
-  zwrot_pieniedzy: { badge: 'Zwrot pieniędzy', title: 'Zwróciliśmy Ci pieniądze', accent: '#0ea5e9', opis: 'Zwrot środków został zainicjowany. Pieniądze wrócą na Twoje konto w ciągu kilku dni roboczych.', subject: (nr) => `Zwrot pieniędzy za zamówienie ${nr} — Artway-TM` },
-  problem: { badge: 'Ważna informacja', title: 'Problem z przesyłką', accent: '#dc2626', opis: 'Przewoźnik zgłosił problem dotyczący przesyłki. Monitorujemy sytuację i przekażemy kolejną informację po jej wyjaśnieniu.', subject: (nr) => `Ważna informacja o przesyłce ${nr} — Artway-TM` },
-};
 function nazwaPrzewoznikaEmail(id) {
   return ({ inpost: 'InPost', dpd: 'DPD', dhl: 'DHL', orlen: 'ORLEN Paczka', gls: 'GLS', ups: 'UPS', pocztex: 'Pocztex', inny: 'przewoźnika' })[id] || 'przewoźnika';
 }
@@ -1270,16 +1269,6 @@ function linkSledzeniaEmail(z) {
   };
   return mapa[w.przewoznik] || '';
 }
-// Wszystkie e-maile statusowe korzystają z TEGO SAMEGO szablonu co potwierdzenie zakupu (htmlLayoutEmail).
-const STATUS_EMAIL_CODALEJ = {
-  przygotowanie: ['Co dalej?', 'Kompletujemy Twoje produkty. Gdy paczka trafi do przewoźnika, dostaniesz e-mail z numerem do śledzenia.'],
-  nadanie: ['Śledź swoją paczkę', 'Paczka jest już w drodze. Kliknij „Śledź przesyłkę”, aby zobaczyć jej status. Damy też znać, gdy zostanie dostarczona.'],
-  dostarczenie: ['Dziękujemy za zakupy', 'Mamy nadzieję, że wszystko się podoba. Jeśli coś będzie nie tak, po prostu odpowiedz na tę wiadomość. Zapraszamy ponownie!'],
-  anulowanie: ['Masz pytania?', 'Jeśli anulowanie to pomyłka albo chcesz coś zmienić, odpowiedz na tę wiadomość — pomożemy.'],
-  zwrot: ['Co dalej?', 'Skontaktujemy się w sprawie dalszych kroków dotyczących zwracanej przesyłki.'],
-  zwrot_pieniedzy: ['Zwrot środków', 'Pieniądze wrócą na Twoje konto w ciągu kilku dni roboczych, zależnie od banku. W razie pytań odpowiedz na tę wiadomość.'],
-  problem: ['Czuwamy nad przesyłką', 'Monitorujemy sytuację w InPost i przekażemy kolejną informację zaraz po jej wyjaśnieniu.'],
-};
 function htmlStatusEmail(z, typ, opcje = {}) {
   const meta = STATUS_EMAIL_META[typ] || STATUS_EMAIL_META.przygotowanie;
   const imie = tekst(z?.klient?.imie, 80).trim();
@@ -1314,7 +1303,7 @@ function htmlStatusEmail(z, typ, opcje = {}) {
     platnoscKartaHtml,
     coDalejTytul: cdT,
     coDalejTekst: cdX,
-    stopkaTekst: 'Dziękujemy za zaufanie. Zapraszamy ponownie — w sklepie czekają kolejne produkty i okazje.',
+    stopkaTekst: 'Dziękujemy za zaufanie. Ta wiadomość dotyczy wyłącznie realizacji Twojego zamówienia.',
   });
 }
 function wiadomoscStatusowa(z, typ, opcje = {}) {
@@ -1332,6 +1321,7 @@ function wiadomoscStatusowa(z, typ, opcje = {}) {
   else if (typ === 'zwrot') tresc = `przesyłka dla zamówienia ${z.nr} została oznaczona jako zwrot do nadawcy. Skontaktujemy się w sprawie dalszych kroków.`;
   else if (typ === 'zwrot_pieniedzy') tresc = `zwróciliśmy pieniądze za zamówienie ${z.nr}.\nKwota zwrotu: ${opcje.kwota != null ? zlSerwer(opcje.kwota) : zlSerwer(z.razem)}\nŚrodki wrócą na Twoje konto w ciągu kilku dni roboczych, zależnie od banku.`;
   else if (typ === 'problem') tresc = `przewoźnik zgłosił problem dotyczący przesyłki dla zamówienia ${z.nr}. Monitorujemy sytuację i przekażemy kolejną informację po jej wyjaśnieniu.${numer ? `\nNumer przesyłki: ${numer}` : ''}${sledzenie ? `\nŚledzenie: ${sledzenie}` : ''}`;
+  else if (typ === 'dostepnosc_potwierdzona') tresc = `potwierdziliśmy dostępność wszystkich sztuk w zamówieniu ${z.nr}. Zamówienie może przejść do przygotowania i wysyłki.`;
   const body = `${powitanie}\n\n${tresc}\n\n${podsumowanieKosztowEmailText(z)}\n\nSzczegóły sprawdzisz w sekcji „Moje zamówienia”.\n\nPozdrawiamy\nArtway-TM\n${linkSklepuEmail('/#/')}`;
   return { subject: meta.subject(z.nr), text: body, html: htmlStatusEmail(z, typ, opcje) };
 }
@@ -1366,6 +1356,8 @@ async function obsluzEmailePrzejsciaStatusu(stary, nowy) {
   const bladNowy = tekst(nowy?.wysylka?.bladIntegracji, 300).trim();
   const bladStary = tekst(stary?.wysylka?.bladIntegracji, 300).trim();
   if (bladNowy && bladNowy !== bladStary) typy.push('problem');
+  const decyzjaDostepnosciNowa = tekst(nowy?.decyzjaDostepnosci?.code, 80).trim().toLowerCase();
+  if (stary?.wymagaPotwierdzeniaDostepnosci === true && nowy?.wymagaPotwierdzeniaDostepnosci !== true && decyzjaDostepnosciNowa === 'confirmed') typy.push('dostepnosc_potwierdzona');
   if ((stary?.status || '') !== (nowy?.status || '')) {
     const t = MAPA_STATUS_EMAIL[nowy.status];
     if (t && !typy.includes(t) && !(t === 'przygotowanie' && typy.includes('nadanie'))) typy.push(t);
@@ -1701,11 +1693,13 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
   let products = await allegroAgentProduktyKompletne(data);
   const mappings = { ...allegroMapowaniaItems(mappingsRec) }, updater = allegroAktualizatorProduktowCentralnych(data, products.keys());
   const offersById = new Map(allegroOfertyItems(offers).map((offer) => [String(offer?.id || ''), offer]));
-  const now = new Date().toISOString();
-  let quarantined = 0;
+  const now = new Date().toISOString(), mappingPolicy = normalizeAllegroSyncSettings(offerSettings);
+  let quarantined = 0, reassessed = 0;
   if (offerSettings.autoCorrections !== false) for (const [offerId, current] of Object.entries(mappings)) {
     const productId = String(current?.productId || current?.previousProductId || '').trim(), product = products.get(productId), offer = offersById.get(String(offerId));
     if (current?.blocked === true) {
+      const reassessment = reassessBlockedAllegroMapping({ current, product, offer, mappings, offersById, minimumScore: mappingPolicy.mappingMinScore, now });
+      if (reassessment) { mappings[offerId] = reassessment; reassessed++; }
       if (product && (String(product.allegroOfferId || '') === String(offerId) || product.allegroMappingStatus === 'wymaga_sprawdzenia')) updater.apply(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', ...(current.conflict ? { allegroMappingConflict: current.conflict } : {}) }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
       continue;
     }
@@ -1720,7 +1714,6 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
   }
   updater.commit();
   products = await allegroAgentProduktyKompletne(data);
-  const mappingPolicy = normalizeAllegroSyncSettings(offerSettings);
   const used = new Map(Object.values(mappings).map((m) => [String(m?.offerId || ''), String(m?.productId || '')]).filter(([o, p]) => o && p && products.has(p)));
   const usedProducts = new Set([...used.values()]);
   let autoMapped = 0, refreshed = 0, descriptionsUpdated = 0, producersUpdated = 0, productsUpdated = 0;
@@ -1747,6 +1740,7 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
       reason: validation.reason,
       evidence: validation.evidence,
       conflicts: validation.conflicts,
+      warnings: validation.warnings,
       verifiedForSupplier: current.verifiedForSupplier === true || (validation.valid && validation.score >= 88),
       verification: current.verification || (validation.valid && validation.score >= 88 ? 'strong-identifiers' : 'catalog-sync-review'),
       productSnapshot: mappingProductSnapshot(product, data),
@@ -1759,6 +1753,7 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
       ...(record.allegroProductId ? { allegroProductId: record.allegroProductId } : {}),
       ...(record.categoryId ? { allegroCategoryId: record.categoryId } : {}),
       ...(producer ? { producent: producer, marka: product.marka || producer } : {}),
+      ...(!canonicalGtin(product.gtin || product.ean) && canonicalGtin(offer.gtin || offer.ean) ? { ean: tekst(offer.ean || offer.gtin, 80), gtin: tekst(offer.gtin || offer.ean, 80) } : {}),
       allegroSyncedAt: record.synced_at, allegroSyncSource: 'offer-sync',
     };
     if (offerSettings.syncDescriptions !== false && tekst(offer.descriptionText, 20000).trim()) {
@@ -1772,13 +1767,13 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
     if (updater.apply(product.id, fields, ['allegroMappingStatus', 'allegroMappingConflict'])) productsUpdated++;
   }
   const productDataChanged = updater.commit();
-  if (autoMapped || refreshed || quarantined || productDataChanged) {
+  if (autoMapped || refreshed || quarantined || reassessed || productDataChanged) {
     await Promise.all([
       zapisz('allegro_mappings', { items: mappings, updated_at: now }),
       ...(productDataChanged ? [zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now })] : []),
     ]);
   }
-  return { mappings, autoMapped, refreshed, quarantined, descriptionsUpdated, producersUpdated, productsUpdated };
+  return { mappings, autoMapped, refreshed, quarantined, reassessed, descriptionsUpdated, producersUpdated, productsUpdated };
 }
 function allegroAgentWirtualnyProduktOferty(line = {}, offer = {}) {
   const offerId = tekst(line.offerId || offer.id || '', 120).trim();
@@ -3260,7 +3255,9 @@ function allegroUstawieniaOfert(raw = {}) {
   const defaultStock = Number.isFinite(requested) ? Math.min(99999, Math.max(1, Math.floor(requested))) : ALLEGRO_DEFAULT_OFFER_STOCK;
   const producers = [...new Set((Array.isArray(raw?.producers) ? raw.producers : ALLEGRO_DEFAULT_PRODUCERS).map((x) => tekst(x, 100).trim()).filter(Boolean))].slice(0, 50);
   const sync = normalizeAllegroSyncSettings(raw);
-  return { defaultStock, republish: true, producers: producers.length ? producers : ALLEGRO_DEFAULT_PRODUCERS, autoCatalog: raw?.autoCatalog !== false, syncDescriptions: raw?.syncDescriptions !== false, autoUpdateOffers: raw?.autoUpdateOffers !== false, autoFees: raw?.autoFees !== false, autoCorrections: raw?.autoCorrections !== false, ...sync, updated_at: raw?.updated_at || null };
+  const autonomousAgentMinutes = Math.min(120, Math.max(15, Number(raw?.autonomousAgentMinutes) || 15));
+  const autoResolveDuplicateMinScore = Math.min(100, Math.max(95, Number(raw?.autoResolveDuplicateMinScore) || 97));
+  return { defaultStock, republish: true, producers: producers.length ? producers : ALLEGRO_DEFAULT_PRODUCERS, autoCatalog: raw?.autoCatalog !== false, syncDescriptions: raw?.syncDescriptions !== false, autoUpdateOffers: raw?.autoUpdateOffers !== false, autoFees: raw?.autoFees !== false, autoCorrections: raw?.autoCorrections !== false, autonomousAgent: raw?.autonomousAgent !== false, autonomousAgentMinutes, autoResolveDuplicates: raw?.autoResolveDuplicates !== false, autoResolveDuplicateMinScore, ...sync, updated_at: raw?.updated_at || null };
 }
 async function allegroPobierzUstawieniaOfert() {
   return allegroUstawieniaOfert(await czytaj('allegro_offer_settings', { defaultStock: ALLEGRO_DEFAULT_OFFER_STOCK, republish: true, producers: ALLEGRO_DEFAULT_PRODUCERS, updated_at: null }));
@@ -4927,6 +4924,8 @@ export default async (req) => {
     if (inventoryResponse) return inventoryResponse;
     const withdrawalResponse = await allegroOfferWithdrawalRoute({ req, url, action });
     if (withdrawalResponse) return withdrawalResponse;
+    const aiBannerResponse = await aiBannerRoute(req, url, action);
+    if (aiBannerResponse) return aiBannerResponse;
     if (action === 'catalog-quality-audit') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -4975,6 +4974,26 @@ export default async (req) => {
         allegro: await allegroStatus(req),
         infakt: infaktPublicConfig(),
       });
+    }
+
+    // Kopia migracyjna: odczyt tylko dla administratora.
+    if (action === 'store-backup-manifest') {
+      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const entries = await repository.listKeys();
+      return odpowiedz({ ok: true, store: STORE_NAME, createdAt: new Date().toISOString(), entries });
+    }
+
+    if (action === 'store-backup-entry') {
+      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const key = String(url.searchParams.get('key') || '');
+      const expectedEtag = String(url.searchParams.get('etag') || '');
+      if (!BACKUP_KEY_PATTERN.test(key) || !expectedEtag) return odpowiedz({ ok: false, error: 'Nieprawidłowy klucz lub brak wersji kopii.', code: 'invalid_backup_request' }, 400);
+      const entry = await repository.readVersioned(key, null);
+      if (!entry.exists) return odpowiedz({ ok: false, error: 'Nie znaleziono wpisu kopii.', code: 'backup_entry_missing' }, 404);
+      if (String(entry.etag || '') !== expectedEtag) return odpowiedz({ ok: false, error: 'Dane zmieniły się podczas wykonywania kopii. Rozpocznij eksport ponownie.', code: 'backup_changed' }, 409);
+      return odpowiedz({ ok: true, key, etag: entry.etag, value: entry.value });
     }
 
     // ─── INFAKT: faktury, statusy asynchroniczne i dokumenty ───
@@ -6426,7 +6445,7 @@ export default async (req) => {
         if (oldProduct && String(oldProduct.allegroOfferId || '') === offerId) updater.apply(old.productId, { allegroMappingStatus: 'zmienione_ręcznie' }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
       }
       if (occupied.length && replaceExisting) for (const otherOfferId of occupied) items[otherOfferId] = { ...(items[otherOfferId] || {}), offerId: otherOfferId, previousProductId: productId, productId: '', blocked: true, operator: 'admin-replaced-by-other-offer', synced_at: now };
-      items[offerId] = { ...old, offerId, productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, synced_at: now, operator: force ? 'admin-force' : 'admin-validated', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, blocked: false, verifiedForSupplier: true, verification: force ? 'admin-force' : 'admin-validated', productSnapshot: mappingProductSnapshot(product, data) };
+      items[offerId] = { ...old, offerId, productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, synced_at: now, operator: force ? 'admin-force' : 'admin-validated', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, warnings: validation.warnings, blocked: false, verifiedForSupplier: true, verification: force ? 'admin-force' : 'admin-validated', productSnapshot: mappingProductSnapshot(product, data) };
       updater.apply(productId, { allegroOfferId: offerId, ...(offer.productId ? { allegroProductId: tekst(offer.productId, 120) } : {}), ...(offer.categoryId ? { allegroCategoryId: tekst(offer.categoryId, 80) } : {}), allegroMappingStatus: force ? 'zatwierdzone_ręcznie' : 'zweryfikowane', allegroSyncedAt: now, allegroSyncSource: 'admin-mapping' }, ['allegroMappingConflict']);
       const settingsChanged = updater.commit();
       await Promise.all([
@@ -6459,7 +6478,7 @@ export default async (req) => {
           const oldProduct = products.get(String(old.productId));
           if (oldProduct && String(oldProduct.allegroOfferId || '') === item.offerId) updater.apply(old.productId, { allegroMappingStatus: 'zmienione_automatycznie' }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
         }
-        mappings[item.offerId] = { ...old, offerId: item.offerId, productId: item.productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, synced_at: now, operator: 'admin-safe-batch', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, blocked: false, verifiedForSupplier: true, verification: 'admin-safe-batch', productSnapshot: mappingProductSnapshot(product, data) };
+        mappings[item.offerId] = { ...old, offerId: item.offerId, productId: item.productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, synced_at: now, operator: 'admin-safe-batch', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, warnings: validation.warnings, blocked: false, verifiedForSupplier: true, verification: 'admin-safe-batch', productSnapshot: mappingProductSnapshot(product, data) };
         updater.apply(item.productId, { allegroOfferId: item.offerId, ...(offer.productId ? { allegroProductId: tekst(offer.productId, 120) } : {}), ...(offer.categoryId ? { allegroCategoryId: tekst(offer.categoryId, 80) } : {}), allegroMappingStatus: 'zweryfikowane', allegroSyncedAt: now, allegroSyncSource: 'safe-batch-mapping' }, ['allegroMappingConflict']);
         occupied.set(item.productId, item.offerId);results.push({ ...item, ok: true, validation });
       }
@@ -6796,11 +6815,14 @@ export default async (req) => {
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
     if (action === 'pull' || action === 'store-data') {
       const admin = czyAdmin(req, url);
-      // Wejście administratora jest bezpiecznym punktem naprawczym również
-      // dla zamówień utworzonych przed wdrożeniem automatycznych szkiców.
-      const supplierDrafts = admin ? await storeOrderSupplierReconciliation.reconcileDraftsSafely() : null;
+      // Samo przechodzenie między kartami nie uruchamia ciężkich zapisów.
       const [s, importedPayload] = await Promise.all([czytaj('settings', { data: {}, rev: 0, updated_at: null }), productLinkImport.payload({ requestedRev: url.searchParams.get('catalogRev'), admin })]);
-      const res = { ok: true, settings: admin ? (s.data || {}) : ustawieniaPubliczneBezDanychPrywatnych(s.data || {}), rev: s.rev || 0, updated_at: s.updated_at || null };
+      const rev = Number(s.rev || 0), requestedSettingsRev = Number(url.searchParams.get('settingsRev'));
+      const settingsUnchanged = Number.isSafeInteger(requestedSettingsRev) && requestedSettingsRev > 0 && requestedSettingsRev === rev;
+      // Nie przesyłamy ponownie ciężkiego katalogu ani niezmienionych ustawień.
+      const sourceSettings = admin ? (s.data || {}) : ustawieniaPubliczneBezDanychPrywatnych(s.data || {});
+      const browserSettings = Object.fromEntries(Object.entries(sourceSettings).filter(([key]) => key !== 'artway_produkty_katalog'));
+      const res = { ok: true, ...(settingsUnchanged ? { settings_unchanged: true } : { settings: browserSettings }), rev, updated_at: s.updated_at || null };
       Object.assign(res, importedPayload);
       if (admin) {
         const o = await czytaj('orders', { items: [] });
@@ -6809,7 +6831,6 @@ export default async (req) => {
         res.deleted_orders = d;
         res.orders = filtrujNieusunieteZamowienia(o.items || [], d);
         res.users = u.items || [];
-        res.supplierDrafts = supplierDrafts;
       }
       return odpowiedz(res);
     }
@@ -6873,6 +6894,7 @@ export default async (req) => {
       const stored = await storeOrderSupplierReconciliation.saveOrder({ order: zam, deletedOrderNumbers: new Set(usuniete.keys()) });
       if (stored.deleted) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
       if (stored.duplicate) return odpowiedz({ ok: true, stored: false, duplicate: true, number: zam.nr });
+      if (zam.rabatKod) await zwiekszLicznikKoduRabatowego(zam.rabatKod).catch(() => false);
       let email = null;
       // Zamówienie jest już bezpiecznie zapisane. Chwilowa awaria katalogu
       // lub konflikt settings nie może cofnąć checkoutu klienta.

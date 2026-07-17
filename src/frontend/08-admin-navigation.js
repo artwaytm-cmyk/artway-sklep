@@ -2,13 +2,16 @@
    podzielone na zakładki. Stare adresy (#/admin/wyglad itd.) dalej działają
    i otwierają właściwą zakładkę.                                          */
 const TABY_PERSONALIZACJI = [
-  ["wyglad","🎨 Układ globalny"], ["rozmieszczenie","🧭 Rozmieszczenie"], ["bannery","🖼️ Banery"],
-  ["podstrony","🧱 Układ podstron"], ["strony","📄 Treści prawne"], ["dostawy","🚚 Dostawa i płatności"]
+  ["home","🏠 Strona główna"], ["wyglad","🎨 Układ globalny"], ["rozmieszczenie","🧭 Rozmieszczenie"], ["bannery","🖼️ Kreator bannerów"],
+  ["rabaty","🎁 Kody rabatowe","#/admin/asortyment/rabaty"], ["podstrony","🧱 Układ podstron"], ["strony","📄 Treści prawne"], ["dostawy","🚚 Dostawa i płatności"]
 ];
 function personalizacjaSzkielet(tab, tresc){
   return adminSzkielet("/admin/personalizacja", `
-    ${adminSubnavHTML(TABY_PERSONALIZACJI.map(([id,label])=>({id,href:`#/admin/personalizacja/${id}`,label})),tab)}
-    ${tresc}`);
+    <div class="module-page-stack personalization-workspace">
+      <header class="personalization-commandbar"><div><span class="order-pro-label">Projekt sklepu</span><b>Personalizacja wszystkich ekranów</b><small>Strona główna, układ globalny, bannery, podstrony i treści działają ze wspólnej konfiguracji.</small></div><div class="diag-actions"><span class="personalization-save-state">● Wspólna baza aktywna</span><a class="btn ghost" href="#/">👁️ Podgląd sklepu</a><a class="btn" href="#/admin/publikacja">🌐 Publikacja</a></div></header>
+      ${adminSubnavHTML(TABY_PERSONALIZACJI.map(([id,label,href])=>({id,href:href||`#/admin/personalizacja/${id}`,label})),tab)}
+      ${tresc}
+    </div>`);
 }
 /* Asortyment = produkty, katalogi, mapowanie i rabaty w JEDNYM dziale z zakładkami */
 const TABY_ASORTYMENTU = [

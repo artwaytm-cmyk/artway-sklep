@@ -198,10 +198,11 @@ function chmuraPominBrudneDaneSerwera(dane={}){
 async function chmuraWczytajStan(){
   chmuraOstatniPullZmienilDane=false;
   try{
-    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev}});
+    const lokalnaRewizja=Math.max(0,Number(wczytajLS("artway_chmura_rev",0))||0);
+    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
     chmuraOstatniPullZmienilDane=(await chmuraPobierzKatalogImportowany(d))||chmuraOstatniPullZmienilDane;
     chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
-    const revLok = Number(wczytajLS("artway_chmura_rev", 0))||0;
+    const revLok = lokalnaRewizja;
     const serwerNowszy = (d.rev||0) > revLok;
     // Klient (bez tokenu): serwer jest źródłem prawdy → zawsze nakładaj.
     // Admin (z tokenem): nakładaj TYLKO gdy serwer ma nowszą wersję niż ostatnio zsynchronizowana —
@@ -331,6 +332,24 @@ function zwolnijPamiecPodreczna({wymus=false}={}){
   return {przed,po:rozmiarLokalnejPamieci(),usunieto};
 }
 function wczytajLS(klucz, domyslne){ try{ return JSON.parse(localStorage.getItem(klucz)) ?? domyslne; }catch(e){ return domyslne; } }
+// Rewizja danych zasila lekki cache podstron administratora. Zmieniamy ją
+// wyłącznie dla danych biznesowych, nie dla kosmetycznych preferencji widoku.
+var adminRewizjaDanych = 0;
+var adminCachePodstron = new Map();
+const ADMIN_KLUCZE_WIDOKU = new Set([
+  "artway_admin_menu_otwarta_v2","artway_admin_menu_kompaktowe_v1",
+  "artway_produkty_na_stronie_admin","artway_produkty_gestosc_admin",
+  "artway_produkty_sortowanie_admin","artway_seo_na_stronie"
+]);
+function kluczZmieniaDaneAdmina(klucz=""){
+  if(ADMIN_KLUCZE_WIDOKU.has(klucz))return false;
+  return ["artway_ustawienia","artway_produkty","artway_zamowienia","artway_uzytkownicy","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn","artway_faktury","artway_agent","artway_producenci","artway_opinie","artway_kosz","artway_seo"].some(prefix=>String(klucz).startsWith(prefix));
+}
+function uniewaznijCachePodstronAdmina(){
+  adminRewizjaDanych++;
+  adminCachePodstron.clear();
+  if(typeof uniewaznijAdminMenuStatCache==="function")uniewaznijAdminMenuStatCache();
+}
 function zapiszLS(klucz, dane){
   if(klucz==="artway_zamowienia" && Array.isArray(dane)) dane = filtrujAktywneZamowienia(dane);
   const serial=JSON.stringify(dane);
@@ -344,6 +363,7 @@ function zapiszLS(klucz, dane){
     try{localStorage.setItem(klucz,serial);zmieniono=true;}
     catch(e2){zmieniono=false;loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
   }
+  if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina();
   if(zmieniono && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
   return zmieniono;
 }

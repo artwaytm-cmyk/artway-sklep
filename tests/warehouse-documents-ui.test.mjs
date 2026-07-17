@@ -17,13 +17,33 @@ test('Plan zawiera ręczne dokumenty PZ i WZ z jednym końcowym księgowaniem', 
 
 test('skanowanie działa aparatem telefonu oraz polem dla czytnika USB lub Bluetooth', () => {
   assert.match(source, /BarcodeDetector/);
+  assert.match(source, /BrowserMultiFormatReader/);
+  assert.match(source, /warehouseCameraQuantity/);
+  assert.match(source, /magazynDokumentKameraUstawIlosc/);
+  assert.match(source, /magazynDokumentKameraPodsumowanieHTML/);
+  assert.match(source, /value,quantity,true/);
+  assert.match(source, /PRZYJĘCIE NA STAN/);
+  assert.match(source, /EAN, GTIN, QR i Code 128/);
   assert.match(source, /navigator\.mediaDevices\.getUserMedia/);
   assert.match(source, /facingMode:\{ideal:"environment"\}/);
   assert.match(source, /Czytnik USB\/Bluetooth/);
   assert.match(source, /data-warehouse-scan-input/);
-  assert.match(source, /Aktywne miejsce/);
-  assert.match(source, /QR miejsca/);
+  assert.match(source, /ZATWIERDZONA PÓŁKA/);
+  assert.match(source, /QR półki/);
+  assert.match(source, /magazynGlobalnySkanerOtworz/);
+  assert.match(source, /kontrolowane zatwierdzanie/);
   assert.match(netlify, /Permissions-Policy = "camera=\(self\), microphone=\(\)/);
+});
+
+test('przyjęcie prowadzi operatora przez zatwierdzoną półkę, produkt i ilość', () => {
+  assert.match(source, /magazynDokumentSkanSesje/);
+  assert.match(source, /magazynDokumentPotwierdzLokalizacjeSkanu/);
+  assert.match(source, /magazynDokumentZatwierdzBiezacaPozycje/);
+  assert.match(source, /Poprzednia pozycja zatwierdzona automatycznie/);
+  assert.match(source, /Zatwierdź produkt i przejdź dalej/);
+  assert.match(source, /Najpierw zatwierdź bieżący zeskanowany produkt/);
+  assert.match(source, /BIEŻĄCY PRODUKT — JESZCZE NIEZAPISANY/);
+  assert.match(source, /Odrzuć odczyt/);
 });
 
 test('moduł i responsywne style są częścią budowanego panelu administratora', () => {

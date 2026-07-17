@@ -1,5 +1,13 @@
 /* ═══════════ KOSZYK ═══════════ */
 function ileWKoszyku(id){ return koszyk.filter(x=>x.id===id).reduce((s,x)=>s+x.ile,0); }
+function kontrolowanyStanDlaZakupu(id){
+  if(!Object.prototype.hasOwnProperty.call(stanyProduktow||{},id)||stanyProduktow[id]===null||stanyProduktow[id]==="")return null;
+  const n=Number(stanyProduktow[id]);return Number.isFinite(n)?Math.max(0,Math.floor(n)):null;
+}
+function wymagaPotwierdzeniaIlosci(id,ilosc){
+  const qty=Math.max(0,Number(ilosc)||0),stan=kontrolowanyStanDlaZakupu(id);
+  return qty>LIMIT_POTWIERDZENIA_DOSTEPNOSCI&&(stan===null||qty>stan);
+}
 function pozycjeDoPotwierdzeniaDostepnosci(){
   const mapa=new Map();
   for(const x of koszyk){
@@ -9,16 +17,17 @@ function pozycjeDoPotwierdzeniaDostepnosci(){
     if(x.wariant)rec.warianty.push(`${x.wariant} × ${x.ile}`);
     mapa.set(key,rec);
   }
-  return [...mapa.values()].filter(x=>x.ilosc>LIMIT_POTWIERDZENIA_DOSTEPNOSCI).map(x=>{
+  return [...mapa.values()].filter(x=>wymagaPotwierdzeniaIlosci(x.id,x.ilosc)).map(x=>{
     const p=produkty.find(p=>String(p.id)===String(x.id));
-    return {...x,nazwa:p?.nazwa||"Produkt",sku:p?.sku||""};
+    return {...x,nazwa:p?.nazwa||"Produkt",sku:p?.sku||"",stanMagazynowy:kontrolowanyStanDlaZakupu(x.id)};
   });
 }
 function potwierdzProgDostepnosci(id, nastepnaIlosc){
-  if(nastepnaIlosc<=LIMIT_POTWIERDZENIA_DOSTEPNOSCI) return true;
+  if(!wymagaPotwierdzeniaIlosci(id,nastepnaIlosc)) return true;
   const obecnie=ileWKoszyku(id);
-  if(obecnie>LIMIT_POTWIERDZENIA_DOSTEPNOSCI) return true;
-  return confirm(`Wybrano więcej niż ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} sztuk jednego produktu. Przy takiej ilości sklep potwierdzi aktualną dostępność przed realizacją. Kontynuować?`);
+  if(wymagaPotwierdzeniaIlosci(id,obecnie)) return true;
+  const stan=kontrolowanyStanDlaZakupu(id),opis=stan===null?`więcej niż ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} sztuk`:`${nastepnaIlosc} szt., przy aktualnym stanie ${stan} szt.`;
+  return confirm(`Wybrano ${opis}. Sklep potwierdzi brakującą ilość przed realizacją. Kontynuować?`);
 }
 function alertDostepnosciKoszykaHTML(){
   const lista=pozycjeDoPotwierdzeniaDostepnosci();
@@ -62,12 +71,31 @@ function usun(id){ koszyk = koszyk.filter(x=>x.id!==id); zapiszLS("artway_koszyk
 function sumaKoszyka(){
   return koszyk.reduce((s,x)=>{ const p=produkty.find(p=>p.id===x.id); return s+(p?p.cena*x.ile:0); },0);
 }
-function kwotaRabatu(){ return rabat ? sumaKoszyka()*rabat.procent/100 : 0; }
+function produktObjetyRegulaRabatowa(p,regula){
+  if(!p||!regula)return false;
+  if(regula.zakres==="kategorie")return (regula.kategorie||[]).includes(p.kategoria);
+  if(regula.zakres==="produkty")return (regula.produkty||[]).map(String).includes(String(p.id));
+  return true;
+}
+function wynikRegulyRabatowej(regula){
+  if(!regula)return {ok:false,powod:"Nieznany kod rabatowy",kwota:0,darmowaDostawa:false};
+  const status=regulaRabatowaStatus(regula);if(!status.aktywna)return {ok:false,powod:status.powod,kwota:0,darmowaDostawa:false};
+  const suma=sumaKoszyka(),minimum=Math.max(0,Number(regula.minKoszyk)||0);
+  if(suma<minimum)return {ok:false,powod:`Minimalna wartość koszyka dla tego kodu to ${zl(minimum)}`,kwota:0,darmowaDostawa:false};
+  const podstawa=koszyk.reduce((sum,x)=>{const p=produkty.find(p=>String(p.id)===String(x.id));return sum+(produktObjetyRegulaRabatowa(p,regula)?Number(p.cena||0)*Number(x.ile||0):0);},0);
+  if(!podstawa&&regula.typ!=="darmowa_dostawa")return {ok:false,powod:"Kod nie obejmuje produktów znajdujących się w koszyku",kwota:0,darmowaDostawa:false};
+  let kwota=regula.typ==="kwota"?Math.min(podstawa,Math.max(0,Number(regula.wartosc)||0)):regula.typ==="procent"?podstawa*Math.max(0,Math.min(100,Number(regula.wartosc)||0))/100:0;
+  const limit=Math.max(0,Number(regula.maxRabat)||0);if(limit)kwota=Math.min(kwota,limit);
+  return {ok:true,powod:"",kwota:+Math.max(0,kwota).toFixed(2),darmowaDostawa:regula.typ==="darmowa_dostawa",podstawa};
+}
+function aktywnaRegulaRabatowa(){return rabat?znajdzReguleRabatowa(rabat.kod):null;}
+function kwotaRabatu(){ const wynik=wynikRegulyRabatowej(aktywnaRegulaRabatowa());return wynik.ok?wynik.kwota:0; }
 function sumaPoRabacie(){ return Math.max(0, sumaKoszyka()-kwotaRabatu()); }
 function zastosujKod(){
   const kod = ($("promoInput")?.value||"").trim().toUpperCase();
-  if(KONFIG.kodyRabatowe[kod]){ rabat={kod, procent:KONFIG.kodyRabatowe[kod]}; zapiszLS("artway_rabat", rabat); toast(`Kod ${kod} aktywny: −${rabat.procent}% 🎉`); }
-  else { toast("Nieznany kod rabatowy 😕"); loguj("info","Próba użycia nieznanego kodu: "+kod); }
+  const regula=znajdzReguleRabatowa(kod),wynik=wynikRegulyRabatowej(regula);
+  if(wynik.ok){rabat={kod:regula.kod,typ:regula.typ,wartosc:Number(regula.wartosc)||0};zapiszLS("artway_rabat",rabat);toast(regula.typ==="darmowa_dostawa"?`Kod ${kod} aktywny: darmowa dostawa 🎉`:`Kod ${kod} aktywny: −${zl(wynik.kwota)} 🎉`);}
+  else { toast(`${wynik.powod||"Nieznany kod rabatowy"} 😕`); loguj("info","Nieudana próba użycia kodu "+kod+": "+(wynik.powod||"nieznany")); }
   odswiezKoszyk();
 }
 function usunRabat(){ rabat=null; zapiszLS("artway_rabat", null); odswiezKoszyk(); }
@@ -77,7 +105,9 @@ function odswiezKoszyk(){
   const suma = sumaPoRabacie();
   $("cartTotal").textContent = zl(suma);
   $("checkoutBtn").disabled = !n;
-  $("rabatBox").innerHTML = rabat ? `<div class="rabat-info"><span>🎁 Kod ${esc(rabat.kod)}: −${zl(kwotaRabatu())}</span><button onclick="usunRabat()">usuń</button></div>` : "";
+  const regulaRabatu=aktywnaRegulaRabatowa(),wynikRabatu=wynikRegulyRabatowej(regulaRabatu);
+  if(rabat&&!wynikRabatu.ok){rabat=null;zapiszLS("artway_rabat",null);}
+  $("rabatBox").innerHTML = rabat ? `<div class="rabat-info"><span>🎁 Kod ${esc(rabat.kod)}: ${wynikRabatu.darmowaDostawa?"darmowa dostawa":"−"+zl(wynikRabatu.kwota)}</span><button onclick="usunRabat()">usuń</button></div>` : "";
   $("freeShip").textContent = suma>=KONFIG.darmowaDostawaOd ? "🎉 Masz darmową dostawę!"
     : suma>0 ? `Do darmowej dostawy brakuje ${zl(KONFIG.darmowaDostawaOd-suma)}` : "";
   $("cartItems").innerHTML = n ? koszyk.map((x,i)=>{
@@ -100,6 +130,8 @@ function odswiezKoszyk(){
    Koszty przeliczają się na żywo przy zmianie opcji.             */
 function kosztDostawyDlaKwoty(idDostawy, kwotaProdukow=sumaPoRabacie()){
   const d = dostepneDostawy().find(x=>x.id===idDostawy) || dostepneDostawy()[0];
+  const wynik=wynikRegulyRabatowej(aktywnaRegulaRabatowa());
+  if(wynik.ok&&wynik.darmowaDostawa)return 0;
   if(d.koszt>0 && kwotaNum(kwotaProdukow)>=KONFIG.darmowaDostawaOd) return 0;
   return kwotaNum(d.koszt);
 }
@@ -341,7 +373,7 @@ function przeliczZamowienie(){
   $("orderSummary").innerHTML =
     koszyk.map(x=>{const p=produkty.find(p=>String(p.id)===String(x.id));
       return p?`<div><span>${esc(p.nazwa)}${x.wariant?` (${esc(x.wariant)})`:""} × ${x.ile}</span><span>${zl(p.cena*x.ile)}</span></div>`:"";}).join("")
-    + (rabat?`<div><span>Rabat (${esc(rabat.kod)})</span><span>−${zl(kwotaRabatu())}</span></div>`:"")
+    + (rabat?`<div><span>Kod (${esc(rabat.kod)})</span><span>${wynikRegulyRabatowej(aktywnaRegulaRabatowa()).darmowaDostawa?"Darmowa dostawa":"−"+zl(kwotaRabatu())}</span></div>`:"")
     + `<div><span>Dostawa</span><span>${dostawa?zl(dostawa):"GRATIS"}</span></div>`
     + (weekend?`<div><span>Paczka w Weekend</span><span>${zl(weekend)}</span></div>`:"")
     + (oplata?`<div><span>Opłata za pobranie</span><span>${zl(oplata)}</span></div>`:"")
@@ -518,7 +550,7 @@ async function zlozZamowienie(e){
 `NOWE ZAMÓWIENIE ${nr}
 ================================
 ${pozycje.map(p=>"- "+p).join("\n")}
-${rabat?`Rabat ${rabat.kod}: -${zl(kwotaRabatu())}\n`:""}Dostawa: ${dost.nazwa}${paczkomat} — ${dostawa?zl(dostawa):"gratis"}
+${rabat?`Kod ${rabat.kod}: ${wynikRegulyRabatowej(aktywnaRegulaRabatowa()).darmowaDostawa?"darmowa dostawa":"-"+zl(kwotaRabatu())}\n`:""}Dostawa: ${dost.nazwa}${paczkomat} — ${dostawa?zl(dostawa):"gratis"}
 ${paczkaWeekend?`Paczka w Weekend: ${zl(oplataWeekend)}\n`:""}
 ${oplata?`Opłata za pobranie: ${zl(oplata)}\n`:""}RAZEM: ${zl(razem)}
 ${potwierdzeniaDostepnosci.length?`UWAGA: potwierdzić dostępność większej ilości: ${potwierdzeniaDostepnosci.map(x=>`${x.nazwa} × ${x.ilosc}`).join(", ")}\n`:""}

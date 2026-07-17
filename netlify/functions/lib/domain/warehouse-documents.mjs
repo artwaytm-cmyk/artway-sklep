@@ -56,21 +56,46 @@ function nextDocumentNumber(data = {}, type = 'PZ', now = new Date()) {
 
 function productSnapshot(product = {}, data = {}) {
   const id = text(product.id ?? product.produktId, 160), meta = object(data?.artway_magazyn_produkty?.[id]);
+  const gtins = productGtinCandidates(product, data);
   return {
     productId: id,
     name: text(product.nazwa || product.name || `Produkt ${id}`, 300),
     sku: text(product.sku || product.SKU, 160),
     externalId: text(product.externalId || product.EXTERNAL_ID, 160),
-    ean: text(product.gtin || product.ean || product.GTIN || product.EAN || meta.kod, 40),
+    ean: text(gtins[0]?.raw || product.gtin || product.ean || product.GTIN || product.EAN || meta.kod, 40),
     producerCode: text(product.kodProducenta || product.mpn || meta.kodDostawcy, 160),
     location: text(meta.lokalizacja, 80).toUpperCase(),
     image: text(product.zdjecie || product.image, 1500),
   };
 }
 
+function rawIdentifierValues(value) {
+  if (Array.isArray(value)) return value.flatMap(rawIdentifierValues);
+  if (value && typeof value === 'object') return [value.value, value.label, value.name, value.code].flatMap(rawIdentifierValues);
+  return value === undefined || value === null ? [] : [value];
+}
+
+function productGtinCandidates(product = {}, data = {}) {
+  const id = text(product.id ?? product.produktId, 160), meta = object(data?.artway_magazyn_produkty?.[id]);
+  const values = [
+    product.canonicalGtins, product.gtins, product.canonicalGtin, product.gtin, product.ean,
+    product.GTIN, product.EAN, product.eans, product.ean13, product.kodEan,
+    product.barcode, product.barCode, product.kodKreskowy,
+    meta.canonicalGtins, meta.gtins, meta.gtin, meta.ean, meta.EAN, meta.ean13,
+    meta.kodEan, meta.barcode, meta.kodKreskowy, meta.kod,
+  ].flatMap(rawIdentifierValues);
+  const unique = new Map();
+  for (const value of values) {
+    const raw = text(value, 100).replace(/(?:[.,]0+)$/, '');
+    const canonical = canonicalGtin(raw);
+    if (canonical && !unique.has(canonical)) unique.set(canonical, { raw: raw.replace(/\D+/g, ''), canonical });
+  }
+  return [...unique.values()];
+}
+
 function productMatchesCode(product = {}, data = {}, code = '') {
-  const snapshot = productSnapshot(product, data), canonical = canonicalGtin(code);
-  if (canonical && canonicalGtin(snapshot.ean) === canonical) return 'EAN/GTIN';
+  const snapshot = productSnapshot(product, data), canonical = canonicalGtin(String(code).replace(/(?:[.,]0+)$/, ''));
+  if (canonical && productGtinCandidates(product, data).some((candidate) => candidate.canonical === canonical)) return 'EAN/GTIN';
   const wanted = identifierKey(code);
   if (!wanted) return '';
   const identifiers = [snapshot.productId, snapshot.externalId, snapshot.sku, snapshot.producerCode];

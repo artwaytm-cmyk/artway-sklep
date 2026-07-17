@@ -12,12 +12,12 @@ export function createAllegroDataReader({
     const needsOffers = ['all', 'summary', 'offers'].includes(scope);
     const needsMappings = ['all', 'summary', 'orders', 'offers'].includes(scope);
     const needsOfferDetails = ['all', 'offers', 'config'].includes(scope);
-    const [orders, offers, mappings, archiveSummary, offerSettings, status, offerLastError, offerDefaultsAudit, catalogMaintenance, offerSyncState, complianceAudit] = await Promise.all([
+    const [orders, offers, mappings, archiveSummary, offerSettings, status, autonomousAgent, offerLastError, offerDefaultsAudit, catalogMaintenance, offerSyncState, complianceAudit] = await Promise.all([
       needsOrders ? read('allegro_orders', { items: [], updated_at: null }) : { items: [], updated_at: null },
       needsOffers ? read('allegro_offers', { items: [], updated_at: null }) : { items: [], updated_at: null },
       needsMappings ? read('allegro_mappings', { items: {}, updated_at: null }) : { items: {}, updated_at: null },
       needsOrders ? archive.summary() : { total: 0, months: [], retentionDays: 30, updated_at: null },
-      getOfferSettings(), getStatus(request),
+      getOfferSettings(), getStatus(request), read('allegro_autonomous_agent_state', { enabled: true, status: 'waiting', completedAt: null, nextRunAt: null, mapping: {}, stats: {}, duplicateGroupsResolved: 0, duplicateOffersEnded: 0, reviewCount: 0 }),
       needsOfferDetails ? read('allegro_offer_last_error', null) : null,
       needsOfferDetails ? read('allegro_offer_defaults_audit', { items: {}, updated_at: null }) : null,
       needsOfferDetails ? read('allegro_catalog_maintenance', { cursor: 0, lastRun: null }) : null,
@@ -28,7 +28,7 @@ export function createAllegroDataReader({
     const statusCounts = orderList.reduce((out, order) => { const key = orderStatus(order); out[key] = (out[key] || 0) + 1; return out; }, {});
     const payload = {
       ok: true, scope,
-      allegro: { ...status, updated_at: orders.updated_at || offers.updated_at || status.updated_at || null },
+      allegro: { ...status, autonomousAgent, updated_at: orders.updated_at || offers.updated_at || status.updated_at || null },
       summary: {
         orders: { live: orderList.length, active: orderList.filter(orderNeedsRefresh).length, statusCounts, archived: Number(archiveSummary.total) || 0, retentionDays: 30, updated_at: orders.updated_at || null },
         offers: { count: offerList.length, mapped: Object.values(mappingsList).filter((entry) => entry?.productId && entry?.blocked !== true).length, updated_at: offers.updated_at || null },

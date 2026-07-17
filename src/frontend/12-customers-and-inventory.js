@@ -153,6 +153,7 @@ let gestoscAdminProduktow=["zwarta","wygodna"].includes(wczytajLS("artway_produk
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
 let frazaMagazynu="", filtrMagazynu="wszystkie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="decyzje";
+let szukajRuchowMagazynu="",filtrRuchowMagazynu="wszystkie",limitRuchowMagazynu=100;
 let magazynLokalizacjeZamowienIds=new Set();
 let magazynNaStronie=[25,50,100,200,500].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
 function ustawKafelkowyFiltrAsortymentu(typ="aktywne"){
@@ -550,6 +551,29 @@ function magazynEksportuj(zakres){
   const ids=zakres==="zaznaczone"?[...zaznaczoneMagazynProdukty]:magazynWynikiIds;
   eksportujMagazynCSV(ids,zakres==="zaznaczone"?"magazyn-zaznaczone.csv":"magazyn-filtrowany.csv");
 }
+function ruchMagazynuPasujeDoTypu(r={}){
+  const qty=Number(r.ilosc||0),typ=String(r.typ||"").toLowerCase();
+  if(filtrRuchowMagazynu==="przyjecia"&&qty<=0)return false;
+  if(filtrRuchowMagazynu==="rozchody"&&qty>=0)return false;
+  if(filtrRuchowMagazynu==="korekty"&&!typ.includes("korekt"))return false;
+  if(filtrRuchowMagazynu==="dokumenty"&&!String(r.dokument||"").trim())return false;
+  return true;
+}
+function ruchMagazynuTekst(r={}){return `${r.produktNazwa||""} ${r.sku||""} ${r.produktId||""} ${r.typ||""} ${r.powod||""} ${r.dokument||""}`.toLowerCase();}
+function ruchMagazynuPasujeDoFiltra(r={}){
+  if(!ruchMagazynuPasujeDoTypu(r))return false;
+  const q=String(szukajRuchowMagazynu||"").trim().toLowerCase();
+  return !q||ruchMagazynuTekst(r).includes(q);
+}
+function magazynSzukajRuchy(input){
+  szukajRuchowMagazynu=String(input?.value||"");const q=szukajRuchowMagazynu.trim().toLowerCase();let widoczne=0;
+  document.querySelectorAll("[data-warehouse-movement]").forEach(row=>{const show=!q||String(row.dataset.search||"").includes(q);row.hidden=!show;if(show)widoczne++;});
+  const count=document.querySelector("[data-warehouse-movement-count]");if(count)count.textContent=String(widoczne);
+}
+function magazynEksportujRuchyCSV(){
+  const rows=(ruchyMagazynowe||[]).filter(ruchMagazynuPasujeDoFiltra),header=["data","typ","produkt","sku_lub_id","ilosc","stan_przed","stan_po","dokument","powod"];
+  adminEksportujCSV(`ruchy-magazynowe-${new Date().toISOString().slice(0,10)}.csv`,header,rows.map(r=>[r.dataTxt||r.data||"",r.typ||"",r.produktNazwa||"",r.sku||r.produktId||"",r.ilosc??"",r.stanPrzed??"",r.stanPo??"",r.dokument||"",r.powod||""]));
+}
 function eksportujZatowarowanieCSV(){
   const plan=potrzebyZatowarowania();
   const rows=[["id","sku","nazwa","kategoria","dostawca","lokalizacja","stan","dostepne_po_rezerwacjach","sprzedaz_30_dni","min_stock","target_stock","lead_time_dni","sugerowana_ilosc","cena_brutto","szacowana_wartosc"].join(";")];
@@ -758,6 +782,19 @@ function widokAdminInfakt(sekcja="pulpit"){
   const content=aktywna==="zamowienia"?ordersPanel:aktywna==="faktury"?invoicesPanel:aktywna==="dostawcy"?costsPanel:aktywna==="szkice"?draftsPanel:aktywna==="ustawienia"?settingsPanel:`${missing.length?ordersPanel:""}${costsPanel}`;
   return adminSzkielet("/admin/infakt",hero+content);
 }
+function magazynKontekstPodstronyHTML(aktywna="pulpit",u={}){
+  const pages={
+    pulpit:{icon:"📊",eyebrow:"Centrum operacyjne magazynu",title:u.nazwa||"Magazyn główny",description:"Priorytety na dziś, braki do aktywnych zamówień, dostępność producentów i trasa kompletacji w jednym miejscu."},
+    dostawcy:{icon:"🏭",eyebrow:"Kontrola zaopatrzenia",title:"Dostępność u producentów",description:"Najpierw bestsellery i produkty z aktywnych zamówień. Każdy alarm prowadzi do jawnej decyzji sprzedażowej."},
+    stany:{icon:"📦",eyebrow:"Kontrola kartoteki",title:"Stany produktów",description:"Fizyczny zapas, rezerwacje, sprzedaż, lokalizacja i potrzeba domówienia bez mieszania odpowiedzialności działów."},
+    lokalizacje:{icon:"🗺️",eyebrow:"Struktura fizyczna",title:"Lokalizacje magazynowe",description:"Czytelna mapa obszarów, regałów i półek z prostymi nazwami oraz stałymi kodami systemowymi w tle."},
+    "etykiety-qr":{icon:"🏷️",eyebrow:"Oznaczenia i skanowanie",title:"Etykiety i kody QR",description:"Wybór, podgląd i druk oznaczeń lokalizacji oraz produktów przygotowanych do pracy telefonem lub czytnikiem."},
+    plan:{icon:"📥",eyebrow:"Zakupy i dokumenty",title:"Zatowarowanie oraz PZ/WZ",description:"Braki, zamówienia producentów, przyjęcia i rozchody prowadzone jako jeden kontrolowany proces z historią."},
+    ruchy:{icon:"🧾",eyebrow:"Audyt i konfiguracja",title:"Ruchy i ustawienia",description:"Historia zmian stanów, dokumenty źródłowe oraz bezpieczne wartości domyślne całego magazynu."}
+  },page=pages[aktywna]||pages.pulpit;
+  const actions=aktywna==="pulpit"?`<button class="btn" onclick="eksportujMagazynCSV()">📊 Eksport CSV</button><button class="btn ghost" onclick="agentAISprawdzDostepnoscProducentow()">🏭 Sprawdź producentów</button><a class="btn ghost" href="#/admin/agent-ai">🤖 Agent AI</a>`:aktywna==="dostawcy"?`<button class="btn" onclick="agentAISprawdzDostepnoscProducentow()">🤖 Uruchom kontrolę</button>`:aktywna==="stany"?`<button class="btn ghost" onclick="eksportujMagazynCSV()">📤 Eksport stanów</button>`:aktywna==="lokalizacje"?`<button class="btn" onclick="magazynOtworzKreatorLokalizacji('strefa')">＋ Nowy obszar</button>`:aktywna==="etykiety-qr"?`<a class="btn ghost" href="#/admin/magazyn/lokalizacje">🗺️ Mapa lokalizacji</a>`:aktywna==="plan"?`<button class="btn" onclick="agentAIUzgodnijPlanZSerwerem()">↻ Uzgodnij plan</button>`:`<a class="btn ghost" href="#/admin/magazyn/plan">📥 Otwórz PZ/WZ</a>`;
+  return `<header class="warehouse-page-context section-${esc(aktywna)}"><div class="warehouse-page-identity"><div class="warehouse-page-kicker"><span>${esc(page.icon)}</span><small>${esc(page.eyebrow)}</small></div><h1>${esc(page.title)}</h1><p>${esc(page.description)}</p></div><div class="warehouse-page-tools"><div class="warehouse-live-state"><i></i><span><b>Wspólna baza aktywna</b><small>Zapis na serwerze</small></span></div><div class="diag-actions">${actions}<button class="btn ghost" type="button" onclick="magazynGlobalnySkanerOtworz()">📷 Skaner</button></div></div></header>`;
+}
 function magazynPlanZatowarowaniaHTML(){
   return `<section class="panel restock-plan-intro"><div class="order-section-head"><div><span class="order-pro-label">Zakupy producentów + dokumenty magazynowe</span><h2>📦 Plan zatowarowania</h2><p class="order-detail-lead">Jedno centrum łączy braki do zamówień, dokumenty producentów oraz niezależne przyjęcia PZ i rozchody WZ. Skanowanie tworzy szkic; stan zmienia dopiero świadome zatwierdzenie całego dokumentu.</p></div><div class="diag-actions"><a class="btn ghost" href="#/admin/magazyn/etykiety-qr">🏷️ Etykiety QR</a><button class="btn" onclick="agentAIUzgodnijPlanZSerwerem()">↻ Uzgodnij szkice z brakami</button></div></div><div class="supplier-plan-guardrails"><span><b>1. Braki</b><small>aktywne zamówienia</small></span><span><b>2. Dokumenty</b><small>producent, PZ albo WZ</small></span><span><b>3. Lokalizacja</b><small>QR regału, półki lub miejsca</small></span><span><b>4. Produkty</b><small>aparat lub czytnik</small></span><span><b>5. Księgowanie</b><small>jedna operacja atomowa</small></span></div></section>${magazynDokumentyPanelHTML()}${magazynTabelaOperacyjnaHTML()}`;
 }
@@ -768,15 +805,25 @@ function odswiezPlanZatowarowaniaWidoku(){
   if(focusId){const nastepny=document.getElementById(focusId);if(nastepny){nastepny.focus({preventScroll:true});if(start!==null&&typeof nastepny.setSelectionRange==="function")nastepny.setSelectionRange(start,end??start);}}
   return true;
 }
+function magazynDostawcaWierszHTML({p={},i={},priority={},rank=0}={}){
+  const historia=Array.isArray(p.producentStanHistoria)?p.producentStanHistoria:[];
+  return `<tr data-product-row="${esc(p.id)}" class="supplier-row ${esc(i.cls||"")}">
+    <td><div class="allegro-offer-title-cell">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"🎲")}</span>`}<div><b>${esc(p.nazwa||"Produkt")}</b><small>SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small></div></div></td>
+    <td><div class="supplier-priority ${esc(priority?.level||"niski")}"><b>${priority?.score?`🏆 #${esc(rank||"—")} • ${esc(priority.level)}`:"— brak sprzedaży"}</b><small>Sklep ${esc(priority?.sklep||0)} • Allegro ${esc(priority?.allegro||0)} • aktywne ${esc(priority?.active||0)}</small><em>Główny kanał: ${esc(priority?.channel||"—")}</em></div></td>
+    <td><div class="supplier-source-state"><b>${esc(p.producent||p.marka||"Nieprzypisany")}</b>${producentDostepnoscBadgeHTML(p)}<small>Próg ostrzeżenia: ${esc(i.prog)} szt.</small><small class="supplier-source-url">${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">Otwórz źródło ↗</a><span>${esc(i.url)}</span>`:"Brak linku źródłowego"}</small></div></td>
+    <td>${decyzjaProducentaPanelHTML(p,i)}</td>
+    <td><div class="supplier-check-cell"><b>${i.checked?esc(allegroDataTxt(i.checked)):"Nigdy nie sprawdzano"}</b><div>${i.stale?`<span class="lvl lvl-ostrzezenie">wynik nieaktualny</span>`:`<span class="lvl lvl-ok">aktualny</span>`}${i.error?`<span class="lvl lvl-blad">${esc(skrocTekst(i.error,80))}</span>`:""}</div><details><summary>Historia kontroli (${historia.length})</summary><div class="supplier-history">${historia.map(h=>`<span class="${esc(h.status||"nieznany")}"><b>${h.quantity===null||h.quantity===undefined?"—":esc(h.quantity)+" szt."}</b><small>${esc(allegroDataTxt(h.at))}</small></span>`).join("")||`<small>Brak historii</small>`}</div></details></div></td>
+    <td><div class="warehouse-worktable-actions">${i.url?`<button class="btn" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź teraz</button>`:""}<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj produkt</a></div></td>
+  </tr>`;
+}
 function widokAdminMagazyn(sekcja="pulpit"){
   allegroLadujJesliTrzeba(["pulpit","stany","plan"].includes(sekcja)?"orders":"summary");
   const aktywna=["pulpit","dostawcy","stany","lokalizacje","etykiety-qr","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   const u=ustawieniaMagazynuPelne();
-  if(aktywna==="etykiety-qr")return adminSzkielet("/admin/magazyn",`${magazynSubnavHTML(aktywna)}${magazynQRCentrumHTML()}`);
+  if(aktywna==="etykiety-qr")return adminSzkielet("/admin/magazyn",`${magazynSubnavHTML(aktywna)}<div class="warehouse-workspace">${magazynKontekstPodstronyHTML(aktywna,u)}${magazynQRCentrumHTML()}</div>`);
   if(aktywna==="plan")return adminSzkielet("/admin/magazyn",`
     ${magazynSubnavHTML(aktywna)}
-    <div class="panel warehouse-hero-panel is-compact"><div class="warehouse-hero"><div><span class="cat-label">Magazyn i dokumenty</span><h1>🏬 ${esc(u.nazwa)}</h1><p>Plan obejmuje realne braki, zamówienia producentów oraz ręczne dokumenty przyjęcia PZ i rozchodu WZ.</p></div></div></div>
-    <div id="warehouseRestockWorkspace" class="warehouse-restock-workspace">${magazynPlanZatowarowaniaHTML()}</div>
+    <div class="warehouse-workspace">${magazynKontekstPodstronyHTML(aktywna,u)}<div id="warehouseRestockWorkspace" class="warehouse-restock-workspace">${magazynPlanZatowarowaniaHTML()}</div></div>
   `);
   const wymagaStanow=aktywna==="pulpit"||aktywna==="stany",rez=wymagaStanow?rezerwacjeMagazynowe():{},kanalySpr=wymagaStanow?sprzedazKanalyMagazynowe(30):{razem:{},sklep:{},allegro:{}},spr=kanalySpr.razem,prog=Math.max(0,Number(u.progNiski)||5);
   const wszystkie=aktywna==="ruchy"?[]:produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
@@ -823,24 +870,13 @@ function widokAdminMagazyn(sekcja="pulpit"){
     fragment=lista.slice((stronaMagazynu-1)*magazynNaStronie,stronaMagazynu*magazynNaStronie);
     magazynWynikiIds=lista.map(p=>p.id);magazynStronaIds=fragment.map(p=>p.id);
   }
+  const ruchyWszystkie=aktywna==="ruchy"?[...(ruchyMagazynowe||[])]:[],ruchyPoTypie=aktywna==="ruchy"?ruchyWszystkie.filter(ruchMagazynuPasujeDoTypu).slice(0,limitRuchowMagazynu):[],ruchyFiltrowane=aktywna==="ruchy"?ruchyPoTypie.filter(ruchMagazynuPasujeDoFiltra):[];
+  const ruchyPrzyjecia=aktywna==="ruchy"?ruchyWszystkie.filter(r=>Number(r.ilosc||0)>0).reduce((s,r)=>s+Number(r.ilosc||0),0):0,ruchyRozchody=aktywna==="ruchy"?Math.abs(ruchyWszystkie.filter(r=>Number(r.ilosc||0)<0).reduce((s,r)=>s+Number(r.ilosc||0),0)):0,ruchyDokumenty=aktywna==="ruchy"?new Set(ruchyWszystkie.map(r=>String(r.dokument||"").trim()).filter(Boolean)).size:0;
   return adminSzkielet("/admin/magazyn", `
   ${magazynSubnavHTML(aktywna)}
-  <div class="panel warehouse-hero-panel ${aktywna!=="pulpit"?"is-compact":""}">
-    <div class="warehouse-hero">
-      <div>
-        <span class="cat-label">Magazyn i dokumenty</span>
-        <h1>🏬 ${esc(u.nazwa)}</h1>
-        <p>Najpierw dostępność u producentów z linków źródłowych, potem braki do aktywnych zamówień. Stan lokalny pozostaje informacją pomocniczą.</p>
-      </div>
-      ${aktywna==="pulpit"?`<div class="diag-actions">
-        <button class="btn" onclick="eksportujMagazynCSV()">📊 Eksport magazynu CSV</button>
-        <button class="btn ghost" onclick="agentAISprawdzDostepnoscProducentow()">🏭 Sprawdź producentów</button>
-        <button class="btn ghost" onclick="eksportujZatowarowanieCSV()">📊 Prognoza wartościowa (admin)</button>
-        <a class="btn ghost" href="#/admin/agent-ai">🤖 Agent AI</a>
-        <a class="btn ghost" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a>
-      </div>`:""}
-    </div>
-    <div class="orders-stat-grid" style="${aktywna==="pulpit"?"":"display:none"}">
+  <div class="warehouse-workspace">
+  ${magazynKontekstPodstronyHTML(aktywna,u)}
+  ${aktywna==="pulpit"?`<section class="panel warehouse-dashboard-metrics"><div class="warehouse-section-title"><div><small>Sytuacja operacyjna</small><h2>Najważniejsze wskaźniki</h2></div><div class="diag-actions"><button class="btn ghost" onclick="eksportujZatowarowanieCSV()">📊 Prognoza wartościowa</button><a class="btn ghost" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a></div></div><nav class="warehouse-dashboard-flow" aria-label="Główny proces magazynowy"><a href="#/admin/magazyn/dostawcy"><span>1</span><div><b>Sprawdź dostawców</b><small>${supplierStats.braki.length+supplierStats.niskie.length} alarmów dostępności</small></div></a><a href="#/admin/magazyn/stany"><span>2</span><div><b>Zweryfikuj pokrycie</b><small>${nadrezerwacje.length} nadrezerwacji • ${zarezerwowane} szt. zarezerwowanych</small></div></a><a href="#/admin/magazyn/plan"><span>3</span><div><b>Zamów lub przyjmij</b><small>${planZakupu.length} pozycji do Planu</small></div></a><a href="#/admin/magazyn/lokalizacje"><span>4</span><div><b>Rozmieść i kompletuj</b><small>${lokalizacjeDoUstalenia.length} lokalizacji do ustalenia</small></div></a></nav><div class="orders-stat-grid">
       <button class="order-stat-card stat-filter money" type="button" onclick="location.hash='#/admin/magazyn/dostawcy';filtrProducentowMagazynu='dostepne'"><span>🏭</span><b>${supplierStats.dostepne.length}</b><small>dostępne u producentów</small></button>
       <button class="order-stat-card stat-filter ${supplierStats.niskie.length?"hot":""}" type="button" onclick="location.hash='#/admin/magazyn/dostawcy';filtrProducentowMagazynu='niski'"><span>🟡</span><b>${supplierStats.niskie.length}</b><small>niski stan u producenta ≤ ${esc(u.progNiskiProducenta)}</small></button>
       <button class="order-stat-card stat-filter ${supplierStats.braki.length?"hot":""}" type="button" onclick="location.hash='#/admin/magazyn/dostawcy';filtrProducentowMagazynu='brak'"><span>🔴</span><b>${supplierStats.braki.length}</b><small>brak u producenta</small></button>
@@ -852,8 +888,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
       <button class="order-stat-card stat-filter ${lokalizacjeDoUstalenia.length?"hot":""} ${filtrMagazynu==="lokalizacje-zamowien"?"active":""}" type="button" onclick="ustawFiltrMagazynu('lokalizacje-zamowien','priorytet')"><span>📍</span><b>${lokalizacjeDoUstalenia.length}</b><small>lokalizacje do ustalenia • nie blokują realizacji</small></button>
       <button class="order-stat-card stat-filter ${brakiDostawcyPlanu.length?"hot":""} ${filtrMagazynu==="bezdostawcy"?"active":""}" type="button" onclick="ustawFiltrMagazynu('bezdostawcy','zakup')"><span>🏭</span><b>${brakiDostawcyPlanu.length}</b><small>brak dostawcy w Planie</small></button>
       <button class="order-stat-card stat-filter ${pozaSlownikiem.length?"hot":""}" type="button" onclick="document.getElementById('warehouseLocationForm')?.scrollIntoView({behavior:'smooth',block:'center'})"><span>🗺️</span><b>${lokalizacje.length}</b><small>lokalizacji w słowniku</small></button>
-    </div>
-  </div>
+    </div></section>`:""}
   ${aktywna==="dostawcy"?`<div class="panel supplier-monitor-panel" data-stable-key="supplier-availability">
     <div class="order-section-head">
       <div><span class="order-pro-label">Priorytet bestsellerów</span><h2 style="margin-top:.25rem">🏭 Dostępność u producentów</h2><p class="order-detail-lead">Agent co 6 godzin zawsze zaczyna od najlepiej sprzedających się produktów w Allegro i sklepie oraz pozycji z aktywnych zamówień. Zajmują one do 75% każdej próbki; pozostałe miejsca są losowane spośród najdłużej niesprawdzanych produktów.</p></div>
@@ -861,7 +896,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
     </div>
     <div class="orders-stat-grid supplier-monitor-stats"><button class="order-stat-card ${supplierStats.wymagajaDecyzji.length?"hot":""}" onclick="filtrProducentowMagazynu='decyzje';odswiezMonitoringProducentow()"><span>🧭</span><b>${supplierStats.wymagajaDecyzji.length}</b><small>wymaga decyzji sprzedażowej</small></button><button class="order-stat-card money" onclick="filtrProducentowMagazynu='aktywne_decyzje';odswiezMonitoringProducentow()"><span>✅</span><b>${supplierStats.aktywneDecyzje.length}</b><small>aktywnych decyzji</small></button><button class="order-stat-card ${supplierStats.wygasleDecyzje.length?"hot":""}" onclick="filtrProducentowMagazynu='wygasle';odswiezMonitoringProducentow()"><span>⏰</span><b>${supplierStats.wygasleDecyzje.length}</b><small>wygasłych terminów</small></button><div class="order-stat-card money"><span>🏆</span><b>${bestselleryProducentow.length}</b><small>bestsellerów z linkiem</small></div><div class="order-stat-card ${bestselleryNieaktualne.length?"hot":""}"><span>⏱️</span><b>${bestselleryNieaktualne.length}</b><small>priorytetowych do kontroli</small></div><div class="order-stat-card ${supplierStats.niskie.length?"hot":""}"><span>🟡</span><b>${supplierStats.niskie.length}</b><small>niski stan ≤ ${esc(u.progNiskiProducenta)} szt.</small></div><div class="order-stat-card ${supplierStats.braki.length?"hot":""}"><span>🔴</span><b>${supplierStats.braki.length}</b><small>brak u producenta</small></div><div class="order-stat-card ${supplierStats.nieznane.length?"hot":""}"><span>⚪</span><b>${supplierStats.nieznane.length}</b><small>nieznane / starsze niż ${esc(u.producentMaxWiekGodz)} h</small></div><div class="order-stat-card"><span>🔗</span><b>${supplierStats.bezLinku.length}</b><small>bez linku źródłowego</small></div></div>
     ${adminWyszukiwaniePanelHTML({id:"supplier-availability",description:"Nazwa, SKU, EAN, producent, adres źródłowy i status decyzji sprzedażowej.",results:supplierRows.length,active:!!(supplierQuery||filtrProducentowMagazynu!=="decyzje"),open:true,fields:`<div class="supplier-monitor-toolbar"><input placeholder="Szukaj: nazwa, SKU, EAN, producent lub URL…" value="${esc(szukajProducentowMagazynu)}" oninput="szukajProducentowMagazynu=this.value;clearTimeout(window.__supplierSearch);window.__supplierSearch=setTimeout(()=>odswiezMonitoringProducentow(),180)"><select onchange="filtrProducentowMagazynu=this.value;odswiezMonitoringProducentow()">${[["decyzje","Wymagają decyzji"],["wygasle","Wygasłe decyzje"],["aktywne_decyzje","Aktywne decyzje"],["alerty","Wszystkie ostrzeżenia"],["bestsellery","Bestsellery sklepu i Allegro"],["wszystkie","Wszystkie z linkiem"],["niski","Niski stan"],["brak","Brak u producenta"],["nieznane","Niepotwierdzone / nieaktualne"],["dostepne","Dostępne"],["bez_linku","Bez linku źródłowego"]].map(([v,l])=>`<option value="${v}" ${filtrProducentowMagazynu===v?"selected":""}>${l}</option>`).join("")}</select><span><b>${supplierRows.length}</b> wyników</span></div>`,actions:adminOperacjeWynikowHTML({id:"supplier-availability",selected:zaznaczoneDostepnoscProducentow.size,pageCount:dostepnoscProducentowStronaIds.length,resultCount:supplierRows.length,selectPage:"ustawZaznaczenieDostepnosciProducentow('strona')",selectAll:supplierRows.length<=500?"ustawZaznaczenieDostepnosciProducentow('filtr')":"",clear:"wyczyscZaznaczenieDostepnosciProducentow()",extra:grupowaDecyzjaProducentaHTML()})})}
-    <div class="warehouse-worktable-wrap"><table class="log-table supplier-monitor-table"><tr><th>Produkt</th><th>Priorytet sprzedaży</th><th>Producent i link</th><th>Stan u producenta</th><th>Decyzja sprzedażowa</th><th>Ostatnia kontrola</th><th>Historia 5 kontroli</th><th>Akcje</th></tr>${supplierRows.slice(0,500).map(({p,i,priority,rank})=>`<tr data-product-row="${esc(p.id)}" class="supplier-row ${i.cls}"><td><div class="allegro-offer-title-cell">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"🎲")}</span>`}<div><b>${esc(p.nazwa||"Produkt")}</b><small>SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small></div></div></td><td><div class="supplier-priority ${esc(priority?.level||"niski")}"><b>${priority?.score?`🏆 #${esc(rank||"—")} • ${esc(priority.level)}`:"— brak sprzedaży"}</b><small>Sklep: ${esc(priority?.sklep||0)} • Allegro: ${esc(priority?.allegro||0)} • aktywne: ${esc(priority?.active||0)}</small><em>Główny kanał: ${esc(priority?.channel||"—")}</em></div></td><td><b>${esc(p.producent||p.marka||"Nieprzypisany")}</b><small class="supplier-source-url">${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">Otwórz źródło ↗</a><br>${esc(i.url)}`:"Brak linku źródłowego"}</small></td><td>${producentDostepnoscBadgeHTML(p)}<small>Próg ostrzeżenia: ${esc(i.prog)} szt.</small></td><td>${decyzjaProducentaPanelHTML(p,i)}</td><td><b>${i.checked?esc(allegroDataTxt(i.checked)):"Nigdy"}</b><br><small>${i.stale?`<span class="lvl lvl-ostrzezenie">wynik nieaktualny</span>`:`<span class="lvl lvl-ok">aktualny</span>`}${i.error?`<br>${esc(skrocTekst(i.error,180))}`:""}</small></td><td><div class="supplier-history">${(Array.isArray(p.producentStanHistoria)?p.producentStanHistoria:[]).map(h=>`<span class="${esc(h.status||"nieznany")}"><b>${h.quantity===null||h.quantity===undefined?"—":esc(h.quantity)+" szt."}</b><small>${esc(allegroDataTxt(h.at))}</small></span>`).join("")||`<small>Brak historii</small>`}</div></td><td><div class="warehouse-worktable-actions">${i.url?`<button class="btn" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź teraz</button>`:""}<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj produkt</a></div></td></tr>`).join("")||`<tr><td colspan="8">Brak produktów pasujących do filtra.</td></tr>`}</table></div>
+    <div class="warehouse-worktable-wrap"><table class="log-table supplier-monitor-table"><tr><th>Produkt i identyfikatory</th><th>Priorytet sprzedaży</th><th>Źródło i dostępność</th><th>Decyzja sprzedażowa</th><th>Kontrola i historia</th><th>Akcje</th></tr>${supplierRows.slice(0,500).map(magazynDostawcaWierszHTML).join("")||`<tr><td colspan="6">Brak produktów pasujących do filtra.</td></tr>`}</table></div>
     <div class="backend-note allegro-info-bottom"><b>Zasada decyzji:</b> brak lokalnego stanu nie wyłącza produktu ze sprzedaży. Alarm powstaje przede wszystkim wtedy, gdy producent zgłasza brak albo ujawniony stan spada do ${esc(u.progNiskiProducenta)} szt. lub mniej. Błąd pobrania nie jest traktowany jako brak — zostaje oznaczony do ponownej kontroli.</div>
   </div>`:""}
   ${aktywna==="pulpit"?`<div class="panel warehouse-ops-panel">
@@ -949,24 +984,16 @@ function widokAdminMagazyn(sekcja="pulpit"){
     </div>
     <div class="pagination">${paginacjaHTML(stronaMagazynu,liczbaStron,"ustawStroneMagazynu")}</div>
   </div>`:""}
-  ${aktywna==="ruchy"?`<div class="warehouse-columns">
-    <div class="panel">
-      <h2 style="margin-top:0">🧾 Historia ruchów</h2>
-      <p>Ostatnie korekty, przyjęcia i sprzedaże. Pełna historia synchronizuje się we wspólnej bazie.</p>
-      <div style="overflow-x:auto"><table class="log-table">
-        <tr><th>Data</th><th>Typ</th><th>Produkt</th><th>Ilość</th><th>Stan</th><th>Dokument</th></tr>
-        ${(ruchyMagazynowe||[]).slice(0,40).map(r=>`<tr>
-          <td>${esc(r.dataTxt||new Date(r.data).toLocaleString("pl-PL"))}</td>
-          <td><span class="lvl lvl-info">${esc(r.typ)}</span></td>
-          <td><b>${esc(r.produktNazwa)}</b><br><small>${esc(r.sku||r.produktId||"")}${r.powod?` • ${esc(r.powod)}`:""}</small></td>
-          <td><b>${Number(r.ilosc)>0?"+":""}${esc(r.ilosc)}</b></td>
-          <td>${r.stanPrzed===null?"∞":esc(r.stanPrzed)} → ${r.stanPo===null?"∞":esc(r.stanPo)}</td>
-          <td>${esc(r.dokument||"—")}</td>
-        </tr>`).join("") || `<tr><td colspan="6">Brak ruchów magazynowych.</td></tr>`}
-      </table></div>
-    </div>
-    <div class="panel">
-      <h2 style="margin-top:0">⚙️ Ustawienia magazynu</h2>
+  ${aktywna==="ruchy"?`<section class="warehouse-movements-overview" aria-label="Podsumowanie ruchów"><div class="warehouse-movement-stat"><span>📥</span><b>+${esc(ruchyPrzyjecia)}</b><small>szt. przyjętych w historii</small></div><div class="warehouse-movement-stat"><span>📤</span><b>−${esc(ruchyRozchody)}</b><small>szt. wydanych w historii</small></div><div class="warehouse-movement-stat"><span>📄</span><b>${esc(ruchyDokumenty)}</b><small>dokumentów źródłowych</small></div><div class="warehouse-movement-stat"><span>🔎</span><b data-warehouse-movement-count>${esc(ruchyFiltrowane.length)}</b><small>ruchów w bieżącym widoku</small></div></section><div class="warehouse-columns">
+    <section class="panel">
+      <div class="warehouse-section-title"><div><small>Pełny ślad audytowy</small><h2>Historia ruchów</h2></div><a class="btn ghost" href="#/admin/magazyn/plan">📄 Dokumenty PZ/WZ</a></div>
+      <p>Przyjęcia, rozchody i korekty są wyszukiwane bez przeładowywania danych produktowych. Filtr nie zmienia stanów.</p>
+      <div class="warehouse-movement-toolbar"><input placeholder="Produkt, SKU, ID, dokument lub powód…" value="${esc(szukajRuchowMagazynu)}" oninput="magazynSzukajRuchy(this)"><select onchange="filtrRuchowMagazynu=this.value;renderuj()">${[["wszystkie","Wszystkie ruchy"],["przyjecia","Tylko przyjęcia"],["rozchody","Tylko rozchody"],["korekty","Tylko korekty"],["dokumenty","Z dokumentem"]].map(([v,l])=>`<option value="${v}" ${filtrRuchowMagazynu===v?"selected":""}>${l}</option>`).join("")}</select><select onchange="limitRuchowMagazynu=Number(this.value)||100;renderuj()">${[50,100,250,500].map(n=>`<option value="${n}" ${limitRuchowMagazynu===n?"selected":""}>Pokaż ${n}</option>`).join("")}</select><button class="btn ghost" onclick="magazynEksportujRuchyCSV()">📤 Eksport CSV</button></div>
+      <div style="overflow-x:auto"><table class="log-table"><tr><th>Data</th><th>Operacja</th><th>Produkt i przyczyna</th><th>Ilość</th><th>Zmiana stanu</th><th>Dokument</th></tr>${ruchyPoTypie.map(r=>`<tr data-warehouse-movement data-search="${esc(ruchMagazynuTekst(r))}" ${ruchMagazynuPasujeDoFiltra(r)?"":"hidden"}><td>${esc(r.dataTxt||new Date(r.data).toLocaleString("pl-PL"))}</td><td><span class="lvl lvl-info">${esc(r.typ||"ruch")}</span></td><td><b>${esc(r.produktNazwa||"Produkt")}</b><br><small>${esc(r.sku||r.produktId||"")}${r.powod?` • ${esc(r.powod)}`:""}</small></td><td><b class="warehouse-movement-qty ${Number(r.ilosc)>0?"is-in":"is-out"}">${Number(r.ilosc)>0?"+":""}${esc(r.ilosc)}</b></td><td>${r.stanPrzed===null?"∞":esc(r.stanPrzed)} → ${r.stanPo===null?"∞":esc(r.stanPo)}</td><td>${esc(r.dokument||"—")}</td></tr>`).join("")||`<tr><td colspan="6">Brak ruchów pasujących do filtrów.</td></tr>`}</table></div>
+    </section>
+    <aside class="panel">
+      <div class="warehouse-section-title"><div><small>Konfiguracja globalna</small><h2>Ustawienia magazynu</h2></div></div>
+      <div class="warehouse-settings-note"><b>Zakres tej karty:</b> wartości domyślne dla nowych kartotek i monitoringu. Zmiana nie nadpisuje automatycznie istniejących produktów.</div>
       <form onsubmit="zapiszUstawieniaMagazynu(event)">
         <div class="f-group"><label>Nazwa magazynu</label><input name="nazwa" value="${esc(u.nazwa)}"></div>
         <div class="f-row"><div class="f-group"><label>Próg niskiego stanu</label><input name="progNiski" inputmode="numeric" value="${esc(prog)}"></div><div class="f-group"><label>Operator domyślny</label><input name="operator" value="${esc(u.domyslnyOperator)}"></div></div>
@@ -979,8 +1006,9 @@ function widokAdminMagazyn(sekcja="pulpit"){
         <div class="f-group"><label>Po ilu godzinach wynik uznać za nieaktualny</label><input name="producentMaxWiekGodz" type="number" min="1" value="${esc(u.producentMaxWiekGodz)}"></div>
         <button class="btn" type="submit">💾 Zapisz ustawienia</button>
       </form>
-    </div>
+    </aside>
   </div>`:""}
+  </div>
   `);
 }
 function widokAdminProdukty(){
@@ -1348,7 +1376,7 @@ function formularzProduktu(p, tryb){
       <details ${(p.allegroCategoryId||p.allegroProductId||p.allegroOfferId)?"open":""} style="margin-bottom:.8rem">
         <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🟠 Allegro — dane do wystawienia</summary>
         ${allegroOstatniWynikWystawienia?.produktId===String(p.id)?allegroWynikOperacjiHTML():""}
-        <div class="backend-note" style="margin-top:.7rem"><b>Status produktu:</b> ${allegroStatusProduktuHTML(p)}<br><small>Przy zapisie sklep sprawdza ID oferty, external.id/SKU, EAN i kod producenta. Istniejąca oferta zostanie zaktualizowana, a nie powielona.</small></div>
+        <div class="backend-note" style="margin-top:.7rem"><b>Status produktu:</b> ${allegroStatusProduktuHTML(p)}<br>${typeof asortymentStatusPrzygotowaniaHTML==="function"?asortymentStatusPrzygotowaniaHTML(p):""}<small>Agent zapisuje w kartotece poprawione opisy, identyfikatory, kategorię, katalog, parametry, zdjęcia i wynik walidacji. Istniejąca oferta zostanie zaktualizowana, a nie powielona.</small></div>
         <div class="f-row" style="margin-top:.7rem">
           <div class="f-group"><label>ID kategorii Allegro *</label><input name="allegroCategoryId" value="${esc(p.allegroCategoryId||"")}" placeholder="wymagane do wystawienia"></div>
           <div class="f-group"><label>ID produktu Allegro</label><input name="allegroProductId" value="${esc(p.allegroProductId||"")}" placeholder="opcjonalnie, jeśli znany"></div>
@@ -1364,8 +1392,8 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Publikacja oferty</label><select id="allegroPublicationAction"><option value="keep">Nowa: szkic / istniejąca: zachowaj status</option><option value="activate">Aktywuj po zapisie</option><option value="deactivate">Zapisz jako nieaktywną</option></select></div>
         </div>
         <div class="diag-actions">
-          ${edycja?`<button class="btn ghost" type="button" onclick="allegroPrzygotujSzkicProduktu(${jsArg(p.id)})">🧾 Sprawdź szkic Allegro</button>
-          <button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">${allegroOfertaDlaProduktuSklepu(p)?"🤖 Agent: aktualizuj ofertę Allegro":"🤖 Agent: dodaj ofertę Allegro"}</button>${ofertaAllegroId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(ofertaAllegroId)}" target="_blank" rel="noopener">↗ Otwórz istniejącą ofertę</a>`:""}`:`<span style="color:var(--muted2);font-size:.85rem">Najpierw zapisz produkt, potem utworzysz z niego szkic Allegro.</span>`}
+          ${edycja?`<button class="btn ghost" type="button" onclick="allegroPrzygotujSzkicProduktu(${jsArg(p.id)})">🤖 Przygotuj i zapisz dane do Allegro</button>
+          <button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">${allegroOfertaDlaProduktuSklepu(p)?"🟠 Przygotuj i zaktualizuj ofertę":"🟠 Przygotuj i wystaw produkt"}</button>${ofertaAllegroId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(ofertaAllegroId)}" target="_blank" rel="noopener">↗ Otwórz istniejącą ofertę</a>`:""}`:`<span style="color:var(--muted2);font-size:.85rem">Najpierw zapisz produkt, potem Agent przygotuje i trwale zapisze komplet danych Allegro.</span>`}
         </div>
         <div id="allegroDraftPreview"></div>
         <div id="allegroDescriptionPreview"></div>
@@ -1552,10 +1580,8 @@ async function automatyczniePobierzDaneZrodlaProduktu(p={}){
 async function allegroSynchronizujPowiazanyProduktPoZapisie(p,options={}){
   if(!p)return;
   try{
-    if(!options.skipSource)p=await automatyczniePobierzDaneZrodlaProduktu(p);
-    const draft=await chmura("allegro-offer-draft",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p)}},timeout:60000});
-    allegroZapiszAutoUzupelnienia(p,draft);
-    let prepared={...(pobierzProduktAdmin(Number(p.id))||p),...(draft.autoFilled||{}),allegroShippingSubsidy:(pobierzProduktAdmin(Number(p.id))||p).allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI};
+    const preparation=await asortymentPrzygotujProduktDoAllegro(p,{refreshSource:!options.skipSource}),draft=preparation.draft;
+    let prepared=preparation.product;
     const existing=allegroOfertaDlaProduktuSklepu(prepared)||draft.existingOffer?.offer||null;
     let updated=false;
     if(existing||draft.operation==="update"){
@@ -1566,8 +1592,8 @@ async function allegroSynchronizujPowiazanyProduktPoZapisie(p,options={}){
     const feeReady=kwotaNum(prepared.cenaAllegro||prepared.cena)>0&&!!(prepared.allegroOfferId||existing?.id||(prepared.allegroCategoryId&&(prepared.allegroProductId||prepared.gtin||prepared.ean)));
     let feesUpdated=false;if(options.forceFees!==false&&feeReady)feesUpdated=!!(await allegroPobierzProwizjeProduktu(prepared.id,null,{silent:true}).catch(()=>null));
     await chmuraZapiszUstawienia().catch(()=>false);
-    toast(updated?`✅ Produkt i oferta Allegro zaktualizowane${feesUpdated?" • prowizja odświeżona":" • prowizja wymaga ponownej próby"}`:`✅ Produkt uzupełniony: kategoria i opisy zapisane${feesUpdated?" • prowizja pobrana":""}`);
-    return {ok:true,updated,feesUpdated,draft};
+    toast(updated?`✅ Produkt i oferta Allegro zaktualizowane${feesUpdated?" • prowizja odświeżona":" • prowizja wymaga ponownej próby"}`:preparation.ready?`✅ Produkt przygotowany i zapisany: opisy, kategoria i dane Allegro${feesUpdated?" • prowizja pobrana":""}`:`⚠️ Agent zapisał poprawki; pozostały braki: ${preparation.missing.join(", ")}`);
+    return {ok:true,updated,feesUpdated,draft,preparation};
   }catch(e){allegroOstatniBladWystawienia=e;if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Automatyka produktu przekazała brak do Agenta AI: "+(e.message||e));return {ok:false,error:e};}
 }
 async function zapiszProduktAdmin(e,id){

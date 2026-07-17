@@ -541,6 +541,23 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
     });
   }
 
+  async function status() {
+    const version = await readVersioned(KEY, { items: [], updatedAt: null });
+    const record = asRecord(version.value), presence = workerPresence(record, now());
+    const counts = { queued: 0, processing: 0, delivering: 0, completed: 0, failed: 0 };
+    for (const item of record.items) {
+      const key = Object.hasOwn(counts, item?.status) ? item.status : '';
+      if (key) counts[key] += 1;
+    }
+    return {
+      workerOnline: presence.workerOnline,
+      workerLastSeenAt: presence.workerLastSeenAt,
+      counts,
+      active: counts.queued + counts.processing + counts.delivering,
+      updatedAt: clean(record.updatedAt, 40),
+    };
+  }
+
   async function result(idInput = '') {
     const id = clean(idInput, 160);
     if (!id) throw queueError('Brakuje identyfikatora zadania Codex.', 'codex_queue_job_required', 422);
@@ -559,6 +576,6 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
 
   return {
     ackFailureNotification, claim, claimFailureNotification, enqueue, fail, heartbeat,
-    markDelivered, prepareDelivery, result, retryFailureNotification,
+    markDelivered, prepareDelivery, result, retryFailureNotification, status,
   };
 }

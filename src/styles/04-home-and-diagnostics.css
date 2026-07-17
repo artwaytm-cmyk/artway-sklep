@@ -60,6 +60,10 @@
 .managed-banner h3{font-size:1rem;margin-bottom:.2rem}
 .managed-banner p{font-size:.8rem;color:var(--muted2);margin-bottom:.35rem}
 .managed-banner small{font-size:.78rem;color:var(--brand);font-weight:800}
+.managed-banner-badge{display:inline-flex;padding:.2rem .38rem;border-radius:6px;background:rgba(37,99,235,.12);color:var(--brand);font-size:.62rem;font-style:normal;font-weight:900;letter-spacing:.08em;margin-bottom:.28rem}
+.managed-banner.banner-szeroki{grid-column:span 2;min-height:150px}.managed-banner.banner-kompaktowy{min-height:92px;padding:.85rem}.managed-banner.banner-wyrozniony{border-width:2px;border-color:var(--brand)}.managed-banner.banner-informacyjny{background:linear-gradient(135deg,#ecfdf5,#f0fdf4)}.managed-banner.banner-minimalny{box-shadow:none;border-style:dashed}.managed-banner.align-srodek{text-align:center;justify-content:center}.managed-banner.audience-mobile{display:none}
+.home-department-picker{max-width:var(--content);margin:1rem auto 0;padding:1rem;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}.home-department-picker>span{display:block;font-size:.72rem;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:var(--muted2);margin-bottom:.65rem}.home-category-chips{display:flex;flex-wrap:wrap;gap:.55rem}
+@media(max-width:700px){.managed-banner.banner-szeroki{grid-column:span 1}.managed-banner.audience-desktop{display:none}.managed-banner.audience-mobile{display:flex}}
 
 /* ── Zaawansowane ustawienia układu ── */
 .header-in,.nav-row,.hero,.toolbar,.grid,.perks,.home-section,.catalog-head,.offer-band,.foot-in,.admin-page{max-width:var(--content)}

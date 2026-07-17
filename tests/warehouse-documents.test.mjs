@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { createWarehouseDocumentService } from '../netlify/functions/lib/domain/warehouse-documents.mjs';
 
 function harness({ stock = { '1': 5 } } = {}) {
-  let value = { data: { artway_stany: stock, artway_magazyn_ustawienia: { nazwa: 'Magazyn główny' }, artway_magazyn_produkty: { '1': { lokalizacja: 'R1-P1' } }, artway_ruchy_magazynowe: [] }, rev: 1, updated_at: null };
+  let value = { data: { artway_stany: stock, artway_magazyn_ustawienia: { nazwa: 'Magazyn główny' }, artway_magazyn_produkty: { '1': { lokalizacja: 'R1-P1' }, '4': { ean13: '5906018028256' } }, artway_ruchy_magazynowe: [] }, rev: 1, updated_at: null };
   let etag = 1;
   const products = [
     { id: 1, nazwa: 'Puzzle magnetyczne Farma', ean: '5906018026788', externalId: '2678', sku: 'FARMA-2678' },
     { id: 2, nazwa: 'Gra bez stanu', ean: '5906018003796', externalId: '379' },
+    { id: 3, nazwa: 'Origami Sukienka', gtins: ['5906018026542'], externalId: '2654' },
+    { id: 4, nazwa: 'Origami Arbuz', externalId: '2825' },
   ];
   const service = createWarehouseDocumentService({
     readVersioned: async () => ({ value: structuredClone(value), etag: String(etag), exists: true }),
@@ -32,6 +34,16 @@ test('PZ rozpoznaje EAN-13 także po skanie GTIN-14 z zerem i sumuje kolejne ska
   const second = await service.upsertLine({ documentId: created.document.id, expectedRevision: 2, scanCode: '5906018026788', quantity: 2, requestId: 'scan-2' }, 'admin@artway.pl');
   assert.equal(second.document.lines[0].quantity, 3);
   assert.equal(second.document.lines[0].scanCount, 2);
+});
+
+test('skaner korzysta także z tablic GTIN i EAN zapisanych w metadanych magazynu', async () => {
+  const { service } = harness();
+  const created = await service.create({ type: 'PZ' }, 'administrator');
+  const fromArray = await service.upsertLine({ documentId: created.document.id, expectedRevision: 1, scanCode: '5906018026542', quantity: 1, requestId: 'array-gtin' }, 'administrator');
+  assert.equal(fromArray.line.productId, '3');
+  const fromMeta = await service.upsertLine({ documentId: created.document.id, expectedRevision: 2, scanCode: '5906018028256', quantity: 1, requestId: 'meta-ean' }, 'administrator');
+  assert.equal(fromMeta.line.productId, '4');
+  assert.equal(fromMeta.line.matchedBy, 'EAN/GTIN');
 });
 
 test('zatwierdzenie całego PZ atomowo zwiększa stan i zapisuje ruch z numerem dokumentu', async () => {
