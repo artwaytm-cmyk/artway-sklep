@@ -1,7 +1,12 @@
 import { getStore } from '@netlify/blobs';
+import { createPostgresStoreRepository } from './postgres-store-repository.mjs';
 
-export function createStoreRepository({ name, consistency = 'strong' }) {
+export function createStoreRepository({ name, consistency = 'strong', driver = process.env.ARTWAY_STORE_DRIVER } = {}) {
   if (!name) throw new Error('Nazwa magazynu danych jest wymagana.');
+
+  if (String(driver || '').trim().toLowerCase() === 'postgres') {
+    return createPostgresStoreRepository({ name });
+  }
 
   const store = () => getStore({ name, consistency });
 
@@ -26,6 +31,10 @@ export function createStoreRepository({ name, consistency = 'strong' }) {
       const options = version.exists === false ? { onlyIfNew: true } : { onlyIfMatch: String(version.etag || '') };
       if (version.exists !== false && !options.onlyIfMatch) return { modified: false };
       return store().setJSON(key, value, options);
+    },
+    async listKeys() {
+      const result = await store().list();
+      return (result?.blobs || []).map((entry) => ({ key: entry.key, etag: entry.etag || '' })).sort((a, b) => a.key.localeCompare(b.key));
     },
   });
 }

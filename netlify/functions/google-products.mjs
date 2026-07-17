@@ -1,7 +1,8 @@
-import { getStore } from '@netlify/blobs';
+import { createStoreRepository } from './lib/core/store-repository.mjs';
 import { mergeCatalogProducts } from './lib/domain/catalog-quality.mjs';
 
 const origin = 'https://artwaytm.pl';
+const repository = createStoreRepository({ name: 'artway-sklep' });
 const xml = (value) => String(value ?? '').replace(/[<>&'\"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
 const plain = (value, max = 5000) => String(value ?? '')
   .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -51,7 +52,7 @@ function productIsUnavailable(product, availability = {}) {
 export default async () => {
   let settings = { data: {}, updated_at: null };
   try {
-    settings = await getStore({ name: 'artway-sklep', consistency: 'strong' }).get('settings', { type: 'json' }) || settings;
+    settings = await repository.read('settings', settings);
   } catch (error) { /* pusty feed nadal pozostaje prawidłowym dokumentem XML */ }
 
   const data = settings.data && typeof settings.data === 'object' ? settings.data : {};
