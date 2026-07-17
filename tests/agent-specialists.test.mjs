@@ -23,8 +23,8 @@ function openAiPayload(fields = []) {
   return { model: 'gpt-5-nano-2025-08-07', usage: { input_tokens: 300, output_tokens: 180, total_tokens: 480 }, output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(result) }] }] };
 }
 
-test('zespół zawiera konkretne role do treści, promocji i komunikacji', () => {
-  assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'allegro_offer', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality']);
+test('zespół zawiera konkretne role do treści, promocji, komunikacji i nadzoru', () => {
+  assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'allegro_offer', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality', 'operations_supervisor']);
   assert.match(SPECIALISTS.allegro_offer.rules, /poza Allegro/i);
   assert.match(SPECIALISTS.supplier_message.rules, /cen/i);
 });
@@ -73,16 +73,47 @@ test('zatwierdzenie szkicu zapisuje wyłącznie dozwolone pola produktu i jest i
   assert.equal(product.agentTextModel, 'gpt-5-nano-2025-08-07');
 });
 
-test('automatyczny cykl przygotowuje szkic brakującej treści, lecz go nie publikuje', async () => {
+test('automatyczny cykl uzupełnia wyłącznie puste pola przy wysokiej pewności', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 99, nazwa: 'Nowa gra', producent: 'Alexander', opis: '', opisKrotki: '' }] }, rev: 1 } });
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload([{ key: 'short_description', label: 'Opis krótki', value: 'Szkic.' }])), { status: 200, headers: { 'content-type': 'application/json' } }) });
   const cycle = await service.automaticCycle();
   assert.equal(cycle.prepared.length, 1);
-  assert.equal(cycle.prepared[0].status, 'prepared');
-  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opisKrotki, '');
+  assert.equal(cycle.prepared[0].status, 'auto_applied');
+  assert.equal(cycle.applied.length, 1);
+  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opisKrotki, 'Szkic.');
+  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].nazwa, 'Nowa gra');
   const status = await service.status();
-  assert.equal(status.history[0].approvalStatus, 'draft');
+  assert.equal(status.history[0].approvalStatus, 'auto_applied');
   assert.equal(status.history[0].source, 'automatic');
+  assert.equal(status.policy.cycleMinutes, 15);
+  assert.match(status.policy.neverAutomatic.join(' '), /wysyłanie wiadomości/);
+});
+
+test('nowa wiadomość tworzy szkic i decyzję, lecz nie jest wysyłana automatycznie', async () => {
+  const repo = memoryRepository({
+    settings: { data: {}, rev: 1 },
+    allegro_communications: { threads: [{ id: 't-1', subject: 'Paczka', needsReply: true, humanReplyNeeded: true, newIncomingCount: 1, latestNewIncomingKey: 'm-1', messages: [{ id: 'm-1', authorRole: 'BUYER', text: 'Gdzie jest paczka?', createdAt: '2026-07-17T11:50:00.000Z' }] }], issues: [], updated_at: '2026-07-17T11:55:00.000Z' },
+  });
+  const replyPayload = openAiPayload([{ key: 'reply', label: 'Odpowiedź', value: 'Dziękujemy za wiadomość. Sprawdzamy potwierdzony status przesyłki.' }]);
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(replyPayload), { status: 200, headers: { 'content-type': 'application/json' } }) });
+  const cycle = await service.automaticCycle();
+  assert.equal(cycle.prepared[0].type, 'communication');
+  const status = await service.status();
+  assert.equal(status.decisions.length, 1);
+  assert.equal(status.decisions[0].kind, 'customer_reply');
+  assert.equal(status.decisions[0].risk, 'high');
+  assert.equal(status.history[0].approvalStatus, 'draft');
+  assert.equal(repo.values.has('allegro_communications'), true);
+});
+
+test('decyzję można odłożyć i nie wraca ona do otwartych przed terminem', async () => {
+  const repo = memoryRepository({
+    agent_specialists_state: { config: {}, history: [], decisions: [{ id: 'd-1', fingerprint: 'fp-1', kind: 'catalog_identity', status: 'open', risk: 'medium', title: 'Brak EAN', target: { type: 'product', productId: '1' }, createdAt: '2026-07-17T10:00:00.000Z', updatedAt: '2026-07-17T10:00:00.000Z' }] },
+  });
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response('{}', { status: 500 }) });
+  const decision = await service.updateDecision('d-1', 'snooze', { days: 2 }, { email: 'admin@example.com' });
+  assert.equal(decision.status, 'snoozed');
+  assert.equal((await service.status()).decisions.length, 0);
 });
 
 test('trasa wymaga administratora i nigdy nie deklaruje automatycznej publikacji', async () => {

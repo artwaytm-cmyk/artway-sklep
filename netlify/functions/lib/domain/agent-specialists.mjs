@@ -2,15 +2,22 @@ import crypto from 'node:crypto';
 
 const STATE_KEY = 'agent_specialists_state';
 const MAX_HISTORY = 240;
+const MAX_DECISIONS = 240;
 const MAX_WRITE_ATTEMPTS = 8;
 const DEFAULT_CONFIG = Object.freeze({
   enabled: true,
   automaticEnabled: true,
   dailyLimit: 60,
-  automaticDailyLimit: 10,
-  automaticBatchSize: 2,
+  automaticDailyLimit: 30,
+  automaticBatchSize: 4,
   cacheHours: 24,
+  safeAutoApply: true,
+  confidenceThreshold: 0.92,
+  decisionRetentionDays: 30,
 });
+
+const PROMPT_VERSION = '2026-07-17.1';
+const NEVER_AUTOMATIC = Object.freeze(['wysyłanie wiadomości', 'publikacja Allegro', 'zmiana ceny', 'zmiana stanu', 'usuwanie', 'zamówienie u producenta']);
 
 const SPECIALISTS = Object.freeze({
   product_content: {
@@ -60,6 +67,12 @@ const SPECIALISTS = Object.freeze({
     description: 'Wykrywa sprzeczności, duplikaty tekstu, braki i ryzykowne sformułowania, nie zapisując zmian samodzielnie.',
     fields: ['assessment', 'recommended_changes', 'compliance_notes'],
     rules: 'Oddziel błędy pewne od podejrzeń. Nie oznaczaj duplikatu bez jednoznacznych identyfikatorów lub bardzo mocnych dowodów.',
+  },
+  operations_supervisor: {
+    icon: '🧭', label: 'Koordynator operacyjny', area: 'Nadzór sklepu',
+    description: 'Porządkuje wykryte ryzyka, wskazuje jedną rekomendację i czytelne warianty decyzji administratora.',
+    fields: ['priority', 'problem', 'recommended_action', 'alternative_action', 'decision_question'],
+    rules: 'Nie wykonuj działań zewnętrznych. Podaj jedno zalecenie, jedno bezpieczne rozwiązanie alternatywne i jasno wskaż, co wymaga zatwierdzenia.',
   },
 });
 
@@ -112,6 +125,9 @@ function config(value = {}) {
     automaticDailyLimit: number(source.automaticDailyLimit, DEFAULT_CONFIG.automaticDailyLimit, 0, 100),
     automaticBatchSize: number(source.automaticBatchSize, DEFAULT_CONFIG.automaticBatchSize, 1, 5),
     cacheHours: number(source.cacheHours, DEFAULT_CONFIG.cacheHours, 1, 168),
+    safeAutoApply: source.safeAutoApply !== false,
+    confidenceThreshold: number(source.confidenceThreshold, DEFAULT_CONFIG.confidenceThreshold, 0.75, 1),
+    decisionRetentionDays: number(source.decisionRetentionDays, DEFAULT_CONFIG.decisionRetentionDays, 7, 90),
   };
 }
 
@@ -144,8 +160,37 @@ function state(value = {}) {
   return {
     config: config(source.config),
     history: (Array.isArray(source.history) ? source.history : []).slice(0, MAX_HISTORY),
+    decisions: (Array.isArray(source.decisions) ? source.decisions : []).slice(0, MAX_DECISIONS),
+    lastCycle: source.lastCycle && typeof source.lastCycle === 'object' ? source.lastCycle : null,
     updatedAt: clean(source.updatedAt, 40),
   };
+}
+
+function decisionFingerprint(kind = '', target = {}) {
+  return crypto.createHash('sha256').update(JSON.stringify({ kind, target })).digest('hex');
+}
+
+function normalizeDecision(raw = {}, timestamp = new Date().toISOString()) {
+  const status = ['open', 'approved', 'dismissed', 'snoozed', 'resolved'].includes(raw.status) ? raw.status : 'open';
+  const risk = ['low', 'medium', 'high'].includes(raw.risk) ? raw.risk : 'medium';
+  const alternatives = (Array.isArray(raw.alternatives) ? raw.alternatives : []).map((item) => clean(item, 240)).filter(Boolean).slice(0, 5);
+  return {
+    id: clean(raw.id, 120) || `decision_${crypto.randomUUID()}`,
+    fingerprint: clean(raw.fingerprint, 100) || decisionFingerprint(raw.kind, raw.target),
+    kind: clean(raw.kind, 80), specialist: clean(raw.specialist, 80), icon: clean(raw.icon, 12) || '🧭',
+    title: clean(raw.title, 180), summary: clean(raw.summary, 700), recommendation: clean(raw.recommendation, 700), alternatives,
+    risk, status, requiresApproval: raw.requiresApproval !== false, target: sanitizeContext(raw.target || {}),
+    href: clean(raw.href, 300), runId: clean(raw.runId, 120), createdAt: clean(raw.createdAt, 40) || timestamp,
+    updatedAt: clean(raw.updatedAt, 40) || timestamp, snoozedUntil: clean(raw.snoozedUntil, 40),
+    resolvedAt: clean(raw.resolvedAt, 40), resolvedBy: clean(raw.resolvedBy, 120), resolutionNote: clean(raw.resolutionNote, 500),
+  };
+}
+
+function activeDecision(item = {}, at = new Date()) {
+  if (item.status === 'open') return true;
+  if (item.status !== 'snoozed') return false;
+  const until = Date.parse(item.snoozedUntil || '');
+  return !Number.isFinite(until) || until <= at.getTime();
 }
 
 function outputText(payload = {}) {
@@ -214,6 +259,48 @@ function productPatch(result = {}) {
   return patch;
 }
 
+function valuePresent(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value && typeof value === 'object') return Object.keys(value).length > 0;
+  return clean(value, 50_000).length > 0;
+}
+
+function productFieldValue(product = {}, key = '') {
+  const aliases = {
+    nazwa: ['nazwa', 'name'], opisKrotki: ['opisKrotki', 'krotkiOpis'], opis: ['opis'], seoTitle: ['seoTitle'], seoDescription: ['seoDescription'], seoKeywords: ['seoKeywords'],
+    allegroTitle: ['allegroTitle'], allegroDescription: ['allegroDescription'],
+  };
+  return (aliases[key] || [key]).map((name) => product?.[name]).find(valuePresent);
+}
+
+function missingOnlyPatch(product = {}, patch = {}) {
+  return Object.fromEntries(Object.entries(patch).filter(([key, value]) => valuePresent(value) && !valuePresent(productFieldValue(product, key))));
+}
+
+function catalogProducts(data = {}) {
+  const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? data.artway_produkty_edytowane : {};
+  const hidden = new Set([...(data.artway_produkty_definitywne || []), ...(data.artway_produkty_ukryte || [])].map(String));
+  const unique = new Map();
+  for (const product of [...(Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []), ...(Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : [])]) {
+    if (product?.id === undefined || hidden.has(String(product.id))) continue;
+    unique.set(String(product.id), { ...product, ...(edits[String(product.id)] || {}) });
+  }
+  return [...unique.values()];
+}
+
+function communicationNeedsReply(item = {}) {
+  const resolved = item?.internalResolved === true || item?.internalResolution?.resolved === true;
+  return !resolved && !item?.cachedOlder && !!(item?.needsReply || item?.humanReplyNeeded || Number(item?.newIncomingCount || 0) > 0);
+}
+
+function communicationFacts(item = {}, type = 'thread') {
+  const messages = (Array.isArray(item.messages) ? item.messages : [item.lastMessage].filter(Boolean)).slice(-30).map((message) => ({
+    author: clean(message?.authorRole || message?.author?.role || message?.authorLogin || message?.author || 'uczestnik', 80),
+    text: clean(message?.text || message?.content || '', 4000), createdAt: clean(message?.createdAt || message?.date || '', 40),
+  }));
+  return sanitizeContext({ type, subject: item.subject || item.topic, orderId: item.orderId || item.checkoutFormId, status: item.status, chatActive: item.chatActive, messages });
+}
+
 export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY, model = process.env.OPENAI_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-5-nano', now = () => new Date() } = {}) {
   if (typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function') throw new Error('Specjaliści GPT wymagają wersjonowanego repozytorium.');
   if (typeof fetchImpl !== 'function') throw new Error('Specjaliści GPT wymagają klienta HTTP.');
@@ -246,18 +333,59 @@ export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImp
     });
   }
 
+  async function upsertDecision(raw = {}) {
+    const timestamp = now().toISOString(), proposed = normalizeDecision(raw, timestamp);
+    const next = await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
+      const previous = state(value), existing = previous.decisions.find((item) => item?.fingerprint === proposed.fingerprint);
+      const keepClosed = existing && ['approved', 'dismissed', 'resolved'].includes(existing.status);
+      const decision = keepClosed ? existing : normalizeDecision({ ...existing, ...proposed, id: existing?.id || proposed.id, createdAt: existing?.createdAt || proposed.createdAt, status: existing?.status === 'snoozed' ? 'snoozed' : proposed.status }, timestamp);
+      return { ...previous, decisions: [decision, ...previous.decisions.filter((item) => item?.id !== decision.id)].slice(0, MAX_DECISIONS), updatedAt: timestamp };
+    });
+    return next.decisions.find((item) => item.fingerprint === proposed.fingerprint) || proposed;
+  }
+
+  async function updateDecision(id = '', action = '', raw = {}, actor = {}) {
+    const safeId = clean(id, 120), safeAction = clean(action, 40), timestamp = now().toISOString(), who = clean(actor?.email || actor?.name || actor?.source || 'administrator', 120);
+    const previous = await readState(), decision = previous.decisions.find((item) => item?.id === safeId);
+    if (!decision) throw Object.assign(new Error('Nie znaleziono decyzji Agenta.'), { code: 'agent_decision_not_found', status: 404 });
+    if (safeAction === 'approve' && decision.runId && decision.target?.type === 'product') {
+      await applyProductDraft(decision.runId, actor, { missingOnly: true });
+    }
+    const statusByAction = { approve: 'approved', dismiss: 'dismissed', resolve: 'resolved', snooze: 'snoozed', reopen: 'open' };
+    if (!statusByAction[safeAction]) throw Object.assign(new Error('Nieobsługiwana decyzja Agenta.'), { code: 'agent_decision_action_invalid', status: 422 });
+    const days = number(raw.days, 1, 1, 14), patch = {
+      status: statusByAction[safeAction], updatedAt: timestamp, resolvedAt: safeAction === 'snooze' || safeAction === 'reopen' ? '' : timestamp,
+      resolvedBy: safeAction === 'snooze' || safeAction === 'reopen' ? '' : who, resolutionNote: clean(raw.note, 500),
+      snoozedUntil: safeAction === 'snooze' ? new Date(now().getTime() + days * 24 * 60 * 60_000).toISOString() : '',
+    };
+    const next = await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
+      const current = state(value);
+      return { ...current, decisions: current.decisions.map((item) => item?.id === safeId ? normalizeDecision({ ...item, ...patch }, timestamp) : item), updatedAt: timestamp };
+    });
+    return next.decisions.find((item) => item?.id === safeId);
+  }
+
   async function status() {
     const current = await readState(), today = day(now()), todayRuns = current.history.filter((item) => String(item?.createdAt || '').startsWith(today));
+    const decisions = current.decisions.map((item) => item.status === 'snoozed' && activeDecision(item, now()) ? { ...item, status: 'open', snoozedUntil: '' } : item);
     return {
       configured: !!clean(apiKey, 500), model: clean(model, 80), config: current.config,
-      specialists: Object.entries(SPECIALISTS).map(([id, value]) => ({ id, ...value })),
+      promptVersion: PROMPT_VERSION,
+      policy: { mode: 'server_owned_code_first', cycleMinutes: 15, safeAutoApply: current.config.safeAutoApply, neverAutomatic: NEVER_AUTOMATIC },
+      specialists: Object.entries(SPECIALISTS).map(([id, value]) => ({ id, ...value, promptVersion: PROMPT_VERSION, deployment: 'server' })),
       usage: {
         today: todayRuns.length,
         automaticToday: todayRuns.filter((item) => item.source === 'automatic').length,
         inputTokens: todayRuns.reduce((sum, item) => sum + Number(item?.usage?.inputTokens || 0), 0),
         outputTokens: todayRuns.reduce((sum, item) => sum + Number(item?.usage?.outputTokens || 0), 0),
       },
-      history: current.history.slice(0, 80), updatedAt: current.updatedAt,
+      decisions: decisions.filter((item) => activeDecision(item, now())).slice(0, 80),
+      decisionStats: {
+        open: decisions.filter((item) => activeDecision(item, now())).length,
+        high: decisions.filter((item) => activeDecision(item, now()) && item.risk === 'high').length,
+        completed: decisions.filter((item) => ['approved', 'resolved'].includes(item.status)).length,
+      },
+      history: current.history.slice(0, 80), lastCycle: current.lastCycle, updatedAt: current.updatedAt,
     };
   }
 
@@ -312,56 +440,137 @@ export function createAgentSpecialists({ readVersioned, writeIfVersion, fetchImp
     const result = normalizeResult(parsed, specialist), usage = { inputTokens: number(payload?.usage?.input_tokens, 0, 0, 10_000_000), outputTokens: number(payload?.usage?.output_tokens, 0, 0, 10_000_000), totalTokens: number(payload?.usage?.total_tokens, 0, 0, 20_000_000) };
     const entry = {
       id: runId, specialist, specialistLabel: definition.label, status: 'completed', source, createdAt, model: clean(payload.model || model, 80),
-      instruction: clean(instruction, 500), target, fingerprint: hash, result, usage, approvalStatus: 'draft',
+      instruction: clean(instruction, 500), target, fingerprint: hash, result, usage, approvalStatus: 'draft', promptVersion: PROMPT_VERSION,
       actor: clean(actor?.email || actor?.name || actor?.source || 'administrator', 120),
     };
     await appendHistory(entry);
     return entry;
   }
 
-  async function applyProductDraft(id = '', actor = {}) {
+  async function applyProductDraft(id = '', actor = {}, options = {}) {
     const current = await readState(), run = current.history.find((item) => item?.id === clean(id, 100));
     if (!run || run.status !== 'completed' || run.target?.type !== 'product' || !clean(run.target?.productId, 100)) throw Object.assign(new Error('Nie znaleziono szkicu produktu do zatwierdzenia.'), { code: 'agent_specialist_draft_not_found', status: 404 });
-    if (run.approvalStatus === 'applied') return { applied: false, duplicate: true, run };
-    const patch = productPatch(run.result), productId = String(run.target.productId);
-    if (!Object.keys(patch).length) throw Object.assign(new Error('Szkic nie zawiera bezpiecznych pól produktu do zapisania.'), { code: 'agent_specialist_patch_empty', status: 422 });
+    if (['applied', 'auto_applied', 'not_needed'].includes(run.approvalStatus)) return { applied: false, duplicate: true, run };
+    const proposedPatch = productPatch(run.result), productId = String(run.target.productId);
+    let appliedPatch = {};
+    if (!Object.keys(proposedPatch).length) throw Object.assign(new Error('Szkic nie zawiera bezpiecznych pól produktu do zapisania.'), { code: 'agent_specialist_patch_empty', status: 422 });
     await change('settings', { data: {}, rev: 0, updated_at: null }, (record) => {
       const previous = record && typeof record === 'object' ? record : { data: {}, rev: 0 }, data = { ...(previous.data || {}) }, added = Array.isArray(data.artway_produkty_dodane) ? [...data.artway_produkty_dodane] : [], index = added.findIndex((product) => String(product?.id) === productId), timestamp = now().toISOString();
-      const safePatch = { ...patch, agentTextModel: run.model, agentTextReviewedAt: timestamp, agentTextRunId: run.id };
+      const effective = index >= 0 ? added[index] : { ...(catalogProducts(data).find((product) => String(product?.id) === productId) || {}), ...((data.artway_produkty_edytowane || {})[productId] || {}) };
+      const patch = options.missingOnly === true ? missingOnlyPatch(effective, proposedPatch) : proposedPatch;
+      if (!Object.keys(patch).length) return previous;
+      appliedPatch = patch;
+      const safePatch = { ...patch, agentTextModel: run.model, agentTextReviewedAt: timestamp, agentTextRunId: run.id, agentTextMode: options.missingOnly === true ? 'safe-missing-only' : 'approved' };
       if (index >= 0) { added[index] = { ...added[index], ...safePatch }; data.artway_produkty_dodane = added; }
       else { const edited = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {}; edited[productId] = { ...(edited[productId] || {}), ...safePatch }; data.artway_produkty_edytowane = edited; }
       return { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: timestamp };
     });
+    if (!Object.keys(appliedPatch).length) {
+      await updateHistory(run.id, { approvalStatus: 'not_needed', appliedAt: now().toISOString(), appliedBy: 'agent-safe-policy' });
+      return { applied: false, duplicate: true, noMissingFields: true, productId, patch: {} };
+    }
     const appliedAt = now().toISOString(), appliedBy = clean(actor?.email || actor?.name || 'administrator', 120);
-    await updateHistory(run.id, { approvalStatus: 'applied', appliedAt, appliedBy });
-    return { applied: true, productId, patch, appliedAt, appliedBy };
+    await updateHistory(run.id, { approvalStatus: options.missingOnly === true ? 'auto_applied' : 'applied', appliedAt, appliedBy });
+    return { applied: true, productId, patch: appliedPatch, appliedAt, appliedBy, safeAutoApply: options.missingOnly === true };
   }
 
   async function automaticCycle() {
     const current = await readState();
-    if (!current.config.enabled || !current.config.automaticEnabled || current.config.automaticDailyLimit < 1) return { skipped: true, reason: 'disabled', prepared: [] };
-    const settingsVersion = await readVersioned('settings', { data: {}, rev: 0 }), data = settingsVersion.value?.data || {}, edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? data.artway_produkty_edytowane : {};
-    const catalog = [...(Array.isArray(data.artway_produkty_katalog) ? data.artway_produkty_katalog : []), ...(Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : [])], hidden = new Set([...(data.artway_produkty_definitywne || []), ...(data.artway_produkty_ukryte || [])].map(String)), unique = new Map();
-    for (const product of catalog) if (product?.id !== undefined && !hidden.has(String(product.id))) unique.set(String(product.id), { ...product, ...(edits[String(product.id)] || {}) });
-    const recentCutoff = now().getTime() - 7 * 24 * 60 * 60_000, recentTargets = new Set(current.history.filter((item) => item.source === 'automatic' && item.status === 'completed' && Date.parse(item.createdAt || '') >= recentCutoff).map((item) => String(item.target?.productId || '')).filter(Boolean));
-    const candidates = [...unique.values()].map((product) => {
+    if (!current.config.enabled || !current.config.automaticEnabled || current.config.automaticDailyLimit < 1) return { skipped: true, reason: 'disabled', prepared: [], applied: [], decisions: [] };
+    const cycleStartedAt = now().toISOString();
+    const [settingsVersion, communicationsVersion] = await Promise.all([
+      readVersioned('settings', { data: {}, rev: 0 }),
+      readVersioned('allegro_communications', { threads: [], issues: [], updated_at: null }),
+    ]);
+    const data = settingsVersion.value?.data || {}, products = catalogProducts(data), communications = communicationsVersion.value || {};
+    const recentCutoff = now().getTime() - 7 * 24 * 60 * 60_000, recentTargets = new Set(current.history.filter((item) => item.source === 'automatic' && item.status === 'completed' && item.promptVersion === PROMPT_VERSION && Date.parse(item.createdAt || '') >= recentCutoff).map((item) => String(item.target?.productId || '')).filter(Boolean));
+    const candidates = products.map((product) => {
       const short = clean(product.opisKrotki || product.krotkiOpis, 5000), full = clean(product.opis, 30000), missing = (!short ? 3 : 0) + (full.length < 250 ? 4 : 0) + (!product.seoTitle ? 2 : 0) + (!product.seoDescription ? 2 : 0);
       return { product, missing };
-    }).filter((item) => item.missing > 0 && !recentTargets.has(String(item.product.id))).sort((a, b) => b.missing - a.missing || String(b.product.createdAt || '').localeCompare(String(a.product.createdAt || ''))).slice(0, current.config.automaticBatchSize);
-    const prepared = [];
-    for (const item of candidates) {
+    }).filter((item) => item.missing > 0 && !recentTargets.has(String(item.product.id))).sort((a, b) => String(b.product.createdAt || b.product.dataDodania || '').localeCompare(String(a.product.createdAt || a.product.dataDodania || '')) || b.missing - a.missing);
+    const prepared = [], applied = [], decisionResults = [], activeFingerprints = new Set();
+
+    const unresolvedCommunication = [
+      ...(Array.isArray(communications.threads) ? communications.threads.map((item) => ({ type: 'thread', item })) : []),
+      ...(Array.isArray(communications.issues) ? communications.issues.map((item) => ({ type: 'issue', item })) : []),
+    ].filter(({ item }) => communicationNeedsReply(item)).sort((a, b) => String(b.item?.latestNewIncoming?.createdAt || b.item?.lastMessage?.createdAt || '').localeCompare(String(a.item?.latestNewIncoming?.createdAt || a.item?.lastMessage?.createdAt || '')));
+
+    let availableRuns = current.config.automaticBatchSize;
+    for (const { type, item } of unresolvedCommunication.slice(0, 20)) {
+      const target = { type: 'communication', communicationType: type, communicationId: String(item?.id || ''), sourceMessageId: String(item?.latestNewIncomingKey || item?.latestNewIncoming?.id || item?.lastMessage?.id || '') };
+      const fp = decisionFingerprint('customer_reply', target); activeFingerprints.add(fp);
+      const existing = current.decisions.find((entry) => entry.fingerprint === fp && activeDecision(entry, now()));
+      if (existing) continue;
+      let draft = null;
+      if (availableRuns > 0) {
+        try {
+          draft = await run({ specialist: 'customer_reply', source: 'automatic', instruction: 'Przeanalizuj całą przekazaną rozmowę i przygotuj wyłącznie szkic odpowiedzi. Nie wysyłaj go. Nie obiecuj działań niepotwierdzonych w faktach.', context: { conversation: communicationFacts(item, type) }, target }, { source: 'background-agent' });
+          prepared.push({ id: draft.id, type: 'communication', targetId: target.communicationId, status: 'prepared' }); availableRuns -= 1;
+        } catch (error) {
+          if (error?.code === 'agent_specialist_daily_limit') availableRuns = 0;
+          else prepared.push({ type: 'communication', targetId: target.communicationId, status: 'error', error: safeError(error?.message || error) });
+        }
+      }
+      const decision = await upsertDecision({ fingerprint: fp, kind: 'customer_reply', specialist: 'customer_reply', icon: type === 'issue' ? '🛟' : '💬', title: type === 'issue' ? 'Nowa dyskusja wymaga decyzji' : 'Nowa wiadomość wymaga odpowiedzi', summary: 'Agent przeanalizował sprawę i przygotował bezpieczny szkic. Żadna wiadomość nie została wysłana automatycznie.', recommendation: 'Sprawdź szkic w odpowiednim module i zatwierdź jego wysłanie dopiero po weryfikacji zamówienia oraz przesyłki.', alternatives: ['Popraw szkic', 'Oznacz jako załatwione wewnętrznie', 'Odłóż decyzję'], risk: 'high', target, href: `#/admin/allegro/${type === 'issue' ? 'dyskusje' : 'wiadomosci'}`, runId: draft?.id || '' });
+      decisionResults.push(decision);
+    }
+
+    for (const item of candidates.slice(0, Math.max(0, availableRuns))) {
       try {
         const draft = await run({ specialist: 'product_content', source: 'automatic', instruction: 'Przygotuj kompletny, profesjonalny szkic treści produktu do kontroli administratora. Zachowaj wszystkie potwierdzone fakty i zgłoś braki.', context: { product: productFacts(item.product) }, target: { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180) } }, { source: 'background-agent' });
-        prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'prepared' });
+        const eligible = current.config.safeAutoApply && draft.result?.readyForApproval === true && draft.result?.complianceStatus === 'ready' && Number(draft.result?.confidence || 0) >= current.config.confidenceThreshold && !(draft.result?.warnings || []).length && !(draft.result?.missingFacts || []).length;
+        if (eligible) {
+          const result = await applyProductDraft(draft.id, { source: 'background-agent' }, { missingOnly: true });
+          if (result.applied) applied.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), fields: Object.keys(result.patch || {}) });
+          prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: result.applied ? 'auto_applied' : 'not_needed' });
+        } else {
+          const target = { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180) }, fp = decisionFingerprint('product_content_review', target); activeFingerprints.add(fp);
+          const decision = await upsertDecision({ fingerprint: fp, kind: 'product_content_review', specialist: 'product_content', icon: '✨', title: `Sprawdź treść: ${clean(item.product.nazwa, 120) || item.product.id}`, summary: draft.result?.summary || 'Treść wymaga sprawdzenia przed zapisem.', recommendation: draft.result?.missingFacts?.length ? 'Uzupełnij brakujące fakty, a następnie ponów przygotowanie.' : 'Zatwierdź przygotowane pola produktu albo odrzuć propozycję.', alternatives: ['Popraw dane produktu', 'Odłóż decyzję', 'Odrzuć szkic'], risk: 'medium', target, href: '#/admin/asortyment/produkty', runId: draft.id });
+          decisionResults.push(decision); prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'needs_decision' });
+        }
       } catch (error) {
         if (error?.code === 'agent_specialist_daily_limit') break;
         prepared.push({ productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'error', error: safeError(error?.message || error) });
       }
     }
-    return { skipped: candidates.length === 0, reason: candidates.length ? '' : 'no_candidates', prepared };
+
+    let openCatalogDecisionCount = current.decisions.filter((item) => item.kind === 'catalog_identity' && activeDecision(item, now())).length;
+    for (const product of products.slice().sort((a, b) => String(b.createdAt || b.dataDodania || '').localeCompare(String(a.createdAt || a.dataDodania || ''))).slice(0, 200)) {
+      const missing = [!clean(product.gtin || product.ean, 80) && 'EAN', !clean(product.producent || product.marka, 120) && 'producent', !clean(product.kategoria, 160) && 'kategoria'].filter(Boolean);
+      if (!missing.length) continue;
+      const target = { type: 'product', productId: String(product.id), name: clean(product.nazwa, 180), missing }, fp = decisionFingerprint('catalog_identity', target); activeFingerprints.add(fp);
+      const existing = current.decisions.find((entry) => entry.fingerprint === fp && ['open', 'snoozed'].includes(entry.status));
+      if (existing || openCatalogDecisionCount >= 12) continue;
+      const decision = await upsertDecision({ fingerprint: fp, kind: 'catalog_identity', specialist: 'catalog_quality', icon: '🛡️', title: `Brak danych identyfikacyjnych: ${clean(product.nazwa, 120) || product.id}`, summary: `Brakuje: ${missing.join(', ')}. Agent nie może bezpiecznie zgadywać tych danych.`, recommendation: 'Uzupełnij brak z linku producenta albo karty produktu przed publikacją na zewnętrznych kanałach.', alternatives: ['Otwórz produkt', 'Odłóż na 1 dzień', 'Odrzuć ostrzeżenie'], risk: 'medium', target, href: '#/admin/asortyment/produkty' });
+      decisionResults.push(decision); openCatalogDecisionCount += 1;
+    }
+
+    const productById = new Map(products.map((product) => [String(product.id), product]));
+    for (const decision of current.decisions.filter((item) => activeDecision(item, now()))) {
+      if (decision.kind === 'product_content_review') {
+        const product = productById.get(String(decision.target?.productId || ''));
+        if (product && (!clean(product.opisKrotki || product.krotkiOpis, 5000) || clean(product.opis, 30000).length < 250 || !product.seoTitle || !product.seoDescription)) activeFingerprints.add(decision.fingerprint);
+      }
+      if (decision.kind === 'catalog_identity') {
+        const product = productById.get(String(decision.target?.productId || ''));
+        if (product && (!clean(product.gtin || product.ean, 80) || !clean(product.producent || product.marka, 120) || !clean(product.kategoria, 160))) activeFingerprints.add(decision.fingerprint);
+      }
+    }
+
+    const completedAt = now().toISOString(), lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, productsChecked: products.length, status: prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
+    await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
+      const previous = state(value), retentionCutoff = now().getTime() - previous.config.decisionRetentionDays * 24 * 60 * 60_000;
+      const decisions = previous.decisions.map((item) => {
+        if (!['customer_reply', 'product_content_review', 'catalog_identity'].includes(item.kind) || !activeDecision(item, now()) || activeFingerprints.has(item.fingerprint)) return item;
+        return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'agent-reconciliation', resolutionNote: 'Warunek wymagający decyzji już nie występuje.' }, completedAt);
+      }).filter((item) => activeDecision(item, now()) || Date.parse(item.updatedAt || item.createdAt || '') >= retentionCutoff).slice(0, MAX_DECISIONS);
+      return { ...previous, decisions, lastCycle, updatedAt: completedAt };
+    });
+    const meaningful = prepared.length || applied.length || decisionResults.length;
+    return { skipped: !meaningful, reason: meaningful ? '' : 'no_candidates', prepared, applied, decisions: decisionResults.map((item) => ({ id: item.id, kind: item.kind, risk: item.risk })), lastCycle };
   }
 
-  return Object.freeze({ status, configure, run, applyProductDraft, automaticCycle, specialists: SPECIALISTS });
+  return Object.freeze({ status, configure, run, applyProductDraft, updateDecision, automaticCycle, specialists: SPECIALISTS });
 }
 
-export { DEFAULT_CONFIG, RESULT_SCHEMA, SPECIALISTS, normalizeResult, productFacts, productPatch, sanitizeContext };
+export { DEFAULT_CONFIG, NEVER_AUTOMATIC, PROMPT_VERSION, RESULT_SCHEMA, SPECIALISTS, activeDecision, communicationNeedsReply, normalizeDecision, normalizeResult, productFacts, productPatch, sanitizeContext };
