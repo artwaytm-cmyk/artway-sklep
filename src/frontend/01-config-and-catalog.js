@@ -98,6 +98,30 @@ const DOMYSLNE_BANNERY = [
   {id:"nowosci",ikona:"✨",tytul:"Nowości w sklepie",opis:"Poznaj ostatnio dodane produkty.",przycisk:"Zobacz nowości",link:"#/nowosci",aktywny:true},
   {id:"dostawa",ikona:"🚚",tytul:"Darmowa dostawa",opis:"Dla zamówień od 200 zł.",przycisk:"Warunki dostawy",link:"#/dostawa",aktywny:true}
 ];
+const TYPY_BANNEROW={
+  "pasek-okazji":"Pasek okazji",
+  hero:"Banner główny",
+  sekcyjny:"Banner sekcyjny",
+  kafelek:"Kafelek promocyjny",
+  komunikat:"Komunikat informacyjny"
+};
+const MIEJSCA_BANNEROW={
+  "nad-hero":"Nad bannerem głównym",
+  "pod-hero":"Pod bannerem głównym",
+  "sekcja-banery":"W sekcji bannerów",
+  "nad-produktami":"Nad ofertą produktów",
+  "pod-produktami":"Pod ofertą produktów",
+  "przed-stopka":"Przed końcową sekcją strony"
+};
+function normalizujBaner(b={}){
+  const legacyDostawa=!b.typ&&!b.szerokosc&&String(b.id||"")==="dostawa";
+  const typ=TYPY_BANNEROW[b.typ]?b.typ:(legacyDostawa||b.rozmiar==="kompaktowy"&&b.styl==="informacyjny"?"komunikat":"kafelek");
+  const umiejscowienie=MIEJSCA_BANNEROW[b.umiejscowienie]?b.umiejscowienie:"sekcja-banery";
+  const szerokosci=["pelna","dwie-trzecie","polowa","jedna-trzecia"],wysokosci=["pasek","niski","standard","wysoki"],mobile=["pelny","kompaktowy","bez-obrazu","ukryty"];
+  const szerokosc=szerokosci.includes(b.szerokosc)?b.szerokosc:(legacyDostawa||b.rozmiar==="szeroki"?"pelna":"polowa");
+  const wysokosc=wysokosci.includes(b.wysokosc)?b.wysokosc:(legacyDostawa||b.rozmiar==="kompaktowy"?"niski":b.rozmiar==="szeroki"?"wysoki":"standard");
+  return {...b,typ,umiejscowienie,szerokosc,wysokosc,mobileMode:mobile.includes(b.mobileMode)?b.mobileMode:"kompaktowy",zamykany:!!b.zamykany,przyklejony:typ==="pasek-okazji"&&!!b.przyklejony};
+}
 const DOMYSLNE_PODSTRONY = {
   kontakt:{nazwa:"Kontakt",tytul:"💬 Napisz do nas",opis:"Masz pytanie o produkt, dostawę lub zamówienie? Opisz sprawę możliwie dokładnie.",szerokosc:"standard",styl:"panel",widoczna:true},
   onas:{nazwa:"O Artway-TM",tytul:"O Artway-TM",opis:"Poznaj sklep, nasze podejście i najważniejsze zasady obsługi.",szerokosc:"standard",styl:"panel",widoczna:true},
@@ -119,7 +143,7 @@ const SEKCJE_PODSTRONY = {
   powrot:{nazwa:"Link powrotu do sklepu",ikona:"↩️"}
 };
 const DOMYSLNA_KOLEJNOSC_PODSTRONY = ["naglowek","opis","tresc","powrot"];
-function pobierzBannery(){ return Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY.map(x=>({...x})); }
+function pobierzBannery(){ return (Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY).map(normalizujBaner); }
 function ustawieniaOfertyGlownej(){
   const source=ustawienia.ofertaGlowna&&typeof ustawienia.ofertaGlowna==="object"?ustawienia.ofertaGlowna:{};
   return {

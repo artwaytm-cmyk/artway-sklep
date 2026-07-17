@@ -99,6 +99,30 @@ const DOMYSLNE_BANNERY = [
   {id:"nowosci",ikona:"✨",tytul:"Nowości w sklepie",opis:"Poznaj ostatnio dodane produkty.",przycisk:"Zobacz nowości",link:"#/nowosci",aktywny:true},
   {id:"dostawa",ikona:"🚚",tytul:"Darmowa dostawa",opis:"Dla zamówień od 200 zł.",przycisk:"Warunki dostawy",link:"#/dostawa",aktywny:true}
 ];
+const TYPY_BANNEROW={
+  "pasek-okazji":"Pasek okazji",
+  hero:"Banner główny",
+  sekcyjny:"Banner sekcyjny",
+  kafelek:"Kafelek promocyjny",
+  komunikat:"Komunikat informacyjny"
+};
+const MIEJSCA_BANNEROW={
+  "nad-hero":"Nad bannerem głównym",
+  "pod-hero":"Pod bannerem głównym",
+  "sekcja-banery":"W sekcji bannerów",
+  "nad-produktami":"Nad ofertą produktów",
+  "pod-produktami":"Pod ofertą produktów",
+  "przed-stopka":"Przed końcową sekcją strony"
+};
+function normalizujBaner(b={}){
+  const legacyDostawa=!b.typ&&!b.szerokosc&&String(b.id||"")==="dostawa";
+  const typ=TYPY_BANNEROW[b.typ]?b.typ:(legacyDostawa||b.rozmiar==="kompaktowy"&&b.styl==="informacyjny"?"komunikat":"kafelek");
+  const umiejscowienie=MIEJSCA_BANNEROW[b.umiejscowienie]?b.umiejscowienie:"sekcja-banery";
+  const szerokosci=["pelna","dwie-trzecie","polowa","jedna-trzecia"],wysokosci=["pasek","niski","standard","wysoki"],mobile=["pelny","kompaktowy","bez-obrazu","ukryty"];
+  const szerokosc=szerokosci.includes(b.szerokosc)?b.szerokosc:(legacyDostawa||b.rozmiar==="szeroki"?"pelna":"polowa");
+  const wysokosc=wysokosci.includes(b.wysokosc)?b.wysokosc:(legacyDostawa||b.rozmiar==="kompaktowy"?"niski":b.rozmiar==="szeroki"?"wysoki":"standard");
+  return {...b,typ,umiejscowienie,szerokosc,wysokosc,mobileMode:mobile.includes(b.mobileMode)?b.mobileMode:"kompaktowy",zamykany:!!b.zamykany,przyklejony:typ==="pasek-okazji"&&!!b.przyklejony};
+}
 const DOMYSLNE_PODSTRONY = {
   kontakt:{nazwa:"Kontakt",tytul:"💬 Napisz do nas",opis:"Masz pytanie o produkt, dostawę lub zamówienie? Opisz sprawę możliwie dokładnie.",szerokosc:"standard",styl:"panel",widoczna:true},
   onas:{nazwa:"O Artway-TM",tytul:"O Artway-TM",opis:"Poznaj sklep, nasze podejście i najważniejsze zasady obsługi.",szerokosc:"standard",styl:"panel",widoczna:true},
@@ -120,7 +144,7 @@ const SEKCJE_PODSTRONY = {
   powrot:{nazwa:"Link powrotu do sklepu",ikona:"↩️"}
 };
 const DOMYSLNA_KOLEJNOSC_PODSTRONY = ["naglowek","opis","tresc","powrot"];
-function pobierzBannery(){ return Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY.map(x=>({...x})); }
+function pobierzBannery(){ return (Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY).map(normalizujBaner); }
 function ustawieniaOfertyGlownej(){
   const source=ustawienia.ofertaGlowna&&typeof ustawienia.ofertaGlowna==="object"?ustawienia.ofertaGlowna:{};
   return {
@@ -2797,19 +2821,26 @@ function opisKategorii(nazwa){
   };
   return mapa[nazwa] || "Zobacz wszystkie produkty dostępne w tym katalogu.";
 }
-function banneryHome(){
+function bannerUkrytyPrzezKlienta(id){try{return sessionStorage.getItem(`artway_banner_hidden_${id}`)==="1";}catch(e){return false;}}
+function zamknijBannerSklepu(event,id){event.preventDefault();event.stopPropagation();try{sessionStorage.setItem(`artway_banner_hidden_${id}`,"1");}catch(e){}event.currentTarget.closest(".managed-banner-shell")?.remove();}
+function bannerSklepuHTML(b){
+  const n=normalizujBaner(b),type=esc(n.typ),width=esc(n.szerokosc),height=esc(n.wysokosc),mobile=esc(n.mobileMode);
+  return `<article class="managed-banner-shell banner-type-${type} banner-width-${width} banner-height-${height} banner-mobile-${mobile} ${n.przyklejony?"is-sticky":""}">
+    <a class="managed-banner ${n.obraz?'ma-obraz':''} banner-${esc(n.styl||"karta")} align-${esc(n.wyrownanie||"lewo")} audience-${esc(n.odbiorcy||"wszyscy")}" href="${esc(bezpiecznyLink(n.link))}" ${n.obraz?`style="background-image:linear-gradient(90deg,rgba(15,18,25,.78),rgba(15,18,25,.26)),url('${esc(n.obraz)}')"`:""}>
+      ${n.obraz?"":`<span class="banner-icon">${esc(n.ikona||"📣")}</span>`}
+      <span>${n.etykieta?`<em class="managed-banner-badge">${esc(n.etykieta)}</em>`:""}<h3>${esc(n.tytul||"")}</h3><p>${esc(n.opis||"")}</p>${n.kodRabatowy?`<strong class="managed-banner-code">Kod: ${esc(n.kodRabatowy)}</strong>`:""}<small>${esc(n.przycisk||"Dowiedz się więcej")} →</small></span>
+    </a>${n.zamykany?`<button class="managed-banner-close" type="button" aria-label="Zamknij banner" onclick="zamknijBannerSklepu(event,${jsArg(n.id)})">×</button>`:""}
+  </article>`;
+}
+function banneryHome(miejsce="sekcja-banery"){
   const teraz=Date.now();
   const lista=pobierzBannery().filter(b=>{
     if(b.aktywny===false)return false;
     const start=b.start?Date.parse(b.start):NaN,koniec=b.koniec?Date.parse(b.koniec):NaN;
-    return (!Number.isFinite(start)||teraz>=start)&&(!Number.isFinite(koniec)||teraz<=koniec);
+    return b.umiejscowienie===miejsce&&!bannerUkrytyPrzezKlienta(b.id)&&(!Number.isFinite(start)||teraz>=start)&&(!Number.isFinite(koniec)||teraz<=koniec);
   });
   if(!lista.length) return "";
-  return `<section class="managed-banners">${lista.map(b=>`
-    <a class="managed-banner ${b.obraz?'ma-obraz':''} banner-${esc(b.styl||"karta")} banner-${esc(b.rozmiar||"standard")} align-${esc(b.wyrownanie||"lewo")} audience-${esc(b.odbiorcy||"wszyscy")}" href="${esc(bezpiecznyLink(b.link))}" ${b.obraz?`style="background-image:linear-gradient(90deg,rgba(15,18,25,.78),rgba(15,18,25,.26)),url('${esc(b.obraz)}')"`:""}>
-      ${b.obraz?"":`<span class="banner-icon">${esc(b.ikona||"📣")}</span>`}
-      <span>${b.etykieta?`<em class="managed-banner-badge">${esc(b.etykieta)}</em>`:""}<h3>${esc(b.tytul||"")}</h3><p>${esc(b.opis||"")}</p>${b.kodRabatowy?`<strong class="managed-banner-code">Kod: ${esc(b.kodRabatowy)}</strong>`:""}<small>${esc(b.przycisk||"Dowiedz się więcej")} →</small></span>
-    </a>`).join("")}</section>`;
+  return `<section class="managed-banners banner-placement-${esc(miejsce)}" aria-label="Bannery promocyjne">${lista.map(bannerSklepuHTML).join("")}</section>`;
 }
 /* ── Sekcje strony głównej: kolejność i widoczność ustawiane wizualnie
       w Panel admina → Personalizacja → 🧭 Rozmieszczenie ── */
@@ -2845,7 +2876,7 @@ function widokSklep(){
   const nowosci = produkty.filter(p=>p.badge==="Nowość").length;
   const hero = ustawienia.hero || {},oferta=ustawieniaOfertyGlownej();
   const SEKCJE = {};
-  SEKCJE.hero = () => `
+  SEKCJE.hero = () => `${banneryHome("nad-hero")}
   <section class="hero">
     <div class="hero-in" ${hero.obraz?`style="background:linear-gradient(120deg,rgba(30,41,59,.88),rgba(49,46,129,.78) 60%,rgba(91,33,182,.68)),url('${hero.obraz}') center/cover"`:""}>
       <span class="hero-eyebrow">${esc(hero.etykieta||"ARTWAY-TM • ZAKUPY PROSTO I WYGODNIE")}</span>
@@ -2862,8 +2893,8 @@ function widokSklep(){
         <div><b>od ${KONFIG.darmowaDostawaOd} zł</b><small>darmowa dostawa</small></div>
       </div>
     </div>
-  </section>`;
-  SEKCJE.banery = () => banneryHome();
+  </section>${banneryHome("pod-hero")}`;
+  SEKCJE.banery = () => banneryHome("sekcja-banery");
   SEKCJE.kategorie = () => `
   <section class="home-section home-categories">
     <div class="section-head">
@@ -2880,7 +2911,7 @@ function widokSklep(){
         </a>`).join("")}
     </div>
   </section>`;
-  SEKCJE.produkty = () => `
+  SEKCJE.produkty = () => `${banneryHome("nad-produktami")}
   <div class="catalog-head" id="produkty">
     <div class="section-head">
       <div><h2>${esc(oferta.tytul||"Cała oferta")}</h2><p>${esc(oferta.opis||"")}</p></div>
@@ -2915,7 +2946,7 @@ function widokSklep(){
   <div class="pagination" id="paginacjaGora"></div>
   <div class="grid" id="grid"></div>
   <div class="pagination" id="paginacjaDol"></div>
-  ${oferta.wyborDzialu!=="ukryty"&&oferta.wyborDzialu!=="nad-produktami"?`<div class="home-department-picker"><span>Wybierz dział oferty</span><div id="chips" class="home-category-chips"></div></div>`:""}`;
+  ${oferta.wyborDzialu!=="ukryty"&&oferta.wyborDzialu!=="nad-produktami"?`<div class="home-department-picker"><span>Wybierz dział oferty</span><div id="chips" class="home-category-chips"></div></div>`:""}${banneryHome("pod-produktami")}`;
   SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(); return `
   <section class="offer-band">
     <div class="offer-band-in">
@@ -2974,7 +3005,7 @@ function widokSklep(){
       <details><summary>Jak zwrócić produkt?</summary><p>Na odstąpienie od umowy masz 14 dni od odbioru. Napisz na ${esc(KONFIG.emailSklepu)}, a otrzymasz dalsze instrukcje.</p></details>
     </div>
   </section>`;
-  SEKCJE.kontakt = () => `
+  SEKCJE.kontakt = () => `${banneryHome("przed-stopka")}
   <section class="home-section home-contact">
     <div class="contact-strip">
       <div><h2>Zostało pytanie?</h2><p>Skontaktuj się z nami — odpowiadamy w dni robocze.</p></div>
