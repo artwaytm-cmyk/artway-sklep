@@ -4976,7 +4976,7 @@ export default async (req) => {
       });
     }
 
-    // Kopia migracyjna: odczyt tylko dla administratora.
+    // ─── KOPIA MIGRACYJNA — odczyt tylko dla administratora, bez zmian w danych ───
     if (action === 'store-backup-manifest') {
       if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
