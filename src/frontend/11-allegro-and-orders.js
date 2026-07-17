@@ -346,20 +346,6 @@ async function allegroUruchomAutomatyczneMapowanie(cicho=false){
     renderuj();return false;
   }
 }
-async function allegroMapujOferte(offerId, productId, options={}){
-  try{
-    const id=String(productId||"").trim();
-    const d=await chmura(id?"allegro-map-offer":"allegro-unmap-offer",{method:"POST",body:{offerId,productId:id,force:options.force===true,replaceExisting:options.replaceExisting===true},timeout:45000});
-    allegroMapowania=(d.mappings&&typeof d.mappings==="object")?d.mappings:allegroMapowania;
-    allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;
-    rezerwacjeMagazynowe._cache=null;
-    if(id)await chmuraWczytajStan().catch(()=>{});
-    allegroZapiszCache();
-    toast(id?`Połączono ofertę z produktem sklepu${d.validation?.score?` • pewność ${d.validation.score}%`:""}`:"Powiązanie produktu zostało usunięte");
-    renderuj();
-    return {ok:true,data:d};
-  }catch(e){allegroMapowaniePozycjiCel={...allegroMapowaniePozycjiCel,error:e};toast("⚠️ Mapowanie Allegro: "+(e.message||e));return {ok:false,error:e};}
-}
 async function allegroDodajProduktZOferty(offerId){
   const o=allegroOferty.find(x=>String(x.id)===String(offerId));
   if(!o){ toast("Nie znaleziono oferty Allegro"); return; }
@@ -400,7 +386,7 @@ async function allegroDodajProduktZOferty(offerId){
   produktyDodane.push(poprawiony);
   zapiszLS("artway_produkty_dodane",produktyDodane);
   zbudujProdukty();
-  await allegroMapujOferte(o.id,id);
+  await allegroMapujOferte(o.id,id,{syncOffer:false});
   const onboardingProduct=pobierzProduktAdmin(id)||poprawiony,onboardingState=agentAIStanWdrozeniaProduktu(onboardingProduct),onboardingStatus=onboardingState.ready?"completed":"needs_attention";
   zapiszPolaProduktuLokalnie(id,{agentOnboardingStatus:onboardingStatus,agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingCompletedAt:onboardingStatus==="completed"?new Date().toISOString():"",agentOnboardingMissing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)},false);
   zapiszHistorieAgenta("wdrozenie-produktu",`${onboardingStatus==="completed"?"Zakończono":"Rozpoczęto"} wdrożenie produktu utworzonego z Allegro: ${poprawiony.nazwa}`,{produktId:id,status:onboardingStatus,missing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)});zaplanujZapisUstawien();
@@ -844,7 +830,7 @@ function allegroZamknijMapowaniePozycji(){document.getElementById("allegroMappin
 function allegroOtworzMapowaniePozycji(offerId,offerName=""){
   allegroMapowaniePozycjiCel={offerId:String(offerId||""),offerName:String(offerName||""),error:null};document.getElementById("allegroMappingModal")?.remove();
   const modal=document.createElement("div");modal.id="allegroMappingModal";modal.className="emoji-picker-overlay";modal.onclick=allegroZamknijMapowaniePozycji;
-  modal.innerHTML=`<div class="emoji-picker-modal allegro-mapping-modal" onclick="event.stopPropagation()"><div class="emoji-picker-head"><div><span class="order-pro-label">Bezpieczne powiązanie 1:1</span><h2>🧩 Wybierz produkt sklepu</h2><p>Agent porówna identyfikatory i nie zapisze sprzecznego połączenia bez świadomego wyboru.</p></div><button class="btn ghost" type="button" onclick="allegroZamknijMapowaniePozycji()">✕ Zamknij</button></div><input class="emoji-picker-search" id="allegroMappingSearch" placeholder="Szukaj po nazwie, ID produktu, EAN, SKU, EXTERNAL_ID lub kodzie producenta…" oninput="allegroRenderujKandydatowMapowania(this.value)"><div id="allegroMappingCandidates"></div></div>`;
+  modal.innerHTML=`<div class="emoji-picker-modal allegro-mapping-modal" onclick="event.stopPropagation()"><div class="emoji-picker-head"><div><span class="order-pro-label">Ręczna decyzja administratora</span><h2>🧩 Wybierz produkt sklepu</h2><p>Wybrany produkt zostanie połączony bez blokady wynikiem procentowym. Poprzednie powiązanie zostanie bezpiecznie zastąpione, a oferta od razu zaktualizowana danymi sklepu.</p></div><button class="btn ghost" type="button" onclick="allegroZamknijMapowaniePozycji()">✕ Zamknij</button></div><input class="emoji-picker-search" id="allegroMappingSearch" placeholder="Szukaj po nazwie, ID produktu, EAN, SKU, EXTERNAL_ID lub kodzie producenta…" oninput="allegroRenderujKandydatowMapowania(this.value)"><div id="allegroMappingCandidates"></div></div>`;
   document.body.appendChild(modal);allegroRenderujKandydatowMapowania("");modal.querySelector("#allegroMappingSearch")?.focus();
 }
 function allegroRenderujKandydatowMapowania(q=""){
@@ -854,8 +840,12 @@ function allegroRenderujKandydatowMapowania(q=""){
   lista.sort((a,b)=>b.score-a.score||Number(a.occupied.length)-Number(b.occupied.length)||String(a.produkt.nazwa||"").localeCompare(String(b.produkt.nazwa||""),"pl"));lista=lista.slice(0,50);
   const err=allegroMapowaniePozycjiCel.error,errValidation=err?.validation||{};
   box.innerHTML=`<div class="allegro-mapping-source-card">${oferta.mainImage?`<img src="${esc(oferta.mainImage)}" alt="">`:`<span>🏷️</span>`}<div><small>OFERTA ALLEGRO</small><b>${esc(oferta.name||allegroMapowaniePozycjiCel.offerName||"—")}</b><p>ID ${esc(offerId)} • EAN ${esc(oferta.ean||oferta.gtin||"—")} • EXTERNAL_ID ${esc(oferta.externalId||"—")} • kod ${esc(oferta.manufacturerCode||oferta.producerCode||"—")}</p></div></div>${err?`<div class="backend-note allegro-mapping-error"><b>Nie zapisano połączenia:</b> ${esc(err.message||err)}${errValidation.conflicts?.length?`<br><small>${esc(errValidation.conflicts.join(" • "))}</small>`:""}</div>`:""}<div class="backend-note"><b>Jak czytać wynik:</b> procent oznacza pewność, że jest to ten sam towar. Brakujące pola nie obniżają wyniku; ostrzeżenie o danych jest pokazywane osobno.</div><div class="allegro-mapping-results pro">${lista.map(x=>{const p=x.produkt,isCurrent=String(p.id)===currentId,cls=x.strongConflict?"conflict":x.score>=88?"strong":x.score>=65?"review":"weak",occupied=x.occupied.length>0&&!isCurrent;return `<article class="allegro-mapping-candidate ${cls} ${isCurrent?"is-current":""}"><div class="allegro-mapping-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa||"Produkt")}</b><small>ID ${esc(p.id)} • EAN ${esc(p.gtin||p.ean||"—")} • SKU/EXTERNAL_ID ${esc(p.sku||p.externalId||"—")} • kod ${esc(p.kodProducenta||p.mpn||"—")}</small><div class="allegro-evidence-chips">${(x.evidence||[]).map(v=>`<span class="ok">✓ ${esc(v)}</span>`).join("")}${(x.warnings||[]).map(v=>`<span class="warn">i ${esc(v)}</span>`).join("")}${(x.conflicts||[]).map(v=>`<span class="bad">! ${esc(v)}</span>`).join("")||(!x.evidence.length?`<span>brak wspólnych kodów</span>`:"")}</div></div></div><div class="allegro-mapping-confidence"><b>${esc(x.score)}%</b><small>pewność tożsamości • ${esc(x.reason)}</small>${occupied?`<em>Ten sam produkt jest już podpięty do oferty ${esc(x.occupied.join(", "))}</em>`:""}</div><div class="allegro-mapping-choice">${isCurrent?`<span class="lvl ${x.valid?"lvl-ok":"lvl-blad"}">${x.valid?"obecne, zweryfikowane":"obecne, błędne"}</span>`:x.strongConflict?`<button class="btn danger" type="button" onclick="allegroWybierzMapowaniePozycji(${jsArg(offerId)},${jsArg(p.id)},true,${occupied})">Połącz mimo konfliktu</button>`:occupied?`<button class="btn ghost" type="button" onclick="allegroWybierzMapowaniePozycji(${jsArg(offerId)},${jsArg(p.id)},false,true)">Przenieś powiązanie tutaj</button>`:`<button class="btn" type="button" onclick="allegroWybierzMapowaniePozycji(${jsArg(offerId)},${jsArg(p.id)})">Połącz ten produkt</button>`}<a href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">Otwórz kartę produktu</a></div></article>`;}).join("")||`<div class="backend-note">Brak wyników. Wpisz nazwę, ID produktu, EAN, SKU, EXTERNAL_ID albo kod producenta.</div>`}</div>${currentId?`<button class="btn danger" type="button" onclick="allegroWybierzMapowaniePozycji(${jsArg(offerId)},'')">Usuń obecne powiązanie</button>`:""}`;
+  const note=[...box.querySelectorAll(".backend-note")].find(el=>!el.classList.contains("allegro-mapping-error"));
+  if(note)note.innerHTML="<b>Podpowiedź, nie blokada:</b> procent i różnice pomagają ocenić towar, ale ręczny wybór administratora jest nadrzędny. Kliknięcie zastąpi kolizyjne powiązanie i od razu zaktualizuje ofertę.";
+  box.querySelectorAll(".allegro-mapping-choice button").forEach(button=>{button.textContent="Połącz i aktualizuj";button.classList.remove("ghost");});
+  box.querySelectorAll(".allegro-mapping-candidate.is-current .allegro-mapping-choice .lvl").forEach(status=>{status.className="lvl lvl-ok";status.textContent="połączone ręcznie";});
 }
-async function allegroWybierzMapowaniePozycji(offerId,productId,force=false,replaceExisting=false){const result=await allegroMapujOferte(offerId,productId,{force,replaceExisting});if(result?.ok)allegroZamknijMapowaniePozycji();else allegroRenderujKandydatowMapowania(document.getElementById("allegroMappingSearch")?.value||"");}
+async function allegroWybierzMapowaniePozycji(offerId,productId){const result=await allegroMapujOferte(offerId,productId,{manualDecision:true,syncOffer:true});if(result?.ok)allegroZamknijMapowaniePozycji();else allegroRenderujKandydatowMapowania(document.getElementById("allegroMappingSearch")?.value||"");}
 function allegroZamowieniePasujeDoFiltra(z){
   const kategoria=allegroKategoriaKolejki(z);
   const statusOk=["wszystkie","archiwum"].includes(filtrAllegroZamowien)||(filtrAllegroZamowien==="do_obslugi"?allegroZamowienieAktywneLokalnie(z):kategoria===filtrAllegroZamowien);
