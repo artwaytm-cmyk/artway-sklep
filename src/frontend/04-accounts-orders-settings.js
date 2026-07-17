@@ -115,6 +115,8 @@ function grupyMenuKategorii(){
       id:String(g.id||("grp_"+i+"_"+prostyHash(String(g.nazwa||i)))),
       nazwa:String(g.nazwa||"Grupa katalogów").trim()||"Grupa katalogów",
       ikona:String(g.ikona||"🗂️").trim()||"🗂️",
+      ikonaObraz:String(g.ikonaObraz||"").trim(),
+      ikonaAssetId:String(g.ikonaAssetId||"").trim(),
       aktywna:g.aktywna!==false,
       kategorie:[...new Set((Array.isArray(g.kategorie)?g.kategorie:[]).map(x=>String(x).trim()).filter(Boolean))]
     }));
@@ -133,7 +135,7 @@ function dzieciKategoriiMenu(kategoria,kategorie){
   return (kategorie||[]).filter(k=>dozwolone.has(k)&&rodzice[k]===kategoria);
 }
 function zapiszGrupyMenuKategorii(lista, ekstra={}){
-  ustawienia.menuKategorii=lista.map(g=>({id:g.id,nazwa:g.nazwa,ikona:g.ikona,aktywna:g.aktywna!==false,kategorie:g.kategorie||[]}));
+  ustawienia.menuKategorii=lista.map(g=>({id:g.id,nazwa:g.nazwa,ikona:g.ikona,ikonaObraz:g.ikonaObraz||"",ikonaAssetId:g.ikonaAssetId||"",aktywna:g.aktywna!==false,kategorie:g.kategorie||[]}));
   zapiszCzescUstawien({menuKategorii:ustawienia.menuKategorii,...ekstra});
 }
 function kategoriePrzypisaneDoAktywnychGrup(kategorie){
@@ -148,10 +150,10 @@ function drzewoKategoriiMenuHTML(k,kategorie,poziom=0){
   const dzieci=dzieciKategoriiMenu(k,kategorie);
   return `<span class="nav-category-node level-${Math.min(2,poziom)}">${linkKategoriiMenu(k)}${dzieci.length?`<span class="nav-category-children">${dzieci.map(d=>drzewoKategoriiMenuHTML(d,kategorie,poziom+1)).join("")}</span>`:""}</span>`;
 }
-function dropdownMenuKategorii(label, dzieci, ikona="🗂️",kategorie=[]){
+function dropdownMenuKategorii(label, dzieci, ikona="🗂️",kategorie=[],ikonaObraz=""){
   if(!dzieci.length) return "";
   const wszystkie=kategorie.length?kategorie:dzieci;
-  return `<span class="nav-dd"><button class="nav-drop-btn" type="button">${esc(ikona)} ${esc(label)} ▾</button><span class="nav-menu">${dzieci.map(k=>drzewoKategoriiMenuHTML(k,wszystkie)).join("")}</span></span>`;
+  return `<span class="nav-dd"><button class="nav-drop-btn" type="button">${ikonaObraz?`<img class="nav-generated-icon" src="${esc(ikonaObraz)}" alt="">`:esc(ikona)} ${esc(label)} ▾</button><span class="nav-menu">${dzieci.map(k=>drzewoKategoriiMenuHTML(k,wszystkie)).join("")}</span></span>`;
 }
 function odswiezMenu(){
   const n = $("mainNav"); if(!n) return;
@@ -161,7 +163,7 @@ function odswiezMenu(){
   const grupyHTML = grupy.filter(g=>g.aktywna).map(g=>{
     const bezposrednie=g.kategorie.filter(k=>dozwolone.has(k));
     const korzenie=[...new Set(bezposrednie.map(k=>rodzice[k]&&dozwolone.has(korzenKategoriiMenu(k,dozwolone))?korzenKategoriiMenu(k,dozwolone):k))];
-    return dropdownMenuKategorii(g.nazwa,korzenie,g.ikona,kategorie);
+    return dropdownMenuKategorii(g.nazwa,korzenie,g.ikona,kategorie,g.ikonaObraz);
   }).join("");
   const przypisane = kategoriePrzypisaneDoAktywnychGrup(kategorie);
   const bezGrup = kategorie.filter(k=>!przypisane.has(k));

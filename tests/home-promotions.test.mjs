@@ -54,3 +54,25 @@ test('kody rabatowe mają warunki i są weryfikowane również przez backend', a
   for (const marker of ['darmowa_dostawa', 'minKoszyk', 'maxRabat', 'limitUzyc', 'zakres']) assert.ok(admin.includes(marker), marker);
   for (const marker of ['wynikRabatu', 'regulaRabatowaAktywna', 'freeDelivery']) assert.ok(backend.includes(marker), marker);
 });
+
+test('wszystkie bannery mają wspólne studio, własne wzory i przypisanie grafik AI', async () => {
+  const source = await readFile('src/frontend/15b-banner-icon-studio.js', 'utf8');
+  for (const marker of ['heroStudioHTML', 'pasekOkazjiStudioHTML', 'zapiszBanerJakoWzor', 'wlasneWzoryBanerowHTML', 'przypiszGrafikeAIDoBanera', 'Pozycja obrazu', 'Przyciemnienie obrazu']) assert.ok(source.includes(marker), marker);
+});
+
+test('studio ikon AI obsługuje grupy menu, katalogi i podstrony', async () => {
+  const [studio, storefront, navigation] = await Promise.all([
+    readFile('src/frontend/15b-banner-icon-studio.js', 'utf8'),
+    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('src/frontend/08-admin-navigation.js', 'utf8'),
+  ]);
+  for (const marker of ['widokAdminIkonyAI', 'uruchomGeneratorIkonyAI', 'przypiszIkoneAI', 'category:', 'subpage:', 'group:']) assert.ok(studio.includes(marker), marker);
+  assert.ok(storefront.includes('ikonaKategoriiHTML'));
+  assert.ok(navigation.includes('✨ Ikony AI'));
+});
+
+test('usunięte kody rabatowe nie wracają z konfiguracji starszego modułu', async () => {
+  const config = await readFile('src/frontend/01-config-and-catalog.js', 'utf8');
+  assert.ok(config.includes('maZapisaneReguly'));
+  assert.ok(config.includes('maZapisaneReguly?{}'));
+});

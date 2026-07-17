@@ -162,13 +162,16 @@ function ustawieniaOfertyGlownej(){
   };
 }
 function regulyRabatowe(){
+  const maZapisaneReguly=Object.prototype.hasOwnProperty.call(ustawienia,"kodyRabatoweZaawansowane");
   const advanced=Array.isArray(ustawienia.kodyRabatoweZaawansowane)?ustawienia.kodyRabatoweZaawansowane:[];
   const result=[],seen=new Set();
   for(const raw of advanced){
     const kod=String(raw?.kod||"").trim().toUpperCase();if(!/^[A-Z0-9_-]{2,30}$/.test(kod)||seen.has(kod))continue;
     seen.add(kod);result.push({typ:"procent",wartosc:0,minKoszyk:0,maxRabat:0,zakres:"wszystkie",kategorie:[],produkty:[],aktywny:true,publiczny:false,...raw,kod});
   }
-  for(const [kod,procent] of Object.entries(KONFIG.kodyRabatowe||{})){
+  // Starsze kody są importowane tylko raz — zanim administrator zapisze nowy moduł.
+  // Inaczej usunięty kod wracał z KONFIG przy każdym renderowaniu podstrony.
+  for(const [kod,procent] of Object.entries(maZapisaneReguly?{}:(KONFIG.kodyRabatowe||{}))){
     const key=String(kod).toUpperCase();if(seen.has(key))continue;
     result.push({kod:key,typ:"procent",wartosc:Number(procent)||0,minKoszyk:0,maxRabat:0,zakres:"wszystkie",kategorie:[],produkty:[],aktywny:true,publiczny:true});
   }
@@ -188,6 +191,7 @@ function znajdzReguleRabatowa(kod){
   return regulyRabatowe().find(x=>x.kod===key)||null;
 }
 function ustawieniaPodstrony(id){ return {...(DOMYSLNE_PODSTRONY[id]||{}),...((ustawienia.podstrony||{})[id]||{})}; }
+function ikonaPodstronyHTML(id){const u=ustawieniaPodstrony(id);return u.ikonaObraz?`<span class="page-ai-icon"><img src="${esc(u.ikonaObraz)}" alt="" loading="lazy"></span>`:"";}
 function klasaPodstrony(id){
   const u=ustawieniaPodstrony(id);
   return `page page-${u.szerokosc||"standard"} ${u.styl==="plain"?"page-plain":""}`;

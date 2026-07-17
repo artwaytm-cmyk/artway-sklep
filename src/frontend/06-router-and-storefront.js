@@ -268,7 +268,7 @@ function renderuj(){
       }
       else if(t.startsWith("/admin/personalizacja/")){
         const s=t.split("/")[3]||"home";
-        w.innerHTML = s==="home"?widokAdminStronaGlowna():s==="rozmieszczenie"?widokAdminRozmieszczenie():s==="bannery"?widokAdminBanneryZaawansowane():s==="podstrony"?widokAdminPodstrony():s==="strony"?widokAdminStrony():s==="dostawy"?widokAdminDostawy():widokAdminWyglad();
+        w.innerHTML = s==="home"?widokAdminStronaGlowna():s==="rozmieszczenie"?widokAdminRozmieszczenie():s==="bannery"?widokAdminBanneryZaawansowane():s==="ikony"?widokAdminIkonyAI():s==="podstrony"?widokAdminPodstrony():s==="strony"?widokAdminStrony():s==="dostawy"?widokAdminDostawy():widokAdminWyglad();
       }
       else if(t==="/admin/asortyment" || t==="/admin/produkty") w.innerHTML = widokAdminProdukty();
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
@@ -318,6 +318,7 @@ function ikonaKategorii(nazwa){
   const mapa = {"Elektronika":"🎧","Dom i ogród":"🏡","Narzędzia":"🧰","Odzież":"🧥","Sport":"🏋️"};
   return mapa[nazwa] || "📦";
 }
+function ikonaKategoriiHTML(nazwa){const item=(ustawienia.ikonyKategorii||{})[nazwa];return item?.url?`<img src="${esc(item.url)}" alt="" loading="lazy">`:esc(ikonaKategorii(nazwa));}
 function opisKategorii(nazwa){
   const mapa = {
     "Elektronika":"Sprzęt i akcesoria do pracy, domu oraz podróży.",
@@ -332,8 +333,9 @@ function bannerUkrytyPrzezKlienta(id){try{return sessionStorage.getItem(`artway_
 function zamknijBannerSklepu(event,id){event.preventDefault();event.stopPropagation();try{sessionStorage.setItem(`artway_banner_hidden_${id}`,"1");}catch(e){}event.currentTarget.closest(".managed-banner-shell")?.remove();}
 function bannerSklepuHTML(b){
   const n=normalizujBaner(b),type=esc(n.typ),width=esc(n.szerokosc),height=esc(n.wysokosc),mobile=esc(n.mobileMode);
+  const shade=Math.max(0,Math.min(90,Number(n.przyciemnienie)||68))/100,position=esc(n.pozycjaObrazu||"center");
   return `<article class="managed-banner-shell banner-type-${type} banner-width-${width} banner-height-${height} banner-mobile-${mobile} ${n.przyklejony?"is-sticky":""}">
-    <a class="managed-banner ${n.obraz?'ma-obraz':''} banner-${esc(n.styl||"karta")} align-${esc(n.wyrownanie||"lewo")} audience-${esc(n.odbiorcy||"wszyscy")}" href="${esc(bezpiecznyLink(n.link))}" ${n.obraz?`style="background-image:linear-gradient(90deg,rgba(15,18,25,.78),rgba(15,18,25,.26)),url('${esc(n.obraz)}')"`:""}>
+    <a class="managed-banner ${n.obraz?'ma-obraz':''} banner-${esc(n.styl||"karta")} align-${esc(n.wyrownanie||"lewo")} audience-${esc(n.odbiorcy||"wszyscy")} anim-${esc(n.animacja||"brak")}" href="${esc(bezpiecznyLink(n.link))}" ${n.obraz?`aria-label="${esc(n.obrazAlt||n.tytul||"Banner")}" style="background-image:linear-gradient(90deg,rgba(15,18,25,${shade}),rgba(15,18,25,${Math.max(.12,shade-.4)})),url('${esc(n.obraz)}');background-position:${position}"`:""}>
       ${n.obraz?"":`<span class="banner-icon">${esc(n.ikona||"📣")}</span>`}
       <span>${n.etykieta?`<em class="managed-banner-badge">${esc(n.etykieta)}</em>`:""}<h3>${esc(n.tytul||"")}</h3><p>${esc(n.opis||"")}</p>${n.kodRabatowy?`<strong class="managed-banner-code">Kod: ${esc(n.kodRabatowy)}</strong>`:""}<small>${esc(n.przycisk||"Dowiedz się więcej")} →</small></span>
     </a>${n.zamykany?`<button class="managed-banner-close" type="button" aria-label="Zamknij banner" onclick="zamknijBannerSklepu(event,${jsArg(n.id)})">×</button>`:""}
@@ -385,7 +387,7 @@ function widokSklep(){
   const SEKCJE = {};
   SEKCJE.hero = () => `${banneryHome("nad-hero")}
   <section class="hero">
-    <div class="hero-in" ${hero.obraz?`style="background:linear-gradient(120deg,rgba(30,41,59,.88),rgba(49,46,129,.78) 60%,rgba(91,33,182,.68)),url('${hero.obraz}') center/cover"`:""}>
+    <div class="hero-in" ${hero.obraz?`style="background-image:linear-gradient(120deg,rgba(30,41,59,.88),rgba(49,46,129,.78) 60%,rgba(91,33,182,.68)),url('${esc(hero.obraz)}');background-position:${esc(hero.pozycjaObrazu||"center")};background-size:cover"`:""}>
       <span class="hero-eyebrow">${esc(hero.etykieta||"ARTWAY-TM • ZAKUPY PROSTO I WYGODNIE")}</span>
       <h1>${esc(KONFIG.heroTytul)}</h1>
       <p>${esc(KONFIG.heroOpis)}</p>
@@ -411,7 +413,7 @@ function widokSklep(){
     <div class="category-grid">
       ${(Array.isArray(oferta.kategorie)&&oferta.kategorie.length?kategorie.filter(k=>oferta.kategorie.includes(k)):kategorie).map(k=>`
         <a class="category-tile" href="#/kategoria/${encodeURIComponent(k)}">
-          <span class="category-ico">${ikonaKategorii(k)}</span>
+          <span class="category-ico">${ikonaKategoriiHTML(k)}</span>
           <b>${esc(k)}</b>
           <p>${esc(opisKategorii(k))}</p>
           <small>${produkty.filter(p=>p.kategoria===k).length} produktów →</small>
@@ -454,10 +456,10 @@ function widokSklep(){
   <div class="grid" id="grid"></div>
   <div class="pagination" id="paginacjaDol"></div>
   ${oferta.wyborDzialu!=="ukryty"&&oferta.wyborDzialu!=="nad-produktami"?`<div class="home-department-picker"><span>Wybierz dział oferty</span><div id="chips" class="home-category-chips"></div></div>`:""}${banneryHome("pod-produktami")}`;
-  SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(); return `
-  <section class="offer-band">
-    <div class="offer-band-in">
-      <div><h2>${esc(o.tytul||"Dobry moment na zakupy")}</h2><p>${o.opis?esc(o.opis):(promo?`Użyj kodu <b>${esc(promo.kod)}</b> w koszyku i odbierz ${esc(promo.procent)}% rabatu na zamówienie.`:"Sprawdź aktualne okazje i produkty w dobrych cenach.")}</p></div>
+  SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(),kod=o.kodRabatowy||promo?.kod||""; return `
+  <section class="offer-band offer-band-${esc(o.mobileMode||"kompaktowy")}">
+    <div class="offer-band-in" ${o.obraz?`style="background-image:linear-gradient(90deg,rgba(30,41,59,.88),rgba(49,46,129,.68)),url('${esc(o.obraz)}');background-position:${esc(o.pozycjaObrazu||"center")};background-size:cover"`:""}>
+      <span class="offer-band-icon">${esc(o.ikona||"🎁")}</span><div>${o.etykieta?`<small>${esc(o.etykieta)}</small>`:""}<h2>${esc(o.tytul||"Dobry moment na zakupy")}</h2><p>${o.opis?esc(o.opis):(kod?`Użyj kodu <b>${esc(kod)}</b>${promo?.procent?` w koszyku i odbierz ${esc(promo.procent)}% rabatu na zamówienie.`:" w koszyku."}`:"Sprawdź aktualne okazje i produkty w dobrych cenach.")}</p></div>
       <a href="${esc(bezpiecznyLink(o.link||"#/promocje"))}">${esc(o.tekstLinku||"Zobacz okazje")} →</a>
     </div>
   </section>`; };
@@ -807,7 +809,7 @@ function widokLogowanie(){
   const us=ustawieniaPodstrony("logowanie");
   return `
   <div class="${klasaPodstrony("logowanie")}"><div class="panel auth-box">
-    <h1>${esc(us.tytul)}</h1><p style="color:var(--muted2);margin-bottom:.7rem">${esc(us.opis||"")}</p>
+    ${ikonaPodstronyHTML("logowanie")}<h1>${esc(us.tytul)}</h1><p style="color:var(--muted2);margin-bottom:.7rem">${esc(us.opis||"")}</p>
     <div id="authMsg"></div>
     <form onsubmit="obsluzLogowanie(event)">
       <div class="f-group"><label>E-mail</label><input required name="email" type="text" autocomplete="username"></div>
@@ -823,7 +825,7 @@ function widokRejestracja(){
   const us=ustawieniaPodstrony("rejestracja");
   return `
   <div class="${klasaPodstrony("rejestracja")}"><div class="panel auth-box">
-    <h1>${esc(us.tytul)}</h1><p style="color:var(--muted2);margin-bottom:.7rem">${esc(us.opis||"")}</p>
+    ${ikonaPodstronyHTML("rejestracja")}<h1>${esc(us.tytul)}</h1><p style="color:var(--muted2);margin-bottom:.7rem">${esc(us.opis||"")}</p>
     <div id="authMsg"></div>
     <form onsubmit="obsluzRejestracje(event)">
       <div class="f-group"><label>Imię i nazwisko</label><input required name="imie" autocomplete="name"></div>
@@ -868,7 +870,7 @@ function widokKonto(){
   const zam = pobierzZamowienia().filter(z=>z.email===sesja.email);
   return `
   <div class="${klasaPodstrony("konto")}"><div class="panel">
-    <h1>${esc(us.tytul)}</h1>
+    ${ikonaPodstronyHTML("konto")}<h1>${esc(us.tytul)}</h1>
     <p style="color:var(--muted2);margin-bottom:.7rem">${admin?"Konto służbowe do zarządzania sklepem.":esc(us.opis||"")}</p>
     <p><b>${esc(sesja.imie)}</b> • ${esc(sesja.email)} ${admin?'<span class="lvl lvl-info">ADMINISTRATOR</span>':""}</p>
     ${admin?`
@@ -980,7 +982,7 @@ function widokZamowienia(){
   const naglowek = sesja ? "" : `<p style="margin-bottom:1rem"><a href="#/logowanie">Zaloguj się</a>, aby zamówienia były przypisane do Twojego konta.</p>`;
   return `
   <div class="${klasaPodstrony("zamowienia")}"><div class="panel">
-    <h1>${esc(us.tytul)}</h1>
+    ${ikonaPodstronyHTML("zamowienia")}<h1>${esc(us.tytul)}</h1>
     <p style="color:var(--muted2);margin-bottom:.7rem">${esc(us.opis||"")}</p>
     ${naglowek}
     ${zam.length?`<p class="pay-note" style="text-align:left;margin:.2rem 0 1rem">W szczegółach każdego zamówienia widzisz produkty, adres, dostawę, płatność, instrukcję opłacenia i aktualny tracking.</p>`:""}
@@ -1063,7 +1065,7 @@ function widokUlubione(){
   const lista = produkty.filter(p=>ulubione.includes(p.id));
   return `
   <div class="${klasaPodstrony("ulubione")}">
-    <h1 style="margin-bottom:.25rem">${esc(us.tytul)}</h1>
+    ${ikonaPodstronyHTML("ulubione")}<h1 style="margin-bottom:.25rem">${esc(us.tytul)}</h1>
     <p style="color:var(--muted2);margin-bottom:.8rem">${esc(us.opis||"")}</p>
     ${lista.length ? `<div class="grid" style="padding:0">${lista.map(kartaProduktu).join("")}</div>`
       : `<div class="panel"><p>Nie masz jeszcze ulubionych. Kliknij 🤍 na produkcie, żeby go tu dodać.</p><p style="margin-top:.6rem"><a href="#/">← Wróć do sklepu</a></p></div>`}
@@ -1087,7 +1089,7 @@ function widokKontakt(){
     <div class="crumb"><a href="#/">Sklep</a> › Kontakt</div>
     <div class="contact-layout">
       <div class="panel">
-        <h1>${esc(us.tytul)}</h1>
+        ${ikonaPodstronyHTML("kontakt")}<h1>${esc(us.tytul)}</h1>
         <p>${esc(us.opis||"")}</p>
         <form style="margin-top:1rem" onsubmit="wyslijKontakt(event)">
           <div class="f-row">
@@ -1124,7 +1126,7 @@ function widokONas(){
   <div class="${klasaPodstrony("onas")}">
     <div class="crumb"><a href="#/">Sklep</a> › O Artway-TM</div>
     <div class="panel">
-      <h1>${esc(us.tytul)}</h1>
+      ${ikonaPodstronyHTML("onas")}<h1>${esc(us.tytul)}</h1>
       <p style="color:var(--muted2);margin-bottom:.8rem">${esc(us.opis||"")}</p>
       <p>Artway-TM to sklep wielobranżowy stworzony z myślą o wygodnych zakupach w jednym miejscu. Oferta obejmuje elektronikę, wyposażenie domu i ogrodu, narzędzia, odzież oraz produkty sportowe.</p>
       <div class="info-grid">
@@ -1146,7 +1148,7 @@ function widokFAQ(){
   <div class="${klasaPodstrony("faq")}">
     <div class="crumb"><a href="#/">Sklep</a> › Najczęstsze pytania</div>
     <div class="panel">
-      <h1>${esc(us.tytul)}</h1>
+      ${ikonaPodstronyHTML("faq")}<h1>${esc(us.tytul)}</h1>
       <p style="margin-bottom:1rem">${esc(us.opis||"")}</p>
       <div class="faq-list">
         <details open><summary>Jak znaleźć odpowiedni produkt?</summary><p>Użyj wyszukiwarki w nagłówku, wybierz katalog albo skorzystaj z sortowania cenowego. Produkty możesz zapisywać na liście ulubionych.</p></details>
@@ -1218,7 +1220,7 @@ function stronaInfo(tytul, tresc,id){
   if(us?.widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
   const pageId=id||"info";
   const bloki={
-    naglowek:`<h1>${us?esc(us.tytul):tytul}</h1>`,
+    naglowek:`${us?ikonaPodstronyHTML(pageId):""}<h1>${us?esc(us.tytul):tytul}</h1>`,
     opis:us?.opis?`<p style="margin-bottom:1rem">${esc(us.opis)}</p>`:"",
     tresc,
     powrot:`<p style="margin-top:1.2rem"><a href="#/">← Wróć do sklepu</a></p>`

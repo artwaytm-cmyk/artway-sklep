@@ -343,6 +343,7 @@ function zapiszWyglad(e){
       link2:String(f.get("heroLink2")).trim()
     },
     pasekOkazji:{
+      ...(ustawienia.pasekOkazji||{}),
       tytul:String(f.get("okazjaTytul")||"").trim(),
       opis:String(f.get("okazjaOpis")||"").trim(),
       tekstLinku:String(f.get("okazjaTekstLinku")||"").trim(),
@@ -400,12 +401,12 @@ function polePlikuHTML(onchange, etykieta){
 /* banery */
 function wgrajObrazBanera(input, id){
   wgrajObrazek(input, 1200, url => {
-    zapiszCzescUstawien({bannery: pobierzBannery().map(x=>x.id===id?{...x, obraz:url}:x)});
+    zapiszCzescUstawien({bannery: pobierzBannery().map(x=>{if(x.id!==id)return x;const {aiAssetId,aiModel,aiGeneratedAt,aiBrief,...rest}=x;return {...rest,obraz:url};})});
     loguj("info","Wgrano obrazek banera "+id);
   });
 }
 function usunObrazBanera(id){
-  zapiszCzescUstawien({bannery: pobierzBannery().map(x=>{ const {obraz, ...reszta}=x; return x.id===id?reszta:x; })});
+  zapiszCzescUstawien({bannery: pobierzBannery().map(x=>{ const {obraz,aiAssetId,aiModel,aiGeneratedAt,aiBrief,...reszta}=x; return x.id===id?reszta:x; })});
 }
 /* logo sklepu */
 function wgrajLogo(input){ wgrajObrazek(input, 420, url => zapiszCzescUstawien({logoObraz:url})); }
@@ -414,8 +415,8 @@ function usunLogo(){ zapiszCzescUstawien({logoObraz:null}); }
 function wgrajFavicon(input){ wgrajObrazek(input, 96, url => zapiszCzescUstawien({faviconObraz:url})); }
 function usunFavicon(){ zapiszCzescUstawien({faviconObraz:null}); }
 /* tło baneru głównego */
-function wgrajTloHero(input){ wgrajObrazek(input, 1600, url => zapiszCzescUstawien({hero:{...(ustawienia.hero||{}), obraz:url}})); }
-function usunTloHero(){ const {obraz, ...h}=(ustawienia.hero||{}); zapiszCzescUstawien({hero:h}); }
+function wgrajTloHero(input){ wgrajObrazek(input, 1600, url => {const {aiAssetId,aiModel,...h}=(ustawienia.hero||{});zapiszCzescUstawien({hero:{...h,obraz:url}});}); }
+function usunTloHero(){ const {obraz,aiAssetId,aiModel, ...h}=(ustawienia.hero||{}); zapiszCzescUstawien({hero:h}); }
 /* zdjęcie produktu (wpisuje się do pola formularza) */
 function wgrajZdjecieProduktu(input){
   wgrajObrazek(input, 900, url => {

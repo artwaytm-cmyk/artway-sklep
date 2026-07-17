@@ -21,6 +21,26 @@ test('brief bannera jest normalizowany, a prompt rezerwuje miejsce na tekst HTML
   assert.match(prompt, /balonami/);
 });
 
+test('tryb ikony tworzy kwadratową grafikę z przezroczystym tłem i bez tekstu', async () => {
+  const input = normalizeAiBannerRequest({ kind: 'icon', iconUse: 'category', brief: 'Kolorowe gry rodzinne', subject: 'pionki i kostka', style: 'radosny' });
+  assert.equal(input.kind, 'icon');
+  assert.match(buildAiBannerPrompt(input), /rozmiarze 32–64 px/);
+  const repository = memoryRepository(), image = Buffer.alloc(12_000, 5), requests = [];
+  const generator = createAiBannerGenerator({
+    ...repository,
+    apiKey: 'test-key',
+    fetchImpl: async (url, options) => {
+      requests.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ data: [{ b64_json: image.toString('base64') }] }), { status: 200 });
+    },
+  });
+  const asset = await generator.generate(input);
+  assert.equal(requests[0].size, '1024x1024');
+  assert.equal(requests[0].background, 'transparent');
+  assert.equal(asset.kind, 'icon');
+  assert.equal(asset.iconUse, 'category');
+});
+
 test('generator wykonuje prawdziwe wywołanie Images API i zapisuje obraz osobno od ustawień', async () => {
   const repository = memoryRepository(), image = Buffer.alloc(12_000, 7), requests = [];
   const generator = createAiBannerGenerator({

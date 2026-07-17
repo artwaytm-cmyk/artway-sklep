@@ -3,7 +3,7 @@
    i otwierają właściwą zakładkę.                                          */
 const TABY_PERSONALIZACJI = [
   ["home","🏠 Strona główna"], ["wyglad","🎨 Układ globalny"], ["rozmieszczenie","🧭 Rozmieszczenie"], ["bannery","🖼️ Kreator bannerów"],
-  ["rabaty","🎁 Kody rabatowe","#/admin/asortyment/rabaty"], ["podstrony","🧱 Układ podstron"], ["strony","📄 Treści prawne"], ["dostawy","🚚 Dostawa i płatności"]
+  ["ikony","✨ Ikony AI"], ["rabaty","🎁 Kody rabatowe","#/admin/asortyment/rabaty"], ["podstrony","🧱 Układ podstron"], ["strony","📄 Treści prawne"], ["dostawy","🚚 Dostawa i płatności"]
 ];
 function personalizacjaSzkielet(tab, tresc){
   return adminSzkielet("/admin/personalizacja", `

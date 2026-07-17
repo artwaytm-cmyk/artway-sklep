@@ -113,8 +113,8 @@ function ustawKategorieWGrupie(id,tryb){
 function zmienKategorie(stara,nowa){
   nowa=String(nowa||"").trim();const d=katalogiDaneAdmin();if(!nowa||nowa===stara){toast("Wpisz inną nazwę");return;}if(d.nazwy.some(k=>k!==stara&&normalizujSzukanyTekst(k)===normalizujSzukanyTekst(nowa))){toast("Katalog o tej nazwie już istnieje");return;}
   const parents={...d.rodzice};if(parents[stara]){parents[nowa]=parents[stara];delete parents[stara];}Object.keys(parents).forEach(k=>{if(parents[k]===stara)parents[k]=nowa;});
-  const groups=d.grupy.map(g=>({...g,kategorie:[...new Set(g.kategorie.map(k=>k===stara?nowa:k))]})),own=(ustawienia.wlasneKategorie||[]).map(k=>k===stara?nowa:k),hidden=(ustawienia.ukryteKategorie||[]).map(k=>k===stara?nowa:k);
-  ustawienia.kategorie={...(ustawienia.kategorie||{}),[stara]:nowa};if(aktywnaKategoria===stara)aktywnaKategoria=nowa;loguj("info",`Zmieniono katalog: ${stara} → ${nowa}`);zapiszCzescUstawien({kategorie:ustawienia.kategorie,menuKategorii:groups,rodziceKategorii:parents,wlasneKategorie:own,ukryteKategorie:hidden});
+  const groups=d.grupy.map(g=>({...g,kategorie:[...new Set(g.kategorie.map(k=>k===stara?nowa:k))]})),own=(ustawienia.wlasneKategorie||[]).map(k=>k===stara?nowa:k),hidden=(ustawienia.ukryteKategorie||[]).map(k=>k===stara?nowa:k),icons={...(ustawienia.ikonyKategorii||{})};if(icons[stara]){icons[nowa]=icons[stara];delete icons[stara];}
+  ustawienia.kategorie={...(ustawienia.kategorie||{}),[stara]:nowa};if(aktywnaKategoria===stara)aktywnaKategoria=nowa;loguj("info",`Zmieniono katalog: ${stara} → ${nowa}`);zapiszCzescUstawien({kategorie:ustawienia.kategorie,menuKategorii:groups,rodziceKategorii:parents,wlasneKategorie:own,ukryteKategorie:hidden,ikonyKategorii:icons});
 }
 
 /* ── Mapowanie produktów ── */

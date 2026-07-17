@@ -4,6 +4,8 @@ const ASSET_INDEX_KEY = 'ai_banner_assets';
 const ASSET_PREFIX = 'ai_banner_asset:';
 const ALLOWED_QUALITY = new Set(['low', 'medium', 'high']);
 const ALLOWED_STYLE = new Set(['produktowy', 'radosny', 'elegancki', 'imprezowy', 'minimalny']);
+const ALLOWED_KINDS = new Set(['banner', 'icon']);
+const ALLOWED_ICON_USES = new Set(['category', 'subpage', 'navigation']);
 
 function clean(value, limit = 500) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, limit);
@@ -19,6 +21,8 @@ export function normalizeAiBannerRequest(raw = {}) {
     throw error;
   }
   return {
+    kind: ALLOWED_KINDS.has(clean(source.kind, 20)) ? clean(source.kind, 20) : 'banner',
+    iconUse: ALLOWED_ICON_USES.has(clean(source.iconUse, 30)) ? clean(source.iconUse, 30) : 'category',
     brief,
     goal: clean(source.goal, 160) || 'promocja sklepu internetowego',
     subject: clean(source.subject, 220) || 'gry, zabawki lub artykuły imprezowe',
@@ -37,6 +41,15 @@ export function buildAiBannerPrompt(input) {
     imprezowy: 'energetyczna scena imprezowa z balonami, konfetti i atrakcyjnym światłem',
     minimalny: 'minimalistyczna, czysta kompozycja produktowa z dużą ilością spokojnej przestrzeni',
   }[input.style] || 'profesjonalna kompozycja reklamowa';
+  if (input.kind === 'icon') return [
+    'Stwórz pojedynczą, kwadratową ikonę interfejsu dla polskiego sklepu Artway-TM.',
+    `Opis ikony: ${input.brief}. Zastosowanie: ${input.iconUse === 'subpage' ? 'nagłówek podstrony' : input.iconUse === 'navigation' ? 'nawigacja sklepu' : 'katalog produktów'}.`,
+    `Motyw: ${input.subject}. Kierunek wizualny: ${style}.`,
+    'Ikona ma być prosta, nowoczesna i natychmiast rozpoznawalna również w rozmiarze 32–64 px.',
+    'Kompozycja centralna, jeden główny symbol, czytelna sylwetka, delikatna głębia i spójna grubość detali.',
+    'Paleta zgodna ze sklepem: niebieski i fiolet jako akcenty, naturalne kolory przedmiotu, przezroczyste tło.',
+    'Nie dodawaj żadnych liter, napisów, liczb, cen, znaków wodnych, logotypów ani ramek. Nie kopiuj chronionych postaci ani marek.',
+  ].join(' ');
   return [
     'Stwórz poziomą grafikę hero/banner dla polskiego sklepu Artway-TM.',
     `Opis użytkownika: ${input.brief}.`,
@@ -80,7 +93,7 @@ export function createAiBannerGenerator({ read, write, remove, fetchImpl = globa
       error.status = 503;
       throw error;
     }
-    const input = normalizeAiBannerRequest(raw), prompt = buildAiBannerPrompt(input);
+    const input = normalizeAiBannerRequest(raw), prompt = buildAiBannerPrompt(input), isIcon = input.kind === 'icon';
     const response = await fetchImpl('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
@@ -88,11 +101,11 @@ export function createAiBannerGenerator({ read, write, remove, fetchImpl = globa
         model,
         prompt,
         n: 1,
-        size: '1536x1024',
+        size: isIcon ? '1024x1024' : '1536x1024',
         quality: input.quality,
         output_format: 'webp',
         output_compression: 82,
-        background: 'opaque',
+        background: isIcon ? 'transparent' : 'opaque',
         moderation: 'auto',
       }),
       signal: AbortSignal.timeout(120_000),
@@ -119,7 +132,7 @@ export function createAiBannerGenerator({ read, write, remove, fetchImpl = globa
     const url = `${publicPath}${encodeURIComponent(id)}`;
     const record = { id, mime: 'image/webp', base64: bytes.toString('base64'), bytes: bytes.length, sha256, createdAt, model, input, prompt };
     await write(`${ASSET_PREFIX}${id}`, record);
-    const metadata = { id, url, mime: record.mime, bytes: record.bytes, sha256, createdAt, model, brief: input.brief, title: input.title, discountCode: input.discountCode, style: input.style, quality: input.quality };
+    const metadata = { id, url, mime: record.mime, bytes: record.bytes, sha256, createdAt, model, kind: input.kind, iconUse: input.iconUse, brief: input.brief, title: input.title, discountCode: input.discountCode, style: input.style, quality: input.quality };
     await saveIndex(metadata);
     return metadata;
   }

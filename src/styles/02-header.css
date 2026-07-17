@@ -34,3 +34,4 @@ header{position:sticky;top:0;z-index:50;background:var(--panel);border-bottom:1p
 .menu-cat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.35rem .7rem;margin-top:.7rem}
 .menu-cat-grid label{display:flex;gap:.45rem;align-items:flex-start;font-size:.82rem;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.45rem .55rem}
 .menu-cat-grid small{color:var(--muted2)}
+.nav-generated-icon{width:20px;height:20px;object-fit:contain;vertical-align:middle}
