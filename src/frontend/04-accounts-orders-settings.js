@@ -144,7 +144,7 @@ function kategoriePrzypisaneDoAktywnychGrup(kategorie){
   return new Set(kategorie.filter(k=>przypisaneBezposrednio.has(k)||przypisaneBezposrednio.has(korzenKategoriiMenu(k,dozwolone))));
 }
 function linkKategoriiMenu(k){
-  return `<a href="#/kategoria/${encodeURIComponent(k)}"><span>${esc(k)}</span><span class="nav-count">${liczbaProduktowWKategorii(k)}</span></a>`;
+  return `<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${esc(k)}</span><span class="nav-count">${liczbaProduktowWKategorii(k)}</span></a>`;
 }
 function drzewoKategoriiMenuHTML(k,kategorie,poziom=0){
   const dzieci=dzieciKategoriiMenu(k,kategorie);
@@ -173,12 +173,12 @@ function odswiezMenu(){
   const bezGrupHTML = pokazBezGrup
     ? (grupy.length && bezGrupKorzenie.length>4
       ? dropdownMenuKategorii("Pozostałe",bezGrupKorzenie,"📁",kategorie)
-      : bezGrupKorzenie.slice(0,limitBezGrup).map(k=>`<a href="#/kategoria/${encodeURIComponent(k)}">${esc(k)}</a>`).join("") + (bezGrupKorzenie.length>limitBezGrup?dropdownMenuKategorii("Więcej",bezGrupKorzenie.slice(limitBezGrup),"📁",kategorie):""))
+      : bezGrupKorzenie.slice(0,limitBezGrup).map(k=>`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join("") + (bezGrupKorzenie.length>limitBezGrup?dropdownMenuKategorii("Więcej",bezGrupKorzenie.slice(limitBezGrup),"📁",kategorie):""))
     : "";
   n.innerHTML = `<a href="#/">🏪 Strona główna</a>`
     + grupyHTML
     + bezGrupHTML
-    + `<a href="#/promocje">🔥 Promocje</a><a href="#/nowosci">✨ Nowości</a>`
+    + `<a href="/promocje" onclick="return nawigujSklep(event,this.getAttribute('href'))">🔥 Promocje</a><a href="/nowosci" onclick="return nawigujSklep(event,this.getAttribute('href'))">✨ Nowości</a>`
     + (jestAdmin()?`<a href="#/admin" style="color:var(--brand2)">⚙️ Panel admina</a>`:"");
 }
 function odswiezUlubioneLicznik(){

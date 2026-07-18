@@ -27,9 +27,12 @@ function zaladujPanelAdmina(){
 function trasa(){
   const path=String(location.pathname||"").replace(/\/+$/,"")||"/";
   if(location.hash)return location.hash.replace(/^#/,"").split("?")[0]||"/";
-  if(/^\/produkt\/\d+$/i.test(path))return path;
+  if(/^\/(?:produkt|kategoria)\/[^/]+$/i.test(path)||["/promocje","/nowosci"].includes(path))return path;
   return "/";
 }
+function seoSlugKategorii(value=""){return String(value||"").toLocaleLowerCase("pl-PL").normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ł/g,"l").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"produkty";}
+function przejdzDoSklepu(path="/"){history.pushState(null,"",path);renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));}
+function nawigujSklep(event,path="/"){if(event&&(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||event.button>0))return true;event?.preventDefault?.();przejdzDoSklepu(path);return false;}
 function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
 let ostatniaRenderowanaTrasa="";
 let renderowanieWidoku=false;
@@ -300,6 +303,7 @@ function renderuj(){
     else w.innerHTML = `<div class="page"><div class="panel"><h1>404 — nie ma takiej strony 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
     if(t==="/"||t==="") { rysujChipy(); rysuj(); }
     seoAktualizujMetaDlaTrasy(t);
+    if(typeof seoSledzTrase==="function")seoSledzTrase(t);
     if(t==="/admin/aktualizacja"&&!stanAktualizacji.sprawdzono&&!stanAktualizacji.ladowanie) setTimeout(()=>sprawdzStatusAktualizacji(true),0);
     ostatniaRenderowanaTrasa=t;
   }catch(e){
@@ -312,6 +316,7 @@ function renderuj(){
   }
 }
 window.addEventListener("hashchange",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
+window.addEventListener("popstate",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 
 /* ═══════════ WIDOK: SKLEP (strona główna) ═══════════ */
 function ikonaKategorii(nazwa){
@@ -413,7 +418,7 @@ function widokSklep(){
     </div>
     <div class="category-grid">
       ${(Array.isArray(oferta.kategorie)&&oferta.kategorie.length?kategorie.filter(k=>oferta.kategorie.includes(k)):kategorie).map(k=>`
-        <a class="category-tile" href="#/kategoria/${encodeURIComponent(k)}">
+        <a class="category-tile" href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">
           <span class="category-ico">${ikonaKategoriiHTML(k)}</span>
           <b>${esc(k)}</b>
           <p>${esc(opisKategorii(k))}</p>
@@ -590,7 +595,7 @@ function kartaProduktu(p,index=0){
   const brakCeny = !produktMaCeneSprzedazy(p);
   const niedostepny = produktOznaczonyNiedostepny(p);
   return `
-  <article class="card" onclick="location.hash='#/produkt/${p.id}'">
+  <article class="card" onclick="przejdzDoSklepu('/produkt/${encodeURIComponent(p.id)}')">
     <div class="thumb" style="background:${p.kolor||'#eef2f7'}">
       ${niedostepny?`<span class="badge" style="background:#64748b">Chwilowo niedostępne</span>`:(brakCeny?`<span class="badge" style="background:#f97316">Do wyceny</span>`:(p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:""))}
       ${jestAdmin()?"":`<button class="fav-btn" onclick="event.stopPropagation();przelaczUlubione(${p.id})" aria-label="Ulubione">${ulub?"❤️":"🤍"}</button>`}
@@ -598,7 +603,7 @@ function kartaProduktu(p,index=0){
     </div>
     <div class="card-body">
       <span class="cat-label">${esc(p.kategoria)}${oceny?` <span style="color:var(--accent);text-transform:none;letter-spacing:0">★ ${oceny.srednia.toFixed(1)} (${oceny.n})</span>`:""}</span>
-      <h3>${esc(p.nazwa)}</h3>
+      <h3><a href="/produkt/${encodeURIComponent(p.id)}" onclick="event.stopPropagation();return nawigujSklep(event,this.getAttribute('href'))">${esc(p.nazwa)}</a></h3>
       <p class="desc">${esc(skrocTekst(opisKrotkiProduktu(p),190))}</p>
       <div class="price-row">
         <span class="price">${brakCeny?"Cena do uzupełnienia":zl(p.cena)}</span>
@@ -609,7 +614,7 @@ function kartaProduktu(p,index=0){
       ${niedostepny||brakCeny
         ? `<button class="add-btn" disabled style="background:#94a3b8;cursor:not-allowed">${brakCeny?"Cena do uzupełnienia":"Chwilowo niedostępny"}</button>`
         : p.warianty?.length
-          ? `<button class="add-btn" onclick="event.stopPropagation();location.hash='#/produkt/${p.id}'" style="background:var(--brand2)">Wybierz wariant →</button>`
+          ? `<button class="add-btn" onclick="event.stopPropagation();przejdzDoSklepu('/produkt/${encodeURIComponent(p.id)}')" style="background:var(--brand2)">Wybierz wariant →</button>`
           : `<div class="card-purchase" onclick="event.stopPropagation()"><div class="card-quantity" aria-label="Liczba sztuk"><button type="button" onclick="ustawIloscKarty(this.nextElementSibling,-1)" aria-label="Zmniejsz liczbę sztuk">−</button><input data-card-quantity type="number" min="1" max="99" step="1" value="1" inputmode="numeric" aria-label="Liczba sztuk produktu ${esc(p.nazwa)}" onchange="ustawIloscKarty(this)"><button type="button" onclick="ustawIloscKarty(this.previousElementSibling,1)" aria-label="Zwiększ liczbę sztuk">+</button></div><button class="add-btn" onclick="dodajZKarty(${p.id},this)">Do koszyka</button></div>`}
     </div>
   </article>`;
@@ -649,12 +654,13 @@ function listaPodstronyHTML(lista,pusty){
     <div class="pagination">${paginacjaHTML(stronaListyProduktow,stron,"ustawStroneListyProduktow")}</div>`;
 }
 function widokKategoria(nazwa){
+  nazwa=wszystkieKategorie().find(k=>k===nazwa||seoSlugKategorii(k)===seoSlugKategorii(nazwa))||nazwa;
   if(!wszystkieKategorie().includes(nazwa))
     return `<div class="page"><div class="panel"><h1>Nie ma takiego katalogu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
   const lista = produkty.filter(p=>p.kategoria===nazwa);
   return `
   <div class="page" style="max-width:1200px">
-    <div class="crumb"><a href="#/">Sklep</a> › ${esc(nazwa)}</div>
+    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${esc(nazwa)}</div>
     <h1 style="margin-bottom:.8rem">🗂️ ${esc(nazwa)} <small style="color:var(--muted2);font-size:.9rem">(${lista.length})</small></h1>
     ${listaPodstronyHTML(lista,"Ten katalog jest jeszcze pusty albo żaden produkt nie pasuje do wyszukiwania.")}
   </div>`;
@@ -697,7 +703,7 @@ function widokProdukt(id){
   const niedostepny = produktOznaczonyNiedostepny(p);
   return `
   <div class="page">
-    <div class="crumb"><a href="#/">Sklep</a> › <a href="#/" onclick="ustawKategorie('${esc(p.kategoria)}')">${esc(p.kategoria)}</a> › ${esc(p.nazwa)}</div>
+    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › <a href="/kategoria/${seoSlugKategorii(p.kategoria)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(p.kategoria)}</a> › ${esc(p.nazwa)}</div>
     <div class="panel">
       <div class="prod-detail">
         <div>

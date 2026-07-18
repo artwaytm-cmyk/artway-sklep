@@ -51,6 +51,7 @@ function dodajWIlosci(id,ilosc=1,btn=null,wariant=null){
   if(btn){const label=btn.dataset.originalLabel||btn.textContent;btn.dataset.originalLabel=label;btn.textContent=`✓ Dodano ${ile} szt.`;btn.classList.add("added");
     setTimeout(()=>{if(btn.isConnected){btn.textContent=label;btn.classList.remove("added");}},1100); }
   toast(`Dodano ${ile} ${ile===1?"sztukę":"szt."} do koszyka 🛒${wariant?" ("+wariant+")":""}`);
+  if(typeof seoSledzKoszyk==="function")seoSledzKoszyk(id);
   return true;
 }
 function dodaj(id,btn,wariant){return dodajWIlosci(id,1,btn,wariant);}
@@ -617,6 +618,7 @@ Uwagi: ${f.get("notes")||"brak"}`;
       zapiszLS("artway_zamowienia_goscia",[nr,...numery.filter(x=>x!==nr)].slice(0,20));
     }
     loguj("info",`Złożono zamówienie ${nr} na ${zl(razem)} (${dost.nazwa}, ${plat.nazwa})`);
+    if(typeof seoSledzZamowienie==="function")seoSledzZamowienie(razem);
 
 	    const infoPlatnosci = instrukcjaPlatnosciHTML(idP,nr,razem,noweZamowienie);
 	    const bladPaynow = idP==="paynow" && paynowWynik && paynowWynik.ok===false && !paynowWynik.skipped

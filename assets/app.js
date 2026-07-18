@@ -1316,7 +1316,7 @@ function kategoriePrzypisaneDoAktywnychGrup(kategorie){
   return new Set(kategorie.filter(k=>przypisaneBezposrednio.has(k)||przypisaneBezposrednio.has(korzenKategoriiMenu(k,dozwolone))));
 }
 function linkKategoriiMenu(k){
-  return `<a href="#/kategoria/${encodeURIComponent(k)}"><span>${esc(k)}</span><span class="nav-count">${liczbaProduktowWKategorii(k)}</span></a>`;
+  return `<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${esc(k)}</span><span class="nav-count">${liczbaProduktowWKategorii(k)}</span></a>`;
 }
 function drzewoKategoriiMenuHTML(k,kategorie,poziom=0){
   const dzieci=dzieciKategoriiMenu(k,kategorie);
@@ -1345,12 +1345,12 @@ function odswiezMenu(){
   const bezGrupHTML = pokazBezGrup
     ? (grupy.length && bezGrupKorzenie.length>4
       ? dropdownMenuKategorii("Pozostałe",bezGrupKorzenie,"📁",kategorie)
-      : bezGrupKorzenie.slice(0,limitBezGrup).map(k=>`<a href="#/kategoria/${encodeURIComponent(k)}">${esc(k)}</a>`).join("") + (bezGrupKorzenie.length>limitBezGrup?dropdownMenuKategorii("Więcej",bezGrupKorzenie.slice(limitBezGrup),"📁",kategorie):""))
+      : bezGrupKorzenie.slice(0,limitBezGrup).map(k=>`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join("") + (bezGrupKorzenie.length>limitBezGrup?dropdownMenuKategorii("Więcej",bezGrupKorzenie.slice(limitBezGrup),"📁",kategorie):""))
     : "";
   n.innerHTML = `<a href="#/">🏪 Strona główna</a>`
     + grupyHTML
     + bezGrupHTML
-    + `<a href="#/promocje">🔥 Promocje</a><a href="#/nowosci">✨ Nowości</a>`
+    + `<a href="/promocje" onclick="return nawigujSklep(event,this.getAttribute('href'))">🔥 Promocje</a><a href="/nowosci" onclick="return nawigujSklep(event,this.getAttribute('href'))">✨ Nowości</a>`
     + (jestAdmin()?`<a href="#/admin" style="color:var(--brand2)">⚙️ Panel admina</a>`:"");
 }
 function odswiezUlubioneLicznik(){
@@ -2527,9 +2527,12 @@ function zaladujPanelAdmina(){
 function trasa(){
   const path=String(location.pathname||"").replace(/\/+$/,"")||"/";
   if(location.hash)return location.hash.replace(/^#/,"").split("?")[0]||"/";
-  if(/^\/produkt\/\d+$/i.test(path))return path;
+  if(/^\/(?:produkt|kategoria)\/[^/]+$/i.test(path)||["/promocje","/nowosci"].includes(path))return path;
   return "/";
 }
+function seoSlugKategorii(value=""){return String(value||"").toLocaleLowerCase("pl-PL").normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ł/g,"l").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"produkty";}
+function przejdzDoSklepu(path="/"){history.pushState(null,"",path);renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));}
+function nawigujSklep(event,path="/"){if(event&&(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||event.button>0))return true;event?.preventDefault?.();przejdzDoSklepu(path);return false;}
 function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
 let ostatniaRenderowanaTrasa="";
 let renderowanieWidoku=false;
@@ -2800,6 +2803,7 @@ function renderuj(){
     else w.innerHTML = `<div class="page"><div class="panel"><h1>404 — nie ma takiej strony 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
     if(t==="/"||t==="") { rysujChipy(); rysuj(); }
     seoAktualizujMetaDlaTrasy(t);
+    if(typeof seoSledzTrase==="function")seoSledzTrase(t);
     if(t==="/admin/aktualizacja"&&!stanAktualizacji.sprawdzono&&!stanAktualizacji.ladowanie) setTimeout(()=>sprawdzStatusAktualizacji(true),0);
     ostatniaRenderowanaTrasa=t;
   }catch(e){
@@ -2812,6 +2816,7 @@ function renderuj(){
   }
 }
 window.addEventListener("hashchange",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
+window.addEventListener("popstate",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 
 /* ═══════════ WIDOK: SKLEP (strona główna) ═══════════ */
 function ikonaKategorii(nazwa){
@@ -2913,7 +2918,7 @@ function widokSklep(){
     </div>
     <div class="category-grid">
       ${(Array.isArray(oferta.kategorie)&&oferta.kategorie.length?kategorie.filter(k=>oferta.kategorie.includes(k)):kategorie).map(k=>`
-        <a class="category-tile" href="#/kategoria/${encodeURIComponent(k)}">
+        <a class="category-tile" href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">
           <span class="category-ico">${ikonaKategoriiHTML(k)}</span>
           <b>${esc(k)}</b>
           <p>${esc(opisKategorii(k))}</p>
@@ -3090,7 +3095,7 @@ function kartaProduktu(p,index=0){
   const brakCeny = !produktMaCeneSprzedazy(p);
   const niedostepny = produktOznaczonyNiedostepny(p);
   return `
-  <article class="card" onclick="location.hash='#/produkt/${p.id}'">
+  <article class="card" onclick="przejdzDoSklepu('/produkt/${encodeURIComponent(p.id)}')">
     <div class="thumb" style="background:${p.kolor||'#eef2f7'}">
       ${niedostepny?`<span class="badge" style="background:#64748b">Chwilowo niedostępne</span>`:(brakCeny?`<span class="badge" style="background:#f97316">Do wyceny</span>`:(p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:""))}
       ${jestAdmin()?"":`<button class="fav-btn" onclick="event.stopPropagation();przelaczUlubione(${p.id})" aria-label="Ulubione">${ulub?"❤️":"🤍"}</button>`}
@@ -3098,7 +3103,7 @@ function kartaProduktu(p,index=0){
     </div>
     <div class="card-body">
       <span class="cat-label">${esc(p.kategoria)}${oceny?` <span style="color:var(--accent);text-transform:none;letter-spacing:0">★ ${oceny.srednia.toFixed(1)} (${oceny.n})</span>`:""}</span>
-      <h3>${esc(p.nazwa)}</h3>
+      <h3><a href="/produkt/${encodeURIComponent(p.id)}" onclick="event.stopPropagation();return nawigujSklep(event,this.getAttribute('href'))">${esc(p.nazwa)}</a></h3>
       <p class="desc">${esc(skrocTekst(opisKrotkiProduktu(p),190))}</p>
       <div class="price-row">
         <span class="price">${brakCeny?"Cena do uzupełnienia":zl(p.cena)}</span>
@@ -3109,7 +3114,7 @@ function kartaProduktu(p,index=0){
       ${niedostepny||brakCeny
         ? `<button class="add-btn" disabled style="background:#94a3b8;cursor:not-allowed">${brakCeny?"Cena do uzupełnienia":"Chwilowo niedostępny"}</button>`
         : p.warianty?.length
-          ? `<button class="add-btn" onclick="event.stopPropagation();location.hash='#/produkt/${p.id}'" style="background:var(--brand2)">Wybierz wariant →</button>`
+          ? `<button class="add-btn" onclick="event.stopPropagation();przejdzDoSklepu('/produkt/${encodeURIComponent(p.id)}')" style="background:var(--brand2)">Wybierz wariant →</button>`
           : `<div class="card-purchase" onclick="event.stopPropagation()"><div class="card-quantity" aria-label="Liczba sztuk"><button type="button" onclick="ustawIloscKarty(this.nextElementSibling,-1)" aria-label="Zmniejsz liczbę sztuk">−</button><input data-card-quantity type="number" min="1" max="99" step="1" value="1" inputmode="numeric" aria-label="Liczba sztuk produktu ${esc(p.nazwa)}" onchange="ustawIloscKarty(this)"><button type="button" onclick="ustawIloscKarty(this.previousElementSibling,1)" aria-label="Zwiększ liczbę sztuk">+</button></div><button class="add-btn" onclick="dodajZKarty(${p.id},this)">Do koszyka</button></div>`}
     </div>
   </article>`;
@@ -3149,12 +3154,13 @@ function listaPodstronyHTML(lista,pusty){
     <div class="pagination">${paginacjaHTML(stronaListyProduktow,stron,"ustawStroneListyProduktow")}</div>`;
 }
 function widokKategoria(nazwa){
+  nazwa=wszystkieKategorie().find(k=>k===nazwa||seoSlugKategorii(k)===seoSlugKategorii(nazwa))||nazwa;
   if(!wszystkieKategorie().includes(nazwa))
     return `<div class="page"><div class="panel"><h1>Nie ma takiego katalogu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
   const lista = produkty.filter(p=>p.kategoria===nazwa);
   return `
   <div class="page" style="max-width:1200px">
-    <div class="crumb"><a href="#/">Sklep</a> › ${esc(nazwa)}</div>
+    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${esc(nazwa)}</div>
     <h1 style="margin-bottom:.8rem">🗂️ ${esc(nazwa)} <small style="color:var(--muted2);font-size:.9rem">(${lista.length})</small></h1>
     ${listaPodstronyHTML(lista,"Ten katalog jest jeszcze pusty albo żaden produkt nie pasuje do wyszukiwania.")}
   </div>`;
@@ -3197,7 +3203,7 @@ function widokProdukt(id){
   const niedostepny = produktOznaczonyNiedostepny(p);
   return `
   <div class="page">
-    <div class="crumb"><a href="#/">Sklep</a> › <a href="#/" onclick="ustawKategorie('${esc(p.kategoria)}')">${esc(p.kategoria)}</a> › ${esc(p.nazwa)}</div>
+    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › <a href="/kategoria/${seoSlugKategorii(p.kategoria)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(p.kategoria)}</a> › ${esc(p.nazwa)}</div>
     <div class="panel">
       <div class="prod-detail">
         <div>
@@ -4957,10 +4963,11 @@ function widokAdminWysylki(){
 
 /* Pozycjonowanie i darmowa promocja — bez płatnych API i bez sztucznych zmian treści. */
 const TABY_SEO=[
-  ["pulpit","📊 Pulpit"],["plan","🗓️ Plan dzienny"],["produkty","🏷️ Produkty SEO"],["tresci","✍️ Frazy i treści"],
+  ["pulpit","📊 Pulpit"],["efekty","📈 Efekty"],["plan","🗓️ Plan dzienny"],["produkty","🏷️ Produkty SEO"],["tresci","✍️ Frazy i treści"],
   ["promocja","📣 Darmowa promocja"],["techniczne","🛠️ Techniczne SEO"],["historia","🧾 Historia"],["ustawienia","⚙️ Ustawienia"]
 ];
-function seoSzkielet(tab,tresc){return adminSzkielet("/admin/seo",`${adminSubnavHTML(TABY_SEO.map(([id,label])=>({id,href:`#/admin/seo/${id}`,label})),tab)}${tresc}`);}
+function seoSzkielet(tab,tresc){const extras=tab==="promocja"?seoDodatkoweKanalyHTML():"";return adminSzkielet("/admin/seo",`${adminSubnavHTML(TABY_SEO.map(([id,label])=>({id,href:`#/admin/seo/${id}`,label})),tab)}${tresc}${extras}`);}
+function seoDodatkoweKanalyHTML(){return `<section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Dodatkowe kanały bez budżetu</span><h2>🌐 Pełne bezpłatne pokrycie</h2><p class="order-detail-lead">Automaty uruchamiamy tam, gdzie jest to bezpieczne. Kanały wymagające konta lub ręcznej publikacji pozostają wyraźnie oznaczone.</p></div></div><div class="seo-free-channels"><article><b>🖼️ Google Images i Lens — automatycznie</b><p>Mapa obrazów oraz dodatkowe zdjęcia w feedzie pomagają prezentować produkty w bezpłatnych wynikach obrazów i Lens.</p><a class="btn ghost" href="/sitemap.xml" target="_blank">Mapa obrazów</a></article><article><b>🔍 Bing i inne wyszukiwarki — automatycznie</b><p>IndexNow przekazuje nowe i zmienione adresy. Bezpłatne Bing Webmaster Tools pozwala dodatkowo kontrolować raporty.</p><a class="btn ghost" href="https://www.bing.com/webmasters/" target="_blank" rel="noopener">Bing Webmaster Tools ↗</a></article><article><b>📤 Udostępnianie organiczne — na żądanie</b><p>Produkt ma gotowy tytuł, opis i czysty adres do bezpłatnego udostępnienia. Publikacja pozostaje ręczna, aby nie wysyłać spamu.</p><a class="btn ghost" href="#/admin/seo/produkty">Wybierz produkt</a></article><article><b>📍 Profil Firmy Google — warunkowo</b><p>Bezpłatny profil lokalny ma sens wyłącznie przy rzeczywistej obsłudze klientów pod adresem lub na określonym obszarze.</p><a class="btn ghost" href="https://business.google.com/" target="_blank" rel="noopener">Profil Firmy Google ↗</a></article></div></section>`;}
 function seoTekstBezHTML(value=""){const el=document.createElement("div");el.innerHTML=String(value||"");return String(el.textContent||"").replace(/\s+/g," ").trim();}
 function seoPropozycjaProduktu(p={}){
   const brand=String(p.producent||p.marka||"").trim(),category=String(p.kategoria||"").trim();
@@ -5074,13 +5081,24 @@ function seoProduktyWorkspaceHTML(queue,tab="produkty"){
 function seoAktualizujMetaDlaTrasy(route=trasa()){
   const ensure=(selector,create)=>{let el=document.head.querySelector(selector);if(!el){el=document.createElement(create.tag||"meta");for(const [k,v] of Object.entries(create.attrs||{}))el.setAttribute(k,v);document.head.appendChild(el);}return el;},setMeta=(name,value,property=false)=>{const attr=property?"property":"name",el=ensure(`meta[${attr}="${name}"]`,{tag:"meta",attrs:{[attr]:name}});el.setAttribute("content",String(value||""));};
   const baseTitle=ustawienia.nazwaSklepu||"Artway-TM",baseDesc=ustawienia.seo?.opis||ustawienia.opisSklepu||"Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów.";let title=ustawienia.seo?.tytul||`Gry, zabawki i artykuły imprezowe | ${baseTitle}`,desc=baseDesc,canonical=location.origin+"/",image="",price="",schema={"@context":"https://schema.org","@graph":[{"@type":"WebSite",name:baseTitle,url:canonical,inLanguage:"pl-PL"},{"@type":"OnlineStore",name:baseTitle,url:canonical,email:ustawienia.email||"artwaytm@gmail.com",telephone:ustawienia.telefon||"+48530038914"}]};
-  if(route.startsWith("/produkt/")){const p=produkty.find(x=>String(x.id)===String(route.split("/")[2]));if(p){const effective=seoEfektywneDaneProduktu(p);title=effective.seoTitle||`${p.nazwa} | ${baseTitle}`;desc=effective.seoDescription;canonical=`${location.origin}/produkt/${p.id}`;image=p.zdjecie||p.zdjecia?.[0]||"";price=Number(p.cena||0)>0?Number(p.cena).toFixed(2):"";schema={"@context":"https://schema.org","@graph":[{"@type":"Product",name:p.nazwa,description:seoTekstBezHTML(p.opis||desc),image:[p.zdjecie,...(p.zdjecia||[])].filter(Boolean),sku:p.sku||p.externalId||String(p.id),gtin13:p.gtin||p.ean||undefined,brand:(p.producent||p.marka)?{"@type":"Brand",name:p.producent||p.marka}:undefined,offers:{"@type":"Offer",url:canonical,priceCurrency:"PLN",price,availability:produktOznaczonyNiedostepny(p)?"https://schema.org/OutOfStock":"https://schema.org/InStock",itemCondition:"https://schema.org/NewCondition"}},{"@type":"BreadcrumbList",itemListElement:[{"@type":"ListItem",position:1,name:"Strona główna",item:location.origin+"/"},{"@type":"ListItem",position:2,name:p.nazwa,item:canonical}]}]};}}
+  if(route.startsWith("/produkt/")){const p=produkty.find(x=>String(x.id)===String(route.split("/")[2]));if(p){const effective=seoEfektywneDaneProduktu(p);title=effective.seoTitle||`${p.nazwa} | ${baseTitle}`;desc=effective.seoDescription;canonical=`${location.origin}/produkt/${p.id}`;image=p.zdjecie||p.zdjecia?.[0]||"";price=Number(p.cena||0)>0?Number(p.cena).toFixed(2):"";const gtin=String(p.gtin||p.ean||"").replace(/\D/g,"");schema={"@context":"https://schema.org","@graph":[{"@type":"Product",name:p.nazwa,description:seoTekstBezHTML(p.opis||desc),image:[p.zdjecie,...(p.zdjecia||[])].filter(Boolean),sku:p.sku||p.externalId||String(p.id),...(gtin?{[`gtin${gtin.length}`]:gtin}:{}),brand:(p.producent||p.marka)?{"@type":"Brand",name:p.producent||p.marka}:undefined,offers:{"@type":"Offer",url:canonical,priceCurrency:"PLN",price,availability:produktOznaczonyNiedostepny(p)?"https://schema.org/OutOfStock":"https://schema.org/InStock",itemCondition:"https://schema.org/NewCondition"}},{"@type":"BreadcrumbList",itemListElement:[{"@type":"ListItem",position:1,name:"Strona główna",item:location.origin+"/"},{"@type":"ListItem",position:2,name:p.nazwa,item:canonical}]}]};}}
+  else if(route.startsWith("/kategoria/")){const raw=decodeURIComponent(route.split("/")[2]||""),category=wszystkieKategorie().find(k=>k===raw||seoSlugKategorii(k)===seoSlugKategorii(raw))||raw,list=produkty.filter(p=>p.kategoria===category);title=`${category} | ${baseTitle}`;desc=`Produkty z kategorii ${category}. Sprawdź aktualną ofertę, ceny i wygodną dostawę InPost.`;canonical=`${location.origin}/kategoria/${seoSlugKategorii(category)}`;image=list.find(p=>p.zdjecie)?.zdjecie||"";schema={"@context":"https://schema.org","@type":"CollectionPage",name:category,description:desc,url:canonical};}
+  else if(route==="/promocje"||route==="/nowosci"){const name=route==="/promocje"?"Promocje":"Nowości";title=`${name} | ${baseTitle}`;desc=route==="/promocje"?"Aktualne promocje na gry, zabawki kreatywne, balony i artykuły imprezowe.":"Nowe gry, zabawki kreatywne, balony i artykuły imprezowe w Artway-TM.";canonical=`${location.origin}${route}`;schema={"@context":"https://schema.org","@type":"CollectionPage",name,description:desc,url:canonical};}
   document.title=title;setMeta("description",desc);setMeta("robots",route.startsWith("/admin")||["/diagnostyka","/logowanie","/rejestracja","/konto","/zamowienia"].includes(route)?"noindex,nofollow":"index,follow,max-image-preview:large");setMeta("og:locale","pl_PL",true);setMeta("og:site_name",baseTitle,true);setMeta("og:title",title,true);setMeta("og:description",desc,true);setMeta("og:url",canonical,true);setMeta("og:type",route.startsWith("/produkt/")?"product":"website",true);setMeta("og:image",image,true);setMeta("twitter:card",image?"summary_large_image":"summary");setMeta("twitter:title",title);setMeta("twitter:description",desc);setMeta("twitter:image",image);setMeta("product:price:amount",price,true);setMeta("product:price:currency",price?"PLN":"",true);
   let link=document.head.querySelector('link[rel="canonical"]');if(!link){link=document.createElement("link");link.rel="canonical";document.head.appendChild(link);}link.href=canonical;let script=document.getElementById("artway-seo-schema");if(!script){script=document.createElement("script");script.id="artway-seo-schema";script.type="application/ld+json";document.head.appendChild(script);}script.textContent=JSON.stringify(schema);
 }
+function seoKanalNazwa(channel=""){return ({google:"Google",bing:"Bing",duckduckgo:"DuckDuckGo",yahoo:"Yahoo",ecosia:"Ecosia",other_search:"Inna wyszukiwarka"})[channel]||channel;}
+function seoEfektyPanelHTML(){
+  const state=typeof seoEfektyStan==="object"?seoEfektyStan:{loading:true,totals:{},channels:{},timeline:[],products:[]},totals=state.totals||{},max=Math.max(1,...(state.timeline||[]).map(x=>Number(x.landing)||0));
+  const channelRows=Object.entries(state.channels||{}).sort((a,b)=>(b[1].landing||0)-(a[1].landing||0)).map(([channel,v])=>`<tr><td><b>${esc(seoKanalNazwa(channel))}</b></td><td>${Number(v.landing)||0}</td><td>${Number(v.product_view)||0}</td><td>${Number(v.add_to_cart)||0}</td><td>${Number(v.order)||0}</td><td>${zl(Number(v.revenue)||0)}</td></tr>`).join("");
+  const productRows=(state.products||[]).map(item=>{const p=pobierzProduktAdmin(Number(item.productId));return `<tr><td>${p?.zdjecie?`<img class="seo-product-thumb" src="${esc(p.zdjecie)}" alt="">`:"📦"}</td><td><b>${esc(p?.nazwa||`Produkt ${item.productId}`)}</b><small>${esc(p?.externalId||p?.sku||item.productId)}</small></td><td>${Number(item.views)||0}</td><td>${Number(item.carts)||0}</td><td>${Number(item.views)>0?Math.round(Number(item.carts)*100/Number(item.views)):0}%</td></tr>`;}).join("");
+  return `<section class="seo-performance-grid"><article class="panel seo-performance-main"><div class="order-section-head"><div><span class="order-pro-label">Anonimowy pomiar wyników</span><h2>📈 Ruch i sprzedaż z wyszukiwarek</h2><p class="order-detail-lead">Rzeczywiste wejścia organiczne oraz dalsze działania klienta. Bez cookies reklamowych, adresów IP, danych klienta i tekstów wyszukiwania.</p></div><label class="seo-period-select">Okres<select onchange="seoPobierzEfekty(this.value,true)">${[7,30,90,365].map(days=>`<option value="${days}" ${Number(state.days)===days?"selected":""}>${days} dni</option>`).join("")}</select></label></div>${state.loading?`<div class="seo-metric-loading"><i></i><b>Pobieram rzeczywiste efekty…</b></div>`:state.error?`<div class="backend-note bad"><b>Pomiar chwilowo niedostępny:</b> ${esc(state.error)}</div>`:`<div class="seo-kpi-grid"><div><span>🔎</span><b>${Number(totals.landing)||0}</b><small>wejść z wyszukiwarek</small></div><div><span>🏷️</span><b>${Number(totals.product_view)||0}</b><small>kart produktów</small></div><div><span>🛒</span><b>${Number(totals.add_to_cart)||0}</b><small>dodań do koszyka</small></div><div><span>✅</span><b>${Number(totals.order)||0}</b><small>zamówień</small></div><div><span>💰</span><b>${zl(Number(totals.revenue)||0)}</b><small>sprzedaży organicznej</small></div></div><div class="seo-timeline" aria-label="Wejścia z wyszukiwarek w czasie">${(state.timeline||[]).map(x=>`<span title="${esc(x.day)}: ${Number(x.landing)||0} wejść"><i style="height:${Math.max(4,Math.round((Number(x.landing)||0)*100/max))}%"></i><small>${esc(String(x.day||"").slice(5))}</small></span>`).join("")}</div>`}</article><article class="panel"><h2>Źródła bezpłatnego ruchu</h2><div class="seo-table-wrap"><table class="log-table"><thead><tr><th>Wyszukiwarka</th><th>Wejścia</th><th>Produkty</th><th>Koszyk</th><th>Zamówienia</th><th>Sprzedaż</th></tr></thead><tbody>${channelRows||`<tr><td colspan="6">Pomiar rozpoczął się teraz. Dane pojawią się po wejściach klientów z wyszukiwarek.</td></tr>`}</tbody></table></div></article><article class="panel"><h2>Produkty pozyskujące ruch</h2><div class="seo-table-wrap"><table class="log-table"><thead><tr><th></th><th>Produkt</th><th>Wyświetlenia</th><th>Koszyk</th><th>Skuteczność</th></tr></thead><tbody>${productRows||`<tr><td colspan="5">Brak zmierzonych kart produktów w tym okresie.</td></tr>`}</tbody></table></div></article><article class="panel seo-measurement-note"><h2>Jak czytać wyniki</h2><p>Wzrost pozycji i indeksowanie nie są natychmiastowe ani gwarantowane. Panel pokazuje wynik biznesowy od momentu wdrożenia pomiaru; pełne dane zapytań i pozycji pozostają w bezpłatnych usługach Google Search Console i Merchant Center.</p><div class="diag-actions"><a class="btn ghost" href="https://search.google.com/search-console" target="_blank" rel="noopener">Search Console ↗</a><a class="btn ghost" href="https://merchants.google.com/" target="_blank" rel="noopener">Merchant Center ↗</a></div></article></section>`;
+}
 function widokAdminSEO(sekcja="pulpit"){
   const tab=TABY_SEO.some(([id])=>id===sekcja)?sekcja:"pulpit",queue=seoKolejkaProduktow(),limit=Math.max(1,Math.min(50,Number(seoUstawienia.dailyLimit)||5)),daily=queue.filter(x=>!String(x.product.seoReviewedAt||"").startsWith(new Date().toISOString().slice(0,10))).slice(0,limit),good=queue.filter(x=>x.score>=85).length,missing=queue.filter(x=>x.score<60).length,priority=queue.filter(x=>x.product.seoPromoted),avg=queue.length?Math.round(queue.reduce((s,x)=>s+x.score,0)/queue.length):0,indexNowOk=seoUstawienia.lastPromotionStatus==="accepted",indexNowState=indexNowOk?`Ostatnio zgłoszono ${Number(seoUstawienia.lastPromotionCount)||0} adresów — ${allegroDataTxt(seoUstawienia.lastPromotionAt)}`:seoUstawienia.lastPromotionStatus==="error"?"Ostatnie zgłoszenie nie powiodło się — automat ponowi próbę przy kolejnej partii":"Pierwsze zgłoszenie nastąpi przy najbliższej dziennej partii";
-  const head=`<div class="panel seo-hero"><div><span class="order-pro-label">Bezpłatny rozwój widoczności</span><h1>📣 Pozycjonowanie i promocja produktów</h1><p>Techniczne SEO, uporządkowane treści, plan małych dziennych partii oraz bezpłatne kanały Google — bez płatnych reklam i bez płatnych narzędzi.</p></div><div class="seo-hero-score"><b>${avg}%</b><small>średnia gotowość katalogu</small></div></div>`;
+  if(typeof seoPobierzEfekty==="function")queueMicrotask(()=>seoPobierzEfekty(typeof seoEfektyStan==="object"?seoEfektyStan.days:30));
+  const head=`<div class="panel seo-hero seo-control-hero"><div><span class="order-pro-label">Centrum bezpłatnego wzrostu</span><h1>📣 Pozycjonowanie i promocja produktów</h1><p>Techniczne SEO, uporządkowane treści, czyste adresy, dane Product/Offer, bezpłatny feed oraz rzeczywisty pomiar wejść i sprzedaży.</p><div class="seo-status-ribbon"><span class="ok">● Automat aktywny</span><span class="ok">● HTML produktów dla Google</span><span class="${indexNowOk?"ok":"wait"}">● IndexNow ${indexNowOk?"przyjęty":"oczekuje"}</span><span>● ${queue.length} produktów w mapie/feedzie</span></div></div><div class="seo-hero-score"><b>${avg}%</b><small>średnia gotowość katalogu</small></div></div>`;
+  if(tab==="efekty")return seoSzkielet(tab,`${head}${seoEfektyPanelHTML()}`);
   if(tab==="pulpit")return seoSzkielet(tab,`${head}<div class="orders-stat-grid seo-stat-grid"><div class="order-stat-card money"><span>✅</span><b>${good}</b><small>produktów gotowych</small></div><div class="order-stat-card ${missing?"hot":""}"><span>⚠️</span><b>${missing}</b><small>wymaga uzupełnienia</small></div><div class="order-stat-card"><span>🗓️</span><b>${daily.length}</b><small>w najbliższej partii</small></div><div class="order-stat-card money"><span>📣</span><b>${queue.length}</b><small>aktywnych w darmowej promocji</small></div></div><div class="panel"><div class="order-section-head"><div><h2>Plan na dziś: ${limit} produktów</h2><p class="order-detail-lead">Wszystkie aktywne produkty są promowane automatycznie. W kolejce kontroli najpierw są produkty z dodatkowym priorytetem i bestsellery, potem karty z największymi brakami.</p></div><button class="btn" onclick="seoUruchomPlanDzienny(this)" ${seoUstawienia.enabled?"":"disabled"}>▶️ Wykonaj dzisiejszą partię</button></div><div class="seo-progress"><span style="width:${avg}%"></span></div><div style="overflow:auto"><table class="log-table"><tr><th></th><th>Produkt</th><th>Wynik</th><th>Braki</th><th>Kontrola</th><th>Akcje</th></tr>${seoProduktRows(daily,limit)}</table></div></div>`);
   if(tab==="plan")return seoSzkielet(tab,`${head}<div class="panel"><div class="order-section-head"><div><h2>🗓️ Kolejka dzienna</h2><p class="order-detail-lead">Domyślnie 5 pozycji dziennie. Przy obecnym katalogu daje to pełny, spokojny cykl mniej więcej raz na tydzień. Nie zmieniamy treści tylko po to, by wyglądały na świeże.</p></div><button class="btn" onclick="seoUruchomPlanDzienny(this)">Uruchom ${limit} teraz</button></div><div style="overflow:auto"><table class="log-table"><tr><th></th><th>Produkt</th><th>Wynik</th><th>Braki</th><th>Ostatnio</th><th>Akcje</th></tr>${seoProduktRows(daily,limit)}</table></div></div>`);
   if(tab==="produkty"||tab==="tresci")return seoSzkielet(tab,`${head}${seoProduktyWorkspaceHTML(queue,tab)}`);
@@ -5095,6 +5113,57 @@ function zapiszCzescUstawien(obj){
   zastosujUstawienia(); zbudujProdukty(); odswiezMenu(); odswiezKoszyk();
   loguj("info","Zapisano ustawienia sklepu");
   toast("Zapisane ✅"); renderuj();
+}
+
+/* Anonimowy pomiar efektów SEO. Zapisuje wyłącznie dzienne sumy kanałów i działa tylko dla wejść z wyszukiwarek. */
+let seoEfektyStan={loading:false,loadedAt:0,error:"",days:30,totals:{landing:0,product_view:0,add_to_cart:0,order:0,revenue:0},channels:{},timeline:[],products:[],updatedAt:null};
+function seoKanalZHosta(host=""){
+  const value=String(host||"").toLowerCase();
+  if(/(^|\.)google\./.test(value))return "google";
+  if(/(^|\.)bing\.com$/.test(value))return "bing";
+  if(/(^|\.)duckduckgo\.com$/.test(value))return "duckduckgo";
+  if(/(^|\.)yahoo\./.test(value))return "yahoo";
+  if(/(^|\.)ecosia\.org$/.test(value))return "ecosia";
+  if(/(^|\.)(?:search\.brave\.com|qwant\.com|startpage\.com|yandex\.[a-z.]+|seznam\.cz)$/.test(value))return "other_search";
+  return "";
+}
+function seoKanalSesji(){
+  try{
+    const saved=sessionStorage.getItem("artway_seo_channel");if(saved)return saved;
+    const host=document.referrer?new URL(document.referrer).hostname:"",channel=seoKanalZHosta(host);
+    if(channel)sessionStorage.setItem("artway_seo_channel",channel);
+    return channel;
+  }catch(e){return "";}
+}
+function seoWyslijZdarzenie(event,data={}){
+  const channel=seoKanalSesji();if(!channel||jestAdmin())return;
+  const body={event,channel,productId:data.productId||"",value:Math.max(0,Number(data.value)||0)};
+  fetch("/api/seo/event",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),keepalive:true,credentials:"omit"}).catch(()=>{});
+}
+function seoSledzTrase(route="/"){
+  if(!seoKanalSesji()||String(route).startsWith("/admin"))return;
+  try{
+    if(!sessionStorage.getItem("artway_seo_landing")){sessionStorage.setItem("artway_seo_landing","1");seoWyslijZdarzenie("landing");}
+    if(String(route).startsWith("/produkt/")){
+      const id=String(route).split("/")[2]||"",key=`artway_seo_view_${id}`;
+      if(id&&!sessionStorage.getItem(key)){sessionStorage.setItem(key,"1");seoWyslijZdarzenie("product_view",{productId:id});}
+    }
+  }catch(e){}
+}
+function seoSledzKoszyk(productId){seoWyslijZdarzenie("add_to_cart",{productId});}
+function seoSledzZamowienie(value){
+  try{if(sessionStorage.getItem("artway_seo_order_sent"))return;sessionStorage.setItem("artway_seo_order_sent","1");}catch(e){}
+  seoWyslijZdarzenie("order",{value});
+}
+async function seoPobierzEfekty(days=30,force=false){
+  if(seoEfektyStan.loading||(!force&&Date.now()-seoEfektyStan.loadedAt<60_000))return;
+  seoEfektyStan={...seoEfektyStan,loading:true,error:"",days};
+  try{
+    const response=await fetch(`/api/seo/performance?days=${Math.max(7,Math.min(365,Number(days)||30))}`,{cache:"no-store",headers:chmuraNaglowki(false),credentials:"same-origin"});
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    const data=await response.json();seoEfektyStan={...seoEfektyStan,...data,loading:false,loadedAt:Date.now(),error:""};
+  }catch(error){seoEfektyStan={...seoEfektyStan,loading:false,loadedAt:Date.now(),error:String(error?.message||error)};}
+  if(trasa().startsWith("/admin/seo"))renderuj();
 }
 
 /* ═══════════ KOSZYK ═══════════ */
@@ -5150,6 +5219,7 @@ function dodajWIlosci(id,ilosc=1,btn=null,wariant=null){
   if(btn){const label=btn.dataset.originalLabel||btn.textContent;btn.dataset.originalLabel=label;btn.textContent=`✓ Dodano ${ile} szt.`;btn.classList.add("added");
     setTimeout(()=>{if(btn.isConnected){btn.textContent=label;btn.classList.remove("added");}},1100); }
   toast(`Dodano ${ile} ${ile===1?"sztukę":"szt."} do koszyka 🛒${wariant?" ("+wariant+")":""}`);
+  if(typeof seoSledzKoszyk==="function")seoSledzKoszyk(id);
   return true;
 }
 function dodaj(id,btn,wariant){return dodajWIlosci(id,1,btn,wariant);}
@@ -5716,6 +5786,7 @@ Uwagi: ${f.get("notes")||"brak"}`;
       zapiszLS("artway_zamowienia_goscia",[nr,...numery.filter(x=>x!==nr)].slice(0,20));
     }
     loguj("info",`Złożono zamówienie ${nr} na ${zl(razem)} (${dost.nazwa}, ${plat.nazwa})`);
+    if(typeof seoSledzZamowienie==="function")seoSledzZamowienie(razem);
 
 	    const infoPlatnosci = instrukcjaPlatnosciHTML(idP,nr,razem,noweZamowienie);
 	    const bladPaynow = idP==="paynow" && paynowWynik && paynowWynik.ok===false && !paynowWynik.skipped

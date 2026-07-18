@@ -23,6 +23,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/06-router-and-storefront.js',
       'src/frontend/07-admin-shipping.js',
       'src/frontend/09-seo.js',
+      'src/frontend/09a-seo-analytics.js',
       'src/frontend/17-cart-and-checkout.js',
       'src/frontend/18-pwa.js',
       'src/frontend/18-ui-and-bootstrap.js',
@@ -73,6 +74,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/05-content-and-account.css',
       'src/styles/08-cart-and-modals.css',
       'src/styles/09-notifications-and-responsive.css',
+      'src/styles/10-seo-ssr.css',
     ],
   },
   {
@@ -96,6 +98,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/22-home-promotions.css',
       'src/styles/23-banner-icon-studio.css',
       'src/styles/24-campaign-studio-pro.css',
+      'src/styles/25-seo-control-center.css',
     ],
   },
 ]);
