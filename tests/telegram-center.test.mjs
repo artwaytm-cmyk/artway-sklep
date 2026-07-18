@@ -205,6 +205,32 @@ test('audyt webhooka zapisuje wyłącznie bezpieczne metadane i licznik odrzuce�
   assert.equal(JSON.stringify(view).includes('999'), false);
 });
 
+test('centrum v2 zapisuje czytelne od-do i treść zaakceptowanej rozmowy, ale nie odrzuconej', async () => {
+  const data = new Map();
+  const read = async (key, fallback) => structuredClone(data.has(key) ? data.get(key) : fallback);
+  const write = async (key, value) => data.set(key, structuredClone(value));
+  const center = createTelegramCenter({ read, write, env: {} });
+  await center.recordInboundAudit({
+    accepted: true, deferred: true, kind: 'text', preview: '<b>Sprawdź nowe zamówienia</b>',
+    fromLabel: 'Tomasz Miotke', toLabel: 'Agent Artway-TM', messageId: 41, threadId: 7,
+    conversationKey: 'telegram:group:7',
+  });
+  await center.recordInboundAudit({ accepted: false, kind: 'text', preview: 'nie zapisuj tej treści', actorHash: 'abcdef1234567890abcdef12' });
+  await center.recordOutboundAudit({
+    kind: 'agent-reply', preview: '<b>Brak nowych zamówień.</b>', fromLabel: 'Agent Artway-TM',
+    toLabel: 'Tomasz Miotke', messageId: 42, threadId: 7, conversationKey: 'telegram:group:7',
+  });
+  const view = await center.view({ priorities: [] }, false);
+  const inbound = view.history.find((item) => item.messageId === 41), outbound = view.history.find((item) => item.messageId === 42);
+  assert.equal(inbound.preview, 'Sprawdź nowe zamówienia');
+  assert.equal(inbound.fromLabel, 'Tomasz Miotke');
+  assert.equal(inbound.toLabel, 'Agent Artway-TM');
+  assert.equal(inbound.threadId, 7);
+  assert.equal(outbound.preview, 'Brak nowych zamówień.');
+  assert.equal(outbound.direction, 'out');
+  assert.equal(JSON.stringify(view).includes('nie zapisuj tej treści'), false);
+});
+
 test('kolejka Telegram obejmuje tylko aktywne ostrzeżenia', () => {
   const events = telegramPriorityEvents({ priorities: [
     { actionId: 'one', severity: 'critical', count: 2, title: 'Nowe zamówienia', action: 'Sprawdź' },

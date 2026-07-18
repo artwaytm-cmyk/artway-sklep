@@ -20,12 +20,34 @@ import {
 
 const SETTINGS_KEY = 'telegram_communication_settings';
 const STATE_KEY = 'telegram_communication_state';
+const ARCHIVE_V1_KEY = 'telegram_communication_archive_v1';
 const OPEN_STATES = new Set(['open', 'acknowledged', 'snoozed']);
 const TELEGRAM_PANEL_ORIGIN = 'https://artwaytm.pl/';
 
 function clean(value = '', limit = 500) { return String(value ?? '').replace(/\u0000/g, '').slice(0, limit); }
 function nowIso() { return new Date().toISOString(); }
 function plusMinutes(iso, minutes) { return new Date(Date.parse(iso) + Math.max(0, Number(minutes) || 0) * 60000).toISOString(); }
+
+function conversationText(value = '', limit = 2400) {
+  const entities = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+  const plain = String(value ?? '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|blockquote|pre)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&(#\d+|#x[0-9a-f]+|amp|lt|gt|quot|apos|nbsp);/gi, (_match, entity) => {
+      if (entity[0] === '#') {
+        const radix = entity[1]?.toLowerCase() === 'x' ? 16 : 10;
+        const number = Number.parseInt(entity.replace(/^#x?/i, ''), radix);
+        return Number.isFinite(number) ? String.fromCodePoint(number) : '';
+      }
+      return entities[entity.toLowerCase()] || '';
+    })
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return plain.length > limit ? `${plain.slice(0, Math.max(1, limit - 1)).trimEnd()}…` : plain;
+}
 
 export function telegramPanelUrl(value = '', fallback = 'https://artwaytm.pl/#/admin/agent-ai/telegram') {
   try {
@@ -41,6 +63,7 @@ export function telegramPanelUrl(value = '', fallback = 'https://artwaytm.pl/#/a
 }
 function emptyState() {
   return {
+    schemaVersion: 2,
     initializedAt: '', updatedAt: '', lastDispatchAt: '', lastDigestAt: '', lastDigestSlot: '', events: {}, history: [], outbox: [],
     dashboard: { messageId: null, chatId: '', updatedAt: '', createdAt: '' },
     health: {
@@ -66,6 +89,11 @@ function auditEntry(input = {}) {
     status: clean(input.status || 'sent', 40), category: clean(input.category || 'operations', 40), severity: clean(input.severity || 'info', 30),
     title: clean(input.title || 'Telegram', 240), reason: clean(input.reason || '', 300), messageId: input.messageId ?? null,
     source: clean(input.source || 'system', 100), chatId: clean(input.chatId || '', 100), incidentId: clean(input.incidentId || '', 40),
+    preview: conversationText(input.preview || input.message || '', 2400),
+    fromLabel: clean(input.fromLabel || (input.direction === 'in' ? 'Zespół Telegram' : 'Agent Artway-TM'), 160),
+    toLabel: clean(input.toLabel || (input.direction === 'in' ? 'Agent Artway-TM' : 'Główna grupa Telegram'), 160),
+    threadId: Math.max(0, Number(input.threadId) || 0) || null,
+    conversationKey: clean(input.conversationKey || 'telegram-main', 180),
   };
 }
 
@@ -207,6 +235,21 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
   async function loadSettings() { return telegramSettings(await read(SETTINGS_KEY, {})); }
   async function loadState() {
     const raw = await read(STATE_KEY, emptyState()), base = emptyState(), source = raw && typeof raw === 'object' ? raw : {};
+    if (Number(source.schemaVersion || 1) < 2) {
+      const existingArchive = await read(ARCHIVE_V1_KEY, null);
+      if (!existingArchive) await write(ARCHIVE_V1_KEY, {
+        archivedAt: nowIso(), reason: 'Migracja do jednego centrum komunikacji v2',
+        history: Array.isArray(source.history) ? source.history : [], outbox: Array.isArray(source.outbox) ? source.outbox : [],
+        events: source.events && typeof source.events === 'object' ? source.events : {}, dashboard: source.dashboard || {}, health: source.health || {},
+      });
+      return {
+        ...base, initializedAt: source.initializedAt || '', updatedAt: nowIso(),
+        events: source.events && typeof source.events === 'object' ? source.events : {},
+        outbox: Array.isArray(source.outbox) ? source.outbox : [],
+        dashboard: { ...base.dashboard, ...(source.dashboard || {}) }, health: { ...base.health, ...(source.health || {}) },
+        migration: { from: 1, archivedAt: nowIso(), archiveKey: ARCHIVE_V1_KEY },
+      };
+    }
     return {
       ...base, ...source, events: source.events && typeof source.events === 'object' ? source.events : {}, history: Array.isArray(source.history) ? source.history : [],
       outbox: Array.isArray(source.outbox) ? source.outbox : [], dashboard: { ...base.dashboard, ...(source.dashboard || {}) }, health: { ...base.health, ...(source.health || {}) },
@@ -314,6 +357,12 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       title: accepted ? (deferred ? 'Przekazano wiadomość do Agenta' : 'Obsłużono wiadomość lokalnie') : 'Odrzucono wiadomość przez kontrolę dostępu',
       reason: !accepted && actorRef ? `ref ${actorRef}` : '',
       source: 'telegram-webhook',
+      preview: accepted ? input.preview : '',
+      fromLabel: accepted ? clean(input.fromLabel || 'Użytkownik Telegram', 160) : 'Nieuprawniony nadawca',
+      toLabel: accepted ? clean(input.toLabel || 'Agent Artway-TM', 160) : 'Kontrola dostępu',
+      messageId: accepted ? input.messageId : null,
+      threadId: accepted ? input.threadId : null,
+      conversationKey: accepted ? input.conversationKey : 'telegram-security',
     });
     await saveState(state);
     return {
@@ -326,14 +375,28 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     };
   }
 
+  async function recordOutboundAudit(input = {}) {
+    const state = await loadState();
+    addHistory(state, {
+      direction: 'out', kind: input.kind || 'message', status: input.status || 'sent',
+      category: input.category || 'conversation', severity: input.severity || 'info',
+      title: input.title || 'Wiadomość Telegram', reason: input.reason || '',
+      messageId: input.messageId, source: input.source || 'system', preview: input.preview,
+      fromLabel: input.fromLabel || 'Agent Artway-TM', toLabel: input.toLabel || 'Główna grupa Telegram',
+      threadId: input.threadId, conversationKey: input.conversationKey || 'telegram-main',
+    });
+    await saveState(state);
+    return { recorded: true };
+  }
+
   async function sendManual(message, options = {}) {
     const state = await loadState();
     try {
       const sent = await sendTelegramHtml(message, options, env);
-      addHistory(state, { kind: options.kind || 'manual', status: 'sent', category: options.category || 'manual', severity: options.severity || 'info', title: options.title || 'Ręczna wiadomość', messageId: sent?.message_id, source: options.source || 'admin-panel' });
+      addHistory(state, { kind: options.kind || 'manual', status: 'sent', category: options.category || 'manual', severity: options.severity || 'info', title: options.title || 'Ręczna wiadomość', messageId: sent?.message_id, source: options.source || 'admin-panel', preview: message, fromLabel: options.fromLabel || 'Panel administratora', toLabel: options.toLabel || 'Główna grupa Telegram', threadId: options.messageThreadId, conversationKey: options.conversationKey || 'telegram-main' });
       await saveState(state); return sent;
     } catch (error) {
-      addHistory(state, { kind: options.kind || 'manual', status: 'error', category: options.category || 'manual', severity: options.severity || 'info', title: options.title || 'Ręczna wiadomość', reason: error?.message || error, source: options.source || 'admin-panel' });
+      addHistory(state, { kind: options.kind || 'manual', status: 'error', category: options.category || 'manual', severity: options.severity || 'info', title: options.title || 'Ręczna wiadomość', reason: error?.message || error, source: options.source || 'admin-panel', preview: message, fromLabel: options.fromLabel || 'Panel administratora', toLabel: options.toLabel || 'Główna grupa Telegram', threadId: options.messageThreadId, conversationKey: options.conversationKey || 'telegram-main' });
       await saveState(state); throw error;
     }
   }
@@ -380,7 +443,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
         const result = await deliverIncident(record, settings, item.heading); record.messageId = result?.message_id || record.messageId; record.chatId = String(result?.chat?.id || record.chatId || '');
         record.sentAt = nowIso(); item.status = 'sent'; item.sentAt = nowIso(); sent += 1;
         deliveredIncidentIds.push(record.id);
-        addHistory(state, { kind: 'retry', status: 'sent', category: record.category, severity: record.severity, title: record.title, messageId: record.messageId, incidentId: record.id, source: 'delivery-queue' });
+        addHistory(state, { kind: 'retry', status: 'sent', category: record.category, severity: record.severity, title: record.title, messageId: record.messageId, incidentId: record.id, source: 'delivery-queue', preview: telegramIncidentCard(record, item.heading), fromLabel: 'Automatyka Artway-TM' });
       } catch (error) {
         item.attempts = Number(item.attempts || 0) + 1; item.lastError = clean(error?.message || error, 400); failed += 1;
         if (item.attempts >= 3) item.status = 'dead'; else item.nextAttemptAt = plusMinutes(nowIso(), [15, 60, 240][item.attempts] || 240);
@@ -418,7 +481,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       }
       const sent = await deliverIncident(record, settings); record.messageId = sent?.message_id || record.messageId; record.chatId = String(sent?.chat?.id || record.chatId || ''); record.sentAt = timestamp;
       record.pendingNotification = false;
-      addHistory(state, { kind: 'incident', status: 'sent', category: record.category, severity: record.severity, title: record.title, reason: decision.reason, messageId: record.messageId, incidentId: record.id, source: options.source || 'automation' });
+      addHistory(state, { kind: 'incident', status: 'sent', category: record.category, severity: record.severity, title: record.title, reason: decision.reason, messageId: record.messageId, incidentId: record.id, source: options.source || 'automation', preview: telegramIncidentCard(record), fromLabel: 'Automatyka Artway-TM' });
       await saveState(state); return { sent: true, messageId: record.messageId, incidentId: record.id, edited: sent?.edited === true };
     } catch (error) {
       enqueue(state, record, error); addHistory(state, { kind: 'incident', status: 'error', category: record.category, severity: record.severity, title: record.title, reason: error?.message || error, incidentId: record.id, source: options.source || 'automation' });
@@ -437,7 +500,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     if (!state.dashboard.messageId && options.create === true) {
       result = await sendTelegramHtml(text, { silent: true, replyMarkup: panelButtons(), messageThreadId: telegramTopicId(settings, 'operations') }, env);
       state.dashboard = { messageId: result?.message_id || null, chatId: String(result?.chat?.id || ''), createdAt: nowIso(), updatedAt: nowIso() };
-      addHistory(state, { kind: 'dashboard', status: 'sent', title: 'Utworzono stały pulpit operacyjny', messageId: result?.message_id, source: options.source || 'admin-panel' });
+      addHistory(state, { kind: 'dashboard', status: 'sent', title: 'Utworzono stały pulpit operacyjny', messageId: result?.message_id, source: options.source || 'admin-panel', preview: text, fromLabel: 'Automatyka Artway-TM' });
     } else if (state.dashboard.messageId) state.dashboard.updatedAt = nowIso();
     await saveState(state); return { active: !!state.dashboard.messageId, created: !!result && options.create === true, messageId: state.dashboard.messageId, updatedAt: state.dashboard.updatedAt };
   }
@@ -468,7 +531,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     for (const record of urgent.slice(0, settings.maxItems)) {
       try {
         const sent = await deliverIncident(record, settings); record.messageId = sent?.message_id || record.messageId; record.chatId = String(sent?.chat?.id || record.chatId || ''); record.sentAt = timestamp; record.digestFingerprint = record.fingerprint; delivered.push(record.id);
-        addHistory(state, { kind: 'urgent', status: 'sent', category: record.category, severity: record.severity, title: record.title, messageId: record.messageId, incidentId: record.id, source: options.source || 'schedule' });
+        addHistory(state, { kind: 'urgent', status: 'sent', category: record.category, severity: record.severity, title: record.title, messageId: record.messageId, incidentId: record.id, source: options.source || 'schedule', preview: telegramIncidentCard(record), fromLabel: 'Automatyka Artway-TM' });
       } catch (error) { enqueue(state, record, error); addHistory(state, { kind: 'urgent', status: 'error', category: record.category, severity: record.severity, title: record.title, reason: error?.message || error, incidentId: record.id, source: options.source || 'schedule' }); }
     }
     const slot = options.forceDigest ? `manual-${Date.now()}` : telegramDigestSlot(settings, state);
@@ -478,7 +541,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       try {
         const sent = await sendTelegramHtml(telegramRenderEvents(digestRecords, '📋 Nowe sprawy'), { silent: true, replyMarkup: panelButtons(), messageThreadId: telegramTopicId(settings, 'operations') }, env);
         for (const record of digestRecords) { record.digestFingerprint = record.fingerprint; record.digestSentAt = timestamp; }
-        digestSent = digestRecords.length; state.lastDigestAt = timestamp; state.lastDigestSlot = slot; addHistory(state, { kind: 'digest', status: 'sent', category: 'operations', severity: 'info', title: `Raport zbiorczy: ${digestRecords.length} spraw`, messageId: sent?.message_id, source: options.source || 'schedule' });
+        digestSent = digestRecords.length; state.lastDigestAt = timestamp; state.lastDigestSlot = slot; addHistory(state, { kind: 'digest', status: 'sent', category: 'operations', severity: 'info', title: `Raport zbiorczy: ${digestRecords.length} spraw`, messageId: sent?.message_id, source: options.source || 'schedule', preview: telegramRenderEvents(digestRecords, '📋 Nowe sprawy'), fromLabel: 'Automatyka Artway-TM' });
       } catch (error) { addHistory(state, { kind: 'digest', status: 'error', title: 'Raport zbiorczy', reason: error?.message || error, source: options.source || 'schedule' }); }
     }
     const deliveredThisCycle = new Set([...(retry.deliveredIncidentIds || []), ...delivered]);
@@ -490,7 +553,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       try {
         const sent = await sendTelegramHtml(escalationCard(record), { replyMarkup: telegramIncidentKeyboard(record), messageThreadId: telegramTopicId(settings, record.category) }, env);
         record.escalationLevel = Number(record.escalationLevel || 0) + 1; record.lastEscalatedAt = timestamp; escalated.push(record.id);
-        addHistory(state, { kind: 'escalation', status: 'sent', category: record.category, severity: record.severity, title: record.title, messageId: sent?.message_id, incidentId: record.id, source: options.source || 'schedule' });
+        addHistory(state, { kind: 'escalation', status: 'sent', category: record.category, severity: record.severity, title: record.title, messageId: sent?.message_id, incidentId: record.id, source: options.source || 'schedule', preview: escalationCard(record), fromLabel: 'Automatyka Artway-TM' });
       } catch (error) { enqueue(state, record, error, '⏱️ Eskalacja SLA'); }
     }
     if (state.dashboard.messageId) {
@@ -557,6 +620,8 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     ];
     await telegramApi('setMyCommands', { commands }, env);
     await Promise.allSettled([
+      telegramApi('setMyName', { name: 'Artway Centrum Operacyjne' }, env),
+      telegramApi('setMyName', { name: 'Artway Centrum Operacyjne', language_code: 'pl' }, env),
       telegramApi('setMyDescription', { description: 'Centrum operacyjne Artway-TM: zamówienia, Allegro, InPost, magazyn, producenci i komunikacja zespołu.' }, env),
       telegramApi('setMyShortDescription', { short_description: 'Najważniejsze sprawy sklepu bez chaosu i powtórzeń.' }, env),
       telegramApi('setChatMenuButton', { menu_button: { type: 'commands' } }, env),
@@ -581,7 +646,11 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       message = `<b>🏬 Magazyn</b>\n${rows.join('\n') || '✅ Brak pilnych braków.'}`; showButton = rows.length > 0;
     } else if (intent === 'settings') message = '<b>⚙️ Telegram</b>\nUstawienia alertów, ciszy i SLA są w panelu.';
     else { message = '<b>🤖 Napisz zwykłym językiem</b>\nNp. „co jest pilne?”, „czy są nowe zamówienia?” albo „kto czeka na odpowiedź?”.'; showButton = false; }
-    await recordInboundAudit({ accepted: true, deferred: false, kind: 'local_command' });
+    await recordInboundAudit({
+      accepted: true, deferred: false, kind: 'local_command', preview: meta.text,
+      fromLabel: meta.user || 'Użytkownik Telegram', messageId: meta.messageId,
+      threadId: meta.messageThreadId, conversationKey: `telegram:${meta.chatId || 'main'}:${meta.messageThreadId || 0}`,
+    });
     return { intent, message, replyMarkup: showButton ? panelButtons(intent) : undefined };
   }
 
@@ -596,5 +665,5 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     return { inline_keyboard: [[{ text: label, url }]] };
   }
 
-  return { connection, deliveryAction, dispatch, inbound, incidentAction, loadSettings, managedEvent, panelButtons, recordInboundAudit, refreshDashboard, registerWebhook, saveSettings, sendManual, view };
+  return { connection, deliveryAction, dispatch, inbound, incidentAction, loadSettings, managedEvent, panelButtons, recordInboundAudit, recordOutboundAudit, refreshDashboard, registerWebhook, saveSettings, sendManual, view };
 }

@@ -219,8 +219,10 @@ export function telegramSupplierTables(order = {}, onlySupplier = '') {
   }
   const messages = [];
   for (const [supplier, items] of groups.entries()) {
+    const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
     for (let offset = 0; offset < items.length; offset += 18) {
       const part = items.slice(offset, offset + 18);
+      const partNumber = Math.floor(offset / 18) + 1, partCount = Math.ceil(items.length / 18);
       const table = [
         `${telegramCell('KOD', 15)} ${telegramCell('NAZWA', 30)} ${telegramCell('POTRZEBNA ILOŚĆ', 16)}`,
         `${'-'.repeat(15)} ${'-'.repeat(30)} ${'-'.repeat(16)}`,
@@ -228,7 +230,18 @@ export function telegramSupplierTables(order = {}, onlySupplier = '') {
       ].join('\n');
       messages.push({
         supplier,
-        text: `<b>🧾 ${telegramHtml(order?.numer || order?.id || 'Zlecenie producenta')} — ${telegramHtml(supplier)}</b>${items.length > 18 ? `\nCzęść ${Math.floor(offset / 18) + 1}/${Math.ceil(items.length / 18)}` : ''}\n\n<pre>${telegramHtml(table)}</pre>`,
+        text: [
+          `<b>🏭 Zamówienie do producenta · ${telegramHtml(supplier)}</b>`,
+          `<b>${telegramHtml(order?.numer || order?.id || 'Zlecenie producenta')}</b> · ${items.length} pozycji · ${telegramHtml(totalQuantity)} szt.${partCount > 1 ? ` · część ${partNumber}/${partCount}` : ''}`,
+          '',
+          'Cześć,',
+          'przesyłamy dzisiejsze zamówienie:',
+          '',
+          `<pre>${telegramHtml(table)}</pre>`,
+          partNumber === partCount ? 'Pozdrowienia dla całej ekipy!\n<b>Artway-TM</b>' : '<i>Dalsza część tabeli w następnej wiadomości.</i>',
+          '',
+          '<i>Podgląd wewnętrzny — ta wiadomość nie wysyła zamówienia producentowi.</i>',
+        ].join('\n'),
       });
     }
   }

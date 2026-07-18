@@ -40,7 +40,11 @@ test('naturalna wiadomość webhooka trafia do kolejki Codex, a nie do uproszczo
   assert.equal(queued.kind, 'voice');
   assert.equal(queued.context, 'Poprzednie pytanie klienta');
   assert.deepEqual(queued.media, { kind: 'voice', fileId: 'voice-1', mimeType: 'audio/ogg', fileName: '' });
-  assert.deepEqual(audit, { accepted: true, deferred: true, kind: 'voice' });
+  assert.deepEqual(audit, {
+    accepted: true, deferred: true, kind: 'voice',
+    preview: 'sprawdź, co wymaga dziś działania', fromLabel: 'Artway', messageId: 88,
+    threadId: 9, conversationKey: 'telegram:123:9',
+  });
   assert.equal(centerCalls, 0);
 });
 

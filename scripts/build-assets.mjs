@@ -35,6 +35,7 @@ export const ASSET_BUNDLES = Object.freeze([
     sources: [
       'src/frontend/08-admin-navigation.js',
       'src/frontend/10-agent-ai.js',
+      'src/frontend/10a-telegram-communications.js',
       'src/frontend/10-warehouse-locations.js',
       'src/frontend/10-warehouse-qr.js',
       'src/frontend/10-warehouse-documents.js',
@@ -99,6 +100,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/23-banner-icon-studio.css',
       'src/styles/24-campaign-studio-pro.css',
       'src/styles/25-seo-control-center.css',
+      'src/styles/26-telegram-communications.css',
     ],
   },
 ]);

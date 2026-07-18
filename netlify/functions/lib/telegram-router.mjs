@@ -3,7 +3,7 @@ import { telegramAgentReport } from './telegram-center.mjs';
 
 const ACTIONS = new Set([
   'telegram-center-status', 'telegram-settings-save', 'telegram-register-webhook', 'telegram-dispatch', 'telegram-inbound-command',
-  'telegram-inbound-audit',
+  'telegram-inbound-audit', 'telegram-outbound-audit',
   'telegram-incident-action', 'telegram-delivery-action', 'telegram-dashboard-refresh', 'telegram-send-note', 'telegram-test', 'telegram-send-agent-report', 'telegram-send-supplier-order',
   'codex-agent-claim', 'codex-agent-complete', 'codex-agent-fail', 'codex-agent-heartbeat', 'codex-agent-panel-enqueue', 'codex-agent-result',
   'agent-runtime-status', 'agent-runtime-report',
@@ -118,7 +118,24 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
     const body = await req.json().catch(() => ({})), session = sessionOf(req), operator = session?.email || 'administrator';
     if (action === 'telegram-inbound-audit') {
       if (!center || typeof center.recordInboundAudit !== 'function') return respond({ ok: false, error: 'Audyt Telegram nie jest dostępny', code: 'telegram_audit_unavailable' }, 503);
-      return respond({ ok: true, audit: await center.recordInboundAudit({ accepted: body.accepted === true, deferred: body.deferred === true, kind: body.kind, actorHash: body.actorHash }) });
+      const accepted = body.accepted === true;
+      return respond({ ok: true, audit: await center.recordInboundAudit({
+        accepted, deferred: body.deferred === true, kind: body.kind, actorHash: body.actorHash,
+        ...(accepted ? {
+          preview: text(body.preview || body.text || '', 2400), fromLabel: text(body.fromLabel || body.user || 'Użytkownik Telegram', 160),
+          toLabel: text(body.toLabel || 'Agent Artway-TM', 160), messageId: body.messageId,
+          threadId: body.threadId || body.messageThreadId, conversationKey: text(body.conversationKey || 'telegram-main', 180),
+        } : {}),
+      }) });
+    }
+    if (action === 'telegram-outbound-audit') {
+      if (!center || typeof center.recordOutboundAudit !== 'function') return respond({ ok: false, error: 'Audyt Telegram nie jest dostępny', code: 'telegram_audit_unavailable' }, 503);
+      return respond({ ok: true, audit: await center.recordOutboundAudit({
+        kind: text(body.kind || 'message', 60), status: text(body.status || 'sent', 40), category: text(body.category || 'conversation', 40),
+        title: text(body.title || 'Odpowiedź Agenta', 240), preview: text(body.preview || '', 2400), messageId: body.messageId,
+        fromLabel: text(body.fromLabel || 'Agent Artway-TM', 160), toLabel: text(body.toLabel || 'Główna grupa Telegram', 160),
+        threadId: body.threadId || body.messageThreadId, conversationKey: text(body.conversationKey || 'telegram-main', 180), source: text(body.source || 'telegram-webhook', 100),
+      }) });
     }
     if (action === 'agent-runtime-report') {
       if (!agentRuntime || typeof agentRuntime.report !== 'function') return respond({ ok: false, error: 'Rejestr pracy Agenta nie jest dostępny', code: 'agent_runtime_unavailable' }, 503);
@@ -178,6 +195,12 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
       // Po sukcesie Telegram nie ponawiamy wysyłki, nawet jeśli sam zapis
       // audytu chwilowo zawiedzie — chroni to rozmowę przed duplikatem.
       const completed = await codexQueue.markDelivered({ id: body.id, claimToken: body.claimToken, telegramMessageId: sent?.message_id });
+      if (typeof center?.recordOutboundAudit === 'function') await center.recordOutboundAudit({
+        kind: 'agent-reply', status: 'sent', category: 'agent', title: 'Odpowiedź Agenta na polecenie',
+        preview: prepared.job.response, messageId: sent?.message_id, fromLabel: 'Agent Artway-TM',
+        toLabel: prepared.job.user || 'Zespół Telegram', threadId: prepared.job.messageThreadId,
+        conversationKey: `telegram:${prepared.job.chatId || 'main'}:${prepared.job.messageThreadId || 0}`, source: 'codex-agent',
+      }).catch(() => null);
       const approvalTarget = codexAgentApprovalReplyTarget(prepared.job);
       if (completed.delivered === true && approvalTarget) await clearTelegramReplyMarkup(approvalTarget).catch(() => null);
       return respond({ ok: true, ...completed, messageId: sent?.message_id || null });
@@ -252,7 +275,7 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
         requestId: body.requestId, source: body.source, channel: body.source === 'telegram-webhook' ? 'telegram' : 'panel',
       }) : null;
       if (inventory) {
-        if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred: false, kind: 'inventory' });
+        if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred: false, kind: 'inventory', preview: body.text, fromLabel: body.fromLabel || body.user, messageId: body.replyTo, threadId: body.messageThreadId, conversationKey: `telegram:${body.chatId || 'main'}:${body.messageThreadId || 0}` });
         return respond({ ok: true, ...inventory });
       }
       if (body.deferToCodex === true && body.source === 'telegram-webhook' && codexQueue) {
@@ -261,7 +284,7 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
           replyTo: body.replyTo, user: body.user, userId: body.userId, context: body.context, media: body.media, kind: body.kind, channel: 'telegram',
         });
         const deferred = ['queued', 'processing', 'delivering'].includes(queued.status);
-        if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred, kind: body.kind || 'text' });
+        if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred, kind: body.kind || 'text', preview: body.text, fromLabel: body.fromLabel || body.user, messageId: body.replyTo, threadId: body.messageThreadId, conversationKey: `telegram:${body.chatId || 'main'}:${body.messageThreadId || 0}` });
         if (!deferred) {
           const completed = queued.status === 'completed';
           return respond({
@@ -280,7 +303,7 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
         });
       }
       const operational = await getOperationalCenter();
-      return respond({ ok: true, ...(await center.inbound(text(body.intent || body.text, 1000), operational, { text: body.text, user: body.user, chatId: body.chatId, messageThreadId: body.messageThreadId })) });
+      return respond({ ok: true, ...(await center.inbound(text(body.intent || body.text, 1000), operational, { text: body.text, user: body.fromLabel || body.user, chatId: body.chatId, messageId: body.replyTo, messageThreadId: body.messageThreadId })) });
     }
     if (action === 'telegram-incident-action') {
       const actor = body.actor && typeof body.actor === 'object' ? body.actor : { name: operator, email: operator };

@@ -91,6 +91,15 @@ async function auditRejectedInbound(origin = '', token = '', kind = 'unknown', a
   }).catch(() => null);
 }
 
+async function auditOutbound(origin = '', token = '', input = {}) {
+  if (!origin || !token) return;
+  await fetch(`${origin}/api/store?action=telegram-outbound-audit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin-token': token },
+    body: JSON.stringify(input),
+  }).catch(() => null);
+}
+
 async function notifyAccessDenied({ userId = '', chatId = '', replyTo = null } = {}) {
   const privateChatId = String(userId || '').trim(), sourceChatId = String(chatId || '').trim();
   if (!privateChatId) return;
@@ -215,6 +224,8 @@ export default async (request) => {
     ...(Number(message.message_thread_id) > 0 ? { message_thread_id: Number(message.message_thread_id) } : {}),
   }, process.env).catch(() => null);
   const rawInput = String(callback?.data || message.text || message.caption || '').trim();
+  const senderLabel = [sender.first_name, sender.last_name].filter(Boolean).join(' ').trim() || sender.username || 'Użytkownik Telegram';
+  const chatLabel = String(message.chat.title || message.chat.first_name || 'Główna grupa Telegram').trim();
   const normalizedInput = callback?.id ? { text: rawInput, forceCodex: false } : normalizeTelegramAgentInput(rawInput);
   const media = telegramMessageMedia(message);
   const input = normalizedInput.text || (media ? `[Telegram: wiadomość ${media.kind === 'voice' ? 'głosowa' : 'audio'} do transkrypcji]` : '');
@@ -283,6 +294,7 @@ export default async (request) => {
         intent: telegramNaturalIntent(input), text: input, chatId, messageThreadId: message.message_thread_id || null,
         replyTo: message.message_id || null, requestId: String(update.update_id || `${chatId}:${message.message_id || ''}`),
         user: sender.username || [sender.first_name, sender.last_name].filter(Boolean).join(' '), userId,
+        fromLabel: senderLabel, chatLabel, chatType: message.chat.type || '',
         context: agentApproval ? cleanTelegramText(message.text || message.caption || '', 1600) : telegramReplyContext(message.reply_to_message),
         media, kind: inboundKind,
         source: 'telegram-webhook', deferToCodex: Boolean(agentApproval) || (!callback?.id && telegramCommandRoute(input) === 'agent'),
@@ -304,7 +316,13 @@ export default async (request) => {
     if (data.deferred) {
       return response();
     }
-    await sendTelegramHtml(data.message, { chatId, replyTo: message.message_id, replyMarkup: data.replyMarkup, messageThreadId: message.message_thread_id || null }, process.env);
+    const sent = await sendTelegramHtml(data.message, { chatId, replyTo: message.message_id, replyMarkup: data.replyMarkup, messageThreadId: message.message_thread_id || null }, process.env);
+    await auditOutbound(origin, token, {
+      kind: 'local-reply', status: 'sent', category: 'agent', title: 'Odpowiedź bota na polecenie', preview: data.message,
+      messageId: sent?.message_id || null, fromLabel: 'Agent Artway-TM', toLabel: senderLabel || chatLabel,
+      messageThreadId: message.message_thread_id || null, conversationKey: `telegram:${chatId}:${message.message_thread_id || 0}`,
+      source: 'telegram-webhook',
+    });
   } catch (error) {
     if (callback?.id) {
       await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: String(error?.message || error).slice(0, 180), show_alert: true }, process.env).catch(() => null);
