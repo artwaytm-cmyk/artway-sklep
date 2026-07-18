@@ -74,7 +74,7 @@ test('zatwierdzenie szkicu zapisuje wyłącznie dozwolone pola produktu i jest i
   assert.equal(product.agentTextModel, 'gpt-5-nano-2025-08-07');
 });
 
-test('automatyczny cykl poprawia pełną treść, oznacza wykonanie i nie analizuje ponownie tych samych faktów', async () => {
+test('automatyczny cykl najpierw pyta o zapis treści i po zatwierdzeniu nie analizuje ponownie tych samych faktów', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 99, nazwa: 'NOWA GRA | SKLEP', producent: 'Alexander', kategoria: 'Gry rodzinne', gtin: '5906018000092', opis: 'Słaby opis.', opisKrotki: 'Stary skrót.', allegroCategoryId: '123' }] }, rev: 1 } });
   let calls = 0;
   const longDescription = '<h2>Rodzinna rozgrywka</h2><p>Ta gra pozwala wspólnie spędzić czas, ćwiczyć spostrzegawczość i poznawać zasady opisane w dołączonej instrukcji.</p><ul><li>Czytelne zasady</li><li>Wspólna zabawa</li></ul>';
@@ -91,8 +91,11 @@ test('automatyczny cykl poprawia pełną treść, oznacza wykonanie i nie analiz
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => { calls += 1; return new Response(JSON.stringify(editorialPayload), { status: 200, headers: { 'content-type': 'application/json' } }); } });
   const cycle = await service.automaticCycle();
   assert.equal(cycle.prepared.length, 1);
-  assert.equal(cycle.prepared[0].status, 'auto_applied');
-  assert.equal(cycle.applied.length, 1);
+  assert.equal(cycle.prepared[0].status, 'needs_decision');
+  assert.equal(cycle.applied.length, 0);
+  const pending = (await service.status()).decisions.find((item) => item.kind === 'product_content_review');
+  assert.ok(pending);
+  await service.updateDecision(pending.id, 'approve', { fieldKeys: fields.map((field) => field.key) }, { email: 'admin@example.com' });
   const product = repo.values.get('settings').data.artway_produkty_dodane[0];
   assert.equal(product.nazwa, 'Nowa gra rodzinna');
   assert.equal(product.opis, longDescription);
@@ -105,9 +108,12 @@ test('automatyczny cykl poprawia pełną treść, oznacza wykonanie i nie analiz
   assert.equal(second.reason, 'no_candidates');
   assert.equal(calls, 1);
   const status = await service.status();
-  assert.equal(status.history[0].approvalStatus, 'auto_applied');
+  assert.equal(status.history[0].approvalStatus, 'applied');
   assert.equal(status.history[0].source, 'automatic');
   assert.equal(status.policy.cycleMinutes, 15);
+  assert.equal(status.learning.productContent.approvals, 1);
+  assert.equal(status.learning.productContent.ready, false);
+  assert.equal(status.learning.productContent.remainingApprovals, 2);
   assert.equal(status.lastCycle.editorialProgress.ready, 1);
   assert.equal(status.lastCycle.editorialProgress.pending, 0);
   assert.match(status.policy.neverAutomatic.join(' '), /wysyłanie wiadomości/);
@@ -153,8 +159,49 @@ test('zatwierdzenie konkretnej rekomendacji nadpisuje wybrane pole, zapisuje aud
   assert.equal(approved.executionStatus, 'completed');
   assert.deepEqual(approved.appliedFields, ['opisKrotki']);
   assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opisKrotki, 'Nowy, uporządkowany opis.');
+  const learned = (await service.status()).learning.productContent;
+  assert.equal(learned.approvals, 1);
+  assert.equal(learned.fieldStats.short_description.approved, 1);
   const duplicate = await service.updateDecision(open.id, 'approve', { fieldKeys: ['short_description'] }, { email: 'admin@example.com' });
   assert.equal(duplicate.duplicate, true);
+});
+
+test('korekta administratora jest zapamiętana i tworzy nową propozycję bez zapisu produktu', async () => {
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 71, nazwa: 'Gra rodzinna', producent: 'Alexander', opisKrotki: 'Stary skrót', opis: '<p>Stary pełny opis produktu, który powinien zostać uporządkowany przez redaktora.</p>' }] }, rev: 1 } });
+  const requests = [];
+  const payload = openAiPayload([{ key: 'short_description', label: 'Opis krótki', value: 'Nowy skrót', current_value: 'Stary skrót', reason: 'Czytelność', evidence: 'Istniejący opis' }]);
+  payload.output[0].content[0].text = JSON.stringify({ ...JSON.parse(payload.output[0].content[0].text), confidence: 0.8, complianceStatus: 'needs_review' });
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async (_url, options) => { requests.push(JSON.parse(options.body)); return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } }); } });
+  const proposal = await service.prepareProductProposal('71', { email: 'admin@example.com' });
+  const revised = await service.updateDecision(proposal.decision.id, 'revise', { note: 'Skrót ma być serdeczny i bez powtarzania nazwy.' }, { email: 'admin@example.com' });
+  assert.equal(revised.revised, true);
+  assert.equal(revised.revisionCount, 1);
+  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opisKrotki, 'Stary skrót');
+  const status = await service.status();
+  assert.equal(status.learning.productContent.corrections, 1);
+  assert.match(requests[1].instructions, /Skrót ma być serdeczny/i);
+  assert.match(requests[1].instructions, /nie zaakceptowano short_description/i);
+});
+
+test('po okresie nauki Agent sam zapisuje tylko pola o utrwalonej wysokiej akceptacji', async () => {
+  const learnedFields = ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'];
+  const fieldStats = Object.fromEntries(learnedFields.map((key) => [key, { approved: 3, rejected: 0 }]));
+  const repo = memoryRepository({
+    agent_specialists_state: { config: { learningEnabled: true, approvalWarmupCount: 3, learnedAutoApplyThreshold: 0.86, safeAutoApply: true }, history: [], decisions: [], learning: { product_content: { approvals: 3, dismissals: 0, corrections: 0, fieldStats, examples: [] } } },
+    settings: { data: { artway_produkty_dodane: [{ id: 81, nazwa: 'GRA TESTOWA', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Krótki opis źródłowy.', gtin: '5906018000092' }] }, rev: 1 },
+  });
+  const fields = [
+    { key: 'title', label: 'Nazwa', value: 'Gra testowa' }, { key: 'short_description', label: 'Opis krótki', value: 'Uporządkowany skrót produktu.' },
+    { key: 'long_description', label: 'Opis pełny', value: '<h2>Gra testowa</h2><p>Uporządkowany, dłuższy opis produktu oparty wyłącznie na przekazanych danych źródłowych i przeznaczony do czytelnej prezentacji.</p><ul><li>Potwierdzony producent</li></ul>' },
+    { key: 'seo_title', label: 'SEO title', value: 'Gra testowa – Alexander' }, { key: 'seo_description', label: 'SEO description', value: 'Poznaj grę testową producenta Alexander i sprawdź uporządkowane informacje o produkcie.' },
+    { key: 'seo_keywords', label: 'Frazy', value: 'gra testowa, Alexander' },
+  ];
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } }) });
+  const cycle = await service.automaticCycle();
+  assert.equal(cycle.applied.length, 1);
+  assert.equal(cycle.prepared[0].status, 'auto_applied');
+  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].nazwa, 'Gra testowa');
+  assert.equal((await service.status()).learning.productContent.ready, true);
 });
 
 test('nieudane zatwierdzenie pozostaje otwarte z dokładnym kodem błędu i można je ponowić', async () => {

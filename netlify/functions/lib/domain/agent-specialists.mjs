@@ -14,11 +14,15 @@ const DEFAULT_CONFIG = Object.freeze({
   cacheHours: 24,
   safeAutoApply: true,
   confidenceThreshold: 0.92,
+  learningEnabled: true,
+  approvalWarmupCount: 3,
+  learnedAutoApplyThreshold: 0.86,
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-18.5';
+const PROMPT_VERSION = '2026-07-18.6';
 const NEVER_AUTOMATIC = Object.freeze(['wysyłanie wiadomości', 'publikacja Allegro', 'zmiana ceny', 'zmiana stanu', 'usuwanie', 'zamówienie u producenta']);
+const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription' });
 
 const SPECIALISTS = Object.freeze({
   product_content: {
@@ -140,6 +144,9 @@ function config(value = {}) {
     cacheHours: number(source.cacheHours, DEFAULT_CONFIG.cacheHours, 1, 168),
     safeAutoApply: source.safeAutoApply !== false,
     confidenceThreshold: number(source.confidenceThreshold, DEFAULT_CONFIG.confidenceThreshold, 0.75, 1),
+    learningEnabled: source.learningEnabled !== false,
+    approvalWarmupCount: number(source.approvalWarmupCount, DEFAULT_CONFIG.approvalWarmupCount, 0, 20),
+    learnedAutoApplyThreshold: number(source.learnedAutoApplyThreshold, DEFAULT_CONFIG.learnedAutoApplyThreshold, 0.6, 1),
     decisionRetentionDays: number(source.decisionRetentionDays, DEFAULT_CONFIG.decisionRetentionDays, 7, 90),
   };
 }
@@ -168,12 +175,58 @@ function sanitizeContext(value, depth = 0) {
   return Object.fromEntries(Object.entries(value).slice(0, 120).filter(([key]) => !blocked.test(key)).map(([key, item]) => [clean(key, 80), sanitizeContext(item, depth + 1)]));
 }
 
+function normalizeFieldStats(value = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(Object.entries(source).slice(0, 30).map(([key, item]) => [clean(key, 80), {
+    approved: number(item?.approved, 0, 0, 100_000), rejected: number(item?.rejected, 0, 0, 100_000),
+  }]).filter(([key]) => key));
+}
+
+function normalizeLearning(value = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const product = source.product_content && typeof source.product_content === 'object' ? source.product_content : {};
+  return {
+    product_content: {
+      approvals: number(product.approvals, 0, 0, 100_000), dismissals: number(product.dismissals, 0, 0, 100_000), corrections: number(product.corrections, 0, 0, 100_000),
+      fieldStats: normalizeFieldStats(product.fieldStats),
+      examples: (Array.isArray(product.examples) ? product.examples : []).slice(0, 12).map((example) => ({
+        id: clean(example?.id, 120), productId: clean(example?.productId, 120), outcome: ['approved', 'dismissed', 'corrected'].includes(example?.outcome) ? example.outcome : 'approved',
+        note: clean(example?.note, 500), actor: clean(example?.actor, 120), at: clean(example?.at, 40),
+        fields: (Array.isArray(example?.fields) ? example.fields : []).slice(0, 8).map((field) => ({ key: clean(field?.key, 80), currentValue: clean(field?.currentValue, 1200), value: clean(field?.value, 2500), accepted: field?.accepted === true })).filter((field) => field.key),
+      })),
+      updatedAt: clean(product.updatedAt, 40),
+    },
+  };
+}
+
+function learningAutonomy(learning = {}, settings = DEFAULT_CONFIG) {
+  const profile = normalizeLearning(learning).product_content, stats = Object.values(profile.fieldStats);
+  const approvedFields = stats.reduce((sum, item) => sum + item.approved, 0), rejectedFields = stats.reduce((sum, item) => sum + item.rejected, 0);
+  const acceptanceRate = approvedFields + rejectedFields > 0 ? approvedFields / (approvedFields + rejectedFields) : 0;
+  const enabled = settings.learningEnabled !== false;
+  const ready = enabled && profile.approvals >= settings.approvalWarmupCount && acceptanceRate >= settings.learnedAutoApplyThreshold;
+  const trustedFields = Object.entries(profile.fieldStats).filter(([, item]) => item.approved >= 2 && item.approved / Math.max(1, item.approved + item.rejected) >= settings.learnedAutoApplyThreshold).map(([key]) => key);
+  return { enabled, ready, approvals: profile.approvals, dismissals: profile.dismissals, corrections: profile.corrections, approvedFields, rejectedFields, acceptanceRate, trustedFields, warmupRequired: settings.approvalWarmupCount, threshold: settings.learnedAutoApplyThreshold, remainingApprovals: Math.max(0, settings.approvalWarmupCount - profile.approvals) };
+}
+
+function learningPrompt(learning = {}, specialist = '') {
+  if (specialist !== 'product_content') return '';
+  const profile = normalizeLearning(learning).product_content;
+  if (!profile.examples.length) return 'Administrator nie zatwierdził jeszcze przykładów stylu. Przygotuj konserwatywną propozycję do jego decyzji; nie zakładaj preferencji.';
+  const examples = profile.examples.slice(0, 4).map((example, index) => {
+    const fields = example.fields.slice(0, 4).map((field) => `${field.accepted ? 'zaakceptowano' : 'nie zaakceptowano'} ${field.key}: ${field.value}`).join(' | ');
+    return `Przykład ${index + 1} (${example.outcome})${example.note ? `, uwaga administratora: ${example.note}` : ''}: ${fields}`;
+  }).join('\n');
+  return `Ucz się wyłącznie z poniższych jawnych zatwierdzeń i korekt administratora. Naśladuj zaakceptowany poziom konkretności, układ i ton; nie kopiuj danych jednego produktu do drugiego. Odrzucone pola pokazują, czego unikać.\n${examples}`;
+}
+
 function state(value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
     config: config(source.config),
     history: (Array.isArray(source.history) ? source.history : []).slice(0, MAX_HISTORY),
     decisions: (Array.isArray(source.decisions) ? source.decisions : []).slice(0, MAX_DECISIONS),
+    learning: normalizeLearning(source.learning),
     lastCycle: source.lastCycle && typeof source.lastCycle === 'object' ? source.lastCycle : null,
     updatedAt: clean(source.updatedAt, 40),
   };
@@ -199,6 +252,7 @@ function normalizeDecision(raw = {}, timestamp = new Date().toISOString()) {
     operationId: clean(raw.operationId, 120), executionStatus: ['idle', 'running', 'completed', 'failed'].includes(raw.executionStatus) ? raw.executionStatus : 'idle',
     attemptCount: number(raw.attemptCount, 0, 0, 100), startedAt: clean(raw.startedAt, 40), completedAt: clean(raw.completedAt, 40),
     lastError: safeError(raw.lastError), lastErrorCode: clean(raw.lastErrorCode, 120), appliedFields: (Array.isArray(raw.appliedFields) ? raw.appliedFields : []).map((item) => clean(item, 80)).filter(Boolean).slice(0, 30),
+    revisionCount: number(raw.revisionCount, 0, 0, 100), feedbackNote: clean(raw.feedbackNote, 500),
   };
 }
 
@@ -455,6 +509,37 @@ export function createAgentSpecialists({
     });
   }
 
+  async function recordProductFeedback(run = {}, outcome = 'approved', raw = {}, actor = {}) {
+    if (run?.specialist !== 'product_content' || !['approved', 'dismissed', 'corrected'].includes(outcome)) return null;
+    const timestamp = now().toISOString(), who = clean(actor?.email || actor?.name || actor?.source || 'administrator', 120);
+    const requested = new Set((Array.isArray(raw.fieldKeys) ? raw.fieldKeys : []).map((key) => clean(key, 80)).filter(Boolean));
+    const resultFields = (Array.isArray(run?.result?.fields) ? run.result.fields : []).filter((field) => PRODUCT_OUTPUT_TO_FIELD[field?.key]);
+    const acceptedAll = outcome === 'approved' && requested.size === 0;
+    const exampleFields = resultFields.map((field) => ({
+      key: clean(field.key, 80), currentValue: clean(field.currentValue, 1200), value: clean(field.value, 2500),
+      accepted: outcome === 'approved' && (acceptedAll || requested.has(field.key) || requested.has(PRODUCT_OUTPUT_TO_FIELD[field.key])),
+    }));
+    return change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], learning: {}, updatedAt: '' }, (value) => {
+      const previous = state(value), learning = normalizeLearning(previous.learning), profile = learning.product_content, fieldStats = { ...profile.fieldStats };
+      for (const field of exampleFields) {
+        const stats = fieldStats[field.key] || { approved: 0, rejected: 0 };
+        const approved = field.accepted === true;
+        fieldStats[field.key] = { approved: stats.approved + (approved ? 1 : 0), rejected: stats.rejected + (approved ? 0 : 1) };
+      }
+      const example = {
+        id: clean(run.id, 120), productId: clean(run.target?.productId, 120), outcome, note: clean(raw.note, 500), actor: who, at: timestamp, fields: exampleFields,
+      };
+      return {
+        ...previous,
+        learning: { ...learning, product_content: {
+          ...profile, approvals: profile.approvals + (outcome === 'approved' ? 1 : 0), dismissals: profile.dismissals + (outcome === 'dismissed' ? 1 : 0), corrections: profile.corrections + (outcome === 'corrected' ? 1 : 0),
+          fieldStats, examples: [example, ...profile.examples.filter((item) => item.id !== example.id)].slice(0, 12), updatedAt: timestamp,
+        } },
+        updatedAt: timestamp,
+      };
+    });
+  }
+
   async function upsertDecision(raw = {}) {
     const timestamp = now().toISOString(), proposed = normalizeDecision(raw, timestamp);
     const next = await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
@@ -468,11 +553,37 @@ export function createAgentSpecialists({
 
   async function updateDecision(id = '', action = '', raw = {}, actor = {}) {
     const safeId = clean(id, 120), safeAction = clean(action, 40), timestamp = now().toISOString(), who = clean(actor?.email || actor?.name || actor?.source || 'administrator', 120);
-    const statusByAction = { approve: 'approved', dismiss: 'dismissed', resolve: 'resolved', snooze: 'snoozed', reopen: 'open' };
+    const statusByAction = { approve: 'approved', dismiss: 'dismissed', resolve: 'resolved', snooze: 'snoozed', reopen: 'open', revise: 'open' };
     if (!statusByAction[safeAction]) throw Object.assign(new Error('Nieobsługiwana decyzja Agenta.'), { code: 'agent_decision_action_invalid', status: 422 });
     const previous = await readState(), decision = previous.decisions.find((item) => item?.id === safeId);
     if (!decision) throw Object.assign(new Error('Nie znaleziono decyzji Agenta.'), { code: 'agent_decision_not_found', status: 404 });
     if (safeAction === 'approve' && decision.status === 'approved' && decision.executionStatus === 'completed') return { ...decision, duplicate: true };
+    if (safeAction === 'revise') {
+      const note = clean(raw.note, 500);
+      if (!note) throw Object.assign(new Error('Napisz, co Agent ma poprawić w kolejnej propozycji.'), { code: 'agent_feedback_required', status: 422 });
+      const oldRun = previous.history.find((item) => item?.id === decision.runId);
+      if (!oldRun || decision.target?.type !== 'product') throw Object.assign(new Error('Ta propozycja nie ma szkicu produktu do poprawy.'), { code: 'agent_revision_not_available', status: 422 });
+      await recordProductFeedback(oldRun, 'corrected', { note, fieldKeys: [] }, actor);
+      const settingsVersion = await readVersioned('settings', { data: {}, rev: 0 }), product = catalogProducts(settingsVersion.value?.data || {}).find((item) => String(item?.id) === String(decision.target?.productId || ''));
+      if (!product) throw Object.assign(new Error('Nie znaleziono produktu do ponownej redakcji.'), { code: 'agent_product_not_found', status: 404 });
+      const editorial = productEditorialState(product);
+      const revised = await run({
+        specialist: 'product_content', source: 'manual',
+        instruction: `Przygotuj nową, kompletną wersję treści produktu. Obowiązkowo uwzględnij korektę administratora: ${note}`,
+        context: { product: productFacts(product), administratorCorrection: note, previousProposal: oldRun.result, editorialTarget: editorial.target },
+        target: { ...decision.target, editorialFingerprint: editorial.fingerprint },
+      }, actor);
+      const revisedAt = now().toISOString();
+      const next = await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], learning: {}, updatedAt: '' }, (value) => {
+        const current = state(value);
+        return { ...current, decisions: current.decisions.map((item) => item?.id === safeId ? normalizeDecision({
+          ...item, status: 'open', runId: revised.id, summary: revised.result?.summary || item.summary,
+          recommendation: 'Sprawdź poprawioną wersję uwzględniającą Twoją wskazówkę.', feedbackNote: note,
+          revisionCount: Number(item.revisionCount || 0) + 1, updatedAt: revisedAt, executionStatus: 'idle', lastError: '', lastErrorCode: '',
+        }, revisedAt) : item), updatedAt: revisedAt };
+      });
+      return { ...next.decisions.find((item) => item?.id === safeId), revised: true, previousRunId: oldRun.id };
+    }
     const operationId = decision.operationId || `approval_${crypto.createHash('sha256').update(`${safeId}|${decision.runId || ''}`).digest('hex').slice(0, 24)}`;
     let executionResult = null;
     if (safeAction === 'approve') {
@@ -522,16 +633,20 @@ export function createAgentSpecialists({
       const current = state(value);
       return { ...current, decisions: current.decisions.map((item) => item?.id === safeId ? normalizeDecision({ ...item, ...patch }, timestamp) : item), updatedAt: timestamp };
     });
+    const feedbackRun = previous.history.find((item) => item?.id === decision.runId);
+    if (feedbackRun && safeAction === 'dismiss') await recordProductFeedback(feedbackRun, 'dismissed', raw, actor);
     return { ...next.decisions.find((item) => item?.id === safeId), executionResult };
   }
 
   async function status() {
     const current = await readState(), today = day(now()), todayRuns = current.history.filter((item) => String(item?.createdAt || '').startsWith(today));
     const decisions = current.decisions.map((item) => item.status === 'snoozed' && activeDecision(item, now()) ? { ...item, status: 'open', snoozedUntil: '' } : item);
+    const autonomy = learningAutonomy(current.learning, current.config), productLearning = current.learning.product_content;
     return {
       configured: !!clean(apiKey, 500), model: clean(model, 80), config: current.config,
       promptVersion: PROMPT_VERSION,
-      policy: { mode: 'openai_platform_profiles_plus_responses', cycleMinutes: 15, safeAutoApply: current.config.safeAutoApply, neverAutomatic: NEVER_AUTOMATIC },
+      policy: { mode: 'openai_platform_profiles_plus_responses', cycleMinutes: 15, safeAutoApply: current.config.safeAutoApply, progressiveAutonomy: true, neverAutomatic: NEVER_AUTOMATIC },
+      learning: { productContent: { ...autonomy, updatedAt: productLearning.updatedAt, fieldStats: productLearning.fieldStats, recentExamples: productLearning.examples.slice(0, 6) } },
       platformAgents: { enabled: platformAgentsEnabled, configured: Object.values(SPECIALISTS).every((item) => !!item.assistantId), executionModel: clean(model, 80), coordinatorId: SPECIALISTS.operations_supervisor.assistantId },
       specialists: Object.entries(SPECIALISTS).map(([id, value]) => ({ id, ...value, promptVersion: PROMPT_VERSION, deployment: 'openai-platform+server', platformAvailable: platformProfiles.get(id)?.available ?? null, platformName: platformProfiles.get(id)?.name || value.label })),
       usage: {
@@ -566,7 +681,7 @@ export function createAgentSpecialists({
     if (todayRuns.length >= current.config.dailyLimit || (source === 'automatic' && todayRuns.filter((item) => item.source === 'automatic').length >= current.config.automaticDailyLimit)) {
       throw Object.assign(new Error('Osiągnięto dzienny limit kontrolujący koszt GPT-5 nano.'), { code: 'agent_specialist_daily_limit', status: 429 });
     }
-    const instruction = sanitizeText(raw.instruction || `Przygotuj profesjonalny szkic jako ${definition.label}.`, 3000), context = sanitizeContext(raw.context || {}), hash = fingerprint(specialist, instruction, context);
+    const instruction = sanitizeText(raw.instruction || `Przygotuj profesjonalny szkic jako ${definition.label}.`, 3000), context = sanitizeContext(raw.context || {}), learnedGuidance = current.config.learningEnabled ? learningPrompt(current.learning, specialist) : '', hash = fingerprint(specialist, instruction, { context, learningUpdatedAt: current.learning?.product_content?.updatedAt || '' });
     const cacheMs = current.config.cacheHours * 60 * 60_000, cached = current.history.find((item) => item.fingerprint === hash && item.status === 'completed' && now().getTime() - Date.parse(item.createdAt || '') <= cacheMs);
     if (cached) return { ...cached, cached: true };
     const runId = `gpt_${Date.now()}_${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`, createdAt = now().toISOString(), target = sanitizeContext(raw.target || {});
@@ -578,6 +693,7 @@ export function createAgentSpecialists({
       'Brakujące dane wpisz do missingFacts. Każdą treść traktuj jako szkic; nie twierdź, że została wysłana lub opublikowana.',
       `Rola: ${definition.label}. ${definition.description}`,
       `Szczególne reguły: ${definition.rules}`,
+      learnedGuidance ? `Pamięć zatwierdzeń administratora:\n${learnedGuidance}` : '',
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
       specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. missingFacts i needs_review stosuj wyłącznie, gdy nie da się pewnie rozpoznać produktu albo przekazane fakty są sprzeczne.' : '',
       'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
@@ -617,8 +733,7 @@ export function createAgentSpecialists({
     const current = await readState(), run = current.history.find((item) => item?.id === clean(id, 100));
     if (!run || run.status !== 'completed' || run.target?.type !== 'product' || !clean(run.target?.productId, 100)) throw Object.assign(new Error('Nie znaleziono szkicu produktu do zatwierdzenia.'), { code: 'agent_specialist_draft_not_found', status: 404 });
     if (['applied', 'auto_applied', 'not_needed'].includes(run.approvalStatus)) return { applied: false, duplicate: true, run };
-    const outputToProduct = { title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription' };
-    const allProposed = productPatch(run.result), requestedKeys = new Set((Array.isArray(options.fieldKeys) ? options.fieldKeys : []).map((item) => outputToProduct[clean(item, 80)] || clean(item, 80)).filter(Boolean));
+    const allProposed = productPatch(run.result), requestedKeys = new Set((Array.isArray(options.fieldKeys) ? options.fieldKeys : []).map((item) => PRODUCT_OUTPUT_TO_FIELD[clean(item, 80)] || clean(item, 80)).filter(Boolean));
     const proposedPatch = requestedKeys.size ? Object.fromEntries(Object.entries(allProposed).filter(([key]) => requestedKeys.has(key))) : allProposed;
     const productId = String(run.target.productId);
     let appliedPatch = {}, contentPatch = {}, beforePatch = {};
@@ -677,6 +792,7 @@ export function createAgentSpecialists({
     }
     const appliedAt = now().toISOString(), appliedBy = clean(actor?.email || actor?.name || 'administrator', 120), automaticApply = options.missingOnly === true || options.editorialAutomatic === true;
     await updateHistory(run.id, { approvalStatus: automaticApply ? 'auto_applied' : 'applied', appliedAt, appliedBy, appliedFields: Object.keys(contentPatch), beforePatch, appliedPatch });
+    if (!automaticApply && options.recordLearning !== false) await recordProductFeedback(run, 'approved', { fieldKeys: Object.keys(contentPatch), note: options.note || '' }, actor);
     return { applied: true, productId, patch: contentPatch, persistedPatch: appliedPatch, before: beforePatch, appliedAt, appliedBy, safeAutoApply: automaticApply };
   }
 
@@ -703,6 +819,29 @@ export function createAgentSpecialists({
     });
   }
 
+  async function prepareProductProposal(productId = '', actor = {}, raw = {}) {
+    const safeId = clean(productId, 120), settingsVersion = await readVersioned('settings', { data: {}, rev: 0 });
+    const product = catalogProducts(settingsVersion.value?.data || {}).find((item) => String(item?.id) === safeId);
+    if (!product) throw Object.assign(new Error('Nie znaleziono produktu do przygotowania propozycji.'), { code: 'agent_product_not_found', status: 404 });
+    const editorial = productEditorialState(product), note = clean(raw.note, 500);
+    const draft = await run({
+      specialist: 'product_content', source: 'manual',
+      instruction: note ? `Przygotuj kompletną, profesjonalną treść produktu. Uwzględnij wskazówkę administratora: ${note}` : `Przygotuj kompletną, profesjonalną treść produktu dla kanałów: ${editorial.target.allegro ? 'sklep i Allegro' : 'sklep'}. Popraw nazwę, opis krótki, opis pełny i SEO, opierając się wyłącznie na faktach.`,
+      context: { product: productFacts(product), administratorInstruction: note, editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint },
+      target: { type: 'product', productId: safeId, name: clean(product.nazwa, 180), channels: editorial.target.channels, editorialFingerprint: editorial.fingerprint },
+    }, actor);
+    await markProductEditorialReview(product, draft, editorial);
+    const target = { type: 'product', productId: safeId, name: clean(product.nazwa, 180), channels: editorial.target.channels, editorialFingerprint: editorial.fingerprint, proposalRunId: draft.id };
+    const decision = await upsertDecision({
+      fingerprint: decisionFingerprint('product_content_review', target), kind: 'product_content_review', specialist: 'product_content', icon: '✨',
+      title: `Agent pyta o zapis: ${clean(product.nazwa, 120) || safeId}`, summary: draft.result?.summary || 'Nowa wersja treści czeka na decyzję.',
+      recommendation: 'Porównaj pola „było” i „propozycja”, a następnie zatwierdź wybrane, wpisz korektę albo odrzuć.',
+      alternatives: ['Popraw propozycję własną wskazówką', 'Odłóż decyzję', 'Odrzuć szkic'], risk: 'medium', target,
+      href: `#/admin/produkty/edytuj/${encodeURIComponent(safeId)}`, runId: draft.id,
+    });
+    return { run: draft, decision };
+  }
+
   async function automaticCycle() {
     const current = await readState();
     if (!current.config.enabled || !current.config.automaticEnabled || current.config.automaticDailyLimit < 1) return { skipped: true, reason: 'disabled', prepared: [], applied: [], decisions: [] };
@@ -721,7 +860,7 @@ export function createAgentSpecialists({
       return { product, missing, priority, editorial };
     }).filter((item) => !item.editorial.current && !item.editorial.reviewedSameInput)
       .sort((a, b) => b.priority - a.priority || String(b.product.createdAt || b.product.dataDodania || '').localeCompare(String(a.product.createdAt || a.product.dataDodania || '')));
-    const prepared = [], applied = [], decisionResults = [], activeFingerprints = new Set();
+    const prepared = [], applied = [], decisionResults = [], activeFingerprints = new Set(), autonomy = learningAutonomy(current.learning, current.config);
 
     const unresolvedCommunication = [
       ...(Array.isArray(communications.threads) ? communications.threads.map((item) => ({ type: 'thread', item })) : []),
@@ -752,7 +891,9 @@ export function createAgentSpecialists({
     for (const item of candidates.slice(0, Math.max(0, availableRuns))) {
       try {
         const draft = await run({ specialist: 'product_content', source: 'automatic', instruction: `Przygotuj kompletną, profesjonalną treść produktu dla wybranych kanałów: ${item.editorial.target.allegro ? 'sklep i Allegro' : 'sklep'}. Popraw również istniejącą słabą nazwę i treść, nie tylko puste pola. Zachowaj wszystkie potwierdzone fakty, zastosuj czytelne akapity, nagłówki i listy oraz zgłoś każdy brak.`, context: { product: productFacts(item.product), editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint }, target: { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint } }, { source: 'background-agent' });
-        const eligible = current.config.safeAutoApply && draft.result?.readyForApproval === true && draft.result?.complianceStatus === 'ready' && Number(draft.result?.confidence || 0) >= current.config.confidenceThreshold && !(draft.result?.warnings || []).length && !(draft.result?.missingFacts || []).length;
+        const proposedFields = (draft.result?.fields || []).map((field) => clean(field?.key, 80)).filter((key) => PRODUCT_OUTPUT_TO_FIELD[key]);
+        const learnedFieldsReady = proposedFields.length > 0 && proposedFields.every((key) => autonomy.trustedFields.includes(key));
+        const eligible = current.config.safeAutoApply && autonomy.ready && learnedFieldsReady && draft.result?.readyForApproval === true && draft.result?.complianceStatus === 'ready' && Number(draft.result?.confidence || 0) >= current.config.confidenceThreshold && !(draft.result?.warnings || []).length && !(draft.result?.missingFacts || []).length;
         if (eligible) {
           const result = await applyProductDraft(draft.id, { source: 'background-agent' }, { missingOnly: false, editorialAutomatic: true, editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint });
           if (result.applied) applied.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), fields: Object.keys(result.patch || {}) });
@@ -760,7 +901,7 @@ export function createAgentSpecialists({
         } else {
           await markProductEditorialReview(item.product, draft, item.editorial);
           const target = { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint }, fp = decisionFingerprint('product_content_review', target); activeFingerprints.add(fp);
-          const decision = await upsertDecision({ fingerprint: fp, kind: 'product_content_review', specialist: 'product_content', icon: '✨', title: `Sprawdź treść: ${clean(item.product.nazwa, 120) || item.product.id}`, summary: draft.result?.summary || 'Treść wymaga sprawdzenia przed zapisem.', recommendation: draft.result?.missingFacts?.length ? 'Uzupełnij brakujące fakty, a następnie ponów przygotowanie.' : 'Zatwierdź przygotowane pola produktu albo odrzuć propozycję.', alternatives: ['Popraw dane produktu', 'Odłóż decyzję', 'Odrzuć szkic'], risk: 'medium', target, href: '#/admin/asortyment/produkty', runId: draft.id });
+          const decision = await upsertDecision({ fingerprint: fp, kind: 'product_content_review', specialist: 'product_content', icon: '✨', title: `Agent pyta o zapis: ${clean(item.product.nazwa, 120) || item.product.id}`, summary: draft.result?.summary || 'Treść została przygotowana i czeka na Twoją decyzję.', recommendation: draft.result?.missingFacts?.length ? 'Uzupełnij brakujące fakty, a następnie poproś o nową wersję.' : autonomy.ready ? 'Sprawdź wyjątek i zatwierdź wybrane pola albo napisz Agentowi, co poprawić.' : `Zatwierdź, odrzuć albo popraw propozycję. Do ograniczonej autonomii brakuje ${autonomy.remainingApprovals} zatwierdzeń.`, alternatives: ['Popraw propozycję własną wskazówką', 'Odłóż decyzję', 'Odrzuć szkic'], risk: 'medium', target, href: `#/admin/produkty/edytuj/${encodeURIComponent(String(item.product.id))}`, runId: draft.id });
           decisionResults.push(decision); prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'needs_decision' });
         }
       } catch (error) {
@@ -795,7 +936,7 @@ export function createAgentSpecialists({
 
     const completedAt = now().toISOString(), readyBefore = editorialRows.filter((item) => item.current).length;
     const readyAfter = Math.min(products.length, readyBefore + applied.length), reviewAfter = Math.min(products.length - readyAfter, editorialRows.filter((item) => item.reviewedSameInput).length + prepared.filter((item) => item.status === 'needs_decision').length);
-    const lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, productsChecked: products.length, editorialProgress: { total: products.length, ready: readyAfter, pending: Math.max(0, products.length - readyAfter - reviewAfter), review: reviewAfter, selectedThisCycle: candidates.length, processedThisCycle: prepared.filter((item) => item.productId).length }, status: prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
+    const lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, productsChecked: products.length, autonomy, editorialProgress: { total: products.length, ready: readyAfter, pending: Math.max(0, products.length - readyAfter - reviewAfter), review: reviewAfter, selectedThisCycle: candidates.length, processedThisCycle: prepared.filter((item) => item.productId).length }, status: prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
     await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
       const previous = state(value), retentionCutoff = now().getTime() - previous.config.decisionRetentionDays * 24 * 60 * 60_000;
       const decisions = previous.decisions.map((item) => {
@@ -808,7 +949,7 @@ export function createAgentSpecialists({
     return { skipped: !meaningful, reason: meaningful ? '' : 'no_candidates', prepared, applied, decisions: decisionResults.map((item) => ({ id: item.id, kind: item.kind, risk: item.risk })), lastCycle };
   }
 
-  return Object.freeze({ status, configure, run, applyProductDraft, updateDecision, automaticCycle, specialists: SPECIALISTS });
+  return Object.freeze({ status, configure, run, applyProductDraft, updateDecision, prepareProductProposal, automaticCycle, specialists: SPECIALISTS });
 }
 
-export { DEFAULT_CONFIG, NEVER_AUTOMATIC, PROMPT_VERSION, RESULT_SCHEMA, SPECIALISTS, activeDecision, communicationNeedsReply, normalizeDecision, normalizeProductContentEditorialResult, normalizeResult, productEditorialFingerprint, productEditorialState, productEditorialTarget, productFacts, productPatch, sanitizeContext };
+export { DEFAULT_CONFIG, NEVER_AUTOMATIC, PROMPT_VERSION, RESULT_SCHEMA, SPECIALISTS, activeDecision, communicationNeedsReply, learningAutonomy, normalizeDecision, normalizeLearning, normalizeProductContentEditorialResult, normalizeResult, productEditorialFingerprint, productEditorialState, productEditorialTarget, productFacts, productPatch, sanitizeContext };

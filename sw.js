@@ -1,6 +1,6 @@
 /* Artway-TM PWA — statyczna powłoka aplikacji. Dane administratora i API
    zawsze pochodzą z sieci i nigdy nie są zapisywane w Service Workerze. */
-const CACHE_NAME="artway-admin-2026.07.18.16";
+const CACHE_NAME="artway-admin-2026.07.18.17";
 const APP_SHELL=[
   "/",
   "/index.html",
@@ -8,8 +8,8 @@ const APP_SHELL=[
   "/icons/artway-icon.svg",
   "/icons/artway-icon-192.png",
   "/icons/artway-icon-512.png",
-  "/assets/styles.css?v=2026.07.18.16",
-  "/assets/app.js?v=2026.07.18.16"
+  "/assets/styles.css?v=2026.07.18.17",
+  "/assets/app.js?v=2026.07.18.17"
 ];
 
 self.addEventListener("install",event=>{event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)).then(()=>self.skipWaiting()));});

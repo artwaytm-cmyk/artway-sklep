@@ -8,7 +8,7 @@ function authError(respond) {
 
 export function createAgentSpecialistRoute({ service, isAdmin, rateLimit, respond, sessionOf = () => null } = {}) {
   if (!service || typeof service.status !== 'function') throw new Error('Trasa specjalistów wymaga serwisu GPT.');
-  const actions = new Set(['agent-specialists-status', 'agent-specialist-run', 'agent-specialists-config', 'agent-specialist-apply', 'agent-specialist-decision', 'agent-specialist-auto-cycle']);
+  const actions = new Set(['agent-specialists-status', 'agent-specialist-run', 'agent-specialists-config', 'agent-specialist-apply', 'agent-specialist-decision', 'agent-specialist-product-proposal', 'agent-specialist-auto-cycle']);
 
   return async function agentSpecialistRoute(req, url, action) {
     if (!actions.has(action)) return null;
@@ -40,6 +40,10 @@ export function createAgentSpecialistRoute({ service, isAdmin, rateLimit, respon
     if (action === 'agent-specialist-decision') {
       const decision = await service.updateDecision(body.id, body.decisionAction || body.action, body, actor);
       return respond({ ok: true, decision, sentExternally: false, published: false });
+    }
+    if (action === 'agent-specialist-product-proposal') {
+      const result = await service.prepareProductProposal(body.productId, actor, body);
+      return respond({ ok: true, ...result, draftOnly: true, sentExternally: false, published: false });
     }
     const cycle = await service.automaticCycle();
     return respond({ ok: true, cycle });
