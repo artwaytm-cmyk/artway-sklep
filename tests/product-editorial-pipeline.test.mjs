@@ -28,6 +28,8 @@ test('treść źródłowa jest zachowana oddzielnie, a sklep i Allegro dostają 
   assert.match(prepared.product.opis, /Kreatywna zabawa\n\nZestaw pozwala/);
   assert.equal(prepared.product.allegroTitle, prepared.product.nazwa);
   assert.equal(prepared.product.allegroDescription, prepared.product.opis);
+  assert.ok(Array.isArray(prepared.product.allegroDescriptionSections));
+  assert.match(prepared.product.allegroDescriptionSections[0].items[0].content, /<strong>/);
   assert.equal(prepared.product.contentEditorial.sourceRole, 'facts_only');
   assert.equal(prepared.product.contentEditorial.status, 'ready');
   assert.equal(prepared.product.ean, raw.ean);

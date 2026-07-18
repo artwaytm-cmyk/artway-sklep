@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
 
 const STATE_KEY = 'agent_specialists_state';
 const MAX_HISTORY = 240;
@@ -16,7 +17,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-18.2';
+const PROMPT_VERSION = '2026-07-18.5';
 const NEVER_AUTOMATIC = Object.freeze(['wysyłanie wiadomości', 'publikacja Allegro', 'zmiana ceny', 'zmiana stanu', 'usuwanie', 'zamówienie u producenta']);
 
 const SPECIALISTS = Object.freeze({
@@ -231,12 +232,31 @@ function normalizeResult(raw = {}, specialist) {
   })).filter((field) => field.key && field.value && allowed.has(field.key) && !seen.has(field.key) && seen.add(field.key));
   const list = (value, limit = 20) => (Array.isArray(value) ? value : []).map((item) => clean(item, 500)).filter(Boolean).slice(0, limit);
   const missingFacts = list(raw.missingFacts);
-  return {
+  const result = {
     title: clean(raw.title, 180), summary: clean(raw.summary, 500), content: clean(raw.content, 30000), fields,
     suggestions: list(raw.suggestions), warnings: list(raw.warnings), missingFacts, factsUsed: list(raw.factsUsed),
     confidence: number(raw.confidence, 0, 0, 1),
     readyForApproval: raw.readyForApproval === true && missingFacts.length === 0,
     complianceStatus: ['ready', 'needs_review', 'blocked_missing_facts'].includes(raw.complianceStatus) ? raw.complianceStatus : (missingFacts.length ? 'blocked_missing_facts' : 'needs_review'),
+  };
+  return specialist === 'product_content' ? normalizeProductContentEditorialResult(result) : result;
+}
+
+function normalizeProductContentEditorialResult(result = {}) {
+  const fields = Object.fromEntries((result.fields || []).map((field) => [field.key, clean(field.value, 30_000)]));
+  const complete = clean(fields.title, 300)
+    && clean(fields.short_description, 1000)
+    && clean(fields.long_description, 30_000).length >= 150
+    && clean(fields.seo_title, 180)
+    && clean(fields.seo_description, 300);
+  if (!complete) return { ...result, readyForApproval: false };
+  const optionalGap = /(?:wiek|age|gracz|player|czas.?gry|play.?time|zdj[eę]ci|image|wymiar|waga|weight|stan|stock|dost[eę]pno|availability|zawarto[śs][ćc].?opak|component|parametr|source.?material|cena|price|rating|ocen|kategori.*docelow|full.?description|long.?description|short.?description)/i;
+  const missingFacts = (result.missingFacts || []).filter((value) => !optionalGap.test(String(value)));
+  const warnings = (result.warnings || []).filter((value) => !optionalGap.test(String(value)));
+  if (missingFacts.length || warnings.length) return { ...result, missingFacts, warnings, readyForApproval: false };
+  return {
+    ...result, missingFacts: [], warnings: [], confidence: Math.max(0.94, Number(result.confidence) || 0),
+    readyForApproval: true, complianceStatus: 'ready',
   };
 }
 
@@ -305,6 +325,60 @@ function catalogProducts(data = {}) {
     unique.set(String(product.id), { ...product, ...(edits[String(product.id)] || {}) });
   }
   return [...unique.values()];
+}
+
+function productEditorialTarget(product = {}) {
+  const allegro = Boolean(
+    clean(product.allegroOfferId || product.offerId, 120)
+    || clean(product.allegroProductId, 120)
+    || clean(product.allegroCategoryId, 80)
+    || product.allegroPublicationIntent === true
+    || ['queued', 'preparing', 'ready', 'published'].includes(clean(product.allegroPreparationStatus, 40).toLowerCase())
+    || product.contentEditorial?.targets?.allegro === true
+  );
+  return { store: true, allegro, channels: allegro ? 'shared_store_and_allegro' : 'store_only' };
+}
+
+function productEditorialFingerprint(product = {}, target = productEditorialTarget(product)) {
+  const source = product.sourceMaterial && typeof product.sourceMaterial === 'object' ? product.sourceMaterial : {};
+  const facts = {
+    promptVersion: PROMPT_VERSION,
+    target: { store: target.store === true, allegro: target.allegro === true },
+    source: {
+      sourceUrl: clean(source.sourceUrl || product.sourceUrl || product.producentUrl, 1000),
+      title: clean(source.title || product.nazwa || product.name, 300),
+      shortDescription: clean(source.shortDescription || product.opisKrotki || product.krotkiOpis, 4000),
+      longDescription: clean(source.longDescription || source.allegroCatalogDescription || product.opis, 30_000),
+      producer: clean(source.producer || product.producent || product.marka, 160),
+      brand: clean(source.brand || product.marka || product.producent, 160),
+      category: clean(source.category || product.kategoria, 180),
+      ean: clean(source.ean || product.gtin || product.ean, 80),
+      producerCode: clean(source.producerCode || product.kodProducenta || product.mpn, 160),
+      parameters: source.parameters || product.parametryProducenta || product.parametryZrodla || product.parametry || product.parameters || {},
+    },
+    category: clean(product.kategoria, 180), producer: clean(product.producent || product.marka, 160),
+    ean: clean(product.gtin || product.ean, 80), producerCode: clean(product.kodProducenta || product.mpn, 160),
+    parameters: product.parametryProducenta || product.parametryZrodla || product.parametry || product.parameters || {},
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(sanitizeContext(facts))).digest('hex');
+}
+
+function productEditorialState(product = {}) {
+  const target = productEditorialTarget(product), fingerprint = productEditorialFingerprint(product, target), editorial = product.contentEditorial || {};
+  const complete = clean(product.nazwa || product.name, 300)
+    && clean(product.opisKrotki || product.krotkiOpis, 500)
+    && clean(product.opis, 30_000).length >= 150
+    && clean(product.seoTitle, 180)
+    && clean(product.seoDescription, 300);
+  const current = editorial.status === 'ready'
+    && editorial.promptVersion === PROMPT_VERSION
+    && editorial.inputFingerprint === fingerprint
+    && editorial.channels === target.channels
+    && Boolean(complete);
+  const reviewedSameInput = editorial.status === 'needs_review'
+    && editorial.promptVersion === PROMPT_VERSION
+    && editorial.inputFingerprint === fingerprint;
+  return { target, fingerprint, current, reviewedSameInput, complete: Boolean(complete), editorial };
 }
 
 function communicationNeedsReply(item = {}) {
@@ -505,6 +579,7 @@ export function createAgentSpecialists({
       `Rola: ${definition.label}. ${definition.description}`,
       `Szczególne reguły: ${definition.rules}`,
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
+      specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. missingFacts i needs_review stosuj wyłącznie, gdy nie da się pewnie rozpoznać produktu albo przekazane fakty są sprzeczne.' : '',
       'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
       'Treść ma być konkretna, naturalna, uporządkowana i gotowa do sprawdzenia przez administratora.',
     ].filter(Boolean).join('\n');
@@ -546,16 +621,52 @@ export function createAgentSpecialists({
     const allProposed = productPatch(run.result), requestedKeys = new Set((Array.isArray(options.fieldKeys) ? options.fieldKeys : []).map((item) => outputToProduct[clean(item, 80)] || clean(item, 80)).filter(Boolean));
     const proposedPatch = requestedKeys.size ? Object.fromEntries(Object.entries(allProposed).filter(([key]) => requestedKeys.has(key))) : allProposed;
     const productId = String(run.target.productId);
-    let appliedPatch = {}, beforePatch = {};
+    let appliedPatch = {}, contentPatch = {}, beforePatch = {};
     if (!Object.keys(proposedPatch).length) throw Object.assign(new Error('Szkic nie zawiera bezpiecznych pól produktu do zapisania.'), { code: 'agent_specialist_patch_empty', status: 422 });
     await change('settings', { data: {}, rev: 0, updated_at: null }, (record) => {
       const previous = record && typeof record === 'object' ? record : { data: {}, rev: 0 }, data = { ...(previous.data || {}) }, added = Array.isArray(data.artway_produkty_dodane) ? [...data.artway_produkty_dodane] : [], index = added.findIndex((product) => String(product?.id) === productId), timestamp = now().toISOString();
       const effective = index >= 0 ? added[index] : { ...(catalogProducts(data).find((product) => String(product?.id) === productId) || {}), ...((data.artway_produkty_edytowane || {})[productId] || {}) };
       const patch = options.missingOnly === true ? missingOnlyPatch(effective, proposedPatch) : proposedPatch;
       if (!Object.keys(patch).length) return previous;
+      contentPatch = { ...patch };
       appliedPatch = patch;
       beforePatch = Object.fromEntries(Object.keys(patch).map((key) => [key, productFieldValue(effective, key) ?? '']));
-      const safePatch = { ...patch, agentTextModel: run.model, agentTextReviewedAt: timestamp, agentTextRunId: run.id, agentTextMode: options.missingOnly === true ? 'safe-missing-only' : 'approved' };
+      const editorialTarget = options.editorialTarget && typeof options.editorialTarget === 'object' ? options.editorialTarget : productEditorialTarget(effective);
+      const inputFingerprint = options.editorialFingerprint || productEditorialFingerprint(effective, editorialTarget);
+      const mergedProduct = { ...effective, ...patch };
+      const editorialReady = run.specialist === 'product_content'
+        && run.result?.readyForApproval === true
+        && run.result?.complianceStatus === 'ready'
+        && clean(mergedProduct.nazwa || mergedProduct.name, 300)
+        && clean(mergedProduct.opisKrotki || mergedProduct.krotkiOpis, 500)
+        && clean(mergedProduct.opis, 30_000).length >= 150;
+      const safePatch = { ...patch, agentTextModel: run.model, agentTextReviewedAt: timestamp, agentTextRunId: run.id, agentTextMode: options.editorialAutomatic === true ? 'autonomous-editorial' : options.missingOnly === true ? 'safe-missing-only' : 'approved' };
+      if (editorialReady) {
+        const sharedName = clean(mergedProduct.nazwa || mergedProduct.name, 300), sharedDescription = clean(mergedProduct.opis, 30_000);
+        Object.assign(safePatch, {
+          allegroTitle: sharedName.slice(0, 75),
+          allegroDescription: sharedDescription,
+          allegroDescriptionSections: buildSharedProductDescriptionSections({ ...mergedProduct, nazwa: sharedName, allegroDescription: sharedDescription }),
+          contentEditorial: {
+            ...(effective.contentEditorial || {}), status: 'ready', sourceRole: effective.sourceMaterial ? 'facts_only' : 'catalog_facts',
+            channels: editorialTarget.channels, targets: { store: true, allegro: editorialTarget.allegro === true },
+            layoutPolicy: 'allegro_sections', promptVersion: PROMPT_VERSION, inputFingerprint,
+            preparedAt: timestamp, runId: run.id, model: run.model, preparedBy: options.editorialAutomatic === true ? 'autonomous-agent' : 'administrator-approved-agent', warnings: [],
+          },
+          contentEditorialPreparedAt: timestamp,
+          contentEditorialSource: options.editorialAutomatic === true ? 'autonomous-agent-specialist' : 'approved-agent-specialist',
+        });
+        if (!effective.sourceMaterial) safePatch.sourceMaterial = {
+          sourceUrl: clean(effective.sourceUrl || effective.producentUrl, 1000), fetchedAt: timestamp,
+          title: clean(effective.nazwa || effective.name, 300), shortDescription: clean(effective.opisKrotki || effective.krotkiOpis, 4000),
+          longDescription: clean(effective.opis, 20_000), producer: clean(effective.producent || effective.marka, 160),
+          brand: clean(effective.marka || effective.producent, 160), category: clean(effective.kategoria, 180),
+          ean: clean(effective.gtin || effective.ean, 80), producerCode: clean(effective.kodProducenta || effective.mpn, 160),
+          parameters: effective.parametryProducenta || effective.parametryZrodla || effective.parametry || effective.parameters || {},
+        };
+      }
+      appliedPatch = safePatch;
+      beforePatch = Object.fromEntries(Object.keys(safePatch).map((key) => [key, productFieldValue(effective, key) ?? effective[key] ?? '']));
       if (index >= 0) { added[index] = { ...added[index], ...safePatch }; data.artway_produkty_dodane = added; }
       else { const edited = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {}; edited[productId] = { ...(edited[productId] || {}), ...safePatch }; data.artway_produkty_edytowane = edited; }
       return { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: timestamp };
@@ -564,9 +675,32 @@ export function createAgentSpecialists({
       await updateHistory(run.id, { approvalStatus: 'not_needed', appliedAt: now().toISOString(), appliedBy: 'agent-safe-policy' });
       return { applied: false, duplicate: true, noMissingFields: true, productId, patch: {} };
     }
-    const appliedAt = now().toISOString(), appliedBy = clean(actor?.email || actor?.name || 'administrator', 120);
-    await updateHistory(run.id, { approvalStatus: options.missingOnly === true ? 'auto_applied' : 'applied', appliedAt, appliedBy, appliedFields: Object.keys(appliedPatch), beforePatch, appliedPatch });
-    return { applied: true, productId, patch: appliedPatch, before: beforePatch, appliedAt, appliedBy, safeAutoApply: options.missingOnly === true };
+    const appliedAt = now().toISOString(), appliedBy = clean(actor?.email || actor?.name || 'administrator', 120), automaticApply = options.missingOnly === true || options.editorialAutomatic === true;
+    await updateHistory(run.id, { approvalStatus: automaticApply ? 'auto_applied' : 'applied', appliedAt, appliedBy, appliedFields: Object.keys(contentPatch), beforePatch, appliedPatch });
+    return { applied: true, productId, patch: contentPatch, persistedPatch: appliedPatch, before: beforePatch, appliedAt, appliedBy, safeAutoApply: automaticApply };
+  }
+
+  async function markProductEditorialReview(product = {}, draft = null, editorial = productEditorialState(product), error = '') {
+    const productId = String(product.id), timestamp = now().toISOString();
+    await change('settings', { data: {}, rev: 0, updated_at: null }, (record) => {
+      const previous = record && typeof record === 'object' ? record : { data: {}, rev: 0 }, data = { ...(previous.data || {}) };
+      const added = Array.isArray(data.artway_produkty_dodane) ? [...data.artway_produkty_dodane] : [], index = added.findIndex((item) => String(item?.id) === productId);
+      const patch = {
+        contentEditorial: {
+          ...(product.contentEditorial || {}), status: 'needs_review', sourceRole: product.sourceMaterial ? 'facts_only' : 'catalog_facts',
+          channels: editorial.target.channels, targets: { store: true, allegro: editorial.target.allegro === true }, layoutPolicy: 'allegro_sections',
+          promptVersion: PROMPT_VERSION, inputFingerprint: editorial.fingerprint, attemptedAt: timestamp,
+          runId: clean(draft?.id, 120), model: clean(draft?.model, 80), warnings: [...(draft?.result?.warnings || []), ...(draft?.result?.missingFacts || []), error].map((item) => clean(item, 500)).filter(Boolean).slice(0, 20),
+        },
+        contentEditorialSource: 'autonomous-agent-needs-review',
+      };
+      if (index >= 0) { added[index] = { ...added[index], ...patch }; data.artway_produkty_dodane = added; }
+      else {
+        const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
+        edits[productId] = { ...(edits[productId] || {}), ...patch }; data.artway_produkty_edytowane = edits;
+      }
+      return { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: timestamp };
+    });
   }
 
   async function automaticCycle() {
@@ -578,11 +712,15 @@ export function createAgentSpecialists({
       readVersioned('allegro_communications', { threads: [], issues: [], updated_at: null }),
     ]);
     const data = settingsVersion.value?.data || {}, products = catalogProducts(data), communications = communicationsVersion.value || {};
-    const recentCutoff = now().getTime() - 7 * 24 * 60 * 60_000, recentTargets = new Set(current.history.filter((item) => item.source === 'automatic' && item.status === 'completed' && item.promptVersion === PROMPT_VERSION && Date.parse(item.createdAt || '') >= recentCutoff).map((item) => String(item.target?.productId || '')).filter(Boolean));
+    const editorialRows = products.map((product) => ({ product, ...productEditorialState(product) }));
     const candidates = products.map((product) => {
-      const short = clean(product.opisKrotki || product.krotkiOpis, 5000), full = clean(product.opis, 30000), missing = (!short ? 3 : 0) + (full.length < 250 ? 4 : 0) + (!product.seoTitle ? 2 : 0) + (!product.seoDescription ? 2 : 0);
-      return { product, missing };
-    }).filter((item) => item.missing > 0 && !recentTargets.has(String(item.product.id))).sort((a, b) => String(b.product.createdAt || b.product.dataDodania || '').localeCompare(String(a.product.createdAt || a.product.dataDodania || '')) || b.missing - a.missing);
+      const editorial = productEditorialState(product), short = clean(product.opisKrotki || product.krotkiOpis, 5000), full = clean(product.opis, 30000);
+      const missing = (!short ? 3 : 0) + (full.length < 250 ? 4 : 0) + (!product.seoTitle ? 2 : 0) + (!product.seoDescription ? 2 : 0);
+      const channelChanged = editorial.editorial.channels && editorial.editorial.channels !== editorial.target.channels;
+      const priority = (channelChanged ? 100 : 0) + (editorial.target.allegro ? 30 : 0) + (product.sourceMaterial ? 15 : 0) + missing;
+      return { product, missing, priority, editorial };
+    }).filter((item) => !item.editorial.current && !item.editorial.reviewedSameInput)
+      .sort((a, b) => b.priority - a.priority || String(b.product.createdAt || b.product.dataDodania || '').localeCompare(String(a.product.createdAt || a.product.dataDodania || '')));
     const prepared = [], applied = [], decisionResults = [], activeFingerprints = new Set();
 
     const unresolvedCommunication = [
@@ -591,16 +729,17 @@ export function createAgentSpecialists({
     ].filter(({ item }) => communicationNeedsReply(item)).sort((a, b) => String(b.item?.latestNewIncoming?.createdAt || b.item?.lastMessage?.createdAt || '').localeCompare(String(a.item?.latestNewIncoming?.createdAt || a.item?.lastMessage?.createdAt || '')));
 
     let availableRuns = current.config.automaticBatchSize;
+    let communicationRuns = Math.max(0, availableRuns - Math.min(2, candidates.length));
     for (const { type, item } of unresolvedCommunication.slice(0, 20)) {
       const target = { type: 'communication', communicationType: type, communicationId: String(item?.id || ''), sourceMessageId: String(item?.latestNewIncomingKey || item?.latestNewIncoming?.id || item?.lastMessage?.id || '') };
       const fp = decisionFingerprint('customer_reply', target); activeFingerprints.add(fp);
       const existing = current.decisions.find((entry) => entry.fingerprint === fp && activeDecision(entry, now()));
       if (existing) continue;
       let draft = null;
-      if (availableRuns > 0) {
+      if (availableRuns > 0 && communicationRuns > 0) {
         try {
           draft = await run({ specialist: 'customer_reply', source: 'automatic', instruction: 'Przeanalizuj całą przekazaną rozmowę i przygotuj wyłącznie szkic odpowiedzi. Nie wysyłaj go. Nie obiecuj działań niepotwierdzonych w faktach.', context: { conversation: communicationFacts(item, type) }, target }, { source: 'background-agent' });
-          prepared.push({ id: draft.id, type: 'communication', targetId: target.communicationId, status: 'prepared' }); availableRuns -= 1;
+          prepared.push({ id: draft.id, type: 'communication', targetId: target.communicationId, status: 'prepared' }); availableRuns -= 1; communicationRuns -= 1;
         } catch (error) {
           if (error?.code === 'agent_specialist_daily_limit') availableRuns = 0;
           else prepared.push({ type: 'communication', targetId: target.communicationId, status: 'error', error: safeError(error?.message || error) });
@@ -612,14 +751,15 @@ export function createAgentSpecialists({
 
     for (const item of candidates.slice(0, Math.max(0, availableRuns))) {
       try {
-        const draft = await run({ specialist: 'product_content', source: 'automatic', instruction: 'Przygotuj kompletny, profesjonalny szkic treści produktu do kontroli administratora. Zachowaj wszystkie potwierdzone fakty i zgłoś braki.', context: { product: productFacts(item.product) }, target: { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180) } }, { source: 'background-agent' });
+        const draft = await run({ specialist: 'product_content', source: 'automatic', instruction: `Przygotuj kompletną, profesjonalną treść produktu dla wybranych kanałów: ${item.editorial.target.allegro ? 'sklep i Allegro' : 'sklep'}. Popraw również istniejącą słabą nazwę i treść, nie tylko puste pola. Zachowaj wszystkie potwierdzone fakty, zastosuj czytelne akapity, nagłówki i listy oraz zgłoś każdy brak.`, context: { product: productFacts(item.product), editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint }, target: { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint } }, { source: 'background-agent' });
         const eligible = current.config.safeAutoApply && draft.result?.readyForApproval === true && draft.result?.complianceStatus === 'ready' && Number(draft.result?.confidence || 0) >= current.config.confidenceThreshold && !(draft.result?.warnings || []).length && !(draft.result?.missingFacts || []).length;
         if (eligible) {
-          const result = await applyProductDraft(draft.id, { source: 'background-agent' }, { missingOnly: true });
+          const result = await applyProductDraft(draft.id, { source: 'background-agent' }, { missingOnly: false, editorialAutomatic: true, editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint });
           if (result.applied) applied.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), fields: Object.keys(result.patch || {}) });
           prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: result.applied ? 'auto_applied' : 'not_needed' });
         } else {
-          const target = { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180) }, fp = decisionFingerprint('product_content_review', target); activeFingerprints.add(fp);
+          await markProductEditorialReview(item.product, draft, item.editorial);
+          const target = { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint }, fp = decisionFingerprint('product_content_review', target); activeFingerprints.add(fp);
           const decision = await upsertDecision({ fingerprint: fp, kind: 'product_content_review', specialist: 'product_content', icon: '✨', title: `Sprawdź treść: ${clean(item.product.nazwa, 120) || item.product.id}`, summary: draft.result?.summary || 'Treść wymaga sprawdzenia przed zapisem.', recommendation: draft.result?.missingFacts?.length ? 'Uzupełnij brakujące fakty, a następnie ponów przygotowanie.' : 'Zatwierdź przygotowane pola produktu albo odrzuć propozycję.', alternatives: ['Popraw dane produktu', 'Odłóż decyzję', 'Odrzuć szkic'], risk: 'medium', target, href: '#/admin/asortyment/produkty', runId: draft.id });
           decisionResults.push(decision); prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'needs_decision' });
         }
@@ -644,7 +784,8 @@ export function createAgentSpecialists({
     for (const decision of current.decisions.filter((item) => activeDecision(item, now()))) {
       if (decision.kind === 'product_content_review') {
         const product = productById.get(String(decision.target?.productId || ''));
-        if (product && (!clean(product.opisKrotki || product.krotkiOpis, 5000) || clean(product.opis, 30000).length < 250 || !product.seoTitle || !product.seoDescription)) activeFingerprints.add(decision.fingerprint);
+        const editorial = product ? productEditorialState(product) : null;
+        if (product && !editorial.current && decision.target?.editorialFingerprint === editorial.fingerprint) activeFingerprints.add(decision.fingerprint);
       }
       if (decision.kind === 'catalog_identity') {
         const product = productById.get(String(decision.target?.productId || ''));
@@ -652,7 +793,9 @@ export function createAgentSpecialists({
       }
     }
 
-    const completedAt = now().toISOString(), lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, productsChecked: products.length, status: prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
+    const completedAt = now().toISOString(), readyBefore = editorialRows.filter((item) => item.current).length;
+    const readyAfter = Math.min(products.length, readyBefore + applied.length), reviewAfter = Math.min(products.length - readyAfter, editorialRows.filter((item) => item.reviewedSameInput).length + prepared.filter((item) => item.status === 'needs_decision').length);
+    const lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, productsChecked: products.length, editorialProgress: { total: products.length, ready: readyAfter, pending: Math.max(0, products.length - readyAfter - reviewAfter), review: reviewAfter, selectedThisCycle: candidates.length, processedThisCycle: prepared.filter((item) => item.productId).length }, status: prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
     await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
       const previous = state(value), retentionCutoff = now().getTime() - previous.config.decisionRetentionDays * 24 * 60 * 60_000;
       const decisions = previous.decisions.map((item) => {
@@ -668,4 +811,4 @@ export function createAgentSpecialists({
   return Object.freeze({ status, configure, run, applyProductDraft, updateDecision, automaticCycle, specialists: SPECIALISTS });
 }
 
-export { DEFAULT_CONFIG, NEVER_AUTOMATIC, PROMPT_VERSION, RESULT_SCHEMA, SPECIALISTS, activeDecision, communicationNeedsReply, normalizeDecision, normalizeResult, productFacts, productPatch, sanitizeContext };
+export { DEFAULT_CONFIG, NEVER_AUTOMATIC, PROMPT_VERSION, RESULT_SCHEMA, SPECIALISTS, activeDecision, communicationNeedsReply, normalizeDecision, normalizeProductContentEditorialResult, normalizeResult, productEditorialFingerprint, productEditorialState, productEditorialTarget, productFacts, productPatch, sanitizeContext };

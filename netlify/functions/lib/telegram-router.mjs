@@ -1,4 +1,4 @@
-import { sendTelegramHtml, telegramApi, telegramHtml, telegramSafeAgentHtml } from './domain/telegram-communication.mjs';
+import { sendTelegramHtml, telegramApi, telegramHtml, telegramProfessionalAgentHtml } from './domain/telegram-communication.mjs';
 import { telegramAgentReport } from './telegram-center.mjs';
 
 const ACTIONS = new Set([
@@ -181,7 +181,8 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
       try {
         const recipients = [...new Set([prepared.job.chatId, ...(Array.isArray(prepared.job.broadcastChatIds) ? prepared.job.broadcastChatIds : [])]
           .map((value) => String(value || '').trim()).filter(Boolean))];
-        const attempts = await Promise.allSettled(recipients.map((chatId) => sendTelegram(telegramSafeAgentHtml(prepared.job.response), {
+        const formattedResponse = telegramProfessionalAgentHtml(prepared.job.response);
+        const attempts = await Promise.allSettled(recipients.map((chatId) => sendTelegram(formattedResponse, {
           chatId,
           ...(chatId === prepared.job.chatId && prepared.job.replyTo ? { replyTo: prepared.job.replyTo } : {}),
           ...(chatId === prepared.job.chatId && prepared.job.messageThreadId ? { messageThreadId: prepared.job.messageThreadId } : {}),

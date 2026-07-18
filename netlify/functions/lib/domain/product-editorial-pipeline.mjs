@@ -1,4 +1,5 @@
-import { productPatch } from './agent-specialists.mjs';
+import { PROMPT_VERSION, productEditorialFingerprint, productPatch } from './agent-specialists.mjs';
+import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
 
 const clean = (value = '', limit = 30_000) => String(value ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, limit);
 
@@ -83,13 +84,17 @@ export async function prepareLinkedProductEditorial(product = {}, {
     ...(storePatch.seoKeywords ? { seoKeywords: clean(storePatch.seoKeywords, 500) } : {}),
   };
   const ready = !!storeRun;
+  const sections = buildSharedProductDescriptionSections(storeProduct);
+  const editorialTarget = { store: true, allegro: true, channels: 'shared_store_and_allegro' };
+  const editorialFingerprint = productEditorialFingerprint({ ...storeProduct, sourceMaterial }, editorialTarget);
   return {
     product: {
       ...storeProduct,
       allegroTitle: title,
       allegroDescription: storeProduct.opis,
+      allegroDescriptionSections: sections,
       sourceMaterial,
-      contentEditorial: { status: ready ? 'ready' : 'needs_review', sourceRole: 'facts_only', channels: 'shared_store_and_allegro', layoutPolicy: 'allegro_sections', preparedAt, store: runMeta(storeRun), warnings },
+      contentEditorial: { status: ready ? 'ready' : 'needs_review', sourceRole: 'facts_only', channels: 'shared_store_and_allegro', targets: { store: true, allegro: true }, layoutPolicy: 'allegro_sections', promptVersion: PROMPT_VERSION, inputFingerprint: editorialFingerprint, preparedAt, store: runMeta(storeRun), warnings },
       contentEditorialPreparedAt: preparedAt,
       contentEditorialSource: 'agent-specialists-from-source-facts',
     },

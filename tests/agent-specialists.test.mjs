@@ -54,6 +54,7 @@ test('GPT-5 nano używa Responses API, ścisłego schematu i pamięci identyczne
   assert.equal(requestBody.text.format.type, 'json_schema');
   assert.equal(requestBody.text.format.strict, true);
   assert.match(requestBody.instructions, /wyłącznie z przekazanych faktów/i);
+  assert.match(requestBody.instructions, /brak opcjonalnych parametrów.*nie jest missingFact/i);
   const status = await service.status();
   assert.equal(status.usage.today, 1);
   assert.equal(status.usage.inputTokens, 300);
@@ -73,19 +74,42 @@ test('zatwierdzenie szkicu zapisuje wyłącznie dozwolone pola produktu i jest i
   assert.equal(product.agentTextModel, 'gpt-5-nano-2025-08-07');
 });
 
-test('automatyczny cykl uzupełnia wyłącznie puste pola przy wysokiej pewności', async () => {
-  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 99, nazwa: 'Nowa gra', producent: 'Alexander', opis: '', opisKrotki: '' }] }, rev: 1 } });
-  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload([{ key: 'short_description', label: 'Opis krótki', value: 'Szkic.' }])), { status: 200, headers: { 'content-type': 'application/json' } }) });
+test('automatyczny cykl poprawia pełną treść, oznacza wykonanie i nie analizuje ponownie tych samych faktów', async () => {
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 99, nazwa: 'NOWA GRA | SKLEP', producent: 'Alexander', kategoria: 'Gry rodzinne', gtin: '5906018000092', opis: 'Słaby opis.', opisKrotki: 'Stary skrót.', allegroCategoryId: '123' }] }, rev: 1 } });
+  let calls = 0;
+  const longDescription = '<h2>Rodzinna rozgrywka</h2><p>Ta gra pozwala wspólnie spędzić czas, ćwiczyć spostrzegawczość i poznawać zasady opisane w dołączonej instrukcji.</p><ul><li>Czytelne zasady</li><li>Wspólna zabawa</li></ul>';
+  const fields = [
+    { key: 'title', label: 'Nazwa', value: 'Nowa gra rodzinna' },
+    { key: 'short_description', label: 'Opis krótki', value: 'Rodzinna gra oparta na czytelnych zasadach i wspólnej zabawie.' },
+    { key: 'long_description', label: 'Opis pełny', value: longDescription },
+    { key: 'seo_title', label: 'SEO title', value: 'Nowa gra rodzinna – Alexander' },
+    { key: 'seo_description', label: 'SEO description', value: 'Poznaj rodzinną grę Alexander z czytelnymi zasadami i wspólną rozgrywką.' },
+    { key: 'seo_keywords', label: 'Frazy SEO', value: 'gra rodzinna, Alexander' },
+  ];
+  const editorialPayload = openAiPayload(fields), rawEditorial = JSON.parse(editorialPayload.output[0].content[0].text);
+  editorialPayload.output[0].content[0].text = JSON.stringify({ ...rawEditorial, confidence: 0.38, readyForApproval: false, complianceStatus: 'needs_review', missingFacts: ['wiek', 'liczba graczy', 'zdjęcia', 'stan i dostępność'], warnings: ['Brak opcjonalnych danych: wiek, liczba graczy i zdjęcia.'] });
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => { calls += 1; return new Response(JSON.stringify(editorialPayload), { status: 200, headers: { 'content-type': 'application/json' } }); } });
   const cycle = await service.automaticCycle();
   assert.equal(cycle.prepared.length, 1);
   assert.equal(cycle.prepared[0].status, 'auto_applied');
   assert.equal(cycle.applied.length, 1);
-  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opisKrotki, 'Szkic.');
-  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].nazwa, 'Nowa gra');
+  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  assert.equal(product.nazwa, 'Nowa gra rodzinna');
+  assert.equal(product.opis, longDescription);
+  assert.equal(product.allegroDescription, longDescription);
+  assert.equal(product.contentEditorial.status, 'ready');
+  assert.equal(product.contentEditorial.channels, 'shared_store_and_allegro');
+  assert.equal(product.contentEditorial.targets.allegro, true);
+  assert.ok(Array.isArray(product.allegroDescriptionSections));
+  const second = await service.automaticCycle();
+  assert.equal(second.reason, 'no_candidates');
+  assert.equal(calls, 1);
   const status = await service.status();
   assert.equal(status.history[0].approvalStatus, 'auto_applied');
   assert.equal(status.history[0].source, 'automatic');
   assert.equal(status.policy.cycleMinutes, 15);
+  assert.equal(status.lastCycle.editorialProgress.ready, 1);
+  assert.equal(status.lastCycle.editorialProgress.pending, 0);
   assert.match(status.policy.neverAutomatic.join(' '), /wysyłanie wiadomości/);
 });
 

@@ -7,6 +7,7 @@ import {
   telegramApi,
   telegramConfig,
   telegramNaturalIntent,
+  telegramProfessionalAgentHtml,
   telegramWebhookSecret,
 } from './lib/domain/telegram-communication.mjs';
 import {
@@ -442,7 +443,8 @@ export default async (request) => {
     if (data.deferred) {
       return response();
     }
-    const sent = await sendToDelivery(data.message, delivery, { replyTo: delivery.replyTo, replyMarkup: data.replyMarkup, messageThreadId: delivery.messageThreadId });
+    const formattedMessage = telegramProfessionalAgentHtml(data.message);
+    const sent = await sendToDelivery(formattedMessage, delivery, { replyTo: delivery.replyTo, replyMarkup: data.replyMarkup, messageThreadId: delivery.messageThreadId });
     await auditOutbound(origin, token, {
       kind: 'local-reply', status: 'sent', category: 'agent', title: 'Odpowiedź bota na polecenie', preview: data.message,
       messageId: sent?.message_id || null, fromLabel: 'Agent Artway-TM', toLabel: delivery.chatLabel || senderLabel || chatLabel,
