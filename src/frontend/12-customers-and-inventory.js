@@ -1514,6 +1514,7 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     allegroParameters.push(el?.dataset?.paramType==="dictionary"?{id:pid,valuesIds:[val]}:{id:pid,values:[val]});
   }
   if(allegroParameters.length)p.allegroParameters=allegroParameters;
+  if(p.contentEditorial?.channels==="shared_store_and_allegro"){p.allegroTitle=p.nazwa;p.allegroDescription=p.opis;if(p.nazwa!==poprzedni.nazwa||p.opisKrotki!==poprzedni.opisKrotki||p.opis!==poprzedni.opis){delete p.allegroDescriptionSections;p.contentEditorial={...p.contentEditorial,status:"needs_layout_refresh"};}}
   return seoAutomatyzujDaneProduktu(p,p.seoMode==="manual"?"ręczne SEO administratora":"automatycznie po zapisie produktu",{force:p.seoMode!=="manual"});
 }
 function wgrajZdjecieDoPola(input, pole){
@@ -1531,8 +1532,9 @@ async function dodajProdukt(e){
   try{ prefillMeta=JSON.parse(sessionStorage.getItem("artway_prefill_product")||"{}")||{}; }catch(err){ prefillMeta={}; }
   const maxId = najwyzszeIdProduktu();
   const KOLORY = ["#dbeafe","#e0e7ff","#fef3c7","#dcfce7","#fee2e2","#f3e8ff","#fce7f3","#ffedd5"];
-  const p = daneProduktuZFormularza(f, maxId+1, {kolor:KOLORY[(maxId+1)%KOLORY.length]});
+  const agentMeta=agentAIImportUrlStan?.data?.product||{},p = daneProduktuZFormularza(f, maxId+1, {...prefillMeta,...agentMeta,kolor:KOLORY[(maxId+1)%KOLORY.length]});
   if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę"); return; }
+  for(const key of Object.keys(p))if(key.startsWith("_agent"))delete p[key];
   const kontrola=produktDodawanieAktualizuj(e.target);
   if(!kontrola?.canSubmit){
     if(submit)submit.disabled=false;
@@ -1572,7 +1574,7 @@ async function automatyczniePobierzDaneZrodlaProduktu(p={}){
   const url=String(p.producentUrl||p.sourceUrl||"").trim();if(!/^https?:\/\//i.test(url))return p;
   try{
     const d=await chmura("product-url-inspect",{method:"POST",body:{url},timeout:30000}),s=d.product||{},canonical=allegroProducentKanoniczny({...p,...s,sourceUrl:url,producentUrl:url});
-    const missing={nazwa:s.nazwa,kategoria:s.kategoria,gtin:s.gtin||s.ean,ean:s.ean||s.gtin,externalId:s.externalId,mpn:s.mpn||s.kodProducenta,kodProducenta:s.kodProducenta||s.mpn,producent:canonical||s.producent||s.marka,marka:s.marka||canonical||s.producent,zdjecie:s.zdjecie,zdjecia:Array.isArray(s.zdjecia)?s.zdjecia.slice(0,15):[],opisKrotki:s.opisKrotki||"",opis:s.opis||"",parametryProducenta:s.parametryProducenta,parametryZrodla:s.parametryZrodla};
+    const missing={gtin:s.gtin||s.ean,ean:s.ean||s.gtin,externalId:s.externalId,mpn:s.mpn||s.kodProducenta,kodProducenta:s.kodProducenta||s.mpn,producent:canonical||s.producent||s.marka,marka:s.marka||canonical||s.producent,zdjecie:s.zdjecie,zdjecia:Array.isArray(s.zdjecia)?s.zdjecia.slice(0,15):[],parametryProducenta:s.parametryProducenta,parametryZrodla:s.parametryZrodla,sourceMaterial:{...(p.sourceMaterial||{}),sourceUrl:s.sourceUrl||s.producentUrl||url,fetchedAt:s.sourceEvidence?.fetchedAt||s.producentSprawdzonoAt||new Date().toISOString(),title:s.nazwa||"",shortDescription:s.opisKrotki||"",longDescription:s.opis||"",producer:s.producent||s.marka||"",brand:s.marka||s.producent||"",category:s.kategoria||"",ean:s.gtin||s.ean||"",producerCode:s.kodProducenta||s.mpn||"",parameters:s.parametryProducenta||s.parametryZrodla||{}}};
     zapiszPolaProduktuLokalnie(p.id,missing,true);
     const current=pobierzProduktAdmin(Number(p.id))||p,canonicalUrl=s.sourceUrl||s.producentUrl||url,force={producentUrl:canonicalUrl,sourceUrl:canonicalUrl,sourceEvidence:s.sourceEvidence||current.sourceEvidence||null,dostepnoscProducenta:s.dostepnoscProducenta||current.dostepnoscProducenta||"",stanProducenta:s.stanProducenta??current.stanProducenta??"",stanProducentaDokladny:s.stanProducentaDokladny===true,stanProducentaZrodlo:s.stanProducentaZrodlo||current.stanProducentaZrodlo||"",producentStatus:s.producentStatus||current.producentStatus||"",producentSprawdzonoAt:s.producentSprawdzonoAt||current.producentSprawdzonoAt||new Date().toISOString()};
     zapiszPolaProduktuLokalnie(p.id,force,false);agentAIZakonczLinkProducenta(url,pobierzProduktAdmin(Number(p.id))||p);return pobierzProduktAdmin(Number(p.id))||{...p,...missing,...force};

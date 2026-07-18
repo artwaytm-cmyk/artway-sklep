@@ -17,6 +17,8 @@ const files = [
   'netlify/functions/lib/core/store-repository.mjs',
   'netlify/functions/lib/domain/orders.mjs',
   'netlify/functions/lib/domain/catalog-quality.mjs',
+  'netlify/functions/lib/domain/product-editorial-pipeline.mjs',
+  'netlify/functions/lib/domain/product-link-package-preparer.mjs',
   'netlify/functions/lib/domain/product-sale-decisions.mjs',
   'netlify/functions/lib/domain/allegro-reply-assistant.mjs',
   'netlify/functions/lib/domain/telegram-communication.mjs',
@@ -68,6 +70,8 @@ const appAdmin = read('assets/admin.js');
 const app = `${appPublic}\n${appAdmin}`;
 const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
+const productEditorial = read('netlify/functions/lib/domain/product-editorial-pipeline.mjs');
+const productLinkPackage = read('netlify/functions/lib/domain/product-link-package-preparer.mjs');
 const productSaleDecisions = read('netlify/functions/lib/domain/product-sale-decisions.mjs');
 const allegroOfferWithdrawal = read('netlify/functions/lib/allegro-offer-withdrawal-route.mjs');
 const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
@@ -723,10 +727,10 @@ const oneLinkApprovalFlow = app.slice(app.indexOf('async function agentAIPrzygot
 if (!oneLinkRuntime.includes('agentAIPrzygotujProduktZJednegoLinku(') || !oneLinkApprovalFlow.includes('location.hash="#/admin/produkty/dodaj?agent=1"') || oneLinkApprovalFlow.includes('produktyDodane.push(')) {
   fail('assets/app.js: odczyt linku ma tylko przygotować wspólny formularz i czekać na zatwierdzenie administratora');
 }
-const productUrlPrepareFlow = store.slice(store.indexOf('async function przygotujPakietProduktuZLinku'), store.indexOf('function allegroNormTekst'));
-if (!productUrlPrepareFlow.includes('allegroDraftZAutoKategoria') || !productUrlPrepareFlow.includes('duplicateAudit') || !productUrlPrepareFlow.includes('readyForAllegro')) {
+if (!store.includes('productLinkPackagePreparer(req, target, options)') || !productLinkPackage.includes('prepareOffer(req, baseProduct') || !productLinkPackage.includes('duplicateAudit') || !productLinkPackage.includes('readyForAllegro')) {
   fail('store-app.mjs: import z linku musi w jednym przebiegu przygotować sklep, duplikaty i Allegro');
 }
+if (!productEditorial.includes("sourceRole: 'facts_only'") || !productEditorial.includes("channels: 'shared_store_and_allegro'") || !productEditorial.includes("layoutPolicy: 'allegro_sections'")) fail('redakcja z linku musi używać źródła wyłącznie jako faktów i wspólnej treści sklepu oraz Allegro');
 if (!store.includes("method: 'PATCH', bodyObj: patch, withMeta: true") || !store.includes("'/pricing/offer-fee-preview'") || !store.includes('allegroDescriptionSections = sections')) {
   fail('store-app.mjs: automatyczna konserwacja musi aktualizować ofertę, opisy i kalkulację opłat');
 }

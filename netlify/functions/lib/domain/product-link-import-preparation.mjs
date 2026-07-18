@@ -2,7 +2,7 @@ const asArray = (value) => Array.isArray(value) ? value : [];
 
 export function createProductLinkImportPreparer({
   readSettings, catalog, centralProducts, inspect, offerSettings, recognizeProducer,
-  chooseCategory, shortDescription, text, now = () => new Date(),
+  chooseCategory, shortDescription, editorialize, text, now = () => new Date(),
 } = {}) {
   if (typeof readSettings !== 'function' || !catalog || typeof centralProducts !== 'function' || typeof inspect !== 'function') {
     throw new Error('Przygotowanie importu wymaga katalogu i odczytu źródła.');
@@ -30,7 +30,7 @@ export function createProductLinkImportPreparer({
     const producer = recognizeProducer(sourceProduct, {}, await offerSettings()) || text(sourceProduct.producent || sourceProduct.marka, 160);
     const category = chooseCategory(sourceProduct, products), description = text(sourceProduct.opis, 20000);
     const timestamp = now().toISOString();
-    const product = {
+    const baseProduct = {
       ...sourceProduct, producent: producer, marka: text(sourceProduct.marka || producer, 160),
       kategoria: text(category.name || sourceProduct.kategoria, 180),
       opisKrotki: text(sourceProduct.opisKrotki || shortDescription(description), 500), opis: description,
@@ -40,6 +40,8 @@ export function createProductLinkImportPreparer({
       agentImportConfidence: Number(alternatives[0]?.confidence || inspected.confidence || 0),
       agentImportUrl: canonicalUrl, createdAt: timestamp, createdBy: 'import pliku linków',
     };
+    const editorial = typeof editorialize === 'function' ? await editorialize(baseProduct, canonicalUrl) : null;
+    const product = editorial?.product || baseProduct;
     const missing = [];
     if (!text(product.nazwa, 300)) missing.push('nazwy');
     if (!(Number(product.cena) > 0)) missing.push('ceny sprzedaży');

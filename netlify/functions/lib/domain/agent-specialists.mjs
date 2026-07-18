@@ -16,7 +16,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-18.1';
+const PROMPT_VERSION = '2026-07-18.2';
 const NEVER_AUTOMATIC = Object.freeze(['wysyłanie wiadomości', 'publikacja Allegro', 'zmiana ceny', 'zmiana stanu', 'usuwanie', 'zamówienie u producenta']);
 
 const SPECIALISTS = Object.freeze({
@@ -25,7 +25,7 @@ const SPECIALISTS = Object.freeze({
     icon: '✨', label: 'Redaktor produktu', area: 'Katalog i sklep',
     description: 'Tworzy spójny tytuł, krótki i pełny opis oraz pola SEO wyłącznie z przekazanych faktów.',
     fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
-    rules: 'Zachowaj dokładną nazwę handlową produktu; poprawiaj ją tylko przy oczywistej literówce. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach.',
+    rules: 'Nazwę ze źródła traktuj jako fakt o tożsamości, a nie gotowy tytuł. Usuń dopiski sklepu źródłowego, powtórzenia i chaos wielkich liter; ułóż naturalną nazwę sprzedażową, zachowując markę, model i wariant. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach.',
   },
   allegro_offer: {
     assistantId: 'asst_16UEvdbo3boUso6xyYeANYnQ',
@@ -259,7 +259,8 @@ function productFacts(product = {}) {
     ean: product.gtin || product.ean, producerCode: product.kodProducenta || product.mpn, price: product.cena,
     shortDescription: product.opisKrotki || product.krotkiOpis, fullDescription: product.opis,
     parameters: product.parametry || product.parameters, age: product.wiek, players: product.gracze,
-    sourceUrl: product.sourceUrl || product.producentUrl, seoTitle: product.seoTitle, seoDescription: product.seoDescription,
+    sourceUrl: product.sourceUrl || product.producentUrl, sourceMaterial: product.sourceMaterial,
+    seoTitle: product.seoTitle, seoDescription: product.seoDescription,
   });
 }
 

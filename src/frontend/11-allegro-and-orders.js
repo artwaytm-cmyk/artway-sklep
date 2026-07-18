@@ -564,13 +564,14 @@ function allegroZapiszAutoUzupelnienia(p,d={}){
     allegroProductId:auto.allegroProductId||catalog.id||p.allegroProductId||"",
     allegroCategoryId:auto.allegroCategoryId||category.id||catalog.categoryId||p.allegroCategoryId||""
   };
-  const improved=d.improvedDescriptions||{},safeSections=d.draft?.description?.sections||improved.sections||[],safeFull=improved.fullDescription||allegroTekstZBezpiecznychSekcji(safeSections)||"",safeShort=improved.shortDescription||p.opisKrotki||(safeFull?agentAITnijDoZdania(safeFull,500):""),next={allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI},force={};let changed=p.allegroShippingSubsidy===undefined;
+  const improved=d.improvedDescriptions||{},safeSections=d.draft?.description?.sections||improved.sections||[],safeFull=improved.storeFullDescription||improved.fullDescription||p.opis||"",allegroFull=improved.allegroDescription||allegroTekstZBezpiecznychSekcji(safeSections)||p.allegroDescription||"",safeShort=improved.storeShortDescription||improved.shortDescription||p.opisKrotki||(safeFull?agentAITnijDoZdania(safeFull,500):""),next={allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI},force={};let changed=p.allegroShippingSubsidy===undefined;
   for(const [key,value] of Object.entries(fields))if(value&&(!p[key]||(canonical&&key==="producent"&&String(p[key])!==String(value)))){next[key]=String(value);changed=true;}
   const extraImages=(Array.isArray(auto.zdjecia)?auto.zdjecia:[]).filter(Boolean).filter(x=>x!==fields.zdjecie).slice(0,15);
   if(extraImages.length&&!(Array.isArray(p.zdjecia)&&p.zdjecia.length)){next.zdjecia=extraImages;changed=true;}
   if(Array.isArray(auto.allegroParameters)&&auto.allegroParameters.length&&!Array.isArray(p.allegroParameters)){next.allegroParameters=auto.allegroParameters;changed=true;}
   if(safeShort&&String(safeShort)!==String(p.opisKrotki||"")){force.opisKrotki=String(safeShort);changed=true;}
   if(safeFull&&String(safeFull)!==String(p.opis||"")){force.opis=String(safeFull);changed=true;}
+  if(allegroFull&&String(allegroFull)!==String(p.allegroDescription||"")){force.allegroDescription=String(allegroFull);changed=true;}
   if(Array.isArray(safeSections)&&safeSections.length){force.allegroDescriptionSections=safeSections;changed=true;}
   const form=document.querySelector("form.product-editor-form");
   if(form){
@@ -700,11 +701,6 @@ function agentAIAktualizujIstniejacyZAnalizy(id,button){
 function agentAIWariantyJednegoLinkuHTML(d={}){
   const alternatives=Array.isArray(d.alternatives)?d.alternatives:[];
   return `<div class="product-link-agent-report needs-choice"><header><div><span>🤖 Agent rozpoznał kilka kart</span><h3>Wybierz właściwy produkt</h3><small>Tylko w tej wyjątkowej sytuacji potrzebna jest jedna decyzja. Po wyborze Agent wykona całą resztę.</small></div><span class="lvl lvl-ostrzezenie">${alternatives.length} możliwości</span></header><div class="product-link-candidate-grid">${alternatives.map((c,i)=>`<article>${c.product?.zdjecie?`<img src="${esc(c.product.zdjecie)}" alt="">`:`<span>📦</span>`}<div><b>${esc(c.product?.nazwa||`Produkt ${i+1}`)}</b><small>EAN ${esc(c.product?.ean||c.product?.gtin||"—")} • kod ${esc(c.product?.kodProducenta||c.product?.mpn||"—")}</small><small>${esc(c.confidence||0)}% • ${esc(c.url||"")}</small></div><button class="btn" type="button" onclick="agentAIWybierzWariantJednegoLinku(${i},this)">Wybierz — Agent zrobi resztę</button></article>`).join("")}</div></div>`;
-}
-function agentAIProduktGotowyZLinku(d={},url=""){
-  const source={...(d.product||{})},category=d.storeCategory?.name?d.storeCategory:agentAIDobierzKategorieProduktu(source),canonical=allegroProducentKanoniczny({...source,sourceUrl:source.sourceUrl||url,producentUrl:source.producentUrl||url}),canonicalUrl=String(d.canonicalUrl||d.resolvedUrl||source.sourceUrl||url).trim(),now=new Date().toISOString();
-  const product={...source,kategoria:category.name||source.kategoria||"",producent:canonical||source.producent||source.marka||"",marka:source.marka||canonical||source.producent||"",sourceUrl:canonicalUrl,producentUrl:canonicalUrl,agentImportAt:now,agentImportConfidence:Number(d.confidence||source.agentImportConfidence||0),agentImportSource:d.fromCache?"pamięć Agenta + źródło produktu":"strona źródłowa produktu + Agent",agentImportUrl:canonicalUrl,sourceEvidence:{...(source.sourceEvidence||{}),requestedUrl:url,canonicalUrl,fetchedAt:source.sourceEvidence?.fetchedAt||source.producentSprawdzonoAt||now,fieldSources:d.fieldSources||source.sourceEvidence?.fieldSources||{}},ikona:source.ikona||(/\b(gra|gry|puzzle|układank|zabaw)/i.test(`${source.nazwa||""} ${category.name||""}`)?"🎲":"📦"),sku:source.sku||source.externalId||"",externalId:source.externalId||source.sku||"",cena:Number(source.cena)||0,createdAt:now,createdBy:sesja?.email||"administrator",agentOnboardingStatus:"processing",agentOnboardingStartedAt:now};
-  return domyslneKosztyDoProduktu(agentAIPoprawOpisyDanychProduktu(product),false);
 }
 async function agentAIPrzygotujProduktZJednegoLinku(d={},url="",box=null){
   const product=agentAIProduktGotowyZLinku(d,url);

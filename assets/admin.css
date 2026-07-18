@@ -304,6 +304,7 @@ body.admin-mode #widok{min-height:100vh;background:radial-gradient(circle at 100
 .product-description-content p{margin:0;color:var(--muted2);font-size:.95rem;line-height:1.72;max-width:880px}
 .product-description-content ul{display:grid;gap:.3rem;margin:0;padding-left:1.25rem;max-width:880px}
 .product-description-content li{color:var(--muted2);line-height:1.55}
+.product-description-shared-layout>section{display:grid;gap:.55rem}.product-description-shared-layout h2{margin:.7rem 0 0;font-size:1.15rem}.product-description-shared-layout figure{margin:.35rem 0;max-width:880px}.product-description-shared-layout figure img{display:block;width:100%;max-height:620px;object-fit:contain;border-radius:14px;background:var(--soft)}
 .allegro-description-preview{display:grid;gap:.65rem;margin-top:.75rem;padding:1rem;border:1.5px solid var(--line);border-radius:15px;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.05)}
 .allegro-description-preview-head{display:grid;gap:.1rem;padding-bottom:.65rem;border-bottom:1px solid var(--line)}.allegro-description-preview-head small{color:var(--muted2)}
 .allegro-description-preview section{padding:.75rem;border:1px solid var(--line);border-radius:12px;background:var(--bg)}

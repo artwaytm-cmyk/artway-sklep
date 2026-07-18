@@ -24,8 +24,8 @@ function asortymentSeoAgenta(p={}){
   for(const key of ["seoTitle","seoDescription","seoKeywords","seoScore","seoReviewedAt","seoSource","seoMode"])if(next[key]!==undefined&&String(next[key])!==String(p[key]??""))patch[key]=next[key];
   return Object.keys(patch).length?zapiszPolaProduktuLokalnie(p.id,patch,false):false;
 }
-const ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO=["nazwa","allegroTitle","opisKrotki","opis","producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","zdjecia","allegroCategoryId","allegroProductId","allegroParameters","allegroDescriptionSections","allegroShippingSubsidy"];
-const ASORTYMENT_ETYKIETY_POL_ALLEGRO={nazwa:"nazwa",allegroTitle:"tytuł Allegro",opisKrotki:"opis krótki",opis:"opis długi",producent:"producent",marka:"marka",gtin:"GTIN",ean:"EAN",kodProducenta:"kod producenta",mpn:"MPN",zdjecie:"zdjęcie główne",zdjecia:"galeria",allegroCategoryId:"kategoria Allegro",allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",allegroDescriptionSections:"układ opisu Allegro",allegroShippingSubsidy:"dopłata do wysyłki"};
+const ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO=["nazwa","allegroTitle","opisKrotki","opis","allegroDescription","producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","zdjecia","allegroCategoryId","allegroProductId","allegroParameters","allegroDescriptionSections","allegroShippingSubsidy"];
+const ASORTYMENT_ETYKIETY_POL_ALLEGRO={nazwa:"nazwa",allegroTitle:"tytuł Allegro",opisKrotki:"opis krótki sklepu",opis:"opis długi sklepu",allegroDescription:"opis Allegro",producent:"producent",marka:"marka",gtin:"GTIN",ean:"EAN",kodProducenta:"kod producenta",mpn:"MPN",zdjecie:"zdjęcie główne",zdjecia:"galeria",allegroCategoryId:"kategoria Allegro",allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",allegroDescriptionSections:"układ opisu Allegro",allegroShippingSubsidy:"dopłata do wysyłki"};
 function asortymentMigawkaPrzygotowania(p={}){return Object.fromEntries(ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.map(key=>[key,p[key]]));}
 function asortymentPolaZmienione(before={},after={}){return ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.filter(key=>JSON.stringify(before[key]??null)!==JSON.stringify(after[key]??null));}
 function asortymentEtykietyPol(keys=[]){return keys.map(key=>ASORTYMENT_ETYKIETY_POL_ALLEGRO[key]||key);}
@@ -53,8 +53,8 @@ function asortymentPatchZPrzygotowania(p={},draft={}){
   if(Array.isArray(auto.allegroParameters)&&auto.allegroParameters.length)patch.allegroParameters=auto.allegroParameters;
   const improved=draft.improvedDescriptions||{},safeSections=draft.draft?.description?.sections||improved.sections||[];
   if(Array.isArray(safeSections)&&safeSections.length)patch.allegroDescriptionSections=safeSections;
-  const full=String(improved.fullDescription||allegroTekstZBezpiecznychSekcji(safeSections)||"").trim(),short=String(improved.shortDescription||p.opisKrotki||(full?agentAITnijDoZdania(full,500):"")).trim();
-  if(full)patch.opis=full;if(short)patch.opisKrotki=short;
+  const full=String(improved.storeFullDescription||improved.fullDescription||p.opis||"").trim(),short=String(improved.storeShortDescription||improved.shortDescription||p.opisKrotki||(full?agentAITnijDoZdania(full,500):"")).trim(),allegroFull=String(improved.allegroDescription||allegroTekstZBezpiecznychSekcji(safeSections)||p.allegroDescription||"").trim();
+  if(full)patch.opis=full;if(short)patch.opisKrotki=short;if(allegroFull)patch.allegroDescription=allegroFull;
   patch.allegroShippingSubsidy=p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI;
   return patch;
 }
@@ -65,9 +65,9 @@ async function asortymentPrzygotujProduktDoAllegro(base={},options={}){
     else warnings.push("brak linku producenta — użyto danych kartoteki i katalogu Allegro");
   }
   try{
-    const improved=await chmura("allegro-description-improve",{method:"POST",body:{product:p},timeout:30000});
+    const improved=await chmura("allegro-description-improve",{method:"POST",body:{product:p},timeout:120000});
     if(improved.compliance?.ok!==false){
-      zapiszPolaProduktuLokalnie(p.id,{opisKrotki:improved.shortDescription||p.opisKrotki,opis:improved.fullDescription||p.opis,allegroDescriptionSections:improved.sections||p.allegroDescriptionSections},false);
+      zapiszPolaProduktuLokalnie(p.id,{nazwa:improved.name||p.nazwa,opisKrotki:improved.shortDescription||p.opisKrotki,opis:improved.fullDescription||p.opis,allegroTitle:improved.allegroTitle||p.allegroTitle,allegroDescription:improved.allegroDescription||p.allegroDescription,contentEditorial:improved.contentEditorial||p.contentEditorial,allegroDescriptionSections:improved.sections||p.allegroDescriptionSections},false);
       p=asortymentProduktPoId(p.id)||p;
     }else warnings.push("opis wymagał oczyszczenia przez końcową bramkę zgodności");
   }catch(error){warnings.push(`poprawa opisu: ${error.message||error}`);}

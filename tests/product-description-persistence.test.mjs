@@ -10,17 +10,24 @@ test('edytor produktu ma niezależny opis krótki i długi oraz tytuł Allegro',
   assert.match(source, /name="allegroTitle"/);
 });
 
-test('poprawa Allegro zapisuje oba opisy i układ w kartotece serwerowej', async () => {
+test('poprawa zapisuje wspólną treść sklepu i Allegro oraz układ w kartotece serwerowej', async () => {
   const source = await readFile('src/frontend/03-cloud-sync.js', 'utf8');
-  assert.match(source, /allegroDescriptionSource:"admin-allegro-improve"/);
+  assert.match(source, /allegroDescriptionSource:"agent-editorial-shared-content"/);
   assert.match(source, /opisKrotki:d\.shortDescription/);
   assert.match(source, /opis:d\.fullDescription/);
+  assert.match(source, /nazwa:d\.name/);
+  assert.match(source, /allegroDescription:d\.allegroDescription/);
+  assert.match(source, /contentEditorial:d\.contentEditorial/);
   assert.match(source, /cloudSaved=await chmuraZapiszUstawienia/);
 });
 
-test('odświeżenie linku producenta uzupełnia tylko brakujące opisy', async () => {
+test('odświeżenie linku zachowuje surową treść tylko jako materiał źródłowy', async () => {
   const source = await readFile('src/frontend/12-customers-and-inventory.js', 'utf8');
-  assert.match(source, /missing=\{[^\n]+opisKrotki:s\.opisKrotki\|\|"",opis:s\.opis\|\|""/);
+  const missing = source.match(/const missing=\{([^\n]+)\};/)?.[1] || '';
+  assert.match(missing, /sourceMaterial:/);
+  assert.match(missing, /shortDescription:s\.opisKrotki/);
+  assert.match(missing, /longDescription:s\.opis/);
+  assert.doesNotMatch(missing, /(?:^|,)nazwa:s\.nazwa|(?:^|,)opisKrotki:s\.opisKrotki|(?:^|,)opis:s\.opis/);
   const force = source.match(/canonicalUrl=s\.sourceUrl[^\n]+force=\{([^\n]+)\}/)?.[1] || '';
   assert.ok(force);
   assert.doesNotMatch(force, /opisKrotki:|opis:/);
@@ -28,5 +35,5 @@ test('odświeżenie linku producenta uzupełnia tylko brakujące opisy', async (
 
 test('krótki opis Allegro zachowuje własną wersję zamiast skrótu opisu długiego', async () => {
   const source = await readFile('src/frontend/11-allegro-and-orders.js', 'utf8');
-  assert.match(source, /safeShort=improved\.shortDescription\|\|p\.opisKrotki/);
+  assert.match(source, /safeShort=improved\.storeShortDescription\|\|improved\.shortDescription\|\|p\.opisKrotki/);
 });

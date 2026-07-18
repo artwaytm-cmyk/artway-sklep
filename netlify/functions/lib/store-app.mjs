@@ -41,6 +41,8 @@ import { createInventoryDecisionService } from './domain/inventory-decisions.mjs
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createAgentRuntime } from './domain/agent-runtime.mjs';
 import { createAgentSpecialists } from './domain/agent-specialists.mjs';
+import { prepareLinkedProductEditorial } from './domain/product-editorial-pipeline.mjs';
+import { createProductLinkPackagePreparer } from './domain/product-link-package-preparer.mjs';
 import { createAllegroCredentialManager } from './domain/allegro-credential-manager.mjs';
 import { allegroCredentialLooksMasked, buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester } from './domain/allegro-operation-receipts.mjs';
 import { createAllegroCredentialsRoute } from './allegro-credentials-route.mjs';
@@ -143,6 +145,8 @@ const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersi
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const agentSpecialists = createAgentSpecialists({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const linkedProductEditorial = (product, sourceUrl, actor) => prepareLinkedProductEditorial(product, { sourceUrl, runSpecialist: agentSpecialists.run, actor });
+const productLinkPackagePreparer = createProductLinkPackagePreparer({ inspect: pobierzProduktProducentaZPamiecia, readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), offerSettings: allegroPobierzUstawieniaOfert, centralProducts: allegroAgentProduktyCentralne, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, editorialize: linkedProductEditorial, prepareOffer: allegroDraftZAutoKategoria, duplicates: produktLinkDuplikaty, shortDescription: allegroOpisKrotkiZTekstu, text: tekst, sessionOf: requestSession });
 const allegroOperationReceipts = createAllegroOperationReceipts({ read: czytaj, write: zapisz, text: tekst });
 const allegroTokenRequest = createAllegroTokenRequester({ configure: allegroKonfiguracja, errorText: bledyAllegroTekst });
 const allegroAccessToken = createAllegroTokenAccess({ configure: allegroKonfiguracja, read: czytaj, write: zapisz, requestToken: allegroTokenRequest, text: tekst });
@@ -153,7 +157,7 @@ const aiBannerGenerator = createAiBannerGenerator({ read: czytaj, write: zapisz,
 const aiBannerRoute = createAiBannerRoute({ generator: aiBannerGenerator, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, configured: () => !!process.env.OPENAI_API_KEY, model: () => process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2' });
 const allegroOrderArchive = createAllegroOrderArchive({ read: czytaj, write: zapisz });
 const allegroDataReader = createAllegroDataReader({ read: czytaj, archive: allegroOrderArchive, getOfferSettings: allegroPobierzUstawieniaOfert, getStatus: allegroStatus, mappingItems: allegroMapowaniaItems, orderStatus: (order) => allegroStatusKolejkiZamowienia(order, {}), orderNeedsRefresh: allegroOrderNeedsLiveRefresh, nextScheduledSyncAt: allegroNextScheduledSyncAt, compliancePolicy: ALLEGRO_COMPLIANCE_POLICY });
-const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
+const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, editorialize: linkedProductEditorial, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
 const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ autoMapOffers: allegroAutoMapujOfertyZKartoteka, callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
 const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, agentRuntime, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
 
@@ -2042,7 +2046,7 @@ function allegroOpisKrotki(product = {}, podobne = []) {
 function allegroOpisPelny(product = {}, shortDescription = '') {
   const blocks = [];
   if (shortDescription) blocks.push({ type: 'lead', text: shortDescription });
-  const raw = tekst(allegroSanitizePlainText(product.opis || '').text, 20000)
+  const raw = tekst(allegroSanitizePlainText(product.allegroDescription || product.opis || '').text, 20000)
     .replace(/<\s*br\s*\/?>/gi, '\n')
     .replace(/<\s*\/\s*(p|div|h[1-6]|li)\s*>/gi, '\n\n')
     .replace(/<\s*li[^>]*>/gi, '• ')
@@ -2075,7 +2079,7 @@ function allegroOpisPelny(product = {}, shortDescription = '') {
     }
   }
   if (!blocks.some((x) => x.type === 'body' || x.type === 'list') && shortDescription) blocks.push({ type: 'body', title: 'Opis produktu', text: shortDescription });
-  const rawKey = allegroNormalizujKlucz(raw), facts = [
+  const rawKey = allegroNormalizujKlucz(raw), facts = product.contentEditorial?.channels === 'shared_store_and_allegro' ? [] : [
     product.marka || product.producent ? `Marka: ${product.marka || product.producent}` : '',
     product.kodProducenta || product.mpn ? `Kod producenta: ${product.kodProducenta || product.mpn}` : '',
     product.gtin || product.ean ? `EAN/GTIN: ${product.gtin || product.ean}` : '',
@@ -2827,68 +2831,7 @@ function produktLinkKategoriaSklepu(product = {}, products = new Map()) {
   return { name: raw, confidence: raw ? 50 : 0, reason: raw ? 'kategoria producenta wymaga zatwierdzenia' : 'brak pewnej kategorii sklepu' };
 }
 async function przygotujPakietProduktuZLinku(req, target = '', options = {}) {
-  const inspected = await pobierzProduktProducentaZPamiecia(target);
-  const alternatives = Array.isArray(inspected.alternatives) ? inspected.alternatives : [];
-  const choice = Number.isInteger(options.choice) ? options.choice : null;
-  if (inspected.needsChoice && (choice === null || !alternatives[choice])) {
-    return { ...inspected, workflow: { stage: 'needs_choice', readyForStore: false, readyForAllegro: false, blockers: ['wybierz właściwy produkt ze znalezionych wariantów'], nextAction: 'choose_product' } };
-  }
-  const selected = choice !== null ? alternatives[choice] : null;
-  const sourceProduct = { ...(selected?.product || inspected.product || {}) };
-  const canonicalUrl = tekst(selected?.url || inspected.canonicalUrl || inspected.resolvedUrl || target, 1000);
-  sourceProduct.sourceUrl = canonicalUrl; sourceProduct.producentUrl = canonicalUrl;
-  const [settingsRec, offerSettings] = await Promise.all([czytaj('settings', { data: {}, rev: 0, updated_at: null }), allegroPobierzUstawieniaOfert()]);
-  const data = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {}, products = allegroAgentProduktyCentralne(data);
-  const producer = allegroRozpoznajProducenta(sourceProduct, {}, offerSettings) || tekst(sourceProduct.producent || sourceProduct.marka, 160);
-  const category = produktLinkKategoriaSklepu(sourceProduct, products);
-  const baseProduct = { ...sourceProduct, ...(producer ? { producent: producer, marka: sourceProduct.marka || producer } : {}), ...(category.name ? { kategoria: category.name } : {}) };
-  let offerPreparation = null, offerError = null;
-  try { offerPreparation = await allegroDraftZAutoKategoria(req, baseProduct, { publicationAction: 'keep' }); }
-  catch (error) { offerError = { message: tekst(error?.message || error, 700), code: tekst(error?.code || '', 120), status: Number(error?.status || 0) }; }
-  const auto = offerPreparation?.autoFilled || {}, improved = offerPreparation?.improvedDescriptions || {};
-  const product = {
-    ...baseProduct,
-    ...(!baseProduct.gtin && !baseProduct.ean && (auto.gtin || auto.ean) ? { gtin: auto.gtin || auto.ean, ean: auto.ean || auto.gtin } : {}),
-    ...(!baseProduct.kodProducenta && !baseProduct.mpn && (auto.kodProducenta || auto.mpn) ? { kodProducenta: auto.kodProducenta || auto.mpn, mpn: auto.mpn || auto.kodProducenta } : {}),
-    ...(!baseProduct.zdjecie && auto.zdjecie ? { zdjecie: auto.zdjecie } : {}),
-    ...((!Array.isArray(baseProduct.zdjecia) || !baseProduct.zdjecia.length) && Array.isArray(auto.zdjecia) && auto.zdjecia.length ? { zdjecia: auto.zdjecia.slice(0, 15) } : {}),
-    ...(auto.allegroProductId ? { allegroProductId: auto.allegroProductId } : {}),
-    ...(auto.allegroCategoryId ? { allegroCategoryId: auto.allegroCategoryId } : {}),
-    ...(Array.isArray(auto.allegroParameters) && auto.allegroParameters.length ? { allegroParameters: auto.allegroParameters } : {}),
-    opisKrotki: tekst(baseProduct.opisKrotki || improved.shortDescription || allegroOpisKrotkiZTekstu(baseProduct.opis), 500),
-    opis: tekst(baseProduct.opis || improved.fullDescription, 20000),
-    agentImportSource: inspected.fromCache ? 'pamięć Agenta + katalog Allegro' : 'link producenta + katalog Allegro',
-    agentImportConfidence: Number(selected?.confidence || inspected.confidence || 0),
-    agentImportUrl: canonicalUrl,
-  };
-  const duplicates = produktLinkDuplikaty(product, products), blockingDuplicate = duplicates.find((item) => item.blocking);
-  const blockers = [], warnings = [];
-  if (!tekst(product.nazwa, 300)) blockers.push('brak nazwy');
-  if (!(Number(product.cena) > 0)) blockers.push('brak poprawnej ceny');
-  if (!tekst(product.kategoria, 180)) blockers.push('brak kategorii sklepu');
-  if (blockingDuplicate) blockers.push(`produkt już istnieje w sklepie: #${blockingDuplicate.productId}`);
-  if (!(product.gtin || product.ean || product.kodProducenta || product.mpn)) warnings.push('brak EAN i kodu producenta');
-  if (!product.zdjecie) warnings.push('brak zdjęcia głównego');
-  if (tekst(product.opisKrotki, 500).length < 40) warnings.push('krótki opis wymaga uzupełnienia');
-  if (tekst(product.opis, 20000).length < 150) warnings.push('pełny opis wymaga uzupełnienia');
-  if (!product.allegroCategoryId) warnings.push('nie dobrano kategorii Allegro');
-  if (!product.allegroProductId) warnings.push('nie znaleziono produktu w katalogu Allegro');
-  if (offerError) warnings.push(`Allegro: ${offerError.message}`);
-  const offerMissing = Array.isArray(offerPreparation?.missing) ? offerPreparation.missing : [];
-  const readyForStore = !blockers.length, readyForAllegro = readyForStore && !offerError && !offerMissing.length && !!product.allegroCategoryId;
-  return {
-    ...inspected,
-    needsChoice: false,
-    product,
-    selectedChoice: choice,
-    confidence: Math.max(Number(inspected.confidence || 0), Number(selected?.confidence || 0)),
-    sourceMissing: Array.isArray(inspected.missing) ? inspected.missing : [],
-    missing: [...new Set([...blockers, ...warnings])],
-    duplicateAudit: { blocking: !!blockingDuplicate, selected: blockingDuplicate || null, items: duplicates },
-    storeCategory: category,
-    allegroPreparation: offerPreparation ? { categorySuggestion: offerPreparation.categorySuggestion || null, catalogMatch: offerPreparation.catalogMatch || null, existingOffer: offerPreparation.existingOffer || null, agentDecision: offerPreparation.agentDecision || null, missing: offerMissing, requiredParameters: offerPreparation.requiredParameters || [], supportErrors: offerPreparation.supportErrors || [] } : null,
-    workflow: { stage: blockingDuplicate ? 'duplicate' : readyForAllegro ? 'ready' : readyForStore ? 'store_ready' : 'incomplete', readyForStore, readyForAllegro, blockers, warnings, nextAction: blockingDuplicate ? 'open_existing_product' : readyForAllegro ? 'review_and_save' : 'complete_missing_fields' },
-  };
+  return productLinkPackagePreparer(req, target, options);
 }
 
 function allegroNormTekst(s = '') {
@@ -3317,11 +3260,7 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
           report.matched++;
           const catalogProducer = allegroRozpoznajProducenta({ ...product, ...fields }, catalog, offerSettings);
           if (catalogProducer) { fields.producent = catalogProducer; fields.marka = catalogProducer; }
-          if (offerSettings.syncDescriptions !== false && !tekst(product.opis, 20000).trim() && catalog.descriptionText) {
-            fields.opis = tekst(catalog.descriptionText, 20000).trim();
-            fields.opisKrotki = allegroOpisKrotkiZTekstu(fields.opis);
-            report.descriptions++;
-          }
+          if (offerSettings.syncDescriptions !== false && !tekst(product.opis, 20000).trim() && catalog.descriptionText) fields.sourceMaterial = { ...(product.sourceMaterial || {}), allegroCatalogDescription: tekst(catalog.descriptionText, 20000).trim(), fetchedAt: report.lastRun };
           if (!product.zdjecie && catalog.images?.[0]) fields.zdjecie = catalog.images[0];
           if ((!Array.isArray(product.zdjecia) || !product.zdjecia.length) && catalog.images?.length > 1) fields.zdjecia = catalog.images.slice(1, 16);
         }
@@ -3335,8 +3274,7 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
       if (offerTitle && offerTitle !== tekst(product.allegroTitle, 75).trim()) { fields.allegroTitle = offerTitle; report.titles++; }
       if (offerSettings.syncDescriptions !== false) {
         const shortDescription = allegroOpisKrotki(styledProduct, []), fullDescription = allegroOpisPelnyTekst(styledProduct, shortDescription), sections = allegroSekcjeOpisu(styledProduct, shortDescription);
-        if (shortDescription) fields.opisKrotki = shortDescription;
-        if (fullDescription) fields.opis = fullDescription;
+        if (fullDescription) fields.allegroDescription = fullDescription;
         fields.allegroDescriptionSections = sections;
         report.descriptions++;
       }
@@ -3434,7 +3372,10 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     similarOffers: similarOffers.map((x) => ({ id: x.offer?.id, name: x.offer?.name, score: Number(x.score.toFixed(2)) })),
     improvedDescriptions: {
       shortDescription: options.shortDescription,
-      fullDescription: allegroOpisPelnyTekst(preparedProduct, options.shortDescription) || options.shortDescription,
+      fullDescription: tekst(preparedProduct.opis, 20000),
+      storeShortDescription: tekst(preparedProduct.opisKrotki, 500),
+      storeFullDescription: tekst(preparedProduct.opis, 20000),
+      allegroDescription: allegroOpisPelnyTekst(preparedProduct, options.shortDescription) || options.shortDescription,
       sections: options.descriptionSections,
     },
     autoFilled: {
@@ -3629,6 +3570,7 @@ async function allegroZapiszPowiazanieProduktu(product = {}, details = {}) {
   if (details.prepared?.autoFilled?.allegroTitle) autoPatch.allegroTitle = tekst(details.prepared.autoFilled.allegroTitle, 75);
   if (improved.shortDescription) autoPatch.opisKrotki = tekst(improved.shortDescription, 500);
   if (improved.fullDescription) autoPatch.opis = tekst(improved.fullDescription, 20000);
+  if (improved.allegroDescription) autoPatch.allegroDescription = tekst(improved.allegroDescription, 20000);
   if (Array.isArray(improved.sections) && improved.sections.length) autoPatch.allegroDescriptionSections = improved.sections;
   if (product.allegroShippingSubsidy === undefined && previousEdit.allegroShippingSubsidy === undefined) autoPatch.allegroShippingSubsidy = 3;
   edits[productId] = {
@@ -5991,17 +5933,24 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const product = body.product || {};
+      const sourceProduct = body.product || {};
+      const editorial = await prepareLinkedProductEditorial(sourceProduct, { sourceUrl: sourceProduct.sourceUrl || sourceProduct.producentUrl, runSpecialist: agentSpecialists.run, actor: requestSession(req) || { source: 'product-editorial' } });
+      const product = editorial.product;
       const offersRec = await czytaj('allegro_offers', { items: [] });
       const similarOffers = allegroPodobneOferty(product, offersRec, 5);
       const shortDescription = allegroOpisKrotki(product, similarOffers);
       const sections = allegroSekcjeOpisu(product, shortDescription);
-      const fullDescription = allegroOpisPelnyTekst(product, shortDescription);
+      const allegroDescription = allegroOpisPelnyTekst(product, shortDescription);
       return odpowiedz({
         ok: true,
-        shortDescription,
-        fullDescription: fullDescription || shortDescription,
+        name: product.nazwa || '',
+        shortDescription: product.opisKrotki || shortDescription,
+        fullDescription: product.opis || '',
+        allegroTitle: product.allegroTitle || allegroOfferTitle(product),
+        allegroDescription: allegroDescription || product.allegroDescription || shortDescription,
         sections,
+        contentEditorial: product.contentEditorial,
+        editorial: { status: editorial.status, sourceRole: 'facts_only', warnings: editorial.warnings },
         compliance: allegroEnforceDraft({ name: product.nazwa || product.name || 'Produkt', description: { sections } }).compliance,
         similarOffers: similarOffers.map((x) => ({ id: x.offer?.id, name: x.offer?.name, score: Number(x.score.toFixed(2)) })),
       });

@@ -450,6 +450,11 @@ function agentAIFormatujOpisPelny(p={}){
   return wynik.join("\n\n").replace(/\n{3,}/g,"\n\n").trim();
 }
 function opisProduktuHTML(p={}){
+  if(p.contentEditorial?.layoutPolicy==="allegro_sections"&&Array.isArray(p.allegroDescriptionSections)&&p.allegroDescriptionSections.length){
+    const safeHtml=value=>{const tpl=document.createElement("template");tpl.innerHTML=String(value||"");tpl.content.querySelectorAll("*").forEach(el=>{if(!["P","H2","UL","LI","B","STRONG"].includes(el.tagName))el.replaceWith(document.createTextNode(el.textContent||""));else[...el.attributes].forEach(a=>el.removeAttribute(a.name));});return tpl.innerHTML;};
+    const sections=p.allegroDescriptionSections.map(section=>(section.items||[]).map(item=>item.type==="IMAGE"&&/^https?:\/\//i.test(String(item.url||""))?`<figure><img src="${esc(item.url)}" alt="${esc(p.nazwa||"Produkt")}" loading="lazy"></figure>`:`<section>${safeHtml(item.content)}</section>`).join("")).join("");
+    if(sections)return `<div class="product-description-content product-description-shared-layout">${sections}</div>`;
+  }
   const tekst=agentAIFormatujOpisPelny(p)||"Szczegółowy opis produktu zostanie wkrótce uzupełniony.";
   const etykieta=/^(opis produktu|najważniejsze informacje|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)$/i;
   const bloki=tekst.split(/\n{2,}/).map(x=>x.trim()).filter(Boolean);
@@ -474,19 +479,15 @@ function agentAIPoprawOpisyDanychProduktu(p={}){
   if(out.opisKrotki&&out.opis&&out.opisKrotki===out.opis) out.opisKrotki=agentAITnijDoZdania(out.opis,300);
   return out;
 }
-function agentAIPoprawOpisyWFormularzu(form){
-  if(!form){ toast("Nie znaleziono formularza produktu"); return; }
-  const p={
-    nazwa:String(form.elements.nazwa?.value||"").trim(),
-    kategoria:String(form.elements.kategoria?.value||"").trim(),
-    opisKrotki:String(form.elements.opisKrotki?.value||"").trim(),
-    opis:String(form.elements.opis?.value||"").trim()
-  };
-  const poprawiony=agentAIPoprawOpisyDanychProduktu(p);
-  if(form.elements.opisKrotki) form.elements.opisKrotki.value=poprawiony.opisKrotki||"";
-  if(form.elements.opis) form.elements.opis.value=poprawiony.opis||"";
-  zapiszHistorieAgenta("opisy-produktow","Agent AI poprawił opisy w formularzu produktu",{nazwa:p.nazwa});
-  toast("🤖 Agent poprawił krótki i pełny opis w formularzu");
+function agentAIProduktGotowyZLinku(d={},url=""){
+  const source={...(d.product||{})},category=d.storeCategory?.name?d.storeCategory:agentAIDobierzKategorieProduktu(source),canonical=allegroProducentKanoniczny({...source,sourceUrl:source.sourceUrl||url,producentUrl:source.producentUrl||url}),canonicalUrl=String(d.canonicalUrl||d.resolvedUrl||source.sourceUrl||url).trim(),now=new Date().toISOString();
+  const product={...source,kategoria:category.name||source.kategoria||"",producent:canonical||source.producent||source.marka||"",marka:source.marka||canonical||source.producent||"",sourceUrl:canonicalUrl,producentUrl:canonicalUrl,agentImportAt:now,agentImportConfidence:Number(d.confidence||source.agentImportConfidence||0),agentImportSource:d.fromCache?"pamięć Agenta + źródło produktu":"strona źródłowa produktu + Agent",agentImportUrl:canonicalUrl,sourceEvidence:{...(source.sourceEvidence||{}),requestedUrl:url,canonicalUrl,fetchedAt:source.sourceEvidence?.fetchedAt||source.producentSprawdzonoAt||now,fieldSources:d.fieldSources||source.sourceEvidence?.fieldSources||{}},ikona:source.ikona||(/\b(gra|gry|puzzle|układank|zabaw)/i.test(`${source.nazwa||""} ${category.name||""}`)?"🎲":"📦"),sku:source.sku||source.externalId||"",externalId:source.externalId||source.sku||"",cena:Number(source.cena)||0,createdAt:now,createdBy:sesja?.email||"administrator",agentOnboardingStatus:"processing",agentOnboardingStartedAt:now};
+  const curated=product.contentEditorial?.channels==="shared_store_and_allegro"?product:agentAIPoprawOpisyDanychProduktu(product);if(curated.contentEditorial?.channels==="shared_store_and_allegro"){curated.allegroTitle=curated.nazwa;curated.allegroDescription=curated.opis;}
+  return domyslneKosztyDoProduktu(curated,false);
+}
+async function agentAIPoprawOpisyWFormularzu(form){
+  if(!form){toast("Nie znaleziono formularza produktu");return;}
+  return allegroPoprawOpisyWFormularzu(form.querySelector('[onclick^="agentAIPoprawOpisyWFormularzu"]'));
 }
 async function allegroPoprawOpisyWFormularzu(btn){
   const form=btn?.closest("form");
@@ -496,17 +497,18 @@ async function allegroPoprawOpisyWFormularzu(btn){
   try{
     btn.disabled=true;
     toast("🤖 Przygotowuję krótki i pełny opis oraz układ wizualny Allegro…");
-    const d=await chmura("allegro-description-improve",{method:"POST",body:{product:produkt},timeout:18000});
+    const d=await chmura("allegro-description-improve",{method:"POST",body:{product:produkt},timeout:120000});
+    if(form.elements.nazwa&&d.name) form.elements.nazwa.value=d.name;
     if(form.elements.opisKrotki) form.elements.opisKrotki.value=d.shortDescription||form.elements.opisKrotki.value||"";
     if(form.elements.opis&&d.fullDescription) form.elements.opis.value=d.fullDescription;
     let cloudSaved=null;
     if(id){
-      zapiszPolaProduktuLokalnie(id,{opisKrotki:d.shortDescription||produkt.opisKrotki||"",opis:d.fullDescription||produkt.opis||"",allegroDescriptionSections:Array.isArray(d.sections)?d.sections:[],allegroDescriptionEditedAt:new Date().toISOString(),allegroDescriptionSource:"admin-allegro-improve"},false);
+      zapiszPolaProduktuLokalnie(id,{nazwa:d.name||produkt.nazwa||"",opisKrotki:d.shortDescription||produkt.opisKrotki||"",opis:d.fullDescription||produkt.opis||"",allegroTitle:d.allegroTitle||produkt.allegroTitle||"",allegroDescription:d.allegroDescription||produkt.allegroDescription||"",contentEditorial:d.contentEditorial||produkt.contentEditorial,allegroDescriptionSections:Array.isArray(d.sections)?d.sections:[],allegroDescriptionEditedAt:new Date().toISOString(),allegroDescriptionSource:"agent-editorial-shared-content"},false);
       cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);
     }
     const box=document.getElementById("allegroDescriptionPreview");
-    if(box) box.innerHTML=`<div class="backend-note"><b>✅ Opisy i układ Allegro przygotowane</b><br>Krótki opis: ${esc(d.shortDescription||"—")}<br><small>${(d.similarOffers||[]).length?`Pomocniczo przeanalizowano podobne tytuły: ${(d.similarOffers||[]).map(x=>esc(x.name)).join(", ")}. Treść nie jest kopiowana.`:"Opis utworzono z danych własnego produktu."}</small></div><div class="allegro-description-preview"><div class="allegro-description-preview-head"><b>Podgląd wyglądu opisu Allegro</b><small>Akapity, nagłówki, listy i zdjęcia zostaną zapisane w tej kolejności.</small></div>${(d.sections||[]).map(s=>(s.items||[]).map(item=>item.type==="IMAGE"?`<img src="${esc(item.url||"")}" alt="Podgląd zdjęcia produktu" loading="lazy">`:`<section>${item.content||""}</section>`).join("")).join("")||`<section><p>Brak sekcji do podglądu.</p></section>`}</div>`;
-    toast(id?(cloudSaved?"✅ Poprawiony opis krótki, długi i układ Allegro zapisano na serwerze":"⚠️ Opisy zapisano lokalnie; serwer ponowi synchronizację"):`🤖 Poprawiono opis krótki, długi i układ Allegro — zostaną zapisane z nowym produktem`);
+    if(box) box.innerHTML=`<div class="backend-note"><b>✅ Wspólna treść sklepu i Allegro przygotowana</b><br>Nazwa: ${esc(d.allegroTitle||"—")}<br><small>Link źródłowy był wyłącznie podstawą faktów. Ta sama zredagowana nazwa i treść trafią do sklepu oraz Allegro.</small></div><div class="allegro-description-preview"><div class="allegro-description-preview-head"><b>Podgląd układu w Allegro</b><small>Treść pozostaje taka sama; Allegro otrzyma tylko wymagany układ sekcji.</small></div>${(d.sections||[]).map(s=>(s.items||[]).map(item=>item.type==="IMAGE"?`<img src="${esc(item.url||"")}" alt="Podgląd zdjęcia produktu" loading="lazy">`:`<section>${item.content||""}</section>`).join("")).join("")||`<section><p>Brak sekcji do podglądu.</p></section>`}</div>`;
+    toast(id?(cloudSaved?"✅ Wspólną treść sklepu i Allegro zapisano na serwerze":"⚠️ Treść zapisana lokalnie; serwer ponowi synchronizację"):`🤖 Wspólna treść sklepu i Allegro zostanie zapisana z produktem`);
   }catch(e){ toast("⚠️ Poprawianie opisów Allegro: "+(e.message||e)); }
   finally{ btn.disabled=false; }
 }
