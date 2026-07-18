@@ -2309,6 +2309,7 @@ function zmienRoleUzytkownika(email){
   const maRole=k.rola==="admin";
   if(maRole&&sesja?.email===e){ toast("Nie możesz odebrać uprawnień aktualnie używanemu kontu"); return; }
   k.rola=maRole?"klient":"admin";
+  if(maRole){ k.telegramAccess=false;k.telegramApprover=false; }
   zapiszLS("artway_uzytkownicy",u);
   void zapiszUzytkownikaCentralnie(k);
   loguj("info",`${maRole?"Odebrano":"Nadano"} rolę administratora: ${e}`);
@@ -2341,7 +2342,7 @@ function widokAdminKlienci(sekcja="lista"){
     ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem">Tutaj szybko nadajesz lub odbierasz rolę administratora. Konto głównego właściciela i aktualnie używane konto są chronione przed przypadkową zmianą.</div>`:""}
     ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko albo adres e-mail użytkownika.",results:kl.length,active:!!szukajKlientow,open:true,fields:`<label class="search-wide">Klient<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();zaplanujRenderPoWpisaniu()"></label>${szukajKlientow?`<button class="btn ghost" onclick="szukajKlientow='';renderuj()">Wyczyść filtry</button>`:""}`,actions:adminOperacjeWynikowHTML({id:"customers",selected:zaznaczeniKlienci.size,pageCount:kl.length,resultCount:kl.length,selectPage:"klienciUstawZaznaczenie('strona')",selectAll:"klienciUstawZaznaczenie('filtr')",clear:"klienciWyczyscZaznaczenie()",exportSelected:"klienciEksportujZakres('zaznaczone')",exportAll:"klienciEksportujZakres('filtr')"})})}
     <div class="table-scroll"><table class="log-table">
-      <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
+      <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Telegram</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
       ${kl.map(k=>{
         const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
         const nZam = zam.filter(z=>z.email===k.email).length;
@@ -2350,6 +2351,7 @@ function widokAdminKlienci(sekcja="lista"){
         <td><a href="#/admin/klient/${encodeURIComponent(k.email)}"><b>${esc(k.imie)}</b></a>${admin?' <span class="lvl lvl-info">ADMIN</span>':""}${k.nip?' <span class="lvl lvl-info">firma</span>':""}</td>
         <td>${esc(k.email)}${k.telefon?`<br><small style="color:var(--muted2)">📞 ${esc(k.telefon)}</small>`:""}</td>
         <td><span class="lvl ${admin?"lvl-info":""}">${admin?"administrator":"klient"}</span>${glowny?"<br><small>właściciel</small>":""}</td>
+        <td>${telegramDostepKontaHTML(k,admin)}</td>
         <td>${new Date(k.data).toLocaleDateString("pl-PL")}</td>
         <td>${nZam ? `<a href="#/admin/zamowienia" onclick="szukajZamowien='${esc(k.email)}';filtrZamowien='wszystkie'" title="Zamówienia klienta">${nZam} →</a>` : "0"}</td>
         <td style="white-space:nowrap">
@@ -2359,7 +2361,7 @@ function widokAdminKlienci(sekcja="lista"){
         </td>
       </tr>`;}).join("")}
     </table></div>
-    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę klienta: dane kontaktowe, adres, dane firmowe, notatka, nowe hasło. Zamówienia klienta otworzysz, klikając ich liczbę.</p>
+    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę klienta. ID Telegram użytkownik otrzyma po wysłaniu <b>/start</b> do bota. Zapisanie opcji „wspólny czat” nadaje dostęp natychmiast — bez restartu serwera. „Zatwierdzanie” jest osobnym, wyższym uprawnieniem.</p>
   </div>
   <div class="panel" style="${aktywna==="zamowienia"?"":"display:none"}">
     <div class="order-section-head">

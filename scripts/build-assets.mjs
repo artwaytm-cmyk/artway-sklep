@@ -47,6 +47,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/11-allegro-mapping-index.js',
       'src/frontend/11-order-location-ui.js',
       'src/frontend/11-allegro-manual-mapping-actions.js',
+      'src/frontend/11-telegram-account-access-ui.js',
       'src/frontend/11-allegro-and-orders.js',
       'src/frontend/11-allegro-settings.js',
       'src/frontend/12-customers-and-inventory.js',

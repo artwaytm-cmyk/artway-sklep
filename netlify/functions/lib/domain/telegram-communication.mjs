@@ -275,8 +275,11 @@ export async function telegramApi(method, payload = {}, env = process.env) {
 
 export async function sendTelegramHtml(message, options = {}, env = process.env) {
   const config = telegramConfig(env);
-  if (!options.chatId && config.sharedMode === 'private-room' && config.teamUserIds.size) {
-    const results = await Promise.allSettled([...config.teamUserIds].map((chatId) => telegramApi('sendMessage', {
+  const teamUserIds = new Set([...config.teamUserIds, ...(Array.isArray(options.teamUserIds) ? options.teamUserIds : [])]
+    .map((value) => String(value || '').trim()).filter((value) => /^[1-9]\d*$/.test(value)));
+  if (!options.chatId && config.sharedMode === 'private-room' && teamUserIds.size) {
+    const recipients = [...teamUserIds].slice(0, 20);
+    const results = await Promise.allSettled(recipients.map((chatId) => telegramApi('sendMessage', {
       chat_id: chatId,
       text: String(message || '').slice(0, 4090),
       parse_mode: 'HTML',
@@ -285,7 +288,7 @@ export async function sendTelegramHtml(message, options = {}, env = process.env)
       ...(options.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
     }, env)));
     const delivered = results.flatMap((result, index) => result.status === 'fulfilled'
-      ? [{ chatId: [...config.teamUserIds][index], result: result.value }]
+      ? [{ chatId: recipients[index], result: result.value }]
       : []);
     if (!delivered.length) throw results.find((result) => result.status === 'rejected')?.reason || new Error('Nie udało się dostarczyć wiadomości do zespołu.');
     return {

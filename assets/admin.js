@@ -2733,6 +2733,31 @@ async function allegroMapujOferte(offerId,productId,options={}){
   }catch(e){allegroMapowaniePozycjiCel={...allegroMapowaniePozycjiCel,error:e};toast("⚠️ Mapowanie Allegro: "+(e.message||e));return {ok:false,error:e};}
 }
 
+async function zapiszTelegramDostepKonta(email,button){
+  if(!jestAdmin())return toast("Brak uprawnień");
+  const e=String(email||"").trim().toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>String(x.email||"").toLowerCase()===e),row=button?.closest("tr");
+  if(!k||!row)return toast("Nie znaleziono konta");
+  if(!kontoMaRoleAdmin(k.email))return toast("Dostęp do czatu można przypisać tylko kontu administratora");
+  const id=String(row.querySelector("[data-telegram-user-id]")?.value||"").trim();
+  const access=!!row.querySelector("[data-telegram-access]")?.checked;
+  const approver=!!row.querySelector("[data-telegram-approver]")?.checked;
+  if(id&&!/^[1-9]\d*$/.test(id))return toast("ID użytkownika Telegram musi składać się wyłącznie z cyfr i nie może zaczynać się od zera");
+  if((access||approver)&&!id)return toast("Najpierw wpisz ID użytkownika Telegram");
+  const previous={telegramUserId:k.telegramUserId||"",telegramAccess:k.telegramAccess===true,telegramApprover:k.telegramApprover===true};
+  k.telegramUserId=id;k.telegramAccess=access&&!!id;k.telegramApprover=approver&&k.telegramAccess;
+  zapiszLS("artway_uzytkownicy",u);button.disabled=true;
+  const saved=await zapiszUzytkownikaCentralnie(k);
+  if(!saved){Object.assign(k,previous);zapiszLS("artway_uzytkownicy",u);toast("Nie udało się zapisać dostępu Telegram na serwerze");renderuj();return;}
+  loguj("info",`${k.telegramAccess?"Nadano":"Odebrano"} dostęp do wspólnego czatu: ${e}`);
+  toast(k.telegramAccess?"Dostęp do wspólnego czatu został przypisany automatycznie":"Dostęp do wspólnego czatu został odebrany");
+  renderuj();
+}
+
+function telegramDostepKontaHTML(k,admin){
+  if(!admin)return `<small>Najpierw nadaj rolę administratora</small>`;
+  return `<div class="account-telegram-access"><input data-telegram-user-id inputmode="numeric" autocomplete="off" placeholder="ID użytkownika" aria-label="ID użytkownika Telegram" value="${esc(k.telegramUserId||"")}"><label><input data-telegram-access type="checkbox" ${k.telegramAccess===true?"checked":""}> wspólny czat</label><label><input data-telegram-approver type="checkbox" ${k.telegramApprover===true?"checked":""}> zatwierdzanie</label><button class="btn ghost" type="button" onclick="zapiszTelegramDostepKonta(${jsArg(k.email)},this)">Zapisz</button></div>`;
+}
+
 function klientZamowieniaLabel(z){
   const k=z?.klient||{};
   return [k.imie,k.nazwisko].filter(Boolean).join(" ") || z?.email || "gość";
@@ -5044,6 +5069,7 @@ function zmienRoleUzytkownika(email){
   const maRole=k.rola==="admin";
   if(maRole&&sesja?.email===e){ toast("Nie możesz odebrać uprawnień aktualnie używanemu kontu"); return; }
   k.rola=maRole?"klient":"admin";
+  if(maRole){ k.telegramAccess=false;k.telegramApprover=false; }
   zapiszLS("artway_uzytkownicy",u);
   void zapiszUzytkownikaCentralnie(k);
   loguj("info",`${maRole?"Odebrano":"Nadano"} rolę administratora: ${e}`);
@@ -5076,7 +5102,7 @@ function widokAdminKlienci(sekcja="lista"){
     ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem">Tutaj szybko nadajesz lub odbierasz rolę administratora. Konto głównego właściciela i aktualnie używane konto są chronione przed przypadkową zmianą.</div>`:""}
     ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko albo adres e-mail użytkownika.",results:kl.length,active:!!szukajKlientow,open:true,fields:`<label class="search-wide">Klient<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();zaplanujRenderPoWpisaniu()"></label>${szukajKlientow?`<button class="btn ghost" onclick="szukajKlientow='';renderuj()">Wyczyść filtry</button>`:""}`,actions:adminOperacjeWynikowHTML({id:"customers",selected:zaznaczeniKlienci.size,pageCount:kl.length,resultCount:kl.length,selectPage:"klienciUstawZaznaczenie('strona')",selectAll:"klienciUstawZaznaczenie('filtr')",clear:"klienciWyczyscZaznaczenie()",exportSelected:"klienciEksportujZakres('zaznaczone')",exportAll:"klienciEksportujZakres('filtr')"})})}
     <div class="table-scroll"><table class="log-table">
-      <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
+      <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Telegram</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
       ${kl.map(k=>{
         const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
         const nZam = zam.filter(z=>z.email===k.email).length;
@@ -5085,6 +5111,7 @@ function widokAdminKlienci(sekcja="lista"){
         <td><a href="#/admin/klient/${encodeURIComponent(k.email)}"><b>${esc(k.imie)}</b></a>${admin?' <span class="lvl lvl-info">ADMIN</span>':""}${k.nip?' <span class="lvl lvl-info">firma</span>':""}</td>
         <td>${esc(k.email)}${k.telefon?`<br><small style="color:var(--muted2)">📞 ${esc(k.telefon)}</small>`:""}</td>
         <td><span class="lvl ${admin?"lvl-info":""}">${admin?"administrator":"klient"}</span>${glowny?"<br><small>właściciel</small>":""}</td>
+        <td>${telegramDostepKontaHTML(k,admin)}</td>
         <td>${new Date(k.data).toLocaleDateString("pl-PL")}</td>
         <td>${nZam ? `<a href="#/admin/zamowienia" onclick="szukajZamowien='${esc(k.email)}';filtrZamowien='wszystkie'" title="Zamówienia klienta">${nZam} →</a>` : "0"}</td>
         <td style="white-space:nowrap">
@@ -5094,7 +5121,7 @@ function widokAdminKlienci(sekcja="lista"){
         </td>
       </tr>`;}).join("")}
     </table></div>
-    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę klienta: dane kontaktowe, adres, dane firmowe, notatka, nowe hasło. Zamówienia klienta otworzysz, klikając ich liczbę.</p>
+    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę klienta. ID Telegram użytkownik otrzyma po wysłaniu <b>/start</b> do bota. Zapisanie opcji „wspólny czat” nadaje dostęp natychmiast — bez restartu serwera. „Zatwierdzanie” jest osobnym, wyższym uprawnieniem.</p>
   </div>
   <div class="panel" style="${aktywna==="zamowienia"?"":"display:none"}">
     <div class="order-section-head">

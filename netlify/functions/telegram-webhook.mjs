@@ -15,6 +15,7 @@ import {
   renderInventoryDecisionConfirmation,
 } from './lib/domain/inventory-decisions.mjs';
 import { createStoreRepository } from './lib/core/store-repository.mjs';
+import { applyTelegramAccountAccess } from './lib/domain/telegram-account-access.mjs';
 
 const inventoryRepository = createStoreRepository({ name: 'artway-sklep' });
 const inventoryDecisions = createInventoryDecisionService({
@@ -318,7 +319,8 @@ export default async (request) => {
   if (!equal(received, expected)) return response();
   const update = await request.json().catch(() => ({})), callback = update.callback_query || null, message = callback?.message || update.message || null;
   if (!message?.chat?.id) return response();
-  const config = telegramConfig(process.env), chatId = String(message.chat.id), sender = callback?.from || message.from || {}, userId = String(sender.id || '');
+  const usersRecord = await inventoryRepository.read('users', { items: [] });
+  const config = applyTelegramAccountAccess(telegramConfig(process.env), usersRecord?.items || []), chatId = String(message.chat.id), sender = callback?.from || message.from || {}, userId = String(sender.id || '');
   const origin = new URL(request.url).origin, token = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim();
   const inboundKind = telegramInboundKind(message, callback);
   const privateExplicitUser = chatId === userId && config.allowedUserIds.has(userId);

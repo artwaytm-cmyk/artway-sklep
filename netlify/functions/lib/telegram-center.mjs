@@ -17,6 +17,7 @@ import {
   telegramTopicId,
   telegramWebhookSecret,
 } from './domain/telegram-communication.mjs';
+import { applyTelegramAccountAccess } from './domain/telegram-account-access.mjs';
 
 const SETTINGS_KEY = 'telegram_communication_settings';
 const STATE_KEY = 'telegram_communication_state';
@@ -232,6 +233,16 @@ function escalationCard(record = {}) {
 export function createTelegramCenter({ read, write, env = process.env } = {}) {
   if (typeof read !== 'function' || typeof write !== 'function') throw new Error('Telegram Center wymaga repozytorium read/write');
 
+  async function accountConfig() {
+    const record = await read('users', { items: [] });
+    return applyTelegramAccountAccess(telegramConfig(env), record?.items || []);
+  }
+
+  async function sendTeamHtml(message, options = {}) {
+    const config = await accountConfig();
+    return sendTelegramHtml(message, { ...options, teamUserIds: [...config.teamUserIds] }, env);
+  }
+
   async function loadSettings() { return telegramSettings(await read(SETTINGS_KEY, {})); }
   async function loadState() {
     const raw = await read(STATE_KEY, emptyState()), base = emptyState(), source = raw && typeof raw === 'object' ? raw : {};
@@ -277,7 +288,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
   }
 
   async function connection(live = false) {
-    const config = telegramConfig(env), result = {
+    const config = await accountConfig(), result = {
       configured: !!(config.token && (config.chatId || config.teamUserIds?.size)), chatConfigured: !!(config.chatId || config.teamUserIds?.size), botConfigured: !!config.token,
       allowlist: { ...(config.allowlistCounts || { chats: config.allowedChatIds.size, users: config.allowedUserIds.size }) },
       bot: null, webhook: null, error: '',
@@ -394,7 +405,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
   async function sendManual(message, options = {}) {
     const state = await loadState();
     try {
-      const sent = await sendTelegramHtml(message, options, env);
+      const sent = await sendTeamHtml(message, options);
       addHistory(state, { kind: options.kind || 'manual', status: 'sent', category: options.category || 'manual', severity: options.severity || 'info', title: options.title || 'Ręczna wiadomość', messageId: sent?.message_id, source: options.source || 'admin-panel', preview: message, fromLabel: options.fromLabel || 'Panel administratora', toLabel: options.toLabel || 'Główna grupa Telegram', threadId: options.messageThreadId, conversationKey: options.conversationKey || 'telegram-main' });
       await saveState(state); return sent;
     } catch (error) {
@@ -425,7 +436,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
 
   async function deliverIncident(record, settings, heading = '') {
     if (record.messageId && await editIncidentMessage(record, heading)) return { message_id: record.messageId, chat: { id: record.chatId }, edited: true };
-    const sent = await sendTelegramHtml(telegramIncidentCard(record, heading), { replyMarkup: telegramIncidentKeyboard(record), messageThreadId: telegramTopicId(settings, record.category) }, env);
+    const sent = await sendTeamHtml(telegramIncidentCard(record, heading), { replyMarkup: telegramIncidentKeyboard(record), messageThreadId: telegramTopicId(settings, record.category) });
     return sent;
   }
 
@@ -500,7 +511,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       catch (error) { if (!/message is not modified/i.test(String(error?.message || ''))) state.dashboard.messageId = null; }
     }
     if (!state.dashboard.messageId && options.create === true) {
-      result = await sendTelegramHtml(text, { silent: true, replyMarkup: panelButtons(), messageThreadId: telegramTopicId(settings, 'operations') }, env);
+      result = await sendTeamHtml(text, { silent: true, replyMarkup: panelButtons(), messageThreadId: telegramTopicId(settings, 'operations') });
       state.dashboard = { messageId: result?.message_id || null, chatId: String(result?.chat?.id || ''), createdAt: nowIso(), updatedAt: nowIso() };
       addHistory(state, { kind: 'dashboard', status: 'sent', title: 'Utworzono stały pulpit operacyjny', messageId: result?.message_id, source: options.source || 'admin-panel', preview: text, fromLabel: 'Automatyka Artway-TM' });
     } else if (state.dashboard.messageId) state.dashboard.updatedAt = nowIso();
@@ -541,7 +552,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     let digestSent = 0;
     if (slot && digestRecords.length) {
       try {
-        const sent = await sendTelegramHtml(telegramRenderEvents(digestRecords, '📋 Nowe sprawy'), { silent: true, replyMarkup: panelButtons(), messageThreadId: telegramTopicId(settings, 'operations') }, env);
+        const sent = await sendTeamHtml(telegramRenderEvents(digestRecords, '📋 Nowe sprawy'), { silent: true, replyMarkup: panelButtons(), messageThreadId: telegramTopicId(settings, 'operations') });
         for (const record of digestRecords) { record.digestFingerprint = record.fingerprint; record.digestSentAt = timestamp; }
         digestSent = digestRecords.length; state.lastDigestAt = timestamp; state.lastDigestSlot = slot; addHistory(state, { kind: 'digest', status: 'sent', category: 'operations', severity: 'info', title: `Raport zbiorczy: ${digestRecords.length} spraw`, messageId: sent?.message_id, source: options.source || 'schedule', preview: telegramRenderEvents(digestRecords, '📋 Nowe sprawy'), fromLabel: 'Automatyka Artway-TM' });
       } catch (error) { addHistory(state, { kind: 'digest', status: 'error', title: 'Raport zbiorczy', reason: error?.message || error, source: options.source || 'schedule' }); }
@@ -553,7 +564,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       const elapsed = (Date.now() - Date.parse(record.lastEscalatedAt || 0)) / 60000;
       if (record.escalationLevel >= settings.maxEscalations || (record.lastEscalatedAt && elapsed < settings.escalationRepeatMinutes)) continue;
       try {
-        const sent = await sendTelegramHtml(escalationCard(record), { replyMarkup: telegramIncidentKeyboard(record), messageThreadId: telegramTopicId(settings, record.category) }, env);
+        const sent = await sendTeamHtml(escalationCard(record), { replyMarkup: telegramIncidentKeyboard(record), messageThreadId: telegramTopicId(settings, record.category) });
         record.escalationLevel = Number(record.escalationLevel || 0) + 1; record.lastEscalatedAt = timestamp; escalated.push(record.id);
         addHistory(state, { kind: 'escalation', status: 'sent', category: record.category, severity: record.severity, title: record.title, messageId: sent?.message_id, incidentId: record.id, source: options.source || 'schedule', preview: escalationCard(record), fromLabel: 'Automatyka Artway-TM' });
       } catch (error) { enqueue(state, record, error, '⏱️ Eskalacja SLA'); }

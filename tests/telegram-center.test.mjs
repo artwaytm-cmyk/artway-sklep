@@ -182,7 +182,25 @@ test('kontrola połączenia zwraca stan Privacy Mode bota', { concurrency: false
     assert.equal(view.status.bot.username, 'magazyn_artway_bot');
     assert.equal(view.status.bot.can_read_all_group_messages, false);
     assert.deepEqual(view.status.target, { reachable: true, type: 'group', name: 'Magazyn Artway', error: '' });
-    assert.deepEqual(view.status.allowlist, { chats: 1, users: 0, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 0, explicitApprovers: 0 });
+    assert.deepEqual(view.status.allowlist, { chats: 1, users: 0, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 0, explicitApprovers: 0, accounts: 0, accountApprovers: 0 });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('konto z dostępem Telegram automatycznie dostaje wiadomości wspólnego pokoju', { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch, calls = [], data = new Map();
+  data.set('users', { items: [{ email: 'operator@example.test', rola: 'admin', telegramUserId: '300', telegramAccess: true }] });
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), body: JSON.parse(options.body || '{}') });
+    return new Response(JSON.stringify({ ok: true, result: { message_id: calls.length } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const read = async (key, fallback) => structuredClone(data.has(key) ? data.get(key) : fallback), write = async (key, value) => data.set(key, structuredClone(value));
+    const center = createTelegramCenter({ read, write, env: { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_CHAT_ID: '100', TELEGRAM_SHARED_MODE: 'private-room' } });
+    const sent = await center.sendManual('<b>Wspólna wiadomość</b>', { kind: 'test' });
+    assert.equal(sent.delivered_count, 2);
+    assert.deepEqual(new Set(calls.filter((item) => item.url.endsWith('/sendMessage')).map((item) => String(item.body.chat_id))), new Set(['100', '300']));
+    const view = await center.view({}, false);
+    assert.equal(view.status.allowlist.accounts, 1);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -200,7 +218,7 @@ test('audyt webhooka zapisuje wyłącznie bezpieczne metadane i licznik odrzuce�
   assert.equal(view.state.health.lastRejectedKind, 'command');
   assert.equal(view.state.health.lastRejectedRef, 'abcdef1234567890abcdef12');
   assert.ok(view.state.health.lastRejectedAt);
-  assert.deepEqual(view.status.allowlist, { chats: 1, users: 2, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 2, explicitApprovers: 0 });
+  assert.deepEqual(view.status.allowlist, { chats: 1, users: 2, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 2, explicitApprovers: 0, accounts: 0, accountApprovers: 0 });
   assert.equal(JSON.stringify(view).includes('tajna treść'), false);
   assert.equal(JSON.stringify(view).includes('999'), false);
 });

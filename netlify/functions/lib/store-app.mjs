@@ -47,6 +47,7 @@ import { createAllegroCredentialsRoute } from './allegro-credentials-route.mjs';
 import { createAgentSpecialistRoute } from './agent-specialist-route.mjs';
 import { createAiBannerGenerator } from './domain/ai-banner-generator.mjs';
 import { createAiBannerRoute } from './ai-banner-route.mjs';
+import { normalizeTelegramAccountFields } from './domain/telegram-account-access.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
 import { applySupplierProcurementWorkflow } from './domain/supplier-procurement-workflow.mjs';
 import { classifyWarehousePosition, summarizeWarehousePositions, warehouseAnalysisNeedsInvestigation } from './domain/order-warehouse-readiness.mjs';
@@ -7001,8 +7002,16 @@ export default async (req) => {
       const session = requestSession(req);
       if (action === 'store-user-save' && !czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       if (action === 'account-profile-save' && !session) return odpowiedz({ ok: false, error: 'Zaloguj się ponownie.', code: 'auth' }, 401);
+      const telegramFields = action === 'store-user-save' ? normalizeTelegramAccountFields(body.user) : {};
       const u = action === 'store-user-save' ? normalizujKlienta(body.user) : profilKlienta(body.user, session.email);
       if (!u) return odpowiedz({ ok: false, error: 'Brak danych klienta' }, 422);
+      if (action === 'store-user-save') {
+        delete u.telegramChatId;
+        delete u.telegramUserId;
+        delete u.telegramAccess;
+        delete u.telegramApprover;
+        Object.assign(u, telegramFields);
+      }
       const rec = await czytaj('users', { items: [] });
       const items = Array.isArray(rec.items) ? rec.items : [];
       const i = items.findIndex((x) => (x.email || '').toLowerCase() === u.email);
