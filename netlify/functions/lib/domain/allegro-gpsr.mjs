@@ -51,3 +51,57 @@ export function allegroBuildContentProductSet({ draftItem = {}, existingItem = {
   if (Array.isArray(existingItem?.deposits)) output.deposits = structuredClone(existingItem.deposits);
   return [output];
 }
+
+export function allegroCatalogParametersForPatch(parameters = []) {
+  return (Array.isArray(parameters) ? parameters : []).map((parameter) => {
+    const out = { id: text(parameter?.id, 80) };
+    if (Array.isArray(parameter?.values) && parameter.values.length) out.values = parameter.values.map((value) => text(value, 500));
+    if (Array.isArray(parameter?.valuesIds) && parameter.valuesIds.length) out.valuesIds = parameter.valuesIds.map((value) => text(value, 120));
+    if (parameter?.rangeValue && typeof parameter.rangeValue === 'object') out.rangeValue = structuredClone(parameter.rangeValue);
+    return out;
+  }).filter((parameter) => parameter.id && (parameter.values?.length || parameter.valuesIds?.length || parameter.rangeValue));
+}
+
+export async function allegroSyncEditorialOffer({
+  offerId = '', prepared = {}, product = {}, responsibleProducers = null,
+  loadResponsibleProducers = async () => [], patchFromDraft, writePatch, waitForOperation = async () => {},
+} = {}) {
+  if (typeof patchFromDraft !== 'function' || typeof writePatch !== 'function') throw new TypeError('Brak obsługi zapisu oferty Allegro.');
+  const existingOffer = prepared?.existingOffer?.offer || {}, existingSetItem = existingOffer?.productSet?.[0] || {};
+  const existingProductId = text(existingOffer.productId || existingSetItem?.product?.id, 120);
+  const foundCatalogProductId = text(prepared?.catalogMatch?.selected?.id, 120);
+  const explicitlyLinked = text(product.allegroOfferId, 100) === text(offerId, 100);
+  if (existingProductId && foundCatalogProductId && existingProductId !== foundCatalogProductId && !explicitlyLinked) {
+    return { skipped: 'catalog_identity_conflict', responsibleProducers, gpsrMatched: false, categoryRepaired: false };
+  }
+  let responsibleProducer = existingSetItem?.responsibleProducer?.id ? { id: existingSetItem.responsibleProducer.id } : null;
+  let directory = responsibleProducers, gpsrMatched = false;
+  if (!responsibleProducer) {
+    const target = { ...product, producent: prepared?.autoFilled?.producent || product.producent, marka: prepared?.autoFilled?.marka || product.marka };
+    const catalogDirectory = (prepared?.catalogMatch?.selected?.productSafety?.responsibleProducers || []).map((item) => ({ id: item?.id, name: item?.name, tradeName: item?.producerData?.tradeName }));
+    responsibleProducer = allegroSelectResponsibleProducer(target, catalogDirectory);
+    if (!responsibleProducer) {
+      if (directory === null) directory = await loadResponsibleProducers().catch(() => []);
+      responsibleProducer = allegroSelectResponsibleProducer(target, directory);
+    }
+    gpsrMatched = !!responsibleProducer;
+  }
+  const catalogProductId = text(prepared?.payload?.productSet?.[0]?.product?.id, 120);
+  const exactExistingProduct = catalogProductId && catalogProductId === existingProductId;
+  const preparedCategoryId = text(prepared?.payload?.category?.id, 80);
+  const categoryRepair = !!(exactExistingProduct && preparedCategoryId && preparedCategoryId !== text(existingOffer.categoryId, 80));
+  const patch = patchFromDraft(prepared.payload, { publicationAction: 'keep', contentOnly: true, includeCatalogProduct: true, repairCatalogCategory: categoryRepair });
+  patch.productSet = allegroBuildContentProductSet({ draftItem: prepared?.payload?.productSet?.[0], existingItem: existingSetItem, responsibleProducer });
+  if (categoryRepair && patch.productSet[0]?.product) patch.productSet[0].product.parameters = allegroCatalogParametersForPatch(prepared?.catalogMatch?.selected?.parameters);
+  let meta;
+  try {
+    meta = await writePatch(patch);
+  } catch (error) {
+    const catalogValidation = /InvalidParameterIdsInCategory|DependencyValidator|DataIntegrity/i.test(text(error?.message || error, 1000));
+    if (!categoryRepair && catalogValidation && existingSetItem?.responsibleProducer?.id) {
+      meta = await writePatch(patchFromDraft(prepared.payload, { publicationAction: 'keep', contentOnly: true }));
+    } else throw error;
+  }
+  await waitForOperation(meta?.location || '');
+  return { meta, skipped: '', responsibleProducers: directory, gpsrMatched, categoryRepaired: categoryRepair };
+}
