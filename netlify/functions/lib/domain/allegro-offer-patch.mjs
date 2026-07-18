@@ -9,7 +9,15 @@ export function allegroPatchZDraftu(draft = {}, options = {}) {
   if (options.contentOnly !== true && draft.delivery) out.delivery = draft.delivery;
   if (options.contentOnly !== true && draft.afterSalesServices) out.afterSalesServices = draft.afterSalesServices;
   if (options.contentOnly !== true && Array.isArray(draft.parameters) && draft.parameters.length) out.parameters = draft.parameters;
-  if (options.contentOnly !== true && Array.isArray(draft.productSet) && draft.productSet[0]?.product?.id) out.productSet = draft.productSet;
+  // Podczas bezpiecznej synchronizacji treści możemy przekazać wyłącznie
+  // identyfikator już powiązanego produktu katalogowego. Allegro wykorzystuje
+  // go m.in. do uzupełnienia wymaganych danych GPSR. Nadal nie wysyłamy ceny,
+  // stanu ani warunków sprzedaży.
+  if ((options.contentOnly !== true || options.includeCatalogProduct === true) && Array.isArray(draft.productSet) && draft.productSet[0]?.product?.id) {
+    out.productSet = options.contentOnly === true
+      ? [{ product: { id: draft.productSet[0].product.id } }]
+      : draft.productSet;
+  }
   if (options.publicationAction === 'activate') out.publication = { status: 'ACTIVE', republish: true };
   else if (options.publicationAction === 'deactivate') out.publication = { status: 'INACTIVE', republish: true };
   else out.publication = { republish: true };

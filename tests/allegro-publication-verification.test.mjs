@@ -10,6 +10,21 @@ test('edytor domyślnie aktywuje nową lub nieaktywną ofertę, a aktywnej nie w
   assert.match(source, /Wynik zostanie ponownie odczytany bezpośrednio z Allegro/);
 });
 
+test('synchronizacja samej treści może dołączyć wyłącznie ID istniejącego produktu katalogowego', () => {
+  const patch = allegroPatchZDraftu({
+    name: 'Gra edukacyjna',
+    productSet: [{ product: { id: 'catalog-product-123', name: 'wartość, której nie wysyłamy' }, quantity: { value: 2 } }],
+    sellingMode: { price: { amount: '99.99', currency: 'PLN' } },
+    stock: { available: 8 },
+    description: { sections: [{ items: [{ type: 'TEXT', content: '<p>Opis</p>' }] }] },
+  }, { contentOnly: true, includeCatalogProduct: true, publicationAction: 'keep' });
+
+  assert.deepEqual(patch.productSet, [{ product: { id: 'catalog-product-123' } }]);
+  assert.equal(patch.sellingMode, undefined);
+  assert.equal(patch.stock, undefined);
+  assert.deepEqual(patch.publication, { republish: true });
+});
+
 test('aktywacja wysyła jednoznaczny status ACTIVE i wznawianie', () => {
   const patch = allegroPatchZDraftu({ name: 'Pieniądze Alexander Tablice' }, { publicationAction: 'activate' });
   assert.deepEqual(patch.publication, { status: 'ACTIVE', republish: true });

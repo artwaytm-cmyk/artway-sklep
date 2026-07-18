@@ -10,6 +10,7 @@ const cycleStartedAt = Date.now();
 const tasks = [
   ['oferty-lekkie', 'allegro-sync-offers', { limit: 10000, details: false, source: 'scheduled-catalog-refresh' }],
   ['tresci-gpt-nano', 'agent-specialist-auto-cycle', { source: 'vps-systemd-timer' }],
+  ['tresci-allegro', 'allegro-auto-maintenance', { limit: 50, source: 'scheduled-editorial-sync' }],
   ['oferty-pelne', 'allegro-sync-offers', { limit: 10000, details: true, detailsLimit: 1000, maintenanceLimit: 50, complianceLimit: 20, source: 'scheduled-offers-sync' }],
   ['agent-autonomiczny', 'allegro-autonomous-agent-cycle', { source: 'vps-systemd-timer', maxActions: 10 }],
   ['zamowienia', 'allegro-sync-orders', { limit: 200, source: 'scheduled-stock-agent' }],
@@ -21,6 +22,7 @@ const taskLabels = {
   'oferty-pelne': 'Pełna aktualizacja danych ofert',
   'agent-autonomiczny': 'Autonomiczna kontrola katalogu',
   'tresci-gpt-nano': 'Szkice treści przez specjalistów GPT-5 nano',
+  'tresci-allegro': 'Zapis gotowych opisów w ofertach Allegro',
   zamowienia: 'Nowe zamówienia i stany Allegro',
   komunikacja: 'Nowe wiadomości i dyskusje',
 };

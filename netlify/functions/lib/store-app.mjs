@@ -3289,7 +3289,7 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
         const prepared = await allegroDraftZAutoKategoria(req, finalProduct, { publicationAction: 'keep' });
         const offerId = tekst(prepared?.existingOffer?.offer?.id || finalProduct.allegroOfferId, 100).trim();
         if (offerId) {
-          const patch = allegroPatchZDraftu(prepared.payload, { publicationAction: 'keep', contentOnly: true });
+          const patch = allegroPatchZDraftu(prepared.payload, { publicationAction: 'keep', contentOnly: true, includeCatalogProduct: true });
           const meta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: patch, withMeta: true });
           await allegroCzekajNaOperacjeOferty(req, meta.location);
           updater.apply(product.id, { allegroEditorialSyncPending: false, allegroEditorialSyncState: 'synced', allegroEditorialSyncedAt: report.lastRun, allegroEditorialSyncError: '' });
@@ -3340,12 +3340,16 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     allegroWarunkiSprzedazy(req),
     allegroZnajdzProduktKatalogu(req, product),
   ]);
-  const effectiveCategoryId = tekst(catalogMatch?.selected?.categoryId || categoryId, 80).trim();
+  // Edycja treści istniejącej oferty nie może podmieniać jej tożsamości
+  // katalogowej. Zachowanie aktualnego produktu i kategorii zapobiega
+  // konfliktom kategorii, a przekazanie jego ID pozwala Allegro uzupełnić GPSR.
+  const existingCatalogProductId = tekst(existingOffer?.offer?.productId || existingOffer?.offer?.productSet?.[0]?.product?.id || '', 120).trim();
+  const effectiveCategoryId = tekst((existingCatalogProductId ? existingOffer?.offer?.categoryId : '') || catalogMatch?.selected?.categoryId || categoryId, 80).trim();
   if (effectiveCategoryId) options.categoryId = effectiveCategoryId;
   const categoryParameters = await allegroParametryKategorii(req, effectiveCategoryId);
   options.salesConditions = salesConditions;
   options.categoryParameters = categoryParameters.parameters;
-  if (catalogMatch?.selected?.id) options.catalogProductId = catalogMatch.selected.id;
+  if (existingCatalogProductId || catalogMatch?.selected?.id) options.catalogProductId = existingCatalogProductId || catalogMatch.selected.id;
   const catalog = catalogMatch?.selected || {};
   const safeOffer = existingOffer?.offer || {};
   const catalogProducer = allegroRozpoznajProducenta(product, { ...catalog, producent: allegroWartoscParametru(catalog, ['producent', 'marka', 'brand']) || catalog.brand || safeOffer.brand }, offerSettings);
