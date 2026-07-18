@@ -32,10 +32,14 @@ export function createAllegroOfferWithdrawalRoute({ autoMapOffers, callAllegro, 
     const body = await req.json().catch(() => ({}));
     if (action === 'allegro-autonomous-agent-cycle') {
       const startedAt = new Date().toISOString(), runId = crypto.randomUUID(), source = text(body.source || 'manual-admin', 100);
-      const dryRun = body.dryRun === true, maxActions = Math.min(25, Math.max(1, Number(body.maxActions) || 10));
+      const dryRun = body.dryRun === true;
       const [offerSettings, previousState] = await Promise.all([read('allegro_offer_settings', {}), read('allegro_autonomous_agent_state', {})]);
       const enabled = offerSettings.autonomousAgent !== false;
-      const autoResolveDuplicates = offerSettings.autoResolveDuplicates !== false;
+      const autoResolveDuplicatesConfigured = offerSettings.autoResolveDuplicates !== false;
+      // Zakończenie oferty jest operacją destrukcyjną. Cykl może wskazać
+      // najlepszą pozycję do pozostawienia, lecz wykonanie należy do jawnej
+      // trasy allegro-resolve-duplicate uruchamianej decyzją administratora.
+      const autoResolveDuplicates = false;
       const intervalMinutes = Math.min(120, Math.max(15, Number(offerSettings.autonomousAgentMinutes) || 15));
       if (!enabled) {
         const completedAt = new Date().toISOString();
@@ -68,7 +72,7 @@ export function createAllegroOfferWithdrawalRoute({ autoMapOffers, callAllegro, 
         if (id) salesByOffer[id] = (salesByOffer[id] || 0) + Math.max(1, Number(line?.quantity) || 1);
       }
       const analysis = analyzeAutonomousAllegroWork({ offers, mappings, products, minimumScore: threshold, salesByOffer });
-      const groups = autoResolveDuplicates ? analysis.duplicates.slice(0, maxActions) : [];
+      const groups = [];
       const results = [], endedIds = new Set(), touchedProducts = new Map();
 
       if (!dryRun) for (const group of groups) {
@@ -95,12 +99,12 @@ export function createAllegroOfferWithdrawalRoute({ autoMapOffers, callAllegro, 
       const updatedOffers = endedIds.size ? offers.map((offer) => endedIds.has(String(offer.id)) ? { ...offer, status: 'ENDED', publication: { ...(offer.publication || {}), status: 'ENDED', republish: false }, duplicateResolvedAt: now, duplicateResolvedBy: 'autonomous-agent' } : offer) : offers;
       const audit = Array.isArray(auditRec.items) ? [...auditRec.items] : [];
       for (const result of results.filter((item) => item.withdrawOfferIds.length)) audit.unshift({ id: crypto.randomUUID(), productId: result.productId, keepOfferId: result.keepOfferId, withdrawOfferIds: result.withdrawOfferIds, results: result.results, confidence: result.confidence, reason: result.reason, at: now, operator: 'autonomous-agent', runId, source });
-      const pendingDuplicates = analysis.duplicates.slice(groups.length);
-      const review = [...analysis.review, ...pendingDuplicates.map((group) => ({ code: 'action_limit', productId: group.productId, productName: group.productName, keepOfferId: group.keepOfferId, withdrawOfferIds: group.withdrawOfferIds, score: group.confidence }))];
+      const pendingDuplicates = analysis.duplicates;
+      const review = [...analysis.review, ...pendingDuplicates.map((group) => ({ code: 'requires_approval', productId: group.productId, productName: group.productName, keepOfferId: group.keepOfferId, withdrawOfferIds: group.withdrawOfferIds, score: group.confidence, reason: 'Zakończenie duplikatu wymaga potwierdzenia administratora.' }))];
       const completedAt = new Date().toISOString(), nextRunAt = new Date(Date.parse(completedAt) + intervalMinutes * 60 * 1000).toISOString();
       const state = {
         runId, enabled: true, status: results.some((item) => !item.ok) ? 'warning' : review.length ? 'review' : 'ok', source, startedAt, completedAt, nextRunAt,
-        intervalMinutes, dryRun, autoResolveDuplicates, minimumScore: threshold,
+        intervalMinutes, dryRun, autoResolveDuplicates, autoResolveDuplicatesConfigured, destructiveActionsRequireApproval: true, minimumScore: threshold,
         mapping: { autoMapped: Number(mapping?.autoMapped) || 0, refreshed: Number(mapping?.refreshed) || 0, quarantined: Number(mapping?.quarantined) || 0, reassessed: Number(mapping?.reassessed) || 0 },
         stats: analysis.stats, duplicateGroupsResolved: results.filter((item) => item.withdrawOfferIds.length).length, duplicateOffersEnded: endedIds.size, reviewCount: review.length,
         recentActions: results.slice(0, 25).map((item) => ({ productId: item.productId, productName: item.productName, keepOfferId: item.keepOfferId, withdrawOfferIds: item.withdrawOfferIds, confidence: item.confidence, ok: item.ok, partial: item.partial, errors: item.results.filter((result) => !result.ended).map((result) => ({ offerId: result.offerId, code: result.code, error: result.error })) })),

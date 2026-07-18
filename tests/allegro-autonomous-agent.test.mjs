@@ -47,7 +47,7 @@ test('sprzeczni kandydaci o tym samym EAN trafiają do decyzji zamiast automatyc
   assert.equal(analysis.review[0].code, 'ambiguous_product');
 });
 
-test('cykl autonomiczny mapuje, kończy pewny duplikat i zapisuje audyt', async () => {
+test('cykl autonomiczny mapuje pewne dane, ale zakończenie duplikatu oddaje do decyzji', async () => {
   const database = new Map([
     ['allegro_offer_settings', { autonomousAgent: true, autoMapping: true, autoResolveDuplicates: true, autoResolveDuplicateMinScore: 97 }],
     ['allegro_offers', { items: [offer('OFF-OLD', { stockSold: 20 }), offer('OFF-NEW', { stockSold: 0 })] }],
@@ -68,11 +68,12 @@ test('cykl autonomiczny mapuje, kończy pewny duplikat i zapisuje audyt', async 
   });
   const response = await route({ req: { method: 'POST', json: async () => ({ source: 'test' }) }, url: new URL('https://artwaytm.pl/api/store'), action: 'allegro-autonomous-agent-cycle' });
   assert.equal(response.status, 200);
-  assert.equal(response.body.state.duplicateOffersEnded, 1);
-  assert.match(calls[0].path, /^\/sale\/offer-publication-commands\/[0-9a-f-]+$/);
-  assert.equal(database.get('allegro_offers').items.find((item) => item.id === 'OFF-NEW').status, 'ENDED');
-  assert.equal(database.get('allegro_mappings').items['OFF-NEW'].duplicateOf, 'OFF-OLD');
-  assert.equal(database.get('allegro_duplicate_resolution_audit').items[0].operator, 'autonomous-agent');
+  assert.equal(response.body.state.duplicateOffersEnded, 0);
+  assert.equal(response.body.state.destructiveActionsRequireApproval, true);
+  assert.equal(calls.length, 0);
+  assert.equal(database.get('allegro_offers').items.find((item) => item.id === 'OFF-NEW').status, 'ACTIVE');
+  assert.equal(database.get('allegro_autonomous_agent_review').items[0].code, 'requires_approval');
+  assert.equal(database.get('allegro_duplicate_resolution_audit').items.length, 0);
 });
 
 test('VPS uruchamia cykl w tle co 15 minut bez ujawniania tokenu', async () => {

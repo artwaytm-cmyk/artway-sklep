@@ -3240,7 +3240,10 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
   const products = [...allegroAgentProduktyCentralne(data).values()].filter((p) => p && p.id !== undefined);
   const limit = Math.min(50, Math.max(1, Number(options.limit) || 10));
   const start = products.length ? Math.max(0, Number(previousAudit.cursor) || 0) % products.length : 0;
-  const selected = products.length <= limit ? products : Array.from({ length: limit }, (_, index) => products[(start + index) % products.length]);
+  const pendingEditorial = products.filter((product) => product.allegroEditorialSyncPending === true)
+    .sort((left, right) => String(left.allegroEditorialSyncPendingAt || '').localeCompare(String(right.allegroEditorialSyncPendingAt || '')));
+  const rotation = products.length <= limit ? products : Array.from({ length: limit }, (_, index) => products[(start + index) % products.length]);
+  const selected = [...new Map([...pendingEditorial, ...rotation].map((product) => [String(product.id), product])).values()].slice(0, limit);
   const updater = allegroAktualizatorProduktowCentralnych(data);
   const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, titles: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, unresolved: 0, errors: [] };
   for (const product of selected) {
@@ -3282,13 +3285,14 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
       if (!catalog?.id && !product.allegroProductId) report.unresolved++;
       const finalProduct = { ...product, ...fields };
       if (Object.keys(fields).length && updater.apply(product.id, { ...fields, allegroCatalogCheckedAt: report.lastRun, allegroCatalogSource: 'automatic-maintenance' })) report.updated++;
-      if (offerSettings.autoUpdateOffers !== false) {
+      if (offerSettings.autoUpdateOffers !== false || product.allegroEditorialSyncPending === true) {
         const prepared = await allegroDraftZAutoKategoria(req, finalProduct, { publicationAction: 'keep' });
         const offerId = tekst(prepared?.existingOffer?.offer?.id || finalProduct.allegroOfferId, 100).trim();
         if (offerId) {
-          const patch = allegroPatchZDraftu(prepared.payload, { publicationAction: 'keep' });
+          const patch = allegroPatchZDraftu(prepared.payload, { publicationAction: 'keep', contentOnly: true });
           const meta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: patch, withMeta: true });
           await allegroCzekajNaOperacjeOferty(req, meta.location);
+          updater.apply(product.id, { allegroEditorialSyncPending: false, allegroEditorialSyncState: 'synced', allegroEditorialSyncedAt: report.lastRun, allegroEditorialSyncError: '' });
           report.offersUpdated++;
           if (offerSettings.autoFees !== false) {
             const actual = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`), price = Math.max(0, Number(finalProduct.cenaAllegro || finalProduct.cena) || 0);
@@ -3297,9 +3301,13 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
             updater.apply(product.id, { allegroCommissionAmount: fee.commissionAmount, allegroCommissionRate: fee.commissionRate, allegroRecurringFees: fee.recurringFees, allegroFeeTotal: fee.totalPreviewFees, allegroFeePrice: fee.salePrice, allegroFeeCurrency: fee.currency, allegroFeeDetails: { commissions: fee.commissions, quotes: fee.quotes }, allegroFeeCalculatedAt: fee.calculatedAt, allegroFeeSource: fee.source });
             report.feesUpdated++;
           }
+        } else if (product.allegroEditorialSyncPending === true) {
+          updater.apply(product.id, { allegroEditorialSyncPending: false, allegroEditorialSyncState: 'requires_publication_decision', allegroEditorialSyncCheckedAt: report.lastRun, allegroEditorialSyncError: 'Brak istniejącej powiązanej oferty. Nowa publikacja wymaga decyzji administratora.' });
+          report.unresolved++;
         }
       }
     } catch (error) {
+      if (product.allegroEditorialSyncPending === true) updater.apply(product.id, { allegroEditorialSyncState: 'retry', allegroEditorialSyncError: tekst(error?.message || error, 500), allegroEditorialSyncCheckedAt: report.lastRun });
       report.errors.push({ productId: String(product.id), name: tekst(product.nazwa || product.name, 180), error: tekst(error?.message || error, 500) });
     }
   }

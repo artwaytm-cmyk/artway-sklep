@@ -15,6 +15,20 @@ test('aktywacja wysyła jednoznaczny status ACTIVE i wznawianie', () => {
   assert.deepEqual(patch.publication, { status: 'ACTIVE', republish: true });
 });
 
+test('automatyczna synchronizacja treści Allegro nie zmienia ceny, stanu ani warunków sprzedaży', () => {
+  const patch = allegroPatchZDraftu({
+    name: 'Gra rodzinna Alexander',
+    sellingMode: { price: { amount: '99.99', currency: 'PLN' } },
+    stock: { available: 500 }, external: { id: 'SKU-1' }, delivery: { shippingRates: { id: 'rate-1' } },
+    images: ['https://example.com/image.jpg'], description: { sections: [{ items: [{ type: 'TEXT', content: '<p>Opis</p>' }] }] },
+    parameters: [{ id: '1', values: ['x'] }], productSet: [{ product: { id: 'catalog-1' } }],
+  }, { publicationAction: 'keep', contentOnly: true });
+  assert.deepEqual(Object.keys(patch).sort(), ['description', 'images', 'name', 'publication']);
+  assert.deepEqual(patch.publication, { republish: true });
+  assert.equal(patch.sellingMode, undefined);
+  assert.equal(patch.stock, undefined);
+});
+
 test('backend po zapisie ponownie odczytuje ofertę i zwraca zweryfikowany status', async () => {
   const source = await readFile('netlify/functions/lib/store-app.mjs', 'utf8');
   assert.match(source, /verifiedOffer = await allegroWywolaj\(req, `\/sale\/product-offers\/\$\{encodeURIComponent\(offerId\)\}`\)/);

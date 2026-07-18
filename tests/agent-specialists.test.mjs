@@ -87,7 +87,7 @@ test('zatwierdzenie szkicu zapisuje wyłącznie dozwolone pola produktu i jest i
   assert.equal(product.agentTextModel, 'gpt-5-nano-2025-08-07');
 });
 
-test('automatyczny cykl najpierw pyta o zapis treści i po zatwierdzeniu nie analizuje ponownie tych samych faktów', async () => {
+test('automatyczny cykl sam zapisuje kompletną bezpieczną redakcję bez okresu oczekiwania na zatwierdzenia', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 99, nazwa: 'NOWA GRA | SKLEP', producent: 'Alexander', kategoria: 'Gry rodzinne', gtin: '5906018000092', opis: 'Słaby opis.', opisKrotki: 'Stary skrót.', allegroCategoryId: '123' }] }, rev: 1 } });
   let calls = 0;
   const longDescription = '<h2>Rodzinna rozgrywka</h2><p>Ta gra pozwala wspólnie spędzić czas, ćwiczyć spostrzegawczość i poznawać zasady opisane w dołączonej instrukcji.</p><ul><li>Czytelne zasady</li><li>Wspólna zabawa</li></ul>';
@@ -104,11 +104,9 @@ test('automatyczny cykl najpierw pyta o zapis treści i po zatwierdzeniu nie ana
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => { calls += 1; return new Response(JSON.stringify(editorialPayload), { status: 200, headers: { 'content-type': 'application/json' } }); } });
   const cycle = await service.automaticCycle();
   assert.equal(cycle.prepared.length, 1);
-  assert.equal(cycle.prepared[0].status, 'needs_decision');
-  assert.equal(cycle.applied.length, 0);
-  const pending = (await service.status()).decisions.find((item) => item.kind === 'product_content_review');
-  assert.ok(pending);
-  await service.updateDecision(pending.id, 'approve', { fieldKeys: fields.map((field) => field.key) }, { email: 'admin@example.com' });
+  assert.equal(cycle.prepared[0].status, 'auto_applied');
+  assert.equal(cycle.applied.length, 1);
+  assert.equal((await service.status()).decisions.some((item) => item.kind === 'product_content_review'), false);
   const product = repo.values.get('settings').data.artway_produkty_dodane[0];
   assert.equal(product.nazwa, 'Nowa gra rodzinna');
   assert.equal(product.opis, longDescription);
@@ -116,20 +114,44 @@ test('automatyczny cykl najpierw pyta o zapis treści i po zatwierdzeniu nie ana
   assert.equal(product.contentEditorial.status, 'ready');
   assert.equal(product.contentEditorial.channels, 'shared_store_and_allegro');
   assert.equal(product.contentEditorial.targets.allegro, true);
+  assert.equal(product.allegroEditorialSyncPending, true);
+  assert.equal(product.allegroEditorialSyncState, 'queued');
   assert.ok(Array.isArray(product.allegroDescriptionSections));
   const second = await service.automaticCycle();
   assert.equal(second.reason, 'no_candidates');
   assert.equal(calls, 1);
   const status = await service.status();
-  assert.equal(status.history[0].approvalStatus, 'applied');
+  assert.equal(status.history[0].approvalStatus, 'auto_applied');
   assert.equal(status.history[0].source, 'automatic');
   assert.equal(status.policy.cycleMinutes, 15);
-  assert.equal(status.learning.productContent.approvals, 1);
+  assert.equal(status.policy.editorialAutonomy, true);
+  assert.equal(status.policy.linkedAllegroContentAutonomy, true);
+  assert.equal(status.learning.productContent.approvals, 0);
   assert.equal(status.learning.productContent.ready, false);
-  assert.equal(status.learning.productContent.remainingApprovals, 2);
+  assert.equal(status.learning.productContent.remainingApprovals, 3);
   assert.equal(status.lastCycle.editorialProgress.ready, 1);
   assert.equal(status.lastCycle.editorialProgress.pending, 0);
-  assert.match(status.policy.neverAutomatic.join(' '), /wysyłanie wiadomości/);
+  assert.match(status.policy.neverAutomatic.join(' '), /Wiadomość do klienta/i);
+});
+
+test('kontrola Allegro zatrzymuje automatyczny opis z zachętą do kontaktu', async () => {
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 101, nazwa: 'Gra testowa', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis', gtin: '5906018000092', allegroOfferId: 'offer-101' }] }, rev: 1 } });
+  const fields = [
+    { key: 'title', label: 'Nazwa', value: 'Gra testowa Alexander' },
+    { key: 'short_description', label: 'Opis krótki', value: 'Rodzinna gra producenta Alexander.' },
+    { key: 'long_description', label: 'Opis pełny', value: '<h2>Rodzinna gra</h2><p>Skontaktuj się z nami przed zakupem, aby potwierdzić dostępność. Produkt marki Alexander przeznaczony jest do wspólnej zabawy.</p>' },
+    { key: 'seo_title', label: 'SEO title', value: 'Gra testowa Alexander' },
+    { key: 'seo_description', label: 'SEO description', value: 'Rodzinna gra testowa producenta Alexander.' },
+    { key: 'seo_keywords', label: 'Frazy', value: 'gra rodzinna, Alexander' },
+  ];
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } }) });
+  const cycle = await service.automaticCycle();
+  assert.equal(cycle.applied.length, 0);
+  assert.equal(cycle.prepared[0].status, 'needs_decision');
+  const status = await service.status(), decision = status.decisions.find((item) => item.kind === 'product_content_review');
+  assert.ok(decision);
+  assert.match(decision.summary, /Allegro/i);
+  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opis, 'Opis');
 });
 
 test('nowa wiadomość tworzy szkic i decyzję, lecz nie jest wysyłana automatycznie', async () => {

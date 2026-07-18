@@ -1471,6 +1471,7 @@ function agentAISubnavHTML(aktywny="pulpit"){
     {id:"pulpit",href:"#/admin/agent-ai",label:"🤖 Pulpit",badge:problemy||""},
     {id:"komendy",href:"#/admin/agent-ai/komendy",label:"💬 Komendy"},
     {id:"specjalisci",href:"#/admin/agent-ai/specjalisci",label:"✦ Specjaliści GPT"},
+    {id:"uprawnienia",href:"#/admin/agent-ai/uprawnienia",label:"🛡️ Uprawnienia"},
     {id:"plan",href:"#/admin/agent-ai/plan",label:"🧭 Plan operacyjny",badge:plan||""},
     {id:"produkty",href:"#/admin/agent-ai/produkty",label:"✨ Nowe produkty",badge:produktyWdrozenie||""},
     {id:"zakupy",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:zlecenia||""},

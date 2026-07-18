@@ -43,7 +43,7 @@ export function createAgentSpecialistRoute({ service, isAdmin, rateLimit, respon
     }
     if (action === 'agent-specialist-product-proposal') {
       const result = await service.prepareProductProposal(body.productId, actor, body);
-      return respond({ ok: true, ...result, draftOnly: true, sentExternally: false, published: false });
+      return respond({ ok: true, ...result, draftOnly: result?.applied?.applied !== true, sentExternally: false, published: false });
     }
     const cycle = await service.automaticCycle();
     return respond({ ok: true, cycle });

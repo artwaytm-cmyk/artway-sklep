@@ -9,9 +9,9 @@ const cycleStartedAt = Date.now();
 
 const tasks = [
   ['oferty-lekkie', 'allegro-sync-offers', { limit: 10000, details: false, source: 'scheduled-catalog-refresh' }],
+  ['tresci-gpt-nano', 'agent-specialist-auto-cycle', { source: 'vps-systemd-timer' }],
   ['oferty-pelne', 'allegro-sync-offers', { limit: 10000, details: true, detailsLimit: 1000, source: 'scheduled-offers-sync' }],
   ['agent-autonomiczny', 'allegro-autonomous-agent-cycle', { source: 'vps-systemd-timer', maxActions: 10 }],
-  ['tresci-gpt-nano', 'agent-specialist-auto-cycle', { source: 'vps-systemd-timer' }],
   ['zamowienia', 'allegro-sync-orders', { limit: 200, source: 'scheduled-stock-agent' }],
   ['komunikacja', 'allegro-sync-communications', { limit: 20, autoReply: true, source: 'scheduled-communications' }],
 ];
