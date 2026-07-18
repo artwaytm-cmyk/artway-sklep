@@ -1316,24 +1316,87 @@ function kategoriePrzypisaneDoAktywnychGrup(kategorie){
   return new Set(kategorie.filter(k=>przypisaneBezposrednio.has(k)||przypisaneBezposrednio.has(korzenKategoriiMenu(k,dozwolone))));
 }
 function linkKategoriiMenu(k){
-  return `<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${esc(k)}</span><span class="nav-count">${liczbaProduktowWKategorii(k)}</span></a>`;
+  return `<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${esc(k)}</span><span class="nav-count" aria-label="Liczba produktów: ${liczbaProduktowWKategorii(k)}">${liczbaProduktowWKategorii(k)}</span></a>`;
 }
 function drzewoKategoriiMenuHTML(k,kategorie,poziom=0){
   const dzieci=dzieciKategoriiMenu(k,kategorie);
   return `<span class="nav-category-node level-${Math.min(2,poziom)}">${linkKategoriiMenu(k)}${dzieci.length?`<span class="nav-category-children">${dzieci.map(d=>drzewoKategoriiMenuHTML(d,kategorie,poziom+1)).join("")}</span>`:""}</span>`;
 }
+let licznikMenuKategorii=0;
+let globalnaObslugaMenuKategorii=false;
+function identyfikatorMenuKategorii(){return `nav-category-menu-${++licznikMenuKategorii}`;}
+function naglowekMenuKategorii(label,ikona,ikonaObraz,podpis="Kategorie w tym dziale"){
+  return `<span class="nav-menu-heading"><span class="nav-menu-heading-icon" aria-hidden="true">${ikonaObraz?`<img class="nav-generated-icon" src="${esc(ikonaObraz)}" alt="">`:esc(ikona||"🗂️")}</span><span><b>${esc(label)}</b><small>${esc(podpis)}</small></span></span>`;
+}
 function dropdownMenuKategorii(label, dzieci, ikona="🗂️",kategorie=[],ikonaObraz="",extraClass=""){
   if(!dzieci.length) return "";
   const wszystkie=kategorie.length?kategorie:dzieci;
-  return `<span class="nav-dd ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true">${ikonaObraz?`<img class="nav-generated-icon" src="${esc(ikonaObraz)}" alt="">`:esc(ikona)} ${esc(label)} <i aria-hidden="true">⌄</i></button><span class="nav-menu">${dzieci.map(k=>drzewoKategoriiMenuHTML(k,wszystkie)).join("")}</span></span>`;
+  const id=identyfikatorMenuKategorii();
+  const podpis=`${dzieci.length} ${dzieci.length===1?"kategoria":dzieci.length<5?"kategorie":"kategorii"}`;
+  return `<span class="nav-dd ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)">${ikonaObraz?`<img class="nav-generated-icon" src="${esc(ikonaObraz)}" alt="">`:esc(ikona)} <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,ikona,ikonaObraz,podpis)}<span class="nav-menu-list">${dzieci.map(k=>drzewoKategoriiMenuHTML(k,wszystkie)).join("")}</span></span></span>`;
 }
 function dropdownZbiorczyKategorii(sekcje,kategorie=[],label="Więcej",extraClass=""){
   const gotowe=(Array.isArray(sekcje)?sekcje:[]).filter(s=>Array.isArray(s.korzenie)&&s.korzenie.length);
   if(!gotowe.length)return "";
-  return `<span class="nav-dd nav-dd-more ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true"><span aria-hidden="true">🗂️</span> ${esc(label)} <i aria-hidden="true">⌄</i></button><span class="nav-menu nav-menu-mega">${gotowe.map(s=>`<span class="nav-menu-section"><b>${s.ikonaObraz?`<img class="nav-generated-icon" src="${esc(s.ikonaObraz)}" alt="">`:esc(s.ikona||"📁")} ${esc(s.nazwa||"Kategorie")}</b><span>${s.korzenie.map(k=>drzewoKategoriiMenuHTML(k,kategorie)).join("")}</span></span>`).join("")}</span></span>`;
+  const id=identyfikatorMenuKategorii();
+  const odmianaDzialu=gotowe.length===1?"dział":gotowe.length<5?"działy":"działów";
+  return `<span class="nav-dd nav-dd-more ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)"><span aria-hidden="true">🗂️</span> <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu nav-menu-mega${gotowe.length===1?" nav-menu-single":""}" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,"🗂️","",`${gotowe.length} ${odmianaDzialu} w jednym miejscu`)}<label class="nav-menu-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Szukaj kategorii…" aria-label="Szukaj kategorii" oninput="filtrujKategorieMenu(this)"></label><span class="nav-menu-empty" hidden>Brak kategorii pasujących do wyszukiwania.</span>${gotowe.map(s=>`<span class="nav-menu-section"><b>${s.ikonaObraz?`<img class="nav-generated-icon" src="${esc(s.ikonaObraz)}" alt="">`:esc(s.ikona||"📁")} ${esc(s.nazwa||"Kategorie")}</b><span>${s.korzenie.map(k=>drzewoKategoriiMenuHTML(k,kategorie)).join("")}</span></span>`).join("")}</span></span>`;
+}
+function zamknijMenuKategorii(wyjatek=null,przywrocFokus=false){
+  document.querySelectorAll("#mainNav .nav-dd.is-open").forEach(menu=>{
+    if(menu===wyjatek)return;
+    menu.classList.remove("is-open");
+    const przycisk=menu.querySelector(":scope > .nav-drop-btn");
+    if(przycisk){przycisk.setAttribute("aria-expanded","false");if(przywrocFokus)przycisk.focus();}
+  });
+}
+function przelaczMenuKategorii(event,przycisk){
+  event.preventDefault();event.stopPropagation();
+  const menu=przycisk.closest(".nav-dd");if(!menu)return false;
+  const otworzyc=!menu.classList.contains("is-open");
+  zamknijMenuKategorii(menu);
+  menu.classList.toggle("is-open",otworzyc);
+  przycisk.setAttribute("aria-expanded",otworzyc?"true":"false");
+  if(!otworzyc)przycisk.blur();
+  return false;
+}
+function filtrujKategorieMenu(input){
+  const panel=input.closest(".nav-menu");if(!panel)return;
+  const fraza=String(input.value||"").trim().toLocaleLowerCase("pl");
+  let widoczne=0;
+  panel.querySelectorAll(":scope > .nav-menu-section").forEach(sekcja=>{
+    const naglowek=sekcja.querySelector(":scope > b")?.textContent.toLocaleLowerCase("pl")||"";
+    const pasujeNaglowek=!!fraza&&naglowek.includes(fraza);
+    let widoczneWSekcji=0;
+    sekcja.querySelectorAll(":scope > span > .nav-category-node").forEach(kategoria=>{
+      const pasuje=!fraza||pasujeNaglowek||kategoria.textContent.toLocaleLowerCase("pl").includes(fraza);
+      kategoria.hidden=!pasuje;if(pasuje)widoczneWSekcji++;
+    });
+    sekcja.hidden=widoczneWSekcji===0;widoczne+=widoczneWSekcji;
+  });
+  const pusty=panel.querySelector(":scope > .nav-menu-empty");if(pusty)pusty.hidden=widoczne>0;
+}
+function zainicjujObslugeMenuKategorii(n){
+  if(!n.dataset.menuKategoriiGotowe){
+    n.dataset.menuKategoriiGotowe="1";
+    n.addEventListener("keydown",event=>{
+      const przycisk=event.target.closest(".nav-drop-btn");
+      if(przycisk&&event.key==="ArrowDown"){
+        const menu=przycisk.closest(".nav-dd");
+        if(!menu.classList.contains("is-open"))przelaczMenuKategorii(event,przycisk);
+        event.preventDefault();menu.querySelector(".nav-menu input,.nav-menu a")?.focus();
+      }
+    });
+  }
+  if(!globalnaObslugaMenuKategorii){
+    globalnaObslugaMenuKategorii=true;
+    document.addEventListener("click",event=>{if(!event.target.closest("#mainNav .nav-dd"))zamknijMenuKategorii();});
+    document.addEventListener("keydown",event=>{if(event.key==="Escape")zamknijMenuKategorii(null,true);});
+  }
 }
 function odswiezMenu(){
   const n = $("mainNav"); if(!n) return;
+  licznikMenuKategorii=0;
   const kategorie = wszystkieKategorie();
   const grupy = grupyMenuKategorii().filter(g=>g.aktywna);
   const rodzice=rodziceKategoriiMenu(),dozwolone=new Set(kategorie);
@@ -1356,7 +1419,7 @@ function odswiezMenu(){
   const limitBezGrupBezposrednich=grupyZKorzeniami.length?0:6;
   const bezGrupBezposrednie=pokazBezGrup?bezGrupKorzenie.slice(0,limitBezGrupBezposrednich):[];
   const bezGrupDodatkowe=pokazBezGrup?bezGrupKorzenie.slice(limitBezGrupBezposrednich):[];
-  const bezGrupHTML=bezGrupBezposrednie.map(k=>`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join("");
+  const bezGrupHTML=bezGrupBezposrednie.map(k=>`<a class="nav-category-direct" href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join("");
   const sekcjeDodatkowe=[...grupyDodatkowe.map(g=>({nazwa:g.nazwa,ikona:g.ikona,ikonaObraz:g.ikonaObraz,korzenie:g.korzenie})),...(bezGrupDodatkowe.length?[{nazwa:"Pozostałe kategorie",ikona:"📁",korzenie:bezGrupDodatkowe}]:[])];
   const wszystkieSekcje=[...grupyZKorzeniami.map(g=>({nazwa:g.nazwa,ikona:g.ikona,ikonaObraz:g.ikonaObraz,korzenie:g.korzenie})),...(bezGrupKorzenie.length?[{nazwa:"Pozostałe kategorie",ikona:"📁",korzenie:bezGrupKorzenie}]:[])];
   const wiecejHTML=dropdownZbiorczyKategorii(sekcjeDodatkowe,kategorie);
@@ -1368,6 +1431,7 @@ function odswiezMenu(){
     + wiecejHTML
     + `<a href="/promocje" onclick="return nawigujSklep(event,this.getAttribute('href'))">🔥 Promocje</a><a href="/nowosci" onclick="return nawigujSklep(event,this.getAttribute('href'))">✨ Nowości</a>`
     + (jestAdmin()?`<a class="nav-admin-link" href="#/admin">⚙️ Panel admina</a>`:"");
+  zainicjujObslugeMenuKategorii(n);
 }
 function odswiezUlubioneLicznik(){
   const e = $("ulubCount"); if(!e) return;
