@@ -4,7 +4,7 @@ import { telegramAgentReport } from './telegram-center.mjs';
 const ACTIONS = new Set([
   'telegram-center-status', 'telegram-settings-save', 'telegram-register-webhook', 'telegram-dispatch', 'telegram-inbound-command',
   'telegram-inbound-audit', 'telegram-outbound-audit',
-  'telegram-incident-action', 'telegram-delivery-action', 'telegram-dashboard-refresh', 'telegram-send-note', 'telegram-test', 'telegram-send-agent-report', 'telegram-send-supplier-order',
+  'telegram-incident-action', 'telegram-delivery-action', 'telegram-dashboard-refresh', 'telegram-send-note', 'telegram-test', 'telegram-send-agent-report', 'telegram-send-supplier-order', 'telegram-supplier-order-preview',
   'codex-agent-claim', 'codex-agent-complete', 'codex-agent-fail', 'codex-agent-heartbeat', 'codex-agent-panel-enqueue', 'codex-agent-result',
   'agent-runtime-status', 'agent-runtime-report',
 ]);
@@ -94,7 +94,7 @@ async function deliverCodexFailureNotification(codexQueue, sendTelegram, sanitiz
   };
 }
 
-export function createTelegramRouter({ center, codexQueue, agentRuntime, getOperationalCenter, inventoryCommand, inventoryDecisions, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text, sendTelegram = sendTelegramHtml, clearTelegramReplyMarkup = ({ chatId, messageId }) => telegramApi('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }) }) {
+export function createTelegramRouter({ center, codexQueue, agentRuntime, getOperationalCenter, inventoryCommand, inventoryDecisions, isAdmin, read, respond, sessionOf, publicOrigin, supplierPreviews, text, sendTelegram = sendTelegramHtml, clearTelegramReplyMarkup = ({ chatId, messageId }) => telegramApi('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }) }) {
   return async function telegramRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
     if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -338,9 +338,27 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
       const operational = await getOperationalCenter(), sent = await center.sendManual(telegramAgentReport(operational), { kind: 'report', title: 'Pełny raport centrum operacyjnego', source: 'admin-panel', replyMarkup: center.panelButtons() });
       return respond({ ok: true, sentAt: new Date().toISOString(), messageId: sent?.message_id || null, center: operational });
     }
-    if (action === 'telegram-send-supplier-order') {
-      const supplier = text(body.supplier || '', 120).trim(), order = body.order && typeof body.order === 'object' ? body.order : {}, tables = supplierTables(order, supplier);
+    if (action === 'telegram-send-supplier-order' || action === 'telegram-supplier-order-preview') {
+      if (typeof read !== 'function' || typeof supplierPreviews !== 'function') return respond({ ok: false, error: 'Kanoniczny Plan zatowarowania jest niedostępny', code: 'supplier_plan_unavailable' }, 503);
+      const settingsRecord = await read('settings', { data: {}, rev: 0, updated_at: null });
+      const tables = supplierPreviews(settingsRecord?.data || {}, {
+        draftId: text(body.draftId || '', 160).trim(),
+        supplier: text(body.supplier || '', 120).trim(),
+        expectedRevision: body.expectedRevision,
+        latestOnly: body.latestOnly === true,
+      });
       if (!tables.length) return respond({ ok: false, error: 'Zlecenie nie ma pozycji dla wybranego dostawcy', code: 'empty_order' }, 422);
+      if (action === 'telegram-supplier-order-preview') {
+        return respond({
+          ok: true,
+          source: 'supplier-plan',
+          rev: Math.max(0, Number(settingsRecord?.rev) || 0),
+          updated_at: settingsRecord?.updated_at || null,
+          messages: tables,
+          documents: [...new Set(tables.map((item) => item.draftId))],
+          suppliers: [...new Set(tables.map((item) => item.supplier))],
+        });
+      }
       const messageIds = [];
       for (const table of tables) {
         const sent = await center.sendManual(table.text, { kind: 'supplier-preview', category: 'supplier', title: `Podgląd zamówienia — ${table.supplier}`, source: 'admin-panel' });

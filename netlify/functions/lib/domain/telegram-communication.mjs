@@ -269,7 +269,10 @@ export function telegramSupplierTables(order = {}, onlySupplier = '') {
   const rows = (Array.isArray(order?.pozycje) ? order.pozycje : []).map((item) => ({
     code: text(supplierProductIdentifier(item).value || 'BRAK KODU', 80).trim(),
     name: text(item?.nazwa || 'Produkt', 180).trim(),
-    quantity: Math.max(0, Number(item?.iloscPotrzebna ?? item?.ilosc) || 0),
+    // Telegram pokazuje dokładnie ilość zamawianą z bieżącej rewizji Planu.
+    // `iloscPotrzebna` jest tylko dolną granicą wynikającą z zamówień i nie
+    // obejmuje ręcznie zatwierdzonej nadwyżki.
+    quantity: Math.max(0, Number(item?.ilosc ?? item?.iloscPotrzebna) || 0),
     supplier: text(item?.dostawca || 'Bez przypisanego dostawcy', 120).trim() || 'Bez przypisanego dostawcy',
   })).filter((item) => item.quantity > 0 && (!onlySupplier || item.supplier === onlySupplier));
   const groups = new Map();
@@ -284,7 +287,7 @@ export function telegramSupplierTables(order = {}, onlySupplier = '') {
       const part = items.slice(offset, offset + 18);
       const partNumber = Math.floor(offset / 18) + 1, partCount = Math.ceil(items.length / 18);
       const table = [
-        `${telegramCell('KOD', 15)} ${telegramCell('NAZWA', 30)} ${telegramCell('POTRZEBNA ILOŚĆ', 16)}`,
+        `${telegramCell('KOD', 15)} ${telegramCell('NAZWA', 30)} ${telegramCell('ZAMAWIANA ILOŚĆ', 16)}`,
         `${'-'.repeat(15)} ${'-'.repeat(30)} ${'-'.repeat(16)}`,
         ...part.map((item) => `${telegramCell(item.code, 15)} ${telegramCell(item.name, 30)} ${telegramCell(item.quantity, 16)}`),
       ].join('\n');
@@ -306,6 +309,70 @@ export function telegramSupplierTables(order = {}, onlySupplier = '') {
     }
   }
   return messages;
+}
+
+const CLOSED_SUPPLIER_DOCUMENT_STATUSES = new Set([
+  'anulowane', 'zrealizowane', 'zamkniete', 'zastapione', 'cancelled',
+  'completed', 'closed', 'superseded',
+]);
+
+function supplierDocumentStatus(value = '') {
+  return text(value, 100).trim().toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ł/g, 'l')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Jedyny resolver podglądu zamówienia producenta. Panel i rozmowa Telegram
+ * przekazują wyłącznie ID dokumentu; dane tabeli zawsze pochodzą z aktualnej
+ * rewizji `artway_agent_ai_zlecenia` zapisanej przez Plan zatowarowania.
+ * Dzięki temu żaden klient nie może przesłać alternatywnej treści zamówienia.
+ */
+export function telegramCanonicalSupplierPreviews(settings = {}, options = {}) {
+  const drafts = Array.isArray(settings?.artway_agent_ai_zlecenia)
+    ? settings.artway_agent_ai_zlecenia
+    : [];
+  const draftId = text(options?.draftId || '', 160).trim();
+  const supplier = text(options?.supplier || '', 120).trim();
+  const expectedRevision = options?.expectedRevision === undefined || options?.expectedRevision === null || options?.expectedRevision === ''
+    ? null
+    : Number(options.expectedRevision);
+  let selected = draftId
+    ? drafts.filter((draft) => text(draft?.id, 160).trim() === draftId)
+    : drafts.filter((draft) => !CLOSED_SUPPLIER_DOCUMENT_STATUSES.has(supplierDocumentStatus(draft?.status)));
+  if (options?.latestOnly === true && selected.length > 1) selected = selected.slice(0, 1);
+  if (draftId && !selected.length) {
+    const error = new Error('Nie znaleziono dokumentu w Planie zatowarowania.');
+    error.code = 'supplier_order_not_found';
+    error.status = 404;
+    throw error;
+  }
+  if (expectedRevision !== null) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      const error = new Error('Nieprawidłowa rewizja dokumentu producenta.');
+      error.code = 'supplier_order_revision_invalid';
+      error.status = 422;
+      throw error;
+    }
+    const stale = selected.find((draft) => Math.max(1, Number(draft?.revision) || 1) !== expectedRevision);
+    if (stale) {
+      const error = new Error('Plan zatowarowania zmienił się. Pobierz jego aktualną wersję.');
+      error.code = 'supplier_order_revision_conflict';
+      error.status = 409;
+      error.currentRevision = Math.max(1, Number(stale?.revision) || 1);
+      throw error;
+    }
+  }
+  return selected.flatMap((draft) => telegramSupplierTables(draft, supplier).map((message) => ({
+    ...message,
+    draftId: text(draft?.id, 160).trim(),
+    documentNumber: text(draft?.numer || draft?.id, 160).trim(),
+    revision: Math.max(1, Number(draft?.revision) || 1),
+    status: text(draft?.status || 'szkic', 100).trim(),
+  })));
 }
 
 export async function telegramApi(method, payload = {}, env = process.env) {

@@ -8,6 +8,7 @@ import {
   telegramQuietNow,
   telegramSettings,
   telegramIncidentId,
+  telegramCanonicalSupplierPreviews,
   telegramRenderEvents,
   telegramSupplierTables,
   telegramTopicId,
@@ -259,12 +260,12 @@ test('kolejka Telegram obejmuje tylko aktywne ostrzeżenia', () => {
   assert.equal(events[0].key, 'one');
 });
 
-test('tabela producenta zawiera tylko kod, nazwę i potrzebną ilość', () => {
+test('tabela producenta zawiera tylko kod, nazwę i ilość zamawianą', () => {
   const tables = telegramSupplierTables({ id: 'Z-1', pozycje: [{ kod: 'ABC', nazwa: 'Gra testowa', ilosc: 3, dostawca: 'Alexander', ean: '123' }] });
   assert.equal(tables.length, 1);
   assert.match(tables[0].text, /KOD/);
   assert.match(tables[0].text, /NAZWA/);
-  assert.match(tables[0].text, /POTRZEBNA ILOŚĆ/);
+  assert.match(tables[0].text, /ZAMAWIANA ILOŚĆ/);
   assert.doesNotMatch(tables[0].text, /123/);
   const explicitBusiness = telegramSupplierTables({ id: 'Z-2', pozycje: [{ produktId: '18', externalId: '18', sku: '18', kodProducenta: '18', kod: '18', nazwa: 'Jawny kod biznesowy', ilosc: 2, dostawca: 'Alexander' }] });
   assert.match(explicitBusiness[0].text, /\b18\b/);
@@ -275,6 +276,29 @@ test('tabela producenta zawiera tylko kod, nazwę i potrzebną ilość', () => {
   const large = telegramSupplierTables({ id: 'Z-501', pozycje: Array.from({ length: 501 }, (_value, index) => ({ externalId: `EXT-${String(index + 1).padStart(3, '0')}`, nazwa: `Produkt ${index + 1}`, ilosc: 1, dostawca: 'Alexander' })) });
   assert.equal(large.length, 28);
   assert.match(large.at(-1).text, /EXT-501/);
+});
+
+test('Telegram pobiera dokument wyłącznie z bieżącej rewizji Planu zatowarowania', () => {
+  const settings = { artway_agent_ai_zlecenia: [
+    { id: 'SPD-1', numer: 'AZ/2026/07/0001', revision: 4, status: 'do sprawdzenia', pozycje: [
+      { externalId: 'EXT-1410', nazwa: 'Gra testowa', iloscPotrzebna: 2, ilosc: 5, dostawca: 'Alexander' },
+    ] },
+    { id: 'SPD-OLD', revision: 1, status: 'zrealizowane', pozycje: [
+      { externalId: 'OLD-1', nazwa: 'Stary produkt', ilosc: 99, dostawca: 'Alexander' },
+    ] },
+  ] };
+  const previews = telegramCanonicalSupplierPreviews(settings, { draftId: 'SPD-1', expectedRevision: 4 });
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0].draftId, 'SPD-1');
+  assert.equal(previews[0].revision, 4);
+  assert.match(previews[0].text, /AZ\/2026\/07\/0001/);
+  assert.match(previews[0].text, /\b5\b/);
+  assert.doesNotMatch(previews[0].text, /\b99\b/);
+  assert.deepEqual(telegramCanonicalSupplierPreviews(settings).map((item) => item.draftId), ['SPD-1']);
+  assert.throws(
+    () => telegramCanonicalSupplierPreviews(settings, { draftId: 'SPD-1', expectedRevision: 3 }),
+    (error) => error?.code === 'supplier_order_revision_conflict' && error?.status === 409,
+  );
 });
 
 test('ustawienia profesjonalnego obiegu mają SLA, eskalację i opcjonalne tematy grupy', () => {

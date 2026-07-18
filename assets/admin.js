@@ -973,7 +973,7 @@ async function agentAIWyslijZlecenieTelegram(id,dostawca=""){
   if(!z){toast("Nie znaleziono zlecenia producenta");return;}
   try{
     toast("Przygotowuję tabelę i wysyłam na Telegram…");
-    const d=await chmura("telegram-send-supplier-order",{method:"POST",body:{order:z,supplier:dostawca||""},timeout:30000});
+    const d=await chmura("telegram-send-supplier-order",{method:"POST",body:{draftId:z.id,expectedRevision:Math.max(1,Number(z.revision)||1),supplier:dostawca||""},timeout:30000});
     zapiszHistorieAgenta("telegram",`Wysłano tabelę ${z.numer||z.id} na Telegram`,{zlecenieId:id,dostawcy:d.suppliers||[],wiadomosci:(d.messageIds||[]).length});
     toast(`Telegram: wysłano ${d.tables||0} tabel ✅`);
   }catch(e){toast("⚠️ Telegram: "+(e.message||e));}

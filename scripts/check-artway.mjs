@@ -575,7 +575,7 @@ requireMarkers('netlify/functions/lib/domain/telegram-communication.mjs', telegr
   'function telegramDigestSlot',
   "telegramCell('KOD', 15)",
   "telegramCell('NAZWA', 30)",
-  "telegramCell('POTRZEBNA ILOŚĆ', 16)",
+  "telegramCell('ZAMAWIANA ILOŚĆ', 16)",
   'function telegramNaturalIntent',
   'function telegramIncidentId',
   'function editTelegramHtml',

@@ -83,8 +83,8 @@ import { createProductLinkImportBundle } from './product-link-import-route.mjs';
 import { createAllegroOfferWithdrawalRoute } from './allegro-offer-withdrawal-route.mjs';
 import {
   telegramConfig as telegramKonfiguracja,
+  telegramCanonicalSupplierPreviews,
   telegramHtml,
-  telegramSupplierTables as telegramTabeleZlecenia,
 } from './domain/telegram-communication.mjs';
 import { createTelegramCenter } from './telegram-center.mjs';
 import { createTelegramRouter } from './telegram-router.mjs';
@@ -159,7 +159,7 @@ const allegroOrderArchive = createAllegroOrderArchive({ read: czytaj, write: zap
 const allegroDataReader = createAllegroDataReader({ read: czytaj, archive: allegroOrderArchive, getOfferSettings: allegroPobierzUstawieniaOfert, getStatus: allegroStatus, mappingItems: allegroMapowaniaItems, orderStatus: (order) => allegroStatusKolejkiZamowienia(order, {}), orderNeedsRefresh: allegroOrderNeedsLiveRefresh, nextScheduledSyncAt: allegroNextScheduledSyncAt, compliancePolicy: ALLEGRO_COMPLIANCE_POLICY });
 const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, editorialize: linkedProductEditorial, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
 const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ autoMapOffers: allegroAutoMapujOfertyZKartoteka, callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
-const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, agentRuntime, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
+const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, agentRuntime, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierPreviews: telegramCanonicalSupplierPreviews, text: tekst });
 
 const KLUCZE_WSPOLNE = [
   'artway_ustawienia',
