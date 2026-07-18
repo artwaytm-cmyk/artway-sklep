@@ -24,8 +24,8 @@ function asortymentSeoAgenta(p={}){
   for(const key of ["seoTitle","seoDescription","seoKeywords","seoScore","seoReviewedAt","seoSource","seoMode"])if(next[key]!==undefined&&String(next[key])!==String(p[key]??""))patch[key]=next[key];
   return Object.keys(patch).length?zapiszPolaProduktuLokalnie(p.id,patch,false):false;
 }
-const ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO=["nazwa","opisKrotki","opis","producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","zdjecia","allegroCategoryId","allegroProductId","allegroParameters","allegroDescriptionSections","allegroShippingSubsidy"];
-const ASORTYMENT_ETYKIETY_POL_ALLEGRO={nazwa:"nazwa",opisKrotki:"opis krótki",opis:"opis pełny",producent:"producent",marka:"marka",gtin:"GTIN",ean:"EAN",kodProducenta:"kod producenta",mpn:"MPN",zdjecie:"zdjęcie główne",zdjecia:"galeria",allegroCategoryId:"kategoria Allegro",allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",allegroDescriptionSections:"układ opisu Allegro",allegroShippingSubsidy:"dopłata do wysyłki"};
+const ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO=["nazwa","allegroTitle","opisKrotki","opis","producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","zdjecia","allegroCategoryId","allegroProductId","allegroParameters","allegroDescriptionSections","allegroShippingSubsidy"];
+const ASORTYMENT_ETYKIETY_POL_ALLEGRO={nazwa:"nazwa",allegroTitle:"tytuł Allegro",opisKrotki:"opis krótki",opis:"opis długi",producent:"producent",marka:"marka",gtin:"GTIN",ean:"EAN",kodProducenta:"kod producenta",mpn:"MPN",zdjecie:"zdjęcie główne",zdjecia:"galeria",allegroCategoryId:"kategoria Allegro",allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",allegroDescriptionSections:"układ opisu Allegro",allegroShippingSubsidy:"dopłata do wysyłki"};
 function asortymentMigawkaPrzygotowania(p={}){return Object.fromEntries(ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.map(key=>[key,p[key]]));}
 function asortymentPolaZmienione(before={},after={}){return ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.filter(key=>JSON.stringify(before[key]??null)!==JSON.stringify(after[key]??null));}
 function asortymentEtykietyPol(keys=[]){return keys.map(key=>ASORTYMENT_ETYKIETY_POL_ALLEGRO[key]||key);}
@@ -41,6 +41,7 @@ function asortymentStatusPrzygotowaniaHTML(p={}){const s=asortymentStatusPrzygot
 function asortymentPatchZPrzygotowania(p={},draft={}){
   const auto=draft.autoFilled||{},catalog=draft.catalogMatch?.selected||{},category=draft.categorySuggestion?.selected||{},patch={};
   const assign=(key,value)=>{if(value!==undefined&&value!==null&&value!=="")patch[key]=value;};
+  assign("allegroTitle",auto.allegroTitle||p.allegroTitle);
   assign("producent",allegroProducentKanoniczny({...p,producent:auto.producent||p.producent,marka:auto.marka||p.marka})||auto.producent||p.producent||p.marka);
   assign("marka",auto.marka||p.marka||patch.producent);
   assign("gtin",auto.gtin||auto.ean||(catalog.eans||[])[0]||p.gtin||p.ean);
@@ -50,8 +51,10 @@ function asortymentPatchZPrzygotowania(p={},draft={}){
   assign("allegroCategoryId",auto.allegroCategoryId||catalog.categoryId||category.id||p.allegroCategoryId);
   assign("allegroProductId",auto.allegroProductId||catalog.id||p.allegroProductId);
   if(Array.isArray(auto.allegroParameters)&&auto.allegroParameters.length)patch.allegroParameters=auto.allegroParameters;
-  const safeSections=draft.draft?.description?.sections||draft.improvedDescriptions?.sections||[];
-  if(Array.isArray(safeSections)&&safeSections.length){patch.allegroDescriptionSections=safeSections;const full=allegroTekstZBezpiecznychSekcji(safeSections);if(full){patch.opis=full;patch.opisKrotki=agentAITnijDoZdania(full,500);}}
+  const improved=draft.improvedDescriptions||{},safeSections=draft.draft?.description?.sections||improved.sections||[];
+  if(Array.isArray(safeSections)&&safeSections.length)patch.allegroDescriptionSections=safeSections;
+  const full=String(improved.fullDescription||allegroTekstZBezpiecznychSekcji(safeSections)||"").trim(),short=String(improved.shortDescription||p.opisKrotki||(full?agentAITnijDoZdania(full,500):"")).trim();
+  if(full)patch.opis=full;if(short)patch.opisKrotki=short;
   patch.allegroShippingSubsidy=p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI;
   return patch;
 }

@@ -399,7 +399,7 @@ async function allegroDodajProduktZOferty(offerId){
 function produktDlaAllegroZFormularza(form,id,poprzedni={}){
   const fd=new FormData(form);
   const dane=daneProduktuZFormularza(fd,id,poprzedni);
-  if(!dane){ toast("⚠️ Uzupełnij poprawną nazwę i cenę produktu"); return null; }
+  if(!dane){ toast("⚠️ Uzupełnij nazwę i cenę"); return null; }
   return dane;
 }
 function produktRoboczyAllegroZFormularza(form,id,poprzedni={}){
@@ -511,8 +511,8 @@ function allegroProducentKanoniczny(p={}){
   return "";
 }
 function zapiszPolaProduktuLokalnie(id,fields={},tylkoBrakujace=false){
-  const key=String(id),idx=produktyDodane.findIndex(x=>String(x.id)===key),base=idx>=0?produktyDodane[idx]:(produktyEdytowane[key]||{}),next={...base};let changed=false;
-  for(const [field,value] of Object.entries(fields)){if(value===undefined||value===null||value==="")continue;if(tylkoBrakujace&&(next[field]!==undefined&&next[field]!==null&&String(next[field]).trim()!==""))continue;if(JSON.stringify(next[field])!==JSON.stringify(value)){next[field]=value;changed=true;}}
+  const key=String(id),idx=produktyDodane.findIndex(x=>String(x.id)===key),base=idx>=0?produktyDodane[idx]:(produktyEdytowane[key]||{}),effective=idx>=0?base:(pobierzProduktAdmin(Number(id))||base),next={...base};let changed=false;
+  for(const [field,value] of Object.entries(fields)){if(value===undefined||value===null||value==="")continue;if(tylkoBrakujace&&(effective[field]!==undefined&&effective[field]!==null&&String(effective[field]).trim()!==""))continue;if(JSON.stringify(next[field])!==JSON.stringify(value)){next[field]=value;changed=true;}}
   if(!changed)return false;
   if(idx>=0){produktyDodane[idx]=next;zapiszLS("artway_produkty_dodane",produktyDodane);}else{produktyEdytowane={...produktyEdytowane,[key]:next};zapiszLS("artway_produkty_edytowane",produktyEdytowane);}
   zbudujProdukty();return true;
@@ -556,6 +556,7 @@ function allegroZapiszAutoUzupelnienia(p,d={}){
   const auto=d.autoFilled||{},catalog=d.catalogMatch?.selected||{},category=d.categorySuggestion?.selected||{};
   const canonical=allegroProducentKanoniczny({...p,producent:auto.producent||p.producent,marka:auto.marka||p.marka});
   const fields={
+    allegroTitle:auto.allegroTitle||p.allegroTitle,
     producent:canonical||auto.producent||p.producent||p.marka||"",
     marka:auto.marka||p.marka||canonical||auto.producent||p.producent||"",
     gtin:auto.gtin||auto.ean||(catalog.eans||[])[0]||p.gtin||p.ean||"",
@@ -566,7 +567,7 @@ function allegroZapiszAutoUzupelnienia(p,d={}){
     allegroProductId:auto.allegroProductId||catalog.id||p.allegroProductId||"",
     allegroCategoryId:auto.allegroCategoryId||category.id||catalog.categoryId||p.allegroCategoryId||""
   };
-  const improved=d.improvedDescriptions||{},safeSections=d.draft?.description?.sections||improved.sections||[],safeFull=allegroTekstZBezpiecznychSekcji(safeSections),safeShort=safeFull?agentAITnijDoZdania(safeFull,500):String(improved.shortDescription||""),next={allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI},force={};let changed=p.allegroShippingSubsidy===undefined;
+  const improved=d.improvedDescriptions||{},safeSections=d.draft?.description?.sections||improved.sections||[],safeFull=improved.fullDescription||allegroTekstZBezpiecznychSekcji(safeSections)||"",safeShort=improved.shortDescription||p.opisKrotki||(safeFull?agentAITnijDoZdania(safeFull,500):""),next={allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI},force={};let changed=p.allegroShippingSubsidy===undefined;
   for(const [key,value] of Object.entries(fields))if(value&&(!p[key]||(canonical&&key==="producent"&&String(p[key])!==String(value)))){next[key]=String(value);changed=true;}
   const extraImages=(Array.isArray(auto.zdjecia)?auto.zdjecia:[]).filter(Boolean).filter(x=>x!==fields.zdjecie).slice(0,15);
   if(extraImages.length&&!(Array.isArray(p.zdjecia)&&p.zdjecia.length)){next.zdjecia=extraImages;changed=true;}

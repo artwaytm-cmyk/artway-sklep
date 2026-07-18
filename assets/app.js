@@ -889,9 +889,14 @@ async function allegroPoprawOpisyWFormularzu(btn){
     const d=await chmura("allegro-description-improve",{method:"POST",body:{product:produkt},timeout:18000});
     if(form.elements.opisKrotki) form.elements.opisKrotki.value=d.shortDescription||form.elements.opisKrotki.value||"";
     if(form.elements.opis&&d.fullDescription) form.elements.opis.value=d.fullDescription;
+    let cloudSaved=null;
+    if(id){
+      zapiszPolaProduktuLokalnie(id,{opisKrotki:d.shortDescription||produkt.opisKrotki||"",opis:d.fullDescription||produkt.opis||"",allegroDescriptionSections:Array.isArray(d.sections)?d.sections:[],allegroDescriptionEditedAt:new Date().toISOString(),allegroDescriptionSource:"admin-allegro-improve"},false);
+      cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);
+    }
     const box=document.getElementById("allegroDescriptionPreview");
     if(box) box.innerHTML=`<div class="backend-note"><b>✅ Opisy i układ Allegro przygotowane</b><br>Krótki opis: ${esc(d.shortDescription||"—")}<br><small>${(d.similarOffers||[]).length?`Pomocniczo przeanalizowano podobne tytuły: ${(d.similarOffers||[]).map(x=>esc(x.name)).join(", ")}. Treść nie jest kopiowana.`:"Opis utworzono z danych własnego produktu."}</small></div><div class="allegro-description-preview"><div class="allegro-description-preview-head"><b>Podgląd wyglądu opisu Allegro</b><small>Akapity, nagłówki, listy i zdjęcia zostaną zapisane w tej kolejności.</small></div>${(d.sections||[]).map(s=>(s.items||[]).map(item=>item.type==="IMAGE"?`<img src="${esc(item.url||"")}" alt="Podgląd zdjęcia produktu" loading="lazy">`:`<section>${item.content||""}</section>`).join("")).join("")||`<section><p>Brak sekcji do podglądu.</p></section>`}</div>`;
-    toast("🤖 Poprawiono krótki opis, pełny opis i układ sekcji Allegro");
+    toast(id?(cloudSaved?"✅ Poprawiony opis krótki, długi i układ Allegro zapisano na serwerze":"⚠️ Opisy zapisano lokalnie; serwer ponowi synchronizację"):`🤖 Poprawiono opis krótki, długi i układ Allegro — zostaną zapisane z nowym produktem`);
   }catch(e){ toast("⚠️ Poprawianie opisów Allegro: "+(e.message||e)); }
   finally{ btn.disabled=false; }
 }

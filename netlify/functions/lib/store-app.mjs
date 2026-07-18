@@ -48,6 +48,7 @@ import { createAgentSpecialistRoute } from './agent-specialist-route.mjs';
 import { createAiBannerGenerator } from './domain/ai-banner-generator.mjs';
 import { createAiBannerRoute } from './ai-banner-route.mjs';
 import { normalizeTelegramAccountFields } from './domain/telegram-account-access.mjs';
+import { allegroOfferTitle } from './domain/allegro-offer-content.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
 import { applySupplierProcurementWorkflow } from './domain/supplier-procurement-workflow.mjs';
 import { classifyWarehousePosition, summarizeWarehousePositions, warehouseAnalysisNeedsInvestigation } from './domain/order-warehouse-readiness.mjs';
@@ -273,8 +274,6 @@ function bezpiecznaOpinia(raw = {}) {
   };
 }
 
-// Zachowujemy stabilny punkt integracyjny używany przez audyt i starsze
-// wywołania, a właściwy szablon oraz plik Optima są w osobnym module domenowym.
 function producentEmailZlecenia(order = {}, supplier = {}) {
   return renderSupplierOrderEmail(order, supplier);
 }
@@ -701,8 +700,6 @@ async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = fa
     if (!uniqueCosts.has(key)) uniqueCosts.set(key, entry);
   }
   const costCandidates = [...uniqueCosts.values()].sort((a, b) => String(b.document.issue_date).localeCompare(String(a.document.issue_date)) || String(b.document.created_at || '').localeCompare(String(a.document.created_at || '')));
-  // Pięć dokumentów na przebieg utrzymuje czas funkcji w bezpiecznym zakresie;
-  // kolejne faktury przejmie następne wykonanie godzinne.
   const batchLimit = Math.max(1, Math.min(5, Number(limit) || 5));
   const selectedCosts = (force ? costCandidates : costCandidates.filter(({ document }) => !['processed', 'no_ksef'].includes(report.costDocuments[tekst(document.uuid, 200)]?.status))).slice(0, batchLimit);
   report.costDocumentsScanned = costsResult.scanned;
@@ -1848,8 +1845,6 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
     }
     lineMatches.set(orderId, matched);
   }
-  // Dokumenty producentów są wyłącznie odczytywane tutaj do prezentacji decyzji agenta.
-  // Jedynym silnikiem, który może je zmieniać, jest kanoniczny Plan zatowarowania.
   const supplierOrders = Array.isArray(dane.artway_agent_ai_zlecenia)
     ? dane.artway_agent_ai_zlecenia.map((z) => ({ ...z, pozycje: Array.isArray(z.pozycje) ? z.pozycje.map((p) => ({ ...p })) : [] }))
     : [];
@@ -1868,8 +1863,6 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
       if (!match?.id) return { offerId: line.offerId, nazwa: line.offerName || offer.name || 'Produkt Allegro', ilosc: quantity, decision: 'nierozpoznany', reason: 'Brak jednoznacznego EAN/SKU lub mapowania oferty' };
       const productId = match.id, meta = kartoteki[productId] && typeof kartoteki[productId] === 'object' ? kartoteki[productId] : {};
       const known = Object.prototype.hasOwnProperty.call(stany, productId) && stany[productId] !== '' && stany[productId] != null && Number.isFinite(Number(stany[productId]));
-      // Brak kartoteki stanu oznacza 0 szt. do planowania zakupu. Nie może
-      // blokować zamówienia producenta dla zatwierdzonego powiązania.
       const stock = known ? Math.max(0, Number(stany[productId]) || 0) : 0, reserved = reservations.get(productId) || 0, available = stock - reserved, shortage = Math.max(0, -available);
       const docs = supplierDocsByProduct.get(productId) || [];
       const location = tekst(meta.lokalizacja || '', 120), classification = classifyWarehousePosition({ matched: true, stockKnown: known, shortage, location });
@@ -3306,7 +3299,7 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
   const start = products.length ? Math.max(0, Number(previousAudit.cursor) || 0) % products.length : 0;
   const selected = products.length <= limit ? products : Array.from({ length: limit }, (_, index) => products[(start + index) % products.length]);
   const updater = allegroAktualizatorProduktowCentralnych(data);
-  const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, unresolved: 0, errors: [] };
+  const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, titles: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, unresolved: 0, errors: [] };
   for (const product of selected) {
     try {
       const fields = {};
@@ -3338,6 +3331,8 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
         if (category?.selected?.id) { fields.allegroCategoryId = category.selected.id; report.categories++; }
       }
       const styledProduct = { ...product, ...fields };
+      const offerTitle = allegroOfferTitle(styledProduct);
+      if (offerTitle && offerTitle !== tekst(product.allegroTitle, 75).trim()) { fields.allegroTitle = offerTitle; report.titles++; }
       if (offerSettings.syncDescriptions !== false) {
         const shortDescription = allegroOpisKrotki(styledProduct, []), fullDescription = allegroOpisPelnyTekst(styledProduct, shortDescription), sections = allegroSekcjeOpisu(styledProduct, shortDescription);
         if (shortDescription) fields.opisKrotki = shortDescription;
@@ -3443,6 +3438,7 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
       sections: options.descriptionSections,
     },
     autoFilled: {
+      allegroTitle: allegroOfferTitle(preparedProduct),
       producent: preparedProduct.producent || preparedProduct.marka || '',
       marka: preparedProduct.marka || preparedProduct.producent || '',
       gtin: preparedProduct.gtin || preparedProduct.ean || '',
@@ -3465,6 +3461,7 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
 }
 function allegroDraftZProduktu(product = {}, opt = {}) {
   const p = product || {};
+  const offerTitle = allegroOfferTitle(p);
   const categoryId = tekst(opt.categoryId || p.allegroCategoryId || p.categoryId || '', 80).trim();
   const images = [p.zdjecie, ...(Array.isArray(p.zdjecia) ? p.zdjecia : [])].filter(Boolean).slice(0, 16);
   const externalId = tekst(p.externalId || p.sku || p.kodProducenta || p.mpn || p.id || '', 120).trim();
@@ -3488,14 +3485,14 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
     : (!categoryId && gtin)
       ? { id: gtin, idType: 'GTIN' }
       : {
-          name: tekst(p.nazwa || p.name, 75).trim(),
+          name: offerTitle,
           category: categoryId ? { id: categoryId } : undefined,
           parameters: [...parameters.filter((x) => x.id), ...productParameters],
           images,
         };
   const stockRaw = Number(opt.offerStock ?? ALLEGRO_DEFAULT_OFFER_STOCK);
   const payload = {
-    name: tekst(p.nazwa || p.name, 75).trim(),
+    name: offerTitle,
     productSet: [{
       product: productObj,
     }],
@@ -3629,6 +3626,7 @@ async function allegroZapiszPowiazanieProduktu(product = {}, details = {}) {
   if (Array.isArray(auto.zdjecia) && auto.zdjecia.length && !(product.zdjecia || []).length && !(previousEdit.zdjecia || []).length) autoPatch.zdjecia = auto.zdjecia.slice(0, 15);
   if (Array.isArray(auto.allegroParameters) && auto.allegroParameters.length && !Array.isArray(product.allegroParameters) && !Array.isArray(previousEdit.allegroParameters)) autoPatch.allegroParameters = auto.allegroParameters;
   const improved = details.prepared?.improvedDescriptions || {};
+  if (details.prepared?.autoFilled?.allegroTitle) autoPatch.allegroTitle = tekst(details.prepared.autoFilled.allegroTitle, 75);
   if (improved.shortDescription) autoPatch.opisKrotki = tekst(improved.shortDescription, 500);
   if (improved.fullDescription) autoPatch.opis = tekst(improved.fullDescription, 20000);
   if (Array.isArray(improved.sections) && improved.sections.length) autoPatch.allegroDescriptionSections = improved.sections;
@@ -3974,9 +3972,6 @@ function allegroZnajdzZamowienieKomunikacji(item = {}, orders = []) {
   if (inText) return { orderId: String(inText.id || inText.nr), order: inText, match: 'order_id_in_message', candidates: [String(inText.id || inText.nr)] };
   const login = String(item.buyerLogin || '').trim().toLowerCase();
   const buyerOrders = login ? list.filter((x) => String(x?.buyerLogin || '').trim().toLowerCase() === login).sort((a, b) => String(b.createdAt || b.firstFetchedAt || '').localeCompare(String(a.createdAt || a.firstFetchedAt || ''))) : [];
-  // Sam login kupującego nie jest bezpiecznym kluczem powiązania — ta sama osoba może mieć
-  // kilka zamówień i kilka niezależnych wątków. Pokazujemy kandydatów, ale nie podstawiamy
-  // danych zamówienia bez identyfikatora z API lub numeru obecnego w treści rozmowy.
   return { orderId: '', order: null, match: '', candidates: buyerOrders.slice(0, 5).map((x) => String(x.id || x.nr)) };
 }
 function allegroStatusZamowieniaOpis(status = '') {
