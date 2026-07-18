@@ -82,6 +82,57 @@ export function telegramActorRef(userId = '', chatId = '', secret = '') {
   return crypto.createHmac('sha256', String(secret)).update(`${String(userId).trim()}|${String(chatId).trim()}`).digest('hex').slice(0, 24);
 }
 
+export function telegramSharedConversationTarget(message = {}, config = {}) {
+  const sourceChatId = String(message?.chat?.id || '').trim();
+  const sharedChatId = String(config?.chatId || '').trim();
+  const privateChat = String(message?.chat?.type || '') === 'private';
+  const sharedGroup = /^-\d+$/.test(sharedChatId);
+  const bridged = privateChat && sharedGroup && sharedChatId !== sourceChatId;
+  return {
+    sourceChatId,
+    chatId: bridged ? sharedChatId : sourceChatId,
+    messageThreadId: bridged ? null : (message?.message_thread_id || null),
+    replyTo: bridged ? null : (message?.message_id || null),
+    bridged,
+  };
+}
+
+export function telegramGroupMessageUrl(chatId = '', messageId = '') {
+  const match = String(chatId || '').match(/^-100(\d+)$/), id = Number(messageId);
+  return match && Number.isSafeInteger(id) && id > 0 ? `https://t.me/c/${match[1]}/${id}` : '';
+}
+
+async function bridgePrivateMessageToSharedConversation({ message, input, senderLabel, config }) {
+  const target = telegramSharedConversationTarget(message, config);
+  if (!target.bridged) return target;
+  const sourceChatId = target.sourceChatId;
+  const description = input || (message?.voice ? '🎤 Wiadomość głosowa' : message?.audio ? '🎧 Wiadomość audio' : 'Wiadomość');
+  const mirrored = await sendTelegramHtml(
+    `<b>👤 ${html(senderLabel || 'Użytkownik Telegram')}</b>\n${html(description)}`,
+    { chatId: target.chatId },
+    process.env,
+  );
+  const groupMessageId = mirrored?.message_id || null;
+  if (message?.voice || message?.audio) {
+    await telegramApi('copyMessage', {
+      chat_id: target.chatId,
+      from_chat_id: sourceChatId,
+      message_id: Number(message.message_id),
+    }, process.env).catch(() => null);
+  }
+  const groupUrl = telegramGroupMessageUrl(target.chatId, groupMessageId);
+  await sendTelegramHtml(
+    '<b>✅ Polecenie przeniesiono do wspólnego centrum.</b>\nOdpowiedź Agenta pojawi się w grupie „Magazyn Artway”, widocznej dla całego zespołu.',
+    {
+      chatId: sourceChatId,
+      silent: true,
+      ...(groupUrl ? { replyMarkup: { inline_keyboard: [[{ text: 'Otwórz wspólną rozmowę', url: groupUrl }]] } } : {}),
+    },
+    process.env,
+  ).catch(() => null);
+  return { ...target, replyTo: groupMessageId, chatLabel: 'Magazyn Artway' };
+}
+
 async function auditRejectedInbound(origin = '', token = '', kind = 'unknown', actorHash = '') {
   if (!origin || !token) return;
   await fetch(`${origin}/api/store?action=telegram-inbound-audit`, {
@@ -218,18 +269,22 @@ export default async (request) => {
     }
     return response();
   }
-  await telegramApi('sendChatAction', {
-    chat_id: chatId,
-    action: 'typing',
-    ...(Number(message.message_thread_id) > 0 ? { message_thread_id: Number(message.message_thread_id) } : {}),
-  }, process.env).catch(() => null);
   const rawInput = String(callback?.data || message.text || message.caption || '').trim();
   const senderLabel = [sender.first_name, sender.last_name].filter(Boolean).join(' ').trim() || sender.username || 'Użytkownik Telegram';
   const chatLabel = String(message.chat.title || message.chat.first_name || 'Główna grupa Telegram').trim();
   const normalizedInput = callback?.id ? { text: rawInput, forceCodex: false } : normalizeTelegramAgentInput(rawInput);
   const media = telegramMessageMedia(message);
   const input = normalizedInput.text || (media ? `[Telegram: wiadomość ${media.kind === 'voice' ? 'głosowa' : 'audio'} do transkrypcji]` : '');
+  let delivery = telegramSharedConversationTarget(message, config);
   try {
+    if (!callback?.id) {
+      delivery = await bridgePrivateMessageToSharedConversation({ message, input, senderLabel, config });
+    }
+    await telegramApi('sendChatAction', {
+      chat_id: delivery.chatId,
+      action: 'typing',
+      ...(Number(delivery.messageThreadId) > 0 ? { message_thread_id: Number(delivery.messageThreadId) } : {}),
+    }, process.env).catch(() => null);
     const inventoryAction = callback?.id ? parseInventoryDecisionCallback(input) : parseInventoryDecisionText(input);
     if (inventoryAction) {
       if (!telegramInventoryDecisionAllowed(inventoryAction, config, { userId })) {
@@ -237,7 +292,7 @@ export default async (request) => {
         if (callback?.id) {
           await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: denied, show_alert: true }, process.env).catch(() => null);
         } else {
-          await sendTelegramHtml(`<b>🔐 Wymagane zatwierdzenie administratora.</b>\n${html(denied)}`, { chatId, replyTo: message.message_id, messageThreadId: message.message_thread_id || null }, process.env).catch(() => null);
+          await sendTelegramHtml(`<b>🔐 Wymagane zatwierdzenie administratora.</b>\n${html(denied)}`, { chatId: delivery.chatId, replyTo: delivery.replyTo, messageThreadId: delivery.messageThreadId }, process.env).catch(() => null);
         }
         return response();
       }
@@ -246,19 +301,19 @@ export default async (request) => {
         name: [sender.first_name, sender.last_name].filter(Boolean).join(' ') || sender.username || 'Telegram',
       });
       if (!callback?.id) {
-        await sendTelegramHtml(decisionData.text, { chatId, replyTo: message.message_id, messageThreadId: message.message_thread_id || null }, process.env);
+        await sendTelegramHtml(decisionData.text, { chatId: delivery.chatId, replyTo: delivery.replyTo, messageThreadId: delivery.messageThreadId }, process.env);
         return response();
       }
       const keyboard = inventoryKeyboardWithoutDecision(message.reply_markup || {}, inventoryAction.id);
       if (inventoryAction.action === 'location' && !keyboard.hasOther) {
-        await editTelegramHtml(decisionData.text, { chatId, messageId: message.message_id, replyMarkup: decisionData.replyMarkup }, process.env).catch(() => null);
+        await editTelegramHtml(decisionData.text, { chatId: delivery.chatId, messageId: message.message_id, replyMarkup: decisionData.replyMarkup }, process.env).catch(() => null);
       } else if (inventoryAction.action === 'location') {
-        await telegramApi('editMessageReplyMarkup', { chat_id: chatId, message_id: message.message_id, reply_markup: keyboard.replyMarkup }, process.env).catch(() => null);
-        await sendTelegramHtml(decisionData.text, { chatId, replyMarkup: decisionData.replyMarkup, messageThreadId: message.message_thread_id || null }, process.env);
+        await telegramApi('editMessageReplyMarkup', { chat_id: delivery.chatId, message_id: message.message_id, reply_markup: keyboard.replyMarkup }, process.env).catch(() => null);
+        await sendTelegramHtml(decisionData.text, { chatId: delivery.chatId, replyMarkup: decisionData.replyMarkup, messageThreadId: delivery.messageThreadId }, process.env);
       } else if (keyboard.hasOther) {
-        await telegramApi('editMessageReplyMarkup', { chat_id: chatId, message_id: message.message_id, reply_markup: keyboard.replyMarkup }, process.env).catch(() => null);
+        await telegramApi('editMessageReplyMarkup', { chat_id: delivery.chatId, message_id: message.message_id, reply_markup: keyboard.replyMarkup }, process.env).catch(() => null);
       } else {
-        await editTelegramHtml(decisionData.text, { chatId, messageId: message.message_id, replyMarkup: { inline_keyboard: [] } }, process.env).catch(() => null);
+        await editTelegramHtml(decisionData.text, { chatId: delivery.chatId, messageId: message.message_id, replyMarkup: { inline_keyboard: [] } }, process.env).catch(() => null);
       }
       const notice = inventoryAction.action === 'confirm' ? 'Zmiana została potwierdzona.' : inventoryAction.action === 'reject' ? 'Zmiana została odrzucona.' : 'Lokalizacja zapisana — teraz potwierdź decyzję.';
       await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: notice, show_alert: false }, process.env).catch(() => null);
@@ -274,7 +329,7 @@ export default async (request) => {
       return response();
     }
     if (!token) {
-      await sendTelegramHtml('⚠️ Dane sklepu są chwilowo niedostępne.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
+      await sendTelegramHtml('⚠️ Dane sklepu są chwilowo niedostępne.', { chatId: delivery.chatId, replyTo: delivery.replyTo }, process.env).catch(() => null);
       return response();
     }
     const incidentMatch = input.match(/^tg:(ack|s1|s24|resolve|reopen):([a-f0-9]{14})$/i);
@@ -291,10 +346,10 @@ export default async (request) => {
     const apiResponse = await fetch(`${origin}/api/store?action=telegram-inbound-command`, {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': token },
       body: JSON.stringify({
-        intent: telegramNaturalIntent(input), text: input, chatId, messageThreadId: message.message_thread_id || null,
-        replyTo: message.message_id || null, requestId: String(update.update_id || `${chatId}:${message.message_id || ''}`),
+        intent: telegramNaturalIntent(input), text: input, chatId: delivery.chatId, messageThreadId: delivery.messageThreadId,
+        replyTo: delivery.replyTo, requestId: String(update.update_id || `${chatId}:${message.message_id || ''}`),
         user: sender.username || [sender.first_name, sender.last_name].filter(Boolean).join(' '), userId,
-        fromLabel: senderLabel, chatLabel, chatType: message.chat.type || '',
+        fromLabel: senderLabel, chatLabel: delivery.chatLabel || chatLabel, chatType: delivery.bridged ? 'group' : (message.chat.type || ''),
         context: agentApproval ? cleanTelegramText(message.text || message.caption || '', 1600) : telegramReplyContext(message.reply_to_message),
         media, kind: inboundKind,
         source: 'telegram-webhook', deferToCodex: Boolean(agentApproval) || (!callback?.id && telegramCommandRoute(input) === 'agent'),
@@ -316,11 +371,11 @@ export default async (request) => {
     if (data.deferred) {
       return response();
     }
-    const sent = await sendTelegramHtml(data.message, { chatId, replyTo: message.message_id, replyMarkup: data.replyMarkup, messageThreadId: message.message_thread_id || null }, process.env);
+    const sent = await sendTelegramHtml(data.message, { chatId: delivery.chatId, replyTo: delivery.replyTo, replyMarkup: data.replyMarkup, messageThreadId: delivery.messageThreadId }, process.env);
     await auditOutbound(origin, token, {
       kind: 'local-reply', status: 'sent', category: 'agent', title: 'Odpowiedź bota na polecenie', preview: data.message,
-      messageId: sent?.message_id || null, fromLabel: 'Agent Artway-TM', toLabel: senderLabel || chatLabel,
-      messageThreadId: message.message_thread_id || null, conversationKey: `telegram:${chatId}:${message.message_thread_id || 0}`,
+      messageId: sent?.message_id || null, fromLabel: 'Agent Artway-TM', toLabel: delivery.chatLabel || senderLabel || chatLabel,
+      messageThreadId: delivery.messageThreadId, conversationKey: `telegram:${delivery.chatId}:${delivery.messageThreadId || 0}`,
       source: 'telegram-webhook',
     });
   } catch (error) {
@@ -328,7 +383,7 @@ export default async (request) => {
       await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: String(error?.message || error).slice(0, 180), show_alert: true }, process.env).catch(() => null);
       return response();
     }
-    await sendTelegramHtml('<b>⚠️ Nie mogę teraz pobrać danych.</b>\nSpróbuj ponownie za chwilę.', { chatId, replyTo: message.message_id }, process.env).catch(() => null);
+    await sendTelegramHtml('<b>⚠️ Nie mogę teraz pobrać danych.</b>\nSpróbuj ponownie za chwilę.', { chatId: delivery.chatId || chatId, replyTo: delivery.replyTo || null }, process.env).catch(() => null);
   }
   return response();
 };

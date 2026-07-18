@@ -11,7 +11,27 @@ import telegramWebhook, {
   telegramInventoryDecisionAllowed,
   telegramMessageMedia,
   telegramReplyContext,
+  telegramGroupMessageUrl,
+  telegramSharedConversationTarget,
 } from '../netlify/functions/telegram-webhook.mjs';
+
+test('prywatne polecenia obu telefonów trafiają do jednej wspólnej grupy', () => {
+  const config = { chatId: '-1009876543210' };
+  assert.deepEqual(telegramSharedConversationTarget({
+    message_id: 17,
+    chat: { id: 123, type: 'private' },
+  }, config), {
+    sourceChatId: '123', chatId: '-1009876543210', messageThreadId: null, replyTo: null, bridged: true,
+  });
+  assert.deepEqual(telegramSharedConversationTarget({
+    message_id: 18,
+    message_thread_id: 4,
+    chat: { id: -1009876543210, type: 'supergroup' },
+  }, config), {
+    sourceChatId: '-1009876543210', chatId: '-1009876543210', messageThreadId: 4, replyTo: 18, bridged: false,
+  });
+  assert.equal(telegramGroupMessageUrl('-1009876543210', 77), 'https://t.me/c/9876543210/77');
+});
 
 test('webhook kieruje wzmiankę i awaryjne /agent do Codexa', () => {
   assert.deepEqual(normalizeTelegramAgentInput('@magazyn_artway_bot sprawdź stan ziemniaka'), { text: 'sprawdź stan ziemniaka', forceCodex: true });
