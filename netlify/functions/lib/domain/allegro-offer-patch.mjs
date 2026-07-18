@@ -18,6 +18,7 @@ export function allegroPatchZDraftu(draft = {}, options = {}) {
       ? [{ product: { id: draft.productSet[0].product.id } }]
       : draft.productSet;
   }
+  if (options.repairCatalogCategory === true && draft.category?.id) out.category = { id: draft.category.id };
   if (options.publicationAction === 'activate') out.publication = { status: 'ACTIVE', republish: true };
   else if (options.publicationAction === 'deactivate') out.publication = { status: 'INACTIVE', republish: true };
   else out.publication = { republish: true };

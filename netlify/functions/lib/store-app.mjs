@@ -75,6 +75,7 @@ import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.m
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
 import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, reassessBlockedAllegroMapping, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
 import { allegroOfferVerification, allegroPatchZDraftu } from './domain/allegro-offer-patch.mjs';
+import { allegroBuildContentProductSet, allegroResponsibleProducerDirectory, allegroSelectResponsibleProducer } from './domain/allegro-gpsr.mjs';
 import { allegroNextScheduledSyncAt, allegroScheduledSyncDue, normalizeAllegroSyncSettings } from './domain/allegro-sync-policy.mjs';
 import { createCatalogProductUpdater as allegroAktualizatorProduktowCentralnych } from './domain/catalog-product-updater.mjs';
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
@@ -3245,7 +3246,8 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
   const rotation = products.length <= limit ? products : Array.from({ length: limit }, (_, index) => products[(start + index) % products.length]);
   const selected = [...new Map([...pendingEditorial, ...rotation].map((product) => [String(product.id), product])).values()].slice(0, limit);
   const updater = allegroAktualizatorProduktowCentralnych(data);
-  const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, titles: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, unresolved: 0, errors: [] };
+  const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, titles: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, gpsrMatched: 0, categoriesRepaired: 0, unresolved: 0, errors: [] };
+  let responsibleProducers = null;
   for (const product of selected) {
     try {
       const fields = {};
@@ -3289,11 +3291,25 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
         const prepared = await allegroDraftZAutoKategoria(req, finalProduct, { publicationAction: 'keep' });
         const offerId = tekst(prepared?.existingOffer?.offer?.id || finalProduct.allegroOfferId, 100).trim();
         if (offerId) {
-          const patch = allegroPatchZDraftu(prepared.payload, { publicationAction: 'keep', contentOnly: true, includeCatalogProduct: true });
+          const existingOffer = prepared?.existingOffer?.offer || {};
+          const existingSetItem = Array.isArray(existingOffer.productSet) ? (existingOffer.productSet[0] || {}) : {};
+          let responsibleProducer = existingSetItem?.responsibleProducer?.id ? { id: existingSetItem.responsibleProducer.id } : null;
+          if (!responsibleProducer) {
+            if (responsibleProducers === null) responsibleProducers = await allegroResponsibleProducerDirectory((path, callOptions) => allegroWywolaj(req, path, callOptions)).catch(() => []);
+            responsibleProducer = allegroSelectResponsibleProducer(finalProduct, responsibleProducers);
+            if (responsibleProducer) report.gpsrMatched++;
+          }
+          const catalogProductId = tekst(prepared?.payload?.productSet?.[0]?.product?.id, 120).trim();
+          const exactExistingProduct = catalogProductId && catalogProductId === tekst(existingOffer.productId || existingSetItem?.product?.id, 120).trim();
+          const preparedCategoryId = tekst(prepared?.payload?.category?.id, 80).trim();
+          const categoryRepair = exactExistingProduct && preparedCategoryId && preparedCategoryId !== tekst(existingOffer.categoryId, 80).trim();
+          const patch = allegroPatchZDraftu(prepared.payload, { publicationAction: 'keep', contentOnly: true, includeCatalogProduct: true, repairCatalogCategory: categoryRepair });
+          patch.productSet = allegroBuildContentProductSet({ draftItem: prepared?.payload?.productSet?.[0], existingItem: existingSetItem, responsibleProducer });
           const meta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: patch, withMeta: true });
           await allegroCzekajNaOperacjeOferty(req, meta.location);
           updater.apply(product.id, { allegroEditorialSyncPending: false, allegroEditorialSyncState: 'synced', allegroEditorialSyncedAt: report.lastRun, allegroEditorialSyncError: '' });
           report.offersUpdated++;
+          if (categoryRepair) report.categoriesRepaired++;
           if (offerSettings.autoFees !== false) {
             const actual = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`), price = Math.max(0, Number(finalProduct.cenaAllegro || finalProduct.cena) || 0);
             actual.sellingMode = actual.sellingMode || { format: 'BUY_NOW' };actual.sellingMode.price = { amount: price.toFixed(2), currency: 'PLN' };
@@ -3344,7 +3360,9 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   // katalogowej. Zachowanie aktualnego produktu i kategorii zapobiega
   // konfliktom kategorii, a przekazanie jego ID pozwala Allegro uzupełnić GPSR.
   const existingCatalogProductId = tekst(existingOffer?.offer?.productId || existingOffer?.offer?.productSet?.[0]?.product?.id || '', 120).trim();
-  const effectiveCategoryId = tekst((existingCatalogProductId ? existingOffer?.offer?.categoryId : '') || catalogMatch?.selected?.categoryId || categoryId, 80).trim();
+  const matchedCatalogProductId = tekst(catalogMatch?.selected?.id, 120).trim();
+  const exactExistingCatalogMatch = existingCatalogProductId && matchedCatalogProductId === existingCatalogProductId;
+  const effectiveCategoryId = tekst((exactExistingCatalogMatch ? catalogMatch?.selected?.categoryId : '') || (existingCatalogProductId ? existingOffer?.offer?.categoryId : '') || catalogMatch?.selected?.categoryId || categoryId, 80).trim();
   if (effectiveCategoryId) options.categoryId = effectiveCategoryId;
   const categoryParameters = await allegroParametryKategorii(req, effectiveCategoryId);
   options.salesConditions = salesConditions;
@@ -3446,6 +3464,7 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
   const stockRaw = Number(opt.offerStock ?? ALLEGRO_DEFAULT_OFFER_STOCK);
   const payload = {
     name: offerTitle,
+    category: categoryId ? { id: categoryId } : undefined,
     productSet: [{
       product: productObj,
     }],

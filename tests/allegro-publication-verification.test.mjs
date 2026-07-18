@@ -25,6 +25,17 @@ test('synchronizacja samej treści może dołączyć wyłącznie ID istniejąceg
   assert.deepEqual(patch.publication, { republish: true });
 });
 
+test('naprawa potwierdzonej kategorii katalogowej nie włącza zmian ceny ani stanu', () => {
+  const patch = allegroPatchZDraftu({
+    name: 'Gra', category: { id: '6106' }, productSet: [{ product: { id: 'catalog-1' } }],
+    sellingMode: { price: { amount: '20.00', currency: 'PLN' } }, stock: { available: 5 },
+    description: { sections: [{ items: [{ type: 'TEXT', content: '<p>Opis gry</p>' }] }] },
+  }, { contentOnly: true, includeCatalogProduct: true, repairCatalogCategory: true });
+  assert.deepEqual(patch.category, { id: '6106' });
+  assert.equal(patch.sellingMode, undefined);
+  assert.equal(patch.stock, undefined);
+});
+
 test('aktywacja wysyła jednoznaczny status ACTIVE i wznawianie', () => {
   const patch = allegroPatchZDraftu({ name: 'Pieniądze Alexander Tablice' }, { publicationAction: 'activate' });
   assert.deepEqual(patch.publication, { status: 'ACTIVE', republish: true });
