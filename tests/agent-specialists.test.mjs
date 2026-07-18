@@ -134,7 +134,7 @@ test('automatyczny cykl sam zapisuje kompletną bezpieczną redakcję bez okresu
   assert.match(status.policy.neverAutomatic.join(' '), /Wiadomość do klienta/i);
 });
 
-test('kontrola Allegro zatrzymuje automatyczny opis z zachętą do kontaktu', async () => {
+test('kontrola Allegro zatrzymuje niedozwolony opis i planuje automatyczną ponowną próbę bez klikania', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 101, nazwa: 'Gra testowa', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis', gtin: '5906018000092', allegroOfferId: 'offer-101' }] }, rev: 1 } });
   const fields = [
     { key: 'title', label: 'Nazwa', value: 'Gra testowa Alexander' },
@@ -147,11 +147,13 @@ test('kontrola Allegro zatrzymuje automatyczny opis z zachętą do kontaktu', as
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } }) });
   const cycle = await service.automaticCycle();
   assert.equal(cycle.applied.length, 0);
-  assert.equal(cycle.prepared[0].status, 'needs_decision');
-  const status = await service.status(), decision = status.decisions.find((item) => item.kind === 'product_content_review');
-  assert.ok(decision);
-  assert.match(decision.summary, /Allegro/i);
-  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opis, 'Opis');
+  assert.equal(cycle.prepared[0].status, 'retry_scheduled');
+  const status = await service.status();
+  assert.equal(status.decisions.some((item) => item.kind === 'product_content_review'), false);
+  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  assert.equal(product.opis, 'Opis');
+  assert.equal(product.contentEditorial.status, 'retry_pending');
+  assert.match(product.contentEditorial.warnings.join(' '), /allegro_compliance/i);
 });
 
 test('nowa wiadomość tworzy szkic i decyzję, lecz nie jest wysyłana automatycznie', async () => {
@@ -181,41 +183,31 @@ test('decyzję można odłożyć i nie wraca ona do otwartych przed terminem', a
   assert.equal((await service.status()).decisions.length, 0);
 });
 
-test('zatwierdzenie konkretnej rekomendacji nadpisuje wybrane pole, zapisuje audyt i nie wykonuje się drugi raz', async () => {
+test('niekompletny wynik redakcji nie tworzy decyzji i wraca do automatycznej kolejki', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 51, nazwa: 'Gra', producent: 'Alexander', opisKrotki: 'Stary opis', opis: '' }] }, rev: 1 } });
   const payload = openAiPayload([{ key: 'short_description', label: 'Opis krótki', value: 'Nowy, uporządkowany opis.', current_value: 'Stary opis', reason: 'Lepsza czytelność', evidence: 'Redakcja istniejącej treści' }]);
   payload.output[0].content[0].text = JSON.stringify({ ...JSON.parse(payload.output[0].content[0].text), confidence: 0.8, complianceStatus: 'needs_review' });
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } }) });
-  await service.automaticCycle();
-  const open = (await service.status()).decisions.find((item) => item.target?.productId === '51' && item.kind === 'product_content_review');
-  assert.ok(open);
-  const approved = await service.updateDecision(open.id, 'approve', { fieldKeys: ['short_description'] }, { email: 'admin@example.com' });
-  assert.equal(approved.status, 'approved');
-  assert.equal(approved.executionStatus, 'completed');
-  assert.deepEqual(approved.appliedFields, ['opisKrotki']);
-  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opisKrotki, 'Nowy, uporządkowany opis.');
-  const learned = (await service.status()).learning.productContent;
-  assert.equal(learned.approvals, 1);
-  assert.equal(learned.fieldStats.short_description.approved, 1);
-  const duplicate = await service.updateDecision(open.id, 'approve', { fieldKeys: ['short_description'] }, { email: 'admin@example.com' });
-  assert.equal(duplicate.duplicate, true);
+  const cycle = await service.automaticCycle();
+  assert.equal(cycle.prepared[0].status, 'retry_scheduled');
+  assert.equal((await service.status()).decisions.some((item) => item.kind === 'product_content_review'), false);
+  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  assert.equal(product.opisKrotki, 'Stary opis');
+  assert.equal(product.contentEditorial.status, 'retry_pending');
 });
 
-test('korekta administratora jest zapamiętana i tworzy nową propozycję bez zapisu produktu', async () => {
+test('ręczne uruchomienie niekompletnej redakcji także wraca do automatycznej kolejki bez decyzji', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 71, nazwa: 'Gra rodzinna', producent: 'Alexander', opisKrotki: 'Stary skrót', opis: '<p>Stary pełny opis produktu, który powinien zostać uporządkowany przez redaktora.</p>' }] }, rev: 1 } });
   const requests = [];
   const payload = openAiPayload([{ key: 'short_description', label: 'Opis krótki', value: 'Nowy skrót', current_value: 'Stary skrót', reason: 'Czytelność', evidence: 'Istniejący opis' }]);
   payload.output[0].content[0].text = JSON.stringify({ ...JSON.parse(payload.output[0].content[0].text), confidence: 0.8, complianceStatus: 'needs_review' });
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async (_url, options) => { requests.push(JSON.parse(options.body)); return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } }); } });
   const proposal = await service.prepareProductProposal('71', { email: 'admin@example.com' });
-  const revised = await service.updateDecision(proposal.decision.id, 'revise', { note: 'Skrót ma być serdeczny i bez powtarzania nazwy.' }, { email: 'admin@example.com' });
-  assert.equal(revised.revised, true);
-  assert.equal(revised.revisionCount, 1);
+  assert.equal(proposal.retryScheduled, true);
+  assert.equal(proposal.decision, null);
   assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opisKrotki, 'Stary skrót');
-  const status = await service.status();
-  assert.equal(status.learning.productContent.corrections, 1);
-  assert.match(requests[1].instructions, /Skrót ma być serdeczny/i);
-  assert.match(requests[1].instructions, /nie zaakceptowano short_description/i);
+  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].contentEditorial.status, 'retry_pending');
+  assert.equal(requests.length, 1);
 });
 
 test('po okresie nauki Agent sam zapisuje tylko pola o utrwalonej wysokiej akceptacji', async () => {

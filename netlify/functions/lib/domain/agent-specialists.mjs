@@ -9,9 +9,9 @@ const MAX_WRITE_ATTEMPTS = 8;
 const DEFAULT_CONFIG = Object.freeze({
   enabled: true,
   automaticEnabled: true,
-  dailyLimit: 60,
-  automaticDailyLimit: 30,
-  automaticBatchSize: 4,
+  dailyLimit: 240,
+  automaticDailyLimit: 200,
+  automaticBatchSize: 12,
   cacheHours: 24,
   safeAutoApply: true,
   autoApplyProductEditorial: true,
@@ -23,7 +23,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-19.7';
+const PROMPT_VERSION = '2026-07-19.8';
 const AGENT_ACTION_POLICY = Object.freeze({
   automatic: Object.freeze([
     Object.freeze({ id: 'product_editorial', icon: '✨', label: 'Redakcja kart produktu', description: 'Nazwa, opis krótki, opis pełny, układ sekcji i SEO są zapisywane bez pytania, gdy wynik jest kompletny, zgodny i oparty na faktach.', configKey: 'autoApplyProductEditorial' }),
@@ -164,9 +164,9 @@ function config(value = {}) {
   return {
     enabled: source.enabled !== false,
     automaticEnabled: source.automaticEnabled !== false,
-    dailyLimit: number(source.dailyLimit, DEFAULT_CONFIG.dailyLimit, 1, 200),
-    automaticDailyLimit: number(source.automaticDailyLimit, DEFAULT_CONFIG.automaticDailyLimit, 0, 100),
-    automaticBatchSize: number(source.automaticBatchSize, DEFAULT_CONFIG.automaticBatchSize, 1, 5),
+    dailyLimit: number(source.dailyLimit, DEFAULT_CONFIG.dailyLimit, 1, 500),
+    automaticDailyLimit: number(source.automaticDailyLimit, DEFAULT_CONFIG.automaticDailyLimit, 0, 400),
+    automaticBatchSize: number(source.automaticBatchSize, DEFAULT_CONFIG.automaticBatchSize, 1, 12),
     cacheHours: number(source.cacheHours, DEFAULT_CONFIG.cacheHours, 1, 168),
     safeAutoApply: source.safeAutoApply !== false,
     autoApplyProductEditorial: source.autoApplyProductEditorial !== false,
@@ -240,7 +240,7 @@ function learningAutonomy(learning = {}, settings = DEFAULT_CONFIG) {
 function learningPrompt(learning = {}, specialist = '') {
   if (specialist !== 'product_content') return '';
   const profile = normalizeLearning(learning).product_content;
-  if (!profile.examples.length) return 'Administrator nie zatwierdził jeszcze przykładów stylu. Przygotuj konserwatywną propozycję do jego decyzji; nie zakładaj preferencji.';
+  if (!profile.examples.length) return 'Brak przykładów preferowanego stylu. Przygotuj konserwatywną, kompletną redakcję opartą wyłącznie na przekazanych faktach; nie zakładaj nieznanych parametrów.';
   const examples = profile.examples.slice(0, 4).map((example, index) => {
     const fields = example.fields.slice(0, 4).map((field) => `${field.accepted ? 'zaakceptowano' : 'nie zaakceptowano'} ${field.key}: ${field.value}`).join(' | ');
     return `Przykład ${index + 1} (${example.outcome})${example.note ? `, uwaga administratora: ${example.note}` : ''}: ${fields}`;
@@ -332,12 +332,12 @@ function normalizeProductContentEditorialResult(result = {}) {
     && clean(fields.seo_title, 180)
     && clean(fields.seo_description, 300);
   if (!complete) return { ...result, readyForApproval: false };
-  const optionalGap = /(?:wiek|age|gracz|player|czas.?gry|play.?time|zdj[eę]ci|image|wymiar|waga|weight|stan|stock|dost[eę]pno|availability|zawarto[śs][ćc].?opak|component|parametr|source.?material|cena|price|rating|ocen|kategori.*docelow|full.?description|long.?description|short.?description)/i;
-  const missingFacts = (result.missingFacts || []).filter((value) => !optionalGap.test(String(value)));
-  const warnings = (result.warnings || []).filter((value) => !optionalGap.test(String(value)));
-  if (missingFacts.length || warnings.length) return { ...result, missingFacts, warnings, readyForApproval: false };
+  // Redakcja nie może być blokowana dlatego, że karta nie zawiera opcjonalnego
+  // parametru. Model ma pominąć taki fakt, a nie wymagać kliknięcia administratora.
+  // Zgodność gotowej treści jest niezależnie sprawdzana deterministycznie przez
+  // automaticEditorialAssessment przed jakimkolwiek zapisem.
   return {
-    ...result, missingFacts: [], warnings: [], confidence: Math.max(0.94, Number(result.confidence) || 0),
+    ...result, editorialNotes: [...(result.warnings || []), ...(result.missingFacts || [])].slice(0, 20), missingFacts: [], warnings: [], confidence: Math.max(0.94, Number(result.confidence) || 0),
     readyForApproval: true, complianceStatus: 'ready',
   };
 }
@@ -384,19 +384,29 @@ function productPatch(result = {}) {
   return patch;
 }
 
+function editorialIdentityConflict(result = {}) {
+  const notes = [...(result.editorialNotes || []), ...(result.warnings || []), ...(result.missingFacts || [])].join(' ');
+  return /(?:sprzeczn|niejednoznaczn|nie da si[eę].{0,30}rozpozna|tożsamo[śs][ćc].{0,30}(?:niepew|brak|konflikt)|inny produkt|różne produkty)/i.test(notes);
+}
+
 function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
   const patch = productPatch(run.result || {}), fields = Object.keys(patch);
   if (settings.autoApplyProductEditorial === false) return { eligible: false, reason: 'automatic_editorial_disabled', fields };
   if (!fields.length) return { eligible: false, reason: 'empty_patch', fields };
-  if (run.result?.readyForApproval !== true || run.result?.complianceStatus !== 'ready') return { eligible: false, reason: 'not_ready', fields };
-  if (Number(run.result?.confidence || 0) < settings.confidenceThreshold) return { eligible: false, reason: 'low_confidence', fields };
-  if ((run.result?.warnings || []).length || (run.result?.missingFacts || []).length) return { eligible: false, reason: 'facts_or_warnings', fields };
+  const coreComplete = clean(patch.nazwa, 300)
+    && clean(patch.opisKrotki, 2000)
+    && clean(patch.opis, 30_000).length >= 150
+    && clean(patch.seoTitle, 180)
+    && clean(patch.seoDescription, 300);
+  if (!coreComplete) return { eligible: false, reason: 'incomplete_editorial', fields };
+  if (Number(run.result?.confidence || 0) < 0.25) return { eligible: false, reason: 'invalid_editorial_output', fields };
+  if (editorialIdentityConflict(run.result || {})) return { eligible: false, reason: 'product_identity_conflict', fields };
   const allegroTarget = run.target?.channels === 'shared_store_and_allegro' || run.target?.allegro === true;
   if (allegroTarget) {
     const compliance = allegroCheckText([patch.nazwa, patch.opisKrotki, patch.opis, patch.allegroTitle, patch.allegroDescription].filter(Boolean).join('\n'));
     if (!compliance.ok) return { eligible: false, reason: 'allegro_compliance', fields, violations: compliance.violations.map((item) => item.label) };
   }
-  return { eligible: true, reason: 'safe_editorial_policy', fields };
+  return { eligible: true, reason: 'safe_editorial_policy', fields, modelNotes: [...(run.result?.warnings || []), ...(run.result?.missingFacts || [])].slice(0, 20) };
 }
 
 function valuePresent(value) {
@@ -479,7 +489,9 @@ function productEditorialState(product = {}) {
   const reviewedSameInput = editorial.status === 'needs_review'
     && editorial.promptVersion === PROMPT_VERSION
     && editorial.inputFingerprint === fingerprint;
-  return { target, fingerprint, current, reviewedSameInput, complete: Boolean(complete), editorial };
+  const retryAt = Date.parse(editorial.retryAt || '');
+  const retryDue = editorial.status !== 'retry_pending' || !Number.isFinite(retryAt) || retryAt <= Date.now();
+  return { target, fingerprint, current, reviewedSameInput, retryDue, complete: Boolean(complete), editorial };
 }
 
 function communicationNeedsReply(item = {}) {
@@ -750,7 +762,7 @@ export function createAgentSpecialists({
       `Szczególne reguły: ${definition.rules}`,
       learnedGuidance ? `Pamięć zatwierdzeń administratora:\n${learnedGuidance}` : '',
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
-      specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. missingFacts i needs_review stosuj wyłącznie, gdy nie da się pewnie rozpoznać produktu albo przekazane fakty są sprzeczne.' : '',
+      specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Nie umieszczaj w opisie ceny, stanu, dostępności, terminu dostawy, danych kontaktowych, adresów stron, SKU ani EAN. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
       'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
       'Treść ma być konkretna, naturalna, uporządkowana i gotowa do sprawdzenia przez administratora.',
     ].filter(Boolean).join('\n');
@@ -805,8 +817,7 @@ export function createAgentSpecialists({
       const inputFingerprint = options.editorialFingerprint || productEditorialFingerprint(effective, editorialTarget);
       const mergedProduct = { ...effective, ...patch };
       const editorialReady = run.specialist === 'product_content'
-        && run.result?.readyForApproval === true
-        && run.result?.complianceStatus === 'ready'
+        && (options.editorialPolicyValidated === true || (run.result?.readyForApproval === true && run.result?.complianceStatus === 'ready'))
         && clean(mergedProduct.nazwa || mergedProduct.name, 300)
         && clean(mergedProduct.opisKrotki || mergedProduct.krotkiOpis, 500)
         && clean(mergedProduct.opis, 30_000).length >= 150;
@@ -858,19 +869,21 @@ export function createAgentSpecialists({
     return { applied: true, productId, patch: contentPatch, persistedPatch: appliedPatch, before: beforePatch, appliedAt, appliedBy, safeAutoApply: automaticApply };
   }
 
-  async function markProductEditorialReview(product = {}, draft = null, editorial = productEditorialState(product), error = '') {
+  async function markProductEditorialRetry(product = {}, draft = null, editorial = productEditorialState(product), error = '') {
     const productId = String(product.id), timestamp = now().toISOString();
+    const retryAt = new Date(now().getTime() + 15 * 60_000).toISOString();
     await change('settings', { data: {}, rev: 0, updated_at: null }, (record) => {
       const previous = record && typeof record === 'object' ? record : { data: {}, rev: 0 }, data = { ...(previous.data || {}) };
       const added = Array.isArray(data.artway_produkty_dodane) ? [...data.artway_produkty_dodane] : [], index = added.findIndex((item) => String(item?.id) === productId);
       const patch = {
         contentEditorial: {
-          ...(product.contentEditorial || {}), status: 'needs_review', sourceRole: product.sourceMaterial ? 'facts_only' : 'catalog_facts',
+          ...(product.contentEditorial || {}), status: 'retry_pending', sourceRole: product.sourceMaterial ? 'facts_only' : 'catalog_facts',
           channels: editorial.target.channels, targets: { store: true, allegro: editorial.target.allegro === true }, layoutPolicy: 'allegro_sections',
-          promptVersion: PROMPT_VERSION, inputFingerprint: editorial.fingerprint, attemptedAt: timestamp,
+          promptVersion: PROMPT_VERSION, inputFingerprint: editorial.fingerprint, attemptedAt: timestamp, retryAt,
+          retryCount: Math.min(100, Math.max(0, Number(product.contentEditorial?.retryCount) || 0) + 1),
           runId: clean(draft?.id, 120), model: clean(draft?.model, 80), warnings: [...(draft?.result?.warnings || []), ...(draft?.result?.missingFacts || []), error].map((item) => clean(item, 500)).filter(Boolean).slice(0, 20),
         },
-        contentEditorialSource: 'autonomous-agent-needs-review',
+        contentEditorialSource: 'autonomous-agent-retry',
       };
       if (index >= 0) { added[index] = { ...added[index], ...patch }; data.artway_produkty_dodane = added; }
       else {
@@ -894,7 +907,7 @@ export function createAgentSpecialists({
     }, actor);
     const current = await readState(), assessment = automaticEditorialAssessment(draft, current.config);
     if (assessment.eligible) {
-      const applied = await applyProductDraft(draft.id, { source: actor?.email || actor?.name || 'admin-product-editor' }, { missingOnly: false, editorialAutomatic: true, editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint });
+      const applied = await applyProductDraft(draft.id, { source: actor?.email || actor?.name || 'admin-product-editor' }, { missingOnly: false, editorialAutomatic: true, editorialPolicyValidated: true, editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint });
       const completedAt = now().toISOString();
       await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
         const previous = state(value);
@@ -902,16 +915,13 @@ export function createAgentSpecialists({
       });
       return { run: { ...draft, approvalStatus: applied.applied ? 'auto_applied' : draft.approvalStatus }, decision: null, applied, automatic: true, policyReason: assessment.reason };
     }
-    await markProductEditorialReview(product, draft, editorial);
-    const target = { type: 'product', productId: safeId, name: clean(product.nazwa, 180), channels: editorial.target.channels, editorialFingerprint: editorial.fingerprint, proposalRunId: draft.id };
-    const decision = await upsertDecision({
-      fingerprint: decisionFingerprint('product_content_review', target), kind: 'product_content_review', specialist: 'product_content', icon: '✨',
-      title: `Wyjątek redakcji: ${clean(product.nazwa, 120) || safeId}`, summary: draft.result?.summary || 'Bezpieczny zapis automatyczny został zatrzymany.',
-      recommendation: assessment.reason === 'allegro_compliance' ? 'Treść narusza kontrolę zgodności Allegro. Popraw ją przed zapisem.' : 'Uzupełnij brakujące fakty albo sprawdź niepewną propozycję.',
-      alternatives: ['Popraw propozycję własną wskazówką', 'Odłóż decyzję', 'Odrzuć szkic'], risk: 'medium', target,
-      href: `#/admin/produkty/edytuj/${encodeURIComponent(safeId)}`, runId: draft.id,
+    await markProductEditorialRetry(product, draft, editorial, assessment.reason);
+    const completedAt = now().toISOString();
+    await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
+      const previous = state(value);
+      return { ...previous, decisions: previous.decisions.map((item) => item.kind === 'product_content_review' && String(item.target?.productId || '') === safeId && activeDecision(item, now()) ? normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'automatic-editorial-retry', resolutionNote: 'Redakcja została przekazana do automatycznej ponownej próby; nie wymaga decyzji administratora.' }, completedAt) : item), updatedAt: completedAt };
     });
-    return { run: draft, decision };
+    return { run: draft, decision: null, automatic: true, retryScheduled: true, policyReason: assessment.reason };
   }
 
   async function automaticCycle() {
@@ -930,9 +940,9 @@ export function createAgentSpecialists({
       const channelChanged = editorial.editorial.channels && editorial.editorial.channels !== editorial.target.channels;
       const priority = (channelChanged ? 100 : 0) + (editorial.target.allegro ? 30 : 0) + (product.sourceMaterial ? 15 : 0) + missing;
       return { product, missing, priority, editorial };
-    }).filter((item) => !item.editorial.current && !item.editorial.reviewedSameInput)
+    }).filter((item) => !item.editorial.current && !item.editorial.reviewedSameInput && item.editorial.retryDue !== false)
       .sort((a, b) => b.priority - a.priority || String(b.product.createdAt || b.product.dataDodania || '').localeCompare(String(a.product.createdAt || a.product.dataDodania || '')));
-    const prepared = [], applied = [], decisionResults = [], activeFingerprints = new Set(), autoResolvedDecisionIds = new Set(), autonomy = learningAutonomy(current.learning, current.config);
+    const prepared = [], applied = [], decisionResults = [], activeFingerprints = new Set(), autoResolvedDecisionIds = new Set(), handledProductIds = new Set(), autonomy = learningAutonomy(current.learning, current.config);
     let limitReached = false;
 
     const productsById = new Map(products.map((product) => [String(product.id), product]));
@@ -941,9 +951,16 @@ export function createAgentSpecialists({
       if (!product || !runEntry) continue;
       const editorial = productEditorialState(product), sameInput = decision.target?.editorialFingerprint === editorial.fingerprint;
       const assessment = automaticEditorialAssessment(runEntry, current.config);
-      if (!sameInput || !assessment.eligible) continue;
+      if (!sameInput) continue;
+      handledProductIds.add(String(product.id));
+      if (!assessment.eligible) {
+        await markProductEditorialRetry(product, runEntry, editorial, assessment.reason);
+        prepared.push({ id: runEntry.id, productId: String(product.id), name: clean(product.nazwa, 180), status: 'retry_scheduled', reason: assessment.reason });
+        autoResolvedDecisionIds.add(decision.id);
+        continue;
+      }
       try {
-        const result = await applyProductDraft(runEntry.id, { source: 'background-agent-policy' }, { missingOnly: false, editorialAutomatic: true, editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint });
+        const result = await applyProductDraft(runEntry.id, { source: 'background-agent-policy' }, { missingOnly: false, editorialAutomatic: true, editorialPolicyValidated: true, editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint });
         if (result.applied) applied.push({ id: runEntry.id, productId: String(product.id), name: clean(product.nazwa, 180), fields: Object.keys(result.patch || {}), fromDecision: decision.id });
         autoResolvedDecisionIds.add(decision.id);
       } catch (error) {
@@ -957,7 +974,9 @@ export function createAgentSpecialists({
     ].filter(({ item }) => communicationNeedsReply(item)).sort((a, b) => String(b.item?.latestNewIncoming?.createdAt || b.item?.lastMessage?.createdAt || '').localeCompare(String(a.item?.latestNewIncoming?.createdAt || a.item?.lastMessage?.createdAt || '')));
 
     let availableRuns = current.config.automaticBatchSize;
-    let communicationRuns = Math.max(0, availableRuns - Math.min(2, candidates.length));
+    // Komunikacja może zająć najwyżej dwa miejsca. Pozostała przepustowość jest
+    // przeznaczona na sukcesywne przygotowanie całego katalogu produktów.
+    let communicationRuns = Math.min(2, Math.max(0, availableRuns - Math.min(2, candidates.length)));
     for (const { type, item } of unresolvedCommunication.slice(0, 20)) {
       const target = { type: 'communication', communicationType: type, communicationId: String(item?.id || ''), sourceMessageId: String(item?.latestNewIncomingKey || item?.latestNewIncoming?.id || item?.lastMessage?.id || '') };
       const fp = decisionFingerprint('customer_reply', target); activeFingerprints.add(fp);
@@ -977,20 +996,17 @@ export function createAgentSpecialists({
       decisionResults.push(decision);
     }
 
-    for (const item of candidates.slice(0, Math.max(0, availableRuns))) {
+    for (const item of candidates.filter((entry) => !handledProductIds.has(String(entry.product.id))).slice(0, Math.max(0, availableRuns))) {
       try {
-        const draft = await run({ specialist: 'product_content', source: 'automatic', instruction: `Przygotuj kompletną, profesjonalną treść produktu dla wybranych kanałów: ${item.editorial.target.allegro ? 'sklep i Allegro' : 'sklep'}. Popraw również istniejącą słabą nazwę i treść, nie tylko puste pola. Zachowaj wszystkie potwierdzone fakty, zastosuj czytelne akapity, nagłówki i listy oraz zgłoś każdy brak.`, context: { product: productFacts(item.product), editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint }, target: { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint } }, { source: 'background-agent' });
+        const draft = await run({ specialist: 'product_content', source: 'automatic', instruction: `Przygotuj kompletną, profesjonalną treść produktu dla wybranych kanałów: ${item.editorial.target.allegro ? 'sklep i Allegro' : 'sklep'}. Popraw również istniejącą słabą nazwę i treść, nie tylko puste pola. Zachowaj potwierdzone fakty, zastosuj czytelne akapity, nagłówki i listy. Nie pytaj o opcjonalne dane — jeżeli ich nie ma, pomiń je i dokończ bezpieczną redakcję.`, context: { product: productFacts(item.product), editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint }, target: { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint } }, { source: 'background-agent' });
         const assessment = automaticEditorialAssessment(draft, current.config);
         if (assessment.eligible) {
-          const result = await applyProductDraft(draft.id, { source: 'background-agent' }, { missingOnly: false, editorialAutomatic: true, editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint });
+          const result = await applyProductDraft(draft.id, { source: 'background-agent' }, { missingOnly: false, editorialAutomatic: true, editorialPolicyValidated: true, editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint });
           if (result.applied) applied.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), fields: Object.keys(result.patch || {}) });
           prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: result.applied ? 'auto_applied' : 'not_needed' });
         } else {
-          await markProductEditorialReview(item.product, draft, item.editorial);
-          const target = { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint }, fp = decisionFingerprint('product_content_review', target); activeFingerprints.add(fp);
-          const reason = assessment.reason === 'allegro_compliance' ? `Kontrola Allegro wykryła: ${(assessment.violations || []).join(', ') || 'niedozwoloną treść'}.` : draft.result?.missingFacts?.length ? `Brakuje faktów: ${draft.result.missingFacts.join(', ')}.` : assessment.reason === 'low_confidence' ? 'Pewność wyniku jest za niska do automatycznego zapisu.' : 'Wynik zawiera wyjątek wymagający sprawdzenia.';
-          const decision = await upsertDecision({ fingerprint: fp, kind: 'product_content_review', specialist: 'product_content', icon: '✨', title: `Wyjątek redakcji: ${clean(item.product.nazwa, 120) || item.product.id}`, summary: reason, recommendation: 'Uzupełnij fakt lub popraw wyjątek. Kompletne i zgodne opisy Agent zapisuje sam.', alternatives: ['Popraw propozycję własną wskazówką', 'Odłóż decyzję', 'Odrzuć szkic'], risk: 'medium', target, href: `#/admin/produkty/edytuj/${encodeURIComponent(String(item.product.id))}`, runId: draft.id });
-          decisionResults.push(decision); prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'needs_decision' });
+          await markProductEditorialRetry(item.product, draft, item.editorial, assessment.reason);
+          prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'retry_scheduled', reason: assessment.reason });
         }
       } catch (error) {
         if (error?.code === 'agent_specialist_daily_limit') { limitReached = true; break; }
@@ -1030,6 +1046,7 @@ export function createAgentSpecialists({
       const previous = state(value), retentionCutoff = now().getTime() - previous.config.decisionRetentionDays * 24 * 60 * 60_000;
       const decisions = previous.decisions.map((item) => {
         if (autoResolvedDecisionIds.has(item.id)) return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'automatic-editorial-policy', resolutionNote: 'Bezpieczna redakcja została zapisana automatycznie zgodnie z polityką uprawnień.' }, completedAt);
+        if (item.kind === 'product_content_review' && activeDecision(item, now())) return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'automatic-editorial-policy', resolutionNote: 'Redakcja produktu działa całkowicie automatycznie i nie wymaga już decyzji administratora.' }, completedAt);
         if (!['customer_reply', 'product_content_review', 'catalog_identity'].includes(item.kind) || !activeDecision(item, now()) || activeFingerprints.has(item.fingerprint)) return item;
         return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'agent-reconciliation', resolutionNote: 'Warunek wymagający decyzji już nie występuje.' }, completedAt);
       }).filter((item) => activeDecision(item, now()) || Date.parse(item.updatedAt || item.createdAt || '') >= retentionCutoff).slice(0, MAX_DECISIONS);
