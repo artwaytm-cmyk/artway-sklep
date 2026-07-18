@@ -187,13 +187,16 @@ test('niekompletny wynik redakcji nie tworzy decyzji i wraca do automatycznej ko
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 51, nazwa: 'Gra', producent: 'Alexander', opisKrotki: 'Stary opis', opis: '' }] }, rev: 1 } });
   const payload = openAiPayload([{ key: 'short_description', label: 'Opis krótki', value: 'Nowy, uporządkowany opis.', current_value: 'Stary opis', reason: 'Lepsza czytelność', evidence: 'Redakcja istniejącej treści' }]);
   payload.output[0].content[0].text = JSON.stringify({ ...JSON.parse(payload.output[0].content[0].text), confidence: 0.8, complianceStatus: 'needs_review' });
-  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } }) });
+  let calls = 0;
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => { calls += 1; return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } }); } });
   const cycle = await service.automaticCycle();
   assert.equal(cycle.prepared[0].status, 'retry_scheduled');
   assert.equal((await service.status()).decisions.some((item) => item.kind === 'product_content_review'), false);
   const product = repo.values.get('settings').data.artway_produkty_dodane[0];
   assert.equal(product.opisKrotki, 'Stary opis');
   assert.equal(product.contentEditorial.status, 'retry_pending');
+  await service.automaticCycle();
+  assert.equal(calls, 2, 'ponowna próba nie może użyć tego samego wyniku z pamięci');
 });
 
 test('ręczne uruchomienie niekompletnej redakcji także wraca do automatycznej kolejki bez decyzji', async () => {
