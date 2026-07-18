@@ -1348,7 +1348,7 @@ function odswiezMenu(){
   const limitGrupBezposrednich=4;
   const grupyBezposrednie=grupyZKorzeniami.slice(0,limitGrupBezposrednich);
   const grupyDodatkowe=grupyZKorzeniami.slice(limitGrupBezposrednich);
-  const grupyHTML = grupyBezposrednie.map(g=>dropdownMenuKategorii(g.nazwa,g.korzenie,g.ikona,kategorie,g.ikonaObraz)).join("");
+  const grupyHTML = grupyBezposrednie.map((g,index)=>dropdownMenuKategorii(g.nazwa,g.korzenie,g.ikona,kategorie,g.ikonaObraz,index>=2?"nav-align-right":"")).join("");
   const przypisane = kategoriePrzypisaneDoAktywnychGrup(kategorie);
   const bezGrup = kategorie.filter(k=>!przypisane.has(k));
   const bezGrupKorzenie=bezGrup.filter(k=>!rodzice[k]||!dozwolone.has(rodzice[k]));

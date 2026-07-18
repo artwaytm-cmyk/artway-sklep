@@ -32,7 +32,7 @@
   .nav-row>a[href="/promocje"]{order:2}
   .nav-row>a[href="/nowosci"]{order:3}
   .nav-admin-link{display:none!important}
-  .nav-menu{position:absolute;left:0;right:auto;top:calc(100% + 2px);min-width:0;max-width:none;max-height:min(62vh,520px);overflow:auto;transform:none}
+  .nav-menu{position:absolute;left:0;right:auto;top:calc(100% + 2px);min-width:0;max-width:none;max-height:min(62vh,520px);overflow-y:auto;overflow-x:hidden;transform:none}
   .nav-menu-mega{width:auto;grid-template-columns:1fr!important;padding:.5rem}
   .nav-mobile-categories .nav-menu-mega{position:absolute;left:0;right:auto;top:calc(100% + 2px);width:calc(100vw - 1.4rem);margin-top:0}
   .hero{margin:.75rem auto 0;padding:0 .7rem}
