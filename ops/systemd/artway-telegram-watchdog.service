@@ -1,0 +1,21 @@
+[Unit]
+Description=Artway-TM Telegram and Agent server watchdog
+After=network-online.target artway-backend.service artway-agent.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/artway/shop
+EnvironmentFile=/srv/artway/shop/.env.netlify
+EnvironmentFile=-/srv/artway/agent/.env
+Environment=ARTWAY_PUBLIC_ORIGIN=https://artwaytm.pl
+Environment=ARTWAY_LOCAL_API_ORIGIN=http://127.0.0.1:3000
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/telegram-server-watchdog.mjs
+TimeoutStartSec=60s
+UMask=0077
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
