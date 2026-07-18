@@ -43,6 +43,14 @@ function cleanMedia(value = null) {
   };
 }
 
+export function sanitizeCodexBroadcastChatIds(value = [], primaryChatId = '') {
+  const primary = clean(primaryChatId, 100);
+  return [...new Set((Array.isArray(value) ? value : [])
+    .map((item) => clean(item, 100))
+    .filter((item) => /^[1-9]\d*$/.test(item) && item !== primary))]
+    .slice(0, 19);
+}
+
 export function sanitizeCodexInboundKind(value = '', channel = 'telegram') {
   if (channel === 'panel') return 'panel';
   const kind = String(value ?? '').trim().toLowerCase();
@@ -94,6 +102,8 @@ function asRecord(value = {}) {
       .map((item) => ({
         ...item,
         kind: sanitizeCodexInboundKind(item.kind, item.channel),
+        broadcastChatIds: sanitizeCodexBroadcastChatIds(item.broadcastChatIds, item.chatId),
+        conversationRoom: clean(item.conversationRoom, 80),
         replyMarkup: item.status === 'delivering' ? sanitizeCodexReplyMarkup(item.replyMarkup) : null,
       })) : [],
     updatedAt: clean(source.updatedAt, 40),
@@ -120,6 +130,7 @@ function telegramRecipient(job = {}) {
   if (job.channel === 'panel' || !clean(job.chatId, 100)) return null;
   return {
     chatId: clean(job.chatId, 100),
+    broadcastChatIds: sanitizeCodexBroadcastChatIds(job.broadcastChatIds, job.chatId),
     messageThreadId: Number(job.messageThreadId) > 0 ? Number(job.messageThreadId) : null,
     replyTo: Number(job.replyTo) > 0 ? Number(job.replyTo) : null,
   };
@@ -135,6 +146,7 @@ function pendingFailureNotification(job = {}, timestamp = new Date()) {
     createdAt,
     notBefore: createdAt,
     chatId: recipient.chatId,
+    broadcastChatIds: recipient.broadcastChatIds,
     messageThreadId: recipient.messageThreadId,
     replyTo: recipient.replyTo,
     claimToken: '',
@@ -152,10 +164,12 @@ function publicFailureNotification(job = {}) {
     ? job.failureNotification
     : {};
   if (!clean(job.id, 160) || !clean(notification.chatId, 100)) return null;
+  const broadcastChatIds = sanitizeCodexBroadcastChatIds(notification.broadcastChatIds, notification.chatId);
   return {
     id: clean(job.id, 160),
     claimToken: clean(notification.claimToken, 200),
     chatId: clean(notification.chatId, 100),
+    ...(broadcastChatIds.length ? { broadcastChatIds } : {}),
     messageThreadId: Number(notification.messageThreadId) > 0 ? Number(notification.messageThreadId) : null,
     replyTo: Number(notification.replyTo) > 0 ? Number(notification.replyTo) : null,
     attempts: Math.max(0, Number(notification.attempts) || 0),
@@ -169,6 +183,8 @@ function publicJob(job = {}) {
     claimToken: clean(job.claimToken, 200),
     text: clean(job.text, 2000),
     chatId: clean(job.chatId, 100),
+    broadcastChatIds: sanitizeCodexBroadcastChatIds(job.broadcastChatIds, job.chatId),
+    conversationRoom: clean(job.conversationRoom, 80),
     messageThreadId: Number(job.messageThreadId) > 0 ? Number(job.messageThreadId) : null,
     replyTo: Number(job.replyTo) > 0 ? Number(job.replyTo) : null,
     user: clean(job.user, 160),
@@ -249,6 +265,8 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
         context: offline ? '' : cleanContext(input.context),
         media: offline ? null : media,
         chatId,
+        broadcastChatIds: sanitizeCodexBroadcastChatIds(input.broadcastChatIds, chatId),
+        conversationRoom: clean(input.conversationRoom, 80),
         messageThreadId: Number(input.messageThreadId) > 0 ? Number(input.messageThreadId) : null,
         replyTo: Number(input.replyTo) > 0 ? Number(input.replyTo) : null,
         user: clean(input.user, 160),

@@ -179,12 +179,20 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
       }
       let sent;
       try {
-        sent = await sendTelegram(telegramSafeAgentHtml(prepared.job.response), {
-          chatId: prepared.job.chatId,
-          replyTo: prepared.job.replyTo,
-          messageThreadId: prepared.job.messageThreadId,
-          replyMarkup: prepared.job.replyMarkup || undefined,
-        });
+        const recipients = [...new Set([prepared.job.chatId, ...(Array.isArray(prepared.job.broadcastChatIds) ? prepared.job.broadcastChatIds : [])]
+          .map((value) => String(value || '').trim()).filter(Boolean))];
+        const attempts = await Promise.allSettled(recipients.map((chatId) => sendTelegram(telegramSafeAgentHtml(prepared.job.response), {
+          chatId,
+          ...(chatId === prepared.job.chatId && prepared.job.replyTo ? { replyTo: prepared.job.replyTo } : {}),
+          ...(chatId === prepared.job.chatId && prepared.job.messageThreadId ? { messageThreadId: prepared.job.messageThreadId } : {}),
+          ...(chatId === prepared.job.chatId && prepared.job.replyMarkup ? { replyMarkup: prepared.job.replyMarkup } : {}),
+        })));
+        const delivered = attempts.flatMap((result, index) => result.status === 'fulfilled'
+          ? [{ chatId: recipients[index], result: result.value }]
+          : []);
+        if (!delivered.length) throw attempts.find((result) => result.status === 'rejected')?.reason || new Error('Nie udało się dostarczyć odpowiedzi do zespołu.');
+        const primary = delivered.find((item) => item.chatId === String(prepared.job.chatId)) || delivered[0];
+        sent = { ...primary.result, message_ids: delivered.map((item) => ({ chat_id: item.chatId, message_id: item.result?.message_id || null })) };
       } catch (error) {
         // Po wywołaniu zewnętrznego API nie wiemy, czy odpowiedź nie zaginęła
         // już po przyjęciu wiadomości przez Telegram. Traktujemy wynik jako
@@ -198,8 +206,8 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
       if (typeof center?.recordOutboundAudit === 'function') await center.recordOutboundAudit({
         kind: 'agent-reply', status: 'sent', category: 'agent', title: 'Odpowiedź Agenta na polecenie',
         preview: prepared.job.response, messageId: sent?.message_id, fromLabel: 'Agent Artway-TM',
-        toLabel: prepared.job.user || 'Zespół Telegram', threadId: prepared.job.messageThreadId,
-        conversationKey: `telegram:${prepared.job.chatId || 'main'}:${prepared.job.messageThreadId || 0}`, source: 'codex-agent',
+        toLabel: prepared.job.broadcastChatIds?.length ? 'Wspólny pokój zespołu' : (prepared.job.user || 'Zespół Telegram'), threadId: prepared.job.messageThreadId,
+        conversationKey: prepared.job.conversationRoom === 'team' ? 'telegram:team:0' : `telegram:${prepared.job.chatId || 'main'}:${prepared.job.messageThreadId || 0}`, source: 'codex-agent',
       }).catch(() => null);
       const approvalTarget = codexAgentApprovalReplyTarget(prepared.job);
       if (completed.delivered === true && approvalTarget) await clearTelegramReplyMarkup(approvalTarget).catch(() => null);
@@ -281,6 +289,7 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
       if (body.deferToCodex === true && body.source === 'telegram-webhook' && codexQueue) {
         const queued = await codexQueue.enqueue({
           requestId: body.requestId, text: body.text, chatId: body.chatId, messageThreadId: body.messageThreadId,
+          broadcastChatIds: body.broadcastChatIds, conversationRoom: body.conversationRoom,
           replyTo: body.replyTo, user: body.user, userId: body.userId, context: body.context, media: body.media, kind: body.kind, channel: 'telegram',
         });
         const deferred = ['queued', 'processing', 'delivering'].includes(queued.status);

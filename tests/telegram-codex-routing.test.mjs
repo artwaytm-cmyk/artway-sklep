@@ -26,6 +26,7 @@ test('naturalna wiadomość webhooka trafia do kolejki Codex, a nie do uproszczo
     body: JSON.stringify({
       text: 'sprawdź, co wymaga dziś działania', intent: 'unknown', source: 'telegram-webhook', deferToCodex: true,
       requestId: 'update-55', chatId: '123', messageThreadId: 9, replyTo: 88, user: 'Artway', userId: '700',
+      broadcastChatIds: ['123', '456'], conversationRoom: 'team',
       context: 'Poprzednie pytanie klienta', media: { kind: 'voice', fileId: 'voice-1', mimeType: 'audio/ogg', fileName: '' }, kind: 'voice',
     }),
   });
@@ -37,6 +38,8 @@ test('naturalna wiadomość webhooka trafia do kolejki Codex, a nie do uproszczo
   assert.equal(queued.replyTo, 88);
   assert.equal(queued.messageThreadId, 9);
   assert.equal(queued.userId, '700');
+  assert.deepEqual(queued.broadcastChatIds, ['123', '456']);
+  assert.equal(queued.conversationRoom, 'team');
   assert.equal(queued.kind, 'voice');
   assert.equal(queued.context, 'Poprzednie pytanie klienta');
   assert.deepEqual(queued.media, { kind: 'voice', fileId: 'voice-1', mimeType: 'audio/ogg', fileName: '' });
@@ -117,7 +120,7 @@ test('complete przekazuje jednorazową klawiaturę zatwierdzeń do Telegram i do
       calls.push({ kind: 'prepare', body });
       return {
         job: {
-          channel: 'telegram', kind: 'callback', text: 'aa:c:AAabcdef123456', response: '<b>Czy zatwierdzasz zmianę?</b> <code>1410</code>', chatId: '123', replyTo: 77, messageThreadId: 9,
+          channel: 'telegram', kind: 'callback', text: 'aa:c:AAabcdef123456', response: '<b>Czy zatwierdzasz zmianę?</b> <code>1410</code>', chatId: '123', broadcastChatIds: ['456'], conversationRoom: 'team', replyTo: 77, messageThreadId: 9,
           replyMarkup: safeMarkup,
         },
       };
@@ -137,13 +140,16 @@ test('complete przekazuje jednorazową klawiaturę zatwierdzeń do Telegram i do
   }, 'codex-agent-complete');
   const result = await router(request, new URL(request.url), 'codex-agent-complete');
   assert.equal(result.payload.delivered, true);
-  assert.deepEqual(sent, [{
-    message: '<b>Czy zatwierdzasz zmianę?</b> <code>1410</code>',
-    options: {
-      chatId: '123', replyTo: 77, messageThreadId: 9,
-      replyMarkup: safeMarkup,
+  assert.deepEqual(sent, [
+    {
+      message: '<b>Czy zatwierdzasz zmianę?</b> <code>1410</code>',
+      options: { chatId: '123', replyTo: 77, messageThreadId: 9, replyMarkup: safeMarkup },
     },
-  }]);
+    {
+      message: '<b>Czy zatwierdzasz zmianę?</b> <code>1410</code>',
+      options: { chatId: '456' },
+    },
+  ]);
   assert.deepEqual(sent[0].options.replyMarkup.inline_keyboard[0].map((button) => button.callback_data), [
     'aa:c:AAabcdef123456', 'aa:r:AAabcdef123456',
   ]);

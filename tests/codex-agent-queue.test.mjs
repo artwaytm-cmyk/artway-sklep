@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCodexAgentQueue, sanitizeCodexInboundKind, sanitizeCodexReplyMarkup } from '../netlify/functions/lib/domain/codex-agent-queue.mjs';
+import { createCodexAgentQueue, sanitizeCodexBroadcastChatIds, sanitizeCodexInboundKind, sanitizeCodexReplyMarkup } from '../netlify/functions/lib/domain/codex-agent-queue.mjs';
 
 function repository() {
   let value = { items: [], updatedAt: null }, etag = 'v1', writes = 0;
@@ -30,6 +30,7 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
   await queue.claim('mac-artway');
   const input = {
     requestId: 'update-100', text: '', chatId: '123', replyTo: 55, user: 'Artway', userId: '700',
+    broadcastChatIds: ['123', '456', '456', '-200', 'abc'], conversationRoom: 'team',
     kind: 'voice',
     context: `Poprzednia wiadomość\u0000\n${'x'.repeat(1800)}`,
     media: { kind: 'voice', fileId: 'telegram-file-1', mimeType: 'audio/ogg', fileName: '' },
@@ -44,6 +45,8 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
   assert.match(claimed.job.text, /wiadomość głosowa/i);
   assert.equal(claimed.job.claimToken, 'claim-secret');
   assert.equal(claimed.job.userId, '700');
+  assert.deepEqual(claimed.job.broadcastChatIds, ['456']);
+  assert.equal(claimed.job.conversationRoom, 'team');
   assert.equal(claimed.job.kind, 'voice');
   assert.equal(claimed.job.context.length, 1600);
   assert.equal(claimed.job.context.includes('\u0000'), false);
@@ -61,6 +64,10 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
   assert.equal(completedDuplicate.duplicate, true);
   assert.equal(completedDuplicate.status, 'completed');
   assert.equal((await queue.claim('mac-artway')).job, null);
+});
+
+test('lista odbiorców wspólnego pokoju odrzuca grupy, tekst i czat główny', () => {
+  assert.deepEqual(sanitizeCodexBroadcastChatIds(['100', '200', '200', '-300', 'x', 400], '100'), ['200', '400']);
 });
 
 test('status kolejki pokazuje jednego aktywnego workera bez ujawniania jego identyfikatora', async () => {

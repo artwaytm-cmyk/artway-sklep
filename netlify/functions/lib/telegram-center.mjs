@@ -278,7 +278,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
 
   async function connection(live = false) {
     const config = telegramConfig(env), result = {
-      configured: !!(config.token && config.chatId), chatConfigured: !!config.chatId, botConfigured: !!config.token,
+      configured: !!(config.token && (config.chatId || config.teamUserIds?.size)), chatConfigured: !!(config.chatId || config.teamUserIds?.size), botConfigured: !!config.token,
       allowlist: { ...(config.allowlistCounts || { chats: config.allowedChatIds.size, users: config.allowedUserIds.size }) },
       bot: null, webhook: null, error: '',
     };
@@ -287,7 +287,9 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       const [bot, webhook, target] = await Promise.all([
         telegramApi('getMe', {}, env),
         telegramApi('getWebhookInfo', {}, env),
-        config.chatId
+        config.sharedMode === 'private-room' && config.teamUserIds?.size
+          ? Promise.resolve({ reachable: true, type: 'server-room', name: 'Wspólny pokój zespołu', members: config.teamUserIds.size, error: '' })
+          : config.chatId
           ? telegramApi('getChat', { chat_id: config.chatId }, env).then((chat) => ({ reachable: true, type: clean(chat?.type || '', 40), name: clean(chat?.title || chat?.first_name || '', 120), error: '' })).catch((error) => ({ reachable: false, type: '', name: '', error: clean(error?.message || error, 240) }))
           : Promise.resolve({ reachable: false, type: '', name: '', error: 'Brak kanału docelowego' }),
       ]);

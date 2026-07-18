@@ -86,15 +86,34 @@ export function telegramSharedConversationTarget(message = {}, config = {}) {
   const sourceChatId = String(message?.chat?.id || '').trim();
   const sharedChatId = String(config?.chatId || '').trim();
   const privateChat = String(message?.chat?.type || '') === 'private';
+  const privateRoom = privateChat && config?.sharedMode === 'private-room';
+  const broadcastChatIds = privateRoom ? telegramPrivateTeamRecipients(config, sourceChatId) : [];
+  const canonicalPrivateChatId = privateRoom
+    ? ([...(config?.approverUserIds instanceof Set ? config.approverUserIds : [])]
+      .find((value) => broadcastChatIds.includes(String(value))) || sourceChatId)
+    : sourceChatId;
   const sharedGroup = /^-\d+$/.test(sharedChatId);
-  const bridged = privateChat && sharedGroup && sharedChatId !== sourceChatId;
+  const bridged = !privateRoom && privateChat && sharedGroup && sharedChatId !== sourceChatId;
   return {
     sourceChatId,
-    chatId: bridged ? sharedChatId : sourceChatId,
+    chatId: bridged ? sharedChatId : canonicalPrivateChatId,
     messageThreadId: bridged ? null : (message?.message_thread_id || null),
     replyTo: bridged ? null : (message?.message_id || null),
     bridged,
+    sharedPrivate: privateRoom,
+    broadcastChatIds,
+    conversationRoom: privateRoom ? 'team' : '',
+    ...(privateRoom ? { chatLabel: 'Wspólny pokój zespołu' } : {}),
   };
+}
+
+export function telegramPrivateTeamRecipients(config = {}, sourceChatId = '') {
+  const source = String(sourceChatId || '').trim();
+  const configured = config?.teamUserIds instanceof Set ? [...config.teamUserIds] : [];
+  return [...new Set([source, ...configured]
+    .map((value) => String(value || '').trim())
+    .filter((value) => /^[1-9]\d*$/.test(value)))]
+    .slice(0, 20);
 }
 
 export function telegramGroupMessageUrl(chatId = '', messageId = '') {
@@ -104,6 +123,33 @@ export function telegramGroupMessageUrl(chatId = '', messageId = '') {
 
 async function bridgePrivateMessageToSharedConversation({ message, input, senderLabel, config }) {
   const target = telegramSharedConversationTarget(message, config);
+  if (target.sharedPrivate) {
+    const sourceChatId = target.sourceChatId;
+    const description = input || (message?.voice ? '🎤 Wiadomość głosowa' : message?.audio ? '🎧 Wiadomość audio' : 'Wiadomość');
+    const recipients = target.broadcastChatIds;
+    const mirrored = await Promise.allSettled(recipients.map((chatId) => sendTelegramHtml(
+      `<b>👤 ${html(senderLabel || 'Użytkownik Telegram')}</b>\n${html(description)}`,
+      { chatId },
+      process.env,
+    )));
+    const delivered = mirrored.flatMap((result, index) => result.status === 'fulfilled'
+      ? [{ chatId: recipients[index], result: result.value }]
+      : []);
+    if (!delivered.length) throw mirrored.find((result) => result.status === 'rejected')?.reason || new Error('Nie udało się zapisać wiadomości we wspólnym pokoju.');
+    if (message?.voice || message?.audio) {
+      await Promise.allSettled(recipients.map((chatId) => telegramApi('copyMessage', {
+        chat_id: chatId,
+        from_chat_id: sourceChatId,
+        message_id: Number(message.message_id),
+      }, process.env)));
+    }
+    await telegramApi('deleteMessage', {
+      chat_id: sourceChatId,
+      message_id: Number(message.message_id),
+    }, process.env).catch(() => null);
+    const primaryMirror = delivered.find((item) => item.chatId === target.chatId) || delivered[0];
+    return { ...target, replyTo: primaryMirror.result?.message_id || null };
+  }
   if (!target.bridged) return target;
   const sourceChatId = target.sourceChatId;
   const description = input || (message?.voice ? '🎤 Wiadomość głosowa' : message?.audio ? '🎧 Wiadomość audio' : 'Wiadomość');
@@ -131,6 +177,28 @@ async function bridgePrivateMessageToSharedConversation({ message, input, sender
     process.env,
   ).catch(() => null);
   return { ...target, replyTo: groupMessageId, chatLabel: 'Magazyn Artway' };
+}
+
+async function sendToDelivery(message, delivery = {}, options = {}) {
+  const primary = String(delivery.chatId || '').trim();
+  const recipients = [...new Set([primary, ...(Array.isArray(delivery.broadcastChatIds) ? delivery.broadcastChatIds : [])]
+    .map((value) => String(value || '').trim()).filter(Boolean))];
+  const results = await Promise.allSettled(recipients.map((chatId) => sendTelegramHtml(message, {
+    chatId,
+    ...(chatId === primary && options.replyTo ? { replyTo: options.replyTo } : {}),
+    ...(chatId === primary && Number(options.messageThreadId) > 0 ? { messageThreadId: options.messageThreadId } : {}),
+    ...(chatId === primary && options.replyMarkup ? { replyMarkup: options.replyMarkup } : {}),
+    ...(options.silent === true ? { silent: true } : {}),
+  }, process.env)));
+  const delivered = results.flatMap((result, index) => result.status === 'fulfilled'
+    ? [{ chatId: recipients[index], result: result.value }]
+    : []);
+  if (!delivered.length) throw results.find((result) => result.status === 'rejected')?.reason || new Error('Nie udało się dostarczyć wiadomości do wspólnego pokoju.');
+  const preferred = delivered.find((item) => item.chatId === primary) || delivered[0];
+  return {
+    ...preferred.result,
+    message_ids: delivered.map((item) => ({ chat_id: item.chatId, message_id: item.result?.message_id || null })),
+  };
 }
 
 async function auditRejectedInbound(origin = '', token = '', kind = 'unknown', actorHash = '') {
@@ -292,7 +360,7 @@ export default async (request) => {
         if (callback?.id) {
           await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: denied, show_alert: true }, process.env).catch(() => null);
         } else {
-          await sendTelegramHtml(`<b>🔐 Wymagane zatwierdzenie administratora.</b>\n${html(denied)}`, { chatId: delivery.chatId, replyTo: delivery.replyTo, messageThreadId: delivery.messageThreadId }, process.env).catch(() => null);
+          await sendToDelivery(`<b>🔐 Wymagane zatwierdzenie administratora.</b>\n${html(denied)}`, delivery, { replyTo: delivery.replyTo, messageThreadId: delivery.messageThreadId }).catch(() => null);
         }
         return response();
       }
@@ -301,7 +369,7 @@ export default async (request) => {
         name: [sender.first_name, sender.last_name].filter(Boolean).join(' ') || sender.username || 'Telegram',
       });
       if (!callback?.id) {
-        await sendTelegramHtml(decisionData.text, { chatId: delivery.chatId, replyTo: delivery.replyTo, messageThreadId: delivery.messageThreadId }, process.env);
+        await sendToDelivery(decisionData.text, delivery, { replyTo: delivery.replyTo, messageThreadId: delivery.messageThreadId });
         return response();
       }
       const keyboard = inventoryKeyboardWithoutDecision(message.reply_markup || {}, inventoryAction.id);
@@ -309,7 +377,7 @@ export default async (request) => {
         await editTelegramHtml(decisionData.text, { chatId: delivery.chatId, messageId: message.message_id, replyMarkup: decisionData.replyMarkup }, process.env).catch(() => null);
       } else if (inventoryAction.action === 'location') {
         await telegramApi('editMessageReplyMarkup', { chat_id: delivery.chatId, message_id: message.message_id, reply_markup: keyboard.replyMarkup }, process.env).catch(() => null);
-        await sendTelegramHtml(decisionData.text, { chatId: delivery.chatId, replyMarkup: decisionData.replyMarkup, messageThreadId: delivery.messageThreadId }, process.env);
+        await sendToDelivery(decisionData.text, delivery, { replyMarkup: decisionData.replyMarkup, messageThreadId: delivery.messageThreadId });
       } else if (keyboard.hasOther) {
         await telegramApi('editMessageReplyMarkup', { chat_id: delivery.chatId, message_id: message.message_id, reply_markup: keyboard.replyMarkup }, process.env).catch(() => null);
       } else {
@@ -329,7 +397,7 @@ export default async (request) => {
       return response();
     }
     if (!token) {
-      await sendTelegramHtml('⚠️ Dane sklepu są chwilowo niedostępne.', { chatId: delivery.chatId, replyTo: delivery.replyTo }, process.env).catch(() => null);
+      await sendToDelivery('⚠️ Dane sklepu są chwilowo niedostępne.', delivery, { replyTo: delivery.replyTo }).catch(() => null);
       return response();
     }
     const incidentMatch = input.match(/^tg:(ack|s1|s24|resolve|reopen):([a-f0-9]{14})$/i);
@@ -347,6 +415,7 @@ export default async (request) => {
       method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': token },
       body: JSON.stringify({
         intent: telegramNaturalIntent(input), text: input, chatId: delivery.chatId, messageThreadId: delivery.messageThreadId,
+        broadcastChatIds: delivery.broadcastChatIds, conversationRoom: delivery.conversationRoom,
         replyTo: delivery.replyTo, requestId: String(update.update_id || `${chatId}:${message.message_id || ''}`),
         user: sender.username || [sender.first_name, sender.last_name].filter(Boolean).join(' '), userId,
         fromLabel: senderLabel, chatLabel: delivery.chatLabel || chatLabel, chatType: delivery.bridged ? 'group' : (message.chat.type || ''),
@@ -371,7 +440,7 @@ export default async (request) => {
     if (data.deferred) {
       return response();
     }
-    const sent = await sendTelegramHtml(data.message, { chatId: delivery.chatId, replyTo: delivery.replyTo, replyMarkup: data.replyMarkup, messageThreadId: delivery.messageThreadId }, process.env);
+    const sent = await sendToDelivery(data.message, delivery, { replyTo: delivery.replyTo, replyMarkup: data.replyMarkup, messageThreadId: delivery.messageThreadId });
     await auditOutbound(origin, token, {
       kind: 'local-reply', status: 'sent', category: 'agent', title: 'Odpowiedź bota na polecenie', preview: data.message,
       messageId: sent?.message_id || null, fromLabel: 'Agent Artway-TM', toLabel: delivery.chatLabel || senderLabel || chatLabel,
@@ -383,7 +452,7 @@ export default async (request) => {
       await telegramApi('answerCallbackQuery', { callback_query_id: callback.id, text: String(error?.message || error).slice(0, 180), show_alert: true }, process.env).catch(() => null);
       return response();
     }
-    await sendTelegramHtml('<b>⚠️ Nie mogę teraz pobrać danych.</b>\nSpróbuj ponownie za chwilę.', { chatId: delivery.chatId || chatId, replyTo: delivery.replyTo || null }, process.env).catch(() => null);
+    await sendToDelivery('<b>⚠️ Nie mogę teraz pobrać danych.</b>\nSpróbuj ponownie za chwilę.', { ...delivery, chatId: delivery.chatId || chatId }, { replyTo: delivery.replyTo || null }).catch(() => null);
   }
   return response();
 };

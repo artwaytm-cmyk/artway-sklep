@@ -105,12 +105,20 @@ export function telegramConfig(env = process.env) {
   const explicitApprovers = new Set(String(env.TELEGRAM_APPROVER_USER_IDS || '').split(',')
     .map((value) => String(value || '').trim()).filter((value) => /^[1-9]\d*$/.test(value)));
   const approverUserIds = new Set([...approverBootstrap, ...explicitApprovers]);
+  const sharedMode = String(env.TELEGRAM_SHARED_MODE || '').trim().toLowerCase() === 'private-room'
+    ? 'private-room'
+    : 'group';
+  const teamUserIds = new Set([...ownerBootstrap, ...explicitChats, ...explicitUsers]
+    .filter((value) => /^[1-9]\d*$/.test(value))
+    .slice(0, 20));
   return {
     token: text(env.TELEGRAM_BOT_TOKEN || '', 300).trim(),
     chatId: text(env.TELEGRAM_NOTIFY_CHAT_ID || env.TELEGRAM_GROUP_ID || env.TELEGRAM_CHAT_ID || '', 100).trim(),
     allowedChatIds: new Set([...bootstrapChats, ...explicitChats]),
     allowedUserIds: explicitUsers,
     approverUserIds,
+    sharedMode,
+    teamUserIds,
     allowlistCounts: {
       chats: new Set([...bootstrapChats, ...explicitChats]).size,
       users: new Set([...ownerBootstrap, ...explicitUsers]).size,
@@ -267,6 +275,25 @@ export async function telegramApi(method, payload = {}, env = process.env) {
 
 export async function sendTelegramHtml(message, options = {}, env = process.env) {
   const config = telegramConfig(env);
+  if (!options.chatId && config.sharedMode === 'private-room' && config.teamUserIds.size) {
+    const results = await Promise.allSettled([...config.teamUserIds].map((chatId) => telegramApi('sendMessage', {
+      chat_id: chatId,
+      text: String(message || '').slice(0, 4090),
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+      disable_notification: options.silent === true,
+      ...(options.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
+    }, env)));
+    const delivered = results.flatMap((result, index) => result.status === 'fulfilled'
+      ? [{ chatId: [...config.teamUserIds][index], result: result.value }]
+      : []);
+    if (!delivered.length) throw results.find((result) => result.status === 'rejected')?.reason || new Error('Nie udało się dostarczyć wiadomości do zespołu.');
+    return {
+      ...delivered[0].result,
+      message_ids: delivered.map((item) => ({ chat_id: item.chatId, message_id: item.result?.message_id || null })),
+      delivered_count: delivered.length,
+    };
+  }
   if (!config.chatId && !options.chatId) {
     const error = new Error('Telegram nie ma ustawionego czatu docelowego. Ustaw TELEGRAM_GROUP_ID lub TELEGRAM_CHAT_ID.');
     error.code = 'telegram_not_configured'; error.status = 503; throw error;

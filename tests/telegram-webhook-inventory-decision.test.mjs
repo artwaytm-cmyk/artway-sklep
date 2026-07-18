@@ -12,6 +12,7 @@ import telegramWebhook, {
   telegramMessageMedia,
   telegramReplyContext,
   telegramGroupMessageUrl,
+  telegramPrivateTeamRecipients,
   telegramSharedConversationTarget,
 } from '../netlify/functions/telegram-webhook.mjs';
 
@@ -22,6 +23,7 @@ test('prywatne polecenia obu telefonów trafiają do jednej wspólnej grupy', ()
     chat: { id: 123, type: 'private' },
   }, config), {
     sourceChatId: '123', chatId: '-1009876543210', messageThreadId: null, replyTo: null, bridged: true,
+    sharedPrivate: false, broadcastChatIds: [], conversationRoom: '',
   });
   assert.deepEqual(telegramSharedConversationTarget({
     message_id: 18,
@@ -29,8 +31,61 @@ test('prywatne polecenia obu telefonów trafiają do jednej wspólnej grupy', ()
     chat: { id: -1009876543210, type: 'supergroup' },
   }, config), {
     sourceChatId: '-1009876543210', chatId: '-1009876543210', messageThreadId: 4, replyTo: 18, bridged: false,
+    sharedPrivate: false, broadcastChatIds: [], conversationRoom: '',
   });
   assert.equal(telegramGroupMessageUrl('-1009876543210', 77), 'https://t.me/c/9876543210/77');
+});
+
+test('serwerowy pokój prywatny ma wspólny czat administratora i oba telefony jako odbiorców', () => {
+  const config = {
+    sharedMode: 'private-room',
+    chatId: '-200',
+    teamUserIds: new Set(['100', '300']),
+    approverUserIds: new Set(['100']),
+  };
+  assert.deepEqual(telegramPrivateTeamRecipients(config, '300'), ['300', '100']);
+  assert.deepEqual(telegramSharedConversationTarget({ message_id: 21, chat: { id: 300, type: 'private' } }, config), {
+    sourceChatId: '300', chatId: '100', messageThreadId: null, replyTo: 21, bridged: false,
+    sharedPrivate: true, broadcastChatIds: ['300', '100'], conversationRoom: 'team', chatLabel: 'Wspólny pokój zespołu',
+  });
+});
+
+test('wiadomość z drugiego telefonu i odpowiedź bota są widoczne na obu telefonach', { concurrency: false }, async (t) => {
+  const previousFetch = globalThis.fetch;
+  const envNames = ['TELEGRAM_WEBHOOK_SECRET', 'TELEGRAM_BOT_TOKEN', 'ARTWAY_ADMIN_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_GROUP_ID', 'TELEGRAM_ALLOWED_USER_IDS', 'TELEGRAM_SHARED_MODE'];
+  const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  t.after(() => {
+    globalThis.fetch = previousFetch;
+    for (const name of envNames) previousEnv[name] === undefined ? delete process.env[name] : process.env[name] = previousEnv[name];
+  });
+  Object.assign(process.env, {
+    TELEGRAM_WEBHOOK_SECRET: 'shared-room-secret', TELEGRAM_BOT_TOKEN: 'bot-test-token', ARTWAY_ADMIN_TOKEN: 'admin-test-token',
+    TELEGRAM_CHAT_ID: '100', TELEGRAM_GROUP_ID: '-200', TELEGRAM_ALLOWED_USER_IDS: '300', TELEGRAM_SHARED_MODE: 'private-room',
+  });
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url), body = options.body ? JSON.parse(options.body) : null;
+    calls.push({ href, body });
+    if (href.includes('/api/store?action=telegram-inbound-command')) {
+      return new Response(JSON.stringify({ ok: true, deferred: false, message: '<b>Braki:</b> Kasa Edukacyjna — 1 szt.' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    const messageNo = calls.filter((item) => item.href.includes('/sendMessage')).length;
+    return new Response(JSON.stringify({ ok: true, result: href.includes('/sendMessage') ? { message_id: messageNo } : true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const result = await telegramWebhook(new Request('https://artwaytm.pl/.netlify/functions/telegram-webhook', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'shared-room-secret' },
+    body: JSON.stringify({ update_id: 42, message: { message_id: 7, text: 'braki', from: { id: 300, first_name: 'Tomasz' }, chat: { id: 300, type: 'private' } } }),
+  }));
+  assert.equal(result.status, 200);
+  const queued = calls.find((call) => call.href.includes('/api/store?action=telegram-inbound-command'));
+  assert.equal(queued.body.chatId, '100');
+  assert.deepEqual(queued.body.broadcastChatIds, ['300', '100']);
+  assert.equal(queued.body.conversationRoom, 'team');
+  const sent = calls.filter((call) => call.href.includes('/sendMessage'));
+  assert.equal(sent.filter((call) => /Tomasz/.test(call.body.text)).length, 2);
+  assert.equal(sent.filter((call) => /Kasa Edukacyjna/.test(call.body.text)).length, 2);
+  assert.deepEqual(new Set(sent.filter((call) => /Kasa Edukacyjna/.test(call.body.text)).map((call) => String(call.body.chat_id))), new Set(['100', '300']));
+  assert.equal(calls.some((call) => call.href.includes('/deleteMessage') && String(call.body.chat_id) === '300'), true);
 });
 
 test('webhook kieruje wzmiankę i awaryjne /agent do Codexa', () => {
