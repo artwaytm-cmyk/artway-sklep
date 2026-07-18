@@ -75,9 +75,6 @@ async function adminMasowoZmienStatusZamowien(){
   toast(`✅ Zmieniono ${zmiany.length} zamówień na „${status}”${bledy?` • błędy synchronizacji: ${bledy}`:""}`);
 }
 function allegroZapiszCache(){
-  // Pełne rejestry pozostają w backendzie i w pamięci bieżącej sesji.
-  // Nie duplikujemy tysięcy ofert, zamówień i wiadomości w localStorage,
-  // ponieważ prowadziło to do przekroczenia limitu pamięci przeglądarki.
   for(const klucz of ["artway_allegro_zamowienia_cache","artway_allegro_oferty_cache","artway_allegro_mapowania_cache","artway_allegro_komunikacja_cache"]){
     try{localStorage.removeItem(klucz);}catch(e){}
   }
@@ -622,22 +619,23 @@ async function allegroWystawProdukt(id){
     const publicationAction=allegroTrybPublikacji();
     const preparedDraft=preparation.draft?.draft?{...preparation.draft.draft,publication:{...(preparation.draft.draft.publication||{}),status:publicationAction==="activate"?"ACTIVE":"INACTIVE",republish:true}}:null;
     const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:produktGotowy,...(preparedDraft?{draft:preparedDraft}:{}),options:{stock:allegroStanOfertyProduktu(produktGotowy),publishNow:publicationAction==="activate",publicationAction}},timeout:120000});
+    const remoteStatus=String(d.verification?.status||d.offer?.publication?.status||d.offer?.status||"").toUpperCase();
     allegroOstatniBladWystawienia=null;
     allegroZapiszWynikOperacji(produktGotowy,d);
     allegroPokazKategorieWFormularzu(d.categorySuggestion);
     allegroZapiszAutoUzupelnienia(produktGotowy,d);
-    toast(d.operation?.completed===false?"🟠 Allegro przyjęło operację — kończy przetwarzanie oferty w tle":d.mode==="updated"?`🟠 Zaktualizowano istniejącą ofertę Allegro — ${d.match?.reason||"dopasowanie"}`:"🟠 Utworzono nową ofertę Allegro");
+    toast(remoteStatus==="ACTIVE"?"✅ Oferta zapisana i aktywna w Allegro":`🧾 Oferta zapisana • status Allegro: ${remoteStatus||"weryfikacja w toku"}`);
     if(d.offer?.id){
       const selectedCat=d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||d.categorySuggestion?.selected?.id||form.elements.allegroCategoryId?.value||"";
       produktyEdytowane[id]={...(produktyEdytowane[id]||{}),allegroOfferId:String(d.offer.id),...(selectedCat?{allegroCategoryId:String(selectedCat)}:{}),...(d.catalogMatch?.selected?.id?{allegroProductId:String(d.catalogMatch.selected.id)}:{})};
       zapiszLS("artway_produkty_edytowane",produktyEdytowane);
       allegroZastosujWynikWystawienia(produktGotowy,d);
       await allegroPobierzProwizjeProduktu(id,null,{silent:true}).catch(()=>null);
-      zapiszPolaProduktuLokalnie(id,{allegroAgentPreparationStatus:"published",allegroAgentPublishedAt:new Date().toISOString(),allegroOfferId:String(d.offer.id)},false);
+      zapiszPolaProduktuLokalnie(id,{allegroAgentPreparationStatus:remoteStatus==="ACTIVE"?"published":"draft",allegroAgentPublishedAt:remoteStatus==="ACTIVE"?new Date().toISOString():"",allegroOfferId:String(d.offer.id)},false);
       const cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);
       await allegroWczytajDane(true).catch(()=>{});
       zbudujProdukty();
-      const box=document.getElementById("allegroDraftPreview");if(box)box.innerHTML=`<div class="duplicate-audit-ok allegro-operation-success"><div><b>✅ Oferta ${d.mode==="updated"?"zaktualizowana":"utworzona"}</b><small>ID ${esc(d.offer.id)} • przygotowanie zapisało: ${esc(asortymentEtykietyPol(preparation.savedFields).join(", ")||"kontrola bez zmian")} • kartoteka ${cloudSaved?"zapisana na serwerze":"czeka na automatyczną ponowną próbę"}</small></div><a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(d.offer.id)}" target="_blank" rel="noopener">Otwórz ofertę</a></div>`;
+      const box=document.getElementById("allegroDraftPreview");if(box)box.innerHTML=`<div class="duplicate-audit-ok allegro-operation-success"><div><b>${remoteStatus==="ACTIVE"?"✅ Oferta aktywna":"🧾 Oferta zapisana — "+esc(remoteStatus||"weryfikacja w toku")}</b><small>ID ${esc(d.offer.id)} • opis: ${esc(d.verification?.descriptionSections||0)} sekcji • kartoteka ${cloudSaved?"zapisana na serwerze":"czeka na ponowny zapis"}</small></div><a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(d.offer.id)}" target="_blank" rel="noopener">Otwórz ofertę</a></div>`;
     }
   }catch(e){
     allegroOstatniBladWystawienia=e;

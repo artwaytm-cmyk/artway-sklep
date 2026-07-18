@@ -2835,9 +2835,6 @@ async function adminMasowoZmienStatusZamowien(){
   toast(`✅ Zmieniono ${zmiany.length} zamówień na „${status}”${bledy?` • błędy synchronizacji: ${bledy}`:""}`);
 }
 function allegroZapiszCache(){
-  // Pełne rejestry pozostają w backendzie i w pamięci bieżącej sesji.
-  // Nie duplikujemy tysięcy ofert, zamówień i wiadomości w localStorage,
-  // ponieważ prowadziło to do przekroczenia limitu pamięci przeglądarki.
   for(const klucz of ["artway_allegro_zamowienia_cache","artway_allegro_oferty_cache","artway_allegro_mapowania_cache","artway_allegro_komunikacja_cache"]){
     try{localStorage.removeItem(klucz);}catch(e){}
   }
@@ -3382,22 +3379,23 @@ async function allegroWystawProdukt(id){
     const publicationAction=allegroTrybPublikacji();
     const preparedDraft=preparation.draft?.draft?{...preparation.draft.draft,publication:{...(preparation.draft.draft.publication||{}),status:publicationAction==="activate"?"ACTIVE":"INACTIVE",republish:true}}:null;
     const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:produktGotowy,...(preparedDraft?{draft:preparedDraft}:{}),options:{stock:allegroStanOfertyProduktu(produktGotowy),publishNow:publicationAction==="activate",publicationAction}},timeout:120000});
+    const remoteStatus=String(d.verification?.status||d.offer?.publication?.status||d.offer?.status||"").toUpperCase();
     allegroOstatniBladWystawienia=null;
     allegroZapiszWynikOperacji(produktGotowy,d);
     allegroPokazKategorieWFormularzu(d.categorySuggestion);
     allegroZapiszAutoUzupelnienia(produktGotowy,d);
-    toast(d.operation?.completed===false?"🟠 Allegro przyjęło operację — kończy przetwarzanie oferty w tle":d.mode==="updated"?`🟠 Zaktualizowano istniejącą ofertę Allegro — ${d.match?.reason||"dopasowanie"}`:"🟠 Utworzono nową ofertę Allegro");
+    toast(remoteStatus==="ACTIVE"?"✅ Oferta zapisana i aktywna w Allegro":`🧾 Oferta zapisana • status Allegro: ${remoteStatus||"weryfikacja w toku"}`);
     if(d.offer?.id){
       const selectedCat=d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||d.categorySuggestion?.selected?.id||form.elements.allegroCategoryId?.value||"";
       produktyEdytowane[id]={...(produktyEdytowane[id]||{}),allegroOfferId:String(d.offer.id),...(selectedCat?{allegroCategoryId:String(selectedCat)}:{}),...(d.catalogMatch?.selected?.id?{allegroProductId:String(d.catalogMatch.selected.id)}:{})};
       zapiszLS("artway_produkty_edytowane",produktyEdytowane);
       allegroZastosujWynikWystawienia(produktGotowy,d);
       await allegroPobierzProwizjeProduktu(id,null,{silent:true}).catch(()=>null);
-      zapiszPolaProduktuLokalnie(id,{allegroAgentPreparationStatus:"published",allegroAgentPublishedAt:new Date().toISOString(),allegroOfferId:String(d.offer.id)},false);
+      zapiszPolaProduktuLokalnie(id,{allegroAgentPreparationStatus:remoteStatus==="ACTIVE"?"published":"draft",allegroAgentPublishedAt:remoteStatus==="ACTIVE"?new Date().toISOString():"",allegroOfferId:String(d.offer.id)},false);
       const cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);
       await allegroWczytajDane(true).catch(()=>{});
       zbudujProdukty();
-      const box=document.getElementById("allegroDraftPreview");if(box)box.innerHTML=`<div class="duplicate-audit-ok allegro-operation-success"><div><b>✅ Oferta ${d.mode==="updated"?"zaktualizowana":"utworzona"}</b><small>ID ${esc(d.offer.id)} • przygotowanie zapisało: ${esc(asortymentEtykietyPol(preparation.savedFields).join(", ")||"kontrola bez zmian")} • kartoteka ${cloudSaved?"zapisana na serwerze":"czeka na automatyczną ponowną próbę"}</small></div><a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(d.offer.id)}" target="_blank" rel="noopener">Otwórz ofertę</a></div>`;
+      const box=document.getElementById("allegroDraftPreview");if(box)box.innerHTML=`<div class="duplicate-audit-ok allegro-operation-success"><div><b>${remoteStatus==="ACTIVE"?"✅ Oferta aktywna":"🧾 Oferta zapisana — "+esc(remoteStatus||"weryfikacja w toku")}</b><small>ID ${esc(d.offer.id)} • opis: ${esc(d.verification?.descriptionSections||0)} sekcji • kartoteka ${cloudSaved?"zapisana na serwerze":"czeka na ponowny zapis"}</small></div><a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(d.offer.id)}" target="_blank" rel="noopener">Otwórz ofertę</a></div>`;
     }
   }catch(e){
     allegroOstatniBladWystawienia=e;
@@ -6520,7 +6518,7 @@ function formularzProduktu(p, tryb){
   const edycja = tryb==="edycja";
   const kontrolaDodawania=edycja?null:produktDodawanieStanKontroli(p,{});
   const maTozsamoscProduktu=!!(p.allegroOfferId||p.allegroProductId||p.gtin||p.ean||p.externalId||p.sku||p.nazwa);
-  const ofertaAllegro=maTozsamoscProduktu?allegroOfertaDlaProduktuSklepu(p):null,ofertaAllegroId=String(p.allegroOfferId||ofertaAllegro?.id||"").trim(),rentownosc=allegroRentownoscProduktu(p),rentownoscSklep=sklepRentownoscProduktu(p),seoDanePodgladu=seoEfektywneDaneProduktu(p);
+  const ofertaAllegro=maTozsamoscProduktu?allegroOfertaDlaProduktuSklepu(p):null,ofertaAllegroId=String(p.allegroOfferId||ofertaAllegro?.id||"").trim(),ofertaAllegroStatus=String(ofertaAllegro?.status||ofertaAllegro?.publication?.status||"").toUpperCase(),domyslnaPublikacjaAllegro=ofertaAllegroStatus==="ACTIVE"?"keep":"activate",rentownosc=allegroRentownoscProduktu(p),rentownoscSklep=sklepRentownoscProduktu(p),seoDanePodgladu=seoEfektywneDaneProduktu(p);
   return `
     <form class="product-editor-form" data-product-id="${esc(p.id||0)}" ${!edycja?`data-product-add-form data-product-duplicate-fingerprint="${esc(kontrolaDodawania.fingerprint)}" oninput="produktDodawanieZmienione(event,this)" onchange="produktDodawanieZmienione(event,this)"`:""} onsubmit="${edycja?`zapiszProduktAdmin(event,${p.id})`:"dodajProdukt(event)"}">
       ${agentAIWdrozenieProduktuHTML(p,edycja)}
@@ -6606,11 +6604,11 @@ function formularzProduktu(p, tryb){
         <div id="allegroCategoryPreview"></div>
         <div class="f-row">
           <div class="f-group"><label>Stan oferty Allegro <small style="font-weight:400;color:var(--muted2)">(ustawienie globalne; nie zmienia magazynu)</small></label><input name="allegroStock" type="number" value="${allegroStanOfertyProduktu()}" readonly><small>Każda oferta otrzymuje ${allegroStanOfertyProduktu()} szt. i automatyczne wznawianie. Zmienisz to w Ustawieniach Allegro.</small></div>
-          <div class="f-group"><label>Publikacja oferty</label><select id="allegroPublicationAction"><option value="keep">Nowa: szkic / istniejąca: zachowaj status</option><option value="activate">Aktywuj po zapisie</option><option value="deactivate">Zapisz jako nieaktywną</option></select></div>
+          <div class="f-group"><label>Co zrobić na Allegro</label><select id="allegroPublicationAction"><option value="activate" ${domyslnaPublikacjaAllegro==="activate"?"selected":""}>Zapisz i aktywuj sprzedaż</option><option value="keep" ${domyslnaPublikacjaAllegro==="keep"?"selected":""}>Tylko zaktualizuj — zachowaj obecny status</option><option value="deactivate">Zapisz i wyłącz sprzedaż</option></select><small>${ofertaAllegroId?`Obecny status Allegro: <b>${esc(ofertaAllegroStatus||"nieznany")}</b>.`:"Produkt nie ma jeszcze oferty — domyślnie zostanie wystawiony aktywnie."} Wynik zostanie ponownie odczytany bezpośrednio z Allegro.</small></div>
         </div>
         <div class="diag-actions">
           ${edycja?`<button class="btn ghost" type="button" onclick="allegroPrzygotujSzkicProduktu(${jsArg(p.id)})">🤖 Przygotuj i zapisz dane do Allegro</button>
-          <button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">${allegroOfertaDlaProduktuSklepu(p)?"🟠 Przygotuj i zaktualizuj ofertę":"🟠 Przygotuj i wystaw produkt"}</button>${ofertaAllegroId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(ofertaAllegroId)}" target="_blank" rel="noopener">↗ Otwórz istniejącą ofertę</a>`:""}`:`<span style="color:var(--muted2);font-size:.85rem">Najpierw zapisz produkt, potem Agent przygotuje i trwale zapisze komplet danych Allegro.</span>`}
+          <button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">${ofertaAllegroStatus==="ACTIVE"?"🟠 Zapisz i zaktualizuj aktywną ofertę":ofertaAllegroId?"🚀 Zapisz i aktywuj ofertę":"🚀 Przygotuj i wystaw produkt"}</button>${ofertaAllegroId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(ofertaAllegroId)}" target="_blank" rel="noopener">↗ Otwórz istniejącą ofertę</a>`:""}`:`<span style="color:var(--muted2);font-size:.85rem">Najpierw zapisz produkt, potem Agent przygotuje i trwale zapisze komplet danych Allegro.</span>`}
         </div>
         <div id="allegroDraftPreview"></div>
         <div id="allegroDescriptionPreview"></div>

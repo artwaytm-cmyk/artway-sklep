@@ -15,3 +15,13 @@ export function allegroPatchZDraftu(draft = {}, options = {}) {
   else out.publication = { republish: true };
   return out;
 }
+
+export function allegroOfferVerification(offer = {}, checked = false) {
+  const status = String(offer?.publication?.status || offer?.status || '').trim().toUpperCase();
+  return {
+    checked: checked === true,
+    status,
+    active: status === 'ACTIVE',
+    descriptionSections: Array.isArray(offer?.description?.sections) ? offer.description.sections.length : 0,
+  };
+}
