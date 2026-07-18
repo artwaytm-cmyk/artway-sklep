@@ -60,6 +60,19 @@ test('GPT-5 nano używa Responses API, ścisłego schematu i pamięci identyczne
   assert.equal(status.usage.inputTokens, 300);
 });
 
+test('dzienny limit Agenta resetuje się o północy czasu polskiego, a nie według UTC', async () => {
+  const repo = memoryRepository({ agent_specialists_state: { config: { dailyLimit: 10, automaticDailyLimit: 10 }, history: [
+    { id: 'before-midnight', source: 'automatic', status: 'completed', createdAt: '2026-07-18T21:59:00.000Z', usage: { inputTokens: 10 } },
+    { id: 'after-midnight', source: 'automatic', status: 'completed', createdAt: '2026-07-18T22:01:00.000Z', usage: { inputTokens: 20 } },
+  ], decisions: [] } });
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-18T22:30:00.000Z'), fetchImpl: async () => new Response('{}', { status: 500 }) });
+  const status = await service.status();
+  assert.equal(status.usage.limitDay, '2026-07-19');
+  assert.equal(status.usage.today, 1);
+  assert.equal(status.usage.automaticToday, 1);
+  assert.equal(status.usage.inputTokens, 20);
+});
+
 test('zatwierdzenie szkicu zapisuje wyłącznie dozwolone pola produktu i jest idempotentne', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 17, nazwa: 'Gra', cena: 20 }] }, rev: 4, updated_at: null } });
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload([{ key: 'title', label: 'Nazwa', value: 'Gra' }, { key: 'short_description', label: 'Opis krótki', value: 'Krótki opis.' }, { key: 'long_description', label: 'Opis pełny', value: '<p>Pełny opis.</p>' }])), { status: 200, headers: { 'content-type': 'application/json' } }) });

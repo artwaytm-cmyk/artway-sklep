@@ -318,7 +318,11 @@ function fingerprint(specialist, instruction, context) {
   return crypto.createHash('sha256').update(JSON.stringify({ specialist, instruction, context })).digest('hex');
 }
 
-function day(value = new Date()) { return value.toISOString().slice(0, 10); }
+function day(value = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(value);
+  const get = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
 
 function responseError(response, payload) {
   const error = new Error(safeError(payload?.error?.message || payload?.message || `OpenAI HTTP ${response.status}`));
@@ -639,7 +643,7 @@ export function createAgentSpecialists({
   }
 
   async function status() {
-    const current = await readState(), today = day(now()), todayRuns = current.history.filter((item) => String(item?.createdAt || '').startsWith(today));
+    const current = await readState(), today = day(now()), todayRuns = current.history.filter((item) => { const created = new Date(item?.createdAt || ''); return Number.isFinite(created.getTime()) && day(created) === today; });
     const decisions = current.decisions.map((item) => item.status === 'snoozed' && activeDecision(item, now()) ? { ...item, status: 'open', snoozedUntil: '' } : item);
     const autonomy = learningAutonomy(current.learning, current.config), productLearning = current.learning.product_content;
     return {
@@ -654,6 +658,9 @@ export function createAgentSpecialists({
         automaticToday: todayRuns.filter((item) => item.source === 'automatic').length,
         inputTokens: todayRuns.reduce((sum, item) => sum + Number(item?.usage?.inputTokens || 0), 0),
         outputTokens: todayRuns.reduce((sum, item) => sum + Number(item?.usage?.outputTokens || 0), 0),
+        dailyLimitReached: todayRuns.length >= current.config.dailyLimit,
+        automaticLimitReached: todayRuns.filter((item) => item.source === 'automatic').length >= current.config.automaticDailyLimit,
+        limitDay: today,
       },
       decisions: decisions.filter((item) => activeDecision(item, now())).slice(0, 80),
       decisionStats: {
@@ -677,7 +684,7 @@ export function createAgentSpecialists({
     if (!clean(apiKey, 500)) throw Object.assign(new Error('Brakuje konfiguracji OpenAI dla GPT-5 nano.'), { code: 'openai_not_configured', status: 503 });
     const current = await readState(), source = raw.source === 'automatic' ? 'automatic' : 'manual';
     if (!current.config.enabled || (source === 'automatic' && !current.config.automaticEnabled)) throw Object.assign(new Error('Ten tryb specjalistów GPT jest wyłączony w ustawieniach.'), { code: 'agent_specialists_disabled', status: 409 });
-    const today = day(now()), todayRuns = current.history.filter((item) => String(item?.createdAt || '').startsWith(today));
+    const today = day(now()), todayRuns = current.history.filter((item) => { const created = new Date(item?.createdAt || ''); return Number.isFinite(created.getTime()) && day(created) === today; });
     if (todayRuns.length >= current.config.dailyLimit || (source === 'automatic' && todayRuns.filter((item) => item.source === 'automatic').length >= current.config.automaticDailyLimit)) {
       throw Object.assign(new Error('Osiągnięto dzienny limit kontrolujący koszt GPT-5 nano.'), { code: 'agent_specialist_daily_limit', status: 429 });
     }
@@ -861,6 +868,7 @@ export function createAgentSpecialists({
     }).filter((item) => !item.editorial.current && !item.editorial.reviewedSameInput)
       .sort((a, b) => b.priority - a.priority || String(b.product.createdAt || b.product.dataDodania || '').localeCompare(String(a.product.createdAt || a.product.dataDodania || '')));
     const prepared = [], applied = [], decisionResults = [], activeFingerprints = new Set(), autonomy = learningAutonomy(current.learning, current.config);
+    let limitReached = false;
 
     const unresolvedCommunication = [
       ...(Array.isArray(communications.threads) ? communications.threads.map((item) => ({ type: 'thread', item })) : []),
@@ -880,7 +888,7 @@ export function createAgentSpecialists({
           draft = await run({ specialist: 'customer_reply', source: 'automatic', instruction: 'Przeanalizuj całą przekazaną rozmowę i przygotuj wyłącznie szkic odpowiedzi. Nie wysyłaj go. Nie obiecuj działań niepotwierdzonych w faktach.', context: { conversation: communicationFacts(item, type) }, target }, { source: 'background-agent' });
           prepared.push({ id: draft.id, type: 'communication', targetId: target.communicationId, status: 'prepared' }); availableRuns -= 1; communicationRuns -= 1;
         } catch (error) {
-          if (error?.code === 'agent_specialist_daily_limit') availableRuns = 0;
+          if (error?.code === 'agent_specialist_daily_limit') { availableRuns = 0; limitReached = true; }
           else prepared.push({ type: 'communication', targetId: target.communicationId, status: 'error', error: safeError(error?.message || error) });
         }
       }
@@ -905,7 +913,7 @@ export function createAgentSpecialists({
           decisionResults.push(decision); prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'needs_decision' });
         }
       } catch (error) {
-        if (error?.code === 'agent_specialist_daily_limit') break;
+        if (error?.code === 'agent_specialist_daily_limit') { limitReached = true; break; }
         prepared.push({ productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'error', error: safeError(error?.message || error) });
       }
     }
@@ -936,7 +944,7 @@ export function createAgentSpecialists({
 
     const completedAt = now().toISOString(), readyBefore = editorialRows.filter((item) => item.current).length;
     const readyAfter = Math.min(products.length, readyBefore + applied.length), reviewAfter = Math.min(products.length - readyAfter, editorialRows.filter((item) => item.reviewedSameInput).length + prepared.filter((item) => item.status === 'needs_decision').length);
-    const lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, productsChecked: products.length, autonomy, editorialProgress: { total: products.length, ready: readyAfter, pending: Math.max(0, products.length - readyAfter - reviewAfter), review: reviewAfter, selectedThisCycle: candidates.length, processedThisCycle: prepared.filter((item) => item.productId).length }, status: prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
+    const lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, productsChecked: products.length, autonomy, limitReached, limitDay: day(now()), editorialProgress: { total: products.length, ready: readyAfter, pending: Math.max(0, products.length - readyAfter - reviewAfter), review: reviewAfter, selectedThisCycle: candidates.length, processedThisCycle: prepared.filter((item) => item.productId).length }, status: limitReached ? 'limit_reached' : prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
     await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
       const previous = state(value), retentionCutoff = now().getTime() - previous.config.decisionRetentionDays * 24 * 60 * 60_000;
       const decisions = previous.decisions.map((item) => {
@@ -946,7 +954,7 @@ export function createAgentSpecialists({
       return { ...previous, decisions, lastCycle, updatedAt: completedAt };
     });
     const meaningful = prepared.length || applied.length || decisionResults.length;
-    return { skipped: !meaningful, reason: meaningful ? '' : 'no_candidates', prepared, applied, decisions: decisionResults.map((item) => ({ id: item.id, kind: item.kind, risk: item.risk })), lastCycle };
+    return { skipped: !meaningful, reason: meaningful ? '' : limitReached ? 'daily_limit' : 'no_candidates', prepared, applied, decisions: decisionResults.map((item) => ({ id: item.id, kind: item.kind, risk: item.risk })), lastCycle };
   }
 
   return Object.freeze({ status, configure, run, applyProductDraft, updateDecision, prepareProductProposal, automaticCycle, specialists: SPECIALISTS });
