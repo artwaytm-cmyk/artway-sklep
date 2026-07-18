@@ -1,4 +1,22 @@
 /* Ustawienia integracji Allegro — mapowanie, harmonogram i automatyzacje. */
+async function allegroZapiszDaneAplikacji(event){
+  event?.preventDefault();const form=event?.currentTarget,button=form?.querySelector("button[type=submit]");
+  const clientId=String(form?.elements?.clientId?.value||"").trim(),clientSecret=String(form?.elements?.clientSecret?.value||"").trim();
+  if(!clientId||!clientSecret){toast("Wpisz pełny Client ID i Client Secret");return false;}
+  if(button){button.disabled=true;button.textContent="⏳ Sprawdzam w Allegro…";}
+  try{
+    const data=await chmura("allegro-credentials",{method:"POST",body:{clientId,clientSecret,environment:"production"},timeout:30000});
+    form.reset();allegroStan={...allegroStan,...(data.allegro||{}),credentialsRedacted:false,credentialsInvalid:false,sprawdzono:true};
+    toast(data.refreshed?"✅ Dane aplikacji sprawdzone — połączenie Allegro działa":"✅ Dane aplikacji sprawdzone — dokończ jednorazowe połączenie konta");
+    if(data.requiresOAuth)setTimeout(()=>allegroPolacz(),300);else{await allegroWczytajDane(true,true,"config");renderuj();}
+  }catch(error){toast("⚠️ Allegro: "+(error?.message||error));}
+  finally{if(button){button.disabled=false;button.textContent="🔐 Sprawdź i zapisz bezpiecznie";}}
+  return false;
+}
+function allegroNaprawaDanychAplikacjiHTML(){
+  if(!allegroStan.credentialsRedacted&&!allegroStan.credentialsInvalid)return "";
+  return `<section class="allegro-credential-repair"><header><span>🔐</span><div><small>Naprawa połączenia • dane tylko na serwerze</small><h3>Wpisz ponownie pełne dane aplikacji Allegro</h3><p>Wcześniej do konfiguracji trafiły zamaskowane wartości z gwiazdkami. Nie są prawdziwym Client ID ani Client Secret, dlatego Allegro zwracało <code>invalid_client</code>. Agent AI i GPT‑5 nano działają prawidłowo.</p></div></header><form autocomplete="off" onsubmit="return allegroZapiszDaneAplikacji(event)"><label>Client ID<input name="clientId" required minlength="12" autocomplete="off" spellcheck="false" placeholder="Pełna wartość z aplikacji Allegro"></label><label>Client Secret<input name="clientSecret" type="password" required minlength="12" autocomplete="new-password" spellcheck="false" placeholder="Pełna wartość — bez gwiazdek"></label><button class="btn" type="submit">🔐 Sprawdź i zapisz bezpiecznie</button></form><footer><span>✓ Dane są najpierw weryfikowane bezpośrednio w OAuth Allegro</span><span>✓ Sekret nie trafia do przeglądarki, bazy sklepu ani repozytorium</span><span>✓ Zamaskowana wartość nigdy więcej nie nadpisze sejfu</span></footer></section>`;
+}
 function allegroUstawieniaPanelHTML(){
   const offerStock=allegroStanOfertyProduktu(),audit=Object.values(allegroStan.offerDefaultsAudit?.items||{}),auditOpen=audit.filter(x=>!x.stockUpdated||!x.republishUpdated).length;
   const settings={autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autonomousAgentMinutes:15,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,...(allegroStan.offerSettings||{})};
@@ -10,6 +28,7 @@ function allegroUstawieniaPanelHTML(){
       <div><span class="order-pro-label">Allegro API</span><h2>⚙️ Ustawienia integracji</h2><p class="order-detail-lead">Jedno miejsce do ustawienia automatycznego mapowania, rytmu synchronizacji, aktualizacji ofert i domyślnych danych.</p></div>
       <div class="diag-actions"><button class="btn" type="button" onclick="allegroPolacz()">🔐 Połącz ponownie</button><button class="btn ghost" type="button" onclick="allegroWczytajDane(true)">Sprawdź połączenie</button></div>
     </div>
+    ${allegroNaprawaDanychAplikacjiHTML()}
     <div class="orders-stat-grid">
       <div class="order-stat-card ${allegroStan.configured?"money":"hot"}"><span>🔧</span><b>${allegroStan.configured?"OK":"BRAK"}</b><small>konfiguracja aplikacji</small></div>
       <div class="order-stat-card ${allegroStan.connected?"money":"hot"}"><span>🔐</span><b>${allegroStan.connected?"TAK":"NIE"}</b><small>autoryzacja OAuth</small></div>

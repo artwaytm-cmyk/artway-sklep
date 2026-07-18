@@ -1659,19 +1659,20 @@ function agentAIRuntimeCzas(value=""){
   return new Date(time).toLocaleString("pl-PL");
 }
 function agentAIRuntimePanelHTML(){
-  const state=agentAIRuntime,r=state.runtime||{},worker=r.worker||{},providers=r.providers||{},queue=r.queue||{},counts=queue.counts||{},current=r.currentRun,last=r.lastRun,activity=Array.isArray(r.activity)?r.activity:[],warnings=Array.isArray(r.integrationWarnings)?r.integrationWarnings:[];
+  const state=agentAIRuntime,r=state.runtime||{},worker=r.worker||{},providers=r.providers||{},queue=r.queue||{},counts=queue.counts||{},current=r.currentRun,last=r.lastRun,activity=Array.isArray(r.activity)?r.activity:[],rawWarnings=Array.isArray(r.integrationWarnings)?r.integrationWarnings:[];
+  const warnings=[...new Map(rawWarnings.map(item=>[`${item.kind||"system"}:${item.error||item.label}`,item])).values()],aiWarnings=warnings.filter(item=>item.kind==="ai"),externalWarnings=warnings.filter(item=>item.kind!=="ai");
   if(state.loading&&!state.loaded)return `<section class="panel agent-runtime-shell"><div class="agent-runtime-loading"><i></i><div><b>Łączę pulpit z procesem wykonawczym…</b><small>Pobieram kolejkę, ostatni cykl i stan dostawców AI.</small></div></div></section>`;
   if(state.error&&!state.runtime)return `<section class="panel agent-runtime-shell"><div class="backend-note warn"><b>Nie udało się pobrać telemetrii Agenta.</b><p>${esc(state.error)}</p><button class="btn ghost" onclick="agentAIRuntimePobierz(false)">Ponów kontrolę</button></div></section>`;
-  const stateMeta={online:["🟢","Agent działa","Wszystkie podstawowe procesy odpowiadają."],working:["⚙️","Agent właśnie pracuje",current?.summary||"Trwa automatyczny cykl."],degraded:["🟠","Agent działa z ostrzeżeniem","Jedna z integracji zewnętrznych wymaga uwagi."],stale:["🟡","Agent czeka na następny cykl","Brakuje świeżego zakończonego cyklu; proces wykonawczy pozostaje połączony."],offline:["🔴","Agent wykonawczy offline","Proces nie wysłał aktualnego sygnału pracy."]}[r.state]||["⚪","Sprawdzam Agenta","Oczekiwanie na pierwszy sygnał procesu."];
+  const stateMeta={online:["🟢","Agent działa","Wszystkie podstawowe procesy odpowiadają."],working:["⚙️","Agent właśnie pracuje",current?.summary||"Trwa automatyczny cykl."],degraded:["🟠",aiWarnings.length?"Agent AI wymaga kontroli":"Agent AI działa prawidłowo",aiWarnings.length?"Dostawca AI zgłosił błąd podczas ostatniego zadania.":"Ostrzeżenie dotyczy wyłącznie zewnętrznej integracji sprzedażowej."],stale:["🟡","Agent czeka na następny cykl","Brakuje świeżego zakończonego cyklu; proces wykonawczy pozostaje połączony."],offline:["🔴","Agent wykonawczy offline","Proces nie wysłał aktualnego sygnału pracy."]}[r.state]||["⚪","Sprawdzam Agenta","Oczekiwanie na pierwszy sygnał procesu."];
   const providerCards=[
     ["codex","⌘","Codex planner","Rozumienie niejednoznacznych poleceń i bezpieczny plan JSON"],
     ["openai","✦","OpenAI Responses API","Role: operacje, katalog, magazyn, komunikacja i zgodność"],
     ["anthropic","◇","Claude — rezerwa","Opcjonalny drugi dostawca do wybranych treści"]
-  ].map(([id,icon,label,detail])=>{const p=providers[id]||{},ready=p.connected||p.configured,status=p.connected?"połączony":p.configured?"skonfigurowany":"brak konfiguracji";return `<article class="${ready?"ready":"attention"}"><span>${icon}</span><div><b>${label}</b><small>${esc(detail)}</small><em>${esc(p.model||"model automatyczny")} • ${status}${p.lastCheckedAt?` • kontrola ${esc(agentAIRuntimeCzas(p.lastCheckedAt))}`:""}</em>${p.error?`<p>${esc(p.error)}</p>`:""}</div><i></i></article>`;}).join("");
+  ].map(([id,icon,label,detail])=>{const p=providers[id]||{},ready=p.connected===true,configured=p.configured===true,status=ready?"potwierdzony działającym zadaniem":configured?"skonfigurowany — czeka na kontrolę":"brak konfiguracji";return `<article class="${ready?"ready":configured?"configured":"attention"}"><span>${icon}</span><div><b>${label}</b><small>${esc(detail)}</small><em>${esc(p.model||"model automatyczny")} • ${status}${p.lastSuccessAt?` • ostatni sukces ${esc(agentAIRuntimeCzas(p.lastSuccessAt))}`:p.lastCheckedAt?` • kontrola ${esc(agentAIRuntimeCzas(p.lastCheckedAt))}`:""}</em>${p.error?`<p>${esc(p.error)}</p>`:""}</div><i></i></article>`;}).join("");
   const steps=(current?.steps||last?.steps||[]),run=current||last,done=steps.filter(x=>["completed","skipped"].includes(x.status)).length,progress=steps.length?Math.round(done/steps.length*100):0;
   return `<section class="agent-runtime-dashboard">
     <div class="panel agent-runtime-status ${esc(r.state||"unknown")}"><div class="agent-runtime-state"><span>${stateMeta[0]}</span><div><small>RZECZYWISTY STAN PROCESU</small><h2>${stateMeta[1]}</h2><p>${esc(stateMeta[2])}</p></div></div><div class="agent-runtime-now"><span><small>Ostatni kontakt</small><b>${esc(agentAIRuntimeCzas(worker.lastSeenAt))}</b></span><span><small>Następny cykl</small><b>${r.schedule?.nextAt?esc(new Date(r.schedule.nextAt).toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})):"co 15 min"}</b></span><button class="btn ghost" onclick="agentAIRuntimePobierz(false)">${state.loading?"⏳":"↻"} Odśwież</button></div></div>
-    ${warnings.length?`<div class="panel agent-runtime-warning"><span>⚠️</span><div><b>${warnings.length} integracje wymagają uwagi — Agent nadal działa</b><p>${warnings.map(x=>`${x.label}: ${x.error}`).map(esc).join(" • ")}</p></div><a class="btn" href="#/admin/allegro/ustawienia">Otwórz ustawienia</a></div>`:""}
+    ${warnings.length?`<div class="panel agent-runtime-warning ${aiWarnings.length?"is-ai-warning":"is-external-warning"}"><span>${aiWarnings.length?"⚠️":"🔌"}</span><div><b>${aiWarnings.length?`${warnings.length} obszarów wymaga kontroli Agenta`:`Agent AI działa • ${externalWarnings.length} połączenie zewnętrzne wymaga naprawy`}</b><p>${externalWarnings.length?`Allegro: ${esc(externalWarnings[0].error||externalWarnings[0].label)}${aiWarnings.length?" • ":""}`:""}${aiWarnings.map(x=>`${esc(x.label)}: ${esc(x.error)}`).join(" • ")}</p>${!aiWarnings.length?`<small>GPT‑5 nano i proces wykonawczy są aktywne. Do czasu naprawy nie są wykonywane wyłącznie operacje wymagające API Allegro.</small>`:""}</div><a class="btn" href="${aiWarnings.length?"#/admin/agent-ai/specjalisci":"#/admin/allegro/ustawienia"}">${aiWarnings.length?"Sprawdź AI":"Napraw Allegro"}</a></div>`:""}
     <div class="agent-runtime-grid"><section class="panel agent-runtime-run"><div class="order-section-head"><div><span class="order-pro-label">${current?"Na żywo":"Ostatni cykl"}</span><h2>${current?"⚙️ Co Agent robi teraz":"✅ Ostatnie wykonanie automatyczne"}</h2><p class="order-detail-lead">${run?`${esc(run.summary||"")} • ${esc(agentAIRuntimeCzas(run.completedAt||run.startedAt))}`:"Historia pojawi się po pierwszym cyklu serwera."}</p></div><span class="lvl ${current?"lvl-info":warnings.length?"lvl-ostrzezenie":"lvl-ok"}">${current?"w toku":last?.status||"oczekuje"}</span></div>${run?`<div class="agent-runtime-progress"><div><b>${done} / ${steps.length} etapów</b><small>${progress}%</small></div><i><span style="width:${progress}%"></span></i></div><div class="agent-runtime-steps">${steps.map(step=>`<article class="${esc(step.status)}"><span>${step.status==="running"?"⏳":step.status==="completed"?"✓":step.status==="skipped"?"—":step.status==="warning"?"!":"×"}</span><div><b>${esc(step.label||step.id)}</b><small>${esc(step.error||step.detail||"Oczekuje na wykonanie")}</small></div><em>${step.durationMs?`${Math.max(1,Math.round(step.durationMs/1000))} s`:""}</em></article>`).join("")}</div>`:`<div class="agent-ops-empty">Agent czeka na pierwszy cykl zapisany w nowym rejestrze.</div>`}</section>
       <aside class="panel agent-runtime-queue"><div class="order-section-head"><div><span class="order-pro-label">Kolejka poleceń</span><h2>🧠 Codex + GPT Agent</h2></div><strong>${esc(queue.active||0)}</strong></div><div class="agent-runtime-queue-stats"><span><b>${esc(counts.queued||0)}</b><small>oczekuje</small></span><span><b>${esc((counts.processing||0)+(counts.delivering||0))}</b><small>wykonywane</small></span><span><b>${esc(counts.completed||0)}</b><small>wykonane</small></span><span><b>${esc(counts.failed||0)}</b><small>błędy</small></span></div><div class="agent-runtime-worker"><span>${worker.currentTask?"⚙️":"✓"}</span><div><b>${esc(worker.currentTask||"Gotowy na polecenie")}</b><small>${worker.currentTaskStartedAt?`od ${esc(agentAIRuntimeCzas(worker.currentTaskStartedAt))}`:`${esc(worker.completedJobs||0)} wykonanych • ${esc(worker.failedJobs||0)} nieudanych`}</small></div></div><a class="btn" href="#/admin/agent-ai/komendy">Wydaj polecenie</a></aside></div>
     <section class="panel agent-runtime-providers"><div class="order-section-head"><div><span class="order-pro-label">Kontrolowany routing AI</span><h2>Połączenia i role Agenta</h2><p class="order-detail-lead">Parser sklepu wykonuje pewne operacje lokalnie. Codex porządkuje niejednoznaczne polecenia, a OpenAI przygotowuje odpowiedź w dobranej roli. Model nigdy nie zapisuje danych bez warstwy reguł i potwierdzenia.</p></div></div><div>${providerCards}</div></section>
@@ -2775,6 +2776,7 @@ async function allegroAutomapujOfertyLegacy(){
 }
 function allegroStatusHTML(){
   if(!allegroStan.sprawdzono && allegroStan.ladowanie) return `<span class="lvl lvl-info">sprawdzam API</span>`;
+  if(allegroStan.credentialsRedacted) return `<span class="lvl lvl-bad">zapisano maskę zamiast danych</span>`;
   if(allegroStan.credentialsInvalid) return `<span class="lvl lvl-bad">błędne dane aplikacji</span>`;
   if(allegroStan.authError) return `<span class="lvl lvl-bad">połączenie wymaga naprawy</span>`;
   if(allegroStan.connected&&allegroStan.requiresReauth) return `<span class="lvl lvl-ostrzezenie">połączone — brak części uprawnień</span>`;
@@ -2842,6 +2844,7 @@ async function allegroWczytajDane(cicho=false,odswiezWidok=true,scope="all"){
   finally{if(allegroDaneObietnice.get(zakres)===zadanie)allegroDaneObietnice.delete(zakres);}
 }
 async function allegroPolacz(){
+  if(allegroStan.credentialsRedacted){location.hash="#/admin/allegro/ustawienia";toast("Najpierw wpisz pełny Client ID i Client Secret w bezpiecznym sejfie Allegro");return;}
   try{
     const d=await chmura("allegro-auth-url",{timeout:12000});
     if(!d.url) throw new Error("Serwer nie zwrócił linku autoryzacji Allegro");
@@ -5033,6 +5036,24 @@ function widokAdminKlienci(sekcja="lista"){
 }
 
 /* Ustawienia integracji Allegro — mapowanie, harmonogram i automatyzacje. */
+async function allegroZapiszDaneAplikacji(event){
+  event?.preventDefault();const form=event?.currentTarget,button=form?.querySelector("button[type=submit]");
+  const clientId=String(form?.elements?.clientId?.value||"").trim(),clientSecret=String(form?.elements?.clientSecret?.value||"").trim();
+  if(!clientId||!clientSecret){toast("Wpisz pełny Client ID i Client Secret");return false;}
+  if(button){button.disabled=true;button.textContent="⏳ Sprawdzam w Allegro…";}
+  try{
+    const data=await chmura("allegro-credentials",{method:"POST",body:{clientId,clientSecret,environment:"production"},timeout:30000});
+    form.reset();allegroStan={...allegroStan,...(data.allegro||{}),credentialsRedacted:false,credentialsInvalid:false,sprawdzono:true};
+    toast(data.refreshed?"✅ Dane aplikacji sprawdzone — połączenie Allegro działa":"✅ Dane aplikacji sprawdzone — dokończ jednorazowe połączenie konta");
+    if(data.requiresOAuth)setTimeout(()=>allegroPolacz(),300);else{await allegroWczytajDane(true,true,"config");renderuj();}
+  }catch(error){toast("⚠️ Allegro: "+(error?.message||error));}
+  finally{if(button){button.disabled=false;button.textContent="🔐 Sprawdź i zapisz bezpiecznie";}}
+  return false;
+}
+function allegroNaprawaDanychAplikacjiHTML(){
+  if(!allegroStan.credentialsRedacted&&!allegroStan.credentialsInvalid)return "";
+  return `<section class="allegro-credential-repair"><header><span>🔐</span><div><small>Naprawa połączenia • dane tylko na serwerze</small><h3>Wpisz ponownie pełne dane aplikacji Allegro</h3><p>Wcześniej do konfiguracji trafiły zamaskowane wartości z gwiazdkami. Nie są prawdziwym Client ID ani Client Secret, dlatego Allegro zwracało <code>invalid_client</code>. Agent AI i GPT‑5 nano działają prawidłowo.</p></div></header><form autocomplete="off" onsubmit="return allegroZapiszDaneAplikacji(event)"><label>Client ID<input name="clientId" required minlength="12" autocomplete="off" spellcheck="false" placeholder="Pełna wartość z aplikacji Allegro"></label><label>Client Secret<input name="clientSecret" type="password" required minlength="12" autocomplete="new-password" spellcheck="false" placeholder="Pełna wartość — bez gwiazdek"></label><button class="btn" type="submit">🔐 Sprawdź i zapisz bezpiecznie</button></form><footer><span>✓ Dane są najpierw weryfikowane bezpośrednio w OAuth Allegro</span><span>✓ Sekret nie trafia do przeglądarki, bazy sklepu ani repozytorium</span><span>✓ Zamaskowana wartość nigdy więcej nie nadpisze sejfu</span></footer></section>`;
+}
 function allegroUstawieniaPanelHTML(){
   const offerStock=allegroStanOfertyProduktu(),audit=Object.values(allegroStan.offerDefaultsAudit?.items||{}),auditOpen=audit.filter(x=>!x.stockUpdated||!x.republishUpdated).length;
   const settings={autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autonomousAgentMinutes:15,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,...(allegroStan.offerSettings||{})};
@@ -5044,6 +5065,7 @@ function allegroUstawieniaPanelHTML(){
       <div><span class="order-pro-label">Allegro API</span><h2>⚙️ Ustawienia integracji</h2><p class="order-detail-lead">Jedno miejsce do ustawienia automatycznego mapowania, rytmu synchronizacji, aktualizacji ofert i domyślnych danych.</p></div>
       <div class="diag-actions"><button class="btn" type="button" onclick="allegroPolacz()">🔐 Połącz ponownie</button><button class="btn ghost" type="button" onclick="allegroWczytajDane(true)">Sprawdź połączenie</button></div>
     </div>
+    ${allegroNaprawaDanychAplikacjiHTML()}
     <div class="orders-stat-grid">
       <div class="order-stat-card ${allegroStan.configured?"money":"hot"}"><span>🔧</span><b>${allegroStan.configured?"OK":"BRAK"}</b><small>konfiguracja aplikacji</small></div>
       <div class="order-stat-card ${allegroStan.connected?"money":"hot"}"><span>🔐</span><b>${allegroStan.connected?"TAK":"NIE"}</b><small>autoryzacja OAuth</small></div>

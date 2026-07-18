@@ -121,6 +121,7 @@ async function allegroAutomapujOfertyLegacy(){
 }
 function allegroStatusHTML(){
   if(!allegroStan.sprawdzono && allegroStan.ladowanie) return `<span class="lvl lvl-info">sprawdzam API</span>`;
+  if(allegroStan.credentialsRedacted) return `<span class="lvl lvl-bad">zapisano maskę zamiast danych</span>`;
   if(allegroStan.credentialsInvalid) return `<span class="lvl lvl-bad">błędne dane aplikacji</span>`;
   if(allegroStan.authError) return `<span class="lvl lvl-bad">połączenie wymaga naprawy</span>`;
   if(allegroStan.connected&&allegroStan.requiresReauth) return `<span class="lvl lvl-ostrzezenie">połączone — brak części uprawnień</span>`;
@@ -188,6 +189,7 @@ async function allegroWczytajDane(cicho=false,odswiezWidok=true,scope="all"){
   finally{if(allegroDaneObietnice.get(zakres)===zadanie)allegroDaneObietnice.delete(zakres);}
 }
 async function allegroPolacz(){
+  if(allegroStan.credentialsRedacted){location.hash="#/admin/allegro/ustawienia";toast("Najpierw wpisz pełny Client ID i Client Secret w bezpiecznym sejfie Allegro");return;}
   try{
     const d=await chmura("allegro-auth-url",{timeout:12000});
     if(!d.url) throw new Error("Serwer nie zwrócił linku autoryzacji Allegro");

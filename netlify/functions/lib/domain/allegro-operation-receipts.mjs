@@ -12,6 +12,13 @@ function operationError(message, code, status = 409) {
   return error;
 }
 
+export function allegroCredentialLooksMasked(value = '') {
+  const credential = String(value || '').trim();
+  return !credential
+    || /[*•●]{3,}/u.test(credential)
+    || /^(?:masked|redacted|ukryty|zamaskowan|hidden|placeholder)(?:[-_: ]|$)/i.test(credential);
+}
+
 export function buildAllegroConnectionStatus({ configuration, auth = {}, requiredScope = '', recommendedScope = '', text = safeText, nowMs = Date.now() }) {
   const required = String(requiredScope || '').split(/\s+/).filter(Boolean);
   const authorized = String(auth?.scope || '').split(/\s+/).filter(Boolean);
@@ -23,6 +30,7 @@ export function buildAllegroConnectionStatus({ configuration, auth = {}, require
   const connected = tokenFresh || (!!auth?.refresh_token && !blockingAuthError);
   return {
     configured: configuration.configured,
+    credentialsRedacted: configuration.credentialsRedacted === true,
     connected,
     connectionHealthy: connected && !authErrorCode,
     credentialsInvalid: authErrorCode === 'invalid_client',
@@ -30,6 +38,7 @@ export function buildAllegroConnectionStatus({ configuration, auth = {}, require
     env: configuration.env,
     redirectUri: configuration.redirectUri,
     missingEnv: configuration.missingEnv,
+    invalidEnv: Array.isArray(configuration.invalidEnv) ? configuration.invalidEnv : [],
     expires_at: auth?.expires_at || null,
     account: auth?.account || '',
     updated_at: auth?.updated_at || null,

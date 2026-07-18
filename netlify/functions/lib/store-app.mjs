@@ -41,7 +41,9 @@ import { createInventoryDecisionService } from './domain/inventory-decisions.mjs
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createAgentRuntime } from './domain/agent-runtime.mjs';
 import { createAgentSpecialists } from './domain/agent-specialists.mjs';
-import { buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester } from './domain/allegro-operation-receipts.mjs';
+import { createAllegroCredentialManager } from './domain/allegro-credential-manager.mjs';
+import { allegroCredentialLooksMasked, buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester } from './domain/allegro-operation-receipts.mjs';
+import { createAllegroCredentialsRoute } from './allegro-credentials-route.mjs';
 import { createAgentSpecialistRoute } from './agent-specialist-route.mjs';
 import { createAiBannerGenerator } from './domain/ai-banner-generator.mjs';
 import { createAiBannerRoute } from './ai-banner-route.mjs';
@@ -142,6 +144,8 @@ const agentSpecialists = createAgentSpecialists({ readVersioned: czytajWersjonow
 const allegroOperationReceipts = createAllegroOperationReceipts({ read: czytaj, write: zapisz, text: tekst });
 const allegroTokenRequest = createAllegroTokenRequester({ configure: allegroKonfiguracja, errorText: bledyAllegroTekst });
 const allegroAccessToken = createAllegroTokenAccess({ configure: allegroKonfiguracja, read: czytaj, write: zapisz, requestToken: allegroTokenRequest, text: tekst });
+const allegroCredentials = createAllegroCredentialManager();
+const allegroCredentialsRoute = createAllegroCredentialsRoute({ manager: allegroCredentials, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, refresh: allegroAccessToken, status: allegroStatus });
 const agentSpecialistRoute = createAgentSpecialistRoute({ service: agentSpecialists, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession });
 const aiBannerGenerator = createAiBannerGenerator({ read: czytaj, write: zapisz, remove: repository.delete });
 const aiBannerRoute = createAiBannerRoute({ generator: aiBannerGenerator, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, configured: () => !!process.env.OPENAI_API_KEY, model: () => process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2' });
@@ -1412,10 +1416,12 @@ function allegroKonfiguracja(req) {
   const scope = [...new Set(`${envScope} ${ALLEGRO_DEFAULT_SCOPE}`.split(/\s+/).map((x) => x.trim()).filter(Boolean))].join(' ');
   const authBaseUrl = env === 'sandbox' ? 'https://allegro.pl.allegrosandbox.pl' : 'https://allegro.pl';
   const apiBaseUrl = env === 'sandbox' ? 'https://api.allegro.pl.allegrosandbox.pl' : 'https://api.allegro.pl';
-  const missingEnv = [];
+  const missingEnv = [], invalidEnv = [];
   if (!clientId) missingEnv.push('ALLEGRO_CLIENT_ID');
   if (!clientSecret) missingEnv.push('ALLEGRO_CLIENT_SECRET');
-  return { env, clientId, clientSecret, redirectUri, scope, authBaseUrl, apiBaseUrl, configured: missingEnv.length === 0, missingEnv };
+  if (clientId && allegroCredentialLooksMasked(clientId)) invalidEnv.push('ALLEGRO_CLIENT_ID');
+  if (clientSecret && allegroCredentialLooksMasked(clientSecret)) invalidEnv.push('ALLEGRO_CLIENT_SECRET');
+  return { env, clientId, clientSecret, redirectUri, scope, authBaseUrl, apiBaseUrl, configured: missingEnv.length === 0 && invalidEnv.length === 0, missingEnv, invalidEnv, credentialsRedacted: invalidEnv.length > 0 };
 }
 async function allegroStatus(req) {
   const c = allegroKonfiguracja(req);
@@ -4830,6 +4836,8 @@ export default async (req) => {
   try {
     const telegramResponse = await telegramRoute(req, url, action);
     if (telegramResponse) return telegramResponse;
+    const allegroCredentialsResponse = await allegroCredentialsRoute(req, url, action);
+    if (allegroCredentialsResponse) return allegroCredentialsResponse;
     const inventoryDecisionResponse = await inventoryDecisionRoute(req, url, action);
     if (inventoryDecisionResponse) return inventoryDecisionResponse;
     const inventoryResponse = await inventoryStockRoute(req, url, action);

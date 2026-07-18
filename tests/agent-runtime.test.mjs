@@ -50,3 +50,19 @@ test('rejestr Agenta nie przechowuje tokenów w błędzie i rozlicza zadania wor
   assert.equal(state.worker.failedJobs, 1);
   assert.equal(state.activity[0].detail.includes('fake12345678'), false);
 });
+
+test('udany etap GPT potwierdza realne połączenie OpenAI i oddziela ostrzeżenie Allegro od AI', async () => {
+  const store = memoryStore();
+  let current = new Date('2026-07-18T09:00:00.000Z');
+  const runtime = createAgentRuntime({ ...store, now: () => current });
+  await runtime.report({ event: 'worker_heartbeat', providers: { openai: { configured: true, connected: false, model: 'gpt-5-nano' } } });
+  await runtime.report({ event: 'cycle_start', runId: 'cycle-ai', steps: [{ id: 'tresci-gpt-nano', label: 'Szkice GPT' }, { id: 'zamowienia', label: 'Zamówienia Allegro' }] });
+  current = new Date('2026-07-18T09:00:02.000Z');
+  await runtime.report({ event: 'cycle_step', runId: 'cycle-ai', step: { id: 'tresci-gpt-nano', status: 'completed', count: 3 } });
+  await runtime.report({ event: 'cycle_step', runId: 'cycle-ai', step: { id: 'zamowienia', status: 'warning', error: 'Autoryzacja Allegro wygasła.' } });
+  await runtime.report({ event: 'cycle_finish', runId: 'cycle-ai', status: 'degraded' });
+  const state = await runtime.status({ workerOnline: true, workerLastSeenAt: current.toISOString() });
+  assert.equal(state.providers.openai.connected, true);
+  assert.equal(state.providers.openai.lastSuccessAt, current.toISOString());
+  assert.equal(state.integrationWarnings[0].kind, 'allegro');
+});

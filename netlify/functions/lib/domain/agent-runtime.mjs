@@ -212,8 +212,23 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
           id: input.step?.id || input.stepId,
           label: input.step?.label || input.label || input.stepId,
         });
+        const openAiStep = step.id === 'tresci-gpt-nano';
+        const openAiFailed = openAiStep && ['warning', 'failed'].includes(step.status);
+        const openAiSucceeded = openAiStep && step.status === 'completed';
+        const providers = openAiStep ? {
+          ...record.providers,
+          openai: safeProvider({
+            ...record.providers.openai,
+            configured: true,
+            connected: openAiSucceeded ? true : openAiFailed ? false : record.providers.openai.connected,
+            lastCheckedAt: step.completedAt || timestamp,
+            lastSuccessAt: openAiSucceeded ? (step.completedAt || timestamp) : record.providers.openai.lastSuccessAt,
+            error: openAiFailed ? (step.error || step.detail) : openAiSucceeded ? '' : record.providers.openai.error,
+          }),
+        } : record.providers;
         return {
           ...record,
+          providers,
           currentRun: upsertStep(record.currentRun, step),
           activity: ['completed', 'warning', 'failed'].includes(step.status)
             ? activity(record, {
@@ -261,7 +276,12 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
     const lastSeenMs = Math.max(runtimeSeen, queueSeen), workerOnline = queue.workerOnline === true || (lastSeenMs > 0 && currentMs - lastSeenMs <= WORKER_ONLINE_MS);
     const lastRun = record.history[0] || null, lastRunMs = Date.parse(lastRun?.completedAt || '') || 0;
     const cycleFresh = lastRunMs > 0 && currentMs - lastRunMs <= CYCLE_FRESH_MS;
-    const integrationWarnings = (lastRun?.steps || []).filter((step) => ['warning', 'failed'].includes(step.status)).map((step) => ({ id: step.id, label: step.label, error: step.error || step.detail }));
+    const integrationWarnings = (lastRun?.steps || []).filter((step) => ['warning', 'failed'].includes(step.status)).map((step) => ({
+      id: step.id,
+      label: step.label,
+      error: step.error || step.detail,
+      kind: ['oferty-lekkie', 'oferty-pelne', 'zamowienia', 'komunikacja'].includes(step.id) ? 'allegro' : step.id === 'tresci-gpt-nano' ? 'ai' : 'system',
+    }));
     const state = !workerOnline ? 'offline' : record.currentRun ? 'working' : !cycleFresh ? 'stale' : integrationWarnings.length ? 'degraded' : 'online';
     return {
       state,

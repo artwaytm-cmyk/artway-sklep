@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester, persistAllegroRefreshFailure } from '../netlify/functions/lib/domain/allegro-operation-receipts.mjs';
+import { allegroCredentialLooksMasked, buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester, persistAllegroRefreshFailure } from '../netlify/functions/lib/domain/allegro-operation-receipts.mjs';
 
 function fixture() {
   const db = new Map();
@@ -59,6 +59,19 @@ test('błąd invalid_client nie jest prezentowany jako aktywne połączenie', ()
   assert.equal(status.connected, false);
   assert.equal(status.credentialsInvalid, true);
   assert.equal(status.requiresReauth, true);
+});
+
+test('zamaskowane dane aplikacji nie są uznawane za prawdziwy sekret', () => {
+  assert.equal(allegroCredentialLooksMasked('****************a123'), true);
+  assert.equal(allegroCredentialLooksMasked('••••••••••••••••a123'), true);
+  assert.equal(allegroCredentialLooksMasked('real-client-id-123456'), false);
+  const status = buildAllegroConnectionStatus({
+    configuration: { configured: false, credentialsRedacted: true, invalidEnv: ['ALLEGRO_CLIENT_ID'], missingEnv: [] },
+    auth: { refresh_token: 'refresh' },
+  });
+  assert.equal(status.configured, false);
+  assert.equal(status.credentialsRedacted, true);
+  assert.deepEqual(status.invalidEnv, ['ALLEGRO_CLIENT_ID']);
 });
 
 test('odrzucone dane aplikacji są zapisane bez tokenów w komunikacie i zwracają czytelny błąd', async () => {
