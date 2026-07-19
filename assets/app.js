@@ -1196,7 +1196,7 @@ function naprawKolizjeIdProduktow(){
   const zajete=new Set();
   let nastepne=najwyzszeIdProduktu()+1, zmiana=false;
   const wezNoweId=()=>{while(zajete.has(nastepne))nastepne++;const id=nastepne;zajete.add(id);nastepne++;return id;};
-  produktyDodane=produktyDodane.map(p=>{
+  const poprawione=produktyDodane.map(p=>{
     const id=Number(p.id);
     if(!Number.isInteger(id)||id<=0||zajete.has(id)){
       const nowe=wezNoweId();
@@ -1208,6 +1208,7 @@ function naprawKolizjeIdProduktow(){
     return p;
   });
   if(!zmiana) return false;
+  produktyDodane=poprawione;
   zapiszLS("artway_produkty_dodane",produktyDodane);
   loguj("ostrzezenie","Naprawiono wyłącznie nieprawidłowe lub powtórzone ID w produktach dodanych. ID usuniętego produktu bazowego może być ponownie użyte przez nowy produkt.");
   return true;
