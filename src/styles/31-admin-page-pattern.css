@@ -1,6 +1,6 @@
 /* Wspólny schemat podstron panelu: wzorem jest Centrum wystawiania Allegro.
    Kolory zawsze pochodzą ze zmiennych sklepu, a moduły zachowują własne akcenty. */
-body.admin-mode .admin-page-pattern{display:grid;gap:14px;min-width:0;--admin-pattern-accent:var(--brand)}
+body.admin-mode .admin-page-pattern{display:grid;gap:14px;min-width:0;--admin-pattern-accent:var(--brand);--admin-pattern-radius:16px;--admin-pattern-radius-small:12px;--admin-pattern-space:14px;--admin-pattern-pad:clamp(14px,2vw,22px);--admin-pattern-soft:color-mix(in srgb,var(--admin-pattern-accent) 5%,var(--panel))}
 body.admin-mode .admin-page-pattern>*{min-width:0}
 body.admin-mode .admin-page-pattern :is(.module-page-stack,.allegro-listing-workspace,.assortment-catalog-workspace,.warehouse-workspace,.agent-ai-workspace,.personalization-workspace){display:grid;gap:14px;min-width:0}
 body.admin-mode .admin-page-pattern :is(.panel,.admin-pattern-surface){border-color:var(--line);box-shadow:0 10px 30px rgba(15,23,42,.05)}
@@ -61,10 +61,67 @@ body.admin-mode .admin-page-pattern .module-page-stack>.panel:not(.module-tabs-p
 body.admin-mode .admin-page-pattern :is(.order-section-head,.section-head,.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection){max-width:100%;flex-wrap:wrap}
 body.admin-mode .admin-page-pattern :is(.admin-search-standard,.module-tabs-panel){margin-top:0}
 
+/* Pełny schemat podstrony. Klasy semantyczne są nadawane centralnie również
+   elementom doładowanym po wejściu na stronę, dzięki czemu nie powstają kolejne
+   lokalne warianty tabel, filtrów, kafelków ani formularzy. */
+body.admin-mode .admin-page-pattern{align-content:start}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-section,.module-page-stack>.panel:not(.module-tabs-panel)){min-width:0;margin:0;border-radius:var(--admin-pattern-radius)}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-section,.module-page-stack>.panel:not(.module-tabs-panel))>:first-child{margin-top:0}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-section,.module-page-stack>.panel:not(.module-tabs-panel))>:last-child{margin-bottom:0}
+
+/* Nawigacja modułu i kontekst strony */
+body.admin-mode .admin-page-pattern :is(.admin-pattern-tabs,.module-tabs-panel,.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs,.agent-module-nav,.agent-module-groups){display:flex;align-items:center;gap:6px;max-width:100%;margin:0;padding:7px;overflow:visible;border:1px solid var(--line);border-radius:var(--admin-pattern-radius);background:var(--panel);box-shadow:0 8px 24px rgba(15,23,42,.04);flex-wrap:wrap}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-tabs,.module-tabs-panel,.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs,.agent-module-nav,.agent-module-groups) :is(a,button){display:inline-flex;align-items:center;justify-content:center;min-width:0;min-height:40px;margin:0;padding:9px 12px;border-radius:10px;white-space:normal;text-align:center;line-height:1.15}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-hero,.allegro-listing-hero,.assortment-catalog-hero,.catalog-quality-hero,.telegram-hub-hero,.dashboard-hero,.agent-command-hero,.warehouse-qr-hero){display:flex;align-items:center;justify-content:space-between;gap:22px;min-width:0;margin:0;padding:var(--admin-pattern-pad);border:1px solid var(--line);border-radius:var(--admin-pattern-radius);background:linear-gradient(135deg,var(--panel),var(--admin-pattern-soft))}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-hero,.allegro-listing-hero,.assortment-catalog-hero,.catalog-quality-hero,.telegram-hub-hero,.dashboard-hero,.agent-command-hero,.warehouse-qr-hero)>:first-child{min-width:0}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-hero,.allegro-listing-hero,.assortment-catalog-hero,.catalog-quality-hero,.telegram-hub-hero,.dashboard-hero,.agent-command-hero,.warehouse-qr-hero) :is(h1,h2){margin:.15rem 0 .35rem;font-size:clamp(1.4rem,2.4vw,1.8rem);letter-spacing:-.025em}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-hero,.allegro-listing-hero,.assortment-catalog-hero,.catalog-quality-hero,.telegram-hub-hero,.dashboard-hero,.agent-command-hero,.warehouse-qr-hero) p{max-width:820px;margin:0;color:var(--muted2);line-height:1.55}
+
+/* Kafelki statystyk i karty informacyjne */
+body.admin-mode .admin-page-pattern :is(.admin-pattern-metrics,.allegro-listing-metrics,.orders-stat-grid,.stat-grid,.info-grid,.supplier-monitor-stats,.telegram-hub-kpis,.product-link-import-stats,.agent-command-metrics,.warehouse-stock-summary,.home-editor-stats){display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;min-width:0;margin:0}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-card,.order-stat-card,.stock-summary-card,.info-card,.diag-card,.setting-box,.order-detail-tile,.order-detail-card,.shipment-manager-card,.producer-summary-card,.warehouse-movement-stat,.ship-stat,.stat){position:relative;min-width:0;min-height:86px;margin:0;padding:14px;border:1px solid var(--line);border-radius:15px;background:var(--panel);box-shadow:0 5px 18px rgba(15,23,42,.035)}
+body.admin-mode .admin-page-pattern button:is(.admin-pattern-card,.order-stat-card,.stock-summary-card,.info-card,.stat){width:100%;text-align:left;cursor:pointer}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-card,.order-stat-card,.stock-summary-card,.info-card,.diag-card,.setting-box,.order-detail-tile,.order-detail-card,.shipment-manager-card,.producer-summary-card,.warehouse-movement-stat,.ship-stat,.stat):is(.active,[aria-pressed="true"]){border-color:var(--admin-pattern-accent);background:var(--admin-pattern-soft);box-shadow:0 0 0 2px color-mix(in srgb,var(--admin-pattern-accent) 9%,transparent)}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-card,.order-stat-card,.stock-summary-card,.info-card,.diag-card,.setting-box,.order-detail-tile,.order-detail-card,.shipment-manager-card,.producer-summary-card,.warehouse-movement-stat,.ship-stat,.stat) :is(h2,h3,h4,p){overflow-wrap:anywhere}
+
+/* Wyszukiwanie, filtrowanie i operacje grupowe */
+body.admin-mode .admin-page-pattern :is(.admin-pattern-filter,.admin-search-standard,.allegro-listing-filter,.orders-toolbar,.warehouse-stock-toolbar,.warehouse-filter-grid,.supplier-monitor-toolbar,.catalog-quality-toolbar,.telegram-conversation-filters,.product-link-import-filters,.diag-toolbar){display:grid;gap:12px;min-width:0;margin:0;padding:14px 16px;border:1px solid var(--line);border-radius:var(--admin-pattern-radius);background:var(--panel)}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-filter,.admin-search-standard,.allegro-listing-filter,.orders-toolbar,.warehouse-stock-toolbar,.warehouse-filter-grid,.supplier-monitor-toolbar,.catalog-quality-toolbar,.telegram-conversation-filters,.product-link-import-filters,.diag-toolbar) :is(.f-grid,.filter-grid,.search-grid){grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:10px}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-toolbar,.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection,.results-bar,.assortment-results-toolbar,.assortment-bulk-editor,.allegro-listing-selection,.warehouse-worktable-actions,.allegro-toolbar,.toolbar){display:flex;align-items:center;gap:8px;max-width:100%;min-width:0;margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:13px;background:var(--bg);flex-wrap:wrap}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-toolbar,.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection,.results-bar,.assortment-results-toolbar,.assortment-bulk-editor,.allegro-listing-selection,.warehouse-worktable-actions,.allegro-toolbar,.toolbar)>:is(input,select){min-width:min(220px,100%);flex:1 1 220px}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-toolbar,.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection,.results-bar,.assortment-results-toolbar,.assortment-bulk-editor,.allegro-listing-selection,.warehouse-worktable-actions,.allegro-toolbar,.toolbar)>.btn{flex:0 1 auto}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-filter,.admin-search-standard,.allegro-listing-filter,.orders-toolbar,.warehouse-stock-toolbar,.warehouse-filter-grid,.supplier-monitor-toolbar,.catalog-quality-toolbar,.telegram-conversation-filters,.product-link-import-filters,.diag-toolbar,form) label{display:grid;gap:6px;min-width:0;color:var(--muted2);font-size:.72rem;font-weight:850;line-height:1.25}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-filter,.admin-search-standard,.allegro-listing-filter,.orders-toolbar,.warehouse-stock-toolbar,.warehouse-filter-grid,.supplier-monitor-toolbar,.catalog-quality-toolbar,.telegram-conversation-filters,.product-link-import-filters,.diag-toolbar,form) :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea){width:100%;max-width:100%;min-height:42px;border-radius:10px}
+body.admin-mode .admin-page-pattern form :is(.f-grid,.form-grid,.settings-grid){grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:12px}
+body.admin-mode .admin-page-pattern form :is(.f-row,.form-actions){display:flex;align-items:end;gap:10px;max-width:100%;flex-wrap:wrap}
+
+/* Tabele mają jeden rytm, nagłówki i zachowanie na małej szerokości. */
+body.admin-mode .admin-page-pattern :is(.admin-pattern-table-wrap,.table-scroll,.warehouse-worktable-wrap,.assortment-table-wrap,.catalog-quality-table-wrap,.product-link-import-table-wrap,.seo-table-wrap,.log-table-wrap){max-width:100%;min-width:0;overflow:auto;border:1px solid var(--line);border-radius:var(--admin-pattern-radius);background:var(--panel);scrollbar-gutter:stable}
+body.admin-mode .admin-page-pattern table{width:100%;max-width:100%;margin:0;border-collapse:separate;border-spacing:0;background:var(--panel)}
+body.admin-mode .admin-page-pattern table th{padding:11px 12px;border:0;border-bottom:1px solid var(--line);background:var(--bg);color:var(--muted2);font-size:.65rem;font-weight:900;line-height:1.25;text-align:left;text-transform:uppercase;letter-spacing:.035em;vertical-align:middle}
+body.admin-mode .admin-page-pattern table td{min-width:0;padding:11px 12px;border:0;border-bottom:1px solid var(--line);line-height:1.4;vertical-align:middle;overflow-wrap:anywhere}
+body.admin-mode .admin-page-pattern table tbody tr:last-child>td{border-bottom:0}
+body.admin-mode .admin-page-pattern table tbody tr:hover>td{background:color-mix(in srgb,var(--admin-pattern-accent) 3%,var(--panel))}
+body.admin-mode .admin-page-pattern table tbody tr:is(.selected,.is-selected)>td{background:var(--admin-pattern-soft)}
+body.admin-mode .admin-page-pattern table :is(input[type="checkbox"],input[type="radio"]){width:18px;height:18px;margin:0}
+
+/* Elementy pomocnicze też są częścią schematu, a nie osobnymi wyjątkami. */
+body.admin-mode .admin-page-pattern :is(.admin-pattern-notice,.backend-note,.pay-note,.duplicate-audit-ok,.allegro-permission-alert,.allegro-info-bottom,.dashboard-all-clear,.warehouse-location-note,.product-link-agent-report){min-width:0;margin:0;padding:13px 15px;border:1px solid var(--line);border-radius:13px;background:var(--bg);line-height:1.55;overflow-wrap:anywhere}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-empty,.empty,.catalog-empty,.assortment-empty,.allegro-listing-empty,.agent-ops-empty,.warehouse-document-empty,.ai-library-empty,.agent-runtime-loading){display:grid;place-items:center;min-height:120px;margin:0;padding:24px;border:1px dashed var(--line);border-radius:var(--admin-pattern-radius);background:var(--bg);color:var(--muted2);text-align:center}
+body.admin-mode .admin-page-pattern :is(.admin-pattern-pagination,.pagination,.allegro-listing-pagination){display:flex;align-items:center;justify-content:center;gap:7px;max-width:100%;margin:0;padding:10px;border:1px solid var(--line);border-radius:13px;background:var(--panel);flex-wrap:wrap}
+body.admin-mode .admin-page-pattern details{min-width:0;margin:0;border:1px solid var(--line);border-radius:13px;background:var(--panel);overflow:hidden}
+body.admin-mode .admin-page-pattern details>summary{display:flex;align-items:center;min-height:44px;padding:11px 14px;cursor:pointer;font-weight:850;line-height:1.3}
+body.admin-mode .admin-page-pattern details[open]>summary{border-bottom:1px solid var(--line);background:var(--bg)}
+body.admin-mode .admin-page-pattern details>*:not(summary){margin-left:14px;margin-right:14px}
+body.admin-mode .admin-page-pattern details>:last-child{margin-bottom:14px}
+
 @media(max-width:900px){
-  body.admin-mode .admin-page-pattern :is(.allegro-listing-hero,.assortment-catalog-hero){align-items:flex-start;flex-direction:column;padding:18px}
+  body.admin-mode .admin-page-pattern :is(.allegro-listing-hero,.assortment-catalog-hero,.admin-pattern-hero){align-items:flex-start;flex-direction:column;padding:18px}
   body.admin-mode .admin-page-pattern :is(.allegro-listing-hero-actions,.assortment-catalog-actions){justify-content:flex-start;max-width:none;width:100%}
   body.admin-mode .admin-page-pattern :is(.allegro-listing-hero-actions,.assortment-catalog-actions)>.btn{flex:1 1 180px}
+  body.admin-mode .admin-page-pattern :is(.admin-pattern-toolbar,.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection,.results-bar,.assortment-results-toolbar,.assortment-bulk-editor,.allegro-listing-selection,.warehouse-worktable-actions,.allegro-toolbar,.toolbar)>.btn{flex:1 1 170px}
+  body.admin-mode .admin-page-pattern :is(.admin-pattern-table-wrap,.table-scroll,.warehouse-worktable-wrap,.assortment-table-wrap,.catalog-quality-table-wrap,.product-link-import-table-wrap,.seo-table-wrap,.log-table-wrap){overflow:visible;border:0;background:transparent}
+  body.admin-mode .admin-page-pattern table.admin-responsive-table tbody>tr{border-radius:14px;box-shadow:0 4px 14px rgba(15,23,42,.04)}
 }
 @media(max-width:620px){
   body.admin-mode .admin-page-pattern{gap:10px}
@@ -73,4 +130,13 @@ body.admin-mode .admin-page-pattern :is(.admin-search-standard,.module-tabs-pane
   body.admin-mode .admin-page-pattern .admin-pattern-surface>.admin-search-standard{margin:10px 10px 0}
   body.admin-mode .admin-page-pattern .admin-pattern-surface>[data-assortment-results]{padding:0 10px 10px}
   body.admin-mode .admin-page-pattern .assortment-sync-note{margin:0 10px 10px}
+  body.admin-mode .admin-page-pattern :is(.admin-pattern-tabs,.module-tabs-panel,.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs,.agent-module-nav,.agent-module-groups){gap:5px;padding:6px}
+  body.admin-mode .admin-page-pattern :is(.admin-pattern-tabs,.module-tabs-panel,.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs,.agent-module-nav,.agent-module-groups) :is(a,button){flex:1 1 135px;padding:8px 9px}
+  body.admin-mode .admin-page-pattern :is(.admin-pattern-filter,.admin-search-standard,.allegro-listing-filter,.orders-toolbar,.warehouse-stock-toolbar,.warehouse-filter-grid,.supplier-monitor-toolbar,.catalog-quality-toolbar,.telegram-conversation-filters,.product-link-import-filters,.diag-toolbar,.admin-pattern-card,.order-stat-card,.stock-summary-card,.info-card,.diag-card,.setting-box,.order-detail-tile,.order-detail-card,.shipment-manager-card,.producer-summary-card,.warehouse-movement-stat,.ship-stat,.stat){padding:12px}
+  body.admin-mode .admin-page-pattern :is(.admin-pattern-toolbar,.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection,.results-bar,.assortment-results-toolbar,.assortment-bulk-editor,.allegro-listing-selection,.warehouse-worktable-actions,.allegro-toolbar,.toolbar){padding:9px}
+  body.admin-mode .admin-page-pattern :is(.admin-pattern-toolbar,.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection,.results-bar,.assortment-results-toolbar,.assortment-bulk-editor,.allegro-listing-selection,.warehouse-worktable-actions,.allegro-toolbar,.toolbar)>:is(.btn,button,input,select){width:100%;flex:1 1 100%}
+  body.admin-mode .admin-page-pattern :is(.admin-pattern-empty,.empty,.catalog-empty,.assortment-empty,.allegro-listing-empty,.agent-ops-empty,.warehouse-document-empty,.ai-library-empty,.agent-runtime-loading){min-height:100px;padding:18px 12px}
+}
+@media(max-width:420px){
+  body.admin-mode .admin-page-pattern :is(.allegro-listing-metrics,.admin-pattern-metrics){grid-template-columns:minmax(0,1fr)}
 }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('cały panel korzysta ze wspólnego schematu podstron bez zmiany kolorystyki sklepu', async () => {
+test('cały panel korzysta z pełnego schematu podstron bez zmiany kolorystyki sklepu', async () => {
   const [shell, catalog, pattern, build] = await Promise.all([
     readFile('src/frontend/07-admin-shipping.js', 'utf8'),
     readFile('src/frontend/12-warehouse-views.js', 'utf8'),
@@ -20,6 +20,16 @@ test('cały panel korzysta ze wspólnego schematu podstron bez zmiany kolorystyk
   assert.match(pattern, /allegro-listing-hero/);
   assert.match(pattern, /assortment-catalog-hero/);
   assert.match(pattern, /@container\(max-width:1280px\)/);
+  assert.match(pattern, /\.admin-pattern-table-wrap/);
+  assert.match(pattern, /\.admin-pattern-card/);
+  assert.match(pattern, /\.admin-pattern-filter/);
+  assert.match(pattern, /\.admin-pattern-toolbar/);
+  assert.match(pattern, /details>summary/);
+  assert.match(pattern, /\.admin-pattern-empty/);
+  assert.match(pattern, /\.admin-pattern-pagination/);
+  assert.match(pattern, /\.orders-stat-grid/);
+  assert.match(pattern, /\.admin-search-standard/);
+  assert.match(pattern, /table tbody tr:hover/);
   assert.match(build, /31-admin-page-pattern\.css/);
 });
 
