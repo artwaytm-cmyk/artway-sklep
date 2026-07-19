@@ -1077,3 +1077,80 @@ body.admin-mode .admin-tresc :is(.telegram-message-stream,.telegram-incident-lis
 @media(max-width:420px){
   body.admin-mode table.admin-responsive-table td{grid-template-columns:minmax(78px,30%) minmax(0,1fr);font-size:.72rem}
 }
+
+/* Wspólny schemat podstron panelu: wzorem jest Centrum wystawiania Allegro.
+   Kolory zawsze pochodzą ze zmiennych sklepu, a moduły zachowują własne akcenty. */
+body.admin-mode .admin-page-pattern{display:grid;gap:14px;min-width:0;--admin-pattern-accent:var(--brand)}
+body.admin-mode .admin-page-pattern>*{min-width:0}
+body.admin-mode .admin-page-pattern :is(.module-page-stack,.allegro-listing-workspace,.assortment-catalog-workspace,.warehouse-workspace,.agent-ai-workspace,.personalization-workspace){display:grid;gap:14px;min-width:0}
+body.admin-mode .admin-page-pattern :is(.panel,.admin-pattern-surface){border-color:var(--line);box-shadow:0 10px 30px rgba(15,23,42,.05)}
+
+/* 1. Kontekst i główne działania */
+body.admin-mode .admin-page-pattern :is(.allegro-listing-hero,.assortment-catalog-hero){display:flex;align-items:center;justify-content:space-between;gap:22px;margin:0;padding:22px 24px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(135deg,var(--panel),color-mix(in srgb,var(--admin-pattern-accent) 5%,var(--panel)))}
+body.admin-mode .admin-page-pattern :is(.allegro-listing-hero,.assortment-catalog-hero)>div:first-child{min-width:0}
+body.admin-mode .admin-page-pattern :is(.allegro-listing-hero,.assortment-catalog-hero) :is(h1,h2){margin:.2rem 0 .35rem;font-size:clamp(1.45rem,2.4vw,1.75rem);letter-spacing:-.025em}
+body.admin-mode .admin-page-pattern :is(.allegro-listing-hero,.assortment-catalog-hero) p{max-width:780px;margin:0;color:var(--muted2);line-height:1.55}
+body.admin-mode .admin-page-pattern :is(.allegro-listing-hero,.assortment-catalog-hero)>div>small{display:block;margin-top:.45rem;color:var(--muted2);font-weight:700}
+body.admin-mode .admin-page-pattern :is(.allegro-listing-hero-actions,.assortment-catalog-actions){display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;max-width:590px}
+
+/* 2. Szybkie widoki i aktywne metryki */
+body.admin-mode .admin-page-pattern :is(.allegro-listing-metrics,.admin-pattern-metrics){display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:0}
+body.admin-mode .admin-page-pattern :is(.allegro-listing-metrics,.admin-pattern-metrics)>:is(button,a,article,div){min-width:0;min-height:86px;border:1px solid var(--line);border-radius:15px;background:var(--panel)}
+body.admin-mode .admin-page-pattern .admin-pattern-metrics .order-stat-card{margin:0;padding:13px 14px;text-align:left}
+body.admin-mode .admin-page-pattern .admin-pattern-metrics .order-stat-card.active{border-color:var(--admin-pattern-accent);background:color-mix(in srgb,var(--admin-pattern-accent) 7%,var(--panel));box-shadow:0 0 0 2px color-mix(in srgb,var(--admin-pattern-accent) 9%,transparent)}
+
+/* 3. Jedna powierzchnia operacyjna: filtry, zaznaczenie, wyniki, paginacja */
+body.admin-mode .admin-page-pattern :is(.admin-pattern-surface,.allegro-listing-catalog){display:grid;gap:0;padding:0;overflow:hidden}
+body.admin-mode .admin-page-pattern .admin-pattern-surface>.assortment-maintenance{margin:14px 16px 0}
+body.admin-mode .admin-page-pattern .admin-pattern-surface>.admin-search-standard{margin:14px 16px 0}
+body.admin-mode .admin-page-pattern .admin-pattern-surface>[data-assortment-results]{min-width:0;padding:0 16px 16px}
+body.admin-mode .admin-page-pattern :is(.assortment-results-toolbar,.allegro-listing-selection){border-radius:13px;background:var(--bg)}
+body.admin-mode .admin-page-pattern .assortment-table-wrap{max-width:100%}
+body.admin-mode .admin-page-pattern :is(.pagination,.allegro-listing-pagination){margin:.65rem 0}
+body.admin-mode .admin-page-pattern .assortment-sync-note{margin:0 16px 16px}
+body.admin-mode .admin-page-pattern .assortment-saved-views{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;margin:0;overflow:visible}
+body.admin-mode .admin-page-pattern .assortment-saved-views button{width:100%;min-width:0}
+
+/* Katalog przechodzi w karty dokładnie według dostępnej szerokości treści,
+   a nie szerokości całego monitora z doliczonym menu bocznym. */
+body.admin-mode .admin-workspace-content{container-type:inline-size}
+@container(max-width:1280px){
+  body.admin-mode .admin-page-pattern .assortment-table-wrap{overflow:visible;border:0;background:transparent}
+  body.admin-mode .admin-page-pattern table.assortment-product-table,
+  body.admin-mode .admin-page-pattern table.assortment-product-table tbody{display:block;width:100%;border:0;background:transparent}
+  body.admin-mode .admin-page-pattern table.assortment-product-table thead{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+  body.admin-mode .admin-page-pattern table.assortment-product-table tbody>tr{position:relative;display:grid;grid-template-columns:minmax(260px,1.35fr) repeat(3,minmax(160px,1fr));gap:0;margin:0 0 10px;padding-left:42px;overflow:hidden;border:1px solid var(--line);border-radius:15px;background:var(--panel);box-shadow:0 4px 14px rgba(15,23,42,.04)}
+  body.admin-mode .admin-page-pattern table.assortment-product-table td{position:static!important;display:grid!important;grid-template-columns:1fr;align-content:start;gap:6px;width:auto!important;min-height:64px;padding:12px!important;border:0!important;border-right:1px solid var(--line)!important;border-bottom:1px solid var(--line)!important;background:transparent!important;text-align:left!important;box-shadow:none!important}
+  body.admin-mode .admin-page-pattern table.assortment-product-table td::before{content:attr(data-label);color:var(--muted2);font-size:.58rem;font-weight:900;text-transform:uppercase;letter-spacing:.04em}
+  body.admin-mode .admin-page-pattern table.assortment-product-table td[data-label=""]{position:absolute!important;top:14px!important;left:13px!important;display:block!important;width:20px!important;min-height:20px;padding:0!important;border:0!important}
+  body.admin-mode .admin-page-pattern table.assortment-product-table td[data-label=""]::before{display:none}
+  body.admin-mode .admin-page-pattern table.assortment-product-table td[data-label="Produkt"]{grid-column:span 2;grid-template-columns:1fr}
+  body.admin-mode .admin-page-pattern table.assortment-product-table td[data-label="Akcje"]{grid-column:span 2}
+  body.admin-mode .admin-page-pattern table.assortment-product-table .assortment-row-actions{display:flex;align-items:center;flex-wrap:wrap;min-width:0}
+  body.admin-mode .admin-page-pattern table.assortment-product-table .assortment-row-actions .btn{width:auto}
+}
+@container(max-width:820px){
+  body.admin-mode .admin-page-pattern table.assortment-product-table tbody>tr{grid-template-columns:minmax(0,1fr);padding-left:38px}
+  body.admin-mode .admin-page-pattern table.assortment-product-table td[data-label="Produkt"],
+  body.admin-mode .admin-page-pattern table.assortment-product-table td[data-label="Akcje"]{grid-column:auto}
+  body.admin-mode .admin-page-pattern table.assortment-product-table td{border-right:0!important}
+}
+
+/* Standard obejmuje pozostałe podstrony: wspólne odstępy, nagłówki i elastyczne działania. */
+body.admin-mode .admin-page-pattern .module-page-stack>.panel:not(.module-tabs-panel){margin:0}
+body.admin-mode .admin-page-pattern :is(.order-section-head,.section-head,.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection){max-width:100%;flex-wrap:wrap}
+body.admin-mode .admin-page-pattern :is(.admin-search-standard,.module-tabs-panel){margin-top:0}
+
+@media(max-width:900px){
+  body.admin-mode .admin-page-pattern :is(.allegro-listing-hero,.assortment-catalog-hero){align-items:flex-start;flex-direction:column;padding:18px}
+  body.admin-mode .admin-page-pattern :is(.allegro-listing-hero-actions,.assortment-catalog-actions){justify-content:flex-start;max-width:none;width:100%}
+  body.admin-mode .admin-page-pattern :is(.allegro-listing-hero-actions,.assortment-catalog-actions)>.btn{flex:1 1 180px}
+}
+@media(max-width:620px){
+  body.admin-mode .admin-page-pattern{gap:10px}
+  body.admin-mode .admin-page-pattern :is(.allegro-listing-metrics,.admin-pattern-metrics){grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  body.admin-mode .admin-page-pattern .admin-pattern-surface>.assortment-maintenance,
+  body.admin-mode .admin-page-pattern .admin-pattern-surface>.admin-search-standard{margin:10px 10px 0}
+  body.admin-mode .admin-page-pattern .admin-pattern-surface>[data-assortment-results]{padding:0 10px 10px}
+  body.admin-mode .admin-page-pattern .assortment-sync-note{margin:0 10px 10px}
+}

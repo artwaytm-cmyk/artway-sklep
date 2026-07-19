@@ -152,7 +152,7 @@ function adminSzkielet(aktywna, tresc){
 	    <div class="admin-tresc">
       ${adminMenuMobilneHTML(aktywna,powiadomienia,kontekst)}
       <header class="admin-workspace-header"><div class="admin-workspace-context"><button class="admin-history-back" type="button" onclick="adminWrocDoPoprzedniejStrony()" ${adminPoprzedniaTrasa()?`title="Wróć do: ${esc(adminPoprzedniaTrasa())}"`:`disabled title="Brak wcześniejszej strony panelu"`} aria-label="Wróć do poprzedniej strony panelu">←</button><span>${kontekst.ikona}</span><div><small>Panel administratora <i>›</i> ${esc(kontekst.grupa)}</small><b>${esc(kontekst.nazwa)}</b><em>${esc(kontekst.podpis||"")}</em></div></div><div class="admin-workspace-actions"><span class="admin-workspace-health"><i class="${licznikOperacyjny?"has-work":"is-clear"}"></i>${licznikOperacyjny?`${licznikOperacyjny} spraw`:"System gotowy"}</span><button class="btn ghost admin-global-scanner" type="button" onclick="if(typeof magazynGlobalnySkanerOtworz==='function')magazynGlobalnySkanerOtworz();else location.hash='#/admin/magazyn/etykiety-qr'">📷 Skaner</button>${typeof pwaPrzyciskInstalacjiHTML==="function"?pwaPrzyciskInstalacjiHTML():""}${aktywna!=="/admin"?`<a class="btn ghost" href="#/admin">📊 Pulpit</a>`:""}<a class="btn ghost" href="#/konto">👤 Konto</a><a class="btn ghost" href="#/">↗ Sklep</a></div></header>
-	      <div class="admin-workspace-content">${tresc}</div>
+	      <div class="admin-workspace-content admin-page-pattern">${tresc}</div>
 	    </div>
 	    ${adminPwaDolneMenuHTML(aktywna,powiadomienia)}
 	  </div>`;

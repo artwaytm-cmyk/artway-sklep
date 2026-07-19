@@ -122,6 +122,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/28-agent-ai-workspace.css',
       'src/styles/29-commerce-catalog-actions.css',
       'src/styles/30-admin-fluid-layout.css',
+      'src/styles/31-admin-page-pattern.css',
     ],
   },
 ]);
