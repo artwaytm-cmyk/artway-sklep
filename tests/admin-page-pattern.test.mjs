@@ -24,7 +24,9 @@ test('cały panel korzysta z pełnego schematu podstron bez zmiany kolorystyki s
   assert.match(pattern, /--admin-pattern-accent:var\(--brand\)/);
   assert.match(pattern, /allegro-listing-hero/);
   assert.match(pattern, /assortment-catalog-hero/);
-  assert.match(pattern, /@container\(max-width:1280px\)/);
+  assert.match(pattern, /@container\(max-width:1180px\)/);
+  assert.match(pattern, /@container\(max-width:820px\)/);
+  assert.match(pattern, /@container\(max-width:520px\)/);
   assert.match(pattern, /\.admin-pattern-table-wrap/);
   assert.match(pattern, /\.admin-pattern-card/);
   assert.match(pattern, /\.admin-pattern-filter/);
@@ -36,7 +38,8 @@ test('cały panel korzysta z pełnego schematu podstron bez zmiany kolorystyki s
   assert.match(pattern, /\.admin-search-standard/);
   assert.match(pattern, /table tbody tr:hover/);
   assert.match(pattern, /\.catalog-product-table-center/);
-  assert.match(pattern, /@container\(min-width:1281px\)/);
+  assert.match(pattern, /grid-template-areas:"product identifiers prices allegro"/);
+  assert.match(pattern, /grid-template-areas:"product" "identifiers" "classification" "prices" "stock" "allegro" "actions"/);
   assert.match(build, /31-admin-page-pattern\.css/);
 });
 
