@@ -56,5 +56,6 @@ test('synchronizacja ofert nie przywraca starego opisu Allegro do edytora produk
   assert.doesNotMatch(mapping, /fields\.opis\s*=/);
   assert.doesNotMatch(mapping, /fields\.opisKrotki\s*=/);
   assert.match(mapping, /sourceMaterial[\s\S]*allegroOfferDescription/);
-  assert.match(mapping, /const latestSettings = await czytaj\('settings'/);
+  assert.match(mapping, /zapiszOperacjeProduktow\(pendingUpdates, now\)/);
+  assert.doesNotMatch(mapping, /zapisz\('settings'/);
 });
