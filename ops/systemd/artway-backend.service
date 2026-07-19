@@ -23,9 +23,11 @@ Environment=DATABASE_URL=postgresql:///artway?host=/var/run/postgresql
 Environment=TELEGRAM_SHARED_MODE=private-room
 ExecStart=/usr/bin/node /srv/artway/shop/server.mjs
 Restart=always
-RestartSec=5s
+RestartSec=2s
 TimeoutStopSec=20s
 KillSignal=SIGTERM
+SyslogIdentifier=artway-backend
+LimitNOFILE=65536
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

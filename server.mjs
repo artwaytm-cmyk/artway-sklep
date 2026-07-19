@@ -6,6 +6,7 @@ import sitemapHandler from './netlify/functions/sitemap.mjs';
 import googleProductsHandler from './netlify/functions/google-products.mjs';
 import { renderStorefrontSeoPage, seoRouteMatches } from './netlify/functions/lib/domain/storefront-seo-renderer.mjs';
 import { handleSeoAnalytics } from './netlify/functions/lib/domain/seo-analytics.mjs';
+import { createResilientServerRuntime } from './src/backend/server-runtime.mjs';
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
@@ -86,5 +87,5 @@ if (isDirectRun) {
   server.requestTimeout = 125_000;
   server.headersTimeout = 130_000;
   server.keepAliveTimeout = 65_000;
-  server.listen(port, host, () => console.log(`Artway VPS API działa na ${host}:${port}`));
+  createResilientServerRuntime({ server, host, port }).start();
 }
