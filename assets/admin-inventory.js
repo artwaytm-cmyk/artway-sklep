@@ -254,7 +254,7 @@ function odswiezMonitoringProducentow(){
   const active=document.activeElement,scrollY=window.scrollY||0,selection=active&&typeof active.selectionStart==="number"?{start:active.selectionStart,end:active.selectionEnd}:null;
   aktualizujWezelStabilnie(current,source,active);
   if(active?.isConnected&&selection&&typeof active.setSelectionRange==="function")try{active.setSelectionRange(selection.start,selection.end);}catch(e){}
-  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY});
+  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY,behavior:"instant"});
   return true;
 }
 function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }
@@ -790,6 +790,34 @@ function widokAdminInfakt(sekcja="pulpit"){
   return adminSzkielet("/admin/infakt",hero+content);
 }
 
+const ASORTYMENT_PARTIA_KART=10;
+let asortymentKartyOczekujace=[],asortymentKartyObserwator=null,asortymentKartyGeneracja=0;
+function asortymentPrzygotujKartyProgresywnie(lista=[]){
+  asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;
+  const generation=++asortymentKartyGeneracja,items=Array.isArray(lista)?lista:[];
+  asortymentKartyOczekujace=items.slice(ASORTYMENT_PARTIA_KART);
+  const first=items.slice(0,ASORTYMENT_PARTIA_KART).join("");
+  if(!asortymentKartyOczekujace.length)return first;
+  setTimeout(()=>asortymentUruchomDoloadowywanieKart(generation),0);
+  return `${first}<div class="assortment-progressive-loader" data-assortment-card-loader data-generation="${generation}"><span><b>Załadowano ${Math.min(ASORTYMENT_PARTIA_KART,items.length)} z ${items.length}</b><small>Kolejne produkty pojawią się automatycznie podczas przewijania.</small></span><button class="btn ghost" type="button" onclick="asortymentDoloadujKarty(${generation})">Pokaż kolejne</button></div>`;
+}
+function asortymentDoloadujKarty(generation=asortymentKartyGeneracja){
+  const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);
+  if(!loader||Number(generation)!==asortymentKartyGeneracja)return false;
+  const batch=asortymentKartyOczekujace.splice(0,ASORTYMENT_PARTIA_KART);
+  if(batch.length)loader.insertAdjacentHTML("beforebegin",batch.join(""));
+  if(!asortymentKartyOczekujace.length){asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;loader.remove();return true;}
+  const loaded=document.querySelectorAll(".catalog-product-list .catalog-product-card").length,total=loaded+asortymentKartyOczekujace.length;
+  const label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${loaded} z ${total}`;
+  return true;
+}
+function asortymentUruchomDoloadowywanieKart(generation=asortymentKartyGeneracja){
+  const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);if(!loader)return;
+  if(typeof IntersectionObserver!=="function")return;
+  asortymentKartyObserwator?.disconnect();
+  asortymentKartyObserwator=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))asortymentDoloadujKarty(generation);},{rootMargin:"500px 0px"});
+  asortymentKartyObserwator.observe(loader);
+}
 function magazynKontekstPodstronyHTML(aktywna="pulpit",u={}){
   const pages={
     pulpit:{icon:"📊",eyebrow:"Centrum operacyjne magazynu",title:u.nazwa||"Magazyn główny",description:"Priorytety na dziś, braki do aktywnych zamówień, dostępność producentów i trasa kompletacji w jednym miejscu."},
@@ -1114,6 +1142,7 @@ function widokAdminProdukty(){
   if(cenaAllegroOdAdminProduktow||cenaAllegroDoAdminProduktow)aktywneFiltry.push(["cenaAllegro",`Cena Allegro: ${cenaAllegroOdAdminProduktow||"0"}–${cenaAllegroDoAdminProduktow||"∞"} zł`]);
   const aktywnyWidok=filtrStatusuProduktow==="kosz"?"kosz":filtrDanychProduktow==="gotowe"&&filtrSprzedazyProduktow==="dostepne"?"gotowe":filtrDanychProduktow==="braki"?"braki":filtrAllegroProduktow==="brak"?"bez-allegro":filtrSprzedazyProduktow==="niedostepne"?"ukryte":filtrPromocjiProduktow==="promocje"?"promocje":aktywneFiltry.length===0?"aktywne":"";
   const opcje=(lista,wartosc)=>lista.map(([v,l])=>`<option value="${esc(v)}" ${String(wartosc)===String(v)?"selected":""}>${esc(l)}</option>`).join("");
+  const kartyProduktowHTML=fragment.length?asortymentPrzygotujKartyProgresywnie(fragment.map(p=>asortymentKartaProduktuHTML(p,audytSklep.hiddenIds.has(String(p.id))))):`<div class="allegro-listing-empty assortment-empty"><span>⌕</span><b>Brak produktów pasujących do filtrów</b><small>Usuń wybrane kryteria albo wróć do widoku aktywnych produktów.</small><button class="btn ghost" onclick="asortymentResetujFiltry()">Pokaż aktywne produkty</button></div>`;
   return asortymentSzkielet("produkty", `
     <div class="assortment-catalog-workspace">
       <header class="panel assortment-catalog-hero">
@@ -1161,7 +1190,7 @@ function widokAdminProdukty(){
       <div class="assortment-results-toolbar allegro-listing-results-head"><div><b>${liczbaWynikow} produktów</b><span>Pokazano ${zakresOd}–${zakresDo} • strona ${stronaAdminProduktow} z ${liczbaStron}</span></div><span><b data-product-selection-count>${zaznaczoneProdukty.size}</b> zaznaczonych</span><label>Gęstość widoku<select onchange="ustawGestoscAdminProduktow(this.value)"><option value="zwarta" ${gestoscAdminProduktow==="zwarta"?"selected":""}>Zwarta</option><option value="wygodna" ${gestoscAdminProduktow==="wygodna"?"selected":""}>Wygodna</option></select></label></div>
       <div class="assortment-bulk-editor allegro-listing-selection"><div><b>Operacje dla zaznaczonych: <span data-product-selection-count>${zaznaczoneProdukty.size}</span></b><small>Zarządzaj ceną sklepu i Allegro oddzielnie; publikacja nowych ofert pozostaje w sekcji Wystawianie.</small></div><label>Kanał ceny<select id="kanalCenProduktow"><option value="sklep">Tylko sklep</option><option value="allegro">Tylko Allegro</option><option value="oba">Sklep i Allegro</option></select></label><label>Zmiana cen<select id="trybCenProduktow"><option value="percent">O procent (+/−)</option><option value="amount">O kwotę (+/−)</option><option value="fixed">Ustaw cenę</option></select></label><input id="procentCen" placeholder="np. 10 lub -5" inputmode="decimal"><button class="btn" data-product-selection-required onclick="zmienCenyZaznaczonych()" ${zaznaczoneProdukty.size?"":"disabled"}>💰 Zmień ceny</button><button class="btn danger" data-product-selection-required onclick="usunZaznaczoneProd()" ${zaznaczoneProdukty.size?"":"disabled"}>🗑️ Przenieś do kosza</button></div>
       <div data-product-agent-center>${asortymentCentrumDzialanHTML()}</div>
-      <div class="allegro-publication-list catalog-product-list density-${gestoscAdminProduktow}">${fragment.map(p=>asortymentKartaProduktuHTML(p,audytSklep.hiddenIds.has(String(p.id)))).join("")||`<div class="allegro-listing-empty assortment-empty"><span>⌕</span><b>Brak produktów pasujących do filtrów</b><small>Usuń wybrane kryteria albo wróć do widoku aktywnych produktów.</small><button class="btn ghost" onclick="asortymentResetujFiltry()">Pokaż aktywne produkty</button></div>`}</div>
+      <div class="allegro-publication-list catalog-product-list density-${gestoscAdminProduktow}">${kartyProduktowHTML}</div>
       <div class="pagination allegro-listing-pagination">${paginacjaHTML(stronaAdminProduktow,liczbaStron,"ustawStroneAdminProduktow")}</div></div>
       <p class="assortment-sync-note"><b>☁️ Wspólna baza:</b> zmiany kartotek, cen, stanów i dostępności zapisują się centralnie i są widoczne na pozostałych urządzeniach po synchronizacji. Eksport pozostaje kopią roboczą lub narzędziem do operacji hurtowych.</p>
       </section>

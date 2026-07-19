@@ -3,16 +3,6 @@
   let zaplanowane=false;
   const zakresy=new Set();
   const bezpiecznyTekst=(value)=>String(value||'').replace(/\s+/g,' ').trim().slice(0,120);
-  const selektorKontrolek=[
-    '.admin-tresc .btn',
-    '.admin-tresc button',
-    '.admin-tresc a[role="button"]',
-    '.admin-tresc .admin-main-tabs>a',
-    '.admin-tresc .admin-tab-bar>a',
-    '.admin-tresc .shipping-tabs>a',
-    '.admin-tresc .warehouse-qr-tabs>a',
-    '.admin-tresc .agent-module-groups a',
-  ].join(',');
   const selektorTabel='.admin-tresc table,.modal table,.drawer table';
   const selektorFiltrow=[
     '.orders-toolbar','.allegro-communication-toolbar','.profitability-controls',
@@ -53,14 +43,6 @@
       });
     });
   }
-  function opiszKontrolki(zakres){
-    elementy(zakres,selektorKontrolek).forEach((control)=>{
-      const label=bezpiecznyTekst(control.getAttribute('aria-label')||control.textContent);
-      if(!label)return;
-      if(!control.hasAttribute('aria-label'))control.setAttribute('aria-label',label);
-      if(control.scrollWidth>control.clientWidth+1&&!control.hasAttribute('title'))control.setAttribute('title',label);
-    });
-  }
   function opiszFiltry(zakres){
     const paski=new Set(elementy(zakres,selektorFiltrow));
     const nadrzedny=zakres?.nodeType===1?zakres.closest?.(selektorFiltrow):null;
@@ -79,12 +61,16 @@
     const tabelaNadrzedna=zakres?.nodeType===1?zakres.closest?.('table'):null;
     if(tabelaNadrzedna&&tabelaNadrzedna.closest('.admin-tresc,.modal,.drawer'))tabele.add(tabelaNadrzedna);
     tabele.forEach(opiszTabele);
-    opiszKontrolki(zakres);
     opiszFiltry(zakres);
   }
   function wykonaj(){
     zaplanowane=false;
     if(!document.body.classList.contains('admin-mode'))return;
+    const panel=document.getElementById('widok')||document;
+    // Katalog produktów używa własnych, responsywnych kart i nie zawiera tabel.
+    // Pomijamy dla niego ogólny analizator DOM, aby setki kontrolek nie były
+    // ponownie przetwarzane po każdym wejściu na podstronę.
+    if(panel.querySelector('.assortment-catalog-workspace')){zakresy.clear();return;}
     const biezace=zakresy.size?[...zakresy]:[document];
     zakresy.clear();
     biezace.forEach(opiszZakres);
@@ -107,3 +93,15 @@
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
   window.addEventListener('resize',()=>zaplanuj(document),{passive:true});
 })();
+let adminWstepneLadowanieZaplanowane=false;
+function zaplanujWstepneLadowaniePanelu(version){
+  if(adminWstepneLadowanieZaplanowane||typeof jestAdmin!=="function"||!jestAdmin())return;adminWstepneLadowanieZaplanowane=true;
+  const queue=Object.keys(ADMIN_MODULY_RUNTIME).filter(x=>x!=="core"&&!adminZaladowaneModuly.has(x)),idle=fn=>typeof requestIdleCallback==="function"?requestIdleCallback(fn,{timeout:2500}):setTimeout(fn,300),next=()=>{const module=queue.shift();if(!module)return;if(adminZaladowaneModuly.has(module)){idle(next);return;}zaladujAdminModul(module,version).catch(()=>{}).finally(()=>idle(next));};idle(next);
+}
+const ADMIN_HISTORIA_KLUCZ="artway_admin_historia_tras_v1";
+let adminHistoriaTras=(()=>{try{const value=JSON.parse(sessionStorage.getItem(ADMIN_HISTORIA_KLUCZ)||"[]");return Array.isArray(value)?value.filter(x=>String(x).startsWith("/admin")).slice(-30):[];}catch(e){return [];}})(),adminOstatniaTrasa=trasa(),adminNawigacjaCofania=false;
+function adminZapiszHistorieTras(){try{sessionStorage.setItem(ADMIN_HISTORIA_KLUCZ,JSON.stringify(adminHistoriaTras.slice(-30)));}catch(e){}}
+function adminZarejestrujTrase(next=trasa()){const current=String(next||""),previous=String(adminOstatniaTrasa||"");if(adminNawigacjaCofania){adminNawigacjaCofania=false;adminOstatniaTrasa=current;adminZapiszHistorieTras();return;}if(previous.startsWith("/admin")&&current!==previous){if(adminHistoriaTras.at(-1)!==previous)adminHistoriaTras.push(previous);adminHistoriaTras=adminHistoriaTras.filter((value,index,array)=>index===array.length-1||value!==array[index+1]).slice(-30);adminZapiszHistorieTras();}adminOstatniaTrasa=current;}
+function adminPoprzedniaTrasa(){const current=trasa();return [...adminHistoriaTras].reverse().find(path=>String(path).startsWith("/admin")&&path!==current)||"";}
+function adminWrocDoPoprzedniejStrony(){const current=trasa();let target="";while(adminHistoriaTras.length&&!target){const candidate=String(adminHistoriaTras.pop()||"");if(candidate.startsWith("/admin")&&candidate!==current)target=candidate;}adminZapiszHistorieTras();if(!target){toast("Nie ma wcześniejszej strony panelu w tej sesji");return false;}adminNawigacjaCofania=true;location.hash="#"+target;return false;}
+function adminAktualizujPrzyciskHistorii(root=document){const button=root?.querySelector?.(".admin-history-back");if(!button)return;const previous=adminPoprzedniaTrasa();button.disabled=!previous;button.title=previous?`Wróć do: ${previous}`:"Brak wcześniejszej strony panelu";}

@@ -253,7 +253,7 @@ function odswiezMonitoringProducentow(){
   const active=document.activeElement,scrollY=window.scrollY||0,selection=active&&typeof active.selectionStart==="number"?{start:active.selectionStart,end:active.selectionEnd}:null;
   aktualizujWezelStabilnie(current,source,active);
   if(active?.isConnected&&selection&&typeof active.setSelectionRange==="function")try{active.setSelectionRange(selection.start,selection.end);}catch(e){}
-  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY});
+  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY,behavior:"instant"});
   return true;
 }
 function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }

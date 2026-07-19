@@ -27,6 +27,18 @@ test('router scala szybkie renderowania i nie skanuje wielokrotnie całego DOM',
   assert.doesNotMatch(router, /else current\.appendChild\(nextWorkspace\.cloneNode\(true\)\)/);
 });
 
+test('techniczne przywracanie pozycji panelu nie uruchamia kosztownego płynnego przewijania', async () => {
+  const [router, customers, shipping] = await Promise.all([
+    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('src/frontend/12-customers-and-inventory.js', 'utf8'),
+    readFile('src/frontend/07-admin-shipping.js', 'utf8'),
+  ]);
+  assert.match(router, /scrollTo\(\{top:Math\.max\(0,Number\(entry\.scrollY\)\|\|0\),behavior:"instant"\}\)/);
+  const calls = `${router}\n${customers}\n${shipping}`.match(/scrollTo\(\{[^}]+\}\)/g) || [];
+  assert.ok(calls.length >= 5);
+  calls.forEach(call => assert.match(call, /behavior:"instant"/));
+});
+
 test('powtórne wejście do panelu pobiera tylko rewizję zamiast wielomegabajtowego snapshotu', async () => {
   const [cloud, backend] = await Promise.all([
     readFile('src/frontend/03-cloud-sync.js', 'utf8'),
@@ -40,6 +52,31 @@ test('powtórne wejście do panelu pobiera tylko rewizję zamiast wielomegabajto
   assert.doesNotMatch(pullRoute, /reconcileDraftsSafely/);
 });
 
+test('importowany katalog ma trwały cache IndexedDB i nie wraca z API po każdym uruchomieniu', async () => {
+  const cloud = await readFile('src/frontend/03-cloud-sync.js', 'utf8');
+  assert.match(cloud, /const CHMURA_KATALOG_CACHE_DB = "artway-runtime-cache"/);
+  assert.match(cloud, /indexedDB\.open\(CHMURA_KATALOG_CACHE_DB,1\)/);
+  assert.match(cloud, /String\(cache\.revision\|\|""\)===revision/);
+  assert.match(cloud, /cache\.products\.length===count/);
+  assert.match(cloud, /chmuraKatalogCacheZapisz\(revision,imported\)/);
+});
+
+test('moduły aktywnej podstrony panelu są pobierane równolegle po rdzeniu', async () => {
+  const [router, responsive] = await Promise.all([readFile('src/frontend/06-router-and-storefront.js', 'utf8'), readFile('src/frontend/08a-admin-responsive-layout.js', 'utf8')]);
+  assert.match(router, /const core=modules\.includes\("core"\)\?zaladujAdminModul\("core",version\)/);
+  assert.match(router, /Promise\.all\(modules\.filter\(module=>module!=="core"\)\.map\(module=>zaladujAdminModul\(module,version\)\)\)/);
+  assert.doesNotMatch(router, /modules\.reduce\(\(chain,module\)=>chain\.then/);
+  assert.match(responsive, /requestIdleCallback\(fn,\{timeout:2500\}\)/);
+  assert.match(router, /zaplanujWstepneLadowaniePanelu\(version\)/);
+});
+
+test('responsywna warstwa nie modyfikuje masowo kontrolek ani nie wymusza przeliczeń układu', async () => {
+  const responsive = await readFile('src/frontend/08a-admin-responsive-layout.js', 'utf8');
+  assert.doesNotMatch(responsive, /control\.scrollWidth|control\.clientWidth/);
+  assert.doesNotMatch(responsive, /opiszKontrolki|setAttribute\('aria-label',label\)|setAttribute\('title',label\)/);
+  assert.match(responsive, /querySelector\('\.assortment-catalog-workspace'\)/);
+});
+
 test('ciężkie podstrony magazynu są budowane wyłącznie dla aktywnej karty', async () => {
   const inventory = await readFile('assets/admin.js', 'utf8');
   assert.match(inventory, /if\(aktywna==="plan"\)return adminSzkielet/);
@@ -49,6 +86,14 @@ test('ciężkie podstrony magazynu są budowane wyłącznie dla aktywnej karty',
     assert.ok(inline || delegated, `sekcja ${section} musi być generowana warunkowo`);
   }
   assert.ok(!inventory.includes('style="${aktywna==="stany"?"":"display:none"}"'), 'lista stanów nie może powstawać jako niewidoczny DOM');
+});
+
+test('duży katalog renderuje produkty progresywnie zamiast układać setki kart naraz', async () => {
+  const inventory = await readFile('src/frontend/12-warehouse-views.js', 'utf8');
+  assert.match(inventory, /const ASORTYMENT_PARTIA_KART=10/);
+  assert.match(inventory, /IntersectionObserver/);
+  assert.match(inventory, /asortymentKartyOczekujace\.splice\(0,ASORTYMENT_PARTIA_KART\)/);
+  assert.match(inventory, /asortymentPrzygotujKartyProgresywnie\(fragment\.map/);
 });
 
 test('główne wyszukiwarki nie przebudowują strony po każdej literze', async () => {

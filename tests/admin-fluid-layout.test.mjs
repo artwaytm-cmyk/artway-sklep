@@ -64,8 +64,8 @@ test('przyciski pozostają jednoliniowe, a układ przenosi całe kontrolki do ko
   assert.match(css, /\[class\*="-actions"\][\s\S]*max-width:100%;min-width:0/);
   assert.match(css, /flex:1 1 100%;width:100%;max-width:100%/);
   assert.match(css, /@media\(max-width:560px\)/);
-  assert.match(script, /control\.scrollWidth>control\.clientWidth\+1/);
-  assert.match(script, /control\.setAttribute\('title',label\)/);
+  assert.doesNotMatch(script, /control\.scrollWidth|control\.clientWidth/);
+  assert.doesNotMatch(script, /opiszKontrolki|setAttribute\('title',label\)/);
 });
 
 test('nazwy produktów w responsywnym katalogu pozostają we własnej kolumnie', async () => {

@@ -683,7 +683,7 @@ function odswiezPoCichejSynchronizacji(){
   if(!odswiezane.some(x=>t===x || (["/admin/pulpit","/admin/agent-ai","/admin/magazyn","/admin/allegro"].includes(x)&&t.startsWith(x+"/")) || (x==="/admin/wysylki"&&t.startsWith("/admin/zamowienie/")))) return;
   const y=window.scrollY||0;
   renderuj();
-  setTimeout(()=>window.scrollTo({top:y}),0);
+  setTimeout(()=>window.scrollTo({top:y,behavior:"instant"}),0);
 }
 async function automatycznaSynchronizacjaChmury(powod="timer"){
   if(chmuraAutoSyncBusy) return false;

@@ -59,7 +59,9 @@ function zaladujAdminModul(modul,version){
 function zaladujPanelAdmina(route=trasa()){
   const version = document.querySelector('meta[name="artway-version"]')?.content || "dev";
   const modules=adminModulyDlaTrasy(route);
-  return Promise.all([zaladujAdminStyle(version),modules.reduce((chain,module)=>chain.then(()=>zaladujAdminModul(module,version)),Promise.resolve())]);
+  const core=modules.includes("core")?zaladujAdminModul("core",version):Promise.resolve();
+  const scripts=core.then(()=>Promise.all(modules.filter(module=>module!=="core").map(module=>zaladujAdminModul(module,version))));
+  return Promise.all([zaladujAdminStyle(version),scripts]).then(result=>{if(typeof zaplanujWstepneLadowaniePanelu==="function")zaplanujWstepneLadowaniePanelu(version);return result;});
 }
 function trasa(){
   const path=String(location.pathname||"").replace(/\/+$/,"")||"/";
@@ -71,22 +73,6 @@ function seoSlugKategorii(value=""){return String(value||"").toLocaleLowerCase("
 function przejdzDoSklepu(path="/"){history.pushState(null,"",path);renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));}
 function nawigujSklep(event,path="/"){if(event&&(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||event.button>0))return true;event?.preventDefault?.();przejdzDoSklepu(path);return false;}
 function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
-const ADMIN_HISTORIA_KLUCZ="artway_admin_historia_tras_v1";
-let adminHistoriaTras=(()=>{try{const value=JSON.parse(sessionStorage.getItem(ADMIN_HISTORIA_KLUCZ)||"[]");return Array.isArray(value)?value.filter(x=>String(x).startsWith("/admin")).slice(-30):[];}catch(e){return [];}})();
-let adminOstatniaTrasa=trasa(),adminNawigacjaCofania=false;
-function adminZapiszHistorieTras(){try{sessionStorage.setItem(ADMIN_HISTORIA_KLUCZ,JSON.stringify(adminHistoriaTras.slice(-30)));}catch(e){}}
-function adminZarejestrujTrase(next=trasa()){
-  const current=String(next||""),previous=String(adminOstatniaTrasa||"");
-  if(adminNawigacjaCofania){adminNawigacjaCofania=false;adminOstatniaTrasa=current;adminZapiszHistorieTras();return;}
-  if(previous.startsWith("/admin")&&current!==previous){if(adminHistoriaTras.at(-1)!==previous)adminHistoriaTras.push(previous);adminHistoriaTras=adminHistoriaTras.filter((value,index,array)=>index===array.length-1||value!==array[index+1]).slice(-30);adminZapiszHistorieTras();}
-  adminOstatniaTrasa=current;
-}
-function adminPoprzedniaTrasa(){const current=trasa();return [...adminHistoriaTras].reverse().find(path=>String(path).startsWith("/admin")&&path!==current)||"";}
-function adminWrocDoPoprzedniejStrony(){
-  const current=trasa();let target="";while(adminHistoriaTras.length&&!target){const candidate=String(adminHistoriaTras.pop()||"");if(candidate.startsWith("/admin")&&candidate!==current)target=candidate;}
-  adminZapiszHistorieTras();if(!target){toast("Nie ma wcześniejszej strony panelu w tej sesji");return false;}adminNawigacjaCofania=true;location.hash="#"+target;return false;
-}
-function adminAktualizujPrzyciskHistorii(root=document){const button=root?.querySelector?.(".admin-history-back");if(!button)return;const previous=adminPoprzedniaTrasa();button.disabled=!previous;button.title=previous?`Wróć do: ${previous}`:"Brak wcześniejszej strony panelu";}
 let ostatniaRenderowanaTrasa="";
 let renderowanieWidoku=false;
 let renderPonowniePoBiezacym=false;
@@ -145,7 +131,7 @@ function adminPrzywrocPodstroneZCache(root,route){
   const currentHeader=container.querySelector(":scope > .admin-workspace-header");if(entry.header&&currentHeader)aktualizujWezelStabilnie(currentHeader,entry.header,document.activeElement);
   const currentMobile=container.querySelector(":scope > .admin-mobile-menu");if(entry.mobile&&currentMobile)aktualizujWezelStabilnie(currentMobile,entry.mobile,document.activeElement);
   adminAktualizujAktywnaNawigacje(shell,route);adminAktualizujPrzyciskHistorii(shell);
-  requestAnimationFrame(()=>window.scrollTo({top:Math.max(0,Number(entry.scrollY)||0)}));
+  requestAnimationFrame(()=>window.scrollTo({top:Math.max(0,Number(entry.scrollY)||0),behavior:"instant"}));
   return true;
 }
 function kluczStabilnegoWezla(node){
@@ -198,7 +184,7 @@ function aktualizujWidokStabilnie(root,html){
   const active=document.activeElement,scrollY=window.scrollY||0,selection=active&&typeof active.selectionStart==="number"?{start:active.selectionStart,end:active.selectionEnd}:null;
   aktualizujDzieciStabilnie(root,template.content,active);
   if(active?.isConnected&&selection&&typeof active.setSelectionRange==="function")try{active.setSelectionRange(selection.start,selection.end);}catch(e){}
-  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY});
+  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY,behavior:"instant"});
 }
 function aktualizujPanelAdminaStabilnie(root,html,taSamaTrasa=false){
   const template=document.createElement("template");template.innerHTML=String(html||"").trim();
@@ -260,7 +246,7 @@ function renderuj(){
     }
     if(t.startsWith("/admin/zamowienie/")&&!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
     if(t.startsWith("/admin")&&stanBramki.authenticated&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja) setTimeout(()=>synchronizujBazeCentralna(true),0);
-    if(!taSamaTrasa)window.scrollTo({top:0});
+    if(!taSamaTrasa)window.scrollTo({top:0,behavior:"instant"});
     if(t==="/" || t==="") w.innerHTML = widokSklep();
     else if(t.startsWith("/produkt/")) w.innerHTML = widokProdukt(identyfikatorZTrasy(t,2));
     else if(t.startsWith("/kategoria/")) w.innerHTML = widokKategoria(decodeURIComponent(t.split("/")[2]||""));
@@ -370,7 +356,7 @@ function renderuj(){
     if(renderPonowniePoBiezacym){renderPonowniePoBiezacym=false;requestAnimationFrame(()=>renderuj());}
   }
 }
-window.addEventListener("hashchange",()=>{adminZarejestrujTrase(trasa());renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
+window.addEventListener("hashchange",()=>{if(typeof adminZarejestrujTrase==="function")adminZarejestrujTrase(trasa());renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 window.addEventListener("popstate",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 
 /* ═══════════ WIDOK: SKLEP (strona główna) ═══════════ */

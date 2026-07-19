@@ -22,16 +22,51 @@ let chmuraAutoSyncOstatniStart = 0;
 let chmuraOstatniPullZmienilDane = false;
 let chmuraOstatniaSynchronizacjaCentralnaZmienilaDane = false;
 let chmuraKatalogImportowanyRev = "";
+const CHMURA_KATALOG_CACHE_DB = "artway-runtime-cache";
+const CHMURA_KATALOG_CACHE_STORE = "catalogs";
+const CHMURA_KATALOG_CACHE_KEY = "imported-products-v1";
+let chmuraKatalogCacheBazaPromise = null;
 let chmuraBrudneKlucze = new Set();
 let chmuraZapisWToku = null;
 let chmuraZapisPonowPoZakonczeniu = false;
 let chmuraNumerMutacji = 0;
 let chmuraPobraniaWToku = new Map();
+function chmuraKatalogCacheBaza(){
+  if(chmuraKatalogCacheBazaPromise)return chmuraKatalogCacheBazaPromise;
+  if(typeof indexedDB==="undefined")return Promise.resolve(null);
+  chmuraKatalogCacheBazaPromise=new Promise(resolve=>{
+    let zakonczono=false,finish=value=>{if(zakonczono)return;zakonczono=true;resolve(value);};
+    try{
+      const request=indexedDB.open(CHMURA_KATALOG_CACHE_DB,1);
+      request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains(CHMURA_KATALOG_CACHE_STORE))db.createObjectStore(CHMURA_KATALOG_CACHE_STORE);};
+      request.onsuccess=()=>finish(request.result);
+      request.onerror=()=>finish(null);
+      request.onblocked=()=>finish(null);
+    }catch(e){finish(null);}
+  });
+  return chmuraKatalogCacheBazaPromise;
+}
+async function chmuraKatalogCacheOdczytaj(){
+  const db=await chmuraKatalogCacheBaza();if(!db)return null;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readonly"),request=tx.objectStore(CHMURA_KATALOG_CACHE_STORE).get(CHMURA_KATALOG_CACHE_KEY);request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>resolve(null);}catch(e){resolve(null);}});
+}
+async function chmuraKatalogCacheZapisz(revision,products){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).put({revision:String(revision||""),count:Array.isArray(products)?products.length:0,products:Array.isArray(products)?products:[],savedAt:Date.now()},CHMURA_KATALOG_CACHE_KEY);tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
+}
 async function chmuraPobierzKatalogImportowany(meta={},force=false){
   const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
   if(!force&&revision===chmuraKatalogImportowanyRev)return false;
   if(!force&&typeof productLinkImportStan!=="undefined"&&productLinkImportStan.loopActive)return false;
-  if(!count){produktyImportowane=[];chmuraKatalogImportowanyRev=revision;return true;}
+  if(!count){produktyImportowane=[];chmuraKatalogImportowanyRev=revision;chmuraKatalogCacheZapisz(revision,[]).catch(()=>{});return true;}
+  if(!force){
+    const cache=await chmuraKatalogCacheOdczytaj();
+    if(cache&&String(cache.revision||"")===revision&&Number(cache.count)===count&&Array.isArray(cache.products)&&cache.products.length===count){
+      produktyImportowane=cache.products;
+      chmuraKatalogImportowanyRev=revision;
+      return true;
+    }
+  }
   const pageSize=500,offsets=[];for(let offset=0;offset<count;offset+=pageSize)offsets.push(offset);
   const pages=[];
   for(let start=0;start<offsets.length;start+=4){
@@ -43,6 +78,7 @@ async function chmuraPobierzKatalogImportowany(meta={},force=false){
   if(imported.length!==count)throw new Error("Katalog produktów nie jest jeszcze kompletny — ponowię synchronizację.");
   produktyImportowane=imported;
   chmuraKatalogImportowanyRev=revision;
+  chmuraKatalogCacheZapisz(revision,imported).catch(()=>{});
   return true;
 }
 function maUprawnieniaZapisuChmury(){

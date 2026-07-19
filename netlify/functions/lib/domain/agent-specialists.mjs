@@ -776,7 +776,8 @@ export function createAgentSpecialists({
     return { ...next.decisions.find((item) => item?.id === safeId), executionResult };
   }
 
-  async function status() {
+  async function status(options = {}) {
+    const historyLimit = Math.max(5, Math.min(80, Number(options?.historyLimit) || 30));
     const current = await readState(), today = day(now()), todayRuns = current.history.filter((item) => { const created = new Date(item?.createdAt || ''); return Number.isFinite(created.getTime()) && day(created) === today; });
     const decisions = current.decisions.map((item) => item.status === 'snoozed' && activeDecision(item, now()) ? { ...item, status: 'open', snoozedUntil: '' } : item);
     const autonomy = learningAutonomy(current.learning, current.config), productLearning = current.learning.product_content;
@@ -807,7 +808,7 @@ export function createAgentSpecialists({
         high: decisions.filter((item) => activeDecision(item, now()) && item.risk === 'high').length,
         completed: decisions.filter((item) => ['approved', 'resolved'].includes(item.status)).length,
       },
-      history: current.history.slice(0, 80), lastCycle: current.lastCycle, updatedAt: current.updatedAt,
+      history: current.history.slice(0, historyLimit), lastCycle: current.lastCycle, updatedAt: current.updatedAt,
     };
   }
 

@@ -1643,7 +1643,7 @@ function agentAIRuntimePanelHTML(){
 async function agentAISpecjalisciPobierz(silent=true){
   if(agentAISpecjalisci.loading)return agentAISpecjalisci.data;
   agentAISpecjalisci={...agentAISpecjalisci,loading:true,error:""};if(!silent)renderuj();
-  try{const data=await chmura("agent-specialists-status",{timeout:30000});agentAISpecjalisci={...agentAISpecjalisci,loading:false,loaded:true,error:"",data,fetchedAt:Date.now()};}
+  try{const data=await chmura("agent-specialists-status",{params:{historyLimit:30},timeout:30000});agentAISpecjalisci={...agentAISpecjalisci,loading:false,loaded:true,error:"",data,fetchedAt:Date.now()};}
   catch(error){agentAISpecjalisci={...agentAISpecjalisci,loading:false,loaded:true,error:String(error?.message||error)};}
   if(!silent)renderuj();else agentAISpecjalisciAktualizujWidocznePanele();return agentAISpecjalisci.data;
 }
