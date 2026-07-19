@@ -35,3 +35,11 @@ test('zakładki, filtry i statystyki zawijają się do dostępnej szerokości', 
   assert.match(css, /agent-module-groups[\s\S]*flex-wrap:wrap/);
   assert.match(css, /max-height:none;overflow:visible/);
 });
+
+test('długie napisy przycisków zawijają się bez nachodzenia na sąsiednie elementy', async () => {
+  const css = await read('src/styles/30-admin-fluid-layout.css');
+  assert.match(css, /white-space:normal!important;overflow-wrap:anywhere;text-wrap:balance/);
+  assert.match(css, /\.btn\{height:auto!important\}/);
+  assert.match(css, /select\{overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/);
+  assert.match(css, /\[class\*="-actions"\][\s\S]*max-width:100%;min-width:0/);
+});
