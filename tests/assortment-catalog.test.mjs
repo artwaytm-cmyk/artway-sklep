@@ -33,9 +33,14 @@ test("katalog udostępnia szybkie widoki, aktywne znaczniki i zapis gęstości",
   assert.match(source,/density-\$\{gestoscAdminProduktow\}/);
 });
 
-test("tabela katalogu grupuje dane i zachowuje operacje hurtowe",async()=>{
+test("lista katalogu używa wzorcowych kart Wystawiania i zachowuje operacje hurtowe",async()=>{
   const source=await read("assets/admin.js");
-  assert.match(source,/<th>Produkt<\/th><th>Identyfikatory<\/th><th>Klasyfikacja i źródło<\/th><th>Ceny<\/th><th>Magazyn i sprzedaż<\/th><th>Allegro<\/th><th>Akcje<\/th>/);
+  assert.match(source,/allegro-publication-list assortment-product-list/);
+  assert.match(source,/allegro-publication-card assortment-product-card/);
+  assert.match(source,/allegro-publication-product assortment-product-cell/);
+  assert.match(source,/allegro-publication-readiness assortment-card-readiness/);
+  assert.match(source,/allegro-publication-data assortment-card-commerce/);
+  assert.match(source,/allegro-publication-actions assortment-row-actions/);
   assert.match(source,/EXTERNAL_ID/);
   assert.match(source,/Zakup \(admin\)/);
   assert.match(source,/adminOperacjeWynikowHTML/);
@@ -45,11 +50,13 @@ test("tabela katalogu grupuje dane i zachowuje operacje hurtowe",async()=>{
   assert.doesNotMatch(source,/Po zakończeniu pobierz nowy <b>products\.json<\/b> i podmień go na hostingu/);
 });
 
-test("układ katalogu jest responsywny i wspiera zwartą tabelę",async()=>{
-  const css=await read("src/styles/07-admin-domains.css");
-  for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".assortment-product-cell",".assortment-identifiers",".assortment-row-actions",".assortment-product-table.density-zwarta"]){
+test("układ katalogu dziedziczy responsywność Wystawiania i wspiera zwarty widok",async()=>{
+  const css=(await read("src/styles/07-admin-domains.css"))+(await read("src/styles/27-allegro-listing-workspace.css"))+(await read("src/styles/31-admin-page-pattern.css"));
+  for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".assortment-product-cell",".assortment-row-actions",".allegro-publication-card",".assortment-product-list.density-zwarta"]){
     assert.match(css,new RegExp(selector.replace(".","\\.")));
   }
+  assert.match(css,/@media\(max-width:1180px\).*allegro-publication-card/);
+  assert.match(css,/@media\(max-width:820px\).*allegro-publication-card/);
   assert.match(css,/@media\(max-width:620px\).*assortment-advanced-grid/);
 });
 

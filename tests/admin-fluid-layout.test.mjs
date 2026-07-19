@@ -28,9 +28,10 @@ test('szerokie tabele zmieniają się w opisane karty zamiast tworzyć suwak', a
   assert.match(css, /max-width:1280px/);
 });
 
-test('zakładki, filtry i statystyki zawijają się do dostępnej szerokości', async () => {
+test('zakładki wykorzystują naturalną szerokość i nie przechodzą przedwcześnie do drugiego rzędu', async () => {
   const css = await read('src/styles/30-admin-fluid-layout.css');
   assert.match(css, /admin-main-tabs[\s\S]*flex-wrap:wrap/);
+  assert.match(css, /flex:1 0 auto;justify-content:center;min-width:max-content/);
   assert.match(css, /warehouse-stock-toolbar[\s\S]*grid-template-columns:repeat\(auto-fit/);
   assert.match(css, /agent-module-groups[\s\S]*flex-wrap:wrap/);
   assert.match(css, /max-height:none;overflow:visible/);

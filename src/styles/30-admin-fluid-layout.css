@@ -21,7 +21,7 @@ body.admin-mode .admin-tresc td :is(input,select,textarea,.btn,details){max-widt
 body.admin-mode .admin-tresc td :is(.diag-actions,.warehouse-stock-links,.supplier-inline-actions){min-width:0;flex-wrap:wrap}
 
 body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs,.warehouse-stock-quickfilters){display:flex;max-width:100%;min-width:0;flex-wrap:wrap;overflow:visible!important;scrollbar-width:none}
-body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs)>:is(a,button){flex:1 1 175px;justify-content:center;min-width:0;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis;text-align:center}
+body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs)>:is(a,button){flex:1 0 auto;justify-content:center;min-width:max-content;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis;text-align:center}
 body.admin-mode .admin-tresc .agent-module-nav{max-width:100%;overflow:visible}
 body.admin-mode .admin-tresc .agent-module-groups,body.admin-mode .admin-tresc .agent-module-groups>section>div{max-width:100%;min-width:0;flex-wrap:wrap;overflow:visible}
 body.admin-mode .admin-tresc .agent-module-groups a{min-width:0;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis}
@@ -63,7 +63,7 @@ body.admin-mode .admin-tresc :is(.telegram-message-stream,.telegram-incident-lis
   body.admin-mode .admin-page{padding:6px!important;gap:8px}
   body.admin-mode .admin-workspace-header,body.admin-mode .admin-mobile-menu,body.admin-mode .admin-tresc .panel{border-radius:12px}
   body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.3rem}
-  body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs)>:is(a,button){width:100%;min-height:42px;padding:.45rem .5rem;font-size:.7rem}
+  body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs)>:is(a,button){width:100%;min-width:0;min-height:42px;padding:.45rem .5rem;font-size:.7rem}
   body.admin-mode .admin-tresc .agent-module-nav{display:grid;gap:.5rem;padding:.65rem}
   body.admin-mode .admin-tresc .agent-module-groups{display:grid;gap:.55rem}
   body.admin-mode .admin-tresc .agent-module-groups>section>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
