@@ -39,11 +39,11 @@ test('kontekst usuwa sekrety i prywatne dane przed wysłaniem do modelu', () => 
 
 test('końcowy zapis opisu usuwa techniczny stan dostawcy oraz identyfikatory katalogowe', () => {
   const patch = productPatch({ fields: [
-    { key: 'short_description', value: 'Gra edukacyjna. Rozmiar uniwersalny 483 szt.' },
-    { key: 'long_description', value: '<p>Gra wspiera spostrzegawczość. Kod producenta: 2648, EAN 5906018026481.</p>' },
+    { key: 'short_description', value: 'Gra edukacyjna, kod 2648. Rozmiar uniwersalny 483 szt.' },
+    { key: 'long_description', value: '<p>Gra wspiera spostrzegawczość. Kod producenta: 2648, EAN 5906018026481.</p><ul><li></li></ul><p>Źródło: sklep producenta.</p>' },
   ] });
   assert.equal(patch.opisKrotki, 'Gra edukacyjna.');
-  assert.doesNotMatch(patch.opis, /Kod producenta|EAN|2648|5906018026481/i);
+  assert.doesNotMatch(patch.opis, /Kod producenta|EAN|2648|5906018026481|Źródło|<li>\s*<\/li>/i);
   assert.match(patch.opis, /spostrzegawczość/i);
 });
 

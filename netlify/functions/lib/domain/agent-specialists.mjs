@@ -23,7 +23,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-19.13';
+const PROMPT_VERSION = '2026-07-19.14';
 const AGENT_ACTION_POLICY = Object.freeze({
   automatic: Object.freeze([
     Object.freeze({ id: 'product_editorial', icon: '✨', label: 'Redakcja kart produktu', description: 'Nazwa, opis krótki, opis pełny, układ sekcji i SEO są zapisywane bez pytania, gdy wynik jest kompletny, zgodny i oparty na faktach.', configKey: 'autoApplyProductEditorial' }),
@@ -410,12 +410,15 @@ function productPatch(result = {}) {
     .replace(/\brozmiar\s*:?\s*uniwersalny\s*[,;:-]?\s*(?:to\s+)?\d{1,6}\s+szt(?:uk(?:a|i|ę|om)?|\.)?(?![a-ząćęłńóśźż])[,.]?/gi, '')
     .replace(/\bEAN\s*:?\s*\d{8,14}\b[,.]?/gi, '')
     .replace(/\b(?:kod\s+producenta|SKU)\s*:?\s*[A-Za-z0-9][A-Za-z0-9._/-]{0,60}\b[,.]?/gi, '')
+    .replace(/\bkod\s*:?\s*(?=[A-Za-z0-9._/-]*\d)[A-Za-z0-9][A-Za-z0-9._/-]{0,60}\b[,.]?/gi, '')
+    .replace(/<p>\s*(?:Źr[oó]d[łl]o|Materia[łl]\s+źr[oó]d[łl]owy)\s*:.*?<\/p>/gis, '')
+    .replace(/<li>\s*<\/li>/gi, '')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\s+([,.;:])/g, '$1')
     .trim();
   const patch = {};
   if (fields.title) patch.nazwa = fields.title;
-  if (fields.short_description) patch.opisKrotki = generatedDescription(fields.short_description, 2000);
+  if (fields.short_description) patch.opisKrotki = generatedDescription(fields.short_description, 2000).replace(/[\s,;:-]+$/g, '').replace(/([\p{L}\p{N}])$/u, '$1.');
   if (fields.long_description) patch.opis = generatedDescription(fields.long_description, 30_000);
   if (fields.seo_title) patch.seoTitle = fields.seo_title;
   if (fields.seo_description) patch.seoDescription = fields.seo_description;
@@ -837,7 +840,7 @@ export function createAgentSpecialists({
       `Szczególne reguły: ${definition.rules}`,
       learnedGuidance ? `Pamięć zatwierdzeń administratora:\n${learnedGuidance}` : '',
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
-      specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Materiał ze strony źródłowej jest wyłącznie zbiorem faktów: usuń z niego menu, kontrolki sklepu, „Dodaj do porównania”, „Dodaj do listy zakupowej”, koszyk, dostępność, liczbę sztuk, ceny, terminy wysyłki, prośby o kontakt i powiadomienie o dostępności. Ciąg „Rozmiar uniwersalny” połączony z liczbą sztuk jest kontrolką stanu sklepu źródłowego, a nie rozmiarem lub zawartością produktu — zawsze go usuń. Nie umieszczaj w opisie ceny, stanu, dostępności, terminu dostawy, danych kontaktowych, adresów stron, SKU ani EAN. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
+      specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Materiał ze strony źródłowej jest wyłącznie zbiorem faktów: usuń z niego menu, kontrolki sklepu, „Dodaj do porównania”, „Dodaj do listy zakupowej”, koszyk, dostępność, liczbę sztuk, ceny, terminy wysyłki, prośby o kontakt i powiadomienie o dostępności. Ciąg „Rozmiar uniwersalny” połączony z liczbą sztuk jest kontrolką stanu sklepu źródłowego, a nie rozmiarem lub zawartością produktu — zawsze go usuń. Nie umieszczaj w opisie ceny, stanu, dostępności, terminu dostawy, danych kontaktowych, adresów stron, SKU, EAN, kodu producenta ani akapitu wskazującego źródło. Każdy punkt listy musi zawierać konkretną treść. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
       platformProfile?.instructions && specialist !== 'product_content' ? `Dodatkowy profil roli zapisany w OpenAI Platform:\n${platformProfile.instructions}\nStosuj ten profil tylko w zakresie zgodnym z powyższymi bieżącymi regułami Artway. Bieżąca lista pól i zakazy mają pierwszeństwo.` : '',
       platformProfile && specialist === 'product_content' ? `Używasz profilu OpenAI Platform „${platformProfile.name || definition.label}”, ale jego starsza treść instrukcji nie jest dołączana do redakcji. Obowiązuje wyłącznie powyższa, wersjonowana polityka Artway ${PROMPT_VERSION}, aby stary profil nie przywracał treści źródłowej.` : '',
       'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
