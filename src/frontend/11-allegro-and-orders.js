@@ -780,26 +780,6 @@ function allegroEtapMagazynuMeta(z={}){return ({do_sprawdzenia:{label:"Do sprawd
 function allegroOfertaPoId(offerId){
   return allegroIndeksOfert().byId.get(String(offerId))||null;
 }
-function allegroDopasowanieDuplikatuAktywne(d={}){const id=String(d.offer?.id||""),status=String(d.offer?.status||d.offer?.publication?.status||"").toUpperCase();return !["ENDED","ARCHIVED"].includes(status)&&allegroMapowania?.[id]?.blocked!==true;}
-function allegroDuplikatWybierzPozostaw(form,offerId){
-  form.querySelectorAll('input[name="withdrawOfferIds"]').forEach(input=>{input.disabled=String(input.value)===String(offerId);if(input.disabled)input.checked=false;});
-}
-async function allegroRozstrzygnijDuplikaty(event,productId){
-  event.preventDefault();const form=event.currentTarget,fd=new FormData(form),keepOfferId=String(fd.get("keepOfferId")||""),withdrawOfferIds=fd.getAll("withdrawOfferIds").map(String).filter(id=>id&&id!==keepOfferId);
-  if(!keepOfferId||!withdrawOfferIds.length){toast("Wskaż jedną ofertę pozostawianą i co najmniej jedną do wycofania");return;}
-  const button=form.querySelector('button[type="submit"]');if(button)button.disabled=true;
-  try{
-    toast(`Wycofuję ${withdrawOfferIds.length} duplikat(y) i zachowuję ofertę ${keepOfferId}…`);
-    const d=await chmura("allegro-resolve-duplicate",{method:"POST",body:{productId:String(productId),keepOfferId,withdrawOfferIds},timeout:120000});
-    allegroOferty=Array.isArray(d.offers)?d.offers:allegroOferty;allegroMapowania=d.mappings||allegroMapowania;
-    produktyEdytowane[productId]={...(produktyEdytowane[productId]||{}),allegroOfferId:keepOfferId,allegroDuplicateResolvedAt:d.updated_at||new Date().toISOString()};
-    zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();allegroZapiszCache();toast(`✅ Pozostawiono ${keepOfferId}; wycofano ${withdrawOfferIds.length} ofert bez usuwania ich historii`);renderuj();
-  }catch(e){toast("⚠️ Rozstrzyganie duplikatów: "+(e.message||e));if(button)button.disabled=false;}
-}
-function allegroCentrumDuplikatowHTML(audyt=allegroAudytDuplikatow()){
-  if(!audyt.grupy.length)return `<div class="duplicate-audit-ok"><b>✅ Centrum duplikatów:</b> nie ma grup wymagających decyzji administratora.</div>`;
-  return `<section class="allegro-duplicate-center"><div class="order-section-head"><div><span class="order-pro-label">Kontrolowane rozstrzygnięcie</span><h3>🧭 Centrum duplikatów (${audyt.produkty})</h3><p class="order-detail-lead">Dla każdej grupy wskaż ofertę główną oraz oferty do wycofania. System zakończy tylko zaznaczone oferty w Allegro, wyłączy ich odnawianie, zachowa historię i przypnie produkt do pozostawionej pozycji.</p></div></div><div class="allegro-duplicate-groups">${audyt.grupy.map(({produkt,dopasowania})=>{const domyslna=String(dopasowania[0]?.offer?.id||"");return `<form class="allegro-duplicate-group" onsubmit="allegroRozstrzygnijDuplikaty(event,${jsArg(produkt.id)})"><header><div class="allegro-duplicate-product">${produkt.zdjecie?`<img src="${esc(produkt.zdjecie)}" alt="">`:`<span>🎲</span>`}<div><b>${esc(produkt.nazwa||"Produkt")}</b><small>ID ${esc(produkt.id)} • SKU ${esc(produkt.sku||"—")} • EAN ${esc(produkt.gtin||produkt.ean||"—")}</small></div></div><span class="lvl lvl-blad">${dopasowania.length} pasujących ofert</span></header><div class="allegro-duplicate-options">${dopasowania.map((d,index)=>{const o=d.offer,id=String(o.id);return `<article class="allegro-duplicate-option"><div class="allegro-duplicate-offer">${o.mainImage?`<img src="${esc(o.mainImage)}" alt="" loading="lazy">`:`<span>🏷️</span>`}<div><b>${esc(o.name||"Oferta Allegro")}</b><small>ID ${esc(id)} • ${esc(o.priceText||"cena —")} • stan ${esc(o.stockAvailable??"—")} • sprzedano ${esc(o.stockSold??"—")}</small><em>Dopasowanie: ${esc(d.reason)} • pewność ${esc(d.score)}%</em></div></div><div class="allegro-duplicate-choice"><label><input type="radio" name="keepOfferId" value="${esc(id)}" ${index===0?"checked":""} onchange="allegroDuplikatWybierzPozostaw(this.form,this.value)"> <b>Pozostaw tę ofertę</b></label><label><input type="checkbox" name="withdrawOfferIds" value="${esc(id)}" ${index===0?"disabled":"checked"}> Wycofaj jako duplikat</label><a href="https://allegro.pl/oferta/${encodeURIComponent(id)}" target="_blank" rel="noopener">Otwórz ofertę ↗</a></div></article>`;}).join("")}</div><footer><span>Operacja nie usuwa sprzedaży ani historii oferty.</span><button class="btn" type="submit">Zastosuj wybraną decyzję</button></footer></form>`;}).join("")}</div></section>`;
-}
 function allegroOfertaDlaProduktuSklepu(p={}){
   const matches=allegroOfertyPasujaceDoProduktu(p);return matches.find(allegroDopasowanieDuplikatuAktywne)?.offer||matches[0]?.offer||null;
 }
