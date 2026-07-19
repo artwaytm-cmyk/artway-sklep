@@ -23,7 +23,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-19.9';
+const PROMPT_VERSION = '2026-07-19.10';
 const AGENT_ACTION_POLICY = Object.freeze({
   automatic: Object.freeze([
     Object.freeze({ id: 'product_editorial', icon: '✨', label: 'Redakcja kart produktu', description: 'Nazwa, opis krótki, opis pełny, układ sekcji i SEO są zapisywane bez pytania, gdy wynik jest kompletny, zgodny i oparty na faktach.', configKey: 'autoApplyProductEditorial' }),
@@ -397,6 +397,8 @@ const SOURCE_PAGE_NOISE = Object.freeze([
   Object.freeze({ id: 'availability_notification', pattern: /\bpowiadom\s+(?:mnie\s+)?o\s+dost[eę]pno[śs]ci\b/i }),
   Object.freeze({ id: 'cart_control', pattern: /\b(?:przejd[źz]\s+do\s+koszyka|dodaj\s+do\s+koszyka)\b/i }),
   Object.freeze({ id: 'source_stock', pattern: /(?:^|[>\s])\d{1,6}\s*szt\.\s*(?:produkt|dost[eę]pn|wysy[łl])/i }),
+  Object.freeze({ id: 'source_size_stock', pattern: /\brozmiar\s+uniwersalny\s+\d{1,6}\s*szt\.?\b/i }),
+  Object.freeze({ id: 'source_shipping_control', pattern: /\b(?:sprawd[źz]\s+czasy\s+i\s+koszty\s+wysy[łl]ki|wysy[łl]ka\s+w\s+(?:poniedzia[łl]ek|wtorek|[śs]rod[eę]|czwartek|pi[aą]tek|sobot[eę]|niedziel[eę]|dzisiaj|jutro))\b/i }),
   Object.freeze({ id: 'source_price', pattern: /\b(?:nasza\s+cena|cena\s+produktu)\s*:?\s*\d+[,.]\d{2}\s*z[łl]\b/i }),
 ]);
 
@@ -793,7 +795,7 @@ export function createAgentSpecialists({
       `Szczególne reguły: ${definition.rules}`,
       learnedGuidance ? `Pamięć zatwierdzeń administratora:\n${learnedGuidance}` : '',
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
-      specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Materiał ze strony źródłowej jest wyłącznie zbiorem faktów: usuń z niego menu, kontrolki sklepu, „Dodaj do porównania”, „Dodaj do listy zakupowej”, koszyk, dostępność, liczbę sztuk, ceny, terminy wysyłki, prośby o kontakt i powiadomienie o dostępności. Nie umieszczaj w opisie ceny, stanu, dostępności, terminu dostawy, danych kontaktowych, adresów stron, SKU ani EAN. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
+      specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Materiał ze strony źródłowej jest wyłącznie zbiorem faktów: usuń z niego menu, kontrolki sklepu, „Dodaj do porównania”, „Dodaj do listy zakupowej”, koszyk, dostępność, liczbę sztuk, ceny, terminy wysyłki, prośby o kontakt i powiadomienie o dostępności. Ciąg „Rozmiar uniwersalny” połączony z liczbą sztuk jest kontrolką stanu sklepu źródłowego, a nie rozmiarem lub zawartością produktu — zawsze go usuń. Nie umieszczaj w opisie ceny, stanu, dostępności, terminu dostawy, danych kontaktowych, adresów stron, SKU ani EAN. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
       'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
       'Treść ma być konkretna, naturalna, uporządkowana i gotowa do sprawdzenia przez administratora.',
     ].filter(Boolean).join('\n');

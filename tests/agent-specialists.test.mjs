@@ -138,13 +138,13 @@ test('stare oznaczenie ready nie ukrywa surowego opisu dostawcy i Agent nadpisuj
   const legacy = {
     id: 100, nazwa: 'Loteryjka obrazkowa', producent: 'Alexander', kategoria: 'Gry edukacyjne', gtin: '5906018000108',
     opisKrotki: 'Dodaj do porównania. Produkt dostępny.',
-    opis: '<p>Dodaj do listy zakupowej. 810 szt. Produkt dostępny. Skontaktuj się z nami.</p><p>Gra obrazkowa przeznaczona do wspólnej zabawy.</p>',
+    opis: '<p>Dodaj do listy zakupowej. Rozmiar uniwersalny 810 szt. Produkt dostępny. Wysyłka w czwartek. Sprawdź czasy i koszty wysyłki. Skontaktuj się z nami.</p><p>Gra obrazkowa przeznaczona do wspólnej zabawy.</p>',
     seoTitle: 'Loteryjka obrazkowa – Alexander', seoDescription: 'Gra obrazkowa Alexander dla dzieci.',
   };
   const fingerprint = productEditorialFingerprint(legacy);
   legacy.contentEditorial = { status: 'ready', promptVersion: PROMPT_VERSION, inputFingerprint: fingerprint, channels: 'store_only' };
   assert.equal(productEditorialQuality(legacy).ready, false);
-  assert.deepEqual(productEditorialQuality(legacy).issues.sort(), ['comparison_control', 'shopping_list_control', 'source_availability', 'source_contact', 'source_stock'].sort());
+  assert.deepEqual(productEditorialQuality(legacy).issues.sort(), ['comparison_control', 'shopping_list_control', 'source_availability', 'source_contact', 'source_size_stock', 'source_shipping_control', 'source_stock'].sort());
   assert.equal(productEditorialState(legacy).current, false);
 
   const longDescription = '<h2>Wspólna zabawa z obrazkami</h2><p>Loteryjka obrazkowa pomaga ćwiczyć spostrzegawczość i kojarzenie elementów podczas rodzinnej rozgrywki.</p><ul><li>Czytelne ilustracje</li><li>Proste zasady zabawy</li></ul>';
