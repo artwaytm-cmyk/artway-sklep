@@ -1,0 +1,68 @@
+/* Wspólny, płynny układ całego panelu — bez poziomych obszarów przewijania. */
+html:has(body.admin-mode),body.admin-mode{max-width:100%;overflow-x:clip}
+body.admin-mode #widok,body.admin-mode .admin-page,body.admin-mode .admin-tresc,body.admin-mode .admin-workspace-content{width:100%;max-width:100%;min-width:0;overflow-x:clip}
+body.admin-mode .admin-tresc :is(main,aside,section,article,header,footer,nav,form,fieldset,div){max-width:100%;min-width:0}
+body.admin-mode .admin-tresc :is(input,select,textarea,button,.btn,img,svg,canvas,video){max-width:100%;min-width:0}
+body.admin-mode .admin-tresc :is(p,li,b,strong,small,em,a,label,legend,code,pre){overflow-wrap:anywhere;word-break:normal}
+body.admin-mode .admin-tresc pre{white-space:pre-wrap}
+
+body.admin-mode .admin-tresc .panel{max-width:100%;overflow:visible}
+body.admin-mode .admin-tresc :is(.table-scroll,.warehouse-worktable-wrap,.catalog-quality-table-wrap,.product-link-import-table-wrap,.warehouse-document-lines,.allegro-listing-table-wrap){max-width:100%;overflow:visible!important}
+body.admin-mode .admin-tresc table{width:100%!important;max-width:100%;min-width:0!important;table-layout:fixed}
+body.admin-mode .admin-tresc :is(th,td){min-width:0!important;max-width:none!important;overflow-wrap:anywhere;white-space:normal}
+body.admin-mode .admin-tresc td :is(input,select,textarea,.btn,details){max-width:100%;min-width:0!important}
+body.admin-mode .admin-tresc td :is(.diag-actions,.warehouse-stock-links,.supplier-inline-actions){min-width:0;flex-wrap:wrap}
+
+body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs,.warehouse-stock-quickfilters){display:flex;max-width:100%;min-width:0;flex-wrap:wrap;overflow:visible!important;scrollbar-width:none}
+body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs)>:is(a,button){flex:1 1 145px;justify-content:center;min-width:0;white-space:normal;text-align:center}
+body.admin-mode .admin-tresc .agent-module-nav{max-width:100%;overflow:visible}
+body.admin-mode .admin-tresc .agent-module-groups,body.admin-mode .admin-tresc .agent-module-groups>section>div{max-width:100%;min-width:0;flex-wrap:wrap;overflow:visible}
+body.admin-mode .admin-tresc .agent-module-groups a{white-space:normal}
+
+body.admin-mode .admin-tresc :is(.admin-search-standard-body,.warehouse-filter-grid,.warehouse-stock-toolbar,.warehouse-stock-meta-form,.supplier-monitor-toolbar,.catalog-quality-toolbar,.telegram-conversation-filters,.product-link-import-filters,.allegro-listing-advanced-grid,.profitability-controls,.orders-toolbar,.diag-toolbar){grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))!important}
+body.admin-mode .admin-tresc :is(.orders-stat-grid,.supplier-monitor-stats,.telegram-hub-kpis,.product-link-import-stats,.agent-command-metrics,.warehouse-stock-summary){grid-template-columns:repeat(auto-fit,minmax(min(100%,135px),1fr))!important}
+body.admin-mode .admin-tresc :is(.diag-actions,.admin-workspace-actions,.section-head,.order-section-head,.warehouse-stock-results,.allegro-listing-results-head,.admin-results-operations,.admin-results-selection){max-width:100%;flex-wrap:wrap}
+body.admin-mode .admin-tresc :is(.telegram-message-stream,.telegram-incident-list,.warehouse-document-list){max-height:none;overflow:visible;scrollbar-gutter:auto}
+
+@media(max-width:1180px){
+  body.admin-mode .admin-tresc :is(.warehouse-document-layout,.warehouse-location-layout,.telegram-hub-columns,.product-link-import-progress-layout,.catalog-quality-hero,.agent-command-center){grid-template-columns:minmax(0,1fr)!important}
+  body.admin-mode .admin-tresc :is(.warehouse-stock-card-head,.warehouse-stock-actions,.warehouse-document-entry,.telegram-hub-hero){grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr))!important}
+  body.admin-mode .admin-tresc :is(.warehouse-stock-card-grid,.warehouse-stock-meta-form,.agent-command-presets){grid-template-columns:repeat(auto-fit,minmax(min(100%,155px),1fr))!important}
+  body.admin-mode .admin-tresc :is(.warehouse-adjust,.infakt-match-control,.account-telegram-access,.warehouse-document-create,.supplier-availability,.supplier-history,.supplier-sale-decision,.warehouse-document-product,.warehouse-worktable-actions){min-width:0!important;width:100%;max-width:100%}
+}
+
+@media(max-width:1280px){
+  body.admin-mode table.admin-responsive-table,body.admin-mode table.admin-responsive-table :is(tbody,tfoot){display:block;width:100%;border:0;background:transparent}
+  body.admin-mode table.admin-responsive-table thead{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+  body.admin-mode table.admin-responsive-table :is(tbody,tfoot)>tr{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,310px),1fr));gap:0;margin:0 0 .7rem;overflow:hidden;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 4px 14px rgba(15,23,42,.04)}
+  body.admin-mode table.admin-responsive-table :is(tbody,tfoot)>tr[hidden]{display:none!important}
+  body.admin-mode table.admin-responsive-table td{display:grid!important;grid-template-columns:minmax(92px,34%) minmax(0,1fr);align-items:start;gap:.55rem;width:auto!important;min-height:44px;padding:.6rem .7rem!important;border:0!important;border-bottom:1px solid color-mix(in srgb,var(--line) 72%,transparent)!important;background:transparent!important;text-align:left!important}
+  body.admin-mode table.admin-responsive-table td::before{content:attr(data-label);align-self:start;color:var(--muted2);font-size:.6rem;font-weight:900;line-height:1.35;text-transform:uppercase;letter-spacing:.025em}
+  body.admin-mode table.admin-responsive-table td[data-label=""]{grid-template-columns:minmax(0,1fr)}
+  body.admin-mode table.admin-responsive-table td[data-label=""]::before{display:none}
+  body.admin-mode table.admin-responsive-table td[colspan]{grid-column:1/-1}
+  body.admin-mode table.admin-responsive-table td>:first-child{min-width:0;max-width:100%}
+  body.admin-mode table.admin-responsive-table td :is(.btn,input,select,textarea){white-space:normal}
+  body.admin-mode table.admin-responsive-table :is(.catalog-quality-product,.warehouse-document-product,.product-link-import-name){grid-template-columns:auto minmax(0,1fr);min-width:0}
+}
+
+@media(max-width:720px){
+  body.admin-mode .admin-page{padding:6px!important;gap:8px}
+  body.admin-mode .admin-workspace-header,body.admin-mode .admin-mobile-menu,body.admin-mode .admin-tresc .panel{border-radius:12px}
+  body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.3rem}
+  body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs)>:is(a,button){width:100%;min-height:42px;padding:.45rem .5rem;font-size:.7rem}
+  body.admin-mode .admin-tresc .agent-module-nav{display:grid;gap:.5rem;padding:.65rem}
+  body.admin-mode .admin-tresc .agent-module-groups{display:grid;gap:.55rem}
+  body.admin-mode .admin-tresc .agent-module-groups>section>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  body.admin-mode .admin-tresc .agent-module-groups a{justify-content:center;padding:.5rem;font-size:.66rem;text-align:center}
+  body.admin-mode table.admin-responsive-table :is(tbody,tfoot)>tr{grid-template-columns:minmax(0,1fr)}
+  body.admin-mode table.admin-responsive-table td{grid-template-columns:minmax(88px,31%) minmax(0,1fr);padding:.55rem .6rem!important}
+  body.admin-mode .admin-tresc :is(.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection)>*{flex:1 1 min(100%,170px);width:auto;max-width:100%}
+  body.admin-mode .admin-tresc :is(.section-head,.order-section-head,.allegro-listing-results-head){align-items:stretch;flex-direction:column}
+  body.admin-mode .admin-tresc :is(.section-head,.order-section-head,.allegro-listing-results-head)>*{width:100%;max-width:100%}
+}
+
+@media(max-width:420px){
+  body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs),body.admin-mode .admin-tresc .agent-module-groups>section>div{grid-template-columns:minmax(0,1fr)}
+  body.admin-mode table.admin-responsive-table td{grid-template-columns:minmax(78px,30%) minmax(0,1fr);font-size:.72rem}
+}

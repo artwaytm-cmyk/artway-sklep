@@ -34,6 +34,7 @@ export const ASSET_BUNDLES = Object.freeze([
     banner: '/* GENERATED FILE — edit src/frontend/*.js and run npm run build */',
     sources: [
       'src/frontend/08-admin-navigation.js',
+      'src/frontend/08a-admin-responsive-layout.js',
       'src/frontend/10-agent-ai.js',
       'src/frontend/10a-telegram-communications.js',
       'src/frontend/10-warehouse-locations.js',
@@ -109,6 +110,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/27-allegro-listing-workspace.css',
       'src/styles/28-agent-ai-workspace.css',
       'src/styles/29-commerce-catalog-actions.css',
+      'src/styles/30-admin-fluid-layout.css',
     ],
   },
 ]);
