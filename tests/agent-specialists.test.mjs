@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAgentSpecialists, productEditorialFingerprint, productEditorialQuality, productEditorialState, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
+import { automaticEditorialAssessment, createAgentSpecialists, productEditorialFingerprint, productEditorialQuality, productEditorialState, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
 import { createAgentSpecialistRoute } from '../netlify/functions/lib/agent-specialist-route.mjs';
 
 function memoryRepository(initial = {}) {
@@ -45,6 +45,21 @@ test('końcowy zapis opisu usuwa techniczny stan dostawcy oraz identyfikatory ka
   assert.equal(patch.opisKrotki, 'Gra edukacyjna.');
   assert.doesNotMatch(patch.opis, /Kod producenta|EAN|2648|5906018026481/i);
   assert.match(patch.opis, /spostrzegawczość/i);
+});
+
+test('uwaga o niewprowadzaniu sprzeczności nie jest błędnie traktowana jako konflikt produktu', () => {
+  const assessment = automaticEditorialAssessment({ target: { channels: 'store_only' }, result: {
+    confidence: 0.94,
+    editorialNotes: ['Upewnij się, aby nie wprowadzać sprzeczności w przyszłych aktualizacjach.'],
+    fields: [
+      { key: 'title', value: 'Gra rodzinna Alexander' },
+      { key: 'short_description', value: 'Rodzinna gra rozwijająca spostrzegawczość.' },
+      { key: 'long_description', value: '<h2>Wspólna rozgrywka</h2><p>Gra rodzinna pozwala ćwiczyć spostrzegawczość i logiczne myślenie podczas wspólnej zabawy.</p><p>Czytelne zasady ułatwiają rozpoczęcie rozgrywki i poznanie jej najważniejszych elementów.</p>' },
+      { key: 'seo_title', value: 'Gra rodzinna Alexander' },
+      { key: 'seo_description', value: 'Poznaj rodzinną grę Alexander rozwijającą spostrzegawczość i logiczne myślenie.' },
+    ],
+  } });
+  assert.equal(assessment.eligible, true);
 });
 
 test('GPT-5 nano używa Responses API, ścisłego schematu i pamięci identycznego zadania', async () => {

@@ -393,7 +393,7 @@ function productPatch(result = {}) {
 
 function editorialIdentityConflict(result = {}) {
   const notes = [...(result.editorialNotes || []), ...(result.warnings || []), ...(result.missingFacts || [])].join(' ')
-    .replace(/\b(?:nie\s+wprowadz\w*|bez)\s+sprzeczno[śs]ci\b/gi, '');
+    .replace(/\b(?:nie\s+wprowadza\S*|bez)\s+sprzeczno[śs]ci\b/gi, '');
   return /(?:sprzeczn|niejednoznaczn|nie da si[eę].{0,30}rozpozna|tożsamo[śs][ćc].{0,30}(?:niepew|brak|konflikt)|inny produkt|różne produkty)/i.test(notes);
 }
 
