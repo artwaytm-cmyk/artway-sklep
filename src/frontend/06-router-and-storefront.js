@@ -298,7 +298,8 @@ function renderuj(){
       else if(t==="/admin/allegro/komunikacja" || t==="/admin/allegro/wiadomosci") w.innerHTML = widokAdminAllegro("wiadomosci");
       else if(t==="/admin/allegro/dyskusje") w.innerHTML = widokAdminAllegro("dyskusje");
       else if(t==="/admin/allegro/ustawienia") w.innerHTML = widokAdminAllegro("ustawienia");
-      else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
+      else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki("zlecenia");
+      else if(t.startsWith("/admin/wysylki/")) w.innerHTML = widokAdminWysylki(t.split("/")[3]||"zlecenia");
       else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn("pulpit");
       else if(t.startsWith("/admin/magazyn/")) w.innerHTML = widokAdminMagazyn(t.split("/")[3]||"pulpit");
       else if(t==="/admin/infakt") w.innerHTML = widokAdminInfakt("pulpit");

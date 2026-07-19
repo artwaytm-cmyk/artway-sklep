@@ -15,6 +15,9 @@ test('Plan zawiera ręczne dokumenty PZ i WZ z jednym końcowym księgowaniem', 
   assert.match(source, /warehouse-document-line-remove/);
   assert.match(source, /warehouse-document-delete/);
   assert.match(source, /Usuń szkic trwale/);
+  assert.match(source, /data-warehouse-document-decision="delete"/);
+  assert.ok(source.indexOf('${magazynDokumentDecyzjaHTML(doc)}${draftWorkspace}')>source.indexOf('function magazynDokumentEditorHTML'));
+  assert.match(source, /Zaksięgowanego PZ\/WZ nie usuwa się bez korekty stanu/);
   assert.match(source, /warehouse-document-correction/);
   assert.match(source, /Utwórz korektę/);
   assert.match(source, /warehouse-document-drawer/);

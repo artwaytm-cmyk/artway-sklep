@@ -1749,22 +1749,16 @@ function magazynSubnavHTML(aktywny="pulpit"){
   const plan=potrzebyZatowarowania(),braki=plan.length;
   const bezLok=magazynLokalizacjeZamowienIds.size;
   const dokumenty=(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny).length,planAkcje=braki+dokumenty;
-  const groups=[
-    {label:"Centrum",items:[{id:"pulpit",href:"#/admin/magazyn",icon:"📊",label:"Pulpit"}]},
-    {label:"Kontrola",items:[
-      {id:"dostawcy",href:"#/admin/magazyn/dostawcy",icon:"🏭",label:"Dostępność",badge:braki||""},
-      {id:"stany",href:"#/admin/magazyn/stany",icon:"📦",label:"Stany produktów",badge:braki||""}
-    ]},
-    {label:"Struktura",items:[
-      {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",icon:"🗺️",label:"Lokalizacje",badge:bezLok||""},
-      {id:"etykiety-qr",href:"#/admin/magazyn/etykiety-qr",label:"🏷️ Etykiety i kody QR",short:"Etykiety QR",icon:"🏷️"}
-    ]},
-    {label:"Operacje",items:[
-      {id:"plan",href:"#/admin/magazyn/plan",icon:"📥",label:"Zatowarowanie i PZ/WZ",badge:planAkcje||""},
-      {id:"ruchy",href:"#/admin/magazyn/ruchy",icon:"🧾",label:"Ruchy i ustawienia"}
-    ]}
+  const items=[
+    {id:"pulpit",href:"#/admin/magazyn",icon:"📊",label:"Pulpit",description:"Priorytety"},
+    {id:"dostawcy",href:"#/admin/magazyn/dostawcy",icon:"🏭",label:"Dostępność",description:"Producenci",badge:braki||""},
+    {id:"stany",href:"#/admin/magazyn/stany",icon:"📦",label:"Stany",description:"Towar i rezerwacje",badge:braki||""},
+    {id:"plan",href:"#/admin/magazyn/plan",icon:"📥",label:"Plan i dokumenty",description:"Zatowarowanie • PZ/WZ",badge:planAkcje||""},
+    {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",icon:"🗺️",label:"Lokalizacje",description:"Obszary • regały • półki",badge:bezLok||""},
+    {id:"etykiety-qr",href:"#/admin/magazyn/etykiety-qr",icon:"🏷️",label:"Etykiety QR",description:"Druk i skanowanie"},
+    {id:"ruchy",href:"#/admin/magazyn/ruchy",icon:"🧾",label:"Ruchy i ustawienia",description:"Audyt magazynu"}
   ];
-  return `<nav class="panel admin-tabs-panel module-tabs-panel warehouse-module-nav" aria-label="Podsekcje magazynu"><div class="warehouse-module-brand"><span>🏬</span><div><small>Centrum operacyjne</small><b>Magazyn</b></div></div><div class="warehouse-module-groups">${groups.map(group=>`<section><small>${esc(group.label)}</small><div>${group.items.map(item=>`<a class="${item.id===aktywny?"active":""}" href="${esc(item.href)}" ${item.id===aktywny?'aria-current="page"':""}><span class="warehouse-nav-icon">${esc(item.icon)}</span><span class="tab-label">${esc(item.short||item.label)}</span>${item.badge?`<span class="nav-badge">${esc(item.badge)}</span>`:""}</a>`).join("")}</div></section>`).join("")}</div></nav>`;
+  return `<nav class="panel warehouse-module-nav" aria-label="Podstrony magazynu"><div class="warehouse-module-brand"><span>🏬</span><div><small>Centrum operacyjne</small><b>Magazyn</b></div></div><div class="warehouse-module-links">${items.map(item=>`<a class="${item.id===aktywny?"active":""}" href="${esc(item.href)}" ${item.id===aktywny?'aria-current="page"':""} title="${esc(`${item.label} — ${item.description}`)}"><span class="warehouse-nav-icon">${esc(item.icon)}</span><span class="warehouse-nav-copy"><b>${esc(item.label)}</b><small>${esc(item.description)}</small></span>${item.badge?`<span class="nav-badge">${esc(item.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
 }
 function agentAISubnavHTML(aktywny="pulpit"){
   const analiza=agentAIAnaliza();

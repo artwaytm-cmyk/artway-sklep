@@ -9,9 +9,10 @@ const styles = await readFile(new URL('../src/styles/21-warehouse-workspace.css'
 
 test('magazyn ma jedną nawigację pogrupowaną według procesu pracy', () => {
   const section = navigation.slice(navigation.indexOf('function magazynSubnavHTML'), navigation.indexOf('function agentAISubnavHTML'));
-  for (const label of ['Centrum', 'Kontrola', 'Struktura', 'Operacje']) assert.match(section, new RegExp(`label:"${label}"`));
   for (const route of ['dostawcy', 'stany', 'lokalizacje', 'etykiety-qr', 'plan', 'ruchy']) assert.ok(section.includes(`#/admin/magazyn/${route}`));
   assert.match(section, /warehouse-module-nav/);
+  assert.match(section, /warehouse-module-links/);
+  assert.match(section, /description:"Zatowarowanie • PZ\/WZ"/);
   assert.match(section, /aria-current="page"/);
 });
 
@@ -30,7 +31,8 @@ test('wspólny wygląd magazynu jest responsywny i ładowany wyłącznie z panel
   assert.ok(admin.sources.includes('src/styles/21-warehouse-workspace.css'));
   assert.ok(!publicStyles.sources.includes('src/styles/21-warehouse-workspace.css'));
   assert.match(styles, /@media\(max-width:760px\)/);
-  assert.match(styles, /warehouse-module-groups/);
+  assert.match(styles, /warehouse-module-links/);
+  assert.match(styles, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(styles, /warehouse-page-context/);
   assert.match(styles, /warehouse-document-layout/);
   assert.match(styles, /warehouse-location-command-center/);
