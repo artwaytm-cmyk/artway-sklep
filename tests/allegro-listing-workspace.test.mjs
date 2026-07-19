@@ -1,0 +1,41 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {readFile} from "node:fs/promises";
+import {ASSET_BUNDLES} from "../scripts/build-assets.mjs";
+
+const root=new URL("../",import.meta.url);
+const read=path=>readFile(new URL(path,root),"utf8");
+
+test("podstrona wystawiania ma widoczny pojedynczy i masowy przycisk publikacji",async()=>{
+  const source=await read("src/frontend/12b-allegro-listing-workspace.js");
+  for(const marker of ["Wystaw na Allegro","Aktywuj ofertę","Opublikuj aktualizację","Wystaw zaznaczone","Wystaw gotowe z widoku"]){
+    assert.match(source,new RegExp(marker));
+  }
+  assert.match(source,/allegroPublikacjaOtworzDecyzje/);
+  assert.match(source,/asortymentPrzygotujOperacjeZewnetrzna/);
+  assert.match(source,/asortymentDecyzjaZewnetrznaHTML/);
+});
+
+test("publikacja zachowuje kontrolę Agenta, blokadę braków i jawne potwierdzenie API",async()=>{
+  const listing=await read("src/frontend/12b-allegro-listing-workspace.js"),actions=await read("src/frontend/12a-product-actions.js");
+  assert.match(listing,/allegroBrakiProduktuDoWystawienia/);
+  assert.match(listing,/asortymentUruchomAgenta\(ids,"allegro"\)/);
+  assert.match(listing,/system blokuje duplikaty/i);
+  assert.match(actions,/data-external-product-confirm/);
+  assert.match(actions,/allegro-connection-check/);
+  assert.match(actions,/approval:\{approved:true,operationId/);
+});
+
+test("centrum wystawiania skaluje katalog przez filtry, limit, paginację i eksport",async()=>{
+  const source=await read("src/frontend/12b-allegro-listing-workspace.js"),styles=await read("src/styles/27-allegro-listing-workspace.css");
+  for(const marker of ["EAN","EXTERNAL_ID","kod producenta","Sortowanie","Na stronie","Eksportuj zaznaczone","Strona <b>"]){
+    assert.match(source,new RegExp(marker));
+  }
+  assert.match(source,/\[25,50,100,250,500,1000\]/);
+  assert.match(source,/allegroWystawianieStrona/);
+  assert.match(styles,/\.allegro-publication-card/);
+  assert.match(styles,/@media\(max-width:820px\)/);
+  const js=ASSET_BUNDLES.find(bundle=>bundle.output==="assets/admin.js"),css=ASSET_BUNDLES.find(bundle=>bundle.output==="assets/admin.css");
+  assert.ok(js.sources.includes("src/frontend/12b-allegro-listing-workspace.js"));
+  assert.ok(css.sources.includes("src/styles/27-allegro-listing-workspace.css"));
+});

@@ -5,7 +5,11 @@ let asortymentAllegroDecyzja={step:"idle",busy:false,operation:"update",ids:[],s
 function asortymentProduktPoId(rawId){return produktyDoAdministracji().find(p=>String(p.id)===String(rawId))||pobierzProduktAdmin(Number(rawId))||null;}
 function asortymentOfertaProduktu(p={}){return allegroOfertaDlaProduktuSklepu(p)||(p.allegroOfferId?allegroOfertaPoId(String(p.allegroOfferId)):null);}
 function asortymentProduktyZId(ids=[]){return [...new Set(ids.map(String))].map(asortymentProduktPoId).filter(p=>p&&!czyProduktAdminWKoszu(p));}
-function asortymentOdswiezCentrumDzialan(){const el=document.querySelector("[data-product-agent-center]");if(el)el.innerHTML=asortymentCentrumDzialanHTML();}
+function asortymentOdswiezCentrumDzialan(){
+  const listing=document.querySelector("[data-allegro-publication-center]");
+  if(listing&&typeof allegroPublikacjaCentrumOperacjiHTML==="function")listing.innerHTML=allegroPublikacjaCentrumOperacjiHTML();
+  const el=document.querySelector("[data-product-agent-center]");if(el)el.innerHTML=asortymentCentrumDzialanHTML();
+}
 function asortymentOdswiezStanZaznaczenia(){
   document.querySelectorAll("[data-assortment-product-id]").forEach(input=>{const checked=zaznaczoneProdukty.has(Number(input.dataset.assortmentProductId))||zaznaczoneProdukty.has(input.dataset.assortmentProductId);input.checked=checked;input.closest("tr")?.classList.toggle("is-selected",checked);});
   document.querySelectorAll("[data-product-selection-count]").forEach(el=>{el.textContent=String(zaznaczoneProdukty.size);});
