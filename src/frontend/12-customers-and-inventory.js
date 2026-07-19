@@ -1403,10 +1403,7 @@ function formularzProduktu(p, tryb){
         <div id="allegroDescriptionPreview"></div>
       </details>
       <div class="f-group"><label>Opis krótki <small style="font-weight:400;color:var(--muted2)">widoczny na kartach i pod tytułem produktu</small></label><textarea name="opisKrotki" rows="3" maxlength="500" placeholder="Krótki, zachęcający opis w 1–2 zdaniach.">${esc(p.opisKrotki||p.krotkiOpis||"")}</textarea></div>
-      <div class="diag-actions" style="margin-top:-.35rem">
-        <button class="btn ghost" type="button" onclick="agentAIPoprawOpisyWFormularzu(this.form)">🤖 Popraw opisy stylistycznie</button>
-        <button class="btn ghost" type="button" onclick="allegroPoprawOpisyWFormularzu(this)">🟠 Popraw opisy i układ Allegro</button>
-      </div>
+      <div class="backend-note product-editorial-automatic" style="margin-top:-.35rem"><b>✨ Redakcja automatyczna:</b> Agent sam przygotowuje i zapisuje wspólną treść sklepu oraz Allegro. Opis krótki trafia do pola poniżej tytułu, a opis długi do pełnej karty produktu — bez przycisku i bez zatwierdzania.</div>
       <div class="f-group"><label>Opis długi <small style="font-weight:400;color:var(--muted2)">pełna treść strony produktu i podstawa układu Allegro</small></label><textarea name="opis" rows="9" maxlength="20000">${esc(p.opis||"")}</textarea></div>
       <details ${(p.seoTitle||p.seoDescription)?"open":""} class="product-seo-editor">
         <summary>📣 Pozycjonowanie produktu</summary>

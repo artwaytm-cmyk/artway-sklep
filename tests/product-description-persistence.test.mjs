@@ -8,6 +8,15 @@ test('edytor produktu ma niezależny opis krótki i długi oraz tytuł Allegro',
   assert.match(source, /name="opis"/);
   assert.match(source, /Opis długi/);
   assert.match(source, /name="allegroTitle"/);
+  assert.match(source, /Redakcja automatyczna/);
+  assert.doesNotMatch(source, /<button[^>]+agentAIPoprawOpisyWFormularzu/);
+  assert.doesNotMatch(source, /<button[^>]+allegroPoprawOpisyWFormularzu/);
+});
+
+test('panel Agenta nie wymaga ręcznego zatwierdzania treści produktu', async () => {
+  const source = await readFile('src/frontend/10-agent-ai.js', 'utf8');
+  assert.doesNotMatch(source, /<button[^>]+agentAISpecjalistaZatwierdzProdukt/);
+  assert.match(source, /Agent ponowi redakcję automatycznie — bez klikania/);
 });
 
 test('poprawa zapisuje wspólną treść sklepu i Allegro oraz układ w kartotece serwerowej', async () => {

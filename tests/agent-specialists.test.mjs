@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAgentSpecialists, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
+import { createAgentSpecialists, productEditorialFingerprint, productEditorialQuality, productEditorialState, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
 import { createAgentSpecialistRoute } from '../netlify/functions/lib/agent-specialist-route.mjs';
 
 function memoryRepository(initial = {}) {
@@ -132,6 +132,61 @@ test('automatyczny cykl sam zapisuje kompletną bezpieczną redakcję bez okresu
   assert.equal(status.lastCycle.editorialProgress.ready, 1);
   assert.equal(status.lastCycle.editorialProgress.pending, 0);
   assert.match(status.policy.neverAutomatic.join(' '), /Wiadomość do klienta/i);
+});
+
+test('stare oznaczenie ready nie ukrywa surowego opisu dostawcy i Agent nadpisuje oba pola opisów', async () => {
+  const legacy = {
+    id: 100, nazwa: 'Loteryjka obrazkowa', producent: 'Alexander', kategoria: 'Gry edukacyjne', gtin: '5906018000108',
+    opisKrotki: 'Dodaj do porównania. Produkt dostępny.',
+    opis: '<p>Dodaj do listy zakupowej. 810 szt. Produkt dostępny. Skontaktuj się z nami.</p><p>Gra obrazkowa przeznaczona do wspólnej zabawy.</p>',
+    seoTitle: 'Loteryjka obrazkowa – Alexander', seoDescription: 'Gra obrazkowa Alexander dla dzieci.',
+  };
+  const fingerprint = productEditorialFingerprint(legacy);
+  legacy.contentEditorial = { status: 'ready', promptVersion: PROMPT_VERSION, inputFingerprint: fingerprint, channels: 'store_only' };
+  assert.equal(productEditorialQuality(legacy).ready, false);
+  assert.deepEqual(productEditorialQuality(legacy).issues.sort(), ['comparison_control', 'shopping_list_control', 'source_availability', 'source_contact', 'source_stock'].sort());
+  assert.equal(productEditorialState(legacy).current, false);
+
+  const longDescription = '<h2>Wspólna zabawa z obrazkami</h2><p>Loteryjka obrazkowa pomaga ćwiczyć spostrzegawczość i kojarzenie elementów podczas rodzinnej rozgrywki.</p><ul><li>Czytelne ilustracje</li><li>Proste zasady zabawy</li></ul>';
+  const fields = [
+    { key: 'title', label: 'Nazwa', value: 'Loteryjka obrazkowa' },
+    { key: 'short_description', label: 'Opis krótki', value: 'Obrazkowa gra rozwijająca spostrzegawczość i umiejętność kojarzenia.' },
+    { key: 'long_description', label: 'Opis pełny', value: longDescription },
+    { key: 'seo_title', label: 'SEO title', value: 'Loteryjka obrazkowa – Alexander' },
+    { key: 'seo_description', label: 'SEO description', value: 'Poznaj loteryjkę obrazkową Alexander wspierającą spostrzegawczość podczas zabawy.' },
+    { key: 'seo_keywords', label: 'Frazy', value: 'loteryjka obrazkowa, Alexander' },
+  ];
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [legacy] }, rev: 1 } });
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-19T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } }) });
+  const cycle = await service.automaticCycle();
+  assert.equal(cycle.applied.length, 1);
+  const saved = repo.values.get('settings').data.artway_produkty_dodane[0];
+  assert.equal(saved.opisKrotki, 'Obrazkowa gra rozwijająca spostrzegawczość i umiejętność kojarzenia.');
+  assert.equal(saved.opis, longDescription);
+  assert.equal(saved.agentTextMode, 'autonomous-editorial');
+  assert.ok(saved.agentTextRunId);
+  assert.ok(saved.agentTextReviewedAt);
+  assert.equal(productEditorialQuality(saved).ready, true);
+  assert.equal(productEditorialState(saved).current, true);
+});
+
+test('wynik zawierający kontrolki strony dostawcy jest automatycznie odrzucany także dla samego sklepu', async () => {
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 102, nazwa: 'Gra obrazkowa', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis źródłowy.' }] }, rev: 1 } });
+  const fields = [
+    { key: 'title', label: 'Nazwa', value: 'Gra obrazkowa Alexander' },
+    { key: 'short_description', label: 'Opis krótki', value: 'Produkt dostępny. Dodaj do porównania.' },
+    { key: 'long_description', label: 'Opis pełny', value: '<h2>Gra obrazkowa</h2><p>Dodaj do listy zakupowej. Produkt marki Alexander przeznaczony jest do wspólnej zabawy i ćwiczenia spostrzegawczości.</p><p>Ilustracje ułatwiają rozpoznawanie elementów oraz wspierają spokojną, rodzinną rozgrywkę.</p>' },
+    { key: 'seo_title', label: 'SEO title', value: 'Gra obrazkowa Alexander' },
+    { key: 'seo_description', label: 'SEO description', value: 'Gra obrazkowa producenta Alexander do wspólnej zabawy.' },
+    { key: 'seo_keywords', label: 'Frazy', value: 'gra obrazkowa, Alexander' },
+  ];
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-19T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } }) });
+  const cycle = await service.automaticCycle();
+  assert.equal(cycle.applied.length, 0);
+  assert.equal(cycle.prepared[0].reason, 'source_page_noise');
+  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  assert.equal(product.opisKrotki, 'Skrót');
+  assert.equal(product.contentEditorial.status, 'retry_pending');
 });
 
 test('kontrola Allegro zatrzymuje niedozwolony opis i planuje automatyczną ponowną próbę bez klikania', async () => {

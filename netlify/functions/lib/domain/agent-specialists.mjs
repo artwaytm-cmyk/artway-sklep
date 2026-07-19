@@ -23,7 +23,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-19.8';
+const PROMPT_VERSION = '2026-07-19.9';
 const AGENT_ACTION_POLICY = Object.freeze({
   automatic: Object.freeze([
     Object.freeze({ id: 'product_editorial', icon: '✨', label: 'Redakcja kart produktu', description: 'Nazwa, opis krótki, opis pełny, układ sekcji i SEO są zapisywane bez pytania, gdy wynik jest kompletny, zgodny i oparty na faktach.', configKey: 'autoApplyProductEditorial' }),
@@ -389,6 +389,34 @@ function editorialIdentityConflict(result = {}) {
   return /(?:sprzeczn|niejednoznaczn|nie da si[eę].{0,30}rozpozna|tożsamo[śs][ćc].{0,30}(?:niepew|brak|konflikt)|inny produkt|różne produkty)/i.test(notes);
 }
 
+const SOURCE_PAGE_NOISE = Object.freeze([
+  Object.freeze({ id: 'comparison_control', pattern: /\bdodaj\s+do\s+por[oó]wnania\b/i }),
+  Object.freeze({ id: 'shopping_list_control', pattern: /\bdodaj\s+do\s+listy\s+zakupowej\b/i }),
+  Object.freeze({ id: 'source_availability', pattern: /\bprodukt\s+(?:jest\s+)?dost[eę]pn(?:y|a|e)\b/i }),
+  Object.freeze({ id: 'source_contact', pattern: /\b(?:skontaktuj\s+si[eę]\s+z\s+nami|zapytaj\s+o\s+produkt)\b/i }),
+  Object.freeze({ id: 'availability_notification', pattern: /\bpowiadom\s+(?:mnie\s+)?o\s+dost[eę]pno[śs]ci\b/i }),
+  Object.freeze({ id: 'cart_control', pattern: /\b(?:przejd[źz]\s+do\s+koszyka|dodaj\s+do\s+koszyka)\b/i }),
+  Object.freeze({ id: 'source_stock', pattern: /(?:^|[>\s])\d{1,6}\s*szt\.\s*(?:produkt|dost[eę]pn|wysy[łl])/i }),
+  Object.freeze({ id: 'source_price', pattern: /\b(?:nasza\s+cena|cena\s+produktu)\s*:?\s*\d+[,.]\d{2}\s*z[łl]\b/i }),
+]);
+
+function productEditorialTextQuality(product = {}) {
+  const shortDescription = clean(product.opisKrotki || product.krotkiOpis || product.short_description, 4000);
+  const longDescription = clean(product.opis || product.long_description, 30_000);
+  const text = `${shortDescription}\n${longDescription}`;
+  const issues = SOURCE_PAGE_NOISE.filter((rule) => rule.pattern.test(text)).map((rule) => rule.id);
+  return { clean: issues.length === 0, issues, shortDescription, longDescription };
+}
+
+function productEditorialQuality(product = {}) {
+  const text = productEditorialTextQuality(product);
+  const mode = clean(product.agentTextMode, 80);
+  const persistedByAgent = ['autonomous-editorial', 'approved'].includes(mode)
+    && Boolean(clean(product.agentTextRunId, 160))
+    && Boolean(clean(product.agentTextReviewedAt, 80));
+  return { ...text, mode, persistedByAgent, ready: text.clean && persistedByAgent };
+}
+
 function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
   const patch = productPatch(run.result || {}), fields = Object.keys(patch);
   if (settings.autoApplyProductEditorial === false) return { eligible: false, reason: 'automatic_editorial_disabled', fields };
@@ -406,6 +434,8 @@ function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
     const compliance = allegroCheckText([patch.nazwa, patch.opisKrotki, patch.opis, patch.allegroTitle, patch.allegroDescription].filter(Boolean).join('\n'));
     if (!compliance.ok) return { eligible: false, reason: 'allegro_compliance', fields, violations: compliance.violations.map((item) => item.label) };
   }
+  const editorialQuality = productEditorialTextQuality(patch);
+  if (!editorialQuality.clean) return { eligible: false, reason: 'source_page_noise', fields, violations: editorialQuality.issues };
   return { eligible: true, reason: 'safe_editorial_policy', fields, modelNotes: [...(run.result?.warnings || []), ...(run.result?.missingFacts || [])].slice(0, 20) };
 }
 
@@ -475,7 +505,7 @@ function productEditorialFingerprint(product = {}, target = productEditorialTarg
 }
 
 function productEditorialState(product = {}) {
-  const target = productEditorialTarget(product), fingerprint = productEditorialFingerprint(product, target), editorial = product.contentEditorial || {};
+  const target = productEditorialTarget(product), fingerprint = productEditorialFingerprint(product, target), editorial = product.contentEditorial || {}, quality = productEditorialQuality(product);
   const complete = clean(product.nazwa || product.name, 300)
     && clean(product.opisKrotki || product.krotkiOpis, 500)
     && clean(product.opis, 30_000).length >= 150
@@ -485,13 +515,14 @@ function productEditorialState(product = {}) {
     && editorial.promptVersion === PROMPT_VERSION
     && editorial.inputFingerprint === fingerprint
     && editorial.channels === target.channels
+    && quality.ready
     && Boolean(complete);
   const reviewedSameInput = editorial.status === 'needs_review'
     && editorial.promptVersion === PROMPT_VERSION
     && editorial.inputFingerprint === fingerprint;
   const retryAt = Date.parse(editorial.retryAt || '');
   const retryDue = editorial.status !== 'retry_pending' || !Number.isFinite(retryAt) || retryAt <= Date.now();
-  return { target, fingerprint, current, reviewedSameInput, retryDue, complete: Boolean(complete), editorial };
+  return { target, fingerprint, current, reviewedSameInput, retryDue, complete: Boolean(complete), editorial, quality };
 }
 
 function communicationNeedsReply(item = {}) {
@@ -762,7 +793,7 @@ export function createAgentSpecialists({
       `Szczególne reguły: ${definition.rules}`,
       learnedGuidance ? `Pamięć zatwierdzeń administratora:\n${learnedGuidance}` : '',
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
-      specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Nie umieszczaj w opisie ceny, stanu, dostępności, terminu dostawy, danych kontaktowych, adresów stron, SKU ani EAN. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
+      specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Materiał ze strony źródłowej jest wyłącznie zbiorem faktów: usuń z niego menu, kontrolki sklepu, „Dodaj do porównania”, „Dodaj do listy zakupowej”, koszyk, dostępność, liczbę sztuk, ceny, terminy wysyłki, prośby o kontakt i powiadomienie o dostępności. Nie umieszczaj w opisie ceny, stanu, dostępności, terminu dostawy, danych kontaktowych, adresów stron, SKU ani EAN. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
       'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
       'Treść ma być konkretna, naturalna, uporządkowana i gotowa do sprawdzenia przez administratora.',
     ].filter(Boolean).join('\n');
@@ -1060,4 +1091,4 @@ export function createAgentSpecialists({
   return Object.freeze({ status, configure, run, applyProductDraft, updateDecision, prepareProductProposal, automaticCycle, specialists: SPECIALISTS });
 }
 
-export { AGENT_ACTION_POLICY, DEFAULT_CONFIG, NEVER_AUTOMATIC, PROMPT_VERSION, RESULT_SCHEMA, SPECIALISTS, activeDecision, automaticEditorialAssessment, communicationNeedsReply, learningAutonomy, normalizeDecision, normalizeLearning, normalizeProductContentEditorialResult, normalizeResult, productEditorialFingerprint, productEditorialState, productEditorialTarget, productFacts, productPatch, sanitizeContext };
+export { AGENT_ACTION_POLICY, DEFAULT_CONFIG, NEVER_AUTOMATIC, PROMPT_VERSION, RESULT_SCHEMA, SPECIALISTS, activeDecision, automaticEditorialAssessment, communicationNeedsReply, learningAutonomy, normalizeDecision, normalizeLearning, normalizeProductContentEditorialResult, normalizeResult, productEditorialFingerprint, productEditorialQuality, productEditorialState, productEditorialTarget, productEditorialTextQuality, productFacts, productPatch, sanitizeContext };
