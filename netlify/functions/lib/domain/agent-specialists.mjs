@@ -325,19 +325,35 @@ function normalizeResult(raw = {}, specialist) {
 }
 
 function normalizeProductContentEditorialResult(result = {}) {
-  const fields = Object.fromEntries((result.fields || []).map((field) => [field.key, clean(field.value, 30_000)]));
+  let editorialFields = Array.isArray(result.fields) ? result.fields : [];
+  const fallbackTitle = clean(result.title, 300), fallbackLong = clean(result.content, 30_000);
+  const fallbackPlain = fallbackLong.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const fallbackShort = clean(result.summary || fallbackPlain, 500);
+  if (!editorialFields.length && fallbackTitle && !/(?:szkic|redakcja|opis)\s+produktu/i.test(fallbackTitle) && fallbackShort && fallbackPlain.length >= 150) {
+    const fallbackSeoDescription = clean(fallbackShort || fallbackPlain, 180);
+    editorialFields = [
+      { key: 'title', label: 'Nazwa', value: fallbackTitle, currentValue: '', reason: 'Uzupełniono z kompletnego wyniku redaktora.', evidence: 'Tytuł zwrócony przez model.' },
+      { key: 'short_description', label: 'Opis krótki', value: fallbackShort, currentValue: '', reason: 'Uzupełniono z podsumowania redaktora.', evidence: 'Podsumowanie oparte na faktach produktu.' },
+      { key: 'long_description', label: 'Opis długi', value: fallbackLong, currentValue: '', reason: 'Uzupełniono z głównej treści redaktora.', evidence: 'Kompletna treść zwrócona przez model.' },
+      { key: 'seo_title', label: 'Tytuł SEO', value: fallbackTitle.slice(0, 70), currentValue: '', reason: 'Spójny tytuł wspólnej karty produktu.', evidence: 'Nazwa produktu zwrócona przez model.' },
+      { key: 'seo_description', label: 'Opis SEO', value: fallbackSeoDescription, currentValue: '', reason: 'Spójne podsumowanie wspólnej karty produktu.', evidence: 'Podsumowanie zwrócone przez model.' },
+      { key: 'seo_keywords', label: 'Frazy SEO', value: fallbackTitle, currentValue: '', reason: 'Bezpieczne frazy z nazwy produktu.', evidence: 'Nazwa produktu zwrócona przez model.' },
+    ];
+  }
+  const normalized = { ...result, fields: editorialFields };
+  const fields = Object.fromEntries(editorialFields.map((field) => [field.key, clean(field.value, 30_000)]));
   const complete = clean(fields.title, 300)
     && clean(fields.short_description, 1000)
     && clean(fields.long_description, 30_000).length >= 150
     && clean(fields.seo_title, 180)
     && clean(fields.seo_description, 300);
-  if (!complete) return { ...result, readyForApproval: false };
+  if (!complete) return { ...normalized, readyForApproval: false };
   // Redakcja nie może być blokowana dlatego, że karta nie zawiera opcjonalnego
   // parametru. Model ma pominąć taki fakt, a nie wymagać kliknięcia administratora.
   // Zgodność gotowej treści jest niezależnie sprawdzana deterministycznie przez
   // automaticEditorialAssessment przed jakimkolwiek zapisem.
   return {
-    ...result, editorialNotes: [...(result.warnings || []), ...(result.missingFacts || [])].slice(0, 20), missingFacts: [], warnings: [], confidence: Math.max(0.94, Number(result.confidence) || 0),
+    ...normalized, editorialNotes: [...(result.warnings || []), ...(result.missingFacts || [])].slice(0, 20), missingFacts: [], warnings: [], confidence: Math.max(0.94, Number(result.confidence) || 0),
     readyForApproval: true, complianceStatus: 'ready',
   };
 }
@@ -428,7 +444,8 @@ function productEditorialQuality(product = {}) {
 }
 
 function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
-  const patch = productPatch(run.result || {}), fields = Object.keys(patch);
+  const assessedResult = run.specialist === 'product_content' ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
+  const patch = productPatch(assessedResult), fields = Object.keys(patch);
   if (settings.autoApplyProductEditorial === false) return { eligible: false, reason: 'automatic_editorial_disabled', fields };
   if (!fields.length) return { eligible: false, reason: 'empty_patch', fields };
   const coreComplete = clean(patch.nazwa, 300)
@@ -437,8 +454,8 @@ function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
     && clean(patch.seoTitle, 180)
     && clean(patch.seoDescription, 300);
   if (!coreComplete) return { eligible: false, reason: 'incomplete_editorial', fields };
-  if (Number(run.result?.confidence || 0) < 0.25) return { eligible: false, reason: 'invalid_editorial_output', fields };
-  if (editorialIdentityConflict(run.result || {})) return { eligible: false, reason: 'product_identity_conflict', fields };
+  if (Number(assessedResult?.confidence || 0) < 0.25) return { eligible: false, reason: 'invalid_editorial_output', fields };
+  if (editorialIdentityConflict(assessedResult)) return { eligible: false, reason: 'product_identity_conflict', fields };
   const allegroTarget = run.target?.channels === 'shared_store_and_allegro' || run.target?.allegro === true;
   if (allegroTarget) {
     const compliance = allegroCheckText([patch.nazwa, patch.opisKrotki, patch.opis, patch.allegroTitle, patch.allegroDescription].filter(Boolean).join('\n'));
@@ -446,7 +463,7 @@ function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
   }
   const editorialQuality = productEditorialTextQuality(patch);
   if (!editorialQuality.clean) return { eligible: false, reason: 'source_page_noise', fields, violations: editorialQuality.issues };
-  return { eligible: true, reason: 'safe_editorial_policy', fields, modelNotes: [...(run.result?.warnings || []), ...(run.result?.missingFacts || [])].slice(0, 20) };
+  return { eligible: true, reason: 'safe_editorial_policy', fields, modelNotes: [...(assessedResult?.warnings || []), ...(assessedResult?.missingFacts || [])].slice(0, 20) };
 }
 
 function valuePresent(value) {
@@ -842,7 +859,8 @@ export function createAgentSpecialists({
     const current = await readState(), run = current.history.find((item) => item?.id === clean(id, 100));
     if (!run || run.status !== 'completed' || run.target?.type !== 'product' || !clean(run.target?.productId, 100)) throw Object.assign(new Error('Nie znaleziono szkicu produktu do zatwierdzenia.'), { code: 'agent_specialist_draft_not_found', status: 404 });
     if (['applied', 'auto_applied', 'not_needed'].includes(run.approvalStatus)) return { applied: false, duplicate: true, run };
-    const allProposed = productPatch(run.result), requestedKeys = new Set((Array.isArray(options.fieldKeys) ? options.fieldKeys : []).map((item) => PRODUCT_OUTPUT_TO_FIELD[clean(item, 80)] || clean(item, 80)).filter(Boolean));
+    const normalizedRunResult = run.specialist === 'product_content' ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
+    const allProposed = productPatch(normalizedRunResult), requestedKeys = new Set((Array.isArray(options.fieldKeys) ? options.fieldKeys : []).map((item) => PRODUCT_OUTPUT_TO_FIELD[clean(item, 80)] || clean(item, 80)).filter(Boolean));
     const proposedPatch = requestedKeys.size ? Object.fromEntries(Object.entries(allProposed).filter(([key]) => requestedKeys.has(key))) : allProposed;
     const productId = String(run.target.productId);
     let appliedPatch = {}, contentPatch = {}, beforePatch = {};
@@ -859,7 +877,7 @@ export function createAgentSpecialists({
       const inputFingerprint = options.editorialFingerprint || productEditorialFingerprint(effective, editorialTarget);
       const mergedProduct = { ...effective, ...patch };
       const editorialReady = run.specialist === 'product_content'
-        && (options.editorialPolicyValidated === true || (run.result?.readyForApproval === true && run.result?.complianceStatus === 'ready'))
+        && (options.editorialPolicyValidated === true || (normalizedRunResult?.readyForApproval === true && normalizedRunResult?.complianceStatus === 'ready'))
         && clean(mergedProduct.nazwa || mergedProduct.name, 300)
         && clean(mergedProduct.opisKrotki || mergedProduct.krotkiOpis, 500)
         && clean(mergedProduct.opis, 30_000).length >= 150;

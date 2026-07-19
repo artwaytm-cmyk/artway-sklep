@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { automaticEditorialAssessment, createAgentSpecialists, productEditorialFingerprint, productEditorialQuality, productEditorialState, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
+import { automaticEditorialAssessment, createAgentSpecialists, normalizeProductContentEditorialResult, productEditorialFingerprint, productEditorialQuality, productEditorialState, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
 import { createAgentSpecialistRoute } from '../netlify/functions/lib/agent-specialist-route.mjs';
 
 function memoryRepository(initial = {}) {
@@ -60,6 +60,18 @@ test('uwaga o niewprowadzaniu sprzeczności nie jest błędnie traktowana jako k
     ],
   } });
   assert.equal(assessment.eligible, true);
+});
+
+test('kompletna treść modelu bez tablicy fields jest automatycznie zamieniana na pola edytora', () => {
+  const result = normalizeProductContentEditorialResult({
+    title: 'Ale Pary – Jedzonko – Alexander',
+    summary: 'Edukacyjna gra z serii Ale Pary przeznaczona do wspólnej zabawy.',
+    content: '<h2>Wspólna zabawa</h2><p>Ale Pary – Jedzonko to edukacyjna gra marki Alexander, która wspiera spostrzegawczość oraz kojarzenie pasujących elementów.</p><p>Proste zasady pozwalają szybko rozpocząć rozgrywkę i skupić się na wspólnej zabawie.</p>',
+    fields: [], warnings: [], missingFacts: [], confidence: 0.55, readyForApproval: false, complianceStatus: 'ready',
+  });
+  assert.deepEqual(result.fields.map((field) => field.key), ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords']);
+  assert.equal(result.readyForApproval, true);
+  assert.equal(result.complianceStatus, 'ready');
 });
 
 test('GPT-5 nano używa Responses API, ścisłego schematu i pamięci identycznego zadania', async () => {
