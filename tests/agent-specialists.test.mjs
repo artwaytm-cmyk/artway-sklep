@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { automaticEditorialAssessment, createAgentSpecialists, normalizeProductContentEditorialResult, productEditorialFingerprint, productEditorialQuality, productEditorialState, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
+import { automaticEditorialAssessment, createAgentSpecialists, normalizeProductContentEditorialResult, productEditorialFingerprint, productEditorialQuality, productEditorialState, productFacts, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
 import { createAgentSpecialistRoute } from '../netlify/functions/lib/agent-specialist-route.mjs';
 
 function memoryRepository(initial = {}) {
@@ -45,6 +45,18 @@ test('końcowy zapis opisu usuwa techniczny stan dostawcy oraz identyfikatory ka
   assert.equal(patch.opisKrotki, 'Gra edukacyjna.');
   assert.doesNotMatch(patch.opis, /Kod producenta|EAN|2648|5906018026481/i);
   assert.match(patch.opis, /spostrzegawczość/i);
+});
+
+test('agent dostaje oczyszczone fakty zamiast kontrolek i stanu sklepu producenta', () => {
+  const facts = productFacts({
+    id: 113, nazwa: 'Ale Pary – Jedzonko', producent: 'Alexander',
+    opisKrotki: 'Dodaj do porównania Rozmiar: uniwersalny, 483 sztuki. Produkt dostępny.',
+    opis: 'Dodaj do listy zakupowej. Wysyłka w czwartek. Sprawdź czasy i koszty wysyłki. 12,00 zł brutto / 1 szt.',
+    sourceMaterial: { longDescription: 'Ale Pary – Jedzonko. Rozmiar uniwersalny 483 szt. Produkt jest dostępny.' },
+  });
+  const serialized = JSON.stringify(facts);
+  assert.doesNotMatch(serialized, /Dodaj do|483 szt|Produkt (?:jest )?dostępny|Wysyłka w|12,00 zł/i);
+  assert.match(serialized, /Ale Pary – Jedzonko/);
 });
 
 test('uwaga o niewprowadzaniu sprzeczności nie jest błędnie traktowana jako konflikt produktu', () => {

@@ -23,7 +23,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-19.12';
+const PROMPT_VERSION = '2026-07-19.13';
 const AGENT_ACTION_POLICY = Object.freeze({
   automatic: Object.freeze([
     Object.freeze({ id: 'product_editorial', icon: '✨', label: 'Redakcja kart produktu', description: 'Nazwa, opis krótki, opis pełny, układ sekcji i SEO są zapisywane bez pytania, gdy wynik jest kompletny, zgodny i oparty na faktach.', configKey: 'autoApplyProductEditorial' }),
@@ -375,13 +375,31 @@ function responseError(response, payload) {
   return error;
 }
 
+function sourceEditorialFacts(value = '', limit = 30_000) {
+  return clean(value, limit)
+    .replace(/\bdodaj\s+do\s+(?:por[oó]wnania|listy\s+zakupowej|koszyka)\b/gi, ' ')
+    .replace(/\brozmiar\s*:?\s*uniwersalny\s*[,;:-]?\s*\d{1,6}\s*szt(?:uk(?:a|i|ę|om)?|\.)?(?![a-ząćęłńóśźż])/gi, ' ')
+    .replace(/\bprodukt\s+(?:jest\s+)?dost[eę]pn(?:y|a|e)\b/gi, ' ')
+    .replace(/\bwysy[łl]ka\s+w\s+\S+|sprawd[źz]\s+czasy\s+i\s+koszty\s+wysy[łl]ki/gi, ' ')
+    .replace(/\b\d+[,.]\d{2}\s*z[łl](?:\s*brutto\s*\/\s*\d+\s*szt\.?)?/gi, ' ')
+    .replace(/(?:\s*[•|]\s*|\s{2,})/g, ' ').trim();
+}
+
 function productFacts(product = {}) {
+  const source = product.sourceMaterial && typeof product.sourceMaterial === 'object' ? product.sourceMaterial : {};
   return sanitizeContext({
     id: product.id, name: product.nazwa || product.name, category: product.kategoria, producer: product.producent || product.marka,
     ean: product.gtin || product.ean, producerCode: product.kodProducenta || product.mpn, price: product.cena,
-    shortDescription: product.opisKrotki || product.krotkiOpis, fullDescription: product.opis,
+    shortDescription: sourceEditorialFacts(source.shortDescription || product.opisKrotki || product.krotkiOpis, 4000),
+    fullDescription: sourceEditorialFacts(source.longDescription || source.allegroCatalogDescription || source.allegroOfferDescription || product.opis),
     parameters: product.parametry || product.parameters, age: product.wiek, players: product.gracze,
-    sourceUrl: product.sourceUrl || product.producentUrl, sourceMaterial: product.sourceMaterial,
+    sourceUrl: product.sourceUrl || product.producentUrl,
+    sourceMaterial: { ...source,
+      shortDescription: sourceEditorialFacts(source.shortDescription, 4000),
+      longDescription: sourceEditorialFacts(source.longDescription),
+      allegroCatalogDescription: sourceEditorialFacts(source.allegroCatalogDescription),
+      allegroOfferDescription: sourceEditorialFacts(source.allegroOfferDescription),
+    },
     seoTitle: product.seoTitle, seoDescription: product.seoDescription,
   });
 }
@@ -389,7 +407,7 @@ function productFacts(product = {}) {
 function productPatch(result = {}) {
   const fields = Object.fromEntries((result.fields || []).map((field) => [field.key, field.value]));
   const generatedDescription = (value, limit) => clean(value, limit)
-    .replace(/\brozmiar\s+uniwersalny\s+(?:to\s+)?\d{1,6}\s+szt(?:uk|\.)?\b[,.]?/gi, '')
+    .replace(/\brozmiar\s*:?\s*uniwersalny\s*[,;:-]?\s*(?:to\s+)?\d{1,6}\s+szt(?:uk(?:a|i|ę|om)?|\.)?(?![a-ząćęłńóśźż])[,.]?/gi, '')
     .replace(/\bEAN\s*:?\s*\d{8,14}\b[,.]?/gi, '')
     .replace(/\b(?:kod\s+producenta|SKU)\s*:?\s*[A-Za-z0-9][A-Za-z0-9._/-]{0,60}\b[,.]?/gi, '')
     .replace(/[ \t]{2,}/g, ' ')
@@ -421,7 +439,7 @@ const SOURCE_PAGE_NOISE = Object.freeze([
   Object.freeze({ id: 'availability_notification', pattern: /\bpowiadom\s+(?:mnie\s+)?o\s+dost[eę]pno[śs]ci\b/i }),
   Object.freeze({ id: 'cart_control', pattern: /\b(?:przejd[źz]\s+do\s+koszyka|dodaj\s+do\s+koszyka)\b/i }),
   Object.freeze({ id: 'source_stock', pattern: /(?:^|[>\s])\d{1,6}\s*szt\.\s*(?:produkt|dost[eę]pn|wysy[łl])/i }),
-  Object.freeze({ id: 'source_size_stock', pattern: /\brozmiar\s+uniwersalny\s+\d{1,6}\s*szt\.?\b/i }),
+  Object.freeze({ id: 'source_size_stock', pattern: /\brozmiar\s*:?\s*uniwersalny\s*[,;:-]?\s*\d{1,6}\s*szt(?:uk(?:a|i|ę|om)?|\.)?(?![a-ząćęłńóśźż])/i }),
   Object.freeze({ id: 'source_shipping_control', pattern: /\b(?:sprawd[źz]\s+czasy\s+i\s+koszty\s+wysy[łl]ki|wysy[łl]ka\s+w\s+(?:poniedzia[łl]ek|wtorek|[śs]rod[eę]|czwartek|pi[aą]tek|sobot[eę]|niedziel[eę]|dzisiaj|jutro))\b/i }),
   Object.freeze({ id: 'source_price', pattern: /\b(?:nasza\s+cena|cena\s+produktu)\s*:?\s*\d+[,.]\d{2}\s*z[łl]\b/i }),
 ]);
