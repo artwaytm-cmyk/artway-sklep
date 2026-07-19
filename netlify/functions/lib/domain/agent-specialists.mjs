@@ -886,8 +886,12 @@ export function createAgentSpecialists({
       }
       appliedPatch = safePatch;
       beforePatch = Object.fromEntries(Object.keys(safePatch).map((key) => [key, productFieldValue(effective, key) ?? effective[key] ?? '']));
-      if (index >= 0) { added[index] = { ...added[index], ...safePatch }; data.artway_produkty_dodane = added; }
-      else { const edited = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {}; edited[productId] = { ...(edited[productId] || {}), ...safePatch }; data.artway_produkty_edytowane = edited; }
+      const edited = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
+      // Warstwa artway_produkty_edytowane ma pierwszeństwo podczas odczytu.
+      // Jeśli już istnieje, zapis wyłącznie do produktu dodanego byłby niewidoczny
+      // w edytorze i stary opis wróciłby po odświeżeniu strony.
+      if (index >= 0 && !edited[productId]) { added[index] = { ...added[index], ...safePatch }; data.artway_produkty_dodane = added; }
+      else { edited[productId] = { ...(edited[productId] || {}), ...safePatch }; data.artway_produkty_edytowane = edited; }
       return { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: timestamp };
     });
     if (!Object.keys(appliedPatch).length) {
@@ -916,11 +920,9 @@ export function createAgentSpecialists({
         },
         contentEditorialSource: 'autonomous-agent-retry',
       };
-      if (index >= 0) { added[index] = { ...added[index], ...patch }; data.artway_produkty_dodane = added; }
-      else {
-        const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
-        edits[productId] = { ...(edits[productId] || {}), ...patch }; data.artway_produkty_edytowane = edits;
-      }
+      const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
+      if (index >= 0 && !edits[productId]) { added[index] = { ...added[index], ...patch }; data.artway_produkty_dodane = added; }
+      else { edits[productId] = { ...(edits[productId] || {}), ...patch }; data.artway_produkty_edytowane = edits; }
       return { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: timestamp };
     });
   }

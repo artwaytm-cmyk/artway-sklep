@@ -156,13 +156,18 @@ test('stare oznaczenie ready nie ukrywa surowego opisu dostawcy i Agent nadpisuj
     { key: 'seo_description', label: 'SEO description', value: 'Poznaj loteryjkę obrazkową Alexander wspierającą spostrzegawczość podczas zabawy.' },
     { key: 'seo_keywords', label: 'Frazy', value: 'loteryjka obrazkowa, Alexander' },
   ];
-  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [legacy] }, rev: 1 } });
+  const repo = memoryRepository({ settings: { data: {
+    artway_produkty_dodane: [legacy],
+    artway_produkty_edytowane: { '100': { opisKrotki: legacy.opisKrotki, opis: legacy.opis, allegroOfferId: 'offer-100' } },
+  }, rev: 1 } });
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-19T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } }) });
   const cycle = await service.automaticCycle();
   assert.equal(cycle.applied.length, 1);
-  const saved = repo.values.get('settings').data.artway_produkty_dodane[0];
+  const stored = repo.values.get('settings').data;
+  const saved = { ...stored.artway_produkty_dodane[0], ...stored.artway_produkty_edytowane['100'] };
   assert.equal(saved.opisKrotki, 'Obrazkowa gra rozwijająca spostrzegawczość i umiejętność kojarzenia.');
   assert.equal(saved.opis, longDescription);
+  assert.equal(stored.artway_produkty_edytowane['100'].opis, longDescription, 'zapis musi trafić do nadrzędnej warstwy edycji');
   assert.equal(saved.agentTextMode, 'autonomous-editorial');
   assert.ok(saved.agentTextRunId);
   assert.ok(saved.agentTextReviewedAt);
