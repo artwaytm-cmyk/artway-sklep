@@ -372,20 +372,28 @@ function productFacts(product = {}) {
 
 function productPatch(result = {}) {
   const fields = Object.fromEntries((result.fields || []).map((field) => [field.key, field.value]));
+  const generatedDescription = (value, limit) => clean(value, limit)
+    .replace(/\brozmiar\s+uniwersalny\s+(?:to\s+)?\d{1,6}\s+szt(?:uk|\.)?\b[,.]?/gi, '')
+    .replace(/\bEAN\s*:?\s*\d{8,14}\b[,.]?/gi, '')
+    .replace(/\b(?:kod\s+producenta|SKU)\s*:?\s*[A-Za-z0-9][A-Za-z0-9._/-]{0,60}\b[,.]?/gi, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([,.;:])/g, '$1')
+    .trim();
   const patch = {};
   if (fields.title) patch.nazwa = fields.title;
-  if (fields.short_description) patch.opisKrotki = fields.short_description;
-  if (fields.long_description) patch.opis = fields.long_description;
+  if (fields.short_description) patch.opisKrotki = generatedDescription(fields.short_description, 2000);
+  if (fields.long_description) patch.opis = generatedDescription(fields.long_description, 30_000);
   if (fields.seo_title) patch.seoTitle = fields.seo_title;
   if (fields.seo_description) patch.seoDescription = fields.seo_description;
   if (fields.seo_keywords) patch.seoKeywords = fields.seo_keywords;
   if (fields.allegro_title) patch.allegroTitle = fields.allegro_title;
-  if (fields.allegro_description) patch.allegroDescription = fields.allegro_description;
+  if (fields.allegro_description) patch.allegroDescription = generatedDescription(fields.allegro_description, 30_000);
   return patch;
 }
 
 function editorialIdentityConflict(result = {}) {
-  const notes = [...(result.editorialNotes || []), ...(result.warnings || []), ...(result.missingFacts || [])].join(' ');
+  const notes = [...(result.editorialNotes || []), ...(result.warnings || []), ...(result.missingFacts || [])].join(' ')
+    .replace(/\b(?:nie\s+wprowadz\w*|bez)\s+sprzeczno[śs]ci\b/gi, '');
   return /(?:sprzeczn|niejednoznaczn|nie da si[eę].{0,30}rozpozna|tożsamo[śs][ćc].{0,30}(?:niepew|brak|konflikt)|inny produkt|różne produkty)/i.test(notes);
 }
 

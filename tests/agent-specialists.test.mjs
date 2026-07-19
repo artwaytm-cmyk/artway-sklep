@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAgentSpecialists, productEditorialFingerprint, productEditorialQuality, productEditorialState, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
+import { createAgentSpecialists, productEditorialFingerprint, productEditorialQuality, productEditorialState, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
 import { createAgentSpecialistRoute } from '../netlify/functions/lib/agent-specialist-route.mjs';
 
 function memoryRepository(initial = {}) {
@@ -35,6 +35,16 @@ test('kontekst usuwa sekrety i prywatne dane przed wysłaniem do modelu', () => 
   assert.equal('phone' in safe, false);
   assert.equal('token' in safe.nested, false);
   assert.doesNotMatch(JSON.stringify(safe), /klient@example\.com|530\s*038\s*914|sk-proj-/);
+});
+
+test('końcowy zapis opisu usuwa techniczny stan dostawcy oraz identyfikatory katalogowe', () => {
+  const patch = productPatch({ fields: [
+    { key: 'short_description', value: 'Gra edukacyjna. Rozmiar uniwersalny 483 szt.' },
+    { key: 'long_description', value: '<p>Gra wspiera spostrzegawczość. Kod producenta: 2648, EAN 5906018026481.</p>' },
+  ] });
+  assert.equal(patch.opisKrotki, 'Gra edukacyjna.');
+  assert.doesNotMatch(patch.opis, /Kod producenta|EAN|2648|5906018026481/i);
+  assert.match(patch.opis, /spostrzegawczość/i);
 });
 
 test('GPT-5 nano używa Responses API, ścisłego schematu i pamięci identycznego zadania', async () => {
