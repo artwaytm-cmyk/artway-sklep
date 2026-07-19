@@ -1,7 +1,3 @@
-function adminSubnavHTML(items, aktywny){
-  const safe = (items||[]).filter(x=>x&&x.id&&x.href&&x.label);
-  return `<nav class="panel admin-tabs-panel module-tabs-panel" aria-label="Podsekcje panelu"><div class="shipping-tabs admin-main-tabs">${safe.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}" ${x.id===aktywny?'aria-current="page"':""} title="${esc(x.label)}"><span class="tab-label">${esc(x.label)}</span>${x.badge?`<span class="nav-badge">${esc(x.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
-}
 function magazynSubnavHTML(aktywny="pulpit"){
   const plan=potrzebyZatowarowania(),braki=plan.length;
   const bezLok=magazynLokalizacjeZamowienIds.size;
@@ -22,16 +18,6 @@ function magazynSubnavHTML(aktywny="pulpit"){
     ]}
   ];
   return `<nav class="panel admin-tabs-panel module-tabs-panel warehouse-module-nav" aria-label="Podsekcje magazynu"><div class="warehouse-module-brand"><span>🏬</span><div><small>Centrum operacyjne</small><b>Magazyn</b></div></div><div class="warehouse-module-groups">${groups.map(group=>`<section><small>${esc(group.label)}</small><div>${group.items.map(item=>`<a class="${item.id===aktywny?"active":""}" href="${esc(item.href)}" ${item.id===aktywny?'aria-current="page"':""}><span class="warehouse-nav-icon">${esc(item.icon)}</span><span class="tab-label">${esc(item.short||item.label)}</span>${item.badge?`<span class="nav-badge">${esc(item.badge)}</span>`:""}</a>`).join("")}</div></section>`).join("")}</div></nav>`;
-}
-function infaktSubnavHTML(aktywny="pulpit"){
-  return adminSubnavHTML([
-    {id:"pulpit",label:"📊 Pulpit",href:"#/admin/infakt"},
-    {id:"zamowienia",label:"📦 Zamówienia do faktury",href:"#/admin/infakt/zamowienia"},
-    {id:"faktury",label:"🧾 Faktury inFakt",href:"#/admin/infakt/faktury"},
-    {id:"dostawcy",label:"🏭 Faktury dostawców",href:"#/admin/infakt/dostawcy"},
-    {id:"szkice",label:"📝 Szkice robocze",href:"#/admin/infakt/szkice"},
-    {id:"ustawienia",label:"⚙️ Dostęp API",href:"#/admin/infakt/ustawienia"},
-  ],aktywny);
 }
 function agentAISubnavHTML(aktywny="pulpit"){
   const analiza=agentAIAnaliza();
@@ -63,30 +49,6 @@ function klienciSubnavHTML(aktywny="lista"){
     {id:"dodaj",href:"#/admin/klienci/dodaj",label:"➕ Dodaj klienta"},
     {id:"uprawnienia",href:"#/admin/klienci/uprawnienia",label:"🛡️ Uprawnienia",badge:admini},
     {id:"zamowienia",href:"#/admin/klienci/zamowienia",label:"📦 Zamówienia klientów"}
-  ],aktywny);
-}
-function eksportSubnavHTML(aktywny="import"){
-  return adminSubnavHTML([
-    {id:"import",href:"#/admin/eksport",label:"📥 Import produktów"},
-    {id:"eksport",href:"#/admin/eksport/eksport",label:"📤 Eksport produktów"},
-    {id:"kopie",href:"#/admin/eksport/kopie",label:"💾 Kopie i raporty"},
-    {id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja strony"}
-  ],aktywny);
-}
-function aktualizacjaSubnavHTML(aktywny="status"){
-  return adminSubnavHTML([
-    {id:"status",href:"#/admin/aktualizacja",label:"📡 Status"},
-    {id:"publikuj",href:"#/admin/aktualizacja/publikuj",label:"⬆️ Publikuj zmiany"},
-    {id:"index",href:"#/admin/aktualizacja/index",label:"📄 Nowy index.html"},
-    {id:"kopie",href:"#/admin/aktualizacja/kopie",label:"↩️ Kopie"}
-  ],aktywny);
-}
-function publikacjaSubnavHTML(aktywny="kontrola"){
-  return adminSubnavHTML([
-    {id:"kontrola",href:"#/admin/publikacja",label:"✅ Gotowość"},
-    {id:"pliki",href:"#/admin/publikacja/pliki",label:"📁 Pliki i hosting"},
-    {id:"kroki",href:"#/admin/publikacja/kroki",label:"🧭 Kroki publikacji"},
-    {id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja"}
   ],aktywny);
 }
 function allegroZgodnoscPozycje(){

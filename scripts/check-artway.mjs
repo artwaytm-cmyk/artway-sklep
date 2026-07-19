@@ -9,6 +9,14 @@ const files = [
   'assets/app.js',
   'assets/admin.css',
   'assets/admin.js',
+  'assets/admin-core.js',
+  'assets/admin-agent.js',
+  'assets/admin-warehouse.js',
+  'assets/admin-commerce.js',
+  'assets/admin-inventory.js',
+  'assets/admin-catalog.js',
+  'assets/admin-personalization.js',
+  'assets/admin-system.js',
   'products.json',
   'netlify/functions/store.mjs',
   'netlify/functions/lib/store-app.mjs',
@@ -400,7 +408,7 @@ requireMarkers('połączonych assets JS', app, [
   'inFakt i faktury',
 ]);
 
-if (!app.includes('"/admin/agent-ai": agentAIAnalizaAktywna(agentAIAnaliza()).length')) {
+if (!app.includes('const zadaniaAgenta=typeof agentAIAnalizaAktywna==="function"') || !app.includes('"/admin/agent-ai": zadaniaAgenta')) {
   fail('assets/app.js: licznik Agent AI musi uwzględniać wyłącznie aktywne zadania');
 }
 if (!app.includes('akcja:"#/admin/agent-ai/produkty"') || !app.includes('href:"#/admin/agent-ai/produkty"')) {

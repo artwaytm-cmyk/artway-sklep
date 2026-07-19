@@ -126,6 +126,107 @@ export const ASSET_BUNDLES = Object.freeze([
   },
 ]);
 
+// Runtime panelu jest dzielony według odpowiedzialności. `assets/admin.js`
+// pozostaje pełnym artefaktem kontrolnym dla testów statycznych i nie jest
+// pobierany przez przeglądarkę. Użytkownik dostaje wyłącznie rdzeń oraz moduły
+// potrzebne dla aktualnej trasy panelu.
+export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
+  {
+    output: 'assets/admin-core.js',
+    banner: '/* GENERATED ADMIN CORE — edit src/frontend/*.js and run npm run build */',
+    sources: [
+      'src/frontend/08-admin-navigation.js',
+      'src/frontend/08a-admin-responsive-layout.js',
+    ],
+  },
+  {
+    output: 'assets/admin-agent.js',
+    banner: '/* GENERATED ADMIN AGENT — loaded on demand */',
+    sources: [
+      'src/frontend/10-agent-ai.js',
+      'src/frontend/10-agent-ai-supplier-planning.js',
+      'src/frontend/10-agent-ai-command-center.js',
+      'src/frontend/10-agent-ai-admin-workspace.js',
+      'src/frontend/10a-telegram-communications.js',
+    ],
+  },
+  {
+    output: 'assets/admin-warehouse.js',
+    banner: '/* GENERATED ADMIN WAREHOUSE — loaded on demand */',
+    sources: [
+      'src/frontend/10-warehouse-locations.js',
+      'src/frontend/10-warehouse-qr.js',
+      'src/frontend/10-warehouse-documents.js',
+    ],
+  },
+  {
+    output: 'assets/admin-commerce.js',
+    banner: '/* GENERATED ADMIN COMMERCE — loaded on demand */',
+    sources: [
+      'src/frontend/11-allegro-procurement-actions.js',
+      'src/frontend/11-allegro-refresh-runtime.js',
+      'src/frontend/11-allegro-offer-management.js',
+      'src/frontend/11-allegro-order-workflow-ui.js',
+      'src/frontend/11-allegro-order-archive-ui.js',
+      'src/frontend/11-allegro-mapping-index.js',
+      'src/frontend/11-allegro-duplicate-decisions.js',
+      'src/frontend/11-order-location-ui.js',
+      'src/frontend/11-allegro-manual-mapping-actions.js',
+      'src/frontend/11-telegram-account-access-ui.js',
+      'src/frontend/11-allegro-and-orders.js',
+      'src/frontend/11-allegro-product-publication.js',
+      'src/frontend/11-allegro-operations.js',
+      'src/frontend/11-allegro-communications.js',
+      'src/frontend/11-allegro-workspace.js',
+      'src/frontend/11-store-orders.js',
+      'src/frontend/11-agent-ai-workspace.js',
+      'src/frontend/11-allegro-settings.js',
+    ],
+  },
+  {
+    output: 'assets/admin-inventory.js',
+    banner: '/* GENERATED ADMIN INVENTORY — loaded on demand */',
+    sources: [
+      'src/frontend/12-customers-and-inventory.js',
+      'src/frontend/12-infakt-admin.js',
+      'src/frontend/12-warehouse-views.js',
+      'src/frontend/12-product-editor.js',
+      'src/frontend/12a-product-actions.js',
+      'src/frontend/12b-allegro-listing-workspace.js',
+      'src/frontend/12c-commerce-catalog-actions.js',
+    ],
+  },
+  {
+    output: 'assets/admin-catalog.js',
+    banner: '/* GENERATED ADMIN CATALOG — loaded on demand */',
+    sources: [
+      'src/frontend/20-product-link-file-import-parser.js',
+      'src/frontend/21-product-link-file-import-ui.js',
+      'src/frontend/13-product-admin.js',
+      'src/frontend/14-categories-and-mapping.js',
+      'src/frontend/14a-category-workspace.js',
+    ],
+  },
+  {
+    output: 'assets/admin-personalization.js',
+    banner: '/* GENERATED ADMIN PERSONALIZATION — loaded on demand */',
+    sources: [
+      'src/frontend/15-personalization-and-publishing.js',
+      'src/frontend/15a-home-promotions-workspace.js',
+      'src/frontend/15b-banner-icon-studio.js',
+      'src/frontend/15c-campaign-studio-pro.js',
+    ],
+  },
+  {
+    output: 'assets/admin-system.js',
+    banner: '/* GENERATED ADMIN SYSTEM — loaded on demand */',
+    sources: [
+      'src/frontend/16-diagnostics.js',
+      'src/frontend/19-admin-dashboard.js',
+    ],
+  },
+]);
+
 async function renderBundle(bundle) {
   const parts = await Promise.all(bundle.sources.map(async (source) => {
     const content = await readFile(path.join(ROOT, source), 'utf8');
@@ -136,7 +237,7 @@ async function renderBundle(bundle) {
 
 export async function buildAssets({ check = false } = {}) {
   const differences = [];
-  for (const bundle of ASSET_BUNDLES) {
+  for (const bundle of [...ASSET_BUNDLES, ...ADMIN_RUNTIME_BUNDLES]) {
     const expected = await renderBundle(bundle);
     const outputPath = path.join(ROOT, bundle.output);
     if (check) {

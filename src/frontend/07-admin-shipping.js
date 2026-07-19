@@ -110,15 +110,20 @@ function adminMenuStatystyki(){
   if(adminMenuStatCache.powiadomienia&&adminMenuStatCache.revision===adminRewizjaDanych&&now<adminMenuStatCache.expiresAt){
     return {powiadomienia:{...adminMenuStatCache.powiadomienia},licznikOperacyjny:adminMenuStatCache.licznikOperacyjny};
   }
+  const allegroDoObslugi=typeof statusAllegroRezerwujeMagazyn==="function"?(Array.isArray(allegroZamowienia)?allegroZamowienia.filter(statusAllegroRezerwujeMagazyn).length:0):Number(allegroPodsumowanie?.orders?.active||0);
+  const komunikacjaDoObslugi=typeof allegroKomunikacjaStaty==="function"?Number(allegroKomunikacjaStaty().totalNeed||0):Number(allegroPodsumowanie?.communication?.needReply||0);
+  const zadaniaAgenta=typeof agentAIAnalizaAktywna==="function"&&typeof agentAIAnaliza==="function"?agentAIAnalizaAktywna(agentAIAnaliza()).length:0;
+  const brakiDoZamowien=typeof rezerwacjeMagazynowe==="function"?potrzebyZatowarowania().length:0;
+  const jakoscKatalogu=typeof produktyDoAdministracji==="function"?seoKolejkaProduktow().filter(x=>x.score<85).length:0;
   const powiadomienia={
     "/admin/zamowienia": pobierzZamowienia().filter(z=>z.status==="nowe").length,
-    "/admin/allegro": (Array.isArray(allegroZamowienia) ? allegroZamowienia.filter(statusAllegroRezerwujeMagazyn).length : 0) + (allegroKomunikacjaStaty?.().totalNeed||0),
+    "/admin/allegro": allegroDoObslugi+komunikacjaDoObslugi,
     "/admin/wysylki": pobierzZamowienia().filter(z=>!["anulowane","dostarczone","zakończone"].includes(z.status)&&!z.wysylka?.numer).length,
-    "/admin/magazyn": potrzebyZatowarowania().length,
+    "/admin/magazyn": brakiDoZamowien,
     "/admin/infakt": pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane"&&(z.klient?.nip||z.klient?.firma)&&!infaktStan.links?.[z.nr]&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length,
-    "/admin/agent-ai": agentAIAnalizaAktywna(agentAIAnaliza()).length,
+    "/admin/agent-ai": zadaniaAgenta,
     "/admin/asortyment": opinie.filter(o=>o.status==="oczekuje").length,
-    "/admin/seo": seoKolejkaProduktow().filter(x=>x.score<85).length
+    "/admin/seo": jakoscKatalogu
   };
   const licznikOperacyjny=["/admin/zamowienia","/admin/allegro","/admin/wysylki","/admin/magazyn","/admin/infakt"].reduce((s,h)=>s+(powiadomienia[h]||0),0);
   powiadomienia["/admin"]=licznikOperacyjny;
@@ -146,7 +151,7 @@ function adminSzkielet(aktywna, tresc){
     </aside>
 	    <div class="admin-tresc">
       ${adminMenuMobilneHTML(aktywna,powiadomienia,kontekst)}
-      <header class="admin-workspace-header"><div class="admin-workspace-context"><button class="admin-history-back" type="button" onclick="adminWrocDoPoprzedniejStrony()" ${adminPoprzedniaTrasa()?`title="Wróć do: ${esc(adminPoprzedniaTrasa())}"`:`disabled title="Brak wcześniejszej strony panelu"`} aria-label="Wróć do poprzedniej strony panelu">←</button><span>${kontekst.ikona}</span><div><small>Panel administratora <i>›</i> ${esc(kontekst.grupa)}</small><b>${esc(kontekst.nazwa)}</b><em>${esc(kontekst.podpis||"")}</em></div></div><div class="admin-workspace-actions"><span class="admin-workspace-health"><i class="${licznikOperacyjny?"has-work":"is-clear"}"></i>${licznikOperacyjny?`${licznikOperacyjny} spraw`:"System gotowy"}</span><button class="btn ghost admin-global-scanner" type="button" onclick="magazynGlobalnySkanerOtworz()">📷 Skaner</button>${typeof pwaPrzyciskInstalacjiHTML==="function"?pwaPrzyciskInstalacjiHTML():""}${aktywna!=="/admin"?`<a class="btn ghost" href="#/admin">📊 Pulpit</a>`:""}<a class="btn ghost" href="#/konto">👤 Konto</a><a class="btn ghost" href="#/">↗ Sklep</a></div></header>
+      <header class="admin-workspace-header"><div class="admin-workspace-context"><button class="admin-history-back" type="button" onclick="adminWrocDoPoprzedniejStrony()" ${adminPoprzedniaTrasa()?`title="Wróć do: ${esc(adminPoprzedniaTrasa())}"`:`disabled title="Brak wcześniejszej strony panelu"`} aria-label="Wróć do poprzedniej strony panelu">←</button><span>${kontekst.ikona}</span><div><small>Panel administratora <i>›</i> ${esc(kontekst.grupa)}</small><b>${esc(kontekst.nazwa)}</b><em>${esc(kontekst.podpis||"")}</em></div></div><div class="admin-workspace-actions"><span class="admin-workspace-health"><i class="${licznikOperacyjny?"has-work":"is-clear"}"></i>${licznikOperacyjny?`${licznikOperacyjny} spraw`:"System gotowy"}</span><button class="btn ghost admin-global-scanner" type="button" onclick="if(typeof magazynGlobalnySkanerOtworz==='function')magazynGlobalnySkanerOtworz();else location.hash='#/admin/magazyn/etykiety-qr'">📷 Skaner</button>${typeof pwaPrzyciskInstalacjiHTML==="function"?pwaPrzyciskInstalacjiHTML():""}${aktywna!=="/admin"?`<a class="btn ghost" href="#/admin">📊 Pulpit</a>`:""}<a class="btn ghost" href="#/konto">👤 Konto</a><a class="btn ghost" href="#/">↗ Sklep</a></div></header>
 	      <div class="admin-workspace-content">${tresc}</div>
 	    </div>
 	    ${adminPwaDolneMenuHTML(aktywna,powiadomienia)}

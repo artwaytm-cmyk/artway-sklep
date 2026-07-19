@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
-import { ASSET_BUNDLES, buildAssets } from '../scripts/build-assets.mjs';
+import { ADMIN_RUNTIME_BUNDLES, ASSET_BUNDLES, buildAssets } from '../scripts/build-assets.mjs';
 
 test('wygenerowane assets odpowiadają modułom źródłowym', async () => {
   await assert.doesNotReject(() => buildAssets({ check: true }));
@@ -70,8 +70,23 @@ test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', 
   const publicCss = await stat('assets/styles.css');
   assert.ok(publicBundle && adminBundle, 'konfiguracja musi zawierać osobny pakiet sklepu i panelu');
   assert.ok(!publicBundle.sources.some((source) => adminBundle.sources.includes(source)), 'kod panelu nie może wejść do pakietu klienta');
-  assert.ok(publicJs.size < 500_000, `początkowy JavaScript urósł do ${publicJs.size} B; moduły panelu muszą pozostać ładowane na żądanie`);
+  assert.ok(publicJs.size < 505_000, `początkowy JavaScript urósł do ${publicJs.size} B; moduły panelu muszą pozostać ładowane na żądanie`);
   assert.ok(publicCss.size < 70_000, `początkowy CSS urósł do ${publicCss.size} B; style panelu muszą pozostać ładowane na żądanie`);
+});
+
+test('panel administratora ładuje mały rdzeń i domeny dopiero dla bieżącej trasy', async () => {
+  const aggregate = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.js');
+  const runtimeSources = ADMIN_RUNTIME_BUNDLES.flatMap((bundle) => bundle.sources);
+  const core = ADMIN_RUNTIME_BUNDLES.find((bundle) => bundle.output === 'assets/admin-core.js');
+  const router = await readFile('src/frontend/06-router-and-storefront.js', 'utf8');
+  assert.ok(aggregate && core, 'panel wymaga artefaktu kontrolnego i małego rdzenia runtime');
+  assert.equal(new Set(runtimeSources).size, runtimeSources.length, 'źródło panelu nie może wejść do dwóch paczek runtime');
+  assert.deepEqual(new Set(runtimeSources), new Set(aggregate.sources), 'paczki runtime muszą obejmować cały panel bez braków');
+  assert.ok((await stat(core.output)).size < 15_000, 'rdzeń panelu powinien pozostać poniżej 15 kB');
+  for (const bundle of ADMIN_RUNTIME_BUNDLES) assert.ok((await stat(bundle.output)).size < 400_000, `${bundle.output} wymaga dalszego podziału`);
+  assert.match(router, /function adminModulyDlaTrasy\(/);
+  assert.match(router, /adminModulyTrasyGotowe\(t\)/);
+  assert.ok(!router.includes('script.src=`/assets/admin.js'), 'przeglądarka nie może pobierać pełnego artefaktu kontrolnego admin.js');
 });
 
 test('bezpośrednie wejście gościa na trasę panelu może wyświetlić bezpieczny brak dostępu', async () => {

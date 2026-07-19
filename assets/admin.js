@@ -25,6 +25,15 @@ function asortymentSzkielet(tab, tresc){
       ${tresc}
     </div>`);
 }
+function adminSubnavHTML(items, aktywny){
+  const safe=(items||[]).filter(x=>x&&x.id&&x.href&&x.label);
+  return `<nav class="panel admin-tabs-panel module-tabs-panel" aria-label="Podsekcje panelu"><div class="shipping-tabs admin-main-tabs">${safe.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}" ${x.id===aktywny?'aria-current="page"':""} title="${esc(x.label)}"><span class="tab-label">${esc(x.label)}</span>${x.badge?`<span class="nav-badge">${esc(x.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
+}
+function eksportSubnavHTML(aktywny="import"){return adminSubnavHTML([{id:"import",href:"#/admin/eksport",label:"📥 Import produktów"},{id:"eksport",href:"#/admin/eksport/eksport",label:"📤 Eksport produktów"},{id:"kopie",href:"#/admin/eksport/kopie",label:"💾 Kopie i raporty"},{id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja strony"}],aktywny);}
+function aktualizacjaSubnavHTML(aktywny="status"){return adminSubnavHTML([{id:"status",href:"#/admin/aktualizacja",label:"📡 Status"},{id:"publikuj",href:"#/admin/aktualizacja/publikuj",label:"⬆️ Publikuj zmiany"},{id:"index",href:"#/admin/aktualizacja/index",label:"📄 Nowy index.html"},{id:"kopie",href:"#/admin/aktualizacja/kopie",label:"↩️ Kopie"}],aktywny);}
+function publikacjaSubnavHTML(aktywny="kontrola"){return adminSubnavHTML([{id:"kontrola",href:"#/admin/publikacja",label:"✅ Gotowość"},{id:"pliki",href:"#/admin/publikacja/pliki",label:"📁 Pliki i hosting"},{id:"kroki",href:"#/admin/publikacja/kroki",label:"🧭 Kroki publikacji"},{id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja"}],aktywny);}
+function infaktSubnavHTML(aktywny="pulpit"){return adminSubnavHTML([{id:"pulpit",label:"📊 Pulpit",href:"#/admin/infakt"},{id:"zamowienia",label:"📦 Zamówienia do faktury",href:"#/admin/infakt/zamowienia"},{id:"faktury",label:"🧾 Faktury inFakt",href:"#/admin/infakt/faktury"},{id:"dostawcy",label:"🏭 Faktury dostawców",href:"#/admin/infakt/dostawcy"},{id:"szkice",label:"📝 Szkice robocze",href:"#/admin/infakt/szkice"},{id:"ustawienia",label:"⚙️ Dostęp API",href:"#/admin/infakt/ustawienia"}],aktywny);}
+function allegroDataTxt(v){const t=Date.parse(v||"");return t?new Date(t).toLocaleString("pl-PL"):"—";}
 
 /* Jeden standard wyszukiwania w całym panelu: zwijany nagłówek, opis,
    licznik wyników i responsywna siatka. Poszczególne domeny przekazują tylko pola. */
@@ -41,6 +50,24 @@ function adminEksportujCSV(nazwa,naglowki,wiersze){
   const csv=[(naglowki||[]).map(quote).join(";"),...rows.map(row=>(Array.isArray(row)?row:[]).map(quote).join(";"))].join("\n");
   pobierzPlik(nazwa||"wyniki.csv","\uFEFF"+csv,"text/csv");toast(`Wyeksportowano ${rows.length} pozycji ✅`);return true;
 }
+const EMOJI_ZESTAWY=[
+  {nazwa:"🎲 Gry, zabawki i edukacja",slowa:"gry zabawki planszowe edukacja puzzle",emoji:["🎲","🧩","♟️","♞","🃏","🎯","🎮","🕹️","🪀","🪁","🧸","🤖","🧠","🔤","🔢","🧮","📚","📖","✏️","🖍️","🎨","🧪","🔬","🔭","🏆","🎳","⚽","🏀","🏓","🥏"]},
+  {nazwa:"🎈 Balony, impreza i prezenty",slowa:"balony balon impreza urodziny prezent dekoracje",emoji:["🎈","🎉","🎊","🥳","🎁","🎀","🪅","🪩","🎂","🧁","🍭","🍬","✨","🌟","⭐","💫","❤️","🩷","🧡","💛","💚","🩵","💙","💜","🤍","🖤","🎵","🎶","📣","🔔"]},
+  {nazwa:"🧒 Dzieci i kreatywność",slowa:"dzieci kreatywne plastyczne",emoji:["👶","🧒","👧","👦","🍼","🛝","🎠","🎡","🏰","🦄","🐸","🐻","🐼","🐰","🐣","🦋","🌈","☀️","🌙","☁️","🌸","🌻","🍀","🖌️","✂️"]},
+  {nazwa:"📦 Sklep i dostawa",slowa:"sklep produkt paczka dostawa promocja",emoji:["📦","🛍️","🛒","🏷️","💰","💳","🧾","🚚","🚛","🚲","✈️","📍","🏪","🏬","✅","🆕","🔥","💥","📢","🔎"]},
+  {nazwa:"🏠 Dom, ogród i pozostałe",slowa:"dom ogród narzędzia elektronika sport",emoji:["🏠","🪴","🌿","🌳","🌼","💡","🔧","🧰","🔨","📏","🔦","📱","💻","⌚","📷","🎧","🔋","⚙️","🚗","🚴","🏋️","🧘","👕","👟","🎒"]}
+];
+let emojiPoleDocelowe=null;
+function emojiPoleHTML(nazwa="ikona",wartosc="",fallback="📦"){return `<div class="emoji-input-row"><input name="${esc(nazwa)}" value="${esc(wartosc||"")}" placeholder="${esc(fallback)}" maxlength="8"><button class="btn ghost" type="button" onclick="otworzWyborEmoji(this,${jsArg(nazwa)})">😀 Wybierz z dużej listy</button></div>`;}
+function otworzWyborEmoji(btn,nazwa="ikona"){
+  const form=btn?.closest?.("form");emojiPoleDocelowe=form?.elements?.[nazwa]||null;if(!emojiPoleDocelowe){toast("Nie znaleziono pola ikony");return;}
+  document.getElementById("emojiPickerModal")?.remove();const modal=document.createElement("div");modal.id="emojiPickerModal";modal.className="emoji-picker-overlay";
+  modal.innerHTML=`<div class="emoji-picker-modal" onclick="event.stopPropagation()"><div class="emoji-picker-head"><div><h2>😀 Wybierz emoji</h2><p>Duży zestaw ikon — gry i balony są na początku.</p></div><button class="btn ghost" type="button" onclick="zamknijWyborEmoji()">✕ Zamknij</button></div><input class="emoji-picker-search" placeholder="Szukaj grupy: gry, balony, dostawa…" oninput="filtrujWyborEmoji(this.value)"><div class="emoji-picker-groups">${EMOJI_ZESTAWY.map(g=>`<section class="emoji-picker-group" data-search="${esc((g.nazwa+' '+g.slowa).toLowerCase())}"><h3>${esc(g.nazwa)}</h3><div class="emoji-picker-grid">${g.emoji.map(e=>`<button type="button" title="${esc(g.nazwa)}" onclick="wybierzEmoji(${jsArg(e)})">${esc(e)}</button>`).join("")}</div></section>`).join("")}</div></div>`;
+  modal.onclick=zamknijWyborEmoji;document.body.appendChild(modal);modal.querySelector(".emoji-picker-search")?.focus();
+}
+function filtrujWyborEmoji(q){const s=String(q||"").trim().toLowerCase();document.querySelectorAll("#emojiPickerModal .emoji-picker-group").forEach(el=>{el.style.display=!s||String(el.dataset.search||"").includes(s)?"":"none";});}
+function wybierzEmoji(emoji){if(emojiPoleDocelowe){emojiPoleDocelowe.value=emoji;emojiPoleDocelowe.dispatchEvent(new Event("input",{bubbles:true}));}zamknijWyborEmoji();}
+function zamknijWyborEmoji(){document.getElementById("emojiPickerModal")?.remove();emojiPoleDocelowe=null;}
 
 (function uruchomResponsywnyPanelAdmina(){
   const media=window.matchMedia('(max-width:1280px)');
@@ -4093,10 +4120,6 @@ function allegroWystawianiePanelHTML(){
   </div>`;
 }
 
-function allegroDataTxt(v){
-  const t=Date.parse(v||"");
-  return t?new Date(t).toLocaleString("pl-PL"):"—";
-}
 function allegroAutoReplyKlucz(type,id,sourceId=""){
   return `${type}:${id}${sourceId?":"+sourceId:""}`;
 }
@@ -4316,10 +4339,6 @@ function allegroKomunikacjaPanelHTML(type="thread"){
   return `<div class="panel allegro-section-panel allegro-communication-page"><div class="order-section-head"><div><span class="order-pro-label">${isIssue?"Zgłoszenia formalne":"Obsługa korespondencji"}</span><h2>${isIssue?"🛟 Dyskusje i reklamacje Allegro":"💬 Centrum wiadomości Allegro"}</h2><p class="order-detail-lead">${isIssue?"Dyskusje i reklamacje są oddzielone od zwykłych wiadomości. Wpisy zespołu Allegro pozostają dostępne, ale są pokazane osobno i nigdy nie udają wiadomości klienta.":"Każdy wątek ma osobno wiadomości klienta, odpowiedzi Artway‑TM i komunikaty Allegro. Agent przygotowuje szkic wyłącznie dla właściwego klienta i właściwej rozmowy."}</p></div><div class="diag-actions">${wymagaPonownegoPolaczenia?`<button class="btn" onclick="allegroPolacz()">🔐 Napraw połączenie</button>`:""}<button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">↻ Sprawdź nowe wiadomości</button></div></div><div class="allegro-source-model"><div class="customer"><span>👤</span><b>Klient</b><small>tylko jego wiadomości otwierają sprawę</small></div><div class="artway"><span>🏪</span><b>Artway‑TM</b><small>odpowiedzi ręczne uczą stylu Agenta</small></div><div class="platform"><span>🔔</span><b>Allegro</b><small>komunikaty systemowe są oddzielone</small></div></div><div class="orders-stat-grid allegro-communication-stats"><div class="order-stat-card"><span>${isIssue?"🛟":"💬"}</span><b>${all.length}</b><small>wszystkich</small></div><div class="order-stat-card ${need?"hot":""}"><span>⚡</span><b>${need}</b><small>wymaga odpowiedzi • bez załatwionych</small></div><div class="order-stat-card money"><span>✅</span><b>${resolved}</b><small>załatwionych wewnętrznie</small></div><div class="order-stat-card"><span>📁</span><b>${handled}</b><small>obsłużonych łącznie</small></div><div class="order-stat-card"><span>🔔</span><b>${withSystem}</b><small>z komunikatami Allegro</small></div></div><div class="allegro-communication-toolbar"><input id="${isIssue?"allegroIssueSearch":"allegroThreadSearch"}" placeholder="Szukaj: klient, numer zamówienia, ID, temat lub treść…" value="${esc(query)}" oninput="allegroSzukajKomunikacje(${jsArg(type)},this.value)"><select onchange="${isIssue?"filtrAllegroDyskusji":"filtrAllegroWiadomosci"}=this.value;renderuj()">${filterOptions.map(([v,l])=>`<option value="${v}" ${filter===v?"selected":""}>${l}</option>`).join("")}</select><select onchange="${isIssue?"sortAllegroDyskusje":"sortAllegroWiadomosci"}=this.value;renderuj()"><option value="najnowsze" ${sort==="najnowsze"?"selected":""}>Najnowsze najpierw</option><option value="najstarsze" ${sort==="najstarsze"?"selected":""}>Najstarsze najpierw</option></select><label>Pokaż <select onchange="allegroLimitKomunikacji=Number(this.value)||50;renderuj()">${[20,50,100].map(n=>`<option value="${n}" ${allegroLimitKomunikacji===n?"selected":""}>${n}</option>`).join("")}</select></label></div><div class="allegro-communication-bulk"><label><input type="checkbox" ${allVisible?"checked":""} onchange="allegroZaznaczWidocznaKomunikacje(${jsArg(type)},this.checked)"> Zaznacz/odznacz widoczne (${visible.length})</label><span><b>${selected.length}</b> zaznaczonych</span><button class="btn" onclick="allegroOznaczZaznaczoneSprawy(${jsArg(type)},true)" ${selected.length?"":"disabled"}>✅ Załatw wewnętrznie</button><button class="btn ghost" onclick="allegroOznaczZaznaczoneSprawy(${jsArg(type)},false)" ${selected.length?"":"disabled"}>↩️ Przywróć do obsługi</button></div><div class="allegro-internal-banner"><b>🔒 Status wewnętrzny ma pierwszeństwo</b><span>Po oznaczeniu „załatwione” sprawa znika z „Wymaga odpowiedzi” i trafia także do filtra „Obsłużone”. Nie wysyła to wiadomości i nie zmienia oficjalnego statusu Allegro. Dopiero nowa wiadomość klienta może ponownie otworzyć sprawę — sam komunikat Allegro tego nie robi.</span></div><div class="ai-task-list allegro-communication-list">${visible.map(item=>isIssue?allegroIssueHTML(item):allegroWatekHTML(item)).join("")||`<div class="backend-note">Brak spraw pasujących do wyszukiwania i filtrów.</div>`}</div>${list.length>visible.length?`<p class="order-detail-lead">Pokazano ${visible.length} z ${list.length} wyników. Zwiększ limit widoku.</p>`:""}${allegroKomunikacjaBledyHTML()}${!isIssue?allegroKomunikacjaUstawieniaHTML():`<div class="backend-note allegro-info-bottom"><b>Ustawienia autorespondera</b> znajdują się na podstronie Wiadomości. Status „załatwiona wewnętrznie” zawsze ma pierwszeństwo przed automatyką.</div>`}</div>`;
 }
 
-function adminSubnavHTML(items, aktywny){
-  const safe = (items||[]).filter(x=>x&&x.id&&x.href&&x.label);
-  return `<nav class="panel admin-tabs-panel module-tabs-panel" aria-label="Podsekcje panelu"><div class="shipping-tabs admin-main-tabs">${safe.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}" ${x.id===aktywny?'aria-current="page"':""} title="${esc(x.label)}"><span class="tab-label">${esc(x.label)}</span>${x.badge?`<span class="nav-badge">${esc(x.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
-}
 function magazynSubnavHTML(aktywny="pulpit"){
   const plan=potrzebyZatowarowania(),braki=plan.length;
   const bezLok=magazynLokalizacjeZamowienIds.size;
@@ -4340,16 +4359,6 @@ function magazynSubnavHTML(aktywny="pulpit"){
     ]}
   ];
   return `<nav class="panel admin-tabs-panel module-tabs-panel warehouse-module-nav" aria-label="Podsekcje magazynu"><div class="warehouse-module-brand"><span>🏬</span><div><small>Centrum operacyjne</small><b>Magazyn</b></div></div><div class="warehouse-module-groups">${groups.map(group=>`<section><small>${esc(group.label)}</small><div>${group.items.map(item=>`<a class="${item.id===aktywny?"active":""}" href="${esc(item.href)}" ${item.id===aktywny?'aria-current="page"':""}><span class="warehouse-nav-icon">${esc(item.icon)}</span><span class="tab-label">${esc(item.short||item.label)}</span>${item.badge?`<span class="nav-badge">${esc(item.badge)}</span>`:""}</a>`).join("")}</div></section>`).join("")}</div></nav>`;
-}
-function infaktSubnavHTML(aktywny="pulpit"){
-  return adminSubnavHTML([
-    {id:"pulpit",label:"📊 Pulpit",href:"#/admin/infakt"},
-    {id:"zamowienia",label:"📦 Zamówienia do faktury",href:"#/admin/infakt/zamowienia"},
-    {id:"faktury",label:"🧾 Faktury inFakt",href:"#/admin/infakt/faktury"},
-    {id:"dostawcy",label:"🏭 Faktury dostawców",href:"#/admin/infakt/dostawcy"},
-    {id:"szkice",label:"📝 Szkice robocze",href:"#/admin/infakt/szkice"},
-    {id:"ustawienia",label:"⚙️ Dostęp API",href:"#/admin/infakt/ustawienia"},
-  ],aktywny);
 }
 function agentAISubnavHTML(aktywny="pulpit"){
   const analiza=agentAIAnaliza();
@@ -4381,30 +4390,6 @@ function klienciSubnavHTML(aktywny="lista"){
     {id:"dodaj",href:"#/admin/klienci/dodaj",label:"➕ Dodaj klienta"},
     {id:"uprawnienia",href:"#/admin/klienci/uprawnienia",label:"🛡️ Uprawnienia",badge:admini},
     {id:"zamowienia",href:"#/admin/klienci/zamowienia",label:"📦 Zamówienia klientów"}
-  ],aktywny);
-}
-function eksportSubnavHTML(aktywny="import"){
-  return adminSubnavHTML([
-    {id:"import",href:"#/admin/eksport",label:"📥 Import produktów"},
-    {id:"eksport",href:"#/admin/eksport/eksport",label:"📤 Eksport produktów"},
-    {id:"kopie",href:"#/admin/eksport/kopie",label:"💾 Kopie i raporty"},
-    {id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja strony"}
-  ],aktywny);
-}
-function aktualizacjaSubnavHTML(aktywny="status"){
-  return adminSubnavHTML([
-    {id:"status",href:"#/admin/aktualizacja",label:"📡 Status"},
-    {id:"publikuj",href:"#/admin/aktualizacja/publikuj",label:"⬆️ Publikuj zmiany"},
-    {id:"index",href:"#/admin/aktualizacja/index",label:"📄 Nowy index.html"},
-    {id:"kopie",href:"#/admin/aktualizacja/kopie",label:"↩️ Kopie"}
-  ],aktywny);
-}
-function publikacjaSubnavHTML(aktywny="kontrola"){
-  return adminSubnavHTML([
-    {id:"kontrola",href:"#/admin/publikacja",label:"✅ Gotowość"},
-    {id:"pliki",href:"#/admin/publikacja/pliki",label:"📁 Pliki i hosting"},
-    {id:"kroki",href:"#/admin/publikacja/kroki",label:"🧭 Kroki publikacji"},
-    {id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja"}
   ],aktywny);
 }
 function allegroZgodnoscPozycje(){
@@ -6634,34 +6619,6 @@ function widokAdminProdukty(){
     </div>`:""}`);
 }
 
-const EMOJI_ZESTAWY=[
-  {nazwa:"🎲 Gry, zabawki i edukacja",slowa:"gry zabawki planszowe edukacja puzzle",emoji:["🎲","🧩","♟️","♞","🃏","🎯","🎮","🕹️","🪀","🪁","🧸","🤖","🧠","🔤","🔢","🧮","📚","📖","✏️","🖍️","🎨","🧪","🔬","🔭","🏆","🎳","⚽","🏀","🏓","🥏"]},
-  {nazwa:"🎈 Balony, impreza i prezenty",slowa:"balony balon impreza urodziny prezent dekoracje",emoji:["🎈","🎉","🎊","🥳","🎁","🎀","🪅","🪩","🎂","🧁","🍭","🍬","✨","🌟","⭐","💫","❤️","🩷","🧡","💛","💚","🩵","💙","💜","🤍","🖤","🎵","🎶","📣","🔔"]},
-  {nazwa:"🧒 Dzieci i kreatywność",slowa:"dzieci kreatywne plastyczne",emoji:["👶","🧒","👧","👦","🍼","🛝","🎠","🎡","🏰","🦄","🐸","🐻","🐼","🐰","🐣","🦋","🌈","☀️","🌙","☁️","🌸","🌻","🍀","🖌️","✂️"]},
-  {nazwa:"📦 Sklep i dostawa",slowa:"sklep produkt paczka dostawa promocja",emoji:["📦","🛍️","🛒","🏷️","💰","💳","🧾","🚚","🚛","🚲","✈️","📍","🏪","🏬","✅","🆕","🔥","💥","📢","🔎"]},
-  {nazwa:"🏠 Dom, ogród i pozostałe",slowa:"dom ogród narzędzia elektronika sport",emoji:["🏠","🪴","🌿","🌳","🌼","💡","🔧","🧰","🔨","📏","🔦","📱","💻","⌚","📷","🎧","🔋","⚙️","🚗","🚴","🏋️","🧘","👕","👟","🎒"]}
-];
-let emojiPoleDocelowe=null;
-function emojiPoleHTML(nazwa="ikona",wartosc="",fallback="📦"){
-  return `<div class="emoji-input-row"><input name="${esc(nazwa)}" value="${esc(wartosc||"")}" placeholder="${esc(fallback)}" maxlength="8"><button class="btn ghost" type="button" onclick="otworzWyborEmoji(this,${jsArg(nazwa)})">😀 Wybierz z dużej listy</button></div>`;
-}
-function otworzWyborEmoji(btn,nazwa="ikona"){
-  const form=btn?.closest?.("form");
-  emojiPoleDocelowe=form?.elements?.[nazwa]||null;
-  if(!emojiPoleDocelowe){toast("Nie znaleziono pola ikony");return;}
-  document.getElementById("emojiPickerModal")?.remove();
-  const modal=document.createElement("div");
-  modal.id="emojiPickerModal";modal.className="emoji-picker-overlay";
-  modal.innerHTML=`<div class="emoji-picker-modal" onclick="event.stopPropagation()"><div class="emoji-picker-head"><div><h2>😀 Wybierz emoji</h2><p>Duży zestaw ikon — gry i balony są na początku.</p></div><button class="btn ghost" type="button" onclick="zamknijWyborEmoji()">✕ Zamknij</button></div><input class="emoji-picker-search" placeholder="Szukaj grupy: gry, balony, dostawa…" oninput="filtrujWyborEmoji(this.value)"><div class="emoji-picker-groups">${EMOJI_ZESTAWY.map(g=>`<section class="emoji-picker-group" data-search="${esc((g.nazwa+' '+g.slowa).toLowerCase())}"><h3>${esc(g.nazwa)}</h3><div class="emoji-picker-grid">${g.emoji.map(e=>`<button type="button" title="${esc(g.nazwa)}" onclick="wybierzEmoji(${jsArg(e)})">${esc(e)}</button>`).join("")}</div></section>`).join("")}</div></div>`;
-  modal.onclick=zamknijWyborEmoji;document.body.appendChild(modal);
-  modal.querySelector(".emoji-picker-search")?.focus();
-}
-function filtrujWyborEmoji(q){
-  const s=String(q||"").trim().toLowerCase();
-  document.querySelectorAll("#emojiPickerModal .emoji-picker-group").forEach(el=>{el.style.display=!s||String(el.dataset.search||"").includes(s)?"":"none";});
-}
-function wybierzEmoji(emoji){if(emojiPoleDocelowe){emojiPoleDocelowe.value=emoji;emojiPoleDocelowe.dispatchEvent(new Event("input",{bubbles:true}));}zamknijWyborEmoji();}
-function zamknijWyborEmoji(){document.getElementById("emojiPickerModal")?.remove();emojiPoleDocelowe=null;}
 const ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI=3;
 function domyslneUstawieniaRentownosci(){
   const raw=ustawienia.domyslneKosztyRentownosci&&typeof ustawienia.domyslneKosztyRentownosci==="object"?ustawienia.domyslneKosztyRentownosci:{};
@@ -10648,7 +10605,7 @@ function dodajBanerZaawansowany(event){event.preventDefault();const list=pobierz
 function zapiszBanerZaawansowany(event,id){event.preventDefault();const old=pobierzBannery().find(x=>String(x.id)===String(id)),next=daneBaneraZaawansowane(event.target,id);for(const key of ["obraz","aiAssetId","aiModel","aiGeneratedAt","aiBrief"])if(old?.[key])next[key]=old[key];zapiszCzescUstawien({bannery:pobierzBannery().map(x=>String(x.id)===String(id)?next:x)});}
 function duplikujBaner(id){const list=pobierzBannery(),source=list.find(x=>String(x.id)===String(id));if(!source||list.length>=24)return;zapiszCzescUstawien({bannery:[...list,{...source,id:"b_"+Date.now(),tytul:`${source.tytul} — kopia`,aktywny:false}]});}
 
-function uzyciaKoduRabatowego(kod){const key=String(kod).toUpperCase(),orders=(zamowienia||[]).filter(x=>String(x.rabatKod||"").toUpperCase()===key).length,stored=(Array.isArray(ustawienia.kodyRabatoweZaawansowane)?ustawienia.kodyRabatoweZaawansowane:[]).find(x=>String(x?.kod||"").toUpperCase()===key);return Math.max(orders,Math.max(0,Number(stored?.uzycia)||0));}
+function uzyciaKoduRabatowego(kod){const key=String(kod).toUpperCase(),orders=pobierzZamowienia().filter(x=>String(x.rabatKod||"").toUpperCase()===key).length,stored=(Array.isArray(ustawienia.kodyRabatoweZaawansowane)?ustawienia.kodyRabatoweZaawansowane:[]).find(x=>String(x?.kod||"").toUpperCase()===key);return Math.max(orders,Math.max(0,Number(stored?.uzycia)||0));}
 function rabatStatusHTML(rule){const status=regulaRabatowaStatus({...rule,uzycia:uzyciaKoduRabatowego(rule.kod)});return `<span class="discount-status ${status.aktywna?"active":"inactive"}">${status.aktywna?"Aktywny":esc(status.powod)}</span>`;}
 function rabatWartoscLabel(r){return r.typ==="darmowa_dostawa"?"Darmowa dostawa":r.typ==="kwota"?`${zl(r.wartosc)} rabatu`:`${Number(r.wartosc)||0}% rabatu`;}
 function rabatFormPolaHTML(r={}){const categories=wszystkieKategorie(),chosen=Array.isArray(r.kategorie)?r.kategorie:[];return `<div class="home-editor-grid"><label>Kod<input name="kod" required maxlength="30" value="${esc(r.kod||"")}" placeholder="np. WIOSNA15" style="text-transform:uppercase"></label><label>Rodzaj<select name="typ" onchange="this.form.querySelector('[data-discount-value]').hidden=this.value==='darmowa_dostawa'"><option value="procent">Procentowy</option><option value="kwota" ${r.typ==="kwota"?"selected":""}>Kwotowy</option><option value="darmowa_dostawa" ${r.typ==="darmowa_dostawa"?"selected":""}>Darmowa dostawa</option></select></label><label data-discount-value ${r.typ==="darmowa_dostawa"?"hidden":""}>Wartość<input name="wartosc" type="number" min="0" max="10000" step=".01" value="${esc(r.wartosc||"")}"></label><label>Minimalny koszyk<input name="minKoszyk" type="number" min="0" step=".01" value="${esc(r.minKoszyk||0)}"></label><label>Maksymalny rabat<input name="maxRabat" type="number" min="0" step=".01" value="${esc(r.maxRabat||0)}"><small>0 = bez limitu</small></label><label>Łączny limit użyć<input name="limitUzyc" type="number" min="0" step="1" value="${esc(r.limitUzyc||0)}"><small>0 = bez limitu</small></label><label>Aktywny od<input type="datetime-local" name="start" value="${esc(r.start||"")}"></label><label>Aktywny do<input type="datetime-local" name="koniec" value="${esc(r.koniec||"")}"></label><label>Zakres<select name="zakres" onchange="this.form.querySelector('[data-discount-categories]').hidden=this.value!=='kategorie';this.form.querySelector('[data-discount-products]').hidden=this.value!=='produkty'"><option value="wszystkie">Cały koszyk</option><option value="kategorie" ${r.zakres==="kategorie"?"selected":""}>Wybrane działy</option><option value="produkty" ${r.zakres==="produkty"?"selected":""}>Wybrane produkty</option></select></label><label data-discount-categories ${r.zakres==="kategorie"?"":"hidden"}>Działy<select name="kategorie" multiple size="4">${categories.map(x=>`<option value="${esc(x)}" ${chosen.includes(x)?"selected":""}>${esc(x)}</option>`).join("")}</select></label><label data-discount-products ${r.zakres==="produkty"?"":"hidden"}>ID produktów<input name="produkty" value="${esc((r.produkty||[]).join(", "))}" placeholder="12, 28, 41"></label></div><label>Opis wewnętrzny<input name="opis" value="${esc(r.opis||"")}" placeholder="np. Kampania wiosenna"></label><div class="home-editor-switches"><label><input type="checkbox" name="aktywny" ${r.aktywny===false?"":"checked"}> Kod aktywny</label><label><input type="checkbox" name="publiczny" ${r.publiczny?"checked":""}> Pokazuj klientom jako główną promocję</label></div>`;}
@@ -10730,7 +10687,7 @@ function regulaRabatowaZForm(form,oldCode=""){const f=new FormData(form),kod=Str
 function zapiszListeRegul(rules){const unique=[],seen=new Set();for(const raw of rules||[]){const key=String(raw?.kod||"").toUpperCase();if(!key||seen.has(key))continue;seen.add(key);unique.push({...raw,kod:key});}let publicSeen=false;for(const r of unique)if(r.publiczny&&r.aktywny!==false){if(publicSeen)r.publiczny=false;else publicSeen=true;}const legacy={};for(const r of unique)if(r.aktywny!==false&&r.typ==="procent"&&r.zakres==="wszystkie"&&!r.start&&!r.koniec&&!r.minKoszyk&&!r.maxRabat&&!r.limitUzyc)legacy[r.kod]=r.wartosc;const publicRule=unique.find(x=>x.publiczny&&x.aktywny!==false);zapiszCzescUstawien({kodyRabatoweZaawansowane:unique,kody:legacy,promocjaGlowna:publicRule?.kod||""});loguj("info",`Zapisano ${unique.length} reguł rabatowych`);}
 
 /* ═══════════ STUDIO KAMPANII PRO: BANNERY, IKONY I RABATY ═══════════ */
-let rabatyProStan={save:"idle",message:"",selected:new Set()};
+let rabatyProStan={save:"idle",message:"",selected:new Set()},rabatProStan=rabatyProStan;
 
 function bannerProClamp(value,min,max,fallback){const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;}
 function bannerProDevice(button,mode){const form=button.closest("form"),preview=form?.querySelector("[data-banner-live-preview]");if(!preview)return;preview.dataset.device=mode;button.parentElement.querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===button));}
@@ -11069,12 +11026,12 @@ function pulpitSystemy(){
 }
 
 function adminPulpitDane(){
-  const sklep=pobierzZamowienia(),sklepAktywne=sklep.filter(pulpitStatusSklepuAktywny),allegro=allegroDaneZaladowane.orders?(Array.isArray(allegroZamowienia)?allegroZamowienia:[]):(allegroPodsumowanie.recentOrders||[]),allegroAktywneRzeczywiste=allegro.filter(allegroZamowienieAktywneLokalnie),allegroAktywne=allegroDaneZaladowane.orders?allegroAktywneRzeczywiste:Array.from({length:Number(allegroPodsumowanie.orders?.active||0)},()=>({summaryOnly:true})),komunikacja=allegroKomunikacjaStaty(),plan=potrzebyZatowarowania(),produktyAktywne=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const sklep=pobierzZamowienia(),sklepAktywne=sklep.filter(pulpitStatusSklepuAktywny),allegro=allegroDaneZaladowane.orders?(Array.isArray(allegroZamowienia)?allegroZamowienia:[]):(allegroPodsumowanie.recentOrders||[]),allegroAktywneRzeczywiste=allegro.filter(allegroZamowienieAktywneLokalnie),allegroAktywne=allegroDaneZaladowane.orders?allegroAktywneRzeczywiste:Array.from({length:Number(allegroPodsumowanie.orders?.active||0)},()=>({summaryOnly:true})),komunikacja=allegroKomunikacjaStaty(),plan=potrzebyZatowarowania();
   const wysylkiBezNumeru=sklepAktywne.filter(z=>!daneWysylki(z).numer).length,firmoweBezFaktury=sklepAktywne.filter(z=>(z.klient?.nip||z.klient?.firma)&&!infaktStan.links?.[z.nr]&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length;
   const teraz=Date.now(),siedem=7*86400000,sklep7=sklep.filter(z=>String(z.status||"").toLowerCase()!=="anulowane"&&pulpitDataMs(z)>=teraz-siedem),sklepPoprzednie7=sklep.filter(z=>String(z.status||"").toLowerCase()!=="anulowane"&&pulpitDataMs(z)>=teraz-2*siedem&&pulpitDataMs(z)<teraz-siedem),allegro7=allegro.filter(z=>!["CANCELLED","RETURNED"].includes(allegroStatusKolejki(z))&&pulpitDataMs(z)>=teraz-siedem);
   const sprzedazSklep7=sklep7.reduce((s,z)=>s+kwotaNum(z.razem),0),sprzedazAllegro7=allegro7.reduce((s,z)=>s+pulpitKwotaAllegro(z),0),sprzedazPoprzednie7=sklepPoprzednie7.reduce((s,z)=>s+kwotaNum(z.razem),0);
   const seoKrytyczne=seoKolejkaProduktow().filter(x=>x.score<60).length,agentAktywne=typeof agentAIAnalizaAktywna==="function"?agentAIAnalizaAktywna(agentAIAnaliza()).length:0,systemy=pulpitSystemy(),systemBledy=systemy.filter(x=>x.status==="blad").length;
-  return {sklep,sklepAktywne,noweSklep:sklepAktywne.filter(z=>z.status==="nowe").length,allegro,allegroAktywne,komunikacja,plan,produktyAktywne,wysylkiBezNumeru,firmoweBezFaktury,sklep7,allegro7,sprzedazSklep7,sprzedazAllegro7,sprzedaz7:sprzedazSklep7+sprzedazAllegro7,sprzedazPoprzednie7,trend:pulpitZmianaProcent(sprzedazSklep7,sprzedazPoprzednie7),seoKrytyczne,agentAktywne,systemy,systemBledy,klienci:pobierzUzytkownikow().filter(u=>!kontoMaRoleAdmin(u.email)).length};
+  return {sklep,sklepAktywne,noweSklep:sklepAktywne.filter(z=>z.status==="nowe").length,allegro,allegroAktywne,komunikacja,plan,wysylkiBezNumeru,firmoweBezFaktury,sklep7,allegro7,sprzedazSklep7,sprzedazAllegro7,sprzedaz7:sprzedazSklep7+sprzedazAllegro7,sprzedazPoprzednie7,trend:pulpitZmianaProcent(sprzedazSklep7,sprzedazPoprzednie7),seoKrytyczne,agentAktywne,systemy,systemBledy,klienci:pobierzUzytkownikow().filter(u=>!kontoMaRoleAdmin(u.email)).length};
 }
 
 function adminPulpitAlerty(d=adminPulpitDane()){

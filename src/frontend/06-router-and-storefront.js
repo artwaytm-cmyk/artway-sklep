@@ -1,28 +1,57 @@
 /* ═══════════ ROUTER (podstrony) ═══════════ */
-let adminAssetsPromise = null;
-function zaladujPanelAdmina(){
-  if(window.__artwayAdminReady) return Promise.resolve();
-  if(adminAssetsPromise) return adminAssetsPromise;
-  const version = document.querySelector('meta[name="artway-version"]')?.content || "dev";
-  const cssPromise = new Promise((resolve,reject)=>{
+const ADMIN_MODULY_RUNTIME = Object.freeze({
+  core:"admin-core",agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce",
+  inventory:"admin-inventory",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system"
+});
+const adminZaladowaneModuly = new Set();
+const adminObietniceModulow = new Map();
+let adminStylePromise = null;
+function adminModulyDlaTrasy(route=""){
+  const t=String(route||"").split("?")[0],moduly=["core"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
+  if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
+  if(t==="/diagnostyka")add("system");
+  else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("commerce","inventory","system");
+  else if(t.startsWith("/admin/agent-ai")||t.startsWith("/admin/magazyn"))add("agent","warehouse","commerce","inventory");
+  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/wysylki")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","inventory");
+  else if(t.startsWith("/admin/infakt"))add("inventory");
+  else if(t.startsWith("/admin/asortyment")||t.startsWith("/admin/produkty")||t==="/admin/kategorie"||t==="/admin/mapowanie"||t==="/admin/opinie")add("agent","warehouse","commerce","inventory","catalog");
+  else if(t.startsWith("/admin/personalizacja")||["/admin/dostawy","/admin/ustawienia","/admin/wyglad","/admin/rozmieszczenie","/admin/bannery","/admin/podstrony","/admin/strony","/admin/rabaty"].includes(t))add("personalization");
+  else if(t.startsWith("/admin/eksport"))add("inventory","catalog","personalization");
+  else if(t.startsWith("/admin/aktualizacja"))add("personalization");
+  else if(t.startsWith("/admin/publikacja"))add("inventory","personalization");
+  else if(t.startsWith("/admin/seo"))add("inventory");
+  else if(t.startsWith("/admin"))add("agent","warehouse","commerce","inventory","catalog","personalization","system");
+  return moduly;
+}
+function adminModulyTrasyGotowe(route=""){return adminModulyDlaTrasy(route).every(modul=>adminZaladowaneModuly.has(modul));}
+function zaladujAdminStyle(version){
+  if(adminStylePromise)return adminStylePromise;
+  adminStylePromise=new Promise((resolve,reject)=>{
     const obecny=document.getElementById("artwayAdminStyles");
-    if(obecny){ resolve(); return; }
-    const link=document.createElement("link");
-    link.id="artwayAdminStyles"; link.rel="stylesheet"; link.href=`/assets/admin.css?v=${encodeURIComponent(version)}`;
-    link.onload=()=>resolve(); link.onerror=()=>reject(new Error("Nie udało się wczytać stylów panelu administratora"));
-    document.head.appendChild(link);
-  });
-  const jsPromise = new Promise((resolve,reject)=>{
-    const obecny=document.getElementById("artwayAdminScript");
-    if(obecny){ if(window.__artwayAdminReady) resolve(); else obecny.addEventListener("load",resolve,{once:true}); return; }
-    const script=document.createElement("script");
-    script.id="artwayAdminScript"; script.src=`/assets/admin.js?v=${encodeURIComponent(version)}`;
-    script.onload=()=>{ window.__artwayAdminReady=true; resolve(); };
-    script.onerror=()=>reject(new Error("Nie udało się wczytać modułów panelu administratora"));
-    document.body.appendChild(script);
-  });
-  adminAssetsPromise=Promise.all([cssPromise,jsPromise]).catch(error=>{adminAssetsPromise=null;throw error;});
-  return adminAssetsPromise;
+    if(obecny){if(obecny.sheet)resolve();else{obecny.addEventListener("load",resolve,{once:true});obecny.addEventListener("error",()=>reject(new Error("Nie udało się wczytać stylów panelu administratora")),{once:true});}return;}
+    const link=document.createElement("link");link.id="artwayAdminStyles";link.rel="stylesheet";link.href=`/assets/admin.css?v=${encodeURIComponent(version)}`;
+    link.onload=()=>resolve();link.onerror=()=>reject(new Error("Nie udało się wczytać stylów panelu administratora"));document.head.appendChild(link);
+  }).catch(error=>{adminStylePromise=null;throw error;});
+  return adminStylePromise;
+}
+function zaladujAdminModul(modul,version){
+  if(adminZaladowaneModuly.has(modul))return Promise.resolve();
+  if(adminObietniceModulow.has(modul))return adminObietniceModulow.get(modul);
+  const asset=ADMIN_MODULY_RUNTIME[modul];
+  if(!asset)return Promise.reject(new Error(`Nieznany moduł panelu: ${modul}`));
+  const promise=new Promise((resolve,reject)=>{
+    const id=`artwayAdminModule-${modul}`,obecny=document.getElementById(id);
+    if(obecny){obecny.addEventListener("load",()=>{adminZaladowaneModuly.add(modul);resolve();},{once:true});obecny.addEventListener("error",()=>reject(new Error(`Nie udało się wczytać modułu ${modul}`)),{once:true});return;}
+    const script=document.createElement("script");script.id=id;script.src=`/assets/${asset}.js?v=${encodeURIComponent(version)}`;script.async=false;
+    script.onload=()=>{adminZaladowaneModuly.add(modul);if(modul==="core")window.__artwayAdminReady=true;resolve();};
+    script.onerror=()=>reject(new Error(`Nie udało się wczytać modułu panelu: ${modul}`));document.body.appendChild(script);
+  }).catch(error=>{adminObietniceModulow.delete(modul);document.getElementById(`artwayAdminModule-${modul}`)?.remove();throw error;});
+  adminObietniceModulow.set(modul,promise);return promise;
+}
+function zaladujPanelAdmina(route=trasa()){
+  const version = document.querySelector('meta[name="artway-version"]')?.content || "dev";
+  const modules=adminModulyDlaTrasy(route);
+  return Promise.all([zaladujAdminStyle(version),modules.reduce((chain,module)=>chain.then(()=>zaladujAdminModul(module,version)),Promise.resolve())]);
 }
 function trasa(){
   const path=String(location.pathname||"").replace(/\/+$/,"")||"/";
@@ -212,9 +241,10 @@ function renderuj(){
     // wyłącznie po wejściu na trasę administracyjną, również dla gościa.
     const wymagaPanelu=t.startsWith("/admin")||t==="/diagnostyka";
     document.body.classList.toggle("admin-mode",wymagaPanelu);
-    if(wymagaPanelu&&!window.__artwayAdminReady){
+    if(wymagaPanelu&&!adminModulyTrasyGotowe(t)){
       w.innerHTML=`<div class="page"><div class="panel admin-loading" role="status" aria-live="polite"><h1>Ładowanie panelu administratora…</h1><p>Wczytuję moduły potrzebne tylko do obsługi sklepu.</p></div></div>`;
-      zaladujPanelAdmina().then(()=>renderuj()).catch(error=>{
+      const trasaLadowania=t;
+      zaladujPanelAdmina(t).then(()=>{if(trasa()===trasaLadowania)renderuj();}).catch(error=>{
         loguj("blad",error.message,t);
         w.innerHTML=`<div class="page"><div class="panel"><h1>Nie udało się wczytać panelu</h1><p>${esc(error.message)}</p><button class="btn" onclick="renderuj()">Spróbuj ponownie</button></div></div>`;
       });

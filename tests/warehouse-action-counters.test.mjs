@@ -7,11 +7,12 @@ const read=path=>readFile(new URL(path,root),"utf8");
 
 test("liczniki nawigacji magazynu pokazują wyłącznie braki do aktywnych zamówień",async()=>{
   const [navigation,warehouse]=await Promise.all([read("assets/admin.js"),read("src/frontend/07-admin-shipping.js")]);
-  const subnav=navigation.slice(navigation.indexOf("function magazynSubnavHTML"),navigation.indexOf("function infaktSubnavHTML"));
+  const subnav=navigation.slice(navigation.indexOf("function magazynSubnavHTML"),navigation.indexOf("function agentAISubnavHTML"));
   assert.match(subnav,/const plan=potrzebyZatowarowania\(\),braki=plan\.length/);
   assert.match(subnav,/badge:braki\|\|""/);
   assert.doesNotMatch(subnav,/produktyAktywne\.length|ruchyMagazynowe|prod\.niskie|prod\.braki/);
-  assert.match(warehouse,/"\/admin\/magazyn": potrzebyZatowarowania\(\)\.length/);
+  assert.match(warehouse,/const brakiDoZamowien=typeof rezerwacjeMagazynowe==="function"\?potrzebyZatowarowania\(\)\.length:0/);
+  assert.match(warehouse,/"\/admin\/magazyn": brakiDoZamowien/);
 });
 
 test("zakupy producentów i lokalizacje magazynowe mają odrębne zakresy",async()=>{

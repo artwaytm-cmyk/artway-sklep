@@ -8,7 +8,7 @@ const inventory = await readFile(new URL('../assets/admin.js', import.meta.url),
 const styles = await readFile(new URL('../src/styles/21-warehouse-workspace.css', import.meta.url), 'utf8');
 
 test('magazyn ma jedną nawigację pogrupowaną według procesu pracy', () => {
-  const section = navigation.slice(navigation.indexOf('function magazynSubnavHTML'), navigation.indexOf('function infaktSubnavHTML'));
+  const section = navigation.slice(navigation.indexOf('function magazynSubnavHTML'), navigation.indexOf('function agentAISubnavHTML'));
   for (const label of ['Centrum', 'Kontrola', 'Struktura', 'Operacje']) assert.match(section, new RegExp(`label:"${label}"`));
   for (const route of ['dostawcy', 'stany', 'lokalizacje', 'etykiety-qr', 'plan', 'ruchy']) assert.ok(section.includes(`#/admin/magazyn/${route}`));
   assert.match(section, /warehouse-module-nav/);

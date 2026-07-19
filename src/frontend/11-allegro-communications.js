@@ -1,7 +1,3 @@
-function allegroDataTxt(v){
-  const t=Date.parse(v||"");
-  return t?new Date(t).toLocaleString("pl-PL"):"—";
-}
 function allegroAutoReplyKlucz(type,id,sourceId=""){
   return `${type}:${id}${sourceId?":"+sourceId:""}`;
 }

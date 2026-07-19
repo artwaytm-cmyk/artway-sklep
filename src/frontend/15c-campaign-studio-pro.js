@@ -1,5 +1,5 @@
 /* ═══════════ STUDIO KAMPANII PRO: BANNERY, IKONY I RABATY ═══════════ */
-let rabatyProStan={save:"idle",message:"",selected:new Set()};
+let rabatyProStan={save:"idle",message:"",selected:new Set()},rabatProStan=rabatyProStan;
 
 function bannerProClamp(value,min,max,fallback){const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;}
 function bannerProDevice(button,mode){const form=button.closest("form"),preview=form?.querySelector("[data-banner-live-preview]");if(!preview)return;preview.dataset.device=mode;button.parentElement.querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===button));}
