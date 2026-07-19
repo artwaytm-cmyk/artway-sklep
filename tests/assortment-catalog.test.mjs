@@ -37,11 +37,11 @@ test("karty katalogu zachowują pełne dane i operacje hurtowe",async()=>{
   const source=await read("assets/admin.js");
   assert.match(source,/allegro-publication-card catalog-product-card/);
   assert.match(source,/data-assortment-product-card/);
-  assert.match(source,/catalog-product-readiness/);
+  assert.match(source,/catalog-product-classification/);
   assert.match(source,/catalog-product-operational-data/);
   assert.match(source,/catalog-product-actions/);
   assert.match(source,/EXTERNAL_ID/);
-  assert.match(source,/Zakup — tylko administrator/);
+  assert.match(source,/Zakup — administrator/);
   assert.match(source,/Cena Allegro/);
   assert.match(source,/Stan magazynowy/);
   assert.match(source,/adminOperacjeWynikowHTML/);
@@ -53,9 +53,9 @@ test("karty katalogu zachowują pełne dane i operacje hurtowe",async()=>{
   assert.doesNotMatch(source,/Po zakończeniu pobierz nowy <b>products\.json<\/b> i podmień go na hostingu/);
 });
 
-test("układ katalogu kopiuje wzorcowy model kart i wspiera widok zwarty",async()=>{
+test("układ katalogu przejmuje strukturę wzorca i zachowuje treść asortymentu",async()=>{
   const css=(await read("src/styles/07-admin-domains.css"))+(await read("src/styles/29-commerce-catalog-actions.css"))+(await read("src/styles/31-admin-page-pattern.css"));
-  for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".catalog-product-list",".catalog-product-card",".catalog-product-readiness",".catalog-product-operational-data",".catalog-product-actions",".catalog-product-list.density-zwarta"]){
+  for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".catalog-product-list",".catalog-product-card",".catalog-product-classification",".catalog-product-operational-data",".catalog-product-actions",".catalog-product-list.density-zwarta"]){
     assert.match(css,new RegExp(selector.replace(".","\\.")));
   }
   assert.match(css,/@container\(max-width:1180px\)/);
