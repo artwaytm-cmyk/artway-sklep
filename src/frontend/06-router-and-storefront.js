@@ -1,13 +1,13 @@
 /* ═══════════ ROUTER (podstrony) ═══════════ */
 const ADMIN_MODULY_RUNTIME = Object.freeze({
-  core:"admin-core",agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce",
+  core:"admin-core",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce",
   inventory:"admin-inventory",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system"
 });
 const adminZaladowaneModuly = new Set();
 const adminObietniceModulow = new Map();
 let adminStylePromise = null;
 function adminModulyDlaTrasy(route=""){
-  const t=String(route||"").split("?")[0],moduly=["core"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
+  const t=String(route||"").split("?")[0],moduly=["core","ui"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
   if(t==="/diagnostyka")add("system");
   else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("commerce","inventory","system");

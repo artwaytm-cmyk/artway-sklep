@@ -1,3 +1,4 @@
+/* GENERATED ADMIN UI — shared responsive tables and filters */
 (function uruchomResponsywnyPanelAdmina(){
   let zaplanowane=false;
   const zakresy=new Set();

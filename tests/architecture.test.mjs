@@ -85,6 +85,8 @@ test('panel administratora ładuje mały rdzeń i domeny dopiero dla bieżącej 
   assert.ok((await stat(core.output)).size < 15_000, 'rdzeń panelu powinien pozostać poniżej 15 kB');
   for (const bundle of ADMIN_RUNTIME_BUNDLES) assert.ok((await stat(bundle.output)).size < 400_000, `${bundle.output} wymaga dalszego podziału`);
   assert.match(router, /function adminModulyDlaTrasy\(/);
+  assert.match(router, /ui:"admin-ui"/);
+  assert.match(router, /moduly=\["core","ui"\]/);
   assert.match(router, /adminModulyTrasyGotowe\(t\)/);
   assert.ok(!router.includes('script.src=`/assets/admin.js'), 'przeglądarka nie może pobierać pełnego artefaktu kontrolnego admin.js');
 });

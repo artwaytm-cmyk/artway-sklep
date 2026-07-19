@@ -21,11 +21,27 @@ test('szerokie tabele zmieniają się w opisane karty zamiast tworzyć suwak', a
     read('scripts/build-assets.mjs'),
   ]);
   assert.match(build, /src\/frontend\/08a-admin-responsive-layout\.js/);
-  assert.match(script, /cell\.dataset\.label=headers\[column\]/);
+  assert.match(script, /if\(cell\.dataset\.label!==label\)cell\.dataset\.label=label/);
+  assert.match(script, /admin-responsive-table','admin-standard-table/);
+  assert.match(script, /entry\.addedNodes\.length\)zaplanuj\(entry\.target\)/);
+  assert.doesNotMatch(script, /if\(media\.matches\)/);
   assert.match(script, /MutationObserver/);
   assert.match(script, /requestIdleCallback/);
   assert.match(css, /content:attr\(data-label\)/);
   assert.match(css, /max-width:1280px/);
+});
+
+test('istniejące paski wyszukiwania i filtrów dostają jeden standard bez zmiany logiki domenowej', async () => {
+  const [script, css] = await Promise.all([
+    read('src/frontend/08a-admin-responsive-layout.js'),
+    read('src/styles/31-admin-page-pattern.css'),
+  ]);
+  assert.match(script, /admin-standard-filterbar/);
+  assert.match(script, /maWyszukiwanie/);
+  assert.match(script, /pasek\.querySelectorAll\('select'\)\.length>1/);
+  assert.match(css, /\.admin-standard-filterbar\{position:relative;display:grid!important/);
+  assert.match(css, /attr\(data-filter-title\)/);
+  assert.match(css, /\.admin-search-standard \.admin-standard-filterbar/);
 });
 
 test('zakładki wykorzystują naturalną szerokość i nie przechodzą przedwcześnie do drugiego rzędu', async () => {

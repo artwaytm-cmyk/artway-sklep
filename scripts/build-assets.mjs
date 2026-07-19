@@ -137,6 +137,12 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
     banner: '/* GENERATED ADMIN CORE — edit src/frontend/*.js and run npm run build */',
     sources: [
       'src/frontend/08-admin-navigation.js',
+    ],
+  },
+  {
+    output: 'assets/admin-ui.js',
+    banner: '/* GENERATED ADMIN UI — shared responsive tables and filters */',
+    sources: [
       'src/frontend/08a-admin-responsive-layout.js',
     ],
   },
