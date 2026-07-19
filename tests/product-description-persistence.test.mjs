@@ -46,3 +46,15 @@ test('krótki opis Allegro zachowuje własną wersję zamiast skrótu opisu dłu
   const source = await readFile('src/frontend/11-allegro-and-orders.js', 'utf8');
   assert.match(source, /safeShort=improved\.storeShortDescription\|\|improved\.shortDescription\|\|p\.opisKrotki/);
 });
+
+test('synchronizacja ofert nie przywraca starego opisu Allegro do edytora produktu', async () => {
+  const source = await readFile('netlify/functions/lib/store-app.mjs', 'utf8');
+  const start = source.indexOf('async function allegroAutoMapujOfertyZKartoteka');
+  const end = source.indexOf('function allegroAgentWirtualnyProduktOferty', start);
+  const mapping = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(mapping, /fields\.opis\s*=/);
+  assert.doesNotMatch(mapping, /fields\.opisKrotki\s*=/);
+  assert.match(mapping, /sourceMaterial[\s\S]*allegroOfferDescription/);
+  assert.match(mapping, /const latestSettings = await czytaj\('settings'/);
+});

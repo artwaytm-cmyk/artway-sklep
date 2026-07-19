@@ -516,7 +516,7 @@ function productEditorialFingerprint(product = {}, target = productEditorialTarg
       sourceUrl: clean(source.sourceUrl || product.sourceUrl || product.producentUrl, 1000),
       title: clean(source.title || product.nazwa || product.name, 300),
       shortDescription: clean(source.shortDescription || product.opisKrotki || product.krotkiOpis, 4000),
-      longDescription: clean(source.longDescription || source.allegroCatalogDescription || product.opis, 30_000),
+      longDescription: clean(source.longDescription || source.allegroCatalogDescription || source.allegroOfferDescription || product.opis, 30_000),
       producer: clean(source.producer || product.producent || product.marka, 160),
       brand: clean(source.brand || product.marka || product.producent, 160),
       category: clean(source.category || product.kategoria, 180),

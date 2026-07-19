@@ -1629,7 +1629,12 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
   ]);
   const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
   let products = await allegroAgentProduktyKompletne(data);
-  const mappings = { ...allegroMapowaniaItems(mappingsRec) }, updater = allegroAktualizatorProduktowCentralnych(data, products.keys());
+  const mappings = { ...allegroMapowaniaItems(mappingsRec) }, updater = allegroAktualizatorProduktowCentralnych(data, products.keys()), pendingUpdates = [];
+  const applyProductUpdate = (id, fields = {}, remove = []) => {
+    const changed = updater.apply(id, fields, remove);
+    if (changed) pendingUpdates.push([String(id), fields, remove]);
+    return changed;
+  };
   const offersById = new Map(allegroOfertyItems(offers).map((offer) => [String(offer?.id || ''), offer]));
   const now = new Date().toISOString(), mappingPolicy = normalizeAllegroSyncSettings(offerSettings);
   let quarantined = 0, reassessed = 0;
@@ -1638,7 +1643,7 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
     if (current?.blocked === true) {
       const reassessment = reassessBlockedAllegroMapping({ current, product, offer, mappings, offersById, minimumScore: mappingPolicy.mappingMinScore, now });
       if (reassessment) { mappings[offerId] = reassessment; reassessed++; }
-      if (product && (String(product.allegroOfferId || '') === String(offerId) || product.allegroMappingStatus === 'wymaga_sprawdzenia')) updater.apply(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', ...(current.conflict ? { allegroMappingConflict: current.conflict } : {}) }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
+      if (product && (String(product.allegroOfferId || '') === String(offerId) || product.allegroMappingStatus === 'wymaga_sprawdzenia')) applyProductUpdate(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', ...(current.conflict ? { allegroMappingConflict: current.conflict } : {}) }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
       continue;
     }
     if (!product || !offer || allegroPowiazanieWiarygodne(product, offer)) continue;
@@ -1647,7 +1652,7 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
       operator: 'auto-quarantine:name-conflict', quarantined_at: now,
       conflict: { productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300) },
     };
-    updater.apply(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', allegroMappingConflict: mappings[offerId].conflict }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
+    applyProductUpdate(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', allegroMappingConflict: mappings[offerId].conflict }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
     quarantined++;
   }
   updater.commit();
@@ -1695,20 +1700,29 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
       allegroSyncedAt: record.synced_at, allegroSyncSource: 'offer-sync',
     };
     if (offerSettings.syncDescriptions !== false && tekst(offer.descriptionText, 20000).trim()) {
-      fields.opis = tekst(offer.descriptionText, 20000).trim();
-      fields.opisKrotki = allegroOpisKrotkiZTekstu(fields.opis);
-      if (fields.opis !== tekst(product.opis, 20000).trim() || fields.opisKrotki !== tekst(product.opisKrotki, 420).trim()) descriptionsUpdated++;
+      const offerDescription = tekst(offer.descriptionText, 20000).trim();
+      if (offerDescription !== tekst(product.sourceMaterial?.allegroOfferDescription, 20000).trim()) {
+        fields.sourceMaterial = { ...(product.sourceMaterial || {}), allegroOfferDescription: offerDescription };
+        descriptionsUpdated++;
+      }
     }
     if (producer && (producer !== product.producent || producer !== product.marka)) producersUpdated++;
     if (!product.zdjecie && offer.mainImage) fields.zdjecie = offer.mainImage;
     if ((!Array.isArray(product.zdjecia) || !product.zdjecia.length) && Array.isArray(offer.images) && offer.images.length > 1) fields.zdjecia = offer.images.slice(1, 16);
-    if (updater.apply(product.id, fields, ['allegroMappingStatus', 'allegroMappingConflict'])) productsUpdated++;
+    if (applyProductUpdate(product.id, fields, ['allegroMappingStatus', 'allegroMappingConflict'])) productsUpdated++;
   }
   const productDataChanged = updater.commit();
   if (autoMapped || refreshed || quarantined || reassessed || productDataChanged) {
     await Promise.all([
       zapisz('allegro_mappings', { items: mappings, updated_at: now }),
-      ...(productDataChanged ? [zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now })] : []),
+      ...(productDataChanged ? [(async () => {
+        const latestSettings = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+        const latestData = latestSettings.data && typeof latestSettings.data === 'object' ? { ...latestSettings.data } : {};
+        const latestUpdater = allegroAktualizatorProduktowCentralnych(latestData, products.keys());
+        for (const [id, fields, remove] of pendingUpdates) latestUpdater.apply(id, fields, remove);
+        latestUpdater.commit();
+        return zapisz('settings', { ...latestSettings, data: latestData, rev: (Number(latestSettings.rev) || 0) + 1, updated_at: now });
+      })()] : []),
     ]);
   }
   return { mappings, autoMapped, refreshed, quarantined, reassessed, descriptionsUpdated, producersUpdated, productsUpdated };
