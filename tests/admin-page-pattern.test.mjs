@@ -39,7 +39,7 @@ test('cały panel korzysta z pełnego schematu podstron bez zmiany kolorystyki s
   assert.match(pattern, /table tbody tr:hover/);
   assert.match(pattern, /\.catalog-product-table-center/);
   assert.match(pattern, /\.module-tabs-panel>\.admin-main-tabs\{width:100%;padding:0;border:0/);
-  assert.match(pattern, /grid-template-areas:"product identifiers prices allegro"/);
+  assert.match(pattern, /grid-template-areas:"product identifiers prices stock allegro" "classification identifiers prices stock actions"/);
   assert.match(pattern, /grid-template-areas:"product" "identifiers" "classification" "prices" "stock" "allegro" "actions"/);
   assert.match(pattern, /content-visibility:auto/);
   assert.match(pattern, /\.admin-standard-table-wrap/);
