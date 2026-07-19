@@ -36,10 +36,17 @@ test('zakładki, filtry i statystyki zawijają się do dostępnej szerokości', 
   assert.match(css, /max-height:none;overflow:visible/);
 });
 
-test('długie napisy przycisków zawijają się bez nachodzenia na sąsiednie elementy', async () => {
-  const css = await read('src/styles/30-admin-fluid-layout.css');
-  assert.match(css, /white-space:normal!important;overflow-wrap:anywhere;text-wrap:balance/);
-  assert.match(css, /\.btn\{height:auto!important\}/);
+test('przyciski pozostają jednoliniowe, a układ przenosi całe kontrolki do kolejnego rzędu', async () => {
+  const [css, script] = await Promise.all([
+    read('src/styles/30-admin-fluid-layout.css'),
+    read('src/frontend/08a-admin-responsive-layout.js'),
+  ]);
+  assert.match(css, /white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis/);
+  assert.match(css, /\.btn\{min-height:40px\}/);
   assert.match(css, /select\{overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/);
   assert.match(css, /\[class\*="-actions"\][\s\S]*max-width:100%;min-width:0/);
+  assert.match(css, /flex:1 1 100%;width:100%;max-width:100%/);
+  assert.match(css, /@media\(max-width:560px\)/);
+  assert.match(script, /control\.scrollWidth>control\.clientWidth\+1/);
+  assert.match(script, /control\.setAttribute\('title',label\)/);
 });

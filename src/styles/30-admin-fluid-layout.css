@@ -5,11 +5,12 @@ body.admin-mode .admin-tresc :is(main,aside,section,article,header,footer,nav,fo
 body.admin-mode .admin-tresc :is(input,select,textarea,button,.btn,img,svg,canvas,video){max-width:100%;min-width:0}
 body.admin-mode .admin-tresc :is(p,li,b,strong,small,em,a,label,legend,code,pre){overflow-wrap:anywhere;word-break:normal}
 body.admin-mode .admin-tresc pre{white-space:pre-wrap}
-body.admin-mode .admin-tresc :is(button,.btn,a[role="button"],summary){max-width:100%;min-width:0;line-height:1.28;white-space:normal!important;overflow-wrap:anywhere;text-wrap:balance}
-body.admin-mode .admin-tresc .btn{height:auto!important}
-body.admin-mode .admin-tresc :is(button,.btn,a[role="button"],summary)>:is(span,b,strong,small,em){max-width:100%;min-width:0;line-height:inherit;white-space:normal;overflow-wrap:anywhere}
+body.admin-mode .admin-tresc :is(button,.btn,a[role="button"],summary){max-width:100%;min-width:0;line-height:1.15;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis}
+body.admin-mode .admin-tresc .btn{min-height:40px}
+body.admin-mode .admin-tresc :is(button,.btn,a[role="button"],summary)>:is(span,b,strong,small,em){max-width:100%;min-width:0;line-height:inherit;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis}
 body.admin-mode .admin-tresc select{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 body.admin-mode .admin-tresc :is([class*="-actions"],[class*="-toolbar"],[class*="-filters"],[class*="-controls"],[class*="-buttons"]),body.admin-mode .admin-tresc :is([class*="-actions"],[class*="-toolbar"],[class*="-filters"],[class*="-controls"],[class*="-buttons"])>*{max-width:100%;min-width:0}
+body.admin-mode .admin-tresc :is([class*="-actions"],[class*="-toolbar"],[class*="-controls"],[class*="-buttons"]){flex-wrap:wrap}
 body.admin-mode .admin-tresc :is(.order-stat-card,.stock-summary-card,.admin-nav-link,.admin-nav-group-toggle,.agent-command-metrics>a)>*{max-width:100%;min-width:0}
 
 body.admin-mode .admin-tresc .panel{max-width:100%;overflow:visible}
@@ -20,10 +21,10 @@ body.admin-mode .admin-tresc td :is(input,select,textarea,.btn,details){max-widt
 body.admin-mode .admin-tresc td :is(.diag-actions,.warehouse-stock-links,.supplier-inline-actions){min-width:0;flex-wrap:wrap}
 
 body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs,.warehouse-stock-quickfilters){display:flex;max-width:100%;min-width:0;flex-wrap:wrap;overflow:visible!important;scrollbar-width:none}
-body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs)>:is(a,button){flex:1 1 145px;justify-content:center;min-width:0;white-space:normal;text-align:center}
+body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs)>:is(a,button){flex:1 1 175px;justify-content:center;min-width:0;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis;text-align:center}
 body.admin-mode .admin-tresc .agent-module-nav{max-width:100%;overflow:visible}
 body.admin-mode .admin-tresc .agent-module-groups,body.admin-mode .admin-tresc .agent-module-groups>section>div{max-width:100%;min-width:0;flex-wrap:wrap;overflow:visible}
-body.admin-mode .admin-tresc .agent-module-groups a{white-space:normal}
+body.admin-mode .admin-tresc .agent-module-groups a{min-width:0;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis}
 
 body.admin-mode .admin-tresc :is(.admin-search-standard-body,.warehouse-filter-grid,.warehouse-stock-toolbar,.warehouse-stock-meta-form,.supplier-monitor-toolbar,.catalog-quality-toolbar,.telegram-conversation-filters,.product-link-import-filters,.allegro-listing-advanced-grid,.profitability-controls,.orders-toolbar,.diag-toolbar){grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))!important}
 body.admin-mode .admin-tresc :is(.orders-stat-grid,.supplier-monitor-stats,.telegram-hub-kpis,.product-link-import-stats,.agent-command-metrics,.warehouse-stock-summary){grid-template-columns:repeat(auto-fit,minmax(min(100%,135px),1fr))!important}
@@ -48,7 +49,8 @@ body.admin-mode .admin-tresc :is(.telegram-message-stream,.telegram-incident-lis
   body.admin-mode table.admin-responsive-table td[data-label=""]::before{display:none}
   body.admin-mode table.admin-responsive-table td[colspan]{grid-column:1/-1}
   body.admin-mode table.admin-responsive-table td>:first-child{min-width:0;max-width:100%}
-  body.admin-mode table.admin-responsive-table td :is(.btn,input,select,textarea){white-space:normal}
+  body.admin-mode table.admin-responsive-table td :is(.btn,button,a[role="button"]){white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis}
+  body.admin-mode table.admin-responsive-table td :is(input,select,textarea){white-space:normal}
   body.admin-mode table.admin-responsive-table :is(.catalog-quality-product,.warehouse-document-product,.product-link-import-name){grid-template-columns:auto minmax(0,1fr);min-width:0}
 }
 
@@ -63,13 +65,16 @@ body.admin-mode .admin-tresc :is(.telegram-message-stream,.telegram-incident-lis
   body.admin-mode .admin-tresc .agent-module-groups a{justify-content:center;padding:.5rem;font-size:.66rem;text-align:center}
   body.admin-mode table.admin-responsive-table :is(tbody,tfoot)>tr{grid-template-columns:minmax(0,1fr)}
   body.admin-mode table.admin-responsive-table td{grid-template-columns:minmax(88px,31%) minmax(0,1fr);padding:.55rem .6rem!important}
-  body.admin-mode .admin-tresc :is(.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection)>*{flex:1 1 min(100%,170px);width:auto;max-width:100%}
+  body.admin-mode .admin-tresc :is(.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection)>*{flex:1 1 100%;width:100%;max-width:100%}
   body.admin-mode .admin-tresc :is(.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection) :is(button,.btn,a[role="button"]){justify-content:center;min-height:44px}
   body.admin-mode .admin-tresc :is(.section-head,.order-section-head,.allegro-listing-results-head){align-items:stretch;flex-direction:column}
   body.admin-mode .admin-tresc :is(.section-head,.order-section-head,.allegro-listing-results-head)>*{width:100%;max-width:100%}
 }
 
-@media(max-width:420px){
+@media(max-width:560px){
   body.admin-mode .admin-tresc :is(.admin-main-tabs,.admin-tab-bar,.shipping-tabs,.warehouse-qr-tabs),body.admin-mode .admin-tresc .agent-module-groups>section>div{grid-template-columns:minmax(0,1fr)}
+}
+
+@media(max-width:420px){
   body.admin-mode table.admin-responsive-table td{grid-template-columns:minmax(78px,30%) minmax(0,1fr);font-size:.72rem}
 }

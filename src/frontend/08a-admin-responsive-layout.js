@@ -2,6 +2,16 @@
   const media=window.matchMedia('(max-width:1280px)');
   let zaplanowane=false;
   const bezpiecznyTekst=(value)=>String(value||'').replace(/\s+/g,' ').trim().slice(0,120);
+  const selektorKontrolek=[
+    '.admin-tresc .btn',
+    '.admin-tresc button',
+    '.admin-tresc a[role="button"]',
+    '.admin-tresc .admin-main-tabs>a',
+    '.admin-tresc .admin-tab-bar>a',
+    '.admin-tresc .shipping-tabs>a',
+    '.admin-tresc .warehouse-qr-tabs>a',
+    '.admin-tresc .agent-module-groups a',
+  ].join(',');
   function naglowkiTabeli(table){
     const row=table.tHead?.rows?.[0]||[...table.rows].find((item)=>item.querySelector('th'));
     if(!row)return [];
@@ -25,10 +35,19 @@
       });
     });
   }
+  function opiszKontrolki(){
+    document.querySelectorAll(selektorKontrolek).forEach((control)=>{
+      const label=bezpiecznyTekst(control.getAttribute('aria-label')||control.textContent);
+      if(!label)return;
+      if(!control.hasAttribute('aria-label'))control.setAttribute('aria-label',label);
+      if(control.scrollWidth>control.clientWidth+1&&!control.hasAttribute('title'))control.setAttribute('title',label);
+    });
+  }
   function wykonaj(){
     zaplanowane=false;
-    if(!media.matches||!document.body.classList.contains('admin-mode'))return;
-    document.querySelectorAll('.admin-tresc table,.modal table,.drawer table').forEach(opiszTabele);
+    if(!document.body.classList.contains('admin-mode'))return;
+    opiszKontrolki();
+    if(media.matches)document.querySelectorAll('.admin-tresc table,.modal table,.drawer table').forEach(opiszTabele);
   }
   function zaplanuj(){
     if(zaplanowane)return;
@@ -38,7 +57,7 @@
     else window.requestAnimationFrame(run);
   }
   const observer=new MutationObserver((entries)=>{
-    if(media.matches&&entries.some((entry)=>entry.addedNodes.length||entry.removedNodes.length))zaplanuj();
+    if(entries.some((entry)=>entry.addedNodes.length||entry.removedNodes.length))zaplanuj();
   });
   function start(){
     observer.observe(document.getElementById('widok')||document.body,{childList:true,subtree:true});
