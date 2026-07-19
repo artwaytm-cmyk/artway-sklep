@@ -366,39 +366,6 @@ function zapiszWyglad(e){
   });
 }
 
-/* ── 📁 OBRAZKI Z DYSKU (bez hostingu zdjęć) ──
-   Wgrywane pliki są zmniejszane i zapisywane w ustawieniach sklepu
-   (data-URL). Trafiają też do eksportowanego index.html — więc po
-   publikacji klienci widzą Twoje grafiki. Limit ~1 MB po kompresji. */
-function wgrajObrazek(input, maxSzer, poWgraniu){
-  const plik = input.files && input.files[0];
-  if(!plik) return;
-  if(!plik.type.startsWith("image/")){ toast("⚠️ Wybierz plik graficzny (JPG/PNG)"); return; }
-  const czytnik = new FileReader();
-  czytnik.onload = () => {
-    const img = new Image();
-    img.onload = () => {
-      try{
-        const skala = Math.min(1, maxSzer / img.width);
-        const c = document.createElement("canvas");
-        c.width = Math.max(1, Math.round(img.width * skala));
-        c.height = Math.max(1, Math.round(img.height * skala));
-        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-        const png = plik.type === "image/png" && plik.size < 300_000;   // małe PNG (logo) bez utraty przezroczystości
-        let dataUrl = png ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", 0.82);
-        if(dataUrl.length > 900_000) dataUrl = c.toDataURL("image/jpeg", 0.6);
-        if(dataUrl.length > 1_200_000){ toast("⚠️ Obrazek za duży nawet po kompresji — wybierz mniejszy"); return; }
-        poWgraniu(dataUrl);
-      }catch(b){ loguj("blad","Kompresja obrazka nie powiodła się: "+b.message); toast("⚠️ Nie udało się przetworzyć obrazka"); }
-    };
-    img.onerror = () => { toast("⚠️ Nie udało się odczytać obrazka"); loguj("ostrzezenie","Błąd odczytu wgrywanego obrazka"); };
-    img.src = czytnik.result;
-  };
-  czytnik.readAsDataURL(plik);
-}
-function polePlikuHTML(onchange, etykieta){
-  return `<label class="btn ghost" style="cursor:pointer;white-space:nowrap">📁 ${etykieta||"Wgraj z dysku"}<input type="file" accept="image/*" style="display:none" onchange="${onchange}"></label>`;
-}
 /* banery */
 function wgrajObrazBanera(input, id){
   wgrajObrazek(input, 1200, url => {
@@ -418,18 +385,6 @@ function usunFavicon(){ zapiszCzescUstawien({faviconObraz:null}); }
 /* tło baneru głównego */
 function wgrajTloHero(input){ wgrajObrazek(input, 1600, url => {const {aiAssetId,aiModel,...h}=(ustawienia.hero||{});zapiszCzescUstawien({hero:{...h,obraz:url}});}); }
 function usunTloHero(){ const {obraz,aiAssetId,aiModel, ...h}=(ustawienia.hero||{}); zapiszCzescUstawien({hero:h}); }
-/* zdjęcie produktu (wpisuje się do pola formularza) */
-function wgrajZdjecieProduktu(input){
-  wgrajObrazek(input, 900, url => {
-    const form = input.closest ? input.closest("form") : input.form;
-    const pole = form && form.zdjecie;
-    if(pole) pole.value = url;
-    const pg = $("podgladZdjecia");
-    if(pg) pg.innerHTML = `<img src="${url}" alt="Podgląd zdjęcia produktu" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">`;
-    toast("Zdjęcie wgrane — kliknij Zapisz/Dodaj, aby zachować ✅");
-  });
-}
-
 /* ── Wiele banerów ── */
 function widokAdminBannery(){
   const bannery=pobierzBannery();

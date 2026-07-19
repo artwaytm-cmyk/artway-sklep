@@ -1650,7 +1650,7 @@ async function agentAISpecjalisciPobierz(silent=true){
 function agentAISpecjalisciAktualizujWidocznePanele(){
   const initiative=document.querySelector(".agent-initiative-panel");if(initiative)initiative.outerHTML=agentAIInicjatywaPanelHTML();
   const permissions=document.querySelector(".agent-permission-page");if(permissions)permissions.outerHTML=agentAIUprawnieniaPanelHTML();
-  document.querySelectorAll("[data-product-agent-card]").forEach(card=>{const id=card.dataset.productAgentCard,product=pobierzProduktAdmin(Number(id))||produkty.find(p=>String(p.id)===String(id));if(product)card.outerHTML=agentAIWdrozenieProduktuHTML(product,true);});
+  document.querySelectorAll("[data-product-agent-card]").forEach(card=>{const id=card.dataset.productAgentCard,product=pobierzProduktAdmin(id)||produkty.find(p=>String(p.id)===String(id));if(product)card.outerHTML=agentAIWdrozenieProduktuHTML(product,true);});
   const badge=document.querySelector("[data-agent-live-decision-count]");if(badge)badge.textContent=String(agentAISpecjalisci.data?.decisionStats?.open||0);
 }
 function agentAISpecjalisciPolling(){

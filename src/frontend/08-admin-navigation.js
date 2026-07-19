@@ -28,6 +28,36 @@ function adminSubnavHTML(items, aktywny){
   const safe=(items||[]).filter(x=>x&&x.id&&x.href&&x.label);
   return `<nav class="panel admin-tabs-panel module-tabs-panel" aria-label="Podsekcje panelu"><div class="shipping-tabs admin-main-tabs">${safe.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}" ${x.id===aktywny?'aria-current="page"':""} title="${esc(x.label)}"><span class="tab-label">${esc(x.label)}</span>${x.badge?`<span class="nav-badge">${esc(x.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
 }
+
+// Wspólne kontrolki plików muszą być dostępne w rdzeniu panelu. Korzystają
+// z nich zarówno edytor produktu, jak i personalizacja ładowane osobno.
+function wgrajObrazek(input,maxSzer,poWgraniu){
+  const plik=input.files&&input.files[0];
+  if(!plik)return;
+  if(!plik.type.startsWith("image/")){toast("⚠️ Wybierz plik graficzny (JPG/PNG)");return;}
+  const czytnik=new FileReader();
+  czytnik.onload=()=>{
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const skala=Math.min(1,maxSzer/img.width),c=document.createElement("canvas");
+        c.width=Math.max(1,Math.round(img.width*skala));c.height=Math.max(1,Math.round(img.height*skala));
+        c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+        const png=plik.type==="image/png"&&plik.size<300_000;
+        let dataUrl=png?c.toDataURL("image/png"):c.toDataURL("image/jpeg",.82);
+        if(dataUrl.length>900_000)dataUrl=c.toDataURL("image/jpeg",.6);
+        if(dataUrl.length>1_200_000){toast("⚠️ Obrazek za duży nawet po kompresji — wybierz mniejszy");return;}
+        poWgraniu(dataUrl);
+      }catch(error){loguj("blad","Kompresja obrazka nie powiodła się: "+error.message);toast("⚠️ Nie udało się przetworzyć obrazka");}
+    };
+    img.onerror=()=>{toast("⚠️ Nie udało się odczytać obrazka");loguj("ostrzezenie","Błąd odczytu wgrywanego obrazka");};
+    img.src=czytnik.result;
+  };
+  czytnik.readAsDataURL(plik);
+}
+function polePlikuHTML(onchange,etykieta){
+  return `<label class="btn ghost" style="cursor:pointer;white-space:nowrap">📁 ${etykieta||"Wgraj z dysku"}<input type="file" accept="image/*" style="display:none" onchange="${onchange}"></label>`;
+}
 function eksportSubnavHTML(aktywny="import"){return adminSubnavHTML([{id:"import",href:"#/admin/eksport",label:"📥 Import produktów"},{id:"eksport",href:"#/admin/eksport/eksport",label:"📤 Eksport produktów"},{id:"kopie",href:"#/admin/eksport/kopie",label:"💾 Kopie i raporty"},{id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja strony"}],aktywny);}
 function aktualizacjaSubnavHTML(aktywny="status"){return adminSubnavHTML([{id:"status",href:"#/admin/aktualizacja",label:"📡 Status"},{id:"publikuj",href:"#/admin/aktualizacja/publikuj",label:"⬆️ Publikuj zmiany"},{id:"index",href:"#/admin/aktualizacja/index",label:"📄 Nowy index.html"},{id:"kopie",href:"#/admin/aktualizacja/kopie",label:"↩️ Kopie"}],aktywny);}
 function publikacjaSubnavHTML(aktywny="kontrola"){return adminSubnavHTML([{id:"kontrola",href:"#/admin/publikacja",label:"✅ Gotowość"},{id:"pliki",href:"#/admin/publikacja/pliki",label:"📁 Pliki i hosting"},{id:"kroki",href:"#/admin/publikacja/kroki",label:"🧭 Kroki publikacji"},{id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja"}],aktywny);}

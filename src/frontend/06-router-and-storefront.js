@@ -6,6 +6,11 @@ const ADMIN_MODULY_RUNTIME = Object.freeze({
 const adminZaladowaneModuly = new Set();
 const adminObietniceModulow = new Map();
 let adminStylePromise = null;
+function identyfikatorZTrasy(route,index){
+  const raw=String(route||"").split("/")[index]||"";let decoded=raw;
+  try{decoded=decodeURIComponent(raw);}catch(e){}
+  return /^(0|[1-9]\d*)$/.test(decoded)?Number(decoded):decoded;
+}
 function adminModulyDlaTrasy(route=""){
   const t=String(route||"").split("?")[0],moduly=["core","ui"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
@@ -14,7 +19,10 @@ function adminModulyDlaTrasy(route=""){
   else if(t.startsWith("/admin/agent-ai")||t.startsWith("/admin/magazyn"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/wysylki")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/infakt"))add("inventory");
-  else if(t.startsWith("/admin/asortyment")||t.startsWith("/admin/produkty")||t==="/admin/kategorie"||t==="/admin/mapowanie"||t==="/admin/opinie")add("agent","warehouse","commerce","inventory","catalog");
+  else if(t.startsWith("/admin/asortyment")||t.startsWith("/admin/produkty")||t==="/admin/kategorie"||t==="/admin/mapowanie"||t==="/admin/opinie"){
+    add("agent","warehouse","commerce","inventory","catalog");
+    if(t==="/admin/asortyment/rabaty")add("personalization");
+  }
   else if(t.startsWith("/admin/personalizacja")||["/admin/dostawy","/admin/ustawienia","/admin/wyglad","/admin/rozmieszczenie","/admin/bannery","/admin/podstrony","/admin/strony","/admin/rabaty"].includes(t))add("personalization");
   else if(t.startsWith("/admin/eksport"))add("inventory","catalog","personalization");
   else if(t.startsWith("/admin/aktualizacja"))add("personalization");
@@ -254,7 +262,7 @@ function renderuj(){
     if(t.startsWith("/admin")&&stanBramki.authenticated&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja) setTimeout(()=>synchronizujBazeCentralna(true),0);
     if(!taSamaTrasa)window.scrollTo({top:0});
     if(t==="/" || t==="") w.innerHTML = widokSklep();
-    else if(t.startsWith("/produkt/")) w.innerHTML = widokProdukt(parseInt(t.split("/")[2]));
+    else if(t.startsWith("/produkt/")) w.innerHTML = widokProdukt(identyfikatorZTrasy(t,2));
     else if(t.startsWith("/kategoria/")) w.innerHTML = widokKategoria(decodeURIComponent(t.split("/")[2]||""));
     else if(t==="/promocje") w.innerHTML = widokListaSpecjalna("🔥 Promocje", p=>p.staraCena, "Aktualnie nie mamy promocji — zajrzyj wkrótce!");
     else if(t==="/nowosci") w.innerHTML = widokListaSpecjalna("✨ Nowości", p=>p.badge==="Nowość", "Brak nowości w tej chwili — zajrzyj wkrótce!");
@@ -323,7 +331,7 @@ function renderuj(){
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
       else if(t==="/admin/produkty/z-linku") w.innerHTML = widokAdminProduktyZLinku();
       else if(t==="/admin/produkty/z-pliku") w.innerHTML = widokAdminProduktyZPliku();
-      else if(t.startsWith("/admin/produkty/edytuj/")) w.innerHTML = widokAdminProduktEdytuj(parseInt(t.split("/")[4]));
+      else if(t.startsWith("/admin/produkty/edytuj/")) w.innerHTML = widokAdminProduktEdytuj(identyfikatorZTrasy(t,4));
       else if(t==="/admin/kategorie") w.innerHTML = widokAdminKategorie();
       else if(t==="/admin/mapowanie") w.innerHTML = widokAdminMapowanie();
       else if(t==="/admin/klienci") w.innerHTML = widokAdminKlienci("lista");

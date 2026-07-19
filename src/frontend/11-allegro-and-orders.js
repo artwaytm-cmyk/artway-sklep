@@ -87,7 +87,7 @@ function allegroProduktIdDlaOferty(offerId){
 function allegroProduktDlaOferty(offerId){
   const id=allegroProduktIdDlaOferty(offerId);
   if(!id) return null;
-  return pobierzProduktAdmin(Number(id)) || produktyDoAdministracji().find(p=>String(p.id)===String(id)) || null;
+  return pobierzProduktAdmin(id) || produktyDoAdministracji().find(p=>String(p.id)===String(id)) || null;
 }
 function allegroKodProduktu(p){
   return String(p?.sku||p?.kod||p?.externalId||p?.gtin||p?.id||"").trim();

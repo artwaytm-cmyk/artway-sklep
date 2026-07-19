@@ -6,7 +6,7 @@ async function allegroMapujOferte(offerId,productId,options={}){
     allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;rezerwacjeMagazynowe._cache=null;
     let synchronizacja=null,bladSynchronizacji=null;
     if(id&&d.syncRequired!==false&&options.syncOffer!==false){
-      const produkt=produktyDoAdministracji().find(p=>String(p.id)===id)||pobierzProduktAdmin(Number(id));
+      const produkt=pobierzProduktAdmin(id)||produktyDoAdministracji().find(p=>String(p.id)===id);
       if(produkt)try{
         synchronizacja=await chmura("allegro-create-product-offer",{method:"POST",body:{product:{...produkt,allegroOfferId:String(offerId)},mappedOfferId:String(offerId),options:{publicationAction:"keep",preserveStock:true,syncReason:"manual-mapping"}},timeout:120000});
         allegroZapiszAutoUzupelnienia(produkt,synchronizacja);allegroZastosujWynikWystawienia(produkt,synchronizacja);
