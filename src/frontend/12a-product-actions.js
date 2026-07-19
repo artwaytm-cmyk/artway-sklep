@@ -118,16 +118,19 @@ function asortymentPrzygotujProduktDoAllegroZMenu(id){return asortymentUruchomAg
 function asortymentWystawZaznaczoneNaAllegro(){return asortymentPrzygotujOperacjeZewnetrzna("activate");}
 function asortymentAnulujAgenta(){if(asortymentAgentKolejka.busy){asortymentAgentKolejka.cancel=true;asortymentOdswiezCentrumDzialan();}}
 
-function asortymentPrzygotujOperacjeZewnetrzna(operation=null,singleId=null){
+function asortymentPrzygotujOperacjeZewnetrzna(operation=null,singleId=null,executeNow=false){
   const op=String(operation||document.querySelector("[data-external-product-operation]")?.value||asortymentAllegroDecyzja.operation||"update"),source=singleId===null?[...zaznaczoneProdukty]:[singleId],all=asortymentProduktyZId(source);
   const eligible=all.filter(p=>op==="update"||op==="withdraw"?!!asortymentOfertaProduktu(p):true).slice(0,50);
   if(!eligible.length){toast(op==="update"||op==="withdraw"?"Zaznaczone produkty nie mają powiązanych ofert Allegro":"Zaznacz produkty");return;}
-  asortymentAllegroDecyzja={step:"confirm",busy:false,operation:op,operationId:`allegro_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`,ids:eligible.map(p=>String(p.id)),skipped:Math.max(0,all.length-eligible.length),done:0,total:eligible.length,ok:0,failed:0,error:"",results:[]};asortymentOdswiezCentrumDzialan();setTimeout(()=>document.querySelector(".product-external-confirm")?.scrollIntoView({behavior:"smooth",block:"center"}),0);
+  asortymentAllegroDecyzja={step:"confirm",busy:false,direct:executeNow&&op!=="withdraw",operation:op,operationId:`allegro_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`,ids:eligible.map(p=>String(p.id)),skipped:Math.max(0,all.length-eligible.length),done:0,total:eligible.length,ok:0,failed:0,error:"",results:[]};
+  if(executeNow&&op!=="withdraw"){void asortymentPotwierdzOperacjeZewnetrzna(true);return;}
+  asortymentOdswiezCentrumDzialan();setTimeout(()=>document.querySelector(".product-external-confirm")?.scrollIntoView({behavior:"smooth",block:"center"}),0);
 }
 function asortymentAnulujOperacjeZewnetrzna(){asortymentAllegroDecyzja={step:"idle",busy:false,operation:"update",ids:[],skipped:0,done:0,total:0,ok:0,failed:0,error:"",results:[]};asortymentOdswiezCentrumDzialan();}
-async function asortymentPotwierdzOperacjeZewnetrzna(){
+async function asortymentPotwierdzOperacjeZewnetrzna(direct=false){
   const state=asortymentAllegroDecyzja;if(state.busy||state.step!=="confirm")return;
-  if(!document.querySelector("[data-external-product-confirm]")?.checked){toast("Zaznacz potwierdzenie świadomej operacji przez API Allegro");return;}
+  if(!direct&&!document.querySelector("[data-external-product-confirm]")?.checked){toast("Zaznacz potwierdzenie świadomej operacji przez API Allegro");return;}
+  asortymentAllegroDecyzja={...state,busy:true,error:""};asortymentOdswiezCentrumDzialan();
   try{
     const health=await chmura("allegro-connection-check",{timeout:30000});
     allegroStan={...allegroStan,...(health.allegro||{}),sprawdzono:true,error:""};
@@ -136,7 +139,7 @@ async function asortymentPotwierdzOperacjeZewnetrzna(){
     allegroStan={...allegroStan,connected:false,requiresReauth:true,sprawdzono:true,error:error.message||String(error)};
     asortymentAllegroDecyzja={...state,busy:false,error:`Połączenie Allegro nie jest gotowe: ${error.message||error}`};asortymentOdswiezCentrumDzialan();toast("⚠️ Najpierw napraw połączenie Allegro — żadna oferta nie została zmieniona");return;
   }
-  asortymentAllegroDecyzja={...state,busy:true,error:""};asortymentOdswiezCentrumDzialan();
+  asortymentAllegroDecyzja={...asortymentAllegroDecyzja,busy:true,error:""};asortymentOdswiezCentrumDzialan();
   try{
     const products=asortymentProduktyZId(state.ids);
     if(state.operation==="withdraw"){
@@ -170,6 +173,7 @@ function asortymentOperacjaZewnetrznaOpis(op){return ({update:["Aktualizacja ist
 function asortymentDecyzjaZewnetrznaHTML(){
   const s=asortymentAllegroDecyzja;if(s.step==="idle")return "";const [title,description]=asortymentOperacjaZewnetrznaOpis(s.operation),products=asortymentProduktyZId(s.ids);
   if(s.step==="done")return `<section class="product-external-result ${s.failed||s.cloudSaved===false?"partial":"ok"}"><div><b>${s.failed?"⚠️ Operacja zakończona częściowo":s.cloudSaved===false?"⚠️ Allegro zapisane, kartoteki czekają na synchronizację":"✅ Operacja zakończona i zapisana"}</b><small>${esc(title)} • poprawnie ${s.ok} • błędy ${s.failed} • serwer ${s.cloudSaved===false?"oczekuje na ponowną próbę":"potwierdził zapis"}</small>${s.results.length?`<details><summary>Raport dla ${s.results.length} produktów</summary>${s.results.map(x=>`<p class="${x.ok?"ok":"error"}"><b>${x.ok?"✅":"⚠️"} ${esc(x.name||x.id)}</b> — ${x.ok?`oferta ${esc(x.offerId||"zapisana")}${x.savedFields?.length?` • zapisano: ${esc(asortymentEtykietyPol(x.savedFields).join(", "))}`:""}`:esc(x.error||"błąd")}</p>`).join("")}</details>`:""}</div><button class="btn ghost" onclick="asortymentAnulujOperacjeZewnetrzna()">Zamknij</button></section>`;
+  if(s.direct)return `<section class="product-external-direct ${s.error?"error":""}" aria-live="polite"><span>${s.error?"⚠️":"🟠"}</span><div><b>${s.error?"Nie rozpoczęto publikacji":esc(title)}</b><small>${s.error?esc(s.error):"Kontrola połączenia, przygotowanie danych i publikacja trwają bez dodatkowego potwierdzenia."}</small>${s.error?`<button class="btn ghost" onclick="${allegroStan.requiresReauth?"allegroPolacz()":"asortymentPotwierdzOperacjeZewnetrzna(true)"}">${allegroStan.requiresReauth?"🔐 Połącz Allegro ponownie":"↻ Ponów operację"}</button>`:`<progress max="${Math.max(1,s.total)}" value="${s.done}"></progress><em>${s.done}/${s.total} • poprawnie ${s.ok} • błędy ${s.failed}</em>`}</div></section>`;
   return `<section class="product-external-confirm"><header><span>⚠️</span><div><small>Świadoma decyzja administratora • API Allegro</small><h3>${esc(title)} — ${products.length} produktów</h3><p>${esc(description)} Ostateczna publikacja nastąpi dopiero po tym potwierdzeniu.</p></div></header><div class="product-external-preview">${products.slice(0,8).map(p=>`<span><b>${esc(p.nazwa||"Produkt")}</b><small>ID ${esc(p.id)} • oferta ${esc(asortymentOfertaProduktu(p)?.id||p.allegroOfferId||"nowa")}</small>${asortymentStatusPrzygotowaniaHTML(p)}</span>`).join("")}${products.length>8?`<em>+ ${products.length-8} kolejnych</em>`:""}</div><label class="product-external-check"><input type="checkbox" data-external-product-confirm> Potwierdzam przygotowanie i wykonanie tej operacji na Allegro${s.skipped?` • pominięto ${s.skipped} niepasujących produktów`:""}</label>${s.busy?`<div class="product-agent-progress"><progress max="${s.total}" value="${s.done}"></progress><span>${s.done}/${s.total} • Agent zapisuje dane przed publikacją</span></div>`:""}${s.error?`<div class="backend-note allegro-mapping-error"><b>${esc(s.error)}</b>${allegroStan.requiresReauth?`<button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro ponownie</button>`:""}</div>`:""}<footer><button class="btn ghost" onclick="asortymentAnulujOperacjeZewnetrzna()" ${s.busy?"disabled":""}>Anuluj</button><button class="btn danger" onclick="asortymentPotwierdzOperacjeZewnetrzna()" ${s.busy?"disabled":""}>${s.busy?"⏳ Przygotowuję i wystawiam…":"Potwierdzam przygotowanie i publikację"}</button></footer></section>`;
 }
 function asortymentCentrumDzialanHTML(){

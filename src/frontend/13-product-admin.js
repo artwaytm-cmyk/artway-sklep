@@ -121,23 +121,27 @@ function usunZaznaczoneProd(){
 function zmienCenyZaznaczonych(){
   const wartosc = parseFloat(String($("procentCen")?.value||"").replace(",","."));
   const tryb=String($("trybCenProduktow")?.value||"percent");
+  const kanal=String($("kanalCenProduktow")?.value||"sklep");
   if(!zaznaczoneProdukty.size){ toast("Zaznacz produkty"); return; }
   if(!Number.isFinite(wartosc)||wartosc===0){ toast("⚠️ Podaj wartość zmiany, np. 10 lub -5"); return; }
   if(tryb==="percent"&&wartosc<=-100){ toast("⚠️ Obniżka procentowa musi być większa niż -100%"); return; }
   if(tryb==="fixed"&&wartosc<=0){ toast("⚠️ Cena docelowa musi być większa od zera"); return; }
   for(const id of [...zaznaczoneProdukty]){
     const p = pobierzProduktAdmin(id); if(!p) continue;
-    const nowa = Math.max(0.01, +(tryb==="percent"?p.cena*(1+wartosc/100):tryb==="amount"?p.cena+wartosc:wartosc).toFixed(2));
+    const wylicz=base=>Math.max(0.01, +(tryb==="percent"?kwotaNum(base)*(1+wartosc/100):tryb==="amount"?kwotaNum(base)+wartosc:wartosc).toFixed(2)),patch={};
+    if(kanal==="sklep"||kanal==="oba")patch.cena=wylicz(p.cena);
+    if(kanal==="allegro"||kanal==="oba")patch.cenaAllegro=wylicz(p.cenaAllegro||p.cena);
     const i = produktyDodane.findIndex(x=>x.id===id);
-    if(i>=0){ produktyDodane[i].cena = nowa; if(produktyDodane[i].staraCena && produktyDodane[i].staraCena<=nowa) delete produktyDodane[i].staraCena; }
-    else produktyEdytowane = {...produktyEdytowane, [id]:{...(produktyEdytowane[id]||{}), cena:nowa}};
+    if(i>=0){ Object.assign(produktyDodane[i],patch);if(patch.cena&&produktyDodane[i].staraCena&&produktyDodane[i].staraCena<=patch.cena)delete produktyDodane[i].staraCena; }
+    else produktyEdytowane = {...produktyEdytowane, [id]:{...(produktyEdytowane[id]||{}),...patch}};
   }
   zapiszLS("artway_produkty_dodane", produktyDodane);
   zapiszLS("artway_produkty_edytowane", produktyEdytowane);
   const opis=tryb==="percent"?`${wartosc>0?"+":""}${wartosc}%`:tryb==="amount"?`${wartosc>0?"+":""}${zl(wartosc)}`:`na ${zl(wartosc)}`;
-  loguj("info",`Masowa zmiana cen ${opis} dla ${zaznaczoneProdukty.size} produktów`);
+  const kanalLabel=kanal==="oba"?"sklepu i Allegro":kanal==="allegro"?"Allegro":"sklepu";
+  loguj("info",`Masowa zmiana cen ${kanalLabel} ${opis} dla ${zaznaczoneProdukty.size} produktów`);
   zaznaczoneProdukty.clear();
-  zbudujProdukty(); toast(`Ceny zmienione ${opis} ✅`); renderuj();
+  zbudujProdukty(); toast(`Ceny ${kanalLabel} zmienione ${opis} ✅`); renderuj();
 }
 function usunProduktAdmin(id){
   if(produktyDodane.some(p=>p.id===id)){

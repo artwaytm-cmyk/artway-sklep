@@ -53,13 +53,20 @@ test("układ katalogu jest responsywny i wspiera zwartą tabelę",async()=>{
   assert.match(css,/@media\(max-width:620px\).*assortment-advanced-grid/);
 });
 
-test("katalog ma kolejkę Agenta, trwałe przygotowanie i potwierdzane decyzje Allegro",async()=>{
-  const catalog=await read("src/frontend/12-customers-and-inventory.js"),actions=await read("src/frontend/12a-product-actions.js"),css=await read("src/styles/15-product-actions.css");
+test("katalog rozdziela zarządzanie produktami od tworzenia nowych ofert Allegro",async()=>{
+  const catalog=await read("src/frontend/12-customers-and-inventory.js"),actions=await read("src/frontend/12a-product-actions.js"),commerce=await read("src/frontend/12c-commerce-catalog-actions.js"),prices=await read("src/frontend/13-product-admin.js"),css=(await read("src/styles/15-product-actions.css"))+(await read("src/styles/29-commerce-catalog-actions.css"));
   assert.match(catalog,/data-product-agent-center/);
   assert.match(catalog,/asortymentMenuDzialanProduktuHTML\(p\)/);
-  for(const marker of ["Przygotuj i zapisz do Allegro","Wystaw gotowe na Allegro","Pełna kontrola i uzupełnienie","Odśwież dane producenta","Przygotuj / sprawdź szkic","Pobierz prowizje i opłaty","Aktualizuj istniejące oferty","Opublikuj / aktywuj sprzedaż","Zakończ powiązane oferty"]){
-    assert.match(actions,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));
-  }
+  for(const marker of ["Centrum zarządzania produktami","Nowe oferty powstają wyłącznie w sekcji Allegro","Synchronizuj dane i ceny","Wycofaj oferty","Otwórz ofertę"]){assert.match(commerce,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));}
+  assert.doesNotMatch(commerce,/Wystaw gotowe na Allegro/);
+  assert.match(catalog,/id="kanalCenProduktow"/);
+  assert.match(catalog,/Tylko sklep/);
+  assert.match(catalog,/Tylko Allegro/);
+  assert.match(catalog,/Sklep i Allegro/);
+  assert.match(commerce,/catalog-allegro-offer-link/);
+  assert.match(prices,/kanalCenProduktow/);
+  assert.match(prices,/patch\.cenaAllegro/);
+  assert.match(prices,/patch\.cena=/);
   assert.match(actions,/Ostateczna publikacja nastąpi dopiero po tym potwierdzeniu/);
   assert.match(actions,/data-external-product-confirm/);
   assert.match(actions,/Promise\.all\(Array\.from\(\{length:Math\.min\(2,products\.length\)\},worker\)\)/);
@@ -75,6 +82,7 @@ test("katalog ma kolejkę Agenta, trwałe przygotowanie i potwierdzane decyzje A
   assert.match(css,/\.product-agent-results/);
   assert.match(css,/\.product-allegro-preparation/);
   assert.match(css,/\.product-external-confirm/);
+  assert.match(css,/\.catalog-allegro-offer-link/);
   assert.match(css,/@media\(max-width:620px\)/);
 });
 

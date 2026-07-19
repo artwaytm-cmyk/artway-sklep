@@ -1,5 +1,6 @@
 /* ═══════════ ALLEGRO — PROFESJONALNE CENTRUM WYSTAWIANIA ═══════════ */
 let allegroWystawianieSort="gotowosc",allegroWystawianieStrona=1;
+let allegroWystawianieFiltry={kategoria:"wszystkie",producent:"wszyscy",dane:"wszystkie",sprzedaz:"wszystkie",magazyn:"wszystkie",zrodlo:"wszystkie",cenaOd:"",cenaDo:""};
 
 function allegroPublikacjaWybraneIds(){
   const active=new Set(produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>String(p.id)));
@@ -8,6 +9,8 @@ function allegroPublikacjaWybraneIds(){
 function allegroPublikacjaUstawStrone(value){allegroWystawianieStrona=Math.max(1,Number(value)||1);renderuj();}
 function allegroPublikacjaPrzelaczFiltr(value){filtrAllegroWystawiania=String(value||"wszystkie");allegroWystawianieStrona=1;renderuj();}
 function allegroPublikacjaPrzelaczSort(value){allegroWystawianieSort=String(value||"gotowosc");allegroWystawianieStrona=1;renderuj();}
+function allegroPublikacjaUstawFiltrZaawansowany(key,value){if(!(key in allegroWystawianieFiltry))return;allegroWystawianieFiltry={...allegroWystawianieFiltry,[key]:String(value??"")};allegroWystawianieStrona=1;renderuj();}
+function allegroPublikacjaResetujFiltry(){szukajAllegroWystawiania="";filtrAllegroWystawiania="wszystkie";allegroWystawianieSort="gotowosc";allegroWystawianieFiltry={kategoria:"wszystkie",producent:"wszyscy",dane:"wszystkie",sprzedaz:"wszystkie",magazyn:"wszystkie",zrodlo:"wszystkie",cenaOd:"",cenaDo:""};allegroWystawianieStrona=1;renderuj();}
 function allegroPublikacjaZaznaczIds(ids=[]){allegroZaznaczOfertyProduktow(ids,true);}
 function allegroPublikacjaPrzeniesWyborDoAgenta(ids=[]){
   zaznaczoneProdukty.clear();
@@ -17,7 +20,7 @@ function allegroPublikacjaOtworzDecyzje(singleId=null,operation="activate"){
   const ids=singleId===null?allegroPublikacjaWybraneIds():[String(singleId)];
   if(!ids.length){toast("Zaznacz co najmniej jeden produkt do wystawienia");return;}
   allegroPublikacjaPrzeniesWyborDoAgenta(ids);
-  asortymentPrzygotujOperacjeZewnetrzna(operation,singleId);
+  asortymentPrzygotujOperacjeZewnetrzna(operation,singleId,true);
 }
 function allegroPublikacjaPrzygotujWybrane(singleId=null){
   const ids=singleId===null?allegroPublikacjaWybraneIds():[String(singleId)];

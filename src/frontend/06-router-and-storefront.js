@@ -34,6 +34,22 @@ function seoSlugKategorii(value=""){return String(value||"").toLocaleLowerCase("
 function przejdzDoSklepu(path="/"){history.pushState(null,"",path);renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));}
 function nawigujSklep(event,path="/"){if(event&&(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||event.button>0))return true;event?.preventDefault?.();przejdzDoSklepu(path);return false;}
 function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
+const ADMIN_HISTORIA_KLUCZ="artway_admin_historia_tras_v1";
+let adminHistoriaTras=(()=>{try{const value=JSON.parse(sessionStorage.getItem(ADMIN_HISTORIA_KLUCZ)||"[]");return Array.isArray(value)?value.filter(x=>String(x).startsWith("/admin")).slice(-30):[];}catch(e){return [];}})();
+let adminOstatniaTrasa=trasa(),adminNawigacjaCofania=false;
+function adminZapiszHistorieTras(){try{sessionStorage.setItem(ADMIN_HISTORIA_KLUCZ,JSON.stringify(adminHistoriaTras.slice(-30)));}catch(e){}}
+function adminZarejestrujTrase(next=trasa()){
+  const current=String(next||""),previous=String(adminOstatniaTrasa||"");
+  if(adminNawigacjaCofania){adminNawigacjaCofania=false;adminOstatniaTrasa=current;adminZapiszHistorieTras();return;}
+  if(previous.startsWith("/admin")&&current!==previous){if(adminHistoriaTras.at(-1)!==previous)adminHistoriaTras.push(previous);adminHistoriaTras=adminHistoriaTras.filter((value,index,array)=>index===array.length-1||value!==array[index+1]).slice(-30);adminZapiszHistorieTras();}
+  adminOstatniaTrasa=current;
+}
+function adminPoprzedniaTrasa(){const current=trasa();return [...adminHistoriaTras].reverse().find(path=>String(path).startsWith("/admin")&&path!==current)||"";}
+function adminWrocDoPoprzedniejStrony(){
+  const current=trasa();let target="";while(adminHistoriaTras.length&&!target){const candidate=String(adminHistoriaTras.pop()||"");if(candidate.startsWith("/admin")&&candidate!==current)target=candidate;}
+  adminZapiszHistorieTras();if(!target){toast("Nie ma wcześniejszej strony panelu w tej sesji");return false;}adminNawigacjaCofania=true;location.hash="#"+target;return false;
+}
+function adminAktualizujPrzyciskHistorii(root=document){const button=root?.querySelector?.(".admin-history-back");if(!button)return;const previous=adminPoprzedniaTrasa();button.disabled=!previous;button.title=previous?`Wróć do: ${previous}`:"Brak wcześniejszej strony panelu";}
 let ostatniaRenderowanaTrasa="";
 let renderowanieWidoku=false;
 let renderPonowniePoBiezacym=false;
@@ -91,7 +107,7 @@ function adminPrzywrocPodstroneZCache(root,route){
   if(current)current.replaceWith(entry.workspace);else container.appendChild(entry.workspace);
   const currentHeader=container.querySelector(":scope > .admin-workspace-header");if(entry.header&&currentHeader)aktualizujWezelStabilnie(currentHeader,entry.header,document.activeElement);
   const currentMobile=container.querySelector(":scope > .admin-mobile-menu");if(entry.mobile&&currentMobile)aktualizujWezelStabilnie(currentMobile,entry.mobile,document.activeElement);
-  adminAktualizujAktywnaNawigacje(shell,route);
+  adminAktualizujAktywnaNawigacje(shell,route);adminAktualizujPrzyciskHistorii(shell);
   requestAnimationFrame(()=>window.scrollTo({top:Math.max(0,Number(entry.scrollY)||0)}));
   return true;
 }
@@ -315,7 +331,7 @@ function renderuj(){
     if(renderPonowniePoBiezacym){renderPonowniePoBiezacym=false;requestAnimationFrame(()=>renderuj());}
   }
 }
-window.addEventListener("hashchange",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
+window.addEventListener("hashchange",()=>{adminZarejestrujTrase(trasa());renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 window.addEventListener("popstate",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 
 /* ═══════════ WIDOK: SKLEP (strona główna) ═══════════ */

@@ -55,6 +55,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/12-customers-and-inventory.js',
       'src/frontend/12a-product-actions.js',
       'src/frontend/12b-allegro-listing-workspace.js',
+      'src/frontend/12c-commerce-catalog-actions.js',
       'src/frontend/20-product-link-file-import-parser.js',
       'src/frontend/21-product-link-file-import-ui.js',
       'src/frontend/13-product-admin.js',
@@ -107,6 +108,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/26-telegram-communications.css',
       'src/styles/27-allegro-listing-workspace.css',
       'src/styles/28-agent-ai-workspace.css',
+      'src/styles/29-commerce-catalog-actions.css',
     ],
   },
 ]);
