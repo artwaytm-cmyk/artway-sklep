@@ -575,6 +575,7 @@ function agentAIMagazynTekst(){
   const bezLokalizacji=produktyAdmin.filter(p=>!magazynMetaProduktu(p.id).lokalizacja),bezDostawcy=braki.filter(x=>!x.meta?.dostawca);
   return [`🏬 Magazyn: ${produktyAdmin.length} produktów aktywnych w administracji.`,`Monitorowane stany: ${monitorowane.length}; bez monitoringu: ${bezMonitoringu}.`,`Realne braki do aktywnych zamówień: ${braki.length}; bez dostawcy w Planie: ${bezDostawcy.length}; lokalizacje do utrzymania przez magazyn: ${bezLokalizacji.length}; wyłączone ze sprzedaży: ${niedostepne.length}.`,niskie.length?`\nPierwsze niskie stany:\n${niskie.slice(0,8).map(p=>`• ${p.nazwa} — stan ${stanMagazynuId(p.id)} szt., próg ${progNiskiProduktu(p)}`).join("\n")}`:""].join("\n");
 }
+
 function czyEAN(v){
   const c=tylkoCyfry(v);
   return [8,12,13,14].includes(c.length);
@@ -1167,6 +1168,7 @@ function magazynTabelaOperacyjnaHTML(){
   const aktywne=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).filter(agentAIPlanDokumentAktywny);
   return `<div class="panel warehouse-worktable-panel ops-control-center"><div class="order-section-head"><div><span class="order-pro-label">Aktualne zapotrzebowanie</span><h2 style="margin-top:.25rem">📑 Braki do zamówień</h2><p class="order-detail-lead">Każda pozycja z aktywnego zamówienia sklepu lub Allegro trafia tutaj. Towar już ujęty w szkicu nie jest liczony drugi raz.</p></div><div class="diag-actions" style="margin-top:0"><button class="btn" onclick="agentAIUzgodnijPlanZSerwerem()" ${braki.length?"":"disabled"}>↻ Przelicz i uzgodnij</button><button class="btn ghost" onclick="eksportujTabeleOperacyjnaMagazynuCSV()">📤 CSV bez cen</button></div></div><nav class="supplier-plan-statusbar" aria-label="Podsumowanie braków"><span><b>${braki.length}</b><small>produkty z brakiem</small></span><span><b>${pozostalo}</b><small>szt. do dodania</small></span><span><b>${wZleceniach}</b><small>szt. w szkicach</small></span><span><b>${grupy.length}</b><small>producenci</small></span><span><b>${aktywne.length}</b><small>aktywne dokumenty</small></span></nav><div class="ops-supplier-list">${grupy.map(([d,rows])=>magazynBrakiDostawcyHTML(d,rows)).join("")||`<div class="backend-note">✅ Brak realnych braków do aktywnych zamówień.</div>`}</div></div>${agentAIZleceniaPanelHTML()}`;
 }
+
 async function agentAIZlecenieProducentaTekst(){
   const docs=(await agentAIUzgodnijPlanZSerwerem({silent:true})).filter(agentAIPlanDokumentAktywny);
   if(!docs.length)return "Nie ma nowych braków; kanoniczny Plan zatowarowania na serwerze nie zawiera aktywnych dokumentów producentów.";
@@ -1673,6 +1675,7 @@ function agentAIPlanOperacyjnyHTML(analiza){
     <details class="agent-task-archive" ${zadania.length?"":"open"}><summary>✅ Zakończone zadania (${archive.length})</summary>${archive.length?`<div class="agent-task-archive-list">${archive.map(x=>`<article><span>✓</span><div><b>${esc(x.title||x.id)}</b><small>${esc(x.completedAt?new Date(x.completedAt).toLocaleString("pl-PL"):"rozwiązane automatycznie")} • ${esc(x.completedBy||"Agent")}</small></div>${x.state==="done"?`<button class="btn ghost" onclick="agentAIPrzywrocZadanie(${jsArg(x.id)})">Przywróć</button>`:`<em>problem rozwiązany</em>`}</article>`).join("")}</div>`:`<p class="order-detail-lead">Archiwum wypełni się po oznaczeniu pierwszego zadania jako wykonane.</p>`}</details>
   </div>`;
 }
+
 function agentAIPodstronaNaglowekHTML(aktywna="pulpit",activeCount=0){
   if(aktywna==="pulpit")return "";
   const pages={
@@ -3298,6 +3301,7 @@ async function allegroDodajProduktZOferty(offerId){
   zapiszHistorieAgenta("wdrozenie-produktu",`${onboardingStatus==="completed"?"Zakończono":"Rozpoczęto"} wdrożenie produktu utworzonego z Allegro: ${poprawiony.nazwa}`,{produktId:id,status:onboardingStatus,missing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)});zaplanujZapisUstawien();
   toast("Produkt utworzony z Allegro i podpięty");
 }
+
 function produktDlaAllegroZFormularza(form,id,poprzedni={}){
   const fd=new FormData(form);
   const dane=daneProduktuZFormularza(fd,id,poprzedni);
@@ -3650,6 +3654,7 @@ async function pobierzDaneProduktuZUrl(btn){
   }
   finally{ btn.disabled=false; }
 }
+
 function allegroProduktSelectHTML(offerId){
   const pid=String(allegroProduktIdDlaOferty(offerId)||"");
   const lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).sort((a,b)=>String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl")).slice(0,1000);
@@ -4087,6 +4092,7 @@ function allegroWystawianiePanelHTML(){
     <div class="backend-note allegro-info-bottom"><b>Sklep jest źródłem najnowszych danych.</b> Powiązanie zapisuje jednocześnie produkt sklepu, produkt katalogowy Allegro i ofertę. Nazwa, cena, stan, zdjęcia, opis oraz producent są aktualizowane automatycznie z kartoteki sklepu bez tworzenia duplikatu i bez zmiany statusu publikacji.</div>
   </div>`;
 }
+
 function allegroDataTxt(v){
   const t=Date.parse(v||"");
   return t?new Date(t).toLocaleString("pl-PL"):"—";
@@ -4309,6 +4315,7 @@ function allegroKomunikacjaPanelHTML(type="thread"){
   const filterOptions=isIssue?[["wszystkie","Wszystkie"],["aktywne","Aktywne w Allegro"],["zamkniete","Zamknięte w Allegro"],["wymaga","Wymagają odpowiedzi"],["zalatwione","Załatwione wewnętrznie"],["obsluzone","Obsłużone"],["systemowe","Z komunikatami Allegro"]]:[["wszystkie","Wszystkie"],["wymaga","Wymagają odpowiedzi"],["zalatwione","Załatwione wewnętrznie"],["obsluzone","Obsłużone"],["systemowe","Z komunikatami Allegro"]];
   return `<div class="panel allegro-section-panel allegro-communication-page"><div class="order-section-head"><div><span class="order-pro-label">${isIssue?"Zgłoszenia formalne":"Obsługa korespondencji"}</span><h2>${isIssue?"🛟 Dyskusje i reklamacje Allegro":"💬 Centrum wiadomości Allegro"}</h2><p class="order-detail-lead">${isIssue?"Dyskusje i reklamacje są oddzielone od zwykłych wiadomości. Wpisy zespołu Allegro pozostają dostępne, ale są pokazane osobno i nigdy nie udają wiadomości klienta.":"Każdy wątek ma osobno wiadomości klienta, odpowiedzi Artway‑TM i komunikaty Allegro. Agent przygotowuje szkic wyłącznie dla właściwego klienta i właściwej rozmowy."}</p></div><div class="diag-actions">${wymagaPonownegoPolaczenia?`<button class="btn" onclick="allegroPolacz()">🔐 Napraw połączenie</button>`:""}<button class="btn ghost" onclick="allegroSynchronizujKomunikacje(false)">↻ Sprawdź nowe wiadomości</button></div></div><div class="allegro-source-model"><div class="customer"><span>👤</span><b>Klient</b><small>tylko jego wiadomości otwierają sprawę</small></div><div class="artway"><span>🏪</span><b>Artway‑TM</b><small>odpowiedzi ręczne uczą stylu Agenta</small></div><div class="platform"><span>🔔</span><b>Allegro</b><small>komunikaty systemowe są oddzielone</small></div></div><div class="orders-stat-grid allegro-communication-stats"><div class="order-stat-card"><span>${isIssue?"🛟":"💬"}</span><b>${all.length}</b><small>wszystkich</small></div><div class="order-stat-card ${need?"hot":""}"><span>⚡</span><b>${need}</b><small>wymaga odpowiedzi • bez załatwionych</small></div><div class="order-stat-card money"><span>✅</span><b>${resolved}</b><small>załatwionych wewnętrznie</small></div><div class="order-stat-card"><span>📁</span><b>${handled}</b><small>obsłużonych łącznie</small></div><div class="order-stat-card"><span>🔔</span><b>${withSystem}</b><small>z komunikatami Allegro</small></div></div><div class="allegro-communication-toolbar"><input id="${isIssue?"allegroIssueSearch":"allegroThreadSearch"}" placeholder="Szukaj: klient, numer zamówienia, ID, temat lub treść…" value="${esc(query)}" oninput="allegroSzukajKomunikacje(${jsArg(type)},this.value)"><select onchange="${isIssue?"filtrAllegroDyskusji":"filtrAllegroWiadomosci"}=this.value;renderuj()">${filterOptions.map(([v,l])=>`<option value="${v}" ${filter===v?"selected":""}>${l}</option>`).join("")}</select><select onchange="${isIssue?"sortAllegroDyskusje":"sortAllegroWiadomosci"}=this.value;renderuj()"><option value="najnowsze" ${sort==="najnowsze"?"selected":""}>Najnowsze najpierw</option><option value="najstarsze" ${sort==="najstarsze"?"selected":""}>Najstarsze najpierw</option></select><label>Pokaż <select onchange="allegroLimitKomunikacji=Number(this.value)||50;renderuj()">${[20,50,100].map(n=>`<option value="${n}" ${allegroLimitKomunikacji===n?"selected":""}>${n}</option>`).join("")}</select></label></div><div class="allegro-communication-bulk"><label><input type="checkbox" ${allVisible?"checked":""} onchange="allegroZaznaczWidocznaKomunikacje(${jsArg(type)},this.checked)"> Zaznacz/odznacz widoczne (${visible.length})</label><span><b>${selected.length}</b> zaznaczonych</span><button class="btn" onclick="allegroOznaczZaznaczoneSprawy(${jsArg(type)},true)" ${selected.length?"":"disabled"}>✅ Załatw wewnętrznie</button><button class="btn ghost" onclick="allegroOznaczZaznaczoneSprawy(${jsArg(type)},false)" ${selected.length?"":"disabled"}>↩️ Przywróć do obsługi</button></div><div class="allegro-internal-banner"><b>🔒 Status wewnętrzny ma pierwszeństwo</b><span>Po oznaczeniu „załatwione” sprawa znika z „Wymaga odpowiedzi” i trafia także do filtra „Obsłużone”. Nie wysyła to wiadomości i nie zmienia oficjalnego statusu Allegro. Dopiero nowa wiadomość klienta może ponownie otworzyć sprawę — sam komunikat Allegro tego nie robi.</span></div><div class="ai-task-list allegro-communication-list">${visible.map(item=>isIssue?allegroIssueHTML(item):allegroWatekHTML(item)).join("")||`<div class="backend-note">Brak spraw pasujących do wyszukiwania i filtrów.</div>`}</div>${list.length>visible.length?`<p class="order-detail-lead">Pokazano ${visible.length} z ${list.length} wyników. Zwiększ limit widoku.</p>`:""}${allegroKomunikacjaBledyHTML()}${!isIssue?allegroKomunikacjaUstawieniaHTML():`<div class="backend-note allegro-info-bottom"><b>Ustawienia autorespondera</b> znajdują się na podstronie Wiadomości. Status „załatwiona wewnętrznie” zawsze ma pierwszeństwo przed automatyką.</div>`}</div>`;
 }
+
 function adminSubnavHTML(items, aktywny){
   const safe = (items||[]).filter(x=>x&&x.id&&x.href&&x.label);
   return `<nav class="panel admin-tabs-panel module-tabs-panel" aria-label="Podsekcje panelu"><div class="shipping-tabs admin-main-tabs">${safe.map(x=>`<a class="${x.id===aktywny?"active":""}" href="${esc(x.href)}" ${x.id===aktywny?'aria-current="page"':""} title="${esc(x.label)}"><span class="tab-label">${esc(x.label)}</span>${x.badge?`<span class="nav-badge">${esc(x.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
@@ -4670,6 +4677,7 @@ function widokAdminAllegro(sekcja="start"){
   </div>
   `);
 }
+
 function decyzjaDostepnosciZamowieniaInfo(z={}){
   const d=z.decyzjaDostepnosci&&typeof z.decyzjaDostepnosci==="object"?z.decyzjaDostepnosci:{},expiresMs=Date.parse(d.expiresAt||""),expired=String(d.code||"").startsWith("wait_")&&Number.isFinite(expiresMs)&&expiresMs<=Date.now();
   const labels={confirmed:"✅ dostępność potwierdzona",wait_1:"⏳ oczekiwanie 1 dzień",wait_2:"⏳ oczekiwanie 2 dni",contact_client:"📞 skontaktować się z klientem",unavailable:"⛔ brak — decyzja o realizacji",reset:"🔎 wymaga ponownej kontroli"};
@@ -6039,6 +6047,7 @@ function audytMagazynuAI(){
   toast("Audyt magazynu zapisany i pobrany ✅");
   renderuj();
 }
+
 function daneSzkicuFakturyZamowienia(nr){
   const z=pobierzZamowienia().find(x=>x.nr===nr); if(!z) return null;
   const k=z.klient||{}, a=z.adresDostawy||{}, koszty=kosztyZamowienia(z);
@@ -6210,6 +6219,7 @@ function widokAdminInfakt(sekcja="pulpit"){
   const content=aktywna==="zamowienia"?ordersPanel:aktywna==="faktury"?invoicesPanel:aktywna==="dostawcy"?costsPanel:aktywna==="szkice"?draftsPanel:aktywna==="ustawienia"?settingsPanel:`${missing.length?ordersPanel:""}${costsPanel}`;
   return adminSzkielet("/admin/infakt",hero+content);
 }
+
 function magazynKontekstPodstronyHTML(aktywna="pulpit",u={}){
   const pages={
     pulpit:{icon:"📊",eyebrow:"Centrum operacyjne magazynu",title:u.nazwa||"Magazyn główny",description:"Priorytety na dziś, braki do aktywnych zamówień, dostępność producentów i trasa kompletacji w jednym miejscu."},
@@ -6623,6 +6633,7 @@ function widokAdminProdukty(){
       </table></div>
     </div>`:""}`);
 }
+
 const EMOJI_ZESTAWY=[
   {nazwa:"🎲 Gry, zabawki i edukacja",slowa:"gry zabawki planszowe edukacja puzzle",emoji:["🎲","🧩","♟️","♞","🃏","🎯","🎮","🕹️","🪀","🪁","🧸","🤖","🧠","🔤","🔢","🧮","📚","📖","✏️","🖍️","🎨","🧪","🔬","🔭","🏆","🎳","⚽","🏀","🏓","🥏"]},
   {nazwa:"🎈 Balony, impreza i prezenty",slowa:"balony balon impreza urodziny prezent dekoracje",emoji:["🎈","🎉","🎊","🥳","🎁","🎀","🪅","🪩","🎂","🧁","🍭","🍬","✨","🌟","⭐","💫","❤️","🩷","🧡","💛","💚","🩵","💙","💜","🤍","🖤","🎵","🎶","📣","🔔"]},

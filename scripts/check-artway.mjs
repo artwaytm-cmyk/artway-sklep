@@ -12,6 +12,11 @@ const files = [
   'products.json',
   'netlify/functions/store.mjs',
   'netlify/functions/lib/store-app.mjs',
+  'netlify/functions/lib/email-service.mjs',
+  'netlify/functions/lib/inpost-service.mjs',
+  'netlify/functions/lib/paynow-service.mjs',
+  'netlify/functions/lib/infakt-service.mjs',
+  'netlify/functions/lib/product-source-inspection-service.mjs',
   'netlify/functions/lib/allegro-offer-withdrawal-route.mjs',
   'netlify/functions/lib/core/http.mjs',
   'netlify/functions/lib/core/store-repository.mjs',
@@ -71,6 +76,14 @@ const appAdmin = read('assets/admin.js');
 const app = `${appPublic}\n${appAdmin}`;
 const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
+const storeRuntime = [
+  store,
+  read('netlify/functions/lib/email-service.mjs'),
+  read('netlify/functions/lib/inpost-service.mjs'),
+  read('netlify/functions/lib/paynow-service.mjs'),
+  read('netlify/functions/lib/infakt-service.mjs'),
+  read('netlify/functions/lib/product-source-inspection-service.mjs'),
+].join('\n');
 const productEditorial = read('netlify/functions/lib/domain/product-editorial-pipeline.mjs');
 const productLinkPackage = read('netlify/functions/lib/domain/product-link-package-preparer.mjs');
 const productSaleDecisions = read('netlify/functions/lib/domain/product-sale-decisions.mjs');
@@ -402,7 +415,7 @@ requireMarkers('netlify/functions/store.mjs', storeEntry, [
   'export default handler',
 ]);
 
-requireMarkers('netlify/functions/lib/store-app.mjs', store, [
+requireMarkers('backend aplikacji po podziale domenowym', storeRuntime, [
   "action === 'health'",
   "action === 'paynow-create'",
   "action === 'paynow-notification'",
@@ -443,8 +456,8 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'mergeCatalogProducts',
   "action === 'product-url-prepare'",
   'function przygotujPakietProduktuZLinku',
-  'export async function inspectProductUrl',
-  'export async function inspectProductUrlViaReader',
+  'function inspectProductUrl',
+  'function inspectProductUrlViaReader',
   'function parsujProduktZMarkdown',
   'bezpłatny odczyt zapasowy źródła',
   'function stripHtmlZPodzialem',

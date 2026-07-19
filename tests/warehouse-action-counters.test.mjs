@@ -6,7 +6,7 @@ const root=new URL("../",import.meta.url);
 const read=path=>readFile(new URL(path,root),"utf8");
 
 test("liczniki nawigacji magazynu pokazują wyłącznie braki do aktywnych zamówień",async()=>{
-  const [navigation,warehouse]=await Promise.all([read("src/frontend/11-allegro-and-orders.js"),read("src/frontend/07-admin-shipping.js")]);
+  const [navigation,warehouse]=await Promise.all([read("assets/admin.js"),read("src/frontend/07-admin-shipping.js")]);
   const subnav=navigation.slice(navigation.indexOf("function magazynSubnavHTML"),navigation.indexOf("function infaktSubnavHTML"));
   assert.match(subnav,/const plan=potrzebyZatowarowania\(\),braki=plan\.length/);
   assert.match(subnav,/badge:braki\|\|""/);
@@ -15,7 +15,7 @@ test("liczniki nawigacji magazynu pokazują wyłącznie braki do aktywnych zamó
 });
 
 test("zakupy producentów i lokalizacje magazynowe mają odrębne zakresy",async()=>{
-  const warehouse=await read("src/frontend/12-customers-and-inventory.js");
+  const warehouse=await read("assets/admin.js");
   assert.match(warehouse,/const planProdukty=planZakupu\.map\(x=>x\.produkt\),planIds=new Set/);
   assert.match(warehouse,/const brakiDostawcyPlanu=planProdukty\.filter/);
   assert.match(warehouse,/const lokalizacjeDoUstalenia=/);

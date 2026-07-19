@@ -30,7 +30,7 @@ test('koszyk usuwa nieaktualne produkty i nie odczytuje nazwy z pustego wyniku',
 
 test('ciężkie rejestry Allegro pozostają na serwerze zamiast w localStorage', () => {
   const cloud = read('src/frontend/03-cloud-sync.js');
-  const allegro = read('src/frontend/11-allegro-and-orders.js');
+  const allegro = read('assets/admin.js');
   assert.match(cloud, /KLUCZE_CIEZKICH_CACHE/);
   assert.match(cloud, /zwolnijPamiecPodreczna/);
   assert.doesNotMatch(allegro, /zapiszLS\("artway_allegro_oferty_cache"/);

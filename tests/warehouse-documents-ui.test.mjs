@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { ASSET_BUNDLES } from '../scripts/build-assets.mjs';
 
 const source = await readFile(new URL('../src/frontend/10-warehouse-documents.js', import.meta.url), 'utf8');
-const inventory = await readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8');
+const inventory = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
 const netlify = await readFile(new URL('../netlify.toml', import.meta.url), 'utf8');
 
 test('Plan zawiera ręczne dokumenty PZ i WZ z jednym końcowym księgowaniem', () => {

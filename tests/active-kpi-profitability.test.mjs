@@ -8,7 +8,7 @@ const read=path=>readFile(new URL(path,root),"utf8");
 test("kafelki wdrożenia produktów Agenta AI są aktywnymi filtrami",async()=>{
   const [runtime,agent]=await Promise.all([
     read("src/frontend/02-runtime-state.js"),
-    read("src/frontend/10-agent-ai.js")
+    read("assets/admin.js")
   ]);
   assert.match(runtime,/filtrAgentAIProdukty="wszystkie"/);
   assert.match(agent,/function ustawFiltrAgentAIProduktow/);
@@ -21,7 +21,7 @@ test("kafelki wdrożenia produktów Agenta AI są aktywnymi filtrami",async()=>{
 });
 
 test("opłacalność ma ręczne zatwierdzenie, wykrywanie zmian i filtry statusów",async()=>{
-  const source=await read("src/frontend/11-allegro-and-orders.js");
+  const source=await read("assets/admin.js");
   for(const fn of ["rentownoscSygnaturaWeryfikacji","rentownoscStatusWeryfikacji","oznaczRentownoscSprawdzona","oznaczZaznaczoneRentownosc","zaznaczWidoczneRentownosc"]){
     assert.match(source,new RegExp(`function ${fn}\\(`),`brak funkcji ${fn}`);
   }
@@ -36,7 +36,7 @@ test("opłacalność ma ręczne zatwierdzenie, wykrywanie zmian i filtry status�
 });
 
 test("zatwierdzenie rentowności synchronizuje się ze wspólną bazą i trafia do audytu",async()=>{
-  const source=await read("src/frontend/11-allegro-and-orders.js");
+  const source=await read("assets/admin.js");
   const start=source.indexOf("function rentownoscZapiszWeryfikacje");
   const body=source.slice(start,start+2500);
   assert.match(body,/artway_produkty_dodane/);

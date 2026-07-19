@@ -34,7 +34,7 @@ test('monitor producentów ma zaznaczanie i identyczny wybór decyzji pojedyncze
   const [state, availability, inventory, backend] = await Promise.all([
     readFile(new URL('../src/frontend/02-runtime-state.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/frontend/05-catalog-inventory.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8'),
+    readFile(new URL('../assets/admin.js', import.meta.url), 'utf8'),
     readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
   ]);
   assert.match(state, /zaznaczoneDostepnoscProducentow=new Set\(\)/);

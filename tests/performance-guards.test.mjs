@@ -41,7 +41,7 @@ test('powtórne wejście do panelu pobiera tylko rewizję zamiast wielomegabajto
 });
 
 test('ciężkie podstrony magazynu są budowane wyłącznie dla aktywnej karty', async () => {
-  const inventory = await readFile('src/frontend/12-customers-and-inventory.js', 'utf8');
+  const inventory = await readFile('assets/admin.js', 'utf8');
   assert.match(inventory, /if\(aktywna==="plan"\)return adminSzkielet/);
   for (const section of ['dostawcy', 'pulpit', 'lokalizacje', 'stany', 'ruchy']) {
     const inline = inventory.includes(`\${aktywna==="${section}"?\``);
@@ -55,8 +55,8 @@ test('główne wyszukiwarki nie przebudowują strony po każdej literze', async 
   const sources = await Promise.all([
     readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
     readFile('src/frontend/07-admin-shipping.js', 'utf8'),
-    readFile('src/frontend/11-allegro-and-orders.js', 'utf8'),
-    readFile('src/frontend/12-customers-and-inventory.js', 'utf8'),
+    readFile('assets/admin.js', 'utf8'),
+    readFile('assets/admin.js', 'utf8'),
   ]);
   const all = sources.join('\n');
   for (const state of ['frazaListyProduktow', 'szukajWysylek', 'szukajAllegroZamowien', 'szukajAllegroOfert', 'szukajAllegroWystawiania', 'szukajZamowien', 'szukajKlientow', 'szukajInfakt']) {

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const orders = await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8');
+const orders = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
 const locations = await readFile(new URL('../src/frontend/11-order-location-ui.js', import.meta.url), 'utf8');
 const source = `${locations}\n${orders}`;
 const styles = await readFile(new URL('../src/styles/21-warehouse-workspace.css', import.meta.url), 'utf8');

@@ -9,7 +9,7 @@ test('przełączanie kart nie uruchamia ponownie tego samego odczytu sieciowego'
   const [cloud, state, allegro] = await Promise.all([
     read('src/frontend/03-cloud-sync.js'),
     read('src/frontend/02-runtime-state.js'),
-    read('src/frontend/11-allegro-and-orders.js'),
+    read('assets/admin.js'),
   ]);
   assert.match(cloud, /chmuraPobraniaWToku\.get\(requestKey\)/);
   assert.match(cloud, /chmuraPobraniaWToku\.set\(requestKey,request\)/);

@@ -13,17 +13,54 @@ test('moduły źródłowe mają kontrolowany rozmiar i jednoznaczną kolejność
   for (const source of sources) {
     const content = await readFile(source, 'utf8');
     assert.ok(content.trim().length > 0, `${source} nie może być pusty`);
-    assert.ok(Buffer.byteLength(content) <= 300_000, `${source} przekroczył budżet 300 kB; podziel domenę`);
+    assert.ok(Buffer.byteLength(content) <= 210_000, `${source} przekroczył budżet 210 kB; podziel domenę`);
     const lines = content.split('\n').length;
-    assert.ok(lines <= 2600, `${source} ma ${lines} linii; podziel domenę na mniejsze moduły`);
+    assert.ok(lines <= 1300, `${source} ma ${lines} linii; podziel domenę na mniejsze moduły`);
   }
 });
 
 test('główny backend pozostaje poniżej budżetu migracyjnego', async () => {
   const file = await stat('netlify/functions/lib/store-app.mjs');
-  assert.ok(file.size < 500_000, `store-app.mjs urósł do ${file.size} B; wydziel kolejną domenę`);
+  assert.ok(file.size < 400_000, `store-app.mjs urósł do ${file.size} B; wydziel kolejną domenę`);
+  const storeLines = (await readFile('netlify/functions/lib/store-app.mjs', 'utf8')).split('\n').length;
+  assert.ok(storeLines <= 5200, `store-app.mjs ma ${storeLines} linii; wydziel kolejną domenę`);
   const catalogQuality = await stat('netlify/functions/lib/domain/catalog-quality.mjs');
   assert.ok(catalogQuality.size < 80_000, `catalog-quality.mjs urósł do ${catalogQuality.size} B; rozdziel audyt od korekt`);
+});
+
+test('wydzielone domeny pozostają małe i są częścią właściwego pakietu', async () => {
+  const frontendDomains = [
+    'src/frontend/10-agent-ai.js',
+    'src/frontend/10-agent-ai-supplier-planning.js',
+    'src/frontend/10-agent-ai-command-center.js',
+    'src/frontend/10-agent-ai-admin-workspace.js',
+    'src/frontend/11-allegro-and-orders.js',
+    'src/frontend/11-allegro-product-publication.js',
+    'src/frontend/11-allegro-operations.js',
+    'src/frontend/11-allegro-communications.js',
+    'src/frontend/11-allegro-workspace.js',
+    'src/frontend/11-store-orders.js',
+    'src/frontend/12-customers-and-inventory.js',
+    'src/frontend/12-infakt-admin.js',
+    'src/frontend/12-warehouse-views.js',
+    'src/frontend/12-product-editor.js',
+  ];
+  const adminBundle = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.js');
+  for (const source of frontendDomains) {
+    assert.ok(adminBundle.sources.includes(source), `${source} nie jest składany do panelu administratora`);
+    const lines = (await readFile(source, 'utf8')).split('\n').length;
+    assert.ok(lines <= 650, `${source} ma ${lines} linii; przekroczono budżet domeny 650 linii`);
+  }
+  for (const source of [
+    'netlify/functions/lib/email-service.mjs',
+    'netlify/functions/lib/inpost-service.mjs',
+    'netlify/functions/lib/paynow-service.mjs',
+    'netlify/functions/lib/infakt-service.mjs',
+    'netlify/functions/lib/product-source-inspection-service.mjs',
+  ]) {
+    const lines = (await readFile(source, 'utf8')).split('\n').length;
+    assert.ok(lines <= 800, `${source} ma ${lines} linii; przekroczono budżet usługi 800 linii`);
+  }
 });
 
 test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', async () => {

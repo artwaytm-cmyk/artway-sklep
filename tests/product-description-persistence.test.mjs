@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 test('edytor produktu ma niezależny opis krótki i długi oraz tytuł Allegro', async () => {
-  const source = await readFile('src/frontend/12-customers-and-inventory.js', 'utf8');
+  const source = await readFile('assets/admin.js', 'utf8');
   assert.match(source, /name="opisKrotki"/);
   assert.match(source, /name="opis"/);
   assert.match(source, /Opis długi/);
@@ -14,7 +14,7 @@ test('edytor produktu ma niezależny opis krótki i długi oraz tytuł Allegro',
 });
 
 test('panel Agenta nie wymaga ręcznego zatwierdzania treści produktu', async () => {
-  const source = await readFile('src/frontend/10-agent-ai.js', 'utf8');
+  const source = await readFile('assets/admin.js', 'utf8');
   assert.doesNotMatch(source, /<button[^>]+agentAISpecjalistaZatwierdzProdukt/);
   assert.match(source, /Agent ponowi redakcję automatycznie — bez klikania/);
 });
@@ -31,7 +31,7 @@ test('poprawa zapisuje wspólną treść sklepu i Allegro oraz układ w kartotec
 });
 
 test('odświeżenie linku zachowuje surową treść tylko jako materiał źródłowy', async () => {
-  const source = await readFile('src/frontend/12-customers-and-inventory.js', 'utf8');
+  const source = await readFile('assets/admin.js', 'utf8');
   const missing = source.match(/const missing=\{([^\n]+)\};/)?.[1] || '';
   assert.match(missing, /sourceMaterial:/);
   assert.match(missing, /shortDescription:s\.opisKrotki/);
@@ -43,7 +43,7 @@ test('odświeżenie linku zachowuje surową treść tylko jako materiał źród�
 });
 
 test('krótki opis Allegro zachowuje własną wersję zamiast skrótu opisu długiego', async () => {
-  const source = await readFile('src/frontend/11-allegro-and-orders.js', 'utf8');
+  const source = await readFile('assets/admin.js', 'utf8');
   assert.match(source, /safeShort=improved\.storeShortDescription\|\|improved\.shortDescription\|\|p\.opisKrotki/);
 });
 

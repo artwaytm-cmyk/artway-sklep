@@ -55,7 +55,7 @@ test('rozbieżny poprawny EAN pozostaje blokadą bez innych silnych dowodów', (
 
 test('frontend rozdziela pewność tożsamości od duplikatu oferty', async () => {
   const [mapping, mappingIndex, management] = await Promise.all([
-    readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8'),
+    readFile(new URL('../assets/admin.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/frontend/11-allegro-mapping-index.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/frontend/11-allegro-offer-management.js', import.meta.url), 'utf8'),
   ]);

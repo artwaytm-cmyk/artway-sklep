@@ -108,7 +108,7 @@ test('backend kończy i wznawia ofertę dopiero po potwierdzeniu operacji Allegr
 
 test('katalog korzysta z pełnego standardu filtrów centrum wystawiania', async () => {
   const [catalog, styles] = await Promise.all([
-    readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8'),
+    readFile(new URL('../assets/admin.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/styles/29-commerce-catalog-actions.css', import.meta.url), 'utf8'),
   ]);
   assert.match(catalog, /assortment-advanced-grid allegro-listing-advanced-grid/);

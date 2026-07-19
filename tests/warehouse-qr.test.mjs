@@ -7,9 +7,9 @@ import { ASSET_BUNDLES, VENDOR_ASSETS } from '../scripts/build-assets.mjs';
 const source = await readFile(new URL('../src/frontend/10-warehouse-qr.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../src/styles/19-warehouse-qr.css', import.meta.url), 'utf8');
 const documents = await readFile(new URL('../src/frontend/10-warehouse-documents.js', import.meta.url), 'utf8');
-const inventory = await readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8');
+const inventory = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
 const locations = await readFile(new URL('../src/frontend/10-warehouse-locations.js', import.meta.url), 'utf8');
-const navigation = await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8');
+const navigation = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
 
 function parse(value) {
   const sandbox = {

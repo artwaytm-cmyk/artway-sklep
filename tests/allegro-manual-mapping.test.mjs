@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 test('ręczny wybór administratora zapisuje trwałe powiązanie i synchronizuje wskazaną ofertę bez kasowania historii', async () => {
   const [frontend, ui] = await Promise.all([
     readFile(new URL('../src/frontend/11-allegro-manual-mapping-actions.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8'),
+    readFile(new URL('../assets/admin.js', import.meta.url), 'utf8'),
   ]);
   assert.match(frontend, /manualDecision=id&&options\.manualDecision!==false/);
   assert.match(frontend, /force:manualDecision\|\|options\.force===true/);

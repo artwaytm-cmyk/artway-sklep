@@ -100,7 +100,7 @@ test('nowy brak zwiększa rewizję i unieważnia wcześniejsze zatwierdzenie', (
 });
 
 test('szczegóły zamówienia pokazują kontrolę magazynu i drogę do szkicu producenta', async () => {
-  const source = `${await readFile(new URL('../src/frontend/11-allegro-procurement-actions.js', import.meta.url), 'utf8')}\n${await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8')}`;
+  const source = `${await readFile(new URL('../src/frontend/11-allegro-procurement-actions.js', import.meta.url), 'utf8')}\n${await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8')}`;
   const styles = await readFile(new URL('../src/styles/07-admin-domains.css', import.meta.url), 'utf8');
   assert.match(source, /function adminZaopatrzenieZamowieniaHTML/);
   assert.match(source, /Magazyn → producent/);

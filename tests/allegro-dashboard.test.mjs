@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 test('nawigacja Allegro pokazuje tylko liczniki wymagające działania', async () => {
-  const source = await readFile('src/frontend/11-allegro-and-orders.js', 'utf8');
+  const source = await readFile('assets/admin.js', 'utf8');
   const start = source.indexOf('function allegroSubnavHTML');
   const end = source.indexOf('function allegroWorkspaceSectionHTML', start);
   const nav = source.slice(start, end);
@@ -17,7 +17,7 @@ test('nawigacja Allegro pokazuje tylko liczniki wymagające działania', async (
 });
 
 test('pulpit Allegro rozdziela kolejkę pracy od danych katalogowych', async () => {
-  const source = await readFile('src/frontend/11-allegro-and-orders.js', 'utf8');
+  const source = await readFile('assets/admin.js', 'utf8');
   const css = await readFile('src/styles/07-admin-domains.css', 'utf8');
 
   assert.match(source, /function allegroPanelOperacyjnyStaty/);

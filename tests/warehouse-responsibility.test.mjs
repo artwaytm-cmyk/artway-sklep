@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs';
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('frontend rozdziela kompletację, zakup i zadanie lokalizacji', () => {
-  const inventory = read('src/frontend/12-customers-and-inventory.js');
-  const allegro = read('src/frontend/11-allegro-and-orders.js');
+  const inventory = read('assets/admin.js');
+  const allegro = read('assets/admin.js');
   assert.match(inventory, /function klasyfikujPozycjeDoKompletacji/);
   assert.match(inventory, /decyzja:"kompletuj",gotowe:true,brakLokalizacji:/);
   assert.match(inventory, /gotowe:nierozpoznane===0&&bezStanu===0&&braki===0/);
@@ -19,8 +19,8 @@ test('frontend rozdziela kompletację, zakup i zadanie lokalizacji', () => {
 });
 
 test('magazyn ma osobną, zawężoną kolejkę lokalizacji aktywnych zamówień', () => {
-  const inventory = read('src/frontend/12-customers-and-inventory.js');
-  const agent = read('src/frontend/10-agent-ai.js');
+  const inventory = read('assets/admin.js');
+  const agent = read('assets/admin.js');
   assert.match(inventory, /magazynLokalizacjeZamowienIds/);
   assert.match(inventory, /filtrMagazynu==="lokalizacje-zamowien"/);
   assert.match(inventory, /lokalizacje do ustalenia • nie blokują realizacji/);

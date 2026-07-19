@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 async function loadDecisionParser() {
-  const source = await readFile(new URL('../src/frontend/10-agent-ai.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
   const start = source.indexOf('function agentAIParsujDecyzjeMagazynowa');
   const end = source.indexOf('\nfunction agentAIKluczIdentyfikatora', start);
   assert.ok(start >= 0 && end > start, 'Nie znaleziono parsera decyzji magazynowej.');

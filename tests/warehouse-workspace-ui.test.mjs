@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { ASSET_BUNDLES } from '../scripts/build-assets.mjs';
 
-const navigation = await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8');
-const inventory = await readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8');
+const navigation = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
+const inventory = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../src/styles/21-warehouse-workspace.css', import.meta.url), 'utf8');
 
 test('magazyn ma jedną nawigację pogrupowaną według procesu pracy', () => {

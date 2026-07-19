@@ -6,7 +6,7 @@ const root=new URL("../",import.meta.url);
 const read=path=>readFile(new URL(path,root),"utf8");
 
 test("katalog produktów ma wielokryterialne filtry dla dużego asortymentu",async()=>{
-  const source=await read("src/frontend/12-customers-and-inventory.js");
+  const source=await read("assets/admin.js");
   assert.match(source,/filtrProducentaProduktow/);
   assert.match(source,/filtrDanychProduktow/);
   assert.match(source,/filtrSprzedazyProduktow/);
@@ -22,7 +22,7 @@ test("katalog produktów ma wielokryterialne filtry dla dużego asortymentu",asy
 });
 
 test("katalog udostępnia szybkie widoki, aktywne znaczniki i zapis gęstości",async()=>{
-  const source=await read("src/frontend/12-customers-and-inventory.js");
+  const source=await read("assets/admin.js");
   assert.match(source,/function asortymentUstawWidok/);
   assert.match(source,/Gotowe do sprzedaży/);
   assert.match(source,/Bez Allegro/);
@@ -34,7 +34,7 @@ test("katalog udostępnia szybkie widoki, aktywne znaczniki i zapis gęstości",
 });
 
 test("tabela katalogu grupuje dane i zachowuje operacje hurtowe",async()=>{
-  const source=await read("src/frontend/12-customers-and-inventory.js");
+  const source=await read("assets/admin.js");
   assert.match(source,/<th>Produkt<\/th><th>Identyfikatory<\/th><th>Klasyfikacja i źródło<\/th><th>Ceny<\/th><th>Magazyn i sprzedaż<\/th><th>Allegro<\/th><th>Akcje<\/th>/);
   assert.match(source,/EXTERNAL_ID/);
   assert.match(source,/Zakup \(admin\)/);
@@ -54,7 +54,7 @@ test("układ katalogu jest responsywny i wspiera zwartą tabelę",async()=>{
 });
 
 test("katalog rozdziela zarządzanie produktami od tworzenia nowych ofert Allegro",async()=>{
-  const catalog=await read("src/frontend/12-customers-and-inventory.js"),actions=await read("src/frontend/12a-product-actions.js"),commerce=await read("src/frontend/12c-commerce-catalog-actions.js"),prices=await read("src/frontend/13-product-admin.js"),css=(await read("src/styles/15-product-actions.css"))+(await read("src/styles/29-commerce-catalog-actions.css"));
+  const catalog=await read("assets/admin.js"),actions=await read("src/frontend/12a-product-actions.js"),commerce=await read("src/frontend/12c-commerce-catalog-actions.js"),prices=await read("src/frontend/13-product-admin.js"),css=(await read("src/styles/15-product-actions.css"))+(await read("src/styles/29-commerce-catalog-actions.css"));
   assert.match(catalog,/data-product-agent-center/);
   assert.match(catalog,/asortymentMenuDzialanProduktuHTML\(p\)/);
   for(const marker of ["Centrum zarządzania produktami","Nowe oferty powstają wyłącznie w sekcji Allegro","Synchronizuj dane i ceny","Wycofaj oferty","Otwórz ofertę"]){assert.match(commerce,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));}
@@ -87,7 +87,7 @@ test("katalog rozdziela zarządzanie produktami od tworzenia nowych ofert Allegr
 });
 
 test("opis zapisywany po przygotowaniu korzysta z końcowych bezpiecznych sekcji Allegro",async()=>{
-  const source=await read("src/frontend/11-allegro-and-orders.js");
+  const source=await read("assets/admin.js");
   assert.match(source,/function allegroTekstZBezpiecznychSekcji/);
   assert.match(source,/d\.draft\?\.description\?\.sections/);
   assert.match(source,/force\.allegroDescriptionSections=safeSections/);

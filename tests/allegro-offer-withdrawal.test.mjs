@@ -28,7 +28,7 @@ test('backend kończy oferty przez API i zachowuje produkty oraz historię zamó
 });
 
 test('panel ma pojedyncze i grupowe zakończenie z kontrolowanym potwierdzeniem', async () => {
-  const source = `${await readFile(frontendPath, 'utf8')}\n${await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8')}`;
+  const source = `${await readFile(frontendPath, 'utf8')}\n${await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8')}`;
   for (const marker of ['allegroPrzygotujWycofanieOfert', 'allegroPotwierdzWycofanieOfert', 'allegroWycofaniePanelHTML', 'Zakończ zaznaczone', 'Zakończ ofertę']) assert.ok(source.includes(marker), `brak: ${marker}`);
   assert.match(source, /chmura\("allegro-withdraw-offers"/);
   assert.match(source, /filtrStatusuAllegroOfert/);
@@ -41,7 +41,7 @@ test('panel ma pojedyncze i grupowe zakończenie z kontrolowanym potwierdzeniem'
 test('katalog produktów ma pełną decyzję dla każdej zduplikowanej oferty Allegro', async () => {
   const [offers, catalog] = await Promise.all([
     readFile(new URL('../src/frontend/11-allegro-duplicate-decisions.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8'),
+    readFile(new URL('../assets/admin.js', import.meta.url), 'utf8'),
   ]);
   assert.match(catalog, /allegroCentrumDuplikatowHTML\(audytAllegro,\{compact:true,maxGroups:12\}\)/);
   for (const marker of ['offerDecision', 'keep_extra', 'review', 'Zatwierdź i wycofaj wybrane', 'allegroDuplikatUstawDecyzje']) assert.ok(offers.includes(marker), `brak wariantu decyzji: ${marker}`);

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { allegroOfferVerification, allegroPatchZDraftu } from '../netlify/functions/lib/domain/allegro-offer-patch.mjs';
 
 test('edytor domyślnie aktywuje nową lub nieaktywną ofertę, a aktywnej nie wyłącza', async () => {
-  const source = await readFile('src/frontend/12-customers-and-inventory.js', 'utf8');
+  const source = await readFile('assets/admin.js', 'utf8');
   assert.match(source, /domyslnaPublikacjaAllegro=ofertaAllegroStatus==="ACTIVE"\?"keep":"activate"/);
   assert.match(source, /Zapisz i aktywuj sprzedaż/);
   assert.match(source, /Wynik zostanie ponownie odczytany bezpośrednio z Allegro/);
@@ -63,6 +63,6 @@ test('backend po zapisie ponownie odczytuje ofertę i zwraca zweryfikowany statu
 });
 
 test('panel nie oznacza szkicu jako opublikowanej oferty', async () => {
-  const source = await readFile('src/frontend/11-allegro-and-orders.js', 'utf8');
+  const source = await readFile('assets/admin.js', 'utf8');
   assert.match(source, /allegroAgentPreparationStatus:remoteStatus==="ACTIVE"\?"published":"draft"/);
 });

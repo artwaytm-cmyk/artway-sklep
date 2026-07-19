@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 
 const core = await readFile('src/frontend/05-catalog-inventory.js', 'utf8');
 const ui = await readFile('src/frontend/10-warehouse-locations.js', 'utf8');
-const view = await readFile('src/frontend/12-customers-and-inventory.js', 'utf8');
+const view = await readFile('assets/admin.js', 'utf8');
 const styles = await readFile('src/styles/20-warehouse-locations.css', 'utf8');
 const build = await readFile('scripts/build-assets.mjs', 'utf8');
 

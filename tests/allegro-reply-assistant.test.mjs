@@ -12,7 +12,7 @@ import {
   mergeAllegroReplyHistory,
 } from '../netlify/functions/lib/domain/allegro-reply-assistant.mjs';
 
-const frontend = await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8');
+const frontend = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
 const backend = await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8');
 
 test('poprawa stylistyczna porządkuje ręczny szkic bez dopisywania faktów', () => {

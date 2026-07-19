@@ -20,8 +20,8 @@ test("najważniejsze listy panelu korzystają ze wspólnego paska operacji",asyn
   const sources=(await Promise.all([
     "src/frontend/07-admin-shipping.js",
     "src/frontend/09-seo.js",
-    "src/frontend/11-allegro-and-orders.js",
-    "src/frontend/12-customers-and-inventory.js"
+    "assets/admin.js",
+    "assets/admin.js"
   ].map(read))).join("\n");
   for(const id of ["shipping-orders","seo-products","allegro-orders","allegro-products","store-orders","customers","infakt-pending","infakt-history","warehouse-stock","assortment-products"]){
     assert.match(sources,new RegExp(`adminOperacjeWynikowHTML\\(\\{id:\"${id}\"`),`brak wspólnych operacji dla ${id}`);
