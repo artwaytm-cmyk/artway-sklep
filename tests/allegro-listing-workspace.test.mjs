@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
+import vm from "node:vm";
 import {ASSET_BUNDLES} from "../scripts/build-assets.mjs";
 
 const root=new URL("../",import.meta.url);
@@ -33,9 +34,20 @@ test("centrum wystawiania skaluje katalog przez filtry, limit, paginację i eksp
   }
   assert.match(source,/\[25,50,100,250,500,1000\]/);
   assert.match(source,/allegroWystawianieStrona/);
+  assert.match(source,/\$\{zl\(p\.cena\)\}/);
+  assert.doesNotMatch(source,/\$\{cena\(p\.cena\)\}/);
   assert.match(styles,/\.allegro-publication-card/);
   assert.match(styles,/@media\(max-width:820px\)/);
   const js=ASSET_BUNDLES.find(bundle=>bundle.output==="assets/admin.js"),css=ASSET_BUNDLES.find(bundle=>bundle.output==="assets/admin.css");
   assert.ok(js.sources.includes("src/frontend/12b-allegro-listing-workspace.js"));
   assert.ok(css.sources.includes("src/styles/27-allegro-listing-workspace.css"));
+});
+
+test("karta produktu wykonuje się z rzeczywistym wspólnym formatowaniem ceny",async()=>{
+  const source=await read("src/frontend/12b-allegro-listing-workspace.js"),start=source.indexOf("function allegroPublikacjaKartaHTML"),end=source.indexOf("\n\nallegroWystawianiePanelHTML",start);
+  assert.ok(start>=0&&end>start);
+  const context={result:"",allegroOfertaDlaProduktuSklepu:()=>null,allegroBrakiProduktuDoWystawienia:()=>[],allegroPublikacjaOcena:()=>({code:"ready",label:"Gotowy",detail:"komplet",score:100}),allegroPublikacjaTrybProduktu:()=>({operation:"activate",label:"Wystaw na Allegro",note:"nowa oferta",icon:"🟠"}),zaznaczoneAllegroProduktyKatalogu:new Set(),esc:value=>String(value??""),jsArg:value=>JSON.stringify(value),zl:value=>`${Number(value).toFixed(2).replace(".",",")} zł`,encodeURIComponent};
+  vm.runInNewContext(`${source.slice(start,end)}\nresult=allegroPublikacjaKartaHTML({id:1,nazwa:"Produkt testowy",cena:19.9});`,context);
+  assert.match(context.result,/19,90 zł/);
+  assert.match(context.result,/Wystaw na Allegro/);
 });
