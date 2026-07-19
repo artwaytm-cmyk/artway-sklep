@@ -53,7 +53,13 @@ function mappedOfferForProduct(mappings = {}, productId = '') {
   if (!mappings || typeof mappings !== 'object') return '';
   let index = mappingOfferIndexCache.get(mappings);
   if (!index) {
-    index = new Map(Object.values(mappings).filter((mapping) => mapping?.blocked !== true && mapping?.productId).map((mapping) => [String(mapping.productId), String(mapping.offerId || '')]));
+    const ranked = new Map();
+    for (const mapping of Object.values(mappings).filter((item) => item?.blocked !== true && item?.productId && item?.lifecycle !== 'historical')) {
+      const productKey = String(mapping.productId), rank = mapping?.canonical === true || mapping?.mappingRole === 'primary' ? 3 : mapping?.mappingRole === 'duplicate' ? 1 : 2;
+      const current = ranked.get(productKey);
+      if (!current || rank > current.rank) ranked.set(productKey, { rank, offerId: String(mapping.offerId || '') });
+    }
+    index = new Map([...ranked.entries()].map(([key, value]) => [key, value.offerId]));
     mappingOfferIndexCache.set(mappings, index);
   }
   return index.get(String(productId)) || '';

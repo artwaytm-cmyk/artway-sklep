@@ -61,6 +61,7 @@ test('frontend rozdziela pewność tożsamości od duplikatu oferty', async () =
   ]);
   assert.match(mappingIndex, /occupiedMatch/);
   assert.match(mappingIndex, /parametryProducenta/);
-  assert.match(management, /pewność tożsamości/);
-  assert.match(management, /możliwy duplikat oferty/);
+  assert.match(management, /wynik pomocniczy/);
+  assert.match(management, /możliwa druga oferta/);
+  assert.match(management, /Trwałe powiązanie główne/);
 });
