@@ -198,7 +198,7 @@ function widokAdminZamowienie(nr){
   const z = pobierzZamowienia().find(x=>x.nr===nr);
   if(!z) return adminSzkielet("/admin/zamowienia", `<div class="panel"><h1>Nie znaleziono zamówienia ${esc(nr)}</h1><p><a href="#/admin/zamowienia">← Wróć do listy</a></p></div>`);
   const w=daneWysylki(z), uw=ustawieniaWysylki(), klient=z.klient||{}, adres=z.adresDostawy||{};
-  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&!!chmuraToken;
+  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=!!stanBramki.email?.authenticated&&maUprawnieniaZapisuChmury();
   const przewoznik="inpost";
   const uslugi=PRZEWOZNICY[przewoznik]?.uslugi||[];
   const paczkomatZam = czyZamowieniePaczkomat(z);
@@ -369,9 +369,8 @@ function widokAdminZamowienie(nr){
   <div class="panel">
     <h2 style="margin-top:0">✉️ Powiadomienia klienta</h2>
     <div class="backend-note" style="${emailPolaczony?"border-color:#86efac;background:#f0fdf4;color:#166534":emailGotowy?"":"border-color:#f59e0b"}">
-      <b>${emailPolaczony?"Automatyczna wysyłka SMTP jest gotowa":emailGotowy?"SMTP jest skonfigurowany":"Automatyczna wysyłka wymaga konfiguracji SMTP/Gmail w Netlify"}.</b>
-      ${emailPolaczony?` Wiadomości wysyła ${esc(stanBramki.email.provider||"SMTP")}; wynik i identyfikator trafiają do historii.`:emailGotowy?` Wpisz hasło bazy administratora, aby wysyłać ręczne wiadomości.`:` Ustaw zmienne <code>SMTP_USER</code> i <code>SMTP_PASS</code> w Netlify.`}
-      ${!emailPolaczony?` <a href="#/admin/dostawy">Konfiguracja e-mail →</a>`:""}
+      <b>${emailPolaczony?"Automatyczna wysyłka SMTP jest gotowa":emailGotowy?"SMTP zapisany, ale jeszcze niepotwierdzony":"Poczta wymaga naprawy trwałego połączenia serwerowego"}.</b>
+      ${emailPolaczony?` Wiadomości wysyła ${esc(stanBramki.email.provider||"SMTP")}; wynik i identyfikator trafiają do historii.`:` <a href="#/admin/wysylki/ustawienia">Sprawdź integrację →</a>`}
     </div>
     <div class="diag-actions">
       ${Object.entries(NAZWY_EMAILI).map(([id,n])=>emailPolaczony
@@ -484,7 +483,7 @@ async function usunZamowienie(nr){
   const numer=nrZamowienia(nr), z=pobierzZamowienia().find(x=>x.nr===numer);
   oznaczZamowienieUsuniete(numer,{by:"admin",email:z?.email||""});
   zapiszLS("artway_zamowienia", pobierzZamowienia().filter(x=>x.nr!==numer));
-  if(chmuraToken){
+  if(maUprawnieniaZapisuChmury()){
     try{
       await chmura("store-order-delete",{method:"POST",body:{number:numer}});
       stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,error:""};
@@ -493,7 +492,7 @@ async function usunZamowienie(nr){
       toast("Usunięto lokalnie, ale nie zapisano na serwerze: "+bl.message);
     }
   }else{
-    toast("Usunięto lokalnie. Wpisz hasło bazy, aby utrwalić usunięcie na serwerze.");
+    toast("Usunięto lokalnie. Zaloguj administratora, aby utrwalić usunięcie na serwerze.");
   }
   loguj("info","Usunięto zamówienie "+nr);
   toast("Zamówienie usunięte — nie wróci do obsługi");

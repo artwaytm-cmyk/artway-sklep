@@ -13,7 +13,7 @@ test('Centrum wysyłki ma trwałe adresy wszystkich podstron', async () => {
 });
 
 test('każda podstrona wysyłek ma własny widok i poprawny aktywny stan nawigacji', async () => {
-  const shipping=await read('src/frontend/07-admin-shipping.js');
+  const shipping=(await read('src/frontend/07-admin-shipping.js'))+(await read('src/frontend/11-integration-center.js'));
   for (const panel of ['panelZlecenWysylkowych','panelTrackinguWysylek','panelAutomatyzacjiWysylek','panelUstawienBramki']) assert.match(shipping,new RegExp(`function ${panel}\\(`));
   assert.match(shipping,/adminSubnavHTML\(\[/);
   assert.match(shipping,/wysylkiKontekstPodstronyHTML\(aktywna\)/);

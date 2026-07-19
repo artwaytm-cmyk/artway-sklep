@@ -43,12 +43,11 @@ async function sprawdzLogowanie(email, haslo){
   if(email==="admin" || email===adminEmail){
     try{
       const d=await chmura("login",{method:"POST",body:{password:haslo,email:adminEmail}});
-      chmuraToken=haslo; sessionStorage.setItem("artway_chmura_token",chmuraToken); localStorage.removeItem("artway_chmura_token");
+      chmuraToken=""; sessionStorage.removeItem("artway_chmura_token"); localStorage.removeItem("artway_chmura_token");
       const lista=pobierzUzytkownikow(); const a=lista.find(x=>x.email===adminEmail);
       if(a){ a.hash=""; zapiszLS("artway_uzytkownicy",lista); }
       domyslneHasloAdmina=false;
       chmuraStan={...chmuraStan,dostepna:true,admin:true};
-      await synchronizujBazeCentralna(true).catch(()=>{});
       return {ok:true, uzytkownik:{imie:"Administrator",email:adminEmail,rola:"admin",token:d.sessionToken||"",verified:true}};
     }catch(bl){
       // serwer niedostępny lub złe hasło → spróbuj lokalnego admin/admin (tryb offline)

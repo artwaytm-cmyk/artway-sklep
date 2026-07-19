@@ -68,36 +68,26 @@ async function ustawUrlePaynow(){
 }
 function emailPanelAdminHTML(){
   const e=stanBramki.email||{};
-  const gotowy=!!e.configured, polaczony=gotowy&&!!chmuraToken;
+  const gotowy=!!e.configured, polaczony=!!e.authenticated&&maUprawnieniaZapisuChmury();
+  const problem=e.credentialIssue==="masked_placeholder"?"W chronionej konfiguracji serwera znajduje się maska zamiast prawidłowego hasła aplikacji Google.":e.lastError||"";
   return `<div class="panel">
-    <h2 style="margin-top:0">📧 Bramka e-mail SMTP / Gmail</h2>
-    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">Automatyczne wiadomości wychodzą z serwera Netlify. Logowanie w Chrome do Gmaila nie wystarcza dla backendu — potrzebne jest hasło aplikacji Google albo dane SMTP zapisane jako sekrety Netlify.</p>
-    <div class="backend-note" style="${gotowy?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
-      <b>${gotowy?"SMTP skonfigurowany ✅":"SMTP/Gmail nie jest jeszcze skonfigurowany"}</b><br>
+    <h2 style="margin-top:0">📧 Trwałe połączenie e-mail SMTP / Gmail</h2>
+    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">Wiadomości wychodzą bezpośrednio z VPS. Dane dostępowe nie są przechowywane w przeglądarce i nie trzeba ich ponownie wpisywać po restarcie ani na innym urządzeniu.</p>
+    <div class="backend-note" style="${polaczony?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
+      <b>${polaczony?"Połączenie Gmail potwierdzone ✅":gotowy?"Konfiguracja zapisana — autoryzacja wymaga sprawdzenia":"Połączenie Gmail wymaga naprawy"}</b><br>
       Nadawca: <code>${esc(e.from||"sklepartway@gmail.com")}</code> • Provider: <code>${esc(e.provider||"gmail-smtp")}</code><br>
-      ${polaczony?"Panel ma hasło bazy — test i ręczne wiadomości mogą być wysyłane.":gotowy?"Wpisz hasło bazy administratora, aby wysyłać testy z panelu.":"Ustaw zmienne poniżej w Netlify i zrób redeploy."}
+      ${polaczony?"Automatyczne i ręczne wiadomości są gotowe. Sesja panelu odnawia się automatycznie.":problem?`<span style="color:#991b1b">${esc(problem)}</span>`:"Uruchom kontrolę połączenia z serwerem."}
+      ${e.lastCheckedAt?`<br>Ostatnia kontrola: <b>${esc(new Date(e.lastCheckedAt).toLocaleString("pl-PL"))}</b>`:""}
     </div>
-    <table class="log-table" style="margin-top:.7rem">
-      <tr><th>Zmienna Netlify</th><th>Wartość dla Gmail</th></tr>
-      <tr><td><code>EMAIL_PROVIDER</code></td><td><code>gmail</code></td></tr>
-      <tr><td><code>EMAIL_FROM</code></td><td><code>sklepartway@gmail.com</code></td></tr>
-      <tr><td><code>EMAIL_FROM_NAME</code></td><td><code>Artway-TM</code></td></tr>
-      <tr><td><code>SMTP_HOST</code></td><td><code>smtp.gmail.com</code></td></tr>
-      <tr><td><code>SMTP_PORT</code></td><td><code>465</code></td></tr>
-      <tr><td><code>SMTP_SECURE</code></td><td><code>true</code></td></tr>
-      <tr><td><code>SMTP_USER</code></td><td><code>sklepartway@gmail.com</code></td></tr>
-      <tr><td><code>SMTP_PASS</code></td><td>hasło aplikacji Google — nie zwykłe hasło do Gmaila</td></tr>
-      <tr><td><code>EMAIL_ADMIN_TO</code></td><td>adres, na który sklep wyśle powiadomienie o nowym zamówieniu</td></tr>
-    </table>
     <form onsubmit="wyslijTestEmail(event)" style="margin-top:1rem">
       <div class="f-row" style="grid-template-columns:1fr auto;align-items:end">
         <div class="f-group"><label>Wyślij test na adres</label><input type="email" name="email" value="${esc(KONFIG.emailSklepu)}" required></div>
-        <div class="f-group"><button class="btn" type="submit" ${gotowy?"":"disabled"}>📧 Wyślij test</button></div>
+        <div class="f-group"><button class="btn" type="submit" ${polaczony?"":"disabled"}>📧 Wyślij testową wiadomość</button></div>
       </div>
     </form>
     <div class="diag-actions" style="margin-top:.8rem">
-      <button class="btn ghost" type="button" onclick="sprawdzBramke()">🔎 Sprawdź e-mail / Netlify</button>
-      ${chmuraToken?"":`<button class="btn ghost" type="button" onclick="chmuraUstawToken()">🔑 Wpisz hasło bazy</button>`}
+      <button class="btn" type="button" onclick="testujEmailPolaczenie()">🔎 Sprawdź autoryzację Gmail</button>
+      <a class="btn ghost" href="#/admin/wysylki/ustawienia">⚙️ Centrum integracji</a>
     </div>
   </div>`;
 }

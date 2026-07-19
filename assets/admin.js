@@ -2,6 +2,24 @@
 /* Personalizacja = wszystkie ustawienia wyglądu i sklepu w JEDNYM miejscu,
    podzielone na zakładki. Stare adresy (#/admin/wyglad itd.) dalej działają
    i otwierają właściwą zakładkę.                                          */
+let chmuraOdswiezanieSesji=null;
+async function chmuraOdswiezSesjeAdministratora(force=false){
+  if(!sesja?.token||!jestAdmin())return false;
+  const last=Number(wczytajLS("artway_admin_session_refreshed_at",0))||0;
+  if(!force&&Date.now()-last<12*60*60*1000)return true;
+  if(chmuraOdswiezanieSesji)return chmuraOdswiezanieSesji;
+  chmuraOdswiezanieSesji=(async()=>{try{const d=await chmura("session-refresh",{method:"POST",timeout:9000});if(!d.sessionToken)return false;sesja={...sesja,token:d.sessionToken,verified:true};zapiszLS("artway_sesja",sesja);zapiszLS("artway_admin_session_refreshed_at",Date.now());chmuraStan={...chmuraStan,dostepna:true,admin:true,error:""};return true;}catch(e){return false;}finally{chmuraOdswiezanieSesji=null;}})();
+  return chmuraOdswiezanieSesji;
+}
+async function testujEmailPolaczenie(cicho=false){
+  if(!maUprawnieniaZapisuChmury()){if(!cicho)chmuraUstawToken();return false;}
+  try{const d=await chmura("email-test",{method:"POST",body:{source:"admin-integration-center"},timeout:18000});stanBramki={...stanBramki,email:{...(d.email||{}),authenticated:true},emailError:""};if(!cicho){toast("Poczta Gmail jest połączona trwale z serwerem ✅");renderuj();}return true;}
+  catch(bl){stanBramki={...stanBramki,email:{...(stanBramki.email||{}),...(bl.email||{}),authenticated:false,lastError:bl.message,lastErrorCode:bl.code||"email_error"},emailError:bl.message};if(!cicho){toast("Poczta: "+bl.message);renderuj();}return false;}
+}
+async function sprawdzPolaczeniaSerwerowe(cicho=false){
+  if(testIntegracjiWToku||!maUprawnieniaZapisuChmury()){if(!cicho&&!maUprawnieniaZapisuChmury())chmuraUstawToken();return false;}
+  testIntegracjiWToku=true;try{const [inpost,email]=await Promise.all([testujInPost(true),testujEmailPolaczenie(true)]);ostatniTestIntegracjiSerwerowych=Date.now();if(!cicho)toast(`Kontrola połączeń: InPost ${inpost?"✅":"❌"} • e-mail ${email?"✅":"❌"}`);renderuj();return inpost&&email;}finally{testIntegracjiWToku=false;}
+}
 const TABY_PERSONALIZACJI = [
   ["home","🏠 Strona główna"], ["wyglad","🎨 Układ globalny"], ["rozmieszczenie","🧭 Rozmieszczenie"], ["bannery","🖼️ Kreator bannerów"],
   ["ikony","✨ Ikony AI"], ["rabaty","🎁 Kody rabatowe","#/admin/asortyment/rabaty"], ["podstrony","🧱 Układ podstron"], ["strony","📄 Treści prawne"], ["dostawy","🚚 Dostawa i płatności"]
@@ -3014,6 +3032,20 @@ function telegramDostepKontaHTML(k,admin){
   return `<div class="account-telegram-access"><input data-telegram-user-id inputmode="numeric" autocomplete="off" placeholder="ID użytkownika" aria-label="ID użytkownika Telegram" value="${esc(k.telegramUserId||"")}"><label><input data-telegram-access type="checkbox" ${k.telegramAccess===true?"checked":""}> wspólny czat</label><label><input data-telegram-approver type="checkbox" ${k.telegramApprover===true?"checked":""}> zatwierdzanie</label><button class="btn ghost" type="button" onclick="zapiszTelegramDostepKonta(${jsArg(k.email)},this)">Zapisz</button></div>`;
 }
 
+function panelUstawienBramki(){
+  const u=ustawieniaWysylki(),ip=stanBramki.inpost||{},ipGotowy=!!ip.configured,ipPolaczony=!!ip.authenticated,ipMapa=!!ip.geowidgetConfigured,ipWebhook=!!ip.webhookConfigured,av=ip.serviceAvailability||{};
+  const braki=Array.isArray(ip.missingEnv)&&ip.missingEnv.length?ip.missingEnv:[...(ipGotowy?[]:["INPOST_TOKEN","INPOST_ORG_ID"])],orgInfo=ip.organization?.id?`Organizacja: <b>${esc(ip.organization.id)}</b>${ip.organization.name?` • ${esc(ip.organization.name)}`:""}`:"Organizacja pojawi się po teście API.";
+  const uslugiInfo=av.services?.length?`<br>Paczkomat <code>${esc(av.lockerService||"inpost_locker_standard")}</code>: <b>${av.locker?"aktywny ✅":"nieaktywny"}</b> • Kurier <code>${esc(av.courierService||"inpost_courier_standard")}</code>: <b>${av.courier?"aktywny ✅":"nieaktywny"}</b>`:"";
+  return `<div class="panel"><h1>⚙️ Trwałe integracje wysyłki i poczty</h1>
+    <div class="integration-hub" style="border:2px solid ${ipPolaczony?'#86efac':'#fcd34d'};background:${ipPolaczony?'#f0fdf4':'#fffbeb'}"><div class="integration-hub-status"><span><b>🟡 InPost ShipX — serwer sklepu</b><br><small>Połączenie serwerowe bez tokenów w przeglądarce.</small></span><span class="integration-state">${ipPolaczony?`połączony • ${esc(ip.env||'production')}`:ipGotowy?"zapisany • sprawdź połączenie":`brakuje: ${esc(braki.join(", "))}`}</span></div>
+      <p class="ship-meta">ShipX: <b>${ipPolaczony?"połączony ✅":"sprawdź"}</b> • Mapa: <b>${ipMapa?"aktywna ✅":"nieaktywna"}</b> • Webhook: <b>${ipWebhook?"aktywny ✅":"nieaktywny"}</b>${ip.lastCheckedAt?` • Test: <b>${esc(new Date(ip.lastCheckedAt).toLocaleString("pl-PL"))}</b>`:""}<br>${orgInfo}${uslugiInfo}</p>
+      <div class="diag-actions"><button class="btn ghost" onclick="sprawdzBramke()">🔎 Stan serwera</button><button class="btn" style="background:#ffcc00;color:#111" onclick="testujInPost()">🟡 Sprawdź InPost</button><button class="btn" onclick="sprawdzPolaczeniaSerwerowe()">🩺 Sprawdź oba</button></div>
+      ${stanBramki.error?`<div class="backend-note" style="color:#991b1b"><b>Błąd:</b> ${esc(stanBramki.error)}</div>`:""}<div class="backend-note"><b>Bezpiecznie:</b> sekrety pozostają na VPS i działają po restarcie. Panel widzi tylko stan połączenia.</div></div>
+    <div class="integration-card" style="margin-top:1rem"><b>📧 Automatyczne e-maile</b><span class="integration-state">${stanBramki.email?.authenticated?`${esc(stanBramki.email.provider||"SMTP")} połączony ✅`:stanBramki.email?.credentialIssue==="masked_placeholder"?"Zapisano maskę zamiast hasła":stanBramki.email?.configured?"Zapisany — wymaga testu":"Brak prawidłowego poświadczenia"}</span><p class="ship-meta">Trwałe połączenie VPS, bez tokenu w panelu.${stanBramki.email?.lastCheckedAt?` Test: <b>${esc(new Date(stanBramki.email.lastCheckedAt).toLocaleString("pl-PL"))}</b>.`:""}${stanBramki.email?.lastError?`<br><span style="color:var(--danger)">${esc(stanBramki.email.lastError)}</span>`:""}</p><button class="btn ghost" type="button" onclick="testujEmailPolaczenie()">📧 Sprawdź SMTP</button></div>
+    <form onsubmit="zapiszUstawieniaWysylki(event)" style="margin-top:1rem"><div class="f-row"><div class="f-group"><label>Adres bramki</label><input name="apiEndpoint" value="${esc(u.apiEndpoint)}"></div><div class="f-group"><label>Tryb</label><select name="tryb"><option value="sandbox" ${u.tryb==="sandbox"?"selected":""}>Testowy</option><option value="production" ${u.tryb==="production"?"selected":""}>Produkcyjny</option></select></div></div><h2>InPost</h2><div class="integration-grid">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<div class="integration-card"><b>${esc(p.nazwa)}</b><span class="integration-state">${ipGotowy?"ShipX gotowy":"wymaga konfiguracji"}</span><p class="ship-meta">Paczkomat + Kurier • etykiety A6/A4 • tracking • webhook</p></div>`).join("")}</div>
+      <h2>Dane nadawcy i paczki</h2><div class="f-row"><div class="f-group"><label>Przewoźnik</label><select name="przewoznik">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<option value="${id}" selected>${esc(p.nazwa)}</option>`).join("")}</select></div><div class="f-group"><label>Nadawca</label><input name="nadawca" value="${esc(u.nadawca)}"></div></div><div class="f-row"><div class="f-group"><label>Ulica i numer</label><input name="ulica" value="${esc(u.ulica)}"></div><div class="f-group"><label>Kod pocztowy</label><input name="kod" value="${esc(u.kod)}"></div><div class="f-group"><label>Miasto</label><input name="miasto" value="${esc(u.miasto)}"></div></div><div class="f-row"><div class="f-group"><label>Telefon</label><input name="telefon" value="${esc(u.telefon)}"></div><div class="f-group"><label>E-mail</label><input type="email" name="email" value="${esc(u.email)}"></div></div><div class="f-row"><div class="f-group"><label>Waga (kg)</label><input type="number" step=".01" min=".01" name="waga" value="${esc(u.waga)}"></div><div class="f-group"><label>Długość (cm)</label><input type="number" min="1" name="dlugosc" value="${esc(u.dlugosc)}"></div><div class="f-group"><label>Szerokość (cm)</label><input type="number" min="1" name="szerokosc" value="${esc(u.szerokosc)}"></div><div class="f-group"><label>Wysokość (cm)</label><input type="number" min="1" name="wysokosc" value="${esc(u.wysokosc)}"></div></div><button class="btn" type="submit">💾 Zapisz dane nadawcy</button></form></div>`;
+}
+
 function klientZamowieniaLabel(z){
   const k=z?.klient||{};
   return [k.imie,k.nazwisko].filter(Boolean).join(" ") || z?.email || "gość";
@@ -4938,7 +4970,7 @@ function widokAdminZamowienie(nr){
   const z = pobierzZamowienia().find(x=>x.nr===nr);
   if(!z) return adminSzkielet("/admin/zamowienia", `<div class="panel"><h1>Nie znaleziono zamówienia ${esc(nr)}</h1><p><a href="#/admin/zamowienia">← Wróć do listy</a></p></div>`);
   const w=daneWysylki(z), uw=ustawieniaWysylki(), klient=z.klient||{}, adres=z.adresDostawy||{};
-  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&!!chmuraToken;
+  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=!!stanBramki.email?.authenticated&&maUprawnieniaZapisuChmury();
   const przewoznik="inpost";
   const uslugi=PRZEWOZNICY[przewoznik]?.uslugi||[];
   const paczkomatZam = czyZamowieniePaczkomat(z);
@@ -5109,9 +5141,8 @@ function widokAdminZamowienie(nr){
   <div class="panel">
     <h2 style="margin-top:0">✉️ Powiadomienia klienta</h2>
     <div class="backend-note" style="${emailPolaczony?"border-color:#86efac;background:#f0fdf4;color:#166534":emailGotowy?"":"border-color:#f59e0b"}">
-      <b>${emailPolaczony?"Automatyczna wysyłka SMTP jest gotowa":emailGotowy?"SMTP jest skonfigurowany":"Automatyczna wysyłka wymaga konfiguracji SMTP/Gmail w Netlify"}.</b>
-      ${emailPolaczony?` Wiadomości wysyła ${esc(stanBramki.email.provider||"SMTP")}; wynik i identyfikator trafiają do historii.`:emailGotowy?` Wpisz hasło bazy administratora, aby wysyłać ręczne wiadomości.`:` Ustaw zmienne <code>SMTP_USER</code> i <code>SMTP_PASS</code> w Netlify.`}
-      ${!emailPolaczony?` <a href="#/admin/dostawy">Konfiguracja e-mail →</a>`:""}
+      <b>${emailPolaczony?"Automatyczna wysyłka SMTP jest gotowa":emailGotowy?"SMTP zapisany, ale jeszcze niepotwierdzony":"Poczta wymaga naprawy trwałego połączenia serwerowego"}.</b>
+      ${emailPolaczony?` Wiadomości wysyła ${esc(stanBramki.email.provider||"SMTP")}; wynik i identyfikator trafiają do historii.`:` <a href="#/admin/wysylki/ustawienia">Sprawdź integrację →</a>`}
     </div>
     <div class="diag-actions">
       ${Object.entries(NAZWY_EMAILI).map(([id,n])=>emailPolaczony
@@ -5224,7 +5255,7 @@ async function usunZamowienie(nr){
   const numer=nrZamowienia(nr), z=pobierzZamowienia().find(x=>x.nr===numer);
   oznaczZamowienieUsuniete(numer,{by:"admin",email:z?.email||""});
   zapiszLS("artway_zamowienia", pobierzZamowienia().filter(x=>x.nr!==numer));
-  if(chmuraToken){
+  if(maUprawnieniaZapisuChmury()){
     try{
       await chmura("store-order-delete",{method:"POST",body:{number:numer}});
       stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,error:""};
@@ -5233,7 +5264,7 @@ async function usunZamowienie(nr){
       toast("Usunięto lokalnie, ale nie zapisano na serwerze: "+bl.message);
     }
   }else{
-    toast("Usunięto lokalnie. Wpisz hasło bazy, aby utrwalić usunięcie na serwerze.");
+    toast("Usunięto lokalnie. Zaloguj administratora, aby utrwalić usunięcie na serwerze.");
   }
   loguj("info","Usunięto zamówienie "+nr);
   toast("Zamówienie usunięte — nie wróci do obsługi");
@@ -9884,36 +9915,26 @@ async function ustawUrlePaynow(){
 }
 function emailPanelAdminHTML(){
   const e=stanBramki.email||{};
-  const gotowy=!!e.configured, polaczony=gotowy&&!!chmuraToken;
+  const gotowy=!!e.configured, polaczony=!!e.authenticated&&maUprawnieniaZapisuChmury();
+  const problem=e.credentialIssue==="masked_placeholder"?"W chronionej konfiguracji serwera znajduje się maska zamiast prawidłowego hasła aplikacji Google.":e.lastError||"";
   return `<div class="panel">
-    <h2 style="margin-top:0">📧 Bramka e-mail SMTP / Gmail</h2>
-    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">Automatyczne wiadomości wychodzą z serwera Netlify. Logowanie w Chrome do Gmaila nie wystarcza dla backendu — potrzebne jest hasło aplikacji Google albo dane SMTP zapisane jako sekrety Netlify.</p>
-    <div class="backend-note" style="${gotowy?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
-      <b>${gotowy?"SMTP skonfigurowany ✅":"SMTP/Gmail nie jest jeszcze skonfigurowany"}</b><br>
+    <h2 style="margin-top:0">📧 Trwałe połączenie e-mail SMTP / Gmail</h2>
+    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">Wiadomości wychodzą bezpośrednio z VPS. Dane dostępowe nie są przechowywane w przeglądarce i nie trzeba ich ponownie wpisywać po restarcie ani na innym urządzeniu.</p>
+    <div class="backend-note" style="${polaczony?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
+      <b>${polaczony?"Połączenie Gmail potwierdzone ✅":gotowy?"Konfiguracja zapisana — autoryzacja wymaga sprawdzenia":"Połączenie Gmail wymaga naprawy"}</b><br>
       Nadawca: <code>${esc(e.from||"sklepartway@gmail.com")}</code> • Provider: <code>${esc(e.provider||"gmail-smtp")}</code><br>
-      ${polaczony?"Panel ma hasło bazy — test i ręczne wiadomości mogą być wysyłane.":gotowy?"Wpisz hasło bazy administratora, aby wysyłać testy z panelu.":"Ustaw zmienne poniżej w Netlify i zrób redeploy."}
+      ${polaczony?"Automatyczne i ręczne wiadomości są gotowe. Sesja panelu odnawia się automatycznie.":problem?`<span style="color:#991b1b">${esc(problem)}</span>`:"Uruchom kontrolę połączenia z serwerem."}
+      ${e.lastCheckedAt?`<br>Ostatnia kontrola: <b>${esc(new Date(e.lastCheckedAt).toLocaleString("pl-PL"))}</b>`:""}
     </div>
-    <table class="log-table" style="margin-top:.7rem">
-      <tr><th>Zmienna Netlify</th><th>Wartość dla Gmail</th></tr>
-      <tr><td><code>EMAIL_PROVIDER</code></td><td><code>gmail</code></td></tr>
-      <tr><td><code>EMAIL_FROM</code></td><td><code>sklepartway@gmail.com</code></td></tr>
-      <tr><td><code>EMAIL_FROM_NAME</code></td><td><code>Artway-TM</code></td></tr>
-      <tr><td><code>SMTP_HOST</code></td><td><code>smtp.gmail.com</code></td></tr>
-      <tr><td><code>SMTP_PORT</code></td><td><code>465</code></td></tr>
-      <tr><td><code>SMTP_SECURE</code></td><td><code>true</code></td></tr>
-      <tr><td><code>SMTP_USER</code></td><td><code>sklepartway@gmail.com</code></td></tr>
-      <tr><td><code>SMTP_PASS</code></td><td>hasło aplikacji Google — nie zwykłe hasło do Gmaila</td></tr>
-      <tr><td><code>EMAIL_ADMIN_TO</code></td><td>adres, na który sklep wyśle powiadomienie o nowym zamówieniu</td></tr>
-    </table>
     <form onsubmit="wyslijTestEmail(event)" style="margin-top:1rem">
       <div class="f-row" style="grid-template-columns:1fr auto;align-items:end">
         <div class="f-group"><label>Wyślij test na adres</label><input type="email" name="email" value="${esc(KONFIG.emailSklepu)}" required></div>
-        <div class="f-group"><button class="btn" type="submit" ${gotowy?"":"disabled"}>📧 Wyślij test</button></div>
+        <div class="f-group"><button class="btn" type="submit" ${polaczony?"":"disabled"}>📧 Wyślij testową wiadomość</button></div>
       </div>
     </form>
     <div class="diag-actions" style="margin-top:.8rem">
-      <button class="btn ghost" type="button" onclick="sprawdzBramke()">🔎 Sprawdź e-mail / Netlify</button>
-      ${chmuraToken?"":`<button class="btn ghost" type="button" onclick="chmuraUstawToken()">🔑 Wpisz hasło bazy</button>`}
+      <button class="btn" type="button" onclick="testujEmailPolaczenie()">🔎 Sprawdź autoryzację Gmail</button>
+      <a class="btn ghost" href="#/admin/wysylki/ustawienia">⚙️ Centrum integracji</a>
     </div>
   </div>`;
 }
@@ -10975,10 +10996,10 @@ function testyDiagnostyczne(){
   dodaj("Integracje","InPost ShipX API",ipDiag.configured?((avDiag.locker===false||avDiag.courier===false)?"warn":"ok"):"warn",ipDiag.configured
     ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}${ipDiag.webhookConfigured?" • webhook aktywny":" • webhook do konfiguracji"}${avDiag.locker===false?" • brak usługi paczkomatowej":""}${avDiag.courier===false?" • kurier InPost nieaktywny":""}`
     :`Brakuje: ${((ipDiag.missingEnv&&ipDiag.missingEnv.length?ipDiag.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", "))}`);
-  const emailDiag=!!stanBramki.email?.configured;
-  dodaj("Integracje","Automatyczne e-maile",emailDiag&&chmuraToken?"ok":"warn",emailDiag
-    ?`${stanBramki.email.provider||"SMTP"} skonfigurowany${chmuraToken?" — wysyłka automatyczna aktywna":" — wpisz hasło bazy do testów i ręcznej wysyłki"}`
-    :"Skonfiguruj SMTP/Gmail w zmiennych Netlify");
+  const emailDiag=!!stanBramki.email?.authenticated;
+  dodaj("Integracje","Automatyczne e-maile",emailDiag?"ok":"warn",emailDiag
+    ?`${stanBramki.email.provider||"SMTP"} — autoryzacja serwerowa potwierdzona, połączenie trwałe`
+    :stanBramki.email?.lastError||"Poczta wymaga kontroli trwałego połączenia serwerowego");
   dodaj("Konfiguracja","Telefon sklepu",KONFIG.telefon.includes("000 000 000")?"warn":"ok",KONFIG.telefon);
   dodaj("Konfiguracja","Dane prawne",widokRegulamin().includes("[nazwa firmy")?"bad":"ok",widokRegulamin().includes("[nazwa firmy")?"Uzupełnij dane firmy w treściach prawnych":"Brak pól przykładowych");
   dodaj("Bezpieczeństwo","Hasło administratora",domyslneHasloAdmina?"bad":"ok",domyslneHasloAdmina?"Nadal ustawione jest hasło admin":"Hasło zostało zmienione");

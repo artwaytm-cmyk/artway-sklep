@@ -475,6 +475,7 @@ function maUprawnieniaZapisuChmury(){
   return !!(chmuraToken||(sesja?.token&&typeof jestAdmin==="function"&&jestAdmin()));
 }
 
+
 function chmuraNaglowki(json){
   const h={"Accept":"application/json"};
   if(json) h["Content-Type"]="application/json";
@@ -700,35 +701,27 @@ async function chmuraPobierzWszystko(){
   }catch(e){ toast("Błąd pobierania: "+e.message); }
 }
 function chmuraUstawToken(){
-  const t = prompt("Wklej hasło administratora wspólnej bazy (wartość ARTWAY_ADMIN_TOKEN ustawiona w Netlify):", chmuraToken||"");
-  if(t===null) return;
-  chmuraToken = t.trim();
-  try{ sessionStorage.setItem("artway_chmura_token",chmuraToken); localStorage.removeItem("artway_chmura_token"); }catch(e){}
-  if(!chmuraToken){ toast("Odłączono hasło bazy"); renderuj(); return; }
-  (async ()=>{
-    try{
-      await chmura("login",{method:"POST",body:{password:chmuraToken}});
-      chmuraStan={...chmuraStan,dostepna:true,admin:true};
-      await synchronizujBazeCentralna(true);
-      toast("Połączono ze wspólną bazą ✅ — kliknij 📤 Wyślij wszystko na serwer, aby przenieść obecny wygląd na inne urządzenia.");
-    }catch(e){ toast("Błąd połączenia z bazą: "+e.message); }
-    renderuj();
-  })();
+  if(maUprawnieniaZapisuChmury()){
+    toast("Trwała sesja administratora jest aktywna ✅");
+    return;
+  }
+  toast("Zaloguj się jako administrator — połączenie z serwerem odnowi się automatycznie.");
+  location.hash="#/logowanie";
 }
 function chmuraWyczyscToken(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; toast("Odłączono hasło bazy"); renderuj(); }
 function chmuraStatusHTML(){
   const ok = chmuraStan.dostepna, adm = chmuraStan.admin && maUprawnieniaZapisuChmury();
   const kolor = adm?"#166534":(ok?"#92400e":"#b91c1c"), tlo = adm?"#f0fdf4":(ok?"#fffbeb":"#fef2f2"), br = adm?"#86efac":(ok?"#fcd34d":"#fecaca");
-  const opis = adm ? `<b>Połączono ✅</b> — Twoje zmiany zapisują się na serwerze automatycznie i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/60000)} min.`
-    : ok ? `<b>⚠️ NIE połączono z bazą</b> — Twoje zmiany zapisują się TYLKO na tym urządzeniu i NIE są widoczne gdzie indziej. Zaloguj się jako <b>admin</b> hasłem = token bazy, albo kliknij „Wpisz hasło bazy".`
+  const opis = adm ? `<b>Połączono trwale ✅</b> — podpisana sesja administratora odnawia się automatycznie, a zmiany zapisują się na serwerze i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/60000)} min.`
+    : ok ? `<b>⚠️ Wymagane logowanie administratora</b> — zaloguj się normalnie do panelu. Nie trzeba wklejać żadnego tokenu.`
     : "Brak połączenia z serwerem — sklep działa lokalnie w tej przeglądarce.";
   return `<div class="backend-note" style="border-color:${br};background:${tlo};color:${kolor}">
     <b>☁️ Wspólna baza:</b> ${opis}
     <div class="diag-actions" style="margin-top:.5rem">
     ${adm?`<button class="btn" style="background:var(--brand2)" onclick="chmuraWyslijWszystko()">📤 Wyślij wszystko na serwer</button>
       <button class="btn ghost" onclick="chmuraPobierzWszystko()">📥 Pobierz z serwera</button>
-      <button class="btn ghost" onclick="chmuraWyczyscToken()">Odłącz hasło</button>`
-      :`<button class="btn" onclick="chmuraUstawToken()">🔑 Wpisz hasło bazy</button>`}
+      <button class="btn ghost" onclick="typeof chmuraOdswiezSesjeAdministratora==='function'&&chmuraOdswiezSesjeAdministratora(true).then(()=>toast('Sesja odnowiona ✅'))">Odśwież sesję</button>`
+      :`<a class="btn" href="#/logowanie">🔐 Zaloguj administratora</a>`}
     </div>
   </div>`;
 }
@@ -1259,12 +1252,11 @@ async function sprawdzLogowanie(email, haslo){
   if(email==="admin" || email===adminEmail){
     try{
       const d=await chmura("login",{method:"POST",body:{password:haslo,email:adminEmail}});
-      chmuraToken=haslo; sessionStorage.setItem("artway_chmura_token",chmuraToken); localStorage.removeItem("artway_chmura_token");
+      chmuraToken=""; sessionStorage.removeItem("artway_chmura_token"); localStorage.removeItem("artway_chmura_token");
       const lista=pobierzUzytkownikow(); const a=lista.find(x=>x.email===adminEmail);
       if(a){ a.hash=""; zapiszLS("artway_uzytkownicy",lista); }
       domyslneHasloAdmina=false;
       chmuraStan={...chmuraStan,dostepna:true,admin:true};
-      await synchronizujBazeCentralna(true).catch(()=>{});
       return {ok:true, uzytkownik:{imie:"Administrator",email:adminEmail,rola:"admin",token:d.sessionToken||"",verified:true}};
     }catch(bl){
       // serwer niedostępny lub złe hasło → spróbuj lokalnego admin/admin (tryb offline)
@@ -4043,6 +4035,7 @@ function adminMenuStatystyki(){
   return {powiadomienia,licznikOperacyjny};
 }
 function adminSzkielet(aktywna, tresc){
+  if(typeof chmuraOdswiezSesjeAdministratora==="function")setTimeout(()=>chmuraOdswiezSesjeAdministratora(),0);
   const {powiadomienia,licznikOperacyjny}=adminMenuStatystyki();
   const otwartaGrupa=adminMenuOtwartaGrupa();
   const kontekst=adminKontekstWidoku(aktywna);
@@ -4244,7 +4237,7 @@ function zapiszWysylke(e,nr){
   loguj("info",`Zapisano przesyłkę ${nr}: ${nazwaPrzewoznika(przewoznik)}${numer?" "+numer:""}`);
   toast("Dane przesyłki zapisane ✅"); renderuj();
   // E-mail „nadanie" wysyła się automatycznie z serwera po zapisaniu numeru nadania (awaryjnie z panelu, gdy baza offline)
-  if(numer&&numer!==staryNumer&&!chmuraToken) void obsluzAutomatycznyEmail(nr,z.status,"nadanie");
+  if(numer&&numer!==staryNumer&&!maUprawnieniaZapisuChmury()) void obsluzAutomatycznyEmail(nr,z.status,"nadanie");
 }
 function uzupelnijUslugi(select){
   const form=select.form, uslugi=PRZEWOZNICY[select.value]?.uslugi||[];
@@ -4267,7 +4260,7 @@ function dodajZdarzenieWysylki(e,nr){
   loguj("info",`Dodano zdarzenie przesyłki ${nr}: ${status}`);
   toast("Zdarzenie dodane"); renderuj();
   // E-mail (nadanie/dostarczenie/zwrot/problem) wysyła się automatycznie z serwera po zapisaniu zdarzenia; awaryjnie z panelu przy braku bazy
-  if((statusZamowienia||typEmaila)&&!chmuraToken) void obsluzAutomatycznyEmail(nr,statusZamowienia,typEmaila);
+  if((statusZamowienia||typEmaila)&&!maUprawnieniaZapisuChmury()) void obsluzAutomatycznyEmail(nr,statusZamowienia,typEmaila);
 }
 function trescPowiadomienia(z,typ){
   const w=daneWysylki(z), klient=z.klient||{}, imie=klient.imie||"";
@@ -4372,11 +4365,11 @@ function otworzEmailWysylki(nr,typ){
 async function wyslijEmailWysylki(nr,typ,automatycznie=false){
   const z=pobierzZamowienia().find(x=>x.nr===nr);
   if(!z?.email){toast("Brak adresu e-mail klienta");return false;}
-  if(!stanBramki.email?.configured){
-    if(!automatycznie) toast("Najpierw skonfiguruj SMTP/Gmail w zmiennych Netlify");
+  if(!stanBramki.email?.authenticated){
+    if(!automatycznie) toast("Poczta nie ma potwierdzonego trwałego połączenia z serwerem");
     return false;
   }
-  if(!chmuraToken){
+  if(!maUprawnieniaZapisuChmury()){
     if(!automatycznie) chmuraUstawToken();
     return false;
   }
@@ -4413,7 +4406,7 @@ async function obsluzAutomatycznyEmail(nr,status,typWymuszony=""){
   if(!z?.email) return;
   const historia=daneWysylki(z).powiadomienia||[];
   if(historia.some(p=>p.typ===typ&&p.status==="wysłano")) return;
-  if(!stanBramki.email?.configured||!chmuraToken){
+  if(!stanBramki.email?.authenticated||!maUprawnieniaZapisuChmury()){
     const istnieje=historia.some(p=>p.typ===typ&&String(p.status).startsWith("oczekuje"));
     if(!istnieje) zapiszHistorieEmaila(nr,{typ,status:"oczekuje — skonfiguruj SMTP / połącz bazę",automatyczne:true});
     renderuj();
@@ -4424,8 +4417,8 @@ async function obsluzAutomatycznyEmail(nr,status,typWymuszony=""){
 async function wyslijTestEmail(e){
   e.preventDefault();
   const email=String(new FormData(e.target).get("email")||"").trim();
-  if(!stanBramki.email?.configured) return toast("Skonfiguruj SMTP/Gmail w Netlify");
-  if(!chmuraToken){ chmuraUstawToken(); return; }
+  if(!stanBramki.email?.authenticated) return toast("Najpierw sprawdź trwałe połączenie poczty z serwerem");
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   if(!confirm(`Wysłać testową wiadomość na ${email}?`)) return;
   try{
     const html=`<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Test e-mail Artway-TM</title></head>
@@ -4491,7 +4484,8 @@ function zapiszUstawieniaWysylki(e){
   obj.regulaKurier="inpost";
   zapiszCzescUstawien({wysylka:{...ustawieniaWysylki(),...obj}});
 }
-let stanBramki={sprawdzono:false,online:false,configured:false,ready:false,authenticated:false,error:"",organizations:[],email:{configured:false,provider:null},store:{configured:false,writable:false,orders:0,users:0},inpost:{configured:false,geowidgetConfigured:false,env:"production"}};
+let stanBramki={sprawdzono:false,online:false,configured:false,ready:false,authenticated:false,error:"",organizations:[],email:{configured:false,authenticated:false,provider:null},store:{configured:false,writable:false,orders:0,users:0},inpost:{configured:false,authenticated:false,geowidgetConfigured:false,env:"production"}};
+let ostatniTestIntegracjiSerwerowych=0, testIntegracjiWToku=false;
 function urlBramki(action,parametry={}){
   const baza=String(ustawieniaWysylki().apiEndpoint||"api/index.php").trim();
   const url=new URL(baza,location.href);
@@ -4517,7 +4511,7 @@ function polaczUzytkownikowCentralnych(serwerowi){
 }
 async function synchronizujBazeCentralna(cicho=false){
   if(stanBazyCentralnej.synchronizacja) return false;
-  if(!chmuraToken){ if(!cicho) chmuraUstawToken(); return false; }
+  if(!maUprawnieniaZapisuChmury()){ if(!cicho) chmuraUstawToken(); return false; }
   chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=false;
   stanBazyCentralnej={...stanBazyCentralnej,synchronizacja:true};
   try{
@@ -4555,7 +4549,7 @@ async function zapiszZamowienieCentralnie(z,publiczne=false){
   if(czyZamowienieUsuniete(z?.nr)) return false;
   try{
     const action=publiczne?"store-order-create":"store-order-save";
-    if(!publiczne&&!chmuraToken) return false;
+    if(!publiczne&&!maUprawnieniaZapisuChmury()) return false;
     const d=await chmura(action,{method:"POST",body:{order:z}});
     if(d?.deleted){ oznaczZamowienieUsuniete(z.nr,{by:"server"}); zapiszLS("artway_zamowienia",pobierzZamowienia()); return false; }
     stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,error:""};
@@ -4574,14 +4568,14 @@ async function zapiszZamowienieCentralnie(z,publiczne=false){
 }
 async function zapiszUzytkownikaCentralnie(u){
   try{
-    const action=chmuraToken?"store-user-save":"account-profile-save";
+    const action=maUprawnieniaZapisuChmury()?"store-user-save":"account-profile-save";
     await chmura(action,{method:"POST",body:{user:u}});
     return true;
   }catch(bl){ return false; }
 }
 async function odtworzSesjeCentralna(){
   try{
-    if(chmuraToken){ await synchronizujBazeCentralna(true); }
+    if(maUprawnieniaZapisuChmury()){ await synchronizujBazeCentralna(true); }
     else if(sesja && !jestAdmin()){ await pobierzMojeZamowieniaCentralne(true); }
   }catch(e){}
 }
@@ -4606,7 +4600,7 @@ async function automatycznaSynchronizacjaChmury(powod="timer"){
   chmuraAutoSyncBusy=true;
   try{
     let ok=false,daneZmienione=false;
-    if(chmuraToken){
+    if(maUprawnieniaZapisuChmury()){
       ok = await synchronizujBazeCentralna(true);
       daneZmienione=chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
       ok = (await chmuraWczytajStan()) || ok;
@@ -4649,11 +4643,12 @@ async function sprawdzBramke(cicho=false){
       const ip=cloud.inpost||{};
       const czesci=[];
       czesci.push("Netlify Functions działa ✅");
-      czesci.push(cloud.email?.configured?`SMTP ${cloud.email.provider||""} gotowy`:"SMTP do konfiguracji");
-      czesci.push(ip.configured?`InPost ShipX gotowy (${ip.env||"production"})`:`InPost: brakuje ${(ip.missingEnv&&ip.missingEnv.length?ip.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")}`);
+      czesci.push(cloud.email?.authenticated?`SMTP ${cloud.email.provider||""} połączony`:cloud.email?.configured?"SMTP zapisany — wymaga testu":"SMTP wymaga naprawy poświadczenia");
+      czesci.push(ip.authenticated?`InPost ShipX połączony (${ip.env||"production"})`:ip.configured?`InPost ShipX zapisany (${ip.env||"production"})`:`InPost: brakuje ${(ip.missingEnv&&ip.missingEnv.length?ip.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")}`);
       if(!ip.geowidgetConfigured) czesci.push("mapa paczkomatów: brak INPOST_GEOWIDGET_TOKEN");
       toast(czesci.join(" • "));
     }
+    if(maUprawnieniaZapisuChmury()&&Date.now()-ostatniTestIntegracjiSerwerowych>15*60*1000)setTimeout(()=>sprawdzPolaczeniaSerwerowe(true),0);
     if(trasa().startsWith("/admin/wysylki")||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
     return;
   }catch(e){ /* Netlify może być chwilowo niedostępne — niżej próbujemy awaryjny backend PHP */ }
@@ -4682,11 +4677,11 @@ async function rozlaczBramke(){
   stanBramki={sprawdzono:true,online:true,configured:stanBramki.configured,ready:stanBramki.ready,authenticated:false,error:"",organizations:[],email:stanBramki.email||{configured:false,provider:null}};
   toast("Rozłączono sesję integracji");renderuj();
 }
-async function testujInPost(){
+async function testujInPost(cicho=false){
   try{
     const cfg=await pobierzInpostConfig(true);
     stanBramki={...stanBramki,inpost:cfg||stanBramki.inpost};
-    if(!chmuraToken){ toast("Wpisz hasło bazy administratora, aby wykonać realny test tokenu InPost"); chmuraUstawToken(); return; }
+    if(!maUprawnieniaZapisuChmury()){ if(!cicho)chmuraUstawToken(); return false; }
     const d=await chmura("inpost-test",{timeout:15000});
     const ip=d.inpost||cfg||{};
     stanBramki={...stanBramki,inpost:ip,error:""};
@@ -4695,14 +4690,18 @@ async function testujInPost(){
     const av=ip.serviceAvailability||{};
     const uwagaPaczkomat=av.locker===false?` • paczkomat ${av.lockerService||"inpost_locker_standard"} wymaga włączenia`:"";
     const uwagaKurier=av.courier===false?` • kurier ${av.courierService||"inpost_courier_standard"} wymaga włączenia`:"";
-    toast(`InPost ShipX połączony ✅ (${ip.env||"production"})${org}${ip.geowidgetConfigured?" • mapa aktywna":" • brak tokenu Geowidget"}${uslugi}${uwagaPaczkomat}${uwagaKurier}`);
-    renderuj();
+    if(!cicho)toast(`InPost ShipX połączony trwale ✅ (${ip.env||"production"})${org}${ip.geowidgetConfigured?" • mapa aktywna":" • mapa wymaga konfiguracji"}${uslugi}${uwagaPaczkomat}${uwagaKurier}`);
+    if(!cicho)renderuj();
+    return true;
   }catch(bl){
     const ip=bl.inpost||stanBramki.inpost||{};
     stanBramki={...stanBramki,inpost:ip,error:bl.message};
-    if(bl.code==="inpost_not_configured") toast("InPost niegotowy — brakuje: "+((bl.missingEnv&&bl.missingEnv.length?bl.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")));
-    else toast("Test InPost: "+bl.message);
-    renderuj();
+    if(!cicho){
+      if(bl.code==="inpost_not_configured") toast("InPost niegotowy — brakuje: "+((bl.missingEnv&&bl.missingEnv.length?bl.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")));
+      else toast("Test InPost: "+bl.message);
+      renderuj();
+    }
+    return false;
   }
 }
 function b64toBlob(b64,typ="application/pdf"){
@@ -4764,7 +4763,7 @@ async function zapiszFormularzWysylkiPrzedAPI(nr){
 async function utworzPrzesylkeAPI(nr){
   const z=pobierzZamowienia().find(x=>x.nr===nr);
   if(!z)return toast("Nie znaleziono zamówienia");
-  if(!chmuraToken){ toast("Wpisz hasło bazy administratora"); chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   if(!confirm(`Utworzyć prawdziwą przesyłkę InPost dla ${nr}? W trybie produkcyjnym operacja może naliczyć opłatę zgodnie z umową.`))return;
   try{
     await zapiszFormularzWysylkiPrzedAPI(nr);
@@ -4793,7 +4792,7 @@ async function utworzPrzesylkeAPI(nr){
 async function pobierzEtykieteAPI(nr,format="A6"){
   const z=pobierzZamowienia().find(x=>x.nr===nr);
   if(!z?.wysylka?.inpostId)return toast("Najpierw utwórz przesyłkę InPost");
-  if(!chmuraToken){ chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   try{
     toast("Pobieram etykietę InPost…");
     const d=await chmura("inpost-label",{params:{nr,type:format},timeout:25000});
@@ -4878,7 +4877,7 @@ function panelEtykietInpostHTML(z){
 async function synchronizujTrackingAPI(nr){
   const z=pobierzZamowienia().find(x=>x.nr===nr);
   if(!z?.wysylka?.inpostId)return toast("To zamówienie nie ma przesyłki InPost");
-  if(!chmuraToken){ chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   try{
     toast("Pobieram status z InPost…");
     const d=await chmura("inpost-status",{params:{nr},timeout:20000});
@@ -4895,7 +4894,7 @@ async function synchronizujTrackingAPI(nr){
 }
 // Ręczne sprawdzenie statusów WSZYSTKICH przesyłek InPost (to samo robi harmonogram co 6h)
 async function synchronizujWszystkieStatusyAPI(){
-  if(!chmuraToken){ toast("Wpisz hasło bazy administratora"); chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   try{
     toast("Sprawdzam statusy wszystkich przesyłek InPost…");
     const d=await chmura("inpost-sync-all",{method:"POST",body:{},timeout:60000});
@@ -4912,7 +4911,7 @@ async function synchronizujWszystkieStatusyAPI(){
 async function utworzEtykietyZaznaczoneAPI(){
   const nry=[...zaznaczoneNadania];
   if(!nry.length){ toast("Zaznacz zlecenia (☑ na karcie)"); return; }
-  if(!chmuraToken){ toast("Wpisz hasło bazy administratora"); chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   if(!confirm(`Utworzyć przesyłki InPost (API) dla ${nry.length} zaznaczonych zleceń? W trybie produkcyjnym mogą naliczyć się opłaty zgodnie z umową.`)) return;
   let ok=0,bl=0,pom=0;
   toast(`Tworzę przesyłki InPost dla ${nry.length} zleceń…`);
@@ -5075,7 +5074,7 @@ function panelTrackinguWysylek(){
 }
 function panelAutomatyzacjiWysylek(){
   const u=ustawieniaWysylki();
-  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&!!chmuraToken;
+  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=!!stanBramki.email?.authenticated&&maUprawnieniaZapisuChmury();
   return `<div class="panel">
     <h1>⚡ Automatyzacje wysyłek</h1>
     <p style="color:var(--muted2)">Reguły obowiązują wszystkie zlecenia. Aktywny jest jeden przewoźnik: InPost, z usługami Paczkomat i Kurier.</p>
@@ -5093,8 +5092,8 @@ function panelAutomatyzacjiWysylek(){
       <button class="btn" type="submit">💾 Zapisz automatyzacje</button>
     </form>
     <div class="backend-note" style="${emailPolaczony?"border-color:#86efac;background:#f0fdf4;color:#166534":emailGotowy?"":"border-color:#f59e0b"}">
-      <b>E-mail SMTP:</b> ${emailPolaczony?`skonfigurowano ${esc(stanBramki.email.provider||"SMTP")} i panel ma hasło bazy — automatyczne wiadomości są gotowe`:emailGotowy?`SMTP jest skonfigurowany, wpisz hasło bazy administratora, aby wysyłać testy i ręczne wiadomości`:"brak konfiguracji — ustaw SMTP/Gmail w zmiennych Netlify"}.
-      ${!emailPolaczony?` <a href="#/admin/dostawy">Konfiguracja e-mail →</a>`:""}
+      <b>E-mail SMTP:</b> ${emailPolaczony?`${esc(stanBramki.email.provider||"SMTP")} — autoryzacja sprawdzona, automatyczne wiadomości są gotowe`:emailGotowy?`dane są zapisane na serwerze, ale autoryzacja nie została potwierdzona`:stanBramki.email?.credentialIssue==="masked_placeholder"?"wykryto maskę zamiast prawidłowego hasła aplikacji Google":"brak prawidłowej trwałej konfiguracji serwera"}.
+      ${!emailPolaczony?` <button class="btn ghost" type="button" onclick="testujEmailPolaczenie()">Sprawdź pocztę</button>`:""}
     </div>
     <form onsubmit="wyslijTestEmail(event)" style="margin-top:1rem">
       <h2>Test wiadomości API</h2>
@@ -5104,49 +5103,6 @@ function panelAutomatyzacjiWysylek(){
       </div>
     </form>
     <div class="backend-note"><b>Sposób działania:</b> e-mail jest wysyłany natychmiast przez serwerowe API, gdy administrator zmienia status zamówienia lub zapisuje nowy numer nadania. Historia i identyfikator wiadomości są zapisywane przy zamówieniu.</div>
-  </div>`;
-}
-function panelUstawienBramki(){
-  const u=ustawieniaWysylki();
-  const ip=stanBramki.inpost||{};
-  const ipGotowy=!!ip.configured, ipMapa=!!ip.geowidgetConfigured, ipWebhook=!!ip.webhookConfigured;
-  const av=ip.serviceAvailability||{};
-  const braki=Array.isArray(ip.missingEnv)&&ip.missingEnv.length?ip.missingEnv:[...(ipGotowy?[]:["INPOST_TOKEN","INPOST_ORG_ID"])];
-  const orgInfo=ip.organization?.id?`Organizacja: <b>${esc(ip.organization.id)}</b>${ip.organization.name?` • ${esc(ip.organization.name)}`:""}`:"Organizacja zostanie pokazana po realnym teście API.";
-  const uslugiInfo=av.services?.length?`<br>Usługa paczkomatowa <code>${esc(av.lockerService||"inpost_locker_standard")}</code>: <b>${av.locker?"aktywna ✅":"brak — włącz usługę paczkomatową w InPost"}</b> • Kurier InPost <code>${esc(av.courierService||"inpost_courier_standard")}</code>: <b>${av.courier?"aktywny ✅":"brak — włącz usługę kurierską w InPost"}</b>`:"";
-  return `<div class="panel">
-    <h1>⚙️ Bramka InPost</h1>
-    <div class="integration-hub" style="border:2px solid ${ipGotowy?'#86efac':'#fcd34d'};background:${ipGotowy?'#f0fdf4':'#fffbeb'}">
-      <div class="integration-hub-status"><span><b>🟡 InPost (ShipX) — Netlify</b><br><small style="color:var(--muted2)">Prawdziwe przesyłki, etykiety i mapa paczkomatów — tokeny w zmiennych Netlify</small></span>
-        <span class="integration-state" style="background:${ipGotowy?'#dcfce7':'#fef3c7'};color:${ipGotowy?'#166534':'#854d0e'}">${ipGotowy?`tokeny obecne • ${esc(ip.env||'production')}`:`brakuje: ${esc(braki.join(", "))}`}</span></div>
-      <p class="ship-meta">Przesyłki ShipX: <b>${ipGotowy?"aktywne po pozytywnym teście ✅":"uzupełnij brakujące zmienne Netlify"}</b> &nbsp;•&nbsp; Mapa paczkomatów: <b>${ipMapa?"aktywna ✅":"ustaw INPOST_GEOWIDGET_TOKEN"}</b> &nbsp;•&nbsp; Webhook statusów: <b>${ipWebhook?"aktywny ✅":"ustaw INPOST_WEBHOOK_SECRET i dodaj URL w InPost"}</b><br>${orgInfo}${uslugiInfo}</p>
-      <div class="diag-actions">
-        <button class="btn ghost" onclick="sprawdzBramke()">🔎 Sprawdź Netlify</button>
-        <button class="btn" style="background:#ffcc00;color:#111" onclick="testujInPost()">🟡 Test API InPost</button>
-      </div>
-      ${stanBramki.error?`<div class="backend-note" style="border-color:var(--danger);background:#fff1f2;color:#991b1b"><b>Błąd połączenia:</b> ${esc(stanBramki.error)}</div>`:""}
-      <div class="backend-note" style="margin-top:.6rem"><b>Wymagane dla etykiet:</b> <code>INPOST_TOKEN</code> i <code>INPOST_ORG_ID</code>. <b>Dla mapy:</b> <code>INPOST_GEOWIDGET_TOKEN</code>. <b>Dla automatycznego śledzenia z Managera:</b> <code>INPOST_WEBHOOK_SECRET</code> oraz adres webhooka wpisany w InPost API. Opcjonalnie: <code>INPOST_ENV</code>, <code>INPOST_SENDING_METHOD</code>, <code>INPOST_LOCKER_SERVICE</code>, <code>INPOST_COURIER_SERVICE</code>. Przy ręcznie tworzonych etykietach wpisuj w InPost numer zamówienia w referencji, np. <code>ATM-123456</code>.</div>
-      <details style="margin-top:.6rem"><summary style="cursor:pointer;font-weight:700">Awaryjny/stary backend PHP na hostingu</summary>
-        <p class="ship-meta">Główna integracja działa przez Netlify Functions. Ten adres zostaje tylko jako informacja dla pierwszej instalacji na nazwa.pl albo awaryjnego hostingu bez Netlify: <code>${esc(u.apiEndpoint)}</code>.</p>
-      </details>
-    </div>
-    <div class="integration-card" style="margin-top:1rem">
-      <b>📧 Automatyczne e-maile</b>
-      <span class="integration-state">${stanBramki.email?.configured?`${esc(stanBramki.email.provider||"SMTP")} skonfigurowany${chmuraToken?" i gotowy":" — wpisz hasło bazy do testów"}`:"ustaw SMTP/Gmail w Netlify"}</span>
-      <p class="ship-meta">Hasło SMTP pozostaje wyłącznie w zmiennych Netlify. Wysyłkę testową i reguły statusów znajdziesz w zakładce Automatyzacje.</p>
-    </div>
-    <form onsubmit="zapiszUstawieniaWysylki(event)" style="margin-top:1rem">
-      <div class="f-row"><div class="f-group"><label>Adres bramki backendowej</label><input name="apiEndpoint" value="${esc(u.apiEndpoint)}" placeholder="/api/shipping"></div><div class="f-group"><label>Tryb</label><select name="tryb"><option value="sandbox" ${u.tryb==="sandbox"?"selected":""}>Sandbox / testowy</option><option value="production" ${u.tryb==="production"?"selected":""}>Produkcyjny</option></select></div></div>
-      <div class="backend-note"><b>Bez sekretów:</b> w tym miejscu zapisuje się tylko adres wspólnej bramki. Tokeny InPost pozostają na serwerze, poza publicznym katalogiem strony.</div>
-      <h2>Aktywny adapter</h2>
-      <div class="integration-grid">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<div class="integration-card"><b>${esc(p.nazwa)}</b><span class="integration-state">${ipGotowy?"adapter Netlify gotowy — przesyłki, etykiety, mapa":"ustaw tokeny InPost w Netlify"}</span><p class="ship-meta">ShipX (Netlify) • Paczkomat + Kurier InPost • numer nadania • PDF A6/A4 • status • Geowidget • webhook</p></div>`).join("")}</div>
-      <h2>Dane nadawcy i paczki</h2>
-      <div class="f-row"><div class="f-group"><label>Domyślny przewoźnik</label><select name="przewoznik">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<option value="${id}" selected>${esc(p.nazwa)}</option>`).join("")}</select></div><div class="f-group"><label>Nazwa nadawcy</label><input name="nadawca" value="${esc(u.nadawca)}"></div></div>
-      <div class="f-row"><div class="f-group"><label>Ulica i numer</label><input name="ulica" value="${esc(u.ulica)}"></div><div class="f-group"><label>Kod pocztowy</label><input name="kod" value="${esc(u.kod)}"></div><div class="f-group"><label>Miasto</label><input name="miasto" value="${esc(u.miasto)}"></div></div>
-      <div class="f-row"><div class="f-group"><label>Telefon</label><input name="telefon" value="${esc(u.telefon)}"></div><div class="f-group"><label>E-mail nadawcy</label><input type="email" name="email" value="${esc(u.email)}"></div></div>
-      <div class="f-row"><div class="f-group"><label>Waga (kg)</label><input type="number" step=".01" min=".01" name="waga" value="${esc(u.waga)}"></div><div class="f-group"><label>Długość (cm)</label><input type="number" min="1" name="dlugosc" value="${esc(u.dlugosc)}"></div><div class="f-group"><label>Szerokość (cm)</label><input type="number" min="1" name="szerokosc" value="${esc(u.szerokosc)}"></div><div class="f-group"><label>Wysokość (cm)</label><input type="number" min="1" name="wysokosc" value="${esc(u.wysokosc)}"></div></div>
-      <button class="btn" type="submit">💾 Zapisz bramkę i dane nadawcy</button>
-    </form>
   </div>`;
 }
 function widokAdminWysylki(sekcja="zlecenia"){

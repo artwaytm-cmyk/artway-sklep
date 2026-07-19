@@ -85,6 +85,7 @@ function maUprawnieniaZapisuChmury(){
   return !!(chmuraToken||(sesja?.token&&typeof jestAdmin==="function"&&jestAdmin()));
 }
 
+
 function chmuraNaglowki(json){
   const h={"Accept":"application/json"};
   if(json) h["Content-Type"]="application/json";
@@ -310,35 +311,27 @@ async function chmuraPobierzWszystko(){
   }catch(e){ toast("Błąd pobierania: "+e.message); }
 }
 function chmuraUstawToken(){
-  const t = prompt("Wklej hasło administratora wspólnej bazy (wartość ARTWAY_ADMIN_TOKEN ustawiona w Netlify):", chmuraToken||"");
-  if(t===null) return;
-  chmuraToken = t.trim();
-  try{ sessionStorage.setItem("artway_chmura_token",chmuraToken); localStorage.removeItem("artway_chmura_token"); }catch(e){}
-  if(!chmuraToken){ toast("Odłączono hasło bazy"); renderuj(); return; }
-  (async ()=>{
-    try{
-      await chmura("login",{method:"POST",body:{password:chmuraToken}});
-      chmuraStan={...chmuraStan,dostepna:true,admin:true};
-      await synchronizujBazeCentralna(true);
-      toast("Połączono ze wspólną bazą ✅ — kliknij 📤 Wyślij wszystko na serwer, aby przenieść obecny wygląd na inne urządzenia.");
-    }catch(e){ toast("Błąd połączenia z bazą: "+e.message); }
-    renderuj();
-  })();
+  if(maUprawnieniaZapisuChmury()){
+    toast("Trwała sesja administratora jest aktywna ✅");
+    return;
+  }
+  toast("Zaloguj się jako administrator — połączenie z serwerem odnowi się automatycznie.");
+  location.hash="#/logowanie";
 }
 function chmuraWyczyscToken(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; toast("Odłączono hasło bazy"); renderuj(); }
 function chmuraStatusHTML(){
   const ok = chmuraStan.dostepna, adm = chmuraStan.admin && maUprawnieniaZapisuChmury();
   const kolor = adm?"#166534":(ok?"#92400e":"#b91c1c"), tlo = adm?"#f0fdf4":(ok?"#fffbeb":"#fef2f2"), br = adm?"#86efac":(ok?"#fcd34d":"#fecaca");
-  const opis = adm ? `<b>Połączono ✅</b> — Twoje zmiany zapisują się na serwerze automatycznie i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/60000)} min.`
-    : ok ? `<b>⚠️ NIE połączono z bazą</b> — Twoje zmiany zapisują się TYLKO na tym urządzeniu i NIE są widoczne gdzie indziej. Zaloguj się jako <b>admin</b> hasłem = token bazy, albo kliknij „Wpisz hasło bazy".`
+  const opis = adm ? `<b>Połączono trwale ✅</b> — podpisana sesja administratora odnawia się automatycznie, a zmiany zapisują się na serwerze i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/60000)} min.`
+    : ok ? `<b>⚠️ Wymagane logowanie administratora</b> — zaloguj się normalnie do panelu. Nie trzeba wklejać żadnego tokenu.`
     : "Brak połączenia z serwerem — sklep działa lokalnie w tej przeglądarce.";
   return `<div class="backend-note" style="border-color:${br};background:${tlo};color:${kolor}">
     <b>☁️ Wspólna baza:</b> ${opis}
     <div class="diag-actions" style="margin-top:.5rem">
     ${adm?`<button class="btn" style="background:var(--brand2)" onclick="chmuraWyslijWszystko()">📤 Wyślij wszystko na serwer</button>
       <button class="btn ghost" onclick="chmuraPobierzWszystko()">📥 Pobierz z serwera</button>
-      <button class="btn ghost" onclick="chmuraWyczyscToken()">Odłącz hasło</button>`
-      :`<button class="btn" onclick="chmuraUstawToken()">🔑 Wpisz hasło bazy</button>`}
+      <button class="btn ghost" onclick="typeof chmuraOdswiezSesjeAdministratora==='function'&&chmuraOdswiezSesjeAdministratora(true).then(()=>toast('Sesja odnowiona ✅'))">Odśwież sesję</button>`
+      :`<a class="btn" href="#/logowanie">🔐 Zaloguj administratora</a>`}
     </div>
   </div>`;
 }

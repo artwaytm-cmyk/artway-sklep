@@ -163,6 +163,7 @@ const {
 const {
   emailKonfiguracja,
   emailPublicConfig,
+  sprawdzEmailSMTP,
   wyslijEmailSMTP,
   kwotaSerwer,
   zlSerwer,
@@ -2692,8 +2693,14 @@ export default async (req) => {
       const o = await czytaj('orders', { items: [] });
       const u = await czytaj('users', { items: [] });
       const d = await czytaj('deleted_orders', { items: [] });
+      const integrationHealth = await czytaj('integration_health', {});
       const aktywne = filtrujNieusunieteZamowienia(o.items || [], d.items || []);
       const admin = czyAdmin(req, url);
+      const emailConfig = emailPublicConfig();
+      const emailSavedHealth = integrationHealth?.email && typeof integrationHealth.email === 'object' ? integrationHealth.email : {};
+      const inpostConfig = inpostPublicConfig();
+      const inpostSavedHealth = integrationHealth?.inpost && typeof integrationHealth.inpost === 'object' ? integrationHealth.inpost : {};
+      const healthFresh = (value) => !!value?.checkedAt && Date.now() - Date.parse(value.checkedAt) < 24 * 60 * 60 * 1000;
       return odpowiedz({
         ok: true,
         configured: !!process.env.ARTWAY_ADMIN_TOKEN,
@@ -2710,12 +2717,19 @@ export default async (req) => {
           continueUrl: paynowKonfiguracja(req).continueUrl,
           notificationUrl: paynowKonfiguracja(req).notificationUrl,
         },
-        email: emailPublicConfig(),
+        email: { ...emailConfig, ...(admin && healthFresh(emailSavedHealth) ? { authenticated: emailConfig.configured && emailSavedHealth.authenticated === true, lastCheckedAt: emailSavedHealth.checkedAt, lastError: emailSavedHealth.error || '', lastErrorCode: emailSavedHealth.code || '' } : {}) },
         telegram: { configured: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId) },
-        inpost: inpostPublicConfig(),
+        inpost: { ...inpostConfig, ...(admin && healthFresh(inpostSavedHealth) ? { authenticated: inpostConfig.configured && inpostSavedHealth.authenticated === true, lastCheckedAt: inpostSavedHealth.checkedAt, serviceAvailability: { locker: inpostSavedHealth.locker === true, courier: inpostSavedHealth.courier === true } } : {}) },
         allegro: await allegroStatus(req),
         infakt: infaktPublicConfig(),
       });
+    }
+
+    if (action === 'session-refresh') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const session = requestSession(req);
+      if (!session || session.role !== 'admin') return odpowiedz({ ok: false, error: 'Zaloguj się ponownie jako administrator.', code: 'auth' }, 401);
+      return odpowiedz({ ok: true, authenticated: true, sessionToken: createAccountSession({ email: session.email, rola: 'admin' }), expiresInDays: 30 });
     }
 
     // ─── KOPIA MIGRACYJNA — odczyt tylko dla administratora, bez zmian w danych ───
@@ -2851,6 +2865,21 @@ export default async (req) => {
     // ─── E-MAIL: konfiguracja bez sekretów ───
     if (action === 'email-config') {
       return odpowiedz({ ok: true, email: emailPublicConfig() });
+    }
+
+    if (action === 'email-test') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const checkedAt = new Date().toISOString();
+      try {
+        const email = await sprawdzEmailSMTP({ force: true });
+        await zapisz('integration_health', { ...(await czytaj('integration_health', {})), email: { authenticated: true, checkedAt, provider: email.provider || 'smtp', error: '', code: '' }, updated_at: checkedAt });
+        return odpowiedz({ ok: true, configured: true, authenticated: true, email });
+      } catch (error) {
+        const code = tekst(error?.code || 'email_connection_error', 100);
+        const safe = { authenticated: false, checkedAt, provider: emailPublicConfig().provider || 'smtp', error: tekst(error?.message || 'Nie udało się połączyć z pocztą.', 500), code };
+        await zapisz('integration_health', { ...(await czytaj('integration_health', {})), email: safe, updated_at: checkedAt });
+        return odpowiedz({ ok: false, configured: emailPublicConfig().configured, authenticated: false, email: { ...emailPublicConfig(), ...safe }, error: safe.error, code }, code === 'email_not_configured' || code === 'email_credential_masked' ? 503 : 502);
+      }
     }
 
     // ─── AGENT AI: jeden kontekst operacyjny całej strony ───
@@ -4372,12 +4401,15 @@ export default async (req) => {
       }
       const org = await inpostOrganizacja(c);
       const availability = inpostDostepnoscUslug(c, org);
+      const checkedAt = new Date().toISOString();
+      await zapisz('integration_health', { ...(await czytaj('integration_health', {})), inpost: { authenticated: true, checkedAt, env: c.env, organizationId: tekst(org?.id || c.orgId, 40), locker: availability.locker === true, courier: availability.courier === true, error: '', code: '' }, updated_at: checkedAt });
       return odpowiedz({
         ok: true,
         configured: true,
         inpost: {
           ...inpostPublicConfig(),
           authenticated: true,
+          lastCheckedAt: checkedAt,
           serviceAvailability: availability,
           organization: {
             id: tekst(org?.id || c.orgId, 40),

@@ -1,6 +1,24 @@
 /* Personalizacja = wszystkie ustawienia wyglądu i sklepu w JEDNYM miejscu,
    podzielone na zakładki. Stare adresy (#/admin/wyglad itd.) dalej działają
    i otwierają właściwą zakładkę.                                          */
+let chmuraOdswiezanieSesji=null;
+async function chmuraOdswiezSesjeAdministratora(force=false){
+  if(!sesja?.token||!jestAdmin())return false;
+  const last=Number(wczytajLS("artway_admin_session_refreshed_at",0))||0;
+  if(!force&&Date.now()-last<12*60*60*1000)return true;
+  if(chmuraOdswiezanieSesji)return chmuraOdswiezanieSesji;
+  chmuraOdswiezanieSesji=(async()=>{try{const d=await chmura("session-refresh",{method:"POST",timeout:9000});if(!d.sessionToken)return false;sesja={...sesja,token:d.sessionToken,verified:true};zapiszLS("artway_sesja",sesja);zapiszLS("artway_admin_session_refreshed_at",Date.now());chmuraStan={...chmuraStan,dostepna:true,admin:true,error:""};return true;}catch(e){return false;}finally{chmuraOdswiezanieSesji=null;}})();
+  return chmuraOdswiezanieSesji;
+}
+async function testujEmailPolaczenie(cicho=false){
+  if(!maUprawnieniaZapisuChmury()){if(!cicho)chmuraUstawToken();return false;}
+  try{const d=await chmura("email-test",{method:"POST",body:{source:"admin-integration-center"},timeout:18000});stanBramki={...stanBramki,email:{...(d.email||{}),authenticated:true},emailError:""};if(!cicho){toast("Poczta Gmail jest połączona trwale z serwerem ✅");renderuj();}return true;}
+  catch(bl){stanBramki={...stanBramki,email:{...(stanBramki.email||{}),...(bl.email||{}),authenticated:false,lastError:bl.message,lastErrorCode:bl.code||"email_error"},emailError:bl.message};if(!cicho){toast("Poczta: "+bl.message);renderuj();}return false;}
+}
+async function sprawdzPolaczeniaSerwerowe(cicho=false){
+  if(testIntegracjiWToku||!maUprawnieniaZapisuChmury()){if(!cicho&&!maUprawnieniaZapisuChmury())chmuraUstawToken();return false;}
+  testIntegracjiWToku=true;try{const [inpost,email]=await Promise.all([testujInPost(true),testujEmailPolaczenie(true)]);ostatniTestIntegracjiSerwerowych=Date.now();if(!cicho)toast(`Kontrola połączeń: InPost ${inpost?"✅":"❌"} • e-mail ${email?"✅":"❌"}`);renderuj();return inpost&&email;}finally{testIntegracjiWToku=false;}
+}
 const TABY_PERSONALIZACJI = [
   ["home","🏠 Strona główna"], ["wyglad","🎨 Układ globalny"], ["rozmieszczenie","🧭 Rozmieszczenie"], ["bannery","🖼️ Kreator bannerów"],
   ["ikony","✨ Ikony AI"], ["rabaty","🎁 Kody rabatowe","#/admin/asortyment/rabaty"], ["podstrony","🧱 Układ podstron"], ["strony","📄 Treści prawne"], ["dostawy","🚚 Dostawa i płatności"]
