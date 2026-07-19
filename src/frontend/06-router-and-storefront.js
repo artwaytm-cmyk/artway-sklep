@@ -435,6 +435,12 @@ function widokSklep(){
   const kategorie = wszystkieKategorie();
   const promki = produkty.filter(p=>p.staraCena).length;
   const nowosci = produkty.filter(p=>p.badge==="Nowość").length;
+  const widoczneSekcje=kolejnoscSekcji().filter(sekcjaWidoczna);
+  const heroMaNaglowekGlowny=widoczneSekcje.includes("hero");
+  const ofertaMaNaglowekGlowny=!heroMaNaglowekGlowny&&widoczneSekcje.includes("produkty");
+  const awaryjnyNaglowekGlowny=!heroMaNaglowekGlowny&&!ofertaMaNaglowekGlowny
+    ?`<h1 class="sr-only home-canonical-title">Gry, zabawki i artykuły imprezowe — Artway-TM</h1>`
+    :"";
   const hero = ustawienia.hero || {},oferta=ustawieniaOfertyGlownej(),heroFx=Number(hero.focalX),heroFy=Number(hero.focalY),heroX=Number.isFinite(heroFx)?Math.max(0,Math.min(100,heroFx)):50,heroY=Number.isFinite(heroFy)?Math.max(0,Math.min(100,heroFy)):50,heroShade=Math.max(0,Math.min(90,Number(hero.przyciemnienie)||76))/100,heroMin=hero.wysokosc==="niski"?280:hero.wysokosc==="wysoki"?460:360;
   const SEKCJE = {};
   SEKCJE.hero = () => `${banneryHome("nad-hero")}
@@ -475,7 +481,7 @@ function widokSklep(){
   SEKCJE.produkty = () => `${banneryHome("nad-produktami")}
   <div class="catalog-head" id="produkty">
     <div class="section-head">
-      <div><h2>${esc(oferta.tytul||"Cała oferta")}</h2><p>${esc(oferta.opis||"")}</p></div>
+      <div><${ofertaMaNaglowekGlowny?"h1":"h2"}>${esc(String(oferta.tytul||"").trim()||"Cała oferta")}</${ofertaMaNaglowekGlowny?"h1":"h2"}><p>${esc(oferta.opis||"")}</p></div>
       ${oferta.liczniki===false?"":`<span style="font-size:.85rem;color:var(--muted2)">${promki} promocji • ${nowosci} nowości</span>`}
     </div>
   </div>
@@ -576,7 +582,7 @@ function widokSklep(){
       </div>
     </div>
   </section>`;
-  return kolejnoscSekcji().filter(sekcjaWidoczna).map(id => SEKCJE[id] ? SEKCJE[id]() : "").join("\n");
+  return awaryjnyNaglowekGlowny+widoczneSekcje.map(id => SEKCJE[id] ? SEKCJE[id]() : "").join("\n");
 }
 function rysujChipy(){
   const c = $("chips"); if(!c) return;

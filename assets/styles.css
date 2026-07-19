@@ -12,6 +12,7 @@ body{font-family:'Segoe UI',system-ui,-apple-system,Roboto,sans-serif;background
 button{font-family:inherit;cursor:pointer}
 input,select,textarea{font-family:inherit;font-size:1rem}
 a{color:var(--brand)}
+.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 .skip-link{position:fixed;top:.5rem;left:.5rem;z-index:1000;padding:.7rem 1rem;border-radius:10px;background:var(--ink);color:#fff;font-weight:800;transform:translateY(-160%);transition:transform .15s;text-decoration:none}.skip-link:focus{transform:translateY(0)}
 :focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 72%,white);outline-offset:3px}
 main:focus{outline:none}
