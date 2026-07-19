@@ -13,6 +13,13 @@ test('Plan zawiera ręczne dokumenty PZ i WZ z jednym końcowym księgowaniem', 
   assert.match(source, /Dane i ilości są zgodne ze stanem faktycznym/);
   assert.match(source, /warehouse-document-line-upsert/);
   assert.match(source, /warehouse-document-line-remove/);
+  assert.match(source, /warehouse-document-delete/);
+  assert.match(source, /Usuń szkic trwale/);
+  assert.match(source, /warehouse-document-correction/);
+  assert.match(source, /Utwórz korektę/);
+  assert.match(source, /warehouse-document-drawer/);
+  assert.match(source, /role="dialog" aria-modal="true"/);
+  assert.match(source, /Kontrolowany przebieg/i);
 });
 
 test('skanowanie działa aparatem telefonu oraz polem dla czytnika USB lub Bluetooth', () => {

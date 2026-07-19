@@ -313,5 +313,57 @@ export function createWarehouseDocumentService({
     });
   }
 
-  return Object.freeze({ list, create, update, upsertLine, removeLine, confirm, cancel });
+  async function deleteDraft(body = {}, actor = 'administrator') {
+    return mutate(async ({ data, timestamp }) => {
+      const documents = documentRegistry(data), index = documents.findIndex((document) => document.id === text(body.documentId, 160));
+      const doc = documents[index]; requireDraft(doc, body.expectedRevision);
+      const reason = text(body.reason, 300);
+      if (reason.length < 3) fail('Podaj krótki powód usunięcia szkicu.', 'warehouse_document_delete_reason_required');
+      documents.splice(index, 1);
+      const deleted = [{
+        id: doc.id, number: doc.number, type: doc.type, reason,
+        lineCount: array(doc.lines).length, totalQuantity: Math.max(0, Number(doc.totalQuantity) || 0),
+        deletedAt: timestamp, deletedBy: text(actor, 200) || 'administrator',
+      }, ...array(data.artway_dokumenty_magazynowe_usuniete)].slice(0, MAX_DOCUMENTS);
+      return {
+        changed: true, document: null,
+        data: { ...data, artway_dokumenty_magazynowe: trimDocuments(documents), artway_dokumenty_magazynowe_usuniete: deleted },
+        extra: { deleted: true, deletedDocumentId: doc.id, deletedDocumentNumber: doc.number },
+      };
+    });
+  }
+
+  async function createCorrection(body = {}, actor = 'administrator') {
+    return mutate(async ({ data, timestamp }) => {
+      const documents = documentRegistry(data), source = documents.find((document) => document.id === text(body.documentId, 160));
+      if (!source?.id) fail('Nie znaleziono dokumentu źródłowego.', 'warehouse_document_not_found', 404);
+      if (source.status !== 'confirmed') fail('Korektę można utworzyć wyłącznie do zaksięgowanego dokumentu.', 'warehouse_document_correction_source_invalid', 409);
+      const expected = Number(body.expectedRevision), revision = Math.max(1, Number(source.revision) || 1);
+      if (!Number.isSafeInteger(expected) || expected !== revision) fail('Dokument źródłowy zmienił się. Odśwież jego aktualną wersję.', 'warehouse_document_revision_conflict', 409, { currentRevision: revision });
+      const existing = documents.find((document) => document.status === 'draft' && document.correctionOf === source.id);
+      if (existing) return { changed: false, document: existing, extra: { correction: true, existing: true } };
+      const type = source.type === 'PZ' ? 'WZ' : 'PZ', generated = nextDocumentNumber(data, type, now());
+      const document = {
+        id: `WD-${crypto.randomUUID()}`, number: generated.number, type, status: 'draft',
+        warehouse: text(source.warehouse || data?.artway_magazyn_ustawienia?.nazwa || 'Magazyn główny', 160),
+        reference: text(`Korekta ${source.number}`, 160), note: text(body.note || `Dokument korekcyjny do ${source.number}`, 500),
+        correctionOf: source.id, correctionOfNumber: source.number,
+        lines: array(source.lines).map((line) => ({
+          ...line, lineId: `WDL-${crypto.randomUUID()}`, stockBefore: undefined, stockAfter: undefined,
+          delta: undefined, confirmedAt: undefined, addedAt: timestamp, addedBy: text(actor, 200) || 'administrator',
+          updatedAt: timestamp, updatedBy: text(actor, 200) || 'administrator', scanCount: 0,
+        })),
+        totalQuantity: array(source.lines).reduce((sum, line) => sum + Math.max(0, Number(line.quantity) || 0), 0),
+        revision: 1, createdAt: timestamp, createdBy: text(actor, 200) || 'administrator',
+        updatedAt: timestamp, updatedBy: text(actor, 200) || 'administrator', mutationIds: [],
+      };
+      return {
+        changed: true, document,
+        data: { ...data, artway_dokumenty_magazynowe: trimDocuments([document, ...documents]), artway_dokumenty_magazynowe_seq: generated.sequences },
+        extra: { correction: true, created: true },
+      };
+    });
+  }
+
+  return Object.freeze({ list, create, update, upsertLine, removeLine, confirm, cancel, deleteDraft, createCorrection });
 }

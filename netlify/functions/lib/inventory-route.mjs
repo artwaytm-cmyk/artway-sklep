@@ -8,6 +8,8 @@ const DOCUMENT_ACTIONS = new Map([
   ['warehouse-document-line-remove', 'removeLine'],
   ['warehouse-document-confirm', 'confirm'],
   ['warehouse-document-cancel', 'cancel'],
+  ['warehouse-document-delete', 'deleteDraft'],
+  ['warehouse-document-correction', 'createCorrection'],
 ]);
 
 // Bezpośrednia korekta stanu została celowo wyłączona. Każda zmiana — także

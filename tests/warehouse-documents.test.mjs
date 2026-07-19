@@ -95,3 +95,31 @@ test('stara rewizja nie może dopisać pozycji, a anulowany szkic pozostaje w hi
   assert.equal(cancelled.document.status, 'cancelled');
   assert.equal((await service.list()).documents.some((document) => document.id === created.document.id), true);
 });
+
+test('szkic można usunąć, ale minimalny ślad usunięcia pozostaje w audycie', async () => {
+  const { service, current } = harness();
+  const created = await service.create({ type: 'PZ', reference: 'Błędne przyjęcie' }, 'administrator');
+  const removed = await service.deleteDraft({ documentId: created.document.id, expectedRevision: 1, reason: 'Utworzono omyłkowo' }, 'administrator');
+  assert.equal(removed.deleted, true);
+  assert.equal((await service.list()).documents.some((document) => document.id === created.document.id), false);
+  assert.deepEqual(current().data.artway_dokumenty_magazynowe_usuniete[0], {
+    id: created.document.id, number: created.document.number, type: 'PZ', reason: 'Utworzono omyłkowo',
+    lineCount: 0, totalQuantity: 0, deletedAt: '2026-07-16T12:00:00.000Z', deletedBy: 'administrator',
+  });
+});
+
+test('zaksięgowanego PZ nie można usunąć, a korekta tworzy kontrolowany szkic WZ', async () => {
+  const { service } = harness();
+  const created = await service.create({ type: 'PZ' }, 'administrator');
+  const line = await service.upsertLine({ documentId: created.document.id, expectedRevision: 1, productId: '1', quantity: 2, mode: 'set', requestId: 'correction-line' }, 'administrator');
+  const confirmed = await service.confirm({ documentId: created.document.id, expectedRevision: line.document.revision, requestId: 'correction-confirm' }, 'administrator');
+  await assert.rejects(() => service.deleteDraft({ documentId: confirmed.document.id, expectedRevision: confirmed.document.revision, reason: 'Nie wolno' }, 'administrator'), (error) => error.code === 'warehouse_document_not_editable');
+  const correction = await service.createCorrection({ documentId: confirmed.document.id, expectedRevision: confirmed.document.revision }, 'administrator');
+  assert.equal(correction.document.type, 'WZ');
+  assert.equal(correction.document.status, 'draft');
+  assert.equal(correction.document.correctionOf, confirmed.document.id);
+  assert.equal(correction.document.lines[0].quantity, 2);
+  const duplicate = await service.createCorrection({ documentId: confirmed.document.id, expectedRevision: confirmed.document.revision }, 'administrator');
+  assert.equal(duplicate.document.id, correction.document.id);
+  assert.equal(duplicate.existing, true);
+});
