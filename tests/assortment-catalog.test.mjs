@@ -33,11 +33,17 @@ test("katalog udostępnia szybkie widoki, aktywne znaczniki i zapis gęstości",
   assert.match(source,/density-\$\{gestoscAdminProduktow\}/);
 });
 
-test("tabela katalogu zachowuje swoje kolumny i operacje hurtowe",async()=>{
+test("karty katalogu zachowują pełne dane i operacje hurtowe",async()=>{
   const source=await read("assets/admin.js");
-  assert.match(source,/<th>Produkt<\/th><th>Identyfikatory<\/th><th>Klasyfikacja i źródło<\/th><th>Ceny<\/th><th>Magazyn i sprzedaż<\/th><th>Allegro<\/th><th>Akcje<\/th>/);
+  assert.match(source,/allegro-publication-card catalog-product-card/);
+  assert.match(source,/data-assortment-product-card/);
+  assert.match(source,/catalog-product-readiness/);
+  assert.match(source,/catalog-product-operational-data/);
+  assert.match(source,/catalog-product-actions/);
   assert.match(source,/EXTERNAL_ID/);
-  assert.match(source,/Zakup \(admin\)/);
+  assert.match(source,/Zakup — tylko administrator/);
+  assert.match(source,/Cena Allegro/);
+  assert.match(source,/Stan magazynowy/);
   assert.match(source,/adminOperacjeWynikowHTML/);
   assert.match(source,/asortymentEksportuj\('zaznaczone'\)/);
   assert.match(source,/asortymentEksportuj\('filtr'\)/);
@@ -47,9 +53,9 @@ test("tabela katalogu zachowuje swoje kolumny i operacje hurtowe",async()=>{
   assert.doesNotMatch(source,/Po zakończeniu pobierz nowy <b>products\.json<\/b> i podmień go na hostingu/);
 });
 
-test("układ katalogu dopasowuje dotychczasowe kolumny i wspiera zwartą tabelę",async()=>{
-  const css=(await read("src/styles/07-admin-domains.css"))+(await read("src/styles/31-admin-page-pattern.css"));
-  for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".assortment-product-cell",".assortment-identifiers",".assortment-row-actions",".assortment-product-table.density-zwarta"]){
+test("układ katalogu kopiuje wzorcowy model kart i wspiera widok zwarty",async()=>{
+  const css=(await read("src/styles/07-admin-domains.css"))+(await read("src/styles/29-commerce-catalog-actions.css"))+(await read("src/styles/31-admin-page-pattern.css"));
+  for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".catalog-product-list",".catalog-product-card",".catalog-product-readiness",".catalog-product-operational-data",".catalog-product-actions",".catalog-product-list.density-zwarta"]){
     assert.match(css,new RegExp(selector.replace(".","\\.")));
   }
   assert.match(css,/@container\(max-width:1180px\)/);

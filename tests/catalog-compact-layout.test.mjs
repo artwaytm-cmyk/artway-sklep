@@ -17,11 +17,16 @@ test('centrum operacji katalogu nie ściska liczników do pojedynczych liter', a
   assert.match(css, /@container\(max-width:1100px\)\{\.catalog-management-center \.product-action-columns\{grid-template-columns:1fr\}\}/);
 });
 
-test('wiersz produktu wykorzystuje szerokość i przenosi całe kontrolki zamiast tekstu', async () => {
-  const css = await read('src/styles/31-admin-page-pattern.css');
-  assert.match(css, /grid-template-areas:"product identifiers prices stock allegro" "classification identifiers prices stock actions"/);
-  assert.match(css, /grid-auto-rows:min-content;align-items:start/);
-  assert.match(css, /\.assortment-product-cell b\{white-space:normal;overflow-wrap:break-word;word-break:normal/);
-  assert.match(css, /\.assortment-row-actions \.btn\{width:auto;min-height:38px;white-space:nowrap\}/);
-  assert.match(css, /td\[data-label="Akcje"\]\{grid-area:actions;align-content:start;align-self:start\}/);
+test('karta produktu korzysta z czterech logicznych stref wzorcowego centrum', async () => {
+  const [css,script] = await Promise.all([read('src/styles/29-commerce-catalog-actions.css'),read('src/frontend/12-warehouse-views.js')]);
+  assert.match(script, /allegro-publication-card catalog-product-card/);
+  assert.match(script, /catalog-product-identity/);
+  assert.match(script, /catalog-product-readiness/);
+  assert.match(script, /catalog-product-operational-data/);
+  assert.match(script, /catalog-product-actions/);
+  assert.match(css, /grid-template-columns:minmax\(300px,1\.35fr\) minmax\(190px,\.8fr\) minmax\(255px,1\.05fr\) minmax\(270px,1\.1fr\)/);
+  assert.match(css, /\.catalog-product-identity h3\{overflow-wrap:break-word;word-break:normal\}/);
+  assert.match(css, /\.catalog-product-buttons>\.btn\{width:auto;white-space:nowrap\}/);
+  assert.match(css, /@container\(max-width:820px\)\{\.catalog-product-list \.catalog-product-card\{grid-template-columns:minmax\(0,1fr\)/);
+  assert.match(css, /@container\(max-width:520px\)\{\.catalog-product-card \.catalog-product-operational-data\{grid-template-columns:minmax\(0,1fr\)/);
 });

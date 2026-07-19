@@ -69,9 +69,9 @@ test('przyciski pozostają jednoliniowe, a układ przenosi całe kontrolki do ko
 });
 
 test('nazwy produktów w responsywnym katalogu pozostają we własnej kolumnie', async () => {
-  const css = await read('src/styles/30-admin-fluid-layout.css');
-  assert.match(css, /assortment-product-cell[\s\S]*grid-template-columns:auto minmax\(0,1fr\)/);
-  assert.match(css, /assortment-product-table td\[data-label="Produkt"\]\{grid-column:1\/-1;grid-template-columns:minmax\(92px,15%\) minmax\(0,1fr\)\}/);
-  assert.match(css, /assortment-product-cell[\s\S]*white-space:normal!important;overflow-wrap:anywhere/);
-  assert.match(css, /assortment-data-status>span[\s\S]*overflow-wrap:anywhere/);
+  const css = await read('src/styles/29-commerce-catalog-actions.css');
+  assert.match(css, /catalog-product-card[\s\S]*grid-template-columns:minmax\(300px,1\.35fr\)/);
+  assert.match(css, /catalog-product-identity h3\{overflow-wrap:break-word;word-break:normal\}/);
+  assert.match(css, /@container\(max-width:820px\)/);
+  assert.match(css, /catalog-product-buttons>\.btn\{width:auto;white-space:nowrap\}/);
 });

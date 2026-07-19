@@ -11,7 +11,7 @@ function asortymentOdswiezCentrumDzialan(){
   const el=document.querySelector("[data-product-agent-center]");if(el)el.innerHTML=asortymentCentrumDzialanHTML();
 }
 function asortymentOdswiezStanZaznaczenia(){
-  document.querySelectorAll("[data-assortment-product-id]").forEach(input=>{const checked=zaznaczoneProdukty.has(Number(input.dataset.assortmentProductId))||zaznaczoneProdukty.has(input.dataset.assortmentProductId);input.checked=checked;input.closest("tr")?.classList.toggle("is-selected",checked);});
+  document.querySelectorAll("[data-assortment-product-id]").forEach(input=>{const checked=zaznaczoneProdukty.has(Number(input.dataset.assortmentProductId))||zaznaczoneProdukty.has(input.dataset.assortmentProductId);input.checked=checked;const card=input.closest("[data-assortment-product-card]")||input.closest("tr");card?.classList.toggle("is-selected",checked);card?.classList.toggle("selected",checked);});
   document.querySelectorAll("[data-product-selection-count]").forEach(el=>{el.textContent=String(zaznaczoneProdukty.size);});
   document.querySelectorAll("[data-product-selection-required]").forEach(el=>{el.disabled=!zaznaczoneProdukty.size;});
   const operations=document.querySelector('[data-admin-results-operations="assortment-products"]');
