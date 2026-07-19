@@ -136,6 +136,40 @@ test('katalog importowany jest dołączany do obliczeń, lecz nie wraca do rekor
   assert.equal(savedData.artway_agent_ai_zlecenia[0].pozycje[0].produktId, '1000001');
 });
 
+test('duże niezależne ustawienia nie blokują dopisania nowego braku do istniejącego szkicu producenta', async () => {
+  const repo = memoryRepository({
+    orders: { items: [
+      { nr: 'ATM-ISTNIEJACE', status: 'nowe', inventoryMode: 'reserved_until_shipment', pozycjeDane: [{ id: 1, ilosc: 1 }] },
+      { nr: 'ATM-NOWE', status: 'nowe', inventoryMode: 'reserved_until_shipment', pozycjeDane: [{ id: 2, ilosc: 2 }] },
+    ] },
+    settings: { rev: 12, data: {
+      artway_stany: { 1: 0, 2: 0 },
+      artway_produkty_edytowane: { duzaNiezaleznaNakladka: 'x'.repeat(20_000) },
+      artway_produkty_dodane: [
+        { id: 1, nazwa: 'Pierwsza gra', producent: 'Alexander', externalId: 'A-1' },
+        { id: 2, nazwa: 'Druga gra', producent: 'Alexander', externalId: 'A-2' },
+      ],
+      artway_agent_ai_zlecenia: [{
+        id: 'SPD-OTWARTY', numer: 'AZ/2026/07/0001', supplier: 'Alexander', dostawca: 'Alexander',
+        status: 'szkic', revision: 3,
+        pozycje: [{ produktId: '1', externalId: 'A-1', kod: 'A-1', nazwa: 'Pierwsza gra', dostawca: 'Alexander', ilosc: 1, iloscPotrzebna: 1, manualExtra: 0, zamowienia: ['ATM-ISTNIEJACE'], orderAllocations: { 'ATM-ISTNIEJACE': 1 } }],
+      }],
+    } },
+  });
+
+  const result = await service(repo, { settingsLimit: 4_096 }).reconcileDrafts();
+  const drafts = repo.records.get('settings').data.artway_agent_ai_zlecenia;
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.created, [], 'nie powstaje drugi dokument tego samego producenta');
+  assert.deepEqual(result.updated, ['SPD-OTWARTY']);
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0].id, 'SPD-OTWARTY');
+  assert.equal(drafts[0].revision, 4);
+  assert.deepEqual(drafts[0].pozycje.map((line) => [line.produktId, line.ilosc]), [['1', 1], ['2', 2]]);
+  assert.equal(repo.records.get('settings').data.artway_produkty_edytowane.duzaNiezaleznaNakladka.length, 20_000);
+});
+
 test('legacy bez inventoryMode jest rozpoznane po order-stock i nie liczy stanu podwójnie', async () => {
   const movements = [{
     sourceRequestId: 'order-stock:ATM-LEGACY', dokument: 'ATM-LEGACY', produktId: '1', stanPrzed: 2, stanPo: 0, ilosc: -3,

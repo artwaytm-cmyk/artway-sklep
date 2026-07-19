@@ -308,6 +308,35 @@ test('serwis zapisuje tylko istniejące źródło artway_agent_ai_zlecenia i zac
   assert.equal(repo.record.data.artway_produkty_dodane, undefined, 'scalony shard katalogu nie wraca do settings');
 });
 
+test('ręczne dopisanie do istniejącego szkicu nie jest blokowane przez duże niezależne nakładki katalogu', async () => {
+  const second = product({ id: 2, externalId: 'ALEX-2000', sku: 'SKU-2000', kodProducenta: '2000', ean: '5901234567005', nazwa: 'Druga gra' });
+  const repo = memoryRepository({
+    rev: 20,
+    data: {
+      artway_produkty_edytowane: { duzaNiezaleznaNakladka: 'x'.repeat(20_000) },
+      artway_agent_ai_zlecenia: [draft()],
+    },
+    updated_at: null,
+  });
+  const service = createSupplierOrderPlanService({
+    readVersioned: repo.readVersioned,
+    writeIfVersion: repo.writeIfVersion,
+    mergeSettings: async (data) => ({ ...data, artway_produkty_dodane: [product(), second] }),
+    catalogProducts: (data) => data.artway_produkty_dodane,
+    settingsLimit: 4_096,
+    now: () => NOW,
+  });
+
+  const result = await service.upsert({
+    draftId: 'D-1', expectedRevision: 3, supplier: 'Alexander', productId: '2', quantity: 4,
+  }, 'admin@example.test');
+
+  assert.equal(result.draft.id, 'D-1');
+  assert.equal(result.draft.revision, 4);
+  assert.deepEqual(result.draft.pozycje.map((line) => [line.produktId, line.ilosc]), [['1', 2], ['2', 4]]);
+  assert.equal(repo.record.data.artway_produkty_edytowane.duzaNiezaleznaNakladka.length, 20_000);
+});
+
 test('nieznany productId nie tworzy osieroconej pozycji z danych klienta', async () => {
   const initial = { rev: 2, data: { artway_agent_ai_zlecenia: [] }, updated_at: null };
   const repo = memoryRepository(initial);

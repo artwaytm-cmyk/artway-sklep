@@ -50,6 +50,15 @@ function supplierOrders(data = {}) {
   return array(object(data).artway_agent_ai_zlecenia);
 }
 
+function supplierOperationalPayloadSize(data = {}) {
+  const source = object(data);
+  return JSON.stringify({
+    artway_agent_ai_zlecenia: array(source.artway_agent_ai_zlecenia),
+    artway_stany: object(source.artway_stany),
+    artway_ruchy_magazynowe: array(source.artway_ruchy_magazynowe),
+  }).length;
+}
+
 /** Genericzny zapis ustawień nie może nadpisać wersjonowanego Planu zatowarowania. */
 export function preserveSupplierPlanOnGenericSettings(incoming = {}, previous = {}) {
   return {
@@ -183,7 +192,7 @@ export function createSupplierOrderPlanService({
       const nextData = ['receive', 'receiveDocument'].includes(kind)
         ? { ...result.settings, artway_agent_ai_zlecenia: result.drafts }
         : { ...data, artway_agent_ai_zlecenia: result.drafts };
-      if (JSON.stringify(nextData).length > settingsLimit) fail('Plan zatowarowania przekracza limit ustawień.', 'settings_too_large', 413);
+      if (supplierOperationalPayloadSize(nextData) > settingsLimit) fail('Plan zatowarowania przekracza bezpieczny limit danych operacyjnych.', 'settings_too_large', 413);
       const updatedAt = now().toISOString();
       const next = { ...record, data: nextData, rev: Math.max(0, Number(record.rev) || 0) + 1, updated_at: updatedAt };
       const write = await writeIfVersion('settings', next, version);
@@ -268,7 +277,7 @@ export function createSupplierOrderPlanService({
       draft.updatedAt = timestamp;
       drafts[index] = draft;
       const nextData = { ...data, artway_agent_ai_zlecenia: drafts };
-      if (JSON.stringify(nextData).length > settingsLimit) fail('Plan zatowarowania przekracza limit ustawień.', 'settings_too_large', 413);
+      if (supplierOperationalPayloadSize(nextData) > settingsLimit) fail('Plan zatowarowania przekracza bezpieczny limit danych operacyjnych.', 'settings_too_large', 413);
       const next = { ...record, data: nextData, rev: Math.max(0, Number(record.rev) || 0) + 1, updated_at: timestamp };
       const write = await writeIfVersion('settings', next, version);
       if (write?.modified) return { ...resultPayload({ drafts, draft }, next, true), sendLockId: lockId, supplierContacts, resend, resendReason: resend ? reason : '' };
@@ -338,7 +347,7 @@ export function createSupplierOrderPlanService({
       }].slice(-150);
       drafts[index] = draft;
       const nextData = { ...data, artway_agent_ai_zlecenia: drafts };
-      if (JSON.stringify(nextData).length > settingsLimit) fail('Plan zatowarowania przekracza limit ustawień.', 'settings_too_large', 413);
+      if (supplierOperationalPayloadSize(nextData) > settingsLimit) fail('Plan zatowarowania przekracza bezpieczny limit danych operacyjnych.', 'settings_too_large', 413);
       const next = { ...record, data: nextData, rev: Math.max(0, Number(record.rev) || 0) + 1, updated_at: timestamp };
       const write = await writeIfVersion('settings', next, version);
       if (write?.modified) return resultPayload({ drafts, draft }, next, true);
