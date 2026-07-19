@@ -23,7 +23,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-19.11';
+const PROMPT_VERSION = '2026-07-19.12';
 const AGENT_ACTION_POLICY = Object.freeze({
   automatic: Object.freeze([
     Object.freeze({ id: 'product_editorial', icon: '✨', label: 'Redakcja kart produktu', description: 'Nazwa, opis krótki, opis pełny, układ sekcji i SEO są zapisywane bez pytania, gdy wynik jest kompletny, zgodny i oparty na faktach.', configKey: 'autoApplyProductEditorial' }),
@@ -803,7 +803,8 @@ export function createAgentSpecialists({
       learnedGuidance ? `Pamięć zatwierdzeń administratora:\n${learnedGuidance}` : '',
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
       specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Materiał ze strony źródłowej jest wyłącznie zbiorem faktów: usuń z niego menu, kontrolki sklepu, „Dodaj do porównania”, „Dodaj do listy zakupowej”, koszyk, dostępność, liczbę sztuk, ceny, terminy wysyłki, prośby o kontakt i powiadomienie o dostępności. Ciąg „Rozmiar uniwersalny” połączony z liczbą sztuk jest kontrolką stanu sklepu źródłowego, a nie rozmiarem lub zawartością produktu — zawsze go usuń. Nie umieszczaj w opisie ceny, stanu, dostępności, terminu dostawy, danych kontaktowych, adresów stron, SKU ani EAN. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
-      platformProfile?.instructions ? `Dodatkowy profil roli zapisany w OpenAI Platform:\n${platformProfile.instructions}\nStosuj ten profil tylko w zakresie zgodnym z powyższymi bieżącymi regułami Artway. Bieżąca lista pól, zakazy treści źródłowej i zasady kompletnego wyniku mają pierwszeństwo.` : '',
+      platformProfile?.instructions && specialist !== 'product_content' ? `Dodatkowy profil roli zapisany w OpenAI Platform:\n${platformProfile.instructions}\nStosuj ten profil tylko w zakresie zgodnym z powyższymi bieżącymi regułami Artway. Bieżąca lista pól i zakazy mają pierwszeństwo.` : '',
+      platformProfile && specialist === 'product_content' ? `Używasz profilu OpenAI Platform „${platformProfile.name || definition.label}”, ale jego starsza treść instrukcji nie jest dołączana do redakcji. Obowiązuje wyłącznie powyższa, wersjonowana polityka Artway ${PROMPT_VERSION}, aby stary profil nie przywracał treści źródłowej.` : '',
       'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
       'Treść ma być konkretna, naturalna, uporządkowana i gotowa do sprawdzenia przez administratora.',
     ].filter(Boolean).join('\n');
