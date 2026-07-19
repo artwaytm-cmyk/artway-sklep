@@ -5498,7 +5498,7 @@ function usunKlienta(email){
 }
 let szukajProduktow = "", filtrProduktow = "Wszystkie", kategoriaNowegoProduktu = "";
 let filtrStatusuProduktow = "aktywne", filtrZrodlaProduktow = "wszystkie", filtrStanuProduktow = "wszystkie", filtrAllegroProduktow = "wszystkie";
-let filtrProducentaProduktow="wszyscy",filtrDanychProduktow="wszystkie",filtrSprzedazyProduktow="wszystkie",filtrPromocjiProduktow="wszystkie",cenaOdAdminProduktow="",cenaDoAdminProduktow="";
+let filtrProducentaProduktow="wszyscy",filtrDanychProduktow="wszystkie",filtrSprzedazyProduktow="wszystkie",filtrPromocjiProduktow="wszystkie",filtrLinkuProduktow="wszystkie",cenaOdAdminProduktow="",cenaDoAdminProduktow="",cenaAllegroOdAdminProduktow="",cenaAllegroDoAdminProduktow="";
 let sortowanieAdminProduktow = ["external","id","nazwa","producent","kategoria","cena-rosnaco","cena-malejaco","stan","braki-danych","najnowsze"].includes(wczytajLS("artway_produkty_sortowanie_admin","external"))?wczytajLS("artway_produkty_sortowanie_admin","external"):"external";
 let gestoscAdminProduktow=["zwarta","wygodna"].includes(wczytajLS("artway_produkty_gestosc_admin","zwarta"))?wczytajLS("artway_produkty_gestosc_admin","zwarta"):"zwarta";
 let stronaAdminProduktow = 1;
@@ -5540,7 +5540,7 @@ function asortymentBrakiDanych(p={}){
   return braki;
 }
 function asortymentResetujFiltry(render=true){
-  szukajProduktow="";filtrProduktow="Wszystkie";filtrStatusuProduktow="aktywne";filtrZrodlaProduktow="wszystkie";filtrStanuProduktow="wszystkie";filtrAllegroProduktow="wszystkie";filtrProducentaProduktow="wszyscy";filtrDanychProduktow="wszystkie";filtrSprzedazyProduktow="wszystkie";filtrPromocjiProduktow="wszystkie";cenaOdAdminProduktow="";cenaDoAdminProduktow="";stronaAdminProduktow=1;
+  szukajProduktow="";filtrProduktow="Wszystkie";filtrStatusuProduktow="aktywne";filtrZrodlaProduktow="wszystkie";filtrStanuProduktow="wszystkie";filtrAllegroProduktow="wszystkie";filtrProducentaProduktow="wszyscy";filtrDanychProduktow="wszystkie";filtrSprzedazyProduktow="wszystkie";filtrPromocjiProduktow="wszystkie";filtrLinkuProduktow="wszystkie";cenaOdAdminProduktow="";cenaDoAdminProduktow="";cenaAllegroOdAdminProduktow="";cenaAllegroDoAdminProduktow="";stronaAdminProduktow=1;
   if(render)renderuj();
 }
 function asortymentUstawFiltr(nazwa,value){
@@ -5554,8 +5554,11 @@ function asortymentUstawFiltr(nazwa,value){
   else if(nazwa==="dane")filtrDanychProduktow=v||"wszystkie";
   else if(nazwa==="sprzedaz")filtrSprzedazyProduktow=v||"wszystkie";
   else if(nazwa==="promocja")filtrPromocjiProduktow=v||"wszystkie";
+  else if(nazwa==="link")filtrLinkuProduktow=v||"wszystkie";
   else if(nazwa==="cenaOd")cenaOdAdminProduktow=v;
   else if(nazwa==="cenaDo")cenaDoAdminProduktow=v;
+  else if(nazwa==="cenaAllegroOd")cenaAllegroOdAdminProduktow=v;
+  else if(nazwa==="cenaAllegroDo")cenaAllegroDoAdminProduktow=v;
   stronaAdminProduktow=1;renderuj();
 }
 function asortymentUstawWidok(widok="aktywne"){
@@ -5579,7 +5582,9 @@ function asortymentWyczyscFiltr(nazwa){
   else if(nazwa==="dane")filtrDanychProduktow="wszystkie";
   else if(nazwa==="sprzedaz")filtrSprzedazyProduktow="wszystkie";
   else if(nazwa==="promocja")filtrPromocjiProduktow="wszystkie";
+  else if(nazwa==="link")filtrLinkuProduktow="wszystkie";
   else if(nazwa==="cena"){cenaOdAdminProduktow="";cenaDoAdminProduktow="";}
+  else if(nazwa==="cenaAllegro"){cenaAllegroOdAdminProduktow="";cenaAllegroDoAdminProduktow="";}
   stronaAdminProduktow=1;renderuj();
 }
 function ustawGestoscAdminProduktow(v){gestoscAdminProduktow=v==="wygodna"?"wygodna":"zwarta";zapiszLS("artway_produkty_gestosc_admin",gestoscAdminProduktow);renderuj();}
@@ -6371,7 +6376,7 @@ function widokAdminProdukty(){
   const duplikatySklepuIds=new Set(audytSklep.grupy.flatMap(g=>g.produkty.map(p=>String(p.id))));
   const duplikatyAllegroIds=new Set((audytAllegro.grupy||[]).map(g=>String(g?.produkt?.id??"")).filter(Boolean));
   let wszystkie=[...katalogWszystkie];
-  if(szukajProduktow) wszystkie = wszystkie.filter(p=>produktPasujeFrazie(p,szukajProduktow));
+  if(szukajProduktow) wszystkie = wszystkie.filter(p=>produktPasujeFrazie(p,szukajProduktow)||normalizujSzukanyTekst(ofertaCache.get(String(p.id))?.id||"").includes(normalizujSzukanyTekst(szukajProduktow)));
   if(filtrProduktow!=="Wszystkie") wszystkie = wszystkie.filter(p=>p.kategoria===filtrProduktow);
   if(filtrStatusuProduktow==="aktywne") wszystkie=wszystkie.filter(p=>!czyProduktAdminWKoszu(p));
   if(filtrStatusuProduktow==="kosz") wszystkie=wszystkie.filter(p=>czyProduktAdminWKoszu(p));
@@ -6403,9 +6408,14 @@ function widokAdminProdukty(){
   if(filtrPromocjiProduktow==="promocje") wszystkie=wszystkie.filter(p=>Number(p.staraCena)>Number(p.cena));
   if(filtrPromocjiProduktow==="regularne") wszystkie=wszystkie.filter(p=>!(Number(p.staraCena)>Number(p.cena)));
   if(filtrPromocjiProduktow==="nowosci") wszystkie=wszystkie.filter(p=>String(p.badge||"").toLowerCase().includes("nowo"));
+  if(filtrLinkuProduktow==="z_linkiem") wszystkie=wszystkie.filter(p=>String(p.sourceUrl||p.producentUrl||p.urlProducenta||"").trim());
+  if(filtrLinkuProduktow==="bez_linku") wszystkie=wszystkie.filter(p=>!String(p.sourceUrl||p.producentUrl||p.urlProducenta||"").trim());
   const cenaOd=parseFloat(String(cenaOdAdminProduktow||"").replace(",",".")),cenaDo=parseFloat(String(cenaDoAdminProduktow||"").replace(",","."));
   if(Number.isFinite(cenaOd))wszystkie=wszystkie.filter(p=>kwotaNum(p.cena)>=cenaOd);
   if(Number.isFinite(cenaDo))wszystkie=wszystkie.filter(p=>kwotaNum(p.cena)<=cenaDo);
+  const cenaAllegroOd=parseFloat(String(cenaAllegroOdAdminProduktow||"").replace(",",".")),cenaAllegroDo=parseFloat(String(cenaAllegroDoAdminProduktow||"").replace(",","."));
+  if(Number.isFinite(cenaAllegroOd))wszystkie=wszystkie.filter(p=>kwotaNum(p.cenaAllegro||p.cena)>=cenaAllegroOd);
+  if(Number.isFinite(cenaAllegroDo))wszystkie=wszystkie.filter(p=>kwotaNum(p.cenaAllegro||p.cena)<=cenaAllegroDo);
   wszystkie=sortujProduktyAdmin(wszystkie);
   const liczbaWynikow=wszystkie.length;
   const liczbaStron=Math.max(1,Math.ceil(liczbaWynikow/produktyNaStronieAdmin));
@@ -6433,7 +6443,9 @@ function widokAdminProdukty(){
   if(filtrStanuProduktow!=="wszystkie")aktywneFiltry.push(["stan",`Magazyn: ${filtrStanuProduktow}`]);
   if(filtrAllegroProduktow!=="wszystkie")aktywneFiltry.push(["allegro",`Allegro: ${filtrAllegroProduktow}`]);
   if(filtrPromocjiProduktow!=="wszystkie")aktywneFiltry.push(["promocja",`Oferta: ${filtrPromocjiProduktow}`]);
+  if(filtrLinkuProduktow!=="wszystkie")aktywneFiltry.push(["link",`Link producenta: ${filtrLinkuProduktow}`]);
   if(cenaOdAdminProduktow||cenaDoAdminProduktow)aktywneFiltry.push(["cena",`Cena: ${cenaOdAdminProduktow||"0"}–${cenaDoAdminProduktow||"∞"} zł`]);
+  if(cenaAllegroOdAdminProduktow||cenaAllegroDoAdminProduktow)aktywneFiltry.push(["cenaAllegro",`Cena Allegro: ${cenaAllegroOdAdminProduktow||"0"}–${cenaAllegroDoAdminProduktow||"∞"} zł`]);
   const aktywnyWidok=filtrStatusuProduktow==="kosz"?"kosz":filtrDanychProduktow==="gotowe"&&filtrSprzedazyProduktow==="dostepne"?"gotowe":filtrDanychProduktow==="braki"?"braki":filtrAllegroProduktow==="brak"?"bez-allegro":filtrSprzedazyProduktow==="niedostepne"?"ukryte":filtrPromocjiProduktow==="promocje"?"promocje":aktywneFiltry.length===0?"aktywne":"";
   const opcje=(lista,wartosc)=>lista.map(([v,l])=>`<option value="${esc(v)}" ${String(wartosc)===String(v)?"selected":""}>${esc(l)}</option>`).join("");
   return asortymentSzkielet("produkty", `
@@ -6442,10 +6454,6 @@ function widokAdminProdukty(){
         <div><span class="order-pro-label">Centralna kartoteka sprzedaży</span><h1>🏷️ Katalog produktów</h1><p>Jeden operacyjny widok produktów sklepu, magazynu i Allegro. Wyszukuj po wielu polach, łącz filtry i wykonuj operacje na całym wyniku bez utraty kontekstu.</p><small>${produkty.length} widocznych w sklepie • ${katalogWszystkie.length} wszystkich kart • ${producenciOpcje.length} producentów • wspólna baza danych</small></div>
         <div class="assortment-catalog-actions"><a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a><a class="btn ghost" href="#/admin/produkty/z-pliku">📄 Import linków</a><a class="btn ghost" href="#/admin/mapowanie">🧩 Mapowanie</a><a class="btn ghost" href="#/admin/eksport">⇄ Import / eksport</a><details><summary>Więcej operacji</summary><button class="btn ghost" onclick="eksportujProduktyJSON()">📤 Eksport JSON</button><button class="btn ghost" onclick="eksportujProduktyCSV()">📤 Eksport CSV</button></details></div>
       </header>
-      <div class="assortment-search-primary">
-        <label><span>Wyszukaj w całym asortymencie</span><input data-assortment-search placeholder="Nazwa, EXTERNAL_ID, SKU, EAN, ID, opis, kategoria lub producent…" value="${esc(szukajProduktow)}" oninput="asortymentSzukajProdukty(this)" autocomplete="off"></label>
-        <small>Wyniki zmieniają się bez przeładowania panelu i bez utraty kursora.</small>
-      </div>
       <nav class="assortment-saved-views" aria-label="Szybkie widoki katalogu">
         ${[["aktywne","🏷️ Aktywne",aktywneKarty.length],["gotowe","✅ Gotowe do sprzedaży",gotoweDoSprzedazy],["braki","⚠️ Braki danych",zBrakami],["bez-allegro","🟠 Bez Allegro",aktywneKarty.length-polaczoneAllegro],["ukryte","⏸️ Ukryte sprzedażowo",ukryteSprzedazowo],["promocje","🔥 Promocje",aktywneKarty.filter(p=>Number(p.staraCena)>Number(p.cena)).length],["kosz","🗑️ Kosz",liczbaWKoszu]].map(([v,l,n])=>`<button type="button" class="${aktywnyWidok===v?"active":""}" onclick="asortymentUstawWidok(${jsArg(v)})"><span>${l}</span><b>${n}</b></button>`).join("")}
       </nav>
@@ -6460,7 +6468,8 @@ function widokAdminProdukty(){
         ${audytSklep.grupy.length?`<section class="allegro-duplicate-center store-duplicate-center"><div class="order-section-head"><div><span class="order-pro-label">Porządkowanie katalogu sklepu</span><h3>Powtarzające się produkty (${audytSklep.grupy.length} grup)</h3><p class="order-detail-lead">Wybierz kartę główną dopiero po porównaniu identyfikatorów i danych.</p></div><button class="btn ghost" onclick="asortymentUstawFiltr('status','duplikaty')">Pokaż wszystkie kopie</button></div><div class="allegro-duplicate-groups">${audytSklep.grupy.slice(0,12).map(g=>`<article class="allegro-duplicate-group"><header><div><b>${esc(g.canonical.nazwa||"Produkt")}</b><small>Wspólny klucz: ${esc(g.keys.join(" • "))}</small></div><span class="lvl lvl-ostrzezenie">${g.produkty.length} kart</span></header><div class="allegro-duplicate-options">${g.produkty.map(p=>`<button type="button" class="allegro-duplicate-option ${String(p.id)===String(g.canonical.id)?"is-canonical":""}" onclick="ustawProduktGlownyDuplikatu(${jsArg(g.groupKey)},${jsArg(p.id)})"><div class="allegro-duplicate-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa)}</b><small>ID ${esc(p.id)} • EXTERNAL_ID ${esc(p.externalId||"—")} • SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small><em>${String(p.id)===String(g.canonical.id)?"✅ karta główna":"kopia do decyzji"}</em></div></div></button>`).join("")}</div><div class="diag-actions"><button class="btn danger" onclick="usunKopieGrupyProduktuTrwale(${jsArg(g.groupKey)})">🗑️ Pozostaw 1 i usuń trwale ${g.hidden.length} kopii</button></div></article>`).join("")}</div></section>`:`<div class="duplicate-audit-ok"><b>✅ Katalog sklepu:</b> brak powtarzających się produktów.</div>`}
         ${audytAllegro.produkty?allegroCentrumDuplikatowHTML(audytAllegro,{compact:true,maxGroups:12}):`<div class="duplicate-audit-ok"><b>✅ Allegro:</b> brak produktów połączonych z więcej niż jedną ofertą.</div>`}
       </div></details>
-      <details class="assortment-filter-panel admin-search-standard" open><summary><span><b>🔎 Wyszukiwanie zaawansowane</b><small>Łącz producenta, kategorię, kompletność danych, sprzedaż, magazyn, Allegro, ofertę i zakres ceny.</small></span><span class="admin-search-summary-meta" data-assortment-filter-summary>${aktywneFiltry.length?`<em>${aktywneFiltry.length} aktywnych</em>`:""}<strong>${liczbaWynikow} wyników</strong><i aria-hidden="true"></i></span></summary><div class="admin-search-standard-body assortment-advanced-grid">
+      <details class="assortment-filter-panel admin-search-standard" open><summary><span><b>🔎 Wyszukiwanie zaawansowane</b><small>Ten sam standard co w centrum wystawiania: łącz identyfikatory, producenta, kategorię, dostępność, magazyn, Allegro, źródło i ceny obu kanałów.</small></span><span class="admin-search-summary-meta" data-assortment-filter-summary>${aktywneFiltry.length?`<em>${aktywneFiltry.length} aktywnych</em>`:""}<strong>${liczbaWynikow} wyników</strong><i aria-hidden="true"></i></span></summary><div class="admin-search-standard-body assortment-advanced-grid allegro-listing-advanced-grid">
+        <label class="allegro-listing-search-wide"><span>Produkt lub identyfikator</span><input data-assortment-search placeholder="Nazwa, EXTERNAL_ID, SKU, EAN, kod producenta, ID produktu lub oferty…" value="${esc(szukajProduktow)}" oninput="asortymentSzukajProdukty(this)" autocomplete="off"></label>
         <label><span>Kategoria</span><select onchange="asortymentUstawFiltr('kategoria',this.value)"><option value="Wszystkie">Wszystkie kategorie</option>${katOpcje.map(k=>`<option value="${esc(k)}" ${k===filtrProduktow?"selected":""}>${esc(k)}</option>`).join("")}</select></label>
         <label><span>Producent</span><select onchange="asortymentUstawFiltr('producent',this.value)"><option value="wszyscy">Wszyscy producenci</option>${producenciOpcje.map(p=>`<option value="${esc(p)}" ${p===filtrProducentaProduktow?"selected":""}>${esc(p)}</option>`).join("")}</select></label>
         <label><span>Status kartoteki</span><select onchange="asortymentUstawFiltr('status',this.value)">${opcje([["aktywne","Tylko aktywne"],["wszystkie","Aktywne i kosz"],["kosz",`Tylko w koszu (${liczbaWKoszu})`],["duplikaty",`Powtarzające się (${audytSklep.produkty})`]],filtrStatusuProduktow)}</select></label>
@@ -6470,15 +6479,19 @@ function widokAdminProdukty(){
         <label><span>Stan magazynowy</span><select onchange="asortymentUstawFiltr('stan',this.value)">${opcje([["wszystkie","Każdy stan"],["dostepne","Powyżej 0 / bez limitu"],["niskie","Niski stan (1–5)"],["brak","Brak lokalnego stanu"]],filtrStanuProduktow)}</select></label>
         <label><span>Status Allegro</span><select onchange="asortymentUstawFiltr('allegro',this.value)">${opcje([["wszystkie","Wszystkie produkty"],["polaczone","Połączone z ofertą"],["aktywne","Aktywne oferty"],["szkice","Szkice / nieaktywne"],["brak","Bez oferty Allegro"],["duplikaty",`Podejrzane duplikaty (${audytAllegro.produkty})`]],filtrAllegroProduktow)}</select></label>
         <label><span>Oferta i promocja</span><select onchange="asortymentUstawFiltr('promocja',this.value)">${opcje([["wszystkie","Wszystkie ceny"],["promocje","Tylko promocje"],["regularne","Bez promocji"],["nowosci","Oznaczone jako nowość"]],filtrPromocjiProduktow)}</select></label>
-        <label><span>Cena od</span><input type="number" min="0" step="0.01" inputmode="decimal" value="${esc(cenaOdAdminProduktow)}" placeholder="0,00 zł" onchange="asortymentUstawFiltr('cenaOd',this.value)"></label>
-        <label><span>Cena do</span><input type="number" min="0" step="0.01" inputmode="decimal" value="${esc(cenaDoAdminProduktow)}" placeholder="bez limitu" onchange="asortymentUstawFiltr('cenaDo',this.value)"></label>
+        <label><span>Link producenta</span><select onchange="asortymentUstawFiltr('link',this.value)">${opcje([["wszystkie","Każde źródło produktu"],["z_linkiem","Ma link producenta"],["bez_linku","Brak linku producenta"]],filtrLinkuProduktow)}</select></label>
+        <label><span>Cena sklepu od</span><input type="number" min="0" step="0.01" inputmode="decimal" value="${esc(cenaOdAdminProduktow)}" placeholder="0,00 zł" onchange="asortymentUstawFiltr('cenaOd',this.value)"></label>
+        <label><span>Cena sklepu do</span><input type="number" min="0" step="0.01" inputmode="decimal" value="${esc(cenaDoAdminProduktow)}" placeholder="bez limitu" onchange="asortymentUstawFiltr('cenaDo',this.value)"></label>
+        <label><span>Cena Allegro od</span><input type="number" min="0" step="0.01" inputmode="decimal" value="${esc(cenaAllegroOdAdminProduktow)}" placeholder="0,00 zł" onchange="asortymentUstawFiltr('cenaAllegroOd',this.value)"></label>
+        <label><span>Cena Allegro do</span><input type="number" min="0" step="0.01" inputmode="decimal" value="${esc(cenaAllegroDoAdminProduktow)}" placeholder="bez limitu" onchange="asortymentUstawFiltr('cenaAllegroDo',this.value)"></label>
         <label><span>Sortowanie</span><select onchange="ustawSortowanieAdminProduktow(this.value)">${opcje([["external","EXTERNAL_ID / SKU (domyślnie)"],["id","ID produktu"],["nazwa","Nazwa A–Z"],["producent","Producent A–Z"],["kategoria","Kategoria A–Z"],["cena-rosnaco","Cena rosnąco"],["cena-malejaco","Cena malejąco"],["stan","Najniższy stan"],["braki-danych","Najwięcej braków danych"],["najnowsze","Najnowsze kartoteki"]],sortowanieAdminProduktow)}</select></label>
+        <label><span>Na stronie</span><select onchange="ustawProduktyNaStronieAdmin(this.value)">${[25,50,100,200,500,1000].map(n=>`<option value="${n}" ${produktyNaStronieAdmin===n?"selected":""}>${n}</option>`).join("")}</select></label>
         <button class="btn ghost" type="button" onclick="asortymentResetujFiltry()">Wyczyść wszystkie filtry</button>
         <div class="assortment-filter-state admin-search-full" data-assortment-active-filters>${aktywneFiltry.length?`<b>Aktywne filtry:</b>${aktywneFiltry.map(([k,l])=>`<button type="button" onclick="asortymentWyczyscFiltr(${jsArg(k)})">${esc(l)} <span>×</span></button>`).join("")}<button class="clear-all" type="button" onclick="asortymentResetujFiltry()">Wyczyść wszystko</button>`:`<span>Brak dodatkowych filtrów — pokazujesz aktywne kartoteki.</span>`}</div>
         <div class="admin-search-standard-actions" data-assortment-operations>${adminOperacjeWynikowHTML({id:"assortment-products",selected:zaznaczoneProdukty.size,pageCount:fragment.length,resultCount:liczbaWynikow,selectPage:"asortymentZaznaczZakres('strona')",selectAll:"asortymentZaznaczZakres('filtr')",clear:"wyczyscZaznaczenieProduktow()",exportSelected:"asortymentEksportuj('zaznaczone')",exportAll:"asortymentEksportuj('filtr')"})}</div>
       </div></details>
       <div data-assortment-results>
-      <div class="assortment-results-toolbar"><div><b>${liczbaWynikow} produktów</b><span>Pokazano ${zakresOd}–${zakresDo} • strona ${stronaAdminProduktow} z ${liczbaStron}</span></div><label>Na stronie<select onchange="ustawProduktyNaStronieAdmin(this.value)">${[25,50,100,200,500,1000].map(n=>`<option value="${n}" ${produktyNaStronieAdmin===n?"selected":""}>${n}</option>`).join("")}</select></label><label>Gęstość<select onchange="ustawGestoscAdminProduktow(this.value)"><option value="zwarta" ${gestoscAdminProduktow==="zwarta"?"selected":""}>Zwarta</option><option value="wygodna" ${gestoscAdminProduktow==="wygodna"?"selected":""}>Wygodna</option></select></label></div>
+      <div class="assortment-results-toolbar"><div><b>${liczbaWynikow} produktów</b><span>Pokazano ${zakresOd}–${zakresDo} • strona ${stronaAdminProduktow} z ${liczbaStron}</span></div><label>Gęstość tabeli<select onchange="ustawGestoscAdminProduktow(this.value)"><option value="zwarta" ${gestoscAdminProduktow==="zwarta"?"selected":""}>Zwarta</option><option value="wygodna" ${gestoscAdminProduktow==="wygodna"?"selected":""}>Wygodna</option></select></label></div>
       <div class="pagination">${paginacjaHTML(stronaAdminProduktow,liczbaStron,"ustawStroneAdminProduktow")}</div>
       <div class="assortment-bulk-editor"><div><b>Zaznaczone: <span data-product-selection-count>${zaznaczoneProdukty.size}</span></b><small>Zarządzaj ceną sklepu i Allegro oddzielnie; publikacja nowych ofert pozostaje w sekcji Wystawianie.</small></div><label>Kanał ceny<select id="kanalCenProduktow"><option value="sklep">Tylko sklep</option><option value="allegro">Tylko Allegro</option><option value="oba">Sklep i Allegro</option></select></label><label>Zmiana cen<select id="trybCenProduktow"><option value="percent">O procent (+/−)</option><option value="amount">O kwotę (+/−)</option><option value="fixed">Ustaw cenę</option></select></label><input id="procentCen" placeholder="np. 10 lub -5" inputmode="decimal"><button class="btn" data-product-selection-required onclick="zmienCenyZaznaczonych()" ${zaznaczoneProdukty.size?"":"disabled"}>💰 Zmień ceny</button><button class="btn danger" data-product-selection-required onclick="usunZaznaczoneProd()" ${zaznaczoneProdukty.size?"":"disabled"}>🗑️ Przenieś do kosza</button></div>
       <div data-product-agent-center>${asortymentCentrumDzialanHTML()}</div>
@@ -6495,7 +6508,7 @@ function widokAdminProdukty(){
           <td><div class="assortment-identifiers"><span><small>EXTERNAL_ID</small><b>${esc(p.externalId||"—")}</b></span><span><small>SKU</small><b>${esc(p.sku||"—")}</b></span><span><small>EAN</small><b>${esc(p.gtin||p.ean||"—")}</b></span></div></td>
           <td><div class="assortment-classification"><b>${esc(p.producent||p.marka||"Bez producenta")}</b><span>${esc(p.kategoria||"Bez kategorii")}</span>${sourceUrl?`<a href="${esc(sourceUrl)}" target="_blank" rel="noopener">Źródło produktu ↗</a>`:`<small>Brak linku źródłowego</small>`}</div></td>
           <td><div class="assortment-price-cell"><label><input value="${String(cena.toFixed(2)).replace(".",",")}" inputmode="decimal" onchange="ustawCene(${jsArg(p.id)},this.value)"><span>zł</span></label>${promocja?`<span class="lvl lvl-blad">Promocja −${promocja}%</span>`:`<small>Cena regularna</small>`}<small class="private-cost">Zakup (admin): <b>${Number(p.cenaZakupu)>0?zl(p.cenaZakupu):"brak"}</b></small></div></td>
-          <td><div class="assortment-stock-cell"><label><span>Stan</span><input value="${stanyProduktow[p.id]??""}" placeholder="∞" inputmode="numeric" onchange="ustawStan(${jsArg(p.id)},this.value)" class="${Number(stanyProduktow[p.id])===0?"empty":""}"></label>${dostepnoscBadgeAdmin(p)}<button class="btn ghost" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})">${produktAutomatycznieNiedostepny(p)?"Sprawdź i przywróć":produktOznaczonyNiedostepny(p)?"Włącz sprzedaż":"Wyłącz sprzedaż"}</button></div></td>
+          <td><div class="assortment-stock-cell"><label><span>Stan</span><input value="${stanyProduktow[p.id]??""}" placeholder="∞" inputmode="numeric" onchange="ustawStan(${jsArg(p.id)},this.value)" class="${Number(stanyProduktow[p.id])===0?"empty":""}"></label>${dostepnoscBadgeAdmin(p)}<button class="btn ghost" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})">${produktAutomatycznieNiedostepny(p)?"Sprawdź oba kanały":produktOznaczonyNiedostepny(p)?"Wznów sklep + Allegro":"Wstrzymaj sklep + Allegro"}</button></div></td>
           <td>${allegroStatusProduktuHTML(p)}</td>
           <td><div class="assortment-row-actions">
             <a class="btn" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}" title="Edytuj produkt">✏️ Edytuj</a>
@@ -7379,7 +7392,7 @@ asortymentMenuDzialanProduktuHTML=function(p={}){
 
 allegroStatusProduktuHTML=function(p={}){
   const matches=allegroOfertyPasujaceDoProduktu(p),activeMatches=matches.filter(allegroDopasowanieDuplikatuAktywne),offer=activeMatches[0]?.offer||matches[0]?.offer;if(!offer)return `<span class="catalog-allegro-empty">○ Brak oferty</span>`;
-  const active=String(offer.status||"").toUpperCase()==="ACTIVE",duplicates=activeMatches.slice(1);return `<a class="catalog-allegro-offer-link ${active?"active":"inactive"}" href="https://allegro.pl/oferta/${encodeURIComponent(offer.id)}" target="_blank" rel="noopener" title="Otwórz ofertę w Allegro"><span>${active?"● Aktywna":`○ ${esc(offer.status||"nieaktywna")}`}</span><b>Oferta ${esc(offer.id)} ↗</b></a>${duplicates.length?`<a class="catalog-allegro-duplicate" href="#/admin/allegro/oferty" title="Sprawdź powiązane duplikaty">⚠️ ${activeMatches.length} powiązanych ofert</a>`:""}`;
+  const blocked=produktOznaczonyNiedostepny(p)||offer.saleAvailabilityBlocked===true,active=String(offer.status||offer.publication?.status||"").toUpperCase()==="ACTIVE"&&!blocked,duplicates=activeMatches.slice(1);return `<a class="catalog-allegro-offer-link ${blocked?"blocked":active?"active":"inactive"}" href="https://allegro.pl/oferta/${encodeURIComponent(offer.id)}" target="_blank" rel="noopener" title="Otwórz ofertę w Allegro"><span>${blocked?"⏸ Wstrzymana razem ze sklepem":active?"● Aktywna":`○ ${esc(offer.status||offer.publication?.status||"nieaktywna")}`}</span><b>Oferta ${esc(offer.id)} ↗</b></a>${duplicates.length?`<a class="catalog-allegro-duplicate" href="#/admin/allegro/oferty" title="Sprawdź powiązane duplikaty">⚠️ ${activeMatches.length} powiązanych ofert</a>`:""}`;
 };
 
 /* Parser plikow z linkami produktow (XLSX / CSV / TXT).

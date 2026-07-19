@@ -71,6 +71,7 @@ import { allegroOrderNeedsLiveRefresh, createAllegroOrderArchive, selectAllegroS
 import { mergeRecentAllegroOrders } from './domain/allegro-order-sync-window.mjs';
 import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
 import { applyProductSaleDecisionBatch } from './domain/product-sale-decisions.mjs';
+import { createProductSaleChannelSynchronizer } from './domain/product-sale-channel-links.mjs';
 import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
 import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, reassessBlockedAllegroMapping, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
@@ -3134,105 +3135,12 @@ function allegroUstawieniaOfert(raw = {}) {
 async function allegroPobierzUstawieniaOfert() {
   return allegroUstawieniaOfert(await czytaj('allegro_offer_settings', { defaultStock: ALLEGRO_DEFAULT_OFFER_STOCK, republish: true, producers: ALLEGRO_DEFAULT_PRODUCERS, updated_at: null }));
 }
-async function synchronizujSprzedazZDostepnosciaProducenta(req, results = [], data = {}) {
-  const checked = (Array.isArray(results) ? results : []).filter((x) => x?.ok && x?.productId);
-  const report = { siteHidden: 0, siteRestored: 0, allegroHidden: 0, allegroRestored: 0, unchanged: 0, errors: [] };
-  if (!checked.length) return report;
-  const availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? { ...data.artway_dostepnosc } : {};
-  const productMap = allegroAgentProduktyCentralne(data);
-  const [mappingsRec, offersRec, auditRec, offerSettings] = await Promise.all([
-    czytaj('allegro_mappings', { items: {} }),
-    czytaj('allegro_offers', { items: [], updated_at: null }),
-    czytaj('allegro_availability_automation', { items: {}, updated_at: null }),
-    allegroPobierzUstawieniaOfert(),
-  ]);
-  const mappings = allegroMapowaniaItems(mappingsRec);
-  const offers = allegroOfertyItems(offersRec);
-  const offersById = new Map(offers.map((offer) => [String(offer?.id || ''), offer]));
-  const offerIdsByProduct = new Map();
-  const addOffer = (productId, offerId) => {
-    const pid = tekst(productId, 100).trim(), oid = tekst(offerId, 100).trim();
-    if (!pid || !oid) return;
-    if (!offerIdsByProduct.has(pid)) offerIdsByProduct.set(pid, new Set());
-    offerIdsByProduct.get(pid).add(oid);
-  };
-  for (const [offerId, mapping] of Object.entries(mappings)) {
-    if (mapping?.blocked === true || mapping?.quarantined === true) continue;
-    addOffer(mapping?.productId ?? mapping?.produktId ?? mapping?.id ?? mapping, offerId);
-  }
-  for (const product of productMap.values()) addOffer(product.id, product.allegroOfferId);
-  const auditItems = auditRec.items && typeof auditRec.items === 'object' ? { ...auditRec.items } : {};
-  const cachePatches = new Map();
-  const now = new Date().toISOString();
-  for (const result of checked) {
-    const productId = String(result.productId);
-    const unavailable = result.status === 'brak';
-    const available = !unavailable && (result.available === true || Number(result.quantity) > 0 || ['dostepny', 'dostepny_nieznany', 'niski'].includes(String(result.status || '')));
-    if (!unavailable && !available) { report.unchanged++; continue; }
-    const previousAvailability = availability[productId];
-    const decisionCode = String(previousAvailability?.decision || previousAvailability?.decyzja || '').toLowerCase();
-    const decisionExpiry = Date.parse(previousAvailability?.expiresAt || previousAvailability?.waznaDo || '');
-    const graceActive = decisionCode === 'grace' && Number.isFinite(decisionExpiry) && decisionExpiry > Date.now();
-    const keepSelling = graceActive || decisionCode === 'manual_available';
-    const keepHidden = decisionCode === 'hide_manual';
-    if (unavailable && keepSelling) { report.unchanged++; continue; }
-    if (available && keepHidden) { report.unchanged++; continue; }
-    const automaticAvailability = previousAvailability?.automatic === true || previousAvailability?.source === 'producent-agent';
-    const legacyTemporaryAvailability = !!previousAvailability && !previousAvailability?.source
-      && /chwilowo niedost[eę]pn|brak u producent/i.test(String(previousAvailability?.powod || ''));
-    if (unavailable) {
-      if (!previousAvailability || automaticAvailability || legacyTemporaryAvailability || decisionCode === 'grace') {
-        availability[productId] = { ...(previousAvailability || {}), status: 'niedostepny', powod: decisionCode === 'grace' ? 'Minął termin pozostawienia sprzedaży — producent nadal zgłasza brak' : 'Automatycznie: produkt niedostępny u producenta', data: now, operator: 'agent-dostepnosci', source: decisionCode === 'grace' ? 'supplier-decision' : 'producent-agent', automatic: true, autoRestore: true, producerStatus: result.status, producerCheckedAt: result.checkedAt || now };
-        if (!previousAvailability || String(previousAvailability.status || '') !== 'niedostepny') report.siteHidden++;
-      }
-    } else if (automaticAvailability || ['grace', 'wait_available', 'manual_available'].includes(decisionCode)) {
-      if (result.preserveDecision !== true) delete availability[productId];
-      report.siteRestored++;
-    }
-    for (const offerId of offerIdsByProduct.get(productId) || []) {
-      const offer = offersById.get(String(offerId)) || {};
-      const previousAudit = auditItems[offerId] && typeof auditItems[offerId] === 'object' ? auditItems[offerId] : {};
-      const cachedStatus = String(offer.publication?.status || offer.status || '').toUpperCase();
-      const cachedStock = Math.max(0, Number(offer.stock?.available ?? offer.stock ?? 0) || 0);
-      if (unavailable && previousAudit.automaticallyHidden !== true) {
-        if (cachedStatus && cachedStatus !== 'ACTIVE') {
-          auditItems[offerId] = { ...previousAudit, offerId, productId, automaticallyHidden: false, alreadyInactive: true, checkedAt: now, producerStatus: result.status };
-          report.unchanged++;
-          continue;
-        }
-        try {
-          await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: { stock: { available: 0 }, publication: { republish: true } }, withMeta: true });
-          auditItems[offerId] = { ...previousAudit, offerId, productId, automaticallyHidden: true, previousStock: cachedStock > 0 ? cachedStock : offerSettings.defaultStock, previousStatus: cachedStatus || 'ACTIVE', hiddenAt: now, restoredAt: null, producerStatus: result.status, error: '' };
-          cachePatches.set(String(offerId), { stock: { ...(offer.stock || {}), available: 0 }, saleAvailabilityBlocked: true, saleAvailabilityUpdatedAt: now });
-          report.allegroHidden++;
-        } catch (error) {
-          const item = { offerId, productId, action: 'hide', error: tekst(error?.message || error, 700), code: tekst(error?.code || '', 120) };
-          auditItems[offerId] = { ...previousAudit, ...item, automaticallyHidden: false, failedAt: now, producerStatus: result.status };
-          report.errors.push(item);
-        }
-      } else if (available && previousAudit.automaticallyHidden === true) {
-        const targetStock = Math.max(1, Number(previousAudit.previousStock) || offerSettings.defaultStock);
-        try {
-          await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: { stock: { available: targetStock }, publication: { status: 'ACTIVE', republish: true } }, withMeta: true });
-          auditItems[offerId] = { ...previousAudit, automaticallyHidden: false, restoredAt: now, producerStatus: result.status, restoredStock: targetStock, error: '' };
-          cachePatches.set(String(offerId), { stock: { ...(offer.stock || {}), available: targetStock }, saleAvailabilityBlocked: false, saleAvailabilityUpdatedAt: now });
-          report.allegroRestored++;
-        } catch (error) {
-          const item = { offerId, productId, action: 'restore', error: tekst(error?.message || error, 700), code: tekst(error?.code || '', 120) };
-          auditItems[offerId] = { ...previousAudit, ...item, failedAt: now, producerStatus: result.status };
-          report.errors.push(item);
-        }
-      } else report.unchanged++;
-    }
-  }
-  data.artway_dostepnosc = availability;
-  await zapisz('allegro_availability_automation', { items: auditItems, updated_at: now });
-  if (cachePatches.size) {
-    const updatedOffers = offers.map((offer) => cachePatches.has(String(offer.id)) ? { ...offer, ...cachePatches.get(String(offer.id)) } : offer);
-    await zapisz('allegro_offers', { ...offersRec, items: updatedOffers, updated_at: now });
-  }
-  return report;
-}
+const synchronizujSprzedazZDostepnosciaProducenta = createProductSaleChannelSynchronizer({
+  read: czytaj, write: zapisz, getProducts: allegroAgentProduktyCentralne,
+  getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems,
+  getOfferSettings: allegroPobierzUstawieniaOfert, callAllegro: allegroWywolaj,
+  waitForOperation: allegroCzekajNaOperacjeOferty, text: tekst,
+});
 function allegroRozpoznajProducenta(product = {}, evidence = {}, settings = {}) {
   const allowed = (Array.isArray(settings.producers) && settings.producers.length ? settings.producers : ALLEGRO_DEFAULT_PRODUCERS).map((name) => ({ name, key: allegroNormalizujKlucz(name) }));
   const text = allegroNormalizujKlucz([
@@ -6202,13 +6110,15 @@ export default async (req) => {
       const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
       const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
       const availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? { ...data.artway_dostepnosc } : {};
+      const previousAvailability = { ...availability };
       const now = new Date().toISOString();
       if (available) delete availability[productId];
       else availability[productId] = { status: 'niedostepny', powod: tekst(body.reason || 'Ręcznie wyłączony ze sprzedaży', 500), data: now, operator: 'administrator', source: 'manual', automatic: false };
       data.artway_dostepnosc = availability;
-      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, [{ ok: true, productId, status: available ? 'dostepny' : 'brak', available, quantity: available ? 1 : 0, checkedAt: now }], data);
+      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, [{ ok: true, productId, status: available ? 'dostepny' : 'brak', available, quantity: available ? 1 : 0, checkedAt: now }], data, { previousAvailability });
+      if (!saleAutomation.complete) return odpowiedz({ ok: false, error: 'Nie zmieniono sprzedaży, ponieważ Allegro nie potwierdziło całej operacji. System wycofał wykonane części i zapisał diagnostykę.', code: 'sale_channel_sync_failed', productId, available, saleAutomation }, 502);
       await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-      return odpowiedz({ ok: true, productId, available, saleAutomation, updated_at: now });
+      return odpowiedz({ ok: true, synchronized: true, productId, available, saleAutomation, updated_at: now });
     }
 
     // ─── PRODUKT: decyzja administratora po kontroli producenta ───
@@ -6216,12 +6126,14 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({})), settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+      const previousAvailability = settingsRec.data?.artway_dostepnosc && typeof settingsRec.data.artway_dostepnosc === 'object' ? { ...settingsRec.data.artway_dostepnosc } : {};
       const batch = applyProductSaleDecisionBatch({ body, data: settingsRec.data, operator: 'administrator' }), { data, results, checks, audit, nowIso } = batch;
-      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, checks, data);
+      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, checks, data, { previousAvailability });
+      if (!saleAutomation.complete) return odpowiedz({ ok: false, error: 'Decyzja nie została zapisana, ponieważ Allegro nie potwierdziło całej operacji. System wycofał wykonane części i zapisał diagnostykę.', code: 'sale_channel_sync_failed', changed: 0, saleAutomation }, 502);
       const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
       audit.forEach((entry, index) => agentHistory.unshift({ id: `AI-DEC-${Date.now().toString(36)}-${index}`, ...entry, data: nowIso, dataTxt: new Date(nowIso).toLocaleString('pl-PL'), dane: { ...entry.dane, saleAutomation } }));data.artway_agent_ai_historia = agentHistory.slice(0, 500);
       await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: nowIso });
-      return odpowiedz({ ok: true, ...results[0], changed: results.length, results, saleAutomation, updated_at: nowIso });
+      return odpowiedz({ ok: true, synchronized: true, ...results[0], changed: results.length, results, saleAutomation, updated_at: nowIso });
     }
 
     // ─── PRODUCENT: wyrywkowy monitoring stanów przez Agenta AI ───

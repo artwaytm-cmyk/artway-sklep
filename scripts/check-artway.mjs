@@ -20,6 +20,7 @@ const files = [
   'netlify/functions/lib/domain/product-editorial-pipeline.mjs',
   'netlify/functions/lib/domain/product-link-package-preparer.mjs',
   'netlify/functions/lib/domain/product-sale-decisions.mjs',
+  'netlify/functions/lib/domain/product-sale-channel-links.mjs',
   'netlify/functions/lib/domain/allegro-reply-assistant.mjs',
   'netlify/functions/lib/domain/telegram-communication.mjs',
   'netlify/functions/lib/telegram-center.mjs',
@@ -73,6 +74,7 @@ const store = read('netlify/functions/lib/store-app.mjs');
 const productEditorial = read('netlify/functions/lib/domain/product-editorial-pipeline.mjs');
 const productLinkPackage = read('netlify/functions/lib/domain/product-link-package-preparer.mjs');
 const productSaleDecisions = read('netlify/functions/lib/domain/product-sale-decisions.mjs');
+const productSaleChannelLinks = read('netlify/functions/lib/domain/product-sale-channel-links.mjs');
 const allegroOfferWithdrawal = read('netlify/functions/lib/allegro-offer-withdrawal-route.mjs');
 const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
 const infaktPurchase = read('netlify/functions/lib/infakt-purchase.mjs');
@@ -448,9 +450,8 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function stripHtmlZPodzialem',
   'function produktLinkDuplikaty',
   "action === 'product-sale-availability'",
-  'function synchronizujSprzedazZDostepnosciaProducenta',
-  'allegro_availability_automation',
-  'stock: { available: 0 }',
+  'const synchronizujSprzedazZDostepnosciaProducenta',
+  'createProductSaleChannelSynchronizer',
   'function stanProducentaZHtml',
   'IdoSell sizes.amount',
   'supplier_availability_audit',
@@ -551,6 +552,17 @@ requireMarkers('netlify/functions/lib/domain/product-sale-decisions.mjs', produc
   "'wait_available'",
   "'hide_manual'",
   "'manual_available'",
+]);
+
+requireMarkers('netlify/functions/lib/domain/product-sale-channel-links.mjs', productSaleChannelLinks, [
+  'buildProductSaleChannelLinks',
+  'createProductSaleChannelSynchronizer',
+  'scoreAllegroProductMapping',
+  'blockedOfferIds',
+  'strong-identity:',
+  "status: 'ENDED'",
+  'allegroCzekajNaOperacjeOferty',
+  'allegro_availability_automation',
 ]);
 
 requireMarkers('netlify/functions/lib/allegro-offer-withdrawal-route.mjs', allegroOfferWithdrawal, [

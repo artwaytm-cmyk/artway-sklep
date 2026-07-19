@@ -143,23 +143,25 @@ function odswiezDostepnoscProducentowWidoku(){
   if(typeof odswiezMonitoringProducentow==="function"&&odswiezMonitoringProducentow())return;
   renderuj();
 }
-function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
+async function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
   const key=String(id);
   const s=String(status||"dostepny").toLowerCase();
-  if(s==="niedostepny"){
-    dostepnoscProduktow={...(dostepnoscProduktow||{}),[key]:{status:"niedostepny",powod:String(powod||"").trim(),data:new Date().toISOString(),operator:sesja?.email||"administrator",source:"manual",automatic:false}};
-  }else{
-    dostepnoscProduktow={...(dostepnoscProduktow||{})};
-    delete dostepnoscProduktow[key];
-    delete dostepnoscProduktow[id];
+  if(chmuraToken&&maUprawnieniaZapisuChmury()){
+    toast(s==="niedostepny"?"⏳ Wstrzymuję sprzedaż w sklepie i na Allegro…":"⏳ Wznawiam sprzedaż w sklepie i na Allegro…");
+    try{
+      const d=await chmura("product-sale-availability",{method:"POST",body:{productId:id,available:s!=="niedostepny",reason:String(powod||"").trim()},timeout:120000});
+      await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();
+      loguj("info",`Dostępność produktu ${id} zmieniona jako jedna operacja sklep + Allegro`);
+      toast(s==="niedostepny"?`✅ Sprzedaż wstrzymana • sklep + Allegro (${d.saleAutomation?.allegroHidden||0} ofert)`:`✅ Sprzedaż wznowiona • sklep + Allegro (${d.saleAutomation?.allegroRestored||0} ofert)`);
+    }catch(e){loguj("blad",`Spójna zmiana sprzedaży produktu ${id}: ${e.message||e}`);toast(`⛔ Niczego nie zmieniono — sklep i Allegro muszą potwierdzić operację razem: ${e.message||e}`);}
+    odswiezDostepnoscProducentowWidoku();return;
   }
+  if(s==="niedostepny")dostepnoscProduktow={...(dostepnoscProduktow||{}),[key]:{status:"niedostepny",powod:String(powod||"").trim(),data:new Date().toISOString(),operator:sesja?.email||"administrator",source:"manual",automatic:false}};
+  else{dostepnoscProduktow={...(dostepnoscProduktow||{})};delete dostepnoscProduktow[key];delete dostepnoscProduktow[id];}
   zapiszLS("artway_dostepnosc",dostepnoscProduktow);
   zbudujProdukty();
   loguj("info",`Dostępność sprzedażowa: produkt ${id} → ${s}`);
-  if(chmuraToken) void chmura("product-sale-availability",{method:"POST",body:{productId:id,available:s!=="niedostepny",reason:String(powod||"").trim()},timeout:45000})
-    .then(d=>loguj("info",`Dostępność produktu ${id} zsynchronizowana ze sklepem i Allegro: ukryto ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`))
-    .catch(e=>{loguj("blad",`Synchronizacja dostępności produktu ${id} z Allegro: ${e.message||e}`);toast("⚠️ Sklep zapisany, ale synchronizacja Allegro wymaga ponowienia");});
-  toast(s==="niedostepny"?"Produkt oznaczony jako niedostępny":"Produkt dostępny w sprzedaży ✅");
+  toast(s==="niedostepny"?"Produkt ukryty lokalnie — połącz wspólną bazę, aby wstrzymać również Allegro":"Produkt dostępny lokalnie — połącz wspólną bazę, aby wznowić również Allegro");
   odswiezDostepnoscProducentowWidoku();
 }
 function przelaczDostepnoscProduktu(id){
@@ -171,20 +173,20 @@ function przelaczDostepnoscProduktu(id){
       agentAISprawdzDostepnoscProducentow(1,[id]);
       return;
     }
-    ustawDostepnoscProduktu(id,"dostepny");
+    void ustawDostepnoscProduktu(id,"dostepny");
   }
   else {
     const powod=prompt("Powód niedostępności widoczny tylko w panelu (opcjonalnie):","chwilowo niedostępny");
     if(powod===null)return;
-    ustawDostepnoscProduktu(id,"niedostepny",powod);
+    void ustawDostepnoscProduktu(id,"niedostepny",powod);
   }
 }
 function dostepnoscBadgeAdmin(p){
   const automat=produktAutomatycznieNiedostepny(p);
   const decision=decyzjaProducentaInfo(p);
   return produktOznaczonyNiedostepny(p)
-    ? `<span class="lvl lvl-blad">niedostępny w sklepie${automat?" • automatycznie":""}</span>${powodNiedostepnosci(p)?`<br><small>${esc(powodNiedostepnosci(p))}</small>`:""}${decision.code?`<br><small>${decision.ico} ${esc(decision.label)}</small>`:""}`
-    : `<span class="lvl lvl-ok">dostępny w sklepie</span>${decision.code?`<br><small>${decision.ico} ${esc(decision.label)}</small>`:""}`;
+    ? `<span class="lvl lvl-blad">sprzedaż wstrzymana • sklep + Allegro${automat?" • automatycznie":""}</span>${powodNiedostepnosci(p)?`<br><small>${esc(powodNiedostepnosci(p))}</small>`:""}${decision.code?`<br><small>${decision.ico} ${esc(decision.label)}</small>`:""}`
+    : `<span class="lvl lvl-ok">sprzedaż aktywna • oba kanały</span>${decision.code?`<br><small>${decision.ico} ${esc(decision.label)}</small>`:""}`;
 }
 function decyzjaProducentaDane(id,value="auto"){
   const p=produktMagazynowy(id),i=producentDostepnoscInfo(p||{}),current=decyzjaProducentaInfo(p||{}),now=new Date(),parts=String(value||"auto").split(":"),code=parts[0],days=Math.max(0,Math.min(30,Number(parts[1])||0)),history=[{at:now.toISOString(),decision:code,days,operator:sesja?.email||"administrator"},...current.history].slice(0,20),base={data:now.toISOString(),operator:sesja?.email||"administrator",source:"supplier-decision",automatic:false,producerStatus:i.status,producerCheckedAt:i.checked,history};
@@ -209,12 +211,14 @@ function zapiszDecyzjeProducentowLokalnie(ids=[],value="auto",historia=true){
 async function ustawDecyzjeProducenta(id,value="auto"){
   const p=produktMagazynowy(id);if(!p)return;
   const next=decyzjaProducentaDane(id,value),key=String(id),i=producentDostepnoscInfo(p);
-  dostepnoscProduktow={...(dostepnoscProduktow||{})};if(next)dostepnoscProduktow[key]=next;else{delete dostepnoscProduktow[key];delete dostepnoscProduktow[id];}
-  zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});odswiezDostepnoscProducentowWidoku();
-  try{
-    if(maUprawnieniaZapisuChmury()){const d=await chmura("product-sale-decision",{method:"POST",body:{productId:id,decision:String(value).split(":")[0],days:Number(String(value).split(":")[1])||0,producerStatus:i.status,producerQuantity:i.quantity,reason:next?.reason||"Automatyczna decyzja"},timeout:90000});await chmuraWczytajStan().catch(()=>{});zbudujProdukty();toast(`✅ Decyzja zapisana • sklep ${d.saleAutomation?.siteHidden?"ukryty":d.available?"aktywny":"zaktualizowany"} • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}
-    else toast("Decyzja zapisana lokalnie — połącz wspólną bazę, aby zmienić Allegro");
-  }catch(e){toast(`⚠️ Decyzja jest w panelu, ale synchronizacja serwera wymaga ponowienia: ${e.message||e}`);}
+  if(maUprawnieniaZapisuChmury()){
+    toast("⏳ Zapisuję jedną decyzję dla sklepu i Allegro…");
+    try{const d=await chmura("product-sale-decision",{method:"POST",body:{productId:id,decision:String(value).split(":")[0],days:Number(String(value).split(":")[1])||0,producerStatus:i.status,producerQuantity:i.quantity,reason:next?.reason||"Automatyczna decyzja"},timeout:120000});await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();toast(`✅ Jedna decyzja zapisana • sklep: ${d.available?"aktywny":"wstrzymany"} • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}
+    catch(e){toast(`⛔ Niczego nie zmieniono — operacja sklep + Allegro nie została potwierdzona: ${e.message||e}`);}
+  }else{
+    dostepnoscProduktow={...(dostepnoscProduktow||{})};if(next)dostepnoscProduktow[key]=next;else{delete dostepnoscProduktow[key];delete dostepnoscProduktow[id];}
+    zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});toast("Decyzja zapisana lokalnie — połącz wspólną bazę, aby zmienić oba kanały");
+  }
   odswiezDostepnoscProducentowWidoku();
 }
 function zastosujWyborDecyzjiProducenta(id){const el=document.querySelector(`[data-supplier-decision="${CSS.escape(String(id))}"]`);if(el)void ustawDecyzjeProducenta(id,el.value);}
@@ -227,11 +231,10 @@ async function zastosujGrupowaDecyzjeProducenta(){
   const select=document.querySelector("[data-supplier-bulk-decision]"),button=document.querySelector("[data-supplier-bulk-apply]"),value=String(select?.value||"auto"),ids=[...zaznaczoneDostepnoscProducentow].filter(id=>produktMagazynowy(id)).slice(0,500);
   if(!ids.length){toast("Zaznacz co najmniej jeden produkt");return;}if(!confirm(`${decyzjaProducentaEtykieta(value)} — zastosować do ${ids.length} zaznaczonych produktów?`))return;
   const parts=value.split(":"),items=ids.map(id=>{const p=produktMagazynowy(id),i=producentDostepnoscInfo(p);return{productId:id,decision:parts[0],days:Number(parts[1])||0,producerStatus:i.status,producerQuantity:i.quantity};});if(button){button.disabled=true;button.textContent=`⏳ Zapisuję ${ids.length}…`;}
-  zapiszDecyzjeProducentowLokalnie(ids,value,true);odswiezDostepnoscProducentowWidoku();
   try{
-    if(maUprawnieniaZapisuChmury()){const d=await chmura("product-sale-decision",{method:"POST",body:{items},timeout:180000});await chmuraWczytajStan().catch(()=>{});zbudujProdukty();toast(`✅ Zapisano ${d.changed||ids.length} decyzji • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}else toast(`Zapisano lokalnie ${ids.length} decyzji — połącz wspólną bazę, aby zmienić Allegro`);
+    if(maUprawnieniaZapisuChmury()){const d=await chmura("product-sale-decision",{method:"POST",body:{items},timeout:180000});await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();toast(`✅ Zapisano ${d.changed||ids.length} spójnych decyzji • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}else{zapiszDecyzjeProducentowLokalnie(ids,value,true);toast(`Zapisano lokalnie ${ids.length} decyzji — połącz wspólną bazę, aby zmienić oba kanały`);}
     ids.forEach(id=>zaznaczoneDostepnoscProducentow.delete(String(id)));
-  }catch(e){toast(`⚠️ Decyzje są w panelu, ale synchronizacja serwera wymaga ponowienia: ${e.message||e}`);}
+  }catch(e){toast(`⛔ Niczego nie zmieniono — operacja sklep + Allegro nie została potwierdzona: ${e.message||e}`);}
   odswiezDostepnoscProducentowWidoku();
 }
 function grupowaDecyzjaProducentaHTML(){const n=zaznaczoneDostepnoscProducentow.size;return `<div class="supplier-bulk-decision"><label><span>Decyzja dla zaznaczonych</span><select data-supplier-bulk-decision>${decyzjaProducentaOpcjeHTML("auto")}</select></label><button class="btn" type="button" data-supplier-bulk-apply onclick="zastosujGrupowaDecyzjeProducenta()" ${n?"":"disabled"}>Zastosuj do ${n}</button><small>Jedno potwierdzenie i jeden spójny zapis dla całej grupy. Sklep i powiązane oferty Allegro zmienią się dopiero po zatwierdzeniu.</small></div>`;}

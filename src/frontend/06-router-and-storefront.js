@@ -561,7 +561,7 @@ function normalizujSzukanyTekst(s){
 function produktPasujeFrazie(p,szukane=fraza){
   const zapytanie=normalizujSzukanyTekst(szukane);
   if(!zapytanie)return true;
-  const tekst=normalizujSzukanyTekst([p.nazwa,p.opisKrotki,p.opis,p.kategoria,p.sku,p.gtin,p.externalId,p.mpn,p.producent,p.marka,p.kolorProduktu,p.rozmiar,p.material,(p.warianty||[]).join(" "),p.id].join(" "));
+  const tekst=normalizujSzukanyTekst([p.nazwa,p.opisKrotki,p.opis,p.kategoria,p.sku,p.gtin,p.ean,p.externalId,p.mpn,p.kodProducenta,p.allegroOfferId,p.producent,p.marka,p.kolorProduktu,p.rozmiar,p.material,(p.warianty||[]).join(" "),p.id].join(" "));
   return zapytanie.split(" ").filter(Boolean).every(slowo=>tekst.includes(slowo));
 }
 function sortujListeProduktow(lista,sort=sortowanie){
