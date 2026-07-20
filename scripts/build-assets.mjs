@@ -220,8 +220,6 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/10-warehouse-documents.js',
       'src/frontend/12-warehouse-views.js',
       'src/frontend/12-warehouse-main-view.js',
-      'src/frontend/12-warehouse-assortment-card.js',
-      'src/frontend/12-warehouse-assortment-view.js',
     ],
   },
   {
@@ -272,6 +270,8 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/12-assortment-index.js',
       'src/frontend/12-infakt-admin.js',
       'src/frontend/09b-seo-effects-panel.js',
+      'src/frontend/12-warehouse-assortment-card.js',
+      'src/frontend/12-warehouse-assortment-view.js',
       'src/frontend/12-product-editor-workspace.js',
       'src/frontend/12-product-editor.js',
       'src/frontend/12a-product-actions.js',

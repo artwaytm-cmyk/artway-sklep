@@ -38,6 +38,11 @@ function odswiezZnacznikDiag(){
    (np. otwarta z dysku), nie pokazuje nieaktualnych produktów demonstracyjnych. */
 const PRODUKTY_ZAPASOWE = []; // brak demonstracyjnych towarów — źródłem awaryjnym jest aktualny products.json
 
+// Stan integracji jest częścią wspólnego rdzenia aplikacji. Panel korzysta z
+// niego na każdej trasie (m.in. przy synchronizacji bazy), dlatego nie może być
+// deklarowany dopiero w ładowanym na żądanie module Centrum wysyłek.
+let stanBramki={sprawdzono:false,online:false,configured:false,ready:false,authenticated:false,error:"",organizations:[],email:{configured:false,authenticated:false,provider:null},store:{configured:false,writable:false,orders:0,users:0},inpost:{configured:false,authenticated:false,geowidgetConfigured:false,env:"production"}};
+
 /* ═══════════ STAN ═══════════ */
 let produkty = [];
 let prodBazowe = [];

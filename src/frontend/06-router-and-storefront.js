@@ -21,7 +21,7 @@ function adminModulyDlaTrasy(route=""){
   const t=String(route||"").split("?")[0],moduly=["core","ui"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
   add("shell");
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
-  if(t==="/diagnostyka")add("system");
+  if(t==="/diagnostyka")add("system","inventory");
   else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("commerce","inventory","system");
   else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","inventory");
   else if(["/admin/magazyn/lokalizacje","/admin/magazyn/etykiety-qr"].includes(t))add("warehouse");
@@ -323,6 +323,7 @@ function renderuj(){
       else if(t==="/admin/allegro/rentownosc") w.innerHTML = widokAdminAllegro("rentownosc");
       else if(t==="/admin/allegro/komunikacja" || t==="/admin/allegro/wiadomosci") w.innerHTML = widokAdminAllegro("wiadomosci");
       else if(t==="/admin/allegro/dyskusje") w.innerHTML = widokAdminAllegro("dyskusje");
+      else if(t==="/admin/allegro/zgodnosc") w.innerHTML = widokAdminAllegro("zgodnosc");
       else if(t==="/admin/allegro/ustawienia") w.innerHTML = widokAdminAllegro("ustawienia");
       else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki("zlecenia");
       else if(t.startsWith("/admin/wysylki/")) w.innerHTML = widokAdminWysylki(t.split("/")[3]||"zlecenia");

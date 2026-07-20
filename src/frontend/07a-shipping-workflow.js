@@ -358,5 +358,4 @@ function zapiszUstawieniaWysylki(e){
   obj.regulaKurier="inpost";
   zapiszCzescUstawien({wysylka:{...ustawieniaWysylki(),...obj}});
 }
-let stanBramki={sprawdzono:false,online:false,configured:false,ready:false,authenticated:false,error:"",organizations:[],email:{configured:false,authenticated:false,provider:null},store:{configured:false,writable:false,orders:0,users:0},inpost:{configured:false,authenticated:false,geowidgetConfigured:false,env:"production"}};
 let ostatniTestIntegracjiSerwerowych=0, testIntegracjiWToku=false;
