@@ -66,6 +66,40 @@ test('półka i miejsce mogą przechowywać nieograniczoną liczbę sztuk', () =
   assert.match(core, /Math\.min\(500,intNieujemny\(f\.get\("miejsca"\),0\)\)/);
 });
 
+test('indeks lokalizacji skaluje się do dużego magazynu bez ponownego przeszukiwania całej listy', () => {
+  const start = core.indexOf('let magazynLokalizacjeIndexCache');
+  const end = core.indexOf('function czyLokalizacjaBezLimitu', start);
+  assert.ok(start >= 0 && end > start);
+  const locations = [{ kod: 'PAK', nazwa: 'Pakownia', typ: 'strefa' }];
+  for (let rack = 1; rack <= 20; rack++) {
+    locations.push({ kod: `PAK-R${rack}`, nazwa: `Regał ${rack}`, typ: 'regał', parentKod: 'PAK' });
+    for (let shelf = 1; shelf <= 20; shelf++) locations.push({ kod: `PAK-R${rack}-P${shelf}`, nazwa: `Półka ${shelf}`, typ: 'półka', parentKod: `PAK-R${rack}` });
+  }
+  const context = {
+    magazynLokalizacje: locations,
+    kodLokalizacjiMagazynu: value => String(value || '').trim().toUpperCase(),
+    esc: value => String(value ?? ''),
+    Map,
+    Set,
+  };
+  vm.runInNewContext(`${core.slice(start, end)};this.first=magazynLokalizacjeIndex();this.second=magazynLokalizacjeIndex();this.path=sciezkaLokalizacjiMagazynu('PAK-R20-P20');this.depth=poziomLokalizacjiMagazynu('PAK-R20-P20');this.found=magazynLokalizacjaPoKodzie('pak-r20-p20');`, context);
+  assert.equal(context.first, context.second);
+  assert.equal(context.first.aktywne.length, 421);
+  assert.equal(context.path, 'PAK / PAK-R20 / PAK-R20-P20');
+  assert.equal(context.depth, 2);
+  assert.equal(context.found.nazwa, 'Półka 20');
+});
+
+test('Stany używają jednej listy lokalizacji zamiast setek powielonych pól wyboru', () => {
+  assert.match(view, /magazynLokalizacjeDatalistHTML\("warehouseStockLocationOptions"\)/);
+  assert.match(view, /poleLokalizacjiMagazynu\(meta\.lokalizacja\|\|"","warehouseStockLocationOptions"\)/);
+  const stockStart = view.indexOf('${aktywna==="stany"?');
+  const stockEnd = view.indexOf('${aktywna==="ruchy"?', stockStart);
+  const stock = view.slice(stockStart, stockEnd);
+  assert.equal((stock.match(/magazynLokalizacjeDatalistHTML/g) || []).length, 1);
+  assert.doesNotMatch(stock, /selectLokalizacjiMagazynu\(meta\.lokalizacja/);
+});
+
 test('lokalizacje mają mapę drzewa, prosty kreator i chronione kody QR', () => {
   assert.match(ui, /MAGAZYN_DRZEWO_LIMIT=500/);
   assert.match(ui, /function magazynDrzewoHTML/);

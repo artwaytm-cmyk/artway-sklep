@@ -1939,29 +1939,40 @@ function kodLokalizacjiMagazynu(v=""){
     .replace(/^-|-$/g,"")
     .slice(0,40);
 }
-function magazynLokalizacjeAktywne(){
-  const lista=Array.isArray(magazynLokalizacje)?magazynLokalizacje:[];
-  return lista.filter(l=>l&&l.aktywna!==false).sort((a,b)=>sciezkaLokalizacjiMagazynu(a.kod).localeCompare(sciezkaLokalizacjiMagazynu(b.kod),"pl",{numeric:true})||(Number(a.priorytet)||9999)-(Number(b.priorytet)||9999));
+let magazynLokalizacjeIndexCache={source:null,lista:[],aktywne:[],poKodzie:new Map(),sciezki:new Map(),sciezkiNazw:new Map(),poziomy:new Map(),opcjeHTML:""};
+function magazynLokalizacjeIndex(){
+  const source=Array.isArray(magazynLokalizacje)?magazynLokalizacje:[];
+  if(magazynLokalizacjeIndexCache.source===source)return magazynLokalizacjeIndexCache;
+  const lista=source.filter(Boolean),poKodzie=new Map();
+  lista.forEach(l=>{const kod=kodLokalizacjiMagazynu(l.kod);if(kod&&!poKodzie.has(kod))poKodzie.set(kod,l);});
+  const sciezki=new Map(),sciezkiNazw=new Map(),poziomy=new Map();
+  const policz=(rawKod)=>{
+    const kod=kodLokalizacjiMagazynu(rawKod);if(sciezki.has(kod))return;
+    const kody=[],nazwy=[],seen=new Set();let current=poKodzie.get(kod)||null,guard=0;
+    while(current&&guard++<20){
+      const currentKod=kodLokalizacjiMagazynu(current.kod);if(!currentKod||seen.has(currentKod))break;
+      seen.add(currentKod);kody.unshift(String(current.kod||currentKod));nazwy.unshift(String(current.nazwa||current.kod||currentKod));
+      current=current.parentKod?poKodzie.get(kodLokalizacjiMagazynu(current.parentKod))||null:null;
+    }
+    sciezki.set(kod,kody.join(" / ")||String(rawKod||""));sciezkiNazw.set(kod,nazwy.join(" → ")||String(rawKod||""));poziomy.set(kod,Math.max(0,kody.length-1));
+  };
+  lista.forEach(l=>policz(l.kod));
+  const aktywne=lista.filter(l=>l.aktywna!==false).sort((a,b)=>{
+    const ka=kodLokalizacjiMagazynu(a.kod),kb=kodLokalizacjiMagazynu(b.kod);
+    return String(sciezki.get(ka)||ka).localeCompare(String(sciezki.get(kb)||kb),"pl",{numeric:true})||(Number(a.priorytet)||9999)-(Number(b.priorytet)||9999);
+  });
+  const opcjeHTML=aktywne.map(l=>{const kod=kodLokalizacjiMagazynu(l.kod),opis=`${"\u00b7 ".repeat(poziomy.get(kod)||0)}${l.kod}${l.nazwa?` — ${l.nazwa}`:""} [${l.typ||"miejsce"}]`;return `<option value="${esc(l.kod)}">${esc(opis)}</option>`;}).join("");
+  magazynLokalizacjeIndexCache={source,lista,aktywne,poKodzie,sciezki,sciezkiNazw,poziomy,opcjeHTML};return magazynLokalizacjeIndexCache;
 }
-function magazynLokalizacjaPoKodzie(kod){
-  const k=kodLokalizacjiMagazynu(kod);
-  return (Array.isArray(magazynLokalizacje)?magazynLokalizacje:[]).find(l=>kodLokalizacjiMagazynu(l.kod)===k)||null;
-}
+function magazynLokalizacjeAktywne(){return magazynLokalizacjeIndex().aktywne;}
+function magazynLokalizacjaPoKodzie(kod){return magazynLokalizacjeIndex().poKodzie.get(kodLokalizacjiMagazynu(kod))||null;}
 function nazwaLokalizacjiMagazynu(kod){
   const l=magazynLokalizacjaPoKodzie(kod);
   return l?`${l.kod}${l.nazwa?` — ${l.nazwa}`:""}`:String(kod||"");
 }
-function sciezkaLokalizacjiMagazynu(kod){
-  const parts=[],seen=new Set();let current=magazynLokalizacjaPoKodzie(kod),guard=0;
-  while(current&&guard++<10&&!seen.has(current.kod)){seen.add(current.kod);parts.unshift(current.kod);current=current.parentKod?magazynLokalizacjaPoKodzie(current.parentKod):null;}
-  return parts.join(" / ")||String(kod||"");
-}
-function poziomLokalizacjiMagazynu(kod){return Math.max(0,sciezkaLokalizacjiMagazynu(kod).split(" / ").filter(Boolean).length-1);}
-function sciezkaNazwLokalizacjiMagazynu(kod){
-  const parts=[],seen=new Set();let current=magazynLokalizacjaPoKodzie(kod),guard=0;
-  while(current&&guard++<10&&!seen.has(current.kod)){seen.add(current.kod);parts.unshift(String(current.nazwa||current.kod));current=current.parentKod?magazynLokalizacjaPoKodzie(current.parentKod):null;}
-  return parts.join(" → ")||String(kod||"");
-}
+function sciezkaLokalizacjiMagazynu(kod){const key=kodLokalizacjiMagazynu(kod);return magazynLokalizacjeIndex().sciezki.get(key)||String(kod||"");}
+function poziomLokalizacjiMagazynu(kod){return magazynLokalizacjeIndex().poziomy.get(kodLokalizacjiMagazynu(kod))||0;}
+function sciezkaNazwLokalizacjiMagazynu(kod){const key=kodLokalizacjiMagazynu(kod);return magazynLokalizacjeIndex().sciezkiNazw.get(key)||String(kod||"");}
 function czyLokalizacjaBezLimitu(location){return !location||location.bezLimitu===true||!(Number(location.pojemnosc)>0);}
 function magazynLiteraRegalu(index=1){let n=Math.max(1,Math.trunc(Number(index)||1)),out="";while(n>0){n--;out=String.fromCharCode(65+n%26)+out;n=Math.floor(n/26);}return out;}
 function magazynIndeksRegalu(value="A"){
@@ -1980,6 +1991,12 @@ function selectLokalizacjiMagazynu(value=""){
     ${aktywne.map(l=>`<option value="${esc(l.kod)}" ${v===l.kod?"selected":""}>${"· ".repeat(poziomLokalizacjiMagazynu(l.kod))}${esc(l.kod)}${l.nazwa?` — ${esc(l.nazwa)}`:""} [${esc(l.typ||"miejsce")}]</option>`).join("")}
     ${v&&!aktywne.some(l=>l.kod===v)?`<option value="${esc(v)}" selected>${esc(v)} — spoza słownika</option>`:""}
   </select>`;
+}
+function poleLokalizacjiMagazynu(value="",listId="warehouseLocationOptions"){
+  return `<input name="lokalizacja" list="${esc(listId)}" value="${esc(String(value||"").trim())}" placeholder="Wpisz lub wybierz kod lokalizacji" autocomplete="off">`;
+}
+function magazynLokalizacjeDatalistHTML(id="warehouseLocationOptions"){
+  return `<datalist id="${esc(id)}">${magazynLokalizacjeIndex().opcjeHTML}</datalist>`;
 }
 function statystykiLokalizacji(produktyLista=produktyDoAdministracji()){
   const rez=rezerwacjeMagazynowe(), mapa={};
@@ -2154,11 +2171,14 @@ function sugestiaZatowarowania(p, rez={}, sprzedaz={}){
   return {produkt:p,stan,rezerwacje:r,dostepne:dost,sprzedaz30:sp,min,lead,target,dniPokrycia,ilosc,poziom,powod,meta};
 }
 function planZatowarowania(){
+  const revision=Number(typeof adminRewizjaDanych!=="undefined"?adminRewizjaDanych:0)||0,produktyLista=produktyDoAdministracji(),cached=planZatowarowania._cache;
+  if(cached&&cached.revision===revision&&cached.produkty===produktyLista)return cached.value;
   const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30);
-  return produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>sugestiaZatowarowania(p,rez,spr)).sort((a,b)=>{
+  const value=produktyLista.filter(p=>!czyProduktAdminWKoszu(p)).map(p=>sugestiaZatowarowania(p,rez,spr)).sort((a,b)=>{
     const pa=a.poziom==="bad"?0:a.poziom==="warn"?1:2, pb=b.poziom==="bad"?0:b.poziom==="warn"?1:2;
     return pa-pb || Number(b.ilosc||0)-Number(a.ilosc||0) || String(a.produkt.nazwa||"").localeCompare(String(b.produkt.nazwa||""),"pl");
   });
+  planZatowarowania._cache={revision,produkty:produktyLista,value};return value;
 }
 function potrzebyZatowarowania(){ return planZatowarowania().filter(x=>Number(x.ilosc)>0); }
 function zapiszHistorieAgenta(typ, opis, dane={}){

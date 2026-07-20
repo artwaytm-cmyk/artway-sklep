@@ -64,3 +64,13 @@ test('Plan zatowarowania prowadzi po procesie i renderuje tabele w jednym schema
   assert.match(styles, /table\.admin-responsive-table td\[data-label="Produkt i kod"\]/);
   assert.match(styles, /@media\(max-width:460px\).*supplier-order-actions/);
 });
+
+test('Stany renderują duży katalog partiami i nie blokują pierwszego wejścia', () => {
+  assert.match(inventory, /MAGAZYN_STANY_PARTIA_KART=10/);
+  assert.match(inventory, /function magazynStanyPrzygotujKartyProgresywnie/);
+  assert.match(inventory, /function magazynStanyDoloadujKarty/);
+  assert.match(inventory, /IntersectionObserver/);
+  assert.match(inventory, /magazynStanyPrzygotujKartyProgresywnie\(fragment,\{rez,spr,kanalySpr,prog\}\)/);
+  assert.match(styles, /warehouse-stock-progressive-loader/);
+  assert.match(styles, /content-visibility:auto/);
+});
