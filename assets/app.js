@@ -290,12 +290,19 @@ const PRODUCT_LINK_IMPORT_FIRST_ID = 1000000;
 // dzielonego katalogu serwerowego. Nie zapisujemy ich w localStorage ani w
 // ogólnym rekordzie settings, aby duży katalog nie przekroczył limitu 4 MB.
 let produktyImportowane = [];
-let produktyBazoweCache={bazowe:null,importowane:null,items:[]};
+let produktyCentralnePobrane = [];
+let produktyBazoweCache={bazowe:null,importowane:null,centralne:null,items:[]};
 function produktyBazoweWspolne(){
-  if(produktyBazoweCache.bazowe===prodBazowe&&produktyBazoweCache.importowane===produktyImportowane)return produktyBazoweCache.items;
+  if(produktyBazoweCache.bazowe===prodBazowe&&produktyBazoweCache.importowane===produktyImportowane&&produktyBazoweCache.centralne===produktyCentralnePobrane)return produktyBazoweCache.items;
   const mapa=new Map();
   [...(Array.isArray(prodBazowe)?prodBazowe:[]),...(Array.isArray(produktyImportowane)?produktyImportowane:[])].forEach(p=>{if(p&&p.id!==undefined)mapa.set(String(p.id),p);});
-  const items=[...mapa.values()];produktyBazoweCache={bazowe:prodBazowe,importowane:produktyImportowane,items};return items;
+  (Array.isArray(produktyCentralnePobrane)?produktyCentralnePobrane:[]).forEach(p=>{if(p&&p.id!==undefined){const id=String(p.id),old=mapa.get(id)||{};mapa.set(id,{...old,...p,_catalog:{...(old._catalog||{}),...(p._catalog||{})}});}});
+  const items=[...mapa.values()];produktyBazoweCache={bazowe:prodBazowe,importowane:produktyImportowane,centralne:produktyCentralnePobrane,items};return items;
+}
+function zapamietajProduktyCentralne(lista=[]){
+  const mapa=new Map((produktyCentralnePobrane||[]).map(p=>[String(p.id),p]));
+  (Array.isArray(lista)?lista:[]).forEach(p=>{if(p&&p.id!==undefined)mapa.set(String(p.id),p);});
+  produktyCentralnePobrane=[...mapa.values()].slice(-5000);produktyBazoweCache={bazowe:null,importowane:null,centralne:null,items:[]};if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
 }
 let zrodloProduktow = "zapasowe";
 let produktyDodane = wczytajLS("artway_produkty_dodane", []);
@@ -812,6 +819,7 @@ function zapiszLS(klucz, dane){
     catch(e2){zmieniono=false;loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
   }
   if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina(klucz);
+  if(zmieniono&&["artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_magazyn_produkty","artway_ustawienia"].includes(klucz)&&typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
   if(zmieniono && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
   return zmieniono;
 }

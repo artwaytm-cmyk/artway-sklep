@@ -3,7 +3,7 @@ import pg from 'pg';
 const { Pool } = pg;
 const pools = new Map();
 
-function poolFor(connectionString) {
+export function postgresPoolFor(connectionString) {
   if (!pools.has(connectionString)) {
     pools.set(connectionString, new Pool({
       connectionString,
@@ -24,7 +24,7 @@ export function createPostgresStoreRepository({ name, connectionString = process
   if (!name) throw new Error('Nazwa magazynu danych jest wymagana.');
   if (!connectionString) throw new Error('Dla magazynu PostgreSQL wymagane jest DATABASE_URL.');
 
-  const pool = poolFor(connectionString);
+  const pool = postgresPoolFor(connectionString);
   let initialization = null;
   const ensureSchema = () => {
     if (!initialization) {

@@ -178,6 +178,10 @@ function asortymentSzukajProdukty(input){
   window.__assortmentSearch=setTimeout(asortymentOdswiezWyniki,160);
 }
 function asortymentBrakiDanych(p={}){
+  if(Array.isArray(p?._catalog?.missingFields)){
+    const labels={nazwa:"nazwa",cena:"cena",ean:"EAN",zdjecie:"zdjęcie",opis:"opis",producent:"producent",kategoria:"kategoria",zrodlo:"źródło"};
+    return p._catalog.missingFields.filter(field=>field!=="koszt").map(field=>labels[field]||field);
+  }
   const braki=[];
   if(!String(p.nazwa||"").trim())braki.push("nazwa");
   if(!(Number(p.cena)>0))braki.push("cena");

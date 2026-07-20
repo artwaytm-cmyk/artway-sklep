@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { createRevisionSafeMutator, createRevisionSafeWriter, createStoreRepository } from './core/store-repository.mjs';
+import { postgresPoolFor } from './core/postgres-store-repository.mjs';
 import {
   bezpiecznePorownanie,
   czyAdmin as czyAdminToken,
@@ -85,6 +86,8 @@ import { allegroResponsibleProducerDirectory, allegroSyncEditorialOffer } from '
 import { allegroNextScheduledSyncAt, allegroScheduledSyncDue, normalizeAllegroSyncSettings } from './domain/allegro-sync-policy.mjs';
 import { createCatalogProductUpdater as allegroAktualizatorProduktowCentralnych } from './domain/catalog-product-updater.mjs';
 import { createCatalogProductOperationWriter } from './domain/catalog-product-operation-rebase.mjs';
+import { createCentralProductCatalog } from './domain/central-product-catalog.mjs';
+import { createCentralProductCatalogRoute } from './central-product-catalog-route.mjs';
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
 import { createInventoryStockRoute } from './inventory-route.mjs';
 import { createProductLinkImportBundle } from './product-link-import-route.mjs';
@@ -112,6 +115,10 @@ import {
 
 const STORE_NAME = 'artway-sklep';
 const repository = createStoreRepository({ name: STORE_NAME });
+const centralProductCatalog = createCentralProductCatalog({
+  pool: String(process.env.ARTWAY_STORE_DRIVER || '').trim().toLowerCase() === 'postgres' && process.env.DATABASE_URL ? postgresPoolFor(process.env.DATABASE_URL) : null,
+  namespace: STORE_NAME,
+});
 const czytaj = repository.read;
 const czytajWersjonowane = repository.readVersioned;
 const zapiszJesliWersja = repository.writeIfVersion;
@@ -233,6 +240,38 @@ const aiBannerRoute = createAiBannerRoute({ generator: aiBannerGenerator, isAdmi
 const allegroOrderArchive = createAllegroOrderArchive({ read: czytaj, write: zapisz });
 const allegroDataReader = createAllegroDataReader({ read: czytaj, archive: allegroOrderArchive, getOfferSettings: allegroPobierzUstawieniaOfert, getStatus: allegroStatus, mappingItems: allegroMapowaniaItems, orderStatus: (order) => allegroStatusKolejkiZamowienia(order, {}), orderNeedsRefresh: allegroOrderNeedsLiveRefresh, nextScheduledSyncAt: allegroNextScheduledSyncAt, compliancePolicy: ALLEGRO_COMPLIANCE_POLICY });
 const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, editorialize: linkedProductEditorial, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
+let centralProductCatalogSyncPromise = null;
+const CENTRAL_PRODUCT_SOURCE_KEYS = [
+  'artway_produkty_dodane', 'artway_produkty_edytowane', 'artway_produkty_katalog',
+  'artway_produkty_ukryte', 'artway_produkty_definitywne', 'artway_stany',
+  'artway_dostepnosc', 'artway_magazyn_produkty', 'artway_kosz_dodane', 'artway_kosz_meta',
+];
+function centralProductSettingsFingerprint(data = {}) {
+  const source = Object.fromEntries(CENTRAL_PRODUCT_SOURCE_KEYS.map((key) => [key, data?.[key] ?? null]));
+  return crypto.createHash('sha256').update(JSON.stringify(source)).digest('hex').slice(0, 24);
+}
+async function centralProductCatalogRevisionSnapshot() {
+  const [settings, imported, offers, mappings] = await Promise.all([
+    czytaj('settings', { data: {}, rev: 0, updated_at: null }), productLinkImport.catalog.metadata(),
+    czytaj('allegro_offers', { items: [], updated_at: null }), czytaj('allegro_mappings', { items: {}, updated_at: null }),
+  ]);
+  // Rewizja kartoteki zależy wyłącznie od danych produktowych. Zmiana bannera,
+  // regulaminu lub innego ustawienia nie może przebudowywać dziesiątek tysięcy produktów.
+  const sourceRevision = [centralProductSettingsFingerprint(settings.data || {}), imported.revision || '', offers.updated_at || '', mappings.updated_at || ''].join(':');
+  return { settings, imported, offers, mappings, sourceRevision };
+}
+async function synchronizeCentralProductCatalog({ force = false } = {}) {
+  if (!centralProductCatalog.available) return { available: false, synchronized: false, count: 0 };
+  if (centralProductCatalogSyncPromise) return centralProductCatalogSyncPromise;
+  centralProductCatalogSyncPromise = (async () => {
+    const snapshot = await centralProductCatalogRevisionSnapshot(), meta = await centralProductCatalog.metadata();
+    if (!force && meta.count > 0 && !meta.outdated && meta.sourceRevision === snapshot.sourceRevision) return { ...meta, synchronized: false, current: true };
+    const importedProducts = await productLinkImport.catalog.list();
+    return centralProductCatalog.synchronize(snapshot.settings.data || {}, { importedProducts, offers: allegroOfertyItems(snapshot.offers), mappings: allegroMapowaniaItems(snapshot.mappings), sourceRevision: snapshot.sourceRevision });
+  })();
+  try { return await centralProductCatalogSyncPromise; } finally { centralProductCatalogSyncPromise = null; }
+}
+const centralProductCatalogRoute = createCentralProductCatalogRoute({ catalog: centralProductCatalog, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, revisionSnapshot: centralProductCatalogRevisionSnapshot, synchronize: synchronizeCentralProductCatalog });
 const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ autoMapOffers: allegroAutoMapujOfertyZKartoteka, callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
 const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, agentRuntime, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierPreviews: telegramCanonicalSupplierPreviews, text: tekst });
 
@@ -4764,6 +4803,10 @@ export default async (req) => {
       }
       return odpowiedz({ ok: true, configured: true, sprawdzone, zmienione, bledy, maile, zmiany, sprawdzono: new Date().toISOString() });
     }
+
+    // ─── CENTRALNA KARTOTEKA PRODUKTÓW (PostgreSQL, stronicowanie serwerowe) ───
+    const centralCatalogResponse = await centralProductCatalogRoute(req, url, action);
+    if (centralCatalogResponse) return centralCatalogResponse;
 
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
     if (action === 'pull' || action === 'store-data') {

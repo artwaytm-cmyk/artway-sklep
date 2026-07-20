@@ -5903,6 +5903,10 @@ function asortymentSzukajProdukty(input){
   window.__assortmentSearch=setTimeout(asortymentOdswiezWyniki,160);
 }
 function asortymentBrakiDanych(p={}){
+  if(Array.isArray(p?._catalog?.missingFields)){
+    const labels={nazwa:"nazwa",cena:"cena",ean:"EAN",zdjecie:"zdjęcie",opis:"opis",producent:"producent",kategoria:"kategoria",zrodlo:"źródło"};
+    return p._catalog.missingFields.filter(field=>field!=="koszt").map(field=>labels[field]||field);
+  }
   const braki=[];
   if(!String(p.nazwa||"").trim())braki.push("nazwa");
   if(!(Number(p.cena)>0))braki.push("cena");
@@ -6344,6 +6348,42 @@ function audytMagazynuAI(){
 /* ═══════════ KATALOG ADMINA — INDEKS I CACHE DLA DUŻEGO ASORTYMENTU ═══════════ */
 let asortymentIndeksCache={revision:-1,source:null,offers:null,mappings:null,states:null,availability:null,hidden:null,added:null,imported:null,value:null};
 let asortymentWynikiCache={index:null,signature:"",value:null};
+let asortymentCentralnyStan={status:"idle",signature:"",data:null,error:"",request:null};
+let asortymentCentralnyCache=new Map(),asortymentCentralnyWylaczonyDo=0;
+
+function asortymentCentralnyParametry(){
+  return {q:szukajProduktow,category:filtrProduktow,producer:filtrProducentaProduktow,status:filtrStatusuProduktow,source:filtrZrodlaProduktow,stock:filtrStanuProduktow,allegro:filtrAllegroProduktow,data:filtrDanychProduktow,sale:filtrSprzedazyProduktow,promotion:filtrPromocjiProduktow,link:filtrLinkuProduktow,priceMin:cenaOdAdminProduktow,priceMax:cenaDoAdminProduktow,allegroPriceMin:cenaAllegroOdAdminProduktow,allegroPriceMax:cenaAllegroDoAdminProduktow,sort:sortowanieAdminProduktow,page:stronaAdminProduktow,limit:produktyNaStronieAdmin};
+}
+function asortymentCentralnyTrasaAktywna(){return ["/admin/asortyment","/admin/asortyment/produkty"].includes(trasa());}
+function asortymentCentralnySygnatura(){return JSON.stringify(asortymentCentralnyParametry());}
+function asortymentCentralnyWyczyscCache(){asortymentCentralnyCache.clear();asortymentCentralnyStan={status:"idle",signature:"",data:null,error:"",request:null};}
+async function asortymentCentralnyPobierz(force=false){
+  if(Date.now()<asortymentCentralnyWylaczonyDo)return null;
+  const signature=asortymentCentralnySygnatura(),cached=!force?asortymentCentralnyCache.get(signature):null;
+  if(cached&&Date.now()-cached.at<5*60*1000){asortymentCentralnyStan={status:"ready",signature,data:cached.data,error:"",request:null};return cached.data;}
+  if(asortymentCentralnyStan.status==="loading"&&asortymentCentralnyStan.signature===signature&&asortymentCentralnyStan.request)return asortymentCentralnyStan.request;
+  const params=asortymentCentralnyParametry(),request=chmura("product-catalog-query",{params,timeout:30000}).then(data=>{
+    if(asortymentCentralnySygnatura()!==signature)return data;
+    if(Array.isArray(data.items)&&typeof zapamietajProduktyCentralne==="function"){zapamietajProduktyCentralne(data.items);zbudujProdukty();}
+    asortymentCentralnyCache.set(signature,{at:Date.now(),data});while(asortymentCentralnyCache.size>16)asortymentCentralnyCache.delete(asortymentCentralnyCache.keys().next().value);
+    asortymentCentralnyStan={status:"ready",signature,data,error:"",request:null};
+    if(data.stale)setTimeout(()=>{asortymentCentralnyCache.delete(signature);if(asortymentCentralnyTrasaAktywna())void asortymentCentralnyPobierz(true).then(()=>renderuj());},1200);
+    if(asortymentCentralnyTrasaAktywna())renderuj();return data;
+  }).catch(error=>{
+    if(asortymentCentralnySygnatura()!==signature)return null;
+    asortymentCentralnyStan={status:"error",signature,data:null,error:String(error?.message||error),request:null};asortymentCentralnyWylaczonyDo=Date.now()+60*1000;
+    loguj("ostrzezenie",`Centralna kartoteka chwilowo niedostępna — użyto bezpiecznego widoku lokalnego: ${error?.message||error}`);if(asortymentCentralnyTrasaAktywna())renderuj();return null;
+  });
+  asortymentCentralnyStan={status:"loading",signature,data:null,error:"",request};return request;
+}
+function asortymentCentralnyWidok(){
+  if(Date.now()<asortymentCentralnyWylaczonyDo)return {fallback:true,error:asortymentCentralnyStan.error};
+  const signature=asortymentCentralnySygnatura(),cached=asortymentCentralnyCache.get(signature);
+  if(cached&&Date.now()-cached.at<5*60*1000)return {ready:true,data:cached.data};
+  if(asortymentCentralnyStan.status==="ready"&&asortymentCentralnyStan.signature===signature)return {ready:true,data:asortymentCentralnyStan.data};
+  if(asortymentCentralnyStan.status!=="loading"||asortymentCentralnyStan.signature!==signature)setTimeout(()=>void asortymentCentralnyPobierz(),0);
+  return {loading:true};
+}
 
 function asortymentSzybkieOfertyProduktu(p={},index=allegroIndeksOfert()){
   const wynik=new Map(),dodaj=lista=>{for(const oferta of lista||[]){const id=String(oferta?.id||"");if(id)wynik.set(id,oferta);}};
@@ -6915,9 +6955,9 @@ function widokAdminMagazyn(sekcja="pulpit"){
   `);
 }
 function asortymentKartaProduktuHTML(p={},ukrytaKopia=false){
-  const dodany=jestProduktemDodanym(p.id),ukryty=czyProduktAdminWKoszu(p),edytowany=!!produktyEdytowane[p.id],selected=zaznaczoneProdukty.has(p.id)||zaznaczoneProdukty.has(String(p.id));
+  const dodany=jestProduktemDodanym(p.id)||["dodany","import"].includes(String(p?._catalog?.source||"")),ukryty=czyProduktAdminWKoszu(p)||p?._catalog?.recordStatus==="trash",edytowany=!!produktyEdytowane[p.id],selected=zaznaczoneProdukty.has(p.id)||zaznaczoneProdukty.has(String(p.id));
   const braki=asortymentBrakiDanych(p),sourceUrl=String(p.sourceUrl||p.producentUrl||p.urlProducenta||"").trim(),image=p.zdjecie||(Array.isArray(p.zdjecia)?p.zdjecia[0]:"")||"";
-  const cena=kwotaNum(p.cena),cenaAllegro=kwotaNum(p.cenaAllegro||p.cena),promocja=Number(p.staraCena)>cena?Math.max(0,Math.round((1-cena/Number(p.staraCena))*100)):0,stan=stanyProduktow[p.id];
+  const cena=kwotaNum(p.cena),cenaAllegro=kwotaNum(p.cenaAllegro||p.cena),promocja=Number(p.staraCena)>cena?Math.max(0,Math.round((1-cena/Number(p.staraCena))*100)):0,stan=stanyProduktow[p.id]!==undefined?stanyProduktow[p.id]:(p.stan??p?._catalog?.inventory?.stock);
   const availabilityLabel=produktAutomatycznieNiedostepny(p)?"Sprawdź oba kanały":produktOznaczonyNiedostepny(p)?"Wznów sklep + Allegro":"Wstrzymaj sklep + Allegro";
   return `<article class="allegro-publication-card catalog-product-card ${selected?"selected is-selected":""} ${ukryty?"deleted":""}" data-assortment-product-card data-assortment-product-key="${esc(p.id)}">
     <label class="allegro-publication-check"><input class="assortment-check" type="checkbox" aria-label="Zaznacz ${esc(p.nazwa||"produkt")}" data-assortment-product-id="${esc(p.id)}" ${selected?"checked":""} onchange="przelaczZaznProd(${jsArg(p.id)})"><span>Zaznacz produkt</span></label>
@@ -6930,15 +6970,19 @@ function asortymentKartaProduktuHTML(p={},ukrytaKopia=false){
 
 function widokAdminProdukty(){
   allegroLadujJesliTrzeba("offers");
-  const index=asortymentIndeksDanych(),audytAllegro=index.audytAllegro,audytSklep=index.audytSklep,katalogWszystkie=index.source,wyniki=asortymentFiltrowaneProdukty(index),wszystkie=wyniki.items;
-  const liczbaWynikow=wszystkie.length;
+  const centralny=typeof asortymentCentralnyWidok==="function"?asortymentCentralnyWidok():{fallback:true};
+  if(centralny.loading)return asortymentSzkielet("produkty",`<div class="assortment-catalog-workspace"><header class="panel assortment-catalog-hero"><div><span class="order-pro-label">Centralna kartoteka PostgreSQL</span><h1>🏷️ Katalog produktów</h1><p>Pobieram wyłącznie bieżącą stronę produktów, filtry i liczniki. Pełny katalog nie jest ponownie przesyłany do przeglądarki.</p></div></header><section class="panel assortment-central-loading" aria-live="polite"><div class="spinner"></div><div><b>Ładowanie kartoteki produktów…</b><small>Wyszukiwanie, sortowanie i paginacja są wykonywane na serwerze.</small></div></section></div>`);
+  const centralData=centralny.ready?centralny.data:null,centralSummary=centralData?.summary||{};
+  const index=centralData?{source:{length:Number(centralSummary.total)||Number(centralData.total)||0},active:{length:Number(centralSummary.active)||0},categories:(centralData.facets?.categories||[]).map(x=>x.value),producers:(centralData.facets?.producers||[]).map(x=>x.value),counts:{connected:Number(centralSummary.connected)||0,missing:Number(centralSummary.missing)||0,ready:Number(centralSummary.ready)||0,hidden:Number(centralSummary.hidden)||0,promotions:Number(centralSummary.promotions)||0,trash:Number(centralSummary.trash)||0},audytSklep:{produkty:Number(centralSummary.duplicate_store)||0,grupy:[],hiddenIds:new Set(),centralOnly:true},audytAllegro:{produkty:Number(centralSummary.duplicate_allegro)||0,grupy:[],offerIds:new Set(),centralOnly:true}}:asortymentIndeksDanych();
+  const audytAllegro=index.audytAllegro,audytSklep=index.audytSklep,katalogWszystkie=index.source,wyniki=centralData?{items:Array.isArray(centralData.items)?centralData.items:[],ids:Array.isArray(centralData.ids)?centralData.ids:(centralData.items||[]).map(p=>p.id)}:asortymentFiltrowaneProdukty(index),wszystkie=wyniki.items;
+  const liczbaWynikow=centralData?Number(centralData.total)||0:wszystkie.length;
   const liczbaStron=Math.max(1,Math.ceil(liczbaWynikow/produktyNaStronieAdmin));
   stronaAdminProduktow=Math.min(Math.max(1,stronaAdminProduktow),liczbaStron);
-  const fragment=wszystkie.slice((stronaAdminProduktow-1)*produktyNaStronieAdmin,stronaAdminProduktow*produktyNaStronieAdmin);
+  const fragment=centralData?wszystkie:wszystkie.slice((stronaAdminProduktow-1)*produktyNaStronieAdmin,stronaAdminProduktow*produktyNaStronieAdmin);
   asortymentWynikiIds=wyniki.ids;asortymentStronaIds=fragment.map(p=>p.id);
   const katOpcje=index.categories,producenciOpcje=index.producers;
   const bazoweWKoszu=bazoweProduktyWKoszu();
-  const liczbaWKoszu=koszDodanych.length+bazoweWKoszu.length;
+  const liczbaWKoszu=centralData?Number(centralSummary.trash)||0:koszDodanych.length+bazoweWKoszu.length;
   const aktywneKarty=index.active,polaczoneAllegro=index.counts.connected,zBrakami=index.counts.missing,gotoweDoSprzedazy=index.counts.ready,ukryteSprzedazowo=index.counts.hidden;
   const zakresOd=liczbaWynikow?(stronaAdminProduktow-1)*produktyNaStronieAdmin+1:0,zakresDo=liczbaWynikow?zakresOd+fragment.length-1:0;
   const aktywneFiltry=[];
@@ -6961,7 +7005,7 @@ function widokAdminProdukty(){
   return asortymentSzkielet("produkty", `
     <div class="assortment-catalog-workspace">
       <header class="panel assortment-catalog-hero">
-        <div><span class="order-pro-label">Centralna kartoteka sprzedaży</span><h1>🏷️ Katalog produktów</h1><p>Jeden operacyjny widok produktów sklepu, magazynu i Allegro. Wyszukuj po wielu polach, łącz filtry i wykonuj operacje na całym wyniku bez utraty kontekstu.</p><small>${produkty.length} widocznych w sklepie • ${katalogWszystkie.length} wszystkich kart • ${producenciOpcje.length} producentów • wspólna baza danych</small></div>
+        <div><span class="order-pro-label">Centralna kartoteka sprzedaży</span><h1>🏷️ Katalog produktów</h1><p>Jeden operacyjny widok produktów sklepu, magazynu i Allegro. Wyszukuj po wielu polach, łącz filtry i wykonuj operacje na całym wyniku bez utraty kontekstu.</p><small>${centralData?Number(centralSummary.active)||0:produkty.length} aktywnych w sklepie • ${katalogWszystkie.length} wszystkich kart • ${producenciOpcje.length} producentów • ${centralData?"PostgreSQL i paginacja serwerowa":"bezpieczny cache lokalny"}</small></div>
         <div class="assortment-catalog-actions"><a class="btn" href="#/admin/produkty/dodaj">➕ Dodaj produkt</a><a class="btn ghost" href="#/admin/produkty/z-pliku">📄 Import linków</a><a class="btn ghost" href="#/admin/mapowanie">🧩 Mapowanie</a><a class="btn ghost" href="#/admin/eksport">⇄ Import / eksport</a><details><summary>Więcej operacji</summary><button class="btn ghost" onclick="eksportujProduktyJSON()">📤 Eksport JSON</button><button class="btn ghost" onclick="eksportujProduktyCSV()">📤 Eksport CSV</button></details></div>
       </header>
       <nav class="assortment-saved-views" aria-label="Szybkie widoki katalogu">
@@ -6976,8 +7020,8 @@ function widokAdminProdukty(){
       </div>
       <section class="panel assortment-catalog-page admin-pattern-surface allegro-listing-catalog catalog-product-card-center">
       <details class="assortment-maintenance" ${filtrStatusuProduktow==="duplikaty"||filtrAllegroProduktow==="duplikaty"?"open":""}><summary><span><b>🧬 Kontrola duplikatów i porządkowanie</b><small>Rozwiń tylko wtedy, gdy chcesz porównać lub uporządkować powtarzające się karty.</small></span><span><strong>Sklep: ${audytSklep.produkty}</strong><strong>Allegro: ${audytAllegro.produkty}</strong></span></summary><div class="assortment-maintenance-body">
-        ${audytSklep.grupy.length?`<section class="allegro-duplicate-center store-duplicate-center"><div class="order-section-head"><div><span class="order-pro-label">Porządkowanie katalogu sklepu</span><h3>Powtarzające się produkty (${audytSklep.grupy.length} grup)</h3><p class="order-detail-lead">Wybierz kartę główną dopiero po porównaniu identyfikatorów i danych.</p></div><button class="btn ghost" onclick="asortymentUstawFiltr('status','duplikaty')">Pokaż wszystkie kopie</button></div><div class="allegro-duplicate-groups">${audytSklep.grupy.slice(0,12).map(g=>`<article class="allegro-duplicate-group"><header><div><b>${esc(g.canonical.nazwa||"Produkt")}</b><small>Wspólny klucz: ${esc(g.keys.join(" • "))}</small></div><span class="lvl lvl-ostrzezenie">${g.produkty.length} kart</span></header><div class="allegro-duplicate-options">${g.produkty.map(p=>`<button type="button" class="allegro-duplicate-option ${String(p.id)===String(g.canonical.id)?"is-canonical":""}" onclick="ustawProduktGlownyDuplikatu(${jsArg(g.groupKey)},${jsArg(p.id)})"><div class="allegro-duplicate-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa)}</b><small>ID ${esc(p.id)} • EXTERNAL_ID ${esc(p.externalId||"—")} • SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small><em>${String(p.id)===String(g.canonical.id)?"✅ karta główna":"kopia do decyzji"}</em></div></div></button>`).join("")}</div><div class="diag-actions"><button class="btn danger" onclick="usunKopieGrupyProduktuTrwale(${jsArg(g.groupKey)})">🗑️ Pozostaw 1 i usuń trwale ${g.hidden.length} kopii</button></div></article>`).join("")}</div></section>`:`<div class="duplicate-audit-ok"><b>✅ Katalog sklepu:</b> brak powtarzających się produktów.</div>`}
-        ${audytAllegro.produkty?allegroCentrumDuplikatowHTML(audytAllegro,{compact:true,maxGroups:12}):`<div class="duplicate-audit-ok"><b>✅ Allegro:</b> brak produktów połączonych z więcej niż jedną ofertą.</div>`}
+        ${audytSklep.grupy.length?`<section class="allegro-duplicate-center store-duplicate-center"><div class="order-section-head"><div><span class="order-pro-label">Porządkowanie katalogu sklepu</span><h3>Powtarzające się produkty (${audytSklep.grupy.length} grup)</h3><p class="order-detail-lead">Wybierz kartę główną dopiero po porównaniu identyfikatorów i danych.</p></div><button class="btn ghost" onclick="asortymentUstawFiltr('status','duplikaty')">Pokaż wszystkie kopie</button></div><div class="allegro-duplicate-groups">${audytSklep.grupy.slice(0,12).map(g=>`<article class="allegro-duplicate-group"><header><div><b>${esc(g.canonical.nazwa||"Produkt")}</b><small>Wspólny klucz: ${esc(g.keys.join(" • "))}</small></div><span class="lvl lvl-ostrzezenie">${g.produkty.length} kart</span></header><div class="allegro-duplicate-options">${g.produkty.map(p=>`<button type="button" class="allegro-duplicate-option ${String(p.id)===String(g.canonical.id)?"is-canonical":""}" onclick="ustawProduktGlownyDuplikatu(${jsArg(g.groupKey)},${jsArg(p.id)})"><div class="allegro-duplicate-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa)}</b><small>ID ${esc(p.id)} • EXTERNAL_ID ${esc(p.externalId||"—")} • SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||"—")}</small><em>${String(p.id)===String(g.canonical.id)?"✅ karta główna":"kopia do decyzji"}</em></div></div></button>`).join("")}</div><div class="diag-actions"><button class="btn danger" onclick="usunKopieGrupyProduktuTrwale(${jsArg(g.groupKey)})">🗑️ Pozostaw 1 i usuń trwale ${g.hidden.length} kopii</button></div></article>`).join("")}</div></section>`:audytSklep.produkty?`<div class="duplicate-audit-ok"><b>🧬 Centralna kontrola:</b> ${audytSklep.produkty} kart ma wspólny silny identyfikator. Użyj filtra „Powtarzające się”, aby wyświetlić je bez pobierania całego katalogu.</div>`:`<div class="duplicate-audit-ok"><b>✅ Katalog sklepu:</b> brak powtarzających się produktów.</div>`}
+        ${audytAllegro.produkty&&audytAllegro.grupy?.length?allegroCentrumDuplikatowHTML(audytAllegro,{compact:true,maxGroups:12}):audytAllegro.produkty?`<div class="duplicate-audit-ok"><b>🟠 Centralna kontrola Allegro:</b> ${audytAllegro.produkty} kart wymaga sprawdzenia wielu aktywnych ofert.</div>`:`<div class="duplicate-audit-ok"><b>✅ Allegro:</b> brak produktów połączonych z więcej niż jedną ofertą.</div>`}
       </div></details>
       <details class="assortment-filter-panel admin-search-standard" open><summary><span><b>🔎 Wyszukiwanie zaawansowane</b><small>Ten sam standard co w centrum wystawiania: łącz identyfikatory, producenta, kategorię, dostępność, magazyn, Allegro, źródło i ceny obu kanałów.</small></span><span class="admin-search-summary-meta" data-assortment-filter-summary>${aktywneFiltry.length?`<em>${aktywneFiltry.length} aktywnych</em>`:""}<strong>${liczbaWynikow} wyników</strong><i aria-hidden="true"></i></span></summary><div class="admin-search-standard-body assortment-advanced-grid allegro-listing-advanced-grid">
         <label class="allegro-listing-search-wide"><span>Produkt lub identyfikator</span><input data-assortment-search placeholder="Nazwa, EXTERNAL_ID, SKU, EAN, kod producenta, ID produktu lub oferty…" value="${esc(szukajProduktow)}" oninput="asortymentSzukajProdukty(this)" autocomplete="off"></label>
@@ -7009,7 +7053,7 @@ function widokAdminProdukty(){
       <div class="pagination allegro-listing-pagination">${paginacjaHTML(stronaAdminProduktow,liczbaStron,"ustawStroneAdminProduktow")}</div></div>
       <p class="assortment-sync-note"><b>☁️ Wspólna baza:</b> zmiany kartotek, cen, stanów i dostępności zapisują się centralnie i są widoczne na pozostałych urządzeniach po synchronizacji. Eksport pozostaje kopią roboczą lub narzędziem do operacji hurtowych.</p>
       </section>
-    ${liczbaWKoszu ? `
+    ${!centralData&&liczbaWKoszu ? `
     <div class="panel assortment-trash-panel">
       <div class="results-bar"><h2 style="margin:0">🗑️ Kosz (${liczbaWKoszu})</h2><button class="btn danger" onclick="wyczyscCalKosz()">Opróżnij kosz</button></div>
       <p style="font-size:.82rem;color:var(--muted2);margin-bottom:.6rem">Produkty pozostają w koszu przez 30 dni. W tym czasie możesz je przywrócić; później są automatycznie usuwane definitywnie.</p>
