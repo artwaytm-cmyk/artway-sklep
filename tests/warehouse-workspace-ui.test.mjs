@@ -49,3 +49,18 @@ test('podstrony mają osobne narzędzia operacyjne, a nie tylko wspólne obramow
   assert.match(styles, /supplier-check-cell/);
   assert.match(styles, /warehouse-movement-toolbar/);
 });
+
+test('Plan zatowarowania prowadzi po procesie i renderuje tabele w jednym schemacie od pierwszej klatki', () => {
+  const plan = inventory.slice(inventory.indexOf('function magazynPlanEtykietaKolumny'), inventory.indexOf('function magazynDostawcaWierszHTML'));
+  assert.match(plan, /restock-workflow-nav/);
+  assert.match(plan, /Braki i zakupy/);
+  assert.match(plan, /Dokumenty producentów/);
+  assert.match(plan, /Operacje PZ \/ WZ/);
+  assert.ok(plan.indexOf('${magazynTabelaOperacyjnaHTML()}') < plan.indexOf('${magazynDokumentyPanelHTML()}'));
+  assert.match(plan, /admin-responsive-table/);
+  assert.match(plan, /admin-standard-table/);
+  assert.match(plan, /data-label/);
+  assert.match(plan, /magazynPlanUstandaryzujTabeleDOM/);
+  assert.match(styles, /table\.admin-responsive-table td\[data-label="Produkt i kod"\]/);
+  assert.match(styles, /@media\(max-width:460px\).*supplier-order-actions/);
+});

@@ -221,7 +221,7 @@ function magazynDokumentPoId(id){return (magazynDokumentyStan.items||[]).find(x=
 function magazynDokumentWybrany(){const selected=magazynDokumentPoId(magazynDokumentyStan.selectedId);return selected&&magazynDokumentPasuje(selected)?selected:null;}
 function magazynDokumentStatusMeta(status="draft"){return {draft:{label:"Szkic",cls:"draft",icon:"✏️"},confirmed:{label:"Zatwierdzony",cls:"confirmed",icon:"✅"},cancelled:{label:"Anulowany",cls:"cancelled",icon:"⛔"}}[status]||{label:status,cls:"",icon:"🧾"};}
 function magazynDokumentRequestId(prefix="wd"){return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,9)}`;}
-function magazynDokumentyOdswiezPanel(){const root=document.getElementById("warehouseDocumentsCenter");if(!root)return false;root.innerHTML=magazynDokumentyPanelWnetrzeHTML();return true;}
+function magazynDokumentyOdswiezPanel(){const root=document.getElementById("warehouseDocumentsCenter");if(!root)return false;root.innerHTML=magazynDokumentyPanelWnetrzeHTML();globalThis.magazynPlanUstandaryzujTabeleDOM?.(root);return true;}
 function magazynDokumentPrzewinDo(selector,focusSelector=""){
   requestAnimationFrame(()=>{const element=document.querySelector(selector);element?.scrollIntoView?.({block:"start",behavior:"smooth"});if(focusSelector)element?.querySelector?.(focusSelector)?.focus?.({preventScroll:true});});
 }

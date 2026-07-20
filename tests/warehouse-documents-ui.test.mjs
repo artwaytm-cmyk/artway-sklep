@@ -73,3 +73,9 @@ test('telefon ma stały, prosty pasek obsługi aktywnego dokumentu', async () =>
   assert.match(styles, /\.warehouse-document-mobile-actions\{position:fixed/);
   assert.match(styles, /html\.artway-pwa-standalone \.warehouse-document-mobile-actions/);
 });
+
+test('odświeżenie PZ i WZ natychmiast przywraca mobilne etykiety tabeli', () => {
+  assert.match(source, /magazynPlanUstandaryzujTabeleDOM\?\.\(root\)/);
+  assert.match(inventory, /Ilość \$\{doc\.type\}/);
+  assert.match(inventory, /warehouse-document-lines/);
+});

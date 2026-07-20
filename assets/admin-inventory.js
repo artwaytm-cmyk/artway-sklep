@@ -880,13 +880,43 @@ function magazynKontekstPodstronyHTML(aktywna="pulpit",u={}){
   const actions=aktywna==="pulpit"?`<button class="btn" onclick="eksportujMagazynCSV()">📊 Eksport CSV</button><button class="btn ghost" onclick="agentAISprawdzDostepnoscProducentow()">🏭 Sprawdź producentów</button><a class="btn ghost" href="#/admin/agent-ai">🤖 Agent AI</a>`:aktywna==="dostawcy"?`<button class="btn" onclick="agentAISprawdzDostepnoscProducentow()">🤖 Uruchom kontrolę</button>`:aktywna==="stany"?`<button class="btn ghost" onclick="eksportujMagazynCSV()">📤 Eksport stanów</button>`:aktywna==="lokalizacje"?`<button class="btn" onclick="magazynOtworzKreatorLokalizacji('strefa')">＋ Nowy obszar</button>`:aktywna==="etykiety-qr"?`<a class="btn ghost" href="#/admin/magazyn/lokalizacje">🗺️ Mapa lokalizacji</a>`:aktywna==="plan"?`<button class="btn" onclick="agentAIUzgodnijPlanZSerwerem()">↻ Uzgodnij plan</button>`:`<a class="btn ghost" href="#/admin/magazyn/plan">📥 Otwórz PZ/WZ</a>`;
   return `<header class="warehouse-page-context section-${esc(aktywna)}"><div class="warehouse-page-identity"><div class="warehouse-page-kicker"><span>${esc(page.icon)}</span><small>${esc(page.eyebrow)}</small></div><h1>${esc(page.title)}</h1><p>${esc(page.description)}</p></div><div class="warehouse-page-tools"><div class="warehouse-live-state"><i></i><span><b>Wspólna baza aktywna</b><small>Zapis na serwerze</small></span></div><div class="diag-actions">${actions}<button class="btn ghost" type="button" onclick="magazynGlobalnySkanerOtworz()">📷 Skaner</button></div></div></header>`;
 }
+function magazynPlanEtykietaKolumny(value=""){return String(value||"").replace(/<[^>]+>/g,"").replace(/\s+/g," ").trim();}
+function magazynPlanUstandaryzujTabeleHTML(html=""){
+  return String(html||"").replace(/<table class="([^"]*)">([\s\S]*?)<\/table>/g,(table,classes,content)=>{
+    if(!/(?:^|\s)log-table(?:\s|$)/.test(classes))return table;
+    const labels=[...content.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map(x=>magazynPlanEtykietaKolumny(x[1]));
+    const body=content.replace(/<tr([^>]*)>([\s\S]*?)<\/tr>/g,(row,rowAttrs,cells)=>{
+      let column=-1;
+      const marked=cells.replace(/<td([^>]*)>/g,(cell,attrs)=>{
+        column+=1;if(/\bdata-label\s*=/.test(attrs))return cell;
+        const label=/\bcolspan\s*=/.test(attrs)?"":(labels[column]||(column===labels.length-1?"Akcje":""));
+        return `<td data-label="${esc(label)}"${attrs}>`;
+      });
+      return `<tr${rowAttrs}>${marked}</tr>`;
+    });
+    const className=[...new Set(`${classes} admin-responsive-table admin-standard-table`.split(/\s+/).filter(Boolean))].join(" ");
+    return `<table class="${className}">${body}</table>`;
+  });
+}
+function magazynPlanUstandaryzujTabeleDOM(root=document){
+  root?.querySelectorAll?.("table.log-table").forEach(table=>{
+    table.classList.add("admin-responsive-table","admin-standard-table");
+    const labels=[...(table.tHead?.rows?.[0]?.cells||[])].map(cell=>magazynPlanEtykietaKolumny(cell.textContent));
+    table.querySelectorAll("tbody tr, tfoot tr").forEach(row=>[...row.cells].forEach((cell,index)=>{
+      if(!cell.hasAttribute("data-label"))cell.dataset.label=cell.colSpan>1?"":(labels[index]||(index===labels.length-1?"Akcje":""));
+    }));
+  });
+  return root;
+}
+function magazynPlanPrzewinDo(selector){const target=document.querySelector(selector);if(!target)return false;target.scrollIntoView({behavior:"smooth",block:"start"});return true;}
 function magazynPlanZatowarowaniaHTML(){
-  return `<section class="panel restock-plan-intro"><div class="order-section-head"><div><span class="order-pro-label">Zakupy producentów + dokumenty magazynowe</span><h2>📦 Plan zatowarowania</h2><p class="order-detail-lead">Jedno centrum łączy braki do zamówień, dokumenty producentów oraz niezależne przyjęcia PZ i rozchody WZ. Skanowanie tworzy szkic; stan zmienia dopiero świadome zatwierdzenie całego dokumentu.</p></div><div class="diag-actions"><a class="btn ghost" href="#/admin/magazyn/etykiety-qr">🏷️ Etykiety QR</a><button class="btn" onclick="agentAIUzgodnijPlanZSerwerem()">↻ Uzgodnij szkice z brakami</button></div></div><div class="supplier-plan-guardrails"><span><b>1. Braki</b><small>aktywne zamówienia</small></span><span><b>2. Dokumenty</b><small>producent, PZ albo WZ</small></span><span><b>3. Lokalizacja</b><small>QR regału, półki lub miejsca</small></span><span><b>4. Produkty</b><small>aparat lub czytnik</small></span><span><b>5. Księgowanie</b><small>jedna operacja atomowa</small></span></div></section>${magazynDokumentyPanelHTML()}${magazynTabelaOperacyjnaHTML()}`;
+  const intro=`<section class="panel restock-plan-intro"><div class="order-section-head"><div><span class="order-pro-label">Zakupy producentów + dokumenty magazynowe</span><h2>📦 Plan zatowarowania</h2><p class="order-detail-lead">Braki, zamówienia producentów, przyjęcia oraz rozchody tworzą jeden kontrolowany proces. Edycja przygotowuje dokument, a stan zmienia dopiero jego końcowe zatwierdzenie.</p></div><div class="diag-actions"><a class="btn ghost" href="#/admin/magazyn/etykiety-qr">🏷️ Etykiety QR</a><button class="btn" onclick="agentAIUzgodnijPlanZSerwerem()">↻ Uzgodnij szkice z brakami</button></div></div><nav class="restock-workflow-nav" aria-label="Etapy planu zatowarowania"><button type="button" onclick="magazynPlanPrzewinDo('.ops-control-center')"><span>1</span><div><b>Braki i zakupy</b><small>sprawdź potrzeby zamówień</small></div></button><button type="button" onclick="magazynPlanPrzewinDo('.supplier-restock-plan')"><span>2</span><div><b>Dokumenty producentów</b><small>zatwierdź, wyślij i przyjmij</small></div></button><button type="button" onclick="magazynPlanPrzewinDo('#warehouseDocumentsCenter')"><span>3</span><div><b>Operacje PZ / WZ</b><small>skanuj, koryguj i zaksięguj</small></div></button></nav></section>`;
+  return magazynPlanUstandaryzujTabeleHTML(`${intro}${magazynTabelaOperacyjnaHTML()}${magazynDokumentyPanelHTML()}`);
 }
 function odswiezPlanZatowarowaniaWidoku(){
   const root=document.getElementById("warehouseRestockWorkspace");if(!root||typeof magazynTabelaOperacyjnaHTML!=="function")return false;
   const aktywny=document.activeElement,focusId=aktywny&&root.contains(aktywny)?String(aktywny.id||""):"",start=typeof aktywny?.selectionStart==="number"?aktywny.selectionStart:null,end=typeof aktywny?.selectionEnd==="number"?aktywny.selectionEnd:null;
-  root.innerHTML=magazynPlanZatowarowaniaHTML();
+  root.innerHTML=magazynPlanZatowarowaniaHTML();magazynPlanUstandaryzujTabeleDOM(root);
   if(focusId){const nastepny=document.getElementById(focusId);if(nastepny){nastepny.focus({preventScroll:true});if(start!==null&&typeof nastepny.setSelectionRange==="function")nastepny.setSelectionRange(start,end??start);}}
   return true;
 }
