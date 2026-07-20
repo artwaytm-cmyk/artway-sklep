@@ -7083,6 +7083,7 @@ function widokAdminProdukty(){
 }
 
 const ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI=3;
+function kodKanonicznyProduktu(p={}){return String(p.kodProducenta||p.numerReferencyjny||p.mpn||p.externalId||p.sku||"").trim();}
 function domyslneUstawieniaRentownosci(){
   const raw=ustawienia.domyslneKosztyRentownosci&&typeof ustawienia.domyslneKosztyRentownosci==="object"?ustawienia.domyslneKosztyRentownosci:{};
   const money=(v,fallback=0)=>Math.max(0,Math.min(100000,kwotaNum(v??fallback))),percent=(v,fallback=0)=>Math.max(0,Math.min(100,Number(v??fallback)||0));
@@ -7214,16 +7215,12 @@ function formularzProduktu(p, tryb){
           </div>
         </div>`).join("")}
       </details>
-      <div class="f-row">
-        <div class="f-group"><label>Kod produktu (SKU) <small style="font-weight:400;color:var(--muted2)">opcjonalnie</small></label><input name="sku" value="${esc(p.sku||"")}" placeholder="np. ATM-0001" maxlength="30"></div>
-        <div class="f-group"><label>Warianty <small style="font-weight:400;color:var(--muted2)">po przecinku, np. S, M, L, XL</small></label><input name="warianty" value="${esc((p.warianty||[]).join(", "))}" placeholder="np. S, M, L, XL albo Czarny, Biały"></div>
-      </div>
+      <div class="f-group"><label>Warianty <small style="font-weight:400;color:var(--muted2)">po przecinku, np. S, M, L, XL</small></label><input name="warianty" value="${esc((p.warianty||[]).join(", "))}" placeholder="np. S, M, L, XL albo Czarny, Biały"></div>
       <details ${(p.gtin||p.externalId||p.mpn||p.producent||p.marka||p.kolorProduktu||p.rozmiar||p.material)?"open":""} style="margin-bottom:.8rem">
         <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🏷️ Dane z hurtowni / OVF</summary>
         <div class="f-row" style="margin-top:.7rem">
-          <div class="f-group"><label>GTIN / EAN</label><input name="gtin" value="${esc(p.gtin||"")}" placeholder="np. 5901234567891"></div>
-          <div class="f-group"><label>EXTERNAL_ID</label><input name="externalId" value="${esc(p.externalId||"")}" placeholder="ID z hurtowni"></div>
-          <div class="f-group"><label>MPN</label><input name="mpn" value="${esc(p.mpn||"")}" placeholder="Kod producenta"></div>
+          <div class="f-group"><label>GTIN / EAN</label><input name="gtin" value="${esc(p.gtin||p.ean||"")}" placeholder="np. 5901234567891"></div>
+          <div class="f-group"><label>Kod produktu / producenta</label><input name="kodProducenta" value="${esc(kodKanonicznyProduktu(p))}" placeholder="np. 0006 lub kod katalogowy" maxlength="160"><small>Jedno pole kanoniczne. System przekazuje tę samą wartość jako SKU, EXTERNAL_ID i MPN do starszych importów oraz Allegro.</small></div>
         </div>
         <div class="f-row">
           <div class="f-group"><label>Producent *</label><input name="producent" list="allegroProducerList" value="${esc(allegroProducentKanoniczny(p)||p.producent||p.marka||"")}" placeholder="np. Alexander"><datalist id="allegroProducerList">${allegroListaProducentow().map(name=>`<option value="${esc(name)}">`).join("")}</datalist><small>Lista jest zarządzana w Allegro → Ustawienia.</small></div>
@@ -7235,13 +7232,13 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Materiał / MATERIAL</label><input name="material" value="${esc(p.material||"")}" placeholder="np. bawełna, karton, stal"></div>
         </div>
         <div class="f-row">
-          <div class="f-group"><label>Kod producenta</label><input name="kodProducenta" value="${esc(p.kodProducenta||"")}" placeholder="np. 2282 lub kod katalogowy"></div>
           <div class="f-group"><label>Dostępność u producenta</label><input name="dostepnoscProducenta" value="${esc(p.dostepnoscProducenta||"")}" placeholder="dostępny / niedostępny / do sprawdzenia"></div>
           <div class="f-group"><label>Zweryfikowane źródło produktu</label>${edycja?`${p.sourceUrl||p.producentUrl?`<input name="sourceUrl" value="${esc(p.sourceUrl||p.producentUrl||"")}" readonly>`:`<input type="hidden" name="sourceUrl" value="">`}<input type="hidden" name="producentUrl" value="${esc(p.producentUrl||p.sourceUrl||"")}"><small>Adres pochodzi z kartoteki produktu.</small>`:`<input type="hidden" name="sourceUrl" value="${esc(p.sourceUrl||p.producentUrl||"")}"><small>Źródło uzupełnia się z pola na górze formularza.</small>`}</div>
         </div>
         <input type="hidden" name="stanProducenta" value="${esc(p.stanProducenta??"")}"><input type="hidden" name="stanProducentaDokladny" value="${p.stanProducentaDokladny?"1":""}"><input type="hidden" name="stanProducentaZrodlo" value="${esc(p.stanProducentaZrodlo||"")}"><input type="hidden" name="producentStatus" value="${esc(p.producentStatus||"")}"><input type="hidden" name="producentSprawdzonoAt" value="${esc(p.producentSprawdzonoAt||"")}">
         <div class="supplier-editor-status">${producentDostepnoscBadgeHTML(p)}${edycja&&/^https?:\/\//i.test(String(p.producentUrl||p.sourceUrl||""))?`<button class="btn ghost" type="button" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź stan u producenta</button>`:""}</div>
         ${p.sourceEvidence?.canonicalUrl||p.sourceEvidence?.url?`<div class="product-source-evidence"><div><span>🔎 Zweryfikowane źródło danych</span><b>${esc(p.sourceEvidence.host||(()=>{try{return new URL(p.sourceEvidence.canonicalUrl||p.sourceEvidence.url).hostname;}catch(e){return "strona produktu";}})())}</b><small>Odczyt: ${esc(p.sourceEvidence.fetchedAt?new Date(p.sourceEvidence.fetchedAt).toLocaleString("pl-PL"):"brak daty")} • pewność Agenta ${esc(p.agentImportConfidence||0)}%</small></div><a class="btn ghost" href="${esc(p.sourceEvidence.canonicalUrl||p.sourceEvidence.url)}" target="_blank" rel="noopener">Otwórz źródło ↗</a><details><summary>Pobrane informacje (${esc((p.sourceEvidence.fields||[]).length)})</summary><p>${esc((p.sourceEvidence.fields||[]).join(" • ")||"nazwa • cena • opis • zdjęcia • parametry • dostępność")}</p></details></div>`:""}
+        ${Object.keys(p.parametryZrodla||p.parametryProducenta||{}).length?`<details class="product-source-parameters"><summary>📋 Wszystkie parametry ze źródła</summary><dl>${Object.entries(p.parametryZrodla||p.parametryProducenta||{}).filter(([,value])=>String(value??"").trim()).map(([label,value])=>`<div><dt>${esc(String(label).replace(/_/g," "))}</dt><dd>${esc(value)}</dd></div>`).join("")}</dl></details>`:""}
       </details>
       <details ${(p.allegroCategoryId||p.allegroProductId||p.allegroOfferId)?"open":""} style="margin-bottom:.8rem">
         <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🟠 Allegro — dane do wystawienia</summary>
@@ -7352,17 +7349,17 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   const zdjecie = String(f.get("zdjecie")||"").trim();
   if(zdjecie) p.zdjecie = zdjecie; else delete p.zdjecie;
   if(f.get("badge")) p.badge = String(f.get("badge")); else delete p.badge;
-  const sku = String(f.get("sku")||"").trim();
-  if(sku) p.sku = sku; else delete p.sku;
   for(const [pole,nazwa] of [
-    ["gtin","gtin"],["externalId","externalId"],["mpn","mpn"],["producent","producent"],["marka","marka"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"],
-    ["kodProducenta","kodProducenta"],["dostepnoscProducenta","dostepnoscProducenta"],["producentUrl","producentUrl"],["sourceUrl","sourceUrl"],
+    ["gtin","gtin"],["producent","producent"],["marka","marka"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"],
+    ["dostepnoscProducenta","dostepnoscProducenta"],["producentUrl","producentUrl"],["sourceUrl","sourceUrl"],
     ["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroOfferId","allegroOfferId"],["allegroCategoryPhrase","allegroCategoryPhrase"],["allegroTitle","allegroTitle"],
     ["seoTitle","seoTitle"],["seoDescription","seoDescription"],["seoKeywords","seoKeywords"],["seoMode","seoMode"]
   ]){
     const v=String(f.get(nazwa)||"").trim();
     if(v)p[pole]=v;else delete p[pole];
   }
+  const canonicalCode=String(f.get("kodProducenta")||"").trim();
+  for(const pole of ["kodProducenta","numerReferencyjny","mpn","externalId","sku"]){if(canonicalCode)p[pole]=canonicalCode;else delete p[pole];}
   if(p.producentUrl)p.sourceUrl=p.producentUrl;
   const stanProd=String(f.get("stanProducenta")??"").trim();if(stanProd!=="")p.stanProducenta=Math.max(0,Math.floor(Number(stanProd)||0));else delete p.stanProducenta;
   p.stanProducentaDokladny=String(f.get("stanProducentaDokladny")||"")==="1";
@@ -7451,7 +7448,8 @@ async function automatyczniePobierzDaneZrodlaProduktu(p={}){
   const url=String(p.producentUrl||p.sourceUrl||"").trim();if(!/^https?:\/\//i.test(url))return p;
   try{
     const d=await chmura("product-url-inspect",{method:"POST",body:{url},timeout:30000}),s=d.product||{},canonical=allegroProducentKanoniczny({...p,...s,sourceUrl:url,producentUrl:url});
-    const missing={gtin:s.gtin||s.ean,ean:s.ean||s.gtin,externalId:s.externalId,mpn:s.mpn||s.kodProducenta,kodProducenta:s.kodProducenta||s.mpn,producent:canonical||s.producent||s.marka,marka:s.marka||canonical||s.producent,zdjecie:s.zdjecie,zdjecia:Array.isArray(s.zdjecia)?s.zdjecia.slice(0,15):[],parametryProducenta:s.parametryProducenta,parametryZrodla:s.parametryZrodla,sourceMaterial:{...(p.sourceMaterial||{}),sourceUrl:s.sourceUrl||s.producentUrl||url,fetchedAt:s.sourceEvidence?.fetchedAt||s.producentSprawdzonoAt||new Date().toISOString(),title:s.nazwa||"",shortDescription:s.opisKrotki||"",longDescription:s.opis||"",producer:s.producent||s.marka||"",brand:s.marka||s.producent||"",category:s.kategoria||"",ean:s.gtin||s.ean||"",producerCode:s.kodProducenta||s.mpn||"",parameters:s.parametryProducenta||s.parametryZrodla||{}},contentEditorial:{...(p.contentEditorial||{}),status:"queued",queuedReason:"source_updated",queuedAt:new Date().toISOString()}};
+    const sourceCode=String(s.kodProducenta||s.numerReferencyjny||s.mpn||s.externalId||s.sku||"").trim();
+    const missing={gtin:s.gtin||s.ean,ean:s.ean||s.gtin,kodProducenta:sourceCode,numerReferencyjny:sourceCode,externalId:sourceCode,sku:sourceCode,mpn:sourceCode,producent:canonical||s.producent||s.marka,marka:s.marka||canonical||s.producent,zdjecie:s.zdjecie,zdjecia:Array.isArray(s.zdjecia)?s.zdjecia.slice(0,15):[],parametryProducenta:s.parametryProducenta,parametryZrodla:s.parametryZrodla,sourceMaterial:{...(p.sourceMaterial||{}),sourceUrl:s.sourceUrl||s.producentUrl||url,fetchedAt:s.sourceEvidence?.fetchedAt||s.producentSprawdzonoAt||new Date().toISOString(),title:s.nazwa||"",shortDescription:s.opisKrotki||"",longDescription:s.opis||"",producer:s.producent||s.marka||"",brand:s.marka||s.producent||"",category:s.kategoria||"",ean:s.gtin||s.ean||"",producerCode:sourceCode,parameters:s.parametryProducenta||s.parametryZrodla||{}},contentEditorial:{...(p.contentEditorial||{}),status:"queued",queuedReason:"source_updated",queuedAt:new Date().toISOString()}};
     zapiszPolaProduktuLokalnie(p.id,missing,true);
     const current=pobierzProduktAdmin(p.id)||p,canonicalUrl=s.sourceUrl||s.producentUrl||url,force={producentUrl:canonicalUrl,sourceUrl:canonicalUrl,sourceEvidence:s.sourceEvidence||current.sourceEvidence||null,dostepnoscProducenta:s.dostepnoscProducenta||current.dostepnoscProducenta||"",stanProducenta:s.stanProducenta??current.stanProducenta??"",stanProducentaDokladny:s.stanProducentaDokladny===true,stanProducentaZrodlo:s.stanProducentaZrodlo||current.stanProducentaZrodlo||"",producentStatus:s.producentStatus||current.producentStatus||"",producentSprawdzonoAt:s.producentSprawdzonoAt||current.producentSprawdzonoAt||new Date().toISOString()};
     zapiszPolaProduktuLokalnie(p.id,force,false);agentAIZakonczLinkProducenta(url,pobierzProduktAdmin(p.id)||p);return pobierzProduktAdmin(p.id)||{...p,...missing,...force};
@@ -8557,7 +8555,7 @@ let productLinkImportStan={
   initialized:false,jobId:"",job:null,summary:null,items:[],analysisItems:[],parsedRows:[],fileName:"",
   parsing:false,creating:false,statusLoading:false,loopActive:false,pauseRequested:false,cancelRequested:false,
   filter:"all",query:"",page:1,pageSize:50,error:"",notice:"",startedLocallyAt:0,lastStepAt:0,statusLoadedFor:"",
-  reviewSelected:new Set(),reviewBusy:false
+  reviewSelected:new Set(),reviewBusy:false,updateExisting:true
 };
 
 function productLinkImportWczytajPamiec(){
@@ -8566,12 +8564,13 @@ function productLinkImportWczytajPamiec(){
   try{
     const saved=JSON.parse(localStorage.getItem(PRODUCT_LINK_IMPORT_STORAGE_KEY)||"null");
     if(saved?.jobId){productLinkImportStan.jobId=String(saved.jobId);productLinkImportStan.fileName=String(saved.fileName||"");}
+    if(typeof saved?.updateExisting==="boolean")productLinkImportStan.updateExisting=saved.updateExisting;
   }catch(_error){}
 }
 function productLinkImportZapiszPamiec(){
   try{
     if(!productLinkImportStan.jobId)localStorage.removeItem(PRODUCT_LINK_IMPORT_STORAGE_KEY);
-    else localStorage.setItem(PRODUCT_LINK_IMPORT_STORAGE_KEY,JSON.stringify({jobId:productLinkImportStan.jobId,fileName:productLinkImportStan.fileName,savedAt:new Date().toISOString()}));
+    else localStorage.setItem(PRODUCT_LINK_IMPORT_STORAGE_KEY,JSON.stringify({jobId:productLinkImportStan.jobId,fileName:productLinkImportStan.fileName,updateExisting:productLinkImportStan.updateExisting,savedAt:new Date().toISOString()}));
   }catch(_error){}
 }
 function productLinkImportBrakZadania(error){return Number(error?.status)===404||String(error?.code||"")==="product_link_import_not_found";}
@@ -8619,6 +8618,7 @@ function productLinkImportScalOdpowiedz(data={}){
   const job=data.job||data.importJob||{},id=job.id||job.jobId||data.jobId||productLinkImportStan.jobId;
   if(id){productLinkImportStan.jobId=String(id);productLinkImportStan.statusLoadedFor=String(id);}
   productLinkImportStan.job={...(productLinkImportStan.job||{}),...job,id:String(id||""),state:productLinkImportStanZadania(job.state||job.status||data.state||productLinkImportStan.job?.state)};
+  if(typeof job.updateExisting==="boolean")productLinkImportStan.updateExisting=job.updateExisting;
   productLinkImportStan.fileName=String(job.fileName||data.fileName||productLinkImportStan.fileName||"");
   if(Array.isArray(data.items))productLinkImportScalElementy(data.items,true);
   else if(Array.isArray(job.items))productLinkImportScalElementy(job.items,true);
@@ -8635,20 +8635,20 @@ function productLinkImportPodsumowanie(){
   const total=productLinkImportLiczba(source.total,productLinkImportLiczba(productLinkImportStan.job?.total,items.length||productLinkImportStan.parsedRows.length));
   const invalid=productLinkImportStan.analysisItems.filter(item=>item.status==="invalid_file").length,duplicates=productLinkImportStan.analysisItems.filter(item=>item.status==="duplicate_file").length,result={
     total,queued:productLinkImportLiczba(source.queued,count("queued")),processing:productLinkImportLiczba(source.processing,count("processing")),
-    added:productLinkImportLiczba(source.added,count("added")),skipped_existing:productLinkImportLiczba(source.skipped_existing,count("skipped_existing")),
+    added:productLinkImportLiczba(source.added,count("added")),updated_existing:productLinkImportLiczba(source.updated_existing,count("updated_existing")),skipped_existing:productLinkImportLiczba(source.skipped_existing,count("skipped_existing")),
     needs_review:productLinkImportLiczba(source.needs_review,count("needs_review")),failed:productLinkImportLiczba(source.failed,count("failed")),
     cancelled:productLinkImportLiczba(source.cancelled,count("cancelled")),invalid_file:invalid,duplicate_file:duplicates
   };
-  result.processed=productLinkImportLiczba(source.processed,result.added+result.skipped_existing+result.needs_review+result.failed+result.cancelled);
+  result.processed=productLinkImportLiczba(source.processed,result.added+result.updated_existing+result.skipped_existing+result.needs_review+result.failed+result.cancelled);
   result.percent=Math.max(0,Math.min(100,productLinkImportLiczba(source.percent,total?Math.round(result.processed/total*100):0)));
   result.fileTotal=total+invalid+duplicates;result.fileRejected=invalid+duplicates;
   return result;
 }
 function productLinkImportAktywne(){return !!productLinkImportStan.jobId&&!PRODUCT_LINK_IMPORT_TERMINAL_STATES.has(productLinkImportStan.job?.state||"");}
 function productLinkImportEtykietaStatusu(status){
-  return ({queued:"Oczekuje",processing:"Pobieranie",added:"Dodano",skipped_existing:"Pominięto — istnieje",needs_review:"Do decyzji",failed:"Błąd",cancelled:"Anulowano",invalid_file:"Błędny wiersz pliku",duplicate_file:"Duplikat w pliku"})[productLinkImportStatus(status)]||String(status||"Oczekuje");
+  return ({queued:"Oczekuje",processing:"Pobieranie",added:"Dodano",updated_existing:"Zaktualizowano",skipped_existing:"Pominięto — istnieje",needs_review:"Do decyzji",failed:"Błąd",cancelled:"Anulowano",invalid_file:"Błędny wiersz pliku",duplicate_file:"Duplikat w pliku"})[productLinkImportStatus(status)]||String(status||"Oczekuje");
 }
-function productLinkImportIkonaStatusu(status){return ({queued:"○",processing:"↻",added:"✓",skipped_existing:"↪",needs_review:"!",failed:"×",cancelled:"−",invalid_file:"×",duplicate_file:"↪"})[productLinkImportStatus(status)]||"○";}
+function productLinkImportIkonaStatusu(status){return ({queued:"○",processing:"↻",added:"✓",updated_existing:"↻",skipped_existing:"↪",needs_review:"!",failed:"×",cancelled:"−",invalid_file:"×",duplicate_file:"↪"})[productLinkImportStatus(status)]||"○";}
 function productLinkImportRozpoznajWiersze(parsed){
   const source=Array.isArray(parsed)?parsed:(parsed?.rows||parsed?.links||parsed?.items||[]);
   return source.map((raw,index)=>{
@@ -8681,12 +8681,13 @@ function productLinkImportWybranoPlik(input){const file=input?.files?.[0];if(fil
 function productLinkImportPrzeciagnij(event){event.preventDefault();event.currentTarget?.classList.add("is-dragging");}
 function productLinkImportOpusc(event){event.preventDefault();event.currentTarget?.classList.remove("is-dragging");}
 function productLinkImportUpusc(event){event.preventDefault();event.currentTarget?.classList.remove("is-dragging");const file=event.dataTransfer?.files?.[0];if(file)void productLinkImportWczytajPlik(file);}
+function productLinkImportUstawAktualizacje(checked){if(productLinkImportAktywne())return;productLinkImportStan.updateExisting=!!checked;productLinkImportZapiszPamiec();productLinkImportOdswiezDOM();}
 
 async function productLinkImportUtworz(){
   if(productLinkImportStan.creating||productLinkImportStan.loopActive||!productLinkImportStan.parsedRows.length)return;
   productLinkImportStan.creating=true;productLinkImportStan.error="";productLinkImportStan.notice="Tworzę bezpieczną kolejkę na serwerze…";productLinkImportOdswiezDOM();
   try{
-    const response=await chmura("product-link-import-create",{method:"POST",body:{fileName:productLinkImportStan.fileName,rows:productLinkImportStan.parsedRows},timeout:60000});
+    const response=await chmura("product-link-import-create",{method:"POST",body:{fileName:productLinkImportStan.fileName,rows:productLinkImportStan.parsedRows,updateExisting:productLinkImportStan.updateExisting===true},timeout:60000});
     productLinkImportScalOdpowiedz(response);productLinkImportStan.startedLocallyAt=Date.now();productLinkImportStan.notice="Kolejka uruchomiona. Produkty są dodawane pojedynczo i od razu zapisywane.";
     void productLinkImportPetla();
   }catch(error){productLinkImportStan.error=error?.message||String(error);productLinkImportStan.notice="Nie uruchomiono importu — żaden produkt nie został zmieniony.";}
@@ -8788,10 +8789,10 @@ function productLinkImportReviewBraki(item={}){
 }
 function productLinkImportReviewFormHTML(item={}){
   const d=productLinkImportReviewDraft(item),missing=productLinkImportReviewBraki(item),brak=field=>missing.some(value=>String(value).toLowerCase().includes(field)),wymagane=field=>brak(field)?" required":"",gwiazdka=field=>brak(field)?" *":"";
-  return `<details class="product-link-review-editor"><summary><span>✏️ Uzupełnij dane produktu</span><em>${missing.length?`Brakuje: ${esc(missing.join(", "))}`:"Szkic gotowy do zatwierdzenia"}</em></summary><form onsubmit="return productLinkImportZapiszDecyzje(event,${jsArg(item.id)})"><div class="product-link-review-primary"><label class="${brak("cena")?"is-required":""}"><span>Cena sprzedaży brutto${gwiazdka("cena")}</span><input name="cena" inputmode="decimal" value="${esc(Number(d.cena)>0?d.cena:"")}" placeholder="np. 29,90"${wymagane("cena")}></label><label class="${brak("nazwa")?"is-required":""}"><span>Nazwa produktu${gwiazdka("nazwa")}</span><input name="nazwa" value="${esc(d.nazwa||"")}"${wymagane("nazwa")}></label><label class="${brak("producent")?"is-required":""}"><span>Producent / marka${gwiazdka("producent")}</span><input name="producent" value="${esc(d.producent||d.marka||"")}"${wymagane("producent")}></label><label class="${brak("kategoria")?"is-required":""}"><span>Kategoria sklepu${gwiazdka("kategoria")}</span><input name="kategoria" value="${esc(d.kategoria||"")}"${wymagane("kategoria")}></label></div><details class="product-link-review-more"><summary>Więcej danych do poprawy</summary><div><label><span>EAN / GTIN</span><input name="ean" value="${esc(d.ean||d.gtin||"")}"></label><label><span>EXTERNAL_ID / SKU</span><input name="externalId" value="${esc(d.externalId||d.sku||"")}"></label><label><span>Kod producenta</span><input name="kodProducenta" value="${esc(d.kodProducenta||d.mpn||"")}"></label><label><span>Główne zdjęcie</span><input name="zdjecie" value="${esc(d.zdjecie||"")}" placeholder="https://…"></label><label><span>Emoji</span><input name="ikona" value="${esc(d.ikona||"🎲")}" maxlength="20"></label><label><span>Kolor karty</span><input name="kolor" type="color" value="${/^#[0-9a-f]{6}$/i.test(String(d.kolor||""))?esc(d.kolor):"#dbeafe"}"></label><label class="wide"><span>Krótki opis</span><textarea name="opisKrotki" rows="2">${esc(d.opisKrotki||"")}</textarea></label><label class="wide"><span>Pełny opis</span><textarea name="opis" rows="5">${esc(d.opis||"")}</textarea></label></div></details><footer><small>System ponownie sprawdzi link, połączy pobrane dane z Twoimi zmianami i doda produkt tylko wtedy, gdy wszystkie wymagane pola będą kompletne.</small><button class="btn" type="submit" ${productLinkImportStan.reviewBusy?"disabled":""}>✅ Zapisz decyzję i dodaj produkt</button></footer></form></details>`;
+  return `<details class="product-link-review-editor"><summary><span>✏️ Uzupełnij dane produktu</span><em>${missing.length?`Brakuje: ${esc(missing.join(", "))}`:"Szkic gotowy do zatwierdzenia"}</em></summary><form onsubmit="return productLinkImportZapiszDecyzje(event,${jsArg(item.id)})"><div class="product-link-review-primary"><label class="${brak("cena")?"is-required":""}"><span>Cena sprzedaży brutto${gwiazdka("cena")}</span><input name="cena" inputmode="decimal" value="${esc(Number(d.cena)>0?d.cena:"")}" placeholder="np. 29,90"${wymagane("cena")}></label><label class="${brak("nazwa")?"is-required":""}"><span>Nazwa produktu${gwiazdka("nazwa")}</span><input name="nazwa" value="${esc(d.nazwa||"")}"${wymagane("nazwa")}></label><label class="${brak("producent")?"is-required":""}"><span>Producent / marka${gwiazdka("producent")}</span><input name="producent" value="${esc(d.producent||d.marka||"")}"${wymagane("producent")}></label><label class="${brak("kategoria")?"is-required":""}"><span>Kategoria sklepu${gwiazdka("kategoria")}</span><input name="kategoria" value="${esc(d.kategoria||"")}"${wymagane("kategoria")}></label></div><details class="product-link-review-more"><summary>Więcej danych do poprawy</summary><div><label><span>EAN / GTIN</span><input name="ean" value="${esc(d.ean||d.gtin||"")}"></label><label><span>Kod produktu / producenta</span><input name="kodProducenta" value="${esc(d.kodProducenta||d.mpn||d.externalId||d.sku||"")}"><small>Uzupełni również aliasy SKU, EXTERNAL_ID i MPN.</small></label><label><span>Główne zdjęcie</span><input name="zdjecie" value="${esc(d.zdjecie||"")}" placeholder="https://…"></label><label><span>Emoji</span><input name="ikona" value="${esc(d.ikona||"🎲")}" maxlength="20"></label><label><span>Kolor karty</span><input name="kolor" type="color" value="${/^#[0-9a-f]{6}$/i.test(String(d.kolor||""))?esc(d.kolor):"#dbeafe"}"></label><label class="wide"><span>Krótki opis</span><textarea name="opisKrotki" rows="2">${esc(d.opisKrotki||"")}</textarea></label><label class="wide"><span>Pełny opis</span><textarea name="opis" rows="5">${esc(d.opis||"")}</textarea></label></div></details><footer><small>System ponownie sprawdzi link, połączy pobrane dane z Twoimi zmianami i doda produkt tylko wtedy, gdy wszystkie wymagane pola będą kompletne.</small><button class="btn" type="submit" ${productLinkImportStan.reviewBusy?"disabled":""}>✅ Zapisz decyzję i dodaj produkt</button></footer></form></details>`;
 }
 function productLinkImportPatchZFormularza(form){
-  const data=new FormData(form),patch={};for(const field of ["cena","nazwa","producent","marka","kategoria","ean","externalId","kodProducenta","zdjecie","ikona","kolor","opisKrotki","opis"]){const value=String(data.get(field)||"").trim();if(data.has(field)&&value)patch[field]=value;}return patch;
+  const data=new FormData(form),patch={};for(const field of ["cena","nazwa","producent","marka","kategoria","ean","kodProducenta","zdjecie","ikona","kolor","opisKrotki","opis"]){const value=String(data.get(field)||"").trim();if(data.has(field)&&value)patch[field]=value;}return patch;
 }
 async function productLinkImportRozstrzygnij(items,commonPatch={},message="Zapisuję decyzję…"){
   if(productLinkImportStan.reviewBusy||!productLinkImportStan.jobId||!items.length)return false;
@@ -8829,12 +8830,12 @@ function productLinkImportOdswiezTabele(){
 function productLinkImportOdswiezDOM(){
   const root=document.querySelector("[data-product-link-import-page]");if(!root)return;
   const summary=productLinkImportPodsumowanie(),jobState=productLinkImportStan.job?.state||"",active=productLinkImportAktywne(),paused=jobState==="paused"||productLinkImportStan.pauseRequested,done=jobState==="completed",cancelled=jobState==="cancelled";
-  [["total",summary.fileTotal],["added",summary.added],["skipped",summary.skipped_existing],["review",summary.needs_review],["failed",summary.failed],["rejected",summary.fileRejected]].forEach(([key,value])=>{const el=root.querySelector(`[data-import-count="${key}"]`);if(el)el.textContent=String(value);});
+  [["total",summary.fileTotal],["added",summary.added],["updated",summary.updated_existing],["skipped",summary.skipped_existing],["review",summary.needs_review],["failed",summary.failed],["rejected",summary.fileRejected]].forEach(([key,value])=>{const el=root.querySelector(`[data-import-count="${key}"]`);if(el)el.textContent=String(value);});
   const bar=root.querySelector("[data-product-link-progress-bar]");if(bar){bar.style.width=`${summary.percent}%`;bar.parentElement?.setAttribute("aria-valuenow",String(summary.percent));}
   const progress=root.querySelector("[data-product-link-progress-text]");if(progress)progress.textContent=`${summary.processed} z ${summary.total} • ${summary.percent}%`;
   const eta=root.querySelector("[data-product-link-eta]");if(eta)eta.textContent=productLinkImportCzasPozostaly(summary);
   const current=productLinkImportStan.items.find(item=>item.status==="processing")||productLinkImportStan.items.find(item=>item.id===productLinkImportStan.job?.currentItemId);
-  const currentBox=root.querySelector("[data-product-link-current]");if(currentBox)currentBox.innerHTML=current?`<span>Teraz przetwarzam wiersz ${esc(current.rowNumber)}</span><b>${esc(current.name||"Produkt ze wskazanego linku")}</b><small>${esc(current.url)}</small>`:`<span>${done?"Import zakończony":cancelled?"Import anulowany":paused?"Kolejka wstrzymana":"Gotowy do pracy"}</span><b>${done?`${summary.added} produktów dodano i zapisano`:cancelled?"Dodane wcześniej produkty pozostały w katalogu":paused?"Wznów, aby przejść do kolejnego linku":"Każdy produkt zapisuję od razu po sprawdzeniu"}</b>`;
+  const currentBox=root.querySelector("[data-product-link-current]");if(currentBox)currentBox.innerHTML=current?`<span>Teraz przetwarzam wiersz ${esc(current.rowNumber)}</span><b>${esc(current.name||"Produkt ze wskazanego linku")}</b><small>${esc(current.url)}</small>`:`<span>${done?"Import zakończony":cancelled?"Import anulowany":paused?"Kolejka wstrzymana":"Gotowy do pracy"}</span><b>${done?`${summary.added} dodano • ${summary.updated_existing} zaktualizowano`:cancelled?"Dodane wcześniej produkty pozostały w katalogu":paused?"Wznów, aby przejść do kolejnego linku":"Każdy produkt zapisuję od razu po sprawdzeniu"}</b>`;
   const notice=root.querySelector("[data-product-link-notice]");if(notice){notice.hidden=!(productLinkImportStan.notice||productLinkImportStan.error);notice.classList.toggle("is-error",!!productLinkImportStan.error);notice.setAttribute("role",productLinkImportStan.error?"alert":"status");notice.setAttribute("aria-live",productLinkImportStan.error?"assertive":"polite");notice.innerHTML=productLinkImportStan.error?`<b>Nie udało się wykonać operacji</b><span>${esc(productLinkImportStan.error)}</span>`:`<b>${done?"Import zakończony":"Stan kolejki"}</b><span>${esc(productLinkImportStan.notice)}</span>`;}
   const upload=root.querySelector("[data-product-link-dropzone]");if(upload)upload.classList.toggle("is-disabled",active||productLinkImportStan.parsing);
   const fileInput=root.querySelector("[data-product-link-file]");if(fileInput)fileInput.disabled=active||productLinkImportStan.parsing;
@@ -8870,6 +8871,7 @@ function widokAdminProduktyZPliku(){
         <input data-product-link-file type="file" accept=".xlsx,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain" aria-label="Wybierz plik XLSX, CSV lub TXT z linkami produktów" aria-describedby="productLinkImportFileMeta" onchange="productLinkImportWybranoPlik(this)">
         <span class="product-link-import-drop-icon" aria-hidden="true">⇧</span><span id="productLinkImportFileMeta" data-product-link-file-meta><b>Wybierz arkusz lub przeciągnij go tutaj</b><span>Obsługiwane: XLSX, CSV, TSV i TXT • linki mogą pochodzić z różnych źródeł</span></span><em>Wybierz plik</em>
       </label>
+      <label class="profit-default-check product-link-import-update-option"><input type="checkbox" ${productLinkImportStan.updateExisting?"checked":""} onchange="productLinkImportUstawAktualizacje(this.checked)" ${productLinkImportAktywne()?"disabled":""}> <span><b>Aktualizuj istniejące produkty z tych samych linków</b><small>Uzupełni brakujące EAN, kod producenta, parametry i dostępność. Nie nadpisze ceny, stanu magazynowego ani ręcznie opracowanych opisów.</small></span></label>
       <div class="product-link-import-notice" data-product-link-notice role="status" aria-live="polite" aria-atomic="true" hidden></div>
     </div>
     <div class="panel product-link-import-control-panel">
@@ -8878,6 +8880,7 @@ function widokAdminProduktyZPliku(){
       <div class="orders-stat-grid product-link-import-stats">
         <button type="button" data-import-filter="all" aria-pressed="${productLinkImportStan.filter==="all"}" class="order-stat-card ${productLinkImportStan.filter==="all"?"active":""}" onclick="productLinkImportUstawFiltr('all')"><span>📚</span><b data-import-count="total">${summary.fileTotal}</b><small>wierszy pliku</small></button>
         <button type="button" data-import-filter="added" class="order-stat-card money ${productLinkImportStan.filter==="added"?"active":""}" onclick="productLinkImportUstawFiltr('added')"><span>✅</span><b data-import-count="added">${summary.added}</b><small>dodanych i zapisanych</small></button>
+        <button type="button" data-import-filter="updated_existing" class="order-stat-card money ${productLinkImportStan.filter==="updated_existing"?"active":""}" onclick="productLinkImportUstawFiltr('updated_existing')"><span>↻</span><b data-import-count="updated">${summary.updated_existing}</b><small>istniejących uzupełnionych</small></button>
         <button type="button" data-import-filter="skipped_existing" class="order-stat-card ${productLinkImportStan.filter==="skipped_existing"?"active":""}" onclick="productLinkImportUstawFiltr('skipped_existing')"><span>↪️</span><b data-import-count="skipped">${summary.skipped_existing}</b><small>pominiętych duplikatów</small></button>
         <button type="button" data-import-filter="needs_review" class="order-stat-card ${productLinkImportStan.filter==="needs_review"?"active":""}" onclick="productLinkImportUstawFiltr('needs_review')"><span>🧐</span><b data-import-count="review">${summary.needs_review}</b><small>wymaga decyzji</small></button>
         <button type="button" data-import-filter="failed" class="order-stat-card hot ${productLinkImportStan.filter==="failed"?"active":""}" onclick="productLinkImportUstawFiltr('failed')"><span>⚠️</span><b data-import-count="failed">${summary.failed}</b><small>błędów do ponowienia</small></button>
@@ -8887,7 +8890,7 @@ function widokAdminProduktyZPliku(){
     <div class="panel product-link-import-results" data-product-link-results>
       <div class="order-section-head"><div><span class="order-pro-label">Krok 3</span><h2>Wyniki i raport</h2><p>Pełna historia każdego wiersza. Duplikat nie tworzy nowej kartoteki i prowadzi bezpośrednio do istniejącego produktu.</p></div><div class="diag-actions"><button class="btn ghost" data-product-link-retry type="button" onclick="productLinkImportPonowBledy()" ${summary.failed?"":"hidden"}>↻ Ponów błędy</button><button class="btn ghost" data-product-link-report type="button" onclick="productLinkImportEksportujRaport()" ${productLinkImportWszystkieElementy().length?"":"disabled"}>⇩ Raport CSV</button></div></div>
       ${productLinkImportMasowaDecyzjaHTML(summary)}
-      <div class="product-link-import-filters"><label><span>Szukaj</span><input type="search" placeholder="Nazwa, link, wiersz, ID lub błąd…" value="${esc(productLinkImportStan.query)}" oninput="productLinkImportSzukaj(this)"></label><label><span>Status</span><select data-product-link-status-filter onchange="productLinkImportUstawFiltr(this.value)">${[["all","Wszystkie statusy"],["queued","Oczekujące"],["processing","W trakcie"],["added","Dodane"],["skipped_existing","Duplikaty katalogu — pominięte"],["needs_review","Do decyzji"],["failed","Błędy pobierania"],["cancelled","Anulowane"],["file_rejected","Wszystkie odrzucone z pliku"],["invalid_file","Błędne wiersze pliku"],["duplicate_file","Duplikaty wewnątrz pliku"]].map(([value,label])=>`<option value="${value}" ${productLinkImportStan.filter===value?"selected":""}>${label}</option>`).join("")}</select></label><label><span>Na stronie</span><select onchange="productLinkImportUstawRozmiar(this.value)">${PRODUCT_LINK_IMPORT_PAGE_SIZES.map(value=>`<option value="${value}" ${productLinkImportStan.pageSize===value?"selected":""}>${value}</option>`).join("")}</select></label><div><span>Wyniki</span><b><span data-product-link-visible>${productLinkImportElementyPoFiltrze().length}</span> pozycji</b></div></div>
+      <div class="product-link-import-filters"><label><span>Szukaj</span><input type="search" placeholder="Nazwa, link, wiersz, ID lub błąd…" value="${esc(productLinkImportStan.query)}" oninput="productLinkImportSzukaj(this)"></label><label><span>Status</span><select data-product-link-status-filter onchange="productLinkImportUstawFiltr(this.value)">${[["all","Wszystkie statusy"],["queued","Oczekujące"],["processing","W trakcie"],["added","Dodane"],["updated_existing","Zaktualizowane istniejące"],["skipped_existing","Istniejące bez zmian"],["needs_review","Do decyzji"],["failed","Błędy pobierania"],["cancelled","Anulowane"],["file_rejected","Wszystkie odrzucone z pliku"],["invalid_file","Błędne wiersze pliku"],["duplicate_file","Duplikaty wewnątrz pliku"]].map(([value,label])=>`<option value="${value}" ${productLinkImportStan.filter===value?"selected":""}>${label}</option>`).join("")}</select></label><label><span>Na stronie</span><select onchange="productLinkImportUstawRozmiar(this.value)">${PRODUCT_LINK_IMPORT_PAGE_SIZES.map(value=>`<option value="${value}" ${productLinkImportStan.pageSize===value?"selected":""}>${value}</option>`).join("")}</select></label><div><span>Wyniki</span><b><span data-product-link-visible>${productLinkImportElementyPoFiltrze().length}</span> pozycji</b></div></div>
       <div class="product-link-import-table-wrap"><table class="log-table product-link-import-table"><thead><tr><th>Wiersz</th><th>Produkt i źródło</th><th>Status</th><th>Kartoteka</th><th>Informacja</th></tr></thead><tbody data-product-link-table-body>${productLinkImportWierszeHTML()}</tbody></table></div>
     </div>
   </section>`);

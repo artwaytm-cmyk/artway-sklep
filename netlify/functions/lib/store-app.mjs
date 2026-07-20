@@ -91,6 +91,7 @@ import { createCentralProductCatalogRoute } from './central-product-catalog-rout
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
 import { createInventoryStockRoute } from './inventory-route.mjs';
 import { createProductLinkImportBundle } from './product-link-import-route.mjs';
+import { refreshCentralProductSource } from './domain/imported-product-catalog.mjs';
 import { createAllegroOfferWithdrawalRoute } from './allegro-offer-withdrawal-route.mjs';
 import {
   telegramConfig as telegramKonfiguracja,
@@ -239,7 +240,10 @@ const aiBannerGenerator = createAiBannerGenerator({ read: czytaj, write: zapisz,
 const aiBannerRoute = createAiBannerRoute({ generator: aiBannerGenerator, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, configured: () => !!process.env.OPENAI_API_KEY, model: () => process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2' });
 const allegroOrderArchive = createAllegroOrderArchive({ read: czytaj, write: zapisz });
 const allegroDataReader = createAllegroDataReader({ read: czytaj, archive: allegroOrderArchive, getOfferSettings: allegroPobierzUstawieniaOfert, getStatus: allegroStatus, mappingItems: allegroMapowaniaItems, orderStatus: (order) => allegroStatusKolejkiZamowienia(order, {}), orderNeedsRefresh: allegroOrderNeedsLiveRefresh, nextScheduledSyncAt: allegroNextScheduledSyncAt, compliancePolicy: ALLEGRO_COMPLIANCE_POLICY });
-const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, editorialize: linkedProductEditorial, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
+async function productLinkRefreshCentralProduct(productId, incoming = {}) {
+  return refreshCentralProductSource({ productId, incoming, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getProducts: allegroAgentProduktyCentralne, createUpdater: allegroAktualizatorProduktowCentralnych });
+}
+const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, updateExistingProduct: productLinkRefreshCentralProduct, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, editorialize: linkedProductEditorial, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
 let centralProductCatalogSyncPromise = null;
 const CENTRAL_PRODUCT_SOURCE_KEYS = [
   'artway_produkty_dodane', 'artway_produkty_edytowane', 'artway_produkty_katalog',

@@ -31,6 +31,7 @@ export function createProductLinkImportRoute({ service, catalog, sanitize = (val
       const result = await service.create({
         fileName: text(body.fileName, 300), rows: Array.isArray(body.rows) ? body.rows : [],
         createdBy: text(session?.email || adminEmail() || 'administrator', 200),
+        updateExisting: body.updateExisting === true,
       });
       return respond({ ok: true, ...result }, 201);
     }
@@ -82,7 +83,7 @@ export async function productLinkImportedCatalogPayload({ catalog, manifest, req
 export function createProductLinkImportBundle(options = {}) {
   const catalog = createImportedProductCatalog({ read: options.read, readVersioned: options.readVersioned, writeIfVersion: options.writeIfVersion });
   const prepareProduct = createProductLinkImportPreparer({ ...options.preparation, catalog });
-  const service = createProductLinkImportService({ read: options.read, readVersioned: options.readVersioned, writeIfVersion: options.writeIfVersion, catalog, prepareProduct });
+  const service = createProductLinkImportService({ read: options.read, readVersioned: options.readVersioned, writeIfVersion: options.writeIfVersion, catalog, prepareProduct, updateExistingProduct: options.updateExistingProduct });
   const route = createProductLinkImportRoute({ service, catalog, sanitize: options.sanitize, ...options.route });
   return Object.freeze({
     catalog, route,

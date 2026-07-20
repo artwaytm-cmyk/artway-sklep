@@ -1,4 +1,5 @@
 import { tekst } from './core/http.mjs';
+import { synchronizeProductIdentifierAliases } from './domain/product-identifiers.mjs';
 
 export function createProductSourceInspectionService({ read, write, normalizeKey, nameSimilarity }) {
   const czytaj = read;
@@ -69,6 +70,15 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
         .filter(Boolean);
       const val = values.join(', ').replace(/\s+\/\s*1\s*szt\.$/i, '').trim();
       if (val) out[normalizujKluczParametru(label)] = val;
+    }
+    // Strony producentów (m.in. Multigra) publikują dane jako powtarzalne
+    // pary label/value, a nie słownik IdoSell. Zachowujemy wszystkie pary,
+    // dzięki czemu nowe parametry nie wymagają kolejnej zmiany importera.
+    const rows = [...source.matchAll(/<div\b[^>]*class=["'][^"']*\bdata__row(?!-)[^"']*["'][^>]*>\s*<div\b[^>]*class=["'][^"']*\bdata__row--label\b[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<div\b[^>]*class=["'][^"']*\bdata__row--val\b[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi)];
+    for (const match of rows) {
+      const label = stripHtml(match[1] || '').replace(/:\s*$/, '');
+      const value = stripHtml(match[2] || '');
+      if (label && value) out[normalizujKluczParametru(label)] = value;
     }
     return out;
   }
@@ -216,13 +226,14 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
       || tekst((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1], 300);
     const cena = cenaProduktuZHtml(html, text) || liczbaZTekstu(ldProduct?.offers?.price);
     const zdjecia = obrazkiProduktuZHtml(url, html);
-    const marka = parametr(dict, ['Marka', 'Brand']) || tekst(ldProduct.brand?.name || ldProduct.brand, 160).trim() || (/alexander/i.test(url + text) ? 'Alexander' : '');
-    const producent = /(^|\.)sklep\.alexander\.com\.pl$/i.test(host) ? 'Alexander' : (parametr(dict, ['Producent', 'Manufacturer']) || marka);
+    const hostProducer = /(^|\.)sklep\.alexander\.com\.pl$/i.test(host) ? 'Alexander' : /(^|\.)multigra\.com\.pl$/i.test(host) ? 'Multigra' : '';
+    const marka = parametr(dict, ['Marka', 'Brand']) || tekst(ldProduct.brand?.name || ldProduct.brand, 160).trim() || hostProducer || (/alexander/i.test(url + text) ? 'Alexander' : '');
+    const producent = hostProducer || parametr(dict, ['Producent', 'Manufacturer']) || marka;
     const symbol = parametr(dict, ['Symbol', 'Kod', 'SKU']) || tekst(ldProduct.sku, 120).trim();
-    const kodProducentaRaw = parametr(dict, ['Kod producenta', 'MPN', 'Kod katalogowy']) || tekst(ldProduct.mpn, 120).trim();
+    const kodProducentaRaw = parametr(dict, ['Kod producenta', 'Numer referencyjny', 'Numer katalogowy', 'Reference number', 'MPN', 'Kod katalogowy']) || tekst(ldProduct.mpn, 120).trim();
     const eanRaw = parametr(dict, ['EAN', 'GTIN', 'Kod EAN']) || tekst(ldProduct.gtin13 || ldProduct.gtin || ldProduct.gtin12 || ldProduct.gtin14, 80).trim() || kodProducentaRaw;
     const ean = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
-    const kodProducenta = symbol || (kodProducentaRaw && normalizujKluczParametru(kodProducentaRaw) !== normalizujKluczParametru(ean) ? kodProducentaRaw : '');
+    const kodProducenta = (kodProducentaRaw && normalizujKluczParametru(kodProducentaRaw) !== normalizujKluczParametru(ean) ? kodProducentaRaw : '') || symbol;
     const statusHtml = stripHtml((html.match(/id=["']projector_status_description["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '');
     const statusDostepny = /produkt dostępny|\bdostępny\b|in stock|instock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
     const statusNiedostepny = /powiadom o dostępności|niedostępny|brak produktu|chwilowo niedostęp|outofstock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
@@ -236,12 +247,17 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
     const parametry = {
       symbol,
       kodProducenta: kodProducentaRaw,
+      numerReferencyjny: parametr(dict, ['Numer referencyjny', 'Reference number']) || kodProducentaRaw,
       ean,
       seria: parametr(dict, ['Seria']),
-      wiek: parametr(dict, ['Wiek']),
+      wiek: parametr(dict, ['Wiek', 'Wiek graczy od']),
       liczbaGraczy: parametr(dict, ['Liczba graczy']),
+      liczbaElementow: parametr(dict, ['Liczba elementów', 'Liczba elementow']),
       wymiaryOpakowania: parametr(dict, ['Wymiary opakowania (dł/sz/wys)', 'Wymiary opakowania']),
       wagaOpakowania: parametr(dict, ['Waga opakowania']),
+      wymiaryOpakowaniaZbiorczego: parametr(dict, ['Wymiary opakowania zbiorczego']),
+      wagaOpakowaniaZbiorczego: parametr(dict, ['Waga opakowania zbiorczego']),
+      iloscWOpakowaniuZbiorczym: parametr(dict, ['Ilość w opakowaniu zbiorczym', 'Ilosc w opakowaniu zbiorczym']),
       ostrzezenie: parametr(dict, ['Ostrzeżenie']),
     };
     const missing = [];
@@ -258,7 +274,7 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
       url,
       confidence,
       missing,
-      product: {
+      product: synchronizeProductIdentifierAliases({
         nazwa: stripHtml(title).replace(/\s+\|.*$/, ''),
         opisKrotki,
         opis,
@@ -270,9 +286,8 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
         marka: marka || producent,
         gtin: ean,
         ean,
-        mpn: kodProducenta || symbol,
         kodProducenta: kodProducenta || symbol,
-        externalId: symbol || '',
+        numerReferencyjny: parametry.numerReferencyjny || kodProducenta || symbol,
         rozmiar: parametry.wymiaryOpakowania || '',
         producentUrl: url,
         sourceUrl: url,
@@ -291,7 +306,7 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
           title: stripHtml(title),
           fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict)].slice(0, 80),
         },
-      },
+      }, { code: kodProducenta || symbol, overwrite: true }),
       availability: { available: dostepny, text: statusHtml || (dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia')), quantity: stanProducenta.quantity, exact: stanProducenta.exact, source: stanProducenta.source, checkedAt },
     };
   }
@@ -380,10 +395,10 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
     const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
     const producent = /(^|\.)sklep\.alexander\.com\.pl$/i.test(host) ? 'Alexander' : (markdownWartoscPoEtykiecie(segment, ['Producent', 'Manufacturer']) || marka);
     const symbol = markdownWartoscPoEtykiecie(segment, ['Symbol', 'SKU', 'Kod']);
-    const kodProducentaRaw = markdownWartoscPoEtykiecie(segment, ['Kod producenta', 'MPN', 'Kod katalogowy']);
+    const kodProducentaRaw = markdownWartoscPoEtykiecie(segment, ['Kod producenta', 'Numer referencyjny', 'Numer katalogowy', 'Reference number', 'MPN', 'Kod katalogowy']);
     const eanRaw = markdownWartoscPoEtykiecie(segment, ['EAN', 'GTIN', 'Kod EAN']) || kodProducentaRaw;
     const ean = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
-    const kodProducenta = symbol || (kodProducentaRaw && normalizujKluczParametru(kodProducentaRaw) !== normalizujKluczParametru(ean) ? kodProducentaRaw : '');
+    const kodProducenta = (kodProducentaRaw && normalizujKluczParametru(kodProducentaRaw) !== normalizujKluczParametru(ean) ? kodProducentaRaw : '') || symbol;
     const zdjecia = obrazkiProduktuZMarkdown(url, body);
     const beforeTitle = body.slice(0, productStart), crumbs = [...beforeTitle.matchAll(/^\s*\d+\.\s+\[([^\]]+)\]/gm)].map((m) => markdownInlineTekst(m[1])).filter((x) => x && !/strona główna/i.test(x));
     const kategoria = crumbs.at(-1) || markdownWartoscPoEtykiecie(segment, ['Seria']) || marka;
@@ -392,6 +407,7 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
       marka,
       symbol,
       'kod producenta': kodProducentaRaw,
+      'numer referencyjny': markdownWartoscPoEtykiecie(segment, ['Numer referencyjny', 'Reference number']) || kodProducentaRaw,
       ean,
       seria: markdownWartoscPoEtykiecie(segment, ['Seria']),
       wiek: markdownWartoscPoEtykiecie(segment, ['Wiek']),
@@ -411,10 +427,10 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
     const confidence = Math.max(20, 100 - missing.length * 14);
     return {
       ok: true, url, confidence, missing,
-      product: {
+      product: synchronizeProductIdentifierAliases({
         nazwa: title.replace(/\s+\|.*$/, '').trim(), opisKrotki, opis, cena: cena || '', kategoria,
         zdjecie: zdjecia[0] || '', zdjecia: zdjecia.slice(1, 16), producent, marka: marka || producent,
-        gtin: ean, ean, mpn: kodProducenta || symbol, kodProducenta: kodProducenta || symbol, externalId: symbol || '',
+        gtin: ean, ean, kodProducenta: kodProducenta || symbol, numerReferencyjny: dict['numer referencyjny'] || kodProducenta || symbol,
         rozmiar: dict['wymiary opakowania'] || '', producentUrl: url, sourceUrl: url,
         dostepnoscProducenta: dostepny ? 'dostępny' : (niedostepny ? 'niedostępny' : 'do sprawdzenia'),
         stanProducenta: quantity === null ? '' : quantity, stanProducentaDokladny: quantity !== null,
@@ -424,7 +440,7 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
         parametryProducenta: { symbol, kodProducenta: kodProducentaRaw, ean, seria: dict.seria, wiek: dict.wiek, liczbaGraczy: dict['liczba graczy'], wymiaryOpakowania: dict['wymiary opakowania'], wagaOpakowania: dict['waga opakowania'], ostrzezenie: dict.ostrzezenie },
         parametryZrodla: Object.fromEntries(Object.entries(dict).filter(([, value]) => value)),
         sourceEvidence: { url, host, fetchedAt: checkedAt, title, retrieval: 'reader-fallback', fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict).filter((key) => dict[key])].slice(0, 80) },
-      },
+      }, { code: kodProducenta || symbol, overwrite: true }),
       availability: { available: dostepny, text: dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia'), quantity, exact: quantity !== null, source: quantity !== null ? 'ilość pokazana przez producenta' : 'status strony producenta', checkedAt },
     };
   }

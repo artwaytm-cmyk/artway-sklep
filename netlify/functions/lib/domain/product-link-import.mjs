@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { synchronizeProductIdentifierAliases } from './product-identifiers.mjs';
 
 export const PRODUCT_LINK_IMPORT_INDEX_KEY = 'product-link-import:index:v1';
 export const PRODUCT_LINK_IMPORT_JOB_PREFIX = 'product-link-import:job:v1:';
@@ -8,8 +9,8 @@ const MAX_ROWS = 1000;
 const ITEMS_PER_SHARD = 100;
 const CAS_ATTEMPTS = 12;
 const LEASE_MS = 5 * 60 * 1000;
-const ITEM_STATUSES = Object.freeze(['queued', 'processing', 'added', 'skipped_existing', 'needs_review', 'failed', 'cancelled']);
-const TERMINAL = new Set(['added', 'skipped_existing', 'needs_review', 'failed', 'cancelled']);
+const ITEM_STATUSES = Object.freeze(['queued', 'processing', 'added', 'updated_existing', 'skipped_existing', 'needs_review', 'failed', 'cancelled']);
+const TERMINAL = new Set(['added', 'updated_existing', 'skipped_existing', 'needs_review', 'failed', 'cancelled']);
 const REVIEW_PATCH_FIELDS = new Set([
   'nazwa', 'cena', 'producent', 'marka', 'kategoria', 'opisKrotki', 'opis',
   'ikona', 'kolor', 'zdjecie', 'ean', 'gtin', 'externalId', 'sku', 'kodProducenta', 'mpn',
@@ -92,8 +93,8 @@ function normalizeRows(rows) {
   });
 }
 
-function importFingerprint(rows) {
-  return crypto.createHash('sha256').update(rows.map((row) => `${row.rowNumber}\t${row.url}`).join('\n')).digest('hex');
+function importFingerprint(rows, updateExisting = false) {
+  return crypto.createHash('sha256').update(`${updateExisting ? 'refresh' : 'add-only'}\n${rows.map((row) => `${row.rowNumber}\t${row.url}`).join('\n')}`).digest('hex');
 }
 
 function normalizeJob(value = {}) {
@@ -105,6 +106,7 @@ function normalizeJob(value = {}) {
     fingerprint: clean(source.fingerprint, 100),
     fileName: clean(source.fileName, 300),
     createdBy: clean(source.createdBy, 300),
+    updateExisting: source.updateExisting === true,
     state: ['running', 'paused', 'cancelled', 'completed'].includes(source.state) ? source.state : 'running',
     total,
     itemShards: asArray(source.itemShards).map((entry, index) => ({
@@ -145,7 +147,7 @@ function reviewDraft(value = {}, sourceUrl = '') {
   };
   const images = asArray(source.zdjecia || source.images).map((entry) => clean(entry, 3000)).filter(Boolean).slice(0, 8);
   if (images.length) draft.zdjecia = images;
-  return draft;
+  return synchronizeProductIdentifierAliases(draft);
 }
 
 function reviewPatch(value = {}) {
@@ -212,7 +214,7 @@ function normalizeStoredSummary(value, total = 0) {
   return result;
 }
 
-export function createProductLinkImportService({ read, readVersioned, writeIfVersion, catalog, prepareProduct, now = () => new Date(), randomUUID = () => crypto.randomUUID() } = {}) {
+export function createProductLinkImportService({ read, readVersioned, writeIfVersion, catalog, prepareProduct, updateExistingProduct = null, now = () => new Date(), randomUUID = () => crypto.randomUUID() } = {}) {
   if (typeof read !== 'function' || typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function') throw new Error('Import linków wymaga repozytorium z zapisem CAS.');
   if (!catalog || typeof catalog.add !== 'function' || typeof catalog.list !== 'function') throw new Error('Import linków wymaga katalogu importowanych produktów.');
   if (typeof prepareProduct !== 'function') throw new Error('Import linków wymaga funkcji przygotowania produktu.');
@@ -235,7 +237,7 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
     const state = job.state === 'running' && stats.processed >= stats.total ? 'completed' : job.state;
     return {
       job: {
-        id: job.id, fileName: job.fileName, state, createdAt: job.createdAt, updatedAt: job.updatedAt,
+        id: job.id, fileName: job.fileName, state, updateExisting: job.updateExisting, createdAt: job.createdAt, updatedAt: job.updatedAt,
         total: job.total, processed: stats.processed, currentItemId: clean(job.lease?.itemId, 220) || null,
       },
       summary: stats,
@@ -248,7 +250,7 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
     const stats = normalizeStoredSummary(job.summary, job.total);
     return {
       job: {
-        id: job.id, fileName: job.fileName, state: job.state, createdAt: job.createdAt, updatedAt: job.updatedAt,
+        id: job.id, fileName: job.fileName, state: job.state, updateExisting: job.updateExisting, createdAt: job.createdAt, updatedAt: job.updatedAt,
         total: job.total, processed: stats.processed, currentItemId: clean(job.lease?.itemId, 220) || null,
       },
       summary: stats,
@@ -282,9 +284,10 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
     throw serviceError('Lista importów zmieniła się podczas zapisu.', 'product_link_import_index_conflict');
   }
 
-  async function create({ fileName = '', rows, createdBy = '' } = {}) {
+  async function create({ fileName = '', rows, createdBy = '', updateExisting = false } = {}) {
     const normalized = normalizeRows(rows);
-    const fingerprint = importFingerprint(normalized);
+    const refreshExisting = updateExisting === true;
+    const fingerprint = importFingerprint(normalized, refreshExisting);
     const createdAt = isoNow();
     const reservation = await reserveJob(fingerprint, createdAt);
     const existing = await read(jobKey(reservation.jobId), null);
@@ -315,6 +318,7 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
       fingerprint,
       fileName: clean(fileName, 300) || 'import-linkow.xlsx',
       createdBy: clean(createdBy, 300),
+      updateExisting: refreshExisting,
       state: 'running',
       total: items.length,
       itemShards,
@@ -489,6 +493,7 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
           itemId: claim.item.id,
           rowNumber: claim.item.rowNumber,
           name: claim.item.name,
+          updateExisting: lease.job.updateExisting === true,
         });
         const packageValue = asObject(prepared);
         const product = packageValue.product && typeof packageValue.product === 'object' ? packageValue.product : prepared;
@@ -500,6 +505,13 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
             reviewDraft: draft,
             missingFields,
           };
+        } else if (packageValue.updateExisting && packageValue.existingProduct) {
+          const existingId = packageValue.existingProduct.id;
+          let refreshed = typeof catalog.updateFromSource === 'function' ? await catalog.updateFromSource(existingId, product) : { notFound: true };
+          if (refreshed?.notFound && typeof updateExistingProduct === 'function') refreshed = await updateExistingProduct(existingId, product, packageValue.existingProduct);
+          terminalPatch = refreshed?.updated
+            ? { status: 'updated_existing', productId: refreshed.product?.id || existingId, reason: `Uzupełniono istniejącą kartotekę z aktualnego źródła${refreshed.changedFields?.length ? `: ${refreshed.changedFields.join(', ')}` : ''}.` }
+            : { status: 'skipped_existing', duplicateProductId: existingId, reason: 'Kartoteka jest już aktualna — nie zmieniono ceny, stanu ani ręcznych opisów.' };
         } else {
           const result = await catalog.add(product, {
             sourceUrl: claim.item.url,
@@ -611,7 +623,7 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
         if (['ikona', 'kolor', 'sourceUrl', 'producentUrl'].includes(field)) return !!value;
         return clean(value, 10).length > 0;
       }));
-      const product = {
+      let product = {
         ...preparedProduct,
         ...reviewDraft(preparedProduct, current.url),
         ...storedValues,
@@ -623,8 +635,7 @@ export function createProductLinkImportService({ read, readVersioned, writeIfVer
       if (!product.producent && product.marka) product.producent = product.marka;
       if (!product.gtin && product.ean) product.gtin = product.ean;
       if (!product.ean && product.gtin) product.ean = product.gtin;
-      if (!product.mpn && product.kodProducenta) product.mpn = product.kodProducenta;
-      if (!product.kodProducenta && product.mpn) product.kodProducenta = product.mpn;
+      product = synchronizeProductIdentifierAliases(product, { code: product.kodProducenta || product.mpn || product.externalId || product.sku, overwrite: !!product.kodProducenta });
       const missingFields = reviewMissing(product);
       if (missingFields.length) {
         const reason = `Nadal uzupełnij: ${missingFields.join(', ')}.${preparationError ? ` Źródło: ${preparationError}` : ''}`;

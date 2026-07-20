@@ -906,6 +906,7 @@ function seoEfektyPanelHTML(){
 }
 
 const ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI=3;
+function kodKanonicznyProduktu(p={}){return String(p.kodProducenta||p.numerReferencyjny||p.mpn||p.externalId||p.sku||"").trim();}
 function domyslneUstawieniaRentownosci(){
   const raw=ustawienia.domyslneKosztyRentownosci&&typeof ustawienia.domyslneKosztyRentownosci==="object"?ustawienia.domyslneKosztyRentownosci:{};
   const money=(v,fallback=0)=>Math.max(0,Math.min(100000,kwotaNum(v??fallback))),percent=(v,fallback=0)=>Math.max(0,Math.min(100,Number(v??fallback)||0));
@@ -1037,16 +1038,12 @@ function formularzProduktu(p, tryb){
           </div>
         </div>`).join("")}
       </details>
-      <div class="f-row">
-        <div class="f-group"><label>Kod produktu (SKU) <small style="font-weight:400;color:var(--muted2)">opcjonalnie</small></label><input name="sku" value="${esc(p.sku||"")}" placeholder="np. ATM-0001" maxlength="30"></div>
-        <div class="f-group"><label>Warianty <small style="font-weight:400;color:var(--muted2)">po przecinku, np. S, M, L, XL</small></label><input name="warianty" value="${esc((p.warianty||[]).join(", "))}" placeholder="np. S, M, L, XL albo Czarny, Biały"></div>
-      </div>
+      <div class="f-group"><label>Warianty <small style="font-weight:400;color:var(--muted2)">po przecinku, np. S, M, L, XL</small></label><input name="warianty" value="${esc((p.warianty||[]).join(", "))}" placeholder="np. S, M, L, XL albo Czarny, Biały"></div>
       <details ${(p.gtin||p.externalId||p.mpn||p.producent||p.marka||p.kolorProduktu||p.rozmiar||p.material)?"open":""} style="margin-bottom:.8rem">
         <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🏷️ Dane z hurtowni / OVF</summary>
         <div class="f-row" style="margin-top:.7rem">
-          <div class="f-group"><label>GTIN / EAN</label><input name="gtin" value="${esc(p.gtin||"")}" placeholder="np. 5901234567891"></div>
-          <div class="f-group"><label>EXTERNAL_ID</label><input name="externalId" value="${esc(p.externalId||"")}" placeholder="ID z hurtowni"></div>
-          <div class="f-group"><label>MPN</label><input name="mpn" value="${esc(p.mpn||"")}" placeholder="Kod producenta"></div>
+          <div class="f-group"><label>GTIN / EAN</label><input name="gtin" value="${esc(p.gtin||p.ean||"")}" placeholder="np. 5901234567891"></div>
+          <div class="f-group"><label>Kod produktu / producenta</label><input name="kodProducenta" value="${esc(kodKanonicznyProduktu(p))}" placeholder="np. 0006 lub kod katalogowy" maxlength="160"><small>Jedno pole kanoniczne. System przekazuje tę samą wartość jako SKU, EXTERNAL_ID i MPN do starszych importów oraz Allegro.</small></div>
         </div>
         <div class="f-row">
           <div class="f-group"><label>Producent *</label><input name="producent" list="allegroProducerList" value="${esc(allegroProducentKanoniczny(p)||p.producent||p.marka||"")}" placeholder="np. Alexander"><datalist id="allegroProducerList">${allegroListaProducentow().map(name=>`<option value="${esc(name)}">`).join("")}</datalist><small>Lista jest zarządzana w Allegro → Ustawienia.</small></div>
@@ -1058,13 +1055,13 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Materiał / MATERIAL</label><input name="material" value="${esc(p.material||"")}" placeholder="np. bawełna, karton, stal"></div>
         </div>
         <div class="f-row">
-          <div class="f-group"><label>Kod producenta</label><input name="kodProducenta" value="${esc(p.kodProducenta||"")}" placeholder="np. 2282 lub kod katalogowy"></div>
           <div class="f-group"><label>Dostępność u producenta</label><input name="dostepnoscProducenta" value="${esc(p.dostepnoscProducenta||"")}" placeholder="dostępny / niedostępny / do sprawdzenia"></div>
           <div class="f-group"><label>Zweryfikowane źródło produktu</label>${edycja?`${p.sourceUrl||p.producentUrl?`<input name="sourceUrl" value="${esc(p.sourceUrl||p.producentUrl||"")}" readonly>`:`<input type="hidden" name="sourceUrl" value="">`}<input type="hidden" name="producentUrl" value="${esc(p.producentUrl||p.sourceUrl||"")}"><small>Adres pochodzi z kartoteki produktu.</small>`:`<input type="hidden" name="sourceUrl" value="${esc(p.sourceUrl||p.producentUrl||"")}"><small>Źródło uzupełnia się z pola na górze formularza.</small>`}</div>
         </div>
         <input type="hidden" name="stanProducenta" value="${esc(p.stanProducenta??"")}"><input type="hidden" name="stanProducentaDokladny" value="${p.stanProducentaDokladny?"1":""}"><input type="hidden" name="stanProducentaZrodlo" value="${esc(p.stanProducentaZrodlo||"")}"><input type="hidden" name="producentStatus" value="${esc(p.producentStatus||"")}"><input type="hidden" name="producentSprawdzonoAt" value="${esc(p.producentSprawdzonoAt||"")}">
         <div class="supplier-editor-status">${producentDostepnoscBadgeHTML(p)}${edycja&&/^https?:\/\//i.test(String(p.producentUrl||p.sourceUrl||""))?`<button class="btn ghost" type="button" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź stan u producenta</button>`:""}</div>
         ${p.sourceEvidence?.canonicalUrl||p.sourceEvidence?.url?`<div class="product-source-evidence"><div><span>🔎 Zweryfikowane źródło danych</span><b>${esc(p.sourceEvidence.host||(()=>{try{return new URL(p.sourceEvidence.canonicalUrl||p.sourceEvidence.url).hostname;}catch(e){return "strona produktu";}})())}</b><small>Odczyt: ${esc(p.sourceEvidence.fetchedAt?new Date(p.sourceEvidence.fetchedAt).toLocaleString("pl-PL"):"brak daty")} • pewność Agenta ${esc(p.agentImportConfidence||0)}%</small></div><a class="btn ghost" href="${esc(p.sourceEvidence.canonicalUrl||p.sourceEvidence.url)}" target="_blank" rel="noopener">Otwórz źródło ↗</a><details><summary>Pobrane informacje (${esc((p.sourceEvidence.fields||[]).length)})</summary><p>${esc((p.sourceEvidence.fields||[]).join(" • ")||"nazwa • cena • opis • zdjęcia • parametry • dostępność")}</p></details></div>`:""}
+        ${Object.keys(p.parametryZrodla||p.parametryProducenta||{}).length?`<details class="product-source-parameters"><summary>📋 Wszystkie parametry ze źródła</summary><dl>${Object.entries(p.parametryZrodla||p.parametryProducenta||{}).filter(([,value])=>String(value??"").trim()).map(([label,value])=>`<div><dt>${esc(String(label).replace(/_/g," "))}</dt><dd>${esc(value)}</dd></div>`).join("")}</dl></details>`:""}
       </details>
       <details ${(p.allegroCategoryId||p.allegroProductId||p.allegroOfferId)?"open":""} style="margin-bottom:.8rem">
         <summary style="cursor:pointer;font-weight:700;font-size:.88rem">🟠 Allegro — dane do wystawienia</summary>
@@ -1175,17 +1172,17 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   const zdjecie = String(f.get("zdjecie")||"").trim();
   if(zdjecie) p.zdjecie = zdjecie; else delete p.zdjecie;
   if(f.get("badge")) p.badge = String(f.get("badge")); else delete p.badge;
-  const sku = String(f.get("sku")||"").trim();
-  if(sku) p.sku = sku; else delete p.sku;
   for(const [pole,nazwa] of [
-    ["gtin","gtin"],["externalId","externalId"],["mpn","mpn"],["producent","producent"],["marka","marka"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"],
-    ["kodProducenta","kodProducenta"],["dostepnoscProducenta","dostepnoscProducenta"],["producentUrl","producentUrl"],["sourceUrl","sourceUrl"],
+    ["gtin","gtin"],["producent","producent"],["marka","marka"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"],
+    ["dostepnoscProducenta","dostepnoscProducenta"],["producentUrl","producentUrl"],["sourceUrl","sourceUrl"],
     ["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroOfferId","allegroOfferId"],["allegroCategoryPhrase","allegroCategoryPhrase"],["allegroTitle","allegroTitle"],
     ["seoTitle","seoTitle"],["seoDescription","seoDescription"],["seoKeywords","seoKeywords"],["seoMode","seoMode"]
   ]){
     const v=String(f.get(nazwa)||"").trim();
     if(v)p[pole]=v;else delete p[pole];
   }
+  const canonicalCode=String(f.get("kodProducenta")||"").trim();
+  for(const pole of ["kodProducenta","numerReferencyjny","mpn","externalId","sku"]){if(canonicalCode)p[pole]=canonicalCode;else delete p[pole];}
   if(p.producentUrl)p.sourceUrl=p.producentUrl;
   const stanProd=String(f.get("stanProducenta")??"").trim();if(stanProd!=="")p.stanProducenta=Math.max(0,Math.floor(Number(stanProd)||0));else delete p.stanProducenta;
   p.stanProducentaDokladny=String(f.get("stanProducentaDokladny")||"")==="1";
@@ -1274,7 +1271,8 @@ async function automatyczniePobierzDaneZrodlaProduktu(p={}){
   const url=String(p.producentUrl||p.sourceUrl||"").trim();if(!/^https?:\/\//i.test(url))return p;
   try{
     const d=await chmura("product-url-inspect",{method:"POST",body:{url},timeout:30000}),s=d.product||{},canonical=allegroProducentKanoniczny({...p,...s,sourceUrl:url,producentUrl:url});
-    const missing={gtin:s.gtin||s.ean,ean:s.ean||s.gtin,externalId:s.externalId,mpn:s.mpn||s.kodProducenta,kodProducenta:s.kodProducenta||s.mpn,producent:canonical||s.producent||s.marka,marka:s.marka||canonical||s.producent,zdjecie:s.zdjecie,zdjecia:Array.isArray(s.zdjecia)?s.zdjecia.slice(0,15):[],parametryProducenta:s.parametryProducenta,parametryZrodla:s.parametryZrodla,sourceMaterial:{...(p.sourceMaterial||{}),sourceUrl:s.sourceUrl||s.producentUrl||url,fetchedAt:s.sourceEvidence?.fetchedAt||s.producentSprawdzonoAt||new Date().toISOString(),title:s.nazwa||"",shortDescription:s.opisKrotki||"",longDescription:s.opis||"",producer:s.producent||s.marka||"",brand:s.marka||s.producent||"",category:s.kategoria||"",ean:s.gtin||s.ean||"",producerCode:s.kodProducenta||s.mpn||"",parameters:s.parametryProducenta||s.parametryZrodla||{}},contentEditorial:{...(p.contentEditorial||{}),status:"queued",queuedReason:"source_updated",queuedAt:new Date().toISOString()}};
+    const sourceCode=String(s.kodProducenta||s.numerReferencyjny||s.mpn||s.externalId||s.sku||"").trim();
+    const missing={gtin:s.gtin||s.ean,ean:s.ean||s.gtin,kodProducenta:sourceCode,numerReferencyjny:sourceCode,externalId:sourceCode,sku:sourceCode,mpn:sourceCode,producent:canonical||s.producent||s.marka,marka:s.marka||canonical||s.producent,zdjecie:s.zdjecie,zdjecia:Array.isArray(s.zdjecia)?s.zdjecia.slice(0,15):[],parametryProducenta:s.parametryProducenta,parametryZrodla:s.parametryZrodla,sourceMaterial:{...(p.sourceMaterial||{}),sourceUrl:s.sourceUrl||s.producentUrl||url,fetchedAt:s.sourceEvidence?.fetchedAt||s.producentSprawdzonoAt||new Date().toISOString(),title:s.nazwa||"",shortDescription:s.opisKrotki||"",longDescription:s.opis||"",producer:s.producent||s.marka||"",brand:s.marka||s.producent||"",category:s.kategoria||"",ean:s.gtin||s.ean||"",producerCode:sourceCode,parameters:s.parametryProducenta||s.parametryZrodla||{}},contentEditorial:{...(p.contentEditorial||{}),status:"queued",queuedReason:"source_updated",queuedAt:new Date().toISOString()}};
     zapiszPolaProduktuLokalnie(p.id,missing,true);
     const current=pobierzProduktAdmin(p.id)||p,canonicalUrl=s.sourceUrl||s.producentUrl||url,force={producentUrl:canonicalUrl,sourceUrl:canonicalUrl,sourceEvidence:s.sourceEvidence||current.sourceEvidence||null,dostepnoscProducenta:s.dostepnoscProducenta||current.dostepnoscProducenta||"",stanProducenta:s.stanProducenta??current.stanProducenta??"",stanProducentaDokladny:s.stanProducentaDokladny===true,stanProducentaZrodlo:s.stanProducentaZrodlo||current.stanProducentaZrodlo||"",producentStatus:s.producentStatus||current.producentStatus||"",producentSprawdzonoAt:s.producentSprawdzonoAt||current.producentSprawdzonoAt||new Date().toISOString()};
     zapiszPolaProduktuLokalnie(p.id,force,false);agentAIZakonczLinkProducenta(url,pobierzProduktAdmin(p.id)||p);return pobierzProduktAdmin(p.id)||{...p,...missing,...force};

@@ -60,3 +60,12 @@ test("podstrona kodów rabatowych ładuje moduł, w którym znajduje się jej wi
   assert.match(promotions,/function widokAdminRabatyZaawansowane\(/);
   assert.match(router,/if\(t==="\/admin\/asortyment\/rabaty"\)add\("personalization"\)/);
 });
+
+test("edytor pokazuje jeden kanoniczny kod produktu i synchronizuje aliasy integracyjne",async()=>{
+  const editor=await read("src/frontend/12-product-editor.js");
+  assert.match(editor,/Kod produktu \/ producenta/);
+  assert.match(editor,/\["kodProducenta","numerReferencyjny","mpn","externalId","sku"\]/);
+  assert.doesNotMatch(editor,/<label>EXTERNAL_ID<\/label>/);
+  assert.doesNotMatch(editor,/<label>MPN<\/label>/);
+  assert.doesNotMatch(editor,/name="sku"/);
+});

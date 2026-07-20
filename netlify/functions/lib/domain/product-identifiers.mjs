@@ -30,3 +30,53 @@ export function gtinEquivalent(left = '', right = '') {
   const b = canonicalGtin(right);
   return !!a && !!b && a === b;
 }
+
+function identifierText(value = '', max = 160) {
+  return String(value ?? '').replace(/\u0000/g, '').trim().slice(0, max);
+}
+
+/**
+ * Jeden biznesowy kod kartoteki. Starsze integracje nazywały go zamiennie
+ * SKU, EXTERNAL_ID, MPN albo kodem producenta. Zera wiodące są istotne.
+ */
+export function canonicalProductCode(product = {}, preferred = '') {
+  return identifierText(
+    preferred
+      || product.kodProducenta
+      || product.manufacturerCode
+      || product.numerReferencyjny
+      || product.referenceNumber
+      || product.mpn
+      || product.MPN
+      || product.externalId
+      || product.external_id
+      || product.EXTERNAL_ID
+      || product.sku
+      || product.SKU,
+  );
+}
+
+/**
+ * Utrzymuje zgodność wsteczną bez mnożenia pól w interfejsie. Administrator
+ * edytuje jedno pole, natomiast Allegro, OVF i stare eksporty nadal otrzymują
+ * alias, którego oczekują.
+ */
+export function synchronizeProductIdentifierAliases(product = {}, {
+  code = '',
+  overwrite = false,
+} = {}) {
+  const result = { ...product };
+  const canonicalCode = canonicalProductCode(product, code);
+  if (canonicalCode) {
+    for (const field of ['kodProducenta', 'mpn', 'externalId', 'sku']) {
+      if (overwrite || !identifierText(result[field])) result[field] = canonicalCode;
+    }
+    if (overwrite || !identifierText(result.numerReferencyjny)) result.numerReferencyjny = canonicalCode;
+  }
+  const gtin = identifierText(result.gtin || result.ean || result.GTIN || result.EAN, 40).replace(/\D/g, '');
+  if (gtin) {
+    if (overwrite || !identifierText(result.gtin, 40)) result.gtin = gtin;
+    if (overwrite || !identifierText(result.ean, 40)) result.ean = gtin;
+  }
+  return result;
+}
