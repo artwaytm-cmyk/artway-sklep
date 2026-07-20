@@ -81,14 +81,27 @@ test('druk QR obejmuje wyłącznie zaznaczone pozycje i zachowuje fizyczny forma
 test('kreator arkusza pozwala ustawić osobny nakład, pozycję startową i fizyczną siatkę A4', () => {
   assert.match(source, /Liczba kopii każdej etykiety/);
   assert.match(source, /magazynQRUstawKopiePozycji/);
-  assert.match(source, /Zacznij od pola/);
-  assert.match(source, /Pomiń wykorzystane miejsca/);
+  assert.match(source, /Miejsce rozpoczęcia/);
+  assert.match(source, /Jeśli arkusz jest nowy/);
   assert.match(source, /magazynQRDrukMetryka/);
   assert.match(source, /magazynQRUstawPresetDruku/);
   assert.match(source, /Układ nie mieści się na kartce A4/);
   assert.match(styles, /--qr-columns/);
   assert.match(styles, /warehouse-qr-empty-slot/);
   assert.match(styles, /page-break-after:always/);
+});
+
+test('arkusz QR automatycznie dobiera siatkę i udostępnia prostą kalibrację drukarki', () => {
+  assert.match(source, /function magazynQRDopasujAutomatycznie/);
+  assert.match(source, /Dopasuj automatycznie/);
+  assert.match(source, /warehouse-qr-start-map/);
+  assert.match(source, /Korekta w poziomie/);
+  assert.match(source, /Ustaw skalę <strong>100%<\/strong>/);
+  assert.match(styles, /--qr-offset-x/);
+  assert.match(styles, /warehouse-qr-preset-cards/);
+  const sandbox = { window: {}, document: {}, Set, Map, Intl, console, setTimeout, clearTimeout, encodeURIComponent, decodeURIComponent };
+  vm.runInNewContext(`${source}\nmagazynQRDrukUstawienia={orientacja:'pion',szerokosc:62,wysokosc:38,odstepX:3,odstepY:2,marginesGora:8,marginesPrawo:8,marginesDol:8,marginesLewo:8,korektaX:0,korektaY:0};globalThis.__fit=magazynQRDopasowanieAutomatyczne();`, sandbox);
+  assert.deepEqual(structuredClone(sandbox.__fit), { columns: 3, rows: 7 });
 });
 
 test('skaner telefonu ma tryb awaryjny QR i przekazuje aktywną lokalizację do pozycji dokumentu', () => {

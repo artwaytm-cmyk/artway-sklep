@@ -328,7 +328,7 @@ requireMarkers('połączonych assets JS', app, [
   'function priorytetDostepnosciProduktu',
   'function generujRegalyIPolkiMagazynu',
   'function wyczyscFiltryStanowMagazynu',
-  'Generator struktury',
+  'Generator obszaru, regałów i półek',
   'Lokalizacja nadrzędna',
   'Co mamy obecnie na magazynie',
   'Priorytet sprzedaży',
@@ -732,8 +732,8 @@ if (!app.includes('.filter(p => !produktOznaczonyNiedostepny(p))') || !app.inclu
 if (!app.includes('Fizyczne korekty ilości wykonujesz wyłącznie w karcie „Stany”') || !app.includes('Błąd pobrania nie jest traktowany jako brak')) {
   fail('assets/app.js: fizyczne stany muszą być oddzielone od dostępności producenta, a błąd strony producenta nie może oznaczać braku produktu');
 }
-if (!app.includes('strefa → regał → półka → miejsce') && !app.includes('strefy przez regał i półkę do konkretnego miejsca')) {
-  fail('assets/app.js: lokalizacje magazynu muszą mieć czytelną hierarchię strefa/regał/półka/miejsce');
+if (!app.includes('Pakownia → Regał A → Półka 3') && !app.includes('Struktura obszarów, regałów i półek')) {
+  fail('assets/app.js: lokalizacje magazynu muszą mieć czytelną hierarchię obszar/regał/półka');
 }
 if (!app.includes('allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI') || !app.includes('Domyślnie zawsze 3,00 zł.')) {
   fail('assets/app.js: dopłata do wysyłki Allegro musi domyślnie wynosić 3 zł w danych i edytorze');
