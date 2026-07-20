@@ -65,6 +65,18 @@ test('etykiety lokalizacji mają krótkie oznaczenia regału, półki i miejsca'
   assert.equal(sandbox.__friendly.code, 'PAKOWNIA-RA-P03');
 });
 
+test('pełna nazwa regału lub półki nie jest zastępowana skrótem ani obcinana', () => {
+  assert.match(source, /locationName:name/);
+  assert.match(source, /warehouse-qr-location-name/);
+  assert.match(source, /parentPath\?`W: \$\{parentPath\}`:"Obszar główny"/);
+  assert.match(styles, /warehouse-qr-location-name\{[^}]*white-space:normal[^}]*overflow-wrap:anywhere/);
+  assert.match(styles, /name-very-long \.warehouse-qr-location-name/);
+  assert.match(styles, /warehouse-qr-location-path\{[^}]*-webkit-line-clamp:unset/);
+  const sandbox = { window: {}, document: {}, Set, Map, Intl, console, setTimeout, clearTimeout, encodeURIComponent, decodeURIComponent };
+  vm.runInNewContext(`${source}\nglobalThis.__classes=[magazynQRKlasaDlugosciNazwy('Regał A'),magazynQRKlasaDlugosciNazwy('Regał na zapleczu sklepu z artykułami imprezowymi')];`, sandbox);
+  assert.deepEqual(Array.from(sandbox.__classes), ['name-short', 'name-very-long']);
+});
+
 test('druk QR obejmuje wyłącznie zaznaczone pozycje i zachowuje fizyczny format etykiety', () => {
   assert.match(source, /Zaznacz widoczne/);
   assert.match(source, /Odznacz widoczne/);
