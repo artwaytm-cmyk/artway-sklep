@@ -59,25 +59,72 @@ function widokAdminJakoscKatalogu(){
   </div>`);
 }
 
-function ustawCene(id, wartosc){
-  const cena = parseFloat(String(wartosc).replace(",","."));
-  if(!(cena>0)){ toast("⚠️ Nieprawidłowa cena"); renderuj(); return; }
-  const nowa = +cena.toFixed(2);
-  const i = produktyDodane.findIndex(x=>x.id===id);
-  if(i>=0){
-    produktyDodane[i].cena = nowa;
-    if(produktyDodane[i].staraCena && produktyDodane[i].staraCena<=nowa) delete produktyDodane[i].staraCena;
-    zapiszLS("artway_produkty_dodane", produktyDodane);
+function asortymentStanZapisuCeny(input,status="",tekst=""){
+  const pole=input?.closest?.(".catalog-product-edit-value");if(!pole)return;
+  pole.classList.remove("is-saving","is-saved","has-error");
+  if(status)pole.classList.add(status);
+  input.setAttribute("aria-busy",status==="is-saving"?"true":"false");
+  input.setAttribute("aria-invalid",status==="has-error"?"true":"false");
+  const info=pole.querySelector("[data-inline-price-status]");if(info)info.textContent=tekst;
+  clearTimeout(input._artwayPriceStateTimer);
+  if(status==="is-saved")input._artwayPriceStateTimer=setTimeout(()=>{pole.classList.remove("is-saved");if(info)info.textContent="";},1800);
+}
+function asortymentPodmienCeneBezRenderu(id,patch={},usun=[]){
+  const key=String(id),baza=pobierzProduktAdmin(id)||{},idx=produktyDodane.findIndex(x=>String(x.id)===key);
+  const signature=typeof asortymentCentralnySygnatura==="function"?asortymentCentralnySygnatura():"";
+  const centralData=asortymentCentralnyStan?.status==="ready"&&asortymentCentralnyStan.signature===signature?asortymentCentralnyStan.data:asortymentCentralnyCache?.get?.(signature)?.data;
+  if(idx>=0){
+    const next={...produktyDodane[idx],...patch};for(const pole of usun)delete next[pole];
+    produktyDodane=[...produktyDodane.slice(0,idx),next,...produktyDodane.slice(idx+1)];
+    zapiszLS("artway_produkty_dodane",produktyDodane);
   }else{
-    const baza = pobierzProduktAdmin(id) || {};
-    const edycja = {...(produktyEdytowane[id]||{}), cena:nowa};
-    if(baza.staraCena && baza.staraCena<=nowa) edycja.staraCena = undefined;
-    produktyEdytowane = {...produktyEdytowane, [id]:edycja};
-    zapiszLS("artway_produkty_edytowane", produktyEdytowane);
+    const next={...(produktyEdytowane[key]||{}),...patch};for(const pole of usun)next[pole]=null;
+    produktyEdytowane={...produktyEdytowane,[key]:next};
+    zapiszLS("artway_produkty_edytowane",produktyEdytowane);
   }
-  zbudujProdukty();
-  loguj("info",`Zmieniono cenę produktu ${id} → ${zl(nowa)}`);
-  toast("Cena zapisana ✅"); renderuj();
+  if(Array.isArray(produkty)){
+    const produktIdx=produkty.findIndex(x=>String(x.id)===key);
+    if(produktIdx>=0){const next={...produkty[produktIdx],...patch};for(const pole of usun)delete next[pole];produkty[produktIdx]=next;}
+  }
+  if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
+  if(centralData&&signature){
+    const data={...centralData,items:(centralData.items||[]).map(item=>String(item.id)===key?{...item,...patch,...Object.fromEntries(usun.map(pole=>[pole,null]))}:item)};
+    asortymentCentralnyCache.set(signature,{at:Date.now(),data});
+    asortymentCentralnyStan={status:"ready",signature,data,error:"",request:null};
+  }
+  return baza;
+}
+function ustawCene(id, wartosc, input=null){
+  const poprzedni=pobierzProduktAdmin(id)||{},cena=parseFloat(String(wartosc).trim().replace(/\s/g,"").replace(",","."));
+  if(!(cena>0)){
+    if(input)input.value=String(kwotaNum(poprzedni.cena).toFixed(2)).replace(".",",");
+    asortymentStanZapisuCeny(input,"has-error","Podaj cenę większą od 0");toast("⚠️ Nieprawidłowa cena sprzedaży");return false;
+  }
+  asortymentStanZapisuCeny(input,"is-saving","Zapisuję…");
+  const nowa=+cena.toFixed(2),usun=Number(poprzedni.staraCena)>0&&Number(poprzedni.staraCena)<=nowa?["staraCena"]:[];
+  asortymentPodmienCeneBezRenderu(id,{cena:nowa},usun);
+  if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
+  loguj("info",`Zmieniono cenę sprzedaży produktu ${id} → ${zl(nowa)}`);
+  asortymentStanZapisuCeny(input,"is-saved","Zapisano");return true;
+}
+function ustawCeneZakupu(id, wartosc, input=null){
+  const poprzedni=pobierzProduktAdmin(id)||{},raw=String(wartosc).trim(),cena=parseFloat(raw.replace(/\s/g,"").replace(",","."));
+  const polaFaktury=["cenaZakupuNetto","cenaZakupuVat","cenaZakupuWaluta","cenaZakupuDokument","cenaZakupuKsef","cenaZakupuDostawca","cenaZakupuDataDokumentu"];
+  if(raw===""){
+    asortymentStanZapisuCeny(input,"is-saving","Usuwam…");
+    asortymentPodmienCeneBezRenderu(id,{},["cenaZakupu","cenaZakupuPrywatna","cenaZakupuZrodlo","cenaZakupuDopasowanie","cenaZakupuZaktualizowanoAt",...polaFaktury]);
+    loguj("info",`Usunięto ręczną cenę zakupu produktu ${id}`);asortymentStanZapisuCeny(input,"is-saved","Usunięto");return true;
+  }
+  if(!Number.isFinite(cena)||cena<0){
+    if(input)input.value=poprzedni.cenaZakupu==null?"":String(kwotaNum(poprzedni.cenaZakupu).toFixed(2)).replace(".",",");
+    asortymentStanZapisuCeny(input,"has-error","Podaj 0 lub więcej");toast("⚠️ Nieprawidłowa cena zakupu");return false;
+  }
+  asortymentStanZapisuCeny(input,"is-saving","Zapisuję…");
+  const nowa=+cena.toFixed(2);
+  asortymentPodmienCeneBezRenderu(id,{cenaZakupu:nowa,cenaZakupuPrywatna:true,cenaZakupuZrodlo:"ręczna edycja administratora",cenaZakupuDopasowanie:"ręcznie",cenaZakupuZaktualizowanoAt:new Date().toISOString()},polaFaktury);
+  if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
+  loguj("info",`Zmieniono prywatną cenę zakupu produktu ${id} → ${zl(nowa)}`);
+  asortymentStanZapisuCeny(input,"is-saved","Zapisano");return true;
 }
 /* ── Akcje masowe na produktach ── */
 let zaznaczoneProdukty = new Set();

@@ -6963,7 +6963,7 @@ function asortymentKartaProduktuHTML(p={},ukrytaKopia=false){
     <label class="allegro-publication-check"><input class="assortment-check" type="checkbox" aria-label="Zaznacz ${esc(p.nazwa||"produkt")}" data-assortment-product-id="${esc(p.id)}" ${selected?"checked":""} onchange="przelaczZaznProd(${jsArg(p.id)})"><span>Zaznacz produkt</span></label>
     <div class="allegro-publication-product catalog-product-identity">${image?`<img src="${esc(image)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="empty-image" style="display:none">${esc(p.ikona||"📦")}</span>`:`<span class="empty-image">${esc(p.ikona||"📦")}</span>`}<div><small class="catalog-column-label">Produkt</small><h3>${esc(p.nazwa||"Produkt bez nazwy")}</h3><p>ID ${esc(p.id)}${dodany?" • dodany":""}${edytowany?" • edytowany":""}${ukryty?" • w koszu":""}${promocja?` • promocja −${promocja}%`:""}</p><div class="allegro-publication-codes"><code>EXTERNAL_ID ${esc(p.externalId||"—")}</code><code>SKU ${esc(p.sku||"—")}</code><code>EAN ${esc(p.gtin||p.ean||"—")}</code></div>${braki.length?`<span class="catalog-product-data-note missing">⚠️ Braki: ${esc(braki.slice(0,3).join(", "))}${braki.length>3?` +${braki.length-3}`:""}</span>`:`<span class="catalog-product-data-note complete">✓ Dane kompletne</span>`}</div></div>
     <div class="catalog-product-classification"><small class="catalog-column-label">Klasyfikacja i źródło</small><b>${esc(p.producent||p.marka||"Bez producenta")}</b><span>${esc(p.kategoria||"Bez kategorii")}</span>${sourceUrl?`<a href="${esc(sourceUrl)}" target="_blank" rel="noopener">Źródło produktu ↗</a>`:`<small>Brak linku źródłowego</small>`}${ukrytaKopia?`<em>Ukryta kopia katalogowa</em>`:""}</div>
-    <div class="catalog-product-operational-data"><small class="catalog-column-label">Ceny i magazyn</small><div class="catalog-product-values"><span class="catalog-product-edit-value"><small>Cena sklepu</small><label><input value="${String(cena.toFixed(2)).replace(".",",")}" inputmode="decimal" aria-label="Cena sklepu: ${esc(p.nazwa||"produkt")}" onchange="ustawCene(${jsArg(p.id)},this.value)"><em>zł</em></label></span><span><small>Cena Allegro</small><b>${cenaAllegro>0?zl(cenaAllegro):"—"}</b></span><span><small>Zakup — administrator</small><b>${Number(p.cenaZakupu)>0?zl(p.cenaZakupu):"brak"}</b></span><span class="catalog-product-edit-value"><small>Stan magazynowy</small><label><input value="${stan??""}" placeholder="∞" inputmode="numeric" aria-label="Stan magazynowy: ${esc(p.nazwa||"produkt")}" onchange="ustawStan(${jsArg(p.id)},this.value)" class="${Number(stan)===0?"empty":""}"><em>${stan===undefined||stan===""?"bez limitu":"szt."}</em></label></span></div></div>
+    <div class="catalog-product-operational-data"><small class="catalog-column-label">Ceny i magazyn</small><div class="catalog-product-values"><span class="catalog-product-edit-value"><small>Cena sklepu</small><label><input value="${String(cena.toFixed(2)).replace(".",",")}" inputmode="decimal" aria-label="Cena sklepu: ${esc(p.nazwa||"produkt")}" onchange="ustawCene(${jsArg(p.id)},this.value,this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}"><em>zł</em></label><i data-inline-price-status aria-live="polite"></i></span><span><small>Cena Allegro</small><b>${cenaAllegro>0?zl(cenaAllegro):"—"}</b></span><span class="catalog-product-edit-value catalog-product-purchase-price"><small>Zakup — tylko administrator</small><label><input value="${p.cenaZakupu==null?"":String(kwotaNum(p.cenaZakupu).toFixed(2)).replace(".",",")}" placeholder="brak" inputmode="decimal" aria-label="Prywatna cena zakupu: ${esc(p.nazwa||"produkt")}" onchange="ustawCeneZakupu(${jsArg(p.id)},this.value,this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}"><em>zł</em></label><i data-inline-price-status aria-live="polite"></i></span><span class="catalog-product-edit-value"><small>Stan magazynowy</small><label><input value="${stan??""}" placeholder="∞" inputmode="numeric" aria-label="Stan magazynowy: ${esc(p.nazwa||"produkt")}" onchange="ustawStan(${jsArg(p.id)},this.value)" class="${Number(stan)===0?"empty":""}"><em>${stan===undefined||stan===""?"bez limitu":"szt."}</em></label></span></div></div>
     <div class="catalog-product-actions"><small class="catalog-column-label">Sprzedaż, Allegro i akcje</small><div class="catalog-product-channel-summary">${allegroStatusProduktuHTML(p)}</div><div class="catalog-product-sale-status">${dostepnoscBadgeAdmin(p)}</div><button class="btn ghost catalog-product-availability-action" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})">${availabilityLabel}</button><div class="catalog-product-buttons"><a class="btn" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}" title="Edytuj produkt">✏️ Edytuj</a>${asortymentMenuDzialanProduktuHTML(p)}<button class="btn ghost" onclick="duplikujProdukt(${jsArg(p.id)})" title="Duplikuj produkt">📄 Kopia</button>${ukryty?`<button class="btn ghost" onclick="przywrocProdukt(${jsArg(p.id)})" title="Przywróć">↩️ Przywróć</button>`:`<button class="btn danger" onclick="if(confirm('Przenieść produkt do kosza?')) usunProduktAdmin(${jsArg(p.id)})" title="Przenieś do kosza">🗑️ Kosz</button>`}</div></div>
   </article>`;
 }
@@ -7242,7 +7242,7 @@ function formularzProduktu(p, tryb){
       <div class="product-price-grid">
         <div class="f-group"><label>Cena w sklepie (zł) *</label><input required name="cena" inputmode="decimal" value="${p.cena??""}" placeholder="99.99" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div>
         <div class="f-group"><label>Cena na Allegro (zł)</label><input name="cenaAllegro" inputmode="decimal" value="${p.cenaAllegro??""}" placeholder="pusta = cena sklepu" oninput="aktualizujKalkulatorCenProduktu(this.form)"><small>Ta cena jest wysyłana do oferty Allegro.</small></div>
-        <div class="f-group"><label>🔒 Cena zakupu brutto (zł) — tylko administrator</label><input name="cenaZakupu" inputmode="decimal" value="${p.cenaZakupu??""}" placeholder="wewnętrzna" oninput="aktualizujKalkulatorCenProduktu(this.form)"><small>Dane prywatne: niewidoczne dla klientów i Allegro, usuwane z publicznego API, products.json, Google/SEO i publikacji sklepu.${p.cenaZakupuNetto!==undefined?`<br>Netto z faktury: ${zl(p.cenaZakupuNetto)} • VAT: ${zl(p.cenaZakupuVat||0)}`:""}${p.cenaZakupuZrodlo?`<br>Źródło: ${esc(p.cenaZakupuZrodlo)} • ${esc(p.cenaZakupuDokument||"")} • ${esc(p.cenaZakupuDostawca||"")} • ${esc(p.cenaZakupuDataDokumentu||"")} • ${esc(p.cenaZakupuDopasowanie||"")}`:""}</small></div>
+        <div class="f-group"><label>🔒 Cena zakupu brutto (zł) — tylko administrator</label><input name="cenaZakupu" inputmode="decimal" value="${p.cenaZakupu??""}" placeholder="wewnętrzna" oninput="aktualizujKalkulatorCenProduktu(this.form)"><small>Dane prywatne: niewidoczne dla klientów i Allegro, usuwane z publicznego API, products.json, Google/SEO i publikacji sklepu.${p.cenaZakupuNetto!=null?`<br>Netto z faktury: ${zl(p.cenaZakupuNetto)} • VAT: ${zl(p.cenaZakupuVat||0)}`:""}${p.cenaZakupuZrodlo?`<br>Źródło: ${esc(p.cenaZakupuZrodlo)} • ${esc(p.cenaZakupuDokument||"")} • ${esc(p.cenaZakupuDostawca||"")} • ${esc(p.cenaZakupuDataDokumentu||"")} • ${esc(p.cenaZakupuDopasowanie||"")}`:""}</small></div>
         <div class="f-group"><label>Stara cena (promocja)</label><input name="staraCena" inputmode="decimal" value="${p.staraCena??""}"></div>
       </div>
       <div class="product-margin-preview" data-product-margin><span><small>Sklep • cena</small><b>${p.cena?zl(p.cena):"—"}</b></span><span class="${rentownoscSklep.profit<0?"is-negative":""}"><small>Sklep • zysk/marża</small><b>${p.cenaZakupu?`${zl(rentownoscSklep.profit)} • ${rentownoscSklep.margin.toFixed(1)}%`:"—"}</b></span><span><small>Sklep • cel ${sklepDocelowaMarza}%</small><b>${p.cenaZakupu?zl(rentownoscSklep.recommended):"—"}</b></span><span><small>Allegro • cena</small><b>${rentownosc.price?zl(rentownosc.price):"—"}</b></span><span><small>Allegro • prowizja</small><b>${p.allegroFeeCalculatedAt?`${zl(rentownosc.commission)} • ${rentownosc.commissionRate.toFixed(2)}%`:"—"}</b></span><span class="${rentownosc.profit<0?"is-negative":""}"><small>Allegro • zysk/marża</small><b>${p.cenaZakupu?`${zl(rentownosc.profit)} • ${rentownosc.margin.toFixed(1)}%`:"—"}</b></span><span><small>Allegro • cel ${allegroDocelowaMarza}%</small><b>${p.cenaZakupu?zl(rentownosc.recommended):"—"}</b></span></div>
@@ -9004,25 +9004,72 @@ function widokAdminJakoscKatalogu(){
   </div>`);
 }
 
-function ustawCene(id, wartosc){
-  const cena = parseFloat(String(wartosc).replace(",","."));
-  if(!(cena>0)){ toast("⚠️ Nieprawidłowa cena"); renderuj(); return; }
-  const nowa = +cena.toFixed(2);
-  const i = produktyDodane.findIndex(x=>x.id===id);
-  if(i>=0){
-    produktyDodane[i].cena = nowa;
-    if(produktyDodane[i].staraCena && produktyDodane[i].staraCena<=nowa) delete produktyDodane[i].staraCena;
-    zapiszLS("artway_produkty_dodane", produktyDodane);
+function asortymentStanZapisuCeny(input,status="",tekst=""){
+  const pole=input?.closest?.(".catalog-product-edit-value");if(!pole)return;
+  pole.classList.remove("is-saving","is-saved","has-error");
+  if(status)pole.classList.add(status);
+  input.setAttribute("aria-busy",status==="is-saving"?"true":"false");
+  input.setAttribute("aria-invalid",status==="has-error"?"true":"false");
+  const info=pole.querySelector("[data-inline-price-status]");if(info)info.textContent=tekst;
+  clearTimeout(input._artwayPriceStateTimer);
+  if(status==="is-saved")input._artwayPriceStateTimer=setTimeout(()=>{pole.classList.remove("is-saved");if(info)info.textContent="";},1800);
+}
+function asortymentPodmienCeneBezRenderu(id,patch={},usun=[]){
+  const key=String(id),baza=pobierzProduktAdmin(id)||{},idx=produktyDodane.findIndex(x=>String(x.id)===key);
+  const signature=typeof asortymentCentralnySygnatura==="function"?asortymentCentralnySygnatura():"";
+  const centralData=asortymentCentralnyStan?.status==="ready"&&asortymentCentralnyStan.signature===signature?asortymentCentralnyStan.data:asortymentCentralnyCache?.get?.(signature)?.data;
+  if(idx>=0){
+    const next={...produktyDodane[idx],...patch};for(const pole of usun)delete next[pole];
+    produktyDodane=[...produktyDodane.slice(0,idx),next,...produktyDodane.slice(idx+1)];
+    zapiszLS("artway_produkty_dodane",produktyDodane);
   }else{
-    const baza = pobierzProduktAdmin(id) || {};
-    const edycja = {...(produktyEdytowane[id]||{}), cena:nowa};
-    if(baza.staraCena && baza.staraCena<=nowa) edycja.staraCena = undefined;
-    produktyEdytowane = {...produktyEdytowane, [id]:edycja};
-    zapiszLS("artway_produkty_edytowane", produktyEdytowane);
+    const next={...(produktyEdytowane[key]||{}),...patch};for(const pole of usun)next[pole]=null;
+    produktyEdytowane={...produktyEdytowane,[key]:next};
+    zapiszLS("artway_produkty_edytowane",produktyEdytowane);
   }
-  zbudujProdukty();
-  loguj("info",`Zmieniono cenę produktu ${id} → ${zl(nowa)}`);
-  toast("Cena zapisana ✅"); renderuj();
+  if(Array.isArray(produkty)){
+    const produktIdx=produkty.findIndex(x=>String(x.id)===key);
+    if(produktIdx>=0){const next={...produkty[produktIdx],...patch};for(const pole of usun)delete next[pole];produkty[produktIdx]=next;}
+  }
+  if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
+  if(centralData&&signature){
+    const data={...centralData,items:(centralData.items||[]).map(item=>String(item.id)===key?{...item,...patch,...Object.fromEntries(usun.map(pole=>[pole,null]))}:item)};
+    asortymentCentralnyCache.set(signature,{at:Date.now(),data});
+    asortymentCentralnyStan={status:"ready",signature,data,error:"",request:null};
+  }
+  return baza;
+}
+function ustawCene(id, wartosc, input=null){
+  const poprzedni=pobierzProduktAdmin(id)||{},cena=parseFloat(String(wartosc).trim().replace(/\s/g,"").replace(",","."));
+  if(!(cena>0)){
+    if(input)input.value=String(kwotaNum(poprzedni.cena).toFixed(2)).replace(".",",");
+    asortymentStanZapisuCeny(input,"has-error","Podaj cenę większą od 0");toast("⚠️ Nieprawidłowa cena sprzedaży");return false;
+  }
+  asortymentStanZapisuCeny(input,"is-saving","Zapisuję…");
+  const nowa=+cena.toFixed(2),usun=Number(poprzedni.staraCena)>0&&Number(poprzedni.staraCena)<=nowa?["staraCena"]:[];
+  asortymentPodmienCeneBezRenderu(id,{cena:nowa},usun);
+  if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
+  loguj("info",`Zmieniono cenę sprzedaży produktu ${id} → ${zl(nowa)}`);
+  asortymentStanZapisuCeny(input,"is-saved","Zapisano");return true;
+}
+function ustawCeneZakupu(id, wartosc, input=null){
+  const poprzedni=pobierzProduktAdmin(id)||{},raw=String(wartosc).trim(),cena=parseFloat(raw.replace(/\s/g,"").replace(",","."));
+  const polaFaktury=["cenaZakupuNetto","cenaZakupuVat","cenaZakupuWaluta","cenaZakupuDokument","cenaZakupuKsef","cenaZakupuDostawca","cenaZakupuDataDokumentu"];
+  if(raw===""){
+    asortymentStanZapisuCeny(input,"is-saving","Usuwam…");
+    asortymentPodmienCeneBezRenderu(id,{},["cenaZakupu","cenaZakupuPrywatna","cenaZakupuZrodlo","cenaZakupuDopasowanie","cenaZakupuZaktualizowanoAt",...polaFaktury]);
+    loguj("info",`Usunięto ręczną cenę zakupu produktu ${id}`);asortymentStanZapisuCeny(input,"is-saved","Usunięto");return true;
+  }
+  if(!Number.isFinite(cena)||cena<0){
+    if(input)input.value=poprzedni.cenaZakupu==null?"":String(kwotaNum(poprzedni.cenaZakupu).toFixed(2)).replace(".",",");
+    asortymentStanZapisuCeny(input,"has-error","Podaj 0 lub więcej");toast("⚠️ Nieprawidłowa cena zakupu");return false;
+  }
+  asortymentStanZapisuCeny(input,"is-saving","Zapisuję…");
+  const nowa=+cena.toFixed(2);
+  asortymentPodmienCeneBezRenderu(id,{cenaZakupu:nowa,cenaZakupuPrywatna:true,cenaZakupuZrodlo:"ręczna edycja administratora",cenaZakupuDopasowanie:"ręcznie",cenaZakupuZaktualizowanoAt:new Date().toISOString()},polaFaktury);
+  if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
+  loguj("info",`Zmieniono prywatną cenę zakupu produktu ${id} → ${zl(nowa)}`);
+  asortymentStanZapisuCeny(input,"is-saved","Zapisano");return true;
 }
 /* ── Akcje masowe na produktach ── */
 let zaznaczoneProdukty = new Set();

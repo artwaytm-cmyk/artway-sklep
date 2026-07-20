@@ -32,6 +32,14 @@
 .catalog-product-operational-data .catalog-product-edit-value input{width:86px;max-width:100%;min-width:0;padding:6px 7px;border:1.5px solid var(--line);border-radius:8px;background:var(--panel);font:inherit;font-size:.78rem;font-weight:850;text-align:right}
 .catalog-product-operational-data .catalog-product-edit-value input.empty{border-color:#fca5a5;background:#fff1f2}
 .catalog-product-operational-data .catalog-product-edit-value em{color:var(--muted2);font-size:.64rem;font-style:normal;white-space:nowrap}
+.catalog-product-operational-data .catalog-product-edit-value>i{min-height:.72rem;color:var(--muted2);font-size:.56rem;font-style:normal;font-weight:850;line-height:1.2}
+.catalog-product-operational-data .catalog-product-edit-value.is-saving{border-color:#93c5fd;background:#eff6ff}
+.catalog-product-operational-data .catalog-product-edit-value.is-saved{border-color:#86efac;background:#f0fdf4}
+.catalog-product-operational-data .catalog-product-edit-value.is-saved>i{color:#15803d}
+.catalog-product-operational-data .catalog-product-edit-value.has-error{border-color:#fca5a5;background:#fff1f2}
+.catalog-product-operational-data .catalog-product-edit-value.has-error>i{color:#b91c1c}
+.catalog-product-operational-data .catalog-product-edit-value.has-error input{border-color:#ef4444}
+.catalog-product-operational-data .catalog-product-purchase-price>small::before{content:"🔒 ";font-size:.58rem}
 .catalog-product-actions{display:flex;align-content:start;align-items:stretch;justify-content:flex-start;gap:6px;min-width:0;flex-wrap:wrap}
 .catalog-product-channel-summary,.catalog-product-sale-status,.catalog-product-availability-action{width:100%;min-width:0}
 .catalog-product-channel-summary .catalog-no-offer-note{max-width:none}

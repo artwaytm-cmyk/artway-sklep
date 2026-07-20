@@ -41,7 +41,7 @@ test("karty katalogu zachowują pełne dane i operacje hurtowe",async()=>{
   assert.match(source,/catalog-product-operational-data/);
   assert.match(source,/catalog-product-actions/);
   assert.match(source,/EXTERNAL_ID/);
-  assert.match(source,/Zakup — administrator/);
+  assert.match(source,/Zakup — tylko administrator/);
   assert.match(source,/Cena Allegro/);
   assert.match(source,/Stan magazynowy/);
   assert.match(source,/adminOperacjeWynikowHTML/);
@@ -51,6 +51,22 @@ test("karty katalogu zachowują pełne dane i operacje hurtowe",async()=>{
   assert.doesNotMatch(source,/const gotowosc=Math\.max/);
   assert.doesNotMatch(source,/assortment-card-readiness/);
   assert.doesNotMatch(source,/Po zakończeniu pobierz nowy <b>products\.json<\/b> i podmień go na hostingu/);
+});
+
+test("ceny w katalogu zapisują się w wierszu bez pełnego renderowania strony",async()=>{
+  const view=await read("src/frontend/12-warehouse-views.js"),prices=await read("src/frontend/13-product-admin.js"),css=await read("src/styles/29-commerce-catalog-actions.css");
+  assert.match(view,/ustawCene\([^\n]+this\.value,this\)/);
+  assert.match(view,/ustawCeneZakupu\([^\n]+this\.value,this\)/);
+  assert.match(view,/data-inline-price-status/);
+  assert.match(prices,/function asortymentPodmienCeneBezRenderu/);
+  assert.match(prices,/function ustawCeneZakupu/);
+  const inlineBlock=prices.slice(prices.indexOf("function ustawCene(id"),prices.indexOf("\/\* ── Akcje masowe"));
+  assert.doesNotMatch(inlineBlock,/renderuj\s*\(/);
+  assert.match(inlineBlock,/cenaZakupuPrywatna:true/);
+  assert.match(inlineBlock,/ręczna edycja administratora/);
+  assert.match(css,/\.catalog-product-edit-value\.is-saving/);
+  assert.match(css,/\.catalog-product-edit-value\.is-saved/);
+  assert.match(css,/\.catalog-product-edit-value\.has-error/);
 });
 
 test("układ katalogu przejmuje strukturę wzorca i zachowuje treść asortymentu",async()=>{
