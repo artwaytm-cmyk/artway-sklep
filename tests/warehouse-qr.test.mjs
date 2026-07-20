@@ -78,6 +78,19 @@ test('druk QR obejmuje wyłącznie zaznaczone pozycje i zachowuje fizyczny forma
   assert.match(styles, /warehouse-qr-print-a4/);
 });
 
+test('kreator arkusza pozwala ustawić osobny nakład, pozycję startową i fizyczną siatkę A4', () => {
+  assert.match(source, /Liczba kopii każdej etykiety/);
+  assert.match(source, /magazynQRUstawKopiePozycji/);
+  assert.match(source, /Zacznij od pola/);
+  assert.match(source, /Pomiń wykorzystane miejsca/);
+  assert.match(source, /magazynQRDrukMetryka/);
+  assert.match(source, /magazynQRUstawPresetDruku/);
+  assert.match(source, /Układ nie mieści się na kartce A4/);
+  assert.match(styles, /--qr-columns/);
+  assert.match(styles, /warehouse-qr-empty-slot/);
+  assert.match(styles, /page-break-after:always/);
+});
+
 test('skaner telefonu ma tryb awaryjny QR i przekazuje aktywną lokalizację do pozycji dokumentu', () => {
   assert.match(documents, /magazynQRLadujCzytnikKodow\(\)/);
   assert.match(documents, /BrowserMultiFormatReader/);
