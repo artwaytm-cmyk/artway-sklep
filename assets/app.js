@@ -5270,13 +5270,6 @@ function seoAktualizujMetaDlaTrasy(route=trasa()){
   document.title=title;setMeta("description",desc);setMeta("robots",route.startsWith("/admin")||["/diagnostyka","/logowanie","/rejestracja","/konto","/zamowienia"].includes(route)?"noindex,nofollow":"index,follow,max-image-preview:large");setMeta("og:locale","pl_PL",true);setMeta("og:site_name",baseTitle,true);setMeta("og:title",title,true);setMeta("og:description",desc,true);setMeta("og:url",canonical,true);setMeta("og:type",route.startsWith("/produkt/")?"product":"website",true);setMeta("og:image",image,true);setMeta("twitter:card",image?"summary_large_image":"summary");setMeta("twitter:title",title);setMeta("twitter:description",desc);setMeta("twitter:image",image);setMeta("product:price:amount",price,true);setMeta("product:price:currency",price?"PLN":"",true);
   let link=document.head.querySelector('link[rel="canonical"]');if(!link){link=document.createElement("link");link.rel="canonical";document.head.appendChild(link);}link.href=canonical;let script=document.getElementById("artway-seo-schema");if(!script){script=document.createElement("script");script.id="artway-seo-schema";script.type="application/ld+json";document.head.appendChild(script);}script.textContent=JSON.stringify(schema);
 }
-function seoKanalNazwa(channel=""){return ({google:"Google",bing:"Bing",duckduckgo:"DuckDuckGo",yahoo:"Yahoo",ecosia:"Ecosia",other_search:"Inna wyszukiwarka"})[channel]||channel;}
-function seoEfektyPanelHTML(){
-  const state=typeof seoEfektyStan==="object"?seoEfektyStan:{loading:true,totals:{},channels:{},timeline:[],products:[]},totals=state.totals||{},max=Math.max(1,...(state.timeline||[]).map(x=>Number(x.landing)||0));
-  const channelRows=Object.entries(state.channels||{}).sort((a,b)=>(b[1].landing||0)-(a[1].landing||0)).map(([channel,v])=>`<tr><td><b>${esc(seoKanalNazwa(channel))}</b></td><td>${Number(v.landing)||0}</td><td>${Number(v.product_view)||0}</td><td>${Number(v.add_to_cart)||0}</td><td>${Number(v.order)||0}</td><td>${zl(Number(v.revenue)||0)}</td></tr>`).join("");
-  const productRows=(state.products||[]).map(item=>{const p=pobierzProduktAdmin(item.productId);return `<tr><td>${p?.zdjecie?`<img class="seo-product-thumb" src="${esc(p.zdjecie)}" alt="">`:"📦"}</td><td><b>${esc(p?.nazwa||`Produkt ${item.productId}`)}</b><small>${esc(p?.externalId||p?.sku||item.productId)}</small></td><td>${Number(item.views)||0}</td><td>${Number(item.carts)||0}</td><td>${Number(item.views)>0?Math.round(Number(item.carts)*100/Number(item.views)):0}%</td></tr>`;}).join("");
-  return `<section class="seo-performance-grid"><article class="panel seo-performance-main"><div class="order-section-head"><div><span class="order-pro-label">Anonimowy pomiar wyników</span><h2>📈 Ruch i sprzedaż z wyszukiwarek</h2><p class="order-detail-lead">Rzeczywiste wejścia organiczne oraz dalsze działania klienta. Bez cookies reklamowych, adresów IP, danych klienta i tekstów wyszukiwania.</p></div><label class="seo-period-select">Okres<select onchange="seoPobierzEfekty(this.value,true)">${[7,30,90,365].map(days=>`<option value="${days}" ${Number(state.days)===days?"selected":""}>${days} dni</option>`).join("")}</select></label></div>${state.loading?`<div class="seo-metric-loading"><i></i><b>Pobieram rzeczywiste efekty…</b></div>`:state.error?`<div class="backend-note bad"><b>Pomiar chwilowo niedostępny:</b> ${esc(state.error)}</div>`:`<div class="seo-kpi-grid"><div><span>🔎</span><b>${Number(totals.landing)||0}</b><small>wejść z wyszukiwarek</small></div><div><span>🏷️</span><b>${Number(totals.product_view)||0}</b><small>kart produktów</small></div><div><span>🛒</span><b>${Number(totals.add_to_cart)||0}</b><small>dodań do koszyka</small></div><div><span>✅</span><b>${Number(totals.order)||0}</b><small>zamówień</small></div><div><span>💰</span><b>${zl(Number(totals.revenue)||0)}</b><small>sprzedaży organicznej</small></div></div><div class="seo-timeline" aria-label="Wejścia z wyszukiwarek w czasie">${(state.timeline||[]).map(x=>`<span title="${esc(x.day)}: ${Number(x.landing)||0} wejść"><i style="height:${Math.max(4,Math.round((Number(x.landing)||0)*100/max))}%"></i><small>${esc(String(x.day||"").slice(5))}</small></span>`).join("")}</div>`}</article><article class="panel"><h2>Źródła bezpłatnego ruchu</h2><div class="seo-table-wrap"><table class="log-table"><thead><tr><th>Wyszukiwarka</th><th>Wejścia</th><th>Produkty</th><th>Koszyk</th><th>Zamówienia</th><th>Sprzedaż</th></tr></thead><tbody>${channelRows||`<tr><td colspan="6">Pomiar rozpoczął się teraz. Dane pojawią się po wejściach klientów z wyszukiwarek.</td></tr>`}</tbody></table></div></article><article class="panel"><h2>Produkty pozyskujące ruch</h2><div class="seo-table-wrap"><table class="log-table"><thead><tr><th></th><th>Produkt</th><th>Wyświetlenia</th><th>Koszyk</th><th>Skuteczność</th></tr></thead><tbody>${productRows||`<tr><td colspan="5">Brak zmierzonych kart produktów w tym okresie.</td></tr>`}</tbody></table></div></article><article class="panel seo-measurement-note"><h2>Jak czytać wyniki</h2><p>Wzrost pozycji i indeksowanie nie są natychmiastowe ani gwarantowane. Panel pokazuje wynik biznesowy od momentu wdrożenia pomiaru; pełne dane zapytań i pozycji pozostają w bezpłatnych usługach Google Search Console i Merchant Center.</p><div class="diag-actions"><a class="btn ghost" href="https://search.google.com/search-console" target="_blank" rel="noopener">Search Console ↗</a><a class="btn ghost" href="https://merchants.google.com/" target="_blank" rel="noopener">Merchant Center ↗</a></div></article></section>`;
-}
 function widokAdminSEO(sekcja="pulpit"){
   const tab=TABY_SEO.some(([id])=>id===sekcja)?sekcja:"pulpit",queue=seoKolejkaProduktow(),limit=Math.max(1,Math.min(50,Number(seoUstawienia.dailyLimit)||5)),daily=queue.filter(x=>!String(x.product.seoReviewedAt||"").startsWith(new Date().toISOString().slice(0,10))).slice(0,limit),good=queue.filter(x=>x.score>=85).length,missing=queue.filter(x=>x.score<60).length,priority=queue.filter(x=>x.product.seoPromoted),avg=queue.length?Math.round(queue.reduce((s,x)=>s+x.score,0)/queue.length):0,indexNowOk=seoUstawienia.lastPromotionStatus==="accepted",indexNowState=indexNowOk?`Ostatnio zgłoszono ${Number(seoUstawienia.lastPromotionCount)||0} adresów — ${allegroDataTxt(seoUstawienia.lastPromotionAt)}`:seoUstawienia.lastPromotionStatus==="error"?"Ostatnie zgłoszenie nie powiodło się — automat ponowi próbę przy kolejnej partii":"Pierwsze zgłoszenie nastąpi przy najbliższej dziennej partii";
   if(typeof seoPobierzEfekty==="function")queueMicrotask(()=>seoPobierzEfekty(typeof seoEfektyStan==="object"?seoEfektyStan.days:30));
@@ -5298,8 +5291,12 @@ function zapiszCzescUstawien(obj){
   toast("Zapisane ✅"); renderuj();
 }
 
-/* Anonimowy pomiar efektów SEO. Zapisuje wyłącznie dzienne sumy kanałów i działa tylko dla wejść z wyszukiwarek. */
-let seoEfektyStan={loading:false,loadedAt:0,error:"",days:30,totals:{landing:0,product_view:0,add_to_cart:0,order:0,revenue:0},channels:{},timeline:[],products:[],updatedAt:null};
+/* Anonimowy pomiar efektów SEO. Zapisuje wyłącznie dzienne sumy kanałów, domen wejścia i konwersji. */
+let seoEfektyStan={loading:false,loadedAt:0,error:"",days:30,totals:{landing:0,product_view:0,add_to_cart:0,order:0,revenue:0},channels:{},domains:{},landingPages:[],campaigns:[],referrers:[],timeline:[],products:[],updatedAt:null};
+const SEO_DOMENY=new Set(["artwaytm.pl","allsklep.pl"]);
+function seoNormalizujDomene(value=""){const host=String(value||"").toLowerCase().replace(/^www\./,"").split(":")[0];return SEO_DOMENY.has(host)?host:"";}
+function seoBezpiecznaSciezka(value="/"){const path=String(value||"/").split(/[?#]/)[0].replace(/[\u0000-\u001f\u007f]/g,"").slice(0,180);return path.startsWith("/")?path:"/";}
+function seoUsunZnacznikDomeny(){try{const url=new URL(location.href);if(!url.searchParams.has("entry_domain"))return;url.searchParams.delete("entry_domain");history.replaceState(history.state,"",`${url.pathname}${url.search}${url.hash}`);}catch(e){}}
 function seoKanalZHosta(host=""){
   const value=String(host||"").toLowerCase();
   if(/(^|\.)google\./.test(value))return "google";
@@ -5310,23 +5307,24 @@ function seoKanalZHosta(host=""){
   if(/(^|\.)(?:search\.brave\.com|qwant\.com|startpage\.com|yandex\.[a-z.]+|seznam\.cz)$/.test(value))return "other_search";
   return "";
 }
-function seoKanalSesji(){
+function seoAtrybucjaSesji(route="/"){
   try{
-    const saved=sessionStorage.getItem("artway_seo_channel");if(saved)return saved;
-    const host=document.referrer?new URL(document.referrer).hostname:"",channel=seoKanalZHosta(host);
-    if(channel)sessionStorage.setItem("artway_seo_channel",channel);
-    return channel;
-  }catch(e){return "";}
+    const stored=JSON.parse(sessionStorage.getItem("artway_seo_attribution_v2")||"null");if(stored?.entryDomain&&stored?.channel)return stored;
+    const url=new URL(location.href),own=seoNormalizujDomene(location.hostname)||"artwaytm.pl",via=seoNormalizujDomene(url.searchParams.get("entry_domain")),referrer=document.referrer?new URL(document.referrer):null,referrerHost=String(referrer?.hostname||"").toLowerCase().replace(/^www\./,""),searchChannel=seoKanalZHosta(referrerHost),campaignName=String(url.searchParams.get("utm_campaign")||url.searchParams.get("utm_source")||"").toLowerCase().replace(/[^a-z0-9_.-]/g,"").slice(0,80);
+    const externalReferrer=referrerHost&&!SEO_DOMENY.has(referrerHost)?referrerHost.replace(/[^a-z0-9.-]/g,"").slice(0,120):"";
+    const attribution={entryDomain:via||own,landingPath:seoBezpiecznaSciezka(route||location.pathname),channel:searchChannel||(campaignName?"campaign":externalReferrer?"referral":"direct"),campaign:campaignName,referrerDomain:externalReferrer};
+    sessionStorage.setItem("artway_seo_attribution_v2",JSON.stringify(attribution));seoUsunZnacznikDomeny();return attribution;
+  }catch(e){return {entryDomain:"artwaytm.pl",landingPath:seoBezpiecznaSciezka(route),channel:"direct",campaign:"",referrerDomain:""};}
 }
 function seoWyslijZdarzenie(event,data={}){
-  const channel=seoKanalSesji();if(!channel||jestAdmin())return;
-  const body={event,channel,productId:data.productId||"",value:Math.max(0,Number(data.value)||0)};
+  const attribution=seoAtrybucjaSesji(data.route||trasa());if(!attribution.channel||jestAdmin())return;
+  const body={event,channel:attribution.channel,entryDomain:attribution.entryDomain,landingPath:attribution.landingPath,campaign:attribution.campaign,referrerDomain:attribution.referrerDomain,productId:data.productId||"",value:Math.max(0,Number(data.value)||0)};
   fetch("/api/seo/event",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),keepalive:true,credentials:"omit"}).catch(()=>{});
 }
 function seoSledzTrase(route="/"){
-  if(!seoKanalSesji()||String(route).startsWith("/admin"))return;
+  if(String(route).startsWith("/admin"))return;seoAtrybucjaSesji(route);
   try{
-    if(!sessionStorage.getItem("artway_seo_landing")){sessionStorage.setItem("artway_seo_landing","1");seoWyslijZdarzenie("landing");}
+    if(!sessionStorage.getItem("artway_seo_landing")){sessionStorage.setItem("artway_seo_landing","1");seoWyslijZdarzenie("landing",{route});}
     if(String(route).startsWith("/produkt/")){
       const id=String(route).split("/")[2]||"",key=`artway_seo_view_${id}`;
       if(id&&!sessionStorage.getItem(key)){sessionStorage.setItem(key,"1");seoWyslijZdarzenie("product_view",{productId:id});}
