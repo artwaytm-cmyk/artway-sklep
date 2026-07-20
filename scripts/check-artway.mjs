@@ -330,8 +330,8 @@ requireMarkers('połączonych assets JS', app, [
   'function wyczyscFiltryStanowMagazynu',
   'Generator struktury',
   'Lokalizacja nadrzędna',
-  'Centrum kontroli zapasu',
-  'Bestsellery najpierw',
+  'Co mamy obecnie na magazynie',
+  'Priorytet sprzedaży',
   'function agentAICentrumTekst',
   'function agentAIWyslijRaportTelegram',
   'function agentAIWykonajPlanBezpieczny',
@@ -729,8 +729,8 @@ if (!supplierFlow.includes('synchronizujSprzedazZDostepnosciaProducenta') || !su
 if (!app.includes('.filter(p => !produktOznaczonyNiedostepny(p))') || !app.includes('function allegroZamowienieZrealizowaneLokalnie')) {
   fail('assets/app.js: niedostępny produkt ma być ukryty w sklepie, a zrealizowane Allegro wyłączone z obsługi');
 }
-if (!app.includes('brak lokalnego stanu nie wyłącza produktu ze sprzedaży') || !app.includes('Błąd pobrania nie jest traktowany jako brak')) {
-  fail('assets/app.js: stan lokalny musi być pomocniczy, a błąd strony producenta nie może oznaczać braku produktu');
+if (!app.includes('Fizyczne korekty ilości wykonujesz wyłącznie w karcie „Stany”') || !app.includes('Błąd pobrania nie jest traktowany jako brak')) {
+  fail('assets/app.js: fizyczne stany muszą być oddzielone od dostępności producenta, a błąd strony producenta nie może oznaczać braku produktu');
 }
 if (!app.includes('strefa → regał → półka → miejsce') && !app.includes('strefy przez regał i półkę do konkretnego miejsca')) {
   fail('assets/app.js: lokalizacje magazynu muszą mieć czytelną hierarchię strefa/regał/półka/miejsce');

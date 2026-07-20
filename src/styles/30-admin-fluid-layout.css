@@ -28,6 +28,7 @@ body.admin-mode .admin-tresc .agent-module-groups a{min-width:0;white-space:nowr
 
 body.admin-mode .admin-tresc :is(.admin-search-standard-body,.warehouse-filter-grid,.warehouse-stock-toolbar,.warehouse-stock-meta-form,.supplier-monitor-toolbar,.catalog-quality-toolbar,.telegram-conversation-filters,.product-link-import-filters,.allegro-listing-advanced-grid,.profitability-controls,.orders-toolbar,.diag-toolbar){grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))!important}
 body.admin-mode .admin-tresc :is(.orders-stat-grid,.supplier-monitor-stats,.telegram-hub-kpis,.product-link-import-stats,.agent-command-metrics,.warehouse-stock-summary){grid-template-columns:repeat(auto-fit,minmax(min(100%,135px),1fr))!important}
+body.admin-mode .admin-tresc :is(.warehouse-stock-page .warehouse-stock-summary,.supplier-monitor-panel .supplier-monitor-stats){grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))!important}
 body.admin-mode .admin-tresc :is(.diag-actions,.admin-workspace-actions,.section-head,.order-section-head,.warehouse-stock-results,.allegro-listing-results-head,.admin-results-operations,.admin-results-selection){max-width:100%;flex-wrap:wrap}
 body.admin-mode .admin-tresc :is(.telegram-message-stream,.telegram-incident-list,.warehouse-document-list){max-height:none;overflow:visible;scrollbar-gutter:auto}
 

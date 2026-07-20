@@ -42,7 +42,7 @@ test('wspólny wygląd magazynu jest responsywny i ładowany wyłącznie z panel
 test('podstrony mają osobne narzędzia operacyjne, a nie tylko wspólne obramowanie', () => {
   assert.match(inventory, /warehouse-dashboard-flow/);
   assert.match(inventory, /function magazynDostawcaWierszHTML/);
-  assert.match(inventory, /Kontrola i historia/);
+  assert.match(inventory, /Pokrycie i kontrola/);
   assert.match(inventory, /warehouse-movements-overview/);
   assert.match(inventory, /magazynEksportujRuchyCSV/);
   assert.match(inventory, /Dokumenty PZ\/WZ/);
@@ -65,12 +65,28 @@ test('Plan zatowarowania prowadzi po procesie i renderuje tabele w jednym schema
   assert.match(styles, /@media\(max-width:460px\).*supplier-order-actions/);
 });
 
-test('Stany renderują duży katalog partiami i nie blokują pierwszego wejścia', () => {
+test('Stany pokazują fizyczny magazyn w tabeli, renderują katalog partiami i nie blokują pierwszego wejścia', () => {
   assert.match(inventory, /MAGAZYN_STANY_PARTIA_KART=10/);
   assert.match(inventory, /function magazynStanyPrzygotujKartyProgresywnie/);
   assert.match(inventory, /function magazynStanyDoloadujKarty/);
+  assert.match(inventory, /function magazynStanWierszHTML/);
   assert.match(inventory, /IntersectionObserver/);
-  assert.match(inventory, /magazynStanyPrzygotujKartyProgresywnie\(fragment,\{rez,spr,kanalySpr,prog\}\)/);
+  assert.match(inventory, /magazynStanyPrzygotujKartyProgresywnie\(fragment,\{rez,prog\}\)/);
+  assert.match(inventory, /class="log-table warehouse-current-stock-table"/);
+  assert.match(inventory, /Co mamy obecnie na magazynie/);
+  assert.match(inventory, /Stan fizyczny<\/th><th>Rezerwacje<\/th><th>Wolne/);
   assert.match(styles, /warehouse-stock-progressive-loader/);
-  assert.match(styles, /content-visibility:auto/);
+  assert.match(styles, /warehouse-current-stock-table/);
+});
+
+test('Dostępność przejmuje producenta, sprzedaż, pokrycie i wspólny schemat wyszukiwania oraz tabel', () => {
+  const start=inventory.indexOf('${aktywna==="dostawcy"?'),end=inventory.indexOf('${aktywna==="pulpit"?',start);
+  const section=inventory.slice(start,end);
+  assert.match(section,/adminWyszukiwaniePanelHTML\(\{id:"supplier-availability"/);
+  assert.match(section,/adminOperacjeWynikowHTML\(\{id:"supplier-availability"/);
+  assert.match(section,/exportSelected:"eksportujDostepnoscProducentow/);
+  assert.match(section,/Magazyn i sprzedaż/);
+  assert.match(section,/Pokrycie i kontrola/);
+  assert.match(section,/admin-standard-table-wrap/);
+  assert.match(section,/paginacjaHTML\(stronaDostepnosciProducentow/);
 });

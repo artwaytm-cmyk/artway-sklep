@@ -21,7 +21,8 @@ test("zakupy producentów i lokalizacje magazynowe mają odrębne zakresy",async
   assert.match(warehouse,/const brakiDostawcyPlanu=planProdukty\.filter/);
   assert.match(warehouse,/const lokalizacjeDoUstalenia=/);
   assert.match(warehouse,/filtrMagazynu==="lokalizacje-zamowien"/);
-  assert.match(warehouse,/const alertyStanow=planProdukty/);
+  assert.match(warehouse,/const fizyczneProdukty=/);
+  assert.match(warehouse,/bezLokalizacjiFizyczne=/);
   assert.match(warehouse,/supplierStats\.braki\.filter\(\(\{p\}\)=>planIds\.has/);
   assert.match(warehouse,/supplierStats\.niskie\.filter\(\(\{p\}\)=>planIds\.has/);
 });

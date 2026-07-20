@@ -4,8 +4,8 @@ function magazynSubnavHTML(aktywny="pulpit"){
   const dokumenty=(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny).length,planAkcje=braki+dokumenty;
   const items=[
     {id:"pulpit",href:"#/admin/magazyn",icon:"📊",label:"Pulpit",description:"Priorytety"},
-    {id:"dostawcy",href:"#/admin/magazyn/dostawcy",icon:"🏭",label:"Dostępność",description:"Producenci",badge:braki||""},
-    {id:"stany",href:"#/admin/magazyn/stany",icon:"📦",label:"Stany",description:"Towar i rezerwacje",badge:braki||""},
+    {id:"dostawcy",href:"#/admin/magazyn/dostawcy",icon:"🏭",label:"Dostępność",description:"Producent • sprzedaż • pokrycie",badge:braki||""},
+    {id:"stany",href:"#/admin/magazyn/stany",icon:"📦",label:"Stany",description:"Fizyczny towar teraz"},
     {id:"plan",href:"#/admin/magazyn/plan",icon:"📥",label:"Plan i dokumenty",description:"Zatowarowanie • PZ/WZ",badge:planAkcje||""},
     {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",icon:"🗺️",label:"Lokalizacje",description:"Obszary • regały • półki",badge:bezLok||""},
     {id:"etykiety-qr",href:"#/admin/magazyn/etykiety-qr",icon:"🏷️",label:"Etykiety QR",description:"Druk i skanowanie"},

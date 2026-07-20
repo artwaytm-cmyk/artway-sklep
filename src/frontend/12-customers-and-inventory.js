@@ -152,10 +152,11 @@ let sortowanieAdminProduktow = ["external","id","nazwa","producent","kategoria",
 let gestoscAdminProduktow=["zwarta","wygodna"].includes(wczytajLS("artway_produkty_gestosc_admin","zwarta"))?wczytajLS("artway_produkty_gestosc_admin","zwarta"):"zwarta";
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
-let frazaMagazynu="", filtrMagazynu="wszystkie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="ryzyko", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="decyzje";
+let frazaMagazynu="", filtrMagazynu="na-stanie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="stan-malejaco", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="wszystkie", sortowanieProducentowMagazynu="priorytet", stronaDostepnosciProducentow=1;
 let szukajRuchowMagazynu="",filtrRuchowMagazynu="wszystkie",limitRuchowMagazynu=100;
 let magazynLokalizacjeZamowienIds=new Set();
 let magazynNaStronie=[25,50,100,200,500].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
+let dostepnoscProducentowNaStronie=[25,50,100,200,500].includes(Number(wczytajLS("artway_dostepnosc_na_stronie",50)))?Number(wczytajLS("artway_dostepnosc_na_stronie",50)):50;
 function ustawKafelkowyFiltrAsortymentu(typ="aktywne"){
   asortymentResetujFiltry(false);
   if(typ==="allegro_polaczone")filtrAllegroProduktow="polaczone";
@@ -255,6 +256,17 @@ function odswiezMonitoringProducentow(){
   if(active?.isConnected&&selection&&typeof active.setSelectionRange==="function")try{active.setSelectionRange(selection.start,selection.end);}catch(e){}
   if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY,behavior:"instant"});
   return true;
+}
+function ustawStroneDostepnosciProducentow(n){stronaDostepnosciProducentow=Math.max(1,Number(n)||1);odswiezMonitoringProducentow();}
+function ustawDostepnoscProducentowNaStronie(n){
+  dostepnoscProducentowNaStronie=[25,50,100,200,500].includes(Number(n))?Number(n):50;
+  stronaDostepnosciProducentow=1;zapiszLS("artway_dostepnosc_na_stronie",dostepnoscProducentowNaStronie);odswiezMonitoringProducentow();
+}
+function wyczyscFiltryDostepnosciProducentow(){szukajProducentowMagazynu="";filtrProducentowMagazynu="wszystkie";sortowanieProducentowMagazynu="priorytet";stronaDostepnosciProducentow=1;odswiezMonitoringProducentow();}
+function eksportujDostepnoscProducentow(zakres="filtr"){
+  const ids=zakres==="zaznaczone"?[...zaznaczoneDostepnoscProducentow]:dostepnoscProducentowWynikiIds,rez=rezerwacjeMagazynowe(),kanaly=sprzedazKanalyMagazynowe(30),spr=kanaly.razem;
+  const rows=ids.map(produktMagazynowy).filter(Boolean).map(p=>{const id=String(p.id),i=producentDostepnoscInfo(p),stan=stanMagazynuId(p.id),plan=sugestiaZatowarowania(p,rez,spr),meta=magazynMetaProduktu(p.id);return [p.id,p.sku||"",p.gtin||p.ean||meta.kod||"",p.nazwa||"",p.producent||p.marka||meta.dostawca||"",i.status,i.quantity??"",i.checked||"",stan===null?"":stan,rez[id]||0,plan.dostepne===null?"":plan.dostepne,kanaly.sklep[id]||0,kanaly.allegro[id]||0,plan.ilosc||0,meta.lokalizacja||"",produktOznaczonyNiedostepny(p)?"wstrzymana":"aktywna",i.url||""];});
+  adminEksportujCSV(`dostepnosc-${zakres}-${new Date().toISOString().slice(0,10)}.csv`,["ID","SKU","EAN","Produkt","Producent","Status producenta","Stan producenta","Ostatnia kontrola","Stan fizyczny","Rezerwacje","Dostępne lokalnie","Sprzedaż sklep 30 dni","Sprzedaż Allegro 30 dni","Do zamówienia","Lokalizacja","Sprzedaż","Źródło"],rows);
 }
 function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }
 function jestProduktemImportowanym(id){ return produktyImportowane.some(p=>String(p.id)===String(id)); }
@@ -432,6 +444,7 @@ function filtrujProduktyMagazynu(lista, rez, sprzedaz){
     const kartoteka=[meta.lokalizacja,nazwaLokalizacjiMagazynu(meta.lokalizacja),meta.dostawca,meta.kod,meta.uwagi].filter(Boolean).join(" ");
     return produktPasujeFrazie(p,frazaMagazynu)||String(p.sku||"").toLowerCase().includes(frazaMagazynu.toLowerCase())||kartoteka.toLowerCase().includes(frazaMagazynu.toLowerCase());
   });
+  if(filtrMagazynu==="na-stanie") out=out.filter(p=>Number(stanMagazynuId(p.id)||0)>0);
   if(filtrMagazynu==="monitorowane") out=out.filter(p=>stanMagazynuId(p.id)!==null);
   if(filtrMagazynu==="bezlimitu") out=out.filter(p=>stanMagazynuId(p.id)===null);
   if(filtrMagazynu==="niskie") out=out.filter(p=>{const s=stanMagazynuId(p.id), pr=progNiskiProduktu(p);return s!==null&&s>0&&s<=pr;});
@@ -463,6 +476,9 @@ function sortujProduktyMagazynu(lista, rez={}, sprzedaz={}, prog=5){
   return [...lista].sort((a,b)=>{
     const sa=stanMagazynuId(a.id), sb=stanMagazynuId(b.id);
     if(sortowanieMagazynu==="nazwa") return String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
+    if(sortowanieMagazynu==="stan-malejaco") return (sb===null?-1:sb)-(sa===null?-1:sa)||String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
+    if(sortowanieMagazynu==="lokalizacja") return String(magazynMetaProduktu(a.id).lokalizacja||"ZZZ").localeCompare(String(magazynMetaProduktu(b.id).lokalizacja||"ZZZ"),"pl",{numeric:true,sensitivity:"base"})||String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl");
+    if(sortowanieMagazynu==="inwentaryzacja") return (Date.parse(magazynMetaProduktu(a.id).ostatniaInwentaryzacja||0)||0)-(Date.parse(magazynMetaProduktu(b.id).ostatniaInwentaryzacja||0)||0);
     if(sortowanieMagazynu==="stan") return (sa===null?Number.MAX_SAFE_INTEGER:sa)-(sb===null?Number.MAX_SAFE_INTEGER:sb);
     if(sortowanieMagazynu==="rezerwacje") return Number(rez[b.id]||0)-Number(rez[a.id]||0);
     if(sortowanieMagazynu==="sprzedaz") return Number(sprzedaz[b.id]||0)-Number(sprzedaz[a.id]||0);
@@ -486,15 +502,15 @@ function stanBadgeMagazynu(stan, prog){
   if(stan<=prog) return `<span class="lvl lvl-ostrzezenie">niski</span>`;
   return `<span class="lvl lvl-ok">OK</span>`;
 }
-function ustawFiltrMagazynu(filtr, sort="ryzyko"){
+function ustawFiltrMagazynu(filtr, sort="stan-malejaco"){
   frazaMagazynu="";
   filtrMagazynu=filtr||"wszystkie";
-  sortowanieMagazynu=sort||"ryzyko";
+  sortowanieMagazynu=sort||"stan-malejaco";
   stronaMagazynu=1;
   renderuj();
 }
 function wyczyscFiltryStanowMagazynu(){
-  frazaMagazynu="";filtrMagazynu="wszystkie";filtrDostawcyMagazynu="wszyscy";filtrLokalizacjiMagazynu="wszystkie";filtrInwentaryzacjiMagazynu="wszystkie";sortowanieMagazynu="ryzyko";stronaMagazynu=1;renderuj();
+  frazaMagazynu="";filtrMagazynu="na-stanie";filtrDostawcyMagazynu="wszyscy";filtrLokalizacjiMagazynu="wszystkie";filtrInwentaryzacjiMagazynu="wszystkie";sortowanieMagazynu="stan-malejaco";stronaMagazynu=1;renderuj();
 }
 function ustawStroneMagazynu(n){ stronaMagazynu=Math.max(1,Number(n)||1); renderuj(); }
 function ustawMagazynNaStronie(n){
@@ -552,9 +568,21 @@ function eksportujMagazynCSV(ids=null,nazwa="magazyn-artway.csv"){
   pobierzPlik(nazwa,"\uFEFF"+rows.join("\n"),"text/csv");
   loguj("info",`Wyeksportowano magazyn CSV (${rows.length-1} produktów)`);toast(`Wyeksportowano ${rows.length-1} produktów magazynowych ✅`);
 }
+function eksportujFizyczneStanyMagazynu(ids=null,nazwa="fizyczne-stany-magazynowe.csv"){
+  const rez=rezerwacjeMagazynowe(),wybrane=Array.isArray(ids)?new Set(ids.map(String)):null;
+  const rows=[["id","sku","ean","produkt","kategoria","lokalizacja","stan_fizyczny","zarezerwowane","wolne","cena_brutto","wartosc_stanu","ostatnia_inwentaryzacja","ostatnia_korekta"].join(";")];
+  produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&(!wybrane||wybrane.has(String(p.id)))).forEach(p=>{
+    const stan=stanMagazynuId(p.id);if(stan===null)return;
+    const meta=magazynMetaProduktu(p.id),r=Number(rez[String(p.id)]||0),wolne=stan-r,wartosc=kwotaNum(stan*kwotaNum(p.cena)).toFixed(2).replace(".",",");
+    rows.push([p.id,p.sku||"",p.gtin||p.ean||meta.kod||"",p.nazwa||"",p.kategoria||"",meta.lokalizacja||"",stan,r,wolne,kwotaNum(p.cena).toFixed(2).replace(".",","),wartosc,meta.ostatniaInwentaryzacja||"",meta.ostatniaKorekta||""].map(csvPole).join(";"));
+  });
+  if(rows.length===1){toast("Brak fizycznych stanów do eksportu");return;}
+  pobierzPlik(nazwa,"\uFEFF"+rows.join("\n"),"text/csv");
+  loguj("info",`Wyeksportowano fizyczne stany CSV (${rows.length-1} produktów)`);toast(`Wyeksportowano ${rows.length-1} fizycznych stanów ✅`);
+}
 function magazynEksportuj(zakres){
   const ids=zakres==="zaznaczone"?[...zaznaczoneMagazynProdukty]:magazynWynikiIds;
-  eksportujMagazynCSV(ids,zakres==="zaznaczone"?"magazyn-zaznaczone.csv":"magazyn-filtrowany.csv");
+  eksportujFizyczneStanyMagazynu(ids,zakres==="zaznaczone"?"stany-fizyczne-zaznaczone.csv":"stany-fizyczne-filtrowane.csv");
 }
 function ruchMagazynuPasujeDoTypu(r={}){
   const qty=Number(r.ilosc||0),typ=String(r.typ||"").toLowerCase();
