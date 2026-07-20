@@ -897,7 +897,7 @@ function allegroZapiszKategorieProduktu(id,categoryId){
 function allegroTrybPublikacji(){ return String(document.getElementById("allegroPublicationAction")?.value||"keep"); }
 function allegroListaProducentow(){
   const ustawione=Array.isArray(allegroStan.offerSettings?.producers)&&allegroStan.offerSettings.producers.length?allegroStan.offerSettings.producers:["Alexander","Multigra","GoDan"];
-  return [...new Set([...ustawione,...(producenciKartoteka||[]).filter(p=>p.active!==false).map(p=>p.name||p.nazwa)].map(x=>String(x||"").trim()).filter(Boolean))];
+  return [...new Set([...ustawione,...(producenciKartoteka||[]).filter(p=>p.active!==false).map(p=>p.name||p.nazwa)].map(normalizujNazweProducenta).filter(Boolean))];
 }
 function allegroProducentKanoniczny(p={}){
   const list=allegroListaProducentow(),norm=v=>String(v||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g," ").trim();
@@ -1390,7 +1390,7 @@ function allegroBrakiProduktuDoWystawienia(p){
   if(!Number(p.cena)) braki.push("cena");
   if((p.gtin||p.ean)&&!allegroPoprawnyGtin(p.gtin||p.ean)) braki.push("poprawny EAN/GTIN");
   if(!(p.kodProducenta||p.mpn||p.externalId||p.sku)) braki.push("kod producenta/SKU");
-  if(!(p.producent||p.marka)) braki.push("producent");
+  if(!poprawnaNazwaProducenta(p.producent||p.marka)) braki.push("prawidłowa nazwa producenta");
   if(!(p.zdjecie||(p.zdjecia||[]).length)) braki.push("zdjęcie");
   if(!p.allegroCategoryId) braki.push("ID kategorii Allegro");
   return braki;

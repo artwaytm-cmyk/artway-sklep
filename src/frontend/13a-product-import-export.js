@@ -140,8 +140,8 @@ function normalizujProduktImportu(r,nr){
   const gtin=String(pobierz("gtin")).trim();if(gtin)p.gtin=gtin;
   const externalId=String(pobierz("externalId")).trim();if(externalId)p.externalId=externalId;
   const mpn=String(pobierz("mpn")).trim();if(mpn)p.mpn=mpn;
-  const marka=String(pobierz("marka")).trim();if(marka)p.marka=marka;
-  const producent=String(pobierz("producent")).trim()||marka;if(producent)p.producent=producent;
+  const rawMarka=String(pobierz("marka")).trim(),marka=normalizujNazweProducenta(rawMarka);if(rawMarka&&!marka)bledy.push("marka musi zawierać co najmniej jedną literę");if(marka)p.marka=marka;
+  const rawProducent=String(pobierz("producent")).trim()||rawMarka,producent=normalizujNazweProducenta(rawProducent);if(rawProducent&&!producent)bledy.push("producent musi być nazwą, a nie samym numerem");if(producent)p.producent=producent;
   const rozmiar=String(pobierz("rozmiar")).trim();if(rozmiar)p.rozmiar=rozmiar;
   const material=String(pobierz("material")).trim();if(material)p.material=material;
   const sku=String(pobierz("sku","kod","kod_produktu")).trim()||externalId||mpn||gtin;if(sku)p.sku=sku;

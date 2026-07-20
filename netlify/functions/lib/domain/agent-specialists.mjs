@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
+import { validManufacturerName } from './product-field-validation.mjs';
 import { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionFingerprint, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts } from './agent-specialists-support.mjs';
 
 export function createAgentSpecialists({
@@ -517,7 +518,7 @@ export function createAgentSpecialists({
 
     let openCatalogDecisionCount = current.decisions.filter((item) => item.kind === 'catalog_identity' && activeDecision(item, now())).length;
     for (const product of products.slice().sort((a, b) => String(b.createdAt || b.dataDodania || '').localeCompare(String(a.createdAt || a.dataDodania || ''))).slice(0, 200)) {
-      const missing = [!clean(product.gtin || product.ean, 80) && 'EAN', !clean(product.producent || product.marka, 120) && 'producent', !clean(product.kategoria, 160) && 'kategoria'].filter(Boolean);
+      const missing = [!clean(product.gtin || product.ean, 80) && 'EAN', !validManufacturerName(product.producent || product.marka) && 'producent', !clean(product.kategoria, 160) && 'kategoria'].filter(Boolean);
       if (!missing.length) continue;
       const target = { type: 'product', productId: String(product.id), name: clean(product.nazwa, 180), missing }, fp = decisionFingerprint('catalog_identity', target); activeFingerprints.add(fp);
       const existing = current.decisions.find((entry) => entry.fingerprint === fp && ['open', 'snoozed'].includes(entry.status));
@@ -536,7 +537,7 @@ export function createAgentSpecialists({
       }
       if (decision.kind === 'catalog_identity') {
         const product = productById.get(String(decision.target?.productId || ''));
-        if (product && (!clean(product.gtin || product.ean, 80) || !clean(product.producent || product.marka, 120) || !clean(product.kategoria, 160))) activeFingerprints.add(decision.fingerprint);
+        if (product && (!clean(product.gtin || product.ean, 80) || !validManufacturerName(product.producent || product.marka) || !clean(product.kategoria, 160))) activeFingerprints.add(decision.fingerprint);
       }
     }
 

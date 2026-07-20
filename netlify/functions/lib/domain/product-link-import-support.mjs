@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { synchronizeProductIdentifierAliases } from './product-identifiers.mjs';
+import { canonicalManufacturerName } from './product-field-validation.mjs';
 
 export const PRODUCT_LINK_IMPORT_INDEX_KEY = 'product-link-import:index:v1';
 export const PRODUCT_LINK_IMPORT_JOB_PREFIX = 'product-link-import:job:v1:';
@@ -128,8 +129,8 @@ function reviewDraft(value = {}, sourceUrl = '') {
   const draft = {
     nazwa: clean(source.nazwa || source.name, 500),
     cena: Number(source.cena || source.price) > 0 ? Math.round(Number(source.cena || source.price) * 100) / 100 : 0,
-    producent: clean(source.producent || source.manufacturer || source.marka || source.brand, 160),
-    marka: clean(source.marka || source.brand || source.producent || source.manufacturer, 160),
+    producent: canonicalManufacturerName(source.producent || source.manufacturer || source.marka || source.brand),
+    marka: canonicalManufacturerName(source.marka || source.brand || source.producent || source.manufacturer),
     kategoria: clean(source.kategoria || source.category, 180),
     opisKrotki: clean(source.opisKrotki || source.shortDescription, 500),
     opis: clean(source.opis || source.description, 6000),
@@ -161,6 +162,9 @@ function reviewPatch(value = {}) {
     } else {
       const limits = { opis: 6000, opisKrotki: 500, zdjecie: 3000, nazwa: 500 };
       patch[field] = clean(source[field], limits[field] || 180);
+      if (['producent', 'marka'].includes(field) && patch[field] && !canonicalManufacturerName(patch[field])) {
+        throw serviceError('Producent musi być rzeczywistą nazwą zawierającą co najmniej jedną literę. Kod lub numer wpisz w polu kodu producenta.', 'product_manufacturer_invalid', 422);
+      }
     }
   }
   return patch;
@@ -170,7 +174,7 @@ function reviewMissing(product = {}) {
   const missing = [];
   if (!clean(product.nazwa, 300)) missing.push('nazwa');
   if (!(Number(product.cena) > 0)) missing.push('cena sprzedaży');
-  if (!clean(product.producent || product.marka, 160)) missing.push('producent lub marka');
+  if (!canonicalManufacturerName(product.producent || product.marka)) missing.push('producent lub marka');
   if (!clean(product.kategoria, 180)) missing.push('kategoria sklepu');
   if (!safeUrl(product.sourceUrl || product.producentUrl)) missing.push('link źródłowy');
   return missing;

@@ -1,4 +1,5 @@
 import { synchronizeProductIdentifierAliases } from './product-identifiers.mjs';
+import { canonicalManufacturerName } from './product-field-validation.mjs';
 
 const asArray = (value) => Array.isArray(value) ? value : [];
 
@@ -17,8 +18,8 @@ export function createProductLinkImportPreparer({
     if (known && options.updateExisting !== true) return { product: {
       sourceUrl: target,
       producentUrl: target,
-      producent: text(known.product?.producent || known.product?.marka, 160),
-      marka: text(known.product?.marka || known.product?.producent, 160),
+      producent: canonicalManufacturerName(known.product?.producent || known.product?.marka),
+      marka: canonicalManufacturerName(known.product?.marka || known.product?.producent),
       nazwa: known.product?.nazwa || 'Istniejący produkt',
     }, extraProducts };
 
@@ -29,12 +30,12 @@ export function createProductLinkImportPreparer({
     sourceProduct.sourceUrl = canonicalUrl; sourceProduct.producentUrl = canonicalUrl;
     const imported = await catalog.list(), products = new Map(central);
     for (const item of imported) if (item?.id !== undefined) products.set(String(item.id), item);
-    const producer = recognizeProducer(sourceProduct, {}, await offerSettings()) || text(sourceProduct.producent || sourceProduct.marka, 160);
+    const producer = canonicalManufacturerName(recognizeProducer(sourceProduct, {}, await offerSettings()) || sourceProduct.producent || sourceProduct.marka);
     const category = chooseCategory(sourceProduct, products), description = text(sourceProduct.opis, 20000);
     const timestamp = now().toISOString();
     const existing = known?.product && typeof known.product === 'object' ? known.product : {};
     const baseProduct = synchronizeProductIdentifierAliases({
-      ...sourceProduct, producent: producer, marka: text(sourceProduct.marka || producer, 160),
+      ...sourceProduct, producent: producer, marka: canonicalManufacturerName(sourceProduct.marka || producer),
       kategoria: text(category.name || sourceProduct.kategoria, 180),
       opisKrotki: text(sourceProduct.opisKrotki || existing.opisKrotki || shortDescription(description || existing.opis), 500), opis: description || existing.opis || '',
       cena: Number(sourceProduct.cena) > 0 ? Number(sourceProduct.cena) : Number(existing.cena) || '',
@@ -49,7 +50,7 @@ export function createProductLinkImportPreparer({
     const missing = [];
     if (!text(product.nazwa, 300)) missing.push('nazwy');
     if (!(Number(product.cena) > 0)) missing.push('ceny sprzedaży');
-    if (!text(product.producent || product.marka, 160)) missing.push('producenta lub marki');
+    if (!canonicalManufacturerName(product.producent || product.marka)) missing.push('producenta lub marki');
     if (!text(product.kategoria, 180)) missing.push('kategorii sklepu');
     if (!canonicalUrl) missing.push('kanonicznego linku źródłowego');
     if (missing.length) return { needsReview: true, reviewReason: `Nie udało się pewnie ustalić: ${missing.join(', ')}.`, product, existingProduct: known?.product || null, updateExisting: !!known && options.updateExisting === true };

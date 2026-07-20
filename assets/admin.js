@@ -4513,7 +4513,7 @@ function allegroZapiszKategorieProduktu(id,categoryId){
 function allegroTrybPublikacji(){ return String(document.getElementById("allegroPublicationAction")?.value||"keep"); }
 function allegroListaProducentow(){
   const ustawione=Array.isArray(allegroStan.offerSettings?.producers)&&allegroStan.offerSettings.producers.length?allegroStan.offerSettings.producers:["Alexander","Multigra","GoDan"];
-  return [...new Set([...ustawione,...(producenciKartoteka||[]).filter(p=>p.active!==false).map(p=>p.name||p.nazwa)].map(x=>String(x||"").trim()).filter(Boolean))];
+  return [...new Set([...ustawione,...(producenciKartoteka||[]).filter(p=>p.active!==false).map(p=>p.name||p.nazwa)].map(normalizujNazweProducenta).filter(Boolean))];
 }
 function allegroProducentKanoniczny(p={}){
   const list=allegroListaProducentow(),norm=v=>String(v||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g," ").trim();
@@ -5006,7 +5006,7 @@ function allegroBrakiProduktuDoWystawienia(p){
   if(!Number(p.cena)) braki.push("cena");
   if((p.gtin||p.ean)&&!allegroPoprawnyGtin(p.gtin||p.ean)) braki.push("poprawny EAN/GTIN");
   if(!(p.kodProducenta||p.mpn||p.externalId||p.sku)) braki.push("kod producenta/SKU");
-  if(!(p.producent||p.marka)) braki.push("producent");
+  if(!poprawnaNazwaProducenta(p.producent||p.marka)) braki.push("prawidłowa nazwa producenta");
   if(!(p.zdjecie||(p.zdjecia||[]).length)) braki.push("zdjęcie");
   if(!p.allegroCategoryId) braki.push("ID kategorii Allegro");
   return braki;
@@ -7961,7 +7961,7 @@ function agentAIStanWdrozeniaProduktu(p={}){
     {id:"identity",label:"EAN lub kod",ok:!!(p.gtin||p.ean||p.mpn||p.kodProducenta)},
     {id:"content",label:"Opis krótki i pełny",ok:!!(p.opisKrotki&&p.opis)},
     {id:"images",label:"Zdjęcie",ok:!!p.zdjecie},
-    {id:"producer",label:"Producent",ok:!!(p.producent||p.marka)},
+    {id:"producer",label:"Producent",ok:poprawnaNazwaProducenta(p.producent||p.marka)},
     {id:"store",label:"Cena i kategoria sklepu",ok:!!(kwotaNum(p.cena)>0&&p.kategoria)},
     {id:"allegro",label:"Kategoria/katalog Allegro",ok:!!(p.allegroCategoryId&&(p.allegroProductId||p.gtin||p.ean))}
   ];
@@ -8038,8 +8038,8 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Kod produktu / producenta</label><input name="kodProducenta" value="${esc(kodKanonicznyProduktu(p))}" placeholder="np. 0006 lub kod katalogowy" maxlength="160"><small>Jedno pole kanoniczne. System przekazuje tę samą wartość jako SKU, EXTERNAL_ID i MPN do starszych importów oraz Allegro.</small></div>
         </div>
         <div class="f-row">
-          <div class="f-group"><label>Producent *</label><input name="producent" list="allegroProducerList" value="${esc(allegroProducentKanoniczny(p)||p.producent||p.marka||"")}" placeholder="np. Alexander"><datalist id="allegroProducerList">${allegroListaProducentow().map(name=>`<option value="${esc(name)}">`).join("")}</datalist><small>Lista jest zarządzana w Allegro → Ustawienia.</small></div>
-          <div class="f-group"><label>Marka / BRAND</label><input name="marka" value="${esc(p.marka||"")}"></div>
+          <div class="f-group"><label>Producent *</label><input required name="producent" list="allegroProducerList" value="${esc(normalizujNazweProducenta(allegroProducentKanoniczny(p)||p.producent||p.marka||""))}" placeholder="np. Alexander" oninput="walidujPoleProducenta(this)" pattern=".*[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż].*" title="Podaj nazwę zawierającą co najmniej jedną literę"><datalist id="allegroProducerList">${allegroListaProducentow().filter(poprawnaNazwaProducenta).map(name=>`<option value="${esc(name)}">`).join("")}</datalist><small>Wpisz rzeczywistą nazwę, np. Alexander. Numer referencyjny należy do pola kodu produktu.</small></div>
+          <div class="f-group"><label>Marka / BRAND</label><input name="marka" value="${esc(normalizujNazweProducenta(p.marka||""))}" oninput="walidujPoleProducenta(this)" pattern=".*[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż].*" title="Marka musi zawierać co najmniej jedną literę"></div>
           <div class="f-group"><label>Kolor produktu / COLOR</label><input name="kolorProduktu" value="${esc(p.kolorProduktu||"")}" placeholder="np. Czarny matowy"></div>
         </div>
         <div class="f-row">
@@ -8145,6 +8145,8 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     ikona:String(f.get("ikona")||"").trim()||"📦",
     kolor:poprzedni.kolor||"#dbeafe"
   };
+  const producerName=normalizujNazweProducenta(f.get("producent")||f.get("marka"));
+  if(!producerName)return null;
   if(poprzedni.kategoria&&p.kategoria!==poprzedni.kategoria){
     delete p.sciezkaKategorii;delete p.grupaKategorii;delete p.kategoriaPelna;
   }
@@ -8161,7 +8163,7 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   if(zdjecie) p.zdjecie = zdjecie; else delete p.zdjecie;
   if(f.get("badge")) p.badge = String(f.get("badge")); else delete p.badge;
   for(const [pole,nazwa] of [
-    ["gtin","gtin"],["producent","producent"],["marka","marka"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"],
+    ["gtin","gtin"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"],
     ["dostepnoscProducenta","dostepnoscProducenta"],["producentUrl","producentUrl"],["sourceUrl","sourceUrl"],
     ["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroOfferId","allegroOfferId"],["allegroCategoryPhrase","allegroCategoryPhrase"],["allegroTitle","allegroTitle"],
     ["seoTitle","seoTitle"],["seoDescription","seoDescription"],["seoKeywords","seoKeywords"],["seoMode","seoMode"]
@@ -8169,6 +8171,8 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     const v=String(f.get(nazwa)||"").trim();
     if(v)p[pole]=v;else delete p[pole];
   }
+  p.producent=producerName;
+  p.marka=normalizujNazweProducenta(f.get("marka"))||producerName;
   const canonicalCode=String(f.get("kodProducenta")||"").trim();
   for(const pole of ["kodProducenta","numerReferencyjny","mpn","externalId","sku"]){if(canonicalCode)p[pole]=canonicalCode;else delete p[pole];}
   if(p.producentUrl)p.sourceUrl=p.producentUrl;
@@ -8209,6 +8213,7 @@ function wgrajZdjecieProduktu(input){
 }
 async function dodajProdukt(e){
   e.preventDefault();
+  const producerInput=e.target.elements.producent;if(!walidujPoleProducenta(producerInput)||!String(producerInput?.value||"").trim()){producerInput?.reportValidity();toast("⚠️ Podaj rzeczywistą nazwę producenta — numer wpisz w polu kodu produktu");return;}
   const submit=e.submitter;if(submit)submit.disabled=true;
   const f = new FormData(e.target);
   let prefillMeta={};
@@ -8216,7 +8221,7 @@ async function dodajProdukt(e){
   const maxId = najwyzszeIdProduktu();
   const KOLORY = ["#dbeafe","#e0e7ff","#fef3c7","#dcfce7","#fee2e2","#f3e8ff","#fce7f3","#ffedd5"];
   const agentMeta=agentAIImportUrlStan?.data?.product||{},p = daneProduktuZFormularza(f, maxId+1, {...prefillMeta,...agentMeta,kolor:KOLORY[(maxId+1)%KOLORY.length]});
-  if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę"); return; }
+  if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę i nazwę producenta"); return; }
   for(const key of Object.keys(p))if(key.startsWith("_agent"))delete p[key];
   const kontrola=produktDodawanieAktualizuj(e.target);
   if(!kontrola?.canSubmit){
@@ -8285,11 +8290,12 @@ async function allegroSynchronizujPowiazanyProduktPoZapisie(p,options={}){
 }
 async function zapiszProduktAdmin(e,id){
   e.preventDefault();
+  const producerInput=e.target.elements.producent;if(!walidujPoleProducenta(producerInput)||!String(producerInput?.value||"").trim()){producerInput?.reportValidity();toast("⚠️ Podaj rzeczywistą nazwę producenta — numer wpisz w polu kodu produktu");return;}
   const submit=e.submitter;if(submit)submit.disabled=true;
   const f = new FormData(e.target);
   const poprzedni = pobierzProduktAdmin(id);
   const p = daneProduktuZFormularza(f, id, poprzedni||{});
-  if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę"); return; }
+  if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę i nazwę producenta"); return; }
   zapiszStanZFormularza(f, id);
   const i = produktyDodane.findIndex(x=>x.id===id);
   if(i>=0){
@@ -9601,7 +9607,7 @@ function productLinkImportReviewFormHTML(item={}){
   return `<details class="product-link-review-editor"><summary><span>✏️ Uzupełnij dane produktu</span><em>${missing.length?`Brakuje: ${esc(missing.join(", "))}`:"Szkic gotowy do zatwierdzenia"}</em></summary><form onsubmit="return productLinkImportZapiszDecyzje(event,${jsArg(item.id)})"><div class="product-link-review-primary"><label class="${brak("cena")?"is-required":""}"><span>Cena sprzedaży brutto${gwiazdka("cena")}</span><input name="cena" inputmode="decimal" value="${esc(Number(d.cena)>0?d.cena:"")}" placeholder="np. 29,90"${wymagane("cena")}></label><label class="${brak("nazwa")?"is-required":""}"><span>Nazwa produktu${gwiazdka("nazwa")}</span><input name="nazwa" value="${esc(d.nazwa||"")}"${wymagane("nazwa")}></label><label class="${brak("producent")?"is-required":""}"><span>Producent / marka${gwiazdka("producent")}</span><input name="producent" value="${esc(d.producent||d.marka||"")}"${wymagane("producent")}></label><label class="${brak("kategoria")?"is-required":""}"><span>Kategoria sklepu${gwiazdka("kategoria")}</span><input name="kategoria" value="${esc(d.kategoria||"")}"${wymagane("kategoria")}></label></div><details class="product-link-review-more"><summary>Więcej danych do poprawy</summary><div><label><span>EAN / GTIN</span><input name="ean" value="${esc(d.ean||d.gtin||"")}"></label><label><span>Kod produktu / producenta</span><input name="kodProducenta" value="${esc(d.kodProducenta||d.mpn||d.externalId||d.sku||"")}"><small>Uzupełni również aliasy SKU, EXTERNAL_ID i MPN.</small></label><label><span>Główne zdjęcie</span><input name="zdjecie" value="${esc(d.zdjecie||"")}" placeholder="https://…"></label><label><span>Emoji</span><input name="ikona" value="${esc(d.ikona||"🎲")}" maxlength="20"></label><label><span>Kolor karty</span><input name="kolor" type="color" value="${/^#[0-9a-f]{6}$/i.test(String(d.kolor||""))?esc(d.kolor):"#dbeafe"}"></label><label class="wide"><span>Krótki opis</span><textarea name="opisKrotki" rows="2">${esc(d.opisKrotki||"")}</textarea></label><label class="wide"><span>Pełny opis</span><textarea name="opis" rows="5">${esc(d.opis||"")}</textarea></label></div></details><footer><small>System ponownie sprawdzi link, połączy pobrane dane z Twoimi zmianami i doda produkt tylko wtedy, gdy wszystkie wymagane pola będą kompletne.</small><button class="btn" type="submit" ${productLinkImportStan.reviewBusy?"disabled":""}>✅ Zapisz decyzję i dodaj produkt</button></footer></form></details>`;
 }
 function productLinkImportPatchZFormularza(form){
-  const data=new FormData(form),patch={};for(const field of ["cena","nazwa","producent","marka","kategoria","ean","kodProducenta","zdjecie","ikona","kolor","opisKrotki","opis"]){const value=String(data.get(field)||"").trim();if(data.has(field)&&value)patch[field]=value;}return patch;
+  const data=new FormData(form),patch={};for(const field of ["cena","nazwa","producent","marka","kategoria","ean","kodProducenta","zdjecie","ikona","kolor","opisKrotki","opis"]){let value=String(data.get(field)||"").trim();if(["producent","marka"].includes(field)&&value){const normalized=normalizujNazweProducenta(value);if(!normalized){const input=form.elements[field];walidujPoleProducenta(input);input?.reportValidity();toast("Producent musi być nazwą zawierającą literę");return null;}value=normalized;}if(data.has(field)&&value)patch[field]=value;}return patch;
 }
 async function productLinkImportRozstrzygnij(items,commonPatch={},message="Zapisuję decyzję…"){
   if(productLinkImportStan.reviewBusy||!productLinkImportStan.jobId||!items.length)return false;
@@ -9616,12 +9622,12 @@ async function productLinkImportRozstrzygnij(items,commonPatch={},message="Zapis
   }catch(error){await productLinkImportPobierzStatus(false).catch(()=>false);productLinkImportStan.error=completed?`Zapisano ${completed} z ${items.length} pozycji. Pozostałe nie zostały zmienione: ${error?.message||String(error)}`:error?.message||String(error);productLinkImportStan.notice=completed?"Operację można bezpiecznie ponowić dla pozostałych zaznaczonych produktów.":"Nie zapisano decyzji.";return false;}
   finally{productLinkImportStan.reviewBusy=false;productLinkImportOdswiezDOM();}
 }
-function productLinkImportZapiszDecyzje(event,itemId){event.preventDefault();const form=event.currentTarget,patch=productLinkImportPatchZFormularza(form);void productLinkImportRozstrzygnij([{itemId:String(itemId),patch}],{},"Sprawdzam link i zapisuję decyzję dla produktu…");return false;}
+function productLinkImportZapiszDecyzje(event,itemId){event.preventDefault();const form=event.currentTarget,patch=productLinkImportPatchZFormularza(form);if(!patch)return false;void productLinkImportRozstrzygnij([{itemId:String(itemId),patch}],{},"Sprawdzam link i zapisuję decyzję dla produktu…");return false;}
 function productLinkImportZaznaczReview(itemId,checked){const id=String(itemId);if(checked)productLinkImportStan.reviewSelected.add(id);else productLinkImportStan.reviewSelected.delete(id);productLinkImportOdswiezReviewToolbar();}
 function productLinkImportWidoczneReview(){return productLinkImportElementyPoFiltrze().filter(item=>productLinkImportStatus(item.status)==="needs_review");}
 function productLinkImportZaznaczWidoczneReview(checked=true){const review=productLinkImportWidoczneReview();if(checked&&review.length>200)toast("Zaznaczono pierwsze 200 produktów — to bezpieczny limit jednej operacji");review.slice(0,200).forEach(item=>checked?productLinkImportStan.reviewSelected.add(String(item.id)):productLinkImportStan.reviewSelected.delete(String(item.id)));if(!checked)review.forEach(item=>productLinkImportStan.reviewSelected.delete(String(item.id)));productLinkImportOdswiezTabele();productLinkImportOdswiezReviewToolbar();}
 function productLinkImportOdswiezReviewToolbar(){const root=document.querySelector("[data-product-link-review-bulk]");if(!root)return;const count=[...productLinkImportStan.reviewSelected].filter(id=>productLinkImportStan.items.some(item=>String(item.id)===id&&productLinkImportStatus(item.status)==="needs_review")).length;root.querySelector("[data-review-selected]")?.replaceChildren(document.createTextNode(String(count)));const submit=root.querySelector('button[type="submit"]');if(submit)submit.disabled=!count||productLinkImportStan.reviewBusy;}
-function productLinkImportMasowaDecyzja(event){event.preventDefault();const form=event.currentTarget,patch=productLinkImportPatchZFormularza(form),hasValue=Object.entries(patch).some(([field,value])=>field==="cena"?Number(String(value).replace(",","."))>0:String(value).trim());if(!hasValue){toast("Wpisz co najmniej jedną wspólną wartość");return false;}const items=[...productLinkImportStan.reviewSelected].map(itemId=>({itemId,patch:{}}));void productLinkImportRozstrzygnij(items,patch,"Stosuję wspólne dane i sprawdzam zaznaczone produkty…");return false;}
+function productLinkImportMasowaDecyzja(event){event.preventDefault();const form=event.currentTarget,patch=productLinkImportPatchZFormularza(form);if(!patch)return false;const hasValue=Object.entries(patch).some(([field,value])=>field==="cena"?Number(String(value).replace(",","."))>0:String(value).trim());if(!hasValue){toast("Wpisz co najmniej jedną wspólną wartość");return false;}const items=[...productLinkImportStan.reviewSelected].map(itemId=>({itemId,patch:{}}));void productLinkImportRozstrzygnij(items,patch,"Stosuję wspólne dane i sprawdzam zaznaczone produkty…");return false;}
 function productLinkImportMasowaDecyzjaHTML(summary){
   const selected=productLinkImportStan.reviewSelected.size;
   return `<section class="product-link-review-bulk" data-product-link-review-bulk ${summary.needs_review?"":"hidden"}><header><div><span class="order-pro-label">Operacja masowa</span><h3>🧩 Uzupełnij zaznaczone produkty</h3><small>Wypełnij tylko pola, które mają otrzymać wspólną wartość. Pozostałe dane każdego produktu zostaną zachowane. Jedna operacja obsługuje do 200 pozycji.</small></div><div><button class="btn ghost" type="button" onclick="productLinkImportZaznaczWidoczneReview(true)">Zaznacz wszystkie w filtrze</button><button class="btn ghost" type="button" onclick="productLinkImportZaznaczWidoczneReview(false)">Odznacz</button><b><span data-review-selected>${selected}</span> zaznaczonych</b></div></header><form onsubmit="return productLinkImportMasowaDecyzja(event)"><label><span>Wspólna cena brutto</span><input name="cena" inputmode="decimal" placeholder="np. 29,90"></label><label><span>Wspólny producent</span><input name="producent" placeholder="np. Alexander"></label><label><span>Wspólna kategoria</span><input name="kategoria" placeholder="np. Gry edukacyjne"></label><label><span>Wspólne emoji</span><input name="ikona" placeholder="🎈"></label><label><span>Wspólny kolor</span><input name="kolor" placeholder="#dbeafe"></label><button class="btn" type="submit" ${!selected||productLinkImportStan.reviewBusy?"disabled":""}>Zastosuj i dodaj gotowe</button></form></section>`;
@@ -10221,8 +10227,8 @@ function normalizujProduktImportu(r,nr){
   const gtin=String(pobierz("gtin")).trim();if(gtin)p.gtin=gtin;
   const externalId=String(pobierz("externalId")).trim();if(externalId)p.externalId=externalId;
   const mpn=String(pobierz("mpn")).trim();if(mpn)p.mpn=mpn;
-  const marka=String(pobierz("marka")).trim();if(marka)p.marka=marka;
-  const producent=String(pobierz("producent")).trim()||marka;if(producent)p.producent=producent;
+  const rawMarka=String(pobierz("marka")).trim(),marka=normalizujNazweProducenta(rawMarka);if(rawMarka&&!marka)bledy.push("marka musi zawierać co najmniej jedną literę");if(marka)p.marka=marka;
+  const rawProducent=String(pobierz("producent")).trim()||rawMarka,producent=normalizujNazweProducenta(rawProducent);if(rawProducent&&!producent)bledy.push("producent musi być nazwą, a nie samym numerem");if(producent)p.producent=producent;
   const rozmiar=String(pobierz("rozmiar")).trim();if(rozmiar)p.rozmiar=rozmiar;
   const material=String(pobierz("material")).trim();if(material)p.material=material;
   const sku=String(pobierz("sku","kod","kod_produktu")).trim()||externalId||mpn||gtin;if(sku)p.sku=sku;

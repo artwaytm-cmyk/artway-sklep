@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { produktBezDanychPrywatnych } from '../infakt-purchase.mjs';
 import { mergeCatalogProducts } from './catalog-quality.mjs';
+import { canonicalManufacturerName } from './product-field-validation.mjs';
 
 const asArray = (value) => Array.isArray(value) ? value : [];
 const asObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -39,7 +40,7 @@ export function centralCatalogMissingFields(product = {}) {
   if (!text(product.gtin || product.ean || product.EAN || product.GTIN)) missing.push('ean');
   if (!text(product.zdjecie || product.image || asArray(product.zdjecia)[0])) missing.push('zdjecie');
   if (!text(product.opisKrotki || product.krotkiOpis) || !text(product.opis || product.description)) missing.push('opis');
-  if (!text(product.producent || product.marka || product.brand)) missing.push('producent');
+  if (!canonicalManufacturerName(product.producent || product.marka || product.brand)) missing.push('producent');
   if (!text(product.kategoria || product.category)) missing.push('kategoria');
   if (!text(product.sourceUrl || product.producentUrl || product.urlProducenta)) missing.push('zrodlo');
   if (!(Number(product.cenaZakupu) > 0)) missing.push('koszt');

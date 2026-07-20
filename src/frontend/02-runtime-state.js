@@ -3,6 +3,17 @@
    (localStorage → klucz artway_logi). Podgląd, pobieranie pliku
    logu i sugestie poprawek: podstrona  #/diagnostyka          */
 const MAX_LOGOW = 200;
+function normalizujNazweProducenta(value=""){
+  const name=String(value??"").replace(/\u0000/g,"").replace(/\s+/g," ").trim().slice(0,160);
+  return name&&/\p{L}/u.test(name)?name:"";
+}
+function poprawnaNazwaProducenta(value=""){return !!normalizujNazweProducenta(value);}
+function walidujPoleProducenta(input){
+  if(!input)return true;
+  const value=String(input.value||"").trim(),valid=!value||poprawnaNazwaProducenta(value);
+  input.setCustomValidity(valid?"":"Producent musi być nazwą zawierającą co najmniej jedną literę. Numer wpisz jako kod produktu / producenta.");
+  return valid;
+}
 function pobierzLogi(){ try{ return JSON.parse(localStorage.getItem("artway_logi")||"[]"); }catch(e){ return []; } }
 function loguj(poziom, tresc, zrodlo){
   try{

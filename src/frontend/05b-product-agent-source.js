@@ -20,6 +20,7 @@ function brakiDanychProducenta(p={}, dane={}){
   if(!p.cena)b.push("cena");
   if(!(p.gtin||p.ean))b.push("EAN");
   if(!(p.mpn||p.kodProducenta||p.externalId))b.push("kod producenta/MPN");
+  if(!poprawnaNazwaProducenta(p.producent||p.marka))b.push("producent");
   if(!p.zdjecie)b.push("zdjęcie");
   if(!p.opisKrotki)b.push("krótki opis");
   if(!p.opis)b.push("opis");
@@ -79,10 +80,11 @@ function agentAIOcenaDodaniaProduktu(p={},d={}){
   if(blockingDuplicate)blockers.push(`duplikat produktu #${blockingDuplicate.product.id}`);
   if(!(product.gtin||product.ean))warnings.push("brak EAN");
   if(!(product.mpn||product.kodProducenta||product.externalId))warnings.push("brak kodu producenta");
+  if(!poprawnaNazwaProducenta(product.producent||product.marka))blockers.push("brak prawidłowej nazwy producenta");
   if(!product.zdjecie)warnings.push("brak zdjęcia głównego");
   if(String(product.opisKrotki||"").length<40)warnings.push("krótki opis wymaga rozwinięcia");
   if(String(product.opis||"").length<150)warnings.push("pełny opis jest zbyt krótki");
-  const dataScore=Math.max(0,Math.min(100,Math.round((product.nazwa?15:0)+(Number(product.cena)>0?15:0)+(product.kategoria?10:0)+((product.gtin||product.ean)?15:0)+((product.mpn||product.kodProducenta||product.externalId)?10:0)+(product.zdjecie?10:0)+(String(product.opisKrotki||"").length>=40?10:0)+(String(product.opis||"").length>=150?10:0)+((product.producent||product.marka)?5:0))));
+  const dataScore=Math.max(0,Math.min(100,Math.round((product.nazwa?15:0)+(Number(product.cena)>0?15:0)+(product.kategoria?10:0)+((product.gtin||product.ean)?15:0)+((product.mpn||product.kodProducenta||product.externalId)?10:0)+(product.zdjecie?10:0)+(String(product.opisKrotki||"").length>=40?10:0)+(String(product.opis||"").length>=150?10:0)+(poprawnaNazwaProducenta(product.producent||product.marka)?5:0))));
   const score=d.needsChoice?Math.min(dataScore,45):blockingDuplicate?Math.min(dataScore,75):blockers.length?Math.min(dataScore,65):dataScore;
   return {product,category,duplicates,blockingDuplicate,blockers,warnings,dataScore,score,ready:!blockers.length};
 }

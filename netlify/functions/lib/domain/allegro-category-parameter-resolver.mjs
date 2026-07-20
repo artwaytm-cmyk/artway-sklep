@@ -1,3 +1,5 @@
+import { canonicalManufacturerName } from './product-field-validation.mjs';
+
 const EMPTY = new Set(['', '-', '—', 'brak', 'nie dotyczy', 'n/d', 'null', 'undefined']);
 
 export function normalizeAllegroParameterName(value = '') {
@@ -46,7 +48,7 @@ export function allegroProductParameterCatalog(product = {}) {
   const direct = [
     [['ean', 'gtin', 'kod kreskowy'], product.gtin || product.ean],
     [['kod producenta', 'mpn', 'numer referencyjny', 'symbol producenta', 'sku', 'external id'], product.kodProducenta || product.mpn || product.numerReferencyjny || product.externalId || product.sku],
-    [['marka', 'producent'], product.producent || product.marka],
+    [['marka', 'producent'], canonicalManufacturerName(product.producent || product.marka)],
     [['wiek', 'wiek dziecka', 'minimalny wiek dziecka', 'wiek graczy od'], product.wiek || product.wiekDziecka || product.minimalnyWiekDziecka || product.wiekGraczyOd],
     [['liczba graczy'], product.liczbaGraczy || product.gracze],
     [['liczba elementow'], product.liczbaElementow],
@@ -169,7 +171,11 @@ export function resolveAllegroCategoryParameter(product = {}, parameter = {}) {
 
   if (/\b(ean|gtin)\b|kod kreskowy/.test(name)) record = firstCatalogValue(catalog, ALIASES.ean);
   else if (/kod producenta|\bmpn\b|symbol producenta|numer referencyjny/.test(name)) record = firstCatalogValue(catalog, ALIASES.code);
-  else if (/^(marka|producent|manufacturer)$/.test(name)) record = firstCatalogValue(catalog, ALIASES.brand);
+  else if (/^(marka|producent|manufacturer)$/.test(name)) {
+    record = firstCatalogValue(catalog, ALIASES.brand);
+    const manufacturer = canonicalManufacturerName(record?.value);
+    record = manufacturer && record ? { ...record, value: manufacturer } : null;
+  }
   else if (/^stan$|stan produktu|condition/.test(name)) {
     payload = parameterPayload(parameter, 'Nowy', ['Nowy', 'new']);
     record = { value: 'Nowy', source: 'domyślna polityka nowych produktów' };
@@ -222,4 +228,3 @@ export function allegroAutomaticCategoryParameters(product = {}, categoryParamet
   }
   return parameters;
 }
-

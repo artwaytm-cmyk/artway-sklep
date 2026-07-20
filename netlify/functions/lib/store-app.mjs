@@ -82,6 +82,7 @@ import { applyProductSaleDecisionBatch } from './domain/product-sale-decisions.m
 import { createProductSaleChannelSynchronizer } from './domain/product-sale-channel-links.mjs';
 import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
+import { canonicalManufacturerName, sanitizeManufacturerFieldsInSettings } from './domain/product-field-validation.mjs';
 import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, reassessBlockedAllegroMapping, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
 import { allegroMappingIsCanonical, allegroProductSyncFingerprint, canonicalizeAllegroMappings, linkCanonicalAllegroMapping, markAllegroMappingSynced } from './domain/allegro-canonical-mappings.mjs';
 import { allegroMappingRecordsEqual, createAllegroMappingStore } from './domain/allegro-mapping-store.mjs';
@@ -548,7 +549,7 @@ function oczyscUstawienia(obj) {
   for (const k of KLUCZE_WSPOLNE) {
     if (k in obj && obj[k] !== undefined) wynik[k] = obj[k];
   }
-  return wynik;
+  return sanitizeManufacturerFieldsInSettings(wynik);
 }
 
 async function czytajUsunieteZamowienia() {
@@ -1712,7 +1713,7 @@ const ALLEGRO_DEFAULT_PRODUCERS = ['Alexander', 'Multigra', 'GoDan'];
 function allegroUstawieniaOfert(raw = {}) {
   const requested = Number(raw?.defaultStock ?? raw?.stock ?? ALLEGRO_DEFAULT_OFFER_STOCK);
   const defaultStock = Number.isFinite(requested) ? Math.min(99999, Math.max(1, Math.floor(requested))) : ALLEGRO_DEFAULT_OFFER_STOCK;
-  const producers = [...new Set((Array.isArray(raw?.producers) ? raw.producers : ALLEGRO_DEFAULT_PRODUCERS).map((x) => tekst(x, 100).trim()).filter(Boolean))].slice(0, 50);
+  const producers = [...new Set((Array.isArray(raw?.producers) ? raw.producers : ALLEGRO_DEFAULT_PRODUCERS).map((x) => canonicalManufacturerName(x, 100)).filter(Boolean))].slice(0, 50);
   const sync = normalizeAllegroSyncSettings(raw);
   const autonomousAgentMinutes = Math.min(120, Math.max(15, Number(raw?.autonomousAgentMinutes) || 15));
   const autoResolveDuplicateMinScore = Math.min(100, Math.max(95, Number(raw?.autoResolveDuplicateMinScore) || 97));

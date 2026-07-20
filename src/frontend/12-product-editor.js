@@ -65,7 +65,7 @@ function agentAIStanWdrozeniaProduktu(p={}){
     {id:"identity",label:"EAN lub kod",ok:!!(p.gtin||p.ean||p.mpn||p.kodProducenta)},
     {id:"content",label:"Opis krótki i pełny",ok:!!(p.opisKrotki&&p.opis)},
     {id:"images",label:"Zdjęcie",ok:!!p.zdjecie},
-    {id:"producer",label:"Producent",ok:!!(p.producent||p.marka)},
+    {id:"producer",label:"Producent",ok:poprawnaNazwaProducenta(p.producent||p.marka)},
     {id:"store",label:"Cena i kategoria sklepu",ok:!!(kwotaNum(p.cena)>0&&p.kategoria)},
     {id:"allegro",label:"Kategoria/katalog Allegro",ok:!!(p.allegroCategoryId&&(p.allegroProductId||p.gtin||p.ean))}
   ];
@@ -142,8 +142,8 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Kod produktu / producenta</label><input name="kodProducenta" value="${esc(kodKanonicznyProduktu(p))}" placeholder="np. 0006 lub kod katalogowy" maxlength="160"><small>Jedno pole kanoniczne. System przekazuje tę samą wartość jako SKU, EXTERNAL_ID i MPN do starszych importów oraz Allegro.</small></div>
         </div>
         <div class="f-row">
-          <div class="f-group"><label>Producent *</label><input name="producent" list="allegroProducerList" value="${esc(allegroProducentKanoniczny(p)||p.producent||p.marka||"")}" placeholder="np. Alexander"><datalist id="allegroProducerList">${allegroListaProducentow().map(name=>`<option value="${esc(name)}">`).join("")}</datalist><small>Lista jest zarządzana w Allegro → Ustawienia.</small></div>
-          <div class="f-group"><label>Marka / BRAND</label><input name="marka" value="${esc(p.marka||"")}"></div>
+          <div class="f-group"><label>Producent *</label><input required name="producent" list="allegroProducerList" value="${esc(normalizujNazweProducenta(allegroProducentKanoniczny(p)||p.producent||p.marka||""))}" placeholder="np. Alexander" oninput="walidujPoleProducenta(this)" pattern=".*[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż].*" title="Podaj nazwę zawierającą co najmniej jedną literę"><datalist id="allegroProducerList">${allegroListaProducentow().filter(poprawnaNazwaProducenta).map(name=>`<option value="${esc(name)}">`).join("")}</datalist><small>Wpisz rzeczywistą nazwę, np. Alexander. Numer referencyjny należy do pola kodu produktu.</small></div>
+          <div class="f-group"><label>Marka / BRAND</label><input name="marka" value="${esc(normalizujNazweProducenta(p.marka||""))}" oninput="walidujPoleProducenta(this)" pattern=".*[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż].*" title="Marka musi zawierać co najmniej jedną literę"></div>
           <div class="f-group"><label>Kolor produktu / COLOR</label><input name="kolorProduktu" value="${esc(p.kolorProduktu||"")}" placeholder="np. Czarny matowy"></div>
         </div>
         <div class="f-row">
@@ -249,6 +249,8 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     ikona:String(f.get("ikona")||"").trim()||"📦",
     kolor:poprzedni.kolor||"#dbeafe"
   };
+  const producerName=normalizujNazweProducenta(f.get("producent")||f.get("marka"));
+  if(!producerName)return null;
   if(poprzedni.kategoria&&p.kategoria!==poprzedni.kategoria){
     delete p.sciezkaKategorii;delete p.grupaKategorii;delete p.kategoriaPelna;
   }
@@ -265,7 +267,7 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   if(zdjecie) p.zdjecie = zdjecie; else delete p.zdjecie;
   if(f.get("badge")) p.badge = String(f.get("badge")); else delete p.badge;
   for(const [pole,nazwa] of [
-    ["gtin","gtin"],["producent","producent"],["marka","marka"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"],
+    ["gtin","gtin"],["kolorProduktu","kolorProduktu"],["rozmiar","rozmiar"],["material","material"],
     ["dostepnoscProducenta","dostepnoscProducenta"],["producentUrl","producentUrl"],["sourceUrl","sourceUrl"],
     ["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroOfferId","allegroOfferId"],["allegroCategoryPhrase","allegroCategoryPhrase"],["allegroTitle","allegroTitle"],
     ["seoTitle","seoTitle"],["seoDescription","seoDescription"],["seoKeywords","seoKeywords"],["seoMode","seoMode"]
@@ -273,6 +275,8 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     const v=String(f.get(nazwa)||"").trim();
     if(v)p[pole]=v;else delete p[pole];
   }
+  p.producent=producerName;
+  p.marka=normalizujNazweProducenta(f.get("marka"))||producerName;
   const canonicalCode=String(f.get("kodProducenta")||"").trim();
   for(const pole of ["kodProducenta","numerReferencyjny","mpn","externalId","sku"]){if(canonicalCode)p[pole]=canonicalCode;else delete p[pole];}
   if(p.producentUrl)p.sourceUrl=p.producentUrl;
@@ -313,6 +317,7 @@ function wgrajZdjecieProduktu(input){
 }
 async function dodajProdukt(e){
   e.preventDefault();
+  const producerInput=e.target.elements.producent;if(!walidujPoleProducenta(producerInput)||!String(producerInput?.value||"").trim()){producerInput?.reportValidity();toast("⚠️ Podaj rzeczywistą nazwę producenta — numer wpisz w polu kodu produktu");return;}
   const submit=e.submitter;if(submit)submit.disabled=true;
   const f = new FormData(e.target);
   let prefillMeta={};
@@ -320,7 +325,7 @@ async function dodajProdukt(e){
   const maxId = najwyzszeIdProduktu();
   const KOLORY = ["#dbeafe","#e0e7ff","#fef3c7","#dcfce7","#fee2e2","#f3e8ff","#fce7f3","#ffedd5"];
   const agentMeta=agentAIImportUrlStan?.data?.product||{},p = daneProduktuZFormularza(f, maxId+1, {...prefillMeta,...agentMeta,kolor:KOLORY[(maxId+1)%KOLORY.length]});
-  if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę"); return; }
+  if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę i nazwę producenta"); return; }
   for(const key of Object.keys(p))if(key.startsWith("_agent"))delete p[key];
   const kontrola=produktDodawanieAktualizuj(e.target);
   if(!kontrola?.canSubmit){
@@ -389,11 +394,12 @@ async function allegroSynchronizujPowiazanyProduktPoZapisie(p,options={}){
 }
 async function zapiszProduktAdmin(e,id){
   e.preventDefault();
+  const producerInput=e.target.elements.producent;if(!walidujPoleProducenta(producerInput)||!String(producerInput?.value||"").trim()){producerInput?.reportValidity();toast("⚠️ Podaj rzeczywistą nazwę producenta — numer wpisz w polu kodu produktu");return;}
   const submit=e.submitter;if(submit)submit.disabled=true;
   const f = new FormData(e.target);
   const poprzedni = pobierzProduktAdmin(id);
   const p = daneProduktuZFormularza(f, id, poprzedni||{});
-  if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę"); return; }
+  if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę i nazwę producenta"); return; }
   zapiszStanZFormularza(f, id);
   const i = produktyDodane.findIndex(x=>x.id===id);
   if(i>=0){

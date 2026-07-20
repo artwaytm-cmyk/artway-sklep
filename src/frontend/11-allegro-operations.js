@@ -240,7 +240,7 @@ function allegroBrakiProduktuDoWystawienia(p){
   if(!Number(p.cena)) braki.push("cena");
   if((p.gtin||p.ean)&&!allegroPoprawnyGtin(p.gtin||p.ean)) braki.push("poprawny EAN/GTIN");
   if(!(p.kodProducenta||p.mpn||p.externalId||p.sku)) braki.push("kod producenta/SKU");
-  if(!(p.producent||p.marka)) braki.push("producent");
+  if(!poprawnaNazwaProducenta(p.producent||p.marka)) braki.push("prawidłowa nazwa producenta");
   if(!(p.zdjecie||(p.zdjecia||[]).length)) braki.push("zdjęcie");
   if(!p.allegroCategoryId) braki.push("ID kategorii Allegro");
   return braki;
