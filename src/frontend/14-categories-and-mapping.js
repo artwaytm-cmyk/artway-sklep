@@ -251,13 +251,13 @@ function wyczyscMapowanie(){
 }
 function dodajKatalogZMapowania(e){
   e.preventDefault();
-  const nazwa = String(new FormData(e.target).get("nazwa")||"").trim();
+  const form=new FormData(e.target),nazwa=String(form.get("nazwa")||"").trim(),rodzic=String(form.get("rodzic")||"").trim();
   if(nazwa.length<2){ toast("Nazwa katalogu musi mieć minimum 2 znaki"); return; }
   if(wszystkieKategorie().includes(nazwa)){ toast("Taki katalog już istnieje"); return; }
-  const wlasne = [...(ustawienia.wlasneKategorie||[]), nazwa];
+  const wlasne = [...(ustawienia.wlasneKategorie||[]), nazwa],rodzice={...rodziceKategoriiMenu()};if(rodzic&&wszystkieKategorie().includes(rodzic))rodzice[nazwa]=rodzic;
   filtrMapowania = nazwa;
-  zapiszCzescUstawien({wlasneKategorie:wlasne});
-  loguj("info","Dodano katalog z mapowania: "+nazwa);
+  zapiszCzescUstawien({wlasneKategorie:wlasne,rodziceKategorii:rodzice});
+  loguj("info",rodzic?`Dodano gałąź ${nazwa} pod ${rodzic}`:"Dodano katalog z mapowania: "+nazwa);
 }
 function zmienKategorie(stara, nowa){
   nowa = String(nowa||"").trim();

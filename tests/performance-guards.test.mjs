@@ -127,6 +127,10 @@ test('duży katalog renderuje produkty progresywnie zamiast układać setki kart
   assert.match(index, /let asortymentIndeksCache=/);
   assert.match(index, /let asortymentWynikiCache=/);
   assert.match(index, /const items=index\.source\.filter\(p=>/);
+  assert.match(index, /search:null/);
+  assert.match(index, /if\(query\.length\)\{if\(m\.search===null\)m\.search=asortymentTekstWyszukiwania/);
+  assert.match(index, /function asortymentSzybkieOfertyProduktu/);
+  assert.doesNotMatch(index, /audytAllegro=allegroAudytDuplikatow\(\)/);
 });
 
 test('główne wyszukiwarki nie przebudowują strony po każdej literze', async () => {

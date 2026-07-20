@@ -25,7 +25,8 @@ test("ciężkie listy Allegro tworzą karty stopniowo zamiast blokować wejście
   assert.match(mapping,/const produkty=allegroProduktyMapowaniaAktywne\(\)/);
   assert.doesNotMatch(mapping,/function allegroKandydaciMapowaniaOferty\([^)]*\)\{const produkty=produktyDoAdministracji\(\)\.filter/);
   assert.match(sync,/const poprawione=produktyDodane\.map/);
-  assert.match(sync,/if\(!zmiana\) return false;\s*produktyDodane=poprawione;/);
+  assert.match(sync,/produktyDodaneAudytId\.source===produktyDodane/);
+  assert.match(sync,/if\(!zmiana\)\{produktyDodaneAudytId=.*?return false;\}\s*produktyDodane=poprawione;/s);
   assert.match(styles,/content-visibility:auto/);
 });
 

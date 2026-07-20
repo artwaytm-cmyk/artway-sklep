@@ -107,7 +107,31 @@ function wszystkieKategorie(){
   const wlasne = (ustawienia.wlasneKategorie||[]).filter(k=>!ukryte.includes(k));
   return [...new Set([...zProduktow, ...wlasne])];
 }
-function liczbaProduktowWKategorii(k){ return produkty.filter(p=>p.kategoria===k).length; }
+let indeksDrzewaKategoriiCache={products:null,parents:null,signature:"",value:null};
+function indeksDrzewaKategoriiMenu(kategorie=wszystkieKategorie()){
+  const lista=[...new Set((kategorie||[]).map(x=>String(x||"").trim()).filter(Boolean))],signature=lista.join("\u0001"),parentsSource=ustawienia.rodziceKategorii||null;
+  if(indeksDrzewaKategoriiCache.products===produkty&&indeksDrzewaKategoriiCache.parents===parentsSource&&indeksDrzewaKategoriiCache.signature===signature&&indeksDrzewaKategoriiCache.value)return indeksDrzewaKategoriiCache.value;
+  const allowed=new Set(lista),raw=rodziceKategoriiMenu(),parents={},children=new Map(lista.map(k=>[k,[]])),directCounts=Object.fromEntries(lista.map(k=>[k,0]));
+  for(const k of lista){const parent=raw[k];if(parent&&allowed.has(parent)&&parent!==k){parents[k]=parent;children.get(parent).push(k);}}
+  for(const p of produkty){const k=String(p?.kategoria||"").trim();if(allowed.has(k))directCounts[k]=(directCounts[k]||0)+1;}
+  children.forEach(items=>items.sort((a,b)=>a.localeCompare(b,"pl")));
+  const depth={},paths={},branchCounts={},descendants={},visit=(k,trail=new Set())=>{
+    if(trail.has(k))return {count:directCounts[k]||0,items:new Set()};
+    const next=new Set(trail);next.add(k);let count=directCounts[k]||0;const items=new Set();
+    for(const child of children.get(k)||[]){items.add(child);const nested=visit(child,next);count+=nested.count;nested.items.forEach(x=>items.add(x));}
+    branchCounts[k]=count;descendants[k]=items;return {count,items};
+  };
+  const pathFor=k=>{const out=[k],seen=new Set([k]);let current=k;while(parents[current]&&!seen.has(parents[current])){current=parents[current];seen.add(current);out.unshift(current);}return out;};
+  lista.forEach(k=>{const path=pathFor(k);paths[k]=path;depth[k]=Math.max(0,path.length-1);});
+  lista.filter(k=>!parents[k]).forEach(k=>visit(k));lista.forEach(k=>{if(branchCounts[k]===undefined)visit(k);});
+  const value={lista,allowed,parents,children,directCounts,branchCounts,descendants,depth,paths,roots:lista.filter(k=>!parents[k])};
+  indeksDrzewaKategoriiCache={products:produkty,parents:parentsSource,signature,value};return value;
+}
+function kategoriePotomneMenu(k,kategorie=wszystkieKategorie()){return indeksDrzewaKategoriiMenu(kategorie).descendants[String(k||"")]||new Set();}
+function kategorieGaleziMenu(k,kategorie=wszystkieKategorie()){return new Set([String(k||""),...kategoriePotomneMenu(k,kategorie)]);}
+function sciezkaKategoriiMenu(k,kategorie=wszystkieKategorie()){return indeksDrzewaKategoriiMenu(kategorie).paths[String(k||"")]||[String(k||"")];}
+function produktNalezyDoGaleziKategorii(p,k,kategorie=wszystkieKategorie()){return k==="Wszystkie"||kategorieGaleziMenu(k,kategorie).has(String(p?.kategoria||""));}
+function liczbaProduktowWKategorii(k){ return indeksDrzewaKategoriiMenu().branchCounts[String(k||"")]||0; }
 function grupyMenuKategorii(){
   return (Array.isArray(ustawienia.menuKategorii)?ustawienia.menuKategorii:[])
     .map((g,i)=>({
@@ -130,8 +154,7 @@ function korzenKategoriiMenu(kategoria,dozwolone=null){
   return current;
 }
 function dzieciKategoriiMenu(kategoria,kategorie){
-  const rodzice=rodziceKategoriiMenu(),dozwolone=new Set(kategorie||[]);
-  return (kategorie||[]).filter(k=>dozwolone.has(k)&&rodzice[k]===kategoria);
+  return indeksDrzewaKategoriiMenu(kategorie).children.get(String(kategoria||""))||[];
 }
 function zapiszGrupyMenuKategorii(lista, ekstra={}){
   ustawienia.menuKategorii=lista.map(g=>({id:g.id,nazwa:g.nazwa,ikona:g.ikona,ikonaObraz:g.ikonaObraz||"",ikonaAssetId:g.ikonaAssetId||"",aktywna:g.aktywna!==false,kategorie:g.kategorie||[]}));
@@ -142,12 +165,13 @@ function kategoriePrzypisaneDoAktywnychGrup(kategorie){
   const przypisaneBezposrednio=new Set(grupyMenuKategorii().filter(g=>g.aktywna).flatMap(g=>g.kategorie.filter(k=>dozwolone.has(k))));
   return new Set(kategorie.filter(k=>przypisaneBezposrednio.has(k)||przypisaneBezposrednio.has(korzenKategoriiMenu(k,dozwolone))));
 }
-function linkKategoriiMenu(k){
-  return `<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${esc(k)}</span><span class="nav-count" aria-label="Liczba produktów: ${liczbaProduktowWKategorii(k)}">${liczbaProduktowWKategorii(k)}</span></a>`;
+function linkKategoriiMenu(k,index=null){
+  const count=index?.branchCounts?.[k]??liczbaProduktowWKategorii(k);
+  return `<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${esc(k)}</span><span class="nav-count" aria-label="Liczba produktów w gałęzi: ${count}">${count}</span></a>`;
 }
-function drzewoKategoriiMenuHTML(k,kategorie,poziom=0){
-  const dzieci=dzieciKategoriiMenu(k,kategorie);
-  return `<span class="nav-category-node level-${Math.min(2,poziom)}">${linkKategoriiMenu(k)}${dzieci.length?`<span class="nav-category-children">${dzieci.map(d=>drzewoKategoriiMenuHTML(d,kategorie,poziom+1)).join("")}</span>`:""}</span>`;
+function drzewoKategoriiMenuHTML(k,kategorie,poziom=0,index=null){
+  const tree=index||indeksDrzewaKategoriiMenu(kategorie),dzieci=tree.children.get(k)||[];
+  return `<span class="nav-category-node level-${Math.min(5,poziom)}">${linkKategoriiMenu(k,tree)}${dzieci.length?`<span class="nav-category-children">${dzieci.map(d=>drzewoKategoriiMenuHTML(d,kategorie,poziom+1,tree)).join("")}</span>`:""}</span>`;
 }
 let licznikMenuKategorii=0;
 let globalnaObslugaMenuKategorii=false;
@@ -160,14 +184,16 @@ function dropdownMenuKategorii(label, dzieci, ikona="🗂️",kategorie=[],ikona
   const wszystkie=kategorie.length?kategorie:dzieci;
   const id=identyfikatorMenuKategorii();
   const podpis=`${dzieci.length} ${dzieci.length===1?"kategoria":dzieci.length<5?"kategorie":"kategorii"}`;
-  return `<span class="nav-dd ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)">${ikonaObraz?`<img class="nav-generated-icon" src="${esc(ikonaObraz)}" alt="">`:esc(ikona)} <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,ikona,ikonaObraz,podpis)}<span class="nav-menu-list">${dzieci.map(k=>drzewoKategoriiMenuHTML(k,wszystkie)).join("")}</span></span></span>`;
+  const tree=indeksDrzewaKategoriiMenu(wszystkie);
+  return `<span class="nav-dd ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)">${ikonaObraz?`<img class="nav-generated-icon" src="${esc(ikonaObraz)}" alt="">`:esc(ikona)} <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,ikona,ikonaObraz,podpis)}<span class="nav-menu-list">${dzieci.map(k=>drzewoKategoriiMenuHTML(k,wszystkie,0,tree)).join("")}</span></span></span>`;
 }
 function dropdownZbiorczyKategorii(sekcje,kategorie=[],label="Więcej",extraClass=""){
   const gotowe=(Array.isArray(sekcje)?sekcje:[]).filter(s=>Array.isArray(s.korzenie)&&s.korzenie.length);
   if(!gotowe.length)return "";
   const id=identyfikatorMenuKategorii();
   const odmianaDzialu=gotowe.length===1?"dział":gotowe.length<5?"działy":"działów";
-  return `<span class="nav-dd nav-dd-more ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)"><span aria-hidden="true">🗂️</span> <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu nav-menu-mega${gotowe.length===1?" nav-menu-single":""}" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,"🗂️","",`${gotowe.length} ${odmianaDzialu} w jednym miejscu`)}<label class="nav-menu-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Szukaj kategorii…" aria-label="Szukaj kategorii" oninput="filtrujKategorieMenu(this)"></label><span class="nav-menu-empty" hidden>Brak kategorii pasujących do wyszukiwania.</span>${gotowe.map(s=>`<span class="nav-menu-section"><b>${s.ikonaObraz?`<img class="nav-generated-icon" src="${esc(s.ikonaObraz)}" alt="">`:esc(s.ikona||"📁")} ${esc(s.nazwa||"Kategorie")}</b><span>${s.korzenie.map(k=>drzewoKategoriiMenuHTML(k,kategorie)).join("")}</span></span>`).join("")}</span></span>`;
+  const tree=indeksDrzewaKategoriiMenu(kategorie);
+  return `<span class="nav-dd nav-dd-more ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)"><span aria-hidden="true">🗂️</span> <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu nav-menu-mega${gotowe.length===1?" nav-menu-single":""}" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,"🗂️","",`${gotowe.length} ${odmianaDzialu} w jednym miejscu`)}<label class="nav-menu-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Szukaj kategorii…" aria-label="Szukaj kategorii" oninput="filtrujKategorieMenu(this)"></label><span class="nav-menu-empty" hidden>Brak kategorii pasujących do wyszukiwania.</span>${gotowe.map(s=>`<span class="nav-menu-section"><b>${s.ikonaObraz?`<img class="nav-generated-icon" src="${esc(s.ikonaObraz)}" alt="">`:esc(s.ikona||"📁")} ${esc(s.nazwa||"Kategorie")}</b><span>${s.korzenie.map(k=>drzewoKategoriiMenuHTML(k,kategorie,0,tree)).join("")}</span></span>`).join("")}</span></span>`;
 }
 function zamknijMenuKategorii(wyjatek=null,przywrocFokus=false){
   document.querySelectorAll("#mainNav .nav-dd.is-open").forEach(menu=>{

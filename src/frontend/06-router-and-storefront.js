@@ -432,6 +432,7 @@ function sekcjaWidoczna(id){
 }
 function widokSklep(){
   const kategorie = wszystkieKategorie();
+  const drzewoKategorii=indeksDrzewaKategoriiMenu(kategorie),kategorieGlowne=drzewoKategorii.roots;
   const promki = produkty.filter(p=>p.staraCena).length;
   const nowosci = produkty.filter(p=>p.badge==="Nowość").length;
   const widoczneSekcje=kolejnoscSekcji().filter(sekcjaWidoczna);
@@ -468,12 +469,12 @@ function widokSklep(){
       <a href="#produkty" onclick="document.querySelector('.catalog-head')?.scrollIntoView({behavior:'smooth'});return false;">Cała oferta →</a>
     </div>
     <div class="category-grid">
-      ${(Array.isArray(oferta.kategorie)&&oferta.kategorie.length?kategorie.filter(k=>oferta.kategorie.includes(k)):kategorie).map(k=>`
+      ${(Array.isArray(oferta.kategorie)&&oferta.kategorie.length?kategorie.filter(k=>oferta.kategorie.includes(k)):kategorieGlowne).map(k=>`
         <a class="category-tile" href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">
           <span class="category-ico">${ikonaKategoriiHTML(k)}</span>
           <b>${esc(k)}</b>
           <p>${esc(opisKategorii(k))}</p>
-          <small>${produkty.filter(p=>p.kategoria===k).length} produktów →</small>
+          <small>${drzewoKategorii.branchCounts[k]||0} produktów${(drzewoKategorii.children.get(k)||[]).length?` • ${(drzewoKategorii.children.get(k)||[]).length} gałęzi`:""} →</small>
         </a>`).join("")}
     </div>
   </section>`;
@@ -611,8 +612,8 @@ function listaProduktowPoFiltrach(){
   const od=cenaOd===""?null:Number(cenaOd),doC=cenaDo===""?null:Number(cenaDo),minOcena=Number(filtrOceny||0),oferta=ustawieniaOfertyGlownej();
   const lista=produkty.filter(p=>{
     const ocena=sredniaOcen(p.id)?.srednia||0, niedostepny=produktOznaczonyNiedostepny(p);
-    const zakres=oferta.zakres==="promocje"?!!p.staraCena:oferta.zakres==="nowosci"?p.badge==="Nowość":oferta.zakres==="kategoria"?p.kategoria===oferta.kategoria:oferta.zakres==="wybrane"?oferta.produkty.includes(String(p.id)):true;
-    return zakres&&(aktywnaKategoria==="Wszystkie"||p.kategoria===aktywnaKategoria)
+    const zakres=oferta.zakres==="promocje"?!!p.staraCena:oferta.zakres==="nowosci"?p.badge==="Nowość":oferta.zakres==="kategoria"?produktNalezyDoGaleziKategorii(p,oferta.kategoria):oferta.zakres==="wybrane"?oferta.produkty.includes(String(p.id)):true;
+    return zakres&&produktNalezyDoGaleziKategorii(p,aktywnaKategoria)
       && produktPasujeFrazie(p)
       && (od===null||p.cena>=od)&&(doC===null||p.cena<=doC)
       && (filtrDostepnosci==="wszystkie"||(filtrDostepnosci==="dostepne"&&!niedostepny)||(filtrDostepnosci==="brak"&&niedostepny))
@@ -708,11 +709,12 @@ function widokKategoria(nazwa){
   nazwa=wszystkieKategorie().find(k=>k===nazwa||seoSlugKategorii(k)===seoSlugKategorii(nazwa))||nazwa;
   if(!wszystkieKategorie().includes(nazwa))
     return `<div class="page"><div class="panel"><h1>Nie ma takiego katalogu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
-  const lista = produkty.filter(p=>p.kategoria===nazwa);
+  const kategorie=wszystkieKategorie(),tree=indeksDrzewaKategoriiMenu(kategorie),galaz=kategorieGaleziMenu(nazwa,kategorie),lista=produkty.filter(p=>galaz.has(p.kategoria)),dzieci=tree.children.get(nazwa)||[],sciezka=tree.paths[nazwa]||[nazwa];
   return `
   <div class="page" style="max-width:1200px">
-    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${esc(nazwa)}</div>
+    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${sciezka.map((k,i)=>i===sciezka.length-1?esc(k):`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join(" › ")}</div>
     <h1 style="margin-bottom:.8rem">🗂️ ${esc(nazwa)} <small style="color:var(--muted2);font-size:.9rem">(${lista.length})</small></h1>
+    ${dzieci.length?`<section class="category-branch-grid" aria-label="Podkatalogi ${esc(nazwa)}">${dzieci.map(k=>`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${ikonaKategoriiHTML(k)}</span><div><b>${esc(k)}</b><small>${tree.branchCounts[k]||0} produktów${(tree.children.get(k)||[]).length?` • ${(tree.children.get(k)||[]).length} kolejnych gałęzi`:""}</small></div><i>›</i></a>`).join("")}</section>`:""}
     ${listaPodstronyHTML(lista,"Ten katalog jest jeszcze pusty albo żaden produkt nie pasuje do wyszukiwania.")}
   </div>`;
 }
@@ -752,9 +754,10 @@ function widokProdukt(id){
   const powiazane = produkty.filter(x=>x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
   const brakCeny = !produktMaCeneSprzedazy(p);
   const niedostepny = produktOznaczonyNiedostepny(p);
+  const sciezkaKategorii=sciezkaKategoriiMenu(p.kategoria);
   return `
   <div class="page">
-    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › <a href="/kategoria/${seoSlugKategorii(p.kategoria)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(p.kategoria)}</a> › ${esc(p.nazwa)}</div>
+    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${sciezkaKategorii.map(k=>`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join(" › ")} › ${esc(p.nazwa)}</div>
     <div class="panel">
       <div class="prod-detail">
         <div>

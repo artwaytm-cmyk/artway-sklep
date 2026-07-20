@@ -823,8 +823,11 @@ function najwyzszeIdProduktu(){
   ].filter(id=>Number(id)>0&&Number(id)<PRODUCT_LINK_IMPORT_FIRST_ID);
   return Math.max(0,...liczby);
 }
+let produktyDodaneAudytId={source:null,length:-1,first:"",last:""};
 function naprawKolizjeIdProduktow(){
-  if(!produktyDodane.length) return false;
+  if(!produktyDodane.length){produktyDodaneAudytId={source:produktyDodane,length:0,first:"",last:""};return false;}
+  const first=String(produktyDodane[0]?.id??""),last=String(produktyDodane.at(-1)?.id??"");
+  if(produktyDodaneAudytId.source===produktyDodane&&produktyDodaneAudytId.length===produktyDodane.length&&produktyDodaneAudytId.first===first&&produktyDodaneAudytId.last===last)return false;
   const zajete=new Set();
   let nastepne=najwyzszeIdProduktu()+1, zmiana=false;
   const wezNoweId=()=>{while(zajete.has(nastepne))nastepne++;const id=nastepne;zajete.add(id);nastepne++;return id;};
@@ -839,8 +842,9 @@ function naprawKolizjeIdProduktow(){
     if(p.id!==id){ zmiana=true; return {...p,id}; }
     return p;
   });
-  if(!zmiana) return false;
+  if(!zmiana){produktyDodaneAudytId={source:produktyDodane,length:produktyDodane.length,first,last};return false;}
   produktyDodane=poprawione;
+  produktyDodaneAudytId={source:produktyDodane,length:produktyDodane.length,first:String(produktyDodane[0]?.id??""),last:String(produktyDodane.at(-1)?.id??"")};
   zapiszLS("artway_produkty_dodane",produktyDodane);
   loguj("ostrzezenie","Naprawiono wyłącznie nieprawidłowe lub powtórzone ID w produktach dodanych. ID usuniętego produktu bazowego może być ponownie użyte przez nowy produkt.");
   return true;

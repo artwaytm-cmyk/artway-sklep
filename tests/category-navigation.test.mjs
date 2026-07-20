@@ -13,6 +13,17 @@ test("menu kategorii działa kliknięciem i klawiaturą z poprawnymi atrybutami 
   assert.match(navigation,/event\.key==="ArrowDown"/);
   assert.match(navigation,/event\.key==="Escape"/);
   assert.match(navigation,/role="region"/);
+  assert.match(navigation,/function indeksDrzewaKategoriiMenu/);
+  assert.match(navigation,/function kategorieGaleziMenu/);
+  assert.match(navigation,/branchCounts/);
+});
+
+test("katalog nadrzędny obejmuje produkty i nawigację wszystkich niższych gałęzi",async()=>{
+  const [navigation,storefront]=await Promise.all([read("src/frontend/04-accounts-orders-settings.js"),read("src/frontend/06-router-and-storefront.js")]);
+  assert.match(navigation,/produktNalezyDoGaleziKategorii/);
+  assert.match(storefront,/galaz=kategorieGaleziMenu\(nazwa,kategorie\)/);
+  assert.match(storefront,/category-branch-grid/);
+  assert.match(storefront,/sciezkaKategoriiMenu\(p\.kategoria\)/);
 });
 
 test("duży katalog ma wyszukiwarkę, komunikat pustego wyniku i nie przewija się poziomo",async()=>{

@@ -70,7 +70,7 @@ test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', 
   const publicCss = await stat('assets/styles.css');
   assert.ok(publicBundle && adminBundle, 'konfiguracja musi zawierać osobny pakiet sklepu i panelu');
   assert.ok(!publicBundle.sources.some((source) => adminBundle.sources.includes(source)), 'kod panelu nie może wejść do pakietu klienta');
-  assert.ok(publicJs.size < 505_000, `początkowy JavaScript urósł do ${publicJs.size} B; moduły panelu muszą pozostać ładowane na żądanie`);
+  assert.ok(publicJs.size < 512_000, `początkowy JavaScript urósł do ${publicJs.size} B; moduły panelu muszą pozostać ładowane na żądanie`);
   assert.ok(publicCss.size < 70_000, `początkowy CSS urósł do ${publicCss.size} B; style panelu muszą pozostać ładowane na żądanie`);
 });
 

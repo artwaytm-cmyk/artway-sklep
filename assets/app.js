@@ -1213,8 +1213,11 @@ function najwyzszeIdProduktu(){
   ].filter(id=>Number(id)>0&&Number(id)<PRODUCT_LINK_IMPORT_FIRST_ID);
   return Math.max(0,...liczby);
 }
+let produktyDodaneAudytId={source:null,length:-1,first:"",last:""};
 function naprawKolizjeIdProduktow(){
-  if(!produktyDodane.length) return false;
+  if(!produktyDodane.length){produktyDodaneAudytId={source:produktyDodane,length:0,first:"",last:""};return false;}
+  const first=String(produktyDodane[0]?.id??""),last=String(produktyDodane.at(-1)?.id??"");
+  if(produktyDodaneAudytId.source===produktyDodane&&produktyDodaneAudytId.length===produktyDodane.length&&produktyDodaneAudytId.first===first&&produktyDodaneAudytId.last===last)return false;
   const zajete=new Set();
   let nastepne=najwyzszeIdProduktu()+1, zmiana=false;
   const wezNoweId=()=>{while(zajete.has(nastepne))nastepne++;const id=nastepne;zajete.add(id);nastepne++;return id;};
@@ -1229,8 +1232,9 @@ function naprawKolizjeIdProduktow(){
     if(p.id!==id){ zmiana=true; return {...p,id}; }
     return p;
   });
-  if(!zmiana) return false;
+  if(!zmiana){produktyDodaneAudytId={source:produktyDodane,length:produktyDodane.length,first,last};return false;}
   produktyDodane=poprawione;
+  produktyDodaneAudytId={source:produktyDodane,length:produktyDodane.length,first:String(produktyDodane[0]?.id??""),last:String(produktyDodane.at(-1)?.id??"")};
   zapiszLS("artway_produkty_dodane",produktyDodane);
   loguj("ostrzezenie","Naprawiono wyłącznie nieprawidłowe lub powtórzone ID w produktach dodanych. ID usuniętego produktu bazowego może być ponownie użyte przez nowy produkt.");
   return true;
@@ -1345,7 +1349,31 @@ function wszystkieKategorie(){
   const wlasne = (ustawienia.wlasneKategorie||[]).filter(k=>!ukryte.includes(k));
   return [...new Set([...zProduktow, ...wlasne])];
 }
-function liczbaProduktowWKategorii(k){ return produkty.filter(p=>p.kategoria===k).length; }
+let indeksDrzewaKategoriiCache={products:null,parents:null,signature:"",value:null};
+function indeksDrzewaKategoriiMenu(kategorie=wszystkieKategorie()){
+  const lista=[...new Set((kategorie||[]).map(x=>String(x||"").trim()).filter(Boolean))],signature=lista.join("\u0001"),parentsSource=ustawienia.rodziceKategorii||null;
+  if(indeksDrzewaKategoriiCache.products===produkty&&indeksDrzewaKategoriiCache.parents===parentsSource&&indeksDrzewaKategoriiCache.signature===signature&&indeksDrzewaKategoriiCache.value)return indeksDrzewaKategoriiCache.value;
+  const allowed=new Set(lista),raw=rodziceKategoriiMenu(),parents={},children=new Map(lista.map(k=>[k,[]])),directCounts=Object.fromEntries(lista.map(k=>[k,0]));
+  for(const k of lista){const parent=raw[k];if(parent&&allowed.has(parent)&&parent!==k){parents[k]=parent;children.get(parent).push(k);}}
+  for(const p of produkty){const k=String(p?.kategoria||"").trim();if(allowed.has(k))directCounts[k]=(directCounts[k]||0)+1;}
+  children.forEach(items=>items.sort((a,b)=>a.localeCompare(b,"pl")));
+  const depth={},paths={},branchCounts={},descendants={},visit=(k,trail=new Set())=>{
+    if(trail.has(k))return {count:directCounts[k]||0,items:new Set()};
+    const next=new Set(trail);next.add(k);let count=directCounts[k]||0;const items=new Set();
+    for(const child of children.get(k)||[]){items.add(child);const nested=visit(child,next);count+=nested.count;nested.items.forEach(x=>items.add(x));}
+    branchCounts[k]=count;descendants[k]=items;return {count,items};
+  };
+  const pathFor=k=>{const out=[k],seen=new Set([k]);let current=k;while(parents[current]&&!seen.has(parents[current])){current=parents[current];seen.add(current);out.unshift(current);}return out;};
+  lista.forEach(k=>{const path=pathFor(k);paths[k]=path;depth[k]=Math.max(0,path.length-1);});
+  lista.filter(k=>!parents[k]).forEach(k=>visit(k));lista.forEach(k=>{if(branchCounts[k]===undefined)visit(k);});
+  const value={lista,allowed,parents,children,directCounts,branchCounts,descendants,depth,paths,roots:lista.filter(k=>!parents[k])};
+  indeksDrzewaKategoriiCache={products:produkty,parents:parentsSource,signature,value};return value;
+}
+function kategoriePotomneMenu(k,kategorie=wszystkieKategorie()){return indeksDrzewaKategoriiMenu(kategorie).descendants[String(k||"")]||new Set();}
+function kategorieGaleziMenu(k,kategorie=wszystkieKategorie()){return new Set([String(k||""),...kategoriePotomneMenu(k,kategorie)]);}
+function sciezkaKategoriiMenu(k,kategorie=wszystkieKategorie()){return indeksDrzewaKategoriiMenu(kategorie).paths[String(k||"")]||[String(k||"")];}
+function produktNalezyDoGaleziKategorii(p,k,kategorie=wszystkieKategorie()){return k==="Wszystkie"||kategorieGaleziMenu(k,kategorie).has(String(p?.kategoria||""));}
+function liczbaProduktowWKategorii(k){ return indeksDrzewaKategoriiMenu().branchCounts[String(k||"")]||0; }
 function grupyMenuKategorii(){
   return (Array.isArray(ustawienia.menuKategorii)?ustawienia.menuKategorii:[])
     .map((g,i)=>({
@@ -1368,8 +1396,7 @@ function korzenKategoriiMenu(kategoria,dozwolone=null){
   return current;
 }
 function dzieciKategoriiMenu(kategoria,kategorie){
-  const rodzice=rodziceKategoriiMenu(),dozwolone=new Set(kategorie||[]);
-  return (kategorie||[]).filter(k=>dozwolone.has(k)&&rodzice[k]===kategoria);
+  return indeksDrzewaKategoriiMenu(kategorie).children.get(String(kategoria||""))||[];
 }
 function zapiszGrupyMenuKategorii(lista, ekstra={}){
   ustawienia.menuKategorii=lista.map(g=>({id:g.id,nazwa:g.nazwa,ikona:g.ikona,ikonaObraz:g.ikonaObraz||"",ikonaAssetId:g.ikonaAssetId||"",aktywna:g.aktywna!==false,kategorie:g.kategorie||[]}));
@@ -1380,12 +1407,13 @@ function kategoriePrzypisaneDoAktywnychGrup(kategorie){
   const przypisaneBezposrednio=new Set(grupyMenuKategorii().filter(g=>g.aktywna).flatMap(g=>g.kategorie.filter(k=>dozwolone.has(k))));
   return new Set(kategorie.filter(k=>przypisaneBezposrednio.has(k)||przypisaneBezposrednio.has(korzenKategoriiMenu(k,dozwolone))));
 }
-function linkKategoriiMenu(k){
-  return `<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${esc(k)}</span><span class="nav-count" aria-label="Liczba produktów: ${liczbaProduktowWKategorii(k)}">${liczbaProduktowWKategorii(k)}</span></a>`;
+function linkKategoriiMenu(k,index=null){
+  const count=index?.branchCounts?.[k]??liczbaProduktowWKategorii(k);
+  return `<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${esc(k)}</span><span class="nav-count" aria-label="Liczba produktów w gałęzi: ${count}">${count}</span></a>`;
 }
-function drzewoKategoriiMenuHTML(k,kategorie,poziom=0){
-  const dzieci=dzieciKategoriiMenu(k,kategorie);
-  return `<span class="nav-category-node level-${Math.min(2,poziom)}">${linkKategoriiMenu(k)}${dzieci.length?`<span class="nav-category-children">${dzieci.map(d=>drzewoKategoriiMenuHTML(d,kategorie,poziom+1)).join("")}</span>`:""}</span>`;
+function drzewoKategoriiMenuHTML(k,kategorie,poziom=0,index=null){
+  const tree=index||indeksDrzewaKategoriiMenu(kategorie),dzieci=tree.children.get(k)||[];
+  return `<span class="nav-category-node level-${Math.min(5,poziom)}">${linkKategoriiMenu(k,tree)}${dzieci.length?`<span class="nav-category-children">${dzieci.map(d=>drzewoKategoriiMenuHTML(d,kategorie,poziom+1,tree)).join("")}</span>`:""}</span>`;
 }
 let licznikMenuKategorii=0;
 let globalnaObslugaMenuKategorii=false;
@@ -1398,14 +1426,16 @@ function dropdownMenuKategorii(label, dzieci, ikona="🗂️",kategorie=[],ikona
   const wszystkie=kategorie.length?kategorie:dzieci;
   const id=identyfikatorMenuKategorii();
   const podpis=`${dzieci.length} ${dzieci.length===1?"kategoria":dzieci.length<5?"kategorie":"kategorii"}`;
-  return `<span class="nav-dd ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)">${ikonaObraz?`<img class="nav-generated-icon" src="${esc(ikonaObraz)}" alt="">`:esc(ikona)} <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,ikona,ikonaObraz,podpis)}<span class="nav-menu-list">${dzieci.map(k=>drzewoKategoriiMenuHTML(k,wszystkie)).join("")}</span></span></span>`;
+  const tree=indeksDrzewaKategoriiMenu(wszystkie);
+  return `<span class="nav-dd ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)">${ikonaObraz?`<img class="nav-generated-icon" src="${esc(ikonaObraz)}" alt="">`:esc(ikona)} <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,ikona,ikonaObraz,podpis)}<span class="nav-menu-list">${dzieci.map(k=>drzewoKategoriiMenuHTML(k,wszystkie,0,tree)).join("")}</span></span></span>`;
 }
 function dropdownZbiorczyKategorii(sekcje,kategorie=[],label="Więcej",extraClass=""){
   const gotowe=(Array.isArray(sekcje)?sekcje:[]).filter(s=>Array.isArray(s.korzenie)&&s.korzenie.length);
   if(!gotowe.length)return "";
   const id=identyfikatorMenuKategorii();
   const odmianaDzialu=gotowe.length===1?"dział":gotowe.length<5?"działy":"działów";
-  return `<span class="nav-dd nav-dd-more ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)"><span aria-hidden="true">🗂️</span> <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu nav-menu-mega${gotowe.length===1?" nav-menu-single":""}" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,"🗂️","",`${gotowe.length} ${odmianaDzialu} w jednym miejscu`)}<label class="nav-menu-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Szukaj kategorii…" aria-label="Szukaj kategorii" oninput="filtrujKategorieMenu(this)"></label><span class="nav-menu-empty" hidden>Brak kategorii pasujących do wyszukiwania.</span>${gotowe.map(s=>`<span class="nav-menu-section"><b>${s.ikonaObraz?`<img class="nav-generated-icon" src="${esc(s.ikonaObraz)}" alt="">`:esc(s.ikona||"📁")} ${esc(s.nazwa||"Kategorie")}</b><span>${s.korzenie.map(k=>drzewoKategoriiMenuHTML(k,kategorie)).join("")}</span></span>`).join("")}</span></span>`;
+  const tree=indeksDrzewaKategoriiMenu(kategorie);
+  return `<span class="nav-dd nav-dd-more ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)"><span aria-hidden="true">🗂️</span> <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu nav-menu-mega${gotowe.length===1?" nav-menu-single":""}" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,"🗂️","",`${gotowe.length} ${odmianaDzialu} w jednym miejscu`)}<label class="nav-menu-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Szukaj kategorii…" aria-label="Szukaj kategorii" oninput="filtrujKategorieMenu(this)"></label><span class="nav-menu-empty" hidden>Brak kategorii pasujących do wyszukiwania.</span>${gotowe.map(s=>`<span class="nav-menu-section"><b>${s.ikonaObraz?`<img class="nav-generated-icon" src="${esc(s.ikonaObraz)}" alt="">`:esc(s.ikona||"📁")} ${esc(s.nazwa||"Kategorie")}</b><span>${s.korzenie.map(k=>drzewoKategoriiMenuHTML(k,kategorie,0,tree)).join("")}</span></span>`).join("")}</span></span>`;
 }
 function zamknijMenuKategorii(wyjatek=null,przywrocFokus=false){
   document.querySelectorAll("#mainNav .nav-dd.is-open").forEach(menu=>{
@@ -3149,6 +3179,7 @@ function sekcjaWidoczna(id){
 }
 function widokSklep(){
   const kategorie = wszystkieKategorie();
+  const drzewoKategorii=indeksDrzewaKategoriiMenu(kategorie),kategorieGlowne=drzewoKategorii.roots;
   const promki = produkty.filter(p=>p.staraCena).length;
   const nowosci = produkty.filter(p=>p.badge==="Nowość").length;
   const widoczneSekcje=kolejnoscSekcji().filter(sekcjaWidoczna);
@@ -3185,12 +3216,12 @@ function widokSklep(){
       <a href="#produkty" onclick="document.querySelector('.catalog-head')?.scrollIntoView({behavior:'smooth'});return false;">Cała oferta →</a>
     </div>
     <div class="category-grid">
-      ${(Array.isArray(oferta.kategorie)&&oferta.kategorie.length?kategorie.filter(k=>oferta.kategorie.includes(k)):kategorie).map(k=>`
+      ${(Array.isArray(oferta.kategorie)&&oferta.kategorie.length?kategorie.filter(k=>oferta.kategorie.includes(k)):kategorieGlowne).map(k=>`
         <a class="category-tile" href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">
           <span class="category-ico">${ikonaKategoriiHTML(k)}</span>
           <b>${esc(k)}</b>
           <p>${esc(opisKategorii(k))}</p>
-          <small>${produkty.filter(p=>p.kategoria===k).length} produktów →</small>
+          <small>${drzewoKategorii.branchCounts[k]||0} produktów${(drzewoKategorii.children.get(k)||[]).length?` • ${(drzewoKategorii.children.get(k)||[]).length} gałęzi`:""} →</small>
         </a>`).join("")}
     </div>
   </section>`;
@@ -3328,8 +3359,8 @@ function listaProduktowPoFiltrach(){
   const od=cenaOd===""?null:Number(cenaOd),doC=cenaDo===""?null:Number(cenaDo),minOcena=Number(filtrOceny||0),oferta=ustawieniaOfertyGlownej();
   const lista=produkty.filter(p=>{
     const ocena=sredniaOcen(p.id)?.srednia||0, niedostepny=produktOznaczonyNiedostepny(p);
-    const zakres=oferta.zakres==="promocje"?!!p.staraCena:oferta.zakres==="nowosci"?p.badge==="Nowość":oferta.zakres==="kategoria"?p.kategoria===oferta.kategoria:oferta.zakres==="wybrane"?oferta.produkty.includes(String(p.id)):true;
-    return zakres&&(aktywnaKategoria==="Wszystkie"||p.kategoria===aktywnaKategoria)
+    const zakres=oferta.zakres==="promocje"?!!p.staraCena:oferta.zakres==="nowosci"?p.badge==="Nowość":oferta.zakres==="kategoria"?produktNalezyDoGaleziKategorii(p,oferta.kategoria):oferta.zakres==="wybrane"?oferta.produkty.includes(String(p.id)):true;
+    return zakres&&produktNalezyDoGaleziKategorii(p,aktywnaKategoria)
       && produktPasujeFrazie(p)
       && (od===null||p.cena>=od)&&(doC===null||p.cena<=doC)
       && (filtrDostepnosci==="wszystkie"||(filtrDostepnosci==="dostepne"&&!niedostepny)||(filtrDostepnosci==="brak"&&niedostepny))
@@ -3425,11 +3456,12 @@ function widokKategoria(nazwa){
   nazwa=wszystkieKategorie().find(k=>k===nazwa||seoSlugKategorii(k)===seoSlugKategorii(nazwa))||nazwa;
   if(!wszystkieKategorie().includes(nazwa))
     return `<div class="page"><div class="panel"><h1>Nie ma takiego katalogu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
-  const lista = produkty.filter(p=>p.kategoria===nazwa);
+  const kategorie=wszystkieKategorie(),tree=indeksDrzewaKategoriiMenu(kategorie),galaz=kategorieGaleziMenu(nazwa,kategorie),lista=produkty.filter(p=>galaz.has(p.kategoria)),dzieci=tree.children.get(nazwa)||[],sciezka=tree.paths[nazwa]||[nazwa];
   return `
   <div class="page" style="max-width:1200px">
-    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${esc(nazwa)}</div>
+    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${sciezka.map((k,i)=>i===sciezka.length-1?esc(k):`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join(" › ")}</div>
     <h1 style="margin-bottom:.8rem">🗂️ ${esc(nazwa)} <small style="color:var(--muted2);font-size:.9rem">(${lista.length})</small></h1>
+    ${dzieci.length?`<section class="category-branch-grid" aria-label="Podkatalogi ${esc(nazwa)}">${dzieci.map(k=>`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${ikonaKategoriiHTML(k)}</span><div><b>${esc(k)}</b><small>${tree.branchCounts[k]||0} produktów${(tree.children.get(k)||[]).length?` • ${(tree.children.get(k)||[]).length} kolejnych gałęzi`:""}</small></div><i>›</i></a>`).join("")}</section>`:""}
     ${listaPodstronyHTML(lista,"Ten katalog jest jeszcze pusty albo żaden produkt nie pasuje do wyszukiwania.")}
   </div>`;
 }
@@ -3469,9 +3501,10 @@ function widokProdukt(id){
   const powiazane = produkty.filter(x=>x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
   const brakCeny = !produktMaCeneSprzedazy(p);
   const niedostepny = produktOznaczonyNiedostepny(p);
+  const sciezkaKategorii=sciezkaKategoriiMenu(p.kategoria);
   return `
   <div class="page">
-    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › <a href="/kategoria/${seoSlugKategorii(p.kategoria)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(p.kategoria)}</a> › ${esc(p.nazwa)}</div>
+    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${sciezkaKategorii.map(k=>`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join(" › ")} › ${esc(p.nazwa)}</div>
     <div class="panel">
       <div class="prod-detail">
         <div>

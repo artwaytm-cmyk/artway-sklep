@@ -13,7 +13,10 @@ test("katalogi obsługują hierarchię i dziedziczenie grup menu",async()=>{
   assert.match(base,/przypisaneBezposrednio\.has\(korzenKategoriiMenu/);
   assert.match(ui,/function ustawPodkatalog\(/);
   assert.match(ui,/Nie można utworzyć pętli w katalogach/);
-  assert.match(ui,/grupa menu → katalog → podkatalog → produkt/);
+  assert.match(ui,/menu → katalog główny → podkatalog → kolejna gałąź → produkt/);
+  assert.match(ui,/function katalogDrzewoAdminHTML/);
+  assert.match(ui,/function katalogOpcjeHierarchiczneHTML/);
+  assert.match(ui,/Balony → Balony foliowe → Balony serca/);
   assert.match(ui,/Nieprzypisane katalogi/);
   assert.match(ui,/dziedziczy/);
 });
@@ -22,7 +25,7 @@ test("przypięcie katalogu jest jednoznaczne i nie zmienia produktów",async()=>
   const ui=await read("src/frontend/14a-category-workspace.js");
   assert.match(ui,/function przypiszKatalogDoGrupy\(/);
   assert.match(ui,/kategorie:g\.kategorie\.filter\(k=>k!==root&&k!==katalog\)/);
-  assert.match(ui,/Zmiana poziomu nie przenosi ani nie usuwa produktów/);
+  assert.match(ui,/Produkty pozostają bezpiecznie w swoich kartotekach/);
   assert.match(ui,/Każdy katalog główny może być przypięty tylko do jednej grupy/);
 });
 

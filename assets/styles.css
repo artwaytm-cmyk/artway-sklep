@@ -81,6 +81,7 @@ header{position:sticky;top:0;z-index:50;background:var(--panel);border-bottom:1p
 .nav-category-children{display:grid;gap:.08rem;margin:.08rem .2rem .18rem .72rem;padding-left:.5rem;border-left:2px solid color-mix(in srgb,var(--brand) 18%,var(--line))}
 .nav-category-children .nav-category-node>a{padding:.4rem .55rem;font-size:.8rem}
 .nav-category-children .nav-category-children{margin-left:.55rem}
+.nav-category-node.level-2>a,.nav-category-node.level-3>a,.nav-category-node.level-4>a,.nav-category-node.level-5>a{font-size:.76rem}.nav-category-node.level-3>a,.nav-category-node.level-4>a,.nav-category-node.level-5>a{color:var(--muted2)}
 .menu-group-box{border:1.5px solid var(--line);border-radius:14px;padding:1rem;background:var(--bg);margin:.85rem 0}
 .menu-cat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.35rem .7rem;margin-top:.7rem}
 .menu-cat-grid label{display:flex;gap:.45rem;align-items:flex-start;font-size:.82rem;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.45rem .55rem}
@@ -300,6 +301,7 @@ body.hide-home-contact .home-contact{display:none}
 .diag-toolbar input,.diag-toolbar select{padding:.45rem .7rem;border:1.5px solid var(--line);border-radius:9px;background:var(--panel)}
 .storage-bar{height:9px;background:var(--line);border-radius:999px;overflow:hidden;margin:.5rem 0}
 .storage-bar span{height:100%;display:block;background:var(--brand);border-radius:inherit}
+.category-branch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.55rem;margin:0 0 1rem}.category-branch-grid>a{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:.65rem;align-items:center;padding:.75rem;border:1px solid var(--line);border-radius:13px;background:var(--panel);color:var(--ink);text-decoration:none}.category-branch-grid>a:hover{border-color:var(--brand);box-shadow:0 5px 16px rgba(37,99,235,.08)}.category-branch-grid>a>span{display:grid;place-items:center;width:42px;height:42px;border-radius:11px;background:var(--bg)}.category-branch-grid>a>div{display:grid;gap:.12rem}.category-branch-grid b{font-size:.82rem}.category-branch-grid small{color:var(--muted2);font-size:.67rem}.category-branch-grid i{color:var(--brand);font-style:normal;font-weight:900}
 
 /* ── Podstrony ── */
 .page{max-width:1000px;margin:1.6rem auto 2.5rem;padding:0 1rem}
