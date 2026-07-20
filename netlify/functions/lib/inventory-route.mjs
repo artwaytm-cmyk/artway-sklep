@@ -1,5 +1,6 @@
 import { mergeCatalogProducts } from './domain/catalog-quality.mjs';
 import { createWarehouseDocumentService } from './domain/warehouse-documents.mjs';
+import { createWarehouseLocationService } from './domain/warehouse-locations.mjs';
 
 const DOCUMENT_ACTIONS = new Map([
   ['warehouse-document-create', 'create'],
@@ -22,7 +23,17 @@ export function createInventoryStockRoute({ isAdmin, rateLimit, readVersioned, r
     catalogProducts: (data) => mergeCatalogProducts(data).products,
     settingsLimit,
   });
+  const locations = createWarehouseLocationService({ readVersioned, writeIfVersion });
   return async function inventoryStockRoute(req, url, action) {
+    if (action === 'warehouse-location-delete-preview' || action === 'warehouse-location-delete') {
+      if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = rateLimit(req, 'warehouse-locations', 300, 60 * 60 * 1000);
+      if (limited) return limited;
+      const body = await req.json().catch(() => ({})), actor = sessionOf?.(req)?.email || 'administrator';
+      try { return respond(action.endsWith('-preview') ? await locations.preview(body) : await locations.remove(body, actor)); }
+      catch (error) { return respond({ ok: false, error: error?.message || 'Nie udało się usunąć lokalizacji.', code: error?.code || 'warehouse_location_error', ...(error?.details || {}) }, Number(error?.status || 422)); }
+    }
     if (action === 'warehouse-documents-list') {
       if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       if (req.method !== 'GET' && req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);

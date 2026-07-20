@@ -115,6 +115,15 @@ test('lokalizacje mają mapę drzewa, prosty kreator i chronione kody QR', () =>
   assert.match(view, /magazynLokalizacjePanelHTML\(lokalizacje,statLok,pozaSlownikiem\)/);
 });
 
+test('lokalizację można naprawdę usunąć z kontrolą produktów i szkiców PZ/WZ', () => {
+  assert.match(ui, /warehouse-location-delete-preview/);
+  assert.match(ui, /warehouse-location-delete/);
+  assert.match(ui, /Przenieś na inną półkę/);
+  assert.match(ui, /Pozostaw bez lokalizacji/);
+  assert.match(ui, /Usuń lokalizację/);
+  assert.match(styles, /warehouse-location-delete-dialog/);
+});
+
 test('nowy moduł i responsywne style są częścią panelu administratora', () => {
   assert.match(build, /src\/frontend\/10-warehouse-locations\.js/);
   assert.match(build, /src\/styles\/20-warehouse-locations\.css/);

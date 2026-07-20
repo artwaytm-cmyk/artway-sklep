@@ -41,6 +41,13 @@ function currentStock(data = {}, productId = '') {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
 }
 
+function activeShelfCodes(data = {}) {
+  return new Set(array(data.artway_magazyn_lokalizacje)
+    .filter((location) => location?.aktywna !== false && location?.typ === 'półka')
+    .map((location) => text(location?.kod, 80).toUpperCase())
+    .filter(Boolean));
+}
+
 function warsawParts(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit' })
     .formatToParts(now).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
@@ -283,10 +290,13 @@ export function createWarehouseDocumentService({
       if (doc?.status === 'confirmed' && requestId && doc.confirmationRequestId === requestId) return { changed: false, document: doc, extra: { stockUpdates: doc.stockUpdates || {}, movements: [] } };
       const revision = requireDraft(doc, body.expectedRevision), lines = array(doc.lines);
       if (!lines.length) fail('Dokument nie zawiera żadnej pozycji.', 'warehouse_document_empty');
+      const shelves = activeShelfCodes(data);
       const stocks = { ...object(data.artway_stany) }, cards = { ...object(data.artway_magazyn_produkty) }, movements = [...array(data.artway_ruchy_magazynowe)];
       const stockUpdates = {}, movementIds = [], finalizedLines = [];
       for (const line of lines) {
-        const productId = text(line.productId, 160), quantity = integer(line.quantity, 'ilość', 1), before = currentStock({ artway_stany: stocks }, productId);
+        const productId = text(line.productId, 160), quantity = integer(line.quantity, 'ilość', 1), before = currentStock({ artway_stany: stocks }, productId), location = text(line.location, 80).toUpperCase();
+        if (shelves.size && !location) fail(`Wskaż półkę dla produktu „${line.name}”.`, 'warehouse_document_location_required', 409, { productId });
+        if (shelves.size && !shelves.has(location)) fail(`Półka „${location}” produktu „${line.name}” nie istnieje albo jest nieaktywna.`, 'warehouse_document_location_invalid', 409, { productId, location });
         if (doc.type === 'WZ' && before === null) fail(`Produkt „${line.name}” nie ma monitorowanego stanu. Najpierw wykonaj PZ lub inwentaryzację.`, 'warehouse_document_untracked_stock', 409, { productId });
         if (doc.type === 'WZ' && before < quantity) fail(`Za mały stan produktu „${line.name}”: dostępne ${before}, wymagane ${quantity}.`, 'warehouse_document_insufficient_stock', 409, { productId, available: before, required: quantity });
         const base = before === null ? 0 : before, delta = doc.type === 'PZ' ? quantity : -quantity, after = integer(base + delta, 'stan po operacji');

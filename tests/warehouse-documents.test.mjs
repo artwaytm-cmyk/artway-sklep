@@ -99,6 +99,20 @@ test('WZ nie pozwala zejść poniżej zera i poprawnie księguje dostępny rozch
   assert.equal(current().data.artway_ruchy_magazynowe[0].ilosc, -2);
 });
 
+test('przy aktywnej mapie magazynu PZ/WZ wymaga istniejącej półki', async () => {
+  const locations = [
+    { kod: 'R1', typ: 'regał', aktywna: true },
+    { kod: 'R1-P1', typ: 'półka', parentKod: 'R1', aktywna: true },
+  ];
+  const { service } = harness({ extraData: { artway_magazyn_lokalizacje: locations } });
+  const missing = await service.create({ type: 'PZ' }, 'administrator');
+  const missingLine = await service.upsertLine({ documentId: missing.document.id, expectedRevision: 1, productId: '2', quantity: 1, mode: 'set', location: '', requestId: 'location-missing' }, 'administrator');
+  await assert.rejects(() => service.confirm({ documentId: missing.document.id, expectedRevision: missingLine.document.revision }, 'administrator'), (error) => error.code === 'warehouse_document_location_required');
+  const invalid = await service.create({ type: 'PZ' }, 'administrator');
+  const invalidLine = await service.upsertLine({ documentId: invalid.document.id, expectedRevision: 1, productId: '1', quantity: 1, mode: 'set', location: 'NIE-MA', requestId: 'location-invalid' }, 'administrator');
+  await assert.rejects(() => service.confirm({ documentId: invalid.document.id, expectedRevision: invalidLine.document.revision }, 'administrator'), (error) => error.code === 'warehouse_document_location_invalid');
+});
+
 test('stara rewizja nie może dopisać pozycji, a anulowany szkic pozostaje w historii', async () => {
   const { service } = harness();
   const created = await service.create({ type: 'PZ' }, 'administrator');
