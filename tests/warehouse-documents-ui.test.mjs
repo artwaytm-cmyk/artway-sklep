@@ -14,14 +14,15 @@ test('Plan zawiera ręczne dokumenty PZ i WZ z jednym końcowym księgowaniem', 
   assert.match(source, /warehouse-document-line-upsert/);
   assert.match(source, /warehouse-document-line-remove/);
   assert.match(source, /warehouse-document-delete/);
-  assert.match(source, /Usuń szkic trwale/);
+  assert.match(source, /Usuń szkic/);
   assert.match(source, /data-warehouse-document-decision="delete"/);
   assert.ok(source.indexOf('${magazynDokumentDecyzjaHTML(doc)}${draftWorkspace}')>source.indexOf('function magazynDokumentEditorHTML'));
   assert.match(source, /Zaksięgowanego PZ\/WZ nie usuwa się bez korekty stanu/);
   assert.match(source, /warehouse-document-correction/);
   assert.match(source, /Utwórz korektę/);
-  assert.match(source, /warehouse-document-drawer/);
-  assert.match(source, /role="dialog" aria-modal="true"/);
+  assert.match(source, /warehouse-document-focus/);
+  assert.match(source, /warehouseDocumentWorkspace/);
+  assert.doesNotMatch(source, /const drawer=selected/);
   assert.match(source, /Kontrolowany przebieg/i);
 });
 
@@ -61,4 +62,14 @@ test('moduł i responsywne style są częścią budowanego panelu administratora
   const styles = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.css');
   assert.ok(admin.sources.includes('src/frontend/10-warehouse-documents.js'));
   assert.ok(styles.sources.includes('src/styles/18-warehouse-documents.css'));
+});
+
+test('telefon ma stały, prosty pasek obsługi aktywnego dokumentu', async () => {
+  const styles = await readFile(new URL('../src/styles/18-warehouse-documents.css', import.meta.url), 'utf8');
+  assert.match(source, /warehouse-document-mobile-actions/);
+  assert.match(source, /Skanuj/);
+  assert.match(source, /Zaksięguj/);
+  assert.match(source, /warehouseDocumentLines/);
+  assert.match(styles, /\.warehouse-document-mobile-actions\{position:fixed/);
+  assert.match(styles, /html\.artway-pwa-standalone \.warehouse-document-mobile-actions/);
 });

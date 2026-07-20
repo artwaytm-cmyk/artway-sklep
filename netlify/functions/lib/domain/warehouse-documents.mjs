@@ -137,6 +137,17 @@ function trimDocuments(documents = []) {
   return [...active, ...sorted.filter((document) => document.status !== 'draft').slice(0, Math.max(0, MAX_DOCUMENTS - active.length))];
 }
 
+// Limit dokumentów nie może zależeć od rozmiaru całego katalogu produktów.
+// Katalog, stany i ustawienia są współdzielonym rekordem i wraz ze wzrostem
+// sklepu naturalnie przekraczają kilka MB. Tutaj kontrolujemy wyłącznie dane,
+// które ten moduł sam rozbudowuje — dokumenty i ich minimalny rejestr usunięć.
+function warehouseDocumentPayloadSize(data = {}) {
+  return JSON.stringify({
+    documents: array(object(data).artway_dokumenty_magazynowe),
+    deleted: array(object(data).artway_dokumenty_magazynowe_usuniete),
+  }).length;
+}
+
 function resultPayload(record = {}, document = null, extra = {}) {
   const data = object(record.data), documents = documentRegistry(data);
   return {
@@ -166,7 +177,7 @@ export function createWarehouseDocumentService({
       const record = object(version.value), data = object(record.data), timestamp = now().toISOString();
       const result = await handler({ record, data, timestamp });
       if (result.changed === false) return resultPayload(record, result.document, { duplicate: true, ...object(result.extra) });
-      const nextData = result.data, size = JSON.stringify(nextData).length;
+      const nextData = result.data, size = warehouseDocumentPayloadSize(nextData);
       if (size > settingsLimit) fail('Rejestr dokumentów magazynowych przekracza limit danych.', 'warehouse_document_settings_too_large', 413);
       const next = { ...record, data: nextData, rev: Math.max(0, Number(record.rev) || 0) + 1, updated_at: timestamp };
       const write = await writeIfVersion('settings', next, version);

@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWarehouseDocumentService } from '../netlify/functions/lib/domain/warehouse-documents.mjs';
 
-function harness({ stock = { '1': 5 } } = {}) {
-  let value = { data: { artway_stany: stock, artway_magazyn_ustawienia: { nazwa: 'Magazyn główny' }, artway_magazyn_produkty: { '1': { lokalizacja: 'R1-P1' }, '4': { ean13: '5906018028256' } }, artway_ruchy_magazynowe: [] }, rev: 1, updated_at: null };
+function harness({ stock = { '1': 5 }, extraData = {}, settingsLimit } = {}) {
+  let value = { data: { ...extraData, artway_stany: stock, artway_magazyn_ustawienia: { nazwa: 'Magazyn główny' }, artway_magazyn_produkty: { '1': { lokalizacja: 'R1-P1' }, '4': { ean13: '5906018028256' } }, artway_ruchy_magazynowe: [] }, rev: 1, updated_at: null };
   let etag = 1;
   const products = [
     { id: 1, nazwa: 'Puzzle magnetyczne Farma', ean: '5906018026788', externalId: '2678', sku: 'FARMA-2678' },
@@ -20,9 +20,22 @@ function harness({ stock = { '1': 5 } } = {}) {
     mergeSettings: async (data) => data,
     catalogProducts: () => products,
     now: () => new Date('2026-07-16T12:00:00.000Z'),
+    ...(settingsLimit ? { settingsLimit } : {}),
   });
   return { service, current: () => structuredClone(value) };
 }
+
+test('duży katalog nie blokuje zatwierdzenia ani usunięcia małego dokumentu', async () => {
+  const largeCatalog = Array.from({ length: 2500 }, (_, index) => ({ id: index, opis: 'x'.repeat(120) }));
+  const { service } = harness({ extraData: { artway_produkty_edytowane: largeCatalog }, settingsLimit: 4096 });
+  const toConfirm = await service.create({ type: 'PZ' }, 'administrator');
+  const line = await service.upsertLine({ documentId: toConfirm.document.id, expectedRevision: 1, productId: '1', quantity: 2, mode: 'set', requestId: 'large-settings-line' }, 'administrator');
+  const confirmed = await service.confirm({ documentId: toConfirm.document.id, expectedRevision: line.document.revision, requestId: 'large-settings-confirm' }, 'administrator');
+  assert.equal(confirmed.document.status, 'confirmed');
+  const toDelete = await service.create({ type: 'WZ' }, 'administrator');
+  const deleted = await service.deleteDraft({ documentId: toDelete.document.id, expectedRevision: 1, reason: 'Szkic testowy' }, 'administrator');
+  assert.equal(deleted.deleted, true);
+});
 
 test('PZ rozpoznaje EAN-13 także po skanie GTIN-14 z zerem i sumuje kolejne skany', async () => {
   const { service } = harness();
