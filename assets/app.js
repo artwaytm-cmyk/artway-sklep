@@ -1693,20 +1693,23 @@ function kluczeDuplikatuProduktu(p={}){
   return [...new Set(out)];
 }
 function kompletnoscProduktuDlaDuplikatu(p={}){return [p.externalId,p.sku,p.gtin||p.ean,p.kodProducenta||p.mpn,p.producent||p.marka,p.zdjecie,p.opis,p.cena>0].filter(Boolean).length;}
-function audytDuplikatowSklepu(lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p))){
-  const items=(Array.isArray(lista)?lista:[]).filter(p=>p&&p.id!==undefined),byId=new Map(items.map(p=>[String(p.id),p])),parent=new Map(items.map(p=>[String(p.id),String(p.id)])),owner=new Map(),shared=new Map();
+let audytDuplikatowSklepuCache={source:null,choices:null,hidden:null,added:null,result:null};
+function audytDuplikatowSklepu(lista){
+  const domyslna=!Array.isArray(lista),source=domyslna?produktyDoAdministracji():lista,choices=ustawienia.kanoniczneDuplikatySklepu&&typeof ustawienia.kanoniczneDuplikatySklepu==="object"?ustawienia.kanoniczneDuplikatySklepu:{};
+  if(audytDuplikatowSklepuCache.source===source&&audytDuplikatowSklepuCache.choices===choices&&audytDuplikatowSklepuCache.hidden===(domyslna?produktyUkryte:null)&&audytDuplikatowSklepuCache.added===(domyslna?produktyDodane:null)&&audytDuplikatowSklepuCache.result)return audytDuplikatowSklepuCache.result;
+  const items=source.filter(p=>p&&p.id!==undefined&&(!domyslna||!czyProduktAdminWKoszu(p))),parent=new Map(items.map(p=>[String(p.id),String(p.id)])),owner=new Map(),shared=new Map();
   const find=id=>{let x=String(id);while(parent.get(x)!==x){parent.set(x,parent.get(parent.get(x)));x=parent.get(x);}return x;};
   const union=(a,b,key)=>{let ra=find(a),rb=find(b);if(ra!==rb)parent.set(rb,ra);if(!shared.has(key))shared.set(key,new Set());shared.get(key).add(String(a));shared.get(key).add(String(b));};
   items.forEach(p=>kluczeDuplikatuProduktu(p).forEach(key=>{if(owner.has(key))union(p.id,owner.get(key),key);else owner.set(key,String(p.id));}));
   const groups=new Map();items.forEach(p=>{const root=find(p.id);if(!groups.has(root))groups.set(root,[]);groups.get(root).push(p);});
-  const choices=ustawienia.kanoniczneDuplikatySklepu&&typeof ustawienia.kanoniczneDuplikatySklepu==="object"?ustawienia.kanoniczneDuplikatySklepu:{};
   const wynik=[...groups.values()].filter(g=>g.length>1).map(group=>{
     const ids=new Set(group.map(p=>String(p.id))),keys=[...shared.entries()].filter(([,set])=>[...set].some(id=>ids.has(id))).map(([key])=>key).sort(),groupKey=keys[0]||`ids:${[...ids].sort().join("-")}`;
     const selected=group.find(p=>String(p.id)===String(choices[groupKey]||""));
     const canonical=selected||[...group].sort((a,b)=>kompletnoscProduktuDlaDuplikatu(b)-kompletnoscProduktuDlaDuplikatu(a)||String(a.externalId||a.sku||a.gtin||a.id).localeCompare(String(b.externalId||b.sku||b.gtin||b.id),"pl",{numeric:true})||Number(a.id)-Number(b.id))[0];
     return {groupKey,keys,produkty:group,canonical,hidden:group.filter(p=>String(p.id)!==String(canonical.id))};
   });
-  return {grupy:wynik,produkty:wynik.reduce((s,g)=>s+g.produkty.length,0),ukryte:wynik.reduce((s,g)=>s+g.hidden.length,0),hiddenIds:new Set(wynik.flatMap(g=>g.hidden.map(p=>String(p.id))))};
+  const result={grupy:wynik,produkty:wynik.reduce((s,g)=>s+g.produkty.length,0),ukryte:wynik.reduce((s,g)=>s+g.hidden.length,0),hiddenIds:new Set(wynik.flatMap(g=>g.hidden.map(p=>String(p.id))))};
+  audytDuplikatowSklepuCache={source,choices,hidden:domyslna?produktyUkryte:null,added:domyslna?produktyDodane:null,result};return result;
 }
 function filtrujDuplikatySklepu(lista=[]){const audit=audytDuplikatowSklepu(lista);return lista.filter(p=>!audit.hiddenIds.has(String(p.id)));}
 function ustawProduktGlownyDuplikatu(groupKey,productId){
@@ -2638,8 +2641,10 @@ function adminModulyDlaTrasy(route=""){
   else if(t.startsWith("/admin/agent-ai")||t.startsWith("/admin/magazyn"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/wysylki")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/infakt"))add("inventory");
+  else if(t==="/admin/asortyment"||t==="/admin/asortyment/produkty")add("commerce","inventory");
+  else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory");
   else if(t.startsWith("/admin/asortyment")||t.startsWith("/admin/produkty")||t==="/admin/kategorie"||t==="/admin/mapowanie"||t==="/admin/opinie"){
-    add("agent","warehouse","commerce","inventory","catalog");
+    add("commerce","inventory","catalog");
     if(t==="/admin/asortyment/rabaty")add("personalization");
   }
   else if(t.startsWith("/admin/personalizacja")||["/admin/dostawy","/admin/ustawienia","/admin/wyglad","/admin/rozmieszczenie","/admin/bannery","/admin/podstrony","/admin/strony","/admin/rabaty"].includes(t))add("personalization");

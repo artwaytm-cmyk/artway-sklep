@@ -63,6 +63,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/11-agent-ai-workspace.js',
       'src/frontend/11-allegro-settings.js',
       'src/frontend/12-customers-and-inventory.js',
+      'src/frontend/12-assortment-index.js',
       'src/frontend/12-infakt-admin.js',
       'src/frontend/12-warehouse-views.js',
       'src/frontend/12-product-editor.js',
@@ -197,12 +198,14 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
     banner: '/* GENERATED ADMIN INVENTORY — loaded on demand */',
     sources: [
       'src/frontend/12-customers-and-inventory.js',
+      'src/frontend/12-assortment-index.js',
       'src/frontend/12-infakt-admin.js',
       'src/frontend/12-warehouse-views.js',
       'src/frontend/12-product-editor.js',
       'src/frontend/12a-product-actions.js',
       'src/frontend/12b-allegro-listing-workspace.js',
       'src/frontend/12c-commerce-catalog-actions.js',
+      'src/frontend/13-product-admin.js',
     ],
   },
   {
@@ -211,7 +214,6 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
     sources: [
       'src/frontend/20-product-link-file-import-parser.js',
       'src/frontend/21-product-link-file-import-ui.js',
-      'src/frontend/13-product-admin.js',
       'src/frontend/14-categories-and-mapping.js',
       'src/frontend/14a-category-workspace.js',
     ],

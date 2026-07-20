@@ -34,4 +34,17 @@ Kod źródłowy jest podzielony według odpowiedzialności. Pliki `assets/app.js
 - Zmiana nie może omijać `npm run verify` ani publikować nieaktualnych plików wynikowych.
 - Funkcje administracyjne i ich style pozostają w pakietach ładowanych na żądanie; nie wolno zwiększać kosztu pierwszego wejścia klienta bez testu budżetu zasobów.
 
+## Stały standard wydajności panelu
+
+Panel administratora projektujemy dla katalogu od 50 000 do 100 000 produktów, a nie wyłącznie dla obecnego rozmiaru danych.
+
+- Trasa pobiera wyłącznie własne moduły. Zabronione jest automatyczne pobieranie wszystkich pakietów panelu; następna trasa może zostać przygotowana dopiero po wskazaniu lub sfokusowaniu jej odnośnika.
+- Rejestry produktów są stronicowane po stronie serwera i przechowywane w trwałym cache IndexedDB. Przejście między podstronami nie może ponownie pobierać pełnego katalogu ani pełnego snapshotu ustawień.
+- Widok nigdy nie tworzy DOM dla całego katalogu. Renderuje tylko bieżącą stronę, a większy fragment dzieli na małe partie lub wirtualizuje.
+- Wyszukiwanie i filtrowanie korzysta z indeksu obliczanego raz na rewizję danych. Dodanie filtra nie może dokładać kolejnego pełnego przebiegu po katalogu.
+- Wpisywanie w wyszukiwarce jest opóźnione i nie może przebudowywać widoku po każdej literze.
+- Kosztowne audyty, mapowania i statystyki mają cache unieważniany rewizją lub zmianą źródłowej kolekcji. Nie wolno ich liczyć osobno dla każdego kafelka produktu.
+- Przełączenie podstrony wykorzystuje zachowany stan i cache widoku; synchronizacja zewnętrzna działa w ustalonym interwale i odświeża ekran tylko po rzeczywistej zmianie danych.
+- Każda zmiana w katalogu, routerze lub modułach panelu musi utrzymać testy `performance-guards` i budżety pakietów z testu architektury.
+
 Obecny podział frontendu jest etapem bezpiecznej migracji: zachowuje zgodność ze starszymi globalnymi funkcjami HTML, a jednocześnie daje kontrolowane granice. Kolejne przebudowy mogą przenosić domeny do natywnych modułów ES bez ponownego tworzenia monolitu.

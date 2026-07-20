@@ -66,8 +66,17 @@ test('moduły aktywnej podstrony panelu są pobierane równolegle po rdzeniu', a
   assert.match(router, /const core=modules\.includes\("core"\)\?zaladujAdminModul\("core",version\)/);
   assert.match(router, /Promise\.all\(modules\.filter\(module=>module!=="core"\)\.map\(module=>zaladujAdminModul\(module,version\)\)\)/);
   assert.doesNotMatch(router, /modules\.reduce\(\(chain,module\)=>chain\.then/);
-  assert.match(responsive, /requestIdleCallback\(fn,\{timeout:2500\}\)/);
+  assert.match(responsive, /a\[href\^=\"#\/admin\"\]/);
+  assert.match(responsive, /setTimeout\(\(\)=>adminWstepnieZaladujTrase\(route,version\),140\)/);
+  assert.doesNotMatch(responsive, /Object\.keys\(ADMIN_MODULY_RUNTIME\)/);
+  assert.doesNotMatch(responsive, /finally\(\(\)=>idle\(next\)\)/);
   assert.match(router, /zaplanujWstepneLadowaniePanelu\(version\)/);
+});
+
+test('lista asortymentu nie ładuje agenta, magazynu ani narzędzi katalogowych', async () => {
+  const router = await readFile('src/frontend/06-router-and-storefront.js', 'utf8');
+  assert.match(router, /t==="\/admin\/asortyment"\|\|t==="\/admin\/asortyment\/produkty"\)add\("commerce","inventory"\)/);
+  assert.match(router, /t\.startsWith\("\/admin\/produkty\/edytuj\/"\).*add\("agent","commerce","inventory"\)/);
 });
 
 test('responsywna warstwa nie modyfikuje masowo kontrolek ani nie wymusza przeliczeń układu', async () => {
@@ -89,11 +98,19 @@ test('ciężkie podstrony magazynu są budowane wyłącznie dla aktywnej karty',
 });
 
 test('duży katalog renderuje produkty progresywnie zamiast układać setki kart naraz', async () => {
-  const inventory = await readFile('src/frontend/12-warehouse-views.js', 'utf8');
+  const [inventory, index] = await Promise.all([
+    readFile('src/frontend/12-warehouse-views.js', 'utf8'),
+    readFile('src/frontend/12-assortment-index.js', 'utf8'),
+  ]);
   assert.match(inventory, /const ASORTYMENT_PARTIA_KART=10/);
   assert.match(inventory, /IntersectionObserver/);
   assert.match(inventory, /asortymentKartyOczekujace\.splice\(0,ASORTYMENT_PARTIA_KART\)/);
   assert.match(inventory, /asortymentPrzygotujKartyProgresywnie\(fragment\.map/);
+  assert.match(inventory, /asortymentRenderujElementKarty/);
+  assert.doesNotMatch(inventory, /fragment\.map\(p=>asortymentKartaProduktuHTML/);
+  assert.match(index, /let asortymentIndeksCache=/);
+  assert.match(index, /let asortymentWynikiCache=/);
+  assert.match(index, /const items=index\.source\.filter\(p=>/);
 });
 
 test('główne wyszukiwarki nie przebudowują strony po każdej literze', async () => {

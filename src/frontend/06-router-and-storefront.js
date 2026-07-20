@@ -19,8 +19,10 @@ function adminModulyDlaTrasy(route=""){
   else if(t.startsWith("/admin/agent-ai")||t.startsWith("/admin/magazyn"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/wysylki")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/infakt"))add("inventory");
+  else if(t==="/admin/asortyment"||t==="/admin/asortyment/produkty")add("commerce","inventory");
+  else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory");
   else if(t.startsWith("/admin/asortyment")||t.startsWith("/admin/produkty")||t==="/admin/kategorie"||t==="/admin/mapowanie"||t==="/admin/opinie"){
-    add("agent","warehouse","commerce","inventory","catalog");
+    add("commerce","inventory","catalog");
     if(t==="/admin/asortyment/rabaty")add("personalization");
   }
   else if(t.startsWith("/admin/personalizacja")||["/admin/dostawy","/admin/ustawienia","/admin/wyglad","/admin/rozmieszczenie","/admin/bannery","/admin/podstrony","/admin/strony","/admin/rabaty"].includes(t))add("personalization");

@@ -92,10 +92,32 @@
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
   window.addEventListener('resize',()=>zaplanuj(document),{passive:true});
 })();
-let adminWstepneLadowanieZaplanowane=false;
+const adminWstepneLadowanieTras=new Set();
+let adminWstepneLadowaniePodlaczone=false,adminWstepneLadowanieTimer=0;
+function adminTrasaZOdnosnika(link){
+  const href=String(link?.getAttribute?.("href")||"");
+  if(!href.startsWith("#/admin"))return "";
+  return href.slice(1).split("?")[0];
+}
+function adminWstepnieZaladujTrase(route,version){
+  const key=String(route||"");if(!key||adminWstepneLadowanieTras.has(key))return;
+  adminWstepneLadowanieTras.add(key);
+  const missing=adminModulyDlaTrasy(key).filter(modul=>modul!=="core"&&!adminZaladowaneModuly.has(modul));
+  if(!missing.length)return;
+  Promise.all(missing.map(modul=>zaladujAdminModul(modul,version))).catch(()=>adminWstepneLadowanieTras.delete(key));
+}
+function adminPodlaczLadowaniePoZamiarze(version){
+  if(adminWstepneLadowaniePodlaczone)return;adminWstepneLadowaniePodlaczone=true;
+  const wskaz=(event)=>{
+    const link=event.target?.closest?.('a[href^="#/admin"]'),route=adminTrasaZOdnosnika(link);if(!route)return;
+    clearTimeout(adminWstepneLadowanieTimer);adminWstepneLadowanieTimer=setTimeout(()=>adminWstepnieZaladujTrase(route,version),140);
+  };
+  const anuluj=()=>{clearTimeout(adminWstepneLadowanieTimer);adminWstepneLadowanieTimer=0;};
+  document.addEventListener("pointerover",wskaz,{passive:true});document.addEventListener("focusin",wskaz);document.addEventListener("pointerout",anuluj,{passive:true});
+}
 function zaplanujWstepneLadowaniePanelu(version){
-  if(adminWstepneLadowanieZaplanowane||typeof jestAdmin!=="function"||!jestAdmin())return;adminWstepneLadowanieZaplanowane=true;
-  const queue=Object.keys(ADMIN_MODULY_RUNTIME).filter(x=>x!=="core"&&!adminZaladowaneModuly.has(x)),idle=fn=>typeof requestIdleCallback==="function"?requestIdleCallback(fn,{timeout:2500}):setTimeout(fn,300),next=()=>{const module=queue.shift();if(!module)return;if(adminZaladowaneModuly.has(module)){idle(next);return;}zaladujAdminModul(module,version).catch(()=>{}).finally(()=>idle(next));};idle(next);
+  if(typeof jestAdmin!=="function"||!jestAdmin())return;
+  adminPodlaczLadowaniePoZamiarze(version);
 }
 const ADMIN_HISTORIA_KLUCZ="artway_admin_historia_tras_v1";
 let adminHistoriaTras=(()=>{try{const value=JSON.parse(sessionStorage.getItem(ADMIN_HISTORIA_KLUCZ)||"[]");return Array.isArray(value)?value.filter(x=>String(x).startsWith("/admin")).slice(-30):[];}catch(e){return [];}})(),adminOstatniaTrasa=trasa(),adminNawigacjaCofania=false;
