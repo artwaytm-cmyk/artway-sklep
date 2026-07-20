@@ -1012,6 +1012,10 @@ function daneFirmyHTML(){
   const d = daneFirmy();
   return `${esc(d.nazwa)}${d.adres?`, ${esc(d.adres)}`:""}<br><b>NIP:</b> ${esc(d.nip)}`;
 }
+function danePrawneFirmyKompletne(){
+  const d=daneFirmy(),wartosci=[d.nazwa,d.nip,d.adres,d.kodPocztowy,d.miasto];
+  return wartosci.every(value=>{const tekst=String(value||"").trim().toLowerCase();return tekst&&!tekst.includes("[nazwa firmy")&&!tekst.includes("uzupełnij")&&!tekst.includes("000 000");});
+}
 function normalizujPlatnosci(lista){
   const bazowe = DOMYSLNE_PLATNOSCI.map(p=>({...p}));
   const domyslne = Object.fromEntries(bazowe.map(p=>[p.id,p]));
@@ -2121,7 +2125,9 @@ function magazynLokalizacjeDatalistHTML(id="warehouseLocationOptions"){
   return `<datalist id="${esc(id)}">${magazynLokalizacjeIndex().opcjeHTML}</datalist>`;
 }
 function statystykiLokalizacji(produktyLista=produktyDoAdministracji()){
-  const rez=rezerwacjeMagazynowe(), mapa={};
+  // Podstrona lokalizacji działa bez ciężkiego modułu operacji magazynowych.
+  // Po jego doładowaniu statystyki automatycznie uwzględniają rezerwacje.
+  const rez=typeof rezerwacjeMagazynowe==="function"?rezerwacjeMagazynowe():{}, mapa={};
   produktyLista.filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
     const meta=magazynMetaProduktu(p.id), rawKod=String(meta.lokalizacja||"").trim(),kod=magazynPolkaPoKodzie(rawKod)?.kod||rawKod||"BRAK";
     const stan=stanMagazynuId(p.id), rezerwacje=Number(rez[p.id]||0);
@@ -2799,16 +2805,16 @@ function adminModulyDlaTrasy(route=""){
   const t=String(route||"").split("?")[0],moduly=["core","ui"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
   add("shell");
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
-  if(t==="/diagnostyka")add("system","inventory");
-  else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("commerce","inventory","system");
-  else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","inventory");
+  if(t==="/diagnostyka")add("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system");
+  else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("commerce","communications","inventory","system");
+  else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","communications","inventory");
   else if(["/admin/magazyn/lokalizacje","/admin/magazyn/etykiety-qr"].includes(t))add("warehouse");
   else if(t==="/admin/magazyn/ruchy")add("warehouse","inventory");
   else if(t==="/admin/magazyn/stany")add("warehouse","commerce","inventory");
   else if(t.startsWith("/admin/magazyn"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/wysylki"))add("agent","warehouse","shipping","commerce","inventory");
   else if(["/admin/allegro/komunikacja","/admin/allegro/wiadomosci","/admin/allegro/dyskusje"].includes(t))add("agent","warehouse","commerce","communications","inventory");
-  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","inventory");
+  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","communications","inventory");
   else if(t.startsWith("/admin/infakt"))add("inventory");
   else if(t==="/admin/asortyment"||t==="/admin/asortyment/produkty")add("commerce","inventory");
   else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory");
@@ -2816,7 +2822,10 @@ function adminModulyDlaTrasy(route=""){
     add("commerce","inventory","catalog");
     if(t==="/admin/asortyment/rabaty")add("personalization");
   }
-  else if(t.startsWith("/admin/personalizacja")||["/admin/dostawy","/admin/ustawienia","/admin/wyglad","/admin/rozmieszczenie","/admin/bannery","/admin/podstrony","/admin/strony","/admin/rabaty"].includes(t))add("personalization");
+  else if(t.startsWith("/admin/personalizacja")||["/admin/dostawy","/admin/ustawienia","/admin/wyglad","/admin/rozmieszczenie","/admin/bannery","/admin/podstrony","/admin/strony","/admin/rabaty"].includes(t)){
+    add("personalization");
+    if(t==="/admin/personalizacja/rozmieszczenie"||t==="/admin/rozmieszczenie")add("catalog");
+  }
   else if(t.startsWith("/admin/eksport"))add("inventory","catalog","personalization");
   else if(t.startsWith("/admin/aktualizacja"))add("personalization");
   else if(t.startsWith("/admin/publikacja"))add("inventory","personalization");

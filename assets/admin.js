@@ -7389,7 +7389,11 @@ function seoEfektyPanelHTML(){
 }
 
 function magazynSubnavHTML(aktywny="pulpit"){
-  const plan=typeof potrzebyZatowarowania==="function"?potrzebyZatowarowania():[],braki=plan.length;
+  // Lokalizacje i generator QR są lekkimi podstronami. Nie uruchamiamy dla
+  // nich kalkulacji planu, dopóki moduł rezerwacji magazynowych nie jest
+  // faktycznie załadowany.
+  const maDanePlanu=typeof potrzebyZatowarowania==="function"&&typeof rezerwacjeMagazynowe==="function";
+  const plan=maDanePlanu?potrzebyZatowarowania():[],braki=plan.length;
   const bezLok=typeof magazynLokalizacjeZamowienIds!=="undefined"?magazynLokalizacjeZamowienIds.size:0;
   const dokumenty=typeof agentAIZlecenia!=="undefined"&&typeof agentAIPlanDokumentAktywny==="function"?(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny).length:0,planAkcje=braki+dokumenty;
   const items=[
@@ -7402,35 +7406,6 @@ function magazynSubnavHTML(aktywny="pulpit"){
     {id:"ruchy",href:"#/admin/magazyn/ruchy",icon:"🧾",label:"Ruchy i ustawienia",description:"Audyt magazynu"}
   ];
   return `<nav class="panel warehouse-module-nav" aria-label="Podstrony magazynu"><div class="warehouse-module-brand"><span>🏬</span><div><small>Centrum operacyjne</small><b>Magazyn</b></div></div><div class="warehouse-module-links">${items.map(item=>`<a class="${item.id===aktywny?"active":""}" href="${esc(item.href)}" ${item.id===aktywny?'aria-current="page"':""} title="${esc(`${item.label} — ${item.description}`)}"><span class="warehouse-nav-icon">${esc(item.icon)}</span><span class="warehouse-nav-copy"><b>${esc(item.label)}</b><small>${esc(item.description)}</small></span>${item.badge?`<span class="nav-badge">${esc(item.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
-}
-const ASORTYMENT_PARTIA_KART=10;
-let asortymentKartyOczekujace=[],asortymentKartyObserwator=null,asortymentKartyGeneracja=0;
-function asortymentRenderujElementKarty(item){return item?.produkt?asortymentKartaProduktuHTML(item.produkt,item.ukrytaKopia===true):String(item||"");}
-function asortymentPrzygotujKartyProgresywnie(lista=[]){
-  asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;
-  const generation=++asortymentKartyGeneracja,items=Array.isArray(lista)?lista:[];
-  asortymentKartyOczekujace=items.slice(ASORTYMENT_PARTIA_KART);
-  const first=items.slice(0,ASORTYMENT_PARTIA_KART).map(asortymentRenderujElementKarty).join("");
-  if(!asortymentKartyOczekujace.length)return first;
-  setTimeout(()=>asortymentUruchomDoloadowywanieKart(generation),0);
-  return `${first}<div class="assortment-progressive-loader" data-assortment-card-loader data-generation="${generation}"><span><b>Załadowano ${Math.min(ASORTYMENT_PARTIA_KART,items.length)} z ${items.length}</b><small>Kolejne produkty pojawią się automatycznie podczas przewijania.</small></span><button class="btn ghost" type="button" onclick="asortymentDoloadujKarty(${generation})">Pokaż kolejne</button></div>`;
-}
-function asortymentDoloadujKarty(generation=asortymentKartyGeneracja){
-  const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);
-  if(!loader||Number(generation)!==asortymentKartyGeneracja)return false;
-  const batch=asortymentKartyOczekujace.splice(0,ASORTYMENT_PARTIA_KART);
-  if(batch.length)loader.insertAdjacentHTML("beforebegin",batch.map(asortymentRenderujElementKarty).join(""));
-  if(!asortymentKartyOczekujace.length){asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;loader.remove();return true;}
-  const loaded=document.querySelectorAll(".catalog-product-list .catalog-product-card").length,total=loaded+asortymentKartyOczekujace.length;
-  const label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${loaded} z ${total}`;
-  return true;
-}
-function asortymentUruchomDoloadowywanieKart(generation=asortymentKartyGeneracja){
-  const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);if(!loader)return;
-  if(typeof IntersectionObserver!=="function")return;
-  asortymentKartyObserwator?.disconnect();
-  asortymentKartyObserwator=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))asortymentDoloadujKarty(generation);},{rootMargin:"500px 0px"});
-  asortymentKartyObserwator.observe(loader);
 }
 function magazynKontekstPodstronyHTML(aktywna="pulpit",u={}){
   const pages={
@@ -7546,7 +7521,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
   `);
   const wymagaStanow=["pulpit","dostawcy","stany"].includes(aktywna),wymagaSprzedazy=aktywna==="pulpit"||aktywna==="dostawcy",rez=wymagaStanow?rezerwacjeMagazynowe():{},kanalySpr=wymagaSprzedazy?sprzedazKanalyMagazynowe(30):{razem:{},sklep:{},allegro:{}},spr=kanalySpr.razem,prog=Math.max(0,Number(u.progNiski)||5);
   const wszystkie=aktywna==="ruchy"?[]:produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
-  const supplierStats=aktywna==="pulpit"||aktywna==="dostawcy"?statystykiDostepnosciProducentow():{rows:[],bezLinku:[],dostepne:[],niskie:[],braki:[],nieznane:[],wymagajaDecyzji:[],aktywneDecyzje:[],wygasleDecyzje:[]},supplierQuery=String(szukajProducentowMagazynu||"").toLowerCase().trim();
+  const supplierStats=aktywna==="pulpit"||aktywna==="dostawcy"?statystykiDostepnosciProducentow():{rows:[],bezLinku:[],dostepne:[],niskie:[],braki:[],nieznane:[],wymagajaDecyzji:[],aktywneDecyzje:[],wygasleDecyzje:[]},supplierQuery=aktywna==="dostawcy"&&typeof szukajProducentowMagazynu!=="undefined"?String(szukajProducentowMagazynu||"").toLowerCase().trim():"";
   let supplierRows=[],supplierFragment=[],supplierLiczbaStron=1;
   if(aktywna==="dostawcy"){
     const bezLinku=supplierStats.bezLinku.map(p=>({p,i:producentDostepnoscInfo(p),priority:priorytetDostepnosciProduktu(p,kanalySpr,rez),rank:0})),base=filtrProducentowMagazynu==="bez_linku"?bezLinku:filtrProducentowMagazynu==="wszystkie"?[...supplierStats.rows,...bezLinku]:supplierStats.rows;
@@ -7727,6 +7702,36 @@ function asortymentKartaProduktuHTML(p={},ukrytaKopia=false){
     <div class="catalog-product-operational-data"><small class="catalog-column-label">Ceny i magazyn</small><div class="catalog-product-values"><span class="catalog-product-edit-value"><small>Cena sklepu</small><label><input value="${String(cena.toFixed(2)).replace(".",",")}" inputmode="decimal" aria-label="Cena sklepu: ${esc(p.nazwa||"produkt")}" onchange="ustawCene(${jsArg(p.id)},this.value,this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}"><em>zł</em></label><i data-inline-price-status aria-live="polite"></i></span><span><small>Cena Allegro</small><b>${cenaAllegro>0?zl(cenaAllegro):"—"}</b></span><span class="catalog-product-edit-value catalog-product-purchase-price"><small>Zakup — tylko administrator</small><label><input value="${p.cenaZakupu==null?"":String(kwotaNum(p.cenaZakupu).toFixed(2)).replace(".",",")}" placeholder="brak" inputmode="decimal" aria-label="Prywatna cena zakupu: ${esc(p.nazwa||"produkt")}" onchange="ustawCeneZakupu(${jsArg(p.id)},this.value,this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}"><em>zł</em></label><i data-inline-price-status aria-live="polite"></i></span><span class="catalog-product-edit-value"><small>Stan magazynowy</small><label><input value="${stan??""}" placeholder="∞" inputmode="numeric" aria-label="Stan magazynowy: ${esc(p.nazwa||"produkt")}" onchange="ustawStan(${jsArg(p.id)},this.value)" class="${Number(stan)===0?"empty":""}"><em>${stan===undefined||stan===""?"bez limitu":"szt."}</em></label></span></div></div>
     <div class="catalog-product-actions"><small class="catalog-column-label">Sprzedaż, Allegro i akcje</small><div class="catalog-product-channel-summary">${allegroStatusProduktuHTML(p)}</div><div class="catalog-product-sale-status">${dostepnoscBadgeAdmin(p)}</div><button class="btn ghost catalog-product-availability-action" onclick="przelaczDostepnoscProduktu(${jsArg(p.id)})">${availabilityLabel}</button><div class="catalog-product-buttons"><a class="btn" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}" title="Edytuj produkt">✏️ Edytuj</a>${asortymentMenuDzialanProduktuHTML(p)}<button class="btn ghost" onclick="duplikujProdukt(${jsArg(p.id)})" title="Duplikuj produkt">📄 Kopia</button>${ukryty?`<button class="btn ghost" onclick="przywrocProdukt(${jsArg(p.id)})" title="Przywróć">↩️ Przywróć</button>`:`<button class="btn danger" onclick="if(confirm('Przenieść produkt do kosza?')) usunProduktAdmin(${jsArg(p.id)})" title="Przenieś do kosza">🗑️ Kosz</button>`}</div></div>
   </article>`;
+}
+
+const ASORTYMENT_PARTIA_KART=10;
+let asortymentKartyOczekujace=[],asortymentKartyObserwator=null,asortymentKartyGeneracja=0;
+function asortymentRenderujElementKarty(item){return item?.produkt?asortymentKartaProduktuHTML(item.produkt,item.ukrytaKopia===true):String(item||"");}
+function asortymentPrzygotujKartyProgresywnie(lista=[]){
+  asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;
+  const generation=++asortymentKartyGeneracja,items=Array.isArray(lista)?lista:[];
+  asortymentKartyOczekujace=items.slice(ASORTYMENT_PARTIA_KART);
+  const first=items.slice(0,ASORTYMENT_PARTIA_KART).map(asortymentRenderujElementKarty).join("");
+  if(!asortymentKartyOczekujace.length)return first;
+  setTimeout(()=>asortymentUruchomDoloadowywanieKart(generation),0);
+  return `${first}<div class="assortment-progressive-loader" data-assortment-card-loader data-generation="${generation}"><span><b>Załadowano ${Math.min(ASORTYMENT_PARTIA_KART,items.length)} z ${items.length}</b><small>Kolejne produkty pojawią się automatycznie podczas przewijania.</small></span><button class="btn ghost" type="button" onclick="asortymentDoloadujKarty(${generation})">Pokaż kolejne</button></div>`;
+}
+function asortymentDoloadujKarty(generation=asortymentKartyGeneracja){
+  const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);
+  if(!loader||Number(generation)!==asortymentKartyGeneracja)return false;
+  const batch=asortymentKartyOczekujace.splice(0,ASORTYMENT_PARTIA_KART);
+  if(batch.length)loader.insertAdjacentHTML("beforebegin",batch.map(asortymentRenderujElementKarty).join(""));
+  if(!asortymentKartyOczekujace.length){asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;loader.remove();return true;}
+  const loaded=document.querySelectorAll(".catalog-product-list .catalog-product-card").length,total=loaded+asortymentKartyOczekujace.length;
+  const label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${loaded} z ${total}`;
+  return true;
+}
+function asortymentUruchomDoloadowywanieKart(generation=asortymentKartyGeneracja){
+  const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);if(!loader)return;
+  if(typeof IntersectionObserver!=="function")return;
+  asortymentKartyObserwator?.disconnect();
+  asortymentKartyObserwator=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))asortymentDoloadujKarty(generation);},{rootMargin:"500px 0px"});
+  asortymentKartyObserwator.observe(loader);
 }
 
 function widokAdminProdukty(){
@@ -11857,7 +11862,7 @@ function kontrolePublikacji(){
   const k = [];
   k.push({ok:!domyslneHasloAdmina, tekst:"Hasło administratora zmienione z domyślnego (admin)", link:"#/konto", akcja:"Zmień hasło"});
   k.push({ok:!KONFIG.telefon.includes("000 000 000"), tekst:"Prawdziwy numer telefonu w stopce i kontakcie", link:"#/admin/wyglad", akcja:"Ustaw telefon"});
-  k.push({ok:!widokRegulamin().includes("[nazwa firmy"), tekst:"Regulamin i polityka prywatności z danymi firmy", link:"#/admin/strony", akcja:"Uzupełnij"});
+  k.push({ok:danePrawneFirmyKompletne(), tekst:"Regulamin i polityka prywatności z danymi firmy", link:"#/admin/strony", akcja:"Uzupełnij"});
   k.push({ok:dostepnePlatnosci().length>0, tekst:"Co najmniej jedna forma płatności włączona ("+dostepnePlatnosci().map(p=>p.id).join(", ")+")", link:"#/admin/dostawy", akcja:"Ustaw płatności"});
   k.push({ok:produkty.length>0, tekst:"Produkty w sklepie ("+produkty.length+")", link:"#/admin/produkty", akcja:"Dodaj produkty"});
   const lokalneUstawienia=wczytajLS("artway_ustawienia",{}), kluczeUstawien=Object.keys(lokalneUstawienia).filter(x=>x!=="krokiPublikacji");
@@ -12234,7 +12239,7 @@ function testyDiagnostyczne(){
     ?`${stanBramki.email.provider||"SMTP"} — autoryzacja serwerowa potwierdzona, połączenie trwałe`
     :stanBramki.email?.lastError||"Poczta wymaga kontroli trwałego połączenia serwerowego");
   dodaj("Konfiguracja","Telefon sklepu",KONFIG.telefon.includes("000 000 000")?"warn":"ok",KONFIG.telefon);
-  dodaj("Konfiguracja","Dane prawne",widokRegulamin().includes("[nazwa firmy")?"bad":"ok",widokRegulamin().includes("[nazwa firmy")?"Uzupełnij dane firmy w treściach prawnych":"Brak pól przykładowych");
+  dodaj("Konfiguracja","Dane prawne",danePrawneFirmyKompletne()?"ok":"bad",danePrawneFirmyKompletne()?"Brak pól przykładowych":"Uzupełnij dane firmy w treściach prawnych");
   dodaj("Bezpieczeństwo","Hasło administratora",domyslneHasloAdmina?"bad":"ok",domyslneHasloAdmina?"Nadal ustawione jest hasło admin":"Hasło zostało zmienione");
   dodaj("Bezpieczeństwo","Role kont administracyjnych",administratorzyDiag.length?"ok":"bad",`${administratorzyDiag.length} kont z rolą administratora • ${kontaDiag.length-administratorzyDiag.length} kont klientów`);
   dodaj("Publikacja","Źródło produktów",zrodloProduktow==="json"?"ok":"warn",zrodloProduktow==="json"?"products.json dostępny":"Używana jest lista zapasowa");

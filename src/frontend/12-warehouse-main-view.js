@@ -10,7 +10,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
   `);
   const wymagaStanow=["pulpit","dostawcy","stany"].includes(aktywna),wymagaSprzedazy=aktywna==="pulpit"||aktywna==="dostawcy",rez=wymagaStanow?rezerwacjeMagazynowe():{},kanalySpr=wymagaSprzedazy?sprzedazKanalyMagazynowe(30):{razem:{},sklep:{},allegro:{}},spr=kanalySpr.razem,prog=Math.max(0,Number(u.progNiski)||5);
   const wszystkie=aktywna==="ruchy"?[]:produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
-  const supplierStats=aktywna==="pulpit"||aktywna==="dostawcy"?statystykiDostepnosciProducentow():{rows:[],bezLinku:[],dostepne:[],niskie:[],braki:[],nieznane:[],wymagajaDecyzji:[],aktywneDecyzje:[],wygasleDecyzje:[]},supplierQuery=String(szukajProducentowMagazynu||"").toLowerCase().trim();
+  const supplierStats=aktywna==="pulpit"||aktywna==="dostawcy"?statystykiDostepnosciProducentow():{rows:[],bezLinku:[],dostepne:[],niskie:[],braki:[],nieznane:[],wymagajaDecyzji:[],aktywneDecyzje:[],wygasleDecyzje:[]},supplierQuery=aktywna==="dostawcy"&&typeof szukajProducentowMagazynu!=="undefined"?String(szukajProducentowMagazynu||"").toLowerCase().trim():"";
   let supplierRows=[],supplierFragment=[],supplierLiczbaStron=1;
   if(aktywna==="dostawcy"){
     const bezLinku=supplierStats.bezLinku.map(p=>({p,i:producentDostepnoscInfo(p),priority:priorytetDostepnosciProduktu(p,kanalySpr,rez),rank:0})),base=filtrProducentowMagazynu==="bez_linku"?bezLinku:filtrProducentowMagazynu==="wszystkie"?[...supplierStats.rows,...bezLinku]:supplierStats.rows;

@@ -1,5 +1,9 @@
 function magazynSubnavHTML(aktywny="pulpit"){
-  const plan=typeof potrzebyZatowarowania==="function"?potrzebyZatowarowania():[],braki=plan.length;
+  // Lokalizacje i generator QR są lekkimi podstronami. Nie uruchamiamy dla
+  // nich kalkulacji planu, dopóki moduł rezerwacji magazynowych nie jest
+  // faktycznie załadowany.
+  const maDanePlanu=typeof potrzebyZatowarowania==="function"&&typeof rezerwacjeMagazynowe==="function";
+  const plan=maDanePlanu?potrzebyZatowarowania():[],braki=plan.length;
   const bezLok=typeof magazynLokalizacjeZamowienIds!=="undefined"?magazynLokalizacjeZamowienIds.size:0;
   const dokumenty=typeof agentAIZlecenia!=="undefined"&&typeof agentAIPlanDokumentAktywny==="function"?(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny).length:0,planAkcje=braki+dokumenty;
   const items=[
@@ -12,35 +16,6 @@ function magazynSubnavHTML(aktywny="pulpit"){
     {id:"ruchy",href:"#/admin/magazyn/ruchy",icon:"🧾",label:"Ruchy i ustawienia",description:"Audyt magazynu"}
   ];
   return `<nav class="panel warehouse-module-nav" aria-label="Podstrony magazynu"><div class="warehouse-module-brand"><span>🏬</span><div><small>Centrum operacyjne</small><b>Magazyn</b></div></div><div class="warehouse-module-links">${items.map(item=>`<a class="${item.id===aktywny?"active":""}" href="${esc(item.href)}" ${item.id===aktywny?'aria-current="page"':""} title="${esc(`${item.label} — ${item.description}`)}"><span class="warehouse-nav-icon">${esc(item.icon)}</span><span class="warehouse-nav-copy"><b>${esc(item.label)}</b><small>${esc(item.description)}</small></span>${item.badge?`<span class="nav-badge">${esc(item.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
-}
-const ASORTYMENT_PARTIA_KART=10;
-let asortymentKartyOczekujace=[],asortymentKartyObserwator=null,asortymentKartyGeneracja=0;
-function asortymentRenderujElementKarty(item){return item?.produkt?asortymentKartaProduktuHTML(item.produkt,item.ukrytaKopia===true):String(item||"");}
-function asortymentPrzygotujKartyProgresywnie(lista=[]){
-  asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;
-  const generation=++asortymentKartyGeneracja,items=Array.isArray(lista)?lista:[];
-  asortymentKartyOczekujace=items.slice(ASORTYMENT_PARTIA_KART);
-  const first=items.slice(0,ASORTYMENT_PARTIA_KART).map(asortymentRenderujElementKarty).join("");
-  if(!asortymentKartyOczekujace.length)return first;
-  setTimeout(()=>asortymentUruchomDoloadowywanieKart(generation),0);
-  return `${first}<div class="assortment-progressive-loader" data-assortment-card-loader data-generation="${generation}"><span><b>Załadowano ${Math.min(ASORTYMENT_PARTIA_KART,items.length)} z ${items.length}</b><small>Kolejne produkty pojawią się automatycznie podczas przewijania.</small></span><button class="btn ghost" type="button" onclick="asortymentDoloadujKarty(${generation})">Pokaż kolejne</button></div>`;
-}
-function asortymentDoloadujKarty(generation=asortymentKartyGeneracja){
-  const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);
-  if(!loader||Number(generation)!==asortymentKartyGeneracja)return false;
-  const batch=asortymentKartyOczekujace.splice(0,ASORTYMENT_PARTIA_KART);
-  if(batch.length)loader.insertAdjacentHTML("beforebegin",batch.map(asortymentRenderujElementKarty).join(""));
-  if(!asortymentKartyOczekujace.length){asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;loader.remove();return true;}
-  const loaded=document.querySelectorAll(".catalog-product-list .catalog-product-card").length,total=loaded+asortymentKartyOczekujace.length;
-  const label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${loaded} z ${total}`;
-  return true;
-}
-function asortymentUruchomDoloadowywanieKart(generation=asortymentKartyGeneracja){
-  const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);if(!loader)return;
-  if(typeof IntersectionObserver!=="function")return;
-  asortymentKartyObserwator?.disconnect();
-  asortymentKartyObserwator=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))asortymentDoloadujKarty(generation);},{rootMargin:"500px 0px"});
-  asortymentKartyObserwator.observe(loader);
 }
 function magazynKontekstPodstronyHTML(aktywna="pulpit",u={}){
   const pages={

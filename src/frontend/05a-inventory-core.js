@@ -262,7 +262,9 @@ function magazynLokalizacjeDatalistHTML(id="warehouseLocationOptions"){
   return `<datalist id="${esc(id)}">${magazynLokalizacjeIndex().opcjeHTML}</datalist>`;
 }
 function statystykiLokalizacji(produktyLista=produktyDoAdministracji()){
-  const rez=rezerwacjeMagazynowe(), mapa={};
+  // Podstrona lokalizacji działa bez ciężkiego modułu operacji magazynowych.
+  // Po jego doładowaniu statystyki automatycznie uwzględniają rezerwacje.
+  const rez=typeof rezerwacjeMagazynowe==="function"?rezerwacjeMagazynowe():{}, mapa={};
   produktyLista.filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
     const meta=magazynMetaProduktu(p.id), rawKod=String(meta.lokalizacja||"").trim(),kod=magazynPolkaPoKodzie(rawKod)?.kod||rawKod||"BRAK";
     const stan=stanMagazynuId(p.id), rezerwacje=Number(rez[p.id]||0);

@@ -15,6 +15,10 @@ function daneFirmyHTML(){
   const d = daneFirmy();
   return `${esc(d.nazwa)}${d.adres?`, ${esc(d.adres)}`:""}<br><b>NIP:</b> ${esc(d.nip)}`;
 }
+function danePrawneFirmyKompletne(){
+  const d=daneFirmy(),wartosci=[d.nazwa,d.nip,d.adres,d.kodPocztowy,d.miasto];
+  return wartosci.every(value=>{const tekst=String(value||"").trim().toLowerCase();return tekst&&!tekst.includes("[nazwa firmy")&&!tekst.includes("uzupełnij")&&!tekst.includes("000 000");});
+}
 function normalizujPlatnosci(lista){
   const bazowe = DOMYSLNE_PLATNOSCI.map(p=>({...p}));
   const domyslne = Object.fromEntries(bazowe.map(p=>[p.id,p]));

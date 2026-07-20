@@ -1,3 +1,33 @@
+const ASORTYMENT_PARTIA_KART=10;
+let asortymentKartyOczekujace=[],asortymentKartyObserwator=null,asortymentKartyGeneracja=0;
+function asortymentRenderujElementKarty(item){return item?.produkt?asortymentKartaProduktuHTML(item.produkt,item.ukrytaKopia===true):String(item||"");}
+function asortymentPrzygotujKartyProgresywnie(lista=[]){
+  asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;
+  const generation=++asortymentKartyGeneracja,items=Array.isArray(lista)?lista:[];
+  asortymentKartyOczekujace=items.slice(ASORTYMENT_PARTIA_KART);
+  const first=items.slice(0,ASORTYMENT_PARTIA_KART).map(asortymentRenderujElementKarty).join("");
+  if(!asortymentKartyOczekujace.length)return first;
+  setTimeout(()=>asortymentUruchomDoloadowywanieKart(generation),0);
+  return `${first}<div class="assortment-progressive-loader" data-assortment-card-loader data-generation="${generation}"><span><b>Załadowano ${Math.min(ASORTYMENT_PARTIA_KART,items.length)} z ${items.length}</b><small>Kolejne produkty pojawią się automatycznie podczas przewijania.</small></span><button class="btn ghost" type="button" onclick="asortymentDoloadujKarty(${generation})">Pokaż kolejne</button></div>`;
+}
+function asortymentDoloadujKarty(generation=asortymentKartyGeneracja){
+  const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);
+  if(!loader||Number(generation)!==asortymentKartyGeneracja)return false;
+  const batch=asortymentKartyOczekujace.splice(0,ASORTYMENT_PARTIA_KART);
+  if(batch.length)loader.insertAdjacentHTML("beforebegin",batch.map(asortymentRenderujElementKarty).join(""));
+  if(!asortymentKartyOczekujace.length){asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;loader.remove();return true;}
+  const loaded=document.querySelectorAll(".catalog-product-list .catalog-product-card").length,total=loaded+asortymentKartyOczekujace.length;
+  const label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${loaded} z ${total}`;
+  return true;
+}
+function asortymentUruchomDoloadowywanieKart(generation=asortymentKartyGeneracja){
+  const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);if(!loader)return;
+  if(typeof IntersectionObserver!=="function")return;
+  asortymentKartyObserwator?.disconnect();
+  asortymentKartyObserwator=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))asortymentDoloadujKarty(generation);},{rootMargin:"500px 0px"});
+  asortymentKartyObserwator.observe(loader);
+}
+
 function widokAdminProdukty(){
   allegroLadujJesliTrzeba("offers");
   const centralny=typeof asortymentCentralnyWidok==="function"?asortymentCentralnyWidok():{fallback:true};

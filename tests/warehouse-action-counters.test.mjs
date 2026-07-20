@@ -6,9 +6,10 @@ const root=new URL("../",import.meta.url);
 const read=path=>readFile(new URL(path,root),"utf8");
 
 test("liczniki nawigacji magazynu pokazują wyłącznie braki do aktywnych zamówień",async()=>{
-  const [navigation,warehouse]=await Promise.all([read("assets/admin-warehouse.js"),read("assets/admin-shell.js")]);
-  const subnav=navigation.slice(navigation.indexOf("function magazynSubnavHTML"),navigation.indexOf("const ASORTYMENT_PARTIA_KART"));
-  assert.match(subnav,/const plan=typeof potrzebyZatowarowania==="function"\?potrzebyZatowarowania\(\):\[\],braki=plan\.length/);
+  const [navigation,warehouse]=await Promise.all([read("src/frontend/12-warehouse-views.js"),read("assets/admin-shell.js")]);
+  const subnav=navigation.slice(navigation.indexOf("function magazynSubnavHTML"),navigation.indexOf("function magazynKontekstPodstronyHTML"));
+  assert.match(subnav,/const maDanePlanu=typeof potrzebyZatowarowania==="function"&&typeof rezerwacjeMagazynowe==="function"/);
+  assert.match(subnav,/const plan=maDanePlanu\?potrzebyZatowarowania\(\):\[\],braki=plan\.length/);
   assert.match(subnav,/badge:braki\|\|""/);
   assert.doesNotMatch(subnav,/produktyAktywne\.length|ruchyMagazynowe|prod\.niskie|prod\.braki/);
   assert.match(warehouse,/const brakiDoZamowien=typeof rezerwacjeMagazynowe==="function"\?potrzebyZatowarowania\(\)\.length:0/);
