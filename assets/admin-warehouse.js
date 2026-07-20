@@ -722,6 +722,7 @@ function magazynStanyUruchomDoloadowywanie(generation=magazynStanyKartyGeneracja
   const loader=document.querySelector(`[data-warehouse-stock-loader][data-generation="${Number(generation)}"]`);if(!loader||typeof IntersectionObserver!=="function")return;
   magazynStanyKartyObserwator?.disconnect();magazynStanyKartyObserwator=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))magazynStanyDoloadujKarty(generation);},{rootMargin:"700px 0px"});magazynStanyKartyObserwator.observe(loader);
 }
+
 function widokAdminMagazyn(sekcja="pulpit"){
   const aktywna=["pulpit","dostawcy","stany","lokalizacje","etykiety-qr","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
   if(["pulpit","dostawcy","stany","plan"].includes(aktywna)&&typeof allegroLadujJesliTrzeba==="function")allegroLadujJesliTrzeba("orders");
@@ -902,6 +903,7 @@ function widokAdminMagazyn(sekcja="pulpit"){
   </div>
   `);
 }
+
 function asortymentKartaProduktuHTML(p={},ukrytaKopia=false){
   const dodany=jestProduktemDodanym(p.id)||["dodany","import"].includes(String(p?._catalog?.source||"")),ukryty=czyProduktAdminWKoszu(p)||p?._catalog?.recordStatus==="trash",edytowany=!!produktyEdytowane[p.id],selected=zaznaczoneProdukty.has(p.id)||zaznaczoneProdukty.has(String(p.id));
   const braki=asortymentBrakiDanych(p),sourceUrl=String(p.sourceUrl||p.producentUrl||p.urlProducenta||"").trim(),image=p.zdjecie||(Array.isArray(p.zdjecia)?p.zdjecia[0]:"")||"";

@@ -19,7 +19,7 @@ test("menu kategorii działa kliknięciem i klawiaturą z poprawnymi atrybutami 
 });
 
 test("katalog nadrzędny obejmuje produkty i nawigację wszystkich niższych gałęzi",async()=>{
-  const [navigation,storefront]=await Promise.all([read("src/frontend/04-accounts-orders-settings.js"),read("src/frontend/06-router-and-storefront.js")]);
+  const [navigation,storefront]=await Promise.all([read("src/frontend/04-accounts-orders-settings.js"),read("assets/app.js")]);
   assert.match(navigation,/produktNalezyDoGaleziKategorii/);
   assert.match(storefront,/galaz=kategorieGaleziMenu\(nazwa,kategorie\)/);
   assert.match(storefront,/category-branch-grid/);

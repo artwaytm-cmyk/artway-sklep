@@ -18,7 +18,7 @@ test('centrum operacji katalogu nie ściska liczników do pojedynczych liter', a
 });
 
 test('karta produktu korzysta ze struktury wzorca bez kopiowania jego treści', async () => {
-  const [css,script] = await Promise.all([read('src/styles/29-commerce-catalog-actions.css'),read('src/frontend/12-warehouse-views.js')]);
+  const [css,script] = await Promise.all([read('src/styles/29-commerce-catalog-actions.css'),read('assets/admin.js')]);
   const start=script.indexOf('function asortymentKartaProduktuHTML'),end=script.indexOf('\n\nfunction widokAdminProdukty',start),card=script.slice(start,end);
   assert.match(script, /allegro-publication-card catalog-product-card/);
   assert.match(script, /catalog-product-identity/);

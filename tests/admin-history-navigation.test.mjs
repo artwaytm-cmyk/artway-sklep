@@ -5,7 +5,7 @@ import {readFile} from "node:fs/promises";
 const root=new URL("../",import.meta.url),read=path=>readFile(new URL(path,root),"utf8");
 
 test("panel zapamiętuje ostatnie podstrony i ma kontrolowany powrót bez zapętlenia",async()=>{
-  const router=await read("src/frontend/06-router-and-storefront.js"),history=await read("src/frontend/08a-admin-responsive-layout.js"),shell=await read("src/frontend/07-admin-shipping.js"),styles=await read("src/styles/29-commerce-catalog-actions.css");
+  const router=await read("assets/app.js"),history=await read("src/frontend/08a-admin-responsive-layout.js"),shell=await read("assets/app.js"),styles=await read("src/styles/29-commerce-catalog-actions.css");
   assert.match(history,/ADMIN_HISTORIA_KLUCZ/);
   assert.match(history,/function adminZarejestrujTrase/);
   assert.match(history,/function adminWrocDoPoprzedniejStrony/);

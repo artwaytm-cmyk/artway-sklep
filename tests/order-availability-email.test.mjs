@@ -7,7 +7,7 @@ const emailService = await readFile(new URL('../netlify/functions/lib/email-serv
 const emailBackend = `${backend}\n${emailService}`;
 const emailContent = await readFile(new URL('../netlify/functions/lib/domain/order-email-content.mjs', import.meta.url), 'utf8');
 const cart = await readFile(new URL('../src/frontend/17-cart-and-checkout.js', import.meta.url), 'utf8');
-const storefront = await readFile(new URL('../src/frontend/06-router-and-storefront.js', import.meta.url), 'utf8');
+const storefront = await readFile(new URL('../assets/app.js', import.meta.url), 'utf8');
 
 test('koszyk pyta tylko o ilość przekraczającą realny kontrolowany stan', () => {
   assert.match(cart, /function kontrolowanyStanDlaZakupu/);

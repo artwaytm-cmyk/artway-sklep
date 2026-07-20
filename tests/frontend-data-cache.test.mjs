@@ -26,7 +26,7 @@ test('przełączanie kart nie uruchamia ponownie tego samego odczytu sieciowego'
 
 test('bazowy katalog i widoki panelu pozostają w trwałej, adaptacyjnej pamięci', async () => {
   const [catalog,cloud,router,responsive]=await Promise.all([
-    read('src/frontend/05-catalog-inventory.js'),read('src/frontend/03-cloud-sync.js'),read('src/frontend/06-router-and-storefront.js'),read('src/frontend/08a-admin-responsive-layout.js'),
+    read('assets/app.js'),read('src/frontend/03-cloud-sync.js'),read('assets/app.js'),read('src/frontend/08a-admin-responsive-layout.js'),
   ]);
   assert.match(catalog,/PRODUKTY_BAZOWE_CACHE_TTL_MS=6\*60\*60\*1000/);
   assert.match(catalog,/If-None-Match/);

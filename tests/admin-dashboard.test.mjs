@@ -8,7 +8,7 @@ const read=path=>readFile(new URL(path,root),"utf8");
 
 test("pulpit ma pięć spójnych podstron operacyjnych",async()=>{
   const [router,dashboard]=await Promise.all([
-    read("src/frontend/06-router-and-storefront.js"),
+    read("assets/app.js"),
     read("src/frontend/19-admin-dashboard.js")
   ]);
   assert.match(router,/t\.startsWith\("\/admin\/pulpit\/"\)/);

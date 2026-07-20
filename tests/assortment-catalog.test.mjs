@@ -54,7 +54,7 @@ test("karty katalogu zachowują pełne dane i operacje hurtowe",async()=>{
 });
 
 test("ceny w katalogu zapisują się w wierszu bez pełnego renderowania strony",async()=>{
-  const view=await read("src/frontend/12-warehouse-views.js"),prices=await read("src/frontend/13-product-admin.js"),css=await read("src/styles/29-commerce-catalog-actions.css");
+  const view=await read("assets/admin.js"),prices=await read("src/frontend/13-product-admin.js"),css=await read("src/styles/29-commerce-catalog-actions.css");
   assert.match(view,/ustawCene\([^\n]+this\.value,this\)/);
   assert.match(view,/ustawCeneZakupu\([^\n]+this\.value,this\)/);
   assert.match(view,/data-inline-price-status/);

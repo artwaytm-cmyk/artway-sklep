@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('Centrum wysyłki ma trwałe adresy wszystkich podstron', async () => {
-  const [shipping,router] = await Promise.all([read('src/frontend/07-admin-shipping.js'),read('src/frontend/06-router-and-storefront.js')]);
+  const [shipping,router] = await Promise.all([read('assets/app.js'),read('assets/app.js')]);
   for (const route of ['#/admin/wysylki/tracking','#/admin/wysylki/automatyzacje','#/admin/wysylki/ustawienia']) assert.match(shipping,new RegExp(route.replaceAll('/','\\/')));
   assert.match(router,/t\.startsWith\("\/admin\/wysylki\/"\)/);
   assert.match(router,/widokAdminWysylki\(t\.split\("\/"\)\[3\]\|\|"zlecenia"\)/);
@@ -13,7 +13,7 @@ test('Centrum wysyłki ma trwałe adresy wszystkich podstron', async () => {
 });
 
 test('każda podstrona wysyłek ma własny widok i poprawny aktywny stan nawigacji', async () => {
-  const shipping=(await read('src/frontend/07-admin-shipping.js'))+(await read('src/frontend/11-integration-center.js'));
+  const shipping=(await read('assets/app.js'))+(await read('src/frontend/11-integration-center.js'));
   for (const panel of ['panelZlecenWysylkowych','panelTrackinguWysylek','panelAutomatyzacjiWysylek','panelUstawienBramki']) assert.match(shipping,new RegExp(`function ${panel}\\(`));
   assert.match(shipping,/adminSubnavHTML\(\[/);
   assert.match(shipping,/wysylkiKontekstPodstronyHTML\(aktywna\)/);

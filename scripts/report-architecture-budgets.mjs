@@ -35,9 +35,12 @@ const sourcePaths = [...new Set((await Promise.all([
 const sourceRisks = await Promise.all(sourcePaths.map(async (path) => {
   const content = await readFile(path, 'utf8'), budget = path.endsWith('.css') ? B.source.stylesheet : B.source.javascript;
   const lines = physicalLineCount(content), bytes = Buffer.byteLength(content);
-  return { path, budget, risk: Math.max(lines / budget.maxLines, bytes / budget.maxBytes) };
+  return { path, budget, lines, bytes, risk: Math.max(lines / budget.maxLines, bytes / budget.maxBytes) };
 }));
-for (const source of sourceRisks.sort((left, right) => right.risk - left.risk).slice(0, 5)) {
+const sourceWarnings = sourceRisks
+  .filter(({ lines, bytes, budget }) => lines > budget.targetLines || bytes > budget.targetBytes)
+  .sort((left, right) => right.risk - left.risk);
+for (const source of sourceWarnings) {
   await sourceRow(`Źródło — ${source.path}`, source.path, source.budget);
 }
 await assetRow('Sklep JavaScript', 'assets/app.js', B.browser.storefrontScript);
@@ -53,4 +56,5 @@ console.table(rows);
 const failures = rows.filter((row) => row.state === 'FAIL');
 const warnings = rows.filter((row) => row.state === 'WARN');
 console.log(`Budżety: ${rows.length - failures.length - warnings.length} OK, ${warnings.length} ostrzeżeń, ${failures.length} przekroczeń.`);
+console.log(`Jawna kolejka podziału: ${sourceWarnings.length} modułów źródłowych ponad celem. Raport pokazuje wszystkie, bez skracania listy.`);
 if (failures.length) process.exitCode = 1;

@@ -31,8 +31,12 @@ import {
 import { bezpieczneZamowienieKlienta } from './domain/checkout.mjs';
 import { createEmailService } from './email-service.mjs';
 import { createInpostService } from './inpost-service.mjs';
+import { createInpostRoute } from './inpost-route.mjs';
+import { createStoreDataRoute } from './store-data-route.mjs';
 import { createPaynowService } from './paynow-service.mjs';
 import { createInfaktService } from './infakt-service.mjs';
+import { createInfaktRoute } from './infakt-route.mjs';
+import { createSystemRoute } from './system-route.mjs';
 import { createProductSourceInspectionService } from './product-source-inspection-service.mjs';
 import {
   applySafeCatalogFixes,
@@ -206,6 +210,36 @@ const {
   zastosujWebhookInpost,
   zapiszPrzesylkeNaZamowieniu,
 } = createInpostService({ read: czytaj, write: zapisz, onOrderStatusTransition: obsluzEmailePrzejsciaStatusu });
+const inpostRoute = createInpostRoute({
+  respond: odpowiedz,
+  isAdmin: czyAdmin,
+  text: tekst,
+  read: czytaj,
+  write: zapisz,
+  orderNumber: numerZamowienia,
+  onOrderStatusTransition: obsluzEmailePrzejsciaStatusu,
+  publicConfig: inpostPublicConfig,
+  configure: inpostKonfiguracja,
+  call: inpostWywolaj,
+  searchPoints: inpostSzukajPunktow,
+  isLockerDelivery: czyDostawaPaczkomatInPost,
+  validateShipment: walidujPrzesylkeInPost,
+  serviceAvailability: inpostDostepnoscUslug,
+  organization: inpostOrganizacja,
+  shipmentPayload: przesylkaShipXPayload,
+  trackingNumber: numerZShipX,
+  shipmentStatus: inpostStatusZShipX,
+  labelReady: inpostEtykietaGotowa,
+  offerId: inpostOfertaId,
+  waitForLabel: inpostCzekajNaEtykiete,
+  webhookSecret: inpostWebhookSecret,
+  webhookAuthorized: inpostWebhookAutoryzowany,
+  webhookEvents: inpostZdarzeniaZWebhooka,
+  webhookData: inpostDaneZWebhooka,
+  writeWebhookLog: zapiszLogInpostWebhook,
+  applyWebhook: zastosujWebhookInpost,
+  saveShipmentOnOrder: zapiszPrzesylkeNaZamowieniu,
+});
 const zapiszOperacjeProduktow = createCatalogProductOperationWriter({ mutateLatest: createRevisionSafeMutator(repository, 'settings'), loadProducts: allegroAgentProduktyKompletne, createUpdater: allegroAktualizatorProduktowCentralnych });
 const zapiszMapowaniaBezpiecznie = createAllegroMappingStore({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getItems: allegroMapowaniaItems }).writeSafely;
 async function zwiekszLicznikKoduRabatowego(kod = '') {
@@ -2802,6 +2836,92 @@ async function katalogWykonajAudyt({ fixSafe = false, quarantineOrphans = false,
   return { report, before: before.summary, changes, quarantined: orphanArchive.map((entry) => ({ id: entry.id, reason: entry.reason })), saved, rev, updated_at: now };
 }
 
+const infaktRoute = createInfaktRoute({
+  odpowiedz,
+  czyAdmin,
+  tekst,
+  czytaj,
+  zapisz,
+  numerZamowienia,
+  infaktPublicConfig,
+  infaktDostawcyUstawienia,
+  infaktDostawcyDozwoleni,
+  infaktPobierzKosztyDozwolone,
+  infaktKosztDoZwrotu,
+  infaktSynchronizujCenyZakupu,
+  infaktPrzypiszCeneZakupu,
+  infaktCofnijDopasowanieCeny,
+  infaktWywolaj,
+  infaktPayloadZamowienia,
+  infaktRef,
+  infaktInvoiceFromTask,
+  infaktErrorText,
+});
+
+const storeDataRoute = createStoreDataRoute({
+  odpowiedz,
+  czyAdmin,
+  czytaj,
+  productLinkImport,
+  ustawieniaPubliczneBezDanychPrywatnych,
+  czytajUsunieteZamowienia,
+  filtrujNieusunieteZamowienia,
+  oczyscUstawienia,
+  tekst,
+  czytajWersjonowane,
+  preserveSupplierPlanOnGenericSettings,
+  LIMIT_USTAWIEN,
+  zapiszJesliWersja,
+  ograniczRuch,
+  bezpieczneZamowienieKlienta,
+  requestSession,
+  mapaUsunietych,
+  storeOrderSupplierReconciliation,
+  zwiekszLicznikKoduRabatowego,
+  wyslijEmaileNowegoZamowienia,
+  emailKonfiguracja,
+  dopiszHistorieEmaila,
+  createOrderAccess,
+  bezpiecznaOpinia,
+  zapisz,
+  normalizujZamowienie,
+  LIMIT_USUNIETYCH_ZAMOWIEN,
+  LIMIT_ZAMOWIEN,
+  normalizujKlienta,
+  LIMIT_KLIENTOW,
+  polaczPowiadomienia,
+  obsluzEmailePrzejsciaStatusu,
+  numerZamowienia,
+  dopiszUsunieteZamowienie,
+  verifyOrderAccess,
+  normalizeTelegramAccountFields,
+  profilKlienta,
+  publicUser,
+  hashPassword,
+  createAccountSession,
+  verifyPassword,
+  bezpiecznePorownanie,
+  legacyPasswordHash,
+});
+
+const systemRoute = createSystemRoute({
+  odpowiedz,
+  czyAdmin,
+  czytaj,
+  filtrujNieusunieteZamowienia,
+  emailPublicConfig,
+  inpostPublicConfig,
+  paynowKonfiguracja,
+  telegramKonfiguracja,
+  allegroStatus,
+  infaktPublicConfig,
+  requestSession,
+  createAccountSession,
+  repository,
+  storeName: STORE_NAME,
+  backupKeyPattern: BACKUP_KEY_PATTERN,
+});
+
 
 export default async (req) => {
   const url = new URL(req.url);
@@ -2826,6 +2946,8 @@ export default async (req) => {
     if (aiBannerResponse) return aiBannerResponse;
     const agentSpecialistResponse = await agentSpecialistRoute(req, url, action);
     if (agentSpecialistResponse) return agentSpecialistResponse;
+    const systemResponse = await systemRoute(req, url, action);
+    if (systemResponse) return systemResponse;
     if (action === 'catalog-quality-audit') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -2844,180 +2966,8 @@ export default async (req) => {
       const body = await req.json().catch(() => ({})), result = await seoWykonajDziennyPlan({ limit: body.limit, source: body.source || 'manual-admin' });
       return odpowiedz({ ok: true, ...result });
     }
-    // ─── ZDROWIE / STATUS ───
-    if (action === 'health') {
-      const s = await czytaj('settings', { updated_at: null });
-      const o = await czytaj('orders', { items: [] });
-      const u = await czytaj('users', { items: [] });
-      const d = await czytaj('deleted_orders', { items: [] });
-      const integrationHealth = await czytaj('integration_health', {});
-      const aktywne = filtrujNieusunieteZamowienia(o.items || [], d.items || []);
-      const admin = czyAdmin(req, url);
-      const emailConfig = emailPublicConfig();
-      const emailSavedHealth = integrationHealth?.email && typeof integrationHealth.email === 'object' ? integrationHealth.email : {};
-      const inpostConfig = inpostPublicConfig();
-      const inpostSavedHealth = integrationHealth?.inpost && typeof integrationHealth.inpost === 'object' ? integrationHealth.inpost : {};
-      const healthFresh = (value) => !!value?.checkedAt && Date.now() - Date.parse(value.checkedAt) < 24 * 60 * 60 * 1000;
-      return odpowiedz({
-        ok: true,
-        configured: !!process.env.ARTWAY_ADMIN_TOKEN,
-        admin,
-        store: admin ? {
-          orders: aktywne.length,
-          users: (u.items || []).length,
-          deleted_orders: (d.items || []).length,
-          settings_updated_at: s.updated_at || null,
-        } : { available: true, settings_updated_at: s.updated_at || null },
-        paynow: {
-          configured: paynowKonfiguracja(req).configured,
-          env: paynowKonfiguracja(req).env,
-          continueUrl: paynowKonfiguracja(req).continueUrl,
-          notificationUrl: paynowKonfiguracja(req).notificationUrl,
-        },
-        email: { ...emailConfig, ...(admin && healthFresh(emailSavedHealth) ? { authenticated: emailConfig.configured && emailSavedHealth.authenticated === true, lastCheckedAt: emailSavedHealth.checkedAt, lastError: emailSavedHealth.error || '', lastErrorCode: emailSavedHealth.code || '' } : {}) },
-        telegram: { configured: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId) },
-        inpost: { ...inpostConfig, ...(admin && healthFresh(inpostSavedHealth) ? { authenticated: inpostConfig.configured && inpostSavedHealth.authenticated === true, lastCheckedAt: inpostSavedHealth.checkedAt, serviceAvailability: { locker: inpostSavedHealth.locker === true, courier: inpostSavedHealth.courier === true } } : {}) },
-        allegro: await allegroStatus(req),
-        infakt: infaktPublicConfig(),
-      });
-    }
-
-    if (action === 'session-refresh') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const session = requestSession(req);
-      if (!session || session.role !== 'admin') return odpowiedz({ ok: false, error: 'Zaloguj się ponownie jako administrator.', code: 'auth' }, 401);
-      return odpowiedz({ ok: true, authenticated: true, sessionToken: createAccountSession({ email: session.email, rola: 'admin' }), expiresInDays: 30 });
-    }
-
-    // ─── KOPIA MIGRACYJNA — odczyt tylko dla administratora, bez zmian w danych ───
-    if (action === 'store-backup-manifest') {
-      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const entries = await repository.listKeys();
-      return odpowiedz({ ok: true, store: STORE_NAME, createdAt: new Date().toISOString(), entries });
-    }
-
-    if (action === 'store-backup-entry') {
-      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const key = String(url.searchParams.get('key') || '');
-      const expectedEtag = String(url.searchParams.get('etag') || '');
-      if (!BACKUP_KEY_PATTERN.test(key) || !expectedEtag) return odpowiedz({ ok: false, error: 'Nieprawidłowy klucz lub brak wersji kopii.', code: 'invalid_backup_request' }, 400);
-      const entry = await repository.readVersioned(key, null);
-      if (!entry.exists) return odpowiedz({ ok: false, error: 'Nie znaleziono wpisu kopii.', code: 'backup_entry_missing' }, 404);
-      if (String(entry.etag || '') !== expectedEtag) return odpowiedz({ ok: false, error: 'Dane zmieniły się podczas wykonywania kopii. Rozpocznij eksport ponownie.', code: 'backup_changed' }, 409);
-      return odpowiedz({ ok: true, key, etag: entry.etag, value: entry.value });
-    }
-
-    // ─── INFAKT: faktury, statusy asynchroniczne i dokumenty ───
-    if (action === 'infakt-status') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const config = infaktPublicConfig(); let connection = null;
-      if (config.configured && url.searchParams.get('verify') === '1') {
-        try { const data = await infaktWywolaj('/api/v3/invoices.json', { parameters: { limit: 1, offset: 0, fields: 'id,uuid,number,status,invoice_date,gross_price' } }); connection = { ok: true, count: Number(data?.metainfo?.total_count ?? data?.entities?.length ?? 0) }; }
-        catch (e) { connection = { ok: false, error: tekst(e.message, 700), code: e.code || 'infakt_error' }; }
-      }
-      const [links, suppliers, purchaseSync] = await Promise.all([czytaj('infakt_invoice_links', { items: {}, updated_at: null }), infaktDostawcyUstawienia(), czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [], updated_at: null })]);
-      return odpowiedz({ ok: true, config, connection, links: links.items || {}, suppliers, purchaseSync, updated_at: links.updated_at || null });
-    }
-
-    if (action === 'infakt-supplier-access') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      if (req.method === 'GET') return odpowiedz({ ok: true, suppliers: await infaktDostawcyUstawienia() });
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const body = await req.json().catch(() => ({})), items = infaktDostawcyDozwoleni(body.items), updated_at = new Date().toISOString();
-      await zapisz('infakt_supplier_access', { items, updated_at });
-      return odpowiedz({ ok: true, suppliers: { items, updated_at } });
-    }
-
-    if (action === 'infakt-costs') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const suppliers = await infaktDostawcyUstawienia();
-      if (!suppliers.items.length) return odpowiedz({ ok: true, costs: [], suppliers, scanned: 0, message: 'Biała lista dostawców jest pusta — żaden dokument kosztowy nie został ujawniony.' });
-      const wanted = Math.max(1, Math.min(200, Number(url.searchParams.get('limit') || 100) || 100));
-      const result = await infaktPobierzKosztyDozwolone(suppliers.items, { wanted, maxScan: 5000 });
-      const collected = result.items.map(({ document, supplier }) => infaktKosztDoZwrotu(document, supplier));
-      const scanned = result.scanned;
-      const purchaseSync = await czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [], updated_at: null });
-      return odpowiedz({ ok: true, costs: collected, suppliers, purchaseSync, scanned, returned: collected.length });
-    }
-
-    if (action === 'infakt-purchase-sync') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), purchaseSync = await infaktSynchronizujCenyZakupu({ days: body.days, limit: body.limit, force: body.force === true });
-      return odpowiedz({ ok: true, purchaseSync });
-    }
-
-    if (action === 'infakt-purchase-match') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), result = await infaktPrzypiszCeneZakupu(tekst(body.itemKey, 100), tekst(body.productId, 100));
-      return odpowiedz({ ok: true, ...result });
-    }
-
-    if (action === 'infakt-purchase-unmatch') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), result = await infaktCofnijDopasowanieCeny(tekst(body.matchId, 100));
-      return odpowiedz({ ok: true, ...result });
-    }
-
-    if (action === 'infakt-invoices') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const linksRec = await czytaj('infakt_invoice_links', { items: {} }), ownUuids = new Set(Object.values(linksRec?.items || {}).map((x) => tekst(x?.invoiceUuid, 200)).filter(Boolean));
-      if (!ownUuids.size) return odpowiedz({ ok: true, invoices: [], metainfo: { count: 0, total_count: 0 }, config: infaktPublicConfig() });
-      const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 50) || 50)), offset = Math.max(0, Number(url.searchParams.get('offset') || 0) || 0);
-      const data = await infaktWywolaj('/api/v3/invoices.json', { parameters: { limit: 100, offset, order: 'invoice_date desc', fields: 'id,uuid,number,status,invoice_date,sale_date,payment_date,paid_date,gross_price,left_to_pay,currency,client_company_name,client_first_name,client_last_name,client_tax_code' } });
-      const invoices = (Array.isArray(data.entities) ? data.entities : []).filter((x) => ownUuids.has(tekst(x?.uuid, 200))).slice(0, limit);
-      return odpowiedz({ ok: true, invoices, metainfo: { count: invoices.length, total_count: ownUuids.size }, config: infaktPublicConfig() });
-    }
-
-    if (action === 'infakt-create-invoice') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), orderNumber = numerZamowienia(body.orderNumber || body.nrZamowienia);
-      if (!orderNumber) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia', code: 'validation' }, 422);
-      const [ordersRec, linksRec] = await Promise.all([czytaj('orders', { items: [] }), czytaj('infakt_invoice_links', { items: {}, updated_at: null })]);
-      const order = (Array.isArray(ordersRec.items) ? ordersRec.items : []).find((x) => numerZamowienia(x?.nr) === orderNumber);
-      if (!order) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
-      const links = linksRec.items && typeof linksRec.items === 'object' ? { ...linksRec.items } : {}, existing = links[orderNumber];
-      if (existing && !['error', 'cancelled'].includes(String(existing.status || '').toLowerCase()) && body.force !== true) return odpowiedz({ ok: true, duplicatePrevented: true, link: existing, message: 'Faktura lub zadanie inFakt już istnieje dla tego zamówienia.' });
-      const payload = infaktPayloadZamowienia(order, { status: 'draft', invoiceDate: body.invoiceDate, sendToKsef: false });
-      const data = await infaktWywolaj('/api/v3/async/invoices.json', { method: 'POST', bodyObj: payload });
-      const reference = infaktRef(data), now = new Date().toISOString();
-      if (!reference) { const e = new Error('inFakt nie zwrócił numeru referencyjnego zadania'); e.code = 'infakt_missing_reference'; throw e; }
-      links[orderNumber] = { orderNumber, taskReference: reference, status: 'processing', processingCode: data.processing_code || 100, processingDescription: tekst(data.processing_description || 'Zlecenie przyjęte', 500), createdAt: now, updatedAt: now, sendToKsef: payload.send_to_ksef, payloadHash: crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
-      await zapisz('infakt_invoice_links', { items: links, updated_at: now });
-      return odpowiedz({ ok: true, duplicatePrevented: false, link: links[orderNumber], task: data }, 201);
-    }
-
-    if (action === 'infakt-task-status') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const reference = tekst(url.searchParams.get('reference'), 200).trim(), orderNumber = numerZamowienia(url.searchParams.get('orderNumber'));
-      if (!reference && !orderNumber) return odpowiedz({ ok: false, error: 'Brak referencji zadania', code: 'validation' }, 422);
-      const linksRec = await czytaj('infakt_invoice_links', { items: {}, updated_at: null }), links = linksRec.items && typeof linksRec.items === 'object' ? { ...linksRec.items } : {};
-      const current = orderNumber ? links[orderNumber] : Object.values(links).find((x) => x.taskReference === reference), ref = reference || current?.taskReference;
-      if (!ref) return odpowiedz({ ok: false, error: 'Nie znaleziono referencji zadania', code: 'not_found' }, 404);
-      const data = await infaktWywolaj(`/api/v3/async/invoices/status/${encodeURIComponent(ref)}.json`), invoice = infaktInvoiceFromTask(data), code = Number(data.processing_code || data.code || 0), now = new Date().toISOString();
-      const status = code === 201 || invoice?.uuid ? 'created' : code === 422 ? 'error' : 'processing', key = orderNumber || current?.orderNumber;
-      const link = { ...(current || {}), orderNumber: key || '', taskReference: ref, status, processingCode: code, processingDescription: tekst(data.processing_description || data.description || '', 700), invoiceId: invoice?.id || current?.invoiceId || null, invoiceUuid: tekst(invoice?.uuid || current?.invoiceUuid || '', 200), invoiceNumber: tekst(invoice?.number || current?.invoiceNumber || '', 120), error: status === 'error' ? infaktErrorText(data, 'Nie udało się utworzyć faktury') : '', updatedAt: now };
-      if (key) { links[key] = link; await zapisz('infakt_invoice_links', { items: links, updated_at: now }); }
-      return odpowiedz({ ok: true, status, link, task: data });
-    }
-
-    if (action === 'infakt-sync') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const linksRec = await czytaj('infakt_invoice_links', { items: {}, updated_at: null }), links = linksRec.items && typeof linksRec.items === 'object' ? { ...linksRec.items } : {}, results = [];
-      for (const [orderNumber, current] of Object.entries(links).filter(([, x]) => x?.taskReference && x.status === 'processing').slice(0, 25)) {
-        try { const data = await infaktWywolaj(`/api/v3/async/invoices/status/${encodeURIComponent(current.taskReference)}.json`), invoice = infaktInvoiceFromTask(data), code = Number(data.processing_code || data.code || 0), status = code === 201 || invoice?.uuid ? 'created' : code === 422 ? 'error' : 'processing'; links[orderNumber] = { ...current, status, processingCode: code, processingDescription: tekst(data.processing_description || '', 700), invoiceId: invoice?.id || current.invoiceId || null, invoiceUuid: tekst(invoice?.uuid || current.invoiceUuid || '', 200), invoiceNumber: tekst(invoice?.number || current.invoiceNumber || '', 120), error: status === 'error' ? infaktErrorText(data, 'Błąd tworzenia') : '', updatedAt: new Date().toISOString() }; results.push({ orderNumber, status }); }
-        catch (e) { results.push({ orderNumber, status: 'error', error: tekst(e.message, 500) }); }
-      }
-      await zapisz('infakt_invoice_links', { items: links, updated_at: new Date().toISOString() });
-      let purchaseSync = null; try { purchaseSync = await infaktSynchronizujCenyZakupu({ days: 180, limit: 25, force: false }); } catch (error) { purchaseSync = { available: false, errors: [tekst(error.message, 500)] }; }
-      return odpowiedz({ ok: true, links, results, purchaseSync });
-    }
+    const infaktResponse = await infaktRoute(req, url, action);
+    if (infaktResponse) return infaktResponse;
 
     // ─── E-MAIL: konfiguracja bez sekretów ───
     if (action === 'email-config') {
@@ -4511,654 +4461,15 @@ export default async (req) => {
       return odpowiedz({ ok: true, mappings: items, ...workflow });
     }
 
-    // ─── INPOST: konfiguracja (publiczny token Geowidget + status) ───
-    if (action === 'inpost-config') {
-      return odpowiedz({ ok: true, inpost: inpostPublicConfig() });
-    }
-
-    // ─── INPOST: publiczne wyszukiwanie paczkomatów / punktów odbioru dla checkoutu ───
-    if (action === 'inpost-points') {
-      const dane = await inpostSzukajPunktow(url);
-      return odpowiedz(dane, dane.ok === false ? 400 : 200);
-    }
-
-    // ─── INPOST: webhook z Managera Paczek / ShipX → obsługa zleceń i tracking ───
-    if (action === 'inpost-webhook') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!inpostWebhookSecret()) return odpowiedz({ ok: false, error: 'Brak INPOST_WEBHOOK_SECRET w Netlify.', code: 'webhook_not_configured' }, 503);
-      if (!inpostWebhookAutoryzowany(req, url)) return odpowiedz({ ok: false, error: 'Nieprawidłowy token webhooka', code: 'auth' }, 401);
-      const rawBody = await req.text();
-      let payload = {};
-      try { payload = JSON.parse(rawBody || '{}'); } catch (e) { return odpowiedz({ ok: false, error: 'Webhook InPost nie przesłał poprawnego JSON', code: 'invalid_json' }, 400); }
-      const c = inpostKonfiguracja();
-      const wyniki = [];
-      for (const event of inpostZdarzeniaZWebhooka(payload)) {
-        let dane = inpostDaneZWebhooka(event);
-        let shipment = null;
-        if (c.configured && dane.id) {
-          try {
-            shipment = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(dane.id)}`, { method: 'GET' });
-            dane = inpostDaneZWebhooka(event, shipment);
-          } catch (e) {
-            // Sam webhook nadal zapisujemy — pełne dane ShipX mogą być chwilowo niedostępne.
-          }
-        }
-        if (!dane.id && !dane.tracking && !dane.reference && !dane.status) continue;
-        wyniki.push(await zastosujWebhookInpost(dane));
-      }
-      if (!wyniki.length) {
-        await zapiszLogInpostWebhook({ matched: false, status: 'empty_payload' });
-      }
-      return odpowiedz({ ok: true, accepted: true, processed: wyniki.length, results: wyniki }, 202);
-    }
-
-    // ─── INPOST: realny test tokenu i organizacji ShipX (admin) ───
-    if (action === 'inpost-test') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = inpostKonfiguracja();
-      if (!c.configured) {
-        return odpowiedz({
-          ok: false,
-          configured: false,
-          code: 'inpost_not_configured',
-          error: 'InPost nie jest skonfigurowany. Ustaw brakujące zmienne Netlify.',
-          missingEnv: c.missingEnv,
-          inpost: inpostPublicConfig(),
-        }, 503);
-      }
-      const org = await inpostOrganizacja(c);
-      const availability = inpostDostepnoscUslug(c, org);
-      const checkedAt = new Date().toISOString();
-      await zapisz('integration_health', { ...(await czytaj('integration_health', {})), inpost: { authenticated: true, checkedAt, env: c.env, organizationId: tekst(org?.id || c.orgId, 40), locker: availability.locker === true, courier: availability.courier === true, error: '', code: '' }, updated_at: checkedAt });
-      return odpowiedz({
-        ok: true,
-        configured: true,
-        inpost: {
-          ...inpostPublicConfig(),
-          authenticated: true,
-          lastCheckedAt: checkedAt,
-          serviceAvailability: availability,
-          organization: {
-            id: tekst(org?.id || c.orgId, 40),
-            name: tekst(org?.name || '', 160),
-            services: availability.services,
-          },
-        },
-      });
-    }
-
-    // ─── INPOST: utworzenie przesyłki ShipX (admin) ───
-    if (action === 'inpost-create') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = inpostKonfiguracja();
-      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany. Ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify.', code: 'inpost_not_configured' }, 503);
-      const body = await req.json().catch(() => ({}));
-      const nr = numerZamowienia(body.nr || body.number);
-      if (!nr) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia' }, 422);
-      const rec = await czytaj('orders', { items: [] });
-      const z = (Array.isArray(rec.items) ? rec.items : []).find((x) => x.nr === nr);
-      if (!z) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
-      if (z?.wysylka?.inpostId) return odpowiedz({ ok: false, error: `Przesyłka InPost już istnieje (${z.wysylka.inpostId}).`, code: 'exists', inpostId: z.wysylka.inpostId }, 409);
-      const doPaczkomatu = czyDostawaPaczkomatInPost(z);
-      if (doPaczkomatu && !tekst(z?.paczkomat || z?.wysylka?.punktKod, 40).trim()) return odpowiedz({ ok: false, error: 'Brak wybranego paczkomatu w zamówieniu — uzupełnij punkt InPost przed wygenerowaniem etykiety.', code: 'no_point' }, 422);
-      const walidacja = walidujPrzesylkeInPost(z);
-      if (!walidacja.ok) {
-        return odpowiedz({
-          ok: false,
-          error: 'Nie można utworzyć przesyłki InPost — uzupełnij dane zamówienia.',
-          code: 'inpost_validation',
-          details: walidacja.errors,
-        }, 422);
-      }
-      let availability = null;
-      try {
-        const org = await inpostOrganizacja(c);
-        availability = inpostDostepnoscUslug(c, org);
-      } catch (e) {
-        availability = null;
-      }
-      if (availability?.services?.length) {
-        const wymaganyTyp = walidacja.doPaczkomatu ? 'locker' : 'courier';
-        const service = walidacja.doPaczkomatu ? availability.lockerService : availability.courierService;
-        if (!availability[wymaganyTyp]) {
-          return odpowiedz({
-            ok: false,
-            error: `Konto InPost nie ma aktywnej usługi ${service}. Włącz tę usługę w Managerze Paczek.`,
-            code: 'inpost_service_unavailable',
-            service,
-            serviceAvailability: availability,
-          }, 422);
-        }
-      }
-      const aktywneUslugi = availability ? { ...c, lockerService: availability.lockerService || c.lockerService, courierService: availability.courierService || c.courierService } : c;
-      const payload = przesylkaShipXPayload(z, aktywneUslugi, walidacja);
-      const dane = await inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}/shipments`, { method: 'POST', bodyObj: payload });
-      const inpostId = tekst(dane?.id, 60).trim();
-      let daneAktualne = dane;
-      if (inpostId) {
-        try { daneAktualne = await inpostCzekajNaEtykiete(inpostId, { proby: 10, opoznienieMs: 1100 }); } catch (e) { daneAktualne = dane; }
-      }
-      const numer = numerZShipX(daneAktualne) || numerZShipX(dane);
-      const statusShipX = inpostStatusZShipX(daneAktualne) || inpostStatusZShipX(dane);
-      const labelReady = inpostEtykietaGotowa(daneAktualne) || inpostEtykietaGotowa(dane);
-      const ofertaId = inpostOfertaId(daneAktualne) || inpostOfertaId(dane);
-      const teraz = new Date().toLocaleString('pl-PL');
-      const opisGotowosci = labelReady ? 'etykieta gotowa' : 'czeka na potwierdzenie/opłacenie w InPost';
-      const historia = [...(Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : []), { czas: teraz, status: 'Przesyłka utworzona w InPost', opis: `${inpostId ? 'ID ' + inpostId : ''}${numer ? ' • ' + numer : ''}${statusShipX ? ' • ' + statusShipX : ''}${ofertaId ? ' • oferta ' + ofertaId : ''} • ${opisGotowosci}`, zewnetrzneId: inpostId }];
-      const patch = {
-        przewoznik: 'inpost',
-        usluga: walidacja.doPaczkomatu ? 'Paczkomat 24/7' : 'Kurier InPost',
-        punktKod: walidacja.doPaczkomatu ? walidacja.punkt : '',
-        inpostId,
-        inpostStatus: statusShipX,
-        inpostOfertaId: ofertaId,
-        etykietaGotowa: labelReady,
-        numer: numer || z?.wysylka?.numer || '',
-        etap: labelReady ? 'etykieta' : (z?.wysylka?.etap && z.wysylka.etap !== 'problem' ? z.wysylka.etap : 'przygotowanie'),
-        bladIntegracji: '',
-        ostatniaSynchronizacja: new Date().toISOString(),
-        zaktualizowano: new Date().toISOString(),
-        zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: labelReady },
-        historia,
-      };
-      const { stary, nowy } = await zapiszPrzesylkeNaZamowieniu(nr, patch);
-      // jeśli od razu jest numer nadania → wyślij e-mail „nadanie"
-      let email = null;
-      if (numer && !numerZShipX({ tracking_number: stary?.wysylka?.numer })) {
-        try { email = await obsluzEmailePrzejsciaStatusu({ ...stary, wysylka: { ...(stary?.wysylka || {}), numer: '' } }, nowy); } catch (e) { email = { sent: false, error: e.message }; }
-      }
-      return odpowiedz({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, labelReady, offerId: ofertaId, email, order: { nr, status: nowy?.status, wysylka: nowy?.wysylka } }, 201);
-    }
-
-    // ─── INPOST: pobranie oficjalnej etykiety PDF (admin) ───
-    if (action === 'inpost-label') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = inpostKonfiguracja();
-      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany.', code: 'inpost_not_configured' }, 503);
-      const nr = numerZamowienia(url.searchParams.get('nr'));
-      let inpostId = tekst(url.searchParams.get('id'), 60).trim();
-      const typ = tekst(url.searchParams.get('type'), 10).trim().toUpperCase() === 'A4' ? 'A4' : 'A6';
-      if (!inpostId && nr) {
-        const rec = await czytaj('orders', { items: [] });
-        const z = (rec.items || []).find((x) => x.nr === nr);
-        inpostId = tekst(z?.wysylka?.inpostId, 60).trim();
-      }
-      if (!inpostId) return odpowiedz({ ok: false, error: 'Brak ID przesyłki InPost — najpierw utwórz przesyłkę.', code: 'no_shipment' }, 422);
-      let daneAktualne = null;
-      try { daneAktualne = await inpostCzekajNaEtykiete(inpostId, { proby: 6, opoznienieMs: 900 }); } catch (e) { daneAktualne = null; }
-      const statusShipX = inpostStatusZShipX(daneAktualne);
-      const numer = numerZShipX(daneAktualne);
-      const labelReady = inpostEtykietaGotowa(daneAktualne);
-      if (!labelReady) {
-        if (nr && daneAktualne) {
-          const rec = await czytaj('orders', { items: [] });
-          const z = (rec.items || []).find((x) => x.nr === nr);
-          if (z) {
-            const stareH = Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : [];
-            const teraz = new Date().toLocaleString('pl-PL');
-            const historia = statusShipX && !stareH.some((h) => h.opis && h.opis.includes(statusShipX))
-              ? [...stareH, { czas: teraz, status: 'Etykieta InPost jeszcze niedostępna', opis: statusShipX }]
-              : stareH;
-            await zapiszPrzesylkeNaZamowieniu(nr, {
-              inpostStatus: statusShipX,
-              numer: numer || z?.wysylka?.numer || '',
-              etykietaGotowa: false,
-              ostatniaSynchronizacja: new Date().toISOString(),
-              zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: false },
-              historia,
-            });
-          }
-        }
-        return odpowiedz({
-          ok: false,
-          code: 'label_not_ready',
-          error: `InPost jeszcze nie potwierdził etykiety${statusShipX ? ` (status: ${statusShipX})` : ''}. Kliknij „Status InPost” za chwilę albo sprawdź, czy przesyłka została opłacona w Managerze Paczek.`,
-          inpostId,
-          status: statusShipX,
-          trackingNumber: numer,
-          labelReady: false,
-        }, 409);
-      }
-      try {
-        const pdf = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(inpostId)}/label?format=pdf&type=${typ}`, { method: 'GET', accept: 'application/pdf' });
-        return odpowiedz({ ok: true, format: 'pdf', type: typ, filename: `etykieta-inpost-${nr || inpostId}.pdf`, base64: pdf.base64, inpostId, status: statusShipX, trackingNumber: numer, labelReady: true });
-      } catch (e) {
-        if (e.code === 'invalid_action' || /invalid_action|statusie wcześniejszym niż|nieopłaconej/i.test(e.message || '')) {
-          return odpowiedz({
-            ok: false,
-            code: 'label_not_ready',
-            error: `InPost nie pozwala jeszcze pobrać etykiety${statusShipX ? ` (status: ${statusShipX})` : ''}. Przesyłka musi być opłacona i mieć status confirmed lub późniejszy.`,
-            inpostId,
-            status: statusShipX,
-            trackingNumber: numer,
-            labelReady: false,
-          }, 409);
-        }
-        throw e;
-      }
-    }
-
-    // ─── INPOST: synchronizacja statusu / trackingu przesyłki (admin) ───
-    if (action === 'inpost-status') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = inpostKonfiguracja();
-      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany.', code: 'inpost_not_configured' }, 503);
-      const nr = numerZamowienia(url.searchParams.get('nr'));
-      const rec = await czytaj('orders', { items: [] });
-      const z = (rec.items || []).find((x) => x.nr === nr);
-      const inpostId = tekst(url.searchParams.get('id') || z?.wysylka?.inpostId, 60).trim();
-      if (!inpostId) return odpowiedz({ ok: false, error: 'Brak ID przesyłki InPost.', code: 'no_shipment' }, 422);
-      const dane = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(inpostId)}`, { method: 'GET' });
-      const numer = numerZShipX(dane);
-      const statusShipX = inpostStatusZShipX(dane);
-      const labelReady = inpostEtykietaGotowa(dane);
-      const ofertaId = inpostOfertaId(dane);
-      const teraz = new Date().toLocaleString('pl-PL');
-      const stareH = Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : [];
-      const wpisIstnieje = stareH.some((h) => h.opis && h.opis.includes(statusShipX));
-      const historia = (statusShipX && !wpisIstnieje) ? [...stareH, { czas: teraz, status: 'Status InPost', opis: statusShipX + (numer ? ' • ' + numer : '') }] : stareH;
-      const patch = {
-        inpostStatus: statusShipX,
-        inpostOfertaId: ofertaId || z?.wysylka?.inpostOfertaId || '',
-        numer: numer || z?.wysylka?.numer || '',
-        etykietaGotowa: labelReady,
-        ostatniaSynchronizacja: new Date().toISOString(),
-        zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: labelReady },
-        historia,
-      };
-      if (labelReady && (!z?.wysylka?.etap || z.wysylka.etap === 'przygotowanie' || z.wysylka.etap === 'problem')) patch.etap = 'etykieta';
-      if (labelReady) patch.bladIntegracji = '';
-      const { stary, nowy } = await zapiszPrzesylkeNaZamowieniu(nr, patch);
-      let email = null;
-      if (numer && !(stary?.wysylka?.numer)) {
-        try { email = await obsluzEmailePrzejsciaStatusu(stary, nowy); } catch (e) { email = { sent: false, error: e.message }; }
-      }
-      return odpowiedz({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, labelReady, offerId: ofertaId, email, order: { nr, wysylka: nowy?.wysylka } });
-    }
-
-    // ─── INPOST: automatyczne sprawdzenie statusów WSZYSTKICH przesyłek (admin / harmonogram co 6h) ───
-    if (action === 'inpost-sync-all') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = inpostKonfiguracja();
-      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany.', code: 'inpost_not_configured' }, 503);
-      const rec = await czytaj('orders', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const zamkniete = ['dostarczone', 'zakończone', 'anulowane', 'zwrot', 'zwrot pieniędzy'];
-      const doSync = items.filter((z) => tekst(z?.wysylka?.inpostId, 60).trim() && !zamkniete.includes(String(z?.status || '').toLowerCase()));
-      let sprawdzone = 0, zmienione = 0, bledy = 0, maile = 0;
-      const zmiany = [];
-      for (const z of doSync.slice(0, 300)) {
-        const inpostId = tekst(z.wysylka.inpostId, 60).trim();
-        try {
-          const dane = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(inpostId)}`, { method: 'GET' });
-          sprawdzone++;
-          const status = inpostStatusZShipX(dane);
-          const tracking = numerZShipX(dane);
-          const statusStary = tekst(z?.wysylka?.inpostStatus, 60).trim();
-          const trackingStary = tekst(z?.wysylka?.numer, 120).trim();
-          const etykietaStara = !!z?.wysylka?.etykietaGotowa;
-          const etykietaNowa = inpostEtykietaGotowa(dane);
-          if ((status && status !== statusStary) || (tracking && tracking !== trackingStary) || (etykietaNowa && !etykietaStara)) {
-            const r = await zastosujWebhookInpost({ id: inpostId, status, tracking, reference: z.nr, occurredAt: new Date().toISOString() });
-            if (r && r.matched) { zmienione++; if (r.email && r.email.sent) maile++; zmiany.push({ nr: z.nr, status, etap: r.etap }); }
-          }
-        } catch (e) { bledy++; }
-      }
-      return odpowiedz({ ok: true, configured: true, sprawdzone, zmienione, bledy, maile, zmiany, sprawdzono: new Date().toISOString() });
-    }
+    const inpostResponse = await inpostRoute(req, url, action);
+    if (inpostResponse) return inpostResponse;
 
     // ─── CENTRALNA KARTOTEKA PRODUKTÓW (PostgreSQL, stronicowanie serwerowe) ───
     const centralCatalogResponse = await centralProductCatalogRoute(req, url, action);
     if (centralCatalogResponse) return centralCatalogResponse;
 
-    // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
-    if (action === 'pull' || action === 'store-data') {
-      const admin = czyAdmin(req, url);
-      // Samo przechodzenie między kartami nie uruchamia ciężkich zapisów.
-      const [s, importedPayload] = await Promise.all([czytaj('settings', { data: {}, rev: 0, updated_at: null }), productLinkImport.payload({ requestedRev: url.searchParams.get('catalogRev'), admin })]);
-      const rev = Number(s.rev || 0), requestedSettingsRev = Number(url.searchParams.get('settingsRev'));
-      const settingsUnchanged = Number.isSafeInteger(requestedSettingsRev) && requestedSettingsRev > 0 && requestedSettingsRev === rev;
-      // Nie przesyłamy ponownie ciężkiego katalogu ani niezmienionych ustawień.
-      const sourceSettings = admin ? (s.data || {}) : ustawieniaPubliczneBezDanychPrywatnych(s.data || {});
-      const browserSettings = Object.fromEntries(Object.entries(sourceSettings).filter(([key]) => key !== 'artway_produkty_katalog'));
-      const res = { ok: true, ...(settingsUnchanged ? { settings_unchanged: true } : { settings: browserSettings }), rev, updated_at: s.updated_at || null };
-      Object.assign(res, importedPayload);
-      if (admin) {
-        const o = await czytaj('orders', { items: [] });
-        const u = await czytaj('users', { items: [] });
-        const d = await czytajUsunieteZamowienia();
-        res.deleted_orders = d;
-        res.orders = filtrujNieusunieteZamowienia(o.items || [], d);
-        res.users = u.items || [];
-      }
-      return odpowiedz(res);
-    }
-
-    // ─── ZAPIS USTAWIEŃ (tylko admin) ───
-    if (action === 'settings') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      if (body.mode === 'patch') {
-        const patch = oczyscUstawienia(body.patch), changedKeys = Object.keys(patch), mutationId = tekst(body.mutationId, 120);
-        if (!changedKeys.length) return odpowiedz({ ok: true, unchanged: true, changedKeys: [] });
-        for (let attempt = 0; attempt < 5; attempt++) {
-          const version = await czytajWersjonowane('settings', { data: {}, rev: 0, updated_at: null }), prev = version.value || { data: {}, rev: 0, updated_at: null };
-          if (mutationId && prev.last_mutation_id === mutationId) return odpowiedz({ ok: true, duplicatePrevented: true, changedKeys, rev: prev.rev, updated_at: prev.updated_at });
-          const dane = preserveSupplierPlanOnGenericSettings({ ...(prev.data || {}), ...patch }, prev.data), updated_at = new Date().toISOString();
-          if (JSON.stringify(dane).length > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
-          const rec = { ...prev, data: dane, rev: Number(prev.rev || 0) + 1, updated_at, last_mutation_id: mutationId || undefined };
-          const write = await zapiszJesliWersja('settings', rec, version);
-          if (write?.modified) return odpowiedz({ ok: true, changedKeys, rev: rec.rev, updated_at, rebased: Number(body.expectedRev) !== Number(prev.rev || 0) });
-        }
-        return odpowiedz({ ok: false, error: 'Serwer równolegle zapisuje inne dane. Zmiana nie została utracona — ponów zapis.', code: 'settings_write_conflict' }, 409);
-      }
-      const incoming = oczyscUstawienia(body.settings);
-      const expectedRev = Number(body.expectedRev);
-      if (!Number.isSafeInteger(expectedRev) || expectedRev < 0) {
-        return odpowiedz({ ok: false, error: 'Brakuje rewizji bazowej. Pobierz aktualne ustawienia przed zapisem.', code: 'settings_write_conflict' }, 409);
-      }
-      const version = await czytajWersjonowane('settings', { data: {}, rev: 0, updated_at: null });
-      const prev = version.value || { data: {}, rev: 0, updated_at: null };
-      if (Number(prev.rev || 0) !== expectedRev) {
-        return odpowiedz({ ok: false, error: 'Ustawienia zmieniły się na innym urządzeniu. Niczego nie nadpisano.', code: 'settings_write_conflict', rev: Number(prev.rev || 0) }, 409);
-      }
-      const dane = preserveSupplierPlanOnGenericSettings(incoming, prev.data);
-      const rozmiar = JSON.stringify(dane).length;
-      if (rozmiar > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
-      const rec = { data: dane, rev: expectedRev + 1, updated_at: new Date().toISOString() };
-      const write = await zapiszJesliWersja('settings', rec, version);
-      if (!write?.modified) {
-        return odpowiedz({ ok: false, error: 'Ustawienia zmieniły się podczas zapisu. Niczego nie nadpisano.', code: 'settings_write_conflict' }, 409);
-      }
-      return odpowiedz({ ok: true, rev: rec.rev, updated_at: rec.updated_at });
-    }
-
-    // ─── KLIENT SKŁADA ZAMÓWIENIE (publiczne) ───
-    if (action === 'store-order-create') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const limited = ograniczRuch(req, 'order-create', 20, 60 * 60 * 1000);
-      if (limited) return limited;
-      const body = await req.json().catch(() => ({}));
-      const settingsRec = await czytaj('settings', { data: {} });
-      const zam = bezpieczneZamowienieKlienta(body.order, await productLinkImport.mergeSettings(settingsRec.data || {}));
-      const session = requestSession(req);
-      if (session && session.email !== zam.email) return odpowiedz({ ok: false, error: 'Zamówienie musi należeć do zalogowanego konta.', code: 'auth' }, 403);
-      zam.status = 'nowe';
-      zam.inventoryMode = 'reserved_until_shipment';
-      zam.ts = Date.now();
-      zam.data = new Date(zam.ts).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' });
-      zam.inventoryReservedAt = new Date(zam.ts).toISOString();
-      const usuniete = mapaUsunietych(await czytajUsunieteZamowienia());
-      const stored = await storeOrderSupplierReconciliation.saveOrder({ order: zam, deletedOrderNumbers: new Set(usuniete.keys()) });
-      if (stored.deleted) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
-      if (stored.duplicate) return odpowiedz({ ok: true, stored: false, duplicate: true, number: zam.nr });
-      if (zam.rabatKod) await zwiekszLicznikKoduRabatowego(zam.rabatKod).catch(() => false);
-      let email = null;
-      // Zamówienie jest już bezpiecznie zapisane. Chwilowa awaria katalogu
-      // lub konflikt settings nie może cofnąć checkoutu klienta.
-      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
-      if (zam.platnoscId !== 'paynow') {
-        try { email = await wyslijEmaileNowegoZamowienia(zam); }
-        catch (e) {
-          email = { configured: emailKonfiguracja().configured, sent: false, error: e.message };
-          await dopiszHistorieEmaila(zam.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
-        }
-      }
-      return odpowiedz({ ok: true, stored: true, number: zam.nr, email, supplierDrafts, orderAccessToken: createOrderAccess(zam) });
-    }
-
-    // ─── KLIENT SKŁADA OPINIĘ (publiczne, do moderacji) ───
-    if (action === 'store-review-add') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const limited = ograniczRuch(req, 'review-add', 10, 60 * 60 * 1000);
-      if (limited) return limited;
-      const body = await req.json().catch(() => ({}));
-      const op = bezpiecznaOpinia(body.review);
-      if (!op) return odpowiedz({ ok: false, error: 'Opinia nie zawiera wymaganych danych.' }, 422);
-      const rec = await czytaj('settings', { data: {}, rev: 0 });
-      const dane = rec.data || {};
-      const lista = Array.isArray(dane.artway_opinie) ? dane.artway_opinie : [];
-      lista.unshift(op);
-      while (lista.length > 5000) lista.pop();
-      dane.artway_opinie = lista;
-      await zapisz('settings', { ...rec, data: dane, rev: (Number(rec.rev) || 0) + 1, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, stored: true });
-    }
-
-    // ─── MOJE ZAMÓWIENIA (po e-mailu) ───
-    if (action === 'store-orders-mine') {
-      const session = requestSession(req);
-      const email = tekst(url.searchParams.get('email') || session?.email, 200).trim().toLowerCase();
-      if (!session || (!czyAdmin(req, url) && session.email !== email)) return odpowiedz({ ok: false, error: 'Zaloguj się, aby pobrać swoje zamówienia.', code: 'auth' }, 401);
-      if (!email) return odpowiedz({ ok: true, orders: [] });
-      const rec = await czytaj('orders', { items: [] });
-      const usuniete = await czytajUsunieteZamowienia();
-      const moje = filtrujNieusunieteZamowienia(rec.items || [], usuniete).filter((z) => (z.email || '').toLowerCase() === email);
-      return odpowiedz({ ok: true, orders: moje });
-    }
-
-    // ─── SYNCHRONIZACJA ADMINA (scala lokalne z serwerem) ───
-    if (action === 'store-sync') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const przychodzaceZ = Array.isArray(body.orders) ? body.orders : [];
-      const przychodzacyU = Array.isArray(body.users) ? body.users : [];
-      const przychodzaceD = Array.isArray(body.deleted_orders) ? body.deleted_orders : [];
-      const zapisaneD = await czytajUsunieteZamowienia();
-      const usunieteMapa = mapaUsunietych([...zapisaneD, ...przychodzaceD]);
-      const deletedOrders = [...usunieteMapa.values()]
-        .sort((a, b) => String(b.deleted_at || '').localeCompare(String(a.deleted_at || '')))
-        .slice(0, LIMIT_USUNIETYCH_ZAMOWIEN);
-      await zapisz('deleted_orders', { items: deletedOrders, updated_at: new Date().toISOString() });
-
-      const recO = await czytaj('orders', { items: [] });
-      const orders = filtrujNieusunieteZamowienia(recO.items || [], usunieteMapa);
-      const numery = new Set(orders.map((z) => z.nr));
-      for (const raw of przychodzaceZ) {
-        const z = normalizujZamowienie(raw);
-        if (z && !usunieteMapa.has(z.nr) && !numery.has(z.nr)) { orders.unshift(z); numery.add(z.nr); }
-      }
-      orders.sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
-      while (orders.length > LIMIT_ZAMOWIEN) orders.pop();
-      await zapisz('orders', { items: orders, updated_at: new Date().toISOString() });
-
-      const recU = await czytaj('users', { items: [] });
-      const users = Array.isArray(recU.items) ? recU.items : [];
-      const maile = new Set(users.map((u) => (u.email || '').toLowerCase()));
-      for (const raw of przychodzacyU) {
-        const u = normalizujKlienta(raw);
-        if (u && !maile.has(u.email)) { users.push(u); maile.add(u.email); }
-      }
-      while (users.length > LIMIT_KLIENTOW) users.pop();
-      await zapisz('users', { items: users, updated_at: new Date().toISOString() });
-
-      return odpowiedz({ ok: true, orders, users, deleted_orders: deletedOrders, updated_at: new Date().toISOString() });
-    }
-
-    // ─── ADMIN: zapis / usuwanie zamówienia ───
-    if (action === 'store-order-save') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const zam = normalizujZamowienie(body.order);
-      if (!zam) return odpowiedz({ ok: false, error: 'Brak danych zamówienia' }, 422);
-      const usuniete = mapaUsunietych(await czytajUsunieteZamowienia());
-      if (usuniete.has(zam.nr)) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
-      const rec = await czytaj('orders', { items: [] });
-      const items = filtrujNieusunieteZamowienia(rec.items || [], usuniete);
-      const i = items.findIndex((x) => x.nr === zam.nr);
-      const stary = i >= 0 ? items[i] : null;
-      // zachowaj serwerową historię e-maili (klient mógł mieć starszą kopię)
-      if (stary) {
-        zam.wysylka = zam.wysylka || {};
-        zam.wysylka.powiadomienia = polaczPowiadomienia(stary?.wysylka?.powiadomienia, zam.wysylka.powiadomienia);
-        zam.inventoryMode = stary.inventoryMode || zam.inventoryMode;
-        zam.inventoryReservedAt = stary.inventoryReservedAt || zam.inventoryReservedAt;
-        zam.inventoryDeductedAt = stary.inventoryDeductedAt || zam.inventoryDeductedAt;
-      }
-      if (i >= 0) items[i] = zam; else items.unshift(zam);
-      await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      const inventory = await storeOrderSupplierReconciliation.finalizeInventoryForOrder(zam);
-      if (inventory.inventoryMode) zam.inventoryMode = inventory.inventoryMode;
-      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely();
-      let email = null;
-      try { email = await obsluzEmailePrzejsciaStatusu(stary, zam); }
-      catch (e) { email = { sent: false, error: e.message }; }
-      return odpowiedz({ ok: true, stored: true, number: zam.nr, inventory, supplierDrafts, email, powiadomienia: email?.powiadomienia });
-    }
-    if (action === 'store-order-delete') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const nr = numerZamowienia(body.number || body.nr);
-      if (!nr) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia' }, 422);
-      await dopiszUsunieteZamowienie({ nr, by: 'admin' });
-      const rec = await czytaj('orders', { items: [] });
-      const items = (rec.items || []).filter((x) => x.nr !== nr);
-      await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
-      return odpowiedz({ ok: true, deleted: true, supplierDrafts });
-    }
-
-    // ─── KLIENT: usuwa własne zlecenie/zamówienie ───
-    if (action === 'store-order-delete-mine') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const body = await req.json().catch(() => ({}));
-      const nr = numerZamowienia(body.number || body.nr);
-      const email = tekst(body.email, 200).trim().toLowerCase();
-      if (!nr || !email) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia albo e-maila klienta' }, 422);
-      const rec = await czytaj('orders', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const zam = items.find((x) => x.nr === nr);
-      if (!zam) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia.' }, 404);
-      const session = requestSession(req);
-      const sessionOwns = !!session && session.email === email && session.email === String(zam.email || '').toLowerCase();
-      const guestOwns = verifyOrderAccess(body.orderAccessToken, zam);
-      if (!czyAdmin(req, url) && !sessionOwns && !guestOwns) return odpowiedz({ ok: false, error: 'Brak uprawnień do tego zamówienia.', code: 'auth' }, 403);
-      await dopiszUsunieteZamowienie({ nr, email, by: 'customer' });
-      await zapisz('orders', { items: items.filter((x) => x.nr !== nr), updated_at: new Date().toISOString() });
-      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
-      return odpowiedz({ ok: true, deleted: true, supplierDrafts });
-    }
-
-    // ─── ADMIN/KLIENT: zapis klienta ───
-    if (action === 'store-user-save' || action === 'account-profile-save') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const body = await req.json().catch(() => ({}));
-      const session = requestSession(req);
-      if (action === 'store-user-save' && !czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      if (action === 'account-profile-save' && !session) return odpowiedz({ ok: false, error: 'Zaloguj się ponownie.', code: 'auth' }, 401);
-      const telegramFields = action === 'store-user-save' ? normalizeTelegramAccountFields(body.user) : {};
-      const u = action === 'store-user-save' ? normalizujKlienta(body.user) : profilKlienta(body.user, session.email);
-      if (!u) return odpowiedz({ ok: false, error: 'Brak danych klienta' }, 422);
-      if (action === 'store-user-save') {
-        delete u.telegramChatId;
-        delete u.telegramUserId;
-        delete u.telegramAccess;
-        delete u.telegramApprover;
-        Object.assign(u, telegramFields);
-      }
-      const rec = await czytaj('users', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const i = items.findIndex((x) => (x.email || '').toLowerCase() === u.email);
-      if (action === 'account-profile-save' && i < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono konta.', code: 'auth' }, 404);
-      if (i >= 0) items[i] = { ...items[i], ...u, email: items[i].email, rola: items[i].rola, passwordHash: items[i].passwordHash, hash: items[i].hash }; else items.push(u);
-      await zapisz('users', { items, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, stored: true, email: u.email, user: i >= 0 ? publicUser(items[i]) : publicUser(u) });
-    }
-    if (action === 'store-user-delete') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const email = tekst(body.email, 200).trim().toLowerCase();
-      const rec = await czytaj('users', { items: [] });
-      const items = (rec.items || []).filter((x) => (x.email || '').toLowerCase() !== email);
-      await zapisz('users', { items, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, deleted: true });
-    }
-
-    // ─── REJESTRACJA KLIENTA (publiczna, konto we wspólnej bazie) ───
-    if (action === 'account-register') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const limited = ograniczRuch(req, 'account-register', 5, 60 * 60 * 1000);
-      if (limited) return limited;
-      const body = await req.json().catch(() => ({}));
-      const password = String(body.password || '');
-      const u = profilKlienta(body.user);
-      if (!u || password.length < 8 || password.length > 200) return odpowiedz({ ok: false, error: 'Hasło musi mieć co najmniej 8 znaków.' }, 422);
-      u.rola = 'klient'; u.account = true; u.passwordHash = await hashPassword(password); u.data = new Date().toISOString();
-      const rec = await czytaj('users', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      if (items.some((x) => (x.email || '').toLowerCase() === u.email)) {
-        return odpowiedz({ ok: false, error: 'Konto z tym adresem już istnieje.', code: 'exists' }, 409);
-      }
-      items.push(u);
-      await zapisz('users', { items, updated_at: new Date().toISOString() });
-      const user = publicUser(u);
-      return odpowiedz({ ok: true, stored: true, user, sessionToken: createAccountSession(user) });
-    }
-
-    // ─── LOGOWANIE KLIENTA (publiczne, sprawdzenie hasła we wspólnej bazie) ───
-    if (action === 'account-login') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const limited = ograniczRuch(req, 'account-login', 10, 15 * 60 * 1000);
-      if (limited) return limited;
-      const body = await req.json().catch(() => ({}));
-      const email = tekst(body.email, 200).trim().toLowerCase();
-      const password = String(body.password || '');
-      if (!email || !password) return odpowiedz({ ok: false, error: 'Podaj e-mail i hasło', code: 'auth' }, 401);
-      const rec = await czytaj('users', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const u = items.find((x) => (x.email || '').toLowerCase() === email);
-      const modernOk = u?.passwordHash ? await verifyPassword(password, u.passwordHash).catch(() => false) : false;
-      const legacyOk = !u?.passwordHash && !!u?.hash && bezpiecznePorownanie(legacyPasswordHash(password), String(u.hash));
-      if (!u || (!modernOk && !legacyOk)) return odpowiedz({ ok: false, error: 'Nieprawidłowy e-mail lub hasło.', code: 'auth' }, 401);
-      if (legacyOk) {
-        u.passwordHash = await hashPassword(password);
-        delete u.hash;
-        await zapisz('users', { items, updated_at: new Date().toISOString() });
-      }
-      const user = publicUser(u);
-      return odpowiedz({ ok: true, authenticated: true, user, sessionToken: createAccountSession(user) });
-    }
-
-    if (action === 'account-password-change') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const session = requestSession(req);
-      if (!session) return odpowiedz({ ok: false, error: 'Zaloguj się ponownie.', code: 'auth' }, 401);
-      const limited = ograniczRuch(req, 'password-change', 5, 60 * 60 * 1000);
-      if (limited) return limited;
-      const body = await req.json().catch(() => ({}));
-      const currentPassword = String(body.currentPassword || body.current_password || '');
-      const newPassword = String(body.newPassword || body.new_password || '');
-      if (newPassword.length < 8 || newPassword.length > 200) return odpowiedz({ ok: false, error: 'Nowe hasło musi mieć co najmniej 8 znaków.' }, 422);
-      const rec = await czytaj('users', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const u = items.find((x) => (x.email || '').toLowerCase() === session.email);
-      const modernOk = u?.passwordHash ? await verifyPassword(currentPassword, u.passwordHash).catch(() => false) : false;
-      const legacyOk = !u?.passwordHash && !!u?.hash && bezpiecznePorownanie(legacyPasswordHash(currentPassword), String(u.hash));
-      if (!u || (!modernOk && !legacyOk)) return odpowiedz({ ok: false, error: 'Obecne hasło jest nieprawidłowe.', code: 'auth' }, 401);
-      u.passwordHash = await hashPassword(newPassword);
-      delete u.hash;
-      await zapisz('users', { items, updated_at: new Date().toISOString() });
-      const user = publicUser(u);
-      return odpowiedz({ ok: true, changed: true, user, sessionToken: createAccountSession(user) });
-    }
-
-    // ─── logowanie tokenem (sprawdzenie hasła administratora) ───
-    if (action === 'login') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const body = await req.json().catch(() => ({}));
-      const podane = tekst(body.password || body.token, 500);
-      const env = process.env.ARTWAY_ADMIN_TOKEN || '';
-      if (!env) return odpowiedz({ ok: false, error: 'Serwer nie ma ustawionego hasła (ARTWAY_ADMIN_TOKEN).', code: 'no_token' }, 503);
-      if (!bezpiecznePorownanie(podane, env)) return odpowiedz({ ok: false, error: 'Nieprawidłowe hasło administratora', code: 'auth' }, 401);
-      const adminUser = { email: tekst(body.email || process.env.ARTWAY_ADMIN_EMAIL || 'artwaytm@gmail.com', 200).trim().toLowerCase(), rola: 'admin' };
-      return odpowiedz({ ok: true, authenticated: true, sessionToken: createAccountSession(adminUser) });
-    }
+    const storeDataResponse = await storeDataRoute(req, url, action);
+    if (storeDataResponse) return storeDataResponse;
 
     return odpowiedz({ ok: false, error: 'Nieznana akcja: ' + action }, 404);
   } catch (e) {

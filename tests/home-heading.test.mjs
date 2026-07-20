@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 test('strona główna zachowuje dokładnie jeden H1 przy każdym układzie sekcji', async () => {
   const [storefront, styles] = await Promise.all([
-    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
     readFile('src/styles/01-foundation.css', 'utf8'),
   ]);
 

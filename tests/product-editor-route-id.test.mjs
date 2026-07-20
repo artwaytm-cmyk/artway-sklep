@@ -6,7 +6,7 @@ const root=new URL("../",import.meta.url);
 const read=path=>readFile(new URL(path,root),"utf8");
 
 test("router zachowuje tekstowe identyfikatory produktów i dekoduje segment adresu",async()=>{
-  const router=await read("src/frontend/06-router-and-storefront.js");
+  const router=await read("assets/app.js");
   assert.match(router,/function identyfikatorZTrasy\(route,index\)/);
   assert.match(router,/widokAdminProduktEdytuj\(identyfikatorZTrasy\(t,4\)\)/);
   assert.match(router,/widokProdukt\(identyfikatorZTrasy\(t,2\)\)/);
@@ -54,7 +54,7 @@ test("edytor ma komplet kontrolek plików bez ładowania modułu personalizacji"
 
 test("podstrona kodów rabatowych ładuje moduł, w którym znajduje się jej widok",async()=>{
   const [router,promotions]=await Promise.all([
-    read("src/frontend/06-router-and-storefront.js"),
+    read("assets/app.js"),
     read("src/frontend/15c-campaign-studio-pro.js")
   ]);
   assert.match(promotions,/function widokAdminRabatyZaawansowane\(/);

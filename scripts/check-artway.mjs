@@ -20,6 +20,10 @@ const files = [
   'products.json',
   'netlify/functions/store.mjs',
   'netlify/functions/lib/store-app.mjs',
+  'netlify/functions/lib/system-route.mjs',
+  'netlify/functions/lib/store-data-route.mjs',
+  'netlify/functions/lib/inpost-route.mjs',
+  'netlify/functions/lib/infakt-route.mjs',
   'netlify/functions/lib/email-service.mjs',
   'netlify/functions/lib/inpost-service.mjs',
   'netlify/functions/lib/paynow-service.mjs',
@@ -86,6 +90,10 @@ const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
 const storeRuntime = [
   store,
+  read('netlify/functions/lib/system-route.mjs'),
+  read('netlify/functions/lib/store-data-route.mjs'),
+  read('netlify/functions/lib/inpost-route.mjs'),
+  read('netlify/functions/lib/infakt-route.mjs'),
   read('netlify/functions/lib/email-service.mjs'),
   read('netlify/functions/lib/inpost-service.mjs'),
   read('netlify/functions/lib/paynow-service.mjs'),

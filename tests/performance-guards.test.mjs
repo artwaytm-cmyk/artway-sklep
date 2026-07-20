@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 test('ciężka synchronizacja działa co 15 minut i nie odświeża widoku bez zmian', async () => {
   const cloud = await readFile('src/frontend/03-cloud-sync.js', 'utf8');
-  const shipping = await readFile('src/frontend/07-admin-shipping.js', 'utf8');
+  const shipping = await readFile('assets/app.js', 'utf8');
   const allegro = await readFile('src/frontend/11-allegro-refresh-runtime.js', 'utf8');
   assert.match(cloud, /const CHMURA_AUTO_SYNC_MS = 15\*60\*1000;/);
   assert.match(cloud, /const CHMURA_FOCUS_SYNC_MIN_MS = 5\*60\*1000;/);
@@ -16,7 +16,7 @@ test('ciężka synchronizacja działa co 15 minut i nie odświeża widoku bez zm
 });
 
 test('router scala szybkie renderowania i nie skanuje wielokrotnie całego DOM', async () => {
-  const [router,responsive] = await Promise.all([readFile('src/frontend/06-router-and-storefront.js', 'utf8'),readFile('src/frontend/08a-admin-responsive-layout.js', 'utf8')]);
+  const [router,responsive] = await Promise.all([readFile('assets/app.js', 'utf8'),readFile('src/frontend/08a-admin-responsive-layout.js', 'utf8')]);
   assert.match(router, /if\(renderowanieWidoku\)\{renderPonowniePoBiezacym=true;return;\}/);
   assert.match(router, /current\.isEqualNode\(next\)/);
   assert.match(router, /const keyed=new Map\(\);/);
@@ -31,9 +31,9 @@ test('router scala szybkie renderowania i nie skanuje wielokrotnie całego DOM',
 
 test('techniczne przywracanie pozycji panelu nie uruchamia kosztownego płynnego przewijania', async () => {
   const [router, customers, shipping] = await Promise.all([
-    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
     readFile('src/frontend/12-customers-and-inventory.js', 'utf8'),
-    readFile('src/frontend/07-admin-shipping.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
   ]);
   assert.match(router, /scrollTo\(\{top:Math\.max\(0,Number\(entry\.scrollY\)\|\|0\),behavior:"instant"\}\)/);
   const calls = `${router}\n${customers}\n${shipping}`.match(/scrollTo\(\{[^}]+\}\)/g) || [];
@@ -44,7 +44,7 @@ test('techniczne przywracanie pozycji panelu nie uruchamia kosztownego płynnego
 test('powtórne wejście do panelu pobiera tylko rewizję zamiast wielomegabajtowego snapshotu', async () => {
   const [cloud, backend] = await Promise.all([
     readFile('src/frontend/03-cloud-sync.js', 'utf8'),
-    readFile('netlify/functions/lib/store-app.mjs', 'utf8'),
+    readFile('netlify/functions/lib/store-data-route.mjs', 'utf8'),
   ]);
   assert.match(cloud, /settingsRev:lokalnaRewizja/);
   assert.match(backend, /settings_unchanged: true/);
@@ -64,7 +64,7 @@ test('importowany katalog ma trwały cache IndexedDB i nie wraca z API po każdy
 });
 
 test('moduły aktywnej podstrony panelu są pobierane równolegle po rdzeniu', async () => {
-  const [router, responsive] = await Promise.all([readFile('src/frontend/06-router-and-storefront.js', 'utf8'), readFile('src/frontend/08a-admin-responsive-layout.js', 'utf8')]);
+  const [router, responsive] = await Promise.all([readFile('assets/app.js', 'utf8'), readFile('src/frontend/08a-admin-responsive-layout.js', 'utf8')]);
   assert.match(router, /const core=modules\.includes\("core"\)\?zaladujAdminModul\("core",version\)/);
   assert.match(router, /Promise\.all\(modules\.filter\(module=>module!=="core"\)\.map\(module=>zaladujAdminModul\(module,version\)\)\)/);
   assert.doesNotMatch(router, /modules\.reduce\(\(chain,module\)=>chain\.then/);
@@ -77,16 +77,16 @@ test('moduły aktywnej podstrony panelu są pobierane równolegle po rdzeniu', a
 });
 
 test('lista asortymentu nie ładuje agenta, magazynu ani narzędzi katalogowych', async () => {
-  const router = await readFile('src/frontend/06-router-and-storefront.js', 'utf8');
+  const router = await readFile('assets/app.js', 'utf8');
   assert.match(router, /t==="\/admin\/asortyment"\|\|t==="\/admin\/asortyment\/produkty"\)add\("commerce","inventory"\)/);
   assert.match(router, /t\.startsWith\("\/admin\/produkty\/edytuj\/"\).*add\("agent","commerce","inventory"\)/);
 });
 
 test('lekkie podstrony lokalizacji i QR nie uruchamiają Allegro, Agenta ani całego edytora', async () => {
   const [router, warehouse, catalog] = await Promise.all([
-    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
-    readFile('src/frontend/12-warehouse-views.js', 'utf8'),
-    readFile('src/frontend/05-catalog-inventory.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
+    readFile('assets/admin.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
   ]);
   assert.match(router, /\["\/admin\/magazyn\/lokalizacje","\/admin\/magazyn\/etykiety-qr"\]\.includes\(t\)\)add\("warehouse"\)/);
   assert.match(router, /t==="\/admin\/magazyn\/ruchy"\)add\("warehouse","inventory"\)/);
@@ -115,7 +115,7 @@ test('ciężkie podstrony magazynu są budowane wyłącznie dla aktywnej karty',
 
 test('duży katalog renderuje produkty progresywnie zamiast układać setki kart naraz', async () => {
   const [inventory, index] = await Promise.all([
-    readFile('src/frontend/12-warehouse-views.js', 'utf8'),
+    readFile('assets/admin.js', 'utf8'),
     readFile('src/frontend/12-assortment-index.js', 'utf8'),
   ]);
   assert.match(inventory, /const ASORTYMENT_PARTIA_KART=10/);
@@ -135,8 +135,8 @@ test('duży katalog renderuje produkty progresywnie zamiast układać setki kart
 
 test('główne wyszukiwarki nie przebudowują strony po każdej literze', async () => {
   const sources = await Promise.all([
-    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
-    readFile('src/frontend/07-admin-shipping.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
     readFile('assets/admin.js', 'utf8'),
     readFile('assets/admin.js', 'utf8'),
   ]);

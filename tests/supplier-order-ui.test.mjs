@@ -9,9 +9,9 @@ const source = (await Promise.all([
   '10-agent-ai-command-center.js',
   '10-agent-ai-admin-workspace.js',
 ].map((file)=>readFile(new URL(`../src/frontend/${file}`, import.meta.url), 'utf8')))).join('\n');
-const routerSource = await readFile(new URL('../src/frontend/06-router-and-storefront.js', import.meta.url), 'utf8');
+const routerSource = await readFile(new URL('../assets/app.js', import.meta.url), 'utf8');
 const cloudSource = await readFile(new URL('../src/frontend/03-cloud-sync.js', import.meta.url), 'utf8');
-const shippingSource = await readFile(new URL('../src/frontend/07-admin-shipping.js', import.meta.url), 'utf8');
+const shippingSource = await readFile(new URL('../assets/app.js', import.meta.url), 'utf8');
 const ordersSource = (await Promise.all([
   '11-allegro-procurement-actions.js',
   '11-allegro-and-orders.js',

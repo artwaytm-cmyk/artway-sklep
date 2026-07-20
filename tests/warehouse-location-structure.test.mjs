@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
-const core = await readFile('src/frontend/05-catalog-inventory.js', 'utf8');
+const core = await readFile('assets/app.js', 'utf8');
 const ui = await readFile('src/frontend/10-warehouse-locations.js', 'utf8');
 const view = await readFile('assets/admin.js', 'utf8');
 const styles = await readFile('src/styles/20-warehouse-locations.css', 'utf8');

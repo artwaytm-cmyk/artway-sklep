@@ -1838,6 +1838,7 @@ async function usunKopieGrupyProduktuTrwale(groupKey){
 }
 /* ── Magazyn ── */
 const LIMIT_POTWIERDZENIA_DOSTEPNOSCI = 5;
+
 function stanProduktu(p){ return (typeof p.stan==="number" && p.stan>=0) ? p.stan : null; }   // null = bez limitu
 function produktMaCeneSprzedazy(p){ return Number(p?.cena)>0; }
 function wpisDostepnosciProduktu(id){
@@ -2284,6 +2285,7 @@ function planZatowarowania(){
   planZatowarowania._cache={revision,produkty:produktyLista,value};return value;
 }
 function potrzebyZatowarowania(){ return planZatowarowania().filter(x=>Number(x.ilosc)>0); }
+
 function zapiszHistorieAgenta(typ, opis, dane={}){
   const rec={id:"AI-"+Date.now().toString(36),typ,opis,data:new Date().toISOString(),dataTxt:new Date().toLocaleString("pl-PL"),operator:sesja?.email||"administrator",dane};
   agentAIHistoria=[rec,...(Array.isArray(agentAIHistoria)?agentAIHistoria:[])].slice(0,500);
@@ -2619,6 +2621,7 @@ async function agentAIWypelnijNowyProduktZLinku(id,candidateIndex=null){
     location.hash="#/admin/produkty/dodaj?agent=1";
   }catch(e){toast("⚠️ Przygotowanie produktu: "+(e.message||e));}
 }
+
 function zapiszRuchMagazynowy(ruch){
   const p=produktMagazynowy(ruch.produktId);
   const rec={
@@ -3119,6 +3122,7 @@ window.addEventListener("hashchange",()=>{if(typeof adminZarejestrujTrase==="fun
 window.addEventListener("popstate",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 
 /* ═══════════ WIDOK: SKLEP (strona główna) ═══════════ */
+
 function ikonaKategorii(nazwa){
   const mapa = {"Elektronika":"🎧","Dom i ogród":"🏡","Narzędzia":"🧰","Odzież":"🧥","Sport":"🏋️"};
   return mapa[nazwa] || "📦";
@@ -3339,6 +3343,7 @@ function widokSklep(){
   </section>`;
   return awaryjnyNaglowekGlowny+widoczneSekcje.map(id => SEKCJE[id] ? SEKCJE[id]() : "").join("\n");
 }
+
 function rysujChipy(){
   const c = $("chips"); if(!c) return;
   const kats = ["Wszystkie", ...wszystkieKategorie()];
@@ -3620,6 +3625,7 @@ function dodajIlosc(id){
 function pokazZdjecie(src){ const g=$("glowneZdjecie"); if(g) g.src=src; }
 
 /* ═══════════ WIDOK: LOGOWANIE / REJESTRACJA ═══════════ */
+
 function widokLogowanie(){
   if(sesja) { location.hash="#/konto"; return ""; }
   const us=ustawieniaPodstrony("logowanie");
@@ -3874,6 +3880,7 @@ async function usunMojeZamowienie(nr){
 }
 
 /* ═══════════ WIDOK: ULUBIONE ═══════════ */
+
 function widokUlubione(){
   if(jestAdmin()) return `<div class="page"><div class="panel auth-box"><h1>🛡️ Konto administratora</h1><p>Lista ulubionych jest przeznaczona dla kont klientów.</p><p style="margin-top:1rem"><a class="btn" href="#/admin">Otwórz panel administratora</a></p></div></div>`;
   if(ustawieniaPodstrony("ulubione").widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
@@ -4267,6 +4274,7 @@ function drukujZamowienie(nr){
 }
 /* Centrum wysyłek. Dane i etykieta robocza działają lokalnie.
    Oficjalne etykiety, webhooki i automatyczna poczta wymagają backendu. */
+
 function nazwaPrzewoznika(id){ return PRZEWOZNICY[id]?.nazwa || (id?String(id):"nie wybrano"); }
 function daneWysylki(z){
   return {
@@ -4629,6 +4637,7 @@ function zapiszUstawieniaWysylki(e){
 }
 let stanBramki={sprawdzono:false,online:false,configured:false,ready:false,authenticated:false,error:"",organizations:[],email:{configured:false,authenticated:false,provider:null},store:{configured:false,writable:false,orders:0,users:0},inpost:{configured:false,authenticated:false,geowidgetConfigured:false,env:"production"}};
 let ostatniTestIntegracjiSerwerowych=0, testIntegracjiWToku=false;
+
 function urlBramki(action,parametry={}){
   const baza=String(ustawieniaWysylki().apiEndpoint||"api/index.php").trim();
   const url=new URL(baza,location.href);
@@ -5084,6 +5093,7 @@ function zastosujRegulyWysylek(){
   toast(ile?`Przypisano ${ile} zleceń ✅`:"Brak zleceń do przypisania"); renderuj();
 }
 let tabWysylek="zlecenia", filtrWysylek="aktywne", szukajWysylek="";
+
 function nawigacjaWysylek(aktywna="zlecenia"){
   const aktywne=pobierzZamowienia().filter(z=>!["dostarczona","anulowana","zwrot"].includes(etapWysylki(z))).length,problemy=pobierzZamowienia().filter(z=>etapWysylki(z)==="problem").length;
   return adminSubnavHTML([

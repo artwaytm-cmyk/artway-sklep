@@ -4,8 +4,8 @@ import { readFile } from 'node:fs/promises';
 
 test('cały panel korzysta z pełnego schematu podstron bez zmiany kolorystyki sklepu', async () => {
   const [shell, catalog, pattern, commerce, build] = await Promise.all([
-    readFile('src/frontend/07-admin-shipping.js', 'utf8'),
-    readFile('src/frontend/12-warehouse-views.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
+    readFile('assets/admin.js', 'utf8'),
     readFile('src/styles/31-admin-page-pattern.css', 'utf8'),
     readFile('src/styles/29-commerce-catalog-actions.css', 'utf8'),
     readFile('scripts/build-assets.mjs', 'utf8'),

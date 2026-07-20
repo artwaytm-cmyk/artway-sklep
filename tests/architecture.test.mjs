@@ -44,11 +44,21 @@ test('moduły źródłowe mają kontrolowany rozmiar i jednoznaczną kolejność
 
 test('główny backend pozostaje koordynatorem z kontrolowanym budżetem migracyjnym', async () => {
   const file = await stat('netlify/functions/lib/store-app.mjs');
+  assert.ok(file.size <= B.backendCoordinator.targetBytes, `store-app.mjs wrócił ponad cel ${B.backendCoordinator.targetBytes} B; trasy muszą pozostać w modułach domenowych`);
   assert.ok(file.size <= B.backendCoordinator.maxBytes, `store-app.mjs urósł do ${file.size} B; wydziel kolejną domenę`);
   const storeLines = physicalLineCount(await readFile('netlify/functions/lib/store-app.mjs', 'utf8'));
+  assert.ok(storeLines <= B.backendCoordinator.targetLines, `store-app.mjs ma ${storeLines} linii i przekroczył osiągnięty cel koordynatora`);
   assert.ok(storeLines <= B.backendCoordinator.maxLines, `store-app.mjs ma ${storeLines} fizycznych linii; wydziel kolejną domenę`);
   const catalogQuality = await stat('netlify/functions/lib/domain/catalog-quality.mjs');
   assert.ok(catalogQuality.size < 80_000, `catalog-quality.mjs urósł do ${catalogQuality.size} B; rozdziel audyt od korekt`);
+});
+
+test('raport architektury ujawnia pełną kolejkę podziału bez limitu top 5', async () => {
+  const report = await readFile('scripts/report-architecture-budgets.mjs', 'utf8');
+  assert.match(report, /const sourceWarnings = sourceRisks/);
+  assert.match(report, /for \(const source of sourceWarnings\)/);
+  assert.doesNotMatch(report, /sourceRisks[\s\S]{0,200}\.slice\(0,\s*5\)/);
+  assert.match(report, /Raport pokazuje wszystkie, bez skracania listy/);
 });
 
 test('wydzielone domeny pozostają małe i są częścią właściwego pakietu', async () => {
@@ -75,6 +85,10 @@ test('wydzielone domeny pozostają małe i są częścią właściwego pakietu',
     assert.ok(lines <= B.source.focusedFrontend.maxLines, `${source} ma ${lines} linii; przekroczono twardy budżet domeny panelu`);
   }
   for (const source of [
+    'netlify/functions/lib/system-route.mjs',
+    'netlify/functions/lib/store-data-route.mjs',
+    'netlify/functions/lib/inpost-route.mjs',
+    'netlify/functions/lib/infakt-route.mjs',
     'netlify/functions/lib/email-service.mjs',
     'netlify/functions/lib/inpost-service.mjs',
     'netlify/functions/lib/paynow-service.mjs',

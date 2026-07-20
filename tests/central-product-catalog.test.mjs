@@ -74,7 +74,7 @@ test('backend udostępnia stronicowaną kartotekę, pojedynczy produkt, synchron
 
 test('Asortyment korzysta z paginacji serwerowej i zachowuje tryb awaryjny', async () => {
   const index = await readFile('src/frontend/12-assortment-index.js', 'utf8');
-  const view = await readFile('src/frontend/12-warehouse-views.js', 'utf8');
+  const view = await readFile('assets/admin.js', 'utf8');
   assert.match(index, /chmura\("product-catalog-query"/);
   assert.match(index, /asortymentCentralnyCache/);
   assert.match(index, /asortymentCentralnyWylaczonyDo/);

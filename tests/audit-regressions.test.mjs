@@ -41,7 +41,7 @@ test('ciężkie rejestry Allegro pozostają na serwerze zamiast w localStorage',
 
 test('promocja ma jedno źródło prawdy i sklep posiada manifest', () => {
   const config = read('src/frontend/01-config-and-catalog.js');
-  const storefront = read('src/frontend/06-router-and-storefront.js');
+  const storefront = read('assets/app.js');
   const html = read('index.html');
   const manifest = JSON.parse(read('manifest.webmanifest'));
   assert.match(config, /function glownaPromocja\(/);
@@ -52,7 +52,7 @@ test('promocja ma jedno źródło prawdy i sklep posiada manifest', () => {
 });
 
 test('katalog produktów używa wersjonowanej pamięci IndexedDB i odrzuca uszkodzony plik', () => {
-  const catalog = read('src/frontend/05-catalog-inventory.js');
+  const catalog = read('assets/app.js');
   assert.match(catalog, /products\.json\?v=/);
   assert.match(catalog, /PRODUKTY_BAZOWE_CACHE_KEY="base-products-v2"/);
   assert.match(catalog, /cache:"no-cache"/);

@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 test('strona główna ma osobne centrum całej oferty i wybór działu pod produktami', async () => {
   const [config, storefront, admin, navigation] = await Promise.all([
     readFile('src/frontend/01-config-and-catalog.js', 'utf8'),
-    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
     readFile('src/frontend/15a-home-promotions-workspace.js', 'utf8'),
     readFile('src/frontend/08-admin-navigation.js', 'utf8'),
   ]);
@@ -24,7 +24,7 @@ test('kreator bannerów oferuje szablony, harmonogram i widoczność urządzeń'
 test('banner studio obsługuje wszystkie typy, miejsca, rozmiary i wersję mobilną', async () => {
   const [config, storefront, admin, styles] = await Promise.all([
     readFile('src/frontend/01-config-and-catalog.js', 'utf8'),
-    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
     readFile('src/frontend/15a-home-promotions-workspace.js', 'utf8'),
     readFile('src/styles/04-home-and-diagnostics.css', 'utf8'),
   ]);
@@ -63,7 +63,7 @@ test('wszystkie bannery mają wspólne studio, własne wzory i przypisanie grafi
 test('studio ikon AI obsługuje grupy menu, katalogi i podstrony', async () => {
   const [studio, storefront, navigation] = await Promise.all([
     readFile('src/frontend/15b-banner-icon-studio.js', 'utf8'),
-    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
     readFile('src/frontend/08-admin-navigation.js', 'utf8'),
   ]);
   for (const marker of ['widokAdminIkonyAI', 'uruchomGeneratorIkonyAI', 'przypiszIkoneAI', 'category:', 'subpage:', 'group:']) assert.ok(studio.includes(marker), marker);
@@ -80,7 +80,7 @@ test('usunięte kody rabatowe nie wracają z konfiguracji starszego modułu', as
 test('studio kampanii pro zapisuje rzeczywiste parametry kompozycji i pokazuje trzy urządzenia', async () => {
   const [studio, storefront, styles] = await Promise.all([
     readFile('src/frontend/15c-campaign-studio-pro.js', 'utf8'),
-    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('assets/app.js', 'utf8'),
     readFile('src/styles/24-campaign-studio-pro.css', 'utf8'),
   ]);
   for (const marker of ['Reżyser kampanii AI', 'format', 'composition', 'palette', 'focalX', 'focalY', 'szerokoscTresci', "bannerProDevice(this,'mobile')"]) assert.ok(studio.includes(marker), marker);
