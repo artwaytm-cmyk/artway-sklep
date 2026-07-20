@@ -236,6 +236,7 @@ function adminPodlaczLadowaniePoZamiarze(version){
 }
 function zaplanujWstepneLadowaniePanelu(version){
   if(typeof jestAdmin!=="function"||!jestAdmin())return;
+  void adminZapewnijTrwalaPamiec();
   adminPodlaczLadowaniePoZamiarze(version);
 }
 const ADMIN_HISTORIA_KLUCZ="artway_admin_historia_tras_v1";
@@ -245,6 +246,30 @@ function adminZarejestrujTrase(next=trasa()){const current=String(next||""),prev
 function adminPoprzedniaTrasa(){const current=trasa();return [...adminHistoriaTras].reverse().find(path=>String(path).startsWith("/admin")&&path!==current)||"";}
 function adminWrocDoPoprzedniejStrony(){const current=trasa();let target="";while(adminHistoriaTras.length&&!target){const candidate=String(adminHistoriaTras.pop()||"");if(candidate.startsWith("/admin")&&candidate!==current)target=candidate;}adminZapiszHistorieTras();if(!target){toast("Nie ma wcześniejszej strony panelu w tej sesji");return false;}adminNawigacjaCofania=true;location.hash="#"+target;return false;}
 function adminAktualizujPrzyciskHistorii(root=document){const button=root?.querySelector?.(".admin-history-back");if(!button)return;const previous=adminPoprzedniaTrasa();button.disabled=!previous;button.title=previous?`Wróć do: ${previous}`:"Brak wcześniejszej strony panelu";}
+/* Budżet pamięci widoków panelu jest większy na mocnych urządzeniach, ale na
+   telefonie nadal ma bezpieczny limit. Rewizje domen nie kasują niezwiązanych kart. */
+const ADMIN_PAMIEC_URZADZENIA_GB=Math.max(2,Number(navigator.deviceMemory)||4);
+const ADMIN_CACHE_PODSTRON_LIMIT=ADMIN_PAMIEC_URZADZENIA_GB>=8?16:12;
+const ADMIN_CACHE_PODSTRON_MAX_WEZLOW=ADMIN_PAMIEC_URZADZENIA_GB>=8?18000:14000;
+const ADMIN_CACHE_PODSTRON_MAX_LACZNIE=ADMIN_PAMIEC_URZADZENIA_GB>=8?64000:42000;
+let adminPamiecTrwalaPromise=null,adminPamiecTrwalaStan={sprawdzono:false,trwala:false,quota:0,usage:0};
+function adminZapewnijTrwalaPamiec(){
+  if(adminPamiecTrwalaPromise)return adminPamiecTrwalaPromise;
+  adminPamiecTrwalaPromise=(async()=>{if(!navigator.storage)return adminPamiecTrwalaStan;try{let trwala=typeof navigator.storage.persisted==="function"?await navigator.storage.persisted():false;if(!trwala&&typeof navigator.storage.persist==="function")trwala=await navigator.storage.persist();const estimate=typeof navigator.storage.estimate==="function"?await navigator.storage.estimate():{};adminPamiecTrwalaStan={sprawdzono:true,trwala:!!trwala,quota:Number(estimate.quota)||0,usage:Number(estimate.usage)||0};}catch(error){adminPamiecTrwalaStan={...adminPamiecTrwalaStan,sprawdzono:true};}return adminPamiecTrwalaStan;})();return adminPamiecTrwalaPromise;
+}
+function adminDomenyCacheDlaTrasy(route=""){
+  const value=String(route||"");
+  if(value.startsWith("/admin/allegro"))return ["allegro","catalog","warehouse"];
+  if(value.startsWith("/admin/magazyn"))return ["warehouse","catalog","orders","allegro","agent"];
+  if(value.startsWith("/admin/asortyment")||value.startsWith("/admin/produkty")||value.startsWith("/admin/kategorie")||value.startsWith("/admin/mapowanie"))return ["catalog","warehouse","allegro"];
+  if(value.startsWith("/admin/zamowien")||value.startsWith("/admin/wysylki")||value.startsWith("/admin/klient"))return ["orders","warehouse","catalog"];
+  if(value.startsWith("/admin/agent-ai"))return ["agent","catalog","warehouse","allegro","orders"];
+  if(value.startsWith("/admin/infakt"))return ["infakt","catalog","orders"];
+  if(value.startsWith("/admin/seo"))return ["seo","catalog"];
+  if(value.startsWith("/admin/personalizacja"))return ["settings","catalog"];
+  return Object.keys(typeof adminRewizjeDomenCache==="object"?adminRewizjeDomenCache:{});
+}
+function adminSygnaturaCacheTrasy(route=""){return adminDomenyCacheDlaTrasy(route).map(domain=>`${domain}:${Number(adminRewizjeDomenCache?.[domain])||0}`).join("|");}
 
 function agentAINormalizuj(s=""){
   const mapa={"ą":"a","ć":"c","ę":"e","ł":"l","ń":"n","ó":"o","ś":"s","ź":"z","ż":"z"};
@@ -3280,10 +3305,37 @@ async function adminMasowoZmienStatusZamowien(){
   }
   toast(`✅ Zmieniono ${zmiany.length} zamówień na „${status}”${bledy?` • błędy synchronizacji: ${bledy}`:""}`);
 }
+const ALLEGRO_TRWALY_CACHE_KEY="allegro-offers-and-mappings-v2";
+const ALLEGRO_TRWALY_CACHE_MAX_AGE_MS=7*24*60*60*1000;
+let allegroTrwalyCacheOdtworzony=false,allegroTrwalyCachePromise=null,allegroTrwalyCacheTimer=null;
 function allegroZapiszCache(){
   for(const klucz of ["artway_allegro_zamowienia_cache","artway_allegro_oferty_cache","artway_allegro_mapowania_cache","artway_allegro_komunikacja_cache"]){
     try{localStorage.removeItem(klucz);}catch(e){}
   }
+  if(typeof chmuraRuntimeCacheZapisz!=="function"||typeof jestAdmin!=="function"||!jestAdmin())return;
+  clearTimeout(allegroTrwalyCacheTimer);allegroTrwalyCacheTimer=setTimeout(()=>{
+    const safeState={configured:!!allegroStan.configured,connected:!!allegroStan.connected,env:allegroStan.env||"production",offerDefaultsAudit:allegroStan.offerDefaultsAudit||{},catalogMaintenance:allegroStan.catalogMaintenance||{},complianceAudit:allegroStan.complianceAudit||{},offerSyncState:allegroStan.offerSyncState||{},offerSettings:allegroStan.offerSettings||{}};
+    void chmuraRuntimeCacheZapisz(ALLEGRO_TRWALY_CACHE_KEY,{schema:2,savedAt:Date.now(),offers:Array.isArray(allegroOferty)?allegroOferty:[],mappings:allegroMapowania&&typeof allegroMapowania==="object"?allegroMapowania:{},summary:allegroPodsumowanie||{},allegro:safeState});
+  },350);
+}
+async function allegroOdtworzTrwalyCache(){
+  if(allegroTrwalyCacheOdtworzony)return false;
+  if(allegroTrwalyCachePromise)return allegroTrwalyCachePromise;
+  allegroTrwalyCachePromise=(async()=>{
+    try{
+      if(typeof chmuraRuntimeCacheOdczytaj!=="function"||typeof jestAdmin!=="function"||!jestAdmin())return false;
+      const cache=await chmuraRuntimeCacheOdczytaj(ALLEGRO_TRWALY_CACHE_KEY),savedAt=Number(cache?.savedAt)||0;
+      if(!cache||cache.schema!==2||!savedAt||Date.now()-savedAt>ALLEGRO_TRWALY_CACHE_MAX_AGE_MS)return false;
+      if(Array.isArray(cache.offers))allegroOferty=cache.offers;
+      if(cache.mappings&&typeof cache.mappings==="object")allegroMapowania=cache.mappings;
+      if(cache.summary&&typeof cache.summary==="object")allegroPodsumowanie={...allegroPodsumowanie,...cache.summary};
+      if(cache.allegro&&typeof cache.allegro==="object")allegroStan={...allegroStan,...cache.allegro,sprawdzono:true,error:"",cacheSavedAt:savedAt};
+      allegroDaneZaladowane={...allegroDaneZaladowane,summary:true,offers:true,config:true};
+      ["summary","offers","config"].forEach(scope=>allegroDaneOdczytAt[scope]=savedAt);return true;
+    }catch(error){return false;}
+    finally{allegroTrwalyCacheOdtworzony=true;allegroTrwalyCachePromise=null;}
+  })();
+  return allegroTrwalyCachePromise;
 }
 function allegroProduktIdDlaOferty(offerId){
   const rec=(allegroMapowania||{})[String(offerId)];
@@ -3348,6 +3400,7 @@ function allegroWersjaSerwerowaZakresu(zakres="summary"){
   return `${orderVersion}|${offerVersion}|${communication.updated_at||""}|${configVersion}`;
 }
 function allegroLadujJesliTrzeba(scope="summary"){
+  if(!allegroTrwalyCacheOdtworzony){const requested=scope;void allegroOdtworzTrwalyCache().then(restored=>{if(restored)renderuj();allegroLadujJesliTrzeba(requested);});return;}
   const zakres=allegroZakresDanych(scope),zaladowany=allegroZakresZaladowany(zakres),ostatni=zakres==="all"?Math.min(...["orders","offers","config"].map(k=>Number(allegroDaneOdczytAt[k]||0))):Number(allegroDaneOdczytAt[zakres]||0);
   if(allegroDaneObietnice.has(zakres)||allegroDaneLadowane.has(zakres)||(zaladowany&&Date.now()-ostatni<ALLEGRO_DANE_TTL_MS))return;
   if(!zaladowany)allegroStan={...allegroStan,ladowanie:true};
@@ -3377,7 +3430,7 @@ async function allegroWczytajDane(cicho=false,odswiezWidok=true,scope="all"){
       if(location.hash==="#/admin/allegro/oferty"&&allegroStan.offerSettings?.autoMapping!==false)setTimeout(()=>allegroUruchomAutomatyczneMapowanie(true),0);
       if(!cicho)toast("Dane Allegro odświeżone");
       const changed=!byloZaladowane||przed!==allegroWersjaSerwerowaZakresu(zakres);
-      if(changed&&typeof uniewaznijCachePodstronAdmina==="function")uniewaznijCachePodstronAdmina();
+      if(changed&&typeof uniewaznijCachePodstronAdmina==="function")uniewaznijCachePodstronAdmina("allegro");
       return {ok:true,changed};
     }catch(e){
       allegroStan={...allegroStan,sprawdzono:true,error:e.message||String(e)};

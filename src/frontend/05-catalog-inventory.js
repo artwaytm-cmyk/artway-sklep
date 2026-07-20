@@ -1017,22 +1017,32 @@ function moderujOpinie(id, akcja){
   loguj("info",`Moderacja opinii ${id}: ${akcja}`);
   renderuj();
 }
+const PRODUKTY_BAZOWE_CACHE_KEY="base-products-v2";
+const PRODUKTY_BAZOWE_CACHE_TTL_MS=6*60*60*1000;
+function walidujBazoweProdukty(dane){
+  if(!Array.isArray(dane))throw new Error("products.json nie zawiera tablicy produktów");
+  const poprawne=dane.filter(p=>p&&p.id!==undefined&&String(p.nazwa||"").trim()),unikalne=new Set(poprawne.map(p=>String(p.id)));
+  if(poprawne.length!==dane.length||unikalne.size!==poprawne.length)throw new Error("products.json zawiera niepoprawne lub powtórzone rekordy");
+  return poprawne;
+}
 async function pobierzBazoweProdukty(){
+  const wersja=document.querySelector('meta[name="artway-version"]')?.content||"dev",teraz=Date.now();
+  let cache=null,cacheProducts=null;
+  try{cache=typeof chmuraRuntimeCacheOdczytaj==="function"?await chmuraRuntimeCacheOdczytaj(PRODUKTY_BAZOWE_CACHE_KEY):null;cacheProducts=cache?.products?walidujBazoweProdukty(cache.products):null;}catch(e){cache=null;cacheProducts=null;}
+  if(cacheProducts){prodBazowe=cacheProducts;zrodloProduktow="json";}
+  if(cacheProducts&&String(cache.version||"")===wersja&&teraz-Number(cache.savedAt||0)<PRODUKTY_BAZOWE_CACHE_TTL_MS)return true;
   try{
-    const wersja = document.querySelector('meta[name="artway-version"]')?.content || String(Date.now());
-    const r = await fetch(`/products.json?v=${encodeURIComponent(wersja)}`, {cache:"no-store"});
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    const dane = await r.json();
-    if(!Array.isArray(dane)) throw new Error("products.json nie zawiera tablicy produktów");
-    const poprawne = dane.filter(p=>p&&p.id!==undefined&&String(p.nazwa||"").trim());
-    const unikalne = new Set(poprawne.map(p=>String(p.id)));
-    if(poprawne.length!==dane.length||unikalne.size!==poprawne.length) throw new Error("products.json zawiera niepoprawne lub powtórzone rekordy");
-    prodBazowe = poprawne;
-    zrodloProduktow = "json";
+    const headers={};if(cache?.etag)headers["If-None-Match"]=String(cache.etag);if(cache?.lastModified)headers["If-Modified-Since"]=String(cache.lastModified);
+    const r=await fetch(`/products.json?v=${encodeURIComponent(wersja)}`,{cache:"no-cache",headers});
+    if(r.status===304&&cacheProducts){await chmuraRuntimeCacheZapisz(PRODUKTY_BAZOWE_CACHE_KEY,{...cache,version:wersja,savedAt:teraz});return true;}
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const poprawne=walidujBazoweProdukty(await r.json());prodBazowe=poprawne;zrodloProduktow="json";
+    if(typeof chmuraRuntimeCacheZapisz==="function")await chmuraRuntimeCacheZapisz(PRODUKTY_BAZOWE_CACHE_KEY,{version:wersja,count:poprawne.length,products:poprawne,etag:r.headers.get("etag")||"",lastModified:r.headers.get("last-modified")||"",savedAt:teraz});
+    return true;
   }catch(e){
-    prodBazowe = PRODUKTY_ZAPASOWE;
-    zrodloProduktow = "zapasowe";
-    loguj("ostrzezenie","products.json niedostępny — katalog demonstracyjny został zablokowany, aby nie pokazywać nieaktualnych produktów.");
+    if(cacheProducts){loguj("info","Użyto trwałej pamięci katalogu; odświeżenie products.json zostanie ponowione później.");return true;}
+    prodBazowe=PRODUKTY_ZAPASOWE;zrodloProduktow="zapasowe";
+    loguj("ostrzezenie","products.json niedostępny — katalog demonstracyjny został zablokowany, aby nie pokazywać nieaktualnych produktów.");return false;
   }
 }
 function finalizujWczytanieProduktow(){

@@ -117,6 +117,7 @@ function adminPodlaczLadowaniePoZamiarze(version){
 }
 function zaplanujWstepneLadowaniePanelu(version){
   if(typeof jestAdmin!=="function"||!jestAdmin())return;
+  void adminZapewnijTrwalaPamiec();
   adminPodlaczLadowaniePoZamiarze(version);
 }
 const ADMIN_HISTORIA_KLUCZ="artway_admin_historia_tras_v1";
@@ -126,3 +127,27 @@ function adminZarejestrujTrase(next=trasa()){const current=String(next||""),prev
 function adminPoprzedniaTrasa(){const current=trasa();return [...adminHistoriaTras].reverse().find(path=>String(path).startsWith("/admin")&&path!==current)||"";}
 function adminWrocDoPoprzedniejStrony(){const current=trasa();let target="";while(adminHistoriaTras.length&&!target){const candidate=String(adminHistoriaTras.pop()||"");if(candidate.startsWith("/admin")&&candidate!==current)target=candidate;}adminZapiszHistorieTras();if(!target){toast("Nie ma wcześniejszej strony panelu w tej sesji");return false;}adminNawigacjaCofania=true;location.hash="#"+target;return false;}
 function adminAktualizujPrzyciskHistorii(root=document){const button=root?.querySelector?.(".admin-history-back");if(!button)return;const previous=adminPoprzedniaTrasa();button.disabled=!previous;button.title=previous?`Wróć do: ${previous}`:"Brak wcześniejszej strony panelu";}
+/* Budżet pamięci widoków panelu jest większy na mocnych urządzeniach, ale na
+   telefonie nadal ma bezpieczny limit. Rewizje domen nie kasują niezwiązanych kart. */
+const ADMIN_PAMIEC_URZADZENIA_GB=Math.max(2,Number(navigator.deviceMemory)||4);
+const ADMIN_CACHE_PODSTRON_LIMIT=ADMIN_PAMIEC_URZADZENIA_GB>=8?16:12;
+const ADMIN_CACHE_PODSTRON_MAX_WEZLOW=ADMIN_PAMIEC_URZADZENIA_GB>=8?18000:14000;
+const ADMIN_CACHE_PODSTRON_MAX_LACZNIE=ADMIN_PAMIEC_URZADZENIA_GB>=8?64000:42000;
+let adminPamiecTrwalaPromise=null,adminPamiecTrwalaStan={sprawdzono:false,trwala:false,quota:0,usage:0};
+function adminZapewnijTrwalaPamiec(){
+  if(adminPamiecTrwalaPromise)return adminPamiecTrwalaPromise;
+  adminPamiecTrwalaPromise=(async()=>{if(!navigator.storage)return adminPamiecTrwalaStan;try{let trwala=typeof navigator.storage.persisted==="function"?await navigator.storage.persisted():false;if(!trwala&&typeof navigator.storage.persist==="function")trwala=await navigator.storage.persist();const estimate=typeof navigator.storage.estimate==="function"?await navigator.storage.estimate():{};adminPamiecTrwalaStan={sprawdzono:true,trwala:!!trwala,quota:Number(estimate.quota)||0,usage:Number(estimate.usage)||0};}catch(error){adminPamiecTrwalaStan={...adminPamiecTrwalaStan,sprawdzono:true};}return adminPamiecTrwalaStan;})();return adminPamiecTrwalaPromise;
+}
+function adminDomenyCacheDlaTrasy(route=""){
+  const value=String(route||"");
+  if(value.startsWith("/admin/allegro"))return ["allegro","catalog","warehouse"];
+  if(value.startsWith("/admin/magazyn"))return ["warehouse","catalog","orders","allegro","agent"];
+  if(value.startsWith("/admin/asortyment")||value.startsWith("/admin/produkty")||value.startsWith("/admin/kategorie")||value.startsWith("/admin/mapowanie"))return ["catalog","warehouse","allegro"];
+  if(value.startsWith("/admin/zamowien")||value.startsWith("/admin/wysylki")||value.startsWith("/admin/klient"))return ["orders","warehouse","catalog"];
+  if(value.startsWith("/admin/agent-ai"))return ["agent","catalog","warehouse","allegro","orders"];
+  if(value.startsWith("/admin/infakt"))return ["infakt","catalog","orders"];
+  if(value.startsWith("/admin/seo"))return ["seo","catalog"];
+  if(value.startsWith("/admin/personalizacja"))return ["settings","catalog"];
+  return Object.keys(typeof adminRewizjeDomenCache==="object"?adminRewizjeDomenCache:{});
+}
+function adminSygnaturaCacheTrasy(route=""){return adminDomenyCacheDlaTrasy(route).map(domain=>`${domain}:${Number(adminRewizjeDomenCache?.[domain])||0}`).join("|");}

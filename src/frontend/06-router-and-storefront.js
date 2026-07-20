@@ -84,9 +84,6 @@ let renderowanieWidoku=false;
 let renderPonowniePoBiezacym=false;
 let renderTimerWpisywania=null;
 let renderFrameWpisywania=0;
-const ADMIN_CACHE_PODSTRON_LIMIT=8;
-const ADMIN_CACHE_PODSTRON_MAX_WEZLOW=12000;
-const ADMIN_CACHE_PODSTRON_MAX_LACZNIE=24000;
 function zaplanujRenderPoWpisaniu(opoznienie=180){
   clearTimeout(renderTimerWpisywania);
   if(renderFrameWpisywania)cancelAnimationFrame(renderFrameWpisywania);
@@ -109,7 +106,8 @@ function adminZapiszPodstroneWCache(root,route){
   if(nodes>ADMIN_CACHE_PODSTRON_MAX_WEZLOW)return false;
   adminCachePodstron.delete(route);
   workspace.remove();
-  adminCachePodstron.set(route,{workspace,nodes,header:shell.querySelector(":scope > .admin-tresc > .admin-workspace-header")?.cloneNode(true)||null,mobile:shell.querySelector(":scope > .admin-tresc > .admin-mobile-menu")?.cloneNode(true)||null,revision:adminRewizjaDanych,scrollY:window.scrollY||0,savedAt:Date.now()});
+  const domains=adminDomenyCacheDlaTrasy(route);
+  adminCachePodstron.set(route,{workspace,nodes,header:shell.querySelector(":scope > .admin-tresc > .admin-workspace-header")?.cloneNode(true)||null,mobile:shell.querySelector(":scope > .admin-tresc > .admin-mobile-menu")?.cloneNode(true)||null,domains,signature:adminSygnaturaCacheTrasy(route),scrollY:window.scrollY||0,savedAt:Date.now()});
   while(adminCachePodstron.size>ADMIN_CACHE_PODSTRON_LIMIT||adminLiczbaWezlowCache()>ADMIN_CACHE_PODSTRON_MAX_LACZNIE)adminCachePodstron.delete(adminCachePodstron.keys().next().value);
   return true;
 }
@@ -130,7 +128,7 @@ function adminAktualizujAktywnaNawigacje(shell,route){
 function adminPrzywrocPodstroneZCache(root,route){
   const entry=adminCachePodstron.get(route);if(!entry)return false;
   adminCachePodstron.delete(route);
-  if(entry.revision!==adminRewizjaDanych)return false;
+  if(entry.signature!==adminSygnaturaCacheTrasy(route))return false;
   const shell=root?.querySelector(":scope > .admin-page");if(!shell)return false;
   const container=adminKontenerTresci(shell),current=adminTrescBezposrednia(shell);if(!container)return false;
   if(current)current.replaceWith(entry.workspace);else container.appendChild(entry.workspace);

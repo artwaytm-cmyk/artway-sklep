@@ -47,12 +47,22 @@ function chmuraKatalogCacheBaza(){
   return chmuraKatalogCacheBazaPromise;
 }
 async function chmuraKatalogCacheOdczytaj(){
-  const db=await chmuraKatalogCacheBaza();if(!db)return null;
-  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readonly"),request=tx.objectStore(CHMURA_KATALOG_CACHE_STORE).get(CHMURA_KATALOG_CACHE_KEY);request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>resolve(null);}catch(e){resolve(null);}});
+  return chmuraRuntimeCacheOdczytaj(CHMURA_KATALOG_CACHE_KEY);
 }
 async function chmuraKatalogCacheZapisz(revision,products){
+  return chmuraRuntimeCacheZapisz(CHMURA_KATALOG_CACHE_KEY,{revision:String(revision||""),count:Array.isArray(products)?products.length:0,products:Array.isArray(products)?products:[],savedAt:Date.now()});
+}
+async function chmuraRuntimeCacheOdczytaj(key){
   const db=await chmuraKatalogCacheBaza();if(!db)return false;
-  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).put({revision:String(revision||""),count:Array.isArray(products)?products.length:0,products:Array.isArray(products)?products:[],savedAt:Date.now()},CHMURA_KATALOG_CACHE_KEY);tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readonly"),request=tx.objectStore(CHMURA_KATALOG_CACHE_STORE).get(String(key));request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>resolve(null);}catch(e){resolve(null);}});
+}
+async function chmuraRuntimeCacheZapisz(key,value){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).put(value,String(key));tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
+}
+async function chmuraRuntimeCacheUsun(key){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).delete(String(key));tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
 }
 async function chmuraPobierzKatalogImportowany(meta={},force=false){
   const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
@@ -336,11 +346,11 @@ function chmuraStatusHTML(){
   </div>`;
 }
 
-const KLUCZE_CIEZKICH_CACHE = [
+const KLUCZE_PRZESTARZALYCH_CACHE = [
   "artway_allegro_oferty_cache",
   "artway_allegro_zamowienia_cache",
-  "artway_allegro_komunikacja_cache",
-  "artway_produkty_katalog"
+  "artway_allegro_mapowania_cache",
+  "artway_allegro_komunikacja_cache"
 ];
 function rozmiarLokalnejPamieci(){
   let n=0;
@@ -349,9 +359,9 @@ function rozmiarLokalnejPamieci(){
 }
 function zwolnijPamiecPodreczna({wymus=false}={}){
   const przed=rozmiarLokalnejPamieci();
-  if(!wymus&&przed<3_500_000)return {przed,po:przed,usunieto:[]};
+  if(!wymus&&przed<7_500_000)return {przed,po:przed,usunieto:[]};
   const usunieto=[];
-  for(const klucz of KLUCZE_CIEZKICH_CACHE){
+  for(const klucz of KLUCZE_PRZESTARZALYCH_CACHE){
     try{if(localStorage.getItem(klucz)!==null){localStorage.removeItem(klucz);usunieto.push(klucz);}}catch(e){}
   }
   try{
@@ -365,6 +375,7 @@ function wczytajLS(klucz, domyslne){ try{ return JSON.parse(localStorage.getItem
 // wyłącznie dla danych biznesowych, nie dla kosmetycznych preferencji widoku.
 var adminRewizjaDanych = 0;
 var adminCachePodstron = new Map();
+var adminRewizjeDomenCache = {catalog:0,orders:0,warehouse:0,allegro:0,agent:0,infakt:0,seo:0,settings:0,system:0};
 const ADMIN_KLUCZE_WIDOKU = new Set([
   "artway_admin_menu_otwarta_v2","artway_admin_menu_kompaktowe_v1",
   "artway_produkty_na_stronie_admin","artway_produkty_gestosc_admin",
@@ -374,9 +385,27 @@ function kluczZmieniaDaneAdmina(klucz=""){
   if(ADMIN_KLUCZE_WIDOKU.has(klucz))return false;
   return ["artway_ustawienia","artway_produkty","artway_zamowienia","artway_uzytkownicy","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn","artway_faktury","artway_agent","artway_producenci","artway_opinie","artway_kosz","artway_seo"].some(prefix=>String(klucz).startsWith(prefix));
 }
-function uniewaznijCachePodstronAdmina(){
+function adminDomenaCacheDlaKlucza(klucz=""){
+  const value=String(klucz||"");
+  if(value==="allegro"||value.startsWith("artway_allegro"))return "allegro";
+  if(value.startsWith("artway_zamowienia")||value.startsWith("artway_uzytkownicy"))return "orders";
+  if(value.startsWith("artway_stany")||value.startsWith("artway_dostepnosc")||value.startsWith("artway_ruchy_magazynowe")||value.startsWith("artway_magazyn")||value.startsWith("artway_producenci"))return "warehouse";
+  if(value.startsWith("artway_agent"))return "agent";
+  if(value.startsWith("artway_faktury")||value.startsWith("artway_infakt"))return "infakt";
+  if(value.startsWith("artway_seo"))return "seo";
+  if(value.startsWith("artway_ustawienia"))return "settings";
+  if(value.startsWith("artway_produkty")||value.startsWith("artway_opinie")||value.startsWith("artway_kosz"))return "catalog";
+  return "system";
+}
+function uniewaznijCachePodstronAdmina(zakres="all"){
   adminRewizjaDanych++;
-  adminCachePodstron.clear();
+  const domena=zakres==="all"||!zakres?"all":adminDomenaCacheDlaKlucza(zakres);
+  if(domena==="all"){
+    Object.keys(adminRewizjeDomenCache).forEach(key=>adminRewizjeDomenCache[key]++);adminCachePodstron.clear();
+  }else{
+    adminRewizjeDomenCache[domena]=(Number(adminRewizjeDomenCache[domena])||0)+1;
+    for(const [route,entry] of adminCachePodstron)if((entry?.domains||[]).includes(domena))adminCachePodstron.delete(route);
+  }
   if(typeof uniewaznijAdminMenuStatCache==="function")uniewaznijAdminMenuStatCache();
 }
 function zapiszLS(klucz, dane){
@@ -392,7 +421,7 @@ function zapiszLS(klucz, dane){
     try{localStorage.setItem(klucz,serial);zmieniono=true;}
     catch(e2){zmieniono=false;loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
   }
-  if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina();
+  if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina(klucz);
   if(zmieniono && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
   return zmieniono;
 }

@@ -437,12 +437,22 @@ function chmuraKatalogCacheBaza(){
   return chmuraKatalogCacheBazaPromise;
 }
 async function chmuraKatalogCacheOdczytaj(){
-  const db=await chmuraKatalogCacheBaza();if(!db)return null;
-  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readonly"),request=tx.objectStore(CHMURA_KATALOG_CACHE_STORE).get(CHMURA_KATALOG_CACHE_KEY);request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>resolve(null);}catch(e){resolve(null);}});
+  return chmuraRuntimeCacheOdczytaj(CHMURA_KATALOG_CACHE_KEY);
 }
 async function chmuraKatalogCacheZapisz(revision,products){
+  return chmuraRuntimeCacheZapisz(CHMURA_KATALOG_CACHE_KEY,{revision:String(revision||""),count:Array.isArray(products)?products.length:0,products:Array.isArray(products)?products:[],savedAt:Date.now()});
+}
+async function chmuraRuntimeCacheOdczytaj(key){
   const db=await chmuraKatalogCacheBaza();if(!db)return false;
-  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).put({revision:String(revision||""),count:Array.isArray(products)?products.length:0,products:Array.isArray(products)?products:[],savedAt:Date.now()},CHMURA_KATALOG_CACHE_KEY);tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readonly"),request=tx.objectStore(CHMURA_KATALOG_CACHE_STORE).get(String(key));request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>resolve(null);}catch(e){resolve(null);}});
+}
+async function chmuraRuntimeCacheZapisz(key,value){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).put(value,String(key));tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
+}
+async function chmuraRuntimeCacheUsun(key){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).delete(String(key));tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
 }
 async function chmuraPobierzKatalogImportowany(meta={},force=false){
   const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
@@ -726,11 +736,11 @@ function chmuraStatusHTML(){
   </div>`;
 }
 
-const KLUCZE_CIEZKICH_CACHE = [
+const KLUCZE_PRZESTARZALYCH_CACHE = [
   "artway_allegro_oferty_cache",
   "artway_allegro_zamowienia_cache",
-  "artway_allegro_komunikacja_cache",
-  "artway_produkty_katalog"
+  "artway_allegro_mapowania_cache",
+  "artway_allegro_komunikacja_cache"
 ];
 function rozmiarLokalnejPamieci(){
   let n=0;
@@ -739,9 +749,9 @@ function rozmiarLokalnejPamieci(){
 }
 function zwolnijPamiecPodreczna({wymus=false}={}){
   const przed=rozmiarLokalnejPamieci();
-  if(!wymus&&przed<3_500_000)return {przed,po:przed,usunieto:[]};
+  if(!wymus&&przed<7_500_000)return {przed,po:przed,usunieto:[]};
   const usunieto=[];
-  for(const klucz of KLUCZE_CIEZKICH_CACHE){
+  for(const klucz of KLUCZE_PRZESTARZALYCH_CACHE){
     try{if(localStorage.getItem(klucz)!==null){localStorage.removeItem(klucz);usunieto.push(klucz);}}catch(e){}
   }
   try{
@@ -755,6 +765,7 @@ function wczytajLS(klucz, domyslne){ try{ return JSON.parse(localStorage.getItem
 // wyłącznie dla danych biznesowych, nie dla kosmetycznych preferencji widoku.
 var adminRewizjaDanych = 0;
 var adminCachePodstron = new Map();
+var adminRewizjeDomenCache = {catalog:0,orders:0,warehouse:0,allegro:0,agent:0,infakt:0,seo:0,settings:0,system:0};
 const ADMIN_KLUCZE_WIDOKU = new Set([
   "artway_admin_menu_otwarta_v2","artway_admin_menu_kompaktowe_v1",
   "artway_produkty_na_stronie_admin","artway_produkty_gestosc_admin",
@@ -764,9 +775,27 @@ function kluczZmieniaDaneAdmina(klucz=""){
   if(ADMIN_KLUCZE_WIDOKU.has(klucz))return false;
   return ["artway_ustawienia","artway_produkty","artway_zamowienia","artway_uzytkownicy","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn","artway_faktury","artway_agent","artway_producenci","artway_opinie","artway_kosz","artway_seo"].some(prefix=>String(klucz).startsWith(prefix));
 }
-function uniewaznijCachePodstronAdmina(){
+function adminDomenaCacheDlaKlucza(klucz=""){
+  const value=String(klucz||"");
+  if(value==="allegro"||value.startsWith("artway_allegro"))return "allegro";
+  if(value.startsWith("artway_zamowienia")||value.startsWith("artway_uzytkownicy"))return "orders";
+  if(value.startsWith("artway_stany")||value.startsWith("artway_dostepnosc")||value.startsWith("artway_ruchy_magazynowe")||value.startsWith("artway_magazyn")||value.startsWith("artway_producenci"))return "warehouse";
+  if(value.startsWith("artway_agent"))return "agent";
+  if(value.startsWith("artway_faktury")||value.startsWith("artway_infakt"))return "infakt";
+  if(value.startsWith("artway_seo"))return "seo";
+  if(value.startsWith("artway_ustawienia"))return "settings";
+  if(value.startsWith("artway_produkty")||value.startsWith("artway_opinie")||value.startsWith("artway_kosz"))return "catalog";
+  return "system";
+}
+function uniewaznijCachePodstronAdmina(zakres="all"){
   adminRewizjaDanych++;
-  adminCachePodstron.clear();
+  const domena=zakres==="all"||!zakres?"all":adminDomenaCacheDlaKlucza(zakres);
+  if(domena==="all"){
+    Object.keys(adminRewizjeDomenCache).forEach(key=>adminRewizjeDomenCache[key]++);adminCachePodstron.clear();
+  }else{
+    adminRewizjeDomenCache[domena]=(Number(adminRewizjeDomenCache[domena])||0)+1;
+    for(const [route,entry] of adminCachePodstron)if((entry?.domains||[]).includes(domena))adminCachePodstron.delete(route);
+  }
   if(typeof uniewaznijAdminMenuStatCache==="function")uniewaznijAdminMenuStatCache();
 }
 function zapiszLS(klucz, dane){
@@ -782,7 +811,7 @@ function zapiszLS(klucz, dane){
     try{localStorage.setItem(klucz,serial);zmieniono=true;}
     catch(e2){zmieniono=false;loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
   }
-  if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina();
+  if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina(klucz);
   if(zmieniono && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
   return zmieniono;
 }
@@ -2649,22 +2678,32 @@ function moderujOpinie(id, akcja){
   loguj("info",`Moderacja opinii ${id}: ${akcja}`);
   renderuj();
 }
+const PRODUKTY_BAZOWE_CACHE_KEY="base-products-v2";
+const PRODUKTY_BAZOWE_CACHE_TTL_MS=6*60*60*1000;
+function walidujBazoweProdukty(dane){
+  if(!Array.isArray(dane))throw new Error("products.json nie zawiera tablicy produktów");
+  const poprawne=dane.filter(p=>p&&p.id!==undefined&&String(p.nazwa||"").trim()),unikalne=new Set(poprawne.map(p=>String(p.id)));
+  if(poprawne.length!==dane.length||unikalne.size!==poprawne.length)throw new Error("products.json zawiera niepoprawne lub powtórzone rekordy");
+  return poprawne;
+}
 async function pobierzBazoweProdukty(){
+  const wersja=document.querySelector('meta[name="artway-version"]')?.content||"dev",teraz=Date.now();
+  let cache=null,cacheProducts=null;
+  try{cache=typeof chmuraRuntimeCacheOdczytaj==="function"?await chmuraRuntimeCacheOdczytaj(PRODUKTY_BAZOWE_CACHE_KEY):null;cacheProducts=cache?.products?walidujBazoweProdukty(cache.products):null;}catch(e){cache=null;cacheProducts=null;}
+  if(cacheProducts){prodBazowe=cacheProducts;zrodloProduktow="json";}
+  if(cacheProducts&&String(cache.version||"")===wersja&&teraz-Number(cache.savedAt||0)<PRODUKTY_BAZOWE_CACHE_TTL_MS)return true;
   try{
-    const wersja = document.querySelector('meta[name="artway-version"]')?.content || String(Date.now());
-    const r = await fetch(`/products.json?v=${encodeURIComponent(wersja)}`, {cache:"no-store"});
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    const dane = await r.json();
-    if(!Array.isArray(dane)) throw new Error("products.json nie zawiera tablicy produktów");
-    const poprawne = dane.filter(p=>p&&p.id!==undefined&&String(p.nazwa||"").trim());
-    const unikalne = new Set(poprawne.map(p=>String(p.id)));
-    if(poprawne.length!==dane.length||unikalne.size!==poprawne.length) throw new Error("products.json zawiera niepoprawne lub powtórzone rekordy");
-    prodBazowe = poprawne;
-    zrodloProduktow = "json";
+    const headers={};if(cache?.etag)headers["If-None-Match"]=String(cache.etag);if(cache?.lastModified)headers["If-Modified-Since"]=String(cache.lastModified);
+    const r=await fetch(`/products.json?v=${encodeURIComponent(wersja)}`,{cache:"no-cache",headers});
+    if(r.status===304&&cacheProducts){await chmuraRuntimeCacheZapisz(PRODUKTY_BAZOWE_CACHE_KEY,{...cache,version:wersja,savedAt:teraz});return true;}
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const poprawne=walidujBazoweProdukty(await r.json());prodBazowe=poprawne;zrodloProduktow="json";
+    if(typeof chmuraRuntimeCacheZapisz==="function")await chmuraRuntimeCacheZapisz(PRODUKTY_BAZOWE_CACHE_KEY,{version:wersja,count:poprawne.length,products:poprawne,etag:r.headers.get("etag")||"",lastModified:r.headers.get("last-modified")||"",savedAt:teraz});
+    return true;
   }catch(e){
-    prodBazowe = PRODUKTY_ZAPASOWE;
-    zrodloProduktow = "zapasowe";
-    loguj("ostrzezenie","products.json niedostępny — katalog demonstracyjny został zablokowany, aby nie pokazywać nieaktualnych produktów.");
+    if(cacheProducts){loguj("info","Użyto trwałej pamięci katalogu; odświeżenie products.json zostanie ponowione później.");return true;}
+    prodBazowe=PRODUKTY_ZAPASOWE;zrodloProduktow="zapasowe";
+    loguj("ostrzezenie","products.json niedostępny — katalog demonstracyjny został zablokowany, aby nie pokazywać nieaktualnych produktów.");return false;
   }
 }
 function finalizujWczytanieProduktow(){
@@ -2762,9 +2801,6 @@ let renderowanieWidoku=false;
 let renderPonowniePoBiezacym=false;
 let renderTimerWpisywania=null;
 let renderFrameWpisywania=0;
-const ADMIN_CACHE_PODSTRON_LIMIT=8;
-const ADMIN_CACHE_PODSTRON_MAX_WEZLOW=12000;
-const ADMIN_CACHE_PODSTRON_MAX_LACZNIE=24000;
 function zaplanujRenderPoWpisaniu(opoznienie=180){
   clearTimeout(renderTimerWpisywania);
   if(renderFrameWpisywania)cancelAnimationFrame(renderFrameWpisywania);
@@ -2787,7 +2823,8 @@ function adminZapiszPodstroneWCache(root,route){
   if(nodes>ADMIN_CACHE_PODSTRON_MAX_WEZLOW)return false;
   adminCachePodstron.delete(route);
   workspace.remove();
-  adminCachePodstron.set(route,{workspace,nodes,header:shell.querySelector(":scope > .admin-tresc > .admin-workspace-header")?.cloneNode(true)||null,mobile:shell.querySelector(":scope > .admin-tresc > .admin-mobile-menu")?.cloneNode(true)||null,revision:adminRewizjaDanych,scrollY:window.scrollY||0,savedAt:Date.now()});
+  const domains=adminDomenyCacheDlaTrasy(route);
+  adminCachePodstron.set(route,{workspace,nodes,header:shell.querySelector(":scope > .admin-tresc > .admin-workspace-header")?.cloneNode(true)||null,mobile:shell.querySelector(":scope > .admin-tresc > .admin-mobile-menu")?.cloneNode(true)||null,domains,signature:adminSygnaturaCacheTrasy(route),scrollY:window.scrollY||0,savedAt:Date.now()});
   while(adminCachePodstron.size>ADMIN_CACHE_PODSTRON_LIMIT||adminLiczbaWezlowCache()>ADMIN_CACHE_PODSTRON_MAX_LACZNIE)adminCachePodstron.delete(adminCachePodstron.keys().next().value);
   return true;
 }
@@ -2808,7 +2845,7 @@ function adminAktualizujAktywnaNawigacje(shell,route){
 function adminPrzywrocPodstroneZCache(root,route){
   const entry=adminCachePodstron.get(route);if(!entry)return false;
   adminCachePodstron.delete(route);
-  if(entry.revision!==adminRewizjaDanych)return false;
+  if(entry.signature!==adminSygnaturaCacheTrasy(route))return false;
   const shell=root?.querySelector(":scope > .admin-page");if(!shell)return false;
   const container=adminKontenerTresci(shell),current=adminTrescBezposrednia(shell);if(!container)return false;
   if(current)current.replaceWith(entry.workspace);else container.appendChild(entry.workspace);

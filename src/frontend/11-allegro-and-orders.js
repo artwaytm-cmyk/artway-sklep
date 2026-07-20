@@ -74,10 +74,37 @@ async function adminMasowoZmienStatusZamowien(){
   }
   toast(`✅ Zmieniono ${zmiany.length} zamówień na „${status}”${bledy?` • błędy synchronizacji: ${bledy}`:""}`);
 }
+const ALLEGRO_TRWALY_CACHE_KEY="allegro-offers-and-mappings-v2";
+const ALLEGRO_TRWALY_CACHE_MAX_AGE_MS=7*24*60*60*1000;
+let allegroTrwalyCacheOdtworzony=false,allegroTrwalyCachePromise=null,allegroTrwalyCacheTimer=null;
 function allegroZapiszCache(){
   for(const klucz of ["artway_allegro_zamowienia_cache","artway_allegro_oferty_cache","artway_allegro_mapowania_cache","artway_allegro_komunikacja_cache"]){
     try{localStorage.removeItem(klucz);}catch(e){}
   }
+  if(typeof chmuraRuntimeCacheZapisz!=="function"||typeof jestAdmin!=="function"||!jestAdmin())return;
+  clearTimeout(allegroTrwalyCacheTimer);allegroTrwalyCacheTimer=setTimeout(()=>{
+    const safeState={configured:!!allegroStan.configured,connected:!!allegroStan.connected,env:allegroStan.env||"production",offerDefaultsAudit:allegroStan.offerDefaultsAudit||{},catalogMaintenance:allegroStan.catalogMaintenance||{},complianceAudit:allegroStan.complianceAudit||{},offerSyncState:allegroStan.offerSyncState||{},offerSettings:allegroStan.offerSettings||{}};
+    void chmuraRuntimeCacheZapisz(ALLEGRO_TRWALY_CACHE_KEY,{schema:2,savedAt:Date.now(),offers:Array.isArray(allegroOferty)?allegroOferty:[],mappings:allegroMapowania&&typeof allegroMapowania==="object"?allegroMapowania:{},summary:allegroPodsumowanie||{},allegro:safeState});
+  },350);
+}
+async function allegroOdtworzTrwalyCache(){
+  if(allegroTrwalyCacheOdtworzony)return false;
+  if(allegroTrwalyCachePromise)return allegroTrwalyCachePromise;
+  allegroTrwalyCachePromise=(async()=>{
+    try{
+      if(typeof chmuraRuntimeCacheOdczytaj!=="function"||typeof jestAdmin!=="function"||!jestAdmin())return false;
+      const cache=await chmuraRuntimeCacheOdczytaj(ALLEGRO_TRWALY_CACHE_KEY),savedAt=Number(cache?.savedAt)||0;
+      if(!cache||cache.schema!==2||!savedAt||Date.now()-savedAt>ALLEGRO_TRWALY_CACHE_MAX_AGE_MS)return false;
+      if(Array.isArray(cache.offers))allegroOferty=cache.offers;
+      if(cache.mappings&&typeof cache.mappings==="object")allegroMapowania=cache.mappings;
+      if(cache.summary&&typeof cache.summary==="object")allegroPodsumowanie={...allegroPodsumowanie,...cache.summary};
+      if(cache.allegro&&typeof cache.allegro==="object")allegroStan={...allegroStan,...cache.allegro,sprawdzono:true,error:"",cacheSavedAt:savedAt};
+      allegroDaneZaladowane={...allegroDaneZaladowane,summary:true,offers:true,config:true};
+      ["summary","offers","config"].forEach(scope=>allegroDaneOdczytAt[scope]=savedAt);return true;
+    }catch(error){return false;}
+    finally{allegroTrwalyCacheOdtworzony=true;allegroTrwalyCachePromise=null;}
+  })();
+  return allegroTrwalyCachePromise;
 }
 function allegroProduktIdDlaOferty(offerId){
   const rec=(allegroMapowania||{})[String(offerId)];
@@ -142,6 +169,7 @@ function allegroWersjaSerwerowaZakresu(zakres="summary"){
   return `${orderVersion}|${offerVersion}|${communication.updated_at||""}|${configVersion}`;
 }
 function allegroLadujJesliTrzeba(scope="summary"){
+  if(!allegroTrwalyCacheOdtworzony){const requested=scope;void allegroOdtworzTrwalyCache().then(restored=>{if(restored)renderuj();allegroLadujJesliTrzeba(requested);});return;}
   const zakres=allegroZakresDanych(scope),zaladowany=allegroZakresZaladowany(zakres),ostatni=zakres==="all"?Math.min(...["orders","offers","config"].map(k=>Number(allegroDaneOdczytAt[k]||0))):Number(allegroDaneOdczytAt[zakres]||0);
   if(allegroDaneObietnice.has(zakres)||allegroDaneLadowane.has(zakres)||(zaladowany&&Date.now()-ostatni<ALLEGRO_DANE_TTL_MS))return;
   if(!zaladowany)allegroStan={...allegroStan,ladowanie:true};
@@ -171,7 +199,7 @@ async function allegroWczytajDane(cicho=false,odswiezWidok=true,scope="all"){
       if(location.hash==="#/admin/allegro/oferty"&&allegroStan.offerSettings?.autoMapping!==false)setTimeout(()=>allegroUruchomAutomatyczneMapowanie(true),0);
       if(!cicho)toast("Dane Allegro odświeżone");
       const changed=!byloZaladowane||przed!==allegroWersjaSerwerowaZakresu(zakres);
-      if(changed&&typeof uniewaznijCachePodstronAdmina==="function")uniewaznijCachePodstronAdmina();
+      if(changed&&typeof uniewaznijCachePodstronAdmina==="function")uniewaznijCachePodstronAdmina("allegro");
       return {ok:true,changed};
     }catch(e){
       allegroStan={...allegroStan,sprawdzono:true,error:e.message||String(e)};

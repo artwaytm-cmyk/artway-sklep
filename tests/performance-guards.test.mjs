@@ -16,13 +16,15 @@ test('ciężka synchronizacja działa co 15 minut i nie odświeża widoku bez zm
 });
 
 test('router scala szybkie renderowania i nie skanuje wielokrotnie całego DOM', async () => {
-  const router = await readFile('src/frontend/06-router-and-storefront.js', 'utf8');
+  const [router,responsive] = await Promise.all([readFile('src/frontend/06-router-and-storefront.js', 'utf8'),readFile('src/frontend/08a-admin-responsive-layout.js', 'utf8')]);
   assert.match(router, /if\(renderowanieWidoku\)\{renderPonowniePoBiezacym=true;return;\}/);
   assert.match(router, /current\.isEqualNode\(next\)/);
   assert.match(router, /const keyed=new Map\(\);/);
   assert.match(router, /function zaplanujRenderPoWpisaniu\(opoznienie=180\)/);
   assert.match(router, /admin-workspace-content/);
-  assert.match(router, /ADMIN_CACHE_PODSTRON_MAX_LACZNIE=24000/);
+  assert.match(responsive, /ADMIN_CACHE_PODSTRON_LIMIT=ADMIN_PAMIEC_URZADZENIA_GB>=8\?16:12/);
+  assert.match(responsive, /ADMIN_CACHE_PODSTRON_MAX_LACZNIE=ADMIN_PAMIEC_URZADZENIA_GB>=8\?64000:42000/);
+  assert.match(router, /signature:adminSygnaturaCacheTrasy\(route\)/);
   assert.match(router, /currentContainer\?\.appendChild\(nextWorkspace\.cloneNode\(true\)\)/);
   assert.doesNotMatch(router, /else current\.appendChild\(nextWorkspace\.cloneNode\(true\)\)/);
 });
