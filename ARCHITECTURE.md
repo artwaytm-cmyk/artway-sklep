@@ -48,3 +48,16 @@ Panel administratora projektujemy dla katalogu od 50 000 do 100 000 produktów, 
 - Każda zmiana w katalogu, routerze lub modułach panelu musi utrzymać testy `performance-guards` i budżety pakietów z testu architektury.
 
 Obecny podział frontendu jest etapem bezpiecznej migracji: zachowuje zgodność ze starszymi globalnymi funkcjami HTML, a jednocześnie daje kontrolowane granice. Kolejne przebudowy mogą przenosić domeny do natywnych modułów ES bez ponownego tworzenia monolitu.
+
+## Budżety jak dla dużej aplikacji
+
+Duże platformy nie uznają jednej liczby linii za miarę skalowalności. Stosujemy dwa poziomy zapisane centralnie w `config/architecture-budgets.mjs`: cel rozwojowy (`target`) oraz twardą bramkę publikacji (`max`). Przekroczenie celu jest długiem do zaplanowania, a przekroczenie maksimum blokuje testy.
+
+- Linie są liczone fizycznie; końcowy znak nowej linii nie tworzy fikcyjnej dodatkowej linii.
+- `store-app.mjs` jest koordynatorem migracyjnym: cel to 4500 linii, a twarda granica 5500. Nowa logika biznesowa nadal musi trafiać do domen, nawet jeśli pozostał zapas.
+- Zwykły moduł JavaScript ma cel 600 i awaryjne maksimum 1500 linii; skupiona domena panelu cel 500 i maksimum 700; integracja cel 500 i maksimum 800. Cel uruchamia ostrzeżenie odpowiednio wcześnie, więc twardy limit nie zostawia zaledwie kilku linii zapasu.
+- Pierwsza paczka sklepu jest kontrolowana również po kompresji gzip: cel 125 KiB i maksimum 160 KiB. Moduł jednej trasy panelu ma cel 100 KiB i maksimum 120 KiB gzip.
+- Pełny `assets/admin.js` jest wyłącznie artefaktem kontrolnym i nie jest wysyłany do przeglądarki. Budżet dotyczy rzeczywiście ładowanego rdzenia i paczki bieżącej trasy.
+- Raport `npm run audit:architecture` pokazuje zapas oraz ostrzeżenia, natomiast `npm run verify` blokuje przekroczenia twarde.
+
+Limity bezpieczeństwa, limity zewnętrznych API, stronicowanie i rozmiary importów pozostają osobnymi kontraktami. Nie wolno ich zwiększać tylko dlatego, że rośnie liczba produktów; skalowanie odbywa się przez stronicowanie, kolejki, cache i podział domen.

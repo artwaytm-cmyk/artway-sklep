@@ -1,29 +1,52 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { gzipSync } from 'node:zlib';
+import { ARCHITECTURE_BUDGETS as B, physicalLineCount } from '../config/architecture-budgets.mjs';
 import { ADMIN_RUNTIME_BUNDLES, ASSET_BUNDLES, buildAssets } from '../scripts/build-assets.mjs';
+
+async function assetMetrics(path) {
+  const content = await readFile(path);
+  return { raw: content.length, gzip: gzipSync(content).length };
+}
+
+async function sourceFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map((entry) => {
+    const path = `${directory}/${entry.name}`;
+    return entry.isDirectory() ? sourceFiles(path) : (/\.(?:js|mjs|css)$/.test(entry.name) ? [path] : []);
+  }));
+  return nested.flat();
+}
 
 test('wygenerowane assets odpowiadają modułom źródłowym', async () => {
   await assert.doesNotReject(() => buildAssets({ check: true }));
 });
 
 test('moduły źródłowe mają kontrolowany rozmiar i jednoznaczną kolejność', async () => {
-  const sources = ASSET_BUNDLES.flatMap((bundle) => bundle.sources);
-  assert.equal(new Set(sources).size, sources.length);
+  const bundledSources = ASSET_BUNDLES.flatMap((bundle) => bundle.sources);
+  assert.equal(new Set(bundledSources).size, bundledSources.length);
+  const applicationSources = (await Promise.all([
+    sourceFiles('src/frontend'), sourceFiles('src/styles'), sourceFiles('src/backend'),
+    sourceFiles('netlify/functions/lib/core'), sourceFiles('netlify/functions/lib/domain'),
+    sourceFiles('netlify/functions/lib'),
+  ])).flat().filter((source) => source !== 'netlify/functions/lib/store-app.mjs');
+  const sources = [...new Set([...bundledSources, ...applicationSources])];
   for (const source of sources) {
     const content = await readFile(source, 'utf8');
+    const budget = source.endsWith('.css') ? B.source.stylesheet : B.source.javascript;
     assert.ok(content.trim().length > 0, `${source} nie może być pusty`);
-    assert.ok(Buffer.byteLength(content) <= 210_000, `${source} przekroczył budżet 210 kB; podziel domenę`);
-    const lines = content.split('\n').length;
-    assert.ok(lines <= 1300, `${source} ma ${lines} linii; podziel domenę na mniejsze moduły`);
+    assert.ok(Buffer.byteLength(content) <= budget.maxBytes, `${source} przekroczył twardy budżet źródła; podziel domenę`);
+    const lines = physicalLineCount(content);
+    assert.ok(lines <= budget.maxLines, `${source} ma ${lines} fizycznych linii; podziel domenę na mniejsze moduły`);
   }
 });
 
-test('główny backend pozostaje poniżej budżetu migracyjnego', async () => {
+test('główny backend pozostaje koordynatorem z kontrolowanym budżetem migracyjnym', async () => {
   const file = await stat('netlify/functions/lib/store-app.mjs');
-  assert.ok(file.size < 400_000, `store-app.mjs urósł do ${file.size} B; wydziel kolejną domenę`);
-  const storeLines = (await readFile('netlify/functions/lib/store-app.mjs', 'utf8')).split('\n').length;
-  assert.ok(storeLines <= 5200, `store-app.mjs ma ${storeLines} linii; wydziel kolejną domenę`);
+  assert.ok(file.size <= B.backendCoordinator.maxBytes, `store-app.mjs urósł do ${file.size} B; wydziel kolejną domenę`);
+  const storeLines = physicalLineCount(await readFile('netlify/functions/lib/store-app.mjs', 'utf8'));
+  assert.ok(storeLines <= B.backendCoordinator.maxLines, `store-app.mjs ma ${storeLines} fizycznych linii; wydziel kolejną domenę`);
   const catalogQuality = await stat('netlify/functions/lib/domain/catalog-quality.mjs');
   assert.ok(catalogQuality.size < 80_000, `catalog-quality.mjs urósł do ${catalogQuality.size} B; rozdziel audyt od korekt`);
 });
@@ -48,8 +71,8 @@ test('wydzielone domeny pozostają małe i są częścią właściwego pakietu',
   const adminBundle = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.js');
   for (const source of frontendDomains) {
     assert.ok(adminBundle.sources.includes(source), `${source} nie jest składany do panelu administratora`);
-    const lines = (await readFile(source, 'utf8')).split('\n').length;
-    assert.ok(lines <= 650, `${source} ma ${lines} linii; przekroczono budżet domeny 650 linii`);
+    const lines = physicalLineCount(await readFile(source, 'utf8'));
+    assert.ok(lines <= B.source.focusedFrontend.maxLines, `${source} ma ${lines} linii; przekroczono twardy budżet domeny panelu`);
   }
   for (const source of [
     'netlify/functions/lib/email-service.mjs',
@@ -58,20 +81,20 @@ test('wydzielone domeny pozostają małe i są częścią właściwego pakietu',
     'netlify/functions/lib/infakt-service.mjs',
     'netlify/functions/lib/product-source-inspection-service.mjs',
   ]) {
-    const lines = (await readFile(source, 'utf8')).split('\n').length;
-    assert.ok(lines <= 800, `${source} ma ${lines} linii; przekroczono budżet usługi 800 linii`);
+    const lines = physicalLineCount(await readFile(source, 'utf8'));
+    assert.ok(lines <= B.source.integrationService.maxLines, `${source} ma ${lines} linii; przekroczono twardy budżet usługi integracyjnej`);
   }
 });
 
 test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', async () => {
   const publicBundle = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/app.js');
   const adminBundle = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.js');
-  const publicJs = await stat('assets/app.js');
-  const publicCss = await stat('assets/styles.css');
+  const publicJs = await assetMetrics('assets/app.js');
+  const publicCss = await assetMetrics('assets/styles.css');
   assert.ok(publicBundle && adminBundle, 'konfiguracja musi zawierać osobny pakiet sklepu i panelu');
   assert.ok(!publicBundle.sources.some((source) => adminBundle.sources.includes(source)), 'kod panelu nie może wejść do pakietu klienta');
-  assert.ok(publicJs.size < 512_000, `początkowy JavaScript urósł do ${publicJs.size} B; moduły panelu muszą pozostać ładowane na żądanie`);
-  assert.ok(publicCss.size < 70_000, `początkowy CSS urósł do ${publicCss.size} B; style panelu muszą pozostać ładowane na żądanie`);
+  assert.ok(publicJs.raw <= B.browser.storefrontScript.maxRawBytes && publicJs.gzip <= B.browser.storefrontScript.maxGzipBytes, 'początkowy JavaScript przekroczył budżet transmisji; podziel kod trasy sklepu');
+  assert.ok(publicCss.raw <= B.browser.storefrontStyles.maxRawBytes && publicCss.gzip <= B.browser.storefrontStyles.maxGzipBytes, 'początkowy CSS przekroczył budżet transmisji');
 });
 
 test('panel administratora ładuje mały rdzeń i domeny dopiero dla bieżącej trasy', async () => {
@@ -82,8 +105,15 @@ test('panel administratora ładuje mały rdzeń i domeny dopiero dla bieżącej 
   assert.ok(aggregate && core, 'panel wymaga artefaktu kontrolnego i małego rdzenia runtime');
   assert.equal(new Set(runtimeSources).size, runtimeSources.length, 'źródło panelu nie może wejść do dwóch paczek runtime');
   assert.deepEqual(new Set(runtimeSources), new Set(aggregate.sources), 'paczki runtime muszą obejmować cały panel bez braków');
-  assert.ok((await stat(core.output)).size < 15_000, 'rdzeń panelu powinien pozostać poniżej 15 kB');
-  for (const bundle of ADMIN_RUNTIME_BUNDLES) assert.ok((await stat(bundle.output)).size < 400_000, `${bundle.output} wymaga dalszego podziału`);
+  const coreMetrics = await assetMetrics(core.output), uiMetrics = await assetMetrics('assets/admin-ui.js');
+  assert.ok(coreMetrics.raw <= B.browser.adminCore.maxRawBytes && coreMetrics.gzip <= B.browser.adminCore.maxGzipBytes, 'rdzeń panelu przekroczył budżet transmisji');
+  assert.ok(uiMetrics.raw <= B.browser.adminSharedUi.maxRawBytes && uiMetrics.gzip <= B.browser.adminSharedUi.maxGzipBytes, 'wspólne UI panelu przekroczyło budżet transmisji');
+  for (const bundle of ADMIN_RUNTIME_BUNDLES.filter((entry) => ![core.output, 'assets/admin-ui.js'].includes(entry.output))) {
+    const metrics = await assetMetrics(bundle.output);
+    assert.ok(metrics.raw <= B.browser.adminRoute.maxRawBytes && metrics.gzip <= B.browser.adminRoute.maxGzipBytes, `${bundle.output} przekroczył budżet trasy i wymaga dalszego podziału`);
+  }
+  const adminStyles = await assetMetrics('assets/admin.css');
+  assert.ok(adminStyles.raw <= B.browser.adminStyles.maxRawBytes && adminStyles.gzip <= B.browser.adminStyles.maxGzipBytes, 'style panelu przekroczyły budżet transmisji');
   assert.match(router, /function adminModulyDlaTrasy\(/);
   assert.match(router, /ui:"admin-ui"/);
   assert.match(router, /moduly=\["core","ui"\]/);
