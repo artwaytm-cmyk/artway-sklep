@@ -67,6 +67,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/12-infakt-admin.js',
       'src/frontend/09b-seo-effects-panel.js',
       'src/frontend/12-warehouse-views.js',
+      'src/frontend/12-product-editor-workspace.js',
       'src/frontend/12-product-editor.js',
       'src/frontend/12a-product-actions.js',
       'src/frontend/12b-allegro-listing-workspace.js',
@@ -126,6 +127,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/29-commerce-catalog-actions.css',
       'src/styles/30-admin-fluid-layout.css',
       'src/styles/31-admin-page-pattern.css',
+      'src/styles/32-product-editor-workspace.css',
     ],
   },
 ]);
@@ -203,6 +205,7 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/12-assortment-index.js',
       'src/frontend/12-infakt-admin.js',
       'src/frontend/09b-seo-effects-panel.js',
+      'src/frontend/12-product-editor-workspace.js',
       'src/frontend/12-product-editor.js',
       'src/frontend/12a-product-actions.js',
       'src/frontend/12b-allegro-listing-workspace.js',

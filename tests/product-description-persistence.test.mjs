@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
 
-test('edytor produktu ma niezależny opis krótki i długi oraz tytuł Allegro', async () => {
+test('edytor produktu ma jedno pole opisu krótkiego i długiego używane przez oba kanały', async () => {
   const source = await readFile('assets/admin.js', 'utf8');
   assert.match(source, /name="opisKrotki"/);
   assert.match(source, /name="opis"/);
   assert.match(source, /Opis długi/);
   assert.match(source, /name="allegroTitle"/);
-  assert.match(source, /Redakcja automatyczna/);
+  assert.match(source, /Opis wspólny dla sklepu i Allegro/);
+  assert.match(source, /Agent redakcji/);
   assert.doesNotMatch(source, /<button[^>]+agentAIPoprawOpisyWFormularzu/);
   assert.doesNotMatch(source, /<button[^>]+allegroPoprawOpisyWFormularzu/);
 });
@@ -42,7 +44,7 @@ test('odświeżenie linku zachowuje surową treść tylko jako materiał źród�
   assert.doesNotMatch(force, /opisKrotki:|opis:/);
 });
 
-test('krótki opis Allegro zachowuje własną wersję zamiast skrótu opisu długiego', async () => {
+test('wspólny opis krótki nie jest zastępowany automatycznym skrótem opisu długiego', async () => {
   const source = await readFile('assets/admin.js', 'utf8');
   assert.match(source, /safeShort=improved\.storeShortDescription\|\|improved\.shortDescription\|\|p\.opisKrotki/);
 });
@@ -58,4 +60,51 @@ test('synchronizacja ofert nie przywraca starego opisu Allegro do edytora produk
   assert.match(mapping, /sourceMaterial[\s\S]*allegroOfferDescription/);
   assert.match(mapping, /zapiszOperacjeProduktow\(pendingUpdates, now\)/);
   assert.doesNotMatch(mapping, /zapisz\('settings'/);
+});
+
+test('zapis edytora zawsze ustanawia jeden kanoniczny opis sklepu i Allegro', async () => {
+  const editor = await readFile('src/frontend/12-product-editor.js', 'utf8');
+  const workspace = await readFile('src/frontend/12-product-editor-workspace.js', 'utf8');
+  assert.match(editor, /productEditorZastosujWspolnaTresc\(p,poprzedni\)/);
+  assert.match(workspace, /p\.allegroDescription=String\(p\.opis\|\|""\)/);
+  assert.match(workspace, /delete p\.allegroDescriptionSections/);
+  assert.match(workspace, /allegroEditorialSyncPending=true/);
+  assert.match(workspace, /channels:allegroSelected\?"shared_store_and_allegro":"store_only"/);
+});
+
+test('starszy produkt z ofertą rzeczywiście dostaje aktualne oba opisy i kolejkę synchronizacji', async () => {
+  const source = await readFile('src/frontend/12-product-editor-workspace.js', 'utf8');
+  const context = { allegroOfertaDlaProduktuSklepu: () => null };
+  vm.createContext(context);
+  vm.runInContext(source, context);
+  const product = {
+    id: 17,
+    allegroOfferId: '123456',
+    nazwa: 'Nowa nazwa',
+    opisKrotki: 'Nowy opis krótki',
+    opis: 'Nowy opis długi',
+    allegroDescription: 'Stary opis',
+    allegroDescriptionSections: [{ items: [{ type: 'TEXT', content: '<p>Stare</p>' }] }],
+  };
+  const result = context.productEditorZastosujWspolnaTresc(product, {
+    ...product,
+    opisKrotki: 'Poprzedni skrót',
+    opis: 'Poprzedni opis',
+  });
+  assert.equal(result.allegroDescription, 'Nowy opis długi');
+  assert.equal(result.opisKrotki, 'Nowy opis krótki');
+  assert.equal(result.allegroShortDescription, undefined);
+  assert.equal(result.allegroDescriptionSections, undefined);
+  assert.equal(result.allegroEditorialSyncPending, true);
+  assert.equal(result.allegroEditorialSyncState, 'queued');
+  assert.equal(result.contentEditorial.channels, 'shared_store_and_allegro');
+  assert.deepEqual({ ...result.contentEditorial.targets }, { store: true, allegro: true });
+});
+
+test('przygotowanie oferty nie wybiera starego opisu Allegro przed aktualnym opisem produktu', async () => {
+  const publication = await readFile('src/frontend/11-allegro-product-publication.js', 'utf8');
+  const actions = await readFile('src/frontend/12a-product-actions.js', 'utf8');
+  assert.match(publication, /allegroFull=improved\.allegroDescription\|\|safeFull\|\|allegroTekstZBezpiecznychSekcji/);
+  assert.match(actions, /allegroFull=String\(improved\.allegroDescription\|\|full\|\|allegroTekstZBezpiecznychSekcji/);
+  assert.doesNotMatch(publication, /allegroTekstZBezpiecznychSekcji\(safeSections\)\|\|p\.allegroDescription/);
 });
