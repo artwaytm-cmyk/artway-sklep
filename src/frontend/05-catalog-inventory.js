@@ -28,23 +28,39 @@ function produktyDoAdministracji(){
   produktyAdminCache={bazowe,dodane:produktyDodane,edytowane:produktyEdytowane,definitywne:produktyDefinitywne,items,byId:new Map(items.map(p=>[String(p.id),p]))};return items;
 }
 function pobierzProduktAdmin(id){produktyDoAdministracji();return produktyAdminCache.byId.get(String(id));}
+function przygotujProduktDlaSklepu(p){
+  if(!p)return null;
+  const zmianyKat=ustawienia.kategorie||{},mapa=ustawienia.mapaProduktow||{};
+  let k=mapa[p.id]||p.kategoria;
+  for(let i=0;i<3&&zmianyKat[k];i++)k=zmianyKat[k];
+  const zKategoria=k===p.kategoria?p:{...p,kategoria:k};
+  return stanyProduktow[p.id]!==undefined?{...zKategoria,stan:+stanyProduktow[p.id]}:zKategoria;
+}
+function produktSklepuPoId(id){
+  const key=String(id),bezposredni=produkty.find(p=>String(p.id)===key);
+  if(bezposredni)return bezposredni;
+  // Po połączeniu duplikatów stary adres produktu nadal prowadzi do zachowanej,
+  // kanonicznej kartoteki. Aktualizacja identyfikatorów nie może tworzyć 404.
+  const grupa=audytDuplikatowSklepu().grupy.find(g=>g.produkty.some(p=>String(p.id)===key));
+  if(grupa){
+    const kanoniczny=produkty.find(p=>String(p.id)===String(grupa.canonical.id));
+    if(kanoniczny)return kanoniczny;
+  }
+  return null;
+}
 function zbudujProdukty(){
   if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
   naprawKolizjeIdProduktow();
-  const zmianyKat = ustawienia.kategorie || {};
   const ukryteKat = ustawienia.ukryteKategorie || [];
-  const mapa = ustawienia.mapaProduktow || {};    // zaawansowane mapowanie: id produktu → katalog
   const dodaneIds = new Set(produktyDodane.map(p=>Number(p.id)));
   const bazowePoEdycji = produktyBazoweWspolne()
     .filter(p=>!dodaneIds.has(Number(p.id))&&!produktyUkryte.includes(p.id))
     .map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p);
   produkty = [ ...bazowePoEdycji, ...produktyDodane ]
-    .map(p => { let k = mapa[p.id] || p.kategoria;
-                for(let i=0; i<3 && zmianyKat[k]; i++) k = zmianyKat[k];
-                return k===p.kategoria ? p : {...p, kategoria:k}; })
-    .map(p => stanyProduktow[p.id]!==undefined ? {...p, stan:+stanyProduktow[p.id]} : p)
-    .filter(p => !ukryteKat.includes(p.kategoria))
-    .filter(p => !produktOznaczonyNiedostepny(p));
+    .map(przygotujProduktDlaSklepu)
+    .filter(p => !ukryteKat.includes(p.kategoria));
+  // Brak u producenta wstrzymuje zakup, ale nie usuwa karty, adresu ani treści.
+  // Tylko świadome przeniesienie do kosza / definitywne usunięcie wyłącza produkt.
   produkty=filtrujDuplikatySklepu(produkty);
 }
 function podpisPublikacjiProduktu(p={}){

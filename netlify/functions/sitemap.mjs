@@ -1,6 +1,6 @@
 import { createStoreRepository } from './lib/core/store-repository.mjs';
 import { mergeCatalogProducts } from './lib/domain/catalog-quality.mjs';
-import { seoProductUnavailable, seoSlug } from './lib/domain/seo-catalog.mjs';
+import { seoSlug } from './lib/domain/seo-catalog.mjs';
 
 const origin = 'https://artwaytm.pl';
 const repository = createStoreRepository({ name: 'artway-sklep' });
@@ -12,7 +12,7 @@ export default async () => {
   try { settings = await repository.read('settings', settings); } catch (error) { /* pusta mapa nadal jest prawidłowa */ }
   const data = settings.data && typeof settings.data === 'object' ? settings.data : {};
   const hidden = new Set([...(Array.isArray(data.artway_produkty_ukryte) ? data.artway_produkty_ukryte : []), ...(Array.isArray(data.artway_produkty_definitywne) ? data.artway_produkty_definitywne : []), ...(Array.isArray(data.artway_kosz_dodane) ? data.artway_kosz_dodane.map((p) => p?.id) : [])].map(String));
-  const products = mergeCatalogProducts(data).products.filter((p) => !hidden.has(String(p.id)) && !seoProductUnavailable(data, p) && Number(p.cena) > 0);
+  const products = mergeCatalogProducts(data).products.filter((p) => !hidden.has(String(p.id)) && Number(p.cena) > 0);
   const urls = [
     { loc: `${origin}/`, lastmod: settings.updated_at },
     { loc: `${origin}/promocje`, lastmod: settings.updated_at },

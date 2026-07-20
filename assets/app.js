@@ -1749,23 +1749,39 @@ function produktyDoAdministracji(){
   produktyAdminCache={bazowe,dodane:produktyDodane,edytowane:produktyEdytowane,definitywne:produktyDefinitywne,items,byId:new Map(items.map(p=>[String(p.id),p]))};return items;
 }
 function pobierzProduktAdmin(id){produktyDoAdministracji();return produktyAdminCache.byId.get(String(id));}
+function przygotujProduktDlaSklepu(p){
+  if(!p)return null;
+  const zmianyKat=ustawienia.kategorie||{},mapa=ustawienia.mapaProduktow||{};
+  let k=mapa[p.id]||p.kategoria;
+  for(let i=0;i<3&&zmianyKat[k];i++)k=zmianyKat[k];
+  const zKategoria=k===p.kategoria?p:{...p,kategoria:k};
+  return stanyProduktow[p.id]!==undefined?{...zKategoria,stan:+stanyProduktow[p.id]}:zKategoria;
+}
+function produktSklepuPoId(id){
+  const key=String(id),bezposredni=produkty.find(p=>String(p.id)===key);
+  if(bezposredni)return bezposredni;
+  // Po połączeniu duplikatów stary adres produktu nadal prowadzi do zachowanej,
+  // kanonicznej kartoteki. Aktualizacja identyfikatorów nie może tworzyć 404.
+  const grupa=audytDuplikatowSklepu().grupy.find(g=>g.produkty.some(p=>String(p.id)===key));
+  if(grupa){
+    const kanoniczny=produkty.find(p=>String(p.id)===String(grupa.canonical.id));
+    if(kanoniczny)return kanoniczny;
+  }
+  return null;
+}
 function zbudujProdukty(){
   if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
   naprawKolizjeIdProduktow();
-  const zmianyKat = ustawienia.kategorie || {};
   const ukryteKat = ustawienia.ukryteKategorie || [];
-  const mapa = ustawienia.mapaProduktow || {};    // zaawansowane mapowanie: id produktu → katalog
   const dodaneIds = new Set(produktyDodane.map(p=>Number(p.id)));
   const bazowePoEdycji = produktyBazoweWspolne()
     .filter(p=>!dodaneIds.has(Number(p.id))&&!produktyUkryte.includes(p.id))
     .map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p);
   produkty = [ ...bazowePoEdycji, ...produktyDodane ]
-    .map(p => { let k = mapa[p.id] || p.kategoria;
-                for(let i=0; i<3 && zmianyKat[k]; i++) k = zmianyKat[k];
-                return k===p.kategoria ? p : {...p, kategoria:k}; })
-    .map(p => stanyProduktow[p.id]!==undefined ? {...p, stan:+stanyProduktow[p.id]} : p)
-    .filter(p => !ukryteKat.includes(p.kategoria))
-    .filter(p => !produktOznaczonyNiedostepny(p));
+    .map(przygotujProduktDlaSklepu)
+    .filter(p => !ukryteKat.includes(p.kategoria));
+  // Brak u producenta wstrzymuje zakup, ale nie usuwa karty, adresu ani treści.
+  // Tylko świadome przeniesienie do kosza / definitywne usunięcie wyłącza produkt.
   produkty=filtrujDuplikatySklepu(produkty);
 }
 function podpisPublikacjiProduktu(p={}){
@@ -3574,7 +3590,7 @@ function specyfikacjaProduktuHTML(p){
   </details>`;
 }
 function widokProdukt(id){
-  const p = produkty.find(x=>x.id===id);
+  const p = produktSklepuPoId(id);
   if(!p){ loguj("ostrzezenie","Otwarto nieistniejący produkt: id="+id); return `<div class="page"><div class="panel"><h1>Nie znaleziono produktu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`; }
   if(String(ostatniProduktIlosci)!==String(id)){iloscProduktu=1;ostatniProduktIlosci=id;}
   const powiazane = produkty.filter(x=>x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
@@ -4268,7 +4284,7 @@ function seoProduktyWorkspaceHTML(queue,tab="produkty"){
 function seoAktualizujMetaDlaTrasy(route=trasa()){
   const ensure=(selector,create)=>{let el=document.head.querySelector(selector);if(!el){el=document.createElement(create.tag||"meta");for(const [k,v] of Object.entries(create.attrs||{}))el.setAttribute(k,v);document.head.appendChild(el);}return el;},setMeta=(name,value,property=false)=>{const attr=property?"property":"name",el=ensure(`meta[${attr}="${name}"]`,{tag:"meta",attrs:{[attr]:name}});el.setAttribute("content",String(value||""));};
   const baseTitle=ustawienia.nazwaSklepu||"Artway-TM",baseDesc=ustawienia.seo?.opis||ustawienia.opisSklepu||"Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów.";let title=ustawienia.seo?.tytul||`Gry, zabawki i artykuły imprezowe | ${baseTitle}`,desc=baseDesc,canonical=location.origin+"/",image="",price="",schema={"@context":"https://schema.org","@graph":[{"@type":"WebSite",name:baseTitle,url:canonical,inLanguage:"pl-PL"},{"@type":"OnlineStore",name:baseTitle,url:canonical,email:ustawienia.email||"artwaytm@gmail.com",telephone:ustawienia.telefon||"+48530038914"}]};
-  if(route.startsWith("/produkt/")){const p=produkty.find(x=>String(x.id)===String(route.split("/")[2]));if(p){const effective=seoEfektywneDaneProduktu(p);title=effective.seoTitle||`${p.nazwa} | ${baseTitle}`;desc=effective.seoDescription;canonical=`${location.origin}/produkt/${p.id}`;image=p.zdjecie||p.zdjecia?.[0]||"";price=Number(p.cena||0)>0?Number(p.cena).toFixed(2):"";const gtin=String(p.gtin||p.ean||"").replace(/\D/g,"");schema={"@context":"https://schema.org","@graph":[{"@type":"Product",name:p.nazwa,description:seoTekstBezHTML(p.opis||desc),image:[p.zdjecie,...(p.zdjecia||[])].filter(Boolean),sku:p.sku||p.externalId||String(p.id),...(gtin?{[`gtin${gtin.length}`]:gtin}:{}),brand:(p.producent||p.marka)?{"@type":"Brand",name:p.producent||p.marka}:undefined,offers:{"@type":"Offer",url:canonical,priceCurrency:"PLN",price,availability:produktOznaczonyNiedostepny(p)?"https://schema.org/OutOfStock":"https://schema.org/InStock",itemCondition:"https://schema.org/NewCondition"}},{"@type":"BreadcrumbList",itemListElement:[{"@type":"ListItem",position:1,name:"Strona główna",item:location.origin+"/"},{"@type":"ListItem",position:2,name:p.nazwa,item:canonical}]}]};}}
+  if(route.startsWith("/produkt/")){const p=produktSklepuPoId(route.split("/")[2]);if(p){const effective=seoEfektywneDaneProduktu(p);title=effective.seoTitle||`${p.nazwa} | ${baseTitle}`;desc=effective.seoDescription;canonical=`${location.origin}/produkt/${p.id}`;image=p.zdjecie||p.zdjecia?.[0]||"";price=Number(p.cena||0)>0?Number(p.cena).toFixed(2):"";const gtin=String(p.gtin||p.ean||"").replace(/\D/g,"");schema={"@context":"https://schema.org","@graph":[{"@type":"Product",name:p.nazwa,description:seoTekstBezHTML(p.opis||desc),image:[p.zdjecie,...(p.zdjecia||[])].filter(Boolean),sku:p.sku||p.externalId||String(p.id),...(gtin?{[`gtin${gtin.length}`]:gtin}:{}),brand:(p.producent||p.marka)?{"@type":"Brand",name:p.producent||p.marka}:undefined,offers:{"@type":"Offer",url:canonical,priceCurrency:"PLN",price,availability:produktOznaczonyNiedostepny(p)?"https://schema.org/OutOfStock":"https://schema.org/InStock",itemCondition:"https://schema.org/NewCondition"}},{"@type":"BreadcrumbList",itemListElement:[{"@type":"ListItem",position:1,name:"Strona główna",item:location.origin+"/"},{"@type":"ListItem",position:2,name:p.nazwa,item:canonical}]}]};}}
   else if(route.startsWith("/kategoria/")){const raw=decodeURIComponent(route.split("/")[2]||""),category=wszystkieKategorie().find(k=>k===raw||seoSlugKategorii(k)===seoSlugKategorii(raw))||raw,list=produkty.filter(p=>p.kategoria===category);title=`${category} | ${baseTitle}`;desc=`Produkty z kategorii ${category}. Sprawdź aktualną ofertę, ceny i wygodną dostawę InPost.`;canonical=`${location.origin}/kategoria/${seoSlugKategorii(category)}`;image=list.find(p=>p.zdjecie)?.zdjecie||"";schema={"@context":"https://schema.org","@type":"CollectionPage",name:category,description:desc,url:canonical};}
   else if(route==="/promocje"||route==="/nowosci"){const name=route==="/promocje"?"Promocje":"Nowości";title=`${name} | ${baseTitle}`;desc=route==="/promocje"?"Aktualne promocje na gry, zabawki kreatywne, balony i artykuły imprezowe.":"Nowe gry, zabawki kreatywne, balony i artykuły imprezowe w Artway-TM.";canonical=`${location.origin}${route}`;schema={"@context":"https://schema.org","@type":"CollectionPage",name,description:desc,url:canonical};}
   document.title=title;setMeta("description",desc);setMeta("robots",route.startsWith("/admin")||["/diagnostyka","/logowanie","/rejestracja","/konto","/zamowienia"].includes(route)?"noindex,nofollow":"index,follow,max-image-preview:large");setMeta("og:locale","pl_PL",true);setMeta("og:site_name",baseTitle,true);setMeta("og:title",title,true);setMeta("og:description",desc,true);setMeta("og:url",canonical,true);setMeta("og:type",route.startsWith("/produkt/")?"product":"website",true);setMeta("og:image",image,true);setMeta("twitter:card",image?"summary_large_image":"summary");setMeta("twitter:title",title);setMeta("twitter:description",desc);setMeta("twitter:image",image);setMeta("product:price:amount",price,true);setMeta("product:price:currency",price?"PLN":"",true);

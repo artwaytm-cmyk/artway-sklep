@@ -736,8 +736,8 @@ if (!supplierFlow.includes("czytaj('orders'") || !supplierFlow.includes("czytaj(
 if (!supplierFlow.includes('synchronizujSprzedazZDostepnosciaProducenta') || !supplierFlow.includes('saleAutomation')) {
   fail('store-app.mjs: wynik kontroli producenta musi automatycznie ukrywać lub przywracać sprzedaż w sklepie i Allegro');
 }
-if (!app.includes('.filter(p => !produktOznaczonyNiedostepny(p))') || !app.includes('function allegroZamowienieZrealizowaneLokalnie')) {
-  fail('assets/app.js: niedostępny produkt ma być ukryty w sklepie, a zrealizowane Allegro wyłączone z obsługi');
+if (!app.includes('Brak u producenta wstrzymuje zakup, ale nie usuwa karty') || !app.includes('function produktSklepuPoId') || !app.includes('function allegroZamowienieZrealizowaneLokalnie')) {
+  fail('assets/app.js: niedostępny produkt ma zachować kartę i adres, zakup ma być wstrzymany, a zrealizowane Allegro wyłączone z obsługi');
 }
 if (!app.includes('Fizyczne korekty ilości wykonujesz wyłącznie w karcie „Stany”') || !app.includes('Błąd pobrania nie jest traktowany jako brak')) {
   fail('assets/app.js: fizyczne stany muszą być oddzielone od dostępności producenta, a błąd strony producenta nie może oznaczać braku produktu');
@@ -869,7 +869,7 @@ requireMarkers('netlify/functions/sitemap.mjs', sitemap, [
 requireMarkers('netlify/functions/google-products.mjs', googleProducts, [
   'base.google.com/ns/1.0',
   'automaticSeo',
-  '<g:availability>in_stock</g:availability>',
+  "productIsUnavailable(product, availability) ? 'out_of_stock' : 'in_stock'",
   '<g:price>',
   'mergeCatalogProducts',
   'artway_dostepnosc',

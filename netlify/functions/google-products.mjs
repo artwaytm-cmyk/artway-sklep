@@ -76,7 +76,7 @@ export default async () => {
     const description = seo.description;
     const images = productImages(product), image = images[0];
     const price = Number(valueFor(product, ['cena', 'price']));
-    if (hidden.has(String(product.id)) || productIsUnavailable(product, availability) || !id || !title || !description || !image || !(price > 0)) {
+    if (hidden.has(String(product.id)) || !id || !title || !description || !image || !(price > 0)) {
       excluded += 1;
       return [];
     }
@@ -96,7 +96,7 @@ export default async () => {
       <g:canonical_link>${xml(`${origin}/produkt/${encodeURIComponent(product.id)}`)}</g:canonical_link>
       <g:image_link>${xml(image)}</g:image_link>
       ${images.slice(1, 11).map((url) => `<g:additional_image_link>${xml(url)}</g:additional_image_link>`).join('\n      ')}
-      <g:availability>in_stock</g:availability>
+      <g:availability>${productIsUnavailable(product, availability) ? 'out_of_stock' : 'in_stock'}</g:availability>
       <g:price>${price.toFixed(2)} PLN</g:price>
       <g:condition>new</g:condition>
       ${brand ? `<g:brand>${xml(brand)}</g:brand>` : ''}

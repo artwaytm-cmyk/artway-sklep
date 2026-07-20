@@ -162,7 +162,7 @@ function specyfikacjaProduktuHTML(p){
   </details>`;
 }
 function widokProdukt(id){
-  const p = produkty.find(x=>x.id===id);
+  const p = produktSklepuPoId(id);
   if(!p){ loguj("ostrzezenie","Otwarto nieistniejący produkt: id="+id); return `<div class="page"><div class="panel"><h1>Nie znaleziono produktu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`; }
   if(String(ostatniProduktIlosci)!==String(id)){iloscProduktu=1;ostatniProduktIlosci=id;}
   const powiazane = produkty.filter(x=>x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);

@@ -20,7 +20,9 @@ const absoluteUrl = (value) => {
 };
 
 function activeCatalog(data = {}) {
-  return mergeCatalogProducts(data).activeProducts.filter((product) => Number(product.cena) > 0 && !seoProductUnavailable(data, product));
+  return mergeCatalogProducts(data).activeProducts
+    .filter((product) => Number(product.cena) > 0)
+    .map((product) => ({ ...product, __saleUnavailable: seoProductUnavailable(data, product) }));
 }
 
 async function catalogSnapshot() {
@@ -63,11 +65,12 @@ function productIdentifiers(product = {}) {
 
 function productCard(product) {
   const seo = productSeo(product), image = productImages(product)[0], url = `/produkt/${encodeURIComponent(product.id)}`;
-  return `<article class="seo-ssr-card">${image ? `<a href="${url}"><img src="${escapeHtml(image)}" alt="${escapeHtml(seo.name)}" loading="lazy" width="320" height="240"></a>` : ''}<div><small>${escapeHtml(seo.category || 'Produkty')}</small><h2><a href="${url}">${escapeHtml(seo.name)}</a></h2><p>${escapeHtml(seo.description)}</p><b>${Number(product.cena).toFixed(2).replace('.', ',')} zł</b></div></article>`;
+  return `<article class="seo-ssr-card">${image ? `<a href="${url}"><img src="${escapeHtml(image)}" alt="${escapeHtml(seo.name)}" loading="lazy" width="320" height="240"></a>` : ''}<div><small>${escapeHtml(seo.category || 'Produkty')}</small><h2><a href="${url}">${escapeHtml(seo.name)}</a></h2><p>${escapeHtml(seo.description)}</p><b>${Number(product.cena).toFixed(2).replace('.', ',')} zł</b>${product.__saleUnavailable?'<span>Chwilowo niedostępny</span>':''}</div></article>`;
 }
 
 function productPage(product, products) {
   const seo = productSeo(product), images = productImages(product), ids = productIdentifiers(product);
+  const unavailable = product.__saleUnavailable === true;
   const canonical = `${ORIGIN}/produkt/${encodeURIComponent(product.id)}`;
   const categoryUrl = seo.category ? `${ORIGIN}/kategoria/${seoSlug(seo.category)}` : ORIGIN;
   const schema = {
@@ -76,7 +79,7 @@ function productPage(product, products) {
         '@type': 'Product', '@id': `${canonical}#product`, name: seo.name, description: cleanText(product.opis || product.description || seo.description, 5000),
         image: images, sku: ids.sku, ...(ids.gtin ? { [`gtin${ids.gtin.length}`]: ids.gtin } : {}), ...(ids.mpn ? { mpn: ids.mpn } : {}),
         ...(seo.brand ? { brand: { '@type': 'Brand', name: seo.brand } } : {}),
-        offers: { '@type': 'Offer', url: canonical, priceCurrency: 'PLN', price: Number(product.cena).toFixed(2), availability: 'https://schema.org/InStock', itemCondition: 'https://schema.org/NewCondition' },
+        offers: { '@type': 'Offer', url: canonical, priceCurrency: 'PLN', price: Number(product.cena).toFixed(2), availability: unavailable ? 'https://schema.org/OutOfStock' : 'https://schema.org/InStock', itemCondition: 'https://schema.org/NewCondition' },
       },
       { '@type': 'BreadcrumbList', itemListElement: [
         { '@type': 'ListItem', position: 1, name: 'Strona główna', item: `${ORIGIN}/` },
@@ -87,7 +90,7 @@ function productPage(product, products) {
   };
   const related = products.filter((entry) => String(entry.id) !== String(product.id) && entry.kategoria === product.kategoria).slice(0, 4);
   const description = cleanText(product.opis || product.description || seo.description, 12000);
-  const content = `<div class="seo-ssr-page"><nav class="seo-ssr-breadcrumb" aria-label="Okruszki"><a href="/">Sklep</a>${seo.category ? ` / <a href="/kategoria/${seoSlug(seo.category)}">${escapeHtml(seo.category)}</a>` : ''} / <span>${escapeHtml(seo.name)}</span></nav><article class="seo-ssr-product">${images[0] ? `<div class="seo-ssr-product-image"><img src="${escapeHtml(images[0])}" alt="${escapeHtml(seo.name)}" width="720" height="620"></div>` : ''}<div><small>${escapeHtml(seo.category || 'Oferta Artway-TM')}</small><h1>${escapeHtml(seo.name)}</h1><p>${escapeHtml(seo.description)}</p><strong>${Number(product.cena).toFixed(2).replace('.', ',')} zł</strong><p class="seo-ssr-available">Dostępny w sprzedaży • dostawa InPost</p>${ids.gtin || ids.sku ? `<dl><dt>Kod produktu</dt><dd>${escapeHtml(ids.gtin || ids.sku)}</dd></dl>` : ''}</div></article><section class="seo-ssr-description"><h2>Opis produktu</h2>${description.split(/\n+/).filter(Boolean).slice(0, 12).map((part) => `<p>${escapeHtml(part)}</p>`).join('')}</section>${related.length ? `<section><h2>Podobne produkty</h2><div class="seo-ssr-grid">${related.map(productCard).join('')}</div></section>` : ''}</div>`;
+  const content = `<div class="seo-ssr-page"><nav class="seo-ssr-breadcrumb" aria-label="Okruszki"><a href="/">Sklep</a>${seo.category ? ` / <a href="/kategoria/${seoSlug(seo.category)}">${escapeHtml(seo.category)}</a>` : ''} / <span>${escapeHtml(seo.name)}</span></nav><article class="seo-ssr-product">${images[0] ? `<div class="seo-ssr-product-image"><img src="${escapeHtml(images[0])}" alt="${escapeHtml(seo.name)}" width="720" height="620"></div>` : ''}<div><small>${escapeHtml(seo.category || 'Oferta Artway-TM')}</small><h1>${escapeHtml(seo.name)}</h1><p>${escapeHtml(seo.description)}</p><strong>${Number(product.cena).toFixed(2).replace('.', ',')} zł</strong><p class="seo-ssr-available">${unavailable?'Chwilowo niedostępny — karta i adres pozostają aktywne':'Dostępny w sprzedaży • dostawa InPost'}</p>${ids.gtin || ids.sku ? `<dl><dt>Kod produktu</dt><dd>${escapeHtml(ids.gtin || ids.sku)}</dd></dl>` : ''}</div></article><section class="seo-ssr-description"><h2>Opis produktu</h2>${description.split(/\n+/).filter(Boolean).slice(0, 12).map((part) => `<p>${escapeHtml(part)}</p>`).join('')}</section>${related.length ? `<section><h2>Podobne produkty</h2><div class="seo-ssr-grid">${related.map(productCard).join('')}</div></section>` : ''}</div>`;
   return { title: seo.title, description: seo.description, canonical, image: images[0] || '', type: 'product', schema, content };
 }
 
