@@ -111,10 +111,10 @@ function adminPodlaczLadowaniePoZamiarze(version){
   if(adminWstepneLadowaniePodlaczone)return;adminWstepneLadowaniePodlaczone=true;
   const wskaz=(event)=>{
     const link=event.target?.closest?.('a[href^="#/admin"]'),route=adminTrasaZOdnosnika(link);if(!route)return;
-    clearTimeout(adminWstepneLadowanieTimer);adminWstepneLadowanieTimer=setTimeout(()=>adminWstepnieZaladujTrase(route,version),140);
+    clearTimeout(adminWstepneLadowanieTimer);const delay=event.type==="pointerdown"?0:70;adminWstepneLadowanieTimer=setTimeout(()=>adminWstepnieZaladujTrase(route,version),delay);
   };
   const anuluj=()=>{clearTimeout(adminWstepneLadowanieTimer);adminWstepneLadowanieTimer=0;};
-  document.addEventListener("pointerover",wskaz,{passive:true});document.addEventListener("focusin",wskaz);document.addEventListener("pointerout",anuluj,{passive:true});
+  document.addEventListener("pointerover",wskaz,{passive:true});document.addEventListener("pointerdown",wskaz,{passive:true});document.addEventListener("focusin",wskaz);document.addEventListener("pointerout",anuluj,{passive:true});
 }
 function zaplanujWstepneLadowaniePanelu(version){
   if(typeof jestAdmin!=="function"||!jestAdmin())return;

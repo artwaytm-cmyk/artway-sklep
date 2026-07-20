@@ -16,7 +16,11 @@ function adminModulyDlaTrasy(route=""){
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
   if(t==="/diagnostyka")add("system");
   else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("commerce","inventory","system");
-  else if(t.startsWith("/admin/agent-ai")||t.startsWith("/admin/magazyn"))add("agent","warehouse","commerce","inventory");
+  else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","inventory");
+  else if(["/admin/magazyn/lokalizacje","/admin/magazyn/etykiety-qr"].includes(t))add("warehouse");
+  else if(t==="/admin/magazyn/ruchy")add("warehouse","inventory");
+  else if(t==="/admin/magazyn/stany")add("warehouse","commerce","inventory");
+  else if(t.startsWith("/admin/magazyn"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/wysylki")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/infakt"))add("inventory");
   else if(t==="/admin/asortyment"||t==="/admin/asortyment/produkty")add("commerce","inventory");

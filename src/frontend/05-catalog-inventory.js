@@ -1,5 +1,33 @@
 /* ═══════════ WCZYTANIE PRODUKTÓW ═══════════
    Lista = (products.json lub zapasowa) − ukryte + dodane w panelu admina */
+// Lekki indeks kartotek jest częścią podstawowych danych sklepu. Dzięki temu
+// magazyn, lokalizacje i generator QR nie muszą pobierać całego modułu edytora.
+function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }
+function jestProduktemImportowanym(id){ return produktyImportowane.some(p=>String(p.id)===String(id)); }
+function produktDodanyPoId(id){ return produktyDodane.find(p=>Number(p.id)===Number(id)); }
+function czyProduktAdminWKoszu(p){
+  if(!p) return false;
+  if(jestProduktemDodanym(p.id)) return false;
+  return produktyUkryte.includes(p.id);
+}
+function bazoweProduktyWKoszu(){
+  const dodaneIds=new Set(produktyDodane.map(p=>Number(p.id)));
+  return produktyUkryte
+    .filter(id=>!dodaneIds.has(Number(id))&&koszMeta[id]&&!produktyDefinitywne.includes(id))
+    .map(id=>produktyBazoweWspolne().find(x=>Number(x.id)===Number(id)))
+    .filter(Boolean);
+}
+let produktyAdminCache={bazowe:null,dodane:null,edytowane:null,definitywne:null,items:[],byId:new Map()};
+function uniewaznijProduktyAdminCache(){produktyAdminCache={bazowe:null,dodane:null,edytowane:null,definitywne:null,items:[],byId:new Map()};}
+function produktyDoAdministracji(){
+  naprawKolizjeIdProduktow();
+  const bazowe=produktyBazoweWspolne();
+  if(produktyAdminCache.bazowe===bazowe&&produktyAdminCache.dodane===produktyDodane&&produktyAdminCache.edytowane===produktyEdytowane&&produktyAdminCache.definitywne===produktyDefinitywne)return produktyAdminCache.items;
+  const dodaneIds=new Set(produktyDodane.map(p=>Number(p.id)));
+  const items=[...bazowe.filter(p=>!dodaneIds.has(Number(p.id))&&!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id]?{...p,...produktyEdytowane[p.id],id:p.id}:p),...produktyDodane];
+  produktyAdminCache={bazowe,dodane:produktyDodane,edytowane:produktyEdytowane,definitywne:produktyDefinitywne,items,byId:new Map(items.map(p=>[String(p.id),p]))};return items;
+}
+function pobierzProduktAdmin(id){produktyDoAdministracji();return produktyAdminCache.byId.get(String(id));}
 function zbudujProdukty(){
   if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
   naprawKolizjeIdProduktow();

@@ -85,7 +85,7 @@ test('kreator arkusza pozwala ustawić osobny nakład, pozycję startową i fizy
   assert.match(source, /Jeśli arkusz jest nowy/);
   assert.match(source, /magazynQRDrukMetryka/);
   assert.match(source, /magazynQRUstawPresetDruku/);
-  assert.match(source, /Układ nie mieści się na kartce A4/);
+  assert.match(source, /Pojedyncza etykieta jest większa od obszaru strony A4/);
   assert.match(styles, /--qr-columns/);
   assert.match(styles, /warehouse-qr-empty-slot/);
   assert.match(styles, /page-break-after:always/);
@@ -102,6 +102,20 @@ test('arkusz QR automatycznie dobiera siatkę i udostępnia prostą kalibrację 
   const sandbox = { window: {}, document: {}, Set, Map, Intl, console, setTimeout, clearTimeout, encodeURIComponent, decodeURIComponent };
   vm.runInNewContext(`${source}\nmagazynQRDrukUstawienia={orientacja:'pion',szerokosc:62,wysokosc:38,odstepX:3,odstepY:2,marginesGora:8,marginesPrawo:8,marginesDol:8,marginesLewo:8,korektaX:0,korektaY:0};globalThis.__fit=magazynQRDopasowanieAutomatyczne();`, sandbox);
   assert.deepEqual(structuredClone(sandbox.__fit), { columns: 3, rows: 7 });
+});
+
+test('etykieta skaluje ramkę i QR jako całość oraz przechodzi w całości na kolejną stronę', () => {
+  assert.match(source, /--qr-code-size:\$\{m\.codeSize\}mm/);
+  assert.match(source, /label-layout-\$\{m\.labelLayout\}/);
+  assert.match(source, /Układ został bezpiecznie dopasowany — żadna etykieta nie będzie przecięta/);
+  assert.match(styles, /grid-template-columns:var\(--qr-code-size\) minmax\(0,1fr\)/);
+  assert.match(styles, /page-break-inside:avoid!important/);
+  const sandbox = { window: {}, document: {}, Set, Map, Intl, console, setTimeout, clearTimeout, encodeURIComponent, decodeURIComponent };
+  vm.runInNewContext(`${source}\nmagazynQRFormat='a4';magazynQRDrukUstawienia={orientacja:'pion',szerokosc:62,wysokosc:38,kolumny:3,wiersze:7,odstepX:3,odstepY:2,marginesGora:8,marginesPrawo:8,marginesDol:8,marginesLewo:8,korektaX:0,korektaY:0,start:1};magazynQRPodgladPozycje=Array.from({length:22},(_,i)=>({key:'P:'+i,type:'product',title:'P'+i}));magazynQREtykietyHTML=items=>items.map(()=>'<article class="warehouse-qr-label"></article>').join('');globalThis.__pages=magazynQRArkuszeHTML();`, sandbox);
+  const pages=String(sandbox.__pages).match(/<section class="warehouse-qr-print-page[\s\S]*?<\/section>/g) || [];
+  assert.equal(pages.length, 2);
+  assert.equal((pages[0].match(/<article/g) || []).length, 21);
+  assert.equal((pages[1].match(/<article/g) || []).length, 1);
 });
 
 test('skaner telefonu ma tryb awaryjny QR i przekazuje aktywną lokalizację do pozycji dokumentu', () => {

@@ -6,9 +6,9 @@ const root=new URL("../",import.meta.url);
 const read=path=>readFile(new URL(path,root),"utf8");
 
 test("liczniki nawigacji magazynu pokazują wyłącznie braki do aktywnych zamówień",async()=>{
-  const [navigation,warehouse]=await Promise.all([read("assets/admin.js"),read("src/frontend/07-admin-shipping.js")]);
-  const subnav=navigation.slice(navigation.indexOf("function magazynSubnavHTML"),navigation.indexOf("function agentAISubnavHTML"));
-  assert.match(subnav,/const plan=potrzebyZatowarowania\(\),braki=plan\.length/);
+  const [navigation,warehouse]=await Promise.all([read("assets/admin-warehouse.js"),read("src/frontend/07-admin-shipping.js")]);
+  const subnav=navigation.slice(navigation.indexOf("function magazynSubnavHTML"),navigation.indexOf("const ASORTYMENT_PARTIA_KART"));
+  assert.match(subnav,/const plan=typeof potrzebyZatowarowania==="function"\?potrzebyZatowarowania\(\):\[\],braki=plan\.length/);
   assert.match(subnav,/badge:braki\|\|""/);
   assert.doesNotMatch(subnav,/produktyAktywne\.length|ruchyMagazynowe|prod\.niskie|prod\.braki/);
   assert.match(warehouse,/const brakiDoZamowien=typeof rezerwacjeMagazynowe==="function"\?potrzebyZatowarowania\(\)\.length:0/);
@@ -16,7 +16,7 @@ test("liczniki nawigacji magazynu pokazują wyłącznie braki do aktywnych zamó
 });
 
 test("zakupy producentów i lokalizacje magazynowe mają odrębne zakresy",async()=>{
-  const warehouse=await read("assets/admin.js");
+  const warehouse=await read("assets/admin-warehouse.js");
   assert.match(warehouse,/const planProdukty=planZakupu\.map\(x=>x\.produkt\),planIds=new Set/);
   assert.match(warehouse,/const brakiDostawcyPlanu=planProdukty\.filter/);
   assert.match(warehouse,/const lokalizacjeDoUstalenia=/);

@@ -67,7 +67,8 @@ test('moduły aktywnej podstrony panelu są pobierane równolegle po rdzeniu', a
   assert.match(router, /Promise\.all\(modules\.filter\(module=>module!=="core"\)\.map\(module=>zaladujAdminModul\(module,version\)\)\)/);
   assert.doesNotMatch(router, /modules\.reduce\(\(chain,module\)=>chain\.then/);
   assert.match(responsive, /a\[href\^=\"#\/admin\"\]/);
-  assert.match(responsive, /setTimeout\(\(\)=>adminWstepnieZaladujTrase\(route,version\),140\)/);
+  assert.match(responsive, /event\.type==="pointerdown"\?0:70/);
+  assert.match(responsive, /addEventListener\("pointerdown",wskaz/);
   assert.doesNotMatch(responsive, /Object\.keys\(ADMIN_MODULY_RUNTIME\)/);
   assert.doesNotMatch(responsive, /finally\(\(\)=>idle\(next\)\)/);
   assert.match(router, /zaplanujWstepneLadowaniePanelu\(version\)/);
@@ -77,6 +78,19 @@ test('lista asortymentu nie ładuje agenta, magazynu ani narzędzi katalogowych'
   const router = await readFile('src/frontend/06-router-and-storefront.js', 'utf8');
   assert.match(router, /t==="\/admin\/asortyment"\|\|t==="\/admin\/asortyment\/produkty"\)add\("commerce","inventory"\)/);
   assert.match(router, /t\.startsWith\("\/admin\/produkty\/edytuj\/"\).*add\("agent","commerce","inventory"\)/);
+});
+
+test('lekkie podstrony lokalizacji i QR nie uruchamiają Allegro, Agenta ani całego edytora', async () => {
+  const [router, warehouse, catalog] = await Promise.all([
+    readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('src/frontend/12-warehouse-views.js', 'utf8'),
+    readFile('src/frontend/05-catalog-inventory.js', 'utf8'),
+  ]);
+  assert.match(router, /\["\/admin\/magazyn\/lokalizacje","\/admin\/magazyn\/etykiety-qr"\]\.includes\(t\)\)add\("warehouse"\)/);
+  assert.match(router, /t==="\/admin\/magazyn\/ruchy"\)add\("warehouse","inventory"\)/);
+  assert.match(router, /t==="\/admin\/magazyn\/stany"\)add\("warehouse","commerce","inventory"\)/);
+  assert.match(warehouse, /\["pulpit","dostawcy","stany","plan"\]\.includes\(aktywna\).*allegroLadujJesliTrzeba\("orders"\)/);
+  assert.match(catalog, /function produktyDoAdministracji\(\)/);
 });
 
 test('responsywna warstwa nie modyfikuje masowo kontrolek ani nie wymusza przeliczeń układu', async () => {

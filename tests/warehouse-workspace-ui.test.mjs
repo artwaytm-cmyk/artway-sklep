@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { ASSET_BUNDLES } from '../scripts/build-assets.mjs';
 
-const navigation = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
-const inventory = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
+const navigation = await readFile(new URL('../assets/admin-warehouse.js', import.meta.url), 'utf8');
+const inventory = await readFile(new URL('../assets/admin-warehouse.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../src/styles/21-warehouse-workspace.css', import.meta.url), 'utf8');
 
 test('magazyn ma jedną nawigację pogrupowaną według procesu pracy', () => {
-  const section = navigation.slice(navigation.indexOf('function magazynSubnavHTML'), navigation.indexOf('function agentAISubnavHTML'));
+  const section = navigation.slice(navigation.indexOf('function magazynSubnavHTML'), navigation.indexOf('const ASORTYMENT_PARTIA_KART'));
   for (const route of ['dostawcy', 'stany', 'lokalizacje', 'etykiety-qr', 'plan', 'ruchy']) assert.ok(section.includes(`#/admin/magazyn/${route}`));
   assert.match(section, /warehouse-module-nav/);
   assert.match(section, /warehouse-module-links/);

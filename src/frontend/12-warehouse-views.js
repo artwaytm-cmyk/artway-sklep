@@ -1,3 +1,18 @@
+function magazynSubnavHTML(aktywny="pulpit"){
+  const plan=typeof potrzebyZatowarowania==="function"?potrzebyZatowarowania():[],braki=plan.length;
+  const bezLok=typeof magazynLokalizacjeZamowienIds!=="undefined"?magazynLokalizacjeZamowienIds.size:0;
+  const dokumenty=typeof agentAIZlecenia!=="undefined"&&typeof agentAIPlanDokumentAktywny==="function"?(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny).length:0,planAkcje=braki+dokumenty;
+  const items=[
+    {id:"pulpit",href:"#/admin/magazyn",icon:"📊",label:"Pulpit",description:"Priorytety"},
+    {id:"dostawcy",href:"#/admin/magazyn/dostawcy",icon:"🏭",label:"Dostępność",description:"Producent • sprzedaż • pokrycie",badge:braki||""},
+    {id:"stany",href:"#/admin/magazyn/stany",icon:"📦",label:"Stany",description:"Fizyczny towar teraz"},
+    {id:"plan",href:"#/admin/magazyn/plan",icon:"📥",label:"Plan i dokumenty",description:"Zatowarowanie • PZ/WZ",badge:planAkcje||""},
+    {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",icon:"🗺️",label:"Lokalizacje",description:"Obszary • regały • półki",badge:bezLok||""},
+    {id:"etykiety-qr",href:"#/admin/magazyn/etykiety-qr",icon:"🏷️",label:"Etykiety QR",description:"Druk i skanowanie"},
+    {id:"ruchy",href:"#/admin/magazyn/ruchy",icon:"🧾",label:"Ruchy i ustawienia",description:"Audyt magazynu"}
+  ];
+  return `<nav class="panel warehouse-module-nav" aria-label="Podstrony magazynu"><div class="warehouse-module-brand"><span>🏬</span><div><small>Centrum operacyjne</small><b>Magazyn</b></div></div><div class="warehouse-module-links">${items.map(item=>`<a class="${item.id===aktywny?"active":""}" href="${esc(item.href)}" ${item.id===aktywny?'aria-current="page"':""} title="${esc(`${item.label} — ${item.description}`)}"><span class="warehouse-nav-icon">${esc(item.icon)}</span><span class="warehouse-nav-copy"><b>${esc(item.label)}</b><small>${esc(item.description)}</small></span>${item.badge?`<span class="nav-badge">${esc(item.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
+}
 const ASORTYMENT_PARTIA_KART=10;
 let asortymentKartyOczekujace=[],asortymentKartyObserwator=null,asortymentKartyGeneracja=0;
 function asortymentRenderujElementKarty(item){return item?.produkt?asortymentKartaProduktuHTML(item.produkt,item.ukrytaKopia===true):String(item||"");}
@@ -129,8 +144,8 @@ function magazynStanyUruchomDoloadowywanie(generation=magazynStanyKartyGeneracja
   magazynStanyKartyObserwator?.disconnect();magazynStanyKartyObserwator=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))magazynStanyDoloadujKarty(generation);},{rootMargin:"700px 0px"});magazynStanyKartyObserwator.observe(loader);
 }
 function widokAdminMagazyn(sekcja="pulpit"){
-  allegroLadujJesliTrzeba(["pulpit","dostawcy","stany","plan"].includes(sekcja)?"orders":"summary");
   const aktywna=["pulpit","dostawcy","stany","lokalizacje","etykiety-qr","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
+  if(["pulpit","dostawcy","stany","plan"].includes(aktywna)&&typeof allegroLadujJesliTrzeba==="function")allegroLadujJesliTrzeba("orders");
   if(aktywna!=="stany"){magazynStanyKartyObserwator?.disconnect();magazynStanyKartyObserwator=null;magazynStanyKartyOczekujace=[];}
   const u=ustawieniaMagazynuPelne();
   if(aktywna==="etykiety-qr")return adminSzkielet("/admin/magazyn",`${magazynSubnavHTML(aktywna)}<div class="warehouse-workspace">${magazynKontekstPodstronyHTML(aktywna,u)}${magazynQRCentrumHTML()}</div>`);
