@@ -99,3 +99,27 @@ test('niższy próg od 55% udostępnia słabszą sugestię bez silnego konfliktu
   assert.equal(broader.offer.id, 'OF-55');
   assert.ok(broader.score >= 55);
 });
+
+test('identyczna nazwa bez identyfikatora nie może automatycznie podpiąć oferty', () => {
+  const product = { id: 30001, nazwa: 'Eco Fun - Trylma', producent: 'Alexander' };
+  const offers = [{ id: 'OF-KAJAK', name: 'Eco Fun - Trylma', productId: 'uuid-kajaka' }];
+  assert.equal(findBestAllegroOffer(product, offers, {}), null);
+  const suggestion = findBestAllegroOffer(product, offers, {}, 55);
+  assert.equal(suggestion.offer.id, 'OF-KAJAK');
+  assert.match(suggestion.reason, /wyłącznie sugestia/);
+});
+
+test('niepotwierdzone UUID katalogu bez EAN nie jest automatycznym dowodem', () => {
+  const product = { id: 30002, nazwa: 'Gra edukacyjna', allegroProductId: 'uuid-123' };
+  const offers = [{ id: 'OF-UUID', name: 'Inny produkt', productId: 'uuid-123' }];
+  assert.equal(findBestAllegroOffer(product, offers, {}), null);
+});
+
+test('ręczne mapowanie administratora pozostaje dozwolone bez EAN', () => {
+  const product = { id: 30003, nazwa: 'Produkt bez kodu' };
+  const offers = [{ id: 'OF-MANUAL', name: 'Produkt bez kodu' }];
+  const mappings = { 'OF-MANUAL': { offerId: 'OF-MANUAL', productId: '30003', operator: 'admin-manual-decision' } };
+  const match = findBestAllegroOffer(product, offers, mappings);
+  assert.equal(match.offer.id, 'OF-MANUAL');
+  assert.equal(match.reason, 'ręczne mapowanie administratora');
+});

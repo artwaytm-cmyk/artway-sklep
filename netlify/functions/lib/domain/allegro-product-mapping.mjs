@@ -59,10 +59,10 @@ function mappedOfferForProduct(mappings = {}, productId = '') {
       const current = ranked.get(productKey);
       if (!current || rank > current.rank) ranked.set(productKey, { rank, offerId: String(mapping.offerId || '') });
     }
-    index = new Map([...ranked.entries()].map(([key, value]) => [key, value.offerId]));
+    index = new Map([...ranked.entries()].map(([key, value]) => [key, value]));
     mappingOfferIndexCache.set(mappings, index);
   }
-  return index.get(String(productId)) || '';
+  return index.get(String(productId)) || null;
 }
 function indexedOfferCandidates(product = {}, offers = [], mappedOfferId = '') {
   let index = offerIndexCache.get(offers);
@@ -163,13 +163,11 @@ export function scoreAllegroProductMapping(product = {}, offer = {}) {
   const savedOfferMatch = !!(p.offerId && o.id && p.offerId === o.id);
   if (savedOfferMatch) hit(Math.max(score, 98), 'zapisane ID oferty');
 
-  // Brak pola nigdy nie jest niezgodnością. Rozbieżny EAN również nie może
-  // zniszczyć kilku niezależnych, mocnych dowodów (np. UUID katalogu + MPN +
-  // identyczna nazwa). Wtedy to kartoteka EAN wymaga korekty, a nie mapowanie.
-  const independentIdentity = catalogMatch || savedOfferMatch || (codeMatch && (exact || similarity >= 0.72)) || (externalMatch && exact);
+  // Brak pola nie jest niezgodnością, ale dwa różne, poprawne GTIN oznaczają
+  // różne warianty lub błędne powiązanie. Automat nie może tego nadpisywać
+  // nawet wtedy, gdy nazwa albo kod producenta wyglądają podobnie.
   if (eanMismatch) {
-    if (independentIdentity) warnings.push('EAN w kartotece różni się — tożsamość potwierdzają silniejsze dowody');
-    else conflicts.push('różny EAN/GTIN');
+    conflicts.push('różny EAN/GTIN');
   }
   if (catalogMismatch) {
     if (eanMatch || savedOfferMatch || (codeMatch && exact)) warnings.push('różne ID produktu katalogowego — sprawdź aktualność UUID');
@@ -222,33 +220,45 @@ export function findBestAllegroOffer(product = {}, offersRaw = [], mappingsRaw =
   const producerCode = normalize(product.kodProducenta || product.mpn);
   const name = normalize(product.nazwa || product.name);
   const threshold = Math.min(100, Math.max(55, Number(minimumScore) || 85));
-  const mappedOfferId = mappedOfferForProduct(mappings, productId);
+  const mappedOffer = mappedOfferForProduct(mappings, productId);
+  const mappedOfferId = String(mappedOffer?.offerId || '');
+  const mappedRecord = mappedOfferId ? mappings[mappedOfferId] || null : null;
+  const mappedByAdministrator = !!(mappedRecord && /^(admin-|manual-|operator-)/i.test(String(mappedRecord.operator || '')));
   const offers = indexedOfferCandidates(product, allOffers, mappedOfferId);
-  const credible = (offer) => {
-    const hasEvidence = !!(offer?.name || offer?.offerName || offer?.productId || offer?.ean || offer?.gtin || offer?.externalId || offer?.manufacturerCode || offer?.producerCode);
-    return !hasEvidence || scoreAllegroProductMapping(product, offer).valid;
+  const strongIdentity = (offer) => {
+    const offerEans = offerGtins(offer);
+    const eanMatch = !!(eans.length && offerEans.some((ean) => eans.includes(ean)));
+    const externalMatch = !!(externalId && normalize(offer?.externalId) === externalId);
+    const exactName = !!(name && normalize(offer?.name || offer?.offerName) === name);
+    const codeMatch = !!(producerCode && normalize(offer?.manufacturerCode || offer?.producerCode) === producerCode);
+    const confirmedCatalog = product.allegroCatalogIdentityConfirmed === true
+      && catalogProductId
+      && String(offer?.productId || '') === catalogProductId;
+    const validation = scoreAllegroProductMapping(product, offer);
+    return !validation.strongConflict && (eanMatch || externalMatch || (codeMatch && exactName) || confirmedCatalog);
   };
   let best = null;
   for (const offer of offers) {
     const publicationStatus = String(offer?.status || offer?.publication?.status || '').toUpperCase();
     if (['ENDED', 'ARCHIVED'].includes(publicationStatus)) continue;
     let score = 0, reason = '';
-    if (savedOfferId && String(offer?.id) === savedOfferId && credible(offer)) { score = 100; reason = 'zapisane ID oferty'; }
-    else if (mappedOfferId && String(offer?.id) === String(mappedOfferId) && credible(offer)) { score = 98; reason = 'mapowanie produktu'; }
-    else if (catalogProductId && String(offer?.productId || '') === catalogProductId && credible(offer)) { score = 97; reason = 'identyczne ID produktu katalogowego Allegro'; }
+    if (savedOfferId && String(offer?.id) === savedOfferId && (strongIdentity(offer) || product.allegroOfferIdentityConfirmed === true)) { score = 100; reason = 'zapisane i zweryfikowane ID oferty'; }
+    else if (mappedOfferId && String(offer?.id) === String(mappedOfferId) && (strongIdentity(offer) || mappedByAdministrator)) { score = 98; reason = mappedByAdministrator ? 'ręczne mapowanie administratora' : 'zweryfikowane mapowanie produktu'; }
+    else if (product.allegroCatalogIdentityConfirmed === true && catalogProductId && String(offer?.productId || '') === catalogProductId && strongIdentity(offer)) { score = 97; reason = 'ręcznie potwierdzone ID produktu katalogowego Allegro'; }
     else if (externalId && normalize(offer?.externalId) === externalId) { score = 95; reason = 'identyczny external.id / SKU'; }
     else if (eans.length && offerGtins(offer).some((ean) => eans.includes(ean))) { score = 92; reason = 'identyczny EAN/GTIN'; }
-    else if (producerCode && normalize(offer?.manufacturerCode || offer?.producerCode) === producerCode) { score = 88; reason = 'identyczny kod producenta'; }
-    else if (name && normalize(offer?.name) === name) { score = 86; reason = 'identyczna nazwa oferty'; }
-    else {
+    else if (producerCode && normalize(offer?.manufacturerCode || offer?.producerCode) === producerCode && name && normalize(offer?.name || offer?.offerName) === name) { score = 90; reason = 'identyczny kod producenta i nazwa'; }
+    else if (threshold < 85) {
       const similarity = tokenSimilarity(product.nazwa || product.name, offer?.name);
-      const sameCategory = product.allegroCategoryId && String(product.allegroCategoryId) === String(offer?.categoryId || '');
-      if (similarity >= 0.82) { score = 70 + Math.round(similarity * 10) + (sameCategory ? 5 : 0); reason = 'bardzo podobna nazwa'; }
+      if (name && normalize(offer?.name) === name) { score = 86; reason = 'identyczna nazwa — wyłącznie sugestia'; }
+      else if (similarity >= 0.82) { score = 70 + Math.round(similarity * 10); reason = 'bardzo podobna nazwa — wyłącznie sugestia'; }
       else {
         const validation = scoreAllegroProductMapping(product, offer);
         if (!validation.strongConflict && validation.score >= threshold) { score = validation.score; reason = validation.reason; }
       }
     }
+    const validation = scoreAllegroProductMapping(product, offer);
+    if (validation.strongConflict && !(mappedByAdministrator && String(offer?.id) === String(mappedOfferId))) score = 0;
     if (score && (!best || score > best.score)) best = { offer, score, reason };
   }
   return best?.score >= threshold ? best : null;

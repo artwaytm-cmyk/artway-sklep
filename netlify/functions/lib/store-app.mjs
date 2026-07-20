@@ -743,6 +743,19 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
       if (product && (String(product.allegroOfferId || '') === String(offerId) || product.allegroMappingStatus === 'wymaga_sprawdzenia')) applyUpdate(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', ...(current.conflict ? { allegroMappingConflict: current.conflict } : {}) }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
       continue;
     }
+    const identityValidation = product && offer ? allegroOcenaPowiazania(product, offer) : null;
+    const administratorConfirmed = /^(admin-|manual-|operator-)/i.test(String(current?.operator || ''));
+    if (identityValidation?.strongConflict && !administratorConfirmed) {
+      mappings[offerId] = {
+        ...current, offerId, previousProductId: productId, productId: '', blocked: true,
+        locked: false, canonicalLocked: false, canonical: false, mappingRole: 'unlinked',
+        operator: 'auto-quarantine:identity-conflict', quarantined_at: now,
+        conflict: { productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), reasons: identityValidation.conflicts },
+      };
+      applyUpdate(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', allegroMappingConflict: mappings[offerId].conflict }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
+      quarantined++;
+      continue;
+    }
     if (current?.locked === true || current?.canonicalLocked === true) {
       if (product && offer && !allegroPowiazanieWiarygodne(product, offer)) {
         const fingerprint = allegroProductSyncFingerprint(product);
@@ -1460,15 +1473,52 @@ async function allegroSugerujKategorie(req, product = {}, opt = {}) {
 function allegroMaKategorie(product = {}, opt = {}) {
   return !!tekst(opt.categoryId || product.allegroCategoryId || product.categoryId || '', 80).trim();
 }
+function allegroGtinsProduktuKatalogowego(product = {}) {
+  const values = [product.eans, product.gtins, product.ean, product.gtin];
+  for (const parameter of Array.isArray(product.parameters) ? product.parameters : []) {
+    const name = allegroNormalizujKlucz(parameter?.name || parameter?.label || '');
+    const id = String(parameter?.id || '').trim();
+    if (parameter?.options?.isGTIN === true || ['225693', '245669', '245673'].includes(id) || /(^| )(ean|gtin|isbn|issn|kod kreskowy)( |$)/.test(name)) {
+      values.push(parameter?.values, parameter?.valuesLabels, parameter?.value);
+    }
+  }
+  return [...new Set(values.flat(Infinity).map(canonicalGtin).filter(Boolean))];
+}
+function allegroOcenaTozsamosciKatalogu(product = {}, candidate = {}) {
+  const gtin = canonicalGtin(product.gtin || product.ean || '');
+  const candidateGtins = allegroGtinsProduktuKatalogowego(candidate);
+  const nameScore = allegroPodobienstwoNazw(product.nazwa || product.name, candidate.name);
+  const productBrand = allegroNormalizujKlucz(product.producent || product.marka || product.brand || '');
+  const candidateBrand = allegroNormalizujKlucz(candidate.brand || allegroWartoscParametru(candidate, ['producent', 'marka', 'brand']));
+  const brandMatch = !!(productBrand && candidateBrand && (productBrand === candidateBrand || productBrand.includes(candidateBrand) || candidateBrand.includes(productBrand)));
+  const brandConflict = !!(productBrand && candidateBrand && !brandMatch);
+  const gtinMatch = !!(gtin && candidateGtins.includes(gtin));
+  const nameConsistent = nameScore >= 0.6 || (brandMatch && nameScore >= 0.45);
+  const verified = gtinMatch && nameConsistent && !brandConflict;
+  return {
+    verified,
+    gtinMatch,
+    nameScore: Number(nameScore.toFixed(3)),
+    brandMatch,
+    brandConflict,
+    productGtin: gtin,
+    candidateGtins,
+    reason: !gtin ? 'brak poprawnego GTIN'
+      : !gtinMatch ? 'GTIN katalogu jest inny'
+        : brandConflict ? 'producent lub marka są sprzeczne'
+          : !nameConsistent ? 'nazwa produktu katalogowego jest niezgodna'
+            : 'zgodny GTIN oraz zgodne cechy produktu',
+  };
+}
 async function allegroZnajdzProduktKatalogu(req, product = {}) {
-  const gtin = tekst(product.gtin || product.ean || '', 80).trim();
-  const mpn = tekst(product.kodProducenta || product.mpn || '', 160).trim();
+  const gtinRaw = tekst(product.gtin || product.ean || '', 80).trim();
+  const gtin = canonicalGtin(gtinRaw);
   const name = tekst(product.nazwa || product.name || '', 180).trim();
-  const phrase = gtin || mpn || name;
-  if (!phrase) return { selected: null, products: [], searchedBy: '' };
+  if (!gtinRaw) return { selected: null, products: [], searchedBy: '', blockedReason: 'Brak EAN/GTIN — automat nie szuka ani nie podpina produktu katalogowego po nazwie.' };
+  if (!gtin) return { selected: null, products: [], searchedBy: 'GTIN', blockedReason: 'EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną.' };
   try {
-    const searchedBy = gtin ? 'GTIN' : (mpn ? 'MPN' : 'name');
-    const parameters = searchedBy === 'name' ? { phrase, language: 'pl-PL' } : { phrase, mode: searchedBy, language: 'pl-PL' };
+    const searchedBy = 'GTIN';
+    const parameters = { phrase: gtinRaw.replace(/\D/g, ''), mode: 'GTIN', language: 'pl-PL' };
     const raw = await allegroWywolaj(req, '/sale/products', { parameters });
     const source = Array.isArray(raw.products) ? raw.products : (Array.isArray(raw.items) ? raw.items : []);
     const products = source.map((p) => ({
@@ -1483,16 +1533,14 @@ async function allegroZnajdzProduktKatalogu(req, product = {}) {
       trustedContent: p.trustedContent || null,
       productSafety: p.productSafety || null,
       matchScore: Number(allegroPodobienstwoNazw(name, p.name).toFixed(3)),
-    })).filter((p) => p.id);
-    let selected = searchedBy === 'GTIN'
-      ? (products.find((p) => p.eans.includes(gtin)) || products[0] || null)
-      : searchedBy === 'MPN'
-        ? (products[0] || null)
-        : (products.find((p) => p.matchScore >= 0.82) || null);
+    })).filter((p) => p.id).map((p) => ({ ...p, identity: allegroOcenaTozsamosciKatalogu(product, p) }));
+    const verified = products.filter((p) => p.identity.verified).sort((a, b) => b.identity.nameScore - a.identity.nameScore);
+    const ambiguous = verified.length > 1 && (verified[0].identity.nameScore - verified[1].identity.nameScore) < 0.12;
+    let selected = ambiguous ? null : (verified[0] || null);
     if (selected?.id) {
       try {
         const details = await allegroWywolaj(req, `/sale/products/${encodeURIComponent(selected.id)}`);
-        selected = {
+        const detailed = {
           ...selected,
           name: tekst(details.name || selected.name, 300),
           categoryId: tekst(details.category?.id || selected.categoryId, 80),
@@ -1504,11 +1552,19 @@ async function allegroZnajdzProduktKatalogu(req, product = {}) {
           trustedContent: details.trustedContent || selected.trustedContent || null,
           productSafety: details.productSafety || selected.productSafety || null,
         };
+        detailed.identity = allegroOcenaTozsamosciKatalogu(product, detailed);
+        selected = detailed.identity.verified ? detailed : null;
       } catch {}
     }
-    return { selected, products: products.slice(0, 10), searchedBy };
+    return {
+      selected,
+      products: products.slice(0, 10),
+      searchedBy,
+      blockedReason: ambiguous ? 'Ten sam GTIN zwrócił kilka podobnych produktów — wymagana jest ręczna decyzja.'
+        : (!selected && products.length ? 'Wyniki GTIN nie mają zgodnej nazwy lub producenta — automat nie podepnie produktu.' : ''),
+    };
   } catch (e) {
-    return { selected: null, products: [], searchedBy: gtin ? 'GTIN' : (mpn ? 'MPN' : 'name'), error: { status: e.status || 0, code: e.code || '', message: e.message || String(e) } };
+    return { selected: null, products: [], searchedBy: 'GTIN', error: { status: e.status || 0, code: e.code || '', message: e.message || String(e) } };
   }
 }
 function allegroBrakujaceParametryWymagane(product = {}, categoryParameters = []) {
@@ -1814,13 +1870,21 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   // konfliktom kategorii, a przekazanie jego ID pozwala Allegro uzupełnić GPSR.
   const existingCatalogProductId = tekst(existingOffer?.offer?.productId || existingOffer?.offer?.productSet?.[0]?.product?.id || '', 120).trim();
   const matchedCatalogProductId = tekst(catalogMatch?.selected?.id, 120).trim();
+  const existingIdentityVerified = !!(existingOffer && /(?:zweryfikowane|ręczne mapowanie administratora|external\.id|EAN\/GTIN|kod producenta i nazwa)/i.test(String(existingOffer.reason || '')));
+  const catalogIdentityVerified = catalogMatch?.selected?.identity?.verified === true;
   const exactExistingCatalogMatch = existingCatalogProductId && matchedCatalogProductId === existingCatalogProductId;
   const effectiveCategoryId = tekst((exactExistingCatalogMatch ? catalogMatch?.selected?.categoryId : '') || (existingCatalogProductId ? existingOffer?.offer?.categoryId : '') || catalogMatch?.selected?.categoryId || categoryId, 80).trim();
   if (effectiveCategoryId) options.categoryId = effectiveCategoryId;
   const categoryParameters = await allegroParametryKategorii(req, effectiveCategoryId);
   options.salesConditions = salesConditions;
   options.categoryParameters = categoryParameters.parameters;
-  if (existingCatalogProductId || catalogMatch?.selected?.id) options.catalogProductId = existingCatalogProductId || catalogMatch.selected.id;
+  if (existingCatalogProductId && existingIdentityVerified) {
+    options.catalogProductId = existingCatalogProductId;
+    options.catalogIdentityVerified = true;
+  } else if (catalogIdentityVerified && catalogMatch?.selected?.id) {
+    options.catalogProductId = catalogMatch.selected.id;
+    options.catalogIdentityVerified = true;
+  }
   const catalog = catalogMatch?.selected || {};
   const safeOffer = existingOffer?.offer || {};
   const catalogProducer = allegroRozpoznajProducenta(product, { ...catalog, producent: allegroWartoscParametru(catalog, ['producent', 'marka', 'brand']) || catalog.brand || safeOffer.brand }, offerSettings);
@@ -1889,8 +1953,10 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
   const categoryId = tekst(opt.categoryId || p.allegroCategoryId || p.categoryId || '', 80).trim();
   const images = [p.zdjecie, ...(Array.isArray(p.zdjecia) ? p.zdjecia : [])].filter(Boolean).slice(0, 16);
   const externalId = tekst(p.externalId || p.sku || p.kodProducenta || p.mpn || p.id || '', 120).trim();
-  const allegroProductId = tekst(opt.catalogProductId || p.allegroProductId || '', 120).trim();
-  const gtin = tekst(p.gtin || p.ean, 80).trim();
+  const rawGtin = tekst(p.gtin || p.ean, 80).trim();
+  const gtin = canonicalGtin(rawGtin) ? rawGtin.replace(/\D/g, '') : '';
+  const persistedCatalogConfirmed = p.allegroCatalogIdentityConfirmed === true ? tekst(p.allegroProductId, 120).trim() : '';
+  const allegroProductId = tekst(opt.catalogIdentityVerified === true ? opt.catalogProductId : persistedCatalogConfirmed, 120).trim();
   const parameters = [];
   if (gtin) parameters.push({ name: 'EAN', values: [gtin] });
   if (p.kodProducenta || p.mpn) parameters.push({ name: 'Kod producenta', values: [tekst(p.kodProducenta || p.mpn, 120)] });
@@ -1942,15 +2008,57 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
   if (Object.keys(afterSalesServices).length) payload.afterSalesServices = afterSalesServices;
   const missing = [];
   if (!payload.name) missing.push('nazwa');
-  if (!categoryId && !allegroProductId && !gtin) missing.push('allegroCategoryId albo EAN/GTIN');
+  if (rawGtin && !gtin) missing.push('poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)');
+  if (!categoryId && !allegroProductId && !gtin) missing.push('ID kategorii Allegro');
   if (!Number(p.cenaAllegro || p.allegroPrice || p.cena || p.price || 0)) missing.push('cena');
   if (!images.length) missing.push('zdjęcia');
   if (!(p.producent || p.marka)) missing.push('producent');
-  if (!gtin && !allegroProductId) missing.push('EAN/GTIN albo ID produktu Allegro');
   for (const param of Array.isArray(opt.requiredParameters) ? opt.requiredParameters : []) missing.push(`parametr Allegro: ${param.name}`);
   const enforced = allegroEnforceDraft(JSON.parse(JSON.stringify(payload)));
   if (!enforced.compliance.ok) missing.push('opis niezgodny z zasadami Allegro');
   return { payload: enforced.draft, missing: [...new Set(missing)], compliance: enforced.compliance };
+}
+
+async function allegroZweryfikujTozsamoscPublikacji(req, product = {}, draft = {}, prepared = {}, opt = {}) {
+  const rawGtin = tekst(product.gtin || product.ean || '', 80).trim();
+  const productGtin = canonicalGtin(rawGtin);
+  if (rawGtin && !productGtin) return { ok: false, code: 'invalid_gtin', reason: 'EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną.' };
+  const draftProduct = draft?.productSet?.[0]?.product || {};
+  const draftId = tekst(draftProduct.id || '', 120).trim();
+  const draftIdType = tekst(draftProduct.idType || '', 20).trim().toUpperCase();
+  if (draftIdType === 'GTIN') {
+    const draftGtin = canonicalGtin(draftId);
+    if (!draftGtin || (productGtin && draftGtin !== productGtin)) return { ok: false, code: 'gtin_identity_mismatch', reason: 'GTIN w szkicu nie jest zgodny z kartoteką sklepu.' };
+    return { ok: true, mode: 'exact_gtin', gtin: draftGtin };
+  }
+  if (draftIdType) return { ok: false, code: 'unsafe_catalog_identifier', reason: `Automatyczne powiązanie przez ${draftIdType} jest zablokowane. Użyj zgodnego GTIN albo ręcznie wskaż ofertę.` };
+  if (!draftId) return { ok: true, mode: productGtin ? 'new_product_with_gtin' : 'new_product_without_gtin', gtin: productGtin, warning: productGtin ? '' : 'Nowa kartoteka bez EAN — bez automatycznego powiązania z Katalogiem Allegro.' };
+
+  const catalogSelected = prepared?.catalogMatch?.selected || {};
+  if (String(catalogSelected.id || '') === draftId && catalogSelected?.identity?.verified === true) {
+    return { ok: true, mode: 'verified_catalog_gtin', catalogProductId: draftId, gtin: productGtin };
+  }
+  if (product.allegroCatalogIdentityConfirmed === true && String(product.allegroProductId || '') === draftId) {
+    return { ok: true, mode: 'admin_confirmed_catalog', catalogProductId: draftId };
+  }
+  const existing = prepared?.existingOffer;
+  const existingCatalogId = tekst(existing?.offer?.productId || existing?.offer?.productSet?.[0]?.product?.id || '', 120).trim();
+  const safeExisting = !!(existing?.offer?.id && /(?:zweryfikowane|ręczn|external\.id|EAN\/GTIN|kod producenta i nazwa)/i.test(String(existing.reason || '')));
+  if (existingCatalogId === draftId && (safeExisting || opt.manualOffer === true)) {
+    return { ok: true, mode: opt.manualOffer === true ? 'admin_selected_offer' : 'verified_existing_offer', catalogProductId: draftId };
+  }
+  if (productGtin) {
+    const catalogMatch = prepared?.catalogMatch?.selected ? prepared.catalogMatch : await allegroZnajdzProduktKatalogu(req, product);
+    if (String(catalogMatch?.selected?.id || '') === draftId && catalogMatch?.selected?.identity?.verified === true) {
+      return { ok: true, mode: 'verified_catalog_gtin', catalogProductId: draftId, gtin: productGtin };
+    }
+  }
+  return {
+    ok: false,
+    code: 'allegro_identity_unverified',
+    reason: 'Zablokowano powiązanie z produktem Katalogu Allegro: UUID nie został potwierdzony zgodnym GTIN oraz zgodnymi cechami produktu. Automat nie może zgadywać po nazwie.',
+    catalogProductId: draftId,
+  };
 }
 
 function allegroPodsumujKalkulacjeOplat(raw = {}, price = 0) {
@@ -1977,15 +2085,21 @@ function allegroPodsumujKalkulacjeOplat(raw = {}, price = 0) {
 function allegroDanePowiazaniaZPrzygotowania(product = {}, prepared = {}, draft = {}) {
   const katalog = prepared?.catalogMatch?.selected || {};
   const draftProduct = draft?.productSet?.[0]?.product || {};
-  const catalogProductId = tekst(katalog.id || (draftProduct.idType ? '' : draftProduct.id) || product.allegroProductId || '', 120).trim();
+  const verifiedCatalogId = katalog?.identity?.verified === true ? tekst(katalog.id, 120).trim() : '';
+  const existingCatalogId = tekst(prepared?.existingOffer?.offer?.productId || prepared?.existingOffer?.offer?.productSet?.[0]?.product?.id || '', 120).trim();
+  const safeExisting = !!(existingCatalogId && /(?:zweryfikowane|ręczn|external\.id|EAN\/GTIN|kod producenta i nazwa)/i.test(String(prepared?.existingOffer?.reason || '')));
+  const confirmedProductId = product.allegroCatalogIdentityConfirmed === true ? tekst(product.allegroProductId, 120).trim() : '';
+  const draftCatalogId = draftProduct.idType ? '' : tekst(draftProduct.id, 120).trim();
+  const catalogProductId = tekst(verifiedCatalogId || (safeExisting && draftCatalogId === existingCatalogId ? draftCatalogId : '') || confirmedProductId, 120).trim();
   const categoryId = tekst(katalog.categoryId || prepared?.autoFilled?.allegroCategoryId || prepared?.categorySuggestion?.selected?.id || product.allegroCategoryId || draftProduct.category?.id || '', 80).trim();
   const producent = tekst(product.producent || product.marka || allegroWartoscParametru(katalog, ['producent', 'marka', 'brand']) || '', 160).trim();
   return { catalogProductId, categoryId, producent };
 }
 const ALLEGRO_AGENT_OFFER_PROCEDURE = [
-  'Sprawdź ID oferty i mapowanie, następnie UUID katalogu, external.id/SKU, EAN, kod producenta i identyczną nazwę.',
+  'Najpierw sprawdź poprawność cyfry kontrolnej EAN/GTIN, a następnie zgodność GTIN, nazwy, producenta i parametrów.',
   'Jeżeli oferta istnieje, połącz ją z produktem i aktualizuj zamiast tworzyć duplikat.',
-  'Dobierz katalog najpierw po EAN, potem po MPN; nazwę uznaj tylko przy wysokiej zgodności.',
+  'Nigdy nie wybieraj produktu katalogowego po samej nazwie ani samym MPN. UUID katalogu wolno zapisać tylko po dokładnej weryfikacji lub ręcznej decyzji administratora.',
+  'Jeżeli produktu nie ma EAN, przygotuj nową kartotekę z kategorią i kompletem parametrów, bez podpinania istniejącego UUID katalogowego.',
   'Uzupełnij producenta, markę, EAN, MPN, kategorię, UUID, parametry i sprawdzone zdjęcia katalogowe.',
   'Nową ofertę zapisz jako INACTIVE; brak stanu magazynowego oznacza 0.',
   'Po sukcesie zapisz powiązanie produkt sklepu–produkt katalogowy–oferta i zamknij zadanie.',
@@ -3909,6 +4023,16 @@ export default async (req) => {
       if (!complianceGate.compliance.ok) {
         return odpowiedz({ ok: false, error: 'Publikacja została zablokowana: opis nadal zawiera treść niezgodną z zasadami Allegro.', code: 'allegro_compliance_block', compliance: complianceGate.compliance, draft }, 422);
       }
+      const identityCheck = await allegroZweryfikujTozsamoscPublikacji(req, body.product || {}, draft, prepared, { manualOffer: !!mappedExisting });
+      if (!identityCheck.ok) {
+        const agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, {
+          missing: ['jednoznaczna tożsamość produktu Allegro'],
+          errors: [{ code: identityCheck.code, message: identityCheck.reason }],
+          prepared,
+          draft,
+        });
+        return odpowiedz({ ok: false, error: identityCheck.reason, code: identityCheck.code, identityCheck, draft, catalogMatch: prepared?.catalogMatch || null, agentTask }, 422);
+      }
       const receiptStart = await allegroOperationReceipts.begin(approvalHandle, { action: approval?.action || body.options?.publicationAction || 'keep', approvedBy: (requestSession(req) || {})?.email || 'administrator' });
       if (receiptStart.kind === 'duplicate') return odpowiedz(receiptStart.response, receiptStart.httpStatus);
       let result, responseMeta = null, operationCheck = { completed: true, checks: 0 };
@@ -3969,7 +4093,7 @@ export default async (req) => {
           await allegroZapiszPowiazanieProduktu(body.product || {}, { offerId, prepared, draft });
         }
       }
-      const responseBody = { ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, verification: allegroOfferVerification(result, !!verifiedOffer), agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { id: approvalOperationId, status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion };
+      const responseBody = { ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, identityCheck, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, verification: allegroOfferVerification(result, !!verifiedOffer), agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { id: approvalOperationId, status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion };
       await allegroOperationReceipts.complete(approvalHandle, { offerId, httpStatus: existing ? 200 : 201, response: responseBody });
       return odpowiedz(responseBody, existing ? 200 : 201);
     }
