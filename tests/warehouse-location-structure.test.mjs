@@ -51,19 +51,21 @@ test('kreator tworzy czytelną strukturę Pakownia → Regał A → Półka 3', 
   const context = { kodLokalizacjiMagazynu: (value = '') => String(value).trim().toUpperCase().replace(/[^A-Z0-9-]+/g, '-') };
   vm.runInNewContext(`${ui.slice(start, end)};this.result=[magazynKodZPrzyjaznejNazwy('strefa','','Pakownia'),magazynKodZPrzyjaznejNazwy('regał','PAKOWNIA','A'),magazynKodZPrzyjaznejNazwy('półka','PAKOWNIA-RA','3'),magazynNazwaZPrzyjaznejWartosci('półka','3')];`, context);
   assert.deepEqual(Array.from(context.result), ['PAKOWNIA', 'PAKOWNIA-RA', 'PAKOWNIA-RA-P03', 'Półka 3']);
-  assert.match(ui, /Kody systemowe i QR są tworzone automatycznie w tle/);
+  assert.match(ui, /Półka jest ostatnim poziomem i nie ma limitu sztuk/);
   assert.match(ui, /Tak zobaczy to pracownik/);
   assert.match(core, /nazwa:`Regał \$\{rackLabel\}`/);
   assert.match(core, /nazwa:`Półka \$\{shelfNo\}`/);
   assert.match(core, /rackMode==="numery"/);
 });
 
-test('półka i miejsce mogą przechowywać nieograniczoną liczbę sztuk', () => {
-  assert.match(core, /bezLimitu=f\.get\("bezLimitu"\)==="on"\|\|limit<=0/);
-  assert.match(core, /pojemnosc:bezLimitu\?0:/);
+test('półka jest ostatnim poziomem i zawsze ma nieograniczoną pojemność', () => {
+  assert.match(core, /l\.aktywna!==false&&l\.typ!=="miejsce"/);
+  assert.match(core, /pojemnosc:0,bezLimitu:true/);
   assert.match(ui, /Bez limitu liczby sztuk/);
-  assert.match(ui, /dowolna liczba produktów i sztuk/);
-  assert.match(core, /Math\.min\(500,intNieujemny\(f\.get\("miejsca"\),0\)\)/);
+  assert.match(ui, /dowolną liczbę produktów i sztuk/);
+  assert.doesNotMatch(core, /for\(let m=0;m<placeCount/);
+  assert.doesNotMatch(ui, /name="miejsca"/);
+  assert.match(ui, /function magazynTypDzieckaLokalizacji\(location\)\{return location\?\.typ==="strefa"\?"regał":location\?\.typ==="regał"\?"półka":"";\}/);
 });
 
 test('indeks lokalizacji skaluje się do dużego magazynu bez ponownego przeszukiwania całej listy', () => {
