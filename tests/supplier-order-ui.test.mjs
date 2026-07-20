@@ -8,6 +8,7 @@ const source = (await Promise.all([
   '10-agent-ai-supplier-planning.js',
   '10-agent-ai-command-center.js',
   '10-agent-ai-admin-workspace.js',
+  '10-agent-ai-communications-workspace.js',
 ].map((file)=>readFile(new URL(`../src/frontend/${file}`, import.meta.url), 'utf8')))).join('\n');
 const routerSource = await readFile(new URL('../assets/app.js', import.meta.url), 'utf8');
 const cloudSource = await readFile(new URL('../src/frontend/03-cloud-sync.js', import.meta.url), 'utf8');

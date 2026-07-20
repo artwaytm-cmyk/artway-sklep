@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
-import {ASSET_BUNDLES} from "../scripts/build-assets.mjs";
+import {ASSET_BUNDLES,ADMIN_RUNTIME_BUNDLES} from "../scripts/build-assets.mjs";
 
 const root=new URL("../",import.meta.url),read=path=>readFile(new URL(path,root),"utf8");
 
@@ -42,7 +42,7 @@ test("zadania i automatyzacje scalają dawne podstrony bez usuwania funkcji",asy
 });
 
 test("nowe centrum Agenta jest częścią panelu i ma responsywne style",async()=>{
-  const js=ASSET_BUNDLES.find(x=>x.output==="assets/admin.js"),css=ASSET_BUNDLES.find(x=>x.output==="assets/admin.css"),styles=await read("src/styles/28-agent-ai-workspace.css");
+  const js=ADMIN_RUNTIME_BUNDLES.find(x=>x.output==="assets/admin-commerce.js"),css=ASSET_BUNDLES.find(x=>x.output==="assets/admin-agent.css"),styles=await read("src/styles/28-agent-ai-workspace.css");
   assert.ok(js.sources.includes("src/frontend/11-agent-ai-workspace.js"));
   assert.ok(css.sources.includes("src/styles/28-agent-ai-workspace.css"));
   for(const selector of [".agent-module-nav",".agent-context-strip",".agent-command-center",".agent-conversation",".agent-workspace-fold"])assert.match(styles,new RegExp(selector.replace(".","\\.")));

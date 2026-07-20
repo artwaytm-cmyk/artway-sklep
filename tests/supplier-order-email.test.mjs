@@ -187,7 +187,7 @@ test('wiadomość i załącznik zawierają wszystkie pozycje dużego szkicu bez 
 });
 
 test('warstwa SMTP przekazuje rendererowi załączniki Nodemailer', async () => {
-  const source = `${await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../netlify/functions/lib/email-service.mjs', import.meta.url), 'utf8')}`;
+  const source = `${await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../netlify/functions/lib/email-service.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../netlify/functions/lib/email-transport-service.mjs', import.meta.url), 'utf8')}`;
   assert.match(source, /async function wyslijEmailSMTP\(\{[^}]*attachments = \[\]/);
   assert.match(source, /transporter\.sendMail\(\{[\s\S]*?attachments: Array\.isArray\(attachments\)/);
   assert.match(source, /wyslijEmailSMTP\(\{[^}]*attachments: item\.attachments/);

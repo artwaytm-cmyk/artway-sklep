@@ -42,7 +42,7 @@ test("mapowanie ma wyszukiwanie, statusy, operacje masowe, eksport i paginację"
 });
 
 test("warstwa wizualna obejmuje katalogi, mapowanie i responsywne podmenu",async()=>{
-  const admin=await read("src/styles/07-admin-domains.css");
+  const admin=(await read("src/styles/07-admin-domains.css"))+(await read("src/styles/07a-admin-domains.css"))+(await read("src/styles/07b-admin-domains.css"));
   const header=await read("src/styles/02-header.css");
   for(const cls of [".catalog-stat-grid",".catalog-group-card",".catalog-unassigned-grid",".catalog-inventory-table",".mapping-table",".mapping-status"]){assert.ok(admin.includes(cls),`brak ${cls}`);}
   assert.match(admin,/@media\(max-width:760px\)/);

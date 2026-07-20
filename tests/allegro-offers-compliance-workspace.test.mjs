@@ -14,7 +14,7 @@ test("oferty Allegro korzystają z pełnego wzorca centrum wystawiania",async()=
 });
 
 test("ciężkie listy Allegro tworzą karty stopniowo zamiast blokować wejście",async()=>{
-  const source=await read("src/frontend/12c-commerce-catalog-actions.js"),mapping=await read("src/frontend/11-allegro-mapping-index.js"),sync=await read("src/frontend/03-cloud-sync.js"),styles=await read("src/styles/29-commerce-catalog-actions.css");
+  const source=await read("src/frontend/12c-commerce-catalog-actions.js"),mapping=await read("src/frontend/11-allegro-mapping-index.js"),sync=(await read("src/frontend/03-cloud-sync.js"))+(await read("src/frontend/03a-company-payments-and-product-ids.js")),styles=await read("src/styles/29-commerce-catalog-actions.css");
   assert.match(source,/function allegroProgresywneKartyHTML/);
   assert.match(source,/items\.slice\(0,batch\)/);
   assert.match(source,/state\.items\.slice\(state\.index,state\.index\+12\)/);

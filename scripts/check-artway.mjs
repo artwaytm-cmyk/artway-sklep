@@ -29,6 +29,7 @@ const files = [
   'netlify/functions/lib/paynow-service.mjs',
   'netlify/functions/lib/infakt-service.mjs',
   'netlify/functions/lib/product-source-inspection-service.mjs',
+  'netlify/functions/lib/product-source-matching.mjs',
   'netlify/functions/lib/allegro-offer-withdrawal-route.mjs',
   'netlify/functions/lib/core/http.mjs',
   'netlify/functions/lib/core/store-repository.mjs',
@@ -99,6 +100,7 @@ const storeRuntime = [
   read('netlify/functions/lib/paynow-service.mjs'),
   read('netlify/functions/lib/infakt-service.mjs'),
   read('netlify/functions/lib/product-source-inspection-service.mjs'),
+  read('netlify/functions/lib/product-source-matching.mjs'),
 ].join('\n');
 const productEditorial = read('netlify/functions/lib/domain/product-editorial-pipeline.mjs');
 const productLinkPackage = read('netlify/functions/lib/domain/product-link-package-preparer.mjs');

@@ -6,7 +6,7 @@ const root=new URL("../",import.meta.url);
 const read=path=>readFile(new URL(path,root),"utf8");
 
 test("liczniki nawigacji magazynu pokazują wyłącznie braki do aktywnych zamówień",async()=>{
-  const [navigation,warehouse]=await Promise.all([read("assets/admin-warehouse.js"),read("assets/app.js")]);
+  const [navigation,warehouse]=await Promise.all([read("assets/admin-warehouse.js"),read("assets/admin-shell.js")]);
   const subnav=navigation.slice(navigation.indexOf("function magazynSubnavHTML"),navigation.indexOf("const ASORTYMENT_PARTIA_KART"));
   assert.match(subnav,/const plan=typeof potrzebyZatowarowania==="function"\?potrzebyZatowarowania\(\):\[\],braki=plan\.length/);
   assert.match(subnav,/badge:braki\|\|""/);

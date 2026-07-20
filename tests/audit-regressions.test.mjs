@@ -21,7 +21,7 @@ test('awaryjny products.json zachowuje cały aktualny katalog bez danych prywatn
 });
 
 test('koszyk usuwa nieaktualne produkty i nie odczytuje nazwy z pustego wyniku', () => {
-  const checkout = read('src/frontend/17-cart-and-checkout.js');
+  const checkout = `${read('src/frontend/17-cart-and-checkout.js')}\n${read('src/frontend/17a-checkout-and-delivery.js')}`;
   assert.match(checkout, /const brakujace=koszyk\.filter/);
   assert.match(checkout, /koszyk=koszyk\.filter\(x=>produkty\.some/);
   assert.match(checkout, /return p\?`<div><span>\$\{esc\(p\.nazwa\)\}/);

@@ -30,7 +30,7 @@ test('panel wykonuje tylko ściśle zapisane decyzje, nigdy pytania, negacje ani
 
 test('mobilny układ decyzji znajduje się w później ładowanym arkuszu administracyjnym', async () => {
   const [admin, responsive] = await Promise.all([
-    readFile(new URL('../src/styles/07-admin-domains.css', import.meta.url), 'utf8'),
+    Promise.all(['07-admin-domains.css','07a-admin-domains.css','07b-admin-domains.css'].map(name=>readFile(new URL(`../src/styles/${name}`, import.meta.url), 'utf8'))).then(parts=>parts.join('\n')),
     readFile(new URL('../src/styles/09-notifications-and-responsive.css', import.meta.url), 'utf8'),
   ]);
   assert.match(admin, /@media\(max-width:700px\)[\s\S]*\.agent-inventory-decision-facts\{grid-template-columns:1fr\}/);

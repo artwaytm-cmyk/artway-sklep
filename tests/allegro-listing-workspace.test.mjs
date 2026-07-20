@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
 import vm from "node:vm";
-import {ASSET_BUNDLES} from "../scripts/build-assets.mjs";
+import {ASSET_BUNDLES,ADMIN_RUNTIME_BUNDLES} from "../scripts/build-assets.mjs";
 
 const root=new URL("../",import.meta.url);
 const read=path=>readFile(new URL(path,root),"utf8");
@@ -45,11 +45,11 @@ test("centrum wystawiania skaluje katalog przez filtry, limit, paginację i eksp
   assert.match(styles,/\.allegro-publication-card/);
   assert.match(styles,/\.allegro-listing-advanced-grid/);
   assert.match(styles,/@media\(max-width:820px\)/);
-  const js=ASSET_BUNDLES.find(bundle=>bundle.output==="assets/admin.js"),css=ASSET_BUNDLES.find(bundle=>bundle.output==="assets/admin.css");
+  const js=ADMIN_RUNTIME_BUNDLES.find(bundle=>bundle.output==="assets/admin-inventory.js"),css=ASSET_BUNDLES.find(bundle=>bundle.output==="assets/admin-commerce.css"),baseCss=ASSET_BUNDLES.find(bundle=>bundle.output==="assets/admin.css");
   assert.ok(js.sources.includes("src/frontend/12b-allegro-listing-workspace.js"));
   assert.ok(js.sources.includes("src/frontend/12c-commerce-catalog-actions.js"));
   assert.ok(css.sources.includes("src/styles/27-allegro-listing-workspace.css"));
-  assert.ok(css.sources.includes("src/styles/29-commerce-catalog-actions.css"));
+  assert.ok(baseCss.sources.includes("src/styles/29-commerce-catalog-actions.css"));
 });
 
 test("karta produktu wykonuje się z rzeczywistym wspólnym formatowaniem ceny",async()=>{

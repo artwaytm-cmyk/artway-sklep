@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
-const source = await readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8');
+const source = (await Promise.all([
+  '../src/frontend/12-customers-and-inventory.js',
+  '../src/frontend/12d-inventory-operations.js',
+].map((path) => readFile(new URL(path, import.meta.url), 'utf8')))).join('\n');
 
 function frontendInventory() {
   const context = {

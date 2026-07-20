@@ -1,10 +1,16 @@
 /* ═══════════ ROUTER (podstrony) ═══════════ */
 const ADMIN_MODULY_RUNTIME = Object.freeze({
-  core:"admin-core",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce",
+  core:"admin-core",shell:"admin-shell",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",shipping:"admin-shipping",commerce:"admin-commerce",communications:"admin-communications",
   inventory:"admin-inventory",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system"
 });
+const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce"});
+const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content"});
 const adminZaladowaneModuly = new Set();
 const adminObietniceModulow = new Map();
+const adminZaladowaneStyle = new Set();
+const adminObietniceStyle = new Map();
+const sklepZaladowaneModuly = new Set();
+const sklepObietniceModulow = new Map();
 let adminStylePromise = null;
 function identyfikatorZTrasy(route,index){
   const raw=String(route||"").split("/")[index]||"";let decoded=raw;
@@ -13,6 +19,7 @@ function identyfikatorZTrasy(route,index){
 }
 function adminModulyDlaTrasy(route=""){
   const t=String(route||"").split("?")[0],moduly=["core","ui"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
+  add("shell");
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
   if(t==="/diagnostyka")add("system");
   else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("commerce","inventory","system");
@@ -21,7 +28,9 @@ function adminModulyDlaTrasy(route=""){
   else if(t==="/admin/magazyn/ruchy")add("warehouse","inventory");
   else if(t==="/admin/magazyn/stany")add("warehouse","commerce","inventory");
   else if(t.startsWith("/admin/magazyn"))add("agent","warehouse","commerce","inventory");
-  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/wysylki")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","inventory");
+  else if(t.startsWith("/admin/wysylki"))add("agent","warehouse","shipping","commerce","inventory");
+  else if(["/admin/allegro/komunikacja","/admin/allegro/wiadomosci","/admin/allegro/dyskusje"].includes(t))add("agent","warehouse","commerce","communications","inventory");
+  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/infakt"))add("inventory");
   else if(t==="/admin/asortyment"||t==="/admin/asortyment/produkty")add("commerce","inventory");
   else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory");
@@ -36,6 +45,20 @@ function adminModulyDlaTrasy(route=""){
   else if(t.startsWith("/admin/seo"))add("inventory");
   else if(t.startsWith("/admin"))add("agent","warehouse","commerce","inventory","catalog","personalization","system");
   return moduly;
+}
+function sklepModulyDlaTrasy(route=""){
+  const t=String(route||"").split("?")[0];
+  if(["/logowanie","/rejestracja","/konto","/zamowienia"].includes(t)||t.startsWith("/dziekujemy/"))return ["account"];
+  if(["/ulubione","/kontakt","/o-nas","/faq","/regulamin","/prywatnosc","/dostawa","/zwroty"].includes(t))return ["content"];
+  return [];
+}
+function sklepModulyTrasyGotowe(route=""){return sklepModulyDlaTrasy(route).every(modul=>sklepZaladowaneModuly.has(modul));}
+function zaladujSklepModul(modul,version){
+  if(sklepZaladowaneModuly.has(modul))return Promise.resolve();
+  if(sklepObietniceModulow.has(modul))return sklepObietniceModulow.get(modul);
+  const asset=SKLEP_MODULY_RUNTIME[modul];if(!asset)return Promise.reject(new Error(`Nieznany moduł sklepu: ${modul}`));
+  const promise=new Promise((resolve,reject)=>{const script=document.createElement("script");script.id=`artwayStoreModule-${modul}`;script.src=`/assets/${asset}.js?v=${encodeURIComponent(version)}`;script.async=false;script.onload=()=>{sklepZaladowaneModuly.add(modul);resolve();};script.onerror=()=>reject(new Error(`Nie udało się wczytać podstrony sklepu: ${modul}`));document.body.appendChild(script);}).catch(error=>{sklepObietniceModulow.delete(modul);document.getElementById(`artwayStoreModule-${modul}`)?.remove();throw error;});
+  sklepObietniceModulow.set(modul,promise);return promise;
 }
 function adminModulyTrasyGotowe(route=""){return adminModulyDlaTrasy(route).every(modul=>adminZaladowaneModuly.has(modul));}
 function zaladujAdminStyle(version){
@@ -62,12 +85,19 @@ function zaladujAdminModul(modul,version){
   }).catch(error=>{adminObietniceModulow.delete(modul);document.getElementById(`artwayAdminModule-${modul}`)?.remove();throw error;});
   adminObietniceModulow.set(modul,promise);return promise;
 }
+function zaladujAdminStyleModul(modul,version){
+  const asset=ADMIN_STYLE_RUNTIME[modul];if(!asset||adminZaladowaneStyle.has(modul))return Promise.resolve();
+  if(adminObietniceStyle.has(modul))return adminObietniceStyle.get(modul);
+  const promise=new Promise((resolve,reject)=>{const link=document.createElement("link");link.id=`artwayAdminStyle-${modul}`;link.rel="stylesheet";link.href=`/assets/${asset}.css?v=${encodeURIComponent(version)}`;link.onload=()=>{adminZaladowaneStyle.add(modul);resolve();};link.onerror=()=>reject(new Error(`Nie udało się wczytać stylów modułu ${modul}`));document.head.appendChild(link);}).catch(error=>{adminObietniceStyle.delete(modul);document.getElementById(`artwayAdminStyle-${modul}`)?.remove();throw error;});
+  adminObietniceStyle.set(modul,promise);return promise;
+}
 function zaladujPanelAdmina(route=trasa()){
   const version = document.querySelector('meta[name="artway-version"]')?.content || "dev";
   const modules=adminModulyDlaTrasy(route);
   const core=modules.includes("core")?zaladujAdminModul("core",version):Promise.resolve();
   const scripts=core.then(()=>Promise.all(modules.filter(module=>module!=="core").map(module=>zaladujAdminModul(module,version))));
-  return Promise.all([zaladujAdminStyle(version),scripts]).then(result=>{if(typeof zaplanujWstepneLadowaniePanelu==="function")zaplanujWstepneLadowaniePanelu(version);return result;});
+  const styles=Promise.all(modules.map(module=>zaladujAdminStyleModul(module,version)));
+  return Promise.all([zaladujAdminStyle(version),styles,scripts]).then(result=>{if(typeof zaplanujWstepneLadowaniePanelu==="function")zaplanujWstepneLadowaniePanelu(version);return result;});
 }
 function trasa(){
   const path=String(location.pathname||"").replace(/\/+$/,"")||"/";
@@ -239,6 +269,12 @@ function renderuj(){
     // wyłącznie po wejściu na trasę administracyjną, również dla gościa.
     const wymagaPanelu=t.startsWith("/admin")||t==="/diagnostyka";
     document.body.classList.toggle("admin-mode",wymagaPanelu);
+    if(!wymagaPanelu&&!sklepModulyTrasyGotowe(t)){
+      w.innerHTML=`<div class="page"><div class="panel admin-loading" role="status" aria-live="polite"><h1>Ładowanie podstrony…</h1><p>Wczytuję tylko funkcje potrzebne w tym miejscu sklepu.</p></div></div>`;
+      const trasaLadowania=t,version=document.querySelector('meta[name="artway-version"]')?.content||"dev";
+      Promise.all(sklepModulyDlaTrasy(t).map(modul=>zaladujSklepModul(modul,version))).then(()=>{if(trasa()===trasaLadowania)renderuj();}).catch(error=>{loguj("blad",error.message,t);w.innerHTML=`<div class="page"><div class="panel"><h1>Nie udało się wczytać podstrony</h1><p>${esc(error.message)}</p><button class="btn" onclick="renderuj()">Spróbuj ponownie</button></div></div>`;});
+      ostatniaRenderowanaTrasa=t;return;
+    }
     if(wymagaPanelu&&!adminModulyTrasyGotowe(t)){
       w.innerHTML=`<div class="page"><div class="panel admin-loading" role="status" aria-live="polite"><h1>Ładowanie panelu administratora…</h1><p>Wczytuję moduły potrzebne tylko do obsługi sklepu.</p></div></div>`;
       const trasaLadowania=t;

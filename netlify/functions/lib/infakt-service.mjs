@@ -18,6 +18,15 @@ import {
   infaktZnajdzDostawce,
 } from './infakt-purchase.mjs';
 
+export function infaktCredentialLooksMasked(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  if (/^(?:\*+|•+|x{6,}|<[^>]+>|\[[^\]]+\])(?:[a-z]{0,12})?$/i.test(raw)) return true;
+  const special = [...raw].filter((char) => !/[a-z0-9\s]/i.test(char)).length;
+  const letters = [...raw].filter((char) => /[a-z0-9]/i.test(char)).length;
+  return raw.length >= 12 && special >= 10 && letters <= 8;
+}
+
 export function createInfaktService({ read, write }) {
   const czytaj = read;
   const zapisz = write;
@@ -25,12 +34,15 @@ export function createInfaktService({ read, write }) {
   function infaktKonfiguracja() {
     const env = INFAKT_ENVY.has(String(process.env.INFAKT_ENV || '').toLowerCase()) ? String(process.env.INFAKT_ENV).toLowerCase() : 'production';
     const apiKey = tekst(process.env.INFAKT_API_KEY || '', 500).trim();
-    return { apiKey, configured: !!apiKey, env, baseUrl: env === 'sandbox' ? 'https://api.sandbox-infakt.pl' : 'https://api.infakt.pl', paymentDays: Math.max(0, Math.min(365, Number(process.env.INFAKT_PAYMENT_DAYS || 7) || 7)) };
+    const credentialIssue = infaktCredentialLooksMasked(apiKey) ? 'masked_placeholder' : '';
+    return { apiKey, configured: !!apiKey && !credentialIssue, credentialStored: !!apiKey, credentialIssue, env, baseUrl: env === 'sandbox' ? 'https://api.sandbox-infakt.pl' : 'https://api.infakt.pl', paymentDays: Math.max(0, Math.min(365, Number(process.env.INFAKT_PAYMENT_DAYS || 7) || 7)) };
   }
   function infaktPublicConfig() {
     const c = infaktKonfiguracja();
     return {
       configured: c.configured,
+      credentialStored: c.credentialStored,
+      credentialIssue: c.credentialIssue,
       env: c.env,
       paymentDays: c.paymentDays,
       missingEnv: c.configured ? [] : ['INFAKT_API_KEY'],
@@ -207,7 +219,13 @@ export function createInfaktService({ read, write }) {
   }
   async function infaktWywolaj(path, { method = 'GET', bodyObj = null, parameters = {}, raw = false, accept = '' } = {}) {
     const c = infaktKonfiguracja();
-    if (!c.configured) { const e = new Error('inFakt nie jest skonfigurowany. Dodaj INFAKT_API_KEY po stronie serwera.'); e.code = 'infakt_not_configured'; e.status = 503; throw e; }
+    if (!c.configured) {
+      const masked = c.credentialIssue === 'masked_placeholder';
+      const e = new Error(masked ? 'Na serwerze zapisano maskę zamiast prawidłowego klucza API inFakt.' : 'inFakt nie jest skonfigurowany. Dodaj INFAKT_API_KEY po stronie serwera.');
+      e.code = masked ? 'infakt_credential_masked' : 'infakt_not_configured';
+      e.status = 503;
+      throw e;
+    }
     const url = new URL(path, c.baseUrl); for (const [k, v] of Object.entries(parameters || {})) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
     const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
     const response = await fetch(url, { method, headers: { 'X-inFakt-ApiKey': c.apiKey, Accept: accept || (raw ? 'application/pdf, application/json' : 'application/json'), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body });

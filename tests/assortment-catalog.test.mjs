@@ -70,7 +70,7 @@ test("ceny w katalogu zapisują się w wierszu bez pełnego renderowania strony"
 });
 
 test("układ katalogu przejmuje strukturę wzorca i zachowuje treść asortymentu",async()=>{
-  const css=(await read("src/styles/07-admin-domains.css"))+(await read("src/styles/29-commerce-catalog-actions.css"))+(await read("src/styles/31-admin-page-pattern.css"));
+  const css=(await read("src/styles/07-admin-domains.css"))+(await read("src/styles/07a-admin-domains.css"))+(await read("src/styles/07b-admin-domains.css"))+(await read("src/styles/29-commerce-catalog-actions.css"))+(await read("src/styles/31-admin-page-pattern.css"));
   for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".catalog-product-list",".catalog-product-card",".catalog-product-classification",".catalog-product-operational-data",".catalog-product-actions",".catalog-product-list.density-zwarta"]){
     assert.match(css,new RegExp(selector.replace(".","\\.")));
   }

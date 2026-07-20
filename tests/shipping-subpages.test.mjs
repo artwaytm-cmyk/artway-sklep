@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('Centrum wysyłki ma trwałe adresy wszystkich podstron', async () => {
-  const [shipping,router] = await Promise.all([read('assets/app.js'),read('assets/app.js')]);
+  const [shipping,router] = await Promise.all([read('assets/admin-shipping.js'),read('assets/app.js')]);
   for (const route of ['#/admin/wysylki/tracking','#/admin/wysylki/automatyzacje','#/admin/wysylki/ustawienia']) assert.match(shipping,new RegExp(route.replaceAll('/','\\/')));
   assert.match(router,/t\.startsWith\("\/admin\/wysylki\/"\)/);
   assert.match(router,/widokAdminWysylki\(t\.split\("\/"\)\[3\]\|\|"zlecenia"\)/);
@@ -13,7 +13,7 @@ test('Centrum wysyłki ma trwałe adresy wszystkich podstron', async () => {
 });
 
 test('każda podstrona wysyłek ma własny widok i poprawny aktywny stan nawigacji', async () => {
-  const shipping=(await read('assets/app.js'))+(await read('src/frontend/11-integration-center.js'));
+  const shipping=(await read('assets/app.js'))+(await read('assets/admin-shell.js'))+(await read('assets/admin-shipping.js'))+(await read('src/frontend/11-integration-center.js'));
   for (const panel of ['panelZlecenWysylkowych','panelTrackinguWysylek','panelAutomatyzacjiWysylek','panelUstawienBramki']) assert.match(shipping,new RegExp(`function ${panel}\\(`));
   assert.match(shipping,/adminSubnavHTML\(\[/);
   assert.match(shipping,/wysylkiKontekstPodstronyHTML\(aktywna\)/);
@@ -21,7 +21,7 @@ test('każda podstrona wysyłek ma własny widok i poprawny aktywny stan nawigac
 });
 
 test('Centrum wysyłki ma responsywną przestrzeń roboczą bez poziomego suwaka na całej stronie', async () => {
-  const css=await read('src/styles/07-admin-domains.css');
+  const css=(await read('src/styles/07-admin-domains.css'))+(await read('src/styles/07a-admin-domains.css'))+(await read('src/styles/07b-admin-domains.css'));
   assert.match(css,/\.shipping-module-page\{display:grid/);
   assert.match(css,/\.shipping-page-context/);
   assert.match(css,/\.shipping-workspace>/);

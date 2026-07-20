@@ -97,6 +97,7 @@ import { createInventoryStockRoute } from './inventory-route.mjs';
 import { createProductLinkImportBundle } from './product-link-import-route.mjs';
 import { refreshCentralProductSource } from './domain/imported-product-catalog.mjs';
 import { createAllegroOfferWithdrawalRoute } from './allegro-offer-withdrawal-route.mjs';
+import { allegroAutomaticCategoryParameters } from './domain/allegro-category-parameter-resolver.mjs';
 import {
   telegramConfig as telegramKonfiguracja,
   telegramCanonicalSupplierPreviews,
@@ -1694,70 +1695,8 @@ async function allegroParametryKategorii(req, categoryId = '') {
     return { parameters: [], errors: [{ key: 'categoryParameters', status: e.status || 0, code: e.code || '', message: e.message || String(e) }] };
   }
 }
-function allegroParamNazwa(p = {}) {
-  return allegroNormTekst(p.name || p.id || '');
-}
-function allegroSlownikValueId(p = {}, regex) {
-  const vals = Array.isArray(p.dictionary) ? p.dictionary
-    : Array.isArray(p.values) ? p.values
-      : Array.isArray(p.restrictions?.allowedValues) ? p.restrictions.allowedValues
-        : [];
-  for (const v of vals) {
-    const label = tekst(v.value || v.name || v.label || '', 200);
-    if (regex.test(label)) return tekst(v.id || v.valueId || v.value || '', 120).trim();
-  }
-  return '';
-}
-function allegroDodajParam(out, p, value, valueId = false) {
-  const id = tekst(p?.id, 80).trim();
-  if (!id || value === undefined || value === null || value === '') return;
-  const v = String(value).trim();
-  if (!v) return;
-  if (valueId) out.push({ id, valuesIds: [v] });
-  else if (/^[a-z0-9]+_[a-z0-9-]+$/i.test(v)) out.push({ id, valuesIds: [v] });
-  else out.push({ id, values: [tekst(v, 500)] });
-}
 function allegroParametryAutomatyczne(product = {}, categoryParameters = []) {
-  const p = product || {};
-  const out = [];
-  const gtin = tekst(p.gtin || p.ean, 80).trim();
-  const kod = tekst(p.kodProducenta || p.mpn || p.externalId || p.sku, 160).trim();
-  const marka = tekst(p.producent || p.marka || '', 160).trim();
-  const material = tekst(p.material || '', 160).trim();
-  const kolor = tekst(p.kolorProduktu || p.color || '', 160).trim();
-  const rozmiar = tekst(p.rozmiar || p.size || '', 160).trim();
-  for (const param of Array.isArray(categoryParameters) ? categoryParameters : []) {
-    const n = allegroParamNazwa(param);
-    if (/\bean\b|gtin|kod kreskowy/.test(n) && gtin) allegroDodajParam(out, param, gtin);
-    else if (/kod producenta|mpn|symbol producenta/.test(n) && kod) allegroDodajParam(out, param, kod);
-    else if (/marka|producent/.test(n) && marka) {
-      const dict = allegroSlownikValueId(param, new RegExp(`^${marka.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
-      allegroDodajParam(out, param, dict || marka, !!dict);
-    } else if (/^stan$|stan produktu|condition/.test(n)) {
-      const nowy = allegroSlownikValueId(param, /nowy|new/i);
-      allegroDodajParam(out, param, nowy || 'Nowy', !!nowy);
-    } else if (/materiał|material/.test(n) && material) {
-      const dict = allegroSlownikValueId(param, new RegExp(`^${material.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
-      allegroDodajParam(out, param, dict || material, !!dict);
-    } else if (/kolor|color/.test(n) && kolor) {
-      const dict = allegroSlownikValueId(param, new RegExp(`^${kolor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
-      allegroDodajParam(out, param, dict || kolor, !!dict);
-    } else if (/rozmiar|size/.test(n) && rozmiar) {
-      const dict = allegroSlownikValueId(param, new RegExp(`^${rozmiar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
-      allegroDodajParam(out, param, dict || rozmiar, !!dict);
-    } else if (param?.required === true && Array.isArray(param.dictionary) && param.dictionary.length === 1) {
-      const only = param.dictionary[0];
-      const value = tekst(only?.id || only?.valueId || only?.value || '', 120).trim();
-      allegroDodajParam(out, param, value, !!(only?.id || only?.valueId));
-    }
-  }
-  const seen = new Set();
-  return out.filter((x) => {
-    const key = `${x.id}:${(x.valuesIds || x.values || []).join('|')}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return allegroAutomaticCategoryParameters(product, categoryParameters);
 }
 function allegroScalParametryBezDuplikatow(...groups) {
   const byId = new Map();
