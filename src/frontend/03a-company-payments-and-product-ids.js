@@ -4,20 +4,31 @@ function daneFirmy(){
   const ident = tylkoCyfry(d.identyfikator || d.nip || d.pesel || DANE_FIRMY_DOMYSLNE.identyfikator);
   d.identyfikator = ident;
   d.nip = tylkoCyfry(d.nip || ident);
+  d.regon = tylkoCyfry(d.regon || DANE_FIRMY_DOMYSLNE.regon);
+  if(d.nip===DANE_FIRMY_DOMYSLNE.nip){
+    if(!String(d.nazwa||"").trim()||/^artway-?tm$/i.test(String(d.nazwa||"").trim()))d.nazwa=DANE_FIRMY_DOMYSLNE.nazwa;
+    if(!String(d.adres||"").trim()||String(d.adres).includes("84-207"))d.adres=DANE_FIRMY_DOMYSLNE.adres;
+    d.kodPocztowy=String(d.kodPocztowy||DANE_FIRMY_DOMYSLNE.kodPocztowy).trim();
+    d.miasto=String(d.miasto||DANE_FIRMY_DOMYSLNE.miasto).trim();
+  }
   delete d.pesel;
   return d;
 }
+function pelnyAdresFirmy(d=daneFirmy()){
+  return [String(d.adres||"").trim(),[String(d.kodPocztowy||"").trim(),String(d.miasto||"").trim()].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+}
 function daneFirmyTekst(){
   const d = daneFirmy();
-  return `${d.nazwa}${d.adres?`, ${d.adres}`:""}, NIP: ${d.nip}`;
+  return `${d.nazwa}${pelnyAdresFirmy(d)?`, ${pelnyAdresFirmy(d)}`:""}, NIP: ${d.nip}, REGON: ${d.regon}`;
 }
 function daneFirmyHTML(){
   const d = daneFirmy();
-  return `${esc(d.nazwa)}${d.adres?`, ${esc(d.adres)}`:""}<br><b>NIP:</b> ${esc(d.nip)}`;
+  return `<strong>${esc(d.nazwa)}</strong><br>${esc(pelnyAdresFirmy(d))}<br><b>NIP:</b> ${esc(d.nip)} • <b>REGON:</b> ${esc(d.regon)}`;
 }
 function danePrawneFirmyKompletne(){
-  const d=daneFirmy(),wartosci=[d.nazwa,d.nip,d.adres,d.kodPocztowy,d.miasto];
-  return wartosci.every(value=>{const tekst=String(value||"").trim().toLowerCase();return tekst&&!tekst.includes("[nazwa firmy")&&!tekst.includes("uzupełnij")&&!tekst.includes("000 000");});
+  const d=daneFirmy(),wartosci=[d.nazwa,d.nip,d.regon,d.adres,d.kodPocztowy,d.miasto];
+  return wartosci.every(value=>{const tekst=String(value||"").trim().toLowerCase();return tekst&&!tekst.includes("[nazwa firmy")&&!tekst.includes("uzupełnij")&&!tekst.includes("000 000");})
+    && walidujNip(d.nip) && /^\d{9}(?:\d{5})?$/.test(d.regon);
 }
 function normalizujPlatnosci(lista){
   const bazowe = DOMYSLNE_PLATNOSCI.map(p=>({...p}));
@@ -66,6 +77,15 @@ function migrujTresciPrawne(tresci){
 function platnosciOpis(){
   return dostepnePlatnosci().map(p=>p.nazwa).join(", ") || "brak aktywnych metod płatności";
 }
+let paynowPubliczne={sprawdzono:false,configured:false,env:"",error:""};
+async function pobierzPaynowKonfiguracjePubliczna(){
+  try{
+    const d=await chmura("paynow-config",{timeout:9000});
+    paynowPubliczne={sprawdzono:true,configured:!!d.configured,env:String(d.env||""),error:""};
+  }catch(e){paynowPubliczne={sprawdzono:true,configured:false,env:"",error:String(e?.message||e)};}
+  return paynowPubliczne;
+}
+function czyPaynowDostepnyPublicznie(){return !!paynowPubliczne.configured;}
 function instrukcjaPlatnosciTekst(id, nr, kwota){
   const kw = typeof kwota==="number" ? zl(kwota) : String(kwota||"");
   if(id==="pobranie") return `Płatność przy odbiorze: do zapłaty ${kw}.`;

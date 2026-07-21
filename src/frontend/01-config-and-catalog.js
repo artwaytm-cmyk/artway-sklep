@@ -1,9 +1,12 @@
 /* ═══════════ KONFIGURACJA ═══════════ */
 const DANE_FIRMY_DOMYSLNE = {
-  nazwa: "Artway-TM",
+  nazwa: "ARTWAY-TM SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ",
   identyfikator: "5882468333",
   nip: "5882468333",
-  adres: "Gryfa Pomorskiego 1/A, 84-207 Bojano"
+  regon: "388782967",
+  adres: "Gryfa Pomorskiego 1/A",
+  kodPocztowy: "84-207",
+  miasto: "Bojano"
 };
 const NUMER_PRZELEWU_TELEFON_DOMYSLNY = "530038914";
 const DOMYSLNE_PLATNOSCI = [

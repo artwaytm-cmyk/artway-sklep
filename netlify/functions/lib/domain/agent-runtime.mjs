@@ -27,7 +27,7 @@ function number(value = 0, min = 0, max = Number.MAX_SAFE_INTEGER) {
 
 function safeError(value = '') {
   return clean(value, 300)
-    .replace(/\b(?:sk|sk-proj|sk-ant)-[A-Za-z0-9_-]{10,}\b/gi, '[ukryty token]')
+    .replace(/\b(?:sk|sk-proj|sk-ant|xai)-[A-Za-z0-9_-]{10,}\b/gi, '[ukryty token]')
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]{10,}=*/gi, 'Bearer [ukryty]');
 }
 
@@ -104,6 +104,7 @@ function asRecord(value = {}) {
       codex: safeProvider(source.providers?.codex),
       openai: safeProvider(source.providers?.openai),
       anthropic: safeProvider(source.providers?.anthropic),
+      xai: safeProvider(source.providers?.xai),
     },
     currentRun: source.currentRun?.id ? safeRun(source.currentRun) : null,
     history: (Array.isArray(source.history) ? source.history : []).slice(0, MAX_HISTORY).map(safeRun),
@@ -154,6 +155,7 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
             codex: safeProvider({ ...record.providers.codex, ...input.providers.codex }),
             openai: safeProvider({ ...record.providers.openai, ...input.providers.openai }),
             anthropic: safeProvider({ ...record.providers.anthropic, ...input.providers.anthropic }),
+            xai: safeProvider({ ...record.providers.xai, ...input.providers.xai }),
           }
           : record.providers;
         return {

@@ -72,7 +72,7 @@ function podsumowanieKosztowTekst(z){
 }
 function dostepnePlatnosci(){
   KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
-  return KONFIG.platnosci.filter(p => !p.wylaczona);
+  return KONFIG.platnosci.filter(p => !p.wylaczona && (p.id!=="paynow"||czyPaynowDostepnyPublicznie()));
 }
 function formatujKod(el){
   const c = el.value.replace(/[^0-9]/g,"").slice(0,5);
@@ -226,8 +226,9 @@ function otworzModal(){
       <div class="f-group"><label>Uwagi do zamówienia</label><textarea name="notes" rows="2"></textarea></div>
       <div id="availabilityConfirmBox"></div>
       <div class="summary" id="orderSummary"></div>
-      <button type="submit" class="checkout-btn">Zamawiam →</button>
-      <p class="pay-note">Klikając, akceptujesz <a href="#/regulamin" onclick="zamknijModalCheckout({restoreFocus:false})">regulamin</a>. Dane służą wyłącznie realizacji zamówienia.</p>
+      <label class="chk-row checkout-legal-confirm"><input type="checkbox" name="regulaminAkceptacja" required> <span>Akceptuję <a href="#/regulamin" onclick="zamknijModalCheckout({restoreFocus:false})">regulamin sklepu</a> i potwierdzam obowiązek zapłaty całkowitej kwoty pokazanej powyżej.</span></label>
+      <button type="submit" class="checkout-btn">Zamówienie z obowiązkiem zapłaty</button>
+      <p class="pay-note">Dane przetwarzamy w celu realizacji zamówienia. Szczegóły znajdziesz w <a href="#/prywatnosc" onclick="zamknijModalCheckout({restoreFocus:false})">Polityce prywatności</a>.</p>
     </form>`;
   przeliczZamowienie();
   aktywujModalCheckout();
@@ -251,7 +252,7 @@ function przeliczZamowienie(){
     + `<div><span>Dostawa</span><span>${dostawa?zl(dostawa):"GRATIS"}</span></div>`
     + (weekend?`<div><span>Paczka w Weekend</span><span>${zl(weekend)}</span></div>`:"")
     + (oplata?`<div><span>Opłata za pobranie</span><span>${zl(oplata)}</span></div>`:"")
-    + `<div class="sum-total"><span>Do zapłaty</span><span>${zl(suma+dostawa+oplata+weekend)}</span></div>`;
+    + `<div class="sum-total"><span>Do zapłaty (PLN)</span><span>${zl(suma+dostawa+oplata+weekend)}</span></div>`;
 }
 // ─── InPost Geowidget (wybór paczkomatu na mapie) ───
 let INPOST_PUBLIC=null, geowidgetSDK=null;

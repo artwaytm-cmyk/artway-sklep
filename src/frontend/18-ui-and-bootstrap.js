@@ -38,7 +38,7 @@ $("searchInput").oninput = e=>{
   const porzadkowaniePamieci=zwolnijPamiecPodreczna();
   if(porzadkowaniePamieci.usunieto.length)loguj("info",`Odciążono pamięć podręczną: ${(porzadkowaniePamieci.przed/1024).toFixed(0)} KB → ${(porzadkowaniePamieci.po/1024).toFixed(0)} KB`);
   const ladowanieProduktow=pobierzBazoweProdukty();
-  await Promise.all([chmuraWczytajStan(),ladowanieProduktow]); // ustawienia i katalog pobieramy równolegle
+  await Promise.all([chmuraWczytajStan(),ladowanieProduktow,pobierzPaynowKonfiguracjePubliczna()]); // ustawienia, katalog i bezpieczny status płatności pobieramy równolegle
   zastosujUstawienia();
   await zainicjujAdmina();
   await odtworzSesjeCentralna();

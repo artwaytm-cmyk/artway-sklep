@@ -463,6 +463,7 @@ function zdaniaOpisu(v){
 function agentAICzyscOpis(v,max=20000){
   let s=String(v??"")
     .replace(/^Domyślny opis(?: krótki| pełny)?\s*/i,"")
+    .replace(/\s*(?:\[?\.{3}\]?\s*Read\s+More|Czytaj\s+więcej)\s*\.{0,3}\s*$/gi,"")
     .replace(/\r/g,"\n")
     .replace(/\t+/g," ")
     .replace(/[ \u00a0]{2,}/g," ")
@@ -492,7 +493,7 @@ function agentAIUtworzOpisKrotki(p={}){
   return agentAITnijDoZdania(`${p.nazwa||"Produkt"} to propozycja z kategorii ${kat}, przygotowana z myślą o wygodnym wyborze i szybkim zakupie w Artway-TM.`,300);
 }
 function agentAIFormatujOpisPelny(p={}){
-  const raw=agentAICzyscOpis(p.opis||"",20000);
+  const raw=agentAICzyscOpis(p.opis||p.opisKrotki||p.krotkiOpis||p.shortDescription||"",20000);
   if(!raw)return "";
   const etykieta=/^(opis produktu|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)\s*:?[\s]*$/i;
   const wejscie=raw

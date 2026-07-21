@@ -1,10 +1,13 @@
 /* GENERATED FILE — edit src/frontend/*.js and run npm run build */
 /* ═══════════ KONFIGURACJA ═══════════ */
 const DANE_FIRMY_DOMYSLNE = {
-  nazwa: "Artway-TM",
+  nazwa: "ARTWAY-TM SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ",
   identyfikator: "5882468333",
   nip: "5882468333",
-  adres: "Gryfa Pomorskiego 1/A, 84-207 Bojano"
+  regon: "388782967",
+  adres: "Gryfa Pomorskiego 1/A",
+  kodPocztowy: "84-207",
+  miasto: "Bojano"
 };
 const NUMER_PRZELEWU_TELEFON_DOMYSLNY = "530038914";
 const DOMYSLNE_PLATNOSCI = [
@@ -876,6 +879,7 @@ function zdaniaOpisu(v){
 function agentAICzyscOpis(v,max=20000){
   let s=String(v??"")
     .replace(/^Domyślny opis(?: krótki| pełny)?\s*/i,"")
+    .replace(/\s*(?:\[?\.{3}\]?\s*Read\s+More|Czytaj\s+więcej)\s*\.{0,3}\s*$/gi,"")
     .replace(/\r/g,"\n")
     .replace(/\t+/g," ")
     .replace(/[ \u00a0]{2,}/g," ")
@@ -905,7 +909,7 @@ function agentAIUtworzOpisKrotki(p={}){
   return agentAITnijDoZdania(`${p.nazwa||"Produkt"} to propozycja z kategorii ${kat}, przygotowana z myślą o wygodnym wyborze i szybkim zakupie w Artway-TM.`,300);
 }
 function agentAIFormatujOpisPelny(p={}){
-  const raw=agentAICzyscOpis(p.opis||"",20000);
+  const raw=agentAICzyscOpis(p.opis||p.opisKrotki||p.krotkiOpis||p.shortDescription||"",20000);
   if(!raw)return "";
   const etykieta=/^(opis produktu|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)\s*:?[\s]*$/i;
   const wejscie=raw
@@ -1017,20 +1021,31 @@ function daneFirmy(){
   const ident = tylkoCyfry(d.identyfikator || d.nip || d.pesel || DANE_FIRMY_DOMYSLNE.identyfikator);
   d.identyfikator = ident;
   d.nip = tylkoCyfry(d.nip || ident);
+  d.regon = tylkoCyfry(d.regon || DANE_FIRMY_DOMYSLNE.regon);
+  if(d.nip===DANE_FIRMY_DOMYSLNE.nip){
+    if(!String(d.nazwa||"").trim()||/^artway-?tm$/i.test(String(d.nazwa||"").trim()))d.nazwa=DANE_FIRMY_DOMYSLNE.nazwa;
+    if(!String(d.adres||"").trim()||String(d.adres).includes("84-207"))d.adres=DANE_FIRMY_DOMYSLNE.adres;
+    d.kodPocztowy=String(d.kodPocztowy||DANE_FIRMY_DOMYSLNE.kodPocztowy).trim();
+    d.miasto=String(d.miasto||DANE_FIRMY_DOMYSLNE.miasto).trim();
+  }
   delete d.pesel;
   return d;
 }
+function pelnyAdresFirmy(d=daneFirmy()){
+  return [String(d.adres||"").trim(),[String(d.kodPocztowy||"").trim(),String(d.miasto||"").trim()].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+}
 function daneFirmyTekst(){
   const d = daneFirmy();
-  return `${d.nazwa}${d.adres?`, ${d.adres}`:""}, NIP: ${d.nip}`;
+  return `${d.nazwa}${pelnyAdresFirmy(d)?`, ${pelnyAdresFirmy(d)}`:""}, NIP: ${d.nip}, REGON: ${d.regon}`;
 }
 function daneFirmyHTML(){
   const d = daneFirmy();
-  return `${esc(d.nazwa)}${d.adres?`, ${esc(d.adres)}`:""}<br><b>NIP:</b> ${esc(d.nip)}`;
+  return `<strong>${esc(d.nazwa)}</strong><br>${esc(pelnyAdresFirmy(d))}<br><b>NIP:</b> ${esc(d.nip)} • <b>REGON:</b> ${esc(d.regon)}`;
 }
 function danePrawneFirmyKompletne(){
-  const d=daneFirmy(),wartosci=[d.nazwa,d.nip,d.adres,d.kodPocztowy,d.miasto];
-  return wartosci.every(value=>{const tekst=String(value||"").trim().toLowerCase();return tekst&&!tekst.includes("[nazwa firmy")&&!tekst.includes("uzupełnij")&&!tekst.includes("000 000");});
+  const d=daneFirmy(),wartosci=[d.nazwa,d.nip,d.regon,d.adres,d.kodPocztowy,d.miasto];
+  return wartosci.every(value=>{const tekst=String(value||"").trim().toLowerCase();return tekst&&!tekst.includes("[nazwa firmy")&&!tekst.includes("uzupełnij")&&!tekst.includes("000 000");})
+    && walidujNip(d.nip) && /^\d{9}(?:\d{5})?$/.test(d.regon);
 }
 function normalizujPlatnosci(lista){
   const bazowe = DOMYSLNE_PLATNOSCI.map(p=>({...p}));
@@ -1079,6 +1094,15 @@ function migrujTresciPrawne(tresci){
 function platnosciOpis(){
   return dostepnePlatnosci().map(p=>p.nazwa).join(", ") || "brak aktywnych metod płatności";
 }
+let paynowPubliczne={sprawdzono:false,configured:false,env:"",error:""};
+async function pobierzPaynowKonfiguracjePubliczna(){
+  try{
+    const d=await chmura("paynow-config",{timeout:9000});
+    paynowPubliczne={sprawdzono:true,configured:!!d.configured,env:String(d.env||""),error:""};
+  }catch(e){paynowPubliczne={sprawdzono:true,configured:false,env:"",error:String(e?.message||e)};}
+  return paynowPubliczne;
+}
+function czyPaynowDostepnyPublicznie(){return !!paynowPubliczne.configured;}
 function instrukcjaPlatnosciTekst(id, nr, kwota){
   const kw = typeof kwota==="number" ? zl(kwota) : String(kwota||"");
   if(id==="pobranie") return `Płatność przy odbiorze: do zapłaty ${kw}.`;
@@ -1727,6 +1751,8 @@ function zastosujUstawienia(){
   $("footMail").textContent = "✉️ " + KONFIG.emailSklepu;
   $("footMail").href = "mailto:" + KONFIG.emailSklepu;
   $("footTel").textContent = "📞 " + KONFIG.telefon;
+  const footFirma=$("footFirma"),df=daneFirmy();
+  if(footFirma)footFirma.innerHTML=`${esc(df.nazwa)}<br>NIP ${esc(df.nip)} • REGON ${esc(df.regon)}<br>${esc(pelnyAdresFirmy(df))}`;
   $("topbar").style.display = u.uklad?.pasekInfoWidoczny===false ? "none" : "";
   $("searchInput").placeholder = u.tekstSzukaj || "Szukaj produktu…";
   $("footCopy").textContent = u.stopkaCopy || `© ${new Date().getFullYear()} ${KONFIG.nazwaSklepu}. Wszystkie prawa zastrzeżone.`;
@@ -3746,7 +3772,7 @@ function widokProdukt(id){
       <h2 style="margin-top:0">Informacje o produkcie</h2>
       <div class="faq-list">
         <details open><summary>Opis</summary>${opisProduktuHTML(p)}</details>
-        <details><summary>Dostawa i płatność</summary><p>Dostępne metody oraz aktualne koszty sprawdzisz w koszyku. Możesz zapłacić przez mBank Paynow, za pobraniem albo przelewem na telefon.</p></details>
+        <details><summary>Dostawa i płatność</summary><p>Dostępne metody oraz aktualne koszty sprawdzisz w koszyku. Aktualne płatności: ${esc(platnosciOpis())}. Wszystkie ceny są cenami brutto w PLN.</p></details>
         <details><summary>Zwrot i reklamacja</summary><p>Masz 14 dni na odstąpienie od umowy. W przypadku problemu z produktem skontaktuj się z nami przez stronę kontaktową.</p></details>
       </div>
     </div>
@@ -4678,7 +4704,7 @@ function podsumowanieKosztowTekst(z){
 }
 function dostepnePlatnosci(){
   KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
-  return KONFIG.platnosci.filter(p => !p.wylaczona);
+  return KONFIG.platnosci.filter(p => !p.wylaczona && (p.id!=="paynow"||czyPaynowDostepnyPublicznie()));
 }
 function formatujKod(el){
   const c = el.value.replace(/[^0-9]/g,"").slice(0,5);
@@ -4832,8 +4858,9 @@ function otworzModal(){
       <div class="f-group"><label>Uwagi do zamówienia</label><textarea name="notes" rows="2"></textarea></div>
       <div id="availabilityConfirmBox"></div>
       <div class="summary" id="orderSummary"></div>
-      <button type="submit" class="checkout-btn">Zamawiam →</button>
-      <p class="pay-note">Klikając, akceptujesz <a href="#/regulamin" onclick="zamknijModalCheckout({restoreFocus:false})">regulamin</a>. Dane służą wyłącznie realizacji zamówienia.</p>
+      <label class="chk-row checkout-legal-confirm"><input type="checkbox" name="regulaminAkceptacja" required> <span>Akceptuję <a href="#/regulamin" onclick="zamknijModalCheckout({restoreFocus:false})">regulamin sklepu</a> i potwierdzam obowiązek zapłaty całkowitej kwoty pokazanej powyżej.</span></label>
+      <button type="submit" class="checkout-btn">Zamówienie z obowiązkiem zapłaty</button>
+      <p class="pay-note">Dane przetwarzamy w celu realizacji zamówienia. Szczegóły znajdziesz w <a href="#/prywatnosc" onclick="zamknijModalCheckout({restoreFocus:false})">Polityce prywatności</a>.</p>
     </form>`;
   przeliczZamowienie();
   aktywujModalCheckout();
@@ -4857,7 +4884,7 @@ function przeliczZamowienie(){
     + `<div><span>Dostawa</span><span>${dostawa?zl(dostawa):"GRATIS"}</span></div>`
     + (weekend?`<div><span>Paczka w Weekend</span><span>${zl(weekend)}</span></div>`:"")
     + (oplata?`<div><span>Opłata za pobranie</span><span>${zl(oplata)}</span></div>`:"")
-    + `<div class="sum-total"><span>Do zapłaty</span><span>${zl(suma+dostawa+oplata+weekend)}</span></div>`;
+    + `<div class="sum-total"><span>Do zapłaty (PLN)</span><span>${zl(suma+dostawa+oplata+weekend)}</span></div>`;
 }
 // ─── InPost Geowidget (wybór paczkomatu na mapie) ───
 let INPOST_PUBLIC=null, geowidgetSDK=null;
@@ -5210,7 +5237,7 @@ $("searchInput").oninput = e=>{
   const porzadkowaniePamieci=zwolnijPamiecPodreczna();
   if(porzadkowaniePamieci.usunieto.length)loguj("info",`Odciążono pamięć podręczną: ${(porzadkowaniePamieci.przed/1024).toFixed(0)} KB → ${(porzadkowaniePamieci.po/1024).toFixed(0)} KB`);
   const ladowanieProduktow=pobierzBazoweProdukty();
-  await Promise.all([chmuraWczytajStan(),ladowanieProduktow]); // ustawienia i katalog pobieramy równolegle
+  await Promise.all([chmuraWczytajStan(),ladowanieProduktow,pobierzPaynowKonfiguracjePubliczna()]); // ustawienia, katalog i bezpieczny status płatności pobieramy równolegle
   zastosujUstawienia();
   await zainicjujAdmina();
   await odtworzSesjeCentralna();

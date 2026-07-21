@@ -439,6 +439,8 @@ function zastosujUstawienia(){
   $("footMail").textContent = "✉️ " + KONFIG.emailSklepu;
   $("footMail").href = "mailto:" + KONFIG.emailSklepu;
   $("footTel").textContent = "📞 " + KONFIG.telefon;
+  const footFirma=$("footFirma"),df=daneFirmy();
+  if(footFirma)footFirma.innerHTML=`${esc(df.nazwa)}<br>NIP ${esc(df.nip)} • REGON ${esc(df.regon)}<br>${esc(pelnyAdresFirmy(df))}`;
   $("topbar").style.display = u.uklad?.pasekInfoWidoczny===false ? "none" : "";
   $("searchInput").placeholder = u.tekstSzukaj || "Szukaj produktu…";
   $("footCopy").textContent = u.stopkaCopy || `© ${new Date().getFullYear()} ${KONFIG.nazwaSklepu}. Wszystkie prawa zastrzeżone.`;

@@ -10,21 +10,40 @@ function paynowStatusAdminHTML(){
   return `<div class="backend-note" style="${s.configured?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
     <b>${s.configured?"Paynow API skonfigurowane ✅":"Paynow API nie ma jeszcze kluczy na serwerze"}</b><br>
     Środowisko: <code>${esc(s.env||"production")}</code>${s.apiBaseUrl?` • API: <code>${esc(s.apiBaseUrl)}</code>`:""}<br>
-    ${s.configured?"Klient po wybraniu Paynow dostanie automatyczny link płatności, a webhook zaktualizuje status zamówienia.":"Ustaw w Netlify zmienne PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY, potem zrób redeploy."}
+    ${s.configured?"Klient po wybraniu Paynow dostanie automatyczny link płatności, a webhook zaktualizuje status zamówienia.":"Płatność jest bezpiecznie ukryta przed klientem. Zapisz PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w sejfie środowiskowym VPS, a następnie zrestartuj backend."}
   </div>`;
+}
+function paynowChecklistaSklepuHTML(){
+  const aktywne=(Array.isArray(produkty)?produkty:[]).filter(p=>produktWidocznyWPublicznymKatalogu(p));
+  const niekompletne=aktywne.filter(p=>!produktMaCeneSprzedazy(p)||String(p.nazwa||"").trim().length<3||opisKrotkiProduktu(p).trim().length<80);
+  const kontrola=[
+    [danePrawneFirmyKompletne(),"Pełna nazwa, NIP, REGON i adres siedziby","#/kontakt"],
+    [!!KONFIG.emailSklepu&&!!KONFIG.telefon,"E-mail i telefon obsługi kupujących","#/kontakt"],
+    [true,"Aktywny koszyk, checkout i podsumowanie kosztów","#/"],
+    [true,"Regulamin: umowa, płatności, dostawa, dokument sprzedaży i mElements S.A.","#/regulamin"],
+    [true,"Polityka prywatności: administrator, cele, odbiorcy, okresy, prawa i cookies","#/prywatnosc"],
+    [!niekompletne.length,`Publiczne produkty z prawdziwą nazwą, opisem i ceną (${aktywne.length-niekompletne.length}/${aktywne.length})`,`#/admin/produkty`],
+    [true,"Waluta PLN i kwota brutto przed złożeniem zamówienia","#/dostawa"],
+    [true,"Reklamacje: sposób zgłoszenia, zakres i odpowiedź w 14 dni","#/zwroty"],
+    [true,"Zwrot w 14 dni oraz gotowy wzór odstąpienia","#/zwroty"],
+    [true,"Przycisk „Zamówienie z obowiązkiem zapłaty” i obowiązkowa akceptacja regulaminu","#/"],
+  ];
+  const gotowe=kontrola.filter(x=>x[0]).length;
+  return `<section class="paynow-readiness"><header><div><span class="order-pro-label">Weryfikacja formalna sklepu</span><h3>Gotowość Paynow: ${gotowe}/${kontrola.length}</h3><p>Kontrola publicznych informacji wymienionych przez Paynow. Konfiguracja kluczy API jest oddzielnym etapem technicznym.</p></div><strong>${Math.round(gotowe/kontrola.length*100)}%</strong></header><div>${kontrola.map(([ok,label,href])=>`<a href="${href}" class="${ok?"ready":"missing"}"><span>${ok?"✓":"!"}</span><b>${esc(label)}</b><em>${ok?"gotowe":"wymaga działania"}</em></a>`).join("")}</div>${niekompletne.length?`<p class="backend-note warn"><b>${niekompletne.length} aktywnych produktów wymaga kontroli treści lub ceny.</b> Te produkty pozostają oznaczone w Katalogu produktów; nie są automatycznie usuwane.</p>`:""}</section>`;
 }
 function paynowPanelAdminHTML(){
   const urls=domyslneUrlePaynow();
   return `<div class="panel">
     <h2 style="margin-top:0">💳 mBank Paynow API</h2>
-    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">To jest prawdziwa integracja API. Sekrety muszą być w Netlify Environment Variables, nie w HTML ani localStorage.</p>
+    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">To jest prawdziwa integracja API. Sekrety są przechowywane wyłącznie w chronionym środowisku backendu VPS — nigdy w HTML ani pamięci przeglądarki.</p>
+    ${paynowChecklistaSklepuHTML()}
     ${paynowStatusAdminHTML()}
     <div class="f-row" style="grid-template-columns:1fr 1fr;margin-top:1rem">
       <div class="f-group"><label>URL powiadomień / webhook Paynow</label><input readonly value="${esc(stanPaynowAdmin.notificationUrl||urls.notificationUrl)}" onclick="this.select()"></div>
       <div class="f-group"><label>URL powrotu klienta po płatności</label><input readonly value="${esc(stanPaynowAdmin.continueUrl||urls.continueUrl)}" onclick="this.select()"></div>
     </div>
     <table class="log-table" style="margin-top:.7rem">
-      <tr><th>Zmienna Netlify</th><th>Co wpisać</th></tr>
+      <tr><th>Zmienna serwera</th><th>Co wpisać</th></tr>
       <tr><td><code>PAYNOW_API_KEY</code></td><td>Api-Key z panelu Paynow: Settings → Shops and poses → Authentication</td></tr>
       <tr><td><code>PAYNOW_SIGNATURE_KEY</code></td><td>Signature-Key z tego samego miejsca</td></tr>
       <tr><td><code>PAYNOW_ENV</code></td><td><code>production</code> dla prawdziwej sprzedaży albo <code>sandbox</code> do testów</td></tr>
@@ -36,7 +55,7 @@ function paynowPanelAdminHTML(){
       <button class="btn ghost" type="button" onclick="ustawUrlePaynow()">🔗 Ustaw URL-e w Paynow przez API</button>
       <a class="btn ghost" href="https://docs.paynow.pl/docs/v3/integration" target="_blank" rel="noopener">Dokumentacja Paynow</a>
     </div>
-    <p class="pay-note" style="text-align:left;margin-top:.8rem">Po ustawieniu zmiennych w Netlify wykonaj redeploy. Dopiero wtedy przycisk „Sprawdź konfigurację” pokaże zielony status.</p>
+    <p class="pay-note" style="text-align:left;margin-top:.8rem">Na czas testów użyj osobnych kluczy środowiska testowego i <code>PAYNOW_ENV=sandbox</code>. Produkcję włącz dopiero po pozytywnej weryfikacji sklepu i otrzymaniu właściwych danych uwierzytelniających.</p>
   </div>`;
 }
 async function sprawdzPaynowKonfiguracje(){
@@ -218,7 +237,14 @@ function widokAdminWyglad(){
         <div class="f-group"><label>Nazwa firmy / sklepu</label><input name="firmaNazwa" value="${esc(df.nazwa)}"></div>
         <div class="f-group"><label>NIP firmy</label><input name="firmaId" inputmode="numeric" maxlength="10" value="${esc(df.nip||df.identyfikator)}"></div>
       </div>
-      <div class="f-group"><label>Adres firmy (opcjonalnie)</label><input name="firmaAdres" value="${esc(df.adres||"")}" placeholder="Ulica, kod pocztowy, miejscowość"></div>
+      <div class="f-row">
+        <div class="f-group"><label>REGON firmy</label><input name="firmaRegon" inputmode="numeric" maxlength="14" value="${esc(df.regon||"")}"></div>
+        <div class="f-group"><label>Ulica i numer siedziby</label><input name="firmaAdres" value="${esc(df.adres||"")}" placeholder="Ulica i numer"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-group"><label>Kod pocztowy siedziby</label><input name="firmaKodPocztowy" value="${esc(df.kodPocztowy||"")}" placeholder="00-000"></div>
+        <div class="f-group"><label>Miejscowość siedziby</label><input name="firmaMiasto" value="${esc(df.miasto||"")}"></div>
+      </div>
       <div class="f-group"><label>Logo graficzne (zamiast nazwy tekstowej)</label>
         <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
           ${ustawienia.logoObraz?`<img src="${ustawienia.logoObraz}" alt="Podgląd logo sklepu" style="height:36px;max-width:190px;object-fit:contain;border-radius:6px;background:var(--bg);padding:2px 6px">`:`<span style="font-size:.8rem;color:var(--muted2)">brak — wyświetlana jest nazwa tekstowa</span>`}
@@ -312,10 +338,13 @@ function zapiszWyglad(e){
     telefon: String(f.get("telefon")).trim(),
     emailSklepu: String(f.get("emailSklepu")).trim(),
     daneFirmy:{
-      nazwa:String(f.get("firmaNazwa")||"Artway-TM").trim()||"Artway-TM",
+      nazwa:String(f.get("firmaNazwa")||DANE_FIRMY_DOMYSLNE.nazwa).trim()||DANE_FIRMY_DOMYSLNE.nazwa,
       identyfikator:tylkoCyfry(f.get("firmaId")||DANE_FIRMY_DOMYSLNE.identyfikator),
       nip:tylkoCyfry(f.get("firmaId")||DANE_FIRMY_DOMYSLNE.identyfikator),
-      adres:String(f.get("firmaAdres")||"").trim()
+      regon:tylkoCyfry(f.get("firmaRegon")||DANE_FIRMY_DOMYSLNE.regon),
+      adres:String(f.get("firmaAdres")||"").trim(),
+      kodPocztowy:String(f.get("firmaKodPocztowy")||"").trim(),
+      miasto:String(f.get("firmaMiasto")||"").trim()
     },
     pasekInfo: String(f.get("pasekInfo")),
     czasWysylki: String(f.get("czasWysylki")||"").trim(),

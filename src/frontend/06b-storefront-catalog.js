@@ -292,7 +292,7 @@ function widokProdukt(id){
       <h2 style="margin-top:0">Informacje o produkcie</h2>
       <div class="faq-list">
         <details open><summary>Opis</summary>${opisProduktuHTML(p)}</details>
-        <details><summary>Dostawa i płatność</summary><p>Dostępne metody oraz aktualne koszty sprawdzisz w koszyku. Możesz zapłacić przez mBank Paynow, za pobraniem albo przelewem na telefon.</p></details>
+        <details><summary>Dostawa i płatność</summary><p>Dostępne metody oraz aktualne koszty sprawdzisz w koszyku. Aktualne płatności: ${esc(platnosciOpis())}. Wszystkie ceny są cenami brutto w PLN.</p></details>
         <details><summary>Zwrot i reklamacja</summary><p>Masz 14 dni na odstąpienie od umowy. W przypadku problemu z produktem skontaktuj się z nami przez stronę kontaktową.</p></details>
       </div>
     </div>
