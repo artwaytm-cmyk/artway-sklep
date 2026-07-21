@@ -51,7 +51,7 @@ const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_descriptio
 
 const SPECIALISTS = Object.freeze({
   product_content: {
-    assistantId: 'asst_bi27lcqG4p4pGx5TouNEE94J',
+    assistantId: 'asst_bi27lcqG4p4pGx5TouNEE94J', platformPrompt: { id: 'pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108', version: '1' },
     icon: '✨', label: 'Redaktor produktu', area: 'Katalog i sklep',
     description: 'Tworzy spójny tytuł, krótki i pełny opis oraz pola SEO wyłącznie z przekazanych faktów.',
     fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
@@ -59,14 +59,14 @@ const SPECIALISTS = Object.freeze({
     rules: 'Nazwę ze źródła traktuj jako fakt o tożsamości, a nie gotowy tytuł. Usuń dopiski sklepu źródłowego, powtórzenia i chaos wielkich liter; ułóż naturalną nazwę sprzedażową, zachowując markę, model i wariant. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach. Treść jest wspólna dla sklepu i Allegro: nigdy nie dodawaj telefonu, e-maila, adresu strony, zachęty do kontaktu, negocjowania ceny, zewnętrznej płatności ani sprzedaży poza Allegro.',
   },
   allegro_offer: {
-    assistantId: 'asst_16UEvdbo3boUso6xyYeANYnQ',
+    assistantId: 'asst_16UEvdbo3boUso6xyYeANYnQ', platformPrompt: { id: 'pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7', version: '1' },
     icon: '🟠', label: 'Redaktor oferty Allegro', area: 'Allegro',
     description: 'Przygotowuje tytuł i układ opisu zgodny z zasadami Allegro, bez kontaktu i sprzedaży poza platformą.',
     fields: ['allegro_title', 'allegro_description', 'selling_points', 'missing_parameters'],
     rules: 'Nigdy nie dodawaj telefonu, e-maila, adresu strony, prośby o kontakt, negocjowania ceny ani zachęty do zakupu poza Allegro. Opis: wyłącznie p, h2, ul, li i strong, bez linków.',
   },
   customer_reply: {
-    assistantId: 'asst_M2ZRdoHVzQ0jIzYZ3TCLwcoI',
+    assistantId: 'asst_M2ZRdoHVzQ0jIzYZ3TCLwcoI', platformPrompt: { id: 'pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421', version: '1' },
     icon: '💬', label: 'Opiekun klienta', area: 'Wiadomości i dyskusje',
     description: 'Układa serdeczny szkic odpowiedzi na podstawie całej rozmowy, zamówienia i potwierdzonego statusu przesyłki.',
     fields: ['subject', 'reply'],
@@ -74,7 +74,7 @@ const SPECIALISTS = Object.freeze({
     rules: 'Nie obiecuj zwrotu, ponownej wysyłki, terminu ani statusu, którego nie potwierdzają fakty. To zawsze szkic do zatwierdzenia.',
   },
   seo_promotion: {
-    assistantId: 'asst_LM0aFCDpHHXGgWI28ZdLHjJw',
+    assistantId: 'asst_LM0aFCDpHHXGgWI28ZdLHjJw', platformPrompt: { id: 'pmpt_6a5f6e84122c81909f9ee773bebf35ea0a46ed1276dedcea', version: '1' },
     icon: '🔎', label: 'Specjalista SEO', area: 'Pozycjonowanie',
     description: 'Przygotowuje naturalne frazy, meta dane i plan bezpłatnej promocji bez upychania słów kluczowych.',
     fields: ['seo_title', 'meta_description', 'keywords', 'slug', 'internal_link_anchor', 'promotion_plan'],
@@ -82,21 +82,21 @@ const SPECIALISTS = Object.freeze({
     rules: 'Nie twórz niepotwierdzonych przewag, bestsellerów ani obietnic. Używaj marki Allegro wyłącznie opisowo i zgodnie z kontekstem.',
   },
   campaign_copy: {
-    assistantId: 'asst_yr8O2brC4yJ9KFmDFpmWQNPB',
+    assistantId: 'asst_yr8O2brC4yJ9KFmDFpmWQNPB', platformPrompt: { id: 'pmpt_6a5f6da900b48190b6e0833bd6d2582709f2081088e2ce3d', version: '2' },
     icon: '📣', label: 'Strateg promocji', area: 'Promocje i kody rabatowe',
     description: 'Buduje gotowy zestaw tekstów kampanii i bezpłatny plan promocji dla wskazanych produktów.',
     fields: ['campaign_name', 'headline', 'subheadline', 'cta', 'store_announcement', 'social_post', 'promotion_plan'],
     rules: 'Kod, rabat, daty i warunki muszą pochodzić z faktów. Jeśli ich brak, wskaż je jako brak zamiast wymyślać.',
   },
   banner_copy: {
-    assistantId: 'asst_4dPRadSuHeusSVkuzvFe9TKg',
+    assistantId: 'asst_4dPRadSuHeusSVkuzvFe9TKg', platformPrompt: { id: 'pmpt_6a5f6e92eed48196b1689d1a1e2d39f60555a437e19e5b3a', version: '1' },
     icon: '🎨', label: 'Dyrektor bannera', area: 'Grafiki AI',
     description: 'Z krótkiej intencji tworzy precyzyjny brief grafiki oraz tekst nakładany przez stronę.',
     fields: ['headline', 'subheadline', 'cta', 'image_brief', 'mobile_crop_guidance', 'alt_text'],
     rules: 'Brief nie może prosić modelu obrazu o generowanie liter. Teksty są nakładane osobno przez sklep. Nie kopiuj chronionych postaci ani marek.',
   },
   supplier_message: {
-    assistantId: 'asst_63UuzQm4UNsjileYU7Wue7pd',
+    assistantId: 'asst_63UuzQm4UNsjileYU7Wue7pd', platformPrompt: { id: 'pmpt_6a5f6eccb4348193bc09427beb9d849b0d483c3686838266', version: '1' },
     icon: '🏭', label: 'Koordynator producenta', area: 'Plan zatowarowania',
     description: 'Redaguje krótki e-mail do producenta wokół kanonicznej tabeli zamówienia.',
     fields: ['subject', 'intro', 'closing', 'import_instruction'],
@@ -104,7 +104,7 @@ const SPECIALISTS = Object.freeze({
     rules: 'Nie dodawaj cen, marż ani stanów. Nie zmieniaj kodów, nazw i ilości z tabeli. Treść ma być krótka i serdeczna.',
   },
   catalog_quality: {
-    assistantId: 'asst_0iw94LI9kTcnLpiOUzr8VnPj',
+    assistantId: 'asst_0iw94LI9kTcnLpiOUzr8VnPj', platformPrompt: { id: 'pmpt_6a5f6edf45508193ad0be5b8e3313dd307ca7bb991527083', version: '1' },
     icon: '🛡️', label: 'Kontroler jakości', area: 'Audyt treści',
     description: 'Wykrywa sprzeczności, duplikaty tekstu, braki i ryzykowne sformułowania, nie zapisując zmian samodzielnie.',
     fields: ['assessment', 'recommended_changes', 'compliance_notes'],
@@ -112,7 +112,7 @@ const SPECIALISTS = Object.freeze({
     rules: 'Oddziel błędy pewne od podejrzeń. Nie oznaczaj duplikatu bez jednoznacznych identyfikatorów lub bardzo mocnych dowodów.',
   },
   operations_supervisor: {
-    assistantId: 'asst_fgnFEmmPmCSsqEiO9uIgO3Kh',
+    assistantId: 'asst_fgnFEmmPmCSsqEiO9uIgO3Kh', platformPrompt: { id: 'pmpt_6a5f6ef1e3ec8193911f0926497d78850dbce1efdf710076', version: '1' },
     icon: '🧭', label: 'Koordynator operacyjny', area: 'Nadzór sklepu',
     description: 'Porządkuje wykryte ryzyka, wskazuje jedną rekomendację i czytelne warianty decyzji administratora.',
     fields: ['priority', 'problem', 'recommended_action', 'alternative_action', 'decision_question'],

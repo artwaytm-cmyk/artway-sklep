@@ -109,6 +109,43 @@ test('GPT-5 nano używa Responses API, ścisłego schematu i pamięci identyczne
   assert.equal(status.usage.inputTokens, 300);
 });
 
+test('produkcyjny specjalista wywołuje opublikowaną wersję promptu OpenAI Platform', async () => {
+  const repo = memoryRepository(); let requestBody;
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'real-key', model: 'gpt-5-nano', now: () => new Date('2026-07-21T12:00:00.000Z'),
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return new Response(JSON.stringify(openAiPayload([{ key: 'subject', label: 'Temat', value: 'Odpowiedź Artway' }, { key: 'reply', label: 'Odpowiedź', value: 'Dziękujemy za wiadomość.' }])), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  const run = await service.run({ specialist: 'customer_reply', instruction: 'Przygotuj odpowiedź', context: { thread: 'Pytanie o przesyłkę.' } });
+  assert.deepEqual(requestBody.prompt, SPECIALISTS.customer_reply.platformPrompt);
+  assert.equal('model' in requestBody, false);
+  assert.equal(run.platformAgent.id, SPECIALISTS.customer_reply.platformPrompt.id);
+  assert.equal(run.platformAgent.version, SPECIALISTS.customer_reply.platformPrompt.version);
+  assert.equal(run.platformAgent.available, true);
+  assert.equal(run.platformAgent.fallback, false);
+});
+
+test('błąd referencji promptu uruchamia jeden jawny fallback do wersjonowanych reguł serwera', async () => {
+  const repo = memoryRepository(); const requests = [];
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'real-key', model: 'gpt-5-nano', now: () => new Date('2026-07-21T12:00:00.000Z'),
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body); requests.push(body);
+      if (body.prompt) return new Response(JSON.stringify({ error: { code: 'prompt_not_found', param: 'prompt.id', message: 'Prompt not found.' } }), { status: 404, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify(openAiPayload([{ key: 'subject', label: 'Temat', value: 'Odpowiedź Artway' }, { key: 'reply', label: 'Odpowiedź', value: 'Dziękujemy za wiadomość.' }])), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  const run = await service.run({ specialist: 'customer_reply', instruction: 'Przygotuj odpowiedź', context: { thread: 'Pytanie o przesyłkę.' } });
+  assert.equal(requests.length, 2);
+  assert.ok(requests[0].prompt);
+  assert.equal(requests[1].model, 'gpt-5-nano');
+  assert.equal(run.platformAgent.available, false);
+  assert.equal(run.platformAgent.fallback, true);
+  assert.match(run.platformAgent.error, /Prompt not found/i);
+});
+
 test('dzienny limit Agenta resetuje się o północy czasu polskiego, a nie według UTC', async () => {
   const repo = memoryRepository({ agent_specialists_state: { config: { dailyLimit: 10, automaticDailyLimit: 10 }, history: [
     { id: 'before-midnight', source: 'automatic', status: 'completed', createdAt: '2026-07-18T21:59:00.000Z', usage: { inputTokens: 10 } },

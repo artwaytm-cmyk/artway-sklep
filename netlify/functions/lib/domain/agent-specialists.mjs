@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
 import { validManufacturerName } from './product-field-validation.mjs';
+import { createPlatformPromptProfile, requestSpecialistResponse } from './agent-specialist-openai.mjs';
 import { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionFingerprint, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts } from './agent-specialists-support.mjs';
 
 export function createAgentSpecialists({
@@ -10,32 +11,6 @@ export function createAgentSpecialists({
 } = {}) {
   if (typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function') throw new Error('Specjaliści GPT wymagają wersjonowanego repozytorium.');
   if (typeof fetchImpl !== 'function') throw new Error('Specjaliści GPT wymagają klienta HTTP.');
-  const platformProfiles = new Map();
-
-  async function platformAgentProfile(specialist, definition) {
-    if (!platformAgentsEnabled || !definition?.assistantId || !clean(apiKey, 500)) return null;
-    const cached = platformProfiles.get(specialist);
-    if (cached && now().getTime() - cached.checkedAt < 6 * 60 * 60_000) return cached;
-    try {
-      const response = await fetchImpl(`https://api.openai.com/v1/assistants/${encodeURIComponent(definition.assistantId)}`, {
-        headers: { authorization: `Bearer ${apiKey}`, 'OpenAI-Beta': 'assistants=v2' }, signal: AbortSignal.timeout(20_000),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw responseError(response, payload);
-      const profile = {
-        id: clean(payload.id, 120), name: clean(payload.name, 180) || definition.label,
-        model: clean(payload.model, 80), instructions: clean(payload.instructions, 12_000),
-        checkedAt: now().getTime(), available: true,
-      };
-      platformProfiles.set(specialist, profile);
-      return profile;
-    } catch (error) {
-      const profile = { id: definition.assistantId, name: definition.label, model: '', instructions: '', checkedAt: now().getTime(), available: false, error: safeError(error?.message || error) };
-      platformProfiles.set(specialist, profile);
-      return profile;
-    }
-  }
-
   async function change(key, fallback, mutator) {
     for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
       const version = await readVersioned(key, fallback), next = await mutator(version.value, version);
@@ -218,9 +193,17 @@ export function createAgentSpecialists({
       },
       learning: { productContent: { ...autonomy, updatedAt: productLearning.updatedAt, fieldStats: productLearning.fieldStats, recentExamples: productLearning.examples.slice(0, 6) } },
       coordinator: { id: 'codex-cli', label: 'Codex', role: 'manager', active: true, scenarioPolicy: 'closed-versioned-registry' },
-      platformAgents: { enabled: platformAgentsEnabled, configured: Object.values(SPECIALISTS).every((item) => !!item.assistantId), executionModel: clean(model, 80), coordinatorId: 'codex-cli', legacySupervisorProfileId: SPECIALISTS.operations_supervisor.assistantId },
+      platformAgents: {
+        enabled: platformAgentsEnabled,
+        configured: Object.values(SPECIALISTS).every((item) => !!item.platformPrompt?.id && !!item.platformPrompt?.version),
+        executionModel: clean(model, 80), coordinatorId: 'codex-cli', registry: 'versioned-platform-prompts',
+        legacySupervisorProfileId: SPECIALISTS.operations_supervisor.assistantId,
+      },
       scenarioStats,
-      specialists: Object.entries(SPECIALISTS).map(([id, value]) => ({ id, ...value, promptVersion: PROMPT_VERSION, deployment: 'openai-platform+server', platformAvailable: platformProfiles.get(id)?.available ?? null, platformName: platformProfiles.get(id)?.name || value.label })),
+      specialists: Object.entries(SPECIALISTS).map(([id, value]) => ({
+        id, ...value, promptVersion: PROMPT_VERSION, deployment: 'openai-platform-prompt+server',
+        platformAvailable: !!value.platformPrompt?.id, platformName: value.label,
+      })),
       usage: {
         today: todayRuns.length,
         automaticToday: todayRuns.filter((item) => item.source === 'automatic').length,
@@ -270,7 +253,7 @@ export function createAgentSpecialists({
     const cacheMs = current.config.cacheHours * 60 * 60_000, cached = current.history.find((item) => item.fingerprint === hash && item.status === 'completed' && now().getTime() - Date.parse(item.createdAt || '') <= cacheMs);
     if (cached) return { ...cached, cached: true };
     const runId = `gpt_${Date.now()}_${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`, createdAt = now().toISOString(), target = sanitizeContext(raw.target || {});
-    const platformProfile = await platformAgentProfile(specialist, definition);
+    const platformProfile = createPlatformPromptProfile(definition, { enabled: platformAgentsEnabled, apiKey });
     const instructions = [
       'Jesteś wyspecjalizowanym pracownikiem polskiego sklepu Artway-TM. Odpowiadasz po polsku.',
       'Korzystaj wyłącznie z przekazanych faktów. Nie zgaduj parametrów, cen, statusów, terminów, dostępności, rabatów ani warunków.',
@@ -282,23 +265,15 @@ export function createAgentSpecialists({
       learnedGuidance ? `Pamięć zatwierdzeń administratora:\n${learnedGuidance}` : '',
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
       specialist === 'product_content' ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Materiał ze strony źródłowej jest wyłącznie zbiorem faktów: usuń z niego menu, kontrolki sklepu, „Dodaj do porównania”, „Dodaj do listy zakupowej”, koszyk, dostępność, liczbę sztuk, ceny, terminy wysyłki, prośby o kontakt i powiadomienie o dostępności. Ciąg „Rozmiar uniwersalny” połączony z liczbą sztuk jest kontrolką stanu sklepu źródłowego, a nie rozmiarem lub zawartością produktu — zawsze go usuń. Nie umieszczaj w opisie ceny, stanu, dostępności, terminu dostawy, danych kontaktowych, adresów stron, SKU, EAN, kodu producenta ani akapitu wskazującego źródło. Każdy punkt listy musi zawierać konkretną treść. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
-      platformProfile?.instructions && specialist !== 'product_content' ? `Dodatkowy profil roli zapisany w OpenAI Platform:\n${platformProfile.instructions}\nStosuj ten profil tylko w zakresie zgodnym z powyższymi bieżącymi regułami Artway. Bieżąca lista pól i zakazy mają pierwszeństwo.` : '',
-      platformProfile && specialist === 'product_content' ? `Używasz profilu OpenAI Platform „${platformProfile.name || definition.label}”, ale jego starsza treść instrukcji nie jest dołączana do redakcji. Obowiązuje wyłącznie powyższa, wersjonowana polityka Artway ${PROMPT_VERSION}, aby stary profil nie przywracał treści źródłowej.` : '',
+      platformProfile ? `Używasz opublikowanego profilu OpenAI Platform „${platformProfile.name}”, wersja ${platformProfile.version}. Bieżące reguły Artway ${PROMPT_VERSION}, lista pól i zakazy mają pierwszeństwo.` : '',
       'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
       'Treść ma być konkretna, naturalna, uporządkowana i gotowa do sprawdzenia przez administratora.',
     ].filter(Boolean).join('\n');
-    const response = await fetchImpl('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model, store: false, reasoning: { effort: 'minimal' }, max_output_tokens: 3600,
-        instructions,
-        input: JSON.stringify({ zadanie: instruction, fakty: context }),
-        text: { format: { type: 'json_schema', name: 'artway_specialist_result', strict: true, schema: RESULT_SCHEMA } },
-      }),
-      signal: AbortSignal.timeout(90_000),
+    const request = await requestSpecialistResponse({
+      fetchImpl, apiKey, model, promptProfile: platformProfile, instructions,
+      input: JSON.stringify({ zadanie: instruction, fakty: context }), resultSchema: RESULT_SCHEMA,
     });
-    const payload = await response.json().catch(() => ({}));
+    const { response, payload } = request;
     if (!response.ok) throw responseError(response, payload);
     let parsed;
     try { parsed = JSON.parse(outputText(payload)); }
@@ -310,7 +285,10 @@ export function createAgentSpecialists({
     const entry = {
       id: runId, specialist, specialistLabel: definition.label, status: 'completed', source, createdAt, model: clean(payload.model || model, 80),
       instruction: clean(instruction, 500), target, fingerprint: hash, result, usage, approvalStatus: 'draft', promptVersion: PROMPT_VERSION, scenario,
-      platformAgent: platformProfile ? { id: platformProfile.id, name: platformProfile.name, available: platformProfile.available } : null,
+      platformAgent: platformProfile ? {
+        id: platformProfile.id, name: platformProfile.name, version: platformProfile.version,
+        available: request.promptApplied, fallback: request.promptFallback, error: request.promptError || '',
+      } : null,
       actor: clean(actor?.email || actor?.name || actor?.source || 'administrator', 120),
     };
     await appendHistory(entry);
