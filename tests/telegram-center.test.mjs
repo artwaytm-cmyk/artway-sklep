@@ -286,6 +286,9 @@ test('Telegram pobiera dokument wyłącznie z bieżącej rewizji Planu zatowarow
     { id: 'SPD-1', numer: 'AZ/2026/07/0001', revision: 4, status: 'do sprawdzenia', pozycje: [
       { externalId: 'EXT-1410', nazwa: 'Gra testowa', iloscPotrzebna: 2, ilosc: 5, dostawca: 'Alexander' },
     ] },
+    { id: 'SPD-1', numer: 'AZ/2026/07/0001', revision: 5, status: 'zastąpione', pozycje: [
+      { externalId: 'EXT-1410', nazwa: 'Techniczna kopia', iloscPotrzebna: 2, ilosc: 5, dostawca: 'Alexander' },
+    ] },
     { id: 'SPD-OLD', revision: 1, status: 'zrealizowane', pozycje: [
       { externalId: 'OLD-1', nazwa: 'Stary produkt', ilosc: 99, dostawca: 'Alexander' },
     ] },

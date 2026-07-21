@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { allegroCheckText } from '../allegro-compliance.mjs';
+import { AGENT_ACTION_POLICY, NEVER_AUTOMATIC } from './agent-action-policy.mjs';
 import { decisionFingerprint, decisionSubjectKey, normalizeDecisionReceipt } from './agent-decision-state.mjs';
 
 const STATE_KEY = 'agent_specialists_state';
@@ -17,6 +18,8 @@ const DEFAULT_CONFIG = Object.freeze({
   safeAutoApply: true,
   autoApplyProductEditorial: true,
   autoUpdateLinkedAllegroContent: true,
+  autoPrepareCustomerReplyDrafts: true,
+  autoAuditCatalogIdentity: true,
   confidenceThreshold: 0.92,
   learningEnabled: true,
   approvalWarmupCount: 3,
@@ -25,30 +28,6 @@ const DEFAULT_CONFIG = Object.freeze({
 });
 
 const PROMPT_VERSION = '2026-07-21.1';
-const AGENT_ACTION_POLICY = Object.freeze({
-  automatic: Object.freeze([
-    Object.freeze({ id: 'product_editorial', icon: '✨', label: 'Redakcja kart produktu', description: 'Nazwa, opis krótki, opis pełny, układ sekcji i SEO są zapisywane bez pytania, gdy wynik jest kompletny, zgodny i oparty na faktach.', configKey: 'autoApplyProductEditorial' }),
-    Object.freeze({ id: 'linked_allegro_content', icon: '🟠', label: 'Treść istniejącej oferty Allegro', description: 'Tytuł, opis i układ sekcji już powiązanej oferty są synchronizowane automatycznie. Cena, stan i status publikacji pozostają nietknięte.', configKey: 'autoUpdateLinkedAllegroContent' }),
-    Object.freeze({ id: 'allegro_compliance', icon: '🛡️', label: 'Oczyszczanie zgodności Allegro', description: 'Agent usuwa z opisu treści kontaktowe, sprzedaż poza Allegro, zewnętrzne płatności i inne niedozwolone sformułowania.' }),
-    Object.freeze({ id: 'read_only_checks', icon: '🔎', label: 'Kontrole i synchronizacja danych', description: 'Odczyt statusów, prowizji, dostępności, zamówień, wiadomości i jakości katalogu odbywa się bez potwierdzenia.' }),
-    Object.freeze({ id: 'exact_identity_mapping', icon: '🧩', label: 'Pewne mapowanie identyfikatorów', description: 'Jednoznaczne połączenia po EAN/GTIN, ID katalogu lub EXTERNAL_ID/SKU mogą być zapisane automatycznie z audytem.' }),
-    Object.freeze({ id: 'supplier_availability', icon: '🏭', label: 'Dostępność potwierdzona u producenta', description: 'Oferta może zostać automatycznie ukryta przy potwierdzonym braku u producenta i przywrócona po powrocie towaru, zgodnie z zapisanym wyjątkiem czasowym.' }),
-  ]),
-  approvalRequired: Object.freeze([
-    Object.freeze({ id: 'new_allegro_publication', icon: '🛒', label: 'Nowa publikacja lub aktywacja Allegro', description: 'Agent może przygotować kompletny szkic, ale pierwsze wystawienie albo aktywacja sprzedaży wymaga zatwierdzenia.' }),
-    Object.freeze({ id: 'price_or_stock', icon: '💰', label: 'Ręczna zmiana ceny lub stanu sprzedażowego', description: 'Cena, marża, rabat i ręczna korekta stanu oferty wymagają decyzji. Wyjątkiem jest wcześniej zatwierdzona automatyka dostępności producenta.' }),
-    Object.freeze({ id: 'destructive_offer_action', icon: '🗑️', label: 'Zakończenie, usunięcie lub scalenie oferty', description: 'Działania nieodwracalne i niejednoznaczne duplikaty zawsze trafiają do decyzji administratora.' }),
-    Object.freeze({ id: 'external_message', icon: '💬', label: 'Wiadomość do klienta lub producenta', description: 'Agent przygotowuje treść, ale wysyłka wiadomości, dyskusji i zamówienia do producenta wymaga potwierdzenia.' }),
-    Object.freeze({ id: 'shipment_or_finance', icon: '🔐', label: 'Przesyłka, dokument finansowy lub płatność', description: 'Etykieta, zwrot, faktura, korekta, płatność i zamówienie zakupu nie są wykonywane bez zatwierdzenia.' }),
-  ]),
-  blockedOnUncertainty: Object.freeze([
-    'sprzeczne albo brakujące fakty produktu',
-    'niepewna tożsamość produktu lub oferty',
-    'naruszenie zasad Allegro, którego nie da się bezpiecznie oczyścić',
-    'błąd API lub brak potwierdzenia wykonania po stronie zewnętrznej',
-  ]),
-});
-const NEVER_AUTOMATIC = Object.freeze(AGENT_ACTION_POLICY.approvalRequired.map((item) => item.label));
 const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription' });
 
 const SPECIALISTS = Object.freeze({
@@ -177,6 +156,8 @@ function config(value = {}) {
     safeAutoApply: source.safeAutoApply !== false,
     autoApplyProductEditorial: source.autoApplyProductEditorial !== false,
     autoUpdateLinkedAllegroContent: source.autoUpdateLinkedAllegroContent !== false,
+    autoPrepareCustomerReplyDrafts: source.autoPrepareCustomerReplyDrafts !== false,
+    autoAuditCatalogIdentity: source.autoAuditCatalogIdentity !== false,
     confidenceThreshold: number(source.confidenceThreshold, DEFAULT_CONFIG.confidenceThreshold, 0.75, 1),
     learningEnabled: source.learningEnabled !== false,
     approvalWarmupCount: number(source.approvalWarmupCount, DEFAULT_CONFIG.approvalWarmupCount, 0, 20),

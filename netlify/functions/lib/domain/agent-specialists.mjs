@@ -465,7 +465,9 @@ export function createAgentSpecialists({
     ].filter(({ item }) => communicationNeedsReply(item));
     const communicationSignal = crypto.createHash('sha256').update(JSON.stringify(communicationRows.map(({ type, item }) => [type, String(item?.id || ''), String(item?.latestNewIncomingKey || item?.latestNewIncoming?.id || item?.lastMessage?.id || '')]).sort())).digest('hex');
     const lastCommunicationScan = Date.parse(current.communicationScan?.lastAt || ''), communicationSafetyDue = !Number.isFinite(lastCommunicationScan) || now().getTime() - lastCommunicationScan >= 12 * 60 * 60_000;
-    const communicationScanDue = scenarioEnabled('customer-reply-draft') && (options.forceCommunicationScan === true || communicationSignal !== current.communicationScan?.signal || communicationSafetyDue);
+    const customerReplyDraftsEnabled = current.config.autoPrepareCustomerReplyDrafts !== false;
+    const catalogIdentityAuditEnabled = current.config.autoAuditCatalogIdentity !== false;
+    const communicationScanDue = customerReplyDraftsEnabled && scenarioEnabled('customer-reply-draft') && (options.forceCommunicationScan === true || communicationSignal !== current.communicationScan?.signal || communicationSafetyDue);
     const editorialRows = products.map((product) => ({ product, ...productEditorialState(product) }));
     const candidates = scenarioEnabled('catalog-editorial') ? products.map((product) => {
       const editorial = productEditorialState(product), short = clean(product.opisKrotki || product.krotkiOpis, 5000), full = clean(product.opis, 30000);
@@ -547,7 +549,7 @@ export function createAgentSpecialists({
     }
 
     let openCatalogDecisionCount = current.decisions.filter((item) => item.kind === 'catalog_identity' && activeDecision(item, now())).length;
-    for (const product of (scenarioEnabled('catalog-identity-control') ? products : []).slice().sort((a, b) => String(b.createdAt || b.dataDodania || '').localeCompare(String(a.createdAt || a.dataDodania || ''))).slice(0, 200)) {
+    for (const product of (catalogIdentityAuditEnabled && scenarioEnabled('catalog-identity-control') ? products : []).slice().sort((a, b) => String(b.createdAt || b.dataDodania || '').localeCompare(String(a.createdAt || a.dataDodania || ''))).slice(0, 200)) {
       const missing = [!clean(product.gtin || product.ean, 80) && 'EAN', !validManufacturerName(product.producent || product.marka) && 'producent', !clean(product.kategoria, 160) && 'kategoria'].filter(Boolean);
       if (!missing.length) continue;
       const target = { type: 'product', productId: String(product.id), name: clean(product.nazwa, 180), missing }, subjectKey = decisionSubjectKey('catalog_identity', target), fp = decisionFingerprint('catalog_identity', target); activeFingerprints.add(fp);
@@ -568,7 +570,7 @@ export function createAgentSpecialists({
         if (product && !editorial.current && decision.target?.editorialFingerprint === editorial.fingerprint) activeFingerprints.add(decision.fingerprint);
       }
       if (decision.kind === 'catalog_identity') {
-        if (!scenarioEnabled('catalog-identity-control')) { activeFingerprints.add(decision.fingerprint); continue; }
+        if (!catalogIdentityAuditEnabled || !scenarioEnabled('catalog-identity-control')) { activeFingerprints.add(decision.fingerprint); continue; }
         const product = productById.get(String(decision.target?.productId || ''));
         if (product && (!clean(product.gtin || product.ean, 80) || !validManufacturerName(product.producent || product.marka) || !clean(product.kategoria, 160))) activeFingerprints.add(decision.fingerprint);
       }

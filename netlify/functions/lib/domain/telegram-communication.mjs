@@ -249,9 +249,15 @@ function supplierDocumentStatus(value = '') {
  * Dzięki temu żaden klient nie może przesłać alternatywnej treści zamówienia.
  */
 export function telegramCanonicalSupplierPreviews(settings = {}, options = {}) {
-  const drafts = Array.isArray(settings?.artway_agent_ai_zlecenia)
+  const sourceDrafts = Array.isArray(settings?.artway_agent_ai_zlecenia)
     ? settings.artway_agent_ai_zlecenia
     : [];
+  const draftIndex = new Map();
+  sourceDrafts.forEach((draft, index) => {
+    const key = text(draft?.id || draft?.numer || `draft-${index}`, 180);
+    if (!draftIndex.has(key)) draftIndex.set(key, draft);
+  });
+  const drafts = [...draftIndex.values()];
   const draftId = text(options?.draftId || '', 160).trim();
   const supplier = text(options?.supplier || '', 120).trim();
   const expectedRevision = options?.expectedRevision === undefined || options?.expectedRevision === null || options?.expectedRevision === ''

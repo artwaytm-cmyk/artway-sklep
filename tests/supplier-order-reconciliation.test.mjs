@@ -130,6 +130,32 @@ test('retry przeliczenia jest idempotentny i nie podwaja ilości ani szkiców', 
   assert.deepEqual(second.unchanged, [first.activeDrafts[0].id]);
 });
 
+test('historyczne kopie tego samego ID są scalane i nie zwielokrotniają braku', () => {
+  const base = run({
+    orders: [order('ATM-DUP-ID', 1, 1)],
+    products: [product(1)],
+    settings: { artway_stany: { 1: 0 } },
+  }).drafts[0];
+  const duplicated = Array.from({ length: 10 }, (_value, index) => ({
+    ...structuredClone(base),
+    status: index % 2 ? 'zastąpione' : 'szkic',
+    revision: index % 2 ? 2 : 1,
+  }));
+  const result = run({
+    orders: [order('ATM-DUP-ID', 1, 1)],
+    products: [product(1)],
+    settings: { artway_stany: { 1: 0 } },
+    supplierDrafts: duplicated,
+  });
+
+  assert.equal(result.changed, true);
+  assert.equal(result.drafts.length, 1);
+  assert.equal(result.activeDrafts.length, 1);
+  assert.equal(result.activeDrafts[0].pozycje[0].iloscPotrzebna, 1);
+  assert.equal(result.activeDrafts[0].pozycje[0].ilosc, 1);
+  assert.equal(result.diagnostics.duplicateDraftIds.length, 9);
+});
+
 test('legacy aktywny szkic bez rewizji dostaje wersję 1 nawet bez zmiany treści', () => {
   const initial = run({
     orders: [order('ATM-LEGACY-REV', 1, 2)], products: [product(1)], settings: { artway_stany: { 1: 0 } },

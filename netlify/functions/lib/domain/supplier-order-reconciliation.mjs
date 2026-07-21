@@ -8,11 +8,30 @@ export function reconcileSupplierOrderDrafts(input = {}) {
   const settings = object(input.settings);
   const orders = array(input.orders);
   const products = productMap(input);
-  const originalDrafts = array(firstValue(input.supplierDrafts, input.drafts)).map(clone);
+  const suppliedDrafts = array(firstValue(input.supplierDrafts, input.drafts)).map(clone);
   const now = input.now instanceof Date ? input.now : new Date(input.now || Date.now());
   if (Number.isNaN(now.getTime())) throw new TypeError('Nieprawidłowa data przeliczenia szkiców producentów.');
   const movements = movementIndex(input);
-  const diagnostics = { skippedInactiveOrders: 0, skippedItemsWithoutProductId: 0, legacyWithoutMovement: [], duplicateEditableDrafts: [] };
+  const diagnostics = { skippedInactiveOrders: 0, skippedItemsWithoutProductId: 0, legacyWithoutMovement: [], duplicateEditableDrafts: [], duplicateDraftIds: [] };
+  // Ten sam identyfikator dokumentu oznacza tę samą rewizję biznesową. Starsze
+  // wersje systemu mogły przy równoległym uzgodnieniu zapisać kilka fizycznych
+  // kopii tego samego ID. Nie wolno ich sumować ani prezentować jako osobnych
+  // zamówień. Zachowujemy pierwszą aktywną kopię (lista jest najnowsza najpierw),
+  // a jeżeli dokument został już wysłany/zamknięty — chronimy stan nieedytowalny.
+  const uniqueDrafts = new Map(), originalDrafts = [];
+  const protectedStatus = (draft = {}) => !supplierDraftIsEditable(draft) && !['zastapione', 'superseded'].includes(draftStatus(draft));
+  for (const draft of suppliedDrafts) {
+    const id = text(draft?.id, 160);
+    if (!id) { originalDrafts.push(draft); continue; }
+    if (!uniqueDrafts.has(id)) {
+      uniqueDrafts.set(id, originalDrafts.length);
+      originalDrafts.push(draft);
+      continue;
+    }
+    const index = uniqueDrafts.get(id), kept = originalDrafts[index];
+    if (protectedStatus(draft) && !protectedStatus(kept)) originalDrafts[index] = draft;
+    diagnostics.duplicateDraftIds.push({ draftId: id, keptStatus: text(originalDrafts[index]?.status, 100), removedStatus: text((originalDrafts[index] === draft ? kept : draft)?.status, 100) });
+  }
   const demandByProduct = new Map();
 
   for (const order of orders) {
@@ -222,7 +241,7 @@ export function reconcileSupplierOrderDrafts(input = {}) {
   return {
     drafts: output,
     activeDrafts,
-    changed: created.length + updated.length + superseded.length > 0,
+    changed: diagnostics.duplicateDraftIds.length + created.length + updated.length + superseded.length > 0,
     created,
     updated,
     unchanged,

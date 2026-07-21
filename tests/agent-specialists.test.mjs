@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { automaticEditorialAssessment, createAgentSpecialists, normalizeProductContentEditorialResult, productEditorialFingerprint, productEditorialQuality, productEditorialState, productFacts, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
+import { AGENT_ACTION_POLICY, automaticEditorialAssessment, createAgentSpecialists, DEFAULT_CONFIG, normalizeProductContentEditorialResult, productEditorialFingerprint, productEditorialQuality, productEditorialState, productFacts, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
 import { createAgentSpecialistRoute } from '../netlify/functions/lib/agent-specialist-route.mjs';
 
 function memoryRepository(initial = {}) {
@@ -27,6 +27,18 @@ test('zespół zawiera konkretne role do treści, promocji, komunikacji i nadzor
   assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'allegro_offer', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality', 'operations_supervisor']);
   assert.match(SPECIALISTS.allegro_offer.rules, /poza Allegro/i);
   assert.match(SPECIALISTS.supplier_message.rules, /cen/i);
+});
+
+test('administrator nadaje bezpieczne automatyki, ale stałych blokad nie można wyłączyć', () => {
+  const configurable = AGENT_ACTION_POLICY.automatic.filter((item) => item.configKey);
+  assert.deepEqual(configurable.map((item) => item.configKey), [
+    'autoApplyProductEditorial', 'autoUpdateLinkedAllegroContent',
+    'autoPrepareCustomerReplyDrafts', 'autoAuditCatalogIdentity',
+  ]);
+  assert.equal(DEFAULT_CONFIG.autoPrepareCustomerReplyDrafts, true);
+  assert.equal(DEFAULT_CONFIG.autoAuditCatalogIdentity, true);
+  assert.ok(AGENT_ACTION_POLICY.approvalRequired.length >= 5);
+  assert.ok(AGENT_ACTION_POLICY.approvalRequired.every((item) => !item.configKey), 'chroniona decyzja nie może dostać przełącznika automatyki');
 });
 
 test('kontekst usuwa sekrety i prywatne dane przed wysłaniem do modelu', () => {
