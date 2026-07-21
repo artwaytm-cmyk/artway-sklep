@@ -157,6 +157,7 @@ export { inspectProductUrl, inspectProductUrlViaReader };
 const {
   publicznyOrigin,
   paynowKonfiguracja,
+  paynowDiagnostyka,
   podpisPaynowPowiadomienia,
   porownajPodpis,
   kluczIdempotencji,
@@ -3143,6 +3144,20 @@ export default async (req) => {
       });
     }
 
+    // ─── PAYNOW: pełny test podpisu, kluczy i metod płatności (admin) ───
+    if (action === 'paynow-diagnose') {
+      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const limited = ograniczRuch(req, 'paynow-diagnose', 30, 60 * 60 * 1000);
+      if (limited) return limited;
+      try {
+        const wynik = await paynowDiagnostyka(req);
+        return odpowiedz(wynik, wynik.ok ? 200 : 503);
+      } catch (error) {
+        return odpowiedz({ ok: false, configured: true, connected: false, error: tekst(error?.message || 'Test Paynow nie powiódł się', 500), code: 'paynow_diagnostic_failed' }, Number(error?.status) || 502);
+      }
+    }
+
     // ─── PAYNOW: utworzenie płatności i linku przekierowania ───
     if (action === 'paynow-create') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -3275,9 +3290,8 @@ export default async (req) => {
         continueUrl: tekst(body.continueUrl || cfg.continueUrl, 1000),
       };
       await paynowWywolaj(req, '/v3/configuration/shop/urls', {
-        method: 'PATCH',
+        method: 'POST',
         bodyObj: payload,
-        idempotencyKey: kluczIdempotencji('cfg', Date.now()),
       });
       return odpowiedz({ ok: true, configured: true, env: cfg.env, ...payload });
     }

@@ -11177,7 +11177,7 @@ function usunMapowanieZaznaczonych(){if(!zaznaczoneMap.size){toast("Zaznacz prod
 function wyczyscMapowanie(){if(!confirm("Usunąć wszystkie ręczne mapowania? Produkty wrócą do kategorii źródłowych."))return;zaznaczoneMap.clear();loguj("info","Wyczyszczono mapowanie produktów");zapiszCzescUstawien({mapaProduktow:{}});}
 
 /* ── Dostawa i płatności ── */
-let stanPaynowAdmin={sprawdzono:false,configured:false,env:"production",continueUrl:"",notificationUrl:"",apiBaseUrl:"",error:""};
+let stanPaynowAdmin={sprawdzono:false,configured:false,env:"production",continueUrl:"",notificationUrl:"",apiBaseUrl:"",error:"",diagnostics:null};
 function domyslneUrlePaynow(){
   return {notificationUrl:`${location.origin}/api/store?action=paynow-notification`, continueUrl:`${location.origin}/#/zamowienia`};
 }
@@ -11185,11 +11185,12 @@ function paynowStatusAdminHTML(){
   const s=stanPaynowAdmin;
   if(!s.sprawdzono) return `<div class="pay-note" style="text-align:left">Kliknij „Sprawdź konfigurację Paynow”, aby potwierdzić, czy chronione środowisko backendu VPS ma ustawione klucze API.</div>`;
   if(s.error) return `<div class="pay-note" style="text-align:left;color:var(--danger)">Błąd sprawdzania Paynow: ${esc(s.error)}</div>`;
+  const d=s.diagnostics;
   return `<div class="backend-note" style="${s.configured?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
     <b>${s.configured?"Paynow API skonfigurowane ✅":"Paynow API nie ma jeszcze kluczy na serwerze"}</b><br>
     Środowisko: <code>${esc(s.env||"production")}</code>${s.apiBaseUrl?` • API: <code>${esc(s.apiBaseUrl)}</code>`:""}<br>
     ${s.configured?"Klient po wybraniu Paynow dostanie automatyczny link płatności, a webhook zaktualizuje status zamówienia.":"Płatność jest bezpiecznie ukryta przed klientem. Zapisz PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w sejfie środowiskowym VPS, a następnie zrestartuj backend."}
-  </div>`;
+  </div>${d?`<div class="backend-note" style="margin-top:.65rem;${d.connected?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}"><b>${d.connected?"Połączenie z API Paynow działa ✅":"Test API Paynow wymaga działania"}</b><br>${d.connected?`Podpis HMAC poprawny • grupy metod: ${esc(d.methodGroups||0)} • aktywne metody: ${esc(d.enabledMethods||0)} • kontrola: ${esc(d.checkedAt?new Date(d.checkedAt).toLocaleString("pl-PL"):"—")}`:esc(d.error||"Brak połączenia")}</div>`:""}`;
 }
 function paynowChecklistaSklepuHTML(){
   const aktywne=(Array.isArray(produkty)?produkty:[]).filter(p=>produktWidocznyWPublicznymKatalogu(p));
@@ -11230,6 +11231,7 @@ function paynowPanelAdminHTML(){
     </table>
     <div class="diag-actions" style="margin-top:.9rem">
       <button class="btn" type="button" onclick="sprawdzPaynowKonfiguracje()">🔎 Sprawdź konfigurację Paynow</button>
+      <button class="btn" type="button" onclick="testujPaynowAPI()">🧪 Testuj podpis i API</button>
       <button class="btn ghost" type="button" onclick="ustawUrlePaynow()">🔗 Ustaw URL-e w Paynow przez API</button>
       <a class="btn ghost" href="https://docs.paynow.pl/docs/v3/integration" target="_blank" rel="noopener">Dokumentacja Paynow</a>
     </div>
@@ -11240,11 +11242,23 @@ async function sprawdzPaynowKonfiguracje(){
   try{
     stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:""};
     const d=await chmura("paynow-config",{timeout:10000});
-    stanPaynowAdmin={sprawdzono:true,configured:!!d.configured,env:d.env||"",continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:d.apiBaseUrl||"",error:""};
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,configured:!!d.configured,env:d.env||"",continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:d.apiBaseUrl||"",error:""};
     toast(d.configured?"Paynow API skonfigurowane ✅":"Brak kluczy Paynow w chronionym środowisku backendu VPS");
   }catch(e){
     stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:e.message};
     toast("Paynow: "+e.message);
+  }
+  renderuj();
+}
+async function testujPaynowAPI(){
+  try{
+    toast("Testuję podpis HMAC i metody płatności Paynow…");
+    const d=await chmura("paynow-diagnose",{timeout:18000});
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,configured:!!d.configured,env:d.env||stanPaynowAdmin.env,apiBaseUrl:d.apiBaseUrl||stanPaynowAdmin.apiBaseUrl,continueUrl:d.continueUrl||stanPaynowAdmin.continueUrl,notificationUrl:d.notificationUrl||stanPaynowAdmin.notificationUrl,diagnostics:d,error:""};
+    toast(`Paynow działa ✅ • aktywne metody: ${d.enabledMethods||0}`);
+  }catch(e){
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,diagnostics:{connected:false,error:e.message},error:""};
+    toast("Test Paynow: "+e.message);
   }
   renderuj();
 }
@@ -11253,7 +11267,7 @@ async function ustawUrlePaynow(){
   try{
     toast("Ustawiam URL-e Paynow…");
     const d=await chmura("paynow-configure-urls",{method:"POST",body:domyslneUrlePaynow(),timeout:18000});
-    stanPaynowAdmin={sprawdzono:true,configured:true,env:d.env||stanPaynowAdmin.env,continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:stanPaynowAdmin.apiBaseUrl,error:""};
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,configured:true,env:d.env||stanPaynowAdmin.env,continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:stanPaynowAdmin.apiBaseUrl,error:""};
     toast("URL-e Paynow ustawione ✅");
   }catch(e){
     stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:e.message};

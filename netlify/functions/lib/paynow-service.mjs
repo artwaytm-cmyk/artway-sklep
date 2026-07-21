@@ -1,19 +1,44 @@
 import crypto from 'node:crypto';
 import { tekst } from './core/http.mjs';
+import { numerZamowienia } from './domain/orders.mjs';
 
 const PAYNOW_ENVY = new Set(['production', 'sandbox']);
+
+export function sortujObiektPaynow(obj = {}) {
+  return Object.keys(obj || {})
+    .sort()
+    .reduce((wynik, k) => {
+      if (obj[k] !== undefined && obj[k] !== null) wynik[k] = obj[k];
+      return wynik;
+    }, {});
+}
+
+export function podpisPaynowV3({ apiKey, signatureKey, idempotencyKey = '', body = '', parameters = {} }) {
+  const headers = { 'Api-Key': apiKey };
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+  const payload = JSON.stringify({
+    headers: sortujObiektPaynow(headers),
+    parameters: sortujObiektPaynow(parameters),
+    body: body || '',
+  });
+  return crypto.createHmac('sha256', signatureKey).update(payload).digest('base64');
+}
+
+export function podpisPaynowPowiadomienia(rawBody, signatureKey) {
+  return crypto.createHmac('sha256', signatureKey).update(rawBody || '').digest('base64');
+}
+
+export function porownajPodpisPaynow(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
 
 export function createPaynowService({ read, write }) {
   const czytaj = read;
   const zapisz = write;
-  function sortujObiekt(obj = {}) {
-    return Object.keys(obj || {})
-      .sort()
-      .reduce((wynik, k) => {
-        if (obj[k] !== undefined && obj[k] !== null) wynik[k] = obj[k];
-        return wynik;
-      }, {});
-  }
   function paynowEnv() {
     const env = String(process.env.PAYNOW_ENV || 'production').trim().toLowerCase();
     return PAYNOW_ENVY.has(env) ? env : 'production';
@@ -51,26 +76,7 @@ export function createPaynowService({ read, write }) {
       notificationUrl: paynowUrlPowiadomien(req),
     };
   }
-  function podpisPaynowV3({ apiKey, signatureKey, idempotencyKey = '', body = '', parameters = {} }) {
-    const headers = { 'Api-Key': apiKey };
-    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
-    const payload = JSON.stringify({
-      headers: sortujObiekt(headers),
-      parameters: sortujObiekt(parameters),
-      body: body || '',
-    });
-    return crypto.createHmac('sha256', signatureKey).update(payload).digest('base64');
-  }
-  function podpisPaynowPowiadomienia(rawBody, signatureKey) {
-    return crypto.createHmac('sha256', signatureKey).update(rawBody || '').digest('base64');
-  }
-  function porownajPodpis(a, b) {
-    if (typeof a !== 'string' || typeof b !== 'string') return false;
-    const ba = Buffer.from(a);
-    const bb = Buffer.from(b);
-    if (ba.length !== bb.length) return false;
-    return crypto.timingSafeEqual(ba, bb);
-  }
+  const porownajPodpis = porownajPodpisPaynow;
   function kluczIdempotencji(prefix, value) {
     const safe = String(value || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 35);
     return `${prefix}_${safe}`.slice(0, 45);
@@ -114,7 +120,7 @@ export function createPaynowService({ read, write }) {
       'Api-Key': cfg.apiKey,
       'Signature': signature,
       'Accept': 'application/json',
-      'User-Agent': 'Artway-TM/1.0 Netlify Function',
+      'User-Agent': 'Artway-TM/2026.07 VPS',
     };
     if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
     if (body) headers['Content-Type'] = 'application/json';
@@ -139,13 +145,60 @@ export function createPaynowService({ read, write }) {
   function daneKupujacegoPaynow(z) {
     const k = z?.klient || {};
     const email = tekst(z?.email || k.email, 50).trim().toLowerCase();
-    const buyer = { email };
+    const buyer = { email, locale: 'pl-PL' };
     if (k.imie) buyer.firstName = tekst(k.imie, 50).trim();
     if (k.nazwisko) buyer.lastName = tekst(k.nazwisko, 50).trim();
     const cyfryTel = String(k.telefon || z?.telefon || '').replace(/[^0-9]/g, '');
     if (cyfryTel.length === 9) buyer.phone = { prefix: '+48', number: Number(cyfryTel) };
     if (cyfryTel.length === 11 && cyfryTel.startsWith('48')) buyer.phone = { prefix: '+48', number: Number(cyfryTel.slice(2)) };
+    const a = z?.adresDostawy || {};
+    const address = {
+      street: tekst(a.ulica, 100).trim(),
+      houseNumber: tekst(a.nrDomu, 16).trim(),
+      apartmentNumber: tekst(a.nrLokalu, 16).trim(),
+      zipcode: tekst(a.kod, 6).trim(),
+      city: tekst(a.miasto, 100).trim(),
+      country: 'PL',
+    };
+    if (!address.apartmentNumber) delete address.apartmentNumber;
+    if (address.street && address.houseNumber && /^\d{2}-\d{3}$/.test(address.zipcode) && address.city.length >= 2) {
+      buyer.address = { billing: { ...address }, shipping: { ...address } };
+    }
     return buyer;
+  }
+
+  async function paynowDiagnostyka(req) {
+    const cfg = paynowKonfiguracja(req);
+    if (!cfg.configured) return {
+      ok: false,
+      configured: false,
+      env: cfg.env,
+      apiBaseUrl: cfg.apiBaseUrl,
+      notificationUrl: cfg.notificationUrl,
+      continueUrl: cfg.continueUrl,
+      signatureReady: true,
+      error: 'Brak kluczy API Paynow w sejfie serwera.',
+    };
+    const groups = await paynowWywolaj(req, '/v3/payments/paymentmethods', {
+      method: 'GET',
+      parameters: { amount: 100, applePayEnabled: false, currency: 'PLN' },
+      idempotencyKey: kluczIdempotencji('diag', Date.now()),
+    });
+    const list = Array.isArray(groups) ? groups : [];
+    const methods = list.flatMap((group) => Array.isArray(group?.paymentMethods) ? group.paymentMethods : []);
+    return {
+      ok: true,
+      configured: true,
+      connected: true,
+      env: cfg.env,
+      apiBaseUrl: cfg.apiBaseUrl,
+      notificationUrl: cfg.notificationUrl,
+      continueUrl: cfg.continueUrl,
+      signatureReady: true,
+      methodGroups: list.length,
+      enabledMethods: methods.filter((method) => method?.status === 'ENABLED').length,
+      checkedAt: new Date().toISOString(),
+    };
   }
   function payloadPlatnosciPaynow(z, req) {
     const nr = numerZamowienia(z?.nr);
@@ -212,12 +265,14 @@ export function createPaynowService({ read, write }) {
   return {
     publicznyOrigin,
     paynowKonfiguracja,
+    podpisPaynowV3,
     podpisPaynowPowiadomienia,
     porownajPodpis,
     kluczIdempotencji,
     grosze,
     statusPlatnosciPaynow,
     paynowWywolaj,
+    paynowDiagnostyka,
     payloadPlatnosciPaynow,
     aktualizujZamowieniePaynow,
   };
