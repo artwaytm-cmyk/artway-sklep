@@ -21,6 +21,7 @@ function polaczUzytkownikowCentralnych(serwerowi){
   for(const u of lokalni) if(!wynik.some(x=>x.email===u.email)) wynik.push(u);
   return wynik;
 }
+let zamowieniaAdminOdswiezenieWToku=null,zamowieniaAdminOstatnieOdswiezenie=0,zamowieniaAdminWersja="",zamowieniaAdminUsunieteWersja="";
 async function synchronizujBazeCentralna(cicho=false){
   if(stanBazyCentralnej.synchronizacja) return false;
   if(!maUprawnieniaZapisuChmury()){ if(!cicho) chmuraUstawToken(); return false; }
@@ -42,6 +43,30 @@ async function synchronizujBazeCentralna(cicho=false){
     else if(!cicho) toast("Błąd wspólnej bazy: "+bl.message);
     return false;
   }
+}
+async function odswiezZamowieniaAdminaPoWejsciu(){
+  if(!maUprawnieniaZapisuChmury())return false;
+  if(zamowieniaAdminOdswiezenieWToku)return zamowieniaAdminOdswiezenieWToku;
+  if(Date.now()-zamowieniaAdminOstatnieOdswiezenie<10000)return false;
+  zamowieniaAdminOstatnieOdswiezenie=Date.now();
+  zamowieniaAdminOdswiezenieWToku=(async()=>{
+    const przed=localStorage.getItem("artway_zamowienia")||"";
+    const d=await chmura("store-orders-admin",{params:{ordersVersion:zamowieniaAdminWersja,deletedVersion:zamowieniaAdminUsunieteWersja,count:pobierzZamowienia().length},timeout:15000});
+    zamowieniaAdminWersja=String(d.ordersVersion||zamowieniaAdminWersja);
+    zamowieniaAdminUsunieteWersja=String(d.deletedVersion||zamowieniaAdminUsunieteWersja);
+    if(!d.unchanged){
+      if(Array.isArray(d.deleted_orders))zapiszUsunieteZamowienia(d.deleted_orders);
+      if(Array.isArray(d.orders))zapiszLS("artway_zamowienia",filtrujAktywneZamowienia(d.orders));
+      stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,orders:Number(d.count)||0,updatedAt:d.updated_at||stanBazyCentralnej.updatedAt,error:""};
+    }
+    const zmieniono=przed!==(localStorage.getItem("artway_zamowienia")||"");
+    if(zmieniono&&trasa().startsWith("/admin/zamowien")){
+      odswiezMenu();
+      odswiezPoCichejSynchronizacji();
+    }
+    return true;
+  })().finally(()=>{zamowieniaAdminOdswiezenieWToku=null;});
+  return zamowieniaAdminOdswiezenieWToku;
 }
 async function pobierzMojeZamowieniaCentralne(cicho=false){
   if(!sesja||jestAdmin()) return false;
@@ -142,6 +167,7 @@ function uruchomAutoSynchronizacjeChmury(){
   if(chmuraTimerAutoSync) clearInterval(chmuraTimerAutoSync);
   chmuraAutoSyncOstatniStart=Date.now();
   chmuraTimerAutoSync=setInterval(()=>automatycznaSynchronizacjaChmury("timer"),CHMURA_AUTO_SYNC_MS);
+  setInterval(()=>{if(trasa()==="/admin/zamowienia"||trasa().startsWith("/admin/zamowienie/"))odswiezZamowieniaAdminaPoWejsciu().catch(()=>{});},60000);
   window.addEventListener("focus",()=>automatycznaSynchronizacjaChmury("focus"));
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) automatycznaSynchronizacjaChmury("visible"); });
 }

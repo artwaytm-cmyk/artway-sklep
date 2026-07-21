@@ -1908,6 +1908,11 @@ function powodNiedostepnosci(p){
 function produktDostepnyWSprzedazy(p){
   return !!p && produktMaCeneSprzedazy(p) && !produktOznaczonyNiedostepny(p);
 }
+function produktWidocznyWPublicznymKatalogu(p){
+  if(!produktDostepnyWSprzedazy(p))return false;
+  if(p.aktywny===false||p.ukryty===true||p.sprzedazAktywna===false||p.saleAvailable===false)return false;
+  return !["trash","removed","deleted"].includes(String(p.recordStatus||p.record_status||"").toLowerCase());
+}
 function odswiezDostepnoscProducentowWidoku(){
   if(typeof odswiezMonitoringProducentow==="function"&&odswiezMonitoringProducentow())return;
   renderuj();
@@ -3088,7 +3093,8 @@ function renderuj(){
       ostatniaRenderowanaTrasa=t;return;
     }
     if(t.startsWith("/admin/zamowienie/")&&!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
-    if(t.startsWith("/admin")&&stanBramki.authenticated&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja) setTimeout(()=>synchronizujBazeCentralna(true),0);
+    if((t==="/admin/zamowienia"||t.startsWith("/admin/zamowienie/"))&&typeof odswiezZamowieniaAdminaPoWejsciu==="function")setTimeout(()=>odswiezZamowieniaAdminaPoWejsciu(),0);
+    else if(t.startsWith("/admin")&&maUprawnieniaZapisuChmury()&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja)setTimeout(()=>automatycznaSynchronizacjaChmury("admin-route"),0);
     if(!taSamaTrasa)window.scrollTo({top:0,behavior:"instant"});
     if(t==="/" || t==="") w.innerHTML = widokSklep();
     else if(t.startsWith("/produkt/")) w.innerHTML = widokProdukt(identyfikatorZTrasy(t,2));
@@ -3274,8 +3280,9 @@ function sekcjaWidoczna(id){
 function widokSklep(){
   const kategorie = wszystkieKategorie();
   const drzewoKategorii=indeksDrzewaKategoriiMenu(kategorie),kategorieGlowne=drzewoKategorii.roots;
-  const promki = produkty.filter(p=>p.staraCena).length;
-  const nowosci = produkty.filter(p=>p.badge==="Nowość").length;
+  const publiczneProdukty=produkty.filter(produktWidocznyWPublicznymKatalogu);
+  const promki = publiczneProdukty.filter(p=>p.staraCena).length;
+  const nowosci = publiczneProdukty.filter(p=>p.badge==="Nowość").length;
   const widoczneSekcje=kolejnoscSekcji().filter(sekcjaWidoczna);
   const heroMaNaglowekGlowny=widoczneSekcje.includes("hero");
   const ofertaMaNaglowekGlowny=!heroMaNaglowekGlowny&&widoczneSekcje.includes("produkty");
@@ -3295,7 +3302,7 @@ function widokSklep(){
         <a class="hero-link-alt" href="${esc(bezpiecznyLink(hero.link2||"#/promocje"))}">${esc(hero.przycisk2||"Sprawdź promocje")}</a>
       </div>
       <div class="hero-meta">
-        <div><b>${produkty.length} produktów</b><small>w aktualnej ofercie</small></div>
+        <div><b>${publiczneProdukty.length} produktów</b><small>w aktualnej ofercie</small></div>
         <div><b>${kategorie.length} katalogów</b><small>łatwe przeglądanie</small></div>
         <div><b>14 dni</b><small>na wygodny zwrot</small></div>
         <div><b>od ${KONFIG.darmowaDostawaOd} zł</b><small>darmowa dostawa</small></div>
@@ -3453,6 +3460,7 @@ function sortujListeProduktow(lista,sort=sortowanie){
 function listaProduktowPoFiltrach(){
   const od=cenaOd===""?null:Number(cenaOd),doC=cenaDo===""?null:Number(cenaDo),minOcena=Number(filtrOceny||0),oferta=ustawieniaOfertyGlownej();
   const lista=produkty.filter(p=>{
+    if(!produktWidocznyWPublicznymKatalogu(p))return false;
     const ocena=sredniaOcen(p.id)?.srednia||0, niedostepny=produktOznaczonyNiedostepny(p);
     const zakres=oferta.zakres==="promocje"?!!p.staraCena:oferta.zakres==="nowosci"?p.badge==="Nowość":oferta.zakres==="kategoria"?produktNalezyDoGaleziKategorii(p,oferta.kategoria):oferta.zakres==="wybrane"?oferta.produkty.includes(String(p.id)):true;
     return zakres&&produktNalezyDoGaleziKategorii(p,aktywnaKategoria)
@@ -3551,7 +3559,7 @@ function widokKategoria(nazwa){
   nazwa=wszystkieKategorie().find(k=>k===nazwa||seoSlugKategorii(k)===seoSlugKategorii(nazwa))||nazwa;
   if(!wszystkieKategorie().includes(nazwa))
     return `<div class="page"><div class="panel"><h1>Nie ma takiego katalogu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
-  const kategorie=wszystkieKategorie(),tree=indeksDrzewaKategoriiMenu(kategorie),galaz=kategorieGaleziMenu(nazwa,kategorie),lista=produkty.filter(p=>galaz.has(p.kategoria)),dzieci=tree.children.get(nazwa)||[],sciezka=tree.paths[nazwa]||[nazwa];
+  const kategorie=wszystkieKategorie(),tree=indeksDrzewaKategoriiMenu(kategorie),galaz=kategorieGaleziMenu(nazwa,kategorie),lista=produkty.filter(p=>produktWidocznyWPublicznymKatalogu(p)&&galaz.has(p.kategoria)),dzieci=tree.children.get(nazwa)||[],sciezka=tree.paths[nazwa]||[nazwa];
   return `
   <div class="page" style="max-width:1200px">
     <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${sciezka.map((k,i)=>i===sciezka.length-1?esc(k):`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join(" › ")}</div>
@@ -3561,7 +3569,7 @@ function widokKategoria(nazwa){
   </div>`;
 }
 function widokListaSpecjalna(tytul, filtr, pusty){
-  const lista = produkty.filter(filtr);
+  const lista = produkty.filter(p=>produktWidocznyWPublicznymKatalogu(p)&&filtr(p));
   return `
   <div class="page" style="max-width:1200px">
     <h1 style="margin-bottom:.8rem">${tytul} <small style="color:var(--muted2);font-size:.9rem">(${lista.length})</small></h1>
@@ -3593,7 +3601,7 @@ function widokProdukt(id){
   const p = produktSklepuPoId(id);
   if(!p){ loguj("ostrzezenie","Otwarto nieistniejący produkt: id="+id); return `<div class="page"><div class="panel"><h1>Nie znaleziono produktu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`; }
   if(String(ostatniProduktIlosci)!==String(id)){iloscProduktu=1;ostatniProduktIlosci=id;}
-  const powiazane = produkty.filter(x=>x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
+  const powiazane = produkty.filter(x=>produktWidocznyWPublicznymKatalogu(x)&&x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
   const brakCeny = !produktMaCeneSprzedazy(p);
   const niedostepny = produktOznaczonyNiedostepny(p);
   const sciezkaKategorii=sciezkaKategoriiMenu(p.kategoria);
@@ -3731,6 +3739,7 @@ function polaczUzytkownikowCentralnych(serwerowi){
   for(const u of lokalni) if(!wynik.some(x=>x.email===u.email)) wynik.push(u);
   return wynik;
 }
+let zamowieniaAdminOdswiezenieWToku=null,zamowieniaAdminOstatnieOdswiezenie=0,zamowieniaAdminWersja="",zamowieniaAdminUsunieteWersja="";
 async function synchronizujBazeCentralna(cicho=false){
   if(stanBazyCentralnej.synchronizacja) return false;
   if(!maUprawnieniaZapisuChmury()){ if(!cicho) chmuraUstawToken(); return false; }
@@ -3752,6 +3761,30 @@ async function synchronizujBazeCentralna(cicho=false){
     else if(!cicho) toast("Błąd wspólnej bazy: "+bl.message);
     return false;
   }
+}
+async function odswiezZamowieniaAdminaPoWejsciu(){
+  if(!maUprawnieniaZapisuChmury())return false;
+  if(zamowieniaAdminOdswiezenieWToku)return zamowieniaAdminOdswiezenieWToku;
+  if(Date.now()-zamowieniaAdminOstatnieOdswiezenie<10000)return false;
+  zamowieniaAdminOstatnieOdswiezenie=Date.now();
+  zamowieniaAdminOdswiezenieWToku=(async()=>{
+    const przed=localStorage.getItem("artway_zamowienia")||"";
+    const d=await chmura("store-orders-admin",{params:{ordersVersion:zamowieniaAdminWersja,deletedVersion:zamowieniaAdminUsunieteWersja,count:pobierzZamowienia().length},timeout:15000});
+    zamowieniaAdminWersja=String(d.ordersVersion||zamowieniaAdminWersja);
+    zamowieniaAdminUsunieteWersja=String(d.deletedVersion||zamowieniaAdminUsunieteWersja);
+    if(!d.unchanged){
+      if(Array.isArray(d.deleted_orders))zapiszUsunieteZamowienia(d.deleted_orders);
+      if(Array.isArray(d.orders))zapiszLS("artway_zamowienia",filtrujAktywneZamowienia(d.orders));
+      stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,orders:Number(d.count)||0,updatedAt:d.updated_at||stanBazyCentralnej.updatedAt,error:""};
+    }
+    const zmieniono=przed!==(localStorage.getItem("artway_zamowienia")||"");
+    if(zmieniono&&trasa().startsWith("/admin/zamowien")){
+      odswiezMenu();
+      odswiezPoCichejSynchronizacji();
+    }
+    return true;
+  })().finally(()=>{zamowieniaAdminOdswiezenieWToku=null;});
+  return zamowieniaAdminOdswiezenieWToku;
 }
 async function pobierzMojeZamowieniaCentralne(cicho=false){
   if(!sesja||jestAdmin()) return false;
@@ -3852,6 +3885,7 @@ function uruchomAutoSynchronizacjeChmury(){
   if(chmuraTimerAutoSync) clearInterval(chmuraTimerAutoSync);
   chmuraAutoSyncOstatniStart=Date.now();
   chmuraTimerAutoSync=setInterval(()=>automatycznaSynchronizacjaChmury("timer"),CHMURA_AUTO_SYNC_MS);
+  setInterval(()=>{if(trasa()==="/admin/zamowienia"||trasa().startsWith("/admin/zamowienie/"))odswiezZamowieniaAdminaPoWejsciu().catch(()=>{});},60000);
   window.addEventListener("focus",()=>automatycznaSynchronizacjaChmury("focus"));
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) automatycznaSynchronizacjaChmury("visible"); });
 }

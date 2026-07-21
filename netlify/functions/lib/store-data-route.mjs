@@ -36,6 +36,25 @@ export function createStoreDataRoute(deps = {}) {
       return odpowiedz(res);
     }
 
+    // Lekka kolejka zamówień dla panelu. Nie pobiera katalogu produktów ani
+    // ustawień, dlatego może być sprawdzana przy wejściu na listę i co minutę.
+    if (action === 'store-orders-admin') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const [ordersVersioned, deletedVersioned] = await Promise.all([
+        czytajWersjonowane('orders', { items: [], updated_at: null }),
+        czytajWersjonowane('deleted_orders', { items: [], updated_at: null }),
+      ]);
+      const version = (record) => String(record?.etag || '').replace(/^W\//, '').replace(/^"|"$/g, '');
+      const ordersVersion = version(ordersVersioned), deletedVersion = version(deletedVersioned);
+      const deletedOrders = Array.isArray(deletedVersioned.value?.items) ? deletedVersioned.value.items : [];
+      const orders = filtrujNieusunieteZamowienia(ordersVersioned.value?.items || [], deletedOrders);
+      const sameVersion = String(url.searchParams.get('ordersVersion') || '') === ordersVersion
+        && String(url.searchParams.get('deletedVersion') || '') === deletedVersion;
+      const sameCount = Number(url.searchParams.get('count')) === orders.length;
+      if (sameVersion && sameCount) return odpowiedz({ ok: true, unchanged: true, count: orders.length, ordersVersion, deletedVersion });
+      return odpowiedz({ ok: true, orders, deleted_orders: deletedOrders, count: orders.length, ordersVersion, deletedVersion, updated_at: ordersVersioned.value?.updated_at || null });
+    }
+
     // ─── ZAPIS USTAWIEŃ (tylko admin) ───
     if (action === 'settings') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -363,4 +382,3 @@ export function createStoreDataRoute(deps = {}) {
     return null;
   };
 }
-

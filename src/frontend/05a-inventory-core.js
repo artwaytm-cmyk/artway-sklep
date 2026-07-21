@@ -29,6 +29,11 @@ function powodNiedostepnosci(p){
 function produktDostepnyWSprzedazy(p){
   return !!p && produktMaCeneSprzedazy(p) && !produktOznaczonyNiedostepny(p);
 }
+function produktWidocznyWPublicznymKatalogu(p){
+  if(!produktDostepnyWSprzedazy(p))return false;
+  if(p.aktywny===false||p.ukryty===true||p.sprzedazAktywna===false||p.saleAvailable===false)return false;
+  return !["trash","removed","deleted"].includes(String(p.recordStatus||p.record_status||"").toLowerCase());
+}
 function odswiezDostepnoscProducentowWidoku(){
   if(typeof odswiezMonitoringProducentow==="function"&&odswiezMonitoringProducentow())return;
   renderuj();

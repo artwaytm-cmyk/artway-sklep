@@ -17,6 +17,19 @@ test('aktualizacja lub brak u producenta nie usuwa karty produktu ze sklepu', as
   assert.match(seoRenderer, /karta i adres pozostają aktywne/);
 });
 
+test('niedostępny produkt zachowuje adres, ale nie trafia na publiczne listy sprzedażowe', async () => {
+  const [inventory, home, listing] = await Promise.all([
+    readFile('src/frontend/05a-inventory-core.js', 'utf8'),
+    readFile('src/frontend/06a-storefront-home.js', 'utf8'),
+    readFile('src/frontend/06b-storefront-catalog.js', 'utf8'),
+  ]);
+  assert.match(inventory, /function produktWidocznyWPublicznymKatalogu/);
+  assert.match(inventory, /produktDostepnyWSprzedazy\(p\)/);
+  assert.match(home, /publiczneProdukty=produkty\.filter\(produktWidocznyWPublicznymKatalogu\)/);
+  assert.match(listing, /if\(!produktWidocznyWPublicznymKatalogu\(p\)\)return false/);
+  assert.match(listing, /produktWidocznyWPublicznymKatalogu\(p\)&&galaz\.has/);
+});
+
 test('stary adres po połączeniu duplikatów prowadzi do zachowanej kartoteki', async () => {
   const catalog = await readFile('src/frontend/05-catalog-inventory.js', 'utf8');
   const lookup = catalog.slice(catalog.indexOf('function produktSklepuPoId'), catalog.indexOf('function zbudujProdukty'));

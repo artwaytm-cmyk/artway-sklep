@@ -288,7 +288,8 @@ function renderuj(){
       ostatniaRenderowanaTrasa=t;return;
     }
     if(t.startsWith("/admin/zamowienie/")&&!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
-    if(t.startsWith("/admin")&&stanBramki.authenticated&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja) setTimeout(()=>synchronizujBazeCentralna(true),0);
+    if((t==="/admin/zamowienia"||t.startsWith("/admin/zamowienie/"))&&typeof odswiezZamowieniaAdminaPoWejsciu==="function")setTimeout(()=>odswiezZamowieniaAdminaPoWejsciu(),0);
+    else if(t.startsWith("/admin")&&maUprawnieniaZapisuChmury()&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja)setTimeout(()=>automatycznaSynchronizacjaChmury("admin-route"),0);
     if(!taSamaTrasa)window.scrollTo({top:0,behavior:"instant"});
     if(t==="/" || t==="") w.innerHTML = widokSklep();
     else if(t.startsWith("/produkt/")) w.innerHTML = widokProdukt(identyfikatorZTrasy(t,2));

@@ -67,8 +67,9 @@ function sekcjaWidoczna(id){
 function widokSklep(){
   const kategorie = wszystkieKategorie();
   const drzewoKategorii=indeksDrzewaKategoriiMenu(kategorie),kategorieGlowne=drzewoKategorii.roots;
-  const promki = produkty.filter(p=>p.staraCena).length;
-  const nowosci = produkty.filter(p=>p.badge==="Nowość").length;
+  const publiczneProdukty=produkty.filter(produktWidocznyWPublicznymKatalogu);
+  const promki = publiczneProdukty.filter(p=>p.staraCena).length;
+  const nowosci = publiczneProdukty.filter(p=>p.badge==="Nowość").length;
   const widoczneSekcje=kolejnoscSekcji().filter(sekcjaWidoczna);
   const heroMaNaglowekGlowny=widoczneSekcje.includes("hero");
   const ofertaMaNaglowekGlowny=!heroMaNaglowekGlowny&&widoczneSekcje.includes("produkty");
@@ -88,7 +89,7 @@ function widokSklep(){
         <a class="hero-link-alt" href="${esc(bezpiecznyLink(hero.link2||"#/promocje"))}">${esc(hero.przycisk2||"Sprawdź promocje")}</a>
       </div>
       <div class="hero-meta">
-        <div><b>${produkty.length} produktów</b><small>w aktualnej ofercie</small></div>
+        <div><b>${publiczneProdukty.length} produktów</b><small>w aktualnej ofercie</small></div>
         <div><b>${kategorie.length} katalogów</b><small>łatwe przeglądanie</small></div>
         <div><b>14 dni</b><small>na wygodny zwrot</small></div>
         <div><b>od ${KONFIG.darmowaDostawaOd} zł</b><small>darmowa dostawa</small></div>
