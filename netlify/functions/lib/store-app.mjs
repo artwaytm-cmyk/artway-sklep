@@ -130,6 +130,9 @@ const czytaj = repository.read;
 const czytajUstawieniaBazowe = typeof repository.readSettingsBase === 'function'
   ? repository.readSettingsBase
   : (fallback) => czytaj('settings', fallback);
+const czytajUstawieniaPrzyrostowo = typeof repository.readSettingsDelta === 'function'
+  ? repository.readSettingsDelta
+  : null;
 const czytajWersjonowane = repository.readVersioned;
 const zapiszJesliWersja = repository.writeIfVersion;
 const zapiszUstawieniaBezpiecznie = createRevisionSafeWriter(repository, 'settings');
@@ -288,6 +291,7 @@ const CENTRAL_PRODUCT_SOURCE_KEYS = [
   'artway_produkty_dodane', 'artway_produkty_edytowane', 'artway_produkty_katalog',
   'artway_produkty_ukryte', 'artway_produkty_definitywne', 'artway_stany',
   'artway_dostepnosc', 'artway_magazyn_produkty', 'artway_kosz_dodane', 'artway_kosz_meta',
+  'artway_opinie',
 ];
 function centralProductSettingsFingerprint(data = {}) {
   const source = Object.fromEntries(CENTRAL_PRODUCT_SOURCE_KEYS.map((key) => [key, data?.[key] ?? null]));
@@ -2862,6 +2866,7 @@ const storeDataRoute = createStoreDataRoute({
   bezpiecznePorownanie,
   legacyPasswordHash,
   czytajUstawieniaBazowe,
+  czytajUstawieniaPrzyrostowo,
 });
 
 const systemRoute = createSystemRoute({

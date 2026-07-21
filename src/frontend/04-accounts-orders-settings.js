@@ -103,9 +103,10 @@ function odswiezUzytkownika(){
 /* Górne menu = strony główne sklepu: katalogi produktów + Promocje + Nowości */
 function wszystkieKategorie(){
   const zProduktow = [...new Set(produkty.map(p=>p.kategoria))];
+  const zCentralnej=(typeof sklepKatalogCentralnyFacety!=="undefined"&&Array.isArray(sklepKatalogCentralnyFacety.categories))?sklepKatalogCentralnyFacety.categories.map(item=>item.value):[];
   const ukryte = ustawienia.ukryteKategorie || [];
   const wlasne = (ustawienia.wlasneKategorie||[]).filter(k=>!ukryte.includes(k));
-  return [...new Set([...zProduktow, ...wlasne])];
+  return [...new Set([...zProduktow, ...zCentralnej, ...wlasne])];
 }
 let indeksDrzewaKategoriiCache={products:null,parents:null,signature:"",value:null};
 function indeksDrzewaKategoriiMenu(kategorie=wszystkieKategorie()){
@@ -114,6 +115,7 @@ function indeksDrzewaKategoriiMenu(kategorie=wszystkieKategorie()){
   const allowed=new Set(lista),raw=rodziceKategoriiMenu(),parents={},children=new Map(lista.map(k=>[k,[]])),directCounts=Object.fromEntries(lista.map(k=>[k,0]));
   for(const k of lista){const parent=raw[k];if(parent&&allowed.has(parent)&&parent!==k){parents[k]=parent;children.get(parent).push(k);}}
   for(const p of produkty){const k=String(p?.kategoria||"").trim();if(allowed.has(k))directCounts[k]=(directCounts[k]||0)+1;}
+  if(typeof sklepKatalogCentralnyFacety!=="undefined")for(const item of sklepKatalogCentralnyFacety.categories||[]){const k=String(item?.value||"").trim();if(allowed.has(k))directCounts[k]=Math.max(directCounts[k]||0,Number(item?.count)||0);}
   children.forEach(items=>items.sort((a,b)=>a.localeCompare(b,"pl")));
   const depth={},paths={},branchCounts={},descendants={},visit=(k,trail=new Set())=>{
     if(trail.has(k))return {count:directCounts[k]||0,items:new Set()};

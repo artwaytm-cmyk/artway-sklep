@@ -30,7 +30,7 @@ $("searchInput").oninput = e=>{
   fraza = e.target.value.toLowerCase();
   stronaProduktow = 1;
   if(trasa()!=="/" && trasa()!=="") location.hash="#/";
-  else rysuj();
+  else if(typeof sklepKatalogCentralnyZaplanuj==="function"&&chmuraKatalogCentralnyPubliczny)sklepKatalogCentralnyZaplanuj();else rysuj();
 };
 
 /* ═══════════ START ═══════════ */

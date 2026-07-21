@@ -22,6 +22,9 @@ let chmuraAutoSyncOstatniStart = 0;
 let chmuraOstatniPullZmienilDane = false;
 let chmuraOstatniaSynchronizacjaCentralnaZmienilaDane = false;
 let chmuraKatalogImportowanyRev = "";
+let chmuraKatalogCentralnyPubliczny = false;
+let chmuraWersjeDomenPubliczne = wczytajLS("artway_chmura_domain_versions_public",{});
+let chmuraWersjeDomenAdmina = wczytajLS("artway_chmura_domain_versions_admin",{});
 const CHMURA_KATALOG_CACHE_DB = "artway-runtime-cache";
 const CHMURA_KATALOG_CACHE_STORE = "catalogs";
 const CHMURA_KATALOG_CACHE_KEY = "imported-products-v1";
@@ -66,6 +69,9 @@ async function chmuraRuntimeCacheUsun(key){
 }
 async function chmuraPobierzKatalogImportowany(meta={},force=false){
   const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
+  const poprzednioCentralny=chmuraKatalogCentralnyPubliczny;chmuraKatalogCentralnyPubliczny=meta.catalog_central===true;
+  if(chmuraKatalogCentralnyPubliczny){chmuraKatalogImportowanyRev=revision;return false;}
+  if(poprzednioCentralny){force=true;chmuraKatalogImportowanyRev="";}
   if(!force&&revision===chmuraKatalogImportowanyRev)return false;
   if(!force&&typeof productLinkImportStan!=="undefined"&&productLinkImportStan.loopActive)return false;
   if(!count){produktyImportowane=[];chmuraKatalogImportowanyRev=revision;chmuraKatalogCacheZapisz(revision,[]).catch(()=>{});return true;}
@@ -246,9 +252,10 @@ async function chmuraWczytajStan(){
   chmuraOstatniPullZmienilDane=false;
   try{
     const lokalnaRewizja=Math.max(0,Number(wczytajLS("artway_chmura_rev",0))||0);
-    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
+    const trybAdmina=maUprawnieniaZapisuChmury(),wersjeDomen=trybAdmina?chmuraWersjeDomenAdmina:chmuraWersjeDomenPubliczne;
+    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,settingsDomains:JSON.stringify(wersjeDomen||{}),catalogMode:trybAdmina?"legacy":"central",adminData:0,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
     chmuraOstatniPullZmienilDane=(await chmuraPobierzKatalogImportowany(d))||chmuraOstatniPullZmienilDane;
-    chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
+    chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, admin:d.admin===true||chmuraStan.admin, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     const revLok = lokalnaRewizja;
     const serwerNowszy = (d.rev||0) > revLok;
     // Klient (bez tokenu): serwer jest źródłem prawdy → zawsze nakładaj.
@@ -257,6 +264,11 @@ async function chmuraWczytajStan(){
     if(d.settings && Object.keys(d.settings).length && (!maUprawnieniaZapisuChmury() || serwerNowszy)){
       chmuraOstatniPullZmienilDane=nalozWspolneUstawienia(chmuraPominBrudneDaneSerwera(d.settings))||chmuraOstatniPullZmienilDane;
       zapiszLS("artway_chmura_rev", d.rev||0);
+    }
+    if(d.settings_domain_versions&&typeof d.settings_domain_versions==="object"){
+      const merged={...(wersjeDomen||{}),...d.settings_domain_versions};
+      if(trybAdmina){chmuraWersjeDomenAdmina=merged;zapiszLS("artway_chmura_domain_versions_admin",merged);}
+      else{chmuraWersjeDomenPubliczne=merged;zapiszLS("artway_chmura_domain_versions_public",merged);}
     }
     if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
     if(Array.isArray(d.orders)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_zamowienia", filtrujAktywneZamowienia(d.orders))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
@@ -309,10 +321,14 @@ async function chmuraWyslijWszystko(){
 // Ręczne POBRANIE sklepu z serwera i nałożenie na to urządzenie.
 async function chmuraPobierzWszystko(){
   try{
-    const d = await chmura("pull",{params:{catalogRev:""}});
+    const d = await chmura("pull",{params:{catalogRev:"",settingsDomains:"{}",adminData:1}});
     await chmuraPobierzKatalogImportowany(d,true);
     chmuraBrudneKlucze.clear();
     if(d.settings && Object.keys(d.settings).length){ nalozWspolneUstawienia(d.settings); zapiszLS("artway_chmura_rev", d.rev||0); }
+    if(d.settings_domain_versions&&typeof d.settings_domain_versions==="object"){
+      if(maUprawnieniaZapisuChmury()){chmuraWersjeDomenAdmina=d.settings_domain_versions;zapiszLS("artway_chmura_domain_versions_admin",d.settings_domain_versions);}
+      else{chmuraWersjeDomenPubliczne=d.settings_domain_versions;zapiszLS("artway_chmura_domain_versions_public",d.settings_domain_versions);}
+    }
     chmuraStan = {...chmuraStan, dostepna:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     if(chmuraToken) await synchronizujBazeCentralna(true).catch(()=>{});
     zastosujUstawienia(); zbudujProdukty();

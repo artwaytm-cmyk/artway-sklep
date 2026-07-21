@@ -21,13 +21,14 @@ function polaczUzytkownikowCentralnych(serwerowi){
   return Array.isArray(serwerowi)?serwerowi:[];
 }
 let zamowieniaAdminOdswiezenieWToku=null,zamowieniaAdminOstatnieOdswiezenie=0,zamowieniaAdminWersja="",zamowieniaAdminUsunieteWersja="";
+let uzytkownicyAdminOdswiezenieWToku=null,uzytkownicyAdminOstatnieOdswiezenie=0,uzytkownicyAdminWersja="";
 async function synchronizujBazeCentralna(cicho=false){
   if(stanBazyCentralnej.synchronizacja) return false;
   if(!maUprawnieniaZapisuChmury()){ if(!cicho) chmuraUstawToken(); return false; }
   chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=false;
   stanBazyCentralnej={...stanBazyCentralnej,synchronizacja:true};
   try{
-    const ok=await chmuraWczytajStan();
+    const wyniki=await Promise.all([chmuraWczytajStan(),odswiezZamowieniaAdminaPoWejsciu(true),odswiezUzytkownikowAdminaPoWejsciu(true)]),ok=wyniki[0];
     if(!ok)throw new Error(chmuraStan.error||"Nie udało się pobrać wspólnej bazy");
     chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=chmuraOstatniPullZmienilDane;
     stanBazyCentralnej={sprawdzono:true,online:true,synchronizacja:false,orders:pobierzZamowienia().length,users:pobierzUzytkownikow().length,updatedAt:chmuraStan.updated_at||null,error:""};
@@ -42,10 +43,23 @@ async function synchronizujBazeCentralna(cicho=false){
     return false;
   }
 }
-async function odswiezZamowieniaAdminaPoWejsciu(){
+async function odswiezUzytkownikowAdminaPoWejsciu(force=false){
+  if(!maUprawnieniaZapisuChmury())return false;
+  if(uzytkownicyAdminOdswiezenieWToku)return uzytkownicyAdminOdswiezenieWToku;
+  if(!force&&Date.now()-uzytkownicyAdminOstatnieOdswiezenie<60000)return false;
+  uzytkownicyAdminOstatnieOdswiezenie=Date.now();
+  uzytkownicyAdminOdswiezenieWToku=(async()=>{
+    const d=await chmura("store-users-admin",{params:{usersVersion:uzytkownicyAdminWersja,count:pobierzUzytkownikow().length},timeout:15000});
+    uzytkownicyAdminWersja=String(d.usersVersion||uzytkownicyAdminWersja);
+    if(!d.unchanged&&Array.isArray(d.users))zapiszLS("artway_uzytkownicy",polaczUzytkownikowCentralnych(d.users));
+    return true;
+  })().finally(()=>{uzytkownicyAdminOdswiezenieWToku=null;});
+  return uzytkownicyAdminOdswiezenieWToku;
+}
+async function odswiezZamowieniaAdminaPoWejsciu(force=false){
   if(!maUprawnieniaZapisuChmury())return false;
   if(zamowieniaAdminOdswiezenieWToku)return zamowieniaAdminOdswiezenieWToku;
-  if(Date.now()-zamowieniaAdminOstatnieOdswiezenie<10000)return false;
+  if(!force&&Date.now()-zamowieniaAdminOstatnieOdswiezenie<10000)return false;
   zamowieniaAdminOstatnieOdswiezenie=Date.now();
   zamowieniaAdminOdswiezenieWToku=(async()=>{
     const przed=localStorage.getItem("artway_zamowienia")||"";

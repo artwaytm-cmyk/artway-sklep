@@ -300,6 +300,29 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
     } finally { client.release(); }
     value.data = data; return versioned ? { ...base, value } : value;
   };
+  const readSettingsDelta = async (fallback, { versions = {}, base = null, excludeKeys = [] } = {}) => {
+    const baseValue = clone(base || await legacy.read('settings', fallback) || fallback), data = baseValue?.data && typeof baseValue.data === 'object' ? baseValue.data : {};
+    const excluded = new Set((Array.isArray(excludeKeys) ? excludeKeys : []).map(String));
+    const client = await pool.connect();
+    try {
+      const snapshots = await client.query("SELECT domain,version FROM artway_domain_snapshots WHERE namespace=$1 AND domain LIKE 'settings:%'", [namespace]);
+      const domainVersions = {}, changedEntries = [];
+      for (const row of snapshots.rows) {
+        const key = String(row.domain || '').slice('settings:'.length), config = SETTINGS_DOMAIN_CONFIGS[key];
+        if (!config || excluded.has(key)) continue;
+        const version = Math.max(0, Number(row.version) || 0); domainVersions[key] = version;
+        if (!Object.prototype.hasOwnProperty.call(versions || {}, key) || Math.max(0, Number(versions[key]) || 0) !== version) changedEntries.push([row.domain, config]);
+      }
+      const domains = await readDomains(client, namespace, changedEntries);
+      const changedKeys = [];
+      for (const [domain, config] of changedEntries) {
+        const current = domains.get(domain); if (!current) continue;
+        const key = domain.slice('settings:'.length); data[key] = current.value; changedKeys.push(key);
+      }
+      baseValue.data = data;
+      return { value: baseValue, domainVersions, changedKeys };
+    } finally { client.release(); }
+  };
   const writeSettingsIfVersion = async (value, version = null) => {
     const client = await pool.connect();
     try {
@@ -350,6 +373,7 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
   };
   return Object.freeze({
     async readSettingsBase(fallback) { await ensure(); return legacy.read('settings', fallback); },
+    async readSettingsDelta(fallback, options = {}) { await ensure(); return readSettingsDelta(fallback, options); },
     async read(key, fallback) { await ensure(); if (key === 'settings') return readSettings(false, fallback); const config = directConfig(key); return config ? readDirect(key, config, fallback, false) : legacy.read(key, fallback); },
     async readVersioned(key, fallback) { await ensure(); if (key === 'settings') return readSettings(true, fallback); const config = directConfig(key); return config ? readDirect(key, config, fallback, true) : legacy.readVersioned(key, fallback); },
     async write(key, value) { await ensure(); if (key === 'settings') return writeSettingsIfVersion(value); const config = directConfig(key); return config ? writeDirect(key, value, config) : legacy.write(key, value); },

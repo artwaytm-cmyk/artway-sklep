@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   DIRECT_DOMAIN_CONFIGS,
   SETTINGS_DOMAIN_CONFIGS,
@@ -63,4 +64,11 @@ test('lekki znacznik rewizji domen jest stabilny, posortowany i uwzględnia brak
     [{ domain: 'settings:artway_stany', version: 17 }, { domain: 'kv:allegro_offers', version: 8 }],
   );
   assert.equal(token, 'ndv1|kv:allegro_offers=8|kv:brak=0|settings:artway_stany=17');
+});
+
+test('repozytorium udostępnia przyrostowy odczyt ustawień zamiast obowiązkowego pełnego nawodnienia', async () => {
+  const source = await readFile(new URL('../netlify/functions/lib/core/normalized-domain-repository.mjs', import.meta.url), 'utf8');
+  assert.match(source, /const readSettingsDelta = async/);
+  assert.match(source, /settings_domain|domainVersions/);
+  assert.match(source, /Object\.prototype\.hasOwnProperty\.call\(versions/);
 });

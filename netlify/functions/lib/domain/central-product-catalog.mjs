@@ -15,7 +15,7 @@ const normalize = (value) => text(value, 5000).toLocaleLowerCase('pl-PL').normal
 const own = (object, key) => Object.prototype.hasOwnProperty.call(asObject(object), String(key)) || Object.prototype.hasOwnProperty.call(asObject(object), key);
 const searchTsQuery = (value) => normalize(value).split(/\s+/).filter(Boolean).slice(0, 12).map((token) => `${token}:*`).join(' & ');
 
-export const CENTRAL_PRODUCT_SCHEMA_VERSION = 2;
+export const CENTRAL_PRODUCT_SCHEMA_VERSION = 3;
 
 function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = false } = {}) {
   const fields = [
@@ -80,6 +80,13 @@ function offerIndex(offers = [], mappings = {}) {
 export function centralCatalogBuildRecords(data = {}, { importedProducts = [], offers = [], mappings = {}, sourceRevision = '' } = {}) {
   const merged = mergeCatalogProducts(data, importedProducts), addedIds = new Set(asArray(data.artway_produkty_dodane).map((product) => String(product?.id))), importedIds = new Set(asArray(importedProducts).map((product) => String(product?.id)));
   const stock = asObject(data.artway_stany), availability = asObject(data.artway_dostepnosc), warehouse = asObject(data.artway_magazyn_produkty), offerLookup = offerIndex(offers, mappings);
+  const reviewStats = new Map();
+  for (const review of asArray(data.artway_opinie)) {
+    if (text(review?.status, 40).toLowerCase() !== 'zatwierdzona') continue;
+    const productId = text(review?.produktId ?? review?.productId, 120), rating = Number(review?.ocena ?? review?.rating);
+    if (!productId || !(rating >= 1 && rating <= 5)) continue;
+    const current = reviewStats.get(productId) || { sum: 0, count: 0 }; current.sum += rating; current.count++; reviewStats.set(productId, current);
+  }
   const identityCounts = new Map();
   for (const product of merged.products) for (const key of catalogIdentityKeys(product)) identityCounts.set(key, (identityCounts.get(key) || 0) + 1);
   const now = new Date().toISOString();
@@ -93,7 +100,7 @@ export function centralCatalogBuildRecords(data = {}, { importedProducts = [], o
     if (directOffer && offerLookup.byId.has(directOffer) && !productOffers.some((offer) => text(offer?.id, 120) === directOffer)) productOffers.unshift(offerLookup.byId.get(directOffer));
     const activeOffers = productOffers.filter((offer) => !['ENDED', 'INACTIVE', 'ARCHIVED', 'DELETED'].includes(text(offer?.status).toUpperCase()));
     const primaryOffer = activeOffers[0] || productOffers[0] || null, missing = centralCatalogMissingFields(product);
-    const source = importedIds.has(id) ? 'import' : addedIds.has(id) ? 'dodany' : 'bazowy';
+    const source = importedIds.has(id) ? 'import' : addedIds.has(id) ? 'dodany' : 'bazowy', reviews = reviewStats.get(id) || { sum: 0, count: 0 };
     const image = text(product.zdjecie || product.image || asArray(product.zdjecia)[0], 3000), category = text(product.kategoria || product.category, 300), producer = text(product.producent || product.marka || product.brand, 300);
     const catalogMeta = {
       schemaVersion: CENTRAL_PRODUCT_SCHEMA_VERSION, source, recordStatus: inTrash ? 'trash' : 'active', sourceRevision, syncedAt: now,
@@ -112,7 +119,7 @@ export function centralCatalogBuildRecords(data = {}, { importedProducts = [], o
       externalId: text(product.externalId, 200), sku: text(product.sku, 200), ean: text(product.gtin || product.ean, 80).replace(/\s/g, ''),
       source, recordStatus: inTrash ? 'trash' : 'active', stock: stockValue, saleAvailable, hasSource: !!text(product.sourceUrl || product.producentUrl || product.urlProducenta),
       hasAllegro: !!catalogMeta.channels.allegro.offerId, allegroStatus: catalogMeta.channels.allegro.status.toUpperCase(), missingFields: missing, missingCount: missing.filter((field) => field !== 'koszt').length,
-      price: numberOrNull(product.cena), allegroPrice: numberOrNull(product.cenaAllegro || product.cena), promotion: Number(product.staraCena) > Number(product.cena),
+      price: numberOrNull(product.cena), allegroPrice: numberOrNull(product.cenaAllegro || product.cena), promotion: Number(product.staraCena) > Number(product.cena), newProduct: text(product.badge, 80).toLowerCase() === 'nowość', rating: reviews.count ? reviews.sum / reviews.count : null, ratingCount: reviews.count,
       duplicateStore: catalogIdentityKeys(product).some((key) => (identityCounts.get(key) || 0) > 1), duplicateAllegro: activeOffers.length > 1,
       fingerprint: crypto.createHash('sha256').update(JSON.stringify(adminProduct)).digest('hex'), updatedAt: now, image,
     };
@@ -120,9 +127,11 @@ export function centralCatalogBuildRecords(data = {}, { importedProducts = [], o
 }
 
 export function centralCatalogQueryOptions(raw = {}) {
-  const allowedSort = new Set(['external', 'id', 'nazwa', 'producent', 'kategoria', 'cena-rosnaco', 'cena-malejaco', 'stan', 'braki-danych', 'najnowsze']);
+  const allowedSort = new Set(['external', 'id', 'nazwa', 'producent', 'kategoria', 'cena-rosnaco', 'cena-malejaco', 'stan', 'braki-danych', 'najnowsze', 'ocena']);
+  const list = (value, max = 1000) => [...new Set((Array.isArray(value) ? value : String(value || '').split(',')).map((item) => text(item, 300)).filter(Boolean))].slice(0, max);
   return {
     query: normalize(raw.query || raw.q), category: text(raw.category, 300), producer: text(raw.producer, 300), status: text(raw.status || 'active', 40), source: text(raw.source || 'wszystkie', 40), stock: text(raw.stock || 'wszystkie', 40), allegro: text(raw.allegro || 'wszystkie', 40), data: text(raw.data || 'wszystkie', 40), sale: text(raw.sale || 'wszystkie', 40), promotion: text(raw.promotion || 'wszystkie', 40), link: text(raw.link || 'wszystkie', 40),
+    categories: list(raw.categories, 200), ids: list(raw.ids, 1000), special: text(raw.special, 40), minRating: numberOrNull(raw.minRating),
     priceMin: numberOrNull(raw.priceMin), priceMax: numberOrNull(raw.priceMax), allegroPriceMin: numberOrNull(raw.allegroPriceMin), allegroPriceMax: numberOrNull(raw.allegroPriceMax),
     sort: allowedSort.has(String(raw.sort)) ? String(raw.sort) : 'external', page: Math.max(1, Number(raw.page) || 1), limit: Math.max(1, Math.min(1000, Number(raw.limit) || 50)), admin: raw.admin === true,
   };
@@ -140,9 +149,15 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
         external_id TEXT NOT NULL DEFAULT '', sku TEXT NOT NULL DEFAULT '', ean TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'bazowy',
         record_status TEXT NOT NULL DEFAULT 'active', stock NUMERIC NULL, sale_available BOOLEAN NOT NULL DEFAULT TRUE, has_source BOOLEAN NOT NULL DEFAULT FALSE,
         has_allegro BOOLEAN NOT NULL DEFAULT FALSE, allegro_status TEXT NOT NULL DEFAULT '', missing_fields JSONB NOT NULL DEFAULT '[]'::jsonb, missing_count INTEGER NOT NULL DEFAULT 0,
-        price NUMERIC NULL, allegro_price NUMERIC NULL, promotion BOOLEAN NOT NULL DEFAULT FALSE, duplicate_store BOOLEAN NOT NULL DEFAULT FALSE, duplicate_allegro BOOLEAN NOT NULL DEFAULT FALSE,
+        price NUMERIC NULL, allegro_price NUMERIC NULL, promotion BOOLEAN NOT NULL DEFAULT FALSE, new_product BOOLEAN NOT NULL DEFAULT FALSE, rating NUMERIC NULL, rating_count INTEGER NOT NULL DEFAULT 0, duplicate_store BOOLEAN NOT NULL DEFAULT FALSE, duplicate_allegro BOOLEAN NOT NULL DEFAULT FALSE,
         fingerprint TEXT NOT NULL DEFAULT '', updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(namespace, product_id)
       );
+      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS admin_list_data JSONB NOT NULL DEFAULT '{}'::jsonb;
+      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS public_list_data JSONB NOT NULL DEFAULT '{}'::jsonb;
+      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS new_product BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS rating NUMERIC NULL;
+      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS rating_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', search_text)) STORED;
       CREATE INDEX IF NOT EXISTS artway_products_search_idx ON artway_products(namespace, search_text text_pattern_ops);
       CREATE INDEX IF NOT EXISTS artway_products_category_idx ON artway_products(namespace, category);
       CREATE INDEX IF NOT EXISTS artway_products_producer_idx ON artway_products(namespace, producer);
@@ -154,9 +169,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
       CREATE INDEX IF NOT EXISTS artway_products_missing_idx ON artway_products(namespace, missing_count) WHERE record_status='active';
       CREATE INDEX IF NOT EXISTS artway_products_updated_idx ON artway_products(namespace, updated_at DESC) WHERE record_status='active';
       CREATE INDEX IF NOT EXISTS artway_products_channel_idx ON artway_products(namespace, has_allegro, allegro_status) WHERE record_status='active';
-      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS admin_list_data JSONB NOT NULL DEFAULT '{}'::jsonb;
-      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS public_list_data JSONB NOT NULL DEFAULT '{}'::jsonb;
-      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', search_text)) STORED;
+      CREATE INDEX IF NOT EXISTS artway_products_public_sort_idx ON artway_products(namespace, new_product, rating DESC) WHERE record_status='active' AND sale_available=true;
       CREATE INDEX IF NOT EXISTS artway_products_search_vector_idx ON artway_products USING GIN(search_vector);
       CREATE TABLE IF NOT EXISTS artway_product_catalog_meta (
         namespace TEXT PRIMARY KEY, schema_version INTEGER NOT NULL DEFAULT 1, source_revision TEXT NOT NULL DEFAULT '', product_count INTEGER NOT NULL DEFAULT 0, synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -185,9 +198,9 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
         await client.query(`WITH payload AS (SELECT value item FROM jsonb_array_elements($1::jsonb)) INSERT INTO artway_product_sync_ids(product_id) SELECT item->>'id' FROM payload ON CONFLICT DO NOTHING`, [JSON.stringify(batch)]);
         await client.query(`
           WITH payload AS (SELECT value item FROM jsonb_array_elements($2::jsonb))
-          INSERT INTO artway_products(namespace,product_id,data,public_data,admin_list_data,public_list_data,name,search_text,category,producer,external_id,sku,ean,source,record_status,stock,sale_available,has_source,has_allegro,allegro_status,missing_fields,missing_count,price,allegro_price,promotion,duplicate_store,duplicate_allegro,fingerprint,updated_at)
-          SELECT $1,item->>'id',item->'data',item->'publicData',item->'adminListData',item->'publicListData',item->>'name',item->>'searchText',item->>'category',item->>'producer',item->>'externalId',item->>'sku',item->>'ean',item->>'source',item->>'recordStatus',NULLIF(item->>'stock','')::numeric,COALESCE((item->>'saleAvailable')::boolean,false),COALESCE((item->>'hasSource')::boolean,false),COALESCE((item->>'hasAllegro')::boolean,false),item->>'allegroStatus',item->'missingFields',COALESCE((item->>'missingCount')::integer,0),NULLIF(item->>'price','')::numeric,NULLIF(item->>'allegroPrice','')::numeric,COALESCE((item->>'promotion')::boolean,false),COALESCE((item->>'duplicateStore')::boolean,false),COALESCE((item->>'duplicateAllegro')::boolean,false),item->>'fingerprint',NOW() FROM payload
-          ON CONFLICT(namespace,product_id) DO UPDATE SET data=EXCLUDED.data,public_data=EXCLUDED.public_data,admin_list_data=EXCLUDED.admin_list_data,public_list_data=EXCLUDED.public_list_data,name=EXCLUDED.name,search_text=EXCLUDED.search_text,category=EXCLUDED.category,producer=EXCLUDED.producer,external_id=EXCLUDED.external_id,sku=EXCLUDED.sku,ean=EXCLUDED.ean,source=EXCLUDED.source,record_status=EXCLUDED.record_status,stock=EXCLUDED.stock,sale_available=EXCLUDED.sale_available,has_source=EXCLUDED.has_source,has_allegro=EXCLUDED.has_allegro,allegro_status=EXCLUDED.allegro_status,missing_fields=EXCLUDED.missing_fields,missing_count=EXCLUDED.missing_count,price=EXCLUDED.price,allegro_price=EXCLUDED.allegro_price,promotion=EXCLUDED.promotion,duplicate_store=EXCLUDED.duplicate_store,duplicate_allegro=EXCLUDED.duplicate_allegro,fingerprint=EXCLUDED.fingerprint,updated_at=CASE WHEN artway_products.fingerprint<>EXCLUDED.fingerprint THEN NOW() ELSE artway_products.updated_at END
+          INSERT INTO artway_products(namespace,product_id,data,public_data,admin_list_data,public_list_data,name,search_text,category,producer,external_id,sku,ean,source,record_status,stock,sale_available,has_source,has_allegro,allegro_status,missing_fields,missing_count,price,allegro_price,promotion,new_product,rating,rating_count,duplicate_store,duplicate_allegro,fingerprint,updated_at)
+          SELECT $1,item->>'id',item->'data',item->'publicData',item->'adminListData',item->'publicListData',item->>'name',item->>'searchText',item->>'category',item->>'producer',item->>'externalId',item->>'sku',item->>'ean',item->>'source',item->>'recordStatus',NULLIF(item->>'stock','')::numeric,COALESCE((item->>'saleAvailable')::boolean,false),COALESCE((item->>'hasSource')::boolean,false),COALESCE((item->>'hasAllegro')::boolean,false),item->>'allegroStatus',item->'missingFields',COALESCE((item->>'missingCount')::integer,0),NULLIF(item->>'price','')::numeric,NULLIF(item->>'allegroPrice','')::numeric,COALESCE((item->>'promotion')::boolean,false),COALESCE((item->>'newProduct')::boolean,false),NULLIF(item->>'rating','')::numeric,COALESCE((item->>'ratingCount')::integer,0),COALESCE((item->>'duplicateStore')::boolean,false),COALESCE((item->>'duplicateAllegro')::boolean,false),item->>'fingerprint',NOW() FROM payload
+          ON CONFLICT(namespace,product_id) DO UPDATE SET data=EXCLUDED.data,public_data=EXCLUDED.public_data,admin_list_data=EXCLUDED.admin_list_data,public_list_data=EXCLUDED.public_list_data,name=EXCLUDED.name,search_text=EXCLUDED.search_text,category=EXCLUDED.category,producer=EXCLUDED.producer,external_id=EXCLUDED.external_id,sku=EXCLUDED.sku,ean=EXCLUDED.ean,source=EXCLUDED.source,record_status=EXCLUDED.record_status,stock=EXCLUDED.stock,sale_available=EXCLUDED.sale_available,has_source=EXCLUDED.has_source,has_allegro=EXCLUDED.has_allegro,allegro_status=EXCLUDED.allegro_status,missing_fields=EXCLUDED.missing_fields,missing_count=EXCLUDED.missing_count,price=EXCLUDED.price,allegro_price=EXCLUDED.allegro_price,promotion=EXCLUDED.promotion,new_product=EXCLUDED.new_product,rating=EXCLUDED.rating,rating_count=EXCLUDED.rating_count,duplicate_store=EXCLUDED.duplicate_store,duplicate_allegro=EXCLUDED.duplicate_allegro,fingerprint=EXCLUDED.fingerprint,updated_at=CASE WHEN artway_products.fingerprint<>EXCLUDED.fingerprint THEN NOW() ELSE artway_products.updated_at END
         `, [ns, JSON.stringify(batch)]);
       }
       await client.query("UPDATE artway_products p SET record_status='removed',sale_available=false,updated_at=NOW() WHERE p.namespace=$1 AND NOT EXISTS(SELECT 1 FROM artway_product_sync_ids s WHERE s.product_id=p.product_id)", [ns]);
@@ -202,7 +215,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.promise;
     const audienceWhere = admin ? "namespace=$1 AND record_status<>'removed'" : "namespace=$1 AND record_status='active' AND sale_available=true";
     const promise = Promise.all([
-      pool.query(`SELECT COUNT(*)::bigint total,COUNT(*) FILTER(WHERE record_status='active')::bigint active,COUNT(*) FILTER(WHERE record_status='trash')::bigint trash,COUNT(*) FILTER(WHERE sale_available=false AND record_status='active')::bigint hidden,COUNT(*) FILTER(WHERE missing_count>0 AND record_status='active')::bigint missing,COUNT(*) FILTER(WHERE missing_count=0 AND sale_available=true AND record_status='active')::bigint ready,COUNT(*) FILTER(WHERE has_allegro=true AND record_status='active')::bigint connected,COUNT(*) FILTER(WHERE promotion=true AND record_status='active')::bigint promotions,COUNT(*) FILTER(WHERE duplicate_store=true AND record_status='active')::bigint duplicate_store,COUNT(*) FILTER(WHERE duplicate_allegro=true AND record_status='active')::bigint duplicate_allegro FROM artway_products WHERE ${audienceWhere}`, [ns]),
+      pool.query(`SELECT COUNT(*)::bigint total,COUNT(*) FILTER(WHERE record_status='active')::bigint active,COUNT(*) FILTER(WHERE record_status='trash')::bigint trash,COUNT(*) FILTER(WHERE sale_available=false AND record_status='active')::bigint hidden,COUNT(*) FILTER(WHERE missing_count>0 AND record_status='active')::bigint missing,COUNT(*) FILTER(WHERE missing_count=0 AND sale_available=true AND record_status='active')::bigint ready,COUNT(*) FILTER(WHERE has_allegro=true AND record_status='active')::bigint connected,COUNT(*) FILTER(WHERE promotion=true AND record_status='active')::bigint promotions,COUNT(*) FILTER(WHERE new_product=true AND record_status='active')::bigint new_products,COUNT(*) FILTER(WHERE duplicate_store=true AND record_status='active')::bigint duplicate_store,COUNT(*) FILTER(WHERE duplicate_allegro=true AND record_status='active')::bigint duplicate_allegro FROM artway_products WHERE ${audienceWhere}`, [ns]),
       pool.query(`SELECT category value,COUNT(*)::bigint count FROM artway_products WHERE ${audienceWhere} AND category<>'' GROUP BY category ORDER BY category`, [ns]),
       pool.query(`SELECT producer value,COUNT(*)::bigint count FROM artway_products WHERE ${audienceWhere} AND producer<>'' GROUP BY producer ORDER BY producer`, [ns]),
     ]).then(([summaryResult, categories, producers]) => ({
@@ -224,6 +237,8 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     if (!options.admin) clauses.push("record_status='active'", 'sale_available=true');
     if (options.query) add("search_vector @@ to_tsquery('simple', ?)", searchTsQuery(options.query));
     if (options.category && options.category !== 'Wszystkie') add('category=?', options.category);
+    if (options.categories.length) { values.push(options.categories); clauses.push(`category=ANY($${values.length}::text[])`); }
+    if (options.ids.length) { values.push(options.ids); clauses.push(`product_id=ANY($${values.length}::text[])`); }
     if (options.producer && options.producer !== 'wszyscy') add('producer=?', options.producer);
     if (options.status === 'active') clauses.push("record_status='active'"); else if (options.status === 'trash') clauses.push("record_status='trash'"); else if (options.status === 'duplikaty') clauses.push('duplicate_store=true');
     if (options.source === 'bazowe') clauses.push("source='bazowy'"); else if (options.source === 'wlasne') clauses.push("source IN ('dodany','import')");
@@ -233,9 +248,11 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     if (options.data === 'gotowe') clauses.push('missing_count=0'); else if (options.data === 'braki') clauses.push('missing_count>0'); else if (missingMap[options.data]) { values.push(missingMap[options.data]); clauses.push(`missing_fields ? $${values.length}`); }
     if (options.sale === 'dostepne') clauses.push('sale_available=true'); else if (options.sale === 'niedostepne') clauses.push('sale_available=false');
     if (options.promotion === 'promocje') clauses.push('promotion=true'); else if (options.promotion === 'regularne') clauses.push('promotion=false');
+    if (options.special === 'nowosci') clauses.push('new_product=true');
+    if (options.minRating !== null) add('rating>=?', options.minRating);
     if (options.link === 'z_linkiem') clauses.push('has_source=true'); else if (options.link === 'bez_linku') clauses.push('has_source=false');
     if (options.priceMin !== null) add('price>=?', options.priceMin); if (options.priceMax !== null) add('price<=?', options.priceMax); if (options.allegroPriceMin !== null) add('allegro_price>=?', options.allegroPriceMin); if (options.allegroPriceMax !== null) add('allegro_price<=?', options.allegroPriceMax);
-    const where = clauses.join(' AND '), order = { external:"NULLIF(external_id,'') ASC NULLS LAST,NULLIF(sku,'') ASC NULLS LAST,product_id ASC", id:'product_id ASC', nazwa:'name ASC,product_id ASC', producent:'producer ASC,name ASC', kategoria:'category ASC,name ASC', 'cena-rosnaco':'price ASC NULLS LAST,name ASC', 'cena-malejaco':'price DESC NULLS LAST,name ASC', stan:'stock ASC NULLS LAST,name ASC', 'braki-danych':'missing_count DESC,name ASC', najnowsze:'updated_at DESC,product_id DESC' }[options.sort];
+    const where = clauses.join(' AND '), order = { external:"NULLIF(external_id,'') ASC NULLS LAST,NULLIF(sku,'') ASC NULLS LAST,product_id ASC", id:'product_id ASC', nazwa:'name ASC,product_id ASC', producent:'producer ASC,name ASC', kategoria:'category ASC,name ASC', 'cena-rosnaco':'price ASC NULLS LAST,name ASC', 'cena-malejaco':'price DESC NULLS LAST,name ASC', stan:'stock ASC NULLS LAST,name ASC', 'braki-danych':'missing_count DESC,name ASC', najnowsze:'updated_at DESC,product_id DESC', ocena:'rating DESC NULLS LAST,rating_count DESC,name ASC' }[options.sort];
     const offset = (options.page - 1) * options.limit, pageValues = [...values, options.limit, offset], limitRef = `$${values.length + 1}`, offsetRef = `$${values.length + 2}`;
     const meta = await metadata();
     const [rows, count, aggregate] = await Promise.all([

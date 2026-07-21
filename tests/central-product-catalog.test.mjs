@@ -63,6 +63,22 @@ test('zapytanie centralnego katalogu ogranicza stronę i dopuszcza tylko bezpiec
   assert.equal(empty.allegroPriceMin, null);
 });
 
+test('publiczny katalog obsługuje gałęzie, wybrane produkty, nowości i oceny bez pobierania całej listy', () => {
+  const query = centralCatalogQueryOptions({ categories: 'Gry,Gry edukacyjne', ids: '10,11', special: 'nowosci', minRating: '4,5', sort: 'ocena' });
+  assert.deepEqual(query.categories, ['Gry', 'Gry edukacyjne']);
+  assert.deepEqual(query.ids, ['10', '11']);
+  assert.equal(query.special, 'nowosci');
+  assert.equal(query.minRating, 4.5);
+  assert.equal(query.sort, 'ocena');
+  const [record] = centralCatalogBuildRecords({
+    artway_produkty_katalog: [{ id: 10, nazwa: 'Gra', cena: 20, badge: 'Nowość' }],
+    artway_opinie: [{ produktId: 10, status: 'zatwierdzona', ocena: 5 }, { produktId: 10, status: 'oczekuje', ocena: 1 }],
+  });
+  assert.equal(record.newProduct, true);
+  assert.equal(record.rating, 5);
+  assert.equal(record.ratingCount, 1);
+});
+
 test('backend udostępnia stronicowaną kartotekę, pojedynczy produkt, synchronizację i status', async () => {
   const source = await readFile('netlify/functions/lib/store-app.mjs', 'utf8');
   const route = await readFile('netlify/functions/lib/central-product-catalog-route.mjs', 'utf8');
@@ -83,4 +99,18 @@ test('Asortyment korzysta z paginacji serwerowej i zachowuje tryb awaryjny', asy
   assert.match(index, /asortymentCentralnyWylaczonyDo/);
   assert.match(view, /Centralna kartoteka PostgreSQL/);
   assert.match(view, /centralData\?wszystkie:wszystkie\.slice/);
+});
+
+test('sklep publiczny używa tej samej centralnej paginacji i pobiera szczegół dopiero po wejściu', async () => {
+  const [cloud, storefront, route] = await Promise.all([
+    readFile('src/frontend/03-cloud-sync.js', 'utf8'),
+    readFile('src/frontend/06b-storefront-catalog.js', 'utf8'),
+    readFile('netlify/functions/lib/store-data-route.mjs', 'utf8'),
+  ]);
+  assert.match(cloud, /catalogMode:trybAdmina\?"legacy":"central"/);
+  assert.match(cloud, /chmuraKatalogCentralnyPubliczny/);
+  assert.match(storefront, /sklepKatalogCentralnyPobierz/);
+  assert.match(storefront, /product-catalog-item/);
+  assert.match(route, /PUBLIC_CENTRAL_CATALOG_KEYS/);
+  assert.match(route, /catalog_central: centralCatalogMode/);
 });

@@ -1,4 +1,13 @@
 export function createStoreDataRoute(deps = {}) {
+  const PUBLIC_CENTRAL_CATALOG_KEYS = ['artway_produkty_edytowane', 'artway_produkty_dodane', 'artway_produkty_katalog', 'artway_produkty_ukryte', 'artway_produkty_definitywne', 'artway_stany', 'artway_dostepnosc', 'artway_magazyn_produkty'];
+  const PUBLIC_CENTRAL_ADMIN_KEYS = [
+    'artway_ruchy_magazynowe', 'artway_magazyn_lokalizacje', 'artway_magazyn_lokalizacje_usuniete',
+    'artway_dokumenty_magazynowe', 'artway_dokumenty_magazynowe_usuniete', 'artway_dokumenty_magazynowe_seq',
+    'artway_faktury_szkice', 'artway_producenci', 'artway_agent_ai_zlecenia', 'artway_agent_ai_plan_cykl',
+    'artway_agent_ai_pamiec', 'artway_agent_ai_historia', 'artway_agent_ai_linki_producentow',
+    'artway_agent_ai_allegro_zadania', 'artway_seo_historia', 'artway_kosz_dodane', 'artway_kosz_meta',
+  ];
+  const PUBLIC_CENTRAL_EXCLUDED_KEYS = [...PUBLIC_CENTRAL_CATALOG_KEYS, ...PUBLIC_CENTRAL_ADMIN_KEYS];
   const {
     odpowiedz, czyAdmin, czytaj, productLinkImport, ustawieniaPubliczneBezDanychPrywatnych,
     czytajUsunieteZamowienia, filtrujNieusunieteZamowienia, oczyscUstawienia, tekst,
@@ -11,22 +20,37 @@ export function createStoreDataRoute(deps = {}) {
     dopiszUsunieteZamowienie, verifyOrderAccess, normalizeTelegramAccountFields, profilKlienta,
     publicUser, hashPassword, createAccountSession, verifyPassword, bezpiecznePorownanie,
     legacyPasswordHash, czytajUstawieniaBazowe = (fallback) => czytaj('settings', fallback),
+    czytajUstawieniaPrzyrostowo = null,
   } = deps;
   return async function storeDataRoute(req, url, action) {
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
     if (action === 'pull' || action === 'store-data') {
       const admin = czyAdmin(req, url);
+      const centralCatalogMode = !admin && url.searchParams.get('catalogMode') === 'central';
       // Samo przechodzenie między kartami nie uruchamia ciężkich zapisów.
       const [baseSettings, importedPayload] = await Promise.all([czytajUstawieniaBazowe({ data: {}, rev: 0, updated_at: null }), productLinkImport.payload({ requestedRev: url.searchParams.get('catalogRev'), admin })]);
       const rev = Number(baseSettings.rev || 0), requestedSettingsRev = Number(url.searchParams.get('settingsRev'));
       const settingsUnchanged = Number.isSafeInteger(requestedSettingsRev) && requestedSettingsRev > 0 && requestedSettingsRev === rev;
       // Nie przesyłamy ponownie ciężkiego katalogu ani niezmienionych ustawień.
-      const s = settingsUnchanged ? baseSettings : await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+      let domainVersions = {}, changedDomainKeys = [];
+      let s = baseSettings;
+      if (!settingsUnchanged) {
+        let requestedDomainVersions = {};
+        try {
+          const parsed = JSON.parse(String(url.searchParams.get('settingsDomains') || '{}'));
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) requestedDomainVersions = Object.fromEntries(Object.entries(parsed).slice(0, 100).map(([key, value]) => [tekst(key, 100), Math.max(0, Number(value) || 0)]));
+        } catch (error) { requestedDomainVersions = {}; }
+        if (typeof czytajUstawieniaPrzyrostowo === 'function') {
+          const delta = await czytajUstawieniaPrzyrostowo({ data: {}, rev: 0, updated_at: null }, { versions: requestedDomainVersions, base: baseSettings, excludeKeys: centralCatalogMode ? PUBLIC_CENTRAL_EXCLUDED_KEYS : [] });
+          s = delta.value || baseSettings; domainVersions = delta.domainVersions || {}; changedDomainKeys = delta.changedKeys || [];
+        } else s = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+      }
       const sourceSettings = admin ? (s.data || {}) : ustawieniaPubliczneBezDanychPrywatnych(s.data || {});
       const browserSettings = Object.fromEntries(Object.entries(sourceSettings).filter(([key]) => key !== 'artway_produkty_katalog'));
-      const res = { ok: true, ...(settingsUnchanged ? { settings_unchanged: true } : { settings: browserSettings }), rev, updated_at: s.updated_at || null };
+      const visibleDomainVersions = Object.fromEntries(Object.entries(domainVersions).filter(([key]) => Object.prototype.hasOwnProperty.call(sourceSettings, key)));
+      const res = { ok: true, admin, catalog_central: centralCatalogMode, ...(settingsUnchanged ? { settings_unchanged: true } : { settings: browserSettings, settings_domain_versions: visibleDomainVersions, settings_changed_keys: changedDomainKeys.filter((key) => Object.prototype.hasOwnProperty.call(sourceSettings, key)) }), rev, updated_at: s.updated_at || null };
       Object.assign(res, importedPayload);
-      if (admin) {
+      if (admin && url.searchParams.get('adminData') !== '0') {
         const o = await czytaj('orders', { items: [] });
         const u = await czytaj('users', { items: [] });
         const d = await czytajUsunieteZamowienia();
@@ -54,6 +78,19 @@ export function createStoreDataRoute(deps = {}) {
       const sameCount = Number(url.searchParams.get('count')) === orders.length;
       if (sameVersion && sameCount) return odpowiedz({ ok: true, unchanged: true, count: orders.length, ordersVersion, deletedVersion });
       return odpowiedz({ ok: true, orders, deleted_orders: deletedOrders, count: orders.length, ordersVersion, deletedVersion, updated_at: ordersVersioned.value?.updated_at || null });
+    }
+
+    // Lekki słownik kont dla podstrony Klienci i uprawnień. Nie jest już
+    // dokładany do każdej synchronizacji katalogu oraz ustawień.
+    if (action === 'store-users-admin') {
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const versioned = await czytajWersjonowane('users', { items: [], updated_at: null });
+      const usersVersion = String(versioned?.etag || '').replace(/^W\//, '').replace(/^"|"$/g, '');
+      const users = (Array.isArray(versioned.value?.items) ? versioned.value.items : []).map(publicUser);
+      const sameVersion = String(url.searchParams.get('usersVersion') || '') === usersVersion;
+      const sameCount = Number(url.searchParams.get('count')) === users.length;
+      if (sameVersion && sameCount) return odpowiedz({ ok: true, unchanged: true, count: users.length, usersVersion });
+      return odpowiedz({ ok: true, users, count: users.length, usersVersion, updated_at: versioned.value?.updated_at || null });
     }
 
     // ─── ZAPIS USTAWIEŃ (tylko admin) ───
