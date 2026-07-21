@@ -18,6 +18,10 @@ import {
   telegramWebhookSecret,
 } from './domain/telegram-communication.mjs';
 import { applyTelegramAccountAccess } from './domain/telegram-account-access.mjs';
+import {
+  renderTelegramEscalation,
+  renderTelegramIncident,
+} from './domain/telegram-message-content.mjs';
 
 const SETTINGS_KEY = 'telegram_communication_settings';
 const STATE_KEY = 'telegram_communication_state';
@@ -81,7 +85,7 @@ function compactEvents(events = {}) {
 }
 
 function hashEvent(event = {}) {
-  return crypto.createHash('sha256').update(JSON.stringify([event.key, event.category, event.severity, event.count, event.title, event.description, event.facts, event.items])).digest('hex').slice(0, 24);
+  return crypto.createHash('sha256').update(JSON.stringify([event.key, event.category, event.severity, event.count, event.title, event.description, event.doneWhen, event.facts, event.items])).digest('hex').slice(0, 24);
 }
 
 function auditEntry(input = {}) {
@@ -171,20 +175,9 @@ function incidentLabel(record = {}) {
 
 export function telegramIncidentCard(record = {}, heading = '') {
   const status = incidentStatus(record), overdue = incidentOverdue(record), custom = cleanCustomMessage(record.customText || '');
-  const icon = heading.includes('Eskalacja') || overdue ? '⏱' : record.severity === 'critical' ? '🔴' : '🟠';
-  const facts = (Array.isArray(record.facts) ? record.facts : []).filter(Boolean).map((item) => telegramHtml(item)).join(' · ');
-  const items = (Array.isArray(record.items) ? record.items : []).filter(Boolean).map((item) => `• ${telegramHtml(item)}`).join('\n');
-  const description = compactLine(record.description || '', 220);
-  const content = custom || [
-    `<b>${icon} ${telegramHtml(compactLine(record.title || 'Sprawa', 120))}</b>${Number(record.count) > 1 ? ` · ${Number(record.count)}` : ''}`,
-    facts,
-    description ? `<blockquote>${telegramHtml(description)}</blockquote>` : '',
-    items,
-  ].filter(Boolean).join('\n');
+  const content = custom || renderTelegramIncident(record, { overdue: heading.includes('Eskalacja') || overdue });
   const meta = [
     status === 'open' ? '' : incidentLabel({ ...record, status }),
-    status !== 'resolved' && status !== 'snoozed' && overdue ? '⏱ Po terminie' : '',
-    status !== 'resolved' && status !== 'snoozed' && !overdue && record.dueAt ? `⏱ do ${shortMoment(record.dueAt)}` : '',
   ].filter(Boolean).join(' · ');
   return `${content}${meta ? `\n\n${telegramHtml(meta)}` : ''}`;
 }
@@ -208,7 +201,7 @@ export function telegramAgentReport(center = {}) {
     [summary.companyOrdersWithoutInvoice, '🧾', ['faktura do wystawienia', 'faktury do wystawienia', 'faktur do wystawienia']],
     [summary.supplierNeedsDecision, '🏭', ['decyzja o dostępności', 'decyzje o dostępności', 'decyzji o dostępności']],
   ].filter(([value]) => Number(value) > 0).map(([value, icon, forms]) => `<b>${Number(value)}</b> ${icon} ${polishForm(value, ...forms)}`);
-  const actions = priorities.map((item) => `${icons[item.severity] || '•'} <b>${telegramHtml(compactLine(item.title || 'Sprawa', 110))}</b>${Number(item.count) > 1 ? ` · ${Number(item.count)}` : ''}${item.action ? `\n${telegramHtml(compactLine(item.action, 150))}` : ''}`);
+  const actions = priorities.map((item) => `${icons[item.severity] || '•'} <b>${telegramHtml(compactLine(item.title || 'Sprawa', 110))}</b>${Number(item.count) > 1 ? ` · ${Number(item.count)}` : ''}${item.action ? `\n<b>Działanie:</b> ${telegramHtml(compactLine(item.action, 150))}` : ''}${item.doneWhen ? `\n<b>Oczekiwany wynik:</b> ${telegramHtml(compactLine(item.doneWhen, 150))}` : ''}`);
   if (!metrics.length && !actions.length) return `<b>✅ Sklep działa prawidłowo · ${center.score ?? 0}%</b>\nBrak spraw wymagających reakcji.`;
   return [`<b>📊 Raport operacyjny · ${center.score ?? 0}%</b>`, metrics.length ? metrics.join('\n') : '', actions.length ? `<b>Do zrobienia</b>\n${actions.join('\n\n')}` : ''].filter(Boolean).join('\n\n');
 }
@@ -227,7 +220,7 @@ export function telegramDashboardCard(center = {}, incidents = []) {
 
 function escalationCard(record = {}) {
   const minutes = Math.max(1, Math.round((Date.now() - Date.parse(record.dueAt || Date.now())) / 60000));
-  return `<b>⏱ ${minutes} min po terminie</b>\n${telegramHtml(compactLine(record.title || 'Pilna sprawa', 120))}${Number(record.count) > 1 ? ` · ${Number(record.count)}` : ''}\n${record.owner?.name ? `👤 ${telegramHtml(record.owner.name)}` : 'Nieprzypisana'}`;
+  return renderTelegramEscalation(record, minutes);
 }
 
 export { SETTINGS_KEY, STATE_KEY, ARCHIVE_V1_KEY, OPEN_STATES, TELEGRAM_PANEL_ORIGIN, clean, nowIso, plusMinutes, conversationText, emptyState, compactEvents, hashEvent, auditEntry, incidentStatus, incidentOverdue, compactLine, polishForm, warsawDayKey, shortMoment, cleanCustomMessage, incidentFromEvent, incidentLabel, escalationCard };

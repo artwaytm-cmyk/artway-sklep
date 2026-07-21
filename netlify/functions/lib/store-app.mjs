@@ -2659,6 +2659,7 @@ async function allegroWyslijPrzypomnieniaTelegram(data = {}, settings = {}) {
       const delivery = await telegramCenter.managedEvent({
         key: incidentKey, legacyPrefix: `${type}:${item.id}:`, fingerprint: sourceKey, category: 'customer', severity: 'critical', count: 1,
         title: `Nowa ${kind} Allegro`, description: tekst(incoming.text || item.subject || '', 180),
+        doneWhen: 'Odpowiedź została wysłana po sprawdzeniu zamówienia i przesyłki albo sprawę zamknięto wewnętrznie.',
         facts: [`Klient: ${item.buyerLogin || '—'}`, orderId ? `Zam. ${orderId}` : ''].filter(Boolean), href: `https://artwaytm.pl/#/admin/allegro/${target}`,
       }, '', { source: 'allegro-communication' });
       if (delivery.sent || delivery.queued) {
@@ -4287,6 +4288,7 @@ export default async (req) => {
         try { telegram = await telegramCenter.managedEvent({
           key: 'supplier-availability', legacyPrefix: 'supplier-availability:', fingerprint: alertFingerprint, category: 'supplier', severity: 'warning', count: changedAlerts.length,
           title: 'Dostępność u producentów', description: automation,
+          doneWhen: 'Każda zmiana dostępności ma zapisaną decyzję sprzedażową.',
           items: changedAlerts.slice(0, 8).map((x) => `${x.name} · ${x.status === 'brak' ? 'brak' : `${x.quantity} szt.`}`),
           href: 'https://artwaytm.pl/#/admin/magazyn/dostawcy',
         }, '', { source: 'supplier-availability' }); }

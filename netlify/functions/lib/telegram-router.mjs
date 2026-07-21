@@ -365,7 +365,10 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
       for (const table of tables) {
         const sent = await center.sendManual(table.text, {
           kind: 'supplier-preview', category: 'supplier', title: `Podgląd zamówienia — ${table.supplier}`, source: 'admin-panel',
-          replyMarkup: { inline_keyboard: [[{ text: '✏️ Edytuj w Planie zatowarowania', url: `${publicOrigin(req)}/#/admin/magazyn/plan` }]] },
+          replyMarkup: { inline_keyboard: [[
+            { text: '➕ Dodaj pozycje', url: `${publicOrigin(req)}/#/admin/magazyn/plan?intent=add` },
+            { text: '✅ Zatwierdź w Planie', url: `${publicOrigin(req)}/#/admin/magazyn/plan?intent=approve` },
+          ]] },
         });
         if (sent?.message_id != null) messageIds.push(sent.message_id);
         if (typeof center.sendManualDocument === 'function') for (const document of Array.isArray(table.documents) ? table.documents : []) {

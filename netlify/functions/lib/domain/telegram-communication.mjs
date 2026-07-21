@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { renderSupplierOrderEmail, supplierProductIdentifier } from './supplier-order-email.mjs';
+import { renderTelegramDigest } from './telegram-message-content.mjs';
+export { telegramProfessionalAgentHtml, telegramSafeAgentHtml } from './telegram-agent-html.mjs';
 
 const DEFAULT_SETTINGS = Object.freeze({
   enabled: true,
@@ -159,107 +161,6 @@ export function telegramHtml(value) {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-export function telegramSafeAgentHtml(value = '', limit = 3900) {
-  const source = String(value ?? ''), maxLength = Math.max(64, Math.min(4000, Number(limit) || 3900));
-  const allowed = new Set(['b', 'strong', 'i', 'em', 'u', 's', 'code', 'pre']);
-  const stack = [];
-  let output = '', cursor = 0, truncated = false;
-  const closingLength = () => stack.reduce((sum, tag) => sum + tag.length + 3, 0);
-  const appendText = (textValue = '') => {
-    for (const character of String(textValue)) {
-      const escaped = character === '&' ? '&amp;' : character === '<' ? '&lt;' : character === '>' ? '&gt;' : character;
-      if (output.length + escaped.length + closingLength() + 1 > maxLength) {
-        truncated = true;
-        return false;
-      }
-      output += escaped;
-    }
-    return true;
-  };
-  const tagPattern = /<[^>]*>/g;
-  let match;
-  while (!truncated && (match = tagPattern.exec(source))) {
-    if (!appendText(source.slice(cursor, match.index))) break;
-    const raw = match[0], parsed = raw.match(/^<(\/)?(b|strong|i|em|u|s|code|pre)>$/i);
-    if (!parsed || !allowed.has(parsed[2].toLowerCase())) {
-      if (!appendText(raw)) break;
-    } else {
-      const tag = parsed[2].toLowerCase();
-      if (parsed[1]) {
-        if (stack.at(-1) === tag) {
-          output += `</${tag}>`;
-          stack.pop();
-        } else if (!appendText(raw)) break;
-      } else {
-        const opening = `<${tag}>`, closing = `</${tag}>`;
-        if (output.length + opening.length + closingLength() + closing.length + 1 > maxLength) {
-          truncated = true;
-          break;
-        }
-        output += opening;
-        stack.push(tag);
-      }
-    }
-    cursor = tagPattern.lastIndex;
-  }
-  if (!truncated) appendText(source.slice(cursor));
-  if (truncated && output.length + closingLength() + 1 <= maxLength) output += '…';
-  while (stack.length) output += `</${stack.pop()}>`;
-  return output;
-}
-
-/**
- * Nadaje odpowiedzi Agenta czytelny wygląd Telegrama, ale nie dopisuje ani
- * jednego faktu, nagłówka, podsumowania czy następnego kroku. Zakres treści
- * ustala odpowiedź wykonawcy; tutaj zmienia się wyłącznie prezentacja.
- */
-export function telegramProfessionalAgentHtml(value = '', limit = 3900) {
-  const source = String(value ?? '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-    .trim();
-  if (!source) return '';
-  if (/<\/?(?:b|strong|i|em|u|s|code|pre)>/i.test(source)) {
-    return telegramSafeAgentHtml(source.replace(/\n{3,}/g, '\n\n'), limit);
-  }
-  const inline = (line = '') => String(line)
-    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
-    .replace(/__([^_\n]+)__/g, '<b>$1</b>')
-    .replace(/`([^`\n]+)`/g, '<code>$1</code>');
-  const lines = source.replace(/\r\n?/g, '\n').split('\n');
-  const output = [];
-  for (let index = 0; index < lines.length;) {
-    const line = lines[index].trimEnd(), table = [];
-    if (line.includes('|')) {
-      let cursor = index;
-      while (cursor < lines.length && lines[cursor].includes('|')) table.push(lines[cursor++].trim());
-      if (table.length >= 2) {
-        output.push(`<pre>${table.join('\n')}</pre>`);
-        index = cursor;
-        continue;
-      }
-    }
-    const trimmed = line.trim();
-    if (!trimmed) {
-      if (output.length && output.at(-1) !== '') output.push('');
-      index += 1;
-      continue;
-    }
-    const bullet = trimmed.match(/^(?:[-*•·▪◦]|\d+[.)])\s+(.+)$/);
-    if (bullet) {
-      const bulletField = bullet[1].match(/^([^:\n]{1,48}):\s*(.+)$/);
-      output.push(bulletField ? `• <b>${bulletField[1]}:</b> ${inline(bulletField[2])}` : `• ${inline(bullet[1])}`);
-    }
-    else {
-      const field = trimmed.match(/^([^:\n]{1,48}):\s*(.+)$/);
-      if (field && !/^https?$/i.test(field[1])) output.push(`<b>${field[1]}:</b> ${inline(field[2])}`);
-      else if (trimmed.endsWith(':') && trimmed.length <= 90) output.push(`<b>${inline(trimmed.slice(0, -1))}</b>`);
-      else output.push(inline(trimmed));
-    }
-    index += 1;
-  }
-  return telegramSafeAgentHtml(output.join('\n').replace(/\n{3,}/g, '\n\n'), limit);
-}
-
 export function telegramCell(value, width) {
   const clean = String(value ?? '—').replace(/\s+/g, ' ').trim() || '—';
   return clean.length > width ? `${clean.slice(0, Math.max(1, width - 1))}…` : clean.padEnd(width, ' ');
@@ -307,17 +208,19 @@ export function telegramSupplierTables(order = {}, onlySupplier = '') {
       messages.push({
         supplier,
         text: [
-          `<b>🏭 ZAMÓWIENIE · ${telegramHtml(supplier)}</b>`,
-          `<b>${telegramHtml(order?.numer || order?.id || 'Zlecenie producenta')}</b>${partCount > 1 ? ` · część ${partNumber}/${partCount}` : ''}`,
-          `${items.length} ${polishForm(items.length, 'pozycja', 'pozycje', 'pozycji')} · <b>${telegramHtml(totalQuantity)} szt.</b>`,
+          `<b>🏭 Zamówienie dla ${telegramHtml(supplier)}</b>`,
+          `<b>Dokument:</b> ${telegramHtml(order?.numer || order?.id || 'zamówienie')}${partCount > 1 ? ` · część ${partNumber}/${partCount}` : ''}`,
+          '',
+          'Cześć,',
+          'przesyłamy dzisiejsze zamówienie:',
           '',
           '<b>NAZWA PRODUKTU · KOD · ZAMAWIANA ILOŚĆ</b>',
           '',
           rows,
           '',
-          partNumber === partCount ? '<b>Razem: ' + telegramHtml(totalQuantity) + ' szt.</b>\n\nPozdrowienia dla całej ekipy!\n<b>Artway-TM</b>' : '<i>Dalsza część zamówienia w następnej wiadomości.</i>',
-          '',
-          '<i>Podgląd wewnętrzny z aktualnej rewizji Planu zatowarowania.</i>',
+          partNumber === partCount
+            ? `<b>Razem: ${telegramHtml(totalQuantity)} szt.</b> · ${items.length} ${polishForm(items.length, 'pozycja', 'pozycje', 'pozycji')}\n\nPozdrowienia dla całej ekipy!\n<b>Artway-TM</b>\n\n<b>Decyzja:</b> Czy dodać jeszcze pozycje, czy zamówienie jest kompletne i można je zatwierdzić?`
+            : '<i>Dalsza część zamówienia w następnej wiadomości.</i>',
         ].join('\n'),
       });
     }
@@ -640,18 +543,7 @@ export function telegramDigestSlot(settingsInput = {}, state = {}, now = new Dat
 }
 
 export function telegramRenderEvents(events = [], heading = '🔔 Ważne sprawy Artway-TM') {
-  const icons = { critical: '🔴', warning: '🟡', info: '🔵' };
-  const compact = (value = '', limit = 160) => {
-    const clean = text(value, limit * 2).replace(/\s+/g, ' ').trim();
-    return clean.length > limit ? `${clean.slice(0, limit - 1).trimEnd()}…` : clean;
-  };
-  const rows = events.slice(0, 8).map((event) => {
-    const count = Math.max(1, Number(event.count) || 1), description = compact(event.description || '');
-    return `${icons[event.severity] || '•'} <b>${telegramHtml(compact(event.title || 'Sprawa', 100))}</b>${count > 1 ? ` · ${count}` : ''}${description ? `\n${telegramHtml(description)}` : ''}`;
-  }).join('\n\n');
-  return rows
-    ? `<b>${telegramHtml(heading)}</b>\n${events.length} ${polishForm(events.length, 'nowa sprawa', 'nowe sprawy', 'nowych spraw')}\n\n${rows}`
-    : `<b>${telegramHtml(heading)}</b>\n✅ Brak nowych spraw.`;
+  return renderTelegramDigest(events, heading);
 }
 
 export function telegramWebhookSecret(env = process.env) {

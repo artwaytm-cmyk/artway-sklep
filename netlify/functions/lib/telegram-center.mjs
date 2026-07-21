@@ -19,6 +19,7 @@ import {
   telegramWebhookSecret,
 } from './domain/telegram-communication.mjs';
 import { applyTelegramAccountAccess } from './domain/telegram-account-access.mjs';
+import { renderTelegramMetricCard } from './domain/telegram-message-content.mjs';
 
 import { SETTINGS_KEY, STATE_KEY, ARCHIVE_V1_KEY, OPEN_STATES, TELEGRAM_PANEL_ORIGIN, clean, nowIso, plusMinutes, conversationText, telegramPanelUrl, emptyState, compactEvents, hashEvent, auditEntry, incidentStatus, incidentOverdue, compactLine, polishForm, warsawDayKey, shortMoment, cleanCustomMessage, incidentFromEvent, incidentLabel, telegramIncidentCard, telegramIncidentKeyboard, telegramAgentReport, telegramDashboardCard, escalationCard } from './telegram-center-support.mjs';
 
@@ -288,7 +289,8 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     const event = {
       key: clean(eventInput.key || eventInput.title || 'event', 140), category: eventInput.category || 'operations', severity: eventInput.severity || 'warning',
       count: Math.max(1, Number(eventInput.count) || 1), title: clean(eventInput.title || 'Nowe zdarzenie', 240), description: clean(eventInput.description || '', 700),
-      href: clean(eventInput.href || '', 500), facts: Array.isArray(eventInput.facts) ? eventInput.facts : [], items: Array.isArray(eventInput.items) ? eventInput.items : [],
+      doneWhen: clean(eventInput.doneWhen || '', 500), href: clean(eventInput.href || '', 500),
+      facts: Array.isArray(eventInput.facts) ? eventInput.facts : [], items: Array.isArray(eventInput.items) ? eventInput.items : [],
     };
     event.fingerprint = clean(eventInput.fingerprint || hashEvent(event), 80);
     const previous = state.events[event.key] || null, changed = !!previous && previous.fingerprint !== event.fingerprint;
@@ -466,16 +468,46 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     let message, showButton = true;
     if (intent === 'status') { message = telegramRenderEvents(events.slice(0, 8), `🤖 Centrum · ${center.score ?? 0}%`); showButton = events.length > 0; }
     else if (intent === 'orders') {
-      const rows = [[summary.newOrders, 'nowe w sklepie'], [summary.activeAllegro, 'Allegro do obsługi'], [summary.shipmentsWithoutTracking, 'wysyłki bez numeru']].filter(([value]) => Number(value) > 0).map(([value, label]) => `<b>${Number(value)}</b> ${label}`);
-      message = `<b>📦 Zamówienia</b>\n${rows.join('\n') || '✅ Brak nowych spraw.'}`; showButton = rows.length > 0;
+      const metrics = [
+        { value: summary.newOrders, label: 'nowych zamówień w sklepie' },
+        { value: summary.activeAllegro, label: 'zamówień Allegro do obsługi' },
+        { value: summary.shipmentsWithoutTracking, label: 'wysyłek bez numeru nadania' },
+      ];
+      showButton = metrics.some((item) => Number(item.value) > 0);
+      message = renderTelegramMetricCard({
+        title: '📦 Zamówienia · stan bieżący', empty: 'Brak nowych zamówień i zaległych wysyłek.', metrics,
+        action: showButton ? 'Obsłuż najstarsze aktywne zamówienie.' : '',
+      });
     } else if (intent === 'shortages') { const rows = matching(/producent|magazyn|brak|dostawc/).slice(0, 8); message = telegramRenderEvents(rows, '🏭 Braki i producenci'); showButton = rows.length > 0; }
-    else if (intent === 'communication') { showButton = Number(summary.communicationWaiting) > 0; message = `<b>💬 Klienci</b>\n${showButton ? `<b>${Number(summary.communicationWaiting)}</b> wymaga odpowiedzi.` : '✅ Nikt nie czeka na odpowiedź.'}`; }
-    else if (intent === 'shipping') { showButton = Number(summary.shipmentsWithoutTracking) > 0; message = `<b>🚚 Wysyłki</b>\n${showButton ? `<b>${Number(summary.shipmentsWithoutTracking)}</b> bez numeru nadania.` : '✅ Wszystkie aktywne wysyłki mają numer.'}`; }
+    else if (intent === 'communication') {
+      showButton = Number(summary.communicationWaiting) > 0;
+      message = renderTelegramMetricCard({
+        title: '💬 Komunikacja z klientami', empty: 'Nikt nie czeka na odpowiedź.',
+        metrics: [{ value: summary.communicationWaiting, label: 'rozmów wymaga odpowiedzi' }],
+        action: showButton ? 'Otwórz najstarszą rozmowę; Agent sprawdzi zamówienie i przesyłkę przed przygotowaniem odpowiedzi.' : '',
+      });
+    }
+    else if (intent === 'shipping') {
+      showButton = Number(summary.shipmentsWithoutTracking) > 0;
+      message = renderTelegramMetricCard({
+        title: '🚚 Wysyłki InPost', empty: 'Wszystkie aktywne wysyłki mają numer nadania.',
+        metrics: [{ value: summary.shipmentsWithoutTracking, label: 'wysyłek nie ma numeru nadania' }],
+        action: showButton ? 'Uzupełnij najstarszą wysyłkę bez numeru nadania.' : '',
+      });
+    }
     else if (intent === 'warehouse') {
-      const rows = [[summary.supplierUnavailable, 'braki u producentów'], [summary.supplierLow, 'niskie stany'], [summary.supplierNeedsDecision, 'decyzje']].filter(([value]) => Number(value) > 0).map(([value, label]) => `<b>${Number(value)}</b> ${label}`);
-      message = `<b>🏬 Magazyn</b>\n${rows.join('\n') || '✅ Brak pilnych braków.'}`; showButton = rows.length > 0;
-    } else if (intent === 'settings') message = '<b>⚙️ Telegram</b>\nUstawienia alertów, ciszy i SLA są w panelu.';
-    else { message = '<b>🤖 Napisz zwykłym językiem</b>\nNp. „co jest pilne?”, „czy są nowe zamówienia?” albo „kto czeka na odpowiedź?”.'; showButton = false; }
+      const metrics = [
+        { value: summary.supplierUnavailable, label: 'produktów niedostępnych u producentów' },
+        { value: summary.supplierLow, label: 'produktów z niską dostępnością' },
+        { value: summary.supplierNeedsDecision, label: 'spraw wymaga decyzji administratora' },
+      ];
+      showButton = metrics.some((item) => Number(item.value) > 0);
+      message = renderTelegramMetricCard({
+        title: '🏬 Magazyn i dostępność', empty: 'Brak pilnych braków i decyzji.', metrics,
+        action: showButton ? 'Sprawdź najpierw braki powiązane z aktywnymi zamówieniami.' : '',
+      });
+    } else if (intent === 'settings') message = '<b>⚙️ Ustawienia Telegram</b>\nAlerty, cisza nocna i terminy reakcji są zarządzane w jednym miejscu w panelu.';
+    else { message = '<b>🤖 Agent Artway-TM</b>\nNapisz konkretnie, czego potrzebujesz, np. „pokaż nowe zamówienia”, „kto czeka na odpowiedź?” lub „pokaż braki do aktywnych zamówień”.'; showButton = false; }
     await recordInboundAudit({
       accepted: true, deferred: false, kind: 'local_command', preview: meta.text,
       fromLabel: meta.user || 'Użytkownik Telegram', messageId: meta.messageId,

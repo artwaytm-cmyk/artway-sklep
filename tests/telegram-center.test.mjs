@@ -61,6 +61,7 @@ test('nowoczesna karta Telegram pokazuje decyzję bez technicznego szumu', () =>
   });
   assert.match(card, /Nowa wiadomość Allegro/);
   assert.match(card, /Klient: tom90mio · Zam\. 123456/);
+  assert.match(card, /Wiadomość klienta/);
   assert.doesNotMatch(card, /abcdef12345678|wyłącznie wewnętrzny|https:\/\/|<code>/);
   const buttons = telegramIncidentKeyboard({ id: 'abcdef12345678', status: 'open', href: 'https://artwaytm.pl/#/admin/allegro/wiadomosci' }).inline_keyboard.flat();
   assert.equal(buttons.length, 2);
@@ -264,6 +265,8 @@ test('tabela producenta zawiera tylko kod, nazwę i ilość zamawianą', () => {
   const tables = telegramSupplierTables({ id: 'Z-1', pozycje: [{ kod: 'ABC', nazwa: 'Gra testowa', ilosc: 3, dostawca: 'Alexander', ean: '123' }] });
   assert.equal(tables.length, 1);
   assert.match(tables[0].text, /KOD/);
+  assert.match(tables[0].text, /Czy dodać jeszcze pozycje, czy zamówienie jest kompletne/);
+  assert.doesNotMatch(tables[0].text, /Podgląd wewnętrzny|cena|wartość/i);
   assert.match(tables[0].text, /NAZWA/);
   assert.match(tables[0].text, /ZAMAWIANA ILOŚĆ/);
   assert.doesNotMatch(tables[0].text, /123/);
