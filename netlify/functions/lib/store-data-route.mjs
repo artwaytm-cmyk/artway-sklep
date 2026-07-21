@@ -10,17 +10,18 @@ export function createStoreDataRoute(deps = {}) {
     LIMIT_KLIENTOW, polaczPowiadomienia, obsluzEmailePrzejsciaStatusu, numerZamowienia,
     dopiszUsunieteZamowienie, verifyOrderAccess, normalizeTelegramAccountFields, profilKlienta,
     publicUser, hashPassword, createAccountSession, verifyPassword, bezpiecznePorownanie,
-    legacyPasswordHash,
+    legacyPasswordHash, czytajUstawieniaBazowe = (fallback) => czytaj('settings', fallback),
   } = deps;
   return async function storeDataRoute(req, url, action) {
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
     if (action === 'pull' || action === 'store-data') {
       const admin = czyAdmin(req, url);
       // Samo przechodzenie między kartami nie uruchamia ciężkich zapisów.
-      const [s, importedPayload] = await Promise.all([czytaj('settings', { data: {}, rev: 0, updated_at: null }), productLinkImport.payload({ requestedRev: url.searchParams.get('catalogRev'), admin })]);
-      const rev = Number(s.rev || 0), requestedSettingsRev = Number(url.searchParams.get('settingsRev'));
+      const [baseSettings, importedPayload] = await Promise.all([czytajUstawieniaBazowe({ data: {}, rev: 0, updated_at: null }), productLinkImport.payload({ requestedRev: url.searchParams.get('catalogRev'), admin })]);
+      const rev = Number(baseSettings.rev || 0), requestedSettingsRev = Number(url.searchParams.get('settingsRev'));
       const settingsUnchanged = Number.isSafeInteger(requestedSettingsRev) && requestedSettingsRev > 0 && requestedSettingsRev === rev;
       // Nie przesyłamy ponownie ciężkiego katalogu ani niezmienionych ustawień.
+      const s = settingsUnchanged ? baseSettings : await czytaj('settings', { data: {}, rev: 0, updated_at: null });
       const sourceSettings = admin ? (s.data || {}) : ustawieniaPubliczneBezDanychPrywatnych(s.data || {});
       const browserSettings = Object.fromEntries(Object.entries(sourceSettings).filter(([key]) => key !== 'artway_produkty_katalog'));
       const res = { ok: true, ...(settingsUnchanged ? { settings_unchanged: true } : { settings: browserSettings }), rev, updated_at: s.updated_at || null };
@@ -159,43 +160,24 @@ export function createStoreDataRoute(deps = {}) {
       return odpowiedz({ ok: true, orders: moje });
     }
 
-    // ─── SYNCHRONIZACJA ADMINA (scala lokalne z serwerem) ───
+    // ─── ZGODNOŚĆ ZE STARSZYMI KLIENTAMI ───
+    // Serwer jest jedynym źródłem danych. Starsza przeglądarka może nadal
+    // wywołać store-sync, ale jej localStorage nie jest już scalany z bazą.
     if (action === 'store-sync') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const przychodzaceZ = Array.isArray(body.orders) ? body.orders : [];
-      const przychodzacyU = Array.isArray(body.users) ? body.users : [];
-      const przychodzaceD = Array.isArray(body.deleted_orders) ? body.deleted_orders : [];
-      const zapisaneD = await czytajUsunieteZamowienia();
-      const usunieteMapa = mapaUsunietych([...zapisaneD, ...przychodzaceD]);
-      const deletedOrders = [...usunieteMapa.values()]
-        .sort((a, b) => String(b.deleted_at || '').localeCompare(String(a.deleted_at || '')))
-        .slice(0, LIMIT_USUNIETYCH_ZAMOWIEN);
-      await zapisz('deleted_orders', { items: deletedOrders, updated_at: new Date().toISOString() });
-
-      const recO = await czytaj('orders', { items: [] });
-      const orders = filtrujNieusunieteZamowienia(recO.items || [], usunieteMapa);
-      const numery = new Set(orders.map((z) => z.nr));
-      for (const raw of przychodzaceZ) {
-        const z = normalizujZamowienie(raw);
-        if (z && !usunieteMapa.has(z.nr) && !numery.has(z.nr)) { orders.unshift(z); numery.add(z.nr); }
-      }
-      orders.sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
-      while (orders.length > LIMIT_ZAMOWIEN) orders.pop();
-      await zapisz('orders', { items: orders, updated_at: new Date().toISOString() });
-
-      const recU = await czytaj('users', { items: [] });
-      const users = Array.isArray(recU.items) ? recU.items : [];
-      const maile = new Set(users.map((u) => (u.email || '').toLowerCase()));
-      for (const raw of przychodzacyU) {
-        const u = normalizujKlienta(raw);
-        if (u && !maile.has(u.email)) { users.push(u); maile.add(u.email); }
-      }
-      while (users.length > LIMIT_KLIENTOW) users.pop();
-      await zapisz('users', { items: users, updated_at: new Date().toISOString() });
-
-      return odpowiedz({ ok: true, orders, users, deleted_orders: deletedOrders, updated_at: new Date().toISOString() });
+      const [recO, recU, deletedOrders] = await Promise.all([
+        czytaj('orders', { items: [], updated_at: null }),
+        czytaj('users', { items: [], updated_at: null }),
+        czytajUsunieteZamowienia(),
+      ]);
+      const orders = filtrujNieusunieteZamowienia(recO.items || [], deletedOrders);
+      return odpowiedz({
+        ok: true, server_authoritative: true, orders,
+        users: Array.isArray(recU.items) ? recU.items : [],
+        deleted_orders: deletedOrders,
+        updated_at: recO.updated_at || recU.updated_at || new Date().toISOString(),
+      });
     }
 
     // ─── ADMIN: zapis / usuwanie zamówienia ───

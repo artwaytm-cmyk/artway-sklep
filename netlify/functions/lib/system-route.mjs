@@ -14,10 +14,11 @@ export function createSystemRoute({
   repository,
   storeName,
   backupKeyPattern,
+  czytajUstawieniaBazowe = (fallback) => czytaj('settings', fallback),
 }) {
   return async function systemRoute(req, url, action) {
     if (action === 'health') {
-      const settings = await czytaj('settings', { updated_at: null });
+      const settings = await czytajUstawieniaBazowe({ updated_at: null });
       const orders = await czytaj('orders', { items: [] });
       const users = await czytaj('users', { items: [] });
       const deletedOrders = await czytaj('deleted_orders', { items: [] });
@@ -31,6 +32,9 @@ export function createSystemRoute({
       const healthFresh = (value) => !!value?.checkedAt && Date.now() - Date.parse(value.checkedAt) < 24 * 60 * 60 * 1000;
       const paynowConfig = paynowKonfiguracja(req);
       const telegramConfig = telegramKonfiguracja();
+      const storage = admin && typeof repository?.storageStatus === 'function'
+        ? await repository.storageStatus().catch(() => ({ engine: 'postgres-normalized-v1', migrated: false, statusUnavailable: true }))
+        : null;
       return odpowiedz({
         ok: true,
         configured: !!process.env.ARTWAY_ADMIN_TOKEN,
@@ -40,6 +44,7 @@ export function createSystemRoute({
           users: (users.items || []).length,
           deleted_orders: (deletedOrders.items || []).length,
           settings_updated_at: settings.updated_at || null,
+          storage,
         } : { available: true, settings_updated_at: settings.updated_at || null },
         paynow: {
           configured: paynowConfig.configured,

@@ -127,6 +127,9 @@ const centralProductCatalog = createCentralProductCatalog({
   namespace: STORE_NAME,
 });
 const czytaj = repository.read;
+const czytajUstawieniaBazowe = typeof repository.readSettingsBase === 'function'
+  ? repository.readSettingsBase
+  : (fallback) => czytaj('settings', fallback);
 const czytajWersjonowane = repository.readVersioned;
 const zapiszJesliWersja = repository.writeIfVersion;
 const zapiszUstawieniaBezpiecznie = createRevisionSafeWriter(repository, 'settings');
@@ -2843,6 +2846,7 @@ const storeDataRoute = createStoreDataRoute({
   verifyPassword,
   bezpiecznePorownanie,
   legacyPasswordHash,
+  czytajUstawieniaBazowe,
 });
 
 const systemRoute = createSystemRoute({
@@ -2861,6 +2865,7 @@ const systemRoute = createSystemRoute({
   repository,
   storeName: STORE_NAME,
   backupKeyPattern: BACKUP_KEY_PATTERN,
+  czytajUstawieniaBazowe,
 });
 
 

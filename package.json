@@ -12,6 +12,7 @@
     "audit:functional": "node scripts/audit-functional-consistency.mjs",
     "server": "node --env-file=.env server.mjs",
     "migrate:netlify": "node scripts/migrate-netlify-to-postgres.mjs",
+    "migrate:domain": "node scripts/migrate-normalized-domain-storage.mjs",
     "verify": "npm run build:check && npm run check:legacy && npm run audit:functional && npm test",
     "check": "npm run verify"
   },

@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { createNormalizedDomainRepository } from './normalized-domain-repository.mjs';
 
 const { Pool } = pg;
 const pools = new Map();
@@ -42,7 +43,7 @@ export function createPostgresStoreRepository({ name, connectionString = process
     return initialization;
   };
 
-  return Object.freeze({
+  const legacy = Object.freeze({
     async read(key, fallback) {
       await ensureSchema();
       const result = await pool.query('SELECT value FROM artway_kv_store WHERE namespace = $1 AND key = $2', [name, key]);
@@ -96,4 +97,5 @@ export function createPostgresStoreRepository({ name, connectionString = process
       return result.rows.map((row) => ({ key: row.key, etag: `"${row.version}"` }));
     },
   });
+  return name === 'artway-sklep' ? createNormalizedDomainRepository({ pool, namespace: name, legacy }) : legacy;
 }

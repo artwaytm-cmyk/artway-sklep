@@ -16,10 +16,9 @@ async function wywolajBramke(action,{method="GET",body=null,parametry={}}={}){
   return dane;
 }
 function polaczUzytkownikowCentralnych(serwerowi){
-  const lokalni=pobierzUzytkownikow(), mapa=new Map(lokalni.map(u=>[u.email,u]));
-  const wynik=(serwerowi||[]).map(u=>({...mapa.get(u.email),...u}));
-  for(const u of lokalni) if(!wynik.some(x=>x.email===u.email)) wynik.push(u);
-  return wynik;
+  // Serwer jest jedynym źródłem kont. localStorage przechowuje wyłącznie
+  // ostatnią pobraną kopię i nie może przywrócić usuniętego użytkownika.
+  return Array.isArray(serwerowi)?serwerowi:[];
 }
 let zamowieniaAdminOdswiezenieWToku=null,zamowieniaAdminOstatnieOdswiezenie=0,zamowieniaAdminWersja="",zamowieniaAdminUsunieteWersja="";
 async function synchronizujBazeCentralna(cicho=false){
@@ -28,12 +27,11 @@ async function synchronizujBazeCentralna(cicho=false){
   chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=false;
   stanBazyCentralnej={...stanBazyCentralnej,synchronizacja:true};
   try{
-    const d=await chmura("store-sync",{method:"POST",body:{orders:pobierzZamowienia(),users:pobierzUzytkownikow(),deleted_orders:zamowieniaUsuniete}});
-    if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
-    chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=zapiszLS("artway_zamowienia",Array.isArray(d.orders)?filtrujAktywneZamowienia(d.orders):[])||chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
-    chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=zapiszLS("artway_uzytkownicy",polaczUzytkownikowCentralnych(d.users))||chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
-    stanBazyCentralnej={sprawdzono:true,online:true,synchronizacja:false,orders:d.orders?.length||0,users:d.users?.length||0,updatedAt:d.updated_at||null,error:""};
-    chmuraStan={...chmuraStan,dostepna:true,admin:true,updated_at:d.updated_at||chmuraStan.updated_at};
+    const ok=await chmuraWczytajStan();
+    if(!ok)throw new Error(chmuraStan.error||"Nie udało się pobrać wspólnej bazy");
+    chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=chmuraOstatniPullZmienilDane;
+    stanBazyCentralnej={sprawdzono:true,online:true,synchronizacja:false,orders:pobierzZamowienia().length,users:pobierzUzytkownikow().length,updatedAt:chmuraStan.updated_at||null,error:""};
+    chmuraStan={...chmuraStan,dostepna:true,admin:true};
     if(!cicho) toast(`Wspólna baza zsynchronizowana ✅ (${stanBazyCentralnej.orders} zamówień)`);
     if(!cicho) renderuj();
     return true;
@@ -138,10 +136,8 @@ async function automatycznaSynchronizacjaChmury(powod="timer"){
   try{
     let ok=false,daneZmienione=false;
     if(maUprawnieniaZapisuChmury()){
-      ok = await synchronizujBazeCentralna(true);
-      daneZmienione=chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
-      ok = (await chmuraWczytajStan()) || ok;
-      daneZmienione=chmuraOstatniPullZmienilDane||daneZmienione;
+      ok = await chmuraWczytajStan();
+      daneZmienione=chmuraOstatniPullZmienilDane;
     }else{
       ok = await chmuraWczytajStan();
       daneZmienione=chmuraOstatniPullZmienilDane;

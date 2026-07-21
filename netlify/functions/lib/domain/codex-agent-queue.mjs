@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-
 const KEY = 'codex_agent_jobs';
 const MAX_JOBS = 250;
 const MAX_ACTIVE_JOBS = 200;
@@ -18,18 +17,15 @@ const MAX_REPLY_MARKUP_BUTTONS = 24;
 const MAX_REPLY_MARKUP_TEXT = 64;
 const MAX_REPLY_MARKUP_CALLBACK_BYTES = 64;
 const TELEGRAM_INBOUND_KINDS = new Set(['text', 'command', 'callback', 'voice', 'audio']);
-
 function clean(value = '', limit = 500) {
   return String(value ?? '').trim().slice(0, limit);
 }
-
 function cleanContext(value = '') {
   return String(value ?? '')
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .trim()
     .slice(0, 1600);
 }
-
 function cleanMedia(value = null) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const kind = value.kind === 'voice' || value.kind === 'audio' ? value.kind : '';
@@ -42,7 +38,6 @@ function cleanMedia(value = null) {
     fileName: clean(value.fileName, 240),
   };
 }
-
 export function sanitizeCodexBroadcastChatIds(value = [], primaryChatId = '') {
   const primary = clean(primaryChatId, 100);
   return [...new Set((Array.isArray(value) ? value : [])
