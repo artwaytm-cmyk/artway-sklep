@@ -35,7 +35,7 @@ test('każda widoczna podstrona Allegro ma jawny odbiornik routera', async () =>
 
 test('trasy panelu ładują jawnie moduły wymagane przez swoje widoki', async () => {
   const router = await read('src/frontend/06-router-and-storefront.js');
-  assert.match(router, /t==="\/admin"\|\|t\.startsWith\("\/admin\/pulpit"\)\)add\("commerce","communications","inventory","system"\)/);
+  assert.match(router, /t==="\/admin"\|\|t\.startsWith\("\/admin\/pulpit"\)\)add\("shipping","commerce","communications","inventory","system"\)/);
   assert.match(router, /t\.startsWith\("\/admin\/agent-ai"\)\)add\("agent","warehouse","commerce","communications","inventory"\)/);
   assert.match(router, /t\.startsWith\("\/admin\/allegro"\)[^\n]+add\("agent","warehouse","commerce","communications","inventory"\)/);
   assert.match(router, /\["\/admin\/magazyn\/lokalizacje","\/admin\/magazyn\/etykiety-qr"\][^\n]+add\("warehouse"\)/);

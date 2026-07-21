@@ -22,7 +22,7 @@ function adminModulyDlaTrasy(route=""){
   add("shell");
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
   if(t==="/diagnostyka")add("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system");
-  else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("commerce","communications","inventory","system");
+  else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("shipping","commerce","communications","inventory","system");
   else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","communications","inventory");
   else if(["/admin/magazyn/lokalizacje","/admin/magazyn/etykiety-qr"].includes(t))add("warehouse");
   else if(t==="/admin/magazyn/ruchy")add("warehouse","inventory");
