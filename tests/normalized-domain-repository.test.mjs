@@ -4,6 +4,7 @@ import {
   DIRECT_DOMAIN_CONFIGS,
   SETTINGS_DOMAIN_CONFIGS,
   hydrateNormalizedValue,
+  normalizedRevisionToken,
   splitNormalizedValue,
 } from '../netlify/functions/lib/core/normalized-domain-repository.mjs';
 
@@ -54,4 +55,12 @@ test('aktywny stan Agenta, Telegrama i inFaktu jest dzielony na rekordy', () => 
   const split = splitNormalizedValue(value, config);
   assert.equal(split.records.length, 3);
   assert.deepEqual(hydrateNormalizedValue(split.metadata, split.records, config), value);
+});
+
+test('lekki znacznik rewizji domen jest stabilny, posortowany i uwzględnia brakującą domenę', () => {
+  const token = normalizedRevisionToken(
+    ['settings:artway_stany', 'kv:allegro_offers', 'settings:artway_stany', 'kv:brak'],
+    [{ domain: 'settings:artway_stany', version: 17 }, { domain: 'kv:allegro_offers', version: 8 }],
+  );
+  assert.equal(token, 'ndv1|kv:allegro_offers=8|kv:brak=0|settings:artway_stany=17');
 });

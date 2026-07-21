@@ -70,6 +70,9 @@ test('backend udostępnia stronicowaną kartotekę, pojedynczy produkt, synchron
   assert.match(source, /createCentralProductCatalog/);
   assert.match(source, /createCentralProductCatalogRoute/);
   assert.match(source, /synchronizeCentralProductCatalog/);
+  assert.match(source, /centralProductCatalogRevisionState/);
+  assert.match(source, /repository\.revisionToken/);
+  assert.match(route, /Promise\.all\(\[catalog\.metadata\(\), revisionState\(\)\]\)/);
 });
 
 test('Asortyment korzysta z paginacji serwerowej i zachowuje tryb awaryjny', async () => {

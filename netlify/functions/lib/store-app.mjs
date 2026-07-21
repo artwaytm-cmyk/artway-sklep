@@ -293,28 +293,43 @@ function centralProductSettingsFingerprint(data = {}) {
   const source = Object.fromEntries(CENTRAL_PRODUCT_SOURCE_KEYS.map((key) => [key, data?.[key] ?? null]));
   return crypto.createHash('sha256').update(JSON.stringify(source)).digest('hex').slice(0, 24);
 }
-async function centralProductCatalogRevisionSnapshot() {
-  const [settings, imported, offers, mappings] = await Promise.all([
-    czytaj('settings', { data: {}, rev: 0, updated_at: null }), productLinkImport.catalog.metadata(),
+async function centralProductCatalogRevisionState() {
+  const imported = await productLinkImport.catalog.metadata();
+  if (typeof repository.revisionToken === 'function') {
+    const token = await repository.revisionToken({ settingsKeys: CENTRAL_PRODUCT_SOURCE_KEYS, keys: ['allegro_offers', 'allegro_mappings'] });
+    const sourceRevision = crypto.createHash('sha256').update(`${token}|import=${imported.revision || ''}`).digest('hex').slice(0, 32);
+    return { imported, sourceRevision };
+  }
+  const [settings, offers, mappings] = await Promise.all([
+    czytaj('settings', { data: {}, rev: 0, updated_at: null }),
+    czytaj('allegro_offers', { items: [], updated_at: null }), czytaj('allegro_mappings', { items: {}, updated_at: null }),
+  ]);
+  const sourceRevision = [centralProductSettingsFingerprint(settings.data || {}), imported.revision || '', offers.updated_at || '', mappings.updated_at || ''].join(':');
+  return { imported, sourceRevision };
+}
+async function centralProductCatalogRevisionSnapshot(revision = null) {
+  const state = revision || await centralProductCatalogRevisionState();
+  const [settings, offers, mappings] = await Promise.all([
+    czytaj('settings', { data: {}, rev: 0, updated_at: null }),
     czytaj('allegro_offers', { items: [], updated_at: null }), czytaj('allegro_mappings', { items: {}, updated_at: null }),
   ]);
   // Rewizja kartoteki zależy wyłącznie od danych produktowych. Zmiana bannera,
   // regulaminu lub innego ustawienia nie może przebudowywać dziesiątek tysięcy produktów.
-  const sourceRevision = [centralProductSettingsFingerprint(settings.data || {}), imported.revision || '', offers.updated_at || '', mappings.updated_at || ''].join(':');
-  return { settings, imported, offers, mappings, sourceRevision };
+  return { settings, imported: state.imported, offers, mappings, sourceRevision: state.sourceRevision };
 }
-async function synchronizeCentralProductCatalog({ force = false } = {}) {
+async function synchronizeCentralProductCatalog({ force = false, revision = null } = {}) {
   if (!centralProductCatalog.available) return { available: false, synchronized: false, count: 0 };
   if (centralProductCatalogSyncPromise) return centralProductCatalogSyncPromise;
   centralProductCatalogSyncPromise = (async () => {
-    const snapshot = await centralProductCatalogRevisionSnapshot(), meta = await centralProductCatalog.metadata();
-    if (!force && meta.count > 0 && !meta.outdated && meta.sourceRevision === snapshot.sourceRevision) return { ...meta, synchronized: false, current: true };
+    const state = revision || await centralProductCatalogRevisionState(), meta = await centralProductCatalog.metadata();
+    if (!force && meta.count > 0 && !meta.outdated && meta.sourceRevision === state.sourceRevision) return { ...meta, synchronized: false, current: true };
+    const snapshot = await centralProductCatalogRevisionSnapshot(state);
     const importedProducts = await productLinkImport.catalog.list();
     return centralProductCatalog.synchronize(snapshot.settings.data || {}, { importedProducts, offers: allegroOfertyItems(snapshot.offers), mappings: allegroMapowaniaItems(snapshot.mappings), sourceRevision: snapshot.sourceRevision });
   })();
   try { return await centralProductCatalogSyncPromise; } finally { centralProductCatalogSyncPromise = null; }
 }
-const centralProductCatalogRoute = createCentralProductCatalogRoute({ catalog: centralProductCatalog, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, revisionSnapshot: centralProductCatalogRevisionSnapshot, synchronize: synchronizeCentralProductCatalog });
+const centralProductCatalogRoute = createCentralProductCatalogRoute({ catalog: centralProductCatalog, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, revisionState: centralProductCatalogRevisionState, synchronize: synchronizeCentralProductCatalog });
 const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ autoMapOffers: allegroAutoMapujOfertyZKartoteka, callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
 const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, agentRuntime, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierPreviews: telegramCanonicalSupplierPreviews, text: tekst });
 

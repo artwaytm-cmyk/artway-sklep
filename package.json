@@ -10,6 +10,7 @@
     "check:legacy": "node scripts/check-artway.mjs",
     "audit:architecture": "node scripts/report-architecture-budgets.mjs",
     "audit:functional": "node scripts/audit-functional-consistency.mjs",
+    "benchmark:catalog": "node scripts/benchmark-large-catalog.mjs --rows=100000",
     "server": "node --env-file=.env server.mjs",
     "migrate:netlify": "node scripts/migrate-netlify-to-postgres.mjs",
     "migrate:domain": "node scripts/migrate-normalized-domain-storage.mjs",

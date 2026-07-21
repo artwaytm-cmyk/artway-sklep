@@ -161,6 +161,10 @@ export function hydrateNormalizedValue(metadata, records, config) {
 
 function domainForDirectKey(key) { return `kv:${key}`; }
 function domainForSetting(key) { return `settings:${key}`; }
+export function normalizedRevisionToken(domains = [], rows = []) {
+  const versions = new Map((rows || []).map((row) => [String(row.domain || ''), Math.max(0, Number(row.version) || 0)]));
+  return ['ndv1', ...[...new Set((domains || []).map(String).filter(Boolean))].sort().map((domain) => `${domain}=${versions.get(domain) || 0}`)].join('|');
+}
 function numericVersion(etag) {
   const value = String(etag || '').replace(/^W\//, '').replace(/^"|"$/g, '').trim();
   return /^\d+$/.test(value) ? Number(value) : null;
@@ -352,6 +356,17 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
     async writeIfVersion(key, value, version) { await ensure(); if (key === 'settings') return writeSettingsIfVersion(value, version); const config = directConfig(key); return config ? writeDirect(key, value, config, version) : legacy.writeIfVersion(key, value, version); },
     async delete(key) { await ensure(); const config = directConfig(key); if (!config) return legacy.delete(key); const client = await pool.connect(); try { await client.query('BEGIN'); const result = await client.query('DELETE FROM artway_domain_snapshots WHERE namespace=$1 AND domain=$2', [namespace, domainForDirectKey(key)]); await client.query('DELETE FROM artway_domain_records WHERE namespace=$1 AND domain=$2', [namespace, domainForDirectKey(key)]); await client.query('COMMIT'); return { deleted: result.rowCount === 1 }; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); } },
     async listKeys() { await ensure(); const [legacyKeys, domains] = await Promise.all([legacy.listKeys(), pool.query("SELECT domain,version FROM artway_domain_snapshots WHERE namespace=$1 AND domain LIKE 'kv:%'", [namespace])]); const mapped = domains.rows.map((row) => ({ key: row.domain.slice(3), etag: `"${row.version}"` })); return [...legacyKeys.filter((entry) => !directConfig(entry.key)), ...mapped].sort((a, b) => a.key.localeCompare(b.key)); },
+    async revisionToken({ settingsKeys = [], keys = [] } = {}) {
+      await ensure();
+      const domains = [
+        ...settingsKeys.filter((key) => SETTINGS_DOMAIN_CONFIGS[key]).map(domainForSetting),
+        ...keys.filter((key) => DIRECT_DOMAIN_CONFIGS[key]).map(domainForDirectKey),
+      ];
+      const unique = [...new Set(domains)];
+      if (!unique.length) return normalizedRevisionToken([]);
+      const result = await pool.query('SELECT domain,version FROM artway_domain_snapshots WHERE namespace=$1 AND domain=ANY($2::text[])', [namespace, unique]);
+      return normalizedRevisionToken(unique, result.rows);
+    },
     async storageStatus() {
       await ensure();
       const result = await pool.query(`SELECT
