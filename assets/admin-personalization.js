@@ -6,7 +6,7 @@ function domyslneUrlePaynow(){
 }
 function paynowStatusAdminHTML(){
   const s=stanPaynowAdmin;
-  if(!s.sprawdzono) return `<div class="pay-note" style="text-align:left">Kliknij „Sprawdź konfigurację Paynow”, aby zobaczyć czy Netlify ma ustawione klucze API.</div>`;
+  if(!s.sprawdzono) return `<div class="pay-note" style="text-align:left">Kliknij „Sprawdź konfigurację Paynow”, aby potwierdzić, czy chronione środowisko backendu VPS ma ustawione klucze API.</div>`;
   if(s.error) return `<div class="pay-note" style="text-align:left;color:var(--danger)">Błąd sprawdzania Paynow: ${esc(s.error)}</div>`;
   return `<div class="backend-note" style="${s.configured?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
     <b>${s.configured?"Paynow API skonfigurowane ✅":"Paynow API nie ma jeszcze kluczy na serwerze"}</b><br>
@@ -64,7 +64,7 @@ async function sprawdzPaynowKonfiguracje(){
     stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:""};
     const d=await chmura("paynow-config",{timeout:10000});
     stanPaynowAdmin={sprawdzono:true,configured:!!d.configured,env:d.env||"",continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:d.apiBaseUrl||"",error:""};
-    toast(d.configured?"Paynow API skonfigurowane ✅":"Brak kluczy Paynow w Netlify");
+    toast(d.configured?"Paynow API skonfigurowane ✅":"Brak kluczy Paynow w chronionym środowisku backendu VPS");
   }catch(e){
     stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:e.message};
     toast("Paynow: "+e.message);

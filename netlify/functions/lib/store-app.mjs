@@ -3147,7 +3147,7 @@ export default async (req) => {
     if (action === 'paynow-create') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w Netlify.', code: 'paynow_not_configured' }, 503);
+      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w chronionym środowisku backendu VPS.', code: 'paynow_not_configured' }, 503);
       const body = await req.json().catch(() => ({}));
       const zam = normalizujZamowienie(body.order);
       if (!zam) return odpowiedz({ ok: false, error: 'Brak danych zamówienia' }, 422);
@@ -3268,7 +3268,7 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Najpierw ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w Netlify.', code: 'paynow_not_configured' }, 503);
+      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Najpierw ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w chronionym środowisku backendu VPS.', code: 'paynow_not_configured' }, 503);
       const body = await req.json().catch(() => ({}));
       const payload = {
         notificationUrl: tekst(body.notificationUrl || cfg.notificationUrl, 1000),
@@ -3287,7 +3287,7 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w Netlify.', code: 'paynow_not_configured' }, 503);
+      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w chronionym środowisku backendu VPS.', code: 'paynow_not_configured' }, 503);
       const body = await req.json().catch(() => ({}));
       const nr = numerZamowienia(body.nr || body.number);
       if (!nr) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia' }, 422);

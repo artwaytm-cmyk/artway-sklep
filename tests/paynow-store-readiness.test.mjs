@@ -41,4 +41,6 @@ test('panel pokazuje formalną checklistę i oddziela sandbox od produkcji', asy
   assert.match(admin, /Gotowość Paynow/);
   assert.match(admin, /PAYNOW_ENV=sandbox/);
   assert.match(admin, /Płatność jest bezpiecznie ukryta przed klientem/);
+  assert.match(admin, /chronione środowisko backendu VPS/);
+  assert.doesNotMatch(admin, /Paynow[^\n]*Netlify|Netlify[^\n]*Paynow/i);
 });

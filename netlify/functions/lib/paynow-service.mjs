@@ -98,7 +98,7 @@ export function createPaynowService({ read, write }) {
   async function paynowWywolaj(req, path, { method = 'GET', bodyObj = null, parameters = {}, idempotencyKey = '' } = {}) {
     const cfg = paynowKonfiguracja(req);
     if (!cfg.configured) {
-      const blad = new Error('Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w Netlify.');
+      const blad = new Error('Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w chronionym środowisku backendu VPS.');
       blad.code = 'paynow_not_configured';
       throw blad;
     }
