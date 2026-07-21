@@ -308,7 +308,8 @@ test('nowa wiadomość tworzy szkic i decyzję, lecz nie jest wysyłana automaty
     allegro_communications: { threads: [{ id: 't-1', subject: 'Paczka', needsReply: true, humanReplyNeeded: true, newIncomingCount: 1, latestNewIncomingKey: 'm-1', messages: [{ id: 'm-1', authorRole: 'BUYER', text: 'Gdzie jest paczka?', createdAt: '2026-07-17T11:50:00.000Z' }] }], issues: [], updated_at: '2026-07-17T11:55:00.000Z' },
   });
   const replyPayload = openAiPayload([{ key: 'reply', label: 'Odpowiedź', value: 'Dziękujemy za wiadomość. Sprawdzamy potwierdzony status przesyłki.' }]);
-  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(replyPayload), { status: 200, headers: { 'content-type': 'application/json' } }) });
+  let calls = 0;
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => { calls += 1; return new Response(JSON.stringify(replyPayload), { status: 200, headers: { 'content-type': 'application/json' } }); } });
   const cycle = await service.automaticCycle();
   assert.equal(cycle.prepared[0].type, 'communication');
   const status = await service.status();
@@ -317,6 +318,10 @@ test('nowa wiadomość tworzy szkic i decyzję, lecz nie jest wysyłana automaty
   assert.equal(status.decisions[0].risk, 'high');
   assert.equal(status.history[0].approvalStatus, 'draft');
   assert.equal(repo.values.has('allegro_communications'), true);
+  const unchanged = await service.automaticCycle();
+  assert.equal(unchanged.lastCycle.communicationMode, 'unchanged_skipped');
+  assert.equal(unchanged.lastCycle.communicationChecked, 0);
+  assert.equal(calls, 1, 'niezmieniona rozmowa nie może ponownie zużywać modelu przed kontrolą 12-godzinną');
 });
 
 test('decyzję można odłożyć i nie wraca ona do otwartych przed terminem', async () => {
@@ -327,6 +332,37 @@ test('decyzję można odłożyć i nie wraca ona do otwartych przed terminem', a
   const decision = await service.updateDecision('d-1', 'snooze', { days: 2 }, { email: 'admin@example.com' });
   assert.equal(decision.status, 'snoozed');
   assert.equal((await service.status()).decisions.length, 0);
+});
+
+test('rozstrzygnięta sprawa nie wraca po zmianie danych technicznych ani po usunięciu jej z krótkiej historii', async () => {
+  const resolvedAt = '2026-07-17T11:00:00.000Z';
+  const repo = memoryRepository({
+    agent_specialists_state: { config: { decisionRetentionDays: 30 }, history: [], decisions: [{
+      id: 'd-resolved', kind: 'customer_reply', status: 'resolved', risk: 'high', title: 'Wiadomość obsłużona',
+      target: { type: 'communication', communicationType: 'thread', communicationId: 't-1', sourceMessageId: 'm-1' },
+      createdAt: resolvedAt, updatedAt: resolvedAt, resolvedAt,
+    }] },
+    settings: { data: {}, rev: 1 },
+    allegro_communications: { threads: [{ id: 't-1', subject: 'Zmieniony temat', needsReply: true, humanReplyNeeded: true, latestNewIncomingKey: 'm-1', messages: [{ id: 'm-1', authorRole: 'BUYER', text: 'Ta sama wiadomość po synchronizacji.' }] }], issues: [] },
+  });
+  let calls = 0;
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => { calls += 1; return new Response(JSON.stringify(openAiPayload([{ key: 'reply', label: 'Odpowiedź', value: 'Szkic.' }])), { status: 200, headers: { 'content-type': 'application/json' } }); } });
+  await service.automaticCycle();
+  assert.equal(calls, 0, 'ta sama rozstrzygnięta wiadomość nie może ponownie uruchomić modelu');
+  assert.equal((await service.status()).decisions.length, 0);
+  const stored = repo.values.get('agent_specialists_state');
+  assert.equal(stored.decisionReceipts.length, 1, 'trwały rejestr rozstrzygnięć musi zostać zachowany niezależnie od krótkiej listy decyzji');
+  stored.decisions = [];
+  repo.values.set('agent_specialists_state', stored);
+  await service.automaticCycle();
+  assert.equal(calls, 0);
+  const communication = repo.values.get('allegro_communications');
+  communication.threads[0].latestNewIncomingKey = 'm-2';
+  communication.threads[0].messages.push({ id: 'm-2', authorRole: 'BUYER', text: 'To jest nowa wiadomość.' });
+  repo.values.set('allegro_communications', communication);
+  await service.automaticCycle();
+  assert.equal(calls, 1, 'rzeczywiście nowa wiadomość ma utworzyć nową decyzję');
+  assert.equal((await service.status()).decisions.length, 1);
 });
 
 test('niekompletny wynik redakcji nie tworzy decyzji i wraca do automatycznej kolejki', async () => {

@@ -1,9 +1,11 @@
 import crypto from 'node:crypto';
 import { allegroCheckText } from '../allegro-compliance.mjs';
+import { decisionFingerprint, decisionSubjectKey, normalizeDecisionReceipt } from './agent-decision-state.mjs';
 
 const STATE_KEY = 'agent_specialists_state';
 const MAX_HISTORY = 240;
 const MAX_DECISIONS = 240;
+const MAX_DECISION_RECEIPTS = 2000;
 const MAX_WRITE_ATTEMPTS = 8;
 const DEFAULT_CONFIG = Object.freeze({
   enabled: true,
@@ -254,18 +256,21 @@ function learningPrompt(learning = {}, specialist = '') {
 
 function state(value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const receiptRows = [
+    ...(Array.isArray(source.decisionReceipts) ? source.decisionReceipts : []),
+    ...(Array.isArray(source.decisions) ? source.decisions : []).filter((item) => ['approved', 'dismissed', 'resolved'].includes(item?.status)),
+  ].map((item) => normalizeDecisionReceipt(item)).filter((item) => item.subjectKey);
+  const receiptKeys = new Set();
   return {
     config: config(source.config),
     history: (Array.isArray(source.history) ? source.history : []).slice(0, MAX_HISTORY),
     decisions: (Array.isArray(source.decisions) ? source.decisions : []).slice(0, MAX_DECISIONS),
+    decisionReceipts: receiptRows.sort((a, b) => String(b.resolvedAt || b.updatedAt).localeCompare(String(a.resolvedAt || a.updatedAt))).filter((item) => !receiptKeys.has(item.subjectKey) && receiptKeys.add(item.subjectKey)).slice(0, MAX_DECISION_RECEIPTS),
+    communicationScan: source.communicationScan && typeof source.communicationScan === 'object' ? { signal: clean(source.communicationScan.signal, 100), lastAt: clean(source.communicationScan.lastAt, 40) } : { signal: '', lastAt: '' },
     learning: normalizeLearning(source.learning),
     lastCycle: source.lastCycle && typeof source.lastCycle === 'object' ? source.lastCycle : null,
     updatedAt: clean(source.updatedAt, 40),
   };
-}
-
-function decisionFingerprint(kind = '', target = {}) {
-  return crypto.createHash('sha256').update(JSON.stringify({ kind, target })).digest('hex');
 }
 
 function normalizeDecision(raw = {}, timestamp = new Date().toISOString()) {
@@ -274,6 +279,7 @@ function normalizeDecision(raw = {}, timestamp = new Date().toISOString()) {
   const alternatives = (Array.isArray(raw.alternatives) ? raw.alternatives : []).map((item) => clean(item, 240)).filter(Boolean).slice(0, 5);
   return {
     id: clean(raw.id, 120) || `decision_${crypto.randomUUID()}`,
+    subjectKey: decisionSubjectKey(raw.kind, raw.target, raw.subjectKey),
     fingerprint: clean(raw.fingerprint, 100) || decisionFingerprint(raw.kind, raw.target),
     kind: clean(raw.kind, 80), specialist: clean(raw.specialist, 80), icon: clean(raw.icon, 12) || '🧭',
     title: clean(raw.title, 180), summary: clean(raw.summary, 700), recommendation: clean(raw.recommendation, 700), alternatives,
@@ -590,4 +596,4 @@ function communicationFacts(item = {}, type = 'thread') {
   return sanitizeContext({ type, subject: item.subject || item.topic, orderId: item.orderId || item.checkoutFormId, status: item.status, chatActive: item.chatActive, messages });
 }
 
-export { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionFingerprint, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts };
+export { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts };

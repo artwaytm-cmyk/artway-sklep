@@ -61,6 +61,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/10-agent-ai-admin-workspace.js',
       'src/frontend/10-agent-ai-communications-workspace.js',
       'src/frontend/10a-telegram-communications.js',
+      'src/frontend/11a-agent-observability-workspace.js',
       'src/frontend/10-warehouse-locations.js',
       'src/frontend/10-warehouse-qr.js',
       'src/frontend/10-warehouse-documents.js',
@@ -169,7 +170,7 @@ export const ASSET_BUNDLES = Object.freeze([
   {
     output: 'assets/admin-agent.css',
     banner: '/* GENERATED ADMIN AGENT STYLES — loaded on demand */',
-    sources: ['src/styles/28-agent-ai-workspace.css'],
+    sources: ['src/styles/28-agent-ai-workspace.css', 'src/styles/33-agent-observability.css'],
   },
 ]);
 
@@ -209,6 +210,7 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/10-agent-ai-admin-workspace.js',
       'src/frontend/10-agent-ai-communications-workspace.js',
       'src/frontend/10a-telegram-communications.js',
+      'src/frontend/11a-agent-observability-workspace.js',
     ],
   },
   {

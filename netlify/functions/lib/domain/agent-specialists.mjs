@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
 import { validManufacturerName } from './product-field-validation.mjs';
 import { createPlatformPromptProfile, requestSpecialistResponse } from './agent-specialist-openai.mjs';
-import { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionFingerprint, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts } from './agent-specialists-support.mjs';
+import { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts } from './agent-specialists-support.mjs';
 
 export function createAgentSpecialists({
   readVersioned, writeIfVersion, fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY,
@@ -73,12 +73,18 @@ export function createAgentSpecialists({
   async function upsertDecision(raw = {}) {
     const timestamp = now().toISOString(), proposed = normalizeDecision(raw, timestamp);
     const next = await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
-      const previous = state(value), existing = previous.decisions.find((item) => item?.fingerprint === proposed.fingerprint);
+      const previous = state(value), existing = previous.decisions.find((item) => item?.subjectKey === proposed.subjectKey || item?.fingerprint === proposed.fingerprint);
+      const receipt = previous.decisionReceipts.find((item) => item?.subjectKey === proposed.subjectKey && now().getTime() - Date.parse(item.resolvedAt || '') <= previous.config.decisionRetentionDays * 24 * 60 * 60_000);
+      if (!existing && receipt && raw.forceReopen !== true) return previous;
       const keepClosed = existing && ['approved', 'dismissed', 'resolved'].includes(existing.status);
-      const decision = keepClosed ? existing : normalizeDecision({ ...existing, ...proposed, id: existing?.id || proposed.id, createdAt: existing?.createdAt || proposed.createdAt, status: existing?.status === 'snoozed' ? 'snoozed' : proposed.status }, timestamp);
+      if (keepClosed && raw.forceReopen !== true) return previous;
+      const decision = normalizeDecision({ ...existing, ...proposed, id: existing?.id || proposed.id, createdAt: existing?.createdAt || proposed.createdAt, status: raw.forceReopen === true ? 'open' : existing?.status === 'snoozed' ? 'snoozed' : proposed.status }, timestamp);
       return { ...previous, decisions: [decision, ...previous.decisions.filter((item) => item?.id !== decision.id)].slice(0, MAX_DECISIONS), updatedAt: timestamp };
     });
-    return next.decisions.find((item) => item.fingerprint === proposed.fingerprint) || proposed;
+    const saved = next.decisions.find((item) => item.subjectKey === proposed.subjectKey || item.fingerprint === proposed.fingerprint);
+    if (saved) return saved;
+    const receipt = next.decisionReceipts.find((item) => item.subjectKey === proposed.subjectKey);
+    return receipt ? { ...proposed, status: receipt.status, resolvedAt: receipt.resolvedAt, resolvedBy: receipt.resolvedBy, suppressed: true } : proposed;
   }
 
   async function updateDecision(id = '', action = '', raw = {}, actor = {}) {
@@ -161,7 +167,9 @@ export function createAgentSpecialists({
     };
     const next = await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
       const current = state(value);
-      return { ...current, decisions: current.decisions.map((item) => item?.id === safeId ? normalizeDecision({ ...item, ...patch }, timestamp) : item), updatedAt: timestamp };
+      const decisionAfter = normalizeDecision({ ...decision, ...patch }, timestamp), reopening = safeAction === 'reopen';
+      const receipts = reopening ? current.decisionReceipts.filter((item) => item.subjectKey !== decisionAfter.subjectKey) : ['approved', 'dismissed', 'resolved'].includes(decisionAfter.status) ? [normalizeDecisionReceipt(decisionAfter, timestamp), ...current.decisionReceipts.filter((item) => item.subjectKey !== decisionAfter.subjectKey)].slice(0, MAX_DECISION_RECEIPTS) : current.decisionReceipts;
+      return { ...current, decisions: current.decisions.map((item) => item?.id === safeId ? decisionAfter : item), decisionReceipts: receipts, updatedAt: timestamp };
     });
     const feedbackRun = previous.history.find((item) => item?.id === decision.runId);
     if (feedbackRun && safeAction === 'dismiss') await recordProductFeedback(feedbackRun, 'dismissed', raw, actor);
@@ -219,6 +227,7 @@ export function createAgentSpecialists({
         high: decisions.filter((item) => activeDecision(item, now()) && item.risk === 'high').length,
         completed: decisions.filter((item) => ['approved', 'resolved'].includes(item.status)).length,
       },
+      recentDecisions: decisions.filter((item) => ['approved', 'dismissed', 'resolved'].includes(item.status)).sort((a, b) => String(b.resolvedAt || b.updatedAt).localeCompare(String(a.resolvedAt || a.updatedAt))).slice(0, 20),
       history: current.history.slice(0, historyLimit), lastCycle: current.lastCycle, updatedAt: current.updatedAt,
     };
   }
@@ -450,6 +459,13 @@ export function createAgentSpecialists({
       readVersioned('allegro_communications', { threads: [], issues: [], updated_at: null }),
     ]);
     const data = settingsVersion.value?.data || {}, products = catalogProducts(data), communications = communicationsVersion.value || {};
+    const communicationRows = [
+      ...(Array.isArray(communications.threads) ? communications.threads.map((item) => ({ type: 'thread', item })) : []),
+      ...(Array.isArray(communications.issues) ? communications.issues.map((item) => ({ type: 'issue', item })) : []),
+    ].filter(({ item }) => communicationNeedsReply(item));
+    const communicationSignal = crypto.createHash('sha256').update(JSON.stringify(communicationRows.map(({ type, item }) => [type, String(item?.id || ''), String(item?.latestNewIncomingKey || item?.latestNewIncoming?.id || item?.lastMessage?.id || '')]).sort())).digest('hex');
+    const lastCommunicationScan = Date.parse(current.communicationScan?.lastAt || ''), communicationSafetyDue = !Number.isFinite(lastCommunicationScan) || now().getTime() - lastCommunicationScan >= 12 * 60 * 60_000;
+    const communicationScanDue = scenarioEnabled('customer-reply-draft') && (options.forceCommunicationScan === true || communicationSignal !== current.communicationScan?.signal || communicationSafetyDue);
     const editorialRows = products.map((product) => ({ product, ...productEditorialState(product) }));
     const candidates = scenarioEnabled('catalog-editorial') ? products.map((product) => {
       const editorial = productEditorialState(product), short = clean(product.opisKrotki || product.krotkiOpis, 5000), full = clean(product.opis, 30000);
@@ -485,10 +501,7 @@ export function createAgentSpecialists({
       }
     }
 
-    const unresolvedCommunication = scenarioEnabled('customer-reply-draft') ? [
-      ...(Array.isArray(communications.threads) ? communications.threads.map((item) => ({ type: 'thread', item })) : []),
-      ...(Array.isArray(communications.issues) ? communications.issues.map((item) => ({ type: 'issue', item })) : []),
-    ].filter(({ item }) => communicationNeedsReply(item)).sort((a, b) => String(b.item?.latestNewIncoming?.createdAt || b.item?.lastMessage?.createdAt || '').localeCompare(String(a.item?.latestNewIncoming?.createdAt || a.item?.lastMessage?.createdAt || ''))) : [];
+    const unresolvedCommunication = communicationScanDue ? communicationRows.sort((a, b) => String(b.item?.latestNewIncoming?.createdAt || b.item?.lastMessage?.createdAt || '').localeCompare(String(a.item?.latestNewIncoming?.createdAt || a.item?.lastMessage?.createdAt || ''))) : [];
 
     let availableRuns = current.config.automaticBatchSize;
     // Komunikacja może zająć najwyżej dwa miejsca. Pozostała przepustowość jest
@@ -496,9 +509,10 @@ export function createAgentSpecialists({
     let communicationRuns = Math.min(2, Math.max(0, availableRuns - Math.min(2, candidates.length)));
     for (const { type, item } of unresolvedCommunication.slice(0, 20)) {
       const target = { type: 'communication', communicationType: type, communicationId: String(item?.id || ''), sourceMessageId: String(item?.latestNewIncomingKey || item?.latestNewIncoming?.id || item?.lastMessage?.id || '') };
-      const fp = decisionFingerprint('customer_reply', target); activeFingerprints.add(fp);
-      const existing = current.decisions.find((entry) => entry.fingerprint === fp && activeDecision(entry, now()));
-      if (existing) continue;
+      const subjectKey = decisionSubjectKey('customer_reply', target), fp = decisionFingerprint('customer_reply', target); activeFingerprints.add(fp);
+      const existing = current.decisions.find((entry) => (entry.subjectKey === subjectKey || entry.fingerprint === fp) && activeDecision(entry, now()));
+      const resolved = current.decisionReceipts.find((entry) => entry.subjectKey === subjectKey && now().getTime() - Date.parse(entry.resolvedAt || '') <= current.config.decisionRetentionDays * 24 * 60 * 60_000);
+      if (existing || resolved) continue;
       let draft = null;
       if (availableRuns > 0 && communicationRuns > 0) {
         try {
@@ -510,7 +524,7 @@ export function createAgentSpecialists({
         }
       }
       const decision = await upsertDecision({ fingerprint: fp, kind: 'customer_reply', specialist: 'customer_reply', icon: type === 'issue' ? '🛟' : '💬', title: type === 'issue' ? 'Nowa dyskusja wymaga decyzji' : 'Nowa wiadomość wymaga odpowiedzi', summary: 'Agent przeanalizował sprawę i przygotował bezpieczny szkic. Żadna wiadomość nie została wysłana automatycznie.', recommendation: 'Sprawdź szkic w odpowiednim module i zatwierdź jego wysłanie dopiero po weryfikacji zamówienia oraz przesyłki.', alternatives: ['Popraw szkic', 'Oznacz jako załatwione wewnętrznie', 'Odłóż decyzję'], risk: 'high', target, href: `#/admin/allegro/${type === 'issue' ? 'dyskusje' : 'wiadomosci'}`, runId: draft?.id || '' });
-      decisionResults.push(decision);
+      if (activeDecision(decision, now())) decisionResults.push(decision);
     }
 
     for (const item of candidates.filter((entry) => !handledProductIds.has(String(entry.product.id))).slice(0, Math.max(0, availableRuns))) {
@@ -536,11 +550,12 @@ export function createAgentSpecialists({
     for (const product of (scenarioEnabled('catalog-identity-control') ? products : []).slice().sort((a, b) => String(b.createdAt || b.dataDodania || '').localeCompare(String(a.createdAt || a.dataDodania || ''))).slice(0, 200)) {
       const missing = [!clean(product.gtin || product.ean, 80) && 'EAN', !validManufacturerName(product.producent || product.marka) && 'producent', !clean(product.kategoria, 160) && 'kategoria'].filter(Boolean);
       if (!missing.length) continue;
-      const target = { type: 'product', productId: String(product.id), name: clean(product.nazwa, 180), missing }, fp = decisionFingerprint('catalog_identity', target); activeFingerprints.add(fp);
-      const existing = current.decisions.find((entry) => entry.fingerprint === fp && ['open', 'snoozed'].includes(entry.status));
-      if (existing || openCatalogDecisionCount >= 12) continue;
+      const target = { type: 'product', productId: String(product.id), name: clean(product.nazwa, 180), missing }, subjectKey = decisionSubjectKey('catalog_identity', target), fp = decisionFingerprint('catalog_identity', target); activeFingerprints.add(fp);
+      const existing = current.decisions.find((entry) => (entry.subjectKey === subjectKey || entry.fingerprint === fp) && ['open', 'snoozed'].includes(entry.status));
+      const resolved = current.decisionReceipts.find((entry) => entry.subjectKey === subjectKey && now().getTime() - Date.parse(entry.resolvedAt || '') <= current.config.decisionRetentionDays * 24 * 60 * 60_000);
+      if (existing || resolved || openCatalogDecisionCount >= 12) continue;
       const decision = await upsertDecision({ fingerprint: fp, kind: 'catalog_identity', specialist: 'catalog_quality', icon: '🛡️', title: `Brak danych identyfikacyjnych: ${clean(product.nazwa, 120) || product.id}`, summary: `Brakuje: ${missing.join(', ')}. Agent nie może bezpiecznie zgadywać tych danych.`, recommendation: 'Uzupełnij brak z linku producenta albo karty produktu przed publikacją na zewnętrznych kanałach.', alternatives: ['Otwórz produkt', 'Odłóż na 1 dzień', 'Odrzuć ostrzeżenie'], risk: 'medium', target, href: '#/admin/asortyment/produkty' });
-      decisionResults.push(decision); openCatalogDecisionCount += 1;
+      if (activeDecision(decision, now())) { decisionResults.push(decision); openCatalogDecisionCount += 1; }
     }
 
     const productById = new Map(products.map((product) => [String(product.id), product]));
@@ -561,16 +576,17 @@ export function createAgentSpecialists({
 
     const completedAt = now().toISOString(), readyBefore = editorialRows.filter((item) => item.current).length;
     const readyAfter = Math.min(products.length, readyBefore + applied.length), reviewAfter = Math.min(products.length - readyAfter, editorialRows.filter((item) => item.reviewedSameInput).length + prepared.filter((item) => item.status === 'needs_decision').length);
-    const lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, productsChecked: products.length, autonomy, limitReached, limitDay: day(now()), coordinatorPlan: coordinatorPlan ? { coordinator: clean(coordinatorPlan.coordinator || 'codex', 60), runId: clean(coordinatorPlan.runId || coordinatorPlan.coordinatorRunId, 120), summary: clean(coordinatorPlan.summary, 240), confidence: number(coordinatorPlan.confidence, 0, 0, 1), assignments: coordinatorAssignments.slice(0, 8).map((item) => ({ scenarioId: clean(item?.scenarioId, 100), scenarioVersion: clean(item?.scenarioVersion, 80), specialist: clean(item?.specialist, 80), priority: number(item?.priority, 5, 1, 5), reason: clean(item?.reason, 180) })) } : null, editorialProgress: { total: products.length, ready: readyAfter, pending: Math.max(0, products.length - readyAfter - reviewAfter), review: reviewAfter, selectedThisCycle: candidates.length, processedThisCycle: prepared.filter((item) => item.productId).length }, status: limitReached ? 'limit_reached' : prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
+    const lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, communicationMode: communicationScanDue ? (communicationSafetyDue ? 'safety_12h' : 'new_event') : 'unchanged_skipped', productsChecked: products.length, autonomy, limitReached, limitDay: day(now()), coordinatorPlan: coordinatorPlan ? { coordinator: clean(coordinatorPlan.coordinator || 'codex', 60), runId: clean(coordinatorPlan.runId || coordinatorPlan.coordinatorRunId, 120), summary: clean(coordinatorPlan.summary, 240), confidence: number(coordinatorPlan.confidence, 0, 0, 1), assignments: coordinatorAssignments.slice(0, 8).map((item) => ({ scenarioId: clean(item?.scenarioId, 100), scenarioVersion: clean(item?.scenarioVersion, 80), specialist: clean(item?.specialist, 80), priority: number(item?.priority, 5, 1, 5), reason: clean(item?.reason, 180) })) } : null, editorialProgress: { total: products.length, ready: readyAfter, pending: Math.max(0, products.length - readyAfter - reviewAfter), review: reviewAfter, selectedThisCycle: candidates.length, processedThisCycle: prepared.filter((item) => item.productId).length }, status: limitReached ? 'limit_reached' : prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
     await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
       const previous = state(value), retentionCutoff = now().getTime() - previous.config.decisionRetentionDays * 24 * 60 * 60_000;
       const decisions = previous.decisions.map((item) => {
         if (autoResolvedDecisionIds.has(item.id)) return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'automatic-editorial-policy', resolutionNote: 'Bezpieczna redakcja została zapisana automatycznie zgodnie z polityką uprawnień.' }, completedAt);
         if (scenarioEnabled('catalog-editorial') && item.kind === 'product_content_review' && activeDecision(item, now())) return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'automatic-editorial-policy', resolutionNote: 'Redakcja produktu działa całkowicie automatycznie i nie wymaga już decyzji administratora.' }, completedAt);
         if (!['customer_reply', 'product_content_review', 'catalog_identity'].includes(item.kind) || !activeDecision(item, now()) || activeFingerprints.has(item.fingerprint)) return item;
+        if (item.kind === 'customer_reply' && !communicationScanDue) return item;
         return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'agent-reconciliation', resolutionNote: 'Warunek wymagający decyzji już nie występuje.' }, completedAt);
       }).filter((item) => activeDecision(item, now()) || Date.parse(item.updatedAt || item.createdAt || '') >= retentionCutoff).slice(0, MAX_DECISIONS);
-      return { ...previous, decisions, lastCycle, updatedAt: completedAt };
+      return { ...previous, decisions, communicationScan: communicationScanDue ? { signal: communicationSignal, lastAt: completedAt } : previous.communicationScan, lastCycle, updatedAt: completedAt };
     });
     const meaningful = prepared.length || applied.length || decisionResults.length;
     return { skipped: !meaningful, reason: meaningful ? '' : limitReached ? 'daily_limit' : 'no_candidates', prepared, applied, decisions: decisionResults.map((item) => ({ id: item.id, kind: item.kind, risk: item.risk })), lastCycle };

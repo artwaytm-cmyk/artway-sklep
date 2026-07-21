@@ -73,7 +73,7 @@ function agentAIScalonaTrescSekcji(active,analysis,requested,score){
   if(active==="automatyzacje")return agentAIAutomatyzacjeScaloneHTML(requested);
   if(active==="komunikacja")return agentAITelegramPanelHTML();
   if(active==="audyt")return agentAIHistoriaPanelHTML();
-  return agentAIPulpitScalonyHTML(score);
+  return typeof agentAIPulpitObserwowalnoscHTML==="function"?agentAIPulpitObserwowalnoscHTML(score):agentAIPulpitScalonyHTML(score);
 }
 widokAdminAgentAI=function(section="pulpit"){
   allegroLadujJesliTrzeba("orders");const requested=String(section||"pulpit").toLowerCase(),active=agentAISekcjaKanoniczna(requested),analysis=agentAIAnaliza(),tasks=agentAIAnalizaAktywna(analysis),score=Math.max(0,Math.round(100-(tasks.filter(x=>x.poziom==="bad").length*18)-(tasks.filter(x=>x.poziom==="warn").length*8))),runtimeAge=Date.now()-Number(agentAIRuntime.updatedAt||0);
