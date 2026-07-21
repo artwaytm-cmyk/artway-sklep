@@ -45,7 +45,7 @@ export function createAgentSpecialistRoute({ service, isAdmin, rateLimit, respon
       const result = await service.prepareProductProposal(body.productId, actor, body);
       return respond({ ok: true, ...result, draftOnly: result?.applied?.applied !== true, sentExternally: false, published: false });
     }
-    const cycle = await service.automaticCycle();
+    const cycle = await service.automaticCycle({ coordinatorPlan: body.coordinatorPlan });
     return respond({ ok: true, cycle });
   };
 }

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {
   editTelegramHtml,
+  sendTelegramDocument,
   sendTelegramHtml,
   telegramApi,
   telegramConfig,
@@ -201,6 +202,31 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
       await saveState(state); return sent;
     } catch (error) {
       addHistory(state, { kind: options.kind || 'manual', status: 'error', category: options.category || 'manual', severity: options.severity || 'info', title: options.title || 'Ręczna wiadomość', reason: error?.message || error, source: options.source || 'admin-panel', preview: message, fromLabel: options.fromLabel || 'Panel administratora', toLabel: options.toLabel || 'Główna grupa Telegram', threadId: options.messageThreadId, conversationKey: options.conversationKey || 'telegram-main' });
+      await saveState(state); throw error;
+    }
+  }
+
+  async function sendManualDocument(document = {}, options = {}) {
+    const state = await loadState();
+    try {
+      const config = await accountConfig();
+      const sent = await sendTelegramDocument(document, { ...options, teamUserIds: [...config.teamUserIds] }, env);
+      addHistory(state, {
+        kind: options.kind || 'document', status: 'sent', category: options.category || 'manual', severity: options.severity || 'info',
+        title: options.title || 'Dokument', messageId: sent?.message_id, source: options.source || 'admin-panel',
+        preview: document?.filename || 'dokument', fromLabel: options.fromLabel || 'Panel administratora',
+        toLabel: options.toLabel || 'Główna grupa Telegram', threadId: options.messageThreadId,
+        conversationKey: options.conversationKey || 'telegram-main',
+      });
+      await saveState(state); return sent;
+    } catch (error) {
+      addHistory(state, {
+        kind: options.kind || 'document', status: 'error', category: options.category || 'manual', severity: options.severity || 'info',
+        title: options.title || 'Dokument', reason: error?.message || error, source: options.source || 'admin-panel',
+        preview: document?.filename || 'dokument', fromLabel: options.fromLabel || 'Panel administratora',
+        toLabel: options.toLabel || 'Główna grupa Telegram', threadId: options.messageThreadId,
+        conversationKey: options.conversationKey || 'telegram-main',
+      });
       await saveState(state); throw error;
     }
   }
@@ -469,7 +495,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
     return { inline_keyboard: [[{ text: label, url }]] };
   }
 
-  return { connection, deliveryAction, dispatch, inbound, incidentAction, loadSettings, managedEvent, panelButtons, recordInboundAudit, recordOutboundAudit, refreshDashboard, registerWebhook, saveSettings, sendManual, view };
+  return { connection, deliveryAction, dispatch, inbound, incidentAction, loadSettings, managedEvent, panelButtons, recordInboundAudit, recordOutboundAudit, refreshDashboard, registerWebhook, saveSettings, sendManual, sendManualDocument, view };
 }
 
 export { telegramPanelUrl, telegramIncidentCard, telegramIncidentKeyboard, telegramAgentReport, telegramDashboardCard };

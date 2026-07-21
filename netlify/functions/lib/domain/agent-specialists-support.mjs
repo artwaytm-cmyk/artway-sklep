@@ -22,7 +22,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-19.14';
+const PROMPT_VERSION = '2026-07-21.1';
 const AGENT_ACTION_POLICY = Object.freeze({
   automatic: Object.freeze([
     Object.freeze({ id: 'product_editorial', icon: '✨', label: 'Redakcja kart produktu', description: 'Nazwa, opis krótki, opis pełny, układ sekcji i SEO są zapisywane bez pytania, gdy wynik jest kompletny, zgodny i oparty na faktach.', configKey: 'autoApplyProductEditorial' }),
@@ -55,6 +55,7 @@ const SPECIALISTS = Object.freeze({
     icon: '✨', label: 'Redaktor produktu', area: 'Katalog i sklep',
     description: 'Tworzy spójny tytuł, krótki i pełny opis oraz pola SEO wyłącznie z przekazanych faktów.',
     fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
+    scenario: { id: 'catalog-editorial', version: '2026-07-21.1' },
     rules: 'Nazwę ze źródła traktuj jako fakt o tożsamości, a nie gotowy tytuł. Usuń dopiski sklepu źródłowego, powtórzenia i chaos wielkich liter; ułóż naturalną nazwę sprzedażową, zachowując markę, model i wariant. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach. Treść jest wspólna dla sklepu i Allegro: nigdy nie dodawaj telefonu, e-maila, adresu strony, zachęty do kontaktu, negocjowania ceny, zewnętrznej płatności ani sprzedaży poza Allegro.',
   },
   allegro_offer: {
@@ -69,6 +70,7 @@ const SPECIALISTS = Object.freeze({
     icon: '💬', label: 'Opiekun klienta', area: 'Wiadomości i dyskusje',
     description: 'Układa serdeczny szkic odpowiedzi na podstawie całej rozmowy, zamówienia i potwierdzonego statusu przesyłki.',
     fields: ['subject', 'reply'],
+    scenario: { id: 'customer-reply-draft', version: '2026-07-21.1' },
     rules: 'Nie obiecuj zwrotu, ponownej wysyłki, terminu ani statusu, którego nie potwierdzają fakty. To zawsze szkic do zatwierdzenia.',
   },
   seo_promotion: {
@@ -76,6 +78,7 @@ const SPECIALISTS = Object.freeze({
     icon: '🔎', label: 'Specjalista SEO', area: 'Pozycjonowanie',
     description: 'Przygotowuje naturalne frazy, meta dane i plan bezpłatnej promocji bez upychania słów kluczowych.',
     fields: ['seo_title', 'meta_description', 'keywords', 'slug', 'internal_link_anchor', 'promotion_plan'],
+    scenario: { id: 'seo-free-promotion', version: '2026-07-21.1' },
     rules: 'Nie twórz niepotwierdzonych przewag, bestsellerów ani obietnic. Używaj marki Allegro wyłącznie opisowo i zgodnie z kontekstem.',
   },
   campaign_copy: {
@@ -97,6 +100,7 @@ const SPECIALISTS = Object.freeze({
     icon: '🏭', label: 'Koordynator producenta', area: 'Plan zatowarowania',
     description: 'Redaguje krótki e-mail do producenta wokół kanonicznej tabeli zamówienia.',
     fields: ['subject', 'intro', 'closing', 'import_instruction'],
+    scenario: { id: 'supplier-order-draft', version: '2026-07-21.1' },
     rules: 'Nie dodawaj cen, marż ani stanów. Nie zmieniaj kodów, nazw i ilości z tabeli. Treść ma być krótka i serdeczna.',
   },
   catalog_quality: {
@@ -104,6 +108,7 @@ const SPECIALISTS = Object.freeze({
     icon: '🛡️', label: 'Kontroler jakości', area: 'Audyt treści',
     description: 'Wykrywa sprzeczności, duplikaty tekstu, braki i ryzykowne sformułowania, nie zapisując zmian samodzielnie.',
     fields: ['assessment', 'recommended_changes', 'compliance_notes'],
+    scenario: { id: 'catalog-identity-control', version: '2026-07-21.1' },
     rules: 'Oddziel błędy pewne od podejrzeń. Nie oznaczaj duplikatu bez jednoznacznych identyfikatorów lub bardzo mocnych dowodów.',
   },
   operations_supervisor: {

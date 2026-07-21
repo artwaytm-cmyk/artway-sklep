@@ -467,8 +467,8 @@ async function agentAIWyslijZlecenieTelegram(id,dostawca=""){
   try{
     toast("Przygotowuję tabelę i wysyłam na Telegram…");
     const d=await chmura("telegram-send-supplier-order",{method:"POST",body:{draftId:z.id,expectedRevision:Math.max(1,Number(z.revision)||1),supplier:dostawca||""},timeout:30000});
-    zapiszHistorieAgenta("telegram",`Wysłano tabelę ${z.numer||z.id} na Telegram`,{zlecenieId:id,dostawcy:d.suppliers||[],wiadomosci:(d.messageIds||[]).length});
-    toast(`Telegram: wysłano ${d.tables||0} tabel ✅`);
+    zapiszHistorieAgenta("telegram",`Wysłano zamówienie ${z.numer||z.id} na Telegram`,{zlecenieId:id,dostawcy:d.suppliers||[],wiadomosci:(d.messageIds||[]).length,pliki:Number(d.documents)||0});
+    toast(`Telegram: ${d.tables||0} wiadomości • ${Number(d.documents)||0} pliki do edycji ✅`);
   }catch(e){toast("⚠️ Telegram: "+(e.message||e));}
 }
 function agentAIDaneProducentaDoEmaila(p={}){return {name:p.name||p.nazwa||""};}

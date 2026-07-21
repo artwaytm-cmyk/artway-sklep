@@ -66,6 +66,25 @@ test('kolejka deduplikuje update, wydaje lease i czyści treść po dostarczeniu
   assert.equal((await queue.claim('mac-artway')).job, null);
 });
 
+test('ponowiony claim tego samego workera zwraca ten sam lease po utracie odpowiedzi HTTP', async () => {
+  const repo = repository();
+  let issued = 0;
+  const queue = createCodexAgentQueue({
+    readVersioned: repo.readVersioned,
+    writeIfVersion: repo.writeIfVersion,
+    now: () => new Date('2026-07-21T12:00:00.000Z'),
+    token: () => `claim-${++issued}`,
+  });
+  await queue.claim('worker-vps');
+  await queue.enqueue({ requestId: 'lost-http-response', text: 'sprawdź katalog', chatId: '123' });
+  const first = await queue.claim('worker-vps');
+  const retry = await queue.claim('worker-vps');
+  assert.equal(first.job.id, retry.job.id);
+  assert.equal(first.job.claimToken, retry.job.claimToken);
+  assert.equal(issued, 1);
+  assert.equal(repo.read().items.filter((item) => item.status === 'processing').length, 1);
+});
+
 test('lista odbiorców wspólnego pokoju odrzuca grupy, tekst i czat główny', () => {
   assert.deepEqual(sanitizeCodexBroadcastChatIds(['100', '200', '200', '-300', 'x', 400], '100'), ['200', '400']);
 });

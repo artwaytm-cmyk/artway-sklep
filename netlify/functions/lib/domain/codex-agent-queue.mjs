@@ -324,8 +324,14 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
         if (channelOrder) return channelOrder;
         return (Date.parse(left.item.createdAt || '') || 0) - (Date.parse(right.item.createdAt || '') || 0) || left.index - right.index;
       });
-      let job = null;
-      if (ready.length) {
+      // Idempotentne wznowienie po utracie odpowiedzi HTTP: ten sam proces
+      // odzyskuje własny aktywny lease z tym samym claimToken zamiast czekać
+      // na jego wygaśnięcie lub wykonywać zadanie drugi raz.
+      const owned = items.find((item) => item.status === 'processing'
+        && item.workerId === workerId && item.claimToken && item.leaseUntil
+        && Date.parse(item.leaseUntil) > timestampMs);
+      let job = owned || null;
+      if (!job && ready.length) {
         const index = ready[0].index, claimToken = token();
         job = {
           ...items[index], status: 'processing', workerId, claimToken,

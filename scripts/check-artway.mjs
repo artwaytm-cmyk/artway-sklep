@@ -616,9 +616,9 @@ requireMarkers('netlify/functions/lib/infakt-purchase.mjs', infaktPurchase, [
 requireMarkers('netlify/functions/lib/domain/telegram-communication.mjs', telegramCommunication, [
   'function telegramEventDecision',
   'function telegramDigestSlot',
-  "telegramCell('KOD', 15)",
-  "telegramCell('NAZWA', 30)",
-  "telegramCell('ZAMAWIANA ILOŚĆ', 16)",
+  '<b>NAZWA PRODUKTU · KOD · ZAMAWIANA ILOŚĆ</b>',
+  'function telegramSupplierQuantity',
+  "kind: 'editable-order'",
   'function telegramNaturalIntent',
   'function telegramIncidentId',
   'function editTelegramHtml',

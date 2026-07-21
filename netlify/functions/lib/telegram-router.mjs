@@ -355,16 +355,30 @@ export function createTelegramRouter({ center, codexQueue, agentRuntime, getOper
           rev: Math.max(0, Number(settingsRecord?.rev) || 0),
           updated_at: settingsRecord?.updated_at || null,
           messages: tables,
-          documents: [...new Set(tables.map((item) => item.draftId))],
+          documents: tables.flatMap((item) => Array.isArray(item.documents) ? item.documents.map((document) => ({
+            draftId: item.draftId, supplier: item.supplier, filename: document.filename, kind: document.kind || 'document',
+          })) : []),
           suppliers: [...new Set(tables.map((item) => item.supplier))],
         });
       }
-      const messageIds = [];
+      const messageIds = [], documentIds = [];
       for (const table of tables) {
-        const sent = await center.sendManual(table.text, { kind: 'supplier-preview', category: 'supplier', title: `Podgląd zamówienia — ${table.supplier}`, source: 'admin-panel' });
+        const sent = await center.sendManual(table.text, {
+          kind: 'supplier-preview', category: 'supplier', title: `Podgląd zamówienia — ${table.supplier}`, source: 'admin-panel',
+          replyMarkup: { inline_keyboard: [[{ text: '✏️ Edytuj w Planie zatowarowania', url: `${publicOrigin(req)}/#/admin/magazyn/plan` }]] },
+        });
         if (sent?.message_id != null) messageIds.push(sent.message_id);
+        if (typeof center.sendManualDocument === 'function') for (const document of Array.isArray(table.documents) ? table.documents : []) {
+          const sentDocument = await center.sendManualDocument(document, {
+            kind: document.kind || 'supplier-document', category: 'supplier', title: `Plik zamówienia — ${table.supplier}`, source: 'admin-panel',
+            caption: document.kind === 'comarch-optima'
+              ? `Comarch ERP Optima · ${table.documentNumber} · wersja ${table.revision}`
+              : `Edytowalna tabela · ${table.documentNumber} · wersja ${table.revision}`,
+          });
+          if (sentDocument?.message_id != null) documentIds.push(sentDocument.message_id);
+        }
       }
-      return respond({ ok: true, sentAt: new Date().toISOString(), tables: tables.length, suppliers: [...new Set(tables.map((item) => item.supplier))], messageIds });
+      return respond({ ok: true, sentAt: new Date().toISOString(), tables: tables.length, documents: documentIds.length, suppliers: [...new Set(tables.map((item) => item.supplier))], messageIds, documentIds });
     }
     return null;
   };

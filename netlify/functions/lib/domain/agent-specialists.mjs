@@ -198,17 +198,28 @@ export function createAgentSpecialists({
     const current = await readState(), today = day(now()), todayRuns = current.history.filter((item) => { const created = new Date(item?.createdAt || ''); return Number.isFinite(created.getTime()) && day(created) === today; });
     const decisions = current.decisions.map((item) => item.status === 'snoozed' && activeDecision(item, now()) ? { ...item, status: 'open', snoozedUntil: '' } : item);
     const autonomy = learningAutonomy(current.learning, current.config), productLearning = current.learning.product_content;
+    const scenarioStats = Object.values(SPECIALISTS).filter((item) => item.scenario?.id).map((definition) => {
+      const runs = current.history.filter((item) => item?.scenario?.id === definition.scenario.id);
+      return {
+        id: definition.scenario.id, version: definition.scenario.version, specialist: definition.label,
+        runs: runs.length, autoApplied: runs.filter((item) => item.approvalStatus === 'auto_applied').length,
+        corrected: runs.filter((item) => item.approvalStatus === 'corrected').length,
+        lastRunAt: runs[0]?.createdAt || '', lastStatus: runs[0]?.approvalStatus || '',
+      };
+    });
     return {
       configured: !!clean(apiKey, 500), model: clean(model, 80), config: current.config,
       promptVersion: PROMPT_VERSION,
       policy: {
-        mode: 'openai_platform_profiles_plus_responses', cycleMinutes: 15, safeAutoApply: current.config.safeAutoApply,
+        mode: 'codex_manager_plus_versioned_gpt_scenarios', cycleMinutes: 15, safeAutoApply: current.config.safeAutoApply,
         progressiveAutonomy: true, editorialAutonomy: current.config.autoApplyProductEditorial !== false,
         linkedAllegroContentAutonomy: current.config.autoUpdateLinkedAllegroContent !== false,
         neverAutomatic: NEVER_AUTOMATIC, actionPolicy: AGENT_ACTION_POLICY,
       },
       learning: { productContent: { ...autonomy, updatedAt: productLearning.updatedAt, fieldStats: productLearning.fieldStats, recentExamples: productLearning.examples.slice(0, 6) } },
-      platformAgents: { enabled: platformAgentsEnabled, configured: Object.values(SPECIALISTS).every((item) => !!item.assistantId), executionModel: clean(model, 80), coordinatorId: SPECIALISTS.operations_supervisor.assistantId },
+      coordinator: { id: 'codex-cli', label: 'Codex', role: 'manager', active: true, scenarioPolicy: 'closed-versioned-registry' },
+      platformAgents: { enabled: platformAgentsEnabled, configured: Object.values(SPECIALISTS).every((item) => !!item.assistantId), executionModel: clean(model, 80), coordinatorId: 'codex-cli', legacySupervisorProfileId: SPECIALISTS.operations_supervisor.assistantId },
+      scenarioStats,
       specialists: Object.entries(SPECIALISTS).map(([id, value]) => ({ id, ...value, promptVersion: PROMPT_VERSION, deployment: 'openai-platform+server', platformAvailable: platformProfiles.get(id)?.available ?? null, platformName: platformProfiles.get(id)?.name || value.label })),
       usage: {
         today: todayRuns.length,
@@ -245,7 +256,17 @@ export function createAgentSpecialists({
     if (todayRuns.length >= current.config.dailyLimit || (source === 'automatic' && todayRuns.filter((item) => item.source === 'automatic').length >= current.config.automaticDailyLimit)) {
       throw Object.assign(new Error('Osiągnięto dzienny limit kontrolujący koszt GPT-5 nano.'), { code: 'agent_specialist_daily_limit', status: 429 });
     }
-    const instruction = sanitizeText(raw.instruction || `Przygotuj profesjonalny szkic jako ${definition.label}.`, 3000), context = sanitizeContext(raw.context || {}), learnedGuidance = current.config.learningEnabled ? learningPrompt(current.learning, specialist) : '', hash = fingerprint(specialist, instruction, { context, learningUpdatedAt: current.learning?.product_content?.updatedAt || '' });
+    const scenarioInput = raw.scenario && typeof raw.scenario === 'object' ? raw.scenario : {};
+    const scenario = {
+      id: clean(scenarioInput.id || definition.scenario?.id || `${specialist}-manual`, 100),
+      version: clean(scenarioInput.version || definition.scenario?.version || PROMPT_VERSION, 80),
+      assignedBy: clean(scenarioInput.assignedBy || (source === 'automatic' ? 'codex' : 'administrator'), 60),
+      coordinatorRunId: clean(scenarioInput.coordinatorRunId || '', 120),
+      objective: clean(scenarioInput.objective || definition.description, 500),
+      qualityGates: (Array.isArray(scenarioInput.qualityGates) ? scenarioInput.qualityGates : []).slice(0, 12).map((item) => clean(item, 180)).filter(Boolean),
+    };
+    if (definition.scenario?.id && scenario.id !== definition.scenario.id) throw Object.assign(new Error('Scenariusz nie pasuje do wybranego specjalisty.'), { code: 'agent_scenario_specialist_mismatch', status: 422 });
+    const instruction = sanitizeText(raw.instruction || `Przygotuj profesjonalny szkic jako ${definition.label}.`, 3000), context = sanitizeContext(raw.context || {}), learnedGuidance = current.config.learningEnabled ? learningPrompt(current.learning, specialist) : '', hash = fingerprint(specialist, instruction, { context, scenarioId: scenario.id, scenarioVersion: scenario.version, learningUpdatedAt: current.learning?.product_content?.updatedAt || '' });
     const cacheMs = current.config.cacheHours * 60 * 60_000, cached = current.history.find((item) => item.fingerprint === hash && item.status === 'completed' && now().getTime() - Date.parse(item.createdAt || '') <= cacheMs);
     if (cached) return { ...cached, cached: true };
     const runId = `gpt_${Date.now()}_${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`, createdAt = now().toISOString(), target = sanitizeContext(raw.target || {});
@@ -255,6 +276,8 @@ export function createAgentSpecialists({
       'Korzystaj wyłącznie z przekazanych faktów. Nie zgaduj parametrów, cen, statusów, terminów, dostępności, rabatów ani warunków.',
       'Brakujące dane wpisz do missingFacts. Każdą treść traktuj jako szkic; nie twierdź, że została wysłana lub opublikowana.',
       `Rola: ${definition.label}. ${definition.description}`,
+      `Zlecenie od koordynatora Codex. Scenariusz ${scenario.id}, wersja ${scenario.version}. Cel: ${scenario.objective}`,
+      scenario.qualityGates.length ? `Warunki odbioru wyniku: ${scenario.qualityGates.join('; ')}.` : '',
       `Szczególne reguły: ${definition.rules}`,
       learnedGuidance ? `Pamięć zatwierdzeń administratora:\n${learnedGuidance}` : '',
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
@@ -286,7 +309,7 @@ export function createAgentSpecialists({
     const result = normalizeResult(parsed, specialist), usage = { inputTokens: number(payload?.usage?.input_tokens, 0, 0, 10_000_000), outputTokens: number(payload?.usage?.output_tokens, 0, 0, 10_000_000), totalTokens: number(payload?.usage?.total_tokens, 0, 0, 20_000_000) };
     const entry = {
       id: runId, specialist, specialistLabel: definition.label, status: 'completed', source, createdAt, model: clean(payload.model || model, 80),
-      instruction: clean(instruction, 500), target, fingerprint: hash, result, usage, approvalStatus: 'draft', promptVersion: PROMPT_VERSION,
+      instruction: clean(instruction, 500), target, fingerprint: hash, result, usage, approvalStatus: 'draft', promptVersion: PROMPT_VERSION, scenario,
       platformAgent: platformProfile ? { id: platformProfile.id, name: platformProfile.name, available: platformProfile.available } : null,
       actor: clean(actor?.email || actor?.name || actor?.source || 'administrator', 120),
     };
@@ -425,29 +448,44 @@ export function createAgentSpecialists({
     return { run: draft, decision: null, automatic: true, retryScheduled: true, policyReason: assessment.reason };
   }
 
-  async function automaticCycle() {
+  async function automaticCycle(options = {}) {
     const current = await readState();
     if (!current.config.enabled || !current.config.automaticEnabled || current.config.automaticDailyLimit < 1) return { skipped: true, reason: 'disabled', prepared: [], applied: [], decisions: [] };
     const cycleStartedAt = now().toISOString();
+    const coordinatorPlan = options?.coordinatorPlan && typeof options.coordinatorPlan === 'object' ? sanitizeContext(options.coordinatorPlan) : null;
+    const coordinatorAssignments = Array.isArray(coordinatorPlan?.assignments) ? coordinatorPlan.assignments : [];
+    const assignedScenarios = new Set(coordinatorAssignments.map((item) => clean(item?.scenarioId, 100)).filter(Boolean));
+    const scenarioAssignment = (id) => coordinatorAssignments.find((item) => clean(item?.scenarioId, 100) === id) || null;
+    // Brak planu oznacza zgodność wsteczną dla ręcznego uruchomienia i testów.
+    // Gdy plan Codex istnieje, GPT wykonuje wyłącznie jawnie przydzielone role.
+    const scenarioEnabled = (id) => !coordinatorPlan || assignedScenarios.has(id);
+    const scenarioPayload = (id) => {
+      const assignment = scenarioAssignment(id);
+      return assignment ? {
+        id, version: clean(assignment.scenarioVersion, 80), assignedBy: clean(coordinatorPlan.coordinator || 'codex', 60),
+        coordinatorRunId: clean(coordinatorPlan.runId || coordinatorPlan.coordinatorRunId, 120),
+        objective: clean(assignment.objective, 500), qualityGates: Array.isArray(assignment.qualityGates) ? assignment.qualityGates : [],
+      } : undefined;
+    };
     const [settingsVersion, communicationsVersion] = await Promise.all([
       readVersioned('settings', { data: {}, rev: 0 }),
       readVersioned('allegro_communications', { threads: [], issues: [], updated_at: null }),
     ]);
     const data = settingsVersion.value?.data || {}, products = catalogProducts(data), communications = communicationsVersion.value || {};
     const editorialRows = products.map((product) => ({ product, ...productEditorialState(product) }));
-    const candidates = products.map((product) => {
+    const candidates = scenarioEnabled('catalog-editorial') ? products.map((product) => {
       const editorial = productEditorialState(product), short = clean(product.opisKrotki || product.krotkiOpis, 5000), full = clean(product.opis, 30000);
       const missing = (!short ? 3 : 0) + (full.length < 250 ? 4 : 0) + (!product.seoTitle ? 2 : 0) + (!product.seoDescription ? 2 : 0);
       const channelChanged = editorial.editorial.channels && editorial.editorial.channels !== editorial.target.channels;
       const priority = (channelChanged ? 100 : 0) + (editorial.target.allegro ? 30 : 0) + (product.sourceMaterial ? 15 : 0) + missing;
       return { product, missing, priority, editorial };
     }).filter((item) => !item.editorial.current && !item.editorial.reviewedSameInput && item.editorial.retryDue !== false)
-      .sort((a, b) => b.priority - a.priority || String(b.product.createdAt || b.product.dataDodania || '').localeCompare(String(a.product.createdAt || a.product.dataDodania || '')));
+      .sort((a, b) => b.priority - a.priority || String(b.product.createdAt || b.product.dataDodania || '').localeCompare(String(a.product.createdAt || a.product.dataDodania || ''))) : [];
     const prepared = [], applied = [], decisionResults = [], activeFingerprints = new Set(), autoResolvedDecisionIds = new Set(), handledProductIds = new Set(), autonomy = learningAutonomy(current.learning, current.config);
     let limitReached = false;
 
     const productsById = new Map(products.map((product) => [String(product.id), product]));
-    for (const decision of current.decisions.filter((item) => item.kind === 'product_content_review' && activeDecision(item, now()))) {
+    for (const decision of (scenarioEnabled('catalog-editorial') ? current.decisions : []).filter((item) => item.kind === 'product_content_review' && activeDecision(item, now()))) {
       const product = productsById.get(String(decision.target?.productId || '')), runEntry = current.history.find((item) => item.id === decision.runId);
       if (!product || !runEntry) continue;
       const editorial = productEditorialState(product), sameInput = decision.target?.editorialFingerprint === editorial.fingerprint;
@@ -469,10 +507,10 @@ export function createAgentSpecialists({
       }
     }
 
-    const unresolvedCommunication = [
+    const unresolvedCommunication = scenarioEnabled('customer-reply-draft') ? [
       ...(Array.isArray(communications.threads) ? communications.threads.map((item) => ({ type: 'thread', item })) : []),
       ...(Array.isArray(communications.issues) ? communications.issues.map((item) => ({ type: 'issue', item })) : []),
-    ].filter(({ item }) => communicationNeedsReply(item)).sort((a, b) => String(b.item?.latestNewIncoming?.createdAt || b.item?.lastMessage?.createdAt || '').localeCompare(String(a.item?.latestNewIncoming?.createdAt || a.item?.lastMessage?.createdAt || '')));
+    ].filter(({ item }) => communicationNeedsReply(item)).sort((a, b) => String(b.item?.latestNewIncoming?.createdAt || b.item?.lastMessage?.createdAt || '').localeCompare(String(a.item?.latestNewIncoming?.createdAt || a.item?.lastMessage?.createdAt || ''))) : [];
 
     let availableRuns = current.config.automaticBatchSize;
     // Komunikacja może zająć najwyżej dwa miejsca. Pozostała przepustowość jest
@@ -486,7 +524,7 @@ export function createAgentSpecialists({
       let draft = null;
       if (availableRuns > 0 && communicationRuns > 0) {
         try {
-          draft = await run({ specialist: 'customer_reply', source: 'automatic', instruction: 'Przeanalizuj całą przekazaną rozmowę i przygotuj wyłącznie szkic odpowiedzi. Nie wysyłaj go. Nie obiecuj działań niepotwierdzonych w faktach.', context: { conversation: communicationFacts(item, type) }, target }, { source: 'background-agent' });
+          draft = await run({ specialist: 'customer_reply', source: 'automatic', scenario: scenarioPayload('customer-reply-draft'), instruction: 'Przeanalizuj całą przekazaną rozmowę i przygotuj wyłącznie szkic odpowiedzi. Nie wysyłaj go. Nie obiecuj działań niepotwierdzonych w faktach.', context: { conversation: communicationFacts(item, type) }, target }, { source: 'background-agent' });
           prepared.push({ id: draft.id, type: 'communication', targetId: target.communicationId, status: 'prepared' }); availableRuns -= 1; communicationRuns -= 1;
         } catch (error) {
           if (error?.code === 'agent_specialist_daily_limit') { availableRuns = 0; limitReached = true; }
@@ -500,7 +538,7 @@ export function createAgentSpecialists({
     for (const item of candidates.filter((entry) => !handledProductIds.has(String(entry.product.id))).slice(0, Math.max(0, availableRuns))) {
       try {
         const retryAttempt = Math.max(0, Number(item.editorial.editorial?.retryCount) || 0) + 1;
-        const draft = await run({ specialist: 'product_content', source: 'automatic', instruction: `Przygotuj kompletną, profesjonalną treść produktu dla wybranych kanałów: ${item.editorial.target.allegro ? 'sklep i Allegro' : 'sklep'}. Popraw również istniejącą słabą nazwę i treść, nie tylko puste pola. Zachowaj potwierdzone fakty, zastosuj czytelne akapity, nagłówki i listy. Nie pytaj o opcjonalne dane — jeżeli ich nie ma, pomiń je i dokończ bezpieczną redakcję. To automatyczna próba ${retryAttempt}; obowiązkowo zwróć wszystkie pola redakcyjne, jeżeli tożsamość produktu jest rozpoznawalna.`, context: { product: productFacts(item.product), editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint, editorialRetryAttempt: retryAttempt }, target: { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint } }, { source: 'background-agent' });
+        const draft = await run({ specialist: 'product_content', source: 'automatic', scenario: scenarioPayload('catalog-editorial'), instruction: `Przygotuj kompletną, profesjonalną treść produktu dla wybranych kanałów: ${item.editorial.target.allegro ? 'sklep i Allegro' : 'sklep'}. Popraw również istniejącą słabą nazwę i treść, nie tylko puste pola. Zachowaj potwierdzone fakty, zastosuj czytelne akapity, nagłówki i listy. Nie pytaj o opcjonalne dane — jeżeli ich nie ma, pomiń je i dokończ bezpieczną redakcję. To automatyczna próba ${retryAttempt}; obowiązkowo zwróć wszystkie pola redakcyjne, jeżeli tożsamość produktu jest rozpoznawalna.`, context: { product: productFacts(item.product), editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint, editorialRetryAttempt: retryAttempt }, target: { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint } }, { source: 'background-agent' });
         const assessment = automaticEditorialAssessment(draft, current.config);
         if (assessment.eligible) {
           const result = await applyProductDraft(draft.id, { source: 'background-agent' }, { missingOnly: false, editorialAutomatic: true, editorialPolicyValidated: true, editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint });
@@ -517,7 +555,7 @@ export function createAgentSpecialists({
     }
 
     let openCatalogDecisionCount = current.decisions.filter((item) => item.kind === 'catalog_identity' && activeDecision(item, now())).length;
-    for (const product of products.slice().sort((a, b) => String(b.createdAt || b.dataDodania || '').localeCompare(String(a.createdAt || a.dataDodania || ''))).slice(0, 200)) {
+    for (const product of (scenarioEnabled('catalog-identity-control') ? products : []).slice().sort((a, b) => String(b.createdAt || b.dataDodania || '').localeCompare(String(a.createdAt || a.dataDodania || ''))).slice(0, 200)) {
       const missing = [!clean(product.gtin || product.ean, 80) && 'EAN', !validManufacturerName(product.producent || product.marka) && 'producent', !clean(product.kategoria, 160) && 'kategoria'].filter(Boolean);
       if (!missing.length) continue;
       const target = { type: 'product', productId: String(product.id), name: clean(product.nazwa, 180), missing }, fp = decisionFingerprint('catalog_identity', target); activeFingerprints.add(fp);
@@ -531,11 +569,13 @@ export function createAgentSpecialists({
     for (const decision of current.decisions.filter((item) => activeDecision(item, now()))) {
       if (autoResolvedDecisionIds.has(decision.id)) continue;
       if (decision.kind === 'product_content_review') {
+        if (!scenarioEnabled('catalog-editorial')) { activeFingerprints.add(decision.fingerprint); continue; }
         const product = productById.get(String(decision.target?.productId || ''));
         const editorial = product ? productEditorialState(product) : null;
         if (product && !editorial.current && decision.target?.editorialFingerprint === editorial.fingerprint) activeFingerprints.add(decision.fingerprint);
       }
       if (decision.kind === 'catalog_identity') {
+        if (!scenarioEnabled('catalog-identity-control')) { activeFingerprints.add(decision.fingerprint); continue; }
         const product = productById.get(String(decision.target?.productId || ''));
         if (product && (!clean(product.gtin || product.ean, 80) || !validManufacturerName(product.producent || product.marka) || !clean(product.kategoria, 160))) activeFingerprints.add(decision.fingerprint);
       }
@@ -543,12 +583,12 @@ export function createAgentSpecialists({
 
     const completedAt = now().toISOString(), readyBefore = editorialRows.filter((item) => item.current).length;
     const readyAfter = Math.min(products.length, readyBefore + applied.length), reviewAfter = Math.min(products.length - readyAfter, editorialRows.filter((item) => item.reviewedSameInput).length + prepared.filter((item) => item.status === 'needs_decision').length);
-    const lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, productsChecked: products.length, autonomy, limitReached, limitDay: day(now()), editorialProgress: { total: products.length, ready: readyAfter, pending: Math.max(0, products.length - readyAfter - reviewAfter), review: reviewAfter, selectedThisCycle: candidates.length, processedThisCycle: prepared.filter((item) => item.productId).length }, status: limitReached ? 'limit_reached' : prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
+    const lastCycle = { startedAt: cycleStartedAt, completedAt, prepared: prepared.length, autoApplied: applied.length, decisionsCreated: decisionResults.length, communicationChecked: unresolvedCommunication.length, productsChecked: products.length, autonomy, limitReached, limitDay: day(now()), coordinatorPlan: coordinatorPlan ? { coordinator: clean(coordinatorPlan.coordinator || 'codex', 60), runId: clean(coordinatorPlan.runId || coordinatorPlan.coordinatorRunId, 120), summary: clean(coordinatorPlan.summary, 240), confidence: number(coordinatorPlan.confidence, 0, 0, 1), assignments: coordinatorAssignments.slice(0, 8).map((item) => ({ scenarioId: clean(item?.scenarioId, 100), scenarioVersion: clean(item?.scenarioVersion, 80), specialist: clean(item?.specialist, 80), priority: number(item?.priority, 5, 1, 5), reason: clean(item?.reason, 180) })) } : null, editorialProgress: { total: products.length, ready: readyAfter, pending: Math.max(0, products.length - readyAfter - reviewAfter), review: reviewAfter, selectedThisCycle: candidates.length, processedThisCycle: prepared.filter((item) => item.productId).length }, status: limitReached ? 'limit_reached' : prepared.some((item) => item.status === 'error') ? 'warning' : 'completed' };
     await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
       const previous = state(value), retentionCutoff = now().getTime() - previous.config.decisionRetentionDays * 24 * 60 * 60_000;
       const decisions = previous.decisions.map((item) => {
         if (autoResolvedDecisionIds.has(item.id)) return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'automatic-editorial-policy', resolutionNote: 'Bezpieczna redakcja została zapisana automatycznie zgodnie z polityką uprawnień.' }, completedAt);
-        if (item.kind === 'product_content_review' && activeDecision(item, now())) return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'automatic-editorial-policy', resolutionNote: 'Redakcja produktu działa całkowicie automatycznie i nie wymaga już decyzji administratora.' }, completedAt);
+        if (scenarioEnabled('catalog-editorial') && item.kind === 'product_content_review' && activeDecision(item, now())) return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'automatic-editorial-policy', resolutionNote: 'Redakcja produktu działa całkowicie automatycznie i nie wymaga już decyzji administratora.' }, completedAt);
         if (!['customer_reply', 'product_content_review', 'catalog_identity'].includes(item.kind) || !activeDecision(item, now()) || activeFingerprints.has(item.fingerprint)) return item;
         return normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'agent-reconciliation', resolutionNote: 'Warunek wymagający decyzji już nie występuje.' }, completedAt);
       }).filter((item) => activeDecision(item, now()) || Date.parse(item.updatedAt || item.createdAt || '') >= retentionCutoff).slice(0, MAX_DECISIONS);

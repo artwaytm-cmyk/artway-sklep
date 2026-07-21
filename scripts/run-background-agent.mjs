@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { CODEX_SCENARIOS, planBackgroundCycleWithCodex } from '../../agent/codex-cycle-coordinator.js';
 
 const origin = String(process.env.ARTWAY_LOCAL_API_ORIGIN || 'http://127.0.0.1:3000').replace(/\/$/, '');
 const token = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim();
@@ -7,7 +8,7 @@ if (!token) throw new Error('Brak ARTWAY_ADMIN_TOKEN dla cyklu serwerowego');
 const runId = `cycle-${randomUUID()}`;
 const cycleStartedAt = Date.now();
 
-const tasks = [
+let tasks = [
   ['oferty-lekkie', 'allegro-sync-offers', { limit: 10000, details: false, source: 'scheduled-catalog-refresh' }],
   ['tresci-gpt-nano', 'agent-specialist-auto-cycle', { source: 'vps-systemd-timer' }],
   ['tresci-allegro', 'allegro-auto-maintenance', { limit: 50, source: 'scheduled-editorial-sync' }],
@@ -18,6 +19,7 @@ const tasks = [
 ];
 
 const taskLabels = {
+  'koordynator-codex': 'Codex rozdziela pracę agentom GPT',
   'oferty-lekkie': 'Szybka kontrola ofert Allegro',
   'oferty-pelne': 'Pełna aktualizacja danych ofert',
   'agent-autonomiczny': 'Autonomiczna kontrola katalogu',
@@ -26,6 +28,56 @@ const taskLabels = {
   zamowienia: 'Nowe zamówienia i stany Allegro',
   komunikacja: 'Nowe wiadomości i dyskusje',
 };
+
+async function adminGet(action, params = {}) {
+  const url = new URL(`${origin}/api/store`);
+  url.searchParams.set('action', action);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
+  const response = await fetch(url, { headers: { 'x-admin-token': token }, signal: AbortSignal.timeout(30_000) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.ok === false) throw new Error(String(data?.error || `HTTP ${response.status}`).slice(0, 500));
+  return data;
+}
+
+function fallbackCoordinatorPlan(snapshot = {}) {
+  const assignments = [], add = (scenarioId, priority, reason) => {
+    const definition = CODEX_SCENARIOS[scenarioId];
+    if (definition) assignments.push({ scenarioId, scenarioVersion: definition.version, specialist: definition.specialist, priority, reason, automatic: definition.automatic, objective: definition.objective, qualityGates: [...definition.qualityGates] });
+  };
+  const summary = snapshot?.operations?.summary || {}, editorial = snapshot?.specialists?.lastCycle?.editorialProgress || {};
+  if (Number(summary.communicationWaiting) > 0) add('customer-reply-draft', 1, 'Klient czeka na szkic odpowiedzi.');
+  if (Number(editorial.pending) > 0 || !snapshot?.specialists?.lastCycle) add('catalog-editorial', 2, 'Katalog ma pozycje oczekujące na redakcję.');
+  add('catalog-identity-control', 3, 'Stała bezpieczna kontrola identyfikacji katalogu.');
+  if (Number(summary.supplierOrders) > 0) add('supplier-order-draft', 4, 'Plan zawiera aktywny dokument producenta.');
+  return { coordinator: 'safe-fallback', coordinatorVersion: '2026-07-21.1', runId, summary: 'Codex był chwilowo niedostępny; wykonano wyłącznie bezpieczny plan awaryjny.', assignments, confidence: 0 };
+}
+
+async function coordinatorCycle() {
+  const started = Date.now();
+  await report('cycle_step', { step: { id: 'koordynator-codex', label: taskLabels['koordynator-codex'], status: 'running', startedAt: new Date(started).toISOString() } });
+  try {
+    const [specialists, operations] = await Promise.all([
+      adminGet('agent-specialists-status', { historyLimit: 5 }),
+      adminGet('agent-operations-summary'),
+    ]);
+    const planned = await planBackgroundCycleWithCodex({ specialists, operations }, { timeoutMs: 30_000 });
+    const plan = planned.ok ? { ...planned.plan, runId } : fallbackCoordinatorPlan({ specialists, operations });
+    await report('cycle_step', { step: {
+      id: 'koordynator-codex', label: taskLabels['koordynator-codex'], status: planned.ok ? 'completed' : 'warning',
+      startedAt: new Date(started).toISOString(), completedAt: new Date().toISOString(), durationMs: Date.now() - started,
+      count: plan.assignments.length, detail: `${planned.ok ? 'Codex' : 'Plan awaryjny'} przydzielił ${plan.assignments.length} scenariusze GPT. ${plan.summary}`,
+    } });
+    return { ok: planned.ok, plan, error: planned.ok ? '' : planned.reason };
+  } catch (error) {
+    const plan = fallbackCoordinatorPlan();
+    await report('cycle_step', { step: {
+      id: 'koordynator-codex', label: taskLabels['koordynator-codex'], status: 'warning',
+      startedAt: new Date(started).toISOString(), completedAt: new Date().toISOString(), durationMs: Date.now() - started,
+      count: plan.assignments.length, error: publicError(error?.message || error), detail: 'Uruchomiono ograniczony plan awaryjny.',
+    } });
+    return { ok: false, plan, error: publicError(error?.message || error) };
+  }
+}
 
 async function report(event, payload = {}) {
   try {
@@ -96,9 +148,14 @@ async function run(label, action, body) {
   }
 }
 
-await report('cycle_start', { steps: tasks.map(([id]) => ({ id, label: taskLabels[id] || id })) });
+await report('cycle_start', { steps: ['koordynator-codex', ...tasks.map(([id]) => id)].map((id) => ({ id, label: taskLabels[id] || id })) });
+const coordinator = await coordinatorCycle();
+tasks = tasks.map((task) => task[0] === 'tresci-gpt-nano'
+  ? [task[0], task[1], { ...task[2], coordinatorPlan: coordinator.plan }]
+  : task);
 const results = [];
 for (const task of tasks) results.push(await run(...task));
+results.unshift({ label: 'koordynator-codex', ok: coordinator.ok, warning: !coordinator.ok, count: coordinator.plan?.assignments?.length || 0, error: coordinator.error || '' });
 const failed = results.filter((result) => !result.ok);
 const hardFailure = failed.some((result) => result.label === 'agent-autonomiczny') || failed.length >= 3;
 const status = hardFailure ? 'failed' : failed.length ? 'degraded' : 'completed';

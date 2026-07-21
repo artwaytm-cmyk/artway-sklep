@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { supplierProductIdentifier } from './supplier-order-email.mjs';
+import { renderSupplierOrderEmail, supplierProductIdentifier } from './supplier-order-email.mjs';
 
 const DEFAULT_SETTINGS = Object.freeze({
   enabled: true,
@@ -265,6 +265,20 @@ export function telegramCell(value, width) {
   return clean.length > width ? `${clean.slice(0, Math.max(1, width - 1))}…` : clean.padEnd(width, ' ');
 }
 
+function telegramSupplierKey(value = '') {
+  return text(value, 160).trim().toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function telegramSupplierQuantity(value = 0) {
+  const number = Math.max(0, Number(value) || 0);
+  return Number.isInteger(number) ? String(number) : number.toFixed(3).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',');
+}
+
+function telegramSupplierFilename(value = '', fallback = 'dokument') {
+  return telegramSupplierKey(value).slice(0, 80) || fallback;
+}
+
 export function telegramSupplierTables(order = {}, onlySupplier = '') {
   const rows = (Array.isArray(order?.pozycje) ? order.pozycje : []).map((item) => ({
     code: text(supplierProductIdentifier(item).value || 'BRAK KODU', 80).trim(),
@@ -286,24 +300,24 @@ export function telegramSupplierTables(order = {}, onlySupplier = '') {
     for (let offset = 0; offset < items.length; offset += 18) {
       const part = items.slice(offset, offset + 18);
       const partNumber = Math.floor(offset / 18) + 1, partCount = Math.ceil(items.length / 18);
-      const table = [
-        `${telegramCell('KOD', 15)} ${telegramCell('NAZWA', 30)} ${telegramCell('ZAMAWIANA ILOŚĆ', 16)}`,
-        `${'-'.repeat(15)} ${'-'.repeat(30)} ${'-'.repeat(16)}`,
-        ...part.map((item) => `${telegramCell(item.code, 15)} ${telegramCell(item.name, 30)} ${telegramCell(item.quantity, 16)}`),
-      ].join('\n');
+      const rows = part.map((item, index) => [
+        `<b>${offset + index + 1}. ${telegramHtml(item.name)}</b>`,
+        `<code>${telegramHtml(item.code)}</code>  ·  <b>${telegramHtml(item.quantity)} szt.</b>`,
+      ].join('\n')).join('\n\n');
       messages.push({
         supplier,
         text: [
-          `<b>🏭 Zamówienie do producenta · ${telegramHtml(supplier)}</b>`,
-          `<b>${telegramHtml(order?.numer || order?.id || 'Zlecenie producenta')}</b> · ${items.length} pozycji · ${telegramHtml(totalQuantity)} szt.${partCount > 1 ? ` · część ${partNumber}/${partCount}` : ''}`,
+          `<b>🏭 ZAMÓWIENIE · ${telegramHtml(supplier)}</b>`,
+          `<b>${telegramHtml(order?.numer || order?.id || 'Zlecenie producenta')}</b>${partCount > 1 ? ` · część ${partNumber}/${partCount}` : ''}`,
+          `${items.length} ${polishForm(items.length, 'pozycja', 'pozycje', 'pozycji')} · <b>${telegramHtml(totalQuantity)} szt.</b>`,
           '',
-          'Cześć,',
-          'przesyłamy dzisiejsze zamówienie:',
+          '<b>NAZWA PRODUKTU · KOD · ZAMAWIANA ILOŚĆ</b>',
           '',
-          `<pre>${telegramHtml(table)}</pre>`,
-          partNumber === partCount ? 'Pozdrowienia dla całej ekipy!\n<b>Artway-TM</b>' : '<i>Dalsza część tabeli w następnej wiadomości.</i>',
+          rows,
           '',
-          '<i>Podgląd wewnętrzny — ta wiadomość nie wysyła zamówienia producentowi.</i>',
+          partNumber === partCount ? '<b>Razem: ' + telegramHtml(totalQuantity) + ' szt.</b>\n\nPozdrowienia dla całej ekipy!\n<b>Artway-TM</b>' : '<i>Dalsza część zamówienia w następnej wiadomości.</i>',
+          '',
+          '<i>Podgląd wewnętrzny z aktualnej rewizji Planu zatowarowania.</i>',
         ].join('\n'),
       });
     }
@@ -366,13 +380,35 @@ export function telegramCanonicalSupplierPreviews(settings = {}, options = {}) {
       throw error;
     }
   }
-  return selected.flatMap((draft) => telegramSupplierTables(draft, supplier).map((message) => ({
-    ...message,
-    draftId: text(draft?.id, 160).trim(),
-    documentNumber: text(draft?.numer || draft?.id, 160).trim(),
-    revision: Math.max(1, Number(draft?.revision) || 1),
-    status: text(draft?.status || 'szkic', 100).trim(),
-  })));
+  const supplierRecords = Array.isArray(settings?.artway_producenci) ? settings.artway_producenci : [];
+  return selected.flatMap((draft) => {
+    const suppliersWithDocuments = new Set();
+    return telegramSupplierTables(draft, supplier).map((message) => {
+    const supplierRecord = supplierRecords.find((record) => telegramSupplierKey(record?.name || record?.nazwa) === telegramSupplierKey(message.supplier)) || { name: message.supplier };
+    const email = renderSupplierOrderEmail(draft, supplierRecord);
+    const csvRows = email.rows.map((row) => [row.kod, row.nazwa, telegramSupplierQuantity(row.ilosc)]
+      .map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(';'));
+    const editable = {
+      filename: `zamowienie-${telegramSupplierFilename(message.supplier, 'producent')}-${telegramSupplierFilename(draft?.numer || draft?.id, 'dokument')}.csv`,
+      contentType: 'text/csv; charset=utf-8',
+      content: ['KOD;NAZWA;ZAMAWIANA ILOŚĆ', ...csvRows].join('\r\n'),
+      kind: 'editable-order',
+    };
+    const supplierKey = telegramSupplierKey(message.supplier);
+    const includeDocuments = !suppliersWithDocuments.has(supplierKey);
+    suppliersWithDocuments.add(supplierKey);
+    return {
+      ...message,
+      draftId: text(draft?.id, 160).trim(),
+      documentNumber: text(draft?.numer || draft?.id, 160).trim(),
+      revision: Math.max(1, Number(draft?.revision) || 1),
+      status: text(draft?.status || 'szkic', 100).trim(),
+      documents: includeDocuments
+        ? [editable, ...(email.attachments || []).map((item) => ({ ...item, kind: 'comarch-optima' }))]
+        : [],
+    };
+    });
+  });
 }
 
 export async function telegramApi(method, payload = {}, env = process.env) {
@@ -430,6 +466,71 @@ export async function sendTelegramHtml(message, options = {}, env = process.env)
     ...(Number(options.messageThreadId) > 0 ? { message_thread_id: Number(options.messageThreadId) } : {}),
     ...(options.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
   }, env);
+}
+
+function telegramDocumentInput(document = {}) {
+  const filename = text(document?.filename || 'dokument.txt', 160).trim()
+    .replace(/[^\p{L}\p{N}._-]+/gu, '-')
+    .replace(/^-+|-+$/g, '') || 'dokument.txt';
+  const content = typeof document?.content === 'string' ? document.content : '';
+  if (!content) {
+    const error = new Error('Dokument Telegram nie zawiera treści.');
+    error.code = 'telegram_document_empty'; error.status = 422; throw error;
+  }
+  if (Buffer.byteLength(content, 'utf8') > 8 * 1024 * 1024) {
+    const error = new Error('Dokument Telegram przekracza bezpieczny limit 8 MB.');
+    error.code = 'telegram_document_too_large'; error.status = 413; throw error;
+  }
+  return { filename, content, contentType: text(document?.contentType || 'text/plain; charset=utf-8', 120).trim() };
+}
+
+async function telegramDocumentApi(document, chatId, options = {}, env = process.env) {
+  const config = telegramConfig(env), input = telegramDocumentInput(document);
+  if (!config.token) {
+    const error = new Error('Telegram nie jest skonfigurowany na serwerze. Brakuje TELEGRAM_BOT_TOKEN.');
+    error.code = 'telegram_not_configured'; error.status = 503; throw error;
+  }
+  const form = new FormData();
+  form.set('chat_id', String(chatId));
+  form.set('document', new Blob([input.content], { type: input.contentType }), input.filename);
+  if (options.caption) form.set('caption', text(options.caption, 900).trim());
+  if (options.parseMode) form.set('parse_mode', text(options.parseMode, 20).trim());
+  if (options.silent === true) form.set('disable_notification', 'true');
+  if (Number(options.messageThreadId) > 0) form.set('message_thread_id', String(Number(options.messageThreadId)));
+  if (options.replyMarkup) form.set('reply_markup', JSON.stringify(options.replyMarkup));
+  const response = await fetch(`https://api.telegram.org/bot${config.token}/sendDocument`, { method: 'POST', body: form });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    const error = new Error(text(data?.description || `Telegram HTTP ${response.status}`, 500));
+    error.code = 'telegram_error'; error.status = response.status || 502; throw error;
+  }
+  return data.result;
+}
+
+/** Wysyła edytowalny plik do tego samego pokoju zespołu co wiadomości tekstowe. */
+export async function sendTelegramDocument(document, options = {}, env = process.env) {
+  const config = telegramConfig(env);
+  const teamUserIds = new Set([...config.teamUserIds, ...(Array.isArray(options.teamUserIds) ? options.teamUserIds : [])]
+    .map((value) => String(value || '').trim()).filter((value) => /^[1-9]\d*$/.test(value)));
+  if (!options.chatId && config.sharedMode === 'private-room' && teamUserIds.size) {
+    const recipients = [...teamUserIds].slice(0, 20);
+    const results = await Promise.allSettled(recipients.map((chatId) => telegramDocumentApi(document, chatId, options, env)));
+    const delivered = results.flatMap((result, index) => result.status === 'fulfilled'
+      ? [{ chatId: recipients[index], result: result.value }]
+      : []);
+    if (!delivered.length) throw results.find((result) => result.status === 'rejected')?.reason || new Error('Nie udało się dostarczyć dokumentu do zespołu.');
+    return {
+      ...delivered[0].result,
+      message_ids: delivered.map((item) => ({ chat_id: item.chatId, message_id: item.result?.message_id || null })),
+      delivered_count: delivered.length,
+    };
+  }
+  const chatId = options.chatId || config.chatId;
+  if (!chatId) {
+    const error = new Error('Telegram nie ma ustawionego czatu docelowego.');
+    error.code = 'telegram_not_configured'; error.status = 503; throw error;
+  }
+  return telegramDocumentApi(document, chatId, options, env);
 }
 
 export async function editTelegramHtml(message, options = {}, env = process.env) {
