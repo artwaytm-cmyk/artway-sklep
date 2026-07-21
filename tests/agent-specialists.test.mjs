@@ -24,8 +24,9 @@ function openAiPayload(fields = []) {
 }
 
 test('zespół zawiera konkretne role do treści, promocji, komunikacji i nadzoru', () => {
-  assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'allegro_offer', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality', 'operations_supervisor']);
+  assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'allegro_offer', 'allegro_compliance', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality', 'operations_supervisor']);
   assert.match(SPECIALISTS.allegro_offer.rules, /poza Allegro/i);
+  assert.match(SPECIALISTS.allegro_compliance.rules, /dostaw/i);
   assert.match(SPECIALISTS.supplier_message.rules, /cen/i);
 });
 
@@ -312,6 +313,34 @@ test('kontrola Allegro zatrzymuje niedozwolony opis i planuje automatyczną pono
   assert.equal(product.opis, 'Opis');
   assert.equal(product.contentEditorial.status, 'retry_pending');
   assert.match(product.contentEditorial.warnings.join(' '), /allegro_compliance/i);
+});
+
+test('Strażnik Allegro automatycznie poprawia logistykę zatrzymaną po pierwszej redakcji', async () => {
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 103, nazwa: 'Origami statek', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis źródłowy.', gtin: '5906018026658', allegroOfferId: '14138119461' }] }, rev: 1 } });
+  const shared = [
+    { key: 'title', label: 'Nazwa', value: 'Moje pierwsze origami – statek – Alexander' },
+    { key: 'short_description', label: 'Opis krótki', value: 'Zestaw origami dla początkujących rozwijający wyobraźnię i sprawność manualną.' },
+    { key: 'seo_title', label: 'SEO title', value: 'Moje pierwsze origami statek – Alexander' },
+    { key: 'seo_description', label: 'SEO description', value: 'Zestaw origami Alexander dla początkujących, wspierający wyobraźnię i sprawność manualną.' },
+    { key: 'seo_keywords', label: 'Frazy', value: 'origami statek, Alexander' },
+  ];
+  const unsafe = openAiPayload([...shared, { key: 'long_description', label: 'Opis pełny', value: '<h2>Origami dla początkujących</h2><p>Zestaw pozwala złożyć papierowy statek i rozwija sprawność manualną.</p><p>Wysyłka w 24 godziny kurierem InPost.</p>' }]);
+  const safe = openAiPayload([...shared, { key: 'long_description', label: 'Opis pełny', value: '<h2>Origami dla początkujących</h2><p>Zestaw pozwala złożyć papierowy statek i rozwija sprawność manualną.</p><p>Czytelna instrukcja prowadzi przez kolejne etapy składania modelu.</p>' }]);
+  let calls = 0;
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'test-key', now: () => new Date('2026-07-21T13:00:00.000Z'),
+    fetchImpl: async () => new Response(JSON.stringify(++calls === 1 ? unsafe : safe), { status: 200, headers: { 'content-type': 'application/json' } }),
+  });
+  const cycle = await service.automaticCycle();
+  assert.equal(calls, 2);
+  assert.equal(cycle.applied.length, 1);
+  assert.equal(cycle.prepared[0].status, 'auto_applied');
+  const status = await service.status();
+  assert.deepEqual(status.history.slice(0, 2).map((item) => item.specialist), ['allegro_compliance', 'product_content']);
+  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  assert.match(product.opis, /papierowy statek/i);
+  assert.doesNotMatch(product.opis, /wysyłk|kurier|InPost/i);
+  assert.equal(product.contentEditorial.status, 'ready');
 });
 
 test('nowa wiadomość tworzy szkic i decyzję, lecz nie jest wysyłana automatycznie', async () => {

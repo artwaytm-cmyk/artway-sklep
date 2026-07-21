@@ -2710,7 +2710,7 @@ function seoPropozycja(p = {}) {
   title = seoSkroc(title, 60);
   let description = seoBezHtml(p.opisKrotki || p.krotkiOpis || p.opis);
   if (!description) description = `${name}${category ? ` z kategorii ${category}` : ''}. Sprawdź szczegóły, dostępność i bezpieczne zakupy w Artway-TM.`;
-  if (description.length < 80) description += ' Poznaj opis, aktualną cenę i warunki dostawy w sklepie Artway-TM.';
+  if (description.length < 80) description += ' Poznaj najważniejsze cechy produktu i jego zastosowanie.';
   const keywords = [...new Set([name, category, brand, p.gtin || p.ean, p.sku].map((v) => tekst(v, 500).trim()).filter(Boolean))].slice(0, 8).join(', ');
   return { seoTitle: title, seoDescription: seoSkroc(description, 158), seoKeywords: keywords };
 }

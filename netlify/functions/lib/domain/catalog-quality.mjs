@@ -228,7 +228,7 @@ function seoProposal(product) {
   if (title.length > 60) title = `${title.slice(0, 59).replace(/\s+\S*$/, '')}…`;
   const base = catalogPlainText(valueFor(product, ['opisKrotki', 'krotkiOpis', 'opis', 'description']), 1000);
   let description = base || `${name}${category ? ` z kategorii ${category}` : ''}. Sprawdź szczegóły produktu w sklepie Artway-TM.`;
-  if (description.length < 80) description += ' Poznaj opis, aktualną cenę, dostępność i warunki dostawy.';
+  if (description.length < 80) description += ' Poznaj najważniejsze cechy produktu i jego zastosowanie.';
   if (description.length > 158) description = `${description.slice(0, 157).replace(/\s+\S*$/, '')}…`;
   return { seoTitle: title, seoDescription: description };
 }

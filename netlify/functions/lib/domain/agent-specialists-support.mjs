@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { allegroCheckText } from '../allegro-compliance.mjs';
+import { allegroCheckText, allegroSanitizePlainText } from '../allegro-compliance.mjs';
 import { AGENT_ACTION_POLICY, NEVER_AUTOMATIC } from './agent-action-policy.mjs';
 import { decisionFingerprint, decisionSubjectKey, normalizeDecisionReceipt } from './agent-decision-state.mjs';
 
@@ -27,7 +27,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-21.1';
+const PROMPT_VERSION = '2026-07-21.2';
 const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription' });
 
 const SPECIALISTS = Object.freeze({
@@ -36,15 +36,26 @@ const SPECIALISTS = Object.freeze({
     icon: '✨', label: 'Redaktor produktu', area: 'Katalog i sklep',
     description: 'Tworzy spójny tytuł, krótki i pełny opis oraz pola SEO wyłącznie z przekazanych faktów.',
     fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
-    scenario: { id: 'catalog-editorial', version: '2026-07-21.1' },
-    rules: 'Nazwę ze źródła traktuj jako fakt o tożsamości, a nie gotowy tytuł. Usuń dopiski sklepu źródłowego, powtórzenia i chaos wielkich liter; ułóż naturalną nazwę sprzedażową, zachowując markę, model i wariant. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach. Treść jest wspólna dla sklepu i Allegro: nigdy nie dodawaj telefonu, e-maila, adresu strony, zachęty do kontaktu, negocjowania ceny, zewnętrznej płatności ani sprzedaży poza Allegro.',
+    scenario: { id: 'catalog-editorial', version: '2026-07-21.2' },
+    rules: 'Nazwę ze źródła traktuj jako fakt o tożsamości, a nie gotowy tytuł. Usuń dopiski sklepu źródłowego, powtórzenia i chaos wielkich liter; ułóż naturalną nazwę sprzedażową, zachowując markę, model i wariant. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach. Treść jest wspólna dla sklepu i Allegro: nigdy nie dodawaj telefonu, e-maila, adresu strony, zachęty do kontaktu, negocjowania ceny, zewnętrznej płatności, sprzedaży poza Allegro ani informacji o dostawie, wysyłce, przewoźniku, paczkomacie, nadaniu, odbiorze, kosztach lub terminach realizacji.',
   },
   allegro_offer: {
     assistantId: 'asst_16UEvdbo3boUso6xyYeANYnQ', platformPrompt: { id: 'pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7', version: '1' },
     icon: '🟠', label: 'Redaktor oferty Allegro', area: 'Allegro',
     description: 'Przygotowuje tytuł i układ opisu zgodny z zasadami Allegro, bez kontaktu i sprzedaży poza platformą.',
     fields: ['allegro_title', 'allegro_description', 'selling_points', 'missing_parameters'],
-    rules: 'Nigdy nie dodawaj telefonu, e-maila, adresu strony, prośby o kontakt, negocjowania ceny ani zachęty do zakupu poza Allegro. Opis: wyłącznie p, h2, ul, li i strong, bez linków.',
+    rules: 'Nigdy nie dodawaj telefonu, e-maila, adresu strony, prośby o kontakt, negocjowania ceny, zachęty do zakupu poza Allegro ani informacji o dostawie, wysyłce, przewoźniku, paczkomacie, nadaniu, odbiorze, kosztach lub terminach realizacji. Opis: wyłącznie p, h2, ul, li i strong, bez linków.',
+  },
+  allegro_compliance: {
+    // Osobna rola uzupełnia redaktora produktu. Korzysta z tego samego
+    // opublikowanego profilu bazowego Allegro, ale dostaje węższe reguły
+    // kontrolne i uruchamia się wyłącznie przy wykrytym naruszeniu.
+    assistantId: 'asst_16UEvdbo3boUso6xyYeANYnQ', platformPrompt: { id: 'pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7', version: '1' },
+    icon: '⚖️', label: 'Strażnik zgodności Allegro', area: 'Allegro • kontrola końcowa',
+    description: 'Naprawia wyłącznie treść odrzuconą przez bramkę zgodności i przekazuje ją ponownie do deterministycznej walidacji.',
+    fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
+    scenario: { id: 'allegro-compliance-review', version: '2026-07-21.2' },
+    rules: 'Zachowaj wszystkie potwierdzone fakty produktu i układ HTML, lecz usuń całe zdania lub punkty dotyczące kontaktu, sprzedaży poza Allegro, płatności, dostawy, wysyłki, przewoźnika, paczkomatu, nadania, odbioru, kosztów albo terminów realizacji. Nie zastępuj ich inną informacją logistyczną i niczego nie zgaduj. Zwróć kompletny zestaw pól redakcyjnych.',
   },
   customer_reply: {
     assistantId: 'asst_M2ZRdoHVzQ0jIzYZ3TCLwcoI', platformPrompt: { id: 'pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421', version: '1' },
@@ -312,7 +323,7 @@ function normalizeResult(raw = {}, specialist) {
     readyForApproval: raw.readyForApproval === true && missingFacts.length === 0,
     complianceStatus: ['ready', 'needs_review', 'blocked_missing_facts'].includes(raw.complianceStatus) ? raw.complianceStatus : (missingFacts.length ? 'blocked_missing_facts' : 'needs_review'),
   };
-  return specialist === 'product_content' ? normalizeProductContentEditorialResult(result) : result;
+  return ['product_content', 'allegro_compliance'].includes(specialist) ? normalizeProductContentEditorialResult(result) : result;
 }
 
 function normalizeProductContentEditorialResult(result = {}) {
@@ -367,13 +378,16 @@ function responseError(response, payload) {
 }
 
 function sourceEditorialFacts(value = '', limit = 30_000) {
-  return clean(value, limit)
+  const cleaned = clean(value, limit)
     .replace(/\bdodaj\s+do\s+(?:por[oó]wnania|listy\s+zakupowej|koszyka)\b/gi, ' ')
     .replace(/\brozmiar\s*:?\s*uniwersalny\s*[,;:-]?\s*\d{1,6}\s*szt(?:uk(?:a|i|ę|om)?|\.)?(?![a-ząćęłńóśźż])/gi, ' ')
     .replace(/\bprodukt\s+(?:jest\s+)?dost[eę]pn(?:y|a|e)\b/gi, ' ')
     .replace(/\bwysy[łl]ka\s+w\s+\S+|sprawd[źz]\s+czasy\s+i\s+koszty\s+wysy[łl]ki/gi, ' ')
     .replace(/\b\d+[,.]\d{2}\s*z[łl](?:\s*brutto\s*\/\s*\d+\s*szt\.?)?/gi, ' ')
     .replace(/(?:\s*[•|]\s*|\s{2,})/g, ' ').trim();
+  // Ten sam filtr, który chroni zapis do Allegro, czyści materiał wejściowy
+  // jeszcze przed przekazaniem go któremukolwiek redaktorowi.
+  return allegroSanitizePlainText(cleaned).text;
 }
 
 function productFacts(product = {}) {
@@ -456,7 +470,7 @@ function productEditorialQuality(product = {}) {
 }
 
 function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
-  const assessedResult = run.specialist === 'product_content' ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
+  const assessedResult = ['product_content', 'allegro_compliance'].includes(run.specialist) ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
   const patch = productPatch(assessedResult), fields = Object.keys(patch);
   if (settings.autoApplyProductEditorial === false) return { eligible: false, reason: 'automatic_editorial_disabled', fields };
   if (!fields.length) return { eligible: false, reason: 'empty_patch', fields };
@@ -468,11 +482,11 @@ function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
   if (!coreComplete) return { eligible: false, reason: 'incomplete_editorial', fields };
   if (Number(assessedResult?.confidence || 0) < 0.25) return { eligible: false, reason: 'invalid_editorial_output', fields };
   if (editorialIdentityConflict(assessedResult)) return { eligible: false, reason: 'product_identity_conflict', fields };
-  const allegroTarget = run.target?.channels === 'shared_store_and_allegro' || run.target?.allegro === true;
-  if (allegroTarget) {
-    const compliance = allegroCheckText([patch.nazwa, patch.opisKrotki, patch.opis, patch.allegroTitle, patch.allegroDescription].filter(Boolean).join('\n'));
-    if (!compliance.ok) return { eligible: false, reason: 'allegro_compliance', fields, violations: compliance.violations.map((item) => item.label) };
-  }
+  // Treść karty jest wspólna dla sklepu i Allegro, dlatego zgodność obowiązuje
+  // już dla redakcji sklepowej. Późniejsze podpięcie kanału nie może ujawnić
+  // starej informacji logistycznej.
+  const compliance = allegroCheckText([patch.nazwa, patch.opisKrotki, patch.opis, patch.allegroTitle, patch.allegroDescription].filter(Boolean).join('\n'));
+  if (!compliance.ok) return { eligible: false, reason: 'allegro_compliance', fields, violations: compliance.violations.map((item) => item.label) };
   const editorialQuality = productEditorialTextQuality(patch);
   if (!editorialQuality.clean) return { eligible: false, reason: 'source_page_noise', fields, violations: editorialQuality.issues };
   return { eligible: true, reason: 'safe_editorial_policy', fields, modelNotes: [...(assessedResult?.warnings || []), ...(assessedResult?.missingFacts || [])].slice(0, 20) };

@@ -41,6 +41,28 @@ test('blokada rozpoznaje szerokie warianty kontaktu przed zakupem', () => {
   assert.equal(allegroCheckText('Gra zawiera 100 pytań i 4 pionki.').ok, true);
 });
 
+test('opis Allegro usuwa każdą informację logistyczną i pozostawia fakty o produkcie', () => {
+  const examples = [
+    'Wysyłka w 24 godziny.',
+    'Dostawa kurierem InPost kosztuje 20 zł.',
+    'Darmowa dostawa od 200 zł.',
+    'Informacje o dostawie znajdziesz poniżej.',
+    'Możliwy odbiór w paczkomacie.',
+    'Przesyłkę nadamy jutro.',
+    'Sprawdź koszty wysyłki i termin realizacji.',
+  ];
+  for (const text of examples) {
+    const check = allegroCheckText(text);
+    assert.equal(check.ok, false, text);
+    assert.ok(check.violations.some((item) => item.id === 'delivery_information'), text);
+  }
+  const sanitized = allegroSanitizePlainText('Gra rozwija wyobraźnię. Wysyłka w czwartek. Zestaw zawiera 48 kart.');
+  assert.equal(sanitized.check.ok, true);
+  assert.match(sanitized.text, /Gra rozwija wyobraźnię/);
+  assert.match(sanitized.text, /48 kart/);
+  assert.doesNotMatch(sanitized.text, /wysyłk/i);
+});
+
 test('blokada rozpoznaje encje, komentarze i niewidoczne znaki', () => {
   const examples = [
     'Skontaktuj&nbsp;się przed zakupem.',
@@ -64,6 +86,21 @@ test('centralna bramka oczyszcza każdy zapis opisu do API Allegro', () => {
   assert.equal(result.compliance.ok, true);
   assert.match(JSON.stringify(result.body.description), /Ćwiczy pamięć/);
   assert.doesNotMatch(JSON.stringify(result.body.description), /kontakt|przed dokonaniem/iu);
+});
+
+test('centralna bramka usuwa dostawę także z aktualizacji istniejącej oferty', () => {
+  const result = allegroSecureOfferWrite({
+    path: '/sale/product-offers/987', method: 'PATCH', body: {
+      name: 'Moje pierwsze origami statek Alexander',
+      description: { sections: [{ items: [{ type: 'TEXT', content: '<h2>Origami dla dzieci</h2><p>Zestaw pozwala złożyć papierowy statek.</p><p>Wysyłka w 24 godziny kurierem InPost.</p>' }] }] },
+    },
+  });
+  const description = JSON.stringify(result.body.description);
+  assert.equal(result.checked, true);
+  assert.equal(result.changed, true);
+  assert.match(description, /papierowy statek/i);
+  assert.doesNotMatch(description, /wysyłk|kurier|InPost/i);
+  assert.ok(result.compliance.removed.some((item) => item.violations.some((violation) => violation.id === 'delivery_information')));
 });
 
 test('centralna bramka nie pozwala utworzyć oferty bez kontrolowanego opisu', () => {
