@@ -55,7 +55,7 @@ function publicError(error = '') {
 }
 
 function changeCount(label, data = {}) {
-  if (label === 'zamowienia') return Math.max(0, Number(data.imported_new || 0)) + Math.max(0, Number(data.refreshed || 0));
+  if (label === 'zamowienia') return Math.max(0, Number(data.imported_new || 0)) + Math.max(0, Number(data.changed_orders || 0));
   if (label === 'komunikacja') return Math.max(0, Number(data.syncSummary?.newBuyerMessages || 0));
   if (label === 'tresci-gpt-nano') return Math.max(0, Number(data.cycle?.applied?.length || 0)) + Math.max(0, Number(data.cycle?.decisions?.length || 0));
   return Math.max(0, Number(data.changed ?? data.updated ?? data.autoMapped ?? 0));

@@ -92,7 +92,7 @@ import {
 import { createStoreOrderSupplierReconciliation } from './store-order-supplier-reconciliation.mjs';
 import { markAllegroInventoryTransition, markAllegroInventoryTransitions, resolveAllegroBaselineCutover } from './domain/allegro-supplier-demand.mjs';
 import { allegroOrderNeedsLiveRefresh, createAllegroOrderArchive, selectAllegroStatusRefreshCandidates } from './domain/allegro-order-retention.mjs';
-import { mergeRecentAllegroOrders } from './domain/allegro-order-sync-window.mjs';
+import { countChangedAllegroOrderEvents, mergeRecentAllegroOrders } from './domain/allegro-order-sync-window.mjs';
 import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
 import { createProductSaleChannelSynchronizer } from './domain/product-sale-channel-links.mjs';
 import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
@@ -3185,14 +3185,15 @@ export default async (req) => {
       }
       const retention = await allegroOrderArchive.archive(items, { now: new Date(), retentionDays: 30 });
       items = retention.items;
-      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: baselineCreated ? 0 : dodane, refreshed: odswiezone, refreshed_from_recent_list: odswiezoneZListy, refreshed_individually: Math.max(0, odswiezone - odswiezoneZListy), status_refresh_candidates: doAktualizacji.length, filtered: pominieteNoweTerminalne, mode: 'allegro_status_authoritative_recent_snapshot_v2', retention_days: 30, archive: retention.summary, archived_now: retention.archived, baseline_at: baselineAt, baseline_created: baselineCreated, baseline_archived: baselineArchived, agent };
+      const changedOrders = countChangedAllegroOrderEvents(poprzednie, items);
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: baselineCreated ? 0 : dodane, changed_orders: changedOrders, refreshed: odswiezone, refreshed_from_recent_list: odswiezoneZListy, refreshed_individually: Math.max(0, odswiezone - odswiezoneZListy), status_refresh_candidates: doAktualizacji.length, filtered: pominieteNoweTerminalne, mode: 'allegro_status_authoritative_recent_snapshot_v2', retention_days: 30, archive: retention.summary, archived_now: retention.archived, baseline_at: baselineAt, baseline_created: baselineCreated, baseline_archived: baselineArchived, agent };
       await zapisz('allegro_orders', rec);
       // Marker cutover jest commitem końcowym: awaria zapisu zamówień nie może
       // oznaczyć baseline jako zakończonego. Ponowne archiwizowanie po awarii
       // samego markera jest bezpieczne i idempotentne.
       if (baselineMarkerMissing) await zapisz('allegro_orders_baseline_v2', { baseline_at: baselineAt, reason: baselineCreated ? 'existing_orders_confirmed_handled' : 'recovered_from_orders_record', created_at: baselineAt });
       const plan = await allegroZapisStanIMozeUzgodnijPlan(items);
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, mappings: orderMappings || undefined, archive: retention.summary, archived: retention.archived, retention_days: 30, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode, baseline_at: rec.baseline_at, baseline_created: rec.baseline_created, baseline_archived: rec.baseline_archived, agent, ...plan });
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, mappings: orderMappings || undefined, archive: retention.summary, archived: retention.archived, retention_days: 30, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, changed_orders: rec.changed_orders, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode, baseline_at: rec.baseline_at, baseline_created: rec.baseline_created, baseline_archived: rec.baseline_archived, agent, ...plan });
     }
 
     // ─── ALLEGRO: lokalny etap obsługi zamówienia (admin) ───

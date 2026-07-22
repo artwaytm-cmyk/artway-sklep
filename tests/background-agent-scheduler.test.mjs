@@ -30,6 +30,18 @@ test('brak nowych zdarzeń nie uruchamia ponownie ciężkich zadań przed termin
   assert.deepEqual(plan.queue, []);
 });
 
+test('nowe zdarzenie omija zegar i natychmiast tworzy małą kolejkę pracy', () => {
+  const at = '2026-07-22T09:55:00Z';
+  const plan = buildBackgroundTaskQueue({
+    runtime: { lastRun: completedRun(at, ['tresci-gpt-nano', 'agent-autonomiczny', 'oferty-lekkie', 'oferty-pelne']) },
+    specialists: { lastCycle: { editorialProgress: { pending: 20 } } },
+    operations: { summary: { activeAllegro: 4 } },
+    detectorResults: [{ changes: 1 }],
+    now: new Date('2026-07-22T10:00:00Z'),
+  });
+  assert.deepEqual(plan.queue.map((item) => item.id), ['tresci-gpt-nano', 'agent-autonomiczny']);
+});
+
 test('historia wykonania jest trwałym zegarem harmonogramu kolejki', () => {
   const runtime = { history: [completedRun('2026-07-22T08:00:00Z', ['oferty-lekkie'])] };
   assert.equal(lastStepAt(runtime, 'oferty-lekkie'), Date.parse('2026-07-22T08:00:00Z'));

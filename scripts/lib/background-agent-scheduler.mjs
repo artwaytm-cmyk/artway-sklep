@@ -37,19 +37,19 @@ function buildBackgroundTaskQueue({ runtime = {}, specialists = {}, operations =
     .some((value) => Number(value || 0) > 0);
   const candidates = [];
 
-  const addIfDue = (id, enabled = true, eventBoost = 0) => {
+  const addIfDue = (id, enabled = true, eventBoost = 0, forceForEvent = false) => {
     if (!enabled) return;
     const definition = JOBS[id], previous = lastStepAt(runtime, id);
     const ageMinutes = previous ? Math.max(0, (nowMs - previous) / MINUTE) : Number.POSITIVE_INFINITY;
-    if (previous && ageMinutes < definition.intervalMinutes) return;
+    if (previous && ageMinutes < definition.intervalMinutes && !forceForEvent) return;
     const overdue = Number.isFinite(ageMinutes) ? Math.min(100, ageMinutes / definition.intervalMinutes * 10) : 100;
     candidates.push({ id, priority: definition.priority + eventBoost + overdue, dueBecause: previous ? `minęło ${Math.floor(ageMinutes)} min` : 'pierwsze wykonanie' });
   };
 
   // Konkretne nowe zdarzenie ma pierwszeństwo. Bez zmian katalog jest obrabiany
   // sukcesywnie w małych porcjach, a nie szerokim przebiegiem wszystkich usług.
-  addIfDue('tresci-gpt-nano', changes > 0 || pendingEditorial > 0, changes > 0 ? 80 : 0);
-  addIfDue('agent-autonomiczny', changes > 0 || hasOperationalWork, changes > 0 ? 35 : 0);
+  addIfDue('tresci-gpt-nano', changes > 0 || pendingEditorial > 0, changes > 0 ? 80 : 0, changes > 0);
+  addIfDue('agent-autonomiczny', changes > 0 || hasOperationalWork, changes > 0 ? 35 : 0, changes > 0);
   addIfDue('oferty-pelne', true);
   addIfDue('oferty-lekkie', true);
 
