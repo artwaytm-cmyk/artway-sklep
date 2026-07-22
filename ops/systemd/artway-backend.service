@@ -1,0 +1,42 @@
+[Unit]
+Description=Artway-TM shop backend
+Wants=network-online.target postgresql.service
+After=network-online.target postgresql.service
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+EnvironmentFile=/srv/artway/shop/.env.netlify
+EnvironmentFile=/srv/artway/agent/.env
+EnvironmentFile=-/srv/artway/ops/secrets/allegro.env
+EnvironmentFile=/srv/artway/ops/secrets/session.env
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3000
+Environment=ARTWAY_PUBLIC_ORIGIN=https://artwaytm.pl
+Environment=ARTWAY_ALLEGRO_CREDENTIALS_FILE=/srv/artway/ops/secrets/allegro.env
+Environment=ARTWAY_STORE_DRIVER=postgres
+Environment=DATABASE_URL=postgresql:///artway?host=/var/run/postgresql
+Environment=TELEGRAM_SHARED_MODE=private-room
+ExecStart=/usr/bin/node /srv/artway/shop/server.mjs
+Restart=always
+RestartSec=2s
+TimeoutStopSec=20s
+KillSignal=SIGTERM
+SyslogIdentifier=artway-backend
+LimitNOFILE=65536
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/artway/ops/secrets
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

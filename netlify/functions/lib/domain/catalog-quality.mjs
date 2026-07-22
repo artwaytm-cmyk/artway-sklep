@@ -1,3 +1,5 @@
+import { canonicalManufacturerName } from './product-field-validation.mjs';
+
 const asArray = (value) => Array.isArray(value) ? value : [];
 const asObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 const text = (value, max = 10000) => String(value ?? '').replace(/\u0000/g, '').trim().slice(0, max);
@@ -226,7 +228,7 @@ function seoProposal(product) {
   if (title.length > 60) title = `${title.slice(0, 59).replace(/\s+\S*$/, '')}…`;
   const base = catalogPlainText(valueFor(product, ['opisKrotki', 'krotkiOpis', 'opis', 'description']), 1000);
   let description = base || `${name}${category ? ` z kategorii ${category}` : ''}. Sprawdź szczegóły produktu w sklepie Artway-TM.`;
-  if (description.length < 80) description += ' Poznaj opis, aktualną cenę, dostępność i warunki dostawy.';
+  if (description.length < 80) description += ' Poznaj najważniejsze cechy produktu i jego zastosowanie.';
   if (description.length > 158) description = `${description.slice(0, 157).replace(/\s+\S*$/, '')}…`;
   return { seoTitle: title, seoDescription: description };
 }
@@ -242,7 +244,7 @@ export function safeCatalogPatch(product = {}) {
     if (!text(product.ean)) patch.ean = gtin;
   }
 
-  const manufacturer = catalogNormalizeName(valueFor(product, ['producent', 'marka', 'brand'])) || inferManufacturer(product);
+  const manufacturer = canonicalManufacturerName(catalogNormalizeName(valueFor(product, ['producent', 'marka', 'brand']))) || canonicalManufacturerName(inferManufacturer(product));
   if (manufacturer) {
     if (!text(product.producent)) patch.producent = manufacturer;
     if (!text(product.marka)) patch.marka = manufacturer;
@@ -289,6 +291,7 @@ const ISSUE_DEFINITIONS = {
   missing_image: ['Brak prawidłowego zdjęcia', 'critical', 14],
   placeholder_content: ['Opis jest technicznym tekstem zastępczym', 'critical', 16],
   missing_brand: ['Brak producenta lub marki', 'warning', 6],
+  invalid_brand: ['Producent nie jest nazwą — przenieś numer do kodu producenta', 'warning', 8],
   missing_ean: ['Brak kodu EAN/GTIN', 'warning', 6],
   invalid_ean: ['Kod EAN/GTIN ma nieprawidłową sumę kontrolną', 'warning', 8],
   missing_identifier: ['Brak kodu własnego lub producenta', 'warning', 5],
@@ -315,7 +318,9 @@ function auditProduct(product) {
   if (!(price > 0)) add('invalid_price');
   if (!text(valueFor(product, ['kategoria', 'productType']))) add('missing_category');
   if (!validImage(valueFor(product, ['zdjecie', 'image', 'imageUrl']))) add('missing_image');
-  if (!text(valueFor(product, ['producent', 'marka', 'brand']))) add('missing_brand');
+  const manufacturerRaw = text(valueFor(product, ['producent', 'marka', 'brand']), 200);
+  if (!manufacturerRaw) add('missing_brand');
+  else if (!canonicalManufacturerName(manufacturerRaw)) add('invalid_brand');
   if (!gtin) add('missing_ean'); else if (!validGtin(gtin)) add('invalid_ean');
   if (!text(valueFor(product, ['externalId', 'external_id', 'sku', 'mpn', 'kodProducenta']))) add('missing_identifier');
   if (compact.length < 60) add('missing_short_description');
@@ -331,7 +336,7 @@ function auditProduct(product) {
     id: productId(product), name: name || `Produkt ${productId(product)}`, score, severity, issues,
     image: text(valueFor(product, ['zdjecie', 'image', 'imageUrl']), 3000),
     sourceUrl: catalogNormalizeUrl(sourceRaw), category: text(valueFor(product, ['kategoria', 'productType']), 200),
-    manufacturer: text(valueFor(product, ['producent', 'marka', 'brand']), 200),
+    manufacturer: canonicalManufacturerName(valueFor(product, ['producent', 'marka', 'brand'])),
     ean: gtin, externalId: text(valueFor(product, ['externalId', 'external_id', 'sku', 'mpn', 'kodProducenta']), 200),
     allegroOfferId: text(product.allegroOfferId, 100), safePatch: safeCatalogPatch(product),
   };

@@ -1,10 +1,26 @@
 /* GENERATED FILE — edit src/frontend/*.js and run npm run build */
 /* ═══════════ KONFIGURACJA ═══════════ */
+function odczytajUstawieniaPubliczne(){
+  const element=document.getElementById("artway-public-settings");
+  if(!element)return {};
+  try{
+    const parsed=JSON.parse(element.textContent||"{}");
+    return parsed&&typeof parsed==="object"&&!Array.isArray(parsed)?parsed:{};
+  }catch(error){
+    console.warn("Nie udało się odczytać publicznych ustawień sklepu",error);
+    return {};
+  }
+}
+const USTAWIENIA_PUBLICZNE=odczytajUstawieniaPubliczne();
+
 const DANE_FIRMY_DOMYSLNE = {
-  nazwa: "Artway-TM",
+  nazwa: "ARTWAY-TM SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ",
   identyfikator: "5882468333",
   nip: "5882468333",
-  adres: "Gryfa Pomorskiego 1/A, 84-207 Bojano"
+  regon: "388782967",
+  adres: "Gryfa Pomorskiego 1/A",
+  kodPocztowy: "84-207",
+  miasto: "Bojano"
 };
 const NUMER_PRZELEWU_TELEFON_DOMYSLNY = "530038914";
 const DOMYSLNE_PLATNOSCI = [
@@ -99,6 +115,30 @@ const DOMYSLNE_BANNERY = [
   {id:"nowosci",ikona:"✨",tytul:"Nowości w sklepie",opis:"Poznaj ostatnio dodane produkty.",przycisk:"Zobacz nowości",link:"#/nowosci",aktywny:true},
   {id:"dostawa",ikona:"🚚",tytul:"Darmowa dostawa",opis:"Dla zamówień od 200 zł.",przycisk:"Warunki dostawy",link:"#/dostawa",aktywny:true}
 ];
+const TYPY_BANNEROW={
+  "pasek-okazji":"Pasek okazji",
+  hero:"Banner główny",
+  sekcyjny:"Banner sekcyjny",
+  kafelek:"Kafelek promocyjny",
+  komunikat:"Komunikat informacyjny"
+};
+const MIEJSCA_BANNEROW={
+  "nad-hero":"Nad bannerem głównym",
+  "pod-hero":"Pod bannerem głównym",
+  "sekcja-banery":"W sekcji bannerów",
+  "nad-produktami":"Nad ofertą produktów",
+  "pod-produktami":"Pod ofertą produktów",
+  "przed-stopka":"Przed końcową sekcją strony"
+};
+function normalizujBaner(b={}){
+  const legacyDostawa=!b.typ&&!b.szerokosc&&String(b.id||"")==="dostawa";
+  const typ=TYPY_BANNEROW[b.typ]?b.typ:(legacyDostawa||b.rozmiar==="kompaktowy"&&b.styl==="informacyjny"?"komunikat":"kafelek");
+  const umiejscowienie=MIEJSCA_BANNEROW[b.umiejscowienie]?b.umiejscowienie:"sekcja-banery";
+  const szerokosci=["pelna","dwie-trzecie","polowa","jedna-trzecia"],wysokosci=["pasek","niski","standard","wysoki"],mobile=["pelny","kompaktowy","bez-obrazu","ukryty"];
+  const szerokosc=szerokosci.includes(b.szerokosc)?b.szerokosc:(legacyDostawa||b.rozmiar==="szeroki"?"pelna":"polowa");
+  const wysokosc=wysokosci.includes(b.wysokosc)?b.wysokosc:(legacyDostawa||b.rozmiar==="kompaktowy"?"niski":b.rozmiar==="szeroki"?"wysoki":"standard");
+  return {...b,typ,umiejscowienie,szerokosc,wysokosc,mobileMode:mobile.includes(b.mobileMode)?b.mobileMode:"kompaktowy",zamykany:!!b.zamykany,przyklejony:typ==="pasek-okazji"&&!!b.przyklejony};
+}
 const DOMYSLNE_PODSTRONY = {
   kontakt:{nazwa:"Kontakt",tytul:"💬 Napisz do nas",opis:"Masz pytanie o produkt, dostawę lub zamówienie? Opisz sprawę możliwie dokładnie.",szerokosc:"standard",styl:"panel",widoczna:true},
   onas:{nazwa:"O Artway-TM",tytul:"O Artway-TM",opis:"Poznaj sklep, nasze podejście i najważniejsze zasady obsługi.",szerokosc:"standard",styl:"panel",widoczna:true},
@@ -120,8 +160,55 @@ const SEKCJE_PODSTRONY = {
   powrot:{nazwa:"Link powrotu do sklepu",ikona:"↩️"}
 };
 const DOMYSLNA_KOLEJNOSC_PODSTRONY = ["naglowek","opis","tresc","powrot"];
-function pobierzBannery(){ return Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY.map(x=>({...x})); }
+function pobierzBannery(){ return (Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY).map(normalizujBaner); }
+function ustawieniaOfertyGlownej(){
+  const source=ustawienia.ofertaGlowna&&typeof ustawienia.ofertaGlowna==="object"?ustawienia.ofertaGlowna:{};
+  return {
+    tytul:"Cała oferta",
+    opis:"Porównaj produkty, dodaj wybrane do ulubionych albo od razu przejdź do koszyka.",
+    zakres:"wszystkie",
+    kategoria:"",
+    produkty:[],
+    sortowanie:"default",
+    naStronie:24,
+    wyborDzialu:"pod-produktami",
+    filtryZaawansowane:true,
+    liczniki:true,
+    ...source,
+    produkty:Array.isArray(source.produkty)?source.produkty.map(String):[]
+  };
+}
+function regulyRabatowe(){
+  const maZapisaneReguly=Object.prototype.hasOwnProperty.call(ustawienia,"kodyRabatoweZaawansowane");
+  const advanced=Array.isArray(ustawienia.kodyRabatoweZaawansowane)?ustawienia.kodyRabatoweZaawansowane:[];
+  const result=[],seen=new Set();
+  for(const raw of advanced){
+    const kod=String(raw?.kod||"").trim().toUpperCase();if(!/^[A-Z0-9_-]{2,30}$/.test(kod)||seen.has(kod))continue;
+    seen.add(kod);result.push({typ:"procent",wartosc:0,minKoszyk:0,maxRabat:0,zakres:"wszystkie",kategorie:[],produkty:[],aktywny:true,publiczny:false,...raw,kod});
+  }
+  // Starsze kody są importowane tylko raz — zanim administrator zapisze nowy moduł.
+  // Inaczej usunięty kod wracał z KONFIG przy każdym renderowaniu podstrony.
+  for(const [kod,procent] of Object.entries(maZapisaneReguly?{}:(KONFIG.kodyRabatowe||{}))){
+    const key=String(kod).toUpperCase();if(seen.has(key))continue;
+    result.push({kod:key,typ:"procent",wartosc:Number(procent)||0,minKoszyk:0,maxRabat:0,zakres:"wszystkie",kategorie:[],produkty:[],aktywny:true,publiczny:true});
+  }
+  return result;
+}
+function regulaRabatowaStatus(regula,teraz=Date.now()){
+  if(!regula||regula.aktywny===false)return {aktywna:false,powod:"Kod jest wyłączony"};
+  const start=regula.start?Date.parse(regula.start):NaN,koniec=regula.koniec?Date.parse(regula.koniec):NaN;
+  if(Number.isFinite(start)&&teraz<start)return {aktywna:false,powod:"Kod nie jest jeszcze aktywny"};
+  if(Number.isFinite(koniec)&&teraz>koniec)return {aktywna:false,powod:"Kod stracił ważność"};
+  const limit=Math.max(0,Number(regula.limitUzyc)||0),uzycia=Math.max(0,Number(regula.uzycia)||0);
+  if(limit&&uzycia>=limit)return {aktywna:false,powod:"Limit użyć kodu został wyczerpany"};
+  return {aktywna:true,powod:""};
+}
+function znajdzReguleRabatowa(kod){
+  const key=String(kod||"").trim().toUpperCase();
+  return regulyRabatowe().find(x=>x.kod===key)||null;
+}
 function ustawieniaPodstrony(id){ return {...(DOMYSLNE_PODSTRONY[id]||{}),...((ustawienia.podstrony||{})[id]||{})}; }
+function ikonaPodstronyHTML(id){const u=ustawieniaPodstrony(id);return u.ikonaObraz?`<span class="page-ai-icon"><img src="${esc(u.ikonaObraz)}" alt="" loading="lazy"></span>`:"";}
 function klasaPodstrony(id){
   const u=ustawieniaPodstrony(id);
   return `page page-${u.szerokosc||"standard"} ${u.styl==="plain"?"page-plain":""}`;
@@ -151,6 +238,8 @@ function glownaPromocja(){
   const kodZPaska=String(zPaska?.[1]||"").toUpperCase(),rabatZPaska=Number(zPaska?.[2]||0);
   if(kodZPaska&&Number(kody[kodZPaska])===rabatZPaska)return {kod:kodZPaska,procent:rabatZPaska};
   const wybrany=String(ustawienia?.promocjaGlowna||"").toUpperCase();
+  const regula=znajdzReguleRabatowa(wybrany)||regulyRabatowe().find(x=>x.publiczny&&x.typ==="procent"&&regulaRabatowaStatus(x).aktywna);
+  if(regula&&regula.typ==="procent"&&Number(regula.wartosc)>0)return {kod:regula.kod,procent:Number(regula.wartosc)};
   if(wybrany&&Number(kody[wybrany])>0)return {kod:wybrany,procent:Number(kody[wybrany])};
   const pierwszy=Object.entries(kody).find(([kod,procent])=>/^[A-Z0-9]{2,20}$/.test(kod)&&Number(procent)>0);
   return pierwszy?{kod:pierwszy[0],procent:Number(pierwszy[1])}:null;
@@ -185,6 +274,17 @@ function aktualizujFavicon(){
    (localStorage → klucz artway_logi). Podgląd, pobieranie pliku
    logu i sugestie poprawek: podstrona  #/diagnostyka          */
 const MAX_LOGOW = 200;
+function normalizujNazweProducenta(value=""){
+  const name=String(value??"").replace(/\u0000/g,"").replace(/\s+/g," ").trim().slice(0,160);
+  return name&&/\p{L}/u.test(name)?name:"";
+}
+function poprawnaNazwaProducenta(value=""){return !!normalizujNazweProducenta(value);}
+function walidujPoleProducenta(input){
+  if(!input)return true;
+  const value=String(input.value||"").trim(),valid=!value||poprawnaNazwaProducenta(value);
+  input.setCustomValidity(valid?"":"Producent musi być nazwą zawierającą co najmniej jedną literę. Numer wpisz jako kod produktu / producenta.");
+  return valid;
+}
 function pobierzLogi(){ try{ return JSON.parse(localStorage.getItem("artway_logi")||"[]"); }catch(e){ return []; } }
 function loguj(poziom, tresc, zrodlo){
   try{
@@ -209,6 +309,11 @@ function odswiezZnacznikDiag(){
    (np. otwarta z dysku), nie pokazuje nieaktualnych produktów demonstracyjnych. */
 const PRODUKTY_ZAPASOWE = []; // brak demonstracyjnych towarów — źródłem awaryjnym jest aktualny products.json
 
+// Stan integracji jest częścią wspólnego rdzenia aplikacji. Panel korzysta z
+// niego na każdej trasie (m.in. przy synchronizacji bazy), dlatego nie może być
+// deklarowany dopiero w ładowanym na żądanie module Centrum wysyłek.
+let stanBramki={sprawdzono:false,online:false,configured:false,ready:false,authenticated:false,error:"",organizations:[],email:{configured:false,authenticated:false,provider:null},store:{configured:false,writable:false,orders:0,users:0},inpost:{configured:false,authenticated:false,geowidgetConfigured:false,env:"production"}};
+
 /* ═══════════ STAN ═══════════ */
 let produkty = [];
 let prodBazowe = [];
@@ -217,12 +322,19 @@ const PRODUCT_LINK_IMPORT_FIRST_ID = 1000000;
 // dzielonego katalogu serwerowego. Nie zapisujemy ich w localStorage ani w
 // ogólnym rekordzie settings, aby duży katalog nie przekroczył limitu 4 MB.
 let produktyImportowane = [];
-let produktyBazoweCache={bazowe:null,importowane:null,items:[]};
+let produktyCentralnePobrane = [];
+let produktyBazoweCache={bazowe:null,importowane:null,centralne:null,items:[]};
 function produktyBazoweWspolne(){
-  if(produktyBazoweCache.bazowe===prodBazowe&&produktyBazoweCache.importowane===produktyImportowane)return produktyBazoweCache.items;
+  if(produktyBazoweCache.bazowe===prodBazowe&&produktyBazoweCache.importowane===produktyImportowane&&produktyBazoweCache.centralne===produktyCentralnePobrane)return produktyBazoweCache.items;
   const mapa=new Map();
   [...(Array.isArray(prodBazowe)?prodBazowe:[]),...(Array.isArray(produktyImportowane)?produktyImportowane:[])].forEach(p=>{if(p&&p.id!==undefined)mapa.set(String(p.id),p);});
-  const items=[...mapa.values()];produktyBazoweCache={bazowe:prodBazowe,importowane:produktyImportowane,items};return items;
+  (Array.isArray(produktyCentralnePobrane)?produktyCentralnePobrane:[]).forEach(p=>{if(p&&p.id!==undefined){const id=String(p.id),old=mapa.get(id)||{};mapa.set(id,{...old,...p,_catalog:{...(old._catalog||{}),...(p._catalog||{})}});}});
+  const items=[...mapa.values()];produktyBazoweCache={bazowe:prodBazowe,importowane:produktyImportowane,centralne:produktyCentralnePobrane,items};return items;
+}
+function zapamietajProduktyCentralne(lista=[]){
+  const mapa=new Map((produktyCentralnePobrane||[]).map(p=>[String(p.id),p]));
+  (Array.isArray(lista)?lista:[]).forEach(p=>{if(p&&p.id!==undefined)mapa.set(String(p.id),p);});
+  produktyCentralnePobrane=[...mapa.values()].slice(-5000);produktyBazoweCache={bazowe:null,importowane:null,centralne:null,items:[]};if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
 }
 let zrodloProduktow = "zapasowe";
 let produktyDodane = wczytajLS("artway_produkty_dodane", []);
@@ -261,7 +373,7 @@ let seoNaStronie=[25,50,100,250,500].includes(Number(wczytajLS("artway_seo_na_st
 let ulubione = wczytajLS("artway_ulubione", []);
 let rabat = wczytajLS("artway_rabat", null);
 let sesja = wczytajLS("artway_sesja", null);
-if(sesja && !sesja.token && !["localhost","127.0.0.1"].includes(location.hostname) && location.protocol!=="file:"){
+if(sesja && !sesja.token && !sesja.verified && !["localhost","127.0.0.1"].includes(location.hostname) && location.protocol!=="file:"){
   sesja=null;
   try{localStorage.removeItem("artway_sesja");}catch(e){}
 }
@@ -292,7 +404,7 @@ let zaznaczoneAllegroDyskusje = new Set();
 let zaznaczoneAllegroZgodnosc = new Set();
 let allegroOstatniBladWystawienia = null;
 let allegroOstatniWynikWystawienia = null;
-let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSyncState:{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null,lastSource:null,lastResult:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,updated_at:null}};
+let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, autonomousAgent:{enabled:true,status:"waiting",completedAt:null,nextRunAt:null,mapping:{},stats:{},duplicateGroupsResolved:0,duplicateOffersEnded:0,reviewCount:0}, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSyncState:{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null,lastSource:null,lastResult:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autonomousAgentMinutes:15,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,updated_at:null}};
 let allegroDaneZaladowane={summary:false,orders:false,offers:false,config:false};
 let allegroDaneLadowane=new Set();
 let allegroDaneOdczytAt={summary:0,orders:0,offers:0,config:0};
@@ -310,6 +422,9 @@ let szukajInfaktZakupy="",filtrInfaktZakupy="wszystkie",limitInfaktZakupy=50,szu
 let zaznaczoneInfaktZakupy=new Set(),zaznaczoneInfaktHistoria=new Set(),zaznaczoneMagazynProdukty=new Set(),magazynWynikiIds=[],magazynStronaIds=[],zaznaczoneDostepnoscProducentow=new Set(),dostepnoscProducentowWynikiIds=[],dostepnoscProducentowStronaIds=[],zaznaczeniKlienci=new Set();
 let agentAIPlanProfil=["full","data","health"].includes(wczytajLS("artway_agent_plan_profil","full"))?wczytajLS("artway_agent_plan_profil","full"):"full";
 let agentAIPlanStan={busy:false,current:"",startedAt:null,completedAt:null,results:[],error:"",profile:agentAIPlanProfil,runId:"",history:[],historyLoading:false};
+let agentAIRuntime={loading:false,loaded:false,error:"",runtime:null,updatedAt:0,pollTimer:null};
+let agentAISpecjalisci={loading:false,loaded:false,saving:false,running:false,error:"",data:null,activeRun:null};
+let agentAISpecjalistaDecyzjeWToku=new Set();
 let agentAITelegram={loading:false,loaded:false,saving:false,error:"",settings:null,status:null,stats:{},state:{},events:[],history:[],quietNow:false};
 
 /* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
@@ -336,16 +451,67 @@ let chmuraAutoSyncOstatniStart = 0;
 let chmuraOstatniPullZmienilDane = false;
 let chmuraOstatniaSynchronizacjaCentralnaZmienilaDane = false;
 let chmuraKatalogImportowanyRev = "";
+let chmuraKatalogCentralnyPubliczny = false;
+let chmuraWersjeDomenPubliczne = wczytajLS("artway_chmura_domain_versions_public",{});
+let chmuraWersjeDomenAdmina = wczytajLS("artway_chmura_domain_versions_admin",{});
+const CHMURA_KATALOG_CACHE_DB = "artway-runtime-cache";
+const CHMURA_KATALOG_CACHE_STORE = "catalogs";
+const CHMURA_KATALOG_CACHE_KEY = "imported-products-v1";
+let chmuraKatalogCacheBazaPromise = null;
 let chmuraBrudneKlucze = new Set();
 let chmuraZapisWToku = null;
 let chmuraZapisPonowPoZakonczeniu = false;
 let chmuraNumerMutacji = 0;
 let chmuraPobraniaWToku = new Map();
+function chmuraKatalogCacheBaza(){
+  if(chmuraKatalogCacheBazaPromise)return chmuraKatalogCacheBazaPromise;
+  if(typeof indexedDB==="undefined")return Promise.resolve(null);
+  chmuraKatalogCacheBazaPromise=new Promise(resolve=>{
+    let zakonczono=false,finish=value=>{if(zakonczono)return;zakonczono=true;resolve(value);};
+    try{
+      const request=indexedDB.open(CHMURA_KATALOG_CACHE_DB,1);
+      request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains(CHMURA_KATALOG_CACHE_STORE))db.createObjectStore(CHMURA_KATALOG_CACHE_STORE);};
+      request.onsuccess=()=>finish(request.result);
+      request.onerror=()=>finish(null);
+      request.onblocked=()=>finish(null);
+    }catch(e){finish(null);}
+  });
+  return chmuraKatalogCacheBazaPromise;
+}
+async function chmuraKatalogCacheOdczytaj(){
+  return chmuraRuntimeCacheOdczytaj(CHMURA_KATALOG_CACHE_KEY);
+}
+async function chmuraKatalogCacheZapisz(revision,products){
+  return chmuraRuntimeCacheZapisz(CHMURA_KATALOG_CACHE_KEY,{revision:String(revision||""),count:Array.isArray(products)?products.length:0,products:Array.isArray(products)?products:[],savedAt:Date.now()});
+}
+async function chmuraRuntimeCacheOdczytaj(key){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readonly"),request=tx.objectStore(CHMURA_KATALOG_CACHE_STORE).get(String(key));request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>resolve(null);}catch(e){resolve(null);}});
+}
+async function chmuraRuntimeCacheZapisz(key,value){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).put(value,String(key));tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
+}
+async function chmuraRuntimeCacheUsun(key){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).delete(String(key));tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
+}
 async function chmuraPobierzKatalogImportowany(meta={},force=false){
   const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
+  const poprzednioCentralny=chmuraKatalogCentralnyPubliczny;chmuraKatalogCentralnyPubliczny=meta.catalog_central===true;
+  if(chmuraKatalogCentralnyPubliczny){chmuraKatalogImportowanyRev=revision;return false;}
+  if(poprzednioCentralny){force=true;chmuraKatalogImportowanyRev="";}
   if(!force&&revision===chmuraKatalogImportowanyRev)return false;
   if(!force&&typeof productLinkImportStan!=="undefined"&&productLinkImportStan.loopActive)return false;
-  if(!count){produktyImportowane=[];chmuraKatalogImportowanyRev=revision;return true;}
+  if(!count){produktyImportowane=[];chmuraKatalogImportowanyRev=revision;chmuraKatalogCacheZapisz(revision,[]).catch(()=>{});return true;}
+  if(!force){
+    const cache=await chmuraKatalogCacheOdczytaj();
+    if(cache&&String(cache.revision||"")===revision&&Number(cache.count)===count&&Array.isArray(cache.products)&&cache.products.length===count){
+      produktyImportowane=cache.products;
+      chmuraKatalogImportowanyRev=revision;
+      return true;
+    }
+  }
   const pageSize=500,offsets=[];for(let offset=0;offset<count;offset+=pageSize)offsets.push(offset);
   const pages=[];
   for(let start=0;start<offsets.length;start+=4){
@@ -357,11 +523,13 @@ async function chmuraPobierzKatalogImportowany(meta={},force=false){
   if(imported.length!==count)throw new Error("Katalog produktów nie jest jeszcze kompletny — ponowię synchronizację.");
   produktyImportowane=imported;
   chmuraKatalogImportowanyRev=revision;
+  chmuraKatalogCacheZapisz(revision,imported).catch(()=>{});
   return true;
 }
 function maUprawnieniaZapisuChmury(){
-  return !!(chmuraToken||(sesja?.token&&typeof jestAdmin==="function"&&jestAdmin()));
+  return !!(chmuraToken||((sesja?.verified||sesja?.token)&&typeof jestAdmin==="function"&&jestAdmin()));
 }
+
 
 function chmuraNaglowki(json){
   const h={"Accept":"application/json"};
@@ -377,7 +545,7 @@ async function chmura(action, {method="GET", body=null, params={}, timeout=9000}
   const requestKey=method==="GET"&&body===null?url.toString():"",istniejace=requestKey?chmuraPobraniaWToku.get(requestKey):null;
   if(istniejace)return istniejace;
   const request=(async()=>{
-    const opt = {method, headers: chmuraNaglowki(body!==null)};
+    const opt = {method, headers: chmuraNaglowki(body!==null), credentials:"same-origin"};
     if(body!==null) opt.body = JSON.stringify(body);
     const ac = (typeof AbortController!=="undefined") ? new AbortController() : null;
     let timer=null;
@@ -512,10 +680,12 @@ function chmuraPominBrudneDaneSerwera(dane={}){
 async function chmuraWczytajStan(){
   chmuraOstatniPullZmienilDane=false;
   try{
-    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev}});
+    const lokalnaRewizja=Math.max(0,Number(wczytajLS("artway_chmura_rev",0))||0);
+    const trybAdmina=maUprawnieniaZapisuChmury(),wersjeDomen=trybAdmina?chmuraWersjeDomenAdmina:chmuraWersjeDomenPubliczne;
+    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,settingsDomains:JSON.stringify(wersjeDomen||{}),catalogMode:trybAdmina?"legacy":"central",adminData:0,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
     chmuraOstatniPullZmienilDane=(await chmuraPobierzKatalogImportowany(d))||chmuraOstatniPullZmienilDane;
-    chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
-    const revLok = Number(wczytajLS("artway_chmura_rev", 0))||0;
+    chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, admin:d.admin===true||chmuraStan.admin, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
+    const revLok = lokalnaRewizja;
     const serwerNowszy = (d.rev||0) > revLok;
     // Klient (bez tokenu): serwer jest źródłem prawdy → zawsze nakładaj.
     // Admin (z tokenem): nakładaj TYLKO gdy serwer ma nowszą wersję niż ostatnio zsynchronizowana —
@@ -523,6 +693,11 @@ async function chmuraWczytajStan(){
     if(d.settings && Object.keys(d.settings).length && (!maUprawnieniaZapisuChmury() || serwerNowszy)){
       chmuraOstatniPullZmienilDane=nalozWspolneUstawienia(chmuraPominBrudneDaneSerwera(d.settings))||chmuraOstatniPullZmienilDane;
       zapiszLS("artway_chmura_rev", d.rev||0);
+    }
+    if(d.settings_domain_versions&&typeof d.settings_domain_versions==="object"){
+      const merged={...(wersjeDomen||{}),...d.settings_domain_versions};
+      if(trybAdmina){chmuraWersjeDomenAdmina=merged;zapiszLS("artway_chmura_domain_versions_admin",merged);}
+      else{chmuraWersjeDomenPubliczne=merged;zapiszLS("artway_chmura_domain_versions_public",merged);}
     }
     if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
     if(Array.isArray(d.orders)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_zamowienia", filtrujAktywneZamowienia(d.orders))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
@@ -575,10 +750,14 @@ async function chmuraWyslijWszystko(){
 // Ręczne POBRANIE sklepu z serwera i nałożenie na to urządzenie.
 async function chmuraPobierzWszystko(){
   try{
-    const d = await chmura("pull",{params:{catalogRev:""}});
+    const d = await chmura("pull",{params:{catalogRev:"",settingsDomains:"{}",adminData:1}});
     await chmuraPobierzKatalogImportowany(d,true);
     chmuraBrudneKlucze.clear();
     if(d.settings && Object.keys(d.settings).length){ nalozWspolneUstawienia(d.settings); zapiszLS("artway_chmura_rev", d.rev||0); }
+    if(d.settings_domain_versions&&typeof d.settings_domain_versions==="object"){
+      if(maUprawnieniaZapisuChmury()){chmuraWersjeDomenAdmina=d.settings_domain_versions;zapiszLS("artway_chmura_domain_versions_admin",d.settings_domain_versions);}
+      else{chmuraWersjeDomenPubliczne=d.settings_domain_versions;zapiszLS("artway_chmura_domain_versions_public",d.settings_domain_versions);}
+    }
     chmuraStan = {...chmuraStan, dostepna:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     if(chmuraToken) await synchronizujBazeCentralna(true).catch(()=>{});
     zastosujUstawienia(); zbudujProdukty();
@@ -587,44 +766,36 @@ async function chmuraPobierzWszystko(){
   }catch(e){ toast("Błąd pobierania: "+e.message); }
 }
 function chmuraUstawToken(){
-  const t = prompt("Wklej hasło administratora wspólnej bazy (wartość ARTWAY_ADMIN_TOKEN ustawiona w Netlify):", chmuraToken||"");
-  if(t===null) return;
-  chmuraToken = t.trim();
-  try{ sessionStorage.setItem("artway_chmura_token",chmuraToken); localStorage.removeItem("artway_chmura_token"); }catch(e){}
-  if(!chmuraToken){ toast("Odłączono hasło bazy"); renderuj(); return; }
-  (async ()=>{
-    try{
-      await chmura("login",{method:"POST",body:{password:chmuraToken}});
-      chmuraStan={...chmuraStan,dostepna:true,admin:true};
-      await synchronizujBazeCentralna(true);
-      toast("Połączono ze wspólną bazą ✅ — kliknij 📤 Wyślij wszystko na serwer, aby przenieść obecny wygląd na inne urządzenia.");
-    }catch(e){ toast("Błąd połączenia z bazą: "+e.message); }
-    renderuj();
-  })();
+  if(maUprawnieniaZapisuChmury()){
+    toast("Trwała sesja administratora jest aktywna ✅");
+    return;
+  }
+  toast("Zaloguj się jako administrator — połączenie z serwerem odnowi się automatycznie.");
+  location.hash="#/logowanie";
 }
 function chmuraWyczyscToken(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; toast("Odłączono hasło bazy"); renderuj(); }
 function chmuraStatusHTML(){
   const ok = chmuraStan.dostepna, adm = chmuraStan.admin && maUprawnieniaZapisuChmury();
   const kolor = adm?"#166534":(ok?"#92400e":"#b91c1c"), tlo = adm?"#f0fdf4":(ok?"#fffbeb":"#fef2f2"), br = adm?"#86efac":(ok?"#fcd34d":"#fecaca");
-  const opis = adm ? `<b>Połączono ✅</b> — Twoje zmiany zapisują się na serwerze automatycznie i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/60000)} min.`
-    : ok ? `<b>⚠️ NIE połączono z bazą</b> — Twoje zmiany zapisują się TYLKO na tym urządzeniu i NIE są widoczne gdzie indziej. Zaloguj się jako <b>admin</b> hasłem = token bazy, albo kliknij „Wpisz hasło bazy".`
+  const opis = adm ? `<b>Połączono trwale ✅</b> — podpisana sesja administratora odnawia się automatycznie, a zmiany zapisują się na serwerze i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/60000)} min.`
+    : ok ? `<b>⚠️ Wymagane logowanie administratora</b> — zaloguj się normalnie do panelu. Nie trzeba wklejać żadnego tokenu.`
     : "Brak połączenia z serwerem — sklep działa lokalnie w tej przeglądarce.";
   return `<div class="backend-note" style="border-color:${br};background:${tlo};color:${kolor}">
     <b>☁️ Wspólna baza:</b> ${opis}
     <div class="diag-actions" style="margin-top:.5rem">
     ${adm?`<button class="btn" style="background:var(--brand2)" onclick="chmuraWyslijWszystko()">📤 Wyślij wszystko na serwer</button>
       <button class="btn ghost" onclick="chmuraPobierzWszystko()">📥 Pobierz z serwera</button>
-      <button class="btn ghost" onclick="chmuraWyczyscToken()">Odłącz hasło</button>`
-      :`<button class="btn" onclick="chmuraUstawToken()">🔑 Wpisz hasło bazy</button>`}
+      <button class="btn ghost" onclick="typeof chmuraOdswiezSesjeAdministratora==='function'&&chmuraOdswiezSesjeAdministratora(true).then(()=>toast('Sesja odnowiona ✅'))">Odśwież sesję</button>`
+      :`<a class="btn" href="#/logowanie">🔐 Zaloguj administratora</a>`}
     </div>
   </div>`;
 }
 
-const KLUCZE_CIEZKICH_CACHE = [
+const KLUCZE_PRZESTARZALYCH_CACHE = [
   "artway_allegro_oferty_cache",
   "artway_allegro_zamowienia_cache",
-  "artway_allegro_komunikacja_cache",
-  "artway_produkty_katalog"
+  "artway_allegro_mapowania_cache",
+  "artway_allegro_komunikacja_cache"
 ];
 function rozmiarLokalnejPamieci(){
   let n=0;
@@ -633,9 +804,9 @@ function rozmiarLokalnejPamieci(){
 }
 function zwolnijPamiecPodreczna({wymus=false}={}){
   const przed=rozmiarLokalnejPamieci();
-  if(!wymus&&przed<3_500_000)return {przed,po:przed,usunieto:[]};
+  if(!wymus&&przed<7_500_000)return {przed,po:przed,usunieto:[]};
   const usunieto=[];
-  for(const klucz of KLUCZE_CIEZKICH_CACHE){
+  for(const klucz of KLUCZE_PRZESTARZALYCH_CACHE){
     try{if(localStorage.getItem(klucz)!==null){localStorage.removeItem(klucz);usunieto.push(klucz);}}catch(e){}
   }
   try{
@@ -645,6 +816,43 @@ function zwolnijPamiecPodreczna({wymus=false}={}){
   return {przed,po:rozmiarLokalnejPamieci(),usunieto};
 }
 function wczytajLS(klucz, domyslne){ try{ return JSON.parse(localStorage.getItem(klucz)) ?? domyslne; }catch(e){ return domyslne; } }
+// Rewizja danych zasila lekki cache podstron administratora. Zmieniamy ją
+// wyłącznie dla danych biznesowych, nie dla kosmetycznych preferencji widoku.
+var adminRewizjaDanych = 0;
+var adminCachePodstron = new Map();
+var adminRewizjeDomenCache = {catalog:0,orders:0,warehouse:0,allegro:0,agent:0,infakt:0,seo:0,settings:0,system:0};
+const ADMIN_KLUCZE_WIDOKU = new Set([
+  "artway_admin_menu_otwarta_v2","artway_admin_menu_kompaktowe_v1",
+  "artway_produkty_na_stronie_admin","artway_produkty_gestosc_admin",
+  "artway_produkty_sortowanie_admin","artway_seo_na_stronie"
+]);
+function kluczZmieniaDaneAdmina(klucz=""){
+  if(ADMIN_KLUCZE_WIDOKU.has(klucz))return false;
+  return ["artway_ustawienia","artway_produkty","artway_zamowienia","artway_uzytkownicy","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn","artway_faktury","artway_agent","artway_producenci","artway_opinie","artway_kosz","artway_seo"].some(prefix=>String(klucz).startsWith(prefix));
+}
+function adminDomenaCacheDlaKlucza(klucz=""){
+  const value=String(klucz||"");
+  if(value==="allegro"||value.startsWith("artway_allegro"))return "allegro";
+  if(value.startsWith("artway_zamowienia")||value.startsWith("artway_uzytkownicy"))return "orders";
+  if(value.startsWith("artway_stany")||value.startsWith("artway_dostepnosc")||value.startsWith("artway_ruchy_magazynowe")||value.startsWith("artway_magazyn")||value.startsWith("artway_producenci"))return "warehouse";
+  if(value.startsWith("artway_agent"))return "agent";
+  if(value.startsWith("artway_faktury")||value.startsWith("artway_infakt"))return "infakt";
+  if(value.startsWith("artway_seo"))return "seo";
+  if(value.startsWith("artway_ustawienia"))return "settings";
+  if(value.startsWith("artway_produkty")||value.startsWith("artway_opinie")||value.startsWith("artway_kosz"))return "catalog";
+  return "system";
+}
+function uniewaznijCachePodstronAdmina(zakres="all"){
+  adminRewizjaDanych++;
+  const domena=zakres==="all"||!zakres?"all":adminDomenaCacheDlaKlucza(zakres);
+  if(domena==="all"){
+    Object.keys(adminRewizjeDomenCache).forEach(key=>adminRewizjeDomenCache[key]++);adminCachePodstron.clear();
+  }else{
+    adminRewizjeDomenCache[domena]=(Number(adminRewizjeDomenCache[domena])||0)+1;
+    for(const [route,entry] of adminCachePodstron)if((entry?.domains||[]).includes(domena))adminCachePodstron.delete(route);
+  }
+  if(typeof uniewaznijAdminMenuStatCache==="function")uniewaznijAdminMenuStatCache();
+}
 function zapiszLS(klucz, dane){
   if(klucz==="artway_zamowienia" && Array.isArray(dane)) dane = filtrujAktywneZamowienia(dane);
   const serial=JSON.stringify(dane);
@@ -658,6 +866,8 @@ function zapiszLS(klucz, dane){
     try{localStorage.setItem(klucz,serial);zmieniono=true;}
     catch(e2){zmieniono=false;loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
   }
+  if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina(klucz);
+  if(zmieniono&&["artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_magazyn_produkty","artway_ustawienia"].includes(klucz)&&typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
   if(zmieniono && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
   return zmieniono;
 }
@@ -682,6 +892,7 @@ function zdaniaOpisu(v){
 function agentAICzyscOpis(v,max=20000){
   let s=String(v??"")
     .replace(/^Domyślny opis(?: krótki| pełny)?\s*/i,"")
+    .replace(/\s*(?:\[?\.{3}\]?\s*Read\s+More|Czytaj\s+więcej)\s*\.{0,3}\s*$/gi,"")
     .replace(/\r/g,"\n")
     .replace(/\t+/g," ")
     .replace(/[ \u00a0]{2,}/g," ")
@@ -711,7 +922,7 @@ function agentAIUtworzOpisKrotki(p={}){
   return agentAITnijDoZdania(`${p.nazwa||"Produkt"} to propozycja z kategorii ${kat}, przygotowana z myślą o wygodnym wyborze i szybkim zakupie w Artway-TM.`,300);
 }
 function agentAIFormatujOpisPelny(p={}){
-  const raw=agentAICzyscOpis(p.opis||"",20000);
+  const raw=agentAICzyscOpis(p.opis||p.opisKrotki||p.krotkiOpis||p.shortDescription||"",20000);
   if(!raw)return "";
   const etykieta=/^(opis produktu|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)\s*:?[\s]*$/i;
   const wejscie=raw
@@ -744,6 +955,11 @@ function agentAIFormatujOpisPelny(p={}){
   return wynik.join("\n\n").replace(/\n{3,}/g,"\n\n").trim();
 }
 function opisProduktuHTML(p={}){
+  if(p.contentEditorial?.layoutPolicy==="allegro_sections"&&Array.isArray(p.allegroDescriptionSections)&&p.allegroDescriptionSections.length){
+    const safeHtml=value=>{const tpl=document.createElement("template");tpl.innerHTML=String(value||"");tpl.content.querySelectorAll("*").forEach(el=>{if(!["P","H2","UL","LI","B","STRONG"].includes(el.tagName))el.replaceWith(document.createTextNode(el.textContent||""));else[...el.attributes].forEach(a=>el.removeAttribute(a.name));});return tpl.innerHTML;};
+    const sections=p.allegroDescriptionSections.map(section=>(section.items||[]).map(item=>item.type==="IMAGE"&&/^https?:\/\//i.test(String(item.url||""))?`<figure><img src="${esc(item.url)}" alt="${esc(p.nazwa||"Produkt")}" loading="lazy"></figure>`:`<section>${safeHtml(item.content)}</section>`).join("")).join("");
+    if(sections)return `<div class="product-description-content product-description-shared-layout">${sections}</div>`;
+  }
   const tekst=agentAIFormatujOpisPelny(p)||"Szczegółowy opis produktu zostanie wkrótce uzupełniony.";
   const etykieta=/^(opis produktu|najważniejsze informacje|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)$/i;
   const bloki=tekst.split(/\n{2,}/).map(x=>x.trim()).filter(Boolean);
@@ -768,19 +984,15 @@ function agentAIPoprawOpisyDanychProduktu(p={}){
   if(out.opisKrotki&&out.opis&&out.opisKrotki===out.opis) out.opisKrotki=agentAITnijDoZdania(out.opis,300);
   return out;
 }
-function agentAIPoprawOpisyWFormularzu(form){
-  if(!form){ toast("Nie znaleziono formularza produktu"); return; }
-  const p={
-    nazwa:String(form.elements.nazwa?.value||"").trim(),
-    kategoria:String(form.elements.kategoria?.value||"").trim(),
-    opisKrotki:String(form.elements.opisKrotki?.value||"").trim(),
-    opis:String(form.elements.opis?.value||"").trim()
-  };
-  const poprawiony=agentAIPoprawOpisyDanychProduktu(p);
-  if(form.elements.opisKrotki) form.elements.opisKrotki.value=poprawiony.opisKrotki||"";
-  if(form.elements.opis) form.elements.opis.value=poprawiony.opis||"";
-  zapiszHistorieAgenta("opisy-produktow","Agent AI poprawił opisy w formularzu produktu",{nazwa:p.nazwa});
-  toast("🤖 Agent poprawił krótki i pełny opis w formularzu");
+function agentAIProduktGotowyZLinku(d={},url=""){
+  const source={...(d.product||{})},category=d.storeCategory?.name?d.storeCategory:agentAIDobierzKategorieProduktu(source),canonical=allegroProducentKanoniczny({...source,sourceUrl:source.sourceUrl||url,producentUrl:source.producentUrl||url}),canonicalUrl=String(d.canonicalUrl||d.resolvedUrl||source.sourceUrl||url).trim(),now=new Date().toISOString();
+  const product={...source,kategoria:category.name||source.kategoria||"",producent:canonical||source.producent||source.marka||"",marka:source.marka||canonical||source.producent||"",sourceUrl:canonicalUrl,producentUrl:canonicalUrl,agentImportAt:now,agentImportConfidence:Number(d.confidence||source.agentImportConfidence||0),agentImportSource:d.fromCache?"pamięć Agenta + źródło produktu":"strona źródłowa produktu + Agent",agentImportUrl:canonicalUrl,sourceEvidence:{...(source.sourceEvidence||{}),requestedUrl:url,canonicalUrl,fetchedAt:source.sourceEvidence?.fetchedAt||source.producentSprawdzonoAt||now,fieldSources:d.fieldSources||source.sourceEvidence?.fieldSources||{}},ikona:source.ikona||(/\b(gra|gry|puzzle|układank|zabaw)/i.test(`${source.nazwa||""} ${category.name||""}`)?"🎲":"📦"),sku:source.sku||source.externalId||"",externalId:source.externalId||source.sku||"",cena:Number(source.cena)||0,createdAt:now,createdBy:sesja?.email||"administrator",agentOnboardingStatus:"processing",agentOnboardingStartedAt:now};
+  const curated=product.contentEditorial?.channels==="shared_store_and_allegro"?product:agentAIPoprawOpisyDanychProduktu(product);if(curated.contentEditorial?.channels==="shared_store_and_allegro"){curated.allegroTitle=curated.nazwa;curated.allegroDescription=curated.opis;}
+  return domyslneKosztyDoProduktu(curated,false);
+}
+async function agentAIPoprawOpisyWFormularzu(form){
+  if(!form){toast("Nie znaleziono formularza produktu");return;}
+  return allegroPoprawOpisyWFormularzu(form.querySelector('[onclick^="agentAIPoprawOpisyWFormularzu"]'));
 }
 async function allegroPoprawOpisyWFormularzu(btn){
   const form=btn?.closest("form");
@@ -790,12 +1002,18 @@ async function allegroPoprawOpisyWFormularzu(btn){
   try{
     btn.disabled=true;
     toast("🤖 Przygotowuję krótki i pełny opis oraz układ wizualny Allegro…");
-    const d=await chmura("allegro-description-improve",{method:"POST",body:{product:produkt},timeout:18000});
+    const d=await chmura("allegro-description-improve",{method:"POST",body:{product:produkt},timeout:120000});
+    if(form.elements.nazwa&&d.name) form.elements.nazwa.value=d.name;
     if(form.elements.opisKrotki) form.elements.opisKrotki.value=d.shortDescription||form.elements.opisKrotki.value||"";
     if(form.elements.opis&&d.fullDescription) form.elements.opis.value=d.fullDescription;
+    let cloudSaved=null;
+    if(id){
+      zapiszPolaProduktuLokalnie(id,{nazwa:d.name||produkt.nazwa||"",opisKrotki:d.shortDescription||produkt.opisKrotki||"",opis:d.fullDescription||produkt.opis||"",allegroTitle:d.allegroTitle||produkt.allegroTitle||"",allegroDescription:d.allegroDescription||produkt.allegroDescription||"",contentEditorial:d.contentEditorial||produkt.contentEditorial,allegroDescriptionSections:Array.isArray(d.sections)?d.sections:[],allegroDescriptionEditedAt:new Date().toISOString(),allegroDescriptionSource:"agent-editorial-shared-content"},false);
+      cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);
+    }
     const box=document.getElementById("allegroDescriptionPreview");
-    if(box) box.innerHTML=`<div class="backend-note"><b>✅ Opisy i układ Allegro przygotowane</b><br>Krótki opis: ${esc(d.shortDescription||"—")}<br><small>${(d.similarOffers||[]).length?`Pomocniczo przeanalizowano podobne tytuły: ${(d.similarOffers||[]).map(x=>esc(x.name)).join(", ")}. Treść nie jest kopiowana.`:"Opis utworzono z danych własnego produktu."}</small></div><div class="allegro-description-preview"><div class="allegro-description-preview-head"><b>Podgląd wyglądu opisu Allegro</b><small>Akapity, nagłówki, listy i zdjęcia zostaną zapisane w tej kolejności.</small></div>${(d.sections||[]).map(s=>(s.items||[]).map(item=>item.type==="IMAGE"?`<img src="${esc(item.url||"")}" alt="Podgląd zdjęcia produktu" loading="lazy">`:`<section>${item.content||""}</section>`).join("")).join("")||`<section><p>Brak sekcji do podglądu.</p></section>`}</div>`;
-    toast("🤖 Poprawiono krótki opis, pełny opis i układ sekcji Allegro");
+    if(box) box.innerHTML=`<div class="backend-note"><b>✅ Wspólna treść sklepu i Allegro przygotowana</b><br>Nazwa: ${esc(d.allegroTitle||"—")}<br><small>Link źródłowy był wyłącznie podstawą faktów. Ta sama zredagowana nazwa i treść trafią do sklepu oraz Allegro.</small></div><div class="allegro-description-preview"><div class="allegro-description-preview-head"><b>Podgląd układu w Allegro</b><small>Treść pozostaje taka sama; Allegro otrzyma tylko wymagany układ sekcji.</small></div>${(d.sections||[]).map(s=>(s.items||[]).map(item=>item.type==="IMAGE"?`<img src="${esc(item.url||"")}" alt="Podgląd zdjęcia produktu" loading="lazy">`:`<section>${item.content||""}</section>`).join("")).join("")||`<section><p>Brak sekcji do podglądu.</p></section>`}</div>`;
+    toast(id?(cloudSaved?"✅ Wspólną treść sklepu i Allegro zapisano na serwerze":"⚠️ Treść zapisana lokalnie; serwer ponowi synchronizację"):`🤖 Wspólna treść sklepu i Allegro zostanie zapisana z produktem`);
   }catch(e){ toast("⚠️ Poprawianie opisów Allegro: "+(e.message||e)); }
   finally{ btn.disabled=false; }
 }
@@ -809,21 +1027,38 @@ function ustawNumerPrzelewuTelefon(v){
   KONFIG.numerPrzelewuTelefon = c || NUMER_PRZELEWU_TELEFON_DOMYSLNY;
   return KONFIG.numerPrzelewuTelefon;
 }
+
+/* Dane firmy, płatności oraz utrzymanie identyfikatorów produktu */
 function daneFirmy(){
   const d = {...DANE_FIRMY_DOMYSLNE, ...(KONFIG.daneFirmy||{})};
   const ident = tylkoCyfry(d.identyfikator || d.nip || d.pesel || DANE_FIRMY_DOMYSLNE.identyfikator);
   d.identyfikator = ident;
   d.nip = tylkoCyfry(d.nip || ident);
+  d.regon = tylkoCyfry(d.regon || DANE_FIRMY_DOMYSLNE.regon);
+  if(d.nip===DANE_FIRMY_DOMYSLNE.nip){
+    if(!String(d.nazwa||"").trim()||/^artway-?tm$/i.test(String(d.nazwa||"").trim()))d.nazwa=DANE_FIRMY_DOMYSLNE.nazwa;
+    if(!String(d.adres||"").trim()||String(d.adres).includes("84-207"))d.adres=DANE_FIRMY_DOMYSLNE.adres;
+    d.kodPocztowy=String(d.kodPocztowy||DANE_FIRMY_DOMYSLNE.kodPocztowy).trim();
+    d.miasto=String(d.miasto||DANE_FIRMY_DOMYSLNE.miasto).trim();
+  }
   delete d.pesel;
   return d;
 }
+function pelnyAdresFirmy(d=daneFirmy()){
+  return [String(d.adres||"").trim(),[String(d.kodPocztowy||"").trim(),String(d.miasto||"").trim()].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+}
 function daneFirmyTekst(){
   const d = daneFirmy();
-  return `${d.nazwa}${d.adres?`, ${d.adres}`:""}, NIP: ${d.nip}`;
+  return `${d.nazwa}${pelnyAdresFirmy(d)?`, ${pelnyAdresFirmy(d)}`:""}, NIP: ${d.nip}, REGON: ${d.regon}`;
 }
 function daneFirmyHTML(){
   const d = daneFirmy();
-  return `${esc(d.nazwa)}${d.adres?`, ${esc(d.adres)}`:""}<br><b>NIP:</b> ${esc(d.nip)}`;
+  return `<strong>${esc(d.nazwa)}</strong><br>${esc(pelnyAdresFirmy(d))}<br><b>NIP:</b> ${esc(d.nip)} • <b>REGON:</b> ${esc(d.regon)}`;
+}
+function danePrawneFirmyKompletne(){
+  const d=daneFirmy(),wartosci=[d.nazwa,d.nip,d.regon,d.adres,d.kodPocztowy,d.miasto];
+  return wartosci.every(value=>{const tekst=String(value||"").trim().toLowerCase();return tekst&&!tekst.includes("[nazwa firmy")&&!tekst.includes("uzupełnij")&&!tekst.includes("000 000");})
+    && walidujNip(d.nip) && /^\d{9}(?:\d{5})?$/.test(d.regon);
 }
 function normalizujPlatnosci(lista){
   const bazowe = DOMYSLNE_PLATNOSCI.map(p=>({...p}));
@@ -872,6 +1107,15 @@ function migrujTresciPrawne(tresci){
 function platnosciOpis(){
   return dostepnePlatnosci().map(p=>p.nazwa).join(", ") || "brak aktywnych metod płatności";
 }
+let paynowPubliczne={sprawdzono:false,configured:false,env:"",error:""};
+async function pobierzPaynowKonfiguracjePubliczna(){
+  try{
+    const d=await chmura("paynow-config",{timeout:9000});
+    paynowPubliczne={sprawdzono:true,configured:!!d.configured,env:String(d.env||""),error:""};
+  }catch(e){paynowPubliczne={sprawdzono:true,configured:false,env:"",error:String(e?.message||e)};}
+  return paynowPubliczne;
+}
+function czyPaynowDostepnyPublicznie(){return !!paynowPubliczne.configured;}
 function instrukcjaPlatnosciTekst(id, nr, kwota){
   const kw = typeof kwota==="number" ? zl(kwota) : String(kwota||"");
   if(id==="pobranie") return `Płatność przy odbiorze: do zapłaty ${kw}.`;
@@ -1052,12 +1296,15 @@ function najwyzszeIdProduktu(){
   ].filter(id=>Number(id)>0&&Number(id)<PRODUCT_LINK_IMPORT_FIRST_ID);
   return Math.max(0,...liczby);
 }
+let produktyDodaneAudytId={source:null,length:-1,first:"",last:""};
 function naprawKolizjeIdProduktow(){
-  if(!produktyDodane.length) return false;
+  if(!produktyDodane.length){produktyDodaneAudytId={source:produktyDodane,length:0,first:"",last:""};return false;}
+  const first=String(produktyDodane[0]?.id??""),last=String(produktyDodane.at(-1)?.id??"");
+  if(produktyDodaneAudytId.source===produktyDodane&&produktyDodaneAudytId.length===produktyDodane.length&&produktyDodaneAudytId.first===first&&produktyDodaneAudytId.last===last)return false;
   const zajete=new Set();
   let nastepne=najwyzszeIdProduktu()+1, zmiana=false;
   const wezNoweId=()=>{while(zajete.has(nastepne))nastepne++;const id=nastepne;zajete.add(id);nastepne++;return id;};
-  produktyDodane=produktyDodane.map(p=>{
+  const poprawione=produktyDodane.map(p=>{
     const id=Number(p.id);
     if(!Number.isInteger(id)||id<=0||zajete.has(id)){
       const nowe=wezNoweId();
@@ -1068,7 +1315,9 @@ function naprawKolizjeIdProduktow(){
     if(p.id!==id){ zmiana=true; return {...p,id}; }
     return p;
   });
-  if(!zmiana) return false;
+  if(!zmiana){produktyDodaneAudytId={source:produktyDodane,length:produktyDodane.length,first,last};return false;}
+  produktyDodane=poprawione;
+  produktyDodaneAudytId={source:produktyDodane,length:produktyDodane.length,first:String(produktyDodane[0]?.id??""),last:String(produktyDodane.at(-1)?.id??"")};
   zapiszLS("artway_produkty_dodane",produktyDodane);
   loguj("ostrzezenie","Naprawiono wyłącznie nieprawidłowe lub powtórzone ID w produktach dodanych. ID usuniętego produktu bazowego może być ponownie użyte przez nowy produkt.");
   return true;
@@ -1094,7 +1343,7 @@ async function zarejestrujUzytkownika(imie, email, haslo){
   const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
   try{
     const d=await chmura("account-register",{method:"POST",body:{user:{imie,email},password:haslo}});
-    const rekord={...(d.user||{imie,email,rola:"klient"}),token:d.sessionToken||""};
+    const rekord={...(d.user||{imie,email,rola:"klient"}),verified:d.authenticated===true};
     const u=pobierzUzytkownikow(),i=u.findIndex(x=>x.email===email);
     if(i>=0)u[i]={...u[i],imie:rekord.imie,email:rekord.email,rola:rekord.rola,account:true};else u.push({imie:rekord.imie,email:rekord.email,rola:rekord.rola,account:true});
     zapiszLS("artway_uzytkownicy",u);
@@ -1119,13 +1368,14 @@ async function sprawdzLogowanie(email, haslo){
   if(email==="admin" || email===adminEmail){
     try{
       const d=await chmura("login",{method:"POST",body:{password:haslo,email:adminEmail}});
-      chmuraToken=haslo; sessionStorage.setItem("artway_chmura_token",chmuraToken); localStorage.removeItem("artway_chmura_token");
+      if(d.mfaRequired)return {ok:true,mfa:d};
+      chmuraToken=""; sessionStorage.removeItem("artway_chmura_token"); localStorage.removeItem("artway_chmura_token");
       const lista=pobierzUzytkownikow(); const a=lista.find(x=>x.email===adminEmail);
       if(a){ a.hash=""; zapiszLS("artway_uzytkownicy",lista); }
       domyslneHasloAdmina=false;
       chmuraStan={...chmuraStan,dostepna:true,admin:true};
-      await synchronizujBazeCentralna(true).catch(()=>{});
-      return {ok:true, uzytkownik:{imie:"Administrator",email:adminEmail,rola:"admin",token:d.sessionToken||"",verified:true}};
+      const serwer=d.user||{};
+      return {ok:true, uzytkownik:{imie:serwer.imie||"Administrator",email:serwer.email||adminEmail,rola:"admin",verified:true}};
     }catch(bl){
       // serwer niedostępny lub złe hasło → spróbuj lokalnego admin/admin (tryb offline)
     }
@@ -1135,11 +1385,12 @@ async function sprawdzLogowanie(email, haslo){
   if(email!=="admin"){
     try{
       const d=await chmura("account-login",{method:"POST",body:{email:emailDocelowy,password:haslo}});
+      if(d.mfaRequired)return {ok:true,mfa:d};
       const serwer=d.user||{}; const lista=pobierzUzytkownikow(); const lok=lista.find(x=>x.email===serwer.email);
       if(lok) Object.assign(lok,serwer,{hash:""}); else lista.push({...serwer,hash:""});
       zapiszLS("artway_uzytkownicy",lista);
       stanBazyCentralnej={...stanBazyCentralnej,online:true,error:""};
-      return {ok:true, uzytkownik:{imie:serwer.imie||serwer.email,email:serwer.email,rola:serwer.rola||"klient",token:d.sessionToken||"",verified:true}};
+      return {ok:true, uzytkownik:{imie:serwer.imie||serwer.email,email:serwer.email,rola:serwer.rola||"klient",verified:true}};
     }catch(bl){
       const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
       if(!lokalnyPodglad) return {ok:false,blad:bl.message||"Nieprawidłowy e-mail lub hasło."};
@@ -1153,10 +1404,10 @@ async function sprawdzLogowanie(email, haslo){
   return {ok:true, uzytkownik:{imie:u.imie, email:u.email, rola:u.rola||"klient"}};
 }
 function ustawSesje(u){
-  if(u&&sesja?.email===u.email&&!u.token&&sesja.token)u={...u,token:sesja.token,verified:sesja.verified};
+  if(u){u={...u};delete u.token;u.verified=u.verified===true;}
   sesja=u; zapiszLS("artway_sesja",u); odswiezUzytkownika();
 }
-function wyloguj(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; stanBramki={...stanBramki,authenticated:false}; ustawSesje(null); toast("Wylogowano 👋"); location.hash="#/"; }
+function wyloguj(){ void chmura("session-logout",{method:"POST",timeout:5000}).catch(()=>{});chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; stanBramki={...stanBramki,authenticated:false}; ustawSesje(null); toast("Wylogowano 👋"); location.hash="#/"; }
 function jestGlownymAdminem(email){ return String(email||"").toLowerCase()===KONFIG.emailAdmina.toLowerCase(); }
 function kontoMaRoleAdmin(email){
   const e=String(email||"").toLowerCase();
@@ -1164,7 +1415,7 @@ function kontoMaRoleAdmin(email){
 }
 function jestAdmin(){
   const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
-  return !!sesja&&kontoMaRoleAdmin(sesja.email)&&(!!chmuraToken||!!sesja.token||lokalnyPodglad);
+  return !!sesja&&kontoMaRoleAdmin(sesja.email)&&(!!chmuraToken||sesja.verified===true||!!sesja.token||lokalnyPodglad);
 }
 function odswiezUzytkownika(){
   const nazwaSesji=sesja ? String(sesja.imie||sesja.login||sesja.email||"Konto").trim() : "";
@@ -1180,17 +1431,45 @@ function odswiezUzytkownika(){
 /* Górne menu = strony główne sklepu: katalogi produktów + Promocje + Nowości */
 function wszystkieKategorie(){
   const zProduktow = [...new Set(produkty.map(p=>p.kategoria))];
+  const zCentralnej=(typeof sklepKatalogCentralnyFacety!=="undefined"&&Array.isArray(sklepKatalogCentralnyFacety.categories))?sklepKatalogCentralnyFacety.categories.map(item=>item.value):[];
   const ukryte = ustawienia.ukryteKategorie || [];
   const wlasne = (ustawienia.wlasneKategorie||[]).filter(k=>!ukryte.includes(k));
-  return [...new Set([...zProduktow, ...wlasne])];
+  return [...new Set([...zProduktow, ...zCentralnej, ...wlasne])];
 }
-function liczbaProduktowWKategorii(k){ return produkty.filter(p=>p.kategoria===k).length; }
+let indeksDrzewaKategoriiCache={products:null,parents:null,signature:"",value:null};
+function indeksDrzewaKategoriiMenu(kategorie=wszystkieKategorie()){
+  const lista=[...new Set((kategorie||[]).map(x=>String(x||"").trim()).filter(Boolean))],signature=lista.join("\u0001"),parentsSource=ustawienia.rodziceKategorii||null;
+  if(indeksDrzewaKategoriiCache.products===produkty&&indeksDrzewaKategoriiCache.parents===parentsSource&&indeksDrzewaKategoriiCache.signature===signature&&indeksDrzewaKategoriiCache.value)return indeksDrzewaKategoriiCache.value;
+  const allowed=new Set(lista),raw=rodziceKategoriiMenu(),parents={},children=new Map(lista.map(k=>[k,[]])),directCounts=Object.fromEntries(lista.map(k=>[k,0]));
+  for(const k of lista){const parent=raw[k];if(parent&&allowed.has(parent)&&parent!==k){parents[k]=parent;children.get(parent).push(k);}}
+  for(const p of produkty){const k=String(p?.kategoria||"").trim();if(allowed.has(k))directCounts[k]=(directCounts[k]||0)+1;}
+  if(typeof sklepKatalogCentralnyFacety!=="undefined")for(const item of sklepKatalogCentralnyFacety.categories||[]){const k=String(item?.value||"").trim();if(allowed.has(k))directCounts[k]=Math.max(directCounts[k]||0,Number(item?.count)||0);}
+  children.forEach(items=>items.sort((a,b)=>a.localeCompare(b,"pl")));
+  const depth={},paths={},branchCounts={},descendants={},visit=(k,trail=new Set())=>{
+    if(trail.has(k))return {count:directCounts[k]||0,items:new Set()};
+    const next=new Set(trail);next.add(k);let count=directCounts[k]||0;const items=new Set();
+    for(const child of children.get(k)||[]){items.add(child);const nested=visit(child,next);count+=nested.count;nested.items.forEach(x=>items.add(x));}
+    branchCounts[k]=count;descendants[k]=items;return {count,items};
+  };
+  const pathFor=k=>{const out=[k],seen=new Set([k]);let current=k;while(parents[current]&&!seen.has(parents[current])){current=parents[current];seen.add(current);out.unshift(current);}return out;};
+  lista.forEach(k=>{const path=pathFor(k);paths[k]=path;depth[k]=Math.max(0,path.length-1);});
+  lista.filter(k=>!parents[k]).forEach(k=>visit(k));lista.forEach(k=>{if(branchCounts[k]===undefined)visit(k);});
+  const value={lista,allowed,parents,children,directCounts,branchCounts,descendants,depth,paths,roots:lista.filter(k=>!parents[k])};
+  indeksDrzewaKategoriiCache={products:produkty,parents:parentsSource,signature,value};return value;
+}
+function kategoriePotomneMenu(k,kategorie=wszystkieKategorie()){return indeksDrzewaKategoriiMenu(kategorie).descendants[String(k||"")]||new Set();}
+function kategorieGaleziMenu(k,kategorie=wszystkieKategorie()){return new Set([String(k||""),...kategoriePotomneMenu(k,kategorie)]);}
+function sciezkaKategoriiMenu(k,kategorie=wszystkieKategorie()){return indeksDrzewaKategoriiMenu(kategorie).paths[String(k||"")]||[String(k||"")];}
+function produktNalezyDoGaleziKategorii(p,k,kategorie=wszystkieKategorie()){return k==="Wszystkie"||kategorieGaleziMenu(k,kategorie).has(String(p?.kategoria||""));}
+function liczbaProduktowWKategorii(k){ return indeksDrzewaKategoriiMenu().branchCounts[String(k||"")]||0; }
 function grupyMenuKategorii(){
   return (Array.isArray(ustawienia.menuKategorii)?ustawienia.menuKategorii:[])
     .map((g,i)=>({
       id:String(g.id||("grp_"+i+"_"+prostyHash(String(g.nazwa||i)))),
       nazwa:String(g.nazwa||"Grupa katalogów").trim()||"Grupa katalogów",
       ikona:String(g.ikona||"🗂️").trim()||"🗂️",
+      ikonaObraz:String(g.ikonaObraz||"").trim(),
+      ikonaAssetId:String(g.ikonaAssetId||"").trim(),
       aktywna:g.aktywna!==false,
       kategorie:[...new Set((Array.isArray(g.kategorie)?g.kategorie:[]).map(x=>String(x).trim()).filter(Boolean))]
     }));
@@ -1205,11 +1484,10 @@ function korzenKategoriiMenu(kategoria,dozwolone=null){
   return current;
 }
 function dzieciKategoriiMenu(kategoria,kategorie){
-  const rodzice=rodziceKategoriiMenu(),dozwolone=new Set(kategorie||[]);
-  return (kategorie||[]).filter(k=>dozwolone.has(k)&&rodzice[k]===kategoria);
+  return indeksDrzewaKategoriiMenu(kategorie).children.get(String(kategoria||""))||[];
 }
 function zapiszGrupyMenuKategorii(lista, ekstra={}){
-  ustawienia.menuKategorii=lista.map(g=>({id:g.id,nazwa:g.nazwa,ikona:g.ikona,aktywna:g.aktywna!==false,kategorie:g.kategorie||[]}));
+  ustawienia.menuKategorii=lista.map(g=>({id:g.id,nazwa:g.nazwa,ikona:g.ikona,ikonaObraz:g.ikonaObraz||"",ikonaAssetId:g.ikonaAssetId||"",aktywna:g.aktywna!==false,kategorie:g.kategorie||[]}));
   zapiszCzescUstawien({menuKategorii:ustawienia.menuKategorii,...ekstra});
 }
 function kategoriePrzypisaneDoAktywnychGrup(kategorie){
@@ -1217,43 +1495,126 @@ function kategoriePrzypisaneDoAktywnychGrup(kategorie){
   const przypisaneBezposrednio=new Set(grupyMenuKategorii().filter(g=>g.aktywna).flatMap(g=>g.kategorie.filter(k=>dozwolone.has(k))));
   return new Set(kategorie.filter(k=>przypisaneBezposrednio.has(k)||przypisaneBezposrednio.has(korzenKategoriiMenu(k,dozwolone))));
 }
-function linkKategoriiMenu(k){
-  return `<a href="#/kategoria/${encodeURIComponent(k)}"><span>${esc(k)}</span><span class="nav-count">${liczbaProduktowWKategorii(k)}</span></a>`;
+function linkKategoriiMenu(k,index=null){
+  const count=index?.branchCounts?.[k]??liczbaProduktowWKategorii(k);
+  return `<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${esc(k)}</span><span class="nav-count" aria-label="Liczba produktów w gałęzi: ${count}">${count}</span></a>`;
 }
-function drzewoKategoriiMenuHTML(k,kategorie,poziom=0){
-  const dzieci=dzieciKategoriiMenu(k,kategorie);
-  return `<span class="nav-category-node level-${Math.min(2,poziom)}">${linkKategoriiMenu(k)}${dzieci.length?`<span class="nav-category-children">${dzieci.map(d=>drzewoKategoriiMenuHTML(d,kategorie,poziom+1)).join("")}</span>`:""}</span>`;
+function drzewoKategoriiMenuHTML(k,kategorie,poziom=0,index=null){
+  const tree=index||indeksDrzewaKategoriiMenu(kategorie),dzieci=tree.children.get(k)||[];
+  return `<span class="nav-category-node level-${Math.min(5,poziom)}">${linkKategoriiMenu(k,tree)}${dzieci.length?`<span class="nav-category-children">${dzieci.map(d=>drzewoKategoriiMenuHTML(d,kategorie,poziom+1,tree)).join("")}</span>`:""}</span>`;
 }
-function dropdownMenuKategorii(label, dzieci, ikona="🗂️",kategorie=[]){
+let licznikMenuKategorii=0;
+let globalnaObslugaMenuKategorii=false;
+function identyfikatorMenuKategorii(){return `nav-category-menu-${++licznikMenuKategorii}`;}
+function naglowekMenuKategorii(label,ikona,ikonaObraz,podpis="Kategorie w tym dziale"){
+  return `<span class="nav-menu-heading"><span class="nav-menu-heading-icon" aria-hidden="true">${ikonaObraz?`<img class="nav-generated-icon" src="${esc(ikonaObraz)}" alt="">`:esc(ikona||"🗂️")}</span><span><b>${esc(label)}</b><small>${esc(podpis)}</small></span></span>`;
+}
+function dropdownMenuKategorii(label, dzieci, ikona="🗂️",kategorie=[],ikonaObraz="",extraClass=""){
   if(!dzieci.length) return "";
   const wszystkie=kategorie.length?kategorie:dzieci;
-  return `<span class="nav-dd"><button class="nav-drop-btn" type="button">${esc(ikona)} ${esc(label)} ▾</button><span class="nav-menu">${dzieci.map(k=>drzewoKategoriiMenuHTML(k,wszystkie)).join("")}</span></span>`;
+  const id=identyfikatorMenuKategorii();
+  const podpis=`${dzieci.length} ${dzieci.length===1?"kategoria":dzieci.length<5?"kategorie":"kategorii"}`;
+  const tree=indeksDrzewaKategoriiMenu(wszystkie);
+  return `<span class="nav-dd ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)">${ikonaObraz?`<img class="nav-generated-icon" src="${esc(ikonaObraz)}" alt="">`:esc(ikona)} <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,ikona,ikonaObraz,podpis)}<span class="nav-menu-list">${dzieci.map(k=>drzewoKategoriiMenuHTML(k,wszystkie,0,tree)).join("")}</span></span></span>`;
+}
+function dropdownZbiorczyKategorii(sekcje,kategorie=[],label="Więcej",extraClass=""){
+  const gotowe=(Array.isArray(sekcje)?sekcje:[]).filter(s=>Array.isArray(s.korzenie)&&s.korzenie.length);
+  if(!gotowe.length)return "";
+  const id=identyfikatorMenuKategorii();
+  const odmianaDzialu=gotowe.length===1?"dział":gotowe.length<5?"działy":"działów";
+  const tree=indeksDrzewaKategoriiMenu(kategorie);
+  return `<span class="nav-dd nav-dd-more ${esc(extraClass)}"><button class="nav-drop-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="${id}" onclick="return przelaczMenuKategorii(event,this)"><span aria-hidden="true">🗂️</span> <span>${esc(label)}</span> <i aria-hidden="true">⌄</i></button><span class="nav-menu nav-menu-mega${gotowe.length===1?" nav-menu-single":""}" id="${id}" role="region" aria-label="${esc(label)}">${naglowekMenuKategorii(label,"🗂️","",`${gotowe.length} ${odmianaDzialu} w jednym miejscu`)}<label class="nav-menu-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Szukaj kategorii…" aria-label="Szukaj kategorii" oninput="filtrujKategorieMenu(this)"></label><span class="nav-menu-empty" hidden>Brak kategorii pasujących do wyszukiwania.</span>${gotowe.map(s=>`<span class="nav-menu-section"><b>${s.ikonaObraz?`<img class="nav-generated-icon" src="${esc(s.ikonaObraz)}" alt="">`:esc(s.ikona||"📁")} ${esc(s.nazwa||"Kategorie")}</b><span>${s.korzenie.map(k=>drzewoKategoriiMenuHTML(k,kategorie,0,tree)).join("")}</span></span>`).join("")}</span></span>`;
+}
+function zamknijMenuKategorii(wyjatek=null,przywrocFokus=false){
+  document.querySelectorAll("#mainNav .nav-dd.is-open").forEach(menu=>{
+    if(menu===wyjatek)return;
+    menu.classList.remove("is-open");
+    const przycisk=menu.querySelector(":scope > .nav-drop-btn");
+    if(przycisk){przycisk.setAttribute("aria-expanded","false");if(przywrocFokus)przycisk.focus();}
+  });
+}
+function przelaczMenuKategorii(event,przycisk){
+  event.preventDefault();event.stopPropagation();
+  const menu=przycisk.closest(".nav-dd");if(!menu)return false;
+  const otworzyc=!menu.classList.contains("is-open");
+  zamknijMenuKategorii(menu);
+  menu.classList.toggle("is-open",otworzyc);
+  przycisk.setAttribute("aria-expanded",otworzyc?"true":"false");
+  if(!otworzyc)przycisk.blur();
+  return false;
+}
+function filtrujKategorieMenu(input){
+  const panel=input.closest(".nav-menu");if(!panel)return;
+  const fraza=String(input.value||"").trim().toLocaleLowerCase("pl");
+  let widoczne=0;
+  panel.querySelectorAll(":scope > .nav-menu-section").forEach(sekcja=>{
+    const naglowek=sekcja.querySelector(":scope > b")?.textContent.toLocaleLowerCase("pl")||"";
+    const pasujeNaglowek=!!fraza&&naglowek.includes(fraza);
+    let widoczneWSekcji=0;
+    sekcja.querySelectorAll(":scope > span > .nav-category-node").forEach(kategoria=>{
+      const pasuje=!fraza||pasujeNaglowek||kategoria.textContent.toLocaleLowerCase("pl").includes(fraza);
+      kategoria.hidden=!pasuje;if(pasuje)widoczneWSekcji++;
+    });
+    sekcja.hidden=widoczneWSekcji===0;widoczne+=widoczneWSekcji;
+  });
+  const pusty=panel.querySelector(":scope > .nav-menu-empty");if(pusty)pusty.hidden=widoczne>0;
+}
+function zainicjujObslugeMenuKategorii(n){
+  if(!n.dataset.menuKategoriiGotowe){
+    n.dataset.menuKategoriiGotowe="1";
+    n.addEventListener("keydown",event=>{
+      const przycisk=event.target.closest(".nav-drop-btn");
+      if(przycisk&&event.key==="ArrowDown"){
+        const menu=przycisk.closest(".nav-dd");
+        if(!menu.classList.contains("is-open"))przelaczMenuKategorii(event,przycisk);
+        event.preventDefault();menu.querySelector(".nav-menu input,.nav-menu a")?.focus();
+      }
+    });
+  }
+  if(!globalnaObslugaMenuKategorii){
+    globalnaObslugaMenuKategorii=true;
+    document.addEventListener("click",event=>{if(!event.target.closest("#mainNav .nav-dd"))zamknijMenuKategorii();});
+    document.addEventListener("keydown",event=>{if(event.key==="Escape")zamknijMenuKategorii(null,true);});
+  }
 }
 function odswiezMenu(){
   const n = $("mainNav"); if(!n) return;
+  licznikMenuKategorii=0;
   const kategorie = wszystkieKategorie();
-  const grupy = grupyMenuKategorii();
+  const grupy = grupyMenuKategorii().filter(g=>g.aktywna);
   const rodzice=rodziceKategoriiMenu(),dozwolone=new Set(kategorie);
-  const grupyHTML = grupy.filter(g=>g.aktywna).map(g=>{
+  const grupyZKorzeniami=grupy.map(g=>{
     const bezposrednie=g.kategorie.filter(k=>dozwolone.has(k));
     const korzenie=[...new Set(bezposrednie.map(k=>rodzice[k]&&dozwolone.has(korzenKategoriiMenu(k,dozwolone))?korzenKategoriiMenu(k,dozwolone):k))];
-    return dropdownMenuKategorii(g.nazwa,korzenie,g.ikona,kategorie);
-  }).join("");
+    return {...g,korzenie};
+  }).filter(g=>g.korzenie.length);
+  // Na szerokim pasku zostają maksymalnie cztery najważniejsze grupy. Pozostałe
+  // nadal są dostępne w jednym, pełnym katalogu „Więcej”, dzięki czemu nawigacja
+  // nie tworzy przypadkowego drugiego wiersza przy dłuższych nazwach.
+  const limitGrupBezposrednich=4;
+  const grupyBezposrednie=grupyZKorzeniami.slice(0,limitGrupBezposrednich);
+  const grupyDodatkowe=grupyZKorzeniami.slice(limitGrupBezposrednich);
+  const grupyHTML = grupyBezposrednie.map((g,index)=>dropdownMenuKategorii(g.nazwa,g.korzenie,g.ikona,kategorie,g.ikonaObraz,index>=2?"nav-align-right":"")).join("");
   const przypisane = kategoriePrzypisaneDoAktywnychGrup(kategorie);
   const bezGrup = kategorie.filter(k=>!przypisane.has(k));
   const bezGrupKorzenie=bezGrup.filter(k=>!rodzice[k]||!dozwolone.has(rodzice[k]));
-  const limitBezGrup=grupy.length?8:10;
   const pokazBezGrup = ustawienia.menuPokazNieprzypisane!==false;
-  const bezGrupHTML = pokazBezGrup
-    ? (grupy.length && bezGrupKorzenie.length>4
-      ? dropdownMenuKategorii("Pozostałe",bezGrupKorzenie,"📁",kategorie)
-      : bezGrupKorzenie.slice(0,limitBezGrup).map(k=>`<a href="#/kategoria/${encodeURIComponent(k)}">${esc(k)}</a>`).join("") + (bezGrupKorzenie.length>limitBezGrup?dropdownMenuKategorii("Więcej",bezGrupKorzenie.slice(limitBezGrup),"📁",kategorie):""))
-    : "";
-  n.innerHTML = `<a href="#/">🏪 Strona główna</a>`
+  const limitBezGrupBezposrednich=grupyZKorzeniami.length?0:6;
+  const bezGrupBezposrednie=pokazBezGrup?bezGrupKorzenie.slice(0,limitBezGrupBezposrednich):[];
+  const bezGrupDodatkowe=pokazBezGrup?bezGrupKorzenie.slice(limitBezGrupBezposrednich):[];
+  const bezGrupHTML=bezGrupBezposrednie.map(k=>`<a class="nav-category-direct" href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join("");
+  const sekcjeDodatkowe=[...grupyDodatkowe.map(g=>({nazwa:g.nazwa,ikona:g.ikona,ikonaObraz:g.ikonaObraz,korzenie:g.korzenie})),...(bezGrupDodatkowe.length?[{nazwa:"Pozostałe kategorie",ikona:"📁",korzenie:bezGrupDodatkowe}]:[])];
+  const wszystkieSekcje=[...grupyZKorzeniami.map(g=>({nazwa:g.nazwa,ikona:g.ikona,ikonaObraz:g.ikonaObraz,korzenie:g.korzenie})),...(bezGrupKorzenie.length?[{nazwa:"Pozostałe kategorie",ikona:"📁",korzenie:bezGrupKorzenie}]:[])];
+  const wiecejHTML=dropdownZbiorczyKategorii(sekcjeDodatkowe,kategorie);
+  const mobilneKategorieHTML=dropdownZbiorczyKategorii(wszystkieSekcje,kategorie,"Kategorie","nav-mobile-categories");
+  n.innerHTML = mobilneKategorieHTML
+    + `<a class="nav-home-link" href="#/">🏪 Strona główna</a>`
     + grupyHTML
     + bezGrupHTML
-    + `<a href="#/promocje">🔥 Promocje</a><a href="#/nowosci">✨ Nowości</a>`
-    + (jestAdmin()?`<a href="#/admin" style="color:var(--brand2)">⚙️ Panel admina</a>`:"");
+    + wiecejHTML
+    + `<a href="/promocje" onclick="return nawigujSklep(event,this.getAttribute('href'))">🔥 Promocje</a><a href="/nowosci" onclick="return nawigujSklep(event,this.getAttribute('href'))">✨ Nowości</a>`
+    + (jestAdmin()?`<a class="nav-admin-link" href="#/admin">⚙️ Panel admina</a>`:"");
+  zainicjujObslugeMenuKategorii(n);
 }
 function odswiezUlubioneLicznik(){
   const e = $("ulubCount"); if(!e) return;
@@ -1290,7 +1651,7 @@ async function zmienHaslo(e){
   if(nowe!==powtorz){ toast("⚠️ Wpisane nowe hasła nie są takie same"); return; }
   try{
     const d=await chmura("account-password-change",{method:"POST",body:{currentPassword:String(f.get("stare")||""),newPassword:nowe}});
-    if(d.sessionToken&&sesja)ustawSesje({...sesja,token:d.sessionToken,verified:true});
+    if(d.authenticated&&sesja)ustawSesje({...sesja,verified:true});
   }catch(bl){
     const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
     if(!lokalnyPodglad){toast("⚠️ Nie zmieniono hasła: "+bl.message);return;}
@@ -1368,6 +1729,8 @@ function zastosujUstawienia(){
   KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
   ustawienia.platnosci = KONFIG.platnosci.map(x=>({...x}));
   if(u.kody) KONFIG.kodyRabatowe = {...u.kody};
+  const ofertaGlowna=ustawieniaOfertyGlownej();
+  if(!localStorage.getItem("artway_produkty_na_stronie")&&[12,24,48,96].includes(Number(ofertaGlowna.naStronie)))produktyNaStronie=Number(ofertaGlowna.naStronie);
   if(u.heroTytul) KONFIG.heroTytul = u.heroTytul;
   if(u.heroOpis) KONFIG.heroOpis = /^Elektronika, dom i ogród, narzędzia, odzież i sport\./i.test(String(u.heroOpis))
     ? "Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów — między innymi Alexander, Multigra i GoDan."
@@ -1404,6 +1767,8 @@ function zastosujUstawienia(){
   $("footMail").textContent = "✉️ " + KONFIG.emailSklepu;
   $("footMail").href = "mailto:" + KONFIG.emailSklepu;
   $("footTel").textContent = "📞 " + KONFIG.telefon;
+  const footFirma=$("footFirma"),df=daneFirmy();
+  if(footFirma)footFirma.innerHTML=`${esc(df.nazwa)}<br>NIP ${esc(df.nip)} • REGON ${esc(df.regon)}<br>${esc(pelnyAdresFirmy(df))}`;
   $("topbar").style.display = u.uklad?.pasekInfoWidoczny===false ? "none" : "";
   $("searchInput").placeholder = u.tekstSzukaj || "Szukaj produktu…";
   $("footCopy").textContent = u.stopkaCopy || `© ${new Date().getFullYear()} ${KONFIG.nazwaSklepu}. Wszystkie prawa zastrzeżone.`;
@@ -1416,23 +1781,67 @@ function zastosujUstawienia(){
 
 /* ═══════════ WCZYTANIE PRODUKTÓW ═══════════
    Lista = (products.json lub zapasowa) − ukryte + dodane w panelu admina */
+// Lekki indeks kartotek jest częścią podstawowych danych sklepu. Dzięki temu
+// magazyn, lokalizacje i generator QR nie muszą pobierać całego modułu edytora.
+function jestProduktemDodanym(id){ return produktyDodane.some(p=>Number(p.id)===Number(id)); }
+function jestProduktemImportowanym(id){ return produktyImportowane.some(p=>String(p.id)===String(id)); }
+function produktDodanyPoId(id){ return produktyDodane.find(p=>Number(p.id)===Number(id)); }
+function czyProduktAdminWKoszu(p){
+  if(!p) return false;
+  if(jestProduktemDodanym(p.id)) return false;
+  return produktyUkryte.includes(p.id);
+}
+function bazoweProduktyWKoszu(){
+  const dodaneIds=new Set(produktyDodane.map(p=>Number(p.id)));
+  return produktyUkryte
+    .filter(id=>!dodaneIds.has(Number(id))&&koszMeta[id]&&!produktyDefinitywne.includes(id))
+    .map(id=>produktyBazoweWspolne().find(x=>Number(x.id)===Number(id)))
+    .filter(Boolean);
+}
+let produktyAdminCache={bazowe:null,dodane:null,edytowane:null,definitywne:null,items:[],byId:new Map()};
+function uniewaznijProduktyAdminCache(){produktyAdminCache={bazowe:null,dodane:null,edytowane:null,definitywne:null,items:[],byId:new Map()};}
+function produktyDoAdministracji(){
+  naprawKolizjeIdProduktow();
+  const bazowe=produktyBazoweWspolne();
+  if(produktyAdminCache.bazowe===bazowe&&produktyAdminCache.dodane===produktyDodane&&produktyAdminCache.edytowane===produktyEdytowane&&produktyAdminCache.definitywne===produktyDefinitywne)return produktyAdminCache.items;
+  const dodaneIds=new Set(produktyDodane.map(p=>Number(p.id)));
+  const items=[...bazowe.filter(p=>!dodaneIds.has(Number(p.id))&&!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id]?{...p,...produktyEdytowane[p.id],id:p.id}:p),...produktyDodane];
+  produktyAdminCache={bazowe,dodane:produktyDodane,edytowane:produktyEdytowane,definitywne:produktyDefinitywne,items,byId:new Map(items.map(p=>[String(p.id),p]))};return items;
+}
+function pobierzProduktAdmin(id){produktyDoAdministracji();return produktyAdminCache.byId.get(String(id));}
+function przygotujProduktDlaSklepu(p){
+  if(!p)return null;
+  const zmianyKat=ustawienia.kategorie||{},mapa=ustawienia.mapaProduktow||{};
+  let k=mapa[p.id]||p.kategoria;
+  for(let i=0;i<3&&zmianyKat[k];i++)k=zmianyKat[k];
+  const zKategoria=k===p.kategoria?p:{...p,kategoria:k};
+  return stanyProduktow[p.id]!==undefined?{...zKategoria,stan:+stanyProduktow[p.id]}:zKategoria;
+}
+function produktSklepuPoId(id){
+  const key=String(id),bezposredni=produkty.find(p=>String(p.id)===key);
+  if(bezposredni)return bezposredni;
+  // Po połączeniu duplikatów stary adres produktu nadal prowadzi do zachowanej,
+  // kanonicznej kartoteki. Aktualizacja identyfikatorów nie może tworzyć 404.
+  const grupa=audytDuplikatowSklepu().grupy.find(g=>g.produkty.some(p=>String(p.id)===key));
+  if(grupa){
+    const kanoniczny=produkty.find(p=>String(p.id)===String(grupa.canonical.id));
+    if(kanoniczny)return kanoniczny;
+  }
+  return null;
+}
 function zbudujProdukty(){
   if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
   naprawKolizjeIdProduktow();
-  const zmianyKat = ustawienia.kategorie || {};
   const ukryteKat = ustawienia.ukryteKategorie || [];
-  const mapa = ustawienia.mapaProduktow || {};    // zaawansowane mapowanie: id produktu → katalog
   const dodaneIds = new Set(produktyDodane.map(p=>Number(p.id)));
   const bazowePoEdycji = produktyBazoweWspolne()
     .filter(p=>!dodaneIds.has(Number(p.id))&&!produktyUkryte.includes(p.id))
     .map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p);
   produkty = [ ...bazowePoEdycji, ...produktyDodane ]
-    .map(p => { let k = mapa[p.id] || p.kategoria;
-                for(let i=0; i<3 && zmianyKat[k]; i++) k = zmianyKat[k];
-                return k===p.kategoria ? p : {...p, kategoria:k}; })
-    .map(p => stanyProduktow[p.id]!==undefined ? {...p, stan:+stanyProduktow[p.id]} : p)
-    .filter(p => !ukryteKat.includes(p.kategoria))
-    .filter(p => !produktOznaczonyNiedostepny(p));
+    .map(przygotujProduktDlaSklepu)
+    .filter(p => !ukryteKat.includes(p.kategoria));
+  // Brak u producenta wstrzymuje zakup, ale nie usuwa karty, adresu ani treści.
+  // Tylko świadome przeniesienie do kosza / definitywne usunięcie wyłącza produkt.
   produkty=filtrujDuplikatySklepu(produkty);
 }
 function podpisPublikacjiProduktu(p={}){
@@ -1477,20 +1886,23 @@ function kluczeDuplikatuProduktu(p={}){
   return [...new Set(out)];
 }
 function kompletnoscProduktuDlaDuplikatu(p={}){return [p.externalId,p.sku,p.gtin||p.ean,p.kodProducenta||p.mpn,p.producent||p.marka,p.zdjecie,p.opis,p.cena>0].filter(Boolean).length;}
-function audytDuplikatowSklepu(lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p))){
-  const items=(Array.isArray(lista)?lista:[]).filter(p=>p&&p.id!==undefined),byId=new Map(items.map(p=>[String(p.id),p])),parent=new Map(items.map(p=>[String(p.id),String(p.id)])),owner=new Map(),shared=new Map();
+let audytDuplikatowSklepuCache={source:null,choices:null,hidden:null,added:null,result:null};
+function audytDuplikatowSklepu(lista){
+  const domyslna=!Array.isArray(lista),source=domyslna?produktyDoAdministracji():lista,choices=ustawienia.kanoniczneDuplikatySklepu&&typeof ustawienia.kanoniczneDuplikatySklepu==="object"?ustawienia.kanoniczneDuplikatySklepu:{};
+  if(audytDuplikatowSklepuCache.source===source&&audytDuplikatowSklepuCache.choices===choices&&audytDuplikatowSklepuCache.hidden===(domyslna?produktyUkryte:null)&&audytDuplikatowSklepuCache.added===(domyslna?produktyDodane:null)&&audytDuplikatowSklepuCache.result)return audytDuplikatowSklepuCache.result;
+  const items=source.filter(p=>p&&p.id!==undefined&&(!domyslna||!czyProduktAdminWKoszu(p))),parent=new Map(items.map(p=>[String(p.id),String(p.id)])),owner=new Map(),shared=new Map();
   const find=id=>{let x=String(id);while(parent.get(x)!==x){parent.set(x,parent.get(parent.get(x)));x=parent.get(x);}return x;};
   const union=(a,b,key)=>{let ra=find(a),rb=find(b);if(ra!==rb)parent.set(rb,ra);if(!shared.has(key))shared.set(key,new Set());shared.get(key).add(String(a));shared.get(key).add(String(b));};
   items.forEach(p=>kluczeDuplikatuProduktu(p).forEach(key=>{if(owner.has(key))union(p.id,owner.get(key),key);else owner.set(key,String(p.id));}));
   const groups=new Map();items.forEach(p=>{const root=find(p.id);if(!groups.has(root))groups.set(root,[]);groups.get(root).push(p);});
-  const choices=ustawienia.kanoniczneDuplikatySklepu&&typeof ustawienia.kanoniczneDuplikatySklepu==="object"?ustawienia.kanoniczneDuplikatySklepu:{};
   const wynik=[...groups.values()].filter(g=>g.length>1).map(group=>{
     const ids=new Set(group.map(p=>String(p.id))),keys=[...shared.entries()].filter(([,set])=>[...set].some(id=>ids.has(id))).map(([key])=>key).sort(),groupKey=keys[0]||`ids:${[...ids].sort().join("-")}`;
     const selected=group.find(p=>String(p.id)===String(choices[groupKey]||""));
     const canonical=selected||[...group].sort((a,b)=>kompletnoscProduktuDlaDuplikatu(b)-kompletnoscProduktuDlaDuplikatu(a)||String(a.externalId||a.sku||a.gtin||a.id).localeCompare(String(b.externalId||b.sku||b.gtin||b.id),"pl",{numeric:true})||Number(a.id)-Number(b.id))[0];
     return {groupKey,keys,produkty:group,canonical,hidden:group.filter(p=>String(p.id)!==String(canonical.id))};
   });
-  return {grupy:wynik,produkty:wynik.reduce((s,g)=>s+g.produkty.length,0),ukryte:wynik.reduce((s,g)=>s+g.hidden.length,0),hiddenIds:new Set(wynik.flatMap(g=>g.hidden.map(p=>String(p.id))))};
+  const result={grupy:wynik,produkty:wynik.reduce((s,g)=>s+g.produkty.length,0),ukryte:wynik.reduce((s,g)=>s+g.hidden.length,0),hiddenIds:new Set(wynik.flatMap(g=>g.hidden.map(p=>String(p.id))))};
+  audytDuplikatowSklepuCache={source,choices,hidden:domyslna?produktyUkryte:null,added:domyslna?produktyDodane:null,result};return result;
 }
 function filtrujDuplikatySklepu(lista=[]){const audit=audytDuplikatowSklepu(lista);return lista.filter(p=>!audit.hiddenIds.has(String(p.id)));}
 function ustawProduktGlownyDuplikatu(groupKey,productId){
@@ -1524,6 +1936,7 @@ async function usunKopieGrupyProduktuTrwale(groupKey){
 }
 /* ── Magazyn ── */
 const LIMIT_POTWIERDZENIA_DOSTEPNOSCI = 5;
+
 function stanProduktu(p){ return (typeof p.stan==="number" && p.stan>=0) ? p.stan : null; }   // null = bez limitu
 function produktMaCeneSprzedazy(p){ return Number(p?.cena)>0; }
 function wpisDostepnosciProduktu(id){
@@ -1555,27 +1968,34 @@ function powodNiedostepnosci(p){
 function produktDostepnyWSprzedazy(p){
   return !!p && produktMaCeneSprzedazy(p) && !produktOznaczonyNiedostepny(p);
 }
+function produktWidocznyWPublicznymKatalogu(p){
+  if(!produktDostepnyWSprzedazy(p))return false;
+  if(p.aktywny===false||p.ukryty===true||p.sprzedazAktywna===false||p.saleAvailable===false)return false;
+  return !["trash","removed","deleted"].includes(String(p.recordStatus||p.record_status||"").toLowerCase());
+}
 function odswiezDostepnoscProducentowWidoku(){
   if(typeof odswiezMonitoringProducentow==="function"&&odswiezMonitoringProducentow())return;
   renderuj();
 }
-function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
+async function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
   const key=String(id);
   const s=String(status||"dostepny").toLowerCase();
-  if(s==="niedostepny"){
-    dostepnoscProduktow={...(dostepnoscProduktow||{}),[key]:{status:"niedostepny",powod:String(powod||"").trim(),data:new Date().toISOString(),operator:sesja?.email||"administrator",source:"manual",automatic:false}};
-  }else{
-    dostepnoscProduktow={...(dostepnoscProduktow||{})};
-    delete dostepnoscProduktow[key];
-    delete dostepnoscProduktow[id];
+  if(chmuraToken&&maUprawnieniaZapisuChmury()){
+    toast(s==="niedostepny"?"⏳ Wstrzymuję sprzedaż w sklepie i na Allegro…":"⏳ Wznawiam sprzedaż w sklepie i na Allegro…");
+    try{
+      const d=await chmura("product-sale-availability",{method:"POST",body:{productId:id,available:s!=="niedostepny",reason:String(powod||"").trim()},timeout:120000});
+      await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();
+      loguj("info",`Dostępność produktu ${id} zmieniona jako jedna operacja sklep + Allegro`);
+      toast(s==="niedostepny"?`✅ Sprzedaż wstrzymana • sklep + Allegro (${d.saleAutomation?.allegroHidden||0} ofert)`:`✅ Sprzedaż wznowiona • sklep + Allegro (${d.saleAutomation?.allegroRestored||0} ofert)`);
+    }catch(e){loguj("blad",`Spójna zmiana sprzedaży produktu ${id}: ${e.message||e}`);toast(`⛔ Niczego nie zmieniono — sklep i Allegro muszą potwierdzić operację razem: ${e.message||e}`);}
+    odswiezDostepnoscProducentowWidoku();return;
   }
+  if(s==="niedostepny")dostepnoscProduktow={...(dostepnoscProduktow||{}),[key]:{status:"niedostepny",powod:String(powod||"").trim(),data:new Date().toISOString(),operator:sesja?.email||"administrator",source:"manual",automatic:false}};
+  else{dostepnoscProduktow={...(dostepnoscProduktow||{})};delete dostepnoscProduktow[key];delete dostepnoscProduktow[id];}
   zapiszLS("artway_dostepnosc",dostepnoscProduktow);
   zbudujProdukty();
   loguj("info",`Dostępność sprzedażowa: produkt ${id} → ${s}`);
-  if(chmuraToken) void chmura("product-sale-availability",{method:"POST",body:{productId:id,available:s!=="niedostepny",reason:String(powod||"").trim()},timeout:45000})
-    .then(d=>loguj("info",`Dostępność produktu ${id} zsynchronizowana ze sklepem i Allegro: ukryto ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`))
-    .catch(e=>{loguj("blad",`Synchronizacja dostępności produktu ${id} z Allegro: ${e.message||e}`);toast("⚠️ Sklep zapisany, ale synchronizacja Allegro wymaga ponowienia");});
-  toast(s==="niedostepny"?"Produkt oznaczony jako niedostępny":"Produkt dostępny w sprzedaży ✅");
+  toast(s==="niedostepny"?"Produkt ukryty lokalnie — połącz wspólną bazę, aby wstrzymać również Allegro":"Produkt dostępny lokalnie — połącz wspólną bazę, aby wznowić również Allegro");
   odswiezDostepnoscProducentowWidoku();
 }
 function przelaczDostepnoscProduktu(id){
@@ -1587,20 +2007,20 @@ function przelaczDostepnoscProduktu(id){
       agentAISprawdzDostepnoscProducentow(1,[id]);
       return;
     }
-    ustawDostepnoscProduktu(id,"dostepny");
+    void ustawDostepnoscProduktu(id,"dostepny");
   }
   else {
     const powod=prompt("Powód niedostępności widoczny tylko w panelu (opcjonalnie):","chwilowo niedostępny");
     if(powod===null)return;
-    ustawDostepnoscProduktu(id,"niedostepny",powod);
+    void ustawDostepnoscProduktu(id,"niedostepny",powod);
   }
 }
 function dostepnoscBadgeAdmin(p){
   const automat=produktAutomatycznieNiedostepny(p);
   const decision=decyzjaProducentaInfo(p);
   return produktOznaczonyNiedostepny(p)
-    ? `<span class="lvl lvl-blad">niedostępny w sklepie${automat?" • automatycznie":""}</span>${powodNiedostepnosci(p)?`<br><small>${esc(powodNiedostepnosci(p))}</small>`:""}${decision.code?`<br><small>${decision.ico} ${esc(decision.label)}</small>`:""}`
-    : `<span class="lvl lvl-ok">dostępny w sklepie</span>${decision.code?`<br><small>${decision.ico} ${esc(decision.label)}</small>`:""}`;
+    ? `<span class="lvl lvl-blad">sprzedaż wstrzymana • sklep + Allegro${automat?" • automatycznie":""}</span>${powodNiedostepnosci(p)?`<br><small>${esc(powodNiedostepnosci(p))}</small>`:""}${decision.code?`<br><small>${decision.ico} ${esc(decision.label)}</small>`:""}`
+    : `<span class="lvl lvl-ok">sprzedaż aktywna • oba kanały</span>${decision.code?`<br><small>${decision.ico} ${esc(decision.label)}</small>`:""}`;
 }
 function decyzjaProducentaDane(id,value="auto"){
   const p=produktMagazynowy(id),i=producentDostepnoscInfo(p||{}),current=decyzjaProducentaInfo(p||{}),now=new Date(),parts=String(value||"auto").split(":"),code=parts[0],days=Math.max(0,Math.min(30,Number(parts[1])||0)),history=[{at:now.toISOString(),decision:code,days,operator:sesja?.email||"administrator"},...current.history].slice(0,20),base={data:now.toISOString(),operator:sesja?.email||"administrator",source:"supplier-decision",automatic:false,producerStatus:i.status,producerCheckedAt:i.checked,history};
@@ -1625,12 +2045,14 @@ function zapiszDecyzjeProducentowLokalnie(ids=[],value="auto",historia=true){
 async function ustawDecyzjeProducenta(id,value="auto"){
   const p=produktMagazynowy(id);if(!p)return;
   const next=decyzjaProducentaDane(id,value),key=String(id),i=producentDostepnoscInfo(p);
-  dostepnoscProduktow={...(dostepnoscProduktow||{})};if(next)dostepnoscProduktow[key]=next;else{delete dostepnoscProduktow[key];delete dostepnoscProduktow[id];}
-  zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});odswiezDostepnoscProducentowWidoku();
-  try{
-    if(maUprawnieniaZapisuChmury()){const d=await chmura("product-sale-decision",{method:"POST",body:{productId:id,decision:String(value).split(":")[0],days:Number(String(value).split(":")[1])||0,producerStatus:i.status,producerQuantity:i.quantity,reason:next?.reason||"Automatyczna decyzja"},timeout:90000});await chmuraWczytajStan().catch(()=>{});zbudujProdukty();toast(`✅ Decyzja zapisana • sklep ${d.saleAutomation?.siteHidden?"ukryty":d.available?"aktywny":"zaktualizowany"} • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}
-    else toast("Decyzja zapisana lokalnie — połącz wspólną bazę, aby zmienić Allegro");
-  }catch(e){toast(`⚠️ Decyzja jest w panelu, ale synchronizacja serwera wymaga ponowienia: ${e.message||e}`);}
+  if(maUprawnieniaZapisuChmury()){
+    toast("⏳ Zapisuję jedną decyzję dla sklepu i Allegro…");
+    try{const d=await chmura("product-sale-decision",{method:"POST",body:{productId:id,decision:String(value).split(":")[0],days:Number(String(value).split(":")[1])||0,producerStatus:i.status,producerQuantity:i.quantity,reason:next?.reason||"Automatyczna decyzja"},timeout:120000});await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();toast(`✅ Jedna decyzja zapisana • sklep: ${d.available?"aktywny":"wstrzymany"} • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}
+    catch(e){toast(`⛔ Niczego nie zmieniono — operacja sklep + Allegro nie została potwierdzona: ${e.message||e}`);}
+  }else{
+    dostepnoscProduktow={...(dostepnoscProduktow||{})};if(next)dostepnoscProduktow[key]=next;else{delete dostepnoscProduktow[key];delete dostepnoscProduktow[id];}
+    zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});toast("Decyzja zapisana lokalnie — połącz wspólną bazę, aby zmienić oba kanały");
+  }
   odswiezDostepnoscProducentowWidoku();
 }
 function zastosujWyborDecyzjiProducenta(id){const el=document.querySelector(`[data-supplier-decision="${CSS.escape(String(id))}"]`);if(el)void ustawDecyzjeProducenta(id,el.value);}
@@ -1643,11 +2065,10 @@ async function zastosujGrupowaDecyzjeProducenta(){
   const select=document.querySelector("[data-supplier-bulk-decision]"),button=document.querySelector("[data-supplier-bulk-apply]"),value=String(select?.value||"auto"),ids=[...zaznaczoneDostepnoscProducentow].filter(id=>produktMagazynowy(id)).slice(0,500);
   if(!ids.length){toast("Zaznacz co najmniej jeden produkt");return;}if(!confirm(`${decyzjaProducentaEtykieta(value)} — zastosować do ${ids.length} zaznaczonych produktów?`))return;
   const parts=value.split(":"),items=ids.map(id=>{const p=produktMagazynowy(id),i=producentDostepnoscInfo(p);return{productId:id,decision:parts[0],days:Number(parts[1])||0,producerStatus:i.status,producerQuantity:i.quantity};});if(button){button.disabled=true;button.textContent=`⏳ Zapisuję ${ids.length}…`;}
-  zapiszDecyzjeProducentowLokalnie(ids,value,true);odswiezDostepnoscProducentowWidoku();
   try{
-    if(maUprawnieniaZapisuChmury()){const d=await chmura("product-sale-decision",{method:"POST",body:{items},timeout:180000});await chmuraWczytajStan().catch(()=>{});zbudujProdukty();toast(`✅ Zapisano ${d.changed||ids.length} decyzji • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}else toast(`Zapisano lokalnie ${ids.length} decyzji — połącz wspólną bazę, aby zmienić Allegro`);
+    if(maUprawnieniaZapisuChmury()){const d=await chmura("product-sale-decision",{method:"POST",body:{items},timeout:180000});await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();toast(`✅ Zapisano ${d.changed||ids.length} spójnych decyzji • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}else{zapiszDecyzjeProducentowLokalnie(ids,value,true);toast(`Zapisano lokalnie ${ids.length} decyzji — połącz wspólną bazę, aby zmienić oba kanały`);}
     ids.forEach(id=>zaznaczoneDostepnoscProducentow.delete(String(id)));
-  }catch(e){toast(`⚠️ Decyzje są w panelu, ale synchronizacja serwera wymaga ponowienia: ${e.message||e}`);}
+  }catch(e){toast(`⛔ Niczego nie zmieniono — operacja sklep + Allegro nie została potwierdzona: ${e.message||e}`);}
   odswiezDostepnoscProducentowWidoku();
 }
 function grupowaDecyzjaProducentaHTML(){const n=zaznaczoneDostepnoscProducentow.size;return `<div class="supplier-bulk-decision"><label><span>Decyzja dla zaznaczonych</span><select data-supplier-bulk-decision>${decyzjaProducentaOpcjeHTML("auto")}</select></label><button class="btn" type="button" data-supplier-bulk-apply onclick="zastosujGrupowaDecyzjeProducenta()" ${n?"":"disabled"}>Zastosuj do ${n}</button><small>Jedno potwierdzenie i jeden spójny zapis dla całej grupy. Sklep i powiązane oferty Allegro zmienią się dopiero po zatwierdzeniu.</small></div>`;}
@@ -1717,29 +2138,48 @@ function kodLokalizacjiMagazynu(v=""){
     .replace(/^-|-$/g,"")
     .slice(0,40);
 }
-function magazynLokalizacjeAktywne(){
-  const lista=Array.isArray(magazynLokalizacje)?magazynLokalizacje:[];
-  return lista.filter(l=>l&&l.aktywna!==false).sort((a,b)=>sciezkaLokalizacjiMagazynu(a.kod).localeCompare(sciezkaLokalizacjiMagazynu(b.kod),"pl",{numeric:true})||(Number(a.priorytet)||9999)-(Number(b.priorytet)||9999));
+let magazynLokalizacjeIndexCache={source:null,lista:[],aktywne:[],poKodzie:new Map(),sciezki:new Map(),sciezkiNazw:new Map(),poziomy:new Map(),opcjeHTML:""};
+function magazynLokalizacjeIndex(){
+  const source=Array.isArray(magazynLokalizacje)?magazynLokalizacje:[];
+  if(magazynLokalizacjeIndexCache.source===source)return magazynLokalizacjeIndexCache;
+  const lista=source.filter(Boolean),poKodzie=new Map();
+  lista.forEach(l=>{const kod=kodLokalizacjiMagazynu(l.kod);if(kod&&!poKodzie.has(kod))poKodzie.set(kod,l);});
+  const sciezki=new Map(),sciezkiNazw=new Map(),poziomy=new Map();
+  const policz=(rawKod)=>{
+    const kod=kodLokalizacjiMagazynu(rawKod);if(sciezki.has(kod))return;
+    const kody=[],nazwy=[],seen=new Set();let current=poKodzie.get(kod)||null,guard=0;
+    while(current&&guard++<20){
+      const currentKod=kodLokalizacjiMagazynu(current.kod);if(!currentKod||seen.has(currentKod))break;
+      seen.add(currentKod);kody.unshift(String(current.kod||currentKod));nazwy.unshift(String(current.nazwa||current.kod||currentKod));
+      current=current.parentKod?poKodzie.get(kodLokalizacjiMagazynu(current.parentKod))||null:null;
+    }
+    sciezki.set(kod,kody.join(" / ")||String(rawKod||""));sciezkiNazw.set(kod,nazwy.join(" → ")||String(rawKod||""));poziomy.set(kod,Math.max(0,kody.length-1));
+  };
+  lista.forEach(l=>policz(l.kod));
+  // Starsze rekordy typu „miejsce” pozostają w indeksie tylko po to, aby
+  // historyczne dokumenty i etykiety nadal dawały się odczytać. W bieżącej
+  // pracy magazynu ostatnim poziomem jest półka.
+  const aktywne=lista.filter(l=>l.aktywna!==false&&l.typ!=="miejsce").sort((a,b)=>{
+    const ka=kodLokalizacjiMagazynu(a.kod),kb=kodLokalizacjiMagazynu(b.kod);
+    return String(sciezki.get(ka)||ka).localeCompare(String(sciezki.get(kb)||kb),"pl",{numeric:true})||(Number(a.priorytet)||9999)-(Number(b.priorytet)||9999);
+  });
+  const opcjeHTML=aktywne.map(l=>{const kod=kodLokalizacjiMagazynu(l.kod),opis=`${"\u00b7 ".repeat(poziomy.get(kod)||0)}${l.kod}${l.nazwa?` — ${l.nazwa}`:""} [${l.typ||"miejsce"}]`;return `<option value="${esc(l.kod)}">${esc(opis)}</option>`;}).join("");
+  magazynLokalizacjeIndexCache={source,lista,aktywne,poKodzie,sciezki,sciezkiNazw,poziomy,opcjeHTML};return magazynLokalizacjeIndexCache;
 }
-function magazynLokalizacjaPoKodzie(kod){
-  const k=kodLokalizacjiMagazynu(kod);
-  return (Array.isArray(magazynLokalizacje)?magazynLokalizacje:[]).find(l=>kodLokalizacjiMagazynu(l.kod)===k)||null;
+function magazynLokalizacjeAktywne(){return magazynLokalizacjeIndex().aktywne;}
+function magazynLokalizacjaPoKodzie(kod){return magazynLokalizacjeIndex().poKodzie.get(kodLokalizacjiMagazynu(kod))||null;}
+function magazynPolkaPoKodzie(kod){
+  let location=magazynLokalizacjaPoKodzie(kod),guard=0;
+  while(location&&location.typ!=="półka"&&guard++<12)location=location.parentKod?magazynLokalizacjaPoKodzie(location.parentKod):null;
+  return location?.typ==="półka"?location:null;
 }
 function nazwaLokalizacjiMagazynu(kod){
   const l=magazynLokalizacjaPoKodzie(kod);
   return l?`${l.kod}${l.nazwa?` — ${l.nazwa}`:""}`:String(kod||"");
 }
-function sciezkaLokalizacjiMagazynu(kod){
-  const parts=[],seen=new Set();let current=magazynLokalizacjaPoKodzie(kod),guard=0;
-  while(current&&guard++<10&&!seen.has(current.kod)){seen.add(current.kod);parts.unshift(current.kod);current=current.parentKod?magazynLokalizacjaPoKodzie(current.parentKod):null;}
-  return parts.join(" / ")||String(kod||"");
-}
-function poziomLokalizacjiMagazynu(kod){return Math.max(0,sciezkaLokalizacjiMagazynu(kod).split(" / ").filter(Boolean).length-1);}
-function sciezkaNazwLokalizacjiMagazynu(kod){
-  const parts=[],seen=new Set();let current=magazynLokalizacjaPoKodzie(kod),guard=0;
-  while(current&&guard++<10&&!seen.has(current.kod)){seen.add(current.kod);parts.unshift(String(current.nazwa||current.kod));current=current.parentKod?magazynLokalizacjaPoKodzie(current.parentKod):null;}
-  return parts.join(" → ")||String(kod||"");
-}
+function sciezkaLokalizacjiMagazynu(kod){const key=kodLokalizacjiMagazynu(kod);return magazynLokalizacjeIndex().sciezki.get(key)||String(kod||"");}
+function poziomLokalizacjiMagazynu(kod){return magazynLokalizacjeIndex().poziomy.get(kodLokalizacjiMagazynu(kod))||0;}
+function sciezkaNazwLokalizacjiMagazynu(kod){const key=kodLokalizacjiMagazynu(kod);return magazynLokalizacjeIndex().sciezkiNazw.get(key)||String(kod||"");}
 function czyLokalizacjaBezLimitu(location){return !location||location.bezLimitu===true||!(Number(location.pojemnosc)>0);}
 function magazynLiteraRegalu(index=1){let n=Math.max(1,Math.trunc(Number(index)||1)),out="";while(n>0){n--;out=String.fromCharCode(65+n%26)+out;n=Math.floor(n/26);}return out;}
 function magazynIndeksRegalu(value="A"){
@@ -1752,17 +2192,25 @@ function zapiszLokalizacjeMagazynuWspolnie(opis="Zapisano lokalizacje"){
   if(chmuraToken)void chmuraZapiszUstawienia();
 }
 function selectLokalizacjiMagazynu(value=""){
-  const v=String(value||"").trim(), aktywne=magazynLokalizacjeAktywne();
+  const raw=String(value||"").trim(),v=magazynPolkaPoKodzie(raw)?.kod||raw, aktywne=magazynLokalizacjeAktywne();
   return `<select name="lokalizacja">
     <option value="" ${!v?"selected":""}>— brak lokalizacji —</option>
     ${aktywne.map(l=>`<option value="${esc(l.kod)}" ${v===l.kod?"selected":""}>${"· ".repeat(poziomLokalizacjiMagazynu(l.kod))}${esc(l.kod)}${l.nazwa?` — ${esc(l.nazwa)}`:""} [${esc(l.typ||"miejsce")}]</option>`).join("")}
     ${v&&!aktywne.some(l=>l.kod===v)?`<option value="${esc(v)}" selected>${esc(v)} — spoza słownika</option>`:""}
   </select>`;
 }
+function poleLokalizacjiMagazynu(value="",listId="warehouseLocationOptions"){
+  const raw=String(value||"").trim(),normalized=magazynPolkaPoKodzie(raw)?.kod||raw;return `<input name="lokalizacja" list="${esc(listId)}" value="${esc(normalized)}" placeholder="Wpisz lub wybierz kod półki" autocomplete="off">`;
+}
+function magazynLokalizacjeDatalistHTML(id="warehouseLocationOptions"){
+  return `<datalist id="${esc(id)}">${magazynLokalizacjeIndex().opcjeHTML}</datalist>`;
+}
 function statystykiLokalizacji(produktyLista=produktyDoAdministracji()){
-  const rez=rezerwacjeMagazynowe(), mapa={};
+  // Podstrona lokalizacji działa bez ciężkiego modułu operacji magazynowych.
+  // Po jego doładowaniu statystyki automatycznie uwzględniają rezerwacje.
+  const rez=typeof rezerwacjeMagazynowe==="function"?rezerwacjeMagazynowe():{}, mapa={};
   produktyLista.filter(p=>!czyProduktAdminWKoszu(p)).forEach(p=>{
-    const meta=magazynMetaProduktu(p.id), kod=String(meta.lokalizacja||"").trim()||"BRAK";
+    const meta=magazynMetaProduktu(p.id), rawKod=String(meta.lokalizacja||"").trim(),kod=magazynPolkaPoKodzie(rawKod)?.kod||rawKod||"BRAK";
     const stan=stanMagazynuId(p.id), rezerwacje=Number(rez[p.id]||0);
     const rec=mapa[kod]||(mapa[kod]={kod,produkty:0,sztuki:0,rezerwacje:0,wartosc:0,brakiKartoteki:0});
     rec.produkty++;
@@ -1780,7 +2228,7 @@ function zapiszLokalizacjeMagazynu(e){
   const kod=kodLokalizacjiMagazynu(f.get("kod"));
   if(!kod){ toast("Podaj kod lokalizacji, np. R1-P2"); return false; }
   const originalKod=kodLokalizacjiMagazynu(f.get("originalKod")),teraz=new Date().toISOString(), istnieje=magazynLokalizacjaPoKodzie(originalKod||kod),limit=Number(String(f.get("pojemnosc")||"0").replace(",","."))||0,bezLimitu=f.get("bezLimitu")==="on"||limit<=0;
-  if(originalKod&&originalKod!==kod){toast("Kod zapisanej lokalizacji jest stały. Utwórz nowe miejsce, aby użyć innego kodu.");return false;}
+  if(originalKod&&originalKod!==kod){toast("Kod zapisanej lokalizacji jest stały. Utwórz nową półkę, aby użyć innego kodu.");return false;}
   const rec={
     id:istnieje?.id||("LOC-"+Date.now().toString(36)),
     kod,
@@ -1793,8 +2241,8 @@ function zapiszLokalizacjeMagazynu(e){
     glebokosc:intNieujemny(f.get("glebokosc"),0),
     wysokosc:intNieujemny(f.get("wysokosc"),0),
     maxWaga:Math.max(0,Number(String(f.get("maxWaga")||"0").replace(",","."))||0),
-    pojemnosc:bezLimitu?0:Math.max(1,Math.trunc(limit)),
-    bezLimitu,
+    pojemnosc:0,
+    bezLimitu:true,
     priorytet:intNieujemny(f.get("priorytet"),999),
     uwagi:String(f.get("uwagi")||"").trim(),
     aktywna:true,
@@ -1802,6 +2250,7 @@ function zapiszLokalizacjeMagazynu(e){
     aktualizacja:teraz,
     operator:sesja?.email||"administrator"
   };
+  if(rec.typ==="miejsce"){toast("Miejsca nie są już osobnym poziomem. Wybierz lub utwórz półkę.");return false;}
   const bez=(Array.isArray(magazynLokalizacje)?magazynLokalizacje:[]).filter(l=>kodLokalizacjiMagazynu(l.kod)!==kod);
   if(rec.parentKod===kod){toast("Lokalizacja nie może być swoim rodzicem");return false;}
   if(rec.parentKod&&!magazynLokalizacjaPoKodzie(rec.parentKod)){toast("Najpierw utwórz wskazaną lokalizację nadrzędną");return false;}
@@ -1837,22 +2286,21 @@ function usunLokalizacjeMagazynu(kod){
   renderuj();
 }
 function generujRegalyIPolkiMagazynu(e){
-  // Kanoniczna hierarchia fizyczna: strefa → regał → półka → miejsce.
-  e.preventDefault();const f=new FormData(e.target),zone=kodLokalizacjiMagazynu(f.get("strefaKod")||"PAK"),zoneName=String(f.get("strefaNazwa")||"Pakownia").trim()||"Pakownia",rackMode=String(f.get("trybRegalow")||"litery"),rackCount=Math.max(1,Math.min(100,intNieujemny(f.get("regaly"),1))),shelfCount=Math.max(1,Math.min(200,intNieujemny(f.get("polki"),5))),placeCount=Math.max(0,Math.min(500,intNieujemny(f.get("miejsca"),0))),startRack=magazynIndeksRegalu(f.get("startRegal")||"A"),startShelf=Math.max(1,intNieujemny(f.get("startPolka"),1)),startPlace=Math.max(1,intNieujemny(f.get("startMiejsce"),1)),limit=Number(String(f.get("pojemnosc")||"0").replace(",","."))||0,unlimited=f.get("bezLimitu")==="on"||limit<=0,capacity=unlimited?0:Math.max(1,Math.trunc(limit)),now=new Date().toISOString();
+  // Kanoniczna hierarchia fizyczna: obszar → regał → półka. Półka nie ma limitu sztuk.
+  e.preventDefault();const f=new FormData(e.target),zone=kodLokalizacjiMagazynu(f.get("strefaKod")||"PAK"),zoneName=String(f.get("strefaNazwa")||"Pakownia").trim()||"Pakownia",rackMode=String(f.get("trybRegalow")||"litery"),rackCount=Math.max(1,Math.min(100,intNieujemny(f.get("regaly"),1))),shelfCount=Math.max(1,Math.min(200,intNieujemny(f.get("polki"),5))),startRack=magazynIndeksRegalu(f.get("startRegal")||"A"),startShelf=Math.max(1,intNieujemny(f.get("startPolka"),1)),now=new Date().toISOString();
   if(!zone){toast("Podaj kod obszaru, np. PAK");return false;}
-  const requested=1+rackCount+rackCount*shelfCount+rackCount*shelfCount*placeCount;if(requested>5000){toast(`Wybrana struktura ma ${requested} elementów. Podziel tworzenie na mniejsze obszary (maks. 5000 elementów jednorazowo).`);return false;}
+  const requested=1+rackCount+rackCount*shelfCount;if(requested>5000){toast(`Wybrana struktura ma ${requested} elementów. Podziel tworzenie na mniejsze obszary (maks. 5000 elementów jednorazowo).`);return false;}
   const existing=new Map((Array.isArray(magazynLokalizacje)?magazynLokalizacje:[]).map(l=>[kodLokalizacjiMagazynu(l.kod),l])),created=[];let overflow=false;
   const put=(rec)=>{const old=existing.get(rec.kod);if(old&&old.aktywna!==false)return;if(!old&&existing.size>=5000){overflow=true;return;}const next={...old,id:old?.id||`LOC-${Date.now().toString(36)}-${created.length}`,aktywna:true,utworzono:old?.utworzono||now,aktualizacja:now,operator:sesja?.email||"administrator",...rec};existing.set(rec.kod,next);created.push(next);};
   put({kod:zone,nazwa:zoneName,typ:"strefa",parentKod:"",strefa:zone,priorytet:1,pojemnosc:0,bezLimitu:true,uwagi:"Obszar wygenerowany w kreatorze struktury"});
   for(let r=0;r<rackCount;r++){
     const rackLabel=rackMode==="numery"?String(startRack+r):magazynLiteraRegalu(startRack+r),rack=`${zone}-R${rackLabel}`;put({kod:rack,nazwa:`Regał ${rackLabel}`,typ:"regał",parentKod:zone,strefa:zone,priorytet:10+r,pojemnosc:0,bezLimitu:true,uwagi:""});
     for(let s=0;s<shelfCount;s++){
-      const shelfNo=startShelf+s,shelf=`${rack}-P${String(shelfNo).padStart(2,"0")}`;put({kod:shelf,nazwa:`Półka ${shelfNo}`,typ:"półka",parentKod:rack,strefa:zone,priorytet:100+r*100+s,pojemnosc:placeCount?0:capacity,bezLimitu:placeCount?true:unlimited,uwagi:""});
-      for(let m=0;m<placeCount;m++){const placeNo=startPlace+m,place=`${shelf}-M${String(placeNo).padStart(3,"0")}`;put({kod:place,nazwa:`Miejsce ${placeNo}`,typ:"miejsce",parentKod:shelf,strefa:zone,priorytet:10000+r*100000+s*1000+m,pojemnosc:capacity,bezLimitu:unlimited,uwagi:""});}
+      const shelfNo=startShelf+s,shelf=`${rack}-P${String(shelfNo).padStart(2,"0")}`;put({kod:shelf,nazwa:`Półka ${shelfNo}`,typ:"półka",parentKod:rack,strefa:zone,priorytet:100+r*100+s,pojemnosc:0,bezLimitu:true,uwagi:""});
     }
   }
-  if(overflow){toast("Struktura przekracza limit 5000 aktywnych elementów. Zmniejsz liczbę regałów, półek albo miejsc.");return false;}
-  magazynLokalizacje=[...existing.values()].slice(0,5000);zapiszLokalizacjeMagazynuWspolnie(`Generator utworzył ${created.length} elementów struktury magazynu`);toast(created.length?`✅ Utworzono ${created.length} nowych elementów: strefę, regały, półki${placeCount?" i miejsca":""}`:"Wszystkie wskazane lokalizacje już istnieją");renderuj();return false;
+  if(overflow){toast("Struktura przekracza limit 5000 aktywnych elementów. Zmniejsz liczbę regałów lub półek.");return false;}
+  magazynLokalizacje=[...existing.values()].slice(0,5000);zapiszLokalizacjeMagazynuWspolnie(`Generator utworzył ${created.length} elementów struktury magazynu`);toast(created.length?`✅ Utworzono ${created.length} nowych elementów: obszar, regały i półki`:"Wszystkie wskazane lokalizacje już istnieją");renderuj();return false;
 }
 function ustawLokalizacjeProduktu(id,kod){
   const meta=magazynMetaProduktu(id);
@@ -1932,13 +2380,17 @@ function sugestiaZatowarowania(p, rez={}, sprzedaz={}){
   return {produkt:p,stan,rezerwacje:r,dostepne:dost,sprzedaz30:sp,min,lead,target,dniPokrycia,ilosc,poziom,powod,meta};
 }
 function planZatowarowania(){
+  const revision=Number(typeof adminRewizjaDanych!=="undefined"?adminRewizjaDanych:0)||0,produktyLista=produktyDoAdministracji(),cached=planZatowarowania._cache;
+  if(cached&&cached.revision===revision&&cached.produkty===produktyLista)return cached.value;
   const rez=rezerwacjeMagazynowe(), spr=sprzedazMagazynowa(30);
-  return produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>sugestiaZatowarowania(p,rez,spr)).sort((a,b)=>{
+  const value=produktyLista.filter(p=>!czyProduktAdminWKoszu(p)).map(p=>sugestiaZatowarowania(p,rez,spr)).sort((a,b)=>{
     const pa=a.poziom==="bad"?0:a.poziom==="warn"?1:2, pb=b.poziom==="bad"?0:b.poziom==="warn"?1:2;
     return pa-pb || Number(b.ilosc||0)-Number(a.ilosc||0) || String(a.produkt.nazwa||"").localeCompare(String(b.produkt.nazwa||""),"pl");
   });
+  planZatowarowania._cache={revision,produkty:produktyLista,value};return value;
 }
 function potrzebyZatowarowania(){ return planZatowarowania().filter(x=>Number(x.ilosc)>0); }
+
 function zapiszHistorieAgenta(typ, opis, dane={}){
   const rec={id:"AI-"+Date.now().toString(36),typ,opis,data:new Date().toISOString(),dataTxt:new Date().toLocaleString("pl-PL"),operator:sesja?.email||"administrator",dane};
   agentAIHistoria=[rec,...(Array.isArray(agentAIHistoria)?agentAIHistoria:[])].slice(0,500);
@@ -1961,6 +2413,7 @@ function brakiDanychProducenta(p={}, dane={}){
   if(!p.cena)b.push("cena");
   if(!(p.gtin||p.ean))b.push("EAN");
   if(!(p.mpn||p.kodProducenta||p.externalId))b.push("kod producenta/MPN");
+  if(!poprawnaNazwaProducenta(p.producent||p.marka))b.push("producent");
   if(!p.zdjecie)b.push("zdjęcie");
   if(!p.opisKrotki)b.push("krótki opis");
   if(!p.opis)b.push("opis");
@@ -2020,10 +2473,11 @@ function agentAIOcenaDodaniaProduktu(p={},d={}){
   if(blockingDuplicate)blockers.push(`duplikat produktu #${blockingDuplicate.product.id}`);
   if(!(product.gtin||product.ean))warnings.push("brak EAN");
   if(!(product.mpn||product.kodProducenta||product.externalId))warnings.push("brak kodu producenta");
+  if(!poprawnaNazwaProducenta(product.producent||product.marka))blockers.push("brak prawidłowej nazwy producenta");
   if(!product.zdjecie)warnings.push("brak zdjęcia głównego");
   if(String(product.opisKrotki||"").length<40)warnings.push("krótki opis wymaga rozwinięcia");
   if(String(product.opis||"").length<150)warnings.push("pełny opis jest zbyt krótki");
-  const dataScore=Math.max(0,Math.min(100,Math.round((product.nazwa?15:0)+(Number(product.cena)>0?15:0)+(product.kategoria?10:0)+((product.gtin||product.ean)?15:0)+((product.mpn||product.kodProducenta||product.externalId)?10:0)+(product.zdjecie?10:0)+(String(product.opisKrotki||"").length>=40?10:0)+(String(product.opis||"").length>=150?10:0)+((product.producent||product.marka)?5:0))));
+  const dataScore=Math.max(0,Math.min(100,Math.round((product.nazwa?15:0)+(Number(product.cena)>0?15:0)+(product.kategoria?10:0)+((product.gtin||product.ean)?15:0)+((product.mpn||product.kodProducenta||product.externalId)?10:0)+(product.zdjecie?10:0)+(String(product.opisKrotki||"").length>=40?10:0)+(String(product.opis||"").length>=150?10:0)+(poprawnaNazwaProducenta(product.producent||product.marka)?5:0))));
   const score=d.needsChoice?Math.min(dataScore,45):blockingDuplicate?Math.min(dataScore,75):blockers.length?Math.min(dataScore,65):dataScore;
   return {product,category,duplicates,blockingDuplicate,blockers,warnings,dataScore,score,ready:!blockers.length};
 }
@@ -2274,6 +2728,7 @@ async function agentAIWypelnijNowyProduktZLinku(id,candidateIndex=null){
     location.hash="#/admin/produkty/dodaj?agent=1";
   }catch(e){toast("⚠️ Przygotowanie produktu: "+(e.message||e));}
 }
+
 function zapiszRuchMagazynowy(ruch){
   const p=produktMagazynowy(ruch.produktId);
   const rec={
@@ -2371,22 +2826,32 @@ function moderujOpinie(id, akcja){
   loguj("info",`Moderacja opinii ${id}: ${akcja}`);
   renderuj();
 }
+const PRODUKTY_BAZOWE_CACHE_KEY="base-products-v2";
+const PRODUKTY_BAZOWE_CACHE_TTL_MS=6*60*60*1000;
+function walidujBazoweProdukty(dane){
+  if(!Array.isArray(dane))throw new Error("products.json nie zawiera tablicy produktów");
+  const poprawne=dane.filter(p=>p&&p.id!==undefined&&String(p.nazwa||"").trim()),unikalne=new Set(poprawne.map(p=>String(p.id)));
+  if(poprawne.length!==dane.length||unikalne.size!==poprawne.length)throw new Error("products.json zawiera niepoprawne lub powtórzone rekordy");
+  return poprawne;
+}
 async function pobierzBazoweProdukty(){
+  const wersja=document.querySelector('meta[name="artway-version"]')?.content||"dev",teraz=Date.now();
+  let cache=null,cacheProducts=null;
+  try{cache=typeof chmuraRuntimeCacheOdczytaj==="function"?await chmuraRuntimeCacheOdczytaj(PRODUKTY_BAZOWE_CACHE_KEY):null;cacheProducts=cache?.products?walidujBazoweProdukty(cache.products):null;}catch(e){cache=null;cacheProducts=null;}
+  if(cacheProducts){prodBazowe=cacheProducts;zrodloProduktow="json";}
+  if(cacheProducts&&String(cache.version||"")===wersja&&teraz-Number(cache.savedAt||0)<PRODUKTY_BAZOWE_CACHE_TTL_MS)return true;
   try{
-    const wersja = document.querySelector('meta[name="artway-version"]')?.content || String(Date.now());
-    const r = await fetch(`/products.json?v=${encodeURIComponent(wersja)}`, {cache:"no-store"});
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    const dane = await r.json();
-    if(!Array.isArray(dane)) throw new Error("products.json nie zawiera tablicy produktów");
-    const poprawne = dane.filter(p=>p&&p.id!==undefined&&String(p.nazwa||"").trim());
-    const unikalne = new Set(poprawne.map(p=>String(p.id)));
-    if(poprawne.length!==dane.length||unikalne.size!==poprawne.length) throw new Error("products.json zawiera niepoprawne lub powtórzone rekordy");
-    prodBazowe = poprawne;
-    zrodloProduktow = "json";
+    const headers={};if(cache?.etag)headers["If-None-Match"]=String(cache.etag);if(cache?.lastModified)headers["If-Modified-Since"]=String(cache.lastModified);
+    const r=await fetch(`/products.json?v=${encodeURIComponent(wersja)}`,{cache:"no-cache",headers});
+    if(r.status===304&&cacheProducts){await chmuraRuntimeCacheZapisz(PRODUKTY_BAZOWE_CACHE_KEY,{...cache,version:wersja,savedAt:teraz});return true;}
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const poprawne=walidujBazoweProdukty(await r.json());prodBazowe=poprawne;zrodloProduktow="json";
+    if(typeof chmuraRuntimeCacheZapisz==="function")await chmuraRuntimeCacheZapisz(PRODUKTY_BAZOWE_CACHE_KEY,{version:wersja,count:poprawne.length,products:poprawne,etag:r.headers.get("etag")||"",lastModified:r.headers.get("last-modified")||"",savedAt:teraz});
+    return true;
   }catch(e){
-    prodBazowe = PRODUKTY_ZAPASOWE;
-    zrodloProduktow = "zapasowe";
-    loguj("ostrzezenie","products.json niedostępny — katalog demonstracyjny został zablokowany, aby nie pokazywać nieaktualnych produktów.");
+    if(cacheProducts){loguj("info","Użyto trwałej pamięci katalogu; odświeżenie products.json zostanie ponowione później.");return true;}
+    prodBazowe=PRODUKTY_ZAPASOWE;zrodloProduktow="zapasowe";
+    loguj("ostrzezenie","products.json niedostępny — katalog demonstracyjny został zablokowany, aby nie pokazywać nieaktualnych produktów.");return false;
   }
 }
 function finalizujWczytanieProduktow(){
@@ -2399,37 +2864,118 @@ function finalizujWczytanieProduktow(){
 async function wczytajProdukty(){ await pobierzBazoweProdukty(); finalizujWczytanieProduktow(); }
 
 /* ═══════════ ROUTER (podstrony) ═══════════ */
-let adminAssetsPromise = null;
-function zaladujPanelAdmina(){
-  if(window.__artwayAdminReady) return Promise.resolve();
-  if(adminAssetsPromise) return adminAssetsPromise;
-  const version = document.querySelector('meta[name="artway-version"]')?.content || "dev";
-  const cssPromise = new Promise((resolve,reject)=>{
+const ADMIN_MODULY_RUNTIME = Object.freeze({
+  core:"admin-core",shell:"admin-shell",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",shipping:"admin-shipping",commerce:"admin-commerce",communications:"admin-communications",
+  inventory:"admin-inventory",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system"
+});
+const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce"});
+const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content"});
+const adminZaladowaneModuly = new Set();
+const adminObietniceModulow = new Map();
+const adminZaladowaneStyle = new Set();
+const adminObietniceStyle = new Map();
+const sklepZaladowaneModuly = new Set();
+const sklepObietniceModulow = new Map();
+let adminStylePromise = null;
+function identyfikatorZTrasy(route,index){
+  const raw=String(route||"").split("/")[index]||"";let decoded=raw;
+  try{decoded=decodeURIComponent(raw);}catch(e){}
+  return /^(0|[1-9]\d*)$/.test(decoded)?Number(decoded):decoded;
+}
+function adminModulyDlaTrasy(route=""){
+  const t=String(route||"").split("?")[0],moduly=["core","ui"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
+  add("shell");
+  if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
+  if(t==="/diagnostyka")add("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system");
+  else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("shipping","commerce","communications","inventory","system");
+  else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","communications","inventory");
+  else if(["/admin/magazyn/lokalizacje","/admin/magazyn/etykiety-qr"].includes(t))add("warehouse");
+  else if(t==="/admin/magazyn/ruchy")add("warehouse","inventory");
+  else if(t==="/admin/magazyn/stany")add("warehouse","commerce","inventory");
+  else if(t.startsWith("/admin/magazyn"))add("agent","warehouse","commerce","inventory");
+  else if(t.startsWith("/admin/wysylki"))add("agent","warehouse","shipping","commerce","inventory");
+  else if(["/admin/allegro/komunikacja","/admin/allegro/wiadomosci","/admin/allegro/dyskusje"].includes(t))add("agent","warehouse","commerce","communications","inventory");
+  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","communications","inventory");
+  else if(t.startsWith("/admin/infakt"))add("inventory");
+  else if(t==="/admin/asortyment"||t==="/admin/asortyment/produkty")add("commerce","inventory");
+  else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory");
+  else if(t.startsWith("/admin/asortyment")||t.startsWith("/admin/produkty")||t==="/admin/kategorie"||t==="/admin/mapowanie"||t==="/admin/opinie"){
+    add("commerce","inventory","catalog");
+    if(t==="/admin/asortyment/rabaty")add("personalization");
+  }
+  else if(t.startsWith("/admin/personalizacja")||["/admin/dostawy","/admin/ustawienia","/admin/wyglad","/admin/rozmieszczenie","/admin/bannery","/admin/podstrony","/admin/strony","/admin/rabaty"].includes(t)){
+    add("personalization");
+    if(t==="/admin/personalizacja/rozmieszczenie"||t==="/admin/rozmieszczenie")add("catalog");
+  }
+  else if(t.startsWith("/admin/eksport"))add("inventory","catalog","personalization");
+  else if(t.startsWith("/admin/aktualizacja"))add("personalization");
+  else if(t.startsWith("/admin/publikacja"))add("inventory","personalization");
+  else if(t.startsWith("/admin/seo"))add("inventory");
+  else if(t.startsWith("/admin"))add("agent","warehouse","commerce","inventory","catalog","personalization","system");
+  return moduly;
+}
+function sklepModulyDlaTrasy(route=""){
+  const t=String(route||"").split("?")[0];
+  if(["/logowanie","/rejestracja","/konto","/zamowienia"].includes(t)||t.startsWith("/dziekujemy/"))return ["account"];
+  if(["/ulubione","/kontakt","/o-nas","/faq","/regulamin","/prywatnosc","/dostawa","/zwroty"].includes(t))return ["content"];
+  return [];
+}
+function sklepModulyTrasyGotowe(route=""){return sklepModulyDlaTrasy(route).every(modul=>sklepZaladowaneModuly.has(modul));}
+function zaladujSklepModul(modul,version){
+  if(sklepZaladowaneModuly.has(modul))return Promise.resolve();
+  if(sklepObietniceModulow.has(modul))return sklepObietniceModulow.get(modul);
+  const asset=SKLEP_MODULY_RUNTIME[modul];if(!asset)return Promise.reject(new Error(`Nieznany moduł sklepu: ${modul}`));
+  const promise=new Promise((resolve,reject)=>{const script=document.createElement("script");script.id=`artwayStoreModule-${modul}`;script.src=`/assets/${asset}.js?v=${encodeURIComponent(version)}`;script.async=false;script.onload=()=>{sklepZaladowaneModuly.add(modul);resolve();};script.onerror=()=>reject(new Error(`Nie udało się wczytać podstrony sklepu: ${modul}`));document.body.appendChild(script);}).catch(error=>{sklepObietniceModulow.delete(modul);document.getElementById(`artwayStoreModule-${modul}`)?.remove();throw error;});
+  sklepObietniceModulow.set(modul,promise);return promise;
+}
+function adminModulyTrasyGotowe(route=""){return adminModulyDlaTrasy(route).every(modul=>adminZaladowaneModuly.has(modul));}
+function zaladujAdminStyle(version){
+  if(adminStylePromise)return adminStylePromise;
+  adminStylePromise=new Promise((resolve,reject)=>{
     const obecny=document.getElementById("artwayAdminStyles");
-    if(obecny){ resolve(); return; }
-    const link=document.createElement("link");
-    link.id="artwayAdminStyles"; link.rel="stylesheet"; link.href=`/assets/admin.css?v=${encodeURIComponent(version)}`;
-    link.onload=()=>resolve(); link.onerror=()=>reject(new Error("Nie udało się wczytać stylów panelu administratora"));
-    document.head.appendChild(link);
-  });
-  const jsPromise = new Promise((resolve,reject)=>{
-    const obecny=document.getElementById("artwayAdminScript");
-    if(obecny){ if(window.__artwayAdminReady) resolve(); else obecny.addEventListener("load",resolve,{once:true}); return; }
-    const script=document.createElement("script");
-    script.id="artwayAdminScript"; script.src=`/assets/admin.js?v=${encodeURIComponent(version)}`;
-    script.onload=()=>{ window.__artwayAdminReady=true; resolve(); };
-    script.onerror=()=>reject(new Error("Nie udało się wczytać modułów panelu administratora"));
-    document.body.appendChild(script);
-  });
-  adminAssetsPromise=Promise.all([cssPromise,jsPromise]).catch(error=>{adminAssetsPromise=null;throw error;});
-  return adminAssetsPromise;
+    if(obecny){if(obecny.sheet)resolve();else{obecny.addEventListener("load",resolve,{once:true});obecny.addEventListener("error",()=>reject(new Error("Nie udało się wczytać stylów panelu administratora")),{once:true});}return;}
+    const link=document.createElement("link");link.id="artwayAdminStyles";link.rel="stylesheet";link.href=`/assets/admin.css?v=${encodeURIComponent(version)}`;
+    link.onload=()=>resolve();link.onerror=()=>reject(new Error("Nie udało się wczytać stylów panelu administratora"));document.head.appendChild(link);
+  }).catch(error=>{adminStylePromise=null;throw error;});
+  return adminStylePromise;
+}
+function zaladujAdminModul(modul,version){
+  if(adminZaladowaneModuly.has(modul))return Promise.resolve();
+  if(adminObietniceModulow.has(modul))return adminObietniceModulow.get(modul);
+  const asset=ADMIN_MODULY_RUNTIME[modul];
+  if(!asset)return Promise.reject(new Error(`Nieznany moduł panelu: ${modul}`));
+  const promise=new Promise((resolve,reject)=>{
+    const id=`artwayAdminModule-${modul}`,obecny=document.getElementById(id);
+    if(obecny){obecny.addEventListener("load",()=>{adminZaladowaneModuly.add(modul);resolve();},{once:true});obecny.addEventListener("error",()=>reject(new Error(`Nie udało się wczytać modułu ${modul}`)),{once:true});return;}
+    const script=document.createElement("script");script.id=id;script.src=`/assets/${asset}.js?v=${encodeURIComponent(version)}`;script.async=false;
+    script.onload=()=>{adminZaladowaneModuly.add(modul);if(modul==="core")window.__artwayAdminReady=true;resolve();};
+    script.onerror=()=>reject(new Error(`Nie udało się wczytać modułu panelu: ${modul}`));document.body.appendChild(script);
+  }).catch(error=>{adminObietniceModulow.delete(modul);document.getElementById(`artwayAdminModule-${modul}`)?.remove();throw error;});
+  adminObietniceModulow.set(modul,promise);return promise;
+}
+function zaladujAdminStyleModul(modul,version){
+  const asset=ADMIN_STYLE_RUNTIME[modul];if(!asset||adminZaladowaneStyle.has(modul))return Promise.resolve();
+  if(adminObietniceStyle.has(modul))return adminObietniceStyle.get(modul);
+  const promise=new Promise((resolve,reject)=>{const link=document.createElement("link");link.id=`artwayAdminStyle-${modul}`;link.rel="stylesheet";link.href=`/assets/${asset}.css?v=${encodeURIComponent(version)}`;link.onload=()=>{adminZaladowaneStyle.add(modul);resolve();};link.onerror=()=>reject(new Error(`Nie udało się wczytać stylów modułu ${modul}`));document.head.appendChild(link);}).catch(error=>{adminObietniceStyle.delete(modul);document.getElementById(`artwayAdminStyle-${modul}`)?.remove();throw error;});
+  adminObietniceStyle.set(modul,promise);return promise;
+}
+function zaladujPanelAdmina(route=trasa()){
+  const version = document.querySelector('meta[name="artway-version"]')?.content || "dev";
+  const modules=adminModulyDlaTrasy(route);
+  const core=modules.includes("core")?zaladujAdminModul("core",version):Promise.resolve();
+  const scripts=core.then(()=>Promise.all(modules.filter(module=>module!=="core").map(module=>zaladujAdminModul(module,version))));
+  const styles=Promise.all(modules.map(module=>zaladujAdminStyleModul(module,version)));
+  return Promise.all([zaladujAdminStyle(version),styles,scripts]).then(result=>{if(typeof zaplanujWstepneLadowaniePanelu==="function")zaplanujWstepneLadowaniePanelu(version);return result;});
 }
 function trasa(){
   const path=String(location.pathname||"").replace(/\/+$/,"")||"/";
   if(location.hash)return location.hash.replace(/^#/,"").split("?")[0]||"/";
-  if(/^\/produkt\/\d+$/i.test(path))return path;
+  if(/^\/(?:produkt|kategoria)\/[^/]+$/i.test(path)||["/promocje","/nowosci","/kontakt","/o-nas","/faq","/regulamin","/prywatnosc","/dostawa","/zwroty"].includes(path))return path;
   return "/";
 }
+function seoSlugKategorii(value=""){return String(value||"").toLocaleLowerCase("pl-PL").normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ł/g,"l").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"produkty";}
+function przejdzDoSklepu(path="/"){history.pushState(null,"",path);renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));}
+function nawigujSklep(event,path="/"){if(event&&(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||event.button>0))return true;event?.preventDefault?.();przejdzDoSklepu(path);return false;}
 function parametryTrasy(){try{return new URLSearchParams(String(location.hash||"").split("?")[1]||"");}catch(e){return new URLSearchParams();}}
 let ostatniaRenderowanaTrasa="";
 let renderowanieWidoku=false;
@@ -2442,6 +2988,53 @@ function zaplanujRenderPoWpisaniu(opoznienie=180){
   renderTimerWpisywania=setTimeout(()=>{
     renderFrameWpisywania=requestAnimationFrame(()=>{renderFrameWpisywania=0;renderuj();});
   },Math.max(80,Number(opoznienie)||180));
+}
+function adminTrasaCacheowalna(route=""){
+  const value=String(route||"");
+  return value.startsWith("/admin")&&!value.startsWith("/admin/zamowienie/")&&!value.startsWith("/admin/produkty/edytuj/")&&!value.startsWith("/admin/produkty/dodaj")&&!value.startsWith("/admin/produkty/z-linku");
+}
+function adminKontenerTresci(shell){return shell?.querySelector(":scope > .admin-tresc")||null;}
+function adminTrescBezposrednia(shell){return adminKontenerTresci(shell)?.querySelector(":scope > .admin-workspace-content")||null;}
+function adminLiczbaWezlowCache(){let total=0;for(const entry of adminCachePodstron.values())total+=Number(entry?.nodes)||0;return total;}
+function adminZapiszPodstroneWCache(root,route){
+  if(!adminTrasaCacheowalna(route)||!root)return false;
+  const shell=root.querySelector(":scope > .admin-page"),workspace=adminTrescBezposrednia(shell);
+  if(!shell||!workspace)return false;
+  const nodes=workspace.getElementsByTagName("*").length;
+  if(nodes>ADMIN_CACHE_PODSTRON_MAX_WEZLOW)return false;
+  adminCachePodstron.delete(route);
+  workspace.remove();
+  const domains=adminDomenyCacheDlaTrasy(route);
+  adminCachePodstron.set(route,{workspace,nodes,header:shell.querySelector(":scope > .admin-tresc > .admin-workspace-header")?.cloneNode(true)||null,mobile:shell.querySelector(":scope > .admin-tresc > .admin-mobile-menu")?.cloneNode(true)||null,domains,signature:adminSygnaturaCacheTrasy(route),scrollY:window.scrollY||0,savedAt:Date.now()});
+  while(adminCachePodstron.size>ADMIN_CACHE_PODSTRON_LIMIT||adminLiczbaWezlowCache()>ADMIN_CACHE_PODSTRON_MAX_LACZNIE)adminCachePodstron.delete(adminCachePodstron.keys().next().value);
+  return true;
+}
+function adminAktualizujAktywnaNawigacje(shell,route){
+  const nav=shell?.querySelector(".admin-nav");if(!nav)return;
+  shell.querySelectorAll(".admin-nav .admin-nav-link[href],.pwa-admin-bottom-nav a[href]").forEach(link=>{
+    const href=String(link.getAttribute("href")||"").replace(/^#/,"");
+    const active=typeof adminMenuPozycjaAktywna==="function"?adminMenuPozycjaAktywna(route,href):route===href;
+    link.classList.toggle("active",active);if(active)link.setAttribute("aria-current","page");else link.removeAttribute("aria-current");
+  });
+  const open=typeof adminMenuOtwartaGrupa==="function"?adminMenuOtwartaGrupa():"";
+  nav.querySelectorAll(".admin-nav-group").forEach(group=>{
+    const active=!!group.querySelector(".admin-nav-link.active"),expanded=active||String(group.dataset.adminMenuGroup||"")===String(open||"");
+    group.classList.toggle("is-active",active);group.classList.toggle("collapsed",!expanded);
+    group.querySelector(".admin-nav-group-toggle")?.setAttribute("aria-expanded",String(expanded));
+  });
+}
+function adminPrzywrocPodstroneZCache(root,route){
+  const entry=adminCachePodstron.get(route);if(!entry)return false;
+  adminCachePodstron.delete(route);
+  if(entry.signature!==adminSygnaturaCacheTrasy(route))return false;
+  const shell=root?.querySelector(":scope > .admin-page");if(!shell)return false;
+  const container=adminKontenerTresci(shell),current=adminTrescBezposrednia(shell);if(!container)return false;
+  if(current)current.replaceWith(entry.workspace);else container.appendChild(entry.workspace);
+  const currentHeader=container.querySelector(":scope > .admin-workspace-header");if(entry.header&&currentHeader)aktualizujWezelStabilnie(currentHeader,entry.header,document.activeElement);
+  const currentMobile=container.querySelector(":scope > .admin-mobile-menu");if(entry.mobile&&currentMobile)aktualizujWezelStabilnie(currentMobile,entry.mobile,document.activeElement);
+  adminAktualizujAktywnaNawigacje(shell,route);adminAktualizujPrzyciskHistorii(shell);
+  requestAnimationFrame(()=>window.scrollTo({top:Math.max(0,Number(entry.scrollY)||0),behavior:"instant"}));
+  return true;
 }
 function kluczStabilnegoWezla(node){
   if(!node||node.nodeType!==1)return "";
@@ -2493,36 +3086,78 @@ function aktualizujWidokStabilnie(root,html){
   const active=document.activeElement,scrollY=window.scrollY||0,selection=active&&typeof active.selectionStart==="number"?{start:active.selectionStart,end:active.selectionEnd}:null;
   aktualizujDzieciStabilnie(root,template.content,active);
   if(active?.isConnected&&selection&&typeof active.setSelectionRange==="function")try{active.setSelectionRange(selection.start,selection.end);}catch(e){}
-  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY});
+  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY,behavior:"instant"});
 }
-function odbiorcaStabilnegoWidoku(root,stabilny){
-  if(!stabilny)return root;
-  return {get innerHTML(){return root.innerHTML;},set innerHTML(html){aktualizujWidokStabilnie(root,html);}};
+function aktualizujPanelAdminaStabilnie(root,html,taSamaTrasa=false){
+  const template=document.createElement("template");template.innerHTML=String(html||"").trim();
+  const next=[...template.content.children].find(node=>node.classList?.contains("admin-page"))||null,current=root.querySelector(":scope > .admin-page");
+  if(!next||!current)return false;
+  aktualizujAtrybutyWezla(current,next,document.activeElement);
+  const currentNav=current.querySelector(":scope > .admin-nav"),nextNav=next.querySelector(":scope > .admin-nav");
+  if(currentNav&&nextNav)aktualizujWezelStabilnie(currentNav,nextNav,document.activeElement);
+  const currentBottom=current.querySelector(":scope > .pwa-admin-bottom-nav"),nextBottom=next.querySelector(":scope > .pwa-admin-bottom-nav");
+  if(currentBottom&&nextBottom)aktualizujWezelStabilnie(currentBottom,nextBottom,document.activeElement);
+  const currentContainer=adminKontenerTresci(current),nextContainer=adminKontenerTresci(next);
+  const currentMobile=currentContainer?.querySelector(":scope > .admin-mobile-menu"),nextMobile=nextContainer?.querySelector(":scope > .admin-mobile-menu");
+  if(currentMobile&&nextMobile)aktualizujWezelStabilnie(currentMobile,nextMobile,document.activeElement);
+  const currentHeader=currentContainer?.querySelector(":scope > .admin-workspace-header"),nextHeader=nextContainer?.querySelector(":scope > .admin-workspace-header");
+  if(currentHeader&&nextHeader)aktualizujWezelStabilnie(currentHeader,nextHeader,document.activeElement);
+  const nextWorkspace=adminTrescBezposrednia(next),currentWorkspace=adminTrescBezposrednia(current);
+  if(nextWorkspace){
+    if(currentWorkspace&&taSamaTrasa)aktualizujWezelStabilnie(currentWorkspace,nextWorkspace,document.activeElement);
+    else if(currentWorkspace)currentWorkspace.replaceWith(nextWorkspace.cloneNode(true));
+    else currentContainer?.appendChild(nextWorkspace.cloneNode(true));
+  }
+  return true;
+}
+function odbiorcaStabilnegoWidoku(root,stabilny,panelAdmin=false,taSamaTrasa=false){
+  if(!stabilny&&!panelAdmin)return root;
+  return {get innerHTML(){return root.innerHTML;},set innerHTML(html){
+    if(panelAdmin&&aktualizujPanelAdminaStabilnie(root,html,taSamaTrasa))return;
+    if(stabilny)aktualizujWidokStabilnie(root,html);else root.innerHTML=html;
+  }};
 }
 function renderuj(){
   if(renderowanieWidoku){renderPonowniePoBiezacym=true;return;}
   renderowanieWidoku=true;
   try{
     const t = trasa();
-    const root = $("widok"),taSamaTrasa=ostatniaRenderowanaTrasa===t&&root.childNodes.length>0;
-    const w = odbiorcaStabilnegoWidoku(root,taSamaTrasa);
+    const root = $("widok"),poprzedniaTrasa=ostatniaRenderowanaTrasa,taSamaTrasa=ostatniaRenderowanaTrasa===t&&root.childNodes.length>0;
+    const przejsciePanelu=!taSamaTrasa&&t.startsWith("/admin")&&poprzedniaTrasa.startsWith("/admin")&&root.childNodes.length>0;
+    if(przejsciePanelu){
+      adminZapiszPodstroneWCache(root,poprzedniaTrasa);
+      if(adminPrzywrocPodstroneZCache(root,t)){
+        document.body.classList.add("admin-mode");seoAktualizujMetaDlaTrasy(t);ostatniaRenderowanaTrasa=t;return;
+      }
+    }
+    const panelAdmin=t.startsWith("/admin")&&poprzedniaTrasa.startsWith("/admin")&&root.querySelector(":scope > .admin-page");
+    const wStabilny = odbiorcaStabilnegoWidoku(root,taSamaTrasa);
+    const w = panelAdmin?odbiorcaStabilnegoWidoku(root,true,true,taSamaTrasa):wStabilny;
     // Moduł panelu zawiera także bezpieczny widok „Brak dostępu”. Ładujemy go
     // wyłącznie po wejściu na trasę administracyjną, również dla gościa.
     const wymagaPanelu=t.startsWith("/admin")||t==="/diagnostyka";
     document.body.classList.toggle("admin-mode",wymagaPanelu);
-    if(wymagaPanelu&&!window.__artwayAdminReady){
+    if(!wymagaPanelu&&!sklepModulyTrasyGotowe(t)){
+      w.innerHTML=`<div class="page"><div class="panel admin-loading" role="status" aria-live="polite"><h1>Ładowanie podstrony…</h1><p>Wczytuję tylko funkcje potrzebne w tym miejscu sklepu.</p></div></div>`;
+      const trasaLadowania=t,version=document.querySelector('meta[name="artway-version"]')?.content||"dev";
+      Promise.all(sklepModulyDlaTrasy(t).map(modul=>zaladujSklepModul(modul,version))).then(()=>{if(trasa()===trasaLadowania)renderuj();}).catch(error=>{loguj("blad",error.message,t);w.innerHTML=`<div class="page"><div class="panel"><h1>Nie udało się wczytać podstrony</h1><p>${esc(error.message)}</p><button class="btn" onclick="renderuj()">Spróbuj ponownie</button></div></div>`;});
+      ostatniaRenderowanaTrasa=t;return;
+    }
+    if(wymagaPanelu&&!adminModulyTrasyGotowe(t)){
       w.innerHTML=`<div class="page"><div class="panel admin-loading" role="status" aria-live="polite"><h1>Ładowanie panelu administratora…</h1><p>Wczytuję moduły potrzebne tylko do obsługi sklepu.</p></div></div>`;
-      zaladujPanelAdmina().then(()=>renderuj()).catch(error=>{
+      const trasaLadowania=t;
+      zaladujPanelAdmina(t).then(()=>{if(trasa()===trasaLadowania)renderuj();}).catch(error=>{
         loguj("blad",error.message,t);
         w.innerHTML=`<div class="page"><div class="panel"><h1>Nie udało się wczytać panelu</h1><p>${esc(error.message)}</p><button class="btn" onclick="renderuj()">Spróbuj ponownie</button></div></div>`;
       });
       ostatniaRenderowanaTrasa=t;return;
     }
     if(t.startsWith("/admin/zamowienie/")&&!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
-    if(t.startsWith("/admin")&&stanBramki.authenticated&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja) setTimeout(()=>synchronizujBazeCentralna(true),0);
-    if(!taSamaTrasa)window.scrollTo({top:0});
+    if((t==="/admin/zamowienia"||t.startsWith("/admin/zamowienie/"))&&typeof odswiezZamowieniaAdminaPoWejsciu==="function")setTimeout(()=>odswiezZamowieniaAdminaPoWejsciu(),0);
+    else if(t.startsWith("/admin")&&maUprawnieniaZapisuChmury()&&!stanBazyCentralnej.sprawdzono&&!stanBazyCentralnej.synchronizacja)setTimeout(()=>automatycznaSynchronizacjaChmury("admin-route"),0);
+    if(!taSamaTrasa)window.scrollTo({top:0,behavior:"instant"});
     if(t==="/" || t==="") w.innerHTML = widokSklep();
-    else if(t.startsWith("/produkt/")) w.innerHTML = widokProdukt(parseInt(t.split("/")[2]));
+    else if(t.startsWith("/produkt/")) w.innerHTML = widokProdukt(identyfikatorZTrasy(t,2));
     else if(t.startsWith("/kategoria/")) w.innerHTML = widokKategoria(decodeURIComponent(t.split("/")[2]||""));
     else if(t==="/promocje") w.innerHTML = widokListaSpecjalna("🔥 Promocje", p=>p.staraCena, "Aktualnie nie mamy promocji — zajrzyj wkrótce!");
     else if(t==="/nowosci") w.innerHTML = widokListaSpecjalna("✨ Nowości", p=>p.badge==="Nowość", "Brak nowości w tej chwili — zajrzyj wkrótce!");
@@ -2557,8 +3192,10 @@ function renderuj(){
       else if(t==="/admin/allegro/rentownosc") w.innerHTML = widokAdminAllegro("rentownosc");
       else if(t==="/admin/allegro/komunikacja" || t==="/admin/allegro/wiadomosci") w.innerHTML = widokAdminAllegro("wiadomosci");
       else if(t==="/admin/allegro/dyskusje") w.innerHTML = widokAdminAllegro("dyskusje");
+      else if(t==="/admin/allegro/zgodnosc") w.innerHTML = widokAdminAllegro("zgodnosc");
       else if(t==="/admin/allegro/ustawienia") w.innerHTML = widokAdminAllegro("ustawienia");
-      else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki();
+      else if(t==="/admin/wysylki") w.innerHTML = widokAdminWysylki("zlecenia");
+      else if(t.startsWith("/admin/wysylki/")) w.innerHTML = widokAdminWysylki(t.split("/")[3]||"zlecenia");
       else if(t==="/admin/magazyn") w.innerHTML = widokAdminMagazyn("pulpit");
       else if(t.startsWith("/admin/magazyn/")) w.innerHTML = widokAdminMagazyn(t.split("/")[3]||"pulpit");
       else if(t==="/admin/infakt") w.innerHTML = widokAdminInfakt("pulpit");
@@ -2581,28 +3218,29 @@ function renderuj(){
       else if(t.startsWith("/admin/seo/")) w.innerHTML = widokAdminSEO(t.split("/")[3]||"pulpit");
       else if(t.startsWith("/admin/asortyment/")){
         const s=t.split("/")[3]||"produkty";
-        w.innerHTML = s==="jakosc"?widokAdminJakoscKatalogu():s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabaty():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
+        w.innerHTML = s==="jakosc"?widokAdminJakoscKatalogu():s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabatyZaawansowane():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
       }
       else if(t.startsWith("/admin/personalizacja/")){
-        const s=t.split("/")[3]||"wyglad";
-        w.innerHTML = s==="rozmieszczenie"?widokAdminRozmieszczenie():s==="bannery"?widokAdminBannery():s==="podstrony"?widokAdminPodstrony():s==="strony"?widokAdminStrony():s==="dostawy"?widokAdminDostawy():widokAdminWyglad();
+        const s=t.split("/")[3]||"home";
+        w.innerHTML = s==="home"?widokAdminStronaGlowna():s==="rozmieszczenie"?widokAdminRozmieszczenie():s==="bannery"?widokAdminBanneryZaawansowane():s==="ikony"?widokAdminIkonyAI():s==="podstrony"?widokAdminPodstrony():s==="strony"?widokAdminStrony():s==="dostawy"?widokAdminDostawy():widokAdminWyglad();
       }
       else if(t==="/admin/asortyment" || t==="/admin/produkty") w.innerHTML = widokAdminProdukty();
       else if(t==="/admin/produkty/dodaj") w.innerHTML = widokAdminProduktyDodaj();
       else if(t==="/admin/produkty/z-linku") w.innerHTML = widokAdminProduktyZLinku();
       else if(t==="/admin/produkty/z-pliku") w.innerHTML = widokAdminProduktyZPliku();
-      else if(t.startsWith("/admin/produkty/edytuj/")) w.innerHTML = widokAdminProduktEdytuj(parseInt(t.split("/")[4]));
+      else if(t.startsWith("/admin/produkty/edytuj/")) w.innerHTML = widokAdminProduktEdytuj(identyfikatorZTrasy(t,4));
       else if(t==="/admin/kategorie") w.innerHTML = widokAdminKategorie();
       else if(t==="/admin/mapowanie") w.innerHTML = widokAdminMapowanie();
       else if(t==="/admin/klienci") w.innerHTML = widokAdminKlienci("lista");
       else if(t.startsWith("/admin/klienci/")) w.innerHTML = widokAdminKlienci(t.split("/")[3]||"lista");
       else if(t.startsWith("/admin/klient/")) w.innerHTML = widokAdminKlient(decodeURIComponent(t.split("/")[3]||""));
-      else if(t==="/admin/rabaty") w.innerHTML = widokAdminRabaty();
+      else if(t==="/admin/rabaty") w.innerHTML = widokAdminRabatyZaawansowane();
       else if(t==="/admin/opinie") w.innerHTML = widokAdminOpinie();
       else if(t==="/admin/dostawy" || t==="/admin/ustawienia") w.innerHTML = widokAdminDostawy();
-      else if(t==="/admin/personalizacja" || t==="/admin/wyglad") w.innerHTML = widokAdminWyglad();
+      else if(t==="/admin/personalizacja") w.innerHTML = widokAdminStronaGlowna();
+      else if(t==="/admin/wyglad") w.innerHTML = widokAdminWyglad();
       else if(t==="/admin/rozmieszczenie") w.innerHTML = widokAdminRozmieszczenie();
-      else if(t==="/admin/bannery") w.innerHTML = widokAdminBannery();
+      else if(t==="/admin/bannery") w.innerHTML = widokAdminBanneryZaawansowane();
       else if(t==="/admin/podstrony") w.innerHTML = widokAdminPodstrony();
       else if(t==="/admin/strony") w.innerHTML = widokAdminStrony();
       else if(t==="/admin/eksport") w.innerHTML = widokAdminEksport("import");
@@ -2616,6 +3254,7 @@ function renderuj(){
     else w.innerHTML = `<div class="page"><div class="panel"><h1>404 — nie ma takiej strony 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
     if(t==="/"||t==="") { rysujChipy(); rysuj(); }
     seoAktualizujMetaDlaTrasy(t);
+    if(typeof seoSledzTrase==="function")seoSledzTrase(t);
     if(t==="/admin/aktualizacja"&&!stanAktualizacji.sprawdzono&&!stanAktualizacji.ladowanie) setTimeout(()=>sprawdzStatusAktualizacji(true),0);
     ostatniaRenderowanaTrasa=t;
   }catch(e){
@@ -2627,13 +3266,16 @@ function renderuj(){
     if(renderPonowniePoBiezacym){renderPonowniePoBiezacym=false;requestAnimationFrame(()=>renderuj());}
   }
 }
-window.addEventListener("hashchange",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
+window.addEventListener("hashchange",()=>{if(typeof adminZarejestrujTrase==="function")adminZarejestrujTrase(trasa());renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
+window.addEventListener("popstate",()=>{renderuj();requestAnimationFrame(()=>$("widok")?.focus({preventScroll:true}));});
 
 /* ═══════════ WIDOK: SKLEP (strona główna) ═══════════ */
+
 function ikonaKategorii(nazwa){
   const mapa = {"Elektronika":"🎧","Dom i ogród":"🏡","Narzędzia":"🧰","Odzież":"🧥","Sport":"🏋️"};
   return mapa[nazwa] || "📦";
 }
+function ikonaKategoriiHTML(nazwa){const item=(ustawienia.ikonyKategorii||{})[nazwa];return item?.url?`<img src="${esc(item.url)}" alt="" loading="lazy">`:esc(ikonaKategorii(nazwa));}
 function opisKategorii(nazwa){
   const mapa = {
     "Elektronika":"Sprzęt i akcesoria do pracy, domu oraz podróży.",
@@ -2644,14 +3286,28 @@ function opisKategorii(nazwa){
   };
   return mapa[nazwa] || "Zobacz wszystkie produkty dostępne w tym katalogu.";
 }
-function banneryHome(){
-  const lista=pobierzBannery().filter(b=>b.aktywny!==false);
+function bannerUkrytyPrzezKlienta(id){try{return sessionStorage.getItem(`artway_banner_hidden_${id}`)==="1";}catch(e){return false;}}
+function zamknijBannerSklepu(event,id){event.preventDefault();event.stopPropagation();try{sessionStorage.setItem(`artway_banner_hidden_${id}`,"1");}catch(e){}event.currentTarget.closest(".managed-banner-shell")?.remove();}
+function bannerSklepuHTML(b){
+  const n=normalizujBaner(b),type=esc(n.typ),width=esc(n.szerokosc),height=esc(n.wysokosc),mobile=esc(n.mobileMode);
+  const shade=Math.max(0,Math.min(90,Number(n.przyciemnienie)||68))/100,fx=Number(n.focalX),fy=Number(n.focalY),x=Number.isFinite(fx)?Math.max(0,Math.min(100,fx)):50,y=Number.isFinite(fy)?Math.max(0,Math.min(100,fy)):50,position=`${x}% ${y}%`,direction=n.kierunekNakladki==="prawo"?"270deg":n.kierunekNakladki==="dookola"?"135deg":"90deg";
+  const content=Math.max(30,Math.min(100,Number(n.szerokoscTresci)||62)),padding=Math.max(8,Math.min(48,Number(n.odstep)||18)),radius=Math.max(0,Math.min(40,Number(n.promien)||14));
+  return `<article class="managed-banner-shell banner-type-${type} banner-width-${width} banner-height-${height} banner-mobile-${mobile} ${n.przyklejony?"is-sticky":""}">
+    <a class="managed-banner ${n.obraz?'ma-obraz':''} banner-${esc(n.styl||"karta")} align-${esc(n.wyrownanie||"lewo")} audience-${esc(n.odbiorcy||"wszyscy")} anim-${esc(n.animacja||"brak")}" href="${esc(bezpiecznyLink(n.link))}" ${n.obraz?`aria-label="${esc(n.obrazAlt||n.tytul||"Banner")}" style="background-image:linear-gradient(${direction},rgba(15,18,25,${shade}),rgba(15,18,25,${Math.max(.08,shade-.42)})),url('${esc(n.obraz)}');background-position:${position};--banner-content:${content}%;--banner-padding:${padding}px;--banner-radius:${radius}px"`:`style="--banner-content:${content}%;--banner-padding:${padding}px;--banner-radius:${radius}px"`}>
+      ${n.obraz?"":`<span class="banner-icon">${esc(n.ikona||"📣")}</span>`}
+      <span class="managed-banner-content">${n.etykieta?`<em class="managed-banner-badge">${esc(n.etykieta)}</em>`:""}<h3>${esc(n.tytul||"")}</h3><p>${esc(n.opis||"")}</p>${n.kodRabatowy?`<strong class="managed-banner-code">Kod: ${esc(n.kodRabatowy)}</strong>`:""}<small class="managed-banner-cta cta-${esc(n.stylPrzycisku||"pelny")}">${esc(n.przycisk||"Dowiedz się więcej")} →</small></span>
+    </a>${n.zamykany?`<button class="managed-banner-close" type="button" aria-label="Zamknij banner" onclick="zamknijBannerSklepu(event,${jsArg(n.id)})">×</button>`:""}
+  </article>`;
+}
+function banneryHome(miejsce="sekcja-banery"){
+  const teraz=Date.now();
+  const lista=pobierzBannery().filter(b=>{
+    if(b.aktywny===false)return false;
+    const start=b.start?Date.parse(b.start):NaN,koniec=b.koniec?Date.parse(b.koniec):NaN;
+    return b.umiejscowienie===miejsce&&!bannerUkrytyPrzezKlienta(b.id)&&(!Number.isFinite(start)||teraz>=start)&&(!Number.isFinite(koniec)||teraz<=koniec);
+  });
   if(!lista.length) return "";
-  return `<section class="managed-banners">${lista.map(b=>`
-    <a class="managed-banner ${b.obraz?'ma-obraz':''}" href="${esc(bezpiecznyLink(b.link))}" ${b.obraz?`style="background-image:linear-gradient(90deg,rgba(15,18,25,.74),rgba(15,18,25,.28)),url('${b.obraz}')"`:""}>
-      ${b.obraz?"":`<span class="banner-icon">${esc(b.ikona||"📣")}</span>`}
-      <span><h3>${esc(b.tytul||"")}</h3><p>${esc(b.opis||"")}</p><small>${esc(b.przycisk||"Dowiedz się więcej")} →</small></span>
-    </a>`).join("")}</section>`;
+  return `<section class="managed-banners banner-placement-${esc(miejsce)}" aria-label="Bannery promocyjne">${lista.map(bannerSklepuHTML).join("")}</section>`;
 }
 /* ── Sekcje strony głównej: kolejność i widoczność ustawiane wizualnie
       w Panel admina → Personalizacja → 🧭 Rozmieszczenie ── */
@@ -2667,10 +3323,12 @@ const SEKCJE_GLOWNEJ = {
   faq:        { nazwa:"Najczęstsze pytania",         ikona:"❓" },
   kontakt:    { nazwa:"Końcowa sekcja kontaktu",     ikona:"💬" }
 };
-const DOMYSLNA_KOLEJNOSC_SEKCJI = ["hero","banery","kategorie","produkty","pasekOferty","zalety","kroki","onas","faq","kontakt"];
+const DOMYSLNA_KOLEJNOSC_SEKCJI = ["hero","banery","produkty","kategorie","pasekOferty","zalety","kroki","onas","faq","kontakt"];
 function kolejnoscSekcji(){
   const zap = Array.isArray(ustawienia.kolejnoscSekcji) ? ustawienia.kolejnoscSekcji.filter(id=>SEKCJE_GLOWNEJ[id]) : [];
-  return [...zap, ...DOMYSLNA_KOLEJNOSC_SEKCJI.filter(id=>!zap.includes(id))];
+  const wynik=[...zap, ...DOMYSLNA_KOLEJNOSC_SEKCJI.filter(id=>!zap.includes(id))],produktyIndex=wynik.indexOf("produkty"),kategorieIndex=wynik.indexOf("kategorie");
+  if(produktyIndex>=0&&kategorieIndex>=0&&kategorieIndex<produktyIndex){wynik.splice(kategorieIndex,1);wynik.splice(wynik.indexOf("produkty")+1,0,"kategorie");}
+  return wynik;
 }
 function sekcjaWidoczna(id){
   if((ustawienia.sekcjeUkryte||[]).includes(id)) return false;
@@ -2681,29 +3339,38 @@ function sekcjaWidoczna(id){
 }
 function widokSklep(){
   const kategorie = wszystkieKategorie();
-  const promki = produkty.filter(p=>p.staraCena).length;
-  const nowosci = produkty.filter(p=>p.badge==="Nowość").length;
-  const hero = ustawienia.hero || {};
+  const drzewoKategorii=indeksDrzewaKategoriiMenu(kategorie),kategorieGlowne=drzewoKategorii.roots;
+  const publiczneProdukty=produkty.filter(produktWidocznyWPublicznymKatalogu),centralSummary=(typeof sklepKatalogCentralnyPodsumowanie!=="undefined"?sklepKatalogCentralnyPodsumowanie:{});
+  const liczbaPublicznych=chmuraKatalogCentralnyPubliczny&&Number.isFinite(Number(centralSummary.total))?Number(centralSummary.total):publiczneProdukty.length;
+  const promki = chmuraKatalogCentralnyPubliczny?Number(centralSummary.promotions)||0:publiczneProdukty.filter(p=>p.staraCena).length;
+  const nowosci = chmuraKatalogCentralnyPubliczny?Number(centralSummary.new_products)||0:publiczneProdukty.filter(p=>p.badge==="Nowość").length;
+  const widoczneSekcje=kolejnoscSekcji().filter(sekcjaWidoczna);
+  const heroMaNaglowekGlowny=widoczneSekcje.includes("hero");
+  const ofertaMaNaglowekGlowny=!heroMaNaglowekGlowny&&widoczneSekcje.includes("produkty");
+  const awaryjnyNaglowekGlowny=!heroMaNaglowekGlowny&&!ofertaMaNaglowekGlowny
+    ?`<h1 class="sr-only home-canonical-title">Gry, zabawki i artykuły imprezowe — Artway-TM</h1>`
+    :"";
+  const hero = ustawienia.hero || {},oferta=ustawieniaOfertyGlownej(),heroFx=Number(hero.focalX),heroFy=Number(hero.focalY),heroX=Number.isFinite(heroFx)?Math.max(0,Math.min(100,heroFx)):50,heroY=Number.isFinite(heroFy)?Math.max(0,Math.min(100,heroFy)):50,heroShade=Math.max(0,Math.min(90,Number(hero.przyciemnienie)||76))/100,heroMin=hero.wysokosc==="niski"?280:hero.wysokosc==="wysoki"?460:360;
   const SEKCJE = {};
-  SEKCJE.hero = () => `
-  <section class="hero">
-    <div class="hero-in" ${hero.obraz?`style="background:linear-gradient(120deg,rgba(30,41,59,.88),rgba(49,46,129,.78) 60%,rgba(91,33,182,.68)),url('${hero.obraz}') center/cover"`:""}>
+  SEKCJE.hero = () => `${banneryHome("nad-hero")}
+  <section class="hero hero-mobile-${esc(hero.mobileMode||"kompaktowy")}">
+    <div class="hero-in hero-align-${esc(hero.wyrownanie||"lewo")}" style="min-height:${heroMin}px;${hero.obraz?`background-image:linear-gradient(120deg,rgba(30,41,59,${heroShade}),rgba(49,46,129,${Math.max(.22,heroShade-.25)}) 60%,rgba(91,33,182,${Math.max(.15,heroShade-.35)})),url('${esc(hero.obraz)}');background-position:${heroX}% ${heroY}%;background-size:cover`:""}">
       <span class="hero-eyebrow">${esc(hero.etykieta||"ARTWAY-TM • ZAKUPY PROSTO I WYGODNIE")}</span>
       <h1>${esc(KONFIG.heroTytul)}</h1>
       <p>${esc(KONFIG.heroOpis)}</p>
       <div class="hero-actions">
-        <a href="#produkty" onclick="document.querySelector('.catalog-head')?.scrollIntoView({behavior:'smooth'});return false;">${esc(hero.przycisk1||"Zobacz ofertę")} ↓</a>
+        <a href="${esc(bezpiecznyLink(hero.link1||"#produkty"))}" ${String(hero.link1||"#produkty")==="#produkty"?`onclick="document.querySelector('.catalog-head')?.scrollIntoView({behavior:'smooth'});return false;"`:""}>${esc(hero.przycisk1||"Zobacz ofertę")} ↓</a>
         <a class="hero-link-alt" href="${esc(bezpiecznyLink(hero.link2||"#/promocje"))}">${esc(hero.przycisk2||"Sprawdź promocje")}</a>
       </div>
       <div class="hero-meta">
-        <div><b>${produkty.length} produktów</b><small>w aktualnej ofercie</small></div>
+        <div><b>${liczbaPublicznych} produktów</b><small>w aktualnej ofercie</small></div>
         <div><b>${kategorie.length} katalogów</b><small>łatwe przeglądanie</small></div>
         <div><b>14 dni</b><small>na wygodny zwrot</small></div>
         <div><b>od ${KONFIG.darmowaDostawaOd} zł</b><small>darmowa dostawa</small></div>
       </div>
     </div>
-  </section>`;
-  SEKCJE.banery = () => banneryHome();
+  </section>${banneryHome("pod-hero")}`;
+  SEKCJE.banery = () => banneryHome("sekcja-banery");
   SEKCJE.kategorie = () => `
   <section class="home-section home-categories">
     <div class="section-head">
@@ -2711,24 +3378,24 @@ function widokSklep(){
       <a href="#produkty" onclick="document.querySelector('.catalog-head')?.scrollIntoView({behavior:'smooth'});return false;">Cała oferta →</a>
     </div>
     <div class="category-grid">
-      ${kategorie.map(k=>`
-        <a class="category-tile" href="#/kategoria/${encodeURIComponent(k)}">
-          <span class="category-ico">${ikonaKategorii(k)}</span>
+      ${(Array.isArray(oferta.kategorie)&&oferta.kategorie.length?kategorie.filter(k=>oferta.kategorie.includes(k)):kategorieGlowne).map(k=>`
+        <a class="category-tile" href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">
+          <span class="category-ico">${ikonaKategoriiHTML(k)}</span>
           <b>${esc(k)}</b>
           <p>${esc(opisKategorii(k))}</p>
-          <small>${produkty.filter(p=>p.kategoria===k).length} produktów →</small>
+          <small>${drzewoKategorii.branchCounts[k]||0} produktów${(drzewoKategorii.children.get(k)||[]).length?` • ${(drzewoKategorii.children.get(k)||[]).length} gałęzi`:""} →</small>
         </a>`).join("")}
     </div>
   </section>`;
-  SEKCJE.produkty = () => `
+  SEKCJE.produkty = () => `${banneryHome("nad-produktami")}
   <div class="catalog-head" id="produkty">
     <div class="section-head">
-      <div><h2>Cała oferta</h2><p>Porównaj produkty, dodaj wybrane do ulubionych albo od razu przejdź do koszyka.</p></div>
-      <span style="font-size:.85rem;color:var(--muted2)">${promki} promocji • ${nowosci} nowości</span>
+      <div><${ofertaMaNaglowekGlowny?"h1":"h2"}>${esc(String(oferta.tytul||"").trim()||"Cała oferta")}</${ofertaMaNaglowekGlowny?"h1":"h2"}><p>${esc(oferta.opis||"")}</p></div>
+      ${oferta.liczniki===false?"":`<span style="font-size:.85rem;color:var(--muted2)">${promki} promocji • ${nowosci} nowości</span>`}
     </div>
   </div>
   <div class="toolbar">
-    <div id="chips" style="display:flex;flex-wrap:wrap;gap:.6rem"></div>
+    ${oferta.wyborDzialu==="nad-produktami"?`<div id="chips" class="home-category-chips"></div>`:""}
     <select id="sortSelect" onchange="sortowanie=this.value;stronaProduktow=1;rysuj()" aria-label="Sortowanie">
       <option value="default" ${sortowanie==="default"?"selected":""}>Sortuj: domyślnie</option>
       <option value="price-asc" ${sortowanie==="price-asc"?"selected":""}>Cena: od najniższej</option>
@@ -2738,7 +3405,7 @@ function widokSklep(){
       <option value="newest" ${sortowanie==="newest"?"selected":""}>Najnowsze</option>
     </select>
   </div>
-  <div class="catalog-tools">
+  <div class="catalog-tools" ${oferta.filtryZaawansowane===false?`style="display:none"`:""}>
     <details class="advanced-search" ${(cenaOd||cenaDo||filtrDostepnosci!=="wszystkie"||filtrOferty!=="wszystkie"||filtrOceny!=="0")?"open":""}>
       <summary>🔎 Zaawansowane wyszukiwanie i filtry</summary>
       <div class="filter-grid">
@@ -2754,11 +3421,12 @@ function widokSklep(){
   <div class="results-bar"><span id="wynikowProdukty"></span><label>Na stronie: <select onchange="ustawProduktyNaStronie(this.value)">${[12,24,48,96].map(n=>`<option value="${n}" ${produktyNaStronie===n?"selected":""}>${n}</option>`).join("")}</select></label></div>
   <div class="pagination" id="paginacjaGora"></div>
   <div class="grid" id="grid"></div>
-  <div class="pagination" id="paginacjaDol"></div>`;
-  SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(); return `
-  <section class="offer-band">
-    <div class="offer-band-in">
-      <div><h2>${esc(o.tytul||"Dobry moment na zakupy")}</h2><p>${o.opis?esc(o.opis):(promo?`Użyj kodu <b>${esc(promo.kod)}</b> w koszyku i odbierz ${esc(promo.procent)}% rabatu na zamówienie.`:"Sprawdź aktualne okazje i produkty w dobrych cenach.")}</p></div>
+  <div class="pagination" id="paginacjaDol"></div>
+  ${oferta.wyborDzialu!=="ukryty"&&oferta.wyborDzialu!=="nad-produktami"?`<div class="home-department-picker"><span>Wybierz dział oferty</span><div id="chips" class="home-category-chips"></div></div>`:""}${banneryHome("pod-produktami")}`;
+  SEKCJE.pasekOferty = () => { const o = ustawienia.pasekOkazji || {},promo=glownaPromocja(),kod=o.kodRabatowy||promo?.kod||"",fx=Number(o.focalX),fy=Number(o.focalY),x=Number.isFinite(fx)?Math.max(0,Math.min(100,fx)):50,y=Number.isFinite(fy)?Math.max(0,Math.min(100,fy)):50,shade=Math.max(0,Math.min(90,Number(o.przyciemnienie)||72))/100,min=o.wysokosc==="niski"?90:o.wysokosc==="wysoki"?190:130; return `
+  <section class="offer-band offer-band-${esc(o.mobileMode||"kompaktowy")} ${o.przyklejony?"offer-band-sticky":""}">
+    <div class="offer-band-in" style="min-height:${min}px;${o.obraz?`background-image:linear-gradient(90deg,rgba(30,41,59,${shade}),rgba(49,46,129,${Math.max(.18,shade-.28)})),url('${esc(o.obraz)}');background-position:${x}% ${y}%;background-size:cover`:""}">
+      <span class="offer-band-icon">${esc(o.ikona||"🎁")}</span><div>${o.etykieta?`<small>${esc(o.etykieta)}</small>`:""}<h2>${esc(o.tytul||"Dobry moment na zakupy")}</h2><p>${o.opis?esc(o.opis):(kod?`Użyj kodu <b>${esc(kod)}</b>${promo?.procent?` w koszyku i odbierz ${esc(promo.procent)}% rabatu na zamówienie.`:" w koszyku."}`:"Sprawdź aktualne okazje i produkty w dobrych cenach.")}</p></div>
       <a href="${esc(bezpiecznyLink(o.link||"#/promocje"))}">${esc(o.tekstLinku||"Zobacz okazje")} →</a>
     </div>
   </section>`; };
@@ -2813,7 +3481,7 @@ function widokSklep(){
       <details><summary>Jak zwrócić produkt?</summary><p>Na odstąpienie od umowy masz 14 dni od odbioru. Napisz na ${esc(KONFIG.emailSklepu)}, a otrzymasz dalsze instrukcje.</p></details>
     </div>
   </section>`;
-  SEKCJE.kontakt = () => `
+  SEKCJE.kontakt = () => `${banneryHome("przed-stopka")}
   <section class="home-section home-contact">
     <div class="contact-strip">
       <div><h2>Zostało pytanie?</h2><p>Skontaktuj się z nami — odpowiadamy w dni robocze.</p></div>
@@ -2823,8 +3491,39 @@ function widokSklep(){
       </div>
     </div>
   </section>`;
-  return kolejnoscSekcji().filter(sekcjaWidoczna).map(id => SEKCJE[id] ? SEKCJE[id]() : "").join("\n");
+  return awaryjnyNaglowekGlowny+widoczneSekcje.map(id => SEKCJE[id] ? SEKCJE[id]() : "").join("\n");
 }
+
+let sklepKatalogCentralnyCache=new Map(),sklepKatalogCentralnyStan={signature:"",loading:false,data:null,error:""},sklepKatalogCentralnyFacety={categories:[],producers:[]},sklepKatalogCentralnyPodsumowanie={},sklepKatalogCentralnyTimer=null,sklepProduktCentralnyWToku=new Map(),sklepProduktCentralnyBledy=new Map();
+function sklepKatalogCentralnySort(value="default"){return ({"price-asc":"cena-rosnaco","price-desc":"cena-malejaco",name:"nazwa",rating:"ocena",newest:"najnowsze"})[value]||"external";}
+function sklepKatalogCentralnyOfertaParams(){
+  const oferta=ustawieniaOfertyGlownej(),params={};
+  if(oferta.zakres==="promocje")params.promotion="promocje";else if(oferta.zakres==="nowosci")params.special="nowosci";else if(oferta.zakres==="kategoria"&&oferta.kategoria)params.categories=[...kategorieGaleziMenu(oferta.kategoria)].join(",");else if(oferta.zakres==="wybrane"&&oferta.produkty.length)params.ids=oferta.produkty.join(",");
+  return params;
+}
+function sklepKatalogCentralnyParametryGlowne(){
+  const params={audience:"public",q:fraza,priceMin:cenaOd,priceMax:cenaDo,minRating:Number(filtrOceny)||"",promotion:filtrOferty==="promocje"?"promocje":"",special:filtrOferty==="nowosci"?"nowosci":"",sort:sklepKatalogCentralnySort(sortowanie==="default"?(ustawieniaOfertyGlownej().sortowanie||"default"):sortowanie),page:stronaProduktow,limit:produktyNaStronie,...sklepKatalogCentralnyOfertaParams()};
+  if(aktywnaKategoria!=="Wszystkie")params.categories=[...kategorieGaleziMenu(aktywnaKategoria)].join(",");
+  return params;
+}
+function sklepKatalogCentralnySygnatura(params){return JSON.stringify(Object.fromEntries(Object.entries(params||{}).filter(([,value])=>value!==""&&value!==null&&value!==undefined)));}
+async function sklepKatalogCentralnyPobierz(params,force=false){
+  if(!chmuraKatalogCentralnyPubliczny)return null;const signature=sklepKatalogCentralnySygnatura(params),cached=!force?sklepKatalogCentralnyCache.get(signature):null;
+  if(cached&&Date.now()-cached.at<5*60*1000)return cached.data;
+  if(sklepKatalogCentralnyStan.loading&&sklepKatalogCentralnyStan.signature===signature)return null;
+  sklepKatalogCentralnyStan={signature,loading:true,data:null,error:""};
+  try{const data=await chmura("product-catalog-query",{params,timeout:30000});sklepKatalogCentralnyCache.set(signature,{at:Date.now(),data});while(sklepKatalogCentralnyCache.size>24)sklepKatalogCentralnyCache.delete(sklepKatalogCentralnyCache.keys().next().value);sklepKatalogCentralnyFacety=data.facets||sklepKatalogCentralnyFacety;sklepKatalogCentralnyPodsumowanie=data.summary||sklepKatalogCentralnyPodsumowanie;zapamietajProduktyCentralne(data.items||[]);zbudujProdukty();sklepKatalogCentralnyStan={signature,loading:false,data,error:""};return data;}
+  catch(error){sklepKatalogCentralnyStan={signature,loading:false,data:null,error:String(error?.message||error)};return null;}
+}
+function sklepKatalogCentralnyWidok(params){
+  const signature=sklepKatalogCentralnySygnatura(params),cached=sklepKatalogCentralnyCache.get(signature);if(cached&&Date.now()-cached.at<5*60*1000)return {ready:true,data:cached.data};
+  if(sklepKatalogCentralnyStan.error&&sklepKatalogCentralnyStan.signature===signature)return {error:sklepKatalogCentralnyStan.error};
+  if(!sklepKatalogCentralnyStan.loading||sklepKatalogCentralnyStan.signature!==signature)setTimeout(()=>sklepKatalogCentralnyPobierz(params).then(()=>{if(chmuraKatalogCentralnyPubliczny)renderuj();}),0);
+  return {loading:true};
+}
+function sklepKatalogCentralnyZaplanuj(){clearTimeout(sklepKatalogCentralnyTimer);sklepKatalogCentralnyTimer=setTimeout(()=>rysuj(),220);}
+async function sklepPobierzProduktCentralny(id,force=false){const key=String(id);if(force)sklepProduktCentralnyBledy.delete(key);if(sklepProduktCentralnyBledy.has(key))return null;if(sklepProduktCentralnyWToku.has(key))return sklepProduktCentralnyWToku.get(key);const request=chmura("product-catalog-item",{params:{id:key,audience:"public"},timeout:20000}).then(data=>{if(data.product){sklepProduktCentralnyBledy.delete(key);zapamietajProduktyCentralne([data.product]);zbudujProdukty();return data.product;}sklepProduktCentralnyBledy.set(key,"Nie znaleziono produktu.");return null;}).catch(error=>{sklepProduktCentralnyBledy.set(key,String(error?.message||error));return null;}).finally(()=>sklepProduktCentralnyWToku.delete(key));sklepProduktCentralnyWToku.set(key,request);return request;}
+function sklepKatalogCentralnyLiczbaKategorii(galaz){const zestaw=galaz instanceof Set?galaz:new Set(galaz||[]);return (sklepKatalogCentralnyFacety.categories||[]).reduce((s,item)=>s+(zestaw.has(item.value)?Number(item.count)||0:0),0);}
 function rysujChipy(){
   const c = $("chips"); if(!c) return;
   const kats = ["Wszystkie", ...wszystkieKategorie()];
@@ -2838,7 +3537,7 @@ function normalizujSzukanyTekst(s){
 function produktPasujeFrazie(p,szukane=fraza){
   const zapytanie=normalizujSzukanyTekst(szukane);
   if(!zapytanie)return true;
-  const tekst=normalizujSzukanyTekst([p.nazwa,p.opisKrotki,p.opis,p.kategoria,p.sku,p.gtin,p.externalId,p.mpn,p.producent,p.marka,p.kolorProduktu,p.rozmiar,p.material,(p.warianty||[]).join(" "),p.id].join(" "));
+  const tekst=normalizujSzukanyTekst([p.nazwa,p.opisKrotki,p.opis,p.kategoria,p.sku,p.gtin,p.ean,p.externalId,p.mpn,p.kodProducenta,p.allegroOfferId,p.producent,p.marka,p.kolorProduktu,p.rozmiar,p.material,(p.warianty||[]).join(" "),p.id].join(" "));
   return zapytanie.split(" ").filter(Boolean).every(slowo=>tekst.includes(slowo));
 }
 function sortujListeProduktow(lista,sort=sortowanie){
@@ -2850,17 +3549,19 @@ function sortujListeProduktow(lista,sort=sortowanie){
   return lista;
 }
 function listaProduktowPoFiltrach(){
-  const od=cenaOd===""?null:Number(cenaOd),doC=cenaDo===""?null:Number(cenaDo),minOcena=Number(filtrOceny||0);
+  const od=cenaOd===""?null:Number(cenaOd),doC=cenaDo===""?null:Number(cenaDo),minOcena=Number(filtrOceny||0),oferta=ustawieniaOfertyGlownej();
   const lista=produkty.filter(p=>{
+    if(!produktWidocznyWPublicznymKatalogu(p))return false;
     const ocena=sredniaOcen(p.id)?.srednia||0, niedostepny=produktOznaczonyNiedostepny(p);
-    return (aktywnaKategoria==="Wszystkie"||p.kategoria===aktywnaKategoria)
+    const zakres=oferta.zakres==="promocje"?!!p.staraCena:oferta.zakres==="nowosci"?p.badge==="Nowość":oferta.zakres==="kategoria"?produktNalezyDoGaleziKategorii(p,oferta.kategoria):oferta.zakres==="wybrane"?oferta.produkty.includes(String(p.id)):true;
+    return zakres&&produktNalezyDoGaleziKategorii(p,aktywnaKategoria)
       && produktPasujeFrazie(p)
       && (od===null||p.cena>=od)&&(doC===null||p.cena<=doC)
       && (filtrDostepnosci==="wszystkie"||(filtrDostepnosci==="dostepne"&&!niedostepny)||(filtrDostepnosci==="brak"&&niedostepny))
       && (filtrOferty==="wszystkie"||(filtrOferty==="promocje"&&!!p.staraCena)||(filtrOferty==="nowosci"&&p.badge==="Nowość"))
       && ocena>=minOcena;
   });
-  return sortujListeProduktow(lista);
+  return sortujListeProduktow(lista,sortowanie==="default"?(oferta.sortowanie||"default"):sortowanie);
 }
 function paginacjaHTML(strona,liczbaStron,fn){
   if(liczbaStron<=1)return "";
@@ -2887,7 +3588,7 @@ function kartaProduktu(p,index=0){
   const brakCeny = !produktMaCeneSprzedazy(p);
   const niedostepny = produktOznaczonyNiedostepny(p);
   return `
-  <article class="card" onclick="location.hash='#/produkt/${p.id}'">
+  <article class="card" onclick="przejdzDoSklepu('/produkt/${encodeURIComponent(p.id)}')">
     <div class="thumb" style="background:${p.kolor||'#eef2f7'}">
       ${niedostepny?`<span class="badge" style="background:#64748b">Chwilowo niedostępne</span>`:(brakCeny?`<span class="badge" style="background:#f97316">Do wyceny</span>`:(p.badge?`<span class="badge ${p.badge==='Nowość'?'new':''}">${esc(p.badge)}</span>`:""))}
       ${jestAdmin()?"":`<button class="fav-btn" onclick="event.stopPropagation();przelaczUlubione(${p.id})" aria-label="Ulubione">${ulub?"❤️":"🤍"}</button>`}
@@ -2895,7 +3596,7 @@ function kartaProduktu(p,index=0){
     </div>
     <div class="card-body">
       <span class="cat-label">${esc(p.kategoria)}${oceny?` <span style="color:var(--accent);text-transform:none;letter-spacing:0">★ ${oceny.srednia.toFixed(1)} (${oceny.n})</span>`:""}</span>
-      <h3>${esc(p.nazwa)}</h3>
+      <h3><a href="/produkt/${encodeURIComponent(p.id)}" onclick="event.stopPropagation();return nawigujSklep(event,this.getAttribute('href'))">${esc(p.nazwa)}</a></h3>
       <p class="desc">${esc(skrocTekst(opisKrotkiProduktu(p),190))}</p>
       <div class="price-row">
         <span class="price">${brakCeny?"Cena do uzupełnienia":zl(p.cena)}</span>
@@ -2906,13 +3607,22 @@ function kartaProduktu(p,index=0){
       ${niedostepny||brakCeny
         ? `<button class="add-btn" disabled style="background:#94a3b8;cursor:not-allowed">${brakCeny?"Cena do uzupełnienia":"Chwilowo niedostępny"}</button>`
         : p.warianty?.length
-          ? `<button class="add-btn" onclick="event.stopPropagation();location.hash='#/produkt/${p.id}'" style="background:var(--brand2)">Wybierz wariant →</button>`
+          ? `<button class="add-btn" onclick="event.stopPropagation();przejdzDoSklepu('/produkt/${encodeURIComponent(p.id)}')" style="background:var(--brand2)">Wybierz wariant →</button>`
           : `<div class="card-purchase" onclick="event.stopPropagation()"><div class="card-quantity" aria-label="Liczba sztuk"><button type="button" onclick="ustawIloscKarty(this.nextElementSibling,-1)" aria-label="Zmniejsz liczbę sztuk">−</button><input data-card-quantity type="number" min="1" max="99" step="1" value="1" inputmode="numeric" aria-label="Liczba sztuk produktu ${esc(p.nazwa)}" onchange="ustawIloscKarty(this)"><button type="button" onclick="ustawIloscKarty(this.previousElementSibling,1)" aria-label="Zwiększ liczbę sztuk">+</button></div><button class="add-btn" onclick="dodajZKarty(${p.id},this)">Do koszyka</button></div>`}
     </div>
   </article>`;
 }
 function rysuj(){
   const g = $("grid"); if(!g) return;
+  if(chmuraKatalogCentralnyPubliczny){
+    if(filtrDostepnosci==="brak"){
+      g.innerHTML=`<div class="empty">W sklepie nie pokazujemy produktów chwilowo niedostępnych.</div>`;const licznik=$("wynikowProdukty");if(licznik)licznik.innerHTML="Nie znaleziono produktów";if($("paginacjaGora"))$("paginacjaGora").innerHTML="";if($("paginacjaDol"))$("paginacjaDol").innerHTML="";return;
+    }
+    const view=sklepKatalogCentralnyWidok(sklepKatalogCentralnyParametryGlowne());
+    if(!view.ready){g.innerHTML=view.error?`<div class="empty">⚠️ ${esc(view.error)} <button class="btn ghost" onclick="sklepKatalogCentralnyPobierz(sklepKatalogCentralnyParametryGlowne(),true).then(()=>renderuj())">Spróbuj ponownie</button></div>`:`<div class="empty" role="status">Ładowanie aktualnej oferty…</div>`;return;}
+    const data=view.data,fragment=Array.isArray(data.items)?data.items:[],liczbaStron=Math.max(1,Math.ceil((Number(data.total)||0)/produktyNaStronie));stronaProduktow=Math.min(Math.max(1,stronaProduktow),liczbaStron);const start=(stronaProduktow-1)*produktyNaStronie;
+    g.innerHTML=fragment.length?fragment.map(kartaProduktu).join(""):`<div class="empty">😕 Brak produktów spełniających kryteria.</div>`;const licznik=$("wynikowProdukty");if(licznik)licznik.innerHTML=data.total?`Znaleziono <b>${data.total}</b> produktów • pokazano ${start+1}–${Math.min(start+fragment.length,data.total)}`:"Nie znaleziono produktów";const pag=paginacjaHTML(stronaProduktow,liczbaStron,"ustawStroneProduktow");if($("paginacjaGora"))$("paginacjaGora").innerHTML=pag;if($("paginacjaDol"))$("paginacjaDol").innerHTML=pag;return;
+  }
   const lista=listaProduktowPoFiltrach(),liczbaStron=Math.max(1,Math.ceil(lista.length/produktyNaStronie));
   stronaProduktow=Math.min(Math.max(1,stronaProduktow),liczbaStron);
   const start=(stronaProduktow-1)*produktyNaStronie,fragment=lista.slice(start,start+produktyNaStronie);
@@ -2945,23 +3655,32 @@ function listaPodstronyHTML(lista,pusty){
     ${fragment.length?`<div class="grid" style="padding:0;margin:.7rem 0">${fragment.map(kartaProduktu).join("")}</div>`:`<div class="panel"><p>${pusty}</p></div>`}
     <div class="pagination">${paginacjaHTML(stronaListyProduktow,stron,"ustawStroneListyProduktow")}</div>`;
 }
+function listaPodstronyCentralnaHTML(params,pusty){
+  const query={audience:"public",q:frazaListyProduktow,sort:sklepKatalogCentralnySort(sortowanieListyProduktow),page:stronaListyProduktow,limit:produktyNaLiscie,...params},view=sklepKatalogCentralnyWidok(query);
+  if(!view.ready)return `<div class="panel"><p>${view.error?`⚠️ ${esc(view.error)}`:"Ładowanie aktualnej listy produktów…"}</p></div>`;
+  const data=view.data,stron=Math.max(1,Math.ceil((Number(data.total)||0)/produktyNaLiscie));if(stronaListyProduktow>stron){stronaListyProduktow=stron;setTimeout(()=>renderuj(),0);return `<div class="panel"><p>Ładowanie właściwej strony wyników…</p></div>`;}const start=(stronaListyProduktow-1)*produktyNaLiscie,fragment=data.items||[];
+  return `<div class="toolbar" style="padding:0;margin:.6rem 0"><input placeholder="Szukaj w tej liście…" value="${esc(frazaListyProduktow)}" oninput="frazaListyProduktow=this.value;stronaListyProduktow=1;zaplanujRenderPoWpisaniu()" style="flex:1;min-width:200px;padding:.45rem .7rem;border:1.5px solid var(--line);border-radius:10px"><select onchange="sortowanieListyProduktow=this.value;stronaListyProduktow=1;renderuj()"><option value="default">Domyślne</option><option value="price-asc" ${sortowanieListyProduktow==="price-asc"?"selected":""}>Cena rosnąco</option><option value="price-desc" ${sortowanieListyProduktow==="price-desc"?"selected":""}>Cena malejąco</option><option value="name" ${sortowanieListyProduktow==="name"?"selected":""}>Nazwa A–Z</option><option value="rating" ${sortowanieListyProduktow==="rating"?"selected":""}>Najlepiej oceniane</option></select></div><div class="results-bar" style="padding:0;margin:.5rem 0"><span>${data.total?`Znaleziono <b>${data.total}</b> • pokazano ${start+1}–${Math.min(start+fragment.length,data.total)}`:"Brak wyników"}</span><label>Na stronie: <select onchange="ustawLiczbeListyProduktow(this.value)">${[12,24,48,96].map(n=>`<option value="${n}" ${produktyNaLiscie===n?"selected":""}>${n}</option>`).join("")}</select></label></div>${fragment.length?`<div class="grid" style="padding:0;margin:.7rem 0">${fragment.map(kartaProduktu).join("")}</div>`:`<div class="panel"><p>${pusty}</p></div>`}<div class="pagination">${paginacjaHTML(stronaListyProduktow,stron,"ustawStroneListyProduktow")}</div>`;
+}
 function widokKategoria(nazwa){
+  nazwa=wszystkieKategorie().find(k=>k===nazwa||seoSlugKategorii(k)===seoSlugKategorii(nazwa))||nazwa;
   if(!wszystkieKategorie().includes(nazwa))
     return `<div class="page"><div class="panel"><h1>Nie ma takiego katalogu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
-  const lista = produkty.filter(p=>p.kategoria===nazwa);
+  const kategorie=wszystkieKategorie(),tree=indeksDrzewaKategoriiMenu(kategorie),galaz=kategorieGaleziMenu(nazwa,kategorie),lista=produkty.filter(p=>produktWidocznyWPublicznymKatalogu(p)&&galaz.has(p.kategoria)),liczba=chmuraKatalogCentralnyPubliczny?sklepKatalogCentralnyLiczbaKategorii(galaz):lista.length,dzieci=tree.children.get(nazwa)||[],sciezka=tree.paths[nazwa]||[nazwa];
   return `
   <div class="page" style="max-width:1200px">
-    <div class="crumb"><a href="#/">Sklep</a> › ${esc(nazwa)}</div>
-    <h1 style="margin-bottom:.8rem">🗂️ ${esc(nazwa)} <small style="color:var(--muted2);font-size:.9rem">(${lista.length})</small></h1>
-    ${listaPodstronyHTML(lista,"Ten katalog jest jeszcze pusty albo żaden produkt nie pasuje do wyszukiwania.")}
+    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${sciezka.map((k,i)=>i===sciezka.length-1?esc(k):`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join(" › ")}</div>
+    <h1 style="margin-bottom:.8rem">🗂️ ${esc(nazwa)} <small style="color:var(--muted2);font-size:.9rem">(${liczba})</small></h1>
+    ${dzieci.length?`<section class="category-branch-grid" aria-label="Podkatalogi ${esc(nazwa)}">${dzieci.map(k=>{const podgalaz=kategorieGaleziMenu(k,kategorie),ile=chmuraKatalogCentralnyPubliczny?sklepKatalogCentralnyLiczbaKategorii(podgalaz):(tree.branchCounts[k]||0);return `<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))"><span>${ikonaKategoriiHTML(k)}</span><div><b>${esc(k)}</b><small>${ile} produktów${(tree.children.get(k)||[]).length?` • ${(tree.children.get(k)||[]).length} kolejnych gałęzi`:""}</small></div><i>›</i></a>`;}).join("")}</section>`:""}
+    ${chmuraKatalogCentralnyPubliczny?listaPodstronyCentralnaHTML({categories:[...galaz].join(",")},"Ten katalog jest jeszcze pusty albo żaden produkt nie pasuje do wyszukiwania."):listaPodstronyHTML(lista,"Ten katalog jest jeszcze pusty albo żaden produkt nie pasuje do wyszukiwania.")}
   </div>`;
 }
 function widokListaSpecjalna(tytul, filtr, pusty){
-  const lista = produkty.filter(filtr);
+  const lista = produkty.filter(p=>produktWidocznyWPublicznymKatalogu(p)&&filtr(p));
+  const params=String(tytul).includes("Promocje")?{promotion:"promocje"}:{special:"nowosci"};
   return `
   <div class="page" style="max-width:1200px">
     <h1 style="margin-bottom:.8rem">${tytul} <small style="color:var(--muted2);font-size:.9rem">(${lista.length})</small></h1>
-    ${listaPodstronyHTML(lista,pusty)}
+    ${chmuraKatalogCentralnyPubliczny?listaPodstronyCentralnaHTML(params,pusty):listaPodstronyHTML(lista,pusty)}
   </div>`;
 }
 
@@ -2986,15 +3705,17 @@ function specyfikacjaProduktuHTML(p){
   </details>`;
 }
 function widokProdukt(id){
-  const p = produkty.find(x=>x.id===id);
+  const p = produktSklepuPoId(id);
+  if(!p&&chmuraKatalogCentralnyPubliczny){const blad=sklepProduktCentralnyBledy.get(String(id));if(blad)return `<div class="page"><div class="panel"><h1>Nie znaleziono produktu 😕</h1><p>${esc(blad)}</p><button class="btn ghost" onclick="sklepPobierzProduktCentralny('${esc(id)}',true).then(()=>renderuj())">Spróbuj ponownie</button> <a class="btn ghost" href="/" onclick="return nawigujSklep(event,'/')">Wróć do sklepu</a></div></div>`;setTimeout(()=>sklepPobierzProduktCentralny(id).then(()=>renderuj()),0);return `<div class="page"><div class="panel"><h1>Ładowanie produktu…</h1><p>Pobieram aktualne dane z katalogu.</p></div></div>`;}
   if(!p){ loguj("ostrzezenie","Otwarto nieistniejący produkt: id="+id); return `<div class="page"><div class="panel"><h1>Nie znaleziono produktu 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`; }
   if(String(ostatniProduktIlosci)!==String(id)){iloscProduktu=1;ostatniProduktIlosci=id;}
-  const powiazane = produkty.filter(x=>x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
+  const powiazane = produkty.filter(x=>produktWidocznyWPublicznymKatalogu(x)&&x.kategoria===p.kategoria && x.id!==p.id).slice(0,4);
   const brakCeny = !produktMaCeneSprzedazy(p);
   const niedostepny = produktOznaczonyNiedostepny(p);
+  const sciezkaKategorii=sciezkaKategoriiMenu(p.kategoria);
   return `
   <div class="page">
-    <div class="crumb"><a href="#/">Sklep</a> › <a href="#/" onclick="ustawKategorie('${esc(p.kategoria)}')">${esc(p.kategoria)}</a> › ${esc(p.nazwa)}</div>
+    <div class="crumb"><a href="/" onclick="return nawigujSklep(event,'/')">Sklep</a> › ${sciezkaKategorii.map(k=>`<a href="/kategoria/${seoSlugKategorii(k)}" onclick="return nawigujSklep(event,this.getAttribute('href'))">${esc(k)}</a>`).join(" › ")} › ${esc(p.nazwa)}</div>
     <div class="panel">
       <div class="prod-detail">
         <div>
@@ -3067,7 +3788,7 @@ function widokProdukt(id){
       <h2 style="margin-top:0">Informacje o produkcie</h2>
       <div class="faq-list">
         <details open><summary>Opis</summary>${opisProduktuHTML(p)}</details>
-        <details><summary>Dostawa i płatność</summary><p>Dostępne metody oraz aktualne koszty sprawdzisz w koszyku. Możesz zapłacić przez mBank Paynow, za pobraniem albo przelewem na telefon.</p></details>
+        <details><summary>Dostawa i płatność</summary><p>Dostępne metody oraz aktualne koszty sprawdzisz w koszyku. Aktualne płatności: ${esc(platnosciOpis())}. Wszystkie ceny są cenami brutto w PLN.</p></details>
         <details><summary>Zwrot i reklamacja</summary><p>Masz 14 dni na odstąpienie od umowy. W przypadku problemu z produktem skontaktuj się z nami przez stronę kontaktową.</p></details>
       </div>
     </div>
@@ -3102,991 +3823,7 @@ function dodajIlosc(id){
 function pokazZdjecie(src){ const g=$("glowneZdjecie"); if(g) g.src=src; }
 
 /* ═══════════ WIDOK: LOGOWANIE / REJESTRACJA ═══════════ */
-function widokLogowanie(){
-  if(sesja) { location.hash="#/konto"; return ""; }
-  const us=ustawieniaPodstrony("logowanie");
-  return `
-  <div class="${klasaPodstrony("logowanie")}"><div class="panel auth-box">
-    <h1>${esc(us.tytul)}</h1><p style="color:var(--muted2);margin-bottom:.7rem">${esc(us.opis||"")}</p>
-    <div id="authMsg"></div>
-    <form onsubmit="obsluzLogowanie(event)">
-      <div class="f-group"><label>E-mail</label><input required name="email" type="text" autocomplete="username"></div>
-      <div class="f-group"><label>Hasło</label><input required name="haslo" type="password" autocomplete="current-password"></div>
-      <button class="checkout-btn" type="submit">Zaloguj się</button>
-    </form>
-    <p class="auth-alt">Nie masz konta? <a href="#/rejestracja">Zarejestruj się</a></p>
-  </div></div>`;
-}
-function widokRejestracja(){
-  if(sesja) { location.hash="#/konto"; return ""; }
-  if(ustawieniaPodstrony("rejestracja").widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
-  const us=ustawieniaPodstrony("rejestracja");
-  return `
-  <div class="${klasaPodstrony("rejestracja")}"><div class="panel auth-box">
-    <h1>${esc(us.tytul)}</h1><p style="color:var(--muted2);margin-bottom:.7rem">${esc(us.opis||"")}</p>
-    <div id="authMsg"></div>
-    <form onsubmit="obsluzRejestracje(event)">
-      <div class="f-group"><label>Imię i nazwisko</label><input required name="imie" autocomplete="name"></div>
-      <div class="f-group"><label>E-mail</label><input required name="email" type="email" autocomplete="email"></div>
-      <div class="f-group"><label>Hasło (min. 8 znaków)</label><input required name="haslo" type="password" minlength="8" autocomplete="new-password"></div>
-      <div class="f-group"><label>Powtórz hasło</label><input required name="haslo2" type="password" minlength="8" autocomplete="new-password"></div>
-      <button class="checkout-btn" type="submit">Załóż konto</button>
-    </form>
-    <p class="auth-alt">Masz już konto? <a href="#/logowanie">Zaloguj się</a></p>
-    <p class="pay-note">Konto jest zapisywane we wspólnej bazie sklepu i działa na wszystkich urządzeniach.</p>
-  </div></div>`;
-}
-async function obsluzLogowanie(e){
-  e.preventDefault();
-  const f = new FormData(e.target);
-  const w = await sprawdzLogowanie(f.get("email"), f.get("haslo"));
-  if(!w.ok){ $("authMsg").innerHTML = `<div class="form-err">${esc(w.blad)}</div>`; return; }
-  ustawSesje(w.uzytkownik);
-  if(w.uzytkownik.rola==="admin"||jestGlownymAdminem(w.uzytkownik.email)) await synchronizujBazeCentralna(true);
-  else await pobierzMojeZamowieniaCentralne(true);
-  toast("Witaj, "+w.uzytkownik.imie.split(" ")[0]+"! 👋");
-  location.hash=jestAdmin()?"#/admin":"#/konto";
-}
-async function obsluzRejestracje(e){
-  e.preventDefault();
-  const f = new FormData(e.target);
-  if(String(f.get("haslo")||"")!==String(f.get("haslo2")||"")){ $("authMsg").innerHTML='<div class="form-err">Wpisane hasła nie są takie same.</div>'; return; }
-  const w = await zarejestrujUzytkownika(f.get("imie"), f.get("email"), f.get("haslo"));
-  if(!w.ok){ $("authMsg").innerHTML = `<div class="form-err">${esc(w.blad)}</div>`; return; }
-  ustawSesje(w.uzytkownik);
-  await pobierzMojeZamowieniaCentralne(true);
-  toast("Konto założone! 🎉");
-  location.hash="#/konto";
-}
 
-/* ═══════════ WIDOK: KONTO ═══════════ */
-function widokKonto(){
-  if(!sesja){ location.hash="#/logowanie"; return ""; }
-  if(ustawieniaPodstrony("konto").widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
-  const us=ustawieniaPodstrony("konto");
-  const admin=jestAdmin();
-  const zam = pobierzZamowienia().filter(z=>z.email===sesja.email);
-  return `
-  <div class="${klasaPodstrony("konto")}"><div class="panel">
-    <h1>${esc(us.tytul)}</h1>
-    <p style="color:var(--muted2);margin-bottom:.7rem">${admin?"Konto służbowe do zarządzania sklepem.":esc(us.opis||"")}</p>
-    <p><b>${esc(sesja.imie)}</b> • ${esc(sesja.email)} ${admin?'<span class="lvl lvl-info">ADMINISTRATOR</span>':""}</p>
-    ${admin?`
-    <div class="sug" style="margin:.9rem 0"><span class="s-ico">🛡️</span><span><b>Tryb administratora</b><br>To konto nie ma ulubionych ani historii własnych zamówień. Zamówieniami klientów zarządzasz w panelu administracyjnym.</span></div>
-    <div class="diag-actions">
-      <a class="btn" style="background:var(--brand2)" href="#/admin">⚙️ Otwórz panel administratora</a>
-      <button class="btn danger" onclick="wyloguj()">Wyloguj się</button>
-    </div>`:`
-    <div class="stat-grid">
-      <div class="stat"><b>${zam.length}</b><small>zamówień</small></div>
-      <div class="stat"><b>${zl(zam.reduce((s,z)=>s+z.razem,0))}</b><small>łączna wartość</small></div>
-      <div class="stat"><b>${ulubione.length}</b><small>ulubionych</small></div>
-    </div>
-    <div class="diag-actions">
-      <a class="btn" href="#/zamowienia">📦 Historia zamówień</a>
-      <a class="btn ghost" href="#/ulubione">❤️ Ulubione</a>
-      <button class="btn danger" onclick="wyloguj()">Wyloguj się</button>
-    </div>
-    <details style="margin-top:1.2rem" ${!(pobierzProfil(sesja.email)||{}).ulica?"open":""}>
-      <summary style="cursor:pointer;font-weight:700;font-size:.92rem">📇 Moje dane do zamówień (adres, telefon, firma)</summary>
-      <form onsubmit="zapiszMojeDane(event)" style="margin-top:.8rem;max-width:640px">
-        ${polaKartotekiHTML(pobierzProfil(sesja.email)||{imie:sesja.imie, email:sesja.email}, {edycja:true, blokujEmail:true, bezNotatki:true, bezHasla:true})}
-        <button class="btn" type="submit">💾 Zapisz moje dane</button>
-        <p class="pay-note" style="text-align:left;margin-top:.5rem">Te dane wypełnią się automatycznie przy każdym zamówieniu.</p>
-      </form>
-    </details>`}
-    <details style="margin-top:.8rem">
-      <summary style="cursor:pointer;font-weight:700;font-size:.92rem">🔑 Zmień hasło</summary>
-      <form onsubmit="zmienHaslo(event)" style="max-width:380px;margin-top:.8rem">
-        <div class="f-group"><label>Obecne hasło</label><input required name="stare" type="password" autocomplete="current-password"></div>
-        <div class="f-group"><label>Nowe hasło (min. 6 znaków)</label><input required name="nowe" type="password" minlength="6" autocomplete="new-password"></div>
-        <div class="f-group"><label>Powtórz nowe hasło</label><input required name="nowe2" type="password" minlength="6" autocomplete="new-password"></div>
-        <button class="btn" type="submit">Zapisz nowe hasło</button>
-      </form>
-    </details>
-  </div></div>`;
-}
-async function zapiszMojeDane(e){
-  if(!sesja) return;
-  await zapiszKartoteke(e, sesja.email);
-}
-
-/* ═══════════ WIDOK: ZAMÓWIENIA ═══════════ */
-function trackingKlientaHTML(z){
-  const w=daneWysylki(z), etap=etapWysylki(z), e=ETAPY_WYSYLKI[etap]||ETAPY_WYSYLKI.do_obslugi;
-  const kolejnosc=["do_obslugi","przygotowanie","transport","doreczenie","dostarczona"];
-  const idx=Math.max(0,kolejnosc.indexOf(etap)), problem=etap==="problem"||etap==="zwrot";
-  const ostatnie=[...(w.historia||[])].pop();
-  return `<div class="customer-track">
-    <div style="display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap"><b>${e.ikona} ${e.nazwa}</b>${w.przewidywaneDoreczenie?`<small>Planowane doręczenie: ${esc(w.przewidywaneDoreczenie)}</small>`:""}</div>
-    <div class="track-progress">${kolejnosc.map((_,i)=>`<span class="${problem?"alert":i<=idx?"done":""}"></span>`).join("")}</div>
-    ${w.numer?`<div style="font-size:.8rem">🚚 ${esc(nazwaPrzewoznika(w.przewoznik))} • nr <b>${esc(w.numer)}</b>${urlSledzenia(z)?` — <a href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">Śledź przesyłkę →</a>`:""}</div>`:"<small>Numer śledzenia pojawi się po przygotowaniu etykiety.</small>"}
-    ${ostatnie?`<small style="display:block;margin-top:.3rem">Ostatnia aktualizacja: ${esc(ostatnie.status)} • ${esc(ostatnie.czas)}</small>`:""}
-    ${problem?`<p style="margin:.45rem 0 0;color:var(--danger);font-size:.8rem"><b>Przesyłka wymaga sprawdzenia.</b> W razie potrzeby skontaktujemy się z Tobą.</p>`:""}
-  </div>`;
-}
-function pozycjeZamowieniaKlientaHTML(z){
-  const dane = Array.isArray(z.pozycjeDane) && z.pozycjeDane.length ? z.pozycjeDane : [];
-  if(dane.length){
-    return `<table class="log-table" style="margin-top:.45rem">
-      <tr><th>Produkt</th><th>SKU</th><th>Ilość</th><th>Cena</th><th>Wartość</th></tr>
-      ${dane.map(p=>`<tr>
-        <td><b>${esc(p.nazwa||"Produkt")}</b>${p.wariant?`<br><small>Wariant: ${esc(p.wariant)}</small>`:""}</td>
-        <td>${esc(p.sku||"—")}</td>
-        <td>${esc(p.ilosc||1)}</td>
-        <td>${zl(Number(p.cena||0))}</td>
-        <td><b>${zl(Number(p.wartosc||0))}</b></td>
-      </tr>`).join("")}
-    </table>`;
-  }
-  const linie = Array.isArray(z.pozycje) ? z.pozycje : [];
-  return linie.length ? `<div class="order-lines">${linie.map(p=>esc(p)).join("<br>")}</div>` : `<p class="pay-note">Brak szczegółowej listy pozycji dla tego zamówienia.</p>`;
-}
-function szczegolyZamowieniaKlientaHTML(z){
-  const k=z.klient||{}, a=z.adresDostawy||{};
-  const klient=[k.imie,k.nazwisko].filter(Boolean).join(" ") || z.email || "—";
-  const adres = z.adres || [a.ulica&&`${a.ulica} ${a.nrDomu||""}${a.nrLokalu?"/"+a.nrLokalu:""}`, [a.kod,a.miasto].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "—";
-  const koszty=kosztyZamowienia(z);
-  const dostawa=[z.dostawa,z.paczkomat?`Paczkomat: ${z.paczkomat}`:"",koszty.paczkaWeekend?`Paczka w Weekend +${zl(koszty.paczkaWeekend)}`:""].filter(Boolean).join(" • ") || "—";
-  const razem=kwotaNum(z.razem), platId=z.platnoscId||"";
-  return `<details class="order-details" open style="margin-top:.7rem">
-    <summary style="cursor:pointer;font-weight:800">Szczegóły zamówienia, płatności i śledzenia</summary>
-    <div class="stat-grid" style="margin-top:.8rem">
-      <div class="stat"><b>${zl(razem)}</b><small>kwota zamówienia</small></div>
-      <div class="stat"><b>${esc(z.status||"nowe")}</b><small>status obsługi</small></div>
-      <div class="stat"><b>${esc(z.platnosc||"—")}</b><small>płatność</small></div>
-    </div>
-    <div class="f-row" style="grid-template-columns:1fr 1fr;margin-top:.85rem">
-      <div class="info-card"><span style="font-size:1.4rem">👤</span><b>Odbiorca</b><p>${esc(klient)}<br>${k.telefon?`Tel. ${esc(k.telefon)}<br>`:""}${esc(z.email||"")}${k.firma?`<br>Firma: ${esc(k.firma)}${k.nip?` • NIP: ${esc(k.nip)}`:""}`:""}</p></div>
-      <div class="info-card"><span style="font-size:1.4rem">🚚</span><b>Dostawa</b><p>${esc(dostawa)}<br>${esc(adres)}</p></div>
-    </div>
-    <h3 class="f-sekcja">🧾 Produkty</h3>
-    ${pozycjeZamowieniaKlientaHTML(z)}
-    <h3 class="f-sekcja">💰 Podsumowanie kosztów</h3>
-    <div class="summary" style="margin:.4rem 0 .9rem">${podsumowanieKosztowHTML(z,"Do zapłaty")}</div>
-    <h3 class="f-sekcja">💳 Instrukcja płatności</h3>
-    ${instrukcjaPlatnosciHTML(platId, z.nr, razem, z)}
-    <h3 class="f-sekcja">📦 Śledzenie realizacji</h3>
-    ${trackingKlientaHTML(z)}
-  </details>`;
-}
-function widokZamowienia(){
-  if(jestAdmin()) return `<div class="page"><div class="panel auth-box"><h1>🛡️ Konto administratora</h1><p>Historia własnych zamówień jest wyłączona dla kont administracyjnych.</p><p style="margin-top:1rem"><a class="btn" href="#/admin/zamowienia">Otwórz zamówienia klientów</a></p></div></div>`;
-  if(ustawieniaPodstrony("zamowienia").widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
-  const us=ustawieniaPodstrony("zamowienia");
-  const wszystkie = pobierzZamowienia();
-  const numeryGoscia = wczytajLS("artway_zamowienia_goscia", []);
-  const zam = sesja ? wszystkie.filter(z=>z.email===sesja.email) : wszystkie.filter(z=>!z.email||numeryGoscia.includes(z.nr));
-  const naglowek = sesja ? "" : `<p style="margin-bottom:1rem"><a href="#/logowanie">Zaloguj się</a>, aby zamówienia były przypisane do Twojego konta.</p>`;
-  return `
-  <div class="${klasaPodstrony("zamowienia")}"><div class="panel">
-    <h1>${esc(us.tytul)}</h1>
-    <p style="color:var(--muted2);margin-bottom:.7rem">${esc(us.opis||"")}</p>
-    ${naglowek}
-    ${zam.length?`<p class="pay-note" style="text-align:left;margin:.2rem 0 1rem">W szczegółach każdego zamówienia widzisz produkty, adres, dostawę, płatność, instrukcję opłacenia i aktualny tracking.</p>`:""}
-    ${zam.length ? zam.map(z=>`
-      <div class="order-box">
-        <div class="order-head">
-          <b>${esc(z.nr)}</b>
-          <span>${esc(z.data)}</span>
-          <span class="status-chip">${esc(z.status)}</span>
-          <b>${zl(z.razem)}</b>
-          <button class="ci-remove" onclick="if(confirm('Usunąć zlecenie ${esc(z.nr)}? Nie wróci ono ponownie do obsługi.')) usunMojeZamowienie(${jsArg(z.nr)})" title="Usuń zlecenie">🗑️</button>
-        </div>
-        ${szczegolyZamowieniaKlientaHTML(z)}
-      </div>`).join("")
-    : `<p>Brak zamówień. <a href="#/">Zrób pierwsze zakupy →</a></p>`}
-	  </div></div>`;
-}
-function widokDziekujemy(nr){
-  const numer=nrZamowienia(nr);
-  const z=pobierzZamowienia().find(x=>x.nr===numer);
-  const razem=kwotaNum(z?.razem), platId=z?.platnoscId||"";
-  if(z && platId==="paynow" && z.paynow?.paymentId && !paynowStatusAutosprawdzone.has(z.nr) && !["CONFIRMED","ERROR","EXPIRED","REJECTED","ABANDONED"].includes(String(z.paynow.status||"").toUpperCase())){
-    paynowStatusAutosprawdzone.add(z.nr);
-    setTimeout(()=>odswiezStatusPaynow(z.nr,z.paynow.paymentId),700);
-  }
-  return `<div class="page"><div class="panel" style="max-width:860px;margin:auto;text-align:center">
-    <div class="big">✅</div>
-    <h1>Dziękujemy za zamówienie!</h1>
-    <p class="sub">Numer zamówienia: <b>${esc(numer||"—")}</b>${z?` • Kwota: <b>${zl(razem)}</b>`:""}</p>
-    ${z?`<div class="stat-grid" style="text-align:center;margin:1rem 0">
-      <div class="stat"><b>${esc(z.status||"nowe")}</b><small>status obsługi</small></div>
-      <div class="stat"><b>${esc(z.platnosc||"—")}</b><small>wybrana płatność</small></div>
-      <div class="stat"><b>${esc(z.platnoscId==="paynow"?paynowStatusTekst(z.paynow?.status):z.platnoscStatus||"przyjęto")}</b><small>status płatności</small></div>
-    </div>
-    <div style="text-align:left;margin-top:1rem">
-      <h3 class="f-sekcja">💳 Płatność</h3>
-      ${instrukcjaPlatnosciHTML(platId,z.nr,razem,z)}
-      <h3 class="f-sekcja">🧾 Podsumowanie</h3>
-      ${pozycjeZamowieniaKlientaHTML(z)}
-      <div class="summary" style="margin:.7rem 0">${podsumowanieKosztowHTML(z,"Do zapłaty")}</div>
-    </div>`:`<p class="pay-note">Jeżeli nie widzisz szczegółów, przejdź do „Moje zamówienia” albo zaloguj się na konto użyte przy zakupie.</p>`}
-    <p class="pay-note" style="margin-top:1rem;text-align:center">Potwierdzenie zamówienia jest wysyłane automatycznie na e-mail klienta, gdy bramka e-mail jest skonfigurowana na serwerze.</p>
-    <div class="diag-actions" style="justify-content:center;margin-top:1rem">
-      <a class="btn" href="#/zamowienia">📦 Moje zamówienia</a>
-      <a class="btn ghost" href="#/">← Wróć do sklepu</a>
-    </div>
-  </div></div>`;
-}
-async function usunMojeZamowienie(nr){
-  if(jestAdmin()){ toast("Konto administratora nie usuwa zleceń z widoku klienta"); return; }
-  const numer=nrZamowienia(nr), lista=pobierzZamowienia(), z=lista.find(x=>x.nr===numer);
-  if(!numer){ toast("Brak numeru zlecenia"); return; }
-  const email=(sesja?.email||z?.email||"").toLowerCase();
-  oznaczZamowienieUsuniete(numer,{by:"customer",email});
-  zapiszLS("artway_zamowienia",lista.filter(x=>x.nr!==numer));
-  const goscie=wczytajLS("artway_zamowienia_goscia",[]);
-  zapiszLS("artway_zamowienia_goscia",goscie.filter(x=>x!==numer));
-  let serwerOk=false;
-  if(email){
-    try{
-      const dostepy=wczytajLS("artway_dostep_zamowien",{});
-      await chmura("store-order-delete-mine",{method:"POST",body:{number:numer,email,orderAccessToken:z?.orderAccessToken||dostepy[numer]||""}});
-      serwerOk=true;
-      if(dostepy[numer]){delete dostepy[numer];zapiszLS("artway_dostep_zamowien",dostepy);}
-      stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,error:""};
-    }catch(bl){
-      stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:false,error:bl.message};
-      loguj("blad",`Usuwanie zlecenia klienta ${numer}: ${bl.message}`);
-    }
-  }
-  toast(serwerOk?"Zlecenie usunięte ze wspólnej bazy 🗑️":"Zlecenie usunięte lokalnie — serwer zsynchronizuje się przy następnym połączeniu");
-  renderuj();
-}
-
-/* ═══════════ WIDOK: ULUBIONE ═══════════ */
-function widokUlubione(){
-  if(jestAdmin()) return `<div class="page"><div class="panel auth-box"><h1>🛡️ Konto administratora</h1><p>Lista ulubionych jest przeznaczona dla kont klientów.</p><p style="margin-top:1rem"><a class="btn" href="#/admin">Otwórz panel administratora</a></p></div></div>`;
-  if(ustawieniaPodstrony("ulubione").widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
-  const us=ustawieniaPodstrony("ulubione");
-  const lista = produkty.filter(p=>ulubione.includes(p.id));
-  return `
-  <div class="${klasaPodstrony("ulubione")}">
-    <h1 style="margin-bottom:.25rem">${esc(us.tytul)}</h1>
-    <p style="color:var(--muted2);margin-bottom:.8rem">${esc(us.opis||"")}</p>
-    ${lista.length ? `<div class="grid" style="padding:0">${lista.map(kartaProduktu).join("")}</div>`
-      : `<div class="panel"><p>Nie masz jeszcze ulubionych. Kliknij 🤍 na produkcie, żeby go tu dodać.</p><p style="margin-top:.6rem"><a href="#/">← Wróć do sklepu</a></p></div>`}
-  </div>`;
-}
-function przelaczUlubione(id){
-  if(jestAdmin()){ toast("Ulubione są dostępne tylko dla kont klientów"); return; }
-  ulubione = ulubione.includes(id) ? ulubione.filter(x=>x!==id) : [...ulubione, id];
-  zapiszLS("artway_ulubione", ulubione);
-  odswiezUlubioneLicznik();
-  toast(ulubione.includes(id) ? "Dodano do ulubionych ❤️" : "Usunięto z ulubionych");
-  if(trasa()==="/"||trasa()==="") rysuj(); else if(trasa()==="/ulubione") renderuj();
-}
-
-/* ═══════════ WIDOK: KONTAKT + STRONY INFORMACYJNE ═══════════ */
-function widokKontakt(){
-  if(ustawieniaPodstrony("kontakt").widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
-  const us=ustawieniaPodstrony("kontakt");
-  return `
-  <div class="${klasaPodstrony("kontakt")}">
-    <div class="crumb"><a href="#/">Sklep</a> › Kontakt</div>
-    <div class="contact-layout">
-      <div class="panel">
-        <h1>${esc(us.tytul)}</h1>
-        <p>${esc(us.opis||"")}</p>
-        <form style="margin-top:1rem" onsubmit="wyslijKontakt(event)">
-          <div class="f-row">
-            <div class="f-group"><label>Twój e-mail</label><input required name="email" type="email" autocomplete="email"></div>
-            <div class="f-group"><label>Temat</label><input required name="temat" placeholder="Np. pytanie o produkt"></div>
-          </div>
-          <div class="f-group"><label>Numer zamówienia (opcjonalnie)</label><input name="numer" placeholder="Np. ATM-123456"></div>
-          <div class="f-group"><label>Wiadomość</label><textarea required name="tresc" rows="7" placeholder="W czym możemy pomóc?"></textarea></div>
-          <button class="btn" type="submit">📧 Wyślij wiadomość</button>
-          <p class="pay-note" style="text-align:left">Formularz otworzy Twój program pocztowy z gotową wiadomością.</p>
-        </form>
-      </div>
-      <aside class="contact-side">
-        <div class="info-card"><span style="font-size:1.5rem">✉️</span><b>E-mail</b><p><a href="mailto:${esc(KONFIG.emailSklepu)}">${esc(KONFIG.emailSklepu)}</a><br>Najlepsza forma kontaktu w sprawie zamówień.</p></div>
-        <div class="info-card"><span style="font-size:1.5rem">📞</span><b>Telefon</b><p>${esc(KONFIG.telefon)}<br>Obsługa w dni robocze.</p></div>
-        <div class="info-card"><span style="font-size:1.5rem">🕘</span><b>Godziny odpowiedzi</b><p>Poniedziałek–piątek, 9:00–17:00. Zwykle odpowiadamy w ciągu jednego dnia roboczego.</p></div>
-        <div class="info-card"><span style="font-size:1.5rem">📦</span><b>Sprawdź najpierw</b><p><a href="#/faq">Najczęstsze pytania</a><br><a href="#/dostawa">Dostawa i płatności</a><br><a href="#/zwroty">Zwroty i reklamacje</a></p></div>
-      </aside>
-    </div>
-  </div>`;
-}
-function wyslijKontakt(e){
-  e.preventDefault();
-  const f = new FormData(e.target);
-  const numer = String(f.get("numer")||"").trim();
-  const body = `${f.get("tresc")}${numer?"\n\nNumer zamówienia: "+numer:""}\n\nOd: ${f.get("email")}`;
-  location.href = `mailto:${KONFIG.emailSklepu}?subject=${encodeURIComponent("[Kontakt] "+f.get("temat"))}&body=${encodeURIComponent(body)}`;
-  toast("Otwieram program pocztowy… 📧");
-}
-function widokONas(){
-  if(ustawieniaPodstrony("onas").widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
-  const us=ustawieniaPodstrony("onas");
-  return `
-  <div class="${klasaPodstrony("onas")}">
-    <div class="crumb"><a href="#/">Sklep</a> › O Artway-TM</div>
-    <div class="panel">
-      <h1>${esc(us.tytul)}</h1>
-      <p style="color:var(--muted2);margin-bottom:.8rem">${esc(us.opis||"")}</p>
-      <p>Artway-TM to sklep wielobranżowy stworzony z myślą o wygodnych zakupach w jednym miejscu. Oferta obejmuje elektronikę, wyposażenie domu i ogrodu, narzędzia, odzież oraz produkty sportowe.</p>
-      <div class="info-grid">
-        <div class="info-card"><span style="font-size:1.5rem">🗂️</span><b>Różne kategorie</b><p>Praktyczne produkty do domu, pracy, warsztatu i aktywnego wypoczynku.</p></div>
-        <div class="info-card"><span style="font-size:1.5rem">🔎</span><b>Czytelna oferta</b><p>Wyszukiwarka, katalogi, sortowanie i ulubione ułatwiają porównanie produktów.</p></div>
-        <div class="info-card"><span style="font-size:1.5rem">💬</span><b>Kontakt z obsługą</b><p>Pomagamy w pytaniach dotyczących produktów, dostawy oraz zamówień.</p></div>
-      </div>
-      <h2>Nasze podejście</h2>
-      <p>Chcemy, aby klient przed złożeniem zamówienia znał cenę, dostępne sposoby dostawy i płatności oraz zasady zwrotu. Dlatego najważniejsze informacje są dostępne bezpośrednio w sklepie i w podsumowaniu koszyka.</p>
-      <h2>Masz pytanie?</h2>
-      <p>Napisz na <a href="mailto:${esc(KONFIG.emailSklepu)}">${esc(KONFIG.emailSklepu)}</a> albo przejdź do <a href="#/kontakt">formularza kontaktowego</a>.</p>
-    </div>
-  </div>`;
-}
-function widokFAQ(){
-  if(ustawieniaPodstrony("faq").widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
-  const us=ustawieniaPodstrony("faq");
-  return `
-  <div class="${klasaPodstrony("faq")}">
-    <div class="crumb"><a href="#/">Sklep</a> › Najczęstsze pytania</div>
-    <div class="panel">
-      <h1>${esc(us.tytul)}</h1>
-      <p style="margin-bottom:1rem">${esc(us.opis||"")}</p>
-      <div class="faq-list">
-        <details open><summary>Jak znaleźć odpowiedni produkt?</summary><p>Użyj wyszukiwarki w nagłówku, wybierz katalog albo skorzystaj z sortowania cenowego. Produkty możesz zapisywać na liście ulubionych.</p></details>
-        <details><summary>Czy muszę zakładać konto?</summary><p>Nie. Zamówienie możesz złożyć bez rejestracji. Konto ułatwia dostęp do historii zakupów i ulubionych produktów na tym urządzeniu.</p></details>
-        <details><summary>Jakie są metody dostawy?</summary><p>Sklep realizuje wysyłkę wyłącznie przez InPost: do paczkomatu/punktu odbioru albo Kurierem InPost pod adres. Przy paczkomacie punkt wybierasz w koszyku na mapie albo przez wyszukiwarkę.</p></details>
-        <details><summary>Kiedy dostawa jest bezpłatna?</summary><p>Dostawa InPost jest bezpłatna od ${KONFIG.darmowaDostawaOd} zł wartości produktów po uwzględnieniu rabatu.</p></details>
-        <details><summary>Jak mogę zapłacić?</summary><p>Aktualne opcje płatności to: ${esc(platnosciOpis())}. Przy przelewie na telefon wpisz w tytule numer zamówienia.</p></details>
-        <details><summary>Jak użyć kodu rabatowego?</summary><p>Wpisz kod w koszyku i kliknij „Zastosuj”. Wartość rabatu od razu pojawi się w podsumowaniu.</p></details>
-        <details><summary>Jak zwrócić produkt?</summary><p>Na odstąpienie od umowy masz 14 dni od odbioru. Napisz na ${esc(KONFIG.emailSklepu)}, podając numer zamówienia i produkty, które chcesz zwrócić.</p></details>
-        <details><summary>Jak zgłosić reklamację?</summary><p>Wyślij opis problemu, numer zamówienia i — jeśli to pomocne — zdjęcia na ${esc(KONFIG.emailSklepu)}. Otrzymasz dalsze instrukcje.</p></details>
-        <details><summary>Gdzie sprawdzić status zamówienia?</summary><p>Jeśli zamówienie było przypisane do konta, znajdziesz je w sekcji „Moje zamówienia”. Możesz też skontaktować się z obsługą i podać numer zamówienia.</p></details>
-      </div>
-      <div class="contact-strip" style="margin-top:1.2rem">
-        <div><h2>Nie ma tu odpowiedzi?</h2><p>Napisz do obsługi Artway-TM.</p></div>
-        <a class="btn" href="#/kontakt">Przejdź do kontaktu</a>
-      </div>
-    </div>
-  </div>`;
-}
-function widokRegulamin(){
-  if(KONFIG.tresci?.regulamin) return stronaInfo("📜 Regulamin sklepu", KONFIG.tresci.regulamin,"regulamin");
-  return stronaInfo("📜 Regulamin sklepu", `
-    <p>Regulamin określa zasady sprzedaży w sklepie internetowym Artway-TM oraz prawa kupującego.</p>
-    <h2>§1 Sprzedawca i kontakt</h2><p>Sprzedawcą jest:<br>${daneFirmyHTML()}<br>E-mail: <a href="mailto:${esc(KONFIG.emailSklepu)}">${esc(KONFIG.emailSklepu)}</a><br>Telefon: ${esc(KONFIG.telefon)}.</p>
-    <h2>§2 Składanie zamówień</h2><p>Zamówienia można składać przez całą dobę. Klient wybiera produkt, ilość, sposób dostawy i płatności, podaje dane wymagane do realizacji oraz potwierdza zamówienie. Konto klienta jest dobrowolne. Informacja o przyjęciu zamówienia jest wysyłana na wskazany adres e-mail. Umowa sprzedaży zostaje zawarta po potwierdzeniu przyjęcia zamówienia przez sklep.</p>
-    <h2>§3 Ceny i płatności</h2><p>Ceny produktów są podawane w złotych polskich i są cenami brutto. Przed złożeniem zamówienia klient widzi łączną cenę produktów, rabaty, koszt dostawy, usługi dodatkowe i opłatę właściwą dla wybranej płatności. Dostępne formy płatności: ${esc(platnosciOpis())}.</p>
-    <h2>§4 Dostawa</h2><p>Dostawa jest realizowana przez InPost do wybranego paczkomatu/punktu albo kurierem pod wskazany adres. Deklarowany czas nadania: ${esc(tekstWysylki())} w dni robocze. Aktualny koszt jest zawsze pokazany przed złożeniem zamówienia; darmowa dostawa obowiązuje od ${KONFIG.darmowaDostawaOd} zł, jeśli koszyk spełnia warunki promocji.</p>
-    <h2>§5 Odstąpienie od umowy</h2><p>Konsument może odstąpić od umowy zawartej na odległość bez podania przyczyny w ciągu 14 dni od otrzymania towaru. Oświadczenie można przesłać na adres e-mail sklepu. Towar należy odesłać nie później niż 14 dni od złożenia oświadczenia. Sklep zwraca otrzymane płatności, w tym koszt najtańszego zwykłego sposobu dostawy oferowanego dla zamówienia, nie później niż w ciągu 14 dni od otrzymania oświadczenia; zwrot może zostać wstrzymany do chwili otrzymania towaru lub dowodu jego odesłania. Bezpośredni koszt zwykłego zwrotu ponosi konsument. Ustawowe wyjątki od prawa odstąpienia stosuje się tylko w przypadkach przewidzianych prawem.</p>
-    <h2>§6 Reklamacje</h2><p>Sprzedawca odpowiada za zgodność towaru z umową na zasadach wynikających z prawa konsumenckiego. Reklamację można przesłać na ${esc(KONFIG.emailSklepu)}, podając dane zamówienia, opis problemu i żądanie. Sklep odpowiada na reklamację konsumenta w terminie 14 dni od jej otrzymania. Koszty uzasadnionej reklamacji towaru niezgodnego z umową ponosi sprzedawca.</p>
-    <h2>§7 Dane osobowe i postanowienia końcowe</h2><p>Zasady przetwarzania danych opisuje Polityka prywatności. W sprawach nieuregulowanych stosuje się obowiązujące przepisy prawa polskiego, w szczególności Kodeks cywilny i ustawę o prawach konsumenta. Regulamin jest dostępny nieodpłatnie na stronie sklepu w formie umożliwiającej zapisanie i odtworzenie.</p>`,"regulamin");
-}
-function widokPrywatnosc(){
-  if(KONFIG.tresci?.prywatnosc) return stronaInfo("🔒 Polityka prywatności (RODO)", KONFIG.tresci.prywatnosc,"prywatnosc");
-  return stronaInfo("🔒 Polityka prywatności (RODO)", `
-    <h2>1. Administrator danych</h2><p>Administratorem danych osobowych jest ${daneFirmyHTML()}. W sprawach dotyczących danych można skontaktować się przez <a href="mailto:${esc(KONFIG.emailSklepu)}">${esc(KONFIG.emailSklepu)}</a> lub ${esc(KONFIG.telefon)}.</p>
-    <h2>2. Zakres, cele i podstawy przetwarzania</h2><p>Przetwarzamy dane podane przy zamówieniu: imię i nazwisko, adres, e-mail, telefon, dane dostawy, a przy zakupie firmowym także nazwę firmy i NIP. Dane są potrzebne do zawarcia i wykonania umowy, obsługi płatności, dostawy, kontaktu oraz reklamacji (art. 6 ust. 1 lit. b RODO). Dane wymagane przepisami rachunkowymi i podatkowymi przetwarzamy w celu wykonania obowiązku prawnego (art. 6 ust. 1 lit. c RODO). Dane techniczne, historia obsługi i niezbędne logi mogą być przetwarzane dla bezpieczeństwa, zapobiegania nadużyciom i ochrony roszczeń (art. 6 ust. 1 lit. f RODO).</p>
-    <h2>3. Konto klienta</h2><p>Utworzenie konta jest dobrowolne. Hasło jest przechowywane wyłącznie jako odporny kryptograficznie skrót z indywidualną solą; sklep nie przechowuje jego jawnej treści. Sesja konta jest podpisywana przez serwer i ma ograniczony czas ważności.</p>
-    <h2>4. Odbiorcy danych</h2><p>Dane otrzymują tylko podmioty niezbędne do realizacji usługi: dostawca hostingu i utrzymania systemu, operator poczty elektronicznej, InPost, wybrany przez klienta operator płatności oraz — gdy jest to potrzebne — dostawca usług księgowych lub fakturowania. Każdy odbiorca otrzymuje wyłącznie zakres potrzebny do wykonania swojego zadania.</p>
-    <h2>5. Okres przechowywania</h2><p>Dane zamówień przechowujemy przez okres realizacji umowy, obsługi reklamacji i możliwych roszczeń, a dokumentację wymaganą prawem — przez okres wynikający z przepisów podatkowych i rachunkowych. Dane konta przechowujemy do jego usunięcia, z wyjątkiem danych, które nadal muszą być przechowywane na innej podstawie prawnej. Logi bezpieczeństwa są przechowywane tylko przez czas potrzebny do wykrywania i wyjaśniania zdarzeń.</p>
-    <h2>6. Prawa użytkownika</h2><p>Możesz żądać dostępu do danych, ich sprostowania, usunięcia, ograniczenia przetwarzania i przeniesienia oraz wnieść sprzeciw wobec przetwarzania opartego na prawnie uzasadnionym interesie. Masz też prawo złożyć skargę do Prezesa Urzędu Ochrony Danych Osobowych. Żądania można wysyłać na ${esc(KONFIG.emailSklepu)}.</p>
-    <h2>7. Pamięć przeglądarki i bezpieczeństwo</h2><p>Sklep korzysta z pamięci przeglądarki do zachowania koszyka, ulubionych, ustawień interfejsu, ograniczonego dziennika diagnostycznego i podpisanej sesji konta. Dane konta, profilu i zamówień są synchronizowane z serwerem sklepu, dlatego nie pozostają wyłącznie na urządzeniu. Strona używa wyłącznie mechanizmów koniecznych do działania sklepu; jeśli w przyszłości zostaną włączone narzędzia analityczne lub marketingowe wymagające zgody, zostanie udostępniony osobny wybór zgód.</p>
-    <h2>8. Automatyzacja</h2><p>Narzędzia automatyczne i Agent AI mogą przygotowywać administratorowi propozycje operacyjne, ale nie podejmują wobec klienta decyzji wywołujących skutki prawne wyłącznie w sposób zautomatyzowany.</p>`,"prywatnosc");
-}
-function widokDostawa(){
-  return stronaInfo("🚚 Dostawa i płatności", `
-    <h2>Formy dostawy</h2>
-    <ul>${dostepneDostawy().map(d=>`<li>${d.nazwa} — ${d.koszt?d.koszt+" zł":"gratis"} (${d.opis})</li>`).join("")}<li><b>Darmowa dostawa InPost</b> przy zamówieniach od ${KONFIG.darmowaDostawaOd} zł</li></ul>
-    <p>Przy zamówieniu wybierasz paczkomat/punkt InPost na mapie albo dostawę Kurierem InPost pod adres.</p>
-    <p><b>Deklarowany czas nadania:</b> ${esc(czasWysylki())} w dni robocze.</p>
-    <h2>Formy płatności</h2>
-    <ul>${dostepnePlatnosci().map(p=>`<li>${p.nazwa}${p.oplata?" (+"+p.oplata+" zł)":""}${p.id==="telefon"?` — w tytule wpisz numer zamówienia; numer: ${formatTelefonPlatnosci()}`:""}${p.id==="paynow"?` — bramka mBank Paynow`:""}</li>`).join("")}</ul>
-    <h2>Kody rabatowe</h2>
-    <p>Aktualne kody: ${Object.entries(KONFIG.kodyRabatowe).map(([k,v])=>`<b>${esc(k)}</b> (−${v}%)`).join(", ")}. Kod wpisz w koszyku.</p>`,"dostawa");
-}
-function widokZwroty(){
-  if(KONFIG.tresci?.zwroty) return stronaInfo("↩️ Zwroty i reklamacje", KONFIG.tresci.zwroty,"zwroty");
-  return stronaInfo("↩️ Zwroty i reklamacje", `
-    <h2>Zwrot w 14 dni</h2><p>Możesz odstąpić od umowy w ciągu 14 dni od otrzymania przesyłki bez podania przyczyny. Napisz na ${KONFIG.emailSklepu} i odeślij produkt pocztą lub przesyłką kurierską. Przy takim zwrocie bezpośredni koszt odesłania ponosi klient. Nie dołączamy gotowej etykiety zwrotnej.</p>
-    <h2>Zwrot pieniędzy</h2><p>Zwrot środków wykonujemy nie później niż w ciągu 14 dni od otrzymania oświadczenia. Możemy wstrzymać zwrot do chwili otrzymania produktu albo przedstawienia potwierdzenia jego odesłania.</p>
-    <h2>Wymiana</h2><p>Nie prowadzimy osobnej procedury wymiany. Możesz zwrócić produkt zgodnie z powyższymi zasadami i złożyć nowe zamówienie.</p>
-    <h2>Reklamacje</h2><p>Jeśli produkt jest niezgodny z umową, opisz problem i dołącz zdjęcia — odpowiemy w ciągu 14 dni. Uzasadnione koszty odesłania reklamowanego produktu ponosi sprzedawca.</p>`,"zwroty");
-}
-function widokWylaczonejStrony(){
-  return `<div class="page page-compact"><div class="panel" style="text-align:center"><h1>Ta strona jest chwilowo wyłączona</h1><p>Wróć na stronę główną lub skontaktuj się ze sklepem.</p><p style="margin-top:1rem"><a class="btn" href="#/">← Strona główna</a></p></div></div>`;
-}
-function stronaInfo(tytul, tresc,id){
-  const us=id?ustawieniaPodstrony(id):null;
-  if(us?.widoczna===false&&!jestAdmin()) return widokWylaczonejStrony();
-  const pageId=id||"info";
-  const bloki={
-    naglowek:`<h1>${us?esc(us.tytul):tytul}</h1>`,
-    opis:us?.opis?`<p style="margin-bottom:1rem">${esc(us.opis)}</p>`:"",
-    tresc,
-    powrot:`<p style="margin-top:1.2rem"><a href="#/">← Wróć do sklepu</a></p>`
-  };
-  const html=kolejnoscSekcjiPodstrony(pageId).filter(s=>sekcjaPodstronyWidoczna(pageId,s)).map(s=>bloki[s]||"").join("");
-  return `<div class="${id?klasaPodstrony(id):"page"}"><div class="panel">${html}</div></div>`;
-}
-
-/* ═══════════ PANEL ADMINA (tylko administrator) ═══════════
-   Podstrony: #/admin (pulpit), #/admin/zamowienia (zmiana statusów),
-   #/admin/klienci, #/admin/produkty. Klienci ich nie widzą.        */
-const STATUSY = ["nowe","potwierdzone","w realizacji","gotowe do wysyłki","nadane","wysłane","w doręczeniu","dostarczone","zakończone","zwrot","zwrot pieniędzy","anulowane"];
-const KOLOR_STATUSU = {
-  "nowe":"#dbeafe","potwierdzone":"#e0f2fe","w realizacji":"#fef3c7","gotowe do wysyłki":"#ffedd5",
-  "nadane":"#e0e7ff","wysłane":"#e0e7ff","w doręczeniu":"#ede9fe","dostarczone":"#dcfce7",
-  "zakończone":"#dcfce7","zwrot":"#fce7f3","zwrot pieniędzy":"#cffafe","anulowane":"#fee2e2"
-};
-const PRZEWOZNICY = {
-  inpost:{nazwa:"InPost",uslugi:["Paczkomat 24/7","Kurier InPost"],url:n=>`https://inpost.pl/sledzenie-przesylek?number=${encodeURIComponent(n)}`},
-  dpd:{nazwa:"DPD",uslugi:["DPD Classic","DPD Pickup","DPD pobranie"],url:n=>`https://tracktrace.dpd.com.pl/parcelDetails?p1=${encodeURIComponent(n)}`},
-  dhl:{nazwa:"DHL",uslugi:["DHL Parcel","DHL POP","DHL Express"],url:n=>`https://www.dhl.com/pl-pl/home/tracking.html?tracking-id=${encodeURIComponent(n)}`},
-  orlen:{nazwa:"ORLEN Paczka",uslugi:["Automat paczkowy","Punkt odbioru","Kurier"],url:()=>`https://www.orlenpaczka.pl/sledz-paczke/`},
-  gls:{nazwa:"GLS",uslugi:["BusinessParcel","ParcelShop","Pobranie"],url:n=>`https://gls-group.com/PL/pl/sledzenie-paczek/?match=${encodeURIComponent(n)}`},
-  ups:{nazwa:"UPS",uslugi:["UPS Standard","UPS Access Point","UPS Express"],url:n=>`https://www.ups.com/track?loc=pl_PL&tracknum=${encodeURIComponent(n)}`},
-  pocztex:{nazwa:"Pocztex",uslugi:["Kurier","PUNKT","Automat"],url:()=>`https://emonitoring.poczta-polska.pl/`},
-  inny:{nazwa:"Inny / własny",uslugi:["Przesyłka standardowa"],url:()=>""}
-};
-const PRZEWOZNICY_AKTYWNI = ["inpost"];
-function przewoznicyAktywni(){
-  return Object.fromEntries(PRZEWOZNICY_AKTYWNI.map(id=>[id,PRZEWOZNICY[id]]).filter(([,p])=>p));
-}
-const ETAPY_WYSYLKI = {
-  do_obslugi:{nazwa:"Do obsługi",ikona:"📥",kolor:"#dbeafe"},
-  przygotowanie:{nazwa:"Przygotowanie",ikona:"📦",kolor:"#fef3c7"},
-  etykieta:{nazwa:"Etykieta gotowa",ikona:"🏷️",kolor:"#ffedd5"},
-  przekazana:{nazwa:"Przekazana",ikona:"🤝",kolor:"#e0e7ff"},
-  transport:{nazwa:"W transporcie",ikona:"🚚",kolor:"#ede9fe"},
-  doreczenie:{nazwa:"W doręczeniu",ikona:"📍",kolor:"#fce7f3"},
-  dostarczona:{nazwa:"Dostarczona",ikona:"✅",kolor:"#dcfce7"},
-  problem:{nazwa:"Wymaga reakcji",ikona:"⚠️",kolor:"#fee2e2"},
-  zwrot:{nazwa:"Zwrot",ikona:"↩️",kolor:"#fce7f3"},
-  anulowana:{nazwa:"Anulowana",ikona:"⛔",kolor:"#e2e8f0"}
-};
-const MENU_ADMINA_PULPIT = ["/admin","📊","Pulpit","Priorytety i praca na dziś"];
-const MENU_ADMINA = [
-  {id:"sprzedaz",ikona:"🛒",nazwa:"Obsługa sprzedaży",opis:"Od zamówienia do doręczenia",elementy:[
-    ["/admin/zamowienia","📦","Zamówienia sklepu","Statusy, płatności i obsługa"],
-    ["/admin/allegro","🟠","Allegro","Oferty, zamówienia i komunikacja"],
-    ["/admin/wysylki","🚚","Centrum wysyłek","InPost, etykiety i tracking"],
-    ["/admin/klienci","👥","Klienci","Konta, uprawnienia i historia"]
-  ]},
-  {id:"towar",ikona:"🏷️",nazwa:"Towar i dane",opis:"Katalog, stany i wymiana danych",elementy:[
-    ["/admin/asortyment","🏷️","Asortyment","Produkty, katalogi i mapowanie"],
-    ["/admin/magazyn","🏬","Magazyn","Stany, lokalizacje i dostawcy"],
-    ["/admin/eksport","⇄","Import i eksport","Przenoszenie i kontrola danych"]
-  ]},
-  {id:"finanse",ikona:"🧾",nazwa:"Finanse",opis:"Koszty, faktury i rentowność",elementy:[
-    ["/admin/infakt","🧾","inFakt i faktury","Koszty, dokumenty i rozliczenia"]
-  ]},
-  {id:"rozwoj",ikona:"✨",nazwa:"Rozwój sklepu",opis:"Automatyzacja, wygląd i widoczność",elementy:[
-    ["/admin/agent-ai","🤖","Agent AI","Zadania, decyzje i automaty"],
-    ["/admin/seo","📣","Pozycjonowanie","Widoczność i promocja produktów"],
-    ["/admin/personalizacja","🎨","Personalizacja","Wygląd, układy i ustawienia sklepu"]
-  ]},
-  {id:"system",ikona:"🛠️",nazwa:"System",opis:"Publikacja, wersje i diagnostyka",elementy:[
-    ["/admin/aktualizacja","⬆️","Aktualizacja strony","Pliki i wersja aplikacji"],
-    ["/admin/publikacja","🌍","Publikacja","Wdrożenie i status online"],
-    ["/diagnostyka","🩺","Diagnostyka","Integracje, błędy i kondycja"]
-  ]}
-];
-function adminMenuPozycjaAktywna(aktywna,href){
-  if(href==="/admin")return aktywna==="/admin";
-  return aktywna===href||String(aktywna||"").startsWith(href+"/");
-}
-function adminMenuLinkHTML(pozycja,aktywna,powiadomienia,dodatkowaKlasa=""){
-  const [href,ikona,nazwa,podpis]=pozycja,czyAktywna=adminMenuPozycjaAktywna(aktywna,href),licznik=powiadomienia[href]||0;
-  return `<a href="#${href}" class="admin-nav-link ${dodatkowaKlasa} ${czyAktywna?"active":""}" title="${esc(nazwa)}${podpis?` — ${esc(podpis)}`:""}" ${czyAktywna?'aria-current="page"':""}><span class="admin-nav-link-main"><i>${ikona}</i><span><b>${esc(nazwa)}</b>${podpis?`<small>${esc(podpis)}</small>`:""}</span></span>${licznik?`<span class="nav-badge" aria-label="${licznik} aktywnych spraw">${licznik}</span>`:""}</a>`;
-}
-function adminKontekstWidoku(aktywna){
-  if(adminMenuPozycjaAktywna(aktywna,"/admin"))return {grupa:"Centrum zarządzania",ikona:MENU_ADMINA_PULPIT[1],nazwa:MENU_ADMINA_PULPIT[2],podpis:MENU_ADMINA_PULPIT[3]};
-  for(const grupa of MENU_ADMINA){const pozycja=grupa.elementy.find(p=>adminMenuPozycjaAktywna(aktywna,p[0]));if(pozycja)return {grupa:grupa.nazwa,ikona:pozycja[1],nazwa:pozycja[2],podpis:pozycja[3]||grupa.opis};}
-  return {grupa:"Panel administratora",ikona:"🛠️",nazwa:"Narzędzia systemowe",podpis:"Zarządzanie sklepem Artway-TM"};
-}
-function adminMenuMobilneHTML(aktywna,powiadomienia,kontekst){
-  return `<details class="admin-mobile-menu"><summary><span><i>☰</i><small>Menu panelu</small><b>${kontekst.ikona} ${esc(kontekst.nazwa)}</b></span><em>⌄</em></summary><div class="admin-mobile-menu-body">${adminMenuLinkHTML(MENU_ADMINA_PULPIT,aktywna,powiadomienia,"admin-mobile-home")}${MENU_ADMINA.map(grupa=>`<section><header><span>${grupa.ikona}</span><div><b>${esc(grupa.nazwa)}</b><small>${esc(grupa.opis||"")}</small></div></header><div>${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia,"admin-mobile-link")).join("")}</div></section>`).join("")}</div></details>`;
-}
-function adminMenuOtwartaGrupa(){return String(wczytajLS("artway_admin_menu_otwarta_v2","")||"");}
-function przelaczGrupeMenuAdmina(id,button){
-  const grupa=button?.closest?.(".admin-nav-group");if(!grupa)return;
-  const nav=grupa.closest(".admin-nav"),otwieramy=grupa.classList.contains("collapsed");
-  nav?.querySelectorAll(".admin-nav-group").forEach(g=>{g.classList.add("collapsed");g.querySelector(".admin-nav-group-toggle")?.setAttribute("aria-expanded","false");});
-  if(otwieramy){grupa.classList.remove("collapsed");button.setAttribute("aria-expanded","true");}
-  zapiszLS("artway_admin_menu_otwarta_v2",otwieramy?id:"");
-}
-function przelaczTrybMenuAdmina(button){
-  const shell=button?.closest?.("[data-admin-shell]");if(!shell)return;
-  const kompaktowy=!shell.classList.contains("admin-nav-compact");
-  shell.classList.toggle("admin-nav-compact",kompaktowy);zapiszLS("artway_admin_menu_kompaktowe_v1",kompaktowy);
-  button.setAttribute("aria-pressed",String(kompaktowy));button.textContent=kompaktowy?"⇥":"⇤";button.title=kompaktowy?"Rozwiń menu":"Zwiń menu";
-}
-function filtrujMenuAdmina(input){
-  const nav=input?.closest?.(".admin-nav"),q=normalizujSzukanyTekst(input?.value||"");if(!nav)return;
-  nav.classList.toggle("is-searching",!!q);
-  nav.querySelectorAll(".admin-nav-group").forEach(grupa=>{
-    let trafienia=0;grupa.querySelectorAll(".admin-nav-link").forEach(link=>{const pasuje=!q||normalizujSzukanyTekst(link.textContent).includes(q);link.hidden=!pasuje;if(pasuje)trafienia++;});
-    const pasujeNaglowek=!q||normalizujSzukanyTekst(grupa.querySelector(".admin-nav-group-toggle")?.textContent||"").includes(q);grupa.hidden=!!q&&!trafienia&&!pasujeNaglowek;grupa.classList.toggle("search-open",!!q&&(trafienia>0||pasujeNaglowek));
-  });
-  nav.querySelector(".admin-nav-home")?.toggleAttribute("hidden",!!q&&!normalizujSzukanyTekst("pulpit priorytety praca dzisiaj").includes(q));
-}
-function adminSzkielet(aktywna, tresc){
-  const powiadomienia = {
-    "/admin/zamowienia": pobierzZamowienia().filter(z=>z.status==="nowe").length,
-    "/admin/allegro": (Array.isArray(allegroZamowienia) ? allegroZamowienia.filter(statusAllegroRezerwujeMagazyn).length : 0) + (allegroKomunikacjaStaty?.().totalNeed||0),
-    "/admin/wysylki": pobierzZamowienia().filter(z=>!["anulowane","dostarczone","zakończone"].includes(z.status)&&!z.wysylka?.numer).length,
-    "/admin/magazyn": potrzebyZatowarowania().length,
-    "/admin/infakt": pobierzZamowienia().filter(z=>String(z.status||"")!=="anulowane"&&(z.klient?.nip||z.klient?.firma)&&!infaktStan.links?.[z.nr]&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length,
-    "/admin/agent-ai": agentAIAnalizaAktywna(agentAIAnaliza()).length,
-    "/admin/asortyment": opinie.filter(o=>o.status==="oczekuje").length,
-    "/admin/seo": seoKolejkaProduktow().filter(x=>x.score<85).length
-  };
-  const licznikOperacyjny=["/admin/zamowienia","/admin/allegro","/admin/wysylki","/admin/magazyn","/admin/infakt"].reduce((s,h)=>s+(powiadomienia[h]||0),0);
-  powiadomienia["/admin"]=licznikOperacyjny;
-  const otwartaGrupa=adminMenuOtwartaGrupa();
-  const kontekst=adminKontekstWidoku(aktywna);
-  const menuKompaktowe=!!wczytajLS("artway_admin_menu_kompaktowe_v1",false);
-  return `
-  <div class="admin-page ${menuKompaktowe?"admin-nav-compact":""}" data-admin-shell>
-    <aside class="admin-nav" aria-label="Główna nawigacja administratora">
-      <div class="admin-nav-heading"><span class="admin-nav-brand-mark">A</span><span class="admin-nav-brand-copy"><b>Artway-TM</b><small>Panel operacyjny</small></span><button type="button" onclick="przelaczTrybMenuAdmina(this)" title="${menuKompaktowe?"Rozwiń menu":"Zwiń menu"}" aria-label="Zmień szerokość menu" aria-pressed="${String(menuKompaktowe)}">${menuKompaktowe?"⇥":"⇤"}</button></div>
-      <label class="admin-nav-search"><span>🔎</span><input type="search" placeholder="Znajdź moduł…" aria-label="Znajdź moduł panelu" oninput="filtrujMenuAdmina(this)"></label>
-      ${adminMenuLinkHTML(MENU_ADMINA_PULPIT,aktywna,powiadomienia,"admin-nav-home")}
-      <div class="admin-nav-separator"></div>
-      ${MENU_ADMINA.map(grupa=>{
-        const aktywnaGrupa=grupa.elementy.some(p=>adminMenuPozycjaAktywna(aktywna,p[0])),zwinieta=!aktywnaGrupa&&otwartaGrupa!==grupa.id;
-        const licznikGrupy=grupa.elementy.reduce((s,p)=>s+(powiadomienia[p[0]]||0),0);
-        return `<section class="admin-nav-group ${aktywnaGrupa?"is-active":""} ${zwinieta?"collapsed":""}" data-admin-menu-group="${esc(grupa.id)}"><button type="button" class="admin-nav-group-toggle" onclick="przelaczGrupeMenuAdmina('${esc(grupa.id)}',this)" title="${esc(grupa.nazwa)} — ${esc(grupa.opis||"")}" aria-expanded="${String(!zwinieta)}"><span class="admin-nav-group-title"><i>${grupa.ikona}</i><span><b>${esc(grupa.nazwa)}</b><small>${esc(grupa.opis||"")}</small></span></span><span class="admin-nav-group-meta">${licznikGrupy?`<b>${licznikGrupy}</b>`:""}<em>⌄</em></span></button><div class="admin-nav-items">${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia)).join("")}</div></section>`;
-      }).join("")}
-      <div class="admin-nav-footer"><span class="${licznikOperacyjny?"has-work":"is-clear"}"></span><small>${licznikOperacyjny?`${licznikOperacyjny} aktywnych spraw operacyjnych`:"Brak pilnych spraw operacyjnych"}</small></div>
-    </aside>
-    <div class="admin-tresc">
-      ${adminMenuMobilneHTML(aktywna,powiadomienia,kontekst)}
-      <header class="admin-workspace-header"><div class="admin-workspace-context"><span>${kontekst.ikona}</span><div><small>Panel administratora <i>›</i> ${esc(kontekst.grupa)}</small><b>${esc(kontekst.nazwa)}</b><em>${esc(kontekst.podpis||"")}</em></div></div><div class="admin-workspace-actions"><span class="admin-workspace-health"><i class="${licznikOperacyjny?"has-work":"is-clear"}"></i>${licznikOperacyjny?`${licznikOperacyjny} spraw`:"System gotowy"}</span>${aktywna!=="/admin"?`<a class="btn ghost" href="#/admin">📊 Pulpit</a>`:""}<a class="btn ghost" href="#/konto">👤 Konto</a><a class="btn ghost" href="#/">↗ Sklep</a></div></header>
-      <div class="admin-workspace-content">${tresc}</div>
-    </div>
-  </div>`;
-}
-/* Wykres sprzedaży z ostatnich 7 dni (bez bibliotek — słupki CSS) */
-function sprzedaz7dni(){
-  const dni = [];
-  for(let i=6;i>=0;i--){
-    const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-i);
-    dni.push({ start:d.getTime(), koniec:d.getTime()+86400000,
-      etykieta:d.toLocaleDateString("pl-PL",{weekday:"short"}), suma:0, ile:0 });
-  }
-  for(const z of pobierzZamowienia()){
-    if(z.status==="anulowane") continue;
-    let ts = z.ts;
-    if(!ts && z.data){ const m = String(z.data).match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/); if(m) ts = new Date(+m[3], +m[2]-1, +m[1]).getTime(); }
-    if(!ts) continue;
-    const dzien = dni.find(d=>ts>=d.start && ts<d.koniec);
-    if(dzien){ dzien.suma += z.razem; dzien.ile++; }
-  }
-  return dni;
-}
-function wykresSprzedazyHTML(){
-  const dni = sprzedaz7dni();
-  const max = Math.max(1, ...dni.map(d=>d.suma));
-  const razem = dni.reduce((s,d)=>s+d.suma,0);
-  return `
-  <div class="panel">
-    <h2 style="margin-top:0">📈 Sprzedaż — ostatnie 7 dni <small style="font-size:.8rem;color:var(--muted2)">razem: ${zl(razem)}</small></h2>
-    <div class="wykres">
-      ${dni.map(d=>`
-        <div class="wykres-kol" title="${d.etykieta}: ${zl(d.suma)} (${d.ile} zam.)">
-          <span class="wykres-kwota">${d.suma?zl(d.suma).replace(",00",""):""}</span>
-          <div class="wykres-slupek" style="height:${Math.max(4, Math.round(d.suma/max*110))}px;${d.suma?'':'background:var(--line)'}"></div>
-          <span class="wykres-dzien">${d.etykieta}</span>
-        </div>`).join("")}
-    </div>
-  </div>`;
-}
-/* Wydruk zamówienia (potwierdzenie dla klienta / do paczki) */
-function drukujZamowienie(nr){
-  const z = pobierzZamowienia().find(x=>x.nr===nr);
-  if(!z){ toast("Nie znaleziono zamówienia"); return; }
-  const obszar = $("obszarWydruku");
-  obszar.innerHTML = `
-    <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#111">
-      <div style="display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:16px">
-        <div><h1 style="margin:0;font-size:22px">${esc(KONFIG.nazwaSklepu)}</h1>
-        <small>${esc(KONFIG.emailSklepu)} • ${esc(KONFIG.telefon)}</small></div>
-        <div style="text-align:right"><b>ZAMÓWIENIE ${esc(z.nr)}</b><br><small>${esc(z.data)}</small><br><small>Status: ${esc(z.status)}</small></div>
-      </div>
-      <p><b>Klient:</b> ${z.email?esc(z.email):"gość (bez konta)"}<br><b>Adres:</b> ${esc(z.adres||"—")}<br><b>Dostawa:</b> ${esc(z.dostawa||"—")} • <b>Płatność:</b> ${esc(z.platnosc||"—")}</p>
-      <table style="width:100%;border-collapse:collapse;margin:14px 0">
-        <tr style="border-bottom:1px solid #999"><th style="text-align:left;padding:6px 0">Pozycja</th></tr>
-        ${z.pozycje.map(p=>`<tr style="border-bottom:1px solid #ddd"><td style="padding:6px 0">${esc(p)}</td></tr>`).join("")}
-      </table>
-      <div class="summary" style="margin:12px 0">${podsumowanieKosztowHTML(z,"RAZEM")}</div>
-      <p style="font-size:11px;color:#666">Dokument wygenerowany ${new Date().toLocaleString("pl-PL")}. Nie stanowi faktury VAT.</p>
-    </div>`;
-  document.body.classList.add("drukowanie");
-  loguj("info","Wydrukowano zamówienie "+nr);
-  window.print();
-  setTimeout(()=>{ document.body.classList.remove("drukowanie"); obszar.innerHTML=""; }, 400);
-}
-/* Centrum wysyłek. Dane i etykieta robocza działają lokalnie.
-   Oficjalne etykiety, webhooki i automatyczna poczta wymagają backendu. */
-function nazwaPrzewoznika(id){ return PRZEWOZNICY[id]?.nazwa || (id?String(id):"nie wybrano"); }
-function daneWysylki(z){
-  return {
-    przewoznik:"", usluga:"", numer:"", trackingUrl:"", status:"nieprzygotowana",
-    etap:"", priorytet:"normalny", operator:"", terminNadania:"", przewidywaneDoreczenie:"",
-    ostatniaSynchronizacja:"", bladIntegracji:"", waga:"", dlugosc:"", szerokosc:"", wysokosc:"",
-    historia:[], powiadomienia:[], zadania:{dane:false,kompletacja:false,etykieta:false,przekazanie:false},
-    ...(z?.wysylka||{})
-  };
-}
-function etapWysylki(z){
-  const w=daneWysylki(z);
-  if(w.etap&&ETAPY_WYSYLKI[w.etap]) return w.etap;
-  if(z.status==="anulowane") return "anulowana";
-  if(z.status==="zwrot"||z.status==="zwrot pieniędzy") return "zwrot";
-  if(z.status==="dostarczone"||z.status==="zakończone") return "dostarczona";
-  if(z.status==="w doręczeniu") return "doreczenie";
-  if(w.bladIntegracji) return "problem";
-  if(z.status==="nadane"||z.status==="wysłane") return w.numer?"transport":"przygotowanie";
-  if(w.numer) return "etykieta";
-  if(z.status==="w realizacji"||z.status==="gotowe do wysyłki") return "przygotowanie";
-  return "do_obslugi";
-}
-function nazwaEtapu(z){ const e=ETAPY_WYSYLKI[etapWysylki(z)]||ETAPY_WYSYLKI.do_obslugi; return `${e.ikona} ${e.nazwa}`; }
-function godzinyOd(ts){ return ts?Math.max(0,(Date.now()-Number(ts))/3600000):0; }
-function slaWysylki(z){
-  const uw=ustawieniaWysylki(), etap=etapWysylki(z);
-  if(["dostarczona","anulowana","zwrot"].includes(etap)) return {klasa:"sla-ok",tekst:"zamknięte"};
-  if(etap==="problem") return {klasa:"sla-bad",tekst:"wymaga reakcji"};
-  const limit=Number(uw.slaNadanie||24), h=godzinyOd(z.ts);
-  if(!daneWysylki(z).numer&&h>limit) return {klasa:"sla-bad",tekst:`SLA +${Math.round(h-limit)} h`};
-  if(!daneWysylki(z).numer&&h>limit*.75) return {klasa:"sla-warn",tekst:`pozostało ${Math.max(0,Math.round(limit-h))} h`};
-  return {klasa:"sla-ok",tekst:daneWysylki(z).numer?"monitorowana":`${Math.max(0,Math.round(limit-h))} h do nadania`};
-}
-function przewoznikDlaZamowienia(z){
-  if(z?.wysylka?.przewoznik) return z.wysylka.przewoznik;
-  return "inpost";
-}
-function czyZamowieniePaczkomat(z){
-  return czyDostawaPaczkomat(z?.dostawaId) || !!(z?.paczkomat || z?.wysylka?.punktKod);
-}
-function uslugaInpostZamowienia(z){
-  return uslugaInpostDlaDostawy(czyZamowieniePaczkomat(z) ? "paczkomat" : "kurier_inpost");
-}
-function normalizujEtapZdarzenia(status){
-  const s=String(status||"").toLowerCase();
-  if(s.includes("problem")||s.includes("nieud")||s.includes("opóź")) return "problem";
-  if(s.includes("zwrot")) return "zwrot";
-  if(s.includes("dostarcz")) return "dostarczona";
-  if(s.includes("doręcz")) return "doreczenie";
-  if(s.includes("drodze")||s.includes("sortown")||s.includes("transport")) return "transport";
-  if(s.includes("przyję")||s.includes("przekazan")) return "przekazana";
-  return "";
-}
-function urlSledzenia(z){
-  const w=daneWysylki(z), wlasny=String(w.trackingUrl||"").trim();
-  if(/^https?:\/\//i.test(wlasny)) return wlasny;
-  if(!w.numer) return "";
-  return PRZEWOZNICY[w.przewoznik]?.url?.(w.numer)||"";
-}
-function ustawieniaWysylki(){
-  const u = {
-    przewoznik:"inpost",waga:"1",dlugosc:"30",szerokosc:"20",wysokosc:"15",
-    nadawca:"Artway-TM",ulica:"",kod:"",miasto:"",telefon:KONFIG.telefon,email:KONFIG.emailSklepu,
-    regulaPaczkomat:"inpost",regulaKurier:"inpost",slaNadanie:"24",slaDoreczenie:"72",
-    apiEndpoint:"api/index.php",tryb:"sandbox",autoStatus:true,autoEmail:true,autoTracking:true,
-    alarmSla:true,powiadomieniaWyjatki:true,
-    ...(ustawienia.wysylka||{})
-  };
-  return {...u, przewoznik:"inpost", regulaPaczkomat:"inpost", regulaKurier:"inpost"};
-}
-function aktualizujZamowienie(nr, zmiana){
-  const lista=pobierzZamowienia(), z=lista.find(x=>x.nr===nr);
-  if(!z) return null;
-  zmiana(z);
-  zapiszLS("artway_zamowienia",lista);
-  void zapiszZamowienieCentralnie(z,false);
-  return z;
-}
-function zapiszWysylke(e,nr){
-  e.preventDefault();
-  const f=new FormData(e.target), teraz=new Date().toLocaleString("pl-PL");
-  const przewoznik="inpost", numer=String(f.get("numer")||"").trim();
-  const punktKod=String(f.get("punktKod")||"").trim().toUpperCase();
-  const przed=pobierzZamowienia().find(x=>x.nr===nr), staryNumer=przed?daneWysylki(przed).numer:"";
-  const z=aktualizujZamowienie(nr, zam=>{
-    const stara=daneWysylki(zam);
-    const paczkomat = czyZamowieniePaczkomat(zam);
-    const usluga = String(f.get("usluga")||stara.usluga||uslugaInpostZamowienia(zam)).trim() || uslugaInpostZamowienia(zam);
-    const zmieniono=stara.numer!==numer||stara.przewoznik!==przewoznik||stara.usluga!==usluga||stara.punktKod!==(paczkomat?punktKod:"");
-    if(paczkomat && punktKod) zam.paczkomat=punktKod;
-    if(!paczkomat){ zam.paczkomat=""; zam.paczkomatAdres=""; }
-    zam.wysylka={...stara,
-      przewoznik, usluga, numer, punktKod:paczkomat?(punktKod||stara.punktKod||zam.paczkomat||""):"",
-      trackingUrl:String(f.get("trackingUrl")||"").trim(),
-      priorytet:String(f.get("priorytet")||stara.priorytet||"normalny"),
-      operator:String(f.get("operator")||"").trim(),
-      terminNadania:String(f.get("terminNadania")||"").trim(),
-      przewidywaneDoreczenie:String(f.get("przewidywaneDoreczenie")||"").trim(),
-      waga:String(f.get("waga")||"").trim(), dlugosc:String(f.get("dlugosc")||"").trim(),
-      szerokosc:String(f.get("szerokosc")||"").trim(), wysokosc:String(f.get("wysokosc")||"").trim(),
-      status:numer?"nadana":"przygotowywana", etap:numer?(stara.etap&&stara.etap!=="do_obslugi"?stara.etap:"etykieta"):"przygotowanie",
-      zaktualizowano:new Date().toISOString(),
-      zadania:{...(stara.zadania||{}),dane:true,etykieta:!!numer},
-      historia:zmieniono?[...(stara.historia||[]),{czas:teraz,status:numer?"Numer nadania zapisany":"Konfiguracja przesyłki",opis:`${nazwaPrzewoznika(przewoznik)}${numer?" • "+numer:""}`}]:stara.historia
-    };
-    if(numer&&["nowe","potwierdzone","w realizacji"].includes(zam.status)) zam.status="gotowe do wysyłki";
-    else if(!numer&&["nowe","potwierdzone","w realizacji"].includes(zam.status)) zam.status="gotowe do wysyłki";
-  });
-  if(!z) return toast("Nie znaleziono zamówienia");
-  loguj("info",`Zapisano przesyłkę ${nr}: ${nazwaPrzewoznika(przewoznik)}${numer?" "+numer:""}`);
-  toast("Dane przesyłki zapisane ✅"); renderuj();
-  // E-mail „nadanie" wysyła się automatycznie z serwera po zapisaniu numeru nadania (awaryjnie z panelu, gdy baza offline)
-  if(numer&&numer!==staryNumer&&!chmuraToken) void obsluzAutomatycznyEmail(nr,z.status,"nadanie");
-}
-function uzupelnijUslugi(select){
-  const form=select.form, uslugi=PRZEWOZNICY[select.value]?.uslugi||[];
-  form.usluga.innerHTML=uslugi.map(x=>`<option>${esc(x)}</option>`).join("");
-}
-function dodajZdarzenieWysylki(e,nr){
-  e.preventDefault();
-  const f=new FormData(e.target), status=String(f.get("status")||""), opis=String(f.get("opis")||"").trim();
-  let statusZamowienia="", typEmaila="";
-  aktualizujZamowienie(nr,z=>{
-    const w=daneWysylki(z);
-    w.historia=[...(w.historia||[]),{czas:new Date().toLocaleString("pl-PL"),status,opis}];
-    w.status=status.toLowerCase(); w.etap=normalizujEtapZdarzenia(status)||w.etap;
-    w.bladIntegracji=w.etap==="problem"?(opis||status):"";
-    w.ostatniaSynchronizacja=new Date().toISOString(); w.zaktualizowano=new Date().toISOString(); z.wysylka=w;
-    const mapa={"Przekazana do InPost":"nadane","Przyjęta przez InPost":"nadane","W sortowni":"nadane","W drodze":"nadane","W doręczeniu":"w doręczeniu","Dostarczona":"dostarczone","Zwrot do nadawcy":"zwrot"};
-    if(mapa[status]){z.status=mapa[status];statusZamowienia=mapa[status];}
-    if(w.etap==="problem") typEmaila="problem";
-  });
-  loguj("info",`Dodano zdarzenie przesyłki ${nr}: ${status}`);
-  toast("Zdarzenie dodane"); renderuj();
-  // E-mail (nadanie/dostarczenie/zwrot/problem) wysyła się automatycznie z serwera po zapisaniu zdarzenia; awaryjnie z panelu przy braku bazy
-  if((statusZamowienia||typEmaila)&&!chmuraToken) void obsluzAutomatycznyEmail(nr,statusZamowienia,typEmaila);
-}
-function trescPowiadomienia(z,typ){
-  const w=daneWysylki(z), klient=z.klient||{}, imie=klient.imie||"";
-  const powitanie=`Dzień dobry${imie?", "+imie:""},`;
-  const sledzenie=urlSledzenia(z);
-  const pozycje=Array.isArray(z.pozycje)&&z.pozycje.length?`\n\nZamówione produkty:\n${z.pozycje.map(p=>`• ${p}`).join("\n")}`:"";
-  const podsumowanie=`\n\n${podsumowanieKosztowTekst(z)}\nPłatność: ${z.platnosc||"—"}`;
-  const stopka=`\n\nPozdrawiamy\n${KONFIG.nazwaSklepu}\n${KONFIG.emailSklepu}`;
-  const warianty={
-    potwierdzenie:{temat:`Potwierdzenie zamówienia ${z.nr}`,body:`${powitanie}\n\npotwierdzamy przyjęcie zamówienia ${z.nr}.${pozycje}${podsumowanie}`},
-    przygotowanie:{temat:`Zamówienie ${z.nr} jest przygotowywane`,body:`${powitanie}\n\nTwoje zamówienie ${z.nr} jest obecnie przygotowywane do wysyłki.${podsumowanie}`},
-    nadanie:{temat:`Zamówienie ${z.nr} zostało nadane`,body:`${powitanie}\n\nprzesyłka dla zamówienia ${z.nr} została nadana przez ${nazwaPrzewoznika(w.przewoznik)}.${w.numer?`\nNumer przesyłki: ${w.numer}`:""}${sledzenie?`\nŚledzenie: ${sledzenie}`:""}`},
-    dostarczenie:{temat:`Zamówienie ${z.nr} zostało dostarczone`,body:`${powitanie}\n\nprzesyłka dla zamówienia ${z.nr} została oznaczona jako dostarczona. Dziękujemy za zakupy.`},
-    anulowanie:{temat:`Aktualizacja zamówienia ${z.nr}`,body:`${powitanie}\n\nzamówienie ${z.nr} zostało anulowane. W razie pytań odpowiedz na tę wiadomość.`},
-    zwrot:{temat:`Zwrot przesyłki dla zamówienia ${z.nr}`,body:`${powitanie}\n\nprzesyłka dla zamówienia ${z.nr} została oznaczona jako zwrot do nadawcy. Skontaktujemy się w sprawie dalszych kroków.`},
-    zwrot_pieniedzy:{temat:`Zwrot pieniędzy za zamówienie ${z.nr}`,body:`${powitanie}\n\nzwróciliśmy pieniądze za zamówienie ${z.nr}.\nKwota zwrotu: ${zl(z.razem)}\nŚrodki wrócą na Twoje konto w ciągu kilku dni roboczych, zależnie od banku.`},
-    problem:{temat:`Ważna informacja o przesyłce ${z.nr}`,body:`${powitanie}\n\nprzewoźnik zgłosił problem dotyczący przesyłki dla zamówienia ${z.nr}. Monitorujemy sytuację i przekażemy kolejną informację po jej wyjaśnieniu.${w.numer?`\nNumer przesyłki: ${w.numer}`:""}${sledzenie?`\nŚledzenie: ${sledzenie}`:""}`}
-  };
-  const p=warianty[typ]||warianty.potwierdzenie;
-  const body=p.body+stopka;
-  return {temat:p.temat,body,html:htmlPowiadomieniaKlienta(z,typ,p.temat,body)};
-}
-function produktyEmailHtmlKlient(z){
-  const dane=Array.isArray(z.pozycjeDane)&&z.pozycjeDane.length
-    ? z.pozycjeDane.map(p=>({nazwa:p.nazwa||"Produkt",ilosc:Number(p.ilosc)||1,wartosc:Number(p.wartosc)||((Number(p.cena)||0)*(Number(p.ilosc)||1)),sku:p.sku||""}))
-    : (Array.isArray(z.pozycje)?z.pozycje.map(p=>({nazwa:p,ilosc:1,wartosc:0,sku:""})):[]);
-  if(!dane.length) return "";
-  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff">
-    <thead><tr style="background:#f8fafc;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.05em">
-      <th align="left" style="padding:10px">Produkt</th><th align="center" style="padding:10px;width:70px">Ilość</th><th align="right" style="padding:10px;width:120px">Wartość</th>
-    </tr></thead>
-    <tbody>${dane.map(p=>`<tr>
-      <td style="padding:12px 10px;border-bottom:1px solid #e5e7eb"><b>${esc(p.nazwa)}</b>${p.sku?`<br><span style="font-size:12px;color:#6b7280">SKU: ${esc(p.sku)}</span>`:""}</td>
-      <td style="padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:center">${p.ilosc}</td>
-      <td style="padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:800">${p.wartosc?zl(p.wartosc):"—"}</td>
-    </tr>`).join("")}</tbody>
-  </table>`;
-}
-function htmlPowiadomieniaKlienta(z,typ,temat,body){
-  const w=daneWysylki(z), klient=z.klient||{}, imie=klient.imie||"";
-  const sledzenie=urlSledzenia(z);
-  const statusy={
-    potwierdzenie:["Dziękujemy za zakupy","Przyjęliśmy zamówienie i mamy wszystkie najważniejsze dane. Będziemy informować o kolejnych etapach realizacji.","#2563eb"],
-    przygotowanie:["Zamówienie jest przygotowywane","Kompletujemy produkty i przygotowujemy paczkę do wysyłki.","#7c3aed"],
-    nadanie:["Paczka została nadana","Przesyłka jest już w InPost. Możesz śledzić jej drogę do Ciebie.","#059669"],
-    dostarczenie:["Dziękujemy — przesyłka dostarczona","Mamy nadzieję, że zakupy sprawią dużo satysfakcji. Zapraszamy ponownie do Artway-TM.","#16a34a"],
-    anulowanie:["Aktualizacja zamówienia","Zamówienie zostało anulowane. Jeśli to pomyłka lub masz pytania, odpowiedz na tę wiadomość.","#dc2626"],
-    zwrot:["Informacja o zwrocie","Przesyłka została oznaczona jako zwrot. Skontaktujemy się w sprawie dalszych kroków.","#ea580c"],
-    zwrot_pieniedzy:["Zwróciliśmy Ci pieniądze","Zwrot środków został zainicjowany. Pieniądze wrócą na Twoje konto w ciągu kilku dni roboczych.","#0ea5e9"],
-    problem:["Ważna informacja o przesyłce","Przewoźnik zgłosił problem. Monitorujemy sytuację i przekażemy kolejną informację po wyjaśnieniu.","#dc2626"]
-  };
-  const [naglowek,opis,kolor]=statusy[typ]||statusy.potwierdzenie;
-  const sklepUrl=location.origin+"/#/";
-  const zamUrl=location.origin+"/#/zamowienia";
-  const karta=(tytul,tresc,accent="#2563eb")=>`<div style="border:1px solid #e5e7eb;border-left:5px solid ${accent};border-radius:16px;background:#ffffff;padding:16px;margin:14px 0">
-    <div style="font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;font-weight:800;margin-bottom:6px">${esc(tytul)}</div>
-    <div style="color:#111827;font-size:15px;line-height:1.6">${tresc}</div>
-  </div>`;
-  const przycisk=(label,url,bg="#2563eb")=>`<a href="${esc(url)}" style="display:inline-block;background:${bg};color:#fff;text-decoration:none;font-weight:800;border-radius:999px;padding:13px 20px;margin:4px 8px 4px 0">${esc(label)}</a>`;
-  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(temat)}</title></head>
-  <body style="margin:0;padding:0;background:#eef2ff;font-family:Arial,Helvetica,sans-serif;color:#111827">
-    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${esc(opis)}</div>
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2ff;padding:26px 10px"><tr><td align="center">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 20px 55px rgba(37,99,235,.14)">
-        <tr><td style="background:linear-gradient(135deg,#2563eb,#6d28d9);padding:28px;color:#fff">
-          <div style="font-size:13px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;opacity:.9">Artway-TM</div>
-          <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.18">${esc(naglowek)}</h1>
-          <p style="margin:0;font-size:16px;line-height:1.55;opacity:.96">Dzień dobry${imie?", "+esc(imie):""}. ${esc(opis)}</p>
-        </td></tr>
-        <tr><td style="padding:26px 28px">
-          <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:18px;padding:14px 16px;margin-bottom:16px;color:#78350f">
-            <b>Zamówienie:</b> ${esc(z.nr)} &nbsp; • &nbsp; <b>Kwota:</b> ${zl(z.razem)}
-          </div>
-          ${karta("Status", esc(body).replace(/\n/g,"<br>"), kolor)}
-          ${karta("Podsumowanie kosztów", podsumowanieKosztowTekst(z).split("\n").map(esc).join("<br>"), "#f59e0b")}
-          ${w.numer||sledzenie?karta("Śledzenie", `${w.numer?`Numer przesyłki: <b>${esc(w.numer)}</b><br>`:""}${sledzenie?`Link śledzenia: <a href="${esc(sledzenie)}" style="color:#2563eb;font-weight:800">${esc(sledzenie)}</a>`:""}`,"#059669"):""}
-          ${produktyEmailHtmlKlient(z)?`<h2 style="font-size:18px;margin:22px 0 10px;color:#111827">Produkty</h2>${produktyEmailHtmlKlient(z)}`:""}
-          <div style="margin:22px 0 8px">${przycisk("Moje zamówienia",zamUrl)}${przycisk("Wróć do sklepu",sklepUrl,"#111827")}</div>
-          <p style="font-size:14px;color:#6b7280;line-height:1.6;margin:18px 0 0">Dziękujemy za zaufanie. Zapraszamy ponownie — w sklepie czekają kolejne produkty i okazje.</p>
-        </td></tr>
-        <tr><td style="background:#111827;color:#d1d5db;padding:20px 28px;font-size:13px;line-height:1.55"><b style="color:#fff">${esc(KONFIG.nazwaSklepu)}</b><br>${esc(KONFIG.emailSklepu)}<br>Wiadomość wysłana automatycznie.</td></tr>
-      </table>
-    </td></tr></table>
-  </body></html>`;
-}
-const NAZWY_EMAILI={potwierdzenie:"Potwierdzenie",przygotowanie:"Przygotowanie",nadanie:"Nadanie",dostarczenie:"Dostarczenie",anulowanie:"Anulowanie",zwrot:"Zwrot",zwrot_pieniedzy:"Zwrot pieniędzy",problem:"Problem z przesyłką"};
-function zapiszHistorieEmaila(nr,wpis){
-  aktualizujZamowienie(nr,zam=>{
-    const w=daneWysylki(zam);
-    w.powiadomienia=[...(w.powiadomienia||[]),{czas:new Date().toLocaleString("pl-PL"),...wpis}];
-    zam.wysylka=w;
-  });
-}
-function otworzEmailWysylki(nr,typ){
-  const z=pobierzZamowienia().find(x=>x.nr===nr);
-  if(!z?.email){ toast("Brak adresu e-mail klienta"); return; }
-  const p=trescPowiadomienia(z,typ);
-  zapiszHistorieEmaila(nr,{typ,status:"otwarto szkic"});
-  loguj("info",`Otwarto szkic e-maila ${typ} dla ${nr}`);
-  location.href=`mailto:${z.email}?subject=${encodeURIComponent(p.temat)}&body=${encodeURIComponent(p.body)}`;
-}
-async function wyslijEmailWysylki(nr,typ,automatycznie=false){
-  const z=pobierzZamowienia().find(x=>x.nr===nr);
-  if(!z?.email){toast("Brak adresu e-mail klienta");return false;}
-  if(!stanBramki.email?.configured){
-    if(!automatycznie) toast("Najpierw skonfiguruj SMTP/Gmail w zmiennych Netlify");
-    return false;
-  }
-  if(!chmuraToken){
-    if(!automatycznie) chmuraUstawToken();
-    return false;
-  }
-  if(!automatycznie&&!confirm(`Wysłać „${NAZWY_EMAILI[typ]||typ}” na ${z.email} przez API?`)) return false;
-  try{
-    // Ten sam, jednolity szablon co potwierdzenie zakupu — budowany po stronie serwera
-    const d=await chmura("send-status-email",{method:"POST",body:{nr,typ},timeout:18000});
-    if(Array.isArray(d.powiadomienia)){ aktualizujZamowienie(nr,zam=>{ zam.wysylka=zam.wysylka||{}; zam.wysylka.powiadomienia=d.powiadomienia; }); }
-    else { zapiszHistorieEmaila(nr,{typ,status:"wysłano",provider:d.provider||stanBramki.email.provider||"",id:d.message_id||"",automatyczne:automatycznie}); }
-    loguj("info",`${automatycznie?"Automatycznie wysłano":"Wysłano"} e-mail ${typ} dla ${nr} przez ${d.provider||"API"}`);
-    toast(`${automatycznie?"Automatyczny e-mail":"E-mail"} wysłany ✅`);
-    renderuj();
-    return true;
-  }catch(bl){
-    zapiszHistorieEmaila(nr,{typ,status:"błąd wysyłki",blad:bl.message,automatyczne:automatycznie});
-    loguj("error",`Błąd e-maila ${typ} dla ${nr}: ${bl.message}`);
-    toast("Nie wysłano e-maila: "+bl.message);
-    renderuj();
-    return false;
-  }
-}
-function typEmailaDlaStatusu(status){
-  return {
-    "potwierdzone":"potwierdzenie","w realizacji":"przygotowanie","gotowe do wysyłki":"przygotowanie",
-    "nadane":"nadanie","wysłane":"nadanie","dostarczone":"dostarczenie","zakończone":"dostarczenie",
-    "zwrot":"zwrot","zwrot pieniędzy":"zwrot_pieniedzy","anulowane":"anulowanie"
-  }[status]||"";
-}
-async function obsluzAutomatycznyEmail(nr,status,typWymuszony=""){
-  if(!ustawieniaWysylki().autoEmail) return;
-  const typ=typWymuszony||typEmailaDlaStatusu(status);
-  if(!typ) return;
-  const z=pobierzZamowienia().find(x=>x.nr===nr);
-  if(!z?.email) return;
-  const historia=daneWysylki(z).powiadomienia||[];
-  if(historia.some(p=>p.typ===typ&&p.status==="wysłano")) return;
-  if(!stanBramki.email?.configured||!chmuraToken){
-    const istnieje=historia.some(p=>p.typ===typ&&String(p.status).startsWith("oczekuje"));
-    if(!istnieje) zapiszHistorieEmaila(nr,{typ,status:"oczekuje — skonfiguruj SMTP / połącz bazę",automatyczne:true});
-    renderuj();
-    return;
-  }
-  await wyslijEmailWysylki(nr,typ,true);
-}
-async function wyslijTestEmail(e){
-  e.preventDefault();
-  const email=String(new FormData(e.target).get("email")||"").trim();
-  if(!stanBramki.email?.configured) return toast("Skonfiguruj SMTP/Gmail w Netlify");
-  if(!chmuraToken){ chmuraUstawToken(); return; }
-  if(!confirm(`Wysłać testową wiadomość na ${email}?`)) return;
-  try{
-    const html=`<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Test e-mail Artway-TM</title></head>
-      <body style="margin:0;background:#eef2ff;font-family:Arial,Helvetica,sans-serif;color:#111827">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2ff;padding:26px 10px"><tr><td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:680px;background:#fff;border-radius:24px;overflow:hidden;box-shadow:0 20px 55px rgba(37,99,235,.14)">
-          <tr><td style="background:linear-gradient(135deg,#2563eb,#6d28d9);padding:28px;color:#fff">
-            <div style="font-size:13px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;opacity:.9">${esc(KONFIG.nazwaSklepu)}</div>
-            <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.18">Test automatycznych wiadomości działa</h1>
-            <p style="margin:0;font-size:16px;line-height:1.55;opacity:.96">Tak będą wyglądać eleganckie wiadomości wysyłane klientom po zakupie i podczas obsługi zamówienia.</p>
-          </td></tr>
-          <tr><td style="padding:26px 28px">
-            <div style="border:1px solid #e5e7eb;border-left:5px solid #10b981;border-radius:16px;background:#fff;padding:16px;margin:14px 0">
-              <div style="font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;font-weight:800;margin-bottom:6px">Status</div>
-              <div style="font-size:15px;line-height:1.6">Konfiguracja Gmail SMTP i Netlify działa poprawnie. Wiadomości są teraz czytelne, estetyczne i zachęcają klienta do dalszych zakupów.</div>
-            </div>
-            <a href="${location.origin}/#/" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;font-weight:800;border-radius:999px;padding:13px 20px;margin-top:10px">Wróć do sklepu</a>
-            <p style="font-size:14px;color:#6b7280;line-height:1.6;margin:18px 0 0">To jest test z panelu administracyjnego ${esc(KONFIG.nazwaSklepu)}.</p>
-          </td></tr>
-          <tr><td style="background:#111827;color:#d1d5db;padding:20px 28px;font-size:13px;line-height:1.55"><b style="color:#fff">${esc(KONFIG.nazwaSklepu)}</b><br>${esc(KONFIG.emailSklepu)}</td></tr>
-        </table>
-      </td></tr></table></body></html>`;
-    const d=await chmura("send-email",{method:"POST",body:{to:email,subject:`Test automatycznych e-maili — ${KONFIG.nazwaSklepu}`,text:`To jest test poprawnej konfiguracji automatycznych wiadomości API sklepu ${KONFIG.nazwaSklepu}. Wiadomości mają teraz elegancki wygląd HTML.`,html},timeout:18000});
-    loguj("info",`Wysłano test e-mail przez ${d.provider||"API"}`);
-    toast("Testowy e-mail wysłany ✅");
-  }catch(bl){loguj("error","Test e-mail: "+bl.message);toast("Test e-mail nieudany: "+bl.message);}
-}
-function drukujEtykieteRobocza(nr){
-  const z=pobierzZamowienia().find(x=>x.nr===nr);
-  if(!z) return toast("Nie znaleziono zamówienia");
-  const w=daneWysylki(z), k=z.klient||{}, adres=z.adresDostawy||{};
-  const adresPelny=adres.ulica?`${adres.ulica} ${adres.nrDomu||""}${adres.nrLokalu?"/"+adres.nrLokalu:""}, ${adres.kod||""} ${adres.miasto||""}`:(z.adres||"—");
-  const obszar=$("obszarWydruku");
-  obszar.innerHTML=`
-    <div style="font-family:Arial,sans-serif;width:100mm;min-height:145mm;margin:0 auto;padding:8mm;border:2px solid #111;color:#111;box-sizing:border-box">
-      <div style="font-size:10px;font-weight:800;border:2px solid #111;padding:4px;text-align:center">ETYKIETA ROBOCZA — NIE ZASTĘPUJE OFICJALNEJ ETYKIETY PRZEWOŹNIKA</div>
-      <div style="display:flex;justify-content:space-between;margin:10px 0;border-bottom:1px solid #111;padding-bottom:8px">
-        <b>${esc(nazwaPrzewoznika(w.przewoznik))}</b><b>${esc(z.nr)}</b>
-      </div>
-      <small>ODBIORCA</small>
-      <div style="font-size:19px;font-weight:800;margin:5px 0">${esc([k.imie,k.nazwisko].filter(Boolean).join(" ")||z.email||"Klient")}</div>
-      <div style="font-size:16px;line-height:1.45">${esc(adresPelny)}</div>
-      ${k.telefon?`<div style="margin-top:5px">Tel. ${esc(k.telefon)}</div>`:""}
-      ${z.paczkomat?`<div style="font-size:20px;font-weight:800;margin-top:12px;border:2px solid #111;padding:6px">PUNKT: ${esc(z.paczkomat)}</div>`:""}
-      <div style="margin-top:16px;border-top:1px solid #111;padding-top:8px"><small>NUMER PRZESYŁKI</small>
-        <div style="font-size:22px;letter-spacing:1px;font-weight:800;word-break:break-all">${esc(w.numer||"BRAK — UZUPEŁNIJ W PANELU")}</div>
-      </div>
-      <div style="margin-top:14px;font-size:12px">Usługa: ${esc(w.usluga||"—")}<br>Paczka: ${esc(w.waga||"—")} kg • ${esc(w.dlugosc||"—")} × ${esc(w.szerokosc||"—")} × ${esc(w.wysokosc||"—")} cm</div>
-      <div style="margin-top:15px;font-size:11px;color:#555">Nadawca: ${esc(ustawieniaWysylki().nadawca)} • ${esc(ustawieniaWysylki().email)}</div>
-    </div>`;
-  document.body.classList.add("drukowanie");
-  loguj("info","Wydrukowano etykietę roboczą "+nr);
-  window.print();
-  setTimeout(()=>{document.body.classList.remove("drukowanie");obszar.innerHTML="";},400);
-}
-function zapiszUstawieniaWysylki(e){
-  e.preventDefault();
-  const f=new FormData(e.target), obj={};
-  for(const [k,v] of f.entries()) obj[k]=String(v).trim();
-  for(const k of String(e.target.dataset.flagi||"").split(",").filter(Boolean)) obj[k]=f.has(k);
-  obj.przewoznik="inpost";
-  obj.regulaPaczkomat="inpost";
-  obj.regulaKurier="inpost";
-  zapiszCzescUstawien({wysylka:{...ustawieniaWysylki(),...obj}});
-}
-let stanBramki={sprawdzono:false,online:false,configured:false,ready:false,authenticated:false,error:"",organizations:[],email:{configured:false,provider:null},store:{configured:false,writable:false,orders:0,users:0},inpost:{configured:false,geowidgetConfigured:false,env:"production"}};
 function urlBramki(action,parametry={}){
   const baza=String(ustawieniaWysylki().apiEndpoint||"api/index.php").trim();
   const url=new URL(baza,location.href);
@@ -4105,23 +3842,23 @@ async function wywolajBramke(action,{method="GET",body=null,parametry={}}={}){
   return dane;
 }
 function polaczUzytkownikowCentralnych(serwerowi){
-  const lokalni=pobierzUzytkownikow(), mapa=new Map(lokalni.map(u=>[u.email,u]));
-  const wynik=(serwerowi||[]).map(u=>({...mapa.get(u.email),...u}));
-  for(const u of lokalni) if(!wynik.some(x=>x.email===u.email)) wynik.push(u);
-  return wynik;
+  // Serwer jest jedynym źródłem kont. localStorage przechowuje wyłącznie
+  // ostatnią pobraną kopię i nie może przywrócić usuniętego użytkownika.
+  return Array.isArray(serwerowi)?serwerowi:[];
 }
+let zamowieniaAdminOdswiezenieWToku=null,zamowieniaAdminOstatnieOdswiezenie=0,zamowieniaAdminWersja="",zamowieniaAdminUsunieteWersja="";
+let uzytkownicyAdminOdswiezenieWToku=null,uzytkownicyAdminOstatnieOdswiezenie=0,uzytkownicyAdminWersja="";
 async function synchronizujBazeCentralna(cicho=false){
   if(stanBazyCentralnej.synchronizacja) return false;
-  if(!chmuraToken){ if(!cicho) chmuraUstawToken(); return false; }
+  if(!maUprawnieniaZapisuChmury()){ if(!cicho) chmuraUstawToken(); return false; }
   chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=false;
   stanBazyCentralnej={...stanBazyCentralnej,synchronizacja:true};
   try{
-    const d=await chmura("store-sync",{method:"POST",body:{orders:pobierzZamowienia(),users:pobierzUzytkownikow(),deleted_orders:zamowieniaUsuniete}});
-    if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
-    chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=zapiszLS("artway_zamowienia",Array.isArray(d.orders)?filtrujAktywneZamowienia(d.orders):[])||chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
-    chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=zapiszLS("artway_uzytkownicy",polaczUzytkownikowCentralnych(d.users))||chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
-    stanBazyCentralnej={sprawdzono:true,online:true,synchronizacja:false,orders:d.orders?.length||0,users:d.users?.length||0,updatedAt:d.updated_at||null,error:""};
-    chmuraStan={...chmuraStan,dostepna:true,admin:true,updated_at:d.updated_at||chmuraStan.updated_at};
+    const wyniki=await Promise.all([chmuraWczytajStan(),odswiezZamowieniaAdminaPoWejsciu(true),odswiezUzytkownikowAdminaPoWejsciu(true)]),ok=wyniki[0];
+    if(!ok)throw new Error(chmuraStan.error||"Nie udało się pobrać wspólnej bazy");
+    chmuraOstatniaSynchronizacjaCentralnaZmienilaDane=chmuraOstatniPullZmienilDane;
+    stanBazyCentralnej={sprawdzono:true,online:true,synchronizacja:false,orders:pobierzZamowienia().length,users:pobierzUzytkownikow().length,updatedAt:chmuraStan.updated_at||null,error:""};
+    chmuraStan={...chmuraStan,dostepna:true,admin:true};
     if(!cicho) toast(`Wspólna baza zsynchronizowana ✅ (${stanBazyCentralnej.orders} zamówień)`);
     if(!cicho) renderuj();
     return true;
@@ -4131,6 +3868,43 @@ async function synchronizujBazeCentralna(cicho=false){
     else if(!cicho) toast("Błąd wspólnej bazy: "+bl.message);
     return false;
   }
+}
+async function odswiezUzytkownikowAdminaPoWejsciu(force=false){
+  if(!maUprawnieniaZapisuChmury())return false;
+  if(uzytkownicyAdminOdswiezenieWToku)return uzytkownicyAdminOdswiezenieWToku;
+  if(!force&&Date.now()-uzytkownicyAdminOstatnieOdswiezenie<60000)return false;
+  uzytkownicyAdminOstatnieOdswiezenie=Date.now();
+  uzytkownicyAdminOdswiezenieWToku=(async()=>{
+    const d=await chmura("store-users-admin",{params:{usersVersion:uzytkownicyAdminWersja,count:pobierzUzytkownikow().length},timeout:15000});
+    uzytkownicyAdminWersja=String(d.usersVersion||uzytkownicyAdminWersja);
+    if(!d.unchanged&&Array.isArray(d.users))zapiszLS("artway_uzytkownicy",polaczUzytkownikowCentralnych(d.users));
+    return true;
+  })().finally(()=>{uzytkownicyAdminOdswiezenieWToku=null;});
+  return uzytkownicyAdminOdswiezenieWToku;
+}
+async function odswiezZamowieniaAdminaPoWejsciu(force=false){
+  if(!maUprawnieniaZapisuChmury())return false;
+  if(zamowieniaAdminOdswiezenieWToku)return zamowieniaAdminOdswiezenieWToku;
+  if(!force&&Date.now()-zamowieniaAdminOstatnieOdswiezenie<10000)return false;
+  zamowieniaAdminOstatnieOdswiezenie=Date.now();
+  zamowieniaAdminOdswiezenieWToku=(async()=>{
+    const przed=localStorage.getItem("artway_zamowienia")||"";
+    const d=await chmura("store-orders-admin",{params:{ordersVersion:zamowieniaAdminWersja,deletedVersion:zamowieniaAdminUsunieteWersja,count:pobierzZamowienia().length},timeout:15000});
+    zamowieniaAdminWersja=String(d.ordersVersion||zamowieniaAdminWersja);
+    zamowieniaAdminUsunieteWersja=String(d.deletedVersion||zamowieniaAdminUsunieteWersja);
+    if(!d.unchanged){
+      if(Array.isArray(d.deleted_orders))zapiszUsunieteZamowienia(d.deleted_orders);
+      if(Array.isArray(d.orders))zapiszLS("artway_zamowienia",filtrujAktywneZamowienia(d.orders));
+      stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,orders:Number(d.count)||0,updatedAt:d.updated_at||stanBazyCentralnej.updatedAt,error:""};
+    }
+    const zmieniono=przed!==(localStorage.getItem("artway_zamowienia")||"");
+    if(zmieniono&&trasa().startsWith("/admin/zamowien")){
+      odswiezMenu();
+      odswiezPoCichejSynchronizacji();
+    }
+    return true;
+  })().finally(()=>{zamowieniaAdminOdswiezenieWToku=null;});
+  return zamowieniaAdminOdswiezenieWToku;
 }
 async function pobierzMojeZamowieniaCentralne(cicho=false){
   if(!sesja||jestAdmin()) return false;
@@ -4150,7 +3924,7 @@ async function zapiszZamowienieCentralnie(z,publiczne=false){
   if(czyZamowienieUsuniete(z?.nr)) return false;
   try{
     const action=publiczne?"store-order-create":"store-order-save";
-    if(!publiczne&&!chmuraToken) return false;
+    if(!publiczne&&!maUprawnieniaZapisuChmury()) return false;
     const d=await chmura(action,{method:"POST",body:{order:z}});
     if(d?.deleted){ oznaczZamowienieUsuniete(z.nr,{by:"server"}); zapiszLS("artway_zamowienia",pobierzZamowienia()); return false; }
     stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,error:""};
@@ -4169,14 +3943,14 @@ async function zapiszZamowienieCentralnie(z,publiczne=false){
 }
 async function zapiszUzytkownikaCentralnie(u){
   try{
-    const action=chmuraToken?"store-user-save":"account-profile-save";
+    const action=maUprawnieniaZapisuChmury()?"store-user-save":"account-profile-save";
     await chmura(action,{method:"POST",body:{user:u}});
     return true;
   }catch(bl){ return false; }
 }
 async function odtworzSesjeCentralna(){
   try{
-    if(chmuraToken){ await synchronizujBazeCentralna(true); }
+    if(maUprawnieniaZapisuChmury()){ await synchronizujBazeCentralna(true); }
     else if(sesja && !jestAdmin()){ await pobierzMojeZamowieniaCentralne(true); }
   }catch(e){}
 }
@@ -4190,7 +3964,7 @@ function odswiezPoCichejSynchronizacji(){
   if(!odswiezane.some(x=>t===x || (["/admin/pulpit","/admin/agent-ai","/admin/magazyn","/admin/allegro"].includes(x)&&t.startsWith(x+"/")) || (x==="/admin/wysylki"&&t.startsWith("/admin/zamowienie/")))) return;
   const y=window.scrollY||0;
   renderuj();
-  setTimeout(()=>window.scrollTo({top:y}),0);
+  setTimeout(()=>window.scrollTo({top:y,behavior:"instant"}),0);
 }
 async function automatycznaSynchronizacjaChmury(powod="timer"){
   if(chmuraAutoSyncBusy) return false;
@@ -4201,11 +3975,9 @@ async function automatycznaSynchronizacjaChmury(powod="timer"){
   chmuraAutoSyncBusy=true;
   try{
     let ok=false,daneZmienione=false;
-    if(chmuraToken){
-      ok = await synchronizujBazeCentralna(true);
-      daneZmienione=chmuraOstatniaSynchronizacjaCentralnaZmienilaDane;
-      ok = (await chmuraWczytajStan()) || ok;
-      daneZmienione=chmuraOstatniPullZmienilDane||daneZmienione;
+    if(maUprawnieniaZapisuChmury()){
+      ok = await chmuraWczytajStan();
+      daneZmienione=chmuraOstatniPullZmienilDane;
     }else{
       ok = await chmuraWczytajStan();
       daneZmienione=chmuraOstatniPullZmienilDane;
@@ -4231,6 +4003,7 @@ function uruchomAutoSynchronizacjeChmury(){
   if(chmuraTimerAutoSync) clearInterval(chmuraTimerAutoSync);
   chmuraAutoSyncOstatniStart=Date.now();
   chmuraTimerAutoSync=setInterval(()=>automatycznaSynchronizacjaChmury("timer"),CHMURA_AUTO_SYNC_MS);
+  setInterval(()=>{if(trasa()==="/admin/zamowienia"||trasa().startsWith("/admin/zamowienie/"))odswiezZamowieniaAdminaPoWejsciu().catch(()=>{});},60000);
   window.addEventListener("focus",()=>automatycznaSynchronizacjaChmury("focus"));
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) automatycznaSynchronizacjaChmury("visible"); });
 }
@@ -4244,12 +4017,13 @@ async function sprawdzBramke(cicho=false){
       const ip=cloud.inpost||{};
       const czesci=[];
       czesci.push("Netlify Functions działa ✅");
-      czesci.push(cloud.email?.configured?`SMTP ${cloud.email.provider||""} gotowy`:"SMTP do konfiguracji");
-      czesci.push(ip.configured?`InPost ShipX gotowy (${ip.env||"production"})`:`InPost: brakuje ${(ip.missingEnv&&ip.missingEnv.length?ip.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")}`);
+      czesci.push(cloud.email?.authenticated?`SMTP ${cloud.email.provider||""} połączony`:cloud.email?.configured?"SMTP zapisany — wymaga testu":"SMTP wymaga naprawy poświadczenia");
+      czesci.push(ip.authenticated?`InPost ShipX połączony (${ip.env||"production"})`:ip.configured?`InPost ShipX zapisany (${ip.env||"production"})`:`InPost: brakuje ${(ip.missingEnv&&ip.missingEnv.length?ip.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")}`);
       if(!ip.geowidgetConfigured) czesci.push("mapa paczkomatów: brak INPOST_GEOWIDGET_TOKEN");
       toast(czesci.join(" • "));
     }
-    if(trasa()==="/admin/wysylki"||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
+    if(maUprawnieniaZapisuChmury()&&Date.now()-ostatniTestIntegracjiSerwerowych>15*60*1000)setTimeout(()=>sprawdzPolaczeniaSerwerowe(true),0);
+    if(trasa().startsWith("/admin/wysylki")||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
     return;
   }catch(e){ /* Netlify może być chwilowo niedostępne — niżej próbujemy awaryjny backend PHP */ }
   try{
@@ -4260,7 +4034,7 @@ async function sprawdzBramke(cicho=false){
     stanBramki={...stanBramki,sprawdzono:true,online:false,error:e.message};
     if(!cicho) toast("Bramka niedostępna — sprawdź Netlify Functions");
   }
-  if(trasa()==="/admin/wysylki"||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
+  if(trasa().startsWith("/admin/wysylki")||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
 }
 async function polaczBramke(e){
   e.preventDefault();
@@ -4277,11 +4051,11 @@ async function rozlaczBramke(){
   stanBramki={sprawdzono:true,online:true,configured:stanBramki.configured,ready:stanBramki.ready,authenticated:false,error:"",organizations:[],email:stanBramki.email||{configured:false,provider:null}};
   toast("Rozłączono sesję integracji");renderuj();
 }
-async function testujInPost(){
+async function testujInPost(cicho=false){
   try{
     const cfg=await pobierzInpostConfig(true);
     stanBramki={...stanBramki,inpost:cfg||stanBramki.inpost};
-    if(!chmuraToken){ toast("Wpisz hasło bazy administratora, aby wykonać realny test tokenu InPost"); chmuraUstawToken(); return; }
+    if(!maUprawnieniaZapisuChmury()){ if(!cicho)chmuraUstawToken(); return false; }
     const d=await chmura("inpost-test",{timeout:15000});
     const ip=d.inpost||cfg||{};
     stanBramki={...stanBramki,inpost:ip,error:""};
@@ -4290,14 +4064,18 @@ async function testujInPost(){
     const av=ip.serviceAvailability||{};
     const uwagaPaczkomat=av.locker===false?` • paczkomat ${av.lockerService||"inpost_locker_standard"} wymaga włączenia`:"";
     const uwagaKurier=av.courier===false?` • kurier ${av.courierService||"inpost_courier_standard"} wymaga włączenia`:"";
-    toast(`InPost ShipX połączony ✅ (${ip.env||"production"})${org}${ip.geowidgetConfigured?" • mapa aktywna":" • brak tokenu Geowidget"}${uslugi}${uwagaPaczkomat}${uwagaKurier}`);
-    renderuj();
+    if(!cicho)toast(`InPost ShipX połączony trwale ✅ (${ip.env||"production"})${org}${ip.geowidgetConfigured?" • mapa aktywna":" • mapa wymaga konfiguracji"}${uslugi}${uwagaPaczkomat}${uwagaKurier}`);
+    if(!cicho)renderuj();
+    return true;
   }catch(bl){
     const ip=bl.inpost||stanBramki.inpost||{};
     stanBramki={...stanBramki,inpost:ip,error:bl.message};
-    if(bl.code==="inpost_not_configured") toast("InPost niegotowy — brakuje: "+((bl.missingEnv&&bl.missingEnv.length?bl.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")));
-    else toast("Test InPost: "+bl.message);
-    renderuj();
+    if(!cicho){
+      if(bl.code==="inpost_not_configured") toast("InPost niegotowy — brakuje: "+((bl.missingEnv&&bl.missingEnv.length?bl.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")));
+      else toast("Test InPost: "+bl.message);
+      renderuj();
+    }
+    return false;
   }
 }
 function b64toBlob(b64,typ="application/pdf"){
@@ -4359,7 +4137,7 @@ async function zapiszFormularzWysylkiPrzedAPI(nr){
 async function utworzPrzesylkeAPI(nr){
   const z=pobierzZamowienia().find(x=>x.nr===nr);
   if(!z)return toast("Nie znaleziono zamówienia");
-  if(!chmuraToken){ toast("Wpisz hasło bazy administratora"); chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   if(!confirm(`Utworzyć prawdziwą przesyłkę InPost dla ${nr}? W trybie produkcyjnym operacja może naliczyć opłatę zgodnie z umową.`))return;
   try{
     await zapiszFormularzWysylkiPrzedAPI(nr);
@@ -4388,7 +4166,7 @@ async function utworzPrzesylkeAPI(nr){
 async function pobierzEtykieteAPI(nr,format="A6"){
   const z=pobierzZamowienia().find(x=>x.nr===nr);
   if(!z?.wysylka?.inpostId)return toast("Najpierw utwórz przesyłkę InPost");
-  if(!chmuraToken){ chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   try{
     toast("Pobieram etykietę InPost…");
     const d=await chmura("inpost-label",{params:{nr,type:format},timeout:25000});
@@ -4473,7 +4251,7 @@ function panelEtykietInpostHTML(z){
 async function synchronizujTrackingAPI(nr){
   const z=pobierzZamowienia().find(x=>x.nr===nr);
   if(!z?.wysylka?.inpostId)return toast("To zamówienie nie ma przesyłki InPost");
-  if(!chmuraToken){ chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   try{
     toast("Pobieram status z InPost…");
     const d=await chmura("inpost-status",{params:{nr},timeout:20000});
@@ -4490,7 +4268,7 @@ async function synchronizujTrackingAPI(nr){
 }
 // Ręczne sprawdzenie statusów WSZYSTKICH przesyłek InPost (to samo robi harmonogram co 6h)
 async function synchronizujWszystkieStatusyAPI(){
-  if(!chmuraToken){ toast("Wpisz hasło bazy administratora"); chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   try{
     toast("Sprawdzam statusy wszystkich przesyłek InPost…");
     const d=await chmura("inpost-sync-all",{method:"POST",body:{},timeout:60000});
@@ -4507,7 +4285,7 @@ async function synchronizujWszystkieStatusyAPI(){
 async function utworzEtykietyZaznaczoneAPI(){
   const nry=[...zaznaczoneNadania];
   if(!nry.length){ toast("Zaznacz zlecenia (☑ na karcie)"); return; }
-  if(!chmuraToken){ toast("Wpisz hasło bazy administratora"); chmuraUstawToken(); return; }
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   if(!confirm(`Utworzyć przesyłki InPost (API) dla ${nry.length} zaznaczonych zleceń? W trybie produkcyjnym mogą naliczyć się opłaty zgodnie z umową.`)) return;
   let ok=0,bl=0,pom=0;
   toast(`Tworzę przesyłki InPost dla ${nry.length} zleceń…`);
@@ -4537,210 +4315,14 @@ function zastosujRegulyWysylek(){
   toast(ile?`Przypisano ${ile} zleceń ✅`:"Brak zleceń do przypisania"); renderuj();
 }
 let tabWysylek="zlecenia", filtrWysylek="aktywne", szukajWysylek="";
-function nawigacjaWysylek(){
-  const taby=[["zlecenia","📋 Obsługa zleceń"],["tracking","📡 Monitoring i tracking"],["automatyzacje","⚡ Automatyzacje"],["ustawienia","⚙️ Bramka i ustawienia"]];
-  return `<div class="panel" style="padding:.65rem .8rem"><div class="shipping-tabs">${taby.map(([id,n])=>`<button class="${tabWysylek===id?"active":""}" onclick="tabWysylek='${id}';renderuj()">${n}</button>`).join("")}</div></div>`;
-}
-function listaWysylekPoFiltrze(){
-  let lista=pobierzZamowienia();
-  if(filtrWysylek==="aktywne") lista=lista.filter(z=>!["dostarczona","anulowana","zwrot"].includes(etapWysylki(z)));
-  else if(filtrWysylek!=="wszystkie") lista=lista.filter(z=>etapWysylki(z)===filtrWysylek);
-  if(szukajWysylek) lista=lista.filter(z=>(`${z.nr} ${z.email||""} ${z.wysylka?.numer||""} ${z.adres||""} ${z.wysylka?.operator||""}`).toLowerCase().includes(szukajWysylek));
-  return lista;
-}
-function wysylkiWyczyscZaznaczenie(){zaznaczoneNadania.clear();renderuj();}
-function wysylkiEksportujZakres(zakres="filtr",format="tab"){
-  const nry=zakres==="zaznaczone"?[...zaznaczoneNadania]:listaWysylekPoFiltrze().map(z=>String(z.nr));
-  eksportNadaniaInpostCSV(nry,format);
-}
-function kartaZleceniaWysylki(z){
-  const w=daneWysylki(z), etap=ETAPY_WYSYLKI[etapWysylki(z)], sla=slaWysylki(z);
-  const koszty=kosztyZamowienia(z);
-  const zad=w.zadania||{}, wykonane=["dane","kompletacja","etykieta","przekazanie"].filter(k=>zad[k]).length;
-  const etykietaGotowa=czyEtykietaInpostGotowa(z);
-  const zazn=zaznaczoneNadania.has(String(z.nr)), got=gotoweDoNadaniaInpost(z), odbior=String(z?.dostawaId||"").toLowerCase()==="odbior";
-  const znacznik = odbior?"":(got.ok?`<span class="lvl" style="background:#dcfce7;color:#166534" title="Dane kompletne — gotowe do nadania">✅ gotowe</span>`:`<span class="lvl" style="background:#fef3c7;color:#92400e" title="Uzupełnij dane odbiorcy przed nadaniem">⚠️ ${esc(got.powod)}</span>`);
-  return `<div class="ship-card ${etapWysylki(z)==="problem"?"problem":""}" style="${zazn?"border:2px solid #ffcc00;background:#fffdf3;":""}">
-    <div class="ship-card-head">
-      <span><label style="margin-right:.5rem;cursor:pointer" title="Zaznacz do nadania z pliku"><input type="checkbox" style="transform:scale(1.25)" ${zazn?"checked":""} onchange="przelaczZaznaczenieNadania(${jsArg(z.nr)})"></label><a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}"><b>${esc(z.nr)}</b></a> • ${esc([z.klient?.imie,z.klient?.nazwisko].filter(Boolean).join(" ")||z.email||"gość")}</span>
-      <span>${znacznik} <span class="shipment-priority priority-${esc(w.priorytet||"normalny")}">${esc(w.priorytet||"normalny")}</span> <span class="lvl" style="background:${etap.kolor}">${etap.ikona} ${etap.nazwa}</span></span>
-    </div>
-	    <div class="ship-meta">🚚 ${esc(nazwaPrzewoznika(w.przewoznik||przewoznikDlaZamowienia(z)))} • ${esc(w.usluga||uslugaInpostZamowienia(z))} • 🔢 ${w.numer?esc(w.numer):"<b>oczekuje na etykietę</b>"}<br>
-	      📍 ${esc(z.adres||"brak adresu")} • 👤 ${esc(w.operator||"nieprzypisane")} • <span class="${sla.klasa}">⏱ ${esc(sla.tekst)}</span><br>
-	      💰 Dostawa: ${koszty.dostawa?zl(koszty.dostawa):"GRATIS"}${koszty.paczkaWeekend?` • Paczka w Weekend: ${zl(koszty.paczkaWeekend)}`:""} • Razem: <b>${zl(koszty.razem)}</b>
-	    </div>
-    <div style="margin:.5rem 0;font-size:.75rem;color:var(--muted2)">Postęp ${wykonane}/4:
-      ${[["dane","dane"],["kompletacja","kompletacja"],["etykieta","etykieta"],["przekazanie","przekazanie"]].map(([k,n])=>`<label style="margin-right:.5rem;white-space:nowrap"><input type="checkbox" ${zad[k]?"checked":""} onchange="przelaczZadanieWysylki('${esc(z.nr)}','${k}')"> ${n}</label>`).join("")}
-    </div>
-    ${w.bladIntegracji?`<div class="backend-note" style="border-color:var(--danger);background:#fff1f2;color:#991b1b"><b>Wyjątek:</b> ${esc(w.bladIntegracji)}</div>`:""}
-    <div class="diag-actions">
-      <a class="btn" href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">Obsłuż zlecenie</a>
-      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}],'tab')">📄 TXT z nagłówkami InPost</button>
-      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}],'csv')">CSV przecinek</button>
-      <button class="btn ghost" type="button" onclick="eksportNadaniaInpostCSV([${jsArg(z.nr)}],'txt')">TXT średnik</button>
-      ${!w.inpostId?`<button class="btn" type="button" style="background:#ffcc00;color:#111" onclick="utworzPrzesylkeAPI(${jsArg(z.nr)})">🟡 Generuj etykietę InPost</button>`:etykietaGotowa?`<button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(z.nr)},'A6')">🏷️ A6</button><button class="btn ghost" type="button" onclick="pobierzEtykieteAPI(${jsArg(z.nr)},'A4')">🏷️ A4</button>`:`<button class="btn ghost" type="button" disabled title="${esc(opisGotowosciEtykietyInpost(z))}">🏷️ PDF po potwierdzeniu</button>`}
-      ${w.inpostId?`<button class="btn ghost" type="button" onclick="synchronizujTrackingAPI(${jsArg(z.nr)})">🔄 Status InPost</button>`:""}
-      ${urlSledzenia(z)?`<a class="btn ghost" href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">Śledź</a>`:""}
-    </div>
-  </div>`;
-}
-function panelZlecenWysylkowych(){
-  const wszystkie=pobierzZamowienia(), lista=listaWysylekPoFiltrze();
-  const doN = lista.filter(z=>String(z?.dostawaId||"").toLowerCase()!=="odbior" && !["dostarczona","anulowana","zwrot"].includes(etapWysylki(z)));
-  const gotoweN = lista.filter(z=>gotoweDoNadaniaInpost(z).ok).length;
-  const paczkDoN = doN.filter(z=>paczkomatoweInpost(z)).length, kurierDoN = doN.length - paczkDoN;
-  const etapy=["do_obslugi","przygotowanie","etykieta","transport","doreczenie","problem"];
-  return `<div class="panel">
-    <h1>🚚 Centrum obsługi InPost</h1>
-    <p style="color:var(--muted2)">Jeden proces dla zamówień InPost: wybór paczkomatu, etykieta, przekazanie, tracking, doręczenie albo wyjątek.</p>
-    <div class="pipeline">${etapy.map(id=>`<div class="pipeline-step ${id==="problem"?"problem":""}"><b>${wszystkie.filter(z=>etapWysylki(z)===id).length}</b><small>${ETAPY_WYSYLKI[id].ikona} ${ETAPY_WYSYLKI[id].nazwa}</small></div>`).join("")}</div>
-    ${adminWyszukiwaniePanelHTML({id:"shipping-orders",description:"Zlecenie, klient, numer nadania, operator oraz etap procesu InPost.",results:lista.length,active:!!(szukajWysylek||filtrWysylek!=="aktywne"),open:true,fields:`<div class="orders-toolbar admin-search-full">
-      <select onchange="filtrWysylek=this.value;renderuj()" style="padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
-        <option value="aktywne" ${filtrWysylek==="aktywne"?"selected":""}>Wszystkie aktywne</option>
-        <option value="wszystkie" ${filtrWysylek==="wszystkie"?"selected":""}>Cała historia</option>
-        ${Object.entries(ETAPY_WYSYLKI).map(([id,e])=>`<option value="${id}" ${filtrWysylek===id?"selected":""}>${e.ikona} ${e.nazwa}</option>`).join("")}
-      </select>
-      <input placeholder="Szukaj: zlecenie, klient, tracking, operator…" value="${esc(szukajWysylek)}" oninput="szukajWysylek=this.value.toLowerCase();zaplanujRenderPoWpisaniu()" style="flex:1;min-width:210px;padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
-      <button class="btn ghost" onclick="zastosujRegulyWysylek()">⚡ Zastosuj reguły</button>
-    </div>`,actions:adminOperacjeWynikowHTML({id:"shipping-orders",selected:zaznaczoneNadania.size,pageCount:lista.length,resultCount:lista.length,selectPage:"zaznaczWszystkieNadania(true)",selectAll:"zaznaczWszystkieNadania(true)",clear:"wysylkiWyczyscZaznaczenie()",exportSelected:"wysylkiEksportujZakres('zaznaczone','tab')",exportAll:"wysylkiEksportujZakres('filtr','tab')",exportLabel:"TXT InPost"})})}
-    <div style="border:2px solid #ffcc00;background:linear-gradient(180deg,#fffbeb,#fff);border-radius:14px;padding:.85rem 1rem;margin:.2rem 0 .9rem">
-      <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;justify-content:space-between">
-        <div style="font-size:1rem"><b>📄 Nadanie z pliku (InPost)</b> <span style="color:var(--muted2);font-size:.82rem">— hurtowe / awaryjne, bez umowy kurierskiej</span></div>
-        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-          <button class="btn" style="background:#ffcc00;color:#111;font-weight:800;box-shadow:0 2px 8px rgba(255,204,0,.45)" onclick="eksportNadaniaInpostCSV(null,'tab')">⬇️ TXT z nagłówkami InPost${zaznaczoneNadania.size?` — ${zaznaczoneNadania.size} zazn.`:` — wszystkie (${doN.length})`}</button>
-          <button class="btn ghost" onclick="eksportNadaniaInpostCSV(null,'csv')">CSV przecinek</button>
-          <button class="btn ghost" onclick="eksportNadaniaInpostCSV(null,'txt')">TXT średnik</button>
-          <button class="btn ghost" onclick="eksportNadaniaInpostCSV(null,'extended')">📋 CSV rozszerzony</button>
-        </div>
-      </div>
-      <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-top:.65rem">
-        <span style="font-size:.8rem;color:var(--muted2);font-weight:700">Zaznacz:</span>
-        <button class="btn ghost" style="padding:.32rem .7rem;font-size:.83rem" onclick="zaznaczWszystkieNadania(true)">☑️ Wszystkie (${lista.length})</button>
-        <button class="btn ghost" style="padding:.32rem .7rem;font-size:.83rem" onclick="zaznaczGotoweNadania()">✅ Gotowe (${gotoweN})</button>
-        <button class="btn ghost" style="padding:.32rem .7rem;font-size:.83rem" onclick="zaznaczTypNadania('paczkomat')">📦 Paczkomat (${paczkDoN})</button>
-        <button class="btn ghost" style="padding:.32rem .7rem;font-size:.83rem" onclick="zaznaczTypNadania('kurier')">🚚 Kurier (${kurierDoN})</button>
-        ${zaznaczoneNadania.size?`<button class="btn ghost" style="padding:.32rem .7rem;font-size:.83rem;color:#b91c1c" onclick="zaznaczoneNadania.clear();renderuj()">✖ Odznacz (${zaznaczoneNadania.size})</button>
-        <button class="btn" style="padding:.32rem .7rem;font-size:.83rem;background:#ffcc00;color:#111;margin-left:auto" title="Utwórz przesyłki i etykiety InPost przez API dla zaznaczonych zleceń" onclick="utworzEtykietyZaznaczoneAPI()">🟡 Etykiety API (${zaznaczoneNadania.size})</button>`:""}
-      </div>
-      <p style="font-size:.77rem;color:var(--muted2);margin:.55rem 0 0">Plik wgraj w InPost: <b>manager.paczkomaty.pl → Wyślij przesyłki → IMPORT Z PLIKU</b> (max 100). Użyj głównego <b>TXT z nagłówkami InPost</b>: zostaw <b>Separator kolumn: Tabulator</b>, ustaw <b>Czy ma nagłówki: Tak</b>, a potem dopasowuj nazwa do nazwy, np. <b>e-mail → E-mail</b>, <b>telefon → Telefon</b>, <b>miasto → Miasto</b>, <b>typ_przesylki → Typ przesyłki</b>. Błąd „nie znaleziono adresu e-mail w pierwszej linii” oznacza, że nagłówki nadal są ustawione na „Nie”.</p>
-    </div>
-    ${lista.length?lista.map(kartaZleceniaWysylki).join(""):"<p>Brak zleceń dla wybranego filtra.</p>"}
-  </div>`;
-}
-function panelTrackinguWysylek(){
-  const lista=pobierzZamowienia().filter(z=>daneWysylki(z).numer||["problem","transport","doreczenie"].includes(etapWysylki(z)));
-  return `<div class="panel">
-    <h1>📡 Monitoring i tracking</h1>
-    <p style="color:var(--muted2)">Monitoring numerów InPost, ostatnich zdarzeń, SLA i wyjątków z automatycznego webhooka oraz ręcznego odświeżenia statusu.</p>
-    <div style="border:1.5px solid #86efac;background:#f0fdf4;border-radius:12px;padding:.7rem .9rem;margin:.2rem 0 .9rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;justify-content:space-between">
-      <div style="font-size:.88rem;color:#166534"><b>🤖 Automatyczne sprawdzanie statusów</b><br><span style="color:var(--muted2)">Wszystkie przesyłki są sprawdzane <b>samoczynnie co 6 godzin</b> (harmonogram) + na bieżąco przez webhook InPost. Statusy i e-maile aktualizują się same.</span></div>
-      <button class="btn" style="background:#166534;color:#fff;white-space:nowrap" onclick="synchronizujWszystkieStatusyAPI()">🔄 Sprawdź teraz wszystkie</button>
-    </div>
-    <div class="ship-grid">
-      <div class="ship-stat"><b>${lista.length}</b><small>monitorowanych</small></div>
-      <div class="ship-stat"><b>${lista.filter(z=>etapWysylki(z)==="transport").length}</b><small>w transporcie</small></div>
-      <div class="ship-stat"><b>${lista.filter(z=>etapWysylki(z)==="doreczenie").length}</b><small>w doręczeniu</small></div>
-      <div class="ship-stat" style="background:#fff1f2"><b>${lista.filter(z=>etapWysylki(z)==="problem").length}</b><small>wymaga reakcji</small></div>
-    </div>
-    ${lista.length?`<table class="tracking-table"><tr><th>Zlecenie</th><th>Przewoźnik / numer</th><th>Etap wspólny</th><th>Ostatnie zdarzenie</th><th>SLA</th><th>Akcja</th></tr>
-      ${lista.map(z=>{const w=daneWysylki(z),h=[...(w.historia||[])].pop(),e=ETAPY_WYSYLKI[etapWysylki(z)],sla=slaWysylki(z);return`<tr>
-        <td><a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}"><b>${esc(z.nr)}</b></a><br><small>${esc(z.email||"")}</small></td>
-        <td>${esc(nazwaPrzewoznika(w.przewoznik))}<br><b>${esc(w.numer||"brak")}</b></td>
-        <td><span class="lvl" style="background:${e.kolor}">${e.ikona} ${e.nazwa}</span></td>
-        <td>${h?`<b>${esc(h.status)}</b><br><small>${esc(h.czas)}</small>`:"brak zdarzeń"}</td>
-        <td class="${sla.klasa}">${esc(sla.tekst)}${w.ostatniaSynchronizacja?`<br><small>synch. ${esc(new Date(w.ostatniaSynchronizacja).toLocaleString("pl-PL"))}</small>`:""}</td>
-        <td>${urlSledzenia(z)?`<a href="${esc(urlSledzenia(z))}" target="_blank" rel="noopener">Śledź →</a>`:`<a href="#/admin/zamowienie/${encodeURIComponent(z.nr)}">Uzupełnij →</a>`}</td>
-      </tr>`}).join("")}</table>`:"<p>Brak przesyłek objętych monitoringiem.</p>"}
-    <div class="backend-note"><b>Automatyzacja:</b> webhook InPost aktualizuje tę tabelę po zmianie statusu przesyłki. Jeśli etykieta jest tworzona ręcznie w InPost Managerze, w polu referencji/opisu wpisz numer zamówienia ze sklepu, np. <code>ATM-123456</code>.</div>
-  </div>`;
-}
-function panelAutomatyzacjiWysylek(){
-  const u=ustawieniaWysylki();
-  const emailGotowy=!!stanBramki.email?.configured, emailPolaczony=emailGotowy&&!!chmuraToken;
-  return `<div class="panel">
-    <h1>⚡ Automatyzacje wysyłek</h1>
-    <p style="color:var(--muted2)">Reguły obowiązują wszystkie zlecenia. Aktywny jest jeden przewoźnik: InPost, z usługami Paczkomat i Kurier.</p>
-    <form data-flagi="autoStatus,autoEmail,autoTracking,alarmSla,powiadomieniaWyjatki" onsubmit="zapiszUstawieniaWysylki(event)">
-      <h2>Reguły przypisania</h2>
-      <div class="automation-row"><span><b>InPost</b><small style="display:block;color:var(--muted2)">Paczkomat wymaga punktu, Kurier używa adresu dostawy</small></span><select name="regulaPaczkomat">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<option value="${id}" selected>${esc(p.nazwa)}</option>`).join("")}</select><span>→ zawsze</span></div>
-      <input type="hidden" name="regulaKurier" value="inpost">
-      <h2>Synchronizacja i reakcje</h2>
-      <label class="chk-row"><input type="checkbox" name="autoTracking" ${u.autoTracking?"checked":""}> Automatycznie pobieraj zdarzenia i normalizuj statusy</label>
-      <label class="chk-row"><input type="checkbox" name="autoStatus" ${u.autoStatus?"checked":""}> Aktualizuj status zamówienia na podstawie trackingu</label>
-      <label class="chk-row"><input type="checkbox" name="autoEmail" ${u.autoEmail?"checked":""}> Automatycznie wysyłaj e-mail przez API po zmianie statusu, nadaniu, doręczeniu, zwrocie lub problemie</label>
-      <label class="chk-row"><input type="checkbox" name="alarmSla" ${u.alarmSla?"checked":""}> Alarmuj o przekroczeniu czasu na nadanie</label>
-      <label class="chk-row"><input type="checkbox" name="powiadomieniaWyjatki" ${u.powiadomieniaWyjatki?"checked":""}> Wyróżniaj wyjątki wymagające działania operatora</label>
-      <div class="f-row" style="margin-top:.8rem"><div class="f-group"><label>SLA nadania (godziny)</label><input type="number" min="1" name="slaNadanie" value="${esc(u.slaNadanie)}"></div><div class="f-group"><label>Planowany czas doręczenia (godziny)</label><input type="number" min="1" name="slaDoreczenie" value="${esc(u.slaDoreczenie)}"></div></div>
-      <button class="btn" type="submit">💾 Zapisz automatyzacje</button>
-    </form>
-    <div class="backend-note" style="${emailPolaczony?"border-color:#86efac;background:#f0fdf4;color:#166534":emailGotowy?"":"border-color:#f59e0b"}">
-      <b>E-mail SMTP:</b> ${emailPolaczony?`skonfigurowano ${esc(stanBramki.email.provider||"SMTP")} i panel ma hasło bazy — automatyczne wiadomości są gotowe`:emailGotowy?`SMTP jest skonfigurowany, wpisz hasło bazy administratora, aby wysyłać testy i ręczne wiadomości`:"brak konfiguracji — ustaw SMTP/Gmail w zmiennych Netlify"}.
-      ${!emailPolaczony?` <a href="#/admin/dostawy">Konfiguracja e-mail →</a>`:""}
-    </div>
-    <form onsubmit="wyslijTestEmail(event)" style="margin-top:1rem">
-      <h2>Test wiadomości API</h2>
-      <div class="f-row" style="grid-template-columns:1fr auto;align-items:end">
-        <div class="f-group"><label>Adres odbiorcy testu</label><input type="email" name="email" value="${esc(KONFIG.emailSklepu)}" required></div>
-        <div class="f-group"><button class="btn ghost" type="submit" ${emailPolaczony?"":"disabled"}>📧 Wyślij test</button></div>
-      </div>
-    </form>
-    <div class="backend-note"><b>Sposób działania:</b> e-mail jest wysyłany natychmiast przez serwerowe API, gdy administrator zmienia status zamówienia lub zapisuje nowy numer nadania. Historia i identyfikator wiadomości są zapisywane przy zamówieniu.</div>
-  </div>`;
-}
-function panelUstawienBramki(){
-  const u=ustawieniaWysylki();
-  const ip=stanBramki.inpost||{};
-  const ipGotowy=!!ip.configured, ipMapa=!!ip.geowidgetConfigured, ipWebhook=!!ip.webhookConfigured;
-  const av=ip.serviceAvailability||{};
-  const braki=Array.isArray(ip.missingEnv)&&ip.missingEnv.length?ip.missingEnv:[...(ipGotowy?[]:["INPOST_TOKEN","INPOST_ORG_ID"])];
-  const orgInfo=ip.organization?.id?`Organizacja: <b>${esc(ip.organization.id)}</b>${ip.organization.name?` • ${esc(ip.organization.name)}`:""}`:"Organizacja zostanie pokazana po realnym teście API.";
-  const uslugiInfo=av.services?.length?`<br>Usługa paczkomatowa <code>${esc(av.lockerService||"inpost_locker_standard")}</code>: <b>${av.locker?"aktywna ✅":"brak — włącz usługę paczkomatową w InPost"}</b> • Kurier InPost <code>${esc(av.courierService||"inpost_courier_standard")}</code>: <b>${av.courier?"aktywny ✅":"brak — włącz usługę kurierską w InPost"}</b>`:"";
-  return `<div class="panel">
-    <h1>⚙️ Bramka InPost</h1>
-    <div class="integration-hub" style="border:2px solid ${ipGotowy?'#86efac':'#fcd34d'};background:${ipGotowy?'#f0fdf4':'#fffbeb'}">
-      <div class="integration-hub-status"><span><b>🟡 InPost (ShipX) — Netlify</b><br><small style="color:var(--muted2)">Prawdziwe przesyłki, etykiety i mapa paczkomatów — tokeny w zmiennych Netlify</small></span>
-        <span class="integration-state" style="background:${ipGotowy?'#dcfce7':'#fef3c7'};color:${ipGotowy?'#166534':'#854d0e'}">${ipGotowy?`tokeny obecne • ${esc(ip.env||'production')}`:`brakuje: ${esc(braki.join(", "))}`}</span></div>
-      <p class="ship-meta">Przesyłki ShipX: <b>${ipGotowy?"aktywne po pozytywnym teście ✅":"uzupełnij brakujące zmienne Netlify"}</b> &nbsp;•&nbsp; Mapa paczkomatów: <b>${ipMapa?"aktywna ✅":"ustaw INPOST_GEOWIDGET_TOKEN"}</b> &nbsp;•&nbsp; Webhook statusów: <b>${ipWebhook?"aktywny ✅":"ustaw INPOST_WEBHOOK_SECRET i dodaj URL w InPost"}</b><br>${orgInfo}${uslugiInfo}</p>
-      <div class="diag-actions">
-        <button class="btn ghost" onclick="sprawdzBramke()">🔎 Sprawdź Netlify</button>
-        <button class="btn" style="background:#ffcc00;color:#111" onclick="testujInPost()">🟡 Test API InPost</button>
-      </div>
-      ${stanBramki.error?`<div class="backend-note" style="border-color:var(--danger);background:#fff1f2;color:#991b1b"><b>Błąd połączenia:</b> ${esc(stanBramki.error)}</div>`:""}
-      <div class="backend-note" style="margin-top:.6rem"><b>Wymagane dla etykiet:</b> <code>INPOST_TOKEN</code> i <code>INPOST_ORG_ID</code>. <b>Dla mapy:</b> <code>INPOST_GEOWIDGET_TOKEN</code>. <b>Dla automatycznego śledzenia z Managera:</b> <code>INPOST_WEBHOOK_SECRET</code> oraz adres webhooka wpisany w InPost API. Opcjonalnie: <code>INPOST_ENV</code>, <code>INPOST_SENDING_METHOD</code>, <code>INPOST_LOCKER_SERVICE</code>, <code>INPOST_COURIER_SERVICE</code>. Przy ręcznie tworzonych etykietach wpisuj w InPost numer zamówienia w referencji, np. <code>ATM-123456</code>.</div>
-      <details style="margin-top:.6rem"><summary style="cursor:pointer;font-weight:700">Awaryjny/stary backend PHP na hostingu</summary>
-        <p class="ship-meta">Główna integracja działa przez Netlify Functions. Ten adres zostaje tylko jako informacja dla pierwszej instalacji na nazwa.pl albo awaryjnego hostingu bez Netlify: <code>${esc(u.apiEndpoint)}</code>.</p>
-      </details>
-    </div>
-    <div class="integration-card" style="margin-top:1rem">
-      <b>📧 Automatyczne e-maile</b>
-      <span class="integration-state">${stanBramki.email?.configured?`${esc(stanBramki.email.provider||"SMTP")} skonfigurowany${chmuraToken?" i gotowy":" — wpisz hasło bazy do testów"}`:"ustaw SMTP/Gmail w Netlify"}</span>
-      <p class="ship-meta">Hasło SMTP pozostaje wyłącznie w zmiennych Netlify. Wysyłkę testową i reguły statusów znajdziesz w zakładce Automatyzacje.</p>
-    </div>
-    <form onsubmit="zapiszUstawieniaWysylki(event)" style="margin-top:1rem">
-      <div class="f-row"><div class="f-group"><label>Adres bramki backendowej</label><input name="apiEndpoint" value="${esc(u.apiEndpoint)}" placeholder="/api/shipping"></div><div class="f-group"><label>Tryb</label><select name="tryb"><option value="sandbox" ${u.tryb==="sandbox"?"selected":""}>Sandbox / testowy</option><option value="production" ${u.tryb==="production"?"selected":""}>Produkcyjny</option></select></div></div>
-      <div class="backend-note"><b>Bez sekretów:</b> w tym miejscu zapisuje się tylko adres wspólnej bramki. Tokeny InPost pozostają na serwerze, poza publicznym katalogiem strony.</div>
-      <h2>Aktywny adapter</h2>
-      <div class="integration-grid">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<div class="integration-card"><b>${esc(p.nazwa)}</b><span class="integration-state">${ipGotowy?"adapter Netlify gotowy — przesyłki, etykiety, mapa":"ustaw tokeny InPost w Netlify"}</span><p class="ship-meta">ShipX (Netlify) • Paczkomat + Kurier InPost • numer nadania • PDF A6/A4 • status • Geowidget • webhook</p></div>`).join("")}</div>
-      <h2>Dane nadawcy i paczki</h2>
-      <div class="f-row"><div class="f-group"><label>Domyślny przewoźnik</label><select name="przewoznik">${Object.entries(przewoznicyAktywni()).map(([id,p])=>`<option value="${id}" selected>${esc(p.nazwa)}</option>`).join("")}</select></div><div class="f-group"><label>Nazwa nadawcy</label><input name="nadawca" value="${esc(u.nadawca)}"></div></div>
-      <div class="f-row"><div class="f-group"><label>Ulica i numer</label><input name="ulica" value="${esc(u.ulica)}"></div><div class="f-group"><label>Kod pocztowy</label><input name="kod" value="${esc(u.kod)}"></div><div class="f-group"><label>Miasto</label><input name="miasto" value="${esc(u.miasto)}"></div></div>
-      <div class="f-row"><div class="f-group"><label>Telefon</label><input name="telefon" value="${esc(u.telefon)}"></div><div class="f-group"><label>E-mail nadawcy</label><input type="email" name="email" value="${esc(u.email)}"></div></div>
-      <div class="f-row"><div class="f-group"><label>Waga (kg)</label><input type="number" step=".01" min=".01" name="waga" value="${esc(u.waga)}"></div><div class="f-group"><label>Długość (cm)</label><input type="number" min="1" name="dlugosc" value="${esc(u.dlugosc)}"></div><div class="f-group"><label>Szerokość (cm)</label><input type="number" min="1" name="szerokosc" value="${esc(u.szerokosc)}"></div><div class="f-group"><label>Wysokość (cm)</label><input type="number" min="1" name="wysokosc" value="${esc(u.wysokosc)}"></div></div>
-      <button class="btn" type="submit">💾 Zapisz bramkę i dane nadawcy</button>
-    </form>
-  </div>`;
-}
-function widokAdminWysylki(){
-  const widok=tabWysylek==="tracking"?panelTrackinguWysylek():tabWysylek==="automatyzacje"?panelAutomatyzacjiWysylek():tabWysylek==="ustawienia"?panelUstawienBramki():panelZlecenWysylkowych();
-  return adminSzkielet("/admin/wysylki",nawigacjaWysylek()+widok);
-}
 
 /* Pozycjonowanie i darmowa promocja — bez płatnych API i bez sztucznych zmian treści. */
 const TABY_SEO=[
-  ["pulpit","📊 Pulpit"],["plan","🗓️ Plan dzienny"],["produkty","🏷️ Produkty SEO"],["tresci","✍️ Frazy i treści"],
+  ["pulpit","📊 Pulpit"],["efekty","📈 Efekty"],["plan","🗓️ Plan dzienny"],["produkty","🏷️ Produkty SEO"],["tresci","✍️ Frazy i treści"],
   ["promocja","📣 Darmowa promocja"],["techniczne","🛠️ Techniczne SEO"],["historia","🧾 Historia"],["ustawienia","⚙️ Ustawienia"]
 ];
-function seoSzkielet(tab,tresc){return adminSzkielet("/admin/seo",`${adminSubnavHTML(TABY_SEO.map(([id,label])=>({id,href:`#/admin/seo/${id}`,label})),tab)}${tresc}`);}
+function seoSzkielet(tab,tresc){const extras=tab==="promocja"?seoDodatkoweKanalyHTML():"";return adminSzkielet("/admin/seo",`${adminSubnavHTML(TABY_SEO.map(([id,label])=>({id,href:`#/admin/seo/${id}`,label})),tab)}${tresc}${extras}`);}
+function seoDodatkoweKanalyHTML(){return `<section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Dodatkowe kanały bez budżetu</span><h2>🌐 Pełne bezpłatne pokrycie</h2><p class="order-detail-lead">Automaty uruchamiamy tam, gdzie jest to bezpieczne. Kanały wymagające konta lub ręcznej publikacji pozostają wyraźnie oznaczone.</p></div></div><div class="seo-free-channels"><article><b>🖼️ Google Images i Lens — automatycznie</b><p>Mapa obrazów oraz dodatkowe zdjęcia w feedzie pomagają prezentować produkty w bezpłatnych wynikach obrazów i Lens.</p><a class="btn ghost" href="/sitemap.xml" target="_blank">Mapa obrazów</a></article><article><b>🔍 Bing i inne wyszukiwarki — automatycznie</b><p>IndexNow przekazuje nowe i zmienione adresy. Bezpłatne Bing Webmaster Tools pozwala dodatkowo kontrolować raporty.</p><a class="btn ghost" href="https://www.bing.com/webmasters/" target="_blank" rel="noopener">Bing Webmaster Tools ↗</a></article><article><b>📤 Udostępnianie organiczne — na żądanie</b><p>Produkt ma gotowy tytuł, opis i czysty adres do bezpłatnego udostępnienia. Publikacja pozostaje ręczna, aby nie wysyłać spamu.</p><a class="btn ghost" href="#/admin/seo/produkty">Wybierz produkt</a></article><article><b>📍 Profil Firmy Google — warunkowo</b><p>Bezpłatny profil lokalny ma sens wyłącznie przy rzeczywistej obsłudze klientów pod adresem lub na określonym obszarze.</p><a class="btn ghost" href="https://business.google.com/" target="_blank" rel="noopener">Profil Firmy Google ↗</a></article></div></section>`;}
 function seoTekstBezHTML(value=""){const el=document.createElement("div");el.innerHTML=String(value||"");return String(el.textContent||"").replace(/\s+/g," ").trim();}
 function seoPropozycjaProduktu(p={}){
   const brand=String(p.producent||p.marka||"").trim(),category=String(p.kategoria||"").trim();
@@ -4796,9 +4378,9 @@ async function seoUruchomPlanDzienny(button){
 }
 function zapiszSeoUstawienia(event){event.preventDefault();const f=new FormData(event.currentTarget),limit=Math.max(1,Math.min(50,Number(f.get("dailyLimit"))||5));seoUstawienia={...seoUstawienia,enabled:f.get("enabled")==="on",autoFillMissing:f.get("autoFillMissing")==="on",autoAllProducts:true,preferBestsellers:f.get("preferBestsellers")==="on",indexNowEnabled:f.get("indexNowEnabled")==="on",dailyLimit:limit,searchConsoleReady:f.get("searchConsoleReady")==="on",merchantCenterReady:f.get("merchantCenterReady")==="on",businessProfileReady:f.get("businessProfileReady")==="on"};zapiszLS("artway_seo_ustawienia",seoUstawienia);zaplanujZapisUstawien();toast("Ustawienia pozycjonowania zapisane ✅");renderuj();}
 function seoUstawLimit(value){const input=document.querySelector('[name="dailyLimit"]');if(input){input.value=value;input.focus();}}
-function seoPrzelaczPromowanie(id){const p=pobierzProduktAdmin(Number(id));if(!p)return;seoZapiszLokalnie(id,{seoPromoted:!p.seoPromoted,seoPromotedAt:!p.seoPromoted?new Date().toISOString():""});zaplanujZapisUstawien();zbudujProdukty();toast(!p.seoPromoted?"Produkt otrzymał wyższy priorytet promocji ⭐":"Usunięto dodatkowy priorytet — produkt nadal promuje się automatycznie");renderuj();}
-function seoUzupelnijProdukt(id){const p=pobierzProduktAdmin(Number(id));if(!p)return;const now=new Date().toISOString(),next=seoAutomatyzujDaneProduktu(p,"ręczna kontrola SEO",{force:p.seoMode!=="manual"}),patch={seoTitle:next.seoTitle,seoDescription:next.seoDescription,seoKeywords:next.seoKeywords,seoMode:next.seoMode,seoReviewedAt:next.seoReviewedAt,seoSource:next.seoSource,seoScore:next.seoScore};seoZapiszLokalnie(id,patch);seoHistoria=[{id:`seo-${Date.now()}-${id}`,at:now,type:"single",source:"ręczna kontrola SEO",count:1,products:[{id:p.id,name:p.nazwa,scoreBefore:seoOcenaProduktu(seoEfektywneDaneProduktu(p)).score}]},...(seoHistoria||[])].slice(0,500);zapiszLS("artway_seo_historia",seoHistoria);zaplanujZapisUstawien();zbudujProdukty();toast("Metadane SEO produktu uzupełnione ✅");renderuj();}
-async function seoUdostepnijProdukt(id){const p=pobierzProduktAdmin(Number(id));if(!p)return;const url=`${location.origin}/produkt/${encodeURIComponent(p.id)}`,data={title:p.seoTitle||p.nazwa,text:p.seoDescription||opisKrotkiProduktu(p),url};try{if(navigator.share)await navigator.share(data);else{await navigator.clipboard.writeText(`${data.title}\n${data.text}\n${url}`);toast("Skopiowano gotowy, bezpłatny materiał promocyjny 📋");}}catch(e){if(e?.name!=="AbortError")toast("Nie udało się udostępnić materiału");}}
+function seoPrzelaczPromowanie(id){const p=pobierzProduktAdmin(id);if(!p)return;seoZapiszLokalnie(id,{seoPromoted:!p.seoPromoted,seoPromotedAt:!p.seoPromoted?new Date().toISOString():""});zaplanujZapisUstawien();zbudujProdukty();toast(!p.seoPromoted?"Produkt otrzymał wyższy priorytet promocji ⭐":"Usunięto dodatkowy priorytet — produkt nadal promuje się automatycznie");renderuj();}
+function seoUzupelnijProdukt(id){const p=pobierzProduktAdmin(id);if(!p)return;const now=new Date().toISOString(),next=seoAutomatyzujDaneProduktu(p,"ręczna kontrola SEO",{force:p.seoMode!=="manual"}),patch={seoTitle:next.seoTitle,seoDescription:next.seoDescription,seoKeywords:next.seoKeywords,seoMode:next.seoMode,seoReviewedAt:next.seoReviewedAt,seoSource:next.seoSource,seoScore:next.seoScore};seoZapiszLokalnie(id,patch);seoHistoria=[{id:`seo-${Date.now()}-${id}`,at:now,type:"single",source:"ręczna kontrola SEO",count:1,products:[{id:p.id,name:p.nazwa,scoreBefore:seoOcenaProduktu(seoEfektywneDaneProduktu(p)).score}]},...(seoHistoria||[])].slice(0,500);zapiszLS("artway_seo_historia",seoHistoria);zaplanujZapisUstawien();zbudujProdukty();toast("Metadane SEO produktu uzupełnione ✅");renderuj();}
+async function seoUdostepnijProdukt(id){const p=pobierzProduktAdmin(id);if(!p)return;const url=`${location.origin}/produkt/${encodeURIComponent(p.id)}`,data={title:p.seoTitle||p.nazwa,text:p.seoDescription||opisKrotkiProduktu(p),url};try{if(navigator.share)await navigator.share(data);else{await navigator.clipboard.writeText(`${data.title}\n${data.text}\n${url}`);toast("Skopiowano gotowy, bezpłatny materiał promocyjny 📋");}}catch(e){if(e?.name!=="AbortError")toast("Nie udało się udostępnić materiału");}}
 function seoCSV(value){const s=String(value??"");return `"${s.replace(/"/g,'""')}"`;}
 function seoEksportujFeedGoogleCSV(){const rows=[["id","title","description","link","image_link","availability","price","brand","gtin","mpn","condition"],...produkty.filter(p=>!produktOznaczonyNiedostepny(p)&&Number(p.cena)>0&&p.zdjecie).map(p=>[p.externalId||p.sku||p.id,p.seoTitle||p.nazwa,p.seoDescription||seoPropozycjaProduktu(p).seoDescription,`${location.origin}/produkt/${p.id}`,p.zdjecie||"","in_stock",`${Number(p.cena).toFixed(2)} PLN`,p.producent||p.marka||"",p.gtin||p.ean||"",p.mpn||p.kodProducenta||p.sku||"","new"])];pobierzPlik(`google-free-listings-${new Date().toISOString().slice(0,10)}.csv`,`\ufeff${rows.map(r=>r.map(seoCSV).join(",")).join("\n")}`,"text/csv");}
 function seoFiltrujKolejke(items=seoKolejkaProduktow()){
@@ -4837,7 +4419,7 @@ function seoEksportujWynikiCSV(zakres="filtr"){
 function seoOdswiezStanZaznaczen(){const selected=seoZaznaczoneProdukty.size;document.querySelectorAll("[data-seo-selected-count]").forEach(el=>el.textContent=String(selected));document.querySelectorAll("[data-seo-bulk-action]").forEach(el=>el.disabled=!selected);document.querySelectorAll("[data-seo-product-row]").forEach(row=>{const active=seoZaznaczoneProdukty.has(String(row.dataset.seoProductId));row.classList.toggle("is-selected",active);const box=row.querySelector("[data-seo-select]");if(box)box.checked=active;});}
 function seoWykonajOperacjeZbiorcza(mode){
   const ids=[...seoZaznaczoneProdukty],now=new Date().toISOString();if(!ids.length)return toast("Najpierw zaznacz produkty");if(!["optimize","promote","unpromote","auto","manual","audit"].includes(mode))return toast("Wybierz operację zbiorczą");let changed=0,names=[];
-  for(const id of ids){const p=pobierzProduktAdmin(Number(id));if(!p)continue;let patch={};if(mode==="promote")patch={seoPromoted:true,seoPromotedAt:now};else if(mode==="unpromote")patch={seoPromoted:false,seoPromotedAt:""};else{const base=mode==="auto"?{...p,seoMode:"auto"}:mode==="manual"?{...seoEfektywneDaneProduktu(p),seoMode:"manual"}:p,next=seoAutomatyzujDaneProduktu(base,mode==="audit"?"zbiorczy audyt SEO":"zbiorcza optymalizacja SEO",{force:mode==="auto"||mode==="optimize"});patch={seoTitle:next.seoTitle,seoDescription:next.seoDescription,seoKeywords:next.seoKeywords,seoMode:next.seoMode,seoReviewedAt:next.seoReviewedAt,seoSource:next.seoSource,seoScore:next.seoScore};}seoZapiszLokalnie(id,patch);changed++;names.push(p.nazwa||id);}
+  for(const id of ids){const p=pobierzProduktAdmin(id);if(!p)continue;let patch={};if(mode==="promote")patch={seoPromoted:true,seoPromotedAt:now};else if(mode==="unpromote")patch={seoPromoted:false,seoPromotedAt:""};else{const base=mode==="auto"?{...p,seoMode:"auto"}:mode==="manual"?{...seoEfektywneDaneProduktu(p),seoMode:"manual"}:p,next=seoAutomatyzujDaneProduktu(base,mode==="audit"?"zbiorczy audyt SEO":"zbiorcza optymalizacja SEO",{force:mode==="auto"||mode==="optimize"});patch={seoTitle:next.seoTitle,seoDescription:next.seoDescription,seoKeywords:next.seoKeywords,seoMode:next.seoMode,seoReviewedAt:next.seoReviewedAt,seoSource:next.seoSource,seoScore:next.seoScore};}seoZapiszLokalnie(id,patch);changed++;names.push(p.nazwa||id);}
   seoHistoria=[{id:`seo-bulk-${Date.now()}`,at:now,type:"bulk",source:`operacja zbiorcza: ${mode}`,count:changed,products:names.slice(0,100).map((name,i)=>({id:ids[i],name}))},...(seoHistoria||[])].slice(0,500);zapiszLS("artway_seo_historia",seoHistoria);zaplanujZapisUstawien();zbudujProdukty();seoZaznaczoneProdukty.clear();toast(`Zmieniono ${changed} produktów ✅`);seoOdswiezWorkspace();
 }
 function seoScoreBadge(score){return `<span class="seo-score ${score>=85?"good":score>=60?"medium":"bad"}">${score}/100</span>`;}
@@ -4854,13 +4436,17 @@ function seoProduktyWorkspaceHTML(queue,tab="produkty"){
 function seoAktualizujMetaDlaTrasy(route=trasa()){
   const ensure=(selector,create)=>{let el=document.head.querySelector(selector);if(!el){el=document.createElement(create.tag||"meta");for(const [k,v] of Object.entries(create.attrs||{}))el.setAttribute(k,v);document.head.appendChild(el);}return el;},setMeta=(name,value,property=false)=>{const attr=property?"property":"name",el=ensure(`meta[${attr}="${name}"]`,{tag:"meta",attrs:{[attr]:name}});el.setAttribute("content",String(value||""));};
   const baseTitle=ustawienia.nazwaSklepu||"Artway-TM",baseDesc=ustawienia.seo?.opis||ustawienia.opisSklepu||"Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów.";let title=ustawienia.seo?.tytul||`Gry, zabawki i artykuły imprezowe | ${baseTitle}`,desc=baseDesc,canonical=location.origin+"/",image="",price="",schema={"@context":"https://schema.org","@graph":[{"@type":"WebSite",name:baseTitle,url:canonical,inLanguage:"pl-PL"},{"@type":"OnlineStore",name:baseTitle,url:canonical,email:ustawienia.email||"artwaytm@gmail.com",telephone:ustawienia.telefon||"+48530038914"}]};
-  if(route.startsWith("/produkt/")){const p=produkty.find(x=>String(x.id)===String(route.split("/")[2]));if(p){const effective=seoEfektywneDaneProduktu(p);title=effective.seoTitle||`${p.nazwa} | ${baseTitle}`;desc=effective.seoDescription;canonical=`${location.origin}/produkt/${p.id}`;image=p.zdjecie||p.zdjecia?.[0]||"";price=Number(p.cena||0)>0?Number(p.cena).toFixed(2):"";schema={"@context":"https://schema.org","@graph":[{"@type":"Product",name:p.nazwa,description:seoTekstBezHTML(p.opis||desc),image:[p.zdjecie,...(p.zdjecia||[])].filter(Boolean),sku:p.sku||p.externalId||String(p.id),gtin13:p.gtin||p.ean||undefined,brand:(p.producent||p.marka)?{"@type":"Brand",name:p.producent||p.marka}:undefined,offers:{"@type":"Offer",url:canonical,priceCurrency:"PLN",price,availability:produktOznaczonyNiedostepny(p)?"https://schema.org/OutOfStock":"https://schema.org/InStock",itemCondition:"https://schema.org/NewCondition"}},{"@type":"BreadcrumbList",itemListElement:[{"@type":"ListItem",position:1,name:"Strona główna",item:location.origin+"/"},{"@type":"ListItem",position:2,name:p.nazwa,item:canonical}]}]};}}
+  if(route.startsWith("/produkt/")){const p=produktSklepuPoId(route.split("/")[2]);if(p){const effective=seoEfektywneDaneProduktu(p);title=effective.seoTitle||`${p.nazwa} | ${baseTitle}`;desc=effective.seoDescription;canonical=`${location.origin}/produkt/${p.id}`;image=p.zdjecie||p.zdjecia?.[0]||"";price=Number(p.cena||0)>0?Number(p.cena).toFixed(2):"";const gtin=String(p.gtin||p.ean||"").replace(/\D/g,"");schema={"@context":"https://schema.org","@graph":[{"@type":"Product",name:p.nazwa,description:seoTekstBezHTML(p.opis||desc),image:[p.zdjecie,...(p.zdjecia||[])].filter(Boolean),sku:p.sku||p.externalId||String(p.id),...(gtin?{[`gtin${gtin.length}`]:gtin}:{}),brand:(p.producent||p.marka)?{"@type":"Brand",name:p.producent||p.marka}:undefined,offers:{"@type":"Offer",url:canonical,priceCurrency:"PLN",price,availability:produktOznaczonyNiedostepny(p)?"https://schema.org/OutOfStock":"https://schema.org/InStock",itemCondition:"https://schema.org/NewCondition"}},{"@type":"BreadcrumbList",itemListElement:[{"@type":"ListItem",position:1,name:"Strona główna",item:location.origin+"/"},{"@type":"ListItem",position:2,name:p.nazwa,item:canonical}]}]};}}
+  else if(route.startsWith("/kategoria/")){const raw=decodeURIComponent(route.split("/")[2]||""),category=wszystkieKategorie().find(k=>k===raw||seoSlugKategorii(k)===seoSlugKategorii(raw))||raw,list=produkty.filter(p=>p.kategoria===category);title=`${category} | ${baseTitle}`;desc=`Produkty z kategorii ${category}. Sprawdź aktualną ofertę, ceny i wygodną dostawę InPost.`;canonical=`${location.origin}/kategoria/${seoSlugKategorii(category)}`;image=list.find(p=>p.zdjecie)?.zdjecie||"";schema={"@context":"https://schema.org","@type":"CollectionPage",name:category,description:desc,url:canonical};}
+  else if(route==="/promocje"||route==="/nowosci"){const name=route==="/promocje"?"Promocje":"Nowości";title=`${name} | ${baseTitle}`;desc=route==="/promocje"?"Aktualne promocje na gry, zabawki kreatywne, balony i artykuły imprezowe.":"Nowe gry, zabawki kreatywne, balony i artykuły imprezowe w Artway-TM.";canonical=`${location.origin}${route}`;schema={"@context":"https://schema.org","@type":"CollectionPage",name,description:desc,url:canonical};}
   document.title=title;setMeta("description",desc);setMeta("robots",route.startsWith("/admin")||["/diagnostyka","/logowanie","/rejestracja","/konto","/zamowienia"].includes(route)?"noindex,nofollow":"index,follow,max-image-preview:large");setMeta("og:locale","pl_PL",true);setMeta("og:site_name",baseTitle,true);setMeta("og:title",title,true);setMeta("og:description",desc,true);setMeta("og:url",canonical,true);setMeta("og:type",route.startsWith("/produkt/")?"product":"website",true);setMeta("og:image",image,true);setMeta("twitter:card",image?"summary_large_image":"summary");setMeta("twitter:title",title);setMeta("twitter:description",desc);setMeta("twitter:image",image);setMeta("product:price:amount",price,true);setMeta("product:price:currency",price?"PLN":"",true);
   let link=document.head.querySelector('link[rel="canonical"]');if(!link){link=document.createElement("link");link.rel="canonical";document.head.appendChild(link);}link.href=canonical;let script=document.getElementById("artway-seo-schema");if(!script){script=document.createElement("script");script.id="artway-seo-schema";script.type="application/ld+json";document.head.appendChild(script);}script.textContent=JSON.stringify(schema);
 }
 function widokAdminSEO(sekcja="pulpit"){
   const tab=TABY_SEO.some(([id])=>id===sekcja)?sekcja:"pulpit",queue=seoKolejkaProduktow(),limit=Math.max(1,Math.min(50,Number(seoUstawienia.dailyLimit)||5)),daily=queue.filter(x=>!String(x.product.seoReviewedAt||"").startsWith(new Date().toISOString().slice(0,10))).slice(0,limit),good=queue.filter(x=>x.score>=85).length,missing=queue.filter(x=>x.score<60).length,priority=queue.filter(x=>x.product.seoPromoted),avg=queue.length?Math.round(queue.reduce((s,x)=>s+x.score,0)/queue.length):0,indexNowOk=seoUstawienia.lastPromotionStatus==="accepted",indexNowState=indexNowOk?`Ostatnio zgłoszono ${Number(seoUstawienia.lastPromotionCount)||0} adresów — ${allegroDataTxt(seoUstawienia.lastPromotionAt)}`:seoUstawienia.lastPromotionStatus==="error"?"Ostatnie zgłoszenie nie powiodło się — automat ponowi próbę przy kolejnej partii":"Pierwsze zgłoszenie nastąpi przy najbliższej dziennej partii";
-  const head=`<div class="panel seo-hero"><div><span class="order-pro-label">Bezpłatny rozwój widoczności</span><h1>📣 Pozycjonowanie i promocja produktów</h1><p>Techniczne SEO, uporządkowane treści, plan małych dziennych partii oraz bezpłatne kanały Google — bez płatnych reklam i bez płatnych narzędzi.</p></div><div class="seo-hero-score"><b>${avg}%</b><small>średnia gotowość katalogu</small></div></div>`;
+  if(typeof seoPobierzEfekty==="function")queueMicrotask(()=>seoPobierzEfekty(typeof seoEfektyStan==="object"?seoEfektyStan.days:30));
+  const head=`<div class="panel seo-hero seo-control-hero"><div><span class="order-pro-label">Centrum bezpłatnego wzrostu</span><h1>📣 Pozycjonowanie i promocja produktów</h1><p>Techniczne SEO, uporządkowane treści, czyste adresy, dane Product/Offer, bezpłatny feed oraz rzeczywisty pomiar wejść i sprzedaży.</p><div class="seo-status-ribbon"><span class="ok">● Automat aktywny</span><span class="ok">● HTML produktów dla Google</span><span class="${indexNowOk?"ok":"wait"}">● IndexNow ${indexNowOk?"przyjęty":"oczekuje"}</span><span>● ${queue.length} produktów w mapie/feedzie</span></div></div><div class="seo-hero-score"><b>${avg}%</b><small>średnia gotowość katalogu</small></div></div>`;
+  if(tab==="efekty")return seoSzkielet(tab,`${head}${seoEfektyPanelHTML()}`);
   if(tab==="pulpit")return seoSzkielet(tab,`${head}<div class="orders-stat-grid seo-stat-grid"><div class="order-stat-card money"><span>✅</span><b>${good}</b><small>produktów gotowych</small></div><div class="order-stat-card ${missing?"hot":""}"><span>⚠️</span><b>${missing}</b><small>wymaga uzupełnienia</small></div><div class="order-stat-card"><span>🗓️</span><b>${daily.length}</b><small>w najbliższej partii</small></div><div class="order-stat-card money"><span>📣</span><b>${queue.length}</b><small>aktywnych w darmowej promocji</small></div></div><div class="panel"><div class="order-section-head"><div><h2>Plan na dziś: ${limit} produktów</h2><p class="order-detail-lead">Wszystkie aktywne produkty są promowane automatycznie. W kolejce kontroli najpierw są produkty z dodatkowym priorytetem i bestsellery, potem karty z największymi brakami.</p></div><button class="btn" onclick="seoUruchomPlanDzienny(this)" ${seoUstawienia.enabled?"":"disabled"}>▶️ Wykonaj dzisiejszą partię</button></div><div class="seo-progress"><span style="width:${avg}%"></span></div><div style="overflow:auto"><table class="log-table"><tr><th></th><th>Produkt</th><th>Wynik</th><th>Braki</th><th>Kontrola</th><th>Akcje</th></tr>${seoProduktRows(daily,limit)}</table></div></div>`);
   if(tab==="plan")return seoSzkielet(tab,`${head}<div class="panel"><div class="order-section-head"><div><h2>🗓️ Kolejka dzienna</h2><p class="order-detail-lead">Domyślnie 5 pozycji dziennie. Przy obecnym katalogu daje to pełny, spokojny cykl mniej więcej raz na tydzień. Nie zmieniamy treści tylko po to, by wyglądały na świeże.</p></div><button class="btn" onclick="seoUruchomPlanDzienny(this)">Uruchom ${limit} teraz</button></div><div style="overflow:auto"><table class="log-table"><tr><th></th><th>Produkt</th><th>Wynik</th><th>Braki</th><th>Ostatnio</th><th>Akcje</th></tr>${seoProduktRows(daily,limit)}</table></div></div>`);
   if(tab==="produkty"||tab==="tresci")return seoSzkielet(tab,`${head}${seoProduktyWorkspaceHTML(queue,tab)}`);
@@ -4877,8 +4463,72 @@ function zapiszCzescUstawien(obj){
   toast("Zapisane ✅"); renderuj();
 }
 
+/* Anonimowy pomiar efektów SEO. Zapisuje wyłącznie dzienne sumy kanałów, domen wejścia i konwersji. */
+let seoEfektyStan={loading:false,loadedAt:0,error:"",days:30,totals:{landing:0,product_view:0,add_to_cart:0,order:0,revenue:0},channels:{},domains:{},landingPages:[],campaigns:[],referrers:[],timeline:[],products:[],updatedAt:null};
+const SEO_DOMENY=new Set(["artwaytm.pl","allsklep.pl"]);
+function seoNormalizujDomene(value=""){const host=String(value||"").toLowerCase().replace(/^www\./,"").split(":")[0];return SEO_DOMENY.has(host)?host:"";}
+function seoBezpiecznaSciezka(value="/"){const path=String(value||"/").split(/[?#]/)[0].replace(/[\u0000-\u001f\u007f]/g,"").slice(0,180);return path.startsWith("/")?path:"/";}
+function seoUsunZnacznikDomeny(){try{const url=new URL(location.href);if(!url.searchParams.has("entry_domain"))return;url.searchParams.delete("entry_domain");history.replaceState(history.state,"",`${url.pathname}${url.search}${url.hash}`);}catch(e){}}
+function seoKanalZHosta(host=""){
+  const value=String(host||"").toLowerCase();
+  if(/(^|\.)google\./.test(value))return "google";
+  if(/(^|\.)bing\.com$/.test(value))return "bing";
+  if(/(^|\.)duckduckgo\.com$/.test(value))return "duckduckgo";
+  if(/(^|\.)yahoo\./.test(value))return "yahoo";
+  if(/(^|\.)ecosia\.org$/.test(value))return "ecosia";
+  if(/(^|\.)(?:search\.brave\.com|qwant\.com|startpage\.com|yandex\.[a-z.]+|seznam\.cz)$/.test(value))return "other_search";
+  return "";
+}
+function seoAtrybucjaSesji(route="/"){
+  try{
+    const stored=JSON.parse(sessionStorage.getItem("artway_seo_attribution_v2")||"null");if(stored?.entryDomain&&stored?.channel)return stored;
+    const url=new URL(location.href),own=seoNormalizujDomene(location.hostname)||"artwaytm.pl",via=seoNormalizujDomene(url.searchParams.get("entry_domain")),referrer=document.referrer?new URL(document.referrer):null,referrerHost=String(referrer?.hostname||"").toLowerCase().replace(/^www\./,""),searchChannel=seoKanalZHosta(referrerHost),campaignName=String(url.searchParams.get("utm_campaign")||url.searchParams.get("utm_source")||"").toLowerCase().replace(/[^a-z0-9_.-]/g,"").slice(0,80);
+    const externalReferrer=referrerHost&&!SEO_DOMENY.has(referrerHost)?referrerHost.replace(/[^a-z0-9.-]/g,"").slice(0,120):"";
+    const attribution={entryDomain:via||own,landingPath:seoBezpiecznaSciezka(route||location.pathname),channel:searchChannel||(campaignName?"campaign":externalReferrer?"referral":"direct"),campaign:campaignName,referrerDomain:externalReferrer};
+    sessionStorage.setItem("artway_seo_attribution_v2",JSON.stringify(attribution));seoUsunZnacznikDomeny();return attribution;
+  }catch(e){return {entryDomain:"artwaytm.pl",landingPath:seoBezpiecznaSciezka(route),channel:"direct",campaign:"",referrerDomain:""};}
+}
+function seoWyslijZdarzenie(event,data={}){
+  const attribution=seoAtrybucjaSesji(data.route||trasa());if(!attribution.channel||jestAdmin())return;
+  const body={event,channel:attribution.channel,entryDomain:attribution.entryDomain,landingPath:attribution.landingPath,campaign:attribution.campaign,referrerDomain:attribution.referrerDomain,productId:data.productId||"",value:Math.max(0,Number(data.value)||0)};
+  fetch("/api/seo/event",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),keepalive:true,credentials:"omit"}).catch(()=>{});
+}
+function seoSledzTrase(route="/"){
+  if(String(route).startsWith("/admin"))return;seoAtrybucjaSesji(route);
+  try{
+    if(!sessionStorage.getItem("artway_seo_landing")){sessionStorage.setItem("artway_seo_landing","1");seoWyslijZdarzenie("landing",{route});}
+    if(String(route).startsWith("/produkt/")){
+      const id=String(route).split("/")[2]||"",key=`artway_seo_view_${id}`;
+      if(id&&!sessionStorage.getItem(key)){sessionStorage.setItem(key,"1");seoWyslijZdarzenie("product_view",{productId:id});}
+    }
+  }catch(e){}
+}
+function seoSledzKoszyk(productId){seoWyslijZdarzenie("add_to_cart",{productId});}
+function seoSledzZamowienie(value){
+  try{if(sessionStorage.getItem("artway_seo_order_sent"))return;sessionStorage.setItem("artway_seo_order_sent","1");}catch(e){}
+  seoWyslijZdarzenie("order",{value});
+}
+async function seoPobierzEfekty(days=30,force=false){
+  if(seoEfektyStan.loading||(!force&&Date.now()-seoEfektyStan.loadedAt<60_000))return;
+  seoEfektyStan={...seoEfektyStan,loading:true,error:"",days};
+  try{
+    const response=await fetch(`/api/seo/performance?days=${Math.max(7,Math.min(365,Number(days)||30))}`,{cache:"no-store",headers:chmuraNaglowki(false),credentials:"same-origin"});
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    const data=await response.json();seoEfektyStan={...seoEfektyStan,...data,loading:false,loadedAt:Date.now(),error:""};
+  }catch(error){seoEfektyStan={...seoEfektyStan,loading:false,loadedAt:Date.now(),error:String(error?.message||error)};}
+  if(trasa().startsWith("/admin/seo"))renderuj();
+}
+
 /* ═══════════ KOSZYK ═══════════ */
 function ileWKoszyku(id){ return koszyk.filter(x=>x.id===id).reduce((s,x)=>s+x.ile,0); }
+function kontrolowanyStanDlaZakupu(id){
+  if(!Object.prototype.hasOwnProperty.call(stanyProduktow||{},id)||stanyProduktow[id]===null||stanyProduktow[id]==="")return null;
+  const n=Number(stanyProduktow[id]);return Number.isFinite(n)?Math.max(0,Math.floor(n)):null;
+}
+function wymagaPotwierdzeniaIlosci(id,ilosc){
+  const qty=Math.max(0,Number(ilosc)||0),stan=kontrolowanyStanDlaZakupu(id);
+  return qty>LIMIT_POTWIERDZENIA_DOSTEPNOSCI&&(stan===null||qty>stan);
+}
 function pozycjeDoPotwierdzeniaDostepnosci(){
   const mapa=new Map();
   for(const x of koszyk){
@@ -4888,16 +4538,17 @@ function pozycjeDoPotwierdzeniaDostepnosci(){
     if(x.wariant)rec.warianty.push(`${x.wariant} × ${x.ile}`);
     mapa.set(key,rec);
   }
-  return [...mapa.values()].filter(x=>x.ilosc>LIMIT_POTWIERDZENIA_DOSTEPNOSCI).map(x=>{
+  return [...mapa.values()].filter(x=>wymagaPotwierdzeniaIlosci(x.id,x.ilosc)).map(x=>{
     const p=produkty.find(p=>String(p.id)===String(x.id));
-    return {...x,nazwa:p?.nazwa||"Produkt",sku:p?.sku||""};
+    return {...x,nazwa:p?.nazwa||"Produkt",sku:p?.sku||"",stanMagazynowy:kontrolowanyStanDlaZakupu(x.id)};
   });
 }
 function potwierdzProgDostepnosci(id, nastepnaIlosc){
-  if(nastepnaIlosc<=LIMIT_POTWIERDZENIA_DOSTEPNOSCI) return true;
+  if(!wymagaPotwierdzeniaIlosci(id,nastepnaIlosc)) return true;
   const obecnie=ileWKoszyku(id);
-  if(obecnie>LIMIT_POTWIERDZENIA_DOSTEPNOSCI) return true;
-  return confirm(`Wybrano więcej niż ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} sztuk jednego produktu. Przy takiej ilości sklep potwierdzi aktualną dostępność przed realizacją. Kontynuować?`);
+  if(wymagaPotwierdzeniaIlosci(id,obecnie)) return true;
+  const stan=kontrolowanyStanDlaZakupu(id),opis=stan===null?`więcej niż ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} sztuk`:`${nastepnaIlosc} szt., przy aktualnym stanie ${stan} szt.`;
+  return confirm(`Wybrano ${opis}. Sklep potwierdzi brakującą ilość przed realizacją. Kontynuować?`);
 }
 function alertDostepnosciKoszykaHTML(){
   const lista=pozycjeDoPotwierdzeniaDostepnosci();
@@ -4921,6 +4572,7 @@ function dodajWIlosci(id,ilosc=1,btn=null,wariant=null){
   if(btn){const label=btn.dataset.originalLabel||btn.textContent;btn.dataset.originalLabel=label;btn.textContent=`✓ Dodano ${ile} szt.`;btn.classList.add("added");
     setTimeout(()=>{if(btn.isConnected){btn.textContent=label;btn.classList.remove("added");}},1100); }
   toast(`Dodano ${ile} ${ile===1?"sztukę":"szt."} do koszyka 🛒${wariant?" ("+wariant+")":""}`);
+  if(typeof seoSledzKoszyk==="function")seoSledzKoszyk(id);
   return true;
 }
 function dodaj(id,btn,wariant){return dodajWIlosci(id,1,btn,wariant);}
@@ -4941,12 +4593,31 @@ function usun(id){ koszyk = koszyk.filter(x=>x.id!==id); zapiszLS("artway_koszyk
 function sumaKoszyka(){
   return koszyk.reduce((s,x)=>{ const p=produkty.find(p=>p.id===x.id); return s+(p?p.cena*x.ile:0); },0);
 }
-function kwotaRabatu(){ return rabat ? sumaKoszyka()*rabat.procent/100 : 0; }
+function produktObjetyRegulaRabatowa(p,regula){
+  if(!p||!regula)return false;
+  if(regula.zakres==="kategorie")return (regula.kategorie||[]).includes(p.kategoria);
+  if(regula.zakres==="produkty")return (regula.produkty||[]).map(String).includes(String(p.id));
+  return true;
+}
+function wynikRegulyRabatowej(regula){
+  if(!regula)return {ok:false,powod:"Nieznany kod rabatowy",kwota:0,darmowaDostawa:false};
+  const status=regulaRabatowaStatus(regula);if(!status.aktywna)return {ok:false,powod:status.powod,kwota:0,darmowaDostawa:false};
+  const suma=sumaKoszyka(),minimum=Math.max(0,Number(regula.minKoszyk)||0);
+  if(suma<minimum)return {ok:false,powod:`Minimalna wartość koszyka dla tego kodu to ${zl(minimum)}`,kwota:0,darmowaDostawa:false};
+  const podstawa=koszyk.reduce((sum,x)=>{const p=produkty.find(p=>String(p.id)===String(x.id));return sum+(produktObjetyRegulaRabatowa(p,regula)?Number(p.cena||0)*Number(x.ile||0):0);},0);
+  if(!podstawa&&regula.typ!=="darmowa_dostawa")return {ok:false,powod:"Kod nie obejmuje produktów znajdujących się w koszyku",kwota:0,darmowaDostawa:false};
+  let kwota=regula.typ==="kwota"?Math.min(podstawa,Math.max(0,Number(regula.wartosc)||0)):regula.typ==="procent"?podstawa*Math.max(0,Math.min(100,Number(regula.wartosc)||0))/100:0;
+  const limit=Math.max(0,Number(regula.maxRabat)||0);if(limit)kwota=Math.min(kwota,limit);
+  return {ok:true,powod:"",kwota:+Math.max(0,kwota).toFixed(2),darmowaDostawa:regula.typ==="darmowa_dostawa",podstawa};
+}
+function aktywnaRegulaRabatowa(){return rabat?znajdzReguleRabatowa(rabat.kod):null;}
+function kwotaRabatu(){ const wynik=wynikRegulyRabatowej(aktywnaRegulaRabatowa());return wynik.ok?wynik.kwota:0; }
 function sumaPoRabacie(){ return Math.max(0, sumaKoszyka()-kwotaRabatu()); }
 function zastosujKod(){
   const kod = ($("promoInput")?.value||"").trim().toUpperCase();
-  if(KONFIG.kodyRabatowe[kod]){ rabat={kod, procent:KONFIG.kodyRabatowe[kod]}; zapiszLS("artway_rabat", rabat); toast(`Kod ${kod} aktywny: −${rabat.procent}% 🎉`); }
-  else { toast("Nieznany kod rabatowy 😕"); loguj("info","Próba użycia nieznanego kodu: "+kod); }
+  const regula=znajdzReguleRabatowa(kod),wynik=wynikRegulyRabatowej(regula);
+  if(wynik.ok){rabat={kod:regula.kod,typ:regula.typ,wartosc:Number(regula.wartosc)||0};zapiszLS("artway_rabat",rabat);toast(regula.typ==="darmowa_dostawa"?`Kod ${kod} aktywny: darmowa dostawa 🎉`:`Kod ${kod} aktywny: −${zl(wynik.kwota)} 🎉`);}
+  else { toast(`${wynik.powod||"Nieznany kod rabatowy"} 😕`); loguj("info","Nieudana próba użycia kodu "+kod+": "+(wynik.powod||"nieznany")); }
   odswiezKoszyk();
 }
 function usunRabat(){ rabat=null; zapiszLS("artway_rabat", null); odswiezKoszyk(); }
@@ -4956,7 +4627,9 @@ function odswiezKoszyk(){
   const suma = sumaPoRabacie();
   $("cartTotal").textContent = zl(suma);
   $("checkoutBtn").disabled = !n;
-  $("rabatBox").innerHTML = rabat ? `<div class="rabat-info"><span>🎁 Kod ${esc(rabat.kod)}: −${zl(kwotaRabatu())}</span><button onclick="usunRabat()">usuń</button></div>` : "";
+  const regulaRabatu=aktywnaRegulaRabatowa(),wynikRabatu=wynikRegulyRabatowej(regulaRabatu);
+  if(rabat&&!wynikRabatu.ok){rabat=null;zapiszLS("artway_rabat",null);}
+  $("rabatBox").innerHTML = rabat ? `<div class="rabat-info"><span>🎁 Kod ${esc(rabat.kod)}: ${wynikRabatu.darmowaDostawa?"darmowa dostawa":"−"+zl(wynikRabatu.kwota)}</span><button onclick="usunRabat()">usuń</button></div>` : "";
   $("freeShip").textContent = suma>=KONFIG.darmowaDostawaOd ? "🎉 Masz darmową dostawę!"
     : suma>0 ? `Do darmowej dostawy brakuje ${zl(KONFIG.darmowaDostawaOd-suma)}` : "";
   $("cartItems").innerHTML = n ? koszyk.map((x,i)=>{
@@ -4979,6 +4652,8 @@ function odswiezKoszyk(){
    Koszty przeliczają się na żywo przy zmianie opcji.             */
 function kosztDostawyDlaKwoty(idDostawy, kwotaProdukow=sumaPoRabacie()){
   const d = dostepneDostawy().find(x=>x.id===idDostawy) || dostepneDostawy()[0];
+  const wynik=wynikRegulyRabatowej(aktywnaRegulaRabatowa());
+  if(wynik.ok&&wynik.darmowaDostawa)return 0;
   if(d.koszt>0 && kwotaNum(kwotaProdukow)>=KONFIG.darmowaDostawaOd) return 0;
   return kwotaNum(d.koszt);
 }
@@ -5045,7 +4720,7 @@ function podsumowanieKosztowTekst(z){
 }
 function dostepnePlatnosci(){
   KONFIG.platnosci = normalizujPlatnosci(KONFIG.platnosci);
-  return KONFIG.platnosci.filter(p => !p.wylaczona);
+  return KONFIG.platnosci.filter(p => !p.wylaczona && (p.id!=="paynow"||czyPaynowDostepnyPublicznie()));
 }
 function formatujKod(el){
   const c = el.value.replace(/[^0-9]/g,"").slice(0,5);
@@ -5199,8 +4874,9 @@ function otworzModal(){
       <div class="f-group"><label>Uwagi do zamówienia</label><textarea name="notes" rows="2"></textarea></div>
       <div id="availabilityConfirmBox"></div>
       <div class="summary" id="orderSummary"></div>
-      <button type="submit" class="checkout-btn">Zamawiam →</button>
-      <p class="pay-note">Klikając, akceptujesz <a href="#/regulamin" onclick="zamknijModalCheckout({restoreFocus:false})">regulamin</a>. Dane służą wyłącznie realizacji zamówienia.</p>
+      <label class="chk-row checkout-legal-confirm"><input type="checkbox" name="regulaminAkceptacja" required> <span>Akceptuję <a href="#/regulamin" onclick="zamknijModalCheckout({restoreFocus:false})">regulamin sklepu</a> i potwierdzam obowiązek zapłaty całkowitej kwoty pokazanej powyżej.</span></label>
+      <button type="submit" class="checkout-btn">Zamówienie z obowiązkiem zapłaty</button>
+      <p class="pay-note">Dane przetwarzamy w celu realizacji zamówienia. Szczegóły znajdziesz w <a href="#/prywatnosc" onclick="zamknijModalCheckout({restoreFocus:false})">Polityce prywatności</a>.</p>
     </form>`;
   przeliczZamowienie();
   aktywujModalCheckout();
@@ -5220,11 +4896,11 @@ function przeliczZamowienie(){
   $("orderSummary").innerHTML =
     koszyk.map(x=>{const p=produkty.find(p=>String(p.id)===String(x.id));
       return p?`<div><span>${esc(p.nazwa)}${x.wariant?` (${esc(x.wariant)})`:""} × ${x.ile}</span><span>${zl(p.cena*x.ile)}</span></div>`:"";}).join("")
-    + (rabat?`<div><span>Rabat (${esc(rabat.kod)})</span><span>−${zl(kwotaRabatu())}</span></div>`:"")
+    + (rabat?`<div><span>Kod (${esc(rabat.kod)})</span><span>${wynikRegulyRabatowej(aktywnaRegulaRabatowa()).darmowaDostawa?"Darmowa dostawa":"−"+zl(kwotaRabatu())}</span></div>`:"")
     + `<div><span>Dostawa</span><span>${dostawa?zl(dostawa):"GRATIS"}</span></div>`
     + (weekend?`<div><span>Paczka w Weekend</span><span>${zl(weekend)}</span></div>`:"")
     + (oplata?`<div><span>Opłata za pobranie</span><span>${zl(oplata)}</span></div>`:"")
-    + `<div class="sum-total"><span>Do zapłaty</span><span>${zl(suma+dostawa+oplata+weekend)}</span></div>`;
+    + `<div class="sum-total"><span>Do zapłaty (PLN)</span><span>${zl(suma+dostawa+oplata+weekend)}</span></div>`;
 }
 // ─── InPost Geowidget (wybór paczkomatu na mapie) ───
 let INPOST_PUBLIC=null, geowidgetSDK=null;
@@ -5397,7 +5073,7 @@ async function zlozZamowienie(e){
 `NOWE ZAMÓWIENIE ${nr}
 ================================
 ${pozycje.map(p=>"- "+p).join("\n")}
-${rabat?`Rabat ${rabat.kod}: -${zl(kwotaRabatu())}\n`:""}Dostawa: ${dost.nazwa}${paczkomat} — ${dostawa?zl(dostawa):"gratis"}
+${rabat?`Kod ${rabat.kod}: ${wynikRegulyRabatowej(aktywnaRegulaRabatowa()).darmowaDostawa?"darmowa dostawa":"-"+zl(kwotaRabatu())}\n`:""}Dostawa: ${dost.nazwa}${paczkomat} — ${dostawa?zl(dostawa):"gratis"}
 ${paczkaWeekend?`Paczka w Weekend: ${zl(oplataWeekend)}\n`:""}
 ${oplata?`Opłata za pobranie: ${zl(oplata)}\n`:""}RAZEM: ${zl(razem)}
 ${potwierdzeniaDostepnosci.length?`UWAGA: potwierdzić dostępność większej ilości: ${potwierdzeniaDostepnosci.map(x=>`${x.nazwa} × ${x.ilosc}`).join(", ")}\n`:""}
@@ -5464,6 +5140,7 @@ Uwagi: ${f.get("notes")||"brak"}`;
       zapiszLS("artway_zamowienia_goscia",[nr,...numery.filter(x=>x!==nr)].slice(0,20));
     }
     loguj("info",`Złożono zamówienie ${nr} na ${zl(razem)} (${dost.nazwa}, ${plat.nazwa})`);
+    if(typeof seoSledzZamowienie==="function")seoSledzZamowienie(razem);
 
 	    const infoPlatnosci = instrukcjaPlatnosciHTML(idP,nr,razem,noweZamowienie);
 	    const bladPaynow = idP==="paynow" && paynowWynik && paynowWynik.ok===false && !paynowWynik.skipped
@@ -5491,6 +5168,50 @@ Uwagi: ${f.get("notes")||"brak"}`;
     toast("⚠️ Wystąpił błąd — zapisano w diagnostyce");
   }
 }
+
+/* Instalowalny panel administratora (PWA). Aplikacja używa dokładnie tego
+   samego panelu i API co strona, dlatego nie tworzy drugiej kopii danych. */
+let pwaOdroczoneZaproszenie=null;
+
+function pwaDzialaJakoAplikacja(){
+  return window.matchMedia?.("(display-mode: standalone)")?.matches||window.navigator.standalone===true;
+}
+function pwaUstawTrybWyswietlania(){const standalone=pwaDzialaJakoAplikacja();document.documentElement.classList.toggle("artway-pwa-standalone",standalone);document.body?.classList.toggle("artway-pwa-standalone",standalone);if(!standalone&&typeof pwaZamknijMenuAdmina==="function")pwaZamknijMenuAdmina();return standalone;}
+function pwaIOS(){return /iphone|ipad|ipod/i.test(navigator.userAgent||"");}
+function pwaPrzyciskInstalacjiHTML(){
+  return `<button class="btn ghost admin-pwa-install" type="button" onclick="pwaZainstalujPanelAdmina()" ${pwaDzialaJakoAplikacja()?"hidden":""}>📲 Zainstaluj</button>`;
+}
+function pwaOdswiezPrzyciski(){
+  document.querySelectorAll(".admin-pwa-install").forEach(button=>{button.hidden=pwaDzialaJakoAplikacja();button.classList.toggle("is-ready",!!pwaOdroczoneZaproszenie);});
+}
+function pwaZamknijInstrukcje(){document.getElementById("adminPwaHelp")?.remove();}
+function pwaPokazInstrukcje(){
+  pwaZamknijInstrukcje();
+  const ios=pwaIOS(),dialog=document.createElement("div");dialog.id="adminPwaHelp";dialog.className="admin-pwa-help";
+  dialog.innerHTML=`<section role="dialog" aria-modal="true" aria-labelledby="adminPwaHelpTitle"><button class="admin-pwa-help-close" type="button" onclick="pwaZamknijInstrukcje()" aria-label="Zamknij">✕</button><span class="admin-pwa-help-icon">📲</span><h2 id="adminPwaHelpTitle">Zainstaluj panel Artway-TM</h2><p>${ios?"W Safari wybierz przycisk <b>Udostępnij</b>, a następnie <b>Do ekranu początkowego</b> i potwierdź <b>Dodaj</b>.":"Otwórz menu przeglądarki i wybierz <b>Zainstaluj aplikację</b> albo <b>Dodaj do ekranu głównego</b>."}</p><small>Po instalacji panel otworzy się jak aplikacja: z własną ikoną, bez paska adresu i ze skrótami do najważniejszych modułów.</small><button class="btn" type="button" onclick="pwaZamknijInstrukcje()">Rozumiem</button></section>`;
+  dialog.addEventListener("click",event=>{if(event.target===dialog)pwaZamknijInstrukcje();});document.body.appendChild(dialog);dialog.querySelector("button")?.focus();
+}
+async function pwaZainstalujPanelAdmina(){
+  if(pwaDzialaJakoAplikacja()){toast("Panel jest już uruchomiony jako aplikacja");return;}
+  if(!pwaOdroczoneZaproszenie){pwaPokazInstrukcje();return;}
+  const prompt=pwaOdroczoneZaproszenie;pwaOdroczoneZaproszenie=null;await prompt.prompt();
+  const result=await prompt.userChoice.catch(()=>({outcome:"dismissed"}));
+  if(result.outcome==="accepted")toast("✅ Panel Artway-TM został dodany do telefonu");
+  pwaOdswiezPrzyciski();
+}
+async function pwaZarejestrujAplikacje(){
+  if(!("serviceWorker" in navigator)||!window.isSecureContext)return;
+  try{await navigator.serviceWorker.register("/sw.js",{scope:"/",updateViaCache:"none"});}
+  catch(error){console.warn("Nie udało się zarejestrować aplikacji PWA",error);}
+}
+function pwaUruchomSkrotSkanera(){
+  const params=new URLSearchParams(location.search);if(params.get("scanner")!=="1")return;
+  let attempts=0;const timer=setInterval(()=>{attempts++;if(typeof magazynGlobalnySkanerOtworz==="function"){clearInterval(timer);params.delete("scanner");const query=params.toString();history.replaceState(null,"",`${location.pathname}${query?`?${query}`:""}${location.hash}`);void magazynGlobalnySkanerOtworz();}else if(attempts>30)clearInterval(timer);},250);
+}
+window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();pwaOdroczoneZaproszenie=event;pwaOdswiezPrzyciski();});
+window.addEventListener("appinstalled",()=>{pwaOdroczoneZaproszenie=null;pwaUstawTrybWyswietlania();pwaOdswiezPrzyciski();});
+window.matchMedia?.("(display-mode: standalone)")?.addEventListener?.("change",()=>{pwaUstawTrybWyswietlania();pwaOdswiezPrzyciski();});
+window.addEventListener("DOMContentLoaded",()=>{pwaUstawTrybWyswietlania();void pwaZarejestrujAplikacje();pwaUruchomSkrotSkanera();});
 
 /* ═══════════ UI ═══════════ */
 let dialogPoprzedniFocus=null;
@@ -5524,7 +5245,7 @@ $("searchInput").oninput = e=>{
   fraza = e.target.value.toLowerCase();
   stronaProduktow = 1;
   if(trasa()!=="/" && trasa()!=="") location.hash="#/";
-  else rysuj();
+  else if(typeof sklepKatalogCentralnyZaplanuj==="function"&&chmuraKatalogCentralnyPubliczny)sklepKatalogCentralnyZaplanuj();else rysuj();
 };
 
 /* ═══════════ START ═══════════ */
@@ -5532,7 +5253,7 @@ $("searchInput").oninput = e=>{
   const porzadkowaniePamieci=zwolnijPamiecPodreczna();
   if(porzadkowaniePamieci.usunieto.length)loguj("info",`Odciążono pamięć podręczną: ${(porzadkowaniePamieci.przed/1024).toFixed(0)} KB → ${(porzadkowaniePamieci.po/1024).toFixed(0)} KB`);
   const ladowanieProduktow=pobierzBazoweProdukty();
-  await Promise.all([chmuraWczytajStan(),ladowanieProduktow]); // ustawienia i katalog pobieramy równolegle
+  await Promise.all([chmuraWczytajStan(),ladowanieProduktow,pobierzPaynowKonfiguracjePubliczna()]); // ustawienia, katalog i bezpieczny status płatności pobieramy równolegle
   zastosujUstawienia();
   await zainicjujAdmina();
   await odtworzSesjeCentralna();

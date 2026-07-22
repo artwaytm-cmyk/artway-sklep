@@ -32,6 +32,10 @@ export function createStoreRepository({ name, consistency = 'strong', driver = p
       if (version.exists !== false && !options.onlyIfMatch) return { modified: false };
       return store().setJSON(key, value, options);
     },
+    async delete(key) {
+      await store().delete(key);
+      return { deleted: true };
+    },
     async listKeys() {
       const result = await store().list();
       return (result?.blobs || []).map((entry) => ({ key: entry.key, etag: entry.etag || '' })).sort((a, b) => a.key.localeCompare(b.key));
@@ -56,5 +60,35 @@ export function createRevisionSafeWriter(repository, key = 'settings') {
       error.code = 'settings_write_conflict'; error.status = 409; throw error;
     }
     return write;
+  };
+}
+
+export function createRevisionSafeMutator(repository, key = 'settings', { maxAttempts = 5 } = {}) {
+  if (!repository || typeof repository.readVersioned !== 'function' || typeof repository.writeIfVersion !== 'function') {
+    throw new Error('Mutator rewizji wymaga wersjonowanego repozytorium.');
+  }
+  const attemptsLimit = Math.max(1, Math.min(20, Number(maxAttempts) || 5));
+  return async function mutateLatest(mutator, { updatedAt = null } = {}) {
+    if (typeof mutator !== 'function') throw new Error('Mutator ustawień musi być funkcją.');
+    for (let attempt = 0; attempt < attemptsLimit; attempt++) {
+      const version = await repository.readVersioned(key, { data: {}, rev: 0, updated_at: null });
+      const previous = version.value && typeof version.value === 'object'
+        ? version.value
+        : { data: {}, rev: 0, updated_at: null };
+      const data = previous.data && typeof previous.data === 'object' ? { ...previous.data } : {};
+      const changed = await mutator(data, previous, { attempt: attempt + 1, maxAttempts: attemptsLimit });
+      if (changed === false) return { modified: false, value: previous, attempts: attempt + 1 };
+      const currentRev = Number(previous.rev || 0);
+      const record = {
+        ...previous,
+        data,
+        rev: Number.isSafeInteger(currentRev) && currentRev >= 0 ? currentRev + 1 : 1,
+        updated_at: updatedAt || new Date().toISOString(),
+      };
+      const write = await repository.writeIfVersion(key, record, version);
+      if (write?.modified) return { ...write, value: record, attempts: attempt + 1 };
+    }
+    const error = new Error('Ustawienia zmieniły się podczas operacji. Automatyczne ponowienie zapisu nie powiodło się.');
+    error.code = 'settings_write_conflict'; error.status = 409; error.attempts = attemptsLimit; throw error;
   };
 }

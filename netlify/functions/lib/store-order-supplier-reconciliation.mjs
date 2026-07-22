@@ -43,6 +43,18 @@ function quantity(value) {
   return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : 0;
 }
 
+function supplierPlanPayloadSize(drafts = []) {
+  return JSON.stringify({ artway_agent_ai_zlecenia: array(drafts) }).length;
+}
+
+function inventoryOperationalPayloadSize(data = {}) {
+  const source = object(data);
+  return JSON.stringify({
+    artway_stany: object(source.artway_stany),
+    artway_ruchy_magazynowe: array(source.artway_ruchy_magazynowe),
+  }).length;
+}
+
 function orderItems(order = {}) {
   const grouped = new Map();
   const items = order.pozycjeDane || order.items || order.lineItems || order.produkty || [];
@@ -179,8 +191,11 @@ export function createStoreOrderSupplierReconciliation({
         };
       }
       const data = { ...settings, artway_agent_ai_zlecenia: result.drafts };
-      if (JSON.stringify(data).length > settingsLimit) {
-        const error = new Error('Szkice producentów przekraczają limit ustawień sklepu.');
+      // Limit dotyczy kanonicznego Planu, a nie całego rekordu settings.
+      // Settings zawiera również duże, niezależne nakładki katalogowe;
+      // ich rozmiar nie może blokować dopisania braku do istniejącego szkicu.
+      if (supplierPlanPayloadSize(result.drafts) > settingsLimit) {
+        const error = new Error('Szkice producentów przekraczają bezpieczny limit Planu zatowarowania.');
         error.code = 'settings_too_large';
         error.status = 413;
         throw error;
@@ -348,8 +363,8 @@ export function createStoreOrderSupplierReconciliation({
         artway_stany: stock,
         artway_ruchy_magazynowe: [...movements, ...oldMovements].slice(0, 3000),
       };
-      if (JSON.stringify(nextData).length > settingsLimit) {
-        const error = new Error('Ruch magazynowy przekracza limit ustawień sklepu.');
+      if (inventoryOperationalPayloadSize(nextData) > settingsLimit) {
+        const error = new Error('Ruch magazynowy przekracza bezpieczny limit danych operacyjnych.');
         error.code = 'settings_too_large';
         error.status = 413;
         throw error;

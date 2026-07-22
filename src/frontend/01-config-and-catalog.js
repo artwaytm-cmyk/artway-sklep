@@ -1,9 +1,25 @@
 /* ═══════════ KONFIGURACJA ═══════════ */
+function odczytajUstawieniaPubliczne(){
+  const element=document.getElementById("artway-public-settings");
+  if(!element)return {};
+  try{
+    const parsed=JSON.parse(element.textContent||"{}");
+    return parsed&&typeof parsed==="object"&&!Array.isArray(parsed)?parsed:{};
+  }catch(error){
+    console.warn("Nie udało się odczytać publicznych ustawień sklepu",error);
+    return {};
+  }
+}
+const USTAWIENIA_PUBLICZNE=odczytajUstawieniaPubliczne();
+
 const DANE_FIRMY_DOMYSLNE = {
-  nazwa: "Artway-TM",
+  nazwa: "ARTWAY-TM SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ",
   identyfikator: "5882468333",
   nip: "5882468333",
-  adres: "Gryfa Pomorskiego 1/A, 84-207 Bojano"
+  regon: "388782967",
+  adres: "Gryfa Pomorskiego 1/A",
+  kodPocztowy: "84-207",
+  miasto: "Bojano"
 };
 const NUMER_PRZELEWU_TELEFON_DOMYSLNY = "530038914";
 const DOMYSLNE_PLATNOSCI = [
@@ -98,6 +114,30 @@ const DOMYSLNE_BANNERY = [
   {id:"nowosci",ikona:"✨",tytul:"Nowości w sklepie",opis:"Poznaj ostatnio dodane produkty.",przycisk:"Zobacz nowości",link:"#/nowosci",aktywny:true},
   {id:"dostawa",ikona:"🚚",tytul:"Darmowa dostawa",opis:"Dla zamówień od 200 zł.",przycisk:"Warunki dostawy",link:"#/dostawa",aktywny:true}
 ];
+const TYPY_BANNEROW={
+  "pasek-okazji":"Pasek okazji",
+  hero:"Banner główny",
+  sekcyjny:"Banner sekcyjny",
+  kafelek:"Kafelek promocyjny",
+  komunikat:"Komunikat informacyjny"
+};
+const MIEJSCA_BANNEROW={
+  "nad-hero":"Nad bannerem głównym",
+  "pod-hero":"Pod bannerem głównym",
+  "sekcja-banery":"W sekcji bannerów",
+  "nad-produktami":"Nad ofertą produktów",
+  "pod-produktami":"Pod ofertą produktów",
+  "przed-stopka":"Przed końcową sekcją strony"
+};
+function normalizujBaner(b={}){
+  const legacyDostawa=!b.typ&&!b.szerokosc&&String(b.id||"")==="dostawa";
+  const typ=TYPY_BANNEROW[b.typ]?b.typ:(legacyDostawa||b.rozmiar==="kompaktowy"&&b.styl==="informacyjny"?"komunikat":"kafelek");
+  const umiejscowienie=MIEJSCA_BANNEROW[b.umiejscowienie]?b.umiejscowienie:"sekcja-banery";
+  const szerokosci=["pelna","dwie-trzecie","polowa","jedna-trzecia"],wysokosci=["pasek","niski","standard","wysoki"],mobile=["pelny","kompaktowy","bez-obrazu","ukryty"];
+  const szerokosc=szerokosci.includes(b.szerokosc)?b.szerokosc:(legacyDostawa||b.rozmiar==="szeroki"?"pelna":"polowa");
+  const wysokosc=wysokosci.includes(b.wysokosc)?b.wysokosc:(legacyDostawa||b.rozmiar==="kompaktowy"?"niski":b.rozmiar==="szeroki"?"wysoki":"standard");
+  return {...b,typ,umiejscowienie,szerokosc,wysokosc,mobileMode:mobile.includes(b.mobileMode)?b.mobileMode:"kompaktowy",zamykany:!!b.zamykany,przyklejony:typ==="pasek-okazji"&&!!b.przyklejony};
+}
 const DOMYSLNE_PODSTRONY = {
   kontakt:{nazwa:"Kontakt",tytul:"💬 Napisz do nas",opis:"Masz pytanie o produkt, dostawę lub zamówienie? Opisz sprawę możliwie dokładnie.",szerokosc:"standard",styl:"panel",widoczna:true},
   onas:{nazwa:"O Artway-TM",tytul:"O Artway-TM",opis:"Poznaj sklep, nasze podejście i najważniejsze zasady obsługi.",szerokosc:"standard",styl:"panel",widoczna:true},
@@ -119,8 +159,55 @@ const SEKCJE_PODSTRONY = {
   powrot:{nazwa:"Link powrotu do sklepu",ikona:"↩️"}
 };
 const DOMYSLNA_KOLEJNOSC_PODSTRONY = ["naglowek","opis","tresc","powrot"];
-function pobierzBannery(){ return Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY.map(x=>({...x})); }
+function pobierzBannery(){ return (Array.isArray(ustawienia.bannery) ? ustawienia.bannery : DOMYSLNE_BANNERY).map(normalizujBaner); }
+function ustawieniaOfertyGlownej(){
+  const source=ustawienia.ofertaGlowna&&typeof ustawienia.ofertaGlowna==="object"?ustawienia.ofertaGlowna:{};
+  return {
+    tytul:"Cała oferta",
+    opis:"Porównaj produkty, dodaj wybrane do ulubionych albo od razu przejdź do koszyka.",
+    zakres:"wszystkie",
+    kategoria:"",
+    produkty:[],
+    sortowanie:"default",
+    naStronie:24,
+    wyborDzialu:"pod-produktami",
+    filtryZaawansowane:true,
+    liczniki:true,
+    ...source,
+    produkty:Array.isArray(source.produkty)?source.produkty.map(String):[]
+  };
+}
+function regulyRabatowe(){
+  const maZapisaneReguly=Object.prototype.hasOwnProperty.call(ustawienia,"kodyRabatoweZaawansowane");
+  const advanced=Array.isArray(ustawienia.kodyRabatoweZaawansowane)?ustawienia.kodyRabatoweZaawansowane:[];
+  const result=[],seen=new Set();
+  for(const raw of advanced){
+    const kod=String(raw?.kod||"").trim().toUpperCase();if(!/^[A-Z0-9_-]{2,30}$/.test(kod)||seen.has(kod))continue;
+    seen.add(kod);result.push({typ:"procent",wartosc:0,minKoszyk:0,maxRabat:0,zakres:"wszystkie",kategorie:[],produkty:[],aktywny:true,publiczny:false,...raw,kod});
+  }
+  // Starsze kody są importowane tylko raz — zanim administrator zapisze nowy moduł.
+  // Inaczej usunięty kod wracał z KONFIG przy każdym renderowaniu podstrony.
+  for(const [kod,procent] of Object.entries(maZapisaneReguly?{}:(KONFIG.kodyRabatowe||{}))){
+    const key=String(kod).toUpperCase();if(seen.has(key))continue;
+    result.push({kod:key,typ:"procent",wartosc:Number(procent)||0,minKoszyk:0,maxRabat:0,zakres:"wszystkie",kategorie:[],produkty:[],aktywny:true,publiczny:true});
+  }
+  return result;
+}
+function regulaRabatowaStatus(regula,teraz=Date.now()){
+  if(!regula||regula.aktywny===false)return {aktywna:false,powod:"Kod jest wyłączony"};
+  const start=regula.start?Date.parse(regula.start):NaN,koniec=regula.koniec?Date.parse(regula.koniec):NaN;
+  if(Number.isFinite(start)&&teraz<start)return {aktywna:false,powod:"Kod nie jest jeszcze aktywny"};
+  if(Number.isFinite(koniec)&&teraz>koniec)return {aktywna:false,powod:"Kod stracił ważność"};
+  const limit=Math.max(0,Number(regula.limitUzyc)||0),uzycia=Math.max(0,Number(regula.uzycia)||0);
+  if(limit&&uzycia>=limit)return {aktywna:false,powod:"Limit użyć kodu został wyczerpany"};
+  return {aktywna:true,powod:""};
+}
+function znajdzReguleRabatowa(kod){
+  const key=String(kod||"").trim().toUpperCase();
+  return regulyRabatowe().find(x=>x.kod===key)||null;
+}
 function ustawieniaPodstrony(id){ return {...(DOMYSLNE_PODSTRONY[id]||{}),...((ustawienia.podstrony||{})[id]||{})}; }
+function ikonaPodstronyHTML(id){const u=ustawieniaPodstrony(id);return u.ikonaObraz?`<span class="page-ai-icon"><img src="${esc(u.ikonaObraz)}" alt="" loading="lazy"></span>`:"";}
 function klasaPodstrony(id){
   const u=ustawieniaPodstrony(id);
   return `page page-${u.szerokosc||"standard"} ${u.styl==="plain"?"page-plain":""}`;
@@ -150,6 +237,8 @@ function glownaPromocja(){
   const kodZPaska=String(zPaska?.[1]||"").toUpperCase(),rabatZPaska=Number(zPaska?.[2]||0);
   if(kodZPaska&&Number(kody[kodZPaska])===rabatZPaska)return {kod:kodZPaska,procent:rabatZPaska};
   const wybrany=String(ustawienia?.promocjaGlowna||"").toUpperCase();
+  const regula=znajdzReguleRabatowa(wybrany)||regulyRabatowe().find(x=>x.publiczny&&x.typ==="procent"&&regulaRabatowaStatus(x).aktywna);
+  if(regula&&regula.typ==="procent"&&Number(regula.wartosc)>0)return {kod:regula.kod,procent:Number(regula.wartosc)};
   if(wybrany&&Number(kody[wybrany])>0)return {kod:wybrany,procent:Number(kody[wybrany])};
   const pierwszy=Object.entries(kody).find(([kod,procent])=>/^[A-Z0-9]{2,20}$/.test(kod)&&Number(procent)>0);
   return pierwszy?{kod:pierwszy[0],procent:Number(pierwszy[1])}:null;

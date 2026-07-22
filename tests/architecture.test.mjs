@@ -1,40 +1,167 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, stat } from 'node:fs/promises';
-import { ASSET_BUNDLES, buildAssets } from '../scripts/build-assets.mjs';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { gzipSync } from 'node:zlib';
+import { ARCHITECTURE_BUDGETS as B, physicalLineCount } from '../config/architecture-budgets.mjs';
+import { ADMIN_RUNTIME_BUNDLES, ASSET_BUNDLES, buildAssets } from '../scripts/build-assets.mjs';
+
+async function assetMetrics(path) {
+  const content = await readFile(path);
+  return { raw: content.length, gzip: gzipSync(content).length };
+}
+
+async function sourceFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map((entry) => {
+    const path = `${directory}/${entry.name}`;
+    return entry.isDirectory() ? sourceFiles(path) : (/\.(?:js|mjs|css)$/.test(entry.name) ? [path] : []);
+  }));
+  return nested.flat();
+}
 
 test('wygenerowane assets odpowiadają modułom źródłowym', async () => {
   await assert.doesNotReject(() => buildAssets({ check: true }));
 });
 
-test('moduły źródłowe mają kontrolowany rozmiar i jednoznaczną kolejność', async () => {
-  const sources = ASSET_BUNDLES.flatMap((bundle) => bundle.sources);
-  assert.equal(new Set(sources).size, sources.length);
-  for (const source of sources) {
-    const content = await readFile(source, 'utf8');
-    assert.ok(content.trim().length > 0, `${source} nie może być pusty`);
-    assert.ok(Buffer.byteLength(content) <= 300_000, `${source} przekroczył budżet 300 kB; podziel domenę`);
-    const lines = content.split('\n').length;
-    assert.ok(lines <= 2600, `${source} ma ${lines} linii; podziel domenę na mniejsze moduły`);
+test('każdy źródłowy moduł widoku i stylu należy do jawnej paczki', async () => {
+  const declared = new Set(ASSET_BUNDLES.flatMap((bundle) => bundle.sources));
+  const frontendSources = [
+    ...(await sourceFiles('src/frontend')),
+    ...(await sourceFiles('src/styles')),
+  ];
+  for (const source of frontendSources) {
+    assert.ok(declared.has(source), `${source} nie należy do żadnej paczki wynikowej`);
   }
 });
 
-test('główny backend pozostaje poniżej budżetu migracyjnego', async () => {
+test('moduły źródłowe mają kontrolowany rozmiar i jednoznaczną kolejność', async () => {
+  const bundledSources = ASSET_BUNDLES.flatMap((bundle) => bundle.sources);
+  assert.equal(new Set(bundledSources).size, bundledSources.length);
+  const applicationSources = (await Promise.all([
+    sourceFiles('src/frontend'), sourceFiles('src/styles'), sourceFiles('src/backend'),
+    sourceFiles('netlify/functions/lib/core'), sourceFiles('netlify/functions/lib/domain'),
+    sourceFiles('netlify/functions/lib'),
+  ])).flat().filter((source) => source !== 'netlify/functions/lib/store-app.mjs');
+  const sources = [...new Set([...bundledSources, ...applicationSources])];
+  for (const source of sources) {
+    const content = await readFile(source, 'utf8');
+    const budget = source.endsWith('.css') ? B.source.stylesheet : B.source.javascript;
+    assert.ok(content.trim().length > 0, `${source} nie może być pusty`);
+    assert.ok(Buffer.byteLength(content) <= budget.maxBytes, `${source} przekroczył twardy budżet źródła; podziel domenę`);
+    const lines = physicalLineCount(content);
+    assert.ok(lines <= budget.maxLines, `${source} ma ${lines} fizycznych linii; podziel domenę na mniejsze moduły`);
+  }
+});
+
+test('główny backend pozostaje koordynatorem z kontrolowanym budżetem migracyjnym', async () => {
   const file = await stat('netlify/functions/lib/store-app.mjs');
-  assert.ok(file.size < 500_000, `store-app.mjs urósł do ${file.size} B; wydziel kolejną domenę`);
+  assert.ok(file.size <= B.backendCoordinator.targetBytes, `store-app.mjs wrócił ponad cel ${B.backendCoordinator.targetBytes} B; trasy muszą pozostać w modułach domenowych`);
+  assert.ok(file.size <= B.backendCoordinator.maxBytes, `store-app.mjs urósł do ${file.size} B; wydziel kolejną domenę`);
+  const storeLines = physicalLineCount(await readFile('netlify/functions/lib/store-app.mjs', 'utf8'));
+  assert.ok(storeLines <= B.backendCoordinator.targetLines, `store-app.mjs ma ${storeLines} linii i przekroczył osiągnięty cel koordynatora`);
+  assert.ok(storeLines <= B.backendCoordinator.maxLines, `store-app.mjs ma ${storeLines} fizycznych linii; wydziel kolejną domenę`);
   const catalogQuality = await stat('netlify/functions/lib/domain/catalog-quality.mjs');
   assert.ok(catalogQuality.size < 80_000, `catalog-quality.mjs urósł do ${catalogQuality.size} B; rozdziel audyt od korekt`);
+});
+
+test('raport architektury ujawnia pełną kolejkę podziału bez limitu top 5', async () => {
+  const report = await readFile('scripts/report-architecture-budgets.mjs', 'utf8');
+  assert.match(report, /const sourceWarnings = sourceRisks/);
+  assert.match(report, /for \(const source of sourceWarnings\)/);
+  assert.doesNotMatch(report, /sourceRisks[\s\S]{0,200}\.slice\(0,\s*5\)/);
+  assert.match(report, /Raport pokazuje wszystkie, bez skracania listy/);
+});
+
+test('wydzielone domeny pozostają małe i są częścią właściwego pakietu', async () => {
+  const frontendDomains = [
+    'src/frontend/10-agent-ai.js',
+    'src/frontend/10-agent-ai-supplier-planning.js',
+    'src/frontend/10-agent-ai-command-center.js',
+    'src/frontend/10-agent-ai-admin-workspace.js',
+    'src/frontend/11-allegro-and-orders.js',
+    'src/frontend/11-allegro-product-publication.js',
+    'src/frontend/11-allegro-operations.js',
+    'src/frontend/11-allegro-communications.js',
+    'src/frontend/11-allegro-workspace.js',
+    'src/frontend/11-store-orders.js',
+    'src/frontend/12-customers-and-inventory.js',
+    'src/frontend/12-infakt-admin.js',
+    'src/frontend/12-warehouse-views.js',
+    'src/frontend/12-product-editor.js',
+  ];
+  const adminBundle = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.js');
+  for (const source of frontendDomains) {
+    assert.ok(adminBundle.sources.includes(source), `${source} nie jest składany do panelu administratora`);
+    const lines = physicalLineCount(await readFile(source, 'utf8'));
+    assert.ok(lines <= B.source.focusedFrontend.maxLines, `${source} ma ${lines} linii; przekroczono twardy budżet domeny panelu`);
+  }
+  for (const source of [
+    'netlify/functions/lib/system-route.mjs',
+    'netlify/functions/lib/store-data-route.mjs',
+    'netlify/functions/lib/inpost-route.mjs',
+    'netlify/functions/lib/infakt-route.mjs',
+    'netlify/functions/lib/paynow-route.mjs',
+    'netlify/functions/lib/email-service.mjs',
+    'netlify/functions/lib/inpost-service.mjs',
+    'netlify/functions/lib/paynow-service.mjs',
+    'netlify/functions/lib/infakt-service.mjs',
+    'netlify/functions/lib/product-source-inspection-service.mjs',
+    'netlify/functions/lib/agent-operations-route.mjs',
+    'netlify/functions/lib/allegro-communications-route.mjs',
+    'netlify/functions/lib/allegro-mapping-route.mjs',
+    'netlify/functions/lib/product-availability-route.mjs',
+    'netlify/functions/lib/email-route.mjs',
+  ]) {
+    const lines = physicalLineCount(await readFile(source, 'utf8'));
+    assert.ok(lines <= B.source.integrationService.maxLines, `${source} ma ${lines} linii; przekroczono twardy budżet usługi integracyjnej`);
+  }
+});
+
+test('koordynator deleguje wydzielone domeny zamiast ponownie zawierać ich trasy', async () => {
+  const coordinator = await readFile('netlify/functions/lib/store-app.mjs', 'utf8');
+  for (const route of [
+    'agentOperationsRoute', 'allegroCommunicationsRoute', 'allegroMappingRoute',
+    'productAvailabilityRoute', 'emailRoute',
+  ]) assert.match(coordinator, new RegExp(`await ${route}\\(`), `Koordynator nie deleguje do ${route}`);
+  for (const action of [
+    'agent-run-safe-checks', 'allegro-communication-resolve', 'allegro-map-offers-batch',
+    'supplier-availability-sample', 'email-send-supplier-order',
+  ]) assert.doesNotMatch(coordinator, new RegExp(`action === ['\"]${action}['\"]`), `Akcja ${action} wróciła do koordynatora`);
 });
 
 test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', async () => {
   const publicBundle = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/app.js');
   const adminBundle = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.js');
-  const publicJs = await stat('assets/app.js');
-  const publicCss = await stat('assets/styles.css');
+  const publicJs = await assetMetrics('assets/app.js');
+  const publicCss = await assetMetrics('assets/styles.css');
   assert.ok(publicBundle && adminBundle, 'konfiguracja musi zawierać osobny pakiet sklepu i panelu');
   assert.ok(!publicBundle.sources.some((source) => adminBundle.sources.includes(source)), 'kod panelu nie może wejść do pakietu klienta');
-  assert.ok(publicJs.size < 500_000, `początkowy JavaScript urósł do ${publicJs.size} B; moduły panelu muszą pozostać ładowane na żądanie`);
-  assert.ok(publicCss.size < 70_000, `początkowy CSS urósł do ${publicCss.size} B; style panelu muszą pozostać ładowane na żądanie`);
+  assert.ok(publicJs.raw <= B.browser.storefrontScript.maxRawBytes && publicJs.gzip <= B.browser.storefrontScript.maxGzipBytes, 'początkowy JavaScript przekroczył budżet transmisji; podziel kod trasy sklepu');
+  assert.ok(publicCss.raw <= B.browser.storefrontStyles.maxRawBytes && publicCss.gzip <= B.browser.storefrontStyles.maxGzipBytes, 'początkowy CSS przekroczył budżet transmisji');
+});
+
+test('panel administratora ładuje mały rdzeń i domeny dopiero dla bieżącej trasy', async () => {
+  const aggregate = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.js');
+  const runtimeSources = ADMIN_RUNTIME_BUNDLES.flatMap((bundle) => bundle.sources);
+  const core = ADMIN_RUNTIME_BUNDLES.find((bundle) => bundle.output === 'assets/admin-core.js');
+  const router = await readFile('src/frontend/06-router-and-storefront.js', 'utf8');
+  assert.ok(aggregate && core, 'panel wymaga artefaktu kontrolnego i małego rdzenia runtime');
+  assert.equal(new Set(runtimeSources).size, runtimeSources.length, 'źródło panelu nie może wejść do dwóch paczek runtime');
+  assert.deepEqual(new Set(runtimeSources), new Set(aggregate.sources), 'paczki runtime muszą obejmować cały panel bez braków');
+  const coreMetrics = await assetMetrics(core.output), uiMetrics = await assetMetrics('assets/admin-ui.js');
+  assert.ok(coreMetrics.raw <= B.browser.adminCore.maxRawBytes && coreMetrics.gzip <= B.browser.adminCore.maxGzipBytes, 'rdzeń panelu przekroczył budżet transmisji');
+  assert.ok(uiMetrics.raw <= B.browser.adminSharedUi.maxRawBytes && uiMetrics.gzip <= B.browser.adminSharedUi.maxGzipBytes, 'wspólne UI panelu przekroczyło budżet transmisji');
+  for (const bundle of ADMIN_RUNTIME_BUNDLES.filter((entry) => ![core.output, 'assets/admin-ui.js'].includes(entry.output))) {
+    const metrics = await assetMetrics(bundle.output);
+    assert.ok(metrics.raw <= B.browser.adminRoute.maxRawBytes && metrics.gzip <= B.browser.adminRoute.maxGzipBytes, `${bundle.output} przekroczył budżet trasy i wymaga dalszego podziału`);
+  }
+  const adminStyles = await assetMetrics('assets/admin.css');
+  assert.ok(adminStyles.raw <= B.browser.adminStyles.maxRawBytes && adminStyles.gzip <= B.browser.adminStyles.maxGzipBytes, 'style panelu przekroczyły budżet transmisji');
+  assert.match(router, /function adminModulyDlaTrasy\(/);
+  assert.match(router, /ui:"admin-ui"/);
+  assert.match(router, /moduly=\["core","ui"\]/);
+  assert.match(router, /adminModulyTrasyGotowe\(t\)/);
+  assert.ok(!router.includes('script.src=`/assets/admin.js'), 'przeglądarka nie może pobierać pełnego artefaktu kontrolnego admin.js');
 });
 
 test('bezpośrednie wejście gościa na trasę panelu może wyświetlić bezpieczny brak dostępu', async () => {

@@ -1,0 +1,77 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+
+test('panel ma wspólną warstwę płynnego układu bez poziomego przewijania', async () => {
+  const [css, build] = await Promise.all([read('src/styles/30-admin-fluid-layout.css'), read('scripts/build-assets.mjs')]);
+  assert.match(build, /src\/styles\/30-admin-fluid-layout\.css/);
+  assert.match(css, /body\.admin-mode\{max-width:100%;overflow-x:clip\}/);
+  assert.match(css, /table-layout:fixed/);
+  assert.match(css, /overflow:visible!important/);
+  assert.match(css, /repeat\(auto-fit,minmax\(min\(100%,180px\),1fr\)\)/);
+  assert.doesNotMatch(css, /overflow-x:auto/);
+});
+
+test('szerokie tabele zmieniają się w opisane karty zamiast tworzyć suwak', async () => {
+  const [script, css, build] = await Promise.all([
+    read('src/frontend/08a-admin-responsive-layout.js'),
+    read('src/styles/30-admin-fluid-layout.css'),
+    read('scripts/build-assets.mjs'),
+  ]);
+  assert.match(build, /src\/frontend\/08a-admin-responsive-layout\.js/);
+  assert.match(script, /if\(cell\.dataset\.label!==label\)cell\.dataset\.label=label/);
+  assert.match(script, /admin-responsive-table','admin-standard-table/);
+  assert.match(script, /entry\.addedNodes\.length\)zaplanuj\(entry\.target\)/);
+  assert.doesNotMatch(script, /if\(media\.matches\)/);
+  assert.match(script, /MutationObserver/);
+  assert.match(script, /requestIdleCallback/);
+  assert.match(css, /content:attr\(data-label\)/);
+  assert.match(css, /max-width:1280px/);
+});
+
+test('istniejące paski wyszukiwania i filtrów dostają jeden standard bez zmiany logiki domenowej', async () => {
+  const [script, css] = await Promise.all([
+    read('src/frontend/08a-admin-responsive-layout.js'),
+    read('src/styles/31-admin-page-pattern.css'),
+  ]);
+  assert.match(script, /admin-standard-filterbar/);
+  assert.match(script, /maWyszukiwanie/);
+  assert.match(script, /pasek\.querySelectorAll\('select'\)\.length>1/);
+  assert.match(css, /\.admin-standard-filterbar\{position:relative;display:grid!important/);
+  assert.match(css, /attr\(data-filter-title\)/);
+  assert.match(css, /\.admin-search-standard \.admin-standard-filterbar/);
+});
+
+test('zakładki wykorzystują naturalną szerokość i nie przechodzą przedwcześnie do drugiego rzędu', async () => {
+  const css = await read('src/styles/30-admin-fluid-layout.css');
+  assert.match(css, /admin-main-tabs[\s\S]*flex-wrap:wrap/);
+  assert.match(css, /flex:1 0 auto;justify-content:center;min-width:max-content/);
+  assert.match(css, /warehouse-stock-toolbar[\s\S]*grid-template-columns:repeat\(auto-fit/);
+  assert.match(css, /agent-module-groups[\s\S]*flex-wrap:wrap/);
+  assert.match(css, /max-height:none;overflow:visible/);
+});
+
+test('przyciski pozostają jednoliniowe, a układ przenosi całe kontrolki do kolejnego rzędu', async () => {
+  const [css, script] = await Promise.all([
+    read('src/styles/30-admin-fluid-layout.css'),
+    read('src/frontend/08a-admin-responsive-layout.js'),
+  ]);
+  assert.match(css, /white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis/);
+  assert.match(css, /\.btn\{min-height:40px\}/);
+  assert.match(css, /select\{overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/);
+  assert.match(css, /\[class\*="-actions"\][\s\S]*max-width:100%;min-width:0/);
+  assert.match(css, /flex:1 1 100%;width:100%;max-width:100%/);
+  assert.match(css, /@media\(max-width:560px\)/);
+  assert.doesNotMatch(script, /control\.scrollWidth|control\.clientWidth/);
+  assert.doesNotMatch(script, /opiszKontrolki|setAttribute\('title',label\)/);
+});
+
+test('nazwy produktów w responsywnym katalogu pozostają we własnej kolumnie', async () => {
+  const css = await read('src/styles/29-commerce-catalog-actions.css');
+  assert.match(css, /catalog-product-card[\s\S]*grid-template-columns:minmax\(300px,1\.35fr\)/);
+  assert.match(css, /catalog-product-identity h3\{overflow-wrap:break-word;word-break:normal\}/);
+  assert.match(css, /@container\(max-width:820px\)/);
+  assert.match(css, /catalog-product-buttons>\.btn\{width:auto;white-space:nowrap\}/);
+});

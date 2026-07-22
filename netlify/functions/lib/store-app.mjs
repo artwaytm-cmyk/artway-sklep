@@ -1,18 +1,16 @@
-// Artway-TM — wspólna baza sklepu na Netlify Blobs
-// Funkcja serwerowa: ustawienia, zamówienia, klienci — widoczne na każdym urządzeniu.
-// Endpoint: /.netlify/functions/store  (alias /api/store)
 import crypto from 'node:crypto';
-import nodemailer from 'nodemailer';
-import { createRevisionSafeWriter, createStoreRepository } from './core/store-repository.mjs';
+import { createRevisionSafeMutator, createRevisionSafeWriter, createStoreRepository } from './core/store-repository.mjs';
+import { postgresPoolFor } from './core/postgres-store-repository.mjs';
 import {
   bezpiecznePorownanie,
   czyAdmin as czyAdminToken,
   odpowiedz,
   odpowiedzHtml,
   tekst,
-  tokenZadania,
 } from './core/http.mjs';
 import {
+  accountSessionHeaders,
+  clearAccountSessionHeaders,
   createAccountSession,
   createOrderAccess,
   hashPassword,
@@ -24,6 +22,16 @@ import {
   verifyPassword,
 } from './core/security.mjs';
 import {
+  createAdminMfaChallenge,
+  createMfaEnrollment,
+  decryptMfaSecret,
+  generateRecoveryCodes,
+  mfaProvisioningUri,
+  recoveryCodeHash,
+  verifyAdminMfaChallenge,
+  verifyMfaCode,
+} from './core/mfa.mjs';
+import {
   filtrujNieusunieteZamowienia,
   mapaUsunietych,
   normalizujKlienta,
@@ -32,6 +40,16 @@ import {
   numerZamowienia,
 } from './domain/orders.mjs';
 import { bezpieczneZamowienieKlienta } from './domain/checkout.mjs';
+import { createEmailService } from './email-service.mjs';
+import { createInpostService } from './inpost-service.mjs';
+import { createInpostRoute } from './inpost-route.mjs';
+import { createStoreDataRoute } from './store-data-route.mjs';
+import { createPaynowService } from './paynow-service.mjs';
+import { createPaynowRoute } from './paynow-route.mjs';
+import { createInfaktService } from './infakt-service.mjs';
+import { createInfaktRoute } from './infakt-route.mjs';
+import { createSystemRoute } from './system-route.mjs';
+import { createProductSourceInspectionService } from './product-source-inspection-service.mjs';
 import {
   applySafeCatalogFixes,
   auditCatalog,
@@ -41,6 +59,23 @@ import { eligiblePromotionProducts, runIndexNowPromotion } from './domain/indexn
 import { createInventoryNaturalCommandHandler } from './domain/inventory-command.mjs';
 import { createInventoryDecisionService } from './domain/inventory-decisions.mjs';
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
+import { createAgentRuntime } from './domain/agent-runtime.mjs';
+import { createAgentSpecialists } from './domain/agent-specialists.mjs';
+import { prepareLinkedProductEditorial } from './domain/product-editorial-pipeline.mjs';
+import { createProductLinkPackagePreparer } from './domain/product-link-package-preparer.mjs';
+import { createAllegroCredentialManager } from './domain/allegro-credential-manager.mjs';
+import { allegroCredentialLooksMasked, buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester } from './domain/allegro-operation-receipts.mjs';
+import { createAllegroCredentialsRoute } from './allegro-credentials-route.mjs';
+import { createAllegroCommunicationsRoute } from './allegro-communications-route.mjs';
+import { createAllegroMappingRoute } from './allegro-mapping-route.mjs';
+import { createProductAvailabilityRoute } from './product-availability-route.mjs';
+import { createEmailRoute } from './email-route.mjs';
+import { createAgentSpecialistRoute } from './agent-specialist-route.mjs';
+import { createAgentOperationsRoute } from './agent-operations-route.mjs';
+import { createAiBannerGenerator } from './domain/ai-banner-generator.mjs';
+import { createAiBannerRoute } from './ai-banner-route.mjs';
+import { normalizeTelegramAccountFields } from './domain/telegram-account-access.mjs';
+import { allegroOfferTitle } from './domain/allegro-offer-content.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
 import { applySupplierProcurementWorkflow } from './domain/supplier-procurement-workflow.mjs';
 import { classifyWarehousePosition, summarizeWarehousePositions, warehouseAnalysisNeedsInvestigation } from './domain/order-warehouse-readiness.mjs';
@@ -49,7 +84,6 @@ import { createSupplierOrderRoute } from './supplier-order-route.mjs';
 import {
   allegroMessagePlainText,
   buildAllegroReplyStyleProfile,
-  buildContextualAllegroReply,
   classifyAllegroMessageAuthor,
   fetchAllegroReplyHistory,
   improvePolishReplyStyle,
@@ -58,22 +92,31 @@ import {
 import { createStoreOrderSupplierReconciliation } from './store-order-supplier-reconciliation.mjs';
 import { markAllegroInventoryTransition, markAllegroInventoryTransitions, resolveAllegroBaselineCutover } from './domain/allegro-supplier-demand.mjs';
 import { allegroOrderNeedsLiveRefresh, createAllegroOrderArchive, selectAllegroStatusRefreshCandidates } from './domain/allegro-order-retention.mjs';
-import { mergeRecentAllegroOrders } from './domain/allegro-order-sync-window.mjs';
+import { countChangedAllegroOrderEvents, mergeRecentAllegroOrders } from './domain/allegro-order-sync-window.mjs';
 import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
-import { applyProductSaleDecisionBatch } from './domain/product-sale-decisions.mjs';
+import { createProductSaleChannelSynchronizer } from './domain/product-sale-channel-links.mjs';
 import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
-import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
+import { canonicalManufacturerName, sanitizeManufacturerFieldsInSettings } from './domain/product-field-validation.mjs';
+import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, reassessBlockedAllegroMapping, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
+import { allegroMappingIsCanonical, allegroProductSyncFingerprint, canonicalizeAllegroMappings, linkCanonicalAllegroMapping, markAllegroMappingSynced } from './domain/allegro-canonical-mappings.mjs';
+import { allegroMappingRecordsEqual, createAllegroMappingStore } from './domain/allegro-mapping-store.mjs';
+import { allegroOfferVerification, allegroPatchZDraftu } from './domain/allegro-offer-patch.mjs';
+import { allegroResponsibleProducerDirectory, allegroSyncEditorialOffer } from './domain/allegro-gpsr.mjs';
 import { allegroNextScheduledSyncAt, allegroScheduledSyncDue, normalizeAllegroSyncSettings } from './domain/allegro-sync-policy.mjs';
 import { createCatalogProductUpdater as allegroAktualizatorProduktowCentralnych } from './domain/catalog-product-updater.mjs';
+import { createCatalogProductOperationWriter } from './domain/catalog-product-operation-rebase.mjs';
+import { createCentralProductCatalog } from './domain/central-product-catalog.mjs';
+import { createCentralProductCatalogRoute } from './central-product-catalog-route.mjs';
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
 import { createInventoryStockRoute } from './inventory-route.mjs';
 import { createProductLinkImportBundle } from './product-link-import-route.mjs';
+import { refreshCentralProductSource } from './domain/imported-product-catalog.mjs';
 import { createAllegroOfferWithdrawalRoute } from './allegro-offer-withdrawal-route.mjs';
+import { allegroAutomaticCategoryParameters } from './domain/allegro-category-parameter-resolver.mjs';
 import {
   telegramConfig as telegramKonfiguracja,
-  telegramHtml,
-  telegramSupplierTables as telegramTabeleZlecenia,
+  telegramCanonicalSupplierPreviews,
 } from './domain/telegram-communication.mjs';
 import { createTelegramCenter } from './telegram-center.mjs';
 import { createTelegramRouter } from './telegram-router.mjs';
@@ -88,25 +131,22 @@ import {
 import {
   ustawieniaPubliczneBezDanychPrywatnych,
   infaktDostawcyDozwoleni,
-  infaktCenaZakupuFields,
-  infaktDopasujPozycje,
-  infaktIndeksProduktow,
-  infaktKsefPozycje,
-  infaktKsefNumerZTekstu,
-  infaktNazwaDostawcy,
-  infaktNormalizujDokumentKosztowy,
-  infaktParametryListyKsef,
-  infaktMigawkaCenyZakupu,
-  infaktPrzygotujCofniecieDopasowania,
-  infaktSugestieNazwy,
-  infaktXmlZOdpowiedzi,
-  infaktZnajdzDostawce,
   produktBezDanychPrywatnych,
 } from './infakt-purchase.mjs';
 
 const STORE_NAME = 'artway-sklep';
 const repository = createStoreRepository({ name: STORE_NAME });
+const centralProductCatalog = createCentralProductCatalog({
+  pool: String(process.env.ARTWAY_STORE_DRIVER || '').trim().toLowerCase() === 'postgres' && process.env.DATABASE_URL ? postgresPoolFor(process.env.DATABASE_URL) : null,
+  namespace: STORE_NAME,
+});
 const czytaj = repository.read;
+const czytajUstawieniaBazowe = typeof repository.readSettingsBase === 'function'
+  ? repository.readSettingsBase
+  : (fallback) => czytaj('settings', fallback);
+const czytajUstawieniaPrzyrostowo = typeof repository.readSettingsDelta === 'function'
+  ? repository.readSettingsDelta
+  : null;
 const czytajWersjonowane = repository.readVersioned;
 const zapiszJesliWersja = repository.writeIfVersion;
 const zapiszUstawieniaBezpiecznie = createRevisionSafeWriter(repository, 'settings');
@@ -114,18 +154,204 @@ async function zapisz(key, value) {
   if (key !== 'settings') return repository.write(key, value);
   return zapiszUstawieniaBezpiecznie(value);
 }
+const {
+  pobierzProduktProducenta,
+  pobierzProduktProducentaZPamiecia,
+  produktLinkDuplikaty,
+  produktLinkKategoriaSklepu,
+  inspectProductUrl,
+  inspectProductUrlViaReader,
+} = createProductSourceInspectionService({
+  read: czytaj,
+  write: zapisz,
+  normalizeKey: (value) => allegroNormalizujKlucz(value),
+  nameSimilarity: (left, right) => allegroPodobienstwoIstotne(left, right),
+});
+export { inspectProductUrl, inspectProductUrlViaReader };
+const {
+  publicznyOrigin,
+  paynowKonfiguracja,
+  paynowDiagnostyka,
+  podpisPaynowPowiadomienia,
+  porownajPodpis,
+  kluczIdempotencji,
+  grosze,
+  statusPlatnosciPaynow,
+  paynowWywolaj,
+  payloadPlatnosciPaynow,
+  aktualizujZamowieniePaynow,
+} = createPaynowService({ read: czytaj, write: zapisz });
+const {
+  infaktPublicConfig,
+  infaktDostawcyUstawienia,
+  infaktKosztDoZwrotu,
+  infaktPobierzKosztyDozwolone,
+  infaktSynchronizujCenyZakupu,
+  infaktPrzypiszCeneZakupu,
+  infaktCofnijDopasowanieCeny,
+  infaktErrorText,
+  infaktWywolaj,
+  infaktPayloadZamowienia,
+  infaktRef,
+  infaktInvoiceFromTask,
+} = createInfaktService({ read: czytaj, write: zapisz });
+const {
+  emailKonfiguracja,
+  emailPublicConfig,
+  sprawdzEmailSMTP,
+  wyslijEmailSMTP,
+  zlSerwer,
+  htmlEscape,
+  wiadomoscKlientaZamowienie,
+  dopiszHistorieEmaila,
+  wyslijEmaileNowegoZamowienia,
+  wyslijEmailStatusowy,
+  polaczPowiadomienia,
+  obsluzEmailePrzejsciaStatusu,
+} = createEmailService({ read: czytaj, write: zapisz });
+const {
+  inpostKonfiguracja,
+  inpostPublicConfig,
+  inpostWywolaj,
+  inpostSzukajPunktow,
+  czyDostawaPaczkomatInPost,
+  walidujPrzesylkeInPost,
+  inpostDostepnoscUslug,
+  inpostOrganizacja,
+  przesylkaShipXPayload,
+  numerZShipX,
+  inpostStatusZShipX,
+  inpostEtykietaGotowa,
+  inpostOfertaId,
+  inpostCzekajNaEtykiete,
+  inpostWebhookSecret,
+  inpostWebhookAutoryzowany,
+  inpostZdarzeniaZWebhooka,
+  inpostDaneZWebhooka,
+  zapiszLogInpostWebhook,
+  zastosujWebhookInpost,
+  zapiszPrzesylkeNaZamowieniu,
+} = createInpostService({ read: czytaj, write: zapisz, onOrderStatusTransition: obsluzEmailePrzejsciaStatusu });
+const inpostRoute = createInpostRoute({
+  respond: odpowiedz,
+  isAdmin: czyAdmin,
+  text: tekst,
+  read: czytaj,
+  write: zapisz,
+  orderNumber: numerZamowienia,
+  onOrderStatusTransition: obsluzEmailePrzejsciaStatusu,
+  publicConfig: inpostPublicConfig,
+  configure: inpostKonfiguracja,
+  call: inpostWywolaj,
+  searchPoints: inpostSzukajPunktow,
+  isLockerDelivery: czyDostawaPaczkomatInPost,
+  validateShipment: walidujPrzesylkeInPost,
+  serviceAvailability: inpostDostepnoscUslug,
+  organization: inpostOrganizacja,
+  shipmentPayload: przesylkaShipXPayload,
+  trackingNumber: numerZShipX,
+  shipmentStatus: inpostStatusZShipX,
+  labelReady: inpostEtykietaGotowa,
+  offerId: inpostOfertaId,
+  waitForLabel: inpostCzekajNaEtykiete,
+  webhookSecret: inpostWebhookSecret,
+  webhookAuthorized: inpostWebhookAutoryzowany,
+  webhookEvents: inpostZdarzeniaZWebhooka,
+  webhookData: inpostDaneZWebhooka,
+  writeWebhookLog: zapiszLogInpostWebhook,
+  applyWebhook: zastosujWebhookInpost,
+  saveShipmentOnOrder: zapiszPrzesylkeNaZamowieniu,
+});
+const zapiszOperacjeProduktow = createCatalogProductOperationWriter({ mutateLatest: createRevisionSafeMutator(repository, 'settings'), loadProducts: allegroAgentProduktyKompletne, createUpdater: allegroAktualizatorProduktowCentralnych });
+const zapiszMapowaniaBezpiecznie = createAllegroMappingStore({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getItems: allegroMapowaniaItems }).writeSafely;
+async function zwiekszLicznikKoduRabatowego(kod = '') {
+  const code = tekst(kod, 30).trim().toUpperCase(); if (!code) return false;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const version = await czytajWersjonowane('settings', { data: {}, rev: 0, updated_at: null });
+    const previous = version.value || { data: {}, rev: 0, updated_at: null }, data = { ...(previous.data || {}) };
+    const config = { ...(data.artway_ustawienia || {}) }, rules = Array.isArray(config.kodyRabatoweZaawansowane) ? config.kodyRabatoweZaawansowane.map((rule) => ({ ...rule })) : [];
+    const index = rules.findIndex((rule) => tekst(rule?.kod, 30).trim().toUpperCase() === code); if (index < 0) return false;
+    rules[index].uzycia = Math.max(0, Number(rules[index].uzycia) || 0) + 1;
+    config.kodyRabatoweZaawansowane = rules; data.artway_ustawienia = config;
+    const record = { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: new Date().toISOString() };
+    const write = await zapiszJesliWersja('settings', record, version); if (write?.modified) return true;
+  }
+  return false;
+}
 const inventoryDecisions = createInventoryDecisionService({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
 const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, decisions: inventoryDecisions });
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const agentSpecialists = createAgentSpecialists({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const linkedProductEditorial = (product, sourceUrl, actor) => prepareLinkedProductEditorial(product, { sourceUrl, runSpecialist: agentSpecialists.run, actor });
+const productLinkPackagePreparer = createProductLinkPackagePreparer({ inspect: pobierzProduktProducentaZPamiecia, readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), offerSettings: allegroPobierzUstawieniaOfert, centralProducts: allegroAgentProduktyCentralne, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, editorialize: linkedProductEditorial, prepareOffer: allegroDraftZAutoKategoria, duplicates: produktLinkDuplikaty, shortDescription: allegroOpisKrotkiZTekstu, text: tekst, sessionOf: requestSession });
+const allegroOperationReceipts = createAllegroOperationReceipts({ read: czytaj, write: zapisz, text: tekst });
+const allegroTokenRequest = createAllegroTokenRequester({ configure: allegroKonfiguracja, errorText: bledyAllegroTekst });
+const allegroAccessToken = createAllegroTokenAccess({ configure: allegroKonfiguracja, read: czytaj, write: zapisz, requestToken: allegroTokenRequest, text: tekst });
+const allegroCredentials = createAllegroCredentialManager();
+const allegroCredentialsRoute = createAllegroCredentialsRoute({ manager: allegroCredentials, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, refresh: allegroAccessToken, status: allegroStatus });
+const agentSpecialistRoute = createAgentSpecialistRoute({ service: agentSpecialists, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession });
+const aiBannerGenerator = createAiBannerGenerator({ read: czytaj, write: zapisz, remove: repository.delete });
+const aiBannerRoute = createAiBannerRoute({ generator: aiBannerGenerator, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, configured: () => !!process.env.OPENAI_API_KEY, model: () => process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2' });
 const allegroOrderArchive = createAllegroOrderArchive({ read: czytaj, write: zapisz });
 const allegroDataReader = createAllegroDataReader({ read: czytaj, archive: allegroOrderArchive, getOfferSettings: allegroPobierzUstawieniaOfert, getStatus: allegroStatus, mappingItems: allegroMapowaniaItems, orderStatus: (order) => allegroStatusKolejkiZamowienia(order, {}), orderNeedsRefresh: allegroOrderNeedsLiveRefresh, nextScheduledSyncAt: allegroNextScheduledSyncAt, compliancePolicy: ALLEGRO_COMPLIANCE_POLICY });
-const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
-const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
-const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierTables: telegramTabeleZlecenia, text: tekst });
+async function productLinkRefreshCentralProduct(productId, incoming = {}) {
+  return refreshCentralProductSource({ productId, incoming, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getProducts: allegroAgentProduktyCentralne, createUpdater: allegroAktualizatorProduktowCentralnych });
+}
+const productLinkImport = createProductLinkImportBundle({ read: czytaj, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, updateExistingProduct: productLinkRefreshCentralProduct, sanitize: produktBezDanychPrywatnych, preparation: { readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), centralProducts: allegroAgentProduktyCentralne, inspect: pobierzProduktProducentaZPamiecia, offerSettings: allegroPobierzUstawieniaOfert, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, shortDescription: allegroOpisKrotkiZTekstu, editorialize: linkedProductEditorial, text: tekst }, route: { isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, sessionOf: requestSession, text: tekst, adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '' } });
+let centralProductCatalogSyncPromise = null;
+const CENTRAL_PRODUCT_SOURCE_KEYS = [
+  'artway_produkty_dodane', 'artway_produkty_edytowane', 'artway_produkty_katalog',
+  'artway_produkty_ukryte', 'artway_produkty_definitywne', 'artway_stany',
+  'artway_dostepnosc', 'artway_magazyn_produkty', 'artway_kosz_dodane', 'artway_kosz_meta',
+  'artway_opinie',
+];
+function centralProductSettingsFingerprint(data = {}) {
+  const source = Object.fromEntries(CENTRAL_PRODUCT_SOURCE_KEYS.map((key) => [key, data?.[key] ?? null]));
+  return crypto.createHash('sha256').update(JSON.stringify(source)).digest('hex').slice(0, 24);
+}
+async function centralProductCatalogRevisionState() {
+  const imported = await productLinkImport.catalog.metadata();
+  if (typeof repository.revisionToken === 'function') {
+    const token = await repository.revisionToken({ settingsKeys: CENTRAL_PRODUCT_SOURCE_KEYS, keys: ['allegro_offers', 'allegro_mappings'] });
+    const sourceRevision = crypto.createHash('sha256').update(`${token}|import=${imported.revision || ''}`).digest('hex').slice(0, 32);
+    return { imported, sourceRevision };
+  }
+  const [settings, offers, mappings] = await Promise.all([
+    czytaj('settings', { data: {}, rev: 0, updated_at: null }),
+    czytaj('allegro_offers', { items: [], updated_at: null }), czytaj('allegro_mappings', { items: {}, updated_at: null }),
+  ]);
+  const sourceRevision = [centralProductSettingsFingerprint(settings.data || {}), imported.revision || '', offers.updated_at || '', mappings.updated_at || ''].join(':');
+  return { imported, sourceRevision };
+}
+async function centralProductCatalogRevisionSnapshot(revision = null) {
+  const state = revision || await centralProductCatalogRevisionState();
+  const [settings, offers, mappings] = await Promise.all([
+    czytaj('settings', { data: {}, rev: 0, updated_at: null }),
+    czytaj('allegro_offers', { items: [], updated_at: null }), czytaj('allegro_mappings', { items: {}, updated_at: null }),
+  ]);
+  // Rewizja kartoteki zależy wyłącznie od danych produktowych. Zmiana bannera,
+  // regulaminu lub innego ustawienia nie może przebudowywać dziesiątek tysięcy produktów.
+  return { settings, imported: state.imported, offers, mappings, sourceRevision: state.sourceRevision };
+}
+async function synchronizeCentralProductCatalog({ force = false, revision = null } = {}) {
+  if (!centralProductCatalog.available) return { available: false, synchronized: false, count: 0 };
+  if (centralProductCatalogSyncPromise) return centralProductCatalogSyncPromise;
+  centralProductCatalogSyncPromise = (async () => {
+    const state = revision || await centralProductCatalogRevisionState(), meta = await centralProductCatalog.metadata();
+    if (!force && meta.count > 0 && !meta.outdated && meta.sourceRevision === state.sourceRevision) return { ...meta, synchronized: false, current: true };
+    const snapshot = await centralProductCatalogRevisionSnapshot(state);
+    const importedProducts = await productLinkImport.catalog.list();
+    return centralProductCatalog.synchronize(snapshot.settings.data || {}, { importedProducts, offers: allegroOfertyItems(snapshot.offers), mappings: allegroMapowaniaItems(snapshot.mappings), sourceRevision: snapshot.sourceRevision });
+  })();
+  try { return await centralProductCatalogSyncPromise; } finally { centralProductCatalogSyncPromise = null; }
+}
+const centralProductCatalogRoute = createCentralProductCatalogRoute({ catalog: centralProductCatalog, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, revisionState: centralProductCatalogRevisionState, synchronize: synchronizeCentralProductCatalog });
+const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ autoMapOffers: allegroAutoMapujOfertyZKartoteka, callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
+const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, agentRuntime, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierPreviews: telegramCanonicalSupplierPreviews, text: tekst });
+const agentOperationsRoute = createAgentOperationsRoute({ respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz, getOperationalCenter: agentCentrumOperacyjne, publicOrigin: publicznyOrigin });
 
-// Klucze wspólne (konfiguracja + katalog + ceny + stany + opinie + kosz) — zapisywane przez administratora,
-// czytane przez wszystkich (żeby sklep wyglądał tak samo na każdym urządzeniu).
 const KLUCZE_WSPOLNE = [
   'artway_ustawienia',
   'artway_produkty_dodane',
@@ -158,7 +384,6 @@ const LIMIT_ZAMOWIEN = 20000;
 const LIMIT_KLIENTOW = 20000;
 const LIMIT_USUNIETYCH_ZAMOWIEN = 50000;
 const BACKUP_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_./-]{0,199}$/;
-const PAYNOW_ENVY = new Set(['production', 'sandbox']);
 const PAYNOW_STATUSY_KONCOWE = new Set(['CONFIRMED', 'ERROR', 'EXPIRED', 'REJECTED', 'ABANDONED']);
 const storeOrderSupplierReconciliation = createStoreOrderSupplierReconciliation({
   readVersioned: czytajWersjonowane,
@@ -243,8 +468,6 @@ function bezpiecznaOpinia(raw = {}) {
   };
 }
 
-// Zachowujemy stabilny punkt integracyjny używany przez audyt i starsze
-// wywołania, a właściwy szablon oraz plik Optima są w osobnym module domenowym.
 function producentEmailZlecenia(order = {}, supplier = {}) {
   return renderSupplierOrderEmail(order, supplier);
 }
@@ -363,7 +586,7 @@ function oczyscUstawienia(obj) {
   for (const k of KLUCZE_WSPOLNE) {
     if (k in obj && obj[k] !== undefined) wynik[k] = obj[k];
   }
-  return wynik;
+  return sanitizeManufacturerFieldsInSettings(wynik);
 }
 
 async function czytajUsunieteZamowienia() {
@@ -381,1011 +604,6 @@ async function dopiszUsunieteZamowienie(raw) {
     .slice(0, LIMIT_USUNIETYCH_ZAMOWIEN);
   await zapisz('deleted_orders', { items, updated_at: new Date().toISOString() });
   return rec;
-}
-
-function sortujObiekt(obj = {}) {
-  return Object.keys(obj || {})
-    .sort()
-    .reduce((wynik, k) => {
-      if (obj[k] !== undefined && obj[k] !== null) wynik[k] = obj[k];
-      return wynik;
-    }, {});
-}
-function paynowEnv() {
-  const env = String(process.env.PAYNOW_ENV || 'production').trim().toLowerCase();
-  return PAYNOW_ENVY.has(env) ? env : 'production';
-}
-function paynowBaseUrl() {
-  return paynowEnv() === 'sandbox' ? 'https://api.sandbox.paynow.pl' : 'https://api.paynow.pl';
-}
-function publicznyOrigin(req) {
-  const u = new URL(req.url);
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || u.host;
-  const proto = req.headers.get('x-forwarded-proto') || u.protocol.replace(':', '') || 'https';
-  return `${proto}://${host}`;
-}
-function paynowUrlPowrotu(req) {
-  return tekst(process.env.PAYNOW_CONTINUE_URL, 1000).trim() || `${publicznyOrigin(req)}/#/zamowienia`;
-}
-function paynowUrlPowrotuZamowienia(req, nr) {
-  const skonfigurowany = tekst(process.env.PAYNOW_CONTINUE_URL, 1000).trim();
-  if (skonfigurowany) return skonfigurowany.replaceAll('{nr}', encodeURIComponent(nr || ''));
-  return `${publicznyOrigin(req)}/#/dziekujemy/${encodeURIComponent(nr || '')}`;
-}
-function paynowUrlPowiadomien(req) {
-  return tekst(process.env.PAYNOW_NOTIFICATION_URL, 1000).trim() || `${publicznyOrigin(req)}/api/store?action=paynow-notification`;
-}
-function paynowKonfiguracja(req) {
-  const apiKey = tekst(process.env.PAYNOW_API_KEY, 200).trim();
-  const signatureKey = tekst(process.env.PAYNOW_SIGNATURE_KEY, 300).trim();
-  return {
-    apiKey,
-    signatureKey,
-    configured: !!(apiKey && signatureKey),
-    env: paynowEnv(),
-    apiBaseUrl: paynowBaseUrl(),
-    continueUrl: paynowUrlPowrotu(req),
-    notificationUrl: paynowUrlPowiadomien(req),
-  };
-}
-function podpisPaynowV3({ apiKey, signatureKey, idempotencyKey = '', body = '', parameters = {} }) {
-  const headers = { 'Api-Key': apiKey };
-  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
-  const payload = JSON.stringify({
-    headers: sortujObiekt(headers),
-    parameters: sortujObiekt(parameters),
-    body: body || '',
-  });
-  return crypto.createHmac('sha256', signatureKey).update(payload).digest('base64');
-}
-function podpisPaynowPowiadomienia(rawBody, signatureKey) {
-  return crypto.createHmac('sha256', signatureKey).update(rawBody || '').digest('base64');
-}
-function porownajPodpis(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string') return false;
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ba.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ba, bb);
-}
-function kluczIdempotencji(prefix, value) {
-  const safe = String(value || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 35);
-  return `${prefix}_${safe}`.slice(0, 45);
-}
-function grosze(kwota) {
-  return Math.round((Number(kwota) || 0) * 100);
-}
-function statusPlatnosciPaynow(status) {
-  switch (String(status || '').toUpperCase()) {
-    case 'CONFIRMED': return 'opłacone';
-    case 'PENDING':
-    case 'NEW': return 'oczekuje';
-    case 'EXPIRED': return 'wygasła';
-    case 'REJECTED':
-    case 'ABANDONED':
-    case 'ERROR': return 'nieopłacone';
-    default: return 'nieznany';
-  }
-}
-function bledyPaynowTekst(dane, fallback) {
-  const err = Array.isArray(dane?.errors) ? dane.errors : [];
-  const msg = err.map((e) => [e.errorType, e.message, e.value].filter(Boolean).join(': ')).filter(Boolean).join('; ');
-  return msg || fallback || 'Błąd Paynow';
-}
-async function paynowWywolaj(req, path, { method = 'GET', bodyObj = null, parameters = {}, idempotencyKey = '' } = {}) {
-  const cfg = paynowKonfiguracja(req);
-  if (!cfg.configured) {
-    const blad = new Error('Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w Netlify.');
-    blad.code = 'paynow_not_configured';
-    throw blad;
-  }
-  const body = bodyObj === null ? '' : JSON.stringify(bodyObj);
-  const signature = podpisPaynowV3({
-    apiKey: cfg.apiKey,
-    signatureKey: cfg.signatureKey,
-    idempotencyKey,
-    body,
-    parameters,
-  });
-  const headers = {
-    'Api-Key': cfg.apiKey,
-    'Signature': signature,
-    'Accept': 'application/json',
-    'User-Agent': 'Artway-TM/1.0 Netlify Function',
-  };
-  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
-  if (body) headers['Content-Type'] = 'application/json';
-  const url = new URL(path, cfg.apiBaseUrl);
-  for (const [k, v] of Object.entries(parameters || {})) {
-    if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
-  }
-  const r = await fetch(url.toString(), { method, headers, body: body || undefined });
-  const textBody = await r.text();
-  let dane = null;
-  if (textBody) {
-    try { dane = JSON.parse(textBody); } catch (e) { dane = { raw: textBody }; }
-  }
-  if (!r.ok) {
-    const blad = new Error(bledyPaynowTekst(dane, `Paynow HTTP ${r.status}`));
-    blad.status = r.status;
-    blad.paynow = dane;
-    throw blad;
-  }
-  return dane || {};
-}
-function daneKupujacegoPaynow(z) {
-  const k = z?.klient || {};
-  const email = tekst(z?.email || k.email, 50).trim().toLowerCase();
-  const buyer = { email };
-  if (k.imie) buyer.firstName = tekst(k.imie, 50).trim();
-  if (k.nazwisko) buyer.lastName = tekst(k.nazwisko, 50).trim();
-  const cyfryTel = String(k.telefon || z?.telefon || '').replace(/[^0-9]/g, '');
-  if (cyfryTel.length === 9) buyer.phone = { prefix: '+48', number: Number(cyfryTel) };
-  if (cyfryTel.length === 11 && cyfryTel.startsWith('48')) buyer.phone = { prefix: '+48', number: Number(cyfryTel.slice(2)) };
-  return buyer;
-}
-function payloadPlatnosciPaynow(z, req) {
-  const nr = numerZamowienia(z?.nr);
-  const amount = grosze(z?.razem);
-  if (!nr) throw new Error('Brak numeru zamówienia');
-  if (amount < 100) throw new Error('Paynow wymaga kwoty minimum 1,00 PLN');
-  const buyer = daneKupujacegoPaynow(z);
-  if (!buyer.email) throw new Error('Paynow wymaga e-maila kupującego');
-  return {
-    amount,
-    currency: 'PLN',
-    externalId: nr,
-    description: tekst(`Zamówienie ${nr} Artway-TM`, 255),
-    continueUrl: paynowUrlPowrotuZamowienia(req, nr),
-    buyer,
-    orderItems: [{
-      name: tekst(`Zamówienie ${nr}`, 120),
-      category: 'Zamówienie',
-      quantity: 1,
-      price: amount,
-    }],
-  };
-}
-async function aktualizujZamowieniePaynow({ externalId = '', paymentId = '', status = '', modifiedAt = '', redirectUrl = '', env = '' } = {}) {
-  const nr = numerZamowienia(externalId);
-  const rec = await czytaj('orders', { items: [] });
-  const items = Array.isArray(rec.items) ? rec.items : [];
-  const i = items.findIndex((z) => (nr && z.nr === nr) || (paymentId && z?.paynow?.paymentId === paymentId));
-  if (i < 0) return null;
-  const z = { ...items[i] };
-  const stary = z.paynow || {};
-  if (modifiedAt && stary.modifiedAt) {
-    const nowyCzas = Date.parse(modifiedAt);
-    const staryCzas = Date.parse(stary.modifiedAt);
-    if (!Number.isNaN(nowyCzas) && !Number.isNaN(staryCzas) && nowyCzas < staryCzas) return z;
-  }
-  z.paynow = {
-    ...stary,
-    paymentId: paymentId || stary.paymentId || '',
-    status: status || stary.status || '',
-    modifiedAt: modifiedAt || stary.modifiedAt || '',
-    redirectUrl: redirectUrl || stary.redirectUrl || '',
-    env: env || stary.env || paynowEnv(),
-    updatedAt: new Date().toISOString(),
-  };
-  z.platnoscId = z.platnoscId || 'paynow';
-  z.platnoscStatus = statusPlatnosciPaynow(z.paynow.status);
-  if (z.paynow.status === 'CONFIRMED' && (!z.status || z.status === 'nowe')) {
-    z.status = 'potwierdzone';
-    const w = z.wysylka || {};
-    w.historia = [...(Array.isArray(w.historia) ? w.historia : []), {
-      czas: new Date().toLocaleString('pl-PL'),
-      status: 'Płatność Paynow potwierdzona',
-      opis: `Paynow ${z.paynow.paymentId || ''}`,
-    }];
-    z.wysylka = w;
-  }
-  items[i] = z;
-  await zapisz('orders', { items, updated_at: new Date().toISOString() });
-  return z;
-}
-
-const INFAKT_ENVY = new Set(['production', 'sandbox']);
-function infaktKonfiguracja() {
-  const env = INFAKT_ENVY.has(String(process.env.INFAKT_ENV || '').toLowerCase()) ? String(process.env.INFAKT_ENV).toLowerCase() : 'production';
-  const apiKey = tekst(process.env.INFAKT_API_KEY || '', 500).trim();
-  return { apiKey, configured: !!apiKey, env, baseUrl: env === 'sandbox' ? 'https://api.sandbox-infakt.pl' : 'https://api.infakt.pl', paymentDays: Math.max(0, Math.min(365, Number(process.env.INFAKT_PAYMENT_DAYS || 7) || 7)) };
-}
-function infaktPublicConfig() {
-  const c = infaktKonfiguracja();
-  return {
-    configured: c.configured,
-    env: c.env,
-    paymentDays: c.paymentDays,
-    missingEnv: c.configured ? [] : ['INFAKT_API_KEY'],
-    requiredScopes: ['api:costs:read', 'api:invoices:read', 'api:invoices:write'],
-    blockedOperations: ['costs:write', 'accounting', 'bank_accounts:write', 'ksef:integration:write'],
-    policy: 'supplier-costs-read-and-customer-invoices-create-only',
-  };
-}
-async function infaktDostawcyUstawienia() {
-  const rec = await czytaj('infakt_supplier_access', { items: [], updated_at: null });
-  return { items: infaktDostawcyDozwoleni(rec?.items), updated_at: rec?.updated_at || null };
-}
-function infaktKosztDoZwrotu(koszt = {}, dostawca = null) {
-  koszt = infaktNormalizujDokumentKosztowy(koszt);
-  return {
-    uuid: tekst(koszt.uuid, 200),
-    number: tekst(koszt.number, 160),
-    seller_name: tekst(koszt.seller_name, 240),
-    description: tekst(koszt.description, 600),
-    net_price: Number(koszt.net_price) || 0,
-    gross_price: Number(koszt.gross_price) || 0,
-    tax_price: Number(koszt.tax_price) || 0,
-    currency: tekst(koszt.currency || 'PLN', 12),
-    issue_date: tekst(koszt.issue_date, 30),
-    received_date: tekst(koszt.received_date, 30),
-    due_date: tekst(koszt.due_date, 30),
-    created_at: tekst(koszt.created_at, 80),
-    category: tekst(koszt.category, 160),
-    kind: tekst(koszt.kind, 80),
-    statuses: (Array.isArray(koszt.statuses) ? koszt.statuses : []).slice(0, 20).map((s) => ({ symbol: tekst(s?.symbol, 80), name: tekst(s?.name, 120), group: tekst(s?.group, 80) })),
-    supplier: dostawca ? { id: dostawca.id, name: dostawca.name } : null,
-  };
-}
-async function infaktPobierzKosztyDozwolone(suppliers = [], { wanted = 200, maxScan = 5000 } = {}) {
-  const items = [];
-  let scanned = 0;
-  const safeWanted = Math.max(1, Math.min(1000, Number(wanted) || 200));
-  const safeMaxScan = Math.max(100, Math.min(10000, Number(maxScan) || 5000));
-  for (let offset = 0; offset < safeMaxScan && items.length < safeWanted; offset += 100) {
-    const data = await infaktWywolaj('/api/v3/documents/costs.json', { parameters: { limit: 100, offset } });
-    const entities = Array.isArray(data?.entities) ? data.entities : [];
-    scanned += entities.length;
-    for (const raw of entities) {
-      const document = infaktNormalizujDokumentKosztowy(raw);
-      const supplier = infaktZnajdzDostawce(document, suppliers);
-      if (supplier) items.push({ document, supplier });
-      if (items.length >= safeWanted) break;
-    }
-    if (entities.length < 100 || !data?.metainfo?.next) break;
-  }
-  return { items, scanned };
-}
-async function infaktSynchronizujCenyZakupu({ days = 180, limit = 25, force = false } = {}) {
-  const suppliers = await infaktDostawcyUstawienia(), previous = await czytaj('infakt_purchase_price_sync', { documents: {}, pendingItems: [], recentMatches: [], updated_at: null }), now = new Date().toISOString();
-  const report = { source: 'inFakt dokument kosztowy → KSeF XML', available: true, startedAt: now, updated_at: now, lastListAttemptAt: now, days, scannedDocuments: 0, allowedDocuments: 0, processedDocuments: 0, lineCount: 0, matchedCount: 0, priceUpdatedCount: 0, unchangedCount: 0, pendingCount: 0, errors: [], documents: { ...(previous.documents || {}) }, costDocuments: { ...(previous.costDocuments || {}) }, lineMappings: { ...(previous.lineMappings || {}) }, pendingItems: [], recentMatches: Array.isArray(previous.recentMatches) ? previous.recentMatches.slice(0, 200) : [] };
-  if (!suppliers.items.length) { report.available = false; report.errors.push('Biała lista dostawców jest pusta.'); await zapisz('infakt_purchase_price_sync', report); return report; }
-  const lastAttempt = Date.parse(previous.lastListAttemptAt || ''), cooldownMs = 11 * 60 * 1000;
-  if (!force && Number.isFinite(lastAttempt) && Date.now() - lastAttempt < cooldownMs) return { ...previous, cooldown: true, nextListAt: new Date(lastAttempt + cooldownMs).toISOString(), message: 'Użyto ostatniego wyniku, aby nie przekroczyć limitu 6 listowań KSeF na godzinę.' };
-  const since = infaktParametryListyKsef({ days, limit: 20 })['q[invoice_date_gteq]'];
-  let costsResult;
-  try { costsResult = await infaktPobierzKosztyDozwolone(suppliers.items, { wanted: 1000, maxScan: 5000 }); }
-  catch (error) {
-    report.available = false;
-    report.pendingItems = Array.isArray(previous.pendingItems) ? previous.pendingItems : [];
-    report.pendingCount = report.pendingItems.length;
-    report.errors.push(`Odczyt dokumentów kosztowych inFakt: ${tekst(error.message, 500)}`);
-    await zapisz('infakt_purchase_price_sync', report); return report;
-  }
-  const uniqueCosts = new Map();
-  for (const entry of costsResult.items) {
-    const date = tekst(entry.document.issue_date, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < since) continue;
-    const key = `${entry.supplier.id}|${entry.document.number}|${date}|${entry.document.gross_price}`;
-    if (!uniqueCosts.has(key)) uniqueCosts.set(key, entry);
-  }
-  const costCandidates = [...uniqueCosts.values()].sort((a, b) => String(b.document.issue_date).localeCompare(String(a.document.issue_date)) || String(b.document.created_at || '').localeCompare(String(a.document.created_at || '')));
-  // Pięć dokumentów na przebieg utrzymuje czas funkcji w bezpiecznym zakresie;
-  // kolejne faktury przejmie następne wykonanie godzinne.
-  const batchLimit = Math.max(1, Math.min(5, Number(limit) || 5));
-  const selectedCosts = (force ? costCandidates : costCandidates.filter(({ document }) => !['processed', 'no_ksef'].includes(report.costDocuments[tekst(document.uuid, 200)]?.status))).slice(0, batchLimit);
-  report.costDocumentsScanned = costsResult.scanned;
-  report.allowedCostDocuments = costsResult.items.length;
-  if (!selectedCosts.length) {
-    report.pendingItems = Array.isArray(previous.pendingItems) ? previous.pendingItems : [];
-    report.pendingCount = report.pendingItems.length;
-    report.recentMatches = Array.isArray(previous.recentMatches) ? previous.recentMatches.slice(0, 500) : [];
-    report.message = costCandidates.length ? 'Wszystkie znalezione faktury KSeF zostały już przeanalizowane.' : 'Brak faktur dozwolonych dostawców w wybranym okresie.';
-    await zapisz('infakt_purchase_price_sync', report); return report;
-  }
-  const invoices = [];
-  for (const { document, supplier } of selectedCosts) {
-    const costKey = tekst(document.uuid, 200);
-    try {
-      const detail = await infaktWywolaj(`/api/v3/documents/costs/${encodeURIComponent(costKey)}.json`);
-      const ksefNumber = infaktKsefNumerZTekstu(detail);
-      if (!ksefNumber) {
-        report.costDocuments[costKey] = { status: 'no_ksef', invoiceNumber: document.number, invoiceDate: document.issue_date, checkedAt: now };
-        continue;
-      }
-      invoices.push({ ksef_number: ksefNumber, invoice_number: document.number, invoice_date: document.issue_date, seller_name: document.seller_name, seller_tax_code: document.seller_tax_code, sourceCostUuid: costKey, sourceSupplierId: supplier.id });
-      report.costDocuments[costKey] = { status: 'identified', ksefNumber, invoiceNumber: document.number, invoiceDate: document.issue_date, checkedAt: now };
-    } catch (error) {
-      report.errors.push(`${tekst(document.number || costKey, 160)}: odczyt szczegółów kosztu — ${tekst(error.message, 300)}`);
-      report.costDocuments[costKey] = { status: 'error', error: tekst(error.message, 300), checkedAt: now };
-    }
-  }
-  report.scannedDocuments = selectedCosts.length; report.allowedDocuments = invoices.length;
-  const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null }), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = allegroAgentProduktyCentralne(data), index = infaktIndeksProduktow(products), updater = allegroAktualizatorProduktowCentralnych(data);
-  const processedKeys = new Set(), selectedInvoices = invoices.filter((invoice) => force || report.documents[tekst(invoice?.ksef_number, 200)]?.status !== 'processed').reverse();
-  for (const invoice of selectedInvoices) {
-    const documentKey = tekst(invoice.ksef_number, 200); if (!documentKey) continue;
-    const supplier = infaktZnajdzDostawce(invoice, suppliers.items);
-    try {
-      const response = await infaktWywolaj(`/api/v3/ksef2/import/${encodeURIComponent(documentKey)}.json`, { parameters: { file_format: 'xml' }, raw: true, accept: 'application/xml, text/xml, application/json' });
-      const xml = infaktXmlZOdpowiedzi(await response.text());
-      const lines = infaktKsefPozycje(xml); if (!lines.length) throw new Error('Dokument XML nie zawiera rozpoznawalnych pozycji FaWiersz'); processedKeys.add(documentKey); report.lineCount += lines.length; report.processedDocuments++;
-      for (const line of lines) {
-        const lineSignature = crypto.createHash('sha256').update(`${supplier?.id || invoice.seller_name}|${line.ean}|${line.code}|${infaktNazwaDostawcy(line.name)}`).digest('hex').slice(0, 24);
-        const itemKey = crypto.createHash('sha256').update(`${documentKey}|${line.row}|${lineSignature}`).digest('hex').slice(0, 24);
-        const sourceItem = { itemKey, lineSignature, invoiceNumber: tekst(invoice.invoice_number, 120), ksefNumber: documentKey, invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || tekst(invoice.seller_name, 200), row: line.row, name: line.name, ean: line.ean, code: line.code, quantity: line.quantity, unitNet: line.unitNet, unitGross: line.unitGross, taxRate: line.taxRate, priceBasis: line.priceBasis, currency: line.currency };
-        const rememberedProduct = products.get(String(previous?.lineMappings?.[lineSignature] || ''));
-        const match = rememberedProduct ? { product: rememberedProduct, method: 'zapamiętane dopasowanie dostawcy', confidence: 100 } : infaktDopasujPozycje(line, products, index, supplier), validPrice = line.currency === 'PLN' && line.quantity > 0 && line.unitGross > 0;
-        if (match.product && validPrice) {
-          const product = products.get(String(match.product.id)) || match.product, oldDate = String(product.cenaZakupuDataDokumentu || ''), shouldUpdate = force || !oldDate || String(invoice.invoice_date || '') >= oldDate;
-          const beforeFields = shouldUpdate ? infaktMigawkaCenyZakupu(product) : null;
-          if (shouldUpdate) { const fields = infaktCenaZakupuFields(product, line, invoice, supplier, match.method); if (Number(product.cenaZakupu || 0) !== Number(fields.cenaZakupu)) report.priceUpdatedCount++; else report.unchangedCount++; updater.apply(product.id, fields); products.set(String(product.id), { ...product, ...fields }); }
-          else report.unchangedCount++;
-          report.matchedCount++; report.recentMatches = report.recentMatches.filter((entry) => entry.itemKey !== itemKey || entry.status === 'reverted'); report.recentMatches.unshift({ matchId: crypto.createHash('sha256').update(`${itemKey}|${product.id}|${now}`).digest('hex').slice(0, 24), itemKey, lineSignature, productId: String(product.id), productName: tekst(product.nazwa, 200), price: +line.unitGross.toFixed(2), quantity: line.quantity, method: match.method, confidence: match.confidence, invoiceNumber: tekst(invoice.invoice_number, 120), invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || invoice.seller_name, updatedAt: now, status: 'active', priceApplied: shouldUpdate, beforeFields, sourceItem });
-        } else {
-          report.pendingItems.push({ ...sourceItem, reason: !validPrice ? 'Brak poprawnej ceny brutto, ilości lub waluta inna niż PLN' : (match.reason || 'Brak jednoznacznego dopasowania'), suggestions: infaktSugestieNazwy(line, products, supplier) });
-        }
-      }
-      report.documents[documentKey] = { status: 'processed', invoiceNumber: tekst(invoice.invoice_number, 120), invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || tekst(invoice.seller_name, 200), lines: lines.length, processedAt: now };
-      if (invoice.sourceCostUuid) report.costDocuments[invoice.sourceCostUuid] = { ...(report.costDocuments[invoice.sourceCostUuid] || {}), status: 'processed', lines: lines.length, processedAt: now };
-    } catch (error) { report.errors.push(`${tekst(invoice.invoice_number || documentKey, 160)}: ${tekst(error.message, 400)}`); report.documents[documentKey] = { status: 'error', error: tekst(error.message, 400), processedAt: now }; if (invoice.sourceCostUuid) report.costDocuments[invoice.sourceCostUuid] = { ...(report.costDocuments[invoice.sourceCostUuid] || {}), status: 'error', error: tekst(error.message, 400), processedAt: now }; }
-  }
-  updater.commit(); if (updater.changed) await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-  const oldPending = Array.isArray(previous.pendingItems) ? previous.pendingItems : [], newKeys = new Set(report.pendingItems.map((x) => x.itemKey)); report.pendingItems = [...report.pendingItems, ...oldPending.filter((x) => !newKeys.has(x.itemKey) && !processedKeys.has(x.ksefNumber))].slice(0, 1000); report.pendingCount = report.pendingItems.length; report.lineMappings = { ...(previous.lineMappings || {}) }; report.recentMatches = report.recentMatches.slice(0, 500); report.updated_at = new Date().toISOString();
-  await zapisz('infakt_purchase_price_sync', report); return report;
-}
-async function infaktPrzypiszCeneZakupu(itemKey = '', productId = '') {
-  const [sync, settingsRec] = await Promise.all([czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [] }), czytaj('settings', { data: {}, rev: 0 })]), item = (Array.isArray(sync.pendingItems) ? sync.pendingItems : []).find((x) => x.itemKey === itemKey), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = allegroAgentProduktyCentralne(data), product = products.get(String(productId));
-  if (!item) { const error = new Error('Nie znaleziono oczekującej pozycji faktury'); error.status = 404; throw error; } if (!product) { const error = new Error('Nie znaleziono produktu'); error.status = 404; throw error; } if (!(Number(item.unitGross) > 0) || item.currency !== 'PLN') { const error = new Error('Pozycja nie ma poprawnej ceny brutto w PLN'); error.status = 422; throw error; }
-  const updater = allegroAktualizatorProduktowCentralnych(data), beforeFields = infaktMigawkaCenyZakupu(product), invoice = { invoice_number: item.invoiceNumber, ksef_number: item.ksefNumber, invoice_date: item.invoiceDate, seller_name: item.supplier }, fields = infaktCenaZakupuFields(product, item, invoice, { name: item.supplier }, 'ręczne zatwierdzenie'); updater.apply(product.id, fields); updater.commit();
-  const now = new Date().toISOString(), matchId = crypto.createHash('sha256').update(`${itemKey}|${product.id}|${now}`).digest('hex').slice(0, 24); sync.pendingItems = sync.pendingItems.filter((x) => x.itemKey !== itemKey); sync.pendingCount = sync.pendingItems.length; sync.matchedCount = (Number(sync.matchedCount) || 0) + 1; sync.priceUpdatedCount = (Number(sync.priceUpdatedCount) || 0) + 1; sync.lineMappings = { ...(sync.lineMappings || {}), ...(item.lineSignature ? { [item.lineSignature]: String(product.id) } : {}) }; sync.recentMatches = [{ matchId, itemKey, lineSignature: item.lineSignature || '', productId: String(product.id), productName: tekst(product.nazwa, 200), price: Number(item.unitGross), quantity: Number(item.quantity), method: 'ręczne zatwierdzenie', confidence: 100, invoiceNumber: item.invoiceNumber, invoiceDate: item.invoiceDate, supplier: item.supplier, updatedAt: now, status: 'active', priceApplied: true, beforeFields, sourceItem: item }, ...(Array.isArray(sync.recentMatches) ? sync.recentMatches.filter((entry) => entry.itemKey !== itemKey || entry.status === 'reverted') : [])].slice(0, 500); sync.updated_at = now;
-  await Promise.all([zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now }), zapisz('infakt_purchase_price_sync', sync)]); return { item, product: { id: String(product.id), name: product.nazwa, cenaZakupu: fields.cenaZakupu }, sync };
-}
-async function infaktCofnijDopasowanieCeny(matchId = '') {
-  const [sync, settingsRec] = await Promise.all([czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [] }), czytaj('settings', { data: {}, rev: 0 })]);
-  const matches = Array.isArray(sync.recentMatches) ? sync.recentMatches : [], index = matches.findIndex((entry) => String(entry.matchId || entry.itemKey) === String(matchId));
-  if (index < 0) { const error = new Error('Nie znaleziono dopasowania w historii'); error.status = 404; throw error; }
-  const match = matches[index];
-  if (match.status === 'reverted') { const error = new Error('To dopasowanie zostało już cofnięte'); error.status = 409; throw error; }
-  if (match.priceApplied === false) { const error = new Error('To dopasowanie nie zmieniło ceny produktu'); error.status = 409; throw error; }
-  const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, product = allegroAgentProduktyCentralne(data).get(String(match.productId));
-  if (!product) { const error = new Error('Produkt z dopasowania już nie istnieje'); error.status = 404; throw error; }
-  const rollback = infaktPrzygotujCofniecieDopasowania(product, match);
-  if (!rollback.ok) { const error = new Error(rollback.error); error.status = 409; throw error; }
-  const updater = allegroAktualizatorProduktowCentralnych(data); updater.apply(product.id, rollback.fields, rollback.remove); updater.commit();
-  sync.lineMappings = { ...(sync.lineMappings || {}) }; let removedAliases = 0;
-  if (match.lineSignature && String(sync.lineMappings[match.lineSignature] || '') === String(product.id)) { delete sync.lineMappings[match.lineSignature]; removedAliases = 1; }
-  else if (!match.lineSignature && String(match.method || '').includes('ręczne')) for (const [signature, id] of Object.entries(sync.lineMappings)) if (String(id) === String(product.id)) { delete sync.lineMappings[signature]; removedAliases++; }
-  const now = new Date().toISOString(), sourceItem = match.sourceItem && typeof match.sourceItem === 'object' ? { ...match.sourceItem, reason: 'Cofnięto wcześniejsze dopasowanie — wybierz właściwy produkt' } : null;
-  if (sourceItem?.itemKey && !(sync.pendingItems || []).some((entry) => entry.itemKey === sourceItem.itemKey)) sync.pendingItems = [sourceItem, ...(sync.pendingItems || [])].slice(0, 1000);
-  matches[index] = { ...match, status: 'reverted', revertedAt: now, removedAliases };
-  sync.recentMatches = matches; sync.pendingCount = (sync.pendingItems || []).length; sync.matchedCount = Math.max(0, (Number(sync.matchedCount) || 0) - 1); sync.updated_at = now;
-  await Promise.all([zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now }), zapisz('infakt_purchase_price_sync', sync)]);
-  return { sync, product: { id: String(product.id), name: product.nazwa }, restored: Object.prototype.hasOwnProperty.call(rollback.fields, 'cenaZakupu') ? rollback.fields.cenaZakupu : null, requiresResync: !sourceItem };
-}
-function infaktErrorText(data, fallback = 'Błąd inFakt') {
-  const errors = data?.errors || data?.error || data?.message;
-  if (typeof errors === 'string') return tekst(errors, 1000);
-  if (Array.isArray(errors)) return tekst(errors.map((x) => typeof x === 'string' ? x : x?.message || JSON.stringify(x)).join('; '), 1000);
-  if (errors && typeof errors === 'object') return tekst(Object.entries(errors).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; '), 1000);
-  return fallback;
-}
-async function infaktWywolaj(path, { method = 'GET', bodyObj = null, parameters = {}, raw = false, accept = '' } = {}) {
-  const c = infaktKonfiguracja();
-  if (!c.configured) { const e = new Error('inFakt nie jest skonfigurowany. Dodaj INFAKT_API_KEY po stronie serwera.'); e.code = 'infakt_not_configured'; e.status = 503; throw e; }
-  const url = new URL(path, c.baseUrl); for (const [k, v] of Object.entries(parameters || {})) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
-  const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
-  const response = await fetch(url, { method, headers: { 'X-inFakt-ApiKey': c.apiKey, Accept: accept || (raw ? 'application/pdf, application/json' : 'application/json'), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body });
-  if (raw && response.ok) return response;
-  const txt = await response.text(); let data = {}; try { data = txt ? JSON.parse(txt) : {}; } catch { data = { raw: tekst(txt, 2000) }; }
-  if (!response.ok) { const e = new Error(infaktErrorText(data, `inFakt HTTP ${response.status}`)); e.status = response.status; e.code = response.status === 401 ? 'infakt_auth' : response.status === 422 ? 'infakt_validation' : 'infakt_error'; e.infakt = data; throw e; }
-  return data;
-}
-function infaktDataISO(value = '') { const d = value ? new Date(value) : new Date(); return Number.isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10); }
-function infaktMetodaPlatnosci(z = {}) { const p = String(z.platnoscId || z.platnosc || '').toLowerCase(); if (p.includes('pobran')) return 'delivery'; if (p.includes('kart')) return 'card'; if (p.includes('gotow')) return 'cash'; return 'transfer'; }
-function infaktPayloadZamowienia(z = {}, options = {}) {
-  const client = z.klient || {}, address = z.adresDostawy || {}, company = tekst(client.firma || z.firma || '', 250).trim(), nip = String(client.nip || z.nip || '').replace(/\D/g, ''), fullName = tekst(`${client.imie || ''} ${client.nazwisko || ''}`, 200).trim(), nameParts = fullName.split(/\s+/).filter(Boolean);
-  const lines = (Array.isArray(z.pozycjeDane) ? z.pozycjeDane : []).map((p) => { const quantity = Math.max(0.001, Number(p.ilosc) || 1), unitGross = Number(p.cena) || Number(p.wartosc) / quantity || 0; return { name: tekst(p.nazwa || p.produkt || 'Produkt', 300), quantity, gross_price: grosze(unitGross), tax_symbol: String(p.vatRate || p.vat || 23).replace('%', '') || '23', unit: 'szt.', ...(p.gtin || p.ean ? { gtin: tekst(p.gtin || p.ean, 80) } : {}) }; }).filter((p) => p.gross_price > 0);
-  const deliveryGross = grosze(Number(z.kosztDostawy || 0) + Number(z.kosztPaczkaWeekend || 0) + Number(z.kosztPlatnosci || 0));
-  if (deliveryGross > 0) lines.push({ name: 'Dostawa i usługi dodatkowe', quantity: 1, gross_price: deliveryGross, tax_symbol: '23', unit: 'szt.' });
-  if (!lines.length) { const total = grosze(z.razem); if (total > 0) lines.push({ name: `Zamówienie ${tekst(z.nr, 100)}`, quantity: 1, gross_price: total, tax_symbol: '23', unit: 'szt.' }); }
-  if (!lines.length) { const e = new Error('Zamówienie nie ma pozycji o dodatniej wartości'); e.code = 'infakt_empty_invoice'; throw e; }
-  const invoiceDate = infaktDataISO(options.invoiceDate), due = new Date(`${invoiceDate}T12:00:00Z`); due.setUTCDate(due.getUTCDate() + infaktKonfiguracja().paymentDays);
-  const invoice = { status: options.status === 'paid' ? 'paid' : 'draft', currency: 'PLN', payment_method: infaktMetodaPlatnosci(z), invoice_date: invoiceDate, sale_date: infaktDataISO(z.ts || z.createdAt || invoiceDate), payment_date: due.toISOString().slice(0, 10), sale_type: 'merchandise', notes: tekst(`Zamówienie Artway-TM: ${z.nr}`, 500), client_business_activity_kind: company || nip ? 'other_business' : 'private_person', client_company_name: company || (nip ? fullName || 'Klient firmowy' : undefined), client_first_name: company ? undefined : (nameParts[0] || 'Klient'), client_last_name: company ? undefined : (nameParts.slice(1).join(' ') || 'Artway-TM'), client_tax_code: nip || undefined, client_street: tekst(address.ulica || client.ulica || '', 160) || undefined, client_street_number: tekst(address.nrDomu || client.nrDomu || '', 40) || undefined, client_flat_number: tekst(address.nrLokalu || client.nrLokalu || '', 40) || undefined, client_city: tekst(address.miasto || client.miasto || '', 120) || undefined, client_post_code: tekst(address.kod || address.kodPocztowy || client.kod || client.kodPocztowy || '', 30) || undefined, services: lines };
-  if (invoice.status === 'paid') invoice.paid_date = invoiceDate;
-  Object.keys(invoice).forEach((key) => invoice[key] === undefined && delete invoice[key]);
-  // Integracja sklepu ma celowo wąski zakres: wystawienie FV klienta, bez operacji KSeF.
-  return { invoice, send_to_ksef: false };
-}
-function infaktRef(data = {}) { return tekst(data.invoice_task_reference_number || data.task_reference_number || data.reference_number || '', 200).trim(); }
-function infaktInvoiceFromTask(data = {}) { return data.invoice || data.entity || data.result?.invoice || data.result || {}; }
-
-function emailKonfiguracja() {
-  const providerRaw = tekst(process.env.EMAIL_PROVIDER, 40).trim().toLowerCase();
-  const host = tekst(process.env.SMTP_HOST || (providerRaw === 'gmail' ? 'smtp.gmail.com' : ''), 120).trim();
-  const port = Number(process.env.SMTP_PORT || (host === 'smtp.gmail.com' ? 465 : 587));
-  const secureRaw = tekst(process.env.SMTP_SECURE, 20).trim().toLowerCase();
-  const secure = secureRaw ? ['1', 'true', 'yes', 'tak'].includes(secureRaw) : port === 465;
-  const user = tekst(process.env.SMTP_USER || process.env.GMAIL_USER || '', 200).trim();
-  const pass = tekst(process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || '', 500).trim();
-  const provider = providerRaw || (host || user || pass ? (host === 'smtp.gmail.com' || user.endsWith('@gmail.com') ? 'gmail-smtp' : 'smtp') : '');
-  const from = tekst(process.env.EMAIL_FROM || user || 'sklepartway@gmail.com', 200).trim();
-  const fromName = tekst(process.env.EMAIL_FROM_NAME || 'Artway-TM', 120).trim();
-  const replyTo = tekst(process.env.EMAIL_REPLY_TO || from, 200).trim();
-  const adminTo = tekst(process.env.EMAIL_ADMIN_TO || process.env.EMAIL_TO || from, 200).trim();
-  return {
-    provider,
-    configured: !!(provider && host && user && pass && from),
-    host,
-    port,
-    secure,
-    user,
-    from,
-    fromName,
-    replyTo,
-    adminTo,
-  };
-}
-function emailPublicConfig() {
-  const c = emailKonfiguracja();
-  return {
-    configured: c.configured,
-    provider: c.provider || 'gmail-smtp',
-    from: c.from,
-    fromName: c.fromName,
-    adminTo: c.adminTo,
-    requiredEnv: ['EMAIL_PROVIDER=gmail', 'EMAIL_FROM', 'SMTP_USER', 'SMTP_PASS'],
-    optionalEnv: ['EMAIL_FROM_NAME', 'EMAIL_REPLY_TO', 'EMAIL_ADMIN_TO', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE'],
-  };
-}
-function adresNadawcyEmail(c = emailKonfiguracja()) {
-  const nazwa = String(c.fromName || '').replace(/"/g, '').trim();
-  return nazwa ? `"${nazwa}" <${c.from}>` : c.from;
-}
-async function wyslijEmailSMTP({ to, subject, text, html, replyTo, attachments = [] }) {
-  const c = emailKonfiguracja();
-  if (!c.configured) {
-    const blad = new Error('E-mail nie jest skonfigurowany po stronie serwera. Ustaw SMTP_USER i SMTP_PASS w Netlify.');
-    blad.code = 'email_not_configured';
-    throw blad;
-  }
-  const transporter = nodemailer.createTransport({
-    host: c.host,
-    port: c.port,
-    secure: c.secure,
-    auth: { user: c.user, pass: process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || '' },
-  });
-  const info = await transporter.sendMail({
-    from: adresNadawcyEmail(c),
-    to,
-    replyTo: replyTo || c.replyTo,
-    subject,
-    text,
-    html,
-    attachments: Array.isArray(attachments) ? attachments.slice(0, 5) : [],
-  });
-  return { provider: c.provider || 'smtp', message_id: info.messageId || '', accepted: info.accepted || [] };
-}
-const OPLATA_PACZKA_WEEKEND = 5;
-function kwotaSerwer(v) {
-  const n = Number(String(v ?? 0).replace(',', '.').replace(/[^0-9.-]/g, ''));
-  return Number.isFinite(n) ? +n.toFixed(2) : 0;
-}
-function zlSerwer(v) {
-  return `${kwotaSerwer(v).toFixed(2).replace('.', ',')} zł`;
-}
-function htmlEscape(v) {
-  return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-function linkSklepuEmail(path = '/') {
-  const base = tekst(process.env.EMAIL_SITE_URL || 'https://artwaytm.pl', 400).trim().replace(/\/+$/, '');
-  return `${base}${path.startsWith('/') ? path : `/${path}`}`;
-}
-function nazwaKlientaEmail(z) {
-  const k = z?.klient || {};
-  return [k.imie, k.nazwisko].map((x) => tekst(x, 80).trim()).filter(Boolean).join(' ') || tekst(z?.email, 160).trim() || 'Klient';
-}
-function adresDostawyEmail(z) {
-  const a = z?.adresDostawy || {};
-  if (a && (a.ulica || a.kod || a.miasto)) {
-    const ulica = [a.ulica, a.nrDomu].map((x) => tekst(x, 120).trim()).filter(Boolean).join(' ');
-    const lokal = a.nrLokalu ? `/${tekst(a.nrLokalu, 30).trim()}` : '';
-    const miasto = [a.kod, a.miasto].map((x) => tekst(x, 120).trim()).filter(Boolean).join(' ');
-    return [ulica ? `${ulica}${lokal}` : '', miasto].filter(Boolean).join(', ') || '—';
-  }
-  return tekst(z?.adres || '—', 500).trim() || '—';
-}
-function produktWariantEmail(p) {
-  const wariant = p?.wariant;
-  if (!wariant) return '';
-  if (typeof wariant === 'string') return tekst(wariant, 120).trim();
-  if (typeof wariant === 'object') return [wariant.nazwa, wariant.wartosc, wariant.label].map((x) => tekst(x, 80).trim()).filter(Boolean).join(': ');
-  return '';
-}
-function produktyEmail(z) {
-  if (Array.isArray(z?.pozycjeDane) && z.pozycjeDane.length) {
-    return z.pozycjeDane.map((p) => {
-      const ilosc = Number(p.ilosc) || 1;
-      const cena = Number(p.cena) || 0;
-      const wartosc = Number(p.wartosc) || (cena * ilosc);
-      return {
-        nazwa: tekst(p.nazwa || p.name || 'Produkt', 240).trim(),
-        ilosc,
-        cena,
-        wartosc,
-        sku: tekst(p.sku || p.SKU || '', 120).trim(),
-        wariant: produktWariantEmail(p),
-      };
-    });
-  }
-  if (Array.isArray(z?.pozycje) && z.pozycje.length) {
-    return z.pozycje.map((p) => ({ nazwa: tekst(p, 500).trim(), ilosc: 1, cena: 0, wartosc: 0, sku: '', wariant: '' }));
-  }
-  return [{ nazwa: 'Pozycje zamówienia zapisane w panelu sklepu', ilosc: 1, cena: 0, wartosc: 0, sku: '', wariant: '' }];
-}
-function linieProduktow(z) {
-  return produktyEmail(z).map((p) => {
-    const meta = [p.sku ? `SKU: ${p.sku}` : '', p.wariant].filter(Boolean).join(', ');
-    const kwota = p.wartosc ? ` — ${zlSerwer(p.wartosc)}` : '';
-    return `• ${p.nazwa}${meta ? ` (${meta})` : ''} × ${p.ilosc}${kwota}`;
-  }).join('\n');
-}
-function htmlProduktyEmail(z) {
-  const rows = produktyEmail(z).map((p) => {
-    const meta = [p.sku ? `SKU: ${p.sku}` : '', p.wariant].filter(Boolean).join(' • ');
-    return `<tr>
-      <td style="padding:12px 10px;border-bottom:1px solid #e5e7eb">
-        <div style="font-weight:800;color:#111827">${htmlEscape(p.nazwa)}</div>
-        ${meta ? `<div style="font-size:12px;color:#6b7280;margin-top:3px">${htmlEscape(meta)}</div>` : ''}
-      </td>
-      <td style="padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:center;color:#374151">${htmlEscape(p.ilosc)}</td>
-      <td style="padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:800;color:#111827">${p.wartosc ? htmlEscape(zlSerwer(p.wartosc)) : '—'}</td>
-    </tr>`;
-  }).join('');
-  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;background:#ffffff">
-    <thead>
-      <tr style="background:#f8fafc;color:#6b7280;font-size:12px;text-transform:uppercase;letter-spacing:.05em">
-        <th align="left" style="padding:10px">Produkt</th>
-        <th align="center" style="padding:10px;width:70px">Ilość</th>
-        <th align="right" style="padding:10px;width:120px">Wartość</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-}
-function kosztyEmail(z) {
-  const k = z?.koszty || {};
-  const ma = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key) && obj[key] != null;
-  const produktyZPozycji = produktyEmail(z).reduce((s, p) => s + kwotaSerwer(p.wartosc), 0);
-  const weekendAktywny = !!(z?.paczkaWeekend || z?.wysylka?.paczkaWeekend);
-  const weekend = kwotaSerwer(ma(z, 'oplataPaczkaWeekend') ? z.oplataPaczkaWeekend : (ma(k, 'paczkaWeekend') ? k.paczkaWeekend : (weekendAktywny ? OPLATA_PACZKA_WEEKEND : 0)));
-  const platnosc = kwotaSerwer(ma(z, 'oplataPlatnosci') ? z.oplataPlatnosci : (ma(k, 'platnosc') ? k.platnosc : (z?.platnoscId === 'pobranie' ? 5 : 0)));
-  const metoda = tekst(z?.dostawaId || '', 40).trim().toLowerCase();
-  const poRabacieZapisane = ma(k, 'poRabacie') ? kwotaSerwer(k.poRabacie) : 0;
-  const kosztDomyslny = metoda === 'kurier' || metoda === 'kurier_inpost' ? 20 : 12;
-  const dostawa = ma(z, 'dostawaKoszt') || ma(k, 'dostawa')
-    ? kwotaSerwer(ma(z, 'dostawaKoszt') ? z.dostawaKoszt : k.dostawa)
-    : ((poRabacieZapisane || produktyZPozycji) >= 200 ? 0 : kosztDomyslny);
-  const razemZapisane = kwotaSerwer(z?.razem);
-  let poRabacie = poRabacieZapisane || (razemZapisane ? Math.max(0, kwotaSerwer(razemZapisane - dostawa - weekend - platnosc)) : 0);
-  const produkty = ma(k, 'produkty') ? kwotaSerwer(k.produkty) : (produktyZPozycji || poRabacie);
-  const rabat = ma(k, 'rabat') ? kwotaSerwer(k.rabat) : Math.max(0, kwotaSerwer(produkty - poRabacie));
-  if (!poRabacie) poRabacie = Math.max(0, kwotaSerwer(produkty - rabat));
-  const razem = razemZapisane || kwotaSerwer(poRabacie + dostawa + weekend + platnosc);
-  return { produkty, rabat, poRabacie, dostawa, paczkaWeekend: weekend, platnosc, razem };
-}
-function podsumowanieKosztowEmailText(z) {
-  const c = kosztyEmail(z);
-  return [
-    `Produkty: ${zlSerwer(c.produkty || c.poRabacie)}`,
-    c.rabat ? `Rabat: -${zlSerwer(c.rabat)}` : '',
-    `Dostawa: ${c.dostawa ? zlSerwer(c.dostawa) : 'GRATIS'} (${z?.dostawa || '—'})`,
-    c.paczkaWeekend ? `Paczka w Weekend: ${zlSerwer(c.paczkaWeekend)}` : '',
-    c.platnosc ? `Opłata płatności / pobrania: ${zlSerwer(c.platnosc)}` : '',
-    `Razem do zapłaty: ${zlSerwer(c.razem)}`,
-  ].filter(Boolean).join('\n');
-}
-function podsumowanieKosztowEmailHtml(z) {
-  const c = kosztyEmail(z);
-  const row = (a, b, strong = false) => `<div style="display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid #eef2f7${strong ? ';font-weight:900;font-size:17px;color:#111827' : ''}"><span>${htmlEscape(a)}</span><span>${htmlEscape(b)}</span></div>`;
-  return [
-    c.produkty ? row('Produkty', zlSerwer(c.produkty)) : '',
-    c.rabat ? row('Rabat', `-${zlSerwer(c.rabat)}`) : '',
-    c.rabat ? row('Po rabacie', zlSerwer(c.poRabacie)) : '',
-    row('Dostawa', c.dostawa ? zlSerwer(c.dostawa) : 'GRATIS'),
-    c.paczkaWeekend ? row('Paczka w Weekend', zlSerwer(c.paczkaWeekend)) : '',
-    c.platnosc ? row('Opłata płatności / pobrania', zlSerwer(c.platnosc)) : '',
-    row('Razem do zapłaty', zlSerwer(c.razem), true),
-  ].filter(Boolean).join('');
-}
-function instrukcjaPlatnosciEmail(z) {
-  const metoda = tekst(z?.platnosc || '—', 180).trim();
-  const kwota = zlSerwer(z?.razem);
-  if (z?.platnoscId === 'paynow') {
-    const url = tekst(z?.paynow?.redirectUrl || '', 1000).trim();
-    return {
-      tytul: 'Dokończ bezpieczną płatność online',
-      opis: url
-        ? `Kliknij przycisk i opłać zamówienie przez mBank Paynow. Po potwierdzeniu płatności od razu przejdziemy do realizacji.`
-        : `Wybrano mBank Paynow. Jeśli link płatności nie jest jeszcze widoczny, status sprawdzisz w sekcji „Moje zamówienia”.`,
-      akcja: url ? 'Zapłać przez mBank Paynow' : 'Sprawdź zamówienie',
-      url: url || linkSklepuEmail('/#/zamowienia'),
-      meta: `Kwota do zapłaty: ${kwota}`,
-    };
-  }
-  if (z?.platnoscId === 'telefon') {
-    return {
-      tytul: 'Przelew na telefon',
-      opis: z?.platnoscInstrukcja || `Wyślij ${kwota} na numer 530 038 914. W tytule lub wiadomości wpisz: Zamówienie ${z.nr}.`,
-      akcja: 'Zobacz szczegóły zamówienia',
-      url: linkSklepuEmail('/#/zamowienia'),
-      meta: `Kwota do zapłaty: ${kwota}`,
-    };
-  }
-  if (z?.platnoscId === 'pobranie') {
-    return {
-      tytul: 'Płatność przy odbiorze',
-      opis: 'Zapłacisz przy odbiorze przesyłki InPost. Przygotujemy paczkę i wyślemy kolejne informacje po nadaniu przesyłki.',
-      akcja: 'Zobacz szczegóły zamówienia',
-      url: linkSklepuEmail('/#/zamowienia'),
-      meta: `Kwota do zapłaty: ${kwota}`,
-    };
-  }
-  return {
-    tytul: 'Płatność',
-    opis: z?.platnoscInstrukcja || `Wybrana metoda płatności: ${metoda}.`,
-    akcja: 'Zobacz szczegóły zamówienia',
-    url: linkSklepuEmail('/#/zamowienia'),
-    meta: `Kwota do zapłaty: ${kwota}`,
-  };
-}
-function emailButton(label, url, kolor = '#2563eb') {
-  return `<a href="${htmlEscape(url)}" style="display:inline-block;background:${kolor};color:#ffffff;text-decoration:none;font-weight:800;border-radius:999px;padding:13px 20px;margin:4px 8px 4px 0">${htmlEscape(label)}</a>`;
-}
-function htmlKartaEmail(tytul, body, accent = '#2563eb') {
-  return `<div style="border:1px solid #e5e7eb;border-left:5px solid ${accent};border-radius:16px;background:#ffffff;padding:16px;margin:14px 0">
-    <div style="font-size:13px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;font-weight:800;margin-bottom:6px">${htmlEscape(tytul)}</div>
-    <div style="color:#111827;font-size:15px">${body}</div>
-  </div>`;
-}
-function htmlLayoutEmail({ preheader, badge, title, intro, z, mainCta, extraCta = [], admin = false, topCard = '', platnoscKartaHtml = '', coDalejTytul = '', coDalejTekst = '', stopkaTekst = '' }) {
-  const payment = instrukcjaPlatnosciEmail(z);
-  const sklepUrl = linkSklepuEmail('/#/');
-  const kontoUrl = linkSklepuEmail('/#/zamowienia');
-  const adminUrl = linkSklepuEmail(`/#/admin/zamowienie/${encodeURIComponent(z?.nr || '')}`);
-  const k = z?.klient || {};
-  const telefon = tekst(k.telefon || '', 80).trim();
-  const email = tekst(z?.email || '', 200).trim();
-  const koszty = kosztyEmail(z);
-  const shippingBody = `${htmlEscape(z?.dostawa || '—')}<br><span style="color:#6b7280">${htmlEscape(adresDostawyEmail(z))}</span>${z?.paczkomat ? `<br><span style="color:#6b7280">Punkt odbioru: ${htmlEscape(z.paczkomat)}</span>` : ''}<br><span style="display:inline-block;margin-top:8px;font-weight:800">Koszt dostawy: ${htmlEscape(koszty.dostawa ? zlSerwer(koszty.dostawa) : 'GRATIS')}</span>${koszty.paczkaWeekend ? `<br><span style="color:#92400e;font-weight:800">Paczka w Weekend: +${htmlEscape(zlSerwer(koszty.paczkaWeekend))}</span>` : ''}`;
-  const paymentBody = platnoscKartaHtml || `<b>${htmlEscape(payment.tytul)}</b><br><span style="color:#374151">${htmlEscape(payment.opis)}</span><br><span style="display:inline-block;margin-top:8px;color:#111827;font-weight:800">${htmlEscape(payment.meta)}</span>`;
-  const cta = mainCta || { label: payment.akcja, url: payment.url };
-  const ctaHtml = [cta, ...extraCta].filter(Boolean).map((x, i) => emailButton(x.label, x.url, i === 0 ? '#2563eb' : '#111827')).join('');
-  return `<!doctype html>
-  <html lang="pl">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>${htmlEscape(title)}</title>
-  </head>
-  <body style="margin:0;padding:0;background:#eef2ff;font-family:Arial,Helvetica,sans-serif;color:#111827">
-    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${htmlEscape(preheader || title)}</div>
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef2ff;padding:26px 10px">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 20px 55px rgba(37,99,235,.14)">
-            <tr>
-              <td style="background:linear-gradient(135deg,#2563eb,#6d28d9);padding:28px 28px 24px;color:#ffffff">
-                <div style="font-size:13px;text-transform:uppercase;letter-spacing:.12em;font-weight:800;opacity:.9">${htmlEscape(badge || 'Artway-TM')}</div>
-                <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.18">${htmlEscape(title)}</h1>
-                <p style="margin:0;font-size:16px;line-height:1.55;opacity:.96">${htmlEscape(intro)}</p>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:26px 28px">
-                <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:18px;padding:14px 16px;margin-bottom:16px;color:#78350f">
-                  <b>Numer zamówienia:</b> ${htmlEscape(z?.nr || '—')} &nbsp; • &nbsp; <b>Razem:</b> ${htmlEscape(zlSerwer(z?.razem))}
-                </div>
-                ${topCard}
-                ${admin ? htmlKartaEmail('Klient', `<b>${htmlEscape(nazwaKlientaEmail(z))}</b>${email ? `<br>${htmlEscape(email)}` : ''}${telefon ? `<br>${htmlEscape(telefon)}` : ''}`, '#7c3aed') : ''}
-                ${htmlKartaEmail('Płatność', paymentBody, '#f59e0b')}
-                ${htmlKartaEmail('Dostawa', shippingBody, '#10b981')}
-                <h2 style="font-size:18px;margin:22px 0 10px;color:#111827">Produkty w zamówieniu</h2>
-                ${htmlProduktyEmail(z)}
-                ${htmlKartaEmail('Podsumowanie kosztów', podsumowanieKosztowEmailHtml(z), '#2563eb')}
-                <div style="text-align:right;margin:14px 0 22px;font-size:20px;font-weight:900;color:#111827">Do zapłaty: ${htmlEscape(zlSerwer(koszty.razem))}</div>
-                ${z?.uwagi ? htmlKartaEmail('Uwagi do zamówienia', htmlEscape(z.uwagi), '#64748b') : ''}
-                <div style="background:#f8fafc;border-radius:18px;padding:18px;margin:20px 0">
-                  <h3 style="margin:0 0 8px;font-size:17px;color:#111827">${htmlEscape(coDalejTytul || (admin ? 'Co dalej w obsłudze?' : 'Co dalej?'))}</h3>
-                  <p style="margin:0;color:#374151;line-height:1.6">${coDalejTekst ? htmlEscape(coDalejTekst) : (admin
-                    ? 'Sprawdź płatność, przygotuj paczkę, wygeneruj etykietę i aktualizuj status zamówienia. Klient dostanie kolejne informacje automatycznie.'
-                    : 'Przyjęliśmy zamówienie. Będziemy informować o kolejnych etapach realizacji. W każdej chwili możesz wrócić do sklepu, sprawdzić szczegóły lub dobrać kolejne produkty do zestawu.')}</p>
-                </div>
-                <div style="margin:22px 0 8px">${ctaHtml}${admin ? emailButton('Otwórz zamówienie w panelu', adminUrl, '#111827') : emailButton('Wróć do sklepu', sklepUrl, '#111827')}</div>
-                ${!admin ? `<p style="font-size:14px;color:#6b7280;line-height:1.6;margin:18px 0 0">${htmlEscape(stopkaTekst || 'Dziękujemy za zaufanie. Życzymy dobrego dnia i udanych zakupów w Artway-TM.')}</p>` : ''}
-              </td>
-            </tr>
-            <tr>
-              <td style="background:#111827;color:#d1d5db;padding:20px 28px;font-size:13px;line-height:1.55">
-                <b style="color:#ffffff">Artway-TM</b><br>
-                Sklep internetowy • ${htmlEscape(linkSklepuEmail('/#/'))}<br>
-                ${admin ? 'To powiadomienie dla administratora sklepu.' : `Status zamówienia: ${htmlEscape(kontoUrl)}`}<br>
-                Wiadomość wysłana automatycznie — odpowiedź trafi do obsługi sklepu.
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-  </html>`;
-}
-function wiadomoscKlientaZamowienie(z) {
-  const imie = tekst(z?.klient?.imie, 80).trim();
-  const paynow = z?.paynow?.redirectUrl ? `\n\nLink do płatności Paynow:\n${z.paynow.redirectUrl}` : '';
-  const telefon = z?.platnoscId === 'telefon' ? '\n\nPrzy przelewie na telefon wpisz w tytule/wiadomości numer zamówienia.' : '';
-  const body = `Dzień dobry${imie ? `, ${imie}` : ''},
-
-dziękujemy za złożenie zamówienia ${z.nr}.
-
-Produkty:
-${linieProduktow(z)}
-
-${podsumowanieKosztowEmailText(z)}
-Płatność: ${z.platnosc || '—'}${paynow}${telefon}
-
-Status i szczegóły zamówienia sprawdzisz na stronie sklepu w sekcji „Moje zamówienia”.
-Jeśli chcesz coś domówić, wróć do sklepu — chętnie pomożemy skompletować kolejne produkty.
-
-Pozdrawiamy
-Artway-TM`;
-  return {
-    subject: `Dziękujemy za zamówienie ${z.nr} — Artway-TM`,
-    text: body,
-    html: htmlLayoutEmail({
-      preheader: `Przyjęliśmy zamówienie ${z.nr}. Sprawdź podsumowanie, płatność i dostawę.`,
-      badge: 'Dziękujemy za zakupy',
-      title: `Zamówienie ${z.nr} przyjęte`,
-      intro: `Dziękujemy${imie ? `, ${imie}` : ''}! Twoje zamówienie jest już zapisane. Poniżej znajdziesz najważniejsze informacje i następny krok.`,
-      z,
-      extraCta: [{ label: 'Moje zamówienia', url: linkSklepuEmail('/#/zamowienia') }],
-    }),
-  };
-}
-function wiadomoscAdminZamowienie(z) {
-  const k = z?.klient || {};
-  const body = `Nowe zamówienie ${z.nr}
-
-Klient: ${[k.imie, k.nazwisko].filter(Boolean).join(' ') || z.email || 'gość'}
-E-mail: ${z.email || 'brak'}
-Telefon: ${k.telefon || 'brak'}
-Adres: ${z.adres || '—'}
-
-Produkty:
-${linieProduktow(z)}
-
-${podsumowanieKosztowEmailText(z)}
-Płatność: ${z.platnosc || '—'}
-Status płatności: ${z.platnoscStatus || z?.paynow?.status || '—'}
-
-Uwagi: ${z.uwagi || 'brak'}`;
-  return {
-    subject: `Nowe zamówienie ${z.nr} — ${zlSerwer(z.razem)}`,
-    text: body,
-    html: htmlLayoutEmail({
-      preheader: `Nowe zamówienie ${z.nr} na kwotę ${zlSerwer(z.razem)} czeka na obsługę.`,
-      badge: 'Panel administratora',
-      title: `Nowe zamówienie ${z.nr}`,
-      intro: `W sklepie pojawiło się nowe zamówienie. Sprawdź płatność, przygotuj wysyłkę i prowadź klienta przez kolejne etapy.`,
-      z,
-      admin: true,
-      mainCta: { label: 'Otwórz panel zamówień', url: linkSklepuEmail('/#/admin/zamowienia') },
-    }),
-  };
-}
-async function dopiszHistorieEmaila(nr, wpis) {
-  const rec = await czytaj('orders', { items: [] });
-  const items = Array.isArray(rec.items) ? rec.items : [];
-  const i = items.findIndex((z) => z.nr === nr);
-  if (i < 0) return;
-  const z = { ...items[i] };
-  const w = z.wysylka || {};
-  w.powiadomienia = [...(Array.isArray(w.powiadomienia) ? w.powiadomienia : []), {
-    czas: new Date().toLocaleString('pl-PL'),
-    ...wpis,
-  }];
-  z.wysylka = w;
-  items[i] = z;
-  await zapisz('orders', { items, updated_at: new Date().toISOString() });
-}
-function emailJuzWyslany(z, typ) {
-  const historia = Array.isArray(z?.wysylka?.powiadomienia) ? z.wysylka.powiadomienia : [];
-  return historia.some((p) => p && p.typ === typ && p.status === 'wysłano');
-}
-async function wyslijEmaileNowegoZamowienia(z, { includeAdmin = true } = {}) {
-  const c = emailKonfiguracja();
-  if (!c.configured) return { configured: false, sent: false, error: 'email_not_configured' };
-  const wyniki = [], errors = [];
-  if (z.email && !emailJuzWyslany(z, 'potwierdzenie')) {
-    const msg = wiadomoscKlientaZamowienie(z);
-    try {
-      const r = await wyslijEmailSMTP({ to: z.email, ...msg });
-      wyniki.push({ to: 'customer', ...r });
-      await dopiszHistorieEmaila(z.nr, { typ: 'potwierdzenie', status: 'wysłano', provider: r.provider, id: r.message_id, automatyczne: true });
-    } catch (e) {
-      errors.push({ to: 'customer', error: e.message });
-      await dopiszHistorieEmaila(z.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
-    }
-  }
-  if (includeAdmin && c.adminTo && !emailJuzWyslany(z, 'admin_nowe')) {
-    const msg = wiadomoscAdminZamowienie(z);
-    try {
-      const r = await wyslijEmailSMTP({ to: c.adminTo, ...msg });
-      wyniki.push({ to: 'admin', ...r });
-      await dopiszHistorieEmaila(z.nr, { typ: 'admin_nowe', status: 'wysłano', provider: r.provider, id: r.message_id, automatyczne: true });
-    } catch (e) {
-      errors.push({ to: 'admin', error: e.message });
-      await dopiszHistorieEmaila(z.nr, { typ: 'admin_nowe', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
-    }
-  }
-  return { configured: true, sent: wyniki.length > 0, results: wyniki, errors };
-}
-
-// ─── E-MAILE STATUSOWE (automatyczne, po stronie serwera) ───
-const MAPA_STATUS_EMAIL = {
-  'w realizacji': 'przygotowanie',
-  'gotowe do wysyłki': 'przygotowanie',
-  'nadane': 'nadanie',
-  'wysłane': 'nadanie',
-  'dostarczone': 'dostarczenie',
-  'zakończone': 'dostarczenie',
-  'zwrot': 'zwrot',
-  'zwrot pieniędzy': 'zwrot_pieniedzy',
-  'anulowane': 'anulowanie',
-};
-const STATUS_EMAIL_META = {
-  przygotowanie: { badge: 'Realizacja zamówienia', title: 'Zamówienie jest przygotowywane', accent: '#7c3aed', opis: 'Kompletujemy produkty i przygotowujemy paczkę do wysyłki. Wkrótce przekażemy przesyłkę przewoźnikowi.', subject: (nr) => `Zamówienie ${nr} jest przygotowywane — Artway-TM` },
-  nadanie: { badge: 'Przesyłka w drodze', title: 'Twoja paczka została nadana', accent: '#059669', opis: 'Przesyłka jest już w InPost. Poniżej znajdziesz numer i link do śledzenia.', subject: (nr) => `Zamówienie ${nr} zostało nadane — Artway-TM` },
-  dostarczenie: { badge: 'Dostarczono', title: 'Przesyłka została dostarczona', accent: '#16a34a', opis: 'Mamy nadzieję, że zakupy sprawią dużo satysfakcji. Zapraszamy ponownie do Artway-TM.', subject: (nr) => `Zamówienie ${nr} zostało dostarczone — Artway-TM` },
-  anulowanie: { badge: 'Aktualizacja zamówienia', title: 'Zamówienie zostało anulowane', accent: '#dc2626', opis: 'Zamówienie zostało anulowane. Jeśli to pomyłka lub masz pytania, po prostu odpowiedz na tę wiadomość.', subject: (nr) => `Zamówienie ${nr} zostało anulowane — Artway-TM` },
-  zwrot: { badge: 'Zwrot przesyłki', title: 'Przesyłka wraca do nadawcy', accent: '#ea580c', opis: 'Przesyłka została oznaczona jako zwrot do nadawcy. Skontaktujemy się w sprawie dalszych kroków.', subject: (nr) => `Zwrot przesyłki dla zamówienia ${nr} — Artway-TM` },
-  zwrot_pieniedzy: { badge: 'Zwrot pieniędzy', title: 'Zwróciliśmy Ci pieniądze', accent: '#0ea5e9', opis: 'Zwrot środków został zainicjowany. Pieniądze wrócą na Twoje konto w ciągu kilku dni roboczych.', subject: (nr) => `Zwrot pieniędzy za zamówienie ${nr} — Artway-TM` },
-  problem: { badge: 'Ważna informacja', title: 'Problem z przesyłką', accent: '#dc2626', opis: 'Przewoźnik zgłosił problem dotyczący przesyłki. Monitorujemy sytuację i przekażemy kolejną informację po jej wyjaśnieniu.', subject: (nr) => `Ważna informacja o przesyłce ${nr} — Artway-TM` },
-};
-function nazwaPrzewoznikaEmail(id) {
-  return ({ inpost: 'InPost', dpd: 'DPD', dhl: 'DHL', orlen: 'ORLEN Paczka', gls: 'GLS', ups: 'UPS', pocztex: 'Pocztex', inny: 'przewoźnika' })[id] || 'przewoźnika';
-}
-function linkSledzeniaEmail(z) {
-  const w = z?.wysylka || {};
-  const wlasny = String(w.trackingUrl || '').trim();
-  if (/^https?:\/\//i.test(wlasny)) return wlasny;
-  const numer = String(w.numer || '').trim();
-  if (!numer) return '';
-  const mapa = {
-    inpost: `https://inpost.pl/sledzenie-przesylek?number=${encodeURIComponent(numer)}`,
-    dpd: `https://tracktrace.dpd.com.pl/parcelDetails?p1=${encodeURIComponent(numer)}`,
-    dhl: `https://www.dhl.com/pl-pl/home/tracking.html?tracking-id=${encodeURIComponent(numer)}`,
-    gls: `https://gls-group.com/PL/pl/sledzenie-paczek/?match=${encodeURIComponent(numer)}`,
-    ups: `https://www.ups.com/track?loc=pl_PL&tracknum=${encodeURIComponent(numer)}`,
-  };
-  return mapa[w.przewoznik] || '';
-}
-// Wszystkie e-maile statusowe korzystają z TEGO SAMEGO szablonu co potwierdzenie zakupu (htmlLayoutEmail).
-const STATUS_EMAIL_CODALEJ = {
-  przygotowanie: ['Co dalej?', 'Kompletujemy Twoje produkty. Gdy paczka trafi do przewoźnika, dostaniesz e-mail z numerem do śledzenia.'],
-  nadanie: ['Śledź swoją paczkę', 'Paczka jest już w drodze. Kliknij „Śledź przesyłkę”, aby zobaczyć jej status. Damy też znać, gdy zostanie dostarczona.'],
-  dostarczenie: ['Dziękujemy za zakupy', 'Mamy nadzieję, że wszystko się podoba. Jeśli coś będzie nie tak, po prostu odpowiedz na tę wiadomość. Zapraszamy ponownie!'],
-  anulowanie: ['Masz pytania?', 'Jeśli anulowanie to pomyłka albo chcesz coś zmienić, odpowiedz na tę wiadomość — pomożemy.'],
-  zwrot: ['Co dalej?', 'Skontaktujemy się w sprawie dalszych kroków dotyczących zwracanej przesyłki.'],
-  zwrot_pieniedzy: ['Zwrot środków', 'Pieniądze wrócą na Twoje konto w ciągu kilku dni roboczych, zależnie od banku. W razie pytań odpowiedz na tę wiadomość.'],
-  problem: ['Czuwamy nad przesyłką', 'Monitorujemy sytuację w InPost i przekażemy kolejną informację zaraz po jej wyjaśnieniu.'],
-};
-function htmlStatusEmail(z, typ, opcje = {}) {
-  const meta = STATUS_EMAIL_META[typ] || STATUS_EMAIL_META.przygotowanie;
-  const imie = tekst(z?.klient?.imie, 80).trim();
-  const w = z?.wysylka || {};
-  const numer = tekst(w.numer, 120).trim();
-  const sledzenie = linkSledzeniaEmail(z);
-  const zamUrl = linkSklepuEmail('/#/zamowienia');
-  const platnoscStatus = tekst(z?.platnoscStatus, 80).trim();
-  // Karta statusu (kolor zależny od etapu) — na górze, tuż pod numerem zamówienia
-  const statusCard = htmlKartaEmail(meta.badge, `<b>${htmlEscape(meta.title)}</b><br><span style="color:#374151">${htmlEscape(meta.opis)}</span>`, meta.accent);
-  const kartaZwrot = typ === 'zwrot_pieniedzy'
-    ? htmlKartaEmail('Zwrot środków', `Kwota zwrotu: <b>${htmlEscape(opcje.kwota != null ? zlSerwer(opcje.kwota) : zlSerwer(z?.razem))}</b><br><span style="color:#374151">Zwrot realizujemy tą samą metodą, którą opłacono zamówienie.</span>`, '#0ea5e9')
-    : '';
-  const kartaTracking = (typ === 'nadanie' || typ === 'problem') && (numer || sledzenie)
-    ? htmlKartaEmail('Śledzenie przesyłki', `${w.przewoznik ? `Przewoźnik: <b>${htmlEscape(nazwaPrzewoznikaEmail(w.przewoznik))}</b><br>` : ''}${numer ? `Numer przesyłki: <b>${htmlEscape(numer)}</b><br>` : ''}${sledzenie ? `Link: <a href="${htmlEscape(sledzenie)}" style="color:#2563eb;font-weight:800">${htmlEscape(sledzenie)}</a>` : ''}`, '#059669')
-    : '';
-  const topCard = `${statusCard}${kartaZwrot}${kartaTracking}`;
-  // Neutralna karta płatności (bez „dokończ płatność”) — metoda, status i kwota
-  const platnoscKartaHtml = `<b>${htmlEscape(z?.platnosc || '—')}</b>${platnoscStatus ? `<br><span style="color:#374151">Status płatności: ${htmlEscape(platnoscStatus)}</span>` : ''}<br><span style="display:inline-block;margin-top:8px;color:#111827;font-weight:800">Kwota: ${htmlEscape(zlSerwer(kosztyEmail(z).razem))}</span>`;
-  const mainCta = typ === 'nadanie' && sledzenie ? { label: 'Śledź przesyłkę', url: sledzenie } : { label: 'Moje zamówienia', url: zamUrl };
-  const extraCta = typ === 'nadanie' && sledzenie ? [{ label: 'Moje zamówienia', url: zamUrl }] : [];
-  const [cdT, cdX] = STATUS_EMAIL_CODALEJ[typ] || STATUS_EMAIL_CODALEJ.przygotowanie;
-  return htmlLayoutEmail({
-    preheader: meta.opis,
-    badge: meta.badge,
-    title: meta.title,
-    intro: `Dzień dobry${imie ? `, ${imie}` : ''}! Poniżej najważniejsze informacje o Twoim zamówieniu ${z?.nr || ''}.`,
-    z,
-    mainCta,
-    extraCta,
-    topCard,
-    platnoscKartaHtml,
-    coDalejTytul: cdT,
-    coDalejTekst: cdX,
-    stopkaTekst: 'Dziękujemy za zaufanie. Zapraszamy ponownie — w sklepie czekają kolejne produkty i okazje.',
-  });
-}
-function wiadomoscStatusowa(z, typ, opcje = {}) {
-  const meta = STATUS_EMAIL_META[typ] || STATUS_EMAIL_META.przygotowanie;
-  const imie = tekst(z?.klient?.imie, 80).trim();
-  const w = z?.wysylka || {};
-  const numer = tekst(w.numer, 120).trim();
-  const sledzenie = linkSledzeniaEmail(z);
-  const powitanie = `Dzień dobry${imie ? `, ${imie}` : ''},`;
-  let tresc = '';
-  if (typ === 'nadanie') tresc = `przesyłka dla zamówienia ${z.nr} została nadana przez ${nazwaPrzewoznikaEmail(w.przewoznik)}.${numer ? `\nNumer przesyłki: ${numer}` : ''}${sledzenie ? `\nŚledzenie: ${sledzenie}` : ''}`;
-  else if (typ === 'przygotowanie') tresc = `Twoje zamówienie ${z.nr} jest obecnie przygotowywane do wysyłki. Damy znać, gdy paczka trafi do przewoźnika.`;
-  else if (typ === 'dostarczenie') tresc = `przesyłka dla zamówienia ${z.nr} została oznaczona jako dostarczona. Dziękujemy za zakupy!`;
-  else if (typ === 'anulowanie') tresc = `zamówienie ${z.nr} zostało anulowane. Jeśli to pomyłka lub masz pytania, odpowiedz na tę wiadomość.`;
-  else if (typ === 'zwrot') tresc = `przesyłka dla zamówienia ${z.nr} została oznaczona jako zwrot do nadawcy. Skontaktujemy się w sprawie dalszych kroków.`;
-  else if (typ === 'zwrot_pieniedzy') tresc = `zwróciliśmy pieniądze za zamówienie ${z.nr}.\nKwota zwrotu: ${opcje.kwota != null ? zlSerwer(opcje.kwota) : zlSerwer(z.razem)}\nŚrodki wrócą na Twoje konto w ciągu kilku dni roboczych, zależnie od banku.`;
-  else if (typ === 'problem') tresc = `przewoźnik zgłosił problem dotyczący przesyłki dla zamówienia ${z.nr}. Monitorujemy sytuację i przekażemy kolejną informację po jej wyjaśnieniu.${numer ? `\nNumer przesyłki: ${numer}` : ''}${sledzenie ? `\nŚledzenie: ${sledzenie}` : ''}`;
-  const body = `${powitanie}\n\n${tresc}\n\n${podsumowanieKosztowEmailText(z)}\n\nSzczegóły sprawdzisz w sekcji „Moje zamówienia”.\n\nPozdrawiamy\nArtway-TM\n${linkSklepuEmail('/#/')}`;
-  return { subject: meta.subject(z.nr), text: body, html: htmlStatusEmail(z, typ, opcje) };
-}
-async function wyslijEmailStatusowy(z, typ, opcje = {}) {
-  const c = emailKonfiguracja();
-  if (!c.configured) return { configured: false, sent: false, error: 'email_not_configured' };
-  if (!z?.email) return { configured: true, sent: false, error: 'no_email' };
-  const msg = wiadomoscStatusowa(z, typ, opcje);
-  try {
-    const r = await wyslijEmailSMTP({ to: z.email, ...msg });
-    await dopiszHistorieEmaila(z.nr, { typ, status: 'wysłano', provider: r.provider, id: r.message_id, automatyczne: true });
-    return { configured: true, sent: true, provider: r.provider, id: r.message_id };
-  } catch (e) {
-    await dopiszHistorieEmaila(z.nr, { typ, status: 'błąd wysyłki', blad: e.message, automatyczne: true });
-    return { configured: true, sent: false, error: e.message };
-  }
-}
-function polaczPowiadomienia(serwerowe, przychodzace) {
-  const a = Array.isArray(serwerowe) ? serwerowe : [];
-  const b = Array.isArray(przychodzace) ? przychodzace : [];
-  const klucz = (p) => `${p?.typ || ''}|${p?.status || ''}|${p?.czas || ''}|${p?.id || ''}`;
-  const widziane = new Set(b.map(klucz));
-  const dodatkowe = a.filter((p) => !widziane.has(klucz(p)));
-  return [...b, ...dodatkowe];
-}
-async function obsluzEmailePrzejsciaStatusu(stary, nowy) {
-  if (!nowy?.nr) return { sent: false };
-  const typy = [];
-  const numerNowy = tekst(nowy?.wysylka?.numer, 120).trim();
-  const numerStary = tekst(stary?.wysylka?.numer, 120).trim();
-  if (numerNowy && numerNowy !== numerStary) typy.push('nadanie');
-  const bladNowy = tekst(nowy?.wysylka?.bladIntegracji, 300).trim();
-  const bladStary = tekst(stary?.wysylka?.bladIntegracji, 300).trim();
-  if (bladNowy && bladNowy !== bladStary) typy.push('problem');
-  if ((stary?.status || '') !== (nowy?.status || '')) {
-    const t = MAPA_STATUS_EMAIL[nowy.status];
-    if (t && !typy.includes(t) && !(t === 'przygotowanie' && typy.includes('nadanie'))) typy.push(t);
-  }
-  if (!typy.length) return { sent: false };
-  const c = emailKonfiguracja();
-  if (!c.configured) return { sent: false, configured: false, typy };
-  // aktualny stan zamówienia z bazy (autorytatywna historia do deduplikacji)
-  const rec = await czytaj('orders', { items: [] });
-  let zapisany = (rec.items || []).find((x) => x.nr === nowy.nr) || nowy;
-  const wyniki = [];
-  for (const typ of typy) {
-    if (emailJuzWyslany(zapisany, typ)) continue;
-    const r = await wyslijEmailStatusowy(zapisany, typ);
-    wyniki.push({ typ, ...r });
-    const rec2 = await czytaj('orders', { items: [] });
-    zapisany = (rec2.items || []).find((x) => x.nr === nowy.nr) || zapisany;
-  }
-  return { sent: wyniki.some((x) => x.sent), configured: true, wyniki, powiadomienia: zapisany?.wysylka?.powiadomienia || [] };
 }
 
 // ─── ALLEGRO API (OAuth, zamówienia, oferty, mapowania) ───
@@ -1412,100 +630,22 @@ function allegroKonfiguracja(req) {
   const scope = [...new Set(`${envScope} ${ALLEGRO_DEFAULT_SCOPE}`.split(/\s+/).map((x) => x.trim()).filter(Boolean))].join(' ');
   const authBaseUrl = env === 'sandbox' ? 'https://allegro.pl.allegrosandbox.pl' : 'https://allegro.pl';
   const apiBaseUrl = env === 'sandbox' ? 'https://api.allegro.pl.allegrosandbox.pl' : 'https://api.allegro.pl';
-  const missingEnv = [];
+  const missingEnv = [], invalidEnv = [];
   if (!clientId) missingEnv.push('ALLEGRO_CLIENT_ID');
   if (!clientSecret) missingEnv.push('ALLEGRO_CLIENT_SECRET');
-  return { env, clientId, clientSecret, redirectUri, scope, authBaseUrl, apiBaseUrl, configured: missingEnv.length === 0, missingEnv };
-}
-function allegroBasicAuth(c) {
-  return `Basic ${Buffer.from(`${c.clientId}:${c.clientSecret}`).toString('base64')}`;
+  if (clientId && allegroCredentialLooksMasked(clientId)) invalidEnv.push('ALLEGRO_CLIENT_ID');
+  if (clientSecret && allegroCredentialLooksMasked(clientSecret)) invalidEnv.push('ALLEGRO_CLIENT_SECRET');
+  return { env, clientId, clientSecret, redirectUri, scope, authBaseUrl, apiBaseUrl, configured: missingEnv.length === 0 && invalidEnv.length === 0, missingEnv, invalidEnv, credentialsRedacted: invalidEnv.length > 0 };
 }
 async function allegroStatus(req) {
   const c = allegroKonfiguracja(req);
   const auth = await czytaj('allegro_auth', {});
-  const wymagane = c.scope.split(/\s+/).filter(Boolean);
-  const autoryzowane = String(auth?.scope || '').split(/\s+/).filter(Boolean);
-  const brakujaceScope = autoryzowane.length ? wymagane.filter((x) => !autoryzowane.includes(x)) : [];
-  return {
-    configured: c.configured,
-    connected: !!(auth && (auth.refresh_token || auth.access_token)),
-    env: c.env,
-    redirectUri: c.redirectUri,
-    missingEnv: c.missingEnv,
-    expires_at: auth?.expires_at || null,
-    account: auth?.account || '',
-    updated_at: auth?.updated_at || null,
-    requiredEnv: ['ALLEGRO_CLIENT_ID', 'ALLEGRO_CLIENT_SECRET'],
-    scope: c.scope,
-    authorizedScope: auth?.scope || '',
-    missingAuthorizedScopes: brakujaceScope,
-    requiresReauth: brakujaceScope.length > 0,
-    recommendedScope: ALLEGRO_DEFAULT_SCOPE,
-    optionalEnv: ['ALLEGRO_REDIRECT_URI', 'ALLEGRO_ENV=production', 'ALLEGRO_SCOPE'],
-  };
+  return buildAllegroConnectionStatus({ configuration: c, auth, requiredScope: c.scope, recommendedScope: ALLEGRO_DEFAULT_SCOPE, text: tekst });
 }
 function bledyAllegroTekst(dane, fallback) {
   const errors = Array.isArray(dane?.errors) ? dane.errors : [];
   const msg = errors.map((e) => [e.code || e.error, e.message, e.userMessage].filter(Boolean).join(': ')).filter(Boolean).join('; ');
   return msg || dane?.error_description || dane?.message || fallback || 'Błąd Allegro';
-}
-async function allegroTokenRequest(req, params) {
-  const c = allegroKonfiguracja(req);
-  if (!c.configured) {
-    const blad = new Error('Allegro API nie jest skonfigurowane. Ustaw ALLEGRO_CLIENT_ID i ALLEGRO_CLIENT_SECRET w Netlify.');
-    blad.code = 'allegro_not_configured';
-    blad.status = 503;
-    blad.missingEnv = c.missingEnv;
-    throw blad;
-  }
-  const r = await fetch(`${c.authBaseUrl}/auth/oauth/token`, {
-    method: 'POST',
-    headers: {
-      'Authorization': allegroBasicAuth(c),
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Accept': 'application/json',
-      'User-Agent': 'Artway-TM/1.0 Netlify Function',
-    },
-    body: new URLSearchParams(params),
-  });
-  const textBody = await r.text();
-  let dane = {};
-  try { dane = textBody ? JSON.parse(textBody) : {}; } catch (e) { dane = { raw: textBody }; }
-  if (!r.ok) {
-    const blad = new Error(bledyAllegroTekst(dane, `Allegro OAuth HTTP ${r.status}`));
-    blad.status = r.status;
-    blad.code = dane.error || 'allegro_oauth_error';
-    blad.allegro = dane;
-    throw blad;
-  }
-  return {
-    ...dane,
-    env: c.env,
-    expires_at: Date.now() + (Math.max(60, Number(dane.expires_in) || 3600) * 1000),
-    updated_at: new Date().toISOString(),
-  };
-}
-async function allegroAccessToken(req) {
-  const c = allegroKonfiguracja(req);
-  if (!c.configured) {
-    const blad = new Error('Allegro API nie jest skonfigurowane. Ustaw ALLEGRO_CLIENT_ID i ALLEGRO_CLIENT_SECRET w Netlify.');
-    blad.code = 'allegro_not_configured';
-    blad.status = 503;
-    blad.missingEnv = c.missingEnv;
-    throw blad;
-  }
-  const auth = await czytaj('allegro_auth', {});
-  if (auth?.access_token && Number(auth.expires_at || 0) > Date.now() + 90000) return auth.access_token;
-  if (!auth?.refresh_token) {
-    const blad = new Error('Allegro nie jest autoryzowane. Kliknij „Połącz Allegro” w panelu admina.');
-    blad.code = 'allegro_not_connected';
-    blad.status = 401;
-    throw blad;
-  }
-  const odswiezony = await allegroTokenRequest(req, { grant_type: 'refresh_token', refresh_token: auth.refresh_token });
-  const zapis = { ...auth, ...odswiezony, refresh_token: odswiezony.refresh_token || auth.refresh_token };
-  await zapisz('allegro_auth', zapis);
-  return zapis.access_token;
 }
 const ALLEGRO_PUBLIC_JSON = 'application/vnd.allegro.public.v1+json';
 const ALLEGRO_BETA_JSON = 'application/vnd.allegro.beta.v1+json';
@@ -1603,7 +743,7 @@ function allegroZdjecia(o) {
   }
   return [...new Set(imgs.map((x) => tekst(x?.url || x, 1000).trim()).filter(Boolean))].slice(0, 16);
 }
-function allegroStatusKolejkiZamowienia(z, poprzednie = {}) {
+function allegroStatusKolejkiZamowienia(z) {
   const status = String(z?.status || '').trim().toUpperCase();
   const fulfillment = String(z?.fulfillmentStatus || z?.fulfillment?.status || '').trim().toUpperCase();
   if (status === 'CANCELLED' || fulfillment === 'CANCELLED') return 'CANCELLED';
@@ -1700,14 +840,44 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
   ]);
   const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
   let products = await allegroAgentProduktyKompletne(data);
-  const mappings = { ...allegroMapowaniaItems(mappingsRec) }, updater = allegroAktualizatorProduktowCentralnych(data, products.keys());
-  const offersById = new Map(allegroOfertyItems(offers).map((offer) => [String(offer?.id || ''), offer]));
-  const now = new Date().toISOString();
-  let quarantined = 0;
+  const baseMappings = { ...allegroMapowaniaItems(mappingsRec) }, updater = allegroAktualizatorProduktowCentralnych(data, products.keys()), pendingUpdates = [];
+  const applyUpdate = (id, fields = {}, remove = []) => {
+    const changed = updater.apply(id, fields, remove);
+    if (changed) pendingUpdates.push({ id: String(id), fields, remove, expectedProduct: products.get(String(id)) });
+    return changed;
+  };
+  const now = new Date().toISOString(), mappingPolicy = normalizeAllegroSyncSettings(offerSettings);
+  const offersList = allegroOfertyItems(offers), offersById = new Map(offersList.map((offer) => [String(offer?.id || ''), offer]));
+  const canonical = canonicalizeAllegroMappings({ mappings: baseMappings, offers: offersList, products, now });
+  const mappings = { ...canonical.mappings };
+  let quarantined = 0, reassessed = 0;
   if (offerSettings.autoCorrections !== false) for (const [offerId, current] of Object.entries(mappings)) {
     const productId = String(current?.productId || current?.previousProductId || '').trim(), product = products.get(productId), offer = offersById.get(String(offerId));
     if (current?.blocked === true) {
-      if (product && (String(product.allegroOfferId || '') === String(offerId) || product.allegroMappingStatus === 'wymaga_sprawdzenia')) updater.apply(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', ...(current.conflict ? { allegroMappingConflict: current.conflict } : {}) }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
+      const reassessment = reassessBlockedAllegroMapping({ current, product, offer, mappings, offersById, minimumScore: mappingPolicy.mappingMinScore, now });
+      if (reassessment) { mappings[offerId] = reassessment; reassessed++; }
+      if (product && (String(product.allegroOfferId || '') === String(offerId) || product.allegroMappingStatus === 'wymaga_sprawdzenia')) applyUpdate(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', ...(current.conflict ? { allegroMappingConflict: current.conflict } : {}) }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
+      continue;
+    }
+    const identityValidation = product && offer ? allegroOcenaPowiazania(product, offer) : null;
+    const administratorConfirmed = /^(admin-|manual-|operator-)/i.test(String(current?.operator || ''));
+    if (identityValidation?.strongConflict && !administratorConfirmed) {
+      mappings[offerId] = {
+        ...current, offerId, previousProductId: productId, productId: '', blocked: true,
+        locked: false, canonicalLocked: false, canonical: false, mappingRole: 'unlinked',
+        operator: 'auto-quarantine:identity-conflict', quarantined_at: now,
+        conflict: { productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), reasons: identityValidation.conflicts },
+      };
+      applyUpdate(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', allegroMappingConflict: mappings[offerId].conflict }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
+      quarantined++;
+      continue;
+    }
+    if (current?.locked === true || current?.canonicalLocked === true) {
+      if (product && offer && !allegroPowiazanieWiarygodne(product, offer)) {
+        const fingerprint = allegroProductSyncFingerprint(product);
+        mappings[offerId] = { ...current, sourceOfTruth: 'store', syncState: current.lastSourceFingerprint === fingerprint ? 'synced' : 'pending', pendingSourceFingerprint: fingerprint, syncRequestedAt: current.syncRequestedAt || now };
+        if (current.lastSourceFingerprint !== fingerprint) applyUpdate(productId, { allegroEditorialSyncPending: true, allegroEditorialSyncPendingAt: now, allegroEditorialSyncState: 'pending', allegroEditorialSyncReason: 'kanoniczne mapowanie — sklep jest źródłem danych' });
+      }
       continue;
     }
     if (!product || !offer || allegroPowiazanieWiarygodne(product, offer)) continue;
@@ -1716,14 +886,13 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
       operator: 'auto-quarantine:name-conflict', quarantined_at: now,
       conflict: { productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300) },
     };
-    updater.apply(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', allegroMappingConflict: mappings[offerId].conflict }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
+    applyUpdate(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', allegroMappingConflict: mappings[offerId].conflict }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
     quarantined++;
   }
   updater.commit();
   products = await allegroAgentProduktyKompletne(data);
-  const mappingPolicy = normalizeAllegroSyncSettings(offerSettings);
-  const used = new Map(Object.values(mappings).map((m) => [String(m?.offerId || ''), String(m?.productId || '')]).filter(([o, p]) => o && p && products.has(p)));
-  const usedProducts = new Set([...used.values()]);
+  const used = new Map(Object.values(mappings).filter((m) => m?.blocked !== true && m?.lifecycle !== 'historical').map((m) => [String(m?.offerId || ''), String(m?.productId || '')]).filter(([o, p]) => o && p && products.has(p)));
+  const usedProducts = new Set(Object.values(mappings).filter((m) => allegroMappingIsCanonical(m)).map((m) => String(m.productId)).filter((id) => products.has(id)));
   let autoMapped = 0, refreshed = 0, descriptionsUpdated = 0, producersUpdated = 0, productsUpdated = 0;
   for (const product of products.values()) {
     const match = allegroDopasowanieOferty(product, offers, mappings, mappingPolicy.mappingMinScore);
@@ -1741,18 +910,22 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
         .sort((left, right) => right.validation.score - left.validation.score)[0];
       if (competitor && validation.score - competitor.validation.score < 6) continue;
     }
+    const fingerprint = allegroProductSyncFingerprint(product);
     const record = {
       ...current, offerId: String(offer.id), productId: String(product.id), allegroProductId: tekst(offer.productId || product.allegroProductId, 120), categoryId: tekst(offer.categoryId || product.allegroCategoryId, 80),
-      productName: tekst(product.nazwa || product.name, 300), linked_at: current.linked_at || new Date().toISOString(), synced_at: new Date().toISOString(), operator: current.operator || `auto:${match.reason}`,
+      productName: tekst(product.nazwa || product.name, 300), linked_at: current.linked_at || now, operator: current.operator || `auto:${match.reason}`,
       confidence: validation.score,
       reason: validation.reason,
       evidence: validation.evidence,
       conflicts: validation.conflicts,
+      warnings: validation.warnings,
       verifiedForSupplier: current.verifiedForSupplier === true || (validation.valid && validation.score >= 88),
       verification: current.verification || (validation.valid && validation.score >= 88 ? 'strong-identifiers' : 'catalog-sync-review'),
       productSnapshot: mappingProductSnapshot(product, data),
+      sourceOfTruth: 'store', syncState: current.lastSourceFingerprint === fingerprint ? 'synced' : 'pending', pendingSourceFingerprint: current.lastSourceFingerprint === fingerprint ? '' : fingerprint,
     };
-    if (!current.offerId) autoMapped++; else refreshed++;
+    if (!current.offerId) autoMapped++;
+    else if (JSON.stringify(record) !== JSON.stringify(current)) refreshed++;
     mappings[String(offer.id)] = record; used.set(String(offer.id), String(product.id)); usedProducts.add(String(product.id));
     const producer = allegroRozpoznajProducenta(product, offer, offerSettings);
     const fields = {
@@ -1760,26 +933,34 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
       ...(record.allegroProductId ? { allegroProductId: record.allegroProductId } : {}),
       ...(record.categoryId ? { allegroCategoryId: record.categoryId } : {}),
       ...(producer ? { producent: producer, marka: product.marka || producer } : {}),
+      ...(!canonicalGtin(product.gtin || product.ean) && canonicalGtin(offer.gtin || offer.ean) ? { ean: tekst(offer.ean || offer.gtin, 80), gtin: tekst(offer.gtin || offer.ean, 80) } : {}),
       allegroSyncedAt: record.synced_at, allegroSyncSource: 'offer-sync',
+      ...(record.syncState === 'pending' ? { allegroEditorialSyncPending: true, allegroEditorialSyncPendingAt: now, allegroEditorialSyncState: 'pending', allegroEditorialSyncReason: 'zmiana danych sklepu po trwałym mapowaniu' } : {}),
     };
     if (offerSettings.syncDescriptions !== false && tekst(offer.descriptionText, 20000).trim()) {
-      fields.opis = tekst(offer.descriptionText, 20000).trim();
-      fields.opisKrotki = allegroOpisKrotkiZTekstu(fields.opis);
-      if (fields.opis !== tekst(product.opis, 20000).trim() || fields.opisKrotki !== tekst(product.opisKrotki, 420).trim()) descriptionsUpdated++;
+      const offerDescription = tekst(offer.descriptionText, 20000).trim();
+      if (offerDescription !== tekst(product.sourceMaterial?.allegroOfferDescription, 20000).trim()) {
+        fields.sourceMaterial = { ...(product.sourceMaterial || {}), allegroOfferDescription: offerDescription };
+        descriptionsUpdated++;
+      }
     }
     if (producer && (producer !== product.producent || producer !== product.marka)) producersUpdated++;
     if (!product.zdjecie && offer.mainImage) fields.zdjecie = offer.mainImage;
     if ((!Array.isArray(product.zdjecia) || !product.zdjecia.length) && Array.isArray(offer.images) && offer.images.length > 1) fields.zdjecia = offer.images.slice(1, 16);
-    if (updater.apply(product.id, fields, ['allegroMappingStatus', 'allegroMappingConflict'])) productsUpdated++;
+    if (applyUpdate(product.id, fields, ['allegroMappingStatus', 'allegroMappingConflict'])) productsUpdated++;
   }
   const productDataChanged = updater.commit();
-  if (autoMapped || refreshed || quarantined || productDataChanged) {
+  const canonicalFinal = canonicalizeAllegroMappings({ mappings, offers: offersList, products, now });
+  const finalMappings = canonicalFinal.mappings;
+  refreshed = Object.keys(finalMappings).filter((offerId) => baseMappings[offerId]
+    && !allegroMappingRecordsEqual(finalMappings[offerId], baseMappings[offerId])).length;
+  if (autoMapped || refreshed || quarantined || reassessed || canonical.changed || canonicalFinal.changed || productDataChanged) {
     await Promise.all([
-      zapisz('allegro_mappings', { items: mappings, updated_at: now }),
-      ...(productDataChanged ? [zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now })] : []),
+      zapiszMapowaniaBezpiecznie(baseMappings, finalMappings, now),
+      ...(productDataChanged ? [zapiszOperacjeProduktow(pendingUpdates, now)] : []),
     ]);
   }
-  return { mappings, autoMapped, refreshed, quarantined, descriptionsUpdated, producersUpdated, productsUpdated };
+  return { mappings: finalMappings, autoMapped, refreshed, quarantined, reassessed, descriptionsUpdated, producersUpdated, productsUpdated, canonical: canonicalFinal.stats };
 }
 function allegroAgentWirtualnyProduktOferty(line = {}, offer = {}) {
   const offerId = tekst(line.offerId || offer.id || '', 120).trim();
@@ -1918,8 +1099,6 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
     }
     lineMatches.set(orderId, matched);
   }
-  // Dokumenty producentów są wyłącznie odczytywane tutaj do prezentacji decyzji agenta.
-  // Jedynym silnikiem, który może je zmieniać, jest kanoniczny Plan zatowarowania.
   const supplierOrders = Array.isArray(dane.artway_agent_ai_zlecenia)
     ? dane.artway_agent_ai_zlecenia.map((z) => ({ ...z, pozycje: Array.isArray(z.pozycje) ? z.pozycje.map((p) => ({ ...p })) : [] }))
     : [];
@@ -1938,8 +1117,6 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
       if (!match?.id) return { offerId: line.offerId, nazwa: line.offerName || offer.name || 'Produkt Allegro', ilosc: quantity, decision: 'nierozpoznany', reason: 'Brak jednoznacznego EAN/SKU lub mapowania oferty' };
       const productId = match.id, meta = kartoteki[productId] && typeof kartoteki[productId] === 'object' ? kartoteki[productId] : {};
       const known = Object.prototype.hasOwnProperty.call(stany, productId) && stany[productId] !== '' && stany[productId] != null && Number.isFinite(Number(stany[productId]));
-      // Brak kartoteki stanu oznacza 0 szt. do planowania zakupu. Nie może
-      // blokować zamówienia producenta dla zatwierdzonego powiązania.
       const stock = known ? Math.max(0, Number(stany[productId]) || 0) : 0, reserved = reservations.get(productId) || 0, available = stock - reserved, shortage = Math.max(0, -available);
       const docs = supplierDocsByProduct.get(productId) || [];
       const location = tekst(meta.lokalizacja || '', 120), classification = classifyWarehousePosition({ matched: true, stockKnown: known, shortage, location });
@@ -2056,9 +1233,6 @@ function allegroMapowaniaItems(raw) {
 function allegroNormalizujKlucz(v = '') {
   return tekst(v, 500).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 }
-function allegroKluczGtin(v = '') {
-  return canonicalGtin(v) || allegroNormalizujKlucz(v);
-}
 function allegroTokeny(v = '') {
   return new Set(allegroNormalizujKlucz(v).split(/\s+/).filter((x) => x.length > 2));
 }
@@ -2119,7 +1293,7 @@ function allegroOpisKrotki(product = {}, podobne = []) {
 function allegroOpisPelny(product = {}, shortDescription = '') {
   const blocks = [];
   if (shortDescription) blocks.push({ type: 'lead', text: shortDescription });
-  const raw = tekst(allegroSanitizePlainText(product.opis || '').text, 20000)
+  const raw = tekst(allegroSanitizePlainText(product.allegroDescription || product.opis || '').text, 20000)
     .replace(/<\s*br\s*\/?>/gi, '\n')
     .replace(/<\s*\/\s*(p|div|h[1-6]|li)\s*>/gi, '\n\n')
     .replace(/<\s*li[^>]*>/gi, '• ')
@@ -2152,7 +1326,7 @@ function allegroOpisPelny(product = {}, shortDescription = '') {
     }
   }
   if (!blocks.some((x) => x.type === 'body' || x.type === 'list') && shortDescription) blocks.push({ type: 'body', title: 'Opis produktu', text: shortDescription });
-  const rawKey = allegroNormalizujKlucz(raw), facts = [
+  const rawKey = allegroNormalizujKlucz(raw), facts = product.contentEditorial?.channels === 'shared_store_and_allegro' ? [] : [
     product.marka || product.producent ? `Marka: ${product.marka || product.producent}` : '',
     product.kodProducenta || product.mpn ? `Kod producenta: ${product.kodProducenta || product.mpn}` : '',
     product.gtin || product.ean ? `EAN/GTIN: ${product.gtin || product.ean}` : '',
@@ -2188,23 +1362,6 @@ function allegroSekcjeOpisu(product = {}, shortDescription = '') {
   const source = sections.length ? sections : [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(product.nazwa || 'Produkt')}</p>` }] }];
   const sanitized = allegroSanitizeDescription({ sections: source });
   return sanitized.description.sections.length ? sanitized.description.sections : [{ items: [{ type: 'TEXT', content: `<p>${htmlEscape(product.nazwa || 'Produkt')}</p>` }] }];
-}
-function allegroPatchZDraftu(draft = {}, options = {}) {
-  const out = {};
-  if (draft.name) out.name = draft.name;
-  if (Number(draft.sellingMode?.price?.amount) > 0) out.sellingMode = draft.sellingMode;
-  if (draft.stock?.available !== undefined) out.stock = draft.stock;
-  if (draft.external?.id) out.external = draft.external;
-  if (Array.isArray(draft.images) && draft.images.length) out.images = draft.images;
-  if (Array.isArray(draft.description?.sections) && draft.description.sections.length) out.description = draft.description;
-  if (draft.delivery) out.delivery = draft.delivery;
-  if (draft.afterSalesServices) out.afterSalesServices = draft.afterSalesServices;
-  if (Array.isArray(draft.parameters) && draft.parameters.length) out.parameters = draft.parameters;
-  if (Array.isArray(draft.productSet) && draft.productSet[0]?.product?.id) out.productSet = draft.productSet;
-  if (options.publicationAction === 'activate') out.publication = { status: 'ACTIVE', republish: true };
-  else if (options.publicationAction === 'deactivate') out.publication = { status: 'INACTIVE', republish: true };
-  else out.publication = { republish: true };
-  return out;
 }
 async function allegroPobierzSzczegolyOfert(req, source, limit) {
   const out = [];
@@ -2329,660 +1486,8 @@ async function allegroAudytZgodnosciOfert(req, options = {}) {
   await zapisz('allegro_compliance_audit', audit);
   return { ...audit, run: results, fix, activeOnly };
 }
-function htmlDecode(s = '') {
-  const mapa = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' };
-  return String(s || '').replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (m) => mapa[m] || m).replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n) || 32));
-}
-function stripHtml(s = '') {
-  return htmlDecode(String(s || '').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
-}
-function stripHtmlZPodzialem(s = '') {
-  return htmlDecode(String(s || '')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<li\b[^>]*>/gi, '\n• ')
-    .replace(/<\/(?:li|p|div|section|article|ul|ol|h[1-6])>/gi, '\n')
-    .replace(/<(?:p|div|section|article|ul|ol|h[1-6])\b[^>]*>/gi, '\n')
-    .replace(/<[^>]+>/g, ' '))
-    .replace(/\r/g, '')
-    .split('\n')
-    .map((line) => line.replace(/[\t ]+/g, ' ').trim())
-    .filter(Boolean)
-    .filter((line, index, lines) => index === 0 || line !== lines[index - 1])
-    .join('\n\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-function attrHtml(tag = '', name = '') {
-  const n = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`\\s${n}\\s*=\\s*["']([^"']*)["']`, 'i');
-  return htmlDecode((String(tag || '').match(re) || [])[1] || '');
-}
-function metaHtml(html, name) {
-  const szukane = String(name || '').toLowerCase();
-  for (const m of String(html || '').matchAll(/<meta\b[^>]*>/gi)) {
-    const tag = m[0];
-    const key = (attrHtml(tag, 'property') || attrHtml(tag, 'name') || attrHtml(tag, 'itemprop')).toLowerCase();
-    if (key === szukane) return attrHtml(tag, 'content');
-  }
-  return '';
-}
-function absoluteUrl(base, u) {
-  try { return new URL(u, base).toString(); } catch { return ''; }
-}
-function znajdzPoEtykiecie(text, label) {
-  const re = new RegExp(`${label}\\s*[:\\n ]+([^\\n]{1,180})`, 'i');
-  return tekst((text.match(re) || [])[1] || '', 180).trim();
-}
-function normalizujKluczParametru(s = '') {
-  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-}
-function parametrySlownikoweZHtml(html = '') {
-  const out = {};
-  const source = String(html || '');
-  const starts = [...source.matchAll(/<div\b[^>]*class=["'][^"']*\bdictionary__param\b[^"']*["'][^>]*>/gi)].map((m) => m.index).filter((x) => x >= 0);
-  for (let i = 0; i < starts.length; i++) {
-    const start = starts[i];
-    const end = starts[i + 1] || source.indexOf('</section>', start);
-    const seg = source.slice(start, end > start ? end : start + 3500);
-    const label = stripHtml((seg.match(/<span\b[^>]*class=["'][^"']*\bdictionary__name_txt\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) || [])[1] || '');
-    if (!label || /podmiot odpowiedzialny/i.test(label)) continue;
-    const values = [...seg.matchAll(/<[^>]*class=["'][^"']*\bdictionary__value_txt\b[^"']*["'][^>]*>([\s\S]*?)(?:<\/a>|<\/span>)/gi)]
-      .map((m) => stripHtml(m[1]))
-      .filter(Boolean);
-    const val = values.join(', ').replace(/\s+\/\s*1\s*szt\.$/i, '').trim();
-    if (val) out[normalizujKluczParametru(label)] = val;
-  }
-  return out;
-}
-function parametr(dict, labels = []) {
-  const keys = Object.keys(dict || {});
-  for (const label of labels) {
-    const n = normalizujKluczParametru(label);
-    const exact = keys.find((k) => k === n);
-    if (exact) return tekst(dict[exact], 500).trim();
-    const loose = keys.find((k) => k.includes(n) || n.includes(k));
-    if (loose) return tekst(dict[loose], 500).trim();
-  }
-  return '';
-}
-function liczbaZTekstu(v) {
-  if (v === null || v === undefined || v === '') return 0;
-  const m = String(v).replace(/\s+/g, '').match(/(\d{1,6}(?:[,.]\d{1,2})?)/);
-  return m ? Number(m[1].replace(',', '.')) || 0 : 0;
-}
-function cenaProduktuZHtml(html = '', text = '') {
-  const kandydaci = [];
-  const dodaj = (v, weight = 1) => {
-    const n = liczbaZTekstu(v);
-    if (n > 0) kandydaci.push({ n, weight });
-  };
-  dodaj(metaHtml(html, 'product:price:amount'), 9);
-  dodaj((html.match(/id=["']projector_price_value["'][^>]*data-price=["']([^"']+)/i) || [])[1], 10);
-  dodaj((html.match(/\bprice\s*:\s*parseFloat\((\d+(?:\.\d+)?)/i) || [])[1], 9);
-  dodaj((html.match(/\bcena_raty\s*=\s*(\d+(?:\.\d+)?)/i) || [])[1], 8);
-  dodaj((html.match(/\bvalue["']?\s*:\s*["'](\d+(?:\.\d+)?)["']/i) || [])[1], 7);
-  const okolicaCeny = (html.match(/<[^>]+id=["']projector_prices_section["'][\s\S]{0,2500}/i) || [])[0] || '';
-  for (const m of okolicaCeny.matchAll(/(\d{1,5}[,.]\d{2})\s*zł/gi)) dodaj(m[1], 6);
-  for (const m of String(text || '').matchAll(/(\d{1,5}[,.]\d{2})\s*zł/gi)) dodaj(m[1], 1);
-  kandydaci.sort((a, b) => b.weight - a.weight || a.n - b.n);
-  return kandydaci[0]?.n || 0;
-}
-function jsonLdProdukty(html = '') {
-  const produkty = [];
-  const scripts = [...String(html || '').matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].map((m) => htmlDecode(m[1]).trim()).filter(Boolean);
-  const visit = (x) => {
-    if (!x) return;
-    if (Array.isArray(x)) return x.forEach(visit);
-    if (typeof x !== 'object') return;
-    const typ = Array.isArray(x['@type']) ? x['@type'].join(' ') : String(x['@type'] || '');
-    if (/Product/i.test(typ)) produkty.push(x);
-    if (x['@graph']) visit(x['@graph']);
-  };
-  for (const raw of scripts) {
-    try { visit(JSON.parse(raw)); } catch {}
-  }
-  return produkty;
-}
-function kategoriaZBreadcrumbJsonLd(html = '') {
-  for (const raw of [...String(html || '').matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].map((m) => htmlDecode(m[1]).trim())) {
-    try {
-      const x = JSON.parse(raw);
-      const typ = Array.isArray(x?.['@type']) ? x['@type'].join(' ') : String(x?.['@type'] || '');
-      if (!/BreadcrumbList/i.test(typ)) continue;
-      const items = Array.isArray(x.itemListElement) ? x.itemListElement : [];
-      const names = items.map((it) => tekst(it?.item?.name || it?.name, 160).trim()).filter(Boolean);
-      if (names.length >= 2) return names[names.length - 2] || names[names.length - 1] || '';
-    } catch {}
-  }
-  return '';
-}
-function opisProduktuZHtml(html = '', title = '') {
-  const meta = metaHtml(html, 'og:description') || metaHtml(html, 'description');
-  const longDesc = (html.match(/<section\b[^>]*id=["']projector_longdescription["'][^>]*>([\s\S]*?)<\/section>/i) || [])[1] || '';
-  const shortDesc = (html.match(/<div\b[^>]*class=["'][^"']*\bproduct_name__block\b[^"']*\b--description\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '';
-  const cleanedLong = stripHtmlZPodzialem(longDesc);
-  if (cleanedLong && cleanedLong.length > 80) return tekst(cleanedLong, 12000);
-  const cleanedShort = stripHtmlZPodzialem(shortDesc);
-  if (cleanedShort) return tekst(cleanedShort, 12000);
-  if (meta && !/gry planszowe,\s*gry rodzinne/i.test(meta)) return tekst(stripHtml(meta), 12000);
-  const text = stripHtml(html);
-  const opisStart = text.indexOf(String(title || '').trim());
-  return opisStart >= 0 ? tekst(text.slice(opisStart + String(title || '').length, opisStart + 8000), 12000) : '';
-}
-function opisKrotkiProduktuZHtml(html = '', opis = '') {
-  const meta = metaHtml(html, 'og:description') || metaHtml(html, 'description');
-  const shortDesc = (html.match(/<div\b[^>]*class=["'][^"']*\bproduct_name__block\b[^"']*\b--description\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '';
-  const cleanedShort = stripHtml(shortDesc);
-  if (cleanedShort && cleanedShort.length > 20) return tekst(cleanedShort, 500);
-  if (meta && !/gry planszowe,\s*gry rodzinne/i.test(meta)) return tekst(stripHtml(meta), 500);
-  const first = String(opis || '').replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).filter((x) => x.length > 20).slice(0, 2).join(' ');
-  return tekst(first || opis, 500);
-}
-function obrazkiProduktuZHtml(url = '', html = '') {
-  const imageSet = new Set();
-  const dodaj = (u) => {
-    const a = absoluteUrl(url, htmlDecode(String(u || '').trim()));
-    if (!a) return;
-    if (/loader\.gif|favicon|logo|payment|platnos|bannery|standards|mask|sprite|icon-|\/icons?\//i.test(a)) return;
-    if (!/\.(jpe?g|png|webp)(?:[?#].*)?$/i.test(a)) return;
-    imageSet.add(a);
-  };
-  dodaj(metaHtml(html, 'og:image'));
-  const gallery = (String(html || '').match(/<section\b[^>]*id=["']projector_photos["'][^>]*>([\s\S]*?)<\/section>/i) || [])[1] || '';
-  for (const m of gallery.matchAll(/<img\b[^>]*\bdata-img_high_res=["']([^"']+)["'][^>]*>/gi)) dodaj(m[1]);
-  for (const m of gallery.matchAll(/<img\b[^>]*class=["'][^"']*\bphotos__photo\b(?![^"']*\b--nav\b)[^"']*["'][^>]*>/gi)) dodaj(attrHtml(m[0], 'data-img_high_res') || attrHtml(m[0], 'src'));
-  for (const m of String(html || '').matchAll(/<link\b[^>]*rel=["']preload["'][^>]*as=["']image["'][^>]*>/gi)) dodaj(attrHtml(m[0], 'href'));
-  if (imageSet.size < 2) for (const m of String(html || '').matchAll(/<img\b[^>]*(?:src|data-src|data-lazy|data-original)=["']([^"']+)["'][^>]*>/gi)) dodaj(m[1]);
-  if (imageSet.size < 2) for (const m of String(html || '').matchAll(/(?:srcset|data-srcset)=["']([^"']+)["']/gi)) {
-    String(m[1]).split(',').map((x) => x.trim().split(/\s+/)[0]).forEach(dodaj);
-  }
-  return [...imageSet].slice(0, 16);
-}
-function stanProducentaZHtml(html = '', ldProduct = {}) {
-  const liczba = (v) => {
-    const raw = String(v ?? '').trim();
-    if (!raw) return null;
-    const n = Number(raw.replace(',', '.'));
-    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
-  };
-  const inventory = liczba(ldProduct?.offers?.inventoryLevel?.value ?? ldProduct?.offers?.inventoryLevel ?? ldProduct?.inventoryLevel?.value ?? ldProduct?.inventoryLevel);
-  if (inventory !== null) return { quantity: inventory, exact: true, source: 'schema.org inventoryLevel' };
-  const source = String(html || '');
-  const sizesStart = source.search(/\bsizes\s*:\s*\[/i);
-  if (sizesStart >= 0) {
-    const after = source.slice(sizesStart, sizesStart + 250000);
-    const boundary = after.search(/\n\s*subscription\s*:/i);
-    const sizesBlock = boundary > 0 ? after.slice(0, boundary) : after.slice(0, 100000);
-    const amounts = [...sizesBlock.matchAll(/(?:^|[,\s{])amount\s*:\s*["']?(\d+(?:[.,]\d+)?)/g)].map((m) => liczba(m[1])).filter((n) => n !== null && n <= 10000000);
-    if (amounts.length) return { quantity: amounts.reduce((sum, n) => sum + n, 0), exact: true, source: 'IdoSell sizes.amount', variants: amounts.length };
-  }
-  const patterns = [
-    [/\b(?:availableQuantity|stockQuantity|quantityAvailable|inventoryQuantity)\b["']?\s*[:=]\s*["']?(\d+(?:[.,]\d+)?)/i, 'pole ilości w danych strony'],
-    [/\bdata-(?:stock|quantity|available)=["'](\d+(?:[.,]\d+)?)["']/i, 'atrybut ilości produktu'],
-    [/itemprop=["']inventoryLevel["'][^>]*(?:content|value)=["'](\d+(?:[.,]\d+)?)["']/i, 'microdata inventoryLevel'],
-  ];
-  for (const [pattern, label] of patterns) {
-    const n = liczba((source.match(pattern) || [])[1]);
-    if (n !== null) return { quantity: n, exact: true, source: label };
-  }
-  return { quantity: null, exact: false, source: '' };
-}
-function parsujProduktZHtml(url, html) {
-  const text = stripHtml(html);
-  const ldProduct = jsonLdProdukty(html)[0] || {};
-  const dict = parametrySlownikoweZHtml(html);
-  const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
-  const title = metaHtml(html, 'og:title')
-    || tekst(ldProduct.name, 300)
-    || stripHtml((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '')
-    || tekst((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1], 300);
-  const cena = cenaProduktuZHtml(html, text) || liczbaZTekstu(ldProduct?.offers?.price);
-  const zdjecia = obrazkiProduktuZHtml(url, html);
-  const marka = parametr(dict, ['Marka', 'Brand']) || tekst(ldProduct.brand?.name || ldProduct.brand, 160).trim() || (/alexander/i.test(url + text) ? 'Alexander' : '');
-  const producent = /(^|\.)sklep\.alexander\.com\.pl$/i.test(host) ? 'Alexander' : (parametr(dict, ['Producent', 'Manufacturer']) || marka);
-  const symbol = parametr(dict, ['Symbol', 'Kod', 'SKU']) || tekst(ldProduct.sku, 120).trim();
-  const kodProducentaRaw = parametr(dict, ['Kod producenta', 'MPN', 'Kod katalogowy']) || tekst(ldProduct.mpn, 120).trim();
-  const eanRaw = parametr(dict, ['EAN', 'GTIN', 'Kod EAN']) || tekst(ldProduct.gtin13 || ldProduct.gtin || ldProduct.gtin12 || ldProduct.gtin14, 80).trim() || kodProducentaRaw;
-  const ean = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
-  const kodProducenta = symbol || (kodProducentaRaw && normalizujKluczParametru(kodProducentaRaw) !== normalizujKluczParametru(ean) ? kodProducentaRaw : '');
-  const statusHtml = stripHtml((html.match(/id=["']projector_status_description["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '');
-  const statusDostepny = /produkt dostępny|\bdostępny\b|in stock|instock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
-  const statusNiedostepny = /powiadom o dostępności|niedostępny|brak produktu|chwilowo niedostęp|outofstock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
-  const stanProducenta = stanProducentaZHtml(html, ldProduct);
-  const niedostepny = stanProducenta.quantity === 0 || statusNiedostepny || (!statusDostepny && /powiadom o dostępności|niedostępny|brak produktu|chwilowo niedostęp/i.test(text));
-  const dostepny = stanProducenta.quantity !== null ? stanProducenta.quantity > 0 : (statusDostepny || (!niedostepny && /produkt dostępny|\bdostępny\b|in stock|instock/i.test(text)));
-  const checkedAt = new Date().toISOString();
-  const opis = opisProduktuZHtml(html, title);
-  const opisKrotki = opisKrotkiProduktuZHtml(html, opis);
-  const kategoria = kategoriaZBreadcrumbJsonLd(html);
-  const parametry = {
-    symbol,
-    kodProducenta: kodProducentaRaw,
-    ean,
-    seria: parametr(dict, ['Seria']),
-    wiek: parametr(dict, ['Wiek']),
-    liczbaGraczy: parametr(dict, ['Liczba graczy']),
-    wymiaryOpakowania: parametr(dict, ['Wymiary opakowania (dł/sz/wys)', 'Wymiary opakowania']),
-    wagaOpakowania: parametr(dict, ['Waga opakowania']),
-    ostrzezenie: parametr(dict, ['Ostrzeżenie']),
-  };
-  const missing = [];
-  if (!title) missing.push('nazwa');
-  if (!cena) missing.push('cena');
-  if (!ean) missing.push('EAN');
-  if (!zdjecia.length) missing.push('zdjęcia');
-  if (!opisKrotki) missing.push('krótki opis');
-  if (!opis) missing.push('opis');
-  if (!dostepny && !niedostepny) missing.push('dostępność');
-  const confidence = Math.max(20, 100 - missing.length * 14);
-  return {
-    ok: true,
-    url,
-    confidence,
-    missing,
-    product: {
-      nazwa: stripHtml(title).replace(/\s+\|.*$/, ''),
-      opisKrotki,
-      opis,
-      cena: cena || '',
-      kategoria,
-      zdjecie: zdjecia[0] || '',
-      zdjecia: zdjecia.slice(1, 16),
-      producent,
-      marka: marka || producent,
-      gtin: ean,
-      ean,
-      mpn: kodProducenta || symbol,
-      kodProducenta: kodProducenta || symbol,
-      externalId: symbol || '',
-      rozmiar: parametry.wymiaryOpakowania || '',
-      producentUrl: url,
-      sourceUrl: url,
-      dostepnoscProducenta: dostepny ? 'dostępny' : (niedostepny ? 'niedostępny' : 'do sprawdzenia'),
-      stanProducenta: stanProducenta.quantity === null ? '' : stanProducenta.quantity,
-      stanProducentaDokladny: stanProducenta.exact,
-      stanProducentaZrodlo: stanProducenta.source,
-      producentStatus: niedostepny ? 'brak' : (dostepny ? (stanProducenta.quantity === null ? 'dostepny_nieznany' : 'dostepny') : 'nieznany'),
-      producentSprawdzonoAt: checkedAt,
-      parametryProducenta: parametry,
-      parametryZrodla: dict,
-      sourceEvidence: {
-        url,
-        host: (() => { try { return new URL(url).hostname; } catch { return ''; } })(),
-        fetchedAt: checkedAt,
-        title: stripHtml(title),
-        fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict)].slice(0, 80),
-      },
-    },
-    availability: { available: dostepny, text: statusHtml || (dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia')), quantity: stanProducenta.quantity, exact: stanProducenta.exact, source: stanProducenta.source, checkedAt },
-  };
-}
-function markdownInlineTekst(value = '') {
-  return htmlDecode(String(value || '')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/<https?:\/\/[^>]+>/g, ' ')
-    .replace(/[*_`~]+/g, '')
-    .replace(/\\([\\[\]()*_#])/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim());
-}
-function markdownTekstZPodzialem(value = '') {
-  return htmlDecode(String(value || '')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '\n')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/^\s*[-*+]\s+/gm, '• ')
-    .replace(/[*_`~]+/g, '')
-    .replace(/\\([\\[\]()*_#])/g, '$1'))
-    .replace(/\r/g, '')
-    .split('\n')
-    .map((line) => line.replace(/[\t ]+/g, ' ').trim())
-    .filter(Boolean)
-    .filter((line, index, lines) => index === 0 || line !== lines[index - 1])
-    .join('\n\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-function markdownWartoscPoEtykiecie(markdown = '', labels = []) {
-  const lines = String(markdown || '').replace(/\r/g, '').split('\n');
-  const wanted = labels.map(normalizujKluczParametru);
-  for (let i = 0; i < lines.length; i++) {
-    const current = normalizujKluczParametru(markdownInlineTekst(lines[i]));
-    if (!wanted.includes(current)) continue;
-    for (let j = i + 1; j < Math.min(lines.length, i + 6); j++) {
-      const raw = lines[j].trim();
-      if (!raw || /^!\[/.test(raw)) continue;
-      if (/^#{1,6}\s/.test(raw)) break;
-      const value = markdownInlineTekst(raw);
-      if (value) return tekst(value, 500).trim();
-    }
-  }
-  return '';
-}
-function obrazkiProduktuZMarkdown(url = '', markdown = '') {
-  const productId = (String(url).match(/product-pol-(\d+)-/i) || [])[1] || '';
-  const all = [...String(markdown || '').matchAll(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)(?:\s+[^)]*)?\)/gi)]
-    .map((m) => htmlDecode(m[1]).replace(/^http:\/\//i, 'https://'))
-    .filter((image) => /\.(?:jpe?g|png|webp)(?:[?#].*)?$/i.test(image))
-    .filter((image) => !productId || new RegExp(`(?:-|_)${productId}(?:_|-|\\.)`, 'i').test(image));
-  const preferred = all.some((image) => /\/pol_pm_/i.test(image)) ? all.filter((image) => /\/pol_pm_/i.test(image)) : all;
-  const unique = [], keys = new Set();
-  for (const image of preferred) {
-    const key = image.replace(/\/pol_(?:ps|pm|pl)_/i, '/pol_').replace(/[?#].*$/, '');
-    if (keys.has(key)) continue;
-    keys.add(key); unique.push(image);
-  }
-  return unique.slice(0, 16);
-}
-function parsujProduktZMarkdown(url, markdown) {
-  const raw = String(markdown || ''), body = raw.includes('Markdown Content:') ? raw.split('Markdown Content:').slice(1).join('Markdown Content:') : raw;
-  const titleHeader = markdownInlineTekst((raw.match(/^Title:\s*(.+)$/mi) || [])[1] || '');
-  const headings = [...body.matchAll(/^#\s+(.+)$/gm)].map((m) => ({ index: m.index, title: markdownInlineTekst(m[1]) })).filter((x) => x.title);
-  const titleHeading = headings.find((x) => titleHeader && normalizujKluczParametru(x.title) === normalizujKluczParametru(titleHeader)) || headings.find((x) => /product-pol-/i.test(url) && !/strona główna|sklep/i.test(x.title)) || headings[0];
-  const title = titleHeader || titleHeading?.title || '';
-  const productStart = Math.max(0, titleHeading?.index || 0), afterTitle = body.slice(productStart), nextProductBoundary = afterTitle.search(/\n##\s+(?:Produkty podobne|Inni kupili|Opinie|Polecane)/i);
-  const segment = nextProductBoundary > 0 ? afterTitle.slice(0, nextProductBoundary) : afterTitle.slice(0, 50000);
-  const cena = liczbaZTekstu((segment.match(/^##\s+(\d[\d\s]*[,.]\d{2})\s*zł\s*$/mi) || [])[1] || '');
-  const stockMatch = segment.match(/\*\*\s*(\d{1,8})\s*szt\.\s*\*\*/i), quantity = stockMatch ? Math.max(0, Math.floor(Number(stockMatch[1]) || 0)) : null;
-  const statusDostepny = /produkt dostępny|towar dostępny|\bdostępny\b/i.test(segment);
-  const statusNiedostepny = /powiadom o dostępności|produkt niedostępny|chwilowo niedostępny|brak produktu/i.test(segment);
-  const dostepny = quantity !== null ? quantity > 0 : (statusDostepny && !statusNiedostepny);
-  const niedostepny = quantity === 0 || statusNiedostepny;
-  const descriptionCandidates = [...segment.matchAll(/^##\s+(.+)$/gm)].map((m) => ({ index: m.index, title: markdownInlineTekst(m[1]), end: m.index + m[0].length }))
-    .filter((x) => x.title && !/^\d[\d\s]*[,.]\d{2}\s*zł$/i.test(x.title));
-  const descriptionHeading = descriptionCandidates.find((x) => x.index > (segment.search(/^##\s+\d[\d\s]*[,.]\d{2}\s*zł/m) || 0));
-  let descriptionRaw = descriptionHeading ? segment.slice(descriptionHeading.end) : '';
-  const descriptionEnd = descriptionRaw.search(/\n(?:Podmiot odpowiedzialny|Marka|Symbol|Kod producenta|EAN)\s*\n/i);
-  if (descriptionEnd > 0) descriptionRaw = descriptionRaw.slice(0, descriptionEnd);
-  let opis = tekst(markdownTekstZPodzialem([descriptionHeading?.title || '', descriptionRaw].filter(Boolean).join('\n')), 12000).trim();
-  if (opis.length < 80) opis = tekst(markdownTekstZPodzialem(segment.slice(0, 10000)), 12000).trim();
-  const opisKrotki = tekst(opis.replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+/).filter((x) => x.length > 20).slice(0, 2).join(' ') || opis, 500);
-  const marka = markdownWartoscPoEtykiecie(segment, ['Marka', 'Brand']);
-  const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
-  const producent = /(^|\.)sklep\.alexander\.com\.pl$/i.test(host) ? 'Alexander' : (markdownWartoscPoEtykiecie(segment, ['Producent', 'Manufacturer']) || marka);
-  const symbol = markdownWartoscPoEtykiecie(segment, ['Symbol', 'SKU', 'Kod']);
-  const kodProducentaRaw = markdownWartoscPoEtykiecie(segment, ['Kod producenta', 'MPN', 'Kod katalogowy']);
-  const eanRaw = markdownWartoscPoEtykiecie(segment, ['EAN', 'GTIN', 'Kod EAN']) || kodProducentaRaw;
-  const ean = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
-  const kodProducenta = symbol || (kodProducentaRaw && normalizujKluczParametru(kodProducentaRaw) !== normalizujKluczParametru(ean) ? kodProducentaRaw : '');
-  const zdjecia = obrazkiProduktuZMarkdown(url, body);
-  const beforeTitle = body.slice(0, productStart), crumbs = [...beforeTitle.matchAll(/^\s*\d+\.\s+\[([^\]]+)\]/gm)].map((m) => markdownInlineTekst(m[1])).filter((x) => x && !/strona główna/i.test(x));
-  const kategoria = crumbs.at(-1) || markdownWartoscPoEtykiecie(segment, ['Seria']) || marka;
-  const checkedAt = new Date().toISOString();
-  const dict = {
-    marka,
-    symbol,
-    'kod producenta': kodProducentaRaw,
-    ean,
-    seria: markdownWartoscPoEtykiecie(segment, ['Seria']),
-    wiek: markdownWartoscPoEtykiecie(segment, ['Wiek']),
-    'liczba graczy': markdownWartoscPoEtykiecie(segment, ['Liczba graczy']),
-    'wymiary opakowania': markdownWartoscPoEtykiecie(segment, ['Wymiary opakowania', 'Wymiary opakowania (dł/sz/wys)']),
-    'waga opakowania': markdownWartoscPoEtykiecie(segment, ['Waga opakowania']),
-    ostrzezenie: markdownWartoscPoEtykiecie(segment, ['Ostrzeżenie']),
-  };
-  const missing = [];
-  if (!title) missing.push('nazwa');
-  if (!cena) missing.push('cena');
-  if (!ean) missing.push('EAN');
-  if (!zdjecia.length) missing.push('zdjęcia');
-  if (!opisKrotki) missing.push('krótki opis');
-  if (!opis) missing.push('opis');
-  if (!dostepny && !niedostepny) missing.push('dostępność');
-  const confidence = Math.max(20, 100 - missing.length * 14);
-  return {
-    ok: true, url, confidence, missing,
-    product: {
-      nazwa: title.replace(/\s+\|.*$/, '').trim(), opisKrotki, opis, cena: cena || '', kategoria,
-      zdjecie: zdjecia[0] || '', zdjecia: zdjecia.slice(1, 16), producent, marka: marka || producent,
-      gtin: ean, ean, mpn: kodProducenta || symbol, kodProducenta: kodProducenta || symbol, externalId: symbol || '',
-      rozmiar: dict['wymiary opakowania'] || '', producentUrl: url, sourceUrl: url,
-      dostepnoscProducenta: dostepny ? 'dostępny' : (niedostepny ? 'niedostępny' : 'do sprawdzenia'),
-      stanProducenta: quantity === null ? '' : quantity, stanProducentaDokladny: quantity !== null,
-      stanProducentaZrodlo: quantity !== null ? 'ilość pokazana przez producenta' : 'status strony producenta',
-      producentStatus: niedostepny ? 'brak' : (dostepny ? (quantity === null ? 'dostepny_nieznany' : 'dostepny') : 'nieznany'),
-      producentSprawdzonoAt: checkedAt,
-      parametryProducenta: { symbol, kodProducenta: kodProducentaRaw, ean, seria: dict.seria, wiek: dict.wiek, liczbaGraczy: dict['liczba graczy'], wymiaryOpakowania: dict['wymiary opakowania'], wagaOpakowania: dict['waga opakowania'], ostrzezenie: dict.ostrzezenie },
-      parametryZrodla: Object.fromEntries(Object.entries(dict).filter(([, value]) => value)),
-      sourceEvidence: { url, host, fetchedAt: checkedAt, title, retrieval: 'reader-fallback', fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict).filter((key) => dict[key])].slice(0, 80) },
-    },
-    availability: { available: dostepny, text: dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia'), quantity, exact: quantity !== null, source: quantity !== null ? 'ilość pokazana przez producenta' : 'status strony producenta', checkedAt },
-  };
-}
-async function pobierzProduktZCzytnika(target = '') {
-  const source = new URL(target), readerTarget = `http://${source.host}${source.pathname}${source.search}`;
-  const readerUrl = `https://r.jina.ai/${readerTarget}`;
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 28000), started = Date.now();
-  try {
-    const r = await fetch(readerUrl, { signal: controller.signal, redirect: 'follow', headers: { accept: 'text/plain;charset=utf-8', 'accept-language': 'pl-PL,pl;q=0.9', 'cache-control': 'no-cache' } });
-    const markdown = await r.text();
-    if (!r.ok || markdown.length < 800) throw Object.assign(new Error(`Czytnik źródła: HTTP ${r.status || 502}`), { statusCode: r.status || 502 });
-    const parsed = parsujProduktZMarkdown(target, markdown);
-    if (!parsed.product?.nazwa || (!parsed.product?.ean && !parsed.product?.kodProducenta)) throw Object.assign(new Error('Czytnik nie rozpoznał jednoznacznie produktu'), { statusCode: 422 });
-    const fieldSources = { nazwa: 'nagłówek strony producenta', opis: 'pełny opis producenta', cena: 'cena producenta', ean: parsed.product.ean ? 'parametry produktu' : '', kod: parsed.product.kodProducenta ? 'parametry produktu' : '', zdjecia: parsed.product.zdjecie ? 'galeria produktu' : '', dostepnosc: parsed.availability?.source || 'status produktu' };
-    parsed.product.sourceEvidence = { ...(parsed.product.sourceEvidence || {}), requestedUrl: target, resolvedUrl: target, canonicalUrl: target, fieldSources };
-    const quality = Math.max(0, Math.min(100, Number(parsed.confidence || 0) + (String(parsed.product.opis || '').length > 300 ? 4 : 0) + (parsed.product.ean ? 3 : 0)));
-    return { ...parsed, confidence: quality, requestedCandidate: target, resolvedUrl: target, canonicalUrl: target, fieldSources, readerBytes: markdown.length, readerStatus: r.status, durationMs: Date.now() - started };
-  } finally { clearTimeout(timer); }
-}
-async function pobierzProduktProducenta(target = '') {
-  const raw = tekst(target, 4000).trim();
-  const naprawiony = raw.replace(/https\/\//gi, 'https://').replace(/http\/\//gi, 'http://').replace(/&amp;/gi, '&').trim();
-  const bezSledzenia = (value) => { try { const u = new URL(value); ['query_id', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid'].forEach((key) => u.searchParams.delete(key)); u.hash = ''; return u.toString(); } catch { return ''; } };
-  const publiczny = (value) => { try { const h = new URL(value).hostname.toLowerCase(); if (!h || h === 'localhost' || h === '::1' || h.endsWith('.local') || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return false; const m = h.match(/^172\.(\d+)\./); return !(m && Number(m[1]) >= 16 && Number(m[1]) <= 31); } catch { return false; } };
-  const urls = [], dodaj = (value, reason = 'podany adres') => { const clean = bezSledzenia(String(value || '').replace(/[),.;]+$/, '')); if (clean && /^https?:\/\//i.test(clean) && publiczny(clean) && !urls.some((x) => x.url === clean)) urls.push({ url: clean, reason }); };
-  dodaj(naprawiony, naprawiony === raw ? 'podany adres' : 'naprawiono brakujący dwukropek');
-  const starts = [...naprawiony.matchAll(/https?:\/\//gi)].map((m) => m.index);
-  for (let i = 0; i < starts.length; i++) dodaj(naprawiony.slice(starts[i], starts[i + 1] ?? naprawiony.length), 'adres odzyskany ze sklejonego linku');
-  const origins = [...urls].map((x) => { try { const u = new URL(x.url); return /\.[a-z]{2,}$/i.test(u.hostname) ? u.origin : ''; } catch { return ''; } }).filter(Boolean);
-  const paths = [...naprawiony.matchAll(/product-pol-\d+-[^?#\s"'<>]+?\.html/gi)].map((m) => m[0]);
-  for (const origin of origins.slice(-2)) for (const path of paths) dodaj(`${origin}/${path.replace(/^\/+/, '')}`, 'odtworzono adres produktu z identyfikatora w linku');
-  if (!urls.length) { const e = new Error('Nie udało się rozpoznać poprawnego adresu URL produktu'); e.status = 422; e.code = 'invalid_product_url'; throw e; }
-  const candidateScore = (item) => { let score = item.reason.includes('identyfikatora') ? 60 : item.reason.includes('odzyskany') ? 35 : 20; try { const u = new URL(item.url); if (/\.(pl|com|eu|de)$/i.test(u.hostname)) score += 25; if (/\.p(https)?$/i.test(u.hostname)) score -= 80; } catch { score -= 100; } if ((item.url.match(/product-pol-/gi) || []).length > 1) score -= 25; return score; };
-  const candidates = urls.sort((a, b) => candidateScore(b) - candidateScore(a)).slice(0, 5), attempts = [];
-  const fetchOne = async (candidate) => {
-    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 18000), started = Date.now();
-    try {
-      const r = await fetch(candidate.url, { redirect: 'follow', signal: controller.signal, headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'accept-language': 'pl-PL,pl;q=0.9,en;q=0.6', 'cache-control': 'no-cache' } });
-      const html = await r.text(), resolvedUrl = r.url || candidate.url, title = stripHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
-      if (!r.ok || !html) throw Object.assign(new Error(`HTTP ${r.status || 502}`), { statusCode: r.status || 502 });
-      if (html.length < 1200 || /access denied|captcha|cloudflare|verify you are human|odmowa dostępu/i.test(`${title} ${html.slice(0, 2500)}`)) throw Object.assign(new Error('Strona zwróciła blokadę automatycznego odczytu'), { statusCode: 403 });
-      const parsed = parsujProduktZHtml(resolvedUrl, html), canonicalTag = [...html.matchAll(/<link\b[^>]*rel=["'][^"']*canonical[^"']*["'][^>]*>/gi)].map((m) => attrHtml(m[0], 'href')).find(Boolean) || metaHtml(html, 'og:url') || '', canonicalUrl = canonicalTag ? absoluteUrl(resolvedUrl, canonicalTag) : resolvedUrl;
-      const fieldSources = { nazwa: metaHtml(html, 'og:title') ? 'Open Graph' : jsonLdProdukty(html)[0]?.name ? 'schema.org' : 'nagłówek H1', opis: /projector_longdescription/i.test(html) ? 'pełny opis producenta' : metaHtml(html, 'og:description') ? 'Open Graph' : 'treść strony', cena: /projector_price_value/i.test(html) ? 'cena producenta' : jsonLdProdukty(html)[0]?.offers?.price ? 'schema.org' : 'treść strony', ean: parsed.product?.ean ? (jsonLdProdukty(html)[0]?.gtin ? 'schema.org' : 'parametry produktu') : '', kod: parsed.product?.kodProducenta ? (jsonLdProdukty(html)[0]?.mpn ? 'schema.org' : 'parametry produktu') : '', zdjecia: parsed.product?.zdjecie ? (metaHtml(html, 'og:image') ? 'Open Graph + galeria' : 'galeria produktu') : '', dostepnosc: parsed.availability?.source || (parsed.availability?.text ? 'status produktu' : '') };
-      parsed.product.sourceUrl = canonicalUrl;
-      parsed.product.producentUrl = canonicalUrl;
-      parsed.product.sourceEvidence = { ...(parsed.product.sourceEvidence || {}), requestedUrl: candidate.url, resolvedUrl, canonicalUrl, fetchedAt: parsed.product.producentSprawdzonoAt || new Date().toISOString(), fieldSources };
-      const quality = Math.max(0, Math.min(100, Number(parsed.confidence || 0) + (String(parsed.product?.opis || '').length > 300 ? 4 : 0) + (parsed.product?.ean ? 3 : 0)));
-      attempts.push({ url: candidate.url, reason: candidate.reason, status: r.status, ok: true, resolvedUrl, canonicalUrl, bytes: html.length, durationMs: Date.now() - started, confidence: quality, missing: parsed.missing || [] });
-      return { ...parsed, confidence: quality, requestedCandidate: candidate.url, resolvedUrl, canonicalUrl, fieldSources };
-    } catch (error) {
-      attempts.push({ url: candidate.url, reason: candidate.reason, status: Number(error?.statusCode || 0), ok: false, durationMs: Date.now() - started, error: error?.name === 'AbortError' ? 'Przekroczono 18 s oczekiwania' : tekst(error?.message || error, 500) });
-      try {
-        const fallback = await pobierzProduktZCzytnika(candidate.url);
-        attempts.push({ url: candidate.url, reason: 'bezpłatny odczyt zapasowy źródła', status: fallback.readerStatus || 200, ok: true, resolvedUrl: candidate.url, canonicalUrl: candidate.url, bytes: fallback.readerBytes || 0, durationMs: fallback.durationMs || 0, confidence: fallback.confidence, missing: fallback.missing || [] });
-        return fallback;
-      } catch (fallbackError) {
-        attempts.push({ url: candidate.url, reason: 'bezpłatny odczyt zapasowy źródła', status: Number(fallbackError?.statusCode || 0), ok: false, error: fallbackError?.name === 'AbortError' ? 'Przekroczono 28 s oczekiwania' : tekst(fallbackError?.message || fallbackError, 500) });
-      }
-      return null;
-    } finally { clearTimeout(timer); }
-  };
-  const results = (await Promise.all(candidates.map(fetchOne))).filter(Boolean);
-  if (!results.length) { const e = new Error(`Agent sprawdził ${attempts.length} wariantów adresu, ale żaden nie zwrócił danych produktu`); e.status = 502; e.code = 'product_link_unavailable'; e.linkDiagnostics = { requestedUrl: raw, candidates, attempts, retryRecommended: true }; throw e; }
-  const fingerprint = (item) => tekst(item.product?.ean || item.product?.kodProducenta || item.product?.nazwa || item.resolvedUrl, 500).toLowerCase().replace(/\s+/g, ' ').trim();
-  const usable = results.filter((item) => Number(item.confidence || 0) >= 45 && item.product?.nazwa), ranked = usable.length ? usable : results;
-  const unique = [...new Map(ranked.sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0) || (a.missing?.length || 0) - (b.missing?.length || 0)).map((item) => [fingerprint(item), item])).values()];
-  const primary = unique[0], alternatives = unique.slice(0, 5).map((item, index) => ({ id: `candidate-${index + 1}`, url: item.canonicalUrl || item.resolvedUrl, confidence: item.confidence, missing: item.missing || [], fieldSources: item.fieldSources || {}, product: item.product, availability: item.availability }));
-  return { ...primary, requestedUrl: raw, resolvedUrl: primary.resolvedUrl, canonicalUrl: primary.canonicalUrl, repaired: bezSledzenia(raw) !== primary.resolvedUrl, needsChoice: alternatives.length > 1, alternatives, diagnostics: { candidates, attempts, successful: results.length, distinctProducts: alternatives.length, selectedReason: candidates.find((x) => x.url === primary.requestedCandidate)?.reason || 'najpełniejsze dane', retryRecommended: false } };
-}
-export async function inspectProductUrl(target = '') {
-  return pobierzProduktProducenta(target);
-}
-export async function inspectProductUrlViaReader(target = '') {
-  return pobierzProduktZCzytnika(target);
-}
-function kluczCacheLinkuProduktu(value = '') {
-  try {
-    const raw = String(value || '').trim().replace(/https\/\//gi, 'https://').replace(/http\/\//gi, 'http://');
-    const u = new URL(raw);
-    ['query_id', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid'].forEach((key) => u.searchParams.delete(key));
-    u.hash = '';
-    return u.toString().replace(/\/$/, '').toLowerCase();
-  } catch { return String(value || '').trim().toLowerCase(); }
-}
-function aliasyCacheWynikuLinku(target = '', result = {}) {
-  return [...new Set([
-    target,
-    result.requestedUrl,
-    result.resolvedUrl,
-    result.canonicalUrl,
-    ...(Array.isArray(result.alternatives) ? result.alternatives.flatMap((x) => [x?.url, x?.product?.sourceUrl, x?.product?.producentUrl]) : []),
-  ].map(kluczCacheLinkuProduktu).filter(Boolean))].slice(0, 20);
-}
-async function pobierzProduktProducentaZPamiecia(target = '') {
-  const cacheRec = await czytaj('product_url_cache', { items: {}, updated_at: null });
-  const items = cacheRec.items && typeof cacheRec.items === 'object' ? { ...cacheRec.items } : {};
-  const key = kluczCacheLinkuProduktu(target);
-  try {
-    const result = await pobierzProduktProducenta(target);
-    const now = new Date().toISOString();
-    items[key] = { key, aliases: aliasyCacheWynikuLinku(target, result), fetchedAt: now, result };
-    const trimmed = Object.fromEntries(Object.entries(items).sort((a, b) => String(b[1]?.fetchedAt || '').localeCompare(String(a[1]?.fetchedAt || ''))).slice(0, 250));
-    await zapisz('product_url_cache', { items: trimmed, updated_at: now });
-    return { ...result, fromCache: false, cacheSavedAt: now };
-  } catch (error) {
-    const cached = items[key] || Object.values(items).find((x) => Array.isArray(x?.aliases) && x.aliases.includes(key));
-    const ageMs = cached?.fetchedAt ? Date.now() - new Date(cached.fetchedAt).getTime() : Infinity;
-    if (cached?.result && ageMs <= 30 * 86400000 && ['product_link_unavailable', 'fetch_error'].includes(String(error?.code || 'product_link_unavailable'))) {
-      const previous = cached.result;
-      return {
-        ...previous,
-        fromCache: true,
-        stale: true,
-        cacheSavedAt: cached.fetchedAt,
-        cacheAgeHours: Math.max(0, Math.round(ageMs / 360000) / 10),
-        diagnostics: {
-          ...(previous.diagnostics || {}),
-          cacheFallback: true,
-          retryRecommended: true,
-          liveFailure: { message: tekst(error?.message || error, 500), code: tekst(error?.code || '', 120), attempts: error?.linkDiagnostics?.attempts || [] },
-        },
-      };
-    }
-    throw error;
-  }
-}
-function produktLinkDuplikaty(product = {}, products = new Map()) {
-  const norm = allegroNormalizujKlucz;
-  const wanted = {
-    ean: norm(product.gtin || product.ean),
-    external: norm(product.externalId || product.sku),
-    code: norm(product.kodProducenta || product.mpn),
-    url: kluczCacheLinkuProduktu(product.sourceUrl || product.producentUrl),
-    name: tekst(product.nazwa || product.name, 400).trim(),
-  };
-  const out = [];
-  for (const candidate of products.values()) {
-    if (!candidate || String(candidate.id || '') === String(product.id || '')) continue;
-    const reasons = [];
-    let score = 0, blocking = false;
-    const ean = norm(candidate.gtin || candidate.ean), external = norm(candidate.externalId || candidate.sku), code = norm(candidate.kodProducenta || candidate.mpn), candidateUrl = kluczCacheLinkuProduktu(candidate.sourceUrl || candidate.producentUrl);
-    if (wanted.ean && ean === wanted.ean) { reasons.push('ten sam EAN/GTIN'); score = 100; blocking = true; }
-    if (wanted.url && candidateUrl && candidateUrl === wanted.url) { reasons.push('ten sam link producenta'); score = Math.max(score, 100); blocking = true; }
-    if (wanted.external && wanted.external.length >= 3 && external === wanted.external) { reasons.push('ten sam EXTERNAL_ID/SKU'); score = Math.max(score, 98); blocking = true; }
-    if (wanted.code && wanted.code.length >= 3 && code === wanted.code) { reasons.push('ten sam kod producenta'); score = Math.max(score, 96); blocking = true; }
-    const similarity = allegroPodobienstwoIstotne(wanted.name, candidate.nazwa || candidate.name || '');
-    if (wanted.name && norm(wanted.name) === norm(candidate.nazwa || candidate.name || '')) { reasons.push('identyczna nazwa'); score = Math.max(score, 92); }
-    else if (similarity >= 0.72) { reasons.push(`bardzo podobna nazwa ${Math.round(similarity * 100)}%`); score = Math.max(score, Math.round(72 + similarity * 18)); }
-    if (reasons.length) out.push({ productId: String(candidate.id), productName: tekst(candidate.nazwa || candidate.name, 300), ean: tekst(candidate.gtin || candidate.ean, 80), externalId: tekst(candidate.externalId || candidate.sku, 120), code: tekst(candidate.kodProducenta || candidate.mpn, 120), score, blocking, reasons });
-  }
-  return out.sort((a, b) => Number(b.blocking) - Number(a.blocking) || b.score - a.score).slice(0, 10);
-}
-function produktLinkKategoriaSklepu(product = {}, products = new Map()) {
-  const raw = tekst(product.kategoria, 180).trim(), rawKey = allegroNormalizujKlucz(raw), categories = new Map();
-  for (const candidate of products.values()) if (candidate?.kategoria) categories.set(allegroNormalizujKlucz(candidate.kategoria), String(candidate.kategoria));
-  if (rawKey && categories.has(rawKey)) return { name: categories.get(rawKey), confidence: 100, reason: 'identyczna kategoria istnieje w sklepie' };
-  const near = rawKey ? [...categories].find(([key]) => key && (key.includes(rawKey) || rawKey.includes(key))) : null;
-  if (near) return { name: near[1], confidence: 88, reason: 'dopasowano kategorię producenta do katalogu sklepu' };
-  const producer = allegroNormalizujKlucz(product.producent || product.marka), scores = new Map();
-  for (const candidate of products.values()) {
-    if (!candidate?.kategoria) continue;
-    let score = allegroPodobienstwoIstotne(product.nazwa || product.name, candidate.nazwa || candidate.name);
-    if (producer && producer === allegroNormalizujKlucz(candidate.producent || candidate.marka)) score += 0.08;
-    if (score < 0.28) continue;
-    const current = scores.get(candidate.kategoria) || { name: candidate.kategoria, score: 0, count: 0, example: candidate.nazwa || candidate.name || '' };
-    current.score = Math.max(current.score, score); current.count++; scores.set(candidate.kategoria, current);
-  }
-  const best = [...scores.values()].sort((a, b) => (b.score + Math.min(0.12, b.count * 0.02)) - (a.score + Math.min(0.12, a.count * 0.02)))[0];
-  if (best) return { name: best.name, confidence: Math.min(90, Math.round((best.score + Math.min(0.12, best.count * 0.02)) * 100)), reason: `podobny produkt w sklepie: ${tekst(best.example, 160)}` };
-  return { name: raw, confidence: raw ? 50 : 0, reason: raw ? 'kategoria producenta wymaga zatwierdzenia' : 'brak pewnej kategorii sklepu' };
-}
 async function przygotujPakietProduktuZLinku(req, target = '', options = {}) {
-  const inspected = await pobierzProduktProducentaZPamiecia(target);
-  const alternatives = Array.isArray(inspected.alternatives) ? inspected.alternatives : [];
-  const choice = Number.isInteger(options.choice) ? options.choice : null;
-  if (inspected.needsChoice && (choice === null || !alternatives[choice])) {
-    return { ...inspected, workflow: { stage: 'needs_choice', readyForStore: false, readyForAllegro: false, blockers: ['wybierz właściwy produkt ze znalezionych wariantów'], nextAction: 'choose_product' } };
-  }
-  const selected = choice !== null ? alternatives[choice] : null;
-  const sourceProduct = { ...(selected?.product || inspected.product || {}) };
-  const canonicalUrl = tekst(selected?.url || inspected.canonicalUrl || inspected.resolvedUrl || target, 1000);
-  sourceProduct.sourceUrl = canonicalUrl; sourceProduct.producentUrl = canonicalUrl;
-  const [settingsRec, offerSettings] = await Promise.all([czytaj('settings', { data: {}, rev: 0, updated_at: null }), allegroPobierzUstawieniaOfert()]);
-  const data = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {}, products = allegroAgentProduktyCentralne(data);
-  const producer = allegroRozpoznajProducenta(sourceProduct, {}, offerSettings) || tekst(sourceProduct.producent || sourceProduct.marka, 160);
-  const category = produktLinkKategoriaSklepu(sourceProduct, products);
-  const baseProduct = { ...sourceProduct, ...(producer ? { producent: producer, marka: sourceProduct.marka || producer } : {}), ...(category.name ? { kategoria: category.name } : {}) };
-  let offerPreparation = null, offerError = null;
-  try { offerPreparation = await allegroDraftZAutoKategoria(req, baseProduct, { publicationAction: 'keep' }); }
-  catch (error) { offerError = { message: tekst(error?.message || error, 700), code: tekst(error?.code || '', 120), status: Number(error?.status || 0) }; }
-  const auto = offerPreparation?.autoFilled || {}, improved = offerPreparation?.improvedDescriptions || {};
-  const product = {
-    ...baseProduct,
-    ...(!baseProduct.gtin && !baseProduct.ean && (auto.gtin || auto.ean) ? { gtin: auto.gtin || auto.ean, ean: auto.ean || auto.gtin } : {}),
-    ...(!baseProduct.kodProducenta && !baseProduct.mpn && (auto.kodProducenta || auto.mpn) ? { kodProducenta: auto.kodProducenta || auto.mpn, mpn: auto.mpn || auto.kodProducenta } : {}),
-    ...(!baseProduct.zdjecie && auto.zdjecie ? { zdjecie: auto.zdjecie } : {}),
-    ...((!Array.isArray(baseProduct.zdjecia) || !baseProduct.zdjecia.length) && Array.isArray(auto.zdjecia) && auto.zdjecia.length ? { zdjecia: auto.zdjecia.slice(0, 15) } : {}),
-    ...(auto.allegroProductId ? { allegroProductId: auto.allegroProductId } : {}),
-    ...(auto.allegroCategoryId ? { allegroCategoryId: auto.allegroCategoryId } : {}),
-    ...(Array.isArray(auto.allegroParameters) && auto.allegroParameters.length ? { allegroParameters: auto.allegroParameters } : {}),
-    opisKrotki: tekst(baseProduct.opisKrotki || improved.shortDescription || allegroOpisKrotkiZTekstu(baseProduct.opis), 500),
-    opis: tekst(baseProduct.opis || improved.fullDescription, 20000),
-    agentImportSource: inspected.fromCache ? 'pamięć Agenta + katalog Allegro' : 'link producenta + katalog Allegro',
-    agentImportConfidence: Number(selected?.confidence || inspected.confidence || 0),
-    agentImportUrl: canonicalUrl,
-  };
-  const duplicates = produktLinkDuplikaty(product, products), blockingDuplicate = duplicates.find((item) => item.blocking);
-  const blockers = [], warnings = [];
-  if (!tekst(product.nazwa, 300)) blockers.push('brak nazwy');
-  if (!(Number(product.cena) > 0)) blockers.push('brak poprawnej ceny');
-  if (!tekst(product.kategoria, 180)) blockers.push('brak kategorii sklepu');
-  if (blockingDuplicate) blockers.push(`produkt już istnieje w sklepie: #${blockingDuplicate.productId}`);
-  if (!(product.gtin || product.ean || product.kodProducenta || product.mpn)) warnings.push('brak EAN i kodu producenta');
-  if (!product.zdjecie) warnings.push('brak zdjęcia głównego');
-  if (tekst(product.opisKrotki, 500).length < 40) warnings.push('krótki opis wymaga uzupełnienia');
-  if (tekst(product.opis, 20000).length < 150) warnings.push('pełny opis wymaga uzupełnienia');
-  if (!product.allegroCategoryId) warnings.push('nie dobrano kategorii Allegro');
-  if (!product.allegroProductId) warnings.push('nie znaleziono produktu w katalogu Allegro');
-  if (offerError) warnings.push(`Allegro: ${offerError.message}`);
-  const offerMissing = Array.isArray(offerPreparation?.missing) ? offerPreparation.missing : [];
-  const readyForStore = !blockers.length, readyForAllegro = readyForStore && !offerError && !offerMissing.length && !!product.allegroCategoryId;
-  return {
-    ...inspected,
-    needsChoice: false,
-    product,
-    selectedChoice: choice,
-    confidence: Math.max(Number(inspected.confidence || 0), Number(selected?.confidence || 0)),
-    sourceMissing: Array.isArray(inspected.missing) ? inspected.missing : [],
-    missing: [...new Set([...blockers, ...warnings])],
-    duplicateAudit: { blocking: !!blockingDuplicate, selected: blockingDuplicate || null, items: duplicates },
-    storeCategory: category,
-    allegroPreparation: offerPreparation ? { categorySuggestion: offerPreparation.categorySuggestion || null, catalogMatch: offerPreparation.catalogMatch || null, existingOffer: offerPreparation.existingOffer || null, agentDecision: offerPreparation.agentDecision || null, missing: offerMissing, requiredParameters: offerPreparation.requiredParameters || [], supportErrors: offerPreparation.supportErrors || [] } : null,
-    workflow: { stage: blockingDuplicate ? 'duplicate' : readyForAllegro ? 'ready' : readyForStore ? 'store_ready' : 'incomplete', readyForStore, readyForAllegro, blockers, warnings, nextAction: blockingDuplicate ? 'open_existing_product' : readyForAllegro ? 'review_and_save' : 'complete_missing_fields' },
-  };
+  return productLinkPackagePreparer(req, target, options);
 }
 
 function allegroNormTekst(s = '') {
@@ -3081,15 +1586,52 @@ async function allegroSugerujKategorie(req, product = {}, opt = {}) {
 function allegroMaKategorie(product = {}, opt = {}) {
   return !!tekst(opt.categoryId || product.allegroCategoryId || product.categoryId || '', 80).trim();
 }
+function allegroGtinsProduktuKatalogowego(product = {}) {
+  const values = [product.eans, product.gtins, product.ean, product.gtin];
+  for (const parameter of Array.isArray(product.parameters) ? product.parameters : []) {
+    const name = allegroNormalizujKlucz(parameter?.name || parameter?.label || '');
+    const id = String(parameter?.id || '').trim();
+    if (parameter?.options?.isGTIN === true || ['225693', '245669', '245673'].includes(id) || /(^| )(ean|gtin|isbn|issn|kod kreskowy)( |$)/.test(name)) {
+      values.push(parameter?.values, parameter?.valuesLabels, parameter?.value);
+    }
+  }
+  return [...new Set(values.flat(Infinity).map(canonicalGtin).filter(Boolean))];
+}
+function allegroOcenaTozsamosciKatalogu(product = {}, candidate = {}) {
+  const gtin = canonicalGtin(product.gtin || product.ean || '');
+  const candidateGtins = allegroGtinsProduktuKatalogowego(candidate);
+  const nameScore = allegroPodobienstwoNazw(product.nazwa || product.name, candidate.name);
+  const productBrand = allegroNormalizujKlucz(product.producent || product.marka || product.brand || '');
+  const candidateBrand = allegroNormalizujKlucz(candidate.brand || allegroWartoscParametru(candidate, ['producent', 'marka', 'brand']));
+  const brandMatch = !!(productBrand && candidateBrand && (productBrand === candidateBrand || productBrand.includes(candidateBrand) || candidateBrand.includes(productBrand)));
+  const brandConflict = !!(productBrand && candidateBrand && !brandMatch);
+  const gtinMatch = !!(gtin && candidateGtins.includes(gtin));
+  const nameConsistent = nameScore >= 0.6 || (brandMatch && nameScore >= 0.45);
+  const verified = gtinMatch && nameConsistent && !brandConflict;
+  return {
+    verified,
+    gtinMatch,
+    nameScore: Number(nameScore.toFixed(3)),
+    brandMatch,
+    brandConflict,
+    productGtin: gtin,
+    candidateGtins,
+    reason: !gtin ? 'brak poprawnego GTIN'
+      : !gtinMatch ? 'GTIN katalogu jest inny'
+        : brandConflict ? 'producent lub marka są sprzeczne'
+          : !nameConsistent ? 'nazwa produktu katalogowego jest niezgodna'
+            : 'zgodny GTIN oraz zgodne cechy produktu',
+  };
+}
 async function allegroZnajdzProduktKatalogu(req, product = {}) {
-  const gtin = tekst(product.gtin || product.ean || '', 80).trim();
-  const mpn = tekst(product.kodProducenta || product.mpn || '', 160).trim();
+  const gtinRaw = tekst(product.gtin || product.ean || '', 80).trim();
+  const gtin = canonicalGtin(gtinRaw);
   const name = tekst(product.nazwa || product.name || '', 180).trim();
-  const phrase = gtin || mpn || name;
-  if (!phrase) return { selected: null, products: [], searchedBy: '' };
+  if (!gtinRaw) return { selected: null, products: [], searchedBy: '', blockedReason: 'Brak EAN/GTIN — automat nie szuka ani nie podpina produktu katalogowego po nazwie.' };
+  if (!gtin) return { selected: null, products: [], searchedBy: 'GTIN', blockedReason: 'EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną.' };
   try {
-    const searchedBy = gtin ? 'GTIN' : (mpn ? 'MPN' : 'name');
-    const parameters = searchedBy === 'name' ? { phrase, language: 'pl-PL' } : { phrase, mode: searchedBy, language: 'pl-PL' };
+    const searchedBy = 'GTIN';
+    const parameters = { phrase: gtinRaw.replace(/\D/g, ''), mode: 'GTIN', language: 'pl-PL' };
     const raw = await allegroWywolaj(req, '/sale/products', { parameters });
     const source = Array.isArray(raw.products) ? raw.products : (Array.isArray(raw.items) ? raw.items : []);
     const products = source.map((p) => ({
@@ -3102,17 +1644,16 @@ async function allegroZnajdzProduktKatalogu(req, product = {}) {
       descriptionText: allegroOpisTekst(p.description),
       brand: allegroWartoscParametru(p, ['producent', 'marka', 'brand']),
       trustedContent: p.trustedContent || null,
+      productSafety: p.productSafety || null,
       matchScore: Number(allegroPodobienstwoNazw(name, p.name).toFixed(3)),
-    })).filter((p) => p.id);
-    let selected = searchedBy === 'GTIN'
-      ? (products.find((p) => p.eans.includes(gtin)) || products[0] || null)
-      : searchedBy === 'MPN'
-        ? (products[0] || null)
-        : (products.find((p) => p.matchScore >= 0.82) || null);
+    })).filter((p) => p.id).map((p) => ({ ...p, identity: allegroOcenaTozsamosciKatalogu(product, p) }));
+    const verified = products.filter((p) => p.identity.verified).sort((a, b) => b.identity.nameScore - a.identity.nameScore);
+    const ambiguous = verified.length > 1 && (verified[0].identity.nameScore - verified[1].identity.nameScore) < 0.12;
+    let selected = ambiguous ? null : (verified[0] || null);
     if (selected?.id) {
       try {
         const details = await allegroWywolaj(req, `/sale/products/${encodeURIComponent(selected.id)}`);
-        selected = {
+        const detailed = {
           ...selected,
           name: tekst(details.name || selected.name, 300),
           categoryId: tekst(details.category?.id || selected.categoryId, 80),
@@ -3122,12 +1663,21 @@ async function allegroZnajdzProduktKatalogu(req, product = {}) {
           descriptionText: allegroOpisTekst(details.description) || selected.descriptionText,
           brand: allegroWartoscParametru(details, ['producent', 'marka', 'brand']) || selected.brand,
           trustedContent: details.trustedContent || selected.trustedContent || null,
+          productSafety: details.productSafety || selected.productSafety || null,
         };
+        detailed.identity = allegroOcenaTozsamosciKatalogu(product, detailed);
+        selected = detailed.identity.verified ? detailed : null;
       } catch {}
     }
-    return { selected, products: products.slice(0, 10), searchedBy };
+    return {
+      selected,
+      products: products.slice(0, 10),
+      searchedBy,
+      blockedReason: ambiguous ? 'Ten sam GTIN zwrócił kilka podobnych produktów — wymagana jest ręczna decyzja.'
+        : (!selected && products.length ? 'Wyniki GTIN nie mają zgodnej nazwy lub producenta — automat nie podepnie produktu.' : ''),
+    };
   } catch (e) {
-    return { selected: null, products: [], searchedBy: gtin ? 'GTIN' : (mpn ? 'MPN' : 'name'), error: { status: e.status || 0, code: e.code || '', message: e.message || String(e) } };
+    return { selected: null, products: [], searchedBy: 'GTIN', error: { status: e.status || 0, code: e.code || '', message: e.message || String(e) } };
   }
 }
 function allegroBrakujaceParametryWymagane(product = {}, categoryParameters = []) {
@@ -3180,70 +1730,8 @@ async function allegroParametryKategorii(req, categoryId = '') {
     return { parameters: [], errors: [{ key: 'categoryParameters', status: e.status || 0, code: e.code || '', message: e.message || String(e) }] };
   }
 }
-function allegroParamNazwa(p = {}) {
-  return allegroNormTekst(p.name || p.id || '');
-}
-function allegroSlownikValueId(p = {}, regex) {
-  const vals = Array.isArray(p.dictionary) ? p.dictionary
-    : Array.isArray(p.values) ? p.values
-      : Array.isArray(p.restrictions?.allowedValues) ? p.restrictions.allowedValues
-        : [];
-  for (const v of vals) {
-    const label = tekst(v.value || v.name || v.label || '', 200);
-    if (regex.test(label)) return tekst(v.id || v.valueId || v.value || '', 120).trim();
-  }
-  return '';
-}
-function allegroDodajParam(out, p, value, valueId = false) {
-  const id = tekst(p?.id, 80).trim();
-  if (!id || value === undefined || value === null || value === '') return;
-  const v = String(value).trim();
-  if (!v) return;
-  if (valueId) out.push({ id, valuesIds: [v] });
-  else if (/^[a-z0-9]+_[a-z0-9-]+$/i.test(v)) out.push({ id, valuesIds: [v] });
-  else out.push({ id, values: [tekst(v, 500)] });
-}
 function allegroParametryAutomatyczne(product = {}, categoryParameters = []) {
-  const p = product || {};
-  const out = [];
-  const gtin = tekst(p.gtin || p.ean, 80).trim();
-  const kod = tekst(p.kodProducenta || p.mpn || p.externalId || p.sku, 160).trim();
-  const marka = tekst(p.producent || p.marka || '', 160).trim();
-  const material = tekst(p.material || '', 160).trim();
-  const kolor = tekst(p.kolorProduktu || p.color || '', 160).trim();
-  const rozmiar = tekst(p.rozmiar || p.size || '', 160).trim();
-  for (const param of Array.isArray(categoryParameters) ? categoryParameters : []) {
-    const n = allegroParamNazwa(param);
-    if (/\bean\b|gtin|kod kreskowy/.test(n) && gtin) allegroDodajParam(out, param, gtin);
-    else if (/kod producenta|mpn|symbol producenta/.test(n) && kod) allegroDodajParam(out, param, kod);
-    else if (/marka|producent/.test(n) && marka) {
-      const dict = allegroSlownikValueId(param, new RegExp(`^${marka.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
-      allegroDodajParam(out, param, dict || marka, !!dict);
-    } else if (/^stan$|stan produktu|condition/.test(n)) {
-      const nowy = allegroSlownikValueId(param, /nowy|new/i);
-      allegroDodajParam(out, param, nowy || 'Nowy', !!nowy);
-    } else if (/materiał|material/.test(n) && material) {
-      const dict = allegroSlownikValueId(param, new RegExp(`^${material.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
-      allegroDodajParam(out, param, dict || material, !!dict);
-    } else if (/kolor|color/.test(n) && kolor) {
-      const dict = allegroSlownikValueId(param, new RegExp(`^${kolor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
-      allegroDodajParam(out, param, dict || kolor, !!dict);
-    } else if (/rozmiar|size/.test(n) && rozmiar) {
-      const dict = allegroSlownikValueId(param, new RegExp(`^${rozmiar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
-      allegroDodajParam(out, param, dict || rozmiar, !!dict);
-    } else if (param?.required === true && Array.isArray(param.dictionary) && param.dictionary.length === 1) {
-      const only = param.dictionary[0];
-      const value = tekst(only?.id || only?.valueId || only?.value || '', 120).trim();
-      allegroDodajParam(out, param, value, !!(only?.id || only?.valueId));
-    }
-  }
-  const seen = new Set();
-  return out.filter((x) => {
-    const key = `${x.id}:${(x.valuesIds || x.values || []).join('|')}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return allegroAutomaticCategoryParameters(product, categoryParameters);
 }
 function allegroScalParametryBezDuplikatow(...groups) {
   const byId = new Map();
@@ -3259,112 +1747,21 @@ const ALLEGRO_DEFAULT_PRODUCERS = ['Alexander', 'Multigra', 'GoDan'];
 function allegroUstawieniaOfert(raw = {}) {
   const requested = Number(raw?.defaultStock ?? raw?.stock ?? ALLEGRO_DEFAULT_OFFER_STOCK);
   const defaultStock = Number.isFinite(requested) ? Math.min(99999, Math.max(1, Math.floor(requested))) : ALLEGRO_DEFAULT_OFFER_STOCK;
-  const producers = [...new Set((Array.isArray(raw?.producers) ? raw.producers : ALLEGRO_DEFAULT_PRODUCERS).map((x) => tekst(x, 100).trim()).filter(Boolean))].slice(0, 50);
+  const producers = [...new Set((Array.isArray(raw?.producers) ? raw.producers : ALLEGRO_DEFAULT_PRODUCERS).map((x) => canonicalManufacturerName(x, 100)).filter(Boolean))].slice(0, 50);
   const sync = normalizeAllegroSyncSettings(raw);
-  return { defaultStock, republish: true, producers: producers.length ? producers : ALLEGRO_DEFAULT_PRODUCERS, autoCatalog: raw?.autoCatalog !== false, syncDescriptions: raw?.syncDescriptions !== false, autoUpdateOffers: raw?.autoUpdateOffers !== false, autoFees: raw?.autoFees !== false, autoCorrections: raw?.autoCorrections !== false, ...sync, updated_at: raw?.updated_at || null };
+  const autonomousAgentMinutes = Math.min(120, Math.max(15, Number(raw?.autonomousAgentMinutes) || 15));
+  const autoResolveDuplicateMinScore = Math.min(100, Math.max(95, Number(raw?.autoResolveDuplicateMinScore) || 97));
+  return { defaultStock, republish: true, producers: producers.length ? producers : ALLEGRO_DEFAULT_PRODUCERS, autoCatalog: raw?.autoCatalog !== false, syncDescriptions: raw?.syncDescriptions !== false, autoUpdateOffers: raw?.autoUpdateOffers !== false, autoFees: raw?.autoFees !== false, autoCorrections: raw?.autoCorrections !== false, autonomousAgent: raw?.autonomousAgent !== false, autonomousAgentMinutes, autoResolveDuplicates: raw?.autoResolveDuplicates !== false, autoResolveDuplicateMinScore, ...sync, updated_at: raw?.updated_at || null };
 }
 async function allegroPobierzUstawieniaOfert() {
   return allegroUstawieniaOfert(await czytaj('allegro_offer_settings', { defaultStock: ALLEGRO_DEFAULT_OFFER_STOCK, republish: true, producers: ALLEGRO_DEFAULT_PRODUCERS, updated_at: null }));
 }
-async function synchronizujSprzedazZDostepnosciaProducenta(req, results = [], data = {}) {
-  const checked = (Array.isArray(results) ? results : []).filter((x) => x?.ok && x?.productId);
-  const report = { siteHidden: 0, siteRestored: 0, allegroHidden: 0, allegroRestored: 0, unchanged: 0, errors: [] };
-  if (!checked.length) return report;
-  const availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? { ...data.artway_dostepnosc } : {};
-  const productMap = allegroAgentProduktyCentralne(data);
-  const [mappingsRec, offersRec, auditRec, offerSettings] = await Promise.all([
-    czytaj('allegro_mappings', { items: {} }),
-    czytaj('allegro_offers', { items: [], updated_at: null }),
-    czytaj('allegro_availability_automation', { items: {}, updated_at: null }),
-    allegroPobierzUstawieniaOfert(),
-  ]);
-  const mappings = allegroMapowaniaItems(mappingsRec);
-  const offers = allegroOfertyItems(offersRec);
-  const offersById = new Map(offers.map((offer) => [String(offer?.id || ''), offer]));
-  const offerIdsByProduct = new Map();
-  const addOffer = (productId, offerId) => {
-    const pid = tekst(productId, 100).trim(), oid = tekst(offerId, 100).trim();
-    if (!pid || !oid) return;
-    if (!offerIdsByProduct.has(pid)) offerIdsByProduct.set(pid, new Set());
-    offerIdsByProduct.get(pid).add(oid);
-  };
-  for (const [offerId, mapping] of Object.entries(mappings)) {
-    if (mapping?.blocked === true || mapping?.quarantined === true) continue;
-    addOffer(mapping?.productId ?? mapping?.produktId ?? mapping?.id ?? mapping, offerId);
-  }
-  for (const product of productMap.values()) addOffer(product.id, product.allegroOfferId);
-  const auditItems = auditRec.items && typeof auditRec.items === 'object' ? { ...auditRec.items } : {};
-  const cachePatches = new Map();
-  const now = new Date().toISOString();
-  for (const result of checked) {
-    const productId = String(result.productId);
-    const unavailable = result.status === 'brak';
-    const available = !unavailable && (result.available === true || Number(result.quantity) > 0 || ['dostepny', 'dostepny_nieznany', 'niski'].includes(String(result.status || '')));
-    if (!unavailable && !available) { report.unchanged++; continue; }
-    const previousAvailability = availability[productId];
-    const decisionCode = String(previousAvailability?.decision || previousAvailability?.decyzja || '').toLowerCase();
-    const decisionExpiry = Date.parse(previousAvailability?.expiresAt || previousAvailability?.waznaDo || '');
-    const graceActive = decisionCode === 'grace' && Number.isFinite(decisionExpiry) && decisionExpiry > Date.now();
-    const keepSelling = graceActive || decisionCode === 'manual_available';
-    const keepHidden = decisionCode === 'hide_manual';
-    if (unavailable && keepSelling) { report.unchanged++; continue; }
-    if (available && keepHidden) { report.unchanged++; continue; }
-    const automaticAvailability = previousAvailability?.automatic === true || previousAvailability?.source === 'producent-agent';
-    const legacyTemporaryAvailability = !!previousAvailability && !previousAvailability?.source
-      && /chwilowo niedost[eę]pn|brak u producent/i.test(String(previousAvailability?.powod || ''));
-    if (unavailable) {
-      if (!previousAvailability || automaticAvailability || legacyTemporaryAvailability || decisionCode === 'grace') {
-        availability[productId] = { ...(previousAvailability || {}), status: 'niedostepny', powod: decisionCode === 'grace' ? 'Minął termin pozostawienia sprzedaży — producent nadal zgłasza brak' : 'Automatycznie: produkt niedostępny u producenta', data: now, operator: 'agent-dostepnosci', source: decisionCode === 'grace' ? 'supplier-decision' : 'producent-agent', automatic: true, autoRestore: true, producerStatus: result.status, producerCheckedAt: result.checkedAt || now };
-        if (!previousAvailability || String(previousAvailability.status || '') !== 'niedostepny') report.siteHidden++;
-      }
-    } else if (automaticAvailability || ['grace', 'wait_available', 'manual_available'].includes(decisionCode)) {
-      if (result.preserveDecision !== true) delete availability[productId];
-      report.siteRestored++;
-    }
-    for (const offerId of offerIdsByProduct.get(productId) || []) {
-      const offer = offersById.get(String(offerId)) || {};
-      const previousAudit = auditItems[offerId] && typeof auditItems[offerId] === 'object' ? auditItems[offerId] : {};
-      const cachedStatus = String(offer.publication?.status || offer.status || '').toUpperCase();
-      const cachedStock = Math.max(0, Number(offer.stock?.available ?? offer.stock ?? 0) || 0);
-      if (unavailable && previousAudit.automaticallyHidden !== true) {
-        if (cachedStatus && cachedStatus !== 'ACTIVE') {
-          auditItems[offerId] = { ...previousAudit, offerId, productId, automaticallyHidden: false, alreadyInactive: true, checkedAt: now, producerStatus: result.status };
-          report.unchanged++;
-          continue;
-        }
-        try {
-          await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: { stock: { available: 0 }, publication: { republish: true } }, withMeta: true });
-          auditItems[offerId] = { ...previousAudit, offerId, productId, automaticallyHidden: true, previousStock: cachedStock > 0 ? cachedStock : offerSettings.defaultStock, previousStatus: cachedStatus || 'ACTIVE', hiddenAt: now, restoredAt: null, producerStatus: result.status, error: '' };
-          cachePatches.set(String(offerId), { stock: { ...(offer.stock || {}), available: 0 }, saleAvailabilityBlocked: true, saleAvailabilityUpdatedAt: now });
-          report.allegroHidden++;
-        } catch (error) {
-          const item = { offerId, productId, action: 'hide', error: tekst(error?.message || error, 700), code: tekst(error?.code || '', 120) };
-          auditItems[offerId] = { ...previousAudit, ...item, automaticallyHidden: false, failedAt: now, producerStatus: result.status };
-          report.errors.push(item);
-        }
-      } else if (available && previousAudit.automaticallyHidden === true) {
-        const targetStock = Math.max(1, Number(previousAudit.previousStock) || offerSettings.defaultStock);
-        try {
-          await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: { stock: { available: targetStock }, publication: { status: 'ACTIVE', republish: true } }, withMeta: true });
-          auditItems[offerId] = { ...previousAudit, automaticallyHidden: false, restoredAt: now, producerStatus: result.status, restoredStock: targetStock, error: '' };
-          cachePatches.set(String(offerId), { stock: { ...(offer.stock || {}), available: targetStock }, saleAvailabilityBlocked: false, saleAvailabilityUpdatedAt: now });
-          report.allegroRestored++;
-        } catch (error) {
-          const item = { offerId, productId, action: 'restore', error: tekst(error?.message || error, 700), code: tekst(error?.code || '', 120) };
-          auditItems[offerId] = { ...previousAudit, ...item, failedAt: now, producerStatus: result.status };
-          report.errors.push(item);
-        }
-      } else report.unchanged++;
-    }
-  }
-  data.artway_dostepnosc = availability;
-  await zapisz('allegro_availability_automation', { items: auditItems, updated_at: now });
-  if (cachePatches.size) {
-    const updatedOffers = offers.map((offer) => cachePatches.has(String(offer.id)) ? { ...offer, ...cachePatches.get(String(offer.id)) } : offer);
-    await zapisz('allegro_offers', { ...offersRec, items: updatedOffers, updated_at: now });
-  }
-  return report;
-}
+const synchronizujSprzedazZDostepnosciaProducenta = createProductSaleChannelSynchronizer({
+  read: czytaj, write: zapisz, getProducts: allegroAgentProduktyCentralne,
+  getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems,
+  getOfferSettings: allegroPobierzUstawieniaOfert, callAllegro: allegroWywolaj,
+  waitForOperation: allegroCzekajNaOperacjeOferty, text: tekst,
+});
 function allegroRozpoznajProducenta(product = {}, evidence = {}, settings = {}) {
   const allowed = (Array.isArray(settings.producers) && settings.producers.length ? settings.producers : ALLEGRO_DEFAULT_PRODUCERS).map((name) => ({ name, key: allegroNormalizujKlucz(name) }));
   const text = allegroNormalizujKlucz([
@@ -3379,19 +1776,27 @@ function allegroRozpoznajProducenta(product = {}, evidence = {}, settings = {}) 
     || '';
 }
 async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
-  const [settingsRec, offerSettings, previousAudit] = await Promise.all([
+  const [settingsRec, offerSettings, previousAudit, mappingsRec] = await Promise.all([
     czytaj('settings', { data: {}, rev: 0, updated_at: null }),
     allegroPobierzUstawieniaOfert(),
     czytaj('allegro_catalog_maintenance', { cursor: 0, lastRun: null }),
+    czytaj('allegro_mappings', { items: {}, updated_at: null }),
   ]);
   if (offerSettings.autoCatalog === false && offerSettings.syncDescriptions === false && offerSettings.autoUpdateOffers === false && offerSettings.autoFees === false) return { enabled: false, lastRun: previousAudit.lastRun || null };
   const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-  const products = [...allegroAgentProduktyCentralne(data).values()].filter((p) => p && p.id !== undefined);
+  const completeProducts = await allegroAgentProduktyKompletne(data);
+  const products = [...completeProducts.values()].filter((p) => p && p.id !== undefined);
   const limit = Math.min(50, Math.max(1, Number(options.limit) || 10));
   const start = products.length ? Math.max(0, Number(previousAudit.cursor) || 0) % products.length : 0;
-  const selected = products.length <= limit ? products : Array.from({ length: limit }, (_, index) => products[(start + index) % products.length]);
-  const updater = allegroAktualizatorProduktowCentralnych(data);
-  const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, unresolved: 0, errors: [] };
+  const pendingEditorial = products.filter((product) => product.allegroEditorialSyncPending === true)
+    .sort((left, right) => String(left.allegroEditorialSyncPendingAt || '').localeCompare(String(right.allegroEditorialSyncPendingAt || '')));
+  const rotation = products.length <= limit ? products : Array.from({ length: limit }, (_, index) => products[(start + index) % products.length]);
+  const selected = [...new Map([...pendingEditorial, ...rotation].map((product) => [String(product.id), product])).values()].slice(0, limit);
+  const updater = allegroAktualizatorProduktowCentralnych(data, completeProducts.keys()), pendingUpdates = [];
+  const applyUpdate = (id, fields = {}, remove = []) => { const changed = updater.apply(id, fields, remove); if (changed) pendingUpdates.push({ id: String(id), fields, remove, expectedProduct: completeProducts.get(String(id)) }); return changed; };
+  const baseMappings = { ...allegroMapowaniaItems(mappingsRec) }, mappings = { ...baseMappings }, syncedMappingIds = new Set();
+  const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, titles: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, gpsrMatched: 0, categoriesRepaired: 0, unresolved: 0, errors: [] };
+  let responsibleProducers = null;
   for (const product of selected) {
     try {
       const fields = {};
@@ -3409,11 +1814,7 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
           report.matched++;
           const catalogProducer = allegroRozpoznajProducenta({ ...product, ...fields }, catalog, offerSettings);
           if (catalogProducer) { fields.producent = catalogProducer; fields.marka = catalogProducer; }
-          if (offerSettings.syncDescriptions !== false && !tekst(product.opis, 20000).trim() && catalog.descriptionText) {
-            fields.opis = tekst(catalog.descriptionText, 20000).trim();
-            fields.opisKrotki = allegroOpisKrotkiZTekstu(fields.opis);
-            report.descriptions++;
-          }
+          if (offerSettings.syncDescriptions !== false && !tekst(product.opis, 20000).trim() && catalog.descriptionText) fields.sourceMaterial = { ...(product.sourceMaterial || {}), allegroCatalogDescription: tekst(catalog.descriptionText, 20000).trim(), fetchedAt: report.lastRun };
           if (!product.zdjecie && catalog.images?.[0]) fields.zdjecie = catalog.images[0];
           if ((!Array.isArray(product.zdjecia) || !product.zdjecia.length) && catalog.images?.length > 1) fields.zdjecia = catalog.images.slice(1, 16);
         }
@@ -3423,40 +1824,71 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
         if (category?.selected?.id) { fields.allegroCategoryId = category.selected.id; report.categories++; }
       }
       const styledProduct = { ...product, ...fields };
+      const offerTitle = allegroOfferTitle(styledProduct);
+      if (offerTitle && offerTitle !== tekst(product.allegroTitle, 75).trim()) { fields.allegroTitle = offerTitle; report.titles++; }
       if (offerSettings.syncDescriptions !== false) {
         const shortDescription = allegroOpisKrotki(styledProduct, []), fullDescription = allegroOpisPelnyTekst(styledProduct, shortDescription), sections = allegroSekcjeOpisu(styledProduct, shortDescription);
-        if (shortDescription) fields.opisKrotki = shortDescription;
-        if (fullDescription) fields.opis = fullDescription;
+        if (fullDescription) fields.allegroDescription = fullDescription;
         fields.allegroDescriptionSections = sections;
         report.descriptions++;
       }
       if (product.allegroShippingSubsidy === undefined) fields.allegroShippingSubsidy = 3;
       if (!catalog?.id && !product.allegroProductId) report.unresolved++;
       const finalProduct = { ...product, ...fields };
-      if (Object.keys(fields).length && updater.apply(product.id, { ...fields, allegroCatalogCheckedAt: report.lastRun, allegroCatalogSource: 'automatic-maintenance' })) report.updated++;
-      if (offerSettings.autoUpdateOffers !== false) {
+      if (Object.keys(fields).length && applyUpdate(product.id, { ...fields, allegroCatalogCheckedAt: report.lastRun, allegroCatalogSource: 'automatic-maintenance' })) report.updated++;
+      if (offerSettings.autoUpdateOffers !== false || product.allegroEditorialSyncPending === true) {
         const prepared = await allegroDraftZAutoKategoria(req, finalProduct, { publicationAction: 'keep' });
         const offerId = tekst(prepared?.existingOffer?.offer?.id || finalProduct.allegroOfferId, 100).trim();
         if (offerId) {
-          const patch = allegroPatchZDraftu(prepared.payload, { publicationAction: 'keep' });
-          const meta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: patch, withMeta: true });
-          await allegroCzekajNaOperacjeOferty(req, meta.location);
+          const sync = await allegroSyncEditorialOffer({
+            offerId, prepared, product: finalProduct, responsibleProducers,
+            loadResponsibleProducers: () => allegroResponsibleProducerDirectory((path, callOptions) => allegroWywolaj(req, path, callOptions)),
+            patchFromDraft: allegroPatchZDraftu,
+            writePatch: (bodyObj) => allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj, withMeta: true }),
+            waitForOperation: (location) => allegroCzekajNaOperacjeOferty(req, location),
+          });
+          responsibleProducers = sync.responsibleProducers;
+          if (sync.skipped === 'catalog_identity_conflict') {
+            applyUpdate(product.id, { allegroEditorialSyncPending: false, allegroEditorialSyncState: 'requires_mapping_review', allegroEditorialSyncCheckedAt: report.lastRun, allegroEditorialSyncError: 'Automatyczna aktualizacja zatrzymana: powiązana oferta ma inne ID produktu katalogowego Allegro.' });
+            report.unresolved++;
+            continue;
+          }
+          if (sync.gpsrMatched) report.gpsrMatched++;
+          applyUpdate(product.id, { allegroEditorialSyncPending: false, allegroEditorialSyncState: 'synced', allegroEditorialSyncedAt: report.lastRun, allegroEditorialSyncError: '' });
+          if (mappings[offerId] && String(mappings[offerId].productId || '') === String(product.id)) {
+            mappings[offerId] = markAllegroMappingSynced(mappings[offerId], finalProduct, report.lastRun);
+            syncedMappingIds.add(offerId);
+          }
           report.offersUpdated++;
+          if (sync.categoryRepaired) report.categoriesRepaired++;
           if (offerSettings.autoFees !== false) {
             const actual = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`), price = Math.max(0, Number(finalProduct.cenaAllegro || finalProduct.cena) || 0);
             actual.sellingMode = actual.sellingMode || { format: 'BUY_NOW' };actual.sellingMode.price = { amount: price.toFixed(2), currency: 'PLN' };
             const preview = await allegroWywolaj(req, '/pricing/offer-fee-preview', { method: 'POST', bodyObj: { offer: actual, marketplaceId: 'allegro-pl' } }), fee = allegroPodsumujKalkulacjeOplat(preview, price);
-            updater.apply(product.id, { allegroCommissionAmount: fee.commissionAmount, allegroCommissionRate: fee.commissionRate, allegroRecurringFees: fee.recurringFees, allegroFeeTotal: fee.totalPreviewFees, allegroFeePrice: fee.salePrice, allegroFeeCurrency: fee.currency, allegroFeeDetails: { commissions: fee.commissions, quotes: fee.quotes }, allegroFeeCalculatedAt: fee.calculatedAt, allegroFeeSource: fee.source });
+            applyUpdate(product.id, { allegroCommissionAmount: fee.commissionAmount, allegroCommissionRate: fee.commissionRate, allegroRecurringFees: fee.recurringFees, allegroFeeTotal: fee.totalPreviewFees, allegroFeePrice: fee.salePrice, allegroFeeCurrency: fee.currency, allegroFeeDetails: { commissions: fee.commissions, quotes: fee.quotes }, allegroFeeCalculatedAt: fee.calculatedAt, allegroFeeSource: fee.source });
             report.feesUpdated++;
           }
+        } else if (product.allegroEditorialSyncPending === true) {
+          applyUpdate(product.id, { allegroEditorialSyncPending: false, allegroEditorialSyncState: 'requires_publication_decision', allegroEditorialSyncCheckedAt: report.lastRun, allegroEditorialSyncError: 'Brak istniejącej powiązanej oferty. Nowa publikacja wymaga decyzji administratora.' });
+          report.unresolved++;
         }
       }
     } catch (error) {
+      if (product.allegroEditorialSyncPending === true) applyUpdate(product.id, { allegroEditorialSyncState: 'retry', allegroEditorialSyncError: tekst(error?.message || error, 500), allegroEditorialSyncCheckedAt: report.lastRun });
       report.errors.push({ productId: String(product.id), name: tekst(product.nazwa || product.name, 180), error: tekst(error?.message || error, 500) });
     }
   }
   const changed = updater.commit();
-  if (changed) await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: report.lastRun });
+  if (changed) await zapiszOperacjeProduktow(pendingUpdates, report.lastRun);
+  if (syncedMappingIds.size) {
+    const persistedSettings = changed ? await czytaj('settings', { data: {}, rev: 0, updated_at: null }) : { data };
+    const persistedProducts = await allegroAgentProduktyKompletne(persistedSettings.data || data);
+    for (const offerId of syncedMappingIds) {
+      const product = persistedProducts.get(String(mappings[offerId]?.productId || ''));
+      if (product) mappings[offerId] = markAllegroMappingSynced(mappings[offerId], product, report.lastRun);
+    }
+  }
+  await zapiszMapowaniaBezpiecznie(baseMappings, mappings, report.lastRun);
   const audit = { ...report, cursor: products.length ? (start + selected.length) % products.length : 0, totalProducts: products.length, errors: report.errors.slice(0, 20) };
   await zapisz('allegro_catalog_maintenance', audit);
   return audit;
@@ -3484,12 +1916,26 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     allegroWarunkiSprzedazy(req),
     allegroZnajdzProduktKatalogu(req, product),
   ]);
-  const effectiveCategoryId = tekst(catalogMatch?.selected?.categoryId || categoryId, 80).trim();
+  // Edycja treści istniejącej oferty nie może podmieniać jej tożsamości
+  // katalogowej. Zachowanie aktualnego produktu i kategorii zapobiega
+  // konfliktom kategorii, a przekazanie jego ID pozwala Allegro uzupełnić GPSR.
+  const existingCatalogProductId = tekst(existingOffer?.offer?.productId || existingOffer?.offer?.productSet?.[0]?.product?.id || '', 120).trim();
+  const matchedCatalogProductId = tekst(catalogMatch?.selected?.id, 120).trim();
+  const existingIdentityVerified = !!(existingOffer && /(?:zweryfikowane|ręczne mapowanie administratora|external\.id|EAN\/GTIN|kod producenta i nazwa)/i.test(String(existingOffer.reason || '')));
+  const catalogIdentityVerified = catalogMatch?.selected?.identity?.verified === true;
+  const exactExistingCatalogMatch = existingCatalogProductId && matchedCatalogProductId === existingCatalogProductId;
+  const effectiveCategoryId = tekst((exactExistingCatalogMatch ? catalogMatch?.selected?.categoryId : '') || (existingCatalogProductId ? existingOffer?.offer?.categoryId : '') || catalogMatch?.selected?.categoryId || categoryId, 80).trim();
   if (effectiveCategoryId) options.categoryId = effectiveCategoryId;
   const categoryParameters = await allegroParametryKategorii(req, effectiveCategoryId);
   options.salesConditions = salesConditions;
   options.categoryParameters = categoryParameters.parameters;
-  if (catalogMatch?.selected?.id) options.catalogProductId = catalogMatch.selected.id;
+  if (existingCatalogProductId && existingIdentityVerified) {
+    options.catalogProductId = existingCatalogProductId;
+    options.catalogIdentityVerified = true;
+  } else if (catalogIdentityVerified && catalogMatch?.selected?.id) {
+    options.catalogProductId = catalogMatch.selected.id;
+    options.catalogIdentityVerified = true;
+  }
   const catalog = catalogMatch?.selected || {};
   const safeOffer = existingOffer?.offer || {};
   const catalogProducer = allegroRozpoznajProducenta(product, { ...catalog, producent: allegroWartoscParametru(catalog, ['producent', 'marka', 'brand']) || catalog.brand || safeOffer.brand }, offerSettings);
@@ -3524,10 +1970,14 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     similarOffers: similarOffers.map((x) => ({ id: x.offer?.id, name: x.offer?.name, score: Number(x.score.toFixed(2)) })),
     improvedDescriptions: {
       shortDescription: options.shortDescription,
-      fullDescription: allegroOpisPelnyTekst(preparedProduct, options.shortDescription) || options.shortDescription,
+      fullDescription: tekst(preparedProduct.opis, 20000),
+      storeShortDescription: tekst(preparedProduct.opisKrotki, 500),
+      storeFullDescription: tekst(preparedProduct.opis, 20000),
+      allegroDescription: allegroOpisPelnyTekst(preparedProduct, options.shortDescription) || options.shortDescription,
       sections: options.descriptionSections,
     },
     autoFilled: {
+      allegroTitle: allegroOfferTitle(preparedProduct),
       producent: preparedProduct.producent || preparedProduct.marka || '',
       marka: preparedProduct.marka || preparedProduct.producent || '',
       gtin: preparedProduct.gtin || preparedProduct.ean || '',
@@ -3550,11 +2000,14 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
 }
 function allegroDraftZProduktu(product = {}, opt = {}) {
   const p = product || {};
+  const offerTitle = allegroOfferTitle(p);
   const categoryId = tekst(opt.categoryId || p.allegroCategoryId || p.categoryId || '', 80).trim();
   const images = [p.zdjecie, ...(Array.isArray(p.zdjecia) ? p.zdjecia : [])].filter(Boolean).slice(0, 16);
   const externalId = tekst(p.externalId || p.sku || p.kodProducenta || p.mpn || p.id || '', 120).trim();
-  const allegroProductId = tekst(opt.catalogProductId || p.allegroProductId || '', 120).trim();
-  const gtin = tekst(p.gtin || p.ean, 80).trim();
+  const rawGtin = tekst(p.gtin || p.ean, 80).trim();
+  const gtin = canonicalGtin(rawGtin) ? rawGtin.replace(/\D/g, '') : '';
+  const persistedCatalogConfirmed = p.allegroCatalogIdentityConfirmed === true ? tekst(p.allegroProductId, 120).trim() : '';
+  const allegroProductId = tekst(opt.catalogIdentityVerified === true ? opt.catalogProductId : persistedCatalogConfirmed, 120).trim();
   const parameters = [];
   if (gtin) parameters.push({ name: 'EAN', values: [gtin] });
   if (p.kodProducenta || p.mpn) parameters.push({ name: 'Kod producenta', values: [tekst(p.kodProducenta || p.mpn, 120)] });
@@ -3573,14 +2026,15 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
     : (!categoryId && gtin)
       ? { id: gtin, idType: 'GTIN' }
       : {
-          name: tekst(p.nazwa || p.name, 75).trim(),
+          name: offerTitle,
           category: categoryId ? { id: categoryId } : undefined,
           parameters: [...parameters.filter((x) => x.id), ...productParameters],
           images,
         };
   const stockRaw = Number(opt.offerStock ?? ALLEGRO_DEFAULT_OFFER_STOCK);
   const payload = {
-    name: tekst(p.nazwa || p.name, 75).trim(),
+    name: offerTitle,
+    category: categoryId ? { id: categoryId } : undefined,
     productSet: [{
       product: productObj,
     }],
@@ -3605,15 +2059,57 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
   if (Object.keys(afterSalesServices).length) payload.afterSalesServices = afterSalesServices;
   const missing = [];
   if (!payload.name) missing.push('nazwa');
-  if (!categoryId && !allegroProductId && !gtin) missing.push('allegroCategoryId albo EAN/GTIN');
+  if (rawGtin && !gtin) missing.push('poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)');
+  if (!categoryId && !allegroProductId && !gtin) missing.push('ID kategorii Allegro');
   if (!Number(p.cenaAllegro || p.allegroPrice || p.cena || p.price || 0)) missing.push('cena');
   if (!images.length) missing.push('zdjęcia');
   if (!(p.producent || p.marka)) missing.push('producent');
-  if (!gtin && !allegroProductId) missing.push('EAN/GTIN albo ID produktu Allegro');
   for (const param of Array.isArray(opt.requiredParameters) ? opt.requiredParameters : []) missing.push(`parametr Allegro: ${param.name}`);
   const enforced = allegroEnforceDraft(JSON.parse(JSON.stringify(payload)));
   if (!enforced.compliance.ok) missing.push('opis niezgodny z zasadami Allegro');
   return { payload: enforced.draft, missing: [...new Set(missing)], compliance: enforced.compliance };
+}
+
+async function allegroZweryfikujTozsamoscPublikacji(req, product = {}, draft = {}, prepared = {}, opt = {}) {
+  const rawGtin = tekst(product.gtin || product.ean || '', 80).trim();
+  const productGtin = canonicalGtin(rawGtin);
+  if (rawGtin && !productGtin) return { ok: false, code: 'invalid_gtin', reason: 'EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną.' };
+  const draftProduct = draft?.productSet?.[0]?.product || {};
+  const draftId = tekst(draftProduct.id || '', 120).trim();
+  const draftIdType = tekst(draftProduct.idType || '', 20).trim().toUpperCase();
+  if (draftIdType === 'GTIN') {
+    const draftGtin = canonicalGtin(draftId);
+    if (!draftGtin || (productGtin && draftGtin !== productGtin)) return { ok: false, code: 'gtin_identity_mismatch', reason: 'GTIN w szkicu nie jest zgodny z kartoteką sklepu.' };
+    return { ok: true, mode: 'exact_gtin', gtin: draftGtin };
+  }
+  if (draftIdType) return { ok: false, code: 'unsafe_catalog_identifier', reason: `Automatyczne powiązanie przez ${draftIdType} jest zablokowane. Użyj zgodnego GTIN albo ręcznie wskaż ofertę.` };
+  if (!draftId) return { ok: true, mode: productGtin ? 'new_product_with_gtin' : 'new_product_without_gtin', gtin: productGtin, warning: productGtin ? '' : 'Nowa kartoteka bez EAN — bez automatycznego powiązania z Katalogiem Allegro.' };
+
+  const catalogSelected = prepared?.catalogMatch?.selected || {};
+  if (String(catalogSelected.id || '') === draftId && catalogSelected?.identity?.verified === true) {
+    return { ok: true, mode: 'verified_catalog_gtin', catalogProductId: draftId, gtin: productGtin };
+  }
+  if (product.allegroCatalogIdentityConfirmed === true && String(product.allegroProductId || '') === draftId) {
+    return { ok: true, mode: 'admin_confirmed_catalog', catalogProductId: draftId };
+  }
+  const existing = prepared?.existingOffer;
+  const existingCatalogId = tekst(existing?.offer?.productId || existing?.offer?.productSet?.[0]?.product?.id || '', 120).trim();
+  const safeExisting = !!(existing?.offer?.id && /(?:zweryfikowane|ręczn|external\.id|EAN\/GTIN|kod producenta i nazwa)/i.test(String(existing.reason || '')));
+  if (existingCatalogId === draftId && (safeExisting || opt.manualOffer === true)) {
+    return { ok: true, mode: opt.manualOffer === true ? 'admin_selected_offer' : 'verified_existing_offer', catalogProductId: draftId };
+  }
+  if (productGtin) {
+    const catalogMatch = prepared?.catalogMatch?.selected ? prepared.catalogMatch : await allegroZnajdzProduktKatalogu(req, product);
+    if (String(catalogMatch?.selected?.id || '') === draftId && catalogMatch?.selected?.identity?.verified === true) {
+      return { ok: true, mode: 'verified_catalog_gtin', catalogProductId: draftId, gtin: productGtin };
+    }
+  }
+  return {
+    ok: false,
+    code: 'allegro_identity_unverified',
+    reason: 'Zablokowano powiązanie z produktem Katalogu Allegro: UUID nie został potwierdzony zgodnym GTIN oraz zgodnymi cechami produktu. Automat nie może zgadywać po nazwie.',
+    catalogProductId: draftId,
+  };
 }
 
 function allegroPodsumujKalkulacjeOplat(raw = {}, price = 0) {
@@ -3640,15 +2136,21 @@ function allegroPodsumujKalkulacjeOplat(raw = {}, price = 0) {
 function allegroDanePowiazaniaZPrzygotowania(product = {}, prepared = {}, draft = {}) {
   const katalog = prepared?.catalogMatch?.selected || {};
   const draftProduct = draft?.productSet?.[0]?.product || {};
-  const catalogProductId = tekst(katalog.id || (draftProduct.idType ? '' : draftProduct.id) || product.allegroProductId || '', 120).trim();
+  const verifiedCatalogId = katalog?.identity?.verified === true ? tekst(katalog.id, 120).trim() : '';
+  const existingCatalogId = tekst(prepared?.existingOffer?.offer?.productId || prepared?.existingOffer?.offer?.productSet?.[0]?.product?.id || '', 120).trim();
+  const safeExisting = !!(existingCatalogId && /(?:zweryfikowane|ręczn|external\.id|EAN\/GTIN|kod producenta i nazwa)/i.test(String(prepared?.existingOffer?.reason || '')));
+  const confirmedProductId = product.allegroCatalogIdentityConfirmed === true ? tekst(product.allegroProductId, 120).trim() : '';
+  const draftCatalogId = draftProduct.idType ? '' : tekst(draftProduct.id, 120).trim();
+  const catalogProductId = tekst(verifiedCatalogId || (safeExisting && draftCatalogId === existingCatalogId ? draftCatalogId : '') || confirmedProductId, 120).trim();
   const categoryId = tekst(katalog.categoryId || prepared?.autoFilled?.allegroCategoryId || prepared?.categorySuggestion?.selected?.id || product.allegroCategoryId || draftProduct.category?.id || '', 80).trim();
   const producent = tekst(product.producent || product.marka || allegroWartoscParametru(katalog, ['producent', 'marka', 'brand']) || '', 160).trim();
   return { catalogProductId, categoryId, producent };
 }
 const ALLEGRO_AGENT_OFFER_PROCEDURE = [
-  'Sprawdź ID oferty i mapowanie, następnie UUID katalogu, external.id/SKU, EAN, kod producenta i identyczną nazwę.',
+  'Najpierw sprawdź poprawność cyfry kontrolnej EAN/GTIN, a następnie zgodność GTIN, nazwy, producenta i parametrów.',
   'Jeżeli oferta istnieje, połącz ją z produktem i aktualizuj zamiast tworzyć duplikat.',
-  'Dobierz katalog najpierw po EAN, potem po MPN; nazwę uznaj tylko przy wysokiej zgodności.',
+  'Nigdy nie wybieraj produktu katalogowego po samej nazwie ani samym MPN. UUID katalogu wolno zapisać tylko po dokładnej weryfikacji lub ręcznej decyzji administratora.',
+  'Jeżeli produktu nie ma EAN, przygotuj nową kartotekę z kategorią i kompletem parametrów, bez podpinania istniejącego UUID katalogowego.',
   'Uzupełnij producenta, markę, EAN, MPN, kategorię, UUID, parametry i sprawdzone zdjęcia katalogowe.',
   'Nową ofertę zapisz jako INACTIVE; brak stanu magazynowego oznacza 0.',
   'Po sukcesie zapisz powiązanie produkt sklepu–produkt katalogowy–oferta i zamknij zadanie.',
@@ -3714,8 +2216,10 @@ async function allegroZapiszPowiazanieProduktu(product = {}, details = {}) {
   if (Array.isArray(auto.zdjecia) && auto.zdjecia.length && !(product.zdjecia || []).length && !(previousEdit.zdjecia || []).length) autoPatch.zdjecia = auto.zdjecia.slice(0, 15);
   if (Array.isArray(auto.allegroParameters) && auto.allegroParameters.length && !Array.isArray(product.allegroParameters) && !Array.isArray(previousEdit.allegroParameters)) autoPatch.allegroParameters = auto.allegroParameters;
   const improved = details.prepared?.improvedDescriptions || {};
+  if (details.prepared?.autoFilled?.allegroTitle) autoPatch.allegroTitle = tekst(details.prepared.autoFilled.allegroTitle, 75);
   if (improved.shortDescription) autoPatch.opisKrotki = tekst(improved.shortDescription, 500);
   if (improved.fullDescription) autoPatch.opis = tekst(improved.fullDescription, 20000);
+  if (improved.allegroDescription) autoPatch.allegroDescription = tekst(improved.allegroDescription, 20000);
   if (Array.isArray(improved.sections) && improved.sections.length) autoPatch.allegroDescriptionSections = improved.sections;
   if (product.allegroShippingSubsidy === undefined && previousEdit.allegroShippingSubsidy === undefined) autoPatch.allegroShippingSubsidy = 3;
   edits[productId] = {
@@ -4059,9 +2563,6 @@ function allegroZnajdzZamowienieKomunikacji(item = {}, orders = []) {
   if (inText) return { orderId: String(inText.id || inText.nr), order: inText, match: 'order_id_in_message', candidates: [String(inText.id || inText.nr)] };
   const login = String(item.buyerLogin || '').trim().toLowerCase();
   const buyerOrders = login ? list.filter((x) => String(x?.buyerLogin || '').trim().toLowerCase() === login).sort((a, b) => String(b.createdAt || b.firstFetchedAt || '').localeCompare(String(a.createdAt || a.firstFetchedAt || ''))) : [];
-  // Sam login kupującego nie jest bezpiecznym kluczem powiązania — ta sama osoba może mieć
-  // kilka zamówień i kilka niezależnych wątków. Pokazujemy kandydatów, ale nie podstawiamy
-  // danych zamówienia bez identyfikatora z API lub numeru obecnego w treści rozmowy.
   return { orderId: '', order: null, match: '', candidates: buyerOrders.slice(0, 5).map((x) => String(x.id || x.nr)) };
 }
 function allegroStatusZamowieniaOpis(status = '') {
@@ -4192,6 +2693,7 @@ async function allegroWyslijPrzypomnieniaTelegram(data = {}, settings = {}) {
       const delivery = await telegramCenter.managedEvent({
         key: incidentKey, legacyPrefix: `${type}:${item.id}:`, fingerprint: sourceKey, category: 'customer', severity: 'critical', count: 1,
         title: `Nowa ${kind} Allegro`, description: tekst(incoming.text || item.subject || '', 180),
+        doneWhen: 'Odpowiedź została wysłana po sprawdzeniu zamówienia i przesyłki albo sprawę zamknięto wewnętrznie.',
         facts: [`Klient: ${item.buyerLogin || '—'}`, orderId ? `Zam. ${orderId}` : ''].filter(Boolean), href: `https://artwaytm.pl/#/admin/allegro/${target}`,
       }, '', { source: 'allegro-communication' });
       if (delivery.sent || delivery.queued) {
@@ -4202,607 +2704,6 @@ async function allegroWyslijPrzypomnieniaTelegram(data = {}, settings = {}) {
   }
   await zapisz('allegro_communication_telegram_alerts', { items, updated_at: new Date().toISOString() });
   return { sent, skipped, items };
-}
-
-// ─── INPOST ShipX (przesyłki, etykiety, tracking) + Geowidget ───
-const INPOST_ENVY = new Set(['production', 'sandbox']);
-const INPOST_SENDING_METHODS = new Set(['parcel_locker', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
-const INPOST_DROPOFF_METHODS = new Set(['parcel_locker', 'pok', 'pop', 'courier_pok']);
-function inpostEnv() {
-  const env = String(process.env.INPOST_ENV || 'production').trim().toLowerCase();
-  return INPOST_ENVY.has(env) ? env : 'production';
-}
-function inpostBaseUrl() {
-  return inpostEnv() === 'sandbox' ? 'https://sandbox-api-shipx-pl.easypack24.net' : 'https://api-shipx-pl.easypack24.net';
-}
-function inpostPointsBaseUrl() {
-  return inpostEnv() === 'sandbox' ? 'https://sandbox-api-shipx-pl.easypack24.net' : 'https://api-shipx-pl.easypack24.net';
-}
-function inpostKonfiguracja() {
-  const token = tekst(process.env.INPOST_TOKEN || process.env.INPOST_API_TOKEN || '', 4000).trim();
-  const orgId = tekst(process.env.INPOST_ORG_ID || process.env.INPOST_ORGANIZATION_ID || '', 40).trim();
-  const geowidgetToken = tekst(process.env.INPOST_GEOWIDGET_TOKEN || '', 4000).trim();
-  const missingEnv = [];
-  if (!token) missingEnv.push('INPOST_TOKEN');
-  if (!orgId) missingEnv.push('INPOST_ORG_ID');
-  return {
-    token,
-    orgId,
-    geowidgetToken,
-    configured: missingEnv.length === 0,
-    missingEnv,
-    env: inpostEnv(),
-    baseUrl: inpostBaseUrl(),
-    sendingMethod: tekst(process.env.INPOST_SENDING_METHOD || 'parcel_locker', 40).trim() || 'parcel_locker',
-    lockerService: tekst(process.env.INPOST_LOCKER_SERVICE || 'inpost_locker_standard', 80).trim() || 'inpost_locker_standard',
-    courierService: tekst(process.env.INPOST_COURIER_SERVICE || 'inpost_courier_standard', 80).trim() || 'inpost_courier_standard',
-  };
-}
-function inpostPublicConfig() {
-  const c = inpostKonfiguracja();
-  return {
-    configured: c.configured,
-    env: c.env,
-    geowidgetToken: c.geowidgetToken,
-    geowidgetConfigured: !!c.geowidgetToken,
-    missingEnv: c.missingEnv,
-    requiredEnv: ['INPOST_TOKEN', 'INPOST_ORG_ID'],
-    services: { locker: c.lockerService, courier: c.courierService },
-    webhookConfigured: !!tekst(process.env.INPOST_WEBHOOK_SECRET || '', 300).trim(),
-    optionalEnv: ['INPOST_GEOWIDGET_TOKEN', 'INPOST_WEBHOOK_SECRET', 'INPOST_ENV=production', 'INPOST_SENDING_METHOD=parcel_locker', 'INPOST_LOCKER_SERVICE', 'INPOST_COURIER_SERVICE'],
-  };
-}
-async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'application/json' } = {}) {
-  const c = inpostKonfiguracja();
-  if (!c.configured) {
-    const blad = new Error('InPost nie jest skonfigurowany po stronie serwera. Ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify.');
-    blad.code = 'inpost_not_configured';
-    blad.status = 503;
-    blad.missingEnv = c.missingEnv;
-    throw blad;
-  }
-  const headers = {
-    'Authorization': `Bearer ${c.token}`,
-    'Accept': accept,
-    'Accept-Language': 'pl_PL',
-    'X-User-Agent': 'Artway-TM',
-    'X-User-Agent-Version': '1.0',
-    'X-Request-ID': `artway-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`,
-  };
-  const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
-  if (body) headers['Content-Type'] = 'application/json';
-  const r = await fetch(new URL(path, c.baseUrl).toString(), { method, headers, body });
-  const ct = r.headers.get('content-type') || '';
-  if (accept === 'application/pdf' || ct.includes('application/pdf') || ct.includes('octet-stream')) {
-    if (!r.ok) {
-      const t = await r.text().catch(() => '');
-      const dane = bezpiecznyJson(t);
-      const blad = new Error(bledyInpostTekst(dane, `InPost HTTP ${r.status}`));
-      blad.status = r.status; blad.code = dane?.error || dane?.code || 'inpost_http_error'; blad.inpost = dane; throw blad;
-    }
-    const buf = Buffer.from(await r.arrayBuffer());
-    return { binary: true, contentType: ct || 'application/pdf', base64: buf.toString('base64') };
-  }
-  const t = await r.text();
-  const dane = bezpiecznyJson(t);
-  if (!r.ok) {
-    const blad = new Error(bledyInpostTekst(dane, `InPost HTTP ${r.status}`));
-    blad.status = r.status; blad.code = dane?.error || dane?.code || 'inpost_http_error'; blad.inpost = dane; throw blad;
-  }
-  return dane || {};
-}
-function inpostPointDto(p) {
-  const ad = p?.address_details || {};
-  const addr = p?.address || {};
-  const loc = p?.location || {};
-  return {
-    name: tekst(p?.name, 40).trim(),
-    status: tekst(p?.status, 40).trim(),
-    type: Array.isArray(p?.type) ? p.type.map((x) => tekst(x, 40).trim()).filter(Boolean) : [],
-    functions: Array.isArray(p?.functions) ? p.functions.map((x) => tekst(x, 60).trim()).filter(Boolean) : [],
-    address: [tekst(addr.line1, 120).trim(), tekst(addr.line2, 120).trim()].filter(Boolean).join(', '),
-    city: tekst(ad.city, 80).trim(),
-    postCode: tekst(ad.post_code, 12).trim(),
-    street: tekst(ad.street, 120).trim(),
-    buildingNumber: tekst(ad.building_number, 30).trim(),
-    description: [tekst(p?.location_description, 140).trim(), tekst(p?.location_description_1, 140).trim(), tekst(p?.location_description_2, 140).trim()].filter(Boolean).join(' • '),
-    openingHours: tekst(p?.opening_hours, 80).trim(),
-    location247: !!p?.location_247,
-    easyAccessZone: !!p?.easy_access_zone,
-    distance: Number.isFinite(Number(p?.distance)) ? Number(p.distance) : null,
-    latitude: Number.isFinite(Number(loc.latitude)) ? Number(loc.latitude) : null,
-    longitude: Number.isFinite(Number(loc.longitude)) ? Number(loc.longitude) : null,
-  };
-}
-async function inpostSzukajPunktow(url) {
-  const q = tekst(url.searchParams.get('q') || '', 100).trim();
-  const postCode = kodPocztowyInpost(url.searchParams.get('post_code') || url.searchParams.get('kod') || '');
-  const city = tekst(url.searchParams.get('city') || url.searchParams.get('miasto') || '', 80).trim();
-  const latRaw = url.searchParams.get('lat');
-  const lngRaw = url.searchParams.get('lng');
-  const lat = latRaw !== null && latRaw !== '' ? Number(latRaw) : NaN;
-  const lng = lngRaw !== null && lngRaw !== '' ? Number(lngRaw) : NaN;
-  const limitRaw = Number(url.searchParams.get('limit') || 12);
-  const limit = Math.min(25, Math.max(1, Number.isFinite(limitRaw) ? Math.round(limitRaw) : 12));
-  const api = new URL('/v1/points', inpostPointsBaseUrl());
-  api.searchParams.set('type', 'parcel_locker');
-  api.searchParams.set('functions', 'parcel_collect');
-  api.searchParams.set('per_page', String(limit));
-  api.searchParams.set('fields', 'name,type,status,functions,address,address_details,location_description,location_description_1,location_description_2,opening_hours,location_247,easy_access_zone,distance,location');
-  if (Number.isFinite(lat) && Number.isFinite(lng)) {
-    api.searchParams.set('relative_point', `${lat},${lng}`);
-    api.searchParams.set('sort_by', 'distance_to_relative_point');
-    api.searchParams.set('limit', String(limit));
-    api.searchParams.set('max_distance', '50000');
-  } else if (/^\d{2}-\d{3}$/.test(postCode)) {
-    api.searchParams.set('relative_post_code', postCode);
-    api.searchParams.set('sort_by', 'distance_to_relative_point');
-    api.searchParams.set('limit', String(limit));
-    api.searchParams.set('max_distance', '50000');
-  } else if (/^[A-Za-z]{2,5}\d[A-Za-z0-9]*$/i.test(q)) {
-    api.searchParams.set('name', q.toUpperCase());
-    api.searchParams.set('sort_by', 'name');
-  } else if (q) {
-    api.searchParams.set('city', q);
-    api.searchParams.set('sort_by', 'name');
-  } else if (city) {
-    api.searchParams.set('city', city);
-    api.searchParams.set('sort_by', 'name');
-  } else {
-    return { ok: false, error: 'Podaj nazwę miasta, kod pocztowy, nazwę paczkomatu albo współrzędne.', code: 'missing_query' };
-  }
-  const r = await fetch(api.toString(), {
-    headers: { 'Accept': 'application/json', 'Accept-Language': 'pl_PL', 'X-User-Agent': 'Artway-TM' },
-  });
-  const t = await r.text();
-  const dane = bezpiecznyJson(t) || {};
-  if (!r.ok) {
-    const blad = new Error(bledyInpostTekst(dane, `InPost Points HTTP ${r.status}`));
-    blad.status = r.status;
-    blad.code = 'inpost_points_error';
-    throw blad;
-  }
-  return {
-    ok: true,
-    count: Number(dane.count || 0),
-    page: Number(dane.page || 1),
-    perPage: Number(dane.per_page || limit),
-    points: Array.isArray(dane.items) ? dane.items.map(inpostPointDto).filter((p) => p.name && (!p.status || p.status === 'Operating')) : [],
-  };
-}
-function bezpiecznyJson(t) {
-  if (!t) return null;
-  try { return JSON.parse(t); } catch (e) { return { raw: t }; }
-}
-function bledyInpostTekst(dane, fallback) {
-  if (!dane) return fallback;
-  if (dane.message && typeof dane.message === 'string') {
-    const det = dane.details && typeof dane.details === 'object'
-      ? Object.entries(dane.details).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; ')
-      : '';
-    return det ? `${dane.message} (${det})` : dane.message;
-  }
-  if (dane.description && typeof dane.description === 'string') return dane.description;
-  if (dane.error) return `${dane.error}${dane.error_description ? ': ' + dane.error_description : ''}`;
-  return fallback;
-}
-function telefonInpost(v) {
-  const cyfry = String(v || '').replace(/[^0-9]/g, '');
-  if (cyfry.length === 11 && cyfry.startsWith('48')) return cyfry.slice(2);
-  return cyfry.slice(-9);
-}
-function emailInpostOk(v) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
-}
-function kodPocztowyInpost(v) {
-  const raw = String(v || '').replace(/\s/g, '');
-  const m = raw.match(/^(\d{2})-?(\d{3})$/);
-  return m ? `${m[1]}-${m[2]}` : raw;
-}
-function adresInpostZamowienia(z) {
-  const a = z?.adresDostawy || {};
-  let street = tekst(a.ulica, 120).trim();
-  let building_number = tekst(a.nrDomu, 30).trim();
-  const flat_number = tekst(a.nrLokalu, 30).trim();
-  let post_code = kodPocztowyInpost(a.kod);
-  let city = tekst(a.miasto, 80).trim();
-
-  if ((!street || !building_number || !post_code || !city) && z?.adres) {
-    const [liniaAdresu = '', liniaMiasta = ''] = String(z.adres).split(',').map((x) => x.trim());
-    const mMiasto = liniaMiasta.match(/(\d{2}-?\d{3})\s+(.+)/);
-    if (!post_code && mMiasto) post_code = kodPocztowyInpost(mMiasto[1]);
-    if (!city && mMiasto) city = mMiasto[2].trim();
-    const mUlica = liniaAdresu.match(/^(.+?)\s+([0-9][0-9A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż/.-]*)$/);
-    if (!street && mUlica) street = mUlica[1].trim();
-    if (!building_number && mUlica) building_number = mUlica[2].trim();
-    if (!street && liniaAdresu) street = liniaAdresu;
-  }
-
-  return { street, building_number, flat_number, city, post_code, country_code: 'PL' };
-}
-function czyDostawaPaczkomatInPost(z) {
-  const id = tekst(z?.dostawaId, 40).trim().toLowerCase();
-  if (id === 'kurier' || id === 'kurier_inpost') return false;
-  if (id === 'paczkomat') return true;
-  return !!(z?.paczkomat || z?.wysylka?.punktKod);
-}
-function walidujPrzesylkeInPost(z) {
-  const k = z?.klient || {};
-  const w = z?.wysylka || {};
-  const doPaczkomatu = czyDostawaPaczkomatInPost(z);
-  const punkt = tekst(z?.paczkomat || w?.punktKod, 40).trim().toUpperCase();
-  const email = tekst(z?.email || k.email, 200).trim().toLowerCase();
-  const phone = telefonInpost(k.telefon || z?.telefon);
-  const errors = [];
-
-  if (!emailInpostOk(email)) errors.push({ field: 'receiver.email', message: 'Brak poprawnego adresu e-mail odbiorcy.' });
-  if (!/^\d{9}$/.test(phone)) errors.push({ field: 'receiver.phone', message: 'Brak poprawnego polskiego numeru telefonu odbiorcy (9 cyfr).' });
-  if (doPaczkomatu && !punkt) errors.push({ field: 'custom_attributes.target_point', message: 'Brak kodu paczkomatu / punktu odbioru.' });
-
-  const address = adresInpostZamowienia(z);
-  if (!doPaczkomatu) {
-    if (!address.street) errors.push({ field: 'receiver.address.street', message: 'Brak ulicy odbiorcy.' });
-    if (!address.building_number) errors.push({ field: 'receiver.address.building_number', message: 'Brak numeru budynku odbiorcy.' });
-    if (!/^\d{2}-\d{3}$/.test(address.post_code)) errors.push({ field: 'receiver.address.post_code', message: 'Brak poprawnego kodu pocztowego odbiorcy.' });
-    if (!address.city) errors.push({ field: 'receiver.address.city', message: 'Brak miasta odbiorcy.' });
-  }
-
-  const gab = tekst(w.gabaryt, 20).trim().toLowerCase();
-  if (!['', 'small', 'medium', 'large'].includes(gab)) errors.push({ field: 'parcel.template', message: 'Gabaryt InPost może być small, medium albo large.' });
-  if (!gab) {
-    for (const [field, label, fallback] of [['dlugosc', 'długość', 30], ['szerokosc', 'szerokość', 20], ['wysokosc', 'wysokość', 15], ['waga', 'waga', 1]]) {
-      const n = Number(w[field] || fallback);
-      if (!Number.isFinite(n) || n <= 0) errors.push({ field: `parcel.${field}`, message: `Niepoprawna ${label} paczki.` });
-    }
-  }
-
-  return { ok: errors.length === 0, errors, doPaczkomatu, punkt, email, phone, address };
-}
-function inpostListaUslug(org) {
-  return Array.isArray(org?.services) ? org.services.map((x) => tekst(x, 80).trim()).filter(Boolean) : [];
-}
-const INPOST_LOCKER_SERVICE_FALLBACKS = [
-  'inpost_locker_standard',
-  'inpost_locker_standard_smart',
-  'inpost_locker_pass_thru',
-  'inpost_locker_allegro',
-];
-const INPOST_COURIER_SERVICE_FALLBACKS = [
-  'inpost_courier_standard',
-  'inpost_courier_c2c',
-  'inpost_courier_local_standard',
-  'inpost_courier_local_express',
-  'inpost_courier_allegro',
-];
-function inpostWybierzAktywnaUsluge(services, preferowana, fallbacks) {
-  if (!services.length) return preferowana;
-  if (services.includes(preferowana)) return preferowana;
-  return fallbacks.find((x) => services.includes(x)) || preferowana;
-}
-function inpostDostepnoscUslug(c, org) {
-  const services = inpostListaUslug(org);
-  const sprawdzaj = services.length > 0;
-  const lockerService = sprawdzaj ? inpostWybierzAktywnaUsluge(services, c.lockerService, INPOST_LOCKER_SERVICE_FALLBACKS) : c.lockerService;
-  const courierService = sprawdzaj ? inpostWybierzAktywnaUsluge(services, c.courierService, INPOST_COURIER_SERVICE_FALLBACKS) : c.courierService;
-  return {
-    services,
-    requestedLockerService: c.lockerService,
-    requestedCourierService: c.courierService,
-    lockerService,
-    courierService,
-    locker: !sprawdzaj || services.includes(lockerService),
-    courier: !sprawdzaj || services.includes(courierService),
-  };
-}
-async function inpostOrganizacja(c) {
-  return inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}`, { method: 'GET' });
-}
-function boolInpostSerwer(v) {
-  const s = String(v ?? '').trim().toLowerCase();
-  return v === true || s === 'tak' || s === 'true' || s === '1' || s === 'yes';
-}
-function inpostPobranieAktywne(z, w) {
-  if (w && Object.prototype.hasOwnProperty.call(w, 'pobranieAktywne')) return boolInpostSerwer(w.pobranieAktywne);
-  return z?.platnoscId === 'pobranie';
-}
-function inpostSposobNadaniaZamowienia(w, c) {
-  const raw = tekst(w?.sposobNadania || '', 40).trim();
-  if (INPOST_SENDING_METHODS.has(raw)) return raw;
-  const env = tekst(c?.sendingMethod || '', 40).trim();
-  return INPOST_SENDING_METHODS.has(env) ? env : 'parcel_locker';
-}
-function przesylkaShipXPayload(z, c, walidacja = null) {
-  const v = walidacja || walidujPrzesylkeInPost(z);
-  const k = z?.klient || {};
-  const w = z?.wysylka || {};
-  const receiver = {
-    first_name: tekst(k.imie, 80).trim() || 'Klient',
-    last_name: tekst(k.nazwisko, 80).trim() || z?.nr || '—',
-    email: v.email,
-    phone: v.phone,
-  };
-  if (tekst(k.firma, 160).trim()) receiver.company_name = tekst(k.firma, 160).trim();
-  if (!v.doPaczkomatu) {
-    receiver.address = Object.fromEntries(Object.entries(v.address).filter(([, val]) => val));
-  }
-  // parcele: szablon (small/medium/large) albo wymiary
-  const gab = tekst(w.gabaryt, 20).trim().toLowerCase();
-  let parcel;
-  if (['small', 'medium', 'large'].includes(gab)) parcel = { template: gab };
-  else parcel = {
-    dimensions: {
-      length: String(Math.round((Number(w.dlugosc) || 30) * 10)),
-      width: String(Math.round((Number(w.szerokosc) || 20) * 10)),
-      height: String(Math.round((Number(w.wysokosc) || 15) * 10)),
-      unit: 'mm',
-    },
-    weight: { amount: String(Number(w.waga) || 1), unit: 'kg' },
-  };
-  const sendingMethod = inpostSposobNadaniaZamowienia(w, c);
-  const dropoffPoint = tekst(w?.punktNadania || w?.dropoffPoint || '', 40).trim().toUpperCase();
-  const payload = {
-    receiver,
-    parcels: [parcel],
-    service: v.doPaczkomatu ? c.lockerService : c.courierService,
-    only_choice_of_offer: false,
-    reference: tekst(z?.nr, 80),
-    comments: tekst(`Artway-TM ${z?.nr || ''}`.trim(), 100),
-    custom_attributes: {
-      sending_method: sendingMethod,
-    },
-  };
-  if (v.doPaczkomatu && v.punkt) payload.custom_attributes.target_point = v.punkt;
-  if (dropoffPoint && INPOST_DROPOFF_METHODS.has(sendingMethod)) payload.custom_attributes.dropoff_point = dropoffPoint;
-  if (z?.paczkaWeekend || w.paczkaWeekend || kwotaSerwer(z?.oplataPaczkaWeekend || z?.koszty?.paczkaWeekend) > 0) {
-    payload.end_of_week_collection = true;
-  }
-  const codAktywny = inpostPobranieAktywne(z, w);
-  const codKwota = codAktywny ? (kwotaSerwer(w.pobranie) || kwotaSerwer(z?.razem)) : 0;
-  if (codAktywny && codKwota > 0) {
-    payload.cod = { amount: codKwota, currency: 'PLN' };
-  }
-  const ochronaKwota = Math.max(kwotaSerwer(w.ochrona), codAktywny ? codKwota : 0);
-  if (ochronaKwota > 0) {
-    payload.insurance = { amount: ochronaKwota, currency: 'PLN' };
-  }
-  return payload;
-}
-function numerZShipX(s) {
-  const direct = tekst(s?.tracking_number || s?.trackingNumber || '', 120).trim();
-  if (direct) return direct;
-  const parcels = Array.isArray(s?.parcels) ? s.parcels : (s?.parcels ? [s.parcels] : []);
-  for (const p of parcels) {
-    const n = tekst(p?.tracking_number || p?.trackingNumber || '', 120).trim();
-    if (n) return n;
-  }
-  return '';
-}
-const INPOST_STATUSY_ETYKIETA_GOTOWA = new Set([
-  'confirmed',
-  'dispatched_by_sender',
-  'collected_from_sender',
-  'taken_by_courier',
-  'adopted_at_source_branch',
-  'sent_from_source_branch',
-  'ready_to_pickup',
-  'out_for_delivery',
-  'delivered',
-  'returned_to_sender',
-  'return_redirected_to_sender',
-]);
-function inpostStatusZShipX(s) {
-  return tekst(s?.status, 80).trim();
-}
-function inpostEtykietaGotowa(src) {
-  if (numerZShipX(src)) return true;
-  const s = inpostStatusZShipX(src).toLowerCase();
-  if (!s) return false;
-  if (INPOST_STATUSY_ETYKIETA_GOTOWA.has(s) || s.includes('confirmed')) return true;
-  if (s.includes('created') || s.includes('offer') || s.includes('prepared') || s.includes('cancel')) return false;
-  const etap = etapZInpostStatus(s).etap || '';
-  return ['transport', 'doreczenie', 'dostarczona', 'zwrot'].includes(etap);
-}
-function inpostOfertaId(src) {
-  const selected = src?.selected_offer || (Array.isArray(src?.offers) ? src.offers.find((o) => ['selected', 'available'].includes(String(o?.status || '').toLowerCase())) : null);
-  return tekst(selected?.id || '', 80).trim();
-}
-async function inpostCzekaj(ms) {
-  await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(3000, Number(ms) || 0))));
-}
-async function inpostPobierzPrzesylke(inpostId) {
-  return inpostWywolaj(`/v1/shipments/${encodeURIComponent(inpostId)}`, { method: 'GET' });
-}
-async function inpostCzekajNaEtykiete(inpostId, { proby = 8, opoznienieMs = 1000 } = {}) {
-  let ostatnie = null;
-  const ile = Math.max(1, Math.min(12, Number(proby) || 8));
-  for (let i = 0; i < ile; i++) {
-    ostatnie = await inpostPobierzPrzesylke(inpostId);
-    if (inpostEtykietaGotowa(ostatnie)) return ostatnie;
-    if (i < ile - 1) await inpostCzekaj(opoznienieMs);
-  }
-  return ostatnie || {};
-}
-function inpostWebhookSecret() {
-  return tekst(process.env.INPOST_WEBHOOK_SECRET || '', 300).trim();
-}
-function inpostWebhookAutoryzowany(req, url) {
-  const secret = inpostWebhookSecret();
-  if (!secret) return false;
-  const podane = tekst(
-    req.headers.get('x-inpost-webhook-secret')
-    || req.headers.get('x-webhook-secret')
-    || req.headers.get('x-artway-webhook-token')
-    || url.searchParams.get('token')
-    || url.searchParams.get('secret')
-    || '',
-    500,
-  ).trim();
-  return !!podane && bezpiecznePorownanie(podane, secret);
-}
-function pierwszePole(obj, klucze, maxDepth = 6) {
-  if (!obj || maxDepth < 0) return '';
-  if (Array.isArray(obj)) {
-    for (const x of obj) {
-      const v = pierwszePole(x, klucze, maxDepth - 1);
-      if (v) return v;
-    }
-    return '';
-  }
-  if (typeof obj !== 'object') return '';
-  for (const k of klucze) {
-    if (obj[k] != null && typeof obj[k] !== 'object') return tekst(obj[k], 500).trim();
-  }
-  for (const v of Object.values(obj)) {
-    const r = pierwszePole(v, klucze, maxDepth - 1);
-    if (r) return r;
-  }
-  return '';
-}
-function inpostZdarzeniaZWebhooka(payload) {
-  const zrodla = [];
-  const dodaj = (x) => { if (x && typeof x === 'object') zrodla.push(x); };
-  dodaj(payload);
-  if (Array.isArray(payload)) payload.forEach(dodaj);
-  if (Array.isArray(payload?.shipments)) payload.shipments.forEach(dodaj);
-  if (Array.isArray(payload?.data)) payload.data.forEach(dodaj);
-  dodaj(payload?.shipment);
-  dodaj(payload?.parcel);
-  dodaj(payload?.data);
-  const seen = new Set();
-  return zrodla.filter((x) => {
-    const key = JSON.stringify(x).slice(0, 1000);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, 10);
-}
-function inpostDaneZWebhooka(obj, shipment = null) {
-  const src = shipment || obj || {};
-  const id = tekst(
-    src?.id || src?.shipment_id || src?.shipmentId || pierwszePole(obj, ['shipment_id', 'shipmentId', 'shipmentID']),
-    80,
-  ).trim();
-  const tracking = numerZShipX(src) || pierwszePole(obj, ['tracking_number', 'trackingNumber', 'tracking', 'number', 'trackingNo']);
-  const status = tekst(src?.status || pierwszePole(obj, ['status', 'shipment_status', 'shipmentStatus', 'event', 'event_type', 'eventType']), 120).trim();
-  const reference = tekst(
-    src?.reference
-    || src?.external_customer_id
-    || src?.externalCustomerId
-    || src?.custom_attributes?.reference
-    || pierwszePole(obj, ['reference', 'external_customer_id', 'externalCustomerId', 'order_number', 'orderNumber', 'order_id', 'orderId']),
-    200,
-  ).trim();
-  const occurredAt = tekst(
-    src?.updated_at || src?.created_at || src?.timestamp || src?.event_time || src?.eventTime
-    || pierwszePole(obj, ['updated_at', 'created_at', 'timestamp', 'event_time', 'eventTime', 'datetime']),
-    120,
-  ).trim();
-  return { id, tracking, status, reference, occurredAt };
-}
-function numerZReferencji(reference, items = []) {
-  const ref = tekst(reference, 500).trim();
-  if (!ref) return '';
-  const m = ref.match(/ATM-\d{4,}/i);
-  if (m) return m[0].toUpperCase();
-  const lower = ref.toLowerCase();
-  const znalezione = items.find((z) => z?.nr && lower.includes(String(z.nr).toLowerCase()));
-  return znalezione?.nr || '';
-}
-function etapZInpostStatus(status) {
-  const s = String(status || '').toLowerCase();
-  if (!s) return {};
-  if (s.includes('delivered')) return { etap: 'dostarczona', statusZamowienia: 'dostarczone' };
-  if (s.includes('ready_to_pickup') || s.includes('out_for_delivery')) return { etap: 'doreczenie', statusZamowienia: 'w doręczeniu' };
-  if (s.includes('returned') || s.includes('return_to') || s.includes('return to') || s.includes('rejected_by_receiver')) return { etap: 'zwrot', statusZamowienia: 'zwrot' };
-  if (s.includes('canceled') || s.includes('cancelled')) return { etap: 'anulowana', statusZamowienia: 'anulowane' };
-  if (s.includes('undelivered') || s.includes('avizo') || s.includes('delay') || s.includes('missing') || s.includes('damaged')) return { etap: 'problem', blad: status };
-  if (s.includes('adopted') || s.includes('sent_from') || s.includes('collected') || s.includes('dispatched') || s.includes('confirmed')) return { etap: 'transport', statusZamowienia: 'nadane' };
-  if (s.includes('created') || s.includes('offer') || s.includes('prepared')) return { etap: 'przygotowanie' };
-  return {};
-}
-function znajdzZamowienieInpost(items, dane) {
-  const nr = numerZReferencji(dane.reference, items);
-  if (nr) return items.find((z) => z.nr === nr) || null;
-  const id = tekst(dane.id, 80).trim();
-  const tracking = tekst(dane.tracking, 120).trim();
-  if (id) {
-    const poId = items.find((z) => tekst(z?.wysylka?.inpostId, 80).trim() === id);
-    if (poId) return poId;
-  }
-  if (tracking) {
-    const poNumerze = items.find((z) => tekst(z?.wysylka?.numer, 120).trim() === tracking);
-    if (poNumerze) return poNumerze;
-  }
-  return null;
-}
-async function zapiszLogInpostWebhook(wpis) {
-  const rec = await czytaj('inpost_webhooks', { items: [] });
-  const items = Array.isArray(rec.items) ? rec.items : [];
-  items.push({ czas: new Date().toISOString(), ...wpis });
-  await zapisz('inpost_webhooks', { items: items.slice(-200), updated_at: new Date().toISOString() });
-}
-async function zastosujWebhookInpost(dane) {
-  const rec = await czytaj('orders', { items: [] });
-  const items = Array.isArray(rec.items) ? rec.items : [];
-  const znalezione = znajdzZamowienieInpost(items, dane);
-  if (!znalezione) {
-    await zapiszLogInpostWebhook({ matched: false, id: dane.id, tracking: dane.tracking, status: dane.status, reference: dane.reference });
-    return { matched: false, id: !!dane.id, tracking: !!dane.tracking, reference: !!dane.reference, status: dane.status || '' };
-  }
-  const idx = items.findIndex((x) => x.nr === znalezione.nr);
-  const stary = items[idx];
-  const nowy = { ...stary };
-  const w = { ...(nowy.wysylka || {}) };
-  const statusInfo = etapZInpostStatus(dane.status);
-  const teraz = new Date().toLocaleString('pl-PL');
-  const czas = dane.occurredAt ? new Date(dane.occurredAt).toLocaleString('pl-PL') : teraz;
-  const opis = `${dane.id ? `ID ${dane.id}` : ''}${dane.tracking ? `${dane.id ? ' • ' : ''}${dane.tracking}` : ''}${dane.reference ? ` • ref: ${dane.reference}` : ''}`;
-  const historia = Array.isArray(w.historia) ? w.historia.slice() : [];
-  const istnieje = historia.some((h) => h.status === `InPost: ${dane.status || 'aktualizacja'}` && String(h.opis || '').includes(dane.tracking || dane.id || dane.reference || ''));
-  if (!istnieje) historia.push({ czas, status: `InPost: ${dane.status || 'aktualizacja'}`, opis: opis || 'Zdarzenie z webhooka InPost', zrodlo: 'inpost-webhook' });
-  w.przewoznik = 'inpost';
-  if (dane.id) w.inpostId = dane.id;
-  if (dane.status) w.inpostStatus = dane.status;
-  if (dane.tracking) w.numer = dane.tracking;
-  if (statusInfo.etap) w.etap = statusInfo.etap;
-  if (statusInfo.blad) w.bladIntegracji = statusInfo.blad;
-  else if (w.bladIntegracji && statusInfo.etap && statusInfo.etap !== 'problem') w.bladIntegracji = '';
-  const etykietaGotowa = inpostEtykietaGotowa({ status: w.inpostStatus, tracking_number: w.numer });
-  w.etykietaGotowa = etykietaGotowa;
-  w.ostatniaSynchronizacja = new Date().toISOString();
-  w.zaktualizowano = new Date().toISOString();
-  w.historia = historia;
-  w.zadania = {
-    ...(w.zadania || {}),
-    dane: true,
-    etykieta: etykietaGotowa,
-    przekazanie: ['transport', 'doreczenie', 'dostarczona'].includes(w.etap) || !!w.zadania?.przekazanie,
-  };
-  nowy.wysylka = w;
-  if (statusInfo.statusZamowienia) nowy.status = statusInfo.statusZamowienia;
-  else if (dane.tracking && ['nowe', 'potwierdzone', 'w realizacji'].includes(nowy.status)) nowy.status = 'gotowe do wysyłki';
-  items[idx] = nowy;
-  await zapisz('orders', { items, updated_at: new Date().toISOString() });
-  const inventory = await storeOrderSupplierReconciliation.finalizeInventoryForOrder(nowy);
-  if (inventory.inventoryMode) nowy.inventoryMode = inventory.inventoryMode;
-  const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
-  let email = null;
-  try { email = await obsluzEmailePrzejsciaStatusu(stary, nowy); } catch (e) { email = { sent: false, error: e.message }; }
-  await zapiszLogInpostWebhook({ matched: true, nr: nowy.nr, id: dane.id, tracking: dane.tracking, status: dane.status, reference: dane.reference });
-  return { matched: true, nr: nowy.nr, tracking: w.numer || '', status: w.inpostStatus || '', etap: w.etap || '', inventory, supplierDrafts, email };
-}
-async function zapiszPrzesylkeNaZamowieniu(nr, patch) {
-  const rec = await czytaj('orders', { items: [] });
-  const items = Array.isArray(rec.items) ? rec.items : [];
-  const i = items.findIndex((x) => x.nr === nr);
-  if (i < 0) return { stary: null, nowy: null };
-  const stary = items[i];
-  const z = { ...stary };
-  const w = { ...(z.wysylka || {}), ...patch };
-  z.wysylka = w;
-  items[i] = z;
-  await zapisz('orders', { items, updated_at: new Date().toISOString() });
-  return { stary, nowy: z };
 }
 
 function seoBezHtml(value = '') {
@@ -4821,7 +2722,7 @@ function seoPropozycja(p = {}) {
   title = seoSkroc(title, 60);
   let description = seoBezHtml(p.opisKrotki || p.krotkiOpis || p.opis);
   if (!description) description = `${name}${category ? ` z kategorii ${category}` : ''}. Sprawdź szczegóły, dostępność i bezpieczne zakupy w Artway-TM.`;
-  if (description.length < 80) description += ' Poznaj opis, aktualną cenę i warunki dostawy w sklepie Artway-TM.';
+  if (description.length < 80) description += ' Poznaj najważniejsze cechy produktu i jego zastosowanie.';
   const keywords = [...new Set([name, category, brand, p.gtin || p.ean, p.sku].map((v) => tekst(v, 500).trim()).filter(Boolean))].slice(0, 8).join(', ');
   return { seoTitle: title, seoDescription: seoSkroc(description, 158), seoKeywords: keywords };
 }
@@ -4910,6 +2811,171 @@ async function katalogWykonajAudyt({ fixSafe = false, quarantineOrphans = false,
   return { report, before: before.summary, changes, quarantined: orphanArchive.map((entry) => ({ id: entry.id, reason: entry.reason })), saved, rev, updated_at: now };
 }
 
+const infaktRoute = createInfaktRoute({
+  odpowiedz,
+  czyAdmin,
+  tekst,
+  czytaj,
+  zapisz,
+  numerZamowienia,
+  infaktPublicConfig,
+  infaktDostawcyUstawienia,
+  infaktDostawcyDozwoleni,
+  infaktPobierzKosztyDozwolone,
+  infaktKosztDoZwrotu,
+  infaktSynchronizujCenyZakupu,
+  infaktPrzypiszCeneZakupu,
+  infaktCofnijDopasowanieCeny,
+  infaktWywolaj,
+  infaktPayloadZamowienia,
+  infaktRef,
+  infaktInvoiceFromTask,
+  infaktErrorText,
+});
+
+const paynowRoute = createPaynowRoute({
+  respond: odpowiedz,
+  isAdmin: czyAdmin,
+  rateLimit: ograniczRuch,
+  text: tekst,
+  read: czytaj,
+  write: zapisz,
+  readDeletedOrders: czytajUsunieteZamowienia,
+  deletedOrderMap: mapaUsunietych,
+  filterUndeletedOrders: filtrujNieusunieteZamowienia,
+  normalizeOrder: normalizujZamowienie,
+  orderNumber: numerZamowienia,
+  orderLimit: LIMIT_ZAMOWIEN,
+  finalStatuses: PAYNOW_STATUSY_KONCOWE,
+  configure: paynowKonfiguracja,
+  diagnose: paynowDiagnostyka,
+  paymentStatus: statusPlatnosciPaynow,
+  idempotencyKey: kluczIdempotencji,
+  call: paynowWywolaj,
+  paymentPayload: payloadPlatnosciPaynow,
+  updateOrder: aktualizujZamowieniePaynow,
+  signNotification: podpisPaynowPowiadomienia,
+  compareSignature: porownajPodpis,
+  cents: grosze,
+  currencyText: zlSerwer,
+  sendNewOrderEmails: wyslijEmaileNowegoZamowienia,
+  emailConfig: emailKonfiguracja,
+  appendEmailHistory: dopiszHistorieEmaila,
+  sendStatusEmail: wyslijEmailStatusowy,
+});
+
+const storeDataRoute = createStoreDataRoute({
+  odpowiedz,
+  czyAdmin,
+  czytaj,
+  productLinkImport,
+  ustawieniaPubliczneBezDanychPrywatnych,
+  czytajUsunieteZamowienia,
+  filtrujNieusunieteZamowienia,
+  oczyscUstawienia,
+  tekst,
+  czytajWersjonowane,
+  preserveSupplierPlanOnGenericSettings,
+  LIMIT_USTAWIEN,
+  zapiszJesliWersja,
+  ograniczRuch,
+  bezpieczneZamowienieKlienta,
+  requestSession,
+  mapaUsunietych,
+  storeOrderSupplierReconciliation,
+  zwiekszLicznikKoduRabatowego,
+  wyslijEmaileNowegoZamowienia,
+  emailKonfiguracja,
+  dopiszHistorieEmaila,
+  createOrderAccess,
+  bezpiecznaOpinia,
+  zapisz,
+  normalizujZamowienie,
+  LIMIT_USUNIETYCH_ZAMOWIEN,
+  LIMIT_ZAMOWIEN,
+  normalizujKlienta,
+  LIMIT_KLIENTOW,
+  polaczPowiadomienia,
+  obsluzEmailePrzejsciaStatusu,
+  numerZamowienia,
+  dopiszUsunieteZamowienie,
+  verifyOrderAccess,
+  normalizeTelegramAccountFields,
+  profilKlienta,
+  publicUser,
+  hashPassword,
+  createAccountSession,
+  verifyPassword,
+  bezpiecznePorownanie,
+  legacyPasswordHash,
+  accountSessionHeaders,
+  createAdminMfaChallenge,
+  createMfaEnrollment,
+  decryptMfaSecret,
+  generateRecoveryCodes,
+  mfaProvisioningUri,
+  recoveryCodeHash,
+  verifyAdminMfaChallenge,
+  verifyMfaCode,
+  czytajUstawieniaBazowe,
+  czytajUstawieniaPrzyrostowo,
+});
+
+const systemRoute = createSystemRoute({
+  odpowiedz,
+  czyAdmin,
+  czytaj,
+  filtrujNieusunieteZamowienia,
+  emailPublicConfig,
+  inpostPublicConfig,
+  paynowKonfiguracja,
+  telegramKonfiguracja,
+  allegroStatus,
+  infaktPublicConfig,
+  requestSession,
+  createAccountSession,
+  accountSessionHeaders,
+  clearAccountSessionHeaders,
+  repository,
+  storeName: STORE_NAME,
+  backupKeyPattern: BACKUP_KEY_PATTERN,
+  czytajUstawieniaBazowe,
+});
+
+const allegroCommunicationsRoute = createAllegroCommunicationsRoute({
+  respond: odpowiedz, isAdmin: czyAdmin, read: czytaj, write: zapisz, text: tekst, allegroStatus,
+  applyInternalStatuses: allegroZastosujStatusyWewnetrzne, normalizeSettings: allegroUstawieniaKomunikacji,
+  caseKey: allegroKluczSprawyWewnetrznej, latestCustomerMessage: allegroNajnowszaWiadomoscKlienta,
+  messageKey: allegroKluczWiadomosci, learnedReplyStyle: allegroWzorceStyluOdpowiedzi,
+  fullReplyCase: allegroPelnaSprawaDoOdpowiedzi, previousCustomerCases: allegroPoprzednieSprawyKlienta,
+  checkReplyContext: allegroSprawdzKontekstOdpowiedzi, callAllegro: allegroWywolaj, betaJson: ALLEGRO_BETA_JSON,
+  normalizeIssueMessage: allegroNormalizujIssueChatMessage, normalizeThreadMessage: allegroNormalizujWiadomosc,
+  rememberManualReplyStyle: allegroZapamietajStylRecznejOdpowiedzi, fetchCommunications: allegroPobierzKomunikacje,
+  markNewCommunications: allegroOznaczNowaKomunikacje, sendTelegramReminders: allegroWyslijPrzypomnieniaTelegram,
+  sendAutoReplies: allegroWyslijAutoOdpowiedzi,
+});
+const allegroMappingRoute = createAllegroMappingRoute({
+  respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz,
+  mappingItems: allegroMapowaniaItems, offerItems: allegroOfertyItems, completeProducts: allegroAgentProduktyKompletne,
+  assessMapping: allegroOcenaPowiazania, createProductUpdater: allegroAktualizatorProduktowCentralnych,
+  productSnapshot: mappingProductSnapshot, writeMappingsSafely: zapiszMapowaniaBezpiecznie,
+  recalculateOrders: allegroPrzeliczZamowieniaPoMapowaniu,
+});
+const productAvailabilityRoute = createProductAvailabilityRoute({
+  respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz,
+  inspectProduct: pobierzProduktProducentaZPamiecia, prepareProduct: przygotujPakietProduktuZLinku,
+  syncSaleChannels: synchronizujSprzedazZDostepnosciaProducenta, mappingItems: allegroMapowaniaItems,
+  isAllegroOrderActive: allegroAgentZlecenieAktywne, fetchProduct: pobierzProduktProducenta,
+  notify: (...args) => telegramCenter.managedEvent(...args),
+});
+const emailRoute = createEmailRoute({
+  respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz,
+  publicConfig: emailPublicConfig, checkSmtp: sprawdzEmailSMTP, supplierPlan: supplierOrderPlan,
+  renderSupplierOrder: producentEmailZlecenia, sendSmtp: wyslijEmailSMTP, sessionOf: requestSession,
+  syncProcurement: synchronizujEtapyZakupoweZlecen, orderNumber: numerZamowienia, emailConfig: emailKonfiguracja,
+  orderConfirmation: wiadomoscKlientaZamowienie, appendHistory: dopiszHistorieEmaila, sendStatus: wyslijEmailStatusowy,
+});
+
 
 export default async (req) => {
   const url = new URL(req.url);
@@ -4922,12 +2988,20 @@ export default async (req) => {
   try {
     const telegramResponse = await telegramRoute(req, url, action);
     if (telegramResponse) return telegramResponse;
+    const allegroCredentialsResponse = await allegroCredentialsRoute(req, url, action);
+    if (allegroCredentialsResponse) return allegroCredentialsResponse;
     const inventoryDecisionResponse = await inventoryDecisionRoute(req, url, action);
     if (inventoryDecisionResponse) return inventoryDecisionResponse;
     const inventoryResponse = await inventoryStockRoute(req, url, action);
     if (inventoryResponse) return inventoryResponse;
     const withdrawalResponse = await allegroOfferWithdrawalRoute({ req, url, action });
     if (withdrawalResponse) return withdrawalResponse;
+    const aiBannerResponse = await aiBannerRoute(req, url, action);
+    if (aiBannerResponse) return aiBannerResponse;
+    const agentSpecialistResponse = await agentSpecialistRoute(req, url, action);
+    if (agentSpecialistResponse) return agentSpecialistResponse;
+    const systemResponse = await systemRoute(req, url, action);
+    if (systemResponse) return systemResponse;
     if (action === 'catalog-quality-audit') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -4946,558 +3020,21 @@ export default async (req) => {
       const body = await req.json().catch(() => ({})), result = await seoWykonajDziennyPlan({ limit: body.limit, source: body.source || 'manual-admin' });
       return odpowiedz({ ok: true, ...result });
     }
-    // ─── ZDROWIE / STATUS ───
-    if (action === 'health') {
-      const s = await czytaj('settings', { updated_at: null });
-      const o = await czytaj('orders', { items: [] });
-      const u = await czytaj('users', { items: [] });
-      const d = await czytaj('deleted_orders', { items: [] });
-      const aktywne = filtrujNieusunieteZamowienia(o.items || [], d.items || []);
-      const admin = czyAdmin(req, url);
-      return odpowiedz({
-        ok: true,
-        configured: !!process.env.ARTWAY_ADMIN_TOKEN,
-        admin,
-        store: admin ? {
-          orders: aktywne.length,
-          users: (u.items || []).length,
-          deleted_orders: (d.items || []).length,
-          settings_updated_at: s.updated_at || null,
-        } : { available: true, settings_updated_at: s.updated_at || null },
-        paynow: {
-          configured: paynowKonfiguracja(req).configured,
-          env: paynowKonfiguracja(req).env,
-          continueUrl: paynowKonfiguracja(req).continueUrl,
-          notificationUrl: paynowKonfiguracja(req).notificationUrl,
-        },
-        email: emailPublicConfig(),
-        telegram: { configured: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId) },
-        inpost: inpostPublicConfig(),
-        allegro: await allegroStatus(req),
-        infakt: infaktPublicConfig(),
-      });
-    }
+    const infaktResponse = await infaktRoute(req, url, action);
+    if (infaktResponse) return infaktResponse;
 
-    // ─── KOPIA MIGRACYJNA — odczyt tylko dla administratora, bez zmian w danych ───
-    if (action === 'store-backup-manifest') {
-      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const entries = await repository.listKeys();
-      return odpowiedz({ ok: true, store: STORE_NAME, createdAt: new Date().toISOString(), entries });
-    }
-
-    if (action === 'store-backup-entry') {
-      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const key = String(url.searchParams.get('key') || '');
-      const expectedEtag = String(url.searchParams.get('etag') || '');
-      if (!BACKUP_KEY_PATTERN.test(key) || !expectedEtag) return odpowiedz({ ok: false, error: 'Nieprawidłowy klucz lub brak wersji kopii.', code: 'invalid_backup_request' }, 400);
-      const entry = await repository.readVersioned(key, null);
-      if (!entry.exists) return odpowiedz({ ok: false, error: 'Nie znaleziono wpisu kopii.', code: 'backup_entry_missing' }, 404);
-      if (String(entry.etag || '') !== expectedEtag) return odpowiedz({ ok: false, error: 'Dane zmieniły się podczas wykonywania kopii. Rozpocznij eksport ponownie.', code: 'backup_changed' }, 409);
-      return odpowiedz({ ok: true, key, etag: entry.etag, value: entry.value });
-    }
-
-    // ─── INFAKT: faktury, statusy asynchroniczne i dokumenty ───
-    if (action === 'infakt-status') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const config = infaktPublicConfig(); let connection = null;
-      if (config.configured && url.searchParams.get('verify') === '1') {
-        try { const data = await infaktWywolaj('/api/v3/invoices.json', { parameters: { limit: 1, offset: 0, fields: 'id,uuid,number,status,invoice_date,gross_price' } }); connection = { ok: true, count: Number(data?.metainfo?.total_count ?? data?.entities?.length ?? 0) }; }
-        catch (e) { connection = { ok: false, error: tekst(e.message, 700), code: e.code || 'infakt_error' }; }
-      }
-      const [links, suppliers, purchaseSync] = await Promise.all([czytaj('infakt_invoice_links', { items: {}, updated_at: null }), infaktDostawcyUstawienia(), czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [], updated_at: null })]);
-      return odpowiedz({ ok: true, config, connection, links: links.items || {}, suppliers, purchaseSync, updated_at: links.updated_at || null });
-    }
-
-    if (action === 'infakt-supplier-access') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      if (req.method === 'GET') return odpowiedz({ ok: true, suppliers: await infaktDostawcyUstawienia() });
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const body = await req.json().catch(() => ({})), items = infaktDostawcyDozwoleni(body.items), updated_at = new Date().toISOString();
-      await zapisz('infakt_supplier_access', { items, updated_at });
-      return odpowiedz({ ok: true, suppliers: { items, updated_at } });
-    }
-
-    if (action === 'infakt-costs') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const suppliers = await infaktDostawcyUstawienia();
-      if (!suppliers.items.length) return odpowiedz({ ok: true, costs: [], suppliers, scanned: 0, message: 'Biała lista dostawców jest pusta — żaden dokument kosztowy nie został ujawniony.' });
-      const wanted = Math.max(1, Math.min(200, Number(url.searchParams.get('limit') || 100) || 100));
-      const result = await infaktPobierzKosztyDozwolone(suppliers.items, { wanted, maxScan: 5000 });
-      const collected = result.items.map(({ document, supplier }) => infaktKosztDoZwrotu(document, supplier));
-      const scanned = result.scanned;
-      const purchaseSync = await czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [], updated_at: null });
-      return odpowiedz({ ok: true, costs: collected, suppliers, purchaseSync, scanned, returned: collected.length });
-    }
-
-    if (action === 'infakt-purchase-sync') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), purchaseSync = await infaktSynchronizujCenyZakupu({ days: body.days, limit: body.limit, force: body.force === true });
-      return odpowiedz({ ok: true, purchaseSync });
-    }
-
-    if (action === 'infakt-purchase-match') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), result = await infaktPrzypiszCeneZakupu(tekst(body.itemKey, 100), tekst(body.productId, 100));
-      return odpowiedz({ ok: true, ...result });
-    }
-
-    if (action === 'infakt-purchase-unmatch') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), result = await infaktCofnijDopasowanieCeny(tekst(body.matchId, 100));
-      return odpowiedz({ ok: true, ...result });
-    }
-
-    if (action === 'infakt-invoices') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const linksRec = await czytaj('infakt_invoice_links', { items: {} }), ownUuids = new Set(Object.values(linksRec?.items || {}).map((x) => tekst(x?.invoiceUuid, 200)).filter(Boolean));
-      if (!ownUuids.size) return odpowiedz({ ok: true, invoices: [], metainfo: { count: 0, total_count: 0 }, config: infaktPublicConfig() });
-      const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 50) || 50)), offset = Math.max(0, Number(url.searchParams.get('offset') || 0) || 0);
-      const data = await infaktWywolaj('/api/v3/invoices.json', { parameters: { limit: 100, offset, order: 'invoice_date desc', fields: 'id,uuid,number,status,invoice_date,sale_date,payment_date,paid_date,gross_price,left_to_pay,currency,client_company_name,client_first_name,client_last_name,client_tax_code' } });
-      const invoices = (Array.isArray(data.entities) ? data.entities : []).filter((x) => ownUuids.has(tekst(x?.uuid, 200))).slice(0, limit);
-      return odpowiedz({ ok: true, invoices, metainfo: { count: invoices.length, total_count: ownUuids.size }, config: infaktPublicConfig() });
-    }
-
-    if (action === 'infakt-create-invoice') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), orderNumber = numerZamowienia(body.orderNumber || body.nrZamowienia);
-      if (!orderNumber) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia', code: 'validation' }, 422);
-      const [ordersRec, linksRec] = await Promise.all([czytaj('orders', { items: [] }), czytaj('infakt_invoice_links', { items: {}, updated_at: null })]);
-      const order = (Array.isArray(ordersRec.items) ? ordersRec.items : []).find((x) => numerZamowienia(x?.nr) === orderNumber);
-      if (!order) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
-      const links = linksRec.items && typeof linksRec.items === 'object' ? { ...linksRec.items } : {}, existing = links[orderNumber];
-      if (existing && !['error', 'cancelled'].includes(String(existing.status || '').toLowerCase()) && body.force !== true) return odpowiedz({ ok: true, duplicatePrevented: true, link: existing, message: 'Faktura lub zadanie inFakt już istnieje dla tego zamówienia.' });
-      const payload = infaktPayloadZamowienia(order, { status: 'draft', invoiceDate: body.invoiceDate, sendToKsef: false });
-      const data = await infaktWywolaj('/api/v3/async/invoices.json', { method: 'POST', bodyObj: payload });
-      const reference = infaktRef(data), now = new Date().toISOString();
-      if (!reference) { const e = new Error('inFakt nie zwrócił numeru referencyjnego zadania'); e.code = 'infakt_missing_reference'; throw e; }
-      links[orderNumber] = { orderNumber, taskReference: reference, status: 'processing', processingCode: data.processing_code || 100, processingDescription: tekst(data.processing_description || 'Zlecenie przyjęte', 500), createdAt: now, updatedAt: now, sendToKsef: payload.send_to_ksef, payloadHash: crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
-      await zapisz('infakt_invoice_links', { items: links, updated_at: now });
-      return odpowiedz({ ok: true, duplicatePrevented: false, link: links[orderNumber], task: data }, 201);
-    }
-
-    if (action === 'infakt-task-status') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const reference = tekst(url.searchParams.get('reference'), 200).trim(), orderNumber = numerZamowienia(url.searchParams.get('orderNumber'));
-      if (!reference && !orderNumber) return odpowiedz({ ok: false, error: 'Brak referencji zadania', code: 'validation' }, 422);
-      const linksRec = await czytaj('infakt_invoice_links', { items: {}, updated_at: null }), links = linksRec.items && typeof linksRec.items === 'object' ? { ...linksRec.items } : {};
-      const current = orderNumber ? links[orderNumber] : Object.values(links).find((x) => x.taskReference === reference), ref = reference || current?.taskReference;
-      if (!ref) return odpowiedz({ ok: false, error: 'Nie znaleziono referencji zadania', code: 'not_found' }, 404);
-      const data = await infaktWywolaj(`/api/v3/async/invoices/status/${encodeURIComponent(ref)}.json`), invoice = infaktInvoiceFromTask(data), code = Number(data.processing_code || data.code || 0), now = new Date().toISOString();
-      const status = code === 201 || invoice?.uuid ? 'created' : code === 422 ? 'error' : 'processing', key = orderNumber || current?.orderNumber;
-      const link = { ...(current || {}), orderNumber: key || '', taskReference: ref, status, processingCode: code, processingDescription: tekst(data.processing_description || data.description || '', 700), invoiceId: invoice?.id || current?.invoiceId || null, invoiceUuid: tekst(invoice?.uuid || current?.invoiceUuid || '', 200), invoiceNumber: tekst(invoice?.number || current?.invoiceNumber || '', 120), error: status === 'error' ? infaktErrorText(data, 'Nie udało się utworzyć faktury') : '', updatedAt: now };
-      if (key) { links[key] = link; await zapisz('infakt_invoice_links', { items: links, updated_at: now }); }
-      return odpowiedz({ ok: true, status, link, task: data });
-    }
-
-    if (action === 'infakt-sync') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const linksRec = await czytaj('infakt_invoice_links', { items: {}, updated_at: null }), links = linksRec.items && typeof linksRec.items === 'object' ? { ...linksRec.items } : {}, results = [];
-      for (const [orderNumber, current] of Object.entries(links).filter(([, x]) => x?.taskReference && x.status === 'processing').slice(0, 25)) {
-        try { const data = await infaktWywolaj(`/api/v3/async/invoices/status/${encodeURIComponent(current.taskReference)}.json`), invoice = infaktInvoiceFromTask(data), code = Number(data.processing_code || data.code || 0), status = code === 201 || invoice?.uuid ? 'created' : code === 422 ? 'error' : 'processing'; links[orderNumber] = { ...current, status, processingCode: code, processingDescription: tekst(data.processing_description || '', 700), invoiceId: invoice?.id || current.invoiceId || null, invoiceUuid: tekst(invoice?.uuid || current.invoiceUuid || '', 200), invoiceNumber: tekst(invoice?.number || current.invoiceNumber || '', 120), error: status === 'error' ? infaktErrorText(data, 'Błąd tworzenia') : '', updatedAt: new Date().toISOString() }; results.push({ orderNumber, status }); }
-        catch (e) { results.push({ orderNumber, status: 'error', error: tekst(e.message, 500) }); }
-      }
-      await zapisz('infakt_invoice_links', { items: links, updated_at: new Date().toISOString() });
-      let purchaseSync = null; try { purchaseSync = await infaktSynchronizujCenyZakupu({ days: 180, limit: 25, force: false }); } catch (error) { purchaseSync = { available: false, errors: [tekst(error.message, 500)] }; }
-      return odpowiedz({ ok: true, links, results, purchaseSync });
-    }
-
-    // ─── E-MAIL: konfiguracja bez sekretów ───
-    if (action === 'email-config') {
-      return odpowiedz({ ok: true, email: emailPublicConfig() });
-    }
-
-    // ─── AGENT AI: jeden kontekst operacyjny całej strony ───
-    if (action === 'agent-operations-summary') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      return odpowiedz(await agentCentrumOperacyjne());
-    }
-
-    if (action === 'agent-action-runs') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const history = await czytaj('agent_action_runs', { items: [], updated_at: null });
-      const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 30) || 30));
-      return odpowiedz({ ok: true, items: (Array.isArray(history.items) ? history.items : []).slice(0, limit), updated_at: history.updated_at || null });
-    }
-
-    if (action === 'agent-run-safe-checks') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), requested = Array.isArray(body.areas) ? body.areas.map((x) => tekst(x, 80)) : [];
-      const allowed = new Map([
-        ['site-health', { action: '', label: 'Funkcjonalność strony i integracje', local: true }],
-        ['allegro-orders', { action: 'allegro-sync-orders', label: 'Zamówienia Allegro' }],
-        ['inpost', { action: 'inpost-sync-all', label: 'Statusy i numery InPost' }],
-        ['infakt', { action: 'infakt-sync', label: 'Zadania inFakt i ceny zakupu' }],
-      ]), selected = (requested.length ? requested : [...allowed.keys()]).filter((x) => allowed.has(x));
-      const adminToken = tokenZadania(req, url), origin = publicznyOrigin(req), startedAt = new Date().toISOString();
-      const results = await Promise.all(selected.map(async (area) => {
-        const definition = allowed.get(area), started = Date.now();
-        try {
-          if (definition.local) {
-            const center = await agentCentrumOperacyjne(), integrations = center.integrations || {}, missing = Object.entries(integrations).filter(([, ready]) => !ready).map(([name]) => name);
-            return { area, label: definition.label, status: missing.length ? 'error' : 'completed', detail: missing.length ? `Wymagają konfiguracji: ${missing.join(', ')}` : `Integracje: ${Object.keys(integrations).join(', ')} • baza i API odpowiadają`, error: missing.length ? `Wymagają konfiguracji: ${missing.join(', ')}` : '', durationMs: Date.now() - started };
-          }
-          const response = await fetch(`${origin}/api/store?action=${encodeURIComponent(definition.action)}`, { method: 'POST', headers: { 'x-admin-token': adminToken, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ source: 'agent-safe-plan' }) });
-          const text = await response.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
-          if (!response.ok || data?.ok === false) throw new Error(tekst(data?.error || data?.message || `HTTP ${response.status}`, 500));
-          const count = area === 'allegro-orders'
-            ? (Number(data?.imported_new || 0) + Number(data?.refreshed || 0))
-            : area === 'inpost'
-              ? Number(data?.sprawdzone ?? data?.zmienione ?? 0) || 0
-              : Number(data?.results?.length ?? data?.purchaseSync?.processedDocuments ?? data?.processed ?? 0) || 0;
-          return { area, label: definition.label, status: 'completed', count, scanned: area === 'allegro-orders' ? Number(data?.fetched || 0) : count, newItems: area === 'allegro-orders' ? Number(data?.imported_new || 0) : 0, refreshed: area === 'allegro-orders' ? Number(data?.refreshed || 0) : 0, durationMs: Date.now() - started };
-        } catch (error) {
-          return { area, label: definition.label, status: 'error', error: tekst(error?.message || error, 500), durationMs: Date.now() - started };
-        }
-      }));
-      const center = await agentCentrumOperacyjne(); results.forEach((result) => { if (result.area === 'allegro-orders') result.active = Number(center.summary?.activeAllegro || 0); });
-      const run = { id: crypto.randomUUID(), source: tekst(body.source || 'admin-panel', 80), profile: tekst(body.profile || 'custom', 40), startedAt, completedAt: new Date().toISOString(), durationMs: Math.max(0, Date.now() - Date.parse(startedAt)), results, completed: results.filter((x) => x.status === 'completed').length, errors: results.filter((x) => x.status === 'error').length, scoreAfter: center.score };
-      const history = await czytaj('agent_action_runs', { items: [] }); history.items = [run, ...(Array.isArray(history.items) ? history.items : [])].slice(0, 100); history.updated_at = run.completedAt; await zapisz('agent_action_runs', history);
-      return odpowiedz({ ok: true, allCompleted: results.every((x) => x.status === 'completed'), run, center });
-    }
+    const agentOperationsResponse = await agentOperationsRoute(req, url, action);
+    if (agentOperationsResponse) return agentOperationsResponse;
 
     // ─── PLAN ZATOWAROWANIA: jedna serwerowa kolejka dokumentów producentów ───
     const supplierRouteResponse = await supplierOrderRoute({ req, url, action });
     if (supplierRouteResponse) return supplierRouteResponse;
 
-    // ─── PRODUCENCI: zatwierdzone zamówienie e-mailem, z ochroną przed duplikatem ───
-    if (action === 'email-send-supplier-order') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const requested = body.order && typeof body.order === 'object' ? body.order : {};
-      const requestedSupplierNames = (Array.isArray(body.suppliers) ? body.suppliers : [body.supplier]).map((x) => tekst(x?.name || x?.nazwa || x, 160)).filter(Boolean);
-      const actor = requestSession(req)?.email || 'administrator';
-      const forceResend = body.forceResend === true;
-      const resendReason = tekst(body.resendReason || '', 500).trim();
-      const currentPlan = await supplierOrderPlan.beginEmailSend({ draftId: requested.id || body.draftId, expectedRevision: requested.revision ?? body.expectedRevision, requestedSupplierNames, actor, allowResend: forceResend, resendReason });
-      const suppliers = currentPlan.supplierContacts;
-      const order = currentPlan.draft;
-      const revision = Math.max(1, Number(order.revision) || 1);
-      let prepared, auditRec;
-      try {
-        prepared = suppliers.map((supplier) => producentEmailZlecenia(order, supplier));
-        const invalid = prepared.filter((item) => !item.validation?.ok);
-        if (invalid.length) {
-          await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results: [], actor, resend: forceResend, resendReason });
-          const missingIdentifiers = [...new Set(invalid.flatMap((item) => item.validation?.missingIdentifiers || []))];
-          return odpowiedz({ ok: false, error: `Uzupełnij kartotekę lub identyfikatory pozycji przed wysyłką: ${missingIdentifiers.join(', ') || invalid.map((x) => x.name || 'bez nazwy').join(', ')}`, code: 'supplier_validation', missingIdentifiers }, 422);
-        }
-        auditRec = await czytaj('supplier_order_email_audit', { items: {}, updated_at: null });
-      } catch (error) {
-        try { await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results: [], actor, resend: forceResend, resendReason }); } catch {}
-        throw error;
-      }
-      const auditItems = auditRec.items && typeof auditRec.items === 'object' ? { ...auditRec.items } : {};
-      const results = [];
-      for (const item of prepared) {
-        const fingerprint = crypto.createHash('sha256').update(`${order.id}|${revision}|${item.name.toLowerCase()}|${item.to}|${item.rows.map((p) => `${p.kod}:${p.ilosc}`).join('|')}|${item.optima?.content || ''}`).digest('hex').slice(0, 32);
-        if (!forceResend && auditItems[fingerprint]?.sent === true) {
-          results.push({ supplier: item.name, to: item.to, sent: true, skippedDuplicate: true, sentAt: auditItems[fingerprint].sentAt, messageId: auditItems[fingerprint].messageId || '', optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
-          continue;
-        }
-        try {
-          const sent = await wyslijEmailSMTP({ to: item.to, subject: item.subject, text: item.text, html: item.html, attachments: item.attachments });
-          const sentResult = { supplier: item.name, to: item.to, sent: true, skippedDuplicate: false, sentAt: new Date().toISOString(), messageId: sent.message_id || '', provider: sent.provider || 'smtp' };
-          const previousAudit = auditItems[fingerprint] && typeof auditItems[fingerprint] === 'object' ? auditItems[fingerprint] : {};
-          const attempt = { ...sentResult, mode: forceResend ? 'resend' : 'send', reason: forceResend ? resendReason : '' };
-          auditItems[fingerprint] = {
-            ...previousAudit,
-            sent: true,
-            sentAt: previousAudit.sentAt || sentResult.sentAt,
-            messageId: previousAudit.messageId || sentResult.messageId,
-            provider: sentResult.provider,
-            lastSentAt: sentResult.sentAt,
-            lastMessageId: sentResult.messageId,
-            sendCount: Math.max(0, Number(previousAudit.sendCount) || 0) + 1,
-            attempts: [...(Array.isArray(previousAudit.attempts) ? previousAudit.attempts : []), attempt].slice(-50),
-            orderId: tekst(order.id, 120), orderNumber: tekst(order.numer || order.id, 120), revision, fingerprint,
-          };
-          try { await zapisz('supplier_order_email_audit', { items: auditItems, updated_at: sentResult.sentAt }); }
-          catch (auditError) { sentResult.auditError = tekst(auditError?.message || auditError, 300); }
-          results.push({ ...sentResult, optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
-        } catch (error) {
-          results.push({ supplier: item.name, to: item.to, sent: false, error: tekst(error?.message || error, 700), code: tekst(error?.code || 'email_error', 120), optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
-        }
-      }
-      const sentAt = results.filter((x) => x.sent).map((x) => x.sentAt).filter(Boolean).sort().pop() || null;
-      const optimaMissingIdentifiers = results.flatMap((result) => (result.optima?.missingIdentifiers || []).map((item) => ({ supplier: result.supplier, ...item })));
-      const plan = await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results, sentAt, actor, resend: forceResend, resendReason });
-      const procurementWorkflow = await synchronizujEtapyZakupoweZlecen(plan.supplierOrders, 'supplier-email');
-      return odpowiedz({ ok: true, allSent: results.length > 0 && results.every((x) => x.sent), resent: forceResend, sentAt, results, revision, optimaComplete: optimaMissingIdentifiers.length === 0, optimaMissingIdentifiers, draft: plan.draft, supplierOrders: plan.supplierOrders, rev: plan.rev, updated_at: plan.updated_at, procurementWorkflow: { changed: procurementWorkflow.changed } });
-    }
+    const emailResponse = await emailRoute(req, url, action);
+    if (emailResponse) return emailResponse;
 
-    // ─── E-MAIL: wysyłka administracyjna przez Netlify SMTP ───
-    if (action === 'send-email') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const to = tekst(body.to, 300).trim();
-      const subject = tekst(body.subject, 300).trim();
-      const text = tekst(body.text, 20000);
-      const html = tekst(body.html, 30000);
-      if (!to || !subject || (!text && !html)) return odpowiedz({ ok: false, error: 'Brak adresu, tematu albo treści e-maila' }, 422);
-      let r;
-      try { r = await wyslijEmailSMTP({ to, subject, text, html: html || undefined }); }
-      catch (e) {
-        return odpowiedz({ ok: false, error: e.message, code: e.code || 'email_error' }, e.code === 'email_not_configured' ? 503 : 502);
-      }
-      return odpowiedz({ ok: true, provider: r.provider, message_id: r.message_id, accepted: r.accepted || [] });
-    }
-
-    // ─── E-MAIL: ręczna wysyłka wiadomości statusowej z JEDNOLITEGO szablonu (admin) ───
-    if (action === 'send-status-email') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const nr = numerZamowienia(body.nr || body.number);
-      const typ = tekst(body.typ || body.type, 40).trim();
-      if (!nr || !typ) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia albo typu wiadomości' }, 422);
-      const rec = await czytaj('orders', { items: [] });
-      const z = (Array.isArray(rec.items) ? rec.items : []).find((x) => x.nr === nr);
-      if (!z) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
-      if (!z.email) return odpowiedz({ ok: false, error: 'Zamówienie nie ma adresu e-mail klienta', code: 'no_email' }, 422);
-      const c = emailKonfiguracja();
-      if (!c.configured) return odpowiedz({ ok: false, error: 'E-mail nie jest skonfigurowany po stronie serwera.', code: 'email_not_configured' }, 503);
-      try {
-        let r;
-        if (typ === 'potwierdzenie') {
-          const msg = wiadomoscKlientaZamowienie(z);
-          r = await wyslijEmailSMTP({ to: z.email, ...msg });
-          await dopiszHistorieEmaila(z.nr, { typ: 'potwierdzenie', status: 'wysłano', provider: r.provider, id: r.message_id, automatyczne: false });
-          r = { configured: true, sent: true, provider: r.provider, id: r.message_id };
-        } else {
-          const kwota = (body.kwota != null && body.kwota !== '') ? Number(body.kwota) : null;
-          r = await wyslijEmailStatusowy(z, typ, kwota != null ? { kwota } : {});
-          if (r && r.sent === false && r.error) return odpowiedz({ ok: false, error: r.error, code: r.error }, r.error === 'email_not_configured' ? 503 : 502);
-        }
-        const recPo = await czytaj('orders', { items: [] });
-        const zPo = (recPo.items || []).find((x) => x.nr === nr) || z;
-        return odpowiedz({ ok: true, provider: r.provider, message_id: r.id, sent: r.sent !== false, powiadomienia: zPo?.wysylka?.powiadomienia || [] });
-      } catch (e) {
-        return odpowiedz({ ok: false, error: e.message, code: e.code || 'email_error' }, e.code === 'email_not_configured' ? 503 : 502);
-      }
-    }
-
-    // ─── PAYNOW: konfiguracja publiczna bez sekretów ───
-    if (action === 'paynow-config') {
-      const cfg = paynowKonfiguracja(req);
-      return odpowiedz({
-        ok: true,
-        configured: cfg.configured,
-        env: cfg.env,
-        apiBaseUrl: cfg.apiBaseUrl,
-        continueUrl: cfg.continueUrl,
-        notificationUrl: cfg.notificationUrl,
-        requiredEnv: ['PAYNOW_API_KEY', 'PAYNOW_SIGNATURE_KEY', 'PAYNOW_ENV'],
-        optionalEnv: ['PAYNOW_CONTINUE_URL', 'PAYNOW_NOTIFICATION_URL'],
-      });
-    }
-
-    // ─── PAYNOW: utworzenie płatności i linku przekierowania ───
-    if (action === 'paynow-create') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w Netlify.', code: 'paynow_not_configured' }, 503);
-      const body = await req.json().catch(() => ({}));
-      const zam = normalizujZamowienie(body.order);
-      if (!zam) return odpowiedz({ ok: false, error: 'Brak danych zamówienia' }, 422);
-      const usuniete = mapaUsunietych(await czytajUsunieteZamowienia());
-      if (usuniete.has(zam.nr)) return odpowiedz({ ok: false, error: 'Zamówienie jest usunięte i nie może dostać nowej płatności', code: 'deleted' }, 409);
-
-      const rec = await czytaj('orders', { items: [] });
-      const items = filtrujNieusunieteZamowienia(rec.items || [], usuniete);
-      const istniejeIdx = items.findIndex((x) => x.nr === zam.nr);
-      const zapisaneZamowienie = istniejeIdx >= 0 ? items[istniejeIdx] : zam;
-      const staraPlatnosc = zapisaneZamowienie.paynow || {};
-      if (staraPlatnosc.redirectUrl && !PAYNOW_STATUSY_KONCOWE.has(String(staraPlatnosc.status || '').toUpperCase())) {
-        return odpowiedz({
-          ok: true,
-          configured: true,
-          reused: true,
-          redirectUrl: staraPlatnosc.redirectUrl,
-          paymentId: staraPlatnosc.paymentId || '',
-          status: staraPlatnosc.status || '',
-          paymentStatus: statusPlatnosciPaynow(staraPlatnosc.status),
-          paynow: staraPlatnosc,
-        });
-      }
-      if (istniejeIdx < 0) {
-        items.unshift(zapisaneZamowienie);
-        while (items.length > LIMIT_ZAMOWIEN) items.pop();
-        await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      }
-
-      const payload = payloadPlatnosciPaynow(zapisaneZamowienie, req);
-      const idempotencyKey = kluczIdempotencji('ord', zapisaneZamowienie.nr);
-      const dane = await paynowWywolaj(req, '/v3/payments', { method: 'POST', bodyObj: payload, idempotencyKey });
-      const status = tekst(dane.status, 40).toUpperCase();
-      const paymentId = tekst(dane.paymentId, 40);
-      const redirectUrl = tekst(dane.redirectUrl, 1000);
-      const zaktualizowane = await aktualizujZamowieniePaynow({
-        externalId: zapisaneZamowienie.nr,
-        paymentId,
-        status,
-        redirectUrl,
-        env: cfg.env,
-      });
-      let email = null;
-      try { email = await wyslijEmaileNowegoZamowienia(zaktualizowane || { ...zapisaneZamowienie, paynow: { paymentId, status, redirectUrl, env: cfg.env } }); }
-      catch (e) {
-        email = { configured: emailKonfiguracja().configured, sent: false, error: e.message };
-        await dopiszHistorieEmaila(zapisaneZamowienie.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
-      }
-      return odpowiedz({
-        ok: true,
-        configured: true,
-        env: cfg.env,
-        redirectUrl,
-        paymentId,
-        status,
-        paymentStatus: statusPlatnosciPaynow(status),
-        paynow: zaktualizowane?.paynow || { paymentId, status, redirectUrl, env: cfg.env },
-        email,
-      }, 201);
-    }
-
-    // ─── PAYNOW: ręczne odświeżenie statusu z API ───
-    if (action === 'paynow-status') {
-      const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera.', code: 'paynow_not_configured' }, 503);
-      let paymentId = tekst(url.searchParams.get('paymentId'), 40).trim();
-      const nr = numerZamowienia(url.searchParams.get('nr'));
-      if (!paymentId && nr) {
-        const rec = await czytaj('orders', { items: [] });
-        const z = (rec.items || []).find((x) => x.nr === nr);
-        paymentId = tekst(z?.paynow?.paymentId, 40).trim();
-      }
-      if (!paymentId) return odpowiedz({ ok: false, error: 'Brak paymentId Paynow' }, 422);
-      const dane = await paynowWywolaj(req, `/v3/payments/${encodeURIComponent(paymentId)}/status`, {
-        method: 'GET',
-        idempotencyKey: kluczIdempotencji('stat', paymentId),
-      });
-      const status = tekst(dane.status, 40).toUpperCase();
-      const zaktualizowane = await aktualizujZamowieniePaynow({
-        externalId: nr,
-        paymentId: dane.paymentId || paymentId,
-        status,
-        env: cfg.env,
-      });
-      return odpowiedz({
-        ok: true,
-        configured: true,
-        paymentId: dane.paymentId || paymentId,
-        status,
-        paymentStatus: statusPlatnosciPaynow(status),
-        order: zaktualizowane ? { nr: zaktualizowane.nr, status: zaktualizowane.status, platnoscStatus: zaktualizowane.platnoscStatus, paynow: zaktualizowane.paynow } : null,
-      });
-    }
-
-    // ─── PAYNOW: webhook statusów płatności ───
-    if (action === 'paynow-notification') {
-      if (req.method !== 'POST') return new Response('', { status: 405 });
-      const cfg = paynowKonfiguracja(req);
-      const rawBody = await req.text();
-      if (!cfg.configured) return new Response('', { status: 503 });
-      const podpis = req.headers.get('signature') || req.headers.get('Signature') || '';
-      const wyliczony = podpisPaynowPowiadomienia(rawBody, cfg.signatureKey);
-      if (!porownajPodpis(podpis, wyliczony)) return new Response('', { status: 401 });
-      let dane = {};
-      try { dane = JSON.parse(rawBody || '{}'); } catch (e) { return new Response('', { status: 400 }); }
-      await aktualizujZamowieniePaynow({
-        externalId: dane.externalId,
-        paymentId: dane.paymentId,
-        status: tekst(dane.status, 40).toUpperCase(),
-        modifiedAt: tekst(dane.modifiedAt, 80),
-        env: cfg.env,
-      });
-      return new Response('', { status: 202, headers: { 'cache-control': 'no-store' } });
-    }
-
-    // ─── PAYNOW: ustawienie URL-i sklepu w panelu Paynow (admin) ───
-    if (action === 'paynow-configure-urls') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Najpierw ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w Netlify.', code: 'paynow_not_configured' }, 503);
-      const body = await req.json().catch(() => ({}));
-      const payload = {
-        notificationUrl: tekst(body.notificationUrl || cfg.notificationUrl, 1000),
-        continueUrl: tekst(body.continueUrl || cfg.continueUrl, 1000),
-      };
-      await paynowWywolaj(req, '/v3/configuration/shop/urls', {
-        method: 'PATCH',
-        bodyObj: payload,
-        idempotencyKey: kluczIdempotencji('cfg', Date.now()),
-      });
-      return odpowiedz({ ok: true, configured: true, env: cfg.env, ...payload });
-    }
-
-    // ─── PAYNOW: zwrot pieniędzy (refund) + automatyczny e-mail (admin) ───
-    if (action === 'paynow-refund') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w Netlify.', code: 'paynow_not_configured' }, 503);
-      const body = await req.json().catch(() => ({}));
-      const nr = numerZamowienia(body.nr || body.number);
-      if (!nr) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia' }, 422);
-      const rec = await czytaj('orders', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const i = items.findIndex((x) => x.nr === nr);
-      if (i < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
-      const z = { ...items[i] };
-      const paymentId = tekst(z?.paynow?.paymentId, 40).trim();
-      if (!paymentId) return odpowiedz({ ok: false, error: 'To zamówienie nie ma płatności Paynow — zwrot pieniędzy zrób w banku, a zamówienie oznacz jako „zwrot pieniędzy”.', code: 'no_payment' }, 409);
-      const statusPlat = String(z?.paynow?.status || '').toUpperCase();
-      if (statusPlat !== 'CONFIRMED') return odpowiedz({ ok: false, error: `Zwrot możliwy tylko dla opłaconej płatności (CONFIRMED). Obecny status Paynow: ${statusPlat || 'brak'}.`, code: 'not_confirmed' }, 409);
-      const pelna = grosze(z.razem);
-      const juz = (Array.isArray(z?.paynow?.refunds) ? z.paynow.refunds : []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
-      const amount = (body.amount != null && body.amount !== '') ? grosze(body.amount) : (pelna - juz);
-      if (amount <= 0) return odpowiedz({ ok: false, error: 'Kwota zwrotu musi być większa od zera' }, 422);
-      if (amount + juz > pelna) return odpowiedz({ ok: false, error: `Kwota zwrotu przekracza pozostałą kwotę płatności (pozostało ${zlSerwer((pelna - juz) / 100)}).`, code: 'amount_too_large' }, 409);
-      const reasonRaw = String(body.reason || '').toUpperCase();
-      const reason = ['RMA', 'REFUND_BEFORE_14', 'REFUND_AFTER_14', 'OTHER'].includes(reasonRaw) ? reasonRaw : '';
-      const bodyObj = reason ? { amount, reason } : { amount };
-      const idempotencyKey = kluczIdempotencji('ref', `${paymentId}${Date.now()}`);
-      const dane = await paynowWywolaj(req, `/v3/payments/${encodeURIComponent(paymentId)}/refunds`, { method: 'POST', bodyObj, idempotencyKey });
-      const refundId = tekst(dane.refundId, 60);
-      const refundStatus = tekst(dane.status, 40).toUpperCase();
-      const refunds = (Array.isArray(z?.paynow?.refunds) ? z.paynow.refunds.slice() : []);
-      refunds.push({ refundId, status: refundStatus, amount, reason, ts: new Date().toISOString() });
-      const pelnyZwrot = (amount + juz) >= pelna;
-      z.paynow = { ...z.paynow, refunds, updatedAt: new Date().toISOString() };
-      z.status = 'zwrot pieniędzy';
-      z.platnoscStatus = pelnyZwrot ? 'zwrócone' : 'częściowy zwrot';
-      const w = z.wysylka || {};
-      w.historia = [...(Array.isArray(w.historia) ? w.historia : []), { czas: new Date().toLocaleString('pl-PL'), status: 'Zwrot pieniędzy Paynow', opis: `${zlSerwer(amount / 100)} • ${refundId || '—'} • ${refundStatus || '—'}` }];
-      z.wysylka = w;
-      items[i] = z;
-      await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      let email = null;
-      try { email = await wyslijEmailStatusowy(z, 'zwrot_pieniedzy', { kwota: amount / 100 }); }
-      catch (e) { email = { sent: false, error: e.message }; }
-      const recPo = await czytaj('orders', { items: [] });
-      const zPo = (recPo.items || []).find((x) => x.nr === nr) || z;
-      return odpowiedz({
-        ok: true,
-        configured: true,
-        refundId,
-        status: refundStatus,
-        amount,
-        fullRefund: pelnyZwrot,
-        email,
-        order: { nr: zPo.nr, status: zPo.status, platnoscStatus: zPo.platnoscStatus, paynow: zPo.paynow },
-        powiadomienia: zPo?.wysylka?.powiadomienia || [],
-      }, 201);
-    }
+    const paynowResponse = await paynowRoute(req, url, action);
+    if (paynowResponse) return paynowResponse;
 
     // ─── ALLEGRO: stan integracji i dane zapisane w backendzie (admin) ───
     if (action === 'allegro-data') {
@@ -5541,6 +3078,14 @@ export default async (req) => {
       const settings = allegroUstawieniaOfert({ ...previous, ...body, defaultStock: requested, republish: true, updated_at: new Date().toISOString() });
       await zapisz('allegro_offer_settings', settings);
       return odpowiedz({ ok: true, settings });
+    }
+
+    if (action === 'allegro-connection-check') {
+      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      await allegroAccessToken(req);
+      const status = await allegroStatus(req);
+      return odpowiedz({ ok: true, allegro: status, ready: status.connected === true && status.requiresReauth !== true });
     }
 
     // ─── ALLEGRO: utworzenie linku OAuth (admin) ───
@@ -5605,7 +3150,7 @@ export default async (req) => {
         const wyniki = await Promise.all(batch.map(async (stare) => {
           try {
             const pelne = await allegroWywolaj(req, `/order/checkout-forms/${encodeURIComponent(stare.id)}`);
-            return { ...allegroScalZamowienie(pelne, stare), officialStatusCheckedAt };
+            return { ...allegroScalZamowienie(pelne, stare), officialStatusCheckedAt: officialCheckedAt };
           } catch (e) {
             return { ...stare, syncError: tekst(e.message, 500), lastSyncErrorAt: new Date().toISOString() };
           }
@@ -5640,14 +3185,15 @@ export default async (req) => {
       }
       const retention = await allegroOrderArchive.archive(items, { now: new Date(), retentionDays: 30 });
       items = retention.items;
-      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: baselineCreated ? 0 : dodane, refreshed: odswiezone, refreshed_from_recent_list: odswiezoneZListy, refreshed_individually: Math.max(0, odswiezone - odswiezoneZListy), status_refresh_candidates: doAktualizacji.length, filtered: pominieteNoweTerminalne, mode: 'allegro_status_authoritative_recent_snapshot_v2', retention_days: 30, archive: retention.summary, archived_now: retention.archived, baseline_at: baselineAt, baseline_created: baselineCreated, baseline_archived: baselineArchived, agent };
+      const changedOrders = countChangedAllegroOrderEvents(poprzednie, items);
+      const rec = { items, updated_at: new Date().toISOString(), count: items.length, fetched: pobrane.length, imported_new: baselineCreated ? 0 : dodane, changed_orders: changedOrders, refreshed: odswiezone, refreshed_from_recent_list: odswiezoneZListy, refreshed_individually: Math.max(0, odswiezone - odswiezoneZListy), status_refresh_candidates: doAktualizacji.length, filtered: pominieteNoweTerminalne, mode: 'allegro_status_authoritative_recent_snapshot_v2', retention_days: 30, archive: retention.summary, archived_now: retention.archived, baseline_at: baselineAt, baseline_created: baselineCreated, baseline_archived: baselineArchived, agent };
       await zapisz('allegro_orders', rec);
       // Marker cutover jest commitem końcowym: awaria zapisu zamówień nie może
       // oznaczyć baseline jako zakończonego. Ponowne archiwizowanie po awarii
       // samego markera jest bezpieczne i idempotentne.
       if (baselineMarkerMissing) await zapisz('allegro_orders_baseline_v2', { baseline_at: baselineAt, reason: baselineCreated ? 'existing_orders_confirmed_handled' : 'recovered_from_orders_record', created_at: baselineAt });
       const plan = await allegroZapisStanIMozeUzgodnijPlan(items);
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, mappings: orderMappings || undefined, archive: retention.summary, archived: retention.archived, retention_days: 30, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode, baseline_at: rec.baseline_at, baseline_created: rec.baseline_created, baseline_archived: rec.baseline_archived, agent, ...plan });
+      return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, mappings: orderMappings || undefined, archive: retention.summary, archived: retention.archived, retention_days: 30, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, changed_orders: rec.changed_orders, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode, baseline_at: rec.baseline_at, baseline_created: rec.baseline_created, baseline_archived: rec.baseline_archived, agent, ...plan });
     }
 
     // ─── ALLEGRO: lokalny etap obsługi zamówienia (admin) ───
@@ -5854,169 +3400,8 @@ export default async (req) => {
       return odpowiedz({ ok: true, stock: targetStock, republish: true, requested: offerIds.length, stockUpdated: results.filter((x) => x.stockUpdated).length, stockFailed: results.filter((x) => !x.stockUpdated).length, republishUpdated: results.filter((x) => x.republishUpdated).length, republishFailed: results.filter((x) => !x.republishUpdated).length, auditOpen: Object.values(auditItems).filter((x) => !x.stockUpdated || !x.republishUpdated).length, results });
     }
 
-    // ─── ALLEGRO: komunikacja z klientami i autoresponder (admin) ───
-    if (action === 'allegro-communications-data') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const comm = await czytaj('allegro_communications', { threads: [], issues: [], updated_at: null, errors: [] });
-      const internalRec = await czytaj('allegro_communication_internal', { items: {}, updated_at: null });
-      const applied = allegroZastosujStatusyWewnetrzne(comm, internalRec);
-      const settings = allegroUstawieniaKomunikacji(await czytaj('allegro_communication_settings', {}));
-      const replies = await czytaj('allegro_auto_replies', { items: {}, updated_at: null });
-      return odpowiedz({
-        ok: true,
-        allegro: await allegroStatus(req),
-        threads: Array.isArray(applied.data.threads) ? applied.data.threads : [],
-        issues: Array.isArray(applied.data.issues) ? applied.data.issues : [],
-        errors: Array.isArray(comm.errors) ? comm.errors : [],
-        updated_at: comm.updated_at || null,
-        lastSyncSummary: comm.lastSyncSummary || null,
-        settings,
-        autoReplies: replies.items && typeof replies.items === 'object' ? replies.items : {},
-        autoRepliesUpdatedAt: replies.updated_at || null,
-        requiresReauth: Array.isArray(comm.errors) && comm.errors.some((e) => Number(e?.status) === 403),
-      });
-    }
-
-    // Status wyłącznie wewnętrzny: nie wywołuje żadnego endpointu Allegro i niczego nie wysyła klientowi.
-    if (action === 'allegro-communication-resolve') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const requests = (Array.isArray(body.items) ? body.items : [body]).slice(0, 200).map((x) => ({ type: x?.type === 'issue' ? 'issue' : 'thread', id: tekst(x?.id, 120).trim(), resolved: x?.resolved !== false, note: tekst(x?.note || body.note || '', 1000).trim() })).filter((x) => x.id);
-      if (!requests.length) return odpowiedz({ ok: false, error: 'Wybierz co najmniej jedną sprawę', code: 'validation' }, 422);
-      const [comm, internalRec, historyRec] = await Promise.all([
-        czytaj('allegro_communications', { threads: [], issues: [], updated_at: null, errors: [] }),
-        czytaj('allegro_communication_internal', { items: {}, updated_at: null }),
-        czytaj('allegro_communication_internal_history', { items: [], updated_at: null }),
-      ]);
-      const internalItems = internalRec.items && typeof internalRec.items === 'object' ? { ...internalRec.items } : {};
-      const history = Array.isArray(historyRec.items) ? [...historyRec.items] : [];
-      const now = new Date().toISOString(), results = [];
-      for (const request of requests) {
-        const listKey = request.type === 'issue' ? 'issues' : 'threads';
-        const list = Array.isArray(comm[listKey]) ? comm[listKey] : [];
-        const index = list.findIndex((x) => String(x?.id) === request.id);
-        if (index < 0) { results.push({ ...request, ok: false, error: 'Nie znaleziono sprawy' }); continue; }
-        const item = list[index], sourceMessageKey = allegroKluczWiadomosci(allegroNajnowszaWiadomoscKlienta(item));
-        const key = allegroKluczSprawyWewnetrznej(request.type, request.id);
-        const state = { ...(internalItems[key] || {}), type: request.type, id: request.id, resolved: request.resolved, note: request.note, sourceMessageKey, updatedAt: now, updatedBy: 'administrator', ...(request.resolved ? { resolvedAt: now, reopenedAt: null, reopenReason: '' } : { resolvedAt: null, reopenedAt: now, reopenReason: 'manual' }) };
-        internalItems[key] = state;
-        list[index] = request.resolved
-          ? { ...item, internalResolved: true, internalResolution: state, needsReply: false, humanReplyNeeded: false, newIncomingCount: 0 }
-          : { ...item, internalResolved: false, internalResolution: state, humanReplyNeeded: true, needsReply: !!allegroNajnowszaWiadomoscKlienta(item) };
-        comm[listKey] = list;
-        history.unshift({ id: crypto.randomUUID(), at: now, ...request, sourceMessageKey, action: request.resolved ? 'resolved_internal' : 'reopened_internal', sentExternally: false });
-        results.push({ ...request, ok: true, state });
-      }
-      comm.updated_at = now;
-      await Promise.all([
-        zapisz('allegro_communications', comm),
-        zapisz('allegro_communication_internal', { items: internalItems, updated_at: now }),
-        zapisz('allegro_communication_internal_history', { items: history.slice(0, 5000), updated_at: now }),
-      ]);
-      return odpowiedz({ ok: true, results, threads: comm.threads || [], issues: comm.issues || [], updated_at: now, sentExternally: false });
-    }
-
-    if (action === 'allegro-communications-settings') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const settings = allegroUstawieniaKomunikacji(body.settings || body);
-      await zapisz('allegro_communication_settings', { ...settings, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, settings });
-    }
-
-    if (action === 'allegro-reply-suggestion') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const type = body.type === 'issue' ? 'issue' : 'thread';
-      const id = tekst(body.id, 120).trim();
-      const mode = body.mode === 'style' ? 'style' : (body.mode === 'improve' ? 'improve' : 'context');
-      const draft = tekst(body.draft, 20000).trim();
-      const [comm, ordersRec, storeOrdersRec, styleMemory] = await Promise.all([
-        czytaj('allegro_communications', { threads: [], issues: [] }),
-        czytaj('allegro_orders', { items: [] }),
-        czytaj('orders', { items: [] }),
-        czytaj('allegro_reply_style_memory', { items: [], updated_at: null }),
-      ]);
-      const list = type === 'issue' ? comm.issues : comm.threads;
-      const item = (Array.isArray(list) ? list : []).find((x) => String(x?.id) === id);
-      if (!item) return odpowiedz({ ok: false, error: 'Nie znaleziono rozmowy Allegro', code: 'not_found' }, 404);
-      const learnedStyle = allegroWzorceStyluOdpowiedzi(comm, styleMemory);
-      if (mode === 'style') {
-        if (!draft) return odpowiedz({ ok: false, error: 'Najpierw wpisz treść, którą Agent ma poprawić stylistycznie', code: 'validation' }, 422);
-        return odpowiedz({ ok: true, type, id, mode, suggestion: improvePolishReplyStyle(draft, { ensureReplyFrame: true, styleProfile: learnedStyle.profile }), context: { mode, verifiedAt: new Date().toISOString(), draftOnly: true, styleProfile: learnedStyle.profile }, sentExternally: false });
-      }
-      const full = await allegroPelnaSprawaDoOdpowiedzi(req, type, item);
-      if (!allegroNajnowszaWiadomoscKlienta(full.item)) return odpowiedz({ ok: false, error: 'Ta sprawa zawiera wyłącznie komunikaty Allegro — nie ma wiadomości klienta, na którą można przygotować odpowiedź.', code: 'no_customer_message', sentExternally: false }, 422);
-      const relatedItems = allegroPoprzednieSprawyKlienta(comm, type, full.item);
-      const checked = await allegroSprawdzKontekstOdpowiedzi(req, full.item, ordersRec.items, storeOrdersRec.items);
-      const prepared = buildContextualAllegroReply({ type, item: full.item, context: checked.context, draft, relatedItems, styleProfile: learnedStyle.profile });
-      return odpowiedz({ ok: true, type, id, mode, suggestion: prepared.suggestion, conversation: prepared.conversation, context: { ...checked.context, mode, conversation: prepared.conversation, styleProfile: learnedStyle.profile, history: { live: full.live, pages: full.pages, truncated: full.truncated, error: full.error } }, basedOn: { order: checked.context.orderFound, liveOrder: checked.context.checks.liveOrder, shipments: checked.context.checks.shipments, localShipping: checked.context.checks.localShipping, warehouse: checked.context.checks.warehouse, wholeConversation: true, fullHistoryLive: full.live, historyPages: full.pages, historyTruncated: full.truncated, historyError: full.error, messageCount: prepared.conversation.messageCount, previousCustomerConversations: prepared.conversation.relatedConversationCount, learnedStyleExamples: learnedStyle.profile.exampleCount }, sentExternally: false });
-    }
-
-    if (action === 'allegro-send-reply') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const type = body.type === 'issue' ? 'issue' : 'thread';
-      const id = tekst(body.id, 120).trim();
-      const text = tekst(body.text, 20000).trim();
-      if (!id || !text) return odpowiedz({ ok: false, error: 'Wybierz rozmowę i wpisz treść odpowiedzi', code: 'validation' }, 422);
-      let raw;
-      if (type === 'issue') raw = await allegroWywolaj(req, `/sale/issues/${encodeURIComponent(id)}/message`, { method: 'POST', accept: ALLEGRO_BETA_JSON, contentType: ALLEGRO_BETA_JSON, bodyObj: { text, attachments: [], type: 'REGULAR' } });
-      else {
-        raw = await allegroWywolaj(req, `/messaging/threads/${encodeURIComponent(id)}/messages`, { method: 'POST', bodyObj: { text, attachments: [] } });
-        try { await allegroWywolaj(req, `/messaging/threads/${encodeURIComponent(id)}/read`, { method: 'PUT', bodyObj: { read: true } }); } catch {}
-      }
-      const comm = await czytaj('allegro_communications', { threads: [], issues: [], updated_at: null, errors: [] });
-      const key = type === 'issue' ? 'issues' : 'threads';
-      const list = Array.isArray(comm[key]) ? [...comm[key]] : [];
-      const index = list.findIndex((x) => String(x?.id) === id);
-      const normalizedRaw = type === 'issue' ? allegroNormalizujIssueChatMessage(raw, id) : allegroNormalizujWiadomosc(raw, id);
-      const normalized = { ...normalizedRaw, role: normalizedRaw.role || 'SELLER', authorType: 'seller', incoming: false, seller: true, system: false };
-      if (index >= 0) {
-        const current = list[index], messages = [...(Array.isArray(current.messages) ? current.messages : []), normalized].filter((m, pos, all) => !m.id || all.findIndex((x) => x.id === m.id) === pos);
-        list[index] = { ...current, messages, lastMessage: normalized, read: true, needsReply: false, humanReplyNeeded: false, humanReplySource: null, newIncomingCount: 0, latestNewIncoming: null, latestNewIncomingKey: '', manualReplyAt: new Date().toISOString() };
-      }
-      const saved = { ...comm, [key]: list, updated_at: new Date().toISOString(), lastManualReply: { type, id, messageId: normalized.id || '', sent_at: new Date().toISOString() } };
-      await zapisz('allegro_communications', saved);
-      let styleProfile = null, styleLearned = false;
-      try {
-        styleProfile = await allegroZapamietajStylRecznejOdpowiedzi({ type, id, text, messageId: normalized.id || '' });
-        styleLearned = true;
-      } catch {}
-      return odpowiedz({ ok: true, type, id, message: normalized, styleLearned, styleProfile, threads: saved.threads || [], issues: saved.issues || [], updated_at: saved.updated_at });
-    }
-
-    if (action === 'allegro-sync-communications') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const settings = allegroUstawieniaKomunikacji(await czytaj('allegro_communication_settings', {}));
-      const previous = await czytaj('allegro_communications', { threads: [], issues: [], updated_at: null, errors: [] });
-      const rawData = await allegroPobierzKomunikacje(req, { limit: body.limit || 20 });
-      const marked = allegroOznaczNowaKomunikacje(rawData, previous);
-      const internalRec = await czytaj('allegro_communication_internal', { items: {}, updated_at: null });
-      const internalApplied = allegroZastosujStatusyWewnetrzne(marked, internalRec);
-      const data = internalApplied.data;
-      const freshCommunication = [...(data.threads || []), ...(data.issues || [])].filter((item) => !item?.cachedOlder);
-      const syncSummary = {
-        newBuyerMessages: freshCommunication.reduce((sum, item) => sum + Math.max(0, Number(item?.newIncomingCount || 0)), 0),
-        newThreads: (data.threads || []).filter((item) => !item?.cachedOlder && Number(item?.newIncomingCount || 0) > 0).length,
-        newIssues: (data.issues || []).filter((item) => !item?.cachedOlder && Number(item?.newIncomingCount || 0) > 0).length,
-        allegroSystemMessages: freshCommunication.reduce((sum, item) => sum + Math.max(0, Number(item?.systemCount || 0)), 0),
-      };
-      if (internalApplied.changed) await zapisz('allegro_communication_internal', { items: internalApplied.items, updated_at: new Date().toISOString() });
-      const telegramReminders = await allegroWyslijPrzypomnieniaTelegram(data, settings);
-      let autoReply = { sent: [], skipped: [], items: {} };
-      if (body.autoReply !== false && settings.enabled) autoReply = await allegroWyslijAutoOdpowiedzi(req, data, settings);
-      const rec = { threads: data.threads, issues: data.issues, errors: data.errors || [], requiresReauth: !!data.requiresReauth, updated_at: new Date().toISOString(), autoReplyLastRun: autoReply.sent?.length || 0, lastSyncSummary: syncSummary };
-      await zapisz('allegro_communications', rec);
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), ...rec, settings, autoReply, telegramReminders, syncSummary });
-    }
-
+    const allegroCommunicationsResponse = await allegroCommunicationsRoute(req, url, action);
+    if (allegroCommunicationsResponse) return allegroCommunicationsResponse;
     // ─── ALLEGRO: szkic i wystawienie produktu sklepu jako oferty ───
     if (action === 'allegro-offer-support') {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -6067,17 +3452,24 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const product = body.product || {};
+      const sourceProduct = body.product || {};
+      const editorial = await prepareLinkedProductEditorial(sourceProduct, { sourceUrl: sourceProduct.sourceUrl || sourceProduct.producentUrl, runSpecialist: agentSpecialists.run, actor: requestSession(req) || { source: 'product-editorial' } });
+      const product = editorial.product;
       const offersRec = await czytaj('allegro_offers', { items: [] });
       const similarOffers = allegroPodobneOferty(product, offersRec, 5);
       const shortDescription = allegroOpisKrotki(product, similarOffers);
       const sections = allegroSekcjeOpisu(product, shortDescription);
-      const fullDescription = allegroOpisPelnyTekst(product, shortDescription);
+      const allegroDescription = allegroOpisPelnyTekst(product, shortDescription);
       return odpowiedz({
         ok: true,
-        shortDescription,
-        fullDescription: fullDescription || shortDescription,
+        name: product.nazwa || '',
+        shortDescription: product.opisKrotki || shortDescription,
+        fullDescription: product.opis || '',
+        allegroTitle: product.allegroTitle || allegroOfferTitle(product),
+        allegroDescription: allegroDescription || product.allegroDescription || shortDescription,
         sections,
+        contentEditorial: product.contentEditorial,
+        editorial: { status: editorial.status, sourceRole: 'facts_only', warnings: editorial.warnings },
         compliance: allegroEnforceDraft({ name: product.nazwa || product.name || 'Produkt', description: { sections } }).compliance,
         similarOffers: similarOffers.map((x) => ({ id: x.offer?.id, name: x.offer?.name, score: Number(x.score.toFixed(2)) })),
       });
@@ -6087,13 +3479,26 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
+      const approval = body.approval && typeof body.approval === 'object' ? body.approval : null;
+      const requestProductId = tekst(body.product?.id || '', 100).trim();
+      const approvalHandle = allegroOperationReceipts.validate({ approval, productId: requestProductId });
+      const approvalOperationId = approvalHandle?.operationId || '';
       const offerSettings = await allegroPobierzUstawieniaOfert();
+      const mappedOfferId = tekst(body.mappedOfferId, 100).trim();
+      let mappedExisting = null;
+      if (mappedOfferId) {
+        const offersRec = await czytaj('allegro_offers', { items: [] });
+        const exactOffer = allegroOfertyItems(offersRec).find((x) => String(x.id) === mappedOfferId);
+        if (!exactOffer) return odpowiedz({ ok: false, error: 'Nie znaleziono ręcznie wskazanej oferty Allegro', code: 'mapped_offer_not_found' }, 404);
+        mappedExisting = { offer: exactOffer, score: 100, reason: 'ręczna decyzja administratora' };
+      }
       let categorySuggestion = null;
       let prepared = null;
       let draft = body.draft && typeof body.draft === 'object' ? body.draft : null;
       if (draft) draft = { ...draft, stock: { available: offerSettings.defaultStock }, publication: { ...(draft.publication || {}), republish: true } };
       if (!draft) {
         prepared = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
+        if (mappedExisting) prepared.existingOffer = mappedExisting;
         categorySuggestion = prepared.categorySuggestion;
         const agentTask = prepared.missing.length ? await allegroZapiszZadanieAgentaOferty(body.product || {}, { missing: prepared.missing, prepared, draft: prepared.payload }) : null;
         if (prepared.missing.length && !prepared.existingOffer) {
@@ -6104,7 +3509,7 @@ export default async (req) => {
       if (!prepared) {
         const offersRec = await czytaj('allegro_offers', { items: [] });
         const mappingsRec = await czytaj('allegro_mappings', { items: {} });
-        prepared = { existingOffer: allegroDopasowanieOferty(body.product || {}, offersRec, mappingsRec) };
+        prepared = { existingOffer: mappedExisting || allegroDopasowanieOferty(body.product || {}, offersRec, mappingsRec) };
       }
       const existing = prepared.existingOffer;
       const complianceGate = allegroEnforceDraft(draft || {});
@@ -6112,6 +3517,18 @@ export default async (req) => {
       if (!complianceGate.compliance.ok) {
         return odpowiedz({ ok: false, error: 'Publikacja została zablokowana: opis nadal zawiera treść niezgodną z zasadami Allegro.', code: 'allegro_compliance_block', compliance: complianceGate.compliance, draft }, 422);
       }
+      const identityCheck = await allegroZweryfikujTozsamoscPublikacji(req, body.product || {}, draft, prepared, { manualOffer: !!mappedExisting });
+      if (!identityCheck.ok) {
+        const agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, {
+          missing: ['jednoznaczna tożsamość produktu Allegro'],
+          errors: [{ code: identityCheck.code, message: identityCheck.reason }],
+          prepared,
+          draft,
+        });
+        return odpowiedz({ ok: false, error: identityCheck.reason, code: identityCheck.code, identityCheck, draft, catalogMatch: prepared?.catalogMatch || null, agentTask }, 422);
+      }
+      const receiptStart = await allegroOperationReceipts.begin(approvalHandle, { action: approval?.action || body.options?.publicationAction || 'keep', approvedBy: (requestSession(req) || {})?.email || 'administrator' });
+      if (receiptStart.kind === 'duplicate') return odpowiedz(receiptStart.response, receiptStart.httpStatus);
       let result, responseMeta = null, operationCheck = { completed: true, checks: 0 };
       try {
         if (existing?.offer?.id) {
@@ -6130,6 +3547,7 @@ export default async (req) => {
         e.catalogMatch = prepared?.catalogMatch || null;
         e.agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, { missing: prepared?.missing || [], errors: e.allegro?.errors || [{ code: e.code, message: e.message }], prepared, draft });
         await zapisz('allegro_offer_last_error', { at: new Date().toISOString(), productId: tekst(body.product?.id, 100), productName: tekst(body.product?.nazwa || body.product?.name, 300), message: tekst(e.message, 1000), status: e.status || 500, code: e.code || '', errors: Array.isArray(e.allegro?.errors) ? e.allegro.errors.slice(0, 20) : [], missing: prepared?.missing || [], requiredParameters: prepared?.requiredParameters || [], catalogMatch: prepared?.catalogMatch || null });
+        await allegroOperationReceipts.fail(approvalHandle, e);
         throw e;
       }
       const locationOfferId = String(responseMeta?.location || '').match(/\/sale\/product-offers\/([^/?]+)/)?.[1] || '';
@@ -6138,8 +3556,14 @@ export default async (req) => {
         const e = new Error('Allegro przyjęło operację, ale nie zwróciło identyfikatora oferty. Zadanie zapisano dla Agenta AI.');
         e.status = 502; e.code = 'allegro_missing_offer_id'; e.draft = draft; e.categorySuggestion = categorySuggestion; e.catalogMatch = prepared?.catalogMatch || null;
         e.agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, { errors: [{ code: e.code, message: e.message }], prepared, draft });
+        await allegroOperationReceipts.fail(approvalHandle, e);
         throw e;
       }
+      let verifiedOffer = null;
+      try {
+        verifiedOffer = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`);
+        if (verifiedOffer?.id) result = verifiedOffer;
+      } catch {}
       await zapisz('allegro_offer_last_error', null);
       if (offerId) {
         const offersRec = await czytaj('allegro_offers', { items: [] });
@@ -6150,14 +3574,22 @@ export default async (req) => {
         const productId = tekst(body.product?.id, 100).trim();
         if (productId) {
           const mappingRec = await czytaj('allegro_mappings', { items: {} });
-          const mappings = allegroMapowaniaItems(mappingRec);
+          const mappings = { ...allegroMapowaniaItems(mappingRec) };
           const link = allegroDanePowiazaniaZPrzygotowania(body.product || {}, prepared, draft);
-          mappings[offerId] = { offerId, productId, allegroProductId: link.catalogProductId, categoryId: link.categoryId, productName: tekst(body.product?.nazwa || body.product?.name, 300), linked_at: new Date().toISOString(), synced_at: new Date().toISOString(), operator: 'auto-offer-save' };
-          await zapisz('allegro_mappings', { items: mappings, updated_at: new Date().toISOString() });
+          const now = new Date().toISOString(), settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null }), settingsData = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {};
+          const products = await allegroAgentProduktyKompletne(settingsData), centralProduct = products.get(productId) || body.product || {};
+          const currentOffer = { ...normalized, ...(result || {}), id: offerId, productId: link.catalogProductId || normalized.productId, categoryId: link.categoryId || normalized.categoryId };
+          const validation = allegroOcenaPowiazania(centralProduct, currentOffer);
+          const canonicalLink = linkCanonicalAllegroMapping({ mappings, offers: [currentOffer, ...items], products, offer: currentOffer, product: centralProduct, validation, operator: mappedOfferId ? 'admin-manual-decision' : 'auto-offer-save', now });
+          canonicalLink.mappings[offerId] = markAllegroMappingSynced({ ...canonicalLink.mappings[offerId], allegroProductId: link.catalogProductId, categoryId: link.categoryId, productSnapshot: mappingProductSnapshot(centralProduct, settingsData) }, centralProduct, now);
+          const changedMappingIds = Object.keys(canonicalLink.mappings).filter((id) => JSON.stringify(mappings[id] ?? null) !== JSON.stringify(canonicalLink.mappings[id] ?? null));
+          await zapiszMapowaniaBezpiecznie(mappings, canonicalLink.mappings, now, { forceKeys: changedMappingIds });
           await allegroZapiszPowiazanieProduktu(body.product || {}, { offerId, prepared, draft });
         }
       }
-      return odpowiedz({ ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion }, existing ? 200 : 201);
+      const responseBody = { ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, identityCheck, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, verification: allegroOfferVerification(result, !!verifiedOffer), agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { id: approvalOperationId, status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion };
+      await allegroOperationReceipts.complete(approvalHandle, { offerId, httpStatus: existing ? 200 : 201, response: responseBody });
+      return odpowiedz(responseBody, existing ? 200 : 201);
     }
 
     // ─── ALLEGRO: kalkulator prowizji i opłat dla konkretnej oferty / produktu ───
@@ -6225,931 +3657,21 @@ export default async (req) => {
     const productLinkImportResponse = await productLinkImport.route(req, url, action);
     if (productLinkImportResponse) return productLinkImportResponse;
 
-    // ─── PRODUCENT: pobranie danych z URL produktu (admin) ───
-    if (action === 'product-url-inspect') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const target = tekst(body.url, 1000).trim();
-      if (!/^https?:\/\//i.test(target)) return odpowiedz({ ok: false, error: 'Podaj pełny adres URL produktu' }, 422);
-      return odpowiedz(await pobierzProduktProducentaZPamiecia(target));
-    }
+    const productAvailabilityResponse = await productAvailabilityRoute(req, url, action);
+    if (productAvailabilityResponse) return productAvailabilityResponse;
 
-    // ─── PRODUCENT + ALLEGRO: jeden kompletny pakiet do formularza produktu ───
-    if (action === 'product-url-prepare') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const target = tekst(body.url, 1000).trim();
-      if (!/^https?:\/\//i.test(target)) return odpowiedz({ ok: false, error: 'Podaj pełny adres URL produktu' }, 422);
-      const rawChoice = body.choice;
-      const choice = rawChoice === null || rawChoice === undefined || rawChoice === '' ? null : Number(rawChoice);
-      if (choice !== null && (!Number.isInteger(choice) || choice < 0 || choice > 20)) return odpowiedz({ ok: false, error: 'Nieprawidłowy wybór produktu', code: 'validation' }, 422);
-      return odpowiedz(await przygotujPakietProduktuZLinku(req, target, { choice }));
-    }
+    const allegroMappingResponse = await allegroMappingRoute(req, url, action);
+    if (allegroMappingResponse) return allegroMappingResponse;
 
-    // ─── PRODUKT: ręczna dostępność spójna ze sklepem i Allegro ───
-    if (action === 'product-sale-availability') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const productId = tekst(body.productId, 100).trim();
-      const available = body.available === true;
-      if (!productId) return odpowiedz({ ok: false, error: 'Brak identyfikatora produktu', code: 'validation' }, 422);
-      const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-      const availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? { ...data.artway_dostepnosc } : {};
-      const now = new Date().toISOString();
-      if (available) delete availability[productId];
-      else availability[productId] = { status: 'niedostepny', powod: tekst(body.reason || 'Ręcznie wyłączony ze sprzedaży', 500), data: now, operator: 'administrator', source: 'manual', automatic: false };
-      data.artway_dostepnosc = availability;
-      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, [{ ok: true, productId, status: available ? 'dostepny' : 'brak', available, quantity: available ? 1 : 0, checkedAt: now }], data);
-      await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-      return odpowiedz({ ok: true, productId, available, saleAutomation, updated_at: now });
-    }
+    const inpostResponse = await inpostRoute(req, url, action);
+    if (inpostResponse) return inpostResponse;
 
-    // ─── PRODUKT: decyzja administratora po kontroli producenta ───
-    if (action === 'product-sale-decision') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-      const batch = applyProductSaleDecisionBatch({ body, data: settingsRec.data, operator: 'administrator' }), { data, results, checks, audit, nowIso } = batch;
-      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, checks, data);
-      const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
-      audit.forEach((entry, index) => agentHistory.unshift({ id: `AI-DEC-${Date.now().toString(36)}-${index}`, ...entry, data: nowIso, dataTxt: new Date(nowIso).toLocaleString('pl-PL'), dane: { ...entry.dane, saleAutomation } }));data.artway_agent_ai_historia = agentHistory.slice(0, 500);
-      await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: nowIso });
-      return odpowiedz({ ok: true, ...results[0], changed: results.length, results, saleAutomation, updated_at: nowIso });
-    }
+    // ─── CENTRALNA KARTOTEKA PRODUKTÓW (PostgreSQL, stronicowanie serwerowe) ───
+    const centralCatalogResponse = await centralProductCatalogRoute(req, url, action);
+    if (centralCatalogResponse) return centralCatalogResponse;
 
-    // ─── PRODUCENT: wyrywkowy monitoring stanów przez Agenta AI ───
-    if (action === 'supplier-availability-sample') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-      const warehouse = data.artway_magazyn_ustawienia && typeof data.artway_magazyn_ustawienia === 'object' ? data.artway_magazyn_ustawienia : {};
-      const threshold = Math.max(1, Math.min(1000000, Number(body.threshold ?? warehouse.progNiskiProducenta ?? 50) || 50));
-      const limit = Math.max(1, Math.min(25, Number(body.limit ?? warehouse.producentProbka ?? 8) || 8));
-      const requestedIds = new Set((Array.isArray(body.productIds) ? body.productIds : []).map((x) => tekst(x, 100).trim()).filter(Boolean));
-      const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
-      const baseMap = mergeCatalogProducts(data).map;
-      const [storeOrdersRec, allegroOrdersRec, mappingsRec] = await Promise.all([
-        czytaj('orders', { items: [] }), czytaj('allegro_orders', { items: [] }), czytaj('allegro_mappings', { items: {} }),
-      ]);
-      const sales = new Map(), nowMs = Date.now(), day = 86400000, cutoff30 = nowMs - 30 * day, cutoff90 = nowMs - 90 * day;
-      const sale = (id, channel, qty, at, active = false) => {
-        const key = tekst(id, 100).trim(), n = Math.max(0, Number(qty) || 0), time = Number(at) || 0;
-        if (!key || !n) return;
-        const rec = sales.get(key) || { sklep30: 0, allegro30: 0, sklep90: 0, allegro90: 0, activeDemand: 0, score: 0 };
-        if (time >= cutoff90) rec[`${channel}90`] += n;
-        if (time >= cutoff30) rec[`${channel}30`] += n;
-        if (active) rec.activeDemand += n;
-        sales.set(key, rec);
-      };
-      const orderTime = (o = {}) => { const raw = o.ts ?? o.createdAt ?? o.firstFetchedAt ?? o.data ?? o.date ?? ''; const n = Number(raw); return Number.isFinite(n) && n > 1000000000 ? (n < 100000000000 ? n * 1000 : n) : (Date.parse(raw) || 0); };
-      for (const order of Array.isArray(storeOrdersRec.items) ? storeOrdersRec.items : []) {
-        const status = String(order?.status || '').toLowerCase(), active = !['anulowane', 'dostarczone', 'zakończone', 'zwrot', 'zwrot pieniędzy'].includes(status);
-        if (status === 'anulowane') continue;
-        for (const line of Array.isArray(order?.pozycjeDane) ? order.pozycjeDane : []) sale(line.id, 'sklep', line.ilosc || 1, orderTime(order), active);
-      }
-      const mappings = allegroMapowaniaItems(mappingsRec), offerToProduct = new Map();
-      for (const [offerId, mapping] of Object.entries(mappings)) { const id = tekst(mapping?.productId ?? mapping?.produktId ?? mapping?.id ?? mapping, 100).trim(); if (id) offerToProduct.set(String(offerId), id); }
-      for (const p of baseMap.values()) if (p.allegroOfferId) offerToProduct.set(String(p.allegroOfferId), String(p.id));
-      for (const order of Array.isArray(allegroOrdersRec.items) ? allegroOrdersRec.items : []) {
-        const active = allegroAgentZlecenieAktywne(order), status = String(order?.status || '').toUpperCase(); if (status === 'CANCELLED') continue;
-        for (const line of Array.isArray(order?.lineItems) ? order.lineItems : []) { const id = offerToProduct.get(String(line.offerId || line.offer?.id || '')); if (id) sale(id, 'allegro', line.quantity || 1, orderTime(order), active); }
-      }
-      for (const rec of sales.values()) rec.score = rec.sklep30 * 4 + rec.allegro30 * 5 + rec.sklep90 + rec.allegro90 + rec.activeDemand * 8;
-      let candidates = [...baseMap.values()].filter((p) => /^https?:\/\//i.test(tekst(p.producentUrl || p.sourceUrl, 1000).trim())).map((p) => ({ ...p, _sales: sales.get(String(p.id)) || { sklep30: 0, allegro30: 0, sklep90: 0, allegro90: 0, activeDemand: 0, score: 0 } }));
-      if (requestedIds.size) candidates = candidates.filter((p) => requestedIds.has(String(p.id)));
-      else {
-        const bestsellers = candidates.filter((p) => p._sales.score > 0).sort((a, b) => b._sales.score - a._sales.score || (Date.parse(a.producentSprawdzonoAt || '') || 0) - (Date.parse(b.producentSprawdzonoAt || '') || 0));
-        const priorityCount = Math.min(bestsellers.length, Math.max(1, Math.ceil(limit * 0.75))), priority = bestsellers.slice(0, priorityCount), priorityIds = new Set(priority.map((p) => String(p.id)));
-        const stale = candidates.filter((p) => !priorityIds.has(String(p.id))).sort((a, b) => (Date.parse(a.producentSprawdzonoAt || '') || 0) - (Date.parse(b.producentSprawdzonoAt || '') || 0));
-        const pool = stale.slice(0, Math.max(limit, Math.min(stale.length, limit * 4)));
-        for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-        candidates = [...priority, ...pool.slice(0, Math.max(0, limit - priority.length))];
-      }
-      candidates = candidates.slice(0, limit);
-      const checkedAt = new Date().toISOString();
-      const results = [];
-      for (let offset = 0; offset < candidates.length; offset += 4) {
-        const batch = candidates.slice(offset, offset + 4);
-        const checked = await Promise.all(batch.map(async (p) => {
-          const productId = String(p.id), sourceUrl = tekst(p.producentUrl || p.sourceUrl, 1000).trim();
-          try {
-            const parsed = await pobierzProduktProducenta(sourceUrl);
-            const quantityRaw = parsed.availability?.quantity;
-            const quantity = quantityRaw === null || quantityRaw === undefined || quantityRaw === '' ? null : Math.max(0, Math.floor(Number(quantityRaw) || 0));
-            const available = parsed.availability?.available === true;
-            const status = quantity === 0 ? 'brak' : (quantity !== null && quantity <= threshold ? 'niski' : (available ? (quantity === null ? 'dostepny_nieznany' : 'dostepny') : 'nieznany'));
-            return { ok: true, productId, name: tekst(p.nazwa || parsed.product?.nazwa || 'Produkt', 300), sourceUrl, quantity, exact: quantity !== null && parsed.availability?.exact === true, status, available, source: tekst(parsed.availability?.source || '', 120), checkedAt, sales: p._sales || {} };
-          } catch (e) {
-            return { ok: false, productId, name: tekst(p.nazwa || 'Produkt', 300), sourceUrl, status: 'blad', error: tekst(e.message || e, 500), checkedAt, sales: p._sales || {} };
-          }
-        }));
-        results.push(...checked);
-      }
-      const changedAlerts = [];
-      for (const result of results) {
-        const previous = edits[result.productId] && typeof edits[result.productId] === 'object' ? edits[result.productId] : {};
-        if (!result.ok) {
-          edits[result.productId] = { ...previous, producentOstatniaProbaAt: checkedAt, producentOstatniBlad: result.error };
-          continue;
-        }
-        const history = Array.isArray(previous.producentStanHistoria) ? [...previous.producentStanHistoria] : [];
-        history.unshift({ at: checkedAt, status: result.status, quantity: result.quantity, exact: result.exact });
-        const alertActive = ['niski', 'brak'].includes(result.status);
-        const alertHash = alertActive ? result.status : '';
-        if (alertActive && alertHash !== previous.producentAlertHash) changedAlerts.push(result);
-        edits[result.productId] = {
-          ...previous,
-          producentUrl: result.sourceUrl,
-          sourceUrl: result.sourceUrl,
-          dostepnoscProducenta: result.status === 'brak' ? 'niedostępny' : (result.available ? 'dostępny' : 'do sprawdzenia'),
-          stanProducenta: result.quantity === null ? '' : result.quantity,
-          stanProducentaDokladny: result.exact,
-          stanProducentaZrodlo: result.source,
-          producentStatus: result.status,
-          producentSprawdzonoAt: checkedAt,
-          producentOstatniaProbaAt: checkedAt,
-          producentOstatniBlad: '',
-          producentAlertAktywny: alertActive,
-          producentAlertHash: alertHash,
-          producentPriorytetWynik: Number(result.sales?.score || 0),
-          sprzedazSklep30: Number(result.sales?.sklep30 || 0),
-          sprzedazAllegro30: Number(result.sales?.allegro30 || 0),
-          sprzedazRazem30: Number(result.sales?.sklep30 || 0) + Number(result.sales?.allegro30 || 0),
-          aktywneZapotrzebowanie: Number(result.sales?.activeDemand || 0),
-          producentStanHistoria: history.slice(0, 5),
-        };
-      }
-      data.artway_produkty_edytowane = edits;
-      let saleAutomation = { siteHidden: 0, siteRestored: 0, allegroHidden: 0, allegroRestored: 0, unchanged: 0, errors: [] };
-      try {
-        saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, results, data);
-      } catch (error) {
-        saleAutomation.errors = [{ action: 'availability-automation', error: tekst(error?.message || error, 700), code: tekst(error?.code || '', 120) }];
-      }
-      const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
-      const summary = { checked: results.length, priorityChecked: results.filter((x) => Number(x.sales?.score || 0) > 0).length, available: results.filter((x) => ['dostepny', 'dostepny_nieznany'].includes(x.status)).length, low: results.filter((x) => x.status === 'niski').length, unavailable: results.filter((x) => x.status === 'brak').length, unknown: results.filter((x) => ['nieznany', 'blad'].includes(x.status)).length, alerts: changedAlerts.length, threshold, saleAutomation };
-      agentHistory.unshift({ id: `AI-SUP-${Date.now().toString(36)}`, typ: 'dostepnosc-producentow', opis: `Agent wyrywkowo sprawdził ${summary.checked} produktów u producentów`, data: checkedAt, dataTxt: new Date().toLocaleString('pl-PL'), operator: tekst(body.source || 'agent-serwerowy', 100), dane: summary });
-      data.artway_agent_ai_historia = agentHistory.slice(0, 500);
-      await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: checkedAt });
-      const auditRec = await czytaj('supplier_availability_audit', { items: [], updated_at: null });
-      const audit = Array.isArray(auditRec.items) ? [...auditRec.items] : [];
-      audit.unshift(...results.map((x) => ({ id: crypto.randomUUID(), ...x, threshold, runSource: tekst(body.source || 'manual', 100) })));
-      await zapisz('supplier_availability_audit', { items: audit.slice(0, 5000), updated_at: checkedAt });
-      let telegram = { sent: false };
-      if (changedAlerts.length) {
-        const alertFingerprint = changedAlerts.map((x) => `${x.productId}:${x.status}`).sort().join('|');
-        const automation = [
-          saleAutomation.siteHidden ? `ukryto w sklepie: ${saleAutomation.siteHidden}` : '', saleAutomation.siteRestored ? `przywrócono w sklepie: ${saleAutomation.siteRestored}` : '',
-          saleAutomation.allegroHidden ? `wstrzymano na Allegro: ${saleAutomation.allegroHidden}` : '', saleAutomation.allegroRestored ? `wznowiono na Allegro: ${saleAutomation.allegroRestored}` : '',
-          saleAutomation.errors?.length ? `błędy automatyki: ${saleAutomation.errors.length}` : '',
-        ].filter(Boolean).join(' · ');
-        try { telegram = await telegramCenter.managedEvent({
-          key: 'supplier-availability', legacyPrefix: 'supplier-availability:', fingerprint: alertFingerprint, category: 'supplier', severity: 'warning', count: changedAlerts.length,
-          title: 'Dostępność u producentów', description: automation,
-          items: changedAlerts.slice(0, 8).map((x) => `${x.name} · ${x.status === 'brak' ? 'brak' : `${x.quantity} szt.`}`),
-          href: 'https://artwaytm.pl/#/admin/magazyn/dostawcy',
-        }, '', { source: 'supplier-availability' }); }
-        catch (e) { telegram = { sent: false, error: tekst(e.message || e, 300) }; }
-      }
-      return odpowiedz({ ok: true, summary, results, checkedAt, saleAutomation, telegram });
-    }
-
-    // ─── ALLEGRO: mapowanie oferty do produktu sklepu (admin) ───
-    if (action === 'allegro-map-offer') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const offerId = tekst(body.offerId, 100).trim();
-      const productId = tekst(body.productId, 100).trim();
-      if (!offerId || !productId) return odpowiedz({ ok: false, error: 'Brak offerId albo productId' }, 422);
-      const [rec, offersRec, settingsRec] = await Promise.all([
-        czytaj('allegro_mappings', { items: {} }), czytaj('allegro_offers', { items: [] }), czytaj('settings', { data: {}, rev: 0, updated_at: null }),
-      ]);
-      const items = { ...allegroMapowaniaItems(rec) };
-      const offer = allegroOfertyItems(offersRec).find((x) => String(x.id) === offerId) || {};
-      if (!offer.id) return odpowiedz({ ok: false, error: 'Nie znaleziono oferty Allegro', code: 'offer_not_found' }, 404);
-      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-      const products = await allegroAgentProduktyKompletne(data), product = products.get(productId);
-      if (!product) return odpowiedz({ ok: false, error: 'Nie znaleziono produktu sklepu', code: 'product_not_found' }, 404);
-      const validation = allegroOcenaPowiazania(product, offer), force = body.force === true, replaceExisting = body.replaceExisting === true;
-      const occupied = Object.values(items).filter((m) => String(m?.offerId || '') !== offerId && String(m?.productId || '') === productId && m?.blocked !== true).map((m) => String(m.offerId));
-      if (occupied.length && !replaceExisting) return odpowiedz({ ok: false, error: `Produkt jest już połączony z ofertą ${occupied.join(', ')}`, code: 'product_already_mapped', validation, occupiedOfferIds: occupied }, 409);
-      if (!validation.valid && !force) return odpowiedz({ ok: false, error: `Połączenie wymaga świadomego zatwierdzenia: ${[...validation.conflicts, validation.reason].filter(Boolean).join(' • ')}`, code: 'mapping_validation', validation }, 409);
-      const updater = allegroAktualizatorProduktowCentralnych(data, products.keys()), now = new Date().toISOString(), old = items[offerId] || null;
-      if (old?.productId && String(old.productId) !== productId) {
-        const oldProduct = products.get(String(old.productId));
-        if (oldProduct && String(oldProduct.allegroOfferId || '') === offerId) updater.apply(old.productId, { allegroMappingStatus: 'zmienione_ręcznie' }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
-      }
-      if (occupied.length && replaceExisting) for (const otherOfferId of occupied) items[otherOfferId] = { ...(items[otherOfferId] || {}), offerId: otherOfferId, previousProductId: productId, productId: '', blocked: true, operator: 'admin-replaced-by-other-offer', synced_at: now };
-      items[offerId] = { ...old, offerId, productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, synced_at: now, operator: force ? 'admin-force' : 'admin-validated', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, blocked: false, verifiedForSupplier: true, verification: force ? 'admin-force' : 'admin-validated', productSnapshot: mappingProductSnapshot(product, data) };
-      updater.apply(productId, { allegroOfferId: offerId, ...(offer.productId ? { allegroProductId: tekst(offer.productId, 120) } : {}), ...(offer.categoryId ? { allegroCategoryId: tekst(offer.categoryId, 80) } : {}), allegroMappingStatus: force ? 'zatwierdzone_ręcznie' : 'zweryfikowane', allegroSyncedAt: now, allegroSyncSource: 'admin-mapping' }, ['allegroMappingConflict']);
-      const settingsChanged = updater.commit();
-      await Promise.all([
-        zapisz('allegro_mappings', { items, updated_at: now }),
-        ...(settingsChanged ? [zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now })] : []),
-      ]);
-      const workflow = await allegroPrzeliczZamowieniaPoMapowaniu();
-      return odpowiedz({ ok: true, mappings: items, validation, replacedOfferIds: replaceExisting ? occupied : [], ...workflow });
-    }
-
-    if (action === 'allegro-map-offers-batch') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const requested = (Array.isArray(body.items) ? body.items : []).map((x) => ({ offerId: tekst(x?.offerId, 100).trim(), productId: tekst(x?.productId, 100).trim() })).filter((x) => x.offerId && x.productId).slice(0, 500);
-      if (!requested.length) return odpowiedz({ ok: false, error: 'Brak bezpiecznych sugestii do zapisania', code: 'empty_batch' }, 422);
-      const [rec, offersRec, settingsRec] = await Promise.all([
-        czytaj('allegro_mappings', { items: {} }), czytaj('allegro_offers', { items: [] }), czytaj('settings', { data: {}, rev: 0, updated_at: null }),
-      ]);
-      const mappings = { ...allegroMapowaniaItems(rec) }, offers = new Map(allegroOfertyItems(offersRec).map((x) => [String(x.id), x]));
-      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = await allegroAgentProduktyKompletne(data), updater = allegroAktualizatorProduktowCentralnych(data, products.keys()), now = new Date().toISOString(), results = [];
-      const occupied = new Map(Object.values(mappings).filter((m) => m?.blocked !== true && m?.productId).map((m) => [String(m.productId), String(m.offerId)]));
-      for (const item of requested) {
-        const offer = offers.get(item.offerId), product = products.get(item.productId);
-        if (!offer || !product) { results.push({ ...item, ok: false, code: !offer ? 'offer_not_found' : 'product_not_found' }); continue; }
-        const validation = allegroOcenaPowiazania(product, offer), other = occupied.get(item.productId);
-        if (!validation.valid || (other && other !== item.offerId)) { results.push({ ...item, ok: false, code: other && other !== item.offerId ? 'product_already_mapped' : 'mapping_validation', otherOfferId: other || '', validation }); continue; }
-        const old = mappings[item.offerId] || null;
-        if (old?.productId && String(old.productId) !== item.productId) {
-          const oldProduct = products.get(String(old.productId));
-          if (oldProduct && String(oldProduct.allegroOfferId || '') === item.offerId) updater.apply(old.productId, { allegroMappingStatus: 'zmienione_automatycznie' }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
-        }
-        mappings[item.offerId] = { ...old, offerId: item.offerId, productId: item.productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, synced_at: now, operator: 'admin-safe-batch', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, blocked: false, verifiedForSupplier: true, verification: 'admin-safe-batch', productSnapshot: mappingProductSnapshot(product, data) };
-        updater.apply(item.productId, { allegroOfferId: item.offerId, ...(offer.productId ? { allegroProductId: tekst(offer.productId, 120) } : {}), ...(offer.categoryId ? { allegroCategoryId: tekst(offer.categoryId, 80) } : {}), allegroMappingStatus: 'zweryfikowane', allegroSyncedAt: now, allegroSyncSource: 'safe-batch-mapping' }, ['allegroMappingConflict']);
-        occupied.set(item.productId, item.offerId);results.push({ ...item, ok: true, validation });
-      }
-      const changed = results.some((x) => x.ok), settingsChanged = updater.commit();
-      if (changed) await Promise.all([
-        zapisz('allegro_mappings', { items: mappings, updated_at: now }),
-        ...(settingsChanged ? [zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now })] : []),
-      ]);
-      const workflow = changed ? await allegroPrzeliczZamowieniaPoMapowaniu() : {};
-      return odpowiedz({ ok: true, mappings, results, mapped: results.filter((x) => x.ok).length, skipped: results.filter((x) => !x.ok).length, ...workflow });
-    }
-
-    if (action === 'allegro-unmap-offer') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const offerId = tekst(body.offerId, 100).trim();
-      if (!offerId) return odpowiedz({ ok: false, error: 'Brak offerId' }, 422);
-      const rec = await czytaj('allegro_mappings', { items: {} });
-      const items = allegroMapowaniaItems(rec);
-      const oldMapping = items[offerId] || null;
-      items[offerId] = { offerId, productId: '', blocked: true, operator: 'admin-unmapped', linked_at: oldMapping?.linked_at || null, synced_at: new Date().toISOString() };
-      const now = new Date().toISOString();
-      let settingsWrite = null;
-      if (oldMapping?.productId) {
-        const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-        const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-        const products = await allegroAgentProduktyKompletne(data), current = products.get(String(oldMapping.productId));
-        if (current && String(current.allegroOfferId || '') === offerId) {
-          const updater = allegroAktualizatorProduktowCentralnych(data, products.keys());
-          updater.apply(oldMapping.productId, { allegroMappingStatus: 'odłączone_ręcznie', allegroSyncedAt: now, allegroSyncSource: 'admin-unmapping' }, ['allegroOfferId', 'allegroMappingConflict']);
-          if (updater.commit()) settingsWrite = zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-        }
-      }
-      await Promise.all([zapisz('allegro_mappings', { items, updated_at: now }), ...(settingsWrite ? [settingsWrite] : [])]);
-      const workflow = await allegroPrzeliczZamowieniaPoMapowaniu();
-      return odpowiedz({ ok: true, mappings: items, ...workflow });
-    }
-
-    // ─── INPOST: konfiguracja (publiczny token Geowidget + status) ───
-    if (action === 'inpost-config') {
-      return odpowiedz({ ok: true, inpost: inpostPublicConfig() });
-    }
-
-    // ─── INPOST: publiczne wyszukiwanie paczkomatów / punktów odbioru dla checkoutu ───
-    if (action === 'inpost-points') {
-      const dane = await inpostSzukajPunktow(url);
-      return odpowiedz(dane, dane.ok === false ? 400 : 200);
-    }
-
-    // ─── INPOST: webhook z Managera Paczek / ShipX → obsługa zleceń i tracking ───
-    if (action === 'inpost-webhook') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!inpostWebhookSecret()) return odpowiedz({ ok: false, error: 'Brak INPOST_WEBHOOK_SECRET w Netlify.', code: 'webhook_not_configured' }, 503);
-      if (!inpostWebhookAutoryzowany(req, url)) return odpowiedz({ ok: false, error: 'Nieprawidłowy token webhooka', code: 'auth' }, 401);
-      const rawBody = await req.text();
-      let payload = {};
-      try { payload = JSON.parse(rawBody || '{}'); } catch (e) { return odpowiedz({ ok: false, error: 'Webhook InPost nie przesłał poprawnego JSON', code: 'invalid_json' }, 400); }
-      const c = inpostKonfiguracja();
-      const wyniki = [];
-      for (const event of inpostZdarzeniaZWebhooka(payload)) {
-        let dane = inpostDaneZWebhooka(event);
-        let shipment = null;
-        if (c.configured && dane.id) {
-          try {
-            shipment = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(dane.id)}`, { method: 'GET' });
-            dane = inpostDaneZWebhooka(event, shipment);
-          } catch (e) {
-            // Sam webhook nadal zapisujemy — pełne dane ShipX mogą być chwilowo niedostępne.
-          }
-        }
-        if (!dane.id && !dane.tracking && !dane.reference && !dane.status) continue;
-        wyniki.push(await zastosujWebhookInpost(dane));
-      }
-      if (!wyniki.length) {
-        await zapiszLogInpostWebhook({ matched: false, status: 'empty_payload' });
-      }
-      return odpowiedz({ ok: true, accepted: true, processed: wyniki.length, results: wyniki }, 202);
-    }
-
-    // ─── INPOST: realny test tokenu i organizacji ShipX (admin) ───
-    if (action === 'inpost-test') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = inpostKonfiguracja();
-      if (!c.configured) {
-        return odpowiedz({
-          ok: false,
-          configured: false,
-          code: 'inpost_not_configured',
-          error: 'InPost nie jest skonfigurowany. Ustaw brakujące zmienne Netlify.',
-          missingEnv: c.missingEnv,
-          inpost: inpostPublicConfig(),
-        }, 503);
-      }
-      const org = await inpostOrganizacja(c);
-      const availability = inpostDostepnoscUslug(c, org);
-      return odpowiedz({
-        ok: true,
-        configured: true,
-        inpost: {
-          ...inpostPublicConfig(),
-          authenticated: true,
-          serviceAvailability: availability,
-          organization: {
-            id: tekst(org?.id || c.orgId, 40),
-            name: tekst(org?.name || '', 160),
-            services: availability.services,
-          },
-        },
-      });
-    }
-
-    // ─── INPOST: utworzenie przesyłki ShipX (admin) ───
-    if (action === 'inpost-create') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = inpostKonfiguracja();
-      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany. Ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify.', code: 'inpost_not_configured' }, 503);
-      const body = await req.json().catch(() => ({}));
-      const nr = numerZamowienia(body.nr || body.number);
-      if (!nr) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia' }, 422);
-      const rec = await czytaj('orders', { items: [] });
-      const z = (Array.isArray(rec.items) ? rec.items : []).find((x) => x.nr === nr);
-      if (!z) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
-      if (z?.wysylka?.inpostId) return odpowiedz({ ok: false, error: `Przesyłka InPost już istnieje (${z.wysylka.inpostId}).`, code: 'exists', inpostId: z.wysylka.inpostId }, 409);
-      const doPaczkomatu = czyDostawaPaczkomatInPost(z);
-      if (doPaczkomatu && !tekst(z?.paczkomat || z?.wysylka?.punktKod, 40).trim()) return odpowiedz({ ok: false, error: 'Brak wybranego paczkomatu w zamówieniu — uzupełnij punkt InPost przed wygenerowaniem etykiety.', code: 'no_point' }, 422);
-      const walidacja = walidujPrzesylkeInPost(z);
-      if (!walidacja.ok) {
-        return odpowiedz({
-          ok: false,
-          error: 'Nie można utworzyć przesyłki InPost — uzupełnij dane zamówienia.',
-          code: 'inpost_validation',
-          details: walidacja.errors,
-        }, 422);
-      }
-      let availability = null;
-      try {
-        const org = await inpostOrganizacja(c);
-        availability = inpostDostepnoscUslug(c, org);
-      } catch (e) {
-        availability = null;
-      }
-      if (availability?.services?.length) {
-        const wymaganyTyp = walidacja.doPaczkomatu ? 'locker' : 'courier';
-        const service = walidacja.doPaczkomatu ? availability.lockerService : availability.courierService;
-        if (!availability[wymaganyTyp]) {
-          return odpowiedz({
-            ok: false,
-            error: `Konto InPost nie ma aktywnej usługi ${service}. Włącz tę usługę w Managerze Paczek.`,
-            code: 'inpost_service_unavailable',
-            service,
-            serviceAvailability: availability,
-          }, 422);
-        }
-      }
-      const aktywneUslugi = availability ? { ...c, lockerService: availability.lockerService || c.lockerService, courierService: availability.courierService || c.courierService } : c;
-      const payload = przesylkaShipXPayload(z, aktywneUslugi, walidacja);
-      const dane = await inpostWywolaj(`/v1/organizations/${encodeURIComponent(c.orgId)}/shipments`, { method: 'POST', bodyObj: payload });
-      const inpostId = tekst(dane?.id, 60).trim();
-      let daneAktualne = dane;
-      if (inpostId) {
-        try { daneAktualne = await inpostCzekajNaEtykiete(inpostId, { proby: 10, opoznienieMs: 1100 }); } catch (e) { daneAktualne = dane; }
-      }
-      const numer = numerZShipX(daneAktualne) || numerZShipX(dane);
-      const statusShipX = inpostStatusZShipX(daneAktualne) || inpostStatusZShipX(dane);
-      const labelReady = inpostEtykietaGotowa(daneAktualne) || inpostEtykietaGotowa(dane);
-      const ofertaId = inpostOfertaId(daneAktualne) || inpostOfertaId(dane);
-      const teraz = new Date().toLocaleString('pl-PL');
-      const opisGotowosci = labelReady ? 'etykieta gotowa' : 'czeka na potwierdzenie/opłacenie w InPost';
-      const historia = [...(Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : []), { czas: teraz, status: 'Przesyłka utworzona w InPost', opis: `${inpostId ? 'ID ' + inpostId : ''}${numer ? ' • ' + numer : ''}${statusShipX ? ' • ' + statusShipX : ''}${ofertaId ? ' • oferta ' + ofertaId : ''} • ${opisGotowosci}`, zewnetrzneId: inpostId }];
-      const patch = {
-        przewoznik: 'inpost',
-        usluga: walidacja.doPaczkomatu ? 'Paczkomat 24/7' : 'Kurier InPost',
-        punktKod: walidacja.doPaczkomatu ? walidacja.punkt : '',
-        inpostId,
-        inpostStatus: statusShipX,
-        inpostOfertaId: ofertaId,
-        etykietaGotowa: labelReady,
-        numer: numer || z?.wysylka?.numer || '',
-        etap: labelReady ? 'etykieta' : (z?.wysylka?.etap && z.wysylka.etap !== 'problem' ? z.wysylka.etap : 'przygotowanie'),
-        bladIntegracji: '',
-        ostatniaSynchronizacja: new Date().toISOString(),
-        zaktualizowano: new Date().toISOString(),
-        zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: labelReady },
-        historia,
-      };
-      const { stary, nowy } = await zapiszPrzesylkeNaZamowieniu(nr, patch);
-      // jeśli od razu jest numer nadania → wyślij e-mail „nadanie"
-      let email = null;
-      if (numer && !numerZShipX({ tracking_number: stary?.wysylka?.numer })) {
-        try { email = await obsluzEmailePrzejsciaStatusu({ ...stary, wysylka: { ...(stary?.wysylka || {}), numer: '' } }, nowy); } catch (e) { email = { sent: false, error: e.message }; }
-      }
-      return odpowiedz({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, labelReady, offerId: ofertaId, email, order: { nr, status: nowy?.status, wysylka: nowy?.wysylka } }, 201);
-    }
-
-    // ─── INPOST: pobranie oficjalnej etykiety PDF (admin) ───
-    if (action === 'inpost-label') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = inpostKonfiguracja();
-      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany.', code: 'inpost_not_configured' }, 503);
-      const nr = numerZamowienia(url.searchParams.get('nr'));
-      let inpostId = tekst(url.searchParams.get('id'), 60).trim();
-      const typ = tekst(url.searchParams.get('type'), 10).trim().toUpperCase() === 'A4' ? 'A4' : 'A6';
-      if (!inpostId && nr) {
-        const rec = await czytaj('orders', { items: [] });
-        const z = (rec.items || []).find((x) => x.nr === nr);
-        inpostId = tekst(z?.wysylka?.inpostId, 60).trim();
-      }
-      if (!inpostId) return odpowiedz({ ok: false, error: 'Brak ID przesyłki InPost — najpierw utwórz przesyłkę.', code: 'no_shipment' }, 422);
-      let daneAktualne = null;
-      try { daneAktualne = await inpostCzekajNaEtykiete(inpostId, { proby: 6, opoznienieMs: 900 }); } catch (e) { daneAktualne = null; }
-      const statusShipX = inpostStatusZShipX(daneAktualne);
-      const numer = numerZShipX(daneAktualne);
-      const labelReady = inpostEtykietaGotowa(daneAktualne);
-      if (!labelReady) {
-        if (nr && daneAktualne) {
-          const rec = await czytaj('orders', { items: [] });
-          const z = (rec.items || []).find((x) => x.nr === nr);
-          if (z) {
-            const stareH = Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : [];
-            const teraz = new Date().toLocaleString('pl-PL');
-            const historia = statusShipX && !stareH.some((h) => h.opis && h.opis.includes(statusShipX))
-              ? [...stareH, { czas: teraz, status: 'Etykieta InPost jeszcze niedostępna', opis: statusShipX }]
-              : stareH;
-            await zapiszPrzesylkeNaZamowieniu(nr, {
-              inpostStatus: statusShipX,
-              numer: numer || z?.wysylka?.numer || '',
-              etykietaGotowa: false,
-              ostatniaSynchronizacja: new Date().toISOString(),
-              zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: false },
-              historia,
-            });
-          }
-        }
-        return odpowiedz({
-          ok: false,
-          code: 'label_not_ready',
-          error: `InPost jeszcze nie potwierdził etykiety${statusShipX ? ` (status: ${statusShipX})` : ''}. Kliknij „Status InPost” za chwilę albo sprawdź, czy przesyłka została opłacona w Managerze Paczek.`,
-          inpostId,
-          status: statusShipX,
-          trackingNumber: numer,
-          labelReady: false,
-        }, 409);
-      }
-      try {
-        const pdf = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(inpostId)}/label?format=pdf&type=${typ}`, { method: 'GET', accept: 'application/pdf' });
-        return odpowiedz({ ok: true, format: 'pdf', type: typ, filename: `etykieta-inpost-${nr || inpostId}.pdf`, base64: pdf.base64, inpostId, status: statusShipX, trackingNumber: numer, labelReady: true });
-      } catch (e) {
-        if (e.code === 'invalid_action' || /invalid_action|statusie wcześniejszym niż|nieopłaconej/i.test(e.message || '')) {
-          return odpowiedz({
-            ok: false,
-            code: 'label_not_ready',
-            error: `InPost nie pozwala jeszcze pobrać etykiety${statusShipX ? ` (status: ${statusShipX})` : ''}. Przesyłka musi być opłacona i mieć status confirmed lub późniejszy.`,
-            inpostId,
-            status: statusShipX,
-            trackingNumber: numer,
-            labelReady: false,
-          }, 409);
-        }
-        throw e;
-      }
-    }
-
-    // ─── INPOST: synchronizacja statusu / trackingu przesyłki (admin) ───
-    if (action === 'inpost-status') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = inpostKonfiguracja();
-      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany.', code: 'inpost_not_configured' }, 503);
-      const nr = numerZamowienia(url.searchParams.get('nr'));
-      const rec = await czytaj('orders', { items: [] });
-      const z = (rec.items || []).find((x) => x.nr === nr);
-      const inpostId = tekst(url.searchParams.get('id') || z?.wysylka?.inpostId, 60).trim();
-      if (!inpostId) return odpowiedz({ ok: false, error: 'Brak ID przesyłki InPost.', code: 'no_shipment' }, 422);
-      const dane = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(inpostId)}`, { method: 'GET' });
-      const numer = numerZShipX(dane);
-      const statusShipX = inpostStatusZShipX(dane);
-      const labelReady = inpostEtykietaGotowa(dane);
-      const ofertaId = inpostOfertaId(dane);
-      const teraz = new Date().toLocaleString('pl-PL');
-      const stareH = Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : [];
-      const wpisIstnieje = stareH.some((h) => h.opis && h.opis.includes(statusShipX));
-      const historia = (statusShipX && !wpisIstnieje) ? [...stareH, { czas: teraz, status: 'Status InPost', opis: statusShipX + (numer ? ' • ' + numer : '') }] : stareH;
-      const patch = {
-        inpostStatus: statusShipX,
-        inpostOfertaId: ofertaId || z?.wysylka?.inpostOfertaId || '',
-        numer: numer || z?.wysylka?.numer || '',
-        etykietaGotowa: labelReady,
-        ostatniaSynchronizacja: new Date().toISOString(),
-        zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: labelReady },
-        historia,
-      };
-      if (labelReady && (!z?.wysylka?.etap || z.wysylka.etap === 'przygotowanie' || z.wysylka.etap === 'problem')) patch.etap = 'etykieta';
-      if (labelReady) patch.bladIntegracji = '';
-      const { stary, nowy } = await zapiszPrzesylkeNaZamowieniu(nr, patch);
-      let email = null;
-      if (numer && !(stary?.wysylka?.numer)) {
-        try { email = await obsluzEmailePrzejsciaStatusu(stary, nowy); } catch (e) { email = { sent: false, error: e.message }; }
-      }
-      return odpowiedz({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, labelReady, offerId: ofertaId, email, order: { nr, wysylka: nowy?.wysylka } });
-    }
-
-    // ─── INPOST: automatyczne sprawdzenie statusów WSZYSTKICH przesyłek (admin / harmonogram co 6h) ───
-    if (action === 'inpost-sync-all') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = inpostKonfiguracja();
-      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany.', code: 'inpost_not_configured' }, 503);
-      const rec = await czytaj('orders', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const zamkniete = ['dostarczone', 'zakończone', 'anulowane', 'zwrot', 'zwrot pieniędzy'];
-      const doSync = items.filter((z) => tekst(z?.wysylka?.inpostId, 60).trim() && !zamkniete.includes(String(z?.status || '').toLowerCase()));
-      let sprawdzone = 0, zmienione = 0, bledy = 0, maile = 0;
-      const zmiany = [];
-      for (const z of doSync.slice(0, 300)) {
-        const inpostId = tekst(z.wysylka.inpostId, 60).trim();
-        try {
-          const dane = await inpostWywolaj(`/v1/shipments/${encodeURIComponent(inpostId)}`, { method: 'GET' });
-          sprawdzone++;
-          const status = inpostStatusZShipX(dane);
-          const tracking = numerZShipX(dane);
-          const statusStary = tekst(z?.wysylka?.inpostStatus, 60).trim();
-          const trackingStary = tekst(z?.wysylka?.numer, 120).trim();
-          const etykietaStara = !!z?.wysylka?.etykietaGotowa;
-          const etykietaNowa = inpostEtykietaGotowa(dane);
-          if ((status && status !== statusStary) || (tracking && tracking !== trackingStary) || (etykietaNowa && !etykietaStara)) {
-            const r = await zastosujWebhookInpost({ id: inpostId, status, tracking, reference: z.nr, occurredAt: new Date().toISOString() });
-            if (r && r.matched) { zmienione++; if (r.email && r.email.sent) maile++; zmiany.push({ nr: z.nr, status, etap: r.etap }); }
-          }
-        } catch (e) { bledy++; }
-      }
-      return odpowiedz({ ok: true, configured: true, sprawdzone, zmienione, bledy, maile, zmiany, sprawdzono: new Date().toISOString() });
-    }
-
-    // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
-    if (action === 'pull' || action === 'store-data') {
-      const admin = czyAdmin(req, url);
-      // Wejście administratora jest bezpiecznym punktem naprawczym również
-      // dla zamówień utworzonych przed wdrożeniem automatycznych szkiców.
-      const supplierDrafts = admin ? await storeOrderSupplierReconciliation.reconcileDraftsSafely() : null;
-      const [s, importedPayload] = await Promise.all([czytaj('settings', { data: {}, rev: 0, updated_at: null }), productLinkImport.payload({ requestedRev: url.searchParams.get('catalogRev'), admin })]);
-      const res = { ok: true, settings: admin ? (s.data || {}) : ustawieniaPubliczneBezDanychPrywatnych(s.data || {}), rev: s.rev || 0, updated_at: s.updated_at || null };
-      Object.assign(res, importedPayload);
-      if (admin) {
-        const o = await czytaj('orders', { items: [] });
-        const u = await czytaj('users', { items: [] });
-        const d = await czytajUsunieteZamowienia();
-        res.deleted_orders = d;
-        res.orders = filtrujNieusunieteZamowienia(o.items || [], d);
-        res.users = u.items || [];
-        res.supplierDrafts = supplierDrafts;
-      }
-      return odpowiedz(res);
-    }
-
-    // ─── ZAPIS USTAWIEŃ (tylko admin) ───
-    if (action === 'settings') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      if (body.mode === 'patch') {
-        const patch = oczyscUstawienia(body.patch), changedKeys = Object.keys(patch), mutationId = tekst(body.mutationId, 120);
-        if (!changedKeys.length) return odpowiedz({ ok: true, unchanged: true, changedKeys: [] });
-        for (let attempt = 0; attempt < 5; attempt++) {
-          const version = await czytajWersjonowane('settings', { data: {}, rev: 0, updated_at: null }), prev = version.value || { data: {}, rev: 0, updated_at: null };
-          if (mutationId && prev.last_mutation_id === mutationId) return odpowiedz({ ok: true, duplicatePrevented: true, changedKeys, rev: prev.rev, updated_at: prev.updated_at });
-          const dane = preserveSupplierPlanOnGenericSettings({ ...(prev.data || {}), ...patch }, prev.data), updated_at = new Date().toISOString();
-          if (JSON.stringify(dane).length > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
-          const rec = { ...prev, data: dane, rev: Number(prev.rev || 0) + 1, updated_at, last_mutation_id: mutationId || undefined };
-          const write = await zapiszJesliWersja('settings', rec, version);
-          if (write?.modified) return odpowiedz({ ok: true, changedKeys, rev: rec.rev, updated_at, rebased: Number(body.expectedRev) !== Number(prev.rev || 0) });
-        }
-        return odpowiedz({ ok: false, error: 'Serwer równolegle zapisuje inne dane. Zmiana nie została utracona — ponów zapis.', code: 'settings_write_conflict' }, 409);
-      }
-      const incoming = oczyscUstawienia(body.settings);
-      const expectedRev = Number(body.expectedRev);
-      if (!Number.isSafeInteger(expectedRev) || expectedRev < 0) {
-        return odpowiedz({ ok: false, error: 'Brakuje rewizji bazowej. Pobierz aktualne ustawienia przed zapisem.', code: 'settings_write_conflict' }, 409);
-      }
-      const version = await czytajWersjonowane('settings', { data: {}, rev: 0, updated_at: null });
-      const prev = version.value || { data: {}, rev: 0, updated_at: null };
-      if (Number(prev.rev || 0) !== expectedRev) {
-        return odpowiedz({ ok: false, error: 'Ustawienia zmieniły się na innym urządzeniu. Niczego nie nadpisano.', code: 'settings_write_conflict', rev: Number(prev.rev || 0) }, 409);
-      }
-      const dane = preserveSupplierPlanOnGenericSettings(incoming, prev.data);
-      const rozmiar = JSON.stringify(dane).length;
-      if (rozmiar > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
-      const rec = { data: dane, rev: expectedRev + 1, updated_at: new Date().toISOString() };
-      const write = await zapiszJesliWersja('settings', rec, version);
-      if (!write?.modified) {
-        return odpowiedz({ ok: false, error: 'Ustawienia zmieniły się podczas zapisu. Niczego nie nadpisano.', code: 'settings_write_conflict' }, 409);
-      }
-      return odpowiedz({ ok: true, rev: rec.rev, updated_at: rec.updated_at });
-    }
-
-    // ─── KLIENT SKŁADA ZAMÓWIENIE (publiczne) ───
-    if (action === 'store-order-create') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const limited = ograniczRuch(req, 'order-create', 20, 60 * 60 * 1000);
-      if (limited) return limited;
-      const body = await req.json().catch(() => ({}));
-      const settingsRec = await czytaj('settings', { data: {} });
-      const zam = bezpieczneZamowienieKlienta(body.order, await productLinkImport.mergeSettings(settingsRec.data || {}));
-      const session = requestSession(req);
-      if (session && session.email !== zam.email) return odpowiedz({ ok: false, error: 'Zamówienie musi należeć do zalogowanego konta.', code: 'auth' }, 403);
-      zam.status = 'nowe';
-      zam.inventoryMode = 'reserved_until_shipment';
-      zam.ts = Date.now();
-      zam.data = new Date(zam.ts).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' });
-      zam.inventoryReservedAt = new Date(zam.ts).toISOString();
-      const usuniete = mapaUsunietych(await czytajUsunieteZamowienia());
-      const stored = await storeOrderSupplierReconciliation.saveOrder({ order: zam, deletedOrderNumbers: new Set(usuniete.keys()) });
-      if (stored.deleted) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
-      if (stored.duplicate) return odpowiedz({ ok: true, stored: false, duplicate: true, number: zam.nr });
-      let email = null;
-      // Zamówienie jest już bezpiecznie zapisane. Chwilowa awaria katalogu
-      // lub konflikt settings nie może cofnąć checkoutu klienta.
-      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
-      if (zam.platnoscId !== 'paynow') {
-        try { email = await wyslijEmaileNowegoZamowienia(zam); }
-        catch (e) {
-          email = { configured: emailKonfiguracja().configured, sent: false, error: e.message };
-          await dopiszHistorieEmaila(zam.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
-        }
-      }
-      return odpowiedz({ ok: true, stored: true, number: zam.nr, email, supplierDrafts, orderAccessToken: createOrderAccess(zam) });
-    }
-
-    // ─── KLIENT SKŁADA OPINIĘ (publiczne, do moderacji) ───
-    if (action === 'store-review-add') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const limited = ograniczRuch(req, 'review-add', 10, 60 * 60 * 1000);
-      if (limited) return limited;
-      const body = await req.json().catch(() => ({}));
-      const op = bezpiecznaOpinia(body.review);
-      if (!op) return odpowiedz({ ok: false, error: 'Opinia nie zawiera wymaganych danych.' }, 422);
-      const rec = await czytaj('settings', { data: {}, rev: 0 });
-      const dane = rec.data || {};
-      const lista = Array.isArray(dane.artway_opinie) ? dane.artway_opinie : [];
-      lista.unshift(op);
-      while (lista.length > 5000) lista.pop();
-      dane.artway_opinie = lista;
-      await zapisz('settings', { ...rec, data: dane, rev: (Number(rec.rev) || 0) + 1, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, stored: true });
-    }
-
-    // ─── MOJE ZAMÓWIENIA (po e-mailu) ───
-    if (action === 'store-orders-mine') {
-      const session = requestSession(req);
-      const email = tekst(url.searchParams.get('email') || session?.email, 200).trim().toLowerCase();
-      if (!session || (!czyAdmin(req, url) && session.email !== email)) return odpowiedz({ ok: false, error: 'Zaloguj się, aby pobrać swoje zamówienia.', code: 'auth' }, 401);
-      if (!email) return odpowiedz({ ok: true, orders: [] });
-      const rec = await czytaj('orders', { items: [] });
-      const usuniete = await czytajUsunieteZamowienia();
-      const moje = filtrujNieusunieteZamowienia(rec.items || [], usuniete).filter((z) => (z.email || '').toLowerCase() === email);
-      return odpowiedz({ ok: true, orders: moje });
-    }
-
-    // ─── SYNCHRONIZACJA ADMINA (scala lokalne z serwerem) ───
-    if (action === 'store-sync') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const przychodzaceZ = Array.isArray(body.orders) ? body.orders : [];
-      const przychodzacyU = Array.isArray(body.users) ? body.users : [];
-      const przychodzaceD = Array.isArray(body.deleted_orders) ? body.deleted_orders : [];
-      const zapisaneD = await czytajUsunieteZamowienia();
-      const usunieteMapa = mapaUsunietych([...zapisaneD, ...przychodzaceD]);
-      const deletedOrders = [...usunieteMapa.values()]
-        .sort((a, b) => String(b.deleted_at || '').localeCompare(String(a.deleted_at || '')))
-        .slice(0, LIMIT_USUNIETYCH_ZAMOWIEN);
-      await zapisz('deleted_orders', { items: deletedOrders, updated_at: new Date().toISOString() });
-
-      const recO = await czytaj('orders', { items: [] });
-      const orders = filtrujNieusunieteZamowienia(recO.items || [], usunieteMapa);
-      const numery = new Set(orders.map((z) => z.nr));
-      for (const raw of przychodzaceZ) {
-        const z = normalizujZamowienie(raw);
-        if (z && !usunieteMapa.has(z.nr) && !numery.has(z.nr)) { orders.unshift(z); numery.add(z.nr); }
-      }
-      orders.sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0));
-      while (orders.length > LIMIT_ZAMOWIEN) orders.pop();
-      await zapisz('orders', { items: orders, updated_at: new Date().toISOString() });
-
-      const recU = await czytaj('users', { items: [] });
-      const users = Array.isArray(recU.items) ? recU.items : [];
-      const maile = new Set(users.map((u) => (u.email || '').toLowerCase()));
-      for (const raw of przychodzacyU) {
-        const u = normalizujKlienta(raw);
-        if (u && !maile.has(u.email)) { users.push(u); maile.add(u.email); }
-      }
-      while (users.length > LIMIT_KLIENTOW) users.pop();
-      await zapisz('users', { items: users, updated_at: new Date().toISOString() });
-
-      return odpowiedz({ ok: true, orders, users, deleted_orders: deletedOrders, updated_at: new Date().toISOString() });
-    }
-
-    // ─── ADMIN: zapis / usuwanie zamówienia ───
-    if (action === 'store-order-save') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const zam = normalizujZamowienie(body.order);
-      if (!zam) return odpowiedz({ ok: false, error: 'Brak danych zamówienia' }, 422);
-      const usuniete = mapaUsunietych(await czytajUsunieteZamowienia());
-      if (usuniete.has(zam.nr)) return odpowiedz({ ok: true, stored: false, deleted: true, number: zam.nr });
-      const rec = await czytaj('orders', { items: [] });
-      const items = filtrujNieusunieteZamowienia(rec.items || [], usuniete);
-      const i = items.findIndex((x) => x.nr === zam.nr);
-      const stary = i >= 0 ? items[i] : null;
-      // zachowaj serwerową historię e-maili (klient mógł mieć starszą kopię)
-      if (stary) {
-        zam.wysylka = zam.wysylka || {};
-        zam.wysylka.powiadomienia = polaczPowiadomienia(stary?.wysylka?.powiadomienia, zam.wysylka.powiadomienia);
-        zam.inventoryMode = stary.inventoryMode || zam.inventoryMode;
-        zam.inventoryReservedAt = stary.inventoryReservedAt || zam.inventoryReservedAt;
-        zam.inventoryDeductedAt = stary.inventoryDeductedAt || zam.inventoryDeductedAt;
-      }
-      if (i >= 0) items[i] = zam; else items.unshift(zam);
-      await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      const inventory = await storeOrderSupplierReconciliation.finalizeInventoryForOrder(zam);
-      if (inventory.inventoryMode) zam.inventoryMode = inventory.inventoryMode;
-      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely();
-      let email = null;
-      try { email = await obsluzEmailePrzejsciaStatusu(stary, zam); }
-      catch (e) { email = { sent: false, error: e.message }; }
-      return odpowiedz({ ok: true, stored: true, number: zam.nr, inventory, supplierDrafts, email, powiadomienia: email?.powiadomienia });
-    }
-    if (action === 'store-order-delete') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const nr = numerZamowienia(body.number || body.nr);
-      if (!nr) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia' }, 422);
-      await dopiszUsunieteZamowienie({ nr, by: 'admin' });
-      const rec = await czytaj('orders', { items: [] });
-      const items = (rec.items || []).filter((x) => x.nr !== nr);
-      await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
-      return odpowiedz({ ok: true, deleted: true, supplierDrafts });
-    }
-
-    // ─── KLIENT: usuwa własne zlecenie/zamówienie ───
-    if (action === 'store-order-delete-mine') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const body = await req.json().catch(() => ({}));
-      const nr = numerZamowienia(body.number || body.nr);
-      const email = tekst(body.email, 200).trim().toLowerCase();
-      if (!nr || !email) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia albo e-maila klienta' }, 422);
-      const rec = await czytaj('orders', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const zam = items.find((x) => x.nr === nr);
-      if (!zam) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia.' }, 404);
-      const session = requestSession(req);
-      const sessionOwns = !!session && session.email === email && session.email === String(zam.email || '').toLowerCase();
-      const guestOwns = verifyOrderAccess(body.orderAccessToken, zam);
-      if (!czyAdmin(req, url) && !sessionOwns && !guestOwns) return odpowiedz({ ok: false, error: 'Brak uprawnień do tego zamówienia.', code: 'auth' }, 403);
-      await dopiszUsunieteZamowienie({ nr, email, by: 'customer' });
-      await zapisz('orders', { items: items.filter((x) => x.nr !== nr), updated_at: new Date().toISOString() });
-      const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
-      return odpowiedz({ ok: true, deleted: true, supplierDrafts });
-    }
-
-    // ─── ADMIN/KLIENT: zapis klienta ───
-    if (action === 'store-user-save' || action === 'account-profile-save') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const body = await req.json().catch(() => ({}));
-      const session = requestSession(req);
-      if (action === 'store-user-save' && !czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      if (action === 'account-profile-save' && !session) return odpowiedz({ ok: false, error: 'Zaloguj się ponownie.', code: 'auth' }, 401);
-      const u = action === 'store-user-save' ? normalizujKlienta(body.user) : profilKlienta(body.user, session.email);
-      if (!u) return odpowiedz({ ok: false, error: 'Brak danych klienta' }, 422);
-      const rec = await czytaj('users', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const i = items.findIndex((x) => (x.email || '').toLowerCase() === u.email);
-      if (action === 'account-profile-save' && i < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono konta.', code: 'auth' }, 404);
-      if (i >= 0) items[i] = { ...items[i], ...u, email: items[i].email, rola: items[i].rola, passwordHash: items[i].passwordHash, hash: items[i].hash }; else items.push(u);
-      await zapisz('users', { items, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, stored: true, email: u.email, user: i >= 0 ? publicUser(items[i]) : publicUser(u) });
-    }
-    if (action === 'store-user-delete') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const email = tekst(body.email, 200).trim().toLowerCase();
-      const rec = await czytaj('users', { items: [] });
-      const items = (rec.items || []).filter((x) => (x.email || '').toLowerCase() !== email);
-      await zapisz('users', { items, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, deleted: true });
-    }
-
-    // ─── REJESTRACJA KLIENTA (publiczna, konto we wspólnej bazie) ───
-    if (action === 'account-register') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const limited = ograniczRuch(req, 'account-register', 5, 60 * 60 * 1000);
-      if (limited) return limited;
-      const body = await req.json().catch(() => ({}));
-      const password = String(body.password || '');
-      const u = profilKlienta(body.user);
-      if (!u || password.length < 8 || password.length > 200) return odpowiedz({ ok: false, error: 'Hasło musi mieć co najmniej 8 znaków.' }, 422);
-      u.rola = 'klient'; u.account = true; u.passwordHash = await hashPassword(password); u.data = new Date().toISOString();
-      const rec = await czytaj('users', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      if (items.some((x) => (x.email || '').toLowerCase() === u.email)) {
-        return odpowiedz({ ok: false, error: 'Konto z tym adresem już istnieje.', code: 'exists' }, 409);
-      }
-      items.push(u);
-      await zapisz('users', { items, updated_at: new Date().toISOString() });
-      const user = publicUser(u);
-      return odpowiedz({ ok: true, stored: true, user, sessionToken: createAccountSession(user) });
-    }
-
-    // ─── LOGOWANIE KLIENTA (publiczne, sprawdzenie hasła we wspólnej bazie) ───
-    if (action === 'account-login') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const limited = ograniczRuch(req, 'account-login', 10, 15 * 60 * 1000);
-      if (limited) return limited;
-      const body = await req.json().catch(() => ({}));
-      const email = tekst(body.email, 200).trim().toLowerCase();
-      const password = String(body.password || '');
-      if (!email || !password) return odpowiedz({ ok: false, error: 'Podaj e-mail i hasło', code: 'auth' }, 401);
-      const rec = await czytaj('users', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const u = items.find((x) => (x.email || '').toLowerCase() === email);
-      const modernOk = u?.passwordHash ? await verifyPassword(password, u.passwordHash).catch(() => false) : false;
-      const legacyOk = !u?.passwordHash && !!u?.hash && bezpiecznePorownanie(legacyPasswordHash(password), String(u.hash));
-      if (!u || (!modernOk && !legacyOk)) return odpowiedz({ ok: false, error: 'Nieprawidłowy e-mail lub hasło.', code: 'auth' }, 401);
-      if (legacyOk) {
-        u.passwordHash = await hashPassword(password);
-        delete u.hash;
-        await zapisz('users', { items, updated_at: new Date().toISOString() });
-      }
-      const user = publicUser(u);
-      return odpowiedz({ ok: true, authenticated: true, user, sessionToken: createAccountSession(user) });
-    }
-
-    if (action === 'account-password-change') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const session = requestSession(req);
-      if (!session) return odpowiedz({ ok: false, error: 'Zaloguj się ponownie.', code: 'auth' }, 401);
-      const limited = ograniczRuch(req, 'password-change', 5, 60 * 60 * 1000);
-      if (limited) return limited;
-      const body = await req.json().catch(() => ({}));
-      const currentPassword = String(body.currentPassword || body.current_password || '');
-      const newPassword = String(body.newPassword || body.new_password || '');
-      if (newPassword.length < 8 || newPassword.length > 200) return odpowiedz({ ok: false, error: 'Nowe hasło musi mieć co najmniej 8 znaków.' }, 422);
-      const rec = await czytaj('users', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const u = items.find((x) => (x.email || '').toLowerCase() === session.email);
-      const modernOk = u?.passwordHash ? await verifyPassword(currentPassword, u.passwordHash).catch(() => false) : false;
-      const legacyOk = !u?.passwordHash && !!u?.hash && bezpiecznePorownanie(legacyPasswordHash(currentPassword), String(u.hash));
-      if (!u || (!modernOk && !legacyOk)) return odpowiedz({ ok: false, error: 'Obecne hasło jest nieprawidłowe.', code: 'auth' }, 401);
-      u.passwordHash = await hashPassword(newPassword);
-      delete u.hash;
-      await zapisz('users', { items, updated_at: new Date().toISOString() });
-      const user = publicUser(u);
-      return odpowiedz({ ok: true, changed: true, user, sessionToken: createAccountSession(user) });
-    }
-
-    // ─── logowanie tokenem (sprawdzenie hasła administratora) ───
-    if (action === 'login') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const body = await req.json().catch(() => ({}));
-      const podane = tekst(body.password || body.token, 500);
-      const env = process.env.ARTWAY_ADMIN_TOKEN || '';
-      if (!env) return odpowiedz({ ok: false, error: 'Serwer nie ma ustawionego hasła (ARTWAY_ADMIN_TOKEN).', code: 'no_token' }, 503);
-      if (!bezpiecznePorownanie(podane, env)) return odpowiedz({ ok: false, error: 'Nieprawidłowe hasło administratora', code: 'auth' }, 401);
-      const adminUser = { email: tekst(body.email || process.env.ARTWAY_ADMIN_EMAIL || 'artwaytm@gmail.com', 200).trim().toLowerCase(), rola: 'admin' };
-      return odpowiedz({ ok: true, authenticated: true, sessionToken: createAccountSession(adminUser) });
-    }
+    const storeDataResponse = await storeDataRoute(req, url, action);
+    if (storeDataResponse) return storeDataResponse;
 
     return odpowiedz({ ok: false, error: 'Nieznana akcja: ' + action }, 404);
   } catch (e) {

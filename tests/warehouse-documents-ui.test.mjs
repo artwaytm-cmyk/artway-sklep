@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { ASSET_BUNDLES } from '../scripts/build-assets.mjs';
 
 const source = await readFile(new URL('../src/frontend/10-warehouse-documents.js', import.meta.url), 'utf8');
-const inventory = await readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8');
+const documentStyles = await readFile(new URL('../src/styles/18-warehouse-documents.css', import.meta.url), 'utf8');
+const inventory = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
 const netlify = await readFile(new URL('../netlify.toml', import.meta.url), 'utf8');
 
 test('Plan zawiera ręczne dokumenty PZ i WZ z jednym końcowym księgowaniem', () => {
@@ -13,17 +14,67 @@ test('Plan zawiera ręczne dokumenty PZ i WZ z jednym końcowym księgowaniem', 
   assert.match(source, /Dane i ilości są zgodne ze stanem faktycznym/);
   assert.match(source, /warehouse-document-line-upsert/);
   assert.match(source, /warehouse-document-line-remove/);
+  assert.match(source, /warehouse-document-delete/);
+  assert.match(source, /Usuń szkic/);
+  assert.match(source, /data-warehouse-document-decision="delete"/);
+  assert.ok(source.indexOf('${magazynDokumentDecyzjaHTML(doc)}${draftWorkspace}')>source.indexOf('function magazynDokumentEditorHTML'));
+  assert.match(source, /Zaksięgowanego PZ\/WZ nie usuwa się bez korekty stanu/);
+  assert.match(source, /warehouse-document-correction/);
+  assert.match(source, /Utwórz korektę/);
+  assert.match(source, /warehouse-document-focus/);
+  assert.match(source, /warehouseDocumentWorkspace/);
+  assert.doesNotMatch(source, /const drawer=selected/);
+  assert.match(source, /Kontrolowany przebieg/i);
+});
+
+test('PZ i WZ mają blokadę księgowania do czasu pełnej kontroli dokumentu', () => {
+  assert.match(source, /magazynDokumentWalidacja/);
+  assert.match(source, /warehouse-document-readiness/);
+  assert.match(source, /KONTROLA PRZED KSIĘGOWANIEM/);
+  assert.match(documentStyles, /warehouse-document-readiness/);
 });
 
 test('skanowanie działa aparatem telefonu oraz polem dla czytnika USB lub Bluetooth', () => {
   assert.match(source, /BarcodeDetector/);
+  assert.match(source, /BrowserMultiFormatReader/);
+  assert.match(source, /warehouseCameraQuantity/);
+  assert.match(source, /magazynDokumentKameraUstawIlosc/);
+  assert.match(source, /magazynDokumentKameraPodsumowanieHTML/);
+  assert.match(source, /value,quantity,true/);
+  assert.match(source, /PRZYJĘCIE NA STAN/);
+  assert.match(source, /EAN, GTIN, QR i Code 128/);
   assert.match(source, /navigator\.mediaDevices\.getUserMedia/);
   assert.match(source, /facingMode:\{ideal:"environment"\}/);
   assert.match(source, /Czytnik USB\/Bluetooth/);
   assert.match(source, /data-warehouse-scan-input/);
-  assert.match(source, /Aktywne miejsce/);
-  assert.match(source, /QR miejsca/);
+  assert.match(source, /ZATWIERDZONA PÓŁKA/);
+  assert.match(source, /QR półki/);
+  assert.match(source, /magazynGlobalnySkanerOtworz/);
+  assert.match(source, /kontrolowane zatwierdzanie/);
   assert.match(netlify, /Permissions-Policy = "camera=\(self\), microphone=\(\)/);
+});
+
+test('przyjęcie prowadzi operatora przez zatwierdzoną półkę, produkt i ilość', () => {
+  assert.match(source, /magazynDokumentSkanSesje/);
+  assert.match(source, /magazynDokumentPotwierdzLokalizacjeSkanu/);
+  assert.match(source, /magazynDokumentZatwierdzBiezacaPozycje/);
+  assert.match(source, /Poprzednia pozycja zatwierdzona automatycznie/);
+  assert.match(source, /Zatwierdź produkt i przejdź dalej/);
+  assert.match(source, /Najpierw zatwierdź bieżący zeskanowany produkt/);
+  assert.match(source, /BIEŻĄCY PRODUKT — JESZCZE NIEZAPISANY/);
+  assert.match(source, /Odrzuć odczyt/);
+});
+
+test('PZ i WZ wybierają półkę z mapy zamiast z długiej listy rozwijanej', async () => {
+  const styles = await readFile(new URL('../src/styles/18-warehouse-documents.css', import.meta.url), 'utf8');
+  assert.match(source, /magazynDokumentOtworzWybierakLokalizacji/);
+  assert.match(source, /LOKALIZACJA DOKUMENTU PZ\/WZ/);
+  assert.match(source, /Obszar → regał → półka/);
+  assert.match(source, /filter\(location=>location\.typ==="półka"\)/);
+  assert.doesNotMatch(source, /aria-label="Wybierz lokalizację skanowania"/);
+  assert.match(source, /admin-standard-table-wrap/);
+  assert.match(styles, /\.warehouse-location-picker-layer/);
+  assert.match(styles, /\.warehouse-location-picker-shelves/);
 });
 
 test('moduł i responsywne style są częścią budowanego panelu administratora', () => {
@@ -31,4 +82,20 @@ test('moduł i responsywne style są częścią budowanego panelu administratora
   const styles = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.css');
   assert.ok(admin.sources.includes('src/frontend/10-warehouse-documents.js'));
   assert.ok(styles.sources.includes('src/styles/18-warehouse-documents.css'));
+});
+
+test('telefon ma stały, prosty pasek obsługi aktywnego dokumentu', async () => {
+  const styles = await readFile(new URL('../src/styles/18-warehouse-documents.css', import.meta.url), 'utf8');
+  assert.match(source, /warehouse-document-mobile-actions/);
+  assert.match(source, /Skanuj/);
+  assert.match(source, /Zaksięguj/);
+  assert.match(source, /warehouseDocumentLines/);
+  assert.match(styles, /\.warehouse-document-mobile-actions\{position:fixed/);
+  assert.match(styles, /html\.artway-pwa-standalone \.warehouse-document-mobile-actions/);
+});
+
+test('odświeżenie PZ i WZ natychmiast przywraca mobilne etykiety tabeli', () => {
+  assert.match(source, /magazynPlanUstandaryzujTabeleDOM\?\.\(root\)/);
+  assert.match(inventory, /Ilość \$\{doc\.type\}/);
+  assert.match(inventory, /warehouse-document-lines/);
 });

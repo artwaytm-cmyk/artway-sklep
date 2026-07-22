@@ -187,15 +187,17 @@ test('wiadomość i załącznik zawierają wszystkie pozycje dużego szkicu bez 
 });
 
 test('warstwa SMTP przekazuje rendererowi załączniki Nodemailer', async () => {
-  const source = await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8');
+  const source = `${await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../netlify/functions/lib/email-route.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../netlify/functions/lib/email-service.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../netlify/functions/lib/email-transport-service.mjs', import.meta.url), 'utf8')}`;
   assert.match(source, /async function wyslijEmailSMTP\(\{[^}]*attachments = \[\]/);
   assert.match(source, /transporter\.sendMail\(\{[\s\S]*?attachments: Array\.isArray\(attachments\)/);
-  assert.match(source, /wyslijEmailSMTP\(\{[^}]*attachments: item\.attachments/);
+  assert.match(source, /(?:wyslijEmailSMTP|sendSmtp)\(\{[^}]*attachments: item\.attachments/);
   assert.match(source, /optimaComplete: optimaMissingIdentifiers\.length === 0/);
-  assert.match(source, /requestedSupplierNames[\s\S]*?x\?\.name \|\| x\?\.nazwa/);
+  assert.match(source, /requestedSupplierNames[\s\S]*?supplier\?\.name \|\| supplier\?\.nazwa/);
   assert.match(source, /const suppliers = currentPlan\.supplierContacts/);
-  const flow = source.slice(source.indexOf("action === 'email-send-supplier-order'"), source.indexOf("action === 'send-email'"));
+  const flow = source.slice(source.indexOf("if (action === 'email-send-supplier-order')"), source.indexOf("if (action === 'send-email')"));
+  const transportCall = flow.indexOf('sendSmtp');
   assert.ok(flow.indexOf('!item.validation?.ok') >= 0);
-  assert.ok(flow.indexOf('!item.validation?.ok') < flow.indexOf('wyslijEmailSMTP'), 'walidacja identyfikatorów musi zakończyć przepływ przed SMTP');
-  assert.ok(flow.indexOf("code: 'supplier_validation'") < flow.indexOf('wyslijEmailSMTP'));
+  assert.ok(transportCall >= 0);
+  assert.ok(flow.indexOf('!item.validation?.ok') < transportCall, 'walidacja identyfikatorów musi zakończyć przepływ przed SMTP');
+  assert.ok(flow.indexOf("code: 'supplier_validation'") < transportCall);
 });

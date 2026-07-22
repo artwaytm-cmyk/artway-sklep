@@ -1,12 +1,12 @@
 // Kontrola opisów ofert Allegro przed publikacją i podczas audytu istniejących ofert.
-// Reguły są celowo zachowawcze: opis oferty nie jest miejscem na dane kontaktowe,
-// zaproszenie do kontaktu ani sugestię sprzedaży poza Allegro.
+// Reguły są celowo zachowawcze: opis oferty zawiera wyłącznie informacje
+// o produkcie. Kontakt, płatność i dostawa mają własne sekcje Allegro.
 
 export const ALLEGRO_COMPLIANCE_POLICY = Object.freeze({
-  id: 'allegro-offsite-sales-2026-07-13-v2',
-  name: 'Sprzedaż wyłącznie przez Allegro',
+  id: 'allegro-product-description-2026-07-21-v3',
+  name: 'Opis wyłącznie o oferowanym produkcie',
   source: 'https://help.allegro.com/pl/sell/a/sprzedaz-poza-allegro-i-omijanie-oplat-aMloER9LrH8',
-  descriptionSource: 'https://help.allegro.com/pl/sell/c/jak-wystawiac-oferty',
+  descriptionSource: 'https://help.allegro.com/pl/sell/c/zasady-dla-tytulu-i-opisu',
 });
 
 const RULES = Object.freeze([
@@ -46,6 +46,14 @@ const RULES = Object.freeze([
     id: 'external_payment',
     label: 'dane lub płatność poza Allegro',
     pattern: /\b(?:numer\s+(?:rachunku|konta)|rachunek\s+bankowy|przelew\s+(?:bezpośredni|tradycyjny)|blik\s+na\s+telefon|płatność\s+poza\s+allegro)\b/giu,
+  },
+  {
+    id: 'delivery_information',
+    label: 'informacja o dostawie poza sekcją Dostawa',
+    // Załącznik nr 2 do Regulaminu Allegro wymaga, aby w opisie pozostały
+    // wyłącznie informacje o produkcie. Koszt, termin, metoda, przewoźnik,
+    // nadanie i odbiór są obsługiwane przez ustawienia dostawy oferty.
+    pattern: /(?<![\p{L}\p{N}_])(?:dostaw(?:a|y|ę|ie|ą)|wysy[łl](?:ka|ki|kę|ce|ką|amy|amy\s+w|ka\s+w|ka\s+od|ka\s+gratis)|czas\s+(?:realizacji|nadania|dostawy|wysy[łl]ki)|termin\s+(?:realizacji|nadania|dostawy|wysy[łl]ki)|koszt(?:y)?\s+(?:dostawy|wysy[łl]ki|przesy[łl]ki)|darmow(?:a|ej|ą)\s+dostaw(?:a|y|ę|ie|ą)|przesy[łl](?:ka|ki|kę|ce|ką)|nadani[aeu]|paczkomat(?:u|y|em|ach)?|paczko\s*punkt|kurier(?:a|em|zy|owi|ska|skie|ską)|in\s*post|odbiór\s+(?:osobisty|w\s+punkcie|w\s+paczkomacie)|wysy[łl]amy|wyślemy|wyslemy|doręczeni[aeu])(?![\p{L}\p{N}_])/giu,
   },
   {
     id: 'external_url',

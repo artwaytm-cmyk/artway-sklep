@@ -19,6 +19,54 @@ function kwota(value) {
   return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
 }
 
+function kontrolowanyStan(settingsData = {}, productId = '') {
+  const stocks = settingsData.artway_stany && typeof settingsData.artway_stany === 'object' && !Array.isArray(settingsData.artway_stany) ? settingsData.artway_stany : {};
+  if (!Object.prototype.hasOwnProperty.call(stocks, productId) || stocks[productId] === null || stocks[productId] === '') return null;
+  const value = Number(stocks[productId]);
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
+}
+
+function regulyRabatowe(config = {}) {
+  const result = [], seen = new Set();
+  for (const raw of Array.isArray(config.kodyRabatoweZaawansowane) ? config.kodyRabatoweZaawansowane : []) {
+    const kod = tekst(raw?.kod, 30).trim().toUpperCase();
+    if (!/^[A-Z0-9_-]{2,30}$/.test(kod) || seen.has(kod)) continue;
+    seen.add(kod); result.push({ typ: 'procent', wartosc: 0, minKoszyk: 0, maxRabat: 0, zakres: 'wszystkie', kategorie: [], produkty: [], aktywny: true, ...raw, kod });
+  }
+  const legacySource = config.kodyRabatowe && typeof config.kodyRabatowe === 'object' ? config.kodyRabatowe : config.kody;
+  const legacy = legacySource && typeof legacySource === 'object' ? legacySource : {};
+  for (const [code, value] of Object.entries(legacy)) {
+    const kod = tekst(code, 30).trim().toUpperCase(); if (!kod || seen.has(kod)) continue;
+    result.push({ kod, typ: 'procent', wartosc: Number(value) || 0, zakres: 'wszystkie', aktywny: true });
+  }
+  return result;
+}
+
+function regulaRabatowaAktywna(rule = {}, now = Date.now()) {
+  if (rule.aktywny === false) return false;
+  const start = rule.start ? Date.parse(rule.start) : NaN, end = rule.koniec ? Date.parse(rule.koniec) : NaN;
+  if (Number.isFinite(start) && now < start) return false;
+  if (Number.isFinite(end) && now > end) return false;
+  const limit = Math.max(0, Number(rule.limitUzyc) || 0), used = Math.max(0, Number(rule.uzycia) || 0);
+  return !limit || used < limit;
+}
+
+function wynikRabatu(config, code, lines, productsTotal) {
+  const rule = regulyRabatowe(config).find((item) => item.kod === code);
+  if (!rule || !regulaRabatowaAktywna(rule) || productsTotal < Math.max(0, Number(rule.minKoszyk) || 0)) return { code: '', discount: 0, freeDelivery: false, rule: null };
+  const ids = new Set((Array.isArray(rule.produkty) ? rule.produkty : []).map(String));
+  const categories = new Set((Array.isArray(rule.kategorie) ? rule.kategorie : []).map(String));
+  const eligible = lines.reduce((sum, line) => {
+    const covered = rule.zakres === 'produkty' ? ids.has(String(line.id)) : rule.zakres === 'kategorie' ? categories.has(String(line.kategoria || '')) : true;
+    return sum + (covered ? line.wartosc : 0);
+  }, 0);
+  if (!eligible && rule.typ !== 'darmowa_dostawa') return { code: '', discount: 0, freeDelivery: false, rule: null };
+  const value = Math.max(0, Number(rule.wartosc) || 0);
+  let discount = rule.typ === 'kwota' ? Math.min(eligible, value) : rule.typ === 'procent' ? eligible * Math.min(100, value) / 100 : 0;
+  const cap = Math.max(0, Number(rule.maxRabat) || 0); if (cap) discount = Math.min(discount, cap);
+  return { code, discount: kwota(discount), freeDelivery: rule.typ === 'darmowa_dostawa', rule };
+}
+
 export function bezpieczneZamowienieKlienta(raw, settingsData = {}) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const number = numerZamowienia(source.nr);
@@ -40,6 +88,7 @@ export function bezpieczneZamowienieKlienta(raw, settingsData = {}) {
       id: product.id,
       nazwa: tekst(product.nazwa, 300).trim(),
       sku: tekst(product.sku || product.externalId, 100).trim(),
+      kategoria: tekst(product.kategoria, 160).trim(),
       wariant: tekst(line?.wariant, 120).trim(),
       ilosc: quantity,
       cena: price,
@@ -49,9 +98,8 @@ export function bezpieczneZamowienieKlienta(raw, settingsData = {}) {
   const config = settingsData.artway_ustawienia && typeof settingsData.artway_ustawienia === 'object' ? settingsData.artway_ustawienia : {};
   const productsTotal = kwota(lines.reduce((sum, line) => sum + line.wartosc, 0));
   const discountCode = tekst(source.rabatKod, 40).trim().toUpperCase();
-  const discounts = config.kodyRabatowe && typeof config.kodyRabatowe === 'object' ? config.kodyRabatowe : {};
-  const discountPercent = Math.max(0, Math.min(100, Number(discounts[discountCode]) || 0));
-  const discount = kwota(productsTotal * discountPercent / 100);
+  const discountResult = wynikRabatu(config, discountCode, lines, productsTotal);
+  const discount = discountResult.discount;
   const afterDiscount = kwota(productsTotal - discount);
   const deliveryId = ['paczkomat', 'kurier_inpost'].includes(source.dostawaId) ? source.dostawaId : '';
   if (!deliveryId) { const error = new Error('Wybierz prawidłową metodę dostawy InPost.'); error.status = 422; throw error; }
@@ -59,7 +107,7 @@ export function bezpieczneZamowienieKlienta(raw, settingsData = {}) {
   const configuredDelivery = (Array.isArray(config.dostawy) ? config.dostawy : []).find((item) => item?.id === deliveryId);
   const delivery = { ...deliveryDefaults[deliveryId], ...(configuredDelivery || {}) };
   const freeFrom = Math.max(0, Number(config.darmowaDostawaOd) || 200);
-  const deliveryCost = afterDiscount >= freeFrom ? 0 : kwota(delivery.koszt);
+  const deliveryCost = discountResult.freeDelivery || afterDiscount >= freeFrom ? 0 : kwota(delivery.koszt);
   const weekend = source.paczkaWeekend === true;
   const weekendCost = weekend ? 5 : 0;
   const paymentId = ['pobranie', 'telefon', 'paynow'].includes(source.platnoscId) ? source.platnoscId : '';
@@ -70,7 +118,9 @@ export function bezpieczneZamowienieKlienta(raw, settingsData = {}) {
   if (payment.wylaczona === true) { const error = new Error('Wybrana metoda płatności jest wyłączona.'); error.status = 409; throw error; }
   const paymentCost = kwota(payment.oplata);
   const total = kwota(afterDiscount + deliveryCost + weekendCost + paymentCost);
-  const availabilityChecks = lines.filter((line) => line.ilosc > 5).map((line) => ({ id: line.id, nazwa: line.nazwa, ilosc: line.ilosc }));
+  const availabilityChecks = lines.map((line) => ({ ...line, stanMagazynowy: kontrolowanyStan(settingsData, String(line.id)) }))
+    .filter((line) => line.ilosc > 5 && (line.stanMagazynowy === null || line.ilosc > line.stanMagazynowy))
+    .map((line) => ({ id: line.id, nazwa: line.nazwa, ilosc: line.ilosc, stanMagazynowy: line.stanMagazynowy }));
   const customer = source.klient && typeof source.klient === 'object' ? source.klient : {};
   const address = source.adresDostawy && typeof source.adresDostawy === 'object' ? source.adresDostawy : {};
   const cleanCustomer = {
@@ -104,7 +154,8 @@ export function bezpieczneZamowienieKlienta(raw, settingsData = {}) {
     dostepnoscDoPotwierdzenia: availabilityChecks,
     oplataPlatnosci: paymentCost,
     koszty: { produkty: productsTotal, rabat: discount, poRabacie: afterDiscount, dostawa: deliveryCost, paczkaWeekend: weekendCost, platnosc: paymentCost, razem: total },
-    rabatKod: discountPercent ? discountCode : '',
+    rabatKod: discountResult.code,
+    rabatTyp: discountResult.rule?.typ || '',
     platnosc: tekst(payment.nazwa, 160), platnoscId: paymentId,
     platnoscInstrukcja: paymentId === 'telefon'
       ? `Przelew na telefon 530 038 914. W tytule lub wiadomości wpisz: Zamówienie ${number}. Kwota: ${total.toFixed(2)} zł.`

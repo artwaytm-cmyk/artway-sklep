@@ -1,8 +1,26 @@
 /* Ustawienia integracji Allegro — mapowanie, harmonogram i automatyzacje. */
+async function allegroZapiszDaneAplikacji(event){
+  event?.preventDefault();const form=event?.currentTarget,button=form?.querySelector("button[type=submit]");
+  const clientId=String(form?.elements?.clientId?.value||"").trim(),clientSecret=String(form?.elements?.clientSecret?.value||"").trim();
+  if(!clientId||!clientSecret){toast("Wpisz pełny Client ID i Client Secret");return false;}
+  if(button){button.disabled=true;button.textContent="⏳ Sprawdzam w Allegro…";}
+  try{
+    const data=await chmura("allegro-credentials",{method:"POST",body:{clientId,clientSecret,environment:"production"},timeout:30000});
+    form.reset();allegroStan={...allegroStan,...(data.allegro||{}),credentialsRedacted:false,credentialsInvalid:false,sprawdzono:true};
+    toast(data.refreshed?"✅ Dane aplikacji sprawdzone — połączenie Allegro działa":"✅ Dane aplikacji sprawdzone — dokończ jednorazowe połączenie konta");
+    if(data.requiresOAuth)setTimeout(()=>allegroPolacz(),300);else{await allegroWczytajDane(true,true,"config");renderuj();}
+  }catch(error){toast("⚠️ Allegro: "+(error?.message||error));}
+  finally{if(button){button.disabled=false;button.textContent="🔐 Sprawdź i zapisz bezpiecznie";}}
+  return false;
+}
+function allegroNaprawaDanychAplikacjiHTML(){
+  if(!allegroStan.credentialsRedacted&&!allegroStan.credentialsInvalid)return "";
+  return `<section class="allegro-credential-repair"><header><span>🔐</span><div><small>Naprawa połączenia • dane tylko na serwerze</small><h3>Wpisz ponownie pełne dane aplikacji Allegro</h3><p>Wcześniej do konfiguracji trafiły zamaskowane wartości z gwiazdkami. Nie są prawdziwym Client ID ani Client Secret, dlatego Allegro zwracało <code>invalid_client</code>. Agent AI i GPT‑5 nano działają prawidłowo.</p></div></header><form autocomplete="off" onsubmit="return allegroZapiszDaneAplikacji(event)"><label>Client ID<input name="clientId" required minlength="12" autocomplete="off" spellcheck="false" placeholder="Pełna wartość z aplikacji Allegro"></label><label>Client Secret<input name="clientSecret" type="password" required minlength="12" autocomplete="new-password" spellcheck="false" placeholder="Pełna wartość — bez gwiazdek"></label><button class="btn" type="submit">🔐 Sprawdź i zapisz bezpiecznie</button></form><footer><span>✓ Dane są najpierw weryfikowane bezpośrednio w OAuth Allegro</span><span>✓ Sekret nie trafia do przeglądarki, bazy sklepu ani repozytorium</span><span>✓ Zamaskowana wartość nigdy więcej nie nadpisze sejfu</span></footer></section>`;
+}
 function allegroUstawieniaPanelHTML(){
   const offerStock=allegroStanOfertyProduktu(),audit=Object.values(allegroStan.offerDefaultsAudit?.items||{}),auditOpen=audit.filter(x=>!x.stockUpdated||!x.republishUpdated).length;
-  const settings={autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,...(allegroStan.offerSettings||{})};
-  const sync=allegroStan.offerSyncState||{},maintenance=allegroStan.catalogMaintenance||{};
+  const settings={autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autonomousAgentMinutes:15,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,...(allegroStan.offerSettings||{})};
+  const sync=allegroStan.offerSyncState||{},maintenance=allegroStan.catalogMaintenance||{},agent=allegroStan.autonomousAgent||{};
   const dataLabel=value=>value&&Number.isFinite(Date.parse(value))?esc(new Date(value).toLocaleString("pl-PL")):"jeszcze nie wykonano";
   const option=(value,current,label)=>`<option value="${value}" ${Number(current)===Number(value)?"selected":""}>${label}</option>`;
   return `<div class="panel allegro-section-panel allegro-integration-settings">
@@ -10,6 +28,7 @@ function allegroUstawieniaPanelHTML(){
       <div><span class="order-pro-label">Allegro API</span><h2>⚙️ Ustawienia integracji</h2><p class="order-detail-lead">Jedno miejsce do ustawienia automatycznego mapowania, rytmu synchronizacji, aktualizacji ofert i domyślnych danych.</p></div>
       <div class="diag-actions"><button class="btn" type="button" onclick="allegroPolacz()">🔐 Połącz ponownie</button><button class="btn ghost" type="button" onclick="allegroWczytajDane(true)">Sprawdź połączenie</button></div>
     </div>
+    ${allegroNaprawaDanychAplikacjiHTML()}
     <div class="orders-stat-grid">
       <div class="order-stat-card ${allegroStan.configured?"money":"hot"}"><span>🔧</span><b>${allegroStan.configured?"OK":"BRAK"}</b><small>konfiguracja aplikacji</small></div>
       <div class="order-stat-card ${allegroStan.connected?"money":"hot"}"><span>🔐</span><b>${allegroStan.connected?"TAK":"NIE"}</b><small>autoryzacja OAuth</small></div>
@@ -17,6 +36,12 @@ function allegroUstawieniaPanelHTML(){
       <div class="order-stat-card"><span>📚</span><b>${settings.fullSyncHours} h</b><small>pełna synchronizacja</small></div>
     </div>
     <form class="allegro-settings-layout" onsubmit="event.preventDefault();allegroZapiszUstawieniaOfert(this)">
+      <section class="allegro-settings-section primary">
+        <div class="allegro-settings-section-head"><div><span>🧠</span><div><h3>Autonomiczny Agent sprzedaży</h3><p>Agent pracuje na serwerze przy zamkniętym panelu: łączy pewne oferty z kartoteką, wykrywa duplikaty, wskazuje najlepszą ofertę i zapisuje pełny audyt. Zakończenie oferty wymaga decyzji.</p></div></div><label class="switch-check"><input type="checkbox" name="autonomousAgent" ${settings.autonomousAgent!==false?"checked":""}><span>Włączony</span></label></div>
+        <div class="allegro-settings-grid compact"><label>Cykl pracy Agenta<select name="autonomousAgentMinutes">${option(15,settings.autonomousAgentMinutes,"co 15 minut")}${option(30,settings.autonomousAgentMinutes,"co 30 minut")}${option(60,settings.autonomousAgentMinutes,"co 1 godzinę")}${option(120,settings.autonomousAgentMinutes,"co 2 godziny")}</select></label><label>Minimalna pewność rekomendacji duplikatu<input name="autoResolveDuplicateMinScore" type="number" min="95" max="100" step="1" value="${esc(settings.autoResolveDuplicateMinScore)}"><small>Nazwa nigdy nie wystarcza. Agent wymaga EAN/GTIN, ID katalogu lub EXTERNAL_ID/SKU.</small></label></div>
+        <div class="allegro-settings-checks"><label class="check"><input type="checkbox" name="autoResolveDuplicates" ${settings.autoResolveDuplicates!==false?"checked":""}> Automatycznie wykrywaj duplikaty i przygotowuj decyzję z najlepszą ofertą</label></div>
+        <div class="allegro-sync-status-grid"><span><small>Ostatni cykl</small><b>${dataLabel(agent.completedAt)}</b><em>Status: ${esc(agent.status||"oczekuje")}</em></span><span><small>Ostatni rezultat</small><b>${esc(agent.duplicateOffersEnded||0)} duplikatów zakończonych</b><em>${esc(agent.mapping?.autoMapped||0)} nowych powiązań • ${esc(agent.reviewCount||0)} do decyzji</em></span><button class="btn" type="button" onclick="allegroUruchomAgentAutonomiczny()">Uruchom Agenta teraz</button></div>
+      </section>
       <section class="allegro-settings-section primary">
         <div class="allegro-settings-section-head"><div><span>🤖</span><div><h3>Automatyczne mapowanie ofert</h3><p>Pewne, jednoznaczne zgodności EAN, ID produktu i kodu są łączone bez klikania. Wyjątki pozostają do ręcznej kontroli.</p></div></div><label class="switch-check"><input type="checkbox" name="autoMapping" ${settings.autoMapping!==false?"checked":""}><span>Włączone</span></label></div>
         <div class="allegro-settings-grid compact"><label>Próg pewności od 55%<input name="mappingMinScore" type="number" min="55" max="100" step="1" required value="${esc(settings.mappingMinScore)}"><small>Możesz ustawić dowolny próg od 55% do 100%. System nadal odrzuca konflikty i niejednoznaczne duplikaty.</small></label><div class="allegro-setting-action"><b>Natychmiastowa kontrola</b><small>Zapisz nowy próg i od razu połącz wszystkie pozycje, które go spełniają.</small><button class="btn" type="button" onclick="this.form.requestSubmit()">💾 Zapisz i połącz według progu</button></div></div>

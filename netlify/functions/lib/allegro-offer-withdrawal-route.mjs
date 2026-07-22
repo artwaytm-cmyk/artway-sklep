@@ -1,11 +1,126 @@
 import crypto from 'node:crypto';
+import { analyzeAutonomousAllegroWork } from './domain/allegro-autonomous-agent.mjs';
 
-export function createAllegroOfferWithdrawalRoute({ callAllegro, createProductUpdater, getMappings, getOffers, getProducts, isAdmin, read, respond, text, write } = {}) {
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function endAllegroOffers(callAllegro, request, offerIds = []) {
+  const ids = [...new Set(offerIds.map(String).filter(Boolean))];
+  if (!ids.length) return [];
+  const commandId = crypto.randomUUID(), path = `/sale/offer-publication-commands/${commandId}`;
+  let summary = await callAllegro(request, path, { method: 'PUT', bodyObj: { offerCriteria: [{ type: 'CONTAINS_OFFERS', offers: ids.map((id) => ({ id })) }], publication: { action: 'END' } } });
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const counts = summary?.taskCount || {};
+    if (Number(counts.total) >= ids.length && Number(counts.failed) === 0 && Number(counts.success) >= ids.length) return ids.map((id) => ({ offerId: id, ended: true, commandId }));
+    if (Number(counts.total) >= ids.length || summary?.completedAt) break;
+    await wait(250);
+    summary = await callAllegro(request, path);
+  }
+  const detail = await callAllegro(request, `${path}/tasks`, { parameters: { limit: Math.min(1000, ids.length), offset: 0 } });
+  const tasks = Array.isArray(detail?.tasks) ? detail.tasks : [], byOffer = new Map(tasks.map((task) => [String(task?.offer?.id || ''), task]));
+  return ids.map((id) => {
+    const task = byOffer.get(id), ended = String(task?.status || '').toUpperCase() === 'SUCCESS';
+    const errors = Array.isArray(task?.errors) ? task.errors : [];
+    return ended ? { offerId: id, ended: true, commandId } : { offerId: id, ended: false, commandId, status: 422, code: String(errors[0]?.code || 'publication_command_failed').slice(0, 120), error: String(task?.message || errors.map((item) => item?.userMessage || item?.message).filter(Boolean).join('; ') || 'Allegro nie potwierdziło zakończenia oferty').slice(0, 700) };
+  });
+}
+
+export function createAllegroOfferWithdrawalRoute({ autoMapOffers, callAllegro, createProductUpdater, getMappings, getOffers, getProducts, isAdmin, read, respond, text, write } = {}) {
   return async function allegroOfferWithdrawalRoute({ req, url, action } = {}) {
-    if (!['allegro-withdraw-offers', 'allegro-resolve-duplicate'].includes(action)) return null;
+    if (!['allegro-withdraw-offers', 'allegro-resolve-duplicate', 'allegro-autonomous-agent-cycle'].includes(action)) return null;
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
     if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
     const body = await req.json().catch(() => ({}));
+    if (action === 'allegro-autonomous-agent-cycle') {
+      const startedAt = new Date().toISOString(), runId = crypto.randomUUID(), source = text(body.source || 'manual-admin', 100);
+      const dryRun = body.dryRun === true;
+      const [offerSettings, previousState] = await Promise.all([read('allegro_offer_settings', {}), read('allegro_autonomous_agent_state', {})]);
+      const enabled = offerSettings.autonomousAgent !== false;
+      const autoResolveDuplicatesConfigured = offerSettings.autoResolveDuplicates !== false;
+      // Zakończenie oferty jest operacją destrukcyjną. Cykl może wskazać
+      // najlepszą pozycję do pozostawienia, lecz wykonanie należy do jawnej
+      // trasy allegro-resolve-duplicate uruchamianej decyzją administratora.
+      const autoResolveDuplicates = false;
+      const intervalMinutes = Math.min(120, Math.max(15, Number(offerSettings.autonomousAgentMinutes) || 15));
+      if (!enabled) {
+        const completedAt = new Date().toISOString();
+        const state = { runId, enabled: false, status: 'disabled', source, startedAt, completedAt, nextRunAt: null, message: 'Autonomiczny Agent Allegro jest wyłączony w ustawieniach.' };
+        await write('allegro_autonomous_agent_state', state);
+        return respond({ ok: true, skipped: true, reason: 'disabled', state });
+      }
+      const scheduled = /^(?:vps|scheduled)/i.test(source), dueAt = Date.parse(previousState?.completedAt || '') + intervalMinutes * 60 * 1000;
+      if (scheduled && Number.isFinite(dueAt) && Date.now() < dueAt) return respond({ ok: true, skipped: true, reason: 'not_due', state: { ...previousState, nextRunAt: new Date(dueAt).toISOString() } });
+
+      let mapping = null;
+      if (!dryRun && typeof autoMapOffers === 'function' && offerSettings.autoMapping !== false) {
+        const currentOffers = getOffers(await read('allegro_offers', { items: [], updated_at: null }));
+        mapping = await autoMapOffers(currentOffers);
+      }
+      const [offersRec, mappingsRec, settingsRec, ordersRec, auditRec] = await Promise.all([
+        read('allegro_offers', { items: [], updated_at: null }),
+        read('allegro_mappings', { items: {}, updated_at: null }),
+        read('settings', { data: {}, rev: 0, updated_at: null }),
+        read('allegro_orders', { items: [], updated_at: null }),
+        read('allegro_duplicate_resolution_audit', { items: [], updated_at: null }),
+      ]);
+      const offers = getOffers(offersRec), mappings = getMappings(mappingsRec);
+      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
+      const products = await getProducts(data);
+      const threshold = Math.min(100, Math.max(95, Number(offerSettings.autoResolveDuplicateMinScore) || 97));
+      const salesByOffer = {};
+      for (const order of Array.isArray(ordersRec.items) ? ordersRec.items : []) for (const line of Array.isArray(order?.lineItems) ? order.lineItems : []) {
+        const id = String(line?.offerId || line?.offer?.id || '').trim();
+        if (id) salesByOffer[id] = (salesByOffer[id] || 0) + Math.max(1, Number(line?.quantity) || 1);
+      }
+      const analysis = analyzeAutonomousAllegroWork({ offers, mappings, products, minimumScore: threshold, salesByOffer });
+      const groups = [];
+      const results = [], endedIds = new Set(), touchedProducts = new Map();
+
+      if (!dryRun) for (const group of groups) {
+        let offerResults;
+        try { offerResults = await endAllegroOffers(callAllegro, req, group.withdrawOfferIds); }
+        catch (error) { offerResults = group.withdrawOfferIds.map((id) => ({ offerId: id, ended: false, error: text(error?.message || error, 700), code: text(error?.code || '', 120), status: error?.status || 500 })); }
+        const successful = offerResults.filter((item) => item.ended).map((item) => String(item.offerId));
+        successful.forEach((id) => endedIds.add(id));
+        if (successful.length) touchedProducts.set(group.productId, { ...group, withdrawOfferIds: successful });
+        results.push({ ...group, withdrawOfferIds: successful, requestedWithdrawOfferIds: group.withdrawOfferIds, results: offerResults, ok: successful.length === group.withdrawOfferIds.length, partial: successful.length > 0 && successful.length < group.withdrawOfferIds.length });
+      }
+
+      const now = new Date().toISOString(), byId = new Map(offers.map((offer) => [String(offer?.id || ''), offer]));
+      if (!dryRun && endedIds.size) {
+        const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
+        for (const [productId, group] of touchedProducts.entries()) {
+          const keepOffer = byId.get(String(group.keepOfferId)) || {};
+          mappings[group.keepOfferId] = { ...(mappings[group.keepOfferId] || {}), offerId: group.keepOfferId, productId, allegroProductId: text(keepOffer.productId, 120), categoryId: text(keepOffer.categoryId, 80), productName: text(group.productName || keepOffer.name, 300), linked_at: mappings[group.keepOfferId]?.linked_at || now, synced_at: now, operator: 'agent-duplicate-keep', duplicateResolvedAt: now, confidence: group.confidence, verifiedForSupplier: true };
+          for (const endedId of group.withdrawOfferIds) mappings[endedId] = { ...(mappings[endedId] || {}), offerId: endedId, previousProductId: productId, productId: '', blocked: true, duplicateOf: group.keepOfferId, operator: 'agent-duplicate-withdrawn', synced_at: now, duplicateResolvedAt: now, confidence: group.confidence };
+          edits[productId] = { ...(edits[productId] || {}), allegroOfferId: group.keepOfferId, allegroProductId: text(keepOffer.productId || edits[productId]?.allegroProductId, 120), allegroCategoryId: text(keepOffer.categoryId || edits[productId]?.allegroCategoryId, 80), allegroDuplicateResolvedAt: now, allegroDuplicateResolvedBy: 'autonomous-agent' };
+        }
+        data.artway_produkty_edytowane = edits;
+      }
+      const updatedOffers = endedIds.size ? offers.map((offer) => endedIds.has(String(offer.id)) ? { ...offer, status: 'ENDED', publication: { ...(offer.publication || {}), status: 'ENDED', republish: false }, duplicateResolvedAt: now, duplicateResolvedBy: 'autonomous-agent' } : offer) : offers;
+      const audit = Array.isArray(auditRec.items) ? [...auditRec.items] : [];
+      for (const result of results.filter((item) => item.withdrawOfferIds.length)) audit.unshift({ id: crypto.randomUUID(), productId: result.productId, keepOfferId: result.keepOfferId, withdrawOfferIds: result.withdrawOfferIds, results: result.results, confidence: result.confidence, reason: result.reason, at: now, operator: 'autonomous-agent', runId, source });
+      const pendingDuplicates = analysis.duplicates;
+      const review = [...analysis.review, ...pendingDuplicates.map((group) => ({ code: 'requires_approval', productId: group.productId, productName: group.productName, keepOfferId: group.keepOfferId, withdrawOfferIds: group.withdrawOfferIds, score: group.confidence, reason: 'Zakończenie duplikatu wymaga potwierdzenia administratora.' }))];
+      const completedAt = new Date().toISOString(), nextRunAt = new Date(Date.parse(completedAt) + intervalMinutes * 60 * 1000).toISOString();
+      const state = {
+        runId, enabled: true, status: results.some((item) => !item.ok) ? 'warning' : review.length ? 'review' : 'ok', source, startedAt, completedAt, nextRunAt,
+        intervalMinutes, dryRun, autoResolveDuplicates, autoResolveDuplicatesConfigured, destructiveActionsRequireApproval: true, minimumScore: threshold,
+        mapping: { autoMapped: Number(mapping?.autoMapped) || 0, refreshed: Number(mapping?.refreshed) || 0, quarantined: Number(mapping?.quarantined) || 0, reassessed: Number(mapping?.reassessed) || 0 },
+        stats: analysis.stats, duplicateGroupsResolved: results.filter((item) => item.withdrawOfferIds.length).length, duplicateOffersEnded: endedIds.size, reviewCount: review.length,
+        recentActions: results.slice(0, 25).map((item) => ({ productId: item.productId, productName: item.productName, keepOfferId: item.keepOfferId, withdrawOfferIds: item.withdrawOfferIds, confidence: item.confidence, ok: item.ok, partial: item.partial, errors: item.results.filter((result) => !result.ended).map((result) => ({ offerId: result.offerId, code: result.code, error: result.error })) })),
+      };
+      if (!dryRun) await Promise.all([
+        ...(endedIds.size ? [
+          write('allegro_offers', { ...offersRec, items: updatedOffers, updated_at: now }),
+          write('allegro_mappings', { items: mappings, updated_at: now }),
+          write('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now }),
+          write('allegro_duplicate_resolution_audit', { items: audit.slice(0, 3000), updated_at: now }),
+        ] : []),
+        write('allegro_autonomous_agent_review', { items: review.slice(0, 2000), updated_at: now, runId }),
+        write('allegro_autonomous_agent_state', state),
+      ]);
+      return respond({ ok: true, dryRun, state, mapping, analysis, results, offers: dryRun ? undefined : updatedOffers, mappings: dryRun ? undefined : mappings, updated_at: now });
+    }
     if (action === 'allegro-resolve-duplicate') {
       const productId = text(body.productId, 100).trim(), keepOfferId = text(body.keepOfferId, 100).trim();
       const withdrawOfferIds = [...new Set((Array.isArray(body.withdrawOfferIds) ? body.withdrawOfferIds : []).map((value) => text(value, 100).trim()).filter((value) => value && value !== keepOfferId))].slice(0, 50);
@@ -17,13 +132,9 @@ export function createAllegroOfferWithdrawalRoute({ callAllegro, createProductUp
       if (!byId.has(keepOfferId)) return respond({ ok: false, error: 'Nie znaleziono oferty wybranej do pozostawienia', code: 'keep_not_found' }, 404);
       const missing = withdrawOfferIds.filter((id) => !byId.has(id));
       if (missing.length) return respond({ ok: false, error: `Nie znaleziono ofert: ${missing.join(', ')}`, code: 'withdraw_not_found' }, 404);
-      const settled = await Promise.allSettled(withdrawOfferIds.map(async (offerId) => {
-        const offer = byId.get(offerId) || {}, status = String(offer.status || offer.publication?.status || '').toUpperCase();
-        if (status === 'ENDED') return { offerId, ended: true, alreadyEnded: true };
-        await callAllegro(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: { publication: { status: 'ENDED', republish: false } } });
-        return { offerId, ended: true, alreadyEnded: false };
-      }));
-      const results = settled.map((result, index) => result.status === 'fulfilled' ? result.value : { offerId: withdrawOfferIds[index], ended: false, error: text(result.reason?.message || result.reason, 700), code: text(result.reason?.code || '', 120), status: result.reason?.status || 500 });
+      let results;
+      try { results = await endAllegroOffers(callAllegro, req, withdrawOfferIds); }
+      catch (error) { results = withdrawOfferIds.map((offerId) => ({ offerId, ended: false, error: text(error?.message || error, 700), code: text(error?.code || '', 120), status: error?.status || 500 })); }
       const failed = results.filter((result) => !result.ended);
       if (failed.length) return respond({ ok: false, error: `Nie udało się wycofać ${failed.length} ofert. Powiązania nie zostały zmienione.`, code: 'partial_withdrawal', results }, 422);
       const now = new Date().toISOString(), mappings = getMappings(mappingsRec), keepOffer = byId.get(keepOfferId) || {};
@@ -60,13 +171,8 @@ export function createAllegroOfferWithdrawalRoute({ callAllegro, createProductUp
     const results = [];
     for (let offset = 0; offset < offerIds.length; offset += 10) {
       const batch = offerIds.slice(offset, offset + 10);
-      const settled = await Promise.allSettled(batch.map(async (offerId) => {
-        const offer = byId.get(offerId) || {}, status = String(offer.status || offer.publication?.status || '').toUpperCase();
-        if (['ENDED', 'ARCHIVED'].includes(status)) return { offerId, ended: true, alreadyEnded: true };
-        await callAllegro(req, `/sale/product-offers/${encodeURIComponent(offerId)}`, { method: 'PATCH', bodyObj: { publication: { status: 'ENDED', republish: false } } });
-        return { offerId, ended: true, alreadyEnded: false };
-      }));
-      settled.forEach((result, index) => results.push(result.status === 'fulfilled' ? result.value : { offerId: batch[index], ended: false, error: text(result.reason?.message || result.reason, 700), code: text(result.reason?.code || '', 120), status: result.reason?.status || 500 }));
+      try { results.push(...await endAllegroOffers(callAllegro, req, batch)); }
+      catch (error) { results.push(...batch.map((offerId) => ({ offerId, ended: false, error: text(error?.message || error, 700), code: text(error?.code || '', 120), status: error?.status || 500 }))); }
     }
 
     const endedIds = results.filter((result) => result.ended).map((result) => String(result.offerId)), failed = results.filter((result) => !result.ended);

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  accountSessionCookie,
   createAccountSession,
   createOrderAccess,
   hashPassword,
@@ -8,7 +9,9 @@ import {
   verifyOrderAccess,
   verifyPassword,
 } from '../netlify/functions/lib/core/security.mjs';
+import { createAdminMfaChallenge, verifyAdminMfaChallenge, verifyMfaCode } from '../netlify/functions/lib/core/mfa.mjs';
 import { bezpieczneZamowienieKlienta } from '../netlify/functions/lib/domain/checkout.mjs';
+import { czyAdmin, tokenZadania } from '../netlify/functions/lib/core/http.mjs';
 
 process.env.ARTWAY_SESSION_SECRET = 'test-secret-that-is-not-used-in-production';
 
@@ -17,6 +20,41 @@ test('podpisana sesja wskazuje właściciela i rolę konta', () => {
   const request = new Request('https://artwaytm.pl/api/store', { headers: { authorization: `Bearer ${token}` } });
   assert.deepEqual(requestSession(request), { email: 'klient@example.com', role: 'klient', exp: requestSession(request).exp });
   assert.equal(requestSession(new Request('https://artwaytm.pl/api/store', { headers: { authorization: `${token}x` } })), null);
+});
+
+test('sesja konta działa z ciasteczka HttpOnly i nie wymaga tokenu w JavaScript', () => {
+  const token = createAccountSession({ email: 'admin@example.com', rola: 'admin' });
+  const cookie = accountSessionCookie(token);
+  assert.match(cookie, /^artway_session=/);
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /Secure/);
+  assert.match(cookie, /SameSite=Lax/);
+  const request = new Request('https://artwaytm.pl/api/store', { headers: { cookie: cookie.split(';')[0] } });
+  assert.equal(requestSession(request)?.role, 'admin');
+  assert.equal(requestSession(request)?.email, 'admin@example.com');
+});
+
+test('token administratora działa wyłącznie w nagłówku i nigdy w adresie URL', () => {
+  const previous = process.env.ARTWAY_ADMIN_TOKEN;
+  process.env.ARTWAY_ADMIN_TOKEN = 'techniczny-sekret-testowy';
+  try {
+    const fromUrl = new Request('https://artwaytm.pl/api/store?action=health&token=techniczny-sekret-testowy');
+    assert.equal(tokenZadania(fromUrl), '');
+    assert.equal(czyAdmin(fromUrl), false);
+    const fromHeader = new Request('https://artwaytm.pl/api/store?action=health', { headers: { 'x-admin-token': 'techniczny-sekret-testowy' } });
+    assert.equal(tokenZadania(fromHeader), 'techniczny-sekret-testowy');
+    assert.equal(czyAdmin(fromHeader), true);
+  } finally {
+    if (previous === undefined) delete process.env.ARTWAY_ADMIN_TOKEN; else process.env.ARTWAY_ADMIN_TOKEN = previous;
+  }
+});
+
+test('wyzwanie MFA wygasa jako osobny zakres i TOTP toleruje tylko sąsiednie okno czasu', () => {
+  const challenge = createAdminMfaChallenge('ADMIN@example.com', true);
+  assert.deepEqual(verifyAdminMfaChallenge(challenge), { email: 'admin@example.com', setup: true });
+  const rfcSecret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  assert.equal(verifyMfaCode(rfcSecret, '287082', 59_000), true);
+  assert.equal(verifyMfaCode(rfcSecret, '287083', 59_000), false);
 });
 
 test('token zamówienia działa wyłącznie dla właściwego numeru i e-maila', () => {
@@ -63,4 +101,46 @@ test('zamówienia nie można utworzyć dla produktu spoza aktywnego katalogu', (
   assert.throws(() => bezpieczneZamowienieKlienta({
     nr: 'ATM-123456', email: 'klient@example.com', pozycjeDane: [{ id: 999, ilosc: 1 }],
   }, { artway_produkty_katalog: [] }), /nie jest dostępny/);
+});
+
+test('kontrolowany stan magazynowy znosi zbędne potwierdzenie większej ilości', () => {
+  const base = {
+    nr: 'ATM-STOCK8', email: 'klient@example.com', pozycjeDane: [{ id: 7, ilosc: 8 }],
+    klient: { imie: 'Jan', nazwisko: 'Kowalski', telefon: '500600700' },
+    adresDostawy: { ulica: 'Testowa', nrDomu: '1', kod: '00-001', miasto: 'Warszawa' },
+    dostawaId: 'paczkomat', paczkomat: 'WAW01A', platnoscId: 'telefon',
+  };
+  const settings = { artway_produkty_katalog: [{ id: 7, nazwa: 'Gra testowa', cena: 20 }], artway_stany: { 7: 8 } };
+  const covered = bezpieczneZamowienieKlienta(base, settings);
+  assert.equal(covered.wymagaPotwierdzeniaDostepnosci, false);
+  const shortage = bezpieczneZamowienieKlienta({ ...base, nr: 'ATM-STOCK9', pozycjeDane: [{ id: 7, ilosc: 9 }] }, settings);
+  assert.equal(shortage.wymagaPotwierdzeniaDostepnosci, true);
+  assert.deepEqual(shortage.dostepnoscDoPotwierdzenia[0], { id: 7, nazwa: 'Gra testowa', ilosc: 9, stanMagazynowy: 8 });
+});
+
+test('backend niezależnie nalicza zaawansowane reguły rabatowe', () => {
+  const base = {
+    nr: 'ATM-RABAT1', email: 'klient@example.com', rabatKod: 'gry20', pozycjeDane: [{ id: 7, ilosc: 1 }, { id: 8, ilosc: 1 }],
+    klient: { imie: 'Jan', nazwisko: 'Kowalski', telefon: '500600700' },
+    adresDostawy: { ulica: 'Testowa', nrDomu: '1', kod: '00-001', miasto: 'Warszawa' },
+    dostawaId: 'paczkomat', paczkomat: 'WAW01A', platnoscId: 'telefon',
+  };
+  const settings = {
+    artway_produkty_katalog: [{ id: 7, nazwa: 'Gra', kategoria: 'Gry', cena: 100 }, { id: 8, nazwa: 'Balon', kategoria: 'Balony', cena: 50 }],
+    artway_ustawienia: {
+      darmowaDostawaOd: 200,
+      kodyRabatoweZaawansowane: [
+        { kod: 'GRY20', typ: 'procent', wartosc: 20, zakres: 'kategorie', kategorie: ['Gry'], maxRabat: 15, aktywny: true },
+        { kod: 'WYSYLKA0', typ: 'darmowa_dostawa', zakres: 'wszystkie', aktywny: true },
+      ],
+    },
+  };
+  const discount = bezpieczneZamowienieKlienta(base, settings);
+  assert.equal(discount.koszty.rabat, 15);
+  assert.equal(discount.razem, 147);
+  assert.equal(discount.rabatKod, 'GRY20');
+  const freeShipping = bezpieczneZamowienieKlienta({ ...base, nr: 'ATM-RABAT2', rabatKod: 'wysylka0' }, settings);
+  assert.equal(freeShipping.koszty.dostawa, 0);
+  assert.equal(freeShipping.razem, 150);
+  assert.equal(freeShipping.rabatTyp, 'darmowa_dostawa');
 });

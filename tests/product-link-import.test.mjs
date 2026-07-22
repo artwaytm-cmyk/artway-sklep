@@ -216,6 +216,38 @@ test('pewny duplikat jest pomijany, a podobna nazwa bez identycznego producenta 
   assert.equal((await catalog.list()).length, 2);
 });
 
+test('tryb aktualizacji tego samego pliku uzupełnia istniejącą kartotekę bez zmiany ceny, stanu i ręcznego opisu', async () => {
+  let existingProduct = null;
+  const { catalog, service } = harness(async (sourceUrl, options) => {
+    assert.equal(options.updateExisting, true);
+    return {
+      updateExisting: true,
+      existingProduct,
+      product: {
+        nazwa: 'Edukarty ze źródła', cena: 999, stan: 999, opis: 'Opis producenta', producent: 'Multigra',
+        sourceUrl, ean: '5906395300068', gtin: '5906395300068', kodProducenta: '0006', mpn: '0006', externalId: '0006', sku: '0006',
+        parametryZrodla: { 'liczba graczy': '2+', 'liczba elementow': '151 szt' },
+      },
+    };
+  });
+  const seed = await catalog.add({
+    nazwa: 'Edukarty — nazwa administratora', cena: 39.9, stan: 4, stock: 4, opis: 'Ręcznie poprawiony opis', producent: 'Multigra', sourceUrl: 'https://multigra.com.pl/produkty/edukarty/',
+  }, { sourceUrl: 'https://multigra.com.pl/produkty/edukarty/', importItemKey: 'seed-multigra' });
+  existingProduct = seed.product;
+  const created = await service.create({ rows: ['https://multigra.com.pl/produkty/edukarty/'], updateExisting: true });
+  const result = await service.processNext(created.job.id);
+  assert.equal(result.processedItem.status, 'updated_existing');
+  const updated = (await catalog.list())[0];
+  assert.equal(updated.nazwa, 'Edukarty — nazwa administratora');
+  assert.equal(updated.cena, 39.9);
+  assert.equal(updated.stan, 0, 'importowany katalog utrzymuje stan w osobnym magazynie i nie przyjmuje stanu ze źródła');
+  assert.equal(updated.opis, 'Ręcznie poprawiony opis');
+  assert.equal(updated.ean, '5906395300068');
+  assert.equal(updated.kodProducenta, '0006');
+  assert.equal(updated.externalId, '0006');
+  assert.deepEqual(updated.parametryZrodla, { 'liczba graczy': '2+', 'liczba elementow': '151 szt' });
+});
+
 test('pauza, wznowienie i anulowanie sterują kolejką bez cofania już zapisanych produktów', async () => {
   const { catalog, service } = harness(async (sourceUrl) => ({ product: product(Number(sourceUrl.match(/product-pol-(\d+)/)?.[1])) }));
   const created = await service.create({ rows: [url(1), url(2), url(3)] });

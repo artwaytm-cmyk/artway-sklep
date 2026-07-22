@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-
 const KEY = 'codex_agent_jobs';
 const MAX_JOBS = 250;
 const MAX_ACTIVE_JOBS = 200;
@@ -18,18 +17,15 @@ const MAX_REPLY_MARKUP_BUTTONS = 24;
 const MAX_REPLY_MARKUP_TEXT = 64;
 const MAX_REPLY_MARKUP_CALLBACK_BYTES = 64;
 const TELEGRAM_INBOUND_KINDS = new Set(['text', 'command', 'callback', 'voice', 'audio']);
-
 function clean(value = '', limit = 500) {
   return String(value ?? '').trim().slice(0, limit);
 }
-
 function cleanContext(value = '') {
   return String(value ?? '')
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .trim()
     .slice(0, 1600);
 }
-
 function cleanMedia(value = null) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const kind = value.kind === 'voice' || value.kind === 'audio' ? value.kind : '';
@@ -41,6 +37,13 @@ function cleanMedia(value = null) {
     mimeType: clean(value.mimeType, 160),
     fileName: clean(value.fileName, 240),
   };
+}
+export function sanitizeCodexBroadcastChatIds(value = [], primaryChatId = '') {
+  const primary = clean(primaryChatId, 100);
+  return [...new Set((Array.isArray(value) ? value : [])
+    .map((item) => clean(item, 100))
+    .filter((item) => /^[1-9]\d*$/.test(item) && item !== primary))]
+    .slice(0, 19);
 }
 
 export function sanitizeCodexInboundKind(value = '', channel = 'telegram') {
@@ -94,6 +97,8 @@ function asRecord(value = {}) {
       .map((item) => ({
         ...item,
         kind: sanitizeCodexInboundKind(item.kind, item.channel),
+        broadcastChatIds: sanitizeCodexBroadcastChatIds(item.broadcastChatIds, item.chatId),
+        conversationRoom: clean(item.conversationRoom, 80),
         replyMarkup: item.status === 'delivering' ? sanitizeCodexReplyMarkup(item.replyMarkup) : null,
       })) : [],
     updatedAt: clean(source.updatedAt, 40),
@@ -120,6 +125,7 @@ function telegramRecipient(job = {}) {
   if (job.channel === 'panel' || !clean(job.chatId, 100)) return null;
   return {
     chatId: clean(job.chatId, 100),
+    broadcastChatIds: sanitizeCodexBroadcastChatIds(job.broadcastChatIds, job.chatId),
     messageThreadId: Number(job.messageThreadId) > 0 ? Number(job.messageThreadId) : null,
     replyTo: Number(job.replyTo) > 0 ? Number(job.replyTo) : null,
   };
@@ -135,6 +141,7 @@ function pendingFailureNotification(job = {}, timestamp = new Date()) {
     createdAt,
     notBefore: createdAt,
     chatId: recipient.chatId,
+    broadcastChatIds: recipient.broadcastChatIds,
     messageThreadId: recipient.messageThreadId,
     replyTo: recipient.replyTo,
     claimToken: '',
@@ -152,10 +159,12 @@ function publicFailureNotification(job = {}) {
     ? job.failureNotification
     : {};
   if (!clean(job.id, 160) || !clean(notification.chatId, 100)) return null;
+  const broadcastChatIds = sanitizeCodexBroadcastChatIds(notification.broadcastChatIds, notification.chatId);
   return {
     id: clean(job.id, 160),
     claimToken: clean(notification.claimToken, 200),
     chatId: clean(notification.chatId, 100),
+    ...(broadcastChatIds.length ? { broadcastChatIds } : {}),
     messageThreadId: Number(notification.messageThreadId) > 0 ? Number(notification.messageThreadId) : null,
     replyTo: Number(notification.replyTo) > 0 ? Number(notification.replyTo) : null,
     attempts: Math.max(0, Number(notification.attempts) || 0),
@@ -169,6 +178,8 @@ function publicJob(job = {}) {
     claimToken: clean(job.claimToken, 200),
     text: clean(job.text, 2000),
     chatId: clean(job.chatId, 100),
+    broadcastChatIds: sanitizeCodexBroadcastChatIds(job.broadcastChatIds, job.chatId),
+    conversationRoom: clean(job.conversationRoom, 80),
     messageThreadId: Number(job.messageThreadId) > 0 ? Number(job.messageThreadId) : null,
     replyTo: Number(job.replyTo) > 0 ? Number(job.replyTo) : null,
     user: clean(job.user, 160),
@@ -249,6 +260,8 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
         context: offline ? '' : cleanContext(input.context),
         media: offline ? null : media,
         chatId,
+        broadcastChatIds: sanitizeCodexBroadcastChatIds(input.broadcastChatIds, chatId),
+        conversationRoom: clean(input.conversationRoom, 80),
         messageThreadId: Number(input.messageThreadId) > 0 ? Number(input.messageThreadId) : null,
         replyTo: Number(input.replyTo) > 0 ? Number(input.replyTo) : null,
         user: clean(input.user, 160),
@@ -306,8 +319,14 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
         if (channelOrder) return channelOrder;
         return (Date.parse(left.item.createdAt || '') || 0) - (Date.parse(right.item.createdAt || '') || 0) || left.index - right.index;
       });
-      let job = null;
-      if (ready.length) {
+      // Idempotentne wznowienie po utracie odpowiedzi HTTP: ten sam proces
+      // odzyskuje własny aktywny lease z tym samym claimToken zamiast czekać
+      // na jego wygaśnięcie lub wykonywać zadanie drugi raz.
+      const owned = items.find((item) => item.status === 'processing'
+        && item.workerId === workerId && item.claimToken && item.leaseUntil
+        && Date.parse(item.leaseUntil) > timestampMs);
+      let job = owned || null;
+      if (!job && ready.length) {
         const index = ready[0].index, claimToken = token();
         job = {
           ...items[index], status: 'processing', workerId, claimToken,
@@ -541,6 +560,23 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
     });
   }
 
+  async function status() {
+    const version = await readVersioned(KEY, { items: [], updatedAt: null });
+    const record = asRecord(version.value), presence = workerPresence(record, now());
+    const counts = { queued: 0, processing: 0, delivering: 0, completed: 0, failed: 0 };
+    for (const item of record.items) {
+      const key = Object.hasOwn(counts, item?.status) ? item.status : '';
+      if (key) counts[key] += 1;
+    }
+    return {
+      workerOnline: presence.workerOnline,
+      workerLastSeenAt: presence.workerLastSeenAt,
+      counts,
+      active: counts.queued + counts.processing + counts.delivering,
+      updatedAt: clean(record.updatedAt, 40),
+    };
+  }
+
   async function result(idInput = '') {
     const id = clean(idInput, 160);
     if (!id) throw queueError('Brakuje identyfikatora zadania Codex.', 'codex_queue_job_required', 422);
@@ -559,6 +595,6 @@ export function createCodexAgentQueue({ readVersioned, writeIfVersion, now = () 
 
   return {
     ackFailureNotification, claim, claimFailureNotification, enqueue, fail, heartbeat,
-    markDelivered, prepareDelivery, result, retryFailureNotification,
+    markDelivered, prepareDelivery, result, retryFailureNotification, status,
   };
 }

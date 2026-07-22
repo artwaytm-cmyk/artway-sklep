@@ -9,15 +9,42 @@ const files = [
   'assets/app.js',
   'assets/admin.css',
   'assets/admin.js',
+  'assets/admin-core.js',
+  'assets/admin-agent.js',
+  'assets/admin-warehouse.js',
+  'assets/admin-commerce.js',
+  'assets/admin-inventory.js',
+  'assets/admin-catalog.js',
+  'assets/admin-personalization.js',
+  'assets/admin-system.js',
   'products.json',
   'netlify/functions/store.mjs',
   'netlify/functions/lib/store-app.mjs',
+  'netlify/functions/lib/system-route.mjs',
+  'netlify/functions/lib/store-data-route.mjs',
+  'netlify/functions/lib/inpost-route.mjs',
+  'netlify/functions/lib/infakt-route.mjs',
+  'netlify/functions/lib/paynow-route.mjs',
+  'netlify/functions/lib/agent-operations-route.mjs',
+  'netlify/functions/lib/allegro-communications-route.mjs',
+  'netlify/functions/lib/allegro-mapping-route.mjs',
+  'netlify/functions/lib/product-availability-route.mjs',
+  'netlify/functions/lib/email-route.mjs',
+  'netlify/functions/lib/email-service.mjs',
+  'netlify/functions/lib/inpost-service.mjs',
+  'netlify/functions/lib/paynow-service.mjs',
+  'netlify/functions/lib/infakt-service.mjs',
+  'netlify/functions/lib/product-source-inspection-service.mjs',
+  'netlify/functions/lib/product-source-matching.mjs',
   'netlify/functions/lib/allegro-offer-withdrawal-route.mjs',
   'netlify/functions/lib/core/http.mjs',
   'netlify/functions/lib/core/store-repository.mjs',
   'netlify/functions/lib/domain/orders.mjs',
   'netlify/functions/lib/domain/catalog-quality.mjs',
+  'netlify/functions/lib/domain/product-editorial-pipeline.mjs',
+  'netlify/functions/lib/domain/product-link-package-preparer.mjs',
   'netlify/functions/lib/domain/product-sale-decisions.mjs',
+  'netlify/functions/lib/domain/product-sale-channel-links.mjs',
   'netlify/functions/lib/domain/allegro-reply-assistant.mjs',
   'netlify/functions/lib/domain/telegram-communication.mjs',
   'netlify/functions/lib/telegram-center.mjs',
@@ -68,7 +95,34 @@ const appAdmin = read('assets/admin.js');
 const app = `${appPublic}\n${appAdmin}`;
 const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
+const agentOperationsRoute = read('netlify/functions/lib/agent-operations-route.mjs');
+const allegroCommunicationsRoute = read('netlify/functions/lib/allegro-communications-route.mjs');
+const allegroMappingRoute = read('netlify/functions/lib/allegro-mapping-route.mjs');
+const productAvailabilityRoute = read('netlify/functions/lib/product-availability-route.mjs');
+const emailRoute = read('netlify/functions/lib/email-route.mjs');
+const storeRuntime = [
+  store,
+  read('netlify/functions/lib/system-route.mjs'),
+  read('netlify/functions/lib/store-data-route.mjs'),
+  read('netlify/functions/lib/inpost-route.mjs'),
+  read('netlify/functions/lib/infakt-route.mjs'),
+  read('netlify/functions/lib/paynow-route.mjs'),
+  agentOperationsRoute,
+  allegroCommunicationsRoute,
+  allegroMappingRoute,
+  productAvailabilityRoute,
+  emailRoute,
+  read('netlify/functions/lib/email-service.mjs'),
+  read('netlify/functions/lib/inpost-service.mjs'),
+  read('netlify/functions/lib/paynow-service.mjs'),
+  read('netlify/functions/lib/infakt-service.mjs'),
+  read('netlify/functions/lib/product-source-inspection-service.mjs'),
+  read('netlify/functions/lib/product-source-matching.mjs'),
+].join('\n');
+const productEditorial = read('netlify/functions/lib/domain/product-editorial-pipeline.mjs');
+const productLinkPackage = read('netlify/functions/lib/domain/product-link-package-preparer.mjs');
 const productSaleDecisions = read('netlify/functions/lib/domain/product-sale-decisions.mjs');
+const productSaleChannelLinks = read('netlify/functions/lib/domain/product-sale-channel-links.mjs');
 const allegroOfferWithdrawal = read('netlify/functions/lib/allegro-offer-withdrawal-route.mjs');
 const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
 const infaktPurchase = read('netlify/functions/lib/infakt-purchase.mjs');
@@ -301,10 +355,10 @@ requireMarkers('połączonych assets JS', app, [
   'function priorytetDostepnosciProduktu',
   'function generujRegalyIPolkiMagazynu',
   'function wyczyscFiltryStanowMagazynu',
-  'Generator struktury',
+  'Generator obszaru, regałów i półek',
   'Lokalizacja nadrzędna',
-  'Centrum kontroli zapasu',
-  'Bestsellery najpierw',
+  'Co mamy obecnie na magazynie',
+  'Priorytet sprzedaży',
   'function agentAICentrumTekst',
   'function agentAIWyslijRaportTelegram',
   'function agentAIWykonajPlanBezpieczny',
@@ -381,7 +435,7 @@ requireMarkers('połączonych assets JS', app, [
   'inFakt i faktury',
 ]);
 
-if (!app.includes('"/admin/agent-ai": agentAIAnalizaAktywna(agentAIAnaliza()).length')) {
+if (!app.includes('const zadaniaAgenta=typeof agentAIAnalizaAktywna==="function"') || !app.includes('"/admin/agent-ai": zadaniaAgenta')) {
   fail('assets/app.js: licznik Agent AI musi uwzględniać wyłącznie aktywne zadania');
 }
 if (!app.includes('akcja:"#/admin/agent-ai/produkty"') || !app.includes('href:"#/admin/agent-ai/produkty"')) {
@@ -396,7 +450,7 @@ requireMarkers('netlify/functions/store.mjs', storeEntry, [
   'export default handler',
 ]);
 
-requireMarkers('netlify/functions/lib/store-app.mjs', store, [
+requireMarkers('backend aplikacji po podziale domenowym', storeRuntime, [
   "action === 'health'",
   "action === 'paynow-create'",
   "action === 'paynow-notification'",
@@ -410,7 +464,7 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   "action === 'store-sync'",
   "action === 'store-order-delete-mine'",
   "action === 'account-login'",
-  "action === 'send-status-email'",
+  "'send-status-email'",
   'function kosztyEmail',
   'Paczka w Weekend',
   'end_of_week_collection',
@@ -429,7 +483,7 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'function allegroPodsumujKalkulacjeOplat',
   "'/pricing/offer-fee-preview'",
   'allegro_fee_preview_audit',
-  "action === 'supplier-availability-sample'",
+  "'supplier-availability-sample'",
   "action === 'seo-daily-run'",
   "action === 'catalog-quality-audit'",
   'function seoWykonajDziennyPlan',
@@ -437,16 +491,15 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'mergeCatalogProducts',
   "action === 'product-url-prepare'",
   'function przygotujPakietProduktuZLinku',
-  'export async function inspectProductUrl',
-  'export async function inspectProductUrlViaReader',
+  'function inspectProductUrl',
+  'function inspectProductUrlViaReader',
   'function parsujProduktZMarkdown',
   'bezpłatny odczyt zapasowy źródła',
   'function stripHtmlZPodzialem',
   'function produktLinkDuplikaty',
   "action === 'product-sale-availability'",
-  'function synchronizujSprzedazZDostepnosciaProducenta',
-  'allegro_availability_automation',
-  'stock: { available: 0 }',
+  'const synchronizujSprzedazZDostepnosciaProducenta',
+  'createProductSaleChannelSynchronizer',
   'function stanProducentaZHtml',
   'IdoSell sizes.amount',
   'supplier_availability_audit',
@@ -454,7 +507,7 @@ requireMarkers('netlify/functions/lib/store-app.mjs', store, [
   'priorityChecked',
   'activeDemand',
   "action === 'agent-operations-summary'",
-  "action === 'agent-run-safe-checks'",
+  "'agent-run-safe-checks'",
   'function agentPriorytetWykonawczy',
   'site_function_check',
   'data_sync',
@@ -549,6 +602,17 @@ requireMarkers('netlify/functions/lib/domain/product-sale-decisions.mjs', produc
   "'manual_available'",
 ]);
 
+requireMarkers('netlify/functions/lib/domain/product-sale-channel-links.mjs', productSaleChannelLinks, [
+  'buildProductSaleChannelLinks',
+  'createProductSaleChannelSynchronizer',
+  'scoreAllegroProductMapping',
+  'blockedOfferIds',
+  'strong-identity:',
+  "status: 'ENDED'",
+  'allegroCzekajNaOperacjeOferty',
+  'allegro_availability_automation',
+]);
+
 requireMarkers('netlify/functions/lib/allegro-offer-withdrawal-route.mjs', allegroOfferWithdrawal, [
   "'allegro-resolve-duplicate'",
   "'allegro-withdraw-offers'",
@@ -569,9 +633,9 @@ requireMarkers('netlify/functions/lib/infakt-purchase.mjs', infaktPurchase, [
 requireMarkers('netlify/functions/lib/domain/telegram-communication.mjs', telegramCommunication, [
   'function telegramEventDecision',
   'function telegramDigestSlot',
-  "telegramCell('KOD', 15)",
-  "telegramCell('NAZWA', 30)",
-  "telegramCell('POTRZEBNA ILOŚĆ', 16)",
+  '<b>NAZWA PRODUKTU · KOD · ZAMAWIANA ILOŚĆ</b>',
+  'function telegramSupplierQuantity',
+  "kind: 'editable-order'",
   'function telegramNaturalIntent',
   'function telegramIncidentId',
   'function editTelegramHtml',
@@ -645,14 +709,14 @@ if (/status\s*:\s*["'`]wysłane na Telegram/.test(telegramSupplierFlow)) {
 if (!app.includes('async function agentAIUzgodnijPlanZSerwerem') || !app.includes('supplier-order-reconcile') || app.includes('function agentAIUtworzZlecenieProducenta(')) {
   fail('assets/app.js: Plan zatowarowania musi używać kanonicznego uzgadniania serwerowego bez lokalnego generatora szkiców');
 }
-if (!store.includes('supplierOrderPlan.beginEmailSend') || !store.includes('supplierOrderPlan.markEmailResults') || !store.includes("crypto.createHash('sha256')")) {
+if (!emailRoute.includes('supplierPlan.beginEmailSend') || !emailRoute.includes('supplierPlan.markEmailResults') || !emailRoute.includes("crypto.createHash('sha256')")) {
   fail('store-app.mjs: wysyłka producenta musi wymagać zatwierdzenia bieżącej wersji i mieć idempotencję');
 }
 if (!app.includes('została bezpiecznie dezaktywowana') || !app.includes('...(producenciKartoteka||[]).filter(p=>p.active!==false)')) {
   fail('assets/app.js: kartoteka producentów musi chronić aktywne zamówienia i zasilać listę producentów produktów');
 }
-const internalResolveFlow = store.slice(store.indexOf("action === 'allegro-communication-resolve'"), store.indexOf("action === 'allegro-communications-settings'"));
-if (!internalResolveFlow.includes('sentExternally: false') || /allegroWywolaj|wyslijTelegramHtml|wyslijEmailSMTP/.test(internalResolveFlow)) {
+const internalResolveFlow = allegroCommunicationsRoute.slice(allegroCommunicationsRoute.indexOf("if (action === 'allegro-communication-resolve')"), allegroCommunicationsRoute.indexOf("if (action === 'allegro-communications-settings')"));
+if (!internalResolveFlow.includes('sentExternally: false') || /callAllegro|sendTelegram|sendSmtp/.test(internalResolveFlow)) {
   fail('store-app.mjs: wewnętrzne zamknięcie komunikacji nie może wysyłać wiadomości ani wywoływać API Allegro');
 }
 const duplicateResolutionFlow = allegroOfferWithdrawal;
@@ -679,24 +743,24 @@ if (!feePreviewFlow.includes('commissions: summary.commissions') || !feePreviewF
 if (!app.includes('1-variableRate-target') || !app.includes('Po zmianie ceny pobierz prowizję ponownie')) {
   fail('assets/app.js: rekomendowana cena musi uwzględniać koszty procentowe i ostrzegać o ponownym przeliczeniu prowizji');
 }
-const supplierFlow = store.slice(store.indexOf("action === 'supplier-availability-sample'"), store.indexOf("action === 'allegro-map-offer'"));
+const supplierFlow = productAvailabilityRoute.slice(productAvailabilityRoute.indexOf("if (action === 'supplier-availability-sample')") >= 0 ? productAvailabilityRoute.indexOf("if (action === 'supplier-availability-sample')") : productAvailabilityRoute.indexOf('const settingsRec = await read'));
 if (!supplierFlow.includes("status === 'niski'") || !supplierFlow.includes('producentAlertHash') || !supplierFlow.includes('changedAlerts') || !supplierFlow.includes('stanProducentaZrodlo')) {
   fail('store-app.mjs: monitoring producentów musi rozpoznawać niski stan, zapisywać źródło i wysyłać alert tylko po zmianie');
 }
-if (!supplierFlow.includes("czytaj('orders'") || !supplierFlow.includes("czytaj('allegro_orders'") || !supplierFlow.includes('Math.ceil(limit * 0.75)') || !supplierFlow.includes('allegro30 * 5')) {
+if (!supplierFlow.includes("read('orders'") || !supplierFlow.includes("read('allegro_orders'") || !supplierFlow.includes('Math.ceil(limit * 0.75)') || !supplierFlow.includes('allegro30 * 5')) {
   fail('store-app.mjs: monitoring producentów musi zawsze priorytetyzować bestsellery sklepu i Allegro oraz aktywne zamówienia');
 }
-if (!supplierFlow.includes('synchronizujSprzedazZDostepnosciaProducenta') || !supplierFlow.includes('saleAutomation')) {
+if (!supplierFlow.includes('syncSaleChannels') || !supplierFlow.includes('saleAutomation')) {
   fail('store-app.mjs: wynik kontroli producenta musi automatycznie ukrywać lub przywracać sprzedaż w sklepie i Allegro');
 }
-if (!app.includes('.filter(p => !produktOznaczonyNiedostepny(p))') || !app.includes('function allegroZamowienieZrealizowaneLokalnie')) {
-  fail('assets/app.js: niedostępny produkt ma być ukryty w sklepie, a zrealizowane Allegro wyłączone z obsługi');
+if (!app.includes('Brak u producenta wstrzymuje zakup, ale nie usuwa karty') || !app.includes('function produktSklepuPoId') || !app.includes('function allegroZamowienieZrealizowaneLokalnie')) {
+  fail('assets/app.js: niedostępny produkt ma zachować kartę i adres, zakup ma być wstrzymany, a zrealizowane Allegro wyłączone z obsługi');
 }
-if (!app.includes('brak lokalnego stanu nie wyłącza produktu ze sprzedaży') || !app.includes('Błąd pobrania nie jest traktowany jako brak')) {
-  fail('assets/app.js: stan lokalny musi być pomocniczy, a błąd strony producenta nie może oznaczać braku produktu');
+if (!app.includes('Fizyczne korekty ilości wykonujesz wyłącznie w karcie „Stany”') || !app.includes('Błąd pobrania nie jest traktowany jako brak')) {
+  fail('assets/app.js: fizyczne stany muszą być oddzielone od dostępności producenta, a błąd strony producenta nie może oznaczać braku produktu');
 }
-if (!app.includes('strefa → regał → półka → miejsce') && !app.includes('strefy przez regał i półkę do konkretnego miejsca')) {
-  fail('assets/app.js: lokalizacje magazynu muszą mieć czytelną hierarchię strefa/regał/półka/miejsce');
+if (!app.includes('Pakownia → Regał A → Półka 3') && !app.includes('Struktura obszarów, regałów i półek')) {
+  fail('assets/app.js: lokalizacje magazynu muszą mieć czytelną hierarchię obszar/regał/półka');
 }
 if (!app.includes('allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI') || !app.includes('Domyślnie zawsze 3,00 zł.')) {
   fail('assets/app.js: dopłata do wysyłki Allegro musi domyślnie wynosić 3 zł w danych i edytorze');
@@ -723,10 +787,10 @@ const oneLinkApprovalFlow = app.slice(app.indexOf('async function agentAIPrzygot
 if (!oneLinkRuntime.includes('agentAIPrzygotujProduktZJednegoLinku(') || !oneLinkApprovalFlow.includes('location.hash="#/admin/produkty/dodaj?agent=1"') || oneLinkApprovalFlow.includes('produktyDodane.push(')) {
   fail('assets/app.js: odczyt linku ma tylko przygotować wspólny formularz i czekać na zatwierdzenie administratora');
 }
-const productUrlPrepareFlow = store.slice(store.indexOf('async function przygotujPakietProduktuZLinku'), store.indexOf('function allegroNormTekst'));
-if (!productUrlPrepareFlow.includes('allegroDraftZAutoKategoria') || !productUrlPrepareFlow.includes('duplicateAudit') || !productUrlPrepareFlow.includes('readyForAllegro')) {
+if (!store.includes('productLinkPackagePreparer(req, target, options)') || !productLinkPackage.includes('prepareOffer(req, baseProduct') || !productLinkPackage.includes('duplicateAudit') || !productLinkPackage.includes('readyForAllegro')) {
   fail('store-app.mjs: import z linku musi w jednym przebiegu przygotować sklep, duplikaty i Allegro');
 }
+if (!productEditorial.includes("sourceRole: 'facts_only'") || !productEditorial.includes("channels: 'shared_store_and_allegro'") || !productEditorial.includes("layoutPolicy: 'allegro_sections'")) fail('redakcja z linku musi używać źródła wyłącznie jako faktów i wspólnej treści sklepu oraz Allegro');
 if (!store.includes("method: 'PATCH', bodyObj: patch, withMeta: true") || !store.includes("'/pricing/offer-fee-preview'") || !store.includes('allegroDescriptionSections = sections')) {
   fail('store-app.mjs: automatyczna konserwacja musi aktualizować ofertę, opisy i kalkulację opłat');
 }
@@ -822,7 +886,7 @@ requireMarkers('netlify/functions/sitemap.mjs', sitemap, [
 requireMarkers('netlify/functions/google-products.mjs', googleProducts, [
   'base.google.com/ns/1.0',
   'automaticSeo',
-  '<g:availability>in_stock</g:availability>',
+  "productIsUnavailable(product, availability) ? 'out_of_stock' : 'in_stock'",
   '<g:price>',
   'mergeCatalogProducts',
   'artway_dostepnosc',

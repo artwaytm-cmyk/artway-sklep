@@ -1,0 +1,23 @@
+[Unit]
+Description=Artway-TM daily free SEO and catalog quality cycle
+Wants=network-online.target postgresql.service artway-backend.service
+After=network-online.target postgresql.service artway-backend.service
+
+[Service]
+Type=oneshot
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+EnvironmentFile=/srv/artway/shop/.env.netlify
+EnvironmentFile=/srv/artway/agent/.env
+Environment=NODE_ENV=production
+Environment=ARTWAY_STORE_DRIVER=postgres
+Environment=DATABASE_URL=postgresql:///artway?host=/var/run/postgresql
+Environment=ARTWAY_INTERNAL_ORIGIN=http://127.0.0.1:3000
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/run-seo-daily.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+UMask=0077
+

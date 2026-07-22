@@ -3,13 +3,35 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-const source = await readFile(new URL('../src/frontend/10-agent-ai.js', import.meta.url), 'utf8');
-const routerSource = await readFile(new URL('../src/frontend/06-router-and-storefront.js', import.meta.url), 'utf8');
+const source = (await Promise.all([
+  '10-agent-ai.js',
+  '10-agent-ai-supplier-planning.js',
+  '10-agent-ai-command-center.js',
+  '10-agent-ai-admin-workspace.js',
+  '10-agent-ai-communications-workspace.js',
+].map((file)=>readFile(new URL(`../src/frontend/${file}`, import.meta.url), 'utf8')))).join('\n');
+const routerSource = await readFile(new URL('../assets/app.js', import.meta.url), 'utf8');
 const cloudSource = await readFile(new URL('../src/frontend/03-cloud-sync.js', import.meta.url), 'utf8');
-const shippingSource = await readFile(new URL('../src/frontend/07-admin-shipping.js', import.meta.url), 'utf8');
-const ordersSource = `${await readFile(new URL('../src/frontend/11-allegro-procurement-actions.js', import.meta.url), 'utf8')}\n${await readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8')}`;
-const inventorySource = await readFile(new URL('../src/frontend/12-customers-and-inventory.js', import.meta.url), 'utf8');
-const storeSource = await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8');
+const shippingSource = await readFile(new URL('../assets/app.js', import.meta.url), 'utf8');
+const ordersSource = (await Promise.all([
+  '11-allegro-procurement-actions.js',
+  '11-allegro-and-orders.js',
+  '11-allegro-product-publication.js',
+  '11-allegro-operations.js',
+  '11-allegro-communications.js',
+  '11-allegro-workspace.js',
+  '11-store-orders.js',
+].map((file)=>readFile(new URL(`../src/frontend/${file}`, import.meta.url), 'utf8')))).join('\n');
+const inventorySource = (await Promise.all([
+  '12-customers-and-inventory.js',
+  '12-infakt-admin.js',
+  '12-warehouse-views.js',
+  '12-product-editor.js',
+].map((file)=>readFile(new URL(`../src/frontend/${file}`, import.meta.url), 'utf8')))).join('\n');
+const storeSource = (await Promise.all([
+  readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
+  readFile(new URL('../netlify/functions/lib/email-route.mjs', import.meta.url), 'utf8'),
+])).join('\n');
 const supplierRouteSource = await readFile(new URL('../netlify/functions/lib/supplier-order-route.mjs', import.meta.url), 'utf8');
 const storePlanSource = `${storeSource}\n${supplierRouteSource}`;
 

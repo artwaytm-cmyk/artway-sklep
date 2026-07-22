@@ -1,11 +1,12 @@
-import { sendTelegramHtml, telegramApi, telegramHtml, telegramSafeAgentHtml } from './domain/telegram-communication.mjs';
+import { sendTelegramHtml, telegramApi, telegramHtml, telegramProfessionalAgentHtml } from './domain/telegram-communication.mjs';
 import { telegramAgentReport } from './telegram-center.mjs';
 
 const ACTIONS = new Set([
   'telegram-center-status', 'telegram-settings-save', 'telegram-register-webhook', 'telegram-dispatch', 'telegram-inbound-command',
-  'telegram-inbound-audit',
-  'telegram-incident-action', 'telegram-delivery-action', 'telegram-dashboard-refresh', 'telegram-send-note', 'telegram-test', 'telegram-send-agent-report', 'telegram-send-supplier-order',
+  'telegram-inbound-audit', 'telegram-outbound-audit',
+  'telegram-incident-action', 'telegram-delivery-action', 'telegram-dashboard-refresh', 'telegram-send-note', 'telegram-test', 'telegram-send-agent-report', 'telegram-send-supplier-order', 'telegram-supplier-order-preview',
   'codex-agent-claim', 'codex-agent-complete', 'codex-agent-fail', 'codex-agent-heartbeat', 'codex-agent-panel-enqueue', 'codex-agent-result',
+  'agent-runtime-status', 'agent-runtime-report',
 ]);
 
 const CODEX_FAILURE_NOTICE = '<b>⚠️ Nie udało się dokończyć tej prośby.</b>\nSpróbuj wysłać ją ponownie za chwilę.';
@@ -93,19 +94,53 @@ async function deliverCodexFailureNotification(codexQueue, sendTelegram, sanitiz
   };
 }
 
-export function createTelegramRouter({ center, codexQueue, getOperationalCenter, inventoryCommand, inventoryDecisions, isAdmin, respond, sessionOf, publicOrigin, supplierTables, text, sendTelegram = sendTelegramHtml, clearTelegramReplyMarkup = ({ chatId, messageId }) => telegramApi('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }) }) {
+export function createTelegramRouter({ center, codexQueue, agentRuntime, getOperationalCenter, inventoryCommand, inventoryDecisions, isAdmin, read, respond, sessionOf, publicOrigin, supplierPreviews, text, sendTelegram = sendTelegramHtml, clearTelegramReplyMarkup = ({ chatId, messageId }) => telegramApi('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }) }) {
   return async function telegramRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
     if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
     if (action === 'telegram-center-status') {
-      const operational = await getOperationalCenter();
-      return respond({ ok: true, center: operational, ...(await center.view(operational, url.searchParams.get('live') === '1')) });
+      const [operational, agentWorker] = await Promise.all([
+        getOperationalCenter(),
+        codexQueue && typeof codexQueue.status === 'function'
+          ? codexQueue.status()
+          : Promise.resolve({ workerOnline: false, workerLastSeenAt: '', counts: {}, active: 0 }),
+      ]);
+      return respond({ ok: true, center: operational, agentWorker, ...(await center.view(operational, url.searchParams.get('live') === '1')) });
+    }
+    if (action === 'agent-runtime-status') {
+      if (!agentRuntime || typeof agentRuntime.status !== 'function') return respond({ ok: false, error: 'Rejestr pracy Agenta nie jest dostępny', code: 'agent_runtime_unavailable' }, 503);
+      const queue = codexQueue && typeof codexQueue.status === 'function'
+        ? await codexQueue.status()
+        : { workerOnline: false, workerLastSeenAt: '', counts: {}, active: 0 };
+      return respond({ ok: true, runtime: await agentRuntime.status(queue) });
     }
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
     const body = await req.json().catch(() => ({})), session = sessionOf(req), operator = session?.email || 'administrator';
     if (action === 'telegram-inbound-audit') {
       if (!center || typeof center.recordInboundAudit !== 'function') return respond({ ok: false, error: 'Audyt Telegram nie jest dostępny', code: 'telegram_audit_unavailable' }, 503);
-      return respond({ ok: true, audit: await center.recordInboundAudit({ accepted: body.accepted === true, deferred: body.deferred === true, kind: body.kind, actorHash: body.actorHash }) });
+      const accepted = body.accepted === true;
+      return respond({ ok: true, audit: await center.recordInboundAudit({
+        accepted, deferred: body.deferred === true, kind: body.kind, actorHash: body.actorHash,
+        ...(accepted ? {
+          preview: text(body.preview || body.text || '', 2400), fromLabel: text(body.fromLabel || body.user || 'Użytkownik Telegram', 160),
+          toLabel: text(body.toLabel || 'Agent Artway-TM', 160), messageId: body.messageId,
+          threadId: body.threadId || body.messageThreadId, conversationKey: text(body.conversationKey || 'telegram-main', 180),
+        } : {}),
+      }) });
+    }
+    if (action === 'telegram-outbound-audit') {
+      if (!center || typeof center.recordOutboundAudit !== 'function') return respond({ ok: false, error: 'Audyt Telegram nie jest dostępny', code: 'telegram_audit_unavailable' }, 503);
+      return respond({ ok: true, audit: await center.recordOutboundAudit({
+        kind: text(body.kind || 'message', 60), status: text(body.status || 'sent', 40), category: text(body.category || 'conversation', 40),
+        title: text(body.title || 'Odpowiedź Agenta', 240), preview: text(body.preview || '', 2400), messageId: body.messageId,
+        fromLabel: text(body.fromLabel || 'Agent Artway-TM', 160), toLabel: text(body.toLabel || 'Główna grupa Telegram', 160),
+        threadId: body.threadId || body.messageThreadId, conversationKey: text(body.conversationKey || 'telegram-main', 180), source: text(body.source || 'telegram-webhook', 100),
+      }) });
+    }
+    if (action === 'agent-runtime-report') {
+      if (!agentRuntime || typeof agentRuntime.report !== 'function') return respond({ ok: false, error: 'Rejestr pracy Agenta nie jest dostępny', code: 'agent_runtime_unavailable' }, 503);
+      const runtime = await agentRuntime.report(body);
+      return respond({ ok: true, updatedAt: runtime.updatedAt });
     }
     if (action === 'codex-agent-claim') {
       if (!codexQueue) return respond({ ok: false, error: 'Kolejka Codex nie jest dostępna', code: 'codex_queue_unavailable' }, 503);
@@ -144,12 +179,21 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
       }
       let sent;
       try {
-        sent = await sendTelegram(telegramSafeAgentHtml(prepared.job.response), {
-          chatId: prepared.job.chatId,
-          replyTo: prepared.job.replyTo,
-          messageThreadId: prepared.job.messageThreadId,
-          replyMarkup: prepared.job.replyMarkup || undefined,
-        });
+        const recipients = [...new Set([prepared.job.chatId, ...(Array.isArray(prepared.job.broadcastChatIds) ? prepared.job.broadcastChatIds : [])]
+          .map((value) => String(value || '').trim()).filter(Boolean))];
+        const formattedResponse = telegramProfessionalAgentHtml(prepared.job.response);
+        const attempts = await Promise.allSettled(recipients.map((chatId) => sendTelegram(formattedResponse, {
+          chatId,
+          ...(chatId === prepared.job.chatId && prepared.job.replyTo ? { replyTo: prepared.job.replyTo } : {}),
+          ...(chatId === prepared.job.chatId && prepared.job.messageThreadId ? { messageThreadId: prepared.job.messageThreadId } : {}),
+          ...(chatId === prepared.job.chatId && prepared.job.replyMarkup ? { replyMarkup: prepared.job.replyMarkup } : {}),
+        })));
+        const delivered = attempts.flatMap((result, index) => result.status === 'fulfilled'
+          ? [{ chatId: recipients[index], result: result.value }]
+          : []);
+        if (!delivered.length) throw attempts.find((result) => result.status === 'rejected')?.reason || new Error('Nie udało się dostarczyć odpowiedzi do zespołu.');
+        const primary = delivered.find((item) => item.chatId === String(prepared.job.chatId)) || delivered[0];
+        sent = { ...primary.result, message_ids: delivered.map((item) => ({ chat_id: item.chatId, message_id: item.result?.message_id || null })) };
       } catch (error) {
         // Po wywołaniu zewnętrznego API nie wiemy, czy odpowiedź nie zaginęła
         // już po przyjęciu wiadomości przez Telegram. Traktujemy wynik jako
@@ -160,6 +204,12 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
       // Po sukcesie Telegram nie ponawiamy wysyłki, nawet jeśli sam zapis
       // audytu chwilowo zawiedzie — chroni to rozmowę przed duplikatem.
       const completed = await codexQueue.markDelivered({ id: body.id, claimToken: body.claimToken, telegramMessageId: sent?.message_id });
+      if (typeof center?.recordOutboundAudit === 'function') await center.recordOutboundAudit({
+        kind: 'agent-reply', status: 'sent', category: 'agent', title: 'Odpowiedź Agenta na polecenie',
+        preview: prepared.job.response, messageId: sent?.message_id, fromLabel: 'Agent Artway-TM',
+        toLabel: prepared.job.broadcastChatIds?.length ? 'Wspólny pokój zespołu' : (prepared.job.user || 'Zespół Telegram'), threadId: prepared.job.messageThreadId,
+        conversationKey: prepared.job.conversationRoom === 'team' ? 'telegram:team:0' : `telegram:${prepared.job.chatId || 'main'}:${prepared.job.messageThreadId || 0}`, source: 'codex-agent',
+      }).catch(() => null);
       const approvalTarget = codexAgentApprovalReplyTarget(prepared.job);
       if (completed.delivered === true && approvalTarget) await clearTelegramReplyMarkup(approvalTarget).catch(() => null);
       return respond({ ok: true, ...completed, messageId: sent?.message_id || null });
@@ -180,7 +230,7 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
     if (action === 'telegram-settings-save') return respond({ ok: true, settings: await center.saveSettings(body.settings || body, operator) });
     if (action === 'telegram-register-webhook') return respond({ ok: true, ...(await center.registerWebhook(publicOrigin(req))) });
     if (action === 'telegram-dispatch') {
-      const operational = await getOperationalCenter(), dispatch = await center.dispatch(operational, { source: text(body.source || 'admin-panel', 80), force: body.force === true, forceDigest: body.forceDigest === true });
+      const operational = await getOperationalCenter(), dispatch = await center.dispatch(operational, { source: text(body.source || 'admin-panel', 80), force: body.force === true, forceDigest: body.forceDigest === true, retryOnly: body.retryOnly === true });
       let inventoryReminder = { due: false, reason: 'service_unavailable', messages: 0, decisions: 0 };
       if (inventoryDecisions && typeof inventoryDecisions.prepareReminder === 'function') {
         const reminder = await inventoryDecisions.prepareReminder(new Date());
@@ -234,16 +284,17 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
         requestId: body.requestId, source: body.source, channel: body.source === 'telegram-webhook' ? 'telegram' : 'panel',
       }) : null;
       if (inventory) {
-        if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred: false, kind: 'inventory' });
+        if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred: false, kind: 'inventory', preview: body.text, fromLabel: body.fromLabel || body.user, messageId: body.replyTo, threadId: body.messageThreadId, conversationKey: `telegram:${body.chatId || 'main'}:${body.messageThreadId || 0}` });
         return respond({ ok: true, ...inventory });
       }
       if (body.deferToCodex === true && body.source === 'telegram-webhook' && codexQueue) {
         const queued = await codexQueue.enqueue({
           requestId: body.requestId, text: body.text, chatId: body.chatId, messageThreadId: body.messageThreadId,
+          broadcastChatIds: body.broadcastChatIds, conversationRoom: body.conversationRoom,
           replyTo: body.replyTo, user: body.user, userId: body.userId, context: body.context, media: body.media, kind: body.kind, channel: 'telegram',
         });
         const deferred = ['queued', 'processing', 'delivering'].includes(queued.status);
-        if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred, kind: body.kind || 'text' });
+        if (typeof center?.recordInboundAudit === 'function') await center.recordInboundAudit({ accepted: true, deferred, kind: body.kind || 'text', preview: body.text, fromLabel: body.fromLabel || body.user, messageId: body.replyTo, threadId: body.messageThreadId, conversationKey: `telegram:${body.chatId || 'main'}:${body.messageThreadId || 0}` });
         if (!deferred) {
           const completed = queued.status === 'completed';
           return respond({
@@ -262,7 +313,7 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
         });
       }
       const operational = await getOperationalCenter();
-      return respond({ ok: true, ...(await center.inbound(text(body.intent || body.text, 1000), operational, { text: body.text, user: body.user, chatId: body.chatId, messageThreadId: body.messageThreadId })) });
+      return respond({ ok: true, ...(await center.inbound(text(body.intent || body.text, 1000), operational, { text: body.text, user: body.fromLabel || body.user, chatId: body.chatId, messageId: body.replyTo, messageThreadId: body.messageThreadId })) });
     }
     if (action === 'telegram-incident-action') {
       const actor = body.actor && typeof body.actor === 'object' ? body.actor : { name: operator, email: operator };
@@ -287,15 +338,50 @@ export function createTelegramRouter({ center, codexQueue, getOperationalCenter,
       const operational = await getOperationalCenter(), sent = await center.sendManual(telegramAgentReport(operational), { kind: 'report', title: 'Pełny raport centrum operacyjnego', source: 'admin-panel', replyMarkup: center.panelButtons() });
       return respond({ ok: true, sentAt: new Date().toISOString(), messageId: sent?.message_id || null, center: operational });
     }
-    if (action === 'telegram-send-supplier-order') {
-      const supplier = text(body.supplier || '', 120).trim(), order = body.order && typeof body.order === 'object' ? body.order : {}, tables = supplierTables(order, supplier);
+    if (action === 'telegram-send-supplier-order' || action === 'telegram-supplier-order-preview') {
+      if (typeof read !== 'function' || typeof supplierPreviews !== 'function') return respond({ ok: false, error: 'Kanoniczny Plan zatowarowania jest niedostępny', code: 'supplier_plan_unavailable' }, 503);
+      const settingsRecord = await read('settings', { data: {}, rev: 0, updated_at: null });
+      const tables = supplierPreviews(settingsRecord?.data || {}, {
+        draftId: text(body.draftId || '', 160).trim(),
+        supplier: text(body.supplier || '', 120).trim(),
+        expectedRevision: body.expectedRevision,
+        latestOnly: body.latestOnly === true,
+      });
       if (!tables.length) return respond({ ok: false, error: 'Zlecenie nie ma pozycji dla wybranego dostawcy', code: 'empty_order' }, 422);
-      const messageIds = [];
-      for (const table of tables) {
-        const sent = await center.sendManual(table.text, { kind: 'supplier-preview', category: 'supplier', title: `Podgląd zamówienia — ${table.supplier}`, source: 'admin-panel' });
-        if (sent?.message_id != null) messageIds.push(sent.message_id);
+      if (action === 'telegram-supplier-order-preview') {
+        return respond({
+          ok: true,
+          source: 'supplier-plan',
+          rev: Math.max(0, Number(settingsRecord?.rev) || 0),
+          updated_at: settingsRecord?.updated_at || null,
+          messages: tables,
+          documents: tables.flatMap((item) => Array.isArray(item.documents) ? item.documents.map((document) => ({
+            draftId: item.draftId, supplier: item.supplier, filename: document.filename, kind: document.kind || 'document',
+          })) : []),
+          suppliers: [...new Set(tables.map((item) => item.supplier))],
+        });
       }
-      return respond({ ok: true, sentAt: new Date().toISOString(), tables: tables.length, suppliers: [...new Set(tables.map((item) => item.supplier))], messageIds });
+      const messageIds = [], documentIds = [];
+      for (const table of tables) {
+        const sent = await center.sendManual(table.text, {
+          kind: 'supplier-preview', category: 'supplier', title: `Podgląd zamówienia — ${table.supplier}`, source: 'admin-panel',
+          replyMarkup: { inline_keyboard: [[
+            { text: '➕ Dodaj pozycje', url: `${publicOrigin(req)}/#/admin/magazyn/plan?intent=add` },
+            { text: '✅ Zatwierdź w Planie', url: `${publicOrigin(req)}/#/admin/magazyn/plan?intent=approve` },
+          ]] },
+        });
+        if (sent?.message_id != null) messageIds.push(sent.message_id);
+        if (typeof center.sendManualDocument === 'function') for (const document of Array.isArray(table.documents) ? table.documents : []) {
+          const sentDocument = await center.sendManualDocument(document, {
+            kind: document.kind || 'supplier-document', category: 'supplier', title: `Plik zamówienia — ${table.supplier}`, source: 'admin-panel',
+            caption: document.kind === 'comarch-optima'
+              ? `Comarch ERP Optima · ${table.documentNumber} · wersja ${table.revision}`
+              : `Edytowalna tabela · ${table.documentNumber} · wersja ${table.revision}`,
+          });
+          if (sentDocument?.message_id != null) documentIds.push(sentDocument.message_id);
+        }
+      }
+      return respond({ ok: true, sentAt: new Date().toISOString(), tables: tables.length, documents: documentIds.length, suppliers: [...new Set(tables.map((item) => item.supplier))], messageIds, documentIds });
     }
     return null;
   };

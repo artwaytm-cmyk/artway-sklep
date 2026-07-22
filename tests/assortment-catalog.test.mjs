@@ -6,7 +6,7 @@ const root=new URL("../",import.meta.url);
 const read=path=>readFile(new URL(path,root),"utf8");
 
 test("katalog produktów ma wielokryterialne filtry dla dużego asortymentu",async()=>{
-  const source=await read("src/frontend/12-customers-and-inventory.js");
+  const source=await read("assets/admin.js");
   assert.match(source,/filtrProducentaProduktow/);
   assert.match(source,/filtrDanychProduktow/);
   assert.match(source,/filtrSprzedazyProduktow/);
@@ -22,7 +22,7 @@ test("katalog produktów ma wielokryterialne filtry dla dużego asortymentu",asy
 });
 
 test("katalog udostępnia szybkie widoki, aktywne znaczniki i zapis gęstości",async()=>{
-  const source=await read("src/frontend/12-customers-and-inventory.js");
+  const source=await read("assets/admin.js");
   assert.match(source,/function asortymentUstawWidok/);
   assert.match(source,/Gotowe do sprzedaży/);
   assert.match(source,/Bez Allegro/);
@@ -33,37 +33,91 @@ test("katalog udostępnia szybkie widoki, aktywne znaczniki i zapis gęstości",
   assert.match(source,/density-\$\{gestoscAdminProduktow\}/);
 });
 
-test("tabela katalogu grupuje dane i zachowuje operacje hurtowe",async()=>{
-  const source=await read("src/frontend/12-customers-and-inventory.js");
-  assert.match(source,/<th>Produkt<\/th><th>Identyfikatory<\/th><th>Klasyfikacja i źródło<\/th><th>Ceny<\/th><th>Magazyn i sprzedaż<\/th><th>Allegro<\/th><th>Akcje<\/th>/);
+test("karty katalogu zachowują pełne dane i operacje hurtowe",async()=>{
+  const source=await read("assets/admin.js");
+  assert.match(source,/allegro-publication-card catalog-product-card/);
+  assert.match(source,/data-assortment-product-card/);
+  assert.match(source,/catalog-product-classification/);
+  assert.match(source,/catalog-product-operational-data/);
+  assert.match(source,/catalog-product-actions/);
   assert.match(source,/EXTERNAL_ID/);
-  assert.match(source,/Zakup \(admin\)/);
+  assert.match(source,/Zakup — tylko administrator/);
+  assert.match(source,/Cena Allegro/);
+  assert.match(source,/Stan magazynowy/);
   assert.match(source,/adminOperacjeWynikowHTML/);
   assert.match(source,/asortymentEksportuj\('zaznaczone'\)/);
   assert.match(source,/asortymentEksportuj\('filtr'\)/);
   assert.match(source,/Wspólna baza/);
+  assert.doesNotMatch(source,/const gotowosc=Math\.max/);
+  assert.doesNotMatch(source,/assortment-card-readiness/);
   assert.doesNotMatch(source,/Po zakończeniu pobierz nowy <b>products\.json<\/b> i podmień go na hostingu/);
 });
 
-test("układ katalogu jest responsywny i wspiera zwartą tabelę",async()=>{
-  const css=await read("src/styles/07-admin-domains.css");
-  for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".assortment-product-cell",".assortment-identifiers",".assortment-row-actions",".assortment-product-table.density-zwarta"]){
+test("ceny w katalogu zapisują się w wierszu bez pełnego renderowania strony",async()=>{
+  const view=await read("assets/admin.js"),prices=await read("src/frontend/13-product-admin.js"),css=await read("src/styles/29-commerce-catalog-actions.css");
+  assert.match(view,/ustawCene\([^\n]+this\.value,this\)/);
+  assert.match(view,/ustawCeneZakupu\([^\n]+this\.value,this\)/);
+  assert.match(view,/data-inline-price-status/);
+  assert.match(prices,/function asortymentPodmienCeneBezRenderu/);
+  assert.match(prices,/function ustawCeneZakupu/);
+  const inlineBlock=prices.slice(prices.indexOf("function ustawCene(id"),prices.indexOf("\/\* ── Akcje masowe"));
+  assert.doesNotMatch(inlineBlock,/renderuj\s*\(/);
+  assert.match(inlineBlock,/cenaZakupuPrywatna:true/);
+  assert.match(inlineBlock,/ręczna edycja administratora/);
+  assert.match(css,/\.catalog-product-edit-value\.is-saving/);
+  assert.match(css,/\.catalog-product-edit-value\.is-saved/);
+  assert.match(css,/\.catalog-product-edit-value\.has-error/);
+});
+
+test("układ katalogu przejmuje strukturę wzorca i zachowuje treść asortymentu",async()=>{
+  const css=(await read("src/styles/07-admin-domains.css"))+(await read("src/styles/07a-admin-domains.css"))+(await read("src/styles/07b-admin-domains.css"))+(await read("src/styles/29-commerce-catalog-actions.css"))+(await read("src/styles/31-admin-page-pattern.css"));
+  for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".catalog-product-list",".catalog-product-card",".catalog-product-classification",".catalog-product-operational-data",".catalog-product-actions",".catalog-product-list.density-zwarta"]){
     assert.match(css,new RegExp(selector.replace(".","\\.")));
   }
+  assert.match(css,/@container\(max-width:1180px\)/);
+  assert.match(css,/@container\(max-width:820px\)/);
+  assert.match(css,/content-visibility:auto/);
   assert.match(css,/@media\(max-width:620px\).*assortment-advanced-grid/);
 });
 
-test("katalog ma kolejkę Agenta i potwierdzane decyzje masowe Allegro",async()=>{
-  const catalog=await read("src/frontend/12-customers-and-inventory.js"),actions=await read("src/frontend/12a-product-actions.js"),css=await read("src/styles/15-product-actions.css");
+test("katalog rozdziela zarządzanie produktami od tworzenia nowych ofert Allegro",async()=>{
+  const catalog=await read("assets/admin.js"),actions=await read("src/frontend/12a-product-actions.js"),commerce=await read("src/frontend/12c-commerce-catalog-actions.js"),prices=await read("src/frontend/13-product-admin.js"),css=(await read("src/styles/15-product-actions.css"))+(await read("src/styles/29-commerce-catalog-actions.css"));
   assert.match(catalog,/data-product-agent-center/);
   assert.match(catalog,/asortymentMenuDzialanProduktuHTML\(p\)/);
-  for(const marker of ["Pełna kontrola i uzupełnienie","Odśwież dane producenta","Przygotuj / sprawdź szkic","Pobierz prowizje i opłaty","Aktualizuj istniejące oferty","Opublikuj / aktywuj sprzedaż","Zakończ powiązane oferty"]){
-    assert.match(actions,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));
-  }
-  assert.match(actions,/Agent nie wykona tej operacji samodzielnie/);
+  for(const marker of ["Centrum zarządzania produktami","Nowe oferty powstają wyłącznie w sekcji Allegro","Synchronizuj dane i ceny","Wycofaj oferty","Otwórz ofertę"]){assert.match(commerce,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));}
+  assert.doesNotMatch(commerce,/Wystaw gotowe na Allegro/);
+  assert.match(catalog,/id="kanalCenProduktow"/);
+  assert.match(catalog,/Tylko sklep/);
+  assert.match(catalog,/Tylko Allegro/);
+  assert.match(catalog,/Sklep i Allegro/);
+  assert.match(commerce,/catalog-allegro-offer-link/);
+  assert.match(prices,/kanalCenProduktow/);
+  assert.match(prices,/patch\.cenaAllegro/);
+  assert.match(prices,/patch\.cena=/);
+  assert.match(actions,/Ostateczna publikacja nastąpi dopiero po tym potwierdzeniu/);
   assert.match(actions,/data-external-product-confirm/);
   assert.match(actions,/Promise\.all\(Array\.from\(\{length:Math\.min\(2,products\.length\)\},worker\)\)/);
+  assert.match(actions,/async function asortymentPrzygotujProduktDoAllegro/);
+  assert.match(actions,/allegro-description-improve/);
+  assert.match(actions,/allegroAgentPreparationStatus/);
+  assert.match(actions,/allegroAgentSavedFields/);
+  assert.match(actions,/if\(!preparation\.ready\)throw new Error/);
+  assert.match(actions,/draft:preparedDraft/);
+  assert.match(actions,/Konkretny zapis Agenta/);
+  assert.match(catalog,/Przygotuj i zapisz dane do Allegro/);
   assert.match(css,/\.product-action-center/);
+  assert.match(css,/\.product-agent-results/);
+  assert.match(css,/\.product-allegro-preparation/);
   assert.match(css,/\.product-external-confirm/);
+  assert.match(css,/\.catalog-allegro-offer-link/);
   assert.match(css,/@media\(max-width:620px\)/);
+});
+
+test("opis zapisywany po przygotowaniu korzysta z końcowych bezpiecznych sekcji Allegro",async()=>{
+  const source=await read("assets/admin.js");
+  assert.match(source,/function allegroTekstZBezpiecznychSekcji/);
+  assert.match(source,/d\.draft\?\.description\?\.sections/);
+  assert.match(source,/force\.allegroDescriptionSections=safeSections/);
+  assert.match(source,/asortymentPrzygotujProduktDoAllegro/);
+  assert.match(source,/Oferta nie została wysłana — uzupełnij wskazane braki/);
 });

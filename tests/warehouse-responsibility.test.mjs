@@ -5,8 +5,9 @@ import { readFileSync } from 'node:fs';
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('frontend rozdziela kompletację, zakup i zadanie lokalizacji', () => {
-  const inventory = read('src/frontend/12-customers-and-inventory.js');
-  const allegro = read('src/frontend/11-allegro-and-orders.js');
+  const inventory = read('assets/admin-inventory.js');
+  const allegro = read('assets/admin-commerce.js');
+  const warehouse = read('assets/admin-warehouse.js');
   assert.match(inventory, /function klasyfikujPozycjeDoKompletacji/);
   assert.match(inventory, /decyzja:"kompletuj",gotowe:true,brakLokalizacji:/);
   assert.match(inventory, /gotowe:nierozpoznane===0&&bezStanu===0&&braki===0/);
@@ -14,13 +15,13 @@ test('frontend rozdziela kompletację, zakup i zadanie lokalizacji', () => {
   assert.match(allegro, /doWyjasnienia:analizy\.filter\(a=>a\.nierozpoznane>0\|\|a\.bezStanu>0\)/);
   assert.match(allegro, /Towar jest zarezerwowany\. Magazyn ustali lokalizację/);
   assert.match(allegro, /Stan pokrywa zamówienie — można kompletować/);
-  assert.match(allegro, /const bezLok=magazynLokalizacjeZamowienIds\.size/);
+  assert.match(warehouse, /const bezLok=typeof magazynLokalizacjeZamowienIds!=="undefined"\?magazynLokalizacjeZamowienIds\.size:0/);
   assert.doesNotMatch(allegro, /const bezLok=plan\.filter/);
 });
 
 test('magazyn ma osobną, zawężoną kolejkę lokalizacji aktywnych zamówień', () => {
-  const inventory = read('src/frontend/12-customers-and-inventory.js');
-  const agent = read('src/frontend/10-agent-ai.js');
+  const inventory = read('assets/admin-warehouse.js');
+  const agent = read('assets/admin-agent.js');
   assert.match(inventory, /magazynLokalizacjeZamowienIds/);
   assert.match(inventory, /filtrMagazynu==="lokalizacje-zamowien"/);
   assert.match(inventory, /lokalizacje do ustalenia • nie blokują realizacji/);

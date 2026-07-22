@@ -1,30 +1,50 @@
 /* ── Dostawa i płatności ── */
-let stanPaynowAdmin={sprawdzono:false,configured:false,env:"production",continueUrl:"",notificationUrl:"",apiBaseUrl:"",error:""};
+let stanPaynowAdmin={sprawdzono:false,configured:false,env:"production",continueUrl:"",notificationUrl:"",apiBaseUrl:"",error:"",diagnostics:null};
 function domyslneUrlePaynow(){
   return {notificationUrl:`${location.origin}/api/store?action=paynow-notification`, continueUrl:`${location.origin}/#/zamowienia`};
 }
 function paynowStatusAdminHTML(){
   const s=stanPaynowAdmin;
-  if(!s.sprawdzono) return `<div class="pay-note" style="text-align:left">Kliknij „Sprawdź konfigurację Paynow”, aby zobaczyć czy Netlify ma ustawione klucze API.</div>`;
+  if(!s.sprawdzono) return `<div class="pay-note" style="text-align:left">Kliknij „Sprawdź konfigurację Paynow”, aby potwierdzić, czy chronione środowisko backendu VPS ma ustawione klucze API.</div>`;
   if(s.error) return `<div class="pay-note" style="text-align:left;color:var(--danger)">Błąd sprawdzania Paynow: ${esc(s.error)}</div>`;
+  const d=s.diagnostics;
   return `<div class="backend-note" style="${s.configured?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
     <b>${s.configured?"Paynow API skonfigurowane ✅":"Paynow API nie ma jeszcze kluczy na serwerze"}</b><br>
     Środowisko: <code>${esc(s.env||"production")}</code>${s.apiBaseUrl?` • API: <code>${esc(s.apiBaseUrl)}</code>`:""}<br>
-    ${s.configured?"Klient po wybraniu Paynow dostanie automatyczny link płatności, a webhook zaktualizuje status zamówienia.":"Ustaw w Netlify zmienne PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY, potem zrób redeploy."}
-  </div>`;
+    ${s.configured?"Klient po wybraniu Paynow dostanie automatyczny link płatności, a webhook zaktualizuje status zamówienia.":"Płatność jest bezpiecznie ukryta przed klientem. Zapisz PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w sejfie środowiskowym VPS, a następnie zrestartuj backend."}
+  </div>${d?`<div class="backend-note" style="margin-top:.65rem;${d.connected?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}"><b>${d.connected?"Połączenie z API Paynow działa ✅":"Test API Paynow wymaga działania"}</b><br>${d.connected?`Podpis HMAC poprawny • grupy metod: ${esc(d.methodGroups||0)} • aktywne metody: ${esc(d.enabledMethods||0)} • kontrola: ${esc(d.checkedAt?new Date(d.checkedAt).toLocaleString("pl-PL"):"—")}`:esc(d.error||"Brak połączenia")}</div>`:""}`;
+}
+function paynowChecklistaSklepuHTML(){
+  const aktywne=(Array.isArray(produkty)?produkty:[]).filter(p=>produktWidocznyWPublicznymKatalogu(p));
+  const niekompletne=aktywne.filter(p=>!produktMaCeneSprzedazy(p)||String(p.nazwa||"").trim().length<3||opisKrotkiProduktu(p).trim().length<80);
+  const kontrola=[
+    [danePrawneFirmyKompletne(),"Pełna nazwa, NIP, REGON i adres siedziby","#/kontakt"],
+    [!!KONFIG.emailSklepu&&!!KONFIG.telefon,"E-mail i telefon obsługi kupujących","#/kontakt"],
+    [true,"Aktywny koszyk, checkout i podsumowanie kosztów","#/"],
+    [true,"Regulamin: umowa, płatności, dostawa, dokument sprzedaży i mElements S.A.","#/regulamin"],
+    [true,"Polityka prywatności: administrator, cele, odbiorcy, okresy, prawa i cookies","#/prywatnosc"],
+    [!niekompletne.length,`Publiczne produkty z prawdziwą nazwą, opisem i ceną (${aktywne.length-niekompletne.length}/${aktywne.length})`,`#/admin/produkty`],
+    [true,"Waluta PLN i kwota brutto przed złożeniem zamówienia","#/dostawa"],
+    [true,"Reklamacje: sposób zgłoszenia, zakres i odpowiedź w 14 dni","#/zwroty"],
+    [true,"Zwrot w 14 dni oraz gotowy wzór odstąpienia","#/zwroty"],
+    [true,"Przycisk „Zamówienie z obowiązkiem zapłaty” i obowiązkowa akceptacja regulaminu","#/"],
+  ];
+  const gotowe=kontrola.filter(x=>x[0]).length;
+  return `<section class="paynow-readiness"><header><div><span class="order-pro-label">Weryfikacja formalna sklepu</span><h3>Gotowość Paynow: ${gotowe}/${kontrola.length}</h3><p>Kontrola publicznych informacji wymienionych przez Paynow. Konfiguracja kluczy API jest oddzielnym etapem technicznym.</p></div><strong>${Math.round(gotowe/kontrola.length*100)}%</strong></header><div>${kontrola.map(([ok,label,href])=>`<a href="${href}" class="${ok?"ready":"missing"}"><span>${ok?"✓":"!"}</span><b>${esc(label)}</b><em>${ok?"gotowe":"wymaga działania"}</em></a>`).join("")}</div>${niekompletne.length?`<p class="backend-note warn"><b>${niekompletne.length} aktywnych produktów wymaga kontroli treści lub ceny.</b> Te produkty pozostają oznaczone w Katalogu produktów; nie są automatycznie usuwane.</p>`:""}</section>`;
 }
 function paynowPanelAdminHTML(){
   const urls=domyslneUrlePaynow();
   return `<div class="panel">
     <h2 style="margin-top:0">💳 mBank Paynow API</h2>
-    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">To jest prawdziwa integracja API. Sekrety muszą być w Netlify Environment Variables, nie w HTML ani localStorage.</p>
+    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">To jest prawdziwa integracja API. Sekrety są przechowywane wyłącznie w chronionym środowisku backendu VPS — nigdy w HTML ani pamięci przeglądarki.</p>
+    ${paynowChecklistaSklepuHTML()}
     ${paynowStatusAdminHTML()}
     <div class="f-row" style="grid-template-columns:1fr 1fr;margin-top:1rem">
       <div class="f-group"><label>URL powiadomień / webhook Paynow</label><input readonly value="${esc(stanPaynowAdmin.notificationUrl||urls.notificationUrl)}" onclick="this.select()"></div>
       <div class="f-group"><label>URL powrotu klienta po płatności</label><input readonly value="${esc(stanPaynowAdmin.continueUrl||urls.continueUrl)}" onclick="this.select()"></div>
     </div>
     <table class="log-table" style="margin-top:.7rem">
-      <tr><th>Zmienna Netlify</th><th>Co wpisać</th></tr>
+      <tr><th>Zmienna serwera</th><th>Co wpisać</th></tr>
       <tr><td><code>PAYNOW_API_KEY</code></td><td>Api-Key z panelu Paynow: Settings → Shops and poses → Authentication</td></tr>
       <tr><td><code>PAYNOW_SIGNATURE_KEY</code></td><td>Signature-Key z tego samego miejsca</td></tr>
       <tr><td><code>PAYNOW_ENV</code></td><td><code>production</code> dla prawdziwej sprzedaży albo <code>sandbox</code> do testów</td></tr>
@@ -33,21 +53,34 @@ function paynowPanelAdminHTML(){
     </table>
     <div class="diag-actions" style="margin-top:.9rem">
       <button class="btn" type="button" onclick="sprawdzPaynowKonfiguracje()">🔎 Sprawdź konfigurację Paynow</button>
+      <button class="btn" type="button" onclick="testujPaynowAPI()">🧪 Testuj podpis i API</button>
       <button class="btn ghost" type="button" onclick="ustawUrlePaynow()">🔗 Ustaw URL-e w Paynow przez API</button>
       <a class="btn ghost" href="https://docs.paynow.pl/docs/v3/integration" target="_blank" rel="noopener">Dokumentacja Paynow</a>
     </div>
-    <p class="pay-note" style="text-align:left;margin-top:.8rem">Po ustawieniu zmiennych w Netlify wykonaj redeploy. Dopiero wtedy przycisk „Sprawdź konfigurację” pokaże zielony status.</p>
-  </div>`;
+    <p class="pay-note" style="text-align:left;margin-top:.8rem">Na czas testów użyj osobnych kluczy środowiska testowego i <code>PAYNOW_ENV=sandbox</code>. Produkcję włącz dopiero po pozytywnej weryfikacji sklepu i otrzymaniu właściwych danych uwierzytelniających.</p>
+  </div>${inpostPayReadinessHTML()}`;
 }
 async function sprawdzPaynowKonfiguracje(){
   try{
     stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:""};
     const d=await chmura("paynow-config",{timeout:10000});
-    stanPaynowAdmin={sprawdzono:true,configured:!!d.configured,env:d.env||"",continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:d.apiBaseUrl||"",error:""};
-    toast(d.configured?"Paynow API skonfigurowane ✅":"Brak kluczy Paynow w Netlify");
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,configured:!!d.configured,env:d.env||"",continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:d.apiBaseUrl||"",error:""};
+    toast(d.configured?"Paynow API skonfigurowane ✅":"Brak kluczy Paynow w chronionym środowisku backendu VPS");
   }catch(e){
     stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:e.message};
     toast("Paynow: "+e.message);
+  }
+  renderuj();
+}
+async function testujPaynowAPI(){
+  try{
+    toast("Testuję podpis HMAC i metody płatności Paynow…");
+    const d=await chmura("paynow-diagnose",{timeout:18000});
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,configured:!!d.configured,env:d.env||stanPaynowAdmin.env,apiBaseUrl:d.apiBaseUrl||stanPaynowAdmin.apiBaseUrl,continueUrl:d.continueUrl||stanPaynowAdmin.continueUrl,notificationUrl:d.notificationUrl||stanPaynowAdmin.notificationUrl,diagnostics:d,error:""};
+    toast(`Paynow działa ✅ • aktywne metody: ${d.enabledMethods||0}`);
+  }catch(e){
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,diagnostics:{connected:false,error:e.message},error:""};
+    toast("Test Paynow: "+e.message);
   }
   renderuj();
 }
@@ -56,7 +89,7 @@ async function ustawUrlePaynow(){
   try{
     toast("Ustawiam URL-e Paynow…");
     const d=await chmura("paynow-configure-urls",{method:"POST",body:domyslneUrlePaynow(),timeout:18000});
-    stanPaynowAdmin={sprawdzono:true,configured:true,env:d.env||stanPaynowAdmin.env,continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:stanPaynowAdmin.apiBaseUrl,error:""};
+    stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,configured:true,env:d.env||stanPaynowAdmin.env,continueUrl:d.continueUrl||"",notificationUrl:d.notificationUrl||"",apiBaseUrl:stanPaynowAdmin.apiBaseUrl,error:""};
     toast("URL-e Paynow ustawione ✅");
   }catch(e){
     stanPaynowAdmin={...stanPaynowAdmin,sprawdzono:true,error:e.message};
@@ -67,36 +100,26 @@ async function ustawUrlePaynow(){
 }
 function emailPanelAdminHTML(){
   const e=stanBramki.email||{};
-  const gotowy=!!e.configured, polaczony=gotowy&&!!chmuraToken;
+  const gotowy=!!e.configured, polaczony=!!e.authenticated&&maUprawnieniaZapisuChmury();
+  const problem=e.credentialIssue==="masked_placeholder"?"W chronionej konfiguracji serwera znajduje się maska zamiast prawidłowego hasła aplikacji Google.":e.lastError||"";
   return `<div class="panel">
-    <h2 style="margin-top:0">📧 Bramka e-mail SMTP / Gmail</h2>
-    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">Automatyczne wiadomości wychodzą z serwera Netlify. Logowanie w Chrome do Gmaila nie wystarcza dla backendu — potrzebne jest hasło aplikacji Google albo dane SMTP zapisane jako sekrety Netlify.</p>
-    <div class="backend-note" style="${gotowy?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
-      <b>${gotowy?"SMTP skonfigurowany ✅":"SMTP/Gmail nie jest jeszcze skonfigurowany"}</b><br>
+    <h2 style="margin-top:0">📧 Trwałe połączenie e-mail SMTP / Gmail</h2>
+    <p style="font-size:.9rem;color:var(--muted2);margin-bottom:.8rem">Wiadomości wychodzą bezpośrednio z VPS. Dane dostępowe nie są przechowywane w przeglądarce i nie trzeba ich ponownie wpisywać po restarcie ani na innym urządzeniu.</p>
+    <div class="backend-note" style="${polaczony?"border-color:#86efac;background:#f0fdf4;color:#166534":"border-color:#f59e0b;background:#fffbeb;color:#92400e"}">
+      <b>${polaczony?"Połączenie Gmail potwierdzone ✅":gotowy?"Konfiguracja zapisana — autoryzacja wymaga sprawdzenia":"Połączenie Gmail wymaga naprawy"}</b><br>
       Nadawca: <code>${esc(e.from||"sklepartway@gmail.com")}</code> • Provider: <code>${esc(e.provider||"gmail-smtp")}</code><br>
-      ${polaczony?"Panel ma hasło bazy — test i ręczne wiadomości mogą być wysyłane.":gotowy?"Wpisz hasło bazy administratora, aby wysyłać testy z panelu.":"Ustaw zmienne poniżej w Netlify i zrób redeploy."}
+      ${polaczony?"Automatyczne i ręczne wiadomości są gotowe. Sesja panelu odnawia się automatycznie.":problem?`<span style="color:#991b1b">${esc(problem)}</span>`:"Uruchom kontrolę połączenia z serwerem."}
+      ${e.lastCheckedAt?`<br>Ostatnia kontrola: <b>${esc(new Date(e.lastCheckedAt).toLocaleString("pl-PL"))}</b>`:""}
     </div>
-    <table class="log-table" style="margin-top:.7rem">
-      <tr><th>Zmienna Netlify</th><th>Wartość dla Gmail</th></tr>
-      <tr><td><code>EMAIL_PROVIDER</code></td><td><code>gmail</code></td></tr>
-      <tr><td><code>EMAIL_FROM</code></td><td><code>sklepartway@gmail.com</code></td></tr>
-      <tr><td><code>EMAIL_FROM_NAME</code></td><td><code>Artway-TM</code></td></tr>
-      <tr><td><code>SMTP_HOST</code></td><td><code>smtp.gmail.com</code></td></tr>
-      <tr><td><code>SMTP_PORT</code></td><td><code>465</code></td></tr>
-      <tr><td><code>SMTP_SECURE</code></td><td><code>true</code></td></tr>
-      <tr><td><code>SMTP_USER</code></td><td><code>sklepartway@gmail.com</code></td></tr>
-      <tr><td><code>SMTP_PASS</code></td><td>hasło aplikacji Google — nie zwykłe hasło do Gmaila</td></tr>
-      <tr><td><code>EMAIL_ADMIN_TO</code></td><td>adres, na który sklep wyśle powiadomienie o nowym zamówieniu</td></tr>
-    </table>
     <form onsubmit="wyslijTestEmail(event)" style="margin-top:1rem">
       <div class="f-row" style="grid-template-columns:1fr auto;align-items:end">
         <div class="f-group"><label>Wyślij test na adres</label><input type="email" name="email" value="${esc(KONFIG.emailSklepu)}" required></div>
-        <div class="f-group"><button class="btn" type="submit" ${gotowy?"":"disabled"}>📧 Wyślij test</button></div>
+        <div class="f-group"><button class="btn" type="submit" ${polaczony?"":"disabled"}>📧 Wyślij testową wiadomość</button></div>
       </div>
     </form>
     <div class="diag-actions" style="margin-top:.8rem">
-      <button class="btn ghost" type="button" onclick="sprawdzBramke()">🔎 Sprawdź e-mail / Netlify</button>
-      ${chmuraToken?"":`<button class="btn ghost" type="button" onclick="chmuraUstawToken()">🔑 Wpisz hasło bazy</button>`}
+      <button class="btn" type="button" onclick="testujEmailPolaczenie()">🔎 Sprawdź autoryzację Gmail</button>
+      <a class="btn ghost" href="#/admin/wysylki/ustawienia">⚙️ Centrum integracji</a>
     </div>
   </div>`;
 }
@@ -228,7 +251,14 @@ function widokAdminWyglad(){
         <div class="f-group"><label>Nazwa firmy / sklepu</label><input name="firmaNazwa" value="${esc(df.nazwa)}"></div>
         <div class="f-group"><label>NIP firmy</label><input name="firmaId" inputmode="numeric" maxlength="10" value="${esc(df.nip||df.identyfikator)}"></div>
       </div>
-      <div class="f-group"><label>Adres firmy (opcjonalnie)</label><input name="firmaAdres" value="${esc(df.adres||"")}" placeholder="Ulica, kod pocztowy, miejscowość"></div>
+      <div class="f-row">
+        <div class="f-group"><label>REGON firmy</label><input name="firmaRegon" inputmode="numeric" maxlength="14" value="${esc(df.regon||"")}"></div>
+        <div class="f-group"><label>Ulica i numer siedziby</label><input name="firmaAdres" value="${esc(df.adres||"")}" placeholder="Ulica i numer"></div>
+      </div>
+      <div class="f-row">
+        <div class="f-group"><label>Kod pocztowy siedziby</label><input name="firmaKodPocztowy" value="${esc(df.kodPocztowy||"")}" placeholder="00-000"></div>
+        <div class="f-group"><label>Miejscowość siedziby</label><input name="firmaMiasto" value="${esc(df.miasto||"")}"></div>
+      </div>
       <div class="f-group"><label>Logo graficzne (zamiast nazwy tekstowej)</label>
         <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap">
           ${ustawienia.logoObraz?`<img src="${ustawienia.logoObraz}" alt="Podgląd logo sklepu" style="height:36px;max-width:190px;object-fit:contain;border-radius:6px;background:var(--bg);padding:2px 6px">`:`<span style="font-size:.8rem;color:var(--muted2)">brak — wyświetlana jest nazwa tekstowa</span>`}
@@ -322,10 +352,13 @@ function zapiszWyglad(e){
     telefon: String(f.get("telefon")).trim(),
     emailSklepu: String(f.get("emailSklepu")).trim(),
     daneFirmy:{
-      nazwa:String(f.get("firmaNazwa")||"Artway-TM").trim()||"Artway-TM",
+      nazwa:String(f.get("firmaNazwa")||DANE_FIRMY_DOMYSLNE.nazwa).trim()||DANE_FIRMY_DOMYSLNE.nazwa,
       identyfikator:tylkoCyfry(f.get("firmaId")||DANE_FIRMY_DOMYSLNE.identyfikator),
       nip:tylkoCyfry(f.get("firmaId")||DANE_FIRMY_DOMYSLNE.identyfikator),
-      adres:String(f.get("firmaAdres")||"").trim()
+      regon:tylkoCyfry(f.get("firmaRegon")||DANE_FIRMY_DOMYSLNE.regon),
+      adres:String(f.get("firmaAdres")||"").trim(),
+      kodPocztowy:String(f.get("firmaKodPocztowy")||"").trim(),
+      miasto:String(f.get("firmaMiasto")||"").trim()
     },
     pasekInfo: String(f.get("pasekInfo")),
     czasWysylki: String(f.get("czasWysylki")||"").trim(),
@@ -343,6 +376,7 @@ function zapiszWyglad(e){
       link2:String(f.get("heroLink2")).trim()
     },
     pasekOkazji:{
+      ...(ustawienia.pasekOkazji||{}),
       tytul:String(f.get("okazjaTytul")||"").trim(),
       opis:String(f.get("okazjaOpis")||"").trim(),
       tekstLinku:String(f.get("okazjaTekstLinku")||"").trim(),
@@ -364,48 +398,15 @@ function zapiszWyglad(e){
   });
 }
 
-/* ── 📁 OBRAZKI Z DYSKU (bez hostingu zdjęć) ──
-   Wgrywane pliki są zmniejszane i zapisywane w ustawieniach sklepu
-   (data-URL). Trafiają też do eksportowanego index.html — więc po
-   publikacji klienci widzą Twoje grafiki. Limit ~1 MB po kompresji. */
-function wgrajObrazek(input, maxSzer, poWgraniu){
-  const plik = input.files && input.files[0];
-  if(!plik) return;
-  if(!plik.type.startsWith("image/")){ toast("⚠️ Wybierz plik graficzny (JPG/PNG)"); return; }
-  const czytnik = new FileReader();
-  czytnik.onload = () => {
-    const img = new Image();
-    img.onload = () => {
-      try{
-        const skala = Math.min(1, maxSzer / img.width);
-        const c = document.createElement("canvas");
-        c.width = Math.max(1, Math.round(img.width * skala));
-        c.height = Math.max(1, Math.round(img.height * skala));
-        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-        const png = plik.type === "image/png" && plik.size < 300_000;   // małe PNG (logo) bez utraty przezroczystości
-        let dataUrl = png ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", 0.82);
-        if(dataUrl.length > 900_000) dataUrl = c.toDataURL("image/jpeg", 0.6);
-        if(dataUrl.length > 1_200_000){ toast("⚠️ Obrazek za duży nawet po kompresji — wybierz mniejszy"); return; }
-        poWgraniu(dataUrl);
-      }catch(b){ loguj("blad","Kompresja obrazka nie powiodła się: "+b.message); toast("⚠️ Nie udało się przetworzyć obrazka"); }
-    };
-    img.onerror = () => { toast("⚠️ Nie udało się odczytać obrazka"); loguj("ostrzezenie","Błąd odczytu wgrywanego obrazka"); };
-    img.src = czytnik.result;
-  };
-  czytnik.readAsDataURL(plik);
-}
-function polePlikuHTML(onchange, etykieta){
-  return `<label class="btn ghost" style="cursor:pointer;white-space:nowrap">📁 ${etykieta||"Wgraj z dysku"}<input type="file" accept="image/*" style="display:none" onchange="${onchange}"></label>`;
-}
 /* banery */
 function wgrajObrazBanera(input, id){
   wgrajObrazek(input, 1200, url => {
-    zapiszCzescUstawien({bannery: pobierzBannery().map(x=>x.id===id?{...x, obraz:url}:x)});
+    zapiszCzescUstawien({bannery: pobierzBannery().map(x=>{if(x.id!==id)return x;const {aiAssetId,aiModel,aiGeneratedAt,aiBrief,...rest}=x;return {...rest,obraz:url};})});
     loguj("info","Wgrano obrazek banera "+id);
   });
 }
 function usunObrazBanera(id){
-  zapiszCzescUstawien({bannery: pobierzBannery().map(x=>{ const {obraz, ...reszta}=x; return x.id===id?reszta:x; })});
+  zapiszCzescUstawien({bannery: pobierzBannery().map(x=>{ const {obraz,aiAssetId,aiModel,aiGeneratedAt,aiBrief,...reszta}=x; return x.id===id?reszta:x; })});
 }
 /* logo sklepu */
 function wgrajLogo(input){ wgrajObrazek(input, 420, url => zapiszCzescUstawien({logoObraz:url})); }
@@ -414,20 +415,8 @@ function usunLogo(){ zapiszCzescUstawien({logoObraz:null}); }
 function wgrajFavicon(input){ wgrajObrazek(input, 96, url => zapiszCzescUstawien({faviconObraz:url})); }
 function usunFavicon(){ zapiszCzescUstawien({faviconObraz:null}); }
 /* tło baneru głównego */
-function wgrajTloHero(input){ wgrajObrazek(input, 1600, url => zapiszCzescUstawien({hero:{...(ustawienia.hero||{}), obraz:url}})); }
-function usunTloHero(){ const {obraz, ...h}=(ustawienia.hero||{}); zapiszCzescUstawien({hero:h}); }
-/* zdjęcie produktu (wpisuje się do pola formularza) */
-function wgrajZdjecieProduktu(input){
-  wgrajObrazek(input, 900, url => {
-    const form = input.closest ? input.closest("form") : input.form;
-    const pole = form && form.zdjecie;
-    if(pole) pole.value = url;
-    const pg = $("podgladZdjecia");
-    if(pg) pg.innerHTML = `<img src="${url}" alt="Podgląd zdjęcia produktu" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">`;
-    toast("Zdjęcie wgrane — kliknij Zapisz/Dodaj, aby zachować ✅");
-  });
-}
-
+function wgrajTloHero(input){ wgrajObrazek(input, 1600, url => {const {aiAssetId,aiModel,...h}=(ustawienia.hero||{});zapiszCzescUstawien({hero:{...h,obraz:url}});}); }
+function usunTloHero(){ const {obraz,aiAssetId,aiModel, ...h}=(ustawienia.hero||{}); zapiszCzescUstawien({hero:h}); }
 /* ── Wiele banerów ── */
 function widokAdminBannery(){
   const bannery=pobierzBannery();
@@ -602,312 +591,4 @@ function zapiszStrony(e){
   }
   KONFIG.tresci = Object.keys(tresci).length ? tresci : null;
   zapiszCzescUstawien({tresci: KONFIG.tresci});
-}
-
-/* ── Eksporty ── */
-function widokAdminEksport(sekcja="import"){
-  const aktywna=["import","eksport","kopie","aktualizacja"].includes(String(sekcja||""))?String(sekcja||""):"import";
-  const p=podgladImportuProduktow,kopia=wczytajLS("artway_ostatnia_kopia_importu",null);
-  return adminSzkielet("/admin/eksport", `
-  ${eksportSubnavHTML(aktywna)}
-  <div class="panel" style="${aktywna==="import"?"":"display:none"}">
-    <h1>⇄ Import i eksport produktów</h1>
-    <p style="color:var(--muted2)">Obsługa dużych katalogów JSON, CSV oraz OVF <code>.xls</code> zapisanego jako CSV. Import zawsze zaczyna się od analizy — żadne dane nie zmienią się przed kliknięciem „Wykonaj import”.</p>
-    <div class="import-grid">
-      <div class="import-box">
-        <h2 style="margin-top:0">1. Wczytaj dane</h2>
-        <label class="btn" style="cursor:pointer">📁 Wybierz JSON, CSV lub OVF .xls<input type="file" accept=".json,.csv,.xls,.txt,application/json,text/csv,application/vnd.ms-excel" onchange="wczytajPlikImportuProduktow(this)" style="display:none"></label>
-        <button class="btn ghost" onclick="pobierzSzablonProduktowCSV()">⬇️ Pobierz szablon CSV</button>
-        <button class="btn ghost" onclick="pobierzSzablonProduktowOVF()">⬇️ Szablon OVF .xls</button>
-        <p class="pay-note" style="text-align:left">Możesz też wkleić dane z hurtowni lub arkusza:</p>
-        <textarea id="importTekstProduktow" placeholder='JSON: [{"nazwa":"Produkt","kategoria":"AGD","cena":99.90}]&#10;&#10;CSV/OVF: GTIN,EXTERNAL_ID,NAME,STOCK,PRICE,MPN,DESCRIPTION,IMAGE1,CATEGORY,BRAND,COLOR,SIZE,MATERIAL'></textarea>
-        <button class="btn ghost" style="margin-top:.5rem" onclick="analizujWklejonyImport()">🔎 Analizuj wklejone dane</button>
-      </div>
-      <div class="import-box">
-        <h2 style="margin-top:0">2. Tryb importu</h2>
-        <div class="f-group"><label>Sposób zapisu</label><select id="trybImportuProduktow">
-          <option value="scal">Dodaj nowe i aktualizuj istniejące</option>
-          <option value="zastap">Zastąp cały katalog importowanymi produktami</option>
-        </select></div>
-        <div class="backend-note"><b>Scalanie:</b> produkt jest rozpoznawany najpierw po EXTERNAL_ID/SKU, a dopiero potem po lokalnym ID. Istniejący zostanie zaktualizowany, a nowy dostanie wolne ID.<br><b>Zastąpienie:</b> obecny katalog zostanie ukryty i zastąpiony importem.</div>
-        <p style="font-size:.82rem;color:var(--muted2)">Przed wykonaniem importu tworzona jest automatyczna kopia produktów, stanów magazynowych, kosza i mapowania.</p>
-        ${kopia?`<button class="btn danger" onclick="cofnijOstatniImportProduktow()">↩️ Cofnij ostatni import (${new Date(kopia.data).toLocaleString("pl-PL")})</button>`:""}
-        ${ostatniRaportImportu?`<div class="sug" style="margin-top:.7rem"><span class="s-ico">✅</span><span><b>Ostatni import zakończony</b><br>Dodano: ${ostatniRaportImportu.dodane} • zaktualizowano: ${ostatniRaportImportu.zaktualizowane} • pominięto: ${ostatniRaportImportu.pominiete}${ostatniRaportImportu.menuZImportu?` • dopisano do menu: ${ostatniRaportImportu.menuZImportu}`:""}</span></div>`:""}
-      </div>
-    </div>
-    ${p?`
-    <div class="import-box" style="margin-top:1rem">
-      <h2 style="margin-top:0">3. Podgląd importu — ${esc(p.nazwa)} <span class="lvl lvl-info">${esc(p.format)}</span></h2>
-      <div class="import-summary">
-        <span>Wiersze: ${p.wszystkich}</span><span>Poprawne: ${p.produkty.length}</span><span>Błędy: ${p.bledy.length}</span><span>Ostrzeżenia: ${p.ostrzezenia.length}</span>
-      </div>
-      ${p.bledy.length?`<div class="import-errors"><b>Pozycje pominięte:</b><br>${p.bledy.slice(0,100).map(esc).join("<br>")}${p.bledy.length>100?`<br>… i ${p.bledy.length-100} kolejnych`:""}</div>`:""}
-      ${p.ostrzezenia.length?`<details><summary>Ostrzeżenia (${p.ostrzezenia.length})</summary><div class="import-errors">${p.ostrzezenia.slice(0,100).map(esc).join("<br>")}</div></details>`:""}
-      ${p.produkty.length?`<div style="overflow-x:auto"><table class="log-table"><tr><th>ID</th><th>Nazwa</th><th>Grupa menu</th><th>Katalog</th><th>Cena</th><th>Stan</th><th>EXTERNAL_ID / SKU</th><th>Zdjęcia</th></tr>
-        ${p.produkty.slice(0,20).map(x=>`<tr><td>${x.id??"auto"}</td><td><b>${esc(x.nazwa)}</b></td><td>${esc(x.grupaKategorii||"—")}</td><td>${esc(x.kategoria)}</td><td>${zl(x.cena)}</td><td>${x.stan??"∞"}</td><td>${esc(x.externalId||x.sku||"—")}</td><td>${(x.zdjecie?1:0)+(x.zdjecia?.length||0)}</td></tr>`).join("")}
-      </table></div>${p.produkty.length>20?`<p class="pay-note">Podgląd pokazuje pierwsze 20 z ${p.produkty.length} poprawnych produktów.</p>`:""}
-      <button class="btn" style="margin-top:.7rem" onclick="wykonajImportProduktow()">✅ Wykonaj import ${p.produkty.length} ${p.produkty.length===1?"produktu":"produktów"}</button>`:"<p>Brak poprawnych produktów do importu.</p>"}
-    </div>`:""}
-  </div>
-  <div class="panel" style="${aktywna==="eksport"?"":"display:none"}">
-    <h1>📤 Eksport produktów</h1>
-    <div class="f-row" style="align-items:end">
-      <div class="f-group"><label>Zakres</label><select id="zakresEksportuProduktow" onchange="$('kategoriaEksportuBox').style.display=this.value==='kategoria'?'':'none'">
-        <option value="widoczne">Cały aktywny katalog — gotowy na hosting (${produkty.length})</option>
-        <option value="zaznaczone">Tylko zaznaczone produkty (${zaznaczoneProdukty.size})</option>
-        <option value="kategoria">Wybrana kategoria</option>
-      </select></div>
-      <div class="f-group" id="kategoriaEksportuBox" style="display:none"><label>Kategoria</label><select id="kategoriaEksportuProduktow">${wszystkieKategorie().map(k=>`<option>${esc(k)}</option>`).join("")}</select></div>
-    </div>
-    <div class="diag-actions">
-      <button class="btn" onclick="eksportujProduktyJSON()">📤 products.json na hosting</button>
-      <button class="btn ghost" onclick="eksportujProduktyCSV()">📊 Pełny CSV do Excela</button>
-      <button class="btn ghost" onclick="eksportujProduktyOVF()">📄 OVF .xls jak szablon</button>
-      <button class="btn ghost" onclick="pobierzSzablonProduktowCSV()">📄 Szablon CSV</button>
-      <button class="btn ghost" onclick="pobierzSzablonProduktowOVF()">📄 Szablon OVF .xls</button>
-    </div>
-    <p class="pay-note" style="text-align:left">Eksport zawiera: ID, nazwę, kategorię, ceny, stan, SKU, GTIN/EAN, EXTERNAL_ID, MPN, markę, krótki opis, pełny opis, etykietę, ikonę, zdjęcie główne, galerię do 16 zdjęć, warianty, kolor karty, kolor produktu, rozmiar i materiał. Produkty z kosza nie trafiają do pliku na hosting.</p>
-  </div>
-  <div class="panel" style="${aktywna==="kopie"?"":"display:none"}">
-    <h1>📦 Pozostałe eksporty i kopie</h1>
-    <div class="sug"><span class="s-ico">🌍</span><span><b>Publiczny index.html</b> — po rozbiciu projektu jest lekkim szkieletem strony i zawiera zapisane ustawienia publiczne. Kod działania sklepu jest w <code>assets/app.js</code>, a wygląd w <code>assets/styles.css</code>.<br>
-      <button class="btn" style="margin-top:.4rem" onclick="eksportujIndexHTML()">Pobierz index.html z ustawieniami</button></span></div>
-    <div class="sug"><span class="s-ico">📦</span><span><b>Zamówienia (CSV)</b> — wszystkie zamówienia do Excela: numery, statusy, kwoty, adresy.<br><button class="btn ghost" style="margin-top:.4rem" onclick="eksportujZamowienia()">Pobierz zamowienia.csv</button></span></div>
-    <div class="sug"><span class="s-ico">👥</span><span><b>Klienci (CSV)</b> — lista zarejestrowanych kont.<br><button class="btn ghost" style="margin-top:.4rem" onclick="eksportujKlientow()">Pobierz klienci.csv</button></span></div>
-    <div class="sug"><span class="s-ico">🛠️</span><span><b>Dziennik zdarzeń</b> — log błędów i zdarzeń; raport możesz wkleić w rozmowie z Claude.<br>
-      <button class="btn ghost" style="margin-top:.4rem" onclick="pobierzPlikLogu()">Pobierz log (.txt)</button>
-      <button class="btn ghost" style="margin-top:.4rem" onclick="kopiujRaport()">📋 Kopiuj raport dla Claude</button></span></div>
-    <div class="sug"><span class="s-ico">💾</span><span><b>Pełna kopia panelu</b> — ustawienia, banery, układy podstron, produkty lokalne, klienci i zamówienia z tej przeglądarki.<br>
-      <button class="btn ghost" style="margin-top:.4rem" onclick="eksportujKopieDanych()">Pobierz kopię JSON</button>
-      <a class="btn ghost" style="margin-top:.4rem" href="#/diagnostyka">Przywracanie i kontrola →</a></span></div>
-  </div>`);
-}
-let stanAktualizacji={sprawdzono:false,ladowanie:false,online:false,authenticated:false,enabled:false,publisher:null,error:""};
-let wybranyIndexAktualizacji=null;
-function formatRozmiaruPliku(n){
-  n=Number(n)||0;return n>=1048576?(n/1048576).toFixed(2)+" MB":n>=1024?(n/1024).toFixed(1)+" KB":n+" B";
-}
-function wersjaZIndexu(html){
-  return String(html||"").match(/<meta\s+name=["']artway-version["']\s+content=["']([^"']+)/i)?.[1]||"brak numeru";
-}
-async function sprawdzStatusAktualizacji(cicho=false){
-  stanAktualizacji={...stanAktualizacji,ladowanie:true,error:""};if(!cicho)renderuj();
-  try{
-    const health=await wywolajBramke("health");
-    stanAktualizacji={...stanAktualizacji,sprawdzono:true,ladowanie:false,online:true,authenticated:!!health.authenticated,enabled:!!health.publisher?.enabled,error:""};
-    if(health.authenticated){
-      const d=await wywolajBramke("site-status");
-      stanAktualizacji={...stanAktualizacji,authenticated:true,enabled:!!d.publisher?.enabled,publisher:d.publisher||null};
-    }
-    if(!cicho)toast(health.authenticated?"Status aktualizacji pobrany ✅":"Backend działa — połącz bezpieczną sesję");
-  }catch(e){
-    stanAktualizacji={...stanAktualizacji,sprawdzono:true,ladowanie:false,online:false,error:e.message};
-    if(!cicho)toast("Nie udało się sprawdzić aktualizacji");
-  }
-  if(trasa().startsWith("/admin/aktualizacja"))renderuj();
-}
-async function polaczAktualizacje(e){
-  e.preventDefault();const f=new FormData(e.target);
-  try{
-    await wywolajBramke("login",{method:"POST",body:{password:String(f.get("apiPassword")||"")}});
-    f.set("apiPassword","");await sprawdzStatusAktualizacji(true);toast("Bezpieczna sesja aktualizacji połączona ✅");
-  }catch(bl){stanAktualizacji={...stanAktualizacji,error:bl.message};toast("Nie udało się połączyć");renderuj();}
-}
-function wczytajIndexDoAktualizacji(input){
-  const plik=input.files?.[0];if(!plik)return;
-  if(plik.size>6*1024*1024){toast("⚠️ index.html może mieć maksymalnie 6 MB");input.value="";return;}
-  const r=new FileReader();
-  r.onload=()=>{
-    try{
-      const html=String(r.result||"");
-      if(html.length<1000||!/<html/i.test(html)||!/<script/i.test(html)||!html.includes("PUBLIC_SETTINGS_START")||!html.includes("assets/app.js")||!html.includes("assets/styles.css"))throw new Error("To nie jest poprawny plik index.html Artway-TM po rozbiciu na pliki");
-      wybranyIndexAktualizacji={nazwa:plik.name,rozmiar:plik.size,wersja:wersjaZIndexu(html),html};
-      toast("Nowy index.html sprawdzony ✅");renderuj();
-    }catch(e){wybranyIndexAktualizacji=null;toast("⚠️ "+e.message);renderuj();}
-  };
-  r.onerror=()=>toast("⚠️ Nie udało się odczytać index.html");
-  r.readAsText(plik,"UTF-8");
-}
-function usunWybranyIndexAktualizacji(){wybranyIndexAktualizacji=null;renderuj();}
-async function publikujAktualizacjeStrony(e){
-  e.preventDefault();const f=new FormData(e.target),index=!!f.get("index"),produktyPlik=!!f.get("produkty");
-  if(!index&&!produktyPlik){toast("Wybierz co najmniej jeden plik do aktualizacji");return;}
-  if(!stanAktualizacji.authenticated){toast("Najpierw połącz bezpieczną sesję");return;}
-  if(!stanAktualizacji.enabled){toast("Publikator jest wyłączony w config.php");return;}
-  const nazwy=[index?"index.html":null,produktyPlik?"products.json":null].filter(Boolean).join(" i ");
-  if(!confirm(`Opublikować ${nazwy} na działającej stronie? Poprzednia wersja zostanie automatycznie zapisana jako kopia.`))return;
-  stanAktualizacji={...stanAktualizacji,ladowanie:true,error:""};renderuj();
-  try{
-    const body={note:String(f.get("notatka")||"Aktualizacja z panelu administratora").trim()};
-    if(index){
-      let html=wybranyIndexAktualizacji?.html;
-      if(!html){const r=await fetch("/index.html",{cache:"no-store"});if(!r.ok)throw new Error("Nie udało się pobrać bieżącego index.html");html=await r.text();}
-      body.index_html=osadzUstawieniaWIndexie(html);
-    }
-    if(produktyPlik)body.products=zakresEksportuProduktow("widoczne");
-    const d=await wywolajBramke("site-publish",{method:"POST",body});
-    stanAktualizacji={...stanAktualizacji,ladowanie:false,sprawdzono:true,online:true,authenticated:true,enabled:!!d.publisher?.enabled,publisher:d.publisher||null,error:""};
-    if(index)localStorage.setItem("artway_ustawienia_export_hash",prostyHash(JSON.stringify(ustawienia)));
-    if(produktyPlik){
-      const hash=prostyHash(JSON.stringify(body.products));
-      localStorage.setItem("artway_produkty_publish_hash",hash);
-      localStorage.setItem("artway_produkty_export_hash",hash);
-    }
-    wybranyIndexAktualizacji=null;
-    loguj("info","Opublikowano bezpośrednio na hostingu: "+nazwy);
-    toast("Strona została zaktualizowana ✅");renderuj();
-  }catch(bl){
-    stanAktualizacji={...stanAktualizacji,ladowanie:false,error:bl.message};
-    loguj("blad","Aktualizacja strony: "+bl.message);toast("Aktualizacja nie powiodła się");renderuj();
-  }
-}
-async function cofnijPublikacjeStrony(id){
-  if(!confirm("Przywrócić tę kopię strony? Obecna wersja również zostanie zabezpieczona przed zmianą."))return;
-  stanAktualizacji={...stanAktualizacji,ladowanie:true,error:""};renderuj();
-  try{
-    const d=await wywolajBramke("site-rollback",{method:"POST",body:{backup_id:id}});
-    stanAktualizacji={...stanAktualizacji,ladowanie:false,publisher:d.publisher||null,error:""};
-    loguj("info","Przywrócono kopię strony "+id);toast("Poprzednia wersja została przywrócona ↩️");renderuj();
-  }catch(bl){stanAktualizacji={...stanAktualizacji,ladowanie:false,error:bl.message};toast("Nie udało się przywrócić kopii");renderuj();}
-}
-async function kopiujKonfiguracjePublikatora(){
-  const tekst=`'publisher' => [\n    'enabled' => true,\n    'root' => dirname(__DIR__),\n    'max_backups' => 10,\n],`;
-  try{await navigator.clipboard.writeText(tekst);toast("Konfiguracja skopiowana 📋");}
-  catch(e){toast("Skopiuj konfigurację z instrukcji api/config.example.php");}
-}
-function statusPlikuPublikacji(nazwa,dane){
-  if(!dane)return `<div class="info-card"><b>${nazwa}</b><p>brak danych</p></div>`;
-  return `<div class="info-card"><b>${nazwa}</b><p>${dane.exists?"✅ istnieje":"❌ brak"} • ${dane.writable?"zapis możliwy":"brak zapisu"}<br>${dane.exists?`${formatRozmiaruPliku(dane.size)} • ${new Date(dane.modified).toLocaleString("pl-PL")}<br><code>${esc(dane.sha256||"")}</code>`:""}</p></div>`;
-}
-function widokAdminAktualizacja(sekcja="status"){
-  const aktywna=["status","publikuj","index","kopie"].includes(String(sekcja||""))?String(sekcja||""):"status";
-  const s=stanAktualizacji,p=s.publisher||{},last=p.last_publication,backups=p.backups||[];
-  return adminSzkielet("/admin/aktualizacja",`
-  ${aktualizacjaSubnavHTML(aktywna)}
-  <div class="panel" style="${aktywna==="status"?"":"display:none"}">
-    <div class="admin-banner-head"><div><h1 style="margin:0">⬆️ Aktualizacja strony</h1><p style="color:var(--muted2);margin-top:.35rem">Wersja panelu: <b>${esc(document.querySelector('meta[name="artway-version"]')?.content||"—")}</b> • publikuj ustawienia i produkty; pełne aktualizacje kodu idą przez GitHub/Netlify razem z <code>assets/app.js</code> i <code>assets/styles.css</code>.</p></div>
-      <button class="btn ghost" onclick="sprawdzStatusAktualizacji()" ${s.ladowanie?"disabled":""}>${s.ladowanie?"⏳ Sprawdzam…":"🔄 Odśwież status"}</button></div>
-    <div class="import-summary">
-      <span>${s.online?"✅ Backend online":"⚠️ Backend niesprawdzony"}</span>
-      <span>${s.authenticated?"🔐 Sesja połączona":"🔒 Wymaga połączenia"}</span>
-      <span>${s.enabled?"✅ Publikator włączony":"⚠️ Publikator wyłączony"}</span>
-    </div>
-    ${s.error?`<div class="backend-note" style="border-color:var(--danger)"><b>Błąd:</b> ${esc(s.error)}</div>`:""}
-    ${s.online&&!s.authenticated?`<form onsubmit="polaczAktualizacje(event)" style="max-width:620px"><div class="f-row" style="grid-template-columns:1fr auto;align-items:end"><div class="f-group"><label>Hasło integracji z api/config.php</label><input type="password" name="apiPassword" required autocomplete="current-password"></div><div class="f-group"><button class="btn" type="submit">🔐 Połącz sesję</button></div></div></form>`:""}
-    ${s.sprawdzono&&!s.enabled?`<div class="backend-note"><b>Jednorazowa konfiguracja:</b> dodaj sekcję <code>publisher</code> z pliku <code>api/config.example.php</code> do chronionego <code>api/config.php</code>. Pierwsze wgranie tej wersji API nadal wykonujesz przez SFTP; następne aktualizacje zrobisz tutaj.<br><button class="btn ghost" style="margin-top:.5rem" onclick="kopiujKonfiguracjePublikatora()">📋 Kopiuj sekcję konfiguracji</button></div>`:""}
-    ${p.files?`<div class="info-grid">${statusPlikuPublikacji("index.html",p.files["index.html"])}${statusPlikuPublikacji("products.json",p.files["products.json"])}</div>`:""}
-    ${last?`<div class="sug" style="margin-top:.8rem"><span class="s-ico">✅</span><span><b>Ostatnia aktualizacja: ${new Date(last.published_at).toLocaleString("pl-PL")}</b><br>Pliki: ${(last.files||[]).map(esc).join(", ")}${last.note?` • ${esc(last.note)}`:""}${last.restored_from?` • przywrócono z ${esc(last.restored_from)}`:""}</span></div>`:""}
-  </div>
-  <div class="panel" style="${aktywna==="publikuj"?"":"display:none"}">
-    <h2 style="margin-top:0">Publikuj bieżące zmiany</h2>
-    <form onsubmit="publikujAktualizacjeStrony(event)">
-      <label class="chk-row"><input type="checkbox" name="index" checked> <span><b>index.html</b> — lekki szkielet strony i publiczne ustawienia panelu</span></label>
-      <label class="chk-row"><input type="checkbox" name="produkty" checked> <span><b>products.json</b> — ${produkty.length} aktywnych produktów, ceny, stany, zdjęcia i warianty</span></label>
-      <div class="f-group" style="margin-top:.7rem"><label>Notatka do aktualizacji</label><input name="notatka" maxlength="200" value="Aktualizacja z panelu administratora"></div>
-      <div class="diag-actions"><button class="btn" type="submit" ${!s.authenticated||!s.enabled||s.ladowanie?"disabled":""}>${s.ladowanie?"⏳ Aktualizacja…":"⬆️ Publikuj na stronie"}</button></div>
-    </form>
-    <div class="backend-note" style="margin-top:1rem"><b>Co zostanie opublikowane?</b> Jeśli nie wybierzesz nowego pliku poniżej, panel użyje bieżącego index.html i automatycznie osadzi w nim aktualne ustawienia. Po rozbiciu kodu techniczne zmiany w JavaScript/CSS wdrażamy przez GitHub/Netlify, żeby nie pominąć żadnego pliku. Zawsze powstaje kopia poprzedniej wersji.</div>
-  </div>
-  <div class="panel" style="${aktywna==="index"?"":"display:none"}">
-    <h2 style="margin-top:0">Wgraj nową wersję index.html</h2>
-    <p style="color:var(--muted2)">Ten plik jest teraz szkieletem strony. Pełna aktualizacja techniczna wymaga też plików <code>assets/app.js</code> i <code>assets/styles.css</code>, dlatego standardowo wdrażamy ją przez GitHub/Netlify.</p>
-    <label class="btn ghost" style="cursor:pointer">📁 Wybierz nowy index.html<input type="file" accept=".html,text/html" onchange="wczytajIndexDoAktualizacji(this)" style="display:none"></label>
-    ${wybranyIndexAktualizacji?`<div class="sug" style="margin-top:.7rem"><span class="s-ico">📄</span><span><b>${esc(wybranyIndexAktualizacji.nazwa)}</b><br>Wersja ${esc(wybranyIndexAktualizacji.wersja)} • ${formatRozmiaruPliku(wybranyIndexAktualizacji.rozmiar)} <button class="btn danger" style="margin-left:.5rem" onclick="usunWybranyIndexAktualizacji()">Usuń wybór</button></span></div>`:""}
-  </div>
-  <div class="panel" style="${aktywna==="kopie"?"":"display:none"}">
-    <h2 style="margin-top:0">Kopie i przywracanie</h2>
-    ${backups.length?`<div style="overflow-x:auto"><table class="log-table"><tr><th>Data</th><th>Powód</th><th>Pliki</th><th>Akcja</th></tr>${backups.slice(0,10).map(b=>`<tr><td>${b.created?new Date(b.created).toLocaleString("pl-PL"):esc(b.id)}</td><td>${b.reason==="before-rollback"?"Przed przywróceniem":"Przed publikacją"}</td><td>${(b.files||[]).map(esc).join(", ")}</td><td><button class="btn ghost" onclick="cofnijPublikacjeStrony('${esc(b.id)}')" ${s.ladowanie?"disabled":""}>↩️ Przywróć</button></td></tr>`).join("")}</table></div>`:`<p style="color:var(--muted2)">Kopie pojawią się automatycznie po pierwszej publikacji.</p>`}
-  </div>`);
-}
-function resetujUstawienia(){
-  localStorage.removeItem("artway_ustawienia");
-  loguj("info","Przywrócono domyślne ustawienia");
-  location.reload();
-}
-
-/* ── Publikacja strony ── */
-function kontrolePublikacji(){
-  const k = [];
-  k.push({ok:!domyslneHasloAdmina, tekst:"Hasło administratora zmienione z domyślnego (admin)", link:"#/konto", akcja:"Zmień hasło"});
-  k.push({ok:!KONFIG.telefon.includes("000 000 000"), tekst:"Prawdziwy numer telefonu w stopce i kontakcie", link:"#/admin/wyglad", akcja:"Ustaw telefon"});
-  k.push({ok:!widokRegulamin().includes("[nazwa firmy"), tekst:"Regulamin i polityka prywatności z danymi firmy", link:"#/admin/strony", akcja:"Uzupełnij"});
-  k.push({ok:dostepnePlatnosci().length>0, tekst:"Co najmniej jedna forma płatności włączona ("+dostepnePlatnosci().map(p=>p.id).join(", ")+")", link:"#/admin/dostawy", akcja:"Ustaw płatności"});
-  k.push({ok:produkty.length>0, tekst:"Produkty w sklepie ("+produkty.length+")", link:"#/admin/produkty", akcja:"Dodaj produkty"});
-  const lokalneUstawienia=wczytajLS("artway_ustawienia",{}), kluczeUstawien=Object.keys(lokalneUstawienia).filter(x=>x!=="krokiPublikacji");
-  const ustawieniaWyeksportowane=!kluczeUstawien.length||localStorage.getItem("artway_ustawienia_export_hash")===prostyHash(JSON.stringify(ustawienia));
-  k.push({ok:ustawieniaWyeksportowane,tekst:ustawieniaWyeksportowane
-    ?"Układ i ustawienia są przygotowane do publikacji"
-    :`Masz zmiany panelu (${kluczeUstawien.length} sekcji) — opublikuj index.html bezpośrednio z panelu`,link:"#/admin/aktualizacja",akcja:"Aktualizuj stronę"});
-  const publikacjaKatalogu=stanPublikacjiKatalogu(),produktyPrzygotowane=publikacjaKatalogu.gotowy;
-  k.push({ok:produktyPrzygotowane, tekst: produktyPrzygotowane
-    ? `products.json zabezpiecza wszystkie ${publikacjaKatalogu.razem} kart produktów`
-    : `products.json wymaga odświeżenia • brakujące ${publikacjaKatalogu.brakujace.length} • zmienione ${publikacjaKatalogu.nieaktualne.length}`,
-    link:"#/admin/aktualizacja", akcja:"Aktualizuj stronę"});
-  return k;
-}
-const KROKI_PUBLIKACJI = [
-  "Zalogowałem się do CloudHosting Panel nazwa.pl",
-  "Wgrałem index.html, products.json i cały katalog api przez SFTP",
-  "Ustawiłem zmienne Netlify dla SMTP, Paynow i InPost ShipX",
-  "Skierowałem domenę na katalog z plikami strony",
-  "Otworzyłem stronę pod własną domeną i wszystko działa",
-  "Sprawdziłem stronę na telefonie",
-  "Złożyłem testowe zamówienie i wysłałem jego potwierdzenie"
-];
-function przelaczKrok(i){
-  const kroki = {...(ustawienia.krokiPublikacji||{})};
-  kroki[i] = !kroki[i];
-  zapiszCzescUstawien({krokiPublikacji: kroki});
-}
-function widokAdminPublikacja(sekcja="kontrola"){
-  const aktywna=["kontrola","pliki","kroki","aktualizacja"].includes(String(sekcja||""))?String(sekcja||""):"kontrola";
-  const kontrole = kontrolePublikacji();
-  const gotowe = kontrole.filter(x=>x.ok).length;
-  const kroki = ustawienia.krokiPublikacji || {};
-  return adminSzkielet("/admin/publikacja", `
-  ${publikacjaSubnavHTML(aktywna)}
-  <div class="panel" style="${aktywna==="kontrola"?"":"display:none"}">
-    <h1>🌍 Publikacja strony</h1>
-    <h2>Gotowość do startu: ${gotowe}/${kontrole.length} ${gotowe===kontrole.length?"— można publikować! 🎉":""}</h2>
-    ${kontrole.map(x=>`<div class="sug" style="${x.ok?'':'background:#fef3c7'}">
-      <span class="s-ico">${x.ok?"✅":"⚠️"}</span>
-      <span>${x.tekst}${x.ok?"":` — <a href="${x.link}">${x.akcja} →</a>`}</span></div>`).join("")}
-  </div>
-  <div class="panel" style="${["pliki","kroki"].includes(aktywna)?"":"display:none"}">
-    <div style="${aktywna==="pliki"?"":"display:none"}"><h2 style="margin-top:0">📁 Co wgrywasz na serwer</h2>
-    <p style="font-size:.9rem;color:var(--muted2)">Przy pierwszym uruchomieniu na hostingu statycznym wgraj <b>index.html</b>, <b>products.json</b> oraz katalog <b>api</b>, jeżeli korzystasz z awaryjnego PHP. Aktualna, profesjonalna wersja sklepu używa jednak <b>Netlify Functions</b> do wspólnej bazy, e-maili, Paynow i InPost.</p>
-    <div class="backend-note"><b>Ważne:</b> GitHub/Netlify są obecnie główną ścieżką publikacji. SFTP/nazwa.pl traktuj jako hosting plików lub plan awaryjny; sekrety InPost i płatności pozostają w zmiennych Netlify, nie w public_html.</div>
-    <h2>Publikacja na nazwa.pl</h2>
-    <details open style="margin:.5rem 0"><summary style="cursor:pointer;font-weight:700">1. Połącz się bezpiecznie przez SFTP</summary>
-      <ol style="font-size:.9rem;color:var(--muted2);padding-left:1.3rem;margin:.5rem 0">
-        <li>Zaloguj się na <b>admin.nazwa.pl</b> identyfikatorem serwera (np. server123456)</li>
-        <li>W CloudHosting Panel wybierz <b>WWW I FTP → Wykaz kont FTP</b></li>
-        <li>Do połączenia SFTP użyj hosta <b>identyfikatorserwera.nazwa.pl</b> i portu <b>22</b></li>
-        <li>Login i hasło są takie jak do CloudHosting Panel albo jak w utworzonym dodatkowym koncie FTP</li>
-      </ol></details>
-    <details style="margin:.5rem 0"><summary style="cursor:pointer;font-weight:700">2. Wgraj gotową paczkę</summary>
-      <ol style="font-size:.9rem;color:var(--muted2);padding-left:1.3rem;margin:.5rem 0">
-        <li>Otwórz katalog docelowy domeny. Jeśli domena wskazuje na <b>public_html</b>, wejdź do public_html</li>
-        <li>Jeżeli public_html nie istnieje, wybierz katalog wskazany dla domeny w CloudHosting Panel</li>
-        <li>Wgraj tam całą zawartość folderu <b>artway-tm-nazwa-pl</b>: index.html, products.json i katalog api</li>
-        <li>Nazwy plików pozostaw bez zmian; nie umieszczaj ich w dodatkowym zagnieżdżonym folderze</li>
-      </ol></details>
-    <details style="margin:.5rem 0"><summary style="cursor:pointer;font-weight:700">3. Skonfiguruj adapter InPost</summary>
-      <ol style="font-size:.9rem;color:var(--muted2);padding-left:1.3rem;margin:.5rem 0">
-        <li>W Parcel Manager InPost wygeneruj token API ShipX oraz publiczny token Geowidget</li>
-        <li>W Netlify ustaw: <b>INPOST_TOKEN</b>, <b>INPOST_ORG_ID</b>, opcjonalnie <b>INPOST_GEOWIDGET_TOKEN</b></li>
-        <li>Dla testów ustaw <b>INPOST_ENV=sandbox</b>; po testach zmień na <b>production</b></li>
-        <li>W panelu sklepu otwórz Centrum wysyłek → Bramka i ustawienia → Test API InPost</li>
-      </ol></details>
-    <details style="margin:.5rem 0"><summary style="cursor:pointer;font-weight:700">4. Skieruj domenę na katalog strony</summary>
-      <ol style="font-size:.9rem;color:var(--muted2);padding-left:1.3rem;margin:.5rem 0">
-        <li>W Panelu Klienta nazwa.pl przejdź do <b>Usługi → Domeny → konfiguruj</b></li>
-        <li>Przekieruj domenę na zakupiony CloudHosting</li>
-        <li>W CloudHosting Panel wskaż katalog, do którego zostały wgrane pliki</li>
-        <li>Po propagacji domeny otwórz stronę i wykonaj test na komputerze oraz telefonie</li>
-      </ol></details>
-    </div><div style="${aktywna==="kroki"?"":"display:none"}"><h2 style="margin-top:0">✅ Lista startowa</h2>
-    ${KROKI_PUBLIKACJI.map((k,i)=>`<label class="chk-row"><input type="checkbox" ${kroki[i]?"checked":""} onchange="przelaczKrok(${i})"> ${k}</label>`).join("")}
-    <p class="pay-note" style="text-align:left;margin-top:.8rem">Pamiętaj: zamówienia, klienci i ustawienia synchronizują się przez wspólną bazę Netlify. Gdy Netlify jest niedostępne, sklep zachowuje lokalną kopię i ponowi synchronizację po odzyskaniu połączenia.</p></div>
-  </div>`);
 }

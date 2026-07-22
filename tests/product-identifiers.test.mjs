@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canonicalGtin, gtinEquivalent, isValidGtin } from '../netlify/functions/lib/domain/product-identifiers.mjs';
+import { canonicalGtin, canonicalProductCode, gtinEquivalent, isValidGtin, synchronizeProductIdentifierAliases } from '../netlify/functions/lib/domain/product-identifiers.mjs';
 import { findBestAllegroOffer, mappingProductSnapshot, mappingVerifiedForSupplier, scoreAllegroProductMapping } from '../netlify/functions/lib/domain/allegro-product-mapping.mjs';
 
 test('EAN-13 i odpowiadający GTIN-14 z zerem wiodącym są tym samym produktem', () => {
@@ -14,6 +14,15 @@ test('zer nie usuwa się z dowolnych SKU ani z błędnych kodów', () => {
   assert.equal(canonicalGtin('001234'), '');
   assert.equal(gtinEquivalent('001234', '1234'), false);
   assert.equal(gtinEquivalent('5906018026789', '05906018026789'), false);
+});
+
+test('jeden kod producenta zasila zgodne aliasy techniczne bez utraty zer wiodących', () => {
+  const product = synchronizeProductIdentifierAliases({ nazwa: 'Edukarty', numerReferencyjny: '0006' }, { overwrite: true });
+  assert.equal(canonicalProductCode(product), '0006');
+  assert.equal(product.kodProducenta, '0006');
+  assert.equal(product.mpn, '0006');
+  assert.equal(product.externalId, '0006');
+  assert.equal(product.sku, '0006');
 });
 
 test('ocena mapowania Allegro nie zgłasza konfliktu dla równoważnych GTIN', () => {
@@ -98,4 +107,28 @@ test('niższy próg od 55% udostępnia słabszą sugestię bez silnego konfliktu
   assert.equal(strict, null);
   assert.equal(broader.offer.id, 'OF-55');
   assert.ok(broader.score >= 55);
+});
+
+test('identyczna nazwa bez identyfikatora nie może automatycznie podpiąć oferty', () => {
+  const product = { id: 30001, nazwa: 'Eco Fun - Trylma', producent: 'Alexander' };
+  const offers = [{ id: 'OF-KAJAK', name: 'Eco Fun - Trylma', productId: 'uuid-kajaka' }];
+  assert.equal(findBestAllegroOffer(product, offers, {}), null);
+  const suggestion = findBestAllegroOffer(product, offers, {}, 55);
+  assert.equal(suggestion.offer.id, 'OF-KAJAK');
+  assert.match(suggestion.reason, /wyłącznie sugestia/);
+});
+
+test('niepotwierdzone UUID katalogu bez EAN nie jest automatycznym dowodem', () => {
+  const product = { id: 30002, nazwa: 'Gra edukacyjna', allegroProductId: 'uuid-123' };
+  const offers = [{ id: 'OF-UUID', name: 'Inny produkt', productId: 'uuid-123' }];
+  assert.equal(findBestAllegroOffer(product, offers, {}), null);
+});
+
+test('ręczne mapowanie administratora pozostaje dozwolone bez EAN', () => {
+  const product = { id: 30003, nazwa: 'Produkt bez kodu' };
+  const offers = [{ id: 'OF-MANUAL', name: 'Produkt bez kodu' }];
+  const mappings = { 'OF-MANUAL': { offerId: 'OF-MANUAL', productId: '30003', operator: 'admin-manual-decision' } };
+  const match = findBestAllegroOffer(product, offers, mappings);
+  assert.equal(match.offer.id, 'OF-MANUAL');
+  assert.equal(match.reason, 'ręczne mapowanie administratora');
 });

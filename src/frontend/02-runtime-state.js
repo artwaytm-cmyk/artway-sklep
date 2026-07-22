@@ -3,6 +3,17 @@
    (localStorage → klucz artway_logi). Podgląd, pobieranie pliku
    logu i sugestie poprawek: podstrona  #/diagnostyka          */
 const MAX_LOGOW = 200;
+function normalizujNazweProducenta(value=""){
+  const name=String(value??"").replace(/\u0000/g,"").replace(/\s+/g," ").trim().slice(0,160);
+  return name&&/\p{L}/u.test(name)?name:"";
+}
+function poprawnaNazwaProducenta(value=""){return !!normalizujNazweProducenta(value);}
+function walidujPoleProducenta(input){
+  if(!input)return true;
+  const value=String(input.value||"").trim(),valid=!value||poprawnaNazwaProducenta(value);
+  input.setCustomValidity(valid?"":"Producent musi być nazwą zawierającą co najmniej jedną literę. Numer wpisz jako kod produktu / producenta.");
+  return valid;
+}
 function pobierzLogi(){ try{ return JSON.parse(localStorage.getItem("artway_logi")||"[]"); }catch(e){ return []; } }
 function loguj(poziom, tresc, zrodlo){
   try{
@@ -27,6 +38,11 @@ function odswiezZnacznikDiag(){
    (np. otwarta z dysku), nie pokazuje nieaktualnych produktów demonstracyjnych. */
 const PRODUKTY_ZAPASOWE = []; // brak demonstracyjnych towarów — źródłem awaryjnym jest aktualny products.json
 
+// Stan integracji jest częścią wspólnego rdzenia aplikacji. Panel korzysta z
+// niego na każdej trasie (m.in. przy synchronizacji bazy), dlatego nie może być
+// deklarowany dopiero w ładowanym na żądanie module Centrum wysyłek.
+let stanBramki={sprawdzono:false,online:false,configured:false,ready:false,authenticated:false,error:"",organizations:[],email:{configured:false,authenticated:false,provider:null},store:{configured:false,writable:false,orders:0,users:0},inpost:{configured:false,authenticated:false,geowidgetConfigured:false,env:"production"}};
+
 /* ═══════════ STAN ═══════════ */
 let produkty = [];
 let prodBazowe = [];
@@ -35,12 +51,19 @@ const PRODUCT_LINK_IMPORT_FIRST_ID = 1000000;
 // dzielonego katalogu serwerowego. Nie zapisujemy ich w localStorage ani w
 // ogólnym rekordzie settings, aby duży katalog nie przekroczył limitu 4 MB.
 let produktyImportowane = [];
-let produktyBazoweCache={bazowe:null,importowane:null,items:[]};
+let produktyCentralnePobrane = [];
+let produktyBazoweCache={bazowe:null,importowane:null,centralne:null,items:[]};
 function produktyBazoweWspolne(){
-  if(produktyBazoweCache.bazowe===prodBazowe&&produktyBazoweCache.importowane===produktyImportowane)return produktyBazoweCache.items;
+  if(produktyBazoweCache.bazowe===prodBazowe&&produktyBazoweCache.importowane===produktyImportowane&&produktyBazoweCache.centralne===produktyCentralnePobrane)return produktyBazoweCache.items;
   const mapa=new Map();
   [...(Array.isArray(prodBazowe)?prodBazowe:[]),...(Array.isArray(produktyImportowane)?produktyImportowane:[])].forEach(p=>{if(p&&p.id!==undefined)mapa.set(String(p.id),p);});
-  const items=[...mapa.values()];produktyBazoweCache={bazowe:prodBazowe,importowane:produktyImportowane,items};return items;
+  (Array.isArray(produktyCentralnePobrane)?produktyCentralnePobrane:[]).forEach(p=>{if(p&&p.id!==undefined){const id=String(p.id),old=mapa.get(id)||{};mapa.set(id,{...old,...p,_catalog:{...(old._catalog||{}),...(p._catalog||{})}});}});
+  const items=[...mapa.values()];produktyBazoweCache={bazowe:prodBazowe,importowane:produktyImportowane,centralne:produktyCentralnePobrane,items};return items;
+}
+function zapamietajProduktyCentralne(lista=[]){
+  const mapa=new Map((produktyCentralnePobrane||[]).map(p=>[String(p.id),p]));
+  (Array.isArray(lista)?lista:[]).forEach(p=>{if(p&&p.id!==undefined)mapa.set(String(p.id),p);});
+  produktyCentralnePobrane=[...mapa.values()].slice(-5000);produktyBazoweCache={bazowe:null,importowane:null,centralne:null,items:[]};if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
 }
 let zrodloProduktow = "zapasowe";
 let produktyDodane = wczytajLS("artway_produkty_dodane", []);
@@ -79,7 +102,7 @@ let seoNaStronie=[25,50,100,250,500].includes(Number(wczytajLS("artway_seo_na_st
 let ulubione = wczytajLS("artway_ulubione", []);
 let rabat = wczytajLS("artway_rabat", null);
 let sesja = wczytajLS("artway_sesja", null);
-if(sesja && !sesja.token && !["localhost","127.0.0.1"].includes(location.hostname) && location.protocol!=="file:"){
+if(sesja && !sesja.token && !sesja.verified && !["localhost","127.0.0.1"].includes(location.hostname) && location.protocol!=="file:"){
   sesja=null;
   try{localStorage.removeItem("artway_sesja");}catch(e){}
 }
@@ -110,7 +133,7 @@ let zaznaczoneAllegroDyskusje = new Set();
 let zaznaczoneAllegroZgodnosc = new Set();
 let allegroOstatniBladWystawienia = null;
 let allegroOstatniWynikWystawienia = null;
-let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSyncState:{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null,lastSource:null,lastResult:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,updated_at:null}};
+let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, autonomousAgent:{enabled:true,status:"waiting",completedAt:null,nextRunAt:null,mapping:{},stats:{},duplicateGroupsResolved:0,duplicateOffersEnded:0,reviewCount:0}, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSyncState:{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null,lastSource:null,lastResult:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autonomousAgentMinutes:15,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,updated_at:null}};
 let allegroDaneZaladowane={summary:false,orders:false,offers:false,config:false};
 let allegroDaneLadowane=new Set();
 let allegroDaneOdczytAt={summary:0,orders:0,offers:0,config:0};
@@ -128,4 +151,7 @@ let szukajInfaktZakupy="",filtrInfaktZakupy="wszystkie",limitInfaktZakupy=50,szu
 let zaznaczoneInfaktZakupy=new Set(),zaznaczoneInfaktHistoria=new Set(),zaznaczoneMagazynProdukty=new Set(),magazynWynikiIds=[],magazynStronaIds=[],zaznaczoneDostepnoscProducentow=new Set(),dostepnoscProducentowWynikiIds=[],dostepnoscProducentowStronaIds=[],zaznaczeniKlienci=new Set();
 let agentAIPlanProfil=["full","data","health"].includes(wczytajLS("artway_agent_plan_profil","full"))?wczytajLS("artway_agent_plan_profil","full"):"full";
 let agentAIPlanStan={busy:false,current:"",startedAt:null,completedAt:null,results:[],error:"",profile:agentAIPlanProfil,runId:"",history:[],historyLoading:false};
+let agentAIRuntime={loading:false,loaded:false,error:"",runtime:null,updatedAt:0,pollTimer:null};
+let agentAISpecjalisci={loading:false,loaded:false,saving:false,running:false,error:"",data:null,activeRun:null};
+let agentAISpecjalistaDecyzjeWToku=new Set();
 let agentAITelegram={loading:false,loaded:false,saving:false,error:"",settings:null,status:null,stats:{},state:{},events:[],history:[],quietNow:false};

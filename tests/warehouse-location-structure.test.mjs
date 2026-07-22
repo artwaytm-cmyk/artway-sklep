@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
-const core = await readFile('src/frontend/05-catalog-inventory.js', 'utf8');
+const core = await readFile('assets/app.js', 'utf8');
 const ui = await readFile('src/frontend/10-warehouse-locations.js', 'utf8');
-const view = await readFile('src/frontend/12-customers-and-inventory.js', 'utf8');
+const view = await readFile('assets/admin.js', 'utf8');
 const styles = await readFile('src/styles/20-warehouse-locations.css', 'utf8');
 const build = await readFile('scripts/build-assets.mjs', 'utf8');
 
@@ -51,19 +51,55 @@ test('kreator tworzy czytelną strukturę Pakownia → Regał A → Półka 3', 
   const context = { kodLokalizacjiMagazynu: (value = '') => String(value).trim().toUpperCase().replace(/[^A-Z0-9-]+/g, '-') };
   vm.runInNewContext(`${ui.slice(start, end)};this.result=[magazynKodZPrzyjaznejNazwy('strefa','','Pakownia'),magazynKodZPrzyjaznejNazwy('regał','PAKOWNIA','A'),magazynKodZPrzyjaznejNazwy('półka','PAKOWNIA-RA','3'),magazynNazwaZPrzyjaznejWartosci('półka','3')];`, context);
   assert.deepEqual(Array.from(context.result), ['PAKOWNIA', 'PAKOWNIA-RA', 'PAKOWNIA-RA-P03', 'Półka 3']);
-  assert.match(ui, /Kody systemowe i QR są tworzone automatycznie w tle/);
+  assert.match(ui, /Półka jest ostatnim poziomem i nie ma limitu sztuk/);
   assert.match(ui, /Tak zobaczy to pracownik/);
   assert.match(core, /nazwa:`Regał \$\{rackLabel\}`/);
   assert.match(core, /nazwa:`Półka \$\{shelfNo\}`/);
   assert.match(core, /rackMode==="numery"/);
 });
 
-test('półka i miejsce mogą przechowywać nieograniczoną liczbę sztuk', () => {
-  assert.match(core, /bezLimitu=f\.get\("bezLimitu"\)==="on"\|\|limit<=0/);
-  assert.match(core, /pojemnosc:bezLimitu\?0:/);
+test('półka jest ostatnim poziomem i zawsze ma nieograniczoną pojemność', () => {
+  assert.match(core, /l\.aktywna!==false&&l\.typ!=="miejsce"/);
+  assert.match(core, /pojemnosc:0,bezLimitu:true/);
   assert.match(ui, /Bez limitu liczby sztuk/);
-  assert.match(ui, /dowolna liczba produktów i sztuk/);
-  assert.match(core, /Math\.min\(500,intNieujemny\(f\.get\("miejsca"\),0\)\)/);
+  assert.match(ui, /dowolną liczbę produktów i sztuk/);
+  assert.doesNotMatch(core, /for\(let m=0;m<placeCount/);
+  assert.doesNotMatch(ui, /name="miejsca"/);
+  assert.match(ui, /function magazynTypDzieckaLokalizacji\(location\)\{return location\?\.typ==="strefa"\?"regał":location\?\.typ==="regał"\?"półka":"";\}/);
+});
+
+test('indeks lokalizacji skaluje się do dużego magazynu bez ponownego przeszukiwania całej listy', () => {
+  const start = core.indexOf('let magazynLokalizacjeIndexCache');
+  const end = core.indexOf('function czyLokalizacjaBezLimitu', start);
+  assert.ok(start >= 0 && end > start);
+  const locations = [{ kod: 'PAK', nazwa: 'Pakownia', typ: 'strefa' }];
+  for (let rack = 1; rack <= 20; rack++) {
+    locations.push({ kod: `PAK-R${rack}`, nazwa: `Regał ${rack}`, typ: 'regał', parentKod: 'PAK' });
+    for (let shelf = 1; shelf <= 20; shelf++) locations.push({ kod: `PAK-R${rack}-P${shelf}`, nazwa: `Półka ${shelf}`, typ: 'półka', parentKod: `PAK-R${rack}` });
+  }
+  const context = {
+    magazynLokalizacje: locations,
+    kodLokalizacjiMagazynu: value => String(value || '').trim().toUpperCase(),
+    esc: value => String(value ?? ''),
+    Map,
+    Set,
+  };
+  vm.runInNewContext(`${core.slice(start, end)};this.first=magazynLokalizacjeIndex();this.second=magazynLokalizacjeIndex();this.path=sciezkaLokalizacjiMagazynu('PAK-R20-P20');this.depth=poziomLokalizacjiMagazynu('PAK-R20-P20');this.found=magazynLokalizacjaPoKodzie('pak-r20-p20');`, context);
+  assert.equal(context.first, context.second);
+  assert.equal(context.first.aktywne.length, 421);
+  assert.equal(context.path, 'PAK / PAK-R20 / PAK-R20-P20');
+  assert.equal(context.depth, 2);
+  assert.equal(context.found.nazwa, 'Półka 20');
+});
+
+test('Stany używają jednej listy lokalizacji zamiast setek powielonych pól wyboru', () => {
+  assert.match(view, /magazynLokalizacjeDatalistHTML\("warehouseStockLocationOptions"\)/);
+  assert.match(view, /poleLokalizacjiMagazynu\(meta\.lokalizacja\|\|"","warehouseStockLocationOptions"\)/);
+  const stockStart = view.indexOf('${aktywna==="stany"?');
+  const stockEnd = view.indexOf('${aktywna==="ruchy"?', stockStart);
+  const stock = view.slice(stockStart, stockEnd);
+  assert.equal((stock.match(/magazynLokalizacjeDatalistHTML/g) || []).length, 1);
+  assert.doesNotMatch(stock, /selectLokalizacjiMagazynu\(meta\.lokalizacja/);
 });
 
 test('lokalizacje mają mapę drzewa, prosty kreator i chronione kody QR', () => {
@@ -77,6 +113,15 @@ test('lokalizacje mają mapę drzewa, prosty kreator i chronione kody QR', () =>
   assert.match(ui, /#\/admin\/magazyn\/etykiety-qr/);
   assert.match(ui, /setTimeout\(\(\)=>renderuj\(\),180\)/);
   assert.match(view, /magazynLokalizacjePanelHTML\(lokalizacje,statLok,pozaSlownikiem\)/);
+});
+
+test('lokalizację można naprawdę usunąć z kontrolą produktów i szkiców PZ/WZ', () => {
+  assert.match(ui, /warehouse-location-delete-preview/);
+  assert.match(ui, /warehouse-location-delete/);
+  assert.match(ui, /Przenieś na inną półkę/);
+  assert.match(ui, /Pozostaw bez lokalizacji/);
+  assert.match(ui, /Usuń lokalizację/);
+  assert.match(styles, /warehouse-location-delete-dialog/);
 });
 
 test('nowy moduł i responsywne style są częścią panelu administratora', () => {

@@ -9,7 +9,7 @@ test('przełączanie kart nie uruchamia ponownie tego samego odczytu sieciowego'
   const [cloud, state, allegro] = await Promise.all([
     read('src/frontend/03-cloud-sync.js'),
     read('src/frontend/02-runtime-state.js'),
-    read('src/frontend/11-allegro-and-orders.js'),
+    read('assets/admin.js'),
   ]);
   assert.match(cloud, /chmuraPobraniaWToku\.get\(requestKey\)/);
   assert.match(cloud, /chmuraPobraniaWToku\.set\(requestKey,request\)/);
@@ -18,7 +18,24 @@ test('przełączanie kart nie uruchamia ponownie tego samego odczytu sieciowego'
   assert.match(allegro, /zaladowany&&Date\.now\(\)-ostatni<ALLEGRO_DANE_TTL_MS/);
   assert.match(allegro, /allegroPanelStatyCache/);
   assert.doesNotMatch(state, /wczytajLS\("artway_allegro_(?:zamowienia|oferty|mapowania|komunikacja)_cache"/);
+  assert.match(allegro, /ALLEGRO_TRWALY_CACHE_KEY="allegro-offers-and-mappings-v2"/);
+  assert.match(allegro, /function allegroOdtworzTrwalyCache/);
+  assert.match(allegro, /chmuraRuntimeCacheOdczytaj\(ALLEGRO_TRWALY_CACHE_KEY\)/);
   assert.match(allegro, /allegroIndeksOfert\(\)\.byId/);
+});
+
+test('bazowy katalog i widoki panelu pozostają w trwałej, adaptacyjnej pamięci', async () => {
+  const [catalog,cloud,router,responsive]=await Promise.all([
+    read('assets/app.js'),read('src/frontend/03-cloud-sync.js'),read('assets/app.js'),read('src/frontend/08a-admin-responsive-layout.js'),
+  ]);
+  assert.match(catalog,/PRODUKTY_BAZOWE_CACHE_TTL_MS=6\*60\*60\*1000/);
+  assert.match(catalog,/If-None-Match/);
+  assert.match(cloud,/przed<7_500_000/);
+  assert.doesNotMatch(cloud,/KLUCZE_PRZESTARZALYCH_CACHE[\s\S]{0,300}"artway_produkty_katalog"/);
+  assert.match(responsive,/navigator\.storage\.persist\(\)/);
+  assert.match(responsive,/ADMIN_PAMIEC_URZADZENIA_GB>=8\?16:12/);
+  assert.match(router,/entry\.signature!==adminSygnaturaCacheTrasy\(route\)/);
+  assert.match(cloud,/uniewaznijCachePodstronAdmina\(klucz\)/);
 });
 
 test('synchronizacja ostatniego okna pobiera wszystkie statusy, lecz kolejka zachowuje filtr pracy', async () => {

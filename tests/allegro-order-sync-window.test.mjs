@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeRecentAllegroOrders } from '../netlify/functions/lib/domain/allegro-order-sync-window.mjs';
+import { allegroOrderEventFingerprint, countChangedAllegroOrderEvents, mergeRecentAllegroOrders } from '../netlify/functions/lib/domain/allegro-order-sync-window.mjs';
 
 const normalize = (order) => ({ ...order, id: String(order.id || '') });
 const merge = (order, previous) => ({ ...previous, ...order, warehouseStage: ['SENT', 'CANCELLED', 'RETURNED'].includes(order.fulfillmentStatus) ? 'zamkniete' : (previous.warehouseStage || 'do_sprawdzenia') });
@@ -38,4 +38,13 @@ test('duplikat w stronie API jest scalany tylko raz, a archiwum nie wraca do kol
   });
   assert.deepEqual([...result.byId.keys()], ['same']);
   assert.equal(result.imported, 1);
+});
+
+test('detektor zdarzeń ignoruje techniczne czasy odczytu, ale widzi rzeczywistą zmianę statusu lub pozycji', () => {
+  const previous = [{ id: '1', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'NEW', rawUpdatedAt: 'stary', lastSeenAt: 'stary', lineItems: [{ id: 'L1', offerId: 'O1', quantity: 1 }] }];
+  const same = [{ ...previous[0], rawUpdatedAt: 'nowy', lastSeenAt: 'nowy', officialStatusCheckedAt: 'nowy' }];
+  const changed = [{ ...same[0], fulfillmentStatus: 'SENT' }];
+  assert.equal(allegroOrderEventFingerprint(previous[0]), allegroOrderEventFingerprint(same[0]));
+  assert.equal(countChangedAllegroOrderEvents(previous, same), 0);
+  assert.equal(countChangedAllegroOrderEvents(previous, changed), 1);
 });

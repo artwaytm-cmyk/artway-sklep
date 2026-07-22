@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import {readFile} from "node:fs/promises";
 
-const sourcePath=new URL("../src/frontend/11-allegro-and-orders.js",import.meta.url);
+const sourcePath=new URL("../assets/admin.js",import.meta.url);
 
 async function loadQueueHelpers(){
   const source=await readFile(sourcePath,"utf8");

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { canonicalProductCode, synchronizeProductIdentifierAliases } from './product-identifiers.mjs';
 
 export const IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY = 'imported-product-catalog:manifest:v1';
 export const IMPORTED_PRODUCT_CATALOG_SHARD_PREFIX = 'imported-product-catalog:shard:v1:';
@@ -118,6 +119,62 @@ function catalogError(message, code = 'imported_catalog_error', status = 409) {
   error.code = code;
   error.status = status;
   return error;
+}
+
+const SOURCE_REFRESH_FIELDS = Object.freeze([
+  'sourceUrl', 'producentUrl', 'agentImportUrl', 'sourceEvidence', 'sourceMaterial',
+  'parametryProducenta', 'parametryZrodla', 'dostepnoscProducenta', 'stanProducenta',
+  'stanProducentaDokladny', 'stanProducentaZrodlo', 'producentStatus', 'producentSprawdzonoAt',
+]);
+const SOURCE_FILL_FIELDS = Object.freeze([
+  'nazwa', 'opisKrotki', 'opis', 'producent', 'marka', 'kategoria', 'zdjecie', 'zdjecia',
+  'rozmiar', 'material', 'kolorProduktu',
+]);
+
+/** Aktualizacja z linku nie może nadpisać ceny, stanu ani ręcznej redakcji administratora. */
+export function mergeImportedProductSourceRefresh(existing = {}, incoming = {}, refreshedAt = timestamp()) {
+  let result = { ...clone(existing) };
+  for (const field of SOURCE_REFRESH_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(incoming, field) || incoming[field] === undefined || incoming[field] === null || incoming[field] === '') continue;
+    if (field === 'parametryProducenta' || field === 'parametryZrodla' || field === 'sourceEvidence' || field === 'sourceMaterial') {
+      result[field] = { ...asObject(result[field]), ...clone(asObject(incoming[field])) };
+    } else result[field] = clone(incoming[field]);
+  }
+  for (const field of SOURCE_FILL_FIELDS) {
+    const current = result[field], next = incoming[field];
+    const currentMissing = Array.isArray(current) ? current.length === 0 : !clean(current, 20);
+    const nextPresent = Array.isArray(next) ? next.length > 0 : !!clean(next, field === 'opis' ? 6000 : 3000);
+    if (currentMissing && nextPresent) result[field] = clone(next);
+  }
+  const gtin = first(incoming, ['gtin', 'ean', 'GTIN', 'EAN'], 40).replace(/\D/g, '');
+  if (gtin && !first(result, ['gtin', 'ean', 'GTIN', 'EAN'], 40)) result = synchronizeProductIdentifierAliases({ ...result, gtin, ean: gtin });
+  const sourceCode = canonicalProductCode(incoming);
+  const existingCode = canonicalProductCode(result);
+  if (sourceCode || existingCode) result = synchronizeProductIdentifierAliases(result, { code: existingCode || sourceCode, overwrite: !existingCode });
+  result.sourceRefreshedAt = refreshedAt;
+  result.sourceRefreshStatus = 'updated_from_product_link_file';
+  return result;
+}
+
+/** Ten sam bezpieczny merge dla produktów przechowywanych w głównej kartotece ustawień. */
+export async function refreshCentralProductSource({ productId, incoming = {}, readVersioned, writeIfVersion, getProducts, createUpdater, maxAttempts = 6 } = {}) {
+  const id = String(productId ?? '').trim();
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const version = await readVersioned('settings', { data: {}, rev: 0, updated_at: null });
+    const previous = version.value || { data: {}, rev: 0, updated_at: null }, data = { ...(previous.data || {}) };
+    const products = getProducts(data), existing = products.get(id);
+    if (!existing) return { updated: false, notFound: true, product: null, changedFields: [] };
+    const next = mergeImportedProductSourceRefresh(existing, incoming);
+    const changedFields = Object.keys(next).filter((field) => field !== 'id' && JSON.stringify(next[field]) !== JSON.stringify(existing[field]));
+    if (!changedFields.length) return { updated: false, product: existing, changedFields: [] };
+    const updater = createUpdater(data, products.keys());
+    updater.apply(id, Object.fromEntries(changedFields.map((field) => [field, next[field]])));
+    if (!updater.commit()) return { updated: false, product: existing, changedFields: [] };
+    const record = { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: timestamp() };
+    const write = await writeIfVersion('settings', record, version);
+    if (write?.modified) return { updated: true, product: { ...existing, ...Object.fromEntries(changedFields.map((field) => [field, next[field]])) }, changedFields };
+  }
+  throw catalogError('Kartoteka zmieniła się podczas aktualizacji z pliku linków.', 'settings_write_conflict');
 }
 
 export function createImportedProductCatalog({ read, readVersioned, writeIfVersion, shardSize = DEFAULT_SHARD_SIZE } = {}) {
@@ -292,5 +349,42 @@ export function createImportedProductCatalog({ read, readVersioned, writeIfVersi
     return { added: true, idempotent: false, product: saved, reason: null };
   }
 
-  return Object.freeze({ list, metadata, page, findDuplicate, add });
+  async function updateFromSource(productId, incoming = {}) {
+    const id = String(productId ?? '').trim();
+    if (!id) throw catalogError('Brakuje identyfikatora aktualizowanego produktu.', 'imported_catalog_product_id_required', 422);
+    const manifest = normalizeManifest(await read(IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY, {}), boundedShardSize);
+    for (const descriptor of manifest.shards) {
+      let changedFields = [];
+      const result = await (async () => {
+        for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+          const version = await readVersioned(descriptor.key, { items: [], updatedAt: null });
+          const items = asArray(version.value?.items), index = items.findIndex((item) => String(item?.id ?? '') === id);
+          if (index < 0) return null;
+          const previous = items[index], next = mergeImportedProductSourceRefresh(previous, incoming);
+          changedFields = Object.keys(next).filter((field) => JSON.stringify(next[field]) !== JSON.stringify(previous[field]));
+          if (!changedFields.length) return { updated: false, product: clone(previous), changedFields: [] };
+          const nextItems = [...items]; nextItems[index] = next;
+          const write = await writeIfVersion(descriptor.key, { items: nextItems, updatedAt: timestamp() }, version);
+          if (write?.modified) return { updated: true, product: clone(next), changedFields };
+        }
+        throw catalogError('Kartoteka zmieniła się podczas odświeżania źródła.', 'imported_catalog_source_refresh_conflict');
+      })();
+      if (!result) continue;
+      if (result.updated) {
+        // Dopisujemy nowe identyfikatory do indeksu. Stare klucze zostają jako
+        // aliasy historyczne, aby ponowny import nadal nie utworzył duplikatu.
+        for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+          const version = await readVersioned(IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY, {}), current = normalizeManifest(version.value, boundedShardSize);
+          const fingerprintIndex = { ...current.fingerprintIndex };
+          for (const fingerprint of productFingerprints(result.product)) fingerprintIndex[fingerprintKey(fingerprint)] = { id: result.product.id, shardKey: descriptor.key, reason: fingerprint.type };
+          const write = await writeIfVersion(IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY, { ...current, fingerprintIndex, updatedAt: timestamp() }, version);
+          if (write?.modified) break;
+        }
+      }
+      return result;
+    }
+    return { updated: false, notFound: true, product: null, changedFields: [] };
+  }
+
+  return Object.freeze({ list, metadata, page, findDuplicate, add, updateFromSource });
 }

@@ -23,10 +23,19 @@
   .search{order:3;grid-column:1/-1;max-width:none;width:100%;min-width:0}
   .search input{padding:.55rem .7rem;font-size:16px;min-width:0;min-height:44px}
   .search button{padding:.5rem .75rem;min-width:44px;min-height:44px}
-  .nav-row{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;gap:.75rem;padding:0 .7rem .55rem;font-size:.78rem;scrollbar-width:none}
-  .nav-row::-webkit-scrollbar{display:none}
-  .nav-row a,.nav-drop-btn{display:inline-flex;align-items:center;white-space:nowrap;font-size:.78rem;min-height:44px}
-  .nav-menu{position:fixed;left:.7rem;right:.7rem;top:98px;min-width:0;max-height:60vh;overflow:auto}
+  .nav-row{flex-wrap:nowrap;overflow:visible;justify-content:space-between;gap:.3rem;padding:0 .7rem .55rem;font-size:.74rem}
+  .nav-row a,.nav-drop-btn{display:inline-flex;align-items:center;white-space:nowrap;font-size:.74rem;min-height:44px}
+  .nav-row>.nav-dd:not(.nav-mobile-categories),.nav-row>.nav-category-direct{display:none}
+  .nav-mobile-categories{display:inline-flex;order:0;margin-left:0;position:relative}
+  .nav-home-link{order:1;font-size:0!important}
+  .nav-home-link::after{content:"🏪 Start";font-size:.74rem}
+  .nav-row>a[href="/promocje"]{order:2}
+  .nav-row>a[href="/nowosci"]{order:3}
+  .nav-admin-link{display:none!important}
+  .nav-menu{position:absolute;left:0;right:auto;top:calc(100% + 2px);min-width:0;max-width:none;max-height:min(62vh,520px);overflow-y:auto;overflow-x:hidden;transform:none}
+  .nav-menu-mega{width:auto;grid-template-columns:1fr!important;padding:.5rem;scrollbar-gutter:auto}
+  .nav-mobile-categories .nav-menu-mega{position:absolute;left:0;right:auto;top:calc(100% + 2px);width:calc(100vw - 1.4rem);margin-top:0}
+  .nav-menu-heading{top:-.5rem}.nav-menu-search{top:55px}
   .hero{margin:.75rem auto 0;padding:0 .7rem}
   .hero-in{padding:1.25rem 1rem;border-radius:16px}
   .hero-in::after{font-size:5.2rem;right:.8rem;bottom:-.7rem}

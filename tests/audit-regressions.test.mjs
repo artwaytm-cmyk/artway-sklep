@@ -21,7 +21,7 @@ test('awaryjny products.json zachowuje cały aktualny katalog bez danych prywatn
 });
 
 test('koszyk usuwa nieaktualne produkty i nie odczytuje nazwy z pustego wyniku', () => {
-  const checkout = read('src/frontend/17-cart-and-checkout.js');
+  const checkout = `${read('src/frontend/17-cart-and-checkout.js')}\n${read('src/frontend/17a-checkout-and-delivery.js')}`;
   assert.match(checkout, /const brakujace=koszyk\.filter/);
   assert.match(checkout, /koszyk=koszyk\.filter\(x=>produkty\.some/);
   assert.match(checkout, /return p\?`<div><span>\$\{esc\(p\.nazwa\)\}/);
@@ -30,16 +30,18 @@ test('koszyk usuwa nieaktualne produkty i nie odczytuje nazwy z pustego wyniku',
 
 test('ciężkie rejestry Allegro pozostają na serwerze zamiast w localStorage', () => {
   const cloud = read('src/frontend/03-cloud-sync.js');
-  const allegro = read('src/frontend/11-allegro-and-orders.js');
-  assert.match(cloud, /KLUCZE_CIEZKICH_CACHE/);
+  const allegro = read('assets/admin.js');
+  assert.match(cloud, /KLUCZE_PRZESTARZALYCH_CACHE/);
   assert.match(cloud, /zwolnijPamiecPodreczna/);
   assert.doesNotMatch(allegro, /zapiszLS\("artway_allegro_oferty_cache"/);
   assert.doesNotMatch(allegro, /zapiszLS\("artway_allegro_komunikacja_cache"/);
+  assert.match(allegro, /ALLEGRO_TRWALY_CACHE_KEY="allegro-offers-and-mappings-v2"/);
+  assert.match(allegro, /chmuraRuntimeCacheZapisz\(ALLEGRO_TRWALY_CACHE_KEY/);
 });
 
 test('promocja ma jedno źródło prawdy i sklep posiada manifest', () => {
   const config = read('src/frontend/01-config-and-catalog.js');
-  const storefront = read('src/frontend/06-router-and-storefront.js');
+  const storefront = read('assets/app.js');
   const html = read('index.html');
   const manifest = JSON.parse(read('manifest.webmanifest'));
   assert.match(config, /function glownaPromocja\(/);
@@ -49,10 +51,12 @@ test('promocja ma jedno źródło prawdy i sklep posiada manifest', () => {
   assert.ok(fs.existsSync(new URL('../icons/artway-icon.svg', import.meta.url)));
 });
 
-test('katalog produktów omija pamięć przeglądarki i odrzuca uszkodzony plik', () => {
-  const catalog = read('src/frontend/05-catalog-inventory.js');
+test('katalog produktów używa wersjonowanej pamięci IndexedDB i odrzuca uszkodzony plik', () => {
+  const catalog = read('assets/app.js');
   assert.match(catalog, /products\.json\?v=/);
-  assert.match(catalog, /cache:"no-store"/);
+  assert.match(catalog, /PRODUKTY_BAZOWE_CACHE_KEY="base-products-v2"/);
+  assert.match(catalog, /cache:"no-cache"/);
+  assert.match(catalog, /chmuraRuntimeCacheOdczytaj\(PRODUKTY_BAZOWE_CACHE_KEY\)/);
   assert.match(catalog, /new Set\(poprawne\.map/);
   assert.match(catalog, /unikalne\.size!==poprawne\.length/);
 });

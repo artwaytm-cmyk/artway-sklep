@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Artway Telegram server availability every two minutes
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=true
+Unit=artway-telegram-watchdog.service
+
+[Install]
+WantedBy=timers.target

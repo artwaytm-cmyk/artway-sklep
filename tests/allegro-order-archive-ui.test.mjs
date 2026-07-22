@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 test('panel zamówień rozdziela rejestr 30-dniowy od archiwum ładowanego na żądanie', async () => {
   const [orders, archive] = await Promise.all([
-    readFile(new URL('../src/frontend/11-allegro-and-orders.js', import.meta.url), 'utf8'),
+    readFile(new URL('../assets/admin.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/frontend/11-allegro-order-archive-ui.js', import.meta.url), 'utf8'),
   ]);
   assert.match(orders, /Ostatnie 30 dni/);

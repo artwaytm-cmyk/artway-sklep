@@ -3,12 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="artway-version" content="2026.07.16.24">
+<meta name="artway-version" content="2026.07.22.23">
 <meta name="google-site-verification" content="rgyRTOc-UT4liX6mFWQyqEFF9eUnKLKy5hoMF62d40g">
 <title>Gry, zabawki i artykuły imprezowe | Artway-TM</title>
 <meta name="description" content="Artway-TM — gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów. Wygodne zakupy i dostawa InPost.">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta name="theme-color" content="#2563eb">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Artway Admin">
 <meta property="og:locale" content="pl_PL">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Artway-TM">
@@ -19,15 +23,16 @@
 <meta name="twitter:title" content="Gry, zabawki i artykuły imprezowe | Artway-TM">
 <meta name="twitter:description" content="Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów. Wygodne zakupy i dostawa InPost.">
 <link id="faviconLink" rel="icon" type="image/svg+xml" href="/icons/artway-icon.svg">
+<link rel="apple-touch-icon" sizes="192x192" href="/icons/artway-icon-192.png">
 <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/assets/styles.css?v=2026.07.16.24">
-  <script id="artway-seo-schema" type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"Artway-TM","url":"https://artwaytm.pl/","inLanguage":"pl-PL"},{"@type":"OnlineStore","name":"Artway-TM","url":"https://artwaytm.pl/","email":"artwaytm@gmail.com","telephone":"+48530038914"}]}</script>
+  <link rel="stylesheet" href="/assets/styles.css?v=2026.07.22.23">
+  <script id="artway-seo-schema" type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","name":"Artway-TM","url":"https://artwaytm.pl/","inLanguage":"pl-PL"},{"@type":"OnlineStore","name":"Artway-TM","legalName":"ARTWAY-TM SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ","taxID":"5882468333","url":"https://artwaytm.pl/","email":"artwaytm@gmail.com","telephone":"+48530038914","address":{"@type":"PostalAddress","streetAddress":"Gryfa Pomorskiego 1/A","postalCode":"84-207","addressLocality":"Bojano","addressCountry":"PL"}}]}</script>
 </head>
 <body>
 
 <a class="skip-link" href="#widok">Przejdź do głównej treści</a>
 
-<div class="topbar" id="topbar" role="note">🚚 Darmowa dostawa od 200 zł &nbsp;•&nbsp; 📦 Wysyłka w 24h &nbsp;•&nbsp; ↩️ 14 dni na zwrot &nbsp;•&nbsp; 🎁 Kod <b>START10</b> = −10%</div>
+<div class="topbar" id="topbar" role="note">🚚 Darmowa dostawa od 400 zł &nbsp;•&nbsp; 📦 Wysyłka w 48h &nbsp;•&nbsp; ↩️ 14 dni na zwrot &nbsp;•&nbsp; 🎁 Kod <b>START5</b> = −5%</div>
 
 <header>
   <div class="header-in">
@@ -46,7 +51,7 @@
   <nav class="nav-row" id="mainNav" aria-label="Główne kategorie sklepu"></nav>
 </header>
 
-<main id="widok" tabindex="-1"></main>
+<main id="widok" tabindex="-1"><div class="seo-home-entry"><section><small>ARTWAY-TM • GRY, ZABAWKI I ARTYKUŁY IMPREZOWE</small><h1>Pomysły na wspólną zabawę, naukę i udane przyjęcie</h1><p>Odkryj gry rodzinne i edukacyjne, zestawy kreatywne, balony oraz artykuły imprezowe od sprawdzonych producentów. Czytelne ceny, bezpieczne zakupy i wygodna dostawa InPost.</p><div><a href="/nowosci">Zobacz nowości</a><a href="/promocje">Sprawdź promocje</a></div></section><aside><b>Dlaczego Artway-TM?</b><ul><li>Gry i zabawki sprawdzonych marek</li><li>Aktualna dostępność produktów</li><li>Dostawa Paczkomatem lub Kurierem InPost</li><li>14 dni na zwrot</li></ul></aside></div></main>
 
 <!-- Koszyk -->
 <div class="overlay" id="overlay" aria-hidden="true"></div>
@@ -59,8 +64,9 @@
   <div class="drawer-foot">
     <div id="rabatBox"></div>
     <div class="promo-row" id="promoRow">
-      <input id="promoInput" placeholder="Kod rabatowy">
-      <button onclick="zastosujKod()">Zastosuj</button>
+      <label class="sr-only" for="promoInput">Kod rabatowy</label>
+      <input id="promoInput" name="promo-code" placeholder="Kod rabatowy" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <button type="button" onclick="zastosujKod()">Zastosuj kod rabatowy</button>
     </div>
     <div class="total-row"><span>Razem:</span><b id="cartTotal">0,00 zł</b></div>
     <button class="checkout-btn" id="checkoutBtn">Przejdź do zamówienia →</button>
@@ -78,16 +84,16 @@
     <div><h4 id="footNazwa">Artway-TM</h4><p id="footOpis">Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów. Czytelna oferta, uczciwe ceny i szybka wysyłka.</p></div>
     <div><h4>Sklep</h4>
       <a href="#/">Wszystkie produkty</a>
-      <a href="#/promocje">Promocje</a>
-      <a href="#/nowosci">Nowości</a>
-      <a href="#/o-nas" data-page-link="onas">O Artway-TM</a>
+      <a href="/promocje">Promocje</a>
+      <a href="/nowosci">Nowości</a>
+      <a href="/o-nas" data-page-link="onas">O Artway-TM</a>
     </div>
     <div><h4>Informacje</h4>
-      <a href="#/regulamin" data-page-link="regulamin">Regulamin</a>
-      <a href="#/prywatnosc" data-page-link="prywatnosc">Polityka prywatności</a>
-      <a href="#/dostawa" data-page-link="dostawa">Dostawa i płatności</a>
-      <a href="#/zwroty" data-page-link="zwroty">Zwroty i reklamacje</a>
-      <a href="#/faq" data-page-link="faq">Najczęstsze pytania</a>
+      <a href="/regulamin" data-page-link="regulamin">Regulamin</a>
+      <a href="/prywatnosc" data-page-link="prywatnosc">Polityka prywatności</a>
+      <a href="/dostawa" data-page-link="dostawa">Dostawa i płatności</a>
+      <a href="/zwroty" data-page-link="zwroty">Zwroty i reklamacje</a>
+      <a href="/faq" data-page-link="faq">Najczęstsze pytania</a>
     </div>
     <div><h4>Twoje konto</h4>
       <a href="#/konto" data-page-link="konto">Moje konto</a>
@@ -96,7 +102,8 @@
     </div>
     <div><h4>Kontakt</h4>
       <a href="mailto:artwaytm@gmail.com" id="footMail">✉️ artwaytm@gmail.com</a>
-      <a href="#/kontakt" id="footTel" data-page-link="kontakt">📞 +48 000 000 000</a>
+      <a href="/kontakt" id="footTel" data-page-link="kontakt">📞 +48 530 038 914</a>
+      <p id="footFirma" class="footer-company-data">ARTWAY-TM SP. Z O.O.<br>NIP 5882468333 • REGON 388782967<br>Gryfa Pomorskiego 1/A, 84-207 Bojano</p>
       <a href="#/diagnostyka" id="diagLink" style="display:none">🛠️ Diagnostyka <span id="diagBadge"></span></a>
     </div>
   </div>
@@ -106,11 +113,9 @@
 <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="obszarWydruku"></div>
 
-<script>
-/* PUBLIC_SETTINGS_START */
-const USTAWIENIA_PUBLICZNE = {};
-/* PUBLIC_SETTINGS_END */
-</script>
-  <script defer src="/assets/app.js?v=2026.07.16.24"></script>
+<!-- PUBLIC_SETTINGS_START -->
+<script id="artway-public-settings" type="application/json">{}</script>
+<!-- PUBLIC_SETTINGS_END -->
+  <script defer src="/assets/app.js?v=2026.07.22.23"></script>
 </body>
 </html>

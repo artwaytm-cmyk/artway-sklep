@@ -41,6 +41,13 @@ function currentStock(data = {}, productId = '') {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
 }
 
+function activeShelfCodes(data = {}) {
+  return new Set(array(data.artway_magazyn_lokalizacje)
+    .filter((location) => location?.aktywna !== false && location?.typ === 'półka')
+    .map((location) => text(location?.kod, 80).toUpperCase())
+    .filter(Boolean));
+}
+
 function warsawParts(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit' })
     .formatToParts(now).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
@@ -56,21 +63,46 @@ function nextDocumentNumber(data = {}, type = 'PZ', now = new Date()) {
 
 function productSnapshot(product = {}, data = {}) {
   const id = text(product.id ?? product.produktId, 160), meta = object(data?.artway_magazyn_produkty?.[id]);
+  const gtins = productGtinCandidates(product, data);
   return {
     productId: id,
     name: text(product.nazwa || product.name || `Produkt ${id}`, 300),
     sku: text(product.sku || product.SKU, 160),
     externalId: text(product.externalId || product.EXTERNAL_ID, 160),
-    ean: text(product.gtin || product.ean || product.GTIN || product.EAN || meta.kod, 40),
+    ean: text(gtins[0]?.raw || product.gtin || product.ean || product.GTIN || product.EAN || meta.kod, 40),
     producerCode: text(product.kodProducenta || product.mpn || meta.kodDostawcy, 160),
     location: text(meta.lokalizacja, 80).toUpperCase(),
     image: text(product.zdjecie || product.image, 1500),
   };
 }
 
+function rawIdentifierValues(value) {
+  if (Array.isArray(value)) return value.flatMap(rawIdentifierValues);
+  if (value && typeof value === 'object') return [value.value, value.label, value.name, value.code].flatMap(rawIdentifierValues);
+  return value === undefined || value === null ? [] : [value];
+}
+
+function productGtinCandidates(product = {}, data = {}) {
+  const id = text(product.id ?? product.produktId, 160), meta = object(data?.artway_magazyn_produkty?.[id]);
+  const values = [
+    product.canonicalGtins, product.gtins, product.canonicalGtin, product.gtin, product.ean,
+    product.GTIN, product.EAN, product.eans, product.ean13, product.kodEan,
+    product.barcode, product.barCode, product.kodKreskowy,
+    meta.canonicalGtins, meta.gtins, meta.gtin, meta.ean, meta.EAN, meta.ean13,
+    meta.kodEan, meta.barcode, meta.kodKreskowy, meta.kod,
+  ].flatMap(rawIdentifierValues);
+  const unique = new Map();
+  for (const value of values) {
+    const raw = text(value, 100).replace(/(?:[.,]0+)$/, '');
+    const canonical = canonicalGtin(raw);
+    if (canonical && !unique.has(canonical)) unique.set(canonical, { raw: raw.replace(/\D+/g, ''), canonical });
+  }
+  return [...unique.values()];
+}
+
 function productMatchesCode(product = {}, data = {}, code = '') {
-  const snapshot = productSnapshot(product, data), canonical = canonicalGtin(code);
-  if (canonical && canonicalGtin(snapshot.ean) === canonical) return 'EAN/GTIN';
+  const snapshot = productSnapshot(product, data), canonical = canonicalGtin(String(code).replace(/(?:[.,]0+)$/, ''));
+  if (canonical && productGtinCandidates(product, data).some((candidate) => candidate.canonical === canonical)) return 'EAN/GTIN';
   const wanted = identifierKey(code);
   if (!wanted) return '';
   const identifiers = [snapshot.productId, snapshot.externalId, snapshot.sku, snapshot.producerCode];
@@ -112,6 +144,17 @@ function trimDocuments(documents = []) {
   return [...active, ...sorted.filter((document) => document.status !== 'draft').slice(0, Math.max(0, MAX_DOCUMENTS - active.length))];
 }
 
+// Limit dokumentów nie może zależeć od rozmiaru całego katalogu produktów.
+// Katalog, stany i ustawienia są współdzielonym rekordem i wraz ze wzrostem
+// sklepu naturalnie przekraczają kilka MB. Tutaj kontrolujemy wyłącznie dane,
+// które ten moduł sam rozbudowuje — dokumenty i ich minimalny rejestr usunięć.
+function warehouseDocumentPayloadSize(data = {}) {
+  return JSON.stringify({
+    documents: array(object(data).artway_dokumenty_magazynowe),
+    deleted: array(object(data).artway_dokumenty_magazynowe_usuniete),
+  }).length;
+}
+
 function resultPayload(record = {}, document = null, extra = {}) {
   const data = object(record.data), documents = documentRegistry(data);
   return {
@@ -141,7 +184,7 @@ export function createWarehouseDocumentService({
       const record = object(version.value), data = object(record.data), timestamp = now().toISOString();
       const result = await handler({ record, data, timestamp });
       if (result.changed === false) return resultPayload(record, result.document, { duplicate: true, ...object(result.extra) });
-      const nextData = result.data, size = JSON.stringify(nextData).length;
+      const nextData = result.data, size = warehouseDocumentPayloadSize(nextData);
       if (size > settingsLimit) fail('Rejestr dokumentów magazynowych przekracza limit danych.', 'warehouse_document_settings_too_large', 413);
       const next = { ...record, data: nextData, rev: Math.max(0, Number(record.rev) || 0) + 1, updated_at: timestamp };
       const write = await writeIfVersion('settings', next, version);
@@ -247,10 +290,13 @@ export function createWarehouseDocumentService({
       if (doc?.status === 'confirmed' && requestId && doc.confirmationRequestId === requestId) return { changed: false, document: doc, extra: { stockUpdates: doc.stockUpdates || {}, movements: [] } };
       const revision = requireDraft(doc, body.expectedRevision), lines = array(doc.lines);
       if (!lines.length) fail('Dokument nie zawiera żadnej pozycji.', 'warehouse_document_empty');
+      const shelves = activeShelfCodes(data);
       const stocks = { ...object(data.artway_stany) }, cards = { ...object(data.artway_magazyn_produkty) }, movements = [...array(data.artway_ruchy_magazynowe)];
       const stockUpdates = {}, movementIds = [], finalizedLines = [];
       for (const line of lines) {
-        const productId = text(line.productId, 160), quantity = integer(line.quantity, 'ilość', 1), before = currentStock({ artway_stany: stocks }, productId);
+        const productId = text(line.productId, 160), quantity = integer(line.quantity, 'ilość', 1), before = currentStock({ artway_stany: stocks }, productId), location = text(line.location, 80).toUpperCase();
+        if (shelves.size && !location) fail(`Wskaż półkę dla produktu „${line.name}”.`, 'warehouse_document_location_required', 409, { productId });
+        if (shelves.size && !shelves.has(location)) fail(`Półka „${location}” produktu „${line.name}” nie istnieje albo jest nieaktywna.`, 'warehouse_document_location_invalid', 409, { productId, location });
         if (doc.type === 'WZ' && before === null) fail(`Produkt „${line.name}” nie ma monitorowanego stanu. Najpierw wykonaj PZ lub inwentaryzację.`, 'warehouse_document_untracked_stock', 409, { productId });
         if (doc.type === 'WZ' && before < quantity) fail(`Za mały stan produktu „${line.name}”: dostępne ${before}, wymagane ${quantity}.`, 'warehouse_document_insufficient_stock', 409, { productId, available: before, required: quantity });
         const base = before === null ? 0 : before, delta = doc.type === 'PZ' ? quantity : -quantity, after = integer(base + delta, 'stan po operacji');
@@ -288,5 +334,57 @@ export function createWarehouseDocumentService({
     });
   }
 
-  return Object.freeze({ list, create, update, upsertLine, removeLine, confirm, cancel });
+  async function deleteDraft(body = {}, actor = 'administrator') {
+    return mutate(async ({ data, timestamp }) => {
+      const documents = documentRegistry(data), index = documents.findIndex((document) => document.id === text(body.documentId, 160));
+      const doc = documents[index]; requireDraft(doc, body.expectedRevision);
+      const reason = text(body.reason, 300);
+      if (reason.length < 3) fail('Podaj krótki powód usunięcia szkicu.', 'warehouse_document_delete_reason_required');
+      documents.splice(index, 1);
+      const deleted = [{
+        id: doc.id, number: doc.number, type: doc.type, reason,
+        lineCount: array(doc.lines).length, totalQuantity: Math.max(0, Number(doc.totalQuantity) || 0),
+        deletedAt: timestamp, deletedBy: text(actor, 200) || 'administrator',
+      }, ...array(data.artway_dokumenty_magazynowe_usuniete)].slice(0, MAX_DOCUMENTS);
+      return {
+        changed: true, document: null,
+        data: { ...data, artway_dokumenty_magazynowe: trimDocuments(documents), artway_dokumenty_magazynowe_usuniete: deleted },
+        extra: { deleted: true, deletedDocumentId: doc.id, deletedDocumentNumber: doc.number },
+      };
+    });
+  }
+
+  async function createCorrection(body = {}, actor = 'administrator') {
+    return mutate(async ({ data, timestamp }) => {
+      const documents = documentRegistry(data), source = documents.find((document) => document.id === text(body.documentId, 160));
+      if (!source?.id) fail('Nie znaleziono dokumentu źródłowego.', 'warehouse_document_not_found', 404);
+      if (source.status !== 'confirmed') fail('Korektę można utworzyć wyłącznie do zaksięgowanego dokumentu.', 'warehouse_document_correction_source_invalid', 409);
+      const expected = Number(body.expectedRevision), revision = Math.max(1, Number(source.revision) || 1);
+      if (!Number.isSafeInteger(expected) || expected !== revision) fail('Dokument źródłowy zmienił się. Odśwież jego aktualną wersję.', 'warehouse_document_revision_conflict', 409, { currentRevision: revision });
+      const existing = documents.find((document) => document.status === 'draft' && document.correctionOf === source.id);
+      if (existing) return { changed: false, document: existing, extra: { correction: true, existing: true } };
+      const type = source.type === 'PZ' ? 'WZ' : 'PZ', generated = nextDocumentNumber(data, type, now());
+      const document = {
+        id: `WD-${crypto.randomUUID()}`, number: generated.number, type, status: 'draft',
+        warehouse: text(source.warehouse || data?.artway_magazyn_ustawienia?.nazwa || 'Magazyn główny', 160),
+        reference: text(`Korekta ${source.number}`, 160), note: text(body.note || `Dokument korekcyjny do ${source.number}`, 500),
+        correctionOf: source.id, correctionOfNumber: source.number,
+        lines: array(source.lines).map((line) => ({
+          ...line, lineId: `WDL-${crypto.randomUUID()}`, stockBefore: undefined, stockAfter: undefined,
+          delta: undefined, confirmedAt: undefined, addedAt: timestamp, addedBy: text(actor, 200) || 'administrator',
+          updatedAt: timestamp, updatedBy: text(actor, 200) || 'administrator', scanCount: 0,
+        })),
+        totalQuantity: array(source.lines).reduce((sum, line) => sum + Math.max(0, Number(line.quantity) || 0), 0),
+        revision: 1, createdAt: timestamp, createdBy: text(actor, 200) || 'administrator',
+        updatedAt: timestamp, updatedBy: text(actor, 200) || 'administrator', mutationIds: [],
+      };
+      return {
+        changed: true, document,
+        data: { ...data, artway_dokumenty_magazynowe: trimDocuments([document, ...documents]), artway_dokumenty_magazynowe_seq: generated.sequences },
+        extra: { correction: true, created: true },
+      };
+    });
+  }
+
+  return Object.freeze({ list, create, update, upsertLine, removeLine, confirm, cancel, deleteDraft, createCorrection });
 }

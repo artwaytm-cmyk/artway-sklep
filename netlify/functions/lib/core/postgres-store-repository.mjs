@@ -1,9 +1,10 @@
 import pg from 'pg';
+import { createNormalizedDomainRepository } from './normalized-domain-repository.mjs';
 
 const { Pool } = pg;
 const pools = new Map();
 
-function poolFor(connectionString) {
+export function postgresPoolFor(connectionString) {
   if (!pools.has(connectionString)) {
     pools.set(connectionString, new Pool({
       connectionString,
@@ -24,7 +25,7 @@ export function createPostgresStoreRepository({ name, connectionString = process
   if (!name) throw new Error('Nazwa magazynu danych jest wymagana.');
   if (!connectionString) throw new Error('Dla magazynu PostgreSQL wymagane jest DATABASE_URL.');
 
-  const pool = poolFor(connectionString);
+  const pool = postgresPoolFor(connectionString);
   let initialization = null;
   const ensureSchema = () => {
     if (!initialization) {
@@ -42,7 +43,7 @@ export function createPostgresStoreRepository({ name, connectionString = process
     return initialization;
   };
 
-  return Object.freeze({
+  const legacy = Object.freeze({
     async read(key, fallback) {
       await ensureSchema();
       const result = await pool.query('SELECT value FROM artway_kv_store WHERE namespace = $1 AND key = $2', [name, key]);
@@ -85,10 +86,16 @@ export function createPostgresStoreRepository({ name, connectionString = process
       `, [name, key, JSON.stringify(value), expectedVersion]);
       return { modified: updated.rowCount === 1 };
     },
+    async delete(key) {
+      await ensureSchema();
+      const result = await pool.query('DELETE FROM artway_kv_store WHERE namespace = $1 AND key = $2', [name, key]);
+      return { deleted: result.rowCount === 1 };
+    },
     async listKeys() {
       await ensureSchema();
       const result = await pool.query('SELECT key, version FROM artway_kv_store WHERE namespace = $1 ORDER BY key ASC', [name]);
       return result.rows.map((row) => ({ key: row.key, etag: `"${row.version}"` }));
     },
   });
+  return name === 'artway-sklep' ? createNormalizedDomainRepository({ pool, namespace: name, legacy }) : legacy;
 }

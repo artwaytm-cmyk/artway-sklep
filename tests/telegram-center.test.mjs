@@ -8,6 +8,7 @@ import {
   telegramQuietNow,
   telegramSettings,
   telegramIncidentId,
+  telegramCanonicalSupplierPreviews,
   telegramRenderEvents,
   telegramSupplierTables,
   telegramTopicId,
@@ -18,6 +19,7 @@ import {
   telegramDashboardCard,
   telegramIncidentCard,
   telegramIncidentKeyboard,
+  telegramPanelUrl,
 } from '../netlify/functions/lib/telegram-center.mjs';
 
 test('Telegram domyślnie wysyła tylko ważne zmiany i chroni ciszę nocną', () => {
@@ -59,10 +61,18 @@ test('nowoczesna karta Telegram pokazuje decyzję bez technicznego szumu', () =>
   });
   assert.match(card, /Nowa wiadomość Allegro/);
   assert.match(card, /Klient: tom90mio · Zam\. 123456/);
+  assert.match(card, /Wiadomość klienta/);
   assert.doesNotMatch(card, /abcdef12345678|wyłącznie wewnętrzny|https:\/\/|<code>/);
   const buttons = telegramIncidentKeyboard({ id: 'abcdef12345678', status: 'open', href: 'https://artwaytm.pl/#/admin/allegro/wiadomosci' }).inline_keyboard.flat();
   assert.equal(buttons.length, 2);
   assert.deepEqual(buttons.map((item) => item.text), ['👤 Przyjmuję', 'Otwórz']);
+});
+
+test('przyciski spraw zawsze zamieniają wewnętrzne trasy na pełny bezpieczny URL', () => {
+  assert.equal(telegramPanelUrl('#/admin/allegro/wiadomosci'), 'https://artwaytm.pl/#/admin/allegro/wiadomosci');
+  assert.equal(telegramIncidentKeyboard({ id: 'abcdef12345678', status: 'open', href: '#/admin/agent-ai/plan' }).inline_keyboard[0][1].url, 'https://artwaytm.pl/#/admin/agent-ai/plan');
+  assert.equal(telegramPanelUrl('javascript:alert(1)'), 'https://artwaytm.pl/#/admin/agent-ai/telegram');
+  assert.equal(telegramPanelUrl('https://evil.example/phishing'), 'https://artwaytm.pl/#/admin/agent-ai/telegram');
 });
 
 test('digest i raport ręczny pomijają puste metryki oraz długie instrukcje', () => {
@@ -126,6 +136,33 @@ test('alert pominięty przy wyłączonej komunikacji pozostaje do ponownej oceny
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('udane ponowienie alertu nie wysyła drugiej eskalacji tej samej sprawy w tym samym cyklu', { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch, calls = [], data = new Map();
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), body: JSON.parse(options.body || '{}') });
+    return new Response(JSON.stringify({ ok: true, result: { message_id: calls.length, chat: { id: -100 } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const operational = { priorities: [{ actionId: 'retry-once', severity: 'critical', count: 1, title: 'Pilna sprawa', action: 'Sprawdź', href: '#/admin/agent-ai/plan' }] };
+    const event = telegramPriorityEvents(operational)[0], id = telegramIncidentId(event.key);
+    data.set('telegram_communication_settings', telegramSettings({ enabled: true, quietStart: '00:00', quietEnd: '00:00', escalationEnabled: true }));
+    data.set('telegram_communication_state', {
+      initializedAt: '2026-07-17T08:00:00.000Z', events: {
+        [event.key]: { ...event, id, status: 'open', firstSeenAt: '2026-07-17T08:00:00.000Z', lastSeenAt: '2026-07-17T08:00:00.000Z', dueAt: '2026-07-17T08:30:00.000Z', escalationLevel: 0, workflowEnabled: true },
+      },
+      history: [], outbox: [{ id: 'retry-1', incidentId: id, key: event.key, status: 'retry', attempts: 1, nextAttemptAt: '2026-07-17T08:10:00.000Z', createdAt: '2026-07-17T08:05:00.000Z' }],
+      dashboard: {}, health: {},
+    });
+    const read = async (key, fallback) => structuredClone(data.has(key) ? data.get(key) : fallback), write = async (key, value) => data.set(key, structuredClone(value));
+    const center = createTelegramCenter({ read, write, env: { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_GROUP_ID: '-100' } });
+    const result = await center.dispatch(operational, { source: 'test', retryOnly: true });
+    assert.equal(result.retry.sent, 1);
+    assert.equal(result.escalated, 0);
+    assert.equal(calls.filter((item) => item.url.endsWith('/sendMessage')).length, 1);
+    assert.equal(calls[0].body.reply_markup.inline_keyboard[0][1].url, 'https://artwaytm.pl/#/admin/agent-ai/plan');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('bot rozumie zwykłe pytania bez komend', () => {
   assert.equal(telegramNaturalIntent('Czy mamy jakieś nowe zamówienia?'), 'orders');
   assert.equal(telegramNaturalIntent('Kto czeka na odpowiedź?'), 'communication');
@@ -137,6 +174,7 @@ test('kontrola połączenia zwraca stan Privacy Mode bota', { concurrency: false
   globalThis.fetch = async (url) => {
     if (String(url).endsWith('/getMe')) return new Response(JSON.stringify({ ok: true, result: { id: 7, username: 'magazyn_artway_bot', first_name: 'Magazyn Artway', can_read_all_group_messages: false } }), { status: 200, headers: { 'content-type': 'application/json' } });
     if (String(url).endsWith('/getWebhookInfo')) return new Response(JSON.stringify({ ok: true, result: { url: 'https://artwaytm.pl/.netlify/functions/telegram-webhook', pending_update_count: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (String(url).endsWith('/getChat')) return new Response(JSON.stringify({ ok: true, result: { id: -100, type: 'group', title: 'Magazyn Artway' } }), { status: 200, headers: { 'content-type': 'application/json' } });
     throw new Error(`Nieoczekiwane wywołanie: ${url}`);
   };
   try {
@@ -145,7 +183,26 @@ test('kontrola połączenia zwraca stan Privacy Mode bota', { concurrency: false
     const view = await center.view({ priorities: [] }, true);
     assert.equal(view.status.bot.username, 'magazyn_artway_bot');
     assert.equal(view.status.bot.can_read_all_group_messages, false);
-    assert.deepEqual(view.status.allowlist, { chats: 1, users: 0, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 0, explicitApprovers: 0 });
+    assert.deepEqual(view.status.target, { reachable: true, type: 'group', name: 'Magazyn Artway', error: '' });
+    assert.deepEqual(view.status.allowlist, { chats: 1, users: 0, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 0, explicitApprovers: 0, accounts: 0, accountApprovers: 0 });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('konto z dostępem Telegram automatycznie dostaje wiadomości wspólnego pokoju', { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch, calls = [], data = new Map();
+  data.set('users', { items: [{ email: 'operator@example.test', rola: 'admin', telegramUserId: '300', telegramAccess: true }] });
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), body: JSON.parse(options.body || '{}') });
+    return new Response(JSON.stringify({ ok: true, result: { message_id: calls.length } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const read = async (key, fallback) => structuredClone(data.has(key) ? data.get(key) : fallback), write = async (key, value) => data.set(key, structuredClone(value));
+    const center = createTelegramCenter({ read, write, env: { TELEGRAM_BOT_TOKEN: 'test-token', TELEGRAM_CHAT_ID: '100', TELEGRAM_SHARED_MODE: 'private-room' } });
+    const sent = await center.sendManual('<b>Wspólna wiadomość</b>', { kind: 'test' });
+    assert.equal(sent.delivered_count, 2);
+    assert.deepEqual(new Set(calls.filter((item) => item.url.endsWith('/sendMessage')).map((item) => String(item.body.chat_id))), new Set(['100', '300']));
+    const view = await center.view({}, false);
+    assert.equal(view.status.allowlist.accounts, 1);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -163,9 +220,35 @@ test('audyt webhooka zapisuje wyłącznie bezpieczne metadane i licznik odrzuce�
   assert.equal(view.state.health.lastRejectedKind, 'command');
   assert.equal(view.state.health.lastRejectedRef, 'abcdef1234567890abcdef12');
   assert.ok(view.state.health.lastRejectedAt);
-  assert.deepEqual(view.status.allowlist, { chats: 1, users: 2, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 2, explicitApprovers: 0 });
+  assert.deepEqual(view.status.allowlist, { chats: 1, users: 2, approvers: 0, ownerBootstrap: 0, chatBootstrap: 1, explicitChats: 0, explicitUsers: 2, explicitApprovers: 0, accounts: 0, accountApprovers: 0 });
   assert.equal(JSON.stringify(view).includes('tajna treść'), false);
   assert.equal(JSON.stringify(view).includes('999'), false);
+});
+
+test('centrum v2 zapisuje czytelne od-do i treść zaakceptowanej rozmowy, ale nie odrzuconej', async () => {
+  const data = new Map();
+  const read = async (key, fallback) => structuredClone(data.has(key) ? data.get(key) : fallback);
+  const write = async (key, value) => data.set(key, structuredClone(value));
+  const center = createTelegramCenter({ read, write, env: {} });
+  await center.recordInboundAudit({
+    accepted: true, deferred: true, kind: 'text', preview: '<b>Sprawdź nowe zamówienia</b>',
+    fromLabel: 'Tomasz Miotke', toLabel: 'Agent Artway-TM', messageId: 41, threadId: 7,
+    conversationKey: 'telegram:group:7',
+  });
+  await center.recordInboundAudit({ accepted: false, kind: 'text', preview: 'nie zapisuj tej treści', actorHash: 'abcdef1234567890abcdef12' });
+  await center.recordOutboundAudit({
+    kind: 'agent-reply', preview: '<b>Brak nowych zamówień.</b>', fromLabel: 'Agent Artway-TM',
+    toLabel: 'Tomasz Miotke', messageId: 42, threadId: 7, conversationKey: 'telegram:group:7',
+  });
+  const view = await center.view({ priorities: [] }, false);
+  const inbound = view.history.find((item) => item.messageId === 41), outbound = view.history.find((item) => item.messageId === 42);
+  assert.equal(inbound.preview, 'Sprawdź nowe zamówienia');
+  assert.equal(inbound.fromLabel, 'Tomasz Miotke');
+  assert.equal(inbound.toLabel, 'Agent Artway-TM');
+  assert.equal(inbound.threadId, 7);
+  assert.equal(outbound.preview, 'Brak nowych zamówień.');
+  assert.equal(outbound.direction, 'out');
+  assert.equal(JSON.stringify(view).includes('nie zapisuj tej treści'), false);
 });
 
 test('kolejka Telegram obejmuje tylko aktywne ostrzeżenia', () => {
@@ -178,12 +261,14 @@ test('kolejka Telegram obejmuje tylko aktywne ostrzeżenia', () => {
   assert.equal(events[0].key, 'one');
 });
 
-test('tabela producenta zawiera tylko kod, nazwę i potrzebną ilość', () => {
+test('tabela producenta zawiera tylko kod, nazwę i ilość zamawianą', () => {
   const tables = telegramSupplierTables({ id: 'Z-1', pozycje: [{ kod: 'ABC', nazwa: 'Gra testowa', ilosc: 3, dostawca: 'Alexander', ean: '123' }] });
   assert.equal(tables.length, 1);
   assert.match(tables[0].text, /KOD/);
+  assert.match(tables[0].text, /Czy dodać jeszcze pozycje, czy zamówienie jest kompletne/);
+  assert.doesNotMatch(tables[0].text, /Podgląd wewnętrzny|cena|wartość/i);
   assert.match(tables[0].text, /NAZWA/);
-  assert.match(tables[0].text, /POTRZEBNA ILOŚĆ/);
+  assert.match(tables[0].text, /ZAMAWIANA ILOŚĆ/);
   assert.doesNotMatch(tables[0].text, /123/);
   const explicitBusiness = telegramSupplierTables({ id: 'Z-2', pozycje: [{ produktId: '18', externalId: '18', sku: '18', kodProducenta: '18', kod: '18', nazwa: 'Jawny kod biznesowy', ilosc: 2, dostawca: 'Alexander' }] });
   assert.match(explicitBusiness[0].text, /\b18\b/);
@@ -194,6 +279,32 @@ test('tabela producenta zawiera tylko kod, nazwę i potrzebną ilość', () => {
   const large = telegramSupplierTables({ id: 'Z-501', pozycje: Array.from({ length: 501 }, (_value, index) => ({ externalId: `EXT-${String(index + 1).padStart(3, '0')}`, nazwa: `Produkt ${index + 1}`, ilosc: 1, dostawca: 'Alexander' })) });
   assert.equal(large.length, 28);
   assert.match(large.at(-1).text, /EXT-501/);
+});
+
+test('Telegram pobiera dokument wyłącznie z bieżącej rewizji Planu zatowarowania', () => {
+  const settings = { artway_agent_ai_zlecenia: [
+    { id: 'SPD-1', numer: 'AZ/2026/07/0001', revision: 4, status: 'do sprawdzenia', pozycje: [
+      { externalId: 'EXT-1410', nazwa: 'Gra testowa', iloscPotrzebna: 2, ilosc: 5, dostawca: 'Alexander' },
+    ] },
+    { id: 'SPD-1', numer: 'AZ/2026/07/0001', revision: 5, status: 'zastąpione', pozycje: [
+      { externalId: 'EXT-1410', nazwa: 'Techniczna kopia', iloscPotrzebna: 2, ilosc: 5, dostawca: 'Alexander' },
+    ] },
+    { id: 'SPD-OLD', revision: 1, status: 'zrealizowane', pozycje: [
+      { externalId: 'OLD-1', nazwa: 'Stary produkt', ilosc: 99, dostawca: 'Alexander' },
+    ] },
+  ] };
+  const previews = telegramCanonicalSupplierPreviews(settings, { draftId: 'SPD-1', expectedRevision: 4 });
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0].draftId, 'SPD-1');
+  assert.equal(previews[0].revision, 4);
+  assert.match(previews[0].text, /AZ\/2026\/07\/0001/);
+  assert.match(previews[0].text, /\b5\b/);
+  assert.doesNotMatch(previews[0].text, /\b99\b/);
+  assert.deepEqual(telegramCanonicalSupplierPreviews(settings).map((item) => item.draftId), ['SPD-1']);
+  assert.throws(
+    () => telegramCanonicalSupplierPreviews(settings, { draftId: 'SPD-1', expectedRevision: 3 }),
+    (error) => error?.code === 'supplier_order_revision_conflict' && error?.status === 409,
+  );
 });
 
 test('ustawienia profesjonalnego obiegu mają SLA, eskalację i opcjonalne tematy grupy', () => {
