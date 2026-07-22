@@ -1,4 +1,17 @@
 /* ═══════════ KONFIGURACJA ═══════════ */
+function odczytajUstawieniaPubliczne(){
+  const element=document.getElementById("artway-public-settings");
+  if(!element)return {};
+  try{
+    const parsed=JSON.parse(element.textContent||"{}");
+    return parsed&&typeof parsed==="object"&&!Array.isArray(parsed)?parsed:{};
+  }catch(error){
+    console.warn("Nie udało się odczytać publicznych ustawień sklepu",error);
+    return {};
+  }
+}
+const USTAWIENIA_PUBLICZNE=odczytajUstawieniaPubliczne();
+
 const DANE_FIRMY_DOMYSLNE = {
   nazwa: "ARTWAY-TM SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ",
   identyfikator: "5882468333",

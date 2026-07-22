@@ -33,12 +33,39 @@ test('CSP blokuje nieznany kod, ramki i obiekty bez wyłączania InPost oraz ska
   assert.match(source, /base-uri 'self'/);
   assert.match(source, /object-src 'none'/);
   assert.match(source, /frame-ancestors 'self'/);
-  assert.match(source, /script-src 'self' 'unsafe-inline' https:\/\/geowidget\.inpost\.pl/);
+  assert.match(source, /script-src 'self' https:\/\/geowidget\.inpost\.pl/);
+  assert.match(source, /script-src-elem 'self' https:\/\/geowidget\.inpost\.pl/);
+  assert.match(source, /style-src 'self' https:\/\/geowidget\.inpost\.pl/);
+  assert.match(source, /style-src-elem 'self' https:\/\/geowidget\.inpost\.pl/);
+  assert.doesNotMatch(source, /(?:script|style)-src 'self'[^;]*'unsafe-inline'/);
+  assert.match(source, /script-src-attr 'unsafe-inline'/);
+  assert.match(source, /style-src-attr 'unsafe-inline'/);
   assert.doesNotMatch(source, /script-src[^;]*'unsafe-eval'/);
   assert.match(source, /frame-src 'self' https:\/\/geowidget-app\.inpost\.pl/);
   assert.match(source, /connect-src 'self' https:\/\/wl-api\.mf\.gov\.pl/);
   assert.match(source, /worker-src 'self' blob:/);
   assert.match(source, /upgrade-insecure-requests/);
+});
+
+test('index nie zawiera wykonywalnego kodu inline wymagającego unsafe-inline', async () => {
+  const html = await readFile('index.html', 'utf8');
+  const inlineScripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+    .filter(([, attributes]) => !/\bsrc\s*=/i.test(attributes));
+  assert.ok(inlineScripts.length >= 2, 'oczekiwano bloków danych SEO i ustawień');
+  for (const [, attributes] of inlineScripts) {
+    assert.match(attributes, /\btype\s*=\s*["']application\/(?:ld\+json|json)["']/i);
+  }
+  assert.match(html, /id="artway-public-settings"\s+type="application\/json">\{\}<\/script>/);
+  assert.doesNotMatch(html, /const\s+USTAWIENIA_PUBLICZNE\s*=/);
+});
+
+test('zapasowa konfiguracja Netlify zachowuje ten sam rygor skryptów i stylów', async () => {
+  const source = await readFile('netlify.toml', 'utf8');
+  assert.match(source, /script-src 'self' https:\/\/geowidget\.inpost\.pl/);
+  assert.match(source, /script-src-elem 'self' https:\/\/geowidget\.inpost\.pl/);
+  assert.match(source, /style-src 'self' https:\/\/geowidget\.inpost\.pl/);
+  assert.match(source, /style-src-elem 'self' https:\/\/geowidget\.inpost\.pl/);
+  assert.doesNotMatch(source, /(?:script|style)-src 'self'[^;\"]*'unsafe-inline'/);
 });
 
 test('lokacje z własnym Cache-Control ponownie dołączają zabezpieczenia', async () => {

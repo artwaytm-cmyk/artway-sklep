@@ -232,8 +232,8 @@ function pobierzPlik(nazwa, tresc, typ){
 }
 function osadzUstawieniaWIndexie(html){
   const bezpieczne=JSON.stringify(ustawienia,null,2).replace(/</g,"\\u003c");
-  const blok=`/* PUBLIC_SETTINGS_START */\nconst USTAWIENIA_PUBLICZNE = ${bezpieczne};\n/* PUBLIC_SETTINGS_END */`;
-  const wzor=/\/\* PUBLIC_SETTINGS_START \*\/[\s\S]*?\/\* PUBLIC_SETTINGS_END \*\//;
+  const blok=`<!-- PUBLIC_SETTINGS_START -->\n<script id="artway-public-settings" type="application/json">${bezpieczne}</script>\n<!-- PUBLIC_SETTINGS_END -->`;
+  const wzor=/<!-- PUBLIC_SETTINGS_START -->[\s\S]*?<!-- PUBLIC_SETTINGS_END -->/;
   if(!wzor.test(html))throw new Error("Nie znaleziono znacznika ustawień w index.html");
   return html.replace(wzor,blok);
 }
