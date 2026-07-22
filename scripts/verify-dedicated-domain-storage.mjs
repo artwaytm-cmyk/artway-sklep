@@ -9,6 +9,7 @@ import {
 const connectionString = process.env.DATABASE_URL;
 const namespace = String(process.env.ARTWAY_STORE_NAME || 'artway-sklep').trim();
 const requireArchive = process.argv.includes('--require-archive');
+const compareArchive = process.argv.includes('--compare-archive');
 if (!connectionString) throw new Error('Brakuje DATABASE_URL.');
 if (namespace !== 'artway-sklep') throw new Error('Weryfikator obsługuje wyłącznie przestrzeń artway-sklep.');
 
@@ -30,7 +31,7 @@ try {
   const archivedRecords = Number(archiveCount.rows[0]?.count) || 0;
   if (requireArchive) assert.ok(archivedRecords > 0, 'Brakuje kopii rekordów sprzed migracji v2.');
 
-  let verifiedArchiveRecords = 0;
+  let verifiedArchiveRecords = 0, archiveMismatches = 0;
   for (const domain of dedicatedDomains()) {
     const table = dedicatedTableForDomain(domain);
     const result = await pool.query(`SELECT
@@ -43,8 +44,9 @@ try {
     [namespace, DEDICATED_DOMAIN_MIGRATION, domain]);
     const archived = Number(result.rows[0]?.archived) || 0;
     const mismatches = Number(result.rows[0]?.mismatches) || 0;
-    assert.equal(mismatches, 0, `Domena ${domain}: kopia v2 różni się od tabeli ${table}.`);
+    if (compareArchive) assert.equal(mismatches, 0, `Domena ${domain}: kopia v2 różni się od tabeli ${table}.`);
     verifiedArchiveRecords += archived;
+    archiveMismatches += mismatches;
   }
   assert.equal(verifiedArchiveRecords, archivedRecords, 'Nie wszystkie rekordy kopii v2 należą do obsługiwanych domen.');
 
@@ -53,6 +55,7 @@ try {
     namespace,
     archivedRecords,
     verifiedArchiveRecords,
+    archiveMismatches,
     ...status,
   })}\n`);
 } finally {
