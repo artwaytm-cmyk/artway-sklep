@@ -63,6 +63,8 @@ jobs:
           sha256sum --check --strict SHA256SUMS
           docker run --rm -v "$PWD:/backup:ro" postgres:17 pg_restore --list /backup/database.dump >/dev/null
           tar --zstd --list --file=application.tar.zst >/dev/null
+          tar --zstd --list --file=deployed-release.tar.zst >/dev/null
+          jq -e '.gitCommit | type == "string" and length > 0' deployed-release.json >/dev/null
           tar --zstd --list --file=server-config.tar.zst >/dev/null
           echo "BACKUP_DIR=$backup_dir" >> "$GITHUB_ENV"
 

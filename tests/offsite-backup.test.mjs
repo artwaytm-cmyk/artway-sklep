@@ -6,6 +6,15 @@ import test from 'node:test';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const read = (file) => readFile(path.join(root, file), 'utf8');
 
+test('bazowa kopia zawiera dokładnie aktywne wydanie atomowe Nginx', async () => {
+  const source = await read('ops/backup/artway-backup.sh');
+  assert.match(source, /ACTIVE_RELEASE_LINK="\/srv\/artway\/releases\/current"/);
+  assert.match(source, /deployed-release\.tar\.zst/);
+  assert.match(source, /active_release_commit/);
+  assert.match(source, /sha256sum[\s\S]*deployed-release\.json/);
+  assert.doesNotMatch(source, /srv\/artway\/public/);
+});
+
 test('kopia opuszcza VPS wyłącznie po szyfrowaniu AES-256 i lokalnej próbie odczytu', async () => {
   const source = await read('ops/backup/artway-offsite-backup.sh');
   assert.match(source, /--symmetric --cipher-algo AES256/);
@@ -34,4 +43,3 @@ test('harmonogram wykonuje codzienny offsite i cotygodniowy pełny restore', asy
   assert.match(workflow, /pg_restore --exit-on-error/);
   assert.match(workflow, /ARTWAY_BACKUP_PASSPHRASE/);
 });
-

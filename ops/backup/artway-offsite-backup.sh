@@ -52,6 +52,8 @@ backup_id="$(basename "$latest")"
   sha256sum --check --strict SHA256SUMS
   pg_restore --list database.dump >/dev/null
   tar --zstd --list --file=application.tar.zst >/dev/null
+  tar --zstd --list --file=deployed-release.tar.zst >/dev/null
+  jq -e '.gitCommit | type == "string" and length > 0' deployed-release.json >/dev/null
   tar --zstd --list --file=server-config.tar.zst >/dev/null
 )
 
@@ -107,4 +109,3 @@ mv -Tf "$OFFSITE_ROOT/.latest.new" "$OFFSITE_ROOT/latest"
 write_status ok encrypted-upload-verified "$backup_id"
 trap - EXIT INT TERM
 echo "Zewnętrzna kopia zaszyfrowana i potwierdzona: $REPOSITORY / $encrypted_name"
-
