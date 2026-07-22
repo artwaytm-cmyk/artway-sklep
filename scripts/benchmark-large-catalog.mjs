@@ -1,50 +1,22 @@
 import crypto from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
 import { createCentralProductCatalog } from '../netlify/functions/lib/domain/central-product-catalog.mjs';
+import { verifyIsolatedBenchmarkDatabase } from './lib/benchmark-database-guard.mjs';
 
 const { Pool } = pg;
 
-function loadLocalEnv(key, path = '.env') {
-  if (process.env[key] || !existsSync(path)) return;
-  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-    if (!match || match[1] !== key) continue;
-    const raw = match[2].trim();
-    process.env[key] = raw.replace(/^(['"])(.*)\1$/, '$2');
-    return;
-  }
-}
-
-loadLocalEnv('DATABASE_URL');
-loadLocalEnv('DATABASE_URL', '.env.netlify');
-
-function loadSystemdEnvironment(key, path = '/etc/systemd/system/artway-backend.service') {
-  if (process.env[key] || !existsSync(path)) return;
-  const content = readFileSync(path, 'utf8');
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('Environment=')) continue;
-    const body = trimmed.slice('Environment='.length);
-    const match = body.match(new RegExp(`(?:^|\\s)${key}=([^\\s]+)`));
-    if (match?.[1]) {
-      process.env[key] = match[1].replace(/^(['"])(.*)\1$/, '$2');
-      return;
-    }
-  }
-}
-
-loadSystemdEnvironment('DATABASE_URL');
-
 const rowsArgument = process.argv.find((value) => value.startsWith('--rows='));
 const rows = Math.max(10_000, Math.min(250_000, Number(rowsArgument?.split('=')[1]) || 100_000));
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) throw new Error('Benchmark wymaga DATABASE_URL.');
+const connectionString = process.env.ARTWAY_BENCHMARK_DATABASE_URL;
+if (!connectionString) throw new Error('Benchmark wymaga odizolowanego ARTWAY_BENCHMARK_DATABASE_URL.');
 
 const namespace = `artway-benchmark-${crypto.randomUUID()}`;
-const pool = new Pool({ connectionString, max: 4, connectionTimeoutMillis: 10_000 });
+const pool = new Pool({
+  connectionString,
+  max: 2,
+  connectionTimeoutMillis: 10_000,
+  application_name: 'artway-isolated-catalog-benchmark',
+});
 const catalog = createCentralProductCatalog({ pool, namespace });
 const elapsed = async (label, operation) => {
   const started = performance.now();
@@ -52,7 +24,14 @@ const elapsed = async (label, operation) => {
   return { label, milliseconds: Number((performance.now() - started).toFixed(2)), total: Number(result?.total) || 0, returned: Array.isArray(result?.items) ? result.items.length : 0 };
 };
 
+let lockClient = null;
+let isolatedDatabaseVerified = false;
 try {
+  const identity = await verifyIsolatedBenchmarkDatabase(pool);
+  isolatedDatabaseVerified = true;
+  lockClient = await pool.connect();
+  const lock = await lockClient.query('SELECT pg_try_advisory_lock($1) AS acquired', [2_607_202_604]);
+  if (lock.rows[0]?.acquired !== true) throw new Error('Inny izolowany benchmark katalogu już działa.');
   await catalog.ensureSchema();
   await pool.query(`
     INSERT INTO artway_products(
@@ -79,9 +58,15 @@ try {
   results.push(await elapsed('środkowa strona', () => catalog.query({ admin: true, page: Math.ceil(rows / 100), limit: 100 })));
   results.push(await elapsed('wyszukiwanie pełnotekstowe', () => catalog.query({ admin: true, query: `Produkt testowy ${Math.floor(rows / 2)}`, page: 1, limit: 50 })));
   results.push(await elapsed('filtry producenta i stanu', () => catalog.query({ admin: true, producer: 'Producent 1', stock: 'niskie', page: 1, limit: 50 })));
-  console.log(JSON.stringify({ ok: true, rows, namespace, results }, null, 2));
+  console.log(JSON.stringify({ ok: true, rows, isolated: true, database: identity.database, role: identity.role, namespace, results }, null, 2));
 } finally {
-  await pool.query('DELETE FROM artway_products WHERE namespace=$1', [namespace]).catch(() => {});
-  await pool.query('DELETE FROM artway_product_catalog_meta WHERE namespace=$1', [namespace]).catch(() => {});
+  if (isolatedDatabaseVerified) {
+    await pool.query('DELETE FROM artway_products WHERE namespace=$1', [namespace]).catch(() => {});
+    await pool.query('DELETE FROM artway_product_catalog_meta WHERE namespace=$1', [namespace]).catch(() => {});
+  }
+  if (lockClient) {
+    await lockClient.query('SELECT pg_advisory_unlock($1)', [2_607_202_604]).catch(() => {});
+    lockClient.release();
+  }
   await pool.end();
 }
