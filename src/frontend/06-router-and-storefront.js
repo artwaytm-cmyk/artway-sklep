@@ -105,7 +105,7 @@ function zaladujPanelAdmina(route=trasa()){
 function trasa(){
   const path=String(location.pathname||"").replace(/\/+$/,"")||"/";
   if(location.hash)return location.hash.replace(/^#/,"").split("?")[0]||"/";
-  if(/^\/(?:produkt|kategoria)\/[^/]+$/i.test(path)||["/promocje","/nowosci"].includes(path))return path;
+  if(/^\/(?:produkt|kategoria)\/[^/]+$/i.test(path)||["/promocje","/nowosci","/kontakt","/o-nas","/faq","/regulamin","/prywatnosc","/dostawa","/zwroty"].includes(path))return path;
   return "/";
 }
 function seoSlugKategorii(value=""){return String(value||"").toLocaleLowerCase("pl-PL").normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/ł/g,"l").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"produkty";}

@@ -26,6 +26,7 @@ test('regulamin i polityki zawierają pełną listę wymaganą przez Paynow', as
   for (const phrase of [
     'Podmiotem świadczącym obsługę płatności online',
     'mElements S.A.',
+    'Autopay S.A.',
     'Visa Electron',
     'złotych polskich (<b>PLN</b>)',
     'w ciągu dwóch lat',
@@ -34,6 +35,28 @@ test('regulamin i polityki zawierają pełną listę wymaganą przez Paynow', as
     'Wzór oświadczenia o odstąpieniu',
     'Cookies to niewielkie informacje',
   ]) assert.ok(content.includes(phrase), `brak wymaganej treści: ${phrase}`);
+});
+
+test('weryfikator bez JavaScriptu dostaje kompletne, samodzielne podstrony prawne', async () => {
+  const required = {
+    'kontakt/index.html': ['ARTWAY-TM SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ', 'NIP: 5882468333', 'REGON: 388782967', 'artwaytm@gmail.com'],
+    'regulamin/index.html': ['Zamówienie z obowiązkiem zapłaty', 'mElements S.A.', 'Autopay S.A.', 'PLN', 'w ciągu 14 dni'],
+    'prywatnosc/index.html': ['Administratorem danych osobowych', 'Cookies', 'Prezesa Urzędu Ochrony Danych Osobowych'],
+    'dostawa/index.html': ['Paczkomat', 'Kurier InPost', 'Waluta rozliczeń: PLN', 'InPost Pay'],
+    'zwroty/index.html': ['Zwrot w ciągu 14 dni', 'Reklamacje', 'Wzór oświadczenia o odstąpieniu'],
+  };
+  for (const [file, phrases] of Object.entries(required)) {
+    const html = await read(file);
+    assert.match(html, /<link rel="canonical" href="https:\/\/artwaytm\.pl\//);
+    for (const phrase of phrases) assert.ok(html.includes(phrase), `${file}: brak ${phrase}`);
+  }
+});
+
+test('InPost Pay jest opisany jako osobny, opcjonalny kanał obok Paynow', async () => {
+  const admin = await read('src/frontend/15e-payment-integration-readiness.js');
+  assert.match(admin, /InPost Pay obok Paynow/);
+  assert.match(admin, /wymaga osobnej umowy/);
+  assert.match(admin, /obecne połączenie InPost[^\n]*ShipX/);
 });
 
 test('panel pokazuje formalną checklistę i oddziela sandbox od produkcji', async () => {

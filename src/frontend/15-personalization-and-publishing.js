@@ -58,7 +58,7 @@ function paynowPanelAdminHTML(){
       <a class="btn ghost" href="https://docs.paynow.pl/docs/v3/integration" target="_blank" rel="noopener">Dokumentacja Paynow</a>
     </div>
     <p class="pay-note" style="text-align:left;margin-top:.8rem">Na czas testów użyj osobnych kluczy środowiska testowego i <code>PAYNOW_ENV=sandbox</code>. Produkcję włącz dopiero po pozytywnej weryfikacji sklepu i otrzymaniu właściwych danych uwierzytelniających.</p>
-  </div>`;
+  </div>${inpostPayReadinessHTML()}`;
 }
 async function sprawdzPaynowKonfiguracje(){
   try{

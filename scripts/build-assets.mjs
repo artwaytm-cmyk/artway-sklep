@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { buildPublicCompliancePages } from './public-compliance-pages.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -105,6 +106,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/14-categories-and-mapping.js',
       'src/frontend/14a-category-workspace.js',
       'src/frontend/15-personalization-and-publishing.js',
+      'src/frontend/15e-payment-integration-readiness.js',
       'src/frontend/15d-publication-and-export.js',
       'src/frontend/15a-home-promotions-workspace.js',
       'src/frontend/15b-banner-icon-studio.js',
@@ -299,6 +301,7 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
     banner: '/* GENERATED ADMIN PERSONALIZATION — loaded on demand */',
     sources: [
       'src/frontend/15-personalization-and-publishing.js',
+      'src/frontend/15e-payment-integration-readiness.js',
       'src/frontend/15d-publication-and-export.js',
       'src/frontend/15a-home-promotions-workspace.js',
       'src/frontend/15b-banner-icon-studio.js',
@@ -346,6 +349,7 @@ export async function buildAssets({ check = false } = {}) {
       await writeFile(outputPath, expected, 'utf8');
     }
   }
+  differences.push(...await buildPublicCompliancePages(ROOT, { check }));
   if (differences.length) {
     throw new Error(`Nieaktualne pliki wynikowe: ${differences.join(', ')}. Uruchom npm run build.`);
   }

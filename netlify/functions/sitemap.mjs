@@ -17,6 +17,7 @@ export default async () => {
     { loc: `${origin}/`, lastmod: settings.updated_at },
     { loc: `${origin}/promocje`, lastmod: settings.updated_at },
     { loc: `${origin}/nowosci`, lastmod: settings.updated_at },
+    ...['kontakt', 'regulamin', 'prywatnosc', 'dostawa', 'zwroty'].map((route) => ({ loc: `${origin}/${route}/`, lastmod: settings.updated_at })),
     ...[...new Set(products.map((p) => String(p.kategoria || '').trim()).filter(Boolean))].map((category) => ({ loc: `${origin}/kategoria/${seoSlug(category)}`, lastmod: settings.updated_at })),
     ...products.map((p) => ({ loc: `${origin}/produkt/${encodeURIComponent(p.id)}`, lastmod: p.seoReviewedAt || p.updatedAt || settings.updated_at || '', image: imageOf(p), caption: p.nazwa || '' })),
   ];
