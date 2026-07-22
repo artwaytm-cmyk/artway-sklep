@@ -12,9 +12,11 @@
     "audit:functional": "node scripts/audit-functional-consistency.mjs",
     "benchmark:setup": "sudo -n /bin/bash ops/postgres/setup-isolated-benchmark.sh",
     "benchmark:catalog": "node scripts/run-isolated-catalog-benchmark.mjs --rows=100000",
+    "test:storage:isolated": "node scripts/test-dedicated-domain-storage.mjs",
     "server": "node --env-file=.env server.mjs",
     "migrate:netlify": "node scripts/migrate-netlify-to-postgres.mjs",
     "migrate:domain": "node scripts/migrate-normalized-domain-storage.mjs",
+    "verify:domain-tables": "node scripts/verify-dedicated-domain-storage.mjs",
     "verify": "npm run build:check && npm run check:legacy && npm run audit:functional && npm test",
     "check": "npm run verify"
   },

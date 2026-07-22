@@ -8,6 +8,10 @@ import {
   normalizedRevisionToken,
   splitNormalizedValue,
 } from '../netlify/functions/lib/core/normalized-domain-repository.mjs';
+import {
+  dedicatedDomains,
+  dedicatedTableForDomain,
+} from '../netlify/functions/lib/core/dedicated-domain-storage.mjs';
 
 test('zamówienia są dzielone na osobne rekordy i składane bez zmiany danych', () => {
   const value = { items: [
@@ -71,4 +75,34 @@ test('repozytorium udostępnia przyrostowy odczyt ustawień zamiast obowiązkowe
   assert.match(source, /const readSettingsDelta = async/);
   assert.match(source, /settings_domain|domainVersions/);
   assert.match(source, /Object\.prototype\.hasOwnProperty\.call\(versions/);
+});
+
+test('największe domeny operacyjne mają własne tabele zamiast wspólnej tabeli JSONB', () => {
+  const expected = {
+    'kv:orders': 'artway_store_orders',
+    'kv:deleted_orders': 'artway_store_orders',
+    'kv:allegro_orders': 'artway_allegro_orders',
+    'kv:allegro_offers': 'artway_allegro_offers',
+    'kv:allegro_mappings': 'artway_allegro_mappings',
+    'kv:allegro_communications': 'artway_allegro_communications',
+    'settings:artway_agent_ai_historia': 'artway_agent_records',
+    'settings:artway_agent_ai_pamiec': 'artway_agent_records',
+    'settings:artway_agent_ai_zlecenia': 'artway_agent_records',
+    'kv:agent_runtime': 'artway_agent_records',
+    'kv:telegram_communication_state': 'artway_agent_records',
+  };
+  for (const [domain, table] of Object.entries(expected)) {
+    assert.equal(dedicatedTableForDomain(domain), table, `Domena ${domain} nie ma właściwej tabeli`);
+  }
+  assert.equal(dedicatedTableForDomain('kv:catalog_quality_audit'), '');
+  assert.ok(dedicatedDomains().length >= Object.keys(expected).length);
+});
+
+test('dedykowana migracja zachowuje kopię wycofania i usuwa aktywne duplikaty z tabeli ogólnej', async () => {
+  const source = await readFile(new URL('../netlify/functions/lib/core/dedicated-domain-storage.mjs', import.meta.url), 'utf8');
+  assert.match(source, /artway_domain_records_archive_v2/);
+  assert.match(source, /INSERT INTO artway_domain_records_archive_v2/);
+  assert.match(source, /DELETE FROM artway_domain_records WHERE namespace=\$1 AND domain=\$2/);
+  assert.match(source, /dedicated-domain-tables-v2/);
+  assert.match(source, /ON DELETE CASCADE/);
 });

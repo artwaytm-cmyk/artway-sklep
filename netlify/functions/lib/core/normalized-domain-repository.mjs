@@ -1,4 +1,13 @@
 import crypto from 'node:crypto';
+import {
+  dedicatedDomainStorageStatus,
+  dedicatedTableForDomain,
+  deleteDedicatedDomainRecords,
+  ensureDedicatedDomainSchema,
+  migrateDedicatedDomainRecords,
+  readDedicatedDomainRecords,
+  replaceDedicatedDomainRecords,
+} from './dedicated-domain-storage.mjs';
 
 const SETTINGS_DOMAIN_CONFIGS = Object.freeze({
   artway_produkty_edytowane: objectConfig(),
@@ -173,23 +182,32 @@ function numericVersion(etag) {
 async function readDomain(client, namespace, domain, config) {
   const snapshot = await client.query('SELECT metadata,version,updated_at FROM artway_domain_snapshots WHERE namespace=$1 AND domain=$2', [namespace, domain]);
   if (!snapshot.rowCount) return null;
-  const rows = await client.query('SELECT collection,record_id,ordinal,data FROM artway_domain_records WHERE namespace=$1 AND domain=$2 ORDER BY collection,ordinal,record_id', [namespace, domain]);
-  const records = rows.rows.map((row) => ({ collection: row.collection, recordId: row.record_id, ordinal: Number(row.ordinal), data: row.data }));
+  const dedicated = await readDedicatedDomainRecords(client, namespace, domain);
+  const rows = dedicated === null
+    ? await client.query('SELECT collection,record_id,ordinal,data FROM artway_domain_records WHERE namespace=$1 AND domain=$2 ORDER BY collection,ordinal,record_id', [namespace, domain])
+    : null;
+  const records = dedicated === null
+    ? rows.rows.map((row) => ({ collection: row.collection, recordId: row.record_id, ordinal: Number(row.ordinal), data: row.data }))
+    : dedicated;
   return { value: hydrateNormalizedValue(snapshot.rows[0].metadata, records, config), version: Number(snapshot.rows[0].version), updatedAt: snapshot.rows[0].updated_at };
 }
 
 async function readDomains(client, namespace, entries) {
   if (!entries.length) return new Map();
   const domains = entries.map(([domain]) => domain), configs = new Map(entries);
-  const [snapshots, rows] = await Promise.all([
-    client.query('SELECT domain,metadata,version,updated_at FROM artway_domain_snapshots WHERE namespace=$1 AND domain=ANY($2::text[])', [namespace, domains]),
-    client.query('SELECT domain,collection,record_id,ordinal,data FROM artway_domain_records WHERE namespace=$1 AND domain=ANY($2::text[]) ORDER BY domain,collection,ordinal,record_id', [namespace, domains]),
-  ]);
+  const genericDomains = domains.filter((domain) => !dedicatedTableForDomain(domain));
+  const snapshots = await client.query('SELECT domain,metadata,version,updated_at FROM artway_domain_snapshots WHERE namespace=$1 AND domain=ANY($2::text[])', [namespace, domains]);
+  const rows = genericDomains.length
+    ? await client.query('SELECT domain,collection,record_id,ordinal,data FROM artway_domain_records WHERE namespace=$1 AND domain=ANY($2::text[]) ORDER BY domain,collection,ordinal,record_id', [namespace, genericDomains])
+    : { rows: [] };
   const grouped = new Map();
   for (const row of rows.rows) {
     const records = grouped.get(row.domain) || [];
     records.push({ collection: row.collection, recordId: row.record_id, ordinal: Number(row.ordinal), data: row.data });
     grouped.set(row.domain, records);
+  }
+  for (const domain of domains.filter((item) => dedicatedTableForDomain(item))) {
+    grouped.set(domain, await readDedicatedDomainRecords(client, namespace, domain) || []);
   }
   const result = new Map();
   for (const snapshot of snapshots.rows) {
@@ -214,7 +232,9 @@ async function replaceDomain(client, namespace, domain, value, config, { expecte
   await client.query(`INSERT INTO artway_domain_snapshots(namespace,domain,metadata,content_hash,version,updated_at) VALUES($1,$2,$3::jsonb,$4,$5,$6)
     ON CONFLICT(namespace,domain) DO UPDATE SET metadata=EXCLUDED.metadata,content_hash=EXCLUDED.content_hash,version=EXCLUDED.version,updated_at=EXCLUDED.updated_at`, [namespace, domain, JSON.stringify(split.metadata || {}), hash, nextVersion, timestamp]);
   const payload = split.records.map((row) => ({ collection: row.collection, record_id: row.recordId, ordinal: row.ordinal, data: row.data }));
-  if (payload.length) {
+  if (dedicatedTableForDomain(domain)) {
+    await replaceDedicatedDomainRecords(client, namespace, domain, split.records, timestamp);
+  } else if (payload.length) {
     await client.query(`WITH incoming AS (
       SELECT collection,record_id,ordinal,data FROM jsonb_to_recordset($3::jsonb) AS x(collection text,record_id text,ordinal bigint,data jsonb)
     ) INSERT INTO artway_domain_records(namespace,domain,collection,record_id,ordinal,data,updated_at)
@@ -249,6 +269,7 @@ async function ensureNormalizedSchema(pool, namespace) {
       namespace text NOT NULL,migration_id text NOT NULL,details jsonb NOT NULL DEFAULT '{}'::jsonb,completed_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(namespace,migration_id))`);
     await client.query(`CREATE TABLE IF NOT EXISTS artway_domain_legacy_backup(
       namespace text NOT NULL,key text NOT NULL,migration_id text NOT NULL,value jsonb NOT NULL,version bigint NOT NULL,updated_at timestamptz NOT NULL,backed_up_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(namespace,key,migration_id))`);
+    await ensureDedicatedDomainSchema(client);
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`artway-normalize:${namespace}`]);
     const migrationId = 'domain-records-v1';
     const done = await client.query('SELECT 1 FROM artway_domain_migrations WHERE namespace=$1 AND migration_id=$2', [namespace, migrationId]);
@@ -278,6 +299,7 @@ async function ensureNormalizedSchema(pool, namespace) {
       }
       await client.query('INSERT INTO artway_domain_migrations(namespace,migration_id,details) VALUES($1,$2,$3::jsonb)', [namespace, migrationId, JSON.stringify({ migratedDomains, migratedRecords })]);
     }
+    await migrateDedicatedDomainRecords(client, namespace);
     await client.query('COMMIT');
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
@@ -378,7 +400,18 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
     async readVersioned(key, fallback) { await ensure(); if (key === 'settings') return readSettings(true, fallback); const config = directConfig(key); return config ? readDirect(key, config, fallback, true) : legacy.readVersioned(key, fallback); },
     async write(key, value) { await ensure(); if (key === 'settings') return writeSettingsIfVersion(value); const config = directConfig(key); return config ? writeDirect(key, value, config) : legacy.write(key, value); },
     async writeIfVersion(key, value, version) { await ensure(); if (key === 'settings') return writeSettingsIfVersion(value, version); const config = directConfig(key); return config ? writeDirect(key, value, config, version) : legacy.writeIfVersion(key, value, version); },
-    async delete(key) { await ensure(); const config = directConfig(key); if (!config) return legacy.delete(key); const client = await pool.connect(); try { await client.query('BEGIN'); const result = await client.query('DELETE FROM artway_domain_snapshots WHERE namespace=$1 AND domain=$2', [namespace, domainForDirectKey(key)]); await client.query('DELETE FROM artway_domain_records WHERE namespace=$1 AND domain=$2', [namespace, domainForDirectKey(key)]); await client.query('COMMIT'); return { deleted: result.rowCount === 1 }; } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); } },
+    async delete(key) {
+      await ensure(); const config = directConfig(key); if (!config) return legacy.delete(key);
+      const client = await pool.connect(), domain = domainForDirectKey(key);
+      try {
+        await client.query('BEGIN');
+        await deleteDedicatedDomainRecords(client, namespace, domain);
+        const result = await client.query('DELETE FROM artway_domain_snapshots WHERE namespace=$1 AND domain=$2', [namespace, domain]);
+        await client.query('DELETE FROM artway_domain_records WHERE namespace=$1 AND domain=$2', [namespace, domain]);
+        await client.query('COMMIT'); return { deleted: result.rowCount === 1 };
+      } catch (error) { await client.query('ROLLBACK'); throw error; }
+      finally { client.release(); }
+    },
     async listKeys() { await ensure(); const [legacyKeys, domains] = await Promise.all([legacy.listKeys(), pool.query("SELECT domain,version FROM artway_domain_snapshots WHERE namespace=$1 AND domain LIKE 'kv:%'", [namespace])]); const mapped = domains.rows.map((row) => ({ key: row.domain.slice(3), etag: `"${row.version}"` })); return [...legacyKeys.filter((entry) => !directConfig(entry.key)), ...mapped].sort((a, b) => a.key.localeCompare(b.key)); },
     async revisionToken({ settingsKeys = [], keys = [] } = {}) {
       await ensure();
@@ -393,21 +426,29 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
     },
     async storageStatus() {
       await ensure();
-      const result = await pool.query(`SELECT
+      const client = await pool.connect();
+      try {
+        const result = await client.query(`SELECT
         EXISTS(SELECT 1 FROM artway_domain_migrations WHERE namespace=$1 AND migration_id='domain-records-v1') AS migrated,
         (SELECT count(*)::int FROM artway_domain_snapshots WHERE namespace=$1) AS domains,
         (SELECT count(*)::int FROM artway_domain_records WHERE namespace=$1) AS records,
         (SELECT count(*)::int FROM artway_domain_legacy_backup WHERE namespace=$1 AND migration_id='domain-records-v1') AS rollback_backups,
         (SELECT count(*)::int FROM artway_kv_store WHERE namespace=$1 AND key=ANY($2::text[])) AS active_legacy_domains,
         COALESCE((SELECT pg_column_size(value)::int FROM artway_kv_store WHERE namespace=$1 AND key='settings'),0) AS settings_bytes`, [namespace, Object.keys(DIRECT_DOMAIN_CONFIGS)]);
-      const row = result.rows[0] || {};
-      return {
-        engine: 'postgres-normalized-v1', migrated: row.migrated === true,
-        domains: Number(row.domains) || 0, records: Number(row.records) || 0,
-        rollbackBackups: Number(row.rollback_backups) || 0,
-        activeLegacyDomains: Number(row.active_legacy_domains) || 0,
-        settingsBytes: Number(row.settings_bytes) || 0,
-      };
+        const row = result.rows[0] || {}, dedicated = await dedicatedDomainStorageStatus(client, namespace);
+        return {
+          engine: 'postgres-domain-tables-v2', migrated: row.migrated === true && dedicated.migrated,
+          domains: Number(row.domains) || 0,
+          records: (Number(row.records) || 0) + dedicated.records,
+          genericRecords: Number(row.records) || 0,
+          dedicatedRecords: dedicated.records,
+          dedicatedTables: dedicated.tables,
+          activeGenericDedicatedRecords: dedicated.activeGenericRecords,
+          rollbackBackups: Number(row.rollback_backups) || 0,
+          activeLegacyDomains: Number(row.active_legacy_domains) || 0,
+          settingsBytes: Number(row.settings_bytes) || 0,
+        };
+      } finally { client.release(); }
     },
   });
 }
