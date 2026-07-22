@@ -106,6 +106,7 @@ test('główne działy administratora mają jeden profesjonalny szablon i nie tw
     '/admin/zamowienia',
     '/admin/wysylki',
     '/admin/agent-ai',
+    '/admin/seo/efekty',
     '/admin/personalizacja/home',
     '/admin/infakt',
   ];
@@ -117,6 +118,21 @@ test('główne działy administratora mają jeden profesjonalny szablon i nie tw
     const dimensions = await workspace.evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
     expect(dimensions.content, `Poziome przepełnienie na ${route}`).toBeLessThanOrEqual(dimensions.width + 1);
   }
+  assertRuntime();
+});
+
+test('istniejąca podstrona Efekty obsługuje zakres dzienny i pełne zestawienia', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  await page.goto('/#/admin/seo/efekty');
+  await expect(page.locator('[data-seo-effects-workspace]')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Dzisiaj', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Wyniki każdego dnia' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Z którego adresu wszedł klient' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Efektywność produktów' })).toBeVisible();
+  await page.getByRole('button', { name: 'Dzisiaj', exact: true }).click();
+  const dates = page.locator('[data-seo-effects-workspace] input[type="date"]');
+  await expect(dates.nth(0)).toHaveValue(await dates.nth(1).inputValue());
   assertRuntime();
 });
 

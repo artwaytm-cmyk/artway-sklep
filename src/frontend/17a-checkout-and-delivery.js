@@ -492,7 +492,7 @@ Uwagi: ${f.get("notes")||"brak"}`;
       zapiszLS("artway_zamowienia_goscia",[nr,...numery.filter(x=>x!==nr)].slice(0,20));
     }
     loguj("info",`Złożono zamówienie ${nr} na ${zl(razem)} (${dost.nazwa}, ${plat.nazwa})`);
-    if(typeof seoSledzZamowienie==="function")seoSledzZamowienie(razem);
+    if(typeof seoSledzZamowienie==="function")seoSledzZamowienie(razem,nr,pozycjeDane);
 
 	    const infoPlatnosci = instrukcjaPlatnosciHTML(idP,nr,razem,noweZamowienie);
 	    const bladPaynow = idP==="paynow" && paynowWynik && paynowWynik.ok===false && !paynowWynik.skipped

@@ -50,6 +50,49 @@ test('historyczny ruch sprzed podziału domen pozostaje przypisany do domeny gł
   assert.equal(report.domains['allsklep.pl'].landing, 0);
 });
 
+test('raport efektywności filtruje każdy dzień, domenę i kanał bez mieszania wyników', () => {
+  const state = { version: 3, days: {}, updatedAt: null, granularSince: null };
+  const events = [
+    ['2026-07-19T10:00:00Z', { event: 'landing', channel: 'google', entryDomain: 'artwaytm.pl', landingPath: '/produkt/10', productId: '10' }],
+    ['2026-07-19T10:01:00Z', { event: 'product_view', channel: 'google', entryDomain: 'artwaytm.pl', productId: '10' }],
+    ['2026-07-19T10:02:00Z', { event: 'add_to_cart', channel: 'google', entryDomain: 'artwaytm.pl', productId: '10' }],
+    ['2026-07-19T10:03:00Z', { event: 'order', channel: 'google', entryDomain: 'artwaytm.pl', value: 80, items: [{ productId: '10', units: 2, revenue: 70 }] }],
+    ['2026-07-20T11:00:00Z', { event: 'landing', channel: 'referral', entryDomain: 'allsklep.pl', landingPath: '/promocje', referrerDomain: 'partner.example' }],
+    ['2026-07-20T11:01:00Z', { event: 'order', channel: 'referral', entryDomain: 'allsklep.pl', value: 120 }],
+  ];
+  for (const [at, event] of events) assert.equal(seoAnalyticsInternals.incrementState(state, event, new Date(at)), true);
+
+  const exactDay = seoAnalyticsInternals.performance(state, { from: '2026-07-19', to: '2026-07-19' });
+  assert.equal(exactDay.range.days, 1);
+  assert.equal(exactDay.timeline.length, 1);
+  assert.equal(exactDay.totals.order, 1);
+  assert.equal(exactDay.totals.revenue, 80);
+  assert.equal(exactDay.totals.orderRate, 100);
+  assert.equal(exactDay.products[0].orders, 1);
+  assert.equal(exactDay.products[0].units, 2);
+  assert.equal(exactDay.products[0].revenue, 70);
+
+  const marketingReferral = seoAnalyticsInternals.performance(state, { from: '2026-07-19', to: '2026-07-21', domain: 'allsklep.pl', channel: 'referral' });
+  assert.equal(marketingReferral.timeline.length, 3);
+  assert.equal(marketingReferral.totals.landing, 1);
+  assert.equal(marketingReferral.totals.order, 1);
+  assert.equal(marketingReferral.totals.revenue, 120);
+  assert.equal(marketingReferral.landingPages[0].path, '/promocje');
+  assert.equal(marketingReferral.referrers[0].referrerDomain, 'partner.example');
+  assert.equal(marketingReferral.domains['artwaytm.pl'].landing, 0);
+});
+
+test('raport porównuje wybrany okres z poprzednim zakresem tej samej długości', () => {
+  const state = { version: 3, days: {}, updatedAt: null, granularSince: null };
+  for (const at of ['2026-07-18T10:00:00Z', '2026-07-19T10:00:00Z', '2026-07-20T10:00:00Z']) {
+    seoAnalyticsInternals.incrementState(state, { event: 'landing', channel: 'direct', entryDomain: 'artwaytm.pl' }, new Date(at));
+  }
+  const report = seoAnalyticsInternals.performance(state, { from: '2026-07-20', to: '2026-07-20' });
+  assert.deepEqual(report.previous.range, { from: '2026-07-19', to: '2026-07-19', days: 1 });
+  assert.equal(report.previous.totals.landing, 1);
+  assert.equal(report.comparison.landing.change, 0);
+});
+
 test('raport sprzedaży organicznej nie jest publicznym endpointem', async () => {
   const source = await readFile('netlify/functions/lib/domain/seo-analytics.mjs', 'utf8');
   assert.match(source, /if \(!adminRequest\(request\)\).*status: 401/);
