@@ -79,7 +79,7 @@ if [[ ! "$active_release" =~ ^/srv/artway/releases/[^/]+$ ]] || [[ ! -f "$active
   echo "Aktywne wydanie Nginx nie jest poprawnym wydaniem atomowym." >&2
   exit 1
 fi
-active_release_commit="$(jq -er '.gitCommit | select(type == "string" and length > 0)' "$active_release/release.json")"
+active_release_commit="$(jq -er '.commit | select(type == "string" and length > 0)' "$active_release/release.json")"
 
 mkdir "$TMP_DIR"
 chmod 700 "$TMP_DIR"
@@ -117,7 +117,7 @@ tar --zstd --dereference --create --file="$TMP_DIR/deployed-release.tar.zst" \
 cp "$active_release/release.json" "$TMP_DIR/deployed-release.json"
 chmod 600 "$TMP_DIR/deployed-release.tar.zst" "$TMP_DIR/deployed-release.json"
 tar --zstd --list --file="$TMP_DIR/deployed-release.tar.zst" >/dev/null
-jq -e --arg commit "$active_release_commit" '.gitCommit == $commit' "$TMP_DIR/deployed-release.json" >/dev/null
+jq -e --arg commit "$active_release_commit" '.commit == $commit' "$TMP_DIR/deployed-release.json" >/dev/null
 
 echo "[4/6] Kopia czytelnej konfiguracji serwera"
 config_paths=()

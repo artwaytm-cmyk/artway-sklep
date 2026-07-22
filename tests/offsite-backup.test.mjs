@@ -11,6 +11,8 @@ test('bazowa kopia zawiera dokładnie aktywne wydanie atomowe Nginx', async () =
   assert.match(source, /ACTIVE_RELEASE_LINK="\/srv\/artway\/releases\/current"/);
   assert.match(source, /deployed-release\.tar\.zst/);
   assert.match(source, /active_release_commit/);
+  assert.match(source, /\.commit \| select/);
+  assert.doesNotMatch(source, /\.gitCommit/);
   assert.match(source, /sha256sum[\s\S]*deployed-release\.json/);
   assert.doesNotMatch(source, /srv\/artway\/public/);
 });

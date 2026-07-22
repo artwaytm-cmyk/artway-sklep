@@ -65,7 +65,7 @@ backup_dir="$(find "$tmp_dir/extracted" -mindepth 1 -maxdepth 1 -type d -print -
   pg_restore --list database.dump >/dev/null
   tar --zstd --list --file=application.tar.zst >/dev/null
   tar --zstd --list --file=deployed-release.tar.zst >/dev/null
-  jq -e '.gitCommit | type == "string" and length > 0' deployed-release.json >/dev/null
+  jq -e '.commit | type == "string" and length > 0' deployed-release.json >/dev/null
   tar --zstd --list --file=server-config.tar.zst >/dev/null
 )
 
