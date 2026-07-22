@@ -11,6 +11,7 @@ import {
 } from '../netlify/functions/lib/core/security.mjs';
 import { createAdminMfaChallenge, verifyAdminMfaChallenge, verifyMfaCode } from '../netlify/functions/lib/core/mfa.mjs';
 import { bezpieczneZamowienieKlienta } from '../netlify/functions/lib/domain/checkout.mjs';
+import { czyAdmin, tokenZadania } from '../netlify/functions/lib/core/http.mjs';
 
 process.env.ARTWAY_SESSION_SECRET = 'test-secret-that-is-not-used-in-production';
 
@@ -31,6 +32,21 @@ test('sesja konta działa z ciasteczka HttpOnly i nie wymaga tokenu w JavaScript
   const request = new Request('https://artwaytm.pl/api/store', { headers: { cookie: cookie.split(';')[0] } });
   assert.equal(requestSession(request)?.role, 'admin');
   assert.equal(requestSession(request)?.email, 'admin@example.com');
+});
+
+test('token administratora działa wyłącznie w nagłówku i nigdy w adresie URL', () => {
+  const previous = process.env.ARTWAY_ADMIN_TOKEN;
+  process.env.ARTWAY_ADMIN_TOKEN = 'techniczny-sekret-testowy';
+  try {
+    const fromUrl = new Request('https://artwaytm.pl/api/store?action=health&token=techniczny-sekret-testowy');
+    assert.equal(tokenZadania(fromUrl), '');
+    assert.equal(czyAdmin(fromUrl), false);
+    const fromHeader = new Request('https://artwaytm.pl/api/store?action=health', { headers: { 'x-admin-token': 'techniczny-sekret-testowy' } });
+    assert.equal(tokenZadania(fromHeader), 'techniczny-sekret-testowy');
+    assert.equal(czyAdmin(fromHeader), true);
+  } finally {
+    if (previous === undefined) delete process.env.ARTWAY_ADMIN_TOKEN; else process.env.ARTWAY_ADMIN_TOKEN = previous;
+  }
 });
 
 test('wyzwanie MFA wygasa jako osobny zakres i TOTP toleruje tylko sąsiednie okno czasu', () => {

@@ -7,7 +7,6 @@ import {
   odpowiedz,
   odpowiedzHtml,
   tekst,
-  tokenZadania,
 } from './core/http.mjs';
 import {
   accountSessionHeaders,
@@ -3034,7 +3033,9 @@ export default async (req) => {
         ['inpost', { action: 'inpost-sync-all', label: 'Statusy i numery InPost' }],
         ['infakt', { action: 'infakt-sync', label: 'Zadania inFakt i ceny zakupu' }],
       ]), selected = (requested.length ? requested : [...allowed.keys()]).filter((x) => allowed.has(x));
-      const adminToken = tokenZadania(req, url), origin = publicznyOrigin(req), startedAt = new Date().toISOString();
+      // Kontrole wewnętrzne używają klucza usługi wyłącznie z pamięci procesu.
+      // Nigdy nie kopiujemy poświadczenia z przeglądarki ani z adresu URL.
+      const adminToken = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim(), origin = publicznyOrigin(req), startedAt = new Date().toISOString();
       const results = await Promise.all(selected.map(async (area) => {
         const definition = allowed.get(area), started = Date.now();
         try {

@@ -3,7 +3,7 @@ export function odpowiedz(body, status = 200, extraHeaders = {}) {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
     'access-control-allow-origin': 'https://artwaytm.pl',
-    'access-control-allow-headers': 'content-type, authorization, x-session-token, x-admin-token',
+    'access-control-allow-headers': 'content-type, authorization, x-admin-token',
     'access-control-allow-methods': 'GET, POST, OPTIONS',
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
@@ -34,13 +34,13 @@ export function bezpiecznePorownanie(a, b) {
   return result === 0;
 }
 
-export function tokenZadania(request, url) {
+export function tokenZadania(request) {
   return request.headers.get('x-admin-token') || '';
 }
 
-export function czyAdmin(request, url) {
+export function czyAdmin(request) {
   const expected = process.env.ARTWAY_ADMIN_TOKEN || '';
-  return !!expected && bezpiecznePorownanie(tokenZadania(request, url), expected);
+  return !!expected && bezpiecznePorownanie(tokenZadania(request), expected);
 }
 
 export function tekst(value, max = 200) {

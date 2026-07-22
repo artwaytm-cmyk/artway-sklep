@@ -47,8 +47,6 @@ export function verifySignedToken(token, expectedScope = '') {
 export function requestToken(request) {
   const auth = String(request?.headers?.get?.('authorization') || '').trim();
   if (/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, '').trim();
-  const legacyHeader = String(request?.headers?.get?.('x-session-token') || '').trim();
-  if (legacyHeader) return legacyHeader;
   const cookieHeader = String(request?.headers?.get?.('cookie') || '');
   for (const part of cookieHeader.split(';')) {
     const separator = part.indexOf('=');
