@@ -1,5 +1,18 @@
 const allowedScopes = new Set(['all', 'summary', 'orders', 'offers', 'config']);
 const list = (value) => Array.isArray(value) ? value : [];
+const amount = (value) => { const parsed = Number(String(value ?? 0).replace(',', '.').replace(/[^0-9.-]/g, '')); return Number.isFinite(parsed) ? parsed : 0; };
+const orderTimestamp = (order = {}) => { const raw = order.createdAt ?? order.firstFetchedAt ?? order.ts ?? order.checkoutForm?.createdAt ?? ''; const numeric = Number(raw); return Number.isFinite(numeric) && numeric > 1e9 ? (numeric < 1e11 ? numeric * 1000 : numeric) : (Date.parse(raw) || 0); };
+const orderAmount = (order = {}) => amount(order.total?.amount ?? order.total ?? order.summary?.totalToPay?.amount ?? order.payment?.paidAmount?.amount ?? 0);
+function dailySales(orders = [], orderStatus = () => '', days = 45) {
+  const from = Date.now() - Math.max(1, Number(days) || 45) * 86400000, rows = {};
+  for (const order of orders) {
+    const timestamp = orderTimestamp(order), status = String(orderStatus(order) || '').toUpperCase();
+    if (!timestamp || timestamp < from || ['CANCELLED', 'RETURNED'].includes(status)) continue;
+    const key = new Date(timestamp).toISOString().slice(0, 10), row = rows[key] || { value: 0, count: 0 };
+    row.value = Math.round((row.value + orderAmount(order)) * 100) / 100; row.count += 1; rows[key] = row;
+  }
+  return rows;
+}
 
 export function createAllegroDataReader({
   read, archive, getOfferSettings, getStatus, mappingItems, orderStatus,
@@ -33,6 +46,7 @@ export function createAllegroDataReader({
         orders: { live: orderList.length, active: orderList.filter(orderNeedsRefresh).length, statusCounts, archived: Number(archiveSummary.total) || 0, retentionDays: 30, updated_at: orders.updated_at || null },
         offers: { count: offerList.length, mapped: Object.values(mappingsList).filter((entry) => entry?.productId && entry?.blocked !== true).length, updated_at: offers.updated_at || null },
         recentOrders: orderList.slice(0, 10),
+        salesDaily: dailySales(orderList, orderStatus, 45),
       },
       archive: archiveSummary, offerSettings,
     };

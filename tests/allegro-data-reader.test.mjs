@@ -5,8 +5,9 @@ import { readFile } from 'node:fs/promises';
 import { createAllegroDataReader } from '../netlify/functions/lib/domain/allegro-data-reader.mjs';
 
 function readerHarness() {
+  const createdAt = new Date().toISOString();
   const records = new Map([
-    ['allegro_orders', { items: [{ id: 'new', fulfillmentStatus: 'NEW' }, { id: 'sent', fulfillmentStatus: 'SENT' }], updated_at: 'orders-at' }],
+    ['allegro_orders', { items: [{ id: 'new', fulfillmentStatus: 'NEW', createdAt, total: { amount: '119.90' } }, { id: 'sent', fulfillmentStatus: 'SENT', createdAt, total: { amount: '30.10' } }], updated_at: 'orders-at' }],
     ['allegro_offers', { items: [{ id: 'offer-1' }], updated_at: 'offers-at' }],
     ['allegro_mappings', { items: { 'offer-1': { productId: 'product-1' } } }],
   ]);
@@ -29,6 +30,8 @@ test('podsumowanie Allegro nie przesyła ciężkich rejestrów', async () => {
   assert.equal(payload.summary.orders.active, 1);
   assert.equal(payload.summary.orders.archived, 40);
   assert.equal(payload.summary.offers.mapped, 1);
+  const today = new Date().toISOString().slice(0, 10);
+  assert.deepEqual(payload.summary.salesDaily[today], { value: 150, count: 2 });
   assert.equal('orders' in payload, false);
   assert.equal('offers' in payload, false);
   assert.equal('mappings' in payload, false);

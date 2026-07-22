@@ -3,6 +3,7 @@ let asortymentIndeksCache={revision:-1,source:null,offers:null,mappings:null,sta
 let asortymentWynikiCache={index:null,signature:"",value:null};
 let asortymentCentralnyStan={status:"idle",signature:"",data:null,error:"",request:null};
 let asortymentCentralnyCache=new Map(),asortymentCentralnyWylaczonyDo=0;
+let asortymentCentralnyOstatni={signature:"",data:null,at:0};
 
 function asortymentCentralnyParametry(){
   return {q:szukajProduktow,category:filtrProduktow,producer:filtrProducentaProduktow,status:filtrStatusuProduktow,source:filtrZrodlaProduktow,stock:filtrStanuProduktow,allegro:filtrAllegroProduktow,data:filtrDanychProduktow,sale:filtrSprzedazyProduktow,promotion:filtrPromocjiProduktow,link:filtrLinkuProduktow,priceMin:cenaOdAdminProduktow,priceMax:cenaDoAdminProduktow,allegroPriceMin:cenaAllegroOdAdminProduktow,allegroPriceMax:cenaAllegroDoAdminProduktow,sort:sortowanieAdminProduktow,page:stronaAdminProduktow,limit:produktyNaStronieAdmin};
@@ -18,7 +19,7 @@ async function asortymentCentralnyPobierz(force=false){
   const params=asortymentCentralnyParametry(),request=chmura("product-catalog-query",{params,timeout:30000}).then(data=>{
     if(asortymentCentralnySygnatura()!==signature)return data;
     if(Array.isArray(data.items)&&typeof zapamietajProduktyCentralne==="function"){zapamietajProduktyCentralne(data.items);zbudujProdukty();}
-    asortymentCentralnyCache.set(signature,{at:Date.now(),data});while(asortymentCentralnyCache.size>16)asortymentCentralnyCache.delete(asortymentCentralnyCache.keys().next().value);
+    const at=Date.now();asortymentCentralnyCache.set(signature,{at,data});asortymentCentralnyOstatni={signature,data,at};while(asortymentCentralnyCache.size>16)asortymentCentralnyCache.delete(asortymentCentralnyCache.keys().next().value);
     asortymentCentralnyStan={status:"ready",signature,data,error:"",request:null};
     if(data.stale)setTimeout(()=>{asortymentCentralnyCache.delete(signature);if(asortymentCentralnyTrasaAktywna())void asortymentCentralnyPobierz(true).then(()=>renderuj());},1200);
     if(asortymentCentralnyTrasaAktywna())renderuj();return data;
@@ -35,6 +36,7 @@ function asortymentCentralnyWidok(){
   if(cached&&Date.now()-cached.at<5*60*1000)return {ready:true,data:cached.data};
   if(asortymentCentralnyStan.status==="ready"&&asortymentCentralnyStan.signature===signature)return {ready:true,data:asortymentCentralnyStan.data};
   if(asortymentCentralnyStan.status!=="loading"||asortymentCentralnyStan.signature!==signature)setTimeout(()=>void asortymentCentralnyPobierz(),0);
+  if(asortymentCentralnyOstatni.signature===signature&&asortymentCentralnyOstatni.data)return {ready:true,data:asortymentCentralnyOstatni.data,refreshing:true,staleAt:asortymentCentralnyOstatni.at};
   return {loading:true};
 }
 

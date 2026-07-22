@@ -41,6 +41,18 @@ test("pulpit obsługuje integracje, eksport i synchronizację bez Paynow",async(
     assert.match(dashboard,new RegExp(integration),`brak stanu ${integration}`);
   }
   assert.match(dashboard,/function adminPulpitEksportujRaport/);
-  assert.match(dashboard,/allegroWczytajDane\(true,false,"summary"\)/);
+  assert.match(dashboard,/tylkoSprzedaz\?"summary":"orders"/);
   assert.doesNotMatch(dashboard,/Paynow/i);
+});
+
+test("wykres pulpitu zachowuje ostatnie poprawne dane i odświeża je bez czyszczenia widoku",async()=>{
+  const dashboard=await read("src/frontend/19-admin-dashboard.js");
+  assert.match(dashboard,/ADMIN_PULPIT_SNAPSHOT_KEY/);
+  assert.match(dashboard,/recentAllegro/);
+  assert.match(dashboard,/pulpitSnapshotMaDane\("allegro",dni\)/);
+  assert.match(dashboard,/Aktualizuję w tle — poprzednie dane pozostają widoczne/);
+  assert.match(dashboard,/adminPulpitOdswiez\(false,true,true\)/);
+  assert.match(dashboard,/allegroWczytajDane\(true,false,tylkoSprzedaz\?"summary":"orders"\)/);
+  assert.match(dashboard,/allegroDaneOdczytAt\?\.summary/);
+  assert.doesNotMatch(dashboard,/adminPulpitWykresHTML\(7\)/);
 });

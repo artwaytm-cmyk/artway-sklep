@@ -38,6 +38,17 @@ test('bazowy katalog i widoki panelu pozostają w trwałej, adaptacyjnej pamięc
   assert.match(cloud,/uniewaznijCachePodstronAdmina\(klucz\)/);
 });
 
+test('katalog asortymentu nie znika podczas ponownej synchronizacji', async () => {
+  const [index,view]=await Promise.all([
+    read('src/frontend/12-assortment-index.js'),
+    read('src/frontend/12-warehouse-assortment-view.js'),
+  ]);
+  assert.match(index,/asortymentCentralnyOstatni/);
+  assert.match(index,/refreshing:true/);
+  assert.match(view,/aktualizacja w tle — obecny wynik pozostaje widoczny/);
+  assert.match(view,/if\(centralny\.loading\)return/);
+});
+
 test('synchronizacja ostatniego okna pobiera wszystkie statusy, lecz kolejka zachowuje filtr pracy', async () => {
   const [backend, cron] = await Promise.all([
     read('netlify/functions/lib/store-app.mjs'),
