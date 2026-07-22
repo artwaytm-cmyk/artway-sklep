@@ -3262,6 +3262,12 @@ function renderuj(){
     $("widok").innerHTML = `<div class="page"><div class="panel"><h1>⚠️ Coś poszło nie tak</h1><p>Błąd został zapisany w <a href="#/diagnostyka">diagnostyce</a>.</p><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
   }finally{
     renderowanieWidoku=false;
+    if(trasa().startsWith("/admin")){
+      const zakres=$("widok")||document;
+      requestAnimationFrame(()=>{
+        if(typeof window.adminUjednolicWidok==="function")window.adminUjednolicWidok(zakres);
+      });
+    }
     odswiezZnacznikDiag();
     if(renderPonowniePoBiezacym){renderPonowniePoBiezacym=false;requestAnimationFrame(()=>renderuj());}
   }

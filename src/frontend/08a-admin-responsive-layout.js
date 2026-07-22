@@ -11,6 +11,25 @@
     '.telegram-conversation-filters','.telegram-incident-toolbar','.dashboard-alert-filters',
     '.seo-advanced-toolbar','.profitability-review-toolbar','.diag-toolbar',
   ].map((item)=>`.admin-tresc ${item}`).join(',');
+  const selektorHero=[
+    '.allegro-listing-hero','.assortment-catalog-hero','.warehouse-page-context',
+    '.orders-hero','.shipping-page-context','.ai-agent-hero','.home-editor-head',
+    '.banner-workspace-head','.discount-workspace-head','.catalog-quality-hero',
+    '.telegram-hub-hero','.dashboard-hero','.agent-command-hero','.warehouse-qr-hero',
+    '.product-link-import-hero','.product-editor-hero','.seo-control-hero',
+  ].join(',');
+  const selektorMetryk=[
+    '.allegro-listing-metrics','.orders-stat-grid','.stat-grid','.info-grid',
+    '.supplier-monitor-stats','.telegram-hub-kpis','.product-link-import-stats',
+    '.agent-command-metrics','.warehouse-stock-summary','.home-editor-stats',
+    '.dashboard-kpi-grid','.warehouse-dashboard-metrics','.profitability-review-metrics',
+  ].join(',');
+  const selektorPaskow=[
+    '.diag-actions','.admin-results-operations','.admin-results-selection','.results-bar',
+    '.assortment-results-toolbar','.assortment-bulk-editor','.allegro-listing-selection',
+    '.warehouse-worktable-actions','.allegro-toolbar','.toolbar','.order-bulk-toolbar',
+    '.warehouse-page-tools','.agent-command-actions','.catalog-quality-actions',
+  ].join(',');
   function elementy(zakres,selektor){
     const result=[];
     if(zakres?.nodeType===1&&zakres.matches?.(selektor))result.push(zakres);
@@ -54,8 +73,42 @@
       if(!pasek.dataset.filterTitle)pasek.dataset.filterTitle='Wyszukiwanie i filtry';
     });
   }
+  function oznaczElementy(zakres,selektor,klasa){
+    elementy(zakres,selektor).forEach((element)=>element.classList.add(klasa));
+  }
+  function opiszStruktureWidoku(zakres){
+    const content=zakres?.nodeType===1
+      ?(zakres.matches?.('.admin-workspace-content')?zakres:(zakres.closest?.('.admin-workspace-content')||zakres.querySelector?.('.admin-workspace-content')))
+      :document.querySelector('.admin-workspace-content');
+    if(!content)return;
+    const route=String(location.hash||'').replace(/^#/u,'').split('?')[0]||'/admin';
+    content.classList.add('admin-unified-view');
+    content.dataset.adminLayout='unified-v2';
+    content.dataset.adminRoute=route;
+    content.querySelectorAll(':scope>.module-page-stack,:scope>.warehouse-workspace,:scope>.shipping-workspace').forEach((element)=>element.classList.add('admin-unified-module'));
+    content.querySelectorAll('.module-tabs-panel').forEach((element)=>element.classList.add('admin-unified-tabs'));
+    content.querySelectorAll('.warehouse-module-nav,.agent-module-nav,.personalization-commandbar').forEach((element)=>element.classList.add('admin-unified-modulebar'));
+    oznaczElementy(content,selektorHero,'admin-unified-hero');
+    const infaktHero=content.querySelector('.infakt-hero>.order-section-head');
+    if(infaktHero)infaktHero.classList.add('admin-unified-hero');
+    if(!content.querySelector('.admin-unified-hero')){
+      const title=[...content.querySelectorAll('h1,h2')].find((element)=>!element.closest('nav,.admin-workspace-header,.admin-unified-modulebar'));
+      const container=title?.closest?.('.order-section-head,.section-head,header,.panel');
+      if(container)container.classList.add('admin-unified-hero');
+    }
+    oznaczElementy(content,selektorMetryk,'admin-unified-metrics');
+    oznaczElementy(content,selektorPaskow,'admin-unified-toolbar');
+    content.querySelectorAll('.panel:not(.module-tabs-panel),form.panel').forEach((element)=>element.classList.add('admin-unified-panel'));
+    content.querySelectorAll('.panel>.order-section-head:first-child,.panel>.section-head:first-child').forEach((element)=>{
+      if(!element.classList.contains('admin-unified-hero'))element.classList.add('admin-unified-section-head');
+    });
+    content.querySelectorAll('.admin-search-standard').forEach((element)=>element.classList.add('admin-unified-search'));
+    content.querySelectorAll('.order-empty,.catalog-empty,.assortment-empty,.agent-ops-empty,.warehouse-document-empty,.ai-library-empty').forEach((element)=>element.classList.add('admin-unified-empty'));
+  }
+  window.adminUjednolicWidok=opiszStruktureWidoku;
   function opiszZakres(zakres){
     if(!zakres)return;
+    opiszStruktureWidoku(zakres);
     const tabele=new Set(elementy(zakres,selektorTabel));
     const tabelaNadrzedna=zakres?.nodeType===1?zakres.closest?.('table'):null;
     if(tabelaNadrzedna&&tabelaNadrzedna.closest('.admin-tresc,.modal,.drawer'))tabele.add(tabelaNadrzedna);
@@ -66,6 +119,7 @@
     zaplanowane=false;
     if(!document.body.classList.contains('admin-mode'))return;
     const panel=document.getElementById('widok')||document;
+    opiszStruktureWidoku(panel);
     // Katalog produktów używa własnych, responsywnych kart i nie zawiera tabel.
     // Pomijamy dla niego ogólny analizator DOM, aby setki kontrolek nie były
     // ponownie przetwarzane po każdym wejściu na podstronę.

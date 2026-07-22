@@ -87,3 +87,49 @@ test('lokalny administrator loguje się i przechodzi między modułami panelu', 
   await expect(page.locator('.admin-page')).toBeVisible();
   assertRuntime();
 });
+
+async function loginAdmin(page) {
+  await page.goto('/#/logowanie');
+  await page.locator('#loginForm [name="email"]').fill('admin');
+  await page.locator('#loginForm [name="haslo"]').fill('admin');
+  await page.getByRole('button', { name: 'Zaloguj się' }).click();
+  await expect(page).toHaveURL(/#\/admin(?:\/|$)/, { timeout: 20_000 });
+}
+
+test('główne działy administratora mają jeden profesjonalny szablon i nie tworzą poziomego suwaka', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  const routes = [
+    '/admin/allegro/wystawianie',
+    '/admin/asortyment/produkty',
+    '/admin/magazyn/stany',
+    '/admin/zamowienia',
+    '/admin/wysylki',
+    '/admin/agent-ai',
+    '/admin/personalizacja/home',
+    '/admin/infakt',
+  ];
+  for (const route of routes) {
+    await page.goto(`/#${route}`);
+    const workspace = page.locator('.admin-workspace-content[data-admin-layout="unified-v2"]');
+    await expect(workspace).toBeVisible();
+    await expect(workspace.locator('.admin-unified-hero').first()).toBeVisible();
+    const dimensions = await workspace.evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
+    expect(dimensions.content, `Poziome przepełnienie na ${route}`).toBeLessThanOrEqual(dimensions.width + 1);
+  }
+  assertRuntime();
+});
+
+test('wspólny układ panelu pozostaje czytelny w aplikacji mobilnej', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await loginAdmin(page);
+  for (const route of ['/admin/asortyment/produkty', '/admin/magazyn/stany', '/admin/zamowienia', '/admin/agent-ai']) {
+    await page.goto(`/#${route}`);
+    const workspace = page.locator('.admin-workspace-content[data-admin-layout="unified-v2"]');
+    await expect(workspace).toBeVisible();
+    const dimensions = await page.evaluate(() => ({ viewport: window.innerWidth, content: document.documentElement.scrollWidth }));
+    expect(dimensions.content, `Poziome przepełnienie mobilne na ${route}`).toBeLessThanOrEqual(dimensions.viewport + 1);
+  }
+  assertRuntime();
+});
