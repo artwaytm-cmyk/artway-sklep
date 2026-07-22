@@ -4,11 +4,11 @@
    i otwierają właściwą zakładkę.                                          */
 let chmuraOdswiezanieSesji=null;
 async function chmuraOdswiezSesjeAdministratora(force=false){
-  if(!sesja?.token||!jestAdmin())return false;
+  if(!sesja||!jestAdmin())return false;
   const last=Number(wczytajLS("artway_admin_session_refreshed_at",0))||0;
   if(!force&&Date.now()-last<12*60*60*1000)return true;
   if(chmuraOdswiezanieSesji)return chmuraOdswiezanieSesji;
-  chmuraOdswiezanieSesji=(async()=>{try{const d=await chmura("session-refresh",{method:"POST",timeout:9000});if(!d.sessionToken)return false;sesja={...sesja,token:d.sessionToken,verified:true};zapiszLS("artway_sesja",sesja);zapiszLS("artway_admin_session_refreshed_at",Date.now());chmuraStan={...chmuraStan,dostepna:true,admin:true,error:""};return true;}catch(e){return false;}finally{chmuraOdswiezanieSesji=null;}})();
+  chmuraOdswiezanieSesji=(async()=>{try{const d=await chmura("session-refresh",{method:"POST",timeout:9000});if(!d.authenticated)return false;sesja={...sesja,verified:true};delete sesja.token;zapiszLS("artway_sesja",sesja);zapiszLS("artway_admin_session_refreshed_at",Date.now());chmuraStan={...chmuraStan,dostepna:true,admin:true,error:""};return true;}catch(e){return false;}finally{chmuraOdswiezanieSesji=null;}})();
   return chmuraOdswiezanieSesji;
 }
 async function testujEmailPolaczenie(cicho=false){

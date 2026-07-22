@@ -20,8 +20,31 @@ export function createStoreDataRoute(deps = {}) {
     dopiszUsunieteZamowienie, verifyOrderAccess, normalizeTelegramAccountFields, profilKlienta,
     publicUser, hashPassword, createAccountSession, verifyPassword, bezpiecznePorownanie,
     legacyPasswordHash, czytajUstawieniaBazowe = (fallback) => czytaj('settings', fallback),
-    czytajUstawieniaPrzyrostowo = null,
+    czytajUstawieniaPrzyrostowo = null, accountSessionHeaders, createAdminMfaChallenge,
+    createMfaEnrollment, decryptMfaSecret, generateRecoveryCodes, mfaProvisioningUri,
+    recoveryCodeHash, verifyAdminMfaChallenge, verifyMfaCode,
   } = deps;
+  const beginAdminMfa = async (admin, items) => {
+    let secret = decryptMfaSecret(admin.mfaSecretEncrypted), setup = !secret;
+    if (!secret) {
+      secret = decryptMfaSecret(admin.mfaPendingSecretEncrypted);
+      if (!secret) {
+        const enrollment = createMfaEnrollment(admin.email);
+        secret = enrollment.secret;
+        admin.mfaPendingSecretEncrypted = enrollment.encryptedSecret;
+        admin.mfaPendingCreatedAt = new Date().toISOString();
+        await zapisz('users', { items, updated_at: new Date().toISOString() });
+      }
+    }
+    return odpowiedz({
+      ok: true,
+      authenticated: false,
+      mfaRequired: true,
+      mfaSetupRequired: setup,
+      challengeToken: createAdminMfaChallenge(admin.email, setup),
+      ...(setup ? { provisioningUri: mfaProvisioningUri(admin.email, secret), manualKey: secret } : {}),
+    });
+  };
   return async function storeDataRoute(req, url, action) {
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
     if (action === 'pull' || action === 'store-data') {
@@ -337,7 +360,7 @@ export function createStoreDataRoute(deps = {}) {
       items.push(u);
       await zapisz('users', { items, updated_at: new Date().toISOString() });
       const user = publicUser(u);
-      return odpowiedz({ ok: true, stored: true, user, sessionToken: createAccountSession(user) });
+      return odpowiedz({ ok: true, stored: true, authenticated: true, user }, 200, accountSessionHeaders(createAccountSession(user)));
     }
 
     // ─── LOGOWANIE KLIENTA (publiczne, sprawdzenie hasła we wspólnej bazie) ───
@@ -360,8 +383,9 @@ export function createStoreDataRoute(deps = {}) {
         delete u.hash;
         await zapisz('users', { items, updated_at: new Date().toISOString() });
       }
+      if (u.rola === 'admin') return beginAdminMfa(u, items);
       const user = publicUser(u);
-      return odpowiedz({ ok: true, authenticated: true, user, sessionToken: createAccountSession(user) });
+      return odpowiedz({ ok: true, authenticated: true, user }, 200, accountSessionHeaders(createAccountSession(user)));
     }
 
     if (action === 'account-password-change') {
@@ -384,19 +408,66 @@ export function createStoreDataRoute(deps = {}) {
       delete u.hash;
       await zapisz('users', { items, updated_at: new Date().toISOString() });
       const user = publicUser(u);
-      return odpowiedz({ ok: true, changed: true, user, sessionToken: createAccountSession(user) });
+      return odpowiedz({ ok: true, changed: true, authenticated: true, user }, 200, accountSessionHeaders(createAccountSession(user)));
     }
 
     // ─── logowanie tokenem (sprawdzenie hasła administratora) ───
     if (action === 'login') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = ograniczRuch(req, 'admin-login', 6, 15 * 60 * 1000);
+      if (limited) return limited;
       const body = await req.json().catch(() => ({}));
       const podane = tekst(body.password || body.token, 500);
-      const env = process.env.ARTWAY_ADMIN_TOKEN || '';
-      if (!env) return odpowiedz({ ok: false, error: 'Serwer nie ma ustawionego hasła (ARTWAY_ADMIN_TOKEN).', code: 'no_token' }, 503);
-      if (!bezpiecznePorownanie(podane, env)) return odpowiedz({ ok: false, error: 'Nieprawidłowe hasło administratora', code: 'auth' }, 401);
-      const adminUser = { email: tekst(body.email || process.env.ARTWAY_ADMIN_EMAIL || 'artwaytm@gmail.com', 200).trim().toLowerCase(), rola: 'admin' };
-      return odpowiedz({ ok: true, authenticated: true, sessionToken: createAccountSession(adminUser) });
+      const email = tekst(process.env.ARTWAY_ADMIN_EMAIL || 'artwaytm@gmail.com', 200).trim().toLowerCase();
+      const rec = await czytaj('users', { items: [] });
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      let admin = items.find((entry) => String(entry?.email || '').trim().toLowerCase() === email);
+      const hashedOk = admin?.passwordHash ? await verifyPassword(podane, admin.passwordHash).catch(() => false) : false;
+      const legacySecret = String(process.env.ARTWAY_ADMIN_TOKEN || '');
+      const migrationOk = !admin?.passwordHash && !!legacySecret && bezpiecznePorownanie(podane, legacySecret);
+      if (!hashedOk && !migrationOk) return odpowiedz({ ok: false, error: 'Nieprawidłowy e-mail lub hasło administratora.', code: 'auth' }, 401);
+      if (!admin) {
+        admin = { email, imie: 'Administrator', rola: 'admin', account: true };
+        items.push(admin);
+      }
+      if (migrationOk) admin.passwordHash = await hashPassword(podane);
+      admin.rola = 'admin'; admin.account = true; admin.authMigratedAt = admin.authMigratedAt || new Date().toISOString();
+      if (migrationOk) await zapisz('users', { items, updated_at: new Date().toISOString() });
+      return beginAdminMfa(admin, items);
+    }
+
+    if (action === 'login-mfa') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = ograniczRuch(req, 'admin-login-mfa', 8, 15 * 60 * 1000);
+      if (limited) return limited;
+      const body = await req.json().catch(() => ({}));
+      const challenge = verifyAdminMfaChallenge(tekst(body.challengeToken, 2000));
+      if (!challenge) return odpowiedz({ ok: false, error: 'Kod logowania wygasł. Zaloguj się ponownie hasłem.', code: 'mfa_challenge' }, 401);
+      const rec = await czytaj('users', { items: [] }), items = Array.isArray(rec.items) ? rec.items : [];
+      const admin = items.find((entry) => String(entry?.email || '').trim().toLowerCase() === challenge.email && entry.rola === 'admin');
+      if (!admin) return odpowiedz({ ok: false, error: 'Konto administratora nie istnieje.', code: 'auth' }, 401);
+      const secret = decryptMfaSecret(challenge.setup ? admin.mfaPendingSecretEncrypted : admin.mfaSecretEncrypted);
+      const supplied = tekst(body.code, 100).trim();
+      let verified = verifyMfaCode(secret, supplied), usedRecoveryHash = '';
+      if (!verified && !challenge.setup) {
+        usedRecoveryHash = recoveryCodeHash(supplied);
+        verified = !!usedRecoveryHash && Array.isArray(admin.mfaRecoveryCodeHashes) && admin.mfaRecoveryCodeHashes.includes(usedRecoveryHash);
+      }
+      if (!verified) return odpowiedz({ ok: false, error: 'Kod z Google Authenticator jest nieprawidłowy.', code: 'mfa_code' }, 401);
+      let recoveryCodes = [];
+      if (challenge.setup) {
+        admin.mfaSecretEncrypted = admin.mfaPendingSecretEncrypted;
+        delete admin.mfaPendingSecretEncrypted; delete admin.mfaPendingCreatedAt;
+        admin.mfaEnabledAt = new Date().toISOString();
+        recoveryCodes = generateRecoveryCodes();
+        admin.mfaRecoveryCodeHashes = recoveryCodes.map(recoveryCodeHash);
+      } else if (usedRecoveryHash) {
+        admin.mfaRecoveryCodeHashes = admin.mfaRecoveryCodeHashes.filter((hash) => hash !== usedRecoveryHash);
+      }
+      admin.lastLoginAt = new Date().toISOString();
+      await zapisz('users', { items, updated_at: new Date().toISOString() });
+      const user = publicUser(admin);
+      return odpowiedz({ ok: true, authenticated: true, user, recoveryCodes }, 200, accountSessionHeaders(createAccountSession(user)));
     }
     return null;
   };

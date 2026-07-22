@@ -360,7 +360,7 @@ let seoNaStronie=[25,50,100,250,500].includes(Number(wczytajLS("artway_seo_na_st
 let ulubione = wczytajLS("artway_ulubione", []);
 let rabat = wczytajLS("artway_rabat", null);
 let sesja = wczytajLS("artway_sesja", null);
-if(sesja && !sesja.token && !["localhost","127.0.0.1"].includes(location.hostname) && location.protocol!=="file:"){
+if(sesja && !sesja.token && !sesja.verified && !["localhost","127.0.0.1"].includes(location.hostname) && location.protocol!=="file:"){
   sesja=null;
   try{localStorage.removeItem("artway_sesja");}catch(e){}
 }
@@ -514,7 +514,7 @@ async function chmuraPobierzKatalogImportowany(meta={},force=false){
   return true;
 }
 function maUprawnieniaZapisuChmury(){
-  return !!(chmuraToken||(sesja?.token&&typeof jestAdmin==="function"&&jestAdmin()));
+  return !!(chmuraToken||((sesja?.verified||sesja?.token)&&typeof jestAdmin==="function"&&jestAdmin()));
 }
 
 
@@ -532,7 +532,7 @@ async function chmura(action, {method="GET", body=null, params={}, timeout=9000}
   const requestKey=method==="GET"&&body===null?url.toString():"",istniejace=requestKey?chmuraPobraniaWToku.get(requestKey):null;
   if(istniejace)return istniejace;
   const request=(async()=>{
-    const opt = {method, headers: chmuraNaglowki(body!==null)};
+    const opt = {method, headers: chmuraNaglowki(body!==null), credentials:"same-origin"};
     if(body!==null) opt.body = JSON.stringify(body);
     const ac = (typeof AbortController!=="undefined") ? new AbortController() : null;
     let timer=null;
@@ -1330,7 +1330,7 @@ async function zarejestrujUzytkownika(imie, email, haslo){
   const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
   try{
     const d=await chmura("account-register",{method:"POST",body:{user:{imie,email},password:haslo}});
-    const rekord={...(d.user||{imie,email,rola:"klient"}),token:d.sessionToken||""};
+    const rekord={...(d.user||{imie,email,rola:"klient"}),verified:d.authenticated===true};
     const u=pobierzUzytkownikow(),i=u.findIndex(x=>x.email===email);
     if(i>=0)u[i]={...u[i],imie:rekord.imie,email:rekord.email,rola:rekord.rola,account:true};else u.push({imie:rekord.imie,email:rekord.email,rola:rekord.rola,account:true});
     zapiszLS("artway_uzytkownicy",u);
@@ -1355,12 +1355,14 @@ async function sprawdzLogowanie(email, haslo){
   if(email==="admin" || email===adminEmail){
     try{
       const d=await chmura("login",{method:"POST",body:{password:haslo,email:adminEmail}});
+      if(d.mfaRequired)return {ok:true,mfa:d};
       chmuraToken=""; sessionStorage.removeItem("artway_chmura_token"); localStorage.removeItem("artway_chmura_token");
       const lista=pobierzUzytkownikow(); const a=lista.find(x=>x.email===adminEmail);
       if(a){ a.hash=""; zapiszLS("artway_uzytkownicy",lista); }
       domyslneHasloAdmina=false;
       chmuraStan={...chmuraStan,dostepna:true,admin:true};
-      return {ok:true, uzytkownik:{imie:"Administrator",email:adminEmail,rola:"admin",token:d.sessionToken||"",verified:true}};
+      const serwer=d.user||{};
+      return {ok:true, uzytkownik:{imie:serwer.imie||"Administrator",email:serwer.email||adminEmail,rola:"admin",verified:true}};
     }catch(bl){
       // serwer niedostępny lub złe hasło → spróbuj lokalnego admin/admin (tryb offline)
     }
@@ -1370,11 +1372,12 @@ async function sprawdzLogowanie(email, haslo){
   if(email!=="admin"){
     try{
       const d=await chmura("account-login",{method:"POST",body:{email:emailDocelowy,password:haslo}});
+      if(d.mfaRequired)return {ok:true,mfa:d};
       const serwer=d.user||{}; const lista=pobierzUzytkownikow(); const lok=lista.find(x=>x.email===serwer.email);
       if(lok) Object.assign(lok,serwer,{hash:""}); else lista.push({...serwer,hash:""});
       zapiszLS("artway_uzytkownicy",lista);
       stanBazyCentralnej={...stanBazyCentralnej,online:true,error:""};
-      return {ok:true, uzytkownik:{imie:serwer.imie||serwer.email,email:serwer.email,rola:serwer.rola||"klient",token:d.sessionToken||"",verified:true}};
+      return {ok:true, uzytkownik:{imie:serwer.imie||serwer.email,email:serwer.email,rola:serwer.rola||"klient",verified:true}};
     }catch(bl){
       const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
       if(!lokalnyPodglad) return {ok:false,blad:bl.message||"Nieprawidłowy e-mail lub hasło."};
@@ -1388,10 +1391,10 @@ async function sprawdzLogowanie(email, haslo){
   return {ok:true, uzytkownik:{imie:u.imie, email:u.email, rola:u.rola||"klient"}};
 }
 function ustawSesje(u){
-  if(u&&sesja?.email===u.email&&!u.token&&sesja.token)u={...u,token:sesja.token,verified:sesja.verified};
+  if(u){u={...u};delete u.token;u.verified=u.verified===true;}
   sesja=u; zapiszLS("artway_sesja",u); odswiezUzytkownika();
 }
-function wyloguj(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; stanBramki={...stanBramki,authenticated:false}; ustawSesje(null); toast("Wylogowano 👋"); location.hash="#/"; }
+function wyloguj(){ void chmura("session-logout",{method:"POST",timeout:5000}).catch(()=>{});chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; stanBramki={...stanBramki,authenticated:false}; ustawSesje(null); toast("Wylogowano 👋"); location.hash="#/"; }
 function jestGlownymAdminem(email){ return String(email||"").toLowerCase()===KONFIG.emailAdmina.toLowerCase(); }
 function kontoMaRoleAdmin(email){
   const e=String(email||"").toLowerCase();
@@ -1399,7 +1402,7 @@ function kontoMaRoleAdmin(email){
 }
 function jestAdmin(){
   const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
-  return !!sesja&&kontoMaRoleAdmin(sesja.email)&&(!!chmuraToken||!!sesja.token||lokalnyPodglad);
+  return !!sesja&&kontoMaRoleAdmin(sesja.email)&&(!!chmuraToken||sesja.verified===true||!!sesja.token||lokalnyPodglad);
 }
 function odswiezUzytkownika(){
   const nazwaSesji=sesja ? String(sesja.imie||sesja.login||sesja.email||"Konto").trim() : "";
@@ -1635,7 +1638,7 @@ async function zmienHaslo(e){
   if(nowe!==powtorz){ toast("⚠️ Wpisane nowe hasła nie są takie same"); return; }
   try{
     const d=await chmura("account-password-change",{method:"POST",body:{currentPassword:String(f.get("stare")||""),newPassword:nowe}});
-    if(d.sessionToken&&sesja)ustawSesje({...sesja,token:d.sessionToken,verified:true});
+    if(d.authenticated&&sesja)ustawSesje({...sesja,verified:true});
   }catch(bl){
     const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
     if(!lokalnyPodglad){toast("⚠️ Nie zmieniono hasła: "+bl.message);return;}

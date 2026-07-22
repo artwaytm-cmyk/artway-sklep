@@ -1,15 +1,17 @@
-export function odpowiedz(body, status = 200) {
+export function odpowiedz(body, status = 200, extraHeaders = {}) {
+  const headers = new Headers({
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'access-control-allow-origin': 'https://artwaytm.pl',
+    'access-control-allow-headers': 'content-type, authorization, x-session-token, x-admin-token',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+  });
+  for (const [name, value] of Object.entries(extraHeaders || {})) if (value != null) headers.set(name, String(value));
   return new Response(JSON.stringify(body), {
     status,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      'access-control-allow-origin': 'https://artwaytm.pl',
-      'access-control-allow-headers': 'content-type, authorization, x-session-token, x-admin-token',
-      'access-control-allow-methods': 'GET, POST, OPTIONS',
-      'x-content-type-options': 'nosniff',
-      'referrer-policy': 'no-referrer',
-    },
+    headers,
   });
 }
 
@@ -33,7 +35,7 @@ export function bezpiecznePorownanie(a, b) {
 }
 
 export function tokenZadania(request, url) {
-  return request.headers.get('x-admin-token') || url.searchParams.get('token') || '';
+  return request.headers.get('x-admin-token') || '';
 }
 
 export function czyAdmin(request, url) {

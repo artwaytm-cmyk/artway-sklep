@@ -10,6 +10,8 @@ import {
   tokenZadania,
 } from './core/http.mjs';
 import {
+  accountSessionHeaders,
+  clearAccountSessionHeaders,
   createAccountSession,
   createOrderAccess,
   hashPassword,
@@ -20,6 +22,16 @@ import {
   verifyOrderAccess,
   verifyPassword,
 } from './core/security.mjs';
+import {
+  createAdminMfaChallenge,
+  createMfaEnrollment,
+  decryptMfaSecret,
+  generateRecoveryCodes,
+  mfaProvisioningUri,
+  recoveryCodeHash,
+  verifyAdminMfaChallenge,
+  verifyMfaCode,
+} from './core/mfa.mjs';
 import {
   filtrujNieusunieteZamowienia,
   mapaUsunietych,
@@ -2898,6 +2910,15 @@ const storeDataRoute = createStoreDataRoute({
   verifyPassword,
   bezpiecznePorownanie,
   legacyPasswordHash,
+  accountSessionHeaders,
+  createAdminMfaChallenge,
+  createMfaEnrollment,
+  decryptMfaSecret,
+  generateRecoveryCodes,
+  mfaProvisioningUri,
+  recoveryCodeHash,
+  verifyAdminMfaChallenge,
+  verifyMfaCode,
   czytajUstawieniaBazowe,
   czytajUstawieniaPrzyrostowo,
 });
@@ -2915,6 +2936,8 @@ const systemRoute = createSystemRoute({
   infaktPublicConfig,
   requestSession,
   createAccountSession,
+  accountSessionHeaders,
+  clearAccountSessionHeaders,
   repository,
   storeName: STORE_NAME,
   backupKeyPattern: BACKUP_KEY_PATTERN,

@@ -102,7 +102,7 @@ let seoNaStronie=[25,50,100,250,500].includes(Number(wczytajLS("artway_seo_na_st
 let ulubione = wczytajLS("artway_ulubione", []);
 let rabat = wczytajLS("artway_rabat", null);
 let sesja = wczytajLS("artway_sesja", null);
-if(sesja && !sesja.token && !["localhost","127.0.0.1"].includes(location.hostname) && location.protocol!=="file:"){
+if(sesja && !sesja.token && !sesja.verified && !["localhost","127.0.0.1"].includes(location.hostname) && location.protocol!=="file:"){
   sesja=null;
   try{localStorage.removeItem("artway_sesja");}catch(e){}
 }

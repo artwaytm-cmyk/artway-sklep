@@ -11,6 +11,8 @@ export function createSystemRoute({
   infaktPublicConfig,
   requestSession,
   createAccountSession,
+  accountSessionHeaders,
+  clearAccountSessionHeaders,
   repository,
   storeName,
   backupKeyPattern,
@@ -64,7 +66,12 @@ export function createSystemRoute({
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const session = requestSession(req);
       if (!session || session.role !== 'admin') return odpowiedz({ ok: false, error: 'Zaloguj się ponownie jako administrator.', code: 'auth' }, 401);
-      return odpowiedz({ ok: true, authenticated: true, sessionToken: createAccountSession({ email: session.email, rola: 'admin' }), expiresInDays: 30 });
+      return odpowiedz({ ok: true, authenticated: true, user: { email: session.email, rola: 'admin' }, expiresInDays: 30 }, 200, accountSessionHeaders(createAccountSession({ email: session.email, rola: 'admin' })));
+    }
+
+    if (action === 'session-logout') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      return odpowiedz({ ok: true, authenticated: false }, 200, clearAccountSessionHeaders());
     }
 
     if (action === 'store-backup-manifest') {

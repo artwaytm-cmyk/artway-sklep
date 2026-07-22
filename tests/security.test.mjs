@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  accountSessionCookie,
   createAccountSession,
   createOrderAccess,
   hashPassword,
@@ -8,6 +9,7 @@ import {
   verifyOrderAccess,
   verifyPassword,
 } from '../netlify/functions/lib/core/security.mjs';
+import { createAdminMfaChallenge, verifyAdminMfaChallenge, verifyMfaCode } from '../netlify/functions/lib/core/mfa.mjs';
 import { bezpieczneZamowienieKlienta } from '../netlify/functions/lib/domain/checkout.mjs';
 
 process.env.ARTWAY_SESSION_SECRET = 'test-secret-that-is-not-used-in-production';
@@ -17,6 +19,26 @@ test('podpisana sesja wskazuje właściciela i rolę konta', () => {
   const request = new Request('https://artwaytm.pl/api/store', { headers: { authorization: `Bearer ${token}` } });
   assert.deepEqual(requestSession(request), { email: 'klient@example.com', role: 'klient', exp: requestSession(request).exp });
   assert.equal(requestSession(new Request('https://artwaytm.pl/api/store', { headers: { authorization: `${token}x` } })), null);
+});
+
+test('sesja konta działa z ciasteczka HttpOnly i nie wymaga tokenu w JavaScript', () => {
+  const token = createAccountSession({ email: 'admin@example.com', rola: 'admin' });
+  const cookie = accountSessionCookie(token);
+  assert.match(cookie, /^artway_session=/);
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /Secure/);
+  assert.match(cookie, /SameSite=Lax/);
+  const request = new Request('https://artwaytm.pl/api/store', { headers: { cookie: cookie.split(';')[0] } });
+  assert.equal(requestSession(request)?.role, 'admin');
+  assert.equal(requestSession(request)?.email, 'admin@example.com');
+});
+
+test('wyzwanie MFA wygasa jako osobny zakres i TOTP toleruje tylko sąsiednie okno czasu', () => {
+  const challenge = createAdminMfaChallenge('ADMIN@example.com', true);
+  assert.deepEqual(verifyAdminMfaChallenge(challenge), { email: 'admin@example.com', setup: true });
+  const rfcSecret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  assert.equal(verifyMfaCode(rfcSecret, '287082', 59_000), true);
+  assert.equal(verifyMfaCode(rfcSecret, '287083', 59_000), false);
 });
 
 test('token zamówienia działa wyłącznie dla właściwego numeru i e-maila', () => {

@@ -37,6 +37,8 @@ test('panel używa odnawialnej sesji administratora zamiast proszenia o token ba
   assert.doesNotMatch(cloudSource, /prompt\("Wklej hasło administratora wspólnej bazy/);
   assert.match(securitySource, /30 \* 24 \* 60 \* 60 \* 1000/);
   assert.match(systemRouteSource, /action === 'session-refresh'/);
+  assert.match(securitySource, /HttpOnly/);
+  assert.doesNotMatch(securitySource, /ARTWAY_SESSION_SECRET \|\| process\.env\.ARTWAY_ADMIN_TOKEN/);
 });
 
 test('InPost i SMTP mają rzeczywiste testy serwerowe z trwałą historią zdrowia', () => {

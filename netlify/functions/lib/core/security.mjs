@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const ORDER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const SESSION_COOKIE_NAME = 'artway_session';
 const rateBuckets = new Map();
 
 function base64url(value) {
@@ -9,7 +10,7 @@ function base64url(value) {
 }
 
 function sessionSecret() {
-  return String(process.env.ARTWAY_SESSION_SECRET || process.env.ARTWAY_ADMIN_TOKEN || '').trim();
+  return String(process.env.ARTWAY_SESSION_SECRET || '').trim();
 }
 
 function sign(encoded) {
@@ -46,7 +47,31 @@ export function verifySignedToken(token, expectedScope = '') {
 export function requestToken(request) {
   const auth = String(request?.headers?.get?.('authorization') || '').trim();
   if (/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, '').trim();
-  return String(request?.headers?.get?.('x-session-token') || '').trim();
+  const legacyHeader = String(request?.headers?.get?.('x-session-token') || '').trim();
+  if (legacyHeader) return legacyHeader;
+  const cookieHeader = String(request?.headers?.get?.('cookie') || '');
+  for (const part of cookieHeader.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 0 || part.slice(0, separator).trim() !== SESSION_COOKIE_NAME) continue;
+    try { return decodeURIComponent(part.slice(separator + 1).trim()); }
+    catch { return ''; }
+  }
+  return '';
+}
+
+export function accountSessionCookie(token = '', { clear = false } = {}) {
+  const value = clear ? '' : encodeURIComponent(String(token || ''));
+  const maxAge = clear ? 0 : Math.floor(SESSION_TTL_MS / 1000);
+  const expires = clear ? '; Expires=Thu, 01 Jan 1970 00:00:00 GMT' : '';
+  return `${SESSION_COOKIE_NAME}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}${expires}`;
+}
+
+export function accountSessionHeaders(token = '') {
+  return { 'set-cookie': accountSessionCookie(token) };
+}
+
+export function clearAccountSessionHeaders() {
+  return { 'set-cookie': accountSessionCookie('', { clear: true }) };
 }
 
 export function requestSession(request) {

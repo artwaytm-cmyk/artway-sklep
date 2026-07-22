@@ -98,7 +98,7 @@ async function chmuraPobierzKatalogImportowany(meta={},force=false){
   return true;
 }
 function maUprawnieniaZapisuChmury(){
-  return !!(chmuraToken||(sesja?.token&&typeof jestAdmin==="function"&&jestAdmin()));
+  return !!(chmuraToken||((sesja?.verified||sesja?.token)&&typeof jestAdmin==="function"&&jestAdmin()));
 }
 
 
@@ -116,7 +116,7 @@ async function chmura(action, {method="GET", body=null, params={}, timeout=9000}
   const requestKey=method==="GET"&&body===null?url.toString():"",istniejace=requestKey?chmuraPobraniaWToku.get(requestKey):null;
   if(istniejace)return istniejace;
   const request=(async()=>{
-    const opt = {method, headers: chmuraNaglowki(body!==null)};
+    const opt = {method, headers: chmuraNaglowki(body!==null), credentials:"same-origin"};
     if(body!==null) opt.body = JSON.stringify(body);
     const ac = (typeof AbortController!=="undefined") ? new AbortController() : null;
     let timer=null;
