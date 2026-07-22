@@ -16,6 +16,7 @@ const PUBLIC_ENTRIES = Object.freeze([
   'dostawa',
   'zwroty',
 ]);
+const RELEASE_MANAGER_ID = 'artway-atomic-release-v1';
 
 export const REQUIRED_PUBLIC_FILES = Object.freeze([
   'index.html',
@@ -120,6 +121,7 @@ export async function createStaticRelease({ sourceRoot, releasesRoot, releaseId,
       });
     }
     const manifest = {
+      managedBy: RELEASE_MANAGER_ID,
       releaseId: id,
       version: releaseVersion(indexHtml),
       commit: String(commit || 'unknown').slice(0, 80),
@@ -176,6 +178,12 @@ export async function pruneStaticReleases({ releasesRoot, currentLink, keep = 8 
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
     const absolute = path.join(releasesRoot, entry.name);
     if (active === absolute) continue;
+    const releaseManifest = await readFile(path.join(absolute, 'release.json'), 'utf8')
+      .then((value) => JSON.parse(value))
+      .catch(() => null);
+    // Ten katalog był używany również przez starsze, ręczne wdrożenia.
+    // Retencja nie może usuwać niczego, czego nie utworzył ten manager.
+    if (releaseManifest?.managedBy !== RELEASE_MANAGER_ID) continue;
     const info = await stat(absolute);
     candidates.push({ absolute, mtimeMs: info.mtimeMs });
   }

@@ -73,3 +73,18 @@ test('produkcja i CI korzystają z atomowej bramki publikacji', async () => {
   assert.match(workflow, /npm audit --audit-level=high/);
   assert.equal(packageJson.scripts['deploy:atomic'], 'node scripts/deploy-atomic-release.mjs');
 });
+
+test('retencja nigdy nie usuwa katalogów ze starszych systemów publikacji', async (t) => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'artway-retention-'));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const source = path.join(temp, 'source'), releases = path.join(temp, 'releases'), current = path.join(releases, 'current');
+  await fixture(source, '2026.07.22.32');
+  const legacy = path.join(releases, 'public-before-legacy');
+  await mkdir(legacy, { recursive: true });
+  await writeFile(path.join(legacy, 'index.html'), 'historyczna kopia');
+  for (let index = 1; index <= 4; index += 1) {
+    await deployStaticRelease({ sourceRoot: source, releasesRoot: releases, currentLink: current, releaseId: `managed-${index}`, commit: `commit-${index}`, keep: 3, healthCheck: async () => {} });
+  }
+  assert.equal(await readFile(path.join(legacy, 'index.html'), 'utf8'), 'historyczna kopia');
+  assert.equal(path.basename(await realpath(current)), 'managed-4');
+});
