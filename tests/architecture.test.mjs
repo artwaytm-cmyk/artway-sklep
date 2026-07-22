@@ -106,10 +106,27 @@ test('wydzielone domeny pozostają małe i są częścią właściwego pakietu',
     'netlify/functions/lib/paynow-service.mjs',
     'netlify/functions/lib/infakt-service.mjs',
     'netlify/functions/lib/product-source-inspection-service.mjs',
+    'netlify/functions/lib/agent-operations-route.mjs',
+    'netlify/functions/lib/allegro-communications-route.mjs',
+    'netlify/functions/lib/allegro-mapping-route.mjs',
+    'netlify/functions/lib/product-availability-route.mjs',
+    'netlify/functions/lib/email-route.mjs',
   ]) {
     const lines = physicalLineCount(await readFile(source, 'utf8'));
     assert.ok(lines <= B.source.integrationService.maxLines, `${source} ma ${lines} linii; przekroczono twardy budżet usługi integracyjnej`);
   }
+});
+
+test('koordynator deleguje wydzielone domeny zamiast ponownie zawierać ich trasy', async () => {
+  const coordinator = await readFile('netlify/functions/lib/store-app.mjs', 'utf8');
+  for (const route of [
+    'agentOperationsRoute', 'allegroCommunicationsRoute', 'allegroMappingRoute',
+    'productAvailabilityRoute', 'emailRoute',
+  ]) assert.match(coordinator, new RegExp(`await ${route}\\(`), `Koordynator nie deleguje do ${route}`);
+  for (const action of [
+    'agent-run-safe-checks', 'allegro-communication-resolve', 'allegro-map-offers-batch',
+    'supplier-availability-sample', 'email-send-supplier-order',
+  ]) assert.doesNotMatch(coordinator, new RegExp(`action === ['\"]${action}['\"]`), `Akcja ${action} wróciła do koordynatora`);
 });
 
 test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', async () => {

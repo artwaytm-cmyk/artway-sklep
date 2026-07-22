@@ -13,7 +13,10 @@ import {
 } from '../netlify/functions/lib/domain/allegro-reply-assistant.mjs';
 
 const frontend = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
-const backend = await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8');
+const backend = (await Promise.all([
+  '../netlify/functions/lib/store-app.mjs',
+  '../netlify/functions/lib/allegro-communications-route.mjs',
+].map((file) => readFile(new URL(file, import.meta.url), 'utf8')))).join('\n');
 
 test('poprawa stylistyczna porządkuje ręczny szkic bez dopisywania faktów', () => {
   const source = 'jeszcze raz przepraszamy za zaistniało sytuacje , zamówienie ORDER-17 ma numer 620999 i wartość 48,50 zł\n\npozdrawiamy serdecznie\nartway tm';
@@ -203,7 +206,8 @@ test('endpoint poprawy zwraca wyłącznie szkic i jawnie nie wysyła niczego zew
   const action = backend.slice(backend.indexOf("if (action === 'allegro-reply-suggestion')"), backend.indexOf("if (action === 'allegro-send-reply')"));
   assert.match(action, /mode === 'style'/u);
   assert.match(action, /buildContextualAllegroReply/u);
-  assert.match(action, /allegroPelnaSprawaDoOdpowiedzi/u);
+  assert.match(action, /fullReplyCase/u);
+  assert.match(backend, /fullReplyCase: allegroPelnaSprawaDoOdpowiedzi/u);
   assert.match(action, /sentExternally: false/u);
   assert.doesNotMatch(action, /method:\s*'POST'.*\/messaging\/threads|\/sale\/issues\/.*\/message/su);
   assert.match(action, /no_customer_message/u);

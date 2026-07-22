@@ -25,6 +25,11 @@ const files = [
   'netlify/functions/lib/inpost-route.mjs',
   'netlify/functions/lib/infakt-route.mjs',
   'netlify/functions/lib/paynow-route.mjs',
+  'netlify/functions/lib/agent-operations-route.mjs',
+  'netlify/functions/lib/allegro-communications-route.mjs',
+  'netlify/functions/lib/allegro-mapping-route.mjs',
+  'netlify/functions/lib/product-availability-route.mjs',
+  'netlify/functions/lib/email-route.mjs',
   'netlify/functions/lib/email-service.mjs',
   'netlify/functions/lib/inpost-service.mjs',
   'netlify/functions/lib/paynow-service.mjs',
@@ -90,6 +95,11 @@ const appAdmin = read('assets/admin.js');
 const app = `${appPublic}\n${appAdmin}`;
 const storeEntry = read('netlify/functions/store.mjs');
 const store = read('netlify/functions/lib/store-app.mjs');
+const agentOperationsRoute = read('netlify/functions/lib/agent-operations-route.mjs');
+const allegroCommunicationsRoute = read('netlify/functions/lib/allegro-communications-route.mjs');
+const allegroMappingRoute = read('netlify/functions/lib/allegro-mapping-route.mjs');
+const productAvailabilityRoute = read('netlify/functions/lib/product-availability-route.mjs');
+const emailRoute = read('netlify/functions/lib/email-route.mjs');
 const storeRuntime = [
   store,
   read('netlify/functions/lib/system-route.mjs'),
@@ -97,6 +107,11 @@ const storeRuntime = [
   read('netlify/functions/lib/inpost-route.mjs'),
   read('netlify/functions/lib/infakt-route.mjs'),
   read('netlify/functions/lib/paynow-route.mjs'),
+  agentOperationsRoute,
+  allegroCommunicationsRoute,
+  allegroMappingRoute,
+  productAvailabilityRoute,
+  emailRoute,
   read('netlify/functions/lib/email-service.mjs'),
   read('netlify/functions/lib/inpost-service.mjs'),
   read('netlify/functions/lib/paynow-service.mjs'),
@@ -449,7 +464,7 @@ requireMarkers('backend aplikacji po podziale domenowym', storeRuntime, [
   "action === 'store-sync'",
   "action === 'store-order-delete-mine'",
   "action === 'account-login'",
-  "action === 'send-status-email'",
+  "'send-status-email'",
   'function kosztyEmail',
   'Paczka w Weekend',
   'end_of_week_collection',
@@ -468,7 +483,7 @@ requireMarkers('backend aplikacji po podziale domenowym', storeRuntime, [
   'function allegroPodsumujKalkulacjeOplat',
   "'/pricing/offer-fee-preview'",
   'allegro_fee_preview_audit',
-  "action === 'supplier-availability-sample'",
+  "'supplier-availability-sample'",
   "action === 'seo-daily-run'",
   "action === 'catalog-quality-audit'",
   'function seoWykonajDziennyPlan',
@@ -492,7 +507,7 @@ requireMarkers('backend aplikacji po podziale domenowym', storeRuntime, [
   'priorityChecked',
   'activeDemand',
   "action === 'agent-operations-summary'",
-  "action === 'agent-run-safe-checks'",
+  "'agent-run-safe-checks'",
   'function agentPriorytetWykonawczy',
   'site_function_check',
   'data_sync',
@@ -694,14 +709,14 @@ if (/status\s*:\s*["'`]wysłane na Telegram/.test(telegramSupplierFlow)) {
 if (!app.includes('async function agentAIUzgodnijPlanZSerwerem') || !app.includes('supplier-order-reconcile') || app.includes('function agentAIUtworzZlecenieProducenta(')) {
   fail('assets/app.js: Plan zatowarowania musi używać kanonicznego uzgadniania serwerowego bez lokalnego generatora szkiców');
 }
-if (!store.includes('supplierOrderPlan.beginEmailSend') || !store.includes('supplierOrderPlan.markEmailResults') || !store.includes("crypto.createHash('sha256')")) {
+if (!emailRoute.includes('supplierPlan.beginEmailSend') || !emailRoute.includes('supplierPlan.markEmailResults') || !emailRoute.includes("crypto.createHash('sha256')")) {
   fail('store-app.mjs: wysyłka producenta musi wymagać zatwierdzenia bieżącej wersji i mieć idempotencję');
 }
 if (!app.includes('została bezpiecznie dezaktywowana') || !app.includes('...(producenciKartoteka||[]).filter(p=>p.active!==false)')) {
   fail('assets/app.js: kartoteka producentów musi chronić aktywne zamówienia i zasilać listę producentów produktów');
 }
-const internalResolveFlow = store.slice(store.indexOf("action === 'allegro-communication-resolve'"), store.indexOf("action === 'allegro-communications-settings'"));
-if (!internalResolveFlow.includes('sentExternally: false') || /allegroWywolaj|wyslijTelegramHtml|wyslijEmailSMTP/.test(internalResolveFlow)) {
+const internalResolveFlow = allegroCommunicationsRoute.slice(allegroCommunicationsRoute.indexOf("if (action === 'allegro-communication-resolve')"), allegroCommunicationsRoute.indexOf("if (action === 'allegro-communications-settings')"));
+if (!internalResolveFlow.includes('sentExternally: false') || /callAllegro|sendTelegram|sendSmtp/.test(internalResolveFlow)) {
   fail('store-app.mjs: wewnętrzne zamknięcie komunikacji nie może wysyłać wiadomości ani wywoływać API Allegro');
 }
 const duplicateResolutionFlow = allegroOfferWithdrawal;
@@ -728,14 +743,14 @@ if (!feePreviewFlow.includes('commissions: summary.commissions') || !feePreviewF
 if (!app.includes('1-variableRate-target') || !app.includes('Po zmianie ceny pobierz prowizję ponownie')) {
   fail('assets/app.js: rekomendowana cena musi uwzględniać koszty procentowe i ostrzegać o ponownym przeliczeniu prowizji');
 }
-const supplierFlow = store.slice(store.indexOf("action === 'supplier-availability-sample'"), store.indexOf("action === 'allegro-map-offer'"));
+const supplierFlow = productAvailabilityRoute.slice(productAvailabilityRoute.indexOf("if (action === 'supplier-availability-sample')") >= 0 ? productAvailabilityRoute.indexOf("if (action === 'supplier-availability-sample')") : productAvailabilityRoute.indexOf('const settingsRec = await read'));
 if (!supplierFlow.includes("status === 'niski'") || !supplierFlow.includes('producentAlertHash') || !supplierFlow.includes('changedAlerts') || !supplierFlow.includes('stanProducentaZrodlo')) {
   fail('store-app.mjs: monitoring producentów musi rozpoznawać niski stan, zapisywać źródło i wysyłać alert tylko po zmianie');
 }
-if (!supplierFlow.includes("czytaj('orders'") || !supplierFlow.includes("czytaj('allegro_orders'") || !supplierFlow.includes('Math.ceil(limit * 0.75)') || !supplierFlow.includes('allegro30 * 5')) {
+if (!supplierFlow.includes("read('orders'") || !supplierFlow.includes("read('allegro_orders'") || !supplierFlow.includes('Math.ceil(limit * 0.75)') || !supplierFlow.includes('allegro30 * 5')) {
   fail('store-app.mjs: monitoring producentów musi zawsze priorytetyzować bestsellery sklepu i Allegro oraz aktywne zamówienia');
 }
-if (!supplierFlow.includes('synchronizujSprzedazZDostepnosciaProducenta') || !supplierFlow.includes('saleAutomation')) {
+if (!supplierFlow.includes('syncSaleChannels') || !supplierFlow.includes('saleAutomation')) {
   fail('store-app.mjs: wynik kontroli producenta musi automatycznie ukrywać lub przywracać sprzedaż w sklepie i Allegro');
 }
 if (!app.includes('Brak u producenta wstrzymuje zakup, ale nie usuwa karty') || !app.includes('function produktSklepuPoId') || !app.includes('function allegroZamowienieZrealizowaneLokalnie')) {

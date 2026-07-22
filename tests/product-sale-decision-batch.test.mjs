@@ -35,7 +35,7 @@ test('monitor producentów ma zaznaczanie i identyczny wybór decyzji pojedyncze
     readFile(new URL('../src/frontend/02-runtime-state.js', import.meta.url), 'utf8'),
     readFile(new URL('../assets/app.js', import.meta.url), 'utf8'),
     readFile(new URL('../assets/admin.js', import.meta.url), 'utf8'),
-    readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../netlify/functions/lib/product-availability-route.mjs', import.meta.url), 'utf8'),
   ]);
   assert.match(state, /zaznaczoneDostepnoscProducentow=new Set\(\)/);
   assert.match(availability, /DECYZJE_PRODUCENTA_OPCJE/);

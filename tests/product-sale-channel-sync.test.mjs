@@ -93,7 +93,10 @@ test('błąd jednej oferty wycofuje wcześniejsze części i nie ukrywa samego s
 
 test('backend kończy i wznawia ofertę dopiero po potwierdzeniu operacji Allegro', async () => {
   const [store, channelSync] = await Promise.all([
-    readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
+    Promise.all([
+      readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
+      readFile(new URL('../netlify/functions/lib/product-availability-route.mjs', import.meta.url), 'utf8'),
+    ]).then((parts) => parts.join('\n')),
     readFile(new URL('../netlify/functions/lib/domain/product-sale-channel-links.mjs', import.meta.url), 'utf8'),
   ]);
   const source = `${store}\n${channelSync}`;
@@ -102,7 +105,7 @@ test('backend kończy i wznawia ofertę dopiero po potwierdzeniu operacji Allegr
   assert.match(source, /status: 'ACTIVE'/);
   assert.match(source, /allegroCzekajNaOperacjeOferty/);
   assert.match(source, /previousAvailability/);
-  assert.match(source, /if \(!saleAutomation\.complete\) return odpowiedz/);
+  assert.match(source, /if \(!saleAutomation\.complete\) return (?:odpowiedz|respond)/);
   assert.match(source, /pendingAction: unavailable \? 'END' : 'ACTIVATE'/);
 });
 

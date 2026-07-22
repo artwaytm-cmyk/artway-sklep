@@ -28,7 +28,10 @@ const inventorySource = (await Promise.all([
   '12-warehouse-views.js',
   '12-product-editor.js',
 ].map((file)=>readFile(new URL(`../src/frontend/${file}`, import.meta.url), 'utf8')))).join('\n');
-const storeSource = await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8');
+const storeSource = (await Promise.all([
+  readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
+  readFile(new URL('../netlify/functions/lib/email-route.mjs', import.meta.url), 'utf8'),
+])).join('\n');
 const supplierRouteSource = await readFile(new URL('../netlify/functions/lib/supplier-order-route.mjs', import.meta.url), 'utf8');
 const storePlanSource = `${storeSource}\n${supplierRouteSource}`;
 

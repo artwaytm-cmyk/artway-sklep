@@ -54,7 +54,7 @@ Obecny podział frontendu jest etapem bezpiecznej migracji: zachowuje zgodność
 Duże platformy nie uznają jednej liczby linii za miarę skalowalności. Stosujemy dwa poziomy zapisane centralnie w `config/architecture-budgets.mjs`: cel rozwojowy (`target`) oraz twardą bramkę publikacji (`max`). Przekroczenie celu jest długiem do zaplanowania, a przekroczenie maksimum blokuje testy.
 
 - Linie są liczone fizycznie; końcowy znak nowej linii nie tworzy fikcyjnej dodatkowej linii.
-- `store-app.mjs` jest koordynatorem migracyjnym: cel to 4500 linii, a twarda granica 5500. Nowa logika biznesowa nadal musi trafiać do domen, nawet jeśli pozostał zapas.
+- `store-app.mjs` jest koordynatorem migracyjnym: po wydzieleniu tras Agenta, komunikacji Allegro, mapowania, dostępności i poczty cel to 3800 linii, a twarda granica 4500. Nowa logika biznesowa nadal musi trafiać do domen, nawet jeśli pozostał zapas.
 - Zwykły moduł JavaScript ma cel 600 i awaryjne maksimum 1500 linii; skupiona domena panelu cel 500 i maksimum 700; integracja cel 500 i maksimum 800. Cel uruchamia ostrzeżenie odpowiednio wcześnie, więc twardy limit nie zostawia zaledwie kilku linii zapasu.
 - Pierwsza paczka sklepu jest kontrolowana również po kompresji gzip: cel 125 KiB i maksimum 160 KiB. Moduł jednej trasy panelu ma cel 100 KiB i maksimum 120 KiB gzip.
 - Pełny `assets/admin.js` jest wyłącznie artefaktem kontrolnym i nie jest wysyłany do przeglądarki. Budżet dotyczy rzeczywiście ładowanego rdzenia i paczki bieżącej trasy.

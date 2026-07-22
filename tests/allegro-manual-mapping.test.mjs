@@ -18,7 +18,7 @@ test('ręczny wybór administratora zapisuje trwałe powiązanie i synchronizuje
 
 test('backend rozdziela decyzję ręczną od automatycznych progów i aktualizuje dokładnie wskazaną ofertę', async () => {
   const [backend, patch, canonical] = await Promise.all([
-    readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../netlify/functions/lib/allegro-mapping-route.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../netlify/functions/lib/domain/allegro-offer-patch.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../netlify/functions/lib/domain/allegro-canonical-mappings.mjs', import.meta.url), 'utf8'),
   ]);

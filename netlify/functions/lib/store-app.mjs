@@ -66,7 +66,12 @@ import { createProductLinkPackagePreparer } from './domain/product-link-package-
 import { createAllegroCredentialManager } from './domain/allegro-credential-manager.mjs';
 import { allegroCredentialLooksMasked, buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester } from './domain/allegro-operation-receipts.mjs';
 import { createAllegroCredentialsRoute } from './allegro-credentials-route.mjs';
+import { createAllegroCommunicationsRoute } from './allegro-communications-route.mjs';
+import { createAllegroMappingRoute } from './allegro-mapping-route.mjs';
+import { createProductAvailabilityRoute } from './product-availability-route.mjs';
+import { createEmailRoute } from './email-route.mjs';
 import { createAgentSpecialistRoute } from './agent-specialist-route.mjs';
+import { createAgentOperationsRoute } from './agent-operations-route.mjs';
 import { createAiBannerGenerator } from './domain/ai-banner-generator.mjs';
 import { createAiBannerRoute } from './ai-banner-route.mjs';
 import { normalizeTelegramAccountFields } from './domain/telegram-account-access.mjs';
@@ -79,7 +84,6 @@ import { createSupplierOrderRoute } from './supplier-order-route.mjs';
 import {
   allegroMessagePlainText,
   buildAllegroReplyStyleProfile,
-  buildContextualAllegroReply,
   classifyAllegroMessageAuthor,
   fetchAllegroReplyHistory,
   improvePolishReplyStyle,
@@ -90,7 +94,6 @@ import { markAllegroInventoryTransition, markAllegroInventoryTransitions, resolv
 import { allegroOrderNeedsLiveRefresh, createAllegroOrderArchive, selectAllegroStatusRefreshCandidates } from './domain/allegro-order-retention.mjs';
 import { mergeRecentAllegroOrders } from './domain/allegro-order-sync-window.mjs';
 import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
-import { applyProductSaleDecisionBatch } from './domain/product-sale-decisions.mjs';
 import { createProductSaleChannelSynchronizer } from './domain/product-sale-channel-links.mjs';
 import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
@@ -114,7 +117,6 @@ import { allegroAutomaticCategoryParameters } from './domain/allegro-category-pa
 import {
   telegramConfig as telegramKonfiguracja,
   telegramCanonicalSupplierPreviews,
-  telegramHtml,
 } from './domain/telegram-communication.mjs';
 import { createTelegramCenter } from './telegram-center.mjs';
 import { createTelegramRouter } from './telegram-router.mjs';
@@ -198,7 +200,6 @@ const {
   emailPublicConfig,
   sprawdzEmailSMTP,
   wyslijEmailSMTP,
-  kwotaSerwer,
   zlSerwer,
   htmlEscape,
   wiadomoscKlientaZamowienie,
@@ -349,6 +350,7 @@ async function synchronizeCentralProductCatalog({ force = false, revision = null
 const centralProductCatalogRoute = createCentralProductCatalogRoute({ catalog: centralProductCatalog, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, revisionState: centralProductCatalogRevisionState, synchronize: synchronizeCentralProductCatalog });
 const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({ autoMapOffers: allegroAutoMapujOfertyZKartoteka, callAllegro: allegroWywolaj, createProductUpdater: allegroAktualizatorProduktowCentralnych, getMappings: allegroMapowaniaItems, getOffers: allegroOfertyItems, getProducts: allegroAgentProduktyKompletne, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, text: tekst, write: zapisz });
 const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, agentRuntime, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierPreviews: telegramCanonicalSupplierPreviews, text: tekst });
+const agentOperationsRoute = createAgentOperationsRoute({ respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz, getOperationalCenter: agentCentrumOperacyjne, publicOrigin: publicznyOrigin });
 
 const KLUCZE_WSPOLNE = [
   'artway_ustawienia',
@@ -741,7 +743,7 @@ function allegroZdjecia(o) {
   }
   return [...new Set(imgs.map((x) => tekst(x?.url || x, 1000).trim()).filter(Boolean))].slice(0, 16);
 }
-function allegroStatusKolejkiZamowienia(z, poprzednie = {}) {
+function allegroStatusKolejkiZamowienia(z) {
   const status = String(z?.status || '').trim().toUpperCase();
   const fulfillment = String(z?.fulfillmentStatus || z?.fulfillment?.status || '').trim().toUpperCase();
   if (status === 'CANCELLED' || fulfillment === 'CANCELLED') return 'CANCELLED';
@@ -1230,9 +1232,6 @@ function allegroMapowaniaItems(raw) {
 
 function allegroNormalizujKlucz(v = '') {
   return tekst(v, 500).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-}
-function allegroKluczGtin(v = '') {
-  return canonicalGtin(v) || allegroNormalizujKlucz(v);
 }
 function allegroTokeny(v = '') {
   return new Set(allegroNormalizujKlucz(v).split(/\s+/).filter((x) => x.length > 2));
@@ -2943,6 +2942,40 @@ const systemRoute = createSystemRoute({
   czytajUstawieniaBazowe,
 });
 
+const allegroCommunicationsRoute = createAllegroCommunicationsRoute({
+  respond: odpowiedz, isAdmin: czyAdmin, read: czytaj, write: zapisz, text: tekst, allegroStatus,
+  applyInternalStatuses: allegroZastosujStatusyWewnetrzne, normalizeSettings: allegroUstawieniaKomunikacji,
+  caseKey: allegroKluczSprawyWewnetrznej, latestCustomerMessage: allegroNajnowszaWiadomoscKlienta,
+  messageKey: allegroKluczWiadomosci, learnedReplyStyle: allegroWzorceStyluOdpowiedzi,
+  fullReplyCase: allegroPelnaSprawaDoOdpowiedzi, previousCustomerCases: allegroPoprzednieSprawyKlienta,
+  checkReplyContext: allegroSprawdzKontekstOdpowiedzi, callAllegro: allegroWywolaj, betaJson: ALLEGRO_BETA_JSON,
+  normalizeIssueMessage: allegroNormalizujIssueChatMessage, normalizeThreadMessage: allegroNormalizujWiadomosc,
+  rememberManualReplyStyle: allegroZapamietajStylRecznejOdpowiedzi, fetchCommunications: allegroPobierzKomunikacje,
+  markNewCommunications: allegroOznaczNowaKomunikacje, sendTelegramReminders: allegroWyslijPrzypomnieniaTelegram,
+  sendAutoReplies: allegroWyslijAutoOdpowiedzi,
+});
+const allegroMappingRoute = createAllegroMappingRoute({
+  respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz,
+  mappingItems: allegroMapowaniaItems, offerItems: allegroOfertyItems, completeProducts: allegroAgentProduktyKompletne,
+  assessMapping: allegroOcenaPowiazania, createProductUpdater: allegroAktualizatorProduktowCentralnych,
+  productSnapshot: mappingProductSnapshot, writeMappingsSafely: zapiszMapowaniaBezpiecznie,
+  recalculateOrders: allegroPrzeliczZamowieniaPoMapowaniu,
+});
+const productAvailabilityRoute = createProductAvailabilityRoute({
+  respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz,
+  inspectProduct: pobierzProduktProducentaZPamiecia, prepareProduct: przygotujPakietProduktuZLinku,
+  syncSaleChannels: synchronizujSprzedazZDostepnosciaProducenta, mappingItems: allegroMapowaniaItems,
+  isAllegroOrderActive: allegroAgentZlecenieAktywne, fetchProduct: pobierzProduktProducenta,
+  notify: (...args) => telegramCenter.managedEvent(...args),
+});
+const emailRoute = createEmailRoute({
+  respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz,
+  publicConfig: emailPublicConfig, checkSmtp: sprawdzEmailSMTP, supplierPlan: supplierOrderPlan,
+  renderSupplierOrder: producentEmailZlecenia, sendSmtp: wyslijEmailSMTP, sessionOf: requestSession,
+  syncProcurement: synchronizujEtapyZakupoweZlecen, orderNumber: numerZamowienia, emailConfig: emailKonfiguracja,
+  orderConfirmation: wiadomoscKlientaZamowienie, appendHistory: dopiszHistorieEmaila, sendStatus: wyslijEmailStatusowy,
+});
+
 
 export default async (req) => {
   const url = new URL(req.url);
@@ -2990,200 +3023,15 @@ export default async (req) => {
     const infaktResponse = await infaktRoute(req, url, action);
     if (infaktResponse) return infaktResponse;
 
-    // ─── E-MAIL: konfiguracja bez sekretów ───
-    if (action === 'email-config') {
-      return odpowiedz({ ok: true, email: emailPublicConfig() });
-    }
-
-    if (action === 'email-test') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const checkedAt = new Date().toISOString();
-      try {
-        const email = await sprawdzEmailSMTP({ force: true });
-        await zapisz('integration_health', { ...(await czytaj('integration_health', {})), email: { authenticated: true, checkedAt, provider: email.provider || 'smtp', error: '', code: '' }, updated_at: checkedAt });
-        return odpowiedz({ ok: true, configured: true, authenticated: true, email });
-      } catch (error) {
-        const code = tekst(error?.code || 'email_connection_error', 100);
-        const safe = { authenticated: false, checkedAt, provider: emailPublicConfig().provider || 'smtp', error: tekst(error?.message || 'Nie udało się połączyć z pocztą.', 500), code };
-        await zapisz('integration_health', { ...(await czytaj('integration_health', {})), email: safe, updated_at: checkedAt });
-        return odpowiedz({ ok: false, configured: emailPublicConfig().configured, authenticated: false, email: { ...emailPublicConfig(), ...safe }, error: safe.error, code }, code === 'email_not_configured' || code === 'email_credential_masked' ? 503 : 502);
-      }
-    }
-
-    // ─── AGENT AI: jeden kontekst operacyjny całej strony ───
-    if (action === 'agent-operations-summary') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      return odpowiedz(await agentCentrumOperacyjne());
-    }
-
-    if (action === 'agent-action-runs') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const history = await czytaj('agent_action_runs', { items: [], updated_at: null });
-      const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 30) || 30));
-      return odpowiedz({ ok: true, items: (Array.isArray(history.items) ? history.items : []).slice(0, limit), updated_at: history.updated_at || null });
-    }
-
-    if (action === 'agent-run-safe-checks') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), requested = Array.isArray(body.areas) ? body.areas.map((x) => tekst(x, 80)) : [];
-      const allowed = new Map([
-        ['site-health', { action: '', label: 'Funkcjonalność strony i integracje', local: true }],
-        ['allegro-orders', { action: 'allegro-sync-orders', label: 'Zamówienia Allegro' }],
-        ['inpost', { action: 'inpost-sync-all', label: 'Statusy i numery InPost' }],
-        ['infakt', { action: 'infakt-sync', label: 'Zadania inFakt i ceny zakupu' }],
-      ]), selected = (requested.length ? requested : [...allowed.keys()]).filter((x) => allowed.has(x));
-      // Kontrole wewnętrzne używają klucza usługi wyłącznie z pamięci procesu.
-      // Nigdy nie kopiujemy poświadczenia z przeglądarki ani z adresu URL.
-      const adminToken = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim(), origin = publicznyOrigin(req), startedAt = new Date().toISOString();
-      const results = await Promise.all(selected.map(async (area) => {
-        const definition = allowed.get(area), started = Date.now();
-        try {
-          if (definition.local) {
-            const center = await agentCentrumOperacyjne(), integrations = center.integrations || {}, missing = Object.entries(integrations).filter(([, ready]) => !ready).map(([name]) => name);
-            return { area, label: definition.label, status: missing.length ? 'error' : 'completed', detail: missing.length ? `Wymagają konfiguracji: ${missing.join(', ')}` : `Integracje: ${Object.keys(integrations).join(', ')} • baza i API odpowiadają`, error: missing.length ? `Wymagają konfiguracji: ${missing.join(', ')}` : '', durationMs: Date.now() - started };
-          }
-          const response = await fetch(`${origin}/api/store?action=${encodeURIComponent(definition.action)}`, { method: 'POST', headers: { 'x-admin-token': adminToken, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ source: 'agent-safe-plan' }) });
-          const text = await response.text(); let data = {}; try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
-          if (!response.ok || data?.ok === false) throw new Error(tekst(data?.error || data?.message || `HTTP ${response.status}`, 500));
-          const count = area === 'allegro-orders'
-            ? (Number(data?.imported_new || 0) + Number(data?.refreshed || 0))
-            : area === 'inpost'
-              ? Number(data?.sprawdzone ?? data?.zmienione ?? 0) || 0
-              : Number(data?.results?.length ?? data?.purchaseSync?.processedDocuments ?? data?.processed ?? 0) || 0;
-          return { area, label: definition.label, status: 'completed', count, scanned: area === 'allegro-orders' ? Number(data?.fetched || 0) : count, newItems: area === 'allegro-orders' ? Number(data?.imported_new || 0) : 0, refreshed: area === 'allegro-orders' ? Number(data?.refreshed || 0) : 0, durationMs: Date.now() - started };
-        } catch (error) {
-          return { area, label: definition.label, status: 'error', error: tekst(error?.message || error, 500), durationMs: Date.now() - started };
-        }
-      }));
-      const center = await agentCentrumOperacyjne(); results.forEach((result) => { if (result.area === 'allegro-orders') result.active = Number(center.summary?.activeAllegro || 0); });
-      const run = { id: crypto.randomUUID(), source: tekst(body.source || 'admin-panel', 80), profile: tekst(body.profile || 'custom', 40), startedAt, completedAt: new Date().toISOString(), durationMs: Math.max(0, Date.now() - Date.parse(startedAt)), results, completed: results.filter((x) => x.status === 'completed').length, errors: results.filter((x) => x.status === 'error').length, scoreAfter: center.score };
-      const history = await czytaj('agent_action_runs', { items: [] }); history.items = [run, ...(Array.isArray(history.items) ? history.items : [])].slice(0, 100); history.updated_at = run.completedAt; await zapisz('agent_action_runs', history);
-      return odpowiedz({ ok: true, allCompleted: results.every((x) => x.status === 'completed'), run, center });
-    }
+    const agentOperationsResponse = await agentOperationsRoute(req, url, action);
+    if (agentOperationsResponse) return agentOperationsResponse;
 
     // ─── PLAN ZATOWAROWANIA: jedna serwerowa kolejka dokumentów producentów ───
     const supplierRouteResponse = await supplierOrderRoute({ req, url, action });
     if (supplierRouteResponse) return supplierRouteResponse;
 
-    // ─── PRODUCENCI: zatwierdzone zamówienie e-mailem, z ochroną przed duplikatem ───
-    if (action === 'email-send-supplier-order') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const requested = body.order && typeof body.order === 'object' ? body.order : {};
-      const requestedSupplierNames = (Array.isArray(body.suppliers) ? body.suppliers : [body.supplier]).map((x) => tekst(x?.name || x?.nazwa || x, 160)).filter(Boolean);
-      const actor = requestSession(req)?.email || 'administrator';
-      const forceResend = body.forceResend === true;
-      const resendReason = tekst(body.resendReason || '', 500).trim();
-      const currentPlan = await supplierOrderPlan.beginEmailSend({ draftId: requested.id || body.draftId, expectedRevision: requested.revision ?? body.expectedRevision, requestedSupplierNames, actor, allowResend: forceResend, resendReason });
-      const suppliers = currentPlan.supplierContacts;
-      const order = currentPlan.draft;
-      const revision = Math.max(1, Number(order.revision) || 1);
-      let prepared, auditRec;
-      try {
-        prepared = suppliers.map((supplier) => producentEmailZlecenia(order, supplier));
-        const invalid = prepared.filter((item) => !item.validation?.ok);
-        if (invalid.length) {
-          await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results: [], actor, resend: forceResend, resendReason });
-          const missingIdentifiers = [...new Set(invalid.flatMap((item) => item.validation?.missingIdentifiers || []))];
-          return odpowiedz({ ok: false, error: `Uzupełnij kartotekę lub identyfikatory pozycji przed wysyłką: ${missingIdentifiers.join(', ') || invalid.map((x) => x.name || 'bez nazwy').join(', ')}`, code: 'supplier_validation', missingIdentifiers }, 422);
-        }
-        auditRec = await czytaj('supplier_order_email_audit', { items: {}, updated_at: null });
-      } catch (error) {
-        try { await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results: [], actor, resend: forceResend, resendReason }); } catch {}
-        throw error;
-      }
-      const auditItems = auditRec.items && typeof auditRec.items === 'object' ? { ...auditRec.items } : {};
-      const results = [];
-      for (const item of prepared) {
-        const fingerprint = crypto.createHash('sha256').update(`${order.id}|${revision}|${item.name.toLowerCase()}|${item.to}|${item.rows.map((p) => `${p.kod}:${p.ilosc}`).join('|')}|${item.optima?.content || ''}`).digest('hex').slice(0, 32);
-        if (!forceResend && auditItems[fingerprint]?.sent === true) {
-          results.push({ supplier: item.name, to: item.to, sent: true, skippedDuplicate: true, sentAt: auditItems[fingerprint].sentAt, messageId: auditItems[fingerprint].messageId || '', optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
-          continue;
-        }
-        try {
-          const sent = await wyslijEmailSMTP({ to: item.to, subject: item.subject, text: item.text, html: item.html, attachments: item.attachments });
-          const sentResult = { supplier: item.name, to: item.to, sent: true, skippedDuplicate: false, sentAt: new Date().toISOString(), messageId: sent.message_id || '', provider: sent.provider || 'smtp' };
-          const previousAudit = auditItems[fingerprint] && typeof auditItems[fingerprint] === 'object' ? auditItems[fingerprint] : {};
-          const attempt = { ...sentResult, mode: forceResend ? 'resend' : 'send', reason: forceResend ? resendReason : '' };
-          auditItems[fingerprint] = {
-            ...previousAudit,
-            sent: true,
-            sentAt: previousAudit.sentAt || sentResult.sentAt,
-            messageId: previousAudit.messageId || sentResult.messageId,
-            provider: sentResult.provider,
-            lastSentAt: sentResult.sentAt,
-            lastMessageId: sentResult.messageId,
-            sendCount: Math.max(0, Number(previousAudit.sendCount) || 0) + 1,
-            attempts: [...(Array.isArray(previousAudit.attempts) ? previousAudit.attempts : []), attempt].slice(-50),
-            orderId: tekst(order.id, 120), orderNumber: tekst(order.numer || order.id, 120), revision, fingerprint,
-          };
-          try { await zapisz('supplier_order_email_audit', { items: auditItems, updated_at: sentResult.sentAt }); }
-          catch (auditError) { sentResult.auditError = tekst(auditError?.message || auditError, 300); }
-          results.push({ ...sentResult, optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
-        } catch (error) {
-          results.push({ supplier: item.name, to: item.to, sent: false, error: tekst(error?.message || error, 700), code: tekst(error?.code || 'email_error', 120), optima: item.optima ? { filename: item.optima.filename, exportedRows: item.optima.exportedRows, missingIdentifiers: item.optima.missingIdentifiers } : null });
-        }
-      }
-      const sentAt = results.filter((x) => x.sent).map((x) => x.sentAt).filter(Boolean).sort().pop() || null;
-      const optimaMissingIdentifiers = results.flatMap((result) => (result.optima?.missingIdentifiers || []).map((item) => ({ supplier: result.supplier, ...item })));
-      const plan = await supplierOrderPlan.markEmailResults({ draftId: order.id, expectedRevision: revision, sendLockId: currentPlan.sendLockId, results, sentAt, actor, resend: forceResend, resendReason });
-      const procurementWorkflow = await synchronizujEtapyZakupoweZlecen(plan.supplierOrders, 'supplier-email');
-      return odpowiedz({ ok: true, allSent: results.length > 0 && results.every((x) => x.sent), resent: forceResend, sentAt, results, revision, optimaComplete: optimaMissingIdentifiers.length === 0, optimaMissingIdentifiers, draft: plan.draft, supplierOrders: plan.supplierOrders, rev: plan.rev, updated_at: plan.updated_at, procurementWorkflow: { changed: procurementWorkflow.changed } });
-    }
-
-    // ─── E-MAIL: wysyłka administracyjna przez Netlify SMTP ───
-    if (action === 'send-email') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const to = tekst(body.to, 300).trim();
-      const subject = tekst(body.subject, 300).trim();
-      const text = tekst(body.text, 20000);
-      const html = tekst(body.html, 30000);
-      if (!to || !subject || (!text && !html)) return odpowiedz({ ok: false, error: 'Brak adresu, tematu albo treści e-maila' }, 422);
-      let r;
-      try { r = await wyslijEmailSMTP({ to, subject, text, html: html || undefined }); }
-      catch (e) {
-        return odpowiedz({ ok: false, error: e.message, code: e.code || 'email_error' }, e.code === 'email_not_configured' ? 503 : 502);
-      }
-      return odpowiedz({ ok: true, provider: r.provider, message_id: r.message_id, accepted: r.accepted || [] });
-    }
-
-    // ─── E-MAIL: ręczna wysyłka wiadomości statusowej z JEDNOLITEGO szablonu (admin) ───
-    if (action === 'send-status-email') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const nr = numerZamowienia(body.nr || body.number);
-      const typ = tekst(body.typ || body.type, 40).trim();
-      if (!nr || !typ) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia albo typu wiadomości' }, 422);
-      const rec = await czytaj('orders', { items: [] });
-      const z = (Array.isArray(rec.items) ? rec.items : []).find((x) => x.nr === nr);
-      if (!z) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
-      if (!z.email) return odpowiedz({ ok: false, error: 'Zamówienie nie ma adresu e-mail klienta', code: 'no_email' }, 422);
-      const c = emailKonfiguracja();
-      if (!c.configured) return odpowiedz({ ok: false, error: 'E-mail nie jest skonfigurowany po stronie serwera.', code: 'email_not_configured' }, 503);
-      try {
-        let r;
-        if (typ === 'potwierdzenie') {
-          const msg = wiadomoscKlientaZamowienie(z);
-          r = await wyslijEmailSMTP({ to: z.email, ...msg });
-          await dopiszHistorieEmaila(z.nr, { typ: 'potwierdzenie', status: 'wysłano', provider: r.provider, id: r.message_id, automatyczne: false });
-          r = { configured: true, sent: true, provider: r.provider, id: r.message_id };
-        } else {
-          const kwota = (body.kwota != null && body.kwota !== '') ? Number(body.kwota) : null;
-          r = await wyslijEmailStatusowy(z, typ, kwota != null ? { kwota } : {});
-          if (r && r.sent === false && r.error) return odpowiedz({ ok: false, error: r.error, code: r.error }, r.error === 'email_not_configured' ? 503 : 502);
-        }
-        const recPo = await czytaj('orders', { items: [] });
-        const zPo = (recPo.items || []).find((x) => x.nr === nr) || z;
-        return odpowiedz({ ok: true, provider: r.provider, message_id: r.id, sent: r.sent !== false, powiadomienia: zPo?.wysylka?.powiadomienia || [] });
-      } catch (e) {
-        return odpowiedz({ ok: false, error: e.message, code: e.code || 'email_error' }, e.code === 'email_not_configured' ? 503 : 502);
-      }
-    }
+    const emailResponse = await emailRoute(req, url, action);
+    if (emailResponse) return emailResponse;
 
     const paynowResponse = await paynowRoute(req, url, action);
     if (paynowResponse) return paynowResponse;
@@ -3302,7 +3150,7 @@ export default async (req) => {
         const wyniki = await Promise.all(batch.map(async (stare) => {
           try {
             const pelne = await allegroWywolaj(req, `/order/checkout-forms/${encodeURIComponent(stare.id)}`);
-            return { ...allegroScalZamowienie(pelne, stare), officialStatusCheckedAt };
+            return { ...allegroScalZamowienie(pelne, stare), officialStatusCheckedAt: officialCheckedAt };
           } catch (e) {
             return { ...stare, syncError: tekst(e.message, 500), lastSyncErrorAt: new Date().toISOString() };
           }
@@ -3551,169 +3399,8 @@ export default async (req) => {
       return odpowiedz({ ok: true, stock: targetStock, republish: true, requested: offerIds.length, stockUpdated: results.filter((x) => x.stockUpdated).length, stockFailed: results.filter((x) => !x.stockUpdated).length, republishUpdated: results.filter((x) => x.republishUpdated).length, republishFailed: results.filter((x) => !x.republishUpdated).length, auditOpen: Object.values(auditItems).filter((x) => !x.stockUpdated || !x.republishUpdated).length, results });
     }
 
-    // ─── ALLEGRO: komunikacja z klientami i autoresponder (admin) ───
-    if (action === 'allegro-communications-data') {
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const comm = await czytaj('allegro_communications', { threads: [], issues: [], updated_at: null, errors: [] });
-      const internalRec = await czytaj('allegro_communication_internal', { items: {}, updated_at: null });
-      const applied = allegroZastosujStatusyWewnetrzne(comm, internalRec);
-      const settings = allegroUstawieniaKomunikacji(await czytaj('allegro_communication_settings', {}));
-      const replies = await czytaj('allegro_auto_replies', { items: {}, updated_at: null });
-      return odpowiedz({
-        ok: true,
-        allegro: await allegroStatus(req),
-        threads: Array.isArray(applied.data.threads) ? applied.data.threads : [],
-        issues: Array.isArray(applied.data.issues) ? applied.data.issues : [],
-        errors: Array.isArray(comm.errors) ? comm.errors : [],
-        updated_at: comm.updated_at || null,
-        lastSyncSummary: comm.lastSyncSummary || null,
-        settings,
-        autoReplies: replies.items && typeof replies.items === 'object' ? replies.items : {},
-        autoRepliesUpdatedAt: replies.updated_at || null,
-        requiresReauth: Array.isArray(comm.errors) && comm.errors.some((e) => Number(e?.status) === 403),
-      });
-    }
-
-    // Status wyłącznie wewnętrzny: nie wywołuje żadnego endpointu Allegro i niczego nie wysyła klientowi.
-    if (action === 'allegro-communication-resolve') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const requests = (Array.isArray(body.items) ? body.items : [body]).slice(0, 200).map((x) => ({ type: x?.type === 'issue' ? 'issue' : 'thread', id: tekst(x?.id, 120).trim(), resolved: x?.resolved !== false, note: tekst(x?.note || body.note || '', 1000).trim() })).filter((x) => x.id);
-      if (!requests.length) return odpowiedz({ ok: false, error: 'Wybierz co najmniej jedną sprawę', code: 'validation' }, 422);
-      const [comm, internalRec, historyRec] = await Promise.all([
-        czytaj('allegro_communications', { threads: [], issues: [], updated_at: null, errors: [] }),
-        czytaj('allegro_communication_internal', { items: {}, updated_at: null }),
-        czytaj('allegro_communication_internal_history', { items: [], updated_at: null }),
-      ]);
-      const internalItems = internalRec.items && typeof internalRec.items === 'object' ? { ...internalRec.items } : {};
-      const history = Array.isArray(historyRec.items) ? [...historyRec.items] : [];
-      const now = new Date().toISOString(), results = [];
-      for (const request of requests) {
-        const listKey = request.type === 'issue' ? 'issues' : 'threads';
-        const list = Array.isArray(comm[listKey]) ? comm[listKey] : [];
-        const index = list.findIndex((x) => String(x?.id) === request.id);
-        if (index < 0) { results.push({ ...request, ok: false, error: 'Nie znaleziono sprawy' }); continue; }
-        const item = list[index], sourceMessageKey = allegroKluczWiadomosci(allegroNajnowszaWiadomoscKlienta(item));
-        const key = allegroKluczSprawyWewnetrznej(request.type, request.id);
-        const state = { ...(internalItems[key] || {}), type: request.type, id: request.id, resolved: request.resolved, note: request.note, sourceMessageKey, updatedAt: now, updatedBy: 'administrator', ...(request.resolved ? { resolvedAt: now, reopenedAt: null, reopenReason: '' } : { resolvedAt: null, reopenedAt: now, reopenReason: 'manual' }) };
-        internalItems[key] = state;
-        list[index] = request.resolved
-          ? { ...item, internalResolved: true, internalResolution: state, needsReply: false, humanReplyNeeded: false, newIncomingCount: 0 }
-          : { ...item, internalResolved: false, internalResolution: state, humanReplyNeeded: true, needsReply: !!allegroNajnowszaWiadomoscKlienta(item) };
-        comm[listKey] = list;
-        history.unshift({ id: crypto.randomUUID(), at: now, ...request, sourceMessageKey, action: request.resolved ? 'resolved_internal' : 'reopened_internal', sentExternally: false });
-        results.push({ ...request, ok: true, state });
-      }
-      comm.updated_at = now;
-      await Promise.all([
-        zapisz('allegro_communications', comm),
-        zapisz('allegro_communication_internal', { items: internalItems, updated_at: now }),
-        zapisz('allegro_communication_internal_history', { items: history.slice(0, 5000), updated_at: now }),
-      ]);
-      return odpowiedz({ ok: true, results, threads: comm.threads || [], issues: comm.issues || [], updated_at: now, sentExternally: false });
-    }
-
-    if (action === 'allegro-communications-settings') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const settings = allegroUstawieniaKomunikacji(body.settings || body);
-      await zapisz('allegro_communication_settings', { ...settings, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, settings });
-    }
-
-    if (action === 'allegro-reply-suggestion') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const type = body.type === 'issue' ? 'issue' : 'thread';
-      const id = tekst(body.id, 120).trim();
-      const mode = body.mode === 'style' ? 'style' : (body.mode === 'improve' ? 'improve' : 'context');
-      const draft = tekst(body.draft, 20000).trim();
-      const [comm, ordersRec, storeOrdersRec, styleMemory] = await Promise.all([
-        czytaj('allegro_communications', { threads: [], issues: [] }),
-        czytaj('allegro_orders', { items: [] }),
-        czytaj('orders', { items: [] }),
-        czytaj('allegro_reply_style_memory', { items: [], updated_at: null }),
-      ]);
-      const list = type === 'issue' ? comm.issues : comm.threads;
-      const item = (Array.isArray(list) ? list : []).find((x) => String(x?.id) === id);
-      if (!item) return odpowiedz({ ok: false, error: 'Nie znaleziono rozmowy Allegro', code: 'not_found' }, 404);
-      const learnedStyle = allegroWzorceStyluOdpowiedzi(comm, styleMemory);
-      if (mode === 'style') {
-        if (!draft) return odpowiedz({ ok: false, error: 'Najpierw wpisz treść, którą Agent ma poprawić stylistycznie', code: 'validation' }, 422);
-        return odpowiedz({ ok: true, type, id, mode, suggestion: improvePolishReplyStyle(draft, { ensureReplyFrame: true, styleProfile: learnedStyle.profile }), context: { mode, verifiedAt: new Date().toISOString(), draftOnly: true, styleProfile: learnedStyle.profile }, sentExternally: false });
-      }
-      const full = await allegroPelnaSprawaDoOdpowiedzi(req, type, item);
-      if (!allegroNajnowszaWiadomoscKlienta(full.item)) return odpowiedz({ ok: false, error: 'Ta sprawa zawiera wyłącznie komunikaty Allegro — nie ma wiadomości klienta, na którą można przygotować odpowiedź.', code: 'no_customer_message', sentExternally: false }, 422);
-      const relatedItems = allegroPoprzednieSprawyKlienta(comm, type, full.item);
-      const checked = await allegroSprawdzKontekstOdpowiedzi(req, full.item, ordersRec.items, storeOrdersRec.items);
-      const prepared = buildContextualAllegroReply({ type, item: full.item, context: checked.context, draft, relatedItems, styleProfile: learnedStyle.profile });
-      return odpowiedz({ ok: true, type, id, mode, suggestion: prepared.suggestion, conversation: prepared.conversation, context: { ...checked.context, mode, conversation: prepared.conversation, styleProfile: learnedStyle.profile, history: { live: full.live, pages: full.pages, truncated: full.truncated, error: full.error } }, basedOn: { order: checked.context.orderFound, liveOrder: checked.context.checks.liveOrder, shipments: checked.context.checks.shipments, localShipping: checked.context.checks.localShipping, warehouse: checked.context.checks.warehouse, wholeConversation: true, fullHistoryLive: full.live, historyPages: full.pages, historyTruncated: full.truncated, historyError: full.error, messageCount: prepared.conversation.messageCount, previousCustomerConversations: prepared.conversation.relatedConversationCount, learnedStyleExamples: learnedStyle.profile.exampleCount }, sentExternally: false });
-    }
-
-    if (action === 'allegro-send-reply') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const type = body.type === 'issue' ? 'issue' : 'thread';
-      const id = tekst(body.id, 120).trim();
-      const text = tekst(body.text, 20000).trim();
-      if (!id || !text) return odpowiedz({ ok: false, error: 'Wybierz rozmowę i wpisz treść odpowiedzi', code: 'validation' }, 422);
-      let raw;
-      if (type === 'issue') raw = await allegroWywolaj(req, `/sale/issues/${encodeURIComponent(id)}/message`, { method: 'POST', accept: ALLEGRO_BETA_JSON, contentType: ALLEGRO_BETA_JSON, bodyObj: { text, attachments: [], type: 'REGULAR' } });
-      else {
-        raw = await allegroWywolaj(req, `/messaging/threads/${encodeURIComponent(id)}/messages`, { method: 'POST', bodyObj: { text, attachments: [] } });
-        try { await allegroWywolaj(req, `/messaging/threads/${encodeURIComponent(id)}/read`, { method: 'PUT', bodyObj: { read: true } }); } catch {}
-      }
-      const comm = await czytaj('allegro_communications', { threads: [], issues: [], updated_at: null, errors: [] });
-      const key = type === 'issue' ? 'issues' : 'threads';
-      const list = Array.isArray(comm[key]) ? [...comm[key]] : [];
-      const index = list.findIndex((x) => String(x?.id) === id);
-      const normalizedRaw = type === 'issue' ? allegroNormalizujIssueChatMessage(raw, id) : allegroNormalizujWiadomosc(raw, id);
-      const normalized = { ...normalizedRaw, role: normalizedRaw.role || 'SELLER', authorType: 'seller', incoming: false, seller: true, system: false };
-      if (index >= 0) {
-        const current = list[index], messages = [...(Array.isArray(current.messages) ? current.messages : []), normalized].filter((m, pos, all) => !m.id || all.findIndex((x) => x.id === m.id) === pos);
-        list[index] = { ...current, messages, lastMessage: normalized, read: true, needsReply: false, humanReplyNeeded: false, humanReplySource: null, newIncomingCount: 0, latestNewIncoming: null, latestNewIncomingKey: '', manualReplyAt: new Date().toISOString() };
-      }
-      const saved = { ...comm, [key]: list, updated_at: new Date().toISOString(), lastManualReply: { type, id, messageId: normalized.id || '', sent_at: new Date().toISOString() } };
-      await zapisz('allegro_communications', saved);
-      let styleProfile = null, styleLearned = false;
-      try {
-        styleProfile = await allegroZapamietajStylRecznejOdpowiedzi({ type, id, text, messageId: normalized.id || '' });
-        styleLearned = true;
-      } catch {}
-      return odpowiedz({ ok: true, type, id, message: normalized, styleLearned, styleProfile, threads: saved.threads || [], issues: saved.issues || [], updated_at: saved.updated_at });
-    }
-
-    if (action === 'allegro-sync-communications') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const settings = allegroUstawieniaKomunikacji(await czytaj('allegro_communication_settings', {}));
-      const previous = await czytaj('allegro_communications', { threads: [], issues: [], updated_at: null, errors: [] });
-      const rawData = await allegroPobierzKomunikacje(req, { limit: body.limit || 20 });
-      const marked = allegroOznaczNowaKomunikacje(rawData, previous);
-      const internalRec = await czytaj('allegro_communication_internal', { items: {}, updated_at: null });
-      const internalApplied = allegroZastosujStatusyWewnetrzne(marked, internalRec);
-      const data = internalApplied.data;
-      const freshCommunication = [...(data.threads || []), ...(data.issues || [])].filter((item) => !item?.cachedOlder);
-      const syncSummary = {
-        newBuyerMessages: freshCommunication.reduce((sum, item) => sum + Math.max(0, Number(item?.newIncomingCount || 0)), 0),
-        newThreads: (data.threads || []).filter((item) => !item?.cachedOlder && Number(item?.newIncomingCount || 0) > 0).length,
-        newIssues: (data.issues || []).filter((item) => !item?.cachedOlder && Number(item?.newIncomingCount || 0) > 0).length,
-        allegroSystemMessages: freshCommunication.reduce((sum, item) => sum + Math.max(0, Number(item?.systemCount || 0)), 0),
-      };
-      if (internalApplied.changed) await zapisz('allegro_communication_internal', { items: internalApplied.items, updated_at: new Date().toISOString() });
-      const telegramReminders = await allegroWyslijPrzypomnieniaTelegram(data, settings);
-      let autoReply = { sent: [], skipped: [], items: {} };
-      if (body.autoReply !== false && settings.enabled) autoReply = await allegroWyslijAutoOdpowiedzi(req, data, settings);
-      const rec = { threads: data.threads, issues: data.issues, errors: data.errors || [], requiresReauth: !!data.requiresReauth, updated_at: new Date().toISOString(), autoReplyLastRun: autoReply.sent?.length || 0, lastSyncSummary: syncSummary };
-      await zapisz('allegro_communications', rec);
-      return odpowiedz({ ok: true, allegro: await allegroStatus(req), ...rec, settings, autoReply, telegramReminders, syncSummary });
-    }
-
+    const allegroCommunicationsResponse = await allegroCommunicationsRoute(req, url, action);
+    if (allegroCommunicationsResponse) return allegroCommunicationsResponse;
     // ─── ALLEGRO: szkic i wystawienie produktu sklepu jako oferty ───
     if (action === 'allegro-offer-support') {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
@@ -3969,311 +3656,11 @@ export default async (req) => {
     const productLinkImportResponse = await productLinkImport.route(req, url, action);
     if (productLinkImportResponse) return productLinkImportResponse;
 
-    // ─── PRODUCENT: pobranie danych z URL produktu (admin) ───
-    if (action === 'product-url-inspect') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const target = tekst(body.url, 1000).trim();
-      if (!/^https?:\/\//i.test(target)) return odpowiedz({ ok: false, error: 'Podaj pełny adres URL produktu' }, 422);
-      return odpowiedz(await pobierzProduktProducentaZPamiecia(target));
-    }
+    const productAvailabilityResponse = await productAvailabilityRoute(req, url, action);
+    if (productAvailabilityResponse) return productAvailabilityResponse;
 
-    // ─── PRODUCENT + ALLEGRO: jeden kompletny pakiet do formularza produktu ───
-    if (action === 'product-url-prepare') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const target = tekst(body.url, 1000).trim();
-      if (!/^https?:\/\//i.test(target)) return odpowiedz({ ok: false, error: 'Podaj pełny adres URL produktu' }, 422);
-      const rawChoice = body.choice;
-      const choice = rawChoice === null || rawChoice === undefined || rawChoice === '' ? null : Number(rawChoice);
-      if (choice !== null && (!Number.isInteger(choice) || choice < 0 || choice > 20)) return odpowiedz({ ok: false, error: 'Nieprawidłowy wybór produktu', code: 'validation' }, 422);
-      return odpowiedz(await przygotujPakietProduktuZLinku(req, target, { choice }));
-    }
-
-    // ─── PRODUKT: ręczna dostępność spójna ze sklepem i Allegro ───
-    if (action === 'product-sale-availability') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const productId = tekst(body.productId, 100).trim();
-      const available = body.available === true;
-      if (!productId) return odpowiedz({ ok: false, error: 'Brak identyfikatora produktu', code: 'validation' }, 422);
-      const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-      const availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? { ...data.artway_dostepnosc } : {};
-      const previousAvailability = { ...availability };
-      const now = new Date().toISOString();
-      if (available) delete availability[productId];
-      else availability[productId] = { status: 'niedostepny', powod: tekst(body.reason || 'Ręcznie wyłączony ze sprzedaży', 500), data: now, operator: 'administrator', source: 'manual', automatic: false };
-      data.artway_dostepnosc = availability;
-      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, [{ ok: true, productId, status: available ? 'dostepny' : 'brak', available, quantity: available ? 1 : 0, checkedAt: now }], data, { previousAvailability });
-      if (!saleAutomation.complete) return odpowiedz({ ok: false, error: 'Nie zmieniono sprzedaży, ponieważ Allegro nie potwierdziło całej operacji. System wycofał wykonane części i zapisał diagnostykę.', code: 'sale_channel_sync_failed', productId, available, saleAutomation }, 502);
-      await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-      return odpowiedz({ ok: true, synchronized: true, productId, available, saleAutomation, updated_at: now });
-    }
-
-    // ─── PRODUKT: decyzja administratora po kontroli producenta ───
-    if (action === 'product-sale-decision') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({})), settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-      const previousAvailability = settingsRec.data?.artway_dostepnosc && typeof settingsRec.data.artway_dostepnosc === 'object' ? { ...settingsRec.data.artway_dostepnosc } : {};
-      const batch = applyProductSaleDecisionBatch({ body, data: settingsRec.data, operator: 'administrator' }), { data, results, checks, audit, nowIso } = batch;
-      const saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, checks, data, { previousAvailability });
-      if (!saleAutomation.complete) return odpowiedz({ ok: false, error: 'Decyzja nie została zapisana, ponieważ Allegro nie potwierdziło całej operacji. System wycofał wykonane części i zapisał diagnostykę.', code: 'sale_channel_sync_failed', changed: 0, saleAutomation }, 502);
-      const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
-      audit.forEach((entry, index) => agentHistory.unshift({ id: `AI-DEC-${Date.now().toString(36)}-${index}`, ...entry, data: nowIso, dataTxt: new Date(nowIso).toLocaleString('pl-PL'), dane: { ...entry.dane, saleAutomation } }));data.artway_agent_ai_historia = agentHistory.slice(0, 500);
-      await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: nowIso });
-      return odpowiedz({ ok: true, synchronized: true, ...results[0], changed: results.length, results, saleAutomation, updated_at: nowIso });
-    }
-
-    // ─── PRODUCENT: wyrywkowy monitoring stanów przez Agenta AI ───
-    if (action === 'supplier-availability-sample') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-      const warehouse = data.artway_magazyn_ustawienia && typeof data.artway_magazyn_ustawienia === 'object' ? data.artway_magazyn_ustawienia : {};
-      const threshold = Math.max(1, Math.min(1000000, Number(body.threshold ?? warehouse.progNiskiProducenta ?? 50) || 50));
-      const limit = Math.max(1, Math.min(25, Number(body.limit ?? warehouse.producentProbka ?? 8) || 8));
-      const requestedIds = new Set((Array.isArray(body.productIds) ? body.productIds : []).map((x) => tekst(x, 100).trim()).filter(Boolean));
-      const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
-      const baseMap = mergeCatalogProducts(data).map;
-      const [storeOrdersRec, allegroOrdersRec, mappingsRec] = await Promise.all([
-        czytaj('orders', { items: [] }), czytaj('allegro_orders', { items: [] }), czytaj('allegro_mappings', { items: {} }),
-      ]);
-      const sales = new Map(), nowMs = Date.now(), day = 86400000, cutoff30 = nowMs - 30 * day, cutoff90 = nowMs - 90 * day;
-      const sale = (id, channel, qty, at, active = false) => {
-        const key = tekst(id, 100).trim(), n = Math.max(0, Number(qty) || 0), time = Number(at) || 0;
-        if (!key || !n) return;
-        const rec = sales.get(key) || { sklep30: 0, allegro30: 0, sklep90: 0, allegro90: 0, activeDemand: 0, score: 0 };
-        if (time >= cutoff90) rec[`${channel}90`] += n;
-        if (time >= cutoff30) rec[`${channel}30`] += n;
-        if (active) rec.activeDemand += n;
-        sales.set(key, rec);
-      };
-      const orderTime = (o = {}) => { const raw = o.ts ?? o.createdAt ?? o.firstFetchedAt ?? o.data ?? o.date ?? ''; const n = Number(raw); return Number.isFinite(n) && n > 1000000000 ? (n < 100000000000 ? n * 1000 : n) : (Date.parse(raw) || 0); };
-      for (const order of Array.isArray(storeOrdersRec.items) ? storeOrdersRec.items : []) {
-        const status = String(order?.status || '').toLowerCase(), active = !['anulowane', 'dostarczone', 'zakończone', 'zwrot', 'zwrot pieniędzy'].includes(status);
-        if (status === 'anulowane') continue;
-        for (const line of Array.isArray(order?.pozycjeDane) ? order.pozycjeDane : []) sale(line.id, 'sklep', line.ilosc || 1, orderTime(order), active);
-      }
-      const mappings = allegroMapowaniaItems(mappingsRec), offerToProduct = new Map();
-      for (const [offerId, mapping] of Object.entries(mappings)) { const id = tekst(mapping?.productId ?? mapping?.produktId ?? mapping?.id ?? mapping, 100).trim(); if (id) offerToProduct.set(String(offerId), id); }
-      for (const p of baseMap.values()) if (p.allegroOfferId) offerToProduct.set(String(p.allegroOfferId), String(p.id));
-      for (const order of Array.isArray(allegroOrdersRec.items) ? allegroOrdersRec.items : []) {
-        const active = allegroAgentZlecenieAktywne(order), status = String(order?.status || '').toUpperCase(); if (status === 'CANCELLED') continue;
-        for (const line of Array.isArray(order?.lineItems) ? order.lineItems : []) { const id = offerToProduct.get(String(line.offerId || line.offer?.id || '')); if (id) sale(id, 'allegro', line.quantity || 1, orderTime(order), active); }
-      }
-      for (const rec of sales.values()) rec.score = rec.sklep30 * 4 + rec.allegro30 * 5 + rec.sklep90 + rec.allegro90 + rec.activeDemand * 8;
-      let candidates = [...baseMap.values()].filter((p) => /^https?:\/\//i.test(tekst(p.producentUrl || p.sourceUrl, 1000).trim())).map((p) => ({ ...p, _sales: sales.get(String(p.id)) || { sklep30: 0, allegro30: 0, sklep90: 0, allegro90: 0, activeDemand: 0, score: 0 } }));
-      if (requestedIds.size) candidates = candidates.filter((p) => requestedIds.has(String(p.id)));
-      else {
-        const bestsellers = candidates.filter((p) => p._sales.score > 0).sort((a, b) => b._sales.score - a._sales.score || (Date.parse(a.producentSprawdzonoAt || '') || 0) - (Date.parse(b.producentSprawdzonoAt || '') || 0));
-        const priorityCount = Math.min(bestsellers.length, Math.max(1, Math.ceil(limit * 0.75))), priority = bestsellers.slice(0, priorityCount), priorityIds = new Set(priority.map((p) => String(p.id)));
-        const stale = candidates.filter((p) => !priorityIds.has(String(p.id))).sort((a, b) => (Date.parse(a.producentSprawdzonoAt || '') || 0) - (Date.parse(b.producentSprawdzonoAt || '') || 0));
-        const pool = stale.slice(0, Math.max(limit, Math.min(stale.length, limit * 4)));
-        for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-        candidates = [...priority, ...pool.slice(0, Math.max(0, limit - priority.length))];
-      }
-      candidates = candidates.slice(0, limit);
-      const checkedAt = new Date().toISOString();
-      const results = [];
-      for (let offset = 0; offset < candidates.length; offset += 4) {
-        const batch = candidates.slice(offset, offset + 4);
-        const checked = await Promise.all(batch.map(async (p) => {
-          const productId = String(p.id), sourceUrl = tekst(p.producentUrl || p.sourceUrl, 1000).trim();
-          try {
-            const parsed = await pobierzProduktProducenta(sourceUrl);
-            const quantityRaw = parsed.availability?.quantity;
-            const quantity = quantityRaw === null || quantityRaw === undefined || quantityRaw === '' ? null : Math.max(0, Math.floor(Number(quantityRaw) || 0));
-            const available = parsed.availability?.available === true;
-            const status = quantity === 0 ? 'brak' : (quantity !== null && quantity <= threshold ? 'niski' : (available ? (quantity === null ? 'dostepny_nieznany' : 'dostepny') : 'nieznany'));
-            return { ok: true, productId, name: tekst(p.nazwa || parsed.product?.nazwa || 'Produkt', 300), sourceUrl, quantity, exact: quantity !== null && parsed.availability?.exact === true, status, available, source: tekst(parsed.availability?.source || '', 120), checkedAt, sales: p._sales || {} };
-          } catch (e) {
-            return { ok: false, productId, name: tekst(p.nazwa || 'Produkt', 300), sourceUrl, status: 'blad', error: tekst(e.message || e, 500), checkedAt, sales: p._sales || {} };
-          }
-        }));
-        results.push(...checked);
-      }
-      const changedAlerts = [];
-      for (const result of results) {
-        const previous = edits[result.productId] && typeof edits[result.productId] === 'object' ? edits[result.productId] : {};
-        if (!result.ok) {
-          edits[result.productId] = { ...previous, producentOstatniaProbaAt: checkedAt, producentOstatniBlad: result.error };
-          continue;
-        }
-        const history = Array.isArray(previous.producentStanHistoria) ? [...previous.producentStanHistoria] : [];
-        history.unshift({ at: checkedAt, status: result.status, quantity: result.quantity, exact: result.exact });
-        const alertActive = ['niski', 'brak'].includes(result.status);
-        const alertHash = alertActive ? result.status : '';
-        if (alertActive && alertHash !== previous.producentAlertHash) changedAlerts.push(result);
-        edits[result.productId] = {
-          ...previous,
-          producentUrl: result.sourceUrl,
-          sourceUrl: result.sourceUrl,
-          dostepnoscProducenta: result.status === 'brak' ? 'niedostępny' : (result.available ? 'dostępny' : 'do sprawdzenia'),
-          stanProducenta: result.quantity === null ? '' : result.quantity,
-          stanProducentaDokladny: result.exact,
-          stanProducentaZrodlo: result.source,
-          producentStatus: result.status,
-          producentSprawdzonoAt: checkedAt,
-          producentOstatniaProbaAt: checkedAt,
-          producentOstatniBlad: '',
-          producentAlertAktywny: alertActive,
-          producentAlertHash: alertHash,
-          producentPriorytetWynik: Number(result.sales?.score || 0),
-          sprzedazSklep30: Number(result.sales?.sklep30 || 0),
-          sprzedazAllegro30: Number(result.sales?.allegro30 || 0),
-          sprzedazRazem30: Number(result.sales?.sklep30 || 0) + Number(result.sales?.allegro30 || 0),
-          aktywneZapotrzebowanie: Number(result.sales?.activeDemand || 0),
-          producentStanHistoria: history.slice(0, 5),
-        };
-      }
-      data.artway_produkty_edytowane = edits;
-      let saleAutomation = { siteHidden: 0, siteRestored: 0, allegroHidden: 0, allegroRestored: 0, unchanged: 0, errors: [] };
-      try {
-        saleAutomation = await synchronizujSprzedazZDostepnosciaProducenta(req, results, data);
-      } catch (error) {
-        saleAutomation.errors = [{ action: 'availability-automation', error: tekst(error?.message || error, 700), code: tekst(error?.code || '', 120) }];
-      }
-      const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
-      const summary = { checked: results.length, priorityChecked: results.filter((x) => Number(x.sales?.score || 0) > 0).length, available: results.filter((x) => ['dostepny', 'dostepny_nieznany'].includes(x.status)).length, low: results.filter((x) => x.status === 'niski').length, unavailable: results.filter((x) => x.status === 'brak').length, unknown: results.filter((x) => ['nieznany', 'blad'].includes(x.status)).length, alerts: changedAlerts.length, threshold, saleAutomation };
-      agentHistory.unshift({ id: `AI-SUP-${Date.now().toString(36)}`, typ: 'dostepnosc-producentow', opis: `Agent wyrywkowo sprawdził ${summary.checked} produktów u producentów`, data: checkedAt, dataTxt: new Date().toLocaleString('pl-PL'), operator: tekst(body.source || 'agent-serwerowy', 100), dane: summary });
-      data.artway_agent_ai_historia = agentHistory.slice(0, 500);
-      await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: checkedAt });
-      const auditRec = await czytaj('supplier_availability_audit', { items: [], updated_at: null });
-      const audit = Array.isArray(auditRec.items) ? [...auditRec.items] : [];
-      audit.unshift(...results.map((x) => ({ id: crypto.randomUUID(), ...x, threshold, runSource: tekst(body.source || 'manual', 100) })));
-      await zapisz('supplier_availability_audit', { items: audit.slice(0, 5000), updated_at: checkedAt });
-      let telegram = { sent: false };
-      if (changedAlerts.length) {
-        const alertFingerprint = changedAlerts.map((x) => `${x.productId}:${x.status}`).sort().join('|');
-        const automation = [
-          saleAutomation.siteHidden ? `ukryto w sklepie: ${saleAutomation.siteHidden}` : '', saleAutomation.siteRestored ? `przywrócono w sklepie: ${saleAutomation.siteRestored}` : '',
-          saleAutomation.allegroHidden ? `wstrzymano na Allegro: ${saleAutomation.allegroHidden}` : '', saleAutomation.allegroRestored ? `wznowiono na Allegro: ${saleAutomation.allegroRestored}` : '',
-          saleAutomation.errors?.length ? `błędy automatyki: ${saleAutomation.errors.length}` : '',
-        ].filter(Boolean).join(' · ');
-        try { telegram = await telegramCenter.managedEvent({
-          key: 'supplier-availability', legacyPrefix: 'supplier-availability:', fingerprint: alertFingerprint, category: 'supplier', severity: 'warning', count: changedAlerts.length,
-          title: 'Dostępność u producentów', description: automation,
-          doneWhen: 'Każda zmiana dostępności ma zapisaną decyzję sprzedażową.',
-          items: changedAlerts.slice(0, 8).map((x) => `${x.name} · ${x.status === 'brak' ? 'brak' : `${x.quantity} szt.`}`),
-          href: 'https://artwaytm.pl/#/admin/magazyn/dostawcy',
-        }, '', { source: 'supplier-availability' }); }
-        catch (e) { telegram = { sent: false, error: tekst(e.message || e, 300) }; }
-      }
-      return odpowiedz({ ok: true, summary, results, checkedAt, saleAutomation, telegram });
-    }
-
-    // ─── ALLEGRO: mapowanie oferty do produktu sklepu (admin) ───
-    if (action === 'allegro-map-offer') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const offerId = tekst(body.offerId, 100).trim();
-      const productId = tekst(body.productId, 100).trim();
-      if (!offerId || !productId) return odpowiedz({ ok: false, error: 'Brak offerId albo productId' }, 422);
-      const [rec, offersRec, settingsRec] = await Promise.all([
-        czytaj('allegro_mappings', { items: {} }), czytaj('allegro_offers', { items: [] }), czytaj('settings', { data: {}, rev: 0, updated_at: null }),
-      ]);
-      const items = { ...allegroMapowaniaItems(rec) };
-      const offer = allegroOfertyItems(offersRec).find((x) => String(x.id) === offerId) || {};
-      if (!offer.id) return odpowiedz({ ok: false, error: 'Nie znaleziono oferty Allegro', code: 'offer_not_found' }, 404);
-      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-      const products = await allegroAgentProduktyKompletne(data), product = products.get(productId);
-      if (!product) return odpowiedz({ ok: false, error: 'Nie znaleziono produktu sklepu', code: 'product_not_found' }, 404);
-      const validation = allegroOcenaPowiazania(product, offer), manualDecision = body.manualDecision === true, force = manualDecision || body.force === true;
-      if (!validation.valid && !force) return odpowiedz({ ok: false, error: `Połączenie wymaga świadomego zatwierdzenia: ${[...validation.conflicts, validation.reason].filter(Boolean).join(' • ')}`, code: 'mapping_validation', validation }, 409);
-      const updater = allegroAktualizatorProduktowCentralnych(data, products.keys()), now = new Date().toISOString(), old = items[offerId] || null;
-      if (old?.productId && String(old.productId) !== productId) {
-        const oldProduct = products.get(String(old.productId));
-        if (oldProduct && String(oldProduct.allegroOfferId || '') === offerId) updater.apply(old.productId, { allegroMappingStatus: 'zmienione_ręcznie' }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
-      }
-      const link = linkCanonicalAllegroMapping({ mappings: items, offers: allegroOfertyItems(offersRec), products, offer, product, validation, operator: manualDecision ? 'admin-manual-decision' : (force ? 'admin-force' : 'admin-validated'), now });
-      link.mappings[offerId] = { ...link.mappings[offerId], productSnapshot: mappingProductSnapshot(product, data) };
-      updater.apply(productId, { allegroOfferId: offerId, ...(offer.productId ? { allegroProductId: tekst(offer.productId, 120) } : {}), ...(offer.categoryId ? { allegroCategoryId: tekst(offer.categoryId, 80) } : {}), allegroMappingStatus: 'kanoniczne', allegroSyncedAt: link.syncRequired ? (product.allegroSyncedAt || null) : now, allegroSyncSource: 'store-canonical-mapping', allegroEditorialSyncPending: link.syncRequired, allegroEditorialSyncPendingAt: link.syncRequired ? now : (product.allegroEditorialSyncPendingAt || null), allegroEditorialSyncState: link.syncRequired ? 'pending' : 'synced', allegroEditorialSyncReason: link.syncRequired ? 'ręcznie zatwierdzone mapowanie — aktualizacja Allegro z danych sklepu' : '' }, ['allegroMappingConflict']);
-      const settingsChanged = updater.commit();
-      const changedMappingIds = Object.keys(link.mappings).filter((id) => JSON.stringify(items[id] ?? null) !== JSON.stringify(link.mappings[id] ?? null));
-      await Promise.all([
-        ...(link.changed ? [zapiszMapowaniaBezpiecznie(items, link.mappings, now, { forceKeys: changedMappingIds })] : []),
-        ...(settingsChanged ? [zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now })] : []),
-      ]);
-      if (link.changed && !link.idempotent) {
-        const auditRec = await czytaj('allegro_mapping_audit', { items: [], updated_at: null }), audit = Array.isArray(auditRec.items) ? auditRec.items : [];
-        await zapisz('allegro_mapping_audit', { items: [{ id: crypto.randomUUID(), at: now, action: old?.productId && String(old.productId) !== productId ? 'canonical-remap' : 'canonical-link', offerId, productId, previousProductId: old?.productId || '', duplicateOfferIds: link.duplicateOfferIds, operator: manualDecision ? 'admin-manual-decision' : 'admin-validated', validation: { score: validation.score, reason: validation.reason, evidence: validation.evidence, warnings: validation.warnings } }, ...audit].slice(0, 2000), updated_at: now });
-      }
-      const workflow = await allegroPrzeliczZamowieniaPoMapowaniu();
-      return odpowiedz({ ok: true, mappings: link.mappings, validation, manualDecision, canonical: true, idempotent: link.idempotent, syncRequired: link.syncRequired, duplicateOfferIds: link.duplicateOfferIds, ...workflow });
-    }
-
-    if (action === 'allegro-map-offers-batch') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const requested = (Array.isArray(body.items) ? body.items : []).map((x) => ({ offerId: tekst(x?.offerId, 100).trim(), productId: tekst(x?.productId, 100).trim() })).filter((x) => x.offerId && x.productId).slice(0, 500);
-      if (!requested.length) return odpowiedz({ ok: false, error: 'Brak bezpiecznych sugestii do zapisania', code: 'empty_batch' }, 422);
-      const [rec, offersRec, settingsRec] = await Promise.all([
-        czytaj('allegro_mappings', { items: {} }), czytaj('allegro_offers', { items: [] }), czytaj('settings', { data: {}, rev: 0, updated_at: null }),
-      ]);
-      const baseMappings = { ...allegroMapowaniaItems(rec) }, mappings = { ...baseMappings }, offersList = allegroOfertyItems(offersRec), offers = new Map(offersList.map((x) => [String(x.id), x]));
-      const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = await allegroAgentProduktyKompletne(data), updater = allegroAktualizatorProduktowCentralnych(data, products.keys()), now = new Date().toISOString(), results = [];
-      const canonicalBefore = canonicalizeAllegroMappings({ mappings, offers: offersList, products, now });
-      Object.keys(mappings).forEach((key) => delete mappings[key]);Object.assign(mappings, canonicalBefore.mappings);
-      const occupied = new Map(Object.values(mappings).filter((m) => allegroMappingIsCanonical(m)).map((m) => [String(m.productId), String(m.offerId)]));
-      for (const item of requested) {
-        const offer = offers.get(item.offerId), product = products.get(item.productId);
-        if (!offer || !product) { results.push({ ...item, ok: false, code: !offer ? 'offer_not_found' : 'product_not_found' }); continue; }
-        const validation = allegroOcenaPowiazania(product, offer), other = occupied.get(item.productId);
-        if (!validation.valid || (other && other !== item.offerId)) { results.push({ ...item, ok: false, code: other && other !== item.offerId ? 'product_already_mapped' : 'mapping_validation', otherOfferId: other || '', validation }); continue; }
-        const old = mappings[item.offerId] || null;
-        if (old?.productId && String(old.productId) !== item.productId) {
-          const oldProduct = products.get(String(old.productId));
-          if (oldProduct && String(oldProduct.allegroOfferId || '') === item.offerId) updater.apply(old.productId, { allegroMappingStatus: 'zmienione_automatycznie' }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
-        }
-        const fingerprint = allegroProductSyncFingerprint(product);
-        mappings[item.offerId] = { ...old, offerId: item.offerId, productId: item.productId, allegroProductId: tekst(offer.productId, 120), categoryId: tekst(offer.categoryId, 80), productName: tekst(product.nazwa || product.name, 300), offerName: tekst(offer.name, 300), linked_at: old?.linked_at || now, operator: 'admin-safe-batch', confidence: validation.score, reason: validation.reason, evidence: validation.evidence, conflicts: validation.conflicts, warnings: validation.warnings, blocked: false, verifiedForSupplier: true, verification: 'admin-safe-batch', productSnapshot: mappingProductSnapshot(product, data), canonical: true, canonicalLocked: true, locked: true, mappingRole: 'primary', lifecycle: 'current', active: true, sourceOfTruth: 'store', syncState: old?.lastSourceFingerprint === fingerprint ? 'synced' : 'pending', pendingSourceFingerprint: old?.lastSourceFingerprint === fingerprint ? '' : fingerprint, syncRequestedAt: now };
-        updater.apply(item.productId, { allegroOfferId: item.offerId, ...(offer.productId ? { allegroProductId: tekst(offer.productId, 120) } : {}), ...(offer.categoryId ? { allegroCategoryId: tekst(offer.categoryId, 80) } : {}), allegroMappingStatus: 'kanoniczne', allegroSyncSource: 'store-canonical-batch', allegroEditorialSyncPending: old?.lastSourceFingerprint !== fingerprint, allegroEditorialSyncPendingAt: now, allegroEditorialSyncState: old?.lastSourceFingerprint === fingerprint ? 'synced' : 'pending' }, ['allegroMappingConflict']);
-        occupied.set(item.productId, item.offerId);results.push({ ...item, ok: true, validation });
-      }
-      const changed = results.some((x) => x.ok), settingsChanged = updater.commit();
-      if (changed) await Promise.all([
-        zapiszMapowaniaBezpiecznie(baseMappings, canonicalizeAllegroMappings({ mappings, offers: offersList, products, now }).mappings, now),
-        ...(settingsChanged ? [zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now })] : []),
-      ]);
-      const workflow = changed ? await allegroPrzeliczZamowieniaPoMapowaniu() : {};
-      return odpowiedz({ ok: true, mappings, results, mapped: results.filter((x) => x.ok).length, skipped: results.filter((x) => !x.ok).length, ...workflow });
-    }
-
-    if (action === 'allegro-unmap-offer') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const body = await req.json().catch(() => ({}));
-      const offerId = tekst(body.offerId, 100).trim();
-      if (!offerId) return odpowiedz({ ok: false, error: 'Brak offerId' }, 422);
-      const rec = await czytaj('allegro_mappings', { items: {} });
-      const baseItems = { ...allegroMapowaniaItems(rec) }, items = { ...baseItems };
-      const oldMapping = items[offerId] || null;
-      items[offerId] = { ...oldMapping, offerId, previousProductId: oldMapping?.productId || oldMapping?.previousProductId || '', productId: '', blocked: true, canonical: false, canonicalLocked: false, locked: false, mappingRole: 'unlinked', lifecycle: 'unlinked', active: false, operator: 'admin-unmapped', linked_at: oldMapping?.linked_at || null, synced_at: new Date().toISOString(), history: [{ at: new Date().toISOString(), action: 'unlinked', fromProductId: oldMapping?.productId || '', operator: 'admin-unmapped' }, ...(Array.isArray(oldMapping?.history) ? oldMapping.history : [])].slice(0, 12) };
-      const now = new Date().toISOString();
-      let settingsWrite = null;
-      if (oldMapping?.productId) {
-        const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-        const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-        const products = await allegroAgentProduktyKompletne(data), current = products.get(String(oldMapping.productId));
-        if (current && String(current.allegroOfferId || '') === offerId) {
-          const updater = allegroAktualizatorProduktowCentralnych(data, products.keys());
-          updater.apply(oldMapping.productId, { allegroMappingStatus: 'odłączone_ręcznie', allegroSyncedAt: now, allegroSyncSource: 'admin-unmapping' }, ['allegroOfferId', 'allegroMappingConflict']);
-          if (updater.commit()) settingsWrite = zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-        }
-      }
-      await Promise.all([zapiszMapowaniaBezpiecznie(baseItems, items, now, { forceKeys: [offerId] }), ...(settingsWrite ? [settingsWrite] : [])]);
-      const workflow = await allegroPrzeliczZamowieniaPoMapowaniu();
-      return odpowiedz({ ok: true, mappings: items, ...workflow });
-    }
+    const allegroMappingResponse = await allegroMappingRoute(req, url, action);
+    if (allegroMappingResponse) return allegroMappingResponse;
 
     const inpostResponse = await inpostRoute(req, url, action);
     if (inpostResponse) return inpostResponse;

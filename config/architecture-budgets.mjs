@@ -12,10 +12,10 @@ export const ARCHITECTURE_BUDGETS = Object.freeze({
     integrationService: Object.freeze({ targetLines: 500, maxLines: 800 }),
   }),
   backendCoordinator: Object.freeze({
-    targetLines: 4500,
-    maxLines: 5500,
-    targetBytes: 320 * KIB,
-    maxBytes: 420 * KIB,
+    targetLines: 3800,
+    maxLines: 4500,
+    targetBytes: 280 * KIB,
+    maxBytes: 340 * KIB,
   }),
   browser: Object.freeze({
     storefrontScript: Object.freeze({ targetGzipBytes: 125 * KIB, maxGzipBytes: 160 * KIB, maxRawBytes: 540 * KIB }),
