@@ -155,6 +155,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/30-admin-fluid-layout.css',
       'src/styles/31-admin-page-pattern.css',
       'src/styles/32-product-editor-workspace.css',
+      'src/styles/34-paynow-readiness.css',
     ],
   },
   {

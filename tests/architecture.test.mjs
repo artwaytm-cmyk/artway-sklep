@@ -23,6 +23,17 @@ test('wygenerowane assets odpowiadają modułom źródłowym', async () => {
   await assert.doesNotReject(() => buildAssets({ check: true }));
 });
 
+test('każdy źródłowy moduł widoku i stylu należy do jawnej paczki', async () => {
+  const declared = new Set(ASSET_BUNDLES.flatMap((bundle) => bundle.sources));
+  const frontendSources = [
+    ...(await sourceFiles('src/frontend')),
+    ...(await sourceFiles('src/styles')),
+  ];
+  for (const source of frontendSources) {
+    assert.ok(declared.has(source), `${source} nie należy do żadnej paczki wynikowej`);
+  }
+});
+
 test('moduły źródłowe mają kontrolowany rozmiar i jednoznaczną kolejność', async () => {
   const bundledSources = ASSET_BUNDLES.flatMap((bundle) => bundle.sources);
   assert.equal(new Set(bundledSources).size, bundledSources.length);
