@@ -1,0 +1,77 @@
+name: Zewnętrzny test odtworzenia Artway-TM
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 4 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: artway-offsite-restore
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    name: Odszyfruj, sprawdź i odtwórz PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: restore-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BACKUP_PASSPHRASE: ${{ secrets.ARTWAY_BACKUP_PASSPHRASE }}
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: restore-test
+    steps:
+      - name: Narzędzia odtwarzania
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnupg zstd
+
+      - name: Pobierz najnowsze zaszyfrowane archiwum
+        run: |
+          asset_name="$(gh api repos/${{ github.repository }}/releases/tags/offsite-backups --jq '[.assets[] | select(.name|test("^artway-.*\\.tar\\.gpg$"))] | sort_by(.created_at) | last | .name')"
+          test -n "$asset_name"
+          gh release download offsite-backups --repo "${{ github.repository }}" --pattern "$asset_name" --pattern "$asset_name.sha256"
+          echo "ASSET_NAME=$asset_name" >> "$GITHUB_ENV"
+
+      - name: Sprawdź szyfrogram i kopię wewnętrzną
+        run: |
+          sha256sum --check --strict "$ASSET_NAME.sha256"
+          printf '%s' "$BACKUP_PASSPHRASE" > backup.key
+          chmod 600 backup.key
+          gpg --batch --quiet --pinentry-mode loopback --passphrase-file backup.key --decrypt "$ASSET_NAME" > backup.tar
+          rm -f backup.key
+          mkdir restored
+          tar -xf backup.tar -C restored
+          backup_dir="$(find restored -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -n "$backup_dir"
+          cd "$backup_dir"
+          sha256sum --check --strict SHA256SUMS
+          docker run --rm -v "$PWD:/backup:ro" postgres:17 pg_restore --list /backup/database.dump >/dev/null
+          tar --zstd --list --file=application.tar.zst >/dev/null
+          tar --zstd --list --file=server-config.tar.zst >/dev/null
+          echo "BACKUP_DIR=$backup_dir" >> "$GITHUB_ENV"
+
+      - name: Pełne odtworzenie w jednorazowym PostgreSQL
+        run: |
+          backup_path="$(realpath "$BACKUP_DIR")"
+          docker run --rm --network host -e PGPASSWORD="$PGPASSWORD" postgres:17 createdb -h 127.0.0.1 -U postgres artway_restore_test
+          docker run --rm --network host -e PGPASSWORD="$PGPASSWORD" -v "$backup_path:/backup:ro" postgres:17 pg_restore --exit-on-error --no-owner --no-privileges -h 127.0.0.1 -U postgres --dbname=artway_restore_test /backup/database.dump
+          table_count="$(docker run --rm --network host -e PGPASSWORD="$PGPASSWORD" postgres:17 psql -h 127.0.0.1 -U postgres --dbname=artway_restore_test -Atqc "select count(*) from information_schema.tables where table_schema='public'")"
+          test "$table_count" -gt 0
+          echo "Odtworzono $table_count tabel."
+          docker run --rm --network host -e PGPASSWORD="$PGPASSWORD" postgres:17 dropdb -h 127.0.0.1 -U postgres artway_restore_test

@@ -1,0 +1,26 @@
+[Unit]
+Description=Zaszyfrowana kopia Artway-TM poza OVH
+Wants=network-online.target
+After=network-online.target artway-backup.service
+ConditionPathIsDirectory=/srv/artway/backups
+
+[Service]
+Type=oneshot
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+Environment=ARTWAY_BACKUP_REPOSITORY=artwaytm-cmyk/artway-backups
+Environment=ARTWAY_BACKUP_KEY_FILE=/srv/artway/ops/secrets/backup-offsite.key
+Environment=GH_CONFIG_DIR=/home/artway/.config/gh
+ExecStart=/srv/artway/ops/backup/artway-offsite-backup.sh
+TimeoutStartSec=25min
+UMask=0077
+Nice=12
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/artway/backups
+

@@ -1,0 +1,26 @@
+[Unit]
+Description=Pełny próbny restore kopii Artway-TM
+Wants=network-online.target postgresql.service
+After=network-online.target postgresql.service artway-offsite-backup.service
+ConditionPathIsDirectory=/srv/artway/backups
+
+[Service]
+Type=oneshot
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+Environment=ARTWAY_BACKUP_REPOSITORY=artwaytm-cmyk/artway-backups
+Environment=ARTWAY_BACKUP_KEY_FILE=/srv/artway/ops/secrets/backup-offsite.key
+Environment=ARTWAY_RESTORE_DATABASE_URL=postgresql:///artway_restore_test?host=/var/run/postgresql
+Environment=GH_CONFIG_DIR=/home/artway/.config/gh
+ExecStart=/srv/artway/ops/backup/artway-restore-drill.sh
+TimeoutStartSec=35min
+UMask=0077
+Nice=15
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/artway/backups
+
