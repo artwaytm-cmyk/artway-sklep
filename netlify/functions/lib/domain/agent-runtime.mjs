@@ -303,7 +303,7 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
       activity: record.activity.slice(0, 60),
       integrationWarnings,
       updatedAt: record.updatedAt,
-      schedule: { intervalMinutes: 15, nextAt: nextQuarterHour(current).toISOString() },
+      schedule: { mode: 'event_queue', detectorIntervalMinutes: 15, maxHeavyJobsPerRun: 2, lightOffersMinutes: 60, fullOffersHours: 24, nextAt: nextQuarterHour(current).toISOString() },
     };
   }
 

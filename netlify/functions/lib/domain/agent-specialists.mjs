@@ -1,9 +1,8 @@
-import crypto from 'node:crypto';
-import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
-import { validManufacturerName } from './product-field-validation.mjs';
-import { createPlatformPromptProfile, requestSpecialistResponse } from './agent-specialist-openai.mjs';
+import crypto from 'node:crypto'; import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
+import { validManufacturerName } from './product-field-validation.mjs'; import { createPlatformPromptProfile, requestSpecialistResponse } from './agent-specialist-openai.mjs';
 import { repairAllegroEditorial } from './agent-specialist-compliance.mjs';
 import { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts } from './agent-specialists-support.mjs';
+import { automaticBatchLimit, statusDecisionData } from './agent-specialists-status-support.mjs';
 export function createAgentSpecialists({
   readVersioned, writeIfVersion, fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY,
   model = process.env.OPENAI_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-5-nano', now = () => new Date(),
@@ -184,11 +183,12 @@ export function createAgentSpecialists({
         lastRunAt: runs[0]?.createdAt || '', lastStatus: runs[0]?.approvalStatus || '',
       };
     });
+    const { activeDecisions, statusHistory } = statusDecisionData(current, decisions, historyLimit, now());
     return {
       configured: !!clean(apiKey, 500), model: clean(model, 80), config: current.config,
       promptVersion: PROMPT_VERSION,
       policy: {
-        mode: 'codex_manager_plus_versioned_gpt_scenarios', cycleMinutes: 15, safeAutoApply: current.config.safeAutoApply,
+        mode: 'event_queue_plus_versioned_gpt_scenarios', cycleMinutes: 15, detectorMinutes: 15, maxJobsPerCycle: 2, safeAutoApply: current.config.safeAutoApply,
         progressiveAutonomy: true, editorialAutonomy: current.config.autoApplyProductEditorial !== false,
         linkedAllegroContentAutonomy: current.config.autoUpdateLinkedAllegroContent !== false,
         neverAutomatic: NEVER_AUTOMATIC, actionPolicy: AGENT_ACTION_POLICY,
@@ -215,14 +215,14 @@ export function createAgentSpecialists({
         automaticLimitReached: todayRuns.filter((item) => item.source === 'automatic').length >= current.config.automaticDailyLimit,
         limitDay: today,
       },
-      decisions: decisions.filter((item) => activeDecision(item, now())).slice(0, 80),
+      decisions: activeDecisions,
       decisionStats: {
         open: decisions.filter((item) => activeDecision(item, now())).length,
         high: decisions.filter((item) => activeDecision(item, now()) && item.risk === 'high').length,
         completed: decisions.filter((item) => ['approved', 'resolved'].includes(item.status)).length,
       },
       recentDecisions: decisions.filter((item) => ['approved', 'dismissed', 'resolved'].includes(item.status)).sort((a, b) => String(b.resolvedAt || b.updatedAt).localeCompare(String(a.resolvedAt || a.updatedAt))).slice(0, 20),
-      history: current.history.slice(0, historyLimit), lastCycle: current.lastCycle, updatedAt: current.updatedAt,
+      history: statusHistory, lastCycle: current.lastCycle, updatedAt: current.updatedAt,
     };
   }
 
@@ -499,7 +499,7 @@ export function createAgentSpecialists({
 
     const unresolvedCommunication = communicationScanDue ? communicationRows.sort((a, b) => String(b.item?.latestNewIncoming?.createdAt || b.item?.lastMessage?.createdAt || '').localeCompare(String(a.item?.latestNewIncoming?.createdAt || a.item?.lastMessage?.createdAt || ''))) : [];
 
-    let availableRuns = current.config.automaticBatchSize;
+    let availableRuns = automaticBatchLimit(current.config.automaticBatchSize, options?.maxItems);
     // Komunikacja może zająć najwyżej dwa miejsca. Pozostała przepustowość jest
     // przeznaczona na sukcesywne przygotowanie całego katalogu produktów.
     let communicationRuns = Math.min(2, Math.max(0, availableRuns - Math.min(2, candidates.length)));

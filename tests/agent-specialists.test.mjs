@@ -468,6 +468,16 @@ test('nieudane zatwierdzenie pozostaje otwarte z dokładnym kodem błędu i moż
   assert.match(failed.lastError, /Nie znaleziono szkicu/i);
 });
 
+test('otwarta decyzja zawsze zwraca swój pełny szkic nawet gdy wypadł poza krótki limit historii', async () => {
+  const oldDraft = { id: 'draft-required', specialist: 'customer_reply', status: 'completed', source: 'automatic', createdAt: '2026-07-01T10:00:00.000Z', target: { type: 'communication', communicationId: 'thread-7' }, result: { title: 'Szkic odpowiedzi', content: 'Dzień dobry, sprawdziliśmy zamówienie.', fields: [{ key: 'reply_body', label: 'Odpowiedź', currentValue: '', value: 'Dzień dobry, sprawdziliśmy zamówienie.' }] } };
+  const recent = Array.from({ length: 12 }, (_, index) => ({ id: `recent-${index}`, specialist: 'catalog_quality', status: 'completed', createdAt: `2026-07-2${index % 2}T10:00:00.000Z`, result: { fields: [] } }));
+  const repo = memoryRepository({ agent_specialists_state: { config: {}, history: [...recent, oldDraft], decisions: [{ id: 'decision-with-draft', kind: 'customer_reply', status: 'open', runId: oldDraft.id, target: oldDraft.target, createdAt: oldDraft.createdAt, updatedAt: oldDraft.createdAt }] } });
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-22T12:00:00.000Z'), fetchImpl: async () => new Response('{}', { status: 500 }) });
+  const status = await service.status({ historyLimit: 5 });
+  assert.equal(status.history.some((item) => item.id === oldDraft.id), true);
+  assert.equal(status.history.find((item) => item.id === oldDraft.id).result.content, 'Dzień dobry, sprawdziliśmy zamówienie.');
+});
+
 test('trasa wymaga administratora i nigdy nie deklaruje automatycznej publikacji', async () => {
   const service = { status: async () => ({ configured: true }), run: async () => ({ id: 'gpt-1' }), configure: async (value) => value, applyProductDraft: async () => ({ applied: true }), automaticCycle: async () => ({ prepared: [] }) };
   const respond = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
