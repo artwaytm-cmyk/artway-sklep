@@ -1,0 +1,46 @@
+name: Kontrola jakości Artway-TM
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'agent/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: artway-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, testy, architektura i bezpieczeństwo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Europe/Warsaw
+    steps:
+      - name: Pobierz dokładny commit
+        uses: actions/checkout@v4
+
+      - name: Node.js zgodny z produkcją
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Czysta instalacja zależności
+        run: npm ci
+
+      - name: Pełna bramka jakości
+        run: npm run verify
+
+      - name: Budżety architektury
+        run: npm run audit:architecture
+
+      - name: Podatności zależności
+        run: npm audit --audit-level=high
+

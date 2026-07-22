@@ -10,6 +10,7 @@
     "check:legacy": "node scripts/check-artway.mjs",
     "audit:architecture": "node scripts/report-architecture-budgets.mjs",
     "audit:functional": "node scripts/audit-functional-consistency.mjs",
+    "deploy:atomic": "node scripts/deploy-atomic-release.mjs",
     "benchmark:setup": "sudo -n /bin/bash ops/postgres/setup-isolated-benchmark.sh",
     "benchmark:catalog": "node scripts/run-isolated-catalog-benchmark.mjs --rows=100000",
     "test:storage:isolated": "node scripts/test-dedicated-domain-storage.mjs",
