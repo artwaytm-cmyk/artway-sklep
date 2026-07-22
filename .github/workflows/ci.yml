@@ -42,3 +42,40 @@ jobs:
 
       - name: Podatności zależności
         run: npm audit --audit-level=high
+
+  browser:
+    name: Prawdziwa przeglądarka Chromium
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Europe/Warsaw
+    steps:
+      - name: Pobierz dokładny commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Node.js zgodny z produkcją
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Czysta instalacja zależności
+        run: npm ci
+
+      - name: Chromium i biblioteki systemowe
+        run: npx playwright install --with-deps chromium
+
+      - name: Scenariusze sklepu i panelu
+        run: npm run test:e2e
+
+      - name: Raport, ślady i zrzuty po wykonaniu
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,5 +1,6 @@
 /* ═══════════ KOSZYK ═══════════ */
-function ileWKoszyku(id){ return koszyk.filter(x=>x.id===id).reduce((s,x)=>s+x.ile,0); }
+function tenSamProdukt(a,b){return String(a??"")===String(b??"");}
+function ileWKoszyku(id){ return koszyk.filter(x=>tenSamProdukt(x.id,id)).reduce((s,x)=>s+x.ile,0); }
 function kontrolowanyStanDlaZakupu(id){
   if(!Object.prototype.hasOwnProperty.call(stanyProduktow||{},id)||stanyProduktow[id]===null||stanyProduktow[id]==="")return null;
   const n=Number(stanyProduktow[id]);return Number.isFinite(n)?Math.max(0,Math.floor(n)):null;
@@ -40,13 +41,13 @@ function dodajZKarty(id,btn){const box=btn?.closest?.(".card-purchase"),input=bo
 function dodajWIlosci(id,ilosc=1,btn=null,wariant=null){
   const ile=normalizujIloscZakupu(ilosc);
   wariant = wariant || null;
-  const p = produkty.find(x=>x.id===id);
+  const p = produkty.find(x=>tenSamProdukt(x.id,id));
   if(p&&!produktMaCeneSprzedazy(p)){ toast("⚠️ Ten produkt wymaga uzupełnienia ceny przez administratora"); return; }
   if(p&&produktOznaczonyNiedostepny(p)){ toast("⚠️ Produkt jest chwilowo niedostępny"); return; }
   if(p?.warianty?.length && !wariant){ location.hash="#/produkt/"+id; toast("Wybierz wariant produktu"); return; }
   if(!potwierdzProgDostepnosci(id, ileWKoszyku(id)+ile)) return;
-  const poz = koszyk.find(x=>x.id===id && (x.wariant||null)===wariant);
-  poz ? poz.ile+=ile : koszyk.push({id, ile, ...(wariant?{wariant}:{})});
+  const productId=p?.id??id,poz = koszyk.find(x=>tenSamProdukt(x.id,productId) && (x.wariant||null)===wariant);
+  poz ? poz.ile+=ile : koszyk.push({id:productId, ile, ...(wariant?{wariant}:{})});
   zapiszLS("artway_koszyk", koszyk); odswiezKoszyk();
   if(btn){const label=btn.dataset.originalLabel||btn.textContent;btn.dataset.originalLabel=label;btn.textContent=`✓ Dodano ${ile} szt.`;btn.classList.add("added");
     setTimeout(()=>{if(btn.isConnected){btn.textContent=label;btn.classList.remove("added");}},1100); }
@@ -58,7 +59,7 @@ function dodaj(id,btn,wariant){return dodajWIlosci(id,1,btn,wariant);}
 function zmienIloscIdx(i, d){
   const poz = koszyk[i]; if(!poz) return;
   if(d>0){
-    const p = produkty.find(x=>x.id===poz.id);
+    const p = produkty.find(x=>tenSamProdukt(x.id,poz.id));
     if(p&&produktOznaczonyNiedostepny(p)){ toast("⚠️ Produkt jest chwilowo niedostępny"); return; }
     if(!potwierdzProgDostepnosci(poz.id, ileWKoszyku(poz.id)+1)) return;
   }
@@ -67,10 +68,10 @@ function zmienIloscIdx(i, d){
   zapiszLS("artway_koszyk", koszyk); odswiezKoszyk();
 }
 function usunIdx(i){ koszyk.splice(i,1); zapiszLS("artway_koszyk", koszyk); odswiezKoszyk(); }
-function zmienIlosc(id, d){ const i = koszyk.findIndex(x=>x.id===id); if(i>=0) zmienIloscIdx(i, d); }
-function usun(id){ koszyk = koszyk.filter(x=>x.id!==id); zapiszLS("artway_koszyk", koszyk); odswiezKoszyk(); }
+function zmienIlosc(id, d){ const i = koszyk.findIndex(x=>tenSamProdukt(x.id,id)); if(i>=0) zmienIloscIdx(i, d); }
+function usun(id){ koszyk = koszyk.filter(x=>!tenSamProdukt(x.id,id)); zapiszLS("artway_koszyk", koszyk); odswiezKoszyk(); }
 function sumaKoszyka(){
-  return koszyk.reduce((s,x)=>{ const p=produkty.find(p=>p.id===x.id); return s+(p?p.cena*x.ile:0); },0);
+  return koszyk.reduce((s,x)=>{ const p=produkty.find(p=>tenSamProdukt(p.id,x.id)); return s+(p?p.cena*x.ile:0); },0);
 }
 function produktObjetyRegulaRabatowa(p,regula){
   if(!p||!regula)return false;
@@ -112,7 +113,7 @@ function odswiezKoszyk(){
   $("freeShip").textContent = suma>=KONFIG.darmowaDostawaOd ? "🎉 Masz darmową dostawę!"
     : suma>0 ? `Do darmowej dostawy brakuje ${zl(KONFIG.darmowaDostawaOd-suma)}` : "";
   $("cartItems").innerHTML = n ? koszyk.map((x,i)=>{
-    const p = produkty.find(p=>p.id===x.id); if(!p) return "";
+    const p = produkty.find(p=>tenSamProdukt(p.id,x.id)); if(!p) return "";
     return `<div class="cart-item">
       <div class="ci-thumb" style="background:${p.kolor||'#eef2f7'}">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="${esc(p.nazwa)}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">`:(p.ikona||"📦")}</div>
       <div class="ci-info"><b>${esc(p.nazwa)}</b>${x.wariant?`<small style="display:block;color:var(--brand);font-weight:700">${esc(x.wariant)}</small>`:""}<small>${zl(p.cena)} / szt.</small></div>

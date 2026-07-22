@@ -33,7 +33,9 @@ test("klient wybiera ilość na karcie i stronie produktu, a koszyk zapisuje ją
   assert.match(storefront,/id="prodQty" type="number" min="1" max="99"/);
   assert.match(storefront,/dodajWIlosci\(id,iloscProduktu,null,wariant\)/);
   assert.match(cart,/function dodajWIlosci\(id,ilosc=1/);
-  assert.match(cart,/poz \? poz\.ile\+=ile : koszyk\.push\(\{id, ile/);
+  assert.match(cart,/function tenSamProdukt/);
+  assert.match(cart,/productId=p\?\.id\?\?id/);
+  assert.match(cart,/poz \? poz\.ile\+=ile : koszyk\.push\(\{id:productId, ile/);
   assert.match(cart,/potwierdzProgDostepnosci\(id, ileWKoszyku\(id\)\+ile\)/);
   assert.doesNotMatch(storefront,/for\(let i=0;i<iloscProduktu;i\+\+\) dodaj/);
 });

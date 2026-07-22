@@ -378,7 +378,7 @@ async function zlozZamowienie(e){
   e.preventDefault();
   try{
     const f = new FormData(e.target);
-    const niedostepneWKoszyku=koszyk.map(x=>produkty.find(p=>p.id===x.id)).filter(p=>!p||!produktDostepnyWSprzedazy(p));
+    const niedostepneWKoszyku=koszyk.map(x=>produkty.find(p=>tenSamProdukt(p.id,x.id))).filter(p=>!p||!produktDostepnyWSprzedazy(p));
     if(niedostepneWKoszyku.length){
       toast("⚠️ Usuń z koszyka produkty chwilowo niedostępne lub bez ceny");
       return;

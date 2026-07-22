@@ -8,3 +8,5 @@ node_modules/
 *.dump
 coverage/
 backups/
+playwright-report/
+test-results/
