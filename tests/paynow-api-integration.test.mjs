@@ -77,13 +77,17 @@ test('diagnostyka API sprawdza podpisem prawdziwy endpoint metod bez ujawniania 
 });
 
 test('diagnostyka Paynow jest dostępna tylko administratorowi i ma osobny przycisk w panelu', async () => {
-  const [backend, admin] = await Promise.all([
+  const [coordinator, route, admin] = await Promise.all([
     readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../netlify/functions/lib/paynow-route.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../src/frontend/15-personalization-and-publishing.js', import.meta.url), 'utf8'),
   ]);
+  const backend = `${coordinator}\n${route}`;
+  assert.match(coordinator, /createPaynowRoute/);
+  assert.match(coordinator, /await paynowRoute\(req, url, action\)/);
   assert.match(backend, /action === 'paynow-diagnose'/);
-  assert.match(backend, /paynow-diagnose'[\s\S]*?czyAdmin\(req, url\)/);
-  assert.match(backend, /paynowWywolaj\(req, '\/v3\/configuration\/shop\/urls', \{\s*method: 'POST'/);
+  assert.match(route, /paynow-diagnose'[\s\S]*?isAdmin\(req, url\)/);
+  assert.match(route, /call\(req, '\/v3\/configuration\/shop\/urls', \{\s*method: 'POST'/);
   assert.doesNotMatch(backend, /\/v3\/configuration\/shop\/urls'[\s\S]{0,120}method: 'PATCH'/);
   assert.match(admin, /Testuj podpis i API/);
   assert.match(admin, /testujPaynowAPI\(\)/);

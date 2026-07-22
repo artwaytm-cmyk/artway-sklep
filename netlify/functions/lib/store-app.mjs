@@ -34,6 +34,7 @@ import { createInpostService } from './inpost-service.mjs';
 import { createInpostRoute } from './inpost-route.mjs';
 import { createStoreDataRoute } from './store-data-route.mjs';
 import { createPaynowService } from './paynow-service.mjs';
+import { createPaynowRoute } from './paynow-route.mjs';
 import { createInfaktService } from './infakt-service.mjs';
 import { createInfaktRoute } from './infakt-route.mjs';
 import { createSystemRoute } from './system-route.mjs';
@@ -2822,6 +2823,37 @@ const infaktRoute = createInfaktRoute({
   infaktErrorText,
 });
 
+const paynowRoute = createPaynowRoute({
+  respond: odpowiedz,
+  isAdmin: czyAdmin,
+  rateLimit: ograniczRuch,
+  text: tekst,
+  read: czytaj,
+  write: zapisz,
+  readDeletedOrders: czytajUsunieteZamowienia,
+  deletedOrderMap: mapaUsunietych,
+  filterUndeletedOrders: filtrujNieusunieteZamowienia,
+  normalizeOrder: normalizujZamowienie,
+  orderNumber: numerZamowienia,
+  orderLimit: LIMIT_ZAMOWIEN,
+  finalStatuses: PAYNOW_STATUSY_KONCOWE,
+  configure: paynowKonfiguracja,
+  diagnose: paynowDiagnostyka,
+  paymentStatus: statusPlatnosciPaynow,
+  idempotencyKey: kluczIdempotencji,
+  call: paynowWywolaj,
+  paymentPayload: payloadPlatnosciPaynow,
+  updateOrder: aktualizujZamowieniePaynow,
+  signNotification: podpisPaynowPowiadomienia,
+  compareSignature: porownajPodpis,
+  cents: grosze,
+  currencyText: zlSerwer,
+  sendNewOrderEmails: wyslijEmaileNowegoZamowienia,
+  emailConfig: emailKonfiguracja,
+  appendEmailHistory: dopiszHistorieEmaila,
+  sendStatusEmail: wyslijEmailStatusowy,
+});
+
 const storeDataRoute = createStoreDataRoute({
   odpowiedz,
   czyAdmin,
@@ -3129,231 +3161,8 @@ export default async (req) => {
       }
     }
 
-    // ─── PAYNOW: konfiguracja publiczna bez sekretów ───
-    if (action === 'paynow-config') {
-      const cfg = paynowKonfiguracja(req);
-      return odpowiedz({
-        ok: true,
-        configured: cfg.configured,
-        env: cfg.env,
-        apiBaseUrl: cfg.apiBaseUrl,
-        continueUrl: cfg.continueUrl,
-        notificationUrl: cfg.notificationUrl,
-        requiredEnv: ['PAYNOW_API_KEY', 'PAYNOW_SIGNATURE_KEY', 'PAYNOW_ENV'],
-        optionalEnv: ['PAYNOW_CONTINUE_URL', 'PAYNOW_NOTIFICATION_URL'],
-      });
-    }
-
-    // ─── PAYNOW: pełny test podpisu, kluczy i metod płatności (admin) ───
-    if (action === 'paynow-diagnose') {
-      if (req.method !== 'GET') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const limited = ograniczRuch(req, 'paynow-diagnose', 30, 60 * 60 * 1000);
-      if (limited) return limited;
-      try {
-        const wynik = await paynowDiagnostyka(req);
-        return odpowiedz(wynik, wynik.ok ? 200 : 503);
-      } catch (error) {
-        return odpowiedz({ ok: false, configured: true, connected: false, error: tekst(error?.message || 'Test Paynow nie powiódł się', 500), code: 'paynow_diagnostic_failed' }, Number(error?.status) || 502);
-      }
-    }
-
-    // ─── PAYNOW: utworzenie płatności i linku przekierowania ───
-    if (action === 'paynow-create') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w chronionym środowisku backendu VPS.', code: 'paynow_not_configured' }, 503);
-      const body = await req.json().catch(() => ({}));
-      const zam = normalizujZamowienie(body.order);
-      if (!zam) return odpowiedz({ ok: false, error: 'Brak danych zamówienia' }, 422);
-      const usuniete = mapaUsunietych(await czytajUsunieteZamowienia());
-      if (usuniete.has(zam.nr)) return odpowiedz({ ok: false, error: 'Zamówienie jest usunięte i nie może dostać nowej płatności', code: 'deleted' }, 409);
-
-      const rec = await czytaj('orders', { items: [] });
-      const items = filtrujNieusunieteZamowienia(rec.items || [], usuniete);
-      const istniejeIdx = items.findIndex((x) => x.nr === zam.nr);
-      const zapisaneZamowienie = istniejeIdx >= 0 ? items[istniejeIdx] : zam;
-      const staraPlatnosc = zapisaneZamowienie.paynow || {};
-      if (staraPlatnosc.redirectUrl && !PAYNOW_STATUSY_KONCOWE.has(String(staraPlatnosc.status || '').toUpperCase())) {
-        return odpowiedz({
-          ok: true,
-          configured: true,
-          reused: true,
-          redirectUrl: staraPlatnosc.redirectUrl,
-          paymentId: staraPlatnosc.paymentId || '',
-          status: staraPlatnosc.status || '',
-          paymentStatus: statusPlatnosciPaynow(staraPlatnosc.status),
-          paynow: staraPlatnosc,
-        });
-      }
-      if (istniejeIdx < 0) {
-        items.unshift(zapisaneZamowienie);
-        while (items.length > LIMIT_ZAMOWIEN) items.pop();
-        await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      }
-
-      const payload = payloadPlatnosciPaynow(zapisaneZamowienie, req);
-      const idempotencyKey = kluczIdempotencji('ord', zapisaneZamowienie.nr);
-      const dane = await paynowWywolaj(req, '/v3/payments', { method: 'POST', bodyObj: payload, idempotencyKey });
-      const status = tekst(dane.status, 40).toUpperCase();
-      const paymentId = tekst(dane.paymentId, 40);
-      const redirectUrl = tekst(dane.redirectUrl, 1000);
-      const zaktualizowane = await aktualizujZamowieniePaynow({
-        externalId: zapisaneZamowienie.nr,
-        paymentId,
-        status,
-        redirectUrl,
-        env: cfg.env,
-      });
-      let email = null;
-      try { email = await wyslijEmaileNowegoZamowienia(zaktualizowane || { ...zapisaneZamowienie, paynow: { paymentId, status, redirectUrl, env: cfg.env } }); }
-      catch (e) {
-        email = { configured: emailKonfiguracja().configured, sent: false, error: e.message };
-        await dopiszHistorieEmaila(zapisaneZamowienie.nr, { typ: 'potwierdzenie', status: 'błąd wysyłki', blad: e.message, automatyczne: true });
-      }
-      return odpowiedz({
-        ok: true,
-        configured: true,
-        env: cfg.env,
-        redirectUrl,
-        paymentId,
-        status,
-        paymentStatus: statusPlatnosciPaynow(status),
-        paynow: zaktualizowane?.paynow || { paymentId, status, redirectUrl, env: cfg.env },
-        email,
-      }, 201);
-    }
-
-    // ─── PAYNOW: ręczne odświeżenie statusu z API ───
-    if (action === 'paynow-status') {
-      const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera.', code: 'paynow_not_configured' }, 503);
-      let paymentId = tekst(url.searchParams.get('paymentId'), 40).trim();
-      const nr = numerZamowienia(url.searchParams.get('nr'));
-      if (!paymentId && nr) {
-        const rec = await czytaj('orders', { items: [] });
-        const z = (rec.items || []).find((x) => x.nr === nr);
-        paymentId = tekst(z?.paynow?.paymentId, 40).trim();
-      }
-      if (!paymentId) return odpowiedz({ ok: false, error: 'Brak paymentId Paynow' }, 422);
-      const dane = await paynowWywolaj(req, `/v3/payments/${encodeURIComponent(paymentId)}/status`, {
-        method: 'GET',
-        idempotencyKey: kluczIdempotencji('stat', paymentId),
-      });
-      const status = tekst(dane.status, 40).toUpperCase();
-      const zaktualizowane = await aktualizujZamowieniePaynow({
-        externalId: nr,
-        paymentId: dane.paymentId || paymentId,
-        status,
-        env: cfg.env,
-      });
-      return odpowiedz({
-        ok: true,
-        configured: true,
-        paymentId: dane.paymentId || paymentId,
-        status,
-        paymentStatus: statusPlatnosciPaynow(status),
-        order: zaktualizowane ? { nr: zaktualizowane.nr, status: zaktualizowane.status, platnoscStatus: zaktualizowane.platnoscStatus, paynow: zaktualizowane.paynow } : null,
-      });
-    }
-
-    // ─── PAYNOW: webhook statusów płatności ───
-    if (action === 'paynow-notification') {
-      if (req.method !== 'POST') return new Response('', { status: 405 });
-      const cfg = paynowKonfiguracja(req);
-      const rawBody = await req.text();
-      if (!cfg.configured) return new Response('', { status: 503 });
-      const podpis = req.headers.get('signature') || req.headers.get('Signature') || '';
-      const wyliczony = podpisPaynowPowiadomienia(rawBody, cfg.signatureKey);
-      if (!porownajPodpis(podpis, wyliczony)) return new Response('', { status: 401 });
-      let dane = {};
-      try { dane = JSON.parse(rawBody || '{}'); } catch (e) { return new Response('', { status: 400 }); }
-      await aktualizujZamowieniePaynow({
-        externalId: dane.externalId,
-        paymentId: dane.paymentId,
-        status: tekst(dane.status, 40).toUpperCase(),
-        modifiedAt: tekst(dane.modifiedAt, 80),
-        env: cfg.env,
-      });
-      return new Response('', { status: 202, headers: { 'cache-control': 'no-store' } });
-    }
-
-    // ─── PAYNOW: ustawienie URL-i sklepu w panelu Paynow (admin) ───
-    if (action === 'paynow-configure-urls') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Najpierw ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w chronionym środowisku backendu VPS.', code: 'paynow_not_configured' }, 503);
-      const body = await req.json().catch(() => ({}));
-      const payload = {
-        notificationUrl: tekst(body.notificationUrl || cfg.notificationUrl, 1000),
-        continueUrl: tekst(body.continueUrl || cfg.continueUrl, 1000),
-      };
-      await paynowWywolaj(req, '/v3/configuration/shop/urls', {
-        method: 'POST',
-        bodyObj: payload,
-      });
-      return odpowiedz({ ok: true, configured: true, env: cfg.env, ...payload });
-    }
-
-    // ─── PAYNOW: zwrot pieniędzy (refund) + automatyczny e-mail (admin) ───
-    if (action === 'paynow-refund') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const cfg = paynowKonfiguracja(req);
-      if (!cfg.configured) return odpowiedz({ ok: false, configured: false, error: 'Paynow nie jest skonfigurowany po stronie serwera. Ustaw PAYNOW_API_KEY i PAYNOW_SIGNATURE_KEY w chronionym środowisku backendu VPS.', code: 'paynow_not_configured' }, 503);
-      const body = await req.json().catch(() => ({}));
-      const nr = numerZamowienia(body.nr || body.number);
-      if (!nr) return odpowiedz({ ok: false, error: 'Brak numeru zamówienia' }, 422);
-      const rec = await czytaj('orders', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const i = items.findIndex((x) => x.nr === nr);
-      if (i < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
-      const z = { ...items[i] };
-      const paymentId = tekst(z?.paynow?.paymentId, 40).trim();
-      if (!paymentId) return odpowiedz({ ok: false, error: 'To zamówienie nie ma płatności Paynow — zwrot pieniędzy zrób w banku, a zamówienie oznacz jako „zwrot pieniędzy”.', code: 'no_payment' }, 409);
-      const statusPlat = String(z?.paynow?.status || '').toUpperCase();
-      if (statusPlat !== 'CONFIRMED') return odpowiedz({ ok: false, error: `Zwrot możliwy tylko dla opłaconej płatności (CONFIRMED). Obecny status Paynow: ${statusPlat || 'brak'}.`, code: 'not_confirmed' }, 409);
-      const pelna = grosze(z.razem);
-      const juz = (Array.isArray(z?.paynow?.refunds) ? z.paynow.refunds : []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
-      const amount = (body.amount != null && body.amount !== '') ? grosze(body.amount) : (pelna - juz);
-      if (amount <= 0) return odpowiedz({ ok: false, error: 'Kwota zwrotu musi być większa od zera' }, 422);
-      if (amount + juz > pelna) return odpowiedz({ ok: false, error: `Kwota zwrotu przekracza pozostałą kwotę płatności (pozostało ${zlSerwer((pelna - juz) / 100)}).`, code: 'amount_too_large' }, 409);
-      const reasonRaw = String(body.reason || '').toUpperCase();
-      const reason = ['RMA', 'REFUND_BEFORE_14', 'REFUND_AFTER_14', 'OTHER'].includes(reasonRaw) ? reasonRaw : '';
-      const bodyObj = reason ? { amount, reason } : { amount };
-      const idempotencyKey = kluczIdempotencji('ref', `${paymentId}${Date.now()}`);
-      const dane = await paynowWywolaj(req, `/v3/payments/${encodeURIComponent(paymentId)}/refunds`, { method: 'POST', bodyObj, idempotencyKey });
-      const refundId = tekst(dane.refundId, 60);
-      const refundStatus = tekst(dane.status, 40).toUpperCase();
-      const refunds = (Array.isArray(z?.paynow?.refunds) ? z.paynow.refunds.slice() : []);
-      refunds.push({ refundId, status: refundStatus, amount, reason, ts: new Date().toISOString() });
-      const pelnyZwrot = (amount + juz) >= pelna;
-      z.paynow = { ...z.paynow, refunds, updatedAt: new Date().toISOString() };
-      z.status = 'zwrot pieniędzy';
-      z.platnoscStatus = pelnyZwrot ? 'zwrócone' : 'częściowy zwrot';
-      const w = z.wysylka || {};
-      w.historia = [...(Array.isArray(w.historia) ? w.historia : []), { czas: new Date().toLocaleString('pl-PL'), status: 'Zwrot pieniędzy Paynow', opis: `${zlSerwer(amount / 100)} • ${refundId || '—'} • ${refundStatus || '—'}` }];
-      z.wysylka = w;
-      items[i] = z;
-      await zapisz('orders', { items, updated_at: new Date().toISOString() });
-      let email = null;
-      try { email = await wyslijEmailStatusowy(z, 'zwrot_pieniedzy', { kwota: amount / 100 }); }
-      catch (e) { email = { sent: false, error: e.message }; }
-      const recPo = await czytaj('orders', { items: [] });
-      const zPo = (recPo.items || []).find((x) => x.nr === nr) || z;
-      return odpowiedz({
-        ok: true,
-        configured: true,
-        refundId,
-        status: refundStatus,
-        amount,
-        fullRefund: pelnyZwrot,
-        email,
-        order: { nr: zPo.nr, status: zPo.status, platnoscStatus: zPo.platnoscStatus, paynow: zPo.paynow },
-        powiadomienia: zPo?.wysylka?.powiadomienia || [],
-      }, 201);
-    }
+    const paynowResponse = await paynowRoute(req, url, action);
+    if (paynowResponse) return paynowResponse;
 
     // ─── ALLEGRO: stan integracji i dane zapisane w backendzie (admin) ───
     if (action === 'allegro-data') {

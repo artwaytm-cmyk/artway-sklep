@@ -1,8 +1,43 @@
 import crypto from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import pg from 'pg';
 import { createCentralProductCatalog } from '../netlify/functions/lib/domain/central-product-catalog.mjs';
 
 const { Pool } = pg;
+
+function loadLocalEnv(key, path = '.env') {
+  if (process.env[key] || !existsSync(path)) return;
+  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match || match[1] !== key) continue;
+    const raw = match[2].trim();
+    process.env[key] = raw.replace(/^(['"])(.*)\1$/, '$2');
+    return;
+  }
+}
+
+loadLocalEnv('DATABASE_URL');
+loadLocalEnv('DATABASE_URL', '.env.netlify');
+
+function loadSystemdEnvironment(key, path = '/etc/systemd/system/artway-backend.service') {
+  if (process.env[key] || !existsSync(path)) return;
+  const content = readFileSync(path, 'utf8');
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('Environment=')) continue;
+    const body = trimmed.slice('Environment='.length);
+    const match = body.match(new RegExp(`(?:^|\\s)${key}=([^\\s]+)`));
+    if (match?.[1]) {
+      process.env[key] = match[1].replace(/^(['"])(.*)\1$/, '$2');
+      return;
+    }
+  }
+}
+
+loadSystemdEnvironment('DATABASE_URL');
+
 const rowsArgument = process.argv.find((value) => value.startsWith('--rows='));
 const rows = Math.max(10_000, Math.min(250_000, Number(rowsArgument?.split('=')[1]) || 100_000));
 const connectionString = process.env.DATABASE_URL;
