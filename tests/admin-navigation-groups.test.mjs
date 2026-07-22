@@ -11,7 +11,7 @@ test("główne menu administratora jest pogrupowane według procesu pracy",async
   assert.ok(source.indexOf('"/admin/zamowienia"')<source.indexOf('"/admin/asortyment"'));
   assert.ok(source.indexOf('"/admin/asortyment"')<source.indexOf('"/admin/infakt"'));
   assert.ok(source.indexOf('"/admin/infakt"')<source.indexOf('"/admin/agent-ai"'));
-  assert.ok(source.indexOf('"/admin/agent-ai"')<source.indexOf('"/admin/aktualizacja"'));
+  assert.ok(source.indexOf('"/admin/agent-ai"')<source.indexOf('"/admin/system"'));
   assert.ok(source.indexOf('"/admin/wysylki"')<source.indexOf('"/admin/klienci"'));
   assert.ok(source.indexOf('"/admin/eksport"')<source.indexOf('"/admin/infakt"'));
 });

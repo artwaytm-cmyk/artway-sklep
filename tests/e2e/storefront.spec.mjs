@@ -109,6 +109,7 @@ test('główne działy administratora mają jeden profesjonalny szablon i nie tw
     '/admin/seo/efekty',
     '/admin/personalizacja/home',
     '/admin/infakt',
+    '/admin/system',
   ];
   for (const route of routes) {
     await page.goto(`/#${route}`);
@@ -133,6 +134,18 @@ test('istniejąca podstrona Efekty obsługuje zakres dzienny i pełne zestawieni
   await page.getByRole('button', { name: 'Dzisiaj', exact: true }).click();
   const dates = page.locator('[data-seo-effects-workspace] input[type="date"]');
   await expect(dates.nth(0)).toHaveValue(await dates.nth(1).inputValue());
+  assertRuntime();
+});
+
+test('Centrum systemu pokazuje wersję i bezpieczny przycisk aktualizacji przeglądarki', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  await page.goto('/#/admin/system');
+  await expect(page.getByRole('heading', { name: 'System i aktualizacje' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pobierz i uruchom aktualizację' })).toBeVisible();
+  await expect(page.locator('.module-tabs-panel a[href="#/admin/system/diagnostyka"]')).toBeVisible();
+  await expect(page.locator('.module-tabs-panel a[href="#/admin/system/logi"]')).toBeVisible();
+  await expect(page.locator('.module-tabs-panel a[href="#/admin/system/kopie"]')).toBeVisible();
   assertRuntime();
 });
 

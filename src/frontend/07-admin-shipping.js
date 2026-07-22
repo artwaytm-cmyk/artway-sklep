@@ -54,10 +54,8 @@ const MENU_ADMINA = [
     ["/admin/seo","📣","Pozycjonowanie","Widoczność i promocja produktów"],
     ["/admin/personalizacja","🎨","Personalizacja","Wygląd, układy i ustawienia sklepu"]
   ]},
-  {id:"system",ikona:"🛠️",nazwa:"System",opis:"Publikacja, wersje i diagnostyka",elementy:[
-    ["/admin/aktualizacja","⬆️","Aktualizacja strony","Pliki i wersja aplikacji"],
-    ["/admin/publikacja","🌍","Publikacja","Wdrożenie i status online"],
-    ["/diagnostyka","🩺","Diagnostyka","Integracje, błędy i kondycja"]
+  {id:"system",ikona:"🛠️",nazwa:"System",opis:"Wersja, diagnostyka i kopie",elementy:[
+    ["/admin/system","🛠️","Centrum systemu","Aktualizacja, diagnostyka, logi i kopie"]
   ]}
 ];
 function adminMenuPozycjaAktywna(aktywna,href){

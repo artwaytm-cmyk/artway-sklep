@@ -69,6 +69,28 @@ function releaseVersion(indexHtml) {
   return String(indexHtml).match(/<meta\s+name=["']artway-version["']\s+content=["']([^"']+)/i)?.[1] || 'unknown';
 }
 
+async function stampBrowserRelease(releaseDir, releaseId) {
+  const indexPath = path.join(releaseDir, 'index.html');
+  const workerPath = path.join(releaseDir, 'sw.js');
+  const indexHtml = await readFile(indexPath, 'utf8');
+  const stampedIndex = indexHtml
+    .replace(/(<meta\s+name=["']artway-version["']\s+content=["'])[^"']+/i, `$1${releaseId}`)
+    .replace(/(\/assets\/(?:app\.js|styles\.css)\?v=)[^"'&\s>]+/g, `$1${releaseId}`);
+  if (stampedIndex === indexHtml || releaseVersion(stampedIndex) !== releaseId) {
+    throw new Error('Nie udało się nadać unikalnej wersji przeglądarkowej wydaniu.');
+  }
+  await writeFile(indexPath, stampedIndex, { mode: 0o644 });
+
+  const worker = await readFile(workerPath, 'utf8');
+  const stampedWorker = worker
+    .replace(/const CACHE_NAME=["'][^"']+["'];/, `const CACHE_NAME="artway-admin-${releaseId}";`)
+    .replace(/(\/assets\/(?:app\.js|styles\.css)\?v=)[^"'&\s]+/g, `$1${releaseId}`);
+  if (!stampedWorker.includes(`artway-admin-${releaseId}`)) {
+    throw new Error('Nie udało się nadać unikalnego klucza pamięci Service Workera.');
+  }
+  await writeFile(workerPath, stampedWorker, { mode: 0o644 });
+}
+
 export async function validateStaticRelease(releaseDir, expectedReleaseId = '') {
   for (const relative of REQUIRED_PUBLIC_FILES) {
     const file = path.join(releaseDir, relative);
@@ -109,6 +131,7 @@ export async function createStaticRelease({ sourceRoot, releasesRoot, releaseId,
   await mkdir(stagingDir, { recursive: false, mode: 0o755 });
   try {
     await copyPublicTree(path.resolve(sourceRoot), stagingDir);
+    await stampBrowserRelease(stagingDir, id);
     const indexHtml = await readFile(path.join(stagingDir, 'index.html'), 'utf8');
     const files = await collectFiles(stagingDir);
     const fileEntries = [];

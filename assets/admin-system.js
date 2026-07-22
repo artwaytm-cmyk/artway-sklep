@@ -10,6 +10,44 @@ function widokBrakDostepu(){
   </div></div>`;
 }
 let filtrLogowDiag="wszystkie", szukajLogowDiag="", ostatniAutotest=[], diagSearchT;
+let systemDiagTylkoProblemy=true;
+let systemWersjaStan={sprawdzono:false,ladowanie:false,wdrazanie:false,release:null,backendOnline:false,error:""};
+function systemWersjaPrzegladarki(){return document.querySelector('meta[name="artway-version"]')?.content||"nieznana";}
+function systemDataCzas(value){const ts=Date.parse(value||"");return Number.isFinite(ts)?new Date(ts).toLocaleString("pl-PL"):"—";}
+async function systemSprawdzWersje(cicho=false){
+  if(systemWersjaStan.ladowanie)return;
+  systemWersjaStan={...systemWersjaStan,ladowanie:true,error:""};if(!cicho&&trasa().startsWith("/admin/system"))renderuj();
+  try{
+    const [releaseResult,healthResult]=await Promise.allSettled([
+      fetch(`/release.json?ts=${Date.now()}`,{cache:"no-store",headers:{"Cache-Control":"no-cache"}}),
+      fetch(`/healthz?ts=${Date.now()}`,{cache:"no-store",headers:{"Cache-Control":"no-cache"}})
+    ]);
+    if(releaseResult.status!=="fulfilled"||!releaseResult.value.ok)throw new Error("Serwer nie udostępnił informacji o aktualnym wydaniu");
+    const release=await releaseResult.value.json();
+    systemWersjaStan={sprawdzono:true,ladowanie:false,wdrazanie:false,release:{releaseId:String(release.releaseId||release.version||""),version:String(release.version||""),commit:String(release.commit||""),createdAt:String(release.createdAt||"")},backendOnline:healthResult.status==="fulfilled"&&healthResult.value.ok,error:""};
+    if(!cicho)toast(systemWersjaStan.release.releaseId===systemWersjaPrzegladarki()?"Ta przeglądarka ma najnowszą wersję ✅":"Dostępna jest nowsza wersja strony");
+  }catch(error){systemWersjaStan={...systemWersjaStan,sprawdzono:true,ladowanie:false,backendOnline:false,error:error.message};if(!cicho)toast("Nie udało się sprawdzić wersji");}
+  if(trasa().startsWith("/admin/system"))renderuj();
+}
+async function systemPobierzNajnowszaWersje(){
+  if(systemWersjaStan.wdrazanie)return;
+  if(!systemWersjaStan.release)await systemSprawdzWersje(true);
+  if(!systemWersjaStan.release){toast("Najpierw serwer musi potwierdzić aktualne wydanie");return;}
+  systemWersjaStan={...systemWersjaStan,wdrazanie:true,error:""};renderuj();
+  try{
+    if("serviceWorker" in navigator){
+      const registration=await navigator.serviceWorker.getRegistration("/");
+      await registration?.update();
+      registration?.waiting?.postMessage({type:"SKIP_WAITING"});
+      registration?.active?.postMessage({type:"CLEAR_APP_CACHE"});
+    }
+    if("caches" in window){const keys=await caches.keys();await Promise.all(keys.filter(key=>key.startsWith("artway-")).map(key=>caches.delete(key)));}
+    sessionStorage.setItem("artway_oczekiwane_wydanie",systemWersjaStan.release.releaseId);
+    loguj("info",`Pobrano wydanie ${systemWersjaStan.release.releaseId} do przeglądarki`);
+    toast("Aktualizacja pobrana — przeładowuję panel ✅");
+    setTimeout(()=>location.reload(),350);
+  }catch(error){systemWersjaStan={...systemWersjaStan,wdrazanie:false,error:error.message};loguj("blad","Aktualizacja przeglądarki: "+error.message);toast("Nie udało się pobrać aktualizacji");renderuj();}
+}
 function rozmiarDanychLokalnych(){
   let n=0;
   try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);n+=(k?.length||0)+(localStorage.getItem(k)?.length||0);}}catch(e){}
@@ -65,7 +103,7 @@ function testyDiagnostyczne(){
   dodaj("Bezpieczeństwo","Role kont administracyjnych",administratorzyDiag.length?"ok":"bad",`${administratorzyDiag.length} kont z rolą administratora • ${kontaDiag.length-administratorzyDiag.length} kont klientów`);
   dodaj("Publikacja","Źródło produktów",zrodloProduktow==="json"?"ok":"warn",zrodloProduktow==="json"?"products.json dostępny":"Używana jest lista zapasowa");
   dodaj("Publikacja","Kopia katalogu products.json",publikacjaKatalogu.gotowy?"ok":"warn",publikacjaKatalogu.gotowy?`Zabezpiecza wszystkie ${publikacjaKatalogu.razem} kart produktów`:`Brakujące ${publikacjaKatalogu.brakujace.length} • zmienione ${publikacjaKatalogu.nieaktualne.length} • odśwież products.json`);
-  dodaj("Publikacja","Aktualizacja strony bez FTP",!stanAktualizacji.sprawdzono?"warn":stanAktualizacji.online&&stanAktualizacji.enabled?"ok":stanAktualizacji.online?"warn":"bad",!stanAktualizacji.sprawdzono?"Sprawdź status w panelu Aktualizacja strony":stanAktualizacji.online&&stanAktualizacji.enabled?"Publikator backendowy jest dostępny":stanAktualizacji.online?"Backend działa, ale publisher.enabled nie jest włączony":"Backend aktualizacji jest niedostępny");
+  dodaj("Publikacja","Atomowe wydanie strony",!systemWersjaStan.sprawdzono?"warn":systemWersjaStan.release&&systemWersjaStan.backendOnline?"ok":"bad",!systemWersjaStan.sprawdzono?"Sprawdź wersję w Centrum systemu":systemWersjaStan.release&&systemWersjaStan.backendOnline?`Aktywne wydanie ${systemWersjaStan.release.releaseId}`:systemWersjaStan.error||"Nie udało się potwierdzić aktywnego wydania");
   dodaj("Pamięć","Wykorzystanie pamięci",pamiec>4_000_000?"bad":pamiec>2_500_000?"warn":"ok",`${(pamiec/1024).toFixed(1)} KB zapisanych danych • ciężkie cache Allegro nie są już dublowane lokalnie`);
   const zleBannery=pobierzBannery().filter(b=>!b.tytul||bezpiecznyLink(b.link)==="#/"&&b.link!=="#/");
   dodaj("Wygląd","Konfiguracja banerów",zleBannery.length?"warn":"ok",zleBannery.length?`${zleBannery.length} banerów wymaga sprawdzenia`:`${pobierzBannery().length} poprawnych banerów`);
@@ -127,7 +165,7 @@ function widokDiagnostyka(){
       <p style="font-size:.86rem;color:var(--muted2)">Naprawa usuwa wyłącznie odwołania do nieistniejących produktów, duplikaty i osierocone mapowania. Nie usuwa prawidłowych produktów ani zamówień.</p>
       <div class="diag-actions">
         <button class="btn" onclick="naprawDaneSklepu()">🧹 Napraw spójność danych</button>
-        <a class="btn ghost" href="#/admin/publikacja">🌍 Kontrola publikacji</a>
+        <a class="btn ghost" href="#/admin/system">🛠️ Wersja i aktualizacja</a>
         <a class="btn ghost" href="#/admin/wyglad">🎨 Ustawienia układu</a>
         <a class="btn ghost" href="#/admin/podstrony">🧱 Ustawienia podstron</a>
       </div>
@@ -153,6 +191,49 @@ function widokDiagnostyka(){
       :`<p style="color:var(--muted2)">Brak zdarzeń pasujących do filtra.</p>`}
     </div>
   </div>`;
+}
+function systemStatusHTML(){
+  const s=systemWersjaStan,browser=systemWersjaPrzegladarki(),server=s.release?.releaseId||"—",aktualna=!!s.release&&browser===server;
+  return `<section class="system-release-hero">
+    <div><span class="order-pro-label">Aktywne wydanie produkcyjne</span><h1>🛠️ System i aktualizacje</h1><p>Jedno miejsce do sprawdzania wersji, pobierania aktualizacji do tej przeglądarki i kontroli kondycji sklepu.</p></div>
+    <span class="system-release-state lvl ${aktualna?"lvl-ok":s.error?"lvl-blad":"lvl-ostrzezenie"}">${aktualna?"✅ Wersja aktualna":s.error?"❌ Brak potwierdzenia":"⬆️ Aktualizacja dostępna"}</span>
+  </section>
+  <section class="panel system-release-panel">
+    <div class="system-release-grid info-grid">
+      <article class="info-card"><small>Wersja w tej przeglądarce</small><b>${esc(browser)}</b><span>${aktualna?"zgodna z serwerem":"wymaga odświeżenia"}</span></article>
+      <article class="info-card"><small>Wydanie na serwerze</small><b>${esc(server)}</b><span>${s.release?systemDataCzas(s.release.createdAt):"jeszcze niesprawdzone"}</span></article>
+      <article class="info-card"><small>Backend</small><b>${s.backendOnline?"Online":"Niepotwierdzony"}</b><span>${s.backendOnline?"Nginx i API odpowiadają":"uruchom sprawdzenie"}</span></article>
+      <article class="info-card"><small>Commit</small><b>${esc((s.release?.commit||"—").slice(0,12))}</b><span>wersja źródłowa wdrożenia</span></article>
+    </div>
+    ${s.error?`<div class="system-inline-alert backend-note"><b>Nie udało się potwierdzić wydania:</b> ${esc(s.error)}</div>`:""}
+    <div class="system-primary-action sug"><div><b>Pobierz najnowszą wersję do tej przeglądarki</b><small>Bezpiecznie czyści wyłącznie pamięć plików aplikacji. Produkty, zamówienia, konta i ustawienia nie są usuwane.</small></div><div><button class="btn ghost" onclick="systemSprawdzWersje()" ${s.ladowanie||s.wdrazanie?"disabled":""}>${s.ladowanie?"⏳ Sprawdzam…":"🔄 Sprawdź wersję"}</button><button class="btn" onclick="systemPobierzNajnowszaWersje()" ${s.wdrazanie?"disabled":""}>${s.wdrazanie?"⏳ Pobieram…":"⬇️ Pobierz i uruchom aktualizację"}</button></div></div>
+  </section>
+  <section class="panel system-deployment-note"><span>🛡️</span><div><b>Publikacja jest atomowa i zabezpieczona</b><p>Nowa wersja trafia na serwer jako komplet plików, przechodzi test zdrowia i dopiero wtedy jest przełączana. W razie błędu serwer automatycznie wraca do poprzedniego wydania.</p></div><a class="btn ghost" href="#/admin/system/diagnostyka">Uruchom diagnostykę</a></section>`;
+}
+function systemDiagnostykaHTML(){
+  const wszystkie=testyDiagnostyczne(),testy=systemDiagTylkoProblemy?wszystkie.filter(x=>x.status!=="ok"):wszystkie,wynik=wynikKondycji(wszystkie),bad=wszystkie.filter(x=>x.status==="bad").length,warn=wszystkie.filter(x=>x.status==="warn").length;
+  return `<section class="system-summary-grid info-grid"><article class="info-card"><small>Kondycja</small><b>${wynik}%</b><span>${wynik>=90?"bardzo dobra":wynik>=70?"dobra":"wymaga działania"}</span></article><article class="info-card"><small>Błędy</small><b>${bad}</b><span>wymagają naprawy</span></article><article class="info-card"><small>Ostrzeżenia</small><b>${warn}</b><span>do sprawdzenia</span></article><article class="info-card"><small>Kontrole</small><b>${wszystkie.length}</b><span>pełny zakres systemu</span></article></section>
+  <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Integralność i integracje</span><h1>🩺 Diagnostyka systemu</h1><p>Najpierw pokazujemy tylko problemy, aby nie zasłaniać czynności wymagających uwagi.</p></div><div><button class="btn ghost" onclick="systemDiagTylkoProblemy=!systemDiagTylkoProblemy;renderuj()">${systemDiagTylkoProblemy?"Pokaż wszystkie kontrole":"Pokaż tylko problemy"}</button><button class="btn" onclick="uruchomAutotest()">🧪 Pełny autotest</button></div></div>
+    ${testy.length?`<div class="system-check-list test-list">${testy.map(x=>`<article class="test-row ${x.status}"><span>${x.status==="ok"?"✅":x.status==="warn"?"⚠️":"❌"}</span><div><small>${esc(x.grupa)}</small><b>${esc(x.nazwa)}</b><p>${esc(x.szczegoly)}</p></div><em class="test-status ${x.status}">${x.status==="ok"?"OK":x.status==="warn"?"UWAGA":"BŁĄD"}</em></article>`).join("")}</div>`:`<div class="system-empty order-empty"><span>✅</span><b>Brak problemów wymagających działania</b><p>Wszystkie kontrole zakończyły się poprawnie.</p></div>`}
+  </section>
+  <section class="panel system-repair sug"><span>🧹</span><div><b>Bezpieczna naprawa spójności</b><small>Usuwa wyłącznie osierocone odwołania i duplikaty techniczne. Nie usuwa prawidłowych produktów ani zamówień.</small></div><button class="btn ghost" onclick="naprawDaneSklepu()">Sprawdź i napraw dane</button></section>`;
+}
+function systemLogiHTML(){
+  const wszystkie=pobierzLogi();let logi=wszystkie;if(filtrLogowDiag!=="wszystkie")logi=logi.filter(l=>l.poziom===filtrLogowDiag);if(szukajLogowDiag)logi=logi.filter(l=>(`${l.tresc} ${l.zrodlo}`).toLowerCase().includes(szukajLogowDiag));
+  const poziom={blad:"BŁĄD",ostrzezenie:"UWAGA",info:"INFO"};
+  return `<section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Historia techniczna</span><h1>📋 Dziennik zdarzeń</h1><p>${logi.length} z ${wszystkie.length} wpisów pasuje do bieżącego filtra.</p></div><div><button class="btn ghost" onclick="pobierzPlikLogu()">⬇️ Pobierz TXT</button><button class="btn danger" onclick="wyczyscLogi()">🗑️ Wyczyść</button></div></div>
+  ${adminWyszukiwaniePanelHTML({id:"system-logi",title:"Filtry dziennika",description:"Znajdź błąd, ostrzeżenie albo zdarzenie z konkretnego modułu.",results:logi.length,active:filtrLogowDiag!=="wszystkie"||!!szukajLogowDiag,fields:`<div class="admin-filter-grid"><label><span>Szukaj</span><input placeholder="Treść lub źródło…" value="${esc(szukajLogowDiag)}" oninput="szukajLogowDiag=this.value.toLowerCase();clearTimeout(diagSearchT);diagSearchT=setTimeout(renderuj,300)"></label><label><span>Poziom</span><select onchange="filtrLogowDiag=this.value;renderuj()"><option value="wszystkie">Wszystkie</option><option value="blad" ${filtrLogowDiag==="blad"?"selected":""}>Błędy</option><option value="ostrzezenie" ${filtrLogowDiag==="ostrzezenie"?"selected":""}>Ostrzeżenia</option><option value="info" ${filtrLogowDiag==="info"?"selected":""}>Informacje</option></select></label></div>`})}
+  ${logi.length?`<div class="system-log-table log-table-wrap"><table class="log-table"><thead><tr><th>Czas</th><th>Poziom</th><th>Zdarzenie</th><th>Źródło</th></tr></thead><tbody>${logi.slice(0,200).map(l=>`<tr><td>${esc(l.czas)}</td><td><span class="lvl lvl-${l.poziom}">${poziom[l.poziom]||esc(l.poziom)}</span></td><td>${esc(l.tresc)}</td><td>${esc(l.zrodlo)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="system-empty order-empty"><span>📭</span><b>Brak zdarzeń</b><p>Zmień filtry lub wróć tu po wykonaniu kontroli.</p></div>`}</section>`;
+}
+function systemKopieHTML(){
+  const pamiec=rozmiarDanychLokalnych();
+  return `<section class="system-summary-grid info-grid"><article class="info-card"><small>Dane lokalne</small><b>${(pamiec/1024).toFixed(1)} KB</b><span>w tej przeglądarce</span></article><article class="info-card"><small>Kopie serwera</small><b>Codziennie</b><span>automatyczny harmonogram</span></article><article class="info-card"><small>Zakres kopii JSON</small><b>Panel</b><span>ustawienia i dane podręczne</span></article></section>
+  <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Ochrona danych</span><h1>💾 Kopie i przywracanie</h1><p>Kopia przeglądarkowa uzupełnia codzienne kopie serwera. Nie zastępuje wersjonowanych wydań kodu.</p></div></div><div class="system-backup-actions info-grid"><article class="info-card"><span>⬇️</span><div><b>Pobierz kopię panelu</b><small>Zapisuje do pliku JSON ustawienia i dane lokalne tej przeglądarki.</small></div><button class="btn" onclick="eksportujKopieDanych()">Pobierz kopię</button></article><article class="info-card"><span>⬆️</span><div><b>Przywróć kopię panelu</b><small>Plik jest sprawdzany przed zapisem; operacja wymaga osobnego potwierdzenia.</small></div><label class="btn ghost">Wybierz plik<input type="file" accept="application/json" onchange="importujKopieDanych(event)" hidden></label></article><article class="info-card"><span>📊</span><div><b>Raport diagnostyczny</b><small>Pełny wynik kontroli i dziennik przydatny podczas naprawy.</small></div><button class="btn ghost" onclick="pobierzRaportJSON()">Pobierz raport</button></article></div></section>`;
+}
+function widokAdminSystem(sekcja="status"){
+  const aktywna=["status","diagnostyka","logi","kopie"].includes(String(sekcja||""))?String(sekcja||""):"status";
+  const tresc=aktywna==="diagnostyka"?systemDiagnostykaHTML():aktywna==="logi"?systemLogiHTML():aktywna==="kopie"?systemKopieHTML():systemStatusHTML();
+  return adminSzkielet("/admin/system",`<div class="module-page-stack system-center">${systemSubnavHTML(aktywna)}${tresc}</div>`);
 }
 function wyczyscLogi(){ localStorage.removeItem("artway_logi"); toast("Dziennik wyczyszczony"); renderuj(); }
 async function kopiujRaport(){
@@ -232,8 +313,8 @@ function pulpitZmianaProcent(teraz,poprzednio){if(!poprzednio)return teraz?100:0
 function pulpitSystemy(){
   const cloudChecked=!!chmuraStan.sprawdzono,healthChecked=!!stanBramki.sprawdzono,allegroChecked=!!allegroStan.sprawdzono,infaktChecked=!!infaktStan.sprawdzono;
   return [
-    {id:"cloud",ico:"☁️",nazwa:"Wspólna baza",status:cloudChecked?(chmuraStan.dostepna?"ok":"blad"):"info",opis:cloudChecked?(chmuraStan.dostepna?`Połączona • rev ${chmuraStan.rev||0}`:chmuraStan.error||"Brak połączenia"):"Oczekuje na pierwszą kontrolę",href:"#/admin/publikacja"},
-    {id:"email",ico:"✉️",nazwa:"E-mail automatyczny",status:healthChecked?(stanBramki.email?.configured?"ok":"blad"):"info",opis:healthChecked?(stanBramki.email?.configured?`${stanBramki.email.provider||"SMTP"} gotowy`:"Wymaga konfiguracji serwera"):"Oczekuje na kontrolę",href:"#/diagnostyka"},
+    {id:"cloud",ico:"☁️",nazwa:"Wspólna baza",status:cloudChecked?(chmuraStan.dostepna?"ok":"blad"):"info",opis:cloudChecked?(chmuraStan.dostepna?`Połączona • rev ${chmuraStan.rev||0}`:chmuraStan.error||"Brak połączenia"):"Oczekuje na pierwszą kontrolę",href:"#/admin/system"},
+    {id:"email",ico:"✉️",nazwa:"E-mail automatyczny",status:healthChecked?(stanBramki.email?.configured?"ok":"blad"):"info",opis:healthChecked?(stanBramki.email?.configured?`${stanBramki.email.provider||"SMTP"} gotowy`:"Wymaga konfiguracji serwera"):"Oczekuje na kontrolę",href:"#/admin/system/diagnostyka"},
     {id:"inpost",ico:"🚚",nazwa:"InPost",status:healthChecked?(stanBramki.inpost?.configured?"ok":"blad"):"info",opis:healthChecked?(stanBramki.inpost?.configured?"API etykiet i śledzenia gotowe":"Wymaga konfiguracji API"):"Oczekuje na kontrolę",href:"#/admin/wysylki"},
     {id:"allegro",ico:"🟠",nazwa:"Allegro",status:allegroChecked?(allegroStan.connected&&!allegroStan.requiresReauth?"ok":"blad"):"info",opis:allegroChecked?(allegroStan.connected&&!allegroStan.requiresReauth?"OAuth i synchronizacja aktywne":allegroStan.requiresReauth?"Wymaga ponownej autoryzacji":"Brak połączenia"):"Oczekuje na kontrolę",href:"#/admin/allegro/ustawienia"},
     {id:"infakt",ico:"🧾",nazwa:"inFakt",status:infaktChecked?(infaktStan.connected?"ok":infaktStan.configured?"blad":"info"):"info",opis:infaktChecked?(infaktStan.connected?"API faktur połączone":infaktStan.configured?infaktStan.error||"Błąd połączenia":"Klucz nie został skonfigurowany"):"Oczekuje na kontrolę",href:"#/admin/infakt/ustawienia"}
@@ -331,7 +412,7 @@ function adminPulpitAlertyHTML(d){
 }
 
 function adminPulpitStanSystemuHTML(d){
-  return `<section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Kontrola połączeń</span><h2>Integracje produkcyjne</h2><p class="order-detail-lead">Każda karta prowadzi bezpośrednio do ustawień albo modułu naprawczego.</p></div><button class="btn" onclick="adminPulpitOdswiez(true)">🩺 Uruchom kontrolę</button></div>${adminPulpitSystemHTML(d)}</section><section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Harmonogram automatyczny</span><h2>Zdarzenia i ograniczona kolejka zadań</h2></div><a class="btn ghost" href="#/admin/allegro/ustawienia">Ustawienia Allegro</a></div><div class="dashboard-schedule">${[["☁️","Wspólna baza","co 60 sekund na aktywnym urządzeniu","ustawienia, produkty i zamówienia"],["📦","Zamówienia Allegro","detektor co 15 minut","tylko nowe lub zmienione zlecenia"],["💬","Wiadomości i dyskusje","detektor co 15 minut","tylko nowe kontakty i przypomnienia"],["🏷️","Lista ofert Allegro","najwyżej raz na godzinę","lekka kontrola wykonywana z kolejki"],["🧩","Pełny katalog Allegro","najwyżej raz na dobę","ograniczona porcja szczegółów, opisów i kategorii"],["🤖","Ciężkie zadania Agenta","maks. 2 na przebieg","pozostałe zadania czekają bez blokowania panelu"],["🏭","Dostępność producentów","partie priorytetowe","najpierw bestsellery i aktywne zamówienia"],["📣","SEO produktów","limit dzienny","bezpłatna kontrola małych partii"]].map(([i,t,c,o])=>`<article><span>${i}</span><div><b>${t}</b><small>${o}</small></div><em>${c}</em></article>`).join("")}</div></section><section class="panel dashboard-system-actions"><div><span>🛠️</span><b>Diagnostyka pełna</b><small>Sprawdź błędy JavaScript, serwer, SMTP, InPost i bazę.</small><a class="btn" href="#/diagnostyka">Otwórz diagnostykę</a></div><div><span>🌍</span><b>Publikacja</b><small>Kontrola wersji i stanu wdrożenia strony.</small><a class="btn ghost" href="#/admin/publikacja">Stan publikacji</a></div><div><span>🤖</span><b>Agent AI</b><small>Przegląd aktywnych zadań i planu operacyjnego.</small><a class="btn ghost" href="#/admin/agent-ai">Otwórz Agenta</a></div></section>`;
+  return `<section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Kontrola połączeń</span><h2>Integracje produkcyjne</h2><p class="order-detail-lead">Każda karta prowadzi bezpośrednio do ustawień albo modułu naprawczego.</p></div><button class="btn" onclick="adminPulpitOdswiez(true)">🩺 Uruchom kontrolę</button></div>${adminPulpitSystemHTML(d)}</section><section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Harmonogram automatyczny</span><h2>Zdarzenia i ograniczona kolejka zadań</h2></div><a class="btn ghost" href="#/admin/allegro/ustawienia">Ustawienia Allegro</a></div><div class="dashboard-schedule">${[["☁️","Wspólna baza","co 60 sekund na aktywnym urządzeniu","ustawienia, produkty i zamówienia"],["📦","Zamówienia Allegro","detektor co 15 minut","tylko nowe lub zmienione zlecenia"],["💬","Wiadomości i dyskusje","detektor co 15 minut","tylko nowe kontakty i przypomnienia"],["🏷️","Lista ofert Allegro","najwyżej raz na godzinę","lekka kontrola wykonywana z kolejki"],["🧩","Pełny katalog Allegro","najwyżej raz na dobę","ograniczona porcja szczegółów, opisów i kategorii"],["🤖","Ciężkie zadania Agenta","maks. 2 na przebieg","pozostałe zadania czekają bez blokowania panelu"],["🏭","Dostępność producentów","partie priorytetowe","najpierw bestsellery i aktywne zamówienia"],["📣","SEO produktów","limit dzienny","bezpłatna kontrola małych partii"]].map(([i,t,c,o])=>`<article><span>${i}</span><div><b>${t}</b><small>${o}</small></div><em>${c}</em></article>`).join("")}</div></section><section class="panel dashboard-system-actions"><div><span>🛠️</span><b>Centrum systemu</b><small>Wersja, aktualizacja przeglądarki, diagnostyka, logi i kopie.</small><a class="btn" href="#/admin/system">Otwórz centrum</a></div><div><span>🩺</span><b>Diagnostyka</b><small>Sprawdź błędy JavaScript, serwer, SMTP, InPost i bazę.</small><a class="btn ghost" href="#/admin/system/diagnostyka">Uruchom kontrolę</a></div><div><span>🤖</span><b>Agent AI</b><small>Przegląd aktywnych zadań i planu operacyjnego.</small><a class="btn ghost" href="#/admin/agent-ai">Otwórz Agenta</a></div></section>`;
 }
 
 async function adminPulpitOdswiez(pelnaKontrola=false){

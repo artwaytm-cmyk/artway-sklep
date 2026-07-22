@@ -39,7 +39,8 @@ test('trasy panelu ładują jawnie moduły wymagane przez swoje widoki', async (
   assert.match(router, /t\.startsWith\("\/admin\/agent-ai"\)\)add\("agent","warehouse","commerce","communications","inventory"\)/);
   assert.match(router, /t\.startsWith\("\/admin\/allegro"\)[^\n]+add\("agent","warehouse","commerce","communications","inventory"\)/);
   assert.match(router, /\["\/admin\/magazyn\/lokalizacje","\/admin\/magazyn\/etykiety-qr"\][^\n]+add\("warehouse"\)/);
-  assert.match(router, /t==="\/diagnostyka"\)add\("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system"\)/);
+  assert.match(router, /t==="\/diagnostyka"\|\|t==="\/admin\/system\/diagnostyka"\)add\("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system"\)/);
+  assert.match(router, /t\.startsWith\("\/admin\/system"\)\)add\("system"\)/);
 });
 
 test('progresywne ładowanie kart należy do pakietu asortymentu', async () => {

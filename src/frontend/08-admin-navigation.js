@@ -26,7 +26,7 @@ const TABY_PERSONALIZACJI = [
 function personalizacjaSzkielet(tab, tresc){
   return adminSzkielet("/admin/personalizacja", `
     <div class="module-page-stack personalization-workspace">
-      <header class="personalization-commandbar"><div><span class="order-pro-label">Projekt sklepu</span><b>Personalizacja wszystkich ekranów</b><small>Strona główna, układ globalny, bannery, podstrony i treści działają ze wspólnej konfiguracji.</small></div><div class="diag-actions"><span class="personalization-save-state">● Wspólna baza aktywna</span><a class="btn ghost" href="#/">👁️ Podgląd sklepu</a><a class="btn" href="#/admin/publikacja">🌐 Publikacja</a></div></header>
+      <header class="personalization-commandbar"><div><span class="order-pro-label">Projekt sklepu</span><b>Personalizacja wszystkich ekranów</b><small>Strona główna, układ globalny, bannery, podstrony i treści działają ze wspólnej konfiguracji.</small></div><div class="diag-actions"><span class="personalization-save-state">● Wspólna baza aktywna</span><a class="btn ghost" href="#/">👁️ Podgląd sklepu</a><a class="btn" href="#/admin/system">🛠️ Stan systemu</a></div></header>
       ${adminSubnavHTML(TABY_PERSONALIZACJI.map(([id,label,href])=>({id,href:href||`#/admin/personalizacja/${id}`,label})),tab)}
       ${tresc}
     </div>`);
@@ -76,9 +76,8 @@ function wgrajObrazek(input,maxSzer,poWgraniu){
 function polePlikuHTML(onchange,etykieta){
   return `<label class="btn ghost" style="cursor:pointer;white-space:nowrap">📁 ${etykieta||"Wgraj z dysku"}<input type="file" accept="image/*" style="display:none" onchange="${onchange}"></label>`;
 }
-function eksportSubnavHTML(aktywny="import"){return adminSubnavHTML([{id:"import",href:"#/admin/eksport",label:"📥 Import produktów"},{id:"eksport",href:"#/admin/eksport/eksport",label:"📤 Eksport produktów"},{id:"kopie",href:"#/admin/eksport/kopie",label:"💾 Kopie i raporty"},{id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja strony"}],aktywny);}
-function aktualizacjaSubnavHTML(aktywny="status"){return adminSubnavHTML([{id:"status",href:"#/admin/aktualizacja",label:"📡 Status"},{id:"publikuj",href:"#/admin/aktualizacja/publikuj",label:"⬆️ Publikuj zmiany"},{id:"index",href:"#/admin/aktualizacja/index",label:"📄 Nowy index.html"},{id:"kopie",href:"#/admin/aktualizacja/kopie",label:"↩️ Kopie"}],aktywny);}
-function publikacjaSubnavHTML(aktywny="kontrola"){return adminSubnavHTML([{id:"kontrola",href:"#/admin/publikacja",label:"✅ Gotowość"},{id:"pliki",href:"#/admin/publikacja/pliki",label:"📁 Pliki i hosting"},{id:"kroki",href:"#/admin/publikacja/kroki",label:"🧭 Kroki publikacji"},{id:"aktualizacja",href:"#/admin/aktualizacja",label:"⬆️ Aktualizacja"}],aktywny);}
+function eksportSubnavHTML(aktywny="import"){return adminSubnavHTML([{id:"import",href:"#/admin/eksport",label:"📥 Import produktów"},{id:"eksport",href:"#/admin/eksport/eksport",label:"📤 Eksport produktów"},{id:"kopie",href:"#/admin/eksport/kopie",label:"💾 Kopie i raporty"}],aktywny);}
+function systemSubnavHTML(aktywny="status"){return adminSubnavHTML([{id:"status",href:"#/admin/system",label:"📡 Wersja i aktualizacja"},{id:"diagnostyka",href:"#/admin/system/diagnostyka",label:"🩺 Diagnostyka"},{id:"logi",href:"#/admin/system/logi",label:"📋 Dziennik"},{id:"kopie",href:"#/admin/system/kopie",label:"💾 Kopie danych"}],aktywny);}
 function infaktSubnavHTML(aktywny="pulpit"){return adminSubnavHTML([{id:"pulpit",label:"📊 Pulpit",href:"#/admin/infakt"},{id:"zamowienia",label:"📦 Zamówienia do faktury",href:"#/admin/infakt/zamowienia"},{id:"faktury",label:"🧾 Faktury inFakt",href:"#/admin/infakt/faktury"},{id:"dostawcy",label:"🏭 Faktury dostawców",href:"#/admin/infakt/dostawcy"},{id:"szkice",label:"📝 Szkice robocze",href:"#/admin/infakt/szkice"},{id:"ustawienia",label:"⚙️ Dostęp API",href:"#/admin/infakt/ustawienia"}],aktywny);}
 function allegroDataTxt(v){const t=Date.parse(v||"");return t?new Date(t).toLocaleString("pl-PL"):"—";}
 

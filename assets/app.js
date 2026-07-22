@@ -272,7 +272,7 @@ function aktualizujFavicon(){
 /* ═══════════ REJESTR BŁĘDÓW (logi + sugestie) ═══════════
    Każdy błąd strony jest zapisywany w pamięci przeglądarki
    (localStorage → klucz artway_logi). Podgląd, pobieranie pliku
-   logu i sugestie poprawek: podstrona  #/diagnostyka          */
+   logu i sugestie poprawek: #/admin/system/diagnostyka       */
 const MAX_LOGOW = 200;
 function normalizujNazweProducenta(value=""){
   const name=String(value??"").replace(/\u0000/g,"").replace(/\s+/g," ").trim().slice(0,160);
@@ -2886,7 +2886,8 @@ function adminModulyDlaTrasy(route=""){
   const t=String(route||"").split("?")[0],moduly=["core","ui"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
   add("shell");
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
-  if(t==="/diagnostyka")add("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system");
+  if(t==="/diagnostyka"||t==="/admin/system/diagnostyka")add("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system");
+  else if(t.startsWith("/admin/system"))add("system");
   else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("shipping","commerce","communications","inventory","system");
   else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","communications","inventory");
   else if(["/admin/magazyn/lokalizacje","/admin/magazyn/etykiety-qr"].includes(t))add("warehouse");
@@ -2908,8 +2909,7 @@ function adminModulyDlaTrasy(route=""){
     if(t==="/admin/personalizacja/rozmieszczenie"||t==="/admin/rozmieszczenie")add("catalog");
   }
   else if(t.startsWith("/admin/eksport"))add("inventory","catalog","personalization");
-  else if(t.startsWith("/admin/aktualizacja"))add("personalization");
-  else if(t.startsWith("/admin/publikacja"))add("inventory","personalization");
+  else if(t.startsWith("/admin/aktualizacja")||t.startsWith("/admin/publikacja"))add("system");
   else if(t.startsWith("/admin/seo"))add("inventory");
   else if(t.startsWith("/admin"))add("agent","warehouse","commerce","inventory","catalog","personalization","system");
   return moduly;
@@ -3174,7 +3174,10 @@ function renderuj(){
     else if(t==="/prywatnosc") w.innerHTML = widokPrywatnosc();
     else if(t==="/dostawa") w.innerHTML = widokDostawa();
     else if(t==="/zwroty") w.innerHTML = widokZwroty();
-    else if(t==="/diagnostyka") w.innerHTML = jestAdmin() ? widokDiagnostyka() : widokBrakDostepu();
+    else if(t==="/diagnostyka"){
+      history.replaceState(null,"",`${location.pathname}${location.search}#/admin/system/diagnostyka`);
+      w.innerHTML = jestAdmin() ? widokAdminSystem("diagnostyka") : widokBrakDostepu();
+    }
     else if(t.startsWith("/admin") ){
       if(!jestAdmin()) w.innerHTML = widokBrakDostepu();
       else if(t==="/admin" || t==="/admin/pulpit") w.innerHTML = widokAdmin("pulpit");
@@ -3244,22 +3247,24 @@ function renderuj(){
       else if(t==="/admin/podstrony") w.innerHTML = widokAdminPodstrony();
       else if(t==="/admin/strony") w.innerHTML = widokAdminStrony();
       else if(t==="/admin/eksport") w.innerHTML = widokAdminEksport("import");
-      else if(t.startsWith("/admin/eksport/")) { const s=t.split("/")[3]||"import"; w.innerHTML = s==="aktualizacja"?widokAdminAktualizacja("status"):widokAdminEksport(s); }
-      else if(t==="/admin/aktualizacja") w.innerHTML = widokAdminAktualizacja("status");
-      else if(t.startsWith("/admin/aktualizacja/")) w.innerHTML = widokAdminAktualizacja(t.split("/")[3]||"status");
-      else if(t==="/admin/publikacja") w.innerHTML = widokAdminPublikacja("kontrola");
-      else if(t.startsWith("/admin/publikacja/")) { const s=t.split("/")[3]||"kontrola"; w.innerHTML = s==="aktualizacja"?widokAdminAktualizacja("status"):widokAdminPublikacja(s); }
+      else if(t.startsWith("/admin/eksport/")) w.innerHTML = widokAdminEksport(t.split("/")[3]||"import");
+      else if(t==="/admin/system") w.innerHTML = widokAdminSystem("status");
+      else if(t.startsWith("/admin/system/")) w.innerHTML = widokAdminSystem(t.split("/")[3]||"status");
+      else if(t.startsWith("/admin/aktualizacja")||t.startsWith("/admin/publikacja")){
+        history.replaceState(null,"",`${location.pathname}${location.search}#/admin/system`);
+        w.innerHTML = widokAdminSystem("status");
+      }
       else w.innerHTML = widokAdmin();
     }
     else w.innerHTML = `<div class="page"><div class="panel"><h1>404 — nie ma takiej strony 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
     if(t==="/"||t==="") { rysujChipy(); rysuj(); }
     seoAktualizujMetaDlaTrasy(t);
     if(typeof seoSledzTrase==="function")seoSledzTrase(t);
-    if(t==="/admin/aktualizacja"&&!stanAktualizacji.sprawdzono&&!stanAktualizacji.ladowanie) setTimeout(()=>sprawdzStatusAktualizacji(true),0);
+    if((t==="/admin/system"||t==="/admin/aktualizacja"||t==="/admin/publikacja")&&!systemWersjaStan.sprawdzono&&!systemWersjaStan.ladowanie)setTimeout(()=>systemSprawdzWersje(true),0);
     ostatniaRenderowanaTrasa=t;
   }catch(e){
     loguj("blad", "Błąd renderowania strony: "+e.message, trasa());
-    $("widok").innerHTML = `<div class="page"><div class="panel"><h1>⚠️ Coś poszło nie tak</h1><p>Błąd został zapisany w <a href="#/diagnostyka">diagnostyce</a>.</p><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
+    $("widok").innerHTML = `<div class="page"><div class="panel"><h1>⚠️ Coś poszło nie tak</h1><p>Błąd został zapisany w <a href="#/admin/system/diagnostyka">diagnostyce</a>.</p><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
   }finally{
     renderowanieWidoku=false;
     if(trasa().startsWith("/admin")){

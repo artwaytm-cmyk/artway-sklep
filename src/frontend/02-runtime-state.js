@@ -1,7 +1,7 @@
 /* ═══════════ REJESTR BŁĘDÓW (logi + sugestie) ═══════════
    Każdy błąd strony jest zapisywany w pamięci przeglądarki
    (localStorage → klucz artway_logi). Podgląd, pobieranie pliku
-   logu i sugestie poprawek: podstrona  #/diagnostyka          */
+   logu i sugestie poprawek: #/admin/system/diagnostyka       */
 const MAX_LOGOW = 200;
 function normalizujNazweProducenta(value=""){
   const name=String(value??"").replace(/\u0000/g,"").replace(/\s+/g," ").trim().slice(0,160);

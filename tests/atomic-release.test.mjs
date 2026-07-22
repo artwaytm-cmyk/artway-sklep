@@ -13,7 +13,8 @@ async function fixture(root, version) {
     const file = path.join(root, relative);
     await mkdir(path.dirname(file), { recursive: true });
     let content = `${relative} ${version}`;
-    if (relative === 'index.html') content = `<html><head><meta name="artway-version" content="${version}"><link rel="stylesheet" href="/assets/styles.css"></head><body><script src="/assets/app.js"></script></body></html>`;
+    if (relative === 'index.html') content = `<html><head><meta name="artway-version" content="${version}"><link rel="stylesheet" href="/assets/styles.css?v=${version}"></head><body><script src="/assets/app.js?v=${version}"></script></body></html>`;
+    if (relative === 'sw.js') content = `const CACHE_NAME="artway-admin-${version}";\nconst APP_SHELL=["/assets/styles.css?v=${version}","/assets/app.js?v=${version}"];`;
     if (relative === 'products.json') content = '[]';
     if (relative === 'manifest.webmanifest') content = '{}';
     await writeFile(file, content);
@@ -35,6 +36,9 @@ test('publikacja przełącza pełne wydanie jednym symlinkiem', async (t) => {
   });
   assert.equal(path.basename(await realpath(current)), 'release-one');
   assert.equal(JSON.parse(await readFile(path.join(current, 'release.json'), 'utf8')).commit, 'abc123');
+  assert.match(await readFile(path.join(current, 'index.html'), 'utf8'), /artway-version" content="release-one"/);
+  assert.match(await readFile(path.join(current, 'index.html'), 'utf8'), /app\.js\?v=release-one/);
+  assert.match(await readFile(path.join(current, 'sw.js'), 'utf8'), /artway-admin-release-one/);
   assert.equal(result.status, 'active');
 });
 

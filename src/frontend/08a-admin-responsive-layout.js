@@ -17,12 +17,14 @@
     '.banner-workspace-head','.discount-workspace-head','.catalog-quality-hero',
     '.telegram-hub-hero','.dashboard-hero','.agent-command-hero','.warehouse-qr-hero',
     '.product-link-import-hero','.product-editor-hero','.seo-control-hero',
+    '.system-release-hero',
   ].join(',');
   const selektorMetryk=[
     '.allegro-listing-metrics','.orders-stat-grid','.stat-grid','.info-grid',
     '.supplier-monitor-stats','.telegram-hub-kpis','.product-link-import-stats',
     '.agent-command-metrics','.warehouse-stock-summary','.home-editor-stats',
     '.dashboard-kpi-grid','.warehouse-dashboard-metrics','.profitability-review-metrics',
+    '.system-release-grid','.system-summary-grid',
   ].join(',');
   const selektorPaskow=[
     '.diag-actions','.admin-results-operations','.admin-results-selection','.results-bar',
@@ -103,7 +105,7 @@
       if(!element.classList.contains('admin-unified-hero'))element.classList.add('admin-unified-section-head');
     });
     content.querySelectorAll('.admin-search-standard').forEach((element)=>element.classList.add('admin-unified-search'));
-    content.querySelectorAll('.order-empty,.catalog-empty,.assortment-empty,.agent-ops-empty,.warehouse-document-empty,.ai-library-empty').forEach((element)=>element.classList.add('admin-unified-empty'));
+    content.querySelectorAll('.order-empty,.catalog-empty,.assortment-empty,.agent-ops-empty,.warehouse-document-empty,.ai-library-empty,.system-empty').forEach((element)=>element.classList.add('admin-unified-empty'));
   }
   window.adminUjednolicWidok=opiszStruktureWidoku;
   function opiszZakres(zakres){

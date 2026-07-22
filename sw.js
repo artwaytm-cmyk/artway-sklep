@@ -14,6 +14,10 @@ const APP_SHELL=[
 
 self.addEventListener("install",event=>{event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)).then(()=>self.skipWaiting()));});
 self.addEventListener("activate",event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith("artway-")&&key!==CACHE_NAME).map(key=>caches.delete(key)))).then(()=>self.clients.claim()));});
+self.addEventListener("message",event=>{
+  if(event.data?.type==="SKIP_WAITING")self.skipWaiting();
+  if(event.data?.type==="CLEAR_APP_CACHE")event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith("artway-")).map(key=>caches.delete(key)))));
+});
 
 function isPrivateRequest(url){return url.pathname==="/api/store"||url.pathname.startsWith("/.netlify/functions/")||url.pathname.startsWith("/api/");}
 async function networkFirst(request){
