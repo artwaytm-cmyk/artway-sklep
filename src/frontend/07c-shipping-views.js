@@ -2,6 +2,7 @@ function nawigacjaWysylek(aktywna="zlecenia"){
   const aktywne=pobierzZamowienia().filter(z=>!["dostarczona","anulowana","zwrot"].includes(etapWysylki(z))).length,problemy=pobierzZamowienia().filter(z=>etapWysylki(z)==="problem").length;
   return adminSubnavHTML([
     {id:"zlecenia",href:"#/admin/wysylki",label:"📋 Obsługa zleceń",badge:aktywne||""},
+    {id:"inpost",href:"#/admin/wysylki/inpost",label:"📮 Wysyłka z InPost"},
     {id:"tracking",href:"#/admin/wysylki/tracking",label:"📡 Monitoring i tracking",badge:problemy||""},
     {id:"automatyzacje",href:"#/admin/wysylki/automatyzacje",label:"⚡ Automatyzacje"},
     {id:"ustawienia",href:"#/admin/wysylki/ustawienia",label:"⚙️ Bramka i ustawienia"}
@@ -10,6 +11,7 @@ function nawigacjaWysylek(aktywna="zlecenia"){
 function wysylkiKontekstPodstronyHTML(aktywna="zlecenia"){
   const cfg={
     zlecenia:{icon:"📋",eyebrow:"Realizacja zamówień",title:"Obsługa zleceń InPost",description:"Dane odbiorcy, sposób nadania, etykieta i przekazanie przesyłki w jednym procesie."},
+    inpost:{icon:"📮",eyebrow:"Nadania umowne",title:"Wysyłka z InPost",description:"Ręczne nadania dla klientów, wszystkie aktywne usługi umowy InPost oraz rozliczenie własnej prowizji."},
     tracking:{icon:"📡",eyebrow:"Monitoring przesyłek",title:"Tracking i wyjątki",description:"Numery nadania, zdarzenia InPost, SLA oraz przesyłki wymagające reakcji operatora."},
     automatyzacje:{icon:"⚡",eyebrow:"Reguły operacyjne",title:"Automatyzacje wysyłek",description:"Automatyczne statusy, tracking, e-maile i alarmy czasu nadania."},
     ustawienia:{icon:"⚙️",eyebrow:"Integracja przewoźnika",title:"Bramka InPost i nadawca",description:"Stan API, usługi, dane nadawcy oraz bezpieczna konfiguracja integracji serwerowej."}
@@ -163,7 +165,7 @@ function panelAutomatyzacjiWysylek(){
   </div>`;
 }
 function widokAdminWysylki(sekcja="zlecenia"){
-  const aktywna=["zlecenia","tracking","automatyzacje","ustawienia"].includes(String(sekcja||""))?String(sekcja):"zlecenia";tabWysylek=aktywna;
-  const widok=aktywna==="tracking"?panelTrackinguWysylek():aktywna==="automatyzacje"?panelAutomatyzacjiWysylek():aktywna==="ustawienia"?panelUstawienBramki():panelZlecenWysylkowych();
+  const aktywna=["zlecenia","inpost","tracking","automatyzacje","ustawienia"].includes(String(sekcja||""))?String(sekcja):"zlecenia";tabWysylek=aktywna;
+  const widok=aktywna==="inpost"?panelWysylkiUslugowejInpost():aktywna==="tracking"?panelTrackinguWysylek():aktywna==="automatyzacje"?panelAutomatyzacjiWysylek():aktywna==="ustawienia"?panelUstawienBramki():panelZlecenWysylkowych();
   return adminSzkielet("/admin/wysylki",`<div class="module-page-stack shipping-module-page">${nawigacjaWysylek(aktywna)}${wysylkiKontekstPodstronyHTML(aktywna)}<div class="shipping-workspace section-${esc(aktywna)}">${widok}</div></div>`);
 }

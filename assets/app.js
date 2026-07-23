@@ -5031,6 +5031,12 @@ window.artwayPunktWybrany=function(point){
   try{
     const kod=(point&&(point.name||point.id))||"";
     const adr=czyscAdresPaczkomatu(point&&point.address?[point.address.line1,point.address.line2].filter(Boolean).join(" • "):((point&&point.location_description)||""));
+    if(window.__geoTarget==="inpost-service"){
+      if(typeof inpostServiceWybierzPunkt==="function")inpostServiceWybierzPunkt(kod,adr);
+      window.__geoTarget="";
+      zamknijGeowidget();
+      return;
+    }
     if(window.__geoTarget==="admin"){
       const ah=$("admPaczkomat"); if(ah) ah.value=kod;
       const av=$("admPaczkomatAdresVal"); if(av) av.value=adr;

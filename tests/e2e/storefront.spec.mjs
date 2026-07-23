@@ -149,6 +149,21 @@ test('Centrum systemu pokazuje wersję i bezpieczny przycisk aktualizacji przegl
   assertRuntime();
 });
 
+test('Centrum wysyłki udostępnia ręczne nadanie InPost bez ujawniania kosztu umowy', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  await page.goto('/#/admin/wysylki/inpost');
+  await expect(page.getByRole('heading', { name: 'Wysyłka z InPost', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Utwórz przesyłkę', exact: true })).toBeVisible();
+  await expect(page.locator('#inpostServiceForm')).toBeVisible();
+  await expect(page.getByText('Koszt umowny InPost jest ukryty.')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Utwórz przesyłkę InPost/ })).toBeVisible();
+  const workspace = page.locator('.admin-workspace-content[data-admin-layout="unified-v2"]');
+  const dimensions = await workspace.evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
+  expect(dimensions.content).toBeLessThanOrEqual(dimensions.width + 1);
+  assertRuntime();
+});
+
 test('wspólny układ panelu pozostaje czytelny w aplikacji mobilnej', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   await page.setViewportSize({ width: 390, height: 844 });

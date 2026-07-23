@@ -43,6 +43,7 @@ import { bezpieczneZamowienieKlienta } from './domain/checkout.mjs';
 import { createEmailService } from './email-service.mjs';
 import { createInpostService } from './inpost-service.mjs';
 import { createInpostRoute } from './inpost-route.mjs';
+import { createInpostServiceShipmentRoute } from './inpost-service-shipment-route.mjs';
 import { createStoreDataRoute } from './store-data-route.mjs';
 import { createPaynowService } from './paynow-service.mjs';
 import { createPaynowRoute } from './paynow-route.mjs';
@@ -261,6 +262,12 @@ const inpostRoute = createInpostRoute({
   writeWebhookLog: zapiszLogInpostWebhook,
   applyWebhook: zastosujWebhookInpost,
   saveShipmentOnOrder: zapiszPrzesylkeNaZamowieniu,
+});
+const inpostServiceShipmentRoute = createInpostServiceShipmentRoute({
+  respond: odpowiedz, isAdmin: czyAdmin, text: tekst, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,
+  publicConfig: inpostPublicConfig, configure: inpostKonfiguracja, call: inpostWywolaj, serviceAvailability: inpostDostepnoscUslug,
+  organization: inpostOrganizacja, waitForLabel: inpostCzekajNaEtykiete, trackingNumber: numerZShipX, shipmentStatus: inpostStatusZShipX,
+  labelReady: inpostEtykietaGotowa, offerId: inpostOfertaId, infaktPublicConfig, infaktCall: infaktWywolaj, infaktReference: infaktRef,
 });
 const zapiszOperacjeProduktow = createCatalogProductOperationWriter({ mutateLatest: createRevisionSafeMutator(repository, 'settings'), loadProducts: allegroAgentProduktyKompletne, createUpdater: allegroAktualizatorProduktowCentralnych });
 const zapiszMapowaniaBezpiecznie = createAllegroMappingStore({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getItems: allegroMapowaniaItems }).writeSafely;
@@ -3665,6 +3672,8 @@ export default async (req) => {
 
     const inpostResponse = await inpostRoute(req, url, action);
     if (inpostResponse) return inpostResponse;
+    const inpostServiceShipmentResponse = await inpostServiceShipmentRoute(req, url, action);
+    if (inpostServiceShipmentResponse) return inpostServiceShipmentResponse;
 
     // ─── CENTRALNA KARTOTEKA PRODUKTÓW (PostgreSQL, stronicowanie serwerowe) ───
     const centralCatalogResponse = await centralProductCatalogRoute(req, url, action);

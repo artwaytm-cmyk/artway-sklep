@@ -43,7 +43,7 @@ test('historia Agenta zachowuje kolejność i rozróżnia powtórzone identyfika
 
 test('duże domeny operacyjne są jawnie wyjęte z settings i KV', () => {
   for (const key of ['artway_produkty_edytowane', 'artway_magazyn_lokalizacje', 'artway_agent_ai_zlecenia', 'artway_agent_ai_historia']) assert.ok(SETTINGS_DOMAIN_CONFIGS[key]);
-  for (const key of ['orders', 'allegro_offers', 'allegro_mappings', 'allegro_communications', 'agent_specialists_state']) assert.ok(DIRECT_DOMAIN_CONFIGS[key]);
+  for (const key of ['orders', 'allegro_offers', 'allegro_mappings', 'allegro_communications', 'agent_specialists_state', 'inpost_service_shipments']) assert.ok(DIRECT_DOMAIN_CONFIGS[key]);
 });
 
 test('aktywny stan Agenta, Telegrama i inFaktu jest dzielony na rekordy', () => {

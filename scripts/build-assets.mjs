@@ -55,6 +55,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/07-admin-shipping.js',
       'src/frontend/07a-shipping-workflow.js',
       'src/frontend/07c-shipping-views.js',
+      'src/frontend/07d-inpost-service-shipping.js',
       'src/frontend/08a-admin-responsive-layout.js',
       'src/frontend/10-agent-ai.js',
       'src/frontend/10-agent-ai-supplier-planning.js',
@@ -88,6 +89,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/12-customers-and-inventory.js',
       'src/frontend/12d-inventory-operations.js',
       'src/frontend/12-assortment-index.js',
+      'src/frontend/12e-infakt-shipping-billing.js',
       'src/frontend/12-infakt-admin.js',
       'src/frontend/09b-seo-effects-panel.js',
       'src/frontend/12-warehouse-views.js',
@@ -159,6 +161,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/32-product-editor-workspace.css',
       'src/styles/34-paynow-readiness.css',
       'src/styles/35-admin-unified-workspace.css',
+      'src/styles/36-inpost-service-shipping.css',
     ],
   },
   {
@@ -234,6 +237,7 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
     sources: [
       'src/frontend/07a-shipping-workflow.js',
       'src/frontend/07c-shipping-views.js',
+      'src/frontend/07d-inpost-service-shipping.js',
     ],
   },
   {
@@ -274,6 +278,7 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/12-customers-and-inventory.js',
       'src/frontend/12d-inventory-operations.js',
       'src/frontend/12-assortment-index.js',
+      'src/frontend/12e-infakt-shipping-billing.js',
       'src/frontend/12-infakt-admin.js',
       'src/frontend/09b-seo-effects-panel.js',
       'src/frontend/12-warehouse-assortment-card.js',
