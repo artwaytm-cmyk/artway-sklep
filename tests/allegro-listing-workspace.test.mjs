@@ -52,6 +52,17 @@ test("centrum wystawiania skaluje katalog przez filtry, limit, paginację i eksp
   assert.ok(baseCss.sources.includes("src/styles/29-commerce-catalog-actions.css"));
 });
 
+test("ukryty produkt nie trafia do wystawiania Allegro i jest ponownie blokowany na serwerze",async()=>{
+  const listing=await read("src/frontend/12b-allegro-listing-workspace.js"),legacy=await read("src/frontend/11-allegro-operations.js"),backend=await read("netlify/functions/lib/store-app.mjs");
+  assert.match(listing,/filter\(p=>!czyProduktAdminWKoszu\(p\)&&produktDostepnyWSprzedazy\(p\)\)/);
+  assert.match(listing,/p&&produktDostepnyWSprzedazy\(p\)&&!allegroBrakiProduktuDoWystawienia/);
+  assert.match(legacy,/produkt jest ukryty lub niedostępny/i);
+  assert.match(backend,/code: 'product_sale_unavailable'/);
+  assert.match(backend,/artway_dostepnosc\?\.\[saleProductId\]/);
+  assert.match(backend,/authoritativeProducts\.get\(saleProductId\)/);
+  assert.match(backend,/\[body\.product \|\| \{\}, authoritativeProduct\]\.some/);
+});
+
 test("karta produktu wykonuje się z rzeczywistym wspólnym formatowaniem ceny",async()=>{
   const source=await read("src/frontend/12b-allegro-listing-workspace.js"),start=source.indexOf("function allegroPublikacjaKartaHTML"),end=source.indexOf("\n\nallegroWystawianiePanelHTML",start);
   assert.ok(start>=0&&end>start);

@@ -15,11 +15,11 @@ const normalize = (value) => text(value, 5000).toLocaleLowerCase('pl-PL').normal
 const own = (object, key) => Object.prototype.hasOwnProperty.call(asObject(object), String(key)) || Object.prototype.hasOwnProperty.call(asObject(object), key);
 const searchTsQuery = (value) => normalize(value).split(/\s+/).filter(Boolean).slice(0, 12).map((token) => `${token}:*`).join(' & ');
 
-export const CENTRAL_PRODUCT_SCHEMA_VERSION = 3;
+export const CENTRAL_PRODUCT_SCHEMA_VERSION = 4;
 
 function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = false } = {}) {
   const fields = [
-    'id', 'nazwa', 'name', 'cena', 'cenaAllegro', 'staraCena', 'kategoria', 'producent', 'marka',
+    'id', 'nazwa', 'name', 'cena', 'cenaAllegro', 'cenaVonHalsky', 'staraCena', 'kategoria', 'producent', 'marka',
     'externalId', 'sku', 'gtin', 'ean', 'kodProducenta', 'mpn', 'zdjecie', 'ikona', 'kolor',
     'sourceUrl', 'producentUrl', 'urlProducenta', 'allegroOfferId', 'allegroProductId', 'badge',
     'opisKrotki', 'krotkiOpis', 'warianty', 'agentOnboardingStatus', 'allegroAgentPreparationStatus',
@@ -94,7 +94,9 @@ export function centralCatalogBuildRecords(data = {}, { importedProducts = [], o
     const id = text(product?.id, 120); if (!id) return null;
     const inTrash = merged.hiddenIds.has(id), availabilityData = asObject(availability[id]), warehouseData = asObject(warehouse[id]);
     const stockValue = own(stock, id) ? numberOrNull(stock[id]) : null;
-    const unavailable = ['niedostepny', 'ukryty', 'wstrzymany', 'brak'].includes(text(availabilityData.status || availabilityData.decision).toLowerCase()) || product.aktywny === false;
+    const decision = text(availabilityData.decision).toLowerCase(), graceUntil = Date.parse(text(availabilityData.expiresAt));
+    const unavailableByRecord = decision === 'manual_available' ? false : decision === 'grace' ? (!Number.isFinite(graceUntil) || graceUntil <= Date.now()) : ['niedostepny', 'ukryty', 'wstrzymany', 'brak'].includes(text(availabilityData.status || decision).toLowerCase());
+    const unavailable = unavailableByRecord || product.aktywny === false || product.ukryty === true || product.sprzedazAktywna === false || product.saleAvailable === false;
     const saleAvailable = !inTrash && !unavailable;
     const directOffer = text(product.allegroOfferId, 120), productOffers = [...(offerLookup.byProduct.get(id) || [])];
     if (directOffer && offerLookup.byId.has(directOffer) && !productOffers.some((offer) => text(offer?.id, 120) === directOffer)) productOffers.unshift(offerLookup.byId.get(directOffer));
@@ -119,7 +121,7 @@ export function centralCatalogBuildRecords(data = {}, { importedProducts = [], o
       externalId: text(product.externalId, 200), sku: text(product.sku, 200), ean: text(product.gtin || product.ean, 80).replace(/\s/g, ''),
       source, recordStatus: inTrash ? 'trash' : 'active', stock: stockValue, saleAvailable, hasSource: !!text(product.sourceUrl || product.producentUrl || product.urlProducenta),
       hasAllegro: !!catalogMeta.channels.allegro.offerId, allegroStatus: catalogMeta.channels.allegro.status.toUpperCase(), missingFields: missing, missingCount: missing.filter((field) => field !== 'koszt').length,
-      price: numberOrNull(product.cena), allegroPrice: numberOrNull(product.cenaAllegro || product.cena), promotion: Number(product.staraCena) > Number(product.cena), newProduct: text(product.badge, 80).toLowerCase() === 'nowość', rating: reviews.count ? reviews.sum / reviews.count : null, ratingCount: reviews.count,
+      price: numberOrNull(product.cena), allegroPrice: numberOrNull(product.cenaAllegro || product.cena), vonHalskyPrice: numberOrNull(product.cenaVonHalsky || product.cenaAllegro || product.cena), promotion: Number(product.staraCena) > Number(product.cena), newProduct: text(product.badge, 80).toLowerCase() === 'nowość', rating: reviews.count ? reviews.sum / reviews.count : null, ratingCount: reviews.count,
       duplicateStore: catalogIdentityKeys(product).some((key) => (identityCounts.get(key) || 0) > 1), duplicateAllegro: activeOffers.length > 1,
       fingerprint: crypto.createHash('sha256').update(JSON.stringify(adminProduct)).digest('hex'), updatedAt: now, image,
     };

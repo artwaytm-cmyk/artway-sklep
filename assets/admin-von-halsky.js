@@ -34,7 +34,7 @@ function vonHalskyKodProducenta(product={}){
 function vonHalskyOcenaProduktu(product={}){
   const nazwa=String(product.nazwa||product.name||"").trim(),surowyOpis=String(product.opisAllegro||product.opis||product.dlugiOpis||product.description||""),opis=vonHalskyOpisProduktu(product),ean=vonHalskyGtin(product);
   const kod=vonHalskyKodProducenta(product),marka=String(product.marka||product.producent||"").trim(),zdjecia=[...(Array.isArray(product.zdjecia)?product.zdjecia:[]),...(Array.isArray(product.images)?product.images:[]),product.zdjecie,product.image].map(item=>String(typeof item==="object"?item?.url||"":item||"").trim()).filter(Boolean);
-  const cena=Number(product.cena??product.price),braki=[],ostrzezenia=[];
+  const cena=[product.cenaVonHalsky,product.vonHalskyPrice,product.cenaAllegro,product.allegroPrice,product.cena,product.price].map(Number).find(value=>Number.isFinite(value)&&value>0)||0,braki=[],ostrzezenia=[];
   if(nazwa.length<7||nazwa.length>150)braki.push("Nazwa 7–150 znaków");
   if(opis.length<100)braki.push("Opis minimum 100 znaków");
   if(/https?:\/\/|www\.|<a\b/i.test(surowyOpis))braki.push("Usuń linki z opisu");
@@ -52,7 +52,7 @@ function vonHalskyOcenaProduktu(product={}){
   return {gotowy:braki.length===0,wynik:Math.max(0,Math.round(100-braki.length*18-ostrzezenia.length*3)),braki,ostrzezenia,ean,kod,marka,opis,nazwa,cena:Number.isFinite(cena)?cena:0,dostepny,ofertaId,zdjecie:zdjecia[0]||""};
 }
 function vonHalskyProdukty(){
-  return produktyDoAdministracji().filter(product=>!czyProduktAdminWKoszu(product)&&!produktyDefinitywne.some(id=>String(id)===String(product.id)));
+  return produktyDoAdministracji().filter(product=>!czyProduktAdminWKoszu(product)&&!produktyDefinitywne.some(id=>String(id)===String(product.id))&&produktDostepnyWSprzedazy(product));
 }
 function vonHalskyWiersze(){
   const q=normalizujSzukanyTekst(vonHalskySzukaj),terms=q.split(" ").filter(Boolean);

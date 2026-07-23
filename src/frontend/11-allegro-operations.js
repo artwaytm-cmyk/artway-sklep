@@ -306,6 +306,7 @@ async function allegroPrzygotujSzkicProduktZListy(id){
 async function allegroWystawProduktZListy(id){
   const p=pobierzProduktAdmin(id);
   if(!p){ toast("Nie znaleziono produktu"); return; }
+  if(!produktDostepnyWSprzedazy(p)){toast("⛔ Produkt jest ukryty lub niedostępny — nie można go wystawić na Allegro");return;}
   try{
     const publicationAction=allegroTrybPublikacji();
     const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p),publishNow:publicationAction==="activate",publicationAction}},timeout:120000});
@@ -327,6 +328,7 @@ async function allegroWystawProduktZListy(id){
 }
 async function allegroAktywujProduktZListy(id){
   const p=pobierzProduktAdmin(id);if(!p){toast("Nie znaleziono produktu");return;}
+  if(!produktDostepnyWSprzedazy(p)){toast("⛔ Produkt jest ukryty lub niedostępny — najpierw wznów sprzedaż");return;}
   const qty=allegroStanOfertyProduktu(p);
   try{
     toast(`Aktywuję ofertę ${p.nazwa} ze stanem Allegro ${qty} szt.…`);
@@ -377,7 +379,7 @@ async function allegroZmienCenyZaznaczonychOfert(){
 }
 function allegroWystawianiePanelHTML(){
   const q=String(szukajAllegroWystawiania||"").toLowerCase().trim();
-  const wszystkie=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const wszystkie=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&produktDostepnyWSprzedazy(p));
   const counts={wszystkie:wszystkie.length,aktywne:0,szkice:0,brak:0,gotowe:0,braki:0,do_aktualizacji:0};
   wszystkie.forEach(p=>{const o=allegroOfertaDlaProduktuSklepu(p), br=allegroBrakiProduktuDoWystawienia(p);if(!o)counts.brak++;else if(String(o.status||"").toUpperCase()==="ACTIVE")counts.aktywne++;else counts.szkice++;if(br.length)counts.braki++;else counts.gotowe++;if(o&&allegroRozniceOfertyProduktu(p,o).length)counts.do_aktualizacji++;});
   const pasujace=wszystkie.filter(p=>{

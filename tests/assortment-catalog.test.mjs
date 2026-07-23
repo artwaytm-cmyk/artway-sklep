@@ -64,6 +64,11 @@ test("ceny w katalogu zapisują się w wierszu bez pełnego renderowania strony"
   assert.doesNotMatch(inlineBlock,/renderuj\s*\(/);
   assert.match(inlineBlock,/cenaZakupuPrywatna:true/);
   assert.match(inlineBlock,/ręczna edycja administratora/);
+  assert.match(view,/Cena Von Halsky/);
+  assert.match(view,/pusta = Allegro/);
+  assert.match(prices,/function ustawCeneKanalu/);
+  assert.match(prices,/await chmuraZapiszUstawienia\(\)/);
+  assert.match(prices,/cenaVonHalsky/);
   assert.match(css,/\.catalog-product-edit-value\.is-saving/);
   assert.match(css,/\.catalog-product-edit-value\.is-saved/);
   assert.match(css,/\.catalog-product-edit-value\.has-error/);

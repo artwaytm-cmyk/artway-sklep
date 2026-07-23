@@ -19,7 +19,8 @@ function produktOznaczonyNiedostepny(p){
   const decision=decyzjaProducentaInfo(p);
   if(decision.code==="manual_available")return false;
   if(decision.code==="grace")return decision.expired;
-  return !!d && String(d.status||"").toLowerCase()==="niedostepny";
+  const status=String(d?.status||"").toLowerCase();
+  return !!d&&(["hide_manual","wait_available"].includes(decision.code)||["niedostepny","ukryty","wstrzymany","brak"].includes(status));
 }
 function produktAutomatycznieNiedostepny(p){const d=wpisDostepnosciProduktu(p?.id);return produktOznaczonyNiedostepny(p)&&(d?.automatic===true||d?.source==="producent-agent");}
 function powodNiedostepnosci(p){
@@ -27,7 +28,7 @@ function powodNiedostepnosci(p){
   return String(d?.powod||"").trim();
 }
 function produktDostepnyWSprzedazy(p){
-  return !!p && produktMaCeneSprzedazy(p) && !produktOznaczonyNiedostepny(p);
+  return !!p && produktMaCeneSprzedazy(p) && !produktOznaczonyNiedostepny(p) && p.aktywny!==false && p.ukryty!==true && p.sprzedazAktywna!==false && p.saleAvailable!==false && p.dostepny!==false && p?._catalog?.availability?.saleAvailable!==false;
 }
 function produktWidocznyWPublicznymKatalogu(p){
   if(!produktDostepnyWSprzedazy(p))return false;

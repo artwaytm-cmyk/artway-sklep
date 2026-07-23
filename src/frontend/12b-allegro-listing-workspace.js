@@ -3,7 +3,7 @@ let allegroWystawianieSort="gotowosc",allegroWystawianieStrona=1;
 let allegroWystawianieFiltry={kategoria:"wszystkie",producent:"wszyscy",dane:"wszystkie",sprzedaz:"wszystkie",magazyn:"wszystkie",zrodlo:"wszystkie",cenaOd:"",cenaDo:""};
 
 function allegroPublikacjaWybraneIds(){
-  const active=new Set(produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>String(p.id)));
+  const active=new Set(produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&produktDostepnyWSprzedazy(p)).map(p=>String(p.id)));
   return [...zaznaczoneAllegroProduktyKatalogu].map(String).filter(id=>active.has(id));
 }
 function allegroPublikacjaUstawStrone(value){allegroWystawianieStrona=Math.max(1,Number(value)||1);renderuj();}
@@ -17,7 +17,7 @@ function allegroPublikacjaPrzeniesWyborDoAgenta(ids=[]){
   ids.map(String).forEach(id=>{const p=asortymentProduktPoId(id);if(p)zaznaczoneProdukty.add(String(p.id));});
 }
 function allegroPublikacjaOtworzDecyzje(singleId=null,operation="activate"){
-  const ids=singleId===null?allegroPublikacjaWybraneIds():[String(singleId)];
+  const ids=(singleId===null?allegroPublikacjaWybraneIds():[String(singleId)]).filter(id=>{const p=asortymentProduktPoId(id);return p&&produktDostepnyWSprzedazy(p);});
   if(!ids.length){toast("Zaznacz co najmniej jeden produkt do wystawienia");return;}
   allegroPublikacjaPrzeniesWyborDoAgenta(ids);
   asortymentPrzygotujOperacjeZewnetrzna(operation,singleId,true);
@@ -29,7 +29,7 @@ function allegroPublikacjaPrzygotujWybrane(singleId=null){
   return asortymentUruchomAgenta(ids,"allegro");
 }
 function allegroPublikacjaWystawGotowe(ids=[]){
-  const ready=ids.map(String).filter(id=>{const p=asortymentProduktPoId(id);return p&&!allegroBrakiProduktuDoWystawienia(p).length&&String(allegroOfertaDlaProduktuSklepu(p)?.status||"").toUpperCase()!=="ACTIVE";});
+  const ready=ids.map(String).filter(id=>{const p=asortymentProduktPoId(id);return p&&produktDostepnyWSprzedazy(p)&&!allegroBrakiProduktuDoWystawienia(p).length&&String(allegroOfertaDlaProduktuSklepu(p)?.status||"").toUpperCase()!=="ACTIVE";});
   if(!ready.length){toast("W bieżącym widoku nie ma gotowych, nieaktywnych produktów");return;}
   allegroWyczyscZaznaczenieOfert();
   ready.forEach(id=>zaznaczoneAllegroProduktyKatalogu.add(String(id)));
@@ -59,7 +59,7 @@ function allegroPublikacjaKartaHTML(p={}){
 }
 
 allegroWystawianiePanelHTML=function(){
-  const query=String(szukajAllegroWystawiania||"").toLowerCase().trim(),all=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)),counts={wszystkie:all.length,aktywne:0,szkice:0,brak:0,gotowe:0,braki:0,do_aktualizacji:0};
+  const query=String(szukajAllegroWystawiania||"").toLowerCase().trim(),all=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&produktDostepnyWSprzedazy(p)),counts={wszystkie:all.length,aktywne:0,szkice:0,brak:0,gotowe:0,braki:0,do_aktualizacji:0};
   all.forEach(p=>{const o=allegroOfertaDlaProduktuSklepu(p),m=allegroBrakiProduktuDoWystawienia(p),status=String(o?.status||"").toUpperCase();if(!o)counts.brak++;else if(status==="ACTIVE")counts.aktywne++;else counts.szkice++;if(m.length)counts.braki++;else counts.gotowe++;if(o&&allegroRozniceOfertyProduktu(p,o).length)counts.do_aktualizacji++;});
   let filtered=all.filter(p=>{const o=allegroOfertaDlaProduktuSklepu(p),m=allegroBrakiProduktuDoWystawienia(p),status=String(o?.status||"").toUpperCase();if(filtrAllegroWystawiania==="aktywne"&&status!=="ACTIVE")return false;if(filtrAllegroWystawiania==="szkice"&&(!o||status==="ACTIVE"))return false;if(filtrAllegroWystawiania==="brak"&&o)return false;if(filtrAllegroWystawiania==="gotowe"&&m.length)return false;if(filtrAllegroWystawiania==="braki"&&!m.length)return false;if(filtrAllegroWystawiania==="do_aktualizacji"&&(!o||!allegroRozniceOfertyProduktu(p,o).length))return false;const text=`${p.id||""} ${p.nazwa||""} ${p.sku||""} ${p.externalId||""} ${p.gtin||p.ean||""} ${p.kodProducenta||p.mpn||""} ${p.producent||p.marka||""} ${o?.id||p.allegroOfferId||""}`.toLowerCase();return !query||text.includes(query);});
   const priority=p=>{const o=allegroOfertaDlaProduktuSklepu(p),m=allegroBrakiProduktuDoWystawienia(p);if(!m.length&&!o)return 0;if(!m.length&&String(o?.status||"").toUpperCase()!=="ACTIVE")return 1;if(o&&allegroRozniceOfertyProduktu(p,o).length)return 2;if(m.length)return 3;return 4;};

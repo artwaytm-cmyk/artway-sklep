@@ -93,6 +93,14 @@ function productImages(product = {}) {
   return [...new Set(values.map((item) => text(typeof item === 'object' ? item?.url : item, 2000)).filter(Boolean))];
 }
 
+export function vonHalskyEffectivePrice(product = {}) {
+  for (const candidate of [product.cenaVonHalsky, product.vonHalskyPrice, product.cenaAllegro, product.allegroPrice, product.cena, product.price]) {
+    const value = Number(candidate);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return 0;
+}
+
 export function vonHalskyProductReadiness(product = {}) {
   const name = text(product.nazwa || product.name, 200);
   const rawDescription = descriptionSource(product);
@@ -101,7 +109,7 @@ export function vonHalskyProductReadiness(product = {}) {
   const manufacturerCode = text(product.kodProducenta || product.mpn || product.externalId || product.sku, 120);
   const brand = text(product.marka || product.producent, 120);
   const images = productImages(product);
-  const price = Number(product.cena ?? product.price);
+  const price = vonHalskyEffectivePrice(product);
   const issues = [];
   const warnings = [];
   if (name.length < 7 || name.length > 150) issues.push('Nazwa musi mieć 7–150 znaków');
@@ -132,7 +140,7 @@ export function vonHalskyProductReadiness(product = {}) {
 
 export function vonHalskyOfferProjection(product = {}, settings = {}) {
   const readiness = vonHalskyProductReadiness(product);
-  const available = product.sprzedazAktywna !== false && product.ukryty !== true;
+  const available = product.sprzedazAktywna !== false && product.saleAvailable !== false && product.dostepny !== false && product.aktywny !== false && product.ukryty !== true && product?._catalog?.availability?.saleAvailable !== false;
   const maximumStock = Math.max(1, Number(settings.maximumStock) || 25);
   const minimumStock = Math.max(0, Math.min(maximumStock, Number(settings.minimumStock) || 0));
   const physicalStock = Math.max(0, Number(product.stan ?? product.stock) || 0);

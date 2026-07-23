@@ -4,6 +4,7 @@ import {
   deduplicateVonHalskyOffers,
   normalizeVonHalskySettings,
   summarizeVonHalskyCatalog,
+  vonHalskyEffectivePrice,
   vonHalskyOfferProjection,
   vonHalskyProductReadiness,
   vonHalskyPublicConfig,
@@ -125,6 +126,25 @@ test('aktywny produkt dostępny u dostawcy zachowuje minimalny stan kanału, a w
   assert.equal(active.stock, 3);
   assert.equal(hidden.available, false);
   assert.equal(hidden.stock, 0);
+});
+
+test('Von Halsky domyślnie dziedziczy cenę Allegro, ale respektuje własną cenę kanału', () => {
+  assert.equal(vonHalskyEffectivePrice({ cena: 20, cenaAllegro: 24.9 }), 24.9);
+  assert.equal(vonHalskyEffectivePrice({ cena: 20, cenaAllegro: 24.9, cenaVonHalsky: 27.5 }), 27.5);
+  const projection = vonHalskyOfferProjection({
+    id: 'VH-PRICE', nazwa: 'Produkt testowy Von Halsky', opis: 'Pełny opis produktu zawiera wszystkie wymagane informacje potrzebne klientowi do świadomego i bezpiecznego wyboru produktu.',
+    ean: '5906018000030', zdjecie: '/one.webp', cena: 20, cenaAllegro: 24.9,
+  });
+  assert.equal(projection.price, 24.9);
+});
+
+test('ukryty produkt pozostaje zablokowany w projekcji kanału Von Halsky', () => {
+  const base = { id: 'VH-HIDDEN', nazwa: 'Produkt ukryty w sprzedaży', opis: 'Pełny opis produktu zawiera wszystkie wymagane informacje potrzebne klientowi do świadomego i bezpiecznego wyboru produktu.', ean: '5906018000030', zdjecie: '/one.webp', cena: 20 };
+  for (const blocked of [{ saleAvailable: false }, { ukryty: true }, { _catalog: { availability: { saleAvailable: false } } }]) {
+    const projection = vonHalskyOfferProjection({ ...base, ...blocked, stan: 8 }, { minimumStock: 1, maximumStock: 25 });
+    assert.equal(projection.available, false);
+    assert.equal(projection.stock, 0);
+  }
 });
 
 test('kanał wysyła tylko jedną najlepszą kartotekę dla tego samego EAN', () => {

@@ -94,26 +94,41 @@ function asortymentPodmienCeneBezRenderu(id,patch={},usun=[]){
   }
   return baza;
 }
-function ustawCene(id, wartosc, input=null){
-  const poprzedni=pobierzProduktAdmin(id)||{},cena=parseFloat(String(wartosc).trim().replace(/\s/g,"").replace(",","."));
-  if(!(cena>0)){
-    if(input)input.value=String(kwotaNum(poprzedni.cena).toFixed(2)).replace(".",",");
-    asortymentStanZapisuCeny(input,"has-error","Podaj cenę większą od 0");toast("⚠️ Nieprawidłowa cena sprzedaży");return false;
-  }
-  asortymentStanZapisuCeny(input,"is-saving","Zapisuję…");
-  const nowa=+cena.toFixed(2),usun=Number(poprzedni.staraCena)>0&&Number(poprzedni.staraCena)<=nowa?["staraCena"]:[];
-  asortymentPodmienCeneBezRenderu(id,{cena:nowa},usun);
-  if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
-  loguj("info",`Zmieniono cenę sprzedaży produktu ${id} → ${zl(nowa)}`);
-  asortymentStanZapisuCeny(input,"is-saved","Zapisano");return true;
+async function asortymentPotwierdzZapisCeny(input,tekst="Zapisano"){
+  if(typeof maUprawnieniaZapisuChmury!=="function"||!maUprawnieniaZapisuChmury()){asortymentStanZapisuCeny(input,"is-saved",`${tekst} lokalnie`);return true;}
+  let ok=await chmuraZapiszUstawienia();
+  if(ok&&(["artway_produkty_dodane","artway_produkty_edytowane"].some(key=>chmuraBrudneKlucze.has(key))))ok=await chmuraZapiszUstawienia();
+  asortymentStanZapisuCeny(input,ok?"is-saved":"has-error",ok?tekst:"Zapis oczekuje na ponowienie");
+  return ok;
 }
-function ustawCeneZakupu(id, wartosc, input=null){
+async function ustawCeneKanalu(id,kanal,wartosc,input=null){
+  const pola={sklep:"cena",allegro:"cenaAllegro",vonHalsky:"cenaVonHalsky"},pole=pola[kanal]||"cena",poprzedni=pobierzProduktAdmin(id)||{},raw=String(wartosc).trim(),cena=parseFloat(raw.replace(/\s/g,"").replace(",",".")),dziedziczony=kanal==="vonHalsky"?kwotaNum(poprzedni.cenaAllegro||poprzedni.cena):kwotaNum(poprzedni.cena);
+  if(raw===""&&kanal!=="sklep"){
+    asortymentStanZapisuCeny(input,"is-saving","Zapisuję dziedziczenie…");asortymentPodmienCeneBezRenderu(id,{},[pole]);
+    if(input)input.value="";loguj("info",`Cena ${kanal} produktu ${id} dziedziczy cenę ${kanal==="vonHalsky"?"Allegro":"sklepu"}`);
+    return asortymentPotwierdzZapisCeny(input,`Dziedziczy ${dziedziczony?zl(dziedziczony):"cenę bazową"}`);
+  }
+  if(!(cena>0)){
+    const previousValue=kwotaNum(poprzedni[pole]||(kanal==="vonHalsky"?poprzedni.cenaAllegro:poprzedni.cena));
+    if(input)input.value=poprzedni[pole]==null&&kanal!=="sklep"?"":String(previousValue.toFixed(2)).replace(".",",");
+    asortymentStanZapisuCeny(input,"has-error",kanal==="sklep"?"Podaj cenę większą od 0":"Podaj cenę albo pozostaw puste");toast("⚠️ Nieprawidłowa cena sprzedaży");return false;
+  }
+  asortymentStanZapisuCeny(input,"is-saving","Zapisuję na serwerze…");
+  const nowa=+cena.toFixed(2),usun=kanal==="sklep"&&Number(poprzedni.staraCena)>0&&Number(poprzedni.staraCena)<=nowa?["staraCena"]:[];
+  asortymentPodmienCeneBezRenderu(id,{[pole]:nowa},usun);if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
+  loguj("info",`Zmieniono cenę ${kanal} produktu ${id} → ${zl(nowa)}`);
+  return asortymentPotwierdzZapisCeny(input,"Zapisano na serwerze");
+}
+function ustawCene(id, wartosc, input=null){
+  return ustawCeneKanalu(id,"sklep",wartosc,input);
+}
+async function ustawCeneZakupu(id, wartosc, input=null){
   const poprzedni=pobierzProduktAdmin(id)||{},raw=String(wartosc).trim(),cena=parseFloat(raw.replace(/\s/g,"").replace(",","."));
   const polaFaktury=["cenaZakupuNetto","cenaZakupuVat","cenaZakupuWaluta","cenaZakupuDokument","cenaZakupuKsef","cenaZakupuDostawca","cenaZakupuDataDokumentu"];
   if(raw===""){
     asortymentStanZapisuCeny(input,"is-saving","Usuwam…");
     asortymentPodmienCeneBezRenderu(id,{},["cenaZakupu","cenaZakupuPrywatna","cenaZakupuZrodlo","cenaZakupuDopasowanie","cenaZakupuZaktualizowanoAt",...polaFaktury]);
-    loguj("info",`Usunięto ręczną cenę zakupu produktu ${id}`);asortymentStanZapisuCeny(input,"is-saved","Usunięto");return true;
+    loguj("info",`Usunięto ręczną cenę zakupu produktu ${id}`);return asortymentPotwierdzZapisCeny(input,"Usunięto");
   }
   if(!Number.isFinite(cena)||cena<0){
     if(input)input.value=poprzedni.cenaZakupu==null?"":String(kwotaNum(poprzedni.cenaZakupu).toFixed(2)).replace(".",",");
@@ -124,7 +139,7 @@ function ustawCeneZakupu(id, wartosc, input=null){
   asortymentPodmienCeneBezRenderu(id,{cenaZakupu:nowa,cenaZakupuPrywatna:true,cenaZakupuZrodlo:"ręczna edycja administratora",cenaZakupuDopasowanie:"ręcznie",cenaZakupuZaktualizowanoAt:new Date().toISOString()},polaFaktury);
   if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
   loguj("info",`Zmieniono prywatną cenę zakupu produktu ${id} → ${zl(nowa)}`);
-  asortymentStanZapisuCeny(input,"is-saved","Zapisano");return true;
+  return asortymentPotwierdzZapisCeny(input,"Zapisano na serwerze");
 }
 /* ── Akcje masowe na produktach ── */
 let zaznaczoneProdukty = new Set();

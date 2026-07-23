@@ -302,7 +302,12 @@ const vonHalskyRoute = createVonHalskyRoute({
   writeIfVersion: zapiszJesliWersja,
   loadCatalog: async () => {
     const settings = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-    return [...(await allegroAgentProduktyKompletne(settings?.data || {})).values()];
+    const data = settings?.data || {}, availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};
+    return [...(await allegroAgentProduktyKompletne(data)).values()].map((product) => {
+      const record = availability[String(product.id)] || {}, decision = String(record.decision || '').toLowerCase(), expiresAt = Date.parse(String(record.expiresAt || ''));
+      const unavailable = decision === 'manual_available' ? false : decision === 'grace' ? (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) : ['niedostepny', 'ukryty', 'wstrzymany', 'brak'].includes(String(record.status || decision).toLowerCase());
+      return { ...product, saleAvailable: !unavailable && product.aktywny !== false && product.ukryty !== true && product.sprzedazAktywna !== false };
+    });
   },
 });
 const zapiszOperacjeProduktow = createCatalogProductOperationWriter({ mutateLatest: createRevisionSafeMutator(repository, 'settings'), loadProducts: allegroAgentProduktyKompletne, createUpdater: allegroAktualizatorProduktowCentralnych });
@@ -3534,6 +3539,14 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
+      const saleSettings = await czytaj('settings', { data: {} }), saleData = saleSettings?.data && typeof saleSettings.data === 'object' ? saleSettings.data : {};
+      const saleProductId = tekst(body.product?.id || '', 100).trim(), saleRecord = saleData.artway_dostepnosc?.[saleProductId] || {};
+      const authoritativeProducts = await allegroAgentProduktyKompletne(saleData);
+      const authoritativeProduct = authoritativeProducts.get(saleProductId) || {};
+      const saleDecision = String(saleRecord.decision || '').toLowerCase(), graceUntil = Date.parse(String(saleRecord.expiresAt || ''));
+      const unavailableByRecord = saleDecision === 'manual_available' ? false : saleDecision === 'grace' ? (!Number.isFinite(graceUntil) || graceUntil <= Date.now()) : ['niedostepny', 'ukryty', 'wstrzymany', 'brak'].includes(String(saleRecord.status || saleDecision).toLowerCase());
+      const unavailableByProduct = [body.product || {}, authoritativeProduct].some((product) => product.sprzedazAktywna === false || product.saleAvailable === false || product.dostepny === false || product.aktywny === false || product.ukryty === true || product?._catalog?.availability?.saleAvailable === false);
+      if (unavailableByRecord || unavailableByProduct) return odpowiedz({ ok: false, error: 'Produkt jest ukryty lub niedostępny. Najpierw wznów sprzedaż w kartotece.', code: 'product_sale_unavailable', productId: saleProductId }, 409);
       const approval = body.approval && typeof body.approval === 'object' ? body.approval : null;
       const requestProductId = tekst(body.product?.id || '', 100).trim();
       const approvalHandle = allegroOperationReceipts.validate({ approval, productId: requestProductId });
