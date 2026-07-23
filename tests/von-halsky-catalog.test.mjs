@@ -12,6 +12,25 @@ import {
 } from '../src/backend/lib/domain/von-halsky-catalog.mjs';
 import { createVonHalskyApiClient } from '../src/backend/lib/domain/von-halsky-api-client.mjs';
 import { createVonHalskyRoute } from '../src/backend/lib/von-halsky-route.mjs';
+import { vonHalskyCheckEditorial, VON_HALSKY_CONTENT_POLICY } from '../src/backend/lib/domain/von-halsky-compliance.mjs';
+
+test('osobna bramka Von Halsky blokuje logistykę, linki i nieobsługiwany HTML', () => {
+  const safe = vonHalskyCheckEditorial({
+    nazwa: 'Rodzinna gra edukacyjna Alexander',
+    opisKrotki: 'Gra wspiera spostrzegawczość i wspólną zabawę.',
+    opis: '<h2>Rozgrywka</h2><p>Zestaw zawiera elementy potrzebne do rozegrania partii zgodnie z dołączoną instrukcją.</p>',
+  });
+  assert.equal(safe.ok, true);
+  const blocked = vonHalskyCheckEditorial({
+    nazwa: 'Gra',
+    opis: '<table><tr><td>Wysyłka InPost. Więcej na https://sklep.example.pl</td></tr></table>',
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.policyId, VON_HALSKY_CONTENT_POLICY.id);
+  assert.ok(blocked.violations.some((item) => item.id === 'delivery_data'));
+  assert.ok(blocked.violations.some((item) => item.id === 'external_link'));
+  assert.ok(blocked.violations.some((item) => item.id === 'unsupported_markup'));
+});
 
 test('Von Halsky uznaje produkt z EAN, opisem, zdjęciem i ceną za gotowy', () => {
   const result = vonHalskyProductReadiness({

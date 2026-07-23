@@ -3,9 +3,9 @@
 // o produkcie. Kontakt, płatność i dostawa mają własne sekcje Allegro.
 
 export const ALLEGRO_COMPLIANCE_POLICY = Object.freeze({
-  id: 'allegro-product-description-2026-07-21-v3',
+  id: 'allegro-product-description-2026-07-23-v4',
   name: 'Opis wyłącznie o oferowanym produkcie',
-  source: 'https://help.allegro.com/pl/sell/a/sprzedaz-poza-allegro-i-omijanie-oplat-aMloER9LrH8',
+  source: 'https://help.allegro.com/pl/sell/a/jakie-sa-zasady-dotyczace-wystawiania-i-opisu-6M9EGaKm1SV',
   descriptionSource: 'https://help.allegro.com/pl/sell/c/zasady-dla-tytulu-i-opisu',
 });
 
@@ -54,6 +54,26 @@ const RULES = Object.freeze([
     // wyłącznie informacje o produkcie. Koszt, termin, metoda, przewoźnik,
     // nadanie i odbiór są obsługiwane przez ustawienia dostawy oferty.
     pattern: /(?<![\p{L}\p{N}_])(?:dostaw(?:a|y|ę|ie|ą)|wysy[łl](?:ka|ki|kę|ce|ką|amy|amy\s+w|ka\s+w|ka\s+od|ka\s+gratis)|czas\s+(?:realizacji|nadania|dostawy|wysy[łl]ki)|termin\s+(?:realizacji|nadania|dostawy|wysy[łl]ki)|koszt(?:y)?\s+(?:dostawy|wysy[łl]ki|przesy[łl]ki)|darmow(?:a|ej|ą)\s+dostaw(?:a|y|ę|ie|ą)|przesy[łl](?:ka|ki|kę|ce|ką)|nadani[aeu]|paczkomat(?:u|y|em|ach)?|paczko\s*punkt|kurier(?:a|em|zy|owi|ska|skie|ską)|in\s*post|odbiór\s+(?:osobisty|w\s+punkcie|w\s+paczkomacie)|wysy[łl]amy|wyślemy|wyslemy|doręczeni[aeu])(?![\p{L}\p{N}_])/giu,
+  },
+  {
+    id: 'marketing_claim',
+    label: 'hasło reklamowe lub promocyjne',
+    pattern: /\b(?:gratis|tanio|promocja|wyprzedaż|hit(?:\s+sprzedażowy)?|idealny\s+prezent|doskonały\s+prezent|najlepszy|najtańszy|okazja\s+cenowa|kup\s+teraz)\b/giu,
+  },
+  {
+    id: 'other_product_or_variant',
+    label: 'informacja o innym produkcie lub wariancie',
+    pattern: /\b(?:inne\s+(?:produkty|gry|zabawki|warianty|kolory|rozmiary)|pozostał(?:e|ych)\s+(?:produkty|oferty|warianty)|dostępn(?:e|y)\s+(?:także|również)\s+(?:w\s+)?inn(?:e|ym|ych)\s+(?:wariantach|kolorach|rozmiarach|ofertach))\b/giu,
+  },
+  {
+    id: 'seller_policy_information',
+    label: 'informacja przeznaczona do innej sekcji oferty',
+    pattern: /\b(?:gwarancj(?:a|i|ę)|zwrot(?:y|u|em)?|reklamacj(?:a|i|ę)|urlop|przerwa\s+w\s+sprzedaży|termin\s+przydatności|data\s+ważności|krótki\s+termin|personalizacj(?:a|i|ę))\b/giu,
+  },
+  {
+    id: 'product_acquisition_source',
+    label: 'informacja o miejscu pozyskania produktu',
+    pattern: /\b(?:bezpośrednio\s+od\s+(?:producenta|dystrybutora|hurtowni)|pochodzi\s+od\s+(?:producenta|dystrybutora)|z\s+naszej\s+hurtowni|od\s+autoryzowanego\s+dystrybutora)\b/giu,
   },
   {
     id: 'external_url',

@@ -63,6 +63,16 @@ test('opis Allegro usuwa każdą informację logistyczną i pozostawia fakty o p
   assert.doesNotMatch(sanitized.text, /wysyłk/i);
 });
 
+test('opis Allegro blokuje marketing, inne warianty i treści z innych sekcji oferty', () => {
+  const examples = [
+    'Idealny prezent i hit sprzedażowy w promocyjnej cenie.',
+    'Pozostałe warianty oraz inne produkty znajdziesz w naszych ofertach.',
+    'Produkt ma gwarancję, możliwość zwrotu i szybką reklamację.',
+    'Towar pochodzi bezpośrednio od producenta.',
+  ];
+  for (const text of examples) assert.equal(allegroCheckText(text).ok, false, text);
+});
+
 test('blokada rozpoznaje encje, komentarze i niewidoczne znaki', () => {
   const examples = [
     'Skontaktuj&nbsp;się przed zakupem.',

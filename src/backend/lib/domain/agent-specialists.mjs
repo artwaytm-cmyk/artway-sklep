@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'; import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
 import { validManufacturerName } from './product-field-validation.mjs'; import { createPlatformPromptProfile, requestSpecialistResponse } from './agent-specialist-openai.mjs';
-import { repairAllegroEditorial } from './agent-specialist-compliance.mjs';
+import { enforceProductEditorialCompliance } from './agent-specialist-compliance.mjs';
 import { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts } from './agent-specialists-support.mjs';
 import { automaticBatchLimit, statusDecisionData } from './agent-specialists-status-support.mjs';
 export function createAgentSpecialists({
@@ -301,7 +301,10 @@ export function createAgentSpecialists({
     const current = await readState(), run = current.history.find((item) => item?.id === clean(id, 100));
     if (!run || run.status !== 'completed' || run.target?.type !== 'product' || !clean(run.target?.productId, 100)) throw Object.assign(new Error('Nie znaleziono szkicu produktu do zatwierdzenia.'), { code: 'agent_specialist_draft_not_found', status: 404 });
     if (['applied', 'auto_applied', 'not_needed'].includes(run.approvalStatus)) return { applied: false, duplicate: true, run };
-    const normalizedRunResult = ['product_content', 'allegro_compliance'].includes(run.specialist) ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
+    const editorialSpecialist = ['product_content', 'allegro_compliance', 'von_halsky_compliance'].includes(run.specialist);
+    const normalizedRunResult = editorialSpecialist ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
+    const finalAssessment = editorialSpecialist ? automaticEditorialAssessment({ ...run, result: normalizedRunResult }, { ...current.config, autoApplyProductEditorial: true }) : null;
+    if (editorialSpecialist && ['allegro_compliance', 'von_halsky_compliance', 'source_page_noise'].includes(finalAssessment.reason)) throw Object.assign(new Error('Treść nie przeszła końcowej kontroli kanałów i nie została zapisana.'), { code: finalAssessment.reason, status: 422, violations: finalAssessment.violations || [] });
     const allProposed = productPatch(normalizedRunResult), requestedKeys = new Set((Array.isArray(options.fieldKeys) ? options.fieldKeys : []).map((item) => PRODUCT_OUTPUT_TO_FIELD[clean(item, 80)] || clean(item, 80)).filter(Boolean));
     const proposedPatch = requestedKeys.size ? Object.fromEntries(Object.entries(allProposed).filter(([key]) => requestedKeys.has(key))) : allProposed;
     const productId = String(run.target.productId);
@@ -318,7 +321,7 @@ export function createAgentSpecialists({
       const editorialTarget = options.editorialTarget && typeof options.editorialTarget === 'object' ? options.editorialTarget : productEditorialTarget(effective);
       const inputFingerprint = options.editorialFingerprint || productEditorialFingerprint(effective, editorialTarget);
       const mergedProduct = { ...effective, ...patch };
-      const editorialReady = ['product_content', 'allegro_compliance'].includes(run.specialist)
+      const editorialReady = editorialSpecialist
         && (options.editorialPolicyValidated === true || (normalizedRunResult?.readyForApproval === true && normalizedRunResult?.complianceStatus === 'ready'))
         && clean(mergedProduct.nazwa || mergedProduct.name, 300)
         && clean(mergedProduct.opisKrotki || mergedProduct.krotkiOpis, 500)
@@ -333,7 +336,7 @@ export function createAgentSpecialists({
             ...(effective.contentEditorial || {}), status: 'ready', sourceRole: effective.sourceMaterial ? 'facts_only' : 'catalog_facts',
             channels: editorialTarget.channels, targets: { store: true, vonHalsky: true, allegro: editorialTarget.allegro === true },
             layoutPolicy: 'allegro_sections', promptVersion: PROMPT_VERSION, inputFingerprint,
-            preparedAt: timestamp, runId: run.id, model: run.model, preparedBy: options.editorialAutomatic === true ? 'autonomous-agent' : 'administrator-approved-agent', warnings: [],
+            preparedAt: timestamp, runId: run.id, model: run.model, preparedBy: options.editorialAutomatic === true ? 'autonomous-agent' : 'administrator-approved-agent', warnings: [], channelCompliance: finalAssessment?.channelCompliance || {},
           },
           contentEditorialPreparedAt: timestamp, contentEditorialSource: options.editorialAutomatic === true ? 'autonomous-agent-specialist' : 'approved-agent-specialist',
           vonHalskyContentMode: 'store', vonHalskyTitle: '', vonHalskyShortDescription: '', vonHalskyDescription: '',
@@ -409,15 +412,16 @@ export function createAgentSpecialists({
       context: { product: productFacts(product), administratorInstruction: note, editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint },
       target: { type: 'product', productId: safeId, name: clean(product.nazwa, 180), channels: editorial.target.channels, editorialFingerprint: editorial.fingerprint },
     }, actor);
-    const current = await readState(), assessment = automaticEditorialAssessment(draft, current.config);
+    const current = await readState(), reviewed = await enforceProductEditorialCompliance({ draft, assess: (entry) => automaticEditorialAssessment(entry, current.config), run, productFacts, product, editorial, target: draft.target });
+    const safeDraft = reviewed.draft, assessment = reviewed.assessment;
     if (assessment.eligible) {
-      const applied = await applyProductDraft(draft.id, { source: actor?.email || actor?.name || 'admin-product-editor' }, { missingOnly: false, editorialAutomatic: true, editorialPolicyValidated: true, editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint });
+      const applied = await applyProductDraft(safeDraft.id, { source: actor?.email || actor?.name || 'admin-product-editor' }, { missingOnly: false, editorialAutomatic: true, editorialPolicyValidated: true, editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint });
       const completedAt = now().toISOString();
       await change(STATE_KEY, { config: DEFAULT_CONFIG, history: [], decisions: [], updatedAt: '' }, (value) => {
         const previous = state(value);
         return { ...previous, decisions: previous.decisions.map((item) => item.kind === 'product_content_review' && String(item.target?.productId || '') === safeId && activeDecision(item, now()) ? normalizeDecision({ ...item, status: 'resolved', resolvedAt: completedAt, resolvedBy: 'automatic-editorial-policy', resolutionNote: 'Bezpieczna redakcja została zapisana automatycznie zgodnie z polityką uprawnień.' }, completedAt) : item), updatedAt: completedAt };
       });
-      return { run: { ...draft, approvalStatus: applied.applied ? 'auto_applied' : draft.approvalStatus }, decision: null, applied, automatic: true, policyReason: assessment.reason };
+      return { run: { ...safeDraft, approvalStatus: applied.applied ? 'auto_applied' : safeDraft.approvalStatus }, decision: null, applied, automatic: true, policyReason: assessment.reason };
     }
     await markProductEditorialRetry(product, draft, editorial, assessment.reason);
     const completedAt = now().toISOString();
@@ -528,12 +532,8 @@ export function createAgentSpecialists({
         const retryAttempt = Math.max(0, Number(item.editorial.editorial?.retryCount) || 0) + 1;
         const target = { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint };
         let draft = await run({ specialist: 'product_content', source: 'automatic', scenario: scenarioPayload('catalog-editorial'), instruction: `Przygotuj jeden kompletny, profesjonalny opis używany równocześnie w sklepie, Von Halsky${item.editorial.target.allegro ? ' i Allegro' : ''}. Popraw również istniejącą słabą nazwę i treść, nie tylko puste pola. Jeśli istnieje starsza osobna prezentacja Von Halsky, potraktuj ją jako materiał redakcyjny i scal z główną kartoteką bez utraty potwierdzonych faktów. Zachowaj potwierdzone fakty, zastosuj czytelne akapity, nagłówki i listy. Nie pytaj o opcjonalne dane — jeżeli ich nie ma, pomiń je i dokończ bezpieczną redakcję. To automatyczna próba ${retryAttempt}; obowiązkowo zwróć wszystkie pola redakcyjne, jeżeli tożsamość produktu jest rozpoznawalna.`, context: { product: productFacts(item.product), editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint, editorialRetryAttempt: retryAttempt }, target }, { source: 'background-agent' });
-        let assessment = automaticEditorialAssessment(draft, current.config);
-        if (assessment.reason === 'allegro_compliance') {
-          const rejectedDraft = normalizeProductContentEditorialResult(draft.result || {});
-          draft = await repairAllegroEditorial({ run, productFacts, product: item.product, editorial: item.editorial, target, rejectedEditorial: rejectedDraft, violations: assessment.violations });
-          assessment = automaticEditorialAssessment(draft, current.config);
-        }
+        const reviewed = await enforceProductEditorialCompliance({ draft, assess: (entry) => automaticEditorialAssessment(entry, current.config), run, productFacts, product: item.product, editorial: item.editorial, target });
+        draft = reviewed.draft; const assessment = reviewed.assessment;
         if (assessment.eligible) {
           const result = await applyProductDraft(draft.id, { source: 'background-agent' }, { missingOnly: false, editorialAutomatic: true, editorialPolicyValidated: true, editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint });
           if (result.applied) applied.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), fields: Object.keys(result.patch || {}) });

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { allegroCheckText, allegroSanitizePlainText } from '../allegro-compliance.mjs';
+import { allegroSanitizePlainText } from '../allegro-compliance.mjs';
+import { channelContentCompliance } from './channel-content-compliance.mjs';
 import { AGENT_ACTION_POLICY, NEVER_AUTOMATIC } from './agent-action-policy.mjs';
 import { decisionFingerprint, decisionSubjectKey, normalizeDecisionReceipt } from './agent-decision-state.mjs';
 
@@ -27,7 +28,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-23.1';
+const PROMPT_VERSION = '2026-07-23.2';
 const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription' });
 
 const SPECIALISTS = Object.freeze({
@@ -36,8 +37,8 @@ const SPECIALISTS = Object.freeze({
     icon: '✨', label: 'Redaktor produktu', area: 'Katalog i sklep',
     description: 'Tworzy jeden spójny tytuł, krótki i pełny opis oraz pola SEO dla sklepu, Von Halsky i powiązanej oferty Allegro wyłącznie z przekazanych faktów.',
     fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
-    scenario: { id: 'catalog-editorial', version: '2026-07-23.1' },
-    rules: 'Nazwę ze źródła traktuj jako fakt o tożsamości, a nie gotowy tytuł. Usuń dopiski sklepu źródłowego, powtórzenia i chaos wielkich liter; ułóż naturalną nazwę sprzedażową, zachowując markę, model i wariant. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach. Treść jest jednym kanonicznym opisem dla sklepu, Von Halsky i powiązanej oferty Allegro: nigdy nie dodawaj telefonu, e-maila, adresu strony, zachęty do kontaktu, negocjowania ceny, zewnętrznej płatności, sprzedaży poza Allegro ani informacji o dostawie, wysyłce, przewoźniku, paczkomacie, nadaniu, odbiorze, kosztach lub terminach realizacji.',
+    scenario: { id: 'catalog-editorial', version: '2026-07-23.2' },
+    rules: 'Nazwę ze źródła traktuj jako fakt o tożsamości, a nie gotowy tytuł. Usuń dopiski sklepu źródłowego, powtórzenia i chaos wielkich liter; ułóż naturalną nazwę sprzedażową 12–75 znaków i minimum 3 słowa, zachowując markę, model i wariant. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach. Treść jest jednym kanonicznym opisem dla sklepu, Von Halsky i powiązanej oferty Allegro: nigdy nie dodawaj telefonu, e-maila, adresu strony, zachęty do kontaktu, negocjowania ceny, zewnętrznej płatności, sprzedaży poza Allegro, haseł reklamowych, innych produktów lub wariantów, miejsca pozyskania towaru, gwarancji, zwrotów, reklamacji ani informacji o dostawie, wysyłce, przewoźniku, paczkomacie, nadaniu, odbiorze, kosztach lub terminach realizacji.',
   },
   allegro_offer: {
     assistantId: 'asst_16UEvdbo3boUso6xyYeANYnQ', platformPrompt: { id: 'pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7', version: '1' },
@@ -54,9 +55,10 @@ const SPECIALISTS = Object.freeze({
     icon: '⚖️', label: 'Strażnik zgodności Allegro', area: 'Allegro • kontrola końcowa',
     description: 'Naprawia wyłącznie treść odrzuconą przez bramkę zgodności i przekazuje ją ponownie do deterministycznej walidacji.',
     fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
-    scenario: { id: 'allegro-compliance-review', version: '2026-07-21.2' },
-    rules: 'Zachowaj wszystkie potwierdzone fakty produktu i układ HTML, lecz usuń całe zdania lub punkty dotyczące kontaktu, sprzedaży poza Allegro, płatności, dostawy, wysyłki, przewoźnika, paczkomatu, nadania, odbioru, kosztów albo terminów realizacji. Nie zastępuj ich inną informacją logistyczną i niczego nie zgaduj. Zwróć kompletny zestaw pól redakcyjnych.',
+    scenario: { id: 'allegro-compliance-review', version: '2026-07-23.2' },
+    rules: 'Zachowaj wszystkie potwierdzone fakty jednego produktu i układ HTML, a tytuł doprowadź do 12–75 znaków i minimum 3 słów. Usuń całe zdania lub punkty dotyczące kontaktu, sprzedaży poza Allegro, płatności, dostawy, wysyłki, przewoźnika, paczkomatu, nadania, odbioru, kosztów, terminów realizacji, haseł reklamowych, innych produktów lub wariantów, miejsca pozyskania towaru, gwarancji, zwrotów albo reklamacji. Nie zastępuj ich inną informacją i niczego nie zgaduj. Zwróć kompletny zestaw pól redakcyjnych.',
   },
+  von_halsky_compliance: { assistantId: '', icon: '🐕', label: 'Strażnik treści Von Halsky', area: 'InPost Von Halsky • kontrola końcowa', description: 'Naprawia kartę odrzuconą przez niezależną bramkę treści kanału Von Halsky i ponawia kontrolę.', fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'], scenario: { id: 'von-halsky-compliance-review', version: '2026-07-23.2' }, rules: 'Zachowaj wyłącznie potwierdzone fakty o jednym produkcie. Nazwa ma mieć 7–150 znaków, opis co najmniej 100 znaków i czytelne sekcje. Usuń linki, osadzone obrazy, kontakt, płatności, logistykę, hasła promocyjne oraz nieobsługiwane znaczniki. Niczego nie zgaduj i zwróć komplet wspólnych pól redakcyjnych.' },
   customer_reply: {
     assistantId: 'asst_M2ZRdoHVzQ0jIzYZ3TCLwcoI', platformPrompt: { id: 'pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421', version: '1' },
     icon: '💬', label: 'Opiekun klienta', area: 'Wiadomości i dyskusje',
@@ -323,7 +325,7 @@ function normalizeResult(raw = {}, specialist) {
     readyForApproval: raw.readyForApproval === true && missingFacts.length === 0,
     complianceStatus: ['ready', 'needs_review', 'blocked_missing_facts'].includes(raw.complianceStatus) ? raw.complianceStatus : (missingFacts.length ? 'blocked_missing_facts' : 'needs_review'),
   };
-  return ['product_content', 'allegro_compliance'].includes(specialist) ? normalizeProductContentEditorialResult(result) : result;
+  return ['product_content', 'allegro_compliance', 'von_halsky_compliance'].includes(specialist) ? normalizeProductContentEditorialResult(result) : result;
 }
 
 function normalizeProductContentEditorialResult(result = {}) {
@@ -471,7 +473,7 @@ function productEditorialQuality(product = {}) {
 }
 
 function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
-  const assessedResult = ['product_content', 'allegro_compliance'].includes(run.specialist) ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
+  const assessedResult = ['product_content', 'allegro_compliance', 'von_halsky_compliance'].includes(run.specialist) ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
   const patch = productPatch(assessedResult), fields = Object.keys(patch);
   if (settings.autoApplyProductEditorial === false) return { eligible: false, reason: 'automatic_editorial_disabled', fields };
   if (!fields.length) return { eligible: false, reason: 'empty_patch', fields };
@@ -486,11 +488,11 @@ function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
   // Treść karty jest wspólna dla sklepu i Allegro, dlatego zgodność obowiązuje
   // już dla redakcji sklepowej. Późniejsze podpięcie kanału nie może ujawnić
   // starej informacji logistycznej.
-  const compliance = allegroCheckText([patch.nazwa, patch.opisKrotki, patch.opis, patch.allegroTitle, patch.allegroDescription].filter(Boolean).join('\n'));
-  if (!compliance.ok) return { eligible: false, reason: 'allegro_compliance', fields, violations: compliance.violations.map((item) => item.label) };
+  const compliance = channelContentCompliance(patch);
+  if (!compliance.ok) return { eligible: false, reason: compliance.reason, fields, violations: compliance.violations.map((item) => item.label), channelCompliance: compliance.channels };
   const editorialQuality = productEditorialTextQuality(patch);
   if (!editorialQuality.clean) return { eligible: false, reason: 'source_page_noise', fields, violations: editorialQuality.issues };
-  return { eligible: true, reason: 'safe_editorial_policy', fields, modelNotes: [...(assessedResult?.warnings || []), ...(assessedResult?.missingFacts || [])].slice(0, 20) };
+  return { eligible: true, reason: 'safe_editorial_policy', fields, channelCompliance: compliance.channels, modelNotes: [...(assessedResult?.warnings || []), ...(assessedResult?.missingFacts || [])].slice(0, 20) };
 }
 
 function valuePresent(value) {

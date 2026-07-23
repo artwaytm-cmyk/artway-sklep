@@ -24,9 +24,10 @@ function openAiPayload(fields = []) {
 }
 
 test('zespół zawiera konkretne role do treści, promocji, komunikacji i nadzoru', () => {
-  assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'allegro_offer', 'allegro_compliance', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality', 'operations_supervisor']);
+  assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'allegro_offer', 'allegro_compliance', 'von_halsky_compliance', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality', 'operations_supervisor']);
   assert.match(SPECIALISTS.allegro_offer.rules, /poza Allegro/i);
   assert.match(SPECIALISTS.allegro_compliance.rules, /dostaw/i);
+  assert.match(SPECIALISTS.von_halsky_compliance.rules, /linki/i);
   assert.match(SPECIALISTS.supplier_message.rules, /cen/i);
 });
 
@@ -282,7 +283,7 @@ test('stare oznaczenie ready nie ukrywa surowego opisu dostawcy i Agent nadpisuj
 
   const longDescription = '<h2>Wspólna zabawa z obrazkami</h2><p>Loteryjka obrazkowa pomaga ćwiczyć spostrzegawczość i kojarzenie elementów podczas rodzinnej rozgrywki.</p><ul><li>Czytelne ilustracje</li><li>Proste zasady zabawy</li></ul>';
   const fields = [
-    { key: 'title', label: 'Nazwa', value: 'Loteryjka obrazkowa' },
+    { key: 'title', label: 'Nazwa', value: 'Loteryjka obrazkowa Alexander' },
     { key: 'short_description', label: 'Opis krótki', value: 'Obrazkowa gra rozwijająca spostrzegawczość i umiejętność kojarzenia.' },
     { key: 'long_description', label: 'Opis pełny', value: longDescription },
     { key: 'seo_title', label: 'SEO title', value: 'Loteryjka obrazkowa – Alexander' },
@@ -375,6 +376,33 @@ test('Strażnik Allegro automatycznie poprawia logistykę zatrzymaną po pierwsz
   assert.match(product.opis, /papierowy statek/i);
   assert.doesNotMatch(product.opis, /wysyłk|kurier|InPost/i);
   assert.equal(product.contentEditorial.status, 'ready');
+});
+
+test('Strażnik Von Halsky osobno poprawia strukturę treści odrzuconą przez kanał', async () => {
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 104, nazwa: 'Gra edukacyjna Alexander', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis źródłowy.', gtin: '5906018000030' }] }, rev: 1 } });
+  const common = [
+    { key: 'title', label: 'Nazwa', value: 'Gra edukacyjna Alexander' },
+    { key: 'short_description', label: 'Opis krótki', value: 'Gra edukacyjna wspierająca spostrzegawczość i logiczne myślenie.' },
+    { key: 'seo_title', label: 'SEO title', value: 'Gra edukacyjna Alexander' },
+    { key: 'seo_description', label: 'SEO description', value: 'Gra edukacyjna Alexander wspierająca spostrzegawczość oraz logiczne myślenie.' },
+    { key: 'seo_keywords', label: 'Frazy', value: 'gra edukacyjna, Alexander' },
+  ];
+  const unsafe = openAiPayload([...common, { key: 'long_description', label: 'Opis pełny', value: '<table><tr><td>Gra zawiera elementy potrzebne do rodzinnej rozgrywki i ćwiczenia spostrzegawczości.</td></tr></table><p>Czytelne zasady pomagają rozpocząć wspólną zabawę.</p>' }]);
+  const safe = openAiPayload([...common, { key: 'long_description', label: 'Opis pełny', value: '<h2>Rozwijająca rozgrywka</h2><p>Gra zawiera elementy potrzebne do rodzinnej rozgrywki i ćwiczenia spostrzegawczości.</p><p>Czytelne zasady pomagają rozpocząć wspólną zabawę.</p>' }]);
+  let calls = 0;
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'test-key', now: () => new Date('2026-07-23T14:00:00.000Z'),
+    fetchImpl: async () => new Response(JSON.stringify(++calls === 1 ? unsafe : safe), { status: 200, headers: { 'content-type': 'application/json' } }),
+  });
+  const cycle = await service.automaticCycle();
+  assert.equal(calls, 2);
+  assert.equal(cycle.applied.length, 1);
+  const status = await service.status();
+  assert.deepEqual(status.history.slice(0, 2).map((item) => item.specialist), ['von_halsky_compliance', 'product_content']);
+  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  assert.doesNotMatch(product.opis, /<table|<tr|<td/i);
+  assert.equal(product.contentEditorial.channelCompliance.vonHalsky.status, 'passed');
+  assert.equal(product.contentEditorial.channelCompliance.allegro.status, 'passed');
 });
 
 test('nowa wiadomość tworzy szkic i decyzję, lecz nie jest wysyłana automatycznie', async () => {
@@ -478,7 +506,7 @@ test('po okresie nauki Agent sam zapisuje tylko pola o utrwalonej wysokiej akcep
     settings: { data: { artway_produkty_dodane: [{ id: 81, nazwa: 'GRA TESTOWA', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Krótki opis źródłowy.', gtin: '5906018000092' }] }, rev: 1 },
   });
   const fields = [
-    { key: 'title', label: 'Nazwa', value: 'Gra testowa' }, { key: 'short_description', label: 'Opis krótki', value: 'Uporządkowany skrót produktu.' },
+    { key: 'title', label: 'Nazwa', value: 'Gra testowa Alexander' }, { key: 'short_description', label: 'Opis krótki', value: 'Uporządkowany skrót produktu.' },
     { key: 'long_description', label: 'Opis pełny', value: '<h2>Gra testowa</h2><p>Uporządkowany, dłuższy opis produktu oparty wyłącznie na przekazanych danych źródłowych i przeznaczony do czytelnej prezentacji.</p><ul><li>Potwierdzony producent</li></ul>' },
     { key: 'seo_title', label: 'SEO title', value: 'Gra testowa – Alexander' }, { key: 'seo_description', label: 'SEO description', value: 'Poznaj grę testową producenta Alexander i sprawdź uporządkowane informacje o produkcie.' },
     { key: 'seo_keywords', label: 'Frazy', value: 'gra testowa, Alexander' },
@@ -487,7 +515,7 @@ test('po okresie nauki Agent sam zapisuje tylko pola o utrwalonej wysokiej akcep
   const cycle = await service.automaticCycle();
   assert.equal(cycle.applied.length, 1);
   assert.equal(cycle.prepared[0].status, 'auto_applied');
-  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].nazwa, 'Gra testowa');
+  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].nazwa, 'Gra testowa Alexander');
   assert.equal((await service.status()).learning.productContent.ready, true);
 });
 
