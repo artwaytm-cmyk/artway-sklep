@@ -14,28 +14,39 @@ function widokLogowanie(){
     <p class="auth-alt">Nie masz konta? <a href="#/rejestracja">Zarejestruj się</a></p>
   </div></div>`;
 }
-let logowanieMfaStan=null,logowaniePoMfa=null;
+let logowanieMfaStan=null;
 function zaladujGeneratorQrMfa(){
   if(window.qrcode)return Promise.resolve(true);
   return new Promise((resolve,reject)=>{const istniejacy=document.querySelector('script[data-mfa-qr]');if(istniejacy){istniejacy.addEventListener("load",()=>resolve(true),{once:true});istniejacy.addEventListener("error",reject,{once:true});return;}const s=document.createElement("script");s.src="/assets/vendor/qrcode-generator.js";s.dataset.mfaQr="1";s.onload=()=>resolve(true);s.onerror=reject;document.head.appendChild(s);});
 }
 async function pokazLogowanieMfa(data){
-  logowanieMfaStan=data;const setup=data.mfaSetupRequired===true,form=$("loginForm");if(form)form.hidden=true;
-  $("authMsg").innerHTML=`<section class="panel" style="margin:.8rem 0;padding:1rem;border:1px solid var(--line)"><div class="order-pro-label">🛡️ Weryfikacja administratora</div><h2 style="margin:.35rem 0">${setup?"Połącz Google Authenticator":"Potwierdź logowanie"}</h2><p class="pay-note" style="text-align:left">${setup?"Zeskanuj kod QR w aplikacji Google Authenticator, a następnie wpisz aktualny sześciocyfrowy kod.":"Wpisz aktualny kod z Google Authenticator albo jeden z zapisanych kodów awaryjnych."}</p>${setup?`<div id="adminMfaQr" style="display:grid;place-items:center;min-height:220px;margin:.8rem 0"></div><details><summary>Nie możesz zeskanować kodu?</summary><p class="pay-note">Klucz ręczny:</p><code style="display:block;word-break:break-all;padding:.7rem;background:var(--soft)">${esc(data.manualKey||"")}</code></details>`:""}<form onsubmit="potwierdzLogowanieMfa(event)" style="margin-top:1rem"><div class="f-group"><label>${setup?"Kod 6-cyfrowy":"Kod z aplikacji lub kod awaryjny"}</label><input required autofocus name="kod" inputmode="numeric" autocomplete="one-time-code" maxlength="20" pattern="[0-9A-Fa-f -]{6,20}"></div><button class="checkout-btn" type="submit">Zweryfikuj i zaloguj</button><button class="btn ghost" type="button" style="margin-top:.5rem;width:100%" onclick="anulujLogowanieMfa()">Wróć do logowania</button></form></section>`;
-  if(setup){try{await zaladujGeneratorQrMfa();const qr=window.qrcode(0,"M");qr.addData(String(data.provisioningUri||""),"Byte");qr.make();const el=$("adminMfaQr");if(el)el.innerHTML=qr.createSvgTag({cellSize:5,margin:3,scalable:true});}catch(e){const el=$("adminMfaQr");if(el)el.innerHTML='<div class="form-err">Nie udało się narysować kodu QR. Użyj klucza ręcznego poniżej.</div>';}}
+  logowanieMfaStan=data;const setup=data.mfaSetupRequired===true,emailMode=!!data.emailRecoveryToken,form=$("loginForm");if(form)form.hidden=true;
+  $("authMsg").innerHTML=`<section class="panel" style="margin:.8rem 0;padding:1rem;border:1px solid var(--line)"><div class="order-pro-label">🛡️ Weryfikacja administratora</div><h2 style="margin:.35rem 0">${setup?"Połącz Google Authenticator":emailMode?"Kod wysłany na e-mail":"Potwierdź logowanie"}</h2><p class="pay-note" style="text-align:left">${setup?"Zeskanuj kod QR w aplikacji Google Authenticator, a następnie wpisz aktualny sześciocyfrowy kod. Żaden plik z sekretami nie zostanie utworzony ani pobrany.":emailMode?`Wpisz sześciocyfrowy kod wysłany na ${esc(data.maskedEmail||"adres konta")}. Kod jest ważny 10 minut i działa jeden raz.`:"Wpisz aktualny sześciocyfrowy kod z Google Authenticator."}</p>${setup?`<div id="adminMfaQr" style="display:grid;place-items:center;min-height:220px;margin:.8rem 0"></div>`:""}<form onsubmit="potwierdzLogowanieMfa(event)" style="margin-top:1rem"><div class="f-group"><label>${emailMode?"Kod z wiadomości e-mail":"Kod 6-cyfrowy"}</label><input required autofocus name="kod" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"></div><button class="checkout-btn" type="submit">Zweryfikuj i zaloguj</button>${!setup&&!emailMode?`<button class="btn ghost" type="button" style="margin-top:.5rem;width:100%" onclick="wyslijKodOdzyskaniaMfa(this)">Nie mam dostępu do aplikacji — wyślij kod na e-mail</button>`:""}${emailMode?`<button class="btn ghost" type="button" style="margin-top:.5rem;width:100%" onclick="wrocDoAuthenticatoraMfa()">Użyj Google Authenticator</button>`:""}<button class="btn ghost" type="button" style="margin-top:.5rem;width:100%" onclick="anulujLogowanieMfa()">Wróć do logowania</button></form></section>`;
+  if(setup){try{await zaladujGeneratorQrMfa();const qr=window.qrcode(0,"M");qr.addData(String(data.provisioningUri||""),"Byte");qr.make();const el=$("adminMfaQr");if(el)el.innerHTML=qr.createSvgTag({cellSize:5,margin:3,scalable:true});}catch(e){const el=$("adminMfaQr");if(el)el.innerHTML='<div class="form-err">Nie udało się narysować kodu QR. Wróć do logowania i spróbuj ponownie.</div>';}}
 }
-function anulujLogowanieMfa(){logowanieMfaStan=null;logowaniePoMfa=null;const form=$("loginForm");if(form)form.hidden=false;$("authMsg").innerHTML="";}
+function anulujLogowanieMfa(){logowanieMfaStan=null;const form=$("loginForm");if(form)form.hidden=false;$("authMsg").innerHTML="";}
+async function wyslijKodOdzyskaniaMfa(button){
+  if(!logowanieMfaStan?.challengeToken)return;
+  if(button){button.disabled=true;button.textContent="Wysyłam bezpieczny kod…";}
+  try{
+    const d=await chmura("login-mfa-email-request",{method:"POST",body:{challengeToken:logowanieMfaStan.challengeToken},timeout:18000});
+    await pokazLogowanieMfa({...logowanieMfaStan,emailRecoveryToken:d.recoveryChallengeToken,maskedEmail:d.maskedEmail});
+  }catch(bl){if(button){button.disabled=false;button.textContent="Nie mam dostępu do aplikacji — wyślij kod na e-mail";}const section=$("authMsg")?.querySelector("section");section?.insertAdjacentHTML("afterbegin",`<div class="form-err">${esc(bl.message||"Nie udało się wysłać kodu.")}</div>`);}
+}
+function wrocDoAuthenticatoraMfa(){
+  if(!logowanieMfaStan)return;
+  const next={...logowanieMfaStan};delete next.emailRecoveryToken;delete next.maskedEmail;void pokazLogowanieMfa(next);
+}
 async function potwierdzLogowanieMfa(e){
   e.preventDefault();if(!logowanieMfaStan)return;const button=e.submitter;if(button){button.disabled=true;button.textContent="Sprawdzam…";}
-  try{const f=new FormData(e.target),d=await chmura("login-mfa",{method:"POST",body:{challengeToken:logowanieMfaStan.challengeToken,code:String(f.get("kod")||"").trim()}});const user={imie:d.user?.imie||"Administrator",email:d.user?.email,rola:"admin",verified:true};if(Array.isArray(d.recoveryCodes)&&d.recoveryCodes.length){logowaniePoMfa={user,codes:d.recoveryCodes};pokazKodyAwaryjneMfa();return;}await zakonczLogowanie(user);}catch(bl){$("authMsg").querySelector(".form-err")?.remove();e.target.insertAdjacentHTML("beforebegin",`<div class="form-err">${esc(bl.message||"Nieprawidłowy kod.")}</div>`);if(button){button.disabled=false;button.textContent="Zweryfikuj i zaloguj";}}
+  try{
+    const f=new FormData(e.target),emailMode=!!logowanieMfaStan.emailRecoveryToken;
+    const d=await chmura(emailMode?"login-mfa-email-verify":"login-mfa",{method:"POST",body:emailMode?{recoveryChallengeToken:logowanieMfaStan.emailRecoveryToken,code:String(f.get("kod")||"").trim()}:{challengeToken:logowanieMfaStan.challengeToken,code:String(f.get("kod")||"").trim()}});
+    await zakonczLogowanie({...d.user,imie:d.user?.imie||"Administrator",email:d.user?.email,rola:"admin",verified:true});
+  }catch(bl){$("authMsg").querySelector(".form-err")?.remove();e.target.insertAdjacentHTML("beforebegin",`<div class="form-err">${esc(bl.message||"Nieprawidłowy kod.")}</div>`);if(button){button.disabled=false;button.textContent="Zweryfikuj i zaloguj";}}
 }
-function pokazKodyAwaryjneMfa(){
-  const codes=logowaniePoMfa?.codes||[];$("authMsg").innerHTML=`<section class="panel" style="margin:.8rem 0;padding:1rem;border:1px solid var(--line)"><div class="order-pro-label">🔐 Kody awaryjne</div><h2 style="margin:.35rem 0">Zapisz je teraz</h2><p class="pay-note" style="text-align:left">Każdy kod działa tylko raz. Przechowuj je poza telefonem z Google Authenticator.</p><pre style="white-space:pre-wrap;line-height:1.8;padding:1rem;background:var(--soft);border-radius:12px">${esc(codes.join("\n"))}</pre><div class="diag-actions"><button class="btn ghost" type="button" onclick="pobierzKodyAwaryjneMfa()">⬇️ Pobierz plik</button><button class="btn" type="button" onclick="zakonczKonfiguracjeMfa()">Zapisałem kody — przejdź do panelu</button></div></section>`;
-}
-function pobierzKodyAwaryjneMfa(){const codes=logowaniePoMfa?.codes||[];const blob=new Blob([`Artway-TM — kody awaryjne administratora\nUtworzono: ${new Date().toLocaleString("pl-PL")}\n\n${codes.join("\n")}\n`],{type:"text/plain;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="artway-kody-awaryjne.txt";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
-async function zakonczKonfiguracjeMfa(){if(logowaniePoMfa?.user)await zakonczLogowanie(logowaniePoMfa.user);}
 async function zakonczLogowanie(user){
-  logowanieMfaStan=null;logowaniePoMfa=null;ustawSesje(user);
+  logowanieMfaStan=null;ustawSesje(user);zapiszLS("artway_admin_session_refreshed_at",Date.now());
   if(user.rola==="admin"||jestGlownymAdminem(user.email))await synchronizujBazeCentralna(true);else await pobierzMojeZamowieniaCentralne(true);
   toast("Witaj, "+String(user.imie||"Administrator").split(" ")[0]+"! 👋");location.hash=jestAdmin()?"#/admin":"#/konto";
 }
@@ -118,12 +129,32 @@ function widokKonto(){
       <summary style="cursor:pointer;font-weight:700;font-size:.92rem">🔑 Zmień hasło</summary>
       <form onsubmit="zmienHaslo(event)" style="max-width:380px;margin-top:.8rem">
         <div class="f-group"><label>Obecne hasło</label><input required name="stare" type="password" autocomplete="current-password"></div>
-        <div class="f-group"><label>Nowe hasło (min. 6 znaków)</label><input required name="nowe" type="password" minlength="6" autocomplete="new-password"></div>
-        <div class="f-group"><label>Powtórz nowe hasło</label><input required name="nowe2" type="password" minlength="6" autocomplete="new-password"></div>
+        <div class="f-group"><label>Nowe hasło (min. 8 znaków)</label><input required name="nowe" type="password" minlength="8" autocomplete="new-password"></div>
+        <div class="f-group"><label>Powtórz nowe hasło</label><input required name="nowe2" type="password" minlength="8" autocomplete="new-password"></div>
         <button class="btn" type="submit">Zapisz nowe hasło</button>
       </form>
     </details>
+    ${admin?`<details style="margin-top:.8rem">
+      <summary style="cursor:pointer;font-weight:700;font-size:.92rem">🛡️ Bezpieczeństwo sesji administratora</summary>
+      <form onsubmit="zapiszBezpieczenstwoKonta(event)" style="max-width:520px;margin-top:.8rem">
+        <div class="f-group"><label>Automatyczne wylogowanie po bezczynności</label><select name="idleTimeoutMinutes">${ADMIN_IDLE_TIMEOUT_OPTIONS.map(value=>`<option value="${value}" ${adminIdleTimeoutMinutes()===value?"selected":""}>${value<60?`${value} minut`:value===60?"1 godzina":`${value/60} godzin`}</option>`).join("")}</select></div>
+        <p class="pay-note" style="text-align:left">Ruch myszą, klawiaturą lub dotyk odświeża aktywność. Po przekroczeniu limitu panel wyloguje konto również z podpisanej sesji serwera.</p>
+        <p class="pay-note" style="text-align:left">Jeśli utracisz dostęp do Google Authenticator, po podaniu prawidłowego hasła możesz wysłać jednorazowy kod na e-mail tego konta.</p>
+        <button class="btn" type="submit">Zapisz zabezpieczenia</button>
+      </form>
+    </details>`:""}
   </div></div>`;
+}
+async function zapiszBezpieczenstwoKonta(e){
+  e.preventDefault();if(!jestAdmin())return;
+  const button=e.submitter,value=Number(new FormData(e.target).get("idleTimeoutMinutes"));
+  if(button){button.disabled=true;button.textContent="Zapisuję…";}
+  try{
+    const d=await chmura("account-security-settings",{method:"POST",body:{idleTimeoutMinutes:value}});
+    ustawSesje({...sesja,...(d.user||{}),verified:true});zapiszLS("artway_admin_session_refreshed_at",Date.now());adminOdnotujAktywnosc(true);
+    toast(`Automatyczne wylogowanie: ${value} min ✅`);
+  }catch(bl){toast("⚠️ Nie zapisano zabezpieczeń: "+(bl.message||"błąd serwera"));}
+  finally{if(button){button.disabled=false;button.textContent="Zapisz zabezpieczenia";}}
 }
 async function zapiszMojeDane(e){
   if(!sesja) return;

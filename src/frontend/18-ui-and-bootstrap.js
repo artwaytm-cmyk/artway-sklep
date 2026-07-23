@@ -43,6 +43,7 @@ $("searchInput").oninput = e=>{
   await zainicjujAdmina();
   await odtworzSesjeCentralna();
   odswiezUzytkownika();
+  uruchomAutomatyczneWylogowanieAdmina();
   odswiezUlubioneLicznik();
   odswiezZnacznikDiag();
   finalizujWczytanieProduktow();

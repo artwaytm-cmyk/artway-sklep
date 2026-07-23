@@ -21,8 +21,9 @@ export function createStoreDataRoute(deps = {}) {
     publicUser, hashPassword, createAccountSession, verifyPassword, bezpiecznePorownanie,
     legacyPasswordHash, czytajUstawieniaBazowe = (fallback) => czytaj('settings', fallback),
     czytajUstawieniaPrzyrostowo = null, accountSessionHeaders, createAdminMfaChallenge,
-    createMfaEnrollment, decryptMfaSecret, generateRecoveryCodes, mfaProvisioningUri,
+    createMfaEmailRecovery, createMfaEnrollment, decryptMfaSecret, mfaProvisioningUri,
     recoveryCodeHash, verifyAdminMfaChallenge, verifyMfaCode,
+    verifyMfaEmailRecoveryChallenge, verifyMfaEmailRecoveryCode, wyslijEmailSMTP,
   } = deps;
   const beginAdminMfa = async (admin, items) => {
     let secret = decryptMfaSecret(admin.mfaSecretEncrypted), setup = !secret;
@@ -42,7 +43,7 @@ export function createStoreDataRoute(deps = {}) {
       mfaRequired: true,
       mfaSetupRequired: setup,
       challengeToken: createAdminMfaChallenge(admin.email, setup),
-      ...(setup ? { provisioningUri: mfaProvisioningUri(admin.email, secret), manualKey: secret } : {}),
+      ...(setup ? { provisioningUri: mfaProvisioningUri(admin.email, secret) } : {}),
     });
   };
   return async function storeDataRoute(req, url, action) {
@@ -411,6 +412,26 @@ export function createStoreDataRoute(deps = {}) {
       return odpowiedz({ ok: true, changed: true, authenticated: true, user }, 200, accountSessionHeaders(createAccountSession(user)));
     }
 
+    if (action === 'account-security-settings') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const session = requestSession(req);
+      if (!session || session.role !== 'admin') return odpowiedz({ ok: false, error: 'Zaloguj się ponownie jako administrator.', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      const idleTimeoutMinutes = Number(body.idleTimeoutMinutes);
+      if (![15, 30, 60, 120, 240, 480].includes(idleTimeoutMinutes)) {
+        return odpowiedz({ ok: false, error: 'Wybierz dozwolony czas bezczynności.' }, 422);
+      }
+      const rec = await czytaj('users', { items: [] });
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      const admin = items.find((entry) => String(entry?.email || '').trim().toLowerCase() === session.email && entry.rola === 'admin');
+      if (!admin) return odpowiedz({ ok: false, error: 'Konto administratora nie istnieje.', code: 'auth' }, 401);
+      admin.adminIdleTimeoutMinutes = idleTimeoutMinutes;
+      admin.securitySettingsUpdatedAt = new Date().toISOString();
+      await zapisz('users', { items, updated_at: new Date().toISOString() });
+      const user = publicUser(admin);
+      return odpowiedz({ ok: true, saved: true, authenticated: true, user }, 200, accountSessionHeaders(createAccountSession(user)));
+    }
+
     // ─── logowanie tokenem (sprawdzenie hasła administratora) ───
     if (action === 'login') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -454,20 +475,84 @@ export function createStoreDataRoute(deps = {}) {
         verified = !!usedRecoveryHash && Array.isArray(admin.mfaRecoveryCodeHashes) && admin.mfaRecoveryCodeHashes.includes(usedRecoveryHash);
       }
       if (!verified) return odpowiedz({ ok: false, error: 'Kod z Google Authenticator jest nieprawidłowy.', code: 'mfa_code' }, 401);
-      let recoveryCodes = [];
       if (challenge.setup) {
         admin.mfaSecretEncrypted = admin.mfaPendingSecretEncrypted;
         delete admin.mfaPendingSecretEncrypted; delete admin.mfaPendingCreatedAt;
         admin.mfaEnabledAt = new Date().toISOString();
-        recoveryCodes = generateRecoveryCodes();
-        admin.mfaRecoveryCodeHashes = recoveryCodes.map(recoveryCodeHash);
       } else if (usedRecoveryHash) {
         admin.mfaRecoveryCodeHashes = admin.mfaRecoveryCodeHashes.filter((hash) => hash !== usedRecoveryHash);
       }
       admin.lastLoginAt = new Date().toISOString();
       await zapisz('users', { items, updated_at: new Date().toISOString() });
       const user = publicUser(admin);
-      return odpowiedz({ ok: true, authenticated: true, user, recoveryCodes }, 200, accountSessionHeaders(createAccountSession(user)));
+      return odpowiedz({ ok: true, authenticated: true, user }, 200, accountSessionHeaders(createAccountSession(user)));
+    }
+
+    if (action === 'login-mfa-email-request') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = ograniczRuch(req, 'admin-login-mfa-email-request', 3, 15 * 60 * 1000);
+      if (limited) return limited;
+      const body = await req.json().catch(() => ({}));
+      const challenge = verifyAdminMfaChallenge(tekst(body.challengeToken, 2000));
+      if (!challenge || challenge.setup) return odpowiedz({ ok: false, error: 'Zaloguj się ponownie hasłem, aby otrzymać kod e-mail.', code: 'mfa_challenge' }, 401);
+      const rec = await czytaj('users', { items: [] });
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      const admin = items.find((entry) => String(entry?.email || '').trim().toLowerCase() === challenge.email && entry.rola === 'admin');
+      if (!admin?.mfaSecretEncrypted) return odpowiedz({ ok: false, error: 'Dla tego konta nie skonfigurowano Google Authenticator.', code: 'mfa_not_configured' }, 409);
+      if (typeof wyslijEmailSMTP !== 'function') return odpowiedz({ ok: false, error: 'Odzyskiwanie przez e-mail nie jest obecnie dostępne.', code: 'email_unavailable' }, 503);
+      const recovery = createMfaEmailRecovery(admin.email);
+      admin.mfaEmailRecoveryCodeHash = recovery.codeHash;
+      admin.mfaEmailRecoveryNonce = recovery.nonce;
+      admin.mfaEmailRecoveryExpiresAt = recovery.expiresAt;
+      admin.mfaEmailRecoveryRequestedAt = new Date().toISOString();
+      admin.mfaEmailRecoveryFailedAttempts = 0;
+      await zapisz('users', { items, updated_at: new Date().toISOString() });
+      try {
+        await wyslijEmailSMTP({
+          to: admin.email,
+          subject: 'Kod odzyskania dostępu do panelu Artway-TM',
+          text: `Kod odzyskania dostępu do panelu administratora Artway-TM: ${recovery.code}\n\nKod jest ważny przez 10 minut. Jeśli to nie Ty próbujesz się zalogować, nie przekazuj nikomu kodu i zmień hasło do konta.`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#172033"><h2 style="margin:0 0 12px">Artway‑TM — odzyskanie dostępu</h2><p>Wpisz poniższy kod na ekranie logowania administratora:</p><div style="font-size:32px;font-weight:800;letter-spacing:8px;padding:18px;text-align:center;background:#f2f5ff;border-radius:14px">${recovery.code}</div><p style="color:#667085">Kod jest ważny przez 10 minut i służy wyłącznie do jednego logowania. Jeśli to nie Ty, nie udostępniaj go nikomu i zmień hasło.</p></div>`,
+        });
+      } catch (error) {
+        delete admin.mfaEmailRecoveryCodeHash; delete admin.mfaEmailRecoveryNonce; delete admin.mfaEmailRecoveryExpiresAt;
+        await zapisz('users', { items, updated_at: new Date().toISOString() }).catch(() => {});
+        return odpowiedz({ ok: false, error: 'Nie udało się wysłać kodu. Sprawdź połączenie poczty i spróbuj ponownie.', code: 'email_send_failed' }, 503);
+      }
+      const [local, domain = ''] = String(admin.email).split('@');
+      const maskedEmail = `${local.slice(0, 2)}${'*'.repeat(Math.max(2, local.length - 2))}@${domain}`;
+      return odpowiedz({ ok: true, sent: true, maskedEmail, recoveryChallengeToken: recovery.challengeToken, expiresInMinutes: 10 });
+    }
+
+    if (action === 'login-mfa-email-verify') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = ograniczRuch(req, 'admin-login-mfa-email-verify', 8, 15 * 60 * 1000);
+      if (limited) return limited;
+      const body = await req.json().catch(() => ({}));
+      const challenge = verifyMfaEmailRecoveryChallenge(tekst(body.recoveryChallengeToken, 2000));
+      if (!challenge) return odpowiedz({ ok: false, error: 'Kod e-mail wygasł. Wyślij nowy kod.', code: 'mfa_email_challenge' }, 401);
+      const rec = await czytaj('users', { items: [] });
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      const admin = items.find((entry) => String(entry?.email || '').trim().toLowerCase() === challenge.email && entry.rola === 'admin');
+      const notExpired = admin?.mfaEmailRecoveryExpiresAt && Date.now() < Date.parse(admin.mfaEmailRecoveryExpiresAt);
+      const nonceMatches = !!admin?.mfaEmailRecoveryNonce && admin.mfaEmailRecoveryNonce === challenge.nonce;
+      const codeMatches = notExpired && nonceMatches && verifyMfaEmailRecoveryCode(admin.email, tekst(body.code, 20), admin.mfaEmailRecoveryCodeHash);
+      if (!codeMatches) {
+        if (admin) {
+          admin.mfaEmailRecoveryFailedAttempts = Math.max(0, Number(admin.mfaEmailRecoveryFailedAttempts) || 0) + 1;
+          if (admin.mfaEmailRecoveryFailedAttempts >= 5) {
+            delete admin.mfaEmailRecoveryCodeHash; delete admin.mfaEmailRecoveryNonce; delete admin.mfaEmailRecoveryExpiresAt;
+          }
+          await zapisz('users', { items, updated_at: new Date().toISOString() });
+        }
+        return odpowiedz({ ok: false, error: 'Kod e-mail jest nieprawidłowy albo wygasł.', code: 'mfa_email_code' }, 401);
+      }
+      delete admin.mfaEmailRecoveryCodeHash; delete admin.mfaEmailRecoveryNonce; delete admin.mfaEmailRecoveryExpiresAt; delete admin.mfaEmailRecoveryFailedAttempts;
+      admin.mfaEmailRecoveryUsedAt = new Date().toISOString();
+      admin.lastLoginAt = admin.mfaEmailRecoveryUsedAt;
+      await zapisz('users', { items, updated_at: new Date().toISOString() });
+      const user = publicUser(admin);
+      return odpowiedz({ ok: true, authenticated: true, user }, 200, accountSessionHeaders(createAccountSession(user)));
     }
     return null;
   };

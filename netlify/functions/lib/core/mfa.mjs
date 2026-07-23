@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { createSignedToken, verifySignedToken } from './security.mjs';
 
 const MFA_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const MFA_EMAIL_RECOVERY_TTL_MS = 10 * 60 * 1000;
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 function mfaKey() {
@@ -86,8 +87,40 @@ export function verifyAdminMfaChallenge(token) {
   return payload?.sub ? { email: String(payload.sub).trim().toLowerCase(), setup: payload.setup === true } : null;
 }
 
-export function generateRecoveryCodes(count = 10) {
-  return Array.from({ length: count }, () => `${crypto.randomBytes(3).toString('hex').toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`);
+export function createMfaEmailRecovery(email) {
+  const account = String(email || '').trim().toLowerCase();
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+  const nonce = crypto.randomBytes(18).toString('base64url');
+  return {
+    code,
+    nonce,
+    codeHash: mfaEmailRecoveryCodeHash(account, code),
+    challengeToken: createSignedToken({ scope: 'admin-mfa-email', sub: account, nonce }, MFA_EMAIL_RECOVERY_TTL_MS),
+    expiresAt: new Date(Date.now() + MFA_EMAIL_RECOVERY_TTL_MS).toISOString(),
+  };
+}
+
+export function verifyMfaEmailRecoveryChallenge(token) {
+  const payload = verifySignedToken(token, 'admin-mfa-email');
+  return payload?.sub && payload?.nonce
+    ? { email: String(payload.sub).trim().toLowerCase(), nonce: String(payload.nonce) }
+    : null;
+}
+
+export function mfaEmailRecoveryCodeHash(email, code) {
+  const key = mfaKey();
+  if (!key) return '';
+  return crypto.createHmac('sha256', key)
+    .update(`email-recovery:${String(email || '').trim().toLowerCase()}:${String(code || '').replace(/\D/g, '')}`)
+    .digest('base64url');
+}
+
+export function verifyMfaEmailRecoveryCode(email, code, expectedHash) {
+  const actual = mfaEmailRecoveryCodeHash(email, code);
+  const expected = String(expectedHash || '');
+  if (!actual || !expected) return false;
+  const a = Buffer.from(actual), b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 export function recoveryCodeHash(code) {

@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const ORDER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const ADMIN_IDLE_TIMEOUT_OPTIONS = [15, 30, 60, 120, 240, 480];
+export const DEFAULT_ADMIN_IDLE_TIMEOUT_MINUTES = 60;
 export const SESSION_COOKIE_NAME = 'artway_session';
 const rateBuckets = new Map();
 
@@ -78,10 +80,22 @@ export function requestSession(request) {
   return { email: String(payload.sub).trim().toLowerCase(), role: payload.role === 'admin' ? 'admin' : 'klient', exp: payload.exp };
 }
 
+export function normalizeAdminIdleTimeoutMinutes(value, fallback = DEFAULT_ADMIN_IDLE_TIMEOUT_MINUTES) {
+  const parsed = Number(value);
+  return ADMIN_IDLE_TIMEOUT_OPTIONS.includes(parsed) ? parsed : fallback;
+}
+
 export function createAccountSession(user = {}) {
   const email = String(user.email || '').trim().toLowerCase();
   if (!email) return '';
-  return createSignedToken({ scope: 'account', sub: email, role: user.rola === 'admin' ? 'admin' : 'klient' });
+  const admin = user.rola === 'admin';
+  const idleTimeoutMinutes = admin ? normalizeAdminIdleTimeoutMinutes(user.adminIdleTimeoutMinutes) : 0;
+  return createSignedToken({
+    scope: 'account',
+    sub: email,
+    role: admin ? 'admin' : 'klient',
+    ...(admin ? { idleTimeoutMinutes } : {}),
+  }, admin ? idleTimeoutMinutes * 60 * 1000 : SESSION_TTL_MS);
 }
 
 export function createOrderAccess(order = {}) {
@@ -125,11 +139,13 @@ export function legacyPasswordHash(password) {
 }
 
 export function publicUser(user = {}) {
-  return {
+  const result = {
     imie: String(user.imie || user.email || '').slice(0, 160),
     email: String(user.email || '').trim().toLowerCase().slice(0, 200),
     rola: user.rola === 'admin' ? 'admin' : 'klient',
   };
+  if (result.rola === 'admin') result.adminIdleTimeoutMinutes = normalizeAdminIdleTimeoutMinutes(user.adminIdleTimeoutMinutes);
+  return result;
 }
 
 export function clientIp(request) {

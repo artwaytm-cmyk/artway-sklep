@@ -1403,11 +1403,63 @@ async function sprawdzLogowanie(email, haslo){
   if(u.hash !== hash) return {ok:false, blad:"Nieprawidłowe hasło."};
   return {ok:true, uzytkownik:{imie:u.imie, email:u.email, rola:u.rola||"klient"}};
 }
+const ADMIN_IDLE_TIMEOUT_OPTIONS=[15,30,60,120,240,480];
+let adminIdleTimer=null,adminIdleListenersReady=false,adminIdleActivityWriteAt=0,adminIdleLogoutRunning=false;
+function adminIdleTimeoutMinutes(){
+  const value=Number(sesja?.adminIdleTimeoutMinutes);
+  return ADMIN_IDLE_TIMEOUT_OPTIONS.includes(value)?value:60;
+}
+function adminOdnotujAktywnosc(force=false){
+  if(!jestAdmin()||(!force&&document.hidden))return;
+  const now=Date.now();
+  let previous=0;
+  try{previous=Number(localStorage.getItem("artway_admin_last_activity_at"))||0;}catch(e){}
+  if(!force&&previous&&now-previous>=adminIdleTimeoutMinutes()*60000){sprawdzBezczynnoscAdmina();return;}
+  if(!force&&now-adminIdleActivityWriteAt<10000)return;
+  adminIdleActivityWriteAt=now;
+  try{localStorage.setItem("artway_admin_last_activity_at",String(now));}catch(e){}
+}
+function zatrzymajAutomatyczneWylogowanieAdmina(){if(adminIdleTimer){clearInterval(adminIdleTimer);adminIdleTimer=null;}}
+function sprawdzBezczynnoscAdmina(){
+  if(!jestAdmin()){zatrzymajAutomatyczneWylogowanieAdmina();return;}
+  let last=Date.now();
+  try{last=Number(localStorage.getItem("artway_admin_last_activity_at"))||last;}catch(e){}
+  if(Date.now()-last>=adminIdleTimeoutMinutes()*60000){
+    if(!adminIdleLogoutRunning){adminIdleLogoutRunning=true;wyloguj("idle");}
+    return;
+  }
+  if(!document.hidden&&typeof chmuraOdswiezSesjeAdministratora==="function")void chmuraOdswiezSesjeAdministratora(false);
+}
+function uruchomAutomatyczneWylogowanieAdmina({reset=false}={}){
+  zatrzymajAutomatyczneWylogowanieAdmina();
+  if(!jestAdmin())return;
+  if(!adminIdleListenersReady){
+    adminIdleListenersReady=true;
+    ["pointerdown","keydown","touchstart","scroll"].forEach(name=>window.addEventListener(name,()=>adminOdnotujAktywnosc(false),{passive:true}));
+    document.addEventListener("visibilitychange",()=>{if(!document.hidden){sprawdzBezczynnoscAdmina();if(jestAdmin())adminOdnotujAktywnosc(false);}});
+    window.addEventListener("storage",event=>{if(event.key==="artway_sesja"&&(!event.newValue||event.newValue==="null")){sesja=null;zatrzymajAutomatyczneWylogowanieAdmina();odswiezUzytkownika();location.hash="#/logowanie";}});
+  }
+  let hasActivity=false;
+  try{hasActivity=Number(localStorage.getItem("artway_admin_last_activity_at"))>0;}catch(e){}
+  if(reset||!hasActivity)adminOdnotujAktywnosc(true);
+  sprawdzBezczynnoscAdmina();
+  if(jestAdmin())adminIdleTimer=setInterval(sprawdzBezczynnoscAdmina,15000);
+}
 function ustawSesje(u){
+  const poprzednia=sesja?.email||"";
   if(u){u={...u};delete u.token;u.verified=u.verified===true;}
   sesja=u; zapiszLS("artway_sesja",u); odswiezUzytkownika();
+  uruchomAutomatyczneWylogowanieAdmina({reset:!!u&&u.email!==poprzednia});
 }
-function wyloguj(){ void chmura("session-logout",{method:"POST",timeout:5000}).catch(()=>{});chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; stanBramki={...stanBramki,authenticated:false}; ustawSesje(null); toast("Wylogowano 👋"); location.hash="#/"; }
+function wyloguj(powod="manual"){
+  const idleMinutes=adminIdleTimeoutMinutes();
+  void chmura("session-logout",{method:"POST",timeout:5000}).catch(()=>{});
+  chmuraToken="";
+  try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_admin_last_activity_at");}catch(e){}
+  chmuraStan={...chmuraStan,admin:false};stanBramki={...stanBramki,authenticated:false};adminIdleLogoutRunning=false;ustawSesje(null);
+  toast(powod==="idle"?`Sesja wygasła po ${idleMinutes} min bezczynności 🔒`:"Wylogowano 👋");
+  location.hash=powod==="idle"?"#/logowanie":"#/";
+}
 function jestGlownymAdminem(email){ return String(email||"").toLowerCase()===KONFIG.emailAdmina.toLowerCase(); }
 function kontoMaRoleAdmin(email){
   const e=String(email||"").toLowerCase();
@@ -1645,25 +1697,26 @@ async function zainicjujAdmina(){
 }
 async function zmienHaslo(e){
   e.preventDefault();
-  const f = new FormData(e.target);
+  const f = new FormData(e.target),button=e.submitter;
   const nowe=String(f.get("nowe")||""),powtorz=String(f.get("nowe2")||"");
   if(nowe.length<8){ toast("⚠️ Nowe hasło musi mieć min. 8 znaków"); return; }
   if(nowe!==powtorz){ toast("⚠️ Wpisane nowe hasła nie są takie same"); return; }
+  if(button){button.disabled=true;button.textContent="Zapisuję bezpiecznie…";}
   try{
     const d=await chmura("account-password-change",{method:"POST",body:{currentPassword:String(f.get("stare")||""),newPassword:nowe}});
-    if(d.authenticated&&sesja)ustawSesje({...sesja,verified:true});
+    if(d.authenticated&&sesja){ustawSesje({...sesja,...(d.user||{}),verified:true});zapiszLS("artway_admin_session_refreshed_at",Date.now());}
   }catch(bl){
     const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
-    if(!lokalnyPodglad){toast("⚠️ Nie zmieniono hasła: "+bl.message);return;}
+    if(!lokalnyPodglad){toast("⚠️ Nie zmieniono hasła: "+bl.message);if(button){button.disabled=false;button.textContent="Zapisz nowe hasło";}return;}
     const w = await sprawdzLogowanie(sesja.email, f.get("stare"));
-    if(!w.ok){ toast("⚠️ Obecne hasło nieprawidłowe"); return; }
+    if(!w.ok){ toast("⚠️ Obecne hasło nieprawidłowe");if(button){button.disabled=false;button.textContent="Zapisz nowe hasło";}return; }
   }
   const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
   const u = pobierzUzytkownikow(); const ja = u.find(x=>x.email===sesja.email);
   if(ja){ja.hash=lokalnyPodglad?await hashuj(nowe):"";zapiszLS("artway_uzytkownicy",u);}
   if(jestGlownymAdminem(sesja.email)) domyslneHasloAdmina = nowe==="admin";
   loguj("info","Zmieniono hasło konta: "+sesja.email);
-  toast("Hasło zmienione ✅"); e.target.reset();
+  toast("Hasło zmienione ✅"); e.target.reset();if(button){button.disabled=false;button.textContent="Zapisz nowe hasło";}
 }
 
 /* ═══════════ ZAMÓWIENIA ═══════════ */
@@ -5309,6 +5362,7 @@ $("searchInput").oninput = e=>{
   await zainicjujAdmina();
   await odtworzSesjeCentralna();
   odswiezUzytkownika();
+  uruchomAutomatyczneWylogowanieAdmina();
   odswiezUlubioneLicznik();
   odswiezZnacznikDiag();
   finalizujWczytanieProduktow();

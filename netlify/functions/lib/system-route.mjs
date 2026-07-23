@@ -11,6 +11,7 @@ export function createSystemRoute({
   infaktPublicConfig,
   requestSession,
   createAccountSession,
+  publicUser,
   accountSessionHeaders,
   clearAccountSessionHeaders,
   repository,
@@ -66,7 +67,11 @@ export function createSystemRoute({
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const session = requestSession(req);
       if (!session || session.role !== 'admin') return odpowiedz({ ok: false, error: 'Zaloguj się ponownie jako administrator.', code: 'auth' }, 401);
-      return odpowiedz({ ok: true, authenticated: true, user: { email: session.email, rola: 'admin' }, expiresInDays: 30 }, 200, accountSessionHeaders(createAccountSession({ email: session.email, rola: 'admin' })));
+      const users = await czytaj('users', { items: [] });
+      const admin = (Array.isArray(users.items) ? users.items : []).find((entry) => String(entry?.email || '').trim().toLowerCase() === session.email && entry.rola === 'admin');
+      if (!admin) return odpowiedz({ ok: false, error: 'Konto administratora nie istnieje.', code: 'auth' }, 401);
+      const user = publicUser(admin);
+      return odpowiedz({ ok: true, authenticated: true, user, expiresInMinutes: user.adminIdleTimeoutMinutes }, 200, accountSessionHeaders(createAccountSession(user)));
     }
 
     if (action === 'session-logout') {

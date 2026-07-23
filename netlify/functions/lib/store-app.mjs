@@ -23,13 +23,15 @@ import {
 } from './core/security.mjs';
 import {
   createAdminMfaChallenge,
+  createMfaEmailRecovery,
   createMfaEnrollment,
   decryptMfaSecret,
-  generateRecoveryCodes,
   mfaProvisioningUri,
   recoveryCodeHash,
   verifyAdminMfaChallenge,
   verifyMfaCode,
+  verifyMfaEmailRecoveryChallenge,
+  verifyMfaEmailRecoveryCode,
 } from './core/mfa.mjs';
 import {
   filtrujNieusunieteZamowienia,
@@ -2925,13 +2927,16 @@ const storeDataRoute = createStoreDataRoute({
   legacyPasswordHash,
   accountSessionHeaders,
   createAdminMfaChallenge,
+  createMfaEmailRecovery,
   createMfaEnrollment,
   decryptMfaSecret,
-  generateRecoveryCodes,
   mfaProvisioningUri,
   recoveryCodeHash,
   verifyAdminMfaChallenge,
   verifyMfaCode,
+  verifyMfaEmailRecoveryChallenge,
+  verifyMfaEmailRecoveryCode,
+  wyslijEmailSMTP,
   czytajUstawieniaBazowe,
   czytajUstawieniaPrzyrostowo,
 });
@@ -2949,6 +2954,7 @@ const systemRoute = createSystemRoute({
   infaktPublicConfig,
   requestSession,
   createAccountSession,
+  publicUser,
   accountSessionHeaders,
   clearAccountSessionHeaders,
   repository,
