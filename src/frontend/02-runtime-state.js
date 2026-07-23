@@ -94,7 +94,7 @@ let koszDodanych = wczytajLS("artway_kosz_dodane", []); // kosz: usunięte produ
 let koszMeta = wczytajLS("artway_kosz_meta", {});      // id → data usunięcia i typ; automatyczne czyszczenie po 30 dniach
 let produktyDefinitywne = wczytajLS("artway_produkty_definitywne", []); // bazowe produkty usunięte po okresie kosza
 let opinie = wczytajLS("artway_opinie", []);          // opinie klientów (moderowane w panelu)
-const SEO_USTAWIENIA_DOMYSLNE={enabled:true,dailyLimit:5,autoFillMissing:true,autoAllProducts:true,preferBestsellers:true,indexNowEnabled:true,searchConsoleReady:false,merchantCenterReady:false,businessProfileReady:false,lastRunAt:"",lastRunCount:0,lastPromotionAt:"",lastPromotionStatus:"",lastPromotionCount:0,lastPromotionHttpStatus:null,indexNowFullCatalogAt:"",indexNowFullCatalogCount:0};
+const SEO_USTAWIENIA_DOMYSLNE={enabled:true,dailyLimit:50,autoFillMissing:true,autoAllProducts:true,preferBestsellers:true,indexNowEnabled:true,searchConsoleReady:false,merchantCenterReady:false,businessProfileReady:false,lastRunAt:"",lastRunCount:0,lastScheduledDay:"",lastChannels:null,lastPromotionAt:"",lastPromotionStatus:"",lastPromotionCount:0,lastPromotionHttpStatus:null,indexNowFullCatalogAt:"",indexNowFullCatalogCount:0};
 let seoUstawienia={...SEO_USTAWIENIA_DOMYSLNE,...wczytajLS("artway_seo_ustawienia",{})};
 let seoHistoria=wczytajLS("artway_seo_historia",[]);
 let seoZaznaczoneProdukty=new Set(),seoSzukaj="",seoFiltrOceny="wszystkie",seoFiltrKontroli="wszystkie",seoFiltrPromocji="wszystkie",seoFiltrBrakow="wszystkie",seoFiltrKategorii="wszystkie",seoFiltrProducenta="wszyscy",seoSortowanie="priorytet",seoStrona=1,seoSzukajTimer=null;

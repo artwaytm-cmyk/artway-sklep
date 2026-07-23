@@ -16,12 +16,15 @@ test('wszystkie aktywne produkty są objęte darmową promocją bez ręcznego w�
 });
 
 test('IndexNow wykonuje pełne pierwsze zgłoszenie, a potem zgłasza tylko zmiany', async () => {
-  const [backend, indexNow] = await Promise.all([read('netlify/functions/lib/store-app.mjs'), read('netlify/functions/lib/domain/indexnow.mjs')]);
+  const [backend, indexNow, automation] = await Promise.all([read('netlify/functions/lib/store-app.mjs'), read('netlify/functions/lib/domain/indexnow.mjs'), read('netlify/functions/lib/domain/seo-daily-automation.mjs')]);
   assert.match(backend, /runIndexNowPromotion\(\{ catalogProducts:/);
   assert.match(indexNow, /fullCatalogSubmission = !config\.indexNowFullCatalogAt/);
   assert.match(indexNow, /fullCatalogSubmission \? catalogProducts : changedProducts/);
   assert.match(indexNow, /scope = fullCatalogSubmission \? 'full-catalog' : 'changed-products'/);
   assert.match(backend, /indexNowFullCatalogAt: fullCatalogSubmission && promotion\.accepted/);
+  assert.match(backend, /scheduledSeoRunForDay\(history, scheduledDay\)/);
+  assert.match(automation, /reason: 'already-ran-today'/);
+  assert.match(backend, /lastChannels: channels/);
 });
 
 test('drugi adres jest pokazany jako bezpieczny alias jednej domeny kanonicznej', async () => {

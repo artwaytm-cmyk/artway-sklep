@@ -61,6 +61,13 @@ import {
   mergeCatalogProducts,
 } from './domain/catalog-quality.mjs';
 import { eligiblePromotionProducts, runIndexNowPromotion } from './domain/indexnow.mjs';
+import {
+  buildSeoChannelReport,
+  duplicateScheduledSeoResult,
+  isScheduledSeoSource,
+  scheduledSeoRunForDay,
+  seoAutomationDay,
+} from './domain/seo-daily-automation.mjs';
 import { createInventoryNaturalCommandHandler } from './domain/inventory-command.mjs';
 import { createInventoryDecisionService } from './domain/inventory-decisions.mjs';
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
@@ -2782,17 +2789,23 @@ function seoZastosujPatch(data, id, patch) {
   if (Array.isArray(data.artway_produkty_katalog)) data.artway_produkty_katalog = data.artway_produkty_katalog.map((p) => String(p?.id) === key ? { ...p, ...patch } : p);
 }
 async function seoWykonajDziennyPlan({ limit, source } = {}) {
-  const rec = await czytaj('settings', { data: {}, rev: 0 }), data = rec.data && typeof rec.data === 'object' ? { ...rec.data } : {}, config = { enabled: true, dailyLimit: 5, autoFillMissing: true, preferBestsellers: true, indexNowEnabled: true, ...(data.artway_seo_ustawienia || {}), autoAllProducts: true };
-  const amount = Math.max(1, Math.min(50, Number(limit || config.dailyLimit) || 5));
-  if (config.enabled === false && String(source || '').startsWith('scheduled')) return { processed: 0, skipped: true, reason: 'disabled' };
+  const rec = await czytaj('settings', { data: {}, rev: 0 }), data = rec.data && typeof rec.data === 'object' ? { ...rec.data } : {}, config = { enabled: true, dailyLimit: 50, autoFillMissing: true, preferBestsellers: true, indexNowEnabled: true, ...(data.artway_seo_ustawienia || {}), autoAllProducts: true };
+  const amount = Math.max(1, Math.min(50, Number(limit || config.dailyLimit) || 50));
+  const runSource = tekst(source || 'manual-admin', 100), now = new Date().toISOString(), scheduledDay = seoAutomationDay(now);
+  const history = Array.isArray(data.artway_seo_historia) ? data.artway_seo_historia : [];
+  if (config.enabled === false && isScheduledSeoSource(runSource)) return { processed: 0, skipped: true, reason: 'disabled' };
+  if (isScheduledSeoSource(runSource)) {
+    const completed = scheduledSeoRunForDay(history, scheduledDay);
+    if (completed) return duplicateScheduledSeoResult(completed, amount);
+  }
   const today = new Date().toISOString().slice(0, 10), products = seoProduktyCentralne(data).map((product) => ({ product, score: seoOcena(product) })).sort((a, b) => {
     const ap = a.product.seoPromoted || a.product.badge ? 1 : 0, bp = b.product.seoPromoted || b.product.badge ? 1 : 0;
     if (config.preferBestsellers !== false && bp !== ap) return bp - ap;
     return a.score - b.score || String(a.product.seoReviewedAt || '').localeCompare(String(b.product.seoReviewedAt || ''));
   });
-  const fresh = products.filter((x) => !String(x.product.seoReviewedAt || '').startsWith(today)), selected = fresh.slice(0, amount), now = new Date().toISOString();
+  const fresh = products.filter((x) => !String(x.product.seoReviewedAt || '').startsWith(today)), selected = fresh.slice(0, amount);
   for (const item of selected) {
-    const proposal = seoPropozycja(item.product), mode = item.product.seoMode === 'manual' ? 'manual' : 'auto', patch = { seoMode: mode, seoReviewedAt: now, seoSource: tekst(source || 'scheduled', 100), seoScore: 0 };
+    const proposal = seoPropozycja(item.product), mode = item.product.seoMode === 'manual' ? 'manual' : 'auto', patch = { seoMode: mode, seoReviewedAt: now, seoSource: runSource, seoScore: 0 };
     if (config.autoFillMissing !== false) {
       if (mode === 'auto' && config.autoAllProducts !== false) { patch.seoTitle = proposal.seoTitle; patch.seoDescription = proposal.seoDescription; patch.seoKeywords = proposal.seoKeywords; }
       else { if (!item.product.seoTitle) patch.seoTitle = proposal.seoTitle; if (!item.product.seoDescription) patch.seoDescription = proposal.seoDescription; if (!item.product.seoKeywords) patch.seoKeywords = proposal.seoKeywords; }
@@ -2801,11 +2814,11 @@ async function seoWykonajDziennyPlan({ limit, source } = {}) {
   }
   const fullCatalogSubmission = !config.indexNowFullCatalogAt;
   const promotion = await runIndexNowPromotion({ catalogProducts: products.map((item) => item.product), changedProducts: selected.map((item) => item.product), config });
-  data.artway_seo_ustawienia = { ...config, dailyLimit: amount, lastRunAt: now, lastRunCount: selected.length, lastPromotionAt: promotion.submitted ? now : (config.lastPromotionAt || ''), lastPromotionStatus: promotion.submitted ? promotion.status : (config.lastPromotionStatus || promotion.status), lastPromotionCount: promotion.submitted ? promotion.count : (Number(config.lastPromotionCount) || 0), lastPromotionHttpStatus: promotion.submitted ? promotion.httpStatus : (config.lastPromotionHttpStatus || null), indexNowFullCatalogAt: fullCatalogSubmission && promotion.accepted ? now : (config.indexNowFullCatalogAt || ''), indexNowFullCatalogCount: fullCatalogSubmission && promotion.accepted ? Math.max(0, promotion.count - 1) : (Number(config.indexNowFullCatalogCount) || 0) };
-  const history = Array.isArray(data.artway_seo_historia) ? data.artway_seo_historia : [];
-  data.artway_seo_historia = [{ id: `seo-${Date.now()}`, at: now, type: 'daily', source: tekst(source || 'scheduled', 100), count: selected.length, promotion: { status: promotion.status, count: promotion.count, httpStatus: promotion.httpStatus, scope: promotion.scope }, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })) }, ...history].slice(0, 500);
+  const channels = buildSeoChannelReport({ selectedProducts: selected.map((item) => item.product), catalogProducts: products.map((item) => item.product), promotion, runAt: now });
+  data.artway_seo_ustawienia = { ...config, dailyLimit: amount, lastRunAt: now, lastRunCount: selected.length, lastScheduledDay: isScheduledSeoSource(runSource) ? scheduledDay : (config.lastScheduledDay || ''), lastChannels: channels, lastPromotionAt: promotion.submitted ? now : (config.lastPromotionAt || ''), lastPromotionStatus: promotion.submitted ? promotion.status : (config.lastPromotionStatus || promotion.status), lastPromotionCount: promotion.submitted ? promotion.count : (Number(config.lastPromotionCount) || 0), lastPromotionHttpStatus: promotion.submitted ? promotion.httpStatus : (config.lastPromotionHttpStatus || null), indexNowFullCatalogAt: fullCatalogSubmission && promotion.accepted ? now : (config.indexNowFullCatalogAt || ''), indexNowFullCatalogCount: fullCatalogSubmission && promotion.accepted ? Math.max(0, promotion.count - 1) : (Number(config.indexNowFullCatalogCount) || 0) };
+  data.artway_seo_historia = [{ id: `seo-${Date.now()}`, at: now, scheduledDay: isScheduledSeoSource(runSource) ? scheduledDay : '', type: 'daily', source: runSource, count: selected.length, channels, promotion: { status: promotion.status, count: promotion.count, httpStatus: promotion.httpStatus, scope: promotion.scope }, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })) }, ...history].slice(0, 500);
   const saved = { data, rev: Number(rec.rev || 0) + 1, updated_at: now }; await zapisz('settings', saved);
-  return { processed: selected.length, limit: amount, promotion, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })), updated_at: now, rev: saved.rev };
+  return { processed: selected.length, limit: amount, scheduledDay: isScheduledSeoSource(runSource) ? scheduledDay : '', channels, promotion, products: selected.map((x) => ({ id: x.product.id, name: x.product.nazwa, scoreBefore: x.score })), updated_at: now, rev: saved.rev };
 }
 
 async function katalogWykonajAudyt({ fixSafe = false, quarantineOrphans = false, source = 'manual-admin' } = {}) {
