@@ -75,12 +75,48 @@ function canonicalGtin(value) {
   return gtinChecksum(digits) ? digits : '';
 }
 
+function descriptionPlain(value, max = 20_000) {
+  return String(value ?? '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|section|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, max);
+}
+
+export function vonHalskyProductPresentation(product = {}) {
+  const custom = String(product.vonHalskyContentMode || '').toLowerCase() === 'custom';
+  const storeName = String(product.nazwa || product.name || '').trim();
+  const storeShort = String(product.opisKrotki || product.krotkiOpis || product.shortDescription || '').trim();
+  const storeLong = String(product.opis || product.dlugiOpis || product.description || '').trim();
+  const name = String(custom ? product.vonHalskyTitle || storeName : storeName).trim();
+  const shortDescription = String(custom ? product.vonHalskyShortDescription || storeShort : storeShort).trim();
+  const longDescription = String(custom ? product.vonHalskyDescription || storeLong : storeLong).trim();
+  const shortPlain = descriptionPlain(shortDescription, 2_000);
+  const longPlain = descriptionPlain(longDescription, 20_000);
+  const description = [shortPlain, longPlain]
+    .filter((value, index, list) => value && (index === 0 || value !== list[0]))
+    .join('\n\n');
+  return {
+    mode: custom ? 'custom' : 'store',
+    source: custom ? 'von_halsky_override_with_store_fallback' : 'store_canonical_content',
+    name: text(name, 200),
+    shortDescription: shortPlain,
+    description,
+    rawDescription: [shortDescription, longDescription].filter(Boolean).join('\n\n').slice(0, 50_000),
+  };
+}
+
 function descriptionSource(product = {}) {
-  return String(product.opisAllegro || product.opis || product.dlugiOpis || product.description || '').slice(0, 50_000);
+  return vonHalskyProductPresentation(product).rawDescription;
 }
 
 function descriptionText(product = {}) {
-  return text(descriptionSource(product).replace(/<[^>]*>/g, ' '), 20_000);
+  return vonHalskyProductPresentation(product).description;
 }
 
 function productImages(product = {}) {
@@ -104,7 +140,8 @@ export function vonHalskyEffectivePrice(product = {}) {
 }
 
 export function vonHalskyProductReadiness(product = {}) {
-  const name = text(product.nazwa || product.name, 200);
+  const presentation = vonHalskyProductPresentation(product);
+  const name = presentation.name;
   const rawDescription = descriptionSource(product);
   const description = descriptionText(product);
   const ean = canonicalGtin(product.gtin || product.ean || product.EAN);
@@ -134,6 +171,8 @@ export function vonHalskyProductReadiness(product = {}) {
     identifiers: { ean, manufacturerCode, brand },
     nameLength: name.length,
     descriptionLength: description.length,
+    presentationMode: presentation.mode,
+    presentationSource: presentation.source,
     hasImage: images.length > 0,
     imageCount: images.length,
     price: Number.isFinite(price) ? price : 0,
@@ -142,6 +181,7 @@ export function vonHalskyProductReadiness(product = {}) {
 
 export function vonHalskyOfferProjection(product = {}, settings = {}) {
   const readiness = vonHalskyProductReadiness(product);
+  const presentation = vonHalskyProductPresentation(product);
   const available = product.sprzedazAktywna !== false && product.saleAvailable !== false && product.dostepny !== false && product.aktywny !== false && product.ukryty !== true && product?._catalog?.availability?.saleAvailable !== false;
   const maximumStock = Math.max(1, Number(settings.maximumStock) || 25);
   const minimumStock = Math.max(0, Math.min(maximumStock, Number(settings.minimumStock) || 0));
@@ -151,8 +191,8 @@ export function vonHalskyOfferProjection(product = {}, settings = {}) {
     gtin: readiness.identifiers.ean,
     manufacturerCode: readiness.identifiers.manufacturerCode,
     brand: readiness.identifiers.brand,
-    name: text(product.nazwa || product.name, 150),
-    description: descriptionText(product),
+    name: text(presentation.name, 150),
+    description: presentation.description,
     category: text(product.kategoria || product.category, 240),
     parameters: product.parametry || product.parameters || {},
     images: productImages(product),

@@ -384,6 +384,12 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await page.goto('/#/admin/von-halsky/oferty');
   await expect(page.getByRole('heading', { name: 'Produkty przygotowywane do Von Halsky' })).toBeVisible();
   await expect(page.locator('.von-halsky-table')).toBeVisible();
+  const previewButton = page.getByRole('button', { name: 'Podgląd karty' }).first();
+  await expect(previewButton).toBeVisible();
+  await previewButton.click();
+  await expect(page.locator('.von-halsky-product-preview')).toBeVisible();
+  await expect(page.getByText(/Źródło treści:/)).toBeVisible();
+  await page.locator('.von-halsky-product-preview [data-close]').first().click();
   await page.goto('/#/admin/von-halsky/ustawienia');
   await expect(page.getByRole('heading', { name: 'Połączenie InPost Von Halsky' })).toBeVisible();
   await expect(page.locator('.von-halsky-settings').getByText('Bezpośrednie API', { exact: true })).toBeVisible();

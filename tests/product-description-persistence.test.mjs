@@ -15,6 +15,21 @@ test('edytor produktu ma jedno pole opisu krótkiego i długiego używane przez 
   assert.doesNotMatch(source, /<button[^>]+allegroPoprawOpisyWFormularzu/);
 });
 
+test('Von Halsky dziedziczy ofertę sklepową, ale pozwala świadomie zapisać własną prezentację', async () => {
+  const editor = await readFile('src/frontend/12-product-editor-workspace.js', 'utf8');
+  const save = await readFile('src/frontend/12-product-editor.js', 'utf8');
+  const workspace = await readFile('src/frontend/11b-von-halsky-workspace.js', 'utf8');
+  assert.match(editor, /name="vonHalskyContentMode" value="store"/);
+  assert.match(editor, /name="vonHalskyContentMode" value="custom"/);
+  assert.match(editor, /name="vonHalskyTitle"/);
+  assert.match(editor, /name="vonHalskyShortDescription"/);
+  assert.match(editor, /name="vonHalskyDescription"/);
+  assert.match(save, /vonHalskyContentSource="store-canonical-content"/);
+  assert.match(workspace, /function vonHalskyOtworzPodglad/);
+  assert.match(workspace, /Podgląd oferty/);
+  assert.doesNotMatch(workspace.slice(workspace.indexOf('function vonHalskyPrezentacjaProduktu'), workspace.indexOf('function vonHalskyGtin')), /opisAllegro|allegroDescription/);
+});
+
 test('panel Agenta nie wymaga ręcznego zatwierdzania treści produktu', async () => {
   const source = await readFile('assets/admin.js', 'utf8');
   assert.doesNotMatch(source, /<button[^>]+agentAISpecjalistaZatwierdzProdukt/);

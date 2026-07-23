@@ -6,6 +6,7 @@ import {
   summarizeVonHalskyCatalog,
   vonHalskyEffectivePrice,
   vonHalskyOfferProjection,
+  vonHalskyProductPresentation,
   vonHalskyProductReadiness,
   vonHalskyPublicConfig,
 } from '../src/backend/lib/domain/von-halsky-catalog.mjs';
@@ -136,6 +137,38 @@ test('Von Halsky domyślnie dziedziczy cenę Allegro, ale respektuje własną ce
     ean: '5906018000030', zdjecie: '/one.webp', cena: 20, cenaAllegro: 24.9,
   });
   assert.equal(projection.price, 24.9);
+});
+
+test('Von Halsky dziedziczy treść sklepu i nigdy nie pobiera starszego opisu Allegro', () => {
+  const product = {
+    nazwa: 'Nazwa produktu w sklepie',
+    opisKrotki: 'Krótkie wprowadzenie zapisane w sklepie.',
+    opis: 'Aktualny długi opis sklepu z najważniejszymi cechami produktu i kompletną informacją dla klienta.',
+    opisAllegro: 'STARY OPIS ALLEGRO',
+    allegroDescription: 'INNA TREŚĆ ALLEGRO',
+  };
+  const presentation = vonHalskyProductPresentation(product);
+  assert.equal(presentation.mode, 'store');
+  assert.equal(presentation.name, 'Nazwa produktu w sklepie');
+  assert.match(presentation.description, /Krótkie wprowadzenie/);
+  assert.match(presentation.description, /Aktualny długi opis sklepu/);
+  assert.doesNotMatch(presentation.description, /ALLEGRO/);
+});
+
+test('Von Halsky pozwala na świadome dopasowanie kanałowe z bezpiecznym fallbackiem do sklepu', () => {
+  const product = {
+    nazwa: 'Nazwa sklepu',
+    opisKrotki: 'Krótki opis sklepu.',
+    opis: 'Długi opis sklepu pozostaje źródłem, gdy własne pole kanału jest puste.',
+    vonHalskyContentMode: 'custom',
+    vonHalskyTitle: 'Tytuł dopasowany do Von Halsky',
+    vonHalskyShortDescription: 'Kanałowe wprowadzenie.',
+  };
+  const presentation = vonHalskyProductPresentation(product);
+  assert.equal(presentation.mode, 'custom');
+  assert.equal(presentation.name, 'Tytuł dopasowany do Von Halsky');
+  assert.match(presentation.description, /Kanałowe wprowadzenie/);
+  assert.match(presentation.description, /Długi opis sklepu/);
 });
 
 test('ukryty produkt pozostaje zablokowany w projekcji kanału Von Halsky', () => {

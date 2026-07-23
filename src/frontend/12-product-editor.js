@@ -106,6 +106,7 @@ function formularzProduktu(p, tryb){
           <datalist id="katLista">${[...new Set([...wszystkieKategorie(), ...wszystkie.map(x=>x.kategoria)])].map(k=>`<option value="${esc(k)}">`).join("")}</datalist></div>
       </div></section>
       ${productEditorTrescHTML(p)}
+      ${productEditorVonHalskyTrescHTML(p)}
       <section class="product-editor-section product-editor-pricing" id="product-editor-prices"><header class="product-editor-section-head"><div><span>Sprzedaż i rentowność</span><h2>Ceny oraz koszty kanałów</h2><p>Ceny sklepu i Allegro są rozdzielone, natomiast prywatne koszty zakupu pozostają widoczne wyłącznie dla administratora.</p></div></header>
       <div class="product-price-grid">
         <div class="f-group"><label>Cena w sklepie (zł) *</label><input required name="cena" inputmode="decimal" value="${p.cena??""}" placeholder="99.99" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div>
@@ -252,6 +253,19 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     ikona:String(f.get("ikona")||"").trim()||"📦",
     kolor:poprzedni.kolor||"#dbeafe"
   };
+  const vonHalskyContentMode=String(f.get("vonHalskyContentMode")||"store")==="custom"?"custom":"store";
+  p.vonHalskyContentMode=vonHalskyContentMode;
+  if(vonHalskyContentMode==="custom"){
+    for(const pole of ["vonHalskyTitle","vonHalskyShortDescription","vonHalskyDescription"]){
+      const value=String(f.get(pole)||"").trim();
+      if(value)p[pole]=value;else delete p[pole];
+    }
+    p.vonHalskyContentUpdatedAt=new Date().toISOString();
+    p.vonHalskyContentSource="administrator-channel-override";
+  }else{
+    for(const pole of ["vonHalskyTitle","vonHalskyShortDescription","vonHalskyDescription","vonHalskyContentUpdatedAt"])delete p[pole];
+    p.vonHalskyContentSource="store-canonical-content";
+  }
   const producerName=normalizujNazweProducenta(f.get("producent")||f.get("marka"));
   if(!producerName)return null;
   if(poprzedni.kategoria&&p.kategoria!==poprzedni.kategoria){
