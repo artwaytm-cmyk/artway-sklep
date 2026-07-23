@@ -17,11 +17,21 @@ export async function repairAllegroEditorial({ run, productFacts, product, edito
   }, { source: 'background-agent-compliance' });
 }
 
+export async function repairStoreEditorial({ run, productFacts, product, editorial, target, rejectedEditorial, violations }) {
+  return run({
+    specialist: 'store_compliance',
+    source: 'automatic',
+    instruction: 'Napraw wyłącznie zatrzymaną treść sklepu. Usuń kontrolki strony źródłowej, stan, cenę, logistykę, kontakt, link źródłowy, kody katalogowe i niepotwierdzone obietnice. Zachowaj tożsamość i wszystkie potwierdzone fakty produktu. Zwróć kompletną nazwę, opis krótki, opis długi i SEO.',
+    context: { product: productFacts(product), rejectedEditorial, violations: violations || [], editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint },
+    target,
+  }, { source: 'background-agent-store-compliance' });
+}
+
 export async function repairVonHalskyEditorial({ run, productFacts, product, editorial, target, rejectedEditorial, violations }) {
   return run({
     specialist: 'von_halsky_compliance',
     source: 'automatic',
-    instruction: 'Napraw zatrzymaną kartę produktu dla Von Halsky. Zachowaj jeden wspólny opis i wyłącznie potwierdzone fakty. Usuń linki, osadzone obrazy, kontakt, płatności, logistykę, hasła promocyjne i nieobsługiwane znaczniki. Zwróć komplet pól gotowy do ponownej kontroli.',
+    instruction: 'Napraw wyłącznie zatrzymaną kartę produktu dla Von Halsky. Zachowaj potwierdzone fakty. Usuń linki, osadzone obrazy, kontakt, płatności, logistykę, hasła promocyjne i nieobsługiwane znaczniki. Zwróć komplet osobnych pól Von Halsky gotowy do ponownej kontroli.',
     context: {
       product: productFacts(product),
       rejectedEditorial,
@@ -38,12 +48,14 @@ export async function enforceProductEditorialCompliance({ draft, assess, run, pr
   const visited = [];
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const assessment = assess(currentDraft);
-    if (assessment.eligible || !['allegro_compliance', 'von_halsky_compliance'].includes(assessment.reason)) return { draft: currentDraft, assessment, visited };
+    if (assessment.eligible || !['source_page_noise', 'allegro_compliance', 'von_halsky_compliance'].includes(assessment.reason)) return { draft: currentDraft, assessment, visited };
     const rejectedEditorial = currentDraft.result || {};
     visited.push({ reason: assessment.reason, violations: assessment.violations || [] });
-    currentDraft = assessment.reason === 'allegro_compliance'
-      ? await repairAllegroEditorial({ run, productFacts, product, editorial, target, rejectedEditorial, violations: assessment.violations })
-      : await repairVonHalskyEditorial({ run, productFacts, product, editorial, target, rejectedEditorial, violations: assessment.violations });
+    currentDraft = assessment.reason === 'source_page_noise'
+      ? await repairStoreEditorial({ run, productFacts, product, editorial, target, rejectedEditorial, violations: assessment.violations })
+      : assessment.reason === 'allegro_compliance'
+        ? await repairAllegroEditorial({ run, productFacts, product, editorial, target, rejectedEditorial, violations: assessment.violations })
+        : await repairVonHalskyEditorial({ run, productFacts, product, editorial, target, rejectedEditorial, violations: assessment.violations });
   }
   return { draft: currentDraft, assessment: assess(currentDraft), visited };
 }

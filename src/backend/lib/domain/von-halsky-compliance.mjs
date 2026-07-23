@@ -1,13 +1,15 @@
-// Wersjonowana, zachowawcza bramka treści kanału InPost Von Halsky.
-// Publiczne materiały InPost nie publikują jeszcze kompletnego kontraktu pól
-// produktu. Dlatego reguły techniczne są oddzielone od promptu i można je
-// podmienić bez zmiany kanonicznej kartoteki produktu.
+// Wersjonowana bramka publicznych wymagań karty InPost Von Halsky.
+// Dane kontaktowe sklepu są konfigurowane w Portalu Merchanta, a nie w opisie
+// produktu. Oficjalny poradnik wprost zabrania linków i zdjęć w opisie.
 
 export const VON_HALSKY_CONTENT_POLICY = Object.freeze({
-  id: 'inpost-von-halsky-product-content-2026-07-23-v1',
+  id: 'inpost-von-halsky-product-content-2026-07-23-v2',
   name: 'Bezpieczna karta produktu Von Halsky',
-  contractStatus: 'public_requirements_plus_conservative_gate',
-  source: 'https://inpost.pl/',
+  contractStatus: 'official_public_requirements_plus_conservative_product_only_gate',
+  source: 'https://inpost.pl/aktualnosci-inpost-von-halsky-jak-stworzyc-dobra-oferte',
+  merchantContactSource: 'https://inpost.pl/aktualnosci-inpost-von-halsky-onboarding',
+  contactPlacement: 'merchant_store_settings_only',
+  productDescriptionLinksAllowed: false,
 });
 
 function plainText(value = '') {
@@ -36,9 +38,9 @@ const PROHIBITED = Object.freeze([
 ]);
 
 export function vonHalskyCheckEditorial(patch = {}) {
-  const title = plainText(patch.nazwa || patch.title);
-  const shortDescription = String(patch.opisKrotki || patch.shortDescription || '');
-  const longDescription = String(patch.opis || patch.longDescription || '');
+  const title = plainText(patch.vonHalskyTitle || patch.nazwa || patch.title);
+  const shortDescription = String(patch.vonHalskyShortDescription || patch.opisKrotki || patch.shortDescription || '');
+  const longDescription = String(patch.vonHalskyDescription || patch.opis || patch.longDescription || '');
   const combined = `${shortDescription}\n${longDescription}`;
   const description = plainText(combined);
   const violations = [];
@@ -60,4 +62,3 @@ export function vonHalskyCheckEditorial(patch = {}) {
     descriptionLength: description.length,
   };
 }
-

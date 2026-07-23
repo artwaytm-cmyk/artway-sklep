@@ -5,7 +5,7 @@ function words(value = '') {
   return String(value ?? '').trim().split(/\s+/).filter(Boolean);
 }
 
-function allegroTitleCheck(title = '') {
+export function allegroTitleCheck(title = '') {
   const value = String(title ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   const violations = [];
   if (value.length < 12 || value.length > 75) violations.push({ id: 'title_length', label: 'tytuł Allegro musi mieć 12–75 znaków' });
@@ -14,16 +14,24 @@ function allegroTitleCheck(title = '') {
   return { ok: violations.length === 0, violations };
 }
 
-export function channelContentCompliance(patch = {}) {
+export function allegroContentCompliance(patch = {}) {
   const title = patch.allegroTitle || patch.nazwa || patch.title || '';
-  const body = [patch.nazwa, patch.opisKrotki, patch.opis, patch.allegroTitle, patch.allegroDescription].filter(Boolean).join('\n');
+  const body = [patch.allegroTitle || patch.nazwa, patch.allegroDescription || patch.opis].filter(Boolean).join('\n');
   const allegroText = allegroCheckText(body);
   const allegroTitle = allegroTitleCheck(title);
-  const allegro = {
+  return {
     ok: allegroText.ok && allegroTitle.ok,
     policyId: ALLEGRO_COMPLIANCE_POLICY.id,
     violations: [...allegroTitle.violations, ...allegroText.violations],
   };
+}
+
+export function vonHalskyContentCompliance(patch = {}) {
+  return vonHalskyCheckEditorial(patch);
+}
+
+export function channelContentCompliance(patch = {}) {
+  const allegro = allegroContentCompliance(patch);
   const vonHalsky = vonHalskyCheckEditorial(patch);
   return {
     ok: allegro.ok && vonHalsky.ok,
@@ -36,4 +44,3 @@ export function channelContentCompliance(patch = {}) {
     policyIds: [ALLEGRO_COMPLIANCE_POLICY.id, VON_HALSKY_CONTENT_POLICY.id],
   };
 }
-

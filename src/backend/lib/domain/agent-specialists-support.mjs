@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
 import { allegroSanitizePlainText } from '../allegro-compliance.mjs';
-import { channelContentCompliance } from './channel-content-compliance.mjs';
+import { allegroContentCompliance, vonHalskyContentCompliance } from './channel-content-compliance.mjs';
 import { AGENT_ACTION_POLICY, NEVER_AUTOMATIC } from './agent-action-policy.mjs';
 import { decisionFingerprint, decisionSubjectKey, normalizeDecisionReceipt } from './agent-decision-state.mjs';
+import { SPECIALISTS } from './agent-specialist-definitions.mjs';
 
 const STATE_KEY = 'agent_specialists_state';
 const MAX_HISTORY = 240;
@@ -28,91 +29,8 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-23.2';
-const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription' });
-
-const SPECIALISTS = Object.freeze({
-  product_content: {
-    assistantId: 'asst_bi27lcqG4p4pGx5TouNEE94J', platformPrompt: { id: 'pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108', version: '1' },
-    icon: '✨', label: 'Redaktor produktu', area: 'Katalog i sklep',
-    description: 'Tworzy jeden spójny tytuł, krótki i pełny opis oraz pola SEO dla sklepu, Von Halsky i powiązanej oferty Allegro wyłącznie z przekazanych faktów.',
-    fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
-    scenario: { id: 'catalog-editorial', version: '2026-07-23.2' },
-    rules: 'Nazwę ze źródła traktuj jako fakt o tożsamości, a nie gotowy tytuł. Usuń dopiski sklepu źródłowego, powtórzenia i chaos wielkich liter; ułóż naturalną nazwę sprzedażową 12–75 znaków i minimum 3 słowa, zachowując markę, model i wariant. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach. Treść jest jednym kanonicznym opisem dla sklepu, Von Halsky i powiązanej oferty Allegro: nigdy nie dodawaj telefonu, e-maila, adresu strony, zachęty do kontaktu, negocjowania ceny, zewnętrznej płatności, sprzedaży poza Allegro, haseł reklamowych, innych produktów lub wariantów, miejsca pozyskania towaru, gwarancji, zwrotów, reklamacji ani informacji o dostawie, wysyłce, przewoźniku, paczkomacie, nadaniu, odbiorze, kosztach lub terminach realizacji.',
-  },
-  allegro_offer: {
-    assistantId: 'asst_16UEvdbo3boUso6xyYeANYnQ', platformPrompt: { id: 'pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7', version: '1' },
-    icon: '🟠', label: 'Redaktor oferty Allegro', area: 'Allegro',
-    description: 'Przygotowuje tytuł i układ opisu zgodny z zasadami Allegro, bez kontaktu i sprzedaży poza platformą.',
-    fields: ['allegro_title', 'allegro_description', 'selling_points', 'missing_parameters'],
-    rules: 'Nigdy nie dodawaj telefonu, e-maila, adresu strony, prośby o kontakt, negocjowania ceny, zachęty do zakupu poza Allegro ani informacji o dostawie, wysyłce, przewoźniku, paczkomacie, nadaniu, odbiorze, kosztach lub terminach realizacji. Opis: wyłącznie p, h2, ul, li i strong, bez linków.',
-  },
-  allegro_compliance: {
-    // Osobna rola uzupełnia redaktora produktu. Korzysta z tego samego
-    // opublikowanego profilu bazowego Allegro, ale dostaje węższe reguły
-    // kontrolne i uruchamia się wyłącznie przy wykrytym naruszeniu.
-    assistantId: 'asst_16UEvdbo3boUso6xyYeANYnQ', platformPrompt: { id: 'pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7', version: '1' },
-    icon: '⚖️', label: 'Strażnik zgodności Allegro', area: 'Allegro • kontrola końcowa',
-    description: 'Naprawia wyłącznie treść odrzuconą przez bramkę zgodności i przekazuje ją ponownie do deterministycznej walidacji.',
-    fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
-    scenario: { id: 'allegro-compliance-review', version: '2026-07-23.2' },
-    rules: 'Zachowaj wszystkie potwierdzone fakty jednego produktu i układ HTML, a tytuł doprowadź do 12–75 znaków i minimum 3 słów. Usuń całe zdania lub punkty dotyczące kontaktu, sprzedaży poza Allegro, płatności, dostawy, wysyłki, przewoźnika, paczkomatu, nadania, odbioru, kosztów, terminów realizacji, haseł reklamowych, innych produktów lub wariantów, miejsca pozyskania towaru, gwarancji, zwrotów albo reklamacji. Nie zastępuj ich inną informacją i niczego nie zgaduj. Zwróć kompletny zestaw pól redakcyjnych.',
-  },
-  von_halsky_compliance: { assistantId: '', icon: '🐕', label: 'Strażnik treści Von Halsky', area: 'InPost Von Halsky • kontrola końcowa', description: 'Naprawia kartę odrzuconą przez niezależną bramkę treści kanału Von Halsky i ponawia kontrolę.', fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'], scenario: { id: 'von-halsky-compliance-review', version: '2026-07-23.2' }, rules: 'Zachowaj wyłącznie potwierdzone fakty o jednym produkcie. Nazwa ma mieć 7–150 znaków, opis co najmniej 100 znaków i czytelne sekcje. Usuń linki, osadzone obrazy, kontakt, płatności, logistykę, hasła promocyjne oraz nieobsługiwane znaczniki. Niczego nie zgaduj i zwróć komplet wspólnych pól redakcyjnych.' },
-  customer_reply: {
-    assistantId: 'asst_M2ZRdoHVzQ0jIzYZ3TCLwcoI', platformPrompt: { id: 'pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421', version: '1' },
-    icon: '💬', label: 'Opiekun klienta', area: 'Wiadomości i dyskusje',
-    description: 'Układa serdeczny szkic odpowiedzi na podstawie całej rozmowy, zamówienia i potwierdzonego statusu przesyłki.',
-    fields: ['subject', 'reply'],
-    scenario: { id: 'customer-reply-draft', version: '2026-07-21.1' },
-    rules: 'Nie obiecuj zwrotu, ponownej wysyłki, terminu ani statusu, którego nie potwierdzają fakty. To zawsze szkic do zatwierdzenia.',
-  },
-  seo_promotion: {
-    assistantId: 'asst_LM0aFCDpHHXGgWI28ZdLHjJw', platformPrompt: { id: 'pmpt_6a5f6e84122c81909f9ee773bebf35ea0a46ed1276dedcea', version: '1' },
-    icon: '🔎', label: 'Specjalista SEO', area: 'Pozycjonowanie',
-    description: 'Przygotowuje naturalne frazy, meta dane i plan bezpłatnej promocji bez upychania słów kluczowych.',
-    fields: ['seo_title', 'meta_description', 'keywords', 'slug', 'internal_link_anchor', 'promotion_plan'],
-    scenario: { id: 'seo-free-promotion', version: '2026-07-21.1' },
-    rules: 'Nie twórz niepotwierdzonych przewag, bestsellerów ani obietnic. Używaj marki Allegro wyłącznie opisowo i zgodnie z kontekstem.',
-  },
-  campaign_copy: {
-    assistantId: 'asst_yr8O2brC4yJ9KFmDFpmWQNPB', platformPrompt: { id: 'pmpt_6a5f6da900b48190b6e0833bd6d2582709f2081088e2ce3d', version: '2' },
-    icon: '📣', label: 'Strateg promocji', area: 'Promocje i kody rabatowe',
-    description: 'Buduje gotowy zestaw tekstów kampanii i bezpłatny plan promocji dla wskazanych produktów.',
-    fields: ['campaign_name', 'headline', 'subheadline', 'cta', 'store_announcement', 'social_post', 'promotion_plan'],
-    rules: 'Kod, rabat, daty i warunki muszą pochodzić z faktów. Jeśli ich brak, wskaż je jako brak zamiast wymyślać.',
-  },
-  banner_copy: {
-    assistantId: 'asst_4dPRadSuHeusSVkuzvFe9TKg', platformPrompt: { id: 'pmpt_6a5f6e92eed48196b1689d1a1e2d39f60555a437e19e5b3a', version: '1' },
-    icon: '🎨', label: 'Dyrektor bannera', area: 'Grafiki AI',
-    description: 'Z krótkiej intencji tworzy precyzyjny brief grafiki oraz tekst nakładany przez stronę.',
-    fields: ['headline', 'subheadline', 'cta', 'image_brief', 'mobile_crop_guidance', 'alt_text'],
-    rules: 'Brief nie może prosić modelu obrazu o generowanie liter. Teksty są nakładane osobno przez sklep. Nie kopiuj chronionych postaci ani marek.',
-  },
-  supplier_message: {
-    assistantId: 'asst_63UuzQm4UNsjileYU7Wue7pd', platformPrompt: { id: 'pmpt_6a5f6eccb4348193bc09427beb9d849b0d483c3686838266', version: '1' },
-    icon: '🏭', label: 'Koordynator producenta', area: 'Plan zatowarowania',
-    description: 'Redaguje krótki e-mail do producenta wokół kanonicznej tabeli zamówienia.',
-    fields: ['subject', 'intro', 'closing', 'import_instruction'],
-    scenario: { id: 'supplier-order-draft', version: '2026-07-21.1' },
-    rules: 'Nie dodawaj cen, marż ani stanów. Nie zmieniaj kodów, nazw i ilości z tabeli. Treść ma być krótka i serdeczna.',
-  },
-  catalog_quality: {
-    assistantId: 'asst_0iw94LI9kTcnLpiOUzr8VnPj', platformPrompt: { id: 'pmpt_6a5f6edf45508193ad0be5b8e3313dd307ca7bb991527083', version: '1' },
-    icon: '🛡️', label: 'Kontroler jakości', area: 'Audyt treści',
-    description: 'Wykrywa sprzeczności, duplikaty tekstu, braki i ryzykowne sformułowania, nie zapisując zmian samodzielnie.',
-    fields: ['assessment', 'recommended_changes', 'compliance_notes'],
-    scenario: { id: 'catalog-identity-control', version: '2026-07-21.1' },
-    rules: 'Oddziel błędy pewne od podejrzeń. Nie oznaczaj duplikatu bez jednoznacznych identyfikatorów lub bardzo mocnych dowodów.',
-  },
-  operations_supervisor: {
-    assistantId: 'asst_fgnFEmmPmCSsqEiO9uIgO3Kh', platformPrompt: { id: 'pmpt_6a5f6ef1e3ec8193911f0926497d78850dbce1efdf710076', version: '1' },
-    icon: '🧭', label: 'Koordynator operacyjny', area: 'Nadzór sklepu',
-    description: 'Porządkuje wykryte ryzyka, wskazuje jedną rekomendację i czytelne warianty decyzji administratora.',
-    fields: ['priority', 'problem', 'recommended_action', 'alternative_action', 'decision_question'],
-    rules: 'Nie wykonuj działań zewnętrznych. Podaj jedno zalecenie, jedno bezpieczne rozwiązanie alternatywne i jasno wskaż, co wymaga zatwierdzenia.',
-  },
-});
+const PROMPT_VERSION = '2026-07-23.3';
+const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription', von_halsky_title: 'vonHalskyTitle', von_halsky_short_description: 'vonHalskyShortDescription', von_halsky_description: 'vonHalskyDescription' });
 
 const RESULT_SCHEMA = Object.freeze({
   type: 'object',
@@ -325,7 +243,7 @@ function normalizeResult(raw = {}, specialist) {
     readyForApproval: raw.readyForApproval === true && missingFacts.length === 0,
     complianceStatus: ['ready', 'needs_review', 'blocked_missing_facts'].includes(raw.complianceStatus) ? raw.complianceStatus : (missingFacts.length ? 'blocked_missing_facts' : 'needs_review'),
   };
-  return ['product_content', 'allegro_compliance', 'von_halsky_compliance'].includes(specialist) ? normalizeProductContentEditorialResult(result) : result;
+  return ['product_content', 'store_compliance'].includes(specialist) ? normalizeProductContentEditorialResult(result) : result;
 }
 
 function normalizeProductContentEditorialResult(result = {}) {
@@ -407,7 +325,11 @@ function productFacts(product = {}) {
       allegroCatalogDescription: sourceEditorialFacts(source.allegroCatalogDescription),
       allegroOfferDescription: sourceEditorialFacts(source.allegroOfferDescription),
     },
-    legacyVonHalskyPresentation: String(product.vonHalskyContentMode || '').toLowerCase() === 'custom' ? { title: clean(product.vonHalskyTitle, 300), shortDescription: sourceEditorialFacts(product.vonHalskyShortDescription, 4000), fullDescription: sourceEditorialFacts(product.vonHalskyDescription) } : null,
+    channelContent: {
+      store: { title: clean(product.nazwa || product.name, 300), shortDescription: sourceEditorialFacts(product.opisKrotki || product.krotkiOpis, 4000), fullDescription: sourceEditorialFacts(product.opis) },
+      allegro: { title: clean(product.allegroTitle, 300), shortDescription: sourceEditorialFacts(product.allegroShortDescription, 4000), fullDescription: sourceEditorialFacts(product.allegroDescription) },
+      vonHalsky: { title: clean(product.vonHalskyTitle, 300), shortDescription: sourceEditorialFacts(product.vonHalskyShortDescription, 4000), fullDescription: sourceEditorialFacts(product.vonHalskyDescription) },
+    },
     seoTitle: product.seoTitle, seoDescription: product.seoDescription,
   });
 }
@@ -433,6 +355,9 @@ function productPatch(result = {}) {
   if (fields.seo_keywords) patch.seoKeywords = fields.seo_keywords;
   if (fields.allegro_title) patch.allegroTitle = fields.allegro_title;
   if (fields.allegro_description) patch.allegroDescription = generatedDescription(fields.allegro_description, 30_000);
+  if (fields.von_halsky_title) patch.vonHalskyTitle = fields.von_halsky_title;
+  if (fields.von_halsky_short_description) patch.vonHalskyShortDescription = generatedDescription(fields.von_halsky_short_description, 2000);
+  if (fields.von_halsky_description) patch.vonHalskyDescription = generatedDescription(fields.von_halsky_description, 30_000);
   return patch;
 }
 
@@ -473,26 +398,25 @@ function productEditorialQuality(product = {}) {
 }
 
 function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
-  const assessedResult = ['product_content', 'allegro_compliance', 'von_halsky_compliance'].includes(run.specialist) ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
+  const channel = run.specialist === 'allegro_offer' || run.specialist === 'allegro_compliance' ? 'allegro'
+    : run.specialist === 'von_halsky_offer' || run.specialist === 'von_halsky_compliance' ? 'vonHalsky' : 'store';
+  const assessedResult = channel === 'store' ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
   const patch = productPatch(assessedResult), fields = Object.keys(patch);
   if (settings.autoApplyProductEditorial === false) return { eligible: false, reason: 'automatic_editorial_disabled', fields };
   if (!fields.length) return { eligible: false, reason: 'empty_patch', fields };
-  const coreComplete = clean(patch.nazwa, 300)
-    && clean(patch.opisKrotki, 2000)
-    && clean(patch.opis, 30_000).length >= 150
-    && clean(patch.seoTitle, 180)
-    && clean(patch.seoDescription, 300);
+  const coreComplete = channel === 'allegro'
+    ? clean(patch.allegroTitle, 300) && clean(patch.allegroDescription, 30_000).length >= 100
+    : channel === 'vonHalsky'
+      ? clean(patch.vonHalskyTitle, 300) && clean(patch.vonHalskyShortDescription, 2000) && clean(patch.vonHalskyDescription, 30_000).length >= 100
+      : clean(patch.nazwa, 300) && clean(patch.opisKrotki, 2000) && clean(patch.opis, 30_000).length >= 150 && clean(patch.seoTitle, 180) && clean(patch.seoDescription, 300);
   if (!coreComplete) return { eligible: false, reason: 'incomplete_editorial', fields };
   if (Number(assessedResult?.confidence || 0) < 0.25) return { eligible: false, reason: 'invalid_editorial_output', fields };
   if (editorialIdentityConflict(assessedResult)) return { eligible: false, reason: 'product_identity_conflict', fields };
-  // Treść karty jest wspólna dla sklepu i Allegro, dlatego zgodność obowiązuje
-  // już dla redakcji sklepowej. Późniejsze podpięcie kanału nie może ujawnić
-  // starej informacji logistycznej.
-  const compliance = channelContentCompliance(patch);
-  if (!compliance.ok) return { eligible: false, reason: compliance.reason, fields, violations: compliance.violations.map((item) => item.label), channelCompliance: compliance.channels };
+  const compliance = channel === 'allegro' ? allegroContentCompliance(patch) : channel === 'vonHalsky' ? vonHalskyContentCompliance(patch) : { ok: true, violations: [], policyId: 'artway-store-editorial-v1' };
+  if (!compliance.ok) return { eligible: false, reason: channel === 'allegro' ? 'allegro_compliance' : 'von_halsky_compliance', fields, violations: compliance.violations.map((item) => item.label), channelCompliance: { [channel]: { status: 'blocked', policyId: compliance.policyId, violations: compliance.violations } }, channel };
   const editorialQuality = productEditorialTextQuality(patch);
   if (!editorialQuality.clean) return { eligible: false, reason: 'source_page_noise', fields, violations: editorialQuality.issues };
-  return { eligible: true, reason: 'safe_editorial_policy', fields, channelCompliance: compliance.channels, modelNotes: [...(assessedResult?.warnings || []), ...(assessedResult?.missingFacts || [])].slice(0, 20) };
+  return { eligible: true, reason: 'safe_editorial_policy', fields, channelCompliance: { [channel]: { status: 'passed', policyId: compliance.policyId, violations: [] } }, channel, modelNotes: [...(assessedResult?.warnings || []), ...(assessedResult?.missingFacts || [])].slice(0, 20) };
 }
 
 function valuePresent(value) {
@@ -504,7 +428,7 @@ function valuePresent(value) {
 function productFieldValue(product = {}, key = '') {
   const aliases = {
     nazwa: ['nazwa', 'name'], opisKrotki: ['opisKrotki', 'krotkiOpis'], opis: ['opis'], seoTitle: ['seoTitle'], seoDescription: ['seoDescription'], seoKeywords: ['seoKeywords'],
-    allegroTitle: ['allegroTitle'], allegroDescription: ['allegroDescription'],
+    allegroTitle: ['allegroTitle'], allegroDescription: ['allegroDescription'], vonHalskyTitle: ['vonHalskyTitle'], vonHalskyShortDescription: ['vonHalskyShortDescription'], vonHalskyDescription: ['vonHalskyDescription'],
   };
   return (aliases[key] || [key]).map((name) => product?.[name]).find(valuePresent);
 }
@@ -533,7 +457,7 @@ function productEditorialTarget(product = {}) {
     || ['queued', 'preparing', 'ready', 'published'].includes(clean(product.allegroPreparationStatus, 40).toLowerCase())
     || product.contentEditorial?.targets?.allegro === true
   );
-  return { store: true, vonHalsky: true, allegro, channels: allegro ? 'shared_store_allegro_von_halsky' : 'shared_store_von_halsky' };
+  return { store: true, vonHalsky: true, allegro, channels: allegro ? 'independent_store_allegro_von_halsky' : 'independent_store_von_halsky' };
 }
 
 function productEditorialFingerprint(product = {}, target = productEditorialTarget(product)) {
@@ -562,25 +486,26 @@ function productEditorialFingerprint(product = {}, target = productEditorialTarg
 
 function productEditorialState(product = {}) {
   const target = productEditorialTarget(product), fingerprint = productEditorialFingerprint(product, target), editorial = product.contentEditorial || {}, quality = productEditorialQuality(product);
-  const complete = clean(product.nazwa || product.name, 300)
+  const storeComplete = clean(product.nazwa || product.name, 300)
     && clean(product.opisKrotki || product.krotkiOpis, 500)
     && clean(product.opis, 30_000).length >= 150
     && clean(product.seoTitle, 180)
     && clean(product.seoDescription, 300);
-  const canonicalChannels = String(product.vonHalskyContentMode || 'store').toLowerCase() !== 'custom';
-  const current = editorial.status === 'ready'
-    && editorial.promptVersion === PROMPT_VERSION
-    && editorial.inputFingerprint === fingerprint
-    && editorial.channels === target.channels
-    && quality.ready
-    && Boolean(complete)
-    && canonicalChannels;
-  const reviewedSameInput = editorial.status === 'needs_review'
-    && editorial.promptVersion === PROMPT_VERSION
-    && editorial.inputFingerprint === fingerprint;
-  const retryAt = Date.parse(editorial.retryAt || '');
-  const retryDue = editorial.status !== 'retry_pending' || !Number.isFinite(retryAt) || retryAt <= Date.now();
-  return { target, fingerprint, current, reviewedSameInput, retryDue, complete: Boolean(complete), editorial, quality };
+  const channelStates = editorial.channelStates && typeof editorial.channelStates === 'object' ? editorial.channelStates : {};
+  const stateCurrent = (name, complete) => channelStates[name]?.status === 'ready'
+    && channelStates[name]?.promptVersion === PROMPT_VERSION
+    && channelStates[name]?.inputFingerprint === fingerprint
+    && Boolean(complete);
+  const complete = {
+    store: Boolean(storeComplete),
+    allegro: !target.allegro || Boolean(clean(product.allegroTitle, 300) && clean(product.allegroDescription, 30_000).length >= 100),
+    vonHalsky: Boolean(clean(product.vonHalskyTitle, 300) && clean(product.vonHalskyShortDescription, 2000) && clean(product.vonHalskyDescription, 30_000).length >= 100),
+  };
+  const currentChannels = { store: stateCurrent('store', complete.store), allegro: !target.allegro || stateCurrent('allegro', complete.allegro), vonHalsky: stateCurrent('vonHalsky', complete.vonHalsky) };
+  const current = currentChannels.store && currentChannels.allegro && currentChannels.vonHalsky && quality.ready;
+  const reviewedSameInput = Object.values(channelStates).some((entry) => entry?.status === 'needs_review' && entry?.promptVersion === PROMPT_VERSION && entry?.inputFingerprint === fingerprint);
+  const retryRows = Object.values(channelStates).filter(Boolean), retryDue = retryRows.every((entry) => entry.status !== 'retry_pending' || !Number.isFinite(Date.parse(entry.retryAt || '')) || Date.parse(entry.retryAt || '') <= Date.now());
+  return { target, fingerprint, current, currentChannels, reviewedSameInput, retryDue, complete, editorial, quality };
 }
 
 function communicationNeedsReply(item = {}) {

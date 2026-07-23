@@ -266,6 +266,10 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     for(const pole of ["vonHalskyTitle","vonHalskyShortDescription","vonHalskyDescription","vonHalskyContentUpdatedAt"])delete p[pole];
     p.vonHalskyContentSource="store-canonical-content";
   }
+  for(const pole of ["allegroShortDescription","allegroDescription"]){
+    const value=String(f.get(pole)||"").trim();
+    if(value)p[pole]=value;else delete p[pole];
+  }
   const producerName=normalizujNazweProducenta(f.get("producent")||f.get("marka"));
   if(!producerName)return null;
   if(poprzedni.kategoria&&p.kategoria!==poprzedni.kategoria){

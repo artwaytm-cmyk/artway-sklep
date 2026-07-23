@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AGENT_ACTION_POLICY, automaticEditorialAssessment, createAgentSpecialists, DEFAULT_CONFIG, normalizeProductContentEditorialResult, productEditorialFingerprint, productEditorialQuality, productEditorialState, productFacts, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../src/backend/lib/domain/agent-specialists.mjs';
 import { createAgentSpecialistRoute } from '../src/backend/lib/agent-specialist-route.mjs';
+import { SPECIALIST_PLAYBOOK_VERSION, specialistPlaybook } from '../src/backend/lib/domain/agent-specialist-playbooks.mjs';
 
 function memoryRepository(initial = {}) {
   const values = new Map(Object.entries(structuredClone(initial))), versions = new Map([...values.keys()].map((key) => [key, 1]));
@@ -24,11 +25,14 @@ function openAiPayload(fields = []) {
 }
 
 test('zespół zawiera konkretne role do treści, promocji, komunikacji i nadzoru', () => {
-  assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'allegro_offer', 'allegro_compliance', 'von_halsky_compliance', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality', 'operations_supervisor']);
+  assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'store_compliance', 'allegro_offer', 'allegro_compliance', 'von_halsky_offer', 'von_halsky_compliance', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality', 'operations_supervisor']);
   assert.match(SPECIALISTS.allegro_offer.rules, /poza Allegro/i);
   assert.match(SPECIALISTS.allegro_compliance.rules, /dostaw/i);
   assert.match(SPECIALISTS.von_halsky_compliance.rules, /linki/i);
   assert.match(SPECIALISTS.supplier_message.rules, /cen/i);
+  assert.match(specialistPlaybook('von_halsky_offer'), /nie może zawierać linków/i);
+  assert.match(specialistPlaybook('operations_supervisor'), /Bramka jakości/i);
+  assert.equal(SPECIALIST_PLAYBOOK_VERSION, PROMPT_VERSION);
 });
 
 test('administrator nadaje bezpieczne automatyki, ale stałych blokad nie można wyłączyć', () => {
@@ -187,11 +191,11 @@ test('zatwierdzenie szkicu zapisuje wyłącznie dozwolone pola produktu i jest i
   assert.equal(product.agentTextModel, 'gpt-5-nano-2025-08-07');
 });
 
-test('automatyczny cykl sam zapisuje kompletną bezpieczną redakcję bez okresu oczekiwania na zatwierdzenia', async () => {
+test('automatyczny cykl zapisuje trzy niezależne i bezpieczne wersje kanałów', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 99, nazwa: 'NOWA GRA | SKLEP', producent: 'Alexander', kategoria: 'Gry rodzinne', gtin: '5906018000092', opis: 'Słaby opis.', opisKrotki: 'Stary skrót.', allegroCategoryId: '123' }] }, rev: 1 } });
   let calls = 0;
   const longDescription = '<h2>Rodzinna rozgrywka</h2><p>Ta gra pozwala wspólnie spędzić czas, ćwiczyć spostrzegawczość i poznawać zasady opisane w dołączonej instrukcji.</p><ul><li>Czytelne zasady</li><li>Wspólna zabawa</li></ul>';
-  const fields = [
+  const storeFields = [
     { key: 'title', label: 'Nazwa', value: 'Nowa gra rodzinna' },
     { key: 'short_description', label: 'Opis krótki', value: 'Rodzinna gra oparta na czytelnych zasadach i wspólnej zabawie.' },
     { key: 'long_description', label: 'Opis pełny', value: longDescription },
@@ -199,30 +203,47 @@ test('automatyczny cykl sam zapisuje kompletną bezpieczną redakcję bez okresu
     { key: 'seo_description', label: 'SEO description', value: 'Poznaj rodzinną grę Alexander z czytelnymi zasadami i wspólną rozgrywką.' },
     { key: 'seo_keywords', label: 'Frazy SEO', value: 'gra rodzinna, Alexander' },
   ];
-  const editorialPayload = openAiPayload(fields), rawEditorial = JSON.parse(editorialPayload.output[0].content[0].text);
-  editorialPayload.output[0].content[0].text = JSON.stringify({ ...rawEditorial, confidence: 0.38, readyForApproval: false, complianceStatus: 'needs_review', missingFacts: ['wiek', 'liczba graczy', 'zdjęcia', 'stan i dostępność'], warnings: ['Brak opcjonalnych danych: wiek, liczba graczy i zdjęcia.'] });
-  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => { calls += 1; return new Response(JSON.stringify(editorialPayload), { status: 200, headers: { 'content-type': 'application/json' } }); } });
+  const allegroFields = [
+    { key: 'allegro_title', label: 'Tytuł', value: 'Nowa gra rodzinna Alexander' },
+    { key: 'allegro_description', label: 'Opis', value: '<h2>Rodzinna rozgrywka</h2><p>Gra pozwala ćwiczyć spostrzegawczość i wspólnie poznawać czytelne zasady.</p><ul><li>Wspólna zabawa</li><li>Czytelna instrukcja</li></ul>' },
+  ];
+  const vhFields = [
+    { key: 'von_halsky_title', label: 'Nazwa', value: 'Nowa gra rodzinna Alexander' },
+    { key: 'von_halsky_short_description', label: 'Opis krótki', value: 'Rodzinna gra Alexander oparta na czytelnych zasadach i wspólnej zabawie.' },
+    { key: 'von_halsky_description', label: 'Opis pełny', value: '<h2>Rodzinna zabawa</h2><p>Gra pozwala ćwiczyć spostrzegawczość podczas wspólnej rozgrywki i poznawania czytelnych zasad.</p><ul><li>Prosta forma</li><li>Wspólny czas</li></ul>' },
+  ];
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'),
+    fetchImpl: async (_url, options) => {
+      calls += 1;
+      const instructions = JSON.parse(options.body).instructions;
+      const fields = /Redaktor oferty Allegro/.test(instructions) ? allegroFields : /Redaktor Von Halsky/.test(instructions) ? vhFields : storeFields;
+      return new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
   const cycle = await service.automaticCycle();
-  assert.equal(cycle.prepared.length, 1);
-  assert.equal(cycle.prepared[0].status, 'auto_applied');
-  assert.equal(cycle.applied.length, 1);
+  assert.equal(cycle.prepared.length, 3);
+  assert.ok(cycle.prepared.every((item) => item.status === 'auto_applied'));
+  assert.equal(cycle.applied.length, 3);
   assert.equal((await service.status()).decisions.some((item) => item.kind === 'product_content_review'), false);
   const product = repo.values.get('settings').data.artway_produkty_dodane[0];
   assert.equal(product.nazwa, 'Nowa gra rodzinna');
   assert.equal(product.opis, longDescription);
-  assert.equal(product.allegroDescription, longDescription);
+  assert.notEqual(product.allegroDescription, longDescription);
+  assert.notEqual(product.vonHalskyDescription, longDescription);
   assert.equal(product.contentEditorial.status, 'ready');
-  assert.equal(product.contentEditorial.channels, 'shared_store_allegro_von_halsky');
+  assert.equal(product.contentEditorial.channels, 'independent_store_allegro_von_halsky');
   assert.equal(product.contentEditorial.targets.vonHalsky, true);
   assert.equal(product.contentEditorial.targets.allegro, true);
-  assert.equal(product.vonHalskyContentMode, 'store');
-  assert.equal(product.vonHalskyContentSource, 'store-canonical-content');
+  assert.equal(product.vonHalskyContentMode, 'custom');
+  assert.equal(product.vonHalskyContentSource, 'agent-independent-von-halsky-content');
+  assert.deepEqual(Object.fromEntries(Object.entries(product.contentEditorial.channelStates).map(([key, value]) => [key, value.status])), { store: 'ready', vonHalsky: 'ready', allegro: 'ready' });
   assert.equal(product.allegroEditorialSyncPending, true);
   assert.equal(product.allegroEditorialSyncState, 'queued');
   assert.ok(Array.isArray(product.allegroDescriptionSections));
   const second = await service.automaticCycle();
   assert.equal(second.reason, 'no_candidates');
-  assert.equal(calls, 1);
+  assert.equal(calls, 3);
   const status = await service.status();
   assert.equal(status.history[0].approvalStatus, 'auto_applied');
   assert.equal(status.history[0].source, 'automatic');
@@ -237,7 +258,7 @@ test('automatyczny cykl sam zapisuje kompletną bezpieczną redakcję bez okresu
   assert.match(status.policy.neverAutomatic.join(' '), /Wiadomość do klienta/i);
 });
 
-test('Agent sukcesywnie scala starszy osobny opis Von Halsky z główną kartoteką sklepu', async () => {
+test('redakcja sklepu zachowuje starszy osobny opis Von Halsky bez nadpisania', async () => {
   const legacy = {
     id: 109, nazwa: 'Gra edukacyjna', producent: 'Alexander', kategoria: 'Gry edukacyjne', gtin: '5906018001099',
     opisKrotki: 'Stary opis sklepu.', opis: 'Stary pełny opis sklepu, który wymaga uporządkowania i zapisania we wspólnej kartotece produktu.',
@@ -245,7 +266,7 @@ test('Agent sukcesywnie scala starszy osobny opis Von Halsky z główną kartote
     vonHalskyDescription: 'Pełna prezentacja Von Halsky zawierająca potwierdzone informacje o edukacyjnej zabawie i najważniejszych cechach produktu.',
   };
   const facts = productFacts(legacy);
-  assert.match(facts.legacyVonHalskyPresentation.fullDescription, /Pełna prezentacja Von Halsky/);
+  assert.match(facts.channelContent.vonHalsky.fullDescription, /Pełna prezentacja Von Halsky/);
   const fields = [
     { key: 'title', label: 'Nazwa', value: 'Gra edukacyjna Alexander' },
     { key: 'short_description', label: 'Opis krótki', value: 'Edukacyjna gra Alexander przygotowana do wspólnej, rozwijającej zabawy.' },
@@ -256,16 +277,15 @@ test('Agent sukcesywnie scala starszy osobny opis Von Halsky z główną kartote
   ];
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [legacy] }, rev: 1 } });
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-23T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } }) });
-  const cycle = await service.automaticCycle({ maxItems: 1 });
-  assert.equal(cycle.applied.length, 1);
+  const run = await service.run({ specialist: 'product_content', context: { product: facts }, target: { type: 'product', productId: '109' } });
+  const applied = await service.applyProductDraft(run.id, {}, { editorialAutomatic: true, editorialPolicyValidated: true });
+  assert.equal(applied.applied, true);
   const saved = repo.values.get('settings').data.artway_produkty_dodane[0];
-  assert.equal(saved.vonHalskyContentMode, 'store');
-  assert.equal(saved.vonHalskyDescription, '');
+  assert.equal(saved.vonHalskyContentMode, 'custom');
+  assert.equal(saved.vonHalskyDescription, legacy.vonHalskyDescription);
   assert.equal(saved.opis, fields[2].value);
-  assert.equal(saved.contentEditorial.channels, 'shared_store_von_halsky');
+  assert.equal(saved.contentEditorial.channels, 'independent_store_von_halsky');
   assert.deepEqual(saved.contentEditorial.targets, { store: true, vonHalsky: true, allegro: false });
-  const second = await service.automaticCycle({ maxItems: 1 });
-  assert.equal(second.reason, 'no_candidates');
 });
 
 test('stare oznaczenie ready nie ukrywa surowego opisu dostawcy i Agent nadpisuje oba pola opisów', async () => {
@@ -306,7 +326,8 @@ test('stare oznaczenie ready nie ukrywa surowego opisu dostawcy i Agent nadpisuj
   assert.ok(saved.agentTextRunId);
   assert.ok(saved.agentTextReviewedAt);
   assert.equal(productEditorialQuality(saved).ready, true);
-  assert.equal(productEditorialState(saved).current, true);
+  assert.equal(productEditorialState(saved).currentChannels.store, true);
+  assert.equal(productEditorialState(saved).current, false, 'pozostałe kanały zachowują własne niezależne kolejki');
 });
 
 test('wynik zawierający kontrolki strony dostawcy jest automatycznie odrzucany także dla samego sklepu', async () => {
@@ -347,62 +368,85 @@ test('kontrola Allegro zatrzymuje niedozwolony opis i planuje automatyczną pono
   const product = repo.values.get('settings').data.artway_produkty_dodane[0];
   assert.equal(product.opis, 'Opis');
   assert.equal(product.contentEditorial.status, 'retry_pending');
-  assert.match(product.contentEditorial.warnings.join(' '), /allegro_compliance/i);
+  assert.match(product.contentEditorial.channelStates.store.warnings.join(' '), /source_page_noise|contact|dostęp/i);
 });
 
 test('Strażnik Allegro automatycznie poprawia logistykę zatrzymaną po pierwszej redakcji', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 103, nazwa: 'Origami statek', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis źródłowy.', gtin: '5906018026658', allegroOfferId: '14138119461' }] }, rev: 1 } });
-  const shared = [
+  const store = [
     { key: 'title', label: 'Nazwa', value: 'Moje pierwsze origami – statek – Alexander' },
     { key: 'short_description', label: 'Opis krótki', value: 'Zestaw origami dla początkujących rozwijający wyobraźnię i sprawność manualną.' },
+    { key: 'long_description', label: 'Opis pełny', value: '<h2>Origami dla początkujących</h2><p>Zestaw pozwala złożyć papierowy statek i rozwija sprawność manualną.</p><p>Czytelna instrukcja prowadzi przez kolejne etapy składania modelu.</p>' },
     { key: 'seo_title', label: 'SEO title', value: 'Moje pierwsze origami statek – Alexander' },
     { key: 'seo_description', label: 'SEO description', value: 'Zestaw origami Alexander dla początkujących, wspierający wyobraźnię i sprawność manualną.' },
     { key: 'seo_keywords', label: 'Frazy', value: 'origami statek, Alexander' },
   ];
-  const unsafe = openAiPayload([...shared, { key: 'long_description', label: 'Opis pełny', value: '<h2>Origami dla początkujących</h2><p>Zestaw pozwala złożyć papierowy statek i rozwija sprawność manualną.</p><p>Wysyłka w 24 godziny kurierem InPost.</p>' }]);
-  const safe = openAiPayload([...shared, { key: 'long_description', label: 'Opis pełny', value: '<h2>Origami dla początkujących</h2><p>Zestaw pozwala złożyć papierowy statek i rozwija sprawność manualną.</p><p>Czytelna instrukcja prowadzi przez kolejne etapy składania modelu.</p>' }]);
+  const vonHalsky = [
+    { key: 'von_halsky_title', label: 'Nazwa', value: 'Moje pierwsze origami statek Alexander' },
+    { key: 'von_halsky_short_description', label: 'Opis krótki', value: 'Zestaw origami do złożenia papierowego statku i ćwiczenia sprawności manualnej.' },
+    { key: 'von_halsky_description', label: 'Opis', value: '<h2>Papierowy statek</h2><p>Zestaw pozwala złożyć model statku i ćwiczyć dokładność podczas twórczej zabawy.</p><p>Czytelna instrukcja prowadzi przez kolejne etapy.</p>' },
+  ];
+  const unsafe = openAiPayload([{ key: 'allegro_title', label: 'Tytuł', value: 'Moje pierwsze origami statek Alexander' }, { key: 'allegro_description', label: 'Opis', value: '<h2>Origami dla początkujących</h2><p>Zestaw pozwala złożyć papierowy statek i rozwija sprawność manualną.</p><p>Wysyłka w 24 godziny kurierem InPost.</p>' }]);
+  const safe = openAiPayload([{ key: 'allegro_title', label: 'Tytuł', value: 'Moje pierwsze origami statek Alexander' }, { key: 'allegro_description', label: 'Opis', value: '<h2>Origami dla początkujących</h2><p>Zestaw pozwala złożyć papierowy statek i rozwija sprawność manualną.</p><p>Czytelna instrukcja prowadzi przez kolejne etapy składania modelu.</p>' }]);
   let calls = 0;
   const service = createAgentSpecialists({
     ...repo, apiKey: 'test-key', now: () => new Date('2026-07-21T13:00:00.000Z'),
-    fetchImpl: async () => new Response(JSON.stringify(++calls === 1 ? unsafe : safe), { status: 200, headers: { 'content-type': 'application/json' } }),
+    fetchImpl: async (_url, options) => {
+      calls += 1; const instructions = JSON.parse(options.body).instructions;
+      const payload = /Strażnik zgodności Allegro/.test(instructions) ? safe : /Redaktor oferty Allegro/.test(instructions) ? unsafe : /Redaktor Von Halsky/.test(instructions) ? openAiPayload(vonHalsky) : openAiPayload(store);
+      return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
   });
   const cycle = await service.automaticCycle();
-  assert.equal(calls, 2);
-  assert.equal(cycle.applied.length, 1);
-  assert.equal(cycle.prepared[0].status, 'auto_applied');
+  assert.equal(calls, 4);
+  assert.equal(cycle.applied.length, 3);
+  assert.ok(cycle.prepared.every((item) => item.status === 'auto_applied'));
   const status = await service.status();
-  assert.deepEqual(status.history.slice(0, 2).map((item) => item.specialist), ['allegro_compliance', 'product_content']);
+  assert.deepEqual(status.history.slice(0, 4).map((item) => item.specialist), ['allegro_compliance', 'allegro_offer', 'von_halsky_offer', 'product_content']);
   const product = repo.values.get('settings').data.artway_produkty_dodane[0];
-  assert.match(product.opis, /papierowy statek/i);
-  assert.doesNotMatch(product.opis, /wysyłk|kurier|InPost/i);
+  assert.match(product.allegroDescription, /papierowy statek/i);
+  assert.doesNotMatch(product.allegroDescription, /wysyłk|kurier|InPost/i);
   assert.equal(product.contentEditorial.status, 'ready');
 });
 
 test('Strażnik Von Halsky osobno poprawia strukturę treści odrzuconą przez kanał', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 104, nazwa: 'Gra edukacyjna Alexander', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis źródłowy.', gtin: '5906018000030' }] }, rev: 1 } });
-  const common = [
+  const store = [
     { key: 'title', label: 'Nazwa', value: 'Gra edukacyjna Alexander' },
     { key: 'short_description', label: 'Opis krótki', value: 'Gra edukacyjna wspierająca spostrzegawczość i logiczne myślenie.' },
+    { key: 'long_description', label: 'Opis pełny', value: '<h2>Rozwijająca rozgrywka</h2><p>Gra zawiera elementy potrzebne do rodzinnej rozgrywki i ćwiczenia spostrzegawczości.</p><p>Czytelne zasady pomagają rozpocząć wspólną zabawę.</p>' },
     { key: 'seo_title', label: 'SEO title', value: 'Gra edukacyjna Alexander' },
     { key: 'seo_description', label: 'SEO description', value: 'Gra edukacyjna Alexander wspierająca spostrzegawczość oraz logiczne myślenie.' },
     { key: 'seo_keywords', label: 'Frazy', value: 'gra edukacyjna, Alexander' },
   ];
-  const unsafe = openAiPayload([...common, { key: 'long_description', label: 'Opis pełny', value: '<table><tr><td>Gra zawiera elementy potrzebne do rodzinnej rozgrywki i ćwiczenia spostrzegawczości.</td></tr></table><p>Czytelne zasady pomagają rozpocząć wspólną zabawę.</p>' }]);
-  const safe = openAiPayload([...common, { key: 'long_description', label: 'Opis pełny', value: '<h2>Rozwijająca rozgrywka</h2><p>Gra zawiera elementy potrzebne do rodzinnej rozgrywki i ćwiczenia spostrzegawczości.</p><p>Czytelne zasady pomagają rozpocząć wspólną zabawę.</p>' }]);
+  const unsafe = openAiPayload([
+    { key: 'von_halsky_title', label: 'Nazwa', value: 'Gra edukacyjna Alexander' },
+    { key: 'von_halsky_short_description', label: 'Opis krótki', value: 'Gra edukacyjna wspierająca spostrzegawczość i logiczne myślenie.' },
+    { key: 'von_halsky_description', label: 'Opis pełny', value: '<table><tr><td>Gra zawiera elementy potrzebne do rodzinnej rozgrywki i ćwiczenia spostrzegawczości.</td></tr></table><p>Czytelne zasady pomagają rozpocząć wspólną zabawę.</p>' },
+  ]);
+  const safe = openAiPayload([
+    { key: 'von_halsky_title', label: 'Nazwa', value: 'Gra edukacyjna Alexander' },
+    { key: 'von_halsky_short_description', label: 'Opis krótki', value: 'Gra edukacyjna wspierająca spostrzegawczość i logiczne myślenie.' },
+    { key: 'von_halsky_description', label: 'Opis pełny', value: '<h2>Rozwijająca rozgrywka</h2><p>Gra zawiera elementy potrzebne do rodzinnej rozgrywki i ćwiczenia spostrzegawczości.</p><p>Czytelne zasady pomagają rozpocząć wspólną zabawę.</p>' },
+  ]);
   let calls = 0;
   const service = createAgentSpecialists({
     ...repo, apiKey: 'test-key', now: () => new Date('2026-07-23T14:00:00.000Z'),
-    fetchImpl: async () => new Response(JSON.stringify(++calls === 1 ? unsafe : safe), { status: 200, headers: { 'content-type': 'application/json' } }),
+    fetchImpl: async (_url, options) => {
+      calls += 1; const instructions = JSON.parse(options.body).instructions;
+      const payload = /Strażnik treści Von Halsky/.test(instructions) ? safe : /Redaktor Von Halsky/.test(instructions) ? unsafe : openAiPayload(store);
+      return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
   });
   const cycle = await service.automaticCycle();
-  assert.equal(calls, 2);
-  assert.equal(cycle.applied.length, 1);
+  assert.equal(calls, 3);
+  assert.equal(cycle.applied.length, 2);
   const status = await service.status();
-  assert.deepEqual(status.history.slice(0, 2).map((item) => item.specialist), ['von_halsky_compliance', 'product_content']);
+  assert.deepEqual(status.history.slice(0, 3).map((item) => item.specialist), ['von_halsky_compliance', 'von_halsky_offer', 'product_content']);
   const product = repo.values.get('settings').data.artway_produkty_dodane[0];
-  assert.doesNotMatch(product.opis, /<table|<tr|<td/i);
-  assert.equal(product.contentEditorial.channelCompliance.vonHalsky.status, 'passed');
-  assert.equal(product.contentEditorial.channelCompliance.allegro.status, 'passed');
+  assert.doesNotMatch(product.vonHalskyDescription, /<table|<tr|<td/i);
+  assert.equal(product.contentEditorial.channelStates.vonHalsky.compliance.status, 'passed');
+  assert.equal(product.opis, store[2].value);
 });
 
 test('nowa wiadomość tworzy szkic i decyzję, lecz nie jest wysyłana automatycznie', async () => {

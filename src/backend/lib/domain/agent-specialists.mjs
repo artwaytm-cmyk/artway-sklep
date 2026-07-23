@@ -1,6 +1,6 @@
-import crypto from 'node:crypto'; import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
+import crypto from 'node:crypto'; import { buildEditorialPersistencePatch, buildEditorialRetryPatch, editorialChannelForSpecialist } from './agent-product-editorial-state.mjs';
 import { validManufacturerName } from './product-field-validation.mjs'; import { createPlatformPromptProfile, requestSpecialistResponse } from './agent-specialist-openai.mjs';
-import { enforceProductEditorialCompliance } from './agent-specialist-compliance.mjs';
+import { enforceProductEditorialCompliance } from './agent-specialist-compliance.mjs'; import { specialistPlaybook } from './agent-specialist-playbooks.mjs';
 import { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts } from './agent-specialists-support.mjs';
 import { automaticBatchLimit, statusDecisionData } from './agent-specialists-status-support.mjs';
 export function createAgentSpecialists({
@@ -265,9 +265,10 @@ export function createAgentSpecialists({
       `Zlecenie od koordynatora Codex. Scenariusz ${scenario.id}, wersja ${scenario.version}. Cel: ${scenario.objective}`,
       scenario.qualityGates.length ? `Warunki odbioru wyniku: ${scenario.qualityGates.join('; ')}.` : '',
       `Szczególne reguły: ${definition.rules}`,
+      specialistPlaybook(specialist),
       learnedGuidance ? `Pamięć zatwierdzeń administratora:\n${learnedGuidance}` : '',
       `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
-      ['product_content', 'allegro_compliance'].includes(specialist) ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Materiał ze strony źródłowej jest wyłącznie zbiorem faktów: usuń z niego menu, kontrolki sklepu, „Dodaj do porównania”, „Dodaj do listy zakupowej”, koszyk, dostępność, liczbę sztuk, ceny, informacje o dostawie i wysyłce, przewoźnikach, paczkomatach, nadaniu, odbiorze, kosztach i terminach realizacji, prośby o kontakt oraz powiadomienie o dostępności. Ciąg „Rozmiar uniwersalny” połączony z liczbą sztuk jest kontrolką stanu sklepu źródłowego, a nie rozmiarem lub zawartością produktu — zawsze go usuń. Nie umieszczaj w opisie ceny, stanu, dostępności, żadnej informacji logistycznej, danych kontaktowych, adresów stron, SKU, EAN, kodu producenta ani akapitu wskazującego źródło. Każdy punkt listy musi zawierać konkretną treść. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
+      ['product_content', 'store_compliance'].includes(specialist) ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Materiał ze strony źródłowej jest wyłącznie zbiorem faktów: usuń z niego menu, kontrolki sklepu, „Dodaj do porównania”, „Dodaj do listy zakupowej”, koszyk, dostępność, liczbę sztuk, ceny, informacje o dostawie i wysyłce, przewoźnikach, paczkomatach, nadaniu, odbiorze, kosztach i terminach realizacji, prośby o kontakt oraz powiadomienie o dostępności. Ciąg „Rozmiar uniwersalny” połączony z liczbą sztuk jest kontrolką stanu sklepu źródłowego, a nie rozmiarem lub zawartością produktu — zawsze go usuń. Nie umieszczaj w opisie ceny, stanu, dostępności, żadnej informacji logistycznej, danych kontaktowych, adresów stron, SKU, EAN, kodu producenta ani akapitu wskazującego źródło. Każdy punkt listy musi zawierać konkretną treść. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
       platformProfile ? `Używasz opublikowanego profilu OpenAI Platform „${platformProfile.name}”, wersja ${platformProfile.version}. Bieżące reguły Artway ${PROMPT_VERSION}, lista pól i zakazy mają pierwszeństwo.` : '',
       'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
       'Treść ma być konkretna, naturalna, uporządkowana i gotowa do sprawdzenia przez administratora.',
@@ -301,10 +302,10 @@ export function createAgentSpecialists({
     const current = await readState(), run = current.history.find((item) => item?.id === clean(id, 100));
     if (!run || run.status !== 'completed' || run.target?.type !== 'product' || !clean(run.target?.productId, 100)) throw Object.assign(new Error('Nie znaleziono szkicu produktu do zatwierdzenia.'), { code: 'agent_specialist_draft_not_found', status: 404 });
     if (['applied', 'auto_applied', 'not_needed'].includes(run.approvalStatus)) return { applied: false, duplicate: true, run };
-    const editorialSpecialist = ['product_content', 'allegro_compliance', 'von_halsky_compliance'].includes(run.specialist);
-    const normalizedRunResult = editorialSpecialist ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
+    const editorialSpecialist = ['product_content', 'store_compliance', 'allegro_offer', 'allegro_compliance', 'von_halsky_offer', 'von_halsky_compliance'].includes(run.specialist);
+    const normalizedRunResult = ['product_content', 'store_compliance'].includes(run.specialist) ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
     const finalAssessment = editorialSpecialist ? automaticEditorialAssessment({ ...run, result: normalizedRunResult }, { ...current.config, autoApplyProductEditorial: true }) : null;
-    if (editorialSpecialist && ['allegro_compliance', 'von_halsky_compliance', 'source_page_noise'].includes(finalAssessment.reason)) throw Object.assign(new Error('Treść nie przeszła końcowej kontroli kanałów i nie została zapisana.'), { code: finalAssessment.reason, status: 422, violations: finalAssessment.violations || [] });
+    if (editorialSpecialist && !finalAssessment.eligible && ['allegro_compliance', 'von_halsky_compliance', 'source_page_noise'].includes(finalAssessment.reason)) throw Object.assign(new Error('Treść nie przeszła końcowej kontroli tego kanału i nie została w nim zapisana.'), { code: finalAssessment.reason, status: 422, violations: finalAssessment.violations || [] });
     const allProposed = productPatch(normalizedRunResult), requestedKeys = new Set((Array.isArray(options.fieldKeys) ? options.fieldKeys : []).map((item) => PRODUCT_OUTPUT_TO_FIELD[clean(item, 80)] || clean(item, 80)).filter(Boolean));
     const proposedPatch = requestedKeys.size ? Object.fromEntries(Object.entries(allProposed).filter(([key]) => requestedKeys.has(key))) : allProposed;
     const productId = String(run.target.productId);
@@ -320,43 +321,15 @@ export function createAgentSpecialists({
       beforePatch = Object.fromEntries(Object.keys(patch).map((key) => [key, productFieldValue(effective, key) ?? '']));
       const editorialTarget = options.editorialTarget && typeof options.editorialTarget === 'object' ? options.editorialTarget : productEditorialTarget(effective);
       const inputFingerprint = options.editorialFingerprint || productEditorialFingerprint(effective, editorialTarget);
-      const mergedProduct = { ...effective, ...patch };
       const editorialReady = editorialSpecialist
-        && (options.editorialPolicyValidated === true || (normalizedRunResult?.readyForApproval === true && normalizedRunResult?.complianceStatus === 'ready'))
-        && clean(mergedProduct.nazwa || mergedProduct.name, 300)
-        && clean(mergedProduct.opisKrotki || mergedProduct.krotkiOpis, 500)
-        && clean(mergedProduct.opis, 30_000).length >= 150;
+        && (options.editorialPolicyValidated === true || finalAssessment?.eligible === true);
       const safePatch = { ...patch, agentTextModel: run.model, agentTextReviewedAt: timestamp, agentTextRunId: run.id, agentTextMode: options.editorialAutomatic === true ? 'autonomous-editorial' : options.missingOnly === true ? 'safe-missing-only' : 'approved' };
       if (editorialReady) {
-        const sharedName = clean(mergedProduct.nazwa || mergedProduct.name, 300), sharedDescription = clean(mergedProduct.opis, 30_000);
-        Object.assign(safePatch, {
-          allegroTitle: sharedName.slice(0, 75), allegroDescription: sharedDescription,
-          allegroDescriptionSections: buildSharedProductDescriptionSections({ ...mergedProduct, nazwa: sharedName, allegroDescription: sharedDescription }),
-          contentEditorial: {
-            ...(effective.contentEditorial || {}), status: 'ready', sourceRole: effective.sourceMaterial ? 'facts_only' : 'catalog_facts',
-            channels: editorialTarget.channels, targets: { store: true, vonHalsky: true, allegro: editorialTarget.allegro === true },
-            layoutPolicy: 'allegro_sections', promptVersion: PROMPT_VERSION, inputFingerprint,
-            preparedAt: timestamp, runId: run.id, model: run.model, preparedBy: options.editorialAutomatic === true ? 'autonomous-agent' : 'administrator-approved-agent', warnings: [], channelCompliance: finalAssessment?.channelCompliance || {},
-          },
-          contentEditorialPreparedAt: timestamp, contentEditorialSource: options.editorialAutomatic === true ? 'autonomous-agent-specialist' : 'approved-agent-specialist',
-          vonHalskyContentMode: 'store', vonHalskyTitle: '', vonHalskyShortDescription: '', vonHalskyDescription: '',
-          vonHalskyContentUpdatedAt: timestamp, vonHalskyContentSource: 'store-canonical-content',
-        });
-        if (editorialTarget.allegro === true && current.config.autoUpdateLinkedAllegroContent !== false) Object.assign(safePatch, {
-          allegroEditorialSyncPending: true,
-          allegroEditorialSyncPendingAt: timestamp,
-          allegroEditorialSyncRunId: run.id,
-          allegroEditorialSyncState: 'queued',
-          allegroEditorialSyncError: '',
-        });
-        if (!effective.sourceMaterial) safePatch.sourceMaterial = {
-          sourceUrl: clean(effective.sourceUrl || effective.producentUrl, 1000), fetchedAt: timestamp,
-          title: clean(effective.nazwa || effective.name, 300), shortDescription: clean(effective.opisKrotki || effective.krotkiOpis, 4000),
-          longDescription: clean(effective.opis, 20_000), producer: clean(effective.producent || effective.marka, 160),
-          brand: clean(effective.marka || effective.producent, 160), category: clean(effective.kategoria, 180),
-          ean: clean(effective.gtin || effective.ean, 80), producerCode: clean(effective.kodProducenta || effective.mpn, 160),
-          parameters: effective.parametryProducenta || effective.parametryZrodla || effective.parametry || effective.parameters || {},
-        };
+        Object.assign(safePatch, buildEditorialPersistencePatch({
+          effective, patch, run, channel: editorialChannelForSpecialist(run.specialist), target: editorialTarget,
+          fingerprint: inputFingerprint, promptVersion: PROMPT_VERSION, timestamp, automatic: options.editorialAutomatic === true,
+          channelCompliance: finalAssessment?.channelCompliance || {}, autoUpdateLinkedAllegroContent: current.config.autoUpdateLinkedAllegroContent !== false,
+        }));
       }
       appliedPatch = safePatch;
       beforePatch = Object.fromEntries(Object.keys(safePatch).map((key) => [key, productFieldValue(effective, key) ?? effective[key] ?? '']));
@@ -378,23 +351,20 @@ export function createAgentSpecialists({
     return { applied: true, productId, patch: contentPatch, persistedPatch: appliedPatch, before: beforePatch, appliedAt, appliedBy, safeAutoApply: automaticApply };
   }
 
-  async function markProductEditorialRetry(product = {}, draft = null, editorial = productEditorialState(product), error = '') {
+  async function markProductEditorialRetry(product = {}, draft = null, editorial = productEditorialState(product), error = '', channel = editorialChannelForSpecialist(draft?.specialist)) {
     const productId = String(product.id), timestamp = now().toISOString();
     const retryAt = new Date(now().getTime() + 15 * 60_000).toISOString();
     await change('settings', { data: {}, rev: 0, updated_at: null }, (record) => {
       const previous = record && typeof record === 'object' ? record : { data: {}, rev: 0 }, data = { ...(previous.data || {}) };
       const added = Array.isArray(data.artway_produkty_dodane) ? [...data.artway_produkty_dodane] : [], index = added.findIndex((item) => String(item?.id) === productId);
-      const patch = {
-        contentEditorial: {
-          ...(product.contentEditorial || {}), status: 'retry_pending', sourceRole: product.sourceMaterial ? 'facts_only' : 'catalog_facts',
-          channels: editorial.target.channels, targets: { store: true, vonHalsky: true, allegro: editorial.target.allegro === true }, layoutPolicy: 'allegro_sections',
-          promptVersion: PROMPT_VERSION, inputFingerprint: editorial.fingerprint, attemptedAt: timestamp, retryAt,
-          retryCount: Math.min(100, Math.max(0, Number(product.contentEditorial?.retryCount) || 0) + 1),
-          runId: clean(draft?.id, 120), model: clean(draft?.model, 80), warnings: [...(draft?.result?.warnings || []), ...(draft?.result?.missingFacts || []), error].map((item) => clean(item, 500)).filter(Boolean).slice(0, 20),
-        },
-        contentEditorialSource: 'autonomous-agent-retry',
-      };
       const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
+      // Każdy kanał kończy się niezależnie. Budowanie stanu ponownej próby ze
+      // starego obiektu produktu usuwałoby wynik kanału zapisanego kilka chwil
+      // wcześniej w tym samym cyklu. Zawsze składamy bieżący widok kartoteki.
+      const effective = index >= 0
+        ? { ...added[index], ...(edits[productId] || {}) }
+        : { ...product, ...(edits[productId] || {}) };
+      const patch = buildEditorialRetryPatch({ product: effective, channel, target: editorial.target, fingerprint: editorial.fingerprint, promptVersion: PROMPT_VERSION, timestamp, retryAt, draft, error });
       if (index >= 0 && !edits[productId]) { added[index] = { ...added[index], ...patch }; data.artway_produkty_dodane = added; }
       else { edits[productId] = { ...(edits[productId] || {}), ...patch }; data.artway_produkty_edytowane = edits; }
       return { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: timestamp };
@@ -408,7 +378,7 @@ export function createAgentSpecialists({
     const editorial = productEditorialState(product), note = clean(raw.note, 500);
     const draft = await run({
       specialist: 'product_content', source: 'manual',
-      instruction: note ? `Przygotuj kompletną, profesjonalną treść produktu dla sklepu, Von Halsky${editorial.target.allegro ? ' i Allegro' : ''}. Uwzględnij wskazówkę administratora: ${note}` : `Przygotuj jeden kompletny, profesjonalny opis używany równocześnie w sklepie, Von Halsky${editorial.target.allegro ? ' i Allegro' : ''}. Popraw nazwę, opis krótki, opis pełny i SEO, opierając się wyłącznie na faktach.`,
+      instruction: note ? `Przygotuj kompletną, profesjonalną treść własnego sklepu. Nie zmieniaj pól Allegro ani Von Halsky. Uwzględnij wskazówkę administratora: ${note}` : 'Przygotuj niezależną treść własnego sklepu: popraw nazwę, opis krótki, opis pełny i SEO, opierając się wyłącznie na faktach. Nie zmieniaj pól Allegro ani Von Halsky.',
       context: { product: productFacts(product), administratorInstruction: note, editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint },
       target: { type: 'product', productId: safeId, name: clean(product.nazwa, 180), channels: editorial.target.channels, editorialFingerprint: editorial.fingerprint },
     }, actor);
@@ -527,25 +497,35 @@ export function createAgentSpecialists({
       if (activeDecision(decision, now())) decisionResults.push(decision);
     }
 
-    for (const item of candidates.filter((entry) => !handledProductIds.has(String(entry.product.id))).slice(0, Math.max(0, availableRuns))) {
-      try {
-        const retryAttempt = Math.max(0, Number(item.editorial.editorial?.retryCount) || 0) + 1;
-        const target = { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint };
-        let draft = await run({ specialist: 'product_content', source: 'automatic', scenario: scenarioPayload('catalog-editorial'), instruction: `Przygotuj jeden kompletny, profesjonalny opis używany równocześnie w sklepie, Von Halsky${item.editorial.target.allegro ? ' i Allegro' : ''}. Popraw również istniejącą słabą nazwę i treść, nie tylko puste pola. Jeśli istnieje starsza osobna prezentacja Von Halsky, potraktuj ją jako materiał redakcyjny i scal z główną kartoteką bez utraty potwierdzonych faktów. Zachowaj potwierdzone fakty, zastosuj czytelne akapity, nagłówki i listy. Nie pytaj o opcjonalne dane — jeżeli ich nie ma, pomiń je i dokończ bezpieczną redakcję. To automatyczna próba ${retryAttempt}; obowiązkowo zwróć wszystkie pola redakcyjne, jeżeli tożsamość produktu jest rozpoznawalna.`, context: { product: productFacts(item.product), editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint, editorialRetryAttempt: retryAttempt }, target }, { source: 'background-agent' });
-        const reviewed = await enforceProductEditorialCompliance({ draft, assess: (entry) => automaticEditorialAssessment(entry, current.config), run, productFacts, product: item.product, editorial: item.editorial, target });
-        draft = reviewed.draft; const assessment = reviewed.assessment;
-        if (assessment.eligible) {
-          const result = await applyProductDraft(draft.id, { source: 'background-agent' }, { missingOnly: false, editorialAutomatic: true, editorialPolicyValidated: true, editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint });
-          if (result.applied) applied.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), fields: Object.keys(result.patch || {}) });
-          prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: result.applied ? 'auto_applied' : 'not_needed' });
-        } else {
-          await markProductEditorialRetry(item.product, draft, item.editorial, assessment.reason);
-          prepared.push({ id: draft.id, productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'retry_scheduled', reason: assessment.reason });
+    for (const item of candidates.filter((entry) => !handledProductIds.has(String(entry.product.id)))) {
+      const jobs = [
+        !item.editorial.currentChannels?.store && { channel: 'store', specialist: 'product_content', scenario: scenarioPayload('catalog-editorial'), instruction: 'Przygotuj kompletną, niezależną treść sklepu: nazwę, opis krótki, opis pełny i SEO. Źródło jest tylko zbiorem faktów. Nie zmieniaj pól Allegro ani Von Halsky.' },
+        !item.editorial.currentChannels?.vonHalsky && { channel: 'vonHalsky', specialist: 'von_halsky_offer', instruction: 'Przygotuj kompletną, niezależną kartę Von Halsky: nazwę 7–150 znaków, krótki opis i pełny opis minimum 100 znaków. Bez linków, osadzonych zdjęć, kontaktu i logistyki.' },
+        item.editorial.target.allegro && !item.editorial.currentChannels?.allegro && { channel: 'allegro', specialist: 'allegro_offer', instruction: 'Przygotuj niezależny tytuł i opis Allegro wyłącznie o produkcie. Bez kontaktu, linków, sprzedaży poza Allegro, płatności i informacji logistycznych.' },
+      ].filter(Boolean);
+      for (const job of jobs) {
+        if (availableRuns <= 0) break;
+        const target = { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channel: job.channel, channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint };
+        try {
+          let draft = await run({ specialist: job.specialist, source: 'automatic', ...(job.scenario ? { scenario: job.scenario } : {}), instruction: job.instruction, context: { product: productFacts(item.product), channel: job.channel, editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint }, target }, { source: 'background-agent' });
+          availableRuns -= 1;
+          const reviewed = await enforceProductEditorialCompliance({ draft, assess: (entry) => automaticEditorialAssessment(entry, current.config), run, productFacts, product: item.product, editorial: item.editorial, target });
+          draft = reviewed.draft; const assessment = reviewed.assessment;
+          if (assessment.eligible) {
+            const result = await applyProductDraft(draft.id, { source: 'background-agent' }, { missingOnly: false, editorialAutomatic: true, editorialPolicyValidated: true, editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint });
+            if (result.applied) applied.push({ id: draft.id, productId: String(item.product.id), channel: job.channel, name: clean(item.product.nazwa, 180), fields: Object.keys(result.patch || {}) });
+            prepared.push({ id: draft.id, productId: String(item.product.id), channel: job.channel, name: clean(item.product.nazwa, 180), status: result.applied ? 'auto_applied' : 'not_needed' });
+          } else {
+            await markProductEditorialRetry(item.product, draft, item.editorial, assessment.reason, job.channel);
+            prepared.push({ id: draft.id, productId: String(item.product.id), channel: job.channel, name: clean(item.product.nazwa, 180), status: 'retry_scheduled', reason: assessment.reason });
+          }
+        } catch (error) {
+          if (error?.code === 'agent_specialist_daily_limit') { limitReached = true; availableRuns = 0; break; }
+          await markProductEditorialRetry(item.product, null, item.editorial, safeError(error?.message || error), job.channel);
+          prepared.push({ productId: String(item.product.id), channel: job.channel, name: clean(item.product.nazwa, 180), status: 'error', error: safeError(error?.message || error) });
         }
-      } catch (error) {
-        if (error?.code === 'agent_specialist_daily_limit') { limitReached = true; break; }
-        prepared.push({ productId: String(item.product.id), name: clean(item.product.nazwa, 180), status: 'error', error: safeError(error?.message || error) });
       }
+      if (availableRuns <= 0) break;
     }
 
     let openCatalogDecisionCount = current.decisions.filter((item) => item.kind === 'catalog_identity' && activeDecision(item, now())).length;

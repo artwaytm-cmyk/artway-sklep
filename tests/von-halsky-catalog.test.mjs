@@ -30,6 +30,10 @@ test('osobna bramka Von Halsky blokuje logistykę, linki i nieobsługiwany HTML'
   assert.ok(blocked.violations.some((item) => item.id === 'delivery_data'));
   assert.ok(blocked.violations.some((item) => item.id === 'external_link'));
   assert.ok(blocked.violations.some((item) => item.id === 'unsupported_markup'));
+  const contact = vonHalskyCheckEditorial({ vonHalskyTitle: 'Rodzinna gra edukacyjna', vonHalskyShortDescription: 'Gra rozwijająca spostrzegawczość.', vonHalskyDescription: '<p>Produkt zapewnia wspólną zabawę. Napisz do nas na e-mail, aby poznać więcej informacji o zakupie.</p>' });
+  assert.ok(contact.violations.some((item) => item.id === 'contact_data'));
+  assert.equal(VON_HALSKY_CONTENT_POLICY.contactPlacement, 'merchant_store_settings_only');
+  assert.equal(VON_HALSKY_CONTENT_POLICY.productDescriptionLinksAllowed, false);
 });
 
 test('Von Halsky uznaje produkt z EAN, opisem, zdjęciem i ceną za gotowy', () => {
