@@ -226,6 +226,8 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /Książka adresowa/);
   assert.match(shipping, /Nadawcy/);
   assert.match(shipping, /Odbiorcy/);
+  assert.match(shipping, /inpostServiceOtworzKsiazke/);
+  assert.match(shipping, /Użyj wybranego adresu/);
   assert.match(shipping, /Używaj tego adresu jako/);
   assert.match(shipping, /Paczkomaty przy tym adresie/);
   assert.match(shipping, /FV: Artway‑TM → nadawca/);
@@ -238,6 +240,7 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(core, /#\/admin\/infakt\/wysylki/);
   assert.match(inventory, /function infaktWysylkiInpostPanelHTML/);
   assert.match(css, /\.inpost-service-workspace/);
+  assert.match(css, /\.inpost-book-dialog/);
 });
 
 test('trasa serwerowa zabezpiecza idempotencję, książkę adresową i wycenę ShipX', async () => {

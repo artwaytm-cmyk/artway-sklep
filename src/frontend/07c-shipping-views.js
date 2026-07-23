@@ -9,6 +9,7 @@ function nawigacjaWysylek(aktywna="zlecenia"){
   ],aktywna);
 }
 function wysylkiKontekstPodstronyHTML(aktywna="zlecenia"){
+  const orders=pobierzZamowienia(),isActive=z=>!["dostarczona","anulowana","zwrot"].includes(etapWysylki(z)),active=orders.filter(isActive).length,labels=orders.filter(z=>isActive(z)&&czyEtykietaInpostGotowa(z)).length,transport=orders.filter(z=>etapWysylki(z)==="transport").length,problems=orders.filter(z=>etapWysylki(z)==="problem").length;
   const cfg={
     zlecenia:{icon:"📋",eyebrow:"Realizacja zamówień",title:"Obsługa zleceń InPost",description:"Dane odbiorcy, sposób nadania, etykieta i przekazanie przesyłki w jednym procesie."},
     inpost:{icon:"📮",eyebrow:"Nadania klientów",title:"Wysyłka z InPost",description:"Nadanie, etykieta, tracking i faktura."},
@@ -16,7 +17,7 @@ function wysylkiKontekstPodstronyHTML(aktywna="zlecenia"){
     automatyzacje:{icon:"⚡",eyebrow:"Reguły operacyjne",title:"Automatyzacje wysyłek",description:"Automatyczne statusy, tracking, e-maile i alarmy czasu nadania."},
     ustawienia:{icon:"⚙️",eyebrow:"Integracja przewoźnika",title:"Bramka InPost i nadawca",description:"Stan API, usługi, dane nadawcy oraz bezpieczna konfiguracja integracji serwerowej."}
   }[aktywna];
-  return `<header class="shipping-page-context"><div><span>${esc(cfg.icon)}</span><div><small>${esc(cfg.eyebrow)}</small><h1>${esc(cfg.title)}</h1><p>${esc(cfg.description)}</p></div></div><a class="btn ghost" href="#/admin/zamowienia">📦 Zamówienia sklepu</a></header>`;
+  return `<header class="shipping-page-context"><div><span>${esc(cfg.icon)}</span><div><small>${esc(cfg.eyebrow)}</small><h1>${esc(cfg.title)}</h1><p>${esc(cfg.description)}</p></div></div><a class="btn ghost" href="#/admin/zamowienia">📦 Zamówienia sklepu</a></header><nav class="shipping-page-kpis" aria-label="Stan operacyjny wysyłek"><a href="#/admin/wysylki"><span>📋</span><b>${active}</b><small>aktywnych</small></a><a href="#/admin/wysylki"><span>🏷️</span><b>${labels}</b><small>etykiet</small></a><a href="#/admin/wysylki/tracking"><span>🚚</span><b>${transport}</b><small>w drodze</small></a><a href="#/admin/wysylki/tracking" class="${problems?"has-alert":""}"><span>⚠️</span><b>${problems}</b><small>wyjątków</small></a></nav>`;
 }
 function listaWysylekPoFiltrze(){
   let lista=pobierzZamowienia();
@@ -68,8 +69,7 @@ function panelZlecenWysylkowych(){
   const paczkDoN = doN.filter(z=>paczkomatoweInpost(z)).length, kurierDoN = doN.length - paczkDoN;
   const etapy=["do_obslugi","przygotowanie","etykieta","transport","doreczenie","problem"];
   return `<div class="panel">
-    <h1>🚚 Centrum obsługi InPost</h1>
-    <p style="color:var(--muted2)">Jeden proces dla zamówień InPost: wybór paczkomatu, etykieta, przekazanie, tracking, doręczenie albo wyjątek.</p>
+    <div class="order-section-head"><div><span class="order-pro-label">Kolejka operacyjna</span><h1>🚚 Centrum obsługi InPost</h1></div><a class="btn ghost" href="#/admin/wysylki/inpost">＋ Nadaj przesyłkę klienta</a></div>
     <div class="pipeline">${etapy.map(id=>`<div class="pipeline-step ${id==="problem"?"problem":""}"><b>${wszystkie.filter(z=>etapWysylki(z)===id).length}</b><small>${ETAPY_WYSYLKI[id].ikona} ${ETAPY_WYSYLKI[id].nazwa}</small></div>`).join("")}</div>
     ${adminWyszukiwaniePanelHTML({id:"shipping-orders",description:"Zlecenie, klient, numer nadania, operator oraz etap procesu InPost.",results:lista.length,active:!!(szukajWysylek||filtrWysylek!=="aktywne"),open:true,fields:`<div class="orders-toolbar admin-search-full">
       <select onchange="filtrWysylek=this.value;renderuj()" style="padding:.45rem .8rem;border-radius:10px;border:1.5px solid var(--line)">
@@ -99,7 +99,7 @@ function panelZlecenWysylkowych(){
         ${zaznaczoneNadania.size?`<button class="btn ghost" style="padding:.32rem .7rem;font-size:.83rem;color:#b91c1c" onclick="zaznaczoneNadania.clear();renderuj()">✖ Odznacz (${zaznaczoneNadania.size})</button>
         <button class="btn" style="padding:.32rem .7rem;font-size:.83rem;background:#ffcc00;color:#111;margin-left:auto" title="Utwórz przesyłki i etykiety InPost przez API dla zaznaczonych zleceń" onclick="utworzEtykietyZaznaczoneAPI()">🟡 Etykiety API (${zaznaczoneNadania.size})</button>`:""}
       </div>
-      <p style="font-size:.77rem;color:var(--muted2);margin:.55rem 0 0">Plik wgraj w InPost: <b>manager.paczkomaty.pl → Wyślij przesyłki → IMPORT Z PLIKU</b> (max 100). Użyj głównego <b>TXT z nagłówkami InPost</b>: zostaw <b>Separator kolumn: Tabulator</b>, ustaw <b>Czy ma nagłówki: Tak</b>, a potem dopasowuj nazwa do nazwy, np. <b>e-mail → E-mail</b>, <b>telefon → Telefon</b>, <b>miasto → Miasto</b>, <b>typ_przesylki → Typ przesyłki</b>. Błąd „nie znaleziono adresu e-mail w pierwszej linii” oznacza, że nagłówki nadal są ustawione na „Nie”.</p>
+      <details class="shipping-import-help"><summary>Instrukcja importu awaryjnego</summary><p>W InPost wybierz <b>Wyślij przesyłki → Import z pliku</b>, separator <b>Tabulator</b> i opcję <b>Nagłówki: Tak</b>.</p></details>
     </div>
     ${lista.length?lista.map(kartaZleceniaWysylki).join(""):"<p>Brak zleceń dla wybranego filtra.</p>"}
   </div>`;

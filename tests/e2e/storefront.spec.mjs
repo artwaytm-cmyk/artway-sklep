@@ -157,8 +157,7 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   await expect(page.getByRole('heading', { name: 'Wysyłka z InPost', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Utwórz przesyłkę InPost', exact: true })).toBeVisible();
   await expect(page.locator('#inpostServiceForm')).toBeVisible();
-  await expect(page.locator('#inpostServiceForm').getByRole('button', { name: /Nadawcy/ })).toHaveCount(2);
-  await expect(page.locator('#inpostServiceForm').getByRole('button', { name: /Odbiorcy/ })).toHaveCount(2);
+  await expect(page.locator('#inpostServiceForm').getByRole('button', { name: /Wybierz z książki/ })).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Przelicz według umowy' })).toBeVisible();
   await expect(page.getByText('FV: Artway‑TM → nadawca.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Przy adresie odbiorcy' })).toBeVisible();
@@ -176,11 +175,31 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
     renderuj();
   });
   const senderCard = page.locator('#inpost-party-sender');
-  await senderCard.getByLabel('Kod pocztowy', { exact: true }).first().fill('84-207');
-  await expect(senderCard.getByRole('button', { name: /Nadawca testowy/ })).toBeVisible();
-  await senderCard.getByRole('button', { name: /Nadawca testowy/ }).click();
+  await senderCard.getByRole('button', { name: /Wybierz z książki/ }).click();
+  const addressBook = page.locator('#inpostAddressBookModal');
+  await expect(addressBook.getByRole('heading', { name: 'Wybierz nadawcę' })).toBeVisible();
+  await expect(addressBook.getByRole('button', { name: 'Nadawcy' })).toBeVisible();
+  await expect(addressBook.getByRole('button', { name: 'Odbiorcy' })).toBeVisible();
+  await addressBook.getByPlaceholder(/Firma, osoba/).fill('Nadawca testowy');
+  await expect(addressBook.getByRole('button', { name: /Nadawca testowy/ })).toBeVisible();
+  await addressBook.getByRole('button', { name: /Nadawca testowy/ }).click();
+  await expect(addressBook.locator('[data-inpost-book-preview]').getByText('Lipowa 7 84-207 Bojano')).toBeVisible();
+  await addressBook.getByRole('button', { name: 'Użyj wybranego adresu' }).click();
+  await expect(addressBook).toHaveCount(0);
   await expect(senderCard.getByLabel(/Miasto/)).toHaveValue('Bojano');
   await expect(senderCard.getByLabel('Ulica *', { exact: true })).toHaveValue('Lipowa');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#inpost-party-receiver').getByRole('button', { name: /Wybierz z książki/ }).click();
+  const mobileBook = page.locator('#inpostAddressBookModal');
+  await expect(mobileBook).toBeVisible();
+  const mobileDimensions = await mobileBook.locator('.inpost-book-dialog').evaluate((element) => ({
+    viewport: window.innerWidth,
+    width: element.getBoundingClientRect().width,
+    content: element.scrollWidth,
+  }));
+  expect(mobileDimensions.width).toBeLessThanOrEqual(mobileDimensions.viewport);
+  expect(mobileDimensions.content).toBeLessThanOrEqual(mobileDimensions.width + 1);
+  await mobileBook.getByRole('button', { name: 'Anuluj' }).click();
   const workspace = page.locator('.admin-workspace-content[data-admin-layout="unified-v2"]');
   const dimensions = await workspace.evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.width + 1);

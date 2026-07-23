@@ -1,7 +1,7 @@
 let inpostServiceWycenaTimer=0;
 const inpostServiceKsiazkaStan={
-  sender:{role:"sender",q:"",postCode:"",city:"",street:""},
-  receiver:{role:"receiver",q:"",postCode:"",city:"",street:""},
+  sender:{role:"sender",q:"",postCode:"",city:"",street:"",page:1,selectedKey:"",targetFormId:""},
+  receiver:{role:"receiver",q:"",postCode:"",city:"",street:"",page:1,selectedKey:"",targetFormId:""},
 };
 
 function inpostServiceAdresKsiazki(contact={}){
@@ -61,11 +61,8 @@ function inpostServiceAdresWyniki(prefix){
   });
 }
 function inpostServiceAdresPodpowiedzi(source,prefix){
-  const form=source?.form||source||document.getElementById("inpostServiceForm");if(!form)return;
   const state=inpostServiceKsiazkaStan[prefix]||inpostServiceKsiazkaStan.receiver;
-  const postCode=String(form.elements[`${prefix}SearchPostCode`]?.value??state.postCode??"").trim(),city=String(form.elements[`${prefix}SearchCity`]?.value??state.city??"").trim(),street=String(form.elements[`${prefix}SearchStreet`]?.value??state.street??"").trim();
-  state.postCode=postCode;state.city=city;state.street=street;
-  const codeN=inpostServiceAdresNormal(postCode),cityN=inpostServiceAdresNormal(city),streetN=inpostServiceAdresNormal(street);
+  const codeN=inpostServiceAdresNormal(state.postCode),cityN=inpostServiceAdresNormal(state.city);
   const all=inpostServiceAdresy().filter(contact=>inpostServiceRoleKontaktu(contact,state.role)),byCode=all.filter(contact=>!codeN||inpostServiceAdresNormal(inpostServiceAdresDane(contact).postCode).includes(codeN));
   const byCity=byCode.filter(contact=>!cityN||inpostServiceAdresNormal(inpostServiceAdresDane(contact).city).includes(cityN));
   const options={
@@ -74,7 +71,7 @@ function inpostServiceAdresPodpowiedzi(source,prefix){
     Street:inpostServiceAdresUnikalne(byCity.map(contact=>inpostServiceAdresDane(contact).street),250),
   };
   Object.entries(options).forEach(([kind,values])=>{
-    const list=document.getElementById(`inpostService${prefix}${kind}Hints`);
+    const list=document.getElementById(`inpostBook${prefix}${kind}Hints`);
     if(list)list.innerHTML=values.map(value=>`<option value="${esc(value)}"></option>`).join("");
   });
   inpostServiceRenderujKsiazke(prefix);
@@ -86,31 +83,69 @@ function inpostServiceRolaEtykieta(contact={}){
   return '<span class="inpost-role receiver">Odbiorca</span>';
 }
 function inpostServiceRenderujKsiazke(prefix){
-  const form=document.getElementById("inpostServiceForm"),box=form?.querySelector(`[data-inpost-address-results="${prefix}"]`);if(!box)return;
-  const state=inpostServiceKsiazkaStan[prefix]||inpostServiceKsiazkaStan.receiver,matches=inpostServiceAdresWyniki(prefix);
-  box.innerHTML=`<div class="inpost-address-match-head"><b>${matches.length} adresów</b><small>${state.role==="sender"?"nadawcy":state.role==="receiver"?"odbiorcy":"wszystkie role"}</small></div>
-    <div class="inpost-address-match-list">${matches.slice(0,12).map(contact=>`<button type="button" onclick="inpostServiceWybierzAdresWynik(${jsArg(prefix)},${jsArg(contact.key)})"><span class="inpost-contact-card-head"><b>${esc(inpostServiceNazwaKontaktu(contact))}</b>${inpostServiceRolaEtykieta(contact)}</span><span>${esc(inpostServiceAdresKsiazki(contact)||"Brak pełnego adresu")}</span><small>${esc([contact.taxCode?`NIP ${contact.taxCode}`:"",contact.phone,contact.email].filter(Boolean).join(" • "))}</small></button>`).join("")||'<div class="inpost-address-empty">Brak pasujących adresów.</div>'}</div>
-    ${matches.length>12?`<small class="inpost-address-more">Zawęź wyszukiwanie — pozostało ${matches.length-12} wyników.</small>`:""}`;
+  const layer=document.getElementById("inpostAddressBookModal");if(!layer||layer.dataset.prefix!==prefix)return;
+  const state=inpostServiceKsiazkaStan[prefix],matches=inpostServiceAdresWyniki(prefix),pageSize=20,pages=Math.max(1,Math.ceil(matches.length/pageSize));
+  state.page=Math.min(Math.max(1,Number(state.page)||1),pages);
+  const page=matches.slice((state.page-1)*pageSize,state.page*pageSize),selected=inpostServiceAdresy().find(item=>String(item.key)===String(state.selectedKey));
+  layer.querySelectorAll("[data-inpost-book-role]").forEach(button=>button.classList.toggle("active",button.dataset.inpostBookRole===state.role));
+  const count=layer.querySelector("[data-inpost-book-count]");if(count)count.textContent=`${matches.length} ${matches.length===1?"adres":matches.length<5?"adresy":"adresów"}`;
+  const list=layer.querySelector("[data-inpost-book-results]");
+  if(list)list.innerHTML=page.map(contact=>`<button class="inpost-book-contact ${String(contact.key)===String(state.selectedKey)?"selected":""}" type="button" onclick="inpostServiceKsiazkaZaznacz(${jsArg(prefix)},${jsArg(contact.key)})"><span class="inpost-book-avatar">${esc((inpostServiceNazwaKontaktu(contact).match(/[A-Za-zĄĆĘŁŃÓŚŹŻ]/i)?.[0]||"A").toUpperCase())}</span><span class="inpost-book-contact-main"><span class="inpost-contact-card-head"><b>${esc(inpostServiceNazwaKontaktu(contact))}</b>${inpostServiceRolaEtykieta(contact)}</span><span>${esc(inpostServiceAdresKsiazki(contact)||"Brak pełnego adresu")}</span><small>${esc([contact.taxCode?`NIP ${contact.taxCode}`:"",contact.phone,contact.email].filter(Boolean).join(" • "))}</small></span><span class="inpost-book-check">✓</span></button>`).join("")||'<div class="inpost-address-empty"><b>Brak pasujących adresów</b><small>Zmień filtry albo dodaj nowy adres.</small></div>';
+  const preview=layer.querySelector("[data-inpost-book-preview]");
+  if(preview)preview.innerHTML=selected?`<span class="order-pro-label">Wybrany kontakt</span><h3>${esc(inpostServiceNazwaKontaktu(selected))}</h3>${inpostServiceRolaEtykieta(selected)}<dl><div><dt>Adres</dt><dd>${esc(inpostServiceAdresKsiazki(selected)||"brak")}</dd></div><div><dt>Telefon</dt><dd>${esc(selected.phone||"—")}</dd></div><div><dt>E-mail</dt><dd>${esc(selected.email||"—")}</dd></div>${selected.taxCode?`<div><dt>NIP</dt><dd>${esc(selected.taxCode)}</dd></div>`:""}</dl>`:'<div class="inpost-book-preview-empty"><span>📒</span><b>Wybierz kontakt</b><small>Tutaj zobaczysz komplet danych przed użyciem adresu.</small></div>';
+  const pager=layer.querySelector("[data-inpost-book-pager]");
+  if(pager)pager.innerHTML=`<button class="btn ghost" type="button" onclick="inpostServiceKsiazkaStrona(${jsArg(prefix)},-1)" ${state.page<=1?"disabled":""}>← Poprzednia</button><span>Strona <b>${state.page}</b> z ${pages}</span><button class="btn ghost" type="button" onclick="inpostServiceKsiazkaStrona(${jsArg(prefix)},1)" ${state.page>=pages?"disabled":""}>Następna →</button>`;
+  const use=layer.querySelector("[data-inpost-book-use]");if(use)use.disabled=!selected;
 }
 function inpostServiceKsiazkaFiltr(prefix,role,button){
   const state=inpostServiceKsiazkaStan[prefix]||inpostServiceKsiazkaStan.receiver;
-  state.role=["sender","receiver","all"].includes(role)?role:prefix;
-  button?.closest(".inpost-address-tabs")?.querySelectorAll("button").forEach(item=>item.classList.toggle("active",item===button));
-  inpostServiceAdresPodpowiedzi(document.getElementById("inpostServiceForm"),prefix);
+  state.role=["sender","receiver","all"].includes(role)?role:prefix;state.page=1;
+  const selected=inpostServiceAdresy().find(item=>String(item.key)===String(state.selectedKey));
+  if(selected&&!inpostServiceRoleKontaktu(selected,state.role))state.selectedKey="";
+  inpostServiceAdresPodpowiedzi(null,prefix);
 }
 function inpostServiceKsiazkaSzukaj(input,prefix){
   const state=inpostServiceKsiazkaStan[prefix]||inpostServiceKsiazkaStan.receiver;
-  state.q=String(input?.value||"");
+  state.q=String(input?.value||"");state.page=1;
   inpostServiceRenderujKsiazke(prefix);
 }
-function inpostServiceNowyAdres(prefix){
-  const form=document.getElementById("inpostServiceForm");if(!form)return;
+function inpostServiceKsiazkaPole(input,prefix,key){
+  const state=inpostServiceKsiazkaStan[prefix]||inpostServiceKsiazkaStan.receiver;
+  if(["postCode","city","street"].includes(key))state[key]=String(input?.value||"");
+  state.page=1;inpostServiceAdresPodpowiedzi(null,prefix);
+}
+function inpostServiceKsiazkaStrona(prefix,change){
+  const state=inpostServiceKsiazkaStan[prefix]||inpostServiceKsiazkaStan.receiver;state.page=Math.max(1,(Number(state.page)||1)+Number(change||0));inpostServiceRenderujKsiazke(prefix);
+}
+function inpostServiceKsiazkaZaznacz(prefix,key){const state=inpostServiceKsiazkaStan[prefix];state.selectedKey=String(key||"");inpostServiceRenderujKsiazke(prefix);}
+function inpostServiceKsiazkaForm(prefix){
+  const state=inpostServiceKsiazkaStan[prefix]||{};return document.getElementById(state.targetFormId)||document.getElementById("inpostServiceForm");
+}
+function inpostServiceZamknijKsiazke(){document.getElementById("inpostAddressBookModal")?.remove();document.body.classList.remove("has-dialog");}
+function inpostServiceOtworzKsiazke(prefix,source=null){
+  const form=source?.closest?.("form")||document.getElementById("inpostServiceForm");if(!form)return;
+  if(!form.id)form.id=`inpostServiceForm${Date.now()}`;
+  const state=inpostServiceKsiazkaStan[prefix]||inpostServiceKsiazkaStan.receiver;
+  state.targetFormId=form.id;state.role=prefix;state.page=1;state.selectedKey=String(form.elements[`${prefix}ContactId`]?.value||"");
+  document.getElementById("inpostAddressBookModal")?.remove();
+  const layer=document.createElement("div");layer.id="inpostAddressBookModal";layer.className="inpost-book-modal-layer";layer.dataset.prefix=prefix;
+  layer.innerHTML=`<button class="inpost-book-backdrop" type="button" onclick="inpostServiceZamknijKsiazke()" aria-label="Zamknij książkę adresową"></button><section class="inpost-book-dialog" role="dialog" aria-modal="true" aria-labelledby="inpostBookTitle"><header><div><span class="order-pro-label">Książka adresowa InPost</span><h2 id="inpostBookTitle">Wybierz ${prefix==="sender"?"nadawcę":"odbiorcę"}</h2></div><div class="diag-actions"><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres(${jsArg(prefix)},this)">＋ Nowy adres</button><button class="inpost-book-close" type="button" onclick="inpostServiceZamknijKsiazke()" aria-label="Zamknij">✕</button></div></header><div class="inpost-book-toolbar"><div class="inpost-address-tabs"><button type="button" data-inpost-book-role="sender" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'sender',this)">Nadawcy</button><button type="button" data-inpost-book-role="receiver" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'receiver',this)">Odbiorcy</button><button type="button" data-inpost-book-role="all" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'all',this)">Wszyscy</button></div><label class="inpost-address-main-search"><span>🔎</span><input type="search" value="${esc(state.q)}" placeholder="Firma, osoba, NIP, telefon, e-mail lub adres…" oninput="inpostServiceKsiazkaSzukaj(this,${jsArg(prefix)})"></label><div class="inpost-address-search-fields"><label>Kod pocztowy<input list="inpostBook${prefix}PostCodeHints" value="${esc(state.postCode)}" placeholder="00-000" oninput="inpostServiceKsiazkaPole(this,${jsArg(prefix)},'postCode')"><datalist id="inpostBook${prefix}PostCodeHints"></datalist></label><label>Miejscowość<input list="inpostBook${prefix}CityHints" value="${esc(state.city)}" placeholder="Wpisz miejscowość" oninput="inpostServiceKsiazkaPole(this,${jsArg(prefix)},'city')"><datalist id="inpostBook${prefix}CityHints"></datalist></label><label>Ulica<input list="inpostBook${prefix}StreetHints" value="${esc(state.street)}" placeholder="Wpisz ulicę" oninput="inpostServiceKsiazkaPole(this,${jsArg(prefix)},'street')"><datalist id="inpostBook${prefix}StreetHints"></datalist></label></div></div><div class="inpost-book-content"><div class="inpost-book-list-panel"><div class="inpost-address-match-head"><b data-inpost-book-count></b><small>Kliknij kontakt, aby zobaczyć szczegóły</small></div><div class="inpost-book-results" data-inpost-book-results></div><div class="inpost-book-pager" data-inpost-book-pager></div></div><aside class="inpost-book-preview" data-inpost-book-preview></aside></div><footer><button class="btn ghost" type="button" onclick="inpostServiceZamknijKsiazke()">Anuluj</button><button class="btn" type="button" data-inpost-book-use onclick="inpostServiceKsiazkaZatwierdz(${jsArg(prefix)})">Użyj wybranego adresu</button></footer></section>`;
+  layer.addEventListener("keydown",event=>{if(event.key==="Escape")inpostServiceZamknijKsiazke();});
+  document.body.appendChild(layer);document.body.classList.add("has-dialog");inpostServiceAdresPodpowiedzi(null,prefix);requestAnimationFrame(()=>layer.querySelector('input[type="search"]')?.focus());
+}
+function inpostServiceKsiazkaZatwierdz(prefix){
+  const state=inpostServiceKsiazkaStan[prefix];if(!state?.selectedKey)return;
+  inpostServiceWybierzAdresWynik(prefix,state.selectedKey,state.targetFormId);inpostServiceZamknijKsiazke();
+}
+function inpostServiceNowyAdres(prefix,source=null){
+  const form=source?.closest?.("form")||inpostServiceKsiazkaForm(prefix);if(!form)return;
+  inpostServiceZamknijKsiazke();
   if(form.elements[`${prefix}ContactId`])form.elements[`${prefix}ContactId`].value="";
   inpostServiceUstawPolaOsoby(form,prefix,{roles:[prefix]});
   toast(`Nowy adres ${prefix==="sender"?"nadawcy":"odbiorcy"}`);
 }
-function inpostServiceWybierzAdresWynik(prefix,key){
-  const form=document.getElementById("inpostServiceForm"),contact=inpostServiceAdresy().find(item=>String(item.key)===String(key));if(!form||!contact)return;
+function inpostServiceWybierzAdresWynik(prefix,key,targetFormId=""){
+  const form=document.getElementById(targetFormId)||inpostServiceKsiazkaForm(prefix),contact=inpostServiceAdresy().find(item=>String(item.key)===String(key));if(!form||!contact)return;
   const hidden=form.elements[`${prefix}ContactId`];
   if(hidden)hidden.value=contact.stored?contact.id:"";
   inpostServiceUstawPolaOsoby(form,prefix,contact);
@@ -126,13 +161,18 @@ function inpostServiceUstawPolaOsoby(form,prefix,contact={}){
     [`${prefix}Street`]:address.street,[`${prefix}Building`]:address.buildingNumber||address.building_number,
     [`${prefix}Flat`]:address.flatNumber||address.flat_number,
     [`${prefix}PostCode`]:address.postCode||address.post_code,[`${prefix}City`]:address.city,
-    [`${prefix}SearchPostCode`]:address.postCode||address.post_code,
-    [`${prefix}SearchCity`]:address.city,[`${prefix}SearchStreet`]:address.street,
   };
   Object.entries(fields).forEach(([name,value])=>{if(form.elements[name])form.elements[name].value=value||"";});
   if(form.elements[`${prefix}RoleSender`])form.elements[`${prefix}RoleSender`].checked=roles.includes("sender");
   if(form.elements[`${prefix}RoleReceiver`])form.elements[`${prefix}RoleReceiver`].checked=roles.includes("receiver");
+  const summary=form.querySelector(`[data-inpost-selected-contact="${prefix}"]`);
+  if(summary)summary.innerHTML=inpostServiceWybranyKontaktHTML(contact,prefix);
   inpostServiceAdresPodpowiedzi(form,prefix);
+}
+function inpostServiceWybranyKontaktHTML(contact={},prefix="receiver"){
+  const hasData=!!(contact.id||contact.companyName||contact.firstName||contact.lastName||contact.email||contact.phone||inpostServiceAdresKsiazki(contact));
+  if(!hasData)return `<span class="inpost-selected-icon">＋</span><span><b>Nie wybrano ${prefix==="sender"?"nadawcy":"odbiorcy"}</b><small>Wybierz zapisany kontakt albo wpisz nowy adres.</small></span>`;
+  return `<span class="inpost-selected-icon">${prefix==="sender"?"📤":"📥"}</span><span><b>${esc(inpostServiceNazwaKontaktu(contact))}</b><small>${esc(inpostServiceAdresKsiazki(contact)||[contact.email,contact.phone].filter(Boolean).join(" • ")||"Adres do uzupełnienia")}</small></span>${inpostServiceRolaEtykieta(contact)}`;
 }
 function inpostServicePunktOpis(point={}){
   const distance=Number(point.distance);
@@ -174,6 +214,7 @@ async function inpostServiceZapiszKontakt(prefix,button=null){
     inpostServiceStan.addressBook=Array.isArray(d.addressBook)?d.addressBook:inpostServiceStan.addressBook;
     form.dataset.lastSavedRole=prefix;
     if(form.elements[`${prefix}ContactId`])form.elements[`${prefix}ContactId`].value=d.contact?.id||id;
+    if(d.contact)inpostServiceUstawPolaOsoby(form,prefix,d.contact);
     inpostServiceOdswiezSelektory(form,d.contact?.id||id);
     toast(id?"Zaktualizowano adres w książce ✅":"Adres zapisany w książce ✅");
   }catch(e){toast("Książka adresowa: "+(e.message||e));}
@@ -289,24 +330,15 @@ function inpostServiceUstawTyp(form){
 }
 function inpostServiceOsobaFields(prefix,title,person={}){
   const a=person.address||{},selected=person.id||"";
-  const state=inpostServiceKsiazkaStan[prefix],counts=inpostServiceAdresy().reduce((out,contact)=>{if((contact.roles||[]).includes("sender"))out.sender++;if((contact.roles||[]).includes("receiver"))out.receiver++;return out;},{sender:0,receiver:0});
   return `<fieldset class="inpost-party-card">
     <legend>${prefix==="sender"?"📤":"📥"} ${esc(title)}</legend>
-    <div class="inpost-address-book">
-      <div class="inpost-address-book-head"><b>Książka adresowa</b><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres(${jsArg(prefix)})">＋ Nowy adres</button></div>
-      <div class="inpost-address-tabs">
-        <button type="button" class="${state.role==="sender"?"active":""}" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'sender',this)">Nadawcy <b>${counts.sender}</b></button>
-        <button type="button" class="${state.role==="receiver"?"active":""}" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'receiver',this)">Odbiorcy <b>${counts.receiver}</b></button>
-        <button type="button" class="${state.role==="all"?"active":""}" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'all',this)">Wszyscy</button>
+    <input type="hidden" name="${prefix}ContactId" value="${esc(selected)}">
+    <div class="inpost-contact-selector">
+      <div class="inpost-selected-contact" data-inpost-selected-contact="${prefix}">${inpostServiceWybranyKontaktHTML(person,prefix)}</div>
+      <div class="inpost-contact-selector-actions">
+        <button class="btn" type="button" onclick="inpostServiceOtworzKsiazke(${jsArg(prefix)},this)">📒 Wybierz z książki</button>
+        <button class="btn ghost" type="button" onclick="inpostServiceNowyAdres(${jsArg(prefix)},this)">＋ Nowy adres</button>
       </div>
-      <label class="inpost-address-main-search"><span>🔎</span><input type="search" value="${esc(state.q)}" placeholder="Firma, osoba, NIP, telefon, e-mail lub adres…" oninput="inpostServiceKsiazkaSzukaj(this,${jsArg(prefix)})"></label>
-      <input type="hidden" name="${prefix}ContactId" value="${esc(selected)}">
-      <div class="inpost-address-search-fields">
-        <label>Kod pocztowy<input name="${prefix}SearchPostCode" list="inpostService${prefix}PostCodeHints" value="${esc(state.postCode)}" placeholder="00-000" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})"></label>
-        <label>Miejscowość<input name="${prefix}SearchCity" list="inpostService${prefix}CityHints" value="${esc(state.city)}" placeholder="miejscowość" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})"></label>
-        <label>Ulica<input name="${prefix}SearchStreet" list="inpostService${prefix}StreetHints" value="${esc(state.street)}" placeholder="ulica" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})"></label>
-      </div>
-      <div class="inpost-address-matches" data-inpost-address-results="${prefix}"></div>
     </div>
     <div class="inpost-form-grid">
       <label>Firma<input name="${prefix}Company" value="${esc(person.companyName||"")}"></label>
@@ -315,11 +347,11 @@ function inpostServiceOsobaFields(prefix,title,person={}){
       <label>Nazwisko<input name="${prefix}LastName" value="${esc(person.lastName||"")}"></label>
       <label>E-mail *<input name="${prefix}Email" type="email" required value="${esc(person.email||"")}"></label>
       <label>Telefon *<input name="${prefix}Phone" inputmode="tel" required value="${esc(person.phone||"")}"></label>
-      <label class="wide">Ulica ${prefix==="sender"?"*":""}<input name="${prefix}Street" list="inpostService${prefix}StreetHints" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.street||"")}"><datalist id="inpostService${prefix}StreetHints"></datalist></label>
+      <label class="wide">Ulica ${prefix==="sender"?"*":""}<input name="${prefix}Street" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.street||"")}"></label>
       <label>Nr budynku ${prefix==="sender"?"*":""}<input name="${prefix}Building" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.buildingNumber||a.building_number||"")}"></label>
       <label>Nr lokalu<input name="${prefix}Flat" value="${esc(a.flatNumber||a.flat_number||"")}"></label>
-      <label>Kod pocztowy ${prefix==="sender"?"*":""}<input name="${prefix}PostCode" list="inpostService${prefix}PostCodeHints" ${prefix==="sender"?"required":"data-receiver-address"} pattern="\\d{2}-?\\d{3}" value="${esc(a.postCode||a.post_code||"")}"><datalist id="inpostService${prefix}PostCodeHints"></datalist></label>
-      <label>Miasto ${prefix==="sender"?"*":""}<input name="${prefix}City" list="inpostService${prefix}CityHints" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.city||"")}"><datalist id="inpostService${prefix}CityHints"></datalist></label>
+      <label>Kod pocztowy ${prefix==="sender"?"*":""}<input name="${prefix}PostCode" ${prefix==="sender"?"required":"data-receiver-address"} pattern="\\d{2}-?\\d{3}" value="${esc(a.postCode||a.post_code||"")}"></label>
+      <label>Miasto ${prefix==="sender"?"*":""}<input name="${prefix}City" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.city||"")}"></label>
       ${prefix==="receiver"?'<button class="btn ghost wide" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie(\'receiver\')">📍 Znajdź Paczkomaty przy tym adresie</button>':""}
       <div class="inpost-contact-roles wide"><b>Używaj tego adresu jako</b><label><input type="checkbox" name="${prefix}RoleSender" ${prefix==="sender"?"checked":""}> Nadawca</label><label><input type="checkbox" name="${prefix}RoleReceiver" ${prefix==="receiver"?"checked":""}> Odbiorca</label></div>
       <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt(${jsArg(prefix)},this)">💾 Zapisz w książce</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt(${jsArg(prefix)},this)">Usuń zapis</button></div>
@@ -433,5 +465,5 @@ function panelWysylkiUslugowejInpost(){
   if(inpostServiceStan.loading&&!inpostServiceStan.loaded)return '<div class="panel"><div class="admin-loading-state">⏳ Pobieram książkę adresową, konfigurację i rejestr nadań…</div></div>';
   setTimeout(()=>{const form=document.getElementById("inpostServiceForm");inpostServiceUstawTyp(form);inpostServiceAktualizujWyceneUI(form);inpostServiceAdresPodpowiedzi(form,"sender");inpostServiceAdresPodpowiedzi(form,"receiver");},0);
   const billing=inpostServiceStan.billing||{};
-  return `<div class="inpost-service-workspace"><section class="inpost-service-stats"><article><span>📦</span><b>${inpostServiceStan.items.length}</b><small>nadań</small></article><article><span>📤</span><b>${inpostServiceAdresy().filter(c=>(c.roles||[]).includes("sender")).length}</b><small>nadawców</small></article><article><span>📥</span><b>${inpostServiceAdresy().filter(c=>(c.roles||[]).includes("receiver")).length}</b><small>odbiorców</small></article><article><span>🧾</span><b>${zl(billing.customerPendingGross||0)}</b><small>do FV miesięcznych</small></article></section>${inpostServiceStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(inpostServiceStan.error)}</div>`:""}${inpostServiceFormHTML()}${inpostServiceMiesieczneHTML()}${inpostServiceHistoriaHTML()}<details class="panel inpost-service-settings"><summary>⚙️ Stawki, domyślny nadawca i prowizja</summary><form onsubmit="inpostServiceZapiszUstawienia(event)">${inpostServiceCennikHTML()}${inpostServiceOsobaFields("sender","Stałe dane nadawcy",inpostServiceNadawca())}<div class="inpost-settings-footer"><label>Domyślna prowizja Artway‑TM brutto<input name="commissionGross" type="number" min="0" step=".01" value="${esc(inpostServiceStan.settings?.commissionGross??4)}"></label><button class="btn" type="submit">Zapisz ustawienia</button><a class="btn ghost" href="#/admin/infakt/wysylki">Rozliczenia inFakt</a></div></form></details></div>`;
+  return `<div class="inpost-service-workspace"><section class="inpost-service-stats"><article><span>📦</span><b>${inpostServiceStan.items.length}</b><small>nadań</small></article><article><span>📤</span><b>${inpostServiceAdresy().filter(c=>(c.roles||[]).includes("sender")).length}</b><small>nadawców</small></article><article><span>📥</span><b>${inpostServiceAdresy().filter(c=>(c.roles||[]).includes("receiver")).length}</b><small>odbiorców</small></article><article><span>🧾</span><b>${zl(billing.customerPendingGross||0)}</b><small>do FV miesięcznych</small></article></section>${inpostServiceStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(inpostServiceStan.error)}</div>`:""}${inpostServiceFormHTML()}${inpostServiceMiesieczneHTML()}${inpostServiceHistoriaHTML()}<details class="panel inpost-service-settings"><summary>⚙️ Stawki, domyślny nadawca i prowizja</summary><form id="inpostServiceSettingsForm" onsubmit="inpostServiceZapiszUstawienia(event)">${inpostServiceCennikHTML()}${inpostServiceOsobaFields("sender","Stałe dane nadawcy",inpostServiceNadawca())}<div class="inpost-settings-footer"><label>Domyślna prowizja Artway‑TM brutto<input name="commissionGross" type="number" min="0" step=".01" value="${esc(inpostServiceStan.settings?.commissionGross??4)}"></label><button class="btn" type="submit">Zapisz ustawienia</button><a class="btn ghost" href="#/admin/infakt/wysylki">Rozliczenia inFakt</a></div></form></details></div>`;
 }
