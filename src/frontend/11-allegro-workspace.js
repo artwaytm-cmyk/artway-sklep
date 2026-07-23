@@ -23,10 +23,13 @@ function agentAISubnavHTML(aktywny="pulpit"){
 function klienciSubnavHTML(aktywny="lista"){
   const u=pobierzUzytkownikow();
   const admini=u.filter(x=>kontoMaRoleAdmin(x.email)).length;
+  const owner=jestGlownymAdminem(sesja?.email);
   return adminSubnavHTML([
     {id:"lista",href:"#/admin/klienci",label:"👥 Lista klientów",badge:u.length},
-    {id:"dodaj",href:"#/admin/klienci/dodaj",label:"➕ Dodaj klienta"},
-    {id:"uprawnienia",href:"#/admin/klienci/uprawnienia",label:"🛡️ Uprawnienia",badge:admini},
+    ...(owner?[
+      {id:"dodaj",href:"#/admin/klienci/dodaj",label:"➕ Dodaj klienta"},
+      {id:"uprawnienia",href:"#/admin/klienci/uprawnienia",label:"🛡️ Uprawnienia",badge:admini},
+    ]:[]),
     {id:"zamowienia",href:"#/admin/klienci/zamowienia",label:"📦 Zamówienia klientów"}
   ],aktywny);
 }

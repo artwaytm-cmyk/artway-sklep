@@ -17,7 +17,8 @@ import {
   legacyPasswordHash,
   publicUser,
   rateLimit,
-  requestSession,
+  requestSession as requestSignedSession,
+  sessionMatchesAccount,
   verifyOrderAccess,
   verifyPassword,
 } from './core/security.mjs';
@@ -157,6 +158,20 @@ const zapiszUstawieniaBezpiecznie = createRevisionSafeWriter(repository, 'settin
 async function zapisz(key, value) {
   if (key !== 'settings') return repository.write(key, value);
   return zapiszUstawieniaBezpiecznie(value);
+}
+const zweryfikowaneSesjeZadania = new WeakMap();
+async function przygotujZweryfikowanaSesje(request) {
+  const signed = requestSignedSession(request);
+  if (!signed) return null;
+  const record = await czytaj('users', { items: [] });
+  const account = (Array.isArray(record.items) ? record.items : []).find((entry) => String(entry?.email || '').trim().toLowerCase() === signed.email);
+  if (!sessionMatchesAccount(signed, account)) return null;
+  const verified = { ...signed, account };
+  zweryfikowaneSesjeZadania.set(request, verified);
+  return verified;
+}
+function requestSession(request) {
+  return zweryfikowaneSesjeZadania.get(request) || null;
 }
 const {
   pobierzProduktProducenta,
@@ -2938,6 +2953,7 @@ const storeDataRoute = createStoreDataRoute({
   wyslijEmailSMTP,
   czytajUstawieniaBazowe,
   czytajUstawieniaPrzyrostowo,
+  primaryAdminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || 'artwaytm@gmail.com',
 });
 
 const systemRoute = createSystemRoute({
@@ -3006,6 +3022,7 @@ export default async (req) => {
   if (contentLength > 5 * 1024 * 1024) return odpowiedz({ ok: false, error: 'Żądanie jest zbyt duże.', code: 'payload_too_large' }, 413);
 
   try {
+    await przygotujZweryfikowanaSesje(req);
     const telegramResponse = await telegramRoute(req, url, action);
     if (telegramResponse) return telegramResponse;
     const allegroCredentialsResponse = await allegroCredentialsRoute(req, url, action);

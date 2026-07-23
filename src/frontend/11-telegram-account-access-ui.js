@@ -1,5 +1,5 @@
 async function zapiszTelegramDostepKonta(email,button){
-  if(!jestAdmin())return toast("Brak uprawnień");
+  if(!jestGlownymAdminem(sesja?.email))return toast("Tylko główny administrator może nadawać uprawnienia Telegram");
   const e=String(email||"").trim().toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>String(x.email||"").toLowerCase()===e),row=button?.closest("tr");
   if(!k||!row)return toast("Nie znaleziono konta");
   if(!kontoMaRoleAdmin(k.email))return toast("Dostęp do czatu można przypisać tylko kontu administratora");
@@ -20,5 +20,6 @@ async function zapiszTelegramDostepKonta(email,button){
 
 function telegramDostepKontaHTML(k,admin){
   if(!admin)return `<small>Najpierw nadaj rolę administratora</small>`;
+  if(!jestGlownymAdminem(sesja?.email))return `<small>${k.telegramAccess?"✅ wspólny czat":"bez dostępu do czatu"}${k.telegramApprover?" • zatwierdzanie":""}</small>`;
   return `<div class="account-telegram-access"><input data-telegram-user-id inputmode="numeric" autocomplete="off" placeholder="ID użytkownika" aria-label="ID użytkownika Telegram" value="${esc(k.telegramUserId||"")}"><label><input data-telegram-access type="checkbox" ${k.telegramAccess===true?"checked":""}> wspólny czat</label><label><input data-telegram-approver type="checkbox" ${k.telegramApprover===true?"checked":""}> zatwierdzanie</label><button class="btn ghost" type="button" onclick="zapiszTelegramDostepKonta(${jsArg(k.email)},this)">Zapisz</button></div>`;
 }

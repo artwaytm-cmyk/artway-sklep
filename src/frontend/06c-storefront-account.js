@@ -130,17 +130,57 @@ function widokKonto(){
   const admin=jestAdmin();
   const zam = pobierzZamowienia().filter(z=>z.email===sesja.email);
   const profil=pobierzProfilKonta(sesja.email)||{imie:sesja.imie,email:sesja.email};
+  const dataKonta=value=>{
+    const date=new Date(value||"");
+    return Number.isFinite(date.getTime())?date.toLocaleString("pl-PL"):"—";
+  };
+  const owner=admin&&jestGlownymAdminem(sesja.email);
+  const adminPanel=admin?`
+    <section class="admin-account-hero">
+      <div class="admin-account-identity">
+        <span class="admin-account-avatar">A</span>
+        <div><span class="order-pro-label">Bezpieczne konto służbowe</span><h1>Moje konto administratora</h1><p><b>${esc(sesja.imie||"Administrator")}</b> • ${esc(sesja.email)}</p></div>
+      </div>
+      <div class="admin-account-actions">
+        <a class="btn" href="#/admin">Otwórz panel</a>
+        ${owner?`<a class="btn ghost" href="#/admin/klienci/uprawnienia">Zarządzaj uprawnieniami</a>`:""}
+        <a class="btn ghost" href="#/admin/system/diagnostyka">Diagnostyka</a>
+        <button class="btn danger" type="button" onclick="wyloguj()">Wyloguj</button>
+      </div>
+    </section>
+    <div class="admin-account-status-grid">
+      <article><span>Rola</span><b>${owner?"Główny administrator":"Administrator"}</b><small>${owner?"Pełne zarządzanie kontami i rolami":"Dostęp operacyjny bez zarządzania właścicielem"}</small></article>
+      <article><span>Weryfikacja logowania</span><b>${sesja.mfaEnabled?"Google Authenticator aktywny":"Konfiguracja przy logowaniu"}</b><small>Każde konto administratora wymaga drugiego składnika</small></article>
+      <article><span>Limit bezczynności</span><b>${adminIdleTimeoutMinutes()} min</b><small>Po tym czasie nastąpi automatyczne wylogowanie</small></article>
+      <article><span>Ważność sesji</span><b>${dataKonta(sesja.sessionExpiresAt)}</b><small>Serwer sprawdza aktualną rolę przy każdym żądaniu</small></article>
+    </div>
+    <div class="admin-account-security-note"><b>Ochrona dostępu jest aktywna.</b><span>Zwykły klient nie może wejść do panelu. Odebranie roli, usunięcie konta albo reset hasła unieważnia wcześniejsze sesje na innych urządzeniach.</span></div>
+    <div class="admin-account-columns">
+      <details class="admin-account-card" open>
+        <summary><span>🔑</span><span><b>Zmień hasło</b><small>Zmiana wyloguje pozostałe sesje tego konta</small></span></summary>
+        <form onsubmit="zmienHaslo(event)">
+          <div class="f-group"><label>Obecne hasło</label><input required name="stare" type="password" autocomplete="current-password"></div>
+          <div class="f-group"><label>Nowe hasło (min. 8 znaków)</label><input required name="nowe" type="password" minlength="8" autocomplete="new-password"></div>
+          <div class="f-group"><label>Powtórz nowe hasło</label><input required name="nowe2" type="password" minlength="8" autocomplete="new-password"></div>
+          <button class="btn" type="submit">Zapisz nowe hasło</button>
+        </form>
+      </details>
+      <details class="admin-account-card" open>
+        <summary><span>🛡️</span><span><b>Sesja i odzyskiwanie</b><small>MFA, bezczynność i kod awaryjny e-mail</small></span></summary>
+        <form onsubmit="zapiszBezpieczenstwoKonta(event)">
+          <div class="f-group"><label>Automatyczne wylogowanie po bezczynności</label><select name="idleTimeoutMinutes">${ADMIN_IDLE_TIMEOUT_OPTIONS.map(value=>`<option value="${value}" ${adminIdleTimeoutMinutes()===value?"selected":""}>${value<60?`${value} minut`:value===60?"1 godzina":`${value/60} godzin`}</option>`).join("")}</select></div>
+          <ul class="admin-account-checks"><li>Google Authenticator przy logowaniu administratora</li><li>Jednorazowy kod odzyskania wysyłany wyłącznie na e-mail konta</li><li>Automatyczna kontrola roli i wersji zabezpieczeń</li></ul>
+          <button class="btn" type="submit">Zapisz zabezpieczenia</button>
+        </form>
+      </details>
+    </div>
+    <div class="admin-account-meta"><span>Ostatnie logowanie: <b>${dataKonta(sesja.lastLoginAt)}</b></span><span>Ostatnia zmiana roli: <b>${dataKonta(sesja.roleUpdatedAt)}</b></span><span>Ustawienia bezpieczeństwa: <b>${dataKonta(sesja.securitySettingsUpdatedAt)}</b></span></div>`:"";
   return `
-  <div class="${klasaPodstrony("konto")}"><div class="panel">
+  <div class="${klasaPodstrony("konto")} ${admin?"admin-account-page":""}"><div class="panel">
+    ${admin?adminPanel:`
     ${ikonaPodstronyHTML("konto")}<h1>${esc(us.tytul)}</h1>
-    <p style="color:var(--muted2);margin-bottom:.7rem">${admin?"Konto służbowe do zarządzania sklepem.":esc(us.opis||"")}</p>
-    <p><b>${esc(sesja.imie)}</b> • ${esc(sesja.email)} ${admin?'<span class="lvl lvl-info">ADMINISTRATOR</span>':""}</p>
-    ${admin?`
-    <div class="sug" style="margin:.9rem 0"><span class="s-ico">🛡️</span><span><b>Tryb administratora</b><br>To konto nie ma ulubionych ani historii własnych zamówień. Zamówieniami klientów zarządzasz w panelu administracyjnym.</span></div>
-    <div class="diag-actions">
-      <a class="btn" style="background:var(--brand2)" href="#/admin">⚙️ Otwórz panel administratora</a>
-      <button class="btn danger" onclick="wyloguj()">Wyloguj się</button>
-    </div>`:`
+    <p style="color:var(--muted2);margin-bottom:.7rem">${esc(us.opis||"")}</p>
+    <p><b>${esc(sesja.imie)}</b> • ${esc(sesja.email)}</p>
     <div class="stat-grid">
       <div class="stat"><b>${zam.length}</b><small>zamówień</small></div>
       <div class="stat"><b>${zl(zam.reduce((s,z)=>s+z.razem,0))}</b><small>łączna wartość</small></div>
@@ -158,7 +198,7 @@ function widokKonto(){
         <button class="btn" type="submit">💾 Zapisz moje dane</button>
         <p class="pay-note" style="text-align:left;margin-top:.5rem">Te dane wypełnią się automatycznie przy każdym zamówieniu.</p>
       </form>
-    </details>`}
+    </details>
     <details style="margin-top:.8rem">
       <summary style="cursor:pointer;font-weight:700;font-size:.92rem">🔑 Zmień hasło</summary>
       <form onsubmit="zmienHaslo(event)" style="max-width:380px;margin-top:.8rem">
@@ -167,16 +207,7 @@ function widokKonto(){
         <div class="f-group"><label>Powtórz nowe hasło</label><input required name="nowe2" type="password" minlength="8" autocomplete="new-password"></div>
         <button class="btn" type="submit">Zapisz nowe hasło</button>
       </form>
-    </details>
-    ${admin?`<details style="margin-top:.8rem">
-      <summary style="cursor:pointer;font-weight:700;font-size:.92rem">🛡️ Bezpieczeństwo sesji administratora</summary>
-      <form onsubmit="zapiszBezpieczenstwoKonta(event)" style="max-width:520px;margin-top:.8rem">
-        <div class="f-group"><label>Automatyczne wylogowanie po bezczynności</label><select name="idleTimeoutMinutes">${ADMIN_IDLE_TIMEOUT_OPTIONS.map(value=>`<option value="${value}" ${adminIdleTimeoutMinutes()===value?"selected":""}>${value<60?`${value} minut`:value===60?"1 godzina":`${value/60} godzin`}</option>`).join("")}</select></div>
-        <p class="pay-note" style="text-align:left">Ruch myszą, klawiaturą lub dotyk odświeża aktywność. Po przekroczeniu limitu panel wyloguje konto również z podpisanej sesji serwera.</p>
-        <p class="pay-note" style="text-align:left">Jeśli utracisz dostęp do Google Authenticator, po podaniu prawidłowego hasła możesz wysłać jednorazowy kod na e-mail tego konta.</p>
-        <button class="btn" type="submit">Zapisz zabezpieczenia</button>
-      </form>
-    </details>`:""}
+    </details>`}
   </div></div>`;
 }
 async function zapiszBezpieczenstwoKonta(e){

@@ -9,7 +9,18 @@ async function chmuraOdswiezSesjeAdministratora(force=false){
   const refreshAfter=Math.max(5,Math.floor((typeof adminIdleTimeoutMinutes==="function"?adminIdleTimeoutMinutes():60)/2))*60*1000;
   if(!force&&Date.now()-last<refreshAfter)return true;
   if(chmuraOdswiezanieSesji)return chmuraOdswiezanieSesji;
-  chmuraOdswiezanieSesji=(async()=>{try{const d=await chmura("session-refresh",{method:"POST",timeout:9000});if(!d.authenticated)return false;sesja={...sesja,...(d.user||{}),verified:true};delete sesja.token;zapiszLS("artway_sesja",sesja);zapiszLS("artway_admin_session_refreshed_at",Date.now());chmuraStan={...chmuraStan,dostepna:true,admin:true,error:""};return true;}catch(e){return false;}finally{chmuraOdswiezanieSesji=null;}})();
+  chmuraOdswiezanieSesji=(async()=>{try{
+    const d=await chmura("session-refresh",{method:"POST",timeout:9000});
+    if(!d.authenticated)throw Object.assign(new Error("Sesja administratora wygasła"),{code:"auth",status:401});
+    sesja={...sesja,...(d.user||{}),verified:true};delete sesja.token;zapiszLS("artway_sesja",sesja);zapiszLS("artway_admin_session_refreshed_at",Date.now());chmuraStan={...chmuraStan,dostepna:true,admin:true,error:""};return true;
+  }catch(e){
+    if(e?.code==="auth"||e?.status===401||e?.status===403){
+      ustawSesje(null);chmuraStan={...chmuraStan,admin:false,error:""};
+      if(trasa().startsWith("/admin"))location.hash="#/logowanie";
+      toast("Uprawnienia lub sesja administratora wygasły — zaloguj się ponownie 🔒");
+    }
+    return false;
+  }finally{chmuraOdswiezanieSesji=null;}})();
   return chmuraOdswiezanieSesji;
 }
 async function testujEmailPolaczenie(cicho=false){

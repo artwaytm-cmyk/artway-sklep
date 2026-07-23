@@ -6,6 +6,7 @@ import {
   createOrderAccess,
   hashPassword,
   requestSession,
+  sessionMatchesAccount,
   verifyOrderAccess,
   verifyPassword,
 } from '../netlify/functions/lib/core/security.mjs';
@@ -16,10 +17,18 @@ import { czyAdmin, tokenZadania } from '../netlify/functions/lib/core/http.mjs';
 process.env.ARTWAY_SESSION_SECRET = 'test-secret-that-is-not-used-in-production';
 
 test('podpisana sesja wskazuje właściciela i rolę konta', () => {
-  const token = createAccountSession({ email: 'Klient@Example.com', rola: 'klient' });
+  const token = createAccountSession({ email: 'Klient@Example.com', rola: 'klient', authVersion: 4 });
   const request = new Request('https://artwaytm.pl/api/store', { headers: { authorization: `Bearer ${token}` } });
-  assert.deepEqual(requestSession(request), { email: 'klient@example.com', role: 'klient', exp: requestSession(request).exp });
+  assert.deepEqual(requestSession(request), { email: 'klient@example.com', role: 'klient', authVersion: 4, exp: requestSession(request).exp });
   assert.equal(requestSession(new Request('https://artwaytm.pl/api/store', { headers: { authorization: `${token}x` } })), null);
+});
+
+test('sesja traci ważność po zmianie roli, wersji zabezpieczeń albo usunięciu konta', () => {
+  const session = { email: 'konto@example.com', role: 'admin', authVersion: 3 };
+  assert.equal(sessionMatchesAccount(session, { email: 'KONTO@example.com', rola: 'admin', authVersion: 3 }), true);
+  assert.equal(sessionMatchesAccount(session, { email: 'konto@example.com', rola: 'klient', authVersion: 3 }), false);
+  assert.equal(sessionMatchesAccount(session, { email: 'konto@example.com', rola: 'admin', authVersion: 4 }), false);
+  assert.equal(sessionMatchesAccount(session, null), false);
 });
 
 test('sesja konta działa z ciasteczka HttpOnly i nie wymaga tokenu w JavaScript', () => {

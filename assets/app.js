@@ -4037,10 +4037,25 @@ async function zapiszUzytkownikaCentralnie(u){
   }catch(bl){ return false; }
 }
 async function odtworzSesjeCentralna(){
+  if(!sesja)return false;
+  const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
   try{
-    if(maUprawnieniaZapisuChmury()){ await synchronizujBazeCentralna(true); }
-    else if(sesja && !jestAdmin()){ await pobierzMojeZamowieniaCentralne(true); }
-  }catch(e){}
+    const d=await chmura("account-session",{method:"GET",timeout:9000});
+    if(!d.authenticated||!d.user)throw new Error("Sesja nie jest aktywna");
+    ustawSesje({...sesja,...d.user,verified:true,sessionExpiresAt:d.expiresAt||""});
+    if(jestAdmin())await synchronizujBazeCentralna(true);else await pobierzMojeZamowieniaCentralne(true);
+    return true;
+  }catch(e){
+    if(lokalnyPodglad){
+      if(maUprawnieniaZapisuChmury())await synchronizujBazeCentralna(true).catch(()=>{});
+      else if(sesja&&!jestAdmin())await pobierzMojeZamowieniaCentralne(true).catch(()=>{});
+      return true;
+    }
+    const mialaSesje=!!sesja;
+    ustawSesje(null);chmuraStan={...chmuraStan,admin:false,error:""};
+    if(mialaSesje&&trasa().startsWith("/admin"))location.hash="#/logowanie";
+    return false;
+  }
 }
 function odswiezPoCichejSynchronizacji(){
   if(typeof document!=="undefined" && document.hidden) return;

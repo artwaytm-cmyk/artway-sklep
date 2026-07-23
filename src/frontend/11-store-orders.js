@@ -500,7 +500,7 @@ async function usunZamowienie(nr){
   toast("Zamówienie usunięte — nie wróci do obsługi");
   if(trasa().startsWith("/admin/zamowienie/")) location.hash="#/admin/zamowienia"; else renderuj();
 }
-let szukajKlientow = "",klienciWynikiEmails=[];
+let szukajKlientow = "",filtrRoliKlientow="wszyscy",klienciWynikiEmails=[];
 function klienciUstawZaznaczenie(zakres,zaznacz=true){
   const emails=zakres==="filtr"||zakres==="strona"?klienciWynikiEmails:Array.isArray(zakres)?zakres:[];
   emails.forEach(email=>zaznacz?zaznaczeniKlienci.add(String(email).toLowerCase()):zaznaczeniKlienci.delete(String(email).toLowerCase()));renderuj();
@@ -511,25 +511,34 @@ function klienciEksportujZakres(zakres="filtr"){
   const lista=pobierzUzytkownikow().filter(k=>ids.has(String(k.email||"").toLowerCase()));
   eksportujKlientow(lista,zakres==="zaznaczone"?"klienci-zaznaczeni.csv":"klienci-filtrowani.csv");
 }
-function zmienRoleUzytkownika(email){
+const zmianyDostepuUzytkownikowWToku=new Set();
+async function zmienRoleUzytkownika(email){
   if(!jestAdmin()){ toast("Brak uprawnień"); return; }
   const e=String(email||"").toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>x.email===e);
   if(!k){ toast("Nie znaleziono użytkownika"); return; }
+  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może zmieniać role");return;}
   if(jestGlownymAdminem(e)){ toast("Nie można zmienić roli głównego administratora"); return; }
   const maRole=k.rola==="admin";
   if(maRole&&sesja?.email===e){ toast("Nie możesz odebrać uprawnień aktualnie używanemu kontu"); return; }
-  k.rola=maRole?"klient":"admin";
-  if(maRole){ k.telegramAccess=false;k.telegramApprover=false; }
-  zapiszLS("artway_uzytkownicy",u);
-  void zapiszUzytkownikaCentralnie(k);
-  loguj("info",`${maRole?"Odebrano":"Nadano"} rolę administratora: ${e}`);
-  toast(maRole?"Odebrano uprawnienia administratora":"Nadano uprawnienia administratora 🛡️");
-  renderuj();
+  if(zmianyDostepuUzytkownikowWToku.has(e))return;
+  zmianyDostepuUzytkownikowWToku.add(e);renderuj();
+  try{
+    const d=await chmura("store-user-role",{method:"POST",body:{email:e,role:maRole?"klient":"admin"},timeout:15000});
+    Object.assign(k,d.user||{rola:maRole?"klient":"admin"});
+    if(k.rola!=="admin"){k.telegramAccess=false;k.telegramApprover=false;}
+    zapiszLS("artway_uzytkownicy",u);
+    loguj("info",`${maRole?"Odebrano":"Nadano"} rolę administratora: ${e}`);
+    toast(maRole?"Odebrano uprawnienia i unieważniono stare sesje":"Nadano rolę — przy logowaniu wymagane będzie MFA 🛡️");
+  }catch(bl){toast("⚠️ Nie zmieniono roli: "+(bl.message||"błąd serwera"));}
+  finally{zmianyDostepuUzytkownikowWToku.delete(e);renderuj();}
 }
 function widokAdminKlienci(sekcja="lista"){
   const aktywna=["lista","dodaj","uprawnienia","zamowienia"].includes(String(sekcja||""))?String(sekcja||""):"lista";
+  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email);
   let kl = pobierzUzytkownikow();
   if(szukajKlientow) kl = kl.filter(k=>(k.imie+" "+k.email).toLowerCase().includes(szukajKlientow));
+  if(filtrRoliKlientow==="admin")kl=kl.filter(k=>kontoMaRoleAdmin(k.email));
+  if(filtrRoliKlientow==="klient")kl=kl.filter(k=>!kontoMaRoleAdmin(k.email));
   if(aktywna==="uprawnienia") kl=kl.slice().sort((a,b)=>Number(kontoMaRoleAdmin(b.email))-Number(kontoMaRoleAdmin(a.email))||String(a.email).localeCompare(String(b.email),"pl"));
   klienciWynikiEmails=kl.map(k=>String(k.email||"").toLowerCase()).filter(Boolean);
   const zam = pobierzZamowienia();
@@ -541,37 +550,39 @@ function widokAdminKlienci(sekcja="lista"){
   ${klienciSubnavHTML(aktywna)}
   <div class="panel" style="${aktywna==="dodaj"?"":"display:none"}">
     <h1>➕ Dodaj klienta (pełna kartoteka)</h1>
-    <form onsubmit="dodajKlientaAdmin(event)">
+    ${zarzadzaDostepem?`<form onsubmit="dodajKlientaAdmin(event)">
       ${polaKartotekiHTML({})}
       <button class="btn" type="submit">➕ Utwórz konto klienta</button>
-    </form>
-    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">Konto trafia do wspólnej bazy serwerowej. Klient może zalogować się na dowolnym urządzeniu.</p>
+    </form>`:`<div class="backend-note">Tworzenie i usuwanie kont oraz zarządzanie rolami jest dostępne wyłącznie dla głównego administratora.</div>`}
+    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">Konto trafia do wspólnej bazy serwerowej bez przełączania bieżącej sesji administratora. Nowe konto zawsze otrzymuje rolę klienta.</p>
   </div>
   <div class="panel" style="${["lista","uprawnienia"].includes(aktywna)?"":"display:none"}">
     <h1>${aktywna==="uprawnienia"?"🛡️ Uprawnienia użytkowników":"👥 Użytkownicy"} (${kl.length}) <button class="btn ghost" style="float:right" onclick="eksportujKlientow()">📤 CSV</button></h1>
-    ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem">Tutaj szybko nadajesz lub odbierasz rolę administratora. Konto głównego właściciela i aktualnie używane konto są chronione przed przypadkową zmianą.</div>`:""}
-    ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko albo adres e-mail użytkownika.",results:kl.length,active:!!szukajKlientow,open:true,fields:`<label class="search-wide">Klient<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();zaplanujRenderPoWpisaniu()"></label>${szukajKlientow?`<button class="btn ghost" onclick="szukajKlientow='';renderuj()">Wyczyść filtry</button>`:""}`,actions:adminOperacjeWynikowHTML({id:"customers",selected:zaznaczeniKlienci.size,pageCount:kl.length,resultCount:kl.length,selectPage:"klienciUstawZaznaczenie('strona')",selectAll:"klienciUstawZaznaczenie('filtr')",clear:"klienciWyczyscZaznaczenie()",exportSelected:"klienciEksportujZakres('zaznaczone')",exportAll:"klienciEksportujZakres('filtr')"})})}
+    ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem"><b>Role są kontrolowane przez serwer.</b> Tylko główny administrator może je zmieniać. Odebranie roli lub reset hasła natychmiast unieważnia wcześniejsze sesje, a konto głównego właściciela jest chronione.</div>`:""}
+    ${aktywna==="uprawnienia"?`<div class="admin-account-status-grid user-access-summary"><article><span>Wszystkie konta</span><b>${pobierzUzytkownikow().length}</b><small>aktywne kartoteki</small></article><article><span>Administratorzy</span><b>${pobierzUzytkownikow().filter(k=>kontoMaRoleAdmin(k.email)).length}</b><small>w tym konto właściciela</small></article><article><span>Klienci</span><b>${pobierzUzytkownikow().filter(k=>!kontoMaRoleAdmin(k.email)).length}</b><small>bez dostępu do panelu</small></article><article><span>MFA</span><b>${pobierzUzytkownikow().filter(k=>kontoMaRoleAdmin(k.email)&&k.mfaEnabled).length}</b><small>kont z aktywnym Authenticator</small></article></div>`:""}
+    ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko, adres e-mail albo rola użytkownika.",results:kl.length,active:!!szukajKlientow||filtrRoliKlientow!=="wszyscy",open:true,fields:`<label class="search-wide">Użytkownik<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();zaplanujRenderPoWpisaniu()"></label><label>Rola<select onchange="filtrRoliKlientow=this.value;renderuj()"><option value="wszyscy" ${filtrRoliKlientow==="wszyscy"?"selected":""}>Wszystkie role</option><option value="admin" ${filtrRoliKlientow==="admin"?"selected":""}>Administratorzy</option><option value="klient" ${filtrRoliKlientow==="klient"?"selected":""}>Klienci</option></select></label>${szukajKlientow||filtrRoliKlientow!=="wszyscy"?`<button class="btn ghost" onclick="szukajKlientow='';filtrRoliKlientow='wszyscy';renderuj()">Wyczyść filtry</button>`:""}`,actions:adminOperacjeWynikowHTML({id:"customers",selected:zaznaczeniKlienci.size,pageCount:kl.length,resultCount:kl.length,selectPage:"klienciUstawZaznaczenie('strona')",selectAll:"klienciUstawZaznaczenie('filtr')",clear:"klienciWyczyscZaznaczenie()",exportSelected:"klienciEksportujZakres('zaznaczone')",exportAll:"klienciEksportujZakres('filtr')"})})}
     <div class="table-scroll"><table class="log-table">
       <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Telegram</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
       ${kl.map(k=>{
         const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
+        const accessBusy=zmianyDostepuUzytkownikowWToku.has(String(k.email||"").toLowerCase())||usunieciaUzytkownikowWToku.has(String(k.email||"").toLowerCase());
         const nZam = zam.filter(z=>z.email===k.email).length;
         return `<tr>
         <td><input type="checkbox" aria-label="Zaznacz ${esc(k.email)}" ${zaznaczeniKlienci.has(String(k.email||"").toLowerCase())?"checked":""} onchange="klienciUstawZaznaczenie([${jsArg(k.email)}],this.checked)"></td>
         <td><a href="#/admin/klient/${encodeURIComponent(k.email)}"><b>${esc(k.imie)}</b></a>${admin?' <span class="lvl lvl-info">ADMIN</span>':""}${k.nip?' <span class="lvl lvl-info">firma</span>':""}</td>
         <td>${esc(k.email)}${k.telefon?`<br><small style="color:var(--muted2)">📞 ${esc(k.telefon)}</small>`:""}</td>
-        <td><span class="lvl ${admin?"lvl-info":""}">${admin?"administrator":"klient"}</span>${glowny?"<br><small>właściciel</small>":""}</td>
+        <td><span class="lvl ${admin?"lvl-info":""}">${admin?"administrator":"klient"}</span>${glowny?"<br><small>właściciel</small>":""}${admin?`<br><small>${k.mfaEnabled?"🛡️ MFA aktywne":"⚠️ MFA przy następnym logowaniu"}</small>`:""}</td>
         <td>${telegramDostepKontaHTML(k,admin)}</td>
         <td>${new Date(k.data).toLocaleDateString("pl-PL")}</td>
         <td>${nZam ? `<a href="#/admin/zamowienia" onclick="szukajZamowien='${esc(k.email)}';filtrZamowien='wszystkie'" title="Zamówienia klienta">${nZam} →</a>` : "0"}</td>
         <td style="white-space:nowrap">
           <a class="btn ghost" href="#/admin/klient/${encodeURIComponent(k.email)}" style="padding:.3rem .55rem" title="Kartoteka klienta">📇</a>
-          ${glowny||sesja?.email===k.email?"":`<button class="btn ghost" onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')" style="padding:.3rem .55rem" title="${admin?"Odbierz rolę administratora":"Nadaj rolę administratora"}">${admin?"🔒":"🛡️"}</button>`}
-          ${admin?"":`<button class="ci-remove" onclick="if(confirm('Usunąć konto ${esc(k.email)}?')) usunKlienta('${esc(k.email)}')" title="Usuń konto">🗑️</button>`}
+          ${!zarzadzaDostepem||glowny||sesja?.email===k.email?"":`<button class="btn ghost" ${accessBusy?"disabled":""} onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')" style="padding:.3rem .55rem" title="${admin?"Odbierz rolę administratora":"Nadaj rolę administratora"}">${accessBusy?"⏳":admin?"🔒":"🛡️"}</button>`}
+          ${zarzadzaDostepem&&!admin&&!glowny?`<button class="ci-remove" ${accessBusy?"disabled":""} onclick="if(confirm('Trwale usunąć konto ${esc(k.email)}? Aktywne sesje natychmiast stracą dostęp.')) usunKlienta('${esc(k.email)}')" title="Usuń konto">${accessBusy?"⏳":"🗑️"}</button>`:""}
         </td>
       </tr>`;}).join("")}
     </table></div>
-    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę klienta. ID Telegram użytkownik otrzyma po wysłaniu <b>/start</b> do bota. Zapisanie opcji „wspólny czat” nadaje dostęp natychmiast — bez restartu serwera. „Zatwierdzanie” jest osobnym, wyższym uprawnieniem.</p>
+    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę. Zwykłe konto klienta nigdy nie dziedziczy dostępu administracyjnego. Uprawnienia Telegram są odrębne i nie zastępują roli administratora sklepu.</p>
   </div>
   <div class="panel" style="${aktywna==="zamowienia"?"":"display:none"}">
     <div class="order-section-head">

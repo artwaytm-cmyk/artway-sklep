@@ -77,7 +77,24 @@ export function clearAccountSessionHeaders() {
 export function requestSession(request) {
   const payload = verifySignedToken(requestToken(request), 'account');
   if (!payload?.sub) return null;
-  return { email: String(payload.sub).trim().toLowerCase(), role: payload.role === 'admin' ? 'admin' : 'klient', exp: payload.exp };
+  return {
+    email: String(payload.sub).trim().toLowerCase(),
+    role: payload.role === 'admin' ? 'admin' : 'klient',
+    authVersion: Math.max(0, Number(payload.authVersion) || 0),
+    exp: payload.exp,
+  };
+}
+
+export function sessionMatchesAccount(session, account) {
+  if (!session || !account) return false;
+  const sessionEmail = String(session.email || '').trim().toLowerCase();
+  const accountEmail = String(account.email || '').trim().toLowerCase();
+  const accountRole = account.rola === 'admin' ? 'admin' : 'klient';
+  const accountVersion = Math.max(0, Number(account.authVersion) || 0);
+  return !!sessionEmail
+    && sessionEmail === accountEmail
+    && session.role === accountRole
+    && Math.max(0, Number(session.authVersion) || 0) === accountVersion;
 }
 
 export function normalizeAdminIdleTimeoutMinutes(value, fallback = DEFAULT_ADMIN_IDLE_TIMEOUT_MINUTES) {
@@ -94,6 +111,7 @@ export function createAccountSession(user = {}) {
     scope: 'account',
     sub: email,
     role: admin ? 'admin' : 'klient',
+    authVersion: Math.max(0, Number(user.authVersion) || 0),
     ...(admin ? { idleTimeoutMinutes } : {}),
   }, admin ? idleTimeoutMinutes * 60 * 1000 : SESSION_TTL_MS);
 }
@@ -144,7 +162,13 @@ export function publicUser(user = {}) {
     email: String(user.email || '').trim().toLowerCase().slice(0, 200),
     rola: user.rola === 'admin' ? 'admin' : 'klient',
   };
-  if (result.rola === 'admin') result.adminIdleTimeoutMinutes = normalizeAdminIdleTimeoutMinutes(user.adminIdleTimeoutMinutes);
+  if (result.rola === 'admin') {
+    result.adminIdleTimeoutMinutes = normalizeAdminIdleTimeoutMinutes(user.adminIdleTimeoutMinutes);
+    result.mfaEnabled = !!user.mfaSecretEncrypted;
+    result.lastLoginAt = String(user.lastLoginAt || '').slice(0, 80);
+    result.roleUpdatedAt = String(user.roleUpdatedAt || '').slice(0, 80);
+    result.securitySettingsUpdatedAt = String(user.securitySettingsUpdatedAt || '').slice(0, 80);
+  }
   return result;
 }
 

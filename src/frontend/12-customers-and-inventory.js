@@ -55,6 +55,7 @@ function widokAdminKlient(email){
   if(!k) return adminSzkielet("/admin/klienci", `<div class="panel"><h1>Nie znaleziono klienta</h1><p><a href="#/admin/klienci">← Wróć do listy</a></p></div>`);
   const zam = pobierzZamowienia().filter(z=>z.email===k.email);
   const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
+  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email),operacjaWToku=zmianyDostepuUzytkownikowWToku.has(k.email)||usunieciaUzytkownikowWToku.has(k.email);
   return adminSzkielet("/admin/klienci", `
   ${klienciSubnavHTML("lista")}
   <div class="panel">
@@ -66,14 +67,15 @@ function widokAdminKlient(email){
       <div class="stat"><b>${new Date(k.data).toLocaleDateString("pl-PL")}</b><small>rejestracja</small></div>
     </div>
     <form onsubmit="zapiszKartoteke(event, '${esc(k.email)}')">
-      ${polaKartotekiHTML(k, {edycja:true, blokujEmail:glowny})}
+      ${polaKartotekiHTML(k, {edycja:true, blokujEmail:true, bezHasla:!zarzadzaDostepem||sesja?.email===k.email})}
       <div class="diag-actions">
         <button class="btn" type="submit">💾 Zapisz kartotekę</button>
-        ${glowny||sesja?.email===k.email?"":`<button class="btn ghost" type="button" onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')">${admin?"🔒 Odbierz rolę administratora":"🛡️ Nadaj rolę administratora"}</button>`}
+        ${!zarzadzaDostepem||glowny||sesja?.email===k.email?"":`<button class="btn ghost" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')">${operacjaWToku?"⏳ Zapisuję…":admin?"🔒 Odbierz rolę administratora":"🛡️ Nadaj rolę administratora"}</button>`}
         ${zam.length?`<a class="btn ghost" href="#/admin/zamowienia" onclick="szukajZamowien='${esc(k.email)}';filtrZamowien='wszystkie'">📦 Zamówienia klienta (${zam.length})</a>`:""}
         <a class="btn ghost" href="mailto:${esc(k.email)}">✉️ Napisz e-mail</a>
-        ${admin?"":`<button class="btn danger" type="button" onclick="if(confirm('Usunąć konto ${esc(k.email)}?')){usunKlienta('${esc(k.email)}');location.hash='#/admin/klienci';}">🗑️ Usuń konto</button>`}
+        ${zarzadzaDostepem&&!admin&&!glowny?`<button class="btn danger" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('Trwale usunąć konto ${esc(k.email)}? Aktywne sesje natychmiast stracą dostęp.')) usunKlienta('${esc(k.email)}',true)">${operacjaWToku?"⏳ Usuwam…":"🗑️ Usuń konto"}</button>`:""}
       </div>
+      <p class="pay-note" style="text-align:left">Adres e-mail jest identyfikatorem logowania i nie jest zmieniany w kartotece. Zmiana roli, reset hasła i usunięcie konta unieważniają jego wcześniejsze sesje.</p>
     </form>
   </div>
   ${zam.length?`<div class="panel">
@@ -90,60 +92,66 @@ async function zapiszKartoteke(e, staryEmail){
   const u = pobierzUzytkownikow();
   const k = u.find(x=>x.email===staryEmail);
   if(!k){ toast("Nie znaleziono klienta"); return; }
-  const glownyAdmin = jestGlownymAdminem(staryEmail);
+  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email);
   const dane = daneKartotekiZFormularza(f);
   if(dane.blad){ toast("⚠️ "+dane.blad); return; }
-  const nowyEmail = glownyAdmin ? staryEmail : String(f.get("email")||"").trim().toLowerCase();
+  const nowyEmail = staryEmail;
   const noweHaslo = String(f.get("haslo")||"");
   const powtorzoneHaslo = String(f.get("haslo2")||"");
   if(dane.imie.length<2){ toast("⚠️ Podaj imię i nazwisko"); return; }
   if(!nowyEmail.includes("@")){ toast("⚠️ Nieprawidłowy e-mail"); return; }
-  if(nowyEmail!==staryEmail && u.some(x=>x.email===nowyEmail)){ toast("⚠️ Ten e-mail jest już zajęty"); return; }
-  if(noweHaslo && noweHaslo.length<6){ toast("⚠️ Nowe hasło: min. 6 znaków"); return; }
+  if(noweHaslo&&!zarzadzaDostepem){toast("⚠️ Tylko główny administrator może ustawiać hasła innych kont");return;}
+  if(noweHaslo && noweHaslo.length<8){ toast("⚠️ Nowe hasło: min. 8 znaków"); return; }
   if(noweHaslo!==powtorzoneHaslo){ toast("⚠️ Wpisane nowe hasła nie są takie same"); return; }
-  Object.assign(k, dane, {email: nowyEmail});
-  if(noweHaslo){ k.hash = await hashuj(noweHaslo); if(glownyAdmin) domyslneHasloAdmina = noweHaslo==="admin"; }
-  zapiszLS("artway_uzytkownicy", u);
-  void zapiszUzytkownikaCentralnie(k);
-  if(nowyEmail!==staryEmail){
-    const zam = pobierzZamowienia();
-    zam.forEach(z=>{ if(z.email===staryEmail) z.email=nowyEmail; });
-    zapiszLS("artway_zamowienia", zam);
-    if(stanBramki.authenticated){
-      void wywolajBramke("store-user-delete",{method:"POST",body:{email:staryEmail}}).catch(()=>{});
-      zam.filter(z=>z.email===nowyEmail).forEach(z=>void zapiszZamowienieCentralnie(z,false));
-    }
-    if(sesja?.email===staryEmail) ustawSesje({imie:dane.imie, email:nowyEmail, rola:k.rola||"klient"});
-    location.hash = "#/admin/klient/"+encodeURIComponent(nowyEmail);
-  } else if(sesja?.email===staryEmail && sesja.imie!==dane.imie){
-    ustawSesje({imie:dane.imie, email:staryEmail, rola:k.rola||"klient"});
-  }
-  loguj("info",`Zapisano kartotekę klienta ${staryEmail}${nowyEmail!==staryEmail?" → "+nowyEmail:""}${noweHaslo?" (nowe hasło)":""}`);
-  toast("Kartoteka zapisana ✅"); renderuj();
+  const button=e.submitter;if(button){button.disabled=true;button.textContent="Zapisuję…";}
+  try{
+    const next={...k,...dane,email:nowyEmail};
+    const wynik=await chmura("store-user-save",{method:"POST",body:{user:next},timeout:15000});
+    if(noweHaslo)await chmura("store-user-password-reset",{method:"POST",body:{email:staryEmail,password:noweHaslo},timeout:20000});
+    Object.assign(k,next,wynik.user||{});
+    delete k.hash;delete k.passwordHash;
+    zapiszLS("artway_uzytkownicy",u);
+    if(sesja?.email===staryEmail&&sesja.imie!==dane.imie)ustawSesje({...sesja,imie:dane.imie});
+    loguj("info",`Zapisano kartotekę klienta ${staryEmail}${noweHaslo?" i unieważniono jego sesje po zmianie hasła":""}`);
+    toast(noweHaslo?"Kartoteka i nowe hasło zapisane — stare sesje wylogowano ✅":"Kartoteka zapisana ✅");
+  }catch(bl){toast("⚠️ Nie zapisano kartoteki: "+(bl.message||"błąd serwera"));}
+  finally{if(button&&document.contains(button)){button.disabled=false;button.textContent="💾 Zapisz kartotekę";}renderuj();}
 }
 async function dodajKlientaAdmin(e){
   e.preventDefault();
+  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może tworzyć konta z panelu");return;}
   const f = new FormData(e.target);
   const dane = daneKartotekiZFormularza(f);
   if(dane.blad){ toast("⚠️ "+dane.blad); return; }
   if(String(f.get("haslo")||"")!==String(f.get("haslo2")||"")){ toast("⚠️ Wpisane hasła nie są takie same"); return; }
-  const wynik = await zarejestrujUzytkownika(String(f.get("imie")),String(f.get("email")),String(f.get("haslo")));
-  if(!wynik.ok){ toast("⚠️ "+wynik.blad); return; }
-  // dopisz pełną kartotekę (adres, firma, notatka)
-  const u = pobierzUzytkownikow();
-  const k = u.find(x=>x.email===String(f.get("email")).trim().toLowerCase());
-  if(k){ Object.assign(k, dane); zapiszLS("artway_uzytkownicy", u); }
-  if(k) void zapiszUzytkownikaCentralnie(k);
-  loguj("info","Utworzono kartotekę klienta: "+f.get("email"));
-  toast("Konto klienta z kartoteką utworzone ✅"); renderuj();
+  const email=String(f.get("email")||"").trim().toLowerCase(),password=String(f.get("haslo")||"");
+  if(!poprawnyEmailKonta(email)){toast("⚠️ Podaj poprawny adres e-mail");return;}
+  if(password.length<8){toast("⚠️ Hasło musi mieć co najmniej 8 znaków");return;}
+  const button=e.submitter;if(button){button.disabled=true;button.textContent="Tworzę konto…";}
+  try{
+    const wynik=await chmura("store-user-create",{method:"POST",body:{user:{...dane,email},password},timeout:20000});
+    const lista=pobierzUzytkownikow();lista.push({...dane,...(wynik.user||{}),email,rola:"klient",account:true});zapiszLS("artway_uzytkownicy",lista);
+    loguj("info","Utworzono kartotekę klienta: "+email);
+    toast("Konto klienta utworzone bez zmiany sesji administratora ✅");e.target.reset();renderuj();
+  }catch(bl){toast("⚠️ Nie utworzono konta: "+(bl.message||"błąd serwera"));}
+  finally{if(button&&document.contains(button)){button.disabled=false;button.textContent="➕ Utwórz konto klienta";}}
 }
-function usunKlienta(email){
-  if(kontoMaRoleAdmin(email)){ toast("Najpierw odbierz temu kontu rolę administratora"); return; }
-  zapiszLS("artway_uzytkownicy", pobierzUzytkownikow().filter(x=>x.email!==email));
-  if(stanBramki.authenticated) void wywolajBramke("store-user-delete",{method:"POST",body:{email}}).catch(bl=>toast("Nie usunięto klienta z serwera: "+bl.message));
-  loguj("info","Usunięto konto klienta: "+email);
-  toast("Usunięto konto "+email);
-  renderuj();
+const usunieciaUzytkownikowWToku=new Set();
+async function usunKlienta(email,przejdzDoListy=false){
+  const e=String(email||"").trim().toLowerCase();
+  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może usuwać konta");return false;}
+  if(jestGlownymAdminem(e)||e===String(sesja?.email||"").toLowerCase()){toast("Nie można usunąć głównego ani aktualnie używanego konta");return false;}
+  if(kontoMaRoleAdmin(e)){ toast("Najpierw odbierz temu kontu rolę administratora"); return false; }
+  if(usunieciaUzytkownikowWToku.has(e))return false;
+  usunieciaUzytkownikowWToku.add(e);renderuj();
+  try{
+    await chmura("store-user-delete",{method:"POST",body:{email:e},timeout:15000});
+    zapiszLS("artway_uzytkownicy",pobierzUzytkownikow().filter(x=>String(x.email||"").toLowerCase()!==e));
+    zaznaczeniKlienci.delete(e);loguj("info","Usunięto konto klienta i unieważniono jego sesje: "+e);
+    toast("Usunięto konto "+e+" — jego sesje nie mają już dostępu ✅");
+    if(przejdzDoListy)location.hash="#/admin/klienci";return true;
+  }catch(bl){toast("⚠️ Nie usunięto konta: "+(bl.message||"błąd serwera"));return false;}
+  finally{usunieciaUzytkownikowWToku.delete(e);renderuj();}
 }
 let szukajProduktow = "", filtrProduktow = "Wszystkie", kategoriaNowegoProduktu = "";
 let filtrStatusuProduktow = "aktywne", filtrZrodlaProduktow = "wszystkie", filtrStanuProduktow = "wszystkie", filtrAllegroProduktow = "wszystkie";

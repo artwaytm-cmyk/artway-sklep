@@ -1,6 +1,6 @@
 import { createStoreRepository } from '../core/store-repository.mjs';
 import crypto from 'node:crypto';
-import { requestSession } from '../core/security.mjs';
+import { requestSession, sessionMatchesAccount } from '../core/security.mjs';
 
 const repository = createStoreRepository({ name: 'artway-sklep' });
 const KEY = 'seo_performance';
@@ -58,11 +58,15 @@ function allowedOrigin(request) {
   const referer = String(request.headers.get('referer') || '');
   return !origin || /^https?:\/\/(?:www\.)?(?:artwaytm\.pl|allsklep\.pl)(?::\d+)?$/i.test(origin) || /^https?:\/\/(?:www\.)?(?:artwaytm\.pl|allsklep\.pl)(?:[:/]|$)/i.test(referer);
 }
-function adminRequest(request) {
-  if (requestSession(request)?.role === 'admin') return true;
+async function adminRequest(request) {
   const supplied = Buffer.from(String(request.headers.get('x-admin-token') || ''));
   const expected = Buffer.from(String(process.env.ARTWAY_ADMIN_TOKEN || ''));
-  return !!expected.length && supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+  if (expected.length && supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected)) return true;
+  const session = requestSession(request);
+  if (session?.role !== 'admin') return false;
+  const users = await repository.read('users', { items: [] });
+  const account = (Array.isArray(users.items) ? users.items : []).find((entry) => String(entry?.email || '').trim().toLowerCase() === session.email);
+  return sessionMatchesAccount(session, account);
 }
 function rateLimited(request) {
   const forwarded = String(request.headers.get('x-forwarded-for') || '').split(',')[0].trim();
@@ -245,7 +249,7 @@ function performance(state, input = 30) {
 
 export async function handleSeoAnalytics(request) {
   if (request.method === 'GET') {
-    if (!adminRequest(request)) return Response.json({ ok: false, error: 'Brak uprawnień administratora' }, { status: 401 });
+    if (!await adminRequest(request)) return Response.json({ ok: false, error: 'Brak uprawnień administratora' }, { status: 401 });
     const url = new URL(request.url), state = await repository.read(KEY, emptyState());
     return Response.json({ ok: true, ...performance(state, { days: url.searchParams.get('days'), from: url.searchParams.get('from'), to: url.searchParams.get('to'), entryDomain: url.searchParams.get('domain'), channel: url.searchParams.get('channel') }) }, { headers: { 'cache-control': 'no-store' } });
   }

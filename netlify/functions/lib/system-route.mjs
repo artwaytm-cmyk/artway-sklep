@@ -71,7 +71,7 @@ export function createSystemRoute({
       const admin = (Array.isArray(users.items) ? users.items : []).find((entry) => String(entry?.email || '').trim().toLowerCase() === session.email && entry.rola === 'admin');
       if (!admin) return odpowiedz({ ok: false, error: 'Konto administratora nie istnieje.', code: 'auth' }, 401);
       const user = publicUser(admin);
-      return odpowiedz({ ok: true, authenticated: true, user, expiresInMinutes: user.adminIdleTimeoutMinutes }, 200, accountSessionHeaders(createAccountSession(user)));
+      return odpowiedz({ ok: true, authenticated: true, user, expiresInMinutes: user.adminIdleTimeoutMinutes }, 200, accountSessionHeaders(createAccountSession(admin)));
     }
 
     if (action === 'session-logout') {

@@ -125,6 +125,9 @@ test('nowe konto klienta działa po rejestracji i ponownym logowaniu na czystym 
   await page.getByRole('button', { name: 'Zaloguj się' }).click();
   await expect(page).toHaveURL(/#\/konto$/);
   await expect(page.getByText(user.email, { exact: false })).toBeVisible();
+  await page.evaluate(() => { location.hash = '#/admin'; });
+  await expect(page.getByRole('heading', { name: 'Strefa właściciela' })).toBeVisible();
+  await expect(page.locator('.admin-page')).toHaveCount(0);
   assertRuntime();
 });
 
@@ -135,6 +138,62 @@ async function loginAdmin(page) {
   await page.getByRole('button', { name: 'Zaloguj się' }).click();
   await expect(page).toHaveURL(/#\/admin(?:\/|$)/, { timeout: 20_000 });
 }
+
+test('Moje konto administratora pokazuje zabezpieczenia i zarządzanie dostępem właściciela', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  await page.goto('/#/konto');
+  await expect(page.getByRole('heading', { name: 'Moje konto administratora' })).toBeVisible();
+  await expect(page.getByText('Ochrona dostępu jest aktywna.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Zarządzaj uprawnieniami' })).toBeVisible();
+  await expect(page.getByText('Google Authenticator', { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Zapisz nowe hasło' })).toBeVisible();
+  assertRuntime();
+});
+
+test('właściciel nadaje, odbiera i usuwa konto bez lokalnego pozornego zapisu', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  let users = [
+    { imie: 'Administrator', email: 'artwaytm@gmail.com', rola: 'admin', mfaEnabled: true, data: '2026-01-01T10:00:00Z' },
+    { imie: 'Klient Testowy', email: 'uprawnienia@example.test', rola: 'klient', data: '2026-07-23T10:00:00Z' },
+  ];
+  await page.route('**/.netlify/functions/store**', async (route) => {
+    const url = new URL(route.request().url()), action = url.searchParams.get('action');
+    if (action === 'store-users-admin') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, users, usersVersion: String(Date.now()), count: users.length }) });
+      return;
+    }
+    if (action === 'store-user-role') {
+      const body = route.request().postDataJSON();
+      users = users.map((user) => user.email === body.email ? { ...user, rola: body.role, mfaEnabled: false } : user);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, changed: true, sessionInvalidated: true, user: users.find((user) => user.email === body.email) }) });
+      return;
+    }
+    if (action === 'store-user-delete') {
+      const body = route.request().postDataJSON();
+      users = users.filter((user) => user.email !== body.email);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, deleted: true, sessionInvalidated: true }) });
+      return;
+    }
+    await route.continue();
+  });
+  await page.evaluate((records) => {
+    localStorage.setItem('artway_uzytkownicy', JSON.stringify(records));
+    uzytkownicyAdminOstatnieOdswiezenie = 0;
+  }, users);
+  page.on('dialog', (dialog) => dialog.accept());
+  await page.goto('/#/admin/klienci/uprawnienia');
+  const row = page.locator('tr').filter({ hasText: 'uprawnienia@example.test' });
+  await expect(row).toBeVisible();
+  await row.getByTitle('Nadaj rolę administratora').click();
+  await expect(row.getByText('administrator', { exact: true })).toBeVisible();
+  await row.getByTitle('Odbierz rolę administratora').click();
+  await expect(row.getByText('klient', { exact: true })).toBeVisible();
+  await row.getByTitle('Usuń konto').click();
+  await expect(row).toHaveCount(0);
+  assertRuntime();
+});
 
 test('główne działy administratora mają jeden profesjonalny szablon i nie tworzą poziomego suwaka', async ({ page }) => {
   const assertRuntime = observeRuntime(page);

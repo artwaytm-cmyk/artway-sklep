@@ -95,7 +95,7 @@ test('raport porównuje wybrany okres z poprzednim zakresem tej samej długości
 
 test('raport sprzedaży organicznej nie jest publicznym endpointem', async () => {
   const source = await readFile('netlify/functions/lib/domain/seo-analytics.mjs', 'utf8');
-  assert.match(source, /if \(!adminRequest\(request\)\).*status: 401/);
+  assert.match(source, /if \(!await adminRequest\(request\)\).*status: 401/);
   assert.match(source, /timingSafeEqual/);
 });
 

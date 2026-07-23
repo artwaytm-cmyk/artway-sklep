@@ -9,7 +9,18 @@ async function chmuraOdswiezSesjeAdministratora(force=false){
   const refreshAfter=Math.max(5,Math.floor((typeof adminIdleTimeoutMinutes==="function"?adminIdleTimeoutMinutes():60)/2))*60*1000;
   if(!force&&Date.now()-last<refreshAfter)return true;
   if(chmuraOdswiezanieSesji)return chmuraOdswiezanieSesji;
-  chmuraOdswiezanieSesji=(async()=>{try{const d=await chmura("session-refresh",{method:"POST",timeout:9000});if(!d.authenticated)return false;sesja={...sesja,...(d.user||{}),verified:true};delete sesja.token;zapiszLS("artway_sesja",sesja);zapiszLS("artway_admin_session_refreshed_at",Date.now());chmuraStan={...chmuraStan,dostepna:true,admin:true,error:""};return true;}catch(e){return false;}finally{chmuraOdswiezanieSesji=null;}})();
+  chmuraOdswiezanieSesji=(async()=>{try{
+    const d=await chmura("session-refresh",{method:"POST",timeout:9000});
+    if(!d.authenticated)throw Object.assign(new Error("Sesja administratora wygasła"),{code:"auth",status:401});
+    sesja={...sesja,...(d.user||{}),verified:true};delete sesja.token;zapiszLS("artway_sesja",sesja);zapiszLS("artway_admin_session_refreshed_at",Date.now());chmuraStan={...chmuraStan,dostepna:true,admin:true,error:""};return true;
+  }catch(e){
+    if(e?.code==="auth"||e?.status===401||e?.status===403){
+      ustawSesje(null);chmuraStan={...chmuraStan,admin:false,error:""};
+      if(trasa().startsWith("/admin"))location.hash="#/logowanie";
+      toast("Uprawnienia lub sesja administratora wygasły — zaloguj się ponownie 🔒");
+    }
+    return false;
+  }finally{chmuraOdswiezanieSesji=null;}})();
   return chmuraOdswiezanieSesji;
 }
 async function testujEmailPolaczenie(cicho=false){
@@ -4807,7 +4818,7 @@ async function allegroMapujOferte(offerId,productId,options={}){
 }
 
 async function zapiszTelegramDostepKonta(email,button){
-  if(!jestAdmin())return toast("Brak uprawnień");
+  if(!jestGlownymAdminem(sesja?.email))return toast("Tylko główny administrator może nadawać uprawnienia Telegram");
   const e=String(email||"").trim().toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>String(x.email||"").toLowerCase()===e),row=button?.closest("tr");
   if(!k||!row)return toast("Nie znaleziono konta");
   if(!kontoMaRoleAdmin(k.email))return toast("Dostęp do czatu można przypisać tylko kontu administratora");
@@ -4828,6 +4839,7 @@ async function zapiszTelegramDostepKonta(email,button){
 
 function telegramDostepKontaHTML(k,admin){
   if(!admin)return `<small>Najpierw nadaj rolę administratora</small>`;
+  if(!jestGlownymAdminem(sesja?.email))return `<small>${k.telegramAccess?"✅ wspólny czat":"bez dostępu do czatu"}${k.telegramApprover?" • zatwierdzanie":""}</small>`;
   return `<div class="account-telegram-access"><input data-telegram-user-id inputmode="numeric" autocomplete="off" placeholder="ID użytkownika" aria-label="ID użytkownika Telegram" value="${esc(k.telegramUserId||"")}"><label><input data-telegram-access type="checkbox" ${k.telegramAccess===true?"checked":""}> wspólny czat</label><label><input data-telegram-approver type="checkbox" ${k.telegramApprover===true?"checked":""}> zatwierdzanie</label><button class="btn ghost" type="button" onclick="zapiszTelegramDostepKonta(${jsArg(k.email)},this)">Zapisz</button></div>`;
 }
 
@@ -6311,10 +6323,13 @@ function agentAISubnavHTML(aktywny="pulpit"){
 function klienciSubnavHTML(aktywny="lista"){
   const u=pobierzUzytkownikow();
   const admini=u.filter(x=>kontoMaRoleAdmin(x.email)).length;
+  const owner=jestGlownymAdminem(sesja?.email);
   return adminSubnavHTML([
     {id:"lista",href:"#/admin/klienci",label:"👥 Lista klientów",badge:u.length},
-    {id:"dodaj",href:"#/admin/klienci/dodaj",label:"➕ Dodaj klienta"},
-    {id:"uprawnienia",href:"#/admin/klienci/uprawnienia",label:"🛡️ Uprawnienia",badge:admini},
+    ...(owner?[
+      {id:"dodaj",href:"#/admin/klienci/dodaj",label:"➕ Dodaj klienta"},
+      {id:"uprawnienia",href:"#/admin/klienci/uprawnienia",label:"🛡️ Uprawnienia",badge:admini},
+    ]:[]),
     {id:"zamowienia",href:"#/admin/klienci/zamowienia",label:"📦 Zamówienia klientów"}
   ],aktywny);
 }
@@ -7304,7 +7319,7 @@ async function usunZamowienie(nr){
   toast("Zamówienie usunięte — nie wróci do obsługi");
   if(trasa().startsWith("/admin/zamowienie/")) location.hash="#/admin/zamowienia"; else renderuj();
 }
-let szukajKlientow = "",klienciWynikiEmails=[];
+let szukajKlientow = "",filtrRoliKlientow="wszyscy",klienciWynikiEmails=[];
 function klienciUstawZaznaczenie(zakres,zaznacz=true){
   const emails=zakres==="filtr"||zakres==="strona"?klienciWynikiEmails:Array.isArray(zakres)?zakres:[];
   emails.forEach(email=>zaznacz?zaznaczeniKlienci.add(String(email).toLowerCase()):zaznaczeniKlienci.delete(String(email).toLowerCase()));renderuj();
@@ -7315,25 +7330,34 @@ function klienciEksportujZakres(zakres="filtr"){
   const lista=pobierzUzytkownikow().filter(k=>ids.has(String(k.email||"").toLowerCase()));
   eksportujKlientow(lista,zakres==="zaznaczone"?"klienci-zaznaczeni.csv":"klienci-filtrowani.csv");
 }
-function zmienRoleUzytkownika(email){
+const zmianyDostepuUzytkownikowWToku=new Set();
+async function zmienRoleUzytkownika(email){
   if(!jestAdmin()){ toast("Brak uprawnień"); return; }
   const e=String(email||"").toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>x.email===e);
   if(!k){ toast("Nie znaleziono użytkownika"); return; }
+  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może zmieniać role");return;}
   if(jestGlownymAdminem(e)){ toast("Nie można zmienić roli głównego administratora"); return; }
   const maRole=k.rola==="admin";
   if(maRole&&sesja?.email===e){ toast("Nie możesz odebrać uprawnień aktualnie używanemu kontu"); return; }
-  k.rola=maRole?"klient":"admin";
-  if(maRole){ k.telegramAccess=false;k.telegramApprover=false; }
-  zapiszLS("artway_uzytkownicy",u);
-  void zapiszUzytkownikaCentralnie(k);
-  loguj("info",`${maRole?"Odebrano":"Nadano"} rolę administratora: ${e}`);
-  toast(maRole?"Odebrano uprawnienia administratora":"Nadano uprawnienia administratora 🛡️");
-  renderuj();
+  if(zmianyDostepuUzytkownikowWToku.has(e))return;
+  zmianyDostepuUzytkownikowWToku.add(e);renderuj();
+  try{
+    const d=await chmura("store-user-role",{method:"POST",body:{email:e,role:maRole?"klient":"admin"},timeout:15000});
+    Object.assign(k,d.user||{rola:maRole?"klient":"admin"});
+    if(k.rola!=="admin"){k.telegramAccess=false;k.telegramApprover=false;}
+    zapiszLS("artway_uzytkownicy",u);
+    loguj("info",`${maRole?"Odebrano":"Nadano"} rolę administratora: ${e}`);
+    toast(maRole?"Odebrano uprawnienia i unieważniono stare sesje":"Nadano rolę — przy logowaniu wymagane będzie MFA 🛡️");
+  }catch(bl){toast("⚠️ Nie zmieniono roli: "+(bl.message||"błąd serwera"));}
+  finally{zmianyDostepuUzytkownikowWToku.delete(e);renderuj();}
 }
 function widokAdminKlienci(sekcja="lista"){
   const aktywna=["lista","dodaj","uprawnienia","zamowienia"].includes(String(sekcja||""))?String(sekcja||""):"lista";
+  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email);
   let kl = pobierzUzytkownikow();
   if(szukajKlientow) kl = kl.filter(k=>(k.imie+" "+k.email).toLowerCase().includes(szukajKlientow));
+  if(filtrRoliKlientow==="admin")kl=kl.filter(k=>kontoMaRoleAdmin(k.email));
+  if(filtrRoliKlientow==="klient")kl=kl.filter(k=>!kontoMaRoleAdmin(k.email));
   if(aktywna==="uprawnienia") kl=kl.slice().sort((a,b)=>Number(kontoMaRoleAdmin(b.email))-Number(kontoMaRoleAdmin(a.email))||String(a.email).localeCompare(String(b.email),"pl"));
   klienciWynikiEmails=kl.map(k=>String(k.email||"").toLowerCase()).filter(Boolean);
   const zam = pobierzZamowienia();
@@ -7345,37 +7369,39 @@ function widokAdminKlienci(sekcja="lista"){
   ${klienciSubnavHTML(aktywna)}
   <div class="panel" style="${aktywna==="dodaj"?"":"display:none"}">
     <h1>➕ Dodaj klienta (pełna kartoteka)</h1>
-    <form onsubmit="dodajKlientaAdmin(event)">
+    ${zarzadzaDostepem?`<form onsubmit="dodajKlientaAdmin(event)">
       ${polaKartotekiHTML({})}
       <button class="btn" type="submit">➕ Utwórz konto klienta</button>
-    </form>
-    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">Konto trafia do wspólnej bazy serwerowej. Klient może zalogować się na dowolnym urządzeniu.</p>
+    </form>`:`<div class="backend-note">Tworzenie i usuwanie kont oraz zarządzanie rolami jest dostępne wyłącznie dla głównego administratora.</div>`}
+    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">Konto trafia do wspólnej bazy serwerowej bez przełączania bieżącej sesji administratora. Nowe konto zawsze otrzymuje rolę klienta.</p>
   </div>
   <div class="panel" style="${["lista","uprawnienia"].includes(aktywna)?"":"display:none"}">
     <h1>${aktywna==="uprawnienia"?"🛡️ Uprawnienia użytkowników":"👥 Użytkownicy"} (${kl.length}) <button class="btn ghost" style="float:right" onclick="eksportujKlientow()">📤 CSV</button></h1>
-    ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem">Tutaj szybko nadajesz lub odbierasz rolę administratora. Konto głównego właściciela i aktualnie używane konto są chronione przed przypadkową zmianą.</div>`:""}
-    ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko albo adres e-mail użytkownika.",results:kl.length,active:!!szukajKlientow,open:true,fields:`<label class="search-wide">Klient<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();zaplanujRenderPoWpisaniu()"></label>${szukajKlientow?`<button class="btn ghost" onclick="szukajKlientow='';renderuj()">Wyczyść filtry</button>`:""}`,actions:adminOperacjeWynikowHTML({id:"customers",selected:zaznaczeniKlienci.size,pageCount:kl.length,resultCount:kl.length,selectPage:"klienciUstawZaznaczenie('strona')",selectAll:"klienciUstawZaznaczenie('filtr')",clear:"klienciWyczyscZaznaczenie()",exportSelected:"klienciEksportujZakres('zaznaczone')",exportAll:"klienciEksportujZakres('filtr')"})})}
+    ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem"><b>Role są kontrolowane przez serwer.</b> Tylko główny administrator może je zmieniać. Odebranie roli lub reset hasła natychmiast unieważnia wcześniejsze sesje, a konto głównego właściciela jest chronione.</div>`:""}
+    ${aktywna==="uprawnienia"?`<div class="admin-account-status-grid user-access-summary"><article><span>Wszystkie konta</span><b>${pobierzUzytkownikow().length}</b><small>aktywne kartoteki</small></article><article><span>Administratorzy</span><b>${pobierzUzytkownikow().filter(k=>kontoMaRoleAdmin(k.email)).length}</b><small>w tym konto właściciela</small></article><article><span>Klienci</span><b>${pobierzUzytkownikow().filter(k=>!kontoMaRoleAdmin(k.email)).length}</b><small>bez dostępu do panelu</small></article><article><span>MFA</span><b>${pobierzUzytkownikow().filter(k=>kontoMaRoleAdmin(k.email)&&k.mfaEnabled).length}</b><small>kont z aktywnym Authenticator</small></article></div>`:""}
+    ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko, adres e-mail albo rola użytkownika.",results:kl.length,active:!!szukajKlientow||filtrRoliKlientow!=="wszyscy",open:true,fields:`<label class="search-wide">Użytkownik<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();zaplanujRenderPoWpisaniu()"></label><label>Rola<select onchange="filtrRoliKlientow=this.value;renderuj()"><option value="wszyscy" ${filtrRoliKlientow==="wszyscy"?"selected":""}>Wszystkie role</option><option value="admin" ${filtrRoliKlientow==="admin"?"selected":""}>Administratorzy</option><option value="klient" ${filtrRoliKlientow==="klient"?"selected":""}>Klienci</option></select></label>${szukajKlientow||filtrRoliKlientow!=="wszyscy"?`<button class="btn ghost" onclick="szukajKlientow='';filtrRoliKlientow='wszyscy';renderuj()">Wyczyść filtry</button>`:""}`,actions:adminOperacjeWynikowHTML({id:"customers",selected:zaznaczeniKlienci.size,pageCount:kl.length,resultCount:kl.length,selectPage:"klienciUstawZaznaczenie('strona')",selectAll:"klienciUstawZaznaczenie('filtr')",clear:"klienciWyczyscZaznaczenie()",exportSelected:"klienciEksportujZakres('zaznaczone')",exportAll:"klienciEksportujZakres('filtr')"})})}
     <div class="table-scroll"><table class="log-table">
       <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Telegram</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
       ${kl.map(k=>{
         const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
+        const accessBusy=zmianyDostepuUzytkownikowWToku.has(String(k.email||"").toLowerCase())||usunieciaUzytkownikowWToku.has(String(k.email||"").toLowerCase());
         const nZam = zam.filter(z=>z.email===k.email).length;
         return `<tr>
         <td><input type="checkbox" aria-label="Zaznacz ${esc(k.email)}" ${zaznaczeniKlienci.has(String(k.email||"").toLowerCase())?"checked":""} onchange="klienciUstawZaznaczenie([${jsArg(k.email)}],this.checked)"></td>
         <td><a href="#/admin/klient/${encodeURIComponent(k.email)}"><b>${esc(k.imie)}</b></a>${admin?' <span class="lvl lvl-info">ADMIN</span>':""}${k.nip?' <span class="lvl lvl-info">firma</span>':""}</td>
         <td>${esc(k.email)}${k.telefon?`<br><small style="color:var(--muted2)">📞 ${esc(k.telefon)}</small>`:""}</td>
-        <td><span class="lvl ${admin?"lvl-info":""}">${admin?"administrator":"klient"}</span>${glowny?"<br><small>właściciel</small>":""}</td>
+        <td><span class="lvl ${admin?"lvl-info":""}">${admin?"administrator":"klient"}</span>${glowny?"<br><small>właściciel</small>":""}${admin?`<br><small>${k.mfaEnabled?"🛡️ MFA aktywne":"⚠️ MFA przy następnym logowaniu"}</small>`:""}</td>
         <td>${telegramDostepKontaHTML(k,admin)}</td>
         <td>${new Date(k.data).toLocaleDateString("pl-PL")}</td>
         <td>${nZam ? `<a href="#/admin/zamowienia" onclick="szukajZamowien='${esc(k.email)}';filtrZamowien='wszystkie'" title="Zamówienia klienta">${nZam} →</a>` : "0"}</td>
         <td style="white-space:nowrap">
           <a class="btn ghost" href="#/admin/klient/${encodeURIComponent(k.email)}" style="padding:.3rem .55rem" title="Kartoteka klienta">📇</a>
-          ${glowny||sesja?.email===k.email?"":`<button class="btn ghost" onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')" style="padding:.3rem .55rem" title="${admin?"Odbierz rolę administratora":"Nadaj rolę administratora"}">${admin?"🔒":"🛡️"}</button>`}
-          ${admin?"":`<button class="ci-remove" onclick="if(confirm('Usunąć konto ${esc(k.email)}?')) usunKlienta('${esc(k.email)}')" title="Usuń konto">🗑️</button>`}
+          ${!zarzadzaDostepem||glowny||sesja?.email===k.email?"":`<button class="btn ghost" ${accessBusy?"disabled":""} onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')" style="padding:.3rem .55rem" title="${admin?"Odbierz rolę administratora":"Nadaj rolę administratora"}">${accessBusy?"⏳":admin?"🔒":"🛡️"}</button>`}
+          ${zarzadzaDostepem&&!admin&&!glowny?`<button class="ci-remove" ${accessBusy?"disabled":""} onclick="if(confirm('Trwale usunąć konto ${esc(k.email)}? Aktywne sesje natychmiast stracą dostęp.')) usunKlienta('${esc(k.email)}')" title="Usuń konto">${accessBusy?"⏳":"🗑️"}</button>`:""}
         </td>
       </tr>`;}).join("")}
     </table></div>
-    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę klienta. ID Telegram użytkownik otrzyma po wysłaniu <b>/start</b> do bota. Zapisanie opcji „wspólny czat” nadaje dostęp natychmiast — bez restartu serwera. „Zatwierdzanie” jest osobnym, wyższym uprawnieniem.</p>
+    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę. Zwykłe konto klienta nigdy nie dziedziczy dostępu administracyjnego. Uprawnienia Telegram są odrębne i nie zastępują roli administratora sklepu.</p>
   </div>
   <div class="panel" style="${aktywna==="zamowienia"?"":"display:none"}">
     <div class="order-section-head">
@@ -7611,6 +7637,7 @@ function widokAdminKlient(email){
   if(!k) return adminSzkielet("/admin/klienci", `<div class="panel"><h1>Nie znaleziono klienta</h1><p><a href="#/admin/klienci">← Wróć do listy</a></p></div>`);
   const zam = pobierzZamowienia().filter(z=>z.email===k.email);
   const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
+  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email),operacjaWToku=zmianyDostepuUzytkownikowWToku.has(k.email)||usunieciaUzytkownikowWToku.has(k.email);
   return adminSzkielet("/admin/klienci", `
   ${klienciSubnavHTML("lista")}
   <div class="panel">
@@ -7622,14 +7649,15 @@ function widokAdminKlient(email){
       <div class="stat"><b>${new Date(k.data).toLocaleDateString("pl-PL")}</b><small>rejestracja</small></div>
     </div>
     <form onsubmit="zapiszKartoteke(event, '${esc(k.email)}')">
-      ${polaKartotekiHTML(k, {edycja:true, blokujEmail:glowny})}
+      ${polaKartotekiHTML(k, {edycja:true, blokujEmail:true, bezHasla:!zarzadzaDostepem||sesja?.email===k.email})}
       <div class="diag-actions">
         <button class="btn" type="submit">💾 Zapisz kartotekę</button>
-        ${glowny||sesja?.email===k.email?"":`<button class="btn ghost" type="button" onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')">${admin?"🔒 Odbierz rolę administratora":"🛡️ Nadaj rolę administratora"}</button>`}
+        ${!zarzadzaDostepem||glowny||sesja?.email===k.email?"":`<button class="btn ghost" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')">${operacjaWToku?"⏳ Zapisuję…":admin?"🔒 Odbierz rolę administratora":"🛡️ Nadaj rolę administratora"}</button>`}
         ${zam.length?`<a class="btn ghost" href="#/admin/zamowienia" onclick="szukajZamowien='${esc(k.email)}';filtrZamowien='wszystkie'">📦 Zamówienia klienta (${zam.length})</a>`:""}
         <a class="btn ghost" href="mailto:${esc(k.email)}">✉️ Napisz e-mail</a>
-        ${admin?"":`<button class="btn danger" type="button" onclick="if(confirm('Usunąć konto ${esc(k.email)}?')){usunKlienta('${esc(k.email)}');location.hash='#/admin/klienci';}">🗑️ Usuń konto</button>`}
+        ${zarzadzaDostepem&&!admin&&!glowny?`<button class="btn danger" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('Trwale usunąć konto ${esc(k.email)}? Aktywne sesje natychmiast stracą dostęp.')) usunKlienta('${esc(k.email)}',true)">${operacjaWToku?"⏳ Usuwam…":"🗑️ Usuń konto"}</button>`:""}
       </div>
+      <p class="pay-note" style="text-align:left">Adres e-mail jest identyfikatorem logowania i nie jest zmieniany w kartotece. Zmiana roli, reset hasła i usunięcie konta unieważniają jego wcześniejsze sesje.</p>
     </form>
   </div>
   ${zam.length?`<div class="panel">
@@ -7646,60 +7674,66 @@ async function zapiszKartoteke(e, staryEmail){
   const u = pobierzUzytkownikow();
   const k = u.find(x=>x.email===staryEmail);
   if(!k){ toast("Nie znaleziono klienta"); return; }
-  const glownyAdmin = jestGlownymAdminem(staryEmail);
+  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email);
   const dane = daneKartotekiZFormularza(f);
   if(dane.blad){ toast("⚠️ "+dane.blad); return; }
-  const nowyEmail = glownyAdmin ? staryEmail : String(f.get("email")||"").trim().toLowerCase();
+  const nowyEmail = staryEmail;
   const noweHaslo = String(f.get("haslo")||"");
   const powtorzoneHaslo = String(f.get("haslo2")||"");
   if(dane.imie.length<2){ toast("⚠️ Podaj imię i nazwisko"); return; }
   if(!nowyEmail.includes("@")){ toast("⚠️ Nieprawidłowy e-mail"); return; }
-  if(nowyEmail!==staryEmail && u.some(x=>x.email===nowyEmail)){ toast("⚠️ Ten e-mail jest już zajęty"); return; }
-  if(noweHaslo && noweHaslo.length<6){ toast("⚠️ Nowe hasło: min. 6 znaków"); return; }
+  if(noweHaslo&&!zarzadzaDostepem){toast("⚠️ Tylko główny administrator może ustawiać hasła innych kont");return;}
+  if(noweHaslo && noweHaslo.length<8){ toast("⚠️ Nowe hasło: min. 8 znaków"); return; }
   if(noweHaslo!==powtorzoneHaslo){ toast("⚠️ Wpisane nowe hasła nie są takie same"); return; }
-  Object.assign(k, dane, {email: nowyEmail});
-  if(noweHaslo){ k.hash = await hashuj(noweHaslo); if(glownyAdmin) domyslneHasloAdmina = noweHaslo==="admin"; }
-  zapiszLS("artway_uzytkownicy", u);
-  void zapiszUzytkownikaCentralnie(k);
-  if(nowyEmail!==staryEmail){
-    const zam = pobierzZamowienia();
-    zam.forEach(z=>{ if(z.email===staryEmail) z.email=nowyEmail; });
-    zapiszLS("artway_zamowienia", zam);
-    if(stanBramki.authenticated){
-      void wywolajBramke("store-user-delete",{method:"POST",body:{email:staryEmail}}).catch(()=>{});
-      zam.filter(z=>z.email===nowyEmail).forEach(z=>void zapiszZamowienieCentralnie(z,false));
-    }
-    if(sesja?.email===staryEmail) ustawSesje({imie:dane.imie, email:nowyEmail, rola:k.rola||"klient"});
-    location.hash = "#/admin/klient/"+encodeURIComponent(nowyEmail);
-  } else if(sesja?.email===staryEmail && sesja.imie!==dane.imie){
-    ustawSesje({imie:dane.imie, email:staryEmail, rola:k.rola||"klient"});
-  }
-  loguj("info",`Zapisano kartotekę klienta ${staryEmail}${nowyEmail!==staryEmail?" → "+nowyEmail:""}${noweHaslo?" (nowe hasło)":""}`);
-  toast("Kartoteka zapisana ✅"); renderuj();
+  const button=e.submitter;if(button){button.disabled=true;button.textContent="Zapisuję…";}
+  try{
+    const next={...k,...dane,email:nowyEmail};
+    const wynik=await chmura("store-user-save",{method:"POST",body:{user:next},timeout:15000});
+    if(noweHaslo)await chmura("store-user-password-reset",{method:"POST",body:{email:staryEmail,password:noweHaslo},timeout:20000});
+    Object.assign(k,next,wynik.user||{});
+    delete k.hash;delete k.passwordHash;
+    zapiszLS("artway_uzytkownicy",u);
+    if(sesja?.email===staryEmail&&sesja.imie!==dane.imie)ustawSesje({...sesja,imie:dane.imie});
+    loguj("info",`Zapisano kartotekę klienta ${staryEmail}${noweHaslo?" i unieważniono jego sesje po zmianie hasła":""}`);
+    toast(noweHaslo?"Kartoteka i nowe hasło zapisane — stare sesje wylogowano ✅":"Kartoteka zapisana ✅");
+  }catch(bl){toast("⚠️ Nie zapisano kartoteki: "+(bl.message||"błąd serwera"));}
+  finally{if(button&&document.contains(button)){button.disabled=false;button.textContent="💾 Zapisz kartotekę";}renderuj();}
 }
 async function dodajKlientaAdmin(e){
   e.preventDefault();
+  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może tworzyć konta z panelu");return;}
   const f = new FormData(e.target);
   const dane = daneKartotekiZFormularza(f);
   if(dane.blad){ toast("⚠️ "+dane.blad); return; }
   if(String(f.get("haslo")||"")!==String(f.get("haslo2")||"")){ toast("⚠️ Wpisane hasła nie są takie same"); return; }
-  const wynik = await zarejestrujUzytkownika(String(f.get("imie")),String(f.get("email")),String(f.get("haslo")));
-  if(!wynik.ok){ toast("⚠️ "+wynik.blad); return; }
-  // dopisz pełną kartotekę (adres, firma, notatka)
-  const u = pobierzUzytkownikow();
-  const k = u.find(x=>x.email===String(f.get("email")).trim().toLowerCase());
-  if(k){ Object.assign(k, dane); zapiszLS("artway_uzytkownicy", u); }
-  if(k) void zapiszUzytkownikaCentralnie(k);
-  loguj("info","Utworzono kartotekę klienta: "+f.get("email"));
-  toast("Konto klienta z kartoteką utworzone ✅"); renderuj();
+  const email=String(f.get("email")||"").trim().toLowerCase(),password=String(f.get("haslo")||"");
+  if(!poprawnyEmailKonta(email)){toast("⚠️ Podaj poprawny adres e-mail");return;}
+  if(password.length<8){toast("⚠️ Hasło musi mieć co najmniej 8 znaków");return;}
+  const button=e.submitter;if(button){button.disabled=true;button.textContent="Tworzę konto…";}
+  try{
+    const wynik=await chmura("store-user-create",{method:"POST",body:{user:{...dane,email},password},timeout:20000});
+    const lista=pobierzUzytkownikow();lista.push({...dane,...(wynik.user||{}),email,rola:"klient",account:true});zapiszLS("artway_uzytkownicy",lista);
+    loguj("info","Utworzono kartotekę klienta: "+email);
+    toast("Konto klienta utworzone bez zmiany sesji administratora ✅");e.target.reset();renderuj();
+  }catch(bl){toast("⚠️ Nie utworzono konta: "+(bl.message||"błąd serwera"));}
+  finally{if(button&&document.contains(button)){button.disabled=false;button.textContent="➕ Utwórz konto klienta";}}
 }
-function usunKlienta(email){
-  if(kontoMaRoleAdmin(email)){ toast("Najpierw odbierz temu kontu rolę administratora"); return; }
-  zapiszLS("artway_uzytkownicy", pobierzUzytkownikow().filter(x=>x.email!==email));
-  if(stanBramki.authenticated) void wywolajBramke("store-user-delete",{method:"POST",body:{email}}).catch(bl=>toast("Nie usunięto klienta z serwera: "+bl.message));
-  loguj("info","Usunięto konto klienta: "+email);
-  toast("Usunięto konto "+email);
-  renderuj();
+const usunieciaUzytkownikowWToku=new Set();
+async function usunKlienta(email,przejdzDoListy=false){
+  const e=String(email||"").trim().toLowerCase();
+  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może usuwać konta");return false;}
+  if(jestGlownymAdminem(e)||e===String(sesja?.email||"").toLowerCase()){toast("Nie można usunąć głównego ani aktualnie używanego konta");return false;}
+  if(kontoMaRoleAdmin(e)){ toast("Najpierw odbierz temu kontu rolę administratora"); return false; }
+  if(usunieciaUzytkownikowWToku.has(e))return false;
+  usunieciaUzytkownikowWToku.add(e);renderuj();
+  try{
+    await chmura("store-user-delete",{method:"POST",body:{email:e},timeout:15000});
+    zapiszLS("artway_uzytkownicy",pobierzUzytkownikow().filter(x=>String(x.email||"").toLowerCase()!==e));
+    zaznaczeniKlienci.delete(e);loguj("info","Usunięto konto klienta i unieważniono jego sesje: "+e);
+    toast("Usunięto konto "+e+" — jego sesje nie mają już dostępu ✅");
+    if(przejdzDoListy)location.hash="#/admin/klienci";return true;
+  }catch(bl){toast("⚠️ Nie usunięto konta: "+(bl.message||"błąd serwera"));return false;}
+  finally{usunieciaUzytkownikowWToku.delete(e);renderuj();}
 }
 let szukajProduktow = "", filtrProduktow = "Wszystkie", kategoriaNowegoProduktu = "";
 let filtrStatusuProduktow = "aktywne", filtrZrodlaProduktow = "wszystkie", filtrStanuProduktow = "wszystkie", filtrAllegroProduktow = "wszystkie";
