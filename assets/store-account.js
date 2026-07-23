@@ -37,6 +37,20 @@ function wrocDoAuthenticatoraMfa(){
   if(!logowanieMfaStan)return;
   const next={...logowanieMfaStan};delete next.emailRecoveryToken;delete next.maskedEmail;void pokazLogowanieMfa(next);
 }
+function pobierzProfilKonta(email){
+  return pobierzUzytkownikow().find(x=>x.email===String(email||"").trim().toLowerCase())||null;
+}
+function polaProfiluKontaHTML(k={}){
+  return `<h3 class="f-sekcja">👤 Dane kontaktowe</h3>
+    <div class="f-row"><div class="f-group"><label>Imię i nazwisko *</label><input required name="imie" value="${esc(k.imie||"")}"></div><div class="f-group"><label>E-mail</label><input readonly name="email" type="email" value="${esc(k.email||"")}" style="background:var(--line)"></div></div>
+    <div class="f-group"><label>Telefon</label><input name="telefon" type="tel" value="${esc(k.telefon||"")}" autocomplete="tel"></div>
+    <h3 class="f-sekcja">📍 Adres</h3>
+    <div class="f-row" style="grid-template-columns:2fr 1fr 1fr"><div class="f-group"><label>Ulica</label><input name="ulica" value="${esc(k.ulica||"")}"></div><div class="f-group"><label>Nr domu</label><input name="nrDomu" value="${esc(k.nrDomu||"")}"></div><div class="f-group"><label>Nr lokalu</label><input name="nrLokalu" value="${esc(k.nrLokalu||"")}"></div></div>
+    <div class="f-row" style="grid-template-columns:1fr 2fr"><div class="f-group"><label>Kod pocztowy</label><input name="kod" value="${esc(k.kod||"")}" placeholder="00-000" maxlength="6" oninput="formatujKod(this)"></div><div class="f-group"><label>Miejscowość</label><input name="miasto" value="${esc(k.miasto||"")}"></div></div>
+    <h3 class="f-sekcja">🧾 Dane firmowe (opcjonalnie)</h3>
+    <div class="f-row" style="grid-template-columns:1fr auto;align-items:end"><div class="f-group"><label>NIP</label><input name="nip" value="${esc(k.nip||"")}" maxlength="13" inputmode="numeric"></div><div class="f-group"><button type="button" class="btn ghost" onclick="nipDoFormularza(this.form,this)">Pobierz dane z NIP</button></div></div>
+    <div class="f-group"><label>Nazwa firmy</label><input name="firma" value="${esc(k.firma||"")}"></div>`;
+}
 async function potwierdzLogowanieMfa(e){
   e.preventDefault();if(!logowanieMfaStan)return;const button=e.submitter;if(button){button.disabled=true;button.textContent="Sprawdzam…";}
   try{
@@ -116,6 +130,7 @@ function widokKonto(){
   const us=ustawieniaPodstrony("konto");
   const admin=jestAdmin();
   const zam = pobierzZamowienia().filter(z=>z.email===sesja.email);
+  const profil=pobierzProfilKonta(sesja.email)||{imie:sesja.imie,email:sesja.email};
   return `
   <div class="${klasaPodstrony("konto")}"><div class="panel">
     ${ikonaPodstronyHTML("konto")}<h1>${esc(us.tytul)}</h1>
@@ -137,10 +152,10 @@ function widokKonto(){
       <a class="btn ghost" href="#/ulubione">❤️ Ulubione</a>
       <button class="btn danger" onclick="wyloguj()">Wyloguj się</button>
     </div>
-    <details style="margin-top:1.2rem" ${!(pobierzProfil(sesja.email)||{}).ulica?"open":""}>
+    <details style="margin-top:1.2rem" ${!profil.ulica?"open":""}>
       <summary style="cursor:pointer;font-weight:700;font-size:.92rem">📇 Moje dane do zamówień (adres, telefon, firma)</summary>
       <form onsubmit="zapiszMojeDane(event)" style="margin-top:.8rem;max-width:640px">
-        ${polaKartotekiHTML(pobierzProfil(sesja.email)||{imie:sesja.imie, email:sesja.email}, {edycja:true, blokujEmail:true, bezNotatki:true, bezHasla:true})}
+        ${polaProfiluKontaHTML(profil)}
         <button class="btn" type="submit">💾 Zapisz moje dane</button>
         <p class="pay-note" style="text-align:left;margin-top:.5rem">Te dane wypełnią się automatycznie przy każdym zamówieniu.</p>
       </form>
@@ -177,8 +192,19 @@ async function zapiszBezpieczenstwoKonta(e){
   finally{if(button){button.disabled=false;button.textContent="Zapisz zabezpieczenia";}}
 }
 async function zapiszMojeDane(e){
-  if(!sesja) return;
-  await zapiszKartoteke(e, sesja.email);
+  e.preventDefault();if(!sesja)return;
+  const button=e.submitter,f=new FormData(e.target),nip=String(f.get("nip")||"").replace(/\D/g,"").slice(0,10);
+  const dane={imie:String(f.get("imie")||"").trim(),telefon:String(f.get("telefon")||"").trim(),ulica:String(f.get("ulica")||"").trim(),nrDomu:String(f.get("nrDomu")||"").trim(),nrLokalu:String(f.get("nrLokalu")||"").trim(),kod:String(f.get("kod")||"").trim(),miasto:String(f.get("miasto")||"").trim(),nip,firma:String(f.get("firma")||"").trim()};
+  if(dane.imie.length<2){toast("⚠️ Podaj imię i nazwisko");return;}
+  if(nip&&!walidujNip(nip)){toast("⚠️ Nieprawidłowy NIP");return;}
+  if(button){button.disabled=true;button.textContent="Zapisuję…";}
+  try{
+    const wynik=await chmura("account-profile-save",{method:"POST",body:{user:dane}});
+    const lista=pobierzUzytkownikow(),index=lista.findIndex(x=>x.email===sesja.email),profil={...(index>=0?lista[index]:{}),...dane,email:sesja.email,...(wynik.user||{})};
+    if(index>=0)lista[index]=profil;else lista.push(profil);zapiszLS("artway_uzytkownicy",lista);ustawSesje({...sesja,imie:profil.imie,verified:sesja.verified===true});
+    toast("Dane konta zapisane ✅");renderuj();
+  }catch(bl){toast("⚠️ Nie zapisano danych: "+(bl.message||"błąd serwera"));}
+  finally{if(button&&document.contains(button)){button.disabled=false;button.textContent="💾 Zapisz moje dane";}}
 }
 
 /* ═══════════ WIDOK: ZAMÓWIENIA ═══════════ */

@@ -88,6 +88,46 @@ test('lokalny administrator loguje się i przechodzi między modułami panelu', 
   assertRuntime();
 });
 
+test('nowe konto klienta działa po rejestracji i ponownym logowaniu na czystym urządzeniu', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  const user = { imie: 'Test Klienta', email: 'test-klienta@example.test', rola: 'klient' };
+  await page.route('**/.netlify/functions/store**', async (route) => {
+    const action = new URL(route.request().url()).searchParams.get('action');
+    if (action === 'account-register' || action === 'account-login') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, authenticated: true, user }) });
+      return;
+    }
+    if (action === 'store-orders-mine') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, orders: [], deleted_orders: [] }) });
+      return;
+    }
+    if (action === 'session-logout') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto('/#/rejestracja');
+  await page.locator('form [name="imie"]').fill(user.imie);
+  await page.locator('form [name="email"]').fill(user.email);
+  await page.locator('form [name="haslo"]').fill('BezpieczneHaslo-2026!');
+  await page.locator('form [name="haslo2"]').fill('BezpieczneHaslo-2026!');
+  await page.getByRole('button', { name: 'Załóż konto' }).click();
+  await expect(page).toHaveURL(/#\/konto$/);
+  await expect(page.getByRole('button', { name: 'Wyloguj się' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Zapisz moje dane' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Wyloguj się' }).click();
+  await page.goto('/#/logowanie');
+  await page.locator('#loginForm [name="email"]').fill(user.email);
+  await page.locator('#loginForm [name="haslo"]').fill('BezpieczneHaslo-2026!');
+  await page.getByRole('button', { name: 'Zaloguj się' }).click();
+  await expect(page).toHaveURL(/#\/konto$/);
+  await expect(page.getByText(user.email, { exact: false })).toBeVisible();
+  assertRuntime();
+});
+
 async function loginAdmin(page) {
   await page.goto('/#/logowanie');
   await page.locator('#loginForm [name="email"]').fill('admin');
