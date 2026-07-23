@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {
+  inpostServiceBillingClientKey,
   inpostServiceBillingKey,
   inpostServiceContactFingerprint,
   inpostServiceContractPricing,
@@ -30,7 +31,10 @@ function cleanStore(value = {}) {
     items: Array.isArray(value?.items) ? value.items : [],
     contacts: (Array.isArray(value?.contacts) ? value.contacts : [])
       .map((contact) => normalizeInpostServiceContact(contact))
-      .filter((contact) => contact.id && (contact.email || contact.phone || contact.taxCode)),
+      .filter((contact) => contact.id && (
+        contact.email || contact.phone || contact.taxCode
+        || contact.address?.street || contact.address?.post_code || contact.address?.city
+      )),
     settings: {
       ...defaults,
       ...(value?.settings || {}),
@@ -114,7 +118,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       updatedAt: now,
     };
     store.contacts.push(contact);
-    store.contacts = store.contacts.slice(-5000);
+    store.contacts = store.contacts.slice(-20_000);
     return contact;
   }
 
@@ -252,6 +256,44 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       });
       if (!removed) return respond({ ok: false, error: 'Nie znaleziono zapisanego adresu.', code: 'not_found' }, 404);
       return respond({ ok: true, addressBook: store.contacts });
+    }
+
+    if (action === 'inpost-service-contact-import') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const body = await req.json().catch(() => ({}));
+      const rows = Array.isArray(body.contacts) ? body.contacts.slice(0, 5_000) : [];
+      if (!rows.length) return respond({ ok: false, error: 'Brak adresów do importu.', code: 'contact_import_empty' }, 422);
+      let created = 0, updated = 0, skipped = 0;
+      const store = await mutateStore((current) => {
+        for (const raw of rows) {
+          const requestedRole = text(raw?.role || raw?.roles?.[0], 20);
+          const role = requestedRole === 'sender' ? 'sender' : 'receiver';
+          const candidate = normalizeInpostServiceContact(raw, { role });
+          const hasAddress = !!(candidate.address?.street && candidate.address?.post_code && candidate.address?.city);
+          if (!candidate.label || (!hasAddress && !candidate.email && !candidate.phone && !candidate.taxCode)) {
+            skipped += 1;
+            continue;
+          }
+          const fingerprint = inpostServiceContactFingerprint(candidate);
+          const exists = current.contacts.some((contact) => (
+            (candidate.id && contact.id === candidate.id)
+            || inpostServiceContactFingerprint(contact) === fingerprint
+          ));
+          upsertContact(current, candidate, role);
+          if (exists) updated += 1;
+          else created += 1;
+        }
+        return current;
+      });
+      return respond({
+        ok: true,
+        source: text(body.source || 'import', 160),
+        imported: created + updated,
+        created,
+        updated,
+        skipped,
+        total: store.contacts.length,
+      }, 201);
     }
 
     if (action === 'inpost-service-settings') {
@@ -476,7 +518,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       if (body.id) records = store.items.filter((record) => record.id === text(body.id, 100) && record.status !== 'cancelled');
       else {
         const month = text(body.month, 7), clientKey = text(body.clientKey, 200).toLowerCase();
-        records = store.items.filter((record) => record.status !== 'cancelled' && record.billing?.mode === 'monthly' && record.billing?.status === 'pending' && record.billing?.month === month && String(record.billing?.clientKey || '').toLowerCase() === clientKey);
+        records = store.items.filter((record) => record.status !== 'cancelled' && record.billing?.mode === 'monthly' && record.billing?.status === 'pending' && record.billing?.month === month && inpostServiceBillingClientKey(record) === clientKey);
       }
       if (!records.length) return respond({ ok: false, error: 'Brak nierozliczonych nadań dla wybranego klienta i okresu.', code: 'not_found' }, 404);
       const invoice = await createInvoice(records, body.invoiceDate);

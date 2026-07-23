@@ -1118,6 +1118,54 @@ function inpostServiceAdresy(){
   });
   return [...map.values()].sort((a,b)=>Number(b.stored)-Number(a.stored)||inpostServiceNazwaKontaktu(a).localeCompare(inpostServiceNazwaKontaktu(b),"pl"));
 }
+function inpostServiceAdresNormal(value){
+  return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/\s+/g," ").trim();
+}
+function inpostServiceAdresUnikalne(values,limit=150){
+  const map=new Map();
+  values.forEach(value=>{const clean=String(value||"").trim(),key=inpostServiceAdresNormal(clean);if(clean&&key&&!map.has(key))map.set(key,clean);});
+  return [...map.values()].sort((a,b)=>a.localeCompare(b,"pl")).slice(0,limit);
+}
+function inpostServiceAdresDane(contact={}){
+  const address=contact.address||{};
+  return {
+    postCode:String(address.postCode||address.post_code||"").trim(),
+    city:String(address.city||"").trim(),
+    street:String(address.street||"").trim(),
+  };
+}
+function inpostServiceAdresPodpowiedzi(source,prefix){
+  const form=source?.form||source||document.getElementById("inpostServiceForm");if(!form)return;
+  const postCode=String(form.elements[`${prefix}PostCode`]?.value||"").trim(),city=String(form.elements[`${prefix}City`]?.value||"").trim(),street=String(form.elements[`${prefix}Street`]?.value||"").trim();
+  const codeN=inpostServiceAdresNormal(postCode),cityN=inpostServiceAdresNormal(city),streetN=inpostServiceAdresNormal(street);
+  const all=inpostServiceAdresy(),byCode=all.filter(contact=>!codeN||inpostServiceAdresNormal(inpostServiceAdresDane(contact).postCode).includes(codeN));
+  const byCity=byCode.filter(contact=>!cityN||inpostServiceAdresNormal(inpostServiceAdresDane(contact).city).includes(cityN));
+  const matches=byCity.filter(contact=>!streetN||inpostServiceAdresNormal(inpostServiceAdresDane(contact).street).includes(streetN));
+  const options={
+    PostCode:inpostServiceAdresUnikalne(all.map(contact=>inpostServiceAdresDane(contact).postCode),250),
+    City:inpostServiceAdresUnikalne(byCode.map(contact=>inpostServiceAdresDane(contact).city)),
+    Street:inpostServiceAdresUnikalne(byCity.map(contact=>inpostServiceAdresDane(contact).street),250),
+  };
+  Object.entries(options).forEach(([kind,values])=>{
+    const list=document.getElementById(`inpostService${prefix}${kind}Hints`);
+    if(list)list.innerHTML=values.map(value=>`<option value="${esc(value)}"></option>`).join("");
+  });
+  const box=form.querySelector(`[data-inpost-address-results="${prefix}"]`);
+  if(!box)return;
+  const active=codeN||cityN||streetN;
+  if(!active){box.innerHTML='<small>Wpisz kod pocztowy, następnie wybierz miejscowość i ulicę. Wyniki pochodzą z prywatnej książki adresowej.</small>';return;}
+  box.innerHTML=`<div class="inpost-address-match-head"><b>${matches.length} pasujących adresów</b><small>Kod → miejscowość → ulica</small></div><div class="inpost-address-match-list">${matches.slice(0,10).map(contact=>`<button type="button" onclick="inpostServiceWybierzAdresWynik(${jsArg(prefix)},${jsArg(contact.key)})"><b>${esc(inpostServiceNazwaKontaktu(contact))}</b><span>${esc(inpostServiceAdresKsiazki(contact))}</span></button>`).join("")||'<small>Brak adresu spełniającego wszystkie filtry.</small>'}</div>`;
+}
+function inpostServiceWybierzAdresWynik(prefix,key){
+  const form=document.getElementById("inpostServiceForm"),contact=inpostServiceAdresy().find(item=>String(item.key)===String(key));if(!form||!contact)return;
+  const select=form.elements[`${prefix}AddressChoice`],hidden=form.elements[`${prefix}ContactId`];
+  if(select&&[...select.options].some(option=>option.value===String(key)))select.value=String(key);
+  if(hidden)hidden.value=contact.stored?contact.id:"";
+  inpostServiceUstawPolaOsoby(form,prefix,contact);
+  inpostServiceAdresPodpowiedzi(form,prefix);
+  inpostServiceZaplanujWycene(form);
+  toast(`Wybrano adres ${prefix==="sender"?"nadawcy":"odbiorcy"} ✅`);
+}
 function inpostServiceOpcjeAdresow(selected="",role="receiver"){
   const options=inpostServiceAdresy().map(contact=>{
     const roleLabel=(contact.roles||[]).includes("sender")&&(contact.roles||[]).includes("receiver")?"nadawca i odbiorca":(contact.roles||[]).includes("sender")?"nadawca":"odbiorca";
@@ -1136,6 +1184,7 @@ function inpostServiceUstawPolaOsoby(form,prefix,contact={}){
     [`${prefix}PostCode`]:address.postCode||address.post_code,[`${prefix}City`]:address.city,
   };
   Object.entries(fields).forEach(([name,value])=>{if(form.elements[name])form.elements[name].value=value||"";});
+  inpostServiceAdresPodpowiedzi(form,prefix);
 }
 function inpostServiceWybierzAdres(select,prefix){
   const form=select?.form,contact=inpostServiceAdresy().find(item=>String(item.key)===String(select.value));
@@ -1149,6 +1198,29 @@ function inpostServiceWybierzAdres(select,prefix){
     inpostServiceUstawPolaOsoby(form,prefix,{});
   }
   inpostServiceZaplanujWycene(form);
+}
+function inpostServicePunktOpis(point={}){
+  const distance=Number(point.distance);
+  return [opisPunktuInpost(point),Number.isFinite(distance)?`${distance<1000?Math.round(distance)+" m":(distance/1000).toFixed(1).replace(".",",")+" km"}`:"",point.location247?"czynny 24/7":point.openingHours].filter(Boolean).join(" • ");
+}
+async function inpostServicePobierzPunkty(params={},caption=""){
+  const box=document.getElementById("inpostServicePointResults");if(box)box.innerHTML="<small>Szukam najbliższych punktów InPost…</small>";
+  try{
+    const d=await chmura("inpost-points",{params:{limit:15,...params},timeout:15000}),points=d.points||[];
+    if(box)box.innerHTML=`${caption?`<div class="inpost-point-caption">${esc(caption)}</div>`:""}${points.map(point=>`<button type="button" class="inpost-point-result" onclick="inpostServiceWybierzPunkt(${jsArg(point.name)},${jsArg(opisPunktuInpost(point))})"><b>${esc(point.name)}</b><span>${esc(inpostServicePunktOpis(point))}</span></button>`).join("")||"<small>Nie znaleziono punktów dla tego adresu.</small>"}`;
+  }catch(e){if(box)box.innerHTML=`<small class="error">${esc(e.message||e)}</small>`;}
+}
+async function inpostServiceSzukajPunktow(){
+  const query=String(document.getElementById("inpostServicePointSearch")?.value||"").trim();
+  if(!query)return toast("Wpisz miasto, kod pocztowy albo kod punktu");
+  return inpostServicePobierzPunkty(/^\d{2}-?\d{3}$/.test(query)?{post_code:query}:{q:query},`Wyniki dla: ${query}`);
+}
+async function inpostServiceSzukajPunktowPrzyAdresie(prefix="receiver"){
+  const form=document.getElementById("inpostServiceForm");if(!form)return;
+  const postCode=String(form.elements[`${prefix}PostCode`]?.value||"").trim(),city=String(form.elements[`${prefix}City`]?.value||"").trim(),street=String(form.elements[`${prefix}Street`]?.value||"").trim();
+  if(!postCode&&!city)return toast("Najpierw wpisz kod pocztowy albo miejscowość odbiorcy");
+  const query=[street,postCode,city].filter(Boolean).join(", "),input=document.getElementById("inpostServicePointSearch");if(input)input.value=query;
+  return inpostServicePobierzPunkty(postCode?{post_code:postCode,city}:{city},`Najbliższe punkty względem adresu: ${query}`);
 }
 function inpostServiceOdswiezSelektory(form,selectedId=""){
   ["sender","receiver"].forEach(prefix=>{
@@ -1303,11 +1375,13 @@ function inpostServiceOsobaFields(prefix,title,person={}){
       <label>Nazwisko<input name="${prefix}LastName" value="${esc(person.lastName||"")}"></label>
       <label>E-mail *<input name="${prefix}Email" type="email" required value="${esc(person.email||"")}"></label>
       <label>Telefon *<input name="${prefix}Phone" inputmode="tel" required value="${esc(person.phone||"")}"></label>
-      <label class="wide">Ulica ${prefix==="sender"?"*":""}<input name="${prefix}Street" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.street||"")}"></label>
+      <label class="wide">Ulica ${prefix==="sender"?"*":""}<input name="${prefix}Street" list="inpostService${prefix}StreetHints" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.street||"")}"><datalist id="inpostService${prefix}StreetHints"></datalist></label>
       <label>Nr budynku ${prefix==="sender"?"*":""}<input name="${prefix}Building" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.buildingNumber||a.building_number||"")}"></label>
       <label>Nr lokalu<input name="${prefix}Flat" value="${esc(a.flatNumber||a.flat_number||"")}"></label>
-      <label>Kod pocztowy ${prefix==="sender"?"*":""}<input name="${prefix}PostCode" ${prefix==="sender"?"required":"data-receiver-address"} pattern="\\d{2}-?\\d{3}" value="${esc(a.postCode||a.post_code||"")}"></label>
-      <label>Miasto ${prefix==="sender"?"*":""}<input name="${prefix}City" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.city||"")}"></label>
+      <label>Kod pocztowy ${prefix==="sender"?"*":""}<input name="${prefix}PostCode" list="inpostService${prefix}PostCodeHints" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})" ${prefix==="sender"?"required":"data-receiver-address"} pattern="\\d{2}-?\\d{3}" value="${esc(a.postCode||a.post_code||"")}"><datalist id="inpostService${prefix}PostCodeHints"></datalist></label>
+      <label>Miasto ${prefix==="sender"?"*":""}<input name="${prefix}City" list="inpostService${prefix}CityHints" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.city||"")}"><datalist id="inpostService${prefix}CityHints"></datalist></label>
+      <div class="wide inpost-address-matches" data-inpost-address-results="${prefix}"><small>Wpisz kod pocztowy, następnie wybierz miejscowość i ulicę. Wyniki pochodzą z prywatnej książki adresowej.</small></div>
+      ${prefix==="receiver"?'<button class="btn ghost wide" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie(\'receiver\')">📍 Znajdź Paczkomaty przy tym adresie</button>':""}
       <label class="check wide"><input type="checkbox" name="save${prefix==="sender"?"Sender":"Receiver"}" checked> Zapamiętaj lub zaktualizuj ten adres po utworzeniu przesyłki</label>
     </div>
   </fieldset>`;
@@ -1357,7 +1431,7 @@ function inpostServiceFormHTML(){
         <fieldset><legend>🚚 Usługa i nadanie</legend><div class="inpost-form-grid">
           <label>Rodzaj dostawy<select name="deliveryType" onchange="inpostServiceUstawTyp(this.form)"><option value="locker">Paczkomat / PaczkoPunkt</option><option value="courier">Kurier InPost</option></select></label>
           <label>Sposób nadania<select name="sendingMethod" onchange="inpostServiceUstawTyp(this.form)"><option value="parcel_locker">Paczkomat</option><option value="any_point">Dowolny punkt InPost</option><option value="pok">Punkt Obsługi Klienta</option><option value="pop">Punkt Obsługi Przesyłek</option><option value="branch">Oddział InPost</option><option value="dispatch_order">Odbiór przez kuriera</option></select></label>
-          <div class="wide" data-inpost-only="locker"><label>Paczkomat / punkt odbiorcy *<div class="inpost-inline"><input id="inpostServiceTargetPoint" name="targetPoint" placeholder="np. BOJ01N"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape()">Mapa</button></div><small id="inpostServiceTargetPointLabel">Wybierz punkt na mapie albo wyszukaj poniżej.</small></label><div class="inpost-point-search"><input id="inpostServicePointSearch" placeholder="Miasto, kod pocztowy lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow()">Szukaj</button></div><div id="inpostServicePointResults"></div></div>
+          <div class="wide" data-inpost-only="locker"><label>Paczkomat / punkt odbiorcy *<div class="inpost-inline"><input id="inpostServiceTargetPoint" name="targetPoint" placeholder="np. BOJ01N"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape()">Mapa</button></div><small id="inpostServiceTargetPointLabel">Wybierz punkt na mapie albo wyszukaj poniżej.</small></label><div class="inpost-point-search"><input id="inpostServicePointSearch" placeholder="Miasto, kod pocztowy, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow()">Szukaj</button><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie('receiver')">Przy adresie odbiorcy</button></div><div id="inpostServicePointResults"></div></div>
           <label>Punkt nadania (opcjonalnie)<input name="dropoffPoint" placeholder="kod punktu"></label>
           <label class="check" data-inpost-only="courier"><input type="checkbox" name="pickupRequested"> Zleć odbiór przez kuriera</label>
         </div></fieldset>
@@ -1380,7 +1454,7 @@ function inpostServiceFormHTML(){
             <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="monthly"><span><b>FV miesięczna</b><small>Dopisz całe nadanie do rozliczenia klienta</small></span></label>
           </div>
           <div class="inpost-form-grid"><label>Miesiąc rozliczenia<input name="billingMonth" type="month" value="${esc(month)}"></label><label>Prowizja Artway‑TM brutto<input name="commissionGross" type="number" min="0" step=".01" value="${esc(fee)}"></label></div>
-          <div class="backend-note"><b>Sprzedawcą usługi na FV jest Artway‑TM.</b> Jedna pozycja faktury obejmuje koszt przesyłki według zapisanego cennika umownego oraz ustawioną wyżej prowizję. InPost nie jest wystawcą dokumentu klienta.</div>
+          <div class="backend-note"><b>FV zawsze otrzymuje nadawca, a wystawcą jest Artway‑TM.</b> Dane odbiorcy służą wyłącznie do doręczenia. Jedna pozycja faktury obejmuje koszt przesyłki według zapisanego cennika umownego oraz ustawioną wyżej prowizję; InPost nie jest wystawcą dokumentu klienta.</div>
         </fieldset>
       </div>
       <div class="inpost-create-footer"><button class="btn" type="submit">🟡 Utwórz przesyłkę InPost</button><small>Adresy, wycena, numer nadania, tracking i etykieta pozostają w jednym rejestrze.</small></div>
@@ -1417,7 +1491,7 @@ function inpostServiceMiesieczneHTML(){
 function panelWysylkiUslugowejInpost(){
   if(!inpostServiceStan.loaded&&!inpostServiceStan.loading)setTimeout(()=>inpostServiceLaduj(false,true),0);
   if(inpostServiceStan.loading&&!inpostServiceStan.loaded)return '<div class="panel"><div class="admin-loading-state">⏳ Pobieram książkę adresową, konfigurację i rejestr nadań…</div></div>';
-  setTimeout(()=>{const form=document.getElementById("inpostServiceForm");inpostServiceUstawTyp(form);inpostServiceAktualizujWyceneUI(form);},0);
+  setTimeout(()=>{const form=document.getElementById("inpostServiceForm");inpostServiceUstawTyp(form);inpostServiceAktualizujWyceneUI(form);inpostServiceAdresPodpowiedzi(form,"sender");inpostServiceAdresPodpowiedzi(form,"receiver");},0);
   const billing=inpostServiceStan.billing||{},list=inpostServiceStan.settings?.priceList||{},lockerA=list.locker?.small?.gross??14.16;
   return `<div class="inpost-service-workspace"><section class="inpost-service-stats"><article><span>📦</span><b>${inpostServiceStan.items.length}</b><small>nadań</small></article><article><span>📒</span><b>${inpostServiceStan.addressBook?.length||0}</b><small>zapisanych adresów</small></article><article><span>📑</span><b>od ${zl(lockerA)}</b><small>stawki brutto z umowy</small></article><article><span>🧾</span><b>${zl(billing.customerPendingGross||0)}</b><small>do FV miesięcznych</small></article></section>${inpostServiceStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(inpostServiceStan.error)}</div>`:""}${inpostServiceFormHTML()}${inpostServiceMiesieczneHTML()}${inpostServiceHistoriaHTML()}<details class="panel inpost-service-settings"><summary>⚙️ Cennik umowny, domyślny nadawca i prowizja</summary><form onsubmit="inpostServiceZapiszUstawienia(event)">${inpostServiceCennikHTML()}${inpostServiceOsobaFields("sender","Stałe dane nadawcy",inpostServiceNadawca())}<div class="inpost-settings-footer"><label>Domyślna prowizja Artway‑TM brutto<input name="commissionGross" type="number" min="0" step=".01" value="${esc(inpostServiceStan.settings?.commissionGross??4)}"></label><button class="btn" type="submit">Zapisz cennik i ustawienia</button><a class="btn ghost" href="#/admin/infakt/wysylki">Rozliczenia inFakt</a></div></form></details></div>`;
 }
@@ -8144,7 +8218,7 @@ function infaktWysylkiLista(){
     if(infaktWysylkiFiltr==="oczekuje"&&!["pending","awaiting_invoice","error"].includes(status))return false;
     if(infaktWysylkiFiltr==="w_toku"&&status!=="processing")return false;
     if(infaktWysylkiFiltr==="wystawione"&&status!=="created")return false;
-    const text=normalizujSzukanyTekst([item.reference,item.trackingNumber,item.receiver?.companyName,item.receiver?.firstName,item.receiver?.lastName,item.receiver?.email,item.receiver?.taxCode,item.billing?.month].join(" "));
+    const text=normalizujSzukanyTekst([item.reference,item.trackingNumber,item.sender?.companyName,item.sender?.firstName,item.sender?.lastName,item.sender?.email,item.sender?.taxCode,item.billing?.month].join(" "));
     return !terms.some(term=>!text.includes(term));
   });
 }
@@ -8160,12 +8234,12 @@ function infaktWysylkiInpostPanelHTML(){
       <div class="order-stat-card money"><span>💰</span><b>${zl(billing.customerPendingGross||0)}</b><small>łącznie na FV klientów</small></div>
     </section>
     ${infaktWysylkiStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(infaktWysylkiStan.error)}</div>`:""}
-    <section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Rozliczenia firmowe Artway‑TM</span><h2>FV miesięczne za nadania</h2><p class="order-detail-lead">Jedna faktura klienta obejmuje koszt każdego nadania według Twojej umowy InPost oraz prowizję Artway‑TM. InPost nie jest wystawcą dokumentu.</p></div><div class="diag-actions"><a class="btn ghost" href="#/admin/wysylki/inpost">Nowe nadanie</a><button class="btn ghost" onclick="infaktWysylkiLaduj(true,false)">↻ Odśwież</button></div></div>
+    <section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Rozliczenia firmowe Artway‑TM</span><h2>FV miesięczne dla nadawców</h2><p class="order-detail-lead">Klientem na fakturze zawsze jest nadawca. Jedna faktura obejmuje koszt każdego jego nadania według Twojej umowy InPost oraz prowizję Artway‑TM; odbiorca nie jest stroną rozliczenia.</p></div><div class="diag-actions"><a class="btn ghost" href="#/admin/wysylki/inpost">Nowe nadanie</a><button class="btn ghost" onclick="infaktWysylkiLaduj(true,false)">↻ Odśwież</button></div></div>
       <div class="inpost-monthly-grid">${groups.map(group=>`<article class="${group.incompletePrices?"has-warning":""}"><div><b>${esc(group.companyName||group.clientKey)}</b><small>${esc(group.month)} • ${group.count} nadań${group.taxCode?` • NIP ${esc(group.taxCode)}`:""}</small><small>Koszt ${zl(group.carrierGross||0)} + prowizja ${zl(group.commissionGross||0)}</small>${group.incompletePrices?`<span class="lvl lvl-ostrzezenie">${group.incompletePrices} niepełnych wycen</span>`:""}</div><strong>${zl(group.customerTotalGross||0)}</strong><button class="btn" ${group.incompletePrices?"disabled title='Najpierw uzupełnij koszt wszystkich nadań'":""} onclick="infaktWysylkiFakturaMiesieczna(${jsArg(group.month)},${jsArg(group.clientKey)})">Utwórz FV Artway‑TM</button></article>`).join("")||'<div class="backend-note">Brak nierozliczonych paczek miesięcznych.</div>'}</div>
     </section>
     <section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Ślad dokumentów</span><h2>Nadania przekazane do inFakt</h2><p class="order-detail-lead">Kontrola pokazuje osobno koszt nadania i prowizję, a na fakturę klienta trafia ich prawidłowa suma jako usługa Artway‑TM.</p></div></div>
       ${adminWyszukiwaniePanelHTML({id:"infakt-shipping",description:"Filtruj po kliencie, dokumencie, miesiącu albo numerze nadania.",fields,results:rows.length,active:!!(infaktWysylkiSzukaj||infaktWysylkiFiltr!=="wszystkie"),open:true})}
-      <div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table admin-responsive-table"><thead><tr><th>Nadanie</th><th>Klient</th><th>Miesiąc</th><th>Koszt InPost</th><th>Prowizja</th><th>Kwota FV klienta</th><th>Status dokumentu</th></tr></thead><tbody>${rows.map(item=>`<tr><td data-label="Nadanie"><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"numer oczekuje")}</small></td><td data-label="Klient"><b>${esc(item.receiver?.companyName||`${item.receiver?.firstName||""} ${item.receiver?.lastName||""}`.trim()||"Klient")}</b><br><small>${esc(item.receiver?.email||"")}${item.receiver?.taxCode?` • NIP ${esc(item.receiver.taxCode)}`:""}</small></td><td data-label="Miesiąc">${esc(item.billing?.month||"—")}<br><small>${item.billing?.mode==="monthly"?"zbiorczo":"pojedynczo"}</small></td><td data-label="Koszt InPost"><b>${zl(item.pricing?.totalGross||0)}</b></td><td data-label="Prowizja"><b>${zl(item.billing?.commissionGross||0)}</b></td><td data-label="Kwota FV"><b>${zl(item.pricing?.customerTotalGross||0)}</b>${item.pricing?.complete===true?"":'<br><span class="lvl lvl-ostrzezenie">niepełna wycena</span>'}</td><td data-label="Status">${infaktWysylkiStatusHTML(item)}</td></tr>`).join("")||'<tr><td colspan="7">Brak rozliczeń pasujących do filtrów.</td></tr>'}</tbody></table></div>
+      <div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table admin-responsive-table"><thead><tr><th>Nadanie</th><th>Nadawca / klient FV</th><th>Miesiąc</th><th>Koszt InPost</th><th>Prowizja</th><th>Kwota FV klienta</th><th>Status dokumentu</th></tr></thead><tbody>${rows.map(item=>`<tr><td data-label="Nadanie"><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"numer oczekuje")}</small></td><td data-label="Nadawca / klient FV"><b>${esc(item.sender?.companyName||`${item.sender?.firstName||""} ${item.sender?.lastName||""}`.trim()||"Nadawca")}</b><br><small>${esc(item.sender?.email||"")}${item.sender?.taxCode?` • NIP ${esc(item.sender.taxCode)}`:""}</small></td><td data-label="Miesiąc">${esc(item.billing?.month||"—")}<br><small>${item.billing?.mode==="monthly"?"zbiorczo":"pojedynczo"}</small></td><td data-label="Koszt InPost"><b>${zl(item.pricing?.totalGross||0)}</b></td><td data-label="Prowizja"><b>${zl(item.billing?.commissionGross||0)}</b></td><td data-label="Kwota FV"><b>${zl(item.pricing?.customerTotalGross||0)}</b>${item.pricing?.complete===true?"":'<br><span class="lvl lvl-ostrzezenie">niepełna wycena</span>'}</td><td data-label="Status">${infaktWysylkiStatusHTML(item)}</td></tr>`).join("")||'<tr><td colspan="7">Brak rozliczeń pasujących do filtrów.</td></tr>'}</tbody></table></div>
     </section>
   </div>`;
 }

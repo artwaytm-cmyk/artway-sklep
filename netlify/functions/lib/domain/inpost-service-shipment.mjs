@@ -245,7 +245,7 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
       mode: billingMode,
       commissionGross,
       month: /^\d{4}-\d{2}$/.test(clean(raw.billingMonth, 7)) ? clean(raw.billingMonth, 7) : new Date().toISOString().slice(0, 7),
-      clientKey: receiver.taxCode || receiver.email,
+      clientKey: sender.taxCode || sender.email,
     },
     pricing: {
       manualGross: money(raw.carrierCostOverride),
@@ -272,7 +272,7 @@ export function validateInpostServiceDraft(draft = {}) {
   if (draft.cod?.enabled && draft.cod.amount <= 0) errors.push({ field: 'cod.amount', message: 'Podaj kwotę pobrania.' });
   if (draft.insurance?.enabled && draft.insurance.amount <= 0) errors.push({ field: 'insurance.amount', message: 'Podaj wartość ubezpieczenia.' });
   if (draft.deliveryType === 'courier' && (draft.parcel?.weight <= 0 || draft.parcel?.weight > 30)) errors.push({ field: 'parcel.weight', message: 'Kurier Standard z tego cennika obsługuje wagę od 0,01 do 30 kg.' });
-  if (draft.billing?.mode === 'monthly' && (!draft.receiver?.companyName || !/^\d{10}$/.test(draft.receiver?.taxCode || ''))) errors.push({ field: 'receiver.taxCode', message: 'Faktura miesięczna wymaga nazwy firmy i 10-cyfrowego NIP.' });
+  if (draft.billing?.mode === 'monthly' && (!draft.sender?.companyName || !/^\d{10}$/.test(draft.sender?.taxCode || ''))) errors.push({ field: 'sender.taxCode', message: 'Faktura miesięczna dla nadawcy wymaga nazwy firmy i 10-cyfrowego NIP.' });
   if (draft.billing?.mode !== 'none' && draft.billing.commissionGross <= 0) errors.push({ field: 'commissionGross', message: 'Prowizja do faktury musi być większa od 0 zł.' });
   if (!draft.requestId) errors.push({ field: 'requestId', message: 'Brak identyfikatora operacji. Odśwież formularz.' });
   return { ok: errors.length === 0, errors };
@@ -444,8 +444,12 @@ export function inpostServicePickupPayload(record = {}) {
   };
 }
 
+export function inpostServiceBillingClientKey(record = {}) {
+  return clean(record.sender?.taxCode || record.sender?.email || record.billing?.clientKey, 120).toLowerCase();
+}
+
 export function inpostServiceBillingKey(record = {}) {
-  if (record.billing?.mode === 'monthly') return `INPOST-MONTHLY:${record.billing.month}:${clean(record.billing.clientKey, 120).toLowerCase()}`;
+  if (record.billing?.mode === 'monthly') return `INPOST-MONTHLY:${record.billing.month}:${inpostServiceBillingClientKey(record)}`;
   return `INPOST:${clean(record.id, 120)}`;
 }
 
@@ -465,7 +469,7 @@ export function inpostServiceInvoicePayload(records = [], options = {}) {
     const error = new Error(`Nie można wystawić FV: ${incomplete.length} nadań nie ma kompletnego kosztu umownego. Uzupełnij brakujące dopłaty albo wpisz pełny koszt ręcznie.`);
     error.code = 'inpost_billing_incomplete_price'; error.status = 422; throw error;
   }
-  const receiver = items[0].receiver || {}, billingMonth = items[0].billing?.month || new Date().toISOString().slice(0, 7);
+  const sender = items[0].sender || {}, billingMonth = items[0].billing?.month || new Date().toISOString().slice(0, 7);
   const invoiceDate = /^\d{4}-\d{2}-\d{2}$/.test(clean(options.invoiceDate, 10)) ? clean(options.invoiceDate, 10) : new Date().toISOString().slice(0, 10);
   const paymentDate = new Date(`${invoiceDate}T12:00:00Z`); paymentDate.setUTCDate(paymentDate.getUTCDate() + 7);
   const services = items.map((record) => ({
@@ -484,16 +488,16 @@ export function inpostServiceInvoicePayload(records = [], options = {}) {
     payment_date: paymentDate.toISOString().slice(0, 10),
     sale_type: 'service',
     notes: clean(items.length > 1 ? `Miesięczne rozliczenie nadań InPost Artway-TM: ${billingMonth}. Kwoty obejmują koszt nadania według cennika umownego oraz prowizję Artway-TM.` : `Nadanie InPost Artway-TM: ${items[0].reference || items[0].id}. Kwota obejmuje koszt nadania oraz prowizję Artway-TM.`, 500),
-    client_business_activity_kind: receiver.companyName || receiver.taxCode ? 'other_business' : 'private_person',
-    client_company_name: receiver.companyName || undefined,
-    client_first_name: receiver.companyName ? undefined : (receiver.firstName || 'Klient'),
-    client_last_name: receiver.companyName ? undefined : (receiver.lastName || 'InPost'),
-    client_tax_code: receiver.taxCode || undefined,
-    client_street: receiver.address?.street || undefined,
-    client_street_number: receiver.address?.building_number || undefined,
-    client_flat_number: receiver.address?.flat_number || undefined,
-    client_city: receiver.address?.city || undefined,
-    client_post_code: receiver.address?.post_code || undefined,
+    client_business_activity_kind: sender.companyName || sender.taxCode ? 'other_business' : 'private_person',
+    client_company_name: sender.companyName || undefined,
+    client_first_name: sender.companyName ? undefined : (sender.firstName || 'Klient'),
+    client_last_name: sender.companyName ? undefined : (sender.lastName || 'InPost'),
+    client_tax_code: sender.taxCode || undefined,
+    client_street: sender.address?.street || undefined,
+    client_street_number: sender.address?.building_number || undefined,
+    client_flat_number: sender.address?.flat_number || undefined,
+    client_city: sender.address?.city || undefined,
+    client_post_code: sender.address?.post_code || undefined,
     services,
   };
   Object.keys(payload).forEach((key) => payload[key] === undefined && delete payload[key]);
@@ -514,8 +518,9 @@ export function summarizeInpostServiceBilling(items = []) {
   const pending = active.filter((item) => item?.billing?.mode === 'monthly' && item?.billing?.status === 'pending');
   const groups = new Map();
   for (const item of pending) {
-    const key = `${item.billing.month}|${item.billing.clientKey}`;
-    const group = groups.get(key) || { key, month: item.billing.month, clientKey: item.billing.clientKey, companyName: item.receiver?.companyName || '', taxCode: item.receiver?.taxCode || '', count: 0, carrierGross: 0, commissionGross: 0, customerTotalGross: 0, incompletePrices: 0, recordIds: [] };
+    const clientKey = inpostServiceBillingClientKey(item);
+    const key = `${item.billing.month}|${clientKey}`;
+    const group = groups.get(key) || { key, month: item.billing.month, clientKey, companyName: item.sender?.companyName || '', taxCode: item.sender?.taxCode || '', count: 0, carrierGross: 0, commissionGross: 0, customerTotalGross: 0, incompletePrices: 0, recordIds: [] };
     group.count += 1;
     group.carrierGross += money(item.pricing?.totalGross);
     group.commissionGross += money(item.billing.commissionGross);

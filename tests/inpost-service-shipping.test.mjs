@@ -19,7 +19,8 @@ import { normalizeInpostServiceTracking } from '../netlify/functions/lib/domain/
 import { createInpostServiceShipmentRoute } from '../netlify/functions/lib/inpost-service-shipment-route.mjs';
 
 const sender = {
-  companyName: 'Artway-TM sp. z o.o.',
+  companyName: 'Nadawca sp. z o.o.',
+  taxCode: '9876543210',
   email: 'sklep@example.pl',
   phone: '530038914',
   address: { street: 'Gryfa Pomorskiego', buildingNumber: '1/A', postCode: '84-207', city: 'Bojano' },
@@ -125,14 +126,15 @@ test('historia transportu scala zdarzenia ShipX, zachowuje starsze wpisy i tłum
 });
 
 test('FV miesięczna wymaga firmy i NIP, a Artway-TM fakturuje koszt nadania wraz z prowizją', () => {
-  const invalid = draft({ receiver: { ...receiver, companyName: '', taxCode: '' } });
+  const invalid = draft({ sender: { ...sender, companyName: '', taxCode: '' } });
   assert.equal(validateInpostServiceDraft(invalid).ok, false);
-  assert.ok(validateInpostServiceDraft(invalid).errors.some((error) => error.field === 'receiver.taxCode'));
+  assert.ok(validateInpostServiceDraft(invalid).errors.some((error) => error.field === 'sender.taxCode'));
   const base = draft();
   const record = {
     id: 'IPS-1',
     reference: base.reference,
     trackingNumber: '620000000000000000000000',
+    sender: base.sender,
     receiver: base.receiver,
     billing: base.billing,
     pricing: { totalGross: 14.16, customerTotalGross: 18.16, complete: true },
@@ -141,7 +143,8 @@ test('FV miesięczna wymaga firmy i NIP, a Artway-TM fakturuje koszt nadania wra
   assert.equal(payload.invoice.services.length, 1);
   assert.equal(payload.invoice.services[0].gross_price, 1816);
   assert.match(payload.invoice.services[0].name, /Nadanie przesyłki InPost/);
-  assert.equal(payload.invoice.client_tax_code, '1234567890');
+  assert.equal(payload.invoice.client_tax_code, '9876543210');
+  assert.equal(payload.invoice.client_company_name, 'Nadawca sp. z o.o.');
   assert.doesNotMatch(JSON.stringify(payload), /carrierCost|carrierRate|selectedOffer|offers/);
 });
 
@@ -162,7 +165,7 @@ test('publiczny rejestr nigdy nie ujawnia ceny ani stawek przewoźnika', () => {
 });
 
 test('podsumowanie miesięczne grupuje pełny koszt klienta, nie tylko prowizję', () => {
-  const common = { receiver, pricing: { totalGross: 14.16, customerTotalGross: 18.16, complete: true }, billing: { mode: 'monthly', status: 'pending', month: '2026-07', clientKey: receiver.taxCode, commissionGross: 4 } };
+  const common = { sender, receiver, pricing: { totalGross: 14.16, customerTotalGross: 18.16, complete: true }, billing: { mode: 'monthly', status: 'pending', month: '2026-07', clientKey: sender.taxCode, commissionGross: 4 } };
   const summary = summarizeInpostServiceBilling([
     { id: '1', status: 'label_ready', ...common },
     { id: '2', status: 'label_ready', ...common },
@@ -173,6 +176,7 @@ test('podsumowanie miesięczne grupuje pełny koszt klienta, nie tylko prowizję
   assert.equal(summary.commissionPendingGross, 8);
   assert.equal(summary.groups.length, 1);
   assert.equal(summary.groups[0].count, 2);
+  assert.equal(summary.groups[0].clientKey, '9876543210');
   assert.equal(summary.groups[0].carrierGross, 28.32);
   assert.equal(summary.groups[0].customerTotalGross, 36.32);
 });
@@ -219,6 +223,9 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /#\/admin\/wysylki\/inpost/);
   assert.match(shipping, /function panelWysylkiUslugowejInpost/);
   assert.match(shipping, /Wybierz z książki adresowej/);
+  assert.match(shipping, /Kod → miejscowość → ulica/);
+  assert.match(shipping, /Paczkomaty przy tym adresie/);
+  assert.match(shipping, /FV zawsze otrzymuje nadawca/);
   assert.match(shipping, /Przelicz według umowy/);
   assert.match(shipping, /Twój cennik umowny InPost/);
   assert.match(shipping, /inpostServicePotwierdzenie/);
@@ -237,6 +244,7 @@ test('trasa serwerowa zabezpiecza idempotencję, książkę adresową i wycenę 
   assert.match(source, /inpost-service-bill/);
   assert.match(source, /inpost-service-contact-save/);
   assert.match(source, /inpost-service-contact-delete/);
+  assert.match(source, /inpost-service-contact-import/);
   assert.match(source, /inpost-service-quote/);
   assert.match(source, /shipments\/calculate/);
   assert.doesNotMatch(source, /carrierCost\s*:/);
@@ -287,4 +295,24 @@ test('endpoint wyceny naprawdę wysyła szkic do ShipX, a książka adresowa zap
   assert.equal(contact.status, 201);
   assert.equal(contact.body.addressBook.length, 1);
   assert.equal(contact.body.addressBook[0].taxCode, '1234567890');
+
+  const importRequest = new Request('http://localhost/api?action=inpost-service-contact-import', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      source: 'Adresy_DPD.xlsx',
+      contacts: [{
+        role: 'sender',
+        label: 'Nowy nadawca',
+        firstName: 'Anna',
+        lastName: 'Nowak',
+        phone: '501002003',
+        address: { street: 'Lipowa', buildingNumber: '7', postCode: '84-150', city: 'Hel' },
+      }],
+    }),
+  });
+  const imported = await route(importRequest, new URL(importRequest.url), 'inpost-service-contact-import');
+  assert.equal(imported.status, 201);
+  assert.equal(imported.body.created, 1);
+  assert.equal(imported.body.total, 2);
 });
