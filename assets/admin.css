@@ -1527,7 +1527,7 @@ body.admin-mode .admin-unified-view form :is(input,select,textarea):focus{border
 .inpost-monthly-grid{display:grid;gap:.55rem}.inpost-monthly-grid article{display:grid;grid-template-columns:minmax(220px,1fr) auto auto;gap:.8rem;align-items:center;padding:.75rem;border:1px solid var(--line);border-radius:12px}
 .inpost-monthly-grid article>div{display:grid}.inpost-monthly-grid article small{color:var(--muted2)}.inpost-monthly-grid article>strong{font-size:1.1rem}
 .inpost-monthly-grid article.has-warning{border-color:#f59e0b;background:#fffbeb}
-.inpost-service-table{min-width:980px}.inpost-service-table td{vertical-align:top}.inpost-row-actions{display:flex;gap:.35rem;flex-wrap:wrap}
+.inpost-service-table{min-width:980px}.inpost-service-table td{vertical-align:top}.inpost-row-actions{display:flex;gap:.35rem;flex-wrap:wrap}.inpost-row-actions .btn.receipt{background:#111827;color:#fff;border-color:#111827}.inpost-row-actions .btn.receipt:hover{background:#312e81;border-color:#312e81}
 .inpost-service-settings>summary{cursor:pointer;font-weight:900}.inpost-service-settings[open]>summary{margin-bottom:1rem}.inpost-settings-footer>label{min-width:220px}
 .inpost-service-workspace .error{color:var(--danger)}
 .inpost-address-summary{display:grid;align-content:center;gap:.18rem;padding:.72rem .85rem;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--card) 88%,var(--primary) 12%)}.inpost-address-summary span,.inpost-address-summary small{color:var(--muted2)}

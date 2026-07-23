@@ -80,8 +80,57 @@ async function inpostServiceZapiszUstawienia(event){
   event.preventDefault();const form=event.currentTarget,body={commissionGross:form.commissionGross.value,sender:inpostServiceStronaOsoby(form,"sender")};
   try{const d=await chmura("inpost-service-settings",{method:"POST",body,timeout:20000});inpostServiceStan.settings=d.settings||inpostServiceStan.settings;toast("Domyślny nadawca i prowizja zapisane ✅");renderuj();}catch(e){toast("Nie zapisano ustawień: "+(e.message||e));}
 }
+async function inpostServicePobierzStatus(id){
+  const current=inpostServiceStan.items.find(item=>item.id===id);if(!current)throw new Error("Nie znaleziono nadania");
+  if(!current.inpostId)return current;
+  const d=await chmura("inpost-service-status",{params:{id},timeout:30000});
+  if(d.item)inpostServiceStan.items=inpostServiceStan.items.map(item=>item.id===id?d.item:item);
+  return d.item||current;
+}
 async function inpostServiceStatus(id){
-  try{const d=await chmura("inpost-service-status",{params:{id},timeout:30000});if(d.item)inpostServiceStan.items=inpostServiceStan.items.map(item=>item.id===id?d.item:item);toast("Status InPost odświeżony ✅");renderuj();}catch(e){toast("Status InPost: "+(e.message||e));}
+  try{await inpostServicePobierzStatus(id);toast("Status i historia InPost odświeżone ✅");renderuj();}catch(e){toast("Status InPost: "+(e.message||e));}
+}
+function inpostServiceStatusNazwa(status){
+  const labels={created:"Przesyłka utworzona",confirmed:"Przesyłka potwierdzona",dispatched_by_sender:"Przekazana przez nadawcę",collected_from_sender:"Odebrana od nadawcy",taken_by_courier:"Odebrana przez kuriera",adopted_at_source_branch:"Przyjęta w oddziale nadawczym",sent_from_source_branch:"Wysłana z oddziału nadawczego",adopted_at_sorting_center:"Przyjęta w sortowni",sent_from_sorting_center:"Wysłana z sortowni",adopted_at_target_branch:"Przyjęta w oddziale docelowym",out_for_delivery:"Wydana do doręczenia",ready_to_pickup:"Gotowa do odbioru",pickup_reminder_sent:"Wysłano przypomnienie o odbiorze",delivered:"Doręczona",avizo:"Nieudana próba doręczenia",undelivered:"Nie doręczono",missing:"Przesyłka poszukiwana",returned_to_sender:"Zwrócona do nadawcy",cancelled:"Przesyłka anulowana"};
+  const key=String(status||"").trim().toLowerCase();return labels[key]||key.replaceAll("_"," ")||"Oczekuje na pierwszy status";
+}
+function inpostServiceDataPotwierdzenia(value){
+  if(!value)return "—";const date=new Date(value);return Number.isNaN(date.getTime())?"—":date.toLocaleString("pl-PL",{dateStyle:"medium",timeStyle:"short"});
+}
+function inpostServiceAdresPotwierdzenia(person={}){
+  const a=person.address||{},name=person.companyName||`${person.firstName||""} ${person.lastName||""}`.trim()||"—";
+  const street=[a.street,[a.buildingNumber||a.building_number,a.flatNumber||a.flat_number].filter(Boolean).join("/")].filter(Boolean).join(" ");
+  return `<b>${esc(name)}</b>${street?`<span>${esc(street)}</span>`:""}<span>${esc([a.postCode||a.post_code,a.city].filter(Boolean).join(" "))}</span>${person.email?`<span>${esc(person.email)}</span>`:""}${person.phone?`<span>${esc(person.phone)}</span>`:""}`;
+}
+function inpostServicePotwierdzenieHTML(item={},warning=""){
+  const company=typeof daneFirmy==="function"?daneFirmy():{},events=Array.isArray(item.trackingHistory)?item.trackingHistory:[],currentStatus=item.inpostStatus||item.status;
+  const currentEvent=events[0],updated=item.trackingUpdatedAt||currentEvent?.occurredAt||item.updatedAt||item.createdAt;
+  const trackingUrl=item.trackingNumber?`https://inpost.pl/sledzenie-przesylek?number=${encodeURIComponent(item.trackingNumber)}`:"";
+  const service=item.deliveryType==="locker"?`Paczkomat / PaczkoPunkt${item.targetPoint?` • ${item.targetPoint}`:""}`:"Kurier InPost";
+  const parcel=item.parcel||{},size=parcel.template?String(parcel.template).toUpperCase():[parcel.length,parcel.width,parcel.height].filter(Boolean).join(" × ");
+  const billing={none:"Bez faktury",single:"Faktura wystawiana od razu",monthly:"Rozliczenie na fakturze miesięcznej"}[item.billing?.mode]||"—";
+  const timeline=events.length?events:(currentStatus||item.createdAt?[{status:currentStatus||"created",label:inpostServiceStatusNazwa(currentStatus||"created"),occurredAt:updated}]:[]);
+  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Potwierdzenie ${esc(item.reference||item.id||"nadania")}</title><style>
+  :root{font-family:Inter,Arial,sans-serif;color:#172033;background:#eef2f7}*{box-sizing:border-box}body{margin:0;padding:28px}.sheet{max-width:900px;margin:auto;background:#fff;border:1px solid #dbe3ee;border-radius:22px;box-shadow:0 18px 55px #17203318;overflow:hidden}.head{display:flex;justify-content:space-between;gap:24px;padding:30px 34px;background:linear-gradient(135deg,#111827,#312e81);color:#fff}.brand{font-size:24px;font-weight:900}.head h1{margin:5px 0 0;font-size:26px}.head small{color:#dbeafe}.status{padding:22px 34px;background:#f8fafc;border-bottom:1px solid #e2e8f0}.status b{display:block;font-size:24px;color:#166534}.status span{display:block;margin-top:5px;color:#64748b}.content{padding:28px 34px}.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px}.meta div,.party,.parcel{padding:14px;border:1px solid #e2e8f0;border-radius:14px}.meta small,.party small,.parcel small{display:block;margin-bottom:6px;color:#64748b;font-weight:700}.meta b{font-size:15px}.parties{display:grid;grid-template-columns:1fr 1fr;gap:14px}.party{display:grid;gap:3px}.party span{font-size:13px;color:#475569}.parcel{margin-top:14px}.timeline{margin:24px 0 0;padding:0;list-style:none}.timeline li{position:relative;margin-left:12px;padding:0 0 20px 28px;border-left:2px solid #cbd5e1}.timeline li:last-child{padding-bottom:0}.timeline li:before{content:"";position:absolute;left:-7px;top:2px;width:12px;height:12px;border-radius:50%;background:#2563eb;box-shadow:0 0 0 4px #dbeafe}.timeline li:first-child:before{background:#16a34a;box-shadow:0 0 0 4px #dcfce7}.timeline b{display:block}.timeline span,.timeline small{display:block;margin-top:3px;color:#64748b}.track-link{display:inline-block;margin-top:16px;color:#1d4ed8;font-weight:800}.warning{margin:0 34px 20px;padding:12px 14px;border:1px solid #f59e0b;border-radius:12px;background:#fffbeb;color:#92400e}.foot{display:flex;justify-content:space-between;gap:20px;padding:20px 34px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px}.actions{display:flex;justify-content:center;gap:10px;padding:20px}.actions button{padding:11px 18px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer}.actions button:last-child{background:#e2e8f0;color:#172033}@media(max-width:650px){body{padding:0}.sheet{border:0;border-radius:0}.head,.status,.content,.foot{padding-left:18px;padding-right:18px}.head,.foot{display:block}.meta,.parties{grid-template-columns:1fr}.foot span{display:block;margin-top:6px}}@media print{body{padding:0;background:#fff}.sheet{max-width:none;border:0;border-radius:0;box-shadow:none}.actions{display:none}.head{-webkit-print-color-adjust:exact;print-color-adjust:exact}.timeline li{break-inside:avoid}.warning{margin-left:34px;margin-right:34px}}</style></head><body><main class="sheet">
+    <header class="head"><div><div class="brand">${esc(company.nazwa||"Artway‑TM")}</div><h1>Potwierdzenie nadania przesyłki</h1><small>Dokument informacyjny dla klienta</small></div><div><b>${esc(item.reference||item.id||"—")}</b><small>Wydruk: ${esc(inpostServiceDataPotwierdzenia(new Date().toISOString()))}</small></div></header>
+    <section class="status"><b>${esc(currentEvent?.label||inpostServiceStatusNazwa(currentStatus))}</b><span>Stan potwierdzony na: ${esc(inpostServiceDataPotwierdzenia(updated))}</span></section>
+    ${warning?`<div class="warning"><b>Nie udało się pobrać świeżego statusu.</b> Wydruk pokazuje ostatnie dane zapisane w systemie: ${esc(warning)}</div>`:""}
+    <div class="content"><div class="meta"><div><small>Numer nadania</small><b>${esc(item.trackingNumber||"Oczekuje na nadanie numeru")}</b></div><div><small>Usługa</small><b>${esc(service)}</b></div><div><small>Rozliczenie</small><b>${esc(billing)}</b></div></div>
+      <div class="parties"><section class="party"><small>Nadawca</small>${inpostServiceAdresPotwierdzenia(item.sender)}</section><section class="party"><small>Odbiorca</small>${inpostServiceAdresPotwierdzenia(item.receiver)}</section></div>
+      <section class="parcel"><small>Dane przesyłki</small><b>${esc(size?`Gabaryt / wymiary: ${size}`:"Przesyłka InPost")}${parcel.weight?` • ${esc(parcel.weight)} kg`:""}</b>${item.cod?.enabled?`<span>Pobranie: ${esc(zl(item.cod.amount))}</span>`:""}${item.weekend?'<span>Paczka w Weekend</span>':""}</section>
+      ${trackingUrl?`<a class="track-link" href="${trackingUrl}" target="_blank" rel="noopener">Sprawdź przesyłkę online w InPost →</a>`:""}
+      <h2>Historia transportu</h2><ol class="timeline">${timeline.map(event=>`<li><b>${esc(event.label||inpostServiceStatusNazwa(event.status))}</b><span>${esc(inpostServiceDataPotwierdzenia(event.occurredAt))}${event.location?` • ${esc(event.location)}`:""}</span>${event.description?`<small>${esc(event.description)}</small>`:""}</li>`).join("")||"<li><b>Oczekuje na pierwsze zdarzenie przewoźnika</b></li>"}</ol>
+    </div><footer class="foot"><span>${esc([company.nazwa,pelnyAdresFirmy?.(company)].filter(Boolean).join(" • "))}</span><span>Dokument nie jest fakturą ani paragonem.</span></footer>
+  </main><div class="actions"><button onclick="window.print()">Drukuj / zapisz PDF</button><button onclick="window.close()">Zamknij</button></div></body></html>`;
+}
+async function inpostServicePotwierdzenie(id){
+  const popup=window.open("","_blank","width=980,height=900");if(!popup)return toast("Przeglądarka zablokowała okno wydruku");
+  popup.document.write('<!doctype html><html lang="pl"><meta charset="utf-8"><title>Przygotowanie potwierdzenia</title><body style="font-family:Arial;padding:40px"><h2>Odświeżam tracking InPost…</h2><p>Dokument otworzy się za chwilę.</p></body></html>');popup.document.close();
+  let item=inpostServiceStan.items.find(row=>row.id===id),warning="";
+  try{item=await inpostServicePobierzStatus(id);}catch(e){warning=e.message||String(e);}
+  if(!item){popup.close();return toast("Nie znaleziono nadania");}
+  popup.document.open();popup.document.write(inpostServicePotwierdzenieHTML(item,warning));popup.document.close();
+  renderuj();
 }
 async function inpostServiceEtykieta(id,format="A6"){
   const item=inpostServiceStan.items.find(row=>row.id===id);if(!item?.inpostId)return toast("Przesyłka nie ma jeszcze ID InPost");

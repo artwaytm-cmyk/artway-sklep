@@ -167,6 +167,45 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   assertRuntime();
 });
 
+test('potwierdzenie klienta otwiera druk A4 z aktualną historią transportu', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  await page.goto('/#/admin/wysylki/inpost');
+  await expect(page.getByRole('heading', { name: 'Wysyłka z InPost', exact: true })).toBeVisible();
+  const popupPromise = page.waitForEvent('popup');
+  await page.evaluate(() => {
+    inpostServiceStan.items = [{
+      id: 'IPS-TEST',
+      reference: 'USL-TEST',
+      createdAt: '2026-07-23T06:00:00.000Z',
+      updatedAt: '2026-07-23T08:10:00.000Z',
+      trackingUpdatedAt: '2026-07-23T08:10:00.000Z',
+      status: 'label_ready',
+      inpostStatus: 'ready_to_pickup',
+      trackingNumber: '620000000000000000000001',
+      sender: { companyName: 'Artway-TM', email: 'artwaytm@gmail.com', phone: '530038914', address: { street: 'Testowa', buildingNumber: '1', postCode: '84-207', city: 'Bojano' } },
+      receiver: { firstName: 'Jan', lastName: 'Klient', email: 'jan@example.pl', phone: '500600700', address: { street: 'Odbiorcza', buildingNumber: '2', postCode: '80-001', city: 'Gdańsk' } },
+      deliveryType: 'locker',
+      targetPoint: 'GDA01N',
+      parcel: { template: 'small', weight: 1 },
+      billing: { mode: 'monthly' },
+      trackingHistory: [
+        { status: 'ready_to_pickup', label: 'Gotowa do odbioru', occurredAt: '2026-07-23T08:10:00.000Z' },
+        { status: 'out_for_delivery', label: 'Wydana do doręczenia', occurredAt: '2026-07-23T06:15:00.000Z' },
+      ],
+    }];
+    inpostServicePotwierdzenie('IPS-TEST');
+  });
+  const popup = await popupPromise;
+  await expect(popup.getByRole('heading', { name: 'Potwierdzenie nadania przesyłki' })).toBeVisible();
+  await expect(popup.getByText('Gotowa do odbioru', { exact: true })).toHaveCount(2);
+  await expect(popup.getByRole('heading', { name: 'Historia transportu' })).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Drukuj / zapisz PDF' })).toBeVisible();
+  await expect(popup.getByText('Dokument nie jest fakturą ani paragonem.')).toBeVisible();
+  await popup.close();
+  assertRuntime();
+});
+
 test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawaniem paczek', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);

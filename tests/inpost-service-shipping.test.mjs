@@ -15,6 +15,7 @@ import {
   summarizeInpostServiceBilling,
   validateInpostServiceDraft,
 } from '../netlify/functions/lib/domain/inpost-service-shipment.mjs';
+import { normalizeInpostServiceTracking } from '../netlify/functions/lib/domain/inpost-service-tracking.mjs';
 import { createInpostServiceShipmentRoute } from '../netlify/functions/lib/inpost-service-shipment-route.mjs';
 
 const sender = {
@@ -103,6 +104,24 @@ test('książka adresowa normalizuje jeden kontakt dla roli nadawcy i odbiorcy',
   assert.deepEqual(contact.roles, ['sender', 'receiver']);
   assert.equal(contact.address.post_code, '80-209');
   assert.equal(contact.address.building_number, '8');
+});
+
+test('historia transportu scala zdarzenia ShipX, zachowuje starsze wpisy i tłumaczy statusy', () => {
+  const history = normalizeInpostServiceTracking({
+    status: 'ready_to_pickup',
+    updated_at: '2026-07-23T08:10:00+02:00',
+    tracking_details: [
+      { origin_status: 'UWP', status: 'ready_to_pickup', datetime: '2026-07-23T08:10:00+02:00' },
+      { origin_status: 'PDD_2', status: 'out_for_delivery', datetime: '2026-07-23T06:15:00+02:00', location: 'Gdańsk' },
+    ],
+  }, [
+    { status: 'confirmed', label: 'Przesyłka potwierdzona', occurredAt: '2026-07-22T10:00:00.000Z' },
+  ], '2026-07-23T08:11:00.000Z');
+  assert.equal(history.length, 3);
+  assert.equal(history[0].status, 'ready_to_pickup');
+  assert.equal(history[0].label, 'Gotowa do odbioru');
+  assert.equal(history[1].location, 'Gdańsk');
+  assert.equal(history[2].status, 'confirmed');
 });
 
 test('FV miesięczna wymaga firmy i NIP, a Artway-TM fakturuje koszt nadania wraz z prowizją', () => {
@@ -202,6 +221,9 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /Wybierz z książki adresowej/);
   assert.match(shipping, /Przelicz według umowy/);
   assert.match(shipping, /Twój cennik umowny InPost/);
+  assert.match(shipping, /inpostServicePotwierdzenie/);
+  assert.match(shipping, /Drukuj \/ zapisz PDF/);
+  assert.match(shipping, /Historia transportu/);
   assert.match(core, /#\/admin\/infakt\/wysylki/);
   assert.match(inventory, /function infaktWysylkiInpostPanelHTML/);
   assert.match(css, /\.inpost-service-workspace/);

@@ -15,6 +15,7 @@ import {
   summarizeInpostServiceBilling,
   validateInpostServiceDraft,
 } from './domain/inpost-service-shipment.mjs';
+import { normalizeInpostServiceTracking } from './domain/inpost-service-tracking.mjs';
 
 const STORE_KEY = 'inpost_service_shipments';
 
@@ -319,6 +320,8 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         inpostId: '',
         trackingNumber: '',
         inpostStatus: '',
+        trackingHistory: [],
+        trackingUpdatedAt: '',
         labelReady: false,
         offerId: '',
         sender: draft.sender,
@@ -378,6 +381,8 @@ export function createInpostServiceShipmentRoute(deps = {}) {
           inpostId: shipmentId,
           trackingNumber: trackingNumber(current) || trackingNumber(created),
           inpostStatus: shipmentStatus(current) || shipmentStatus(created),
+          trackingHistory: normalizeInpostServiceTracking(current || created, item.trackingHistory, new Date().toISOString()),
+          trackingUpdatedAt: new Date().toISOString(),
           labelReady: labelReady(current) || labelReady(created),
           offerId: offerId(current) || offerId(created),
           pricing: actualPricing.available ? actualPricing : item.pricing,
@@ -417,15 +422,18 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         ...record,
         pricing: { manualGross: record.pricing?.source === 'manual' ? record.pricing.totalGross : null },
       }, store.settings, shipment);
+      const checkedAt = new Date().toISOString();
       const saved = await updateRecord(id, (item) => ({
         ...item,
         status: labelReady(shipment) ? 'label_ready' : item.status,
         trackingNumber: trackingNumber(shipment) || item.trackingNumber,
         inpostStatus: shipmentStatus(shipment) || item.inpostStatus,
+        trackingHistory: normalizeInpostServiceTracking(shipment, item.trackingHistory, checkedAt),
+        trackingUpdatedAt: checkedAt,
         labelReady: labelReady(shipment),
         offerId: offerId(shipment) || item.offerId,
         pricing: refreshedPricing.available ? refreshedPricing : item.pricing,
-        updatedAt: new Date().toISOString(),
+        updatedAt: checkedAt,
       }));
       return respond({ ok: true, configured: config.configured, item: safeInpostServiceRecord(saved) });
     }
@@ -449,7 +457,15 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       const store = cleanStore((await readVersioned(STORE_KEY, initialStore())).value), record = store.items.find((item) => item.id === id);
       if (!record?.inpostId) return respond({ ok: false, error: 'Nie znaleziono przesyłki InPost.', code: 'no_shipment' }, 422);
       await call(`/v1/shipments/${encodeURIComponent(record.inpostId)}`, { method: 'DELETE' });
-      const saved = await updateRecord(id, (item) => ({ ...item, status: 'cancelled', inpostStatus: 'cancelled', updatedAt: new Date().toISOString() }));
+      const checkedAt = new Date().toISOString();
+      const saved = await updateRecord(id, (item) => ({
+        ...item,
+        status: 'cancelled',
+        inpostStatus: 'cancelled',
+        trackingHistory: normalizeInpostServiceTracking({ status: 'cancelled', updated_at: checkedAt }, item.trackingHistory, checkedAt),
+        trackingUpdatedAt: checkedAt,
+        updatedAt: checkedAt,
+      }));
       return respond({ ok: true, item: safeInpostServiceRecord(saved) });
     }
 
