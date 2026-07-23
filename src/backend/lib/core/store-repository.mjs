@@ -1,46 +1,48 @@
-import { getStore } from '@netlify/blobs';
 import { createPostgresStoreRepository } from './postgres-store-repository.mjs';
 
-export function createStoreRepository({ name, consistency = 'strong', driver = process.env.ARTWAY_STORE_DRIVER } = {}) {
-  if (!name) throw new Error('Nazwa magazynu danych jest wymagana.');
+const memoryStores = new Map();
 
-  if (String(driver || '').trim().toLowerCase() === 'postgres') {
-    return createPostgresStoreRepository({ name });
-  }
-
-  const store = () => getStore({ name, consistency });
-
+function createMemoryStoreRepository({ name }) {
+  if (!memoryStores.has(name)) memoryStores.set(name, new Map());
+  const records = memoryStores.get(name);
+  const versionOf = (record) => record ? String(record.version) : '';
   return Object.freeze({
     async read(key, fallback) {
-      try {
-        const value = await store().get(key, { type: 'json' });
-        return value === null || value === undefined ? fallback : value;
-      } catch {
-        return fallback;
-      }
+      return records.has(key) ? structuredClone(records.get(key).value) : fallback;
     },
     async readVersioned(key, fallback) {
-      const result = await store().getWithMetadata(key, { type: 'json' });
-      if (!result) return { value: fallback, etag: '', exists: false };
-      return { value: result.data === null || result.data === undefined ? fallback : result.data, etag: result.etag || '', exists: true };
+      const record = records.get(key);
+      return record
+        ? { value: structuredClone(record.value), etag: versionOf(record), exists: true }
+        : { value: fallback, etag: '', exists: false };
     },
     async write(key, value) {
-      await store().setJSON(key, value);
+      const current = records.get(key);
+      records.set(key, { value: structuredClone(value), version: Number(current?.version || 0) + 1 });
     },
     async writeIfVersion(key, value, version = {}) {
-      const options = version.exists === false ? { onlyIfNew: true } : { onlyIfMatch: String(version.etag || '') };
-      if (version.exists !== false && !options.onlyIfMatch) return { modified: false };
-      return store().setJSON(key, value, options);
+      const current = records.get(key);
+      if (version.exists === false ? !!current : !current || versionOf(current) !== String(version.etag || '')) return { modified: false };
+      const nextVersion = Number(current?.version || 0) + 1;
+      records.set(key, { value: structuredClone(value), version: nextVersion });
+      return { modified: true, etag: String(nextVersion) };
     },
     async delete(key) {
-      await store().delete(key);
-      return { deleted: true };
+      return { deleted: records.delete(key) };
     },
     async listKeys() {
-      const result = await store().list();
-      return (result?.blobs || []).map((entry) => ({ key: entry.key, etag: entry.etag || '' })).sort((a, b) => a.key.localeCompare(b.key));
+      return [...records.entries()].map(([key, record]) => ({ key, etag: versionOf(record) })).sort((a, b) => a.key.localeCompare(b.key));
     },
   });
+}
+
+export function createStoreRepository({ name, driver = process.env.ARTWAY_STORE_DRIVER || (process.env.NODE_ENV === 'production' ? 'postgres' : 'memory') } = {}) {
+  if (!name) throw new Error('Nazwa magazynu danych jest wymagana.');
+
+  const selected = String(driver || '').trim().toLowerCase();
+  if (selected === 'postgres') return createPostgresStoreRepository({ name });
+  if (selected === 'memory') return createMemoryStoreRepository({ name });
+  throw new Error(`Nieobsługiwany sterownik danych: ${selected || 'brak'}. Serwer produkcyjny wymaga PostgreSQL.`);
 }
 
 export function createRevisionSafeWriter(repository, key = 'settings') {

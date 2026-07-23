@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCatalogProductUpdater } from '../netlify/functions/lib/domain/catalog-product-updater.mjs';
-import { applyCatalogProductOperations } from '../netlify/functions/lib/domain/catalog-product-operation-rebase.mjs';
+import { createCatalogProductUpdater } from '../src/backend/lib/domain/catalog-product-updater.mjs';
+import { applyCatalogProductOperations } from '../src/backend/lib/domain/catalog-product-operation-rebase.mjs';
 
 test('rebase aktualizacji Allegro zachowuje równoległą edycję tego samego produktu przez administratora', () => {
   const expectedProduct = { id: 31, nazwa: 'Gra', opis: 'stary opis' };

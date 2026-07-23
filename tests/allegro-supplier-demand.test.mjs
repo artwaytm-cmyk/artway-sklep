@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allegroOrdersForInventoryDeduction, allegroOrdersForSupplierDemand, markAllegroInventoryTransition, markAllegroInventoryTransitions, resolveAllegroBaselineCutover } from '../netlify/functions/lib/domain/allegro-supplier-demand.mjs';
-import { reconcileSupplierOrderDrafts } from '../netlify/functions/lib/domain/supplier-order-reconciliation.mjs';
+import { allegroOrdersForInventoryDeduction, allegroOrdersForSupplierDemand, markAllegroInventoryTransition, markAllegroInventoryTransitions, resolveAllegroBaselineCutover } from '../src/backend/lib/domain/allegro-supplier-demand.mjs';
+import { reconcileSupplierOrderDrafts } from '../src/backend/lib/domain/supplier-order-reconciliation.mjs';
 
 const catalog = [{ id: 'P-1' }, { id: 'P-2' }];
 

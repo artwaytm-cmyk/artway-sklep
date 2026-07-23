@@ -12,7 +12,7 @@ import {
   telegramRenderEvents,
   telegramSupplierTables,
   telegramTopicId,
-} from '../netlify/functions/lib/domain/telegram-communication.mjs';
+} from '../src/backend/lib/domain/telegram-communication.mjs';
 import {
   createTelegramCenter,
   telegramAgentReport,
@@ -20,7 +20,7 @@ import {
   telegramIncidentCard,
   telegramIncidentKeyboard,
   telegramPanelUrl,
-} from '../netlify/functions/lib/telegram-center.mjs';
+} from '../src/backend/lib/telegram-center.mjs';
 
 test('Telegram domyślnie wysyła tylko ważne zmiany i chroni ciszę nocną', () => {
   const settings = telegramSettings({});
@@ -173,7 +173,7 @@ test('kontrola połączenia zwraca stan Privacy Mode bota', { concurrency: false
   const originalFetch = globalThis.fetch, data = new Map();
   globalThis.fetch = async (url) => {
     if (String(url).endsWith('/getMe')) return new Response(JSON.stringify({ ok: true, result: { id: 7, username: 'magazyn_artway_bot', first_name: 'Magazyn Artway', can_read_all_group_messages: false } }), { status: 200, headers: { 'content-type': 'application/json' } });
-    if (String(url).endsWith('/getWebhookInfo')) return new Response(JSON.stringify({ ok: true, result: { url: 'https://artwaytm.pl/.netlify/functions/telegram-webhook', pending_update_count: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (String(url).endsWith('/getWebhookInfo')) return new Response(JSON.stringify({ ok: true, result: { url: 'https://artwaytm.pl/api/telegram/webhook', pending_update_count: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
     if (String(url).endsWith('/getChat')) return new Response(JSON.stringify({ ok: true, result: { id: -100, type: 'group', title: 'Magazyn Artway' } }), { status: 200, headers: { 'content-type': 'application/json' } });
     throw new Error(`Nieoczekiwane wywołanie: ${url}`);
   };

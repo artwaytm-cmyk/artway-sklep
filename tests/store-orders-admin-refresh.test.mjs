@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 test('panel pobiera zamówienia gości z dedykowanej lekkiej kolejki', async () => {
   const [route, sync, router] = await Promise.all([
-    readFile('netlify/functions/lib/store-data-route.mjs', 'utf8'),
+    readFile('src/backend/lib/store-data-route.mjs', 'utf8'),
     readFile('src/frontend/07b-shipping-integrations.js', 'utf8'),
     readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
   ]);
@@ -18,7 +18,7 @@ test('panel pobiera zamówienia gości z dedykowanej lekkiej kolejki', async () 
 
 test('automatyczna synchronizacja nie scala localStorage z serwerem', async () => {
   const [route, sync] = await Promise.all([
-    readFile('netlify/functions/lib/store-data-route.mjs', 'utf8'),
+    readFile('src/backend/lib/store-data-route.mjs', 'utf8'),
     readFile('src/frontend/07b-shipping-integrations.js', 'utf8'),
   ]);
   const compatibility = route.slice(route.indexOf("action === 'store-sync'"), route.indexOf('// ─── ADMIN: zapis'));

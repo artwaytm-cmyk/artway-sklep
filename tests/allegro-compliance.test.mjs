@@ -5,7 +5,7 @@ import {
   allegroEnforceDraft,
   allegroSanitizePlainText,
   allegroSecureOfferWrite,
-} from '../netlify/functions/lib/allegro-compliance.mjs';
+} from '../src/backend/lib/allegro-compliance.mjs';
 
 test('opis Allegro blokuje kontakt i sprzedaż poza serwisem', () => {
   const check = allegroCheckText('Przed zakupem napisz do nas: sklep@example.com');

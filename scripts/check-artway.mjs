@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { allegroCheckText, allegroSanitizePlainText, allegroSanitizeDescription, allegroEnforceDraft } from '../netlify/functions/lib/allegro-compliance.mjs';
-import { infaktKsefPozycje, ustawieniaPubliczneBezDanychPrywatnych } from '../netlify/functions/lib/infakt-purchase.mjs';
+import { allegroCheckText, allegroSanitizePlainText, allegroSanitizeDescription, allegroEnforceDraft } from '../src/backend/lib/allegro-compliance.mjs';
+import { infaktKsefPozycje, ustawieniaPubliczneBezDanychPrywatnych } from '../src/backend/lib/infakt-purchase.mjs';
 
 const files = [
   'index.html',
@@ -18,50 +18,50 @@ const files = [
   'assets/admin-personalization.js',
   'assets/admin-system.js',
   'products.json',
-  'netlify/functions/store.mjs',
-  'netlify/functions/lib/store-app.mjs',
-  'netlify/functions/lib/system-route.mjs',
-  'netlify/functions/lib/store-data-route.mjs',
-  'netlify/functions/lib/inpost-route.mjs',
-  'netlify/functions/lib/infakt-route.mjs',
-  'netlify/functions/lib/paynow-route.mjs',
-  'netlify/functions/lib/agent-operations-route.mjs',
-  'netlify/functions/lib/allegro-communications-route.mjs',
-  'netlify/functions/lib/allegro-mapping-route.mjs',
-  'netlify/functions/lib/product-availability-route.mjs',
-  'netlify/functions/lib/email-route.mjs',
-  'netlify/functions/lib/email-service.mjs',
-  'netlify/functions/lib/inpost-service.mjs',
-  'netlify/functions/lib/paynow-service.mjs',
-  'netlify/functions/lib/infakt-service.mjs',
-  'netlify/functions/lib/product-source-inspection-service.mjs',
-  'netlify/functions/lib/product-source-matching.mjs',
-  'netlify/functions/lib/allegro-offer-withdrawal-route.mjs',
-  'netlify/functions/lib/core/http.mjs',
-  'netlify/functions/lib/core/store-repository.mjs',
-  'netlify/functions/lib/domain/orders.mjs',
-  'netlify/functions/lib/domain/catalog-quality.mjs',
-  'netlify/functions/lib/domain/product-editorial-pipeline.mjs',
-  'netlify/functions/lib/domain/product-link-package-preparer.mjs',
-  'netlify/functions/lib/domain/product-sale-decisions.mjs',
-  'netlify/functions/lib/domain/product-sale-channel-links.mjs',
-  'netlify/functions/lib/domain/allegro-reply-assistant.mjs',
-  'netlify/functions/lib/domain/telegram-communication.mjs',
-  'netlify/functions/lib/telegram-center.mjs',
-  'netlify/functions/lib/telegram-router.mjs',
-  'netlify/functions/lib/allegro-compliance.mjs',
-  'netlify/functions/lib/infakt-purchase.mjs',
-  'netlify/functions/cron-inpost-sync.mjs',
-  'netlify/functions/cron-allegro-orders.mjs',
-  'netlify/functions/cron-allegro-communications.mjs',
-  'netlify/functions/cron-allegro-offers.mjs',
-  'netlify/functions/cron-supplier-availability.mjs',
-  'netlify/functions/cron-infakt-sync.mjs',
-  'netlify/functions/cron-seo-daily.mjs',
-  'netlify/functions/cron-telegram-center.mjs',
-  'netlify/functions/telegram-webhook.mjs',
-  'netlify/functions/sitemap.mjs',
-  'netlify/functions/google-products.mjs',
+  'src/backend/store.mjs',
+  'src/backend/lib/store-app.mjs',
+  'src/backend/lib/system-route.mjs',
+  'src/backend/lib/store-data-route.mjs',
+  'src/backend/lib/inpost-route.mjs',
+  'src/backend/lib/infakt-route.mjs',
+  'src/backend/lib/paynow-route.mjs',
+  'src/backend/lib/agent-operations-route.mjs',
+  'src/backend/lib/allegro-communications-route.mjs',
+  'src/backend/lib/allegro-mapping-route.mjs',
+  'src/backend/lib/product-availability-route.mjs',
+  'src/backend/lib/email-route.mjs',
+  'src/backend/lib/email-service.mjs',
+  'src/backend/lib/inpost-service.mjs',
+  'src/backend/lib/paynow-service.mjs',
+  'src/backend/lib/infakt-service.mjs',
+  'src/backend/lib/product-source-inspection-service.mjs',
+  'src/backend/lib/product-source-matching.mjs',
+  'src/backend/lib/allegro-offer-withdrawal-route.mjs',
+  'src/backend/lib/core/http.mjs',
+  'src/backend/lib/core/store-repository.mjs',
+  'src/backend/lib/domain/orders.mjs',
+  'src/backend/lib/domain/catalog-quality.mjs',
+  'src/backend/lib/domain/product-editorial-pipeline.mjs',
+  'src/backend/lib/domain/product-link-package-preparer.mjs',
+  'src/backend/lib/domain/product-sale-decisions.mjs',
+  'src/backend/lib/domain/product-sale-channel-links.mjs',
+  'src/backend/lib/domain/allegro-reply-assistant.mjs',
+  'src/backend/lib/domain/telegram-communication.mjs',
+  'src/backend/lib/telegram-center.mjs',
+  'src/backend/lib/telegram-router.mjs',
+  'src/backend/lib/allegro-compliance.mjs',
+  'src/backend/lib/infakt-purchase.mjs',
+  'src/backend/cron-inpost-sync.mjs',
+  'src/backend/cron-allegro-orders.mjs',
+  'src/backend/cron-allegro-communications.mjs',
+  'src/backend/cron-allegro-offers.mjs',
+  'src/backend/cron-supplier-availability.mjs',
+  'src/backend/cron-infakt-sync.mjs',
+  'src/backend/cron-seo-daily.mjs',
+  'src/backend/cron-telegram-center.mjs',
+  'src/backend/telegram-webhook.mjs',
+  'src/backend/sitemap.mjs',
+  'src/backend/google-products.mjs',
   'robots.txt',
 ];
 
@@ -93,53 +93,53 @@ const css = `${cssPublic}\n${cssAdmin}`;
 const appPublic = read('assets/app.js');
 const appAdmin = read('assets/admin.js');
 const app = `${appPublic}\n${appAdmin}`;
-const storeEntry = read('netlify/functions/store.mjs');
-const store = read('netlify/functions/lib/store-app.mjs');
-const agentOperationsRoute = read('netlify/functions/lib/agent-operations-route.mjs');
-const allegroCommunicationsRoute = read('netlify/functions/lib/allegro-communications-route.mjs');
-const allegroMappingRoute = read('netlify/functions/lib/allegro-mapping-route.mjs');
-const productAvailabilityRoute = read('netlify/functions/lib/product-availability-route.mjs');
-const emailRoute = read('netlify/functions/lib/email-route.mjs');
+const storeEntry = read('src/backend/store.mjs');
+const store = read('src/backend/lib/store-app.mjs');
+const agentOperationsRoute = read('src/backend/lib/agent-operations-route.mjs');
+const allegroCommunicationsRoute = read('src/backend/lib/allegro-communications-route.mjs');
+const allegroMappingRoute = read('src/backend/lib/allegro-mapping-route.mjs');
+const productAvailabilityRoute = read('src/backend/lib/product-availability-route.mjs');
+const emailRoute = read('src/backend/lib/email-route.mjs');
 const storeRuntime = [
   store,
-  read('netlify/functions/lib/system-route.mjs'),
-  read('netlify/functions/lib/store-data-route.mjs'),
-  read('netlify/functions/lib/inpost-route.mjs'),
-  read('netlify/functions/lib/infakt-route.mjs'),
-  read('netlify/functions/lib/paynow-route.mjs'),
+  read('src/backend/lib/system-route.mjs'),
+  read('src/backend/lib/store-data-route.mjs'),
+  read('src/backend/lib/inpost-route.mjs'),
+  read('src/backend/lib/infakt-route.mjs'),
+  read('src/backend/lib/paynow-route.mjs'),
   agentOperationsRoute,
   allegroCommunicationsRoute,
   allegroMappingRoute,
   productAvailabilityRoute,
   emailRoute,
-  read('netlify/functions/lib/email-service.mjs'),
-  read('netlify/functions/lib/inpost-service.mjs'),
-  read('netlify/functions/lib/paynow-service.mjs'),
-  read('netlify/functions/lib/infakt-service.mjs'),
-  read('netlify/functions/lib/product-source-inspection-service.mjs'),
-  read('netlify/functions/lib/product-source-matching.mjs'),
+  read('src/backend/lib/email-service.mjs'),
+  read('src/backend/lib/inpost-service.mjs'),
+  read('src/backend/lib/paynow-service.mjs'),
+  read('src/backend/lib/infakt-service.mjs'),
+  read('src/backend/lib/product-source-inspection-service.mjs'),
+  read('src/backend/lib/product-source-matching.mjs'),
 ].join('\n');
-const productEditorial = read('netlify/functions/lib/domain/product-editorial-pipeline.mjs');
-const productLinkPackage = read('netlify/functions/lib/domain/product-link-package-preparer.mjs');
-const productSaleDecisions = read('netlify/functions/lib/domain/product-sale-decisions.mjs');
-const productSaleChannelLinks = read('netlify/functions/lib/domain/product-sale-channel-links.mjs');
-const allegroOfferWithdrawal = read('netlify/functions/lib/allegro-offer-withdrawal-route.mjs');
-const allegroCompliance = read('netlify/functions/lib/allegro-compliance.mjs');
-const infaktPurchase = read('netlify/functions/lib/infakt-purchase.mjs');
-const telegramCommunication = read('netlify/functions/lib/domain/telegram-communication.mjs');
-const telegramCenter = read('netlify/functions/lib/telegram-center.mjs');
-const telegramRouter = read('netlify/functions/lib/telegram-router.mjs');
-const cron = read('netlify/functions/cron-inpost-sync.mjs');
-const cronAllegroOrders = read('netlify/functions/cron-allegro-orders.mjs');
-const cronAllegroCommunications = read('netlify/functions/cron-allegro-communications.mjs');
-const cronAllegroOffers = read('netlify/functions/cron-allegro-offers.mjs');
-const cronSupplierAvailability = read('netlify/functions/cron-supplier-availability.mjs');
-const cronInfaktSync = read('netlify/functions/cron-infakt-sync.mjs');
-const cronSeoDaily = read('netlify/functions/cron-seo-daily.mjs');
-const cronTelegramCenter = read('netlify/functions/cron-telegram-center.mjs');
-const telegramWebhook = read('netlify/functions/telegram-webhook.mjs');
-const sitemap = read('netlify/functions/sitemap.mjs');
-const googleProducts = read('netlify/functions/google-products.mjs');
+const productEditorial = read('src/backend/lib/domain/product-editorial-pipeline.mjs');
+const productLinkPackage = read('src/backend/lib/domain/product-link-package-preparer.mjs');
+const productSaleDecisions = read('src/backend/lib/domain/product-sale-decisions.mjs');
+const productSaleChannelLinks = read('src/backend/lib/domain/product-sale-channel-links.mjs');
+const allegroOfferWithdrawal = read('src/backend/lib/allegro-offer-withdrawal-route.mjs');
+const allegroCompliance = read('src/backend/lib/allegro-compliance.mjs');
+const infaktPurchase = read('src/backend/lib/infakt-purchase.mjs');
+const telegramCommunication = read('src/backend/lib/domain/telegram-communication.mjs');
+const telegramCenter = read('src/backend/lib/telegram-center.mjs');
+const telegramRouter = read('src/backend/lib/telegram-router.mjs');
+const cron = read('src/backend/cron-inpost-sync.mjs');
+const cronAllegroOrders = read('src/backend/cron-allegro-orders.mjs');
+const cronAllegroCommunications = read('src/backend/cron-allegro-communications.mjs');
+const cronAllegroOffers = read('src/backend/cron-allegro-offers.mjs');
+const cronSupplierAvailability = read('src/backend/cron-supplier-availability.mjs');
+const cronInfaktSync = read('src/backend/cron-infakt-sync.mjs');
+const cronSeoDaily = read('src/backend/cron-seo-daily.mjs');
+const cronTelegramCenter = read('src/backend/cron-telegram-center.mjs');
+const telegramWebhook = read('src/backend/telegram-webhook.mjs');
+const sitemap = read('src/backend/sitemap.mjs');
+const googleProducts = read('src/backend/google-products.mjs');
 const robots = read('robots.txt');
 
 requireMarkers('assets/app.js', appPublic, [
@@ -445,7 +445,7 @@ if (!app.includes('agentOnboardingStatus="processing"') && !app.includes('agentO
   fail('assets/app.js: nowy produkt administratora nie uruchamia priorytetowej kontroli Agenta');
 }
 
-requireMarkers('netlify/functions/store.mjs', storeEntry, [
+requireMarkers('src/backend/store.mjs', storeEntry, [
   "import handler from './lib/store-app.mjs'",
   'export default handler',
 ]);
@@ -596,7 +596,7 @@ requireMarkers('backend aplikacji po podziale domenowym', storeRuntime, [
   'autoFees',
 ]);
 
-requireMarkers('netlify/functions/lib/domain/product-sale-decisions.mjs', productSaleDecisions, [
+requireMarkers('src/backend/lib/domain/product-sale-decisions.mjs', productSaleDecisions, [
   'applyProductSaleDecisionBatch',
   "source: 'producent-agent'",
   "'wait_available'",
@@ -604,7 +604,7 @@ requireMarkers('netlify/functions/lib/domain/product-sale-decisions.mjs', produc
   "'manual_available'",
 ]);
 
-requireMarkers('netlify/functions/lib/domain/product-sale-channel-links.mjs', productSaleChannelLinks, [
+requireMarkers('src/backend/lib/domain/product-sale-channel-links.mjs', productSaleChannelLinks, [
   'buildProductSaleChannelLinks',
   'createProductSaleChannelSynchronizer',
   'scoreAllegroProductMapping',
@@ -615,7 +615,7 @@ requireMarkers('netlify/functions/lib/domain/product-sale-channel-links.mjs', pr
   'allegro_availability_automation',
 ]);
 
-requireMarkers('netlify/functions/lib/allegro-offer-withdrawal-route.mjs', allegroOfferWithdrawal, [
+requireMarkers('src/backend/lib/allegro-offer-withdrawal-route.mjs', allegroOfferWithdrawal, [
   "'allegro-resolve-duplicate'",
   "'allegro-withdraw-offers'",
   'allegro_duplicate_resolution_audit',
@@ -624,7 +624,7 @@ requireMarkers('netlify/functions/lib/allegro-offer-withdrawal-route.mjs', alleg
   'republish: false',
 ]);
 
-requireMarkers('netlify/functions/lib/infakt-purchase.mjs', infaktPurchase, [
+requireMarkers('src/backend/lib/infakt-purchase.mjs', infaktPurchase, [
   'PRYWATNE_POLA_PRODUKTU',
   'function produktBezDanychPrywatnych',
   'function ustawieniaPubliczneBezDanychPrywatnych',
@@ -632,7 +632,7 @@ requireMarkers('netlify/functions/lib/infakt-purchase.mjs', infaktPurchase, [
   'wartość wiersza po rabatach',
 ]);
 
-requireMarkers('netlify/functions/lib/domain/telegram-communication.mjs', telegramCommunication, [
+requireMarkers('src/backend/lib/domain/telegram-communication.mjs', telegramCommunication, [
   'function telegramEventDecision',
   'function telegramDigestSlot',
   '<b>NAZWA PRODUKTU · KOD · ZAMAWIANA ILOŚĆ</b>',
@@ -643,7 +643,7 @@ requireMarkers('netlify/functions/lib/domain/telegram-communication.mjs', telegr
   'function editTelegramHtml',
 ]);
 
-requireMarkers('netlify/functions/lib/telegram-center.mjs', telegramCenter, [
+requireMarkers('src/backend/lib/telegram-center.mjs', telegramCenter, [
   'function createTelegramCenter',
   'async function managedEvent',
   'async function dispatch',
@@ -653,7 +653,7 @@ requireMarkers('netlify/functions/lib/telegram-center.mjs', telegramCenter, [
   'async function inbound',
 ]);
 
-requireMarkers('netlify/functions/lib/telegram-router.mjs', telegramRouter, [
+requireMarkers('src/backend/lib/telegram-router.mjs', telegramRouter, [
   "'telegram-center-status'",
   "'telegram-settings-save'",
   "'telegram-register-webhook'",
@@ -664,8 +664,8 @@ requireMarkers('netlify/functions/lib/telegram-router.mjs', telegramRouter, [
   "'telegram-send-agent-report'",
 ]);
 
-requireMarkers('netlify/functions/cron-telegram-center.mjs', cronTelegramCenter, ["schedule: '*/15 * * * *'", "action=telegram-dispatch"]);
-requireMarkers('netlify/functions/telegram-webhook.mjs', telegramWebhook, ['x-telegram-bot-api-secret-token', 'telegram-inbound-command', 'telegram-incident-action', 'allowedChatIds']);
+requireMarkers('src/backend/cron-telegram-center.mjs', cronTelegramCenter, ["schedule: '*/15 * * * *'", "action=telegram-dispatch"]);
+requireMarkers('src/backend/telegram-webhook.mjs', telegramWebhook, ['x-telegram-bot-api-secret-token', 'telegram-inbound-command', 'telegram-incident-action', 'allowedChatIds']);
 
 const ksefTestRows = infaktKsefPozycje(`<?xml version="1.0"?><Faktura><KodWaluty>PLN</KodWaluty><FaWiersz><P_7>Gra testowa 5901234123457</P_7><P_8A>szt.</P_8A><P_8B>2</P_8B><P_9A>100.00</P_9A><P_11>180.00</P_11><P_11A>221.40</P_11A><P_12>23</P_12><Indeks>ABC-123</Indeks></FaWiersz></Faktura>`);
 if (ksefTestRows.length !== 1 || ksefTestRows[0].unitNet !== 90 || ksefTestRows[0].unitGross !== 110.7 || ksefTestRows[0].ean !== '5901234123457') {
@@ -699,7 +699,7 @@ if ((app.match(/<input id="oneProductUrl"/g) || []).length !== 1) {
 }
 
 if (/stock:\s*\{\s*available:\s*Math\.max\(0,\s*Number\(opt\.stock\s*\?\?\s*p\.stan\s*\?\?\s*1\)\s*\|\|\s*1\)/.test(store)) {
-  fail('netlify/functions/lib/store-app.mjs: stan 0 nie może być zamieniany na 1 przy wystawianiu Allegro');
+  fail('src/backend/lib/store-app.mjs: stan 0 nie może być zamieniany na 1 przy wystawianiu Allegro');
 }
 if (app.includes('badge:produktyBezOferty')) {
   fail('assets/app.js: licznik Allegro nie może zliczać całego katalogu produktów bez oferty');
@@ -796,7 +796,7 @@ if (!productEditorial.includes("sourceRole: 'facts_only'") || !productEditorial.
 if (!store.includes("method: 'PATCH', bodyObj: patch, withMeta: true") || !store.includes("'/pricing/offer-fee-preview'") || !store.includes('allegroDescriptionSections = sections')) {
   fail('store-app.mjs: automatyczna konserwacja musi aktualizować ofertę, opisy i kalkulację opłat');
 }
-requireMarkers('netlify/functions/lib/allegro-compliance.mjs', allegroCompliance, [
+requireMarkers('src/backend/lib/allegro-compliance.mjs', allegroCompliance, [
   'ALLEGRO_COMPLIANCE_POLICY',
   'allegroCheckText',
   'allegroSanitizeDescription',
@@ -831,45 +831,45 @@ for (const marker of ['<h1>ORIGAMI 3D</h1>', '<b>Kreatywny zestaw</b>', '<ul>', 
 }
 if (richAllegroJson.includes('skontaktuj')) fail('kontrola Allegro: niedozwolony punkt listy nie został usunięty');
 
-requireMarkers('netlify/functions/cron-inpost-sync.mjs', cron, [
+requireMarkers('src/backend/cron-inpost-sync.mjs', cron, [
   "schedule: '0 */6 * * *'",
   'inpost-sync-all',
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
-requireMarkers('netlify/functions/cron-allegro-orders.mjs', cronAllegroOrders, [
+requireMarkers('src/backend/cron-allegro-orders.mjs', cronAllegroOrders, [
   "schedule: '5,20,35,50 * * * *'",
   'allegro-sync-orders',
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
-requireMarkers('netlify/functions/cron-allegro-communications.mjs', cronAllegroCommunications, [
+requireMarkers('src/backend/cron-allegro-communications.mjs', cronAllegroCommunications, [
   "schedule: '*/15 * * * *'",
   'allegro-sync-communications',
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
-requireMarkers('netlify/functions/cron-allegro-offers.mjs', cronAllegroOffers, [
+requireMarkers('src/backend/cron-allegro-offers.mjs', cronAllegroOffers, [
   "schedule: '25 */6 * * *'",
   'allegro-sync-offers',
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
-requireMarkers('netlify/functions/cron-supplier-availability.mjs', cronSupplierAvailability, [
+requireMarkers('src/backend/cron-supplier-availability.mjs', cronSupplierAvailability, [
   "schedule: '40 */6 * * *'",
   'supplier-availability-sample',
   'scheduled-supplier-availability',
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
-requireMarkers('netlify/functions/cron-infakt-sync.mjs', cronInfaktSync, [
+requireMarkers('src/backend/cron-infakt-sync.mjs', cronInfaktSync, [
   "schedule: '17 * * * *'",
   'infakt-sync',
   'INFAKT_API_KEY',
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
-requireMarkers('netlify/functions/cron-seo-daily.mjs', cronSeoDaily, [
+requireMarkers('src/backend/cron-seo-daily.mjs', cronSeoDaily, [
   "schedule: '15 4 * * *'",
   'seo-daily-run',
   'scheduled-seo-daily',
@@ -878,14 +878,14 @@ requireMarkers('netlify/functions/cron-seo-daily.mjs', cronSeoDaily, [
   'ARTWAY_ADMIN_TOKEN',
 ]);
 
-requireMarkers('netlify/functions/sitemap.mjs', sitemap, [
+requireMarkers('src/backend/sitemap.mjs', sitemap, [
   'sitemaps.org/schemas/sitemap',
   'mergeCatalogProducts',
   'artway_produkty_ukryte',
   '/produkt/',
 ]);
 
-requireMarkers('netlify/functions/google-products.mjs', googleProducts, [
+requireMarkers('src/backend/google-products.mjs', googleProducts, [
   'base.google.com/ns/1.0',
   'automaticSeo',
   "productIsUnavailable(product, availability) ? 'out_of_stock' : 'in_stock'",
@@ -906,7 +906,7 @@ try {
   fail(`połączone assets JS: błąd składni: ${error.message}`);
 }
 
-for (const file of ['netlify/functions/store.mjs', 'netlify/functions/lib/store-app.mjs', 'netlify/functions/lib/allegro-compliance.mjs', 'netlify/functions/cron-inpost-sync.mjs', 'netlify/functions/cron-allegro-orders.mjs', 'netlify/functions/cron-allegro-communications.mjs', 'netlify/functions/cron-allegro-offers.mjs', 'netlify/functions/cron-supplier-availability.mjs', 'netlify/functions/cron-infakt-sync.mjs', 'netlify/functions/cron-seo-daily.mjs', 'netlify/functions/sitemap.mjs', 'netlify/functions/google-products.mjs']) {
+for (const file of ['src/backend/store.mjs', 'src/backend/lib/store-app.mjs', 'src/backend/lib/allegro-compliance.mjs', 'src/backend/cron-inpost-sync.mjs', 'src/backend/cron-allegro-orders.mjs', 'src/backend/cron-allegro-communications.mjs', 'src/backend/cron-allegro-offers.mjs', 'src/backend/cron-supplier-availability.mjs', 'src/backend/cron-infakt-sync.mjs', 'src/backend/cron-seo-daily.mjs', 'src/backend/sitemap.mjs', 'src/backend/google-products.mjs']) {
   try {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
   } catch (error) {

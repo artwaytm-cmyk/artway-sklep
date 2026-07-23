@@ -6,7 +6,7 @@ import { ASSET_BUNDLES } from '../scripts/build-assets.mjs';
 const source = await readFile(new URL('../src/frontend/10-warehouse-documents.js', import.meta.url), 'utf8');
 const documentStyles = await readFile(new URL('../src/styles/18-warehouse-documents.css', import.meta.url), 'utf8');
 const inventory = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
-const netlify = await readFile(new URL('../netlify.toml', import.meta.url), 'utf8');
+const securityHeaders = await readFile(new URL('../ops/nginx/artway-security-headers.conf', import.meta.url), 'utf8');
 
 test('Plan zawiera ręczne dokumenty PZ i WZ z jednym końcowym księgowaniem', () => {
   assert.match(inventory, /magazynDokumentyPanelHTML\(\)/);
@@ -51,7 +51,7 @@ test('skanowanie działa aparatem telefonu oraz polem dla czytnika USB lub Bluet
   assert.match(source, /QR półki/);
   assert.match(source, /magazynGlobalnySkanerOtworz/);
   assert.match(source, /kontrolowane zatwierdzanie/);
-  assert.match(netlify, /Permissions-Policy = "camera=\(self\), microphone=\(\)/);
+  assert.match(securityHeaders, /Permissions-Policy\s+"camera=\(self\), microphone=\(\), geolocation=\(\)"/);
 });
 
 test('przyjęcie prowadzi operatora przez zatwierdzoną półkę, produkt i ilość', () => {

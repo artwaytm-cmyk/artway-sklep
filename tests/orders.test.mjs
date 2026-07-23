@@ -6,7 +6,7 @@ import {
   normalizujKlienta,
   normalizujUsunieteZamowienie,
   normalizujZamowienie,
-} from '../netlify/functions/lib/domain/orders.mjs';
+} from '../src/backend/lib/domain/orders.mjs';
 
 test('normalizacja zamówienia czyści numer, e-mail i uzupełnia czas', () => {
   const order = normalizujZamowienie({ nr: '  ATM-123  ', email: ' KLIENT@EXAMPLE.COM ' }, 123456);

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {
   createStoreOrderSupplierReconciliation,
   normalizeOrderInventoryModes,
-} from '../netlify/functions/lib/store-order-supplier-reconciliation.mjs';
-import { markAllegroInventoryTransitions } from '../netlify/functions/lib/domain/allegro-supplier-demand.mjs';
+} from '../src/backend/lib/store-order-supplier-reconciliation.mjs';
+import { markAllegroInventoryTransitions } from '../src/backend/lib/domain/allegro-supplier-demand.mjs';
 
 const FIXED_NOW = new Date('2026-07-15T16:00:00.000Z');
 

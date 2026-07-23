@@ -51,8 +51,8 @@ test('katalog asortymentu nie znika podczas ponownej synchronizacji', async () =
 
 test('synchronizacja ostatniego okna pobiera wszystkie statusy, lecz kolejka zachowuje filtr pracy', async () => {
   const [backend, cron] = await Promise.all([
-    read('netlify/functions/lib/store-app.mjs'),
-    read('netlify/functions/cron-allegro-orders.mjs'),
+    read('src/backend/lib/store-app.mjs'),
+    read('src/backend/cron-allegro-orders.mjs'),
   ]);
   const start = backend.indexOf("if (action === 'allegro-sync-orders')"), end = backend.indexOf("if (action === 'allegro-order-checked')", start), route = backend.slice(start, end);
   assert.match(route, /mergeRecentAllegroOrders/);

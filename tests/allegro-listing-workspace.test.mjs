@@ -53,7 +53,7 @@ test("centrum wystawiania skaluje katalog przez filtry, limit, paginację i eksp
 });
 
 test("ukryty produkt nie trafia do wystawiania Allegro i jest ponownie blokowany na serwerze",async()=>{
-  const listing=await read("src/frontend/12b-allegro-listing-workspace.js"),legacy=await read("src/frontend/11-allegro-operations.js"),backend=await read("netlify/functions/lib/store-app.mjs");
+  const listing=await read("src/frontend/12b-allegro-listing-workspace.js"),legacy=await read("src/frontend/11-allegro-operations.js"),backend=await read("src/backend/lib/store-app.mjs");
   assert.match(listing,/filter\(p=>!czyProduktAdminWKoszu\(p\)&&produktDostepnyWSprzedazy\(p\)\)/);
   assert.match(listing,/p&&produktDostepnyWSprzedazy\(p\)&&!allegroBrakiProduktuDoWystawienia/);
   assert.match(legacy,/produkt jest ukryty lub niedostępny/i);
@@ -64,7 +64,7 @@ test("ukryty produkt nie trafia do wystawiania Allegro i jest ponownie blokowany
 });
 
 test("szkic Allegro bierze zdjęcia ze strony źródłowej, a nie z podobnej oferty lub katalogu",async()=>{
-  const backend=await read("netlify/functions/lib/store-app.mjs");
+  const backend=await read("src/backend/lib/store-app.mjs");
   const start=backend.indexOf("async function allegroDraftZAutoKategoria");
   const end=backend.indexOf("\nfunction allegroDraftZProduktu",start);
   const draft=backend.slice(start,end);

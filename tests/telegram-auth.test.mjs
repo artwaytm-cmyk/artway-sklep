@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { telegramActorAllowed, telegramApproverAllowed, telegramConfig } from '../netlify/functions/lib/domain/telegram-communication.mjs';
+import { telegramActorAllowed, telegramApproverAllowed, telegramConfig } from '../src/backend/lib/domain/telegram-communication.mjs';
 
 test('Telegram wymaga dozwolonego czatu i konkretnego użytkownika grupy', () => {
   const config = { allowedChatIds: new Set(['100', '-200']), allowedUserIds: new Set() };

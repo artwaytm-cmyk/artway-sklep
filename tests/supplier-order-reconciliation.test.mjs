@@ -4,7 +4,7 @@ import {
   reconcileSupplierOrderDrafts,
   resolveProductSupplier,
   supplierDraftIsEditable,
-} from '../netlify/functions/lib/domain/supplier-order-reconciliation.mjs';
+} from '../src/backend/lib/domain/supplier-order-reconciliation.mjs';
 
 const NOW = new Date('2026-07-15T15:00:00.000Z');
 

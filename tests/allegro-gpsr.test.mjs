@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allegroBuildContentProductSet, allegroCatalogParametersForPatch, allegroResponsibleProducerDirectory, allegroSelectResponsibleProducer, allegroSyncEditorialOffer } from '../netlify/functions/lib/domain/allegro-gpsr.mjs';
+import { allegroBuildContentProductSet, allegroCatalogParametersForPatch, allegroResponsibleProducerDirectory, allegroSelectResponsibleProducer, allegroSyncEditorialOffer } from '../src/backend/lib/domain/allegro-gpsr.mjs';
 
 test('GPSR dobiera wyłącznie jednoznacznego producenta po nazwie lub nazwie handlowej', () => {
   const match = allegroSelectResponsibleProducer({ producent: 'Multigra' }, [

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { isValidAccountEmail, normalizeAccountEmail } from '../netlify/functions/lib/core/account-validation.mjs';
+import { isValidAccountEmail, normalizeAccountEmail } from '../src/backend/lib/core/account-validation.mjs';
 
 test('walidacja konta akceptuje prawdziwe adresy i odrzuca niepełne dane', () => {
   assert.equal(normalizeAccountEmail(' Klient@Example.PL '), 'klient@example.pl');

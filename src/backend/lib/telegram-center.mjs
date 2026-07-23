@@ -103,7 +103,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
         name: [bot?.first_name, bot?.last_name].filter(Boolean).join(' '),
         can_read_all_group_messages: bot?.can_read_all_group_messages === true,
       };
-      result.webhook = { active: !!webhook?.url, url: webhook?.url ? 'https://artwaytm.pl/.netlify/functions/telegram-webhook' : '', pending: Number(webhook?.pending_update_count || 0), lastErrorAt: webhook?.last_error_date || null, lastError: clean(webhook?.last_error_message || '', 300) };
+      result.webhook = { active: !!webhook?.url, url: webhook?.url ? 'https://artwaytm.pl/api/telegram/webhook' : '', pending: Number(webhook?.pending_update_count || 0), lastErrorAt: webhook?.last_error_date || null, lastError: clean(webhook?.last_error_message || '', 300) };
       result.target = target;
     } catch (error) { result.error = clean(error?.message || error, 400); }
     return result;
@@ -423,7 +423,7 @@ export function createTelegramCenter({ read, write, env = process.env } = {}) {
 
   async function registerWebhook(origin = 'https://artwaytm.pl') {
     const secret = telegramWebhookSecret(env); if (!secret) throw new Error('Nie można zabezpieczyć webhooka bez tokenu Telegram.');
-    const url = `${String(origin || 'https://artwaytm.pl').replace(/\/$/, '')}/.netlify/functions/telegram-webhook`;
+    const url = `${String(origin || 'https://artwaytm.pl').replace(/\/$/, '')}/api/telegram/webhook`;
     const result = await telegramApi('setWebhook', { url, secret_token: secret, allowed_updates: ['message', 'callback_query'], drop_pending_updates: true, max_connections: 20 }, env);
     const commands = [
       { command: 'agent', description: 'Przekaż zwykłe polecenie Agentowi Codex' },

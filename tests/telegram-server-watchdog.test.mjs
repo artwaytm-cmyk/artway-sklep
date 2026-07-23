@@ -19,7 +19,7 @@ test('watchdog nie zmienia poprawnego webhooka i potwierdza serwerowego Agenta',
     telegramApiImpl: async (method) => {
       calls.push(method);
       if (method === 'getMe') return { is_bot: true };
-      return { url: 'https://artwaytm.pl/.netlify/functions/telegram-webhook', pending_update_count: 0 };
+      return { url: 'https://artwaytm.pl/api/telegram/webhook', pending_update_count: 0 };
     },
     serviceController: () => ({ ok: true }),
   });

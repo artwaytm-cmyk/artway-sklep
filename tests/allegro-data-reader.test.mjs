@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-import { createAllegroDataReader } from '../netlify/functions/lib/domain/allegro-data-reader.mjs';
+import { createAllegroDataReader } from '../src/backend/lib/domain/allegro-data-reader.mjs';
 
 function readerHarness() {
   const createdAt = new Date().toISOString();

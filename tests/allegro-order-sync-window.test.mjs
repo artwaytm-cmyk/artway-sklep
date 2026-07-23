@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allegroOrderEventFingerprint, countChangedAllegroOrderEvents, mergeRecentAllegroOrders } from '../netlify/functions/lib/domain/allegro-order-sync-window.mjs';
+import { allegroOrderEventFingerprint, countChangedAllegroOrderEvents, mergeRecentAllegroOrders } from '../src/backend/lib/domain/allegro-order-sync-window.mjs';
 
 const normalize = (order) => ({ ...order, id: String(order.id || '') });
 const merge = (order, previous) => ({ ...previous, ...order, warehouseStage: ['SENT', 'CANCELLED', 'RETURNED'].includes(order.fulfillmentStatus) ? 'zamkniete' : (previous.warehouseStage || 'do_sprawdzenia') });

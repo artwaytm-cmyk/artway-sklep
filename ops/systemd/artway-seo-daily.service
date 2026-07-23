@@ -8,7 +8,7 @@ Type=oneshot
 User=artway
 Group=artway
 WorkingDirectory=/srv/artway/shop
-EnvironmentFile=/srv/artway/shop/.env.netlify
+EnvironmentFile=/srv/artway/shop/.env.server
 EnvironmentFile=/srv/artway/agent/.env
 Environment=NODE_ENV=production
 Environment=ARTWAY_STORE_DRIVER=postgres
@@ -20,4 +20,3 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 UMask=0077
-

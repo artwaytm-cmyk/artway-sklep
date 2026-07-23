@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCatalogProductUpdater } from '../netlify/functions/lib/domain/catalog-product-updater.mjs';
+import { createCatalogProductUpdater } from '../src/backend/lib/domain/catalog-product-updater.mjs';
 
 test('aktualizator zapisuje metadane mapowania jako edycję importowanego produktu', () => {
   const data = { artway_produkty_edytowane: {} };

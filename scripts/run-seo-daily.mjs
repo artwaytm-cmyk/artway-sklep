@@ -1,4 +1,4 @@
-import { createStoreRepository } from '../netlify/functions/lib/core/store-repository.mjs';
+import { createStoreRepository } from '../src/backend/lib/core/store-repository.mjs';
 
 const repository = createStoreRepository({ name: 'artway-sklep' });
 const token = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim();

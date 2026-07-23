@@ -9,12 +9,12 @@ import {
   supplierLineIdentifiers,
   supplierLineStableKey,
   upsertSupplierPlanLine,
-} from '../netlify/functions/lib/domain/supplier-order-plan.mjs';
+} from '../src/backend/lib/domain/supplier-order-plan.mjs';
 import {
   createSupplierOrderPlanService,
   preserveSupplierPlanOnGenericSettings,
   resolveCanonicalSupplierContacts,
-} from '../netlify/functions/lib/supplier-order-plan-service.mjs';
+} from '../src/backend/lib/supplier-order-plan-service.mjs';
 
 const NOW = new Date('2026-07-15T18:00:00.000Z');
 

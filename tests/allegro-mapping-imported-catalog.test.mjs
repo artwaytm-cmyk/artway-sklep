@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const storePath = new URL('../netlify/functions/lib/store-app.mjs', import.meta.url);
+const storePath = new URL('../src/backend/lib/store-app.mjs', import.meta.url);
 const frontendPath = new URL('../src/frontend/11-allegro-settings.js', import.meta.url);
 
 test('mapowanie ręczne i automatyczne korzysta z kompletnego katalogu importowanego', async () => {

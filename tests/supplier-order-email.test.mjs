@@ -8,7 +8,7 @@ import {
   supplierProductIdentifier,
   validateSupplierOrderEmail,
   validGtin,
-} from '../netlify/functions/lib/domain/supplier-order-email.mjs';
+} from '../src/backend/lib/domain/supplier-order-email.mjs';
 
 test('EAN/GTIN jest sprawdzany sumą kontrolną, a nie samą długością', () => {
   assert.equal(validGtin('5901234123457'), '5901234123457');
@@ -187,7 +187,7 @@ test('wiadomość i załącznik zawierają wszystkie pozycje dużego szkicu bez 
 });
 
 test('warstwa SMTP przekazuje rendererowi załączniki Nodemailer', async () => {
-  const source = `${await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../netlify/functions/lib/email-route.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../netlify/functions/lib/email-service.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../netlify/functions/lib/email-transport-service.mjs', import.meta.url), 'utf8')}`;
+  const source = `${await readFile(new URL('../src/backend/lib/store-app.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../src/backend/lib/email-route.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../src/backend/lib/email-service.mjs', import.meta.url), 'utf8')}\n${await readFile(new URL('../src/backend/lib/email-transport-service.mjs', import.meta.url), 'utf8')}`;
   assert.match(source, /async function wyslijEmailSMTP\(\{[^}]*attachments = \[\]/);
   assert.match(source, /transporter\.sendMail\(\{[\s\S]*?attachments: Array\.isArray\(attachments\)/);
   assert.match(source, /(?:wyslijEmailSMTP|sendSmtp)\(\{[^}]*attachments: item\.attachments/);

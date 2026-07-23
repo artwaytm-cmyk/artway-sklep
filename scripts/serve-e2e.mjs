@@ -39,7 +39,7 @@ async function regularFile(candidate) {
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url || '/', `http://${host}:${port}`);
   if (url.pathname === '/healthz') return send(response, 200, '{"ok":true}', 'application/json; charset=utf-8');
-  if (url.pathname === '/api/store' || url.pathname.startsWith('/.netlify/functions/')) {
+  if (url.pathname.startsWith('/api/')) {
     return send(response, 503, '{"ok":false,"error":"E2E działa bez produkcyjnych integracji"}', 'application/json; charset=utf-8');
   }
 

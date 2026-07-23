@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { scoreAllegroProductMapping } from '../netlify/functions/lib/domain/allegro-product-mapping.mjs';
+import { scoreAllegroProductMapping } from '../src/backend/lib/domain/allegro-product-mapping.mjs';
 
 const ecoFunOffer = {
   id: '14227220550',

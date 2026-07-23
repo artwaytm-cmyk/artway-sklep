@@ -9,10 +9,10 @@ import {
   sessionMatchesAccount,
   verifyOrderAccess,
   verifyPassword,
-} from '../netlify/functions/lib/core/security.mjs';
-import { createAdminMfaChallenge, verifyAdminMfaChallenge, verifyMfaCode } from '../netlify/functions/lib/core/mfa.mjs';
-import { bezpieczneZamowienieKlienta } from '../netlify/functions/lib/domain/checkout.mjs';
-import { czyAdmin, tokenZadania } from '../netlify/functions/lib/core/http.mjs';
+} from '../src/backend/lib/core/security.mjs';
+import { createAdminMfaChallenge, verifyAdminMfaChallenge, verifyMfaCode } from '../src/backend/lib/core/mfa.mjs';
+import { bezpieczneZamowienieKlienta } from '../src/backend/lib/domain/checkout.mjs';
+import { czyAdmin, tokenZadania } from '../src/backend/lib/core/http.mjs';
 
 process.env.ARTWAY_SESSION_SECRET = 'test-secret-that-is-not-used-in-production';
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canonicalGtin, canonicalProductCode, gtinEquivalent, isValidGtin, synchronizeProductIdentifierAliases } from '../netlify/functions/lib/domain/product-identifiers.mjs';
-import { findBestAllegroOffer, mappingProductSnapshot, mappingVerifiedForSupplier, scoreAllegroProductMapping } from '../netlify/functions/lib/domain/allegro-product-mapping.mjs';
+import { canonicalGtin, canonicalProductCode, gtinEquivalent, isValidGtin, synchronizeProductIdentifierAliases } from '../src/backend/lib/domain/product-identifiers.mjs';
+import { findBestAllegroOffer, mappingProductSnapshot, mappingVerifiedForSupplier, scoreAllegroProductMapping } from '../src/backend/lib/domain/allegro-product-mapping.mjs';
 
 test('EAN-13 i odpowiadający GTIN-14 z zerem wiodącym są tym samym produktem', () => {
   assert.equal(isValidGtin('5906018026788'), true);

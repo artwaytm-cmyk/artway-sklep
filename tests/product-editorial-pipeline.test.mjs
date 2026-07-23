@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { linkedProductSourceMaterial, normalizeEditorialTitle, prepareLinkedProductEditorial } from '../netlify/functions/lib/domain/product-editorial-pipeline.mjs';
+import { linkedProductSourceMaterial, normalizeEditorialTitle, prepareLinkedProductEditorial } from '../src/backend/lib/domain/product-editorial-pipeline.mjs';
 
 const result = (id, fields) => ({ id, model: 'gpt-5-nano', result: { confidence: 0.97, complianceStatus: 'ready', fields: Object.entries(fields).map(([key, value]) => ({ key, value })) } });
 

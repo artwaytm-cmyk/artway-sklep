@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWarehouseLocationService } from '../netlify/functions/lib/domain/warehouse-locations.mjs';
+import { createWarehouseLocationService } from '../src/backend/lib/domain/warehouse-locations.mjs';
 
 function harness() {
   let value = { data: {

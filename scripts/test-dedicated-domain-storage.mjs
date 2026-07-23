@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import { createPostgresStoreRepository, postgresPoolFor } from '../netlify/functions/lib/core/postgres-store-repository.mjs';
+import { createPostgresStoreRepository, postgresPoolFor } from '../src/backend/lib/core/postgres-store-repository.mjs';
 
 const { Client } = pg;
 const connectionString = process.env.DATABASE_URL;

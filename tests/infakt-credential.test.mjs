@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInfaktService, infaktCredentialLooksMasked } from '../netlify/functions/lib/infakt-service.mjs';
+import { createInfaktService, infaktCredentialLooksMasked } from '../src/backend/lib/infakt-service.mjs';
 
 test('inFakt nie uznaje maski sekretu za działający klucz API', async () => {
   const previous = process.env.INFAKT_API_KEY;

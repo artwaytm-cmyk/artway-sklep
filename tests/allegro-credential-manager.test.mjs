@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createAllegroCredentialManager } from '../netlify/functions/lib/domain/allegro-credential-manager.mjs';
+import { createAllegroCredentialManager } from '../src/backend/lib/domain/allegro-credential-manager.mjs';
 
 test('sejf odrzuca maskę i zapisuje dopiero dane potwierdzone przez Allegro', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'artway-allegro-')), file = join(dir, 'allegro.env'), env = {};

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createProductSourceInspectionService } from '../netlify/functions/lib/product-source-inspection-service.mjs';
+import { createProductSourceInspectionService } from '../src/backend/lib/product-source-inspection-service.mjs';
 
 test('import strony Multigry rozpoznaje EAN, numer referencyjny i komplet parametrów producenta', async () => {
   const html = `<!doctype html><html><head>

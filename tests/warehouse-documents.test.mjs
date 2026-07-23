@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWarehouseDocumentService } from '../netlify/functions/lib/domain/warehouse-documents.mjs';
+import { createWarehouseDocumentService } from '../src/backend/lib/domain/warehouse-documents.mjs';
 
 function harness({ stock = { '1': 5 }, extraData = {}, settingsLimit } = {}) {
   let value = { data: { ...extraData, artway_stany: stock, artway_magazyn_ustawienia: { nazwa: 'Magazyn główny' }, artway_magazyn_produkty: { '1': { lokalizacja: 'R1-P1' }, '4': { ean13: '5906018028256' } }, artway_ruchy_magazynowe: [] }, rev: 1, updated_at: null };

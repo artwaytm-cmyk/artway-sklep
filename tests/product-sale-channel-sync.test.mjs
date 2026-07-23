@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { buildProductSaleChannelLinks, createProductSaleChannelSynchronizer } from '../netlify/functions/lib/domain/product-sale-channel-links.mjs';
+import { buildProductSaleChannelLinks, createProductSaleChannelSynchronizer } from '../src/backend/lib/domain/product-sale-channel-links.mjs';
 
 const linkedIds = (links, productId) => (links.get(String(productId)) || []).map((item) => item.offerId).sort();
 
@@ -94,10 +94,10 @@ test('błąd jednej oferty wycofuje wcześniejsze części i nie ukrywa samego s
 test('backend kończy i wznawia ofertę dopiero po potwierdzeniu operacji Allegro', async () => {
   const [store, channelSync] = await Promise.all([
     Promise.all([
-      readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
-      readFile(new URL('../netlify/functions/lib/product-availability-route.mjs', import.meta.url), 'utf8'),
+      readFile(new URL('../src/backend/lib/store-app.mjs', import.meta.url), 'utf8'),
+      readFile(new URL('../src/backend/lib/product-availability-route.mjs', import.meta.url), 'utf8'),
     ]).then((parts) => parts.join('\n')),
-    readFile(new URL('../netlify/functions/lib/domain/product-sale-channel-links.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/backend/lib/domain/product-sale-channel-links.mjs', import.meta.url), 'utf8'),
   ]);
   const source = `${store}\n${channelSync}`;
   assert.match(source, /publication: \{ status, republish: true \}/);

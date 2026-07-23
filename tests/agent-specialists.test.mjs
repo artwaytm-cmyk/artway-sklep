@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AGENT_ACTION_POLICY, automaticEditorialAssessment, createAgentSpecialists, DEFAULT_CONFIG, normalizeProductContentEditorialResult, productEditorialFingerprint, productEditorialQuality, productEditorialState, productFacts, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../netlify/functions/lib/domain/agent-specialists.mjs';
-import { createAgentSpecialistRoute } from '../netlify/functions/lib/agent-specialist-route.mjs';
+import { AGENT_ACTION_POLICY, automaticEditorialAssessment, createAgentSpecialists, DEFAULT_CONFIG, normalizeProductContentEditorialResult, productEditorialFingerprint, productEditorialQuality, productEditorialState, productFacts, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../src/backend/lib/domain/agent-specialists.mjs';
+import { createAgentSpecialistRoute } from '../src/backend/lib/agent-specialist-route.mjs';
 
 function memoryRepository(initial = {}) {
   const values = new Map(Object.entries(structuredClone(initial))), versions = new Map([...values.keys()].map((key) => [key, 1]));

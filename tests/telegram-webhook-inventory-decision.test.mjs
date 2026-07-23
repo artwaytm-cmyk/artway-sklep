@@ -14,7 +14,7 @@ import telegramWebhook, {
   telegramGroupMessageUrl,
   telegramPrivateTeamRecipients,
   telegramSharedConversationTarget,
-} from '../netlify/functions/telegram-webhook.mjs';
+} from '../src/backend/telegram-webhook.mjs';
 
 test('prywatne polecenia obu telefonów trafiają do jednej wspólnej grupy', () => {
   const config = { chatId: '-1009876543210' };
@@ -72,7 +72,7 @@ test('wiadomość z drugiego telefonu i odpowiedź bota są widoczne na obu tele
     const messageNo = calls.filter((item) => item.href.includes('/sendMessage')).length;
     return new Response(JSON.stringify({ ok: true, result: href.includes('/sendMessage') ? { message_id: messageNo } : true }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
-  const result = await telegramWebhook(new Request('https://artwaytm.pl/.netlify/functions/telegram-webhook', {
+  const result = await telegramWebhook(new Request('https://artwaytm.pl/api/telegram/webhook', {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'shared-room-secret' },
     body: JSON.stringify({ update_id: 42, message: { message_id: 7, text: 'braki', from: { id: 300, first_name: 'Tomasz' }, chat: { id: 300, type: 'private' } } }),
   }));
@@ -199,7 +199,7 @@ test('webhook przekazuje callback aa do kolejki Agenta i potwierdza kliknięcie 
       status: 200, headers: { 'content-type': 'application/json' },
     });
   };
-  const request = new Request('https://artwaytm.pl/.netlify/functions/telegram-webhook', {
+  const request = new Request('https://artwaytm.pl/api/telegram/webhook', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'webhook-test-secret' },
     body: JSON.stringify({
@@ -247,7 +247,7 @@ test('callback aa bez wiarygodnego zatwierdzającego nigdy nie trafia do kolejki
     calls.push({ href, body });
     return new Response(JSON.stringify({ ok: true, result: true }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
-  const invoke = (from, callbackId, updateId) => telegramWebhook(new Request('https://artwaytm.pl/.netlify/functions/telegram-webhook', {
+  const invoke = (from, callbackId, updateId) => telegramWebhook(new Request('https://artwaytm.pl/api/telegram/webhook', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'webhook-deny-secret' },
     body: JSON.stringify({

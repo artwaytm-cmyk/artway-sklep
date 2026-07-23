@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const backend = await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8');
-const emailService = await readFile(new URL('../netlify/functions/lib/email-service.mjs', import.meta.url), 'utf8');
-const emailTransport = await readFile(new URL('../netlify/functions/lib/email-transport-service.mjs', import.meta.url), 'utf8');
+const backend = await readFile(new URL('../src/backend/lib/store-app.mjs', import.meta.url), 'utf8');
+const emailService = await readFile(new URL('../src/backend/lib/email-service.mjs', import.meta.url), 'utf8');
+const emailTransport = await readFile(new URL('../src/backend/lib/email-transport-service.mjs', import.meta.url), 'utf8');
 const emailBackend = `${backend}\n${emailService}\n${emailTransport}`;
-const emailContent = await readFile(new URL('../netlify/functions/lib/domain/order-email-content.mjs', import.meta.url), 'utf8');
+const emailContent = await readFile(new URL('../src/backend/lib/domain/order-email-content.mjs', import.meta.url), 'utf8');
 const cart = await readFile(new URL('../src/frontend/17-cart-and-checkout.js', import.meta.url), 'utf8');
 const storefront = await readFile(new URL('../assets/app.js', import.meta.url), 'utf8');
 

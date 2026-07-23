@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createAllegroOfferWithdrawalRoute } from '../netlify/functions/lib/allegro-offer-withdrawal-route.mjs';
+import { createAllegroOfferWithdrawalRoute } from '../src/backend/lib/allegro-offer-withdrawal-route.mjs';
 
-const storePath = new URL('../netlify/functions/lib/store-app.mjs', import.meta.url);
-const routePath = new URL('../netlify/functions/lib/allegro-offer-withdrawal-route.mjs', import.meta.url);
+const storePath = new URL('../src/backend/lib/store-app.mjs', import.meta.url);
+const routePath = new URL('../src/backend/lib/allegro-offer-withdrawal-route.mjs', import.meta.url);
 const frontendPath = new URL('../src/frontend/11-allegro-offer-management.js', import.meta.url);
 
 test('backend kończy oferty przez API i zachowuje produkty oraz historię zamówień', async () => {

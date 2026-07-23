@@ -33,7 +33,7 @@ test('magazyn ma osobną, zawężoną kolejkę lokalizacji aktywnych zamówień'
 });
 
 test('backend publikuje osobne zadanie magazynu bez blokowania realizacji', () => {
-  const backend = read('netlify/functions/lib/store-app.mjs');
+  const backend = read('src/backend/lib/store-app.mjs');
   assert.match(backend, /classifyWarehousePosition/);
   assert.match(backend, /summarizeWarehousePositions/);
   assert.match(backend, /warehouse_location/);

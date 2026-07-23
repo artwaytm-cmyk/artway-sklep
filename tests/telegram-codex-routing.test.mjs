@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { codexAgentApprovalReplyTarget, createTelegramRouter } from '../netlify/functions/lib/telegram-router.mjs';
-import { createCodexAgentQueue } from '../netlify/functions/lib/domain/codex-agent-queue.mjs';
-import { telegramSafeAgentHtml } from '../netlify/functions/lib/domain/telegram-communication.mjs';
+import { codexAgentApprovalReplyTarget, createTelegramRouter } from '../src/backend/lib/telegram-router.mjs';
+import { createCodexAgentQueue } from '../src/backend/lib/domain/codex-agent-queue.mjs';
+import { telegramSafeAgentHtml } from '../src/backend/lib/domain/telegram-communication.mjs';
 
 test('naturalna wiadomość webhooka trafia do kolejki Codex, a nie do uproszczonej odpowiedzi', async () => {
   let queued = null, centerCalls = 0, audit = null;

@@ -28,10 +28,10 @@ async function assetRow(name, path, budget) {
   rows.push({ area: name, metric: 'gzip', value: kib(gzip), target: kib(budget.targetGzipBytes), max: kib(budget.maxGzipBytes), state: budgetState(gzip, budget.targetGzipBytes, budget.maxGzipBytes) });
 }
 
-await sourceRow('Koordynator backendu', 'netlify/functions/lib/store-app.mjs', B.backendCoordinator);
+await sourceRow('Koordynator backendu', 'src/backend/lib/store-app.mjs', B.backendCoordinator);
 const sourcePaths = [...new Set((await Promise.all([
-  sourceFiles('src'), sourceFiles('netlify/functions/lib/core'), sourceFiles('netlify/functions/lib/domain'), sourceFiles('netlify/functions/lib'),
-])).flat().filter((path) => path !== 'netlify/functions/lib/store-app.mjs'))];
+  sourceFiles('src'), sourceFiles('src/backend/lib/core'), sourceFiles('src/backend/lib/domain'), sourceFiles('src/backend/lib'),
+])).flat().filter((path) => path !== 'src/backend/lib/store-app.mjs'))];
 const sourceRisks = await Promise.all(sourcePaths.map(async (path) => {
   const content = await readFile(path, 'utf8'), budget = path.endsWith('.css') ? B.source.stylesheet : B.source.javascript;
   const lines = physicalLineCount(content), bytes = Buffer.byteLength(content);

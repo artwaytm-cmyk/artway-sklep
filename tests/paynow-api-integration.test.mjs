@@ -5,7 +5,7 @@ import {
   createPaynowService,
   podpisPaynowV3,
   porownajPodpisPaynow,
-} from '../netlify/functions/lib/paynow-service.mjs';
+} from '../src/backend/lib/paynow-service.mjs';
 
 const request = () => new Request('https://artwaytm.pl/api/store', {
   headers: { host: 'artwaytm.pl', 'x-forwarded-proto': 'https' },
@@ -78,8 +78,8 @@ test('diagnostyka API sprawdza podpisem prawdziwy endpoint metod bez ujawniania 
 
 test('diagnostyka Paynow jest dostępna tylko administratorowi i ma osobny przycisk w panelu', async () => {
   const [coordinator, route, admin] = await Promise.all([
-    readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
-    readFile(new URL('../netlify/functions/lib/paynow-route.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/backend/lib/store-app.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/backend/lib/paynow-route.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../src/frontend/15-personalization-and-publishing.js', import.meta.url), 'utf8'),
   ]);
   const backend = `${coordinator}\n${route}`;

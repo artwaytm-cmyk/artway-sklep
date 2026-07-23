@@ -5,7 +5,7 @@ import {
   allegroNextScheduledSyncAt,
   allegroScheduledSyncDue,
   normalizeAllegroSyncSettings,
-} from '../netlify/functions/lib/domain/allegro-sync-policy.mjs';
+} from '../src/backend/lib/domain/allegro-sync-policy.mjs';
 
 test('ustawienia synchronizacji mają bezpieczne wartości domyślne', () => {
   assert.deepEqual(normalizeAllegroSyncSettings({}), ALLEGRO_SYNC_DEFAULTS);

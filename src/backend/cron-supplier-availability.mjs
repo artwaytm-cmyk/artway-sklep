@@ -12,7 +12,7 @@ export default async () => {
     return new Response('no token');
   }
   try {
-    const response = await fetch(`${base}/.netlify/functions/store?action=supplier-availability-sample`, {
+    const response = await fetch(`${base}/api/store?action=supplier-availability-sample`, {
       method: 'POST',
       headers: { 'x-admin-token': token, 'content-type': 'application/json' },
       body: JSON.stringify({ source: 'scheduled-supplier-availability' }),

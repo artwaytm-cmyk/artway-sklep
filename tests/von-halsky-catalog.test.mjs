@@ -8,9 +8,9 @@ import {
   vonHalskyOfferProjection,
   vonHalskyProductReadiness,
   vonHalskyPublicConfig,
-} from '../netlify/functions/lib/domain/von-halsky-catalog.mjs';
-import { createVonHalskyApiClient } from '../netlify/functions/lib/domain/von-halsky-api-client.mjs';
-import { createVonHalskyRoute } from '../netlify/functions/lib/von-halsky-route.mjs';
+} from '../src/backend/lib/domain/von-halsky-catalog.mjs';
+import { createVonHalskyApiClient } from '../src/backend/lib/domain/von-halsky-api-client.mjs';
+import { createVonHalskyRoute } from '../src/backend/lib/von-halsky-route.mjs';
 
 test('Von Halsky uznaje produkt z EAN, opisem, zdjęciem i ceną za gotowy', () => {
   const result = vonHalskyProductReadiness({

@@ -91,7 +91,7 @@ test('lokalny administrator loguje się i przechodzi między modułami panelu', 
 test('nowe konto klienta działa po rejestracji i ponownym logowaniu na czystym urządzeniu', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   const user = { imie: 'Test Klienta', email: 'test-klienta@example.test', rola: 'klient' };
-  await page.route('**/.netlify/functions/store**', async (route) => {
+  await page.route('**/api/store**', async (route) => {
     const action = new URL(route.request().url()).searchParams.get('action');
     if (action === 'account-register' || action === 'account-login') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, authenticated: true, user }) });
@@ -179,7 +179,7 @@ test('właściciel nadaje, odbiera i usuwa konto bez lokalnego pozornego zapisu'
     { imie: 'Administrator', email: 'artwaytm@gmail.com', rola: 'admin', mfaEnabled: true, data: '2026-01-01T10:00:00Z' },
     { imie: 'Klient Testowy', email: 'uprawnienia@example.test', rola: 'klient', data: '2026-07-23T10:00:00Z' },
   ];
-  await page.route('**/.netlify/functions/store**', async (route) => {
+  await page.route('**/api/store**', async (route) => {
     const url = new URL(route.request().url()), action = url.searchParams.get('action');
     if (action === 'store-users-admin') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, users, usersVersion: String(Date.now()), count: users.length }) });

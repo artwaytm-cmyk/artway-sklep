@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { applyProductSaleDecisionBatch } from '../netlify/functions/lib/domain/product-sale-decisions.mjs';
+import { applyProductSaleDecisionBatch } from '../src/backend/lib/domain/product-sale-decisions.mjs';
 
 test('decyzja grupowa zapisuje tę samą opcję dla wielu produktów w jednym rekordzie', () => {
   const now = new Date('2026-07-16T18:00:00.000Z');
@@ -35,7 +35,7 @@ test('monitor producentów ma zaznaczanie i identyczny wybór decyzji pojedyncze
     readFile(new URL('../src/frontend/02-runtime-state.js', import.meta.url), 'utf8'),
     readFile(new URL('../assets/app.js', import.meta.url), 'utf8'),
     readFile(new URL('../assets/admin.js', import.meta.url), 'utf8'),
-    readFile(new URL('../netlify/functions/lib/product-availability-route.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/backend/lib/product-availability-route.mjs', import.meta.url), 'utf8'),
   ]);
   assert.match(state, /zaznaczoneDostepnoscProducentow=new Set\(\)/);
   assert.match(availability, /DECYZJE_PRODUCENTA_OPCJE/);

@@ -37,8 +37,8 @@ test('banner studio obsługuje wszystkie typy, miejsca, rozmiary i wersję mobil
 test('kreator bannerów używa serwerowego generatora AI i wiąże grafikę z kodem rabatowym', async () => {
   const [frontend, backend, route] = await Promise.all([
     readFile('src/frontend/15a-home-promotions-workspace.js', 'utf8'),
-    readFile('netlify/functions/lib/store-app.mjs', 'utf8'),
-    readFile('netlify/functions/lib/ai-banner-route.mjs', 'utf8'),
+    readFile('src/backend/lib/store-app.mjs', 'utf8'),
+    readFile('src/backend/lib/ai-banner-route.mjs', 'utf8'),
   ]);
   for (const marker of ['ai-banner-generate', 'Wygeneruj prawdziwą grafikę AI', 'kodRabatowy', 'utworzBanerZGrafikiAI']) assert.ok(frontend.includes(marker), marker);
   assert.ok(backend.includes('createAiBannerGenerator'));
@@ -49,7 +49,7 @@ test('kreator bannerów używa serwerowego generatora AI i wiąże grafikę z ko
 test('kody rabatowe mają warunki i są weryfikowane również przez backend', async () => {
   const [admin, backend] = await Promise.all([
     readFile('src/frontend/15a-home-promotions-workspace.js', 'utf8'),
-    readFile('netlify/functions/lib/domain/checkout.mjs', 'utf8'),
+    readFile('src/backend/lib/domain/checkout.mjs', 'utf8'),
   ]);
   for (const marker of ['darmowa_dostawa', 'minKoszyk', 'maxRabat', 'limitUzyc', 'zakres']) assert.ok(admin.includes(marker), marker);
   for (const marker of ['wynikRabatu', 'regulaRabatowaAktywna', 'freeDelivery']) assert.ok(backend.includes(marker), marker);
@@ -96,7 +96,7 @@ test('kody rabatowe mają potwierdzony zapis serwerowy, tester i operacje grupow
 test('studio ikon nie obiecuje przezroczystości, gdy model jej nie obsługuje', async () => {
   const [studio, generator] = await Promise.all([
     readFile('src/frontend/15c-campaign-studio-pro.js', 'utf8'),
-    readFile('netlify/functions/lib/domain/ai-banner-generator.mjs', 'utf8'),
+    readFile('src/backend/lib/domain/ai-banner-generator.mjs', 'utf8'),
   ]);
   assert.ok(studio.includes('jasnym tle zgodnym ze sklepem'));
   assert.ok(generator.includes("/^gpt-image-2(?:$|-)/i"));

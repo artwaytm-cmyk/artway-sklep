@@ -6,9 +6,9 @@ import {
   normalizeProductManufacturerFields,
   sanitizeManufacturerFieldsInSettings,
   validManufacturerName,
-} from '../netlify/functions/lib/domain/product-field-validation.mjs';
-import { centralCatalogMissingFields } from '../netlify/functions/lib/domain/central-product-catalog.mjs';
-import { resolveAllegroCategoryParameter } from '../netlify/functions/lib/domain/allegro-category-parameter-resolver.mjs';
+} from '../src/backend/lib/domain/product-field-validation.mjs';
+import { centralCatalogMissingFields } from '../src/backend/lib/domain/central-product-catalog.mjs';
+import { resolveAllegroCategoryParameter } from '../src/backend/lib/domain/allegro-category-parameter-resolver.mjs';
 
 test('producent musi zawierać literę, ale może zawierać cyfry', () => {
   assert.equal(canonicalManufacturerName('0031'), '');

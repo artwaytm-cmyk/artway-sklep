@@ -153,6 +153,9 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/18-warehouse-documents.css',
       'src/styles/19-warehouse-qr.css',
       'src/styles/20-warehouse-locations.css',
+      // Nawigacja i układ magazynu są krytyczne dla całego panelu. Trzymamy
+      // je w bazowym arkuszu, aby stara karta nie pokazała surowych linków.
+      'src/styles/21-warehouse-workspace.css',
       'src/styles/22-home-promotions.css',
       'src/styles/23-banner-icon-studio.css',
       'src/styles/24-campaign-studio-pro.css',
@@ -166,11 +169,6 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/35-admin-unified-workspace.css',
       'src/styles/36-inpost-service-shipping.css',
     ],
-  },
-  {
-    output: 'assets/admin-warehouse.css',
-    banner: '/* GENERATED ADMIN WAREHOUSE STYLES — loaded on demand */',
-    sources: ['src/styles/21-warehouse-workspace.css'],
   },
   {
     output: 'assets/admin-commerce.css',

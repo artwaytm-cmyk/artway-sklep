@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTelegramRouter } from '../netlify/functions/lib/telegram-router.mjs';
+import { createTelegramRouter } from '../src/backend/lib/telegram-router.mjs';
 
 function request(body = {}) {
   return new Request('https://artwaytm.pl/api/store?action=telegram-dispatch', {

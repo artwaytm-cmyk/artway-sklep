@@ -5,7 +5,7 @@ import {
   classifyWarehousePosition,
   summarizeWarehousePositions,
   warehouseAnalysisNeedsInvestigation,
-} from '../netlify/functions/lib/domain/order-warehouse-readiness.mjs';
+} from '../src/backend/lib/domain/order-warehouse-readiness.mjs';
 
 test('towar pokryty stanem jest gotowy do kompletacji także bez lokalizacji', () => {
   const position = classifyWarehousePosition({ matched: true, stockKnown: true, shortage: 0, location: '' });

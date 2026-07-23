@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createImportedProductCatalog } from '../netlify/functions/lib/domain/imported-product-catalog.mjs';
-import { createProductLinkImportService } from '../netlify/functions/lib/domain/product-link-import.mjs';
-import { createProductLinkImportPreparer } from '../netlify/functions/lib/domain/product-link-import-preparation.mjs';
-import { createProductLinkImportBundle } from '../netlify/functions/lib/product-link-import-route.mjs';
+import { createImportedProductCatalog } from '../src/backend/lib/domain/imported-product-catalog.mjs';
+import { createProductLinkImportService } from '../src/backend/lib/domain/product-link-import.mjs';
+import { createProductLinkImportPreparer } from '../src/backend/lib/domain/product-link-import-preparation.mjs';
+import { createProductLinkImportBundle } from '../src/backend/lib/product-link-import-route.mjs';
 
 function repository() {
   const values = new Map(), versions = new Map(), reads = new Map();
@@ -458,7 +458,7 @@ test('katalog importowany jest dołączany do checkoutu, a publiczny odczyt usuw
   assert.equal('imported_products' in payload, false, 'pull zwraca tylko lekki manifest, nie cały katalog');
   const page = await bundle.route(
     { method: 'GET' },
-    new URL('https://example.test/.netlify/functions/store?action=product-link-import-catalog&offset=0&limit=50'),
+    new URL('https://example.test/api/store?action=product-link-import-catalog&offset=0&limit=50'),
     'product-link-import-catalog',
   );
   assert.equal(page.products.length, 1);

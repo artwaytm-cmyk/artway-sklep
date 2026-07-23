@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allegroCredentialLooksMasked, buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester, persistAllegroRefreshFailure } from '../netlify/functions/lib/domain/allegro-operation-receipts.mjs';
+import { allegroCredentialLooksMasked, buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester, persistAllegroRefreshFailure } from '../src/backend/lib/domain/allegro-operation-receipts.mjs';
 
 function fixture() {
   const db = new Map();

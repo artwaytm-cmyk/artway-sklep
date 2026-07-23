@@ -13,10 +13,10 @@ export default async () => {
     const headers = { 'x-admin-token': token, 'content-type': 'application/json' };
     // Obie operacje zapisują wspólne ustawienia, dlatego wykonujemy je kolejno,
     // aby kontrola jakości nie nadpisała świeżej rewizji przygotowanej przez SEO.
-    const seoResponse = await fetch(`${base}/.netlify/functions/store?action=seo-daily-run`, {
+    const seoResponse = await fetch(`${base}/api/store?action=seo-daily-run`, {
       method: 'POST', headers, body: JSON.stringify({ source: 'scheduled-seo-daily' }),
     });
-    const qualityResponse = await fetch(`${base}/.netlify/functions/store?action=catalog-quality-audit`, {
+    const qualityResponse = await fetch(`${base}/api/store?action=catalog-quality-audit`, {
       method: 'POST', headers, body: JSON.stringify({ source: 'scheduled-catalog-quality', fixSafe: true, quarantineOrphans: true }),
     });
     const [seoBody, qualityBody] = await Promise.all([seoResponse.text(), qualityResponse.text()]);

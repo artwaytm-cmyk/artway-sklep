@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { analyzeAutonomousAllegroWork } from '../netlify/functions/lib/domain/allegro-autonomous-agent.mjs';
-import { createAllegroOfferWithdrawalRoute } from '../netlify/functions/lib/allegro-offer-withdrawal-route.mjs';
+import { analyzeAutonomousAllegroWork } from '../src/backend/lib/domain/allegro-autonomous-agent.mjs';
+import { createAllegroOfferWithdrawalRoute } from '../src/backend/lib/allegro-offer-withdrawal-route.mjs';
 
 const product = { id: 'P-1', nazwa: 'ECO FUN - TRYLMA', ean: '5906018025309', externalId: '2530', allegroProductId: 'CAT-1', allegroOfferId: 'OFF-OLD' };
 const offer = (id, extra = {}) => ({ id, name: 'ECO FUN - TRYLMA', ean: '5906018025309', externalId: '2530', productId: 'CAT-1', categoryId: '123', status: 'ACTIVE', stockSold: 0, mainImage: 'https://img.test/1.jpg', ...extra });

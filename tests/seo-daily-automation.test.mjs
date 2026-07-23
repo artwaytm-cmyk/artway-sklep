@@ -6,7 +6,7 @@ import {
   isScheduledSeoSource,
   scheduledSeoRunForDay,
   seoAutomationDay,
-} from '../netlify/functions/lib/domain/seo-daily-automation.mjs';
+} from '../src/backend/lib/domain/seo-daily-automation.mjs';
 
 test('dzień automatu jest liczony w strefie sklepu', () => {
   assert.equal(seoAutomationDay('2026-07-22T22:30:00.000Z'), '2026-07-23');

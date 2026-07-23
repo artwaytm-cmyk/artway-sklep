@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { seoAnalyticsInternals } from '../netlify/functions/lib/domain/seo-analytics.mjs';
-import { seoRouteMatches, seoSlug } from '../netlify/functions/lib/domain/storefront-seo-renderer.mjs';
+import { seoAnalyticsInternals } from '../src/backend/lib/domain/seo-analytics.mjs';
+import { seoRouteMatches, seoSlug } from '../src/backend/lib/domain/storefront-seo-renderer.mjs';
 
 test('czyste adresy produktów, kategorii i ofert specjalnych mają rendering serwerowy', async () => {
   assert.equal(seoRouteMatches('/produkt/20'), true);
@@ -94,15 +94,15 @@ test('raport porównuje wybrany okres z poprzednim zakresem tej samej długości
 });
 
 test('raport sprzedaży organicznej nie jest publicznym endpointem', async () => {
-  const source = await readFile('netlify/functions/lib/domain/seo-analytics.mjs', 'utf8');
+  const source = await readFile('src/backend/lib/domain/seo-analytics.mjs', 'utf8');
   assert.match(source, /if \(!await adminRequest\(request\)\).*status: 401/);
   assert.match(source, /timingSafeEqual/);
 });
 
 test('mapa, feed i panel wykorzystują komplet bezpłatnych mechanizmów', async () => {
   const [sitemap, feed, frontendCore, frontendReport, analytics, timer] = await Promise.all([
-    readFile('netlify/functions/sitemap.mjs', 'utf8'),
-    readFile('netlify/functions/google-products.mjs', 'utf8'),
+    readFile('src/backend/sitemap.mjs', 'utf8'),
+    readFile('src/backend/google-products.mjs', 'utf8'),
     readFile('src/frontend/09-seo.js', 'utf8'),
     readFile('src/frontend/09b-seo-effects-panel.js', 'utf8'),
     readFile('src/frontend/09a-seo-analytics.js', 'utf8'),

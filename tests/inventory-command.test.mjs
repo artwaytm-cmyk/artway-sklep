@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInventoryNaturalCommandHandler, matchInventoryProduct, parseInventoryNaturalCommand } from '../netlify/functions/lib/domain/inventory-command.mjs';
-import { createInventoryDecisionService, INVENTORY_DECISIONS_KEY } from '../netlify/functions/lib/domain/inventory-decisions.mjs';
+import { createInventoryNaturalCommandHandler, matchInventoryProduct, parseInventoryNaturalCommand } from '../src/backend/lib/domain/inventory-command.mjs';
+import { createInventoryDecisionService, INVENTORY_DECISIONS_KEY } from '../src/backend/lib/domain/inventory-decisions.mjs';
 
 const products = [
   { id: 31, nazwa: 'Gorący Ziemniak Familijny', externalId: '1410', ean: '5906018014105' },

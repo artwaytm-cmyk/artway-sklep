@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allegroOrderNeedsLiveRefresh, allegroOrderNeedsStatusRefresh, createAllegroOrderArchive, partitionAllegroOrders, selectAllegroStatusRefreshCandidates } from '../netlify/functions/lib/domain/allegro-order-retention.mjs';
+import { allegroOrderNeedsLiveRefresh, allegroOrderNeedsStatusRefresh, createAllegroOrderArchive, partitionAllegroOrders, selectAllegroStatusRefreshCandidates } from '../src/backend/lib/domain/allegro-order-retention.mjs';
 
 const now = new Date('2026-07-16T12:00:00.000Z');
 const order = (id, createdAt, fulfillmentStatus = 'NEW', warehouseStage = 'kompletacja', extra = {}) => ({ id, createdAt, fulfillmentStatus, warehouseStage, ...extra });

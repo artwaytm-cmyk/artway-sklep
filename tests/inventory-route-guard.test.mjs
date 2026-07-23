@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInventoryStockRoute } from '../netlify/functions/lib/inventory-route.mjs';
+import { createInventoryStockRoute } from '../src/backend/lib/inventory-route.mjs';
 
 test('bezpośredni endpoint zawsze wymaga trwałej decyzji, niezależnie od deklarowanego źródła', async () => {
   let reads = 0;

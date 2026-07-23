@@ -8,14 +8,14 @@ Kod źródłowy jest podzielony według odpowiedzialności. Pliki `assets/app.js
 
 - `src/frontend/` — domenowe części aplikacji klienckiej, składane w jawnej kolejności.
 - `src/styles/` — style pogrupowane według obszarów interfejsu.
-- `netlify/functions/lib/core/` — wspólne mechanizmy HTTP i zapisu danych.
-- `netlify/functions/lib/domain/` — reguły biznesowe niezależne od endpointów.
-- `netlify/functions/lib/*` — integracje i tymczasowy moduł aplikacyjny podczas dalszej migracji.
+- `src/backend/lib/core/` — wspólne mechanizmy HTTP i zapisu danych.
+- `src/backend/lib/domain/` — reguły biznesowe niezależne od endpointów.
+- `src/backend/lib/*` — integracje i tymczasowy moduł aplikacyjny podczas dalszej migracji.
 - `tests/` — testy reguł biznesowych, bezpieczeństwa i granic architektury.
 
 ## Praca nad zmianą
 
-1. Zmień właściwy moduł w `src/` albo `netlify/functions/lib/`.
+1. Zmień właściwy moduł w `src/` albo `src/backend/lib/`.
 2. Dodaj lub uaktualnij test dla reguły biznesowej.
 3. Uruchom `npm run build`, a następnie `npm run verify`.
 4. Publikuj dopiero po przejściu całej bramki jakości.

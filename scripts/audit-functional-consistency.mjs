@@ -10,6 +10,7 @@ const frontendReloads = fs.readdirSync(path.join(root, 'src/frontend')).filter((
 const allowedMaintenanceReloads = new Map([
   ['15d-publication-and-export.js', 1], // świadomy reset ustawień
   ['16-diagnostics.js', 2], // aktualizacja pełnego wydania i przywrócenie kopii
+  ['18-pwa.js', 1], // bezpieczne uruchomienie kompletnego nowego wydania serwerowego
 ]);
 const reloadCounts = frontendReloads.reduce((map, name) => map.set(name, (map.get(name) || 0) + 1), new Map());
 const maintenanceReloadsOnly = frontendReloads.length === [...allowedMaintenanceReloads.values()].reduce((sum, count) => sum + count, 0)
@@ -18,8 +19,8 @@ const checks = [
   ['Edytor wymaga tekstowej nazwy producenta', /required name="producent"[\s\S]*?walidujPoleProducenta/.test(read('src/frontend/12-product-editor.js'))],
   ['Gotowość Allegro sprawdza nazwę producenta', /poprawnaNazwaProducenta\(p\.producent\|\|p\.marka\)/.test(read('src/frontend/11-allegro-operations.js'))],
   ['Import CSV odrzuca liczbowego producenta', /producent musi być nazwą, a nie samym numerem/.test(read('src/frontend/13a-product-import-export.js'))],
-  ['Backend oczyszcza producenta w ustawieniach', /sanitizeManufacturerFieldsInSettings\(wynik\)/.test(read('netlify/functions/lib/store-app.mjs'))],
-  ['Import linków używa tej samej walidacji', /canonicalManufacturerName/.test(read('netlify/functions/lib/domain/product-link-import-support.mjs'))],
+  ['Backend oczyszcza producenta w ustawieniach', /sanitizeManufacturerFieldsInSettings\(wynik\)/.test(read('src/backend/lib/store-app.mjs'))],
+  ['Import linków używa tej samej walidacji', /canonicalManufacturerName/.test(read('src/backend/lib/domain/product-link-import-support.mjs'))],
   ['Pełne przeładowanie występuje tylko po aktualizacji wydania, resecie lub imporcie kopii', maintenanceReloadsOnly],
 ];
 

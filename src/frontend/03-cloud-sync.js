@@ -1,8 +1,8 @@
-/* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
+/* ═══════════ WSPÓLNA BAZA SERWEROWA (VPS + PostgreSQL) ═══════════
    Ustawienia sklepu, zamówienia i klienci są zapisywane na serwerze, więc są
    widoczne na KAŻDYM urządzeniu. Bez połączenia z serwerem sklep dalej działa
    na pamięci przeglądarki (localStorage) jak dotychczas. */
-const CHMURA_URL = "/.netlify/functions/store";
+const CHMURA_URL = "/api/store";
 const CHMURA_AUTO_SYNC_MS = 15*60*1000;
 const CHMURA_FOCUS_SYNC_MIN_MS = 5*60*1000;
 const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta","artway_seo_ustawienia","artway_seo_historia"];
@@ -126,7 +126,7 @@ async function chmura(action, {method="GET", body=null, params={}, timeout=9000}
     catch(e){ if(timer)clearTimeout(timer); throw new Error(e&&e.name==="AbortError"?"Serwer nie odpowiedział w wyznaczonym czasie":"Brak połączenia z serwerem"); }
     if(timer)clearTimeout(timer);
     const t = await r.text(); let d;
-    try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił danych — czy backend Netlify jest opublikowany?"); }
+    try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił prawidłowych danych — sprawdź usługę backendu VPS."); }
     if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); Object.assign(b,d); b.code=d.code||""; b.status=r.status; throw b; }
     return d;
   })();

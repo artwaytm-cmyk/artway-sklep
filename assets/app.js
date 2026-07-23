@@ -427,11 +427,11 @@ let agentAISpecjalisci={loading:false,loaded:false,saving:false,running:false,er
 let agentAISpecjalistaDecyzjeWToku=new Set();
 let agentAITelegram={loading:false,loaded:false,saving:false,error:"",settings:null,status:null,stats:{},state:{},events:[],history:[],quietNow:false};
 
-/* ═══════════ WSPÓLNA BAZA SERWEROWA (Netlify Functions + Blobs) ═══════════
+/* ═══════════ WSPÓLNA BAZA SERWEROWA (VPS + PostgreSQL) ═══════════
    Ustawienia sklepu, zamówienia i klienci są zapisywane na serwerze, więc są
    widoczne na KAŻDYM urządzeniu. Bez połączenia z serwerem sklep dalej działa
    na pamięci przeglądarki (localStorage) jak dotychczas. */
-const CHMURA_URL = "/.netlify/functions/store";
+const CHMURA_URL = "/api/store";
 const CHMURA_AUTO_SYNC_MS = 15*60*1000;
 const CHMURA_FOCUS_SYNC_MIN_MS = 5*60*1000;
 const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta","artway_seo_ustawienia","artway_seo_historia"];
@@ -555,7 +555,7 @@ async function chmura(action, {method="GET", body=null, params={}, timeout=9000}
     catch(e){ if(timer)clearTimeout(timer); throw new Error(e&&e.name==="AbortError"?"Serwer nie odpowiedział w wyznaczonym czasie":"Brak połączenia z serwerem"); }
     if(timer)clearTimeout(timer);
     const t = await r.text(); let d;
-    try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił danych — czy backend Netlify jest opublikowany?"); }
+    try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił prawidłowych danych — sprawdź usługę backendu VPS."); }
     if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); Object.assign(b,d); b.code=d.code||""; b.status=r.status; throw b; }
     return d;
   })();
@@ -2931,7 +2931,7 @@ const ADMIN_MODULY_RUNTIME = Object.freeze({
   core:"admin-core",shell:"admin-shell",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",shipping:"admin-shipping",commerce:"admin-commerce",communications:"admin-communications",
   inventory:"admin-inventory",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system",vonHalsky:"admin-von-halsky"
 });
-const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
+const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
 const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content"});
 const adminZaladowaneModuly = new Set();
 const adminObietniceModulow = new Map();
@@ -4145,7 +4145,7 @@ async function sprawdzBramke(cicho=false){
     if(!cicho){
       const ip=cloud.inpost||{};
       const czesci=[];
-      czesci.push("Netlify Functions działa ✅");
+      czesci.push("Backend VPS działa ✅");
       czesci.push(cloud.email?.authenticated?`SMTP ${cloud.email.provider||""} połączony`:cloud.email?.configured?"SMTP zapisany — wymaga testu":"SMTP wymaga naprawy poświadczenia");
       czesci.push(ip.authenticated?`InPost ShipX połączony (${ip.env||"production"})`:ip.configured?`InPost ShipX zapisany (${ip.env||"production"})`:`InPost: brakuje ${(ip.missingEnv&&ip.missingEnv.length?ip.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")}`);
       if(!ip.geowidgetConfigured) czesci.push("mapa paczkomatów: brak INPOST_GEOWIDGET_TOKEN");
@@ -4154,14 +4154,14 @@ async function sprawdzBramke(cicho=false){
     if(maUprawnieniaZapisuChmury()&&Date.now()-ostatniTestIntegracjiSerwerowych>15*60*1000)setTimeout(()=>sprawdzPolaczeniaSerwerowe(true),0);
     if(trasa().startsWith("/admin/wysylki")||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
     return;
-  }catch(e){ /* Netlify może być chwilowo niedostępne — niżej próbujemy awaryjny backend PHP */ }
+  }catch(e){ /* Główny backend VPS może być chwilowo niedostępny — niżej działa kontrola awaryjna. */ }
   try{
     const d=await wywolajBramke("health");
     stanBramki={...stanBramki,...d,email:d.email||stanBramki.email,store:d.store||stanBramki.store,sprawdzono:true,online:true,error:""};
     if(!cicho) toast(d.ready?"Awaryjna bramka PHP gotowa ✅":d.configured?"Awaryjna bramka PHP skonfigurowana":"Bramka InPost wymaga konfiguracji");
   }catch(e){
     stanBramki={...stanBramki,sprawdzono:true,online:false,error:e.message};
-    if(!cicho) toast("Bramka niedostępna — sprawdź Netlify Functions");
+    if(!cicho) toast("Bramka niedostępna — sprawdź usługę backendu VPS");
   }
   if(trasa().startsWith("/admin/wysylki")||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
 }
@@ -4283,7 +4283,7 @@ async function utworzPrzesylkeAPI(nr){
     toast(labelReady?`Przesyłka InPost utworzona ✅ ${d.trackingNumber||"etykieta gotowa"}`:"Przesyłka utworzona, ale InPost jeszcze potwierdza etykietę — użyj „Sprawdź status InPost” za chwilę.");
     renderuj();
   }catch(bl){
-    if(bl.code==="inpost_not_configured"){ toast("Najpierw skonfiguruj InPost w Netlify (INPOST_TOKEN, INPOST_ORG_ID)"); location.hash="#/admin/dostawy"; return; }
+    if(bl.code==="inpost_not_configured"){ toast("Najpierw skonfiguruj InPost na serwerze (INPOST_TOKEN, INPOST_ORG_ID)"); location.hash="#/admin/dostawy"; return; }
     if(bl.code==="no_point"){ toast("Brak punktu InPost — otwórz zlecenie i wpisz paczkomat przed etykietą"); return; }
     if(bl.code==="exists"){ toast("Przesyłka InPost już istnieje dla tego zamówienia"); return; }
     if(bl.code==="inpost_validation"){ toast("Uzupełnij dane do InPost: "+((bl.details||[]).map(x=>x.message||x).join(" • ")||bl.message)); return; }
@@ -4314,7 +4314,7 @@ async function pobierzEtykieteAPI(nr,format="A6"){
     loguj("info",`Pobrano etykietę InPost ${format} dla ${nr}`);
     renderuj();
   }catch(bl){
-    if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost w Netlify"); return; }
+    if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost na serwerze"); return; }
     if(bl.code==="no_shipment"){ toast("Najpierw utwórz przesyłkę InPost"); return; }
     if(bl.code==="label_not_ready"){
       aktualizujZamowienie(nr,zam=>{ const w=daneWysylki(zam); if(bl.status)w.inpostStatus=bl.status; if(bl.trackingNumber)w.numer=bl.trackingNumber; w.etykietaGotowa=false; w.zadania={...(w.zadania||{}),dane:true,etykieta:false}; zam.wysylka=w; });
@@ -4389,7 +4389,7 @@ async function synchronizujTrackingAPI(nr){
     toast((d.labelReady||d.trackingNumber)?"Status InPost zaktualizowany ✅ — etykieta gotowa":"Status InPost zaktualizowany — etykieta jeszcze czeka na potwierdzenie");
     renderuj();
   }catch(bl){
-    if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost w Netlify"); return; }
+    if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost na serwerze"); return; }
     if(bl.code==="no_shipment"){ toast("To zamówienie nie ma przesyłki InPost"); return; }
     aktualizujZamowienie(nr,zam=>{const w=daneWysylki(zam);w.bladIntegracji=bl.message;zam.wysylka=w;});
     loguj("blad",`InPost status ${nr}: ${bl.message}`);toast("Status: "+bl.message);renderuj();
@@ -4406,7 +4406,7 @@ async function synchronizujWszystkieStatusyAPI(){
     toast(`✅ Sprawdzono ${d.sprawdzone||0} przesyłek — ${d.zmienione||0} zmian statusu, ${d.maile||0} e-maili`);
     renderuj();
   }catch(bl){
-    if(bl.code==="inpost_not_configured") toast("InPost nie jest skonfigurowany w Netlify");
+    if(bl.code==="inpost_not_configured") toast("InPost nie jest skonfigurowany na serwerze");
     else toast("Błąd sprawdzania statusów: "+bl.message);
   }
 }
@@ -5362,6 +5362,52 @@ Uwagi: ${f.get("notes")||"brak"}`;
 /* Instalowalny panel administratora (PWA). Aplikacja używa dokładnie tego
    samego panelu i API co strona, dlatego nie tworzy drugiej kopii danych. */
 let pwaOdroczoneZaproszenie=null;
+let pwaSprawdzanieWydania=false;
+let pwaWykryteWydanie="";
+let pwaAutomatycznePrzeladowanie=0;
+
+function pwaBiezaceWydanie(){return document.querySelector('meta[name="artway-version"]')?.content||"dev";}
+function pwaMoznaBezpieczniePrzeladowac(){
+  const active=document.activeElement;
+  return document.visibilityState==="visible"
+    && !document.querySelector("dialog[open],.modal.show,[aria-modal='true']")
+    && !(active&&/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
+}
+async function pwaAktywujNajnowszeWydanie(){
+  clearTimeout(pwaAutomatycznePrzeladowanie);
+  try{
+    if("serviceWorker" in navigator){
+      const registration=await navigator.serviceWorker.getRegistration("/");
+      await registration?.update();
+      registration?.waiting?.postMessage({type:"SKIP_WAITING"});
+      registration?.active?.postMessage({type:"CLEAR_APP_CACHE"});
+    }
+    if("caches" in window){const keys=await caches.keys();await Promise.all(keys.filter(key=>key.startsWith("artway-")).map(key=>caches.delete(key)));}
+  }catch(error){console.warn("Nie udało się wyczyścić starej powłoki aplikacji",error);}
+  location.reload();
+}
+function pwaPokazNoweWydanie(releaseId){
+  pwaWykryteWydanie=releaseId;
+  let bar=document.getElementById("artwayReleaseUpdate");
+  if(!bar){
+    bar=document.createElement("aside");bar.id="artwayReleaseUpdate";bar.className="artway-release-update";bar.setAttribute("role","status");
+    bar.innerHTML=`<span>✨</span><div><b>Nowa wersja panelu jest gotowa</b><small>Serwer opublikował kompletne wydanie. Odświeżenie nie usuwa danych.</small></div><button class="btn" type="button">Uruchom aktualizację</button>`;
+    bar.querySelector("button").addEventListener("click",()=>void pwaAktywujNajnowszeWydanie());
+    document.body.appendChild(bar);
+  }
+  clearTimeout(pwaAutomatycznePrzeladowanie);
+  pwaAutomatycznePrzeladowanie=setTimeout(()=>{if(pwaWykryteWydanie===releaseId&&pwaMoznaBezpieczniePrzeladowac())void pwaAktywujNajnowszeWydanie();},12000);
+}
+async function pwaSprawdzNajnowszeWydanie(){
+  if(pwaSprawdzanieWydania||document.visibilityState==="hidden")return;
+  pwaSprawdzanieWydania=true;
+  try{
+    const response=await fetch(`/release.json?check=${Date.now()}`,{cache:"no-store",headers:{"Cache-Control":"no-cache"}});
+    if(!response.ok)return;
+    const data=await response.json(),releaseId=String(data.releaseId||data.version||"");
+    if(releaseId&&releaseId!==pwaBiezaceWydanie())pwaPokazNoweWydanie(releaseId);
+  }catch(error){}finally{pwaSprawdzanieWydania=false;}
+}
 
 function pwaDzialaJakoAplikacja(){
   return window.matchMedia?.("(display-mode: standalone)")?.matches||window.navigator.standalone===true;
@@ -5401,7 +5447,13 @@ function pwaUruchomSkrotSkanera(){
 window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();pwaOdroczoneZaproszenie=event;pwaOdswiezPrzyciski();});
 window.addEventListener("appinstalled",()=>{pwaOdroczoneZaproszenie=null;pwaUstawTrybWyswietlania();pwaOdswiezPrzyciski();});
 window.matchMedia?.("(display-mode: standalone)")?.addEventListener?.("change",()=>{pwaUstawTrybWyswietlania();pwaOdswiezPrzyciski();});
-window.addEventListener("DOMContentLoaded",()=>{pwaUstawTrybWyswietlania();void pwaZarejestrujAplikacje();pwaUruchomSkrotSkanera();});
+window.addEventListener("DOMContentLoaded",()=>{
+  pwaUstawTrybWyswietlania();void pwaZarejestrujAplikacje();pwaUruchomSkrotSkanera();
+  setTimeout(()=>void pwaSprawdzNajnowszeWydanie(),15000);
+  setInterval(()=>void pwaSprawdzNajnowszeWydanie(),2*60*1000);
+});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")setTimeout(()=>void pwaSprawdzNajnowszeWydanie(),800);});
+window.addEventListener("online",()=>void pwaSprawdzNajnowszeWydanie());
 
 /* ═══════════ UI ═══════════ */
 let dialogPoprzedniFocus=null;

@@ -11,7 +11,7 @@ export default async () => {
     return new Response('no token');
   }
   try {
-    const response = await fetch(`${base}/.netlify/functions/store?action=allegro-sync-orders`, {
+    const response = await fetch(`${base}/api/store?action=allegro-sync-orders`, {
       method: 'POST',
       headers: { 'x-admin-token': token, 'content-type': 'application/json' },
       body: JSON.stringify({ limit: 200, source: 'scheduled-stock-agent' }),

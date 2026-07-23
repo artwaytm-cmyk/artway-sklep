@@ -29,10 +29,10 @@ const inventorySource = (await Promise.all([
   '12-product-editor.js',
 ].map((file)=>readFile(new URL(`../src/frontend/${file}`, import.meta.url), 'utf8')))).join('\n');
 const storeSource = (await Promise.all([
-  readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8'),
-  readFile(new URL('../netlify/functions/lib/email-route.mjs', import.meta.url), 'utf8'),
+  readFile(new URL('../src/backend/lib/store-app.mjs', import.meta.url), 'utf8'),
+  readFile(new URL('../src/backend/lib/email-route.mjs', import.meta.url), 'utf8'),
 ])).join('\n');
-const supplierRouteSource = await readFile(new URL('../netlify/functions/lib/supplier-order-route.mjs', import.meta.url), 'utf8');
+const supplierRouteSource = await readFile(new URL('../src/backend/lib/supplier-order-route.mjs', import.meta.url), 'utf8');
 const storePlanSource = `${storeSource}\n${supplierRouteSource}`;
 
 function fragment(start, end) {

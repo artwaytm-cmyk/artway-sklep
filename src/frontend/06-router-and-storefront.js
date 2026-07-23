@@ -3,7 +3,7 @@ const ADMIN_MODULY_RUNTIME = Object.freeze({
   core:"admin-core",shell:"admin-shell",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",shipping:"admin-shipping",commerce:"admin-commerce",communications:"admin-communications",
   inventory:"admin-inventory",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system",vonHalsky:"admin-von-halsky"
 });
-const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
+const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
 const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content"});
 const adminZaladowaneModuly = new Set();
 const adminObietniceModulow = new Map();

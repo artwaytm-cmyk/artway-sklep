@@ -12,7 +12,7 @@ export default async () => {
     return new Response('no token');
   }
   try {
-    const r = await fetch(`${base}/.netlify/functions/store?action=allegro-sync-communications`, {
+    const r = await fetch(`${base}/api/store?action=allegro-sync-communications`, {
       method: 'POST',
       headers: { 'x-admin-token': token, 'content-type': 'application/json' },
       body: JSON.stringify({ limit: 20, autoReply: true }),

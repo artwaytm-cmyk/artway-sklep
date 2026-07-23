@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aiImageRequestLayout, buildAiBannerPrompt, createAiBannerGenerator, normalizeAiBannerRequest } from '../netlify/functions/lib/domain/ai-banner-generator.mjs';
+import { aiImageRequestLayout, buildAiBannerPrompt, createAiBannerGenerator, normalizeAiBannerRequest } from '../src/backend/lib/domain/ai-banner-generator.mjs';
 
 function memoryRepository() {
   const data = new Map();

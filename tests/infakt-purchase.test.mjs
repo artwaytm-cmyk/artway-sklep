@@ -8,7 +8,7 @@ import {
   infaktParametryListyKsef,
   infaktPrzygotujCofniecieDopasowania,
   ustawieniaPubliczneBezDanychPrywatnych,
-} from '../netlify/functions/lib/infakt-purchase.mjs';
+} from '../src/backend/lib/infakt-purchase.mjs';
 
 test('lista KSeF zawsze wysyła pełny zakres dat i bezpieczny limit API', () => {
   const parameters = infaktParametryListyKsef({

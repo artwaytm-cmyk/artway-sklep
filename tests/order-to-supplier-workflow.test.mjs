@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { renderSupplierOrderEmail } from '../netlify/functions/lib/domain/supplier-order-email.mjs';
-import { reconcileSupplierOrderDrafts } from '../netlify/functions/lib/domain/supplier-order-reconciliation.mjs';
+import { renderSupplierOrderEmail } from '../src/backend/lib/domain/supplier-order-email.mjs';
+import { reconcileSupplierOrderDrafts } from '../src/backend/lib/domain/supplier-order-reconciliation.mjs';
 
 const product = {
   id: 1410,

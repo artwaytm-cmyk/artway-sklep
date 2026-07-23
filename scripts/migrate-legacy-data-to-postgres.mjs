@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { createPostgresStoreRepository } from '../netlify/functions/lib/core/postgres-store-repository.mjs';
+import { createPostgresStoreRepository } from '../src/backend/lib/core/postgres-store-repository.mjs';
 
 const sourceUrl = String(process.env.ARTWAY_SOURCE_URL || 'https://artwaytm.pl').replace(/\/$/, '');
 const adminToken = process.env.ARTWAY_SOURCE_ADMIN_TOKEN || process.env.ARTWAY_ADMIN_TOKEN || '';

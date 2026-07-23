@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import pg from 'pg';
-import { createCentralProductCatalog } from '../netlify/functions/lib/domain/central-product-catalog.mjs';
+import { createCentralProductCatalog } from '../src/backend/lib/domain/central-product-catalog.mjs';
 import { verifyIsolatedBenchmarkDatabase } from './lib/benchmark-database-guard.mjs';
 
 const { Pool } = pg;

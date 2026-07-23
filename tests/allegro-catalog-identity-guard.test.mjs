@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const backend = await readFile(new URL('../netlify/functions/lib/store-app.mjs', import.meta.url), 'utf8');
+const backend = await readFile(new URL('../src/backend/lib/store-app.mjs', import.meta.url), 'utf8');
 const frontend = await readFile(new URL('../src/frontend/11-allegro-operations.js', import.meta.url), 'utf8');
 
 test('wyszukiwanie katalogu Allegro działa wyłącznie po poprawnym GTIN', () => {

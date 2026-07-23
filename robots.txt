@@ -1,6 +1,5 @@
 User-agent: *
 Allow: /
 Disallow: /admin/
-Disallow: /.netlify/functions/
 
 Sitemap: https://artwaytm.pl/sitemap.xml

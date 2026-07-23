@@ -6,7 +6,7 @@ test('aktualizacja lub brak u producenta nie usuwa karty produktu ze sklepu', as
   const [catalog, view, seoRenderer] = await Promise.all([
     readFile('src/frontend/05-catalog-inventory.js', 'utf8'),
     readFile('src/frontend/06b-storefront-catalog.js', 'utf8'),
-    readFile('netlify/functions/lib/domain/storefront-seo-renderer.mjs', 'utf8'),
+    readFile('src/backend/lib/domain/storefront-seo-renderer.mjs', 'utf8'),
   ]);
   const builder = catalog.slice(catalog.indexOf('function zbudujProdukty()'), catalog.indexOf('function podpisPublikacjiProduktu'));
   assert.doesNotMatch(builder, /filter\s*\(\s*p\s*=>\s*!produktOznaczonyNiedostepny/);
@@ -39,8 +39,8 @@ test('stary adres po połączeniu duplikatów prowadzi do zachowanej kartoteki',
 
 test('mapa strony zachowuje adres, a feed oznacza brak zamiast usuwać produkt', async () => {
   const [sitemap, feed] = await Promise.all([
-    readFile('netlify/functions/sitemap.mjs', 'utf8'),
-    readFile('netlify/functions/google-products.mjs', 'utf8'),
+    readFile('src/backend/sitemap.mjs', 'utf8'),
+    readFile('src/backend/google-products.mjs', 'utf8'),
   ]);
   assert.doesNotMatch(sitemap, /!seoProductUnavailable/);
   assert.match(feed, /productIsUnavailable\(product, availability\) \? 'out_of_stock' : 'in_stock'/);

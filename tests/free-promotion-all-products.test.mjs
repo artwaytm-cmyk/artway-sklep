@@ -16,7 +16,7 @@ test('wszystkie aktywne produkty są objęte darmową promocją bez ręcznego w�
 });
 
 test('IndexNow wykonuje pełne pierwsze zgłoszenie, a potem zgłasza tylko zmiany', async () => {
-  const [backend, indexNow, automation] = await Promise.all([read('netlify/functions/lib/store-app.mjs'), read('netlify/functions/lib/domain/indexnow.mjs'), read('netlify/functions/lib/domain/seo-daily-automation.mjs')]);
+  const [backend, indexNow, automation] = await Promise.all([read('src/backend/lib/store-app.mjs'), read('src/backend/lib/domain/indexnow.mjs'), read('src/backend/lib/domain/seo-daily-automation.mjs')]);
   assert.match(backend, /runIndexNowPromotion\(\{ catalogProducts:/);
   assert.match(indexNow, /fullCatalogSubmission = !config\.indexNowFullCatalogAt/);
   assert.match(indexNow, /fullCatalogSubmission \? catalogProducts : changedProducts/);
@@ -28,9 +28,9 @@ test('IndexNow wykonuje pełne pierwsze zgłoszenie, a potem zgłasza tylko zmia
 });
 
 test('drugi adres jest pokazany jako bezpieczny alias jednej domeny kanonicznej', async () => {
-  const [frontend, config] = await Promise.all([read('src/frontend/09-seo.js'), read('netlify.toml')]);
+  const [frontend, config] = await Promise.all([read('src/frontend/09-seo.js'), read('ops/nginx/artway-production.conf')]);
   assert.match(frontend, /allsklep\.pl — drugi adres podpięty/);
   assert.match(frontend, /Jedna domena kanoniczna chroni pozycjonowanie przed duplikacją treści/);
-  assert.match(config, /from = "https:\/\/allsklep\.pl\/\*"[\s\S]*to = "https:\/\/artwaytm\.pl\/:splat"[\s\S]*status = 301/);
-  assert.match(config, /from = "https:\/\/www\.allsklep\.pl\/\*"[\s\S]*to = "https:\/\/artwaytm\.pl\/:splat"[\s\S]*status = 301/);
+  assert.match(config, /server_name allsklep\.pl www\.allsklep\.pl;/);
+  assert.match(config, /return 301 https:\/\/artwaytm\.pl\$uri\?entry_domain=allsklep\.pl&\$args;/);
 });

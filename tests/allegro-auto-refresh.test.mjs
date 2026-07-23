@@ -23,10 +23,10 @@ test("otwarty panel okresowo pobiera wyniki synchronizacji Allegro bez przerywan
 
 test("serwer cyklicznie sprawdza zamówienia, komunikację i katalog Allegro",async()=>{
   const [orders,communications,catalog,offers]=await Promise.all([
-    read("netlify/functions/cron-allegro-orders.mjs"),
-    read("netlify/functions/cron-allegro-communications.mjs"),
-    read("netlify/functions/cron-allegro-catalog.mjs"),
-    read("netlify/functions/cron-allegro-offers.mjs")
+    read("src/backend/cron-allegro-orders.mjs"),
+    read("src/backend/cron-allegro-communications.mjs"),
+    read("src/backend/cron-allegro-catalog.mjs"),
+    read("src/backend/cron-allegro-offers.mjs")
   ]);
   assert.match(orders,/schedule: '5,20,35,50 \* \* \* \*'/);
   assert.match(orders,/allegro-sync-orders/);
@@ -40,7 +40,7 @@ test("serwer cyklicznie sprawdza zamówienia, komunikację i katalog Allegro",as
 });
 
 test("marker baseline Allegro jest zapisywany dopiero po trwałym zapisie zarchiwizowanych zamówień",async()=>{
-  const backend=await read("netlify/functions/lib/store-app.mjs");
+  const backend=await read("src/backend/lib/store-app.mjs");
   const start=backend.indexOf("if (action === 'allegro-sync-orders')");
   const end=backend.indexOf("if (action === 'allegro-order-checked')",start);
   assert.ok(start>=0&&end>start,"brak sekcji synchronizacji zamówień Allegro");

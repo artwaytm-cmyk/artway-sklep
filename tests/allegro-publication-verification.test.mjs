@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { allegroOfferVerification, allegroPatchZDraftu } from '../netlify/functions/lib/domain/allegro-offer-patch.mjs';
+import { allegroOfferVerification, allegroPatchZDraftu } from '../src/backend/lib/domain/allegro-offer-patch.mjs';
 
 test('edytor domyślnie aktywuje nową lub nieaktywną ofertę, a aktywnej nie wyłącza', async () => {
   const source = await readFile('assets/admin.js', 'utf8');
@@ -56,7 +56,7 @@ test('automatyczna synchronizacja treści Allegro nie zmienia ceny, stanu ani wa
 });
 
 test('backend po zapisie ponownie odczytuje ofertę i zwraca zweryfikowany status', async () => {
-  const source = await readFile('netlify/functions/lib/store-app.mjs', 'utf8');
+  const source = await readFile('src/backend/lib/store-app.mjs', 'utf8');
   assert.match(source, /verifiedOffer = await allegroWywolaj\(req, `\/sale\/product-offers\/\$\{encodeURIComponent\(offerId\)\}`\)/);
   assert.match(source, /verification: allegroOfferVerification\(result, !!verifiedOffer\)/);
   assert.deepEqual(allegroOfferVerification({ publication: { status: 'ACTIVE' }, description: { sections: [{ items: [] }, { items: [] }] } }, true), { checked: true, status: 'ACTIVE', active: true, descriptionSections: 2 });

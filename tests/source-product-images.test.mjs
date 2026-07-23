@@ -4,8 +4,8 @@ import {
   inspectedSourceImages,
   sourceProductIdentity,
   verifiedSourceImages,
-} from '../netlify/functions/lib/domain/source-product-images.mjs';
-import { mergeImportedProductSourceRefresh } from '../netlify/functions/lib/domain/imported-product-catalog.mjs';
+} from '../src/backend/lib/domain/source-product-images.mjs';
+import { mergeImportedProductSourceRefresh } from '../src/backend/lib/domain/imported-product-catalog.mjs';
 
 const sourceUrl = 'https://hurtownia.example.pl/product-pol-1188-ORIGAMI-3D-KWIATY.html';
 const product = {

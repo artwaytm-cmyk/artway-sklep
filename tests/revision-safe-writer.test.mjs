@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createRevisionSafeMutator, createRevisionSafeWriter } from '../netlify/functions/lib/core/store-repository.mjs';
+import { createRevisionSafeMutator, createRevisionSafeWriter } from '../src/backend/lib/core/store-repository.mjs';
 
 test('stary pełny zapis settings nie może nadpisać nowszej korekty magazynu', async () => {
   let current = { value: { rev: 10, data: { artway_stany: { 31: 1 } } }, etag: 'v10', exists: true };
@@ -76,7 +76,7 @@ test('mutator nie tworzy rewizji, gdy aktualizacja nie ma już nic do zapisania'
 
 test('zwykły zapis wysyła tylko zmienione dziedziny i serwer scala je warunkowo', () => {
   const frontend = fs.readFileSync(new URL('../src/frontend/03-cloud-sync.js', import.meta.url), 'utf8');
-  const backend = fs.readFileSync(new URL('../netlify/functions/lib/store-data-route.mjs', import.meta.url), 'utf8');
+  const backend = fs.readFileSync(new URL('../src/backend/lib/store-data-route.mjs', import.meta.url), 'utf8');
   assert.match(frontend, /chmuraBrudneKlucze = new Set\(\)/);
   assert.match(frontend, /body:\{mode:"patch",patch,expectedRev,mutationId\}/);
   assert.match(frontend, /chmuraPominBrudneDaneSerwera/);
@@ -87,7 +87,7 @@ test('zwykły zapis wysyła tylko zmienione dziedziny i serwer scala je warunkow
 });
 
 test('ręczny zgodnościowy pełny zapis nadal egzekwuje oczekiwaną rewizję', () => {
-  const backend = fs.readFileSync(new URL('../netlify/functions/lib/store-data-route.mjs', import.meta.url), 'utf8');
+  const backend = fs.readFileSync(new URL('../src/backend/lib/store-data-route.mjs', import.meta.url), 'utf8');
   assert.match(backend, /const expectedRev = Number\(body\.expectedRev\)/);
   assert.match(backend, /Number\(prev\.rev \|\| 0\) !== expectedRev/);
   assert.match(backend, /zapiszJesliWersja\('settings', rec, version\)/);

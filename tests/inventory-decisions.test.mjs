@@ -9,7 +9,7 @@ import {
   renderInventoryDecisionConfirmation,
   renderInventoryDecisionReminder,
   renderInventoryLocationPrompt,
-} from '../netlify/functions/lib/domain/inventory-decisions.mjs';
+} from '../src/backend/lib/domain/inventory-decisions.mjs';
 
 const PRODUCT = {
   id: '31',

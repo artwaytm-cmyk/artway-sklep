@@ -707,7 +707,7 @@ async function allegroWywolaj(req, path, { method = 'GET', parameters = {}, body
     'Authorization': `Bearer ${token}`,
     'Accept': accept,
     'Accept-Language': 'pl-PL',
-    'User-Agent': 'Artway-TM/1.0 Netlify Function',
+    'User-Agent': 'Artway-TM/1.0 VPS',
   };
   // Fail closed: każda nowa lub przyszła ścieżka zapisu opisu przechodzi przez
   // tę samą bramkę, nawet gdy jej autor zapomni wywołać kontrolę wcześniej.
@@ -3164,7 +3164,7 @@ export default async (req) => {
     if (action === 'allegro-auth-url') {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const c = allegroKonfiguracja(req);
-      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'Allegro API nie jest skonfigurowane. Ustaw ALLEGRO_CLIENT_ID i ALLEGRO_CLIENT_SECRET w Netlify.', code: 'allegro_not_configured', missingEnv: c.missingEnv }, 503);
+      if (!c.configured) return odpowiedz({ ok: false, configured: false, error: 'Allegro API nie jest skonfigurowane. Ustaw ALLEGRO_CLIENT_ID i ALLEGRO_CLIENT_SECRET na serwerze.', code: 'allegro_not_configured', missingEnv: c.missingEnv }, 503);
       const state = crypto.randomBytes(20).toString('hex');
       await zapisz('allegro_oauth_state', { state, created_at: new Date().toISOString() });
       const authUrl = new URL('/auth/oauth/authorize', c.authBaseUrl);

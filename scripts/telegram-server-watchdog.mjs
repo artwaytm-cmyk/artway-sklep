@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { telegramApi, telegramWebhookSecret } from '../netlify/functions/lib/domain/telegram-communication.mjs';
+import { telegramApi, telegramWebhookSecret } from '../src/backend/lib/domain/telegram-communication.mjs';
 
 const BACKEND_SERVICE = 'artway-backend.service';
 const AGENT_SERVICE = 'artway-agent.service';
@@ -29,7 +29,7 @@ export async function runTelegramServerWatchdog({
 } = {}) {
   const origin = normalizedOrigin(env.ARTWAY_PUBLIC_ORIGIN);
   const localOrigin = normalizedOrigin(env.ARTWAY_LOCAL_API_ORIGIN || 'http://127.0.0.1:3000');
-  const webhookUrl = `${origin}/.netlify/functions/telegram-webhook`;
+  const webhookUrl = `${origin}/api/telegram/webhook`;
   const report = {
     at: new Date().toISOString(),
     backend: 'unknown',

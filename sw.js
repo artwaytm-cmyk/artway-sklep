@@ -19,7 +19,7 @@ self.addEventListener("message",event=>{
   if(event.data?.type==="CLEAR_APP_CACHE")event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith("artway-")).map(key=>caches.delete(key)))));
 });
 
-function isPrivateRequest(url){return url.pathname==="/api/store"||url.pathname.startsWith("/.netlify/functions/")||url.pathname.startsWith("/api/");}
+function isPrivateRequest(url){return url.pathname.startsWith("/api/");}
 async function networkFirst(request){
   try{const response=await fetch(request);if(response.ok){const cache=await caches.open(CACHE_NAME);cache.put(request,response.clone());}return response;}
   catch(error){return (await caches.match(request))||(await caches.match("/index.html"))||Response.error();}

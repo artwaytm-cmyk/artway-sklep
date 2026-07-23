@@ -59,13 +59,16 @@ test('index nie zawiera wykonywalnego kodu inline wymagającego unsafe-inline', 
   assert.doesNotMatch(html, /const\s+USTAWIENIA_PUBLICZNE\s*=/);
 });
 
-test('zapasowa konfiguracja Netlify zachowuje ten sam rygor skryptów i stylów', async () => {
-  const source = await readFile('netlify.toml', 'utf8');
-  assert.match(source, /script-src 'self' https:\/\/geowidget\.inpost\.pl/);
-  assert.match(source, /script-src-elem 'self' https:\/\/geowidget\.inpost\.pl/);
-  assert.match(source, /style-src 'self' https:\/\/geowidget\.inpost\.pl/);
-  assert.match(source, /style-src-elem 'self' https:\/\/geowidget\.inpost\.pl/);
-  assert.doesNotMatch(source, /(?:script|style)-src 'self'[^;\"]*'unsafe-inline'/);
+test('produkcja korzysta wyłącznie z backendu VPS i kanonicznych tras API', async () => {
+  const [nginx, server, frontend] = await Promise.all([
+    readFile('ops/nginx/artway-production.conf', 'utf8'),
+    readFile('server.mjs', 'utf8'),
+    readFile('src/frontend/03-cloud-sync.js', 'utf8'),
+  ]);
+  assert.match(nginx, /proxy_pass http:\/\/127\.0\.0\.1:3000\/api\/store;/);
+  assert.match(nginx, /location = \/api\/telegram\/webhook/);
+  assert.match(server, /pathname === '\/api\/store'/);
+  assert.match(frontend, /const CHMURA_URL = "\/api\/store"/);
 });
 
 test('lokacje z własnym Cache-Control ponownie dołączają zabezpieczenia', async () => {

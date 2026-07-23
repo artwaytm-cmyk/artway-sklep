@@ -10,12 +10,12 @@ import {
   fetchAllegroReplyHistory,
   improvePolishReplyStyle,
   mergeAllegroReplyHistory,
-} from '../netlify/functions/lib/domain/allegro-reply-assistant.mjs';
+} from '../src/backend/lib/domain/allegro-reply-assistant.mjs';
 
 const frontend = await readFile(new URL('../assets/admin.js', import.meta.url), 'utf8');
 const backend = (await Promise.all([
-  '../netlify/functions/lib/store-app.mjs',
-  '../netlify/functions/lib/allegro-communications-route.mjs',
+  '../src/backend/lib/store-app.mjs',
+  '../src/backend/lib/allegro-communications-route.mjs',
 ].map((file) => readFile(new URL(file, import.meta.url), 'utf8')))).join('\n');
 
 test('poprawa stylistyczna porządkuje ręczny szkic bez dopisywania faktów', () => {

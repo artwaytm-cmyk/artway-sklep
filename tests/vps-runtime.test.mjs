@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { postgresVersionFromEtag } from '../netlify/functions/lib/core/postgres-store-repository.mjs';
+import { postgresVersionFromEtag } from '../src/backend/lib/core/postgres-store-repository.mjs';
 import { createArtwayServer } from '../server.mjs';
 import { createResilientServerRuntime } from '../src/backend/server-runtime.mjs';
 

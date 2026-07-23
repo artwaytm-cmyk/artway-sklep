@@ -14,10 +14,10 @@ import {
   safeInpostServiceRecord,
   summarizeInpostServiceBilling,
   validateInpostServiceDraft,
-} from '../netlify/functions/lib/domain/inpost-service-shipment.mjs';
-import { normalizeInpostServiceTracking } from '../netlify/functions/lib/domain/inpost-service-tracking.mjs';
-import { createInpostServiceShipmentRoute } from '../netlify/functions/lib/inpost-service-shipment-route.mjs';
-import { createInpostRoute } from '../netlify/functions/lib/inpost-route.mjs';
+} from '../src/backend/lib/domain/inpost-service-shipment.mjs';
+import { normalizeInpostServiceTracking } from '../src/backend/lib/domain/inpost-service-tracking.mjs';
+import { createInpostServiceShipmentRoute } from '../src/backend/lib/inpost-service-shipment-route.mjs';
+import { createInpostRoute } from '../src/backend/lib/inpost-route.mjs';
 
 const sender = {
   companyName: 'Nadawca sp. z o.o.',
@@ -244,7 +244,7 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
 });
 
 test('trasa serwerowa zabezpiecza idempotencję, książkę adresową i wycenę ShipX', async () => {
-  const source = await readFile(new URL('../netlify/functions/lib/inpost-service-shipment-route.mjs', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../src/backend/lib/inpost-service-shipment-route.mjs', import.meta.url), 'utf8');
   assert.match(source, /duplicatePrevented/);
   assert.match(source, /concurrentDuplicate/);
   assert.match(source, /safeInpostServiceRecord/);
@@ -259,7 +259,7 @@ test('trasa serwerowa zabezpiecza idempotencję, książkę adresową i wycenę 
 
 test('zamówienia sklepu korzystają z tego samego cennika umownego bez ujawniania abonamentu', async () => {
   const [route, orderView, orderQuote] = await Promise.all([
-    readFile(new URL('../netlify/functions/lib/inpost-route.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/backend/lib/inpost-route.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../src/frontend/11-store-orders.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/frontend/11-inpost-order-contract-quote.js', import.meta.url), 'utf8'),
   ]);

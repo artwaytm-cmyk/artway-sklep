@@ -461,4 +461,4 @@ export default async (request) => {
   return response();
 };
 
-export const config = { path: '/.netlify/functions/telegram-webhook' };
+export const config = { path: '/api/telegram/webhook' };

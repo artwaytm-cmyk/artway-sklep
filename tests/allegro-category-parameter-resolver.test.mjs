@@ -4,7 +4,7 @@ import {
   allegroAutomaticCategoryParameters,
   allegroProductParameterCatalog,
   normalizeAllegroParameterName,
-} from '../netlify/functions/lib/domain/allegro-category-parameter-resolver.mjs';
+} from '../src/backend/lib/domain/allegro-category-parameter-resolver.mjs';
 
 const dictionary = (id, name, values) => ({
   id,

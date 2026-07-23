@@ -5,7 +5,7 @@ import {
   normalizeTelegramAccountFields,
   telegramAccountAccess,
   telegramAccountAccessList,
-} from '../netlify/functions/lib/domain/telegram-account-access.mjs';
+} from '../src/backend/lib/domain/telegram-account-access.mjs';
 
 test('konto administratora automatycznie rozszerza wspólny czat bez restartu', () => {
   const config = applyTelegramAccountAccess({

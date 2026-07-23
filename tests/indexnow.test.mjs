@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { INDEXNOW_KEY, INDEXNOW_KEY_LOCATION, eligiblePromotionProducts, normalizeIndexNowUrls, runIndexNowPromotion, submitIndexNow } from '../netlify/functions/lib/domain/indexnow.mjs';
+import { INDEXNOW_KEY, INDEXNOW_KEY_LOCATION, eligiblePromotionProducts, normalizeIndexNowUrls, runIndexNowPromotion, submitIndexNow } from '../src/backend/lib/domain/indexnow.mjs';
 
 test('IndexNow przyjmuje tylko bezpieczne, unikalne adresy głównej domeny', () => {
   assert.deepEqual(normalizeIndexNowUrls([

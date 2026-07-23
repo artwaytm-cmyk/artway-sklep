@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createStoreDataRoute } from '../netlify/functions/lib/store-data-route.mjs';
+import { createStoreDataRoute } from '../src/backend/lib/store-data-route.mjs';
 import {
   accountSessionHeaders,
   createAccountSession,
@@ -9,14 +9,14 @@ import {
   publicUser,
   requestSession,
   verifyPassword,
-} from '../netlify/functions/lib/core/security.mjs';
+} from '../src/backend/lib/core/security.mjs';
 import {
   createAdminMfaChallenge,
   createMfaEmailRecovery,
   verifyAdminMfaChallenge,
   verifyMfaEmailRecoveryChallenge,
   verifyMfaEmailRecoveryCode,
-} from '../netlify/functions/lib/core/mfa.mjs';
+} from '../src/backend/lib/core/mfa.mjs';
 
 process.env.ARTWAY_SESSION_SECRET = 'admin-security-test-session-secret';
 process.env.ARTWAY_MFA_ENCRYPTION_SECRET = 'admin-security-test-mfa-secret';
@@ -271,7 +271,7 @@ test('rejestracja po stronie serwera odrzuca niepełny adres e-mail przed zapise
 test('interfejs nie generuje ani nie pobiera pliku z sekretami MFA', async () => {
   const [source, backend] = await Promise.all([
     readFile(new URL('../src/frontend/06c-storefront-account.js', import.meta.url), 'utf8'),
-    readFile(new URL('../netlify/functions/lib/store-data-route.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/backend/lib/store-data-route.mjs', import.meta.url), 'utf8'),
   ]);
   assert.doesNotMatch(source, /artway-kody-awaryjne\.txt|pobierzKodyAwaryjneMfa|recoveryCodes/);
   assert.doesNotMatch(backend, /recoveryCodeHash\(supplied\)/);

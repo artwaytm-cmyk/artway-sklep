@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allegroOfferGtinCandidates, allegroOfferPrimaryGtin } from '../netlify/functions/lib/domain/allegro-offer-identifiers.mjs';
+import { allegroOfferGtinCandidates, allegroOfferPrimaryGtin } from '../src/backend/lib/domain/allegro-offer-identifiers.mjs';
 
 test('odczytuje EAN z parametru Allegro niezależnie od nazwy i miejsca', () => {
   const offer = { productSet: [{ product: { parameters: [{ id: '225693', name: 'GTIN (EAN)', values: ['05906018026788'] }] } }] };

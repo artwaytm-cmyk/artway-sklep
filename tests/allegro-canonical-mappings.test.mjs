@@ -5,8 +5,8 @@ import {
   canonicalizeAllegroMappings,
   linkCanonicalAllegroMapping,
   markAllegroMappingSynced,
-} from '../netlify/functions/lib/domain/allegro-canonical-mappings.mjs';
-import { allegroMappingRecordsEqual } from '../netlify/functions/lib/domain/allegro-mapping-store.mjs';
+} from '../src/backend/lib/domain/allegro-canonical-mappings.mjs';
+import { allegroMappingRecordsEqual } from '../src/backend/lib/domain/allegro-mapping-store.mjs';
 
 const product = { id: 'P-1', nazwa: 'ECO FUN - TRYLMA', ean: '5906018025309', cena: 39.9, opis: 'Gra logiczna.', allegroOfferId: 'OFF-NEW' };
 const offer = (id, status = 'ACTIVE') => ({ id, name: 'ECO FUN - TRYLMA', ean: '5906018025309', status });

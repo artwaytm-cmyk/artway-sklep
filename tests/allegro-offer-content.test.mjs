@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allegroOfferTitle, allegroOfferTitleValid } from '../netlify/functions/lib/domain/allegro-offer-content.mjs';
+import { allegroOfferTitle, allegroOfferTitleValid } from '../src/backend/lib/domain/allegro-offer-content.mjs';
 
 test('krótka nazwa produktu dostaje zgodny, faktyczny tytuł Allegro', () => {
   const title = allegroOfferTitle({ nazwa: 'Pieniądze', producent: 'Alexander', kategoria: 'Tablice edukacyjne i inne', kodProducenta: '0026' });

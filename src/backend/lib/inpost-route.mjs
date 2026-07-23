@@ -81,7 +81,7 @@ export function createInpostRoute(deps = {}) {
     // ─── INPOST: webhook z Managera Paczek / ShipX → obsługa zleceń i tracking ───
     if (action === 'inpost-webhook') {
       if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!webhookSecret()) return respond({ ok: false, error: 'Brak INPOST_WEBHOOK_SECRET w Netlify.', code: 'webhook_not_configured' }, 503);
+      if (!webhookSecret()) return respond({ ok: false, error: 'Brak INPOST_WEBHOOK_SECRET w konfiguracji serwera.', code: 'webhook_not_configured' }, 503);
       if (!webhookAuthorized(req, url)) return respond({ ok: false, error: 'Nieprawidłowy token webhooka', code: 'auth' }, 401);
       const rawBody = await req.text();
       let payload = {};
@@ -117,7 +117,7 @@ export function createInpostRoute(deps = {}) {
           ok: false,
           configured: false,
           code: 'inpost_not_configured',
-          error: 'InPost nie jest skonfigurowany. Ustaw brakujące zmienne Netlify.',
+          error: 'InPost nie jest skonfigurowany. Ustaw brakujące zmienne serwera.',
           missingEnv: c.missingEnv,
           inpost: publicConfig(),
         }, 503);
@@ -159,7 +159,7 @@ export function createInpostRoute(deps = {}) {
       if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const c = configure();
-      if (!c.configured) return respond({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany. Ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify.', code: 'inpost_not_configured' }, 503);
+      if (!c.configured) return respond({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany. Ustaw INPOST_TOKEN i INPOST_ORG_ID na serwerze.', code: 'inpost_not_configured' }, 503);
       const body = await req.json().catch(() => ({}));
       const nr = orderNumber(body.nr || body.number);
       if (!nr) return respond({ ok: false, error: 'Brak numeru zamówienia' }, 422);

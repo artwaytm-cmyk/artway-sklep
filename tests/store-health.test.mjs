@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import handler from '../netlify/functions/lib/store-app.mjs';
+import handler from '../src/backend/lib/store-app.mjs';
 
 test('główny backend uruchamia się po podziale na moduły', async () => {
   const response = await handler(new Request('http://localhost/api/store?action=health'), {});

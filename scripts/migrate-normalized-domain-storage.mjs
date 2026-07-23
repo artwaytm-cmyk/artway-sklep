@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { createPostgresStoreRepository, postgresPoolFor } from '../netlify/functions/lib/core/postgres-store-repository.mjs';
-import { DIRECT_DOMAIN_CONFIGS, SETTINGS_DOMAIN_CONFIGS } from '../netlify/functions/lib/core/normalized-domain-repository.mjs';
+import { createPostgresStoreRepository, postgresPoolFor } from '../src/backend/lib/core/postgres-store-repository.mjs';
+import { DIRECT_DOMAIN_CONFIGS, SETTINGS_DOMAIN_CONFIGS } from '../src/backend/lib/core/normalized-domain-repository.mjs';
 
 const connectionString = process.env.DATABASE_URL;
 const namespace = String(process.env.ARTWAY_STORE_NAME || 'artway-sklep').trim();

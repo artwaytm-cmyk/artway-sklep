@@ -13,7 +13,7 @@ export default async () => {
     return new Response('not configured');
   }
   try {
-    const response = await fetch(`${base}/.netlify/functions/store?action=infakt-sync`, {
+    const response = await fetch(`${base}/api/store?action=infakt-sync`, {
       method: 'POST',
       headers: { 'x-admin-token': token, 'content-type': 'application/json' },
       body: '{}',

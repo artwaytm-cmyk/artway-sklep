@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyInventoryStockSet } from '../netlify/functions/lib/domain/inventory.mjs';
+import { applyInventoryStockSet } from '../src/backend/lib/domain/inventory.mjs';
 
 const NOW = new Date('2026-07-15T10:15:30.000Z');
 

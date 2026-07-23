@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createAgentRuntime } from '../netlify/functions/lib/domain/agent-runtime.mjs';
+import { createAgentRuntime } from '../src/backend/lib/domain/agent-runtime.mjs';
 
 function memoryStore() {
   let value = {}, etag = '0';

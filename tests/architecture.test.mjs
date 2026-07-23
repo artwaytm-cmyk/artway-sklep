@@ -39,9 +39,9 @@ test('moduły źródłowe mają kontrolowany rozmiar i jednoznaczną kolejność
   assert.equal(new Set(bundledSources).size, bundledSources.length);
   const applicationSources = (await Promise.all([
     sourceFiles('src/frontend'), sourceFiles('src/styles'), sourceFiles('src/backend'),
-    sourceFiles('netlify/functions/lib/core'), sourceFiles('netlify/functions/lib/domain'),
-    sourceFiles('netlify/functions/lib'),
-  ])).flat().filter((source) => source !== 'netlify/functions/lib/store-app.mjs');
+    sourceFiles('src/backend/lib/core'), sourceFiles('src/backend/lib/domain'),
+    sourceFiles('src/backend/lib'),
+  ])).flat().filter((source) => source !== 'src/backend/lib/store-app.mjs');
   const sources = [...new Set([...bundledSources, ...applicationSources])];
   for (const source of sources) {
     const content = await readFile(source, 'utf8');
@@ -54,13 +54,13 @@ test('moduły źródłowe mają kontrolowany rozmiar i jednoznaczną kolejność
 });
 
 test('główny backend pozostaje koordynatorem z kontrolowanym budżetem migracyjnym', async () => {
-  const file = await stat('netlify/functions/lib/store-app.mjs');
+  const file = await stat('src/backend/lib/store-app.mjs');
   assert.ok(file.size <= B.backendCoordinator.targetBytes, `store-app.mjs wrócił ponad cel ${B.backendCoordinator.targetBytes} B; trasy muszą pozostać w modułach domenowych`);
   assert.ok(file.size <= B.backendCoordinator.maxBytes, `store-app.mjs urósł do ${file.size} B; wydziel kolejną domenę`);
-  const storeLines = physicalLineCount(await readFile('netlify/functions/lib/store-app.mjs', 'utf8'));
+  const storeLines = physicalLineCount(await readFile('src/backend/lib/store-app.mjs', 'utf8'));
   assert.ok(storeLines <= B.backendCoordinator.targetLines, `store-app.mjs ma ${storeLines} linii i przekroczył osiągnięty cel koordynatora`);
   assert.ok(storeLines <= B.backendCoordinator.maxLines, `store-app.mjs ma ${storeLines} fizycznych linii; wydziel kolejną domenę`);
-  const catalogQuality = await stat('netlify/functions/lib/domain/catalog-quality.mjs');
+  const catalogQuality = await stat('src/backend/lib/domain/catalog-quality.mjs');
   assert.ok(catalogQuality.size < 80_000, `catalog-quality.mjs urósł do ${catalogQuality.size} B; rozdziel audyt od korekt`);
 });
 
@@ -97,22 +97,22 @@ test('wydzielone domeny pozostają małe i są częścią właściwego pakietu',
     assert.ok(lines <= B.source.focusedFrontend.maxLines, `${source} ma ${lines} linii; przekroczono twardy budżet domeny panelu`);
   }
   for (const source of [
-    'netlify/functions/lib/system-route.mjs',
-    'netlify/functions/lib/store-data-route.mjs',
-    'netlify/functions/lib/inpost-route.mjs',
-    'netlify/functions/lib/inpost-service-shipment-route.mjs',
-    'netlify/functions/lib/infakt-route.mjs',
-    'netlify/functions/lib/paynow-route.mjs',
-    'netlify/functions/lib/email-service.mjs',
-    'netlify/functions/lib/inpost-service.mjs',
-    'netlify/functions/lib/paynow-service.mjs',
-    'netlify/functions/lib/infakt-service.mjs',
-    'netlify/functions/lib/product-source-inspection-service.mjs',
-    'netlify/functions/lib/agent-operations-route.mjs',
-    'netlify/functions/lib/allegro-communications-route.mjs',
-    'netlify/functions/lib/allegro-mapping-route.mjs',
-    'netlify/functions/lib/product-availability-route.mjs',
-    'netlify/functions/lib/email-route.mjs',
+    'src/backend/lib/system-route.mjs',
+    'src/backend/lib/store-data-route.mjs',
+    'src/backend/lib/inpost-route.mjs',
+    'src/backend/lib/inpost-service-shipment-route.mjs',
+    'src/backend/lib/infakt-route.mjs',
+    'src/backend/lib/paynow-route.mjs',
+    'src/backend/lib/email-service.mjs',
+    'src/backend/lib/inpost-service.mjs',
+    'src/backend/lib/paynow-service.mjs',
+    'src/backend/lib/infakt-service.mjs',
+    'src/backend/lib/product-source-inspection-service.mjs',
+    'src/backend/lib/agent-operations-route.mjs',
+    'src/backend/lib/allegro-communications-route.mjs',
+    'src/backend/lib/allegro-mapping-route.mjs',
+    'src/backend/lib/product-availability-route.mjs',
+    'src/backend/lib/email-route.mjs',
   ]) {
     const lines = physicalLineCount(await readFile(source, 'utf8'));
     assert.ok(lines <= B.source.integrationService.maxLines, `${source} ma ${lines} linii; przekroczono twardy budżet usługi integracyjnej`);
@@ -120,7 +120,7 @@ test('wydzielone domeny pozostają małe i są częścią właściwego pakietu',
 });
 
 test('koordynator deleguje wydzielone domeny zamiast ponownie zawierać ich trasy', async () => {
-  const coordinator = await readFile('netlify/functions/lib/store-app.mjs', 'utf8');
+  const coordinator = await readFile('src/backend/lib/store-app.mjs', 'utf8');
   for (const route of [
     'agentOperationsRoute', 'allegroCommunicationsRoute', 'allegroMappingRoute',
     'productAvailabilityRoute', 'emailRoute',
@@ -182,14 +182,10 @@ test('HTML startowy ma komplet podstaw technicznego SEO', async () => {
 });
 
 test('domena marketingowa przekierowuje stale na kanoniczny adres sklepu', async () => {
-  const config = await readFile('netlify.toml', 'utf8');
-  const apexRedirect = config.indexOf('from = "https://allsklep.pl/*"');
-  const wwwRedirect = config.indexOf('from = "https://www.allsklep.pl/*"');
-  const appRewrite = config.indexOf('from = "/api/store"');
-  assert.ok(apexRedirect >= 0 && wwwRedirect >= 0, 'brakuje przekierowania obu wariantów allsklep.pl');
-  assert.ok(apexRedirect < appRewrite && wwwRedirect < appRewrite, 'przekierowania domen muszą poprzedzać wewnętrzne rewrite aplikacji');
-  const canonicalRedirects = config.match(/to = "https:\/\/artwaytm\.pl\/:splat"[\s\S]*?status = 301[\s\S]*?force = true/g) || [];
-  assert.equal(canonicalRedirects.length, 2, 'każdy wariant domeny wymaga osobnej reguły 301');
+  const config = await readFile('ops/nginx/artway-production.conf', 'utf8');
+  assert.match(config, /server_name allsklep\.pl www\.allsklep\.pl;/);
+  assert.match(config, /return 301 https:\/\/artwaytm\.pl\$uri\?entry_domain=allsklep\.pl&\$args;/);
+  assert.match(config, /location = \/api\/store/);
 });
 
 test('podstawowy interfejs ma obsługę klawiatury i czytników ekranu', async () => {

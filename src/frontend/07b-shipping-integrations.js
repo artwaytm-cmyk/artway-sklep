@@ -205,7 +205,7 @@ async function sprawdzBramke(cicho=false){
     if(!cicho){
       const ip=cloud.inpost||{};
       const czesci=[];
-      czesci.push("Netlify Functions działa ✅");
+      czesci.push("Backend VPS działa ✅");
       czesci.push(cloud.email?.authenticated?`SMTP ${cloud.email.provider||""} połączony`:cloud.email?.configured?"SMTP zapisany — wymaga testu":"SMTP wymaga naprawy poświadczenia");
       czesci.push(ip.authenticated?`InPost ShipX połączony (${ip.env||"production"})`:ip.configured?`InPost ShipX zapisany (${ip.env||"production"})`:`InPost: brakuje ${(ip.missingEnv&&ip.missingEnv.length?ip.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")}`);
       if(!ip.geowidgetConfigured) czesci.push("mapa paczkomatów: brak INPOST_GEOWIDGET_TOKEN");
@@ -214,14 +214,14 @@ async function sprawdzBramke(cicho=false){
     if(maUprawnieniaZapisuChmury()&&Date.now()-ostatniTestIntegracjiSerwerowych>15*60*1000)setTimeout(()=>sprawdzPolaczeniaSerwerowe(true),0);
     if(trasa().startsWith("/admin/wysylki")||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
     return;
-  }catch(e){ /* Netlify może być chwilowo niedostępne — niżej próbujemy awaryjny backend PHP */ }
+  }catch(e){ /* Główny backend VPS może być chwilowo niedostępny — niżej działa kontrola awaryjna. */ }
   try{
     const d=await wywolajBramke("health");
     stanBramki={...stanBramki,...d,email:d.email||stanBramki.email,store:d.store||stanBramki.store,sprawdzono:true,online:true,error:""};
     if(!cicho) toast(d.ready?"Awaryjna bramka PHP gotowa ✅":d.configured?"Awaryjna bramka PHP skonfigurowana":"Bramka InPost wymaga konfiguracji");
   }catch(e){
     stanBramki={...stanBramki,sprawdzono:true,online:false,error:e.message};
-    if(!cicho) toast("Bramka niedostępna — sprawdź Netlify Functions");
+    if(!cicho) toast("Bramka niedostępna — sprawdź usługę backendu VPS");
   }
   if(trasa().startsWith("/admin/wysylki")||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
 }
@@ -343,7 +343,7 @@ async function utworzPrzesylkeAPI(nr){
     toast(labelReady?`Przesyłka InPost utworzona ✅ ${d.trackingNumber||"etykieta gotowa"}`:"Przesyłka utworzona, ale InPost jeszcze potwierdza etykietę — użyj „Sprawdź status InPost” za chwilę.");
     renderuj();
   }catch(bl){
-    if(bl.code==="inpost_not_configured"){ toast("Najpierw skonfiguruj InPost w Netlify (INPOST_TOKEN, INPOST_ORG_ID)"); location.hash="#/admin/dostawy"; return; }
+    if(bl.code==="inpost_not_configured"){ toast("Najpierw skonfiguruj InPost na serwerze (INPOST_TOKEN, INPOST_ORG_ID)"); location.hash="#/admin/dostawy"; return; }
     if(bl.code==="no_point"){ toast("Brak punktu InPost — otwórz zlecenie i wpisz paczkomat przed etykietą"); return; }
     if(bl.code==="exists"){ toast("Przesyłka InPost już istnieje dla tego zamówienia"); return; }
     if(bl.code==="inpost_validation"){ toast("Uzupełnij dane do InPost: "+((bl.details||[]).map(x=>x.message||x).join(" • ")||bl.message)); return; }
@@ -374,7 +374,7 @@ async function pobierzEtykieteAPI(nr,format="A6"){
     loguj("info",`Pobrano etykietę InPost ${format} dla ${nr}`);
     renderuj();
   }catch(bl){
-    if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost w Netlify"); return; }
+    if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost na serwerze"); return; }
     if(bl.code==="no_shipment"){ toast("Najpierw utwórz przesyłkę InPost"); return; }
     if(bl.code==="label_not_ready"){
       aktualizujZamowienie(nr,zam=>{ const w=daneWysylki(zam); if(bl.status)w.inpostStatus=bl.status; if(bl.trackingNumber)w.numer=bl.trackingNumber; w.etykietaGotowa=false; w.zadania={...(w.zadania||{}),dane:true,etykieta:false}; zam.wysylka=w; });
@@ -449,7 +449,7 @@ async function synchronizujTrackingAPI(nr){
     toast((d.labelReady||d.trackingNumber)?"Status InPost zaktualizowany ✅ — etykieta gotowa":"Status InPost zaktualizowany — etykieta jeszcze czeka na potwierdzenie");
     renderuj();
   }catch(bl){
-    if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost w Netlify"); return; }
+    if(bl.code==="inpost_not_configured"){ toast("Skonfiguruj InPost na serwerze"); return; }
     if(bl.code==="no_shipment"){ toast("To zamówienie nie ma przesyłki InPost"); return; }
     aktualizujZamowienie(nr,zam=>{const w=daneWysylki(zam);w.bladIntegracji=bl.message;zam.wysylka=w;});
     loguj("blad",`InPost status ${nr}: ${bl.message}`);toast("Status: "+bl.message);renderuj();
@@ -466,7 +466,7 @@ async function synchronizujWszystkieStatusyAPI(){
     toast(`✅ Sprawdzono ${d.sprawdzone||0} przesyłek — ${d.zmienione||0} zmian statusu, ${d.maile||0} e-maili`);
     renderuj();
   }catch(bl){
-    if(bl.code==="inpost_not_configured") toast("InPost nie jest skonfigurowany w Netlify");
+    if(bl.code==="inpost_not_configured") toast("InPost nie jest skonfigurowany na serwerze");
     else toast("Błąd sprawdzania statusów: "+bl.message);
   }
 }

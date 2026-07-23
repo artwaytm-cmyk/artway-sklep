@@ -7,11 +7,11 @@ import {
   hydrateNormalizedValue,
   normalizedRevisionToken,
   splitNormalizedValue,
-} from '../netlify/functions/lib/core/normalized-domain-repository.mjs';
+} from '../src/backend/lib/core/normalized-domain-repository.mjs';
 import {
   dedicatedDomains,
   dedicatedTableForDomain,
-} from '../netlify/functions/lib/core/dedicated-domain-storage.mjs';
+} from '../src/backend/lib/core/dedicated-domain-storage.mjs';
 
 test('zamówienia są dzielone na osobne rekordy i składane bez zmiany danych', () => {
   const value = { items: [
@@ -89,7 +89,7 @@ test('lekki znacznik rewizji domen jest stabilny, posortowany i uwzględnia brak
 });
 
 test('repozytorium udostępnia przyrostowy odczyt ustawień zamiast obowiązkowego pełnego nawodnienia', async () => {
-  const source = await readFile(new URL('../netlify/functions/lib/core/normalized-domain-repository.mjs', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../src/backend/lib/core/normalized-domain-repository.mjs', import.meta.url), 'utf8');
   assert.match(source, /const readSettingsDelta = async/);
   assert.match(source, /settings_domain|domainVersions/);
   assert.match(source, /Object\.prototype\.hasOwnProperty\.call\(versions/);
@@ -117,7 +117,7 @@ test('największe domeny operacyjne mają własne tabele zamiast wspólnej tabel
 });
 
 test('dedykowana migracja zachowuje kopię wycofania i usuwa aktywne duplikaty z tabeli ogólnej', async () => {
-  const source = await readFile(new URL('../netlify/functions/lib/core/dedicated-domain-storage.mjs', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../src/backend/lib/core/dedicated-domain-storage.mjs', import.meta.url), 'utf8');
   assert.match(source, /artway_domain_records_archive_v2/);
   assert.match(source, /INSERT INTO artway_domain_records_archive_v2/);
   assert.match(source, /DELETE FROM artway_domain_records WHERE namespace=\$1 AND domain=\$2/);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { telegramProfessionalAgentHtml } from '../netlify/functions/lib/domain/telegram-communication.mjs';
+import { telegramProfessionalAgentHtml } from '../src/backend/lib/domain/telegram-communication.mjs';
 
 test('profesjonalny format Telegram zachowuje dokładnie przekazaną treść bez dodatkowych informacji', () => {
   const source = 'Stan produktu:\n- Kod: 1410\n- Ilość: 8 szt.';

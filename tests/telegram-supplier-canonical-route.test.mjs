@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTelegramRouter } from '../netlify/functions/lib/telegram-router.mjs';
-import { telegramCanonicalSupplierPreviews } from '../netlify/functions/lib/domain/telegram-communication.mjs';
+import { createTelegramRouter } from '../src/backend/lib/telegram-router.mjs';
+import { telegramCanonicalSupplierPreviews } from '../src/backend/lib/domain/telegram-communication.mjs';
 
 function createRouter({ sent = [] } = {}) {
   const record = {

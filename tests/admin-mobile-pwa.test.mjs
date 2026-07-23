@@ -43,8 +43,7 @@ test('zainstalowana aplikacja ma dolny pasek, którego nie pokazuje zwykła prze
 
 test('Service Worker nie zapisuje prywatnych danych ani odpowiedzi API',()=>{
   assert.match(worker,/isPrivateRequest/);
-  assert.match(worker,/url\.pathname==="\/api\/store"/);
-  assert.match(worker,/url\.pathname\.startsWith\("\/\.netlify\/functions\/"\)/);
+  assert.match(worker,/url\.pathname\.startsWith\("\/api\/"\)/);
   assert.match(worker,/request\.mode==="navigate"/);
   assert.match(worker,/networkFirst\(request\)/);
   assert.match(worker,/request\.destination==="style"/);

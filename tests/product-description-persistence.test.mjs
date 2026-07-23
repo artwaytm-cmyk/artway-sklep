@@ -50,7 +50,7 @@ test('wspólny opis krótki nie jest zastępowany automatycznym skrótem opisu d
 });
 
 test('synchronizacja ofert nie przywraca starego opisu Allegro do edytora produktu', async () => {
-  const source = await readFile('netlify/functions/lib/store-app.mjs', 'utf8');
+  const source = await readFile('src/backend/lib/store-app.mjs', 'utf8');
   const start = source.indexOf('async function allegroAutoMapujOfertyZKartoteka');
   const end = source.indexOf('function allegroAgentWirtualnyProduktOferty', start);
   const mapping = source.slice(start, end);

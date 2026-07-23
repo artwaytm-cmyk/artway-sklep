@@ -5,7 +5,7 @@ import {
   centralCatalogBuildRecords,
   centralCatalogMissingFields,
   centralCatalogQueryOptions,
-} from '../netlify/functions/lib/domain/central-product-catalog.mjs';
+} from '../src/backend/lib/domain/central-product-catalog.mjs';
 
 test('centralna kartoteka scala produkt, magazyn, dostępność i Allegro pod jednym ID', () => {
   const data = {
@@ -80,8 +80,8 @@ test('publiczny katalog obsługuje gałęzie, wybrane produkty, nowości i oceny
 });
 
 test('backend udostępnia stronicowaną kartotekę, pojedynczy produkt, synchronizację i status', async () => {
-  const source = await readFile('netlify/functions/lib/store-app.mjs', 'utf8');
-  const route = await readFile('netlify/functions/lib/central-product-catalog-route.mjs', 'utf8');
+  const source = await readFile('src/backend/lib/store-app.mjs', 'utf8');
+  const route = await readFile('src/backend/lib/central-product-catalog-route.mjs', 'utf8');
   for (const action of ['product-catalog-query', 'product-catalog-item', 'product-catalog-sync', 'product-catalog-status']) assert.match(route, new RegExp(action));
   assert.match(source, /createCentralProductCatalog/);
   assert.match(source, /createCentralProductCatalogRoute/);
@@ -105,7 +105,7 @@ test('sklep publiczny używa tej samej centralnej paginacji i pobiera szczegół
   const [cloud, storefront, route] = await Promise.all([
     readFile('src/frontend/03-cloud-sync.js', 'utf8'),
     readFile('src/frontend/06b-storefront-catalog.js', 'utf8'),
-    readFile('netlify/functions/lib/store-data-route.mjs', 'utf8'),
+    readFile('src/backend/lib/store-data-route.mjs', 'utf8'),
   ]);
   assert.match(cloud, /catalogMode:trybAdmina\?"legacy":"central"/);
   assert.match(cloud, /chmuraKatalogCentralnyPubliczny/);

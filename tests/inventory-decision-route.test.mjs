@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createInventoryDecisionRoute } from '../netlify/functions/lib/inventory-decision-route.mjs';
+import { createInventoryDecisionRoute } from '../src/backend/lib/inventory-decision-route.mjs';
 
 const product = { id: '31', nazwa: 'Gorący Ziemniak Familijny', externalId: '1410', ean: '5906018014105' };
 const draft = {

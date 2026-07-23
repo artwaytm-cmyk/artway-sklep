@@ -56,7 +56,7 @@ export function createInpostService({ read, write, onOrderStatusTransition }) {
   async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'application/json' } = {}) {
     const c = inpostKonfiguracja();
     if (!c.configured) {
-      const blad = new Error('InPost nie jest skonfigurowany po stronie serwera. Ustaw INPOST_TOKEN i INPOST_ORG_ID w Netlify.');
+      const blad = new Error('InPost nie jest skonfigurowany po stronie serwera. Ustaw INPOST_TOKEN i INPOST_ORG_ID w chronionej konfiguracji VPS.');
       blad.code = 'inpost_not_configured';
       blad.status = 503;
       blad.missingEnv = c.missingEnv;

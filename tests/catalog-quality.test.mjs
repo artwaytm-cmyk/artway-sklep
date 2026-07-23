@@ -5,7 +5,7 @@ import {
   auditCatalog,
   mergeCatalogProducts,
   safeCatalogPatch,
-} from '../netlify/functions/lib/domain/catalog-quality.mjs';
+} from '../src/backend/lib/domain/catalog-quality.mjs';
 
 const completeProduct = {
   id: 1,

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCodexAgentQueue, sanitizeCodexBroadcastChatIds, sanitizeCodexInboundKind, sanitizeCodexReplyMarkup } from '../netlify/functions/lib/domain/codex-agent-queue.mjs';
+import { createCodexAgentQueue, sanitizeCodexBroadcastChatIds, sanitizeCodexInboundKind, sanitizeCodexReplyMarkup } from '../src/backend/lib/domain/codex-agent-queue.mjs';
 
 function repository() {
   let value = { items: [], updatedAt: null }, etag = 'v1', writes = 0;

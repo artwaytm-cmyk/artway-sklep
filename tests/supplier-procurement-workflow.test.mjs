@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   applySupplierProcurementToOrder,
   applySupplierProcurementWorkflow,
-} from '../netlify/functions/lib/domain/supplier-procurement-workflow.mjs';
+} from '../src/backend/lib/domain/supplier-procurement-workflow.mjs';
 
 const order = (overrides = {}) => ({
   id: 'ALG-1', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'PROCESSING', warehouseStage: 'braki',
