@@ -62,6 +62,24 @@ test('aktywny stan Agenta, Telegrama i inFaktu jest dzielony na rekordy', () => 
   assert.deepEqual(hydrateNormalizedValue(split.metadata, split.records, config), value);
 });
 
+test('rejestr InPost rozdziela nadania, adresy i ustawienia z wartościami null bez utraty danych', () => {
+  const value = {
+    items: [{ id: 'IPS-1', requestId: 'REQ-1', status: 'created' }],
+    contacts: [{ id: 'IPA-1', label: 'Nadawca', address: { post_code: '84-207', city: 'Bojano' } }],
+    settings: { commissionGross: 4, sender: {}, priceList: { extras: { weekendGross: null } }, updatedAt: null },
+    updatedAt: '2026-07-23T08:00:00.000Z',
+  };
+  const config = DIRECT_DOMAIN_CONFIGS.inpost_service_shipments;
+  const split = splitNormalizedValue(value, config);
+  assert.deepEqual(split.records.map((row) => [row.collection, row.recordId]), [
+    ['items', 'IPS-1'],
+    ['contacts', 'IPA-1'],
+    ['settings', 'singleton'],
+  ]);
+  assert.ok(split.records.every((row) => row.data !== null));
+  assert.deepEqual(hydrateNormalizedValue(split.metadata, split.records, config), value);
+});
+
 test('lekki znacznik rewizji domen jest stabilny, posortowany i uwzględnia brakującą domenę', () => {
   const token = normalizedRevisionToken(
     ['settings:artway_stany', 'kv:allegro_offers', 'settings:artway_stany', 'kv:brak'],

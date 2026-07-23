@@ -69,7 +69,11 @@ const DIRECT_DOMAIN_CONFIGS = Object.freeze({
   allegro_availability_automation: containerConfig({ items: objectConfig() }),
   allegro_auto_replies: containerConfig({ items: objectConfig() }),
   inpost_webhooks: containerConfig({ items: arrayConfig(['id', 'at']) }),
-  inpost_service_shipments: containerConfig({ items: arrayConfig(['id', 'requestId']), settings: objectConfig() }),
+  inpost_service_shipments: containerConfig({
+    items: arrayConfig(['id', 'requestId']),
+    contacts: arrayConfig(['id']),
+    settings: valueConfig(),
+  }),
   allegro_mapping_audit: containerConfig({ items: arrayConfig(['id', 'at']) }),
   allegro_communication_telegram_alerts: containerConfig({ items: objectConfig() }),
   allegro_catalog_maintenance: containerConfig({ errors: arrayConfig(['id', 'at']) }),
