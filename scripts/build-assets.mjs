@@ -56,6 +56,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/07a-shipping-workflow.js',
       'src/frontend/07c-shipping-views.js',
       'src/frontend/07d-inpost-service-shipping.js',
+      'src/frontend/07e-inpost-service-address-book-pricing.js',
       'src/frontend/08a-admin-responsive-layout.js',
       'src/frontend/10-agent-ai.js',
       'src/frontend/10-agent-ai-supplier-planning.js',
@@ -244,6 +245,7 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/07a-shipping-workflow.js',
       'src/frontend/07c-shipping-views.js',
       'src/frontend/07d-inpost-service-shipping.js',
+      'src/frontend/07e-inpost-service-address-book-pricing.js',
     ],
   },
   {

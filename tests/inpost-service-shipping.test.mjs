@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   inpostServiceInvoicePayload,
+  inpostServicePricePayload,
+  inpostServicePricing,
   inpostServiceShipxPayload,
+  normalizeInpostServiceContact,
   normalizeInpostServiceDraft,
   safeInpostServiceRecord,
   summarizeInpostServiceBilling,
   validateInpostServiceDraft,
 } from '../netlify/functions/lib/domain/inpost-service-shipment.mjs';
+import { createInpostServiceShipmentRoute } from '../netlify/functions/lib/inpost-service-shipment-route.mjs';
 
 const sender = {
   companyName: 'Artway-TM sp. z o.o.',
@@ -59,6 +63,42 @@ test('nadanie usługowe waliduje klienta i obsługuje Paczkomat, pobranie, ochro
   assert.equal(payload.end_of_week_collection, true);
   assert.deepEqual(payload.cod, { amount: 149.99, currency: 'PLN' });
   assert.deepEqual(payload.insurance, { amount: 200, currency: 'PLN' });
+});
+
+test('wycena ShipX korzysta z tego samego szkicu i pokazuje pełny koszt z prowizją', () => {
+  const value = draft();
+  const payload = inpostServicePricePayload(value, 'QUOTE-1');
+  assert.equal(payload.shipments.length, 1);
+  assert.equal(payload.shipments[0].id, 'QUOTE-1');
+  assert.equal(payload.shipments[0].service, 'inpost_locker_standard');
+  assert.equal(payload.shipments[0].parcels.dimensions.length, '300');
+  const pricing = inpostServicePricing([{
+    id: 'QUOTE-1',
+    calculated_charge_amount: '18.90',
+    calculated_charge_amount_non_commission: '15.00',
+    fuel_charge_amount: '1.50',
+    cod_charge_amount: '2.40',
+  }], { commissionGross: 4 });
+  assert.equal(pricing.totalGross, 18.9);
+  assert.equal(pricing.customerTotalGross, 22.9);
+  assert.equal(pricing.breakdown.baseGross, 15);
+  assert.equal(pricing.source, 'shipx_calculation');
+  const unavailable = inpostServicePricing([{ calculated_charge_amount: null }], { commissionGross: 4 });
+  assert.equal(unavailable.available, false);
+  assert.equal(unavailable.totalGross, null);
+});
+
+test('książka adresowa normalizuje jeden kontakt dla roli nadawcy i odbiorcy', () => {
+  const contact = normalizeInpostServiceContact({
+    id: 'IPA-1',
+    label: 'Magazyn klienta',
+    roles: ['sender', 'receiver'],
+    ...receiver,
+  });
+  assert.equal(contact.id, 'IPA-1');
+  assert.deepEqual(contact.roles, ['sender', 'receiver']);
+  assert.equal(contact.address.post_code, '80-209');
+  assert.equal(contact.address.building_number, '8');
 });
 
 test('FV miesięczna wymaga firmy i NIP, a faktura zawiera tylko prowizję Artway-TM', () => {
@@ -118,17 +158,68 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   ]);
   assert.match(shipping, /#\/admin\/wysylki\/inpost/);
   assert.match(shipping, /function panelWysylkiUslugowejInpost/);
-  assert.match(shipping, /Koszt umowny InPost jest ukryty/);
+  assert.match(shipping, /Wybierz z książki adresowej/);
+  assert.match(shipping, /Sprawdź koszt teraz/);
   assert.match(core, /#\/admin\/infakt\/wysylki/);
   assert.match(inventory, /function infaktWysylkiInpostPanelHTML/);
   assert.match(css, /\.inpost-service-workspace/);
 });
 
-test('trasa serwerowa zabezpiecza idempotencję i usuwa stawki InPost z odpowiedzi', async () => {
+test('trasa serwerowa zabezpiecza idempotencję, książkę adresową i wycenę ShipX', async () => {
   const source = await readFile(new URL('../netlify/functions/lib/inpost-service-shipment-route.mjs', import.meta.url), 'utf8');
   assert.match(source, /duplicatePrevented/);
   assert.match(source, /concurrentDuplicate/);
   assert.match(source, /safeInpostServiceRecord/);
   assert.match(source, /inpost-service-bill/);
+  assert.match(source, /inpost-service-contact-save/);
+  assert.match(source, /inpost-service-contact-delete/);
+  assert.match(source, /inpost-service-quote/);
+  assert.match(source, /shipments\/calculate/);
   assert.doesNotMatch(source, /carrierCost\s*:/);
+});
+
+test('endpoint wyceny naprawdę wysyła szkic do ShipX, a książka adresowa zapisuje kontakt', async () => {
+  const storage = new Map(), calls = [];
+  const route = createInpostServiceShipmentRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    text: (value, max = 200) => String(value ?? '').slice(0, max),
+    readVersioned: async (key, fallback) => ({ value: storage.has(key) ? storage.get(key) : structuredClone(fallback), version: 1 }),
+    writeIfVersion: async (key, value) => { storage.set(key, structuredClone(value)); return { modified: true }; },
+    publicConfig: () => ({ configured: true }),
+    configure: () => ({ configured: true, orgId: 'ORG-1', lockerService: 'inpost_locker_standard', courierService: 'inpost_courier_standard' }),
+    organization: async () => ({ id: 'ORG-1' }),
+    serviceAvailability: async () => ({ services: ['inpost_locker_standard'], locker: true, courier: false, lockerService: 'inpost_locker_standard', courierService: 'inpost_courier_standard' }),
+    call: async (path, options) => {
+      calls.push({ path, options });
+      return [{ id: 'REQ-1', calculated_charge_amount: '16.50', fuel_charge_amount: '1.50' }];
+    },
+  });
+  const quoteRequest = new Request('http://localhost/api?action=inpost-service-quote', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...draft(),
+      sender,
+      receiver,
+      requestId: 'REQ-1',
+      deliveryType: 'locker',
+      targetPoint: 'BOJ01N',
+    }),
+  });
+  const quote = await route(quoteRequest, new URL(quoteRequest.url), 'inpost-service-quote');
+  assert.equal(quote.status, 200);
+  assert.equal(quote.body.pricing.totalGross, 16.5);
+  assert.equal(calls[0].path, '/v1/organizations/ORG-1/shipments/calculate');
+  assert.equal(calls[0].options.bodyObj.shipments[0].custom_attributes.target_point, 'BOJ01N');
+
+  const contactRequest = new Request('http://localhost/api?action=inpost-service-contact-save', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ role: 'receiver', contact: receiver }),
+  });
+  const contact = await route(contactRequest, new URL(contactRequest.url), 'inpost-service-contact-save');
+  assert.equal(contact.status, 201);
+  assert.equal(contact.body.addressBook.length, 1);
+  assert.equal(contact.body.addressBook[0].taxCode, '1234567890');
 });

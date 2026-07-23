@@ -1,10 +1,14 @@
 import crypto from 'node:crypto';
 import {
   inpostServiceBillingKey,
+  inpostServiceContactFingerprint,
   inpostServiceDefaultSettings,
   inpostServiceInvoicePayload,
   inpostServicePickupPayload,
+  inpostServicePricePayload,
+  inpostServicePricing,
   inpostServiceShipxPayload,
+  normalizeInpostServiceContact,
   normalizeInpostServiceDraft,
   safeInpostServiceRecord,
   summarizeInpostServiceBilling,
@@ -14,13 +18,16 @@ import {
 const STORE_KEY = 'inpost_service_shipments';
 
 function initialStore() {
-  return { items: [], settings: inpostServiceDefaultSettings(), updatedAt: null };
+  return { items: [], contacts: [], settings: inpostServiceDefaultSettings(), updatedAt: null };
 }
 
 function cleanStore(value = {}) {
   return {
     ...value,
     items: Array.isArray(value?.items) ? value.items : [],
+    contacts: (Array.isArray(value?.contacts) ? value.contacts : [])
+      .map((contact) => normalizeInpostServiceContact(contact))
+      .filter((contact) => contact.id && (contact.email || contact.phone || contact.taxCode)),
     settings: { ...inpostServiceDefaultSettings(), ...(value?.settings || {}) },
   };
 }
@@ -69,6 +76,59 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         lockerService: config.lockerService,
         courierService: config.courierService,
       };
+    }
+  }
+
+  function upsertContact(store, raw, role = 'receiver') {
+    const now = new Date().toISOString();
+    const next = normalizeInpostServiceContact(raw, { role });
+    const fingerprint = inpostServiceContactFingerprint(next);
+    const index = store.contacts.findIndex((contact) => (
+      (next.id && contact.id === next.id)
+      || inpostServiceContactFingerprint(contact) === fingerprint
+    ));
+    if (index >= 0) {
+      const current = store.contacts[index];
+      store.contacts[index] = {
+        ...current,
+        ...next,
+        id: current.id,
+        roles: [...new Set([...(current.roles || []), ...(next.roles || []), role])],
+        createdAt: current.createdAt || now,
+        updatedAt: now,
+      };
+      return store.contacts[index];
+    }
+    const contact = {
+      ...next,
+      id: `IPA-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
+      roles: [...new Set([...(next.roles || []), role])],
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.contacts.push(contact);
+    store.contacts = store.contacts.slice(-5000);
+    return contact;
+  }
+
+  async function calculatePricing(draft, config) {
+    const fallback = () => inpostServicePricing({}, {
+      manualGross: draft.pricing?.manualGross,
+      commissionGross: draft.billing?.commissionGross,
+    });
+    try {
+      const result = await call(`/v1/organizations/${encodeURIComponent(config.orgId)}/shipments/calculate`, {
+        method: 'POST',
+        bodyObj: inpostServicePricePayload(draft, draft.requestId || 'QUOTE'),
+      });
+      return inpostServicePricing(result, {
+        manualGross: draft.pricing?.manualGross,
+        commissionGross: draft.billing?.commissionGross,
+      });
+    } catch (error) {
+      const pricing = fallback();
+      if (pricing.available) return { ...pricing, warning: text(error.message, 500) };
+      throw error;
     }
   }
 
@@ -155,10 +215,42 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         config: publicConfig(),
         serviceAvailability: availability,
         settings: store.settings,
+        addressBook: store.contacts,
         items,
         billing: summarizeInpostServiceBilling(store.items),
         updatedAt: store.updatedAt,
       });
+    }
+
+    if (action === 'inpost-service-contact-save') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const body = await req.json().catch(() => ({}));
+      const role = text(body.role, 20) === 'sender' ? 'sender' : 'receiver';
+      const candidate = normalizeInpostServiceContact(body.contact || body, { role });
+      if (!candidate.label || (!candidate.email && !candidate.phone && !candidate.taxCode)) {
+        return respond({ ok: false, error: 'Podaj nazwę oraz e-mail, telefon albo NIP kontaktu.', code: 'contact_validation' }, 422);
+      }
+      let contact = null;
+      const store = await mutateStore((current) => {
+        contact = upsertContact(current, candidate, role);
+        return current;
+      });
+      return respond({ ok: true, contact, addressBook: store.contacts }, candidate.id ? 200 : 201);
+    }
+
+    if (action === 'inpost-service-contact-delete') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const body = await req.json().catch(() => ({})), id = text(body.id, 100);
+      if (!id) return respond({ ok: false, error: 'Brak identyfikatora kontaktu.' }, 422);
+      let removed = false;
+      const store = await mutateStore((current) => {
+        const before = current.contacts.length;
+        current.contacts = current.contacts.filter((contact) => contact.id !== id);
+        removed = current.contacts.length !== before;
+        return removed ? current : null;
+      });
+      if (!removed) return respond({ ok: false, error: 'Nie znaleziono zapisanego adresu.', code: 'not_found' }, 404);
+      return respond({ ok: true, addressBook: store.contacts });
     }
 
     if (action === 'inpost-service-settings') {
@@ -175,6 +267,20 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         return current;
       });
       return respond({ ok: true, settings: store.settings });
+    }
+
+    if (action === 'inpost-service-quote') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const config = configure();
+      if (!config.configured) return respond({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany po stronie serwera.', code: 'inpost_not_configured' }, 503);
+      const body = await req.json().catch(() => ({}));
+      const store = cleanStore((await readVersioned(STORE_KEY, initialStore())).value);
+      const availability = await activeServices(config);
+      const draft = normalizeInpostServiceDraft(body, store.settings, availability);
+      const validation = validateInpostServiceDraft(draft);
+      if (!validation.ok) return respond({ ok: false, error: 'Uzupełnij dane potrzebne do wyceny.', code: 'inpost_quote_validation', details: validation.errors }, 422);
+      const pricing = await calculatePricing(draft, config);
+      return respond({ ok: true, configured: true, pricing });
     }
 
     if (action === 'inpost-service-create') {
@@ -226,6 +332,10 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         additionalServices: draft.additionalServices,
         pickupRequested: draft.pickupRequested,
         pickup: null,
+        pricing: inpostServicePricing({}, {
+          manualGross: draft.pricing?.manualGross,
+          commissionGross: draft.billing?.commissionGross,
+        }),
         billing: { ...draft.billing, status: draft.billing.mode === 'monthly' ? 'pending' : draft.billing.mode === 'single' ? 'awaiting_invoice' : 'not_required', error: '' },
         error: '',
       };
@@ -233,6 +343,8 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       await mutateStore((current) => {
         concurrentDuplicate = current.items.find((item) => item.requestId && item.requestId === requestId) || null;
         if (concurrentDuplicate) return null;
+        if (body.saveSender === true) upsertContact(current, draft.sender, 'sender');
+        if (body.saveReceiver === true) upsertContact(current, draft.receiver, 'receiver');
         current.items.push(record); current.items = current.items.slice(-5000); return current;
       });
       if (concurrentDuplicate) {
@@ -247,8 +359,22 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       }
       let saved = record;
       try {
+        try {
+          const pricing = await calculatePricing(draft, config);
+          saved = await updateRecord(id, (item) => ({ ...item, pricing, updatedAt: new Date().toISOString() }));
+        } catch (error) {
+          saved = await updateRecord(id, (item) => ({
+            ...item,
+            pricing: { ...(item.pricing || {}), warning: text(error.message, 500), checkedAt: new Date().toISOString() },
+            updatedAt: new Date().toISOString(),
+          }));
+        }
         const created = await call(`/v1/organizations/${encodeURIComponent(config.orgId)}/shipments`, { method: 'POST', bodyObj: inpostServiceShipxPayload(draft) });
         const shipmentId = text(created?.id, 80), current = shipmentId ? await waitForLabel(shipmentId, { proby: 10, opoznienieMs: 1100 }).catch(() => created) : created;
+        const actualPricing = inpostServicePricing(current || created, {
+          manualGross: draft.pricing?.manualGross,
+          commissionGross: draft.billing?.commissionGross,
+        });
         saved = await updateRecord(id, (item) => ({
           ...item,
           status: labelReady(current) || labelReady(created) ? 'label_ready' : 'created',
@@ -257,6 +383,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
           inpostStatus: shipmentStatus(current) || shipmentStatus(created),
           labelReady: labelReady(current) || labelReady(created),
           offerId: offerId(current) || offerId(created),
+          pricing: actualPricing.available ? actualPricing : item.pricing,
           updatedAt: new Date().toISOString(),
           error: '',
         }));
@@ -289,6 +416,10 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       if (!record) return respond({ ok: false, error: 'Nie znaleziono nadania.', code: 'not_found' }, 404);
       if (!record.inpostId) return respond({ ok: false, error: 'Nadanie nie ma jeszcze ID InPost.', code: 'no_shipment' }, 422);
       const shipment = await call(`/v1/shipments/${encodeURIComponent(record.inpostId)}`, { method: 'GET' });
+      const refreshedPricing = inpostServicePricing(shipment, {
+        manualGross: record.pricing?.source === 'manual' ? record.pricing.totalGross : null,
+        commissionGross: record.billing?.commissionGross,
+      });
       const saved = await updateRecord(id, (item) => ({
         ...item,
         status: labelReady(shipment) ? 'label_ready' : item.status,
@@ -296,6 +427,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         inpostStatus: shipmentStatus(shipment) || item.inpostStatus,
         labelReady: labelReady(shipment),
         offerId: offerId(shipment) || item.offerId,
+        pricing: refreshedPricing.available ? refreshedPricing : item.pricing,
         updatedAt: new Date().toISOString(),
       }));
       return respond({ ok: true, configured: config.configured, item: safeInpostServiceRecord(saved) });

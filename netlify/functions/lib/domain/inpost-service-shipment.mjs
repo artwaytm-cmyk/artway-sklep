@@ -36,10 +36,10 @@ function emailOk(value) {
 function address(raw = {}) {
   return {
     street: clean(raw.street || raw.ulica, 120),
-    building_number: clean(raw.buildingNumber || raw.nrDomu, 30),
-    flat_number: clean(raw.flatNumber || raw.nrLokalu, 30),
+    building_number: clean(raw.buildingNumber || raw.building_number || raw.nrDomu, 30),
+    flat_number: clean(raw.flatNumber || raw.flat_number || raw.nrLokalu, 30),
     city: clean(raw.city || raw.miasto, 80),
-    post_code: postCode(raw.postCode || raw.kod || raw.kodPocztowy),
+    post_code: postCode(raw.postCode || raw.post_code || raw.kod || raw.kodPocztowy),
     country_code: 'PL',
   };
 }
@@ -87,6 +87,36 @@ export function inpostServiceDefaultSettings() {
   return { commissionGross: 4, sender: {}, updatedAt: null };
 }
 
+export function normalizeInpostServiceContact(raw = {}, options = {}) {
+  const value = party(raw);
+  const roles = [...new Set((Array.isArray(raw.roles) ? raw.roles : [options.role || raw.role])
+    .map((role) => clean(role, 20))
+    .filter((role) => ['sender', 'receiver'].includes(role)))];
+  const label = clean(raw.label || raw.name || value.companyName || `${value.firstName} ${value.lastName}`.trim() || value.email, 160);
+  return {
+    id: clean(raw.id, 100),
+    label,
+    roles: roles.length ? roles : ['receiver'],
+    favoriteSender: raw.favoriteSender === true,
+    favoriteReceiver: raw.favoriteReceiver === true,
+    ...value,
+  };
+}
+
+export function inpostServiceContactFingerprint(raw = {}) {
+  const value = normalizeInpostServiceContact(raw);
+  return [
+    value.taxCode,
+    value.email,
+    value.phone,
+    value.address.street,
+    value.address.building_number,
+    value.address.flat_number,
+    value.address.post_code,
+    value.address.city,
+  ].map((item) => clean(item, 200).toLowerCase()).join('|');
+}
+
 export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = {}) {
   const deliveryType = DELIVERY_TYPES.has(clean(raw.deliveryType, 20)) ? clean(raw.deliveryType, 20) : 'locker';
   const sendingMethod = SENDING_METHODS.has(clean(raw.sendingMethod, 40)) ? clean(raw.sendingMethod, 40) : 'parcel_locker';
@@ -128,6 +158,10 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
       commissionGross,
       month: /^\d{4}-\d{2}$/.test(clean(raw.billingMonth, 7)) ? clean(raw.billingMonth, 7) : new Date().toISOString().slice(0, 7),
       clientKey: receiver.taxCode || receiver.email,
+    },
+    pricing: {
+      manualGross: money(raw.carrierCostOverride),
+      currency: 'PLN',
     },
   };
 }
@@ -176,6 +210,54 @@ export function inpostServiceShipxPayload(draft = {}) {
   if (draft.insurance.enabled || draft.cod.enabled) payload.insurance = { amount: Math.max(draft.insurance.amount, draft.cod.amount), currency: 'PLN' };
   Object.keys(payload).forEach((key) => payload[key] === undefined && delete payload[key]);
   return payload;
+}
+
+export function inpostServicePricePayload(draft = {}, id = 'QUOTE') {
+  const shipment = inpostServiceShipxPayload(draft);
+  return {
+    shipments: [{
+      id: clean(id, 100) || 'QUOTE',
+      ...shipment,
+      parcels: Array.isArray(shipment.parcels) ? shipment.parcels[0] : shipment.parcels,
+    }],
+  };
+}
+
+function amount(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const number = Number(String(value).replace(',', '.'));
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) / 100 : null;
+}
+
+export function inpostServicePricing(raw = {}, options = {}) {
+  const value = Array.isArray(raw) ? (raw[0] || {}) : (raw || {});
+  const selectedOffer = value.selected_offer || value.selectedOffer || {};
+  const offer = selectedOffer.rate != null
+    ? selectedOffer
+    : (Array.isArray(value.offers) ? value.offers.find((item) => item?.rate != null) : null);
+  const calculated = amount(value.calculated_charge_amount);
+  const offerRate = amount(offer?.rate);
+  const manual = amount(options.manualGross);
+  const totalGross = calculated ?? offerRate ?? (manual && manual > 0 ? manual : null);
+  const source = calculated != null ? 'shipx_calculation' : offerRate != null ? 'shipx_offer' : totalGross != null ? 'manual' : 'unavailable';
+  const commissionGross = amount(options.commissionGross) || 0;
+  return {
+    totalGross,
+    currency: clean(value.currency || offer?.currency || options.currency || 'PLN', 8) || 'PLN',
+    source,
+    estimated: source === 'manual',
+    available: totalGross != null,
+    customerTotalGross: totalGross == null ? null : Math.round((totalGross + commissionGross) * 100) / 100,
+    commissionGross,
+    breakdown: {
+      baseGross: amount(value.calculated_charge_amount_non_commission),
+      fuelGross: amount(value.fuel_charge_amount),
+      notificationGross: amount(value.notification_charge_amount),
+      codGross: amount(value.cod_charge_amount),
+      insuranceGross: amount(value.insurance_charge_amount),
+    },
+    checkedAt: new Date().toISOString(),
+  };
 }
 
 export function inpostServicePickupPayload(record = {}) {
