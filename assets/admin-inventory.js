@@ -56,7 +56,7 @@ function widokAdminKlient(email){
   if(!k) return adminSzkielet("/admin/klienci", `<div class="panel"><h1>Nie znaleziono klienta</h1><p><a href="#/admin/klienci">← Wróć do listy</a></p></div>`);
   const zam = pobierzZamowienia().filter(z=>z.email===k.email);
   const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
-  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email),operacjaWToku=zmianyDostepuUzytkownikowWToku.has(k.email)||usunieciaUzytkownikowWToku.has(k.email);
+  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email),operacjaWToku=zmianyDostepuUzytkownikowWToku.has(k.email)||resetMfaUzytkownikowWToku.has(k.email)||usunieciaUzytkownikowWToku.has(k.email);
   return adminSzkielet("/admin/klienci", `
   ${klienciSubnavHTML("lista")}
   <div class="panel">
@@ -66,12 +66,14 @@ function widokAdminKlient(email){
       <div class="stat"><b>${zam.length}</b><small>zamówień</small></div>
       <div class="stat"><b>${zl(zam.filter(z=>z.status!=="anulowane").reduce((s,z)=>s+z.razem,0))}</b><small>łączna wartość</small></div>
       <div class="stat"><b>${new Date(k.data).toLocaleDateString("pl-PL")}</b><small>rejestracja</small></div>
+      <div class="stat"><b>${admin?(k.mfaEnabled?"MFA aktywne":"Nowy QR przy logowaniu"):"Konto klienta"}</b><small>${admin?"Google Authenticator":"bez dostępu do panelu"}</small></div>
     </div>
     <form onsubmit="zapiszKartoteke(event, '${esc(k.email)}')">
       ${polaKartotekiHTML(k, {edycja:true, blokujEmail:true, bezHasla:!zarzadzaDostepem||sesja?.email===k.email})}
       <div class="diag-actions">
         <button class="btn" type="submit">💾 Zapisz kartotekę</button>
         ${!zarzadzaDostepem||glowny||sesja?.email===k.email?"":`<button class="btn ghost" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')">${operacjaWToku?"⏳ Zapisuję…":admin?"🔒 Odbierz rolę administratora":"🛡️ Nadaj rolę administratora"}</button>`}
+        ${zarzadzaDostepem&&admin&&!glowny&&sesja?.email!==k.email?`<button class="btn ghost" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('Odłączyć obecny Google Authenticator konta ${esc(k.email)}? Stare sesje zostaną wylogowane, a przy następnym logowaniu pojawi się nowy kod QR.')) resetujMfaUzytkownika('${esc(k.email)}')">${operacjaWToku?"⏳ Resetuję…":"↻ Skonfiguruj MFA ponownie"}</button>`:""}
         ${zam.length?`<a class="btn ghost" href="#/admin/zamowienia" onclick="szukajZamowien='${esc(k.email)}';filtrZamowien='wszystkie'">📦 Zamówienia klienta (${zam.length})</a>`:""}
         <a class="btn ghost" href="mailto:${esc(k.email)}">✉️ Napisz e-mail</a>
         ${zarzadzaDostepem&&!admin&&!glowny?`<button class="btn danger" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('Trwale usunąć konto ${esc(k.email)}? Aktywne sesje natychmiast stracą dostęp.')) usunKlienta('${esc(k.email)}',true)">${operacjaWToku?"⏳ Usuwam…":"🗑️ Usuń konto"}</button>`:""}

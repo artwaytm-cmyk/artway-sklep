@@ -27,6 +27,7 @@ export function createStoreDataRoute(deps = {}) {
     verifyAdminMfaChallenge, verifyMfaCode,
     verifyMfaEmailRecoveryChallenge, verifyMfaEmailRecoveryCode, wyslijEmailSMTP,
     primaryAdminEmail = () => '',
+    clearAccountSessionHeaders = () => ({}),
   } = deps;
   const accessAudit = async (entry = {}) => {
     const now = new Date().toISOString();
@@ -426,6 +427,58 @@ export function createStoreDataRoute(deps = {}) {
         return odpowiedz({ ok: true, changed: true, sessionInvalidated: true, user: publicUser(items[index]) });
       }
       return odpowiedz({ ok: false, error: 'Lista kont została równolegle zmieniona. Ponów zmianę hasła.', code: 'users_write_conflict' }, 409);
+    }
+    if (action === 'account-mfa-reset') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const session = requestSession(req);
+      if (!czyAdmin(req, url) || !session || session.role !== 'admin') {
+        return odpowiedz({ ok: false, error: 'Zaloguj się ponownie jako administrator.', code: 'auth' }, 403);
+      }
+      const body = await req.json().catch(() => ({}));
+      const ownerEmail = tekst(primaryAdminEmail(), 200).trim().toLowerCase();
+      const targetEmail = tekst(body.email || session.email, 200).trim().toLowerCase();
+      const selfReset = targetEmail === session.email;
+      if (!isValidAccountEmail(targetEmail)) return odpowiedz({ ok: false, error: 'Podaj prawidłowe konto administratora.', code: 'invalid_email' }, 422);
+      if (!selfReset && session.email !== ownerEmail) {
+        return odpowiedz({ ok: false, error: 'Tylko główny administrator może resetować Authenticator innego konta.', code: 'owner_required' }, 403);
+      }
+      const currentPassword = String(body.currentPassword || '');
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const version = await czytajWersjonowane('users', { items: [] });
+        const previous = version.value || { items: [] };
+        const items = Array.isArray(previous.items) ? previous.items.map((entry) => ({ ...entry })) : [];
+        const index = items.findIndex((entry) => String(entry?.email || '').trim().toLowerCase() === targetEmail);
+        if (index < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono konta administratora.', code: 'not_found' }, 404);
+        if (items[index].rola !== 'admin') return odpowiedz({ ok: false, error: 'Reset Authenticatora dotyczy wyłącznie kont administratorów.', code: 'admin_required' }, 409);
+        if (selfReset) {
+          const passwordOk = items[index].passwordHash
+            ? await verifyPassword(currentPassword, items[index].passwordHash).catch(() => false)
+            : (!items[index].passwordHash && !!items[index].hash && bezpiecznePorownanie(legacyPasswordHash(currentPassword), String(items[index].hash)));
+          if (!passwordOk) return odpowiedz({ ok: false, error: 'Aktualne hasło jest nieprawidłowe.', code: 'auth' }, 401);
+        }
+        const now = new Date().toISOString();
+        for (const key of [
+          'mfaSecretEncrypted', 'mfaPendingSecretEncrypted', 'mfaPendingCreatedAt', 'mfaEnabledAt',
+          'mfaEmailRecoveryCodeHash', 'mfaEmailRecoveryNonce', 'mfaEmailRecoveryExpiresAt',
+          'mfaEmailRecoveryRequestedAt', 'mfaEmailRecoveryFailedAttempts', 'mfaEmailRecoveryUsedAt',
+          'mfaRecoveryCodeHashes',
+        ]) delete items[index][key];
+        items[index].authVersion = Math.max(0, Number(items[index].authVersion) || 0) + 1;
+        items[index].mfaResetAt = now;
+        items[index].mfaResetBy = session.email;
+        const write = await zapiszJesliWersja('users', { ...previous, items, updated_at: now }, version);
+        if (!write?.modified) continue;
+        await accessAudit({ action: 'mfa_reset', actor: session.email, target: targetEmail, before: 'configured', after: 'enrollment_required' }).catch(() => {});
+        return odpowiedz({
+          ok: true,
+          reset: true,
+          enrollmentRequired: true,
+          sessionInvalidated: true,
+          selfReset,
+          user: publicUser(items[index]),
+        }, 200, selfReset ? clearAccountSessionHeaders() : {});
+      }
+      return odpowiedz({ ok: false, error: 'Lista kont została równolegle zmieniona. Ponów reset Authenticatora.', code: 'users_write_conflict' }, 409);
     }
     if (action === 'store-user-role') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);

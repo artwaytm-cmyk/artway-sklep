@@ -512,6 +512,24 @@ function klienciEksportujZakres(zakres="filtr"){
   eksportujKlientow(lista,zakres==="zaznaczone"?"klienci-zaznaczeni.csv":"klienci-filtrowani.csv");
 }
 const zmianyDostepuUzytkownikowWToku=new Set();
+const resetMfaUzytkownikowWToku=new Set();
+async function resetujMfaUzytkownika(email){
+  const e=String(email||"").trim().toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>String(x.email||"").toLowerCase()===e);
+  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może zresetować Authenticator innego konta");return false;}
+  if(!k||k.rola!=="admin"){toast("Reset Authenticatora jest dostępny tylko dla kont administratorów");return false;}
+  if(jestGlownymAdminem(e)||e===String(sesja?.email||"").toLowerCase()){toast("Własny Authenticator zresetujesz bezpiecznie w sekcji Moje konto");return false;}
+  if(resetMfaUzytkownikowWToku.has(e))return false;
+  resetMfaUzytkownikowWToku.add(e);renderuj();
+  try{
+    const d=await chmura("account-mfa-reset",{method:"POST",body:{email:e},timeout:15000});
+    Object.assign(k,d.user||{}, {mfaEnabled:false});
+    zapiszLS("artway_uzytkownicy",u);
+    loguj("ostrzezenie",`Zresetowano Google Authenticator konta ${e}; poprzednie sesje zostały unieważnione`);
+    toast("Authenticator zresetowany — przy następnym logowaniu pojawi się nowy kod QR ✅");
+    return true;
+  }catch(bl){toast("⚠️ Nie zresetowano Authenticatora: "+(bl.message||"błąd serwera"));return false;}
+  finally{resetMfaUzytkownikowWToku.delete(e);renderuj();}
+}
 async function zmienRoleUzytkownika(email){
   if(!jestAdmin()){ toast("Brak uprawnień"); return; }
   const e=String(email||"").toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>x.email===e);
@@ -565,7 +583,7 @@ function widokAdminKlienci(sekcja="lista"){
       <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Telegram</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
       ${kl.map(k=>{
         const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
-        const accessBusy=zmianyDostepuUzytkownikowWToku.has(String(k.email||"").toLowerCase())||usunieciaUzytkownikowWToku.has(String(k.email||"").toLowerCase());
+        const accessBusy=zmianyDostepuUzytkownikowWToku.has(String(k.email||"").toLowerCase())||resetMfaUzytkownikowWToku.has(String(k.email||"").toLowerCase())||usunieciaUzytkownikowWToku.has(String(k.email||"").toLowerCase());
         const nZam = zam.filter(z=>z.email===k.email).length;
         return `<tr>
         <td><input type="checkbox" aria-label="Zaznacz ${esc(k.email)}" ${zaznaczeniKlienci.has(String(k.email||"").toLowerCase())?"checked":""} onchange="klienciUstawZaznaczenie([${jsArg(k.email)}],this.checked)"></td>
@@ -578,6 +596,7 @@ function widokAdminKlienci(sekcja="lista"){
         <td style="white-space:nowrap">
           <a class="btn ghost" href="#/admin/klient/${encodeURIComponent(k.email)}" style="padding:.3rem .55rem" title="Kartoteka klienta">📇</a>
           ${!zarzadzaDostepem||glowny||sesja?.email===k.email?"":`<button class="btn ghost" ${accessBusy?"disabled":""} onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')" style="padding:.3rem .55rem" title="${admin?"Odbierz rolę administratora":"Nadaj rolę administratora"}">${accessBusy?"⏳":admin?"🔒":"🛡️"}</button>`}
+          ${zarzadzaDostepem&&admin&&!glowny&&sesja?.email!==k.email?`<button class="btn ghost" ${accessBusy?"disabled":""} onclick="if(confirm('Odłączyć obecny Google Authenticator konta ${esc(k.email)}? Stare sesje zostaną wylogowane, a przy następnym logowaniu pojawi się nowy kod QR.')) resetujMfaUzytkownika('${esc(k.email)}')" style="padding:.3rem .55rem" title="Resetuj Google Authenticator">${accessBusy?"⏳":"↻ MFA"}</button>`:""}
           ${zarzadzaDostepem&&!admin&&!glowny?`<button class="ci-remove" ${accessBusy?"disabled":""} onclick="if(confirm('Trwale usunąć konto ${esc(k.email)}? Aktywne sesje natychmiast stracą dostęp.')) usunKlienta('${esc(k.email)}')" title="Usuń konto">${accessBusy?"⏳":"🗑️"}</button>`:""}
         </td>
       </tr>`;}).join("")}

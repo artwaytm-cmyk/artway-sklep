@@ -148,6 +148,8 @@ test('Moje konto administratora pokazuje zabezpieczenia i zarządzanie dostępem
   await expect(page.getByRole('link', { name: 'Zarządzaj uprawnieniami' })).toBeVisible();
   await expect(page.getByText('Google Authenticator', { exact: false }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Zapisz nowe hasło' })).toBeVisible();
+  await page.getByText('Skonfiguruj Authenticator ponownie').click();
+  await expect(page.getByRole('button', { name: 'Odłącz i skonfiguruj ponownie' })).toBeVisible();
   assertRuntime();
 });
 
@@ -170,6 +172,12 @@ test('właściciel nadaje, odbiera i usuwa konto bez lokalnego pozornego zapisu'
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, changed: true, sessionInvalidated: true, user: users.find((user) => user.email === body.email) }) });
       return;
     }
+    if (action === 'account-mfa-reset') {
+      const body = route.request().postDataJSON();
+      users = users.map((user) => user.email === body.email ? { ...user, mfaEnabled: false } : user);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, reset: true, enrollmentRequired: true, sessionInvalidated: true, user: users.find((user) => user.email === body.email) }) });
+      return;
+    }
     if (action === 'store-user-delete') {
       const body = route.request().postDataJSON();
       users = users.filter((user) => user.email !== body.email);
@@ -188,6 +196,8 @@ test('właściciel nadaje, odbiera i usuwa konto bez lokalnego pozornego zapisu'
   await expect(row).toBeVisible();
   await row.getByTitle('Nadaj rolę administratora').click();
   await expect(row.getByText('administrator', { exact: true })).toBeVisible();
+  await row.getByTitle('Resetuj Google Authenticator').click();
+  await expect(row.getByText('MFA przy następnym logowaniu')).toBeVisible();
   await row.getByTitle('Odbierz rolę administratora').click();
   await expect(row.getByText('klient', { exact: true })).toBeVisible();
   await row.getByTitle('Usuń konto').click();

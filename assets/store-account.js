@@ -174,6 +174,14 @@ function widokKonto(){
           <button class="btn" type="submit">Zapisz zabezpieczenia</button>
         </form>
       </details>
+      <details class="admin-account-card">
+        <summary><span>↻</span><span><b>Skonfiguruj Authenticator ponownie</b><small>Odłącz stary telefon i wyświetl nowy kod QR</small></span></summary>
+        <form onsubmit="resetujWlasneMfa(event)">
+          <div class="admin-account-security-note"><b>Hasło pozostanie bez zmian.</b><span>Reset wyloguje to konto na wszystkich urządzeniach. Podczas następnego logowania sklep poprosi o zeskanowanie nowego kodu QR.</span></div>
+          <div class="f-group"><label>Aktualne hasło</label><input required name="currentPassword" type="password" autocomplete="current-password"></div>
+          <button class="btn danger" type="submit">Odłącz i skonfiguruj ponownie</button>
+        </form>
+      </details>
     </div>
     <div class="admin-account-meta"><span>Ostatnie logowanie: <b>${dataKonta(sesja.lastLoginAt)}</b></span><span>Ostatnia zmiana roli: <b>${dataKonta(sesja.roleUpdatedAt)}</b></span><span>Ustawienia bezpieczeństwa: <b>${dataKonta(sesja.securitySettingsUpdatedAt)}</b></span></div>`:"";
   return `
@@ -210,6 +218,19 @@ function widokKonto(){
       </form>
     </details>`}
   </div></div>`;
+}
+async function resetujWlasneMfa(e){
+  e.preventDefault();if(!jestAdmin())return;
+  const button=e.submitter,currentPassword=String(new FormData(e.target).get("currentPassword")||"");
+  if(!confirm("Odłączyć obecny Google Authenticator? Nastąpi wylogowanie ze wszystkich urządzeń, a przy następnym logowaniu pojawi się nowy kod QR."))return;
+  if(button){button.disabled=true;button.textContent="Resetuję zabezpieczenie…";}
+  try{
+    await chmura("account-mfa-reset",{method:"POST",body:{email:sesja.email,currentPassword},timeout:20000});
+    ustawSesje(null);chmuraStan.admin=false;
+    toast("Authenticator odłączony. Zaloguj się ponownie i zeskanuj nowy kod QR ✅");
+    location.hash="#/logowanie";
+  }catch(bl){toast("⚠️ Nie zresetowano Authenticatora: "+(bl.message||"błąd serwera"));}
+  finally{if(button&&document.contains(button)){button.disabled=false;button.textContent="Odłącz i skonfiguruj ponownie";}}
 }
 async function zapiszBezpieczenstwoKonta(e){
   e.preventDefault();if(!jestAdmin())return;

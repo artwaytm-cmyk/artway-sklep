@@ -52,6 +52,7 @@ function routeDependencies(users, overrides = {}) {
     verifyPassword,
     createAccountSession,
     accountSessionHeaders,
+    clearAccountSessionHeaders: () => ({ 'set-cookie': 'artway_session=; Max-Age=0' }),
     createAdminMfaChallenge,
     createMfaEmailRecovery,
     verifyAdminMfaChallenge,
@@ -62,6 +63,58 @@ function routeDependencies(users, overrides = {}) {
     ...overrides,
   };
 }
+
+test('właściciel resetuje Authenticator innego administratora bez zmiany hasła i roli', async () => {
+  const passwordHash = await hashPassword('haslo-tomasza');
+  const users = { items: [
+    { email: 'admin@example.test', rola: 'admin', authVersion: 1 },
+    {
+      email: 'tomasz@example.test', rola: 'admin', authVersion: 2, passwordHash,
+      mfaSecretEncrypted: 'stary-sekret', mfaPendingSecretEncrypted: 'oczekujacy-sekret',
+      mfaRecoveryCodeHashes: ['hash'], mfaEmailRecoveryCodeHash: 'email-hash',
+    },
+  ] };
+  const route = createStoreDataRoute(routeDependencies(users));
+  const result = await route(new Request('https://artwaytm.pl/api/store?action=account-mfa-reset', {
+    method: 'POST', body: JSON.stringify({ email: 'tomasz@example.test' }),
+  }), new URL('https://artwaytm.pl/api/store?action=account-mfa-reset'), 'account-mfa-reset');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.enrollmentRequired, true);
+  assert.equal(result.body.sessionInvalidated, true);
+  assert.equal(result.headers['set-cookie'], undefined);
+  assert.equal(users.items[1].rola, 'admin');
+  assert.equal(users.items[1].passwordHash, passwordHash);
+  assert.equal(users.items[1].authVersion, 3);
+  assert.equal(users.items[1].mfaSecretEncrypted, undefined);
+  assert.equal(users.items[1].mfaPendingSecretEncrypted, undefined);
+  assert.equal(users.items[1].mfaRecoveryCodeHashes, undefined);
+  assert.equal(result.body.user.mfaEnabled, false);
+});
+
+test('własny reset Authenticatora wymaga aktualnego hasła i czyści bieżącą sesję', async () => {
+  const users = { items: [{
+    email: 'admin@example.test', rola: 'admin', authVersion: 4,
+    passwordHash: await hashPassword('poprawne-haslo'), mfaSecretEncrypted: 'stary-sekret',
+  }] };
+  const route = createStoreDataRoute(routeDependencies(users, {
+    requestSession: () => ({ email: 'admin@example.test', role: 'admin', authVersion: 4 }),
+  }));
+  const wrong = await route(new Request('https://artwaytm.pl/api/store?action=account-mfa-reset', {
+    method: 'POST', body: JSON.stringify({ email: 'admin@example.test', currentPassword: 'bledne-haslo' }),
+  }), new URL('https://artwaytm.pl/api/store?action=account-mfa-reset'), 'account-mfa-reset');
+  assert.equal(wrong.status, 401);
+  assert.equal(users.items[0].mfaSecretEncrypted, 'stary-sekret');
+  assert.equal(users.items[0].authVersion, 4);
+
+  const correct = await route(new Request('https://artwaytm.pl/api/store?action=account-mfa-reset', {
+    method: 'POST', body: JSON.stringify({ email: 'admin@example.test', currentPassword: 'poprawne-haslo' }),
+  }), new URL('https://artwaytm.pl/api/store?action=account-mfa-reset'), 'account-mfa-reset');
+  assert.equal(correct.status, 200);
+  assert.match(correct.headers['set-cookie'], /Max-Age=0/);
+  assert.equal(correct.body.selfReset, true);
+  assert.equal(users.items[0].mfaSecretEncrypted, undefined);
+  assert.equal(users.items[0].authVersion, 5);
+});
 
 test('główny administrator może nadać i odebrać rolę, a zmiana unieważnia stare sesje', async () => {
   const users = { items: [

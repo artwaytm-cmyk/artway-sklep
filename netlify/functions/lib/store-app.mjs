@@ -2954,6 +2954,7 @@ const storeDataRoute = createStoreDataRoute({
   czytajUstawieniaBazowe,
   czytajUstawieniaPrzyrostowo,
   primaryAdminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || 'artwaytm@gmail.com',
+  clearAccountSessionHeaders,
 });
 
 const systemRoute = createSystemRoute({
