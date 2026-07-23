@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   inpostServiceInvoicePayload,
+  inpostServiceContractPricing,
+  inpostServiceDefaultPriceList,
+  inpostServiceDefaultSettings,
   inpostServicePricePayload,
   inpostServicePricing,
   inpostServiceShipxPayload,
@@ -39,6 +42,7 @@ function draft(overrides = {}) {
     deliveryType: 'locker',
     targetPoint: 'BOJ01N',
     sendingMethod: 'parcel_locker',
+    parcel: { template: 'small', weight: 1 },
     cod: { enabled: true, amount: 149.99 },
     insurance: { enabled: true, amount: 200 },
     weekend: true,
@@ -71,7 +75,7 @@ test('wycena ShipX korzysta z tego samego szkicu i pokazuje pełny koszt z prowi
   assert.equal(payload.shipments.length, 1);
   assert.equal(payload.shipments[0].id, 'QUOTE-1');
   assert.equal(payload.shipments[0].service, 'inpost_locker_standard');
-  assert.equal(payload.shipments[0].parcels.dimensions.length, '300');
+  assert.equal(payload.shipments[0].parcels.template, 'small');
   const pricing = inpostServicePricing([{
     id: 'QUOTE-1',
     calculated_charge_amount: '18.90',
@@ -101,7 +105,7 @@ test('książka adresowa normalizuje jeden kontakt dla roli nadawcy i odbiorcy',
   assert.equal(contact.address.building_number, '8');
 });
 
-test('FV miesięczna wymaga firmy i NIP, a faktura zawiera tylko prowizję Artway-TM', () => {
+test('FV miesięczna wymaga firmy i NIP, a Artway-TM fakturuje koszt nadania wraz z prowizją', () => {
   const invalid = draft({ receiver: { ...receiver, companyName: '', taxCode: '' } });
   assert.equal(validateInpostServiceDraft(invalid).ok, false);
   assert.ok(validateInpostServiceDraft(invalid).errors.some((error) => error.field === 'receiver.taxCode'));
@@ -112,10 +116,12 @@ test('FV miesięczna wymaga firmy i NIP, a faktura zawiera tylko prowizję Artwa
     trackingNumber: '620000000000000000000000',
     receiver: base.receiver,
     billing: base.billing,
+    pricing: { totalGross: 14.16, customerTotalGross: 18.16, complete: true },
   };
   const payload = inpostServiceInvoicePayload([record], { invoiceDate: '2026-07-23' });
   assert.equal(payload.invoice.services.length, 1);
-  assert.equal(payload.invoice.services[0].gross_price, 400);
+  assert.equal(payload.invoice.services[0].gross_price, 1816);
+  assert.match(payload.invoice.services[0].name, /Nadanie przesyłki InPost/);
   assert.equal(payload.invoice.client_tax_code, '1234567890');
   assert.doesNotMatch(JSON.stringify(payload), /carrierCost|carrierRate|selectedOffer|offers/);
 });
@@ -136,17 +142,52 @@ test('publiczny rejestr nigdy nie ujawnia ceny ani stawek przewoźnika', () => {
   assert.equal(safe.billing.commissionGross, 4);
 });
 
-test('podsumowanie miesięczne grupuje wyłącznie aktywne, nierozliczone nadania', () => {
-  const common = { receiver, billing: { mode: 'monthly', status: 'pending', month: '2026-07', clientKey: receiver.taxCode, commissionGross: 4 } };
+test('podsumowanie miesięczne grupuje pełny koszt klienta, nie tylko prowizję', () => {
+  const common = { receiver, pricing: { totalGross: 14.16, customerTotalGross: 18.16, complete: true }, billing: { mode: 'monthly', status: 'pending', month: '2026-07', clientKey: receiver.taxCode, commissionGross: 4 } };
   const summary = summarizeInpostServiceBilling([
     { id: '1', status: 'label_ready', ...common },
     { id: '2', status: 'label_ready', ...common },
     { id: '3', status: 'cancelled', ...common },
   ]);
   assert.equal(summary.pendingMonthly, 2);
+  assert.equal(summary.carrierPendingGross, 28.32);
   assert.equal(summary.commissionPendingGross, 8);
   assert.equal(summary.groups.length, 1);
   assert.equal(summary.groups[0].count, 2);
+  assert.equal(summary.groups[0].carrierGross, 28.32);
+  assert.equal(summary.groups[0].customerTotalGross, 36.32);
+});
+
+test('cennik umowny ze zrzutu jest nadrzędny wobec innej kwoty zwróconej przez ShipX', () => {
+  const list = inpostServiceDefaultPriceList();
+  assert.deepEqual(Object.values(list.locker).map((rate) => rate.gross), [14.16, 15.93, 18.65]);
+  assert.deepEqual(list.courierStandard.map((rate) => rate.gross), [17.58, 19.47, 20.81, 22.18, 23.42, 24.55]);
+  assert.deepEqual(Object.values(list.courierManager).map((rate) => rate.gross), [17.58, 19.47, 20.81, 24.55]);
+  assert.deepEqual(Object.values(list.handoff).map((rate) => rate.gross), [5.52, 6.75, 7.98]);
+  assert.deepEqual(Object.values(list.quickReturns).map((rate) => rate.gross), [11.59, 11.99, 12.42]);
+  const settings = inpostServiceDefaultSettings();
+  const locker = inpostServiceContractPricing(draft(), settings, [{ calculated_charge_amount: '99.99' }]);
+  assert.equal(locker.totalGross, 14.16);
+  assert.equal(locker.customerTotalGross, 18.16);
+  assert.equal(locker.source, 'contract_price_list');
+  assert.equal(locker.apiComparison.totalGross, 99.99);
+  assert.equal(locker.subscription.gross, 369);
+  assert.equal(locker.subscription.includedInShipment, false);
+
+  const courier = draft({ deliveryType: 'courier', parcel: { template: 'small', weight: 12 }, targetPoint: '' });
+  const courierPrice = inpostServiceContractPricing(courier, settings, {});
+  assert.equal(courierPrice.rateLabel, 'powyżej 10 kg do 15 kg');
+  assert.equal(courierPrice.totalGross, 20.81);
+});
+
+test('brak stawki za wybraną dopłatę blokuje fakturę, ale pełny koszt ręczny ją odblokowuje', () => {
+  const settings = inpostServiceDefaultSettings();
+  const withWeekend = inpostServiceContractPricing(draft({ weekend: true }), settings, {});
+  assert.equal(withWeekend.complete, false);
+  assert.deepEqual(withWeekend.unpricedOptions, ['Pobranie', 'Dodatkowa ochrona', 'Paczka w Weekend']);
+  const manual = inpostServiceContractPricing(draft({ weekend: true, carrierCostOverride: 22.5 }), settings, {});
+  assert.equal(manual.complete, true);
+  assert.equal(manual.totalGross, 22.5);
 });
 
 test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt', async () => {
@@ -159,7 +200,8 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /#\/admin\/wysylki\/inpost/);
   assert.match(shipping, /function panelWysylkiUslugowejInpost/);
   assert.match(shipping, /Wybierz z książki adresowej/);
-  assert.match(shipping, /Sprawdź koszt teraz/);
+  assert.match(shipping, /Przelicz według umowy/);
+  assert.match(shipping, /Twój cennik umowny InPost/);
   assert.match(core, /#\/admin\/infakt\/wysylki/);
   assert.match(inventory, /function infaktWysylkiInpostPanelHTML/);
   assert.match(css, /\.inpost-service-workspace/);
@@ -209,7 +251,8 @@ test('endpoint wyceny naprawdę wysyła szkic do ShipX, a książka adresowa zap
   });
   const quote = await route(quoteRequest, new URL(quoteRequest.url), 'inpost-service-quote');
   assert.equal(quote.status, 200);
-  assert.equal(quote.body.pricing.totalGross, 16.5);
+  assert.equal(quote.body.pricing.totalGross, 14.16);
+  assert.equal(quote.body.pricing.apiComparison.totalGross, 16.5);
   assert.equal(calls[0].path, '/v1/organizations/ORG-1/shipments/calculate');
   assert.equal(calls[0].options.bodyObj.shipments[0].custom_attributes.target_point, 'BOJ01N');
 

@@ -2,14 +2,15 @@ import crypto from 'node:crypto';
 import {
   inpostServiceBillingKey,
   inpostServiceContactFingerprint,
+  inpostServiceContractPricing,
   inpostServiceDefaultSettings,
   inpostServiceInvoicePayload,
   inpostServicePickupPayload,
   inpostServicePricePayload,
-  inpostServicePricing,
   inpostServiceShipxPayload,
   normalizeInpostServiceContact,
   normalizeInpostServiceDraft,
+  normalizeInpostServicePriceList,
   safeInpostServiceRecord,
   summarizeInpostServiceBilling,
   validateInpostServiceDraft,
@@ -22,13 +23,18 @@ function initialStore() {
 }
 
 function cleanStore(value = {}) {
+  const defaults = inpostServiceDefaultSettings();
   return {
     ...value,
     items: Array.isArray(value?.items) ? value.items : [],
     contacts: (Array.isArray(value?.contacts) ? value.contacts : [])
       .map((contact) => normalizeInpostServiceContact(contact))
       .filter((contact) => contact.id && (contact.email || contact.phone || contact.taxCode)),
-    settings: { ...inpostServiceDefaultSettings(), ...(value?.settings || {}) },
+    settings: {
+      ...defaults,
+      ...(value?.settings || {}),
+      priceList: normalizeInpostServicePriceList(value?.settings?.priceList || defaults.priceList),
+    },
   };
 }
 
@@ -111,23 +117,17 @@ export function createInpostServiceShipmentRoute(deps = {}) {
     return contact;
   }
 
-  async function calculatePricing(draft, config) {
-    const fallback = () => inpostServicePricing({}, {
-      manualGross: draft.pricing?.manualGross,
-      commissionGross: draft.billing?.commissionGross,
-    });
+  async function calculatePricing(draft, config, settings) {
+    const fallback = () => inpostServiceContractPricing(draft, settings, {});
     try {
       const result = await call(`/v1/organizations/${encodeURIComponent(config.orgId)}/shipments/calculate`, {
         method: 'POST',
         bodyObj: inpostServicePricePayload(draft, draft.requestId || 'QUOTE'),
       });
-      return inpostServicePricing(result, {
-        manualGross: draft.pricing?.manualGross,
-        commissionGross: draft.billing?.commissionGross,
-      });
+      return inpostServiceContractPricing(draft, settings, result);
     } catch (error) {
       const pricing = fallback();
-      if (pricing.available) return { ...pricing, warning: text(error.message, 500) };
+      if (pricing.available) return { ...pricing, apiWarning: text(error.message, 500) };
       throw error;
     }
   }
@@ -262,6 +262,9 @@ export function createInpostServiceShipmentRoute(deps = {}) {
           ...current.settings,
           commissionGross: Number.isFinite(commission) ? commission : 4,
           sender: body.sender && typeof body.sender === 'object' ? body.sender : current.settings.sender,
+          priceList: body.priceList && typeof body.priceList === 'object'
+            ? normalizeInpostServicePriceList({ ...body.priceList, updatedAt: new Date().toISOString() })
+            : current.settings.priceList,
           updatedAt: new Date().toISOString(),
         };
         return current;
@@ -279,7 +282,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       const draft = normalizeInpostServiceDraft(body, store.settings, availability);
       const validation = validateInpostServiceDraft(draft);
       if (!validation.ok) return respond({ ok: false, error: 'Uzupełnij dane potrzebne do wyceny.', code: 'inpost_quote_validation', details: validation.errors }, 422);
-      const pricing = await calculatePricing(draft, config);
+      const pricing = await calculatePricing(draft, config, store.settings);
       return respond({ ok: true, configured: true, pricing });
     }
 
@@ -332,10 +335,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         additionalServices: draft.additionalServices,
         pickupRequested: draft.pickupRequested,
         pickup: null,
-        pricing: inpostServicePricing({}, {
-          manualGross: draft.pricing?.manualGross,
-          commissionGross: draft.billing?.commissionGross,
-        }),
+        pricing: inpostServiceContractPricing(draft, store.settings, {}),
         billing: { ...draft.billing, status: draft.billing.mode === 'monthly' ? 'pending' : draft.billing.mode === 'single' ? 'awaiting_invoice' : 'not_required', error: '' },
         error: '',
       };
@@ -360,7 +360,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       let saved = record;
       try {
         try {
-          const pricing = await calculatePricing(draft, config);
+          const pricing = await calculatePricing(draft, config, store.settings);
           saved = await updateRecord(id, (item) => ({ ...item, pricing, updatedAt: new Date().toISOString() }));
         } catch (error) {
           saved = await updateRecord(id, (item) => ({
@@ -371,10 +371,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         }
         const created = await call(`/v1/organizations/${encodeURIComponent(config.orgId)}/shipments`, { method: 'POST', bodyObj: inpostServiceShipxPayload(draft) });
         const shipmentId = text(created?.id, 80), current = shipmentId ? await waitForLabel(shipmentId, { proby: 10, opoznienieMs: 1100 }).catch(() => created) : created;
-        const actualPricing = inpostServicePricing(current || created, {
-          manualGross: draft.pricing?.manualGross,
-          commissionGross: draft.billing?.commissionGross,
-        });
+        const actualPricing = inpostServiceContractPricing(draft, store.settings, current || created);
         saved = await updateRecord(id, (item) => ({
           ...item,
           status: labelReady(current) || labelReady(created) ? 'label_ready' : 'created',
@@ -416,10 +413,10 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       if (!record) return respond({ ok: false, error: 'Nie znaleziono nadania.', code: 'not_found' }, 404);
       if (!record.inpostId) return respond({ ok: false, error: 'Nadanie nie ma jeszcze ID InPost.', code: 'no_shipment' }, 422);
       const shipment = await call(`/v1/shipments/${encodeURIComponent(record.inpostId)}`, { method: 'GET' });
-      const refreshedPricing = inpostServicePricing(shipment, {
-        manualGross: record.pricing?.source === 'manual' ? record.pricing.totalGross : null,
-        commissionGross: record.billing?.commissionGross,
-      });
+      const refreshedPricing = inpostServiceContractPricing({
+        ...record,
+        pricing: { manualGross: record.pricing?.source === 'manual' ? record.pricing.totalGross : null },
+      }, store.settings, shipment);
       const saved = await updateRecord(id, (item) => ({
         ...item,
         status: labelReady(shipment) ? 'label_ready' : item.status,

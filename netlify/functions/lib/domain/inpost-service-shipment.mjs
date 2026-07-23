@@ -83,8 +83,96 @@ function parcel(raw = {}) {
   };
 }
 
+export function inpostServiceDefaultPriceList() {
+  return {
+    label: 'Umowa abonamentowa InPost • 12 miesięcy',
+    currency: 'PLN',
+    subscriptionNet: 300,
+    subscriptionGross: 369,
+    settlementPeriod: 'monthly',
+    paymentDays: 7,
+    locker: {
+      small: { label: 'Paczkomat gabaryt A', net: 11.51, gross: 14.16 },
+      medium: { label: 'Paczkomat gabaryt B', net: 12.95, gross: 15.93 },
+      large: { label: 'Paczkomat gabaryt C', net: 15.16, gross: 18.65 },
+    },
+    courierStandard: [
+      { label: 'do 5 kg', maxKg: 5, net: 14.29, gross: 17.58 },
+      { label: 'powyżej 5 kg do 10 kg', maxKg: 10, net: 15.83, gross: 19.47 },
+      { label: 'powyżej 10 kg do 15 kg', maxKg: 15, net: 16.92, gross: 20.81 },
+      { label: 'powyżej 15 kg do 20 kg', maxKg: 20, net: 18.03, gross: 22.18 },
+      { label: 'powyżej 20 kg do 25 kg', maxKg: 25, net: 19.04, gross: 23.42 },
+      { label: 'powyżej 25 kg do 30 kg', maxKg: 30, net: 19.96, gross: 24.55 },
+    ],
+    courierManager: {
+      small: { label: 'Gabaryt A', net: 14.29, gross: 17.58 },
+      medium: { label: 'Gabaryt B', net: 15.83, gross: 19.47 },
+      large: { label: 'Gabaryt C', net: 16.92, gross: 20.81 },
+      xlarge: { label: 'Gabaryt D', net: 19.96, gross: 24.55 },
+    },
+    handoff: {
+      small: { label: 'Gabaryt A', net: 4.49, gross: 5.52 },
+      medium: { label: 'Gabaryt B', net: 5.49, gross: 6.75 },
+      large: { label: 'Gabaryt C', net: 6.49, gross: 7.98 },
+    },
+    quickReturns: {
+      small: { label: 'Paczkomat gabaryt A', net: 9.42, gross: 11.59 },
+      medium: { label: 'Paczkomat gabaryt B', net: 9.75, gross: 11.99 },
+      large: { label: 'Paczkomat gabaryt C', net: 10.10, gross: 12.42 },
+    },
+    extras: {
+      codGross: null,
+      insuranceGross: null,
+      weekendGross: null,
+      pickupGross: null,
+      smsGross: null,
+      emailGross: null,
+      saturdayGross: null,
+      dor1720Gross: null,
+      rodGross: null,
+      nonStandardGross: null,
+    },
+    updatedAt: '2026-07-23T00:00:00.000Z',
+  };
+}
+
+function optionalMoney(value, fallback = null) {
+  if (value == null || String(value).trim() === '') return fallback;
+  return money(value, fallback ?? 0);
+}
+
+function normalizeRate(raw = {}, fallback = {}) {
+  return {
+    label: clean(raw.label || fallback.label, 120),
+    ...(fallback.maxKg != null || raw.maxKg != null ? { maxKg: Math.max(0.01, Number(raw.maxKg ?? fallback.maxKg) || fallback.maxKg) } : {}),
+    net: money(raw.net, fallback.net),
+    gross: money(raw.gross, fallback.gross),
+  };
+}
+
+export function normalizeInpostServicePriceList(raw = {}) {
+  const base = inpostServiceDefaultPriceList();
+  const groups = {};
+  for (const key of ['locker', 'courierManager', 'handoff', 'quickReturns']) {
+    groups[key] = {};
+    for (const [size, fallback] of Object.entries(base[key])) groups[key][size] = normalizeRate(raw?.[key]?.[size], fallback);
+  }
+  return {
+    label: clean(raw.label || base.label, 160),
+    currency: 'PLN',
+    subscriptionNet: money(raw.subscriptionNet, base.subscriptionNet),
+    subscriptionGross: money(raw.subscriptionGross, base.subscriptionGross),
+    settlementPeriod: 'monthly',
+    paymentDays: Math.max(1, Math.min(90, Math.round(Number(raw.paymentDays) || base.paymentDays))),
+    ...groups,
+    courierStandard: base.courierStandard.map((fallback, index) => normalizeRate(raw?.courierStandard?.[index], fallback)),
+    extras: Object.fromEntries(Object.keys(base.extras).map((key) => [key, optionalMoney(raw?.extras?.[key], base.extras[key])])),
+    updatedAt: clean(raw.updatedAt || base.updatedAt, 120),
+  };
+}
+
 export function inpostServiceDefaultSettings() {
-  return { commissionGross: 4, sender: {}, updatedAt: null };
+  return { commissionGross: 4, sender: {}, priceList: inpostServiceDefaultPriceList(), updatedAt: null };
 }
 
 export function normalizeInpostServiceContact(raw = {}, options = {}) {
@@ -183,6 +271,7 @@ export function validateInpostServiceDraft(draft = {}) {
   if (draft.deliveryType === 'locker' && !draft.targetPoint) errors.push({ field: 'targetPoint', message: 'Wybierz Paczkomat lub PaczkoPunkt odbiorcy.' });
   if (draft.cod?.enabled && draft.cod.amount <= 0) errors.push({ field: 'cod.amount', message: 'Podaj kwotę pobrania.' });
   if (draft.insurance?.enabled && draft.insurance.amount <= 0) errors.push({ field: 'insurance.amount', message: 'Podaj wartość ubezpieczenia.' });
+  if (draft.deliveryType === 'courier' && (draft.parcel?.weight <= 0 || draft.parcel?.weight > 30)) errors.push({ field: 'parcel.weight', message: 'Kurier Standard z tego cennika obsługuje wagę od 0,01 do 30 kg.' });
   if (draft.billing?.mode === 'monthly' && (!draft.receiver?.companyName || !/^\d{10}$/.test(draft.receiver?.taxCode || ''))) errors.push({ field: 'receiver.taxCode', message: 'Faktura miesięczna wymaga nazwy firmy i 10-cyfrowego NIP.' });
   if (draft.billing?.mode !== 'none' && draft.billing.commissionGross <= 0) errors.push({ field: 'commissionGross', message: 'Prowizja do faktury musi być większa od 0 zł.' });
   if (!draft.requestId) errors.push({ field: 'requestId', message: 'Brak identyfikatora operacji. Odśwież formularz.' });
@@ -260,6 +349,83 @@ export function inpostServicePricing(raw = {}, options = {}) {
   };
 }
 
+function contractRate(draft = {}, priceList = {}) {
+  if (draft.deliveryType === 'locker') {
+    let template = ['small', 'medium', 'large'].includes(draft.parcel?.template) ? draft.parcel.template : '';
+    if (!template) {
+      const dimensions = [draft.parcel?.length, draft.parcel?.width, draft.parcel?.height].map(Number).sort((a, b) => b - a);
+      if (dimensions[0] <= 64 && dimensions[1] <= 38) {
+        if (dimensions[2] <= 8) template = 'small';
+        else if (dimensions[2] <= 19) template = 'medium';
+        else if (dimensions[2] <= 41) template = 'large';
+      }
+    }
+    const selected = priceList.locker?.[template];
+    return selected ? { ...selected, key: `locker.${template}` } : null;
+  }
+  const weight = Number(draft.parcel?.weight) || 0;
+  const selected = (priceList.courierStandard || []).find((rate) => weight <= Number(rate.maxKg));
+  return selected ? { ...selected, key: `courierStandard.${selected.maxKg}` } : null;
+}
+
+export function inpostServiceContractPricing(draft = {}, settings = {}, shipxRaw = {}) {
+  const priceList = normalizeInpostServicePriceList(settings.priceList || {});
+  const api = inpostServicePricing(shipxRaw, { commissionGross: draft.billing?.commissionGross });
+  const manual = amount(draft.pricing?.manualGross);
+  const rate = contractRate(draft, priceList);
+  const extras = priceList.extras || {};
+  const selectedExtras = [];
+  if (draft.cod?.enabled) selectedExtras.push(['Pobranie', 'codGross']);
+  if (draft.insurance?.enabled) selectedExtras.push(['Dodatkowa ochrona', 'insuranceGross']);
+  if (draft.weekend) selectedExtras.push(['Paczka w Weekend', 'weekendGross']);
+  if (draft.pickupRequested || draft.sendingMethod === 'dispatch_order') selectedExtras.push(['Odbiór przez kuriera', 'pickupGross']);
+  if (draft.parcel?.nonStandard) selectedExtras.push(['Element niestandardowy', 'nonStandardGross']);
+  for (const service of draft.additionalServices || []) {
+    const labels = { sms: 'Powiadomienie SMS', email: 'Powiadomienie e-mail', saturday: 'Doręczenie w sobotę', dor1720: 'Doręczenie 17:00–20:00', rod: 'Zwrot dokumentów' };
+    if (labels[service]) selectedExtras.push([labels[service], `${service}Gross`]);
+  }
+  const unpricedOptions = selectedExtras.filter(([, key]) => extras[key] == null).map(([label]) => label);
+  const extraGross = selectedExtras.reduce((sum, [, key]) => sum + (extras[key] == null ? 0 : Number(extras[key]) || 0), 0);
+  const commissionGross = amount(draft.billing?.commissionGross) || 0;
+  const contractGross = rate ? Math.round((Number(rate.gross || 0) + extraGross) * 100) / 100 : null;
+  const totalGross = manual != null && manual > 0 ? manual : contractGross;
+  const source = manual != null && manual > 0 ? 'manual' : rate ? 'contract_price_list' : 'unavailable';
+  const complete = totalGross != null && (source === 'manual' || unpricedOptions.length === 0);
+  return {
+    totalGross,
+    currency: 'PLN',
+    source,
+    available: totalGross != null,
+    complete,
+    estimated: false,
+    rateKey: rate?.key || '',
+    rateLabel: rate?.label || '',
+    contractNet: rate?.net ?? null,
+    commissionGross,
+    customerTotalGross: totalGross == null ? null : Math.round((totalGross + commissionGross) * 100) / 100,
+    breakdown: {
+      baseGross: rate?.gross ?? null,
+      extrasGross: Math.round(extraGross * 100) / 100,
+      fuelIncluded: true,
+    },
+    unpricedOptions,
+    apiComparison: {
+      totalGross: api.totalGross,
+      source: api.source,
+      differenceGross: api.totalGross == null || totalGross == null ? null : Math.round((api.totalGross - totalGross) * 100) / 100,
+      checkedAt: api.checkedAt,
+    },
+    subscription: {
+      net: priceList.subscriptionNet,
+      gross: priceList.subscriptionGross,
+      settlementPeriod: priceList.settlementPeriod,
+      includedInShipment: false,
+    },
+    priceListLabel: priceList.label,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
 export function inpostServicePickupPayload(record = {}) {
   const sender = record.sender || {}, addressValue = sender.address || {};
   return {
@@ -284,18 +450,28 @@ export function inpostServiceBillingKey(record = {}) {
 }
 
 export function inpostServiceInvoicePayload(records = [], options = {}) {
-  const items = (Array.isArray(records) ? records : []).filter((record) => record?.billing?.commissionGross > 0);
+  const items = (Array.isArray(records) ? records : []).filter(Boolean);
   if (!items.length) {
-    const error = new Error('Brak prowizji InPost do rozliczenia.');
+    const error = new Error('Brak poprawnie wyliczonych nadań InPost do rozliczenia.');
     error.code = 'inpost_billing_empty'; error.status = 422; throw error;
+  }
+  const missing = items.filter((record) => !(record?.pricing?.customerTotalGross > 0));
+  if (missing.length) {
+    const error = new Error(`Nie można wystawić FV: ${missing.length} nadań nie ma wyliczonego kosztu i prowizji.`);
+    error.code = 'inpost_billing_missing_price'; error.status = 422; throw error;
+  }
+  const incomplete = items.filter((record) => record?.pricing?.complete !== true);
+  if (incomplete.length) {
+    const error = new Error(`Nie można wystawić FV: ${incomplete.length} nadań nie ma kompletnego kosztu umownego. Uzupełnij brakujące dopłaty albo wpisz pełny koszt ręcznie.`);
+    error.code = 'inpost_billing_incomplete_price'; error.status = 422; throw error;
   }
   const receiver = items[0].receiver || {}, billingMonth = items[0].billing?.month || new Date().toISOString().slice(0, 7);
   const invoiceDate = /^\d{4}-\d{2}-\d{2}$/.test(clean(options.invoiceDate, 10)) ? clean(options.invoiceDate, 10) : new Date().toISOString().slice(0, 10);
   const paymentDate = new Date(`${invoiceDate}T12:00:00Z`); paymentDate.setUTCDate(paymentDate.getUTCDate() + 7);
   const services = items.map((record) => ({
-    name: clean(`Obsługa nadania InPost ${record.trackingNumber || record.reference || record.id}`, 300),
+    name: clean(`Nadanie przesyłki InPost ${record.trackingNumber || record.reference || record.id}`, 300),
     quantity: 1,
-    gross_price: Math.round(money(record.billing.commissionGross) * 100),
+    gross_price: Math.round(money(record.pricing.customerTotalGross) * 100),
     tax_symbol: '23',
     unit: 'szt.',
   }));
@@ -307,7 +483,7 @@ export function inpostServiceInvoicePayload(records = [], options = {}) {
     sale_date: invoiceDate,
     payment_date: paymentDate.toISOString().slice(0, 10),
     sale_type: 'service',
-    notes: clean(items.length > 1 ? `Miesięczne rozliczenie obsługi nadań InPost: ${billingMonth}` : `Obsługa nadania InPost: ${items[0].reference || items[0].id}`, 500),
+    notes: clean(items.length > 1 ? `Miesięczne rozliczenie nadań InPost Artway-TM: ${billingMonth}. Kwoty obejmują koszt nadania według cennika umownego oraz prowizję Artway-TM.` : `Nadanie InPost Artway-TM: ${items[0].reference || items[0].id}. Kwota obejmuje koszt nadania oraz prowizję Artway-TM.`, 500),
     client_business_activity_kind: receiver.companyName || receiver.taxCode ? 'other_business' : 'private_person',
     client_company_name: receiver.companyName || undefined,
     client_first_name: receiver.companyName ? undefined : (receiver.firstName || 'Klient'),
@@ -339,13 +515,25 @@ export function summarizeInpostServiceBilling(items = []) {
   const groups = new Map();
   for (const item of pending) {
     const key = `${item.billing.month}|${item.billing.clientKey}`;
-    const group = groups.get(key) || { key, month: item.billing.month, clientKey: item.billing.clientKey, companyName: item.receiver?.companyName || '', taxCode: item.receiver?.taxCode || '', count: 0, commissionGross: 0, recordIds: [] };
-    group.count += 1; group.commissionGross += money(item.billing.commissionGross); group.recordIds.push(item.id); groups.set(key, group);
+    const group = groups.get(key) || { key, month: item.billing.month, clientKey: item.billing.clientKey, companyName: item.receiver?.companyName || '', taxCode: item.receiver?.taxCode || '', count: 0, carrierGross: 0, commissionGross: 0, customerTotalGross: 0, incompletePrices: 0, recordIds: [] };
+    group.count += 1;
+    group.carrierGross += money(item.pricing?.totalGross);
+    group.commissionGross += money(item.billing.commissionGross);
+    group.customerTotalGross += money(item.pricing?.customerTotalGross);
+    if (item.pricing?.complete !== true) group.incompletePrices += 1;
+    group.recordIds.push(item.id); groups.set(key, group);
   }
   return {
     total: active.length,
     pendingMonthly: pending.length,
+    carrierPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.pricing?.totalGross), 0) * 100) / 100,
     commissionPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.billing.commissionGross), 0) * 100) / 100,
-    groups: [...groups.values()].map((group) => ({ ...group, commissionGross: Math.round(group.commissionGross * 100) / 100 })),
+    customerPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.pricing?.customerTotalGross), 0) * 100) / 100,
+    groups: [...groups.values()].map((group) => ({
+      ...group,
+      carrierGross: Math.round(group.carrierGross * 100) / 100,
+      commissionGross: Math.round(group.commissionGross * 100) / 100,
+      customerTotalGross: Math.round(group.customerTotalGross * 100) / 100,
+    })),
   };
 }
