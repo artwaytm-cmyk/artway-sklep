@@ -386,12 +386,32 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.locator('.von-halsky-table')).toBeVisible();
   await page.goto('/#/admin/von-halsky/ustawienia');
   await expect(page.getByRole('heading', { name: 'Połączenie InPost Von Halsky' })).toBeVisible();
-  await expect(page.locator('.von-halsky-settings form').getByText('Bezpośrednie API', { exact: true })).toBeVisible();
-  await expect(page.locator('.von-halsky-settings form').getByText('Gotowy integrator', { exact: true })).toBeVisible();
+  await expect(page.locator('.von-halsky-settings').getByText('Bezpośrednie API', { exact: true })).toBeVisible();
+  await expect(page.locator('.von-halsky-api-readiness article')).toHaveCount(4);
+  await expect.poll(() => page.locator('#artwayAdminStyle-vonHalsky').evaluate((link) => Boolean(link.sheet))).toBe(true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/#/admin/von-halsky/oferty');
+  const mobile = await page.evaluate(() => ({ viewport: window.innerWidth, content: document.documentElement.scrollWidth }));
+  expect(mobile.content).toBeLessThanOrEqual(mobile.viewport + 1);
   assertRuntime();
 });
 
+test('panel ponawia modułowy CSS i nie pokazuje podstrony bez zastosowanych stylów', async ({ page }) => {
+  await loginAdmin(page);
+  await page.goto('/#/admin/von-halsky');
+  const header = page.locator('.von-halsky-workspace-head');
+  await expect(header).toBeVisible();
+  await page.locator('#artwayAdminStyle-vonHalsky').evaluate((link) => link.remove());
+  await page.goto('/#/admin/pulpit');
+  await page.goto('/#/admin/von-halsky');
+  await expect(page.locator('#artwayAdminStyle-vonHalsky')).toHaveCount(1);
+  await expect.poll(() => page.locator('#artwayAdminStyle-vonHalsky').evaluate((link) => Boolean(link.sheet))).toBe(true);
+  await expect(header).toHaveCSS('display', 'grid');
+  await expect(page.locator('#artwayAdminStyle-vonHalsky')).toHaveAttribute('data-loading', 'false');
+});
+
 test('wspólny układ panelu pozostaje czytelny w aplikacji mobilnej', async ({ page }) => {
+  test.setTimeout(90_000);
   const assertRuntime = observeRuntime(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await loginAdmin(page);

@@ -25,8 +25,16 @@ async function networkFirst(request){
   catch(error){return (await caches.match(request))||(await caches.match("/index.html"))||Response.error();}
 }
 async function cacheFirst(request){
-  const cached=await caches.match(request);if(cached)return cached;
-  const response=await fetch(request);if(response.ok){const cache=await caches.open(CACHE_NAME);cache.put(request,response.clone());}return response;
+  const cache=await caches.open(CACHE_NAME),isValid=response=>{
+    const type=String(response?.headers?.get("content-type")||"").toLowerCase();
+    return request.destination==="style"?type.includes("text/css"):request.destination==="script"?(/javascript|ecmascript/.test(type)):true;
+  };
+  const cached=await cache.match(request);
+  if(cached&&isValid(cached))return cached;
+  if(cached)await cache.delete(request);
+  const response=await fetch(request);
+  if(!isValid(response))return new Response("",{status:502,statusText:"Nieprawidłowy typ zasobu"});
+  if(response.ok)cache.put(request,response.clone());return response;
 }
 self.addEventListener("fetch",event=>{
   const request=event.request;if(request.method!=="GET")return;

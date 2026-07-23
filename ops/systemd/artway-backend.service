@@ -13,6 +13,7 @@ WorkingDirectory=/srv/artway/shop
 EnvironmentFile=/srv/artway/shop/.env.netlify
 EnvironmentFile=/srv/artway/agent/.env
 EnvironmentFile=-/srv/artway/ops/secrets/allegro.env
+EnvironmentFile=-/srv/artway/ops/secrets/von-halsky.env
 EnvironmentFile=/srv/artway/ops/secrets/session.env
 Environment=NODE_ENV=production
 Environment=HOST=127.0.0.1

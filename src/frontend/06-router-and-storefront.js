@@ -12,6 +12,16 @@ const adminObietniceStyle = new Map();
 const sklepZaladowaneModuly = new Set();
 const sklepObietniceModulow = new Map();
 let adminStylePromise = null;
+function adminArkuszStylowGotowy(id=""){
+  const link=document.getElementById(id);
+  if(!link?.isConnected||!link.sheet)return false;
+  try{return link.sheet.cssRules.length>0;}catch(error){return true;}
+}
+function adminBazowyArkuszGotowy(){return adminArkuszStylowGotowy("artwayAdminStyles");}
+function adminArkuszModuluGotowy(modul){
+  const asset=ADMIN_STYLE_RUNTIME[modul];
+  return !asset||adminArkuszStylowGotowy(`artwayAdminStyle-${modul}`);
+}
 function identyfikatorZTrasy(route,index){
   const raw=String(route||"").split("/")[index]||"";let decoded=raw;
   try{decoded=decodeURIComponent(raw);}catch(e){}
@@ -71,14 +81,21 @@ function zaladujSklepModul(modul,version){
   const promise=wczytaj().catch(error=>{sklepObietniceModulow.delete(modul);document.getElementById(id)?.remove();throw error;});
   sklepObietniceModulow.set(modul,promise);return promise;
 }
-function adminModulyTrasyGotowe(route=""){return adminModulyDlaTrasy(route).every(modul=>adminZaladowaneModuly.has(modul));}
+function adminModulyTrasyGotowe(route=""){
+  const moduly=adminModulyDlaTrasy(route);
+  return adminBazowyArkuszGotowy()&&moduly.every(modul=>adminZaladowaneModuly.has(modul)&&adminArkuszModuluGotowy(modul));
+}
 function zaladujAdminStyle(version){
-  if(adminStylePromise)return adminStylePromise;
+  if(adminBazowyArkuszGotowy())return Promise.resolve();
+  const obecny=document.getElementById("artwayAdminStyles");
+  if(adminStylePromise&&obecny?.dataset.loading==="true")return adminStylePromise;
+  adminStylePromise=null;obecny?.remove();
   const wczytaj=(proba=0)=>new Promise((resolve,reject)=>{
-    const obecny=document.getElementById("artwayAdminStyles");
-    if(obecny?.sheet){resolve();return;}obecny?.remove();
-    const link=document.createElement("link");link.id="artwayAdminStyles";link.rel="stylesheet";link.href=`/assets/admin.css?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;
-    link.onload=()=>resolve();link.onerror=()=>{link.remove();if(proba<1)setTimeout(()=>wczytaj(proba+1).then(resolve,reject),250);else reject(new Error("Nie udało się wczytać stylów panelu administratora"));};document.head.appendChild(link);
+    document.getElementById("artwayAdminStyles")?.remove();
+    const link=document.createElement("link");link.id="artwayAdminStyles";link.rel="stylesheet";link.dataset.loading="true";link.href=`/assets/admin.css?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;
+    const blad=()=>{link.remove();if(proba<2)setTimeout(()=>wczytaj(proba+1).then(resolve,reject),250*(proba+1));else reject(new Error("Nie udało się zastosować stylów panelu administratora"));};
+    link.onload=()=>requestAnimationFrame(()=>{link.dataset.loading="false";adminBazowyArkuszGotowy()?resolve():blad();});
+    link.onerror=blad;document.head.appendChild(link);
   });
   adminStylePromise=wczytaj().catch(error=>{adminStylePromise=null;throw error;});
   return adminStylePromise;
@@ -98,13 +115,17 @@ function zaladujAdminModul(modul,version){
   adminObietniceModulow.set(modul,promise);return promise;
 }
 function zaladujAdminStyleModul(modul,version){
-  const asset=ADMIN_STYLE_RUNTIME[modul];if(!asset||adminZaladowaneStyle.has(modul))return Promise.resolve();
-  if(adminObietniceStyle.has(modul))return adminObietniceStyle.get(modul);
+  const asset=ADMIN_STYLE_RUNTIME[modul];if(!asset)return Promise.resolve();
+  if(adminArkuszModuluGotowy(modul)){adminZaladowaneStyle.add(modul);return Promise.resolve();}
+  const obecny=document.getElementById(`artwayAdminStyle-${modul}`);
+  if(adminObietniceStyle.has(modul)&&obecny?.dataset.loading==="true")return adminObietniceStyle.get(modul);
+  adminZaladowaneStyle.delete(modul);adminObietniceStyle.delete(modul);obecny?.remove();
   const id=`artwayAdminStyle-${modul}`,wczytaj=(proba=0)=>new Promise((resolve,reject)=>{
     document.getElementById(id)?.remove();
-    const link=document.createElement("link");link.id=id;link.rel="stylesheet";link.href=`/assets/${asset}.css?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;
-    link.onload=()=>{adminZaladowaneStyle.add(modul);resolve();};
-    link.onerror=()=>{link.remove();if(proba<1)setTimeout(()=>wczytaj(proba+1).then(resolve,reject),250);else reject(new Error(`Nie udało się wczytać stylów modułu ${modul}`));};
+    const link=document.createElement("link");link.id=id;link.rel="stylesheet";link.dataset.loading="true";link.href=`/assets/${asset}.css?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;
+    const blad=()=>{link.remove();if(proba<2)setTimeout(()=>wczytaj(proba+1).then(resolve,reject),250*(proba+1));else reject(new Error(`Nie udało się zastosować stylów modułu ${modul}`));};
+    link.onload=()=>requestAnimationFrame(()=>{link.dataset.loading="false";if(adminArkuszModuluGotowy(modul)){adminZaladowaneStyle.add(modul);resolve();}else blad();});
+    link.onerror=blad;
     document.head.appendChild(link);
   });
   const promise=wczytaj().catch(error=>{adminObietniceStyle.delete(modul);document.getElementById(id)?.remove();throw error;});

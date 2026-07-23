@@ -47,6 +47,9 @@ test('Service Worker nie zapisuje prywatnych danych ani odpowiedzi API',()=>{
   assert.match(worker,/url\.pathname\.startsWith\("\/\.netlify\/functions\/"\)/);
   assert.match(worker,/request\.mode==="navigate"/);
   assert.match(worker,/networkFirst\(request\)/);
+  assert.match(worker,/request\.destination==="style"/);
+  assert.match(worker,/cache\.delete\(request\)/);
+  assert.match(worker,/Nieprawidłowy typ zasobu/);
 });
 
 test('skaner jest małym oknem nad każdą podstroną i rozpoznaje kod automatycznie',()=>{

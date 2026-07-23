@@ -11,6 +11,7 @@ WorkingDirectory=/srv/artway/shop
 EnvironmentFile=/srv/artway/shop/.env.netlify
 EnvironmentFile=-/srv/artway/agent/.env
 EnvironmentFile=-/srv/artway/ops/secrets/allegro.env
+EnvironmentFile=-/srv/artway/ops/secrets/von-halsky.env
 Environment=ARTWAY_LOCAL_API_ORIGIN=http://127.0.0.1:3000
 ExecStart=/usr/bin/node /srv/artway/shop/scripts/run-background-agent.mjs
 NoNewPrivileges=true

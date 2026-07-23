@@ -300,6 +300,10 @@ const vonHalskyRoute = createVonHalskyRoute({
   isAdmin: czyAdmin,
   readVersioned: czytajWersjonowane,
   writeIfVersion: zapiszJesliWersja,
+  loadCatalog: async () => {
+    const settings = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+    return [...(await allegroAgentProduktyKompletne(settings?.data || {})).values()];
+  },
 });
 const zapiszOperacjeProduktow = createCatalogProductOperationWriter({ mutateLatest: createRevisionSafeMutator(repository, 'settings'), loadProducts: allegroAgentProduktyKompletne, createUpdater: allegroAktualizatorProduktowCentralnych });
 const zapiszMapowaniaBezpiecznie = createAllegroMappingStore({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getItems: allegroMapowaniaItems }).writeSafely;

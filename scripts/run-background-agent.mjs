@@ -19,6 +19,7 @@ const taskLabels = {
   'tresci-allegro': 'Aktualizacja zmienionych opisów Allegro',
   zamowienia: 'Nowe lub zmienione zamówienia Allegro',
   komunikacja: 'Nowe wiadomości i dyskusje',
+  'von-halsky-katalog': 'Okresowa synchronizacja katalogu Von Halsky',
 };
 
 const taskDefinition = (id, coordinatorPlan = null) => ({
@@ -58,6 +59,7 @@ function changeCount(label, data = {}) {
   if (label === 'zamowienia') return Math.max(0, Number(data.imported_new || 0)) + Math.max(0, Number(data.changed_orders || 0));
   if (label === 'komunikacja') return Math.max(0, Number(data.syncSummary?.newBuyerMessages || 0));
   if (label === 'tresci-gpt-nano') return Math.max(0, Number(data.cycle?.applied?.length || 0)) + Math.max(0, Number(data.cycle?.decisions?.length || 0));
+  if (label === 'von-halsky-katalog') return Math.max(0, Number(data.sent || 0));
   return Math.max(0, Number(data.changed ?? data.updated ?? data.autoMapped ?? 0));
 }
 
@@ -124,10 +126,12 @@ await report('cycle_start', { steps: [
 
 // Te dwa wywołania są detektorami zmian i działają równolegle. Nie uruchamiają
 // automatycznie pełnej kontroli 10 000 ofert ani całego katalogu.
-const detectorResults = await Promise.all([
+const [ordersResult, communicationResult, vonHalskyResult] = await Promise.all([
   run('zamowienia', 'allegro-sync-orders', { limit: 200, source: 'event-detector' }, 90_000),
   run('komunikacja', 'allegro-sync-communications', { limit: 20, autoReply: true, source: 'event-detector' }, 90_000),
+  run('von-halsky-katalog', 'von-halsky-sync-catalog', { publish: true, scheduled: true, batchSize: 50 }, 120_000),
 ]);
+const detectorResults = [ordersResult, communicationResult];
 
 let specialists = {}, operations = {};
 try { [specialists, operations] = await Promise.all([adminGet('agent-specialists-status', { historyLimit: 5 }), adminGet('agent-operations-summary')]); } catch { /* plan działa także na samym harmonogramie */ }
@@ -137,7 +141,7 @@ await report('cycle_step', { step: {
   count: planned.queue.length, detail: planned.queue.length ? `Wybrano: ${planned.queue.map((item) => taskLabels[item.id]).join(' → ')}. Odłożono: ${planned.deferred.length}.` : 'Brak konkretnego zadania do wykonania. Ciężkie kontrole pominięto.',
 } });
 
-const results = [...detectorResults];
+const results = [...detectorResults, vonHalskyResult];
 let coordinator = null;
 if (planned.queue.some((item) => item.id === 'tresci-gpt-nano')) {
   coordinator = await coordinatorCycle({ specialists, operations });
