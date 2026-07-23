@@ -44,6 +44,7 @@ import { createEmailService } from './email-service.mjs';
 import { createInpostService } from './inpost-service.mjs';
 import { createInpostRoute } from './inpost-route.mjs';
 import { createInpostServiceShipmentRoute } from './inpost-service-shipment-route.mjs';
+import { createVonHalskyRoute } from './von-halsky-route.mjs';
 import { createStoreDataRoute } from './store-data-route.mjs';
 import { createPaynowService } from './paynow-service.mjs';
 import { createPaynowRoute } from './paynow-route.mjs';
@@ -268,6 +269,12 @@ const inpostServiceShipmentRoute = createInpostServiceShipmentRoute({
   publicConfig: inpostPublicConfig, configure: inpostKonfiguracja, call: inpostWywolaj, serviceAvailability: inpostDostepnoscUslug,
   organization: inpostOrganizacja, waitForLabel: inpostCzekajNaEtykiete, trackingNumber: numerZShipX, shipmentStatus: inpostStatusZShipX,
   labelReady: inpostEtykietaGotowa, offerId: inpostOfertaId, infaktPublicConfig, infaktCall: infaktWywolaj, infaktReference: infaktRef,
+});
+const vonHalskyRoute = createVonHalskyRoute({
+  respond: odpowiedz,
+  isAdmin: czyAdmin,
+  readVersioned: czytajWersjonowane,
+  writeIfVersion: zapiszJesliWersja,
 });
 const zapiszOperacjeProduktow = createCatalogProductOperationWriter({ mutateLatest: createRevisionSafeMutator(repository, 'settings'), loadProducts: allegroAgentProduktyKompletne, createUpdater: allegroAktualizatorProduktowCentralnych });
 const zapiszMapowaniaBezpiecznie = createAllegroMappingStore({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getItems: allegroMapowaniaItems }).writeSafely;
@@ -3674,6 +3681,8 @@ export default async (req) => {
     if (inpostResponse) return inpostResponse;
     const inpostServiceShipmentResponse = await inpostServiceShipmentRoute(req, url, action);
     if (inpostServiceShipmentResponse) return inpostServiceShipmentResponse;
+    const vonHalskyResponse = await vonHalskyRoute(req, url, action);
+    if (vonHalskyResponse) return vonHalskyResponse;
 
     // ─── CENTRALNA KARTOTEKA PRODUKTÓW (PostgreSQL, stronicowanie serwerowe) ───
     const centralCatalogResponse = await centralProductCatalogRoute(req, url, action);

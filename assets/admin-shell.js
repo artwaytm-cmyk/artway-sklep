@@ -39,6 +39,7 @@ const MENU_ADMINA = [
   {id:"sprzedaz",ikona:"🛒",nazwa:"Obsługa sprzedaży",opis:"Od zamówienia do doręczenia",elementy:[
     ["/admin/zamowienia","📦","Zamówienia sklepu","Statusy, płatności i obsługa"],
     ["/admin/allegro","🟠","Allegro","Oferty, zamówienia i komunikacja"],
+    ["/admin/von-halsky","🐕","InPost Von Halsky","Oferty, powiązania i zamówienia InPost+"],
     ["/admin/wysylki","🚚","Centrum wysyłek","InPost, etykiety i tracking"],
     ["/admin/klienci","👥","Klienci","Konta, uprawnienia i historia"]
   ]},

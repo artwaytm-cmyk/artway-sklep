@@ -83,6 +83,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/11-allegro-operations.js',
       'src/frontend/11-allegro-communications.js',
       'src/frontend/11-allegro-workspace.js',
+      'src/frontend/11b-von-halsky-workspace.js',
       'src/frontend/11-store-orders.js',
       'src/frontend/11-agent-ai-workspace.js',
       'src/frontend/11-allegro-settings.js',
@@ -179,6 +180,11 @@ export const ASSET_BUNDLES = Object.freeze([
     banner: '/* GENERATED ADMIN AGENT STYLES — loaded on demand */',
     sources: ['src/styles/28-agent-ai-workspace.css', 'src/styles/33-agent-observability.css'],
   },
+  {
+    output: 'assets/admin-von-halsky.css',
+    banner: '/* GENERATED ADMIN VON HALSKY STYLES — loaded on demand */',
+    sources: ['src/styles/37-von-halsky-workspace.css'],
+  },
 ]);
 
 // Runtime panelu jest dzielony według odpowiedzialności. `assets/admin.js`
@@ -269,6 +275,13 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
     banner: '/* GENERATED ADMIN COMMUNICATIONS — loaded on demand */',
     sources: [
       'src/frontend/11-allegro-communications.js',
+    ],
+  },
+  {
+    output: 'assets/admin-von-halsky.js',
+    banner: '/* GENERATED ADMIN VON HALSKY — loaded on demand */',
+    sources: [
+      'src/frontend/11b-von-halsky-workspace.js',
     ],
   },
   {

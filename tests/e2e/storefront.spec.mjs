@@ -109,6 +109,7 @@ test('główne działy administratora mają jeden profesjonalny szablon i nie tw
     '/admin/seo/efekty',
     '/admin/personalizacja/home',
     '/admin/infakt',
+    '/admin/von-halsky',
     '/admin/system',
   ];
   for (const route of routes) {
@@ -161,6 +162,24 @@ test('Centrum wysyłki udostępnia ręczne nadanie InPost bez ujawniania kosztu 
   const workspace = page.locator('.admin-workspace-content[data-admin-layout="unified-v2"]');
   const dimensions = await workspace.evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.width + 1);
+  assertRuntime();
+});
+
+test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawaniem paczek', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  await page.goto('/#/admin/von-halsky');
+  await expect(page.getByRole('heading', { name: 'InPost Von Halsky', exact: true })).toBeVisible();
+  await expect(page.locator('.module-tabs-panel a[href="#/admin/von-halsky/oferty"]')).toBeVisible();
+  await expect(page.locator('.module-tabs-panel a[href="#/admin/von-halsky/powiazania"]')).toBeVisible();
+  await expect(page.locator('.module-tabs-panel a[href="#/admin/von-halsky/zamowienia"]')).toBeVisible();
+  await page.goto('/#/admin/von-halsky/oferty');
+  await expect(page.getByRole('heading', { name: 'Produkty przygotowywane do Von Halsky' })).toBeVisible();
+  await expect(page.locator('.von-halsky-table')).toBeVisible();
+  await page.goto('/#/admin/von-halsky/ustawienia');
+  await expect(page.getByRole('heading', { name: 'Połączenie InPost Von Halsky' })).toBeVisible();
+  await expect(page.locator('.von-halsky-settings form').getByText('Bezpośrednie API', { exact: true })).toBeVisible();
+  await expect(page.locator('.von-halsky-settings form').getByText('Gotowy integrator', { exact: true })).toBeVisible();
   assertRuntime();
 });
 
