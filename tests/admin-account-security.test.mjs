@@ -104,6 +104,22 @@ test('sesja administratora respektuje wybrany limit bezczynności', () => {
   assert.ok(session.exp <= before + 16 * 60 * 1000);
 });
 
+test('rejestracja po stronie serwera odrzuca niepełny adres e-mail przed zapisem', async () => {
+  const users = { items: [] };
+  let writes = 0;
+  const route = createStoreDataRoute(routeDependencies(users, {
+    profilKlienta: () => ({ email: 'niepoprawny', imie: 'Test Konta' }),
+    zapisz: async () => { writes += 1; return true; },
+  }));
+  const result = await route(new Request('https://artwaytm.pl/api/store?action=account-register', {
+    method: 'POST',
+    body: JSON.stringify({ user: { email: 'niepoprawny', imie: 'Test Konta' }, password: 'bezpieczne-haslo' }),
+  }), new URL('https://artwaytm.pl/api/store?action=account-register'), 'account-register');
+  assert.equal(result.status, 422);
+  assert.equal(result.body.code, 'email');
+  assert.equal(writes, 0);
+});
+
 test('interfejs nie generuje ani nie pobiera pliku z sekretami MFA', async () => {
   const [source, backend] = await Promise.all([
     readFile(new URL('../src/frontend/06c-storefront-account.js', import.meta.url), 'utf8'),

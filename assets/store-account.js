@@ -47,8 +47,14 @@ async function potwierdzLogowanieMfa(e){
 }
 async function zakonczLogowanie(user){
   logowanieMfaStan=null;ustawSesje(user);zapiszLS("artway_admin_session_refreshed_at",Date.now());
-  if(user.rola==="admin"||jestGlownymAdminem(user.email))await synchronizujBazeCentralna(true);else await pobierzMojeZamowieniaCentralne(true);
-  toast("Witaj, "+String(user.imie||"Administrator").split(" ")[0]+"! 👋");location.hash=jestAdmin()?"#/admin":"#/konto";
+  const admin=user.rola==="admin"||jestGlownymAdminem(user.email),cel=admin?"#/admin":"#/konto";
+  toast("Witaj, "+String(user.imie||"Administrator").split(" ")[0]+"! 👋");
+  location.hash=cel;
+  const synchronizacja=()=>admin?synchronizujBazeCentralna(true):pobierzMojeZamowieniaCentralne(true);
+  void Promise.resolve().then(synchronizacja).catch(bl=>{
+    loguj("ostrzezenie","Zalogowano poprawnie; dane zostaną ponownie zsynchronizowane: "+String(bl?.message||bl),"logowanie");
+    if(location.hash===cel)toast("Zalogowano. Dane odświeżą się automatycznie po odzyskaniu połączenia.");
+  });
 }
 function widokRejestracja(){
   if(sesja) { location.hash="#/konto"; return ""; }
@@ -71,22 +77,36 @@ function widokRejestracja(){
 }
 async function obsluzLogowanie(e){
   e.preventDefault();
-  const f = new FormData(e.target);
-  const w = await sprawdzLogowanie(f.get("email"), f.get("haslo"));
-  if(!w.ok){ $("authMsg").innerHTML = `<div class="form-err">${esc(w.blad)}</div>`; return; }
-  if(w.mfa){await pokazLogowanieMfa(w.mfa);return;}
-  await zakonczLogowanie(w.uzytkownik);
+  const button=e.submitter;if(button){button.disabled=true;button.textContent="Loguję…";}
+  try{
+    const f = new FormData(e.target);
+    const w = await sprawdzLogowanie(f.get("email"), f.get("haslo"));
+    if(!w.ok){ $("authMsg").innerHTML = `<div class="form-err">${esc(w.blad)}</div>`; return; }
+    if(w.mfa){await pokazLogowanieMfa(w.mfa);return;}
+    await zakonczLogowanie(w.uzytkownik);
+  }catch(bl){
+    $("authMsg").innerHTML=`<div class="form-err">${esc(bl?.message||"Nie udało się zalogować. Spróbuj ponownie.")}</div>`;
+  }finally{
+    if(button&&document.contains(button)){button.disabled=false;button.textContent="Zaloguj się";}
+  }
 }
 async function obsluzRejestracje(e){
   e.preventDefault();
-  const f = new FormData(e.target);
-  if(String(f.get("haslo")||"")!==String(f.get("haslo2")||"")){ $("authMsg").innerHTML='<div class="form-err">Wpisane hasła nie są takie same.</div>'; return; }
-  const w = await zarejestrujUzytkownika(f.get("imie"), f.get("email"), f.get("haslo"));
-  if(!w.ok){ $("authMsg").innerHTML = `<div class="form-err">${esc(w.blad)}</div>`; return; }
-  ustawSesje(w.uzytkownik);
-  await pobierzMojeZamowieniaCentralne(true);
-  toast("Konto założone! 🎉");
-  location.hash="#/konto";
+  const button=e.submitter;if(button){button.disabled=true;button.textContent="Tworzę konto…";}
+  try{
+    const f = new FormData(e.target);
+    if(String(f.get("haslo")||"")!==String(f.get("haslo2")||"")){ $("authMsg").innerHTML='<div class="form-err">Wpisane hasła nie są takie same.</div>'; return; }
+    const w = await zarejestrujUzytkownika(f.get("imie"), f.get("email"), f.get("haslo"));
+    if(!w.ok){ $("authMsg").innerHTML = `<div class="form-err">${esc(w.blad)}</div>`; return; }
+    ustawSesje(w.uzytkownik);
+    toast("Konto założone! 🎉");
+    location.hash="#/konto";
+    void Promise.resolve().then(()=>pobierzMojeZamowieniaCentralne(true)).catch(bl=>loguj("ostrzezenie","Konto utworzone; historia zamówień odświeży się później: "+String(bl?.message||bl),"rejestracja"));
+  }catch(bl){
+    $("authMsg").innerHTML=`<div class="form-err">${esc(bl?.message||"Nie udało się utworzyć konta. Spróbuj ponownie.")}</div>`;
+  }finally{
+    if(button&&document.contains(button)){button.disabled=false;button.textContent="Załóż konto";}
+  }
 }
 
 /* ═══════════ WIDOK: KONTO ═══════════ */

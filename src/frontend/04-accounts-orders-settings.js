@@ -11,9 +11,14 @@ async function hashuj(s){
   }catch(e){}
   return prostyHash(s);
 }
+function poprawnyEmailKonta(value){
+  const email=String(value||"").trim().toLowerCase(),parts=email.split("@"),domain=parts[1]||"";
+  return email.length<=200&&parts.length===2&&parts[0].length>0&&domain.includes(".")&&!/\s/.test(email)&&!domain.startsWith(".")&&!domain.endsWith(".");
+}
 async function zarejestrujUzytkownika(imie, email, haslo){
   imie=imie.trim(); email=email.trim().toLowerCase();
-  if(!imie || !email.includes("@")) return {ok:false, blad:"Podaj poprawne imię i adres e-mail."};
+  if(imie.length<2) return {ok:false, blad:"Podaj imię i nazwisko."};
+  if(!poprawnyEmailKonta(email)) return {ok:false, blad:"Podaj poprawny adres e-mail."};
   if(haslo.length<8) return {ok:false, blad:"Hasło musi mieć co najmniej 8 znaków."};
   const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
   try{

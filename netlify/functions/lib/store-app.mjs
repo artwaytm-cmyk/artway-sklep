@@ -21,6 +21,7 @@ import {
   verifyOrderAccess,
   verifyPassword,
 } from './core/security.mjs';
+import { isValidAccountEmail, normalizeAccountEmail } from './core/account-validation.mjs';
 import {
   createAdminMfaChallenge,
   createMfaEmailRecovery,
@@ -450,8 +451,8 @@ const inventoryDecisionRoute = createInventoryDecisionRoute({ decisions: invento
 
 function profilKlienta(raw = {}, email = '') {
   const source = raw && typeof raw === 'object' ? raw : {};
-  const cleanEmail = tekst(email || source.email, 200).trim().toLowerCase();
-  if (!cleanEmail) return null;
+  const cleanEmail = normalizeAccountEmail(tekst(email || source.email, 200));
+  if (!isValidAccountEmail(cleanEmail)) return null;
   return {
     email: cleanEmail,
     imie: tekst(source.imie, 160).trim(),

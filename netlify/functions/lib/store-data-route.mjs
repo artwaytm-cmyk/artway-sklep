@@ -1,3 +1,5 @@
+import { isValidAccountEmail } from './core/account-validation.mjs';
+
 export function createStoreDataRoute(deps = {}) {
   const PUBLIC_CENTRAL_CATALOG_KEYS = ['artway_produkty_edytowane', 'artway_produkty_dodane', 'artway_produkty_katalog', 'artway_produkty_ukryte', 'artway_produkty_definitywne', 'artway_stany', 'artway_dostepnosc', 'artway_magazyn_produkty'];
   const PUBLIC_CENTRAL_ADMIN_KEYS = [
@@ -350,8 +352,11 @@ export function createStoreDataRoute(deps = {}) {
       if (limited) return limited;
       const body = await req.json().catch(() => ({}));
       const password = String(body.password || '');
+      if (!isValidAccountEmail(body.user?.email)) return odpowiedz({ ok: false, error: 'Podaj poprawny adres e-mail.', code: 'email' }, 422);
       const u = profilKlienta(body.user);
-      if (!u || password.length < 8 || password.length > 200) return odpowiedz({ ok: false, error: 'Hasło musi mieć co najmniej 8 znaków.' }, 422);
+      if (!u) return odpowiedz({ ok: false, error: 'Podaj poprawny adres e-mail.', code: 'email' }, 422);
+      if (!u.imie || u.imie.length < 2) return odpowiedz({ ok: false, error: 'Podaj imię i nazwisko.', code: 'name' }, 422);
+      if (password.length < 8 || password.length > 200) return odpowiedz({ ok: false, error: 'Hasło musi mieć co najmniej 8 znaków.', code: 'password' }, 422);
       u.rola = 'klient'; u.account = true; u.passwordHash = await hashPassword(password); u.data = new Date().toISOString();
       const rec = await czytaj('users', { items: [] });
       const items = Array.isArray(rec.items) ? rec.items : [];
