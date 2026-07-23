@@ -85,7 +85,7 @@ export async function prepareLinkedProductEditorial(product = {}, {
   };
   const ready = !!storeRun;
   const sections = buildSharedProductDescriptionSections(storeProduct);
-  const editorialTarget = { store: true, allegro: true, channels: 'shared_store_and_allegro' };
+  const editorialTarget = { store: true, vonHalsky: true, allegro: true, channels: 'shared_store_allegro_von_halsky' };
   const editorialFingerprint = productEditorialFingerprint({ ...storeProduct, sourceMaterial }, editorialTarget);
   return {
     product: {
@@ -93,8 +93,11 @@ export async function prepareLinkedProductEditorial(product = {}, {
       allegroTitle: title,
       allegroDescription: storeProduct.opis,
       allegroDescriptionSections: sections,
+      vonHalskyContentMode: 'store',
+      vonHalskyContentSource: 'store-canonical-content',
+      vonHalskyContentUpdatedAt: preparedAt,
       sourceMaterial,
-      contentEditorial: { status: ready ? 'ready' : 'needs_review', sourceRole: 'facts_only', channels: 'shared_store_and_allegro', targets: { store: true, allegro: true }, layoutPolicy: 'allegro_sections', promptVersion: PROMPT_VERSION, inputFingerprint: editorialFingerprint, preparedAt, store: runMeta(storeRun), warnings },
+      contentEditorial: { status: ready ? 'ready' : 'needs_review', sourceRole: 'facts_only', channels: 'shared_store_allegro_von_halsky', targets: { store: true, vonHalsky: true, allegro: true }, layoutPolicy: 'allegro_sections', promptVersion: PROMPT_VERSION, inputFingerprint: editorialFingerprint, preparedAt, store: runMeta(storeRun), warnings },
       contentEditorialPreparedAt: preparedAt,
       contentEditorialSource: 'agent-specialists-from-source-facts',
     },

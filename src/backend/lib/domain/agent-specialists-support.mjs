@@ -27,17 +27,17 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-21.2';
+const PROMPT_VERSION = '2026-07-23.1';
 const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription' });
 
 const SPECIALISTS = Object.freeze({
   product_content: {
     assistantId: 'asst_bi27lcqG4p4pGx5TouNEE94J', platformPrompt: { id: 'pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108', version: '1' },
     icon: '✨', label: 'Redaktor produktu', area: 'Katalog i sklep',
-    description: 'Tworzy spójny tytuł, krótki i pełny opis oraz pola SEO wyłącznie z przekazanych faktów.',
+    description: 'Tworzy jeden spójny tytuł, krótki i pełny opis oraz pola SEO dla sklepu, Von Halsky i powiązanej oferty Allegro wyłącznie z przekazanych faktów.',
     fields: ['title', 'short_description', 'long_description', 'seo_title', 'seo_description', 'seo_keywords'],
-    scenario: { id: 'catalog-editorial', version: '2026-07-21.2' },
-    rules: 'Nazwę ze źródła traktuj jako fakt o tożsamości, a nie gotowy tytuł. Usuń dopiski sklepu źródłowego, powtórzenia i chaos wielkich liter; ułóż naturalną nazwę sprzedażową, zachowując markę, model i wariant. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach. Treść jest wspólna dla sklepu i Allegro: nigdy nie dodawaj telefonu, e-maila, adresu strony, zachęty do kontaktu, negocjowania ceny, zewnętrznej płatności, sprzedaży poza Allegro ani informacji o dostawie, wysyłce, przewoźniku, paczkomacie, nadaniu, odbiorze, kosztach lub terminach realizacji.',
+    scenario: { id: 'catalog-editorial', version: '2026-07-23.1' },
+    rules: 'Nazwę ze źródła traktuj jako fakt o tożsamości, a nie gotowy tytuł. Usuń dopiski sklepu źródłowego, powtórzenia i chaos wielkich liter; ułóż naturalną nazwę sprzedażową, zachowując markę, model i wariant. Pełny opis formatuj prostym HTML: p, h2, ul, li i strong. Nie dodawaj parametrów, których nie ma w faktach. Treść jest jednym kanonicznym opisem dla sklepu, Von Halsky i powiązanej oferty Allegro: nigdy nie dodawaj telefonu, e-maila, adresu strony, zachęty do kontaktu, negocjowania ceny, zewnętrznej płatności, sprzedaży poza Allegro ani informacji o dostawie, wysyłce, przewoźniku, paczkomacie, nadaniu, odbiorze, kosztach lub terminach realizacji.',
   },
   allegro_offer: {
     assistantId: 'asst_16UEvdbo3boUso6xyYeANYnQ', platformPrompt: { id: 'pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7', version: '1' },
@@ -405,6 +405,7 @@ function productFacts(product = {}) {
       allegroCatalogDescription: sourceEditorialFacts(source.allegroCatalogDescription),
       allegroOfferDescription: sourceEditorialFacts(source.allegroOfferDescription),
     },
+    legacyVonHalskyPresentation: String(product.vonHalskyContentMode || '').toLowerCase() === 'custom' ? { title: clean(product.vonHalskyTitle, 300), shortDescription: sourceEditorialFacts(product.vonHalskyShortDescription, 4000), fullDescription: sourceEditorialFacts(product.vonHalskyDescription) } : null,
     seoTitle: product.seoTitle, seoDescription: product.seoDescription,
   });
 }
@@ -530,14 +531,14 @@ function productEditorialTarget(product = {}) {
     || ['queued', 'preparing', 'ready', 'published'].includes(clean(product.allegroPreparationStatus, 40).toLowerCase())
     || product.contentEditorial?.targets?.allegro === true
   );
-  return { store: true, allegro, channels: allegro ? 'shared_store_and_allegro' : 'store_only' };
+  return { store: true, vonHalsky: true, allegro, channels: allegro ? 'shared_store_allegro_von_halsky' : 'shared_store_von_halsky' };
 }
 
 function productEditorialFingerprint(product = {}, target = productEditorialTarget(product)) {
   const source = product.sourceMaterial && typeof product.sourceMaterial === 'object' ? product.sourceMaterial : {};
   const facts = {
     promptVersion: PROMPT_VERSION,
-    target: { store: target.store === true, allegro: target.allegro === true },
+    target: { store: target.store === true, vonHalsky: target.vonHalsky === true, allegro: target.allegro === true },
     source: {
       sourceUrl: clean(source.sourceUrl || product.sourceUrl || product.producentUrl, 1000),
       title: clean(source.title || product.nazwa || product.name, 300),
@@ -564,12 +565,14 @@ function productEditorialState(product = {}) {
     && clean(product.opis, 30_000).length >= 150
     && clean(product.seoTitle, 180)
     && clean(product.seoDescription, 300);
+  const canonicalChannels = String(product.vonHalskyContentMode || 'store').toLowerCase() !== 'custom';
   const current = editorial.status === 'ready'
     && editorial.promptVersion === PROMPT_VERSION
     && editorial.inputFingerprint === fingerprint
     && editorial.channels === target.channels
     && quality.ready
-    && Boolean(complete);
+    && Boolean(complete)
+    && canonicalChannels;
   const reviewedSameInput = editorial.status === 'needs_review'
     && editorial.promptVersion === PROMPT_VERSION
     && editorial.inputFingerprint === fingerprint;

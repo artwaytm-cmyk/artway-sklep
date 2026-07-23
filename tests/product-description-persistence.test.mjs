@@ -3,27 +3,28 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-test('edytor produktu ma jedno pole opisu krótkiego i długiego używane przez oba kanały', async () => {
+test('edytor produktu ma jedno pole opisu krótkiego i długiego używane przez wszystkie kanały', async () => {
   const source = await readFile('assets/admin.js', 'utf8');
   assert.match(source, /name="opisKrotki"/);
   assert.match(source, /name="opis"/);
   assert.match(source, /Opis długi/);
   assert.match(source, /name="allegroTitle"/);
-  assert.match(source, /Opis wspólny dla sklepu i Allegro/);
+  assert.match(source, /Jeden opis dla sklepu, Von Halsky i Allegro/);
   assert.match(source, /Agent redakcji/);
   assert.doesNotMatch(source, /<button[^>]+agentAIPoprawOpisyWFormularzu/);
   assert.doesNotMatch(source, /<button[^>]+allegroPoprawOpisyWFormularzu/);
 });
 
-test('Von Halsky dziedziczy ofertę sklepową, ale pozwala świadomie zapisać własną prezentację', async () => {
+test('Von Halsky i sklep mają jedną kanoniczną prezentację bez osobnych pól opisowych', async () => {
   const editor = await readFile('src/frontend/12-product-editor-workspace.js', 'utf8');
   const save = await readFile('src/frontend/12-product-editor.js', 'utf8');
   const workspace = await readFile('src/frontend/11b-von-halsky-workspace.js', 'utf8');
-  assert.match(editor, /name="vonHalskyContentMode" value="store"/);
-  assert.match(editor, /name="vonHalskyContentMode" value="custom"/);
-  assert.match(editor, /name="vonHalskyTitle"/);
-  assert.match(editor, /name="vonHalskyShortDescription"/);
-  assert.match(editor, /name="vonHalskyDescription"/);
+  assert.match(editor, /Sklep = 🐕 Von Halsky/);
+  assert.match(editor, /Von Halsky nie ma już osobnego pola opisu/);
+  assert.doesNotMatch(editor, /name="vonHalskyContentMode"/);
+  assert.doesNotMatch(editor, /name="vonHalskyTitle"/);
+  assert.doesNotMatch(editor, /name="vonHalskyShortDescription"/);
+  assert.doesNotMatch(editor, /name="vonHalskyDescription"/);
   assert.match(save, /vonHalskyContentSource="store-canonical-content"/);
   assert.match(workspace, /function vonHalskyOtworzPodglad/);
   assert.match(workspace, /Podgląd oferty/);
@@ -77,14 +78,16 @@ test('synchronizacja ofert nie przywraca starego opisu Allegro do edytora produk
   assert.doesNotMatch(mapping, /zapisz\('settings'/);
 });
 
-test('zapis edytora zawsze ustanawia jeden kanoniczny opis sklepu i Allegro', async () => {
+test('zapis edytora zawsze ustanawia jeden kanoniczny opis sklepu, Von Halsky i Allegro', async () => {
   const editor = await readFile('src/frontend/12-product-editor.js', 'utf8');
   const workspace = await readFile('src/frontend/12-product-editor-workspace.js', 'utf8');
   assert.match(editor, /productEditorZastosujWspolnaTresc\(p,poprzedni\)/);
   assert.match(workspace, /p\.allegroDescription=String\(p\.opis\|\|""\)/);
   assert.match(workspace, /delete p\.allegroDescriptionSections/);
   assert.match(workspace, /allegroEditorialSyncPending=true/);
-  assert.match(workspace, /channels:allegroSelected\?"shared_store_and_allegro":"store_only"/);
+  assert.match(workspace, /channels:allegroSelected\?"shared_store_allegro_von_halsky":"shared_store_von_halsky"/);
+  assert.match(workspace, /targets:\{store:true,vonHalsky:true,allegro:allegroSelected\}/);
+  assert.match(workspace, /p\.vonHalskyContentMode="store"/);
 });
 
 test('starszy produkt z ofertą rzeczywiście dostaje aktualne oba opisy i kolejkę synchronizacji', async () => {
@@ -112,8 +115,17 @@ test('starszy produkt z ofertą rzeczywiście dostaje aktualne oba opisy i kolej
   assert.equal(result.allegroDescriptionSections, undefined);
   assert.equal(result.allegroEditorialSyncPending, true);
   assert.equal(result.allegroEditorialSyncState, 'queued');
-  assert.equal(result.contentEditorial.channels, 'shared_store_and_allegro');
-  assert.deepEqual({ ...result.contentEditorial.targets }, { store: true, allegro: true });
+  assert.equal(result.contentEditorial.channels, 'shared_store_allegro_von_halsky');
+  assert.deepEqual({ ...result.contentEditorial.targets }, { store: true, vonHalsky: true, allegro: true });
+  assert.equal(result.vonHalskyContentMode, 'store');
+});
+
+test('starszy własny opis Von Halsky jest od razu wyświetlany w sklepie i trafia do pól głównych przy zapisie', async () => {
+  const source = await readFile('src/frontend/03-cloud-sync.js', 'utf8');
+  const workspace = await readFile('src/frontend/12-product-editor-workspace.js', 'utf8');
+  assert.match(source, /function wspolnaTrescProduktu/);
+  assert.match(source, /vonHalskyDescription\|\|p\.opis/);
+  assert.match(workspace, /legacyVonHalsky\?p\.vonHalskyDescription\|\|p\.opis/);
 });
 
 test('przygotowanie oferty nie wybiera starego opisu Allegro przed aktualnym opisem produktu', async () => {

@@ -297,7 +297,6 @@ export function createAgentSpecialists({
     await appendHistory(entry);
     return entry;
   }
-
   async function applyProductDraft(id = '', actor = {}, options = {}) {
     const current = await readState(), run = current.history.find((item) => item?.id === clean(id, 100));
     if (!run || run.status !== 'completed' || run.target?.type !== 'product' || !clean(run.target?.productId, 100)) throw Object.assign(new Error('Nie znaleziono szkicu produktu do zatwierdzenia.'), { code: 'agent_specialist_draft_not_found', status: 404 });
@@ -328,17 +327,17 @@ export function createAgentSpecialists({
       if (editorialReady) {
         const sharedName = clean(mergedProduct.nazwa || mergedProduct.name, 300), sharedDescription = clean(mergedProduct.opis, 30_000);
         Object.assign(safePatch, {
-          allegroTitle: sharedName.slice(0, 75),
-          allegroDescription: sharedDescription,
+          allegroTitle: sharedName.slice(0, 75), allegroDescription: sharedDescription,
           allegroDescriptionSections: buildSharedProductDescriptionSections({ ...mergedProduct, nazwa: sharedName, allegroDescription: sharedDescription }),
           contentEditorial: {
             ...(effective.contentEditorial || {}), status: 'ready', sourceRole: effective.sourceMaterial ? 'facts_only' : 'catalog_facts',
-            channels: editorialTarget.channels, targets: { store: true, allegro: editorialTarget.allegro === true },
+            channels: editorialTarget.channels, targets: { store: true, vonHalsky: true, allegro: editorialTarget.allegro === true },
             layoutPolicy: 'allegro_sections', promptVersion: PROMPT_VERSION, inputFingerprint,
             preparedAt: timestamp, runId: run.id, model: run.model, preparedBy: options.editorialAutomatic === true ? 'autonomous-agent' : 'administrator-approved-agent', warnings: [],
           },
-          contentEditorialPreparedAt: timestamp,
-          contentEditorialSource: options.editorialAutomatic === true ? 'autonomous-agent-specialist' : 'approved-agent-specialist',
+          contentEditorialPreparedAt: timestamp, contentEditorialSource: options.editorialAutomatic === true ? 'autonomous-agent-specialist' : 'approved-agent-specialist',
+          vonHalskyContentMode: 'store', vonHalskyTitle: '', vonHalskyShortDescription: '', vonHalskyDescription: '',
+          vonHalskyContentUpdatedAt: timestamp, vonHalskyContentSource: 'store-canonical-content',
         });
         if (editorialTarget.allegro === true && current.config.autoUpdateLinkedAllegroContent !== false) Object.assign(safePatch, {
           allegroEditorialSyncPending: true,
@@ -385,7 +384,7 @@ export function createAgentSpecialists({
       const patch = {
         contentEditorial: {
           ...(product.contentEditorial || {}), status: 'retry_pending', sourceRole: product.sourceMaterial ? 'facts_only' : 'catalog_facts',
-          channels: editorial.target.channels, targets: { store: true, allegro: editorial.target.allegro === true }, layoutPolicy: 'allegro_sections',
+          channels: editorial.target.channels, targets: { store: true, vonHalsky: true, allegro: editorial.target.allegro === true }, layoutPolicy: 'allegro_sections',
           promptVersion: PROMPT_VERSION, inputFingerprint: editorial.fingerprint, attemptedAt: timestamp, retryAt,
           retryCount: Math.min(100, Math.max(0, Number(product.contentEditorial?.retryCount) || 0) + 1),
           runId: clean(draft?.id, 120), model: clean(draft?.model, 80), warnings: [...(draft?.result?.warnings || []), ...(draft?.result?.missingFacts || []), error].map((item) => clean(item, 500)).filter(Boolean).slice(0, 20),
@@ -406,7 +405,7 @@ export function createAgentSpecialists({
     const editorial = productEditorialState(product), note = clean(raw.note, 500);
     const draft = await run({
       specialist: 'product_content', source: 'manual',
-      instruction: note ? `Przygotuj kompletną, profesjonalną treść produktu. Uwzględnij wskazówkę administratora: ${note}` : `Przygotuj kompletną, profesjonalną treść produktu dla kanałów: ${editorial.target.allegro ? 'sklep i Allegro' : 'sklep'}. Popraw nazwę, opis krótki, opis pełny i SEO, opierając się wyłącznie na faktach.`,
+      instruction: note ? `Przygotuj kompletną, profesjonalną treść produktu dla sklepu, Von Halsky${editorial.target.allegro ? ' i Allegro' : ''}. Uwzględnij wskazówkę administratora: ${note}` : `Przygotuj jeden kompletny, profesjonalny opis używany równocześnie w sklepie, Von Halsky${editorial.target.allegro ? ' i Allegro' : ''}. Popraw nazwę, opis krótki, opis pełny i SEO, opierając się wyłącznie na faktach.`,
       context: { product: productFacts(product), administratorInstruction: note, editorialTarget: editorial.target, editorialFingerprint: editorial.fingerprint },
       target: { type: 'product', productId: safeId, name: clean(product.nazwa, 180), channels: editorial.target.channels, editorialFingerprint: editorial.fingerprint },
     }, actor);
@@ -467,7 +466,8 @@ export function createAgentSpecialists({
       const editorial = productEditorialState(product), short = clean(product.opisKrotki || product.krotkiOpis, 5000), full = clean(product.opis, 30000);
       const missing = (!short ? 3 : 0) + (full.length < 250 ? 4 : 0) + (!product.seoTitle ? 2 : 0) + (!product.seoDescription ? 2 : 0);
       const channelChanged = editorial.editorial.channels && editorial.editorial.channels !== editorial.target.channels;
-      const priority = (channelChanged ? 100 : 0) + (editorial.target.allegro ? 30 : 0) + (product.sourceMaterial ? 15 : 0) + missing;
+      const legacyVonHalskyOverride = String(product.vonHalskyContentMode || '').toLowerCase() === 'custom';
+      const priority = (legacyVonHalskyOverride ? 140 : 0) + (channelChanged ? 100 : 0) + (editorial.target.allegro ? 30 : 0) + (product.sourceMaterial ? 15 : 0) + missing;
       return { product, missing, priority, editorial };
     }).filter((item) => !item.editorial.current && !item.editorial.reviewedSameInput && item.editorial.retryDue !== false)
       .sort((a, b) => b.priority - a.priority || String(b.product.createdAt || b.product.dataDodania || '').localeCompare(String(a.product.createdAt || a.product.dataDodania || ''))) : [];
@@ -527,7 +527,7 @@ export function createAgentSpecialists({
       try {
         const retryAttempt = Math.max(0, Number(item.editorial.editorial?.retryCount) || 0) + 1;
         const target = { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint };
-        let draft = await run({ specialist: 'product_content', source: 'automatic', scenario: scenarioPayload('catalog-editorial'), instruction: `Przygotuj kompletną, profesjonalną treść produktu dla wybranych kanałów: ${item.editorial.target.allegro ? 'sklep i Allegro' : 'sklep'}. Popraw również istniejącą słabą nazwę i treść, nie tylko puste pola. Zachowaj potwierdzone fakty, zastosuj czytelne akapity, nagłówki i listy. Nie pytaj o opcjonalne dane — jeżeli ich nie ma, pomiń je i dokończ bezpieczną redakcję. To automatyczna próba ${retryAttempt}; obowiązkowo zwróć wszystkie pola redakcyjne, jeżeli tożsamość produktu jest rozpoznawalna.`, context: { product: productFacts(item.product), editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint, editorialRetryAttempt: retryAttempt }, target }, { source: 'background-agent' });
+        let draft = await run({ specialist: 'product_content', source: 'automatic', scenario: scenarioPayload('catalog-editorial'), instruction: `Przygotuj jeden kompletny, profesjonalny opis używany równocześnie w sklepie, Von Halsky${item.editorial.target.allegro ? ' i Allegro' : ''}. Popraw również istniejącą słabą nazwę i treść, nie tylko puste pola. Jeśli istnieje starsza osobna prezentacja Von Halsky, potraktuj ją jako materiał redakcyjny i scal z główną kartoteką bez utraty potwierdzonych faktów. Zachowaj potwierdzone fakty, zastosuj czytelne akapity, nagłówki i listy. Nie pytaj o opcjonalne dane — jeżeli ich nie ma, pomiń je i dokończ bezpieczną redakcję. To automatyczna próba ${retryAttempt}; obowiązkowo zwróć wszystkie pola redakcyjne, jeżeli tożsamość produktu jest rozpoznawalna.`, context: { product: productFacts(item.product), editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint, editorialRetryAttempt: retryAttempt }, target }, { source: 'background-agent' });
         let assessment = automaticEditorialAssessment(draft, current.config);
         if (assessment.reason === 'allegro_compliance') {
           const rejectedDraft = normalizeProductContentEditorialResult(draft.result || {});

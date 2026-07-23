@@ -4,7 +4,7 @@ import { linkedProductSourceMaterial, normalizeEditorialTitle, prepareLinkedProd
 
 const result = (id, fields) => ({ id, model: 'gpt-5-nano', result: { confidence: 0.97, complianceStatus: 'ready', fields: Object.entries(fields).map(([key, value]) => ({ key, value })) } });
 
-test('treść źródłowa jest zachowana oddzielnie, a sklep i Allegro dostają jedną wspólną redakcję', async () => {
+test('treść źródłowa jest zachowana oddzielnie, a sklep, Von Halsky i Allegro dostają jedną wspólną redakcję', async () => {
   const calls = [];
   const runSpecialist = async (input) => {
     calls.push(input);
@@ -28,10 +28,13 @@ test('treść źródłowa jest zachowana oddzielnie, a sklep i Allegro dostają 
   assert.match(prepared.product.opis, /Kreatywna zabawa\n\nZestaw pozwala/);
   assert.equal(prepared.product.allegroTitle, prepared.product.nazwa);
   assert.equal(prepared.product.allegroDescription, prepared.product.opis);
+  assert.equal(prepared.product.vonHalskyContentMode, 'store');
   assert.ok(Array.isArray(prepared.product.allegroDescriptionSections));
   assert.match(prepared.product.allegroDescriptionSections[0].items[0].content, /<strong>/);
   assert.equal(prepared.product.contentEditorial.sourceRole, 'facts_only');
   assert.equal(prepared.product.contentEditorial.status, 'ready');
+  assert.equal(prepared.product.contentEditorial.channels, 'shared_store_allegro_von_halsky');
+  assert.deepEqual(prepared.product.contentEditorial.targets, { store: true, vonHalsky: true, allegro: true });
   assert.equal(prepared.product.ean, raw.ean);
 });
 

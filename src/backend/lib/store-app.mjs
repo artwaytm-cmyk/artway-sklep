@@ -1375,7 +1375,9 @@ function allegroOpisPelny(product = {}, shortDescription = '') {
     }
   }
   if (!blocks.some((x) => x.type === 'body' || x.type === 'list') && shortDescription) blocks.push({ type: 'body', title: 'Opis produktu', text: shortDescription });
-  const rawKey = allegroNormalizujKlucz(raw), facts = product.contentEditorial?.channels === 'shared_store_and_allegro' ? [] : [
+  const usesCanonicalSharedDescription = product.contentEditorial?.targets?.store === true
+    && product.contentEditorial?.targets?.allegro === true;
+  const rawKey = allegroNormalizujKlucz(raw), facts = usesCanonicalSharedDescription ? [] : [
     product.marka || product.producent ? `Marka: ${product.marka || product.producent}` : '',
     product.kodProducenta || product.mpn ? `Kod producenta: ${product.kodProducenta || product.mpn}` : '',
     product.gtin || product.ean ? `EAN/GTIN: ${product.gtin || product.ean}` : '',

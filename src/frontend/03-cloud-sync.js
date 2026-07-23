@@ -475,15 +475,12 @@ function agentAICzyscOpis(v,max=20000){
   s=s.replace(/\n{3,}/g,"\n\n").trim();
   return s.length>max ? s.slice(0,max).replace(/\s+\S*$/,"")+"…" : s;
 }
-function agentAITnijDoZdania(s,max=280){
-  s=String(s||"").replace(/\s+/g," ").trim();
-  if(s.length<=max) return s;
-  const cut=s.slice(0,max+1);
-  const idx=Math.max(cut.lastIndexOf("."),cut.lastIndexOf("!"),cut.lastIndexOf("?"));
-  if(idx>90) return cut.slice(0,idx+1).trim();
-  return cut.slice(0,max).replace(/\s+\S*$/,"").trim()+"…";
+function agentAITnijDoZdania(s,max=280){s=String(s||"").replace(/\s+/g," ").trim();if(s.length<=max)return s;const cut=s.slice(0,max+1),idx=Math.max(cut.lastIndexOf("."),cut.lastIndexOf("!"),cut.lastIndexOf("?"));return idx>90?cut.slice(0,idx+1).trim():cut.slice(0,max).replace(/\s+\S*$/,"").trim()+"…";}
+function wspolnaTrescProduktu(p={}){
+  if(String(p.vonHalskyContentMode||"").toLowerCase()!=="custom")return p;
+  return {...p,nazwa:p.vonHalskyTitle||p.nazwa,opisKrotki:p.vonHalskyShortDescription||p.opisKrotki||p.krotkiOpis,opis:p.vonHalskyDescription||p.opis};
 }
-function agentAIUtworzOpisKrotki(p={}){
+function agentAIUtworzOpisKrotki(p={}){p=wspolnaTrescProduktu(p);
   const raw=String(p.opisKrotki||p.krotkiOpis||p.shortDescription||"").replace(/^Domyślny opis krótki\s*/i,"").trim();
   if(raw) return agentAITnijDoZdania(agentAICzyscOpis(raw,500),300);
   const opis=agentAICzyscOpis(p.opis||"",20000);
@@ -492,7 +489,7 @@ function agentAIUtworzOpisKrotki(p={}){
   const kat=String(p.kategoria||"produkt").toLowerCase();
   return agentAITnijDoZdania(`${p.nazwa||"Produkt"} to propozycja z kategorii ${kat}, przygotowana z myślą o wygodnym wyborze i szybkim zakupie w Artway-TM.`,300);
 }
-function agentAIFormatujOpisPelny(p={}){
+function agentAIFormatujOpisPelny(p={}){p=wspolnaTrescProduktu(p);
   const raw=agentAICzyscOpis(p.opis||p.opisKrotki||p.krotkiOpis||p.shortDescription||"",20000);
   if(!raw)return "";
   const etykieta=/^(opis produktu|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)\s*:?[\s]*$/i;
@@ -526,6 +523,7 @@ function agentAIFormatujOpisPelny(p={}){
   return wynik.join("\n\n").replace(/\n{3,}/g,"\n\n").trim();
 }
 function opisProduktuHTML(p={}){
+  p=wspolnaTrescProduktu(p);
   if(p.contentEditorial?.layoutPolicy==="allegro_sections"&&Array.isArray(p.allegroDescriptionSections)&&p.allegroDescriptionSections.length){
     const safeHtml=value=>{const tpl=document.createElement("template");tpl.innerHTML=String(value||"");tpl.content.querySelectorAll("*").forEach(el=>{if(!["P","H2","UL","LI","B","STRONG"].includes(el.tagName))el.replaceWith(document.createTextNode(el.textContent||""));else[...el.attributes].forEach(a=>el.removeAttribute(a.name));});return tpl.innerHTML;};
     const sections=p.allegroDescriptionSections.map(section=>(section.items||[]).map(item=>item.type==="IMAGE"&&/^https?:\/\//i.test(String(item.url||""))?`<figure><img src="${esc(item.url)}" alt="${esc(p.nazwa||"Produkt")}" loading="lazy"></figure>`:`<section>${safeHtml(item.content)}</section>`).join("")).join("");
@@ -546,7 +544,7 @@ function opisProduktuHTML(p={}){
   return `<div class="product-description-content">${html}</div>`;
 }
 function opisKrotkiProduktu(p={}){
-  return agentAIUtworzOpisKrotki(p);
+  return agentAIUtworzOpisKrotki(wspolnaTrescProduktu(p));
 }
 function agentAIPoprawOpisyDanychProduktu(p={}){
   const out={...p};
@@ -558,7 +556,7 @@ function agentAIPoprawOpisyDanychProduktu(p={}){
 function agentAIProduktGotowyZLinku(d={},url=""){
   const source={...(d.product||{})},category=d.storeCategory?.name?d.storeCategory:agentAIDobierzKategorieProduktu(source),canonical=allegroProducentKanoniczny({...source,sourceUrl:source.sourceUrl||url,producentUrl:source.producentUrl||url}),canonicalUrl=String(d.canonicalUrl||d.resolvedUrl||source.sourceUrl||url).trim(),now=new Date().toISOString();
   const product={...source,kategoria:category.name||source.kategoria||"",producent:canonical||source.producent||source.marka||"",marka:source.marka||canonical||source.producent||"",sourceUrl:canonicalUrl,producentUrl:canonicalUrl,agentImportAt:now,agentImportConfidence:Number(d.confidence||source.agentImportConfidence||0),agentImportSource:d.fromCache?"pamięć Agenta + źródło produktu":"strona źródłowa produktu + Agent",agentImportUrl:canonicalUrl,sourceEvidence:{...(source.sourceEvidence||{}),requestedUrl:url,canonicalUrl,fetchedAt:source.sourceEvidence?.fetchedAt||source.producentSprawdzonoAt||now,fieldSources:d.fieldSources||source.sourceEvidence?.fieldSources||{}},ikona:source.ikona||(/\b(gra|gry|puzzle|układank|zabaw)/i.test(`${source.nazwa||""} ${category.name||""}`)?"🎲":"📦"),sku:source.sku||source.externalId||"",externalId:source.externalId||source.sku||"",cena:Number(source.cena)||0,createdAt:now,createdBy:sesja?.email||"administrator",agentOnboardingStatus:"processing",agentOnboardingStartedAt:now};
-  const curated=product.contentEditorial?.channels==="shared_store_and_allegro"?product:agentAIPoprawOpisyDanychProduktu(product);if(curated.contentEditorial?.channels==="shared_store_and_allegro"){curated.allegroTitle=curated.nazwa;curated.allegroDescription=curated.opis;}
+  const shared=product.contentEditorial?.targets?.store===true&&product.contentEditorial?.targets?.vonHalsky===true,curated=shared?product:agentAIPoprawOpisyDanychProduktu(product);if(shared&&product.contentEditorial?.targets?.allegro===true){curated.allegroTitle=curated.nazwa;curated.allegroDescription=curated.opis;}
   return domyslneKosztyDoProduktu(curated,false);
 }
 async function agentAIPoprawOpisyWFormularzu(form){

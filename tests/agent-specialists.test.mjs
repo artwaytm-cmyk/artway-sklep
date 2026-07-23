@@ -211,8 +211,11 @@ test('automatyczny cykl sam zapisuje kompletną bezpieczną redakcję bez okresu
   assert.equal(product.opis, longDescription);
   assert.equal(product.allegroDescription, longDescription);
   assert.equal(product.contentEditorial.status, 'ready');
-  assert.equal(product.contentEditorial.channels, 'shared_store_and_allegro');
+  assert.equal(product.contentEditorial.channels, 'shared_store_allegro_von_halsky');
+  assert.equal(product.contentEditorial.targets.vonHalsky, true);
   assert.equal(product.contentEditorial.targets.allegro, true);
+  assert.equal(product.vonHalskyContentMode, 'store');
+  assert.equal(product.vonHalskyContentSource, 'store-canonical-content');
   assert.equal(product.allegroEditorialSyncPending, true);
   assert.equal(product.allegroEditorialSyncState, 'queued');
   assert.ok(Array.isArray(product.allegroDescriptionSections));
@@ -233,6 +236,37 @@ test('automatyczny cykl sam zapisuje kompletną bezpieczną redakcję bez okresu
   assert.match(status.policy.neverAutomatic.join(' '), /Wiadomość do klienta/i);
 });
 
+test('Agent sukcesywnie scala starszy osobny opis Von Halsky z główną kartoteką sklepu', async () => {
+  const legacy = {
+    id: 109, nazwa: 'Gra edukacyjna', producent: 'Alexander', kategoria: 'Gry edukacyjne', gtin: '5906018001099',
+    opisKrotki: 'Stary opis sklepu.', opis: 'Stary pełny opis sklepu, który wymaga uporządkowania i zapisania we wspólnej kartotece produktu.',
+    vonHalskyContentMode: 'custom', vonHalskyShortDescription: 'Lepsze wprowadzenie z prezentacji Von Halsky.',
+    vonHalskyDescription: 'Pełna prezentacja Von Halsky zawierająca potwierdzone informacje o edukacyjnej zabawie i najważniejszych cechach produktu.',
+  };
+  const facts = productFacts(legacy);
+  assert.match(facts.legacyVonHalskyPresentation.fullDescription, /Pełna prezentacja Von Halsky/);
+  const fields = [
+    { key: 'title', label: 'Nazwa', value: 'Gra edukacyjna Alexander' },
+    { key: 'short_description', label: 'Opis krótki', value: 'Edukacyjna gra Alexander przygotowana do wspólnej, rozwijającej zabawy.' },
+    { key: 'long_description', label: 'Opis pełny', value: '<h2>Rozwijająca zabawa</h2><p>Gra edukacyjna pozwala ćwiczyć ważne umiejętności podczas wspólnej zabawy zgodnej z zasadami produktu.</p><ul><li>Czytelna forma rozgrywki</li><li>Wspólne spędzanie czasu</li></ul>' },
+    { key: 'seo_title', label: 'SEO title', value: 'Gra edukacyjna Alexander' },
+    { key: 'seo_description', label: 'SEO description', value: 'Poznaj edukacyjną grę Alexander przygotowaną do wspólnej i rozwijającej zabawy.' },
+    { key: 'seo_keywords', label: 'Frazy SEO', value: 'gra edukacyjna, Alexander' },
+  ];
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [legacy] }, rev: 1 } });
+  const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-23T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } }) });
+  const cycle = await service.automaticCycle({ maxItems: 1 });
+  assert.equal(cycle.applied.length, 1);
+  const saved = repo.values.get('settings').data.artway_produkty_dodane[0];
+  assert.equal(saved.vonHalskyContentMode, 'store');
+  assert.equal(saved.vonHalskyDescription, '');
+  assert.equal(saved.opis, fields[2].value);
+  assert.equal(saved.contentEditorial.channels, 'shared_store_von_halsky');
+  assert.deepEqual(saved.contentEditorial.targets, { store: true, vonHalsky: true, allegro: false });
+  const second = await service.automaticCycle({ maxItems: 1 });
+  assert.equal(second.reason, 'no_candidates');
+});
+
 test('stare oznaczenie ready nie ukrywa surowego opisu dostawcy i Agent nadpisuje oba pola opisów', async () => {
   const legacy = {
     id: 100, nazwa: 'Loteryjka obrazkowa', producent: 'Alexander', kategoria: 'Gry edukacyjne', gtin: '5906018000108',
@@ -241,7 +275,7 @@ test('stare oznaczenie ready nie ukrywa surowego opisu dostawcy i Agent nadpisuj
     seoTitle: 'Loteryjka obrazkowa – Alexander', seoDescription: 'Gra obrazkowa Alexander dla dzieci.',
   };
   const fingerprint = productEditorialFingerprint(legacy);
-  legacy.contentEditorial = { status: 'ready', promptVersion: PROMPT_VERSION, inputFingerprint: fingerprint, channels: 'store_only' };
+  legacy.contentEditorial = { status: 'ready', promptVersion: PROMPT_VERSION, inputFingerprint: fingerprint, channels: 'shared_store_von_halsky' };
   assert.equal(productEditorialQuality(legacy).ready, false);
   assert.deepEqual(productEditorialQuality(legacy).issues.sort(), ['comparison_control', 'shopping_list_control', 'source_availability', 'source_contact', 'source_size_stock', 'source_shipping_control', 'source_stock'].sort());
   assert.equal(productEditorialState(legacy).current, false);

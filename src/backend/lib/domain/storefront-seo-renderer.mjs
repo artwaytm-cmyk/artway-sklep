@@ -13,6 +13,12 @@ let catalogCache = null;
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const jsonLd = (value) => JSON.stringify(value).replace(/</g, '\\u003c');
 const cleanText = (value, max = 5000) => catalogPlainText(value, max).replace(/\s+/g, ' ').trim();
+const canonicalStoreContent = (product = {}) => String(product.vonHalskyContentMode || '').toLowerCase() === 'custom' ? {
+  ...product,
+  nazwa: product.vonHalskyTitle || product.nazwa,
+  opisKrotki: product.vonHalskyShortDescription || product.opisKrotki || product.krotkiOpis,
+  opis: product.vonHalskyDescription || product.opis,
+} : product;
 const absoluteUrl = (value) => {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
@@ -44,6 +50,7 @@ function productImages(product = {}) {
 }
 
 function productSeo(product = {}) {
+  product = canonicalStoreContent(product);
   const name = cleanText(product.nazwa || product.name, 140) || 'Produkt';
   const brand = cleanText(product.producent || product.marka || product.brand, 80);
   const category = cleanText(product.kategoria || product.productType, 100);
@@ -69,6 +76,7 @@ function productCard(product) {
 }
 
 function productPage(product, products) {
+  product = canonicalStoreContent(product);
   const seo = productSeo(product), images = productImages(product), ids = productIdentifiers(product);
   const unavailable = product.__saleUnavailable === true;
   const canonical = `${ORIGIN}/produkt/${encodeURIComponent(product.id)}`;
