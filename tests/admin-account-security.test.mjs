@@ -105,8 +105,12 @@ test('sesja administratora respektuje wybrany limit bezczynności', () => {
 });
 
 test('interfejs nie generuje ani nie pobiera pliku z sekretami MFA', async () => {
-  const source = await readFile(new URL('../src/frontend/06c-storefront-account.js', import.meta.url), 'utf8');
+  const [source, backend] = await Promise.all([
+    readFile(new URL('../src/frontend/06c-storefront-account.js', import.meta.url), 'utf8'),
+    readFile(new URL('../netlify/functions/lib/store-data-route.mjs', import.meta.url), 'utf8'),
+  ]);
   assert.doesNotMatch(source, /artway-kody-awaryjne\.txt|pobierzKodyAwaryjneMfa|recoveryCodes/);
+  assert.doesNotMatch(backend, /recoveryCodeHash\(supplied\)/);
   assert.match(source, /login-mfa-email-request/);
   assert.match(source, /login-mfa-email-verify/);
   assert.match(source, /minlength="8"/);

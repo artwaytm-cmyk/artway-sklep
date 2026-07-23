@@ -22,7 +22,7 @@ export function createStoreDataRoute(deps = {}) {
     legacyPasswordHash, czytajUstawieniaBazowe = (fallback) => czytaj('settings', fallback),
     czytajUstawieniaPrzyrostowo = null, accountSessionHeaders, createAdminMfaChallenge,
     createMfaEmailRecovery, createMfaEnrollment, decryptMfaSecret, mfaProvisioningUri,
-    recoveryCodeHash, verifyAdminMfaChallenge, verifyMfaCode,
+    verifyAdminMfaChallenge, verifyMfaCode,
     verifyMfaEmailRecoveryChallenge, verifyMfaEmailRecoveryCode, wyslijEmailSMTP,
   } = deps;
   const beginAdminMfa = async (admin, items) => {
@@ -469,19 +469,14 @@ export function createStoreDataRoute(deps = {}) {
       if (!admin) return odpowiedz({ ok: false, error: 'Konto administratora nie istnieje.', code: 'auth' }, 401);
       const secret = decryptMfaSecret(challenge.setup ? admin.mfaPendingSecretEncrypted : admin.mfaSecretEncrypted);
       const supplied = tekst(body.code, 100).trim();
-      let verified = verifyMfaCode(secret, supplied), usedRecoveryHash = '';
-      if (!verified && !challenge.setup) {
-        usedRecoveryHash = recoveryCodeHash(supplied);
-        verified = !!usedRecoveryHash && Array.isArray(admin.mfaRecoveryCodeHashes) && admin.mfaRecoveryCodeHashes.includes(usedRecoveryHash);
-      }
+      const verified = verifyMfaCode(secret, supplied);
       if (!verified) return odpowiedz({ ok: false, error: 'Kod z Google Authenticator jest nieprawidłowy.', code: 'mfa_code' }, 401);
       if (challenge.setup) {
         admin.mfaSecretEncrypted = admin.mfaPendingSecretEncrypted;
         delete admin.mfaPendingSecretEncrypted; delete admin.mfaPendingCreatedAt;
         admin.mfaEnabledAt = new Date().toISOString();
-      } else if (usedRecoveryHash) {
-        admin.mfaRecoveryCodeHashes = admin.mfaRecoveryCodeHashes.filter((hash) => hash !== usedRecoveryHash);
       }
+      delete admin.mfaRecoveryCodeHashes;
       admin.lastLoginAt = new Date().toISOString();
       await zapisz('users', { items, updated_at: new Date().toISOString() });
       const user = publicUser(admin);
@@ -548,6 +543,7 @@ export function createStoreDataRoute(deps = {}) {
         return odpowiedz({ ok: false, error: 'Kod e-mail jest nieprawidłowy albo wygasł.', code: 'mfa_email_code' }, 401);
       }
       delete admin.mfaEmailRecoveryCodeHash; delete admin.mfaEmailRecoveryNonce; delete admin.mfaEmailRecoveryExpiresAt; delete admin.mfaEmailRecoveryFailedAttempts;
+      delete admin.mfaRecoveryCodeHashes;
       admin.mfaEmailRecoveryUsedAt = new Date().toISOString();
       admin.lastLoginAt = admin.mfaEmailRecoveryUsedAt;
       await zapisz('users', { items, updated_at: new Date().toISOString() });

@@ -122,9 +122,3 @@ export function verifyMfaEmailRecoveryCode(email, code, expectedHash) {
   const a = Buffer.from(actual), b = Buffer.from(expected);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
-
-export function recoveryCodeHash(code) {
-  const key = mfaKey();
-  if (!key) return '';
-  return crypto.createHmac('sha256', key).update(String(code || '').toUpperCase().replace(/[^A-F0-9]/g, '')).digest('base64url');
-}
