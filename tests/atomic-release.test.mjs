@@ -70,12 +70,15 @@ test('nieudany health-check automatycznie przywraca poprzednią wersję', async 
 test('produkcja i CI korzystają z atomowej bramki publikacji', async () => {
   const nginx = await readFile(path.join(projectRoot, 'ops/nginx/artway-production.conf'), 'utf8');
   const workflow = await readFile(path.join(projectRoot, '.github/workflows/ci.yml'), 'utf8');
+  const deployScript = await readFile(path.join(projectRoot, 'scripts/deploy-atomic-release.mjs'), 'utf8');
   const packageJson = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8'));
   assert.match(nginx, /root \/srv\/artway\/releases\/current;/);
   assert.match(workflow, /npm run verify/);
   assert.match(workflow, /npm run audit:architecture/);
   assert.match(workflow, /npm audit --audit-level=high/);
   assert.equal(packageJson.scripts['deploy:atomic'], 'node scripts/deploy-atomic-release.mjs');
+  assert.match(deployScript, /systemctl', 'restart', backendService/);
+  assert.match(deployScript, /restartProductionBackend\(\);[\s\S]*deployStaticRelease/);
 });
 
 test('retencja nigdy nie usuwa katalogów ze starszych systemów publikacji', async (t) => {

@@ -17,6 +17,7 @@ const keep = Math.max(3, Math.min(30, Number(argument('keep', '8')) || 8));
 const commit = argument('commit') || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceRoot, encoding: 'utf8' }).trim();
 const version = String(execFileSync('git', ['show', '-s', '--format=%cd', '--date=format:%Y%m%d-%H%M%S', commit], { cwd: sourceRoot, encoding: 'utf8' })).trim();
 const releaseId = argument('release', `${version}-${commit.slice(0, 12)}`);
+const backendService = argument('backend-service', process.env.ARTWAY_BACKEND_SERVICE || 'artway-backend.service');
 
 async function fetchJson(url, timeoutMs = 8000) {
   const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(timeoutMs), headers: { accept: 'application/json' } });
@@ -43,10 +44,20 @@ async function productionHealthCheck(manifest) {
   throw lastError || new Error('Kontrola zdrowia nie powiodła się.');
 }
 
+function restartProductionBackend() {
+  if (!backendService || backendService === 'none') return;
+  if (!/^[A-Za-z0-9_.@-]+$/.test(backendService)) throw new Error('Nieprawidłowa nazwa usługi backendu.');
+  execFileSync('sudo', ['-n', 'systemctl', 'restart', backendService], { stdio: 'inherit' });
+}
+
 let releaseLock;
 try {
   execFileSync('npm', ['run', 'build:check'], { cwd: sourceRoot, stdio: 'inherit' });
   releaseLock = await acquireDeploymentLock(releasesRoot);
+  // Backend działa z kontrolowanego katalogu roboczego, a statyczny frontend z
+  // atomowego symlinku. Restart przed przełączeniem gwarantuje, że health-check
+  // sprawdza bieżący kod API, a nie proces pozostawiony po poprzednim wdrożeniu.
+  restartProductionBackend();
   const result = await deployStaticRelease({ sourceRoot, releasesRoot, currentLink, releaseId, commit, healthCheck: productionHealthCheck, keep });
   console.log(JSON.stringify({ ok: true, ...result }, null, 2));
 } catch (error) {
@@ -55,4 +66,3 @@ try {
 } finally {
   if (releaseLock) await releaseLock();
 }
-
