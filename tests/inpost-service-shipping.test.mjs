@@ -17,6 +17,7 @@ import {
 } from '../netlify/functions/lib/domain/inpost-service-shipment.mjs';
 import { normalizeInpostServiceTracking } from '../netlify/functions/lib/domain/inpost-service-tracking.mjs';
 import { createInpostServiceShipmentRoute } from '../netlify/functions/lib/inpost-service-shipment-route.mjs';
+import { createInpostRoute } from '../netlify/functions/lib/inpost-route.mjs';
 
 const sender = {
   companyName: 'Nadawca sp. z o.o.',
@@ -222,12 +223,15 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   ]);
   assert.match(shipping, /#\/admin\/wysylki\/inpost/);
   assert.match(shipping, /function panelWysylkiUslugowejInpost/);
-  assert.match(shipping, /Wybierz z książki adresowej/);
-  assert.match(shipping, /Kod → miejscowość → ulica/);
+  assert.match(shipping, /Książka adresowa/);
+  assert.match(shipping, /Nadawcy/);
+  assert.match(shipping, /Odbiorcy/);
+  assert.match(shipping, /Używaj tego adresu jako/);
   assert.match(shipping, /Paczkomaty przy tym adresie/);
-  assert.match(shipping, /FV zawsze otrzymuje nadawca/);
+  assert.match(shipping, /FV: Artway‑TM → nadawca/);
   assert.match(shipping, /Przelicz według umowy/);
-  assert.match(shipping, /Twój cennik umowny InPost/);
+  assert.match(shipping, /Stawki InPost/);
+  assert.doesNotMatch(shipping, /Abonament netto|Abonament brutto|Umowa abonamentowa/);
   assert.match(shipping, /inpostServicePotwierdzenie/);
   assert.match(shipping, /Drukuj \/ zapisz PDF/);
   assert.match(shipping, /Historia transportu/);
@@ -248,6 +252,48 @@ test('trasa serwerowa zabezpiecza idempotencję, książkę adresową i wycenę 
   assert.match(source, /inpost-service-quote/);
   assert.match(source, /shipments\/calculate/);
   assert.doesNotMatch(source, /carrierCost\s*:/);
+});
+
+test('zamówienia sklepu korzystają z tego samego cennika umownego bez ujawniania abonamentu', async () => {
+  const [route, orderView, orderQuote] = await Promise.all([
+    readFile(new URL('../netlify/functions/lib/inpost-route.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/frontend/11-store-orders.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/frontend/11-inpost-order-contract-quote.js', import.meta.url), 'utf8'),
+  ]);
+  const orders = `${orderQuote}\n${orderView}`;
+  assert.match(route, /inpost-order-quote/);
+  assert.match(route, /inpostServiceContractPricing/);
+  assert.match(route, /kosztUmowny: contractPricing/);
+  assert.match(route, /subscription: _subscription/);
+  assert.match(orders, /Koszt InPost brutto/);
+  assert.match(orders, /inpostWycenaZamowieniaLaduj/);
+  assert.doesNotMatch(orders, /abonament/i);
+});
+
+test('wycena zamówienia sklepu zwraca operacyjny koszt umowny bez danych abonamentu', async () => {
+  const route = createInpostRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    orderNumber: (value) => String(value || ''),
+    read: async () => ({
+      items: [{
+        nr: 'ATM-TEST',
+        dostawaId: 'paczkomat',
+        paczkomat: 'BOJ01N',
+        wysylka: { gabaryt: 'small', waga: 1 },
+      }],
+    }),
+    readVersioned: async (_key, fallback) => ({ value: fallback, version: 1 }),
+    validateShipment: () => ({ ok: true, doPaczkomatu: true, punkt: 'BOJ01N' }),
+  });
+  const request = new Request('http://localhost/api?action=inpost-order-quote&nr=ATM-TEST');
+  const result = await route(request, new URL(request.url), 'inpost-order-quote');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.pricing.totalGross, 14.16);
+  assert.equal(result.body.pricing.rateLabel, 'Paczkomat gabaryt A');
+  assert.equal(result.body.pricing.subscription, undefined);
+  assert.equal(result.body.pricing.priceListLabel, undefined);
+  assert.equal(result.body.pricing.contractNet, undefined);
 });
 
 test('endpoint wyceny naprawdę wysyła szkic do ShipX, a książka adresowa zapisuje kontakt', async () => {
@@ -295,6 +341,16 @@ test('endpoint wyceny naprawdę wysyła szkic do ShipX, a książka adresowa zap
   assert.equal(contact.status, 201);
   assert.equal(contact.body.addressBook.length, 1);
   assert.equal(contact.body.addressBook[0].taxCode, '1234567890');
+  const bothRolesRequest = new Request('http://localhost/api?action=inpost-service-contact-save', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      role: 'receiver',
+      contact: { ...receiver, id: contact.body.addressBook[0].id, roles: ['sender', 'receiver'] },
+    }),
+  });
+  const bothRoles = await route(bothRolesRequest, new URL(bothRolesRequest.url), 'inpost-service-contact-save');
+  assert.deepEqual(bothRoles.body.contact.roles, ['sender', 'receiver']);
 
   const importRequest = new Request('http://localhost/api?action=inpost-service-contact-import', {
     method: 'POST',

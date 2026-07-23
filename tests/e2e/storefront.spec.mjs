@@ -155,11 +155,12 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   await loginAdmin(page);
   await page.goto('/#/admin/wysylki/inpost');
   await expect(page.getByRole('heading', { name: 'Wysyłka z InPost', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Nadaj i prawidłowo rozlicz przesyłkę', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Utwórz przesyłkę InPost', exact: true })).toBeVisible();
   await expect(page.locator('#inpostServiceForm')).toBeVisible();
-  await expect(page.locator('#inpostServiceForm').getByLabel('Wybierz z książki adresowej')).toHaveCount(2);
+  await expect(page.locator('#inpostServiceForm').getByRole('button', { name: /Nadawcy/ })).toHaveCount(2);
+  await expect(page.locator('#inpostServiceForm').getByRole('button', { name: /Odbiorcy/ })).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Przelicz według umowy' })).toBeVisible();
-  await expect(page.getByText('FV zawsze otrzymuje nadawca, a wystawcą jest Artway‑TM.')).toBeVisible();
+  await expect(page.getByText('FV: Artway‑TM → nadawca.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Przy adresie odbiorcy' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Utwórz przesyłkę InPost/ })).toBeVisible();
   await page.evaluate(() => {
@@ -175,7 +176,7 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
     renderuj();
   });
   const senderCard = page.locator('#inpost-party-sender');
-  await senderCard.getByLabel('1. Kod pocztowy').fill('84-207');
+  await senderCard.getByLabel('Kod pocztowy', { exact: true }).first().fill('84-207');
   await expect(senderCard.getByRole('button', { name: /Nadawca testowy/ })).toBeVisible();
   await senderCard.getByRole('button', { name: /Nadawca testowy/ }).click();
   await expect(senderCard.getByLabel(/Miasto/)).toHaveValue('Bojano');

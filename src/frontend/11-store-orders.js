@@ -212,6 +212,7 @@ function widokAdminZamowienie(nr){
   const punktNadania=String(w.punktNadania||INPOST_DOMYSLNY_PUNKT_NADANIA).trim().toUpperCase();
   const ochronaKwota=String(w.ochrona||"").trim();
   const ochronaPreset=inpostOchronaPreset(ochronaKwota);
+  setTimeout(()=>inpostWycenaZamowieniaLaduj(nr),0);
   return adminSzkielet("/admin/zamowienia", `
   ${adminZamowieniaSubnavHTML("lista")}
   <div class="panel order-detail-page">
@@ -272,6 +273,7 @@ function widokAdminZamowienie(nr){
 
         <section class="shipment-manager-card">
           <h4 class="inpost-like-section-title">Dostawa i gabaryt</h4>
+          <div class="inpost-order-contract-quote" data-inpost-order-quote="${esc(z.nr)}">${inpostWycenaZamowieniaHTML(z)}</div>
           <div class="shipment-manager-grid">
             <div class="shipment-manager-field"><label>Sposób dostawy</label><div><select name="dostawaTyp" onchange="przelaczDostawaAdmin(this)">
               <option value="paczkomat" ${paczkomatZam?"selected":""}>Paczkomat / punkt InPost</option>

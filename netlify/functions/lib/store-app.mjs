@@ -239,6 +239,7 @@ const inpostRoute = createInpostRoute({
   isAdmin: czyAdmin,
   text: tekst,
   read: czytaj,
+  readVersioned: czytajWersjonowane,
   write: zapisz,
   orderNumber: numerZamowienia,
   onOrderStatusTransition: obsluzEmailePrzejsciaStatusu,

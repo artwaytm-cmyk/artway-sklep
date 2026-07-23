@@ -1,11 +1,71 @@
+import {
+  inpostServiceContractPricing,
+  inpostServiceDefaultSettings,
+  normalizeInpostServicePriceList,
+} from './domain/inpost-service-shipment.mjs';
+
+function bool(value) {
+  return value === true || ['1', 'true', 'tak', 'yes'].includes(String(value ?? '').trim().toLowerCase());
+}
+
+function storeOrderContractDraft(order = {}, validation = {}) {
+  const shipping = order.wysylka || {};
+  const template = ['small', 'medium', 'large'].includes(String(shipping.gabaryt || '').toLowerCase())
+    ? String(shipping.gabaryt).toLowerCase()
+    : '';
+  const codEnabled = bool(shipping.pobranieAktywne) || order.platnoscId === 'pobranie';
+  const insuranceAmount = Number(String(shipping.ochrona || '').replace(',', '.')) || 0;
+  return {
+    deliveryType: validation.doPaczkomatu ? 'locker' : 'courier',
+    sendingMethod: shipping.sposobNadania || 'parcel_locker',
+    parcel: {
+      template,
+      length: Number(shipping.dlugosc) || 30,
+      width: Number(shipping.szerokosc) || 20,
+      height: Number(shipping.wysokosc) || 15,
+      weight: Number(shipping.waga) || 1,
+      nonStandard: bool(shipping.niestandardowa),
+    },
+    cod: { enabled: codEnabled, amount: Number(shipping.pobranie) || Number(order.razem) || 0 },
+    insurance: { enabled: insuranceAmount > 0, amount: insuranceAmount },
+    weekend: bool(shipping.paczkaWeekend) || bool(order.paczkaWeekend),
+    pickupRequested: shipping.sposobNadania === 'dispatch_order',
+    additionalServices: Array.isArray(shipping.uslugiDodatkowe) ? shipping.uslugiDodatkowe : [],
+    billing: { commissionGross: 0 },
+    pricing: { manualGross: 0 },
+  };
+}
+
+function operationalContractPricing(value = {}) {
+  const {
+    subscription: _subscription,
+    priceListLabel: _priceListLabel,
+    contractNet: _contractNet,
+    ...safe
+  } = value || {};
+  return safe;
+}
+
 export function createInpostRoute(deps = {}) {
   const {
-    respond, isAdmin, text, read, write, orderNumber, onOrderStatusTransition,
+    respond, isAdmin, text, read, readVersioned, write, orderNumber, onOrderStatusTransition,
     publicConfig, configure, call, searchPoints, isLockerDelivery, validateShipment,
     serviceAvailability, organization, shipmentPayload, trackingNumber, shipmentStatus,
     labelReady, offerId, waitForLabel, webhookSecret, webhookAuthorized, webhookEvents,
     webhookData, writeWebhookLog, applyWebhook, saveShipmentOnOrder,
   } = deps;
+  async function contractPricingForOrder(order, validation, shipxRaw = {}) {
+    const defaults = inpostServiceDefaultSettings();
+    const stored = typeof readVersioned === 'function'
+      ? (await readVersioned('inpost_service_shipments', { items: [], contacts: [], settings: defaults })).value
+      : {};
+    const settings = {
+      ...defaults,
+      ...(stored?.settings || {}),
+      priceList: normalizeInpostServicePriceList(stored?.settings?.priceList || defaults.priceList),
+    };
+    return operationalContractPricing(inpostServiceContractPricing(storeOrderContractDraft(order, validation), settings, shipxRaw));
+  }
   return async function inpostRoute(req, url, action) {
     // ─── INPOST: konfiguracja (publiczny token Geowidget + status) ───
     if (action === 'inpost-config') {
@@ -83,6 +143,17 @@ export function createInpostRoute(deps = {}) {
       });
     }
 
+    if (action === 'inpost-order-quote') {
+      if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const nr = orderNumber(url.searchParams.get('nr'));
+      const rec = await read('orders', { items: [] });
+      const order = (Array.isArray(rec.items) ? rec.items : []).find((item) => item.nr === nr);
+      if (!order) return respond({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
+      const validation = validateShipment(order);
+      const pricing = await contractPricingForOrder(order, validation);
+      return respond({ ok: true, nr, pricing });
+    }
+
     // ─── INPOST: utworzenie przesyłki ShipX (admin) ───
     if (action === 'inpost-create') {
       if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -139,6 +210,7 @@ export function createInpostRoute(deps = {}) {
       const statusShipX = shipmentStatus(daneAktualne) || shipmentStatus(dane);
       const labelReady = labelReady(daneAktualne) || labelReady(dane);
       const ofertaId = offerId(daneAktualne) || offerId(dane);
+      const contractPricing = await contractPricingForOrder(z, walidacja, daneAktualne || dane);
       const teraz = new Date().toLocaleString('pl-PL');
       const opisGotowosci = labelReady ? 'etykieta gotowa' : 'czeka na potwierdzenie/opłacenie w InPost';
       const historia = [...(Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : []), { czas: teraz, status: 'Przesyłka utworzona w InPost', opis: `${inpostId ? 'ID ' + inpostId : ''}${numer ? ' • ' + numer : ''}${statusShipX ? ' • ' + statusShipX : ''}${ofertaId ? ' • oferta ' + ofertaId : ''} • ${opisGotowosci}`, zewnetrzneId: inpostId }];
@@ -156,6 +228,7 @@ export function createInpostRoute(deps = {}) {
         ostatniaSynchronizacja: new Date().toISOString(),
         zaktualizowano: new Date().toISOString(),
         zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: labelReady },
+        kosztUmowny: contractPricing,
         historia,
       };
       const { stary, nowy } = await saveShipmentOnOrder(nr, patch);
@@ -164,7 +237,7 @@ export function createInpostRoute(deps = {}) {
       if (numer && !trackingNumber({ tracking_number: stary?.wysylka?.numer })) {
         try { email = await onOrderStatusTransition({ ...stary, wysylka: { ...(stary?.wysylka || {}), numer: '' } }, nowy); } catch (e) { email = { sent: false, error: e.message }; }
       }
-      return respond({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, labelReady, offerId: ofertaId, email, order: { nr, status: nowy?.status, wysylka: nowy?.wysylka } }, 201);
+      return respond({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, labelReady, offerId: ofertaId, pricing: contractPricing, email, order: { nr, status: nowy?.status, wysylka: nowy?.wysylka } }, 201);
     }
 
     // ─── INPOST: pobranie oficjalnej etykiety PDF (admin) ───
@@ -306,4 +379,3 @@ export function createInpostRoute(deps = {}) {
     return null;
   };
 }
-

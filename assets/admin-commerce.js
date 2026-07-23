@@ -1896,6 +1896,34 @@ function widokAdminAllegro(sekcja="start"){
   `);
 }
 
+const inpostWycenyZamowienCache=new Map();
+function inpostWycenaZamowieniaKlucz(z={}){
+  const w=z.wysylka||{};
+  return [z.nr,z.dostawaId,w.gabaryt,w.waga,w.dlugosc,w.szerokosc,w.wysokosc,w.paczkaWeekend,w.pobranieAktywne,w.ochrona,w.sposobNadania].map(v=>String(v??"")).join("|");
+}
+function inpostWycenaZamowieniaWartosc(z={}){
+  return inpostWycenyZamowienCache.get(inpostWycenaZamowieniaKlucz(z))||z?.wysylka?.kosztUmowny||null;
+}
+function inpostWycenaZamowieniaHTML(z={}){
+  const p=inpostWycenaZamowieniaWartosc(z),amount=Number(p?.totalGross);
+  if(!p)return '<span class="inpost-order-quote-loading">Sprawdzam stawkę InPost…</span>';
+  if(!Number.isFinite(amount))return '<span class="lvl lvl-ostrzezenie">Brak stawki dla wybranej paczki</span>';
+  return `<span><small>Koszt InPost brutto</small><b>${zl(amount)}</b></span><span><small>Stawka</small><b>${esc(p.rateLabel||"indywidualna")}</b></span>${p.complete===false?`<span class="lvl lvl-ostrzezenie">${esc((p.unpricedOptions||[]).join(", ")||"uzupełnij dopłaty")}</span>`:'<span class="lvl lvl-ok">wycena kompletna</span>'}`;
+}
+async function inpostWycenaZamowieniaLaduj(nr){
+  const z=pobierzZamowienia().find(item=>String(item.nr)===String(nr)),box=document.querySelector(`[data-inpost-order-quote="${CSS.escape(String(nr))}"]`);
+  if(!z||!box)return;
+  const key=inpostWycenaZamowieniaKlucz(z);
+  if(inpostWycenyZamowienCache.has(key)){box.innerHTML=inpostWycenaZamowieniaHTML(z);return;}
+  try{
+    const d=await chmura("inpost-order-quote",{params:{nr},timeout:15000});
+    inpostWycenyZamowienCache.set(key,d.pricing||{});
+    if(document.contains(box))box.innerHTML=inpostWycenaZamowieniaHTML(z);
+  }catch(e){
+    if(document.contains(box))box.innerHTML=`<span class="lvl lvl-ostrzezenie">${esc(e.message||"Nie pobrano stawki InPost")}</span>`;
+  }
+}
+
 function decyzjaDostepnosciZamowieniaInfo(z={}){
   const d=z.decyzjaDostepnosci&&typeof z.decyzjaDostepnosci==="object"?z.decyzjaDostepnosci:{},expiresMs=Date.parse(d.expiresAt||""),expired=String(d.code||"").startsWith("wait_")&&Number.isFinite(expiresMs)&&expiresMs<=Date.now();
   const labels={confirmed:"✅ dostępność potwierdzona",wait_1:"⏳ oczekiwanie 1 dzień",wait_2:"⏳ oczekiwanie 2 dni",contact_client:"📞 skontaktować się z klientem",unavailable:"⛔ brak — decyzja o realizacji",reset:"🔎 wymaga ponownej kontroli"};
@@ -2110,6 +2138,7 @@ function widokAdminZamowienie(nr){
   const punktNadania=String(w.punktNadania||INPOST_DOMYSLNY_PUNKT_NADANIA).trim().toUpperCase();
   const ochronaKwota=String(w.ochrona||"").trim();
   const ochronaPreset=inpostOchronaPreset(ochronaKwota);
+  setTimeout(()=>inpostWycenaZamowieniaLaduj(nr),0);
   return adminSzkielet("/admin/zamowienia", `
   ${adminZamowieniaSubnavHTML("lista")}
   <div class="panel order-detail-page">
@@ -2170,6 +2199,7 @@ function widokAdminZamowienie(nr){
 
         <section class="shipment-manager-card">
           <h4 class="inpost-like-section-title">Dostawa i gabaryt</h4>
+          <div class="inpost-order-contract-quote" data-inpost-order-quote="${esc(z.nr)}">${inpostWycenaZamowieniaHTML(z)}</div>
           <div class="shipment-manager-grid">
             <div class="shipment-manager-field"><label>Sposób dostawy</label><div><select name="dostawaTyp" onchange="przelaczDostawaAdmin(this)">
               <option value="paczkomat" ${paczkomatZam?"selected":""}>Paczkomat / punkt InPost</option>

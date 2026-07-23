@@ -90,7 +90,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
     }
   }
 
-  function upsertContact(store, raw, role = 'receiver') {
+  function upsertContact(store, raw, role = 'receiver', options = {}) {
     const now = new Date().toISOString();
     const next = normalizeInpostServiceContact(raw, { role });
     const fingerprint = inpostServiceContactFingerprint(next);
@@ -104,7 +104,9 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         ...current,
         ...next,
         id: current.id,
-        roles: [...new Set([...(current.roles || []), ...(next.roles || []), role])],
+        roles: options.replaceRoles === true
+          ? [...new Set(next.roles || [])]
+          : [...new Set([...(current.roles || []), ...(next.roles || []), role])],
         createdAt: current.createdAt || now,
         updatedAt: now,
       };
@@ -113,7 +115,9 @@ export function createInpostServiceShipmentRoute(deps = {}) {
     const contact = {
       ...next,
       id: `IPA-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
-      roles: [...new Set([...(next.roles || []), role])],
+      roles: options.replaceRoles === true
+        ? [...new Set(next.roles || [])]
+        : [...new Set([...(next.roles || []), role])],
       createdAt: now,
       updatedAt: now,
     };
@@ -231,13 +235,21 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const body = await req.json().catch(() => ({}));
       const role = text(body.role, 20) === 'sender' ? 'sender' : 'receiver';
-      const candidate = normalizeInpostServiceContact(body.contact || body, { role });
-      if (!candidate.label || (!candidate.email && !candidate.phone && !candidate.taxCode)) {
-        return respond({ ok: false, error: 'Podaj nazwę oraz e-mail, telefon albo NIP kontaktu.', code: 'contact_validation' }, 422);
+      const rawContact = body.contact || body;
+      const requestedRoles = Array.isArray(rawContact?.roles)
+        ? [...new Set(rawContact.roles.map((value) => text(value, 20)).filter((value) => ['sender', 'receiver'].includes(value)))]
+        : [role];
+      if (!requestedRoles.length) {
+        return respond({ ok: false, error: 'Adres musi być przypisany jako nadawca, odbiorca albo obie role.', code: 'contact_role_validation' }, 422);
+      }
+      const candidate = normalizeInpostServiceContact({ ...rawContact, roles: requestedRoles }, { role });
+      const hasAddress = !!(candidate.address?.street && candidate.address?.post_code && candidate.address?.city);
+      if (!candidate.label || (!hasAddress && !candidate.email && !candidate.phone && !candidate.taxCode)) {
+        return respond({ ok: false, error: 'Podaj nazwę oraz adres, e-mail, telefon albo NIP kontaktu.', code: 'contact_validation' }, 422);
       }
       let contact = null;
       const store = await mutateStore((current) => {
-        contact = upsertContact(current, candidate, role);
+        contact = upsertContact(current, candidate, role, { replaceRoles: true });
         return current;
       });
       return respond({ ok: true, contact, addressBook: store.contacts }, candidate.id ? 200 : 201);
