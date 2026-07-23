@@ -59,7 +59,14 @@ async function potwierdzLogowanieMfa(e){
   }catch(bl){$("authMsg").querySelector(".form-err")?.remove();e.target.insertAdjacentHTML("beforebegin",`<div class="form-err">${esc(bl.message||"Nieprawidłowy kod.")}</div>`);if(button){button.disabled=false;button.textContent="Zweryfikuj i zaloguj";}}
 }
 async function zakonczLogowanie(user){
-  logowanieMfaStan=null;ustawSesje(user);zapiszLS("artway_admin_session_refreshed_at",Date.now());
+  logowanieMfaStan=null;
+  const email=String(user?.email||"").trim().toLowerCase(),lista=pobierzUzytkownikow(),index=lista.findIndex(entry=>String(entry?.email||"").trim().toLowerCase()===email);
+  if(email){
+    const record={...(index>=0?lista[index]:{}),...user,email,hash:""};
+    if(index>=0)lista[index]=record;else lista.push(record);
+    zapiszLS("artway_uzytkownicy",lista);
+  }
+  ustawSesje(user);zapiszLS("artway_admin_session_refreshed_at",Date.now());
   const admin=user.rola==="admin"||jestGlownymAdminem(user.email),cel=admin?"#/admin":"#/konto";
   toast("Witaj, "+String(user.imie||"Administrator").split(" ")[0]+"! 👋");
   location.hash=cel;

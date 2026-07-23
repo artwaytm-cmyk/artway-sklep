@@ -153,6 +153,25 @@ test('Moje konto administratora pokazuje zabezpieczenia i zarządzanie dostępem
   assertRuntime();
 });
 
+test('delegowany administrator działa na czystym urządzeniu bez lokalnej kopii ról', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await page.goto('/');
+  await page.evaluate(() => {
+    localStorage.setItem('artway_uzytkownicy', JSON.stringify([]));
+    localStorage.setItem('artway_sesja', JSON.stringify({
+      imie: 'Tomasz Miotke',
+      email: 'tom90mio@gmail.com',
+      rola: 'admin',
+      verified: true,
+    }));
+  });
+  await page.reload();
+  await page.goto('/#/admin');
+  await expect(page.locator('.admin-page')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Strefa właściciela' })).toHaveCount(0);
+  assertRuntime();
+});
+
 test('właściciel nadaje, odbiera i usuwa konto bez lokalnego pozornego zapisu', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);

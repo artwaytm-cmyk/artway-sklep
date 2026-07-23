@@ -143,7 +143,11 @@ function wyloguj(powod="manual"){
 function jestGlownymAdminem(email){ return String(email||"").toLowerCase()===KONFIG.emailAdmina.toLowerCase(); }
 function kontoMaRoleAdmin(email){
   const e=String(email||"").toLowerCase();
-  return jestGlownymAdminem(e)||pobierzUzytkownikow().some(u=>u.email===e&&u.rola==="admin");
+  const rolaPotwierdzonaPrzezSerwer=!!sesja
+    && String(sesja.email||"").toLowerCase()===e
+    && sesja.verified===true
+    && sesja.rola==="admin";
+  return jestGlownymAdminem(e)||rolaPotwierdzonaPrzezSerwer||pobierzUzytkownikow().some(u=>u.email===e&&u.rola==="admin");
 }
 function jestAdmin(){
   const lokalnyPodglad=["localhost","127.0.0.1"].includes(location.hostname)||location.protocol==="file:";
