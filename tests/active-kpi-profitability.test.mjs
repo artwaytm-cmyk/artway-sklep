@@ -44,3 +44,16 @@ test("zatwierdzenie rentowności synchronizuje się ze wspólną bazą i trafia 
   assert.match(body,/zaplanujZapisUstawien\(\)/);
   assert.match(body,/zapiszHistorieAgenta\("kontrola-rentownosci"/);
 });
+
+test("opłacalność pokazuje Von Halsky jako pełny kanał z własną ceną",async()=>{
+  const source=await read("assets/admin.js");
+  for(const fn of ["rentownoscKanalowaWierszHTML","zapiszSzybkaCeneVonHalsky","przywrocDziedziczenieCenyVonHalsky"]){
+    assert.match(source,new RegExp(`function ${fn}\\(`),`brak funkcji ${fn}`);
+  }
+  assert.match(source,/Von Halsky — cena i wynik/);
+  assert.match(source,/data-von-halsky-price/);
+  assert.match(source,/Dziedziczy aktualną cenę Allegro/);
+  assert.match(source,/vonhalsky_niska/);
+  assert.match(source,/vonhalsky_oplacalne/);
+  assert.match(source,/Najniższa marża Von Halsky/);
+});

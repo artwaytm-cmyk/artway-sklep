@@ -23,7 +23,7 @@ test('rejestr Agenta pokazuje realny cykl, etapy i ostrzeżenie integracji bez o
     providers: {
       codex: { configured: true, connected: true, model: 'Codex CLI' },
       openai: { configured: true, connected: true, model: 'gpt-5-nano' },
-      xai: { configured: true, connected: true, model: 'grok-4.20-0309-non-reasoning' },
+      xai: { configured: true, connected: true, model: 'grok-4.20-0309-non-reasoning', requestsToday: 7, dailyRequestLimit: 30, remainingToday: 23, day: '2026-07-23', usageMode: 'free-model-only', freeOnly: true },
     },
   });
   await runtime.report({ event: 'cycle_start', runId: 'cycle-1', source: 'timer', steps: [{ id: 'orders', label: 'Zamówienia Allegro' }] });
@@ -39,6 +39,11 @@ test('rejestr Agenta pokazuje realny cykl, etapy i ostrzeżenie integracji bez o
   assert.equal(state.providers.openai.model, 'gpt-5-nano');
   assert.equal(state.providers.xai.model, 'grok-4.20-0309-non-reasoning');
   assert.equal(state.providers.xai.connected, true);
+  assert.equal(state.providers.xai.requestsToday, 7);
+  assert.equal(state.providers.xai.dailyRequestLimit, 30);
+  assert.equal(state.providers.xai.remainingToday, 23);
+  assert.equal(state.providers.xai.usageDay, '2026-07-23');
+  assert.equal(state.providers.xai.freeOnly, true);
   assert.equal(state.queue.active, 1);
 });
 

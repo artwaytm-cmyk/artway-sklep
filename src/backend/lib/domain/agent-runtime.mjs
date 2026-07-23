@@ -41,6 +41,13 @@ function safeProvider(value = {}) {
     lastCheckedAt: iso(source.lastCheckedAt),
     lastSuccessAt: iso(source.lastSuccessAt),
     error: safeError(source.error),
+    requestsToday: number(source.requestsToday, 0, 1_000_000),
+    dailyRequestLimit: number(source.dailyRequestLimit, 0, 1_000_000),
+    remainingToday: number(source.remainingToday, 0, 1_000_000),
+    limitReached: source.limitReached === true,
+    usageDay: clean(source.usageDay || source.day, 20),
+    usageMode: clean(source.usageMode, 60),
+    freeOnly: source.freeOnly === true,
   };
 }
 
