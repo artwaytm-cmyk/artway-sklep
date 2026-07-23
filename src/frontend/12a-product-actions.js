@@ -28,8 +28,8 @@ function asortymentSeoAgenta(p={}){
   for(const key of ["seoTitle","seoDescription","seoKeywords","seoScore","seoReviewedAt","seoSource","seoMode"])if(next[key]!==undefined&&String(next[key])!==String(p[key]??""))patch[key]=next[key];
   return Object.keys(patch).length?zapiszPolaProduktuLokalnie(p.id,patch,false):false;
 }
-const ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO=["nazwa","allegroTitle","opisKrotki","opis","allegroDescription","producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","zdjecia","allegroCategoryId","allegroProductId","allegroParameters","allegroDescriptionSections","allegroShippingSubsidy"];
-const ASORTYMENT_ETYKIETY_POL_ALLEGRO={nazwa:"nazwa",allegroTitle:"tytuł Allegro",opisKrotki:"opis krótki sklepu",opis:"opis długi sklepu",allegroDescription:"opis Allegro",producent:"producent",marka:"marka",gtin:"GTIN",ean:"EAN",kodProducenta:"kod producenta",mpn:"MPN",zdjecie:"zdjęcie główne",zdjecia:"galeria",allegroCategoryId:"kategoria Allegro",allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",allegroDescriptionSections:"układ opisu Allegro",allegroShippingSubsidy:"dopłata do wysyłki"};
+const ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO=["nazwa","allegroTitle","opisKrotki","opis","allegroDescription","producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","zdjecia","sourceEvidence","allegroCategoryId","allegroProductId","allegroParameters","allegroDescriptionSections","allegroShippingSubsidy"];
+const ASORTYMENT_ETYKIETY_POL_ALLEGRO={nazwa:"nazwa",allegroTitle:"tytuł Allegro",opisKrotki:"opis krótki sklepu",opis:"opis długi sklepu",allegroDescription:"opis Allegro",producent:"producent",marka:"marka",gtin:"GTIN",ean:"EAN",kodProducenta:"kod producenta",mpn:"MPN",zdjecie:"zdjęcie główne ze źródła",zdjecia:"galeria ze źródła",sourceEvidence:"potwierdzenie źródła zdjęć",allegroCategoryId:"kategoria Allegro",allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",allegroDescriptionSections:"układ opisu Allegro",allegroShippingSubsidy:"dopłata do wysyłki"};
 function asortymentMigawkaPrzygotowania(p={}){return Object.fromEntries(ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.map(key=>[key,p[key]]));}
 function asortymentPolaZmienione(before={},after={}){return ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.filter(key=>JSON.stringify(before[key]??null)!==JSON.stringify(after[key]??null));}
 function asortymentEtykietyPol(keys=[]){return keys.map(key=>ASORTYMENT_ETYKIETY_POL_ALLEGRO[key]||key);}
@@ -54,6 +54,11 @@ function asortymentPatchZPrzygotowania(p={},draft={}){
   assign("mpn",auto.mpn||auto.kodProducenta||p.mpn||p.kodProducenta);
   assign("allegroCategoryId",auto.allegroCategoryId||catalog.categoryId||category.id||p.allegroCategoryId);
   assign("allegroProductId",auto.allegroProductId||catalog.id||p.allegroProductId);
+  if(auto.sourceEvidence?.imageSourceType==="product_source_page"){
+    assign("zdjecie",auto.zdjecie);
+    patch.zdjecia=Array.isArray(auto.zdjecia)?auto.zdjecia.slice(0,15):[];
+    patch.sourceEvidence=auto.sourceEvidence;
+  }
   if(Array.isArray(auto.allegroParameters)&&auto.allegroParameters.length)patch.allegroParameters=auto.allegroParameters;
   const improved=draft.improvedDescriptions||{},safeSections=draft.draft?.description?.sections||improved.sections||[];
   if(Array.isArray(safeSections)&&safeSections.length)patch.allegroDescriptionSections=safeSections;
@@ -66,7 +71,7 @@ async function asortymentPrzygotujProduktDoAllegro(base={},options={}){
   let p=asortymentProduktPoId(base.id)||base;const warnings=[],before=asortymentMigawkaPrzygotowania(p),startedAt=new Date().toISOString();
   if(options.refreshSource!==false){
     if(p.sourceUrl||p.producentUrl)p=await automatyczniePobierzDaneZrodlaProduktu(p);
-    else warnings.push("brak linku producenta — użyto danych kartoteki i katalogu Allegro");
+    else warnings.push("brak linku źródłowego — użyto wyłącznie ręcznie zapisanych zdjęć kartoteki");
   }
   try{
     const improved=await chmura("allegro-description-improve",{method:"POST",body:{product:p},timeout:120000});

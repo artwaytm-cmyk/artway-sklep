@@ -63,6 +63,18 @@ test("ukryty produkt nie trafia do wystawiania Allegro i jest ponownie blokowany
   assert.match(backend,/\[body\.product \|\| \{\}, authoritativeProduct\]\.some/);
 });
 
+test("szkic Allegro bierze zdjęcia ze strony źródłowej, a nie z podobnej oferty lub katalogu",async()=>{
+  const backend=await read("netlify/functions/lib/store-app.mjs");
+  const start=backend.indexOf("async function allegroDraftZAutoKategoria");
+  const end=backend.indexOf("\nfunction allegroDraftZProduktu",start);
+  const draft=backend.slice(start,end);
+  assert.match(draft,/sourcePageUrl\(product\)/);
+  assert.match(draft,/verifiedSourceImages\(product\)/);
+  assert.match(draft,/inspectedSourceImages\(product, inspection/);
+  assert.doesNotMatch(draft,/catalog\.images/);
+  assert.doesNotMatch(draft,/safeOffer\.mainImage/);
+});
+
 test("karta produktu wykonuje się z rzeczywistym wspólnym formatowaniem ceny",async()=>{
   const source=await read("src/frontend/12b-allegro-listing-workspace.js"),start=source.indexOf("function allegroPublikacjaKartaHTML"),end=source.indexOf("\n\nallegroWystawianiePanelHTML",start);
   assert.ok(start>=0&&end>start);

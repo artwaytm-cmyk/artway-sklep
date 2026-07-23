@@ -147,6 +147,25 @@ test('ukryty produkt pozostaje zablokowany w projekcji kanału Von Halsky', () =
   }
 });
 
+test('Von Halsky przy linku źródłowym używa tylko galerii potwierdzonej przez stronę produktu', () => {
+  const base = {
+    id: 'VH-SOURCE', nazwa: 'Produkt ze źródła producenta', opis: 'Pełny opis produktu zawiera wszystkie wymagane informacje potrzebne klientowi do świadomego i bezpiecznego wyboru produktu.',
+    ean: '5906018000030', cena: 20, sourceUrl: 'https://producent.example.pl/produkt/1', zdjecie: 'https://wrong.example.pl/inny.jpg',
+  };
+  assert.equal(vonHalskyProductReadiness(base).hasImage, false);
+  const verified = {
+    ...base,
+    sourceEvidence: {
+      imagePolicyVersion: 2,
+      imageSourceType: 'product_source_page',
+      imageSourceUrl: base.sourceUrl,
+      imageUrls: ['https://cdn.example.pl/produkt-1.jpg'],
+    },
+  };
+  const projection = vonHalskyOfferProjection(verified);
+  assert.deepEqual(projection.images, ['https://cdn.example.pl/produkt-1.jpg']);
+});
+
 test('kanał wysyła tylko jedną najlepszą kartotekę dla tego samego EAN', () => {
   const { items, conflicts } = deduplicateVonHalskyOffers([
     { externalId: 'A', gtin: '5906018000030', available: true, readiness: { score: 72 } },

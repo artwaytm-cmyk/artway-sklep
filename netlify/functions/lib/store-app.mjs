@@ -75,6 +75,7 @@ import { createAgentRuntime } from './domain/agent-runtime.mjs';
 import { createAgentSpecialists } from './domain/agent-specialists.mjs';
 import { prepareLinkedProductEditorial } from './domain/product-editorial-pipeline.mjs';
 import { createProductLinkPackagePreparer } from './domain/product-link-package-preparer.mjs';
+import { inspectedSourceImages, sourcePageUrl, verifiedSourceImages } from './domain/source-product-images.mjs';
 import { createAllegroCredentialManager } from './domain/allegro-credential-manager.mjs';
 import { allegroCredentialLooksMasked, buildAllegroConnectionStatus, createAllegroOperationReceipts, createAllegroTokenAccess, createAllegroTokenRequester } from './domain/allegro-operation-receipts.mjs';
 import { createAllegroCredentialsRoute } from './allegro-credentials-route.mjs';
@@ -1848,6 +1849,12 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
   for (const product of selected) {
     try {
       const fields = {};
+      const productSourceUrl = sourcePageUrl(product), sourceImagesAge = Date.parse(String(product?.sourceEvidence?.imagesFetchedAt || ''));
+      if (productSourceUrl && (!verifiedSourceImages(product).length || !Number.isFinite(sourceImagesAge) || sourceImagesAge < Date.now() - 30 * 86400000)) {
+        const sourceInspection = await pobierzProduktProducentaZPamiecia(productSourceUrl).catch(() => null);
+        const sourceImageResult = inspectedSourceImages(product, sourceInspection || {});
+        if (sourceImageResult.ok) Object.assign(fields, sourceImageResult.patch);
+      }
       const producer = allegroRozpoznajProducenta(product, {}, offerSettings);
       if (producer && (product.producent !== producer || product.marka !== producer)) {
         fields.producent = producer; fields.marka = producer; report.producers++;
@@ -1863,8 +1870,6 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
           const catalogProducer = allegroRozpoznajProducenta({ ...product, ...fields }, catalog, offerSettings);
           if (catalogProducer) { fields.producent = catalogProducer; fields.marka = catalogProducer; }
           if (offerSettings.syncDescriptions !== false && !tekst(product.opis, 20000).trim() && catalog.descriptionText) fields.sourceMaterial = { ...(product.sourceMaterial || {}), allegroCatalogDescription: tekst(catalog.descriptionText, 20000).trim(), fetchedAt: report.lastRun };
-          if (!product.zdjecie && catalog.images?.[0]) fields.zdjecie = catalog.images[0];
-          if ((!Array.isArray(product.zdjecia) || !product.zdjecia.length) && catalog.images?.length > 1) fields.zdjecia = catalog.images.slice(1, 16);
         }
       }
       if (offerSettings.autoCatalog !== false && !fields.allegroCategoryId && !product.allegroCategoryId) {
@@ -1989,17 +1994,19 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   const catalogProducer = allegroRozpoznajProducenta(product, { ...catalog, producent: allegroWartoscParametru(catalog, ['producent', 'marka', 'brand']) || catalog.brand || safeOffer.brand }, offerSettings);
   const catalogCode = allegroWartoscParametru(catalog, ['kod producenta', 'mpn', 'symbol producenta']) || tekst(safeOffer.manufacturerCode || safeOffer.producerCode || '', 160).trim();
   const catalogGtin = tekst((catalog.eans || [])[0] || safeOffer.ean || safeOffer.gtin || '', 80).trim();
-  const sourceImages = [...new Set([
-    ...(Array.isArray(catalog.images) ? catalog.images : []),
-    safeOffer.mainImage,
-    ...(Array.isArray(safeOffer.images) ? safeOffer.images : []),
-  ].map((x) => tekst(x, 1000).trim()).filter(Boolean))].slice(0, 16);
+  const productSourceUrl = sourcePageUrl(product);
+  let sourceImages = verifiedSourceImages(product), sourceImagePatch = sourceImages.length ? { zdjecie: sourceImages[0], zdjecia: sourceImages.slice(1), sourceEvidence: product.sourceEvidence } : {};
+  if (productSourceUrl && !sourceImages.length) {
+    const inspection = await pobierzProduktProducentaZPamiecia(productSourceUrl).catch(() => null);
+    const sourceResult = inspectedSourceImages(product, inspection || {});
+    if (sourceResult.ok) { sourceImages = sourceResult.images; sourceImagePatch = sourceResult.patch; }
+  }
+  const productWithSafeImages = productSourceUrl ? { ...product, zdjecie: '', zdjecia: [], ...sourceImagePatch } : product;
   const preparedProduct = {
-    ...product,
+    ...productWithSafeImages,
     ...(!catalogProducer ? {} : { producent: catalogProducer, marka: catalogProducer }),
     ...(product.gtin || product.ean || !catalogGtin ? {} : { gtin: catalogGtin, ean: catalogGtin }),
     ...(product.kodProducenta || product.mpn || !catalogCode ? {} : { kodProducenta: catalogCode, mpn: catalogCode }),
-    ...(!sourceImages.length ? {} : { zdjecie: sourceImages[0], zdjecia: sourceImages.slice(1, 16) }),
   };
   options.descriptionSections = allegroSekcjeOpisu(preparedProduct, options.shortDescription);
   const requiredParameters = options.catalogProductId ? [] : allegroBrakujaceParametryWymagane(preparedProduct, categoryParameters.parameters);
@@ -2032,8 +2039,9 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
       ean: preparedProduct.ean || preparedProduct.gtin || '',
       kodProducenta: preparedProduct.kodProducenta || preparedProduct.mpn || '',
       mpn: preparedProduct.mpn || preparedProduct.kodProducenta || '',
-      zdjecie: product.zdjecie || preparedProduct.zdjecie || '',
-      zdjecia: Array.isArray(product.zdjecia) && product.zdjecia.length ? product.zdjecia.slice(0, 15) : (Array.isArray(preparedProduct.zdjecia) ? preparedProduct.zdjecia.slice(0, 15) : []),
+      zdjecie: preparedProduct.zdjecie || '',
+      zdjecia: Array.isArray(preparedProduct.zdjecia) ? preparedProduct.zdjecia.slice(0, 15) : [],
+      sourceEvidence: preparedProduct.sourceEvidence || null,
       allegroParameters: autoParameters,
       allegroProductId: options.catalogProductId || '',
       allegroCategoryId: effectiveCategoryId || '',
@@ -2199,7 +2207,7 @@ const ALLEGRO_AGENT_OFFER_PROCEDURE = [
   'Jeżeli oferta istnieje, połącz ją z produktem i aktualizuj zamiast tworzyć duplikat.',
   'Nigdy nie wybieraj produktu katalogowego po samej nazwie ani samym MPN. UUID katalogu wolno zapisać tylko po dokładnej weryfikacji lub ręcznej decyzji administratora.',
   'Jeżeli produktu nie ma EAN, przygotuj nową kartotekę z kategorią i kompletem parametrów, bez podpinania istniejącego UUID katalogowego.',
-  'Uzupełnij producenta, markę, EAN, MPN, kategorię, UUID, parametry i sprawdzone zdjęcia katalogowe.',
+  'Uzupełnij producenta, markę, EAN, MPN, kategorię, UUID i parametry. Zdjęcia pobieraj wyłącznie z konkretnego linku źródłowego produktu; nigdy z podobnej oferty ani katalogu Allegro.',
   'Nową ofertę zapisz jako INACTIVE; brak stanu magazynowego oznacza 0.',
   'Po sukcesie zapisz powiązanie produkt sklepu–produkt katalogowy–oferta i zamknij zadanie.',
   'Jeżeli brakuje danych, nie zgaduj: zapisz dokładne braki i błąd API do jednej kolejki ponowienia.',
@@ -2261,7 +2269,11 @@ async function allegroZapiszPowiazanieProduktu(product = {}, details = {}) {
     const value = auto[key];
     if (value && !product[key] && !previousEdit[key]) autoPatch[key] = value;
   }
-  if (Array.isArray(auto.zdjecia) && auto.zdjecia.length && !(product.zdjecia || []).length && !(previousEdit.zdjecia || []).length) autoPatch.zdjecia = auto.zdjecia.slice(0, 15);
+  if (auto.sourceEvidence?.imageSourceType === 'product_source_page' && auto.zdjecie) {
+    autoPatch.zdjecie = auto.zdjecie;
+    autoPatch.zdjecia = Array.isArray(auto.zdjecia) ? auto.zdjecia.slice(0, 15) : [];
+    autoPatch.sourceEvidence = auto.sourceEvidence;
+  } else if (Array.isArray(auto.zdjecia) && auto.zdjecia.length && !(product.zdjecia || []).length && !(previousEdit.zdjecia || []).length) autoPatch.zdjecia = auto.zdjecia.slice(0, 15);
   if (Array.isArray(auto.allegroParameters) && auto.allegroParameters.length && !Array.isArray(product.allegroParameters) && !Array.isArray(previousEdit.allegroParameters)) autoPatch.allegroParameters = auto.allegroParameters;
   const improved = details.prepared?.improvedDescriptions || {};
   if (details.prepared?.autoFilled?.allegroTitle) autoPatch.allegroTitle = tekst(details.prepared.autoFilled.allegroTitle, 75);

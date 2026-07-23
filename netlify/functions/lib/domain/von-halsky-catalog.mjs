@@ -1,4 +1,5 @@
 import { vonHalskyPublicApiConfig } from './von-halsky-api-client.mjs';
+import { sourcePageUrl, verifiedSourceImages } from './source-product-images.mjs';
 
 function text(value, max = 240) {
   return String(value ?? '').replace(/\u0000/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -83,6 +84,7 @@ function descriptionText(product = {}) {
 }
 
 function productImages(product = {}) {
+  if (sourcePageUrl(product)) return verifiedSourceImages(product);
   const values = [
     ...(Array.isArray(product.zdjecia) ? product.zdjecia : []),
     ...(Array.isArray(product.images) ? product.images : []),

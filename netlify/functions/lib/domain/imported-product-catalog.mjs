@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { canonicalProductCode, synchronizeProductIdentifierAliases } from './product-identifiers.mjs';
+import { SOURCE_IMAGE_POLICY_VERSION } from './source-product-images.mjs';
 
 export const IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY = 'imported-product-catalog:manifest:v1';
 export const IMPORTED_PRODUCT_CATALOG_SHARD_PREFIX = 'imported-product-catalog:shard:v1:';
@@ -145,6 +146,10 @@ export function mergeImportedProductSourceRefresh(existing = {}, incoming = {}, 
     const currentMissing = Array.isArray(current) ? current.length === 0 : !clean(current, 20);
     const nextPresent = Array.isArray(next) ? next.length > 0 : !!clean(next, field === 'opis' ? 6000 : 3000);
     if (currentMissing && nextPresent) result[field] = clone(next);
+  }
+  if (Number(incoming?.sourceEvidence?.imagePolicyVersion) >= SOURCE_IMAGE_POLICY_VERSION && clean(incoming.zdjecie, 3000)) {
+    result.zdjecie = clean(incoming.zdjecie, 3000);
+    result.zdjecia = asArray(incoming.zdjecia).map((image) => clean(image, 3000)).filter(Boolean).slice(0, 15);
   }
   const gtin = first(incoming, ['gtin', 'ean', 'GTIN', 'EAN'], 40).replace(/\D/g, '');
   if (gtin && !first(result, ['gtin', 'ean', 'GTIN', 'EAN'], 40)) result = synchronizeProductIdentifierAliases({ ...result, gtin, ean: gtin });

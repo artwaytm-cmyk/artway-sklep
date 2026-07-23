@@ -1,6 +1,7 @@
 import { tekst } from './core/http.mjs';
 import { createProductSourceMatching } from './product-source-matching.mjs';
 import { synchronizeProductIdentifierAliases } from './domain/product-identifiers.mjs';
+import { SOURCE_IMAGE_POLICY_VERSION } from './domain/source-product-images.mjs';
 
 export function createProductSourceInspectionService({ read, write, normalizeKey, nameSimilarity }) {
   const czytaj = read;
@@ -177,13 +178,22 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
       imageSet.add(a);
     };
     dodaj(metaHtml(html, 'og:image'));
+    for (const product of jsonLdProdukty(html)) {
+      const images = Array.isArray(product?.image) ? product.image : [product?.image];
+      for (const image of images) dodaj(typeof image === 'object' ? image?.url || image?.contentUrl : image);
+    }
     const gallery = (String(html || '').match(/<section\b[^>]*id=["']projector_photos["'][^>]*>([\s\S]*?)<\/section>/i) || [])[1] || '';
     for (const m of gallery.matchAll(/<img\b[^>]*\bdata-img_high_res=["']([^"']+)["'][^>]*>/gi)) dodaj(m[1]);
     for (const m of gallery.matchAll(/<img\b[^>]*class=["'][^"']*\bphotos__photo\b(?![^"']*\b--nav\b)[^"']*["'][^>]*>/gi)) dodaj(attrHtml(m[0], 'data-img_high_res') || attrHtml(m[0], 'src'));
-    for (const m of String(html || '').matchAll(/<link\b[^>]*rel=["']preload["'][^>]*as=["']image["'][^>]*>/gi)) dodaj(attrHtml(m[0], 'href'));
-    if (imageSet.size < 2) for (const m of String(html || '').matchAll(/<img\b[^>]*(?:src|data-src|data-lazy|data-original)=["']([^"']+)["'][^>]*>/gi)) dodaj(m[1]);
-    if (imageSet.size < 2) for (const m of String(html || '').matchAll(/(?:srcset|data-srcset)=["']([^"']+)["']/gi)) {
-      String(m[1]).split(',').map((x) => x.trim().split(/\s+/)[0]).forEach(dodaj);
+    const productGalleries = [...String(html || '').matchAll(/<(?:section|div)\b[^>]*(?:id|class)=["'][^"']*(?:woocommerce-product-gallery|product[-_ ]gallery|product[-_ ]images|gallery[-_ ]product)[^"']*["'][^>]*>([\s\S]*?)<\/(?:section|div)>/gi)].map((match) => match[1] || '');
+    for (const block of productGalleries) {
+      for (const tag of block.matchAll(/<(?:img|a)\b[^>]*>/gi)) {
+        const raw = tag[0];
+        dodaj(attrHtml(raw, 'data-large_image') || attrHtml(raw, 'data-img_high_res') || attrHtml(raw, 'data-original') || attrHtml(raw, 'data-src') || attrHtml(raw, 'href') || attrHtml(raw, 'src'));
+        const srcset = attrHtml(raw, 'srcset') || attrHtml(raw, 'data-srcset');
+        const largest = String(srcset).split(',').map((item) => item.trim().split(/\s+/)[0]).filter(Boolean).at(-1);
+        dodaj(largest);
+      }
     }
     return [...imageSet].slice(0, 16);
   }
@@ -306,6 +316,11 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
           fetchedAt: checkedAt,
           title: stripHtml(title),
           fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict)].slice(0, 80),
+          imagePolicyVersion: SOURCE_IMAGE_POLICY_VERSION,
+          imageSourceType: 'product_source_page',
+          imageSourceUrl: url,
+          imageUrls: zdjecia,
+          imagesFetchedAt: checkedAt,
         },
       }, { code: kodProducenta || symbol, overwrite: true }),
       availability: { available: dostepny, text: statusHtml || (dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia')), quantity: stanProducenta.quantity, exact: stanProducenta.exact, source: stanProducenta.source, checkedAt },
@@ -440,7 +455,7 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
         producentSprawdzonoAt: checkedAt,
         parametryProducenta: { symbol, kodProducenta: kodProducentaRaw, ean, seria: dict.seria, wiek: dict.wiek, liczbaGraczy: dict['liczba graczy'], wymiaryOpakowania: dict['wymiary opakowania'], wagaOpakowania: dict['waga opakowania'], ostrzezenie: dict.ostrzezenie },
         parametryZrodla: Object.fromEntries(Object.entries(dict).filter(([, value]) => value)),
-        sourceEvidence: { url, host, fetchedAt: checkedAt, title, retrieval: 'reader-fallback', fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict).filter((key) => dict[key])].slice(0, 80) },
+        sourceEvidence: { url, host, fetchedAt: checkedAt, title, retrieval: 'reader-fallback', fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict).filter((key) => dict[key])].slice(0, 80), imagePolicyVersion: SOURCE_IMAGE_POLICY_VERSION, imageSourceType: 'product_source_page', imageSourceUrl: url, imageUrls: zdjecia, imagesFetchedAt: checkedAt },
       }, { code: kodProducenta || symbol, overwrite: true }),
       availability: { available: dostepny, text: dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia'), quantity, exact: quantity !== null, source: quantity !== null ? 'ilość pokazana przez producenta' : 'status strony producenta', checkedAt },
     };

@@ -18,7 +18,9 @@ test('import strony Multigry rozpoznaje EAN, numer referencyjny i komplet parame
     <div class="data__row"><div class="data__row--label">Wymiary opakowania zbiorczego:</div><div class="data__row--val">51/27/26 cm</div></div>
     <div class="data__row"><div class="data__row--label">Waga opakowania zbiorczego:</div><div class="data__row--val">3,96 kg</div></div>
     <div class="data__row"><div class="data__row--label">Ilość w opakowaniu zbiorczym:</div><div class="data__row--val">8 szt</div></div>
-  </div><div id="projector_status_description">Produkt dostępny</div>${' '.repeat(1800)}</body></html>`;
+  </div><div id="projector_status_description">Produkt dostępny</div>
+  <section class="products-related"><img src="https://multigra.com.pl/media/obcy-produkt.jpg" alt="Inny produkt"></section>
+  ${' '.repeat(1800)}</body></html>`;
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async (url) => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } });
   try {
@@ -40,6 +42,10 @@ test('import strony Multigry rozpoznaje EAN, numer referencyjny i komplet parame
     assert.equal(product.parametryProducenta.liczbaElementow, '151 szt');
     assert.equal(product.parametryProducenta.iloscWOpakowaniuZbiorczym, '8 szt');
     assert.equal(product.parametryZrodla['wymiary opakowania zbiorczego'], '51/27/26 cm');
+    assert.equal(product.zdjecie, 'https://multigra.com.pl/media/edukarty.jpg');
+    assert.deepEqual(product.zdjecia, []);
+    assert.equal(product.sourceEvidence.imagePolicyVersion, 2);
+    assert.deepEqual(product.sourceEvidence.imageUrls, ['https://multigra.com.pl/media/edukarty.jpg']);
   } finally {
     globalThis.fetch = previousFetch;
   }
