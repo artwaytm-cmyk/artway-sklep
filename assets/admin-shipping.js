@@ -787,7 +787,7 @@ function inpostServiceAdresDane(contact={}){
 }
 function inpostServiceAdresPodpowiedzi(source,prefix){
   const form=source?.form||source||document.getElementById("inpostServiceForm");if(!form)return;
-  const postCode=String(form.elements[`${prefix}PostCode`]?.value||"").trim(),city=String(form.elements[`${prefix}City`]?.value||"").trim(),street=String(form.elements[`${prefix}Street`]?.value||"").trim();
+  const postCode=String(form.elements[`${prefix}SearchPostCode`]?.value||"").trim(),city=String(form.elements[`${prefix}SearchCity`]?.value||"").trim(),street=String(form.elements[`${prefix}SearchStreet`]?.value||"").trim();
   const codeN=inpostServiceAdresNormal(postCode),cityN=inpostServiceAdresNormal(city),streetN=inpostServiceAdresNormal(street);
   const all=inpostServiceAdresy(),byCode=all.filter(contact=>!codeN||inpostServiceAdresNormal(inpostServiceAdresDane(contact).postCode).includes(codeN));
   const byCity=byCode.filter(contact=>!cityN||inpostServiceAdresNormal(inpostServiceAdresDane(contact).city).includes(cityN));
@@ -833,6 +833,8 @@ function inpostServiceUstawPolaOsoby(form,prefix,contact={}){
     [`${prefix}Street`]:address.street,[`${prefix}Building`]:address.buildingNumber||address.building_number,
     [`${prefix}Flat`]:address.flatNumber||address.flat_number,
     [`${prefix}PostCode`]:address.postCode||address.post_code,[`${prefix}City`]:address.city,
+    [`${prefix}SearchPostCode`]:address.postCode||address.post_code,
+    [`${prefix}SearchCity`]:address.city,[`${prefix}SearchStreet`]:address.street,
   };
   Object.entries(fields).forEach(([name,value])=>{if(form.elements[name])form.elements[name].value=value||"";});
   inpostServiceAdresPodpowiedzi(form,prefix);
@@ -1019,6 +1021,15 @@ function inpostServiceOsobaFields(prefix,title,person={}){
         <button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt(${jsArg(prefix)},this)">Usuń zapis</button>
       </div>
     </div>
+    <div class="inpost-address-search">
+      <div class="inpost-address-search-head"><b>🔎 Wyszukaj adres w bazie</b><small>Wpisz kolejno kod → wybierz miejscowość → wyszukaj ulicę.</small></div>
+      <div class="inpost-address-search-fields">
+        <label>1. Kod pocztowy<input name="${prefix}SearchPostCode" list="inpostService${prefix}PostCodeHints" placeholder="np. 84-207" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})"></label>
+        <label>2. Miejscowość<input name="${prefix}SearchCity" list="inpostService${prefix}CityHints" placeholder="wybierz lub wpisz" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})"></label>
+        <label>3. Ulica<input name="${prefix}SearchStreet" list="inpostService${prefix}StreetHints" placeholder="zacznij wpisywać" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})"></label>
+      </div>
+      <div class="inpost-address-matches" data-inpost-address-results="${prefix}"><small>Wpisz kod pocztowy, następnie wybierz miejscowość i ulicę. Wyniki pochodzą z prywatnej książki adresowej.</small></div>
+    </div>
     <div class="inpost-form-grid">
       <label>Firma<input name="${prefix}Company" value="${esc(person.companyName||"")}"></label>
       <label>NIP<input name="${prefix}TaxCode" inputmode="numeric" maxlength="10" value="${esc(person.taxCode||"")}"></label>
@@ -1026,12 +1037,11 @@ function inpostServiceOsobaFields(prefix,title,person={}){
       <label>Nazwisko<input name="${prefix}LastName" value="${esc(person.lastName||"")}"></label>
       <label>E-mail *<input name="${prefix}Email" type="email" required value="${esc(person.email||"")}"></label>
       <label>Telefon *<input name="${prefix}Phone" inputmode="tel" required value="${esc(person.phone||"")}"></label>
-      <label class="wide">Ulica ${prefix==="sender"?"*":""}<input name="${prefix}Street" list="inpostService${prefix}StreetHints" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.street||"")}"><datalist id="inpostService${prefix}StreetHints"></datalist></label>
+      <label class="wide">Ulica ${prefix==="sender"?"*":""}<input name="${prefix}Street" list="inpostService${prefix}StreetHints" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.street||"")}"><datalist id="inpostService${prefix}StreetHints"></datalist></label>
       <label>Nr budynku ${prefix==="sender"?"*":""}<input name="${prefix}Building" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.buildingNumber||a.building_number||"")}"></label>
       <label>Nr lokalu<input name="${prefix}Flat" value="${esc(a.flatNumber||a.flat_number||"")}"></label>
-      <label>Kod pocztowy ${prefix==="sender"?"*":""}<input name="${prefix}PostCode" list="inpostService${prefix}PostCodeHints" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})" ${prefix==="sender"?"required":"data-receiver-address"} pattern="\\d{2}-?\\d{3}" value="${esc(a.postCode||a.post_code||"")}"><datalist id="inpostService${prefix}PostCodeHints"></datalist></label>
-      <label>Miasto ${prefix==="sender"?"*":""}<input name="${prefix}City" list="inpostService${prefix}CityHints" oninput="inpostServiceAdresPodpowiedzi(this,${jsArg(prefix)})" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.city||"")}"><datalist id="inpostService${prefix}CityHints"></datalist></label>
-      <div class="wide inpost-address-matches" data-inpost-address-results="${prefix}"><small>Wpisz kod pocztowy, następnie wybierz miejscowość i ulicę. Wyniki pochodzą z prywatnej książki adresowej.</small></div>
+      <label>Kod pocztowy ${prefix==="sender"?"*":""}<input name="${prefix}PostCode" list="inpostService${prefix}PostCodeHints" ${prefix==="sender"?"required":"data-receiver-address"} pattern="\\d{2}-?\\d{3}" value="${esc(a.postCode||a.post_code||"")}"><datalist id="inpostService${prefix}PostCodeHints"></datalist></label>
+      <label>Miasto ${prefix==="sender"?"*":""}<input name="${prefix}City" list="inpostService${prefix}CityHints" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.city||"")}"><datalist id="inpostService${prefix}CityHints"></datalist></label>
       ${prefix==="receiver"?'<button class="btn ghost wide" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie(\'receiver\')">📍 Znajdź Paczkomaty przy tym adresie</button>':""}
       <label class="check wide"><input type="checkbox" name="save${prefix==="sender"?"Sender":"Receiver"}" checked> Zapamiętaj lub zaktualizuj ten adres po utworzeniu przesyłki</label>
     </div>

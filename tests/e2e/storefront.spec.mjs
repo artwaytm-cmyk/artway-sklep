@@ -159,8 +159,27 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   await expect(page.locator('#inpostServiceForm')).toBeVisible();
   await expect(page.locator('#inpostServiceForm').getByLabel('Wybierz z książki adresowej')).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Przelicz według umowy' })).toBeVisible();
-  await expect(page.getByText('Sprzedawcą usługi na FV jest Artway‑TM.')).toBeVisible();
+  await expect(page.getByText('FV zawsze otrzymuje nadawca, a wystawcą jest Artway‑TM.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Przy adresie odbiorcy' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Utwórz przesyłkę InPost/ })).toBeVisible();
+  await page.evaluate(() => {
+    inpostServiceStan.addressBook = [{
+      id: 'IPA-E2E',
+      label: 'Nadawca testowy',
+      roles: ['sender'],
+      firstName: 'Anna',
+      lastName: 'Nowak',
+      phone: '501002003',
+      address: { street: 'Lipowa', building_number: '7', post_code: '84-207', city: 'Bojano' },
+    }];
+    renderuj();
+  });
+  const senderCard = page.locator('#inpost-party-sender');
+  await senderCard.getByLabel('1. Kod pocztowy').fill('84-207');
+  await expect(senderCard.getByRole('button', { name: /Nadawca testowy/ })).toBeVisible();
+  await senderCard.getByRole('button', { name: /Nadawca testowy/ }).click();
+  await expect(senderCard.getByLabel(/Miasto/)).toHaveValue('Bojano');
+  await expect(senderCard.getByLabel('Ulica *', { exact: true })).toHaveValue('Lipowa');
   const workspace = page.locator('.admin-workspace-content[data-admin-layout="unified-v2"]');
   const dimensions = await workspace.evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.width + 1);
