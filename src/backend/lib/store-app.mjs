@@ -112,7 +112,7 @@ import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
 import { createProductSaleChannelSynchronizer } from './domain/product-sale-channel-links.mjs';
 import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
-import { evaluateAllegroCatalogIdentitySignals } from './domain/allegro-catalog-identity.mjs';
+import { evaluateAllegroCatalogIdentitySignals, selectAllegroCatalogCandidate } from './domain/allegro-catalog-identity.mjs';
 import { ALLEGRO_AGENT_OFFER_PROCEDURE, createAllegroPublicationAgent } from './domain/allegro-publication-agent.mjs';
 import { canonicalManufacturerName, sanitizeManufacturerFieldsInSettings } from './domain/product-field-validation.mjs';
 import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, reassessBlockedAllegroMapping, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
@@ -1690,9 +1690,9 @@ async function allegroZnajdzProduktKatalogu(req, product = {}) {
     const raw = await allegroWywolaj(req, '/sale/products', { parameters });
     const source = Array.isArray(raw.products) ? raw.products : (Array.isArray(raw.items) ? raw.items : []);
     const products = source.map((item) => allegroNormalizujProduktKatalogu(product, item)).filter((item) => item.id);
-    const verified = products.filter((p) => p.identity.verified).sort((a, b) => b.identity.nameScore - a.identity.nameScore);
-    const ambiguous = verified.length > 1 && (verified[0].identity.nameScore - verified[1].identity.nameScore) < 0.12;
-    let selected = ambiguous ? null : (verified[0] || null);
+    const selection = selectAllegroCatalogCandidate(products, { preferredProductId: product.allegroProductId });
+    const { verified, ambiguous } = selection;
+    let { selected } = selection;
     if (selected?.id) {
       try {
         const detailed = await allegroPobierzProduktKataloguPoId(req, product, selected.id);
@@ -1796,6 +1796,8 @@ function allegroRozpoznajProducenta(product = {}, evidence = {}, settings = {}) 
   const allowed = (Array.isArray(settings.producers) && settings.producers.length ? settings.producers : ALLEGRO_DEFAULT_PRODUCERS).map((name) => ({ name, key: allegroNormalizujKlucz(name) }));
   const evidenceText = allegroNormalizujKlucz([evidence.brand, evidence.producent].filter(Boolean).join(' '));
   for (const item of allowed) if (item.key && evidenceText && (evidenceText === item.key || evidenceText.includes(item.key) || item.key.includes(evidenceText))) return item.name;
+  const sourceBrand = allegroNormalizujKlucz(product?.parametryZrodla?.marka || product?.sourceParameters?.brand || '');
+  for (const item of allowed) if (item.key && sourceBrand && (sourceBrand === item.key || sourceBrand.includes(item.key) || item.key.includes(sourceBrand))) return item.name;
   const sourceText = allegroNormalizujKlucz([
     product.producent, product.marka, product.nazwa, product.name, product.sourceUrl, product.producentUrl,
     evidence.name, evidence.sourceUrl,

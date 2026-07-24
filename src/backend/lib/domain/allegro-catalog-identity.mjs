@@ -49,3 +49,18 @@ export function evaluateAllegroCatalogIdentitySignals({
               : 'zgodny GTIN oraz zgodne cechy produktu',
   };
 }
+
+export function selectAllegroCatalogCandidate(candidates = [], {
+  preferredProductId = '',
+  ambiguityMargin = 0.03,
+} = {}) {
+  const verified = (Array.isArray(candidates) ? candidates : [])
+    .filter((candidate) => candidate?.id && candidate?.identity?.verified === true)
+    .sort((left, right) => Number(right?.identity?.nameScore || 0) - Number(left?.identity?.nameScore || 0));
+  const preferred = verified.find((candidate) => String(candidate.id) === String(preferredProductId || ''));
+  if (preferred) return { selected: preferred, ambiguous: false, verified };
+  if (verified.length < 2) return { selected: verified[0] || null, ambiguous: false, verified };
+  const difference = Number(verified[0]?.identity?.nameScore || 0) - Number(verified[1]?.identity?.nameScore || 0);
+  const ambiguous = difference < Math.max(0, Number(ambiguityMargin) || 0);
+  return { selected: ambiguous ? null : verified[0], ambiguous, verified };
+}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateAllegroCatalogIdentitySignals } from '../src/backend/lib/domain/allegro-catalog-identity.mjs';
+import { evaluateAllegroCatalogIdentitySignals, selectAllegroCatalogCandidate } from '../src/backend/lib/domain/allegro-catalog-identity.mjs';
 
 test('dokładny GTIN dopuszcza wariant nazwy, gdy katalog Allegro nie zwraca marki', () => {
   const identity = evaluateAllegroCatalogIdentitySignals({
@@ -51,4 +51,22 @@ test('podobna nazwa nigdy nie zastępuje brakującej zgodności GTIN', () => {
   });
   assert.equal(identity.verified, false);
   assert.equal(identity.gtinMatch, false);
+});
+
+test('kilka rekordów katalogu z tym samym GTIN wybiera wyraźnie najlepiej zgodną nazwę', () => {
+  const result = selectAllegroCatalogCandidate([
+    { id: 'weaker', identity: { verified: true, nameScore: 0.429 } },
+    { id: 'better', identity: { verified: true, nameScore: 0.5 } },
+  ]);
+  assert.equal(result.ambiguous, false);
+  assert.equal(result.selected.id, 'better');
+});
+
+test('niemal identyczne wyniki katalogowe nadal wymagają decyzji', () => {
+  const result = selectAllegroCatalogCandidate([
+    { id: 'one', identity: { verified: true, nameScore: 0.51 } },
+    { id: 'two', identity: { verified: true, nameScore: 0.5 } },
+  ]);
+  assert.equal(result.ambiguous, true);
+  assert.equal(result.selected, null);
 });
