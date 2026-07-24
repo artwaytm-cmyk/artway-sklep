@@ -27,6 +27,20 @@ test('dokładny GTIN nie omija jawnego konfliktu producenta', () => {
   assert.equal(identity.brandConflict, true);
 });
 
+test('marka katalogowa potwierdzona w nazwie pozwala poprawić błędne pole marki przy dokładnym GTIN', () => {
+  const identity = evaluateAllegroCatalogIdentitySignals({
+    gtin: '5906395300761',
+    candidateGtins: ['5906395300761'],
+    nameScore: 0.55,
+    productBrand: 'Alexander',
+    candidateBrand: 'Multigra',
+    candidateBrandCorroborated: true,
+  });
+  assert.equal(identity.verified, true);
+  assert.equal(identity.brandConflict, false);
+  assert.equal(identity.brandCorroborated, true);
+});
+
 test('podobna nazwa nigdy nie zastępuje brakującej zgodności GTIN', () => {
   const identity = evaluateAllegroCatalogIdentitySignals({
     gtin: '5906018027204',

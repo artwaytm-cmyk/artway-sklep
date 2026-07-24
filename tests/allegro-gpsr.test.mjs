@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allegroBuildContentProductSet, allegroCatalogParametersForPatch, allegroResponsibleProducerDirectory, allegroSelectResponsibleProducer, allegroSyncEditorialOffer } from '../src/backend/lib/domain/allegro-gpsr.mjs';
+import { allegroApplyProductSetSafety, allegroBuildContentProductSet, allegroCatalogParametersForPatch, allegroResponsibleProducerDirectory, allegroSelectResponsibleProducer, allegroSyncEditorialOffer } from '../src/backend/lib/domain/allegro-gpsr.mjs';
 
 test('GPSR dobiera wyłącznie jednoznacznego producenta po nazwie lub nazwie handlowej', () => {
   const match = allegroSelectResponsibleProducer({ producent: 'Multigra' }, [
@@ -80,4 +80,20 @@ test('aktualizacja treści zachowuje GPSR i ilość zestawu, ale nie kopiuje par
     marketedBeforeGPSRObligation: false,
     deposits: [],
   }]);
+});
+
+test('przygotowanie nowej oferty pobiera GPSR z dokładnego produktu katalogowego', () => {
+  const result = allegroApplyProductSetSafety({
+    draft: { productSet: [{ product: { id: 'catalog-1' } }] },
+    product: { producent: 'Alexander', marka: 'Alexander' },
+    catalog: {
+      productSafety: {
+        responsibleProducers: [{ id: 'producer-1', name: 'Alexander.' }],
+        safetyInformation: { type: 'TEXT', description: 'Używać zgodnie z instrukcją.' },
+      },
+    },
+  });
+  assert.equal(result.ready, true);
+  assert.deepEqual(result.draft.productSet[0].responsibleProducer, { type: 'ID', id: 'producer-1' });
+  assert.deepEqual(result.draft.productSet[0].safetyInformation, { type: 'TEXT', description: 'Używać zgodnie z instrukcją.' });
 });

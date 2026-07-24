@@ -38,6 +38,46 @@ export function allegroSelectResponsibleProducer(product = {}, producers = []) {
   };
 }
 
+export function allegroApplyProductSetSafety({
+  draft = {},
+  product = {},
+  catalog = {},
+  responsibleProducers = [],
+} = {}) {
+  const payload = structuredClone(draft || {});
+  const item = payload?.productSet?.[0];
+  if (!item || typeof item !== 'object') return { draft: payload, ready: false, missing: ['produkt w zestawie Allegro'], responsibleProducer: null };
+
+  const safety = catalog?.productSafety && typeof catalog.productSafety === 'object' ? catalog.productSafety : {};
+  const catalogProducers = Array.isArray(safety.responsibleProducers) ? safety.responsibleProducers : [];
+  const directory = catalogProducers.length ? catalogProducers : responsibleProducers;
+  const responsibleProducer = allegroSelectResponsibleProducer(product, directory)
+    || (catalogProducers.length === 1 && text(catalogProducers[0]?.id, 120)
+      ? { id: text(catalogProducers[0].id, 120), name: text(catalogProducers[0]?.name || catalogProducers[0]?.producerData?.tradeName, 200), score: 100 }
+      : null);
+
+  if (responsibleProducer?.id) item.responsibleProducer = { type: 'ID', id: responsibleProducer.id };
+  const safetyInformation = product.allegroSafetyInformation && typeof product.allegroSafetyInformation === 'object'
+    ? product.allegroSafetyInformation
+    : safety.safetyInformation;
+  if (safetyInformation && typeof safetyInformation === 'object' && text(safetyInformation.type, 40)) {
+    item.safetyInformation = structuredClone(safetyInformation);
+  }
+  if (typeof product.marketedBeforeGPSRObligation === 'boolean') item.marketedBeforeGPSRObligation = product.marketedBeforeGPSRObligation;
+
+  const missing = [];
+  if (!item.responsibleProducer?.id) missing.push('odpowiedzialny producent GPSR');
+  if (!item.safetyInformation?.type) missing.push('informacja o bezpieczeństwie GPSR');
+  return {
+    draft: payload,
+    ready: missing.length === 0,
+    missing,
+    responsibleProducer,
+    safetyInformation: item.safetyInformation || null,
+    source: catalogProducers.length ? 'katalog Allegro' : (responsibleProducer ? 'kartoteka odpowiedzialnych producentów Allegro' : ''),
+  };
+}
+
 export function allegroBuildContentProductSet({ draftItem = {}, existingItem = {}, responsibleProducer = null } = {}) {
   const productId = text(draftItem?.product?.id || existingItem?.product?.id, 120);
   if (!productId) return [];
