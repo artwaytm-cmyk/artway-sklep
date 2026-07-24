@@ -201,7 +201,8 @@ function zapiszStanProduktowPoOperacji(){
   zapiszLS("artway_kosz_meta",koszMeta);
   zapiszLS("artway_stany",stanyProduktow);
   zapiszLS("artway_dostepnosc",dostepnoscProduktow);
-  zapiszLS("artway_ustawienia",ustawienia);
+  zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});
+  void chmuraDodajMutacjePolUstawien({mapaProduktow:ustawienia.mapaProduktow||{},menuKategorii:ustawienia.menuKategorii||[]});
 }
 function dodajSciezkiKategoriiZImportuDoMenu(lista){
   const importowane=(Array.isArray(lista)?lista:[]).filter(p=>p?.grupaKategorii&&p?.kategoria);

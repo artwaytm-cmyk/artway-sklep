@@ -90,7 +90,7 @@ test('studio kampanii pro zapisuje rzeczywiste parametry kompozycji i pokazuje t
 
 test('kody rabatowe mają potwierdzony zapis serwerowy, tester i operacje grupowe', async () => {
   const studio = await readFile('src/frontend/15c-campaign-studio-pro.js', 'utf8');
-  for (const marker of ['await chmuraZapiszUstawienia({flush:true})', 'Tester kodu', 'rabatProMasowo', 'Zaznacz widoczne', 'Eksportuj', 'Utwórz i zapisz na serwerze']) assert.ok(studio.includes(marker), marker);
+  for (const marker of ['await zapiszCzescUstawien(', 'Tester kodu', 'rabatProMasowo', 'Zaznacz widoczne', 'Eksportuj', 'Utwórz i zapisz na serwerze']) assert.ok(studio.includes(marker), marker);
 });
 
 test('studio ikon nie obiecuje przezroczystości, gdy model jej nie obsługuje', async () => {

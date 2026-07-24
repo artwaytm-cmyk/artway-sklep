@@ -273,6 +273,7 @@ async function chmuraWczytajStan(){
     if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
     if(Array.isArray(d.orders)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_zamowienia", filtrujAktywneZamowienia(d.orders))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
     if(Array.isArray(d.users)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_uzytkownicy", polaczUzytkownikowCentralnych(d.users))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
+    if(chmuraMutacjePolUstawien.length)chmuraMutacjePolUstawienZaplanuj(0);
     return true;
   }catch(e){ chmuraStan = {...chmuraStan, dostepna:false, sprawdzono:true, error:e.message}; return false; }
 }

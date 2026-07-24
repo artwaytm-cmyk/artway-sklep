@@ -19,6 +19,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/01-config-and-catalog.js',
       'src/frontend/02-runtime-state.js',
       'src/frontend/03-cloud-sync.js',
+      'src/frontend/03b-settings-field-mutations.js',
       'src/frontend/03a-company-payments-and-product-ids.js',
       'src/frontend/04-accounts-orders-settings.js',
       'src/frontend/05-catalog-inventory.js',

@@ -161,10 +161,24 @@ function widokAdminSEO(sekcja="pulpit"){
   if(tab==="historia")return seoSzkielet(tab,`${head}<div class="panel"><h2>🧾 Historia pracy</h2><div class="seo-table-wrap"><table class="log-table"><tr><th>Data</th><th>Źródło</th><th>Produkty</th><th>IndexNow</th><th>Kanały</th><th>Szczegóły</th></tr>${(seoHistoria||[]).map(h=>`<tr><td>${esc(allegroDataTxt(h.at))}</td><td>${esc(h.source||h.type||"automat")}</td><td><b>${esc(h.count||0)}</b></td><td>${h.promotion?.status==="accepted"?"✅":"•"} ${esc(Math.max(0,(Number(h.promotion?.count)||0)-1))}</td><td>${h.channels?`✅ ${Object.values(h.channels).filter(Boolean).length}`:"starszy zapis"}</td><td>${esc((h.products||[]).slice(0,8).map(x=>x.name||x.id).join(", "))}</td></tr>`).join("")||`<tr><td colspan="6">Plan nie był jeszcze uruchamiany.</td></tr>`}</table></div></div>`);
   return seoSzkielet("ustawienia",`${head}<div class="panel"><form onsubmit="zapiszSeoUstawienia(event)"><div class="order-section-head"><div><h2>⚙️ Ustawienia automatu i audytów</h2><p class="order-detail-lead">Każdy produkt jest objęty pozycjonowaniem od razu. Limit 1–50 określa liczbę kart codziennie kontrolowanych, poprawianych i zgłaszanych bezpłatnym kanałom.</p></div><button class="btn" type="submit">💾 Zapisz</button></div><div class="seo-settings-grid"><label class="check"><input type="checkbox" checked disabled> Każdy aktywny produkt automatycznie wszędzie — zawsze aktywne</label><label class="check"><input type="checkbox" name="enabled" ${seoUstawienia.enabled?"checked":""}> Automatyczne audyty aktywne</label><label class="check"><input type="checkbox" name="autoFillMissing" ${seoUstawienia.autoFillMissing!==false?"checked":""}> Uzupełniaj bezpieczne metadane</label><label class="check"><input type="checkbox" name="preferBestsellers" ${seoUstawienia.preferBestsellers!==false?"checked":""}> Najpierw produkty z dodatkowym priorytetem i bestsellery</label><label class="check"><input type="checkbox" name="indexNowEnabled" ${seoUstawienia.indexNowEnabled!==false?"checked":""}> Zgłaszaj poprawione produkty bezpłatnie przez IndexNow</label><label>Dzienny limit automatycznej partii<input name="dailyLimit" type="number" min="1" max="50" value="${esc(limit)}"><span class="seo-limit-presets"><button type="button" onclick="seoUstawLimit(10)">10</button><button type="button" onclick="seoUstawLimit(20)">20</button><button type="button" onclick="seoUstawLimit(50)">50</button></span></label></div><h3>Stan bezpłatnych kanałów</h3><div class="seo-settings-grid"><label class="check"><input type="checkbox" name="searchConsoleReady" ${seoUstawienia.searchConsoleReady?"checked":""}> Search Console skonfigurowane</label><label class="check"><input type="checkbox" name="merchantCenterReady" ${seoUstawienia.merchantCenterReady?"checked":""}> Merchant Center / bezpłatne informacje skonfigurowane</label><label class="check"><input type="checkbox" checked disabled> allsklep.pl podpięty jako adres marketingowy 301</label></div><div class="backend-note"><b>Wyłącznie darmowe rozwiązania.</b> Wszystkie aktywne produkty automatycznie otrzymują tytuł, opis i frazy oraz trafiają do mapy strony, feedu Google, danych Product/Offer i zgłoszeń IndexNow. Drugi adres prowadzi do tej samej domeny kanonicznej, więc nie tworzy duplikatów SEO. Moduł nie uruchamia reklam i nie wymaga płatnego API. Ostatni audyt: ${seoUstawienia.lastRunAt?esc(allegroDataTxt(seoUstawienia.lastRunAt)):"jeszcze nie było"}.</div></form></div>`);
 }
-function zapiszCzescUstawien(obj){
-  ustawienia = {...ustawienia, ...obj};
-  zapiszLS("artway_ustawienia", ustawienia);
+async function zapiszCzescUstawien(obj){
+  const zmiany={},usunKlucze=[],next={...ustawienia};
+  for(const [key,value] of Object.entries(obj||{})){
+    if(value===undefined){delete next[key];usunKlucze.push(key);}
+    else{next[key]=value;zmiany[key]=value;}
+  }
+  ustawienia = next;
+  zapiszLS("artway_ustawienia", ustawienia,{synchronizuj:false});
   zastosujUstawienia(); zbudujProdukty(); odswiezMenu(); odswiezKoszyk();
-  loguj("info","Zapisano ustawienia sklepu");
-  toast("Zapisane ✅"); renderuj();
+  loguj("info","Zabezpieczono zmianę ustawień w trwałej kolejce");
+  toast("Zapisywanie na serwerze…"); renderuj();
+  const zapisane=await chmuraDodajMutacjePolUstawien(zmiany,usunKlucze);
+  if(zapisane){
+    loguj("info",`Serwer potwierdził zapis pól ustawień: ${[...Object.keys(zmiany),...usunKlucze].join(", ")}`);
+    toast("Zapisane na serwerze i aktywne wszędzie ✅");
+  }else{
+    loguj("ostrzezenie","Zmiana ustawień oczekuje w trwałej kolejce na potwierdzenie serwera");
+    toast("⚠️ Zmiana jest zabezpieczona i oczekuje na potwierdzenie serwera");
+  }
+  return zapisane;
 }

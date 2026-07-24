@@ -91,7 +91,7 @@ function porzadkujBezpieczneReferencje(){
   for(const id of Object.keys(mapa))if(!wszystkie.has(String(id))){delete mapa[id];usuniete.push(id);}
   if(usuniete.length){
     ustawienia={...ustawienia,mapaProduktow:mapa};
-    if(typeof produktyDoAdministracji==="function")zapiszLS("artway_ustawienia",ustawienia);
+    if(typeof produktyDoAdministracji==="function"){zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});void chmuraDodajMutacjePolUstawien({mapaProduktow:mapa});}
     else try{localStorage.setItem("artway_ustawienia",JSON.stringify(ustawienia));}catch(e){}
     loguj("info",`Usunięto ${usuniete.length} osieroconych mapowań bez zmiany katalogu produktów`);
   }
@@ -125,7 +125,7 @@ function audytDuplikatowSklepu(lista){
 }
 function filtrujDuplikatySklepu(lista=[]){const audit=audytDuplikatowSklepu(lista);return lista.filter(p=>!audit.hiddenIds.has(String(p.id)));}
 function ustawProduktGlownyDuplikatu(groupKey,productId){
-  ustawienia={...ustawienia,kanoniczneDuplikatySklepu:{...(ustawienia.kanoniczneDuplikatySklepu||{}),[String(groupKey)]:String(productId)}};zapiszLS("artway_ustawienia",ustawienia);zbudujProdukty();odswiezMenu();toast("Wybrano kartę, która ma pozostać");renderuj();
+  const kanoniczneDuplikatySklepu={...(ustawienia.kanoniczneDuplikatySklepu||{}),[String(groupKey)]:String(productId)};ustawienia={...ustawienia,kanoniczneDuplikatySklepu};zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});void chmuraDodajMutacjePolUstawien({kanoniczneDuplikatySklepu});zbudujProdukty();odswiezMenu();toast("Wybrano kartę, która ma pozostać");renderuj();
 }
 async function usunKopieGrupyProduktuTrwale(groupKey){
   const grupa=audytDuplikatowSklepu().grupy.find(g=>String(g.groupKey)===String(groupKey));
@@ -148,7 +148,7 @@ async function usunKopieGrupyProduktuTrwale(groupKey){
   produktyDefinitywne=[...new Map(produktyDefinitywne.map(x=>[String(x),x])).values()];
   if(ustawienia.mapaProduktow&&typeof ustawienia.mapaProduktow==="object"){const mapa={...ustawienia.mapaProduktow};ids.forEach(id=>delete mapa[id]);ustawienia={...ustawienia,mapaProduktow:mapa};}
   const kanoniczne={...(ustawienia.kanoniczneDuplikatySklepu||{})};delete kanoniczne[String(groupKey)];ustawienia={...ustawienia,kanoniczneDuplikatySklepu:kanoniczne};
-  zapiszLS("artway_produkty_dodane",produktyDodane);zapiszLS("artway_kosz_dodane",koszDodanych);zapiszLS("artway_produkty_definitywne",produktyDefinitywne);zapiszLS("artway_produkty_ukryte",produktyUkryte);zapiszLS("artway_produkty_edytowane",produktyEdytowane);zapiszLS("artway_stany",stanyProduktow);zapiszLS("artway_dostepnosc",dostepnoscProduktow);zapiszLS("artway_magazyn_produkty",magazynProdukty);zapiszLS("artway_kosz_meta",koszMeta);zapiszLS("artway_ustawienia",ustawienia);
+  zapiszLS("artway_produkty_dodane",produktyDodane);zapiszLS("artway_kosz_dodane",koszDodanych);zapiszLS("artway_produkty_definitywne",produktyDefinitywne);zapiszLS("artway_produkty_ukryte",produktyUkryte);zapiszLS("artway_produkty_edytowane",produktyEdytowane);zapiszLS("artway_stany",stanyProduktow);zapiszLS("artway_dostepnosc",dostepnoscProduktow);zapiszLS("artway_magazyn_produkty",magazynProdukty);zapiszLS("artway_kosz_meta",koszMeta);zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});void chmuraDodajMutacjePolUstawien({mapaProduktow:ustawienia.mapaProduktow||{},kanoniczneDuplikatySklepu:ustawienia.kanoniczneDuplikatySklepu||{}});
   zbudujProdukty();odswiezMenu();zapiszHistorieAgenta("katalog",`Trwale usunięto ${usun.length} powtarzające się rekordy; pozostawiono ${grupa.canonical.nazwa}`,{keepId:grupa.canonical.id,deletedIds:[...ids],groupKey});
   if(chmuraToken)await chmuraZapiszUstawienia({flush:true});
   toast(`✅ Pozostawiono 1 kartę i trwale usunięto ${usun.length} kopii`);renderuj();

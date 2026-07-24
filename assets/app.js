@@ -255,7 +255,12 @@ function pasekInfoHTML(){
   t=t.replace(/Darmowa dostawa od\s*\d+(?:[,.]\d+)?\s*zł/gi,`Darmowa dostawa od ${KONFIG.darmowaDostawaOd} zł`);
   t=t.replace(/Wysyłka w\s*\d+\s*(?:h|godziny|godzin|godz\.?)(?:\s*robocze)?/gi,tekstWysylki());
   t=t.replace(/Wysylka w\s*\d+\s*(?:h|godziny|godzin|godz\.?)(?:\s*robocze)?/gi,tekstWysylki("Wysylka w"));
-  if(promocja)t=t.replace(/Kod\s*(?:<b>)?[A-Z0-9]{2,20}(?:<\/b>)?\s*=\s*[−-]?\d{1,2}%/gi,promocja);
+  const kodWPasie=/Kod\s*(?:<b>)?[A-Z0-9]{2,20}(?:<\/b>)?\s*=\s*[−-]?\d{1,2}%/gi;
+  if(promocja)t=t.replace(kodWPasie,promocja);
+  else{
+    t=t.replace(/\s*(?:&nbsp;)?\s*•\s*(?:&nbsp;)?\s*🎁\s*Kod\s*(?:<b>)?[A-Z0-9]{2,20}(?:<\/b>)?\s*=\s*[−-]?\d{1,2}%/gi,"");
+    t=t.replace(/\s*🎁\s*Kod\s*(?:<b>)?[A-Z0-9]{2,20}(?:<\/b>)?\s*=\s*[−-]?\d{1,2}%/gi,"");
+  }
   return t;
 }
 function domyslnyFavicon(){
@@ -702,6 +707,7 @@ async function chmuraWczytajStan(){
     if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
     if(Array.isArray(d.orders)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_zamowienia", filtrujAktywneZamowienia(d.orders))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
     if(Array.isArray(d.users)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_uzytkownicy", polaczUzytkownikowCentralnych(d.users))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
+    if(chmuraMutacjePolUstawien.length)chmuraMutacjePolUstawienZaplanuj(0);
     return true;
   }catch(e){ chmuraStan = {...chmuraStan, dostepna:false, sprawdzono:true, error:e.message}; return false; }
 }
@@ -1042,6 +1048,78 @@ function ustawNumerPrzelewuTelefon(v){
   const c = tylkoCyfry(v || NUMER_PRZELEWU_TELEFON_DOMYSLNY).slice(0,15);
   KONFIG.numerPrzelewuTelefon = c || NUMER_PRZELEWU_TELEFON_DOMYSLNY;
   return KONFIG.numerPrzelewuTelefon;
+}
+
+/* ═══════════ ATOMOWE MUTACJE PÓL USTAWIEŃ ═══════════
+   Każda drobna zmiana formularza trafia do trwałej kolejki, jest nakładana na
+   najnowszy rekord serwera i znika z kolejki dopiero po odczycie potwierdzenia. */
+const CHMURA_MUTACJE_POL_USTAWIEN_KEY = "artway_oczekujace_mutacje_ustawien";
+let chmuraMutacjePolUstawien = (()=>{const value=wczytajLS(CHMURA_MUTACJE_POL_USTAWIEN_KEY,[]);return Array.isArray(value)?value.slice(0,250):[];})();
+let chmuraMutacjePolUstawienWToku = null;
+let chmuraMutacjePolUstawienTimer = null;
+
+function chmuraMutacjePolUstawienZapiszKolejke(){
+  try{localStorage.setItem(CHMURA_MUTACJE_POL_USTAWIEN_KEY,JSON.stringify(chmuraMutacjePolUstawien.slice(0,250)));return true;}
+  catch(e){return false;}
+}
+function chmuraMutacjaOdcisk(value){
+  try{return JSON.stringify(value);}
+  catch(e){return String(value);}
+}
+function chmuraMutacjePolUstawienZaplanuj(ms=12000){
+  clearTimeout(chmuraMutacjePolUstawienTimer);
+  if(!chmuraMutacjePolUstawien.length)return;
+  chmuraMutacjePolUstawienTimer=setTimeout(()=>chmuraWyslijMutacjePolUstawien().catch(()=>false),ms);
+}
+async function chmuraWyslijMutacjePolUstawien(){
+  if(chmuraMutacjePolUstawienWToku)return chmuraMutacjePolUstawienWToku;
+  if(!chmuraMutacjePolUstawien.length)return true;
+  if(!maUprawnieniaZapisuChmury()){chmuraMutacjePolUstawienZaplanuj(15000);return false;}
+  chmuraMutacjePolUstawienWToku=(async()=>{
+    while(chmuraMutacjePolUstawien.length){
+      const mutation=chmuraMutacjePolUstawien[0];
+      try{
+        const d=await chmura("settings-field-mutation",{method:"POST",body:{mutationId:mutation.id,changes:mutation.changes||{},removeKeys:mutation.removeKeys||[],expectedRev:Number(chmuraStan.rev||wczytajLS("artway_chmura_rev",0))||0},timeout:30000});
+        const authoritative=d.authoritative||{},values=authoritative.values||{},deleted=new Set(authoritative.deletedKeys||[]);
+        for(const [key,value] of Object.entries(mutation.changes||{})){
+          if(chmuraMutacjaOdcisk(ustawienia?.[key])===chmuraMutacjaOdcisk(value)&&Object.prototype.hasOwnProperty.call(values,key))ustawienia[key]=values[key];
+        }
+        for(const key of mutation.removeKeys||[]){
+          if(!Object.prototype.hasOwnProperty.call(ustawienia||{},key)&&deleted.has(key))delete ustawienia[key];
+        }
+        zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});
+        chmuraStan={...chmuraStan,dostepna:true,admin:true,rev:d.rev||chmuraStan.rev,updated_at:d.updated_at||null,error:"",ostatniZapis:Date.now()};
+        localStorage.setItem("artway_chmura_rev",JSON.stringify(d.rev||chmuraStan.rev));
+        chmuraMutacjePolUstawien.shift();
+        chmuraMutacjePolUstawienZapiszKolejke();
+      }catch(error){
+        chmuraStan={...chmuraStan,error:error.message||String(error)};
+        chmuraMutacjePolUstawienZaplanuj(error?.code==="auth"?30000:5000);
+        return false;
+      }
+    }
+    return true;
+  })();
+  try{return await chmuraMutacjePolUstawienWToku;}
+  finally{
+    chmuraMutacjePolUstawienWToku=null;
+    if(chmuraMutacjePolUstawien.length)chmuraMutacjePolUstawienZaplanuj();
+  }
+}
+function chmuraDodajMutacjePolUstawien(changes={},removeKeys=[]){
+  const cleanChanges={},cleanRemove=[...new Set((Array.isArray(removeKeys)?removeKeys:[]).map(String).filter(Boolean))];
+  for(const [key,value] of Object.entries(changes||{})){
+    if(value===undefined){if(!cleanRemove.includes(key))cleanRemove.push(key);}
+    else cleanChanges[key]=JSON.parse(JSON.stringify(value));
+  }
+  if(!Object.keys(cleanChanges).length&&!cleanRemove.length)return Promise.resolve(true);
+  const mutation={id:`setting-${Date.now().toString(36)}-${(++chmuraNumerMutacji).toString(36)}-${Math.random().toString(36).slice(2,8)}`,at:new Date().toISOString(),changes:cleanChanges,removeKeys:cleanRemove};
+  chmuraMutacjePolUstawien.push(mutation);
+  if(!chmuraMutacjePolUstawienZapiszKolejke()){
+    chmuraStan={...chmuraStan,error:"Nie udało się zabezpieczyć kolejki zmian ustawień w pamięci przeglądarki."};
+    return Promise.resolve(false);
+  }
+  return chmuraWyslijMutacjePolUstawien();
 }
 
 /* Dane firmy, płatności oraz utrzymanie identyfikatorów produktu */
@@ -1950,7 +2028,7 @@ function porzadkujBezpieczneReferencje(){
   for(const id of Object.keys(mapa))if(!wszystkie.has(String(id))){delete mapa[id];usuniete.push(id);}
   if(usuniete.length){
     ustawienia={...ustawienia,mapaProduktow:mapa};
-    if(typeof produktyDoAdministracji==="function")zapiszLS("artway_ustawienia",ustawienia);
+    if(typeof produktyDoAdministracji==="function"){zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});void chmuraDodajMutacjePolUstawien({mapaProduktow:mapa});}
     else try{localStorage.setItem("artway_ustawienia",JSON.stringify(ustawienia));}catch(e){}
     loguj("info",`Usunięto ${usuniete.length} osieroconych mapowań bez zmiany katalogu produktów`);
   }
@@ -1984,7 +2062,7 @@ function audytDuplikatowSklepu(lista){
 }
 function filtrujDuplikatySklepu(lista=[]){const audit=audytDuplikatowSklepu(lista);return lista.filter(p=>!audit.hiddenIds.has(String(p.id)));}
 function ustawProduktGlownyDuplikatu(groupKey,productId){
-  ustawienia={...ustawienia,kanoniczneDuplikatySklepu:{...(ustawienia.kanoniczneDuplikatySklepu||{}),[String(groupKey)]:String(productId)}};zapiszLS("artway_ustawienia",ustawienia);zbudujProdukty();odswiezMenu();toast("Wybrano kartę, która ma pozostać");renderuj();
+  const kanoniczneDuplikatySklepu={...(ustawienia.kanoniczneDuplikatySklepu||{}),[String(groupKey)]:String(productId)};ustawienia={...ustawienia,kanoniczneDuplikatySklepu};zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});void chmuraDodajMutacjePolUstawien({kanoniczneDuplikatySklepu});zbudujProdukty();odswiezMenu();toast("Wybrano kartę, która ma pozostać");renderuj();
 }
 async function usunKopieGrupyProduktuTrwale(groupKey){
   const grupa=audytDuplikatowSklepu().grupy.find(g=>String(g.groupKey)===String(groupKey));
@@ -2007,7 +2085,7 @@ async function usunKopieGrupyProduktuTrwale(groupKey){
   produktyDefinitywne=[...new Map(produktyDefinitywne.map(x=>[String(x),x])).values()];
   if(ustawienia.mapaProduktow&&typeof ustawienia.mapaProduktow==="object"){const mapa={...ustawienia.mapaProduktow};ids.forEach(id=>delete mapa[id]);ustawienia={...ustawienia,mapaProduktow:mapa};}
   const kanoniczne={...(ustawienia.kanoniczneDuplikatySklepu||{})};delete kanoniczne[String(groupKey)];ustawienia={...ustawienia,kanoniczneDuplikatySklepu:kanoniczne};
-  zapiszLS("artway_produkty_dodane",produktyDodane);zapiszLS("artway_kosz_dodane",koszDodanych);zapiszLS("artway_produkty_definitywne",produktyDefinitywne);zapiszLS("artway_produkty_ukryte",produktyUkryte);zapiszLS("artway_produkty_edytowane",produktyEdytowane);zapiszLS("artway_stany",stanyProduktow);zapiszLS("artway_dostepnosc",dostepnoscProduktow);zapiszLS("artway_magazyn_produkty",magazynProdukty);zapiszLS("artway_kosz_meta",koszMeta);zapiszLS("artway_ustawienia",ustawienia);
+  zapiszLS("artway_produkty_dodane",produktyDodane);zapiszLS("artway_kosz_dodane",koszDodanych);zapiszLS("artway_produkty_definitywne",produktyDefinitywne);zapiszLS("artway_produkty_ukryte",produktyUkryte);zapiszLS("artway_produkty_edytowane",produktyEdytowane);zapiszLS("artway_stany",stanyProduktow);zapiszLS("artway_dostepnosc",dostepnoscProduktow);zapiszLS("artway_magazyn_produkty",magazynProdukty);zapiszLS("artway_kosz_meta",koszMeta);zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});void chmuraDodajMutacjePolUstawien({mapaProduktow:ustawienia.mapaProduktow||{},kanoniczneDuplikatySklepu:ustawienia.kanoniczneDuplikatySklepu||{}});
   zbudujProdukty();odswiezMenu();zapiszHistorieAgenta("katalog",`Trwale usunięto ${usun.length} powtarzające się rekordy; pozostawiono ${grupa.canonical.nazwa}`,{keepId:grupa.canonical.id,deletedIds:[...ids],groupKey});
   if(chmuraToken)await chmuraZapiszUstawienia({flush:true});
   toast(`✅ Pozostawiono 1 kartę i trwale usunięto ${usun.length} kopii`);renderuj();
@@ -4624,12 +4702,26 @@ function widokAdminSEO(sekcja="pulpit"){
   if(tab==="historia")return seoSzkielet(tab,`${head}<div class="panel"><h2>🧾 Historia pracy</h2><div class="seo-table-wrap"><table class="log-table"><tr><th>Data</th><th>Źródło</th><th>Produkty</th><th>IndexNow</th><th>Kanały</th><th>Szczegóły</th></tr>${(seoHistoria||[]).map(h=>`<tr><td>${esc(allegroDataTxt(h.at))}</td><td>${esc(h.source||h.type||"automat")}</td><td><b>${esc(h.count||0)}</b></td><td>${h.promotion?.status==="accepted"?"✅":"•"} ${esc(Math.max(0,(Number(h.promotion?.count)||0)-1))}</td><td>${h.channels?`✅ ${Object.values(h.channels).filter(Boolean).length}`:"starszy zapis"}</td><td>${esc((h.products||[]).slice(0,8).map(x=>x.name||x.id).join(", "))}</td></tr>`).join("")||`<tr><td colspan="6">Plan nie był jeszcze uruchamiany.</td></tr>`}</table></div></div>`);
   return seoSzkielet("ustawienia",`${head}<div class="panel"><form onsubmit="zapiszSeoUstawienia(event)"><div class="order-section-head"><div><h2>⚙️ Ustawienia automatu i audytów</h2><p class="order-detail-lead">Każdy produkt jest objęty pozycjonowaniem od razu. Limit 1–50 określa liczbę kart codziennie kontrolowanych, poprawianych i zgłaszanych bezpłatnym kanałom.</p></div><button class="btn" type="submit">💾 Zapisz</button></div><div class="seo-settings-grid"><label class="check"><input type="checkbox" checked disabled> Każdy aktywny produkt automatycznie wszędzie — zawsze aktywne</label><label class="check"><input type="checkbox" name="enabled" ${seoUstawienia.enabled?"checked":""}> Automatyczne audyty aktywne</label><label class="check"><input type="checkbox" name="autoFillMissing" ${seoUstawienia.autoFillMissing!==false?"checked":""}> Uzupełniaj bezpieczne metadane</label><label class="check"><input type="checkbox" name="preferBestsellers" ${seoUstawienia.preferBestsellers!==false?"checked":""}> Najpierw produkty z dodatkowym priorytetem i bestsellery</label><label class="check"><input type="checkbox" name="indexNowEnabled" ${seoUstawienia.indexNowEnabled!==false?"checked":""}> Zgłaszaj poprawione produkty bezpłatnie przez IndexNow</label><label>Dzienny limit automatycznej partii<input name="dailyLimit" type="number" min="1" max="50" value="${esc(limit)}"><span class="seo-limit-presets"><button type="button" onclick="seoUstawLimit(10)">10</button><button type="button" onclick="seoUstawLimit(20)">20</button><button type="button" onclick="seoUstawLimit(50)">50</button></span></label></div><h3>Stan bezpłatnych kanałów</h3><div class="seo-settings-grid"><label class="check"><input type="checkbox" name="searchConsoleReady" ${seoUstawienia.searchConsoleReady?"checked":""}> Search Console skonfigurowane</label><label class="check"><input type="checkbox" name="merchantCenterReady" ${seoUstawienia.merchantCenterReady?"checked":""}> Merchant Center / bezpłatne informacje skonfigurowane</label><label class="check"><input type="checkbox" checked disabled> allsklep.pl podpięty jako adres marketingowy 301</label></div><div class="backend-note"><b>Wyłącznie darmowe rozwiązania.</b> Wszystkie aktywne produkty automatycznie otrzymują tytuł, opis i frazy oraz trafiają do mapy strony, feedu Google, danych Product/Offer i zgłoszeń IndexNow. Drugi adres prowadzi do tej samej domeny kanonicznej, więc nie tworzy duplikatów SEO. Moduł nie uruchamia reklam i nie wymaga płatnego API. Ostatni audyt: ${seoUstawienia.lastRunAt?esc(allegroDataTxt(seoUstawienia.lastRunAt)):"jeszcze nie było"}.</div></form></div>`);
 }
-function zapiszCzescUstawien(obj){
-  ustawienia = {...ustawienia, ...obj};
-  zapiszLS("artway_ustawienia", ustawienia);
+async function zapiszCzescUstawien(obj){
+  const zmiany={},usunKlucze=[],next={...ustawienia};
+  for(const [key,value] of Object.entries(obj||{})){
+    if(value===undefined){delete next[key];usunKlucze.push(key);}
+    else{next[key]=value;zmiany[key]=value;}
+  }
+  ustawienia = next;
+  zapiszLS("artway_ustawienia", ustawienia,{synchronizuj:false});
   zastosujUstawienia(); zbudujProdukty(); odswiezMenu(); odswiezKoszyk();
-  loguj("info","Zapisano ustawienia sklepu");
-  toast("Zapisane ✅"); renderuj();
+  loguj("info","Zabezpieczono zmianę ustawień w trwałej kolejce");
+  toast("Zapisywanie na serwerze…"); renderuj();
+  const zapisane=await chmuraDodajMutacjePolUstawien(zmiany,usunKlucze);
+  if(zapisane){
+    loguj("info",`Serwer potwierdził zapis pól ustawień: ${[...Object.keys(zmiany),...usunKlucze].join(", ")}`);
+    toast("Zapisane na serwerze i aktywne wszędzie ✅");
+  }else{
+    loguj("ostrzezenie","Zmiana ustawień oczekuje w trwałej kolejce na potwierdzenie serwera");
+    toast("⚠️ Zmiana jest zabezpieczona i oczekuje na potwierdzenie serwera");
+  }
+  return zapisane;
 }
 
 /* Anonimowy pomiar efektów SEO. Zapisuje wyłącznie dzienne sumy kanałów, domen wejścia i konwersji. */
