@@ -5,6 +5,7 @@ import { createCatalogProductUpdater } from '../src/backend/lib/domain/catalog-p
 import { mergeCatalogProducts } from '../src/backend/lib/domain/catalog-quality.mjs';
 import {
   automaticEditorialAssessment,
+  normalizeChannelEditorialResult,
   normalizeProductContentEditorialResult,
   productPatch,
 } from '../src/backend/lib/domain/agent-specialists-support.mjs';
@@ -54,7 +55,7 @@ for (const run of newest.values()) {
   if (!row) { rejected.push({ runId: run.id, reason: 'product_not_found' }); continue; }
   const normalized = run.specialist === 'product_content'
     ? { ...run, result: normalizeProductContentEditorialResult(run.result || {}) }
-    : run;
+    : { ...run, result: normalizeChannelEditorialResult(run.result || {}, run.specialist) };
   const assessment = automaticEditorialAssessment(normalized);
   if (!assessment.eligible) {
     rejected.push({ runId: run.id, productId: row.product_id, reason: assessment.reason });

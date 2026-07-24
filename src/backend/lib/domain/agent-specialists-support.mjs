@@ -243,7 +243,9 @@ function normalizeResult(raw = {}, specialist) {
     readyForApproval: raw.readyForApproval === true && missingFacts.length === 0,
     complianceStatus: ['ready', 'needs_review', 'blocked_missing_facts'].includes(raw.complianceStatus) ? raw.complianceStatus : (missingFacts.length ? 'blocked_missing_facts' : 'needs_review'),
   };
-  return ['product_content', 'store_compliance'].includes(specialist) ? normalizeProductContentEditorialResult(result) : result;
+  if (['product_content', 'store_compliance'].includes(specialist)) return normalizeProductContentEditorialResult(result);
+  if (['allegro_offer', 'allegro_compliance', 'von_halsky_offer', 'von_halsky_compliance'].includes(specialist)) return normalizeChannelEditorialResult(result, specialist);
+  return result;
 }
 
 function normalizeProductContentEditorialResult(result = {}) {
@@ -278,6 +280,30 @@ function normalizeProductContentEditorialResult(result = {}) {
     ...normalized, editorialNotes: [...(result.warnings || []), ...(result.missingFacts || [])].slice(0, 20), missingFacts: [], warnings: [], confidence: Math.max(0.94, Number(result.confidence) || 0),
     readyForApproval: true, complianceStatus: 'ready',
   };
+}
+
+function normalizeChannelEditorialResult(result = {}, specialist = '') {
+  const channel = String(specialist).startsWith('allegro') ? 'allegro' : String(specialist).startsWith('von_halsky') ? 'vonHalsky' : '';
+  if (!channel) return result;
+  const fields = Array.isArray(result.fields) ? result.fields.map((field) => ({ ...field })) : [];
+  const present = new Set(fields.map((field) => clean(field?.key, 80)));
+  const title = clean(result.title, channel === 'allegro' ? 75 : 150);
+  const description = clean(result.content, 30_000), plain = description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const shortDescription = clean(result.summary || plain, 500);
+  const add = (key, label, value) => {
+    if (!present.has(key) && value) fields.push({ key, label, value, currentValue: '', reason: 'Uzupełniono z kompletnego wyniku redaktora kanału.', evidence: 'Treść zwrócona przez model dla wskazanego kanału.' });
+  };
+  if (title && !/(?:szkic|redakcja|opis)\s+(?:produktu|oferty)/i.test(title)) {
+    add(channel === 'allegro' ? 'allegro_title' : 'von_halsky_title', 'Tytuł kanału', title);
+  }
+  if (plain.length >= 100) {
+    if (channel === 'allegro') add('allegro_description', 'Opis Allegro', description);
+    else {
+      add('von_halsky_short_description', 'Opis krótki Von Halsky', shortDescription);
+      add('von_halsky_description', 'Opis Von Halsky', description);
+    }
+  }
+  return { ...result, fields };
 }
 
 function fingerprint(specialist, instruction, context) {
@@ -400,7 +426,7 @@ function productEditorialQuality(product = {}) {
 function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
   const channel = run.specialist === 'allegro_offer' || run.specialist === 'allegro_compliance' ? 'allegro'
     : run.specialist === 'von_halsky_offer' || run.specialist === 'von_halsky_compliance' ? 'vonHalsky' : 'store';
-  const assessedResult = channel === 'store' ? normalizeProductContentEditorialResult(run.result || {}) : (run.result || {});
+  const assessedResult = channel === 'store' ? normalizeProductContentEditorialResult(run.result || {}) : normalizeChannelEditorialResult(run.result || {}, run.specialist);
   const patch = productPatch(assessedResult), fields = Object.keys(patch);
   if (settings.autoApplyProductEditorial === false) return { eligible: false, reason: 'automatic_editorial_disabled', fields };
   if (!fields.length) return { eligible: false, reason: 'empty_patch', fields };
@@ -521,4 +547,4 @@ function communicationFacts(item = {}, type = 'thread') {
   return sanitizeContext({ type, subject: item.subject || item.topic, orderId: item.orderId || item.checkoutFormId, status: item.status, chatActive: item.chatActive, messages });
 }
 
-export { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts };
+export { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeProductContentEditorialResult, normalizeChannelEditorialResult, normalizeDecision, activeDecision, outputText, normalizeResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts };

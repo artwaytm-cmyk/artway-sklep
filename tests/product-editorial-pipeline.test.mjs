@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { linkedProductSourceMaterial, normalizeEditorialTitle, prepareLinkedProductEditorial } from '../src/backend/lib/domain/product-editorial-pipeline.mjs';
+import { automaticEditorialAssessment, normalizeChannelEditorialResult, productPatch } from '../src/backend/lib/domain/agent-specialists.mjs';
 
 const result = (id, specialist, fields) => ({
   id, specialist, model: 'gpt-5-nano',
@@ -76,4 +77,18 @@ test('awaria jednego kanału nie cofa zapisanych wyników pozostałych kanałów
 test('normalizacja awaryjna usuwa dopisek strony i porządkuje wielkie litery', () => {
   assert.equal(normalizeEditorialTitle('ORIGAMI 3D KWIATY | Sklep producenta'), 'Origami 3D Kwiaty');
   assert.equal(linkedProductSourceMaterial({ nazwa: 'Gra', opis: '<p>Opis</p>', ean: '123' }, 'https://example.test').title, 'Gra');
+});
+
+test('kompletny wynik kanału bez tablicy fields trafia do właściwych pól i nadal przechodzi kontrolę zgodności', () => {
+  const raw = {
+    title: 'Origami 3D Kwiaty Alexander',
+    summary: 'Kreatywny zestaw do wykonania przestrzennych kwiatów.',
+    content: '<h2>Przestrzenne kwiaty</h2><p>Zestaw zawiera papierowe moduły i instrukcję potrzebne do wykonania efektownej kompozycji. Zabawa rozwija dokładność, cierpliwość i wyobraźnię.</p>',
+    fields: [], confidence: 0.97, warnings: [], missingFacts: [], complianceStatus: 'ready',
+  };
+  const normalized = normalizeChannelEditorialResult(raw, 'allegro_offer');
+  const patch = productPatch(normalized);
+  assert.equal(patch.allegroTitle, raw.title);
+  assert.equal(patch.allegroDescription, raw.content);
+  assert.equal(automaticEditorialAssessment({ specialist: 'allegro_offer', result: raw }).eligible, true);
 });

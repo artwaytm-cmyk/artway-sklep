@@ -1,4 +1,4 @@
-import { automaticEditorialAssessment, PROMPT_VERSION, productEditorialFingerprint, productPatch } from './agent-specialists.mjs';
+import { automaticEditorialAssessment, normalizeChannelEditorialResult, PROMPT_VERSION, productEditorialFingerprint, productPatch } from './agent-specialists.mjs';
 import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
 
 const clean = (value = '', limit = 30_000) => String(value ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, limit);
@@ -99,7 +99,7 @@ export async function prepareLinkedProductEditorial(product = {}, {
     runChannel('allegro_offer', 'allegro', 'Przygotuj niezależny tytuł i opis Allegro wyłącznie o tym produkcie. Bez linków, kontaktu, sprzedaży poza Allegro, płatności, dostawy i logistyki.'),
     runChannel('von_halsky_offer', 'vonHalsky', 'Przygotuj niezależną nazwę, opis krótki i opis pełny Von Halsky. Nazwa 7–150 znaków, opis minimum 100 znaków. Bez linków, obrazów w treści, kontaktu, płatności i logistyki.'),
   ]);
-  const allegroPatch = productPatch(allegroRun?.result || {}), vonHalskyPatch = productPatch(vonHalskyRun?.result || {});
+  const allegroPatch = productPatch(normalizeChannelEditorialResult(allegroRun?.result || {}, 'allegro_offer')), vonHalskyPatch = productPatch(normalizeChannelEditorialResult(vonHalskyRun?.result || {}, 'von_halsky_offer'));
   const allegroAssessment = allegroRun ? automaticEditorialAssessment(allegroRun) : { eligible: false, reason: 'agent_unavailable' };
   const vonHalskyAssessment = vonHalskyRun ? automaticEditorialAssessment(vonHalskyRun) : { eligible: false, reason: 'agent_unavailable' };
   if (storeRun && !storeAssessment.eligible) warnings.push(`Sklep: ${storeAssessment.reason}`);
