@@ -15,7 +15,7 @@ test('wyszukiwanie katalogu Allegro działa wyłącznie po poprawnym GTIN', () =
 test('publikacja ma serwerową blokadę niepotwierdzonego UUID katalogu', () => {
   assert.match(backend, /async function allegroZweryfikujTozsamoscPublikacji/);
   assert.match(backend, /code: 'allegro_identity_unverified'/);
-  assert.match(backend, /const identityCheck = await allegroZweryfikujTozsamoscPublikacji/);
+  assert.match(backend, /(?:const|let) identityCheck = await allegroZweryfikujTozsamoscPublikacji/);
   assert.match(backend, /if \(!identityCheck\.ok\)/);
 });
 

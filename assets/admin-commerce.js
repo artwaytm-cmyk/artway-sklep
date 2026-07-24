@@ -1036,7 +1036,7 @@ async function allegroWystawProdukt(id){
       zapiszLS("artway_produkty_edytowane",produktyEdytowane);
       allegroZastosujWynikWystawienia(produktGotowy,d);
       await allegroPobierzProwizjeProduktu(id,null,{silent:true}).catch(()=>null);
-      zapiszPolaProduktuLokalnie(id,{allegroAgentPreparationStatus:remoteStatus==="ACTIVE"?"published":"draft",allegroAgentPublishedAt:remoteStatus==="ACTIVE"?new Date().toISOString():"",allegroOfferId:String(d.offer.id)},false);
+      zapiszPolaProduktuLokalnie(id,{allegroAgentPreparationStatus:remoteStatus==="ACTIVE"?"published":"draft",allegroAgentPublishedAt:remoteStatus==="ACTIVE"?new Date().toISOString():"",allegroOfferId:String(d.offer.id),allegroAgentPublicationError:"",...(d.catalogRecovery?.applied?{allegroCatalogAutoRepairedAt:new Date().toISOString()}: {})},false);
       const cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);
       await allegroWczytajDane(true).catch(()=>{});
       zbudujProdukty();

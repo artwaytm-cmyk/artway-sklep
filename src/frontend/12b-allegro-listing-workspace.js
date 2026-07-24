@@ -82,6 +82,7 @@ function allegroPublikacjaTrybProduktu(p={},offer=null){
 }
 function allegroPublikacjaOcena(p={},offer=null,missing=[]){
   if(missing.length)return {code:"missing",label:"Wymaga uzupełnienia",detail:missing.join(", "),score:Math.max(8,Math.round((7-Math.min(7,missing.length))/7*100))};
+  if(p.allegroAgentPublicationError)return {code:"verify",label:"Kompletne lokalnie • ponowna kontrola API",detail:"Poprzednią próbę odrzucił katalog Allegro; przy kolejnym wystawieniu system spróbuje bezpiecznej korekty i ponowi operację.",score:90};
   const differences=offer?allegroRozniceOfertyProduktu(p,offer):[];
   if(!offer)return {code:"ready",label:"Gotowy do wystawienia",detail:"komplet danych • brak oferty",score:100};
   if(String(offer.status||"").toUpperCase()!=="ACTIVE")return {code:"draft",label:"Gotowy do aktywacji",detail:`oferta ${offer.id} • ${offer.status||"nieaktywna"}`,score:100};

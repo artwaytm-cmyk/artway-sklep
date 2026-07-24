@@ -116,6 +116,7 @@ import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, ma
 import { allegroMappingIsCanonical, allegroProductSyncFingerprint, canonicalizeAllegroMappings, linkCanonicalAllegroMapping, markAllegroMappingSynced } from './domain/allegro-canonical-mappings.mjs';
 import { allegroMappingRecordsEqual, createAllegroMappingStore } from './domain/allegro-mapping-store.mjs';
 import { allegroOfferVerification, allegroPatchZDraftu } from './domain/allegro-offer-patch.mjs';
+import { executeAllegroOfferWriteWithRecovery } from './domain/allegro-publication-recovery.mjs';
 import { allegroResponsibleProducerDirectory, allegroSyncEditorialOffer } from './domain/allegro-gpsr.mjs';
 import { allegroNextScheduledSyncAt, allegroScheduledSyncDue, normalizeAllegroSyncSettings } from './domain/allegro-sync-policy.mjs';
 import { createCatalogProductUpdater as allegroAktualizatorProduktowCentralnych } from './domain/catalog-product-updater.mjs';
@@ -1674,10 +1675,24 @@ function allegroOcenaTozsamosciKatalogu(product = {}, candidate = {}) {
             : 'zgodny GTIN oraz zgodne cechy produktu',
   };
 }
+function allegroNormalizujProduktKatalogu(product = {}, raw = {}) {
+  const candidate = {
+    id: tekst(raw.id, 120), name: tekst(raw.name, 300), categoryId: tekst(raw.category?.id || raw.categoryId || '', 80),
+    eans: Array.isArray(raw.eans) ? raw.eans.map((x) => tekst(x, 80)) : [], images: allegroZdjecia(raw),
+    parameters: Array.isArray(raw.parameters) ? raw.parameters.slice(0, 120) : [], descriptionText: allegroOpisTekst(raw.description),
+    brand: allegroWartoscParametru(raw, ['producent', 'marka', 'brand']), trustedContent: raw.trustedContent || null, productSafety: raw.productSafety || null,
+    matchScore: Number(allegroPodobienstwoNazw(product.nazwa || product.name, raw.name).toFixed(3)),
+  };
+  return { ...candidate, identity: allegroOcenaTozsamosciKatalogu(product, candidate) };
+}
+async function allegroPobierzProduktKataloguPoId(req, product = {}, productId = '') {
+  const id = tekst(productId, 160).trim();
+  if (!id) return null;
+  return allegroNormalizujProduktKatalogu(product, await allegroWywolaj(req, `/sale/products/${encodeURIComponent(id)}`));
+}
 async function allegroZnajdzProduktKatalogu(req, product = {}) {
   const gtinRaw = tekst(product.gtin || product.ean || '', 80).trim();
   const gtin = canonicalGtin(gtinRaw);
-  const name = tekst(product.nazwa || product.name || '', 180).trim();
   if (!gtinRaw) return { selected: null, products: [], searchedBy: '', blockedReason: 'Brak EAN/GTIN — automat nie szuka ani nie podpina produktu katalogowego po nazwie.' };
   if (!gtin) return { selected: null, products: [], searchedBy: 'GTIN', blockedReason: 'EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną.' };
   try {
@@ -1685,39 +1700,14 @@ async function allegroZnajdzProduktKatalogu(req, product = {}) {
     const parameters = { phrase: gtinRaw.replace(/\D/g, ''), mode: 'GTIN', language: 'pl-PL' };
     const raw = await allegroWywolaj(req, '/sale/products', { parameters });
     const source = Array.isArray(raw.products) ? raw.products : (Array.isArray(raw.items) ? raw.items : []);
-    const products = source.map((p) => ({
-      id: tekst(p.id, 120),
-      name: tekst(p.name, 300),
-      categoryId: tekst(p.category?.id || '', 80),
-      eans: Array.isArray(p.eans) ? p.eans.map((x) => tekst(x, 80)) : [],
-      images: allegroZdjecia(p),
-      parameters: Array.isArray(p.parameters) ? p.parameters.slice(0, 120) : [],
-      descriptionText: allegroOpisTekst(p.description),
-      brand: allegroWartoscParametru(p, ['producent', 'marka', 'brand']),
-      trustedContent: p.trustedContent || null,
-      productSafety: p.productSafety || null,
-      matchScore: Number(allegroPodobienstwoNazw(name, p.name).toFixed(3)),
-    })).filter((p) => p.id).map((p) => ({ ...p, identity: allegroOcenaTozsamosciKatalogu(product, p) }));
+    const products = source.map((item) => allegroNormalizujProduktKatalogu(product, item)).filter((item) => item.id);
     const verified = products.filter((p) => p.identity.verified).sort((a, b) => b.identity.nameScore - a.identity.nameScore);
     const ambiguous = verified.length > 1 && (verified[0].identity.nameScore - verified[1].identity.nameScore) < 0.12;
     let selected = ambiguous ? null : (verified[0] || null);
     if (selected?.id) {
       try {
-        const details = await allegroWywolaj(req, `/sale/products/${encodeURIComponent(selected.id)}`);
-        const detailed = {
-          ...selected,
-          name: tekst(details.name || selected.name, 300),
-          categoryId: tekst(details.category?.id || selected.categoryId, 80),
-          eans: Array.isArray(details.eans) ? details.eans.map((x) => tekst(x, 80)) : selected.eans,
-          images: allegroZdjecia(details).length ? allegroZdjecia(details) : selected.images,
-          parameters: Array.isArray(details.parameters) ? details.parameters.slice(0, 120) : selected.parameters,
-          descriptionText: allegroOpisTekst(details.description) || selected.descriptionText,
-          brand: allegroWartoscParametru(details, ['producent', 'marka', 'brand']) || selected.brand,
-          trustedContent: details.trustedContent || selected.trustedContent || null,
-          productSafety: details.productSafety || selected.productSafety || null,
-        };
-        detailed.identity = allegroOcenaTozsamosciKatalogu(product, detailed);
-        selected = detailed.identity.verified ? detailed : null;
+        const detailed = await allegroPobierzProduktKataloguPoId(req, product, selected.id);
+        selected = detailed?.identity?.verified ? detailed : null;
       } catch {}
     }
     return {
@@ -1982,10 +1972,11 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     if (categorySuggestion?.selected?.id) options.categoryId = categorySuggestion.selected.id;
   }
   const categoryId = tekst(options.categoryId || product.allegroCategoryId || product.categoryId || '', 80).trim();
-  const [salesConditions, catalogMatch] = await Promise.all([
+  const [salesConditions, catalogLookup] = await Promise.all([
     allegroWarunkiSprzedazy(req),
     allegroZnajdzProduktKatalogu(req, product),
   ]);
+  const catalogMatch = options.catalogMatchOverride?.selected ? options.catalogMatchOverride : catalogLookup;
   // Edycja treści istniejącej oferty nie może podmieniać jej tożsamości
   // katalogowej. Zachowanie aktualnego produktu i kategorii zapobiega
   // konfliktom kategorii, a przekazanie jego ID pozwala Allegro uzupełnić GPSR.
@@ -2090,7 +2081,8 @@ function allegroDraftZProduktu(product = {}, opt = {}) {
     String(param?.id || ''),
     param?.options?.describesProduct,
   ]));
-  const customParameters = Array.isArray(p.allegroParameters) ? p.allegroParameters : [];
+  const customParameters = (Array.isArray(p.allegroParameters) ? p.allegroParameters : [])
+    .filter((param) => !categoryParameterTypes.size || categoryParameterTypes.has(String(param?.id || '')));
   const mergedParameters = allegroScalParametryBezDuplikatow(autoParameters, customParameters);
   const offerParameters = mergedParameters.filter((param) => categoryParameterTypes.get(String(param?.id || '')) === false);
   const productParameters = mergedParameters.filter((param) => categoryParameterTypes.get(String(param?.id || '')) !== false);
@@ -3590,31 +3582,21 @@ export default async (req) => {
         mappedExisting = { offer: exactOffer, score: 100, reason: 'ręczna decyzja administratora' };
       }
       let categorySuggestion = null;
-      let prepared = null;
-      let draft = body.draft && typeof body.draft === 'object' ? body.draft : null;
-      if (draft) draft = { ...draft, stock: { available: offerSettings.defaultStock }, publication: { ...(draft.publication || {}), republish: true } };
-      if (!draft) {
-        prepared = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
-        if (mappedExisting) prepared.existingOffer = mappedExisting;
-        categorySuggestion = prepared.categorySuggestion;
-        const agentTask = prepared.missing.length ? await allegroZapiszZadanieAgentaOferty(body.product || {}, { missing: prepared.missing, prepared, draft: prepared.payload }) : null;
-        if (prepared.missing.length && !prepared.existingOffer) {
-          return odpowiedz({ ok: false, error: `Szkic wymaga uzupełnienia: ${prepared.missing.join(', ')}`, missing: prepared.missing, draft: prepared.payload, categorySuggestion, salesConditions: prepared.salesConditions, categoryParameters: prepared.categoryParameters, requiredParameters: prepared.requiredParameters, catalogMatch: prepared.catalogMatch, autoFilled: prepared.autoFilled, supportErrors: prepared.supportErrors, agentDecision: prepared.agentDecision, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, agentTask }, 422);
-        }
-        draft = prepared.payload;
+      let prepared = await allegroDraftZAutoKategoria(req, body.product || {}, body.options || {});
+      if (mappedExisting) prepared.existingOffer = mappedExisting;
+      categorySuggestion = prepared.categorySuggestion;
+      let draft = prepared.payload;
+      const agentTask = prepared.missing.length ? await allegroZapiszZadanieAgentaOferty(body.product || {}, { missing: prepared.missing, prepared, draft }) : null;
+      if (prepared.missing.length && !prepared.existingOffer) {
+        return odpowiedz({ ok: false, error: `Szkic wymaga uzupełnienia: ${prepared.missing.join(', ')}`, missing: prepared.missing, draft, categorySuggestion, salesConditions: prepared.salesConditions, categoryParameters: prepared.categoryParameters, requiredParameters: prepared.requiredParameters, catalogMatch: prepared.catalogMatch, autoFilled: prepared.autoFilled, supportErrors: prepared.supportErrors, agentDecision: prepared.agentDecision, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, agentTask }, 422);
       }
-      if (!prepared) {
-        const offersRec = await czytaj('allegro_offers', { items: [] });
-        const mappingsRec = await czytaj('allegro_mappings', { items: {} });
-        prepared = { existingOffer: mappedExisting || allegroDopasowanieOferty(body.product || {}, offersRec, mappingsRec) };
-      }
-      const existing = prepared.existingOffer;
-      const complianceGate = allegroEnforceDraft(draft || {});
+      let existing = prepared.existingOffer;
+      let complianceGate = allegroEnforceDraft(draft || {});
       draft = complianceGate.draft;
       if (!complianceGate.compliance.ok) {
         return odpowiedz({ ok: false, error: 'Publikacja została zablokowana: opis nadal zawiera treść niezgodną z zasadami Allegro.', code: 'allegro_compliance_block', compliance: complianceGate.compliance, draft }, 422);
       }
-      const identityCheck = await allegroZweryfikujTozsamoscPublikacji(req, body.product || {}, draft, prepared, { manualOffer: !!mappedExisting });
+      let identityCheck = await allegroZweryfikujTozsamoscPublikacji(req, body.product || {}, draft, prepared, { manualOffer: !!mappedExisting });
       if (!identityCheck.ok) {
         const agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, {
           missing: ['jednoznaczna tożsamość produktu Allegro'],
@@ -3626,17 +3608,29 @@ export default async (req) => {
       }
       const receiptStart = await allegroOperationReceipts.begin(approvalHandle, { action: approval?.action || body.options?.publicationAction || 'keep', approvedBy: (requestSession(req) || {})?.email || 'administrator' });
       if (receiptStart.kind === 'duplicate') return odpowiedz(receiptStart.response, receiptStart.httpStatus);
-      let result, responseMeta = null, operationCheck = { completed: true, checks: 0 };
+      let result, responseMeta = null, operationCheck = { completed: true, checks: 0 }, catalogRecovery = null;
       try {
-        if (existing?.offer?.id) {
-          const patch = allegroPatchZDraftu(draft, body.options || {});
-          responseMeta = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(existing.offer.id)}`, { method: 'PATCH', bodyObj: patch, withMeta: true });
-        } else {
-          responseMeta = await allegroWywolaj(req, '/sale/product-offers', { method: 'POST', bodyObj: draft, withMeta: true });
-        }
-        result = responseMeta?.data || {};
-        operationCheck = await allegroCzekajNaOperacjeOferty(req, responseMeta?.location || '');
-        if (operationCheck.result?.id) result = operationCheck.result;
+        const execution = await executeAllegroOfferWriteWithRecovery({
+          draft, prepared, existing,
+          send: async (outgoing, found) => {
+            const meta = found?.offer?.id
+              ? await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(found.offer.id)}`, { method: 'PATCH', bodyObj: allegroPatchZDraftu(outgoing, body.options || {}), withMeta: true })
+              : await allegroWywolaj(req, '/sale/product-offers', { method: 'POST', bodyObj: outgoing, withMeta: true });
+            const check = await allegroCzekajNaOperacjeOferty(req, meta?.location || '');
+            return { responseMeta: meta, operationCheck: check, result: check.result?.id ? check.result : (meta?.data || {}) };
+          },
+          loadCatalog: (productId) => allegroPobierzProduktKataloguPoId(req, body.product || {}, productId),
+          prepareRecovery: async ({ hint, catalog, decision }) => {
+            const rejected = new Set(hint.parameterIds || []), recoveryProduct = { ...(body.product || {}), allegroCategoryId: decision.categoryId, ...(rejected.size ? { allegroParameters: (body.product?.allegroParameters || []).filter((param) => !rejected.has(String(param?.id || ''))) } : {}) };
+            const next = await allegroDraftZAutoKategoria(req, recoveryProduct, { ...(body.options || {}), categoryId: decision.categoryId, ...(catalog ? { catalogProductId: decision.productId, catalogIdentityVerified: true, catalogMatchOverride: { selected: catalog, searchedBy: 'metadata błędu Allegro' } } : {}) });
+            const gate = allegroEnforceDraft(next.payload || {}), check = await allegroZweryfikujTozsamoscPublikacji(req, body.product || {}, gate.draft, next);
+            return { draft: gate.draft, prepared: next, existing: next.existingOffer, identityCheck: check, ready: !next.missing.length && gate.compliance.ok && check.ok, missing: [...next.missing, ...(check.ok ? [] : [check.reason])] };
+          },
+        });
+        ({ result, responseMeta, operationCheck, prepared, draft, existing, catalogRecovery } = execution);
+        if (execution.identityCheck) identityCheck = execution.identityCheck;
+        complianceGate = allegroEnforceDraft(draft);
+        categorySuggestion = prepared.categorySuggestion;
       } catch (e) {
         e.draft = draft;
         e.categorySuggestion = categorySuggestion;
@@ -3684,7 +3678,7 @@ export default async (req) => {
           await allegroZapiszPowiazanieProduktu(body.product || {}, { offerId, prepared, draft });
         }
       }
-      const responseBody = { ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, identityCheck, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, verification: allegroOfferVerification(result, !!verifiedOffer), agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { id: approvalOperationId, status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion };
+      const responseBody = { ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, identityCheck, catalogRecovery, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, verification: allegroOfferVerification(result, !!verifiedOffer), agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { id: approvalOperationId, status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion };
       await allegroOperationReceipts.complete(approvalHandle, { offerId, httpStatus: existing ? 200 : 201, response: responseBody });
       return odpowiedz(responseBody, existing ? 200 : 201);
     }
@@ -3791,6 +3785,7 @@ export default async (req) => {
     if (e?.categoryParameters) body.categoryParameters = e.categoryParameters;
     if (e?.requiredParameters) body.requiredParameters = e.requiredParameters;
     if (e?.catalogMatch) body.catalogMatch = e.catalogMatch;
+    if (e?.catalogRecovery) body.catalogRecovery = e.catalogRecovery;
     if (e?.supportErrors) body.supportErrors = e.supportErrors;
     if (e?.agentTask) body.agentTask = e.agentTask;
     if (e?.linkDiagnostics) body.linkDiagnostics = e.linkDiagnostics;

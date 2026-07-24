@@ -2,7 +2,7 @@ function plain(value = '', limit = 500) {
   return String(value ?? '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/[\u0000-\u001f\u007f]+/g, ' ')
-    .replace(/[–—|•]+/g, ' ')
+    .replace(/[‐‑‒–—―−|•]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, limit)

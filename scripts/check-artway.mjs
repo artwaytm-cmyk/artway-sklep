@@ -795,7 +795,7 @@ if (!store.includes('productLinkPackagePreparer(req, target, options)') || !prod
 if (!productEditorial.includes("sourceRole: 'facts_only'") || !productEditorial.includes("targets: { store: true, vonHalsky: true, allegro: true }") || !productEditorial.includes("layoutPolicy: 'independent_channel_versions'") || !productEditorial.includes('channelStates')) {
   fail('redakcja z linku musi używać źródła wyłącznie jako faktów oraz utrzymywać niezależne treści i stany sklepu, Von Halsky i Allegro');
 }
-if (!store.includes("method: 'PATCH', bodyObj: patch, withMeta: true") || !store.includes("'/pricing/offer-fee-preview'") || !store.includes('allegroDescriptionSections = sections')) {
+if ((!store.includes("method: 'PATCH', bodyObj: patch, withMeta: true") && !store.includes('writePatch: (bodyObj) => allegroWywolaj')) || !store.includes("'/pricing/offer-fee-preview'") || !store.includes('allegroDescriptionSections = sections')) {
   fail('store-app.mjs: automatyczna konserwacja musi aktualizować ofertę, opisy i kalkulację opłat');
 }
 requireMarkers('src/backend/lib/allegro-compliance.mjs', allegroCompliance, [

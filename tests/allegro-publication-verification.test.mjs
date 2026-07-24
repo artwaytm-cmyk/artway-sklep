@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { allegroOfferVerification, allegroPatchZDraftu } from '../src/backend/lib/domain/allegro-offer-patch.mjs';
+import { allegroOfferTitle } from '../src/backend/lib/domain/allegro-offer-content.mjs';
 
 test('edytor domyślnie aktywuje nową lub nieaktywną ofertę, a aktywnej nie wyłącza', async () => {
   const source = await readFile('assets/admin.js', 'utf8');
@@ -65,4 +66,10 @@ test('backend po zapisie ponownie odczytuje ofertę i zwraca zweryfikowany statu
 test('panel nie oznacza szkicu jako opublikowanej oferty', async () => {
   const source = await readFile('assets/admin.js', 'utf8');
   assert.match(source, /allegroAgentPreparationStatus:remoteStatus==="ACTIVE"\?"published":"draft"/);
+});
+
+test('tytuł Allegro automatycznie usuwa niedozwolone warianty myślnika przed wysłaniem', () => {
+  const title = allegroOfferTitle({ nazwa: 'ORIGAMI 3D ‑ ZESTAW OWOCÓW', producent: 'Alexander' });
+  assert.equal(title.includes('‑'), false);
+  assert.equal(title.split(/\s+/).length >= 3, true);
 });
