@@ -1,4 +1,4 @@
-const VERSION = '2026-07-23.3';
+const VERSION = '2026-07-24.1';
 const scenario = (id) => ({ id, version: VERSION });
 
 export const SPECIALISTS = Object.freeze({
@@ -28,6 +28,12 @@ export const SPECIALISTS = Object.freeze({
     description: 'Naprawia wyłącznie treść Allegro odrzuconą przez deterministyczną bramkę.',
     fields: ['allegro_title', 'allegro_description'], scenario: scenario('allegro-compliance-review'),
     rules: 'Usuń całe zakazane zdania, w tym kontakt, płatność, dostawę i logistykę. Zachowaj fakty i bezpieczny HTML. Nie zmieniaj sklepu ani Von Halsky.',
+  },
+  allegro_publication: {
+    assistantId: '', icon: '🚀', label: 'Operator publikacji Allegro', area: 'Allegro • wystawianie i naprawa API',
+    description: 'Analizuje zapisany raport API konkretnego produktu, klasyfikuje przyczynę i wskazuje wyłącznie bezpieczne korekty do ponowienia.',
+    fields: ['error_class', 'root_cause', 'safe_corrections', 'retry_plan', 'requires_admin_decision'], scenario: scenario('allegro-publication-repair'),
+    rules: 'EAN/GTIN, kategoria i parametry pochodzą wyłącznie z kartoteki oraz odpowiedzi API. Nie zgaduj UUID katalogu, kategorii, parametrów, marki ani wartości. Publikacja pozostaje chroniona istniejącym zatwierdzeniem administratora.',
   },
   von_halsky_offer: {
     assistantId: '', icon: '🐕', label: 'Redaktor Von Halsky', area: 'InPost Von Halsky',

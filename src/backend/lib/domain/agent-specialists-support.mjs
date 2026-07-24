@@ -29,7 +29,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-23.3';
+const PROMPT_VERSION = '2026-07-24.1';
 const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription', von_halsky_title: 'vonHalskyTitle', von_halsky_short_description: 'vonHalskyShortDescription', von_halsky_description: 'vonHalskyDescription' });
 
 const RESULT_SCHEMA = Object.freeze({

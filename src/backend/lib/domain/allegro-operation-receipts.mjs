@@ -114,17 +114,69 @@ export function createAllegroTokenRequester({ configure, errorText, fetchImpl = 
   };
 }
 
-export function createAllegroOperationReceipts({ read, write, text = safeText, now = () => new Date() } = {}) {
-  if (typeof read !== 'function' || typeof write !== 'function') throw new Error('Rejestr operacji Allegro wymaga repozytorium.');
+export function createAllegroOperationReceipts({
+  read, write, readVersioned, writeIfVersion, text = safeText, now = () => new Date(),
+} = {}) {
+  const versioned = typeof readVersioned === 'function' && typeof writeIfVersion === 'function';
+  if (!versioned && (typeof read !== 'function' || typeof write !== 'function')) throw new Error('Rejestr operacji Allegro wymaga repozytorium.');
   const timestamp = () => now().toISOString();
-  const load = () => read(STORE_KEY, { items: {}, updated_at: null });
+  const fallback = { items: {}, updated_at: null };
+  const load = () => versioned ? readVersioned(STORE_KEY, fallback).then((entry) => entry.value) : read(STORE_KEY, fallback);
   const saveReceipt = async (operationId, transform) => {
-    const record = await load();
-    const items = { ...(record?.items || {}) };
-    items[operationId] = transform(items[operationId] || {});
-    const updated_at = timestamp();
-    await write(STORE_KEY, { ...record, items, updated_at });
-    return items[operationId];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const version = versioned ? await readVersioned(STORE_KEY, fallback) : null;
+      const record = versioned ? version.value : await load();
+      const items = { ...(record?.items || {}) };
+      items[operationId] = transform(items[operationId] || {});
+      const updated_at = timestamp(), next = { ...record, items, updated_at };
+      if (!versioned) {
+        await write(STORE_KEY, next);
+        return items[operationId];
+      }
+      const result = await writeIfVersion(STORE_KEY, next, version);
+      if (result?.modified) return items[operationId];
+    }
+    throw operationError('Rejestr prób Allegro zmienił się równocześnie. Bezpieczny zapis raportu nie powiódł się.', 'allegro_receipt_write_conflict');
+  };
+  const errorRows = (error) => (Array.isArray(error?.allegro?.errors) ? error.allegro.errors : []).slice(0, 20).map((item) => ({
+    code: text(item?.code || '', 120),
+    message: text(item?.userMessage || item?.message || '', 700),
+    path: text(item?.path || '', 300),
+    metadata: item?.metadata && typeof item.metadata === 'object'
+      ? Object.fromEntries(Object.entries(item.metadata).slice(0, 20).map(([key, value]) => [text(key, 80), text(value, 500)]))
+      : {},
+  }));
+  const failureReport = (error, at) => {
+    const selected = error?.catalogMatch?.selected || {}, identity = selected?.identity || {};
+    return {
+      at,
+      code: text(error?.code || 'allegro_operation_failed', 120),
+      message: text(error?.message || error, 1000),
+      httpStatus: Number(error?.status) || 500,
+      errors: errorRows(error),
+      missing: (Array.isArray(error?.missing) ? error.missing : []).slice(0, 30).map((item) => text(item, 250)).filter(Boolean),
+      requiredParameters: (Array.isArray(error?.requiredParameters) ? error.requiredParameters : []).slice(0, 50).map((item) => ({
+        id: text(item?.id || '', 120), name: text(item?.name || '', 240), required: item?.required === true,
+      })),
+      catalog: selected?.id ? {
+        productId: text(selected.id, 160), name: text(selected.name, 300),
+        categoryId: text(selected.categoryId || selected.category?.id || '', 100),
+        identity: {
+          verified: identity.verified === true, gtinMatch: identity.gtinMatch === true,
+          nameScore: Number(identity.nameScore) || 0, brandMatch: identity.brandMatch === true,
+          brandConflict: identity.brandConflict === true, reason: text(identity.reason, 500),
+        },
+      } : null,
+      recovery: error?.catalogRecovery && typeof error.catalogRecovery === 'object' ? {
+        applied: error.catalogRecovery.applied === true,
+        kind: text(error.catalogRecovery.kind || '', 120),
+        reason: text(error.catalogRecovery.reason || '', 500),
+      } : null,
+      agentTask: error?.agentTask ? {
+        id: text(error.agentTask.id, 160), status: text(error.agentTask.status, 80),
+        specialistRunId: text(error.agentTask.specialistRunId, 160),
+      } : null,
+    };
   };
 
   function validate({ approval, productId }) {
@@ -140,40 +192,41 @@ export function createAllegroOperationReceipts({ read, write, text = safeText, n
 
   async function begin(handle, { action = 'keep', approvedBy = 'administrator' } = {}) {
     if (!handle) return { kind: 'disabled' };
-    const record = await load();
-    const existing = record?.items?.[handle.operationId];
-    if (existing?.productId && String(existing.productId) !== handle.productId) {
-      throw operationError('Identyfikator zatwierdzenia został już przypisany do innego produktu.', 'allegro_approval_reused');
-    }
-    if (existing?.status === 'completed' && existing.response) {
-      return { kind: 'duplicate', response: { ...existing.response, duplicateApproval: true, operationId: handle.operationId }, httpStatus: Number(existing.httpStatus) || 200 };
-    }
-    const updatedAt = Date.parse(existing?.updatedAt || '');
-    if (existing?.status === 'running' && Number.isFinite(updatedAt) && now().getTime() - updatedAt < RUNNING_TTL_MS) {
-      throw operationError('Ta zatwierdzona operacja Allegro jest już wykonywana. Poczekaj na wynik zamiast uruchamiać ją ponownie.', 'allegro_approval_in_progress');
-    }
     const startedAt = timestamp();
-    await saveReceipt(handle.operationId, (current) => ({
-      ...current,
-      operationId: handle.operationId,
-      productId: handle.productId,
-      action: text(action, 60),
-      status: 'running',
-      attempts: Number(current?.attempts || 0) + 1,
-      approvedAt: text(handle.approval?.approvedAt || startedAt, 40),
-      approvedBy: text(approvedBy, 120) || 'administrator',
-      startedAt,
-      completedAt: null,
-      updatedAt: startedAt,
-      lastError: '',
-      lastErrorCode: '',
-    }));
+    const receipt = await saveReceipt(handle.operationId, (current) => {
+      if (current?.productId && String(current.productId) !== handle.productId) {
+        throw operationError('Identyfikator zatwierdzenia został już przypisany do innego produktu.', 'allegro_approval_reused');
+      }
+      if (current?.status === 'completed' && current.response) return current;
+      const updatedAt = Date.parse(current?.updatedAt || '');
+      if (current?.status === 'running' && Number.isFinite(updatedAt) && now().getTime() - updatedAt < RUNNING_TTL_MS) {
+        throw operationError('Ta zatwierdzona operacja Allegro jest już wykonywana. Poczekaj na wynik zamiast uruchamiać ją ponownie.', 'allegro_approval_in_progress');
+      }
+      return {
+        ...current,
+        operationId: handle.operationId,
+        productId: handle.productId,
+        action: text(action, 60),
+        status: 'running',
+        attempts: Number(current?.attempts || 0) + 1,
+        approvedAt: text(handle.approval?.approvedAt || current?.approvedAt || startedAt, 40),
+        approvedBy: text(approvedBy, 120) || 'administrator',
+        startedAt,
+        completedAt: null,
+        updatedAt: startedAt,
+        lastError: '',
+        lastErrorCode: '',
+      };
+    });
+    if (receipt?.status === 'completed' && receipt.response) {
+      return { kind: 'duplicate', response: { ...receipt.response, duplicateApproval: true, operationId: handle.operationId }, httpStatus: Number(receipt.httpStatus) || 200 };
+    }
     return { kind: 'started', operationId: handle.operationId };
   }
 
   async function fail(handle, error) {
     if (!handle) return null;
-    const completedAt = timestamp();
+    const completedAt = timestamp(), report = failureReport(error, completedAt);
     return saveReceipt(handle.operationId, (current) => ({
       ...current,
       status: 'failed',
@@ -181,6 +234,8 @@ export function createAllegroOperationReceipts({ read, write, text = safeText, n
       updatedAt: completedAt,
       lastError: text(error?.message || error, 700),
       lastErrorCode: text(error?.code || 'allegro_operation_failed', 120),
+      failureReport: report,
+      failureHistory: [report, ...(Array.isArray(current?.failureHistory) ? current.failureHistory : [])].slice(0, 20),
     }));
   }
 

@@ -1,4 +1,4 @@
-export const SPECIALIST_PLAYBOOK_VERSION = '2026-07-23.3';
+export const SPECIALIST_PLAYBOOK_VERSION = '2026-07-24.1';
 
 const COMMON = Object.freeze({
   input: [
@@ -47,6 +47,24 @@ const PLAYBOOKS = Object.freeze({
     procedure: ['Odczytaj dokładne naruszenia.', 'Usuń całe zakazane zdania lub punkty bez zastępowania ich inną obietnicą.', 'Zachowaj fakty i dozwolony układ.', 'Zwróć pełny tytuł oraz opis do ponownej walidacji.'],
     mustNot: ['Nie osłabiaj bramki i nie ignoruj naruszenia.', 'Nie zmieniaj danych sklepu ani Von Halsky.', 'Nie wymyślaj brakującej cechy produktu.'],
     example: 'Naruszenie „dostawa” powoduje usunięcie całego zdania o wysyłce, a nie zamianę nazwy kuriera.',
+  },
+  allegro_publication: {
+    purpose: 'Techniczna diagnoza nieudanej publikacji Allegro przypisana do jednej kartoteki produktu i jednego raportu operacji.',
+    procedure: [
+      'Odczytaj kod, ścieżkę, metadane API, wymagane parametry, kategorię i wynik kontroli tożsamości.',
+      'Najpierw sklasyfikuj błąd: tożsamość katalogu, kategoria, wymagany parametr, zdjęcie, bezpieczeństwo produktu, treść, stan oferty, autoryzacja albo błąd przejściowy.',
+      'Dla CATEGORY_MISMATCH i PARAMETER_MISMATCH korzystaj wyłącznie z identyfikatorów oraz oczekiwanych wartości zwróconych przez API.',
+      'Dokładny poprawny GTIN może potwierdzić wariant nazwy katalogowej tylko wtedy, gdy nie występuje jawny konflikt producenta.',
+      'Dla TOO_SMALL_IMAGE wskaż konieczność zdjęcia z właściwej strony źródłowej produktu. Dla SAFETY_INFO_NOT_DEFINED wskaż brak danych bezpieczeństwa, bez wymyślania treści.',
+      'Zwróć plan jednej bezpiecznej ponownej próby i zaznacz, czy wymaga decyzji administratora.',
+    ],
+    mustNot: [
+      'Nie wybieraj produktu katalogowego po samej nazwie ani podobieństwie.',
+      'Nie zgaduj EAN, UUID katalogu, kategorii, parametru, marki, zdjęcia ani danych bezpieczeństwa.',
+      'Nie deklaruj, że oferta została wystawiona. Potwierdzeniem jest wyłącznie zakończony raport API z offerId.',
+      'Nie wykonuj nowej publikacji bez istniejącego zatwierdzenia administratora.',
+    ],
+    example: 'CATEGORY_MISMATCH + zgodny GTIN + brak konfliktu marki: użyj productId i categoryId z metadanych API, przebuduj szkic, ponownie zweryfikuj i dopiero wtedy ponów tę samą zatwierdzoną operację.',
   },
   von_halsky_offer: {
     purpose: 'Niezależna karta InPost Von Halsky przygotowana według publicznych wymagań kanału.',
@@ -123,4 +141,3 @@ export function specialistPlaybook(id = '') {
     'Awaria kanału: zapisz błąd wyłącznie dla bieżącego kanału. Nie cofaj i nie blokuj poprawnego wyniku innej roli.',
   ].filter(Boolean).join('\n');
 }
-

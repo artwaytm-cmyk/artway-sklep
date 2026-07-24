@@ -25,9 +25,10 @@ function openAiPayload(fields = []) {
 }
 
 test('zespół zawiera konkretne role do treści, promocji, komunikacji i nadzoru', () => {
-  assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'store_compliance', 'allegro_offer', 'allegro_compliance', 'von_halsky_offer', 'von_halsky_compliance', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality', 'operations_supervisor']);
+  assert.deepEqual(Object.keys(SPECIALISTS), ['product_content', 'store_compliance', 'allegro_offer', 'allegro_compliance', 'allegro_publication', 'von_halsky_offer', 'von_halsky_compliance', 'customer_reply', 'seo_promotion', 'campaign_copy', 'banner_copy', 'supplier_message', 'catalog_quality', 'operations_supervisor']);
   assert.match(SPECIALISTS.allegro_offer.rules, /poza Allegro/i);
   assert.match(SPECIALISTS.allegro_compliance.rules, /dostaw/i);
+  assert.match(SPECIALISTS.allegro_publication.rules, /nie zgaduj/i);
   assert.match(SPECIALISTS.von_halsky_compliance.rules, /linki/i);
   assert.match(SPECIALISTS.supplier_message.rules, /cen/i);
   assert.match(specialistPlaybook('von_halsky_offer'), /nie może zawierać linków/i);

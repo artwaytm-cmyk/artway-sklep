@@ -112,6 +112,8 @@ import { createAllegroDataReader } from './domain/allegro-data-reader.mjs';
 import { createProductSaleChannelSynchronizer } from './domain/product-sale-channel-links.mjs';
 import { allegroOfferGtinCandidates } from './domain/allegro-offer-identifiers.mjs';
 import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs';
+import { evaluateAllegroCatalogIdentitySignals } from './domain/allegro-catalog-identity.mjs';
+import { ALLEGRO_AGENT_OFFER_PROCEDURE, createAllegroPublicationAgent } from './domain/allegro-publication-agent.mjs';
 import { canonicalManufacturerName, sanitizeManufacturerFieldsInSettings } from './domain/product-field-validation.mjs';
 import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, reassessBlockedAllegroMapping, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
 import { allegroMappingIsCanonical, allegroProductSyncFingerprint, canonicalizeAllegroMappings, linkCanonicalAllegroMapping, markAllegroMappingSynced } from './domain/allegro-canonical-mappings.mjs';
@@ -313,7 +315,8 @@ const vonHalskyRoute = createVonHalskyRoute({
     });
   },
 });
-const zapiszOperacjeProduktow = createCatalogProductOperationWriter({ mutateLatest: createRevisionSafeMutator(repository, 'settings'), loadProducts: allegroAgentProduktyKompletne, createUpdater: allegroAktualizatorProduktowCentralnych });
+const mutateSettingsSafely = createRevisionSafeMutator(repository, 'settings', { maxAttempts: 8 });
+const zapiszOperacjeProduktow = createCatalogProductOperationWriter({ mutateLatest: mutateSettingsSafely, loadProducts: allegroAgentProduktyKompletne, createUpdater: allegroAktualizatorProduktowCentralnych });
 const zapiszPolaProduktuCentralnie = createCatalogProductFieldSaver({ writeOperations: zapiszOperacjeProduktow, readProduct: async (productId, savedData = null) => (await allegroAgentProduktyKompletne(savedData && typeof savedData === 'object' ? savedData : (await czytaj('settings', { data: {}, rev: 0, updated_at: null })).data || {})).get(String(productId)) || null });
 const zapiszMapowaniaBezpiecznie = createAllegroMappingStore({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getItems: allegroMapowaniaItems }).writeSafely;
 async function zwiekszLicznikKoduRabatowego(kod = '') {
@@ -335,9 +338,11 @@ const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
 const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, decisions: inventoryDecisions });
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const agentSpecialists = createAgentSpecialists({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, reportProgress: (work) => agentRuntime.report({ event: 'work_progress', source: 'openai-specialist', work }) });
+const allegroPublicationAgent = createAllegroPublicationAgent({ text: tekst, canonicalGtin, linkFromPreparation: allegroDanePowiazaniaZPrzygotowania, runSpecialist: agentSpecialists.run, mutateSettings: mutateSettingsSafely, saveProductFields: zapiszPolaProduktuCentralnie });
+function allegroZapiszZadanieAgentaOferty(product = {}, details = {}) { return allegroPublicationAgent.recordFailure(product, details); }
 const linkedProductEditorial = (product, sourceUrl, actor) => prepareLinkedProductEditorial(product, { sourceUrl, runSpecialist: agentSpecialists.run, actor });
 const productLinkPackagePreparer = createProductLinkPackagePreparer({ inspect: pobierzProduktProducentaZPamiecia, readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), offerSettings: allegroPobierzUstawieniaOfert, centralProducts: allegroAgentProduktyCentralne, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, editorialize: linkedProductEditorial, prepareOffer: allegroDraftZAutoKategoria, duplicates: produktLinkDuplikaty, shortDescription: allegroOpisKrotkiZTekstu, text: tekst, sessionOf: requestSession });
-const allegroOperationReceipts = createAllegroOperationReceipts({ read: czytaj, write: zapisz, text: tekst });
+const allegroOperationReceipts = createAllegroOperationReceipts({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, text: tekst });
 const allegroTokenRequest = createAllegroTokenRequester({ configure: allegroKonfiguracja, errorText: bledyAllegroTekst });
 const allegroAccessToken = createAllegroTokenAccess({ configure: allegroKonfiguracja, read: czytaj, write: zapisz, requestToken: allegroTokenRequest, text: tekst });
 const allegroCredentials = createAllegroCredentialManager();
@@ -1657,25 +1662,7 @@ function allegroOcenaTozsamosciKatalogu(product = {}, candidate = {}) {
   const nameScore = allegroPodobienstwoNazw(product.nazwa || product.name, candidate.name);
   const productBrand = allegroNormalizujKlucz(product.producent || product.marka || product.brand || '');
   const candidateBrand = allegroNormalizujKlucz(candidate.brand || allegroWartoscParametru(candidate, ['producent', 'marka', 'brand']));
-  const brandMatch = !!(productBrand && candidateBrand && (productBrand === candidateBrand || productBrand.includes(candidateBrand) || candidateBrand.includes(productBrand)));
-  const brandConflict = !!(productBrand && candidateBrand && !brandMatch);
-  const gtinMatch = !!(gtin && candidateGtins.includes(gtin));
-  const nameConsistent = nameScore >= 0.6 || (brandMatch && nameScore >= 0.45);
-  const verified = gtinMatch && nameConsistent && !brandConflict;
-  return {
-    verified,
-    gtinMatch,
-    nameScore: Number(nameScore.toFixed(3)),
-    brandMatch,
-    brandConflict,
-    productGtin: gtin,
-    candidateGtins,
-    reason: !gtin ? 'brak poprawnego GTIN'
-      : !gtinMatch ? 'GTIN katalogu jest inny'
-        : brandConflict ? 'producent lub marka są sprzeczne'
-          : !nameConsistent ? 'nazwa produktu katalogowego jest niezgodna'
-            : 'zgodny GTIN oraz zgodne cechy produktu',
-  };
+  return evaluateAllegroCatalogIdentitySignals({ gtin, candidateGtins, nameScore, productBrand, candidateBrand });
 }
 function allegroNormalizujProduktKatalogu(product = {}, raw = {}) {
   const candidate = {
@@ -2213,106 +2200,56 @@ function allegroDanePowiazaniaZPrzygotowania(product = {}, prepared = {}, draft 
   const producent = tekst(product.producent || product.marka || allegroWartoscParametru(katalog, ['producent', 'marka', 'brand']) || '', 160).trim();
   return { catalogProductId, categoryId, producent };
 }
-const ALLEGRO_AGENT_OFFER_PROCEDURE = [
-  'Najpierw sprawdź poprawność cyfry kontrolnej EAN/GTIN, a następnie zgodność GTIN, nazwy, producenta i parametrów.',
-  'Jeżeli oferta istnieje, połącz ją z produktem i aktualizuj zamiast tworzyć duplikat.',
-  'Nigdy nie wybieraj produktu katalogowego po samej nazwie ani samym MPN. UUID katalogu wolno zapisać tylko po dokładnej weryfikacji lub ręcznej decyzji administratora.',
-  'Jeżeli produktu nie ma EAN, przygotuj nową kartotekę z kategorią i kompletem parametrów, bez podpinania istniejącego UUID katalogowego.',
-  'Uzupełnij producenta, markę, EAN, MPN, kategorię, UUID i parametry. Zdjęcia pobieraj wyłącznie z konkretnego linku źródłowego produktu; nigdy z podobnej oferty ani katalogu Allegro.',
-  'Nową ofertę zapisz jako INACTIVE; brak stanu magazynowego oznacza 0.',
-  'Po sukcesie zapisz powiązanie produkt sklepu–produkt katalogowy–oferta i zamknij zadanie.',
-  'Jeżeli brakuje danych, nie zgaduj: zapisz dokładne braki i błąd API do jednej kolejki ponowienia.',
-];
-async function allegroZapiszZadanieAgentaOferty(product = {}, details = {}) {
-  const productId = tekst(product.id, 100).trim();
-  if (!productId) return null;
-  const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-  const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-  const tasks = Array.isArray(data.artway_agent_ai_allegro_zadania) ? [...data.artway_agent_ai_allegro_zadania] : [];
-  const missing = [...new Set((Array.isArray(details.missing) ? details.missing : []).map((x) => tekst(x, 250)).filter(Boolean))];
-  const errors = (Array.isArray(details.errors) ? details.errors : []).map((x) => ({
-    code: tekst(x?.code || '', 120), message: tekst(x?.userMessage || x?.message || x || '', 700), path: tekst(x?.path || '', 300),
-  })).filter((x) => x.message || x.code).slice(0, 20);
-  const now = new Date().toISOString();
-  const index = tasks.findIndex((x) => String(x.productId) === productId && !['wykonane', 'anulowane'].includes(String(x.status || '').toLowerCase()));
-  const previous = index >= 0 ? tasks[index] : {};
-  const link = allegroDanePowiazaniaZPrzygotowania(product, details.prepared || {}, details.draft || {});
-  const auto = details.prepared?.autoFilled || {};
-  const task = {
-    ...previous,
-    id: previous.id || `AA-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-    typ: 'allegro-oferta', status: errors.length ? 'błąd API' : 'oczekuje', productId,
-    productName: tekst(product.nazwa || product.name || `Produkt ${productId}`, 300),
-    producent: link.producent, missing, errors,
-    suggestions: {
-      allegroCategoryId: auto.allegroCategoryId || link.categoryId,
-      allegroProductId: auto.allegroProductId || link.catalogProductId,
-      producent: auto.producent || link.producent,
-      marka: auto.marka || '', gtin: auto.gtin || auto.ean || '', ean: auto.ean || auto.gtin || '',
-      kodProducenta: auto.kodProducenta || auto.mpn || '', mpn: auto.mpn || auto.kodProducenta || '',
-      zdjecie: auto.zdjecie || '', zdjecia: Array.isArray(auto.zdjecia) ? auto.zdjecia.slice(0, 15) : [],
-      allegroParameters: Array.isArray(auto.allegroParameters) ? auto.allegroParameters : [],
-    },
-    procedure: ALLEGRO_AGENT_OFFER_PROCEDURE,
-    decision: details.prepared?.agentDecision || null,
-    sourceUrl: tekst(product.sourceUrl || product.producentUrl || '', 800),
-    attempts: (Number(previous.attempts) || 0) + 1, createdAt: previous.createdAt || now, updatedAt: now,
-  };
-  if (index >= 0) tasks[index] = task; else tasks.unshift(task);
-  data.artway_agent_ai_allegro_zadania = tasks.slice(0, 500);
-  const history = Array.isArray(data.artway_agent_ai_historia) ? data.artway_agent_ai_historia : [];
-  history.unshift({ id: `AI-${Date.now().toString(36)}`, typ: 'allegro-oferta', opis: `Oferta produktu ${task.productName} wymaga pracy agenta: ${[...missing, ...errors.map((x) => x.message)].join(', ') || 'weryfikacja danych'}.`, data: now, dataTxt: new Date().toLocaleString('pl-PL'), operator: 'Agent Allegro', dane: { productId, taskId: task.id } });
-  data.artway_agent_ai_historia = history.slice(0, 500);
-  await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-  return task;
-}
 async function allegroZapiszPowiazanieProduktu(product = {}, details = {}) {
   const productId = tekst(product.id, 100).trim(), offerId = tekst(details.offerId, 100).trim();
   if (!productId || !offerId) return null;
-  const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-  const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
-  const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
   const link = allegroDanePowiazaniaZPrzygotowania(product, details.prepared || {}, details.draft || {});
   const auto = details.prepared?.autoFilled || {};
-  const previousEdit = edits[productId] || {};
   const autoPatch = {};
   for (const key of ['producent', 'marka', 'gtin', 'ean', 'kodProducenta', 'mpn', 'zdjecie']) {
     const value = auto[key];
-    if (value && !product[key] && !previousEdit[key]) autoPatch[key] = value;
+    if (value && !product[key]) autoPatch[key] = value;
   }
   if (auto.sourceEvidence?.imageSourceType === 'product_source_page' && auto.zdjecie) {
     autoPatch.zdjecie = auto.zdjecie;
     autoPatch.zdjecia = Array.isArray(auto.zdjecia) ? auto.zdjecia.slice(0, 15) : [];
     autoPatch.sourceEvidence = auto.sourceEvidence;
-  } else if (Array.isArray(auto.zdjecia) && auto.zdjecia.length && !(product.zdjecia || []).length && !(previousEdit.zdjecia || []).length) autoPatch.zdjecia = auto.zdjecia.slice(0, 15);
-  if (Array.isArray(auto.allegroParameters) && auto.allegroParameters.length && !Array.isArray(product.allegroParameters) && !Array.isArray(previousEdit.allegroParameters)) autoPatch.allegroParameters = auto.allegroParameters;
+  } else if (Array.isArray(auto.zdjecia) && auto.zdjecia.length && !(product.zdjecia || []).length) autoPatch.zdjecia = auto.zdjecia.slice(0, 15);
+  if (Array.isArray(auto.allegroParameters) && auto.allegroParameters.length && !Array.isArray(product.allegroParameters)) autoPatch.allegroParameters = auto.allegroParameters;
   const improved = details.prepared?.improvedDescriptions || {};
   if (details.prepared?.autoFilled?.allegroTitle) autoPatch.allegroTitle = tekst(details.prepared.autoFilled.allegroTitle, 75);
   if (improved.shortDescription) autoPatch.opisKrotki = tekst(improved.shortDescription, 500);
   if (improved.fullDescription) autoPatch.opis = tekst(improved.fullDescription, 20000);
   if (improved.allegroDescription) autoPatch.allegroDescription = tekst(improved.allegroDescription, 20000);
   if (Array.isArray(improved.sections) && improved.sections.length) autoPatch.allegroDescriptionSections = improved.sections;
-  if (product.allegroShippingSubsidy === undefined && previousEdit.allegroShippingSubsidy === undefined) autoPatch.allegroShippingSubsidy = 3;
-  edits[productId] = {
-    ...previousEdit, ...autoPatch, allegroOfferId: offerId,
+  if (product.allegroShippingSubsidy === undefined) autoPatch.allegroShippingSubsidy = 3;
+  const now = new Date().toISOString(), fields = {
+    ...autoPatch, allegroOfferId: offerId,
     ...(Number.isFinite(Number(details.draft?.stock?.available)) ? { allegroStock: Math.max(0, Math.floor(Number(details.draft.stock.available))) } : {}),
     ...(link.catalogProductId ? { allegroProductId: link.catalogProductId } : {}),
     ...(link.categoryId ? { allegroCategoryId: link.categoryId } : {}),
     ...(link.producent ? { producent: link.producent } : {}),
-    allegroSyncedAt: new Date().toISOString(), allegroSyncSource: 'artway-store',
+    allegroSyncedAt: now, allegroSyncSource: 'artway-store',
+    allegroPublicationAgentStatus: 'completed', allegroPublicationLastSuccessAt: now,
+    allegroPublicationLastErrorCode: '', allegroPublicationLastError: '',
+    allegroPublicationAgentTaskId: '', allegroPublicationReportId: '', allegroPublicationSpecialistRunId: '',
   };
-  data.artway_produkty_edytowane = edits;
-  const tasks = Array.isArray(data.artway_agent_ai_allegro_zadania) ? [...data.artway_agent_ai_allegro_zadania] : [];
-  const now = new Date().toISOString();
-  for (let i = 0; details.resolveTasks !== false && i < tasks.length; i++) if (String(tasks[i]?.productId) === productId && !['wykonane', 'anulowane'].includes(String(tasks[i]?.status || '').toLowerCase())) {
-    const remaining = Array.isArray(details.prepared?.missing) ? details.prepared.missing : [];
-    tasks[i] = remaining.length
-      ? { ...tasks[i], status: 'oczekuje', offerId, missing: remaining, errors: [], updatedAt: now }
-      : { ...tasks[i], status: 'wykonane', offerId, missing: [], errors: [], resolvedAt: now, updatedAt: now };
-  }
-  data.artway_agent_ai_allegro_zadania = tasks.slice(0, 500);
-  await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-  return edits[productId];
+  await zapiszPolaProduktuCentralnie({ productId, fields, mutationId: `allegro-publication-success:${productId}:${offerId}:${Date.now()}`, actor: 'allegro-api', area: 'allegro-publication' });
+  if (details.resolveTasks !== false) await mutateSettingsSafely((data) => {
+    const tasks = Array.isArray(data.artway_agent_ai_allegro_zadania) ? [...data.artway_agent_ai_allegro_zadania] : [];
+    let changed = false;
+    for (let i = 0; i < tasks.length; i++) if (String(tasks[i]?.productId) === productId && !['wykonane', 'anulowane'].includes(String(tasks[i]?.status || '').toLowerCase())) {
+      const remaining = Array.isArray(details.prepared?.missing) ? details.prepared.missing : [];
+      tasks[i] = remaining.length
+        ? { ...tasks[i], status: 'oczekuje', offerId, missing: remaining, errors: [], updatedAt: now }
+        : { ...tasks[i], status: 'wykonane', offerId, missing: [], errors: [], resolvedAt: now, updatedAt: now };
+      changed = true;
+    }
+    if (!changed) return false;
+    data.artway_agent_ai_allegro_zadania = tasks.slice(0, 500);
+    return true;
+  }, { updatedAt: now });
+  return fields;
 }
 
 const ALLEGRO_AUTO_REPLY_DEFAULT = `Dzień dobry,
@@ -3603,7 +3540,7 @@ export default async (req) => {
         const agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, {
           missing: ['jednoznaczna tożsamość produktu Allegro'],
           errors: [{ code: identityCheck.code, message: identityCheck.reason }],
-          prepared,
+          prepared, operationId: approvalOperationId,
           draft,
         });
         return odpowiedz({ ok: false, error: identityCheck.reason, code: identityCheck.code, identityCheck, draft, catalogMatch: prepared?.catalogMatch || null, agentTask }, 422);
@@ -3635,10 +3572,12 @@ export default async (req) => {
         categorySuggestion = prepared.categorySuggestion;
       } catch (e) {
         e.draft = draft;
+        e.missing = prepared?.missing || [];
         e.categorySuggestion = categorySuggestion;
         e.requiredParameters = prepared?.requiredParameters || [];
         e.catalogMatch = prepared?.catalogMatch || null;
-        e.agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, { missing: prepared?.missing || [], errors: e.allegro?.errors || [{ code: e.code, message: e.message }], prepared, draft });
+        e.catalogRecovery = e.catalogRecovery || catalogRecovery;
+        e.agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, { operationId: approvalOperationId, missing: prepared?.missing || [], errors: e.allegro?.errors || [{ code: e.code, message: e.message }], prepared, draft });
         await zapisz('allegro_offer_last_error', { at: new Date().toISOString(), productId: tekst(body.product?.id, 100), productName: tekst(body.product?.nazwa || body.product?.name, 300), message: tekst(e.message, 1000), status: e.status || 500, code: e.code || '', errors: Array.isArray(e.allegro?.errors) ? e.allegro.errors.slice(0, 20) : [], missing: prepared?.missing || [], requiredParameters: prepared?.requiredParameters || [], catalogMatch: prepared?.catalogMatch || null });
         await allegroOperationReceipts.fail(approvalHandle, e);
         throw e;
@@ -3648,7 +3587,7 @@ export default async (req) => {
       if (!offerId) {
         const e = new Error('Allegro przyjęło operację, ale nie zwróciło identyfikatora oferty. Zadanie zapisano dla Agenta AI.');
         e.status = 502; e.code = 'allegro_missing_offer_id'; e.draft = draft; e.categorySuggestion = categorySuggestion; e.catalogMatch = prepared?.catalogMatch || null;
-        e.agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, { errors: [{ code: e.code, message: e.message }], prepared, draft });
+        e.agentTask = await allegroZapiszZadanieAgentaOferty(body.product || {}, { operationId: approvalOperationId, errors: [{ code: e.code, message: e.message }], prepared, draft });
         await allegroOperationReceipts.fail(approvalHandle, e);
         throw e;
       }

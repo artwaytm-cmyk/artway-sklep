@@ -42,6 +42,43 @@ test('błąd zachowuje audyt i pozwala bezpiecznie ponowić operację', async ()
   assert.equal(receipt.approvedBy, 'administrator');
 });
 
+test('pełny raport błędu zostaje w historii operacji i wskazuje zadanie Agenta produktu', async () => {
+  const { db, service } = fixture();
+  const handle = service.validate({ approval: { approved: true, operationId: 'op-report', productId: 'P-9' }, productId: 'P-9' });
+  await service.begin(handle);
+  const error = Object.assign(new Error('Kategoria katalogu jest inna'), {
+    code: 'CATEGORY_MISMATCH',
+    status: 422,
+    missing: ['minimalny wiek dziecka'],
+    requiredParameters: [{ id: 'age', name: 'Minimalny wiek dziecka', required: true }],
+    catalogMatch: { selected: { id: 'catalog-1', name: 'Wariant katalogowy', categoryId: '6105', identity: { verified: true, gtinMatch: true, nameScore: 0.5, reason: 'zgodny GTIN' } } },
+    agentTask: { id: 'AA-1', status: 'błąd API', specialistRunId: 'gpt-1' },
+    allegro: { errors: [{ code: 'CATEGORY_MISMATCH', message: 'Błędna kategoria', path: 'category.id', metadata: { existingCategoryId: '6105' } }] },
+  });
+  await service.fail(handle, error);
+  const receipt = db.get('allegro_operation_receipts').items['op-report'];
+  assert.equal(receipt.failureReport.code, 'CATEGORY_MISMATCH');
+  assert.equal(receipt.failureReport.catalog.productId, 'catalog-1');
+  assert.equal(receipt.failureReport.agentTask.id, 'AA-1');
+  assert.equal(receipt.failureHistory.length, 1);
+});
+
+test('wersjonowany rejestr nie gubi dwóch równoległych raportów', async () => {
+  let value = { items: {}, updated_at: null }, version = 0;
+  const readVersioned = async () => ({ value: structuredClone(value), etag: String(version), exists: true });
+  const writeIfVersion = async (_key, next, expected) => {
+    await new Promise((resolve) => setImmediate(resolve));
+    if (String(expected.etag) !== String(version)) return { modified: false };
+    value = structuredClone(next); version += 1;
+    return { modified: true, etag: String(version) };
+  };
+  const service = createAllegroOperationReceipts({ readVersioned, writeIfVersion });
+  const first = service.validate({ approval: { approved: true, operationId: 'parallel-1', productId: 'P-1' }, productId: 'P-1' });
+  const second = service.validate({ approval: { approved: true, operationId: 'parallel-2', productId: 'P-2' }, productId: 'P-2' });
+  await Promise.all([service.begin(first), service.begin(second)]);
+  assert.deepEqual(Object.keys(value.items).sort(), ['parallel-1', 'parallel-2']);
+});
+
 test('równoległe uruchomienie tego samego zatwierdzenia jest blokowane', async () => {
   const { service } = fixture();
   const handle = service.validate({ approval: { approved: true, operationId: 'op-3', productId: 'P-3' }, productId: 'P-3' });

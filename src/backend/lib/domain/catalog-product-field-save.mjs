@@ -16,6 +16,12 @@ export const CATALOG_PRODUCT_PREPARATION_FIELDS = new Set([
   'allegroAgentDraftOperation', 'allegroAgentCompliancePolicy',
   'allegroAgentComplianceCheckedAt', 'allegroAgentPreparationError',
   'allegroAgentPreparationCheckedAt',
+  'allegroOfferId', 'allegroStock', 'allegroSyncedAt', 'allegroSyncSource',
+  'allegroPublicationAgentStatus', 'allegroPublicationLastAttemptAt',
+  'allegroPublicationLastSuccessAt', 'allegroPublicationLastErrorCode',
+  'allegroPublicationLastError', 'allegroPublicationAgentTaskId',
+  'allegroPublicationReportId', 'allegroPublicationSpecialistRunId',
+  'allegroPublicationFailureCount',
 ]);
 
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
