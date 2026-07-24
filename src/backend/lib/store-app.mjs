@@ -123,6 +123,7 @@ import { executeAllegroOfferWriteWithRecovery } from './domain/allegro-publicati
 import { allegroApplyProductSetSafety, allegroResponsibleProducerDirectory, allegroSyncEditorialOffer } from './domain/allegro-gpsr.mjs';
 import { allegroCatalogParameterValue } from './domain/allegro-catalog-parameters.mjs';
 import { checkAllegroImageReadiness } from './domain/allegro-image-readiness.mjs';
+import { applyRequiredAllegroSalesConditions, createAllegroOfferStatusWaiter, createAllegroSalesConditionsLoader } from './domain/allegro-sales-readiness.mjs';
 import { allegroNextScheduledSyncAt, allegroScheduledSyncDue, normalizeAllegroSyncSettings } from './domain/allegro-sync-policy.mjs';
 import { createCatalogProductUpdater as allegroAktualizatorProduktowCentralnych } from './domain/catalog-product-updater.mjs';
 import { createCatalogProductOperationWriter } from './domain/catalog-product-operation-rebase.mjs';
@@ -1718,38 +1719,8 @@ function allegroBrakujaceParametryWymagane(product = {}, categoryParameters = []
     id: tekst(p.id, 80), name: tekst(p.name, 180), type: tekst(p.type, 40), unit: tekst(p.unit, 40), dictionary: Array.isArray(p.dictionary) ? p.dictionary.slice(0, 200) : [], restrictions: p.restrictions || {},
   }));
 }
-function allegroPierwszyId(lista = []) {
-  const x = (Array.isArray(lista) ? lista : []).find((item) => tekst(item?.id || item?.uuid || '', 120).trim());
-  return tekst(x?.id || x?.uuid || '', 120).trim();
-}
-function allegroNormalizujWarunki(raw = {}) {
-  return {
-    shippingRates: allegroLista(raw.shippingRates, ['shippingRates', 'items', 'rates']).map((x) => ({ id: tekst(x.id, 120), name: tekst(x.name || x.label, 250) })).filter((x) => x.id),
-    returnPolicies: allegroLista(raw.returnPolicies, ['returnPolicies', 'items', 'policies']).map((x) => ({ id: tekst(x.id, 120), name: tekst(x.name || x.label, 250) })).filter((x) => x.id),
-    impliedWarranties: allegroLista(raw.impliedWarranties, ['impliedWarranties', 'items', 'warranties']).map((x) => ({ id: tekst(x.id, 120), name: tekst(x.name || x.label, 250) })).filter((x) => x.id),
-    warranties: allegroLista(raw.warranties, ['warranties', 'items']).map((x) => ({ id: tekst(x.id, 120), name: tekst(x.name || x.label, 250) })).filter((x) => x.id),
-  };
-}
-async function allegroWarunkiSprzedazy(req) {
-  const errors = [];
-  const safe = async (path, key) => {
-    try { return await allegroWywolaj(req, path, { parameters: { limit: 100, offset: 0 } }); }
-    catch (e) { errors.push({ key, path, status: e.status || 0, code: e.code || '', message: e.message || String(e) }); return {}; }
-  };
-  const [shippingRatesRaw, returnPoliciesRaw, impliedWarrantiesRaw, warrantiesRaw] = await Promise.all([
-    safe('/sale/shipping-rates', 'shippingRates'),
-    safe('/after-sales-service-conditions/return-policies', 'returnPolicies'),
-    safe('/after-sales-service-conditions/implied-warranties', 'impliedWarranties'),
-    safe('/after-sales-service-conditions/warranties', 'warranties'),
-  ]);
-  const data = allegroNormalizujWarunki({ shippingRates: shippingRatesRaw, returnPolicies: returnPoliciesRaw, impliedWarranties: impliedWarrantiesRaw, warranties: warrantiesRaw });
-  return { ...data, defaults: {
-    shippingRateId: allegroPierwszyId(data.shippingRates),
-    returnPolicyId: allegroPierwszyId(data.returnPolicies),
-    impliedWarrantyId: allegroPierwszyId(data.impliedWarranties),
-    warrantyId: allegroPierwszyId(data.warranties),
-  }, errors };
-}
+const allegroWarunkiSprzedazy = createAllegroSalesConditionsLoader({ call: (req, path, options) => allegroWywolaj(req, path, options) });
+const allegroCzekajNaStatusOferty = createAllegroOfferStatusWaiter({ call: (req, path, options) => allegroWywolaj(req, path, options) });
 async function allegroParametryKategorii(req, categoryId = '') {
   const id = tekst(categoryId, 80).trim();
   if (!id) return { parameters: [], errors: [] };
@@ -2041,6 +2012,7 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   if (!existingOffer && preparedProduct.marketedBeforeGPSRObligation !== true) {
     draft.missing = [...new Set([...draft.missing, ...gpsr.missing])];
   }
+  draft.missing = applyRequiredAllegroSalesConditions(draft.missing, draft.payload, { existingOffer: !!existingOffer });
   const autoParameters = allegroParametryAutomatyczne(preparedProduct, categoryParameters.parameters);
   return {
     ...draft,
@@ -3646,9 +3618,14 @@ export default async (req) => {
         await allegroOperationReceipts.fail(approvalHandle, e);
         throw e;
       }
-      let verifiedOffer = null;
+      let verifiedOffer = null, publicationWait = null;
       try {
-        verifiedOffer = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`);
+        const publicationAction = String(body.options?.publicationAction || '').toLowerCase();
+        const expectedStatus = publicationAction === 'activate' ? 'ACTIVE' : publicationAction === 'deactivate' ? 'INACTIVE' : '';
+        if (expectedStatus) {
+          publicationWait = await allegroCzekajNaStatusOferty(req, offerId, expectedStatus);
+          verifiedOffer = publicationWait.offer;
+        } else verifiedOffer = await allegroWywolaj(req, `/sale/product-offers/${encodeURIComponent(offerId)}`);
         if (verifiedOffer?.id) result = verifiedOffer;
       } catch {}
       await zapisz('allegro_offer_last_error', null);
@@ -3674,7 +3651,7 @@ export default async (req) => {
           await allegroZapiszPowiazanieProduktu(body.product || {}, { offerId, prepared, draft });
         }
       }
-      const responseBody = { ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, identityCheck, catalogRecovery, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, verification: allegroOfferVerification(result, !!verifiedOffer), agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { id: approvalOperationId, status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion };
+      const responseBody = { ok: true, offer: { ...(existing?.offer || {}), ...(result || {}), id: offerId }, mode: existing ? 'updated' : 'created', duplicatePrevented: !!existing, match: existing ? { score: existing.score, reason: existing.reason } : null, identityCheck, catalogRecovery, catalogMatch: prepared.catalogMatch || null, autoFilled: prepared.autoFilled || null, improvedDescriptions: prepared.improvedDescriptions || null, compliance: complianceGate.compliance, verification: { ...allegroOfferVerification(result, !!verifiedOffer), publicationConfirmed: publicationWait?.completed !== false, publicationChecks: publicationWait?.checks || 0 }, agentDecision: prepared.agentDecision || null, agentProcedure: ALLEGRO_AGENT_OFFER_PROCEDURE, warnings: Array.isArray(result?.warnings) ? result.warnings : [], operation: { id: approvalOperationId, status: responseMeta?.status || 200, location: responseMeta?.location || '', completed: operationCheck.completed || publicationWait?.completed === true, checks: operationCheck.checks || 0 }, allegro: await allegroStatus(req), categorySuggestion };
       await allegroOperationReceipts.complete(approvalHandle, { offerId, httpStatus: existing ? 200 : 201, response: responseBody });
       return odpowiedz(responseBody, existing ? 200 : 201);
     }
