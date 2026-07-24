@@ -23,3 +23,56 @@ test('bezpośredni endpoint zawsze wymaga trwałej decyzji, niezależnie od dekl
   }
   assert.equal(reads, 0);
 });
+
+test('zatwierdzenie PZ/WZ automatycznie uzgadnia Plan zatowarowania dokładnie raz', async () => {
+  let value = {
+    data: {
+      artway_produkty_dodane: [{ id: '1', nazwa: 'Gra testowa', externalId: 'T-1', ean: '5906018003796' }],
+      artway_stany: { 1: 0 },
+      artway_magazyn_produkty: { 1: { lokalizacja: 'R1-P1' } },
+      artway_ruchy_magazynowe: [],
+    },
+    rev: 1,
+    updated_at: null,
+  };
+  let etag = 1, reconciliations = 0;
+  const route = createInventoryStockRoute({
+    isAdmin: () => true,
+    rateLimit: () => null,
+    readVersioned: async () => ({ value: structuredClone(value), etag: String(etag), exists: true }),
+    reconciliation: {
+      reconcileDraftsSafely: async (options) => {
+        reconciliations += 1;
+        assert.deepEqual(options, { summary: true });
+        return { ok: true, changed: true, updated: ['supplier-draft'] };
+      },
+    },
+    respond: (payload, status = 200) => ({ payload, status }),
+    sessionOf: () => ({ email: 'admin@example.test' }),
+    writeIfVersion: async (_key, next, version) => {
+      if (String(version.etag) !== String(etag)) return { modified: false };
+      value = structuredClone(next);
+      etag += 1;
+      return { modified: true, etag: String(etag) };
+    },
+    mergeSettings: async (data) => data,
+    settingsLimit: 4 * 1024 * 1024,
+  });
+  const call = async (action, body) => {
+    const request = new Request(`https://artwaytm.pl/api/store?action=${action}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    return route(request, new URL(request.url), action);
+  };
+  const created = await call('warehouse-document-create', { type: 'PZ', reference: 'Test automatycznego planu' });
+  const line = await call('warehouse-document-line-upsert', {
+    documentId: created.payload.document.id, expectedRevision: 1, productId: '1', quantity: 2, mode: 'set', requestId: 'line-auto-plan',
+  });
+  const confirmed = await call('warehouse-document-confirm', {
+    documentId: created.payload.document.id, expectedRevision: line.payload.document.revision, requestId: 'confirm-auto-plan',
+  });
+  assert.equal(confirmed.status, 200);
+  assert.equal(confirmed.payload.confirmed, true);
+  assert.equal(reconciliations, 1);
+  assert.deepEqual(confirmed.payload.supplierPlan, { ok: true, changed: true, updated: ['supplier-draft'] });
+});

@@ -6,6 +6,8 @@ import { ASSET_BUNDLES } from '../scripts/build-assets.mjs';
 const navigation = await readFile(new URL('../assets/admin-warehouse.js', import.meta.url), 'utf8');
 const inventory = await readFile(new URL('../assets/admin-warehouse.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../src/styles/21-warehouse-workspace.css', import.meta.url), 'utf8');
+const warehouseViewsSource = await readFile(new URL('../src/frontend/12-warehouse-views.js', import.meta.url), 'utf8');
+const supplierPlanningSource = await readFile(new URL('../src/frontend/10-agent-ai-supplier-planning.js', import.meta.url), 'utf8');
 
 test('magazyn ma jedną nawigację pogrupowaną według procesu pracy', () => {
   const section = navigation.slice(navigation.indexOf('function magazynSubnavHTML'), navigation.indexOf('const ASORTYMENT_PARTIA_KART'));
@@ -63,6 +65,22 @@ test('Plan zatowarowania prowadzi po procesie i renderuje tabele w jednym schema
   assert.match(plan, /magazynPlanUstandaryzujTabeleDOM/);
   assert.match(styles, /table\.admin-responsive-table td\[data-label="Produkt i kod"\]/);
   assert.match(styles, /@media\(max-width:460px\).*supplier-order-actions/);
+});
+
+test('Plan ma jedną ręczną kontrolę i automatycznie uzgadnia braki po otwarciu oraz zmianie stanu', () => {
+  assert.equal((warehouseViewsSource.match(/data-plan-refresh/g) || []).length, 1);
+  assert.match(warehouseViewsSource, />↻ Aktualizuj plan</);
+  assert.match(warehouseViewsSource, /Automatyczny plan zakupowy/);
+  assert.match(supplierPlanningSource, /function agentAIPlanZaplanujAutomatyczneUzgodnienie/);
+  assert.match(supplierPlanningSource, /source:"admin-restock-open"/);
+  const shortages = supplierPlanningSource.slice(
+    supplierPlanningSource.indexOf('function magazynBrakiDostawcyHTML'),
+    supplierPlanningSource.indexOf('function agentAIPrzyjecieNadwyzki'),
+  );
+  assert.doesNotMatch(shortages, /agentAIUzgodnijPlanZSerwerem/);
+  assert.match(shortages, /synchronizacja automatyczna|dane operacyjne na żywo/);
+  assert.match(styles, /restock-plan-automation/);
+  assert.match(styles, /supplier-plan-auto-badge/);
 });
 
 test('Stany pokazują fizyczny magazyn w tabeli, renderują katalog partiami i nie blokują pierwszego wejścia', () => {

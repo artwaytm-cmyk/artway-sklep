@@ -42,7 +42,16 @@ test('API pierwszej wiadomości zwraca pytanie o lokalizację i nie potwierdzeni
 });
 
 test('API wymaga osobnych akcji lokalizacji i końcowego potwierdzenia', async () => {
-  const route = createInventoryDecisionRoute(dependencies());
+  let reconciliations = 0;
+  const route = createInventoryDecisionRoute(dependencies({
+    reconciliation: {
+      reconcileDraftsSafely: async (options) => {
+        reconciliations += 1;
+        assert.deepEqual(options, { summary: true });
+        return { ok: true, changed: true, created: ['supplier-1'] };
+      },
+    },
+  }));
   const locationReq = request('inventory-decision-location', { id: draft.id, location: 'A-R01-P01' });
   const located = await route(locationReq, new URL(locationReq.url), 'inventory-decision-location');
   assert.match(located.payload.text, /Potwierdź zmianę/);
@@ -52,6 +61,8 @@ test('API wymaga osobnych akcji lokalizacji i końcowego potwierdzenia', async (
   const confirmed = await route(confirmReq, new URL(confirmReq.url), 'inventory-decision-confirm');
   assert.match(confirmed.payload.text, /Zmiana magazynowa zapisana/);
   assert.equal(confirmed.payload.decision.status, 'confirmed');
+  assert.equal(reconciliations, 1);
+  assert.deepEqual(confirmed.payload.supplierPlan, { ok: true, changed: true, created: ['supplier-1'] });
 });
 
 test('token techniczny może utworzyć szkic i wskazać lokalizację, ale nie może podjąć końcowej decyzji', async () => {

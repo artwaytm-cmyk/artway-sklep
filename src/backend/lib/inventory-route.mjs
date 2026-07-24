@@ -17,7 +17,17 @@ const DOCUMENT_ACTIONS = new Map([
 // ręczna — przechodzi przez trwały szkic, lokalizację i osobne potwierdzenie.
 // Dzięki temu żaden klient posiadający ogólny token administracyjny nie może
 // ominąć rejestru decyzji przez zmianę pola `source`.
-export function createInventoryStockRoute({ isAdmin, rateLimit, readVersioned, respond, sessionOf, writeIfVersion, mergeSettings, settingsLimit } = {}) {
+export function createInventoryStockRoute({
+  isAdmin,
+  rateLimit,
+  readVersioned,
+  reconciliation,
+  respond,
+  sessionOf,
+  writeIfVersion,
+  mergeSettings,
+  settingsLimit,
+} = {}) {
   const documents = createWarehouseDocumentService({
     readVersioned, writeIfVersion, mergeSettings,
     catalogProducts: (data) => mergeCatalogProducts(data).products,
@@ -47,7 +57,13 @@ export function createInventoryStockRoute({ isAdmin, rateLimit, readVersioned, r
       const limited = rateLimit(req, 'warehouse-documents', 2000, 60 * 60 * 1000);
       if (limited) return limited;
       const body = await req.json().catch(() => ({})), actor = sessionOf?.(req)?.email || 'administrator';
-      try { return respond(await documents[documentMethod](body, actor)); }
+      try {
+        const result = await documents[documentMethod](body, actor);
+        const supplierPlan = documentMethod === 'confirm' && result?.confirmed === true && result?.duplicate !== true && typeof reconciliation?.reconcileDraftsSafely === 'function'
+          ? await reconciliation.reconcileDraftsSafely({ summary: true })
+          : null;
+        return respond({ ...result, ...(supplierPlan ? { supplierPlan } : {}) });
+      }
       catch (error) { return respond({ ok: false, error: error?.message || 'Nie udało się zapisać dokumentu.', code: error?.code || 'warehouse_document_error', ...(error?.details || {}) }, Number(error?.status || 422)); }
     }
     if (action !== 'inventory-stock-set') return null;

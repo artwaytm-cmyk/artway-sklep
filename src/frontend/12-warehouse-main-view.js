@@ -1,5 +1,6 @@
 function widokAdminMagazyn(sekcja="pulpit"){
   const aktywna=["pulpit","dostawcy","stany","lokalizacje","etykiety-qr","plan","ruchy"].includes(String(sekcja||""))?String(sekcja||""):"pulpit";
+  if(aktywna==="plan"&&typeof agentAIPlanZaplanujAutomatyczneUzgodnienie==="function")agentAIPlanZaplanujAutomatyczneUzgodnienie();
   if(["pulpit","dostawcy","stany","plan"].includes(aktywna)&&typeof allegroLadujJesliTrzeba==="function")allegroLadujJesliTrzeba("orders");
   if(aktywna!=="stany"){magazynStanyKartyObserwator?.disconnect();magazynStanyKartyObserwator=null;magazynStanyKartyOczekujace=[];}
   const u=ustawieniaMagazynuPelne();

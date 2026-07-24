@@ -258,7 +258,7 @@ this.exportRows=agentAIPlanWierszeEksportu;`, context);
   assert.doesNotMatch(exporter, /cenaBrutto|cenaZakupu|wartoscSzacowana/);
   const plan = inventorySource.slice(inventorySource.indexOf('function magazynPlanZatowarowaniaHTML'), inventorySource.indexOf('function odswiezPlanZatowarowaniaWidoku'));
   assert.doesNotMatch(plan, /eksportujZatowarowanieCSV/);
-  assert.equal((source.match(/onclick="eksportujTabeleOperacyjnaMagazynuCSV\(\)"/g) || []).length, 1);
+  assert.equal((`${source}\n${inventorySource}`.match(/onclick="eksportujTabeleOperacyjnaMagazynuCSV\(\)"/g) || []).length, 1);
 });
 
 test('eksport Planu z brakującym kodem jest blokowany przed utworzeniem pliku', () => {

@@ -42,7 +42,7 @@ function finalCard(decision = {}, rejected = false) {
   };
 }
 
-export function createInventoryDecisionRoute({ decisions, isAdmin, rateLimit, readVersioned, respond, sessionOf, text } = {}) {
+export function createInventoryDecisionRoute({ decisions, isAdmin, rateLimit, readVersioned, reconciliation, respond, sessionOf, text } = {}) {
   if (!decisions || typeof decisions.createDraft !== 'function') throw new Error('Trasa decyzji magazynowych wymaga serwisu decyzji.');
   return async function inventoryDecisionRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
@@ -120,7 +120,10 @@ export function createInventoryDecisionRoute({ decisions, isAdmin, rateLimit, re
       }
       if (action === 'inventory-decision-confirm') {
         const result = await decisions.confirm(id, decisionActor);
-        return respond({ ok: true, ...result, ...finalCard(result.decision, false) });
+        const supplierPlan = result?.duplicate !== true && typeof reconciliation?.reconcileDraftsSafely === 'function'
+          ? await reconciliation.reconcileDraftsSafely({ summary: true })
+          : null;
+        return respond({ ok: true, ...result, ...finalCard(result.decision, false), ...(supplierPlan ? { supplierPlan } : {}) });
       }
       const result = await decisions.reject(id, decisionActor);
       return respond({ ok: true, ...result, ...finalCard(result.decision, true) });
