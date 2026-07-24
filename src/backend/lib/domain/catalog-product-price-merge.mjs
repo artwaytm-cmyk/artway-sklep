@@ -25,6 +25,18 @@ export function preserveNewerManualPrices(serverRecord = {}, incomingRecord = {}
   return next;
 }
 
+export function preserveNewerConfirmedMutation(serverRecord = {}, incomingRecord = {}) {
+  const serverTime = time(serverRecord.lastAdminMutationAt);
+  const incomingTime = time(incomingRecord.lastAdminMutationAt);
+  if (!serverTime || incomingTime >= serverTime) return incomingRecord;
+  const next = { ...incomingRecord }, protectedFields = Array.isArray(serverRecord.lastAdminMutationFields) ? serverRecord.lastAdminMutationFields : [];
+  for (const key of [...protectedFields, 'lastAdminMutationId', 'lastAdminMutationAt', 'lastAdminMutationBy', 'lastAdminMutationArea', 'lastAdminMutationFields']) {
+    if (own(serverRecord, key)) next[key] = serverRecord[key];
+    else delete next[key];
+  }
+  return next;
+}
+
 function protectEditMap(serverMap, incomingMap) {
   if (!incomingMap || typeof incomingMap !== 'object' || Array.isArray(incomingMap)) return incomingMap;
   const next = { ...incomingMap };
@@ -32,9 +44,9 @@ function protectEditMap(serverMap, incomingMap) {
     if (!serverRecord || typeof serverRecord !== 'object' || Array.isArray(serverRecord)) continue;
     const incomingRecord = next[id];
     if (incomingRecord && typeof incomingRecord === 'object' && !Array.isArray(incomingRecord)) {
-      next[id] = preserveNewerManualPrices(serverRecord, incomingRecord);
-    } else if (PRICE_CHANNELS.some((channel) => time(serverRecord[channel.updatedAt]) > 0)) {
-      next[id] = preserveNewerManualPrices(serverRecord, {});
+      next[id] = preserveNewerManualPrices(serverRecord, preserveNewerConfirmedMutation(serverRecord, incomingRecord));
+    } else if (PRICE_CHANNELS.some((channel) => time(serverRecord[channel.updatedAt]) > 0) || time(serverRecord.lastAdminMutationAt) > 0) {
+      next[id] = preserveNewerManualPrices(serverRecord, preserveNewerConfirmedMutation(serverRecord, {}));
     }
   }
   return next;
@@ -45,7 +57,9 @@ function protectProductArray(serverList, incomingList) {
   const serverById = new Map((Array.isArray(serverList) ? serverList : []).map((item) => [String(item?.id ?? ''), item]));
   return incomingList.map((item) => {
     const serverRecord = serverById.get(String(item?.id ?? ''));
-    return serverRecord && item && typeof item === 'object' ? preserveNewerManualPrices(serverRecord, item) : item;
+    return serverRecord && item && typeof item === 'object'
+      ? preserveNewerManualPrices(serverRecord, preserveNewerConfirmedMutation(serverRecord, item))
+      : item;
   });
 }
 

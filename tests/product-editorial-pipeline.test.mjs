@@ -34,6 +34,7 @@ test('źródło pozostaje materiałem faktów, a trzy kanały dostają niezależ
 
   assert.deepEqual(calls.map((call) => call.specialist), ['product_content', 'allegro_offer', 'von_halsky_offer']);
   assert.equal(calls[0].context.rule, 'raw_source_is_facts_only');
+  assert.equal(calls[0].target.productId, '');
   assert.equal(prepared.product.sourceMaterial.title, raw.nazwa);
   assert.equal(prepared.product.sourceMaterial.longDescription, raw.opis);
   assert.notEqual(prepared.product.nazwa, raw.nazwa);
@@ -45,6 +46,14 @@ test('źródło pozostaje materiałem faktów, a trzy kanały dostają niezależ
   assert.equal(prepared.product.contentEditorial.channels, 'independent_store_allegro_von_halsky');
   assert.deepEqual(Object.fromEntries(Object.entries(prepared.product.contentEditorial.channelStates).map(([key, value]) => [key, value.status])), { store: 'ready', allegro: 'ready', vonHalsky: 'ready' });
   assert.equal(prepared.product.ean, raw.ean);
+});
+
+test('historia każdego specjalisty zawiera ID centralnego produktu', async () => {
+  const calls = [];
+  await prepareLinkedProductEditorial({ id: 123, nazwa: 'Gra rodzinna', opis: 'Faktyczny opis produktu wystarczający do redakcji.', opisKrotki: 'Gra rodzinna.', producent: 'Alexander' }, {
+    runSpecialist: async (input) => { calls.push(input); return specialistResult(input); },
+  });
+  assert.deepEqual(calls.map((call) => call.target.productId), ['123', '123', '123']);
 });
 
 test('awaria jednego kanału nie cofa zapisanych wyników pozostałych kanałów', async () => {

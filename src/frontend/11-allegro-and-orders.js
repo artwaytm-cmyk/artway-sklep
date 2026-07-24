@@ -224,7 +224,7 @@ async function allegroPolacz(){
 async function allegroSynchronizujZamowienia(){
   try{
     toast("Pobieram zamówienia Allegro i uruchamiam kontrolę magazynową agenta…");
-    await chmuraZapiszUstawienia().catch(()=>false);
+    await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
     const d=await chmura("allegro-sync-orders",{method:"POST",body:{limit:200},timeout:120000});
     allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,ladowanie:false,error:""};
     allegroZamowienia=Array.isArray(d.orders)?d.orders:allegroZamowienia;

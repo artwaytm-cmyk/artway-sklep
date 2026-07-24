@@ -1,5 +1,6 @@
 import { isValidAccountEmail } from './core/account-validation.mjs';
 import { preserveManualProductPrices } from './domain/catalog-product-price-merge.mjs';
+import { createCatalogProductFieldRoute } from './domain/catalog-product-field-save.mjs';
 
 export function createStoreDataRoute(deps = {}) {
   const PUBLIC_CENTRAL_CATALOG_KEYS = ['artway_produkty_edytowane', 'artway_produkty_dodane', 'artway_produkty_katalog', 'artway_produkty_ukryte', 'artway_produkty_definitywne', 'artway_stany', 'artway_dostepnosc', 'artway_magazyn_produkty'];
@@ -30,7 +31,9 @@ export function createStoreDataRoute(deps = {}) {
     primaryAdminEmail = () => '',
     clearAccountSessionHeaders = () => ({}),
     zapiszOperacjeProduktow = null,
+    zapiszPolaProduktuCentralnie = null,
   } = deps;
+  const catalogProductFieldRoute = createCatalogProductFieldRoute({ respond: odpowiedz, isAdmin: czyAdmin, text: tekst, sessionOf: requestSession, saveFields: zapiszPolaProduktuCentralnie });
   const accessAudit = async (entry = {}) => {
     const now = new Date().toISOString();
     const record = await czytaj('user_access_audit', { items: [] });
@@ -169,6 +172,10 @@ export function createStoreDataRoute(deps = {}) {
       const saved = await zapiszOperacjeProduktow([{ id: productId, fields, remove }], updatedAt);
       if (saved.skippedProductIds?.includes(productId) || (!saved.modified && !saved.appliedOperations)) return odpowiedz({ ok: false, error: 'Produkt nie istnieje w centralnym katalogu albo nie można go bezpiecznie zaktualizować.' }, 404);
       return odpowiedz({ ok: true, productId, channel, field: config.field, value: clear ? null : +value.toFixed(2), clear, fields, remove, rev: saved.value?.rev, updated_at: updatedAt });
+    }
+
+    if (action === 'catalog-product-fields-update') {
+      return catalogProductFieldRoute(req, url);
     }
 
     // ─── ZAPIS USTAWIEŃ (tylko admin) ───

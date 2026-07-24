@@ -1328,7 +1328,7 @@ async function ustawRekomendowanaCeneProduktu(productId,kanal,price,targetMargin
   const value=kwotaNum(price);if(!value)return;const p=pobierzProduktAdmin(productId);if(!p)return;
   const appliedMargin=Number.isFinite(Number(targetMargin))?+Number(targetMargin).toFixed(2):null;
   if(kanal==="sklep"){zapiszPolaProduktuLokalnie(productId,{cena:value,sklepPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{sklepPriceTargetMargin:appliedMargin})},false);zaplanujZapisUstawien();toast(`✅ Cena w sklepie została ustawiona na ${zl(value)}${appliedMargin===null?"":` • marża ${appliedMargin.toFixed(2)}%`}`);renderuj();return;}
-  if(kanal==="vonHalsky"){zapiszPolaProduktuLokalnie(productId,{cenaVonHalsky:value,vonHalskyPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{vonHalskyPriceTargetMargin:appliedMargin})},false);zaplanujZapisUstawien();const ok=await chmuraZapiszUstawienia();toast(ok?`🐕 Cena Von Halsky została ustawiona na ${zl(value)}`:"⚠️ Cena została zachowana lokalnie i oczekuje na ponowienie zapisu");renderuj();return;}
+  if(kanal==="vonHalsky"){zapiszPolaProduktuLokalnie(productId,{cenaVonHalsky:value,vonHalskyPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{vonHalskyPriceTargetMargin:appliedMargin})},false);zaplanujZapisUstawien();const ok=await chmuraZapiszUstawienia({flush:true});toast(ok?`🐕 Cena Von Halsky została ustawiona na ${zl(value)}`:"⚠️ Cena została zachowana lokalnie i oczekuje na ponowienie zapisu");renderuj();return;}
   zapiszPolaProduktuLokalnie(productId,{cenaAllegro:value,allegroPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{allegroPriceTargetMargin:appliedMargin}),allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI},false);zaplanujZapisUstawien();toast(`🟠 Ustawiono ${zl(value)}${appliedMargin===null?"":` • marża ${appliedMargin.toFixed(2)}%`} i aktualizuję ofertę Allegro…`);
   const next={...p,cenaAllegro:value,allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI};await allegroSynchronizujPowiazanyProduktPoZapisie(next,{forceFees:true});renderuj();
 }
@@ -1689,7 +1689,7 @@ async function allegroSynchronizujPowiazanyProduktPoZapisie(p,options={}){
     }
     const feeReady=kwotaNum(prepared.cenaAllegro||prepared.cena)>0&&!!(prepared.allegroOfferId||existing?.id||(prepared.allegroCategoryId&&(prepared.allegroProductId||prepared.gtin||prepared.ean)));
     let feesUpdated=false;if(options.forceFees!==false&&feeReady)feesUpdated=!!(await allegroPobierzProwizjeProduktu(prepared.id,null,{silent:true}).catch(()=>null));
-    await chmuraZapiszUstawienia().catch(()=>false);
+    await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
     toast(updated?`✅ Produkt i oferta Allegro zaktualizowane${feesUpdated?" • prowizja odświeżona":" • prowizja wymaga ponownej próby"}`:preparation.ready?`✅ Produkt przygotowany i zapisany: opisy, kategoria i dane Allegro${feesUpdated?" • prowizja pobrana":""}`:`⚠️ Agent zapisał poprawki; pozostały braki: ${preparation.missing.join(", ")}`);
     return {ok:true,updated,feesUpdated,draft,preparation};
   }catch(e){allegroOstatniBladWystawienia=e;if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Automatyka produktu przekazała brak do Agenta AI: "+(e.message||e));return {ok:false,error:e};}
@@ -1831,10 +1831,22 @@ function asortymentSeoAgenta(p={}){
   return Object.keys(patch).length?zapiszPolaProduktuLokalnie(p.id,patch,false):false;
 }
 const ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO=["nazwa","allegroTitle","opisKrotki","opis","allegroDescription","producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","zdjecia","sourceEvidence","allegroCategoryId","allegroProductId","allegroParameters","allegroDescriptionSections","allegroShippingSubsidy"];
+const ASORTYMENT_POLA_TRWALEGO_ZAPISU_ALLEGRO=[...ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO,"allegroShortDescription","contentEditorial","sourceMaterial","contentEditorialPreparedAt","contentEditorialSource","allegroDescriptionSource","allegroEditorialSyncPending","allegroEditorialSyncRequestedAt","allegroEditorialSyncError","allegroAgentPreparationStatus","allegroAgentPreparationMissing","allegroAgentSavedFields","allegroAgentPreparedAt","allegroAgentPreparationStartedAt","allegroAgentPreparationSource","allegroAgentDraftOperation","allegroAgentCompliancePolicy","allegroAgentComplianceCheckedAt","allegroAgentPreparationError","allegroAgentPreparationCheckedAt"];
 const ASORTYMENT_ETYKIETY_POL_ALLEGRO={nazwa:"nazwa",allegroTitle:"tytuł Allegro",opisKrotki:"opis krótki sklepu",opis:"opis długi sklepu",allegroDescription:"opis Allegro",producent:"producent",marka:"marka",gtin:"GTIN",ean:"EAN",kodProducenta:"kod producenta",mpn:"MPN",zdjecie:"zdjęcie główne ze źródła",zdjecia:"galeria ze źródła",sourceEvidence:"potwierdzenie źródła zdjęć",allegroCategoryId:"kategoria Allegro",allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",allegroDescriptionSections:"układ opisu Allegro",allegroShippingSubsidy:"dopłata do wysyłki"};
 function asortymentMigawkaPrzygotowania(p={}){return Object.fromEntries(ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.map(key=>[key,p[key]]));}
 function asortymentPolaZmienione(before={},after={}){return ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.filter(key=>JSON.stringify(before[key]??null)!==JSON.stringify(after[key]??null));}
 function asortymentEtykietyPol(keys=[]){return keys.map(key=>ASORTYMENT_ETYKIETY_POL_ALLEGRO[key]||key);}
+function asortymentPolaDoTrwalegoZapisu(p={}){
+  return Object.fromEntries(ASORTYMENT_POLA_TRWALEGO_ZAPISU_ALLEGRO.filter(key=>p[key]!==undefined).map(key=>[key,p[key]]));
+}
+async function asortymentZapiszProduktCentralnie(p={},startedAt=""){
+  const productId=String(p.id??"").trim(),mutationId=`allegro-preparation:${productId}:${String(startedAt||Date.now()).replace(/[^0-9A-Za-z:._-]/g,"").slice(0,80)}`;
+  if(!productId)throw new Error("Brakuje ID produktu — Agent nie może potwierdzić zapisu.");
+  const result=await chmura("catalog-product-fields-update",{method:"POST",body:{productId,fields:asortymentPolaDoTrwalegoZapisu(p),mutationId,area:"allegro-preparation"},timeout:60000});
+  if(result?.confirmed!==true||String(result.productId)!==productId)throw new Error("Serwer nie potwierdził odczytu zapisanej kartoteki.");
+  zapiszPolaProduktuLokalnie(productId,result.fields||{},false);
+  return result;
+}
 function asortymentStatusPrzygotowania(p={}){
   const status=String(p.allegroAgentPreparationStatus||"");
   const missing=Array.isArray(p.allegroAgentPreparationMissing)?p.allegroAgentPreparationMissing:[];
@@ -1890,7 +1902,9 @@ async function asortymentPrzygotujProduktDoAllegro(base={},options={}){
   const missing=[...new Set((draft.missing||[]).map(String).filter(Boolean))],ready=missing.length===0&&draft.compliance?.ok!==false,savedFields=asortymentPolaZmienione(before,asortymentMigawkaPrzygotowania(p)),finishedAt=new Date().toISOString();
   zapiszPolaProduktuLokalnie(p.id,{allegroAgentPreparationStatus:ready?"ready":"needs_attention",allegroAgentPreparationMissing:missing,allegroAgentSavedFields:savedFields,allegroAgentPreparedAt:finishedAt,allegroAgentPreparationStartedAt:startedAt,allegroAgentPreparationSource:"agent-katalogu",allegroAgentDraftOperation:draft.operation||"create",allegroAgentCompliancePolicy:draft.compliance?.policyId||"",allegroAgentComplianceCheckedAt:draft.compliance?.checkedAt||finishedAt,allegroAgentPreparationError:""},false);
   p=asortymentProduktPoId(p.id)||p;
-  return {id:String(p.id),name:p.nazwa||"Produkt",product:p,draft,ready,missing,savedFields,warnings};
+  const persistence=await asortymentZapiszProduktCentralnie(p,startedAt);
+  p=asortymentProduktPoId(p.id)||p;
+  return {id:String(p.id),name:p.nazwa||"Produkt",product:p,draft,ready,missing,savedFields,warnings,persistence};
 }
 async function asortymentAgentPrzetworzProdukt(base,operation){
   let p=asortymentProduktPoId(base.id)||base;const warnings=[];let preparation=null;
@@ -1916,7 +1930,7 @@ async function asortymentUruchomAgenta(ids,operation){
   await Promise.all(Array.from({length:Math.min(2,products.length)},worker));
   asortymentAgentKolejka={...asortymentAgentKolejka,busy:false,current:"",finishedAt:new Date().toISOString()};
   zapiszHistorieAgenta("katalog-allegro",`Agent zakończył kolejkę katalogu: ${asortymentAgentKolejka.ok} poprawnie, ${asortymentAgentKolejka.failed} błędów`,{operation,products:asortymentAgentKolejka.ids,warningCount:asortymentAgentKolejka.warnings});
-  const cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);asortymentAgentKolejka={...asortymentAgentKolejka,cloudSaved};zbudujProdukty();asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🤖 Kolejka zakończona i zapisana na serwerze: ${asortymentAgentKolejka.ok} poprawnie${asortymentAgentKolejka.failed?` • ${asortymentAgentKolejka.failed} błędów`:""}`:"⚠️ Poprawki są zapisane lokalnie, ale serwer ich jeszcze nie potwierdził — automatyczna ponowna próba pozostaje aktywna");
+  const cloudSaved=await chmuraZapiszUstawienia({flush:true}).catch(()=>false);asortymentAgentKolejka={...asortymentAgentKolejka,cloudSaved};zbudujProdukty();asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🤖 Kolejka zakończona: serwer potwierdził trwały zapis ${asortymentAgentKolejka.ok} produktów${asortymentAgentKolejka.failed?` • ${asortymentAgentKolejka.failed} błędów`:""}`:"⚠️ Nie potwierdzono całej kolejki zmian — pozycje bez potwierdzenia mają status błędu i można je bezpiecznie ponowić");
 }
 function asortymentUruchomAgentaDlaZaznaczonych(){return asortymentUruchomAgenta([...zaznaczoneProdukty],String(document.querySelector("[data-agent-product-operation]")?.value||asortymentAgentKolejka.operation||"pelna"));}
 function asortymentUruchomAgentaDlaProduktu(id,operation="pelna"){return asortymentUruchomAgenta([id],operation);}
@@ -1978,7 +1992,7 @@ async function asortymentPotwierdzOperacjeZewnetrzna(direct=false){
       asortymentAllegroDecyzja={...asortymentAllegroDecyzja,busy:false,step:"done"};
     }
     asortymentAllegroDecyzja.results.filter(result=>result.ok&&result.id!==undefined).forEach(result=>{const id=String(result.id);zaznaczoneProdukty.delete(id);zaznaczoneProdukty.delete(Number(id));zaznaczoneAllegroProduktyKatalogu?.delete?.(id);});
-    const cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);asortymentAllegroDecyzja={...asortymentAllegroDecyzja,cloudSaved};await allegroWczytajDane(true).catch(()=>{});allegroZapiszCache();asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🟠 Operacja Allegro zakończona i zapisana: ${asortymentAllegroDecyzja.ok} poprawnie${asortymentAllegroDecyzja.failed?` • ${asortymentAllegroDecyzja.failed} błędów`:""}${asortymentAllegroDecyzja.remaining?` • pozostało ${asortymentAllegroDecyzja.remaining}`:""}`:"⚠️ Allegro przyjęło operację, ale zapis kartotek na serwer wymaga ponownej próby");
+    const cloudSaved=await chmuraZapiszUstawienia({flush:true}).catch(()=>false);asortymentAllegroDecyzja={...asortymentAllegroDecyzja,cloudSaved};await allegroWczytajDane(true).catch(()=>{});allegroZapiszCache();asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🟠 Operacja Allegro zakończona i trwale zapisana: ${asortymentAllegroDecyzja.ok} poprawnie${asortymentAllegroDecyzja.failed?` • ${asortymentAllegroDecyzja.failed} błędów`:""}${asortymentAllegroDecyzja.remaining?` • pozostało ${asortymentAllegroDecyzja.remaining}`:""}`:"⚠️ Allegro przyjęło operację, ale serwer nie potwierdził jeszcze całej kolejki kartotek");
   }catch(error){asortymentAllegroDecyzja={...asortymentAllegroDecyzja,busy:false,error:error.message||String(error)};asortymentOdswiezCentrumDzialan();toast("⚠️ Operacja Allegro: "+(error.message||error));}
 }
 

@@ -49,6 +49,7 @@ import { createInpostRoute } from './inpost-route.mjs';
 import { createInpostServiceShipmentRoute } from './inpost-service-shipment-route.mjs';
 import { createVonHalskyRoute } from './von-halsky-route.mjs';
 import { createStoreDataRoute } from './store-data-route.mjs';
+import { createCatalogProductFieldSaver } from './domain/catalog-product-field-save.mjs';
 import { createPaynowService } from './paynow-service.mjs';
 import { createPaynowRoute } from './paynow-route.mjs';
 import { createInfaktService } from './infakt-service.mjs';
@@ -313,6 +314,7 @@ const vonHalskyRoute = createVonHalskyRoute({
   },
 });
 const zapiszOperacjeProduktow = createCatalogProductOperationWriter({ mutateLatest: createRevisionSafeMutator(repository, 'settings'), loadProducts: allegroAgentProduktyKompletne, createUpdater: allegroAktualizatorProduktowCentralnych });
+const zapiszPolaProduktuCentralnie = createCatalogProductFieldSaver({ writeOperations: zapiszOperacjeProduktow, readProduct: async (productId, savedData = null) => (await allegroAgentProduktyKompletne(savedData && typeof savedData === 'object' ? savedData : (await czytaj('settings', { data: {}, rev: 0, updated_at: null })).data || {})).get(String(productId)) || null });
 const zapiszMapowaniaBezpiecznie = createAllegroMappingStore({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getItems: allegroMapowaniaItems }).writeSafely;
 async function zwiekszLicznikKoduRabatowego(kod = '') {
   const code = tekst(kod, 30).trim().toUpperCase(); if (!code) return false;
@@ -2952,7 +2954,7 @@ const storeDataRoute = createStoreDataRoute({
   czytajWersjonowane,
   preserveSupplierPlanOnGenericSettings,
   LIMIT_USTAWIEN,
-  zapiszJesliWersja, zapiszOperacjeProduktow,
+  zapiszJesliWersja, zapiszOperacjeProduktow, zapiszPolaProduktuCentralnie,
   ograniczRuch,
   bezpieczneZamowienieKlienta,
   requestSession,

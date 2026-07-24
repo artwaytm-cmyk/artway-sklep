@@ -70,7 +70,7 @@ export async function prepareLinkedProductEditorial(product = {}, {
         specialist: 'product_content', source: 'manual',
         instruction: 'Na podstawie materiału źródłowego przygotuj niezależną treść produktu dla sklepu Artway-TM. Źródło służy wyłącznie do ustalenia faktów. Popraw nazwę sprzedażową, krótki opis, długi opis i SEO; nie zmieniaj treści Allegro ani Von Halsky.',
         context: { channel: 'store', sourceMaterial, rule: 'raw_source_is_facts_only' },
-        target: { type: 'product_link_draft', sourceUrl: sourceMaterial.sourceUrl },
+        target: { type: 'product_link_draft', productId: clean(product.id, 100), sourceUrl: sourceMaterial.sourceUrl },
       }, actor);
     } catch (error) { warnings.push(`Redakcja sklepu: ${clean(error?.message || error, 500)}`); }
   }
@@ -84,7 +84,7 @@ export async function prepareLinkedProductEditorial(product = {}, {
     ...(storePatch.seoDescription ? { seoDescription: clean(storePatch.seoDescription, 180) } : {}),
     ...(storePatch.seoKeywords ? { seoKeywords: clean(storePatch.seoKeywords, 500) } : {}),
   };
-  const channelTarget = { type: 'product_link_draft', sourceUrl: sourceMaterial.sourceUrl };
+  const channelTarget = { type: 'product_link_draft', productId: clean(product.id, 100), sourceUrl: sourceMaterial.sourceUrl };
   const channelContext = { sourceMaterial, storeFacts: { title: storeProduct.nazwa, shortDescription: storeProduct.opisKrotki, longDescription: storeProduct.opis }, rule: 'independent_channel_content' };
   const runChannel = async (specialist, channel, instruction) => {
     if (typeof runSpecialist !== 'function') return null;

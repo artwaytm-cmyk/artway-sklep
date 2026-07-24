@@ -199,7 +199,7 @@ async function allegroPrzygotujSzkicProduktu(id){
   try{
     toast("🤖 Agent przygotowuje i zapisuje komplet danych Allegro…");
     zapiszPolaProduktuLokalnie(id,produkt,false);
-    const result=await asortymentPrzygotujProduktDoAllegro(pobierzProduktAdmin(id)||produkt,{refreshSource:true}),d=result.draft,cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);
+    const result=await asortymentPrzygotujProduktDoAllegro(pobierzProduktAdmin(id)||produkt,{refreshSource:true}),d=result.draft,cloudSaved=await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
     allegroPokazKategorieWFormularzu(d.categorySuggestion);
     const brak=result.missing.join(", ")||"brak";
     const cat=d.categorySuggestion?.selected;
@@ -218,7 +218,7 @@ async function allegroWystawProdukt(id){
     zapiszPolaProduktuLokalnie(id,produkt,false);
     const preparation=await asortymentPrzygotujProduktDoAllegro(pobierzProduktAdmin(id)||produkt,{refreshSource:true});
     if(!preparation.ready){
-      await chmuraZapiszUstawienia().catch(()=>false);
+      await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
       const box=document.getElementById("allegroDraftPreview");if(box)box.innerHTML=`<div class="backend-note allegro-mapping-error"><b>Agent zapisał poprawione dane, ale zatrzymał wystawienie.</b><br>Do uzupełnienia: ${esc(preparation.missing.join(", ")||"sprawdź kartotekę produktu")}<br><small>Zapisane pola: ${esc(asortymentEtykietyPol(preparation.savedFields).join(", ")||"kontrola bez zmian")}</small></div>`;
       toast("⚠️ Oferta nie została wysłana — uzupełnij wskazane braki");return;
     }
@@ -239,7 +239,7 @@ async function allegroWystawProdukt(id){
       allegroZastosujWynikWystawienia(produktGotowy,d);
       await allegroPobierzProwizjeProduktu(id,null,{silent:true}).catch(()=>null);
       zapiszPolaProduktuLokalnie(id,{allegroAgentPreparationStatus:remoteStatus==="ACTIVE"?"published":"draft",allegroAgentPublishedAt:remoteStatus==="ACTIVE"?new Date().toISOString():"",allegroOfferId:String(d.offer.id),allegroAgentPublicationError:"",...(d.catalogRecovery?.applied?{allegroCatalogAutoRepairedAt:new Date().toISOString()}: {})},false);
-      const cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);
+      const cloudSaved=await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
       await allegroWczytajDane(true).catch(()=>{});
       zbudujProdukty();
       const box=document.getElementById("allegroDraftPreview");if(box)box.innerHTML=`<div class="duplicate-audit-ok allegro-operation-success"><div><b>${remoteStatus==="ACTIVE"?"✅ Oferta aktywna":"🧾 Oferta zapisana — "+esc(remoteStatus||"weryfikacja w toku")}</b><small>ID ${esc(d.offer.id)} • opis: ${esc(d.verification?.descriptionSections||0)} sekcji • kartoteka ${cloudSaved?"zapisana na serwerze":"czeka na ponowny zapis"}</small></div><a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(d.offer.id)}" target="_blank" rel="noopener">Otwórz ofertę</a></div>`;

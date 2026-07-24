@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { preserveManualProductPrices, preserveNewerManualPrices } from '../src/backend/lib/domain/catalog-product-price-merge.mjs';
+import { preserveManualProductPrices, preserveNewerConfirmedMutation, preserveNewerManualPrices } from '../src/backend/lib/domain/catalog-product-price-merge.mjs';
 import { createStoreDataRoute } from '../src/backend/lib/store-data-route.mjs';
 
 test('starsza karta przeglądarki nie usuwa ani nie cofa ręcznie zapisanej ceny', () => {
@@ -16,6 +16,14 @@ test('nowsza świadoma zmiana ceny wygrywa z wartością serwera', () => {
     { cena: 52.9, cenaManualna: true, cenaZaktualizowanoAt: '2026-07-24T11:00:00.000Z' },
   );
   assert.equal(result.cena, 52.9);
+});
+
+test('spóźniona karta nie nadpisuje nowszej potwierdzonej operacji produktu', () => {
+  const server = { nazwa: 'Nowa nazwa AI', opis: 'Nowy opis', cena: 49.9, lastAdminMutationAt: '2026-07-24T13:10:00.000Z', lastAdminMutationId: 'new', lastAdminMutationFields: ['nazwa', 'opis'] };
+  const stale = { nazwa: 'Stara nazwa', opis: 'Stary opis', cena: 52.9, lastAdminMutationAt: '2026-07-24T13:00:00.000Z', lastAdminMutationId: 'old' };
+  assert.deepEqual(preserveNewerConfirmedMutation(server, stale), { ...stale, nazwa: 'Nowa nazwa AI', opis: 'Nowy opis', lastAdminMutationAt: server.lastAdminMutationAt, lastAdminMutationId: 'new', lastAdminMutationFields: ['nazwa', 'opis'] });
+  assert.equal(preserveNewerConfirmedMutation(server, stale).cena, 52.9);
+  assert.equal(preserveNewerConfirmedMutation(server, { ...stale, lastAdminMutationAt: '2026-07-24T13:20:00.000Z' }).nazwa, 'Stara nazwa');
 });
 
 test('dedykowany zapis ceny wykonuje jedną atomową operację na centralnym produkcie', async () => {

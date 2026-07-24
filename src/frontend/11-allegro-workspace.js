@@ -282,7 +282,7 @@ async function przywrocDziedziczenieCenyVonHalsky(button,productId){
   const p=produktDlaWyboruMarzy(productId);if(!p)return;
   button.disabled=true;button.textContent="⏳ Zapisuję…";
   zapiszPolaProduktuLokalnie(productId,{cenaVonHalsky:"",vonHalskyPriceRecommendedAt:new Date().toISOString()},false);zaplanujZapisUstawien();
-  const ok=await chmuraZapiszUstawienia();toast(ok?"🐕 Von Halsky ponownie dziedziczy cenę Allegro.":"⚠️ Zmiana została zachowana lokalnie i oczekuje na synchronizację.");renderuj();
+  const ok=await chmuraZapiszUstawienia({flush:true});toast(ok?"🐕 Von Halsky ponownie dziedziczy cenę Allegro.":"⚠️ Zmiana została zachowana lokalnie i oczekuje na synchronizację.");renderuj();
 }
 function rentownoscKanalowaWierszHTML({p,r}={}){
   const s=sklepRentownoscProduktu(p),vonTarget=Math.max(.1,Math.min(75,Number(p.vonHalskyPriceTargetMargin||vonHalskyDocelowaMarza)||vonHalskyDocelowaMarza)),v=vonHalskyRentownoscProduktu(p,null,vonTarget),offerId=String(p.allegroOfferId||allegroOfertaDlaProduktuSklepu(p)?.id||"");

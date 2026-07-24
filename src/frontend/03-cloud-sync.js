@@ -279,10 +279,30 @@ async function chmuraWczytajStan(){
 function zaplanujZapisUstawien(){
   if(!maUprawnieniaZapisuChmury()) return;
   clearTimeout(chmuraTimerZapisu);
-  chmuraTimerZapisu = setTimeout(chmuraZapiszUstawienia, 1200);
+  chmuraTimerZapisu = setTimeout(()=>chmuraZapiszUstawienia({flush:false}), 1200);
 }
 async function chmuraZapiszUstawienia(opcje={}){
   if(!maUprawnieniaZapisuChmury()) return false;
+  if(opcje.flush===true){
+    let all=opcje.all===true;
+    for(let attempt=0;attempt<8;attempt++){
+      clearTimeout(chmuraTimerZapisu);
+      if(chmuraZapisWToku){
+        const pending=await chmuraZapisWToku.catch(()=>false);
+        if(!pending)return false;
+      }
+      clearTimeout(chmuraTimerZapisu);
+      const ok=await chmuraZapiszUstawienia({...opcje,flush:false,all});
+      all=false;
+      if(!ok)return false;
+      if(!chmuraZapisWToku&&!chmuraBrudneKlucze.size&&!chmuraZapisPonowPoZakonczeniu){
+        clearTimeout(chmuraTimerZapisu);
+        return true;
+      }
+    }
+    chmuraStan={...chmuraStan,error:"Serwer nie potwierdził jeszcze całej kolejki zmian."};
+    return false;
+  }
   if(chmuraZapisWToku){chmuraZapisPonowPoZakonczeniu=true;return chmuraZapisWToku;}
   chmuraZapisWToku=(async()=>{
     const snapshot=zbierzWspolneUstawienia(),klucze=(opcje.all===true?KLUCZE_WSPOLNE:[...chmuraBrudneKlucze]).filter(k=>Object.prototype.hasOwnProperty.call(snapshot,k));
@@ -305,14 +325,14 @@ async function chmuraZapiszUstawienia(opcje={}){
   })();
   try{return await chmuraZapisWToku;}finally{
     chmuraZapisWToku=null;
-    if(chmuraBrudneKlucze.size||chmuraZapisPonowPoZakonczeniu){chmuraZapisPonowPoZakonczeniu=false;clearTimeout(chmuraTimerZapisu);chmuraTimerZapisu=setTimeout(chmuraZapiszUstawienia,1200);}
+    if(chmuraBrudneKlucze.size||chmuraZapisPonowPoZakonczeniu){chmuraZapisPonowPoZakonczeniu=false;clearTimeout(chmuraTimerZapisu);chmuraTimerZapisu=setTimeout(()=>chmuraZapiszUstawienia({flush:false}),1200);}
   }
 }
 // Ręczne WYSŁANIE całego sklepu z tego urządzenia na serwer (dla wszystkich).
 async function chmuraWyslijWszystko(){
   if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
   toast("Wysyłanie na serwer…");
-  const okU = await chmuraZapiszUstawienia({all:true});
+  const okU = await chmuraZapiszUstawienia({all:true,flush:true});
   await synchronizujBazeCentralna(true).catch(()=>{});
   if(okU) toast("📤 Cały sklep wysłany na serwer — widoczny na każdym urządzeniu ✅");
   else toast("⚠️ Nie udało się wysłać — sprawdź hasło bazy");
@@ -576,7 +596,7 @@ async function allegroPoprawOpisyWFormularzu(btn){
     let cloudSaved=null;
     if(id){
       zapiszPolaProduktuLokalnie(id,{allegroTitle:d.allegroTitle||produkt.allegroTitle||"",allegroShortDescription:d.shortDescription||produkt.allegroShortDescription||"",allegroDescription:d.allegroDescription||produkt.allegroDescription||"",contentEditorial:d.contentEditorial||produkt.contentEditorial,allegroDescriptionSections:Array.isArray(d.sections)?d.sections:[],allegroDescriptionEditedAt:new Date().toISOString(),allegroDescriptionSource:"agent-independent-allegro-content"},false);
-      cloudSaved=await chmuraZapiszUstawienia().catch(()=>false);
+      cloudSaved=await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
     }
     const box=document.getElementById("allegroDescriptionPreview");
     if(box) box.innerHTML=`<div class="backend-note"><b>✅ Niezależna treść Allegro przygotowana</b><br>Nazwa: ${esc(d.allegroTitle||"—")}<br><small>Treść sklepu i Von Halsky nie została zmieniona.</small></div><div class="allegro-description-preview"><div class="allegro-description-preview-head"><b>Podgląd układu w Allegro</b><small>Ta wersja ma własną walidację i kolejkę aktualizacji.</small></div>${(d.sections||[]).map(s=>(s.items||[]).map(item=>item.type==="IMAGE"?`<img src="${esc(item.url||"")}" alt="Podgląd zdjęcia produktu" loading="lazy">`:`<section>${item.content||""}</section>`).join("")).join("")||`<section><p>Brak sekcji do podglądu.</p></section>`}</div>`;
