@@ -29,11 +29,14 @@ test("publikacja działa jednym kliknięciem, ale zachowuje kontrolę Agenta i b
   assert.match(actions,/data-external-product-confirm/);
   assert.match(actions,/allegro-connection-check/);
   assert.match(actions,/approval:\{approved:true,operationId/);
+  assert.match(actions,/eligibleAll\.slice\(0,50\)/);
+  assert.match(actions,/Następna partia/);
+  assert.match(actions,/zaznaczoneAllegroProduktyKatalogu\?\.delete/);
 });
 
 test("centrum wystawiania skaluje katalog przez filtry, limit, paginację i eksport",async()=>{
   const source=(await read("src/frontend/12b-allegro-listing-workspace.js"))+(await read("src/frontend/12c-commerce-catalog-actions.js")),styles=(await read("src/styles/27-allegro-listing-workspace.css"))+(await read("src/styles/29-commerce-catalog-actions.css"));
-  for(const marker of ["EAN","EXTERNAL_ID","kod producenta","Sortowanie","Na stronie","Wszystkie kategorie","Wszyscy producenci","Gotowość danych","Sprzedaż w sklepie","Źródło produktu","Cena Allegro od","Cena Allegro do","Strona <b>"]){
+  for(const marker of ["EAN","EXTERNAL_ID","kod producenta","Sortowanie","Na stronie","Wszystkie kategorie","Wszyscy producenci","Gotowość danych","Dokładny stan kolejki","Źródło produktu","Cena Allegro od","Cena Allegro do","Strona <b>"]){
     assert.match(source,new RegExp(marker));
   }
   assert.match(source,/\[25,50,100,250,500,1000\]/);
@@ -52,10 +55,52 @@ test("centrum wystawiania skaluje katalog przez filtry, limit, paginację i eksp
   assert.ok(baseCss.sources.includes("src/styles/29-commerce-catalog-actions.css"));
 });
 
+test("domyślny filtr pokazuje tylko produkty naprawdę bez oferty Allegro",async()=>{
+  const runtime=await read("src/frontend/02-runtime-state.js"),listing=await read("src/frontend/12b-allegro-listing-workspace.js"),workspace=await read("src/frontend/12c-commerce-catalog-actions.js");
+  assert.match(runtime,/filtrAllegroWystawiania="bez_oferty"/);
+  for(const marker of ["Naprawdę bez oferty","Gotowe nowe","Nowe z brakami","Istniejące nieaktywne","Zweryfikuj zapisane ID"]){
+    assert.match(workspace,new RegExp(marker));
+  }
+  assert.match(workspace,/filter\(p=>!czyProduktAdminWKoszu\(p\)&&produktDostepnyWSprzedazy\(p\)\)/);
+  const start=listing.indexOf("function allegroPublikacjaMetaProduktu"),end=listing.indexOf("\nfunction allegroPublikacjaOtworzDecyzje",start);
+  assert.ok(start>=0&&end>start);
+  const context={
+    result:null,currentOffer:null,
+    asortymentOfertaProduktu(){return context.currentOffer;},
+    allegroOfertaDlaProduktuSklepu(){return null;},
+    allegroBrakiProduktuDoWystawienia(p){return p.missing||[];},
+    allegroRozniceOfertyProduktu(p){return p.differences||[];},
+  };
+  vm.runInNewContext(`${listing.slice(start,end)}
+    const fresh=allegroPublikacjaMetaProduktu({id:1,missing:[]});
+    const unresolved=allegroPublikacjaMetaProduktu({id:2,allegroOfferId:"123",missing:[]});
+    currentOffer={id:"456",status:"ACTIVE"};
+    const active=allegroPublikacjaMetaProduktu({id:3,missing:[]});
+    result={fresh,unresolved,active};`,context);
+  assert.equal(context.result.fresh.readyNew,true);
+  assert.equal(context.result.unresolved.noOffer,false);
+  assert.equal(context.result.unresolved.unresolved,true);
+  assert.equal(context.result.active.active,true);
+  assert.equal(context.result.active.actionable,false);
+});
+
+test("proces wystawiania ma trzy etapy i blokuje duplikat przy niezweryfikowanym ID",async()=>{
+  const listing=await read("src/frontend/12b-allegro-listing-workspace.js"),actions=await read("src/frontend/12a-product-actions.js"),styles=await read("src/styles/27-allegro-listing-workspace.css");
+  assert.match(listing,/WYBÓR ZAKRESU/);
+  assert.match(listing,/KONTROLA I ZAPIS/);
+  assert.match(listing,/PUBLIKACJA PRZEZ API/);
+  assert.match(listing,/meta\.unresolved/);
+  assert.match(listing,/publikacja duplikatu została zablokowana/i);
+  assert.match(actions,/unresolved=all\.filter/);
+  assert.match(actions,/Zapisane ID oferty wymaga weryfikacji/);
+  assert.match(styles,/\.allegro-publication-steps-three/);
+  assert.match(styles,/\.allegro-publication-card\.verify/);
+});
+
 test("ukryty produkt nie trafia do wystawiania Allegro i jest ponownie blokowany na serwerze",async()=>{
-  const listing=await read("src/frontend/12b-allegro-listing-workspace.js"),legacy=await read("src/frontend/11-allegro-operations.js"),backend=await read("src/backend/lib/store-app.mjs");
+  const listing=(await read("src/frontend/12b-allegro-listing-workspace.js"))+(await read("src/frontend/12c-commerce-catalog-actions.js")),legacy=await read("src/frontend/11-allegro-operations.js"),backend=await read("src/backend/lib/store-app.mjs");
   assert.match(listing,/filter\(p=>!czyProduktAdminWKoszu\(p\)&&produktDostepnyWSprzedazy\(p\)\)/);
-  assert.match(listing,/p&&produktDostepnyWSprzedazy\(p\)&&!allegroBrakiProduktuDoWystawienia/);
+  assert.match(listing,/p&&produktDostepnyWSprzedazy\(p\)&&meta\?\.ready/);
   assert.match(legacy,/produkt jest ukryty lub niedostępny/i);
   assert.match(backend,/code: 'product_sale_unavailable'/);
   assert.match(backend,/artway_dostepnosc\?\.\[saleProductId\]/);
@@ -78,8 +123,18 @@ test("szkic Allegro bierze zdjęcia ze strony źródłowej, a nie z podobnej ofe
 test("karta produktu wykonuje się z rzeczywistym wspólnym formatowaniem ceny",async()=>{
   const source=await read("src/frontend/12b-allegro-listing-workspace.js"),start=source.indexOf("function allegroPublikacjaKartaHTML"),end=source.indexOf("\n\nallegroWystawianiePanelHTML",start);
   assert.ok(start>=0&&end>start);
-  const context={result:"",allegroOfertaDlaProduktuSklepu:()=>null,allegroBrakiProduktuDoWystawienia:()=>[],allegroPublikacjaOcena:()=>({code:"ready",label:"Gotowy",detail:"komplet",score:100}),allegroPublikacjaTrybProduktu:()=>({operation:"activate",label:"Wystaw na Allegro",note:"nowa oferta",icon:"🟠"}),zaznaczoneAllegroProduktyKatalogu:new Set(),esc:value=>String(value??""),jsArg:value=>JSON.stringify(value),zl:value=>`${Number(value).toFixed(2).replace(".",",")} zł`,encodeURIComponent};
+  const context={result:"",allegroPublikacjaMetaProduktu:()=>({offer:null,missing:[],unresolved:false,status:""}),allegroPublikacjaOcena:()=>({code:"ready",label:"Gotowy",detail:"komplet",score:100}),allegroPublikacjaTrybProduktu:()=>({operation:"activate",label:"Wystaw na Allegro",note:"nowa oferta",icon:"🟠"}),zaznaczoneAllegroProduktyKatalogu:new Set(),esc:value=>String(value??""),jsArg:value=>JSON.stringify(value),zl:value=>`${Number(value).toFixed(2).replace(".",",")} zł`,encodeURIComponent};
   vm.runInNewContext(`${source.slice(start,end)}\nresult=allegroPublikacjaKartaHTML({id:1,nazwa:"Produkt testowy",cena:19.9});`,context);
   assert.match(context.result,/19,90 zł/);
   assert.match(context.result,/Wystaw na Allegro/);
+});
+
+test("wystawianie jest kolejką działań, a nie kopią pełnego katalogu Allegro",async()=>{
+  const listing=await read("src/frontend/12b-allegro-listing-workspace.js"),workspace=await read("src/frontend/12c-commerce-catalog-actions.js");
+  assert.match(listing,/actionable:noOffer\|\|unresolved\|\|inactive\|\|needsUpdate/);
+  assert.match(workspace,/all=saleProducts\.filter\(p=>allegroPublikacjaMetaProduktu\(p\)\.actionable\)/);
+  assert.match(workspace,/To nie jest pełny katalog ofert/);
+  assert.match(workspace,/Aktualne, poprawne oferty są automatycznie pomijane/);
+  assert.match(workspace,/Cała kolejka działań/);
+  assert.doesNotMatch(workspace,/Aktywne \(\$\{counts\.aktywne\}\)/);
 });
