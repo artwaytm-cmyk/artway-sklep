@@ -90,9 +90,12 @@ export function createSettingsFieldMutationHandler(deps = {}) {
       for (const [key, value] of Object.entries(mutation.changes)) current[key] = clone(value);
       for (const key of mutation.removeKeys) delete current[key];
 
+      // Rekord settings zawiera również duży katalog centralny. Ten endpoint
+      // zmienia wyłącznie artway_ustawienia, dlatego limitujemy tę domenę,
+      // a nie historyczną wielkość całego, niezwiązanego katalogu produktów.
+      if (Buffer.byteLength(JSON.stringify(current), 'utf8') > settingsLimit) return respond({ ok: false, error: 'Ustawienia sklepu są zbyt duże' }, 413);
       const merged = { ...(previous.data || {}), artway_ustawienia: current };
       const data = preserveSupplierPlan(preserveManualProductPrices(merged, previous.data), previous.data);
-      if (Buffer.byteLength(JSON.stringify(data), 'utf8') > settingsLimit) return respond({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
 
       const updatedAt = new Date().toISOString();
       const receipt = { id: mutationId, at: updatedAt, keys: changedKeys, settingsHash: hash(current) };
@@ -116,4 +119,3 @@ export function createSettingsFieldMutationHandler(deps = {}) {
     return respond({ ok: false, error: 'Serwer równolegle zapisuje inne dane. Operacja pozostała w kolejce i zostanie ponowiona.', code: 'settings_write_conflict' }, 409);
   };
 }
-

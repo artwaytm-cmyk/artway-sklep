@@ -64,6 +64,29 @@ test('usunięcie rabatu zapisuje pustą regułę dokładnie raz i zwraca potwier
   assert.deepEqual(duplicate.body.authoritative.values.kody, {});
 });
 
+test('mała zmiana ustawień nie jest blokowana przez duży centralny katalog produktów', async () => {
+  const largeCatalog = Array.from({ length: 6000 }, (_, index) => ({
+    id: `p-${index}`,
+    name: `Produkt ${index} ${'x'.repeat(900)}`,
+  }));
+  const store = harness({
+    data: {
+      artway_ustawienia: { kosztPaczkomat: '18', kosztKurierInpost: '24' },
+      artway_produkty_katalog: largeCatalog,
+    },
+    rev: 8,
+    updated_at: null,
+  });
+  const response = await store.handler({
+    method: 'POST',
+    json: async () => ({ mutationId: 'delivery-price-1', changes: { kosztPaczkomat: '19' } }),
+  }, new URL('https://artwaytm.pl/api/store?action=settings-field-mutation'));
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(store.current.value.data.artway_ustawienia.kosztPaczkomat, '19');
+  assert.equal(store.current.value.data.artway_produkty_katalog.length, 6000);
+});
+
 test('każdy formularz ustawień korzysta z trwałej kolejki i atomowego endpointu', () => {
   const sync = fs.readFileSync(new URL('../src/frontend/03b-settings-field-mutations.js', import.meta.url), 'utf8');
   const settings = fs.readFileSync(new URL('../src/frontend/09-seo.js', import.meta.url), 'utf8');
