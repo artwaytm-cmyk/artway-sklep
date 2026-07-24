@@ -2960,7 +2960,7 @@ const storeDataRoute = createStoreDataRoute({
   czytajWersjonowane,
   preserveSupplierPlanOnGenericSettings,
   LIMIT_USTAWIEN,
-  zapiszJesliWersja,
+  zapiszJesliWersja, zapiszOperacjeProduktow,
   ograniczRuch,
   bezpieczneZamowienieKlienta,
   requestSession,

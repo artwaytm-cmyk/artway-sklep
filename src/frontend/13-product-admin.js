@@ -69,18 +69,18 @@ function asortymentStanZapisuCeny(input,status="",tekst=""){
   clearTimeout(input._artwayPriceStateTimer);
   if(status==="is-saved")input._artwayPriceStateTimer=setTimeout(()=>{pole.classList.remove("is-saved");if(info)info.textContent="";},1800);
 }
-function asortymentPodmienCeneBezRenderu(id,patch={},usun=[]){
+function asortymentPodmienCeneBezRenderu(id,patch={},usun=[],synchronizuj=true){
   const key=String(id),baza=pobierzProduktAdmin(id)||{},idx=produktyDodane.findIndex(x=>String(x.id)===key);
   const signature=typeof asortymentCentralnySygnatura==="function"?asortymentCentralnySygnatura():"";
   const centralData=asortymentCentralnyStan?.status==="ready"&&asortymentCentralnyStan.signature===signature?asortymentCentralnyStan.data:asortymentCentralnyCache?.get?.(signature)?.data;
   if(idx>=0){
     const next={...produktyDodane[idx],...patch};for(const pole of usun)delete next[pole];
     produktyDodane=[...produktyDodane.slice(0,idx),next,...produktyDodane.slice(idx+1)];
-    zapiszLS("artway_produkty_dodane",produktyDodane);
+    zapiszLS("artway_produkty_dodane",produktyDodane,{synchronizuj});
   }else{
     const next={...(produktyEdytowane[key]||{}),...patch};for(const pole of usun)next[pole]=null;
     produktyEdytowane={...produktyEdytowane,[key]:next};
-    zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+    zapiszLS("artway_produkty_edytowane",produktyEdytowane,{synchronizuj});
   }
   if(Array.isArray(produkty)){
     const produktIdx=produkty.findIndex(x=>String(x.id)===key);
@@ -94,19 +94,16 @@ function asortymentPodmienCeneBezRenderu(id,patch={},usun=[]){
   }
   return baza;
 }
-async function asortymentPotwierdzZapisCeny(input,tekst="Zapisano"){
-  if(typeof maUprawnieniaZapisuChmury!=="function"||!maUprawnieniaZapisuChmury()){asortymentStanZapisuCeny(input,"is-saved",`${tekst} lokalnie`);return true;}
-  let ok=await chmuraZapiszUstawienia();
-  if(ok&&(["artway_produkty_dodane","artway_produkty_edytowane"].some(key=>chmuraBrudneKlucze.has(key))))ok=await chmuraZapiszUstawienia();
-  asortymentStanZapisuCeny(input,ok?"is-saved":"has-error",ok?tekst:"Zapis oczekuje na ponowienie");
-  return ok;
+async function asortymentZapiszCeneSerwer(id,channel,value,clear=false){
+  return chmura("catalog-product-price-update",{method:"POST",body:{productId:String(id),channel,...(clear?{clear:true}:{value})},timeout:30000});
 }
 async function ustawCeneKanalu(id,kanal,wartosc,input=null){
   const pola={sklep:"cena",allegro:"cenaAllegro",vonHalsky:"cenaVonHalsky"},pole=pola[kanal]||"cena",poprzedni=pobierzProduktAdmin(id)||{},raw=String(wartosc).trim(),cena=parseFloat(raw.replace(/\s/g,"").replace(",",".")),dziedziczony=kanal==="vonHalsky"?kwotaNum(poprzedni.cenaAllegro||poprzedni.cena):kwotaNum(poprzedni.cena);
   if(raw===""&&kanal!=="sklep"){
-    asortymentStanZapisuCeny(input,"is-saving","Zapisuję dziedziczenie…");asortymentPodmienCeneBezRenderu(id,{},[pole]);
-    if(input)input.value="";loguj("info",`Cena ${kanal} produktu ${id} dziedziczy cenę ${kanal==="vonHalsky"?"Allegro":"sklepu"}`);
-    return asortymentPotwierdzZapisCeny(input,`Dziedziczy ${dziedziczony?zl(dziedziczony):"cenę bazową"}`);
+    asortymentStanZapisuCeny(input,"is-saving","Zapisuję dziedziczenie…");
+    try{const saved=await asortymentZapiszCeneSerwer(id,kanal==="vonHalsky"?"vonHalsky":"allegro",null,true);asortymentPodmienCeneBezRenderu(id,saved.fields||{},saved.remove||[pole],false);
+      if(input)input.value="";loguj("info",`Cena ${kanal} produktu ${id} dziedziczy cenę ${kanal==="vonHalsky"?"Allegro":"sklepu"}`);asortymentStanZapisuCeny(input,"is-saved",`Dziedziczy ${dziedziczony?zl(dziedziczony):"cenę bazową"}`);return true;
+    }catch(error){asortymentStanZapisuCeny(input,"has-error","Nie zapisano — spróbuj ponownie");toast(`⚠️ ${error.message||"Nie udało się zapisać ceny"}`);return false;}
   }
   if(!(cena>0)){
     const previousValue=kwotaNum(poprzedni[pole]||(kanal==="vonHalsky"?poprzedni.cenaAllegro:poprzedni.cena));
@@ -115,9 +112,9 @@ async function ustawCeneKanalu(id,kanal,wartosc,input=null){
   }
   asortymentStanZapisuCeny(input,"is-saving","Zapisuję na serwerze…");
   const nowa=+cena.toFixed(2),usun=kanal==="sklep"&&Number(poprzedni.staraCena)>0&&Number(poprzedni.staraCena)<=nowa?["staraCena"]:[];
-  asortymentPodmienCeneBezRenderu(id,{[pole]:nowa},usun);if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
-  loguj("info",`Zmieniono cenę ${kanal} produktu ${id} → ${zl(nowa)}`);
-  return asortymentPotwierdzZapisCeny(input,"Zapisano na serwerze");
+  try{const saved=await asortymentZapiszCeneSerwer(id,kanal==="sklep"?"store":kanal,nowa);asortymentPodmienCeneBezRenderu(id,saved.fields||{[pole]:nowa},[...new Set([...(saved.remove||[]),...usun])],false);if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
+    loguj("info",`Zmieniono cenę ${kanal} produktu ${id} → ${zl(nowa)}`);asortymentStanZapisuCeny(input,"is-saved","Zapisano trwale");return true;
+  }catch(error){if(input)input.value=poprzedni[pole]==null&&kanal!=="sklep"?"":String(kwotaNum(poprzedni[pole]||poprzedni.cena).toFixed(2)).replace(".",",");asortymentStanZapisuCeny(input,"has-error","Nie zapisano — spróbuj ponownie");toast(`⚠️ ${error.message||"Nie udało się zapisać ceny"}`);return false;}
 }
 function ustawCene(id, wartosc, input=null){
   return ustawCeneKanalu(id,"sklep",wartosc,input);
@@ -127,8 +124,8 @@ async function ustawCeneZakupu(id, wartosc, input=null){
   const polaFaktury=["cenaZakupuNetto","cenaZakupuVat","cenaZakupuWaluta","cenaZakupuDokument","cenaZakupuKsef","cenaZakupuDostawca","cenaZakupuDataDokumentu"];
   if(raw===""){
     asortymentStanZapisuCeny(input,"is-saving","Usuwam…");
-    asortymentPodmienCeneBezRenderu(id,{},["cenaZakupu","cenaZakupuPrywatna","cenaZakupuZrodlo","cenaZakupuDopasowanie","cenaZakupuZaktualizowanoAt",...polaFaktury]);
-    loguj("info",`Usunięto ręczną cenę zakupu produktu ${id}`);return asortymentPotwierdzZapisCeny(input,"Usunięto");
+    try{const saved=await asortymentZapiszCeneSerwer(id,"purchase",null,true);asortymentPodmienCeneBezRenderu(id,saved.fields||{},saved.remove||["cenaZakupu",...polaFaktury],false);loguj("info",`Usunięto ręczną cenę zakupu produktu ${id}`);asortymentStanZapisuCeny(input,"is-saved","Usunięto");return true;
+    }catch(error){asortymentStanZapisuCeny(input,"has-error","Nie usunięto");toast(`⚠️ ${error.message||"Nie udało się usunąć ceny"}`);return false;}
   }
   if(!Number.isFinite(cena)||cena<0){
     if(input)input.value=poprzedni.cenaZakupu==null?"":String(kwotaNum(poprzedni.cenaZakupu).toFixed(2)).replace(".",",");
@@ -136,10 +133,9 @@ async function ustawCeneZakupu(id, wartosc, input=null){
   }
   asortymentStanZapisuCeny(input,"is-saving","Zapisuję…");
   const nowa=+cena.toFixed(2);
-  asortymentPodmienCeneBezRenderu(id,{cenaZakupu:nowa,cenaZakupuPrywatna:true,cenaZakupuZrodlo:"ręczna edycja administratora",cenaZakupuDopasowanie:"ręcznie",cenaZakupuZaktualizowanoAt:new Date().toISOString()},polaFaktury);
-  if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
-  loguj("info",`Zmieniono prywatną cenę zakupu produktu ${id} → ${zl(nowa)}`);
-  return asortymentPotwierdzZapisCeny(input,"Zapisano na serwerze");
+  try{const saved=await asortymentZapiszCeneSerwer(id,"purchase",nowa);asortymentPodmienCeneBezRenderu(id,saved.fields||{cenaZakupu:nowa},saved.remove||polaFaktury,false);
+    if(input)input.value=String(nowa.toFixed(2)).replace(".",",");loguj("info",`Zmieniono prywatną cenę zakupu produktu ${id} → ${zl(nowa)}`);asortymentStanZapisuCeny(input,"is-saved","Zapisano trwale");return true;
+  }catch(error){if(input)input.value=poprzedni.cenaZakupu==null?"":String(kwotaNum(poprzedni.cenaZakupu).toFixed(2)).replace(".",",");asortymentStanZapisuCeny(input,"has-error","Nie zapisano — spróbuj ponownie");toast(`⚠️ ${error.message||"Nie udało się zapisać ceny zakupu"}`);return false;}
 }
 /* ── Akcje masowe na produktach ── */
 let zaznaczoneProdukty = new Set();

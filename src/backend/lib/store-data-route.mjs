@@ -1,4 +1,5 @@
 import { isValidAccountEmail } from './core/account-validation.mjs';
+import { preserveManualProductPrices } from './domain/catalog-product-price-merge.mjs';
 
 export function createStoreDataRoute(deps = {}) {
   const PUBLIC_CENTRAL_CATALOG_KEYS = ['artway_produkty_edytowane', 'artway_produkty_dodane', 'artway_produkty_katalog', 'artway_produkty_ukryte', 'artway_produkty_definitywne', 'artway_stany', 'artway_dostepnosc', 'artway_magazyn_produkty'];
@@ -28,6 +29,7 @@ export function createStoreDataRoute(deps = {}) {
     verifyMfaEmailRecoveryChallenge, verifyMfaEmailRecoveryCode, wyslijEmailSMTP,
     primaryAdminEmail = () => '',
     clearAccountSessionHeaders = () => ({}),
+    zapiszOperacjeProduktow = null,
   } = deps;
   const accessAudit = async (entry = {}) => {
     const now = new Date().toISOString();
@@ -145,6 +147,30 @@ export function createStoreDataRoute(deps = {}) {
       return odpowiedz({ ok: true, users, count: users.length, usersVersion, updated_at: versioned.value?.updated_at || null });
     }
 
+    if (action === 'catalog-product-price-update') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      if (typeof zapiszOperacjeProduktow !== 'function') return odpowiedz({ ok: false, error: 'Atomowy zapis ceny nie jest dostępny.' }, 503);
+      const body = await req.json().catch(() => ({})), productId = tekst(body.productId, 100), channel = tekst(body.channel, 30), clear = body.clear === true;
+      const config = {
+        store: { field: 'cena', updatedAt: 'cenaZaktualizowanoAt', manual: 'cenaManualna', source: 'cenaZrodlo', clear: false },
+        allegro: { field: 'cenaAllegro', updatedAt: 'cenaAllegroZaktualizowanoAt', manual: 'cenaAllegroManualna', source: 'cenaAllegroZrodlo', clear: true },
+        vonHalsky: { field: 'cenaVonHalsky', updatedAt: 'cenaVonHalskyZaktualizowanoAt', manual: 'cenaVonHalskyManualna', source: 'cenaVonHalskyZrodlo', clear: true },
+        purchase: { field: 'cenaZakupu', updatedAt: 'cenaZakupuZaktualizowanoAt', manual: 'cenaZakupuPrywatna', source: 'cenaZakupuZrodlo', clear: true },
+      }[channel];
+      if (!productId || !config || (clear && !config.clear)) return odpowiedz({ ok: false, error: 'Nieprawidłowy produkt, kanał albo sposób zapisu ceny.' }, 422);
+      const value = Number(String(body.value ?? '').replace(',', '.'));
+      if (!clear && (!Number.isFinite(value) || value < (channel === 'purchase' ? 0 : 0.01))) return odpowiedz({ ok: false, error: 'Nieprawidłowa wartość ceny.' }, 422);
+      const updatedAt = new Date().toISOString(), actor = tekst(requestSession(req)?.email || 'administrator', 200);
+      const fields = { [config.updatedAt]: updatedAt, [config.manual]: !clear, [config.source]: clear ? 'dziedziczenie po kanale nadrzędnym' : `ręczna edycja administratora: ${actor}`, ...(clear ? {} : { [config.field]: +value.toFixed(2) }) };
+      if (channel === 'purchase' && !clear) Object.assign(fields, { cenaZakupuDopasowanie: 'ręcznie' });
+      const purchaseInvoiceFields = ['cenaZakupuNetto', 'cenaZakupuVat', 'cenaZakupuWaluta', 'cenaZakupuDokument', 'cenaZakupuKsef', 'cenaZakupuDostawca', 'cenaZakupuDataDokumentu'];
+      const remove = clear ? [config.field, ...(channel === 'purchase' ? [...purchaseInvoiceFields, 'cenaZakupuDopasowanie'] : [])] : (channel === 'purchase' ? purchaseInvoiceFields : []);
+      const saved = await zapiszOperacjeProduktow([{ id: productId, fields, remove }], updatedAt);
+      if (saved.skippedProductIds?.includes(productId) || (!saved.modified && !saved.appliedOperations)) return odpowiedz({ ok: false, error: 'Produkt nie istnieje w centralnym katalogu albo nie można go bezpiecznie zaktualizować.' }, 404);
+      return odpowiedz({ ok: true, productId, channel, field: config.field, value: clear ? null : +value.toFixed(2), clear, fields, remove, rev: saved.value?.rev, updated_at: updatedAt });
+    }
+
     // ─── ZAPIS USTAWIEŃ (tylko admin) ───
     if (action === 'settings') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -156,7 +182,7 @@ export function createStoreDataRoute(deps = {}) {
         for (let attempt = 0; attempt < 5; attempt++) {
           const version = await czytajWersjonowane('settings', { data: {}, rev: 0, updated_at: null }), prev = version.value || { data: {}, rev: 0, updated_at: null };
           if (mutationId && prev.last_mutation_id === mutationId) return odpowiedz({ ok: true, duplicatePrevented: true, changedKeys, rev: prev.rev, updated_at: prev.updated_at });
-          const dane = preserveSupplierPlanOnGenericSettings({ ...(prev.data || {}), ...patch }, prev.data), updated_at = new Date().toISOString();
+          const dane = preserveSupplierPlanOnGenericSettings(preserveManualProductPrices({ ...(prev.data || {}), ...patch }, prev.data), prev.data), updated_at = new Date().toISOString();
           if (JSON.stringify(dane).length > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
           const rec = { ...prev, data: dane, rev: Number(prev.rev || 0) + 1, updated_at, last_mutation_id: mutationId || undefined };
           const write = await zapiszJesliWersja('settings', rec, version);
@@ -174,7 +200,7 @@ export function createStoreDataRoute(deps = {}) {
       if (Number(prev.rev || 0) !== expectedRev) {
         return odpowiedz({ ok: false, error: 'Ustawienia zmieniły się na innym urządzeniu. Niczego nie nadpisano.', code: 'settings_write_conflict', rev: Number(prev.rev || 0) }, 409);
       }
-      const dane = preserveSupplierPlanOnGenericSettings(incoming, prev.data);
+      const dane = preserveSupplierPlanOnGenericSettings(preserveManualProductPrices(incoming, prev.data), prev.data);
       const rozmiar = JSON.stringify(dane).length;
       if (rozmiar > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
       const rec = { data: dane, rev: expectedRev + 1, updated_at: new Date().toISOString() };

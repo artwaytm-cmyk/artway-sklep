@@ -853,7 +853,7 @@ function uniewaznijCachePodstronAdmina(zakres="all"){
   }
   if(typeof uniewaznijAdminMenuStatCache==="function")uniewaznijAdminMenuStatCache();
 }
-function zapiszLS(klucz, dane){
+function zapiszLS(klucz, dane, opcje={}){
   if(klucz==="artway_zamowienia" && Array.isArray(dane)) dane = filtrujAktywneZamowienia(dane);
   const serial=JSON.stringify(dane);
   let zmieniono=true;
@@ -868,7 +868,7 @@ function zapiszLS(klucz, dane){
   }
   if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina(klucz);
   if(zmieniono&&["artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_magazyn_produkty","artway_ustawienia"].includes(klucz)&&typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
-  if(zmieniono && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
+  if(zmieniono && opcje.synchronizuj!==false && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
   return zmieniono;
 }
 const kwotaNum = v => { const n=Number(String(v ?? 0).replace(",",".").replace(/[^0-9.-]/g,"")); return Number.isFinite(n) ? +n.toFixed(2) : 0; };
