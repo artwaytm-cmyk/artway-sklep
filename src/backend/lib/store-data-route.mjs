@@ -3,7 +3,7 @@ import { isValidAccountEmail } from './core/account-validation.mjs';
 export function createStoreDataRoute(deps = {}) {
   const PUBLIC_CENTRAL_CATALOG_KEYS = ['artway_produkty_edytowane', 'artway_produkty_dodane', 'artway_produkty_katalog', 'artway_produkty_ukryte', 'artway_produkty_definitywne', 'artway_stany', 'artway_dostepnosc', 'artway_magazyn_produkty'];
   const PUBLIC_CENTRAL_ADMIN_KEYS = [
-    'artway_ruchy_magazynowe', 'artway_magazyn_lokalizacje', 'artway_magazyn_lokalizacje_usuniete',
+    'artway_ruchy_magazynowe', 'artway_magazyn_niedobory_wydan', 'artway_magazyn_lokalizacje', 'artway_magazyn_lokalizacje_usuniete',
     'artway_dokumenty_magazynowe', 'artway_dokumenty_magazynowe_usuniete', 'artway_dokumenty_magazynowe_seq',
     'artway_faktury_szkice', 'artway_producenci', 'artway_agent_ai_zlecenia', 'artway_agent_ai_plan_cykl',
     'artway_agent_ai_pamiec', 'artway_agent_ai_historia', 'artway_agent_ai_linki_producentow',

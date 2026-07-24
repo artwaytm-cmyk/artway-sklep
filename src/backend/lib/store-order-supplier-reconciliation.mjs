@@ -1,5 +1,6 @@
 import { reconcileSupplierOrderDrafts } from './domain/supplier-order-reconciliation.mjs';
 import { allegroOrdersForInventoryDeduction, allegroOrdersForSupplierDemand } from './domain/allegro-supplier-demand.mjs';
+import { recordInventoryShortfall } from './domain/inventory-shortfall.mjs';
 
 const DEFAULT_ORDER_LIMIT = 20_000;
 const DEFAULT_SETTINGS_LIMIT = 4 * 1024 * 1024;
@@ -51,6 +52,7 @@ function inventoryOperationalPayloadSize(data = {}) {
   const source = object(data);
   return JSON.stringify({
     artway_stany: object(source.artway_stany),
+    artway_magazyn_niedobory_wydan: object(source.artway_magazyn_niedobory_wydan),
     artway_ruchy_magazynowe: array(source.artway_ruchy_magazynowe),
   }).length;
 }
@@ -334,13 +336,24 @@ export function createStoreOrderSupplierReconciliation({
         };
       }
       const stock = { ...object(data.artway_stany) };
+      let shortfalls = structuredClone(object(data.artway_magazyn_niedobory_wydan));
       const timestamp = now();
       const iso = timestamp.toISOString();
       const movements = [];
       for (const [movementIndex, entry] of items.entries()) {
         const before = quantity(stock[entry.id]);
-        const after = Math.max(0, before - entry.amount);
+        const deducted = Math.min(before, entry.amount);
+        const missing = entry.amount - deducted;
+        const after = before - deducted;
         stock[entry.id] = after;
+        if (missing > 0) {
+          shortfalls = recordInventoryShortfall(shortfalls, {
+            productId: entry.id,
+            orderNumber: nr,
+            quantity: missing,
+            at: iso,
+          }).shortfalls;
+        }
         movements.push({
           id: `MAG-${timestamp.getTime().toString(36)}-${movementIndex}-${entry.id.slice(-10)}`,
           data: iso,
@@ -350,6 +363,8 @@ export function createStoreOrderSupplierReconciliation({
           sku: text(entry.item?.sku || '', 80),
           typ: 'sprzedaż',
           ilosc: -entry.amount,
+          iloscFizycznieOdjeta: deducted,
+          iloscDoRozliczeniaZDostawy: missing,
           stanPrzed: before,
           stanPo: after,
           dokument: nr,
@@ -361,6 +376,7 @@ export function createStoreOrderSupplierReconciliation({
       const nextData = {
         ...data,
         artway_stany: stock,
+        artway_magazyn_niedobory_wydan: shortfalls,
         artway_ruchy_magazynowe: [...movements, ...oldMovements].slice(0, 3000),
       };
       if (inventoryOperationalPayloadSize(nextData) > settingsLimit) {

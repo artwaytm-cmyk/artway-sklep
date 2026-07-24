@@ -16,6 +16,7 @@ const SETTINGS_DOMAIN_CONFIGS = Object.freeze({
   artway_produkty_ukryte: arrayConfig(),
   artway_produkty_definitywne: arrayConfig(),
   artway_stany: objectConfig(),
+  artway_magazyn_niedobory_wydan: objectConfig(),
   artway_dostepnosc: objectConfig(),
   artway_ruchy_magazynowe: arrayConfig(['id', 'sourceRequestId']),
   artway_magazyn_produkty: objectConfig(),

@@ -48,6 +48,7 @@ const KLUCZE_MAP_PRODUKTOW = new Set(['artway_produkty_edytowane']);
 const PRYWATNE_POLA_USTAWIEN = new Set(['celMarzySklep', 'celMarzyAllegro', 'allegroJednostkiOplatCyklicznych', 'domyslneKosztyRentownosci']);
 const PRYWATNE_KLUCZE_ADMINA = new Set([
   'artway_ruchy_magazynowe',
+  'artway_magazyn_niedobory_wydan',
   'artway_magazyn_ustawienia',
   'artway_magazyn_produkty',
   'artway_magazyn_lokalizacje',

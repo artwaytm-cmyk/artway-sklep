@@ -236,6 +236,44 @@ test('stan fizyczny jest odejmowany raz dopiero po wysłaniu zamówienia', async
   assert.equal(repo.records.get('orders').items[0].inventoryMode, 'deducted_on_shipment');
 });
 
+test('wysyłka przy zbyt małym stanie zapisuje zaległe wydanie do rozliczenia z następnego PZ', async () => {
+  const repo = memoryRepository({
+    orders: { items: [] },
+    settings: {
+      rev: 1,
+      data: {
+        artway_stany: { 110: 1 },
+        artway_magazyn_niedobory_wydan: {},
+        artway_ruchy_magazynowe: [],
+      },
+    },
+  });
+  const workflow = service(repo);
+  const shipped = {
+    nr: 'Allegro TEST-110',
+    status: 'wysłane',
+    inventoryMode: 'reserved_until_shipment',
+    pozycjeDane: [{ id: 110, nazwa: 'ALE PARY FLAGI', ilosc: 3 }],
+  };
+
+  const first = await workflow.deductInventoryOnShipment(shipped);
+  const retry = await workflow.deductInventoryOnShipment(shipped);
+  const data = repo.records.get('settings').data;
+
+  assert.equal(first.changed, true);
+  assert.equal(retry.alreadyDeducted, true);
+  assert.equal(data.artway_stany[110], 0);
+  assert.equal(data.artway_magazyn_niedobory_wydan[110].quantity, 2);
+  assert.deepEqual(data.artway_magazyn_niedobory_wydan[110].orders, [{
+    orderNumber: 'Allegro TEST-110',
+    quantity: 2,
+    createdAt: FIXED_NOW.toISOString(),
+    updatedAt: FIXED_NOW.toISOString(),
+  }]);
+  assert.equal(data.artway_ruchy_magazynowe[0].iloscFizycznieOdjeta, 1);
+  assert.equal(data.artway_ruchy_magazynowe[0].iloscDoRozliczeniaZDostawy, 2);
+});
+
 test('anulowanie przed wysyłką zwalnia rezerwację bez ruchu fizycznego stanu', async () => {
   const repo = memoryRepository({
     orders: { items: [] },

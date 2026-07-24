@@ -409,6 +409,7 @@ const KLUCZE_WSPOLNE = [
   'artway_produkty_ukryte',
   'artway_produkty_definitywne',
   'artway_stany',
+  'artway_magazyn_niedobory_wydan',
   'artway_dostepnosc',
   'artway_ruchy_magazynowe',
   'artway_magazyn_ustawienia',

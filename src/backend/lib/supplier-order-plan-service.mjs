@@ -55,6 +55,7 @@ function supplierOperationalPayloadSize(data = {}) {
   return JSON.stringify({
     artway_agent_ai_zlecenia: array(source.artway_agent_ai_zlecenia),
     artway_stany: object(source.artway_stany),
+    artway_magazyn_niedobory_wydan: object(source.artway_magazyn_niedobory_wydan),
     artway_ruchy_magazynowe: array(source.artway_ruchy_magazynowe),
   }).length;
 }
@@ -64,6 +65,7 @@ export function preserveSupplierPlanOnGenericSettings(incoming = {}, previous = 
   return {
     ...object(incoming),
     artway_agent_ai_zlecenia: structuredClone(supplierOrders(previous)),
+    artway_magazyn_niedobory_wydan: structuredClone(object(object(previous).artway_magazyn_niedobory_wydan)),
     artway_dokumenty_magazynowe: structuredClone(array(object(previous).artway_dokumenty_magazynowe)),
     artway_dokumenty_magazynowe_seq: structuredClone(object(object(previous).artway_dokumenty_magazynowe_seq)),
   };

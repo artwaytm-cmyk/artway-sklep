@@ -249,6 +249,56 @@ test('przyjęcie zwiększa stan o całą faktyczną ilość, zapisuje nadwyżkę
   assert.equal(retry.settings.artway_stany[1], 8);
 });
 
+test('przyjęcie najpierw rozlicza wysłane zamówienie, a dopiero nadwyżkę dodaje do wolnego stanu', () => {
+  const sent = draft({
+    status: 'wysłane do producenta',
+    emailSentAt: NOW.toISOString(),
+    receiptRevision: 0,
+    pozycje: [{
+      ...draft().pozycje[0],
+      ilosc: 5,
+      iloscPotrzebna: 3,
+      orderAllocations: { 'Allegro TEST-1': 3 },
+      zamowienia: ['Allegro TEST-1'],
+    }],
+  });
+  const result = receiveSupplierPlanLine({
+    drafts: [sent],
+    settings: {
+      artway_stany: { 1: 0 },
+      artway_magazyn_niedobory_wydan: {
+        1: {
+          quantity: 3,
+          orders: [{
+            orderNumber: 'Allegro TEST-1',
+            quantity: 3,
+            createdAt: NOW.toISOString(),
+            updatedAt: NOW.toISOString(),
+          }],
+        },
+      },
+      artway_ruchy_magazynowe: [],
+    },
+    draftId: 'D-1',
+    productId: '1',
+    quantity: 5,
+    requestId: 'receipt-with-shortfall',
+    expectedReceiptRevision: 0,
+    actor: 'admin@example.test',
+    now: NOW,
+  });
+
+  assert.equal(result.settings.artway_stany[1], 2);
+  assert.deepEqual(result.settings.artway_magazyn_niedobory_wydan, {});
+  assert.equal(result.allocatedToShippedOrders, 3);
+  assert.equal(result.addedToFreeStock, 2);
+  assert.equal(result.movement.stanPrzed, 0);
+  assert.equal(result.movement.stanPo, 5);
+  assert.equal(result.settlementMovements[0].stanPrzed, 5);
+  assert.equal(result.settlementMovements[0].stanPo, 2);
+  assert.equal(result.draft.pozycje[0].rozliczonoZalegleWydania, 3);
+});
+
 test('cały dokument jest przyjmowany jednym zapisem, a korekta pozostawia brak do kolejnej dostawy', () => {
   const sent = draft({
     status: 'wysłane do producenta', emailSentAt: NOW.toISOString(), receiptRevision: 0,

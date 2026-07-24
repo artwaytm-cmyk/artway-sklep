@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { RECEIVABLE_STATUSES, CORRECTABLE_STATUSES, object, array, text, normalized, integer, fail, nowDate, statusKey, isEditable, supplierOf, draftItems, quantityOf, requiredOf, receivedOf, orderAllocationsOf, updateReceiptAllocations, identifierValue, sameLine, productLine, clearApproval, appendHistory, summarize, nextDraft, expectedRevision, supplierLineIdentifiers, supplierLineStableKey } from './supplier-order-plan-support.mjs';
+import { settleInventoryShortfall } from './inventory-shortfall.mjs';
 
 /** Dodaje pozycję albo zmienia jej łączną ilość w jedynym aktywnym szkicu dostawcy. */
 export function upsertSupplierPlanLine(input = {}) {
@@ -260,7 +261,13 @@ export function receiveSupplierPlanLine(input = {}) {
   if (!productId) fail('Pozycja nie jest połączona z kartoteką magazynową.', 'supplier_product_not_linked');
   const stock = { ...object(settings.artway_stany) };
   const before = Math.max(0, Number(stock[productId]) || 0);
-  const after = before + amount;
+  const debtSettlement = settleInventoryShortfall(settings.artway_magazyn_niedobory_wydan, {
+    productId,
+    quantity: amount,
+    at: now.toISOString(),
+  });
+  const afterReceipt = before + amount;
+  const after = afterReceipt - debtSettlement.settled;
   const received = receivedOf(line) + amount;
   const ordered = quantityOf(line);
   stock[productId] = after;
@@ -276,7 +283,14 @@ export function receiveSupplierPlanLine(input = {}) {
   draft.lastReceiptAt = now.toISOString();
   const allReceived = lines.length > 0 && lines.every((item) => receivedOf(item) >= quantityOf(item));
   draft.status = allReceived ? 'zrealizowane' : 'częściowo zrealizowane';
-  appendHistory(draft, now.toISOString(), 'stock-receipt', `Przyjęto ${amount} szt. ${text(line.nazwa, 220)} na stan ${before} → ${after}.`, input.actor);
+  line.rozliczonoZalegleWydania = Math.max(0, Number(line.rozliczonoZalegleWydania) || 0) + debtSettlement.settled;
+  appendHistory(
+    draft,
+    now.toISOString(),
+    'stock-receipt',
+    `Przyjęto ${amount} szt. ${text(line.nazwa, 220)}; ${debtSettlement.settled} szt. rozliczono z wysłanymi zamówieniami, wolny stan ${before} → ${after}.`,
+    input.actor,
+  );
   summarize(draft);
   const movement = {
     id: `MAG-${crypto.createHash('sha256').update(sourceRequestId).digest('hex').slice(0, 18)}`,
@@ -288,7 +302,7 @@ export function receiveSupplierPlanLine(input = {}) {
     typ: 'przyjęcie',
     ilosc: amount,
     stanPrzed: before,
-    stanPo: after,
+    stanPo: afterReceipt,
     dokument: text(draft.numer || draft.id, 160),
     powod: 'Dostawa od producenta',
     operator: text(input.actor, 200) || 'administrator',
@@ -296,9 +310,33 @@ export function receiveSupplierPlanLine(input = {}) {
     supplierOrderId: text(draft.id, 160),
     supplierLineKey: supplierLineStableKey(line),
   };
+  const settlementMovements = debtSettlement.allocations.map((allocation, index) => ({
+    id: `MAG-${crypto.createHash('sha256').update(`${sourceRequestId}:settlement:${index}`).digest('hex').slice(0, 18)}`,
+    data: now.toISOString(),
+    dataTxt: now.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' }),
+    produktId: productId,
+    produktNazwa: text(line.nazwa, 220),
+    sku: text(line.sku || line.externalId || line.kod, 120),
+    typ: 'rozliczenie wydania',
+    ilosc: -allocation.quantity,
+    stanPrzed: afterReceipt - debtSettlement.allocations.slice(0, index).reduce((sum, row) => sum + row.quantity, 0),
+    stanPo: afterReceipt - debtSettlement.allocations.slice(0, index + 1).reduce((sum, row) => sum + row.quantity, 0),
+    dokument: allocation.orderNumber,
+    powod: 'Rozliczenie wysyłki wykonanej przed przyjęciem dostawy',
+    operator: 'system',
+    sourceRequestId: `${sourceRequestId}:settlement:${index}`,
+    supplierOrderId: text(draft.id, 160),
+    supplierLineKey: supplierLineStableKey(line),
+    sourceReceiptRequestId: sourceRequestId,
+  }));
   settings.artway_stany = stock;
-  settings.artway_ruchy_magazynowe = [movement, ...movements].slice(0, 3000);
-  return { drafts, draft, settings, changed: true, duplicate: false, movement };
+  settings.artway_magazyn_niedobory_wydan = debtSettlement.shortfalls;
+  settings.artway_ruchy_magazynowe = [...settlementMovements.reverse(), movement, ...movements].slice(0, 3000);
+  return {
+    drafts, draft, settings, changed: true, duplicate: false, movement, settlementMovements,
+    allocatedToShippedOrders: debtSettlement.settled,
+    addedToFreeStock: amount - debtSettlement.settled,
+  };
 }
 
 /**
@@ -341,8 +379,10 @@ export function receiveSupplierPlanDocument(input = {}) {
   const lines = draftItems(draft).map((line) => ({ ...line }));
   if (!lines.length) fail('Dokument producenta nie ma pozycji.', 'supplier_order_empty');
   const stock = { ...object(settings.artway_stany) };
+  let shortfalls = structuredClone(object(settings.artway_magazyn_niedobory_wydan));
   const existingMovements = array(settings.artway_ruchy_magazynowe);
   const movements = [];
+  const settlementMovements = [];
   const rows = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -361,13 +401,21 @@ export function receiveSupplierPlanDocument(input = {}) {
     const productId = text(line.produktId ?? line.productId, 160);
     if (!productId) fail(`Pozycja „${text(line.nazwa, 220)}” nie jest połączona z kartoteką magazynową.`, 'supplier_product_not_linked');
     const before = Math.max(0, Number(stock[productId]) || 0);
-    const after = before + amount;
+    const debtSettlement = settleInventoryShortfall(shortfalls, {
+      productId,
+      quantity: amount,
+      at: now.toISOString(),
+    });
+    shortfalls = debtSettlement.shortfalls;
+    const afterReceipt = before + amount;
+    const after = afterReceipt - debtSettlement.settled;
     const received = receivedBefore + amount;
     stock[productId] = after;
     line.przyjeto = received;
     line.przyjetaNadwyzka = Math.max(0, received - ordered);
     line.ostatniePrzyjecie = now.toISOString();
     line.statusPrzyjecia = received > ordered ? 'przyjęto z nadwyżką' : received === ordered ? 'przyjęte' : 'częściowo przyjęte';
+    line.rozliczonoZalegleWydania = Math.max(0, Number(line.rozliczonoZalegleWydania) || 0) + debtSettlement.settled;
     updateReceiptAllocations(line);
     const sourceRequestId = `supplier-document-receipt:${requestId}:${lineKey}`;
     const movement = {
@@ -380,7 +428,7 @@ export function receiveSupplierPlanDocument(input = {}) {
       typ: 'przyjęcie',
       ilosc: amount,
       stanPrzed: before,
-      stanPo: after,
+      stanPo: afterReceipt,
       dokument: text(draft.numer || draft.id, 160),
       powod: 'Zbiorcze przyjęcie dokumentu producenta',
       operator: text(input.actor, 200) || 'administrator',
@@ -390,7 +438,35 @@ export function receiveSupplierPlanDocument(input = {}) {
       receiptBatchId: requestId,
     };
     movements.push(movement);
-    rows.push({ lineKey, productId, ordered, receivedBefore, receivedNow: amount, received, remaining: Math.max(0, ordered - received), overage: Math.max(0, received - ordered) });
+    debtSettlement.allocations.forEach((allocation, allocationIndex) => {
+      const settledBefore = debtSettlement.allocations.slice(0, allocationIndex).reduce((sum, row) => sum + row.quantity, 0);
+      settlementMovements.push({
+        id: `MAG-${crypto.createHash('sha256').update(`${sourceRequestId}:settlement:${allocationIndex}`).digest('hex').slice(0, 18)}`,
+        data: now.toISOString(),
+        dataTxt: now.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' }),
+        produktId: productId,
+        produktNazwa: text(line.nazwa, 220),
+        sku: text(line.sku || line.externalId || line.kod, 120),
+        typ: 'rozliczenie wydania',
+        ilosc: -allocation.quantity,
+        stanPrzed: afterReceipt - settledBefore,
+        stanPo: afterReceipt - settledBefore - allocation.quantity,
+        dokument: allocation.orderNumber,
+        powod: 'Rozliczenie wysyłki wykonanej przed przyjęciem dostawy',
+        operator: 'system',
+        sourceRequestId: `${sourceRequestId}:settlement:${allocationIndex}`,
+        supplierOrderId: text(draft.id, 160),
+        supplierLineKey: lineKey,
+        receiptBatchId: requestId,
+        sourceReceiptRequestId: sourceRequestId,
+      });
+    });
+    rows.push({
+      lineKey, productId, ordered, receivedBefore, receivedNow: amount, received,
+      remaining: Math.max(0, ordered - received), overage: Math.max(0, received - ordered),
+      allocatedToShippedOrders: debtSettlement.settled,
+      addedToFreeStock: amount - debtSettlement.settled,
+    });
   }
 
   draft.pozycje = lines;
@@ -422,8 +498,13 @@ export function receiveSupplierPlanDocument(input = {}) {
   );
   summarize(draft);
   settings.artway_stany = stock;
-  settings.artway_ruchy_magazynowe = [...movements.reverse(), ...existingMovements].slice(0, 3000);
-  return { drafts, draft, settings, changed: true, duplicate: false, receiptBatch, movements };
+  settings.artway_magazyn_niedobory_wydan = shortfalls;
+  settings.artway_ruchy_magazynowe = [
+    ...settlementMovements.reverse(),
+    ...movements.reverse(),
+    ...existingMovements,
+  ].slice(0, 3000);
+  return { drafts, draft, settings, changed: true, duplicate: false, receiptBatch, movements, settlementMovements };
 }
 
 export function supplierPlanDraftIsEditable(draft = {}) {
