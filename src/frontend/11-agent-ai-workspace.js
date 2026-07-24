@@ -2,6 +2,7 @@
 const AGENT_AI_SEKCJE_KANONICZNE=Object.freeze({
   pulpit:"pulpit",centrum:"pulpit",
   rozmowa:"rozmowa",komendy:"rozmowa",
+  praca:"praca",status:"praca",runtime:"praca",
   zadania:"zadania",plan:"zadania",produkty:"zadania",zlecenia:"zadania",producenci:"zadania",
   automatyzacje:"automatyzacje",specjalisci:"automatyzacje",uprawnienia:"automatyzacje",pamiec:"automatyzacje",
   komunikacja:"komunikacja",telegram:"komunikacja",
@@ -18,7 +19,7 @@ function agentAIStanSystemuMeta(){
 function agentAINawigacjaScalonaHTML(active="pulpit"){
   const m=agentAIMetrykiScalone(),groups=[
     {label:"Sterowanie",items:[{id:"pulpit",href:"#/admin/agent-ai",icon:"⌂",label:"Centrum"},{id:"rozmowa",href:"#/admin/agent-ai/rozmowa",icon:"💬",label:"Rozmowa"}]},
-    {label:"Praca",items:[{id:"zadania",href:"#/admin/agent-ai/zadania",icon:"✓",label:"Zadania i decyzje",badge:m.tasks||m.decisions||""}]},
+    {label:"Praca",items:[{id:"praca",href:"#/admin/agent-ai/praca",icon:"◉",label:"Praca na żywo",badge:m.working||m.queued||""},{id:"zadania",href:"#/admin/agent-ai/zadania",icon:"✓",label:"Zadania i decyzje",badge:m.tasks||m.decisions||""}]},
     {label:"System",items:[{id:"automatyzacje",href:"#/admin/agent-ai/automatyzacje",icon:"⚙",label:"Automatyzacje",badge:m.specialistDecisions||""}]},
     {label:"Zespół",items:[{id:"komunikacja",href:"#/admin/agent-ai/komunikacja",icon:"✈",label:"Telegram",badge:agentAITelegram.stats?.critical||""}]},
     {label:"Kontrola",items:[{id:"audyt",href:"#/admin/agent-ai/audyt",icon:"▤",label:"Audyt"}]}
@@ -34,6 +35,7 @@ function agentAIKontekstHTML(){
 function agentAIPodstronaScalonyNaglowekHTML(active="pulpit"){
   if(active==="pulpit")return "";const m=agentAIMetrykiScalone(),pages={
     rozmowa:["💬","Rozmowa z Agentem","Jedno miejsce do wydawania poleceń zwykłym językiem, sprawdzania odpowiedzi i bezpiecznego potwierdzania zmian.","Nowe polecenie"],
+    praca:["◉","Praca Agenta na żywo","Rzeczywisty stan procesu z serwera: aktualnie wykonywane zadanie, kolejne etapy, kolejka, wynik i ewentualny błąd. Gdy Agent czeka, widok mówi o tym wprost.","odświeżanie co 15 s"],
     zadania:["✓","Zadania i decyzje","Wspólna kolejka aktywnych problemów, decyzji administratora, nowych produktów i źródeł producentów — bez powielania tych samych braków.",`${m.tasks+m.decisions} otwartych`],
     automatyzacje:["⚙","Automatyzacje i zasady","Specjaliści GPT, granice autonomii i pamięć procedur w jednym miejscu konfiguracji.",`${m.specialistDecisions} wyjątków`],
     komunikacja:["✈","Komunikacja zespołu","Jeden bot Telegram, wspólna kolejka spraw, dostarczenia i ręczne notatki do zespołu.",`${agentAITelegram.stats?.critical||0} pilnych`],
@@ -53,6 +55,11 @@ function agentAIRozmowaScalonaHTML(){
   const more=[["Przygotuj zamówienie do producenta","przygotuj zamówienie do producenta"],["Popraw opisy produktów","popraw opisy produktów"],["Pokaż stan magazynu","pokaż stan magazynu"],["Sprawdź integracje","diagnostyka integracji"],["Pokaż pamięć","pokaż pamięć"],["Naucz Agenta","zapamiętaj: "]];
   return `<section class="panel agent-conversation"><div class="agent-conversation-head"><div><span>🤖</span><div><small>CODEX + GPT‑5 NANO + DANE SKLEPU</small><h2>Co mam zrobić?</h2><p>Pisz normalnie po polsku. Agent najpierw sprawdza dane i pokazuje plan; zmiany magazynowe oraz działania zewnętrzne wymagają osobnego potwierdzenia.</p></div></div><span id="agentAICommandCloudState" class="lvl ${chmuraStan.dostepna?"lvl-ok":"lvl-info"}">${chmuraStan.dostepna?`wspólna baza • rewizja ${chmuraStan.rev||0}`:"łączenie z bazą"}</span></div><form class="agent-conversation-form" onsubmit="return agentAIPrzyjmijKomende(event)"><textarea id="agentAICommandInput" rows="4" placeholder="Np. sprawdź nowe zamówienia i przygotuj listę brakujących produktów…"></textarea><div><button class="btn" type="submit">🤖 Przekaż Agentowi</button><button class="btn ghost" type="button" onclick="agentAIWstawKomende('wykonaj bezpieczny plan agenta')">▶ Bezpieczna kontrola</button></div></form><div class="agent-command-presets">${quick.map(([icon,label,command])=>`<button type="button" onclick="agentAIWstawKomende(${jsArg(command)})"><span>${icon}</span><b>${esc(label)}</b></button>`).join("")}</div><details class="agent-more-commands"><summary>Więcej gotowych poleceń</summary><div>${more.map(([label,command])=>`<button class="btn ghost" type="button" onclick="agentAIWstawKomende(${jsArg(command)})">${esc(label)}</button>`).join("")}</div></details><div class="agent-command-safety"><span>🛡️</span><div><b>Bezpieczna zasada wykonania</b><small>Rozmowa nie zmienia stanu sama. Agent tworzy osobną decyzję z lokalizacją, ilością i przyciskami Potwierdzam / Odrzucam.</small></div></div><div id="agentAICommandLiveResult" class="agent-response-card agent-command-live-result" hidden></div><div id="agentInventoryDecisionPanel">${agentAIDecyzjeMagazynowePanelHTML()}</div>${answers.length?`<section class="agent-conversation-history"><div><b>Ostatnie odpowiedzi</b><a href="#/admin/agent-ai/audyt">Pełny audyt →</a></div>${answers.map(h=>`<article><header><b>${esc(h.dane.polecenie||"Polecenie")}</b><small>${esc(h.dataTxt||"")}</small></header><pre>${esc(h.dane.odpowiedz||"")}</pre></article>`).join("")}</section>`:`<div class="agent-ops-empty">Nie ma jeszcze odpowiedzi z panelu. Wpisz pierwsze polecenie powyżej.</div>`}</section>`;
 }
+function agentAIPracaNaZywoHTML(){
+  const runtime=agentAIRuntime.runtime||{},worker=runtime.worker||{},queue=runtime.queue||{},counts=queue.counts||{},current=runtime.currentRun;
+  const working=!!(current||worker.currentTask||Number(counts.processing||0)+Number(counts.delivering||0));
+  return `<section class="agent-live-truth ${working?"is-working":"is-waiting"}"><div><span>${working?"⚙":"✓"}</span><div><small>STAN POTWIERDZONY PRZEZ SERWER</small><b>${working?"Agent wykonuje teraz zadanie":"Agent jest gotowy i obecnie czeka"}</b><p>${esc(current?.summary||worker.currentTask||(agentAIRuntime.loaded?"Nie ma aktywnej czynności. Następna praca rozpocznie się po nowym zdarzeniu, poleceniu albo zaplanowanym cyklu.":"Łączenie z procesem wykonawczym…"))}</p></div></div><div><span><small>W toku</small><b>${esc((counts.processing||0)+(counts.delivering||0))}</b></span><span><small>Oczekuje</small><b>${esc(counts.queued||0)}</b></span><a class="btn" href="#/admin/agent-ai/rozmowa">Wydaj polecenie</a></div></section><div id="agentAIRuntimePanel">${agentAIRuntimePanelHTML()}</div>`;
+}
 function agentAIObszarHTML(id,title,description,content,open=false,badge=""){
   return `<details class="agent-workspace-fold" id="${esc(id)}" ${open?"open":""}><summary><span><b>${esc(title)}</b><small>${esc(description)}</small></span>${badge?`<em>${esc(badge)}</em>`:""}<i>⌄</i></summary><div>${content}</div></details>`;
 }
@@ -69,6 +76,7 @@ function agentAIAutomatyzacjeScaloneHTML(requested="automatyzacje"){
 }
 function agentAIScalonaTrescSekcji(active,analysis,requested,score){
   if(active==="rozmowa")return agentAIRozmowaScalonaHTML();
+  if(active==="praca")return agentAIPracaNaZywoHTML();
   if(active==="zadania")return agentAIZadaniaScaloneHTML(analysis,requested);
   if(active==="automatyzacje")return agentAIAutomatyzacjeScaloneHTML(requested);
   if(active==="komunikacja")return agentAITelegramPanelHTML();
@@ -78,7 +86,7 @@ function agentAIScalonaTrescSekcji(active,analysis,requested,score){
 widokAdminAgentAI=function(section="pulpit"){
   allegroLadujJesliTrzeba("orders");const requested=String(section||"pulpit").toLowerCase(),active=agentAISekcjaKanoniczna(requested),analysis=agentAIAnaliza(),tasks=agentAIAnalizaAktywna(analysis),score=Math.max(0,Math.round(100-(tasks.filter(x=>x.poziom==="bad").length*18)-(tasks.filter(x=>x.poziom==="warn").length*8))),runtimeAge=Date.now()-Number(agentAIRuntime.updatedAt||0);
   if((!agentAIRuntime.loaded||runtimeAge>60_000)&&!agentAIRuntime.loading)setTimeout(()=>agentAIRuntimePobierz(true),0);
-  if(active==="pulpit")setTimeout(()=>agentAIRuntimePolling(),0);
+  if(["pulpit","praca"].includes(active))setTimeout(()=>agentAIRuntimePolling(),0);
   if(active==="komunikacja"&&!agentAITelegram.loaded&&!agentAITelegram.loading)setTimeout(()=>agentAITelegramPobierz(true,true),0);
   if(["pulpit","automatyzacje"].includes(active)&&!agentAISpecjalisci.loaded&&!agentAISpecjalisci.loading)setTimeout(()=>agentAISpecjalisciPobierz(false),0);
   if(["pulpit","automatyzacje"].includes(active))setTimeout(()=>agentAISpecjalisciPolling(),0);
