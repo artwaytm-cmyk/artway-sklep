@@ -73,6 +73,7 @@ import { createInventoryDecisionService } from './domain/inventory-decisions.mjs
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createAgentRuntime } from './domain/agent-runtime.mjs';
 import { createAgentSpecialists } from './domain/agent-specialists.mjs';
+import { buildEditorialPublicationPatch } from './domain/agent-product-editorial-state.mjs';
 import { prepareLinkedProductEditorial } from './domain/product-editorial-pipeline.mjs';
 import { createProductLinkPackagePreparer } from './domain/product-link-package-preparer.mjs';
 import { inspectedSourceImages, sourcePageUrl, verifiedSourceImages } from './domain/source-product-images.mjs';
@@ -296,11 +297,10 @@ const inpostServiceShipmentRoute = createInpostServiceShipmentRoute({
   organization: inpostOrganizacja, waitForLabel: inpostCzekajNaEtykiete, trackingNumber: numerZShipX, shipmentStatus: inpostStatusZShipX,
   labelReady: inpostEtykietaGotowa, offerId: inpostOfertaId, infaktPublicConfig, infaktCall: infaktWywolaj, infaktReference: infaktRef,
 });
+const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const vonHalskyRoute = createVonHalskyRoute({
-  respond: odpowiedz,
-  isAdmin: czyAdmin,
-  readVersioned: czytajWersjonowane,
-  writeIfVersion: zapiszJesliWersja,
+  respond: odpowiedz, isAdmin: czyAdmin, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,
+  reportProgress: (work) => agentRuntime.report({ event: 'work_progress', source: 'von-halsky-api', work }),
   loadCatalog: async () => {
     const settings = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
     const data = settings?.data || {}, availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};
@@ -331,8 +331,7 @@ const inventoryDecisions = createInventoryDecisionService({ readVersioned: czyta
 const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
 const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, decisions: inventoryDecisions });
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
-const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
-const agentSpecialists = createAgentSpecialists({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const agentSpecialists = createAgentSpecialists({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, reportProgress: (work) => agentRuntime.report({ event: 'work_progress', source: 'openai-specialist', work }) });
 const linkedProductEditorial = (product, sourceUrl, actor) => prepareLinkedProductEditorial(product, { sourceUrl, runSpecialist: agentSpecialists.run, actor });
 const productLinkPackagePreparer = createProductLinkPackagePreparer({ inspect: pobierzProduktProducentaZPamiecia, readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), offerSettings: allegroPobierzUstawieniaOfert, centralProducts: allegroAgentProduktyCentralne, recognizeProducer: allegroRozpoznajProducenta, chooseCategory: produktLinkKategoriaSklepu, editorialize: linkedProductEditorial, prepareOffer: allegroDraftZAutoKategoria, duplicates: produktLinkDuplikaty, shortDescription: allegroOpisKrotkiZTekstu, text: tekst, sessionOf: requestSession });
 const allegroOperationReceipts = createAllegroOperationReceipts({ read: czytaj, write: zapisz, text: tekst });
@@ -1840,17 +1839,24 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
   const products = [...completeProducts.values()].filter((p) => p && p.id !== undefined);
   const limit = Math.min(50, Math.max(1, Number(options.limit) || 10));
   const start = products.length ? Math.max(0, Number(previousAudit.cursor) || 0) % products.length : 0;
-  const pendingEditorial = products.filter((product) => product.allegroEditorialSyncPending === true)
-    .sort((left, right) => String(left.allegroEditorialSyncPendingAt || '').localeCompare(String(right.allegroEditorialSyncPendingAt || '')));
+  const requestedProductIds = new Set((Array.isArray(options.productIds) ? options.productIds : []).map((id) => String(id || '')).filter(Boolean));
+  const pendingEditorial = products.filter((product) => product.allegroEditorialSyncPending === true).sort((left, right) => String(left.allegroEditorialSyncPendingAt || '').localeCompare(String(right.allegroEditorialSyncPendingAt || '')));
   const rotation = products.length <= limit ? products : Array.from({ length: limit }, (_, index) => products[(start + index) % products.length]);
-  const selected = [...new Map([...pendingEditorial, ...rotation].map((product) => [String(product.id), product])).values()].slice(0, limit);
+  const requested = requestedProductIds.size ? products.filter((product) => requestedProductIds.has(String(product.id))) : [], candidates = options.pendingOnly === true ? [...requested, ...pendingEditorial] : [...requested, ...pendingEditorial, ...rotation], selected = [...new Map(candidates.map((product) => [String(product.id), product])).values()].slice(0, limit);
   const updater = allegroAktualizatorProduktowCentralnych(data, completeProducts.keys()), pendingUpdates = [];
   const applyUpdate = (id, fields = {}, remove = []) => { const changed = updater.apply(id, fields, remove); if (changed) pendingUpdates.push({ id: String(id), fields, remove, expectedProduct: completeProducts.get(String(id)) }); return changed; };
   const baseMappings = { ...allegroMapowaniaItems(mappingsRec) }, mappings = { ...baseMappings }, syncedMappingIds = new Set();
   const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, titles: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, gpsrMatched: 0, categoriesRepaired: 0, unresolved: 0, errors: [] };
   let responsibleProducers = null;
   for (const product of selected) {
+    const trackPublication = product.allegroEditorialSyncPending === true || requestedProductIds.has(String(product.id));
+    const workId = `editorial:${product.id}:allegro:${tekst(product.allegroEditorialSyncRunId || product.allegroEditorialSyncPendingAt || report.lastRun, 64)}`;
+    const reportWork = async (work = {}) => {
+      if (!trackPublication) return;
+      try { await agentRuntime.report({ event: 'work_progress', source: 'allegro-api', work: { id: workId, runId: product.allegroEditorialSyncRunId, productId: String(product.id), productName: tekst(product.nazwa || product.name, 180), channel: 'allegro', target: 'powiązana oferta Allegro', ...work } }); } catch { /* telemetria nie może zatrzymać synchronizacji */ }
+    };
     try {
+      await reportWork({ action: 'publikacja treści w kanale', phase: 'preparing_api_payload', status: 'running', message: 'Buduję dane oferty wyłącznie z potwierdzonej kartoteki sklepu.' });
       const fields = {};
       const productSourceUrl = sourcePageUrl(product), sourceImagesAge = Date.parse(String(product?.sourceEvidence?.imagesFetchedAt || ''));
       if (productSourceUrl && (!verifiedSourceImages(product).length || !Number.isFinite(sourceImagesAge) || sourceImagesAge < Date.now() - 30 * 86400000)) {
@@ -1896,6 +1902,7 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
         const prepared = await allegroDraftZAutoKategoria(req, finalProduct, { publicationAction: 'keep' });
         const offerId = tekst(prepared?.existingOffer?.offer?.id || finalProduct.allegroOfferId, 100).trim();
         if (offerId) {
+          await reportWork({ action: 'publikacja treści w kanale', phase: 'sending_to_allegro', status: 'running', targetRef: offerId, message: `Wysyłam zmianę do istniejącej oferty ${offerId} i czekam na wynik operacji Allegro.` });
           const sync = await allegroSyncEditorialOffer({
             offerId, prepared, product: finalProduct, responsibleProducers,
             loadResponsibleProducers: () => allegroResponsibleProducerDirectory((path, callOptions) => allegroWywolaj(req, path, callOptions)),
@@ -1905,12 +1912,15 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
           });
           responsibleProducers = sync.responsibleProducers;
           if (sync.skipped === 'catalog_identity_conflict') {
-            applyUpdate(product.id, { allegroEditorialSyncPending: false, allegroEditorialSyncState: 'requires_mapping_review', allegroEditorialSyncCheckedAt: report.lastRun, allegroEditorialSyncError: 'Automatyczna aktualizacja zatrzymana: powiązana oferta ma inne ID produktu katalogowego Allegro.' });
+            const message = 'Automatyczna aktualizacja zatrzymana: powiązana oferta ma inne ID produktu katalogowego Allegro.';
+            applyUpdate(product.id, buildEditorialPublicationPatch({ product: finalProduct, channel: 'allegro', status: 'blocked', stateOverride: 'requires_mapping_review', timestamp: report.lastRun, targetRef: offerId, error: message }));
+            await reportWork({ action: 'publikacja treści w kanale', phase: 'identity_conflict', status: 'attention', targetRef: offerId, error: message, message: 'Nic nie zmieniono w ofercie; wymagana jest kontrola mapowania produktu.' });
             report.unresolved++;
             continue;
           }
           if (sync.gpsrMatched) report.gpsrMatched++;
-          applyUpdate(product.id, { allegroEditorialSyncPending: false, allegroEditorialSyncState: 'synced', allegroEditorialSyncedAt: report.lastRun, allegroEditorialSyncError: '' });
+          applyUpdate(product.id, buildEditorialPublicationPatch({ product: finalProduct, channel: 'allegro', status: 'confirmed', timestamp: report.lastRun, targetRef: offerId, receiptId: offerId }));
+          await reportWork({ action: 'publikacja treści w kanale', phase: 'confirmed_by_allegro', status: 'confirmed', targetRef: offerId, receiptId: offerId, completedAt: report.lastRun, message: `Allegro potwierdziło aktualizację oferty ${offerId}.` });
           if (mappings[offerId] && String(mappings[offerId].productId || '') === String(product.id)) {
             mappings[offerId] = markAllegroMappingSynced(mappings[offerId], finalProduct, report.lastRun);
             syncedMappingIds.add(offerId);
@@ -1925,12 +1935,16 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
             report.feesUpdated++;
           }
         } else if (product.allegroEditorialSyncPending === true) {
-          applyUpdate(product.id, { allegroEditorialSyncPending: false, allegroEditorialSyncState: 'requires_publication_decision', allegroEditorialSyncCheckedAt: report.lastRun, allegroEditorialSyncError: 'Brak istniejącej powiązanej oferty. Nowa publikacja wymaga decyzji administratora.' });
+          const message = 'Brak istniejącej powiązanej oferty. Nowa publikacja wymaga decyzji administratora.';
+          applyUpdate(product.id, buildEditorialPublicationPatch({ product: finalProduct, channel: 'allegro', status: 'decision_required', timestamp: report.lastRun, error: message }));
+          await reportWork({ action: 'publikacja nowej oferty', phase: 'administrator_decision', status: 'decision_required', error: message, message: 'Treść jest zapisana, ale Agent nie utworzył nowej oferty bez decyzji administratora.' });
           report.unresolved++;
         }
       }
     } catch (error) {
-      if (product.allegroEditorialSyncPending === true) applyUpdate(product.id, { allegroEditorialSyncState: 'retry', allegroEditorialSyncError: tekst(error?.message || error, 500), allegroEditorialSyncCheckedAt: report.lastRun });
+      const message = tekst(error?.message || error, 500), nextRetryAt = new Date(Date.parse(report.lastRun) + 15 * 60_000).toISOString();
+      if (product.allegroEditorialSyncPending === true) applyUpdate(product.id, buildEditorialPublicationPatch({ product, channel: 'allegro', status: 'retry', timestamp: report.lastRun, error: message, nextRetryAt }));
+      await reportWork({ action: 'publikacja treści w kanale', phase: 'retry_scheduled', status: 'failed', error: message, nextRetryAt, message: 'Allegro nie potwierdziło zmiany. Stan pozostaje nieopublikowany i trafi do ponownej próby.' });
       report.errors.push({ productId: String(product.id), name: tekst(product.nazwa || product.name, 180), error: tekst(error?.message || error, 500) });
     }
   }
@@ -3437,7 +3451,7 @@ export default async (req) => {
       const body = await req.json().catch(() => ({}));
       const offersRec = await czytaj('allegro_offers', { items: [] });
       const mapping = await allegroAutoMapujOfertyZKartoteka(allegroOfertyItems(offersRec));
-      const maintenance = await allegroAutoUzupelnijKatalogProduktow(req, { limit: Math.min(50, Math.max(1, Number(body.limit) || 20)) });
+      const maintenance = await allegroAutoUzupelnijKatalogProduktow(req, { limit: Math.min(50, Math.max(1, Number(body.limit) || 20)), pendingOnly: body.pendingOnly === true, productIds: Array.isArray(body.productIds) ? body.productIds.slice(0, 50) : [] });
       return odpowiedz({ ok: true, mapping, maintenance });
     }
 

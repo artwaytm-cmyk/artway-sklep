@@ -74,3 +74,29 @@ test('udany etap GPT potwierdza realne połączenie OpenAI i oddziela ostrzeżen
   assert.equal(state.providers.openai.lastSuccessAt, current.toISOString());
   assert.equal(state.integrationWarnings[0].kind, 'allegro');
 });
+
+test('rejestr rozróżnia fizyczną czynność, zapis oczekujący i publikację potwierdzoną przez kanał', async () => {
+  const store = memoryStore();
+  let current = new Date('2026-07-24T10:00:00.000Z');
+  const runtime = createAgentRuntime({ ...store, now: () => current });
+  const base = {
+    id: 'editorial:P-17:allegro:fingerprint', runId: 'run-17', productId: 'P-17',
+    productName: 'Gra edukacyjna', channel: 'allegro', action: 'publikacja treści w kanale',
+    target: 'powiązana oferta Allegro', fields: ['allegroTitle', 'allegroDescription'],
+  };
+  await runtime.report({ event: 'work_progress', work: { ...base, phase: 'sending_to_allegro', status: 'running', targetRef: 'offer-17' } });
+  let state = await runtime.status({ workerOnline: true, workerLastSeenAt: current.toISOString() });
+  assert.equal(state.currentWork.productName, 'Gra edukacyjna');
+  assert.equal(state.currentWork.phase, 'sending_to_allegro');
+  current = new Date('2026-07-24T10:00:03.000Z');
+  await runtime.report({ event: 'work_progress', work: { ...base, phase: 'queued_for_publication', status: 'pending', message: 'Oczekuje na API.' } });
+  state = await runtime.status({ workerOnline: true, workerLastSeenAt: current.toISOString() });
+  assert.equal(state.currentWork, null);
+  assert.equal(state.publication.counts.pending, 1);
+  current = new Date('2026-07-24T10:00:05.000Z');
+  await runtime.report({ event: 'work_progress', work: { ...base, phase: 'confirmed_by_allegro', status: 'confirmed', receiptId: 'offer-17' } });
+  state = await runtime.status({ workerOnline: true, workerLastSeenAt: current.toISOString() });
+  assert.equal(state.publication.counts.pending, 0);
+  assert.equal(state.publication.counts.confirmed, 1);
+  assert.equal(state.publication.recent[0].receiptId, 'offer-17');
+});

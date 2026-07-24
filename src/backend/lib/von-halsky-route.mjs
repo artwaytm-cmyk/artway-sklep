@@ -7,6 +7,7 @@ import {
   vonHalskyPublicConfig,
 } from './domain/von-halsky-catalog.mjs';
 import { createVonHalskyApiClient } from './domain/von-halsky-api-client.mjs';
+import { buildEditorialPublicationPatch } from './domain/agent-product-editorial-state.mjs';
 
 const STORE_KEY = 'inpost_von_halsky_channel';
 
@@ -55,6 +56,7 @@ export function createVonHalskyRoute({
   env = () => process.env,
   fetchImpl = globalThis.fetch,
   loadCatalog = async () => [],
+  reportProgress = async () => {},
 } = {}) {
   const api = createVonHalskyApiClient({ env: new Proxy({}, { get: (_target, key) => env()?.[key] }), fetchImpl });
 
@@ -86,6 +88,37 @@ export function createVonHalskyRoute({
       }, ...(current.diagnostics || [])].slice(0, 30);
       return current;
     });
+  }
+
+  async function progress(work = {}) {
+    try { await reportProgress(work); } catch { /* telemetria nie może blokować API kanału */ }
+  }
+
+  async function updateProductPublication(products = [], status = 'confirmed', details = {}) {
+    const rows = (Array.isArray(products) ? products : []).filter((product) => product?.id !== undefined && product?.id !== null);
+    if (!rows.length) return;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const version = await readVersioned('settings', { data: {}, rev: 0, updated_at: null });
+      const previous = version.value && typeof version.value === 'object' ? version.value : { data: {}, rev: 0, updated_at: null };
+      const data = { ...(previous.data || {}) }, edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
+      const timestamp = details.timestamp || new Date().toISOString();
+      for (const product of rows) {
+        const id = String(product.id), effective = { ...product, ...(edits[id] || {}) };
+        edits[id] = {
+          ...(edits[id] || {}),
+          ...buildEditorialPublicationPatch({
+            product: effective, channel: 'vonHalsky', status, timestamp,
+            targetRef: details.targetRef || product.externalId || product.sku || id,
+            receiptId: details.receiptId || '', error: details.error || '', nextRetryAt: details.nextRetryAt || '',
+          }),
+        };
+      }
+      data.artway_produkty_edytowane = edits;
+      const next = { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: timestamp };
+      const written = await writeIfVersion('settings', next, version);
+      if (written?.modified) return;
+    }
+    throw Object.assign(new Error('Nie udało się zapisać potwierdzenia publikacji Von Halsky.'), { code: 'von_halsky_publication_receipt_conflict', status: 409 });
   }
 
   return async function vonHalskyRoute(req, url, action) {
@@ -189,16 +222,30 @@ export function createVonHalskyRoute({
       }
       const products = await loadCatalog();
       const list = Array.isArray(products) ? products : [...(products?.values?.() || [])];
-      const projections = list.map((product) => vonHalskyOfferProjection(product, state.settings));
+      const requestedProductIds = new Set((Array.isArray(body.productIds) ? body.productIds : []).map((id) => String(id || '')).filter(Boolean));
+      const selectedList = requestedProductIds.size ? list.filter((product) => requestedProductIds.has(String(product?.id))) : list;
+      const projections = selectedList.map((product) => vonHalskyOfferProjection(product, state.settings));
+      const productByExternalId = new Map(selectedList.map((product) => [vonHalskyOfferProjection(product, state.settings).externalId, product]));
       const deduplicated = deduplicateVonHalskyOffers(projections);
       const eligible = deduplicated.items.filter((item) => item.readiness.ready && item.available);
       if (body.publish !== true) return respond({ ok: true, dryRun: true, eligible: eligible.length, blocked: deduplicated.items.length - eligible.length, duplicates: deduplicated.conflicts.length });
       const batchSize = Math.max(1, Math.min(100, Number(body.batchSize) || 50));
       let sent = 0;
       let lastRequestId = '';
+      let activeBatchProducts = [];
       try {
         for (let offset = 0; offset < eligible.length; offset += batchSize) {
-          const items = eligible.slice(offset, offset + batchSize).map(({ readiness, ...item }) => {
+          const batch = eligible.slice(offset, offset + batchSize);
+          activeBatchProducts = batch.map((item) => productByExternalId.get(item.externalId)).filter(Boolean);
+          const tracked = activeBatchProducts.filter((product) => product.vonHalskyEditorialSyncPending === true || requestedProductIds.has(String(product.id)));
+          await Promise.all(tracked.map((product) => progress({
+            id: `editorial:${product.id}:vonHalsky:${String(product.vonHalskyEditorialSyncRunId || product.vonHalskyEditorialSyncPendingAt || Date.now()).slice(0, 64)}`,
+            runId: product.vonHalskyEditorialSyncRunId, productId: String(product.id), productName: String(product.nazwa || product.name || '').slice(0, 180),
+            channel: 'vonHalsky', action: 'publikacja treści w kanale', phase: 'sending_to_von_halsky', status: 'running',
+            target: 'katalog InPost Von Halsky', targetRef: product.externalId || product.sku || String(product.id),
+            message: 'Wysyłam zapisaną kartę produktu do API Von Halsky i czekam na potwierdzenie partii.',
+          })));
+          const items = batch.map(({ readiness, ...item }) => {
             if (body.scheduled === true && state.settings.automaticPriceSync === false) {
               delete item.price;
               delete item.currency;
@@ -212,6 +259,17 @@ export function createVonHalskyRoute({
           const result = await api.pushCatalog({ contractVersion: config.contractVersion, items });
           lastRequestId = result.requestId || lastRequestId;
           sent += items.length;
+          const at = new Date().toISOString();
+          await updateProductPublication(tracked, 'confirmed', { timestamp: at, receiptId: result.requestId || lastRequestId });
+          await Promise.all(tracked.map((product) => progress({
+            id: `editorial:${product.id}:vonHalsky:${String(product.vonHalskyEditorialSyncRunId || product.vonHalskyEditorialSyncPendingAt || Date.now()).slice(0, 64)}`,
+            runId: product.vonHalskyEditorialSyncRunId, productId: String(product.id), productName: String(product.nazwa || product.name || '').slice(0, 180),
+            channel: 'vonHalsky', action: 'publikacja treści w kanale', phase: 'confirmed_by_von_halsky', status: 'confirmed',
+            target: 'katalog InPost Von Halsky', targetRef: product.externalId || product.sku || String(product.id),
+            receiptId: result.requestId || lastRequestId, completedAt: at,
+            message: 'API Von Halsky potwierdziło przyjęcie karty produktu.',
+          })));
+          activeBatchProducts = [];
         }
         const at = new Date().toISOString();
         const updated = await mutate((current) => {
@@ -222,6 +280,16 @@ export function createVonHalskyRoute({
         return respond({ ok: true, sent, blocked: deduplicated.items.length - eligible.length, duplicates: deduplicated.conflicts.length, sync: updated.sync });
       } catch (error) {
         const safe = safeError(error);
+        const retryProducts = activeBatchProducts.filter((product) => product.vonHalskyEditorialSyncPending === true || requestedProductIds.has(String(product.id)));
+        const failedAt = new Date().toISOString(), nextRetryAt = new Date(Date.now() + 15 * 60_000).toISOString();
+        await updateProductPublication(retryProducts, 'retry', { timestamp: failedAt, error: safe.message, nextRetryAt }).catch(() => {});
+        await Promise.all(retryProducts.map((product) => progress({
+          id: `editorial:${product.id}:vonHalsky:${String(product.vonHalskyEditorialSyncRunId || product.vonHalskyEditorialSyncPendingAt || Date.now()).slice(0, 64)}`,
+          runId: product.vonHalskyEditorialSyncRunId, productId: String(product.id), productName: String(product.nazwa || product.name || '').slice(0, 180),
+          channel: 'vonHalsky', action: 'publikacja treści w kanale', phase: 'retry_scheduled', status: 'failed',
+          target: 'katalog InPost Von Halsky', targetRef: product.externalId || product.sku || String(product.id),
+          error: safe.message, nextRetryAt, message: 'Kanał nie potwierdził zmiany. Niczego nie oznaczono jako opublikowane; zaplanowano ponowienie.',
+        })));
         await mutate((current) => {
           current.sync = { ...current.sync, status: 'error', lastError: safe.message };
           current.diagnostics = [{ id: `${Date.now()}-catalog`, at: new Date().toISOString(), operation: 'catalog-sync', status: 'error', message: safe.message, requestId: '' }, ...(current.diagnostics || [])].slice(0, 30);

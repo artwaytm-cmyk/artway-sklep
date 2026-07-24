@@ -44,7 +44,24 @@ test("Praca Agenta pokazuje wyłącznie telemetrię runtime i odświeża ją co 
   assert.match(workspace,/\["pulpit","praca"\]\.includes\(active\)/);
   assert.match(runtime,/chmura\("agent-runtime-status"/);
   assert.match(runtime,/setTimeout\(async\(\)=>\{await agentAIRuntimePobierz\(true\);agentAIRuntimePolling\(\);\},15000\)/);
+  assert.match(runtime,/FIZYCZNIE WYKONYWANA CZYNNOŚĆ/);
+  assert.match(runtime,/Dowody publikacji zmian Agenta/);
+  assert.match(runtime,/currentWork/);
+  assert.match(runtime,/publicationCounts/);
   assert.match(styles,/\.agent-live-truth/);
+  assert.match(styles,/\.agent-runtime-exact-work/);
+  assert.match(styles,/\.agent-publication-proof/);
+});
+
+test("katalog pokazuje małą datę ostatniej poprawy Agenta i stan publikacji każdego kanału",async()=>{
+  const card=await read("src/frontend/12-warehouse-assortment-card.js"),styles=await read("src/styles/29-commerce-catalog-actions.css");
+  assert.match(card,/function asortymentAgentMetaHTML/);
+  assert.match(card,/Agent: poprawiono/);
+  assert.match(card,/sklep \$\{publication\("store"\)\}/);
+  assert.match(card,/Allegro \$\{publication\("allegro"\)\}/);
+  assert.match(card,/Von Halsky \$\{publication\("vonHalsky"\)\}/);
+  assert.match(card,/Agent wróci do produktu dopiero po zmianie danych wejściowych albo błędzie publikacji/);
+  assert.match(styles,/\.catalog-product-agent-meta/);
 });
 
 test("zadania i automatyzacje scalają dawne podstrony bez usuwania funkcji",async()=>{

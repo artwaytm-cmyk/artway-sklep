@@ -17,6 +17,7 @@ const taskLabels = {
   'agent-autonomiczny': 'Kontrola operacyjna katalogu',
   'tresci-gpt-nano': 'Redakcja małej porcji treści',
   'tresci-allegro': 'Aktualizacja zmienionych opisów Allegro',
+  'tresci-von-halsky': 'Publikacja zmienionych kart Von Halsky',
   zamowienia: 'Nowe lub zmienione zamówienia Allegro',
   komunikacja: 'Nowe wiadomości i dyskusje',
   'von-halsky-katalog': 'Okresowa synchronizacja katalogu Von Halsky',
@@ -78,8 +79,15 @@ async function run(label, action, body, timeoutMs = 120_000) {
       label, ok: true, skipped: !!(data?.skipped || data?.cycle?.skipped), durationMs: Date.now() - started,
       count: Number(data?.count ?? data?.fetched ?? data?.offers?.length ?? data?.cycle?.prepared?.length) || 0,
       changes, applied: Number(data?.cycle?.applied?.length || 0), mapped: Number(data?.autoMapped ?? state?.mapping?.autoMapped) || 0,
+      items: (Array.isArray(data?.cycle?.applied) ? data.cycle.applied : []).slice(0, 50).map((item) => ({
+        productId: String(item?.productId || ''), name: String(item?.name || '').slice(0, 180),
+        channel: String(item?.channel || 'store'), fields: Array.isArray(item?.fields) ? item.fields.slice(0, 30) : [],
+      })),
     };
-    const detail = result.skipped ? 'Nie wykryto pracy — bez szerokiego ponownego zapisu.' : changes ? `Wykryto lub zapisano ${changes} zmian.` : `Sprawdzono ograniczoną porcję ${result.count} rekordów; brak nowych zmian.`;
+    const exact = result.items.length
+      ? result.items.map((item) => `${item.name || `produkt ${item.productId}`} → ${item.channel}${item.fields.length ? ` (${item.fields.join(', ')})` : ''}`).join('; ')
+      : '';
+    const detail = result.skipped ? 'Nie wykryto pracy — bez szerokiego ponownego zapisu.' : exact || (changes ? `Wykryto lub zapisano ${changes} zmian.` : `Sprawdzono ograniczoną porcję ${result.count} rekordów; brak nowych zmian.`);
     await report('cycle_step', { step: { id: label, label: taskLabels[label] || label, status: result.skipped ? 'skipped' : 'completed', startedAt: new Date(started).toISOString(), completedAt: new Date().toISOString(), durationMs: result.durationMs, count: changes || result.count, detail } });
     return result;
   } catch (error) {
@@ -151,7 +159,28 @@ for (const job of planned.queue) {
   const [action, body, timeout] = taskDefinition(job.id, coordinator?.plan || null);
   const result = await run(job.id, action, body, timeout);
   results.push(result);
-  if (job.id === 'tresci-gpt-nano' && result.applied > 0) results.push(await run('tresci-allegro', 'allegro-auto-maintenance', { limit: 12, source: 'changed-editorial-only' }, 90_000));
+}
+
+// Zapis w kartotece i publikacja zewnętrzna są dwoma rozliczanymi etapami.
+// Kolejka obejmuje także niedokończone publikacje z poprzedniego cyklu, więc
+// restart procesu lub chwilowy błąd API nie pozostawia zmiany bez ponowienia.
+const previousPending = Array.isArray(previousRuntime?.publication?.pending) ? previousRuntime.publication.pending : [];
+const newlyApplied = results.flatMap((result) => Array.isArray(result.items) ? result.items : []);
+const pendingIds = (channel) => [...new Set([
+  ...previousPending.filter((item) => item.channel === channel && item.productId).map((item) => String(item.productId)),
+  ...newlyApplied.filter((item) => item.channel === channel && item.productId).map((item) => String(item.productId)),
+])].slice(0, 50);
+const allegroPublicationIds = pendingIds('allegro');
+const vonHalskyPublicationIds = pendingIds('vonHalsky');
+if (allegroPublicationIds.length) {
+  results.push(await run('tresci-allegro', 'allegro-auto-maintenance', {
+    limit: Math.min(50, allegroPublicationIds.length), pendingOnly: true, productIds: allegroPublicationIds, source: 'publication-queue',
+  }, 120_000));
+}
+if (vonHalskyPublicationIds.length) {
+  results.push(await run('tresci-von-halsky', 'von-halsky-sync-catalog', {
+    publish: true, scheduled: false, batchSize: 50, productIds: vonHalskyPublicationIds, source: 'publication-queue',
+  }, 120_000));
 }
 
 const failed = results.filter((result) => !result.ok);

@@ -7,9 +7,13 @@ export function createAgentSpecialists({
   readVersioned, writeIfVersion, fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY,
   model = process.env.OPENAI_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-5-nano', now = () => new Date(),
   platformAgentsEnabled = process.env.OPENAI_PLATFORM_AGENTS !== 'false' && !String(apiKey || '').startsWith('test-'),
+  reportProgress = async () => {},
 } = {}) {
   if (typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function') throw new Error('Specjaliści GPT wymagają wersjonowanego repozytorium.');
   if (typeof fetchImpl !== 'function') throw new Error('Specjaliści GPT wymagają klienta HTTP.');
+  async function progress(work = {}) {
+    try { await reportProgress(work); } catch { /* telemetria nie może zatrzymać zapisu produktu */ }
+  }
   async function change(key, fallback, mutator) {
     for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
       const version = await readVersioned(key, fallback), next = await mutator(version.value, version);
@@ -309,6 +313,13 @@ export function createAgentSpecialists({
     const allProposed = productPatch(normalizedRunResult), requestedKeys = new Set((Array.isArray(options.fieldKeys) ? options.fieldKeys : []).map((item) => PRODUCT_OUTPUT_TO_FIELD[clean(item, 80)] || clean(item, 80)).filter(Boolean));
     const proposedPatch = requestedKeys.size ? Object.fromEntries(Object.entries(allProposed).filter(([key]) => requestedKeys.has(key))) : allProposed;
     const productId = String(run.target.productId);
+    const channel = editorialChannelForSpecialist(run.specialist), workId = `editorial:${productId}:${channel}:${clean(run.target?.editorialFingerprint || run.id, 64)}`;
+    await progress({
+      id: workId, runId: run.id, productId, productName: clean(run.target?.name, 180), channel,
+      action: 'zapis treści produktu', phase: 'saving', status: 'running',
+      fields: Object.keys(proposedPatch), target: channel === 'store' ? 'kartoteka sklepu i artwaytm.pl' : channel === 'allegro' ? 'powiązana oferta Allegro' : 'katalog InPost Von Halsky',
+      message: 'Zapisuję zatwierdzoną przez reguły wersję treści w głównej kartotece produktu.',
+    });
     let appliedPatch = {}, contentPatch = {}, beforePatch = {};
     if (!Object.keys(proposedPatch).length) throw Object.assign(new Error('Szkic nie zawiera bezpiecznych pól produktu do zapisania.'), { code: 'agent_specialist_patch_empty', status: 422 });
     await change('settings', { data: {}, rev: 0, updated_at: null }, (record) => {
@@ -343,11 +354,23 @@ export function createAgentSpecialists({
     });
     if (!Object.keys(appliedPatch).length) {
       await updateHistory(run.id, { approvalStatus: 'not_needed', appliedAt: now().toISOString(), appliedBy: 'agent-safe-policy' });
+      await progress({ id: workId, runId: run.id, productId, productName: clean(run.target?.name, 180), channel, action: 'zapis treści produktu', phase: 'unchanged', status: 'skipped', message: 'Kartoteka zawiera już tę samą wersję danych; zapis nie był potrzebny.' });
       return { applied: false, duplicate: true, noMissingFields: true, productId, patch: {} };
     }
     const appliedAt = now().toISOString(), appliedBy = clean(actor?.email || actor?.name || 'administrator', 120), automaticApply = options.missingOnly === true || options.editorialAutomatic === true;
     await updateHistory(run.id, { approvalStatus: automaticApply ? 'auto_applied' : 'applied', appliedAt, appliedBy, appliedFields: Object.keys(contentPatch), beforePatch, appliedPatch });
     if (!automaticApply && options.recordLearning !== false) await recordProductFeedback(run, 'approved', { fieldKeys: Object.keys(contentPatch), note: options.note || '' }, actor);
+    await progress({
+      id: workId, runId: run.id, productId, productName: clean(run.target?.name, 180), channel,
+      action: channel === 'store' ? 'publikacja treści produktu' : 'publikacja treści w kanale',
+      phase: channel === 'store' ? 'published' : 'queued_for_publication',
+      status: channel === 'store' ? 'confirmed' : 'pending', fields: Object.keys(contentPatch),
+      target: channel === 'store' ? 'artwaytm.pl' : channel === 'allegro' ? 'Allegro' : 'InPost Von Halsky',
+      receiptId: run.id, completedAt: channel === 'store' ? appliedAt : '',
+      message: channel === 'store'
+        ? 'Zapis potwierdzony w głównej kartotece; sklep korzysta z tej samej wersji danych.'
+        : 'Zapis potwierdzony w kartotece. Zmiana oczekuje na odpowiedź API kanału zewnętrznego.',
+    });
     return { applied: true, productId, patch: contentPatch, persistedPatch: appliedPatch, before: beforePatch, appliedAt, appliedBy, safeAutoApply: automaticApply };
   }
 
@@ -506,9 +529,23 @@ export function createAgentSpecialists({
       for (const job of jobs) {
         if (availableRuns <= 0) break;
         const target = { type: 'product', productId: String(item.product.id), name: clean(item.product.nazwa, 180), channel: job.channel, channels: item.editorial.target.channels, editorialFingerprint: item.editorial.fingerprint };
+        const workId = `editorial:${target.productId}:${job.channel}:${clean(item.editorial.fingerprint, 64)}`;
         try {
+          await progress({
+            id: workId, productId: target.productId, productName: target.name, channel: job.channel,
+            action: 'redakcja produktu', phase: 'preparing', status: 'running',
+            target: job.channel === 'store' ? 'artwaytm.pl' : job.channel === 'allegro' ? 'Allegro' : 'InPost Von Halsky',
+            message: `Analizuję fakty źródłowe i przygotowuję ${job.channel === 'store' ? 'nazwę, opis krótki, opis pełny i SEO' : job.channel === 'allegro' ? 'tytuł i opis zgodny z regulaminem Allegro' : 'kartę produktu dla Von Halsky'}.`,
+          });
           let draft = await run({ specialist: job.specialist, source: 'automatic', ...(job.scenario ? { scenario: job.scenario } : {}), instruction: job.instruction, context: { product: productFacts(item.product), channel: job.channel, editorialTarget: item.editorial.target, editorialFingerprint: item.editorial.fingerprint }, target }, { source: 'background-agent' });
           availableRuns -= 1;
+          await progress({
+            id: workId, runId: draft.id, productId: target.productId, productName: target.name, channel: job.channel,
+            action: 'kontrola przygotowanej treści', phase: 'validating', status: 'running',
+            fields: (draft.result?.fields || []).map((field) => field?.key).filter(Boolean),
+            target: job.channel === 'store' ? 'artwaytm.pl' : job.channel === 'allegro' ? 'Allegro' : 'InPost Von Halsky',
+            message: 'Sprawdzam zgodność, kompletność, zakazane informacje i układ treści przed zapisem.',
+          });
           const reviewed = await enforceProductEditorialCompliance({ draft, assess: (entry) => automaticEditorialAssessment(entry, current.config), run, productFacts, product: item.product, editorial: item.editorial, target });
           draft = reviewed.draft; const assessment = reviewed.assessment;
           if (assessment.eligible) {
@@ -517,11 +554,25 @@ export function createAgentSpecialists({
             prepared.push({ id: draft.id, productId: String(item.product.id), channel: job.channel, name: clean(item.product.nazwa, 180), status: result.applied ? 'auto_applied' : 'not_needed' });
           } else {
             await markProductEditorialRetry(item.product, draft, item.editorial, assessment.reason, job.channel);
+            await progress({
+              id: workId, runId: draft.id, productId: target.productId, productName: target.name, channel: job.channel,
+              action: 'kontrola przygotowanej treści', phase: 'retry_scheduled', status: 'attention',
+              target: job.channel === 'store' ? 'artwaytm.pl' : job.channel === 'allegro' ? 'Allegro' : 'InPost Von Halsky',
+              error: assessment.reason, nextRetryAt: new Date(now().getTime() + 15 * 60_000).toISOString(),
+              message: 'Treść nie przeszła bramki jakości. Nic nie opublikowano; Agent ponowi redakcję.',
+            });
             prepared.push({ id: draft.id, productId: String(item.product.id), channel: job.channel, name: clean(item.product.nazwa, 180), status: 'retry_scheduled', reason: assessment.reason });
           }
         } catch (error) {
           if (error?.code === 'agent_specialist_daily_limit') { limitReached = true; availableRuns = 0; break; }
           await markProductEditorialRetry(item.product, null, item.editorial, safeError(error?.message || error), job.channel);
+          await progress({
+            id: workId, productId: target.productId, productName: target.name, channel: job.channel,
+            action: 'redakcja produktu', phase: 'retry_scheduled', status: 'failed',
+            target: job.channel === 'store' ? 'artwaytm.pl' : job.channel === 'allegro' ? 'Allegro' : 'InPost Von Halsky',
+            error: safeError(error?.message || error), nextRetryAt: new Date(now().getTime() + 15 * 60_000).toISOString(),
+            message: 'Zapis lub kontrola nie zakończyły się powodzeniem. Niczego nie uznano za opublikowane.',
+          });
           prepared.push({ productId: String(item.product.id), channel: job.channel, name: clean(item.product.nazwa, 180), status: 'error', error: safeError(error?.message || error) });
         }
       }

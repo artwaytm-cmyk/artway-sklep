@@ -39,6 +39,10 @@ export function buildEditorialPersistencePatch({
     status: 'ready', promptVersion, inputFingerprint: fingerprint, preparedAt: timestamp,
     runId: clean(run.id, 160), model: clean(run.model, 100), preparedBy: automatic ? 'autonomous-agent' : 'administrator-approved-agent',
     compliance: channelCompliance[channel] || { status: 'passed', violations: [] }, error: '',
+    persistenceStatus: 'confirmed', savedAt: timestamp,
+    publicationStatus: channel === 'store' ? 'confirmed' : 'queued',
+    publicationTarget: channel === 'store' ? 'artwaytm.pl' : channel === 'allegro' ? 'Allegro' : 'InPost Von Halsky',
+    ...(channel === 'store' ? { publishedAt: timestamp, publicationReceipt: clean(run.id, 160) } : { publicationQueuedAt: timestamp }),
   };
   const result = {
     ...patch,
@@ -73,6 +77,44 @@ export function buildEditorialPersistencePatch({
   return result;
 }
 
+export function buildEditorialPublicationPatch({
+  product = {}, channel = 'store', status = 'confirmed', timestamp = '', targetRef = '',
+  receiptId = '', error = '', nextRetryAt = '', stateOverride = '',
+} = {}) {
+  const previous = product.contentEditorial || {}, channelStates = { ...(previous.channelStates || {}) };
+  const current = channelStates[channel] || {};
+  const normalized = ['confirmed', 'queued', 'publishing', 'retry', 'decision_required', 'blocked'].includes(status) ? status : 'retry';
+  channelStates[channel] = {
+    ...current,
+    publicationStatus: normalized,
+    publicationTarget: channel === 'store' ? 'artwaytm.pl' : channel === 'allegro' ? 'Allegro' : 'InPost Von Halsky',
+    publicationAttemptedAt: timestamp,
+    publicationTargetRef: clean(targetRef, 180),
+    publicationReceipt: clean(receiptId, 180),
+    publicationError: clean(error, 1000),
+    publicationNextRetryAt: clean(nextRetryAt, 80),
+    ...(normalized === 'confirmed' ? { publishedAt: timestamp } : {}),
+  };
+  const patch = {
+    contentEditorial: { ...previous, channelStates, updatedAt: timestamp },
+  };
+  if (channel === 'allegro') Object.assign(patch, {
+    allegroEditorialSyncPending: ['queued', 'publishing', 'retry'].includes(normalized),
+    allegroEditorialSyncState: clean(stateOverride, 100) || (normalized === 'confirmed' ? 'synced' : normalized === 'decision_required' ? 'requires_publication_decision' : normalized),
+    allegroEditorialSyncCheckedAt: timestamp,
+    allegroEditorialSyncError: clean(error, 1000),
+    ...(normalized === 'confirmed' ? { allegroEditorialSyncedAt: timestamp } : {}),
+  });
+  if (channel === 'vonHalsky') Object.assign(patch, {
+    vonHalskyEditorialSyncPending: ['queued', 'publishing', 'retry'].includes(normalized),
+    vonHalskyEditorialSyncState: normalized === 'confirmed' ? 'synced' : normalized,
+    vonHalskyEditorialSyncCheckedAt: timestamp,
+    vonHalskyEditorialSyncError: clean(error, 1000),
+    ...(normalized === 'confirmed' ? { vonHalskyEditorialSyncedAt: timestamp } : {}),
+  });
+  return patch;
+}
+
 export function buildEditorialRetryPatch({
   product = {}, channel = 'store', target = {}, fingerprint = '', promptVersion = '',
   timestamp = '', retryAt = '', draft = null, error = '',
@@ -93,4 +135,3 @@ export function buildEditorialRetryPatch({
     contentEditorialSource: 'autonomous-agent-independent-retry',
   };
 }
-

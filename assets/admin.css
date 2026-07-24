@@ -1092,6 +1092,7 @@ body.admin-mode #widok{min-height:100vh;background:radial-gradient(circle at 100
 .catalog-column-label{display:block;margin:0 0 5px;color:var(--muted2)!important;font-size:.58rem!important;font-weight:900!important;line-height:1.25;text-transform:uppercase;letter-spacing:.045em}
 .catalog-product-data-note{display:block;width:max-content;max-width:100%;margin-top:6px;padding:3px 6px;border-radius:6px;font-size:.62rem;font-weight:850;line-height:1.3}
 .catalog-product-data-note.complete{background:#dcfce7;color:#166534}.catalog-product-data-note.missing{background:#fff7ed;color:#9a3412}
+.catalog-product-agent-meta{display:block;margin-top:5px;color:#64748b;font-size:.57rem;line-height:1.35;font-weight:650}
 .catalog-product-classification{display:grid;align-content:start;gap:4px;min-width:0}
 .catalog-product-classification>b,.catalog-product-classification>span,.catalog-product-classification>a,.catalog-product-classification>small,.catalog-product-classification>em{min-width:0;line-height:1.35}
 .catalog-product-classification>b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem}

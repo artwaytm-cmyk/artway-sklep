@@ -4,6 +4,7 @@ const KEY = 'agent_runtime';
 const MAX_HISTORY = 72;
 const MAX_ACTIVITY = 160;
 const MAX_STEPS = 24;
+const MAX_WORK_ITEMS = 300;
 const MAX_WRITE_ATTEMPTS = 8;
 const WORKER_ONLINE_MS = 150_000;
 const CYCLE_FRESH_MS = 35 * 60_000;
@@ -94,6 +95,34 @@ function safeActivity(value = {}) {
   };
 }
 
+function safeWork(value = {}) {
+  const channel = ['store', 'allegro', 'vonHalsky', 'system'].includes(value?.channel) ? value.channel : 'system';
+  const status = ['running', 'pending', 'confirmed', 'attention', 'failed', 'decision_required', 'skipped'].includes(value?.status)
+    ? value.status
+    : 'pending';
+  return {
+    id: clean(value?.id || `${value?.productId || 'system'}:${channel}:${value?.action || 'work'}`, 180),
+    runId: clean(value?.runId, 140),
+    productId: clean(value?.productId, 140),
+    productName: clean(value?.productName, 220),
+    channel,
+    action: clean(value?.action, 100),
+    phase: clean(value?.phase, 80),
+    status,
+    fields: [...new Set((Array.isArray(value?.fields) ? value.fields : []).map((item) => clean(item, 80)).filter(Boolean))].slice(0, 30),
+    target: clean(value?.target, 220),
+    targetRef: clean(value?.targetRef, 180),
+    receiptId: clean(value?.receiptId, 180),
+    message: safeError(value?.message || value?.detail),
+    error: safeError(value?.error),
+    attempt: number(value?.attempt, 0, 100),
+    startedAt: iso(value?.startedAt),
+    updatedAt: iso(value?.updatedAt),
+    completedAt: iso(value?.completedAt),
+    nextRetryAt: iso(value?.nextRetryAt),
+  };
+}
+
 function asRecord(value = {}) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
@@ -114,6 +143,8 @@ function asRecord(value = {}) {
       xai: safeProvider(source.providers?.xai),
     },
     currentRun: source.currentRun?.id ? safeRun(source.currentRun) : null,
+    currentWork: source.currentWork?.id ? safeWork(source.currentWork) : null,
+    workItems: (Array.isArray(source.workItems) ? source.workItems : []).slice(0, MAX_WORK_ITEMS).map(safeWork),
     history: (Array.isArray(source.history) ? source.history : []).slice(0, MAX_HISTORY).map(safeRun),
     activity: (Array.isArray(source.activity) ? source.activity : []).slice(0, MAX_ACTIVITY).map(safeActivity),
   };
@@ -274,6 +305,42 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
           }),
         };
       }
+      if (event === 'work_progress') {
+        const work = safeWork({
+          ...input.work,
+          updatedAt: input.work?.updatedAt || timestamp,
+          startedAt: input.work?.startedAt || (input.work?.status === 'running' ? timestamp : ''),
+          completedAt: ['confirmed', 'decision_required', 'skipped'].includes(input.work?.status) ? (input.work?.completedAt || timestamp) : input.work?.completedAt,
+        });
+        const previous = record.workItems.find((item) => item.id === work.id);
+        const merged = safeWork({
+          ...previous,
+          ...work,
+          fields: work.fields.length ? work.fields : previous?.fields,
+          startedAt: previous?.startedAt || work.startedAt || timestamp,
+          attempt: work.attempt || previous?.attempt || 1,
+        });
+        const workItems = [merged, ...record.workItems.filter((item) => item.id !== merged.id)]
+          .sort((left, right) => String(right.updatedAt || right.startedAt).localeCompare(String(left.updatedAt || left.startedAt)))
+          .slice(0, MAX_WORK_ITEMS);
+        const finished = ['confirmed', 'decision_required', 'skipped'].includes(merged.status);
+        const noteworthy = merged.status !== 'running';
+        return {
+          ...record,
+          currentWork: merged.status === 'running'
+            ? merged
+            : record.currentWork?.id === merged.id ? null : record.currentWork,
+          workItems,
+          activity: noteworthy ? activity(record, {
+            at: merged.updatedAt || timestamp,
+            type: 'work',
+            status: merged.status === 'confirmed' ? 'success' : merged.status === 'failed' ? 'error' : merged.status === 'pending' ? 'info' : 'warning',
+            title: `${merged.productName || 'Zadanie'} • ${merged.channel === 'vonHalsky' ? 'Von Halsky' : merged.channel === 'allegro' ? 'Allegro' : merged.channel === 'store' ? 'Sklep' : 'System'}`,
+            detail: merged.error || merged.message || (finished ? 'Operacja zakończona i potwierdzona.' : 'Operacja oczekuje na kolejny etap.'),
+            source: clean(input.source, 100) || 'agent-work',
+          }) : record.activity,
+        };
+      }
       throw Object.assign(new Error('Nieobsługiwane zdarzenie Agenta.'), { status: 422, code: 'agent_runtime_event_invalid' });
     });
   }
@@ -292,6 +359,8 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
       kind: ['oferty-lekkie', 'oferty-pelne', 'zamowienia', 'komunikacja'].includes(step.id) ? 'allegro' : step.id === 'tresci-gpt-nano' ? 'ai' : 'system',
     }));
     const state = !workerOnline ? 'offline' : record.currentRun ? 'working' : !cycleFresh ? 'stale' : integrationWarnings.length ? 'degraded' : 'online';
+    const pendingPublication = record.workItems.filter((item) => ['pending', 'attention', 'failed'].includes(item.status));
+    const confirmedPublication = record.workItems.filter((item) => item.status === 'confirmed');
     return {
       state,
       worker: {
@@ -305,6 +374,17 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
         active: number(queue.active, 0, 1_000_000),
       },
       currentRun: record.currentRun,
+      currentWork: record.currentWork,
+      publication: {
+        counts: {
+          pending: pendingPublication.filter((item) => item.status === 'pending').length,
+          attention: pendingPublication.filter((item) => item.status === 'attention').length,
+          failed: pendingPublication.filter((item) => item.status === 'failed').length,
+          confirmed: confirmedPublication.length,
+        },
+        pending: pendingPublication.slice(0, 80),
+        recent: record.workItems.slice(0, 80),
+      },
       lastRun,
       history: record.history.slice(0, 20),
       activity: record.activity.slice(0, 60),

@@ -352,3 +352,47 @@ test('harmonogram respektuje wyłączoną automatyzację ceny i stanu oraz zapis
   assert.equal('stock' in catalogPayload.items[0], false);
   assert.equal(result.body.sync.lastRequestId, 'catalog-req-7');
 });
+
+test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny postęp pracy', async () => {
+  const records = new Map(), revisions = new Map(), progress = [];
+  const env = {
+    INPOST_VON_HALSKY_API_BASE_URL: 'https://api.example.test',
+    INPOST_VON_HALSKY_AUTH_URL: 'https://auth.example.test/token',
+    INPOST_VON_HALSKY_CLIENT_ID: 'client',
+    INPOST_VON_HALSKY_CLIENT_SECRET: 'secret',
+    INPOST_VON_HALSKY_MERCHANT_ID: 'merchant',
+    INPOST_VON_HALSKY_HEALTH_PATH: '/health',
+    INPOST_VON_HALSKY_CATALOG_PATH: '/catalog',
+    INPOST_VON_HALSKY_ORDERS_PATH: '/orders',
+    INPOST_VON_HALSKY_CONTRACT_VERSION: '2026-01',
+  };
+  const product = {
+    id: 'P-17', externalId: 'EXT-17', nazwa: 'Alexander Gra edukacyjna',
+    opis: 'Pełny i prawdziwy opis produktu zawierający cechy, przeznaczenie oraz zawartość potrzebną klientowi do świadomego wyboru produktu.',
+    ean: '5906018000030', producent: 'Alexander', zdjecie: '/one.webp', cena: 39.9, stan: 8,
+    vonHalskyEditorialSyncPending: true, vonHalskyEditorialSyncRunId: 'run-17',
+    contentEditorial: { channelStates: { vonHalsky: { status: 'ready', publicationStatus: 'queued' } } },
+  };
+  const route = createVonHalskyRoute({
+    respond: (body, status = 200) => ({ body, status }), isAdmin: () => true,
+    readVersioned: async (key, fallback) => ({ value: structuredClone(records.get(key) ?? fallback), revision: revisions.get(key) || 0 }),
+    writeIfVersion: async (key, value) => { records.set(key, structuredClone(value)); revisions.set(key, (revisions.get(key) || 0) + 1); return { modified: true }; },
+    env: () => env,
+    fetchImpl: async (url) => String(url).includes('/token')
+      ? new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : new Response(JSON.stringify({ accepted: 1 }), { status: 202, headers: { 'content-type': 'application/json', 'x-request-id': 'vh-receipt-17' } }),
+    loadCatalog: async () => [product],
+    reportProgress: async (work) => progress.push(structuredClone(work)),
+  });
+  const request = new Request('https://artwaytm.pl/api?action=von-halsky-sync-catalog', {
+    method: 'POST', body: JSON.stringify({ publish: true, productIds: ['P-17'] }),
+  });
+  const result = await route(request, new URL(request.url), 'von-halsky-sync-catalog');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.sent, 1);
+  const saved = records.get('settings').data.artway_produkty_edytowane['P-17'];
+  assert.equal(saved.vonHalskyEditorialSyncState, 'synced');
+  assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationStatus, 'confirmed');
+  assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationReceipt, 'vh-receipt-17');
+  assert.deepEqual(progress.map((item) => item.phase), ['sending_to_von_halsky', 'confirmed_by_von_halsky']);
+});
