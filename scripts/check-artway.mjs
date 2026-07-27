@@ -46,6 +46,7 @@ const files = [
   'src/backend/lib/domain/product-link-package-preparer.mjs',
   'src/backend/lib/domain/product-sale-decisions.mjs',
   'src/backend/lib/domain/product-sale-channel-links.mjs',
+  'src/backend/lib/domain/store-data-pull.mjs',
   'src/backend/lib/domain/allegro-publication-agent.mjs',
   'src/backend/lib/domain/allegro-reply-assistant.mjs',
   'src/backend/lib/domain/telegram-communication.mjs',
@@ -122,6 +123,7 @@ const storeRuntime = [
   read('src/backend/lib/product-source-inspection-service.mjs'),
   read('src/backend/lib/product-source-matching.mjs'),
   read('src/backend/lib/domain/allegro-publication-agent.mjs'),
+  read('src/backend/lib/domain/store-data-pull.mjs'),
 ].join('\n');
 const productEditorial = read('src/backend/lib/domain/product-editorial-pipeline.mjs');
 const productLinkPackage = read('src/backend/lib/domain/product-link-package-preparer.mjs');

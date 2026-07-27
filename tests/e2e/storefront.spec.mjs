@@ -361,6 +361,22 @@ test('główne działy administratora mają jeden profesjonalny szablon i nie tw
   assertRuntime();
 });
 
+test('Wystawianie rozdziela brak towaru od szkiców i nie pokazuje ogólnego filtra nieaktywnych', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  await page.goto('/#/admin/allegro/wystawianie');
+  const queueFilter = page.getByLabel('Dokładny stan kolejki');
+  await expect(queueFilter).toBeVisible();
+  for (const label of ['Bez oferty Allegro', 'Szkice do aktywacji', 'Zakończone z innego powodu', 'Wycofane — brak towaru']) {
+    await expect(queueFilter).toContainText(label);
+  }
+  await expect(queueFilter).not.toContainText('Istniejące nieaktywne');
+  await expect(page.getByRole('button', { name: /Wycofane — brak towaru/ })).toBeVisible();
+  await expect(page.getByLabel('Dostępność w sprzedaży')).toBeVisible();
+  await expect(page.getByLabel('Stan magazynowy')).toBeVisible();
+  assertRuntime();
+});
+
 test('istniejąca podstrona Efekty obsługuje zakres dzienny i pełne zestawienia', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);

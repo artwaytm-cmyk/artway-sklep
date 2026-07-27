@@ -9,7 +9,7 @@ const read=path=>readFile(new URL(path,root),"utf8");
 
 test("podstrona wystawiania ma widoczny pojedynczy i masowy przycisk publikacji",async()=>{
   const source=(await read("src/frontend/12b-allegro-listing-workspace.js"))+(await read("src/frontend/12c-commerce-catalog-actions.js"));
-  for(const marker of ["Wystaw na Allegro","Aktywuj ofertę","Opublikuj aktualizację","Wystaw zaznaczone","Wystaw gotowe z widoku"]){
+  for(const marker of ["Wystaw na Allegro","Aktywuj szkic","Wznów zakończoną ofertę","Opublikuj aktualizację","Wystaw zaznaczone","Wystaw gotowe z widoku"]){
     assert.match(source,new RegExp(marker));
   }
   assert.match(source,/allegroPublikacjaOtworzDecyzje/);
@@ -98,30 +98,43 @@ test("centrum wystawiania skaluje katalog przez filtry, limit, paginację i eksp
 test("domyślny filtr pokazuje tylko produkty naprawdę bez oferty Allegro",async()=>{
   const runtime=await read("src/frontend/02-runtime-state.js"),listing=await read("src/frontend/12b-allegro-listing-workspace.js"),workspace=await read("src/frontend/12c-commerce-catalog-actions.js");
   assert.match(runtime,/filtrAllegroWystawiania="bez_oferty"/);
-  for(const marker of ["Naprawdę bez oferty","Gotowe nowe","Nowe z brakami","Istniejące nieaktywne","Zweryfikuj zapisane ID"]){
+  for(const marker of ["Bez oferty Allegro","Gotowe do pierwszego wystawienia","Nowe wymagające uzupełnienia","Szkice do aktywacji","Wycofane — brak towaru","Powiązania do weryfikacji"]){
     assert.match(workspace,new RegExp(marker));
   }
-  assert.match(workspace,/filter\(p=>!czyProduktAdminWKoszu\(p\)&&produktDostepnyWSprzedazy\(p\)\)/);
-  const start=listing.indexOf("function allegroPublikacjaMetaProduktu"),end=listing.indexOf("\nfunction allegroPublikacjaOtworzDecyzje",start);
+  assert.match(workspace,/catalogProducts=produktyDoAdministracji\(\)\.filter\(p=>!czyProduktAdminWKoszu\(p\)\)/);
+  assert.doesNotMatch(workspace,/Istniejące nieaktywne|Nieaktywne/);
+  const start=listing.indexOf("function allegroPublikacjaDostepnoscMeta"),end=listing.indexOf("\nfunction allegroPublikacjaOtworzDecyzje",start);
   assert.ok(start>=0&&end>start);
   const context={
-    result:null,currentOffer:null,
+    result:null,currentOffer:null,currentAvailability:null,currentUnavailable:false,
     asortymentOfertaProduktu(){return context.currentOffer;},
     allegroOfertaDlaProduktuSklepu(){return null;},
     allegroBrakiProduktuDoWystawienia(p){return p.missing||[];},
     allegroRozniceOfertyProduktu(p){return p.differences||[];},
+    wpisDostepnosciProduktu(){return context.currentAvailability;},
+    produktOznaczonyNiedostepny(){return context.currentUnavailable;},
+    produktDostepnyWSprzedazy(){return !context.currentUnavailable;},
   };
   vm.runInNewContext(`${listing.slice(start,end)}
     const fresh=allegroPublikacjaMetaProduktu({id:1,missing:[]});
     const unresolved=allegroPublikacjaMetaProduktu({id:2,allegroOfferId:"123",missing:[]});
     currentOffer={id:"456",status:"ACTIVE"};
     const active=allegroPublikacjaMetaProduktu({id:3,missing:[]});
-    result={fresh,unresolved,active};`,context);
+    currentUnavailable=true;currentAvailability={status:"niedostepny",decision:"wait_available",reason:"Brak u producenta"};
+    currentOffer={id:"789",status:"ENDED",saleAvailabilityBlocked:true};
+    const withdrawn=allegroPublikacjaMetaProduktu({id:4,missing:[]});
+    currentOffer={id:"790",status:"ACTIVE"};const pendingWithdrawal=allegroPublikacjaMetaProduktu({id:5,missing:[]});
+    result={fresh,unresolved,active,withdrawn,pendingWithdrawal};`,context);
   assert.equal(context.result.fresh.readyNew,true);
   assert.equal(context.result.unresolved.noOffer,false);
   assert.equal(context.result.unresolved.unresolved,true);
   assert.equal(context.result.active.active,true);
   assert.equal(context.result.active.actionable,false);
+  assert.equal(context.result.withdrawn.withdrawnNoStock,true);
+  assert.equal(context.result.withdrawn.pendingStockWithdrawal,false);
+  assert.equal(context.result.withdrawn.selectable,false);
+  assert.equal(context.result.withdrawn.actionable,true);
+  assert.equal(context.result.pendingWithdrawal.pendingStockWithdrawal,true);
 });
 
 test("proces wystawiania ma trzy etapy i blokuje duplikat przy niezweryfikowanym ID",async()=>{
@@ -137,10 +150,13 @@ test("proces wystawiania ma trzy etapy i blokuje duplikat przy niezweryfikowanym
   assert.match(styles,/\.allegro-publication-card\.verify/);
 });
 
-test("ukryty produkt nie trafia do wystawiania Allegro i jest ponownie blokowany na serwerze",async()=>{
+test("ukryty produkt nie może być wystawiony, ale powiązana oferta trafia do filtra wycofanych z braku towaru",async()=>{
   const listing=(await read("src/frontend/12b-allegro-listing-workspace.js"))+(await read("src/frontend/12c-commerce-catalog-actions.js")),legacy=await read("src/frontend/11-allegro-operations.js"),backend=await read("src/backend/lib/store-app.mjs");
-  assert.match(listing,/filter\(p=>!czyProduktAdminWKoszu\(p\)&&produktDostepnyWSprzedazy\(p\)\)/);
-  assert.match(listing,/p&&produktDostepnyWSprzedazy\(p\)&&meta\?\.ready/);
+  assert.match(listing,/withdrawnNoStock:\s*availability\.withdrawnNoStock/);
+  assert.match(listing,/meta\?\.selectable&&meta\.ready/);
+  assert.match(listing,/Wycofana z powodu braku towaru/);
+  assert.match(listing,/Status wynika z tej samej decyzji dostępności/);
+  assert.match(listing,/href="#\/admin\/magazyn\/dostawcy"/);
   assert.match(legacy,/produkt jest ukryty lub niedostępny/i);
   assert.match(backend,/code: 'product_sale_unavailable'/);
   assert.match(backend,/artway_dostepnosc\?\.\[saleProductId\]/);
@@ -171,9 +187,9 @@ test("karta produktu wykonuje się z rzeczywistym wspólnym formatowaniem ceny",
 
 test("wystawianie jest kolejką działań, a nie kopią pełnego katalogu Allegro",async()=>{
   const listing=await read("src/frontend/12b-allegro-listing-workspace.js"),workspace=await read("src/frontend/12c-commerce-catalog-actions.js");
-  assert.match(listing,/actionable:noOffer\|\|unresolved\|\|inactive\|\|needsUpdate/);
-  assert.match(workspace,/all=saleProducts\.filter\(p=>allegroPublikacjaMetaProduktu\(p\)\.actionable\)/);
-  assert.match(workspace,/To nie jest pełny katalog ofert/);
+  assert.match(listing,/actionable:availability\.withdrawnNoStock\|\|\(availability\.saleAvailable&&\(noOffer\|\|unresolved\|\|inactive\|\|needsUpdate\)\)/);
+  assert.match(workspace,/all=catalogProducts\.filter\(p=>allegroPublikacjaMetaProduktu\(p\)\.actionable\)/);
+  assert.match(workspace,/Widzisz wyłącznie produkty wymagające działania/);
   assert.match(workspace,/Aktualne, poprawne oferty są automatycznie pomijane/);
   assert.match(workspace,/Cała kolejka działań/);
   assert.doesNotMatch(workspace,/Aktywne \(\$\{counts\.aktywne\}\)/);
