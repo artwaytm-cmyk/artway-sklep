@@ -5,6 +5,9 @@ import {
   applySupplierProcurementToOrder,
   applySupplierProcurementWorkflow,
 } from '../src/backend/lib/domain/supplier-procurement-workflow.mjs';
+import fs from 'node:fs';
+
+const storeAppSource = fs.readFileSync(new URL('../src/backend/lib/store-app.mjs', import.meta.url), 'utf8');
 
 const order = (overrides = {}) => ({
   id: 'ALG-1', status: 'READY_FOR_PROCESSING', fulfillmentStatus: 'PROCESSING', warehouseStage: 'braki',
@@ -130,4 +133,9 @@ test('zbiorcza synchronizacja raportuje tylko realnie zmienione zlecenia', () =>
   const result = applySupplierProcurementWorkflow([order(), { id: 'ALG-2', warehouseStage: 'do_sprawdzenia' }], [draft()]);
   assert.equal(result.changed, 1);
   assert.equal(result.items[1].supplierProcurement, undefined);
+});
+
+test('błąd rozchodu innego zamówienia nie blokuje aktualizacji lokalnego etapu kompletacji', () => {
+  assert.match(storeAppSource, /allegro-sync-inventory-pending/);
+  assert.doesNotMatch(storeAppSource, /if \(supplierReconciliation\.ok !== false\)\s*\{[\s\S]*?synchronizujEtapyZakupoweZlecen/);
 });

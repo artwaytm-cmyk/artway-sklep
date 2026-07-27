@@ -1129,14 +1129,15 @@ async function allegroZapisStanIMozeUzgodnijPlan(items = []) {
   const supplierReconciliation = inventory.ok
     ? await storeOrderSupplierReconciliation.reconcileDraftsSafely()
     : { ok: false, changed: false, pendingRetry: true, code: 'allegro_inventory_pending', error: 'Plan nie został przeliczony, dopóki stan wysłanych zleceń Allegro nie zostanie bezpiecznie zdjęty.', inventory };
-  let procurementWorkflow = { changed: 0 };
-  if (supplierReconciliation.ok !== false) {
-    const settings = await czytaj('settings', { data: {} });
-    procurementWorkflow = await synchronizujEtapyZakupoweZlecen(
-      Array.isArray(settings.data?.artway_agent_ai_zlecenia) ? settings.data.artway_agent_ai_zlecenia : [],
-      'allegro-sync',
-    );
-  }
+  // Lokalny etap kompletacji wynika z bieżącego stanu i powiązań dokumentów.
+  // Nie może pozostać zablokowany przez niezależny błąd rozchodu innego,
+  // wcześniej wysłanego zamówienia. Sam Plan zatowarowania nadal zachowuje
+  // ostrzejszą blokadę powyżej.
+  const settings = await czytaj('settings', { data: {} });
+  const procurementWorkflow = await synchronizujEtapyZakupoweZlecen(
+    Array.isArray(settings.data?.artway_agent_ai_zlecenia) ? settings.data.artway_agent_ai_zlecenia : [],
+    supplierReconciliation.ok === false ? 'allegro-sync-inventory-pending' : 'allegro-sync',
+  );
   return { inventory, supplierReconciliation, procurementWorkflow: { changed: procurementWorkflow.changed } };
 }
 async function allegroPrzeliczZamowieniaPoMapowaniu(options = {}) {
