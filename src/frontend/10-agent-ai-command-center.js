@@ -21,12 +21,11 @@ async function agentAIWykonajOferteAllegro(fraza="",publicationAction="keep"){
   const p=best.p,baseStock=allegroStanOfertyProduktu(p),stock=publicationAction==="activate"?Math.max(1,baseStock):baseStock;
   const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock,publicationAction,publishNow:publicationAction==="activate"}},timeout:120000});
   allegroOstatniBladWystawienia=null;
-  allegroZapiszWynikOperacji(p,d);allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);
+  allegroZapiszWynikOperacji(p,d);await allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);
   if(d.offer?.id){
     const categoryId=d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||p.allegroCategoryId||"";
     const productId=d.autoFilled?.allegroProductId||d.catalogMatch?.selected?.id||p.allegroProductId||"";
-    produktyEdytowane[p.id]={...(produktyEdytowane[p.id]||{}),allegroOfferId:String(d.offer.id),...(categoryId?{allegroCategoryId:String(categoryId)}:{}),...(productId?{allegroProductId:String(productId)}:{})};
-    zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+    await chmuraZapiszProduktyCentralnie([{productId:p.id,fields:{allegroOfferId:String(d.offer.id),...(categoryId?{allegroCategoryId:String(categoryId)}:{}),...(productId?{allegroProductId:String(productId)}:{})}}],"agent-allegro-publication");
   }
   await chmuraWczytajStan().catch(()=>{});await allegroWczytajDane(true).catch(()=>{});zbudujProdukty();
   const updated=d.mode==="updated";
@@ -93,7 +92,7 @@ async function agentAIWykonajPolecenie(tekst=""){
     }else if(intent.typ==="opisy"){
       odpowiedz=agentAIOpisyTekst();
     }else if(intent.typ==="opisy-popraw"){
-      odpowiedz=agentAIPoprawOpisyProduktow(40);
+      odpowiedz=await agentAIPoprawOpisyProduktow(40);
       renderuj();
     }else if(intent.typ==="linki-producentow"){
       odpowiedz=agentAILinkiProducentowTekst();
@@ -421,7 +420,7 @@ async function agentAIWykonaj(akcja){
   if(akcja==="utworz-zlecenie-braki"||akcja==="utworz-zlecenie-niskie")return agentAIUzgodnijPlanZSerwerem();
   if(akcja==="sprawdz-linki-producentow") return agentAISprawdzLinkiProducentow().then(t=>toast(t));
   if(akcja==="sprawdz-dostepnosc-producentow") return agentAISprawdzDostepnoscProducentow();
-  if(akcja==="popraw-opisy"){ const t=agentAIPoprawOpisyProduktow(40); toast(t); renderuj(); return t; }
+  if(akcja==="popraw-opisy"){ const t=await agentAIPoprawOpisyProduktow(40); toast(t); renderuj(); return t; }
   if(akcja==="kartoteka-domyslna") return wypelnijDomyslnaKartotekeMagazynu();
   if(akcja==="audyt-magazynu") return audytMagazynuAI();
   if(akcja==="raport-telegram") return agentAIWyslijRaportTelegram();

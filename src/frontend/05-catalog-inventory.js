@@ -27,7 +27,29 @@ function produktyDoAdministracji(){
   const items=[...bazowe.filter(p=>!dodaneIds.has(Number(p.id))&&!produktyDefinitywne.includes(p.id)).map(p=>produktyEdytowane[p.id]?{...p,...produktyEdytowane[p.id],id:p.id}:p),...produktyDodane];
   produktyAdminCache={bazowe,dodane:produktyDodane,edytowane:produktyEdytowane,definitywne:produktyDefinitywne,items,byId:new Map(items.map(p=>[String(p.id),p]))};return items;
 }
-function pobierzProduktAdmin(id){produktyDoAdministracji();return produktyAdminCache.byId.get(String(id));}
+function pobierzProduktAdmin(id){
+  const central=typeof asortymentCentralnyProduktPoId==="function"?asortymentCentralnyProduktPoId(id):null;
+  if(central)return central;
+  produktyDoAdministracji();return produktyAdminCache.byId.get(String(id));
+}
+function podmienProduktAdminBezRenderu(id,patch={},usun=[]){
+  const key=String(id),baza=pobierzProduktAdmin(id)||{},targets=new Set([baza]);
+  const added=(produktyDodane||[]).find(item=>String(item?.id)===key);
+  if(added)targets.add(added);
+  else{
+    const edit=produktyEdytowane[key]&&typeof produktyEdytowane[key]==="object"?produktyEdytowane[key]:(produktyEdytowane[key]={});
+    Object.assign(edit,patch);for(const field of usun)edit[field]=null;
+  }
+  const storefront=(produkty||[]).find(item=>String(item?.id)===key);if(storefront)targets.add(storefront);
+  const cached=produktyAdminCache?.byId?.get?.(key);if(cached)targets.add(cached);
+  for(const product of targets){
+    if(!product||typeof product!=="object")continue;
+    Object.assign(product,patch);for(const field of usun)delete product[field];
+  }
+  if(typeof asortymentCentralnyPodmienProdukt==="function")asortymentCentralnyPodmienProdukt(key,patch,usun);
+  if(typeof asortymentWynikiCache!=="undefined")asortymentWynikiCache={index:null,signature:"",value:null};
+  return baza;
+}
 function przygotujProduktDlaSklepu(p){
   if(!p)return null;
   const zmianyKat=ustawienia.kategorie||{},mapa=ustawienia.mapaProduktow||{};
@@ -135,6 +157,11 @@ async function usunKopieGrupyProduktuTrwale(groupKey){
   if(!confirm(`Pozostawić „${grupa.canonical.nazwa}” (ID ${grupa.canonical.id}) i TRWALE usunąć ${usun.length} powtarzające się rekordy?\n\n${lista}\n\nOperacji nie można cofnąć.`))return;
   const ids=new Set(usun.map(p=>String(p.id)));
   const scalony=usun.reduce((keep,copy)=>{const next={...keep};for(const [k,v] of Object.entries(copy)){if(k!=="id"&&(next[k]===undefined||next[k]===null||next[k]==="")&&v!==undefined&&v!==null&&v!=="")next[k]=v;}if(String(copy.opis||"").length>String(next.opis||"").length)next.opis=copy.opis;if(String(copy.opisKrotki||"").length>String(next.opisKrotki||"").length)next.opisKrotki=copy.opisKrotki;if((copy.zdjecia||[]).length>(next.zdjecia||[]).length)next.zdjecia=copy.zdjecia;return next;},{...grupa.canonical,id:grupa.canonical.id});
+  try{
+    await chmuraZapiszProduktyCentralnie([{productId:keepId,fields:scalony}],"catalog-duplicate-merge");
+    await produktCyklCentralny([...ids],"trash");
+    await produktCyklCentralny([...ids],"purge");
+  }catch(error){toast("⛔ Nie zakończono scalania — serwer nie potwierdził wszystkich zmian: "+(error.message||error));return;}
   const keepAdded=produktyDodane.findIndex(p=>String(p.id)===keepId);if(keepAdded>=0)produktyDodane[keepAdded]=scalony;else produktyEdytowane[keepId]={...(produktyEdytowane[keepId]||{}),...scalony,id:grupa.canonical.id};
   produktyDodane=produktyDodane.filter(p=>!ids.has(String(p.id)));
   koszDodanych=koszDodanych.filter(p=>!ids.has(String(p.id)));
@@ -148,7 +175,7 @@ async function usunKopieGrupyProduktuTrwale(groupKey){
   produktyDefinitywne=[...new Map(produktyDefinitywne.map(x=>[String(x),x])).values()];
   if(ustawienia.mapaProduktow&&typeof ustawienia.mapaProduktow==="object"){const mapa={...ustawienia.mapaProduktow};ids.forEach(id=>delete mapa[id]);ustawienia={...ustawienia,mapaProduktow:mapa};}
   const kanoniczne={...(ustawienia.kanoniczneDuplikatySklepu||{})};delete kanoniczne[String(groupKey)];ustawienia={...ustawienia,kanoniczneDuplikatySklepu:kanoniczne};
-  zapiszLS("artway_produkty_dodane",produktyDodane);zapiszLS("artway_kosz_dodane",koszDodanych);zapiszLS("artway_produkty_definitywne",produktyDefinitywne);zapiszLS("artway_produkty_ukryte",produktyUkryte);zapiszLS("artway_produkty_edytowane",produktyEdytowane);zapiszLS("artway_stany",stanyProduktow);zapiszLS("artway_dostepnosc",dostepnoscProduktow);zapiszLS("artway_magazyn_produkty",magazynProdukty);zapiszLS("artway_kosz_meta",koszMeta);zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});void chmuraDodajMutacjePolUstawien({mapaProduktow:ustawienia.mapaProduktow||{},kanoniczneDuplikatySklepu:ustawienia.kanoniczneDuplikatySklepu||{}});
+  zapiszLS("artway_stany",stanyProduktow);zapiszLS("artway_dostepnosc",dostepnoscProduktow);zapiszLS("artway_magazyn_produkty",magazynProdukty);zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});void chmuraDodajMutacjePolUstawien({mapaProduktow:ustawienia.mapaProduktow||{},kanoniczneDuplikatySklepu:ustawienia.kanoniczneDuplikatySklepu||{}});
   zbudujProdukty();odswiezMenu();zapiszHistorieAgenta("katalog",`Trwale usunięto ${usun.length} powtarzające się rekordy; pozostawiono ${grupa.canonical.nazwa}`,{keepId:grupa.canonical.id,deletedIds:[...ids],groupKey});
   if(chmuraToken)await chmuraZapiszUstawienia({flush:true});
   toast(`✅ Pozostawiono 1 kartę i trwale usunięto ${usun.length} kopii`);renderuj();

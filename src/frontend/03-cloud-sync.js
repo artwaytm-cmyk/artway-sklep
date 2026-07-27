@@ -5,7 +5,15 @@
 const CHMURA_URL = "/api/store";
 const CHMURA_AUTO_SYNC_MS = 15*60*1000;
 const CHMURA_FOCUS_SYNC_MIN_MS = 5*60*1000;
-const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_kosz_dodane","artway_kosz_meta","artway_seo_ustawienia","artway_seo_historia"];
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_seo_ustawienia","artway_seo_historia"];
+const CHMURA_DOMENOWE_KLUCZE = new Set(["artway_ustawienia","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_niedobory_wydan","artway_magazyn_produkty","artway_magazyn_ustawienia","artway_magazyn_lokalizacje","artway_magazyn_lokalizacje_usuniete","artway_dokumenty_magazynowe","artway_dokumenty_magazynowe_usuniete","artway_dokumenty_magazynowe_seq","artway_faktury_szkice","artway_producenci","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_agent_ai_pamiec","artway_agent_ai_historia","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_seo_historia","artway_seo_ustawienia","artway_opinie"]);
+// Produkty mają jedno źródło prawdy: rekordy artway_products w PostgreSQL.
+// Stare karty mogą pozostawić wielomegabajtowe snapshoty w localStorage, ale
+// nie wolno ich już scalać ani odsyłać na serwer.
+for(const key of CENTRAL_PRODUCT_LS_KEYS){
+  try{localStorage.removeItem(key);if(typeof chmuraUsunChunksLS==="function")chmuraUsunChunksLS(key);}catch(error){}
+}
+produktyDodane=[];produktyEdytowane={};produktyUkryte=[];produktyDefinitywne=[];koszDodanych=[];koszMeta={};
 let chmuraToken = (function(){
   try{
     const token=sessionStorage.getItem("artway_chmura_token")||"";
@@ -25,15 +33,26 @@ let chmuraKatalogImportowanyRev = "";
 let chmuraKatalogCentralnyPubliczny = false;
 let chmuraWersjeDomenPubliczne = wczytajLS("artway_chmura_domain_versions_public",{});
 let chmuraWersjeDomenAdmina = wczytajLS("artway_chmura_domain_versions_admin",{});
+// W starszych wydaniach panel zapamiętywał rewizje tych domen, mimo że nie
+// otrzymywał ich treści. Jednorazowo usuwamy błędne potwierdzenia, aby pierwszy
+// odczyt po aktualizacji rzeczywiście pobrał stany i decyzje dostępności.
+const CHMURA_WERSJA_WIDOCZNOSCI_DOMEN=2;
+if(Number(wczytajLS("artway_chmura_domain_visibility_schema",0))<CHMURA_WERSJA_WIDOCZNOSCI_DOMEN){
+  ["artway_stany","artway_dostepnosc","artway_magazyn_produkty"].forEach(key=>delete chmuraWersjeDomenAdmina[key]);
+  try{localStorage.setItem("artway_chmura_domain_versions_admin",JSON.stringify(chmuraWersjeDomenAdmina));localStorage.setItem("artway_chmura_domain_visibility_schema",String(CHMURA_WERSJA_WIDOCZNOSCI_DOMEN));}catch(e){}
+}
 const CHMURA_KATALOG_CACHE_DB = "artway-runtime-cache";
 const CHMURA_KATALOG_CACHE_STORE = "catalogs";
 const CHMURA_KATALOG_CACHE_KEY = "imported-products-v1";
 let chmuraKatalogCacheBazaPromise = null;
 let chmuraBrudneKlucze = new Set();
+const CHMURA_ODRZUCONA_DOMENA_RETRY_MS = 15*60*1000;
+let chmuraWstrzymaneDomeny = new Map();
 let chmuraZapisWToku = null;
 let chmuraZapisPonowPoZakonczeniu = false;
 let chmuraNumerMutacji = 0;
 let chmuraPobraniaWToku = new Map();
+const chmuraPominieteLokalnieZalogowane = new Set();
 function chmuraKatalogCacheBaza(){
   if(chmuraKatalogCacheBazaPromise)return chmuraKatalogCacheBazaPromise;
   if(typeof indexedDB==="undefined")return Promise.resolve(null);
@@ -70,7 +89,11 @@ async function chmuraRuntimeCacheUsun(key){
 async function chmuraPobierzKatalogImportowany(meta={},force=false){
   const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
   const poprzednioCentralny=chmuraKatalogCentralnyPubliczny;chmuraKatalogCentralnyPubliczny=meta.catalog_central===true;
-  if(chmuraKatalogCentralnyPubliczny){chmuraKatalogImportowanyRev=revision;return false;}
+  if(chmuraKatalogCentralnyPubliczny){
+    produktyImportowane=[];chmuraKatalogImportowanyRev=revision;
+    await chmuraRuntimeCacheUsun(CHMURA_KATALOG_CACHE_KEY).catch(()=>false);
+    return false;
+  }
   if(poprzednioCentralny){force=true;chmuraKatalogImportowanyRev="";}
   if(!force&&revision===chmuraKatalogImportowanyRev)return false;
   if(!force&&typeof productLinkImportStan!=="undefined"&&productLinkImportStan.loopActive)return false;
@@ -176,16 +199,8 @@ function filtrujAktywneZamowienia(lista){
   });
 }
 function zbierzWspolneUstawienia(){
-  const katalogAllegro=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&!jestProduktemImportowanym(p.id)).map(p=>({
-    id:p.id,nazwa:p.nazwa||"",opisKrotki:p.opisKrotki||p.krotkiOpis||"",opis:p.opis||"",kategoria:p.kategoria||"",zdjecie:p.zdjecie||"",zdjecia:Array.isArray(p.zdjecia)?p.zdjecia.slice(0,15):[],ikona:p.ikona||"",sku:p.sku||"",externalId:p.externalId||"",gtin:p.gtin||p.ean||"",ean:p.ean||p.gtin||"",kodProducenta:p.kodProducenta||p.mpn||"",mpn:p.mpn||p.kodProducenta||"",producent:p.producent||p.marka||"",marka:p.marka||p.producent||"",cena:p.cena||0,cenaAllegro:p.cenaAllegro||0,cenaVonHalsky:p.cenaVonHalsky??null,cenaZakupu:p.cenaZakupu||0,contentEditorial:p.contentEditorial||null,vonHalskyContentMode:p.vonHalskyContentMode||"custom",vonHalskyTitle:p.vonHalskyTitle||"",vonHalskyShortDescription:p.vonHalskyShortDescription||"",vonHalskyDescription:p.vonHalskyDescription||"",vonHalskyContentUpdatedAt:p.vonHalskyContentUpdatedAt||"",vonHalskyContentSource:p.vonHalskyContentSource||"independent-channel-content",allegroTitle:p.allegroTitle||"",allegroShortDescription:p.allegroShortDescription||"",allegroDescription:p.allegroDescription||"",allegroDescriptionSections:Array.isArray(p.allegroDescriptionSections)?p.allegroDescriptionSections:[],allegroOfferId:p.allegroOfferId||"",producentUrl:p.producentUrl||p.sourceUrl||"",sourceUrl:p.sourceUrl||p.producentUrl||"",sourceEvidence:p.sourceEvidence||null,parametryProducenta:p.parametryProducenta||null,parametryZrodla:p.parametryZrodla||null,agentImportAt:p.agentImportAt||"",agentImportConfidence:Number(p.agentImportConfidence)||0,agentImportSource:p.agentImportSource||"",agentImportUrl:p.agentImportUrl||"",dostepnoscProducenta:p.dostepnoscProducenta||"",stanProducenta:p.stanProducenta??"",stanProducentaDokladny:!!p.stanProducentaDokladny,stanProducentaZrodlo:p.stanProducentaZrodlo||"",producentStatus:p.producentStatus||"",producentSprawdzonoAt:p.producentSprawdzonoAt||"",producentOstatniBlad:p.producentOstatniBlad||"",producentAlertAktywny:!!p.producentAlertAktywny,allegroCommissionAmount:p.allegroCommissionAmount||0,allegroCommissionRate:p.allegroCommissionRate||0,allegroRecurringFees:p.allegroRecurringFees||0,allegroFeeCalculatedAt:p.allegroFeeCalculatedAt||"",allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI,kosztPakowania:p.kosztPakowania||0,sklepAdditionalCost:p.sklepAdditionalCost||0,sklepPaymentPercent:p.sklepPaymentPercent||0,allegroAdditionalCost:p.allegroAdditionalCost||0,allegroAdsPercent:p.allegroAdsPercent||0,seoTitle:p.seoTitle||"",seoDescription:p.seoDescription||"",seoKeywords:p.seoKeywords||"",seoScore:Number(p.seoScore)||0,seoReviewedAt:p.seoReviewedAt||"",seoSource:p.seoSource||"",seoMode:p.seoMode||"auto",seoPromoted:!!p.seoPromoted
-  }));
   return {
     artway_ustawienia: ustawienia,
-    artway_produkty_dodane: produktyDodane,
-    artway_produkty_edytowane: produktyEdytowane,
-    artway_produkty_katalog: katalogAllegro,
-    artway_produkty_ukryte: produktyUkryte,
-    artway_produkty_definitywne: produktyDefinitywne,
     artway_stany: stanyProduktow,
     artway_dostepnosc: dostepnoscProduktow,
     artway_ruchy_magazynowe: ruchyMagazynowe,
@@ -201,8 +216,6 @@ function zbierzWspolneUstawienia(){
     artway_agent_ai_linki_producentow: agentAILinkiProducentow,
     artway_agent_ai_allegro_zadania: agentAIAllegroZadania,
     artway_opinie: opinie,
-    artway_kosz_dodane: koszDodanych,
-    artway_kosz_meta: koszMeta,
     artway_seo_ustawienia: seoUstawienia,
     artway_seo_historia: seoHistoria,
   };
@@ -220,8 +233,6 @@ function nalozWspolneUstawienia(dane){
       allegroJednostkiOplatCyklicznych=Math.max(1,Math.min(1000,Number(ustawienia.allegroJednostkiOplatCyklicznych)||allegroJednostkiOplatCyklicznych||10));
     }
     const setter = {
-      artway_produkty_dodane:(v)=>{produktyDodane=v;}, artway_produkty_ukryte:(v)=>{produktyUkryte=v;},
-      artway_produkty_edytowane:(v)=>{produktyEdytowane=v;}, artway_produkty_definitywne:(v)=>{produktyDefinitywne=v;},
       artway_stany:(v)=>{stanyProduktow=v;}, artway_dostepnosc:(v)=>{dostepnoscProduktow=(v&&typeof v==="object")?v:{};},
       artway_ruchy_magazynowe:(v)=>{ruchyMagazynowe=Array.isArray(v)?v:[];},
       artway_magazyn_ustawienia:(v)=>{ustawieniaMagazynu=(v&&typeof v==="object")?v:{};}, artway_magazyn_produkty:(v)=>{magazynProdukty=(v&&typeof v==="object")?v:{};},
@@ -234,7 +245,6 @@ function nalozWspolneUstawienia(dane){
       artway_agent_ai_linki_producentow:(v)=>{agentAILinkiProducentow=Array.isArray(v)?v:[];},
       artway_agent_ai_allegro_zadania:(v)=>{agentAIAllegroZadania=Array.isArray(v)?v:[];},
       artway_opinie:(v)=>{opinie=v;},
-      artway_kosz_dodane:(v)=>{koszDodanych=v;}, artway_kosz_meta:(v)=>{koszMeta=v;},
       artway_seo_ustawienia:(v)=>{seoUstawienia={...SEO_USTAWIENIA_DOMYSLNE,...((v&&typeof v==="object")?v:{})};},
       artway_seo_historia:(v)=>{seoHistoria=Array.isArray(v)?v:[];},
     };
@@ -258,10 +268,12 @@ async function chmuraWczytajStan(){
     chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, admin:d.admin===true||chmuraStan.admin, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     const revLok = lokalnaRewizja;
     const serwerNowszy = (d.rev||0) > revLok;
+    const zmienioneDomeny = Array.isArray(d.settings_changed_keys) && d.settings_changed_keys.length>0;
     // Klient (bez tokenu): serwer jest źródłem prawdy → zawsze nakładaj.
-    // Admin (z tokenem): nakładaj TYLKO gdy serwer ma nowszą wersję niż ostatnio zsynchronizowana —
-    // dzięki temu wczytanie strony NIE kasuje świeżych, jeszcze niewysłanych zmian admina.
-    if(d.settings && Object.keys(d.settings).length && (!maUprawnieniaZapisuChmury() || serwerNowszy)){
+    // Admin: nakładaj nowszy rekord bazowy ALBO jawnie zmienione domeny.
+    // Domeny mają własne rewizje, więc ich świeżego zapisu nie wolno pominąć
+    // tylko dlatego, że globalna rewizja ustawień pozostała bez zmian.
+    if(d.settings && Object.keys(d.settings).length && (!maUprawnieniaZapisuChmury() || serwerNowszy || zmienioneDomeny)){
       chmuraOstatniPullZmienilDane=nalozWspolneUstawienia(chmuraPominBrudneDaneSerwera(d.settings))||chmuraOstatniPullZmienilDane;
       zapiszLS("artway_chmura_rev", d.rev||0);
     }
@@ -281,6 +293,23 @@ function zaplanujZapisUstawien(){
   if(!maUprawnieniaZapisuChmury()) return;
   clearTimeout(chmuraTimerZapisu);
   chmuraTimerZapisu = setTimeout(()=>chmuraZapiszUstawienia({flush:false}), 1200);
+}
+function chmuraDomenaGotowaDoZapisu(key,now=Date.now()){
+  const retryAt=Number(chmuraWstrzymaneDomeny.get(key)||0);
+  if(!retryAt)return true;
+  if(retryAt<=now){chmuraWstrzymaneDomeny.delete(key);return true;}
+  return false;
+}
+function chmuraZaplanujKolejnyZapis(){
+  clearTimeout(chmuraTimerZapisu);
+  const now=Date.now(),gotowy=[...chmuraBrudneKlucze].some(key=>chmuraDomenaGotowaDoZapisu(key,now));
+  if(gotowy||chmuraZapisPonowPoZakonczeniu){
+    chmuraZapisPonowPoZakonczeniu=false;
+    chmuraTimerZapisu=setTimeout(()=>chmuraZapiszUstawienia({flush:false}),1200);
+    return;
+  }
+  const terminy=[...chmuraBrudneKlucze].map(key=>Number(chmuraWstrzymaneDomeny.get(key)||0)).filter(value=>value>now);
+  if(terminy.length)chmuraTimerZapisu=setTimeout(()=>chmuraZapiszUstawienia({flush:false}),Math.max(1200,Math.min(...terminy)-now));
 }
 async function chmuraZapiszUstawienia(opcje={}){
   if(!maUprawnieniaZapisuChmury()) return false;
@@ -306,27 +335,173 @@ async function chmuraZapiszUstawienia(opcje={}){
   }
   if(chmuraZapisWToku){chmuraZapisPonowPoZakonczeniu=true;return chmuraZapisWToku;}
   chmuraZapisWToku=(async()=>{
-    const snapshot=zbierzWspolneUstawienia(),klucze=(opcje.all===true?KLUCZE_WSPOLNE:[...chmuraBrudneKlucze]).filter(k=>Object.prototype.hasOwnProperty.call(snapshot,k));
-    if(!klucze.length)return true;
-    const patch=Object.fromEntries(klucze.map(k=>[k,snapshot[k]])),odciski=Object.fromEntries(klucze.map(k=>[k,JSON.stringify(snapshot[k])]));
-    const expectedRev=Number(chmuraStan.rev||wczytajLS("artway_chmura_rev",0))||0,mutationId=`web-${Date.now().toString(36)}-${(++chmuraNumerMutacji).toString(36)}`;
-    try{
-      const d=await chmura("settings",{method:"POST",body:{mode:"patch",patch,expectedRev,mutationId},timeout:30000});
-      chmuraStan={...chmuraStan,dostepna:true,admin:true,rev:d.rev||chmuraStan.rev,updated_at:d.updated_at||null,error:"",ostatniZapis:Date.now()};
-      localStorage.setItem("artway_chmura_rev",JSON.stringify(d.rev||chmuraStan.rev));
-      const teraz=zbierzWspolneUstawienia();
-      for(const k of klucze)if(JSON.stringify(teraz[k])===odciski[k])chmuraBrudneKlucze.delete(k);
-      return true;
-    }catch(e){
-      chmuraStan={...chmuraStan,error:e.message};
-      if(e.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
-      else if(e.code==="settings_write_conflict")toast("⚠️ Serwer jest zajęty inną zmianą — dane lokalne zostały zachowane i zapis zostanie ponowiony.");
-      loguj("blad","Zapis ustawień w chmurze: "+e.message);return false;
+    const trybAdmina = maUprawnieniaZapisuChmury();
+    const wersjeDomen = trybAdmina ? chmuraWersjeDomenAdmina : chmuraWersjeDomenPubliczne;
+    const snapshot=zbierzWspolneUstawienia(), wszystkie= (opcje.all===true?KLUCZE_WSPOLNE:[...chmuraBrudneKlucze]).filter(k=>Object.prototype.hasOwnProperty.call(snapshot,k)&&chmuraDomenaGotowaDoZapisu(k));
+    if(!wszystkie.length) return true;
+    const domainKeys=wszystkie.filter(k=>CHMURA_DOMENOWE_KLUCZE.has(k)), patchKeys=wszystkie.filter(k=>!CHMURA_DOMENOWE_KLUCZE.has(k));
+    const odciski=Object.fromEntries(wszystkie.map(k=>[k,JSON.stringify(snapshot[k])]));
+    let expectedRev=Number(chmuraStan.rev||wczytajLS("artway_chmura_rev",0))||0,mutationId=`web-${Date.now().toString(36)}-${(++chmuraNumerMutacji).toString(36)}`;
+    let ok = true;
+    if(domainKeys.length){
+      for(const key of domainKeys){
+        try{
+          const expectedRevision = wersjeDomen && Object.prototype.hasOwnProperty.call(wersjeDomen, key) ? Number(wersjeDomen[key]) : null;
+          const body = {mode:"domain",key,value:snapshot[key]};
+          if(Number.isFinite(expectedRevision) && expectedRevision>0) body.expectedRevision = expectedRevision;
+          const d=await chmura("settings",{method:"POST",body,timeout:30000});
+          chmuraWstrzymaneDomeny.delete(key);
+          if(Number.isFinite(d.version)) {
+            if(trybAdmina) chmuraWersjeDomenAdmina={...(chmuraWersjeDomenAdmina||{}),[key]:Number(d.version)};
+            else chmuraWersjeDomenPubliczne={...(chmuraWersjeDomenPubliczne||{}),[key]:Number(d.version)};
+          }
+          if(d.merged===true) loguj("info",`Scalono równoległe zmiany domeny ${key}; żadnego zadania nie utracono.`);
+          chmuraStan={...chmuraStan,dostepna:true,admin:true,error:"",updated_at:d.updated_at||chmuraStan.updated_at,ostatniZapis:Date.now()};
+          if(Number.isFinite(d.rev)){ chmuraStan.rev=Number(d.rev); expectedRev=chmuraStan.rev; localStorage.setItem("artway_chmura_rev",JSON.stringify(chmuraStan.rev)); }
+          const teraz=zbierzWspolneUstawienia();
+          if(JSON.stringify(teraz[key])===odciski[key]) chmuraBrudneKlucze.delete(key);
+        }catch(e){
+          ok=false;
+          if(e.code==="settings_write_conflict"){
+            const currentVersion=Number(e?.payload?.currentVersion||e?.currentVersion||0);
+            if(Number.isFinite(currentVersion)&&currentVersion>0){
+              if(trybAdmina) chmuraWersjeDomenAdmina={...(chmuraWersjeDomenAdmina||{}),[key]:currentVersion};
+              else chmuraWersjeDomenPubliczne={...(chmuraWersjeDomenPubliczne||{}),[key]:currentVersion};
+            }
+            loguj("ostrzezenie",`${key}: wykryto równoległą zmianę; zapis pozostaje w kolejce i zostanie bezpiecznie ponowiony.`);
+          }else if(e.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
+          else if(Number(e.status)===422&&/domena ustawien|domena ustawień/i.test(String(e.message||""))){
+            chmuraWstrzymaneDomeny.set(key,Date.now()+CHMURA_ODRZUCONA_DOMENA_RETRY_MS);
+            loguj("blad","Kontrakt zapisu domeny "+key+" jest niespójny z serwerem. Dane lokalne zachowano; kolejna próba nastąpi za 15 minut.");
+          }
+          else loguj("blad","Zapis ustawienia domeny "+key+" w chmurze: "+e.message);
+          break;
+        }
+      }
     }
+    if(!ok){ chmuraStan={...chmuraStan,error:`Nie udało się zapisać części ustawień domenowych.`}; return false; }
+    if(trybAdmina) zapiszLS("artway_chmura_domain_versions_admin",chmuraWersjeDomenAdmina||{});
+    else zapiszLS("artway_chmura_domain_versions_public",chmuraWersjeDomenPubliczne||{});
+    if(patchKeys.length){
+      const CHMURA_PATCH_MAX_BYTES = 9_600_000;
+      const sizeUtf8 = (value) => {
+        try {
+          return new Blob([JSON.stringify(value)]).size;
+        } catch (e) {
+          return String(JSON.stringify(value)).length;
+        }
+      };
+      const bladZapisuZaDuzy = (error, fallbackMessage) => {
+        const msg = String(fallbackMessage || error?.message || "").toLowerCase();
+        const is413 = Number(error?.status || 0) === 413;
+        const containsText = /ustawienia\s*sa\s*zbyt\s+duze|ustawienia\s+są\s+zbyt\s+duże|zbyt\s+duże|request\s+entity\s+too\s+large|żądanie\s+jest\s+zbyt\s+duże|payload.*too\s+large|limit.*rozmiar/i;
+        return is413 || containsText.test(msg);
+      };
+      const podzielKluczePoRozmiarze = (keys, limit) => {
+        if(!keys.length) return [];
+        const chunks = [];
+        let current = [];
+        let currentBytes = 2; // {}
+        for (const key of keys) {
+          const item = { [key]: snapshot[key] };
+          const itemBytes = sizeUtf8(item) + 6; // {"a":}+kolejny separator
+          if (current.length && currentBytes + itemBytes > limit) {
+            chunks.push(current);
+            current = [];
+            currentBytes = 2;
+          }
+          if (itemBytes > limit) {
+            chunks.push([key]);
+            currentBytes = 2;
+            current = [];
+            continue;
+          }
+          current.push(key);
+          currentBytes += itemBytes;
+        }
+        if (current.length) chunks.push(current);
+        return chunks;
+      };
+      const zapiszJakoDomena = async (key, currentExpected) => {
+        const expectedRevision = wersjeDomen && Object.prototype.hasOwnProperty.call(wersjeDomen, key) ? Number(wersjeDomen[key]) : null;
+        const body = {mode:"domain",key,value:snapshot[key]};
+        if (Number.isFinite(expectedRevision) && expectedRevision > 0) body.expectedRevision = expectedRevision;
+        const d = await chmura("settings",{method:"POST",body,timeout:30000});
+        if (Number.isFinite(d.version)) {
+          if (trybAdmina) chmuraWersjeDomenAdmina = {...(chmuraWersjeDomenAdmina || {}), [key]: Number(d.version)};
+          else chmuraWersjeDomenPubliczne = {...(chmuraWersjeDomenPubliczne || {}), [key]: Number(d.version)};
+        }
+        if (Number.isFinite(d.rev)) {
+          chmuraStan = { ...chmuraStan, rev: Number(d.rev) };
+          currentExpected = chmuraStan.rev;
+          localStorage.setItem("artway_chmura_rev", JSON.stringify(chmuraStan.rev));
+        }
+        return {ok:true,rev:Number(d.rev || currentExpected),errorMessage:"",updatedAt:d.updated_at||chmuraStan.updated_at};
+      };
+      const zapiszPatch = async (keys, expected) => {
+        if(!keys.length) return {ok:true,rev:expected};
+        const patch = Object.fromEntries(keys.map((k)=>[k,snapshot[k]]));
+        const expectedRev = expected;
+        const request = async () => {
+          const d = await chmura("settings",{method:"POST",body:{mode:"patch",patch,expectedRev,mutationId},timeout:30000});
+          return {ok:true,rev:Number(d.rev||expected),errorMessage:"",updatedAt:d.updated_at||chmuraStan.updated_at};
+        };
+        try {
+          return await request();
+        } catch (e) {
+          const tooLarge = bladZapisuZaDuzy(e, e?.message || "");
+          const shouldSplit = (keys.length > 1) && tooLarge;
+          if (shouldSplit) {
+            const chunks = podzielKluczePoRozmiarze(keys, Math.max(150000, Math.floor(CHMURA_PATCH_MAX_BYTES / Math.max(2, keys.length))));
+            if (chunks.length > 1) {
+              let rev = expected;
+              for (const chunk of chunks) {
+                const res = await zapiszPatch(chunk, rev);
+                if (!res.ok) return res;
+                rev = Number(res.rev || rev);
+              }
+              return {ok:true,rev,updatedAt:chmuraStan.updated_at,errorMessage:""};
+            }
+          }
+          if (tooLarge && keys.length === 1) {
+            try {
+              return await zapiszJakoDomena(keys[0], expected);
+            } catch (e2) {
+              return {ok:false,errorMessage:e2.message,code:e2.code||e.code||""};
+            }
+          }
+          return {ok:false,errorMessage:e.message,code:e.code||""};
+        }
+      };
+      try{
+        const patchResult = await zapiszPatch(patchKeys,expectedRev);
+        if(!patchResult.ok){
+          ok=false;
+          if(patchResult.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
+          else if(patchResult.code==="settings_write_conflict")toast("⚠️ Serwer jest zajęty inną zmianą — dane lokalne zostały zachowane i zapis zostanie ponowiony.");
+          else loguj("blad","Zapis ustawień w chmurze: "+(patchResult.errorMessage||"Nieznany błąd zapisu."));
+          chmuraStan={...chmuraStan,error:patchResult.errorMessage||"Nieznany błąd zapisu ustawień."};
+        } else {
+          chmuraStan={...chmuraStan,dostepna:true,admin:true,rev:patchResult.rev||chmuraStan.rev,updated_at:patchResult.updatedAt||null,error:"",ostatniZapis:Date.now()};
+          localStorage.setItem("artway_chmura_rev",JSON.stringify(chmuraStan.rev));
+          for(const k of patchKeys)if(JSON.stringify(snapshot[k])===odciski[k])chmuraBrudneKlucze.delete(k);
+        }
+      }catch(e){
+        ok=false;
+        chmuraStan={...chmuraStan,error:e.message};
+        if(e.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
+        else if(e.code==="settings_write_conflict")toast("⚠️ Serwer jest zajęty inną zmianą — dane lokalne zostały zachowane i zapis zostanie ponowiony.");
+        loguj("blad","Zapis ustawień w chmurze: "+e.message);
+      }
+    }
+    if(ok && patchKeys.length){
+      for(const k of patchKeys) if(JSON.stringify(snapshot[k])===odciski[k]) chmuraBrudneKlucze.delete(k);
+    }
+    return ok;
   })();
   try{return await chmuraZapisWToku;}finally{
     chmuraZapisWToku=null;
-    if(chmuraBrudneKlucze.size||chmuraZapisPonowPoZakonczeniu){chmuraZapisPonowPoZakonczeniu=false;clearTimeout(chmuraTimerZapisu);chmuraTimerZapisu=setTimeout(()=>chmuraZapiszUstawienia({flush:false}),1200);}
+    if(chmuraBrudneKlucze.size||chmuraZapisPonowPoZakonczeniu)chmuraZaplanujKolejnyZapis();
   }
 }
 // Ręczne WYSŁANIE całego sklepu z tego urządzenia na serwer (dla wszystkich).
@@ -407,7 +582,6 @@ function zwolnijPamiecPodreczna({wymus=false}={}){
   }catch(e){}
   return {przed,po:rozmiarLokalnejPamieci(),usunieto};
 }
-function wczytajLS(klucz, domyslne){ try{ return JSON.parse(localStorage.getItem(klucz)) ?? domyslne; }catch(e){ return domyslne; } }
 // Rewizja danych zasila lekki cache podstron administratora. Zmieniamy ją
 // wyłącznie dla danych biznesowych, nie dla kosmetycznych preferencji widoku.
 var adminRewizjaDanych = 0;
@@ -447,16 +621,88 @@ function uniewaznijCachePodstronAdmina(zakres="all"){
 }
 function zapiszLS(klucz, dane, opcje={}){
   if(klucz==="artway_zamowienia" && Array.isArray(dane)) dane = filtrujAktywneZamowienia(dane);
-  const serial=JSON.stringify(dane);
-  let zmieniono=true;
-  try{
-    if(localStorage.getItem(klucz)===serial)zmieniono=false;
-    else localStorage.setItem(klucz, serial);
+  if(typeof CENTRAL_PRODUCT_LS_KEYS!=="undefined"&&CENTRAL_PRODUCT_LS_KEYS.has(klucz)){
+    try{localStorage.removeItem(klucz);chmuraUsunChunksLS(klucz);}catch(e){}
+    if(kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina(klucz);
+    return true;
   }
-  catch(e){
-    const wynik=zwolnijPamiecPodreczna({wymus:true});
-    try{localStorage.setItem(klucz,serial);zmieniono=true;}
-    catch(e2){zmieniono=false;loguj("ostrzezenie",`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`);}
+  const serial=JSON.stringify(dane);
+  const serialBytes=chmuraRozmiarBajtow(serial);
+  let zmieniono=true;
+  if(!zapiszLS._pomijane) zapiszLS._pomijane = new Set();
+  const pominZLudz = CHMURA_LS_OMIJANE_KLUCZE.has(klucz) && serialBytes > CHMURA_LS_OMIJANE_PRAG_BYTES;
+  const pominZPamieci = chmuraCzyPominacZapisLS(klucz) && serialBytes > CHMURA_LS_OMIJANE_PRAG_BYTES;
+  if(!pominZPamieci && chmuraCzyPominacZapisLS(klucz)) chmuraUsunPominanyZapisLS(klucz);
+  const pomijamyLs = pominZLudz || pominZPamieci;
+  if (pomijamyLs) {
+    if (!zapiszLS._pomijane.has(klucz)) {
+      if(!chmuraPominieteLokalnieZalogowane.has(klucz)){
+        chmuraPominieteLokalnieZalogowane.add(klucz);
+        loguj("info",`Dane ${klucz} są zapisywane centralnie na serwerze; lokalna ciężka kopia nie jest potrzebna (${(serialBytes / 1024).toFixed(0)} KB)`);
+      }
+      zapiszLS._pomijane.add(klucz);
+    }
+    chmuraUsuńDuzyKluczLS(klucz);
+    chmuraUsunChunksLS(klucz);
+    if (pominZLudz && !pominZPamieci) chmuraZapiszPominanyZapisLS(klucz);
+    zmieniono = false;
+  } else {
+    try{
+      const chunks = chmuraCzyKluczBylZaDuzy(klucz, serial);
+      const nowyZapis = () => {
+        if(chunks) return chmuraZapiszZChunksLS(klucz, serial);
+        localStorage.setItem(klucz, serial);
+        if (zapiszLS._pomijane.has(klucz)) {
+          chmuraUsunPominanyZapisLS(klucz);
+          zapiszLS._pomijane.delete(klucz);
+        }
+        return true;
+      };
+      if(chunks){
+        const before = wczytajLS(klucz, null);
+        if(before === null) {
+          chmuraUsunChunksLS(klucz);
+          nowyZapis();
+        } else {
+          nowyZapis();
+        }
+          } else {
+            if(localStorage.getItem(klucz)===serial)zmieniono=false;
+            else nowyZapis();
+          }
+      if (zapiszLS._pomijane.has(klucz)) {
+        chmuraUsunPominanyZapisLS(klucz);
+        zapiszLS._pomijane.delete(klucz);
+      }
+    }
+    catch(e){
+      const wynik=zwolnijPamiecPodreczna({wymus:true});
+      try{
+        const chunks = chmuraCzyKluczBylZaDuzy(klucz, serial);
+        if(chunks){
+          chmuraZapiszZChunksLS(klucz, serial);
+          if (zapiszLS._pomijane.has(klucz)) {
+            chmuraUsunPominanyZapisLS(klucz);
+            zapiszLS._pomijane.delete(klucz);
+          }
+          zmieniono=true;
+        } else {
+          localStorage.setItem(klucz,serial);
+          if (zapiszLS._pomijane.has(klucz)) {
+            chmuraUsunPominanyZapisLS(klucz);
+            zapiszLS._pomijane.delete(klucz);
+          }
+          zmieniono=true;
+        }
+      }
+      catch(e2){
+        const msg=`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`;
+        if(!zapiszLS._pomijane.has(klucz)) loguj("ostrzezenie",msg);
+        chmuraZapiszPominanyZapisLS(klucz);
+        zapiszLS._pomijane.add(klucz);
+        zmieniono=false;
+      }
+    }
   }
   if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina(klucz);
   if(zmieniono&&["artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_magazyn_produkty","artway_ustawienia"].includes(klucz)&&typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
@@ -473,13 +719,13 @@ function skrocTekst(v, max=190){
   return s.length>max ? s.slice(0,max).replace(/\s+\S*$/,"")+"…" : s;
 }
 function zdaniaOpisu(v){
-  return String(v??"")
+  const s=String(v??"")
     .replace(/<[^>]+>/g," ")
     .replace(/\s+/g," ")
-    .trim()
-    .split(/(?<=[.!?])\s+/)
-    .map(x=>x.trim())
-    .filter(x=>x.length>18);
+    .trim();
+  if(!s) return [];
+  const m = s.match(/[^.!?]+(?:[.!?](?=\s|$)|$)/g) || [];
+  return m.map(x=>x.trim()).filter(x=>x.length>18);
 }
 function agentAICzyscOpis(v,max=20000){
   let s=String(v??"")
@@ -596,12 +842,11 @@ async function allegroPoprawOpisyWFormularzu(btn){
     if(form.elements.allegroDescription&&d.allegroDescription) form.elements.allegroDescription.value=d.allegroDescription;
     let cloudSaved=null;
     if(id){
-      zapiszPolaProduktuLokalnie(id,{allegroTitle:d.allegroTitle||produkt.allegroTitle||"",allegroShortDescription:d.shortDescription||produkt.allegroShortDescription||"",allegroDescription:d.allegroDescription||produkt.allegroDescription||"",contentEditorial:d.contentEditorial||produkt.contentEditorial,allegroDescriptionSections:Array.isArray(d.sections)?d.sections:[],allegroDescriptionEditedAt:new Date().toISOString(),allegroDescriptionSource:"agent-independent-allegro-content"},false);
-      cloudSaved=await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
+      cloudSaved=await zapiszPolaProduktuTrwale(id,{allegroTitle:d.allegroTitle||produkt.allegroTitle||"",allegroShortDescription:d.shortDescription||produkt.allegroShortDescription||"",allegroDescription:d.allegroDescription||produkt.allegroDescription||"",contentEditorial:d.contentEditorial||produkt.contentEditorial,allegroDescriptionSections:Array.isArray(d.sections)?d.sections:[],allegroDescriptionEditedAt:new Date().toISOString(),allegroDescriptionSource:"agent-independent-allegro-content"},false,"allegro-description-agent").then(()=>true);
     }
     const box=document.getElementById("allegroDescriptionPreview");
     if(box) box.innerHTML=`<div class="backend-note"><b>✅ Niezależna treść Allegro przygotowana</b><br>Nazwa: ${esc(d.allegroTitle||"—")}<br><small>Treść sklepu i Von Halsky nie została zmieniona.</small></div><div class="allegro-description-preview"><div class="allegro-description-preview-head"><b>Podgląd układu w Allegro</b><small>Ta wersja ma własną walidację i kolejkę aktualizacji.</small></div>${(d.sections||[]).map(s=>(s.items||[]).map(item=>item.type==="IMAGE"?`<img src="${esc(item.url||"")}" alt="Podgląd zdjęcia produktu" loading="lazy">`:`<section>${item.content||""}</section>`).join("")).join("")||`<section><p>Brak sekcji do podglądu.</p></section>`}</div>`;
-    toast(id?(cloudSaved?"✅ Treść Allegro zapisano niezależnie na serwerze":"⚠️ Treść Allegro zapisana lokalnie; serwer ponowi synchronizację"):"🤖 Treść Allegro zostanie zapisana z produktem");
+    toast(id?(cloudSaved?"✅ Treść Allegro zapisano i odczytano z serwera":"⚠️ Serwer nie potwierdził treści Allegro"):"🤖 Treść Allegro zostanie zapisana z produktem");
   }catch(e){ toast("⚠️ Poprawianie opisów Allegro: "+(e.message||e)); }
   finally{ btn.disabled=false; }
 }

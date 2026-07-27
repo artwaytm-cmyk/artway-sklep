@@ -1,20 +1,3 @@
-function urlBramki(action,parametry={}){
-  const baza=String(ustawieniaWysylki().apiEndpoint||"api/index.php").trim();
-  const url=new URL(baza,location.href);
-  if(url.origin!==location.origin) throw new Error("Bramka musi działać w tej samej domenie co sklep.");
-  url.searchParams.set("action",action);
-  for(const [k,v] of Object.entries(parametry)) if(v!==undefined&&v!==null&&v!=="") url.searchParams.set(k,String(v));
-  return url.toString();
-}
-async function wywolajBramke(action,{method="GET",body=null,parametry={}}={}){
-  const opcje={method,credentials:"same-origin",headers:{"Accept":"application/json"}};
-  if(body!==null){opcje.headers["Content-Type"]="application/json";opcje.body=JSON.stringify(body);}
-  const r=await fetch(urlBramki(action,parametry),opcje);
-  const tekst=await r.text(); let dane;
-  try{dane=JSON.parse(tekst);}catch(e){throw new Error(r.ok?"Serwer nie uruchomił PHP dla katalogu api.":"Bramka zwróciła nieprawidłową odpowiedź.");}
-  if(!r.ok||dane.ok===false){const blad=new Error(dane.error||`Błąd bramki HTTP ${r.status}`);blad.code=dane.code||"";blad.status=r.status;throw blad;}
-  return dane;
-}
 function polaczUzytkownikowCentralnych(serwerowi){
   // Serwer jest jedynym źródłem kont. localStorage przechowuje wyłącznie
   // ostatnią pobraną kopię i nie może przywrócić usuniętego użytkownika.
@@ -49,10 +32,15 @@ async function odswiezUzytkownikowAdminaPoWejsciu(force=false){
   if(!force&&Date.now()-uzytkownicyAdminOstatnieOdswiezenie<60000)return false;
   uzytkownicyAdminOstatnieOdswiezenie=Date.now();
   uzytkownicyAdminOdswiezenieWToku=(async()=>{
-    const d=await chmura("store-users-admin",{params:{usersVersion:uzytkownicyAdminWersja,count:pobierzUzytkownikow().length},timeout:15000});
-    uzytkownicyAdminWersja=String(d.usersVersion||uzytkownicyAdminWersja);
-    if(!d.unchanged&&Array.isArray(d.users))zapiszLS("artway_uzytkownicy",polaczUzytkownikowCentralnych(d.users));
-    return true;
+    try{
+      const d=await chmura("store-users-admin",{params:{usersVersion:uzytkownicyAdminWersja,count:pobierzUzytkownikow().length},timeout:15000});
+      uzytkownicyAdminWersja=String(d.usersVersion||uzytkownicyAdminWersja);
+      if(!d.unchanged&&Array.isArray(d.users))zapiszLS("artway_uzytkownicy",polaczUzytkownikowCentralnych(d.users));
+      return true;
+    }catch(error){
+      loguj("ostrzezenie","Lista kont odświeży się po odzyskaniu połączenia: "+String(error?.message||error),"konta");
+      return false;
+    }
   })().finally(()=>{uzytkownicyAdminOdswiezenieWToku=null;});
   return uzytkownicyAdminOdswiezenieWToku;
 }
@@ -62,21 +50,27 @@ async function odswiezZamowieniaAdminaPoWejsciu(force=false){
   if(!force&&Date.now()-zamowieniaAdminOstatnieOdswiezenie<10000)return false;
   zamowieniaAdminOstatnieOdswiezenie=Date.now();
   zamowieniaAdminOdswiezenieWToku=(async()=>{
-    const przed=localStorage.getItem("artway_zamowienia")||"";
-    const d=await chmura("store-orders-admin",{params:{ordersVersion:zamowieniaAdminWersja,deletedVersion:zamowieniaAdminUsunieteWersja,count:pobierzZamowienia().length},timeout:15000});
-    zamowieniaAdminWersja=String(d.ordersVersion||zamowieniaAdminWersja);
-    zamowieniaAdminUsunieteWersja=String(d.deletedVersion||zamowieniaAdminUsunieteWersja);
-    if(!d.unchanged){
-      if(Array.isArray(d.deleted_orders))zapiszUsunieteZamowienia(d.deleted_orders);
-      if(Array.isArray(d.orders))zapiszLS("artway_zamowienia",filtrujAktywneZamowienia(d.orders));
-      stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,orders:Number(d.count)||0,updatedAt:d.updated_at||stanBazyCentralnej.updatedAt,error:""};
+    try{
+      const przed=localStorage.getItem("artway_zamowienia")||"";
+      const d=await chmura("store-orders-admin",{params:{ordersVersion:zamowieniaAdminWersja,deletedVersion:zamowieniaAdminUsunieteWersja,count:pobierzZamowienia().length},timeout:15000});
+      zamowieniaAdminWersja=String(d.ordersVersion||zamowieniaAdminWersja);
+      zamowieniaAdminUsunieteWersja=String(d.deletedVersion||zamowieniaAdminUsunieteWersja);
+      if(!d.unchanged){
+        if(Array.isArray(d.deleted_orders))zapiszUsunieteZamowienia(d.deleted_orders);
+        if(Array.isArray(d.orders))zapiszLS("artway_zamowienia",filtrujAktywneZamowienia(d.orders));
+        stanBazyCentralnej={...stanBazyCentralnej,sprawdzono:true,online:true,orders:Number(d.count)||0,updatedAt:d.updated_at||stanBazyCentralnej.updatedAt,error:""};
+      }
+      const zmieniono=przed!==(localStorage.getItem("artway_zamowienia")||"");
+      if(zmieniono&&trasa().startsWith("/admin/zamowien")){
+        odswiezMenu();
+        odswiezPoCichejSynchronizacji();
+      }
+      return true;
+    }catch(error){
+      stanBazyCentralnej={...stanBazyCentralnej,online:false,error:String(error?.message||error)};
+      loguj("ostrzezenie","Zamówienia odświeżą się po odzyskaniu połączenia: "+String(error?.message||error),"zamowienia");
+      return false;
     }
-    const zmieniono=przed!==(localStorage.getItem("artway_zamowienia")||"");
-    if(zmieniono&&trasa().startsWith("/admin/zamowien")){
-      odswiezMenu();
-      odswiezPoCichejSynchronizacji();
-    }
-    return true;
   })().finally(()=>{zamowieniaAdminOdswiezenieWToku=null;});
   return zamowieniaAdminOdswiezenieWToku;
 }
@@ -197,6 +191,7 @@ function uruchomAutoSynchronizacjeChmury(){
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) automatycznaSynchronizacjaChmury("visible"); });
 }
 async function sprawdzBramke(cicho=false){
+  let backendError="";
   try{
     const cloud=await chmura("health",{timeout:9000});
     stanBramki={...stanBramki,sprawdzono:true,online:true,email:cloud.email||stanBramki.email,store:cloud.store||stanBramki.store,inpost:cloud.inpost||stanBramki.inpost,error:""};
@@ -214,31 +209,10 @@ async function sprawdzBramke(cicho=false){
     if(maUprawnieniaZapisuChmury()&&Date.now()-ostatniTestIntegracjiSerwerowych>15*60*1000)setTimeout(()=>sprawdzPolaczeniaSerwerowe(true),0);
     if(trasa().startsWith("/admin/wysylki")||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
     return;
-  }catch(e){ /* Główny backend VPS może być chwilowo niedostępny — niżej działa kontrola awaryjna. */ }
-  try{
-    const d=await wywolajBramke("health");
-    stanBramki={...stanBramki,...d,email:d.email||stanBramki.email,store:d.store||stanBramki.store,sprawdzono:true,online:true,error:""};
-    if(!cicho) toast(d.ready?"Awaryjna bramka PHP gotowa ✅":d.configured?"Awaryjna bramka PHP skonfigurowana":"Bramka InPost wymaga konfiguracji");
-  }catch(e){
-    stanBramki={...stanBramki,sprawdzono:true,online:false,error:e.message};
-    if(!cicho) toast("Bramka niedostępna — sprawdź usługę backendu VPS");
-  }
+  }catch(e){backendError=String(e?.message||"Backend VPS nie odpowiedział.");}
+  stanBramki={...stanBramki,sprawdzono:true,online:false,error:backendError||"Backend VPS nie odpowiedział."};
+  if(!cicho) toast("Backend VPS jest chwilowo niedostępny");
   if(trasa().startsWith("/admin/wysylki")||trasa().startsWith("/admin/zamowienie/")||trasa()==="/admin/dostawy"||trasa().startsWith("/admin/agent-ai")) renderuj();
-}
-async function polaczBramke(e){
-  e.preventDefault();
-  const f=new FormData(e.target), haslo=String(f.get("apiPassword")||"");
-  try{
-    await wywolajBramke("login",{method:"POST",body:{password:haslo}});
-    e.target.reset(); await sprawdzBramke(true);
-    await synchronizujBazeCentralna(true);
-    toast("Sesja integracji połączona ✅");
-  }catch(bl){stanBramki={...stanBramki,error:bl.message};toast("Nie udało się połączyć: "+bl.message);renderuj();}
-}
-async function rozlaczBramke(){
-  try{await wywolajBramke("logout",{method:"POST",body:{}});}catch(e){}
-  stanBramki={sprawdzono:true,online:true,configured:stanBramki.configured,ready:stanBramki.ready,authenticated:false,error:"",organizations:[],email:stanBramki.email||{configured:false,provider:null}};
-  toast("Rozłączono sesję integracji");renderuj();
 }
 async function testujInPost(cicho=false){
   try{

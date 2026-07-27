@@ -216,42 +216,18 @@ const bezpiecznyLink = s => /^(#\/|https?:\/\/|mailto:)/i.test(String(s||"")) ? 
 const OKRES_KOSZA_MS = 30*24*60*60*1000;
 function oznaczProduktWKoszu(id,typ){
   koszMeta={...koszMeta,[id]:{usunietoAt:Date.now(),typ}};
-  zapiszLS("artway_kosz_meta",koszMeta);
 }
 function usunMetaKosza(id){
-  delete koszMeta[id]; zapiszLS("artway_kosz_meta",koszMeta);
+  delete koszMeta[id];
 }
 function dniDoUsuniecia(id){
   const ts=Number(koszMeta[id]?.usunietoAt||Date.now());
   return Math.max(0,Math.ceil((ts+OKRES_KOSZA_MS-Date.now())/86400000));
 }
 function wyczyscPrzeterminowanyKosz(){
-  let zmiana=false;
-  for(const p of koszDodanych) if(!koszMeta[p.id]){koszMeta[p.id]={usunietoAt:Date.now(),typ:"wlasny"};zmiana=true;}
-  for(const id of produktyUkryte) if(!produktyDefinitywne.includes(id)&&!koszMeta[id]){koszMeta[id]={usunietoAt:Date.now(),typ:"bazowy"};zmiana=true;}
-  const wygasle=Object.entries(koszMeta).filter(([,m])=>Date.now()-Number(m.usunietoAt||0)>=OKRES_KOSZA_MS);
-  for(const [idTekst,m] of wygasle){
-    const id=Number(idTekst);
-    if(m.typ==="wlasny"){
-      koszDodanych=koszDodanych.filter(p=>p.id!==id);
-    }else{
-      if(!produktyDefinitywne.includes(id)) produktyDefinitywne.push(id);
-      if(!produktyUkryte.includes(id)) produktyUkryte.push(id);
-      delete produktyEdytowane[id];
-    }
-    delete stanyProduktow[id];
-    delete koszMeta[idTekst]; zmiana=true;
-    loguj("info",`Kosz: automatycznie usunięto definitywnie produkt ${id} po 30 dniach`);
-  }
-  produktyDefinitywne=[...new Set(produktyDefinitywne)];
-  if(zmiana){
-    zapiszLS("artway_kosz_dodane",koszDodanych);
-    zapiszLS("artway_kosz_meta",koszMeta);
-    zapiszLS("artway_produkty_definitywne",produktyDefinitywne);
-    zapiszLS("artway_produkty_ukryte",produktyUkryte);
-    zapiszLS("artway_produkty_edytowane",produktyEdytowane);
-    zapiszLS("artway_stany",stanyProduktow);
-  }
+  // Kosz jest teraz częścią centralnej kartoteki. Retencję 30 dni wykonuje
+  // wyłącznie proces serwerowy, więc otwarcie panelu nie może usuwać danych.
+  return false;
 }
 function najwyzszeIdProduktu(){
   const liczby=[
@@ -271,24 +247,8 @@ function naprawKolizjeIdProduktow(){
   if(!produktyDodane.length){produktyDodaneAudytId={source:produktyDodane,length:0,first:"",last:""};return false;}
   const first=String(produktyDodane[0]?.id??""),last=String(produktyDodane.at(-1)?.id??"");
   if(produktyDodaneAudytId.source===produktyDodane&&produktyDodaneAudytId.length===produktyDodane.length&&produktyDodaneAudytId.first===first&&produktyDodaneAudytId.last===last)return false;
-  const zajete=new Set();
-  let nastepne=najwyzszeIdProduktu()+1, zmiana=false;
-  const wezNoweId=()=>{while(zajete.has(nastepne))nastepne++;const id=nastepne;zajete.add(id);nastepne++;return id;};
-  const poprawione=produktyDodane.map(p=>{
-    const id=Number(p.id);
-    if(!Number.isInteger(id)||id<=0||zajete.has(id)){
-      const nowe=wezNoweId();
-      zmiana=true;
-      return {...p,id:nowe};
-    }
-    zajete.add(id);
-    if(p.id!==id){ zmiana=true; return {...p,id}; }
-    return p;
-  });
-  if(!zmiana){produktyDodaneAudytId={source:produktyDodane,length:produktyDodane.length,first,last};return false;}
-  produktyDodane=poprawione;
-  produktyDodaneAudytId={source:produktyDodane,length:produktyDodane.length,first:String(produktyDodane[0]?.id??""),last:String(produktyDodane.at(-1)?.id??"")};
-  zapiszLS("artway_produkty_dodane",produktyDodane);
-  loguj("ostrzezenie","Naprawiono wyłącznie nieprawidłowe lub powtórzone ID w produktach dodanych. ID usuniętego produktu bazowego może być ponownie użyte przez nowy produkt.");
-  return true;
+  const seen=new Set(),invalid=produktyDodane.filter(p=>{const id=String(p?.id??"").trim();if(!id||seen.has(id))return true;seen.add(id);return false;});
+  produktyDodaneAudytId={source:produktyDodane,length:produktyDodane.length,first,last};
+  if(invalid.length)loguj("blad",`Centralna kartoteka zwróciła ${invalid.length} nieprawidłowych identyfikatorów. Panel nie zmieni ich samodzielnie.`);
+  return false;
 }

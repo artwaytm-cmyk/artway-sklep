@@ -56,6 +56,7 @@ export function createVonHalskyRoute({
   env = () => process.env,
   fetchImpl = globalThis.fetch,
   loadCatalog = async () => [],
+  saveProductFields = null,
   reportProgress = async () => {},
 } = {}) {
   const api = createVonHalskyApiClient({ env: new Proxy({}, { get: (_target, key) => env()?.[key] }), fetchImpl });
@@ -97,28 +98,34 @@ export function createVonHalskyRoute({
   async function updateProductPublication(products = [], status = 'confirmed', details = {}) {
     const rows = (Array.isArray(products) ? products : []).filter((product) => product?.id !== undefined && product?.id !== null);
     if (!rows.length) return;
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const version = await readVersioned('settings', { data: {}, rev: 0, updated_at: null });
-      const previous = version.value && typeof version.value === 'object' ? version.value : { data: {}, rev: 0, updated_at: null };
-      const data = { ...(previous.data || {}) }, edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {};
+    if (typeof saveProductFields === 'function') {
       const timestamp = details.timestamp || new Date().toISOString();
       for (const product of rows) {
-        const id = String(product.id), effective = { ...product, ...(edits[id] || {}) };
-        edits[id] = {
-          ...(edits[id] || {}),
-          ...buildEditorialPublicationPatch({
-            product: effective, channel: 'vonHalsky', status, timestamp,
-            targetRef: details.targetRef || product.externalId || product.sku || id,
-            receiptId: details.receiptId || '', error: details.error || '', nextRetryAt: details.nextRetryAt || '',
-          }),
-        };
+        const id = String(product.id);
+        const fields = buildEditorialPublicationPatch({
+          product,
+          channel: 'vonHalsky',
+          status,
+          timestamp,
+          targetRef: details.targetRef || product.externalId || product.sku || id,
+          receiptId: details.receiptId || '',
+          error: details.error || '',
+          nextRetryAt: details.nextRetryAt || '',
+        });
+        await saveProductFields({
+          productId: id,
+          fields,
+          mutationId: `von-halsky-publication:${id}:${details.receiptId || timestamp}`,
+          actor: 'von-halsky-api',
+          area: 'von-halsky-publication',
+        });
       }
-      data.artway_produkty_edytowane = edits;
-      const next = { ...previous, data, rev: Number(previous.rev || 0) + 1, updated_at: timestamp };
-      const written = await writeIfVersion('settings', next, version);
-      if (written?.modified) return;
+      return;
     }
-    throw Object.assign(new Error('Nie udało się zapisać potwierdzenia publikacji Von Halsky.'), { code: 'von_halsky_publication_receipt_conflict', status: 409 });
+    throw Object.assign(
+      new Error('Centralna kartoteka produktów nie jest dostępna; potwierdzenie Von Halsky nie może zostać zapisane zastępczo.'),
+      { code: 'central_product_catalog_unavailable', status: 503 },
+    );
   }
 
   return async function vonHalskyRoute(req, url, action) {

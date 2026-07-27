@@ -50,3 +50,36 @@ test('import strony Multigry rozpoznaje EAN, numer referencyjny i komplet parame
     globalThis.fetch = previousFetch;
   }
 });
+
+test('krótki opis produktu Alexander ma pierwszeństwo przed koszykiem, logowaniem i stopką strony', async () => {
+  const html = `<!doctype html><html><head>
+    <meta property="og:title" content="Wiatrak B">
+    <meta property="og:description" content="Gry planszowe, gry rodzinne i zabawki w sklepie producenta.">
+    <meta property="og:image" content="https://www.sklep.alexander.com.pl/data/include/cms/wiatrak.jpg">
+  </head><body>
+    <h1>Wiatrak B</h1>
+    <section id="projector_longdescription">Wiatraczek o średnicy 25 cm (rozmiar główki).</section>
+    <div>Dodaj produkty podając kody</div>
+    <div>Wgraj pliki z kodami</div>
+    <div>Przejdź do koszyka</div>
+    <div>Zaloguj się do Twojego konta</div>
+    <footer>Newsletter Polityka prywatności Regulamin sklepu</footer>
+    ${' '.repeat(1800)}
+  </body></html>`;
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } });
+  try {
+    const service = createProductSourceInspectionService({
+      read: async (_key, fallback) => fallback,
+      write: async () => {},
+      normalizeKey: (value) => String(value || '').toLowerCase().replace(/\W+/g, ''),
+      nameSimilarity: () => 0,
+    });
+    const result = await service.inspectProductUrl('https://www.sklep.alexander.com.pl/product-pol-130-Wiatrak-B.html');
+    assert.equal(result.product.opis, 'Wiatraczek o średnicy 25 cm (rozmiar główki).');
+    assert.equal(result.product.opisKrotki, 'Wiatraczek o średnicy 25 cm (rozmiar główki).');
+    assert.doesNotMatch(result.product.opis, /koszyk|zaloguj|newsletter/i);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});

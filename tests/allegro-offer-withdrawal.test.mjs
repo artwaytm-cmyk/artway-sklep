@@ -56,18 +56,26 @@ test('zakończenie oferty jest audytowane i nie usuwa kartoteki produktu', async
     ['settings', { data: { artway_produkty_edytowane: { 'P-1': { allegroOfferId: 'OFF-1', nazwa: 'Gra testowa' } } }, rev: 4 }],
     ['allegro_offer_withdrawal_audit', { items: [] }],
   ]);
-  const apiCalls = [], writes = [];
+  const apiCalls = [], writes = [], products = new Map([
+    ['P-1', { id: 'P-1', nazwa: 'Gra testowa', allegroOfferId: 'OFF-1' }],
+  ]);
   const route = createAllegroOfferWithdrawalRoute({
     callAllegro: async (_req, path, options) => { apiCalls.push({ path, options }); return { completedAt: new Date().toISOString(), taskCount: { success: 1, failed: 0, total: 1 } }; },
-    createProductUpdater: (data) => ({ apply: (id, patch, removed = []) => { const current = { ...(data.artway_produkty_edytowane?.[id] || {}) }; for (const key of removed) delete current[key]; data.artway_produkty_edytowane[id] = { ...current, ...patch }; }, commit: () => true }),
     getMappings: (record) => ({ ...(record.items || {}) }),
     getOffers: (record) => [...(record.items || [])],
-    getProducts: async () => new Map([['P-1', { id: 'P-1', nazwa: 'Gra testowa' }]]),
+    getProducts: async () => products,
     isAdmin: () => true,
     read: async (key, fallback) => structuredClone(database.get(key) || fallback),
     respond: (body, status = 200) => ({ body, status }),
     text: (value, limit = 1000) => String(value ?? '').slice(0, limit),
     write: async (key, value) => { writes.push(key); database.set(key, structuredClone(value)); },
+    saveProductFields: async ({ productId, fields = {}, remove = [] }) => {
+      const current = products.get(String(productId)) || { id: productId };
+      const next = { ...current, ...fields };
+      for (const field of remove) delete next[field];
+      products.set(String(productId), next);
+      return { confirmed: true };
+    },
   });
   const response = await route({ req: { method: 'POST', json: async () => ({ offerIds: ['OFF-1'], reason: 'admin_decision' }) }, url: new URL('https://artwaytm.pl/api/store'), action: 'allegro-withdraw-offers' });
 
@@ -77,8 +85,8 @@ test('zakończenie oferty jest audytowane i nie usuwa kartoteki produktu', async
   assert.deepEqual(apiCalls[0].options, { method: 'PUT', bodyObj: { offerCriteria: [{ type: 'CONTAINS_OFFERS', offers: [{ id: 'OFF-1' }] }], publication: { action: 'END' } } });
   assert.equal(database.get('allegro_offers').items[0].status, 'ENDED');
   assert.equal(database.get('allegro_mappings').items['OFF-1'].previousProductId, 'P-1');
-  assert.equal(database.get('settings').data.artway_produkty_edytowane['P-1'].nazwa, 'Gra testowa');
-  assert.equal(database.get('settings').data.artway_produkty_edytowane['P-1'].allegroOfferId, undefined);
+  assert.equal(products.get('P-1').nazwa, 'Gra testowa');
+  assert.equal(products.get('P-1').allegroOfferId, undefined);
   assert.ok(writes.includes('allegro_offer_withdrawal_audit'));
 });
 
@@ -89,10 +97,17 @@ test('rozstrzygnięcie duplikatu pozostawia wybraną ofertę i kończy wyłączn
     ['settings', { data: { artway_produkty_edytowane: { 'P-1': { nazwa: 'Gra testowa' } } }, rev: 2 }],
     ['allegro_duplicate_resolution_audit', { items: [] }],
   ]);
+  const products = new Map([['P-1', { id: 'P-1', nazwa: 'Gra testowa' }]]);
   const route = createAllegroOfferWithdrawalRoute({
     callAllegro: async () => ({ completedAt: new Date().toISOString(), taskCount: { success: 1, failed: 0, total: 1 } }),
-    createProductUpdater: () => ({ apply: () => false, commit: () => false }), getMappings: (record) => ({ ...(record.items || {}) }), getOffers: (record) => [...(record.items || [])], getProducts: async () => new Map(), isAdmin: () => true,
+    getMappings: (record) => ({ ...(record.items || {}) }), getOffers: (record) => [...(record.items || [])], getProducts: async () => products, isAdmin: () => true,
     read: async (key, fallback) => structuredClone(database.get(key) || fallback), respond: (body, status = 200) => ({ body, status }), text: (value, limit = 1000) => String(value ?? '').slice(0, limit), write: async (key, value) => database.set(key, structuredClone(value)),
+    saveProductFields: async ({ productId, fields = {}, remove = [] }) => {
+      const next = { ...(products.get(String(productId)) || { id: productId }), ...fields };
+      for (const field of remove) delete next[field];
+      products.set(String(productId), next);
+      return { confirmed: true };
+    },
   });
   const response = await route({ req: { method: 'POST', json: async () => ({ productId: 'P-1', keepOfferId: 'KEEP', withdrawOfferIds: ['END'] }) }, url: new URL('https://artwaytm.pl/api/store'), action: 'allegro-resolve-duplicate' });
   assert.equal(response.status, 200);
@@ -101,5 +116,5 @@ test('rozstrzygnięcie duplikatu pozostawia wybraną ofertę i kończy wyłączn
   assert.equal(database.get('allegro_offers').items.find((offer) => offer.id === 'EXTRA').status, 'ACTIVE');
   assert.equal(database.get('allegro_mappings').items.END.blocked, true);
   assert.equal(database.get('allegro_mappings').items.END.duplicateOf, 'KEEP');
-  assert.equal(database.get('settings').data.artway_produkty_edytowane['P-1'].allegroOfferId, 'KEEP');
+  assert.equal(products.get('P-1').allegroOfferId, 'KEEP');
 });

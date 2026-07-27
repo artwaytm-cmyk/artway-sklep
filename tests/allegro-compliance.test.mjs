@@ -73,6 +73,20 @@ test('opis Allegro blokuje marketing, inne warianty i treści z innych sekcji of
   for (const text of examples) assert.equal(allegroCheckText(text).ok, false, text);
 });
 
+test('opis gry ze zwrotami akcji nie jest mylony z polityką zwrotów', () => {
+  const safe = allegroCheckText('Dynamiczna gra pełna zwrotów akcji i nieprzewidywalnych decyzji.');
+  assert.equal(safe.ok, true);
+  for (const text of [
+    'Produkt objęty jest możliwością zwrotu.',
+    'Zwrot towaru jest możliwy w ciągu 14 dni.',
+    'Zwroty i reklamacje realizujemy zgodnie z regulaminem.',
+  ]) {
+    const check = allegroCheckText(text);
+    assert.equal(check.ok, false, text);
+    assert.ok(check.violations.some((item) => item.id === 'seller_policy_information'), text);
+  }
+});
+
 test('blokada rozpoznaje encje, komentarze i niewidoczne znaki', () => {
   const examples = [
     'Skontaktuj&nbsp;się przed zakupem.',

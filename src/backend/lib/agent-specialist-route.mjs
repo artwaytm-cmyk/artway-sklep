@@ -17,7 +17,10 @@ export function createAgentSpecialistRoute({ service, isAdmin, rateLimit, respon
 
     if (action === 'agent-specialists-status') {
       if (req.method !== 'GET') return methodError(respond);
-      return respond({ ok: true, ...(await service.status({ historyLimit: url.searchParams.get('historyLimit') })) });
+      return respond({ ok: true, ...(await service.status({
+        historyLimit: url.searchParams.get('historyLimit'),
+        includeInstructions: url.searchParams.get('includeInstructions') === '1',
+      })) });
     }
 
     if (req.method !== 'POST') return methodError(respond);

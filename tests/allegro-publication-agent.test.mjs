@@ -1,6 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAllegroPublicationAgent } from '../src/backend/lib/domain/allegro-publication-agent.mjs';
+import { buildAllegroPublicationSuccessFields, createAllegroPublicationAgent } from '../src/backend/lib/domain/allegro-publication-agent.mjs';
+
+test('potwierdzona oferta tworzy komplet pól zamykających przygotowanie i publikację', () => {
+  const fields = buildAllegroPublicationSuccessFields({
+    details: {
+      offerId: '18793056852',
+      verifiedOffer: { publication: { status: 'ACTIVE' } },
+      draft: { stock: { available: 5 } },
+    },
+    link: { catalogProductId: 'catalog-1', categoryId: '123958', producent: 'Multigra' },
+    now: '2026-07-26T08:00:00.000Z',
+  });
+  assert.equal(fields.allegroOfferId, '18793056852');
+  assert.equal(fields.allegroStatus, 'ACTIVE');
+  assert.equal(fields.allegroStock, 5);
+  assert.equal(fields.allegroAgentPreparationStatus, 'published');
+  assert.deepEqual(fields.allegroAgentPreparationMissing, []);
+  assert.equal(fields.allegroPublicationAgentStatus, 'completed');
+});
 
 test('Operator publikacji zapisuje raport w zadaniu i bezpośrednio w kartotece produktu', async () => {
   const data = {}, savedProducts = [], specialistCalls = [];

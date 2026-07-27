@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 import { buildBackgroundTaskQueue, lastStepAt } from '../scripts/lib/background-agent-scheduler.mjs';
 
 const completedRun = (at, steps) => ({ completedAt: at, steps: steps.map((id) => ({ id, status: 'completed', completedAt: at })) });
@@ -45,4 +46,10 @@ test('nowe zdarzenie omija zegar i natychmiast tworzy małą kolejkę pracy', ()
 test('historia wykonania jest trwałym zegarem harmonogramu kolejki', () => {
   const runtime = { history: [completedRun('2026-07-22T08:00:00Z', ['oferty-lekkie'])] };
   assert.equal(lastStepAt(runtime, 'oferty-lekkie'), Date.parse('2026-07-22T08:00:00Z'));
+});
+
+test('cykl serwerowy zasila sukcesywne przygotowanie produktów niezależnie od otwartej przeglądarki', async () => {
+  const source = await readFile('scripts/run-background-agent.mjs', 'utf8');
+  assert.match(source, /'przygotowanie-produktow',\s*'allegro-preparation-queue-auto'/);
+  assert.match(source, /batchSize:\s*50/);
 });

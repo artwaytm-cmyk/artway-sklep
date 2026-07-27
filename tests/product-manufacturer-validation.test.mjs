@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   canonicalManufacturerName,
   normalizeProductManufacturerFields,
+  recognizeProductManufacturer,
   sanitizeManufacturerFieldsInSettings,
   validManufacturerName,
 } from '../src/backend/lib/domain/product-field-validation.mjs';
@@ -16,6 +17,17 @@ test('producent musi zawierać literę, ale może zawierać cyfry', () => {
   assert.equal(canonicalManufacturerName('3D Factory'), '3D Factory');
   assert.equal(canonicalManufacturerName('4M'), '4M');
   assert.equal(validManufacturerName('Ładne Balony 24'), true);
+});
+
+test('wydawca nie jest ograniczony do Alexander i rozpoznaje dowolną nazwę z kartoteki lub źródła', () => {
+  assert.equal(recognizeProductManufacturer({ producent: 'Multigra' }, {}, ['Alexander']), 'Multigra');
+  assert.equal(recognizeProductManufacturer({ marka: 'Gabo' }, {}, ['Alexander', 'Multigra']), 'Gabo');
+  assert.equal(recognizeProductManufacturer({
+    parametryZrodla: { wydawca: 'Nasza Księgarnia' },
+  }, {}, ['Alexander']), 'Nasza Księgarnia');
+  assert.equal(recognizeProductManufacturer({
+    nazwa: 'Nowa gra Gabo',
+  }, {}, ['Alexander', 'Gabo']), 'Gabo');
 });
 
 test('kartoteka usuwa liczbowy producent i korzysta z prawidłowej marki', () => {

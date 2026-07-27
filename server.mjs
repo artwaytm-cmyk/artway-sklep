@@ -8,7 +8,7 @@ import { renderStorefrontSeoPage, seoRouteMatches } from './src/backend/lib/doma
 import { handleSeoAnalytics } from './src/backend/lib/domain/seo-analytics.mjs';
 import { createResilientServerRuntime } from './src/backend/server-runtime.mjs';
 
-const MAX_BODY_BYTES = 5 * 1024 * 1024;
+const MAX_BODY_BYTES = 12 * 1024 * 1024;
 
 async function requestBody(request) {
   if (request.method === 'GET' || request.method === 'HEAD') return undefined;
@@ -48,8 +48,8 @@ async function sendFetchResponse(response, nodeResponse) {
 }
 
 function routeHandler(pathname) {
-  if (pathname === '/api/store' || pathname === '/.netlify/functions/store') return storeHandler;
-  if (pathname === '/api/telegram/webhook' || pathname === '/.netlify/functions/telegram-webhook') return telegramWebhookHandler;
+  if (pathname === '/api/store') return storeHandler;
+  if (pathname === '/api/telegram/webhook') return telegramWebhookHandler;
   if (pathname === '/sitemap.xml') return sitemapHandler;
   if (pathname === '/google-products.xml') return googleProductsHandler;
   if (pathname === '/api/seo/performance' || pathname === '/api/seo/event') return handleSeoAnalytics;

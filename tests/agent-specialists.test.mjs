@@ -1,17 +1,61 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AGENT_ACTION_POLICY, automaticEditorialAssessment, createAgentSpecialists, DEFAULT_CONFIG, normalizeProductContentEditorialResult, productEditorialFingerprint, productEditorialQuality, productEditorialState, productFacts, productPatch, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../src/backend/lib/domain/agent-specialists.mjs';
+import { AGENT_ACTION_POLICY, automaticEditorialAssessment, createAgentSpecialists, DEFAULT_CONFIG, normalizeProductContentEditorialResult, productEditorialAutomaticEligibility, productEditorialFingerprint, productEditorialQuality, productEditorialState, productFacts, productPatch, providerQuotaUnavailable, PROMPT_VERSION, SPECIALISTS, sanitizeContext } from '../src/backend/lib/domain/agent-specialists.mjs';
+
+test('automatyczny Agent nie przepisuje aktywnej starszej oferty bez nowego zdarzenia', () => {
+  const product = {
+    id: 17,
+    allegroOfferId: '123456789',
+    allegroStatus: 'ACTIVE',
+    nazwa: 'Gotowa oferta',
+    opisKrotki: 'Krótki opis',
+    opis: 'Pełny opis produktu, który ma wystarczającą długość do sprzedaży i nie wymaga ponownej redakcji bez zmiany źródła.'.repeat(2),
+  };
+  const eligibility = productEditorialAutomaticEligibility(product, productEditorialState(product));
+  assert.equal(eligibility.eligible, false);
+  assert.equal(eligibility.reason, 'legacy_active_listing_grandfathered');
+  assert.equal(productEditorialAutomaticEligibility({ ...product, forceEditorialRefresh: true }, productEditorialState({ ...product, forceEditorialRefresh: true })).eligible, true);
+});
+
+test('blokada limitu dostawcy rozpoznaje błędy quota i nie myli zwykłego błędu treści', () => {
+  assert.equal(providerQuotaUnavailable(Object.assign(new Error('You exceeded your current quota'), { code: 'insufficient_quota' })), true);
+  assert.equal(providerQuotaUnavailable(new Error('Opis nie przeszedł kontroli jakości')), false);
+});
 import { createAgentSpecialistRoute } from '../src/backend/lib/agent-specialist-route.mjs';
 import { SPECIALIST_PLAYBOOK_VERSION, specialistPlaybook } from '../src/backend/lib/domain/agent-specialist-playbooks.mjs';
 
 function memoryRepository(initial = {}) {
   const values = new Map(Object.entries(structuredClone(initial))), versions = new Map([...values.keys()].map((key) => [key, 1]));
+  const productData = values.get('settings')?.data || {};
+  const products = new Map();
+  for (const list of [
+    productData.artway_produkty_katalog,
+    productData.artway_produkty_dodane,
+  ]) for (const product of Array.isArray(list) ? list : []) {
+    if (product?.id !== undefined) products.set(String(product.id), structuredClone(product));
+  }
+  for (const [id, patch] of Object.entries(productData.artway_produkty_edytowane || {})) {
+    products.set(String(id), { ...(products.get(String(id)) || { id }), ...structuredClone(patch) });
+  }
   return {
     values,
+    products,
     readVersioned: async (key, fallback) => ({ value: structuredClone(values.has(key) ? values.get(key) : fallback), version: versions.get(key) || 0 }),
     writeIfVersion: async (key, value, expected) => {
       if ((versions.get(key) || 0) !== expected.version) return { modified: false };
       values.set(key, structuredClone(value)); versions.set(key, (versions.get(key) || 0) + 1); return { modified: true };
+    },
+    loadProducts: async () => new Map([...products.entries()].map(([id, product]) => [id, structuredClone(product)])),
+    saveProductFields: async ({ productId, fields = {}, remove = [] }) => {
+      const id = String(productId), current = products.get(id) || { id };
+      const next = { ...current, ...structuredClone(fields) };
+      for (const field of remove) delete next[field];
+      products.set(id, next);
+      return {
+        confirmed: true,
+        product: structuredClone(next),
+        publication: { published: true, readbackConfirmed: true },
+      };
     },
   };
 }
@@ -22,6 +66,15 @@ function openAiPayload(fields = []) {
     suggestions: ['Sprawdź kategorię'], warnings: [], missingFacts: [], factsUsed: ['nazwa', 'producent'], confidence: 0.94, readyForApproval: true, complianceStatus: 'ready',
   };
   return { model: 'gpt-5-nano-2025-08-07', usage: { input_tokens: 300, output_tokens: 180, total_tokens: 480 }, output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(result) }] }] };
+}
+
+function requestInstructions(body = {}) {
+  if (typeof body.instructions === 'string') return body.instructions;
+  return (Array.isArray(body.input) ? body.input : [])
+    .filter((item) => item?.role === 'developer')
+    .flatMap((item) => Array.isArray(item.content) ? item.content : [])
+    .map((item) => item?.text || '')
+    .join('\n');
 }
 
 test('zespół zawiera konkretne role do treści, promocji, komunikacji i nadzoru', () => {
@@ -93,6 +146,43 @@ test('uwaga o niewprowadzaniu sprzeczności nie jest błędnie traktowana jako k
   assert.equal(assessment.eligible, true);
 });
 
+test('rozbieżne opcjonalne parametry nie są konfliktem tożsamości produktu', () => {
+  const assessment = automaticEditorialAssessment({ specialist: 'allegro_offer', result: {
+    confidence: 0.9,
+    warnings: ['Wiek 4+ i 7-107 oraz liczba graczy 2 i 2-4 są sprzeczne, dlatego pominięto je w opisie.'],
+    missingFacts: ['Potwierdzony wiek produktu.', 'Potwierdzona liczba graczy.'],
+    fields: [
+      { key: 'allegro_title', value: 'Multigra Piotruś i Pamięć Święta' },
+      { key: 'allegro_description', value: 'Świąteczny zestaw 25 kart do dwóch klasycznych gier karcianych: Piotruś i Pamięć. Karty pozwalają ćwiczyć spostrzegawczość i skojarzenia podczas wspólnej zabawy.' },
+    ],
+  } });
+  assert.equal(assessment.eligible, true);
+  assert.equal(assessment.reason, 'safe_editorial_policy');
+});
+
+test('tytuł główny uzupełnia brakujące pole nazwy w częściowym wyniku redaktora sklepu', () => {
+  const result = normalizeProductContentEditorialResult({
+    title: 'Piotruś + Pamięć – Święta, gra karciana Multigra Alexander',
+    summary: 'Świąteczny zestaw kart do rodzinnej zabawy.',
+    content: 'Kompletna redakcja produktu.',
+    fields: [
+      { key: 'short_description', value: 'Świąteczny zestaw 25 kart do gier Piotruś i Pamięć.' },
+      { key: 'long_description', value: '<h2>Piotruś i Pamięć</h2><p>Świąteczny zestaw zawiera 25 kart do dwóch klasycznych gier karcianych.</p><p>Rozgrywka pozwala ćwiczyć spostrzegawczość i skojarzenia podczas wspólnej zabawy.</p>' },
+      { key: 'seo_title', value: 'Piotruś i Pamięć Święta – Multigra' },
+      { key: 'seo_description', value: 'Świąteczny zestaw 25 kart do dwóch klasycznych gier karcianych.' },
+    ],
+    warnings: ['Wiek i liczba graczy są sprzeczne, dlatego pominięto je w treści.'],
+    missingFacts: ['Potwierdzony wiek produktu.'],
+    confidence: 0.9,
+    readyForApproval: false,
+    complianceStatus: 'needs_review',
+  });
+  const fields = Object.fromEntries(result.fields.map((field) => [field.key, field.value]));
+  assert.equal(fields.title, 'Piotruś + Pamięć – Święta, gra karciana Multigra Alexander');
+  assert.equal(result.readyForApproval, true);
+  assert.equal(result.complianceStatus, 'ready');
+});
+
 test('kompletna treść modelu bez tablicy fields jest automatycznie zamieniana na pola edytora', () => {
   const result = normalizeProductContentEditorialResult({
     title: 'Ale Pary – Jedzonko – Alexander',
@@ -139,11 +229,34 @@ test('produkcyjny specjalista wywołuje opublikowaną wersję promptu OpenAI Pla
   });
   const run = await service.run({ specialist: 'customer_reply', instruction: 'Przygotuj odpowiedź', context: { thread: 'Pytanie o przesyłkę.' } });
   assert.deepEqual(requestBody.prompt, SPECIALISTS.customer_reply.platformPrompt);
-  assert.equal('model' in requestBody, false);
+  assert.equal(requestBody.model, 'gpt-5-nano');
   assert.equal(run.platformAgent.id, SPECIALISTS.customer_reply.platformPrompt.id);
   assert.equal(run.platformAgent.version, SPECIALISTS.customer_reply.platformPrompt.version);
   assert.equal(run.platformAgent.available, true);
   assert.equal(run.platformAgent.fallback, false);
+});
+
+test('GPT-5.4 mini cacheuje długi stały playbook, ogranicza wynik i zapisuje odczyt cache', async () => {
+  const repo = memoryRepository(); let requestBody;
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'real-key', now: () => new Date('2026-07-26T08:00:00.000Z'),
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      const payload = openAiPayload([{ key: 'subject', label: 'Temat', value: 'Odpowiedź Artway' }, { key: 'reply', label: 'Odpowiedź', value: 'Dziękujemy za wiadomość.' }]);
+      payload.model = 'gpt-5.4-mini';
+      payload.usage = { input_tokens: 2400, output_tokens: 300, total_tokens: 2700, input_tokens_details: { cached_tokens: 1800, cache_write_tokens: 0 } };
+      return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  const run = await service.run({ specialist: 'customer_reply', instruction: 'Przygotuj odpowiedź', context: { thread: 'Pytanie o przesyłkę.' } });
+  assert.equal(requestBody.model, 'gpt-5.4-mini');
+  assert.equal(requestBody.max_output_tokens, 1200);
+  assert.equal(requestBody.prompt_cache_key, undefined);
+  assert.equal(requestBody.prompt_cache_options, undefined);
+  assert.match(requestBody.instructions, /Typowe pomyłki tej roli/i);
+  assert.equal(run.usage.cachedTokens, 1800);
+  assert.equal(run.promptCache.enabled, true);
+  assert.equal(run.promptCache.mode, 'automatic');
 });
 
 test('błąd referencji promptu uruchamia jeden jawny fallback do wersjonowanych reguł serwera', async () => {
@@ -165,6 +278,41 @@ test('błąd referencji promptu uruchamia jeden jawny fallback do wersjonowanych
   assert.match(run.platformAgent.error, /Prompt not found/i);
 });
 
+test('pusta lub niepełna odpowiedź 200 jest raz ponawiana z regułami serwera i pełnym budżetem wyniku', async () => {
+  const repo = memoryRepository(); const requests = [];
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'real-key', now: () => new Date('2026-07-26T08:30:00.000Z'),
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body); requests.push(body);
+      if (requests.length === 1) {
+        return new Response(JSON.stringify({
+          status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' },
+          output: [{ type: 'reasoning', content: [] }], usage: { input_tokens: 1000, output_tokens: 2600, total_tokens: 3600 },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify(openAiPayload([
+        { key: 'title', label: 'Nazwa', value: 'Gra rodzinna Alexander' },
+        { key: 'short_description', label: 'Opis krótki', value: 'Rodzinna gra do wspólnej zabawy.' },
+        { key: 'long_description', label: 'Opis pełny', value: '<h2>Rodzinna rozgrywka</h2><p>Gra wspiera spostrzegawczość i wspólne spędzanie czasu.</p>' },
+        { key: 'seo_title', label: 'SEO title', value: 'Gra rodzinna Alexander' },
+        { key: 'seo_description', label: 'SEO description', value: 'Poznaj rodzinną grę Alexander do wspólnej zabawy.' },
+        { key: 'seo_keywords', label: 'SEO keywords', value: 'gra rodzinna, Alexander' },
+      ])), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  const run = await service.run({
+    specialist: 'product_content', instruction: 'Uporządkuj opis.',
+    context: { product: { name: 'Gra', producer: 'Alexander' } }, target: { type: 'product', productId: '17' },
+  });
+  assert.equal(requests.length, 2);
+  assert.ok(requests[0].prompt);
+  assert.equal(requests[1].prompt, undefined);
+  assert.equal(requests[1].reasoning.effort, 'low');
+  assert.equal(requests[1].max_output_tokens, 3600);
+  assert.equal(run.status, 'completed');
+  assert.equal(run.platformAgent.fallback, true);
+});
+
 test('dzienny limit Agenta resetuje się o północy czasu polskiego, a nie według UTC', async () => {
   const repo = memoryRepository({ agent_specialists_state: { config: { dailyLimit: 10, automaticDailyLimit: 10 }, history: [
     { id: 'before-midnight', source: 'automatic', status: 'completed', createdAt: '2026-07-18T21:59:00.000Z', usage: { inputTokens: 10 } },
@@ -178,6 +326,33 @@ test('dzienny limit Agenta resetuje się o północy czasu polskiego, a nie wed�
   assert.equal(status.usage.inputTokens, 20);
 });
 
+test('sztuczne limity nie blokują pracy, dopóki administrator wyraźnie ich nie włączy', async () => {
+  const repo = memoryRepository({ agent_specialists_state: { config: {
+    dailyLimit: 1, automaticDailyLimit: 1, automaticInputTokenLimit: 20_000, automaticOutputTokenLimit: 10_000,
+  }, history: [{
+    id: 'earlier', source: 'automatic', status: 'completed', createdAt: '2026-07-26T08:00:00.000Z',
+    usage: { inputTokens: 30_000, outputTokens: 15_000 },
+  }], decisions: [] } });
+  let calls = 0;
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'test-key', now: () => new Date('2026-07-26T09:00:00.000Z'),
+    fetchImpl: async () => {
+      calls += 1;
+      return new Response(JSON.stringify(openAiPayload([{ key: 'short_description', label: 'Opis krótki', value: 'Rodzinna gra logiczna.' }])), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  const result = await service.run({
+    specialist: 'product_content', source: 'automatic', instruction: 'Popraw opis po raz pierwszy.',
+    context: { product: { name: 'Gra', producer: 'Alexander' } }, target: { type: 'product', productId: '17' },
+  });
+  assert.equal(result.status, 'completed');
+  assert.equal(calls, 1);
+  const status = await service.status();
+  assert.equal(status.usage.limitsEnabled, false);
+  assert.equal(status.usage.dailyLimitReached, false);
+  assert.equal(status.usage.automaticLimitReached, false);
+});
+
 test('zatwierdzenie szkicu zapisuje wyłącznie dozwolone pola produktu i jest idempotentne', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 17, nazwa: 'Gra', cena: 20 }] }, rev: 4, updated_at: null } });
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload([{ key: 'title', label: 'Nazwa', value: 'Gra' }, { key: 'short_description', label: 'Opis krótki', value: 'Krótki opis.' }, { key: 'long_description', label: 'Opis pełny', value: '<p>Pełny opis.</p>' }])), { status: 200, headers: { 'content-type': 'application/json' } }) });
@@ -185,11 +360,176 @@ test('zatwierdzenie szkicu zapisuje wyłącznie dozwolone pola produktu i jest i
   const first = await service.applyProductDraft(run.id, { email: 'admin@example.com' }), second = await service.applyProductDraft(run.id, { email: 'admin@example.com' });
   assert.equal(first.applied, true);
   assert.equal(second.duplicate, true);
-  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  const product = repo.products.get('17');
   assert.equal(product.opisKrotki, 'Krótki opis.');
   assert.equal(product.opis, '<p>Pełny opis.</p>');
   assert.equal(product.cena, 20);
   assert.equal(product.agentTextModel, 'gpt-5-nano-2025-08-07');
+});
+
+test('produkcyjna ścieżka Agenta wymaga zapisu, publikacji i zgodnego odczytu serwerowego', async () => {
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 18, nazwa: 'Gra', cena: 20 }] }, rev: 4, updated_at: null } });
+  const calls = [];
+  const service = createAgentSpecialists({
+    ...repo,
+    apiKey: 'test-key',
+    now: () => new Date('2026-07-26T07:10:00.000Z'),
+    fetchImpl: async () => new Response(JSON.stringify(openAiPayload([
+      { key: 'title', label: 'Nazwa', value: 'Gra rodzinna' },
+      { key: 'short_description', label: 'Opis krótki', value: 'Krótki opis rodzinnej gry.' },
+      { key: 'long_description', label: 'Opis pełny', value: '<h2>Rodzinna gra</h2><p>Gra pozwala wspólnie spędzić czas i ćwiczyć spostrzegawczość podczas rozgrywki.</p><ul><li>Czytelne zasady</li><li>Wspólna zabawa</li></ul>' },
+      { key: 'seo_title', label: 'SEO title', value: 'Gra rodzinna' },
+      { key: 'seo_description', label: 'SEO description', value: 'Poznaj rodzinną grę do wspólnej zabawy i ćwiczenia spostrzegawczości.' },
+      { key: 'seo_keywords', label: 'SEO keywords', value: 'gra rodzinna' },
+    ])), { status: 200, headers: { 'content-type': 'application/json' } }),
+    saveProductFields: async (input) => {
+      calls.push(input);
+      return {
+        mutationId: input.mutationId,
+        confirmedAt: '2026-07-26T07:10:00.000Z',
+        publication: { published: true, readbackConfirmed: true, revision: 'catalog-18' },
+      };
+    },
+  });
+  const run = await service.run({ specialist: 'product_content', context: { name: 'Gra' }, target: { type: 'product', productId: '18' } });
+  const result = await service.applyProductDraft(run.id, { source: 'background-agent' }, { editorialAutomatic: true, editorialPolicyValidated: true });
+  assert.equal(result.applied, true);
+  assert.equal(result.persistence.readbackConfirmed, true);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].mutationId, /^agent-editorial:/);
+  assert.equal(calls[0].area, 'agent-editorial-store');
+  assert.equal((await service.status()).history.find((item) => item.id === run.id).approvalStatus, 'auto_applied');
+});
+
+test('Agent nie oznacza szkicu jako wykonanego, gdy serwer nie potwierdzi publikacji', async () => {
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 19, nazwa: 'Gra' }] }, rev: 1 } });
+  const fields = [
+    { key: 'title', label: 'Nazwa', value: 'Gra rodzinna' },
+    { key: 'short_description', label: 'Opis krótki', value: 'Krótki opis rodzinnej gry.' },
+    { key: 'long_description', label: 'Opis pełny', value: '<h2>Rodzinna gra</h2><p>Gra pozwala wspólnie spędzić czas i ćwiczyć spostrzegawczość podczas rozgrywki.</p><ul><li>Czytelne zasady</li><li>Wspólna zabawa</li></ul>' },
+    { key: 'seo_title', label: 'SEO title', value: 'Gra rodzinna' },
+    { key: 'seo_description', label: 'SEO description', value: 'Poznaj rodzinną grę do wspólnej zabawy i ćwiczenia spostrzegawczości.' },
+    { key: 'seo_keywords', label: 'SEO keywords', value: 'gra rodzinna' },
+  ];
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'test-key',
+    fetchImpl: async () => new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } }),
+    saveProductFields: async () => ({ publication: { published: true, readbackConfirmed: false } }),
+  });
+  const run = await service.run({ specialist: 'product_content', context: { name: 'Gra' }, target: { type: 'product', productId: '19' } });
+  await assert.rejects(
+    () => service.applyProductDraft(run.id, { source: 'background-agent' }, { editorialAutomatic: true, editorialPolicyValidated: true }),
+    (error) => error.code === 'agent_product_persistence_unconfirmed',
+  );
+  assert.equal((await service.status()).history.find((item) => item.id === run.id).approvalStatus, 'draft');
+});
+
+test('kolejne kanały zachowują wcześniejszy stan produktu także przy istniejącej warstwie edycji', async () => {
+  const originalEditorial = {
+    status: 'partial_ready',
+    channelStates: {
+      store: { status: 'ready', promptVersion: PROMPT_VERSION, inputFingerprint: 'previous' },
+    },
+  };
+  const repo = memoryRepository({ settings: { data: {
+    artway_produkty_dodane: [{ id: 20, nazwa: 'Gra', opisKrotki: 'Opis', opis: 'Pełny opis produktu wymagający dalszego przygotowania redakcyjnego dla wszystkich kanałów sprzedaży.' }],
+    artway_produkty_edytowane: { 20: { contentEditorial: originalEditorial, seoTitle: 'Gra', seoDescription: 'Opis gry' } },
+  }, rev: 2 } });
+  const vhFields = [
+    { key: 'von_halsky_title', label: 'Nazwa', value: 'Gra rodzinna' },
+    { key: 'von_halsky_short_description', label: 'Opis krótki', value: 'Rodzinna gra do wspólnej zabawy.' },
+    { key: 'von_halsky_description', label: 'Opis pełny', value: '<h2>Rodzinna zabawa</h2><p>Gra pozwala wspólnie spędzić czas i ćwiczyć spostrzegawczość podczas rozgrywki.</p><ul><li>Czytelne zasady</li><li>Wspólna zabawa</li></ul>' },
+  ];
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'test-key', now: () => new Date('2026-07-26T07:15:00.000Z'),
+    fetchImpl: async () => new Response(JSON.stringify(openAiPayload(vhFields)), { status: 200, headers: { 'content-type': 'application/json' } }),
+  });
+  const run = await service.run({ specialist: 'von_halsky_offer', context: { name: 'Gra' }, target: { type: 'product', productId: '20' } });
+  await service.applyProductDraft(run.id, {}, { editorialAutomatic: true, editorialPolicyValidated: true });
+  const saved = repo.products.get('20');
+  assert.ok(saved.contentEditorial.channelStates.store, 'stan wcześniejszego kanału nie może zostać usunięty');
+  assert.ok(saved.contentEditorial.channelStates.vonHalsky, 'nowy kanał powinien zostać dopisany');
+});
+
+test('równoległe wywołanie timera i panelu nie uruchamia drugiej redakcji tego samego produktu', async () => {
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{
+    id: 21, nazwa: 'Gra rodzinna', producent: 'Alexander', kategoria: 'Gry',
+    opisKrotki: 'Krótki opis.', opis: 'Pełny opis gry rodzinnej wymagający profesjonalnego uporządkowania przed publikacją w kanałach sprzedaży.',
+  }] }, rev: 1 } });
+  let release;
+  const responseReady = new Promise((resolve) => { release = resolve; });
+  const fields = [
+    { key: 'title', label: 'Nazwa', value: 'Gra rodzinna Alexander' },
+    { key: 'short_description', label: 'Opis krótki', value: 'Rodzinna gra Alexander do wspólnej zabawy.' },
+    { key: 'long_description', label: 'Opis pełny', value: '<h2>Rodzinna rozgrywka</h2><p>Gra pozwala wspólnie spędzić czas i ćwiczyć spostrzegawczość podczas rozgrywki.</p><ul><li>Czytelne zasady</li><li>Wspólna zabawa</li></ul>' },
+    { key: 'seo_title', label: 'SEO title', value: 'Gra rodzinna Alexander' },
+    { key: 'seo_description', label: 'SEO description', value: 'Poznaj rodzinną grę Alexander do wspólnej zabawy i ćwiczenia spostrzegawczości.' },
+    { key: 'seo_keywords', label: 'SEO keywords', value: 'gra rodzinna, Alexander' },
+  ];
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'test-key',
+    fetchImpl: async () => {
+      await responseReady;
+      return new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  const first = service.automaticCycle({ maxItems: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  const concurrent = await service.automaticCycle({ maxItems: 1 });
+  assert.equal(concurrent.skipped, true);
+  assert.equal(concurrent.reason, 'already_running');
+  release();
+  const completed = await first;
+  assert.equal(completed.applied.length, 1);
+});
+
+test('poprawiona treść nie zmienia odcisku źródła i kolejny cykl nie redaguje ponownie tego samego kanału', async () => {
+  const sourceMaterial = {
+    allegroOfferDescription: 'Gra liczbowa dla dzieci od 8 lat. Zestaw zawiera planszę, pionki, żetony, kostki oraz instrukcję.',
+  };
+  const original = {
+    id: 22, nazwa: 'LICZ NA SIEBIE', producent: 'Alexander', kategoria: 'Gry edukacyjne',
+    gtin: '5906018000221', opisKrotki: 'Stary skrót.', opis: 'Stary opis.',
+    allegroCategoryId: '123', sourceMaterial,
+  };
+  const edited = {
+    ...original,
+    nazwa: 'Licz na Siebie – gra edukacyjna Alexander',
+    opisKrotki: 'Edukacyjna gra liczbowa dla dzieci od 8 lat.',
+    opis: '<h2>Nauka przez zabawę</h2><p>Gra wspiera ćwiczenie działań matematycznych podczas rodzinnej rozgrywki.</p><ul><li>Plansza</li><li>Pionki i żetony</li></ul>',
+  };
+  assert.equal(productEditorialFingerprint(original), productEditorialFingerprint(edited));
+
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [original] }, rev: 1 } });
+  const storeFields = [
+    { key: 'title', label: 'Nazwa', value: edited.nazwa },
+    { key: 'short_description', label: 'Opis krótki', value: edited.opisKrotki },
+    { key: 'long_description', label: 'Opis pełny', value: edited.opis },
+    { key: 'seo_title', label: 'SEO title', value: edited.nazwa },
+    { key: 'seo_description', label: 'SEO description', value: 'Edukacyjna gra liczbowa Alexander dla dzieci od 8 lat.' },
+    { key: 'seo_keywords', label: 'SEO keywords', value: 'gra liczbowa, Alexander' },
+  ];
+  const vonHalskyFields = [
+    { key: 'von_halsky_title', label: 'Nazwa', value: 'Alexander Licz na Siebie gra edukacyjna' },
+    { key: 'von_halsky_short_description', label: 'Opis krótki', value: 'Gra liczbowa dla dzieci od 8 lat.' },
+    { key: 'von_halsky_description', label: 'Opis pełny', value: '<h2>Gra liczbowa</h2><p>Zestaw pozwala ćwiczyć działania matematyczne podczas rozgrywki.</p><ul><li>Plansza</li><li>Pionki</li></ul>' },
+  ];
+  const calls = [];
+  const service = createAgentSpecialists({
+    ...repo, apiKey: 'test-key',
+    fetchImpl: async (_url, options) => {
+      const instructions = requestInstructions(JSON.parse(options.body));
+      const channel = /Redaktor Von Halsky/.test(instructions) ? 'vonHalsky' : 'store';
+      calls.push(channel);
+      return new Response(JSON.stringify(openAiPayload(channel === 'store' ? storeFields : vonHalskyFields)), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+
+  const first = await service.automaticCycle({ maxItems: 1 });
+  const second = await service.automaticCycle({ maxItems: 1 });
+  assert.equal(first.applied[0].channel, 'store');
+  assert.equal(second.applied[0].channel, 'vonHalsky');
+  assert.deepEqual(calls, ['store', 'vonHalsky']);
 });
 
 test('automatyczny cykl zapisuje trzy niezależne i bezpieczne wersje kanałów', async () => {
@@ -217,7 +557,7 @@ test('automatyczny cykl zapisuje trzy niezależne i bezpieczne wersje kanałów'
     ...repo, apiKey: 'test-key', now: () => new Date('2026-07-17T12:00:00.000Z'),
     fetchImpl: async (_url, options) => {
       calls += 1;
-      const instructions = JSON.parse(options.body).instructions;
+      const instructions = requestInstructions(JSON.parse(options.body));
       const fields = /Redaktor oferty Allegro/.test(instructions) ? allegroFields : /Redaktor Von Halsky/.test(instructions) ? vhFields : storeFields;
       return new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } });
     },
@@ -227,7 +567,7 @@ test('automatyczny cykl zapisuje trzy niezależne i bezpieczne wersje kanałów'
   assert.ok(cycle.prepared.every((item) => item.status === 'auto_applied'));
   assert.equal(cycle.applied.length, 3);
   assert.equal((await service.status()).decisions.some((item) => item.kind === 'product_content_review'), false);
-  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  const product = [...repo.products.values()][0];
   assert.equal(product.nazwa, 'Nowa gra rodzinna');
   assert.equal(product.opis, longDescription);
   assert.notEqual(product.allegroDescription, longDescription);
@@ -281,7 +621,7 @@ test('redakcja sklepu zachowuje starszy osobny opis Von Halsky bez nadpisania', 
   const run = await service.run({ specialist: 'product_content', context: { product: facts }, target: { type: 'product', productId: '109' } });
   const applied = await service.applyProductDraft(run.id, {}, { editorialAutomatic: true, editorialPolicyValidated: true });
   assert.equal(applied.applied, true);
-  const saved = repo.values.get('settings').data.artway_produkty_dodane[0];
+  const saved = repo.products.get('109');
   assert.equal(saved.vonHalskyContentMode, 'custom');
   assert.equal(saved.vonHalskyDescription, legacy.vonHalskyDescription);
   assert.equal(saved.opis, fields[2].value);
@@ -318,11 +658,10 @@ test('stare oznaczenie ready nie ukrywa surowego opisu dostawcy i Agent nadpisuj
   const service = createAgentSpecialists({ ...repo, apiKey: 'test-key', now: () => new Date('2026-07-19T12:00:00.000Z'), fetchImpl: async () => new Response(JSON.stringify(openAiPayload(fields)), { status: 200, headers: { 'content-type': 'application/json' } }) });
   const cycle = await service.automaticCycle();
   assert.equal(cycle.applied.length, 1);
-  const stored = repo.values.get('settings').data;
-  const saved = { ...stored.artway_produkty_dodane[0], ...stored.artway_produkty_edytowane['100'] };
+  const saved = repo.products.get('100');
   assert.equal(saved.opisKrotki, 'Obrazkowa gra rozwijająca spostrzegawczość i umiejętność kojarzenia.');
   assert.equal(saved.opis, longDescription);
-  assert.equal(stored.artway_produkty_edytowane['100'].opis, longDescription, 'zapis musi trafić do nadrzędnej warstwy edycji');
+  assert.equal(saved.opis, longDescription, 'zapis musi trafić do centralnej kartoteki');
   assert.equal(saved.agentTextMode, 'autonomous-editorial');
   assert.ok(saved.agentTextRunId);
   assert.ok(saved.agentTextReviewedAt);
@@ -345,13 +684,13 @@ test('wynik zawierający kontrolki strony dostawcy jest automatycznie odrzucany 
   const cycle = await service.automaticCycle();
   assert.equal(cycle.applied.length, 0);
   assert.equal(cycle.prepared[0].reason, 'source_page_noise');
-  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  const product = repo.products.get('102');
   assert.equal(product.opisKrotki, 'Skrót');
   assert.equal(product.contentEditorial.status, 'retry_pending');
 });
 
 test('kontrola Allegro zatrzymuje niedozwolony opis i planuje automatyczną ponowną próbę bez klikania', async () => {
-  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 101, nazwa: 'Gra testowa', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis', gtin: '5906018000092', allegroOfferId: 'offer-101' }] }, rev: 1 } });
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 101, nazwa: 'Gra testowa', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis', gtin: '5906018000092', allegroOfferId: 'offer-101', forceEditorialRefresh: true }] }, rev: 1 } });
   const fields = [
     { key: 'title', label: 'Nazwa', value: 'Gra testowa Alexander' },
     { key: 'short_description', label: 'Opis krótki', value: 'Rodzinna gra producenta Alexander.' },
@@ -366,14 +705,14 @@ test('kontrola Allegro zatrzymuje niedozwolony opis i planuje automatyczną pono
   assert.equal(cycle.prepared[0].status, 'retry_scheduled');
   const status = await service.status();
   assert.equal(status.decisions.some((item) => item.kind === 'product_content_review'), false);
-  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  const product = repo.products.get('101');
   assert.equal(product.opis, 'Opis');
   assert.equal(product.contentEditorial.status, 'retry_pending');
   assert.match(product.contentEditorial.channelStates.store.warnings.join(' '), /source_page_noise|contact|dostęp/i);
 });
 
 test('Strażnik Allegro automatycznie poprawia logistykę zatrzymaną po pierwszej redakcji', async () => {
-  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 103, nazwa: 'Origami statek', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis źródłowy.', gtin: '5906018026658', allegroOfferId: '14138119461' }] }, rev: 1 } });
+  const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 103, nazwa: 'Origami statek', producent: 'Alexander', opisKrotki: 'Skrót', opis: 'Opis źródłowy.', gtin: '5906018026658', allegroOfferId: '14138119461', forceEditorialRefresh: true }] }, rev: 1 } });
   const store = [
     { key: 'title', label: 'Nazwa', value: 'Moje pierwsze origami – statek – Alexander' },
     { key: 'short_description', label: 'Opis krótki', value: 'Zestaw origami dla początkujących rozwijający wyobraźnię i sprawność manualną.' },
@@ -393,7 +732,7 @@ test('Strażnik Allegro automatycznie poprawia logistykę zatrzymaną po pierwsz
   const service = createAgentSpecialists({
     ...repo, apiKey: 'test-key', now: () => new Date('2026-07-21T13:00:00.000Z'),
     fetchImpl: async (_url, options) => {
-      calls += 1; const instructions = JSON.parse(options.body).instructions;
+      calls += 1; const instructions = requestInstructions(JSON.parse(options.body));
       const payload = /Strażnik zgodności Allegro/.test(instructions) ? safe : /Redaktor oferty Allegro/.test(instructions) ? unsafe : /Redaktor Von Halsky/.test(instructions) ? openAiPayload(vonHalsky) : openAiPayload(store);
       return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
     },
@@ -404,7 +743,7 @@ test('Strażnik Allegro automatycznie poprawia logistykę zatrzymaną po pierwsz
   assert.ok(cycle.prepared.every((item) => item.status === 'auto_applied'));
   const status = await service.status();
   assert.deepEqual(status.history.slice(0, 4).map((item) => item.specialist), ['allegro_compliance', 'allegro_offer', 'von_halsky_offer', 'product_content']);
-  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  const product = repo.products.get('103');
   assert.match(product.allegroDescription, /papierowy statek/i);
   assert.doesNotMatch(product.allegroDescription, /wysyłk|kurier|InPost/i);
   assert.equal(product.contentEditorial.status, 'ready');
@@ -434,7 +773,7 @@ test('Strażnik Von Halsky osobno poprawia strukturę treści odrzuconą przez k
   const service = createAgentSpecialists({
     ...repo, apiKey: 'test-key', now: () => new Date('2026-07-23T14:00:00.000Z'),
     fetchImpl: async (_url, options) => {
-      calls += 1; const instructions = JSON.parse(options.body).instructions;
+      calls += 1; const instructions = requestInstructions(JSON.parse(options.body));
       const payload = /Strażnik treści Von Halsky/.test(instructions) ? safe : /Redaktor Von Halsky/.test(instructions) ? unsafe : openAiPayload(store);
       return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
     },
@@ -444,7 +783,7 @@ test('Strażnik Von Halsky osobno poprawia strukturę treści odrzuconą przez k
   assert.equal(cycle.applied.length, 2);
   const status = await service.status();
   assert.deepEqual(status.history.slice(0, 3).map((item) => item.specialist), ['von_halsky_compliance', 'von_halsky_offer', 'product_content']);
-  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  const product = repo.products.get('104');
   assert.doesNotMatch(product.vonHalskyDescription, /<table|<tr|<td/i);
   assert.equal(product.contentEditorial.channelStates.vonHalsky.compliance.status, 'passed');
   assert.equal(product.opis, store[2].value);
@@ -522,7 +861,7 @@ test('niekompletny wynik redakcji nie tworzy decyzji i wraca do automatycznej ko
   const cycle = await service.automaticCycle();
   assert.equal(cycle.prepared[0].status, 'retry_scheduled');
   assert.equal((await service.status()).decisions.some((item) => item.kind === 'product_content_review'), false);
-  const product = repo.values.get('settings').data.artway_produkty_dodane[0];
+  const product = repo.products.get('51');
   assert.equal(product.opisKrotki, 'Stary opis');
   assert.equal(product.contentEditorial.status, 'retry_pending');
   await service.automaticCycle();
@@ -538,8 +877,8 @@ test('ręczne uruchomienie niekompletnej redakcji także wraca do automatycznej 
   const proposal = await service.prepareProductProposal('71', { email: 'admin@example.com' });
   assert.equal(proposal.retryScheduled, true);
   assert.equal(proposal.decision, null);
-  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].opisKrotki, 'Stary skrót');
-  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].contentEditorial.status, 'retry_pending');
+  assert.equal(repo.products.get('71').opisKrotki, 'Stary skrót');
+  assert.equal(repo.products.get('71').contentEditorial.status, 'retry_pending');
   assert.equal(requests.length, 1);
 });
 
@@ -560,7 +899,7 @@ test('po okresie nauki Agent sam zapisuje tylko pola o utrwalonej wysokiej akcep
   const cycle = await service.automaticCycle();
   assert.equal(cycle.applied.length, 1);
   assert.equal(cycle.prepared[0].status, 'auto_applied');
-  assert.equal(repo.values.get('settings').data.artway_produkty_dodane[0].nazwa, 'Gra testowa Alexander');
+  assert.equal(repo.products.get('81').nazwa, 'Gra testowa Alexander');
   assert.equal((await service.status()).learning.productContent.ready, true);
 });
 

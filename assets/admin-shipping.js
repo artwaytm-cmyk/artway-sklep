@@ -64,11 +64,14 @@ function ustawieniaWysylki(){
     przewoznik:"inpost",waga:"1",dlugosc:"30",szerokosc:"20",wysokosc:"15",
     nadawca:"Artway-TM",ulica:"",kod:"",miasto:"",telefon:KONFIG.telefon,email:KONFIG.emailSklepu,
     regulaPaczkomat:"inpost",regulaKurier:"inpost",slaNadanie:"24",slaDoreczenie:"72",
-    apiEndpoint:"api/index.php",tryb:"sandbox",autoStatus:true,autoEmail:true,autoTracking:true,
+    apiEndpoint:"/api/store",tryb:"production",autoStatus:true,autoEmail:true,autoTracking:true,
     alarmSla:true,powiadomieniaWyjatki:true,
     ...(ustawienia.wysylka||{})
   };
-  return {...u, przewoznik:"inpost", regulaPaczkomat:"inpost", regulaKurier:"inpost"};
+  const endpoint=/^(?:\.\/)?api\/index\.php(?:$|\?)/i.test(String(u.apiEndpoint||"").trim())
+    ?"/api/store"
+    :(String(u.apiEndpoint||"").trim()||"/api/store");
+  return {...u, apiEndpoint:endpoint, przewoznik:"inpost", regulaPaczkomat:"inpost", regulaKurier:"inpost"};
 }
 function aktualizujZamowienie(nr, zmiana){
   const lista=pobierzZamowienia(), z=lista.find(x=>x.nr===nr);

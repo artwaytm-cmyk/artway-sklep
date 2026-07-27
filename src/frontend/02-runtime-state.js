@@ -3,6 +3,41 @@
    (localStorage → klucz artway_logi). Podgląd, pobieranie pliku
    logu i sugestie poprawek: #/admin/system/diagnostyka       */
 const MAX_LOGOW = 200;
+const DIAGNOSTYKA_KOLEJKA_KEY = "artway_diagnostyka_kolejka";
+let diagnostykaWysylkaTimer=null,diagnostykaWysylkaWToku=false;
+function diagnostykaKolejka(){
+  try{const value=JSON.parse(localStorage.getItem(DIAGNOSTYKA_KOLEJKA_KEY)||"[]");return Array.isArray(value)?value.slice(-30):[];}catch(e){return [];}
+}
+function diagnostykaWersja(){
+  return document.querySelector('meta[name="artway-version"]')?.content||"";
+}
+function diagnostykaDodajDoKolejki(event){
+  if(!["blad","ostrzezenie"].includes(event?.poziom))return;
+  try{
+    const queue=diagnostykaKolejka(),signature=`${event.poziom}|${event.tresc}|${event.zrodlo}|${location.hash}`;
+    if(!queue.some(item=>item.signature===signature))queue.push({
+      signature,level:event.poziom,message:event.tresc,source:event.zrodlo||"przeglądarka",
+      route:`${location.pathname}${location.hash||""}`,release:diagnostykaWersja(),kind:"browser",at:event.czasIso
+    });
+    localStorage.setItem(DIAGNOSTYKA_KOLEJKA_KEY,JSON.stringify(queue.slice(-30)));
+    clearTimeout(diagnostykaWysylkaTimer);diagnostykaWysylkaTimer=setTimeout(()=>diagnostykaWyslijKolejke(),1200);
+  }catch(e){}
+}
+async function diagnostykaWyslijKolejke(){
+  if(diagnostykaWysylkaWToku)return false;
+  const queue=diagnostykaKolejka();if(!queue.length)return true;
+  diagnostykaWysylkaWToku=true;
+  try{
+    const headers=typeof chmuraNaglowki==="function"?chmuraNaglowki(true):{"Accept":"application/json","Content-Type":"application/json"};
+    const response=await fetch("/api/store?action=diagnostics-ingest",{method:"POST",headers,credentials:"same-origin",body:JSON.stringify({events:queue.map(({signature,...event})=>event)}),keepalive:true});
+    if(!response.ok)throw new Error(`HTTP ${response.status}`);
+    localStorage.removeItem(DIAGNOSTYKA_KOLEJKA_KEY);
+    return true;
+  }catch(e){
+    clearTimeout(diagnostykaWysylkaTimer);diagnostykaWysylkaTimer=setTimeout(()=>diagnostykaWyslijKolejke(),30000);
+    return false;
+  }finally{diagnostykaWysylkaWToku=false;}
+}
 function normalizujNazweProducenta(value=""){
   const name=String(value??"").replace(/\u0000/g,"").replace(/\s+/g," ").trim().slice(0,160);
   return name&&/\p{L}/u.test(name)?name:"";
@@ -17,9 +52,12 @@ function walidujPoleProducenta(input){
 function pobierzLogi(){ try{ return JSON.parse(localStorage.getItem("artway_logi")||"[]"); }catch(e){ return []; } }
 function loguj(poziom, tresc, zrodlo){
   try{
-    const logi = pobierzLogi();
-    logi.unshift({ czas:new Date().toLocaleString("pl-PL"), poziom, tresc:String(tresc).slice(0,500), zrodlo:zrodlo||"" });
+    const logi = pobierzLogi(),teraz=new Date(),tekst=String(tresc).slice(0,500),source=zrodlo||"",czasIso=teraz.toISOString();
+    const poprzedni=logi[0],powtorzony=poprzedni&&poprzedni.poziom===poziom&&poprzedni.tresc===tekst&&poprzedni.zrodlo===source&&Date.now()-Date.parse(poprzedni.czasIso||"")<15*60*1000;
+    const event={czas:teraz.toLocaleString("pl-PL"),czasIso,poziom,tresc:tekst,zrodlo:source,powtorzenia:powtorzony?Number(poprzedni.powtorzenia||1)+1:1};
+    if(powtorzony)logi[0]=event;else logi.unshift(event);
     localStorage.setItem("artway_logi", JSON.stringify(logi.slice(0, MAX_LOGOW)));
+    diagnostykaDodajDoKolejki(event);
     odswiezZnacznikDiag();
   }catch(e){/* pamięć pełna — nic więcej nie zrobimy */}
 }
@@ -27,6 +65,14 @@ window.onerror = (msg, src, linia, kol) => { loguj("blad", msg, `${(src||"").spl
 window.onunhandledrejection = e => { loguj("blad", "Nieobsłużona obietnica: " + (e.reason?.message || e.reason)); };
 const _konsolaBlad = console.error.bind(console);
 console.error = (...a) => { loguj("blad", a.map(x=>x?.message||x).join(" "), "console"); _konsolaBlad(...a); };
+window.addEventListener("online",()=>diagnostykaWyslijKolejke());
+window.addEventListener("pagehide",()=>{
+  const queue=diagnostykaKolejka();
+  if(queue.length&&navigator.sendBeacon){
+    const queued=navigator.sendBeacon("/api/store?action=diagnostics-ingest",new Blob([JSON.stringify({events:queue.map(({signature,...event})=>event)})],{type:"application/json"}));
+    if(queued)localStorage.removeItem(DIAGNOSTYKA_KOLEJKA_KEY);
+  }
+});
 function odswiezZnacznikDiag(){
   const el = document.getElementById("diagBadge"); if(!el) return;
   const n = pobierzLogi().filter(l=>l.poziom==="blad").length;
@@ -66,9 +112,12 @@ function zapamietajProduktyCentralne(lista=[]){
   produktyCentralnePobrane=[...mapa.values()].slice(-5000);produktyBazoweCache={bazowe:null,importowane:null,centralne:null,items:[]};if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
 }
 let zrodloProduktow = "zapasowe";
-let produktyDodane = wczytajLS("artway_produkty_dodane", []);
-let produktyUkryte = wczytajLS("artway_produkty_ukryte", []);
-let produktyEdytowane = wczytajLS("artway_produkty_edytowane", {});
+// Wyłącznie nietrwały cache widoku. Pełne kartoteki nigdy nie startują już
+// z localStorage — źródłem jest PostgreSQL, a products.json to generowany
+// podczas wydania publiczny snapshot awaryjny.
+let produktyDodane = [];
+let produktyUkryte = [];
+let produktyEdytowane = {};
 let ustawienia = {...USTAWIENIA_PUBLICZNE, ...wczytajLS("artway_ustawienia", {})};
 let koszyk = wczytajLS("artway_koszyk", []);
 let stanyProduktow = wczytajLS("artway_stany", {});   // magazyn: id → liczba sztuk (brak wpisu = bez limitu)
@@ -90,9 +139,9 @@ let producenciKartoteka = wczytajLS("artway_producenci", [
 let agentAILinkiProducentow = wczytajLS("artway_agent_ai_linki_producentow", []); // kolejka URL-i produktów producentów do pobrania/sprawdzenia przez agenta
 let agentAIImportUrlStan={busy:false,data:null,selected:0,error:""};
 let agentAIAllegroZadania = wczytajLS("artway_agent_ai_allegro_zadania", []); // braki i błędy wystawiania przekazane agentowi
-let koszDodanych = wczytajLS("artway_kosz_dodane", []); // kosz: usunięte produkty własne (można przywrócić)
-let koszMeta = wczytajLS("artway_kosz_meta", {});      // id → data usunięcia i typ; automatyczne czyszczenie po 30 dniach
-let produktyDefinitywne = wczytajLS("artway_produkty_definitywne", []); // bazowe produkty usunięte po okresie kosza
+let koszDodanych = []; // nietrwały cache widoku centralnego kosza
+let koszMeta = {};     // metadane widoku; retencję wykonuje PostgreSQL
+let produktyDefinitywne = []; // nietrwały cache widoku
 let opinie = wczytajLS("artway_opinie", []);          // opinie klientów (moderowane w panelu)
 const SEO_USTAWIENIA_DOMYSLNE={enabled:true,dailyLimit:50,autoFillMissing:true,autoAllProducts:true,preferBestsellers:true,indexNowEnabled:true,searchConsoleReady:false,merchantCenterReady:false,businessProfileReady:false,lastRunAt:"",lastRunCount:0,lastScheduledDay:"",lastChannels:null,lastPromotionAt:"",lastPromotionStatus:"",lastPromotionCount:0,lastPromotionHttpStatus:null,indexNowFullCatalogAt:"",indexNowFullCatalogCount:0};
 let seoUstawienia={...SEO_USTAWIENIA_DOMYSLNE,...wczytajLS("artway_seo_ustawienia",{})};
@@ -133,7 +182,7 @@ let zaznaczoneAllegroDyskusje = new Set();
 let zaznaczoneAllegroZgodnosc = new Set();
 let allegroOstatniBladWystawienia = null;
 let allegroOstatniWynikWystawienia = null;
-let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, autonomousAgent:{enabled:true,status:"waiting",completedAt:null,nextRunAt:null,mapping:{},stats:{},duplicateGroupsResolved:0,duplicateOffersEnded:0,reviewCount:0}, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSyncState:{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null,lastSource:null,lastResult:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autonomousAgentMinutes:15,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,updated_at:null}};
+let allegroStan = {sprawdzono:false, configured:false, connected:false, env:"production", error:"", updated_at:null, autonomousAgent:{enabled:true,status:"waiting",completedAt:null,nextRunAt:null,mapping:{},stats:{},duplicateGroupsResolved:0,duplicateOffersEnded:0,reviewCount:0}, offerDefaultsAudit:{items:{},updated_at:null}, catalogMaintenance:{cursor:0,lastRun:null}, complianceAudit:{items:[],summary:{},updated_at:null}, offerSyncState:{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null,lastSource:null,lastResult:null}, offerSettings:{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan","Gabo"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autonomousAgentMinutes:15,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,updated_at:null}};
 let allegroDaneZaladowane={summary:false,orders:false,offers:false,config:false};
 let allegroDaneLadowane=new Set();
 let allegroDaneOdczytAt={summary:0,orders:0,offers:0,config:0};

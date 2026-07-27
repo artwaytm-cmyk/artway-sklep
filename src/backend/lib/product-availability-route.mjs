@@ -5,7 +5,11 @@ import { applyProductSaleDecisionBatch } from './domain/product-sale-decisions.m
 const ACTIONS = new Set(['product-url-inspect', 'product-url-prepare', 'product-sale-availability', 'product-sale-decision', 'supplier-availability-sample']);
 
 export function createProductAvailabilityRoute(deps) {
-  const { respond, isAdmin, text, read, write, inspectProduct, prepareProduct, syncSaleChannels, mappingItems, isAllegroOrderActive, fetchProduct, notify } = deps;
+  const {
+    respond, isAdmin, text, read, write, inspectProduct, prepareProduct,
+    syncSaleChannels, mappingItems, isAllegroOrderActive, fetchProduct, notify,
+    loadProducts = null, saveProductFields = null, mutateSettings = null,
+  } = deps;
   return async function productAvailabilityRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
@@ -36,8 +40,16 @@ export function createProductAvailabilityRoute(deps) {
       data.artway_dostepnosc = availability;
       const saleAutomation = await syncSaleChannels(req, [{ ok: true, productId, status: available ? 'dostepny' : 'brak', available, quantity: available ? 1 : 0, checkedAt: now }], data, { previousAvailability });
       if (!saleAutomation.complete) return respond({ ok: false, error: 'Nie zmieniono sprzedaży, ponieważ Allegro nie potwierdziło całej operacji. System wycofał wykonane części i zapisał diagnostykę.', code: 'sale_channel_sync_failed', productId, available, saleAutomation }, 502);
-      await write('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
-      return respond({ ok: true, synchronized: true, productId, available, saleAutomation, updated_at: now });
+      if (typeof mutateSettings === 'function') {
+        await mutateSettings((latestData) => {
+          const latestAvailability = latestData.artway_dostepnosc && typeof latestData.artway_dostepnosc === 'object' ? { ...latestData.artway_dostepnosc } : {};
+          if (Object.prototype.hasOwnProperty.call(data.artway_dostepnosc || {}, productId)) latestAvailability[productId] = data.artway_dostepnosc[productId];
+          else delete latestAvailability[productId];
+          latestData.artway_dostepnosc = latestAvailability;
+          return true;
+        }, { updatedAt: now });
+      } else await write('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
+      return respond({ ok: true, synchronized: true, productId, available, authoritativeAvailability: { [productId]: data.artway_dostepnosc?.[productId] || null }, saleAutomation, updated_at: now });
     }
 
     if (action === 'product-sale-decision') {
@@ -45,12 +57,61 @@ export function createProductAvailabilityRoute(deps) {
       const previousAvailability = settingsRec.data?.artway_dostepnosc && typeof settingsRec.data.artway_dostepnosc === 'object' ? { ...settingsRec.data.artway_dostepnosc } : {};
       const batch = applyProductSaleDecisionBatch({ body, data: settingsRec.data, operator: 'administrator' }), { data, results, checks, audit, nowIso } = batch;
       const saleAutomation = await syncSaleChannels(req, checks, data, { previousAvailability });
-      if (!saleAutomation.complete) return respond({ ok: false, error: 'Decyzja nie została zapisana, ponieważ Allegro nie potwierdziło całej operacji. System wycofał wykonane części i zapisał diagnostykę.', code: 'sale_channel_sync_failed', changed: 0, saleAutomation }, 502);
-      const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
-      audit.forEach((entry, index) => agentHistory.unshift({ id: `AI-DEC-${Date.now().toString(36)}-${index}`, ...entry, data: nowIso, dataTxt: new Date(nowIso).toLocaleString('pl-PL'), dane: { ...entry.dane, saleAutomation } }));
-      data.artway_agent_ai_historia = agentHistory.slice(0, 500);
-      await write('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: nowIso });
-      return respond({ ok: true, synchronized: true, ...results[0], changed: results.length, results, saleAutomation, updated_at: nowIso });
+      const resultIds = new Set(results.map((entry) => String(entry.productId)));
+      const failedIds = new Set((Array.isArray(saleAutomation?.errors) ? saleAutomation.errors : [])
+        .map((entry) => String(entry?.productId || '')).filter((productId) => resultIds.has(productId)));
+      // Gdy kanał zwrócił błąd bez identyfikatora produktu, nie wolno zgadywać,
+      // które pozycje są spójne. W takim przypadku cała partia pozostaje do
+      // ponowienia. Standardowe błędy Allegro mają productId i są rozliczane
+      // pojedynczo, bez blokowania poprawnych pozycji z tej samej partii.
+      if (saleAutomation?.complete === false && failedIds.size === 0) results.forEach((entry) => failedIds.add(String(entry.productId)));
+      const successfulResults = results.filter((entry) => !failedIds.has(String(entry.productId)));
+      const successfulIds = new Set(successfulResults.map((entry) => String(entry.productId)));
+      const successfulAudit = audit.filter((entry) => successfulIds.has(String(entry?.dane?.productId || '')));
+      const finalAvailability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};
+      const authoritativeAvailability = Object.fromEntries(results.map((entry) => {
+        const productId = String(entry.productId);
+        return [productId, Object.prototype.hasOwnProperty.call(finalAvailability, productId) ? finalAvailability[productId] : null];
+      }));
+      if (successfulResults.length) {
+        if (typeof mutateSettings === 'function') {
+          await mutateSettings((latestData) => {
+            const latestAvailability = latestData.artway_dostepnosc && typeof latestData.artway_dostepnosc === 'object' ? { ...latestData.artway_dostepnosc } : {};
+            for (const productId of successfulIds) {
+              if (Object.prototype.hasOwnProperty.call(finalAvailability, productId)) latestAvailability[productId] = finalAvailability[productId];
+              else delete latestAvailability[productId];
+            }
+            latestData.artway_dostepnosc = latestAvailability;
+            const agentHistory = Array.isArray(latestData.artway_agent_ai_historia) ? [...latestData.artway_agent_ai_historia] : [];
+            successfulAudit.forEach((entry, index) => agentHistory.unshift({ id: `AI-DEC-${Date.now().toString(36)}-${index}`, ...entry, data: nowIso, dataTxt: new Date(nowIso).toLocaleString('pl-PL'), dane: { ...entry.dane, saleAutomation } }));
+            latestData.artway_agent_ai_historia = agentHistory.slice(0, 500);
+            return true;
+          }, { updatedAt: nowIso });
+        } else {
+          const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
+          successfulAudit.forEach((entry, index) => agentHistory.unshift({ id: `AI-DEC-${Date.now().toString(36)}-${index}`, ...entry, data: nowIso, dataTxt: new Date(nowIso).toLocaleString('pl-PL'), dane: { ...entry.dane, saleAutomation } }));
+          data.artway_agent_ai_historia = agentHistory.slice(0, 500);
+          await write('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: nowIso });
+        }
+      }
+      const failures = results.filter((entry) => failedIds.has(String(entry.productId))).map((entry) => ({
+        ...entry,
+        errors: (saleAutomation?.errors || []).filter((error) => String(error?.productId || '') === String(entry.productId)),
+      }));
+      return respond({
+        ok: true,
+        synchronized: failures.length === 0,
+        complete: failures.length === 0,
+        partial: failures.length > 0 && successfulResults.length > 0,
+        ...(successfulResults[0] || results[0]),
+        changed: successfulResults.length,
+        failed: failures.length,
+        results: successfulResults,
+        failures,
+        authoritativeAvailability,
+        saleAutomation,
+        updated_at: nowIso,
+      });
     }
 
     const settingsRec = await read('settings', { data: {}, rev: 0, updated_at: null }), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
@@ -58,7 +119,8 @@ export function createProductAvailabilityRoute(deps) {
     const threshold = Math.max(1, Math.min(1000000, Number(body.threshold ?? warehouse.progNiskiProducenta ?? 50) || 50));
     const limit = Math.max(1, Math.min(25, Number(body.limit ?? warehouse.producentProbka ?? 8) || 8));
     const requestedIds = new Set((Array.isArray(body.productIds) ? body.productIds : []).map((value) => text(value, 100).trim()).filter(Boolean));
-    const edits = data.artway_produkty_edytowane && typeof data.artway_produkty_edytowane === 'object' ? { ...data.artway_produkty_edytowane } : {}, baseMap = mergeCatalogProducts(data).map;
+    const loaded = typeof loadProducts === 'function' ? await loadProducts(data) : null;
+    const baseMap = loaded instanceof Map ? loaded : mergeCatalogProducts(data).map;
     const [storeOrdersRec, allegroOrdersRec, mappingsRec] = await Promise.all([read('orders', { items: [] }), read('allegro_orders', { items: [] }), read('allegro_mappings', { items: {} })]);
     const sales = new Map(), nowMs = Date.now(), day = 86400000, cutoff30 = nowMs - 30 * day, cutoff90 = nowMs - 90 * day;
     const sale = (id, channel, quantity, at, active = false) => {
@@ -108,20 +170,52 @@ export function createProductAvailabilityRoute(deps) {
       }));
       results.push(...checked);
     }
-    const changedAlerts = [];
+    const changedAlerts = [], productPatches = new Map();
     for (const result of results) {
-      const previous = edits[result.productId] && typeof edits[result.productId] === 'object' ? edits[result.productId] : {};
-      if (!result.ok) { edits[result.productId] = { ...previous, producentOstatniaProbaAt: checkedAt, producentOstatniBlad: result.error }; continue; }
+      const previous = baseMap.get(String(result.productId)) || {};
+      if (!result.ok) {
+        productPatches.set(result.productId, { producentOstatniaProbaAt: checkedAt, producentOstatniBlad: result.error });
+        continue;
+      }
       const history = Array.isArray(previous.producentStanHistoria) ? [...previous.producentStanHistoria] : [];
       history.unshift({ at: checkedAt, status: result.status, quantity: result.quantity, exact: result.exact });
       const alertActive = ['niski', 'brak'].includes(result.status), alertHash = alertActive ? result.status : '';
       if (alertActive && alertHash !== previous.producentAlertHash) changedAlerts.push(result);
-      edits[result.productId] = { ...previous, producentUrl: result.sourceUrl, sourceUrl: result.sourceUrl, dostepnoscProducenta: result.status === 'brak' ? 'niedostępny' : (result.available ? 'dostępny' : 'do sprawdzenia'), stanProducenta: result.quantity === null ? '' : result.quantity, stanProducentaDokladny: result.exact, stanProducentaZrodlo: result.source, producentStatus: result.status, producentSprawdzonoAt: checkedAt, producentOstatniaProbaAt: checkedAt, producentOstatniBlad: '', producentAlertAktywny: alertActive, producentAlertHash: alertHash, producentPriorytetWynik: Number(result.sales?.score || 0), sprzedazSklep30: Number(result.sales?.sklep30 || 0), sprzedazAllegro30: Number(result.sales?.allegro30 || 0), sprzedazRazem30: Number(result.sales?.sklep30 || 0) + Number(result.sales?.allegro30 || 0), aktywneZapotrzebowanie: Number(result.sales?.activeDemand || 0), producentStanHistoria: history.slice(0, 5) };
+      productPatches.set(result.productId, {
+        producentUrl: result.sourceUrl,
+        sourceUrl: result.sourceUrl,
+        dostepnoscProducenta: result.status === 'brak' ? 'niedostępny' : (result.available ? 'dostępny' : 'do sprawdzenia'),
+        stanProducenta: result.quantity === null ? '' : result.quantity,
+        stanProducentaDokladny: result.exact,
+        stanProducentaZrodlo: result.source,
+        producentStatus: result.status,
+        producentSprawdzonoAt: checkedAt,
+        producentOstatniaProbaAt: checkedAt,
+        producentOstatniBlad: '',
+        producentAlertAktywny: alertActive,
+        producentAlertHash: alertHash,
+        producentPriorytetWynik: Number(result.sales?.score || 0),
+        sprzedazSklep30: Number(result.sales?.sklep30 || 0),
+        sprzedazAllegro30: Number(result.sales?.allegro30 || 0),
+        sprzedazRazem30: Number(result.sales?.sklep30 || 0) + Number(result.sales?.allegro30 || 0),
+        aktywneZapotrzebowanie: Number(result.sales?.activeDemand || 0),
+        producentStanHistoria: history.slice(0, 5),
+      });
     }
-    data.artway_produkty_edytowane = edits;
     let saleAutomation = { siteHidden: 0, siteRestored: 0, allegroHidden: 0, allegroRestored: 0, unchanged: 0, errors: [] };
     try { saleAutomation = await syncSaleChannels(req, results, data); }
     catch (error) { saleAutomation.errors = [{ action: 'availability-automation', error: text(error?.message || error, 700), code: text(error?.code || '', 120) }]; }
+    if (typeof saveProductFields === 'function') {
+      for (const [productId, fields] of productPatches) {
+        await saveProductFields({
+          productId,
+          fields,
+          mutationId: `supplier-availability:${productId}:${checkedAt}`,
+          actor: text(body.source || 'agent-serwerowy', 100),
+          area: 'supplier-availability',
+        });
+      }
+    }
     const agentHistory = Array.isArray(data.artway_agent_ai_historia) ? [...data.artway_agent_ai_historia] : [];
     const summary = { checked: results.length, priorityChecked: results.filter((result) => Number(result.sales?.score || 0) > 0).length, available: results.filter((result) => ['dostepny', 'dostepny_nieznany'].includes(result.status)).length, low: results.filter((result) => result.status === 'niski').length, unavailable: results.filter((result) => result.status === 'brak').length, unknown: results.filter((result) => ['nieznany', 'blad'].includes(result.status)).length, alerts: changedAlerts.length, threshold, saleAutomation };
     agentHistory.unshift({ id: `AI-SUP-${Date.now().toString(36)}`, typ: 'dostepnosc-producentow', opis: `Agent wyrywkowo sprawdził ${summary.checked} produktów u producentów`, data: checkedAt, dataTxt: new Date().toLocaleString('pl-PL'), operator: text(body.source || 'agent-serwerowy', 100), dane: summary });

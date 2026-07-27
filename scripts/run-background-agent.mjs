@@ -15,7 +15,9 @@ const taskLabels = {
   'oferty-lekkie': 'Szybka kontrola ofert Allegro',
   'oferty-pelne': 'Dobowa pełna aktualizacja ofert',
   'agent-autonomiczny': 'Kontrola operacyjna katalogu',
-  'tresci-gpt-nano': 'Redakcja małej porcji treści',
+  'tresci-gpt-nano': 'Redakcja małej porcji treści przez routing OpenAI',
+  'platforma-openai': 'Kontrola OpenAI Platform, trace i Batch',
+  'przygotowanie-produktow': 'Sukcesywne przygotowanie produktów do Allegro',
   'tresci-allegro': 'Aktualizacja zmienionych opisów Allegro',
   'tresci-von-halsky': 'Publikacja zmienionych kart Von Halsky',
   zamowienia: 'Nowe lub zmienione zamówienia Allegro',
@@ -24,7 +26,9 @@ const taskLabels = {
 };
 
 const taskDefinition = (id, coordinatorPlan = null) => ({
-  'tresci-gpt-nano': ['agent-specialist-auto-cycle', { source: 'event-queue', maxItems: 2, coordinatorPlan }, 125_000],
+  // Jedna zakończona i potwierdzona operacja jest lepsza niż kilka szkiców
+  // przerwanych przez timeout. Następny kanał zostanie podjęty w kolejnym cyklu.
+  'tresci-gpt-nano': ['agent-specialist-auto-cycle', { source: 'event-queue', maxItems: 1, coordinatorPlan }, 240_000],
   'agent-autonomiczny': ['allegro-autonomous-agent-cycle', { source: 'event-queue', maxActions: 4 }, 120_000],
   'oferty-lekkie': ['allegro-sync-offers', { limit: 10_000, details: false, source: 'hourly-catalog-delta' }, 120_000],
   'oferty-pelne': ['allegro-sync-offers', { limit: 10_000, details: true, detailsLimit: 200, maintenanceLimit: 20, complianceLimit: 10, source: 'daily-bounded-offers-sync' }, 150_000],
@@ -134,10 +138,12 @@ await report('cycle_start', { steps: [
 
 // Te dwa wywołania są detektorami zmian i działają równolegle. Nie uruchamiają
 // automatycznie pełnej kontroli 10 000 ofert ani całego katalogu.
-const [ordersResult, communicationResult, vonHalskyResult] = await Promise.all([
+const [ordersResult, communicationResult, vonHalskyResult, openAiPlatformResult] = await Promise.all([
   run('zamowienia', 'allegro-sync-orders', { limit: 200, source: 'event-detector' }, 90_000),
   run('komunikacja', 'allegro-sync-communications', { limit: 20, autoReply: true, source: 'event-detector' }, 90_000),
   run('von-halsky-katalog', 'von-halsky-sync-catalog', { publish: true, scheduled: true, batchSize: 50 }, 120_000),
+  run('platforma-openai', 'openai-platform-cycle', { source: 'scheduled' }, 90_000),
+  run('przygotowanie-produktow', 'allegro-preparation-queue-auto', { batchSize: 50, source: 'server-cycle' }, 90_000),
 ]);
 const detectorResults = [ordersResult, communicationResult];
 
@@ -149,7 +155,7 @@ await report('cycle_step', { step: {
   count: planned.queue.length, detail: planned.queue.length ? `Wybrano: ${planned.queue.map((item) => taskLabels[item.id]).join(' → ')}. Odłożono: ${planned.deferred.length}.` : 'Brak konkretnego zadania do wykonania. Ciężkie kontrole pominięto.',
 } });
 
-const results = [...detectorResults, vonHalskyResult];
+const results = [...detectorResults, vonHalskyResult, openAiPlatformResult];
 let coordinator = null;
 if (planned.queue.some((item) => item.id === 'tresci-gpt-nano')) {
   coordinator = await coordinatorCycle({ specialists, operations });
@@ -175,7 +181,7 @@ const vonHalskyPublicationIds = pendingIds('vonHalsky');
 if (allegroPublicationIds.length) {
   results.push(await run('tresci-allegro', 'allegro-auto-maintenance', {
     limit: Math.min(50, allegroPublicationIds.length), pendingOnly: true, productIds: allegroPublicationIds, source: 'publication-queue',
-  }, 120_000));
+  }, 240_000));
 }
 if (vonHalskyPublicationIds.length) {
   results.push(await run('tresci-von-halsky', 'von-halsky-sync-catalog', {

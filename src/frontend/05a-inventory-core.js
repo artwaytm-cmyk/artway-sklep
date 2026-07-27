@@ -46,7 +46,7 @@ async function ustawDostepnoscProduktu(id, status="dostepny", powod=""){
     toast(s==="niedostepny"?"⏳ Wstrzymuję sprzedaż w sklepie i na Allegro…":"⏳ Wznawiam sprzedaż w sklepie i na Allegro…");
     try{
       const d=await chmura("product-sale-availability",{method:"POST",body:{productId:id,available:s!=="niedostepny",reason:String(powod||"").trim()},timeout:120000});
-      await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();
+      nalozPotwierdzonaDostepnoscSerwera(d);await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();
       loguj("info",`Dostępność produktu ${id} zmieniona jako jedna operacja sklep + Allegro`);
       toast(s==="niedostepny"?`✅ Sprzedaż wstrzymana • sklep + Allegro (${d.saleAutomation?.allegroHidden||0} ofert)`:`✅ Sprzedaż wznowiona • sklep + Allegro (${d.saleAutomation?.allegroRestored||0} ofert)`);
     }catch(e){loguj("blad",`Spójna zmiana sprzedaży produktu ${id}: ${e.message||e}`);toast(`⛔ Niczego nie zmieniono — sklep i Allegro muszą potwierdzić operację razem: ${e.message||e}`);}
@@ -104,12 +104,24 @@ function zapiszDecyzjeProducentowLokalnie(ids=[],value="auto",historia=true){
   for(const p of unique){const next=decyzjaProducentaDane(p.id,value),key=String(p.id),i=producentDostepnoscInfo(p);if(next)dostepnoscProduktow[key]=next;else{delete dostepnoscProduktow[key];delete dostepnoscProduktow[p.id];}if(historia)zapiszHistorieAgenta("decyzja-producenta",`Decyzja sprzedażowa dla ${p.nazwa}: ${next?.reason||"automat — produkt dostępny"}`,{productId:p.id,decision:value,producerStatus:i.status,expiresAt:next?.expiresAt||null});}
   zapiszLS("artway_dostepnosc",dostepnoscProduktow);zbudujProdukty();return unique.length;
 }
+function nalozPotwierdzonaDostepnoscSerwera(odpowiedz={}){
+  const rekordy=odpowiedz?.authoritativeAvailability;
+  if(!rekordy||typeof rekordy!=="object"||Array.isArray(rekordy))return 0;
+  dostepnoscProduktow={...(dostepnoscProduktow||{})};let zmieniono=0;
+  for(const [productId,record] of Object.entries(rekordy)){
+    if(record&&typeof record==="object")dostepnoscProduktow[String(productId)]=record;
+    else{delete dostepnoscProduktow[String(productId)];delete dostepnoscProduktow[productId];}
+    zmieniono++;
+  }
+  if(zmieniono)zapiszLS("artway_dostepnosc",dostepnoscProduktow,{synchronizuj:false});
+  return zmieniono;
+}
 async function ustawDecyzjeProducenta(id,value="auto"){
   const p=produktMagazynowy(id);if(!p)return;
   const next=decyzjaProducentaDane(id,value),key=String(id),i=producentDostepnoscInfo(p);
   if(maUprawnieniaZapisuChmury()){
     toast("⏳ Zapisuję jedną decyzję dla sklepu i Allegro…");
-    try{const d=await chmura("product-sale-decision",{method:"POST",body:{productId:id,decision:String(value).split(":")[0],days:Number(String(value).split(":")[1])||0,producerStatus:i.status,producerQuantity:i.quantity,reason:next?.reason||"Automatyczna decyzja"},timeout:120000});await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();toast(`✅ Jedna decyzja zapisana • sklep: ${d.available?"aktywny":"wstrzymany"} • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}
+    try{const d=await chmura("product-sale-decision",{method:"POST",body:{productId:id,decision:String(value).split(":")[0],days:Number(String(value).split(":")[1])||0,producerStatus:i.status,producerQuantity:i.quantity,reason:next?.reason||"Automatyczna decyzja"},timeout:120000});nalozPotwierdzonaDostepnoscSerwera(d);await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();if(d.failed)toast(`⛔ Decyzja nie została zastosowana: ${d.failures?.[0]?.errors?.[0]?.error||"kanał sprzedaży nie potwierdził zmiany"}`);else toast(`✅ Jedna decyzja zapisana • sklep: ${d.available?"aktywny":"wstrzymany"} • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}
     catch(e){toast(`⛔ Niczego nie zmieniono — operacja sklep + Allegro nie została potwierdzona: ${e.message||e}`);}
   }else{
     dostepnoscProduktow={...(dostepnoscProduktow||{})};if(next)dostepnoscProduktow[key]=next;else{delete dostepnoscProduktow[key];delete dostepnoscProduktow[id];}
@@ -128,9 +140,29 @@ async function zastosujGrupowaDecyzjeProducenta(){
   if(!ids.length){toast("Zaznacz co najmniej jeden produkt");return;}if(!confirm(`${decyzjaProducentaEtykieta(value)} — zastosować do ${ids.length} zaznaczonych produktów?`))return;
   const parts=value.split(":"),items=ids.map(id=>{const p=produktMagazynowy(id),i=producentDostepnoscInfo(p);return{productId:id,decision:parts[0],days:Number(parts[1])||0,producerStatus:i.status,producerQuantity:i.quantity};});if(button){button.disabled=true;button.textContent=`⏳ Zapisuję ${ids.length}…`;}
   try{
-    if(maUprawnieniaZapisuChmury()){const d=await chmura("product-sale-decision",{method:"POST",body:{items},timeout:180000});await chmuraWczytajStan();if(typeof allegroWczytajDane==="function")await allegroWczytajDane(true,false,"offers");zbudujProdukty();toast(`✅ Zapisano ${d.changed||ids.length} spójnych decyzji • Allegro: wstrzymano ${d.saleAutomation?.allegroHidden||0}, wznowiono ${d.saleAutomation?.allegroRestored||0}`);}else{zapiszDecyzjeProducentowLokalnie(ids,value,true);toast(`Zapisano lokalnie ${ids.length} decyzji — połącz wspólną bazę, aby zmienić oba kanały`);}
-    ids.forEach(id=>zaznaczoneDostepnoscProducentow.delete(String(id)));
-  }catch(e){toast(`⛔ Niczego nie zmieniono — operacja sklep + Allegro nie została potwierdzona: ${e.message||e}`);}
+    if(maUprawnieniaZapisuChmury()){
+      const rozmiarPartii=40,zapisane=new Set(),nieudane=new Set();let allegroUkryte=0,allegroWznowione=0,bledyPolaczenia=0;
+      for(let offset=0;offset<items.length;offset+=rozmiarPartii){
+        const partia=items.slice(offset,offset+rozmiarPartii);
+        if(button)button.textContent=`⏳ ${Math.min(offset+partia.length,items.length)} / ${items.length}`;
+        try{
+          const d=await chmura("product-sale-decision",{method:"POST",body:{items:partia},timeout:180000});
+          nalozPotwierdzonaDostepnoscSerwera(d);
+          (Array.isArray(d.results)?d.results:[]).forEach(entry=>zapisane.add(String(entry.productId)));
+          (Array.isArray(d.failures)?d.failures:[]).forEach(entry=>nieudane.add(String(entry.productId)));
+          allegroUkryte+=Number(d.saleAutomation?.allegroHidden)||0;allegroWznowione+=Number(d.saleAutomation?.allegroRestored)||0;
+        }catch(e){bledyPolaczenia++;partia.forEach(entry=>nieudane.add(String(entry.productId)));}
+        odswiezDostepnoscProducentowWidoku();
+      }
+      zapisane.forEach(id=>{zaznaczoneDostepnoscProducentow.delete(id);nieudane.delete(id);});
+      await chmuraWczytajStan();
+      if(typeof allegroWczytajDane==="function"&&(allegroUkryte||allegroWznowione))await allegroWczytajDane(true,false,"offers");
+      zbudujProdukty();
+      if(nieudane.size||bledyPolaczenia)toast(`⚠️ Zapisano ${zapisane.size} z ${ids.length} decyzji • do ponowienia: ${nieudane.size} • Allegro: wstrzymano ${allegroUkryte}, wznowiono ${allegroWznowione}`);
+      else toast(`✅ Zapisano ${zapisane.size} decyzji • sklep i panel są zgodne • Allegro: wstrzymano ${allegroUkryte}, wznowiono ${allegroWznowione}`);
+    }else{zapiszDecyzjeProducentowLokalnie(ids,value,true);ids.forEach(id=>zaznaczoneDostepnoscProducentow.delete(String(id)));toast(`Zapisano lokalnie ${ids.length} decyzji — połącz wspólną bazę, aby zmienić oba kanały`);}
+  }catch(e){toast(`⛔ Operacja została przerwana; niezapisane pozycje pozostają zaznaczone: ${e.message||e}`);}
+  finally{if(button){button.disabled=false;button.textContent=`Zastosuj do ${zaznaczoneDostepnoscProducentow.size}`;}}
   odswiezDostepnoscProducentowWidoku();
 }
 function grupowaDecyzjaProducentaHTML(){const n=zaznaczoneDostepnoscProducentow.size;return `<div class="supplier-bulk-decision"><label><span>Decyzja dla zaznaczonych</span><select data-supplier-bulk-decision>${decyzjaProducentaOpcjeHTML("auto")}</select></label><button class="btn" type="button" data-supplier-bulk-apply onclick="zastosujGrupowaDecyzjeProducenta()" ${n?"":"disabled"}>Zastosuj do ${n}</button><small>Jedno potwierdzenie i jeden spójny zapis dla całej grupy. Sklep i powiązane oferty Allegro zmienią się dopiero po zatwierdzeniu.</small></div>`;}

@@ -148,16 +148,22 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
   }
   function opisProduktuZHtml(html = '', title = '') {
     const meta = metaHtml(html, 'og:description') || metaHtml(html, 'description');
+    const schemaDescription = stripHtmlZPodzialem(jsonLdProdukty(html)[0]?.description || '');
     const longDesc = (html.match(/<section\b[^>]*id=["']projector_longdescription["'][^>]*>([\s\S]*?)<\/section>/i) || [])[1] || '';
     const shortDesc = (html.match(/<div\b[^>]*class=["'][^"']*\bproduct_name__block\b[^"']*\b--description\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '';
     const cleanedLong = stripHtmlZPodzialem(longDesc);
-    if (cleanedLong && cleanedLong.length > 80) return tekst(cleanedLong, 12000);
+    // Krótki, ale konkretny opis producenta (np. jedno zdanie z wymiarem)
+    // jest lepszym źródłem niż cała treść sklepu. Poprzedni próg 80 znaków
+    // odrzucał poprawne opisy i wciągał do produktu koszyk, logowanie i stopkę.
+    if (cleanedLong && cleanedLong.length >= 20) return tekst(cleanedLong, 12000);
     const cleanedShort = stripHtmlZPodzialem(shortDesc);
-    if (cleanedShort) return tekst(cleanedShort, 12000);
-    if (meta && !/gry planszowe,\s*gry rodzinne/i.test(meta)) return tekst(stripHtml(meta), 12000);
-    const text = stripHtml(html);
-    const opisStart = text.indexOf(String(title || '').trim());
-    return opisStart >= 0 ? tekst(text.slice(opisStart + String(title || '').length, opisStart + 8000), 12000) : '';
+    if (cleanedShort && cleanedShort.length >= 20) return tekst(cleanedShort, 12000);
+    if (schemaDescription && schemaDescription.length >= 20) return tekst(schemaDescription, 12000);
+    const cleanedMeta = stripHtmlZPodzialem(meta);
+    if (cleanedMeta && cleanedMeta.length >= 20 && !/gry planszowe,\s*gry rodzinne/i.test(cleanedMeta)) return tekst(cleanedMeta, 12000);
+    // Brak bezpiecznego, wydzielonego opisu oznacza brak opisu. Nigdy nie
+    // kopiujemy całego body strony producenta do kartoteki produktu.
+    return '';
   }
   function opisKrotkiProduktuZHtml(html = '', opis = '') {
     const meta = metaHtml(html, 'og:description') || metaHtml(html, 'description');

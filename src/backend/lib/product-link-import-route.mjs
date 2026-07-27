@@ -1,4 +1,4 @@
-import { createImportedProductCatalog, IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY } from './domain/imported-product-catalog.mjs';
+import { createImportedProductCatalog } from './domain/imported-product-catalog.mjs';
 import { createProductLinkImportService } from './domain/product-link-import.mjs';
 import { createProductLinkImportPreparer } from './domain/product-link-import-preparation.mjs';
 
@@ -81,18 +81,33 @@ export async function productLinkImportedCatalogPayload({ catalog, manifest, req
 }
 
 export function createProductLinkImportBundle(options = {}) {
-  const catalog = createImportedProductCatalog({ read: options.read, readVersioned: options.readVersioned, writeIfVersion: options.writeIfVersion });
+  const catalog = createImportedProductCatalog({
+    read: options.read,
+    readVersioned: options.readVersioned,
+    writeIfVersion: options.writeIfVersion,
+    productStore: options.centralCatalog,
+  });
   const prepareProduct = createProductLinkImportPreparer({ ...options.preparation, catalog });
   const service = createProductLinkImportService({ read: options.read, readVersioned: options.readVersioned, writeIfVersion: options.writeIfVersion, catalog, prepareProduct, updateExistingProduct: options.updateExistingProduct });
   const route = createProductLinkImportRoute({ service, catalog, sanitize: options.sanitize, ...options.route });
   return Object.freeze({
     catalog, route,
     async mergeSettings(data = {}) {
+      if (options.centralCatalog?.listDataMap) {
+        const canonical = [...(await options.centralCatalog.listDataMap({ includeTrash: true })).values()];
+        return {
+          ...data,
+          artway_produkty_katalog: [],
+          artway_produkty_dodane: canonical,
+          artway_produkty_edytowane: {},
+        };
+      }
       const imported = await catalog.list(), added = Array.isArray(data.artway_produkty_dodane) ? data.artway_produkty_dodane : [], ids = new Set(added.map((product) => String(product?.id)));
       return { ...data, artway_produkty_dodane: [...added, ...imported.filter((product) => !ids.has(String(product?.id)))] };
     },
     async payload({ requestedRev, admin }) {
-      const manifest = await options.read(IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY, { count: 0, updatedAt: null });
+      const metadata = await catalog.metadata();
+      const manifest = { count: metadata.count, updatedAt: metadata.revision };
       return productLinkImportedCatalogPayload({ catalog, manifest, requestedRev, admin, sanitize: options.sanitize });
     },
   });

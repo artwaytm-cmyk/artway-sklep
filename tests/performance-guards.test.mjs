@@ -42,14 +42,18 @@ test('techniczne przywracanie pozycji panelu nie uruchamia kosztownego płynnego
 });
 
 test('powtórne wejście do panelu pobiera tylko rewizję zamiast wielomegabajtowego snapshotu', async () => {
-  const [cloud, backend] = await Promise.all([
+  const [cloud, backend, pull] = await Promise.all([
     readFile('src/frontend/03-cloud-sync.js', 'utf8'),
     readFile('src/backend/lib/store-data-route.mjs', 'utf8'),
+    readFile('src/backend/lib/domain/store-data-pull.mjs', 'utf8'),
   ]);
   assert.match(cloud, /settingsRev:lokalnaRewizja/);
-  assert.match(backend, /settings_unchanged: true/);
-  assert.match(backend, /key !== 'artway_produkty_katalog'/);
-  assert.match(backend, /requestedSettingsRev === rev/);
+  assert.match(pull, /settings_unchanged: true/);
+  assert.match(pull, /excluded\.includes\(key\)/);
+  assert.match(pull, /excludeKeys: centralCatalogMode \? PUBLIC_CENTRAL_EXCLUDED_KEYS : \[\]/);
+  assert.match(pull, /settingsRevisionUnchanged/);
+  assert.match(pull, /url\.searchParams\.has\('settingsDomains'\)/);
+  assert.match(cloud, /serwerNowszy \|\| zmienioneDomeny/);
   const pullStart=backend.indexOf("if (action === 'pull' || action === 'store-data')"),pullEnd=backend.indexOf("if (action === 'settings')",pullStart),pullRoute=backend.slice(pullStart,pullEnd);
   assert.doesNotMatch(pullRoute, /reconcileDraftsSafely/);
 });

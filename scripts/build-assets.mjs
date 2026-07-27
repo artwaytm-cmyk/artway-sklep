@@ -17,6 +17,7 @@ export const ASSET_BUNDLES = Object.freeze([
     banner: '/* GENERATED FILE — edit src/frontend/*.js and run npm run build */',
     sources: [
       'src/frontend/01-config-and-catalog.js',
+      'src/frontend/01b-storage-foundation.js',
       'src/frontend/02-runtime-state.js',
       'src/frontend/03-cloud-sync.js',
       'src/frontend/03b-settings-field-mutations.js',
@@ -118,6 +119,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/15b-banner-icon-studio.js',
       'src/frontend/15c-campaign-studio-pro.js',
       'src/frontend/16-diagnostics.js',
+      'src/frontend/16a-server-dashboard.js',
       'src/frontend/19-admin-dashboard.js',
     ],
   },
@@ -169,6 +171,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/34-paynow-readiness.css',
       'src/styles/35-admin-unified-workspace.css',
       'src/styles/36-inpost-service-shipping.css',
+      'src/styles/38-server-dashboard.css',
     ],
   },
   {
@@ -335,6 +338,7 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
     banner: '/* GENERATED ADMIN SYSTEM — loaded on demand */',
     sources: [
       'src/frontend/16-diagnostics.js',
+      'src/frontend/16a-server-dashboard.js',
       'src/frontend/19-admin-dashboard.js',
     ],
   },

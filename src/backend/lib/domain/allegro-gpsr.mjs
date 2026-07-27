@@ -51,7 +51,15 @@ export function allegroApplyProductSetSafety({
   const safety = catalog?.productSafety && typeof catalog.productSafety === 'object' ? catalog.productSafety : {};
   const catalogProducers = Array.isArray(safety.responsibleProducers) ? safety.responsibleProducers : [];
   const directory = catalogProducers.length ? catalogProducers : responsibleProducers;
-  const responsibleProducer = allegroSelectResponsibleProducer(product, directory)
+  const storedResponsibleProducer = text(product?.allegroResponsibleProducer?.id, 120)
+    ? {
+        id: text(product.allegroResponsibleProducer.id, 120),
+        name: text(product.allegroResponsibleProducer.name, 200),
+        score: Number(product.allegroResponsibleProducer.score) || 100,
+      }
+    : null;
+  const responsibleProducer = storedResponsibleProducer
+    || allegroSelectResponsibleProducer(product, directory)
     || (catalogProducers.length === 1 && text(catalogProducers[0]?.id, 120)
       ? { id: text(catalogProducers[0].id, 120), name: text(catalogProducers[0]?.name || catalogProducers[0]?.producerData?.tradeName, 200), score: 100 }
       : null);
@@ -76,6 +84,14 @@ export function allegroApplyProductSetSafety({
     safetyInformation: item.safetyInformation || null,
     source: catalogProducers.length ? 'katalog Allegro' : (responsibleProducer ? 'kartoteka odpowiedzialnych producentów Allegro' : ''),
   };
+}
+
+export function allegroMergeGpsrMissing(existing = [], current = []) {
+  const gpsrLabels = new Set(['odpowiedzialny producent GPSR', 'informacja o bezpieczeństwie GPSR']);
+  return [...new Set([
+    ...(Array.isArray(existing) ? existing : []).filter((item) => !gpsrLabels.has(String(item))),
+    ...(Array.isArray(current) ? current : []),
+  ].filter(Boolean))];
 }
 
 export function allegroBuildContentProductSet({ draftItem = {}, existingItem = {}, responsibleProducer = null } = {}) {

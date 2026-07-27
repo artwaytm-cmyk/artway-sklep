@@ -74,6 +74,32 @@ test('awaria jednego kanału nie cofa zapisanych wyników pozostałych kanałów
   assert.match(prepared.warnings.join(' '), /Allegro chwilowo niedostępne/);
 });
 
+test('chwilowy brak AI zachowuje kompletne istniejące treści zamiast oznaczać wszystkie kanały jako błędne', async () => {
+  let calls = 0;
+  const product = {
+    nazwa: 'Puzzle drewniane Galaxies – Jednorożec',
+    opisKrotki: 'Drewniane puzzle przedstawiające jednorożca, przeznaczone do spokojnej, kreatywnej zabawy.',
+    opis: 'Zestaw składa się ze 150 drewnianych elementów. Układanie rozwija koncentrację, spostrzegawczość i cierpliwość. Produkt marki Alexander.',
+    allegroTitle: 'Puzzle drewniane Galaxies Jednorożec 150 elementów',
+    allegroDescription: 'Drewniane puzzle ze 150 elementów przedstawiają jednorożca. Układanie rozwija koncentrację, spostrzegawczość i cierpliwość. Produkt marki Alexander.',
+    vonHalskyTitle: 'Puzzle drewniane Galaxies Jednorożec',
+    vonHalskyShortDescription: 'Drewniane puzzle przedstawiające jednorożca, 150 elementów.',
+    vonHalskyDescription: 'Drewniane puzzle ze 150 elementów przedstawiają jednorożca. Układanie rozwija koncentrację, spostrzegawczość i cierpliwość. Produkt marki Alexander.',
+  };
+  const prepared = await prepareLinkedProductEditorial(product, {
+    runSpecialist: async () => {
+      calls += 1;
+      throw new Error('You exceeded your current quota, please check your plan and billing details.');
+    },
+  });
+  assert.equal(prepared.status, 'ready');
+  assert.deepEqual(Object.fromEntries(Object.entries(prepared.product.contentEditorial.channelStates).map(([key, value]) => [key, value.status])), { store: 'ready', allegro: 'ready', vonHalsky: 'ready' });
+  assert.equal(prepared.product.allegroDescription, product.allegroDescription);
+  assert.equal(prepared.product.vonHalskyDescription, product.vonHalskyDescription);
+  assert.equal(calls, 1);
+  assert.match(prepared.warnings.join(' '), /exceeded your current quota/);
+});
+
 test('normalizacja awaryjna usuwa dopisek strony i porządkuje wielkie litery', () => {
   assert.equal(normalizeEditorialTitle('ORIGAMI 3D KWIATY | Sklep producenta'), 'Origami 3D Kwiaty');
   assert.equal(linkedProductSourceMaterial({ nazwa: 'Gra', opis: '<p>Opis</p>', ean: '123' }, 'https://example.test').title, 'Gra');

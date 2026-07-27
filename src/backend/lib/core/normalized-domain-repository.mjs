@@ -10,16 +10,13 @@ import {
 } from './dedicated-domain-storage.mjs';
 
 const SETTINGS_DOMAIN_CONFIGS = Object.freeze({
-  artway_produkty_edytowane: objectConfig(),
-  artway_produkty_dodane: arrayConfig(['id', 'externalId', 'sku', 'gtin', 'ean']),
-  artway_produkty_katalog: arrayConfig(['id', 'externalId', 'sku', 'gtin', 'ean']),
-  artway_produkty_ukryte: arrayConfig(),
-  artway_produkty_definitywne: arrayConfig(),
+  artway_ustawienia: valueConfig(),
   artway_stany: objectConfig(),
   artway_magazyn_niedobory_wydan: objectConfig(),
   artway_dostepnosc: objectConfig(),
   artway_ruchy_magazynowe: arrayConfig(['id', 'sourceRequestId']),
   artway_magazyn_produkty: objectConfig(),
+  artway_magazyn_ustawienia: objectConfig(),
   artway_magazyn_lokalizacje: arrayConfig(['id', 'kod']),
   artway_magazyn_lokalizacje_usuniete: arrayConfig(['id', 'kod']),
   artway_dokumenty_magazynowe: arrayConfig(['id', 'numer']),
@@ -34,10 +31,10 @@ const SETTINGS_DOMAIN_CONFIGS = Object.freeze({
   artway_agent_ai_linki_producentow: arrayConfig(['id', 'url']),
   artway_agent_ai_allegro_zadania: arrayConfig(['id']),
   artway_seo_historia: arrayConfig(['id', 'at', 'data']),
+  artway_seo_ustawienia: valueConfig(),
   artway_opinie: arrayConfig(['id']),
-  artway_kosz_dodane: arrayConfig(),
-  artway_kosz_meta: objectConfig(),
 });
+const SETTINGS_DOMAIN_KEYS = new Set(Object.keys(SETTINGS_DOMAIN_CONFIGS));
 
 const DIRECT_DOMAIN_CONFIGS = Object.freeze({
   orders: containerConfig({ items: arrayConfig(['nr']) }),
@@ -55,6 +52,12 @@ const DIRECT_DOMAIN_CONFIGS = Object.freeze({
   agent_action_runs: containerConfig({ items: arrayConfig(['id', 'runId']) }),
   agent_runtime: containerConfig({
     activity: arrayConfig(['id', 'runId', 'at']), history: arrayConfig(['id', 'runId', 'at']),
+  }),
+  system_diagnostics: containerConfig({
+    items: arrayConfig(['id', 'fingerprint']),
+  }),
+  openai_platform_state: containerConfig({
+    batches: arrayConfig(['id', 'day']),
   }),
   allegro_operation_receipts: containerConfig({ items: objectConfig() }),
   product_url_cache: containerConfig({ items: objectConfig() }),
@@ -176,6 +179,36 @@ export function hydrateNormalizedValue(metadata, records, config) {
 
 function domainForDirectKey(key) { return `kv:${key}`; }
 function domainForSetting(key) { return `settings:${key}`; }
+function settingsDomainFromKey(key = '') {
+  const value = String(key || '');
+  if (value.startsWith('settings:')) return value.slice('settings:'.length);
+  return SETTINGS_DOMAIN_KEYS.has(value) ? value : '';
+}
+
+function settingsDomainConfig(key) {
+  const normalized = settingsDomainFromKey(key);
+  return normalized ? SETTINGS_DOMAIN_CONFIGS[normalized] : undefined;
+}
+
+function readSettingsDomain(client, namespace, key, fallback, versioned = false) {
+  const normalized = settingsDomainFromKey(key);
+  const config = normalized ? SETTINGS_DOMAIN_CONFIGS[normalized] : null;
+  if (!config) return versioned ? legacy.readVersioned(key, fallback) : legacy.read(key, fallback);
+  return (async () => {
+    const domain = await readDomain(client, namespace, domainForSetting(normalized), config);
+    if (!domain) return versioned ? { value: fallback, etag: '0', exists: false } : fallback;
+    const record = { value: domain.value, exists: true, etag: `"${domain.version}"` };
+    return versioned ? record : record.value;
+  })();
+}
+
+async function writeSettingsDomain(client, namespace, key, value, config, version = null) {
+  const expectedVersion = version?.exists === false ? null : (version ? Number(String(version.etag || '').replace(/^W\//, '').replace(/^"|"$/g, '')) : null);
+  if (version && version.exists !== false && !Number.isSafeInteger(expectedVersion)) return { modified: false };
+  const existing = await client.query('SELECT version FROM artway_domain_snapshots WHERE namespace=$1 AND domain=$2', [namespace, domainForSetting(key)]);
+  if (version?.exists === false && existing.rowCount) return { modified: false };
+  return replaceDomain(client, namespace, domainForSetting(key), value, config, { expectedVersion: Number.isSafeInteger(expectedVersion) ? expectedVersion : null });
+}
 export function normalizedRevisionToken(domains = [], rows = []) {
   const versions = new Map((rows || []).map((row) => [String(row.domain || ''), Math.max(0, Number(row.version) || 0)]));
   return ['ndv1', ...[...new Set((domains || []).map(String).filter(Boolean))].sort().map((domain) => `${domain}=${versions.get(domain) || 0}`)].join('|');
@@ -254,6 +287,28 @@ async function replaceDomain(client, namespace, domain, value, config, { expecte
   return { modified: true, version: nextVersion };
 }
 
+async function bumpSettingsRevision(client, namespace) {
+  const now = new Date().toISOString();
+  const current = await client.query('SELECT value FROM artway_kv_store WHERE namespace=$1 AND key=$2 FOR UPDATE', [namespace, 'settings']);
+  if (!current.rowCount) {
+    const initial = { data: {}, rev: 1, updated_at: now };
+    await client.query(
+      `INSERT INTO artway_kv_store(namespace,key,value,version,updated_at) VALUES($1,'settings',$2::jsonb,1,$3)`,
+      [namespace, JSON.stringify(initial), now],
+    );
+    return 1;
+  }
+  const value = current.rows[0].value && typeof current.rows[0].value === 'object' ? current.rows[0].value : {};
+  const currentRev = Number(value?.rev);
+  const rev = Number.isSafeInteger(currentRev) ? currentRev + 1 : 1;
+  const nextValue = { ...value, rev, updated_at: now };
+  await client.query(
+    'UPDATE artway_kv_store SET value=$3::jsonb, version=version+1, updated_at=$4 WHERE namespace=$1 AND key=$2',
+    [namespace, 'settings', JSON.stringify(nextValue), now],
+  );
+  return rev;
+}
+
 async function ensureNormalizedSchema(pool, namespace) {
   const client = await pool.connect();
   try {
@@ -328,6 +383,31 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
     } finally { client.release(); }
     value.data = data; return versioned ? { ...base, value } : value;
   };
+  const readSettingsDomainValue = async (key, fallback, versioned = false) => {
+    const config = settingsDomainConfig(key);
+    if (!config) return versioned ? legacy.readVersioned(key, fallback) : legacy.read(key, fallback);
+    const client = await pool.connect();
+    try { return await readSettingsDomain(client, namespace, key, fallback, versioned); }
+    finally { client.release(); }
+  };
+  const writeSettingsDomainValue = async (key, value, version = null) => {
+    const config = settingsDomainConfig(key);
+    if (!config) return legacy.writeIfVersion(key, value, version);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await writeSettingsDomain(client, namespace, settingsDomainFromKey(key), value, config, version);
+      if (!result?.modified) { await client.query('ROLLBACK'); return result; }
+      const settingsRev = await bumpSettingsRevision(client, namespace);
+      await client.query('COMMIT');
+      return { ...result, settingsRev };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
   const readSettingsDelta = async (fallback, { versions = {}, base = null, excludeKeys = [] } = {}) => {
     const baseValue = clone(base || await legacy.read('settings', fallback) || fallback), data = baseValue?.data && typeof baseValue.data === 'object' ? baseValue.data : {};
     const excluded = new Set((Array.isArray(excludeKeys) ? excludeKeys : []).map(String));
@@ -401,11 +481,33 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
   };
   return Object.freeze({
     async readSettingsBase(fallback) { await ensure(); return legacy.read('settings', fallback); },
+    async readSettingsDomain(key, fallback) { await ensure(); return readSettingsDomainValue(key, fallback, false); },
     async readSettingsDelta(fallback, options = {}) { await ensure(); return readSettingsDelta(fallback, options); },
-    async read(key, fallback) { await ensure(); if (key === 'settings') return readSettings(false, fallback); const config = directConfig(key); return config ? readDirect(key, config, fallback, false) : legacy.read(key, fallback); },
-    async readVersioned(key, fallback) { await ensure(); if (key === 'settings') return readSettings(true, fallback); const config = directConfig(key); return config ? readDirect(key, config, fallback, true) : legacy.readVersioned(key, fallback); },
+    async read(key, fallback) {
+      await ensure();
+      if (key === 'settings') return readSettings(false, fallback);
+      const direct = directConfig(key);
+      if (direct) return readDirect(key, direct, fallback, false);
+      if (settingsDomainConfig(key)) return readSettingsDomainValue(key, fallback, false);
+      return legacy.read(key, fallback);
+    },
+    async readVersioned(key, fallback) {
+      await ensure();
+      if (key === 'settings') return readSettings(true, fallback);
+      const direct = directConfig(key);
+      if (direct) return readDirect(key, direct, fallback, true);
+      if (settingsDomainConfig(key)) return readSettingsDomainValue(key, fallback, true);
+      return legacy.readVersioned(key, fallback);
+    },
     async write(key, value) { await ensure(); if (key === 'settings') return writeSettingsIfVersion(value); const config = directConfig(key); return config ? writeDirect(key, value, config) : legacy.write(key, value); },
-    async writeIfVersion(key, value, version) { await ensure(); if (key === 'settings') return writeSettingsIfVersion(value, version); const config = directConfig(key); return config ? writeDirect(key, value, config, version) : legacy.writeIfVersion(key, value, version); },
+    async writeIfVersion(key, value, version) {
+      await ensure();
+      if (key === 'settings') return writeSettingsIfVersion(value, version);
+      const config = directConfig(key);
+      if (config) return writeDirect(key, value, config, version);
+      if (settingsDomainConfig(key)) return writeSettingsDomainValue(key, value, version);
+      return legacy.writeIfVersion(key, value, version);
+    },
     async delete(key) {
       await ensure(); const config = directConfig(key); if (!config) return legacy.delete(key);
       const client = await pool.connect(), domain = domainForDirectKey(key);

@@ -69,40 +69,21 @@ function asortymentStanZapisuCeny(input,status="",tekst=""){
   clearTimeout(input._artwayPriceStateTimer);
   if(status==="is-saved")input._artwayPriceStateTimer=setTimeout(()=>{pole.classList.remove("is-saved");if(info)info.textContent="";},1800);
 }
-function asortymentPodmienCeneBezRenderu(id,patch={},usun=[],synchronizuj=true){
-  const key=String(id),baza=pobierzProduktAdmin(id)||{},idx=produktyDodane.findIndex(x=>String(x.id)===key);
-  const signature=typeof asortymentCentralnySygnatura==="function"?asortymentCentralnySygnatura():"";
-  const centralData=asortymentCentralnyStan?.status==="ready"&&asortymentCentralnyStan.signature===signature?asortymentCentralnyStan.data:asortymentCentralnyCache?.get?.(signature)?.data;
-  if(idx>=0){
-    const next={...produktyDodane[idx],...patch};for(const pole of usun)delete next[pole];
-    produktyDodane=[...produktyDodane.slice(0,idx),next,...produktyDodane.slice(idx+1)];
-    zapiszLS("artway_produkty_dodane",produktyDodane,{synchronizuj});
-  }else{
-    const next={...(produktyEdytowane[key]||{}),...patch};for(const pole of usun)next[pole]=null;
-    produktyEdytowane={...produktyEdytowane,[key]:next};
-    zapiszLS("artway_produkty_edytowane",produktyEdytowane,{synchronizuj});
-  }
-  if(Array.isArray(produkty)){
-    const produktIdx=produkty.findIndex(x=>String(x.id)===key);
-    if(produktIdx>=0){const next={...produkty[produktIdx],...patch};for(const pole of usun)delete next[pole];produkty[produktIdx]=next;}
-  }
-  if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
-  if(centralData&&signature){
-    const data={...centralData,items:(centralData.items||[]).map(item=>String(item.id)===key?{...item,...patch,...Object.fromEntries(usun.map(pole=>[pole,null]))}:item)};
-    asortymentCentralnyCache.set(signature,{at:Date.now(),data});
-    asortymentCentralnyStan={status:"ready",signature,data,error:"",request:null};
-  }
-  return baza;
+function asortymentPodmienCeneBezRenderu(id,patch={},usun=[]){
+  return podmienProduktAdminBezRenderu(id,patch,usun);
 }
 async function asortymentZapiszCeneSerwer(id,channel,value,clear=false){
   return chmura("catalog-product-price-update",{method:"POST",body:{productId:String(id),channel,...(clear?{clear:true}:{value})},timeout:30000});
+}
+function asortymentStatusPublikacjiCeny(saved={}){
+  return saved.publication?.published===false?"Zapisano • publikacja w tle":"Zapisano i opublikowano";
 }
 async function ustawCeneKanalu(id,kanal,wartosc,input=null){
   const pola={sklep:"cena",allegro:"cenaAllegro",vonHalsky:"cenaVonHalsky"},pole=pola[kanal]||"cena",poprzedni=pobierzProduktAdmin(id)||{},raw=String(wartosc).trim(),cena=parseFloat(raw.replace(/\s/g,"").replace(",",".")),dziedziczony=kanal==="vonHalsky"?kwotaNum(poprzedni.cenaAllegro||poprzedni.cena):kwotaNum(poprzedni.cena);
   if(raw===""&&kanal!=="sklep"){
     asortymentStanZapisuCeny(input,"is-saving","Zapisuję dziedziczenie…");
     try{const saved=await asortymentZapiszCeneSerwer(id,kanal==="vonHalsky"?"vonHalsky":"allegro",null,true);asortymentPodmienCeneBezRenderu(id,saved.fields||{},saved.remove||[pole],false);
-      if(input)input.value="";loguj("info",`Cena ${kanal} produktu ${id} dziedziczy cenę ${kanal==="vonHalsky"?"Allegro":"sklepu"}`);asortymentStanZapisuCeny(input,"is-saved",`Dziedziczy ${dziedziczony?zl(dziedziczony):"cenę bazową"}`);return true;
+      if(input)input.value="";loguj("info",`Cena ${kanal} produktu ${id} dziedziczy cenę ${kanal==="vonHalsky"?"Allegro":"sklepu"}`);asortymentStanZapisuCeny(input,"is-saved",asortymentStatusPublikacjiCeny(saved));return true;
     }catch(error){asortymentStanZapisuCeny(input,"has-error","Nie zapisano — spróbuj ponownie");toast(`⚠️ ${error.message||"Nie udało się zapisać ceny"}`);return false;}
   }
   if(!(cena>0)){
@@ -113,7 +94,7 @@ async function ustawCeneKanalu(id,kanal,wartosc,input=null){
   asortymentStanZapisuCeny(input,"is-saving","Zapisuję na serwerze…");
   const nowa=+cena.toFixed(2),usun=kanal==="sklep"&&Number(poprzedni.staraCena)>0&&Number(poprzedni.staraCena)<=nowa?["staraCena"]:[];
   try{const saved=await asortymentZapiszCeneSerwer(id,kanal==="sklep"?"store":kanal,nowa);asortymentPodmienCeneBezRenderu(id,saved.fields||{[pole]:nowa},[...new Set([...(saved.remove||[]),...usun])],false);if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
-    loguj("info",`Zmieniono cenę ${kanal} produktu ${id} → ${zl(nowa)}`);asortymentStanZapisuCeny(input,"is-saved","Zapisano trwale");return true;
+    loguj("info",`Zmieniono cenę ${kanal} produktu ${id} → ${zl(nowa)}`);asortymentStanZapisuCeny(input,"is-saved",asortymentStatusPublikacjiCeny(saved));return true;
   }catch(error){if(input)input.value=poprzedni[pole]==null&&kanal!=="sklep"?"":String(kwotaNum(poprzedni[pole]||poprzedni.cena).toFixed(2)).replace(".",",");asortymentStanZapisuCeny(input,"has-error","Nie zapisano — spróbuj ponownie");toast(`⚠️ ${error.message||"Nie udało się zapisać ceny"}`);return false;}
 }
 function ustawCene(id, wartosc, input=null){
@@ -134,7 +115,7 @@ async function ustawCeneZakupu(id, wartosc, input=null){
   asortymentStanZapisuCeny(input,"is-saving","Zapisuję…");
   const nowa=+cena.toFixed(2);
   try{const saved=await asortymentZapiszCeneSerwer(id,"purchase",nowa);asortymentPodmienCeneBezRenderu(id,saved.fields||{cenaZakupu:nowa},saved.remove||polaFaktury,false);
-    if(input)input.value=String(nowa.toFixed(2)).replace(".",",");loguj("info",`Zmieniono prywatną cenę zakupu produktu ${id} → ${zl(nowa)}`);asortymentStanZapisuCeny(input,"is-saved","Zapisano trwale");return true;
+    if(input)input.value=String(nowa.toFixed(2)).replace(".",",");loguj("info",`Zmieniono prywatną cenę zakupu produktu ${id} → ${zl(nowa)}`);asortymentStanZapisuCeny(input,"is-saved",asortymentStatusPublikacjiCeny(saved));return true;
   }catch(error){if(input)input.value=poprzedni.cenaZakupu==null?"":String(kwotaNum(poprzedni.cenaZakupu).toFixed(2)).replace(".",",");asortymentStanZapisuCeny(input,"has-error","Nie zapisano — spróbuj ponownie");toast(`⚠️ ${error.message||"Nie udało się zapisać ceny zakupu"}`);return false;}
 }
 /* ── Akcje masowe na produktach ── */
@@ -155,10 +136,27 @@ function asortymentEksportuj(zakres){
   if(zakres==="zaznaczone")return eksportujProduktyPoIdCSV([...zaznaczoneProdukty],"produkty-zaznaczone.csv");
   eksportujProduktyPoIdCSV(asortymentWynikiIds,"produkty-filtrowane.csv");
 }
-function usunZaznaczoneProd(){
+async function produktCyklCentralny(productIds=[],operation="trash"){
+  const ids=[...new Set((Array.isArray(productIds)?productIds:[productIds]).map(id=>String(id??"").trim()).filter(Boolean))];
+  if(!ids.length)return {changed:0,results:[]};
+  const result=await chmura("catalog-product-lifecycle",{method:"POST",body:{
+    productIds:ids,
+    operation,
+    mutationId:`product-${operation}-batch:${Date.now().toString(36)}`
+  },timeout:60000});
+  if(result?.ok!==true)throw new Error(result?.error||"Serwer nie potwierdził operacji na produktach.");
+  const failed=(result.results||[]).filter(item=>operation==="purge"?!item.deleted:!item.updated);
+  if(failed.length)throw new Error(`Nie zmieniono ${failed.length} z ${ids.length} produktów.`);
+  if(typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
+  return result;
+}
+async function usunZaznaczoneProd(){
   if(!zaznaczoneProdukty.size){ toast("Zaznacz produkty"); return; }
   if(!confirm(`Usunąć ${zaznaczoneProdukty.size} zaznaczonych produktów?`)) return;
-  for(const id of [...zaznaczoneProdukty]){
+  const ids=[...zaznaczoneProdukty];
+  try{await produktCyklCentralny(ids,"trash");}
+  catch(error){toast("⛔ Nie usunięto zaznaczonych: "+(error.message||error));return;}
+  for(const id of ids){
     const p = produktyDodane.find(x=>x.id===id);
     if(p){
       if(!koszDodanych.some(x=>x.id===id)) koszDodanych.push(p);
@@ -169,14 +167,11 @@ function usunZaznaczoneProd(){
       oznaczProduktWKoszu(id,"bazowy");
     }
   }
-  zapiszLS("artway_kosz_dodane", koszDodanych);
-  zapiszLS("artway_produkty_dodane", produktyDodane);
-  zapiszLS("artway_produkty_ukryte", produktyUkryte);
   loguj("info",`Masowo usunięto ${zaznaczoneProdukty.size} produktów`);
   zaznaczoneProdukty.clear();
   zbudujProdukty(); odswiezMenu(); toast("Usunięto zaznaczone 🗑️"); renderuj();
 }
-function zmienCenyZaznaczonych(){
+async function zmienCenyZaznaczonych(){
   const wartosc = parseFloat(String($("procentCen")?.value||"").replace(",","."));
   const tryb=String($("trybCenProduktow")?.value||"percent");
   const kanal=String($("kanalCenProduktow")?.value||"sklep");
@@ -184,55 +179,58 @@ function zmienCenyZaznaczonych(){
   if(!Number.isFinite(wartosc)||wartosc===0){ toast("⚠️ Podaj wartość zmiany, np. 10 lub -5"); return; }
   if(tryb==="percent"&&wartosc<=-100){ toast("⚠️ Obniżka procentowa musi być większa niż -100%"); return; }
   if(tryb==="fixed"&&wartosc<=0){ toast("⚠️ Cena docelowa musi być większa od zera"); return; }
+  const operations=[];
   for(const id of [...zaznaczoneProdukty]){
     const p = pobierzProduktAdmin(id); if(!p) continue;
     const wylicz=base=>Math.max(0.01, +(tryb==="percent"?kwotaNum(base)*(1+wartosc/100):tryb==="amount"?kwotaNum(base)+wartosc:wartosc).toFixed(2)),patch={};
     if(kanal==="sklep"||kanal==="oba")patch.cena=wylicz(p.cena);
     if(kanal==="allegro"||kanal==="oba")patch.cenaAllegro=wylicz(p.cenaAllegro||p.cena);
-    const i = produktyDodane.findIndex(x=>x.id===id);
-    if(i>=0){ Object.assign(produktyDodane[i],patch);if(patch.cena&&produktyDodane[i].staraCena&&produktyDodane[i].staraCena<=patch.cena)delete produktyDodane[i].staraCena; }
-    else produktyEdytowane = {...produktyEdytowane, [id]:{...(produktyEdytowane[id]||{}),...patch}};
+    const remove=patch.cena&&Number(p.staraCena)>0&&Number(p.staraCena)<=patch.cena?["staraCena"]:[];
+    operations.push({productId:id,fields:patch,remove});
   }
-  zapiszLS("artway_produkty_dodane", produktyDodane);
-  zapiszLS("artway_produkty_edytowane", produktyEdytowane);
+  if(!operations.length){toast("Brak produktów możliwych do zmiany");return;}
+  try{await chmuraZapiszProduktyCentralnie(operations,"catalog-bulk-price");}
+  catch(error){toast("⛔ Serwer nie potwierdził masowej zmiany cen: "+(error.message||error));return;}
   const opis=tryb==="percent"?`${wartosc>0?"+":""}${wartosc}%`:tryb==="amount"?`${wartosc>0?"+":""}${zl(wartosc)}`:`na ${zl(wartosc)}`;
   const kanalLabel=kanal==="oba"?"sklepu i Allegro":kanal==="allegro"?"Allegro":"sklepu";
   loguj("info",`Masowa zmiana cen ${kanalLabel} ${opis} dla ${zaznaczoneProdukty.size} produktów`);
   zaznaczoneProdukty.clear();
   zbudujProdukty(); toast(`Ceny ${kanalLabel} zmienione ${opis} ✅`); renderuj();
 }
-function usunProduktAdmin(id){
+async function usunProduktAdmin(id){
   if(produktyDodane.some(p=>p.id===id)){
-    usunProdukt(id);
+    await usunProdukt(id);
     return;
   }
+  try{await produktCyklCentralny([id],"trash");}
+  catch(error){toast("⛔ Nie przeniesiono produktu do kosza: "+(error.message||error));return;}
   if(!produktyUkryte.includes(id)) produktyUkryte.push(id);
   oznaczProduktWKoszu(id,"bazowy");
-  zapiszLS("artway_produkty_ukryte", produktyUkryte);
   zbudujProdukty(); odswiezMenu();
   loguj("info","Przeniesiono do kosza na 30 dni produkt bazowy id="+id);
   toast("Produkt w koszu przez 30 dni 🗑️");
   renderuj();
 }
-function przywrocProdukt(id){
+async function przywrocProdukt(id){
   if(produktyDefinitywne.includes(id)){ toast("Ten produkt został już usunięty definitywnie"); return; }
+  try{await produktCyklCentralny([id],"restore");}
+  catch(error){toast("⛔ Nie przywrócono produktu: "+(error.message||error));return;}
   produktyUkryte = produktyUkryte.filter(x=>x!==id);
-  zapiszLS("artway_produkty_ukryte", produktyUkryte);
   usunMetaKosza(id);
   zbudujProdukty(); odswiezMenu();
   toast("Produkt przywrócony ↩️"); renderuj();
 }
-function resetujEdycjeProduktu(id){
-  delete produktyEdytowane[id];
-  zapiszLS("artway_produkty_edytowane", produktyEdytowane);
-  zbudujProdukty(); odswiezMenu();
-  toast("Przywrócono dane z products.json");
-  location.hash="#/admin/produkty";
+function resetujEdycjeProduktu(){
+  toast("Kartoteka ma teraz jedno źródło na serwerze. Nie istnieje już osobna warstwa products.json do przywrócenia.");
 }
-function przelaczWidocznosc(id){
-  produktyUkryte = produktyUkryte.includes(id) ? produktyUkryte.filter(x=>x!==id) : [...produktyUkryte, id];
-  zapiszLS("artway_produkty_ukryte", produktyUkryte); zbudujProdukty();
-  toast(produktyUkryte.includes(id)?"Produkt ukryty 🙈":"Produkt widoczny 👁️"); renderuj();
+async function przelaczWidocznosc(id){
+  const product=pobierzProduktAdmin(id)||{},hidden=product.ukryty===true||product.sprzedazAktywna===false||product.saleAvailable===false;
+  const fields=hidden
+    ? {ukryty:false,sprzedazAktywna:true,saleAvailable:true,aktywny:true}
+    : {ukryty:true,sprzedazAktywna:false,saleAvailable:false};
+  try{await chmuraZapiszProduktyCentralnie([{productId:id,fields}],"catalog-sale-visibility");}
+  catch(error){toast("⛔ Nie zmieniono widoczności: "+(error.message||error));return;}
+  zbudujProdukty();toast(hidden?"Produkt widoczny 👁️":"Produkt ukryty 🙈");renderuj();
 }
 
 /* ── Eksporty (CSV dla Excela, JSON dla hostingu) ── */

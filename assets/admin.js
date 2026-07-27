@@ -90,7 +90,7 @@ function polePlikuHTML(onchange,etykieta){
   return `<label class="btn ghost" style="cursor:pointer;white-space:nowrap">📁 ${etykieta||"Wgraj z dysku"}<input type="file" accept="image/*" style="display:none" onchange="${onchange}"></label>`;
 }
 function eksportSubnavHTML(aktywny="import"){return adminSubnavHTML([{id:"import",href:"#/admin/eksport",label:"📥 Import produktów"},{id:"eksport",href:"#/admin/eksport/eksport",label:"📤 Eksport produktów"},{id:"kopie",href:"#/admin/eksport/kopie",label:"💾 Kopie i raporty"}],aktywny);}
-function systemSubnavHTML(aktywny="status"){return adminSubnavHTML([{id:"status",href:"#/admin/system",label:"📡 Wersja i aktualizacja"},{id:"diagnostyka",href:"#/admin/system/diagnostyka",label:"🩺 Diagnostyka"},{id:"logi",href:"#/admin/system/logi",label:"📋 Dziennik"},{id:"kopie",href:"#/admin/system/kopie",label:"💾 Kopie danych"}],aktywny);}
+function systemSubnavHTML(aktywny="status"){return adminSubnavHTML([{id:"status",href:"#/admin/system",label:"📡 Wersja i aktualizacja"},{id:"serwer",href:"#/admin/system/serwer",label:"🖥️ Serwer"},{id:"diagnostyka",href:"#/admin/system/diagnostyka",label:"🩺 Diagnostyka"},{id:"logi",href:"#/admin/system/logi",label:"📋 Dziennik"},{id:"kopie",href:"#/admin/system/kopie",label:"💾 Kopie danych"}],aktywny);}
 function infaktSubnavHTML(aktywny="pulpit"){return adminSubnavHTML([{id:"pulpit",label:"📊 Pulpit",href:"#/admin/infakt"},{id:"zamowienia",label:"📦 Zamówienia do faktury",href:"#/admin/infakt/zamowienia"},{id:"faktury",label:"🧾 Faktury inFakt",href:"#/admin/infakt/faktury"},{id:"wysylki",label:"📮 Rozliczenia InPost",href:"#/admin/infakt/wysylki"},{id:"dostawcy",label:"🏭 Faktury dostawców",href:"#/admin/infakt/dostawcy"},{id:"szkice",label:"📝 Szkice robocze",href:"#/admin/infakt/szkice"},{id:"ustawienia",label:"⚙️ Dostęp API",href:"#/admin/infakt/ustawienia"}],aktywny);}
 function allegroDataTxt(v){const t=Date.parse(v||"");return t?new Date(t).toLocaleString("pl-PL"):"—";}
 
@@ -425,11 +425,14 @@ function ustawieniaWysylki(){
     przewoznik:"inpost",waga:"1",dlugosc:"30",szerokosc:"20",wysokosc:"15",
     nadawca:"Artway-TM",ulica:"",kod:"",miasto:"",telefon:KONFIG.telefon,email:KONFIG.emailSklepu,
     regulaPaczkomat:"inpost",regulaKurier:"inpost",slaNadanie:"24",slaDoreczenie:"72",
-    apiEndpoint:"api/index.php",tryb:"sandbox",autoStatus:true,autoEmail:true,autoTracking:true,
+    apiEndpoint:"/api/store",tryb:"production",autoStatus:true,autoEmail:true,autoTracking:true,
     alarmSla:true,powiadomieniaWyjatki:true,
     ...(ustawienia.wysylka||{})
   };
-  return {...u, przewoznik:"inpost", regulaPaczkomat:"inpost", regulaKurier:"inpost"};
+  const endpoint=/^(?:\.\/)?api\/index\.php(?:$|\?)/i.test(String(u.apiEndpoint||"").trim())
+    ?"/api/store"
+    :(String(u.apiEndpoint||"").trim()||"/api/store");
+  return {...u, apiEndpoint:endpoint, przewoznik:"inpost", regulaPaczkomat:"inpost", regulaKurier:"inpost"};
 }
 function aktualizujZamowienie(nr, zmiana){
   const lista=pobierzZamowienia(), z=lista.find(x=>x.nr===nr);
@@ -2069,24 +2072,21 @@ function agentAIOpisyTekst(limit=12){
   if(!lista.length) return "Opisy produktów wyglądają poprawnie: krótkie opisy są uzupełnione, a pełne opisy nie wymagają pilnej korekty.";
   return ["📝 Produkty do poprawy opisów:",...lista.map((x,i)=>`• ${i+1}. ${x.produkt.nazwa} — ${x.braki.join(", ")}`),"Napisz „popraw opisy produktów”, żeby agent uzupełnił krótkie opisy i uporządkował pełne opisy."].join("\n");
 }
-function agentAIPoprawOpisyProduktow(limit=40){
+async function agentAIPoprawOpisyProduktow(limit=40){
   const lista=agentAIProduktyZProblememOpisu(limit);
-  let zmienione=0;
+  const operations=[];
   for(const x of lista){
     const p=x.produkt, poprawiony=agentAIPoprawOpisyDanychProduktu(p);
     if(JSON.stringify({a:p.opisKrotki||"",b:p.opis||""})===JSON.stringify({a:poprawiony.opisKrotki||"",b:poprawiony.opis||""})) continue;
-    const idx=produktyDodane.findIndex(d=>Number(d.id)===Number(p.id));
-    if(idx>=0) produktyDodane[idx]={...produktyDodane[idx],...poprawiony,id:p.id};
-    else produktyEdytowane[p.id]={...(produktyEdytowane[p.id]||{}),opisKrotki:poprawiony.opisKrotki,opis:poprawiony.opis};
-    zmienione++;
+    operations.push({productId:p.id,fields:{opisKrotki:poprawiony.opisKrotki,opis:poprawiony.opis}});
   }
-  if(zmienione){
-    zapiszStanProduktowPoOperacji();
+  if(operations.length){
+    try{await chmuraZapiszProduktyCentralnie(operations,"agent-description-cleanup");}
+    catch(error){loguj("blad","Agent nie zapisał opisów w centralnej kartotece: "+(error.message||error));return `Nie zapisano zmian opisów: ${error.message||error}`;}
     zbudujProdukty();
-    zapiszHistorieAgenta("opisy-produktow",`Agent AI poprawił opisy produktów: ${zmienione}`,{limit,zmienione});
-    if(chmuraToken) void chmuraZapiszUstawienia();
+    zapiszHistorieAgenta("opisy-produktow",`Agent AI poprawił i potwierdził zapis opisów: ${operations.length}`,{limit,zmienione:operations.length,storage:"postgresql"});
   }
-  return `Agent sprawdził opisy. Poprawiono: ${zmienione}. Do kontroli po akcji: ${agentAIProduktyZProblememOpisu(500).length}.`;
+  return `Agent sprawdził opisy. Zapisano centralnie: ${operations.length}. Do kontroli po akcji: ${agentAIProduktyZProblememOpisu(500).length}.`;
 }
 function agentAIRozpoznajPolecenie(tekst=""){
   const raw=String(tekst||"").trim(), n=agentAINormalizuj(raw);
@@ -2875,12 +2875,11 @@ async function agentAIWykonajOferteAllegro(fraza="",publicationAction="keep"){
   const p=best.p,baseStock=allegroStanOfertyProduktu(p),stock=publicationAction==="activate"?Math.max(1,baseStock):baseStock;
   const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock,publicationAction,publishNow:publicationAction==="activate"}},timeout:120000});
   allegroOstatniBladWystawienia=null;
-  allegroZapiszWynikOperacji(p,d);allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);
+  allegroZapiszWynikOperacji(p,d);await allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);
   if(d.offer?.id){
     const categoryId=d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||p.allegroCategoryId||"";
     const productId=d.autoFilled?.allegroProductId||d.catalogMatch?.selected?.id||p.allegroProductId||"";
-    produktyEdytowane[p.id]={...(produktyEdytowane[p.id]||{}),allegroOfferId:String(d.offer.id),...(categoryId?{allegroCategoryId:String(categoryId)}:{}),...(productId?{allegroProductId:String(productId)}:{})};
-    zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+    await chmuraZapiszProduktyCentralnie([{productId:p.id,fields:{allegroOfferId:String(d.offer.id),...(categoryId?{allegroCategoryId:String(categoryId)}:{}),...(productId?{allegroProductId:String(productId)}:{})}}],"agent-allegro-publication");
   }
   await chmuraWczytajStan().catch(()=>{});await allegroWczytajDane(true).catch(()=>{});zbudujProdukty();
   const updated=d.mode==="updated";
@@ -2947,7 +2946,7 @@ async function agentAIWykonajPolecenie(tekst=""){
     }else if(intent.typ==="opisy"){
       odpowiedz=agentAIOpisyTekst();
     }else if(intent.typ==="opisy-popraw"){
-      odpowiedz=agentAIPoprawOpisyProduktow(40);
+      odpowiedz=await agentAIPoprawOpisyProduktow(40);
       renderuj();
     }else if(intent.typ==="linki-producentow"){
       odpowiedz=agentAILinkiProducentowTekst();
@@ -3275,7 +3274,7 @@ async function agentAIWykonaj(akcja){
   if(akcja==="utworz-zlecenie-braki"||akcja==="utworz-zlecenie-niskie")return agentAIUzgodnijPlanZSerwerem();
   if(akcja==="sprawdz-linki-producentow") return agentAISprawdzLinkiProducentow().then(t=>toast(t));
   if(akcja==="sprawdz-dostepnosc-producentow") return agentAISprawdzDostepnoscProducentow();
-  if(akcja==="popraw-opisy"){ const t=agentAIPoprawOpisyProduktow(40); toast(t); renderuj(); return t; }
+  if(akcja==="popraw-opisy"){ const t=await agentAIPoprawOpisyProduktow(40); toast(t); renderuj(); return t; }
   if(akcja==="kartoteka-domyslna") return wypelnijDomyslnaKartotekeMagazynu();
   if(akcja==="audyt-magazynu") return audytMagazynuAI();
   if(akcja==="raport-telegram") return agentAIWyslijRaportTelegram();
@@ -3363,7 +3362,7 @@ function agentAIPodstronaNaglowekHTML(aktywna="pulpit",activeCount=0){
   if(aktywna==="pulpit")return "";
   const pages={
     komendy:["💬","Komendy i odpowiedzi","Wydawaj polecenia zwykłym językiem. Odpowiedzi, wynik działania i audyt pozostają w jednym miejscu."],
-    specjalisci:["✦","Specjaliści GPT-5 nano","Konkretne role do opisów, odpowiedzi, SEO, promocji, bannerów, Allegro i kontroli jakości z historią oraz kontrolą kosztów."],
+    specjalisci:["✦","Specjaliści OpenAI","Role do opisów, odpowiedzi, SEO, promocji, bannerów, Allegro i kontroli jakości z routingiem modeli, historią oraz kontrolą kosztów."],
     uprawnienia:["🛡️","Uprawnienia i granice autonomii","Jedna centralna lista pokazuje, co Agent wykonuje sam, co zawsze wymaga zatwierdzenia i kiedy operacja zostaje zatrzymana."],
     plan:["🧭","Plan operacyjny","Widzisz wyłącznie aktywne problemy. Wykonane zadania trafiają do historii i wracają tylko po nowym zdarzeniu."],
     produkty:["✨","Wdrożenie nowych produktów","Agent koncentruje się na produktach dodawanych przez administratora i prowadzi je od kartoteki do gotowości sklepu oraz Allegro."],
@@ -3415,6 +3414,37 @@ function agentAIRuntimeCzas(value=""){
   if(seconds<86400)return `${Math.round(seconds/3600)} godz. temu`;
   return new Date(time).toLocaleString("pl-PL");
 }
+function agentAIEtapPracyLabel(value=""){
+  const key=String(value||"").trim(),labels={
+    kartoteka:"Pobranie kartoteki",
+    weryfikacja:"Weryfikacja aktualności",
+    "źródło":"Odczyt źródła producenta",
+    "źródło_pobrane":"Dopasowanie danych źródłowych",
+    parametry:"Dopasowanie parametrów",
+    opisy:"Redakcja nazwy i opisów",
+    kategoria_i_szkic:"Kategoria i szkic Allegro",
+    kontrola:"Kontrola EAN, GPSR i kompletności",
+    zapis:"Zapis centralny",
+    zapis_potwierdzony:"Potwierdzenie zapisu",
+    "uzupełnienie_zaplanowane":"Zaplanowane uzupełnienie",
+    running:"Uruchomienie zadania",
+    completed:"Zadanie zakończone",
+    attention:"Wymaga dalszego uzupełnienia",
+    failed:"Błąd wykonania"
+  };return labels[key]||key.replaceAll("_"," ")||"Wykonywanie";
+}
+function agentAIPolePracyLabel(value=""){
+  const key=String(value||"").trim(),labels={
+    nazwa:"nazwa produktu",opisKrotki:"opis krótki",opis:"opis długi",
+    allegroTitle:"tytuł Allegro",allegroDescription:"opis Allegro",
+    allegroDescriptionSections:"sekcje opisu Allegro",allegroCategoryId:"kategoria Allegro",
+    allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",
+    allegroSafetyInformation:"informacja GPSR",ean:"EAN",gtin:"GTIN",
+    kodProducenta:"kod producenta",producent:"producent",parametryProducenta:"parametry producenta",
+    zdjecie:"zdjęcie główne",zdjecia:"galeria zdjęć",sourceEvidence:"dowody źródłowe",
+    sourceMaterial:"materiał źródłowy"
+  };return labels[key]||key.replace(/([a-z])([A-Z])/g,"$1 $2").toLowerCase();
+}
 function agentAIRuntimePanelHTML(){
   const state=agentAIRuntime,r=state.runtime||{},worker=r.worker||{},providers=r.providers||{},queue=r.queue||{},counts=queue.counts||{},current=r.currentRun,last=r.lastRun,currentWork=r.currentWork||null,publication=r.publication||{},publicationCounts=publication.counts||{},publicationRows=Array.isArray(publication.recent)?publication.recent:[],activity=Array.isArray(r.activity)?r.activity:[],rawWarnings=Array.isArray(r.integrationWarnings)?r.integrationWarnings:[];
   const warnings=[...new Map(rawWarnings.map(item=>[`${item.kind||"system"}:${item.error||item.label}`,item])).values()],aiWarnings=warnings.filter(item=>item.kind==="ai"),externalWarnings=warnings.filter(item=>item.kind!=="ai");
@@ -3428,23 +3458,24 @@ function agentAIRuntimePanelHTML(){
     ["xai","𝕏","Grok — xAI","Trzeci dostawca rotacyjny z osobnym limitem dziennym"]
   ].map(([id,icon,label,detail])=>{const p=providers[id]||{},ready=p.connected===true,configured=p.configured===true,status=ready?"potwierdzony działającym zadaniem":configured?"skonfigurowany — czeka na kontrolę":"brak konfiguracji",quota=id==="xai"&&Number(p.dailyRequestLimit)>0?` • dzisiaj ${Number(p.requestsToday)||0}/${Number(p.dailyRequestLimit)} • zostało ${Number(p.remainingToday)||0}`:"",costGuard=id==="xai"&&p.freeOnly?" • tylko model o stawce API 0 zł":"";return `<article class="${ready?"ready":configured?"configured":"attention"}"><span>${icon}</span><div><b>${label}</b><small>${esc(detail)}</small><em>${esc(p.model||"model automatyczny")} • ${status}${costGuard}${quota}${p.lastSuccessAt?` • ostatni sukces ${esc(agentAIRuntimeCzas(p.lastSuccessAt))}`:p.lastCheckedAt?` • kontrola ${esc(agentAIRuntimeCzas(p.lastCheckedAt))}`:""}</em>${p.error?`<p>${esc(p.error)}</p>`:""}</div><i></i></article>`;}).join("");
   const steps=(current?.steps||last?.steps||[]),run=current||last,done=steps.filter(x=>["completed","skipped"].includes(x.status)).length,progress=steps.length?Math.round(done/steps.length*100):0;
+  const workTrace=activity.filter(item=>item.type==="work"&&(!currentWork?.productId||String(item.productId||"")===String(currentWork.productId))).slice(0,12);
   const channelLabel=(channel)=>channel==="allegro"?"Allegro":channel==="vonHalsky"?"InPost Von Halsky":channel==="store"?"Sklep Artway-TM":"System";
   const workStatus=(work)=>work.status==="confirmed"?"potwierdzono publikację":work.status==="pending"?"oczekuje na API":work.status==="decision_required"?"wymaga decyzji":work.status==="failed"?"ponowienie po błędzie":work.status==="attention"?"zatrzymano do kontroli":work.status==="running"?"wykonywane teraz":"pominięto";
   return `<section class="agent-runtime-dashboard">
     <div class="panel agent-runtime-status ${esc(r.state||"unknown")}"><div class="agent-runtime-state"><span>${stateMeta[0]}</span><div><small>RZECZYWISTY STAN PROCESU</small><h2>${stateMeta[1]}</h2><p>${esc(stateMeta[2])}</p></div></div><div class="agent-runtime-now"><span><small>Ostatni kontakt</small><b>${esc(agentAIRuntimeCzas(worker.lastSeenAt))}</b></span><span><small>Następny detektor zmian</small><b>${r.schedule?.nextAt?esc(new Date(r.schedule.nextAt).toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})):"co 15 min"}</b></span><button class="btn ghost" onclick="agentAIRuntimePobierz(false)">${state.loading?"⏳":"↻"} Odśwież</button></div></div>
-    ${warnings.length?`<div class="panel agent-runtime-warning ${aiWarnings.length?"is-ai-warning":"is-external-warning"}"><span>${aiWarnings.length?"⚠️":"🔌"}</span><div><b>${aiWarnings.length?`${warnings.length} obszarów wymaga kontroli Agenta`:`Agent AI działa • ${externalWarnings.length} połączenie zewnętrzne wymaga naprawy`}</b><p>${externalWarnings.length?`Allegro: ${esc(externalWarnings[0].error||externalWarnings[0].label)}${aiWarnings.length?" • ":""}`:""}${aiWarnings.map(x=>`${esc(x.label)}: ${esc(x.error)}`).join(" • ")}</p>${!aiWarnings.length?`<small>GPT‑5 nano i proces wykonawczy są aktywne. Do czasu naprawy nie są wykonywane wyłącznie operacje wymagające API Allegro.</small>`:""}</div><a class="btn" href="${aiWarnings.length?"#/admin/agent-ai/specjalisci":"#/admin/allegro/ustawienia"}">${aiWarnings.length?"Sprawdź AI":"Napraw Allegro"}</a></div>`:""}
-    ${currentWork?`<section class="panel agent-runtime-exact-work"><div class="agent-runtime-exact-icon">⚙️</div><div><span class="order-pro-label">FIZYCZNIE WYKONYWANA CZYNNOŚĆ</span><h2>${esc(currentWork.productName||currentWork.action||"Zadanie systemowe")}</h2><p><b>${esc(currentWork.action||"Operacja")}</b> • etap: ${esc(currentWork.phase||"wykonywanie")} • cel: ${esc(currentWork.target||channelLabel(currentWork.channel))}</p>${currentWork.fields?.length?`<small>Pola: ${currentWork.fields.map(value=>esc(value)).join(", ")}</small>`:""}<em>${esc(currentWork.message||"Trwa wykonanie i oczekiwanie na potwierdzenie wyniku.")}</em></div><strong>${esc(channelLabel(currentWork.channel))}<small>${esc(workStatus(currentWork))}</small></strong></section>`:""}
+    ${warnings.length?`<div class="panel agent-runtime-warning ${aiWarnings.length?"is-ai-warning":"is-external-warning"}"><span>${aiWarnings.length?"⚠️":"🔌"}</span><div><b>${aiWarnings.length?`${warnings.length} obszarów wymaga kontroli Agenta`:`Agent AI działa • ${externalWarnings.length} połączenie zewnętrzne wymaga naprawy`}</b><p>${externalWarnings.length?`Allegro: ${esc(externalWarnings[0].error||externalWarnings[0].label)}${aiWarnings.length?" • ":""}`:""}${aiWarnings.map(x=>`${esc(x.label)}: ${esc(x.error)}`).join(" • ")}</p>${!aiWarnings.length?`<small>Routing OpenAI i proces wykonawczy są aktywne. Do czasu naprawy nie są wykonywane wyłącznie operacje wymagające API Allegro.</small>`:""}</div><a class="btn" href="${aiWarnings.length?"#/admin/agent-ai/specjalisci":"#/admin/allegro/ustawienia"}">${aiWarnings.length?"Sprawdź AI":"Napraw Allegro"}</a></div>`:""}
+    ${currentWork?`<section class="panel agent-runtime-exact-work"><div class="agent-runtime-exact-icon">⚙️</div><div><span class="order-pro-label">FIZYCZNIE WYKONYWANA CZYNNOŚĆ</span><h2>${esc(currentWork.productName||currentWork.action||"Zadanie systemowe")}</h2><p><b>${esc(currentWork.action||"Operacja")}</b> • etap: ${esc(agentAIEtapPracyLabel(currentWork.phase))} • cel: ${esc(currentWork.target||channelLabel(currentWork.channel))} • próba ${esc(currentWork.attempt||1)}</p>${currentWork.fields?.length?`<small>Pola: ${currentWork.fields.map(value=>esc(agentAIPolePracyLabel(value))).join(", ")}</small>`:""}<em>${esc(currentWork.message||"Trwa wykonanie i oczekiwanie na potwierdzenie wyniku.")}</em>${workTrace.length?`<ol class="agent-runtime-work-trace">${workTrace.map((item,index)=>`<li class="${esc(item.status)}"><i>${index===0?"●":"✓"}</i><div><b>${esc(agentAIEtapPracyLabel(item.phase))}</b>${item.fields?.length?`<small>${item.fields.map(value=>esc(agentAIPolePracyLabel(value))).join(", ")}</small>`:""}</div><time>${esc(agentAIRuntimeCzas(item.at))}</time></li>`).join("")}</ol>`:""}</div><strong>${esc(channelLabel(currentWork.channel))}<small>${esc(workStatus(currentWork))}</small></strong></section>`:""}
     <div class="agent-runtime-grid"><section class="panel agent-runtime-run"><div class="order-section-head"><div><span class="order-pro-label">${current?"Na żywo":"Ostatni cykl"}</span><h2>${current?"⚙️ Co Agent robi teraz":"✅ Ostatnie wykonanie automatyczne"}</h2><p class="order-detail-lead">${run?`${esc(run.summary||"")} • ${esc(agentAIRuntimeCzas(run.completedAt||run.startedAt))}`:"Historia pojawi się po pierwszym cyklu serwera."}</p></div><span class="lvl ${current?"lvl-info":warnings.length?"lvl-ostrzezenie":"lvl-ok"}">${current?"w toku":last?.status||"oczekuje"}</span></div>${run?`<div class="agent-runtime-progress"><div><b>${done} / ${steps.length} etapów</b><small>${progress}%</small></div><i><span style="width:${progress}%"></span></i></div><div class="agent-runtime-steps">${steps.map(step=>`<article class="${esc(step.status)}"><span>${step.status==="running"?"⏳":step.status==="completed"?"✓":step.status==="skipped"?"—":step.status==="warning"?"!":"×"}</span><div><b>${esc(step.label||step.id)}</b><small>${esc(step.error||step.detail||"Oczekuje na wykonanie")}</small></div><em>${step.durationMs?`${Math.max(1,Math.round(step.durationMs/1000))} s`:""}</em></article>`).join("")}</div>`:`<div class="agent-ops-empty">Agent czeka na pierwszy cykl zapisany w nowym rejestrze.</div>`}</section>
       <aside class="panel agent-runtime-queue"><div class="order-section-head"><div><span class="order-pro-label">Kolejka poleceń</span><h2>🧠 Codex + GPT Agent</h2></div><strong>${esc(queue.active||0)}</strong></div><div class="agent-runtime-queue-stats"><span><b>${esc(counts.queued||0)}</b><small>oczekuje</small></span><span><b>${esc((counts.processing||0)+(counts.delivering||0))}</b><small>wykonywane</small></span><span><b>${esc(counts.completed||0)}</b><small>wykonane</small></span><span><b>${esc(counts.failed||0)}</b><small>błędy</small></span></div><div class="agent-runtime-worker"><span>${worker.currentTask?"⚙️":"✓"}</span><div><b>${esc(worker.currentTask||"Gotowy na polecenie")}</b><small>${worker.currentTaskStartedAt?`od ${esc(agentAIRuntimeCzas(worker.currentTaskStartedAt))}`:`${esc(worker.completedJobs||0)} wykonanych • ${esc(worker.failedJobs||0)} nieudanych`}</small></div></div><a class="btn" href="#/admin/agent-ai/komendy">Wydaj polecenie</a></aside></div>
     <section class="panel agent-publication-proof"><div class="order-section-head"><div><span class="order-pro-label">Zapis ≠ publikacja • trwałe potwierdzenia</span><h2>Dowody publikacji zmian Agenta</h2><p class="order-detail-lead">Każdy produkt ma osobny stan dla sklepu, Allegro i Von Halsky. „Potwierdzono” pojawia się dopiero po zapisie kartoteki albo odpowiedzi API kanału.</p></div><div class="agent-publication-counts"><span><b>${esc(publicationCounts.pending||0)}</b><small>oczekuje na API</small></span><span><b>${esc((publicationCounts.attention||0)+(publicationCounts.failed||0))}</b><small>w ponowieniu</small></span><span><b>${esc(publicationCounts.confirmed||0)}</b><small>potwierdzono</small></span></div></div><div class="agent-publication-list">${publicationRows.slice(0,12).map(work=>`<article class="${esc(work.status)}"><span>${work.status==="confirmed"?"✓":work.status==="running"?"⋯":work.status==="decision_required"?"?":work.status==="pending"?"↻":"!"}</span><div><b>${esc(work.productName||work.action||"Operacja systemowa")}</b><small>${esc(channelLabel(work.channel))} • ${esc(work.action||"operacja")} • ${esc(work.phase||workStatus(work))}${work.targetRef?` • ${esc(work.targetRef)}`:""}</small><p>${esc(work.error||work.message||workStatus(work))}</p></div><em>${esc(workStatus(work))}<small>${esc(agentAIRuntimeCzas(work.completedAt||work.updatedAt||work.startedAt))}</small></em></article>`).join("")||`<div class="agent-ops-empty">Pierwsze potwierdzenia pojawią się po następnym zapisie wykonanym przez Agenta.</div>`}</div></section>
     <section class="panel agent-runtime-providers"><div class="order-section-head"><div><span class="order-pro-label">Kontrolowany routing AI</span><h2>Połączenia i role Agenta</h2><p class="order-detail-lead">Parser sklepu wykonuje pewne operacje lokalnie. Codex porządkuje niejednoznaczne polecenia, a odpowiedzi są rozdzielane rotacyjnie między OpenAI, Claude i Groka. Niedostępny dostawca jest automatycznie pomijany. Żaden model nie zapisuje danych bez warstwy reguł i wymaganego potwierdzenia.</p></div></div><div>${providerCards}</div></section>
-    <section class="panel agent-runtime-activity"><div class="order-section-head"><div><span class="order-pro-label">Dziennik na żywo</span><h2>Ostatnie działania</h2><p class="order-detail-lead">Bez treści prywatnych i sekretów — wyłącznie etap, źródło, wynik i czas.</p></div><a class="btn ghost" href="#/admin/agent-ai/historia">Pełna historia</a></div><div>${activity.slice(0,12).map(item=>`<article class="${esc(item.status)}"><span>${item.status==="success"?"✓":item.status==="warning"?"!":item.status==="error"?"×":item.status==="running"?"⋯":"•"}</span><div><b>${esc(item.title||"Zdarzenie Agenta")}</b><small>${esc(item.detail||item.source||"")}</small></div><time>${esc(agentAIRuntimeCzas(item.at))}</time></article>`).join("")||`<div class="agent-ops-empty">Dziennik zapełni się podczas następnego cyklu lub polecenia.</div>`}</div></section>
+    <section class="panel agent-runtime-activity"><div class="order-section-head"><div><span class="order-pro-label">Dziennik na żywo</span><h2>Każdy wykonany etap</h2><p class="order-detail-lead">Produkt, dokładna czynność, zmieniane pola, wynik oraz czas pozostają widoczne także po przejściu Agenta do następnego etapu.</p></div><a class="btn ghost" href="#/admin/agent-ai/historia">Pełna historia</a></div><div>${activity.slice(0,30).map(item=>`<article class="${esc(item.status)}"><span>${item.status==="success"?"✓":item.status==="warning"?"!":item.status==="error"?"×":item.status==="running"?"⋯":"•"}</span><div><b>${esc(item.productName||item.title||"Zdarzenie Agenta")}${item.phase?` • ${esc(agentAIEtapPracyLabel(item.phase))}`:""}</b><small>${esc(item.detail||item.source||"")}${item.fields?.length?`<em>Pola: ${item.fields.map(value=>esc(agentAIPolePracyLabel(value))).join(", ")}</em>`:""}</small></div><time>${esc(agentAIRuntimeCzas(item.at))}</time></article>`).join("")||`<div class="agent-ops-empty">Dziennik zapełni się podczas następnego cyklu lub polecenia.</div>`}</div></section>
   </section>`;
 }
 async function agentAISpecjalisciPobierz(silent=true){
   if(agentAISpecjalisci.loading)return agentAISpecjalisci.data;
   agentAISpecjalisci={...agentAISpecjalisci,loading:true,error:""};if(!silent)renderuj();
-  try{const data=await chmura("agent-specialists-status",{params:{historyLimit:30},timeout:30000});agentAISpecjalisci={...agentAISpecjalisci,loading:false,loaded:true,error:"",data,fetchedAt:Date.now()};}
+  try{const data=await chmura("agent-specialists-status",{params:{historyLimit:30,includeInstructions:location.hash.includes("/admin/agent-ai/specjalisci")?1:0},timeout:30000});agentAISpecjalisci={...agentAISpecjalisci,loading:false,loaded:true,error:"",data,fetchedAt:Date.now()};}
   catch(error){agentAISpecjalisci={...agentAISpecjalisci,loading:false,loaded:true,error:String(error?.message||error)};}
   if(!silent)renderuj();else agentAISpecjalisciAktualizujWidocznePanele();return agentAISpecjalisci.data;
 }
@@ -3452,7 +3483,7 @@ function agentAISpecjalisciAktualizujWidocznePanele(){
   const initiative=document.querySelector(".agent-initiative-panel");if(initiative)initiative.outerHTML=agentAIInicjatywaPanelHTML();
   const permissions=document.querySelector(".agent-permission-page");if(permissions)permissions.outerHTML=agentAIUprawnieniaPanelHTML();
   const specialistsPage=document.querySelector(".agent-specialists-page");
-  if(specialistsPage){specialistsPage.querySelector(".agent-coordinator-card")?.remove();specialistsPage.querySelector(".agent-specialists-hero")?.insertAdjacentHTML("afterend",agentAICodexKoordynatorHTML(agentAISpecjalisci.data?.lastCycle||{}));}
+  if(specialistsPage){specialistsPage.querySelector(".agent-coordinator-card")?.remove();specialistsPage.querySelector(".agent-specialists-hero")?.insertAdjacentHTML("afterend",agentAICodexKoordynatorHTML(agentAISpecjalisci.data?.lastCycle||{}));const platform=specialistsPage.querySelector(".openai-platform-card");if(platform)platform.outerHTML=agentAIOpenAiPlatformHTML(agentAISpecjalisci.data?.openaiPlatform||{});agentAIKonfiguracjaRolWidok();}
   document.querySelectorAll("[data-product-agent-card]").forEach(card=>{const id=card.dataset.productAgentCard,product=pobierzProduktAdmin(id)||produkty.find(p=>String(p.id)===String(id));if(product)card.outerHTML=agentAIWdrozenieProduktuHTML(product,true);});
   const badge=document.querySelector("[data-agent-live-decision-count]");if(badge)badge.textContent=String(agentAISpecjalisci.data?.decisionStats?.open||0);
 }
@@ -3476,13 +3507,13 @@ async function agentAISpecjalistaProduktWdrozenie(product={}){
 function agentAISpecjalistaWynikHTML(run={},compact=false){
   const result=run.result||{},fields=Array.isArray(result.fields)?result.fields:[],warnings=[...(result.warnings||[]),...(result.missingFacts||[]).map(item=>`Brak faktu: ${item}`)],status=result.complianceStatus||"needs_review";
   const saved=["applied","auto_applied","not_needed"].includes(run.approvalStatus);
-  return `<article class="agent-specialist-result ${esc(status)}"><header><div><span>${run.source==="automatic"?"⚙️":"✍️"}</span><div><b>${esc(result.title||run.specialistLabel||"Szkic GPT-5 nano")}</b><small>${esc(run.specialistLabel||run.specialist||"")} • ${esc(run.model||"gpt-5-nano")} • ${run.platformAgent?.id?`profil OpenAI ${esc(run.platformAgent.name||run.platformAgent.id)} • `:""}reguły ${esc(run.promptVersion||"bieżące")} • ${esc(agentAIRuntimeCzas(run.createdAt))}${run.cached?" • pamięć wyniku":""}</small></div></div><span class="lvl ${saved?"lvl-ok":status==="ready"?"lvl-ok":status==="blocked_missing_facts"?"lvl-blad":"lvl-ostrzezenie"}">${saved?(run.approvalStatus==="auto_applied"?"bezpiecznie zapisano":"zapisano"):run.target?.type==="product"?"automatyczna ponowna próba":status==="ready"?"gotowy do decyzji":status==="blocked_missing_facts"?"brak faktów":"sprawdź szkic"}</span></header>${result.summary?`<p>${esc(result.summary)}</p>`:""}${fields.length?`<div class="agent-specialist-fields">${fields.map(field=>`<section><small>${esc(field.label||field.key)}</small>${field.currentValue?`<div class="agent-field-before"><b>Było</b><span>${esc(field.currentValue)}</span></div>`:""}<pre>${esc(field.value||"")}</pre>${field.reason?`<p><b>Dlaczego:</b> ${esc(field.reason)}</p>`:""}${field.evidence?`<p><b>Podstawa:</b> ${esc(field.evidence)}</p>`:""}</section>`).join("")}</div>`:""}${!compact&&result.content?`<details><summary>Główna treść</summary><pre>${esc(result.content)}</pre></details>`:""}${warnings.length?`<div class="agent-specialist-warnings">${warnings.map(item=>`<span>⚠️ ${esc(item)}</span>`).join("")}</div>`:""}<footer><span>Pewność: <b>${Math.round(Number(result.confidence||0)*100)}%</b></span><span>Tokeny: <b>${esc(run.usage?.totalTokens||0)}</b></span>${run.target?.type==="product"&&!saved?`<span class="lvl lvl-ostrzezenie">Agent ponowi redakcję automatycznie — bez klikania</span>`:saved?`<span class="lvl lvl-ok">${run.approvalStatus==="auto_applied"?"zapisano bezpieczną pełną redakcję":"zapisano w produkcie"}</span>`:""}</footer></article>`;
+  return `<article class="agent-specialist-result ${esc(status)}"><header><div><span>${run.source==="automatic"?"⚙️":"✍️"}</span><div><b>${esc(result.title||run.specialistLabel||"Szkic OpenAI")}</b><small>${esc(run.specialistLabel||run.specialist||"")} • ${esc(run.model||"model routowany")} • ${run.reasoningEffort?`reasoning ${esc(run.reasoningEffort)} • `:""}${run.platformAgent?.id?`profil OpenAI ${esc(run.platformAgent.name||run.platformAgent.id)} • `:""}reguły ${esc(run.promptVersion||"bieżące")} • ${esc(agentAIRuntimeCzas(run.createdAt))}${run.cached?" • pamięć wyniku":""}</small></div></div><span class="lvl ${saved?"lvl-ok":status==="ready"?"lvl-ok":status==="blocked_missing_facts"?"lvl-blad":"lvl-ostrzezenie"}">${saved?(run.approvalStatus==="auto_applied"?"bezpiecznie zapisano":"zapisano"):run.target?.type==="product"?"automatyczna ponowna próba":status==="ready"?"gotowy do decyzji":status==="blocked_missing_facts"?"brak faktów":"sprawdź szkic"}</span></header>${result.summary?`<p>${esc(result.summary)}</p>`:""}${fields.length?`<div class="agent-specialist-fields">${fields.map(field=>`<section><small>${esc(field.label||field.key)}</small>${field.currentValue?`<div class="agent-field-before"><b>Było</b><span>${esc(field.currentValue)}</span></div>`:""}<pre>${esc(field.value||"")}</pre>${field.reason?`<p><b>Dlaczego:</b> ${esc(field.reason)}</p>`:""}${field.evidence?`<p><b>Podstawa:</b> ${esc(field.evidence)}</p>`:""}</section>`).join("")}</div>`:""}${!compact&&result.content?`<details><summary>Główna treść</summary><pre>${esc(result.content)}</pre></details>`:""}${warnings.length?`<div class="agent-specialist-warnings">${warnings.map(item=>`<span>⚠️ ${esc(item)}</span>`).join("")}</div>`:""}<footer><span>Pewność: <b>${Math.round(Number(result.confidence||0)*100)}%</b></span><span>Tokeny: <b>${esc(run.usage?.totalTokens||0)}</b></span>${run.target?.type==="product"&&!saved?`<span class="lvl lvl-ostrzezenie">Agent ponowi redakcję automatycznie — bez klikania</span>`:saved?`<span class="lvl lvl-ok">${run.approvalStatus==="auto_applied"?"zapisano bezpieczną pełną redakcję":"zapisano w produkcie"}</span>`:""}</footer></article>`;
 }
 async function agentAISpecjalistaFormularz(e){
   e?.preventDefault();const form=e.currentTarget,specialist=String(form.elements.specialist?.value||"product_content"),instruction=String(form.elements.instruction?.value||"").trim(),material=String(form.elements.material?.value||"").trim();
   if(!material){toast("Wpisz fakty lub materiał wejściowy");return false;}agentAISpecjalisci={...agentAISpecjalisci,running:true,error:""};renderuj();
-  try{const run=await agentAISpecjalistaWykonaj(specialist,{material},instruction,{});toast(run.cached?"✅ Użyto aktualnego, sprawdzonego szkicu":"✅ GPT-5 nano przygotował szkic do zatwierdzenia");await agentAISpecjalisciPobierz(true);}
-  catch(error){agentAISpecjalisci={...agentAISpecjalisci,error:String(error?.message||error)};toast("⚠️ GPT-5 nano: "+(error?.message||error));}
+  try{const run=await agentAISpecjalistaWykonaj(specialist,{material},instruction,{});toast(run.cached?"✅ Użyto aktualnego, sprawdzonego szkicu":"✅ Specjalista OpenAI przygotował szkic do zatwierdzenia");await agentAISpecjalisciPobierz(true);}
+  catch(error){agentAISpecjalisci={...agentAISpecjalisci,error:String(error?.message||error)};toast("⚠️ OpenAI: "+(error?.message||error));}
   finally{agentAISpecjalisci={...agentAISpecjalisci,running:false};renderuj();}return false;
 }
 async function agentAISpecjalistaZatwierdzProdukt(id,button=null){
@@ -3490,8 +3521,8 @@ async function agentAISpecjalistaZatwierdzProdukt(id,button=null){
   catch(error){toast("⚠️ Zatwierdzenie szkicu: "+(error?.message||error));if(button)button.disabled=false;}
 }
 async function agentAISpecjalisciZapiszUstawienia(e){
-  e?.preventDefault();const form=e.currentTarget,f=new FormData(form),current=agentAISpecjalisci.data?.config||{},config={...current,enabled:f.get("enabled")==="on",automaticEnabled:f.get("automaticEnabled")==="on",safeAutoApply:f.get("safeAutoApply")==="on",autoApplyProductEditorial:f.has("autoApplyProductEditorial")?f.get("autoApplyProductEditorial")==="on":current.autoApplyProductEditorial!==false,autoUpdateLinkedAllegroContent:f.has("autoUpdateLinkedAllegroContent")?f.get("autoUpdateLinkedAllegroContent")==="on":current.autoUpdateLinkedAllegroContent!==false,learningEnabled:f.get("learningEnabled")==="on",approvalWarmupCount:Number(f.get("approvalWarmupCount")||0),learnedAutoApplyThreshold:Number(f.get("learnedAutoApplyThreshold")||86)/100,dailyLimit:Number(f.get("dailyLimit")||60),automaticDailyLimit:Number(f.get("automaticDailyLimit")||30),automaticBatchSize:Number(f.get("automaticBatchSize")||4),cacheHours:Number(f.get("cacheHours")||24),confidenceThreshold:Number(f.get("confidenceThreshold")||92)/100,decisionRetentionDays:Number(f.get("decisionRetentionDays")||30)};agentAISpecjalisci={...agentAISpecjalisci,saving:true};renderuj();
-  try{await chmura("agent-specialists-config",{method:"POST",body:{config},timeout:30000});toast("✅ Zapisano kontrolę kosztów i automatykę GPT-5 nano");await agentAISpecjalisciPobierz(true);}catch(error){toast("⚠️ Ustawienia GPT: "+(error?.message||error));}finally{agentAISpecjalisci={...agentAISpecjalisci,saving:false};renderuj();}return false;
+  e?.preventDefault();const form=e.currentTarget,f=new FormData(form),current=agentAISpecjalisci.data?.config||{},config={...current,enabled:f.get("enabled")==="on",automaticEnabled:f.get("automaticEnabled")==="on",safeAutoApply:f.get("safeAutoApply")==="on",autoApplyProductEditorial:f.has("autoApplyProductEditorial")?f.get("autoApplyProductEditorial")==="on":current.autoApplyProductEditorial!==false,autoUpdateLinkedAllegroContent:f.has("autoUpdateLinkedAllegroContent")?f.get("autoUpdateLinkedAllegroContent")==="on":current.autoUpdateLinkedAllegroContent!==false,learningEnabled:f.get("learningEnabled")==="on",approvalWarmupCount:Number(f.get("approvalWarmupCount")||0),learnedAutoApplyThreshold:Number(f.get("learnedAutoApplyThreshold")||86)/100,dailyLimit:Number(f.get("dailyLimit")||60),automaticDailyLimit:Number(f.get("automaticDailyLimit")||30),automaticBatchSize:Number(f.get("automaticBatchSize")||4),automaticInputTokenLimit:Number(f.get("automaticInputTokenLimit")||current.automaticInputTokenLimit||180000),automaticOutputTokenLimit:Number(f.get("automaticOutputTokenLimit")||current.automaticOutputTokenLimit||70000),cacheHours:Number(f.get("cacheHours")||72),confidenceThreshold:Number(f.get("confidenceThreshold")||92)/100,decisionRetentionDays:Number(f.get("decisionRetentionDays")||30)};agentAISpecjalisci={...agentAISpecjalisci,saving:true};renderuj();
+  try{await chmura("agent-specialists-config",{method:"POST",body:{config},timeout:30000});toast("✅ Zapisano routing modeli, kontrolę kosztów i automatykę");await agentAISpecjalisciPobierz(true);}catch(error){toast("⚠️ Ustawienia agentów: "+(error?.message||error));}finally{agentAISpecjalisci={...agentAISpecjalisci,saving:false};renderuj();}return false;
 }
 async function agentAIUprawnieniaZapisz(e){
   e?.preventDefault();const f=new FormData(e.currentTarget),current=agentAISpecjalisci.data?.config||{},automatic=agentAISpecjalisci.data?.policy?.actionPolicy?.automatic||[],config={...current,safeAutoApply:true};automatic.filter(item=>item.configKey).forEach(item=>{config[item.configKey]=f.get(item.configKey)==="on";});agentAISpecjalisci={...agentAISpecjalisci,saving:true};renderuj();
@@ -3526,19 +3557,58 @@ function agentAIUprawnieniaPanelHTML(){
   const configurable=automatic.filter(item=>item.configKey),enabled=configurable.filter(isEnabled).length;
   return `<section class="agent-permission-page"><section class="panel agent-permission-hero"><div><span class="order-pro-label">Jedna polityka dla całej strony</span><h2>🛡️ Uprawnienia Agenta i zespołu</h2><p>Nadajesz Agentowi dostęp wyłącznie do bezpiecznych, odwracalnych działań. Operacje finansowe, sprzedażowe, wysyłkowe i zewnętrzna komunikacja pozostają stale zablokowane do decyzji administratora.</p></div><div class="agent-permission-summary"><span><b>${enabled}/${configurable.length}</b><small>nadanych automatyk</small></span><span><b>${approval.length}</b><small>stałych blokad</small></span></div></section><section class="panel agent-team-access"><div><span>👥</span><div><span class="order-pro-label">Dostęp konkretnych osób</span><h2>Administratorzy, Telegram i prawo zatwierdzania</h2><p>Na kontach użytkowników osobno nadajesz dostęp do panelu, rozmowy z Agentem oraz zatwierdzania chronionych decyzji.</p></div></div><a class="btn" href="#/admin/klienci/uprawnienia">Zarządzaj dostępem osób →</a></section><div class="agent-permission-columns"><form class="panel agent-permission-list automatic" onsubmit="return agentAIUprawnieniaZapisz(event)"><div class="order-section-head"><div><span class="order-pro-label">Nadawane przez administratora • pełny audyt</span><h2>⚡ Agent może wykonywać</h2><p class="order-detail-lead">Przełączniki dotyczą tylko bezpiecznej automatyki. Każdy zapis pozostaje w historii.</p></div><button class="btn" type="submit" ${agentAISpecjalisci.saving?"disabled":""}>💾 Zapisz uprawnienia</button></div><div class="agent-permission-items">${automatic.map(item=>`<article class="${isEnabled(item)?"enabled":"disabled"}"><span>${esc(item.icon||"⚡")}</span><div><b>${esc(item.label)}</b><p>${esc(item.description)}</p></div>${item.configKey?`<label class="switch-check"><input type="checkbox" name="${esc(item.configKey)}" ${isEnabled(item)?"checked":""}><span>${isEnabled(item)?"Nadane":"Wstrzymane"}</span></label>`:`<em>✓ funkcja systemowa</em>`}</article>`).join("")}</div><div class="agent-permission-guard"><b>Ochrona synchronizacji Allegro</b><span>Automatyczna aktualizacja treści nie zmienia ceny, stanu, aktywności oferty ani warunków sprzedaży.</span></div></form><section class="panel agent-permission-list approval"><div class="order-section-head"><div><span class="order-pro-label">Niezmienne • zawsze decyzja administratora</span><h2>🔐 Agent nie może wykonać sam</h2><p class="order-detail-lead">Tych blokad nie można wyłączyć przełącznikiem, poleceniem Telegram ani automatycznym cyklem.</p></div><span class="agent-policy-lock">🔒 polityka stała</span></div><div class="agent-permission-items">${approval.map(item=>`<article><span>${esc(item.icon||"🔐")}</span><div><b>${esc(item.label)}</b><p>${esc(item.description)}</p></div><em>🔐 zatwierdza administrator</em></article>`).join("")}</div></section></div><section class="panel agent-permission-blocked"><div><span>⛔</span><div><span class="order-pro-label">Automatyczny bezpiecznik</span><h2>Kiedy Agent zatrzymuje wykonanie</h2></div></div><div>${blocked.map(item=>`<span>• ${esc(item)}</span>`).join("")}</div><p>Przy niepewności Agent nie zgaduje i niczego nie wysyła. Redakcję produktu może ponowić bezpiecznie, a rzeczywista operacja sprzedażowa lub zewnętrzna zawsze trafia do administratora.</p></section></section>`;
 }
+async function agentAIOpenAiPlatformOdswiez(){
+  try{await chmura("openai-platform-cycle",{method:"POST",body:{force:true},timeout:120000});toast("✅ Sprawdzono wszystkie połączenia OpenAI Platform");await agentAISpecjalisciPobierz(false);}
+  catch(error){toast("⚠️ OpenAI Platform: "+(error?.message||error));}
+}
+async function agentAIOpenAiBatchEval(){
+  try{const data=await chmura("openai-platform-batch-eval",{method:"POST",body:{force:false},timeout:90000});toast(data.skipped?"ℹ️ Dzisiejsza partia ewaluacyjna już istnieje":"✅ Utworzono bezpieczną partię ewaluacyjną");await agentAISpecjalisciPobierz(false);}
+  catch(error){toast("⚠️ Ewaluacja Batch: "+(error?.message||error));}
+}
+function agentAIOpenAiPlatformHTML(platform={}){
+  const capabilities=Array.isArray(platform.capabilities)?platform.capabilities:[],batches=Array.isArray(platform.batches)?platform.batches:[],last=batches[0]||{},score=last.score||{},active=["validating","in_progress","finalizing"].includes(last.status);
+  const icons={responses:"💬",ui:"▣",agents:"⌘",realtime:"◖",audio:"🎤",images:"🖼️",logs:"↗",batches:"{ }",evals:"✓",fineTuning:"⚗️",modelUpgrade:"↑",optimization:"◒",migration:"⇄",usage:"↗",apiKey:"🔑"};
+  return `<section class="panel openai-platform-card"><div class="order-section-head"><div><span class="order-pro-label">Jeden obecny klucz • jawna mapa możliwości Platformy</span><h2>OpenAI Platform w sklepie</h2><p class="order-detail-lead">Rutynowe zadania wykonuje GPT-5.4 nano, pełne redakcje GPT-5.4 mini, a zwykły GPT-5.4 uruchamia się wyłącznie przy jawnej eskalacji. GPT-5.5 pozostaje dostępny na koncie, lecz nie pracuje automatycznie, ponieważ kosztuje więcej bez potrzeby dla tych precyzyjnych scenariuszy.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIOpenAiPlatformOdswiez()">↻ Sprawdź Platformę</button><button class="btn ghost" onclick="agentAIOpenAiBatchEval()" ${active?"disabled":""}>${active?"⏳ Batch w toku":"✓ Uruchom test Batch"}</button></div></div><div class="openai-capability-grid">${capabilities.map(item=>`<article class="${esc(item.state||"unknown")}"><span>${icons[item.id]||"✦"}</span><div><b>${esc(item.label)}</b><small>${esc(item.detail)}</small></div><em>${item.state==="active"?"aktywne":item.state==="available"?"dostępne / celowo niewłączone":"sprawdź"}</em></article>`).join("")||`<div class="agent-ops-empty">Status możliwości pojawi się po połączeniu z serwerem.</div>`}</div><footer class="openai-platform-footer"><span><b>Ostatni Batch:</b> ${last.id?`${esc(last.status)} • ${esc(last.cases||0)} przypadki${score.total?` • wynik ${esc(score.passed)}/${esc(score.total)}`:""}`:"oczekuje na pierwszy cykl"}</span><nav><a href="https://platform.openai.com/logs" target="_blank" rel="noopener">Dzienniki i trace ↗</a><a href="https://platform.openai.com/usage" target="_blank" rel="noopener">Stosowanie ↗</a><a href="https://platform.openai.com/evaluations" target="_blank" rel="noopener">Ewaluacje ↗</a></nav></footer></section>`;
+}
 function agentAICodexKoordynatorHTML(last={}){
   const plan=last?.coordinatorPlan||{},assignments=Array.isArray(plan.assignments)?plan.assignments:[];
   const labels={"catalog-editorial":"Redakcja katalogu","customer-reply-draft":"Szkice odpowiedzi","catalog-identity-control":"Kontrola tożsamości","supplier-order-draft":"Dokument producenta","seo-free-promotion":"Bezpłatne SEO"};
-  return `<section class="panel agent-coordinator-card"><div class="order-section-head"><div><span class="order-pro-label">Główny koordynator • rzeczywisty Codex CLI</span><h2>⌘ Codex rozdziela pracę wyspecjalizowanym agentom GPT</h2><p class="order-detail-lead">Codex analizuje wyłącznie bezpieczne liczniki, wybiera wersjonowany scenariusz i przypisuje właściwą rolę. Specjalista wykonuje zadanie przez GPT-5 nano, a reguły sklepu kontrolują zapis i wymagane potwierdzenia.</p></div><span class="lvl ${assignments.length?"lvl-ok":"lvl-info"}">${assignments.length?`● ${assignments.length} ${assignments.length===1?"scenariusz":"scenariusze"}`:"oczekuje na cykl"}</span></div>${plan.summary?`<p class="agent-coordinator-summary">${esc(plan.summary)}</p>`:""}<div class="agent-coordinator-flow"><article><span>1</span><b>Codex</b><small>ocenia priorytety</small></article><i>→</i><article><span>2</span><b>Scenariusz</b><small>reguły i bramki jakości</small></article><i>→</i><article><span>3</span><b>GPT-5 nano</b><small>wykonuje przypisaną rolę</small></article><i>→</i><article><span>4</span><b>Sklep</b><small>waliduje, zapisuje lub pyta</small></article></div><div class="agent-coordinator-assignments">${assignments.map(item=>`<span><b>P${esc(item.priority||5)} · ${esc(labels[item.scenarioId]||item.scenarioId)}</b><small>${esc(item.specialist||"specjalista")} · v${esc(item.scenarioVersion||"—")}</small></span>`).join("")||`<small>Najbliższy automatyczny cykl zapisze tutaj faktyczny przydział Codex.</small>`}</div></section>`;
+  return `<section class="panel agent-coordinator-card"><div class="order-section-head"><div><span class="order-pro-label">Główny koordynator • rzeczywisty Codex CLI</span><h2>⌘ Codex rozdziela pracę wyspecjalizowanym agentom OpenAI</h2><p class="order-detail-lead">Codex analizuje wyłącznie bezpieczne liczniki, wybiera wersjonowany scenariusz i przypisuje właściwą rolę. Model dobierany jest według trudności, a reguły sklepu kontrolują zapis i wymagane potwierdzenia.</p></div><span class="lvl ${assignments.length?"lvl-ok":"lvl-info"}">${assignments.length?`● ${assignments.length} ${assignments.length===1?"scenariusz":"scenariusze"}`:"oczekuje na cykl"}</span></div>${plan.summary?`<p class="agent-coordinator-summary">${esc(plan.summary)}</p>`:""}<div class="agent-coordinator-flow"><article><span>1</span><b>Codex</b><small>ocenia priorytety</small></article><i>→</i><article><span>2</span><b>Scenariusz</b><small>reguły i bramki jakości</small></article><i>→</i><article><span>3</span><b>Model routowany</b><small>5.4 nano / mini / pełny</small></article><i>→</i><article><span>4</span><b>Sklep</b><small>waliduje, zapisuje lub pyta</small></article></div><div class="agent-coordinator-assignments">${assignments.map(item=>`<span><b>P${esc(item.priority||5)} · ${esc(labels[item.scenarioId]||item.scenarioId)}</b><small>${esc(item.specialist||"specjalista")} · v${esc(item.scenarioVersion||"—")}</small></span>`).join("")||`<small>Najbliższy automatyczny cykl zapisze tutaj faktyczny przydział Codex.</small>`}</div></section>`;
+}
+function agentAIKonfiguracjaRolWidok(){
+  const page=document.querySelector(".agent-specialists-page"),data=agentAISpecjalisci.data||{},roles=Array.isArray(data.specialists)?data.specialists:[],usage=data.usage||{},cfg=data.config||{};
+  if(!page)return;
+  const heroDescription=page.querySelector(".agent-specialists-hero p");
+  if(heroDescription)heroDescription.textContent="Każda rola korzysta z pełnego, wersjonowanego profilu serwerowego. Istniejące zapisane prompty OpenAI Platform są połączone bezpośrednio, a pozostałe role pokazują tutaj całą używaną instrukcję — Platforma nie udostępnia publicznego API do automatycznego tworzenia i edycji zapisanych promptów.";
+  const grid=page.querySelector(".agent-specialist-grid");
+  if(grid){
+    [...grid.querySelectorAll(":scope > article")].forEach((card,index)=>{
+      const role=roles[index];if(!role||card.dataset.instructionAudit==="1")return;
+      card.dataset.instructionAudit="1";card.classList.add("agent-role-audited");
+      const policy=role.modelPolicy||{},platformLink=role.platformUrl?`<a class="btn ghost" href="${esc(role.platformUrl)}" target="_blank" rel="noopener">Otwórz prompt w Platformie ↗</a>`:`<span class="lvl lvl-info">Pełny profil serwerowy — Platforma nie udostępnia publicznego API tworzenia promptów</span>`;
+      card.insertAdjacentHTML("beforeend",`<details class="agent-role-instruction"><summary>Pełna konfiguracja i instrukcja (${esc(role.instructionCharacters||0)} znaków)</summary><div class="agent-role-policy"><span><small>Model codzienny</small><b>${esc(policy.model||"—")}</b></span><span><small>Warstwa</small><b>${esc(policy.tier||"—")}</b></span><span><small>Rozumowanie</small><b>${esc(policy.reasoning||"—")}</b></span><span><small>Maks. wynik</small><b>${esc(policy.maxOutputTokens||"—")} tokenów</b></span><span><small>Reguły</small><b>${esc(role.promptVersion||"—")}</b></span><span><small>Sekcje</small><b>${esc(role.instructionSections||0)}</b></span></div><div class="agent-role-platform">${platformLink}</div><pre>${esc(role.fullInstruction||"Pełna instrukcja zostanie pobrana po otwarciu podstrony Specjaliści.")}</pre></details>`);
+    });
+  }
+  if(!page.querySelector(".agent-token-economy")){
+    const firstStats=page.querySelector(".orders-stat-grid");
+    const models=Array.isArray(usage.usageByModel)?usage.usageByModel:[];
+    const cacheRate=Number(usage.inputTokens)>0?Math.round(Number(usage.cachedTokens||0)/Number(usage.inputTokens)*100):0;
+    firstStats?.insertAdjacentHTML("afterend",`<section class="panel agent-token-economy"><div class="order-section-head"><div><span class="order-pro-label">Ekonomiczny routing • dane z dzisiejszych wywołań</span><h2>🪙 Zużycie modeli i cache</h2><p class="order-detail-lead">GPT-5.4 nano wykonuje zadania proste i masowe, GPT-5.4 mini pełne redakcje, a zwykły GPT-5.4 jest zarezerwowany dla eskalacji. Długi playbook jest stałym prefiksem cache; dane produktu są wysyłane na końcu.</p></div><strong>≈ ${esc(Number(usage.estimatedUsd||0).toFixed(2))} USD<small>szacunek wg cennika ${esc(usage.pricingSnapshot?.date||"—")}</small></strong></div><div class="agent-token-models">${models.map(item=>`<article><b>${esc(item.model)}</b><span>${esc(item.runs)} uruchomień</span><small>wejście ${Number(item.inputTokens||0).toLocaleString("pl-PL")} • wynik ${Number(item.outputTokens||0).toLocaleString("pl-PL")} • cache ${Number(item.cachedTokens||0).toLocaleString("pl-PL")}</small><em>≈ ${esc(Number(item.estimatedUsd||0).toFixed(2))} USD</em></article>`).join("")||`<div class="agent-ops-empty">Pomiar pojawi się po pierwszym wywołaniu nowej wersji.</div>`}</div><footer><span>Cache odczyt: <b>${esc(cacheRate)}%</b></span><span>Automatyka wejście: <b>${Number(usage.automaticInputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticInputTokenLimit||cfg.automaticInputTokenLimit||0).toLocaleString("pl-PL")}</b></span><span>Automatyka wynik: <b>${Number(usage.automaticOutputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticOutputTokenLimit||cfg.automaticOutputTokenLimit||0).toLocaleString("pl-PL")}</b></span></footer></section>`);
+  }
+  const settings=page.querySelector(".agent-specialist-settings>div:last-child");
+  if(settings&&!settings.querySelector('[name="automaticInputTokenLimit"]')){
+    settings.insertAdjacentHTML("beforeend",`<label>Limit wejścia automatyki / dzień<input type="number" name="automaticInputTokenLimit" min="20000" max="2000000" step="10000" value="${esc(cfg.automaticInputTokenLimit||180000)}"></label><label>Limit wyniku automatyki / dzień<input type="number" name="automaticOutputTokenLimit" min="10000" max="800000" step="5000" value="${esc(cfg.automaticOutputTokenLimit||70000)}"></label>`);
+  }
 }
 function agentAISpecjalisciPanelHTML(){
-  const state=agentAISpecjalisci,data=state.data||{},specialists=Array.isArray(data.specialists)?data.specialists:[],history=Array.isArray(data.history)?data.history:[],decisions=Array.isArray(data.decisions)?data.decisions:[],usage=data.usage||{},stats=data.decisionStats||{},last=data.lastCycle||{},cfg=data.config||{enabled:true,automaticEnabled:true,safeAutoApply:true,autoApplyProductEditorial:true,autoUpdateLinkedAllegroContent:true,learningEnabled:true,approvalWarmupCount:3,learnedAutoApplyThreshold:.86,dailyLimit:240,automaticDailyLimit:200,automaticBatchSize:12,cacheHours:24,confidenceThreshold:.92,decisionRetentionDays:30},learning=data.learning?.productContent||{};
-  if(state.loading&&!state.loaded)return `<section class="panel agent-specialists-page"><div class="agent-runtime-loading"><i></i><div><b>Uruchamiam zespół GPT-5 nano…</b><small>Pobieram role, limity i szkice.</small></div></div></section>`;
+  const state=agentAISpecjalisci,data=state.data||{},specialists=Array.isArray(data.specialists)?data.specialists:[],history=Array.isArray(data.history)?data.history:[],decisions=Array.isArray(data.decisions)?data.decisions:[],usage=data.usage||{},stats=data.decisionStats||{},last=data.lastCycle||{},cfg=data.config||{enabled:true,automaticEnabled:true,safeAutoApply:true,autoApplyProductEditorial:true,autoUpdateLinkedAllegroContent:true,learningEnabled:true,approvalWarmupCount:0,learnedAutoApplyThreshold:.84,dailyLimit:240,automaticDailyLimit:80,automaticBatchSize:3,cacheHours:72,confidenceThreshold:.9,decisionRetentionDays:30},learning=data.learning?.productContent||{};
+  if(state.loading&&!state.loaded)return `<section class="panel agent-specialists-page"><div class="agent-runtime-loading"><i></i><div><b>Uruchamiam zespół OpenAI…</b><small>Pobieram role, modele, limity i szkice.</small></div></div></section>`;
   if(state.error&&!data.specialists)return `<section class="panel"><div class="backend-note warn"><b>Nie udało się uruchomić specjalistów.</b><p>${esc(state.error)}</p><button class="btn" onclick="agentAISpecjalisciPobierz(false)">Ponów</button></div></section>`;
   const active=state.activeRun||history[0],never=(data.policy?.neverAutomatic||[]).join(", "),progress=last.editorialProgress||{},progressTotal=Number(progress.total||0),progressReady=Number(progress.ready||0),progressPercent=progressTotal?Math.round(progressReady/progressTotal*100):0;
+  setTimeout(()=>{const page=document.querySelector(".agent-specialists-page"),hero=page?.querySelector(".agent-specialists-hero");if(hero&&!page.querySelector(".openai-platform-card"))hero.insertAdjacentHTML("afterend",agentAIOpenAiPlatformHTML(data.openaiPlatform||{}));agentAIKonfiguracjaRolWidok();},0);
   const autonomyHTML=`<section class="panel agent-learning-panel"><div><span>🧠</span><div><small>AUTONOMIA TREŚCI + PAMIĘĆ STYLU</small><h3>${cfg.autoApplyProductEditorial!==false?"Bezpieczne redakcje są zapisywane automatycznie":"Automatyczna redakcja jest wstrzymana"}</h3><p>Kompletne, zgodne opisy Agent zapisuje bez pytania. Twoje korekty nadal uczą go preferowanego tonu i układu; decyzja pojawia się tylko przy braku faktów, konflikcie lub ryzyku.</p></div></div><div><b>${esc(learning.approvals||0)}</b><small>zatwierdzeń</small><b>${esc(learning.corrections||0)}</b><small>korekt stylu</small><b>${esc(last.autoApplied||0)}</b><small>zapisów w cyklu</small></div></section>`;
   const progressHTML=`<section class="panel agent-proposal-board"><div class="order-section-head"><div><span class="order-pro-label">Sukcesywna redakcja katalogu</span><h2>Jedna treść dla sklepu, Von Halsky i Allegro</h2><p class="order-detail-lead">Co 15 minut Agent bierze kolejne pozycje i zapisuje wynik w głównej kartotece. Gotowego produktu nie analizuje ponownie, dopóki nie zmienią się fakty lub wybrany kanał sprzedaży.</p></div><span class="lvl ${progressTotal&&progressReady>=progressTotal?"lvl-ok":"lvl-ostrzezenie"}">${progressTotal?`${esc(progressPercent)}% gotowe`:"oczekuje na pierwszy cykl"}</span></div><div class="orders-stat-grid"><div class="order-stat-card"><span>✅</span><b>${esc(progressReady)}</b><small>redakcja zakończona</small></div><div class="order-stat-card money"><span>⏳</span><b>${esc(progress.pending||0)}</b><small>w kolejce sukcesywnej</small></div><div class="order-stat-card"><span>👁️</span><b>${esc(progress.review||0)}</b><small>wymaga decyzji</small></div><div class="order-stat-card"><span>✦</span><b>${esc(progress.processedThisCycle||0)}</b><small>obsłużono w ostatnim cyklu</small></div></div></section>`;
-  return `<section class="agent-specialists-page"><section class="panel agent-specialists-hero"><div><span class="order-pro-label">Stała gotowość • cykl co ${esc(data.policy?.cycleMinutes||15)} minut</span><h2>✦ Zespół agentów OpenAI + GPT-5 nano</h2><p>Każda rola ma opublikowany, wersjonowany profil w OpenAI Platform. Serwer wywołuje profil przez Responses API, a bezpieczny fallback uruchamia wyłącznie przy błędzie referencji platformy. Strażnik Allegro uzupełnia redaktora i przejmuje tylko treści zatrzymane przez kontrolę zgodności.</p></div><div><strong>${esc(data.model||"gpt-5-nano")} • reguły ${esc(data.promptVersion||"—")}</strong><span class="lvl ${data.configured&&data.platformAgents?.configured&&cfg.automaticEnabled!==false?"lvl-ok":"lvl-blad"}">${data.configured&&data.platformAgents?.configured&&cfg.automaticEnabled!==false?`● ${specialists.length} ról OpenAI aktywnych`:"automatyka zatrzymana"}</span><button class="btn ghost" onclick="agentAISpecjalisciCykl()" ${state.running?"disabled":""}>${state.running?"⏳ Kontroluję…":"↻ Sprawdź teraz"}</button></div></section>${autonomyHTML}<div class="orders-stat-grid"><div class="order-stat-card money"><span>🧭</span><b>${esc(stats.open||0)}</b><small>decyzji dla Ciebie</small></div><div class="order-stat-card"><span>✅</span><b>${esc(last.autoApplied||0)}</b><small>bezpiecznie zapisano w cyklu</small></div><div class="order-stat-card"><span>✦</span><b>${specialists.length}</b><small>aktywnych ról specjalistycznych</small></div><div class="order-stat-card"><span>🪙</span><b>${esc(usage.automaticToday||0)} / ${esc(cfg.automaticDailyLimit||200)}</b><small>automatycznych analiz dzisiaj</small></div></div>${progressHTML}<section class="panel agent-proposal-board"><div class="order-section-head"><div><span class="order-pro-label">Tylko sprawy wymagające człowieka</span><h2>Decyzje i propozycje Agenta</h2><p class="order-detail-lead">Opisy nie pojawiają się tutaj. Zewnętrzne działania nadal wymagają zgody: ${esc(never)}.</p></div><span class="lvl ${stats.high?"lvl-blad":decisions.length?"lvl-ostrzezenie":"lvl-ok"}">${decisions.length?`${decisions.length} otwartych`:`wszystko pod kontrolą`}</span></div><div class="agent-proposal-list">${decisions.map(agentAISpecjalistaDecyzjaHTML).join("")||`<div class="agent-ops-empty">✅ Brak trudnych decyzji. Zespół nadal kontroluje sklep automatycznie co 15 minut.</div>`}</div></section><div class="agent-specialist-grid">${specialists.map(item=>`<article><span>${esc(item.icon||"✦")}</span><div><b>${esc(item.platformName||item.label)}</b><small>${esc(item.area)} • ${esc(item.platformPrompt?.id?item.platformPrompt.id.slice(0,10)+"…":"brak promptu")} • wersja ${esc(item.platformPrompt?.version||"—")}</small><p>${esc(item.description)}</p></div><i class="agent-role-live">● ${item.platformAvailable===false?"tryb awaryjny":"połączony"}</i></article>`).join("")}</div><details class="panel agent-specialist-manual"><summary>＋ Dodatkowe ręczne zadanie dla wybranej roli</summary><div class="agent-specialist-workspace"><form class="agent-specialist-form" onsubmit="return agentAISpecjalistaFormularz(event)"><label>Specjalista<select name="specialist">${specialists.map(item=>`<option value="${esc(item.id)}">${esc(item.icon)} ${esc(item.label)} • ${esc(item.area)}</option>`).join("")}</select></label><label>Co ma przygotować?<input name="instruction" maxlength="3000" placeholder="Np. przygotuj kampanię weekendową i tekst bannera"></label><label>Potwierdzone fakty<textarea name="material" rows="7" maxlength="12000" placeholder="Produkt, grupa odbiorców, rabat, daty lub obecna treść…"></textarea></label><button class="btn" type="submit" ${state.running?"disabled":""}>✦ Przygotuj dodatkowy szkic</button></form><aside>${active?agentAISpecjalistaWynikHTML(active):`<div class="agent-specialist-empty"><span>✦</span><b>Wynik pojawi się tutaj</b></div>`}</aside></div></details><form class="panel agent-specialist-settings" onsubmit="return agentAISpecjalisciZapiszUstawienia(event)"><div class="order-section-head"><div><span class="order-pro-label">Przepustowość automatyki</span><h2>Tempo przygotowania całego katalogu</h2><p class="order-detail-lead">Treści produktów zapisują się samodzielnie. Ustawienia określają wyłącznie tempo i dzienny limit użycia modelu.</p></div><button class="btn" type="submit" ${state.saving?"disabled":""}>💾 Zapisz ustawienia</button></div><div><label><input type="checkbox" name="enabled" ${cfg.enabled!==false?"checked":""}> Role aktywne</label><label><input type="checkbox" name="automaticEnabled" ${cfg.automaticEnabled!==false?"checked":""}> Czuwanie co 15 min</label><label><input type="checkbox" name="learningEnabled" ${cfg.learningEnabled!==false?"checked":""}> Ucz się z moich korekt stylu</label><label><input type="checkbox" name="safeAutoApply" ${cfg.safeAutoApply!==false?"checked":""}> Automatycznie zapisuj redakcje</label><label>Zatwierdzeń przed autonomią<input type="number" name="approvalWarmupCount" min="0" max="20" value="${esc(cfg.approvalWarmupCount??0)}"></label><label>Min. akceptacja pól (%)<input type="number" name="learnedAutoApplyThreshold" min="60" max="100" value="${esc(Math.round(Number(cfg.learnedAutoApplyThreshold||.86)*100))}"></label><label>Próg pewności (%)<input type="number" name="confidenceThreshold" min="75" max="100" value="${esc(Math.round(Number(cfg.confidenceThreshold||.92)*100))}"></label><label>Automatyczne / dzień<input type="number" name="automaticDailyLimit" min="0" max="400" value="${esc(cfg.automaticDailyLimit??200)}"></label><label>Analiz na cykl<input type="number" name="automaticBatchSize" min="1" max="12" value="${esc(cfg.automaticBatchSize||10)}"></label><label>Wszystkie / dzień<input type="number" name="dailyLimit" min="1" max="500" value="${esc(cfg.dailyLimit||240)}"></label><label>Pamięć wyniku (godz.)<input type="number" name="cacheHours" min="1" max="168" value="${esc(cfg.cacheHours||24)}"></label><label>Historia decyzji (dni)<input type="number" name="decisionRetentionDays" min="7" max="90" value="${esc(cfg.decisionRetentionDays||30)}"></label></div></form><section class="panel agent-specialist-history"><div class="order-section-head"><div><span class="order-pro-label">Pełny audyt pracy</span><h2>Co agenci rzeczywiście wykonali</h2><p class="order-detail-lead">Każdy wynik ma prompt OpenAI, model wykonawczy, wersję reguł, pewność, użyte tokeny i stan zapisu.</p></div><button class="btn ghost" onclick="agentAISpecjalisciPobierz(false)">↻ Odśwież</button></div><div>${history.slice(0,30).map(run=>agentAISpecjalistaWynikHTML(run,true)).join("")||`<div class="agent-ops-empty">Historia pojawi się po najbliższym cyklu serwera.</div>`}</div></section></section>`;
+  return `<section class="agent-specialists-page"><section class="panel agent-specialists-hero"><div><span class="order-pro-label">Stała gotowość • cykl co ${esc(data.policy?.cycleMinutes||15)} minut</span><h2>✦ Zespół agentów OpenAI + routing modeli OpenAI</h2><p>Każda rola ma opublikowany, wersjonowany profil w OpenAI Platform. Serwer wywołuje profil przez Responses API, a bezpieczny fallback uruchamia wyłącznie przy błędzie referencji platformy. Strażnik Allegro uzupełnia redaktora i przejmuje tylko treści zatrzymane przez kontrolę zgodności.</p></div><div><strong>${esc(data.model||"model routowany")} • reguły ${esc(data.promptVersion||"—")}</strong><span class="lvl ${data.configured&&data.platformAgents?.configured&&cfg.automaticEnabled!==false?"lvl-ok":"lvl-blad"}">${data.configured&&data.platformAgents?.configured&&cfg.automaticEnabled!==false?`● ${specialists.length} ról OpenAI aktywnych`:"automatyka zatrzymana"}</span><button class="btn ghost" onclick="agentAISpecjalisciCykl()" ${state.running?"disabled":""}>${state.running?"⏳ Kontroluję…":"↻ Sprawdź teraz"}</button></div></section>${autonomyHTML}<div class="orders-stat-grid"><div class="order-stat-card money"><span>🧭</span><b>${esc(stats.open||0)}</b><small>decyzji dla Ciebie</small></div><div class="order-stat-card"><span>✅</span><b>${esc(last.autoApplied||0)}</b><small>bezpiecznie zapisano w cyklu</small></div><div class="order-stat-card"><span>✦</span><b>${specialists.length}</b><small>aktywnych ról specjalistycznych</small></div><div class="order-stat-card"><span>🪙</span><b>${esc(usage.automaticToday||0)} / ${esc(cfg.automaticDailyLimit||200)}</b><small>automatycznych analiz dzisiaj</small></div></div>${progressHTML}<section class="panel agent-proposal-board"><div class="order-section-head"><div><span class="order-pro-label">Tylko sprawy wymagające człowieka</span><h2>Decyzje i propozycje Agenta</h2><p class="order-detail-lead">Opisy nie pojawiają się tutaj. Zewnętrzne działania nadal wymagają zgody: ${esc(never)}.</p></div><span class="lvl ${stats.high?"lvl-blad":decisions.length?"lvl-ostrzezenie":"lvl-ok"}">${decisions.length?`${decisions.length} otwartych`:`wszystko pod kontrolą`}</span></div><div class="agent-proposal-list">${decisions.map(agentAISpecjalistaDecyzjaHTML).join("")||`<div class="agent-ops-empty">✅ Brak trudnych decyzji. Zespół nadal kontroluje sklep automatycznie co 15 minut.</div>`}</div></section><div class="agent-specialist-grid">${specialists.map(item=>`<article><span>${esc(item.icon||"✦")}</span><div><b>${esc(item.platformName||item.label)}</b><small>${esc(item.area)} • ${esc(item.platformPrompt?.id?item.platformPrompt.id.slice(0,10)+"…":"brak promptu")} • wersja ${esc(item.platformPrompt?.version||"—")}</small><p>${esc(item.description)}</p></div><i class="agent-role-live">● ${item.platformAvailable===false?"tryb awaryjny":"połączony"}</i></article>`).join("")}</div><details class="panel agent-specialist-manual"><summary>＋ Dodatkowe ręczne zadanie dla wybranej roli</summary><div class="agent-specialist-workspace"><form class="agent-specialist-form" onsubmit="return agentAISpecjalistaFormularz(event)"><label>Specjalista<select name="specialist">${specialists.map(item=>`<option value="${esc(item.id)}">${esc(item.icon)} ${esc(item.label)} • ${esc(item.area)}</option>`).join("")}</select></label><label>Co ma przygotować?<input name="instruction" maxlength="3000" placeholder="Np. przygotuj kampanię weekendową i tekst bannera"></label><label>Potwierdzone fakty<textarea name="material" rows="7" maxlength="12000" placeholder="Produkt, grupa odbiorców, rabat, daty lub obecna treść…"></textarea></label><button class="btn" type="submit" ${state.running?"disabled":""}>✦ Przygotuj dodatkowy szkic</button></form><aside>${active?agentAISpecjalistaWynikHTML(active):`<div class="agent-specialist-empty"><span>✦</span><b>Wynik pojawi się tutaj</b></div>`}</aside></div></details><form class="panel agent-specialist-settings" onsubmit="return agentAISpecjalisciZapiszUstawienia(event)"><div class="order-section-head"><div><span class="order-pro-label">Przepustowość automatyki</span><h2>Tempo przygotowania całego katalogu</h2><p class="order-detail-lead">Treści produktów zapisują się samodzielnie. Ustawienia określają wyłącznie tempo i dzienny limit użycia modelu.</p></div><button class="btn" type="submit" ${state.saving?"disabled":""}>💾 Zapisz ustawienia</button></div><div><label><input type="checkbox" name="enabled" ${cfg.enabled!==false?"checked":""}> Role aktywne</label><label><input type="checkbox" name="automaticEnabled" ${cfg.automaticEnabled!==false?"checked":""}> Czuwanie co 15 min</label><label><input type="checkbox" name="learningEnabled" ${cfg.learningEnabled!==false?"checked":""}> Ucz się z moich korekt stylu</label><label><input type="checkbox" name="safeAutoApply" ${cfg.safeAutoApply!==false?"checked":""}> Automatycznie zapisuj redakcje</label><label>Zatwierdzeń przed autonomią<input type="number" name="approvalWarmupCount" min="0" max="20" value="${esc(cfg.approvalWarmupCount??0)}"></label><label>Min. akceptacja pól (%)<input type="number" name="learnedAutoApplyThreshold" min="60" max="100" value="${esc(Math.round(Number(cfg.learnedAutoApplyThreshold||.86)*100))}"></label><label>Próg pewności (%)<input type="number" name="confidenceThreshold" min="75" max="100" value="${esc(Math.round(Number(cfg.confidenceThreshold||.92)*100))}"></label><label>Automatyczne / dzień<input type="number" name="automaticDailyLimit" min="0" max="400" value="${esc(cfg.automaticDailyLimit??200)}"></label><label>Analiz na cykl<input type="number" name="automaticBatchSize" min="1" max="12" value="${esc(cfg.automaticBatchSize||10)}"></label><label>Wszystkie / dzień<input type="number" name="dailyLimit" min="1" max="500" value="${esc(cfg.dailyLimit||240)}"></label><label>Pamięć wyniku (godz.)<input type="number" name="cacheHours" min="1" max="168" value="${esc(cfg.cacheHours||24)}"></label><label>Historia decyzji (dni)<input type="number" name="decisionRetentionDays" min="7" max="90" value="${esc(cfg.decisionRetentionDays||30)}"></label></div></form><section class="panel agent-specialist-history"><div class="order-section-head"><div><span class="order-pro-label">Pełny audyt pracy</span><h2>Co agenci rzeczywiście wykonali</h2><p class="order-detail-lead">Każdy wynik ma prompt OpenAI, model wykonawczy, wersję reguł, pewność, użyte tokeny i stan zapisu.</p></div><button class="btn ghost" onclick="agentAISpecjalisciPobierz(false)">↻ Odśwież</button></div><div>${history.slice(0,30).map(run=>agentAISpecjalistaWynikHTML(run,true)).join("")||`<div class="agent-ops-empty">Historia pojawi się po najbliższym cyklu serwera.</div>`}</div></section></section>`;
 }
 function agentAIInicjatywaPanelHTML(){
   const data=agentAISpecjalisci.data||{},learning=data.learning?.productContent||{},decisions=(data.decisions||[]).filter(item=>item.kind==="product_content_review"),history=data.history||[],last=data.lastCycle||{},usage=data.usage||{},limit=usage.dailyLimitReached||usage.automaticLimitReached||last.limitReached;
@@ -4771,8 +4841,8 @@ async function allegroRozstrzygnijDuplikaty(event,productId){
     toast(`Wycofuję ${withdrawOfferIds.length} duplikat(y) i zachowuję ofertę ${keepOfferId}…`);
     const d=await chmura("allegro-resolve-duplicate",{method:"POST",body:{productId:String(productId),keepOfferId,withdrawOfferIds},timeout:120000});
     allegroOferty=Array.isArray(d.offers)?d.offers:allegroOferty;allegroMapowania=d.mappings||allegroMapowania;
-    produktyEdytowane[productId]={...(produktyEdytowane[productId]||{}),allegroOfferId:keepOfferId,allegroDuplicateResolvedAt:d.updated_at||new Date().toISOString()};
-    zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();allegroZapiszCache();toast(`✅ Pozostawiono ${keepOfferId}; wycofano ${withdrawOfferIds.length} ofert bez usuwania ich historii`);renderuj();
+    podmienProduktAdminBezRenderu(productId,{allegroOfferId:keepOfferId,allegroDuplicateResolvedAt:d.updated_at||new Date().toISOString()},[]);
+    zbudujProdukty();allegroZapiszCache();toast(`✅ Pozostawiono ${keepOfferId}; wycofano ${withdrawOfferIds.length} ofert bez usuwania ich historii`);renderuj();
   }catch(e){toast("⚠️ Rozstrzyganie duplikatów: "+(e.message||e));if(button)button.disabled=false;}
 }
 function allegroCentrumDuplikatowHTML(audyt=allegroAudytDuplikatow(),options={}){
@@ -4818,7 +4888,7 @@ async function allegroMapujOferte(offerId,productId,options={}){
       const produkt=pobierzProduktAdmin(id)||produktyDoAdministracji().find(p=>String(p.id)===id);
       if(produkt)try{
         synchronizacja=await chmura("allegro-create-product-offer",{method:"POST",body:{product:{...produkt,allegroOfferId:String(offerId)},mappedOfferId:String(offerId),options:{publicationAction:"keep",preserveStock:true,syncReason:"manual-mapping"}},timeout:120000});
-        allegroZapiszAutoUzupelnienia(produkt,synchronizacja);allegroZastosujWynikWystawienia(produkt,synchronizacja);
+        await allegroZapiszAutoUzupelnienia(produkt,synchronizacja);allegroZastosujWynikWystawienia(produkt,synchronizacja);
       }catch(e){bladSynchronizacji=e;}
     }
     if(id)await chmuraWczytajStan().catch(()=>{});allegroZapiszCache();
@@ -5052,7 +5122,7 @@ async function allegroWczytajDane(cicho=false,odswiezWidok=true,scope="all"){
     allegroDaneLadowane.add(zakres);allegroStan={...allegroStan,ladowanie:true};
     try{
       const d=await chmura("allegro-data",{params:{scope:zakres},timeout:20000});
-      allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,error:"",offerDefaultsAudit:d.offerDefaultsAudit||allegroStan.offerDefaultsAudit||{items:{},updated_at:null},catalogMaintenance:d.catalogMaintenance||allegroStan.catalogMaintenance||{cursor:0,lastRun:null},complianceAudit:d.complianceAudit||allegroStan.complianceAudit||{items:[],summary:{},updated_at:null},offerSyncState:d.offerSyncState||allegroStan.offerSyncState||{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null},offerSettings:d.offerSettings||allegroStan.offerSettings||{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autonomousAgentMinutes:15,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,updated_at:null}};
+      allegroStan={...allegroStan,...(d.allegro||{}),sprawdzono:true,error:"",offerDefaultsAudit:d.offerDefaultsAudit||allegroStan.offerDefaultsAudit||{items:{},updated_at:null},catalogMaintenance:d.catalogMaintenance||allegroStan.catalogMaintenance||{cursor:0,lastRun:null},complianceAudit:d.complianceAudit||allegroStan.complianceAudit||{items:[],summary:{},updated_at:null},offerSyncState:d.offerSyncState||allegroStan.offerSyncState||{lastLightSyncAt:null,lastFullSyncAt:null,nextLightSyncAt:null,nextFullSyncAt:null},offerSettings:d.offerSettings||allegroStan.offerSettings||{defaultStock:5,republish:true,producers:["Alexander","Multigra","GoDan","Gabo"],autoCatalog:true,syncDescriptions:true,autoUpdateOffers:true,autoFees:true,autoCorrections:true,autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autonomousAgentMinutes:15,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,updated_at:null}};
       if(Array.isArray(d.orders))allegroZamowienia=d.orders;
       if(Array.isArray(d.offers))allegroOferty=d.offers;
       if(d.mappings&&typeof d.mappings==="object")allegroMapowania=d.mappings;
@@ -5281,12 +5351,12 @@ async function allegroDodajProduktZOferty(offerId){
   };
   if(o.descriptionText) p.opis=o.descriptionText;
   const poprawiony=agentAIPoprawOpisyDanychProduktu(p);
+  await utworzProduktCentralnie(poprawiony,"dodany");
   produktyDodane.push(poprawiony);
-  zapiszLS("artway_produkty_dodane",produktyDodane);
   zbudujProdukty();
   await allegroMapujOferte(o.id,id,{syncOffer:false});
   const onboardingProduct=pobierzProduktAdmin(id)||poprawiony,onboardingState=agentAIStanWdrozeniaProduktu(onboardingProduct),onboardingStatus=onboardingState.ready?"completed":"needs_attention";
-  zapiszPolaProduktuLokalnie(id,{agentOnboardingStatus:onboardingStatus,agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingCompletedAt:onboardingStatus==="completed"?new Date().toISOString():"",agentOnboardingMissing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)},false);
+  await zapiszPolaProduktuTrwale(id,{agentOnboardingStatus:onboardingStatus,agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingCompletedAt:onboardingStatus==="completed"?new Date().toISOString():"",agentOnboardingMissing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)},false,"allegro-product-onboarding");
   zapiszHistorieAgenta("wdrozenie-produktu",`${onboardingStatus==="completed"?"Zakończono":"Rozpoczęto"} wdrożenie produktu utworzonego z Allegro: ${poprawiony.nazwa}`,{produktId:id,status:onboardingStatus,missing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)});zaplanujZapisUstawien();
   toast("Produkt utworzony z Allegro i podpięty");
 }
@@ -5381,18 +5451,17 @@ async function allegroDobierzKategorieProduktu(id=0,btn=null){
   }catch(e){ toast("⚠️ Kategorie Allegro: "+(e.message||e)); }
   finally{ if(btn)btn.disabled=false; }
 }
-function allegroZapiszKategorieProduktu(id,categoryId){
+async function allegroZapiszKategorieProduktu(id,categoryId){
   if(!id||!categoryId) return false;
   const p=pobierzProduktAdmin(id);
   if(p?.allegroCategoryId) return false;
-  produktyEdytowane[id]={...(produktyEdytowane[id]||{}),allegroCategoryId:String(categoryId)};
-  zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+  await chmuraZapiszProduktyCentralnie([{productId:id,fields:{allegroCategoryId:String(categoryId)}}],"allegro-category-selection");
   zbudujProdukty();
   return true;
 }
 function allegroTrybPublikacji(){ return String(document.getElementById("allegroPublicationAction")?.value||"keep"); }
 function allegroListaProducentow(){
-  const ustawione=Array.isArray(allegroStan.offerSettings?.producers)&&allegroStan.offerSettings.producers.length?allegroStan.offerSettings.producers:["Alexander","Multigra","GoDan"];
+  const ustawione=Array.isArray(allegroStan.offerSettings?.producers)&&allegroStan.offerSettings.producers.length?allegroStan.offerSettings.producers:["Alexander","Multigra","GoDan","Gabo"];
   return [...new Set([...ustawione,...(producenciKartoteka||[]).filter(p=>p.active!==false).map(p=>p.name||p.nazwa)].map(normalizujNazweProducenta).filter(Boolean))];
 }
 function allegroProducentKanoniczny(p={}){
@@ -5405,12 +5474,19 @@ function allegroProducentKanoniczny(p={}){
   if(/go dan|godan|godanparty/.test(text))return find("GoDan");
   return "";
 }
-function zapiszPolaProduktuLokalnie(id,fields={},tylkoBrakujace=false){
-  const key=String(id),idx=produktyDodane.findIndex(x=>String(x.id)===key),base=idx>=0?produktyDodane[idx]:(produktyEdytowane[key]||{}),effective=idx>=0?base:(pobierzProduktAdmin(id)||base),next={...base};let changed=false;
-  for(const [field,value] of Object.entries(fields)){if(value===undefined||value===null||value==="")continue;if(tylkoBrakujace&&(effective[field]!==undefined&&effective[field]!==null&&String(effective[field]).trim()!==""))continue;if(JSON.stringify(next[field])!==JSON.stringify(value)){next[field]=value;changed=true;}}
-  if(!changed)return false;
-  if(idx>=0){produktyDodane[idx]=next;zapiszLS("artway_produkty_dodane",produktyDodane);}else{produktyEdytowane={...produktyEdytowane,[key]:next};zapiszLS("artway_produkty_edytowane",produktyEdytowane);}
-  zbudujProdukty();return true;
+async function zapiszPolaProduktuTrwale(id,fields={},tylkoBrakujace=false,area="admin-product-editor"){
+  const key=String(id??"").trim(),effective=pobierzProduktAdmin(id)||{},changedFields={};
+  if(!key)throw new Error("Brak identyfikatora produktu do zapisu.");
+  for(const [field,value] of Object.entries(fields)){
+    if(value===undefined||value===null)continue;
+    if(tylkoBrakujace&&(effective[field]!==undefined&&effective[field]!==null&&String(effective[field]).trim()!==""))continue;
+    if(JSON.stringify(effective[field])!==JSON.stringify(value))changedFields[field]=value;
+  }
+  if(!Object.keys(changedFields).length)return false;
+  const result=await chmuraZapiszProduktyCentralnie([{productId:key,fields:changedFields}],area);
+  if(result?.confirmed!==true)throw new Error("Serwer nie potwierdził trwałego zapisu produktu.");
+  zbudujProdukty();
+  return true;
 }
 function allegroZastosujWynikWystawienia(p,d={}){
   const id=String(d.offer?.id||p.allegroOfferId||"").trim();
@@ -5446,7 +5522,7 @@ function allegroTekstZBezpiecznychSekcji(sections=[]){
   const el=document.createElement("textarea");el.innerHTML=withBreaks;
   return String(el.value||"").replace(/<[^>]+>/g,"").replace(/[ \t]+\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
 }
-function allegroZapiszAutoUzupelnienia(p,d={}){
+async function allegroZapiszAutoUzupelnienia(p,d={}){
   if(!p?.id)return false;
   const auto=d.autoFilled||{},catalog=d.catalogMatch?.selected||{},category=d.categorySuggestion?.selected||{};
   const canonical=allegroProducentKanoniczny({...p,producent:auto.producent||p.producent,marka:auto.marka||p.marka});
@@ -5480,9 +5556,9 @@ function allegroZapiszAutoUzupelnienia(p,d={}){
     uzupelnijPoleFormularza(form,"opis",safeFull,true);
     uzupelnijPoleFormularza(form,"allegroShippingSubsidy",next.allegroShippingSubsidy,false);
   }
-  if(canonical){const producerFields={producent:canonical,...(!p.marka&&!auto.marka?{marka:canonical}:{})};if(zapiszPolaProduktuLokalnie(p.id,producerFields,false))changed=true;delete next.producent;if(p.marka||auto.marka)delete next.marka;}
-  const missingSaved=Object.keys(next).length?zapiszPolaProduktuLokalnie(p.id,next,true):false;
-  const forcedSaved=Object.keys(force).length?zapiszPolaProduktuLokalnie(p.id,force,false):false;
+  if(canonical){const producerFields={producent:canonical,...(!p.marka&&!auto.marka?{marka:canonical}:{})};if(await zapiszPolaProduktuTrwale(p.id,producerFields,false,"allegro-auto-fill"))changed=true;delete next.producent;if(p.marka||auto.marka)delete next.marka;}
+  const missingSaved=Object.keys(next).length?await zapiszPolaProduktuTrwale(p.id,next,true,"allegro-auto-fill"):false;
+  const forcedSaved=Object.keys(force).length?await zapiszPolaProduktuTrwale(p.id,force,false,"allegro-auto-fill"):false;
   return missingSaved||forcedSaved||changed;
 }
 async function allegroPrzygotujSzkicProduktu(id){
@@ -5491,7 +5567,7 @@ async function allegroPrzygotujSzkicProduktu(id){
   if(!produkt) return;
   try{
     toast("🤖 Agent przygotowuje i zapisuje komplet danych Allegro…");
-    zapiszPolaProduktuLokalnie(id,produkt,false);
+    await zapiszPolaProduktuTrwale(id,produkt,false,"allegro-editor-preparation");
     const result=await asortymentPrzygotujProduktDoAllegro(pobierzProduktAdmin(id)||produkt,{refreshSource:true}),d=result.draft,cloudSaved=await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
     allegroPokazKategorieWFormularzu(d.categorySuggestion);
     const brak=result.missing.join(", ")||"brak";
@@ -5500,7 +5576,7 @@ async function allegroPrzygotujSzkicProduktu(id){
     toast(`${cloudSaved?"✅":"⚠️"} ${msg}${cloudSaved?"":" • serwer ponowi synchronizację"}`);
     const box=document.getElementById("allegroDraftPreview");
     if(box) box.innerHTML=`<div class="backend-note ${result.ready?"duplicate-audit-ok":""}"><b>${result.ready?"✅ Przygotowanie zapisane":"⚠️ Poprawki zapisane — pozostały braki"}</b><br><small>${result.savedFields.length?`Zmieniono: ${esc(asortymentEtykietyPol(result.savedFields).join(", "))}`:"Kontrola nie wymagała zmiany istniejących danych."} • serwer: ${cloudSaved?"zapis potwierdzony":"ponowna próba w toku"}</small></div>${allegroKategorieHTML(d.categorySuggestion)}${cat?`<div class="backend-note">Dobrana kategoria: <b>${esc(cat.name)}</b> (${esc(cat.id)})</div>`:""}${allegroDraftDiagnostykaHTML(d,msg,brak)}`;
-  }catch(e){ allegroZapiszAutoUzupelnienia(produkt,e);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Szkic Allegro: "+(e.message||e)); }
+  }catch(e){ await allegroZapiszAutoUzupelnienia(produkt,e).catch(()=>false);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Szkic Allegro: "+(e.message||e)); }
 }
 async function allegroWystawProdukt(id){
   const form=document.querySelector("form.product-editor-form");
@@ -5508,7 +5584,7 @@ async function allegroWystawProdukt(id){
   if(!produkt) return;
   try{
     toast("🤖 Najpierw przygotowuję i zapisuję pełne dane produktu…");
-    zapiszPolaProduktuLokalnie(id,produkt,false);
+    await zapiszPolaProduktuTrwale(id,produkt,false,"allegro-editor-publication");
     const preparation=await asortymentPrzygotujProduktDoAllegro(pobierzProduktAdmin(id)||produkt,{refreshSource:true});
     if(!preparation.ready){
       await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
@@ -5523,15 +5599,14 @@ async function allegroWystawProdukt(id){
     allegroOstatniBladWystawienia=null;
     allegroZapiszWynikOperacji(produktGotowy,d);
     allegroPokazKategorieWFormularzu(d.categorySuggestion);
-    allegroZapiszAutoUzupelnienia(produktGotowy,d);
+    await allegroZapiszAutoUzupelnienia(produktGotowy,d);
     toast(remoteStatus==="ACTIVE"?"✅ Oferta zapisana i aktywna w Allegro":`🧾 Oferta zapisana • status Allegro: ${remoteStatus||"weryfikacja w toku"}`);
     if(d.offer?.id){
       const selectedCat=d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||d.categorySuggestion?.selected?.id||form.elements.allegroCategoryId?.value||"";
-      produktyEdytowane[id]={...(produktyEdytowane[id]||{}),allegroOfferId:String(d.offer.id),...(selectedCat?{allegroCategoryId:String(selectedCat)}:{}),...(d.catalogMatch?.selected?.id?{allegroProductId:String(d.catalogMatch.selected.id)}:{})};
-      zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+      await chmuraZapiszProduktyCentralnie([{productId:id,fields:{allegroOfferId:String(d.offer.id),...(selectedCat?{allegroCategoryId:String(selectedCat)}:{}),...(d.catalogMatch?.selected?.id?{allegroProductId:String(d.catalogMatch.selected.id)}:{})}}],"allegro-editor-publication");
       allegroZastosujWynikWystawienia(produktGotowy,d);
       await allegroPobierzProwizjeProduktu(id,null,{silent:true}).catch(()=>null);
-      zapiszPolaProduktuLokalnie(id,{allegroAgentPreparationStatus:remoteStatus==="ACTIVE"?"published":"draft",allegroAgentPublishedAt:remoteStatus==="ACTIVE"?new Date().toISOString():"",allegroOfferId:String(d.offer.id),allegroAgentPublicationError:"",...(d.catalogRecovery?.applied?{allegroCatalogAutoRepairedAt:new Date().toISOString()}: {})},false);
+      await zapiszPolaProduktuTrwale(id,{allegroAgentPreparationStatus:remoteStatus==="ACTIVE"?"published":"draft",allegroAgentPublishedAt:remoteStatus==="ACTIVE"?new Date().toISOString():"",allegroOfferId:String(d.offer.id),allegroAgentPublicationError:"",...(d.catalogRecovery?.applied?{allegroCatalogAutoRepairedAt:new Date().toISOString()}: {})},false,"allegro-editor-publication");
       const cloudSaved=await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
       await allegroWczytajDane(true).catch(()=>{});
       zbudujProdukty();
@@ -5539,7 +5614,7 @@ async function allegroWystawProdukt(id){
     }
   }catch(e){
     allegroOstatniBladWystawienia=e;
-    allegroZapiszAutoUzupelnienia(produkt,e);
+    await allegroZapiszAutoUzupelnienia(produkt,e).catch(()=>false);
     if(e.agentTask)await chmuraWczytajStan().catch(()=>{});
     allegroPokazKategorieWFormularzu(e.categorySuggestion);
     const box=document.getElementById("allegroDraftPreview");
@@ -5592,10 +5667,10 @@ function agentAIDodajProduktZAnalizy(button){
   const kontrola=produktDodawanieAktualizuj(form);if(!kontrola?.canSubmit){form?.querySelector("[data-product-add-control]")?.scrollIntoView({behavior:"smooth",block:"start"});toast(kontrola?.potential&&!kontrola.acknowledged?"Najpierw zdecyduj, czy podobna pozycja jest innym produktem":"Najpierw zakończ kontrolę danych i duplikatów");return;}
   form.dataset.agentAdd="1";form.dataset.agentLinkConfidence=String(selected>=0?d.alternatives?.[selected]?.confidence||d.confidence||0:d.confidence||0);const approval=form.querySelector("[data-product-final-approval]");approval?.scrollIntoView({behavior:"smooth",block:"center"});approval?.focus();toast("Dane są gotowe — sprawdź formularz i zatwierdź dodanie produktu");
 }
-function agentAIAktualizujIstniejacyZAnalizy(id,button){
+async function agentAIAktualizujIstniejacyZAnalizy(id,button){
   const d=agentAIImportUrlStan.data||{},selected=agentAIImportUrlStan.selected,source=agentAIWybranyProduktImportu(d,selected);if(!source?.nazwa){toast("Brak danych analizy do aktualizacji");return;}
   const category=agentAIDobierzKategorieProduktu(source),canonical=allegroProducentKanoniczny(source),fields={...source,kategoria:category.name||source.kategoria||"",producent:canonical||source.producent||source.marka||"",marka:source.marka||canonical||source.producent||"",agentImportAt:new Date().toISOString(),agentImportConfidence:selected>=0?d.alternatives?.[selected]?.confidence||d.confidence||0:d.confidence||0,agentImportSource:d.fromCache?"pamięć Agenta":"link producenta"};delete fields.id;
-  zapiszPolaProduktuLokalnie(id,fields,true);const updated=pobierzProduktAdmin(id)||{id,...fields};agentAIZakonczLinkProducenta(updated.sourceUrl||updated.producentUrl,updated);zapiszHistorieAgenta("produkt-z-linku",`Agent uzupełnił istniejący produkt #${id}: ${updated.nazwa||source.nazwa}`,{produktId:id,zrodlo:fields.agentImportSource,confidence:fields.agentImportConfidence});if(chmuraToken)void chmuraZapiszUstawienia();toast("Istniejący produkt uzupełniony — nie utworzono duplikatu");location.hash=`#/admin/produkty/edytuj/${encodeURIComponent(String(id))}`;
+  await zapiszPolaProduktuTrwale(id,fields,true,"agent-product-source-import");const updated=pobierzProduktAdmin(id)||{id,...fields};agentAIZakonczLinkProducenta(updated.sourceUrl||updated.producentUrl,updated);zapiszHistorieAgenta("produkt-z-linku",`Agent uzupełnił istniejący produkt #${id}: ${updated.nazwa||source.nazwa}`,{produktId:id,zrodlo:fields.agentImportSource,confidence:fields.agentImportConfidence});toast("Istniejący produkt uzupełniony i potwierdzony na serwerze");location.hash=`#/admin/produkty/edytuj/${encodeURIComponent(String(id))}`;
 }
 function agentAIWariantyJednegoLinkuHTML(d={}){
   const alternatives=Array.isArray(d.alternatives)?d.alternatives:[];
@@ -5898,7 +5973,22 @@ function allegroBrakiProduktuDoWystawienia(p){
   if(!poprawnaNazwaProducenta(p.producent||p.marka)) braki.push("prawidłowa nazwa producenta");
   if(!(p.zdjecie||(p.zdjecia||[]).length)) braki.push("zdjęcie");
   if(!p.allegroCategoryId) braki.push("ID kategorii Allegro");
-  return braki;
+  const agentStatus=String(p.allegroAgentPreparationStatus||"").toLowerCase();
+  const agentMissing=Array.isArray(p.allegroAgentPreparationMissing)?p.allegroAgentPreparationMissing.map(String).filter(Boolean):[];
+  const hasOffer=!!String(p.allegroOfferId||"").trim()||(typeof allegroOfertaDlaProduktuSklepu==="function"&&!!allegroOfertaDlaProduktuSklepu(p));
+  if(!hasOffer){
+    const currentFingerprint=typeof asortymentSygnaturaPrzygotowania==="function"?asortymentSygnaturaPrzygotowania(p):"";
+    const serverConfirmed=p.allegroAgentPreparationCurrent;
+    const confirmedPreparation=["ready","published"].includes(agentStatus)
+      &&(serverConfirmed===true||(serverConfirmed===undefined
+        &&Number(p.allegroAgentPreparationVersion)>=4
+        &&!!String(p.allegroAgentPreparationFingerprint||"")
+        &&String(p.allegroAgentPreparationFingerprint)===currentFingerprint))
+      &&agentMissing.length===0;
+    if(agentMissing.length)braki.push(...agentMissing);
+    if(!confirmedPreparation)braki.push(agentStatus==="failed"?"ponowne przygotowanie po błędzie":"aktualne przygotowanie Agenta Allegro");
+  }
+  return [...new Set(braki)];
 }
 function allegroStanOfertyProduktu(){
   const n=Number(allegroStan.offerSettings?.defaultStock??5);
@@ -5932,13 +6022,14 @@ function allegroProceduraAgentaOfertHTML(){
 async function allegroAgentUzupelnijZadanieOferty(taskId){
   const task=(agentAIAllegroZadania||[]).find(x=>String(x.id)===String(taskId));if(!task){toast("Nie znaleziono zadania Agenta AI");return;}
   const p=pobierzProduktAdmin(task.productId);if(!p){toast("Produkt z zadania nie istnieje");return;}
-  const s=task.suggestions||{},next={...(produktyEdytowane[p.id]||{})};
+  const s=task.suggestions||{},next={};
   for(const key of ["producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","allegroCategoryId","allegroProductId"]){
     if(s[key]&&!p[key])next[key]=String(s[key]);
   }
   if(Array.isArray(s.zdjecia)&&s.zdjecia.length&&!(p.zdjecia||[]).length)next.zdjecia=s.zdjecia.slice(0,15);
   if(Array.isArray(s.allegroParameters)&&s.allegroParameters.length&&!Array.isArray(p.allegroParameters))next.allegroParameters=s.allegroParameters;
-  produktyEdytowane[p.id]=next;zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();
+  if(Object.keys(next).length)await chmuraZapiszProduktyCentralnie([{productId:p.id,fields:next}],"agent-allegro-task");
+  zbudujProdukty();
   toast("Agent uzupełnił dostępne dane i ponownie sprawdza szkic…");
   await allegroPrzygotujSzkicProduktZListy(p.id);
 }
@@ -5951,12 +6042,12 @@ async function allegroPrzygotujSzkicProduktZListy(id){
   if(!p){ toast("Nie znaleziono produktu"); return; }
   try{
     const d=await chmura("allegro-offer-draft",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p)}},timeout:60000});
-    allegroZapiszAutoUzupelnienia(p,d);
+    await allegroZapiszAutoUzupelnienia(p,d);
     const cat=d.categorySuggestion?.selected;
-    const saved=cat?.id?allegroZapiszKategorieProduktu(p.id,cat.id):false;
+    const saved=cat?.id?await allegroZapiszKategorieProduktu(p.id,cat.id):false;
     toast(d.ready?`🟠 Szkic Allegro gotowy technicznie${cat?` — kategoria: ${cat.name}`:""}`:`🟠 Braki: ${((d.missing||[]).join(", ")||"brak")}${cat?` • dobrano kategorię: ${cat.name}`:""}`);
     if(saved) renderuj();
-  }catch(e){ allegroZapiszAutoUzupelnienia(p,e);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Szkic Allegro: "+(e.message||e)); }
+  }catch(e){ await allegroZapiszAutoUzupelnienia(p,e).catch(()=>false);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Szkic Allegro: "+(e.message||e)); }
 }
 async function allegroWystawProduktZListy(id){
   const p=pobierzProduktAdmin(id);
@@ -5967,19 +6058,18 @@ async function allegroWystawProduktZListy(id){
     const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p),publishNow:publicationAction==="activate",publicationAction}},timeout:120000});
     allegroOstatniBladWystawienia=null;
     allegroZapiszWynikOperacji(p,d);
-    allegroZapiszAutoUzupelnienia(p,d);
+    await allegroZapiszAutoUzupelnienia(p,d);
     toast(d.operation?.completed===false?`🟠 Oferta ${d.offer?.id||""} jest jeszcze przetwarzana przez Allegro`:d.mode==="updated"?`🟠 Zaktualizowano ofertę ${d.offer?.id||""} bez tworzenia duplikatu`:`🟠 Utworzono nową ofertę ${d.offer?.id||""}`);
     if(d.offer?.id){
       const selectedCat=d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||d.categorySuggestion?.selected?.id||p.allegroCategoryId||"";
-      produktyEdytowane[p.id]={...(produktyEdytowane[p.id]||{}),allegroOfferId:String(d.offer.id),...(selectedCat?{allegroCategoryId:String(selectedCat)}:{}),...(d.catalogMatch?.selected?.id?{allegroProductId:String(d.catalogMatch.selected.id)}:{})};
-      zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+      await chmuraZapiszProduktyCentralnie([{productId:p.id,fields:{allegroOfferId:String(d.offer.id),...(selectedCat?{allegroCategoryId:String(selectedCat)}:{}),...(d.catalogMatch?.selected?.id?{allegroProductId:String(d.catalogMatch.selected.id)}:{})}}],"allegro-publication");
       allegroZastosujWynikWystawienia(p,d);
       await chmuraWczytajStan().catch(()=>{});
       await allegroWczytajDane(true).catch(()=>{});
       zbudujProdukty();
       renderuj();
     }
-  }catch(e){ allegroOstatniBladWystawienia=e;allegroZapiszAutoUzupelnienia(p,e);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Wystawianie Allegro: "+(e.message||e)+" • zadanie przekazano Agentowi AI");renderuj(); }
+  }catch(e){ allegroOstatniBladWystawienia=e;await allegroZapiszAutoUzupelnienia(p,e).catch(()=>false);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Wystawianie Allegro: "+(e.message||e)+" • zadanie przekazano Agentowi AI");renderuj(); }
 }
 async function allegroAktywujProduktZListy(id){
   const p=pobierzProduktAdmin(id);if(!p){toast("Nie znaleziono produktu");return;}
@@ -5989,20 +6079,19 @@ async function allegroAktywujProduktZListy(id){
     toast(`Aktywuję ofertę ${p.nazwa} ze stanem Allegro ${qty} szt.…`);
     const product={...p,allegroStock:qty};
     const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product,options:{stock:qty,publicationAction:"activate",publishNow:true}},timeout:120000});
-    allegroOstatniBladWystawienia=null;allegroZapiszWynikOperacji(product,d);allegroZapiszAutoUzupelnienia(product,d);allegroZastosujWynikWystawienia(product,d);
+    allegroOstatniBladWystawienia=null;allegroZapiszWynikOperacji(product,d);await allegroZapiszAutoUzupelnienia(product,d);allegroZastosujWynikWystawienia(product,d);
     const categoryId=d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||p.allegroCategoryId||"";
     const productId=d.autoFilled?.allegroProductId||d.catalogMatch?.selected?.id||p.allegroProductId||"";
-    produktyEdytowane[p.id]={...(produktyEdytowane[p.id]||{}),allegroStock:qty,allegroOfferId:String(d.offer?.id||p.allegroOfferId||""),...(categoryId?{allegroCategoryId:String(categoryId)}:{}),...(productId?{allegroProductId:String(productId)}:{})};
-    zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+    await chmuraZapiszProduktyCentralnie([{productId:p.id,fields:{allegroStock:qty,allegroOfferId:String(d.offer?.id||p.allegroOfferId||""),...(categoryId?{allegroCategoryId:String(categoryId)}:{}),...(productId?{allegroProductId:String(productId)}:{})}}],"allegro-activation");
     await chmuraWczytajStan().catch(()=>{});await allegroWczytajDane(true).catch(()=>{});zbudujProdukty();
     toast(`✅ Oferta ${d.offer?.id||""} aktywna • stan Allegro ${qty} szt. • magazyn bez zmian`);renderuj();
-  }catch(e){allegroOstatniBladWystawienia=e;allegroZapiszAutoUzupelnienia(p,e);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Aktywacja Allegro: "+(e.message||e));renderuj();}
+  }catch(e){allegroOstatniBladWystawienia=e;await allegroZapiszAutoUzupelnienia(p,e).catch(()=>false);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Aktywacja Allegro: "+(e.message||e));renderuj();}
 }
 async function allegroAktualizujZaznaczoneOfertyDanymiSklepu(){
   const ids=[...zaznaczoneAllegroOferty].slice(0,100),produkty=[...new Map(ids.map(id=>allegroProduktDlaOferty(id)).filter(Boolean).map(p=>[String(p.id),p])).values()];
   if(!produkty.length){toast("Zaznacz powiązane oferty, które mają zostać zaktualizowane danymi sklepu");return;}
   let ok=0,bledy=0;toast(`Aktualizuję ${produkty.length} ofert nowszymi danymi sklepu…`);
-  for(const p of produkty){try{const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p),publicationAction:"keep"}},timeout:120000});allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);ok++;}catch(e){bledy++;allegroOstatniBladWystawienia=e;}}
+  for(const p of produkty){try{const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p),publicationAction:"keep"}},timeout:120000});await allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);ok++;}catch(e){bledy++;allegroOstatniBladWystawienia=e;}}
   zaznaczoneAllegroOferty.clear();await chmuraWczytajStan().catch(()=>{});await allegroWczytajDane(true).catch(()=>{});
   toast(`Synchronizacja ofert: zaktualizowano ${ok}${bledy?` • do Agenta AI / błędy: ${bledy}`:""}`);renderuj();
 }
@@ -6547,20 +6636,21 @@ function rentownoscPolaWeryfikacji(p={},approved=true,at=new Date().toISOString(
   const store=sklepRentownoscProduktu(p),allegro=allegroRentownoscProduktu(p),vonHalsky=vonHalskyRentownoscProduktu(p);
   return {profitabilityReviewed:true,profitabilityReviewedAt:at,profitabilityReviewedBy:sesja?.email||"administrator",profitabilityReviewSignature:rentownoscSygnaturaWeryfikacji(p),profitabilityReviewSnapshot:{storePrice:store.price,allegroPrice:allegro.price,vonHalskyPrice:vonHalsky.price,purchasePrice:kwotaNum(p.cenaZakupu),storeMargin:store.margin,allegroMargin:allegro.margin,vonHalskyMargin:vonHalsky.margin,storeTarget:Number(p.sklepPriceTargetMargin||sklepDocelowaMarza)||0,allegroTarget:Number(p.allegroPriceTargetMargin||allegroDocelowaMarza)||0,vonHalskyTarget:Number(p.vonHalskyPriceTargetMargin||vonHalskyDocelowaMarza)||0},profitabilityReviewRevision:2};
 }
-function rentownoscZapiszWeryfikacje(ids=[],approved=true){
+async function rentownoscZapiszWeryfikacje(ids=[],approved=true){
   const unique=[...new Set(ids.map(String))],products=new Map(produktyDoAdministracji().map(p=>[String(p.id),p])),at=new Date().toISOString();let changed=0;
-  for(const id of unique){const p=products.get(id);if(!p||czyProduktAdminWKoszu(p))continue;const patch=rentownoscPolaWeryfikacji(p,approved,at),idx=produktyDodane.findIndex(x=>String(x.id)===id);if(idx>=0)produktyDodane[idx]={...produktyDodane[idx],...patch};else produktyEdytowane={...produktyEdytowane,[id]:{...(produktyEdytowane[id]||{}),...patch}};changed++;}
+  const operations=[];
+  for(const id of unique){const p=products.get(id);if(!p||czyProduktAdminWKoszu(p))continue;operations.push({productId:id,fields:rentownoscPolaWeryfikacji(p,approved,at)});changed++;}
   if(!changed)return 0;
-  zapiszLS("artway_produkty_dodane",produktyDodane);zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();zaplanujZapisUstawien();
+  await chmuraZapiszProduktyCentralnie(operations,"catalog-profit-review");zbudujProdukty();
   zapiszHistorieAgenta("kontrola-rentownosci",`${approved?"Zatwierdzono":"Cofnięto zatwierdzenie"} kalkulacji rentowności: ${changed}`,{productIds:unique.slice(0,500),approved});
   return changed;
 }
 function ustawFiltrAllegroRentownosc(value="wszystkie"){filtrAllegroRentownosc=value;renderuj();}
-function oznaczRentownoscSprawdzona(productId,approved=true){const changed=rentownoscZapiszWeryfikacje([productId],approved);if(changed)toast(approved?"✅ Produkt oznaczony jako sprawdzony według Twojego ustawienia":"Cofnięto oznaczenie produktu jako sprawdzony");renderuj();}
+async function oznaczRentownoscSprawdzona(productId,approved=true){try{const changed=await rentownoscZapiszWeryfikacje([productId],approved);if(changed)toast(approved?"✅ Produkt oznaczony jako sprawdzony według Twojego ustawienia":"Cofnięto oznaczenie produktu jako sprawdzony");renderuj();}catch(error){toast("⛔ Nie zapisano weryfikacji: "+(error.message||error));}}
 function przelaczZaznaczenieRentownosci(productId,checked){const id=String(productId);checked?zaznaczoneRentownosc.add(id):zaznaczoneRentownosc.delete(id);renderuj();}
 function zaznaczWidoczneRentownosc(){for(const {p} of allegroRentownoscLista().slice(0,500))zaznaczoneRentownosc.add(String(p.id));renderuj();}
 function wyczyscZaznaczenieRentownosci(){zaznaczoneRentownosc.clear();renderuj();}
-function oznaczZaznaczoneRentownosc(approved=true){const ids=[...zaznaczoneRentownosc];if(!ids.length){toast("Najpierw zaznacz produkty");return;}const changed=rentownoscZapiszWeryfikacje(ids,approved);zaznaczoneRentownosc.clear();toast(`${approved?"✅ Oznaczono jako sprawdzone":"Cofnięto oznaczenie"}: ${changed} produktów`);renderuj();}
+async function oznaczZaznaczoneRentownosc(approved=true){const ids=[...zaznaczoneRentownosc];if(!ids.length){toast("Najpierw zaznacz produkty");return;}try{const changed=await rentownoscZapiszWeryfikacje(ids,approved);zaznaczoneRentownosc.clear();toast(`${approved?"✅ Oznaczono jako sprawdzone":"Cofnięto oznaczenie"}: ${changed} produktów`);renderuj();}catch(error){toast("⛔ Nie zapisano weryfikacji: "+(error.message||error));}}
 function rentownoscStatusWeryfikacjiHTML(p={}){const status=rentownoscStatusWeryfikacji(p);if(status==="reviewed"){const snapshot=p.profitabilityReviewSnapshot||{};return `<span class="profit-review-status reviewed"><b>✅ Sprawdzone przeze mnie</b><small>${p.profitabilityReviewedAt?esc(new Date(p.profitabilityReviewedAt).toLocaleString("pl-PL")):"zatwierdzone"}${snapshot.storePrice||snapshot.allegroPrice?` • sklep ${snapshot.storePrice?zl(snapshot.storePrice):"—"} • Allegro ${snapshot.allegroPrice?zl(snapshot.allegroPrice):"—"}`:""}</small></span>`;}if(status==="outdated")return `<span class="profit-review-status outdated"><b>⚠️ Sprawdź ponownie</b><small>Od zatwierdzenia zmieniła się cena, koszt, prowizja lub cel marży.</small></span>`;return `<span class="profit-review-status unreviewed"><b>○ Jeszcze niesprawdzone</b><small>Oznacz po ustawieniu właściwej ceny i marży.</small></span>`;}
 function allegroRentownoscLista(){
   const q=String(szukajAllegroRentownosc||"").toLowerCase().trim();let list=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>({p,r:allegroRentownoscProduktu(p),v:vonHalskyRentownoscProduktu(p)})).filter(({p,r,v})=>{const review=rentownoscStatusWeryfikacji(p);if(q&&!`${p.nazwa||""} ${p.sku||""} ${p.externalId||""} ${p.gtin||p.ean||""} ${p.kodProducenta||p.mpn||""} ${p.producent||""} ${p.kategoria||""}`.toLowerCase().includes(q))return false;if(filtrAllegroRentownosc==="niesprawdzone"&&review!=="unreviewed")return false;if(filtrAllegroRentownosc==="sprawdzone"&&review!=="reviewed")return false;if(filtrAllegroRentownosc==="nieaktualne"&&review!=="outdated")return false;if(filtrAllegroRentownosc==="kompletne"&&!r.dataComplete)return false;if(filtrAllegroRentownosc==="brak_prowizji"&&p.allegroFeeCalculatedAt)return false;if(filtrAllegroRentownosc==="strata"&&r.profit>=0)return false;if(filtrAllegroRentownosc==="niska"&&(!r.dataComplete||r.margin>=allegroDocelowaMarza))return false;if(filtrAllegroRentownosc==="oplacalne"&&(!r.dataComplete||r.margin<allegroDocelowaMarza))return false;if(filtrAllegroRentownosc==="vonhalsky_niska"&&(!v.dataComplete||v.margin>=vonHalskyDocelowaMarza))return false;if(filtrAllegroRentownosc==="vonhalsky_oplacalne"&&(!v.dataComplete||v.margin<vonHalskyDocelowaMarza))return false;return true;});
@@ -6602,8 +6692,11 @@ async function zapiszSzybkaCeneVonHalsky(button,productId){
 async function przywrocDziedziczenieCenyVonHalsky(button,productId){
   const p=produktDlaWyboruMarzy(productId);if(!p)return;
   button.disabled=true;button.textContent="⏳ Zapisuję…";
-  zapiszPolaProduktuLokalnie(productId,{cenaVonHalsky:"",vonHalskyPriceRecommendedAt:new Date().toISOString()},false);zaplanujZapisUstawien();
-  const ok=await chmuraZapiszUstawienia({flush:true});toast(ok?"🐕 Von Halsky ponownie dziedziczy cenę Allegro.":"⚠️ Zmiana została zachowana lokalnie i oczekuje na synchronizację.");renderuj();
+  try{
+    await zapiszPolaProduktuTrwale(productId,{cenaVonHalsky:"",vonHalskyPriceRecommendedAt:new Date().toISOString()},false,"von-halsky-price-inheritance");
+    toast("🐕 Von Halsky ponownie dziedziczy cenę Allegro.");renderuj();
+  }catch(error){toast("⚠️ Nie zapisano zmiany ceny: "+(error.message||error));}
+  finally{button.disabled=false;}
 }
 function rentownoscKanalowaWierszHTML({p,r}={}){
   const s=sklepRentownoscProduktu(p),vonTarget=Math.max(.1,Math.min(75,Number(p.vonHalskyPriceTargetMargin||vonHalskyDocelowaMarza)||vonHalskyDocelowaMarza)),v=vonHalskyRentownoscProduktu(p,null,vonTarget),offerId=String(p.allegroOfferId||allegroOfertaDlaProduktuSklepu(p)?.id||"");
@@ -7692,7 +7785,7 @@ function allegroUstawieniaPanelHTML(){
       </section>
       <section class="allegro-settings-section">
         <div class="allegro-settings-section-head"><div><span>📦</span><div><h3>Domyślne dane oferty</h3><p>Stan ofertowy pozostaje niezależny od fizycznego stanu magazynu. Automatyczne wznawianie jest zawsze aktywne.</p></div></div></div>
-        <div class="allegro-settings-grid"><label>Domyślny stan każdej oferty<input name="defaultStock" type="number" min="1" max="99999" step="1" required value="${offerStock}"><small>Nowe i aktualizowane oferty otrzymają tę wartość.</small></label><label>Dozwoleni producenci<textarea name="producers" rows="4" required>${esc(allegroListaProducentow().join("\n"))}</textarea><small>Po jednym producencie w wierszu.</small></label></div>
+        <div class="allegro-settings-grid"><label>Domyślny stan każdej oferty<input name="defaultStock" type="number" min="1" max="99999" step="1" required value="${offerStock}"><small>Nowe i aktualizowane oferty otrzymają tę wartość.</small></label><label>Znani producenci i aliasy<textarea name="producers" rows="4" required>${esc(allegroListaProducentow().join("\n"))}</textarea><small>Lista pomaga rozpoznawać nazwy w tekście. Nie ogranicza innych producentów zapisanych w kartotece lub źródle.</small></label></div>
         <label class="check allegro-apply-existing"><input type="checkbox" name="applyExisting"> Zastosuj stan i wznawianie także do wszystkich ${allegroOferty.length} istniejących ofert</label>
         ${audit.length?`<small class="allegro-settings-audit">Ostatni audyt: ${audit.length-auditOpen} bez problemu • ${auditOpen} wymaga uzupełnienia.</small>`:""}
       </section>
@@ -8343,6 +8436,10 @@ let asortymentWynikiCache={index:null,signature:"",value:null};
 let asortymentCentralnyStan={status:"idle",signature:"",data:null,error:"",request:null};
 let asortymentCentralnyCache=new Map(),asortymentCentralnyWylaczonyDo=0;
 let asortymentCentralnyOstatni={signature:"",data:null,at:0};
+const ASORTYMENT_CACHE_SWIEZY_MS=10*60*1000;
+const ASORTYMENT_CACHE_MAX_MS=60*60*1000;
+const ASORTYMENT_CACHE_MAX_WPISOW=64;
+const ASORTYMENT_CACHE_MAX_PRODUKTOW=6000;
 
 function asortymentCentralnyParametry(){
   return {q:szukajProduktow,category:filtrProduktow,producer:filtrProducentaProduktow,status:filtrStatusuProduktow,source:filtrZrodlaProduktow,stock:filtrStanuProduktow,allegro:filtrAllegroProduktow,data:filtrDanychProduktow,sale:filtrSprzedazyProduktow,promotion:filtrPromocjiProduktow,link:filtrLinkuProduktow,priceMin:cenaOdAdminProduktow,priceMax:cenaDoAdminProduktow,allegroPriceMin:cenaAllegroOdAdminProduktow,allegroPriceMax:cenaAllegroDoAdminProduktow,sort:sortowanieAdminProduktow,page:stronaAdminProduktow,limit:produktyNaStronieAdmin};
@@ -8350,29 +8447,59 @@ function asortymentCentralnyParametry(){
 function asortymentCentralnyTrasaAktywna(){return ["/admin/asortyment","/admin/asortyment/produkty"].includes(trasa());}
 function asortymentCentralnySygnatura(){return JSON.stringify(asortymentCentralnyParametry());}
 function asortymentCentralnyWyczyscCache(){asortymentCentralnyCache.clear();asortymentCentralnyStan={status:"idle",signature:"",data:null,error:"",request:null};}
-async function asortymentCentralnyPobierz(force=false){
+function asortymentCentralnyCachePobierz(signature){
+  const cached=asortymentCentralnyCache.get(signature);if(!cached)return null;
+  if(Date.now()-cached.at>ASORTYMENT_CACHE_MAX_MS){asortymentCentralnyCache.delete(signature);return null;}
+  asortymentCentralnyCache.delete(signature);asortymentCentralnyCache.set(signature,cached);return cached;
+}
+function asortymentCentralnyCacheZapisz(signature,data,at=Date.now()){
+  asortymentCentralnyCache.delete(signature);asortymentCentralnyCache.set(signature,{at,data});
+  let products=0;for(const entry of asortymentCentralnyCache.values())products+=Array.isArray(entry?.data?.items)?entry.data.items.length:0;
+  while(asortymentCentralnyCache.size>ASORTYMENT_CACHE_MAX_WPISOW||products>ASORTYMENT_CACHE_MAX_PRODUKTOW){
+    const oldest=asortymentCentralnyCache.keys().next().value,entry=asortymentCentralnyCache.get(oldest);
+    products-=Array.isArray(entry?.data?.items)?entry.data.items.length:0;asortymentCentralnyCache.delete(oldest);
+  }
+}
+function asortymentCentralnyProduktPoId(id){
+  const key=String(id),find=data=>(data?.items||[]).find(item=>String(item?.id)===key)||null;
+  return find(asortymentCentralnyStan.data)||find(asortymentCentralnyOstatni.data)||[...asortymentCentralnyCache.values()].reverse().map(entry=>find(entry.data)).find(Boolean)||null;
+}
+function asortymentCentralnyPodmienProdukt(id,patch={},usun=[]){
+  const key=String(id),seen=new Set(),apply=data=>{
+    if(!data||seen.has(data))return;seen.add(data);
+    const item=(data.items||[]).find(product=>String(product?.id)===key);if(!item)return;
+    Object.assign(item,patch);for(const field of usun)delete item[field];
+  };
+  apply(asortymentCentralnyStan.data);apply(asortymentCentralnyOstatni.data);
+  for(const entry of asortymentCentralnyCache.values())apply(entry.data);
+}
+async function asortymentCentralnyPobierz(force=false,{render=true}={}){
   if(Date.now()<asortymentCentralnyWylaczonyDo)return null;
-  const signature=asortymentCentralnySygnatura(),cached=!force?asortymentCentralnyCache.get(signature):null;
-  if(cached&&Date.now()-cached.at<5*60*1000){asortymentCentralnyStan={status:"ready",signature,data:cached.data,error:"",request:null};return cached.data;}
+  const signature=asortymentCentralnySygnatura(),cached=!force?asortymentCentralnyCachePobierz(signature):null;
+  if(cached){asortymentCentralnyStan={status:"ready",signature,data:cached.data,error:"",request:null};return cached.data;}
   if(asortymentCentralnyStan.status==="loading"&&asortymentCentralnyStan.signature===signature&&asortymentCentralnyStan.request)return asortymentCentralnyStan.request;
+  const hadVisibleData=asortymentCentralnyStan.signature===signature&&!!asortymentCentralnyStan.data||asortymentCentralnyOstatni.signature===signature&&!!asortymentCentralnyOstatni.data;
   const params=asortymentCentralnyParametry(),request=chmura("product-catalog-query",{params,timeout:30000}).then(data=>{
     if(asortymentCentralnySygnatura()!==signature)return data;
-    if(Array.isArray(data.items)&&typeof zapamietajProduktyCentralne==="function"){zapamietajProduktyCentralne(data.items);zbudujProdukty();}
-    const at=Date.now();asortymentCentralnyCache.set(signature,{at,data});asortymentCentralnyOstatni={signature,data,at};while(asortymentCentralnyCache.size>16)asortymentCentralnyCache.delete(asortymentCentralnyCache.keys().next().value);
+    if(Array.isArray(data.items)&&typeof zapamietajProduktyCentralne==="function")zapamietajProduktyCentralne(data.items);
+    const at=Date.now();asortymentCentralnyCacheZapisz(signature,data,at);asortymentCentralnyOstatni={signature,data,at};
     asortymentCentralnyStan={status:"ready",signature,data,error:"",request:null};
-    if(data.stale)setTimeout(()=>{asortymentCentralnyCache.delete(signature);if(asortymentCentralnyTrasaAktywna())void asortymentCentralnyPobierz(true).then(()=>renderuj());},1200);
-    if(asortymentCentralnyTrasaAktywna())renderuj();return data;
+    if(render&&!hadVisibleData&&asortymentCentralnyTrasaAktywna())renderuj();return data;
   }).catch(error=>{
     if(asortymentCentralnySygnatura()!==signature)return null;
     asortymentCentralnyStan={status:"error",signature,data:null,error:String(error?.message||error),request:null};asortymentCentralnyWylaczonyDo=Date.now()+60*1000;
-    loguj("ostrzezenie",`Centralna kartoteka chwilowo niedostępna — użyto bezpiecznego widoku lokalnego: ${error?.message||error}`);if(asortymentCentralnyTrasaAktywna())renderuj();return null;
+    loguj("ostrzezenie",`Centralna kartoteka chwilowo niedostępna — użyto bezpiecznego widoku lokalnego: ${error?.message||error}`);if(render&&!hadVisibleData&&asortymentCentralnyTrasaAktywna())renderuj();return null;
   });
   asortymentCentralnyStan={status:"loading",signature,data:null,error:"",request};return request;
 }
 function asortymentCentralnyWidok(){
   if(Date.now()<asortymentCentralnyWylaczonyDo)return {fallback:true,error:asortymentCentralnyStan.error};
-  const signature=asortymentCentralnySygnatura(),cached=asortymentCentralnyCache.get(signature);
-  if(cached&&Date.now()-cached.at<5*60*1000)return {ready:true,data:cached.data};
+  const signature=asortymentCentralnySygnatura(),cached=asortymentCentralnyCachePobierz(signature);
+  if(cached){
+    const refreshing=Date.now()-cached.at>ASORTYMENT_CACHE_SWIEZY_MS;
+    if(refreshing&&(asortymentCentralnyStan.status!=="loading"||asortymentCentralnyStan.signature!==signature))setTimeout(()=>void asortymentCentralnyPobierz(true,{render:false}),0);
+    return {ready:true,data:cached.data,refreshing,staleAt:cached.at};
+  }
   if(asortymentCentralnyStan.status==="ready"&&asortymentCentralnyStan.signature===signature)return {ready:true,data:asortymentCentralnyStan.data};
   if(asortymentCentralnyStan.status!=="loading"||asortymentCentralnyStan.signature!==signature)setTimeout(()=>void asortymentCentralnyPobierz(),0);
   if(asortymentCentralnyOstatni.signature===signature&&asortymentCentralnyOstatni.data)return {ready:true,data:asortymentCentralnyOstatni.data,refreshing:true,staleAt:asortymentCentralnyOstatni.at};
@@ -9292,19 +9419,23 @@ function domyslneUstawieniaRentownosci(){
 }
 function wartoscKosztuProduktu(p={},pole){const v=p?.[pole];return v!==undefined&&v!==null&&String(v).trim()!==""?Math.max(0,Number(v)||0):domyslneUstawieniaRentownosci()[pole];}
 function domyslneKosztyDoProduktu(p={},wymus=false){const d=domyslneUstawieniaRentownosci(),next={...p};for(const [pole,value] of Object.entries(d))if(wymus||next[pole]===undefined||next[pole]===null||String(next[pole]).trim()==="")next[pole]=value;return next;}
-function zastosujDomyslneKosztyProduktow(wymus=false){
-  const defaults=domyslneUstawieniaRentownosci(),lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));let changed=0;
-  for(const p of lista){const patch={};for(const [pole,value] of Object.entries(defaults))if(wymus||p[pole]===undefined||p[pole]===null||String(p[pole]).trim()==="")patch[pole]=value;if(!Object.keys(patch).length)continue;const key=String(p.id),idx=produktyDodane.findIndex(x=>String(x.id)===key);if(idx>=0)produktyDodane[idx]={...produktyDodane[idx],...patch};else produktyEdytowane={...produktyEdytowane,[key]:{...(produktyEdytowane[key]||{}),...patch}};changed++;}
-  if(changed){zapiszLS("artway_produkty_dodane",produktyDodane);zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();zaplanujZapisUstawien();}
-  return changed;
+async function zastosujDomyslneKosztyProduktow(wymus=false){
+  const defaults=domyslneUstawieniaRentownosci(),lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)),operations=[];
+  for(const p of lista){const patch={};for(const [pole,value] of Object.entries(defaults))if(wymus||p[pole]===undefined||p[pole]===null||String(p[pole]).trim()==="")patch[pole]=value;if(Object.keys(patch).length)operations.push({productId:p.id,fields:patch});}
+  if(operations.length){await chmuraZapiszProduktyCentralnie(operations,"catalog-profit-defaults");zbudujProdukty();}
+  return operations.length;
 }
-function zapiszDomyslneUstawieniaRentownosci(event){
+async function zapiszDomyslneUstawieniaRentownosci(event){
   event.preventDefault();const form=event.currentTarget,mode=String(event.submitter?.value||"defaults");if(mode==="all"&&!confirm("Nadpisać koszty operacyjne we wszystkich aktywnych produktach aktualnymi wartościami domyślnymi? Ceny zakupu i prowizje z API nie zostaną zmienione."))return;
   const n=name=>Math.max(0,Number(String(form.elements[name]?.value||"0").replace(",","."))||0),pct=name=>Math.min(100,n(name));
   const defaults={kosztPakowania:n("kosztPakowania"),sklepAdditionalCost:n("sklepAdditionalCost"),sklepPaymentPercent:pct("sklepPaymentPercent"),allegroAdditionalCost:n("allegroAdditionalCost"),allegroShippingSubsidy:n("allegroShippingSubsidy"),allegroAdsPercent:pct("allegroAdsPercent"),vatRate:pct("vatRate")};
   sklepDocelowaMarza=Math.max(1,Math.min(60,n("celMarzySklep")||20));allegroDocelowaMarza=Math.max(1,Math.min(60,n("celMarzyAllegro")||20));vonHalskyDocelowaMarza=Math.max(1,Math.min(60,n("celMarzyVonHalsky")||allegroDocelowaMarza));allegroJednostkiOplatCyklicznych=Math.max(1,Math.min(1000,Math.floor(n("allegroJednostkiOplatCyklicznych")||10)));
   void zapiszCzescUstawien({celMarzySklep:sklepDocelowaMarza,celMarzyAllegro:allegroDocelowaMarza,celMarzyVonHalsky:vonHalskyDocelowaMarza,allegroJednostkiOplatCyklicznych,domyslneKosztyRentownosci:defaults});zapiszLS("artway_cel_marzy_sklep",sklepDocelowaMarza);zapiszLS("artway_cel_marzy_allegro",allegroDocelowaMarza);
-  const applyAll=mode==="all",applyMissing=applyAll||!!form.elements.applyMissing?.checked,changed=applyMissing?zastosujDomyslneKosztyProduktow(applyAll):0;zaplanujZapisUstawien();toast(`✅ Zapisano domyślne koszty i cele${applyMissing?` • zaktualizowano ${changed} produktów`:""}`);renderuj();
+  const applyAll=mode==="all",applyMissing=applyAll||!!form.elements.applyMissing?.checked;
+  let changed=0;
+  try{changed=applyMissing?await zastosujDomyslneKosztyProduktow(applyAll):0;}
+  catch(error){toast("⛔ Ustawienia zapisano, ale nie zaktualizowano produktów: "+(error.message||error));return;}
+  zaplanujZapisUstawien();toast(`✅ Zapisano domyślne koszty i cele${applyMissing?` • zaktualizowano ${changed} produktów`:""}`);renderuj();
 }
 function domyslneUstawieniaRentownosciHTML(){const d=domyslneUstawieniaRentownosci();return `<details class="profit-defaults-panel" open><summary>⚙️ Domyślne koszty i cele</summary><form onsubmit="zapiszDomyslneUstawieniaRentownosci(event)"><p class="order-detail-lead">Te wartości są używane przy nowych produktach i wszędzie tam, gdzie kartoteka nie ma własnego kosztu. Wartość wpisana bezpośrednio w produkcie ma pierwszeństwo.</p><div class="profit-default-grid"><label>🏪 Cel marży sklepu (%)<input name="celMarzySklep" type="number" min="1" max="60" step="0.1" value="${esc(sklepDocelowaMarza)}"></label><label>🟠 Cel marży Allegro (%)<input name="celMarzyAllegro" type="number" min="1" max="60" step="0.1" value="${esc(allegroDocelowaMarza)}"></label><label>🐕 Cel marży Von Halsky (%)<input name="celMarzyVonHalsky" type="number" min="1" max="60" step="0.1" value="${esc(vonHalskyDocelowaMarza)}"></label><label>📦 Pakowanie / szt. (zł)<input name="kosztPakowania" inputmode="decimal" value="${esc(d.kosztPakowania)}"></label><label>🏪 Inne koszty sklepu / szt. (zł)<input name="sklepAdditionalCost" inputmode="decimal" value="${esc(d.sklepAdditionalCost)}"></label><label>💳 Płatność sklepu (% ceny)<input name="sklepPaymentPercent" inputmode="decimal" value="${esc(d.sklepPaymentPercent)}"></label><label>🟠 Inne koszty Allegro / szt. (zł)<input name="allegroAdditionalCost" inputmode="decimal" value="${esc(d.allegroAdditionalCost)}"></label><label>🚚 Dopłata do wysyłki Allegro (zł)<input name="allegroShippingSubsidy" inputmode="decimal" value="${esc(d.allegroShippingSubsidy)}"></label><label>📣 Reklama Allegro (% ceny)<input name="allegroAdsPercent" inputmode="decimal" value="${esc(d.allegroAdsPercent)}"></label><label>🧾 Domyślny VAT (%)<input name="vatRate" inputmode="decimal" value="${esc(d.vatRate)}"></label><label>🔁 Opłatę cykliczną podziel na (szt.)<input name="allegroJednostkiOplatCyklicznych" type="number" min="1" max="1000" value="${esc(allegroJednostkiOplatCyklicznych)}"></label></div><label class="profit-default-check"><input type="checkbox" name="applyMissing" checked> Uzupełnij teraz tylko puste pola kosztowe w istniejących produktach</label><div class="diag-actions"><button class="btn" type="submit" value="defaults">💾 Zapisz ustawienia</button><button class="btn danger" type="submit" value="all">Zapisz i nadpisz koszty wszystkich produktów</button></div></form></details>`;}
 function allegroRentownoscProduktu(p={},priceOverride=null,targetMargin=allegroDocelowaMarza){
@@ -9318,14 +9449,14 @@ function sklepRentownoscProduktu(p={},priceOverride=null,targetMargin=sklepDocel
 }
 function vonHalskyRentownoscProduktu(p={},priceOverride=null,targetMargin=vonHalskyDocelowaMarza){const price=kwotaNum(priceOverride)||kwotaNum(p.cenaVonHalsky)||kwotaNum(p.cenaAllegro)||kwotaNum(p.cena);return allegroRentownoscProduktu({...p,cenaAllegro:price},price,targetMargin);}
 function ustawCelMarzy(kanal,value){const v=Math.max(1,Math.min(60,Number(value)||20));if(kanal==="sklep"){sklepDocelowaMarza=v;zapiszLS("artway_cel_marzy_sklep",v);void zapiszCzescUstawien({celMarzySklep:v});}else if(kanal==="vonHalsky"){vonHalskyDocelowaMarza=v;void zapiszCzescUstawien({celMarzyVonHalsky:v});}else{allegroDocelowaMarza=v;zapiszLS("artway_cel_marzy_allegro",v);void zapiszCzescUstawien({celMarzyAllegro:v});}}
-function allegroZapiszProwizjeLokalnie(productId,summary={}){
+async function allegroZapiszProwizjeTrwale(productId,summary={}){
   const patch={allegroCommissionAmount:kwotaNum(summary.commissionAmount),allegroCommissionRate:Number(summary.commissionRate)||0,allegroRecurringFees:kwotaNum(summary.recurringFees),allegroFeeTotal:kwotaNum(summary.totalPreviewFees),allegroFeePrice:kwotaNum(summary.salePrice),allegroFeeCurrency:summary.currency||"PLN",allegroFeeDetails:{commissions:summary.commissions||[],quotes:summary.quotes||[]},allegroFeeCalculatedAt:summary.calculatedAt||new Date().toISOString(),allegroFeeSource:summary.source||"allegro-offer-fee-preview"};
-  zapiszPolaProduktuLokalnie(productId,patch,false);zaplanujZapisUstawien();return patch;
+  await zapiszPolaProduktuTrwale(productId,patch,false,"allegro-fee-preview");return patch;
 }
 async function allegroPobierzProwizjeProduktu(productId,button=null,options={}){
   const form=button?.closest?.("form"),base=pobierzProduktAdmin(productId)||produkty.find(p=>String(p.id)===String(productId))||{},product=form?produktRoboczyAllegroZFormularza(form,productId,base):base,offer=allegroOfertaDlaProduktuSklepu(product),offerId=String(product.allegroOfferId||offer?.id||"").trim(),price=kwotaNum(form?.elements?.cenaAllegro?.value)||kwotaNum(product.cenaAllegro||product.cena);
   if(!price){toast("Uzupełnij cenę Allegro");return null;}if(button)button.disabled=true;
-  try{if(!options.silent)toast("🟠 Pobieram aktualne prowizje i opłaty z Allegro…");const d=await chmura("allegro-fee-preview",{method:"POST",body:{productId:String(productId),product,offerId,price,save:true},timeout:90000});const patch=allegroZapiszProwizjeLokalnie(productId,d.summary||{});if(form){for(const [name,value] of Object.entries({allegroCommissionAmount:patch.allegroCommissionAmount,allegroCommissionRate:patch.allegroCommissionRate,allegroRecurringFees:patch.allegroRecurringFees,allegroFeePrice:patch.allegroFeePrice,allegroFeeCalculatedAt:patch.allegroFeeCalculatedAt}))if(form.elements[name])form.elements[name].value=value;aktualizujKalkulatorCenProduktu(form);}if(!options.silent)toast(`✅ Prowizja ${zl(patch.allegroCommissionAmount)} (${Number(patch.allegroCommissionRate).toFixed(2)}%) • opłaty cykliczne ${zl(patch.allegroRecurringFees)}`);if(!form&&!options.silent)renderuj();return d;}catch(e){if(!options.silent)toast("⚠️ Kalkulator opłat Allegro: "+(e.message||e));return null;}finally{if(button)button.disabled=false;}
+  try{if(!options.silent)toast("🟠 Pobieram aktualne prowizje i opłaty z Allegro…");const d=await chmura("allegro-fee-preview",{method:"POST",body:{productId:String(productId),product,offerId,price,save:true},timeout:90000});const patch=await allegroZapiszProwizjeTrwale(productId,d.summary||{});if(form){for(const [name,value] of Object.entries({allegroCommissionAmount:patch.allegroCommissionAmount,allegroCommissionRate:patch.allegroCommissionRate,allegroRecurringFees:patch.allegroRecurringFees,allegroFeePrice:patch.allegroFeePrice,allegroFeeCalculatedAt:patch.allegroFeeCalculatedAt}))if(form.elements[name])form.elements[name].value=value;aktualizujKalkulatorCenProduktu(form);}if(!options.silent)toast(`✅ Prowizja ${zl(patch.allegroCommissionAmount)} (${Number(patch.allegroCommissionRate).toFixed(2)}%) • opłaty cykliczne ${zl(patch.allegroRecurringFees)}`);if(!form&&!options.silent)renderuj();return d;}catch(e){if(!options.silent)toast("⚠️ Kalkulator opłat Allegro: "+(e.message||e));return null;}finally{if(button)button.disabled=false;}
 }
 async function allegroPobierzProwizjeMasowo(){
   const complete=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&kwotaNum(p.cenaZakupu)>0&&kwotaNum(p.cenaAllegro||p.cena)>0&&(p.allegroOfferId||(p.allegroCategoryId&&(p.allegroProductId||p.gtin||p.ean)))).slice(0,25);if(!complete.length){toast("Brak produktów z pełnymi danymi do kalkulacji");return;}
@@ -9334,9 +9465,9 @@ async function allegroPobierzProwizjeMasowo(){
 async function ustawRekomendowanaCeneProduktu(productId,kanal,price,targetMargin=null){
   const value=kwotaNum(price);if(!value)return;const p=pobierzProduktAdmin(productId);if(!p)return;
   const appliedMargin=Number.isFinite(Number(targetMargin))?+Number(targetMargin).toFixed(2):null;
-  if(kanal==="sklep"){zapiszPolaProduktuLokalnie(productId,{cena:value,sklepPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{sklepPriceTargetMargin:appliedMargin})},false);zaplanujZapisUstawien();toast(`✅ Cena w sklepie została ustawiona na ${zl(value)}${appliedMargin===null?"":` • marża ${appliedMargin.toFixed(2)}%`}`);renderuj();return;}
-  if(kanal==="vonHalsky"){zapiszPolaProduktuLokalnie(productId,{cenaVonHalsky:value,vonHalskyPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{vonHalskyPriceTargetMargin:appliedMargin})},false);zaplanujZapisUstawien();const ok=await chmuraZapiszUstawienia({flush:true});toast(ok?`🐕 Cena Von Halsky została ustawiona na ${zl(value)}`:"⚠️ Cena została zachowana lokalnie i oczekuje na ponowienie zapisu");renderuj();return;}
-  zapiszPolaProduktuLokalnie(productId,{cenaAllegro:value,allegroPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{allegroPriceTargetMargin:appliedMargin}),allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI},false);zaplanujZapisUstawien();toast(`🟠 Ustawiono ${zl(value)}${appliedMargin===null?"":` • marża ${appliedMargin.toFixed(2)}%`} i aktualizuję ofertę Allegro…`);
+  if(kanal==="sklep"){await zapiszPolaProduktuTrwale(productId,{cena:value,sklepPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{sklepPriceTargetMargin:appliedMargin})},false,"store-price-update");toast(`✅ Cena w sklepie została ustawiona na ${zl(value)}${appliedMargin===null?"":` • marża ${appliedMargin.toFixed(2)}%`}`);renderuj();return;}
+  if(kanal==="vonHalsky"){await zapiszPolaProduktuTrwale(productId,{cenaVonHalsky:value,vonHalskyPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{vonHalskyPriceTargetMargin:appliedMargin})},false,"von-halsky-price-update");toast(`🐕 Cena Von Halsky została ustawiona na ${zl(value)}`);renderuj();return;}
+  await zapiszPolaProduktuTrwale(productId,{cenaAllegro:value,allegroPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{allegroPriceTargetMargin:appliedMargin}),allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI},false,"allegro-price-update");toast(`🟠 Ustawiono ${zl(value)}${appliedMargin===null?"":` • marża ${appliedMargin.toFixed(2)}%`} i aktualizuję ofertę Allegro…`);
   const next={...p,cenaAllegro:value,allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI};await allegroSynchronizujPowiazanyProduktPoZapisie(next,{forceFees:true});renderuj();
 }
 function allegroUstawRekomendowanaCene(productId,price){return ustawRekomendowanaCeneProduktu(productId,"allegro",price);}
@@ -9624,6 +9755,31 @@ function wgrajZdjecieProduktu(input){
     toast("Zdjęcie wgrane — kliknij Zapisz/Dodaj, aby zachować ✅");
   });
 }
+function produktPolaDoCentralnegoZapisu(product={}){
+  return Object.fromEntries(Object.entries(product).filter(([key,value])=>
+    !["id","_catalog","stan","dostepny"].includes(key)&&value!==undefined
+  ));
+}
+async function utworzProduktCentralnie(product={}){
+  const result=await chmura("catalog-product-create",{method:"POST",body:{
+    product,
+    source:product.storageOrigin==="product-link-file-import"?"import":"dodany",
+    mutationId:`product-create:${String(product.id)}:${Date.now().toString(36)}`
+  },timeout:60000});
+  if(!result?.ok||String(result.productId)!==String(product.id))throw new Error(result?.error||"Serwer nie potwierdził utworzenia produktu.");
+  return result.product&&String(result.product.id)===String(product.id)?result.product:product;
+}
+async function zapiszProduktCentralnie(product={}){
+  const productId=String(product.id??"").trim();
+  const result=await chmura("catalog-product-fields-update",{method:"POST",body:{
+    productId,
+    fields:produktPolaDoCentralnegoZapisu(product),
+    mutationId:`product-editor:${productId}:${Date.now().toString(36)}`,
+    area:"admin-product-editor"
+  },timeout:60000});
+  if(result?.confirmed!==true||String(result.productId)!==productId)throw new Error(result?.error||"Serwer nie potwierdził zapisu produktu.");
+  return result.product&&String(result.product.id)===productId?result.product:product;
+}
 async function dodajProdukt(e){
   e.preventDefault();
   const producerInput=e.target.elements.producent;if(!walidujPoleProducenta(producerInput)||!String(producerInput?.value||"").trim()){producerInput?.reportValidity();toast("⚠️ Podaj rzeczywistą nazwę producenta — numer wpisz w polu kodu produktu");return;}
@@ -9652,7 +9808,15 @@ async function dodajProdukt(e){
   }
   if(e.target.dataset.agentAdd==="1"||e.target.dataset.agentLinkSource){p.agentImportAt=new Date().toISOString();p.agentImportConfidence=Number(e.target.dataset.agentLinkConfidence||0)||0;p.agentImportSource=agentAIImportUrlStan.data?.fromCache?"pamięć Agenta":"link producenta";p.agentImportUrl=e.target.dataset.agentLinkSource||p.sourceUrl||p.producentUrl||"";}
   p.createdAt=p.createdAt||new Date().toISOString();p.createdBy=sesja?.email||"administrator";p.agentOnboardingStatus="processing";p.agentOnboardingStartedAt=new Date().toISOString();
-  produktyDodane.push(p); zapiszLS("artway_produkty_dodane", produktyDodane);
+  try{
+    const saved=await utworzProduktCentralnie(p);
+    Object.assign(p,saved);
+  }catch(error){
+    if(submit)submit.disabled=false;
+    toast("⛔ Produkt nie został dodany: "+(error.message||error));
+    return;
+  }
+  produktyDodane.push(p);
   zapiszStanZFormularza(f, p.id);
   agentAIZakonczLinkProducenta(prefillMeta._agentLinkId||prefillMeta._agentLinkUrl||p.sourceUrl||p.producentUrl,p);
   zapiszHistorieAgenta("opisy-produktow",`Agent AI sprawdził opisy po dodaniu produktu: ${p.nazwa}`,{produktId:p.id,opisKrotki:!!p.opisKrotki,opis:!!p.opis,importConfidence:p.agentImportConfidence||0,zrodlo:p.agentImportSource||"ręczne"});
@@ -9663,7 +9827,7 @@ async function dodajProdukt(e){
   toast("Produkt dodany ✅");
   toast("Produkt zapisany. Automat dobiera dane, kategorię, opisy i opłaty…");
   const onboardingResult=await allegroSynchronizujPowiazanyProduktPoZapisie(p,{forceFees:true}),onboardingProduct=pobierzProduktAdmin(p.id)||p,onboardingState=agentAIStanWdrozeniaProduktu(onboardingProduct),onboardingStatus=onboardingResult?.ok&&onboardingState.ready?"completed":"needs_attention";
-  zapiszPolaProduktuLokalnie(p.id,{agentOnboardingStatus:onboardingStatus,agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingCompletedAt:onboardingStatus==="completed"?new Date().toISOString():"",agentOnboardingMissing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)},false);
+  await zapiszPolaProduktuTrwale(p.id,{agentOnboardingStatus:onboardingStatus,agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingCompletedAt:onboardingStatus==="completed"?new Date().toISOString():"",agentOnboardingMissing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)},false,"product-onboarding");
   zapiszHistorieAgenta("wdrozenie-produktu",`${onboardingStatus==="completed"?"Zakończono":"Rozpoczęto"} wdrożenie nowego produktu: ${p.nazwa}`,{produktId:p.id,status:onboardingStatus,missing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)});zaplanujZapisUstawien();
   if(submit)submit.disabled=false;
   if(["/admin/produkty/dodaj","/admin/produkty/z-linku"].includes(trasa())) location.hash="#/admin/produkty"; else renderuj();
@@ -9671,15 +9835,17 @@ async function dodajProdukt(e){
 function zapiszStanZFormularza(f, id){
   ustawStanMagazynowy(id, String(f.get("stan")??"").trim()===""?0:f.get("stan"), {typ:"korekta",powod:"Formularz produktu"});
 }
-async function automatyczniePobierzDaneZrodlaProduktu(p={}){
+async function automatyczniePobierzDaneZrodlaProduktu(p={},options={}){
   const url=String(p.producentUrl||p.sourceUrl||"").trim();if(!/^https?:\/\//i.test(url))return p;
   try{
     const d=await chmura("product-url-inspect",{method:"POST",body:{url},timeout:30000}),s=d.product||{},canonical=allegroProducentKanoniczny({...p,...s,sourceUrl:url,producentUrl:url});
     const sourceCode=String(s.kodProducenta||s.numerReferencyjny||s.mpn||s.externalId||s.sku||"").trim();
     const missing={gtin:s.gtin||s.ean,ean:s.ean||s.gtin,kodProducenta:sourceCode,numerReferencyjny:sourceCode,externalId:sourceCode,sku:sourceCode,mpn:sourceCode,producent:canonical||s.producent||s.marka,marka:s.marka||canonical||s.producent,parametryProducenta:s.parametryProducenta,parametryZrodla:s.parametryZrodla,sourceMaterial:{...(p.sourceMaterial||{}),sourceUrl:s.sourceUrl||s.producentUrl||url,fetchedAt:s.sourceEvidence?.fetchedAt||s.producentSprawdzonoAt||new Date().toISOString(),title:s.nazwa||"",shortDescription:s.opisKrotki||"",longDescription:s.opis||"",producer:s.producent||s.marka||"",brand:s.marka||s.producent||"",category:s.kategoria||"",ean:s.gtin||s.ean||"",producerCode:sourceCode,parameters:s.parametryProducenta||s.parametryZrodla||{}},contentEditorial:{...(p.contentEditorial||{}),status:"queued",queuedReason:"source_updated",queuedAt:new Date().toISOString()}};
-    zapiszPolaProduktuLokalnie(p.id,missing,true);
-    const current=pobierzProduktAdmin(p.id)||p,canonicalUrl=s.sourceUrl||s.producentUrl||url,sourceImages=Number(s.sourceEvidence?.imagePolicyVersion)>=2?[s.zdjecie,...(Array.isArray(s.zdjecia)?s.zdjecia:[])].filter(Boolean):[],force={producentUrl:canonicalUrl,sourceUrl:canonicalUrl,sourceEvidence:s.sourceEvidence||current.sourceEvidence||null,...(sourceImages.length?{zdjecie:sourceImages[0],zdjecia:sourceImages.slice(1,16)}:{}),dostepnoscProducenta:s.dostepnoscProducenta||current.dostepnoscProducenta||"",stanProducenta:s.stanProducenta??current.stanProducenta??"",stanProducentaDokladny:s.stanProducentaDokladny===true,stanProducentaZrodlo:s.stanProducentaZrodlo||current.stanProducentaZrodlo||"",producentStatus:s.producentStatus||current.producentStatus||"",producentSprawdzonoAt:s.producentSprawdzonoAt||current.producentSprawdzonoAt||new Date().toISOString()};
-    zapiszPolaProduktuLokalnie(p.id,force,false);agentAIZakonczLinkProducenta(url,pobierzProduktAdmin(p.id)||p);return pobierzProduktAdmin(p.id)||{...p,...missing,...force};
+    const merged={...p};
+    for(const [field,value] of Object.entries(missing))if(value!==undefined&&value!==null&&value!==""&&(merged[field]===undefined||merged[field]===null||String(merged[field]).trim()===""))merged[field]=value;
+    const canonicalUrl=s.sourceUrl||s.producentUrl||url,sourceImages=Number(s.sourceEvidence?.imagePolicyVersion)>=2?[s.zdjecie,...(Array.isArray(s.zdjecia)?s.zdjecia:[])].filter(Boolean):[],force={producentUrl:canonicalUrl,sourceUrl:canonicalUrl,sourceEvidence:s.sourceEvidence||merged.sourceEvidence||null,...(sourceImages.length?{zdjecie:sourceImages[0],zdjecia:sourceImages.slice(1,16)}:{}),dostepnoscProducenta:s.dostepnoscProducenta||merged.dostepnoscProducenta||"",stanProducenta:s.stanProducenta??merged.stanProducenta??"",stanProducentaDokladny:s.stanProducentaDokladny===true,stanProducentaZrodlo:s.stanProducentaZrodlo||merged.stanProducentaZrodlo||"",producentStatus:s.producentStatus||merged.producentStatus||"",producentSprawdzonoAt:s.producentSprawdzonoAt||merged.producentSprawdzonoAt||new Date().toISOString()},result={...merged,...force};
+    if(options.persist===false){agentAIZakonczLinkProducenta(url,result);return result;}
+    await zapiszPolaProduktuTrwale(p.id,missing,true,"product-source-refresh");await zapiszPolaProduktuTrwale(p.id,force,false,"product-source-refresh");agentAIZakonczLinkProducenta(url,pobierzProduktAdmin(p.id)||result);return pobierzProduktAdmin(p.id)||result;
   }catch(e){agentAIZapiszLinkProducenta(url,"oczekuje","Automatyczne odświeżenie przy zapisie: "+(e.message||e));return p;}
 }
 async function allegroSynchronizujPowiazanyProduktPoZapisie(p,options={}){
@@ -9691,7 +9857,7 @@ async function allegroSynchronizujPowiazanyProduktPoZapisie(p,options={}){
     let updated=false;
     if(existing||draft.operation==="update"){
       const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:prepared,options:{stock:allegroStanOfertyProduktu(prepared),publicationAction:"keep"}},timeout:120000});
-      allegroZapiszAutoUzupelnienia(prepared,d);allegroZastosujWynikWystawienia(prepared,d);allegroZapiszWynikOperacji(prepared,d);updated=true;
+      await allegroZapiszAutoUzupelnienia(prepared,d);allegroZastosujWynikWystawienia(prepared,d);allegroZapiszWynikOperacji(prepared,d);updated=true;
       prepared=pobierzProduktAdmin(p.id)||prepared;
     }
     const feeReady=kwotaNum(prepared.cenaAllegro||prepared.cena)>0&&!!(prepared.allegroOfferId||existing?.id||(prepared.allegroCategoryId&&(prepared.allegroProductId||prepared.gtin||prepared.ean)));
@@ -9709,14 +9875,20 @@ async function zapiszProduktAdmin(e,id){
   const poprzedni = pobierzProduktAdmin(id);
   const p = daneProduktuZFormularza(f, id, poprzedni||{});
   if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę i nazwę producenta"); return; }
+  try{
+    const saved=await zapiszProduktCentralnie(p);
+    Object.assign(p,saved);
+  }catch(error){
+    if(submit)submit.disabled=false;
+    toast("⛔ Zmiany nie zostały potwierdzone przez serwer: "+(error.message||error));
+    return;
+  }
   zapiszStanZFormularza(f, id);
   const i = produktyDodane.findIndex(x=>x.id===id);
   if(i>=0){
     produktyDodane[i] = p;
-    zapiszLS("artway_produkty_dodane", produktyDodane);
   }else{
     produktyEdytowane = {...produktyEdytowane, [id]:p};
-    zapiszLS("artway_produkty_edytowane", produktyEdytowane);
   }
   zbudujProdukty(); odswiezMenu();
   zapiszHistorieAgenta("opisy-produktow",`Agent AI sprawdził opisy po edycji produktu: ${p.nazwa}`,{produktId:p.id,opisKrotki:!!p.opisKrotki,opis:!!p.opis});
@@ -9726,39 +9898,43 @@ async function zapiszProduktAdmin(e,id){
   if(submit)submit.disabled=false;
   location.hash="#/admin/produkty";
 }
-function duplikujProdukt(id){
+async function duplikujProdukt(id){
   const p = pobierzProduktAdmin(id); if(!p) return;
   const maxId = najwyzszeIdProduktu();
   const kopia = seoAutomatyzujDaneProduktu({...p,id:maxId+1,nazwa:p.nazwa+" — kopia",seoMode:"auto",seoTitle:"",seoDescription:"",seoKeywords:"",createdAt:new Date().toISOString(),createdBy:sesja?.email||"administrator",agentOnboardingStatus:"needs_attention",agentOnboardingStartedAt:new Date().toISOString(),agentOnboardingMissing:["identity"]},"automatycznie po utworzeniu kopii",{force:true});
+  try{Object.assign(kopia,await utworzProduktCentralnie(kopia));}
+  catch(error){toast("⛔ Nie utworzono kopii: "+(error.message||error));return;}
   produktyDodane.push(kopia);
-  zapiszLS("artway_produkty_dodane", produktyDodane);
   zbudujProdukty();zapiszHistorieAgenta("wdrozenie-produktu",`Nowa kopia produktu wymaga kontroli Agenta: ${kopia.nazwa}`,{produktId:kopia.id,status:"needs_attention",sourceProductId:id});zaplanujZapisUstawien();loguj("info",`Zduplikowano produkt ${id} jako ${kopia.id}`);
   toast("Utworzono kopię produktu 📄");
   location.hash="#/admin/produkty/edytuj/"+kopia.id;
 }
-function usunProdukt(id){
+async function usunProdukt(id){
+  try{await produktCyklCentralny([id],"trash");}
+  catch(error){toast("⛔ Nie przeniesiono produktu do kosza: "+(error.message||error));return;}
   const p = produktyDodane.find(x=>x.id===id);
   if(p){
     if(!koszDodanych.some(x=>x.id===id)) koszDodanych.push(p);
     oznaczProduktWKoszu(id,"wlasny");
-    zapiszLS("artway_kosz_dodane", koszDodanych);
   }
   produktyDodane = produktyDodane.filter(p=>p.id!==id);
-  zapiszLS("artway_produkty_dodane", produktyDodane); zbudujProdukty();
+  zbudujProdukty();
   loguj("info","Przeniesiono produkt do kosza na 30 dni: id="+id); toast("Produkt w koszu przez 30 dni 🗑️"); renderuj();
 }
-function przywrocZKosza(id){
+async function przywrocZKosza(id){
+  try{await produktCyklCentralny([id],"restore");}
+  catch(error){toast("⛔ Nie przywrócono produktu: "+(error.message||error));return;}
   const p = koszDodanych.find(x=>x.id===id);
-  if(p&&!produktyDodane.some(x=>x.id===id)){ produktyDodane.push(p); zapiszLS("artway_produkty_dodane", produktyDodane); }
+  if(p&&!produktyDodane.some(x=>x.id===id))produktyDodane.push(p);
   koszDodanych = koszDodanych.filter(x=>x.id!==id);
-  zapiszLS("artway_kosz_dodane", koszDodanych);
   usunMetaKosza(id);
   zbudujProdukty(); odswiezMenu();
   toast("Produkt przywrócony z kosza ↩️"); renderuj();
 }
-function usunDefinitywnie(id){
+async function usunDefinitywnie(id){
+  try{await produktCyklCentralny([id],"purge");}
+  catch(error){toast("⛔ Nie usunięto produktu definitywnie: "+(error.message||error));return;}
   koszDodanych = koszDodanych.filter(x=>x.id!==id);
-  zapiszLS("artway_kosz_dodane", koszDodanych);
   usunMetaKosza(id);
   delete stanyProduktow[id];
   delete dostepnoscProduktow[String(id)];
@@ -9767,17 +9943,16 @@ function usunDefinitywnie(id){
   loguj("info","Usunięto definitywnie produkt id="+id);
   toast("Produkt usunięty definitywnie"); renderuj();
 }
-function usunDefinitywnieBazowy(id){
+async function usunDefinitywnieBazowy(id){
+  try{await produktCyklCentralny([id],"purge");}
+  catch(error){toast("⛔ Nie usunięto produktu definitywnie: "+(error.message||error));return;}
   if(!produktyDefinitywne.includes(id)) produktyDefinitywne.push(id);
   if(!produktyUkryte.includes(id)) produktyUkryte.push(id);
   produktyDefinitywne=[...new Set(produktyDefinitywne)];
-  zapiszLS("artway_produkty_definitywne",produktyDefinitywne);
-  zapiszLS("artway_produkty_ukryte",produktyUkryte);
   usunMetaKosza(id);
   delete produktyEdytowane[id];
   delete stanyProduktow[id];
   delete dostepnoscProduktow[String(id)];
-  zapiszLS("artway_produkty_edytowane",produktyEdytowane);
   zapiszLS("artway_stany",stanyProduktow);
   zapiszLS("artway_dostepnosc",dostepnoscProduktow);
   zaznaczoneProdukty.delete(id);
@@ -9785,10 +9960,13 @@ function usunDefinitywnieBazowy(id){
   loguj("info","Usunięto definitywnie produkt bazowy id="+id);
   toast("Produkt usunięty definitywnie"); renderuj();
 }
-function wyczyscCalKosz(){
+async function wyczyscCalKosz(){
   const bazowe=bazoweProduktyWKoszu().map(p=>p.id);
   const ile=koszDodanych.length+bazowe.length;
   if(!ile||!confirm(`Definitywnie usunąć ${ile} produktów z kosza? Tej operacji nie można cofnąć.`)) return;
+  const ids=[...new Set([...koszDodanych.map(p=>p.id),...bazowe])];
+  try{await produktCyklCentralny(ids,"purge");}
+  catch(error){toast("⛔ Kosz nie został opróżniony — serwer nie potwierdził usunięcia: "+(error.message||error));return;}
   koszDodanych.forEach(p=>{delete koszMeta[p.id];delete stanyProduktow[p.id];delete dostepnoscProduktow[String(p.id)];});
   bazowe.forEach(id=>{
     if(!produktyDefinitywne.includes(id)) produktyDefinitywne.push(id);
@@ -9796,10 +9974,6 @@ function wyczyscCalKosz(){
   });
   koszDodanych=[];
   produktyDefinitywne=[...new Set(produktyDefinitywne)];
-  zapiszLS("artway_kosz_dodane",koszDodanych);
-  zapiszLS("artway_kosz_meta",koszMeta);
-  zapiszLS("artway_produkty_definitywne",produktyDefinitywne);
-  zapiszLS("artway_produkty_edytowane",produktyEdytowane);
   zapiszLS("artway_stany",stanyProduktow);
   zapiszLS("artway_dostepnosc",dostepnoscProduktow);
   zbudujProdukty(); odswiezMenu();
@@ -9810,8 +9984,20 @@ function wyczyscCalKosz(){
 /* ═══════════ KATALOG PRODUKTÓW — AGENT I DECYZJE MASOWE ALLEGRO ═══════════ */
 let asortymentAgentKolejka={busy:false,operation:"pelna",ids:[],done:0,total:0,ok:0,warnings:0,failed:0,cancel:false,current:"",results:[],startedAt:"",finishedAt:""};
 let asortymentAllegroDecyzja={step:"idle",busy:false,operation:"update",ids:[],skipped:0,done:0,total:0,ok:0,failed:0,error:"",results:[]};
+let asortymentPelneProduktyCache=new Map();
+let asortymentSerwerowaKolejka={batchId:"",checking:false,timer:null,lastCheck:0};
+const ASORTYMENT_PELNY_PRODUKT_CACHE_MS=15*60*1000;
 
 function asortymentProduktPoId(rawId){return pobierzProduktAdmin(rawId)||produktyDoAdministracji().find(p=>String(p.id)===String(rawId))||null;}
+async function asortymentPobierzPelnyProdukt(rawId,{force=false}={}){
+  const id=String(rawId??"").trim(),cached=asortymentPelneProduktyCache.get(id);
+  if(!force&&cached&&Date.now()-cached.at<ASORTYMENT_PELNY_PRODUKT_CACHE_MS)return cached.product;
+  const result=await chmura("product-catalog-item",{params:{id},timeout:30000}),product=result?.product;
+  if(!product||String(product.id)!==id)throw new Error(`Nie udało się pobrać pełnej kartoteki produktu ${id}.`);
+  asortymentPelneProduktyCache.delete(id);asortymentPelneProduktyCache.set(id,{at:Date.now(),product});
+  while(asortymentPelneProduktyCache.size>250)asortymentPelneProduktyCache.delete(asortymentPelneProduktyCache.keys().next().value);
+  return product;
+}
 function asortymentOfertaProduktu(p={}){return allegroOfertaDlaProduktuSklepu(p)||(p.allegroOfferId?allegroOfertaPoId(String(p.allegroOfferId)):null);}
 function asortymentProduktyZId(ids=[]){return [...new Set(ids.map(String))].map(asortymentProduktPoId).filter(p=>p&&!czyProduktAdminWKoszu(p));}
 function asortymentOdswiezCentrumDzialan(){
@@ -9831,14 +10017,69 @@ function asortymentOdswiezStanZaznaczenia(){
 function asortymentUstawOperacjeAgenta(value){asortymentAgentKolejka.operation=String(value||"pelna");}
 function asortymentUstawOperacjeZewnetrzna(value){asortymentAllegroDecyzja.operation=String(value||"update");}
 
-function asortymentSeoAgenta(p={}){
+function asortymentZastosujStanKolejkiSerwera(queue={},preferredBatchId=""){
+  const batches=Array.isArray(queue.batches)?queue.batches:[],preferred=batches.find(item=>String(item.id)===String(preferredBatchId||asortymentSerwerowaKolejka.batchId)),working=batches.find(item=>Number(item.pending||0)+Number(item.running||0)>0),newest=batches[0]||null;
+  const batch=working||(newest&&preferred&&Date.parse(newest.requestedAt||0)>Date.parse(preferred.requestedAt||0)?newest:preferred)||newest||null;
+  if(!batch)return false;
+  asortymentSerwerowaKolejka.batchId=String(batch.id||"");
+  const trackedTaskIds=new Set((Array.isArray(batch.trackedTaskIds)?batch.trackedTaskIds:[]).map(String));
+  const recent=(Array.isArray(queue.recent)?queue.recent:[]).filter(item=>trackedTaskIds.size?trackedTaskIds.has(String(item.id)):String(item.batchId)===asortymentSerwerowaKolejka.batchId);
+  const results=recent.map(item=>({id:String(item.productId||""),name:item.name||`Produkt ${item.productId}`,ok:item.status!=="failed",ready:item.ready===true,missing:item.missing||[],savedFields:item.savedFields||[],error:item.error||""}));
+  const queuedIds=[...(Array.isArray(batch.pendingProductIds)?batch.pendingProductIds:[]),...(batch.activeProductId?[batch.activeProductId]:[])].map(String);
+  queuedIds.forEach(id=>podmienProduktAdminBezRenderu(id,{allegroAgentPreparationStatus:"queued",allegroAgentPreparationError:"",allegroAgentPreparationMissing:[]}));
+  recent.forEach(item=>podmienProduktAdminBezRenderu(item.productId,{
+    allegroAgentPreparationStatus:item.status==="completed"?"ready":item.status==="attention"?"needs_attention":item.status==="failed"?"failed":"queued",
+    allegroAgentPreparationError:item.error||"",
+    allegroAgentPreparationMissing:item.missing||[],
+    allegroAgentPreparedAt:item.completedAt||"",
+  }));
+  const done=Number(batch.completed||0)+Number(batch.attention||0)+Number(batch.failed||0),total=Math.max(Number(batch.total||0),done+Number(batch.pending||0)+Number(batch.running||0)),busy=Number(batch.pending||0)+Number(batch.running||0)>0;
+  asortymentAgentKolejka={...asortymentAgentKolejka,busy,operation:batch.operation||"allegro",ids:[],done,total,ok:Number(batch.completed||0)+Number(batch.attention||0),warnings:Number(batch.attention||0),failed:Number(batch.failed||0),current:queue.active&&String(queue.active.batchId)===asortymentSerwerowaKolejka.batchId?`Produkt ${queue.active.productId}`:"",results,startedAt:batch.requestedAt||"",finishedAt:busy?"":queue.updatedAt||new Date().toISOString(),cloudSaved:!busy&&Number(batch.failed||0)===0};
+  return true;
+}
+async function asortymentSprawdzKolejkeSerwera({render=true}={}){
+  if(asortymentSerwerowaKolejka.checking)return;
+  asortymentSerwerowaKolejka.timer=null;
+  asortymentSerwerowaKolejka.checking=true;
+  try{
+    const response=await chmura("allegro-preparation-queue-status",{timeout:30000}),queue=response?.queue||{};
+    const found=asortymentZastosujStanKolejkiSerwera(queue);
+    if(found&&render)asortymentOdswiezCentrumDzialan();
+    if(asortymentAgentKolejka.busy){
+      clearTimeout(asortymentSerwerowaKolejka.timer);asortymentSerwerowaKolejka.timer=setTimeout(()=>void asortymentSprawdzKolejkeSerwera(),2500);
+    }else if(found){
+      asortymentPelneProduktyCache.clear();
+      if(typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
+      await asortymentCentralnyPobierz(true,{render:false}).catch(()=>null);
+      if(render&&asortymentCentralnyTrasaAktywna())renderuj();
+    }
+  }catch(error){if(asortymentAgentKolejka.busy){clearTimeout(asortymentSerwerowaKolejka.timer);asortymentSerwerowaKolejka.timer=setTimeout(()=>void asortymentSprawdzKolejkeSerwera(),5000);}}
+  finally{asortymentSerwerowaKolejka.checking=false;asortymentSerwerowaKolejka.lastCheck=Date.now();}
+}
+function asortymentZapewnijMonitorKolejkiSerwera(){
+  if(asortymentSerwerowaKolejka.checking||asortymentSerwerowaKolejka.timer||Date.now()-asortymentSerwerowaKolejka.lastCheck<10000)return;
+  setTimeout(()=>void asortymentSprawdzKolejkeSerwera({render:false}),0);
+}
+async function asortymentUruchomAgentaNaSerwerze(products=[],operation="allegro"){
+  if(asortymentAgentKolejka.busy){toast("Agent ma już aktywną kolejkę produktów");return;}
+  asortymentAgentKolejka={busy:true,operation,ids:products.map(p=>String(p.id)),done:0,total:products.length,ok:0,warnings:0,failed:0,cancel:false,current:"przekazywanie na serwer",results:[],startedAt:new Date().toISOString(),finishedAt:""};asortymentOdswiezCentrumDzialan();
+  try{
+    const response=await chmura("allegro-preparation-queue-enqueue",{method:"POST",body:{productIds:products.map(p=>String(p.id)),operation},timeout:30000}),queue=response?.queue||{};
+    products.forEach(p=>podmienProduktAdminBezRenderu(p.id,{allegroAgentPreparationStatus:"queued",allegroAgentPreparationError:"",allegroAgentPreparationMissing:[]}));
+    asortymentSerwerowaKolejka.batchId=String(queue.batchId||"");asortymentZastosujStanKolejkiSerwera(queue,queue.batchId);
+    toast(`🤖 Serwer przejął kolejkę ${products.length} produktów — możesz odświeżyć lub zamknąć kartę`);
+    clearTimeout(asortymentSerwerowaKolejka.timer);asortymentSerwerowaKolejka.timer=setTimeout(()=>void asortymentSprawdzKolejkeSerwera(),1000);asortymentOdswiezCentrumDzialan();
+  }catch(error){asortymentAgentKolejka={...asortymentAgentKolejka,busy:false,failed:products.length,current:"",finishedAt:new Date().toISOString(),cloudSaved:false,results:products.map(p=>({id:String(p.id),name:p.nazwa||"Produkt",ok:false,error:error.message||String(error)}))};asortymentOdswiezCentrumDzialan();toast(`⛔ Serwer nie przejął kolejki: ${error.message||error}`);}
+}
+
+async function asortymentSeoAgenta(p={}){
   if(typeof seoAutomatyzujDaneProduktu!=="function")return false;
   const next=seoAutomatyzujDaneProduktu({...p},"agent-katalogu",{force:false}),patch={};
   for(const key of ["seoTitle","seoDescription","seoKeywords","seoScore","seoReviewedAt","seoSource","seoMode"])if(next[key]!==undefined&&String(next[key])!==String(p[key]??""))patch[key]=next[key];
-  return Object.keys(patch).length?zapiszPolaProduktuLokalnie(p.id,patch,false):false;
+  return Object.keys(patch).length?zapiszPolaProduktuTrwale(p.id,patch,false,"catalog-agent-seo"):false;
 }
 const ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO=["nazwa","allegroTitle","opisKrotki","opis","allegroDescription","producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","zdjecia","sourceEvidence","allegroCategoryId","allegroProductId","allegroParameters","allegroDescriptionSections","allegroSafetyInformation","allegroResponsibleProducer","allegroShippingSubsidy"];
-const ASORTYMENT_POLA_TRWALEGO_ZAPISU_ALLEGRO=[...ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO,"allegroShortDescription","contentEditorial","sourceMaterial","contentEditorialPreparedAt","contentEditorialSource","allegroDescriptionSource","allegroEditorialSyncPending","allegroEditorialSyncRequestedAt","allegroEditorialSyncError","allegroAgentPreparationStatus","allegroAgentPreparationMissing","allegroAgentSavedFields","allegroAgentPreparedAt","allegroAgentPreparationStartedAt","allegroAgentPreparationSource","allegroAgentDraftOperation","allegroAgentCompliancePolicy","allegroAgentComplianceCheckedAt","allegroAgentPreparationError","allegroAgentPreparationCheckedAt"];
+const ASORTYMENT_POLA_TRWALEGO_ZAPISU_ALLEGRO=[...ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO,"allegroShortDescription","contentEditorial","sourceMaterial","sourceUrl","producentUrl","externalId","sku","numerReferencyjny","parametryProducenta","parametryZrodla","dostepnoscProducenta","stanProducenta","stanProducentaDokladny","stanProducentaZrodlo","producentStatus","producentSprawdzonoAt","contentEditorialPreparedAt","contentEditorialSource","allegroDescriptionSource","allegroEditorialSyncPending","allegroEditorialSyncRequestedAt","allegroEditorialSyncError","allegroAgentPreparationStatus","allegroAgentPreparationMissing","allegroAgentSavedFields","allegroAgentPreparedAt","allegroAgentPreparationStartedAt","allegroAgentPreparationSource","allegroAgentDraftOperation","allegroAgentCompliancePolicy","allegroAgentComplianceCheckedAt","allegroAgentPreparationError","allegroAgentPreparationCheckedAt","allegroAgentPreparationFingerprint","allegroAgentPreparationVersion","allegroAgentPreparationRunId","allegroAgentPreparationConfirmedAt","allegroAgentPreparationConfirmedRevision","seoTitle","seoDescription","seoKeywords","seoScore","seoReviewedAt","seoSource","seoMode"];
 const ASORTYMENT_ETYKIETY_POL_ALLEGRO={nazwa:"nazwa",allegroTitle:"tytuł Allegro",opisKrotki:"opis krótki sklepu",opis:"opis długi sklepu",allegroDescription:"opis Allegro",producent:"producent",marka:"marka",gtin:"GTIN",ean:"EAN",kodProducenta:"kod producenta",mpn:"MPN",zdjecie:"zdjęcie główne ze źródła",zdjecia:"galeria ze źródła",sourceEvidence:"potwierdzenie źródła zdjęć",allegroCategoryId:"kategoria Allegro",allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",allegroDescriptionSections:"układ opisu Allegro",allegroSafetyInformation:"informacja bezpieczeństwa GPSR",allegroResponsibleProducer:"odpowiedzialny producent GPSR",allegroShippingSubsidy:"dopłata do wysyłki"};
 function asortymentMigawkaPrzygotowania(p={}){return Object.fromEntries(ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.map(key=>[key,p[key]]));}
 function asortymentPolaZmienione(before={},after={}){return ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.filter(key=>JSON.stringify(before[key]??null)!==JSON.stringify(after[key]??null));}
@@ -9846,23 +10087,36 @@ function asortymentEtykietyPol(keys=[]){return keys.map(key=>ASORTYMENT_ETYKIETY
 function asortymentPolaDoTrwalegoZapisu(p={}){
   return Object.fromEntries(ASORTYMENT_POLA_TRWALEGO_ZAPISU_ALLEGRO.filter(key=>p[key]!==undefined).map(key=>[key,p[key]]));
 }
+function asortymentStabilnyJson(value){
+  if(Array.isArray(value))return `[${value.map(asortymentStabilnyJson).join(",")}]`;
+  if(value&&typeof value==="object")return `{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${asortymentStabilnyJson(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+function asortymentSygnaturaPrzygotowania(p={}){
+  const raw=asortymentStabilnyJson(ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.map(key=>[key,p[key]??null])),bytes=new TextEncoder().encode(raw);let hash=2166136261;
+  for(const byte of bytes){hash^=byte;hash=Math.imul(hash,16777619);}
+  return `allegro-preparation-v4-${(hash>>>0).toString(16).padStart(8,"0")}`;
+}
 async function asortymentZapiszProduktCentralnie(p={},startedAt=""){
   const productId=String(p.id??"").trim(),mutationId=`allegro-preparation:${productId}:${String(startedAt||Date.now()).replace(/[^0-9A-Za-z:._-]/g,"").slice(0,80)}`;
   if(!productId)throw new Error("Brakuje ID produktu — Agent nie może potwierdzić zapisu.");
   const result=await chmura("catalog-product-fields-update",{method:"POST",body:{productId,fields:asortymentPolaDoTrwalegoZapisu(p),mutationId,area:"allegro-preparation"},timeout:60000});
-  if(result?.confirmed!==true||String(result.productId)!==productId)throw new Error("Serwer nie potwierdził odczytu zapisanej kartoteki.");
-  zapiszPolaProduktuLokalnie(productId,result.fields||{},false);
-  return result;
+  if(result?.confirmed!==true||String(result.productId)!==productId||result.publication?.published!==true)throw new Error("Serwer nie potwierdził zapisu i publikacji pełnej kartoteki.");
+  const confirmed=result.product&&String(result.product.id)===productId?result.product:{...p,...(result.fields||{})};
+  asortymentPelneProduktyCache.set(productId,{at:Date.now(),product:confirmed});
+  podmienProduktAdminBezRenderu(productId,result.fields||{});
+  return {...result,product:confirmed};
 }
 function asortymentStatusPrzygotowania(p={}){
   const status=String(p.allegroAgentPreparationStatus||"");
   const missing=Array.isArray(p.allegroAgentPreparationMissing)?p.allegroAgentPreparationMissing:[];
+  if(status==="queued")return {code:"queued",label:"W kolejce Agenta",note:"oczekuje na przygotowanie i trwały zapis na serwerze"};
   if(status==="ready"||status==="published")return {code:"ready",label:status==="published"?"Oferta zapisana w Allegro":"Gotowy do Allegro",note:(status==="published"?p.allegroAgentPublishedAt:p.allegroAgentPreparedAt)?`zapis ${new Date(status==="published"?p.allegroAgentPublishedAt:p.allegroAgentPreparedAt).toLocaleString("pl-PL")}`:"komplet danych"};
-  if(status==="needs_attention")return {code:"attention",label:"Wymaga uzupełnienia",note:missing.join(", ")||"sprawdź dane"};
+  if(status==="needs_attention"){const retry=Date.parse(p.allegroAgentPreparationNextRetryAt||"");return {code:"attention",label:"Wymaga uzupełnienia",note:`${missing.join(", ")||"sprawdź dane"}${Number.isFinite(retry)?` • Agent ponowi ${new Date(retry).toLocaleString("pl-PL")}`:" • Agent ponowi automatycznie"}`};}
   if(status==="failed")return {code:"failed",label:"Błąd przygotowania",note:p.allegroAgentPreparationError||"uruchom ponownie"};
   return {code:"new",label:"Nieprzygotowany",note:"Agent nie zapisał jeszcze kontroli"};
 }
-function asortymentStatusPrzygotowaniaHTML(p={}){const s=asortymentStatusPrzygotowania(p);return `<span class="product-allegro-preparation ${s.code}"><b>${s.code==="ready"?"✅":s.code==="attention"?"⚠️":s.code==="failed"?"⛔":"○"} ${esc(s.label)}</b><small>${esc(s.note)}</small></span>`;}
+function asortymentStatusPrzygotowaniaHTML(p={}){const s=asortymentStatusPrzygotowania(p);return `<span class="product-allegro-preparation ${s.code}"><b>${s.code==="ready"?"✅":s.code==="attention"?"⚠️":s.code==="failed"?"⛔":s.code==="queued"?"⏳":"○"} ${esc(s.label)}</b><small>${esc(s.note)}</small></span>`;}
 function asortymentPatchZPrzygotowania(p={},draft={}){
   const auto=draft.autoFilled||{},catalog=draft.catalogMatch?.selected||{},category=draft.categorySuggestion?.selected||{},patch={};
   const assign=(key,value)=>{if(value!==undefined&&value!==null&&value!=="")patch[key]=value;};
@@ -9891,55 +10145,68 @@ function asortymentPatchZPrzygotowania(p={},draft={}){
   return patch;
 }
 async function asortymentPrzygotujProduktDoAllegro(base={},options={}){
-  let p=asortymentProduktPoId(base.id)||base;const warnings=[],before=asortymentMigawkaPrzygotowania(p),startedAt=new Date().toISOString();
-  if(options.refreshSource!==false){
-    if(p.sourceUrl||p.producentUrl)p=await automatyczniePobierzDaneZrodlaProduktu(p);
-    else warnings.push("brak linku źródłowego — użyto wyłącznie ręcznie zapisanych zdjęć kartoteki");
+  const productId=String(base.id??"").trim();
+  if(!productId)throw new Error("Brakuje ID produktu.");
+  const enqueue=await chmura("allegro-preparation-queue-enqueue",{method:"POST",body:{
+    productIds:[productId],operation:options.includeSeo?"pelna":"allegro"
+  },timeout:30000});
+  const batchId=String(enqueue?.queue?.batchId||""),started=Date.now();
+  if(!batchId)throw new Error("Serwer nie zwrócił numeru kolejki przygotowania.");
+  let result=null;
+  while(Date.now()-started<5*60*1000){
+    const status=await chmura("allegro-preparation-queue-status",{timeout:30000});
+    const queue=status?.queue||{},batch=(queue.batches||[]).find(item=>String(item.id)===batchId);
+    if(!batch)throw new Error("Serwer nie odnalazł utworzonej partii przygotowania.");
+    const taskIds=new Set((batch.trackedTaskIds||[]).map(String));
+    result=(queue.recent||[]).find(item=>taskIds.has(String(item.id)))||null;
+    const terminal=Number(batch.completed||0)+Number(batch.attention||0)+Number(batch.failed||0);
+    if(result&&terminal>=Number(batch.total||1)&&!Number(batch.pending||0)&&!Number(batch.running||0))break;
+    await new Promise(resolve=>setTimeout(resolve,1000));
   }
-  try{
-    const improved=await chmura("allegro-description-improve",{method:"POST",body:{product:p},timeout:120000});
-    if(improved.compliance?.ok!==false){
-      zapiszPolaProduktuLokalnie(p.id,{nazwa:improved.name||p.nazwa,opisKrotki:improved.shortDescription||p.opisKrotki,opis:improved.fullDescription||p.opis,allegroTitle:improved.allegroTitle||p.allegroTitle,allegroDescription:improved.allegroDescription||p.allegroDescription,contentEditorial:improved.contentEditorial||p.contentEditorial,allegroDescriptionSections:improved.sections||p.allegroDescriptionSections},false);
-      p=asortymentProduktPoId(p.id)||p;
-    }else warnings.push("opis wymagał oczyszczenia przez końcową bramkę zgodności");
-  }catch(error){warnings.push(`poprawa opisu: ${error.message||error}`);}
+  if(!result)throw new Error("Przygotowanie nadal pracuje na serwerze — sprawdź monitor kolejki.");
+  if(result.status==="failed")throw new Error(result.error||"Serwer nie potwierdził przygotowania produktu.");
+  const p=await asortymentPobierzPelnyProdukt(productId,{force:true});
+  if(!p)throw new Error("Po przygotowaniu nie udało się odczytać produktu z centralnej kartoteki.");
   const draft=await chmura("allegro-offer-draft",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p)}},timeout:90000});
-  allegroZapiszAutoUzupelnienia(p,draft);
-  p=asortymentProduktPoId(p.id)||p;
-  zapiszPolaProduktuLokalnie(p.id,asortymentPatchZPrzygotowania(p,draft),false);
-  p=asortymentProduktPoId(p.id)||p;
-  const missing=[...new Set((draft.missing||[]).map(String).filter(Boolean))],ready=missing.length===0&&draft.compliance?.ok!==false,savedFields=asortymentPolaZmienione(before,asortymentMigawkaPrzygotowania(p)),finishedAt=new Date().toISOString();
-  zapiszPolaProduktuLokalnie(p.id,{allegroAgentPreparationStatus:ready?"ready":"needs_attention",allegroAgentPreparationMissing:missing,allegroAgentSavedFields:savedFields,allegroAgentPreparedAt:finishedAt,allegroAgentPreparationStartedAt:startedAt,allegroAgentPreparationSource:"agent-katalogu",allegroAgentDraftOperation:draft.operation||"create",allegroAgentCompliancePolicy:draft.compliance?.policyId||"",allegroAgentComplianceCheckedAt:draft.compliance?.checkedAt||finishedAt,allegroAgentPreparationError:""},false);
-  p=asortymentProduktPoId(p.id)||p;
-  const persistence=await asortymentZapiszProduktCentralnie(p,startedAt);
-  p=asortymentProduktPoId(p.id)||p;
-  return {id:String(p.id),name:p.nazwa||"Produkt",product:p,draft,ready,missing,savedFields,warnings,persistence};
+  const missing=[...new Set([...(result.missing||[]),...(draft.missing||[])].map(String).filter(Boolean))];
+  const ready=result.ready===true&&missing.length===0&&draft.compliance?.ok!==false;
+  return {
+    id:productId,name:p.nazwa||"Produkt",product:p,draft,ready,missing,
+    savedFields:result.savedFields||[],warnings:result.reused?["wykorzystano aktualne, wcześniej potwierdzone przygotowanie serwerowe"]:[],
+    persistence:{confirmed:true,mutationId:result.mutationId||"",publication:{published:true,readbackConfirmed:true}},
+  };
 }
 async function asortymentAgentPrzetworzProdukt(base,operation){
   let p=asortymentProduktPoId(base.id)||base;const warnings=[];let preparation=null;
   if(["pelna","allegro","szkic","dane"].includes(operation)){
-    preparation=await asortymentPrzygotujProduktDoAllegro(p,{refreshSource:["pelna","allegro"].includes(operation)});p=preparation.product;warnings.push(...preparation.warnings);if(preparation.missing.length)warnings.push(`do uzupełnienia: ${preparation.missing.join(", ")}`);
+    preparation=await asortymentPrzygotujProduktDoAllegro(p,{refreshSource:["pelna","allegro"].includes(operation),includeSeo:operation==="pelna"});p=preparation.product;warnings.push(...preparation.warnings);if(preparation.missing.length)warnings.push(`do uzupełnienia: ${preparation.missing.join(", ")}`);
   }else if(operation==="zrodlo"){
     if(p.sourceUrl||p.producentUrl)p=await automatyczniePobierzDaneZrodlaProduktu(p);else warnings.push("brak linku producenta");
   }
-  if(["pelna","seo"].includes(operation))asortymentSeoAgenta(p);
+  if(operation==="seo")await asortymentSeoAgenta(p);
   if(["pelna","prowizja"].includes(operation)){
     const price=kwotaNum(p.cenaAllegro||p.cena),feeReady=price>0&&!!(p.allegroOfferId||(p.allegroCategoryId&&(p.allegroProductId||p.gtin||p.ean)));
     if(feeReady){const fee=await allegroPobierzProwizjeProduktu(p.id,null,{silent:true});if(!fee)warnings.push("nie pobrano prowizji");}
     else warnings.push("brak danych do wyliczenia prowizji");
   }
   p=asortymentProduktPoId(p.id)||p;
-  return {id:String(p.id),name:p.nazwa||"Produkt",warnings,ready:preparation?.ready??null,missing:preparation?.missing||[],savedFields:preparation?.savedFields||[]};
+  return {id:String(p.id),name:p.nazwa||"Produkt",warnings,ready:preparation?.ready??null,missing:preparation?.missing||[],savedFields:preparation?.savedFields||[],persistenceConfirmed:preparation?preparation.persistence?.confirmed===true&&preparation.persistence?.publication?.published===true:true};
 }
 async function asortymentUruchomAgenta(ids,operation){
   if(asortymentAgentKolejka.busy){toast("Agent ma już aktywną kolejkę produktów");return;}
   const products=asortymentProduktyZId(ids).slice(0,250);if(!products.length){toast("Zaznacz co najmniej jeden aktywny produkt");return;}
+  if(["pelna","allegro","szkic","dane"].includes(operation))return asortymentUruchomAgentaNaSerwerze(products,operation);
   asortymentAgentKolejka={busy:true,operation,ids:products.map(p=>String(p.id)),done:0,total:products.length,ok:0,warnings:0,failed:0,cancel:false,current:"",results:[],startedAt:new Date().toISOString(),finishedAt:""};asortymentOdswiezCentrumDzialan();
-  let cursor=0;const worker=async()=>{while(cursor<products.length&&!asortymentAgentKolejka.cancel){const p=products[cursor++];asortymentAgentKolejka.current=p.nazwa||`Produkt ${p.id}`;asortymentOdswiezCentrumDzialan();try{const result=await asortymentAgentPrzetworzProdukt(p,operation);asortymentAgentKolejka.ok++;if(result.warnings.length)asortymentAgentKolejka.warnings++;asortymentAgentKolejka.results.push({...result,ok:true});}catch(error){if(["pelna","allegro","szkic","dane"].includes(operation))zapiszPolaProduktuLokalnie(p.id,{allegroAgentPreparationStatus:"failed",allegroAgentPreparationError:error.message||String(error),allegroAgentPreparationCheckedAt:new Date().toISOString()},false);asortymentAgentKolejka.failed++;asortymentAgentKolejka.results.push({id:String(p.id),name:p.nazwa||"Produkt",ok:false,error:error.message||String(error)});}finally{asortymentAgentKolejka.done++;asortymentOdswiezCentrumDzialan();}}};
-  await Promise.all(Array.from({length:Math.min(2,products.length)},worker));
+  let cursor=0;const worker=async()=>{while(cursor<products.length&&!asortymentAgentKolejka.cancel){const p=products[cursor++];asortymentAgentKolejka.current=p.nazwa||`Produkt ${p.id}`;asortymentOdswiezCentrumDzialan();try{const result=await asortymentAgentPrzetworzProdukt(p,operation);if(!result.persistenceConfirmed)throw new Error("Brak potwierdzenia trwałego zapisu produktu.");asortymentAgentKolejka.ok++;if(result.warnings.length)asortymentAgentKolejka.warnings++;asortymentAgentKolejka.results.push({...result,ok:true});}catch(error){if(["pelna","allegro","szkic","dane"].includes(operation))podmienProduktAdminBezRenderu(p.id,{allegroAgentPreparationStatus:"failed",allegroAgentPreparationError:error.message||String(error),allegroAgentPreparationCheckedAt:new Date().toISOString()});asortymentAgentKolejka.failed++;asortymentAgentKolejka.results.push({id:String(p.id),name:p.nazwa||"Produkt",ok:false,error:error.message||String(error)});}finally{asortymentAgentKolejka.done++;asortymentOdswiezCentrumDzialan();}}};
+  // Jedna kolejka = jeden zapis naraz. Dzięki temu każdy produkt otrzymuje
+  // osobne potwierdzenie odczytu z serwera i nie ściga się o rewizję ustawień
+  // z drugim produktem z tej samej partii.
+  await worker();
   asortymentAgentKolejka={...asortymentAgentKolejka,busy:false,current:"",finishedAt:new Date().toISOString()};
   zapiszHistorieAgenta("katalog-allegro",`Agent zakończył kolejkę katalogu: ${asortymentAgentKolejka.ok} poprawnie, ${asortymentAgentKolejka.failed} błędów`,{operation,products:asortymentAgentKolejka.ids,warningCount:asortymentAgentKolejka.warnings});
-  const cloudSaved=await chmuraZapiszUstawienia({flush:true}).catch(()=>false);asortymentAgentKolejka={...asortymentAgentKolejka,cloudSaved};zbudujProdukty();asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🤖 Kolejka zakończona: serwer potwierdził trwały zapis ${asortymentAgentKolejka.ok} produktów${asortymentAgentKolejka.failed?` • ${asortymentAgentKolejka.failed} błędów`:""}`:"⚠️ Nie potwierdzono całej kolejki zmian — pozycje bez potwierdzenia mają status błędu i można je bezpiecznie ponowić");
+  const preparationOperation=["pelna","allegro","szkic","dane"].includes(operation);
+  const cloudSaved=preparationOperation?asortymentAgentKolejka.failed===0&&asortymentAgentKolejka.results.every(result=>result.ok&&result.persistenceConfirmed!==false):await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
+  asortymentAgentKolejka={...asortymentAgentKolejka,cloudSaved};asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🤖 Kolejka zakończona: serwer potwierdził zapis i publikację ${asortymentAgentKolejka.ok} produktów`:"⚠️ Nie wszystkie produkty uzyskały potwierdzenie zapisu i publikacji — sprawdź raport kolejki");
 }
 function asortymentUruchomAgentaDlaZaznaczonych(){return asortymentUruchomAgenta([...zaznaczoneProdukty],String(document.querySelector("[data-agent-product-operation]")?.value||asortymentAgentKolejka.operation||"pelna"));}
 function asortymentUruchomAgentaDlaProduktu(id,operation="pelna"){return asortymentUruchomAgenta([id],operation);}
@@ -9990,18 +10257,24 @@ async function asortymentPotwierdzOperacjeZewnetrzna(direct=false){
           const preparedDraft=preparation.draft?.draft?{...preparation.draft.draft,publication:{...(preparation.draft.draft.publication||{}),status:publicationAction==="activate"?"ACTIVE":"INACTIVE",republish:true}}:null;
           const operationId=`${state.operationId||`allegro_${Date.now().toString(36)}`}:${String(p.id)}`;
           const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,...(preparedDraft?{draft:preparedDraft}:{}),options:{stock:allegroStanOfertyProduktu(p),publicationAction,publishNow:publicationAction==="activate"},approval:{approved:true,operationId,productId:String(p.id),action:state.operation,approvedAt:new Date().toISOString()}},timeout:120000});
-          allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);allegroZapiszWynikOperacji(p,d);
-          zapiszPolaProduktuLokalnie(p.id,{allegroAgentPreparationStatus:"published",allegroAgentPublishedAt:new Date().toISOString(),allegroOfferId:String(d.offer?.id||existing?.id||p.allegroOfferId||""),allegroAgentPublicationError:"",...(d.catalogRecovery?.applied?{allegroCatalogAutoRepairedAt:new Date().toISOString()}: {})},false);
-          asortymentAllegroDecyzja.ok++;asortymentAllegroDecyzja.results.push({id:String(p.id),name:p.nazwa,ok:true,offerId:d.offer?.id||existing?.id||"",operationId,savedFields:preparation.savedFields,catalogRecovery:d.catalogRecovery||null});
+          allegroZastosujWynikWystawienia(p,d);allegroZapiszWynikOperacji(p,d);
+          const expectedOfferId=String(d.offer?.id||existing?.id||p.allegroOfferId||"").trim();
+          const persisted=await asortymentPobierzPelnyProdukt(p.id,{force:true});
+          if(!expectedOfferId||String(persisted?.allegroOfferId||"").trim()!==expectedOfferId||String(persisted?.allegroAgentPreparationStatus||"")!=="published"){
+            throw Object.assign(new Error("Allegro przyjęło ofertę, ale serwer nie potwierdził jeszcze jej trwałego zapisu w kartotece."),{code:"allegro_publication_readback_mismatch"});
+          }
+          if(typeof asortymentCentralnyPodmienProdukt==="function")asortymentCentralnyPodmienProdukt(p.id,persisted);
+          asortymentAllegroDecyzja.ok++;asortymentAllegroDecyzja.results.push({id:String(p.id),name:p.nazwa,ok:true,offerId:expectedOfferId,operationId,savedFields:preparation.savedFields,catalogRecovery:d.catalogRecovery||null,readbackConfirmed:true});
         }catch(error){
-          const p=asortymentProduktPoId(sourceProduct.id)||sourceProduct,currentStatus=String(p.allegroAgentPreparationStatus||"");zapiszPolaProduktuLokalnie(p.id,{...(currentStatus==="needs_attention"?{}:{allegroAgentPreparationStatus:"failed",allegroAgentPreparationError:error.message||String(error)}),allegroAgentPublicationError:error.message||String(error),allegroAgentPreparationCheckedAt:new Date().toISOString()},false);
+          const p=asortymentProduktPoId(sourceProduct.id)||sourceProduct,currentStatus=String(p.allegroAgentPreparationStatus||"");await zapiszPolaProduktuTrwale(p.id,{...(currentStatus==="needs_attention"?{}:{allegroAgentPreparationStatus:"failed",allegroAgentPreparationError:error.message||String(error)}),allegroAgentPublicationError:error.message||String(error),allegroAgentPreparationCheckedAt:new Date().toISOString()},false,"allegro-publication-failure").catch(()=>false);
           asortymentAllegroDecyzja.failed++;asortymentAllegroDecyzja.results.push({id:String(p.id),name:p.nazwa,ok:false,operationId:`${state.operationId||"allegro"}:${String(p.id)}`,error:error.message||String(error),code:error.code||""});
         }finally{asortymentAllegroDecyzja.done++;asortymentOdswiezCentrumDzialan();}
       }
       asortymentAllegroDecyzja={...asortymentAllegroDecyzja,busy:false,step:"done"};
     }
     asortymentAllegroDecyzja.results.filter(result=>result.ok&&result.id!==undefined).forEach(result=>{const id=String(result.id);zaznaczoneProdukty.delete(id);zaznaczoneProdukty.delete(Number(id));zaznaczoneAllegroProduktyKatalogu?.delete?.(id);});
-    const cloudSaved=await chmuraZapiszUstawienia({flush:true}).catch(()=>false);asortymentAllegroDecyzja={...asortymentAllegroDecyzja,cloudSaved};await allegroWczytajDane(true).catch(()=>{});allegroZapiszCache();asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🟠 Operacja Allegro zakończona i trwale zapisana: ${asortymentAllegroDecyzja.ok} poprawnie${asortymentAllegroDecyzja.failed?` • ${asortymentAllegroDecyzja.failed} błędów`:""}${asortymentAllegroDecyzja.remaining?` • pozostało ${asortymentAllegroDecyzja.remaining}`:""}`:"⚠️ Allegro przyjęło operację, ale serwer nie potwierdził jeszcze całej kolejki kartotek");
+    const successful=asortymentAllegroDecyzja.results.filter(result=>result.ok),cloudSaved=state.operation==="withdraw"||successful.length===asortymentAllegroDecyzja.ok&&successful.every(result=>result.readbackConfirmed===true);
+    asortymentAllegroDecyzja={...asortymentAllegroDecyzja,cloudSaved};await allegroWczytajDane(true).catch(()=>{});allegroZapiszCache();asortymentCentralnyWyczyscCache();asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🟠 Operacja Allegro zakończona i trwale zapisana: ${asortymentAllegroDecyzja.ok} poprawnie${asortymentAllegroDecyzja.failed?` • ${asortymentAllegroDecyzja.failed} błędów`:""}${asortymentAllegroDecyzja.remaining?` • pozostało ${asortymentAllegroDecyzja.remaining}`:""}`:"⚠️ Allegro przyjęło operację, ale serwer nie potwierdził jeszcze całej kolejki kartotek");
   }catch(error){asortymentAllegroDecyzja={...asortymentAllegroDecyzja,busy:false,error:error.message||String(error)};asortymentOdswiezCentrumDzialan();toast("⚠️ Operacja Allegro: "+(error.message||error));}
 }
 
@@ -10013,8 +10286,9 @@ function asortymentDecyzjaZewnetrznaHTML(){
   return `<section class="product-external-confirm"><header><span>⚠️</span><div><small>Świadoma decyzja administratora • API Allegro</small><h3>${esc(title)} — ${products.length} produktów</h3><p>${esc(description)} Ostateczna publikacja nastąpi dopiero po tym potwierdzeniu.</p></div></header><div class="product-external-preview">${products.slice(0,8).map(p=>`<span><b>${esc(p.nazwa||"Produkt")}</b><small>ID ${esc(p.id)} • oferta ${esc(asortymentOfertaProduktu(p)?.id||p.allegroOfferId||"nowa")}</small>${asortymentStatusPrzygotowaniaHTML(p)}</span>`).join("")}${products.length>8?`<em>+ ${products.length-8} kolejnych</em>`:""}</div><label class="product-external-check"><input type="checkbox" data-external-product-confirm> Potwierdzam przygotowanie i wykonanie tej operacji na Allegro${s.skipped?` • pominięto ${s.skipped} niepasujących produktów`:""}</label>${s.busy?`<div class="product-agent-progress"><progress max="${s.total}" value="${s.done}"></progress><span>${s.done}/${s.total} • Agent zapisuje dane przed publikacją</span></div>`:""}${s.error?`<div class="backend-note allegro-mapping-error"><b>${esc(s.error)}</b>${allegroStan.requiresReauth?`<button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro ponownie</button>`:""}</div>`:""}<footer><button class="btn ghost" onclick="asortymentAnulujOperacjeZewnetrzna()" ${s.busy?"disabled":""}>Anuluj</button><button class="btn danger" onclick="asortymentPotwierdzOperacjeZewnetrzna()" ${s.busy?"disabled":""}>${s.busy?"⏳ Przygotowuję i wystawiam…":"Potwierdzam przygotowanie i publikację"}</button></footer></section>`;
 }
 function asortymentCentrumDzialanHTML(){
+  asortymentZapewnijMonitorKolejkiSerwera();
   const q=asortymentAgentKolejka,selected=zaznaczoneProdukty.size,dirty=typeof chmuraBrudneKlucze!=="undefined"?chmuraBrudneKlucze.size:0;
-  return `<section class="product-action-center"><header><div><span class="order-pro-label">Automatyzacje katalogu i Allegro</span><h3>⚡ Centrum przygotowania i wystawiania</h3><p>Najpierw Agent zapisuje poprawione dane w kartotece. Dopiero osobna, potwierdzona operacja wysyła kompletną ofertę do Allegro.</p></div><span class="product-save-state ${dirty?"pending":"saved"}">${dirty?`☁️ ${dirty} zmian czeka na bezpieczny zapis`:"☁️ Dane zsynchronizowane"}</span></header><div class="product-action-columns"><article class="product-action-primary"><small>KROK 1 • PRZYGOTUJ I ZAPISZ</small><b>${selected} zaznaczonych produktów</b><button class="btn" onclick="asortymentPrzygotujZaznaczoneDoAllegro()" ${!selected||q.busy?"disabled":""}>🤖 Przygotuj i zapisz do Allegro</button><small>Agent odświeży źródło, poprawi oba opisy, dobierze katalog, kategorię, parametry, zdjęcia i zapisze wynik kontroli.</small><details><summary>Inne działania Agenta</summary><div class="product-action-advanced"><select data-agent-product-operation onchange="asortymentUstawOperacjeAgenta(this.value)" ${q.busy?"disabled":""}><option value="pelna" ${q.operation==="pelna"?"selected":""}>Pełna kontrola i uzupełnienie</option><option value="zrodlo" ${q.operation==="zrodlo"?"selected":""}>Odśwież dane producenta</option><option value="dane" ${q.operation==="dane"?"selected":""}>Kompletność i kategoria Allegro</option><option value="szkic" ${q.operation==="szkic"?"selected":""}>Przygotuj / sprawdź szkic</option><option value="prowizja" ${q.operation==="prowizja"?"selected":""}>Pobierz prowizje i opłaty</option><option value="seo" ${q.operation==="seo"?"selected":""}>Popraw SEO produktu</option></select><button class="btn ghost" onclick="asortymentUruchomAgentaDlaZaznaczonych()" ${!selected||q.busy?"disabled":""}>Uruchom wybrane</button></div></details></article><article class="product-action-primary external"><small>KROK 2 • WYSTAW GOTOWE</small><b>Publikacja po ponownej kontroli</b><button class="btn product-allegro-publish" onclick="asortymentWystawZaznaczoneNaAllegro()" ${!selected||q.busy?"disabled":""}>🟠 Wystaw gotowe na Allegro</button><small>Każdy produkt zostanie ponownie przygotowany. Braki zatrzymają tylko daną pozycję i pojawią się w raporcie.</small><details><summary>Inna operacja Allegro</summary><div class="product-action-advanced"><select data-external-product-operation onchange="asortymentUstawOperacjeZewnetrzna(this.value)" ${q.busy?"disabled":""}><option value="update">Aktualizuj istniejące oferty</option><option value="draft">Utwórz brakujące jako nieaktywne</option><option value="activate">Opublikuj / aktywuj sprzedaż</option><option value="withdraw">Zakończ powiązane oferty</option></select><button class="btn ghost" onclick="asortymentPrzygotujOperacjeZewnetrzna()" ${!selected||q.busy?"disabled":""}>Przygotuj decyzję</button></div></details></article></div>${q.busy||q.finishedAt?`<div class="product-agent-progress" aria-live="polite"><progress max="${q.total||1}" value="${q.done}"></progress><div><b>${q.busy?`Agent zapisuje: ${esc(q.current||"uruchamianie kolejki")}`:q.cloudSaved===false?"Kolejka zakończona — serwer ponowi zapis":"Kolejka Agenta zakończona i zapisana"}</b><small>${q.done}/${q.total} • poprawnie ${q.ok} • uwagi ${q.warnings} • błędy ${q.failed}${q.cancel?" • zatrzymywanie":""}</small></div>${q.busy?`<button class="btn ghost" onclick="asortymentAnulujAgenta()">Zatrzymaj po bieżącym</button>`:""}</div>`:""}${q.results.length?`<details class="product-agent-results" ${!q.busy?"open":""}><summary>Konkretny zapis Agenta (${q.results.length})</summary>${q.results.slice(-30).map(x=>`<p class="${x.ok?x.ready===false?"warning":"ok":"error"}"><b>${x.ok?x.ready===false?"⚠️":"✅":"⛔"} ${esc(x.name)}</b>${x.ok?`<span>${x.savedFields?.length?`Zapisano: ${esc(asortymentEtykietyPol(x.savedFields).join(", "))}`:"Dane sprawdzone — bez nowych zmian"}</span>${x.missing?.length?`<small>Do uzupełnienia: ${esc(x.missing.join(", "))}</small>`:`<small>Komplet danych do wystawienia</small>`}`:`<span>${esc(x.error)}</span>`}</p>`).join("")}</details>`:""}${asortymentDecyzjaZewnetrznaHTML()}</section>`;
+  return `<section class="product-action-center"><header><div><span class="order-pro-label">Automatyzacje katalogu i Allegro</span><h3>⚡ Centrum przygotowania i wystawiania</h3><p>Najpierw Agent zapisuje poprawione dane w kartotece. Dopiero osobna, potwierdzona operacja wysyła kompletną ofertę do Allegro.</p></div><span class="product-save-state ${dirty?"pending":"saved"}">${dirty?`☁️ ${dirty} zmian czeka na bezpieczny zapis`:"☁️ Dane zsynchronizowane"}</span></header><div class="product-action-columns"><article class="product-action-primary"><small>KROK 1 • PRZYGOTUJ I ZAPISZ</small><b>${selected} zaznaczonych produktów</b><button class="btn" onclick="asortymentPrzygotujZaznaczoneDoAllegro()" ${!selected||q.busy?"disabled":""}>🤖 Przygotuj i zapisz do Allegro</button><small>Agent odświeży źródło, poprawi oba opisy, dobierze katalog, kategorię, parametry, zdjęcia i zapisze wynik kontroli.</small><details><summary>Inne działania Agenta</summary><div class="product-action-advanced"><select data-agent-product-operation onchange="asortymentUstawOperacjeAgenta(this.value)" ${q.busy?"disabled":""}><option value="pelna" ${q.operation==="pelna"?"selected":""}>Pełna kontrola i uzupełnienie</option><option value="zrodlo" ${q.operation==="zrodlo"?"selected":""}>Odśwież dane producenta</option><option value="dane" ${q.operation==="dane"?"selected":""}>Kompletność i kategoria Allegro</option><option value="szkic" ${q.operation==="szkic"?"selected":""}>Przygotuj / sprawdź szkic</option><option value="prowizja" ${q.operation==="prowizja"?"selected":""}>Pobierz prowizje i opłaty</option><option value="seo" ${q.operation==="seo"?"selected":""}>Popraw SEO produktu</option></select><button class="btn ghost" onclick="asortymentUruchomAgentaDlaZaznaczonych()" ${!selected||q.busy?"disabled":""}>Uruchom wybrane</button></div></details></article><article class="product-action-primary external"><small>KROK 2 • WYSTAW GOTOWE</small><b>Publikacja po kontroli aktualności</b><button class="btn product-allegro-publish" onclick="asortymentWystawZaznaczoneNaAllegro()" ${!selected||q.busy?"disabled":""}>🟠 Wystaw gotowe na Allegro</button><small>Potwierdzone przygotowanie jest używane ponownie. Agent generuje opisy od nowa wyłącznie po zmianie danych produktu.</small><details><summary>Inna operacja Allegro</summary><div class="product-action-advanced"><select data-external-product-operation onchange="asortymentUstawOperacjeZewnetrzna(this.value)" ${q.busy?"disabled":""}><option value="update">Aktualizuj istniejące oferty</option><option value="draft">Utwórz brakujące jako nieaktywne</option><option value="activate">Opublikuj / aktywuj sprzedaż</option><option value="withdraw">Zakończ powiązane oferty</option></select><button class="btn ghost" onclick="asortymentPrzygotujOperacjeZewnetrzna()" ${!selected||q.busy?"disabled":""}>Przygotuj decyzję</button></div></details></article></div>${q.busy||q.finishedAt?`<div class="product-agent-progress" aria-live="polite"><progress max="${q.total||1}" value="${q.done}"></progress><div><b>${q.busy?`Agent zapisuje: ${esc(q.current||"uruchamianie kolejki")}`:q.cloudSaved===false?"Kolejka zakończona — sprawdź błędy zapisu":"Kolejka Agenta zakończona i zapisana"}</b><small>${q.done}/${q.total} • poprawnie ${q.ok} • uwagi ${q.warnings} • błędy ${q.failed}${q.cancel?" • zatrzymywanie":""}</small></div>${q.busy?`<button class="btn ghost" onclick="asortymentAnulujAgenta()">Zatrzymaj po bieżącym</button>`:""}</div>`:""}${q.results.length?`<details class="product-agent-results" ${!q.busy?"open":""}><summary>Konkretny zapis Agenta (${q.results.length})</summary>${q.results.slice(-30).map(x=>`<p class="${x.ok?x.ready===false?"warning":"ok":"error"}"><b>${x.ok?x.ready===false?"⚠️":"✅":"⛔"} ${esc(x.name)}</b>${x.ok?`<span>${x.savedFields?.length?`Zapisano: ${esc(asortymentEtykietyPol(x.savedFields).join(", "))}`:"Dane sprawdzone — bez nowych zmian"}</span>${x.missing?.length?`<small>Do uzupełnienia: ${esc(x.missing.join(", "))}</small>`:`<small>Komplet danych do wystawienia</small>`}`:`<span>${esc(x.error)}</span>`}</p>`).join("")}</details>`:""}${asortymentDecyzjaZewnetrznaHTML()}</section>`;
 }
 function asortymentMenuDzialanProduktuHTML(p={}){
   const offer=asortymentOfertaProduktu(p);return `<details class="product-row-action-menu"><summary class="btn ghost">⚡ Działania</summary><div>${asortymentStatusPrzygotowaniaHTML(p)}<button class="primary" onclick="asortymentPrzygotujProduktDoAllegroZMenu(${jsArg(p.id)})">🤖 Przygotuj i zapisz do Allegro</button><button class="allegro" onclick="asortymentPrzygotujOperacjeZewnetrzna('${offer?"update":"activate"}',${jsArg(p.id)})">🟠 ${offer?"Zapisz poprawki w ofercie":"Wystaw gotowy produkt"}</button><button onclick="asortymentUruchomAgentaDlaProduktu(${jsArg(p.id)},'prowizja')">📊 Pobierz prowizję</button>${offer?`<a href="https://allegro.pl/oferta/${encodeURIComponent(offer.id)}" target="_blank" rel="noopener">↗ Otwórz ofertę Allegro</a><button class="danger" onclick="asortymentPrzygotujOperacjeZewnetrzna('withdraw',${jsArg(p.id)})">⏹ Przygotuj zakończenie</button>`:""}</div></details>`;
@@ -11263,40 +11537,21 @@ function asortymentStanZapisuCeny(input,status="",tekst=""){
   clearTimeout(input._artwayPriceStateTimer);
   if(status==="is-saved")input._artwayPriceStateTimer=setTimeout(()=>{pole.classList.remove("is-saved");if(info)info.textContent="";},1800);
 }
-function asortymentPodmienCeneBezRenderu(id,patch={},usun=[],synchronizuj=true){
-  const key=String(id),baza=pobierzProduktAdmin(id)||{},idx=produktyDodane.findIndex(x=>String(x.id)===key);
-  const signature=typeof asortymentCentralnySygnatura==="function"?asortymentCentralnySygnatura():"";
-  const centralData=asortymentCentralnyStan?.status==="ready"&&asortymentCentralnyStan.signature===signature?asortymentCentralnyStan.data:asortymentCentralnyCache?.get?.(signature)?.data;
-  if(idx>=0){
-    const next={...produktyDodane[idx],...patch};for(const pole of usun)delete next[pole];
-    produktyDodane=[...produktyDodane.slice(0,idx),next,...produktyDodane.slice(idx+1)];
-    zapiszLS("artway_produkty_dodane",produktyDodane,{synchronizuj});
-  }else{
-    const next={...(produktyEdytowane[key]||{}),...patch};for(const pole of usun)next[pole]=null;
-    produktyEdytowane={...produktyEdytowane,[key]:next};
-    zapiszLS("artway_produkty_edytowane",produktyEdytowane,{synchronizuj});
-  }
-  if(Array.isArray(produkty)){
-    const produktIdx=produkty.findIndex(x=>String(x.id)===key);
-    if(produktIdx>=0){const next={...produkty[produktIdx],...patch};for(const pole of usun)delete next[pole];produkty[produktIdx]=next;}
-  }
-  if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
-  if(centralData&&signature){
-    const data={...centralData,items:(centralData.items||[]).map(item=>String(item.id)===key?{...item,...patch,...Object.fromEntries(usun.map(pole=>[pole,null]))}:item)};
-    asortymentCentralnyCache.set(signature,{at:Date.now(),data});
-    asortymentCentralnyStan={status:"ready",signature,data,error:"",request:null};
-  }
-  return baza;
+function asortymentPodmienCeneBezRenderu(id,patch={},usun=[]){
+  return podmienProduktAdminBezRenderu(id,patch,usun);
 }
 async function asortymentZapiszCeneSerwer(id,channel,value,clear=false){
   return chmura("catalog-product-price-update",{method:"POST",body:{productId:String(id),channel,...(clear?{clear:true}:{value})},timeout:30000});
+}
+function asortymentStatusPublikacjiCeny(saved={}){
+  return saved.publication?.published===false?"Zapisano • publikacja w tle":"Zapisano i opublikowano";
 }
 async function ustawCeneKanalu(id,kanal,wartosc,input=null){
   const pola={sklep:"cena",allegro:"cenaAllegro",vonHalsky:"cenaVonHalsky"},pole=pola[kanal]||"cena",poprzedni=pobierzProduktAdmin(id)||{},raw=String(wartosc).trim(),cena=parseFloat(raw.replace(/\s/g,"").replace(",",".")),dziedziczony=kanal==="vonHalsky"?kwotaNum(poprzedni.cenaAllegro||poprzedni.cena):kwotaNum(poprzedni.cena);
   if(raw===""&&kanal!=="sklep"){
     asortymentStanZapisuCeny(input,"is-saving","Zapisuję dziedziczenie…");
     try{const saved=await asortymentZapiszCeneSerwer(id,kanal==="vonHalsky"?"vonHalsky":"allegro",null,true);asortymentPodmienCeneBezRenderu(id,saved.fields||{},saved.remove||[pole],false);
-      if(input)input.value="";loguj("info",`Cena ${kanal} produktu ${id} dziedziczy cenę ${kanal==="vonHalsky"?"Allegro":"sklepu"}`);asortymentStanZapisuCeny(input,"is-saved",`Dziedziczy ${dziedziczony?zl(dziedziczony):"cenę bazową"}`);return true;
+      if(input)input.value="";loguj("info",`Cena ${kanal} produktu ${id} dziedziczy cenę ${kanal==="vonHalsky"?"Allegro":"sklepu"}`);asortymentStanZapisuCeny(input,"is-saved",asortymentStatusPublikacjiCeny(saved));return true;
     }catch(error){asortymentStanZapisuCeny(input,"has-error","Nie zapisano — spróbuj ponownie");toast(`⚠️ ${error.message||"Nie udało się zapisać ceny"}`);return false;}
   }
   if(!(cena>0)){
@@ -11307,7 +11562,7 @@ async function ustawCeneKanalu(id,kanal,wartosc,input=null){
   asortymentStanZapisuCeny(input,"is-saving","Zapisuję na serwerze…");
   const nowa=+cena.toFixed(2),usun=kanal==="sklep"&&Number(poprzedni.staraCena)>0&&Number(poprzedni.staraCena)<=nowa?["staraCena"]:[];
   try{const saved=await asortymentZapiszCeneSerwer(id,kanal==="sklep"?"store":kanal,nowa);asortymentPodmienCeneBezRenderu(id,saved.fields||{[pole]:nowa},[...new Set([...(saved.remove||[]),...usun])],false);if(input)input.value=String(nowa.toFixed(2)).replace(".",",");
-    loguj("info",`Zmieniono cenę ${kanal} produktu ${id} → ${zl(nowa)}`);asortymentStanZapisuCeny(input,"is-saved","Zapisano trwale");return true;
+    loguj("info",`Zmieniono cenę ${kanal} produktu ${id} → ${zl(nowa)}`);asortymentStanZapisuCeny(input,"is-saved",asortymentStatusPublikacjiCeny(saved));return true;
   }catch(error){if(input)input.value=poprzedni[pole]==null&&kanal!=="sklep"?"":String(kwotaNum(poprzedni[pole]||poprzedni.cena).toFixed(2)).replace(".",",");asortymentStanZapisuCeny(input,"has-error","Nie zapisano — spróbuj ponownie");toast(`⚠️ ${error.message||"Nie udało się zapisać ceny"}`);return false;}
 }
 function ustawCene(id, wartosc, input=null){
@@ -11328,7 +11583,7 @@ async function ustawCeneZakupu(id, wartosc, input=null){
   asortymentStanZapisuCeny(input,"is-saving","Zapisuję…");
   const nowa=+cena.toFixed(2);
   try{const saved=await asortymentZapiszCeneSerwer(id,"purchase",nowa);asortymentPodmienCeneBezRenderu(id,saved.fields||{cenaZakupu:nowa},saved.remove||polaFaktury,false);
-    if(input)input.value=String(nowa.toFixed(2)).replace(".",",");loguj("info",`Zmieniono prywatną cenę zakupu produktu ${id} → ${zl(nowa)}`);asortymentStanZapisuCeny(input,"is-saved","Zapisano trwale");return true;
+    if(input)input.value=String(nowa.toFixed(2)).replace(".",",");loguj("info",`Zmieniono prywatną cenę zakupu produktu ${id} → ${zl(nowa)}`);asortymentStanZapisuCeny(input,"is-saved",asortymentStatusPublikacjiCeny(saved));return true;
   }catch(error){if(input)input.value=poprzedni.cenaZakupu==null?"":String(kwotaNum(poprzedni.cenaZakupu).toFixed(2)).replace(".",",");asortymentStanZapisuCeny(input,"has-error","Nie zapisano — spróbuj ponownie");toast(`⚠️ ${error.message||"Nie udało się zapisać ceny zakupu"}`);return false;}
 }
 /* ── Akcje masowe na produktach ── */
@@ -11349,10 +11604,27 @@ function asortymentEksportuj(zakres){
   if(zakres==="zaznaczone")return eksportujProduktyPoIdCSV([...zaznaczoneProdukty],"produkty-zaznaczone.csv");
   eksportujProduktyPoIdCSV(asortymentWynikiIds,"produkty-filtrowane.csv");
 }
-function usunZaznaczoneProd(){
+async function produktCyklCentralny(productIds=[],operation="trash"){
+  const ids=[...new Set((Array.isArray(productIds)?productIds:[productIds]).map(id=>String(id??"").trim()).filter(Boolean))];
+  if(!ids.length)return {changed:0,results:[]};
+  const result=await chmura("catalog-product-lifecycle",{method:"POST",body:{
+    productIds:ids,
+    operation,
+    mutationId:`product-${operation}-batch:${Date.now().toString(36)}`
+  },timeout:60000});
+  if(result?.ok!==true)throw new Error(result?.error||"Serwer nie potwierdził operacji na produktach.");
+  const failed=(result.results||[]).filter(item=>operation==="purge"?!item.deleted:!item.updated);
+  if(failed.length)throw new Error(`Nie zmieniono ${failed.length} z ${ids.length} produktów.`);
+  if(typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
+  return result;
+}
+async function usunZaznaczoneProd(){
   if(!zaznaczoneProdukty.size){ toast("Zaznacz produkty"); return; }
   if(!confirm(`Usunąć ${zaznaczoneProdukty.size} zaznaczonych produktów?`)) return;
-  for(const id of [...zaznaczoneProdukty]){
+  const ids=[...zaznaczoneProdukty];
+  try{await produktCyklCentralny(ids,"trash");}
+  catch(error){toast("⛔ Nie usunięto zaznaczonych: "+(error.message||error));return;}
+  for(const id of ids){
     const p = produktyDodane.find(x=>x.id===id);
     if(p){
       if(!koszDodanych.some(x=>x.id===id)) koszDodanych.push(p);
@@ -11363,14 +11635,11 @@ function usunZaznaczoneProd(){
       oznaczProduktWKoszu(id,"bazowy");
     }
   }
-  zapiszLS("artway_kosz_dodane", koszDodanych);
-  zapiszLS("artway_produkty_dodane", produktyDodane);
-  zapiszLS("artway_produkty_ukryte", produktyUkryte);
   loguj("info",`Masowo usunięto ${zaznaczoneProdukty.size} produktów`);
   zaznaczoneProdukty.clear();
   zbudujProdukty(); odswiezMenu(); toast("Usunięto zaznaczone 🗑️"); renderuj();
 }
-function zmienCenyZaznaczonych(){
+async function zmienCenyZaznaczonych(){
   const wartosc = parseFloat(String($("procentCen")?.value||"").replace(",","."));
   const tryb=String($("trybCenProduktow")?.value||"percent");
   const kanal=String($("kanalCenProduktow")?.value||"sklep");
@@ -11378,55 +11647,58 @@ function zmienCenyZaznaczonych(){
   if(!Number.isFinite(wartosc)||wartosc===0){ toast("⚠️ Podaj wartość zmiany, np. 10 lub -5"); return; }
   if(tryb==="percent"&&wartosc<=-100){ toast("⚠️ Obniżka procentowa musi być większa niż -100%"); return; }
   if(tryb==="fixed"&&wartosc<=0){ toast("⚠️ Cena docelowa musi być większa od zera"); return; }
+  const operations=[];
   for(const id of [...zaznaczoneProdukty]){
     const p = pobierzProduktAdmin(id); if(!p) continue;
     const wylicz=base=>Math.max(0.01, +(tryb==="percent"?kwotaNum(base)*(1+wartosc/100):tryb==="amount"?kwotaNum(base)+wartosc:wartosc).toFixed(2)),patch={};
     if(kanal==="sklep"||kanal==="oba")patch.cena=wylicz(p.cena);
     if(kanal==="allegro"||kanal==="oba")patch.cenaAllegro=wylicz(p.cenaAllegro||p.cena);
-    const i = produktyDodane.findIndex(x=>x.id===id);
-    if(i>=0){ Object.assign(produktyDodane[i],patch);if(patch.cena&&produktyDodane[i].staraCena&&produktyDodane[i].staraCena<=patch.cena)delete produktyDodane[i].staraCena; }
-    else produktyEdytowane = {...produktyEdytowane, [id]:{...(produktyEdytowane[id]||{}),...patch}};
+    const remove=patch.cena&&Number(p.staraCena)>0&&Number(p.staraCena)<=patch.cena?["staraCena"]:[];
+    operations.push({productId:id,fields:patch,remove});
   }
-  zapiszLS("artway_produkty_dodane", produktyDodane);
-  zapiszLS("artway_produkty_edytowane", produktyEdytowane);
+  if(!operations.length){toast("Brak produktów możliwych do zmiany");return;}
+  try{await chmuraZapiszProduktyCentralnie(operations,"catalog-bulk-price");}
+  catch(error){toast("⛔ Serwer nie potwierdził masowej zmiany cen: "+(error.message||error));return;}
   const opis=tryb==="percent"?`${wartosc>0?"+":""}${wartosc}%`:tryb==="amount"?`${wartosc>0?"+":""}${zl(wartosc)}`:`na ${zl(wartosc)}`;
   const kanalLabel=kanal==="oba"?"sklepu i Allegro":kanal==="allegro"?"Allegro":"sklepu";
   loguj("info",`Masowa zmiana cen ${kanalLabel} ${opis} dla ${zaznaczoneProdukty.size} produktów`);
   zaznaczoneProdukty.clear();
   zbudujProdukty(); toast(`Ceny ${kanalLabel} zmienione ${opis} ✅`); renderuj();
 }
-function usunProduktAdmin(id){
+async function usunProduktAdmin(id){
   if(produktyDodane.some(p=>p.id===id)){
-    usunProdukt(id);
+    await usunProdukt(id);
     return;
   }
+  try{await produktCyklCentralny([id],"trash");}
+  catch(error){toast("⛔ Nie przeniesiono produktu do kosza: "+(error.message||error));return;}
   if(!produktyUkryte.includes(id)) produktyUkryte.push(id);
   oznaczProduktWKoszu(id,"bazowy");
-  zapiszLS("artway_produkty_ukryte", produktyUkryte);
   zbudujProdukty(); odswiezMenu();
   loguj("info","Przeniesiono do kosza na 30 dni produkt bazowy id="+id);
   toast("Produkt w koszu przez 30 dni 🗑️");
   renderuj();
 }
-function przywrocProdukt(id){
+async function przywrocProdukt(id){
   if(produktyDefinitywne.includes(id)){ toast("Ten produkt został już usunięty definitywnie"); return; }
+  try{await produktCyklCentralny([id],"restore");}
+  catch(error){toast("⛔ Nie przywrócono produktu: "+(error.message||error));return;}
   produktyUkryte = produktyUkryte.filter(x=>x!==id);
-  zapiszLS("artway_produkty_ukryte", produktyUkryte);
   usunMetaKosza(id);
   zbudujProdukty(); odswiezMenu();
   toast("Produkt przywrócony ↩️"); renderuj();
 }
-function resetujEdycjeProduktu(id){
-  delete produktyEdytowane[id];
-  zapiszLS("artway_produkty_edytowane", produktyEdytowane);
-  zbudujProdukty(); odswiezMenu();
-  toast("Przywrócono dane z products.json");
-  location.hash="#/admin/produkty";
+function resetujEdycjeProduktu(){
+  toast("Kartoteka ma teraz jedno źródło na serwerze. Nie istnieje już osobna warstwa products.json do przywrócenia.");
 }
-function przelaczWidocznosc(id){
-  produktyUkryte = produktyUkryte.includes(id) ? produktyUkryte.filter(x=>x!==id) : [...produktyUkryte, id];
-  zapiszLS("artway_produkty_ukryte", produktyUkryte); zbudujProdukty();
-  toast(produktyUkryte.includes(id)?"Produkt ukryty 🙈":"Produkt widoczny 👁️"); renderuj();
+async function przelaczWidocznosc(id){
+  const product=pobierzProduktAdmin(id)||{},hidden=product.ukryty===true||product.sprzedazAktywna===false||product.saleAvailable===false;
+  const fields=hidden
+    ? {ukryty:false,sprzedazAktywna:true,saleAvailable:true,aktywny:true}
+    : {ukryty:true,sprzedazAktywna:false,saleAvailable:false};
+  try{await chmuraZapiszProduktyCentralnie([{productId:id,fields}],"catalog-sale-visibility");}
+  catch(error){toast("⛔ Nie zmieniono widoczności: "+(error.message||error));return;}
+  zbudujProdukty();toast(hidden?"Produkt widoczny 👁️":"Produkt ukryty 🙈");renderuj();
 }
 
 /* ── Eksporty (CSV dla Excela, JSON dla hostingu) ── */
@@ -11771,18 +12043,6 @@ function wczytajPlikImportuProduktow(input){
   r.onerror=()=>toast("⚠️ Nie udało się odczytać pliku");
   r.readAsText(plik,"UTF-8");
 }
-function zapiszStanProduktowPoOperacji(){
-  zapiszLS("artway_produkty_dodane",produktyDodane);
-  zapiszLS("artway_produkty_ukryte",produktyUkryte);
-  zapiszLS("artway_produkty_edytowane",produktyEdytowane);
-  zapiszLS("artway_produkty_definitywne",produktyDefinitywne);
-  zapiszLS("artway_kosz_dodane",koszDodanych);
-  zapiszLS("artway_kosz_meta",koszMeta);
-  zapiszLS("artway_stany",stanyProduktow);
-  zapiszLS("artway_dostepnosc",dostepnoscProduktow);
-  zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});
-  void chmuraDodajMutacjePolUstawien({mapaProduktow:ustawienia.mapaProduktow||{},menuKategorii:ustawienia.menuKategorii||[]});
-}
 function dodajSciezkiKategoriiZImportuDoMenu(lista){
   const importowane=(Array.isArray(lista)?lista:[]).filter(p=>p?.grupaKategorii&&p?.kategoria);
   if(!importowane.length)return 0;
@@ -11804,66 +12064,65 @@ function dodajSciezkiKategoriiZImportuDoMenu(lista){
   }
   return dodane;
 }
-function wykonajImportProduktow(){
+async function wykonajImportProduktow(){
   const d=podgladImportuProduktow;if(!d?.produkty?.length){toast("Najpierw przeanalizuj poprawne dane");return;}
   const tryb=$("trybImportuProduktow")?.value||"scal";
-  if(tryb==="zastap"&&!confirm(`Zastąpić obecny katalog ${d.produkty.length} produktami? Przed zmianą zostanie utworzona kopia do cofnięcia.`))return;
-  const kopia={data:new Date().toISOString(),produktyDodane,produktyUkryte,produktyEdytowane,produktyDefinitywne,koszDodanych,koszMeta,stanyProduktow,dostepnoscProduktow,ustawienia};
-  try{localStorage.setItem("artway_ostatnia_kopia_importu",JSON.stringify(kopia));}catch(e){toast("⚠️ Nie udało się utworzyć kopii przed importem");return;}
-  let dodane=0,zaktualizowane=0;const wejscie=d.produkty.map(p=>JSON.parse(JSON.stringify(p)));
-  if(tryb==="zastap"){
-    const zajete=new Set();let nastepne=Math.max(0,...wejscie.map(p=>Number(p.id)||0),...prodBazowe.map(p=>Number(p.id)||0))+1;
-    for(const p of wejscie){if(!p.id||zajete.has(p.id)){while(zajete.has(nastepne))nastepne++;p.id=nastepne++;}zajete.add(p.id);if(!p.ikona)p.ikona="📦";if(!p.kolor)p.kolor="#dbeafe";if(p.opis===undefined)p.opis="";}
-    produktyDodane=wejscie;
-    produktyUkryte=[...new Set(prodBazowe.map(p=>p.id))];
-    produktyEdytowane={};produktyDefinitywne=[...produktyUkryte];koszDodanych=[];koszMeta={};stanyProduktow={};
-    wejscie.forEach(p=>{if(Number.isInteger(p.stan)&&p.stan>=0)stanyProduktow[p.id]=p.stan;});
-    ustawienia={...ustawienia,mapaProduktow:{}};
-    dodane=wejscie.length;
-  }else{
-    const kluczKodu=v=>String(v||"").trim().toLowerCase();
-    const aktywne=produktyDoAdministracji(),poSku=new Map(aktywne.filter(p=>p.sku).map(p=>[kluczKodu(p.sku),p])),poExternal=new Map(aktywne.filter(p=>p.externalId).map(p=>[kluczKodu(p.externalId),p]));
-    const zajete=new Set([...aktywne.map(p=>Number(p.id)),...koszDodanych.map(p=>Number(p.id))].filter(id=>Number.isInteger(id)&&id>0));let nastepne=Math.max(0,...prodBazowe.map(p=>Number(p.id)||0),...zajete,...wejscie.map(p=>Number(p.id)||0))+1;
-    for(const p0 of wejscie){
-      const poExternalId=p0.externalId?poExternal.get(kluczKodu(p0.externalId)):null,poKodzie=p0.sku?poSku.get(kluczKodu(p0.sku)):null,poId=(!p0.externalId&&!p0.sku&&p0.id)?aktywne.find(x=>x.id===p0.id):null,istniejacy=poExternalId||poKodzie||poId;
-      if(istniejacy){
-        const p={...istniejacy,...p0,id:istniejacy.id};
-        const i=produktyDodane.findIndex(x=>x.id===p.id);
-        if(i>=0)produktyDodane[i]=p;else produktyEdytowane={...produktyEdytowane,[p.id]:p};
-        produktyUkryte=produktyUkryte.filter(id=>id!==p.id);produktyDefinitywne=produktyDefinitywne.filter(id=>id!==p.id);
-        koszDodanych=koszDodanych.filter(x=>x.id!==p.id);delete koszMeta[p.id];
-        if(Number.isInteger(p0.stan)&&p0.stan>=0)stanyProduktow[p.id]=p0.stan;
-        if(p.sku)poSku.set(kluczKodu(p.sku),p);
-        if(p.externalId)poExternal.set(kluczKodu(p.externalId),p);
-        zaktualizowane++;
-      }else{
-        if(!p0.id||zajete.has(p0.id)){while(zajete.has(nastepne))nastepne++;p0.id=nastepne++;}
-        if(!p0.ikona)p0.ikona="📦";if(!p0.kolor)p0.kolor="#dbeafe";if(p0.opis===undefined)p0.opis="";
-        zajete.add(p0.id);produktyDodane.push(p0);
-        koszDodanych=koszDodanych.filter(x=>x.id!==p0.id);delete koszMeta[p0.id];
-        if(Number.isInteger(p0.stan)&&p0.stan>=0)stanyProduktow[p0.id]=p0.stan;
-        if(p0.sku)poSku.set(kluczKodu(p0.sku),p0);
-        if(p0.externalId)poExternal.set(kluczKodu(p0.externalId),p0);
-        aktywne.push(p0);dodane++;
+  if(tryb!=="scal"){toast("⛔ Zastępowanie całego katalogu zostało wyłączone. Użyj bezpiecznego scalania z centralną kartoteką.");return;}
+  const kluczKodu=v=>String(v||"").trim().toLowerCase(),aktywne=produktyDoAdministracji();
+  const poSku=new Map(aktywne.filter(p=>p.sku).map(p=>[kluczKodu(p.sku),p]));
+  const poExternal=new Map(aktywne.filter(p=>p.externalId).map(p=>[kluczKodu(p.externalId),p]));
+  const poEan=new Map(aktywne.filter(p=>p.gtin||p.ean).map(p=>[kluczKodu(p.gtin||p.ean),p]));
+  const poId=new Map(aktywne.map(p=>[String(p.id),p]));
+  const zajete=new Set(aktywne.map(p=>Number(p.id)).filter(id=>Number.isInteger(id)&&id>0));
+  let nastepne=Math.max(1000000,...zajete)+1,dodane=0,zaktualizowane=0;
+  const wejscie=d.produkty.map(p=>JSON.parse(JSON.stringify(p))).map(p0=>{
+    const istniejacy=(p0.externalId&&poExternal.get(kluczKodu(p0.externalId)))
+      ||(p0.sku&&poSku.get(kluczKodu(p0.sku)))
+      ||((p0.gtin||p0.ean)&&poEan.get(kluczKodu(p0.gtin||p0.ean)))
+      ||(p0.id&&poId.get(String(p0.id)));
+    if(istniejacy){p0.id=istniejacy.id;zaktualizowane++;}
+    else{
+      if(!Number.isInteger(Number(p0.id))||Number(p0.id)<=0||zajete.has(Number(p0.id))){
+        while(zajete.has(nastepne))nastepne++;p0.id=nastepne++;
       }
+      zajete.add(Number(p0.id));dodane++;
     }
+    if(!p0.ikona)p0.ikona="📦";if(!p0.kolor)p0.kolor="#dbeafe";if(p0.opis===undefined)p0.opis="";
+    return p0;
+  });
+  const importId=`catalog-import:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
+  const zapisane=[];
+  try{
+    for(let offset=0;offset<wejscie.length;offset+=200){
+      const result=await chmura("catalog-products-import",{method:"POST",body:{products:wejscie.slice(offset,offset+200),importId:`${importId}:${offset}`},timeout:180000});
+      if(result?.confirmed!==true)throw new Error(result?.errors?.map(x=>`${x.productId}: ${x.error}`).slice(0,3).join(" • ")||"Serwer nie potwierdził importu.");
+      zapisane.push(...(result.products||[]));
+    }
+  }catch(error){
+    loguj("blad",`Import centralnej kartoteki przerwany: ${error.message||error}`);
+    toast("⛔ Import przerwany — można go bezpiecznie ponowić: "+(error.message||error));return;
+  }
+  for(const product of zapisane){
+    const id=String(product.id),stan=wejscie.find(p=>String(p.id)===id)?.stan;
+    if(Number.isInteger(stan)&&stan>=0)stanyProduktow[id]=stan;
+    podmienProduktAdminBezRenderu(id,product,[]);
+    if(!aktywne.some(p=>String(p.id)===id))produktyDodane.push(product);
   }
   const menuZImportu=dodajSciezkiKategoriiZImportuDoMenu(wejscie);
-  zaznaczoneProdukty.clear();zapiszStanProduktowPoOperacji();zbudujProdukty();odswiezMenu();
+  zaznaczoneProdukty.clear();
+  zapiszLS("artway_stany",stanyProduktow);
+  if(menuZImportu)await chmuraDodajMutacjePolUstawien({menuKategorii:ustawienia.menuKategorii||[],menuPokazNieprzypisane:true});
+  await chmuraZapiszUstawienia({flush:true});
+  if(typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
+  zbudujProdukty();odswiezMenu();
   ostatniRaportImportu={dodane,zaktualizowane,pominiete:d.bledy.length,tryb,plik:d.nazwa,menuZImportu};
   podgladImportuProduktow=null;
   loguj("info",`Import produktów: ${dodane} dodanych, ${zaktualizowane} zaktualizowanych, ${d.bledy.length} pominiętych, ${menuZImportu} dopisań do menu`);
   toast(`Import zakończony: +${dodane}, aktualizacje ${zaktualizowane}${menuZImportu?`, menu +${menuZImportu}`:""} ✅`);renderuj();
 }
 function cofnijOstatniImportProduktow(){
-  const k=wczytajLS("artway_ostatnia_kopia_importu",null);
-  if(!k){toast("Brak kopii ostatniego importu");return;}
-  if(!confirm(`Cofnąć import i przywrócić stan z ${new Date(k.data).toLocaleString("pl-PL")}?`))return;
-  produktyDodane=k.produktyDodane||[];produktyUkryte=k.produktyUkryte||[];produktyEdytowane=k.produktyEdytowane||{};
-  produktyDefinitywne=k.produktyDefinitywne||[];koszDodanych=k.koszDodanych||[];koszMeta=k.koszMeta||{};stanyProduktow=k.stanyProduktow||{};dostepnoscProduktow=k.dostepnoscProduktow||{};ustawienia=k.ustawienia||ustawienia;
-  zapiszStanProduktowPoOperacji();localStorage.removeItem("artway_ostatnia_kopia_importu");
-  podgladImportuProduktow=null;ostatniRaportImportu=null;zbudujProdukty();odswiezMenu();
-  loguj("info","Cofnięto ostatni import produktów");toast("Przywrócono stan sprzed importu ↩️");renderuj();
+  localStorage.removeItem("artway_ostatnia_kopia_importu");
+  toast("Cofanie przez lokalną kopię zostało wyłączone. Centralna kartoteka ma historię mutacji i kopię serwerową.");
 }
 function produktDoEksportu(p,administracyjny=false){
   const o={id:p.id,nazwa:p.nazwa,kategoria:p.kategoria,cena:+Number(p.cena).toFixed(2)};
@@ -13187,10 +13446,10 @@ function inpostPayReadinessHTML(){
    przez atomowe wydania serwera; panel nie wgrywa pojedynczych plików aplikacji. */
 function widokAdminEksport(sekcja="import"){
   const aktywna=["import","eksport","kopie"].includes(String(sekcja||""))?String(sekcja||""):"import";
-  const p=podgladImportuProduktow,kopia=wczytajLS("artway_ostatnia_kopia_importu",null);
+  const p=podgladImportuProduktow;
   const importHTML=`<section class="panel"><div class="system-section-head"><div><span class="order-pro-label">Kontrolowane zasilanie katalogu</span><h1>📥 Import produktów</h1><p>Najpierw analizujemy plik i pokazujemy błędy. Dane zmienią się dopiero po zatwierdzeniu importu.</p></div><button class="btn ghost" onclick="pobierzSzablonProduktowCSV()">⬇️ Szablon CSV</button></div>
     <div class="import-grid"><article class="import-box"><h2>1. Wczytaj źródło</h2><label class="btn">📁 JSON, CSV lub OVF .xls<input hidden type="file" accept=".json,.csv,.xls,.txt,application/json,text/csv,application/vnd.ms-excel" onchange="wczytajPlikImportuProduktow(this)"></label><button class="btn ghost" onclick="pobierzSzablonProduktowOVF()">Szablon OVF .xls</button><textarea id="importTekstProduktow" placeholder="Wklej JSON albo dane CSV z hurtowni…"></textarea><button class="btn ghost" onclick="analizujWklejonyImport()">🔎 Analizuj wklejone dane</button></article>
-    <article class="import-box"><h2>2. Ustal sposób zapisu</h2><div class="f-group"><label>Tryb importu</label><select id="trybImportuProduktow"><option value="scal">Dodaj nowe i aktualizuj istniejące</option><option value="zastap">Zastąp katalog importowanymi produktami</option></select></div><div class="backend-note"><b>Bezpieczne scalanie:</b> rozpoznaje produkt po EXTERNAL_ID/SKU, EAN i identyfikatorach, a przed zapisem tworzy kopię.</div>${kopia?`<button class="btn danger" onclick="cofnijOstatniImportProduktow()">↩️ Cofnij import z ${new Date(kopia.data).toLocaleString("pl-PL")}</button>`:""}</article></div>
+    <article class="import-box"><h2>2. Zapis centralny</h2><input id="trybImportuProduktow" type="hidden" value="scal"><div class="backend-note"><b>Bezpieczne scalanie:</b> rozpoznaje produkt po EXTERNAL_ID, SKU, EAN i ID. Każda kartoteka jest zapisywana bezpośrednio w PostgreSQL i potwierdzana odczytem. Import nigdy nie zastępuje ani nie usuwa pozostałych produktów.</div></article></div>
     ${p?`<article class="import-box"><div class="system-section-head"><div><h2>3. Podgląd — ${esc(p.nazwa)}</h2><p>${esc(p.format)} • ${p.wszystkich} wierszy</p></div><div class="import-summary"><span>✅ ${p.produkty.length} poprawnych</span><span>❌ ${p.bledy.length} błędów</span><span>⚠️ ${p.ostrzezenia.length} ostrzeżeń</span></div></div>${p.bledy.length?`<div class="import-errors">${p.bledy.slice(0,100).map(esc).join("<br>")}</div>`:""}${p.ostrzezenia.length?`<details><summary>Ostrzeżenia (${p.ostrzezenia.length})</summary><div class="import-errors">${p.ostrzezenia.slice(0,100).map(esc).join("<br>")}</div></details>`:""}${p.produkty.length?`<div class="system-log-table"><table class="log-table"><thead><tr><th>ID</th><th>Nazwa</th><th>Katalog</th><th>Cena</th><th>EXTERNAL_ID / SKU</th><th>Zdjęcia</th></tr></thead><tbody>${p.produkty.slice(0,20).map(x=>`<tr><td>${x.id??"auto"}</td><td><b>${esc(x.nazwa)}</b></td><td>${esc(x.kategoria)}</td><td>${zl(x.cena)}</td><td>${esc(x.externalId||x.sku||"—")}</td><td>${(x.zdjecie?1:0)+(x.zdjecia?.length||0)}</td></tr>`).join("")}</tbody></table></div><button class="btn" onclick="wykonajImportProduktow()">✅ Wykonaj import ${p.produkty.length} produktów</button>`:"<p>Brak poprawnych produktów do importu.</p>"}</article>`:""}</section>`;
   const eksportHTML=`<section class="panel"><div class="system-section-head"><div><span class="order-pro-label">Przenoszenie danych</span><h1>📤 Eksport produktów</h1><p>Eksportuj pełne dane katalogowe do pliku używanego przez sklep albo do dalszej obróbki.</p></div></div><div class="f-row"><div class="f-group"><label>Zakres</label><select id="zakresEksportuProduktow" onchange="$('kategoriaEksportuBox').hidden=this.value!=='kategoria'"><option value="widoczne">Cały aktywny katalog (${produkty.length})</option><option value="zaznaczone">Zaznaczone produkty (${zaznaczoneProdukty.size})</option><option value="kategoria">Wybrany katalog</option></select></div><div class="f-group" id="kategoriaEksportuBox" hidden><label>Katalog</label><select id="kategoriaEksportuProduktow">${wszystkieKategorie().map(k=>`<option>${esc(k)}</option>`).join("")}</select></div></div><div class="system-backup-actions"><article><span>🧩</span><div><b>Plik sklepu</b><small>Pełny products.json ze wszystkimi aktywnymi kartami.</small></div><button class="btn" onclick="eksportujProduktyJSON()">Pobierz JSON</button></article><article><span>📊</span><div><b>Arkusz danych</b><small>Pełny zestaw pól gotowy do Excela.</small></div><button class="btn ghost" onclick="eksportujProduktyCSV()">Pobierz CSV</button></article><article><span>📄</span><div><b>Format OVF</b><small>Plik zgodny z rozszerzonym szablonem.</small></div><button class="btn ghost" onclick="eksportujProduktyOVF()">Pobierz OVF .xls</button></article></div></section>`;
   const kopieHTML=`<section class="panel"><div class="system-section-head"><div><span class="order-pro-label">Kopie operacyjne</span><h1>💾 Eksporty i raporty</h1><p>Tylko kopie danych biznesowych. Aktualizacje aplikacji znajdują się w Centrum systemu.</p></div><a class="btn" href="#/admin/system/kopie">Otwórz kopie systemu</a></div><div class="system-backup-actions"><article><span>📦</span><div><b>Zamówienia</b><small>Numery, statusy, kwoty i adresy w CSV.</small></div><button class="btn ghost" onclick="eksportujZamowienia()">Pobierz CSV</button></article><article><span>👥</span><div><b>Klienci</b><small>Lista zarejestrowanych kont w CSV.</small></div><button class="btn ghost" onclick="eksportujKlientow()">Pobierz CSV</button></article><article><span>📋</span><div><b>Dziennik</b><small>Błędy i zdarzenia techniczne w TXT.</small></div><button class="btn ghost" onclick="pobierzPlikLogu()">Pobierz TXT</button></article></div></section>`;
@@ -13445,6 +13704,36 @@ function widokBrakDostepu(){
 let filtrLogowDiag="wszystkie", szukajLogowDiag="", ostatniAutotest=[], diagSearchT;
 let systemDiagTylkoProblemy=true;
 let systemWersjaStan={sprawdzono:false,ladowanie:false,wdrazanie:false,release:null,backendOnline:false,error:""};
+let systemDiagStan={ladowanie:false,sprawdzono:false,sprawdzonoAt:"",error:"",zwolniono:0};
+let systemCentralDiag={loaded:false,loading:false,items:[],summary:{total:0,open:0,errors:0,warnings:0,occurrences:0},agent:{configured:false},updatedAt:"",error:""};
+async function systemPobierzCentralneBledy(force=false){
+  if(systemCentralDiag.loading||(!force&&systemCentralDiag.loaded&&Date.now()-Date.parse(systemCentralDiag.updatedAt||0)<60000))return systemCentralDiag;
+  if(!maUprawnieniaZapisuChmury())return systemCentralDiag;
+  systemCentralDiag={...systemCentralDiag,loading:true,error:""};
+  try{
+    const data=await chmura("diagnostics-central",{params:{status:"all",limit:500},timeout:15000});
+    systemCentralDiag={loaded:true,loading:false,items:Array.isArray(data.items)?data.items:[],summary:data.summary||{total:0,open:0,errors:0,warnings:0,occurrences:0},agent:data.agent||{configured:false},updatedAt:data.updatedAt||new Date().toISOString(),error:""};
+  }catch(error){systemCentralDiag={...systemCentralDiag,loaded:true,loading:false,error:error.message||String(error)};}
+  return systemCentralDiag;
+}
+async function systemAnalizujBledy(ids=[]){
+  const wybrane=[...new Set((Array.isArray(ids)?ids:[ids]).filter(Boolean))];
+  if(!wybrane.length)return toast("Brak otwartych błędów do analizy");
+  try{
+    const data=await chmura("diagnostics-central-analyze",{method:"POST",body:{ids:wybrane},timeout:15000});
+    toast(`Agent rozpoczął analizę ${data.queued||wybrane.length} problemów`);
+    await systemPobierzCentralneBledy(true);renderuj();
+    setTimeout(()=>systemPobierzCentralneBledy(true).then(renderuj),5000);
+  }catch(error){toast("Nie udało się uruchomić analizy: "+error.message);}
+}
+async function systemUstawStatusBledu(id,status){
+  try{
+    await chmura("diagnostics-central-update",{method:"POST",body:{ids:[id],status,resolution:status==="resolved"?"Sprawdzone i rozwiązane przez administratora":status==="ignored"?"Świadomie pominięte przez administratora":""},timeout:15000});
+    await systemPobierzCentralneBledy(true);
+    toast(status==="resolved"?"Problem oznaczony jako rozwiązany ✅":status==="ignored"?"Wpis pominięty":"Problem ponownie otwarty");
+    renderuj();
+  }catch(error){toast("Nie udało się zmienić statusu: "+error.message);}
+}
 function systemWersjaPrzegladarki(){return document.querySelector('meta[name="artway-version"]')?.content||"nieznana";}
 function systemDataCzas(value){const ts=Date.parse(value||"");return Number.isFinite(ts)?new Date(ts).toLocaleString("pl-PL"):"—";}
 async function systemSprawdzWersje(cicho=false){
@@ -13486,6 +13775,46 @@ function rozmiarDanychLokalnych(){
   try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);n+=(k?.length||0)+(localStorage.getItem(k)?.length||0);}}catch(e){}
   return n*2;
 }
+function systemPamiecSzczegoly(){
+  let razem=0,serwerowe=0,przestarzale=0;
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const key=localStorage.key(i)||"",raw=localStorage.getItem(key)||"",bytes=chmuraRozmiarBajtow(key)+chmuraRozmiarBajtow(raw);
+      razem+=bytes;
+      if(typeof CHMURA_LS_OMIJANE_KLUCZE!=="undefined"&&CHMURA_LS_OMIJANE_KLUCZE.has(key))serwerowe+=bytes;
+      if(typeof KLUCZE_PRZESTARZALYCH_CACHE!=="undefined"&&KLUCZE_PRZESTARZALYCH_CACHE.includes(key))przestarzale+=bytes;
+    }
+  }catch(e){}
+  return {razem,serwerowe,przestarzale,operacyjne:Math.max(0,razem-serwerowe-przestarzale)};
+}
+async function systemOdswiezDiagnostyke(cicho=false){
+  if(systemDiagStan.ladowanie)return false;
+  systemDiagStan={...systemDiagStan,ladowanie:true,error:""};
+  if(!cicho&&trasa().startsWith("/admin/system/diagnostyka"))renderuj();
+  try{
+    await diagnostykaWyslijKolejke();
+    await Promise.allSettled([sprawdzBramke(true),systemSprawdzWersje(true)]);
+    if(maUprawnieniaZapisuChmury()){
+      await sprawdzPolaczeniaSerwerowe(true);
+      await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
+    }
+    const przed=rozmiarDanychLokalnych();
+    const stare=zwolnijPamiecPodreczna({wymus:true});
+    const serwerowe=chmuraCzyscSerweroweKopieLS();
+    const po=rozmiarDanychLokalnych();
+    await diagnostykaWyslijKolejke();
+    await systemPobierzCentralneBledy(true);
+    systemDiagStan={ladowanie:false,sprawdzono:true,sprawdzonoAt:new Date().toISOString(),error:"",zwolniono:Math.max(0,przed-po)};
+    if((stare.usunieto.length||serwerowe.length)&&!cicho)toast(`Odciążono pamięć przeglądarki o ${Math.round((przed-po)/1024)} KB ✅`);
+    return true;
+  }catch(error){
+    systemDiagStan={...systemDiagStan,ladowanie:false,sprawdzono:true,sprawdzonoAt:new Date().toISOString(),error:error.message};
+    if(!cicho)toast("Diagnostyka: "+error.message);
+    return false;
+  }finally{
+    if(trasa().startsWith("/admin/system/diagnostyka"))renderuj();
+  }
+}
 function testyDiagnostyczne(){
   const t=[], dodaj=(grupa,nazwa,status,szczegoly)=>t.push({grupa,nazwa,status,szczegoly});
   const zamowieniaDiag=pobierzZamowienia();
@@ -13496,7 +13825,7 @@ function testyDiagnostyczne(){
   const bezZdjec=produkty.filter(p=>!p.zdjecie).length, bledneProdukty=produkty.filter(p=>!p.nazwa||!p.kategoria||!(p.cena>0));
   const idsKosza=[...koszDodanych.map(p=>p.id),...bazoweProduktyWKoszu().map(p=>p.id)];
   const brakMetaKosza=idsKosza.filter(id=>!koszMeta[id]), wygasleKosza=idsKosza.filter(id=>Date.now()-Number(koszMeta[id]?.usunietoAt||Date.now())>=OKRES_KOSZA_MS);
-  const pamiec=rozmiarDanychLokalnych(),publikacjaKatalogu=stanPublikacjiKatalogu();
+  const pamiec=rozmiarDanychLokalnych(),pamiecStan=systemPamiecSzczegoly(),publikacjaKatalogu=stanPublikacjiKatalogu();
   dodaj("Produkty","Produkty są wczytane",produkty.length?"ok":"bad",`${produkty.length} widocznych produktów`);
   dodaj("Produkty","Unikalne identyfikatory produktów",unikalne.size===ids.length?"ok":"bad",unikalne.size===ids.length?"Brak duplikatów ID":`${ids.length-unikalne.size} zduplikowanych ID`);
   dodaj("Produkty","Poprawne dane i ceny",bledneProdukty.length?"bad":"ok",bledneProdukty.length?`${bledneProdukty.length} produktów wymaga poprawy`:"Nazwy, katalogi i ceny są poprawne");
@@ -13517,27 +13846,32 @@ function testyDiagnostyczne(){
   dodaj("Wysyłki","Kolejka wyjątków",wyjatkiWysylki?"bad":"ok",wyjatkiWysylki?`${wyjatkiWysylki} przesyłek wymaga reakcji operatora`:"Brak nierozwiązanych wyjątków");
   dodaj("Wysyłki","Reguły automatycznego wyboru",uwDiag.regulaPaczkomat==="inpost"?"ok":"bad",`Aktywne metody: InPost Paczkomat i Kurier InPost`);
   const poprawnyEndpoint=String(uwDiag.apiEndpoint||"").startsWith("/")||String(uwDiag.apiEndpoint||"").startsWith("https://")||String(uwDiag.apiEndpoint||"").startsWith("http://");
-  dodaj("Integracje","Uniwersalna bramka",stanBramki.online?"ok":poprawnyEndpoint?"warn":"bad",stanBramki.online?`Backend VPS dostępny • tryb wysyłek ${uwDiag.tryb}`:`Endpoint awaryjny ${uwDiag.apiEndpoint} • sprawdź usługę serwera`);
-  dodaj("Integracje","Centralna baza zamówień",stanBazyCentralnej.online?"ok":stanBazyCentralnej.sprawdzono?"bad":"warn",stanBazyCentralnej.online
+  const integracjeSprawdzone=stanBramki.sprawdzono&&!systemDiagStan.ladowanie;
+  dodaj("Integracje","Backend i uniwersalne API",!integracjeSprawdzone?"pending":stanBramki.online?"ok":poprawnyEndpoint?"warn":"bad",!integracjeSprawdzone?"Trwa automatyczna kontrola backendu VPS":stanBramki.online?`Backend VPS dostępny • ${uwDiag.apiEndpoint} • tryb ${uwDiag.tryb}`:`Backend VPS nie odpowiedział • ${uwDiag.apiEndpoint}`);
+  dodaj("Integracje","Centralna baza zamówień",!integracjeSprawdzone?"pending":stanBazyCentralnej.online?"ok":stanBazyCentralnej.sprawdzono?"bad":"warn",!integracjeSprawdzone?"Trwa kontrola PostgreSQL":stanBazyCentralnej.online
     ?`${stanBazyCentralnej.orders} zamówień • ${stanBazyCentralnej.users} klientów • wspólne dla wszystkich urządzeń`
     :stanBazyCentralnej.error||"Połącz backend, aby sprawdzić i zsynchronizować wspólną bazę");
   const ipDiag=stanBramki.inpost||{};
   const avDiag=ipDiag.serviceAvailability||{};
-  dodaj("Integracje","InPost ShipX API",ipDiag.configured?((avDiag.locker===false||avDiag.courier===false)?"warn":"ok"):"warn",ipDiag.configured
+  dodaj("Integracje","InPost ShipX API",!integracjeSprawdzone?"pending":ipDiag.configured&&ipDiag.authenticated?((avDiag.locker===false||avDiag.courier===false)?"warn":"ok"):"warn",!integracjeSprawdzone?"Trwa kontrola tokenu, organizacji i usług":ipDiag.configured
     ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}${ipDiag.webhookConfigured?" • webhook aktywny":" • webhook do konfiguracji"}${avDiag.locker===false?" • brak usługi paczkomatowej":""}${avDiag.courier===false?" • kurier InPost nieaktywny":""}`
     :`Brakuje: ${((ipDiag.missingEnv&&ipDiag.missingEnv.length?ipDiag.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", "))}`);
   const emailDiag=!!stanBramki.email?.authenticated;
-  dodaj("Integracje","Automatyczne e-maile",emailDiag?"ok":"warn",emailDiag
+  dodaj("Integracje","Automatyczne e-maile",!integracjeSprawdzone?"pending":emailDiag?"ok":"warn",!integracjeSprawdzone?"Trwa kontrola trwałego połączenia SMTP":emailDiag
     ?`${stanBramki.email.provider||"SMTP"} — autoryzacja serwerowa potwierdzona, połączenie trwałe`
     :stanBramki.email?.lastError||"Poczta wymaga kontroli trwałego połączenia serwerowego");
+  const centralDiag=systemCentralDiag.summary||{},centralDiagChecked=systemCentralDiag.loaded&&!systemCentralDiag.loading;
+  dodaj("Diagnostyka","Centralny rejestr błędów",!centralDiagChecked?"pending":systemCentralDiag.error?"bad":centralDiag.errors?"bad":centralDiag.warnings?"warn":"ok",!centralDiagChecked?"Pobieram wspólny rejestr z VPS":systemCentralDiag.error||`${centralDiag.open||0} otwartych grup • ${centralDiag.errors||0} błędów • ${centralDiag.warnings||0} ostrzeżeń • Agent widzi tę samą kolejkę`);
   dodaj("Konfiguracja","Telefon sklepu",KONFIG.telefon.includes("000 000 000")?"warn":"ok",KONFIG.telefon);
   dodaj("Konfiguracja","Dane prawne",danePrawneFirmyKompletne()?"ok":"bad",danePrawneFirmyKompletne()?"Brak pól przykładowych":"Uzupełnij dane firmy w treściach prawnych");
   dodaj("Bezpieczeństwo","Hasło administratora",domyslneHasloAdmina?"bad":"ok",domyslneHasloAdmina?"Nadal ustawione jest hasło admin":"Hasło zostało zmienione");
   dodaj("Bezpieczeństwo","Role kont administracyjnych",administratorzyDiag.length?"ok":"bad",`${administratorzyDiag.length} kont z rolą administratora • ${kontaDiag.length-administratorzyDiag.length} kont klientów`);
   dodaj("Publikacja","Źródło produktów",zrodloProduktow==="json"?"ok":"warn",zrodloProduktow==="json"?"products.json dostępny":"Używana jest lista zapasowa");
-  dodaj("Publikacja","Kopia katalogu products.json",publikacjaKatalogu.gotowy?"ok":"warn",publikacjaKatalogu.gotowy?`Zabezpiecza wszystkie ${publikacjaKatalogu.razem} kart produktów`:`Brakujące ${publikacjaKatalogu.brakujace.length} • zmienione ${publikacjaKatalogu.nieaktualne.length} • odśwież products.json`);
-  dodaj("Publikacja","Atomowe wydanie strony",!systemWersjaStan.sprawdzono?"warn":systemWersjaStan.release&&systemWersjaStan.backendOnline?"ok":"bad",!systemWersjaStan.sprawdzono?"Sprawdź wersję w Centrum systemu":systemWersjaStan.release&&systemWersjaStan.backendOnline?`Aktywne wydanie ${systemWersjaStan.release.releaseId}`:systemWersjaStan.error||"Nie udało się potwierdzić aktywnego wydania");
-  dodaj("Pamięć","Wykorzystanie pamięci",pamiec>4_000_000?"bad":pamiec>2_500_000?"warn":"ok",`${(pamiec/1024).toFixed(1)} KB zapisanych danych • ciężkie cache Allegro nie są już dublowane lokalnie`);
+  const centralnyKatalog=stanBramki.store?.storage?.migrated===true&&String(stanBramki.store?.storage?.engine||"").startsWith("postgres-");
+  dodaj("Publikacja","Centralny katalog produktów",!integracjeSprawdzone?"pending":centralnyKatalog?"ok":publikacjaKatalogu.gotowy?"ok":"warn",!integracjeSprawdzone?"Trwa kontrola źródła katalogu":centralnyKatalog?`PostgreSQL jest źródłem prawdy • ${stanBramki.store.storage.records||publikacjaKatalogu.razem} rekordów domenowych • products.json pełni wyłącznie rolę startowej kopii awaryjnej`:publikacjaKatalogu.gotowy?`Awaryjny products.json zabezpiecza ${publikacjaKatalogu.razem} kart`:`Brakujące ${publikacjaKatalogu.brakujace.length} • zmienione ${publikacjaKatalogu.nieaktualne.length}`);
+  dodaj("Publikacja","Atomowe wydanie strony",!systemWersjaStan.sprawdzono||systemWersjaStan.ladowanie?"pending":systemWersjaStan.release&&systemWersjaStan.backendOnline?"ok":"bad",!systemWersjaStan.sprawdzono||systemWersjaStan.ladowanie?"Trwa automatyczna kontrola wydania":systemWersjaStan.release&&systemWersjaStan.backendOnline?`Aktywne wydanie ${systemWersjaStan.release.releaseId}`:systemWersjaStan.error||"Nie udało się potwierdzić aktywnego wydania");
+  const pamiecStatus=pamiecStan.przestarzale>0||pamiecStan.serwerowe>CHMURA_LS_OMIJANE_PRAG_BYTES?"warn":pamiec>7_500_000?"bad":pamiec>5_000_000?"warn":"ok";
+  dodaj("Pamięć","Pamięć operacyjna przeglądarki",pamiecStatus,`${(pamiec/1024).toFixed(1)} KB łącznie • ${(pamiecStan.operacyjne/1024).toFixed(1)} KB operacyjnych • ${(pamiecStan.serwerowe/1024).toFixed(1)} KB kopii danych serwerowych${systemDiagStan.zwolniono?` • ostatnio zwolniono ${(systemDiagStan.zwolniono/1024).toFixed(1)} KB`:""}`);
   const zleBannery=pobierzBannery().filter(b=>!b.tytul||bezpiecznyLink(b.link)==="#/"&&b.link!=="#/");
   dodaj("Wygląd","Konfiguracja banerów",zleBannery.length?"warn":"ok",zleBannery.length?`${zleBannery.length} banerów wymaga sprawdzenia`:`${pobierzBannery().length} poprawnych banerów`);
   return [...t,...ostatniAutotest];
@@ -13644,19 +13978,24 @@ function systemStatusHTML(){
   <section class="panel system-deployment-note"><span>🛡️</span><div><b>Publikacja jest atomowa i zabezpieczona</b><p>Nowa wersja trafia na serwer jako komplet plików, przechodzi test zdrowia i dopiero wtedy jest przełączana. W razie błędu serwer automatycznie wraca do poprzedniego wydania.</p></div><a class="btn ghost" href="#/admin/system/diagnostyka">Uruchom diagnostykę</a></section>`;
 }
 function systemDiagnostykaHTML(){
-  const wszystkie=testyDiagnostyczne(),testy=systemDiagTylkoProblemy?wszystkie.filter(x=>x.status!=="ok"):wszystkie,wynik=wynikKondycji(wszystkie),bad=wszystkie.filter(x=>x.status==="bad").length,warn=wszystkie.filter(x=>x.status==="warn").length;
+  const wszystkie=testyDiagnostyczne(),testy=systemDiagTylkoProblemy?wszystkie.filter(x=>x.status==="bad"||x.status==="warn"):wszystkie,wynik=wynikKondycji(wszystkie),bad=wszystkie.filter(x=>x.status==="bad").length,warn=wszystkie.filter(x=>x.status==="warn").length;
   return `<section class="system-summary-grid info-grid"><article class="info-card"><small>Kondycja</small><b>${wynik}%</b><span>${wynik>=90?"bardzo dobra":wynik>=70?"dobra":"wymaga działania"}</span></article><article class="info-card"><small>Błędy</small><b>${bad}</b><span>wymagają naprawy</span></article><article class="info-card"><small>Ostrzeżenia</small><b>${warn}</b><span>do sprawdzenia</span></article><article class="info-card"><small>Kontrole</small><b>${wszystkie.length}</b><span>pełny zakres systemu</span></article></section>
-  <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Integralność i integracje</span><h1>🩺 Diagnostyka systemu</h1><p>Najpierw pokazujemy tylko problemy, aby nie zasłaniać czynności wymagających uwagi.</p></div><div><button class="btn ghost" onclick="systemDiagTylkoProblemy=!systemDiagTylkoProblemy;renderuj()">${systemDiagTylkoProblemy?"Pokaż wszystkie kontrole":"Pokaż tylko problemy"}</button><button class="btn" onclick="uruchomAutotest()">🧪 Pełny autotest</button></div></div>
-    ${testy.length?`<div class="system-check-list test-list">${testy.map(x=>`<article class="test-row ${x.status}"><span>${x.status==="ok"?"✅":x.status==="warn"?"⚠️":"❌"}</span><div><small>${esc(x.grupa)}</small><b>${esc(x.nazwa)}</b><p>${esc(x.szczegoly)}</p></div><em class="test-status ${x.status}">${x.status==="ok"?"OK":x.status==="warn"?"UWAGA":"BŁĄD"}</em></article>`).join("")}</div>`:`<div class="system-empty order-empty"><span>✅</span><b>Brak problemów wymagających działania</b><p>Wszystkie kontrole zakończyły się poprawnie.</p></div>`}
+  <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Integralność i integracje</span><h1>🩺 Diagnostyka systemu</h1><p>Najpierw pokazujemy tylko problemy, aby nie zasłaniać czynności wymagających uwagi.</p></div><div><button class="btn ghost" onclick="systemDiagTylkoProblemy=!systemDiagTylkoProblemy;renderuj()">${systemDiagTylkoProblemy?"Pokaż wszystkie kontrole":"Pokaż tylko problemy"}</button><button class="btn" onclick="uruchomAutotest()" ${systemDiagStan.ladowanie?"disabled":""}>${systemDiagStan.ladowanie?"⏳ Sprawdzam…":"🧪 Pełny autotest"}</button></div></div>
+    ${systemDiagStan.ladowanie?`<div class="backend-note"><b>Trwa kontrola na żywo:</b> backend, PostgreSQL, InPost, Gmail, wydanie atomowe i pamięć przeglądarki.</div>`:""}
+    ${testy.length?`<div class="system-check-list test-list">${testy.map(x=>`<article class="test-row ${x.status}"><span>${x.status==="ok"?"✅":x.status==="warn"?"⚠️":x.status==="pending"?"⏳":"❌"}</span><div><small>${esc(x.grupa)}</small><b>${esc(x.nazwa)}</b><p>${esc(x.szczegoly)}</p></div><em class="test-status ${x.status}">${x.status==="ok"?"OK":x.status==="warn"?"UWAGA":x.status==="pending"?"SPRAWDZAM":"BŁĄD"}</em></article>`).join("")}</div>`:systemDiagStan.ladowanie?`<div class="system-empty order-empty"><span>⏳</span><b>Sprawdzam stan na serwerze</b><p>Wynik pojawi się po zakończeniu kontroli usług.</p></div>`:`<div class="system-empty order-empty"><span>✅</span><b>Brak problemów wymagających działania</b><p>Wszystkie kontrole zakończyły się poprawnie.</p></div>`}
   </section>
   <section class="panel system-repair sug"><span>🧹</span><div><b>Bezpieczna naprawa spójności</b><small>Usuwa wyłącznie osierocone odwołania i duplikaty techniczne. Nie usuwa prawidłowych produktów ani zamówień.</small></div><button class="btn ghost" onclick="naprawDaneSklepu()">Sprawdź i napraw dane</button></section>`;
 }
 function systemLogiHTML(){
   const wszystkie=pobierzLogi();let logi=wszystkie;if(filtrLogowDiag!=="wszystkie")logi=logi.filter(l=>l.poziom===filtrLogowDiag);if(szukajLogowDiag)logi=logi.filter(l=>(`${l.tresc} ${l.zrodlo}`).toLowerCase().includes(szukajLogowDiag));
-  const poziom={blad:"BŁĄD",ostrzezenie:"UWAGA",info:"INFO"};
-  return `<section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Historia techniczna</span><h1>📋 Dziennik zdarzeń</h1><p>${logi.length} z ${wszystkie.length} wpisów pasuje do bieżącego filtra.</p></div><div><button class="btn ghost" onclick="pobierzPlikLogu()">⬇️ Pobierz TXT</button><button class="btn danger" onclick="wyczyscLogi()">🗑️ Wyczyść</button></div></div>
+  const poziom={blad:"BŁĄD",ostrzezenie:"UWAGA",info:"INFO"},centralne=(systemCentralDiag.items||[]).filter(item=>filtrLogowDiag==="wszystkie"||item.level===filtrLogowDiag).filter(item=>!szukajLogowDiag||(`${item.message} ${item.source} ${item.route}`).toLowerCase().includes(szukajLogowDiag)),summary=systemCentralDiag.summary||{},agent=systemCentralDiag.agent||{},otwarteBledy=centralne.filter(item=>item.level==="blad"&&!["resolved","ignored"].includes(item.status)).map(item=>item.id);
+  const analizaHTML=item=>{const a=item.analysis||{},status=a.status||"idle";if(status==="idle")return"";if(["queued","running"].includes(status))return`<div class="backend-note"><b>Najmocniejszy agent:</b> ${status==="queued"?"oczekuje w kolejce":"analizuje dowody"} • ${esc(a.model||agent.model||"OpenAI")}</div>`;if(status==="failed")return`<div class="backend-note warn"><b>Analiza nieudana:</b> ${esc(a.error||"brak wyniku")}</div>`;return`<details class="backend-note"><summary><b>Analiza AI:</b> ${esc(a.summary||a.classification||"gotowa")} • pewność ${Math.round(Number(a.confidence||0)*100)}%</summary><p><b>Przyczyna:</b> ${esc(a.rootCause||"—")}</p>${a.evidence?.length?`<p><b>Dowody:</b> ${a.evidence.map(esc).join(" • ")}</p>`:""}${a.recommendedActions?.length?`<p><b>Zalecane działania:</b> ${a.recommendedActions.map(x=>esc(x.action)).join(" • ")}</p>`:""}${a.validationPlan?.length?`<p><b>Weryfikacja:</b> ${a.validationPlan.map(esc).join(" • ")}</p>`:""}<small>${esc(a.model||"")} • reasoning ${esc(a.reasoning||"")} • ${esc(systemDataCzas(a.analyzedAt))}</small></details>`};
+  return `<section class="system-summary-grid info-grid"><article class="info-card"><small>Wspólny rejestr</small><b>${summary.open||0}</b><span>otwartych grup problemów</span></article><article class="info-card"><small>Błędy</small><b>${summary.errors||0}</b><span>z wszystkich urządzeń</span></article><article class="info-card"><small>Ostrzeżenia</small><b>${summary.warnings||0}</b><span>zgrupowane bez duplikatów</span></article><article class="info-card"><small>Agent diagnostyczny</small><b>${agent.configured?"Aktywny":"Nieaktywny"}</b><span>${agent.configured?`${esc(agent.model)} • ${esc(agent.reasoning)}`:esc(systemCentralDiag.error||"sprawdź konfigurację OpenAI")}</span></article></section>
+  <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Monitoring VPS + OpenAI Agents SDK</span><h1>🛰️ Centralny rejestr problemów</h1><p>Błędy są grupowane według przyczyny. Agent zapisuje dowody i plan weryfikacji; nie oznacza błędu jako naprawionego bez potwierdzenia.</p></div><div><button class="btn" onclick='systemAnalizujBledy(${JSON.stringify(otwarteBledy)})' ${!agent.configured||!otwarteBledy.length?"disabled":""}>🧠 Analizuj błędy</button><button class="btn ghost" onclick="systemPobierzCentralneBledy(true).then(renderuj)" ${systemCentralDiag.loading?"disabled":""}>${systemCentralDiag.loading?"⏳ Pobieram…":"↻ Odśwież"}</button></div></div>
+  ${centralne.length?`<div class="system-log-table log-table-wrap"><table class="log-table"><thead><tr><th>Ostatnio</th><th>Poziom</th><th>Problem i analiza</th><th>Wystąpienia</th><th>Status</th><th>Działanie</th></tr></thead><tbody>${centralne.map(item=>`<tr><td>${esc(systemDataCzas(item.lastSeenAt))}<small>${esc(item.release||"wydanie nieznane")}</small></td><td><span class="lvl lvl-${item.level}">${poziom[item.level]||esc(item.level)}</span></td><td><b>${esc(item.message)}</b><small>${esc([item.source,item.route].filter(Boolean).join(" • "))}</small>${analizaHTML(item)}</td><td>${esc(item.count||1)}</td><td>${esc(item.status==="open"?"otwarty":item.status==="investigating"?"w analizie":item.status==="resolved"?"rozwiązany":"pominięty")}</td><td>${["resolved","ignored"].includes(item.status)?`<button class="btn ghost" onclick="systemUstawStatusBledu('${esc(item.id)}','open')">Otwórz ponownie</button>`:`<button class="btn ghost" onclick="systemAnalizujBledy('${esc(item.id)}')" ${!agent.configured?"disabled":""}>Analizuj</button><button class="btn" onclick="systemUstawStatusBledu('${esc(item.id)}','resolved')">Rozwiązane</button><button class="btn ghost" onclick="systemUstawStatusBledu('${esc(item.id)}','ignored')">Pomiń</button>`}</td></tr>`).join("")}</tbody></table></div>`:`<div class="system-empty order-empty"><span>${systemCentralDiag.loading?"⏳":"✅"}</span><b>${systemCentralDiag.loading?"Pobieram wspólny rejestr":"Brak centralnie zarejestrowanych problemów"}</b><p>${systemCentralDiag.error?esc(systemCentralDiag.error):"Nowe błędy pojawią się tu automatycznie, niezależnie od urządzenia."}</p></div>`}</section>
+  <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Ta przeglądarka</span><h1>📋 Lokalny dziennik zdarzeń</h1><p>${logi.length} z ${wszystkie.length} wpisów pasuje do bieżącego filtra.</p></div><div><button class="btn ghost" onclick="pobierzPlikLogu()">⬇️ Pobierz TXT</button><button class="btn danger" onclick="wyczyscLogi()">🗑️ Wyczyść lokalny</button></div></div>
   ${adminWyszukiwaniePanelHTML({id:"system-logi",title:"Filtry dziennika",description:"Znajdź błąd, ostrzeżenie albo zdarzenie z konkretnego modułu.",results:logi.length,active:filtrLogowDiag!=="wszystkie"||!!szukajLogowDiag,fields:`<div class="admin-filter-grid"><label><span>Szukaj</span><input placeholder="Treść lub źródło…" value="${esc(szukajLogowDiag)}" oninput="szukajLogowDiag=this.value.toLowerCase();clearTimeout(diagSearchT);diagSearchT=setTimeout(renderuj,300)"></label><label><span>Poziom</span><select onchange="filtrLogowDiag=this.value;renderuj()"><option value="wszystkie">Wszystkie</option><option value="blad" ${filtrLogowDiag==="blad"?"selected":""}>Błędy</option><option value="ostrzezenie" ${filtrLogowDiag==="ostrzezenie"?"selected":""}>Ostrzeżenia</option><option value="info" ${filtrLogowDiag==="info"?"selected":""}>Informacje</option></select></label></div>`})}
-  ${logi.length?`<div class="system-log-table log-table-wrap"><table class="log-table"><thead><tr><th>Czas</th><th>Poziom</th><th>Zdarzenie</th><th>Źródło</th></tr></thead><tbody>${logi.slice(0,200).map(l=>`<tr><td>${esc(l.czas)}</td><td><span class="lvl lvl-${l.poziom}">${poziom[l.poziom]||esc(l.poziom)}</span></td><td>${esc(l.tresc)}</td><td>${esc(l.zrodlo)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="system-empty order-empty"><span>📭</span><b>Brak zdarzeń</b><p>Zmień filtry lub wróć tu po wykonaniu kontroli.</p></div>`}</section>`;
+  ${logi.length?`<div class="system-log-table log-table-wrap"><table class="log-table"><thead><tr><th>Czas</th><th>Poziom</th><th>Zdarzenie</th><th>Źródło</th></tr></thead><tbody>${logi.slice(0,200).map(l=>`<tr><td>${esc(l.czas)}</td><td><span class="lvl lvl-${l.poziom}">${poziom[l.poziom]||esc(l.poziom)}</span></td><td>${esc(l.tresc)}${Number(l.powtorzenia||1)>1?` <small>× ${esc(l.powtorzenia)}</small>`:""}</td><td>${esc(l.zrodlo)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="system-empty order-empty"><span>📭</span><b>Brak zdarzeń</b><p>Zmień filtry lub wróć tu po wykonaniu kontroli.</p></div>`}</section>`;
 }
 function systemKopieHTML(){
   const pamiec=rozmiarDanychLokalnych();
@@ -13664,8 +14003,8 @@ function systemKopieHTML(){
   <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Ochrona danych</span><h1>💾 Kopie i przywracanie</h1><p>Kopia przeglądarkowa uzupełnia codzienne kopie serwera. Nie zastępuje wersjonowanych wydań kodu.</p></div></div><div class="system-backup-actions info-grid"><article class="info-card"><span>⬇️</span><div><b>Pobierz kopię panelu</b><small>Zapisuje do pliku JSON ustawienia i dane lokalne tej przeglądarki.</small></div><button class="btn" onclick="eksportujKopieDanych()">Pobierz kopię</button></article><article class="info-card"><span>⬆️</span><div><b>Przywróć kopię panelu</b><small>Plik jest sprawdzany przed zapisem; operacja wymaga osobnego potwierdzenia.</small></div><label class="btn ghost">Wybierz plik<input type="file" accept="application/json" onchange="importujKopieDanych(event)" hidden></label></article><article class="info-card"><span>📊</span><div><b>Raport diagnostyczny</b><small>Pełny wynik kontroli i dziennik przydatny podczas naprawy.</small></div><button class="btn ghost" onclick="pobierzRaportJSON()">Pobierz raport</button></article></div></section>`;
 }
 function widokAdminSystem(sekcja="status"){
-  const aktywna=["status","diagnostyka","logi","kopie"].includes(String(sekcja||""))?String(sekcja||""):"status";
-  const tresc=aktywna==="diagnostyka"?systemDiagnostykaHTML():aktywna==="logi"?systemLogiHTML():aktywna==="kopie"?systemKopieHTML():systemStatusHTML();
+  const aktywna=["status","serwer","diagnostyka","logi","kopie"].includes(String(sekcja||""))?String(sekcja||""):"status";
+  const tresc=aktywna==="serwer"?systemSerwerHTML():aktywna==="diagnostyka"?systemDiagnostykaHTML():aktywna==="logi"?systemLogiHTML():aktywna==="kopie"?systemKopieHTML():systemStatusHTML();
   return adminSzkielet("/admin/system",`<div class="module-page-stack system-center">${systemSubnavHTML(aktywna)}${tresc}</div>`);
 }
 function wyczyscLogi(){ localStorage.removeItem("artway_logi"); toast("Dziennik wyczyszczony"); renderuj(); }
@@ -13682,7 +14021,7 @@ async function kopiujRaport(){
 function pobierzRaportJSON(){
   const testy=testyDiagnostyczne();
   pobierzPlik("artway-diagnostyka-"+new Date().toISOString().slice(0,10)+".json",JSON.stringify({
-    data:new Date().toISOString(),wynik:wynikKondycji(testy),testy,logi:pobierzLogi(),produkty:produkty.length,zamowienia:pobierzZamowienia().length
+    data:new Date().toISOString(),wynik:wynikKondycji(testy),testy,logi:pobierzLogi(),centralnaDiagnostyka:systemCentralDiag,produkty:produkty.length,zamowienia:pobierzZamowienia().length
   },null,2),"application/json");
 }
 function pobierzPlikLogu(){
@@ -13700,7 +14039,9 @@ function importujKopieDanych(e){
   const r=new FileReader();
   r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.localStorage||typeof d.localStorage!=="object")throw new Error("Niepoprawny format");
     if(!confirm("Przywrócić kopię? Obecne dane lokalne zostaną zastąpione."))return;
-    Object.entries(d.localStorage).forEach(([k,v])=>{if(k.startsWith("artway_"))localStorage.setItem(k,String(v));});
+    Object.entries(d.localStorage).forEach(([k,v])=>{
+      if(k.startsWith("artway_")&&!(typeof CENTRAL_PRODUCT_LS_KEYS!=="undefined"&&CENTRAL_PRODUCT_LS_KEYS.has(k)))localStorage.setItem(k,String(v));
+    });
     location.reload();
   }catch(bl){toast("⚠️ Nie udało się wczytać kopii: "+bl.message);}};
   r.readAsText(plik);
@@ -13711,12 +14052,11 @@ function naprawDaneSklepu(){
   const widoczne=new Set(produkty.map(p=>p.id)), wszystkie=new Set(produktyDoAdministracji().map(p=>p.id));
   koszyk=koszyk.filter((x,i,a)=>widoczne.has(x.id)&&x.ile>0&&a.findIndex(y=>y.id===x.id)===i);
   ulubione=[...new Set(ulubione.filter(id=>widoczne.has(id)))];
-  produktyUkryte=[...new Set(produktyUkryte.filter(id=>produktyBazoweWspolne().some(p=>p.id===id)))];
   const mapa={...(ustawienia.mapaProduktow||{})};Object.keys(mapa).forEach(id=>{if(!wszystkie.has(+id))delete mapa[id];});
   const kat=new Set(wszystkieKategorie());
   const menuKategorii=grupyMenuKategorii().map(g=>({...g,kategorie:g.kategorie.filter(k=>kat.has(k))})).filter(g=>g.nazwa);
   const uzytkownicy=pobierzUzytkownikow().filter((u,i,a)=>u.email&&a.findIndex(x=>x.email===u.email)===i);
-  zapiszLS("artway_koszyk",koszyk);zapiszLS("artway_ulubione",ulubione);zapiszLS("artway_produkty_ukryte",produktyUkryte);
+  zapiszLS("artway_koszyk",koszyk);zapiszLS("artway_ulubione",ulubione);
   zapiszLS("artway_uzytkownicy",uzytkownicy);ustawienia={...ustawienia,mapaProduktow:mapa,menuKategorii};zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});void chmuraDodajMutacjePolUstawien({mapaProduktow:mapa,menuKategorii});
   zbudujProdukty();odswiezKoszyk();odswiezUlubioneLicznik();loguj("info","Wykonano naprawę spójności danych");toast("Dane zostały sprawdzone i naprawione ✅");renderuj();
 }
@@ -13725,9 +14065,100 @@ async function uruchomAutotest(){
   try{localStorage.setItem("artway_test","1");const ok=localStorage.getItem("artway_test")==="1";localStorage.removeItem("artway_test");dodaj("Zapis i odczyt pamięci",ok?"ok":"bad",ok?"Pamięć działa":"Brak możliwości zapisu");}catch(e){dodaj("Zapis i odczyt pamięci","bad",e.message);}
   try{const h=await hashuj("test");dodaj("Szyfrowanie haseł",h.length===64?"ok":"warn",h.length===64?"SHA-256 dostępne":"Użyto mechanizmu zapasowego");}catch(e){dodaj("Szyfrowanie haseł","bad",e.message);}
   try{const r=await fetch("/products.json",{cache:"no-store"}),j=r.ok?await r.json():null;dodaj("Dostęp do products.json",r.ok&&Array.isArray(j)?"ok":"bad",r.ok?`${j.length} rekordów`:`HTTP ${r.status}`);}catch(e){dodaj("Dostęp do products.json","bad",e.message);}
-  try{const widoki=[widokSklep(),widokKontakt(),widokFAQ(),widokDostawa(),widokAdminProdukty()];dodaj("Renderowanie głównych widoków",widoki.every(x=>typeof x==="string"&&x.length>100)?"ok":"bad","Sprawdzono 5 kluczowych ekranów");}catch(e){dodaj("Renderowanie głównych widoków","bad",e.message);}
-  loguj("info","Wykonano pełny autotest: "+ostatniAutotest.map(x=>x.status).join(","));
+  const widoki=[["Sklep",()=>widokSklep()],["Kontakt",()=>widokKontakt()],["FAQ",()=>widokFAQ()],["Dostawa",()=>widokDostawa()],["Katalog administratora",()=>widokAdminProdukty()]],bledyWidokow=[];
+  for(const [nazwa,fn] of widoki){try{const html=fn();if(typeof html!=="string"||html.length<=100)bledyWidokow.push(`${nazwa}: niepełny wynik`);}catch(error){bledyWidokow.push(`${nazwa}: ${error.message||error}`);}}
+  dodaj("Renderowanie głównych widoków",bledyWidokow.length?"bad":"ok",bledyWidokow.length?bledyWidokow.join(" • "):"Sprawdzono 5 kluczowych ekranów");
+  const problemy=ostatniAutotest.filter(item=>["bad","warn"].includes(item.status));
+  if(problemy.length)problemy.forEach(item=>loguj(item.status==="bad"?"blad":"ostrzezenie",`${item.nazwa}: ${item.szczegoly}`,"pełny autotest"));
+  else loguj("info","Pełny autotest zakończony: wszystkie 4 obszary działają poprawnie","pełny autotest");
+  await diagnostykaWyslijKolejke();
+  await systemPobierzCentralneBledy(true);
   renderuj();
+}
+
+let systemSerwerStan={loaded:false,loading:false,status:null,plan:null,error:"",cleaning:false};
+function systemBajty(value){
+  const n=Math.max(0,Number(value)||0),units=["B","KB","MB","GB","TB"];let current=n,index=0;
+  while(current>=1024&&index<units.length-1){current/=1024;index++;}
+  return `${current.toLocaleString("pl-PL",{maximumFractionDigits:index>1?1:0})} ${units[index]}`;
+}
+function systemCzasDzialania(seconds){
+  const total=Math.max(0,Math.floor(Number(seconds)||0)),days=Math.floor(total/86400),hours=Math.floor(total%86400/3600),minutes=Math.floor(total%3600/60);
+  return [days?`${days} d`:"",hours?`${hours} godz.`:"",`${minutes} min`].filter(Boolean).join(" ");
+}
+function systemPoziom(value,warn,bad=101){return Number(value)>=bad?"bad":Number(value)>=warn?"warn":"ok";}
+async function systemPobierzSerwer(force=false){
+  if(systemSerwerStan.loading||(!force&&systemSerwerStan.loaded&&systemSerwerStan.status))return systemSerwerStan;
+  systemSerwerStan={...systemSerwerStan,loading:true,error:""};
+  if(trasa()==="/admin/system/serwer")renderuj();
+  try{
+    const data=await chmura("server-status",{timeout:30000,params:force?{refresh:Date.now()}:{}});
+    systemSerwerStan={...systemSerwerStan,loaded:true,loading:false,status:data.status||null,error:""};
+  }catch(error){systemSerwerStan={...systemSerwerStan,loaded:true,loading:false,error:error.message||String(error)};}
+  if(trasa()==="/admin/system/serwer")renderuj();
+  return systemSerwerStan;
+}
+async function systemPodgladCzyszczenia(){
+  if(systemSerwerStan.cleaning)return;
+  systemSerwerStan={...systemSerwerStan,cleaning:true,error:""};renderuj();
+  try{
+    const data=await chmura("server-cleanup-preview",{timeout:60000,params:{refresh:Date.now()}});
+    systemSerwerStan={...systemSerwerStan,cleaning:false,plan:data.plan||null,error:""};
+    toast(data.plan?.totalItems?`Znaleziono ${data.plan.totalItems} bezpiecznych plików technicznych`:"Serwer nie wymaga czyszczenia ✅");
+  }catch(error){systemSerwerStan={...systemSerwerStan,cleaning:false,error:error.message||String(error)};toast("Nie udało się przygotować podglądu");}
+  renderuj();
+}
+async function systemWykonajCzyszczenie(){
+  if(systemSerwerStan.cleaning||!systemSerwerStan.plan)return;
+  systemSerwerStan={...systemSerwerStan,cleaning:true,error:""};renderuj();
+  try{
+    const data=await chmura("server-cleanup-run",{method:"POST",body:{confirm:"safe-server-cleanup"},timeout:120000});
+    systemSerwerStan={...systemSerwerStan,cleaning:false,plan:null,error:"",loaded:false};
+    toast(`Zwolniono ${systemBajty(data.result?.freedBytes||0)} • usunięto ${data.result?.removedItems||0} plików technicznych ✅`);
+    await systemPobierzSerwer(true);
+  }catch(error){systemSerwerStan={...systemSerwerStan,cleaning:false,error:error.message||String(error)};toast("Czyszczenie nie powiodło się");renderuj();}
+}
+function systemSerwerPasek(label,value,warning,critical){
+  const percent=Math.max(0,Math.min(100,Number(value)||0)),level=systemPoziom(percent,warning,critical);
+  return `<div class="server-meter ${level}"><div><b>${esc(label)}</b><strong>${esc(percent.toFixed(1))}%</strong></div><span><i style="width:${percent}%"></i></span></div>`;
+}
+function systemBackupStatusHTML(label,item){
+  const ok=item?.ok&&!item?.stale;
+  return `<article class="server-service ${ok?"ok":"warn"}"><span>${ok?"✓":"!"}</span><div><b>${esc(label)}</b><small>${item?.checkedAt?`Ostatnio: ${esc(systemDataCzas(item.checkedAt))}`:"Brak potwierdzonego uruchomienia"}${item?.ageHours!==null&&item?.ageHours!==undefined?` • ${esc(item.ageHours)} godz. temu`:""}</small></div><em>${ok?"AKTUALNA":"SPRAWDŹ"}</em></article>`;
+}
+function systemSerwerHTML(){
+  const s=systemSerwerStan.status;
+  if(systemSerwerStan.loading&&!s)return `<section class="panel server-loading"><span>⏳</span><h1>Pobieram stan serwera</h1><p>Sprawdzam dysk, pamięć, wydanie i kopie danych.</p></section>`;
+  if(!s)return `<section class="panel server-loading bad"><span>⚠️</span><h1>Nie udało się odczytać serwera</h1><p>${esc(systemSerwerStan.error||"Uruchom kontrolę ponownie.")}</p><button class="btn" onclick="systemPobierzSerwer(true)">Spróbuj ponownie</button></section>`;
+  const diskLevel=systemPoziom(s.disk?.usedPercent,75,90),memoryLevel=systemPoziom(s.memory?.usedPercent,85,95),loadLevel=systemPoziom(s.host?.loadPercent,80,120),plan=systemSerwerStan.plan,last=s.maintenance?.lastCleanup;
+  return `<section class="server-hero panel"><div><span class="order-pro-label">OVH • ${esc(s.host?.hostname||"serwer")}</span><h1>🖥️ Stan i utrzymanie serwera</h1><p>Jedno miejsce do kontroli zasobów, aktywnego wydania, kopii oraz bezpiecznego usuwania wyłącznie zbędnych plików technicznych.</p></div><div class="server-hero-actions"><span class="server-live"><i></i> Backend działa</span><button class="btn ghost" onclick="systemPobierzSerwer(true)" ${systemSerwerStan.loading?"disabled":""}>${systemSerwerStan.loading?"⏳ Odświeżam":"↻ Odśwież dane"}</button></div></section>
+  <section class="server-kpi-grid">
+    <article class="server-kpi ${diskLevel}"><small>Dysk</small><b>${esc(s.disk?.usedPercent||0)}%</b><span>${systemBajty(s.disk?.availableBytes)} wolne z ${systemBajty(s.disk?.totalBytes)}</span></article>
+    <article class="server-kpi ${memoryLevel}"><small>Pamięć RAM</small><b>${esc(s.memory?.usedPercent||0)}%</b><span>${systemBajty(s.memory?.availableBytes)} dostępne</span></article>
+    <article class="server-kpi ${loadLevel}"><small>Obciążenie CPU</small><b>${esc(s.host?.loadPercent||0)}%</b><span>${esc(s.host?.cpuCount||0)} rdzeni • load ${esc(s.host?.load?.[0]||0)}</span></article>
+    <article class="server-kpi ok"><small>Czas działania</small><b>${esc(systemCzasDzialania(s.host?.uptimeSeconds))}</b><span>backend: ${esc(systemCzasDzialania(s.process?.uptimeSeconds))}</span></article>
+  </section>
+  <section class="server-workspace">
+    <div class="server-main-column">
+      <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Zasoby na żywo</span><h2>Wykorzystanie serwera</h2></div><small>Sprawdzono ${esc(systemDataCzas(s.checkedAt))}</small></div>
+        <div class="server-meters">${systemSerwerPasek("Dysk",s.disk?.usedPercent||0,75,90)}${systemSerwerPasek("Pamięć RAM",s.memory?.usedPercent||0,85,95)}${systemSerwerPasek("Obciążenie CPU",s.host?.loadPercent||0,80,120)}</div>
+        <div class="server-storage-grid"><article><span>📦</span><div><b>Kopie danych</b><small>${esc(s.storage?.backups?.files||0)} plików</small></div><strong>${systemBajty(s.storage?.backups?.bytes)}</strong></article><article><span>🚀</span><div><b>Wydania strony</b><small>${esc(s.storage?.releases?.count||0)} katalogów • ${esc(s.storage?.releases?.managed||0)} zarządzanych</small></div><strong>${systemBajty(s.storage?.releases?.bytes)}</strong></article><article><span>🧩</span><div><b>Projekt roboczy</b><small>${esc(s.storage?.project?.files||0)} plików</small></div><strong>${systemBajty(s.storage?.project?.bytes)}</strong></article></div>
+      </section>
+      <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Kopie i odtwarzanie</span><h2>Ochrona danych</h2></div><a class="btn ghost" href="#/admin/system/kopie">Kopie danych</a></div><div class="server-services">${systemBackupStatusHTML("Kopia lokalna",s.backups?.local)}${systemBackupStatusHTML("Kopia zewnętrzna",s.backups?.offsite)}${systemBackupStatusHTML("Test odtworzenia",s.backups?.restoreTest)}</div></section>
+    </div>
+    <aside class="server-side-column">
+      <section class="panel server-release-card"><span class="order-pro-label">Aktywne wydanie</span><b>${esc(s.release?.active||"niepotwierdzone")}</b><small>${esc(s.release?.managedCount||0)} wydań pod kontrolą automatu • ${esc(s.release?.unmanagedCount||0)} starszych katalogów zachowanych do ręcznej decyzji</small><a href="#/admin/system">Sprawdź aktualizację →</a></section>
+      <section class="panel server-cleanup-card"><div class="system-section-head"><div><span class="order-pro-label">Bezpieczne utrzymanie</span><h2>Oczyszczanie</h2></div><span>🧹</span></div><p>Automat chroni aktywne wydanie, kompletne kopie oraz wszystkie dane sklepu. Czyści tylko stare pliki techniczne utworzone przez Artway.</p>
+        <dl><div><dt>Harmonogram</dt><dd>${esc(s.maintenance?.schedule||"codziennie")}</dd></div><div><dt>Ostatnie czyszczenie</dt><dd>${last?.finishedAt?esc(systemDataCzas(last.finishedAt)):"jeszcze nie wykonano"}</dd></div><div><dt>Ostatnio zwolniono</dt><dd>${systemBajty(last?.freedBytes||0)}</dd></div></dl>
+        <button class="btn ghost" onclick="systemPodgladCzyszczenia()" ${systemSerwerStan.cleaning?"disabled":""}>${systemSerwerStan.cleaning?"⏳ Sprawdzam":"🔎 Pokaż pliki do usunięcia"}</button>
+      </section>
+    </aside>
+  </section>
+  ${plan?`<section class="panel server-cleanup-preview"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Podgląd przed operacją</span><h2>${plan.totalItems?`${esc(plan.totalItems)} plików technicznych • ${systemBajty(plan.totalBytes)}`:"Serwer jest uporządkowany"}</h2><p>${plan.totalItems?"Poniżej znajduje się pełny zakres operacji. Dane sklepu i kopie nie są na tej liście.":"Nie znaleziono żadnych plików spełniających bezpieczne reguły usuwania."}</p></div>${plan.totalItems?`<button class="btn" onclick="systemWykonajCzyszczenie()" ${systemSerwerStan.cleaning?"disabled":""}>${systemSerwerStan.cleaning?"⏳ Czyszczę":"🧹 Wyczyść bezpiecznie"}</button>`:""}</div>
+    ${plan.totalItems?`<div class="server-cleanup-list">${plan.candidates.map(item=>`<article><span>${item.type==="temporary-artifact"?"🧪":item.type==="managed-release"?"🚀":"🧹"}</span><div><b>${esc(item.name)}</b><small>${esc(item.reason)}</small></div><strong>${systemBajty(item.bytes)}</strong></article>`).join("")}</div>`:""}
+    <div class="server-protection-note"><b>Chronione zawsze:</b> aktywne wydanie ${esc(plan.protected?.activeRelease||"—")}, kompletne kopie, produkty, zamówienia, zdjęcia, konta i baza PostgreSQL.</div>
+  </section>`:""}
+  ${systemSerwerStan.error?`<div class="backend-note bad">${esc(systemSerwerStan.error)}</div>`:""}`;
 }
 
 /* ═══════════ GŁÓWNY PULPIT ADMINISTRATORA ═══════════
@@ -13774,7 +14205,9 @@ function adminPulpitAktualizujStatusDOM(){const status=adminPulpitStatusDanych()
 
 function pulpitSystemy(){
   const cloudChecked=!!chmuraStan.sprawdzono,healthChecked=!!stanBramki.sprawdzono,allegroChecked=!!allegroStan.sprawdzono,infaktChecked=!!infaktStan.sprawdzono;
+  const server=systemSerwerStan?.status,serverChecked=!!server,diskPercent=Number(server?.disk?.usedPercent)||0;
   return [
+    {id:"server",ico:"🖥️",nazwa:"Serwer VPS",status:serverChecked?(diskPercent>=90?"blad":"ok"):"info",opis:serverChecked?`Dysk ${diskPercent}% • ${systemBajty(server.disk?.availableBytes)} wolne`:"Oczekuje na lekką kontrolę zasobów",href:"#/admin/system/serwer"},
     {id:"cloud",ico:"☁️",nazwa:"Wspólna baza",status:cloudChecked?(chmuraStan.dostepna?"ok":"blad"):"info",opis:cloudChecked?(chmuraStan.dostepna?`Połączona • rev ${chmuraStan.rev||0}`:chmuraStan.error||"Brak połączenia"):"Oczekuje na pierwszą kontrolę",href:"#/admin/system"},
     {id:"email",ico:"✉️",nazwa:"E-mail automatyczny",status:healthChecked?(stanBramki.email?.configured?"ok":"blad"):"info",opis:healthChecked?(stanBramki.email?.configured?`${stanBramki.email.provider||"SMTP"} gotowy`:"Wymaga konfiguracji serwera"):"Oczekuje na kontrolę",href:"#/admin/system/diagnostyka"},
     {id:"inpost",ico:"🚚",nazwa:"InPost",status:healthChecked?(stanBramki.inpost?.configured?"ok":"blad"):"info",opis:healthChecked?(stanBramki.inpost?.configured?"API etykiet i śledzenia gotowe":"Wymaga konfiguracji API"):"Oczekuje na kontrolę",href:"#/admin/wysylki"},
@@ -13880,7 +14313,7 @@ function adminPulpitAlertyHTML(d){
 }
 
 function adminPulpitStanSystemuHTML(d){
-  return `<section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Kontrola połączeń</span><h2>Integracje produkcyjne</h2><p class="order-detail-lead">Każda karta prowadzi bezpośrednio do ustawień albo modułu naprawczego.</p></div><button class="btn" onclick="adminPulpitOdswiez(true)">🩺 Uruchom kontrolę</button></div>${adminPulpitSystemHTML(d)}</section><section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Harmonogram automatyczny</span><h2>Zdarzenia i ograniczona kolejka zadań</h2></div><a class="btn ghost" href="#/admin/allegro/ustawienia">Ustawienia Allegro</a></div><div class="dashboard-schedule">${[["☁️","Wspólna baza","co 60 sekund na aktywnym urządzeniu","ustawienia, produkty i zamówienia"],["📦","Zamówienia Allegro","detektor co 15 minut","tylko nowe lub zmienione zlecenia"],["💬","Wiadomości i dyskusje","detektor co 15 minut","tylko nowe kontakty i przypomnienia"],["🏷️","Lista ofert Allegro","najwyżej raz na godzinę","lekka kontrola wykonywana z kolejki"],["🧩","Pełny katalog Allegro","najwyżej raz na dobę","ograniczona porcja szczegółów, opisów i kategorii"],["🤖","Ciężkie zadania Agenta","maks. 2 na przebieg","pozostałe zadania czekają bez blokowania panelu"],["🏭","Dostępność producentów","partie priorytetowe","najpierw bestsellery i aktywne zamówienia"],["📣","SEO produktów","limit dzienny","bezpłatna kontrola małych partii"]].map(([i,t,c,o])=>`<article><span>${i}</span><div><b>${t}</b><small>${o}</small></div><em>${c}</em></article>`).join("")}</div></section><section class="panel dashboard-system-actions"><div><span>🛠️</span><b>Centrum systemu</b><small>Wersja, aktualizacja przeglądarki, diagnostyka, logi i kopie.</small><a class="btn" href="#/admin/system">Otwórz centrum</a></div><div><span>🩺</span><b>Diagnostyka</b><small>Sprawdź błędy JavaScript, serwer, SMTP, InPost i bazę.</small><a class="btn ghost" href="#/admin/system/diagnostyka">Uruchom kontrolę</a></div><div><span>🤖</span><b>Agent AI</b><small>Przegląd aktywnych zadań i planu operacyjnego.</small><a class="btn ghost" href="#/admin/agent-ai">Otwórz Agenta</a></div></section>`;
+  return `<section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Kontrola połączeń</span><h2>Integracje produkcyjne</h2><p class="order-detail-lead">Każda karta prowadzi bezpośrednio do ustawień albo modułu naprawczego.</p></div><button class="btn" onclick="adminPulpitOdswiez(true)">🩺 Uruchom kontrolę</button></div>${adminPulpitSystemHTML(d)}</section><section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Harmonogram automatyczny</span><h2>Zdarzenia i ograniczona kolejka zadań</h2></div><a class="btn ghost" href="#/admin/allegro/ustawienia">Ustawienia Allegro</a></div><div class="dashboard-schedule">${[["🧹","Utrzymanie serwera","codziennie 02:35","stare pliki techniczne; aktywne wydanie i kopie są chronione"],["☁️","Wspólna baza","co 60 sekund na aktywnym urządzeniu","ustawienia, produkty i zamówienia"],["📦","Zamówienia Allegro","detektor co 15 minut","tylko nowe lub zmienione zlecenia"],["💬","Wiadomości i dyskusje","detektor co 15 minut","tylko nowe kontakty i przypomnienia"],["🏷️","Lista ofert Allegro","najwyżej raz na godzinę","lekka kontrola wykonywana z kolejki"],["🧩","Pełny katalog Allegro","najwyżej raz na dobę","ograniczona porcja szczegółów, opisów i kategorii"],["🤖","Ciężkie zadania Agenta","maks. 2 na przebieg","pozostałe zadania czekają bez blokowania panelu"],["🏭","Dostępność producentów","partie priorytetowe","najpierw bestsellery i aktywne zamówienia"],["📣","SEO produktów","limit dzienny","bezpłatna kontrola małych partii"]].map(([i,t,c,o])=>`<article><span>${i}</span><div><b>${t}</b><small>${o}</small></div><em>${c}</em></article>`).join("")}</div></section><section class="panel dashboard-system-actions"><div><span>🖥️</span><b>Serwer VPS</b><small>Dysk, RAM, obciążenie, wydanie, kopie i bezpieczne czyszczenie.</small><a class="btn" href="#/admin/system/serwer">Otwórz serwer</a></div><div><span>🩺</span><b>Diagnostyka</b><small>Sprawdź błędy JavaScript, serwer, SMTP, InPost i bazę.</small><a class="btn ghost" href="#/admin/system/diagnostyka">Uruchom kontrolę</a></div><div><span>🤖</span><b>Agent AI</b><small>Przegląd aktywnych zadań i planu operacyjnego.</small><a class="btn ghost" href="#/admin/agent-ai">Otwórz Agenta</a></div></section>`;
 }
 
 async function adminPulpitOdswiez(pelnaKontrola=false,cicho=false,tylkoSprzedaz=false){
@@ -13913,6 +14346,7 @@ function widokAdmin(sekcja="pulpit"){
   setTimeout(()=>adminPulpitZaplanujOdswiezenieWTle(),0);
   if(!stanBramki.sprawdzono)setTimeout(()=>sprawdzBramke(true),0);
   const aktywna=["pulpit","operacje","sprzedaz","alerty","system"].includes(String(sekcja||""))?String(sekcja):"pulpit",d=adminPulpitDane();
+  if(aktywna==="system"&&!systemSerwerStan.loading&&!systemSerwerStan.loaded)setTimeout(()=>systemPobierzSerwer(false),0);
   const body=aktywna==="operacje"?adminPulpitOperacjeHTML(d):aktywna==="sprzedaz"?adminPulpitSprzedazHTML(d):aktywna==="alerty"?adminPulpitAlertyHTML(d):aktywna==="system"?adminPulpitStanSystemuHTML(d):adminPulpitPrzegladHTML(d);
   return adminSzkielet("/admin",`${adminPulpitSubnavHTML(aktywna,d)}${adminPulpitHeroHTML(aktywna,d)}<div class="dashboard-workspace">${body}</div>${domyslneHasloAdmina?`<div class="panel dashboard-security-warning"><span>🔑</span><div><b>Administrator używa domyślnego hasła</b><small>Zmień je przed dalszą publikacją strony.</small></div><a class="btn" href="#/konto">Zmień hasło</a></div>`:""}`);
 }

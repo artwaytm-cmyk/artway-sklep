@@ -9,6 +9,35 @@ export const ALLEGRO_AGENT_OFFER_PROCEDURE = Object.freeze([
   'Jeżeli brakuje danych, nie zgaduj: zapisz dokładne braki i błąd API do jednej kolejki ponowienia.',
 ]);
 
+export function buildAllegroPublicationSuccessFields({
+  text = (value, limit = 1000) => String(value ?? '').slice(0, limit).trim(),
+  product = {},
+  details = {},
+  link = {},
+  autoPatch = {},
+  now = new Date().toISOString(),
+} = {}) {
+  const verifiedStatus = text(
+    details.verifiedOffer?.status || details.verifiedOffer?.publication?.status
+      || details.offer?.status || details.offer?.publication?.status || details.expectedStatus || '',
+    80,
+  ).toUpperCase();
+  return {
+    ...autoPatch, allegroOfferId: text(details.offerId, 100),
+    ...(Number.isFinite(Number(details.draft?.stock?.available)) ? { allegroStock: Math.max(0, Math.floor(Number(details.draft.stock.available))) } : {}),
+    ...(link.catalogProductId ? { allegroProductId: link.catalogProductId } : {}),
+    ...(link.categoryId ? { allegroCategoryId: link.categoryId } : {}),
+    ...(link.producent ? { producent: link.producent } : {}),
+    ...(verifiedStatus ? { allegroStatus: verifiedStatus } : {}),
+    allegroSyncedAt: now, allegroSyncSource: 'artway-store',
+    allegroAgentPreparationStatus: 'published', allegroAgentPreparationMissing: [],
+    allegroAgentPreparationError: '', allegroAgentPublishedAt: now,
+    allegroPublicationAgentStatus: 'completed', allegroPublicationLastSuccessAt: now,
+    allegroPublicationLastErrorCode: '', allegroPublicationLastError: '',
+    allegroPublicationAgentTaskId: '', allegroPublicationReportId: '', allegroPublicationSpecialistRunId: '',
+  };
+}
+
 export function createAllegroPublicationAgent({
   text, canonicalGtin, linkFromPreparation, runSpecialist, mutateSettings, saveProductFields,
   now = () => new Date(),

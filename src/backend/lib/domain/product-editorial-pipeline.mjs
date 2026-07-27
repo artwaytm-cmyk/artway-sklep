@@ -2,6 +2,27 @@ import { automaticEditorialAssessment, normalizeChannelEditorialResult, PROMPT_V
 import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
 
 const clean = (value = '', limit = 30_000) => String(value ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, limit);
+let editorialProviderUnavailableUntil = 0;
+let editorialProviderUnavailableReason = '';
+
+function editorialProviderFailure(error) {
+  const message = clean(error?.message || error, 500);
+  if (/exceeded your current quota|insufficient_quota|billing details/i.test(message)) {
+    editorialProviderUnavailableUntil = Date.now() + 15 * 60_000;
+    editorialProviderUnavailableReason = message;
+  }
+  return message;
+}
+
+async function callEditorialSpecialist(runSpecialist, input, actor) {
+  if (Date.now() < editorialProviderUnavailableUntil) throw new Error(editorialProviderUnavailableReason || 'Usługa redakcji AI jest chwilowo niedostępna.');
+  try {
+    return await runSpecialist(input, actor);
+  } catch (error) {
+    editorialProviderFailure(error);
+    throw error;
+  }
+}
 
 function decodeEntities(value = '') {
   return String(value).replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>');
@@ -59,6 +80,12 @@ function sharedTitle(value = '') {
   return shortened.slice(0, boundary > 45 ? boundary : 75).trim();
 }
 
+function existingContentAssessment(ready, unavailableReason = 'agent_unavailable') {
+  return ready
+    ? { eligible: true, reason: 'existing_content_preserved' }
+    : { eligible: false, reason: unavailableReason };
+}
+
 export async function prepareLinkedProductEditorial(product = {}, {
   sourceUrl = '', runSpecialist, actor = { source: 'product-link-editorial' }, now = () => new Date(),
 } = {}) {
@@ -66,7 +93,7 @@ export async function prepareLinkedProductEditorial(product = {}, {
   let storeRun = null;
   if (typeof runSpecialist === 'function') {
     try {
-      storeRun = await runSpecialist({
+      storeRun = await callEditorialSpecialist(runSpecialist, {
         specialist: 'product_content', source: 'manual',
         instruction: 'Na podstawie materiału źródłowego przygotuj niezależną treść produktu dla sklepu Artway-TM. Źródło służy wyłącznie do ustalenia faktów. Popraw nazwę sprzedażową, krótki opis, długi opis i SEO; nie zmieniaj treści Allegro ani Von Halsky.',
         context: { channel: 'store', sourceMaterial, rule: 'raw_source_is_facts_only' },
@@ -74,7 +101,11 @@ export async function prepareLinkedProductEditorial(product = {}, {
       }, actor);
     } catch (error) { warnings.push(`Redakcja sklepu: ${clean(error?.message || error, 500)}`); }
   }
-  const storePatch = productPatch(storeRun?.result || {}), storeAssessment = storeRun ? automaticEditorialAssessment(storeRun) : { eligible: false, reason: 'agent_unavailable' };
+  const storePatch = productPatch(storeRun?.result || {});
+  const existingStoreReady = clean(product.nazwa || product.name, 300).length >= 5
+    && clean(product.opisKrotki || product.krotkiOpis, 1000).length >= 20
+    && clean(product.opis, 20_000).length >= 80;
+  const storeAssessment = storeRun ? automaticEditorialAssessment(storeRun) : existingContentAssessment(existingStoreReady);
   const title = sharedTitle(storePatch.nazwa || product.nazwa || product.name), storeProduct = {
     ...product,
     nazwa: title,
@@ -89,7 +120,7 @@ export async function prepareLinkedProductEditorial(product = {}, {
   const runChannel = async (specialist, channel, instruction) => {
     if (typeof runSpecialist !== 'function') return null;
     try {
-      return await runSpecialist({ specialist, source: 'manual', instruction, context: { ...channelContext, channel }, target: channelTarget }, actor);
+      return await callEditorialSpecialist(runSpecialist, { specialist, source: 'manual', instruction, context: { ...channelContext, channel }, target: channelTarget }, actor);
     } catch (error) {
       warnings.push(`${channel}: ${clean(error?.message || error, 500)}`);
       return null;
@@ -100,8 +131,10 @@ export async function prepareLinkedProductEditorial(product = {}, {
     runChannel('von_halsky_offer', 'vonHalsky', 'Przygotuj niezależną nazwę, opis krótki i opis pełny Von Halsky. Nazwa 7–150 znaków, opis minimum 100 znaków. Bez linków, obrazów w treści, kontaktu, płatności i logistyki.'),
   ]);
   const allegroPatch = productPatch(normalizeChannelEditorialResult(allegroRun?.result || {}, 'allegro_offer')), vonHalskyPatch = productPatch(normalizeChannelEditorialResult(vonHalskyRun?.result || {}, 'von_halsky_offer'));
-  const allegroAssessment = allegroRun ? automaticEditorialAssessment(allegroRun) : { eligible: false, reason: 'agent_unavailable' };
-  const vonHalskyAssessment = vonHalskyRun ? automaticEditorialAssessment(vonHalskyRun) : { eligible: false, reason: 'agent_unavailable' };
+  const existingAllegroTitle = clean(product.allegroTitle, 75), existingAllegroDescription = clean(product.allegroDescription, 30_000);
+  const existingVonHalskyTitle = clean(product.vonHalskyTitle, 150), existingVonHalskyShort = clean(product.vonHalskyShortDescription, 2000), existingVonHalskyDescription = clean(product.vonHalskyDescription, 30_000);
+  const allegroAssessment = allegroRun ? automaticEditorialAssessment(allegroRun) : existingContentAssessment(existingAllegroTitle.length >= 5 && existingAllegroDescription.length >= 80);
+  const vonHalskyAssessment = vonHalskyRun ? automaticEditorialAssessment(vonHalskyRun) : existingContentAssessment(existingVonHalskyTitle.length >= 5 && existingVonHalskyShort.length >= 20 && existingVonHalskyDescription.length >= 100);
   if (storeRun && !storeAssessment.eligible) warnings.push(`Sklep: ${storeAssessment.reason}`);
   if (allegroRun && !allegroAssessment.eligible) warnings.push(`Allegro: ${allegroAssessment.reason}`);
   if (vonHalskyRun && !vonHalskyAssessment.eligible) warnings.push(`Von Halsky: ${vonHalskyAssessment.reason}`);
@@ -113,12 +146,12 @@ export async function prepareLinkedProductEditorial(product = {}, {
   const channelProduct = {
     ...storeProduct,
     ...(allegroAssessment.eligible ? {
-      allegroTitle: clean(allegroPatch.allegroTitle, 75), allegroDescription: clean(allegroPatch.allegroDescription, 30_000),
-      allegroDescriptionSections: buildSharedProductDescriptionSections({ ...storeProduct, nazwa: allegroPatch.allegroTitle, opis: allegroPatch.allegroDescription, allegroDescription: allegroPatch.allegroDescription }),
+      allegroTitle: clean(allegroPatch.allegroTitle || existingAllegroTitle, 75), allegroDescription: clean(allegroPatch.allegroDescription || existingAllegroDescription, 30_000),
+      allegroDescriptionSections: buildSharedProductDescriptionSections({ ...storeProduct, nazwa: allegroPatch.allegroTitle || existingAllegroTitle, opis: allegroPatch.allegroDescription || existingAllegroDescription, allegroDescription: allegroPatch.allegroDescription || existingAllegroDescription }),
     } : {}),
     ...(vonHalskyAssessment.eligible ? {
-      vonHalskyContentMode: 'custom', vonHalskyTitle: clean(vonHalskyPatch.vonHalskyTitle, 150),
-      vonHalskyShortDescription: clean(vonHalskyPatch.vonHalskyShortDescription, 2000), vonHalskyDescription: clean(vonHalskyPatch.vonHalskyDescription, 30_000),
+      vonHalskyContentMode: 'custom', vonHalskyTitle: clean(vonHalskyPatch.vonHalskyTitle || existingVonHalskyTitle, 150),
+      vonHalskyShortDescription: clean(vonHalskyPatch.vonHalskyShortDescription || existingVonHalskyShort, 2000), vonHalskyDescription: clean(vonHalskyPatch.vonHalskyDescription || existingVonHalskyDescription, 30_000),
       vonHalskyContentSource: 'agent-independent-von-halsky-content', vonHalskyContentUpdatedAt: preparedAt,
     } : { vonHalskyContentMode: 'custom' }),
   };

@@ -39,9 +39,8 @@ test("zatwierdzenie rentowności synchronizuje się ze wspólną bazą i trafia 
   const source=await read("assets/admin.js");
   const start=source.indexOf("function rentownoscZapiszWeryfikacje");
   const body=source.slice(start,start+2500);
-  assert.match(body,/artway_produkty_dodane/);
-  assert.match(body,/artway_produkty_edytowane/);
-  assert.match(body,/zaplanujZapisUstawien\(\)/);
+  assert.match(body,/await chmuraZapiszProduktyCentralnie\(operations,"catalog-profit-review"\)/);
+  assert.doesNotMatch(body,/artway_produkty_dodane|artway_produkty_edytowane|zaplanujZapisUstawien\(\)/);
   assert.match(body,/zapiszHistorieAgenta\("kontrola-rentownosci"/);
 });
 

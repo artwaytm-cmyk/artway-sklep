@@ -29,9 +29,58 @@ test('pull zwraca tylko przyrost domen i bez ciężkich danych administratora', 
   assert.deepEqual(deltaOptions.versions, { artway_stany: 8 });
   assert.deepEqual(result.body.settings_domain_versions, { artway_stany: 9 });
   assert.deepEqual(result.body.settings_changed_keys, ['artway_stany']);
+  assert.deepEqual(result.body.settings.artway_stany, { 10: 3 });
   assert.equal(result.body.orders, undefined);
   assert.equal(result.body.users, undefined);
   assert.equal(result.body.admin, true);
+});
+
+test('zmiana domeny jest zwracana mimo niezmienionej globalnej rewizji ustawień', async () => {
+  let deltaReads = 0;
+  const deps = dependencies({
+    czytajUstawieniaPrzyrostowo: async (fallback, options) => {
+      deltaReads++;
+      return {
+        value: { ...options.base, data: { ...options.base.data, artway_dostepnosc: { p96: { status: 'niedostepny', decision: 'wait_available' } } } },
+        domainVersions: { artway_dostepnosc: 22 },
+        changedKeys: ['artway_dostepnosc'],
+      };
+    },
+  });
+  const route = createStoreDataRoute(deps);
+  const result = await route(
+    { method: 'GET' },
+    new URL('https://artwaytm.pl/api/store?action=pull&settingsRev=12&settingsDomains=%7B%22artway_dostepnosc%22%3A21%7D&adminData=0'),
+    'pull',
+  );
+  assert.equal(deltaReads, 1);
+  assert.equal(result.body.settings_unchanged, undefined);
+  assert.deepEqual(result.body.settings.artway_dostepnosc, { p96: { status: 'niedostepny', decision: 'wait_available' } });
+  assert.deepEqual(result.body.settings_changed_keys, ['artway_dostepnosc']);
+  assert.deepEqual(result.body.settings_domain_versions, { artway_dostepnosc: 22 });
+});
+
+test('panel potwierdza wyłącznie wersje domen, których treść naprawdę otrzymał', async () => {
+  const deps = dependencies({
+    czytajUstawieniaPrzyrostowo: async (fallback, options) => ({
+      value: {
+        ...options.base,
+        data: {
+          ...options.base.data,
+          artway_produkty_edytowane: { p1: { nazwa: 'stary snapshot' } },
+          artway_dostepnosc: { p1: { status: 'niedostepny' } },
+        },
+      },
+      domainVersions: { artway_produkty_edytowane: 51, artway_dostepnosc: 9 },
+      changedKeys: ['artway_produkty_edytowane', 'artway_dostepnosc'],
+    }),
+  });
+  const route = createStoreDataRoute(deps);
+  const result = await route({ method: 'GET' }, new URL('https://artwaytm.pl/api/store?action=pull&settingsDomains=%7B%7D&adminData=0'), 'pull');
+  assert.equal(result.body.settings.artway_produkty_edytowane, undefined);
+  assert.deepEqual(result.body.settings.artway_dostepnosc, { p1: { status: 'niedostepny' } });
+  assert.deepEqual(result.body.settings_domain_versions, { artway_dostepnosc: 9 });
+  assert.deepEqual(result.body.settings_changed_keys, ['artway_dostepnosc']);
 });
 
 test('publiczny bootstrap centralnego katalogu pomija ciężkie mapy produktów', async () => {
@@ -42,6 +91,8 @@ test('publiczny bootstrap centralnego katalogu pomija ciężkie mapy produktów'
   assert.equal(result.body.catalog_central, true);
   assert.ok(deltaOptions.excludeKeys.includes('artway_produkty_edytowane'));
   assert.ok(deltaOptions.excludeKeys.includes('artway_produkty_dodane'));
+  assert.ok(deltaOptions.excludeKeys.includes('artway_dostepnosc'));
+  assert.equal(result.body.settings?.artway_dostepnosc, undefined);
   assert.equal(result.body.orders, undefined);
 });
 

@@ -10,7 +10,8 @@ export function createProductLinkPackagePreparer({
     const canonicalUrl = text(selected?.url || inspected.canonicalUrl || inspected.resolvedUrl || target, 1000);
     sourceProduct.sourceUrl = canonicalUrl; sourceProduct.producentUrl = canonicalUrl;
     const [settingsRec, offerConfig] = await Promise.all([readSettings(), offerSettings()]);
-    const data = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {}, products = centralProducts(data);
+    const data = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {};
+    const products = await centralProducts(data);
     const producer = recognizeProducer(sourceProduct, {}, offerConfig) || text(sourceProduct.producent || sourceProduct.marka, 160), category = chooseCategory(sourceProduct, products);
     const sourceBaseProduct = { ...sourceProduct, ...(producer ? { producent: producer, marka: sourceProduct.marka || producer } : {}), ...(category.name ? { kategoria: category.name } : {}) };
     const editorial = await editorialize(sourceBaseProduct, canonicalUrl, sessionOf(req) || { source: 'product-link-editorial' }), baseProduct = editorial.product;

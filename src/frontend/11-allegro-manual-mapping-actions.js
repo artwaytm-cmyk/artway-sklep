@@ -9,7 +9,7 @@ async function allegroMapujOferte(offerId,productId,options={}){
       const produkt=pobierzProduktAdmin(id)||produktyDoAdministracji().find(p=>String(p.id)===id);
       if(produkt)try{
         synchronizacja=await chmura("allegro-create-product-offer",{method:"POST",body:{product:{...produkt,allegroOfferId:String(offerId)},mappedOfferId:String(offerId),options:{publicationAction:"keep",preserveStock:true,syncReason:"manual-mapping"}},timeout:120000});
-        allegroZapiszAutoUzupelnienia(produkt,synchronizacja);allegroZastosujWynikWystawienia(produkt,synchronizacja);
+        await allegroZapiszAutoUzupelnienia(produkt,synchronizacja);allegroZastosujWynikWystawienia(produkt,synchronizacja);
       }catch(e){bladSynchronizacji=e;}
     }
     if(id)await chmuraWczytajStan().catch(()=>{});allegroZapiszCache();

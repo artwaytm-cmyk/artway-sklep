@@ -278,24 +278,21 @@ function agentAIOpisyTekst(limit=12){
   if(!lista.length) return "Opisy produktów wyglądają poprawnie: krótkie opisy są uzupełnione, a pełne opisy nie wymagają pilnej korekty.";
   return ["📝 Produkty do poprawy opisów:",...lista.map((x,i)=>`• ${i+1}. ${x.produkt.nazwa} — ${x.braki.join(", ")}`),"Napisz „popraw opisy produktów”, żeby agent uzupełnił krótkie opisy i uporządkował pełne opisy."].join("\n");
 }
-function agentAIPoprawOpisyProduktow(limit=40){
+async function agentAIPoprawOpisyProduktow(limit=40){
   const lista=agentAIProduktyZProblememOpisu(limit);
-  let zmienione=0;
+  const operations=[];
   for(const x of lista){
     const p=x.produkt, poprawiony=agentAIPoprawOpisyDanychProduktu(p);
     if(JSON.stringify({a:p.opisKrotki||"",b:p.opis||""})===JSON.stringify({a:poprawiony.opisKrotki||"",b:poprawiony.opis||""})) continue;
-    const idx=produktyDodane.findIndex(d=>Number(d.id)===Number(p.id));
-    if(idx>=0) produktyDodane[idx]={...produktyDodane[idx],...poprawiony,id:p.id};
-    else produktyEdytowane[p.id]={...(produktyEdytowane[p.id]||{}),opisKrotki:poprawiony.opisKrotki,opis:poprawiony.opis};
-    zmienione++;
+    operations.push({productId:p.id,fields:{opisKrotki:poprawiony.opisKrotki,opis:poprawiony.opis}});
   }
-  if(zmienione){
-    zapiszStanProduktowPoOperacji();
+  if(operations.length){
+    try{await chmuraZapiszProduktyCentralnie(operations,"agent-description-cleanup");}
+    catch(error){loguj("blad","Agent nie zapisał opisów w centralnej kartotece: "+(error.message||error));return `Nie zapisano zmian opisów: ${error.message||error}`;}
     zbudujProdukty();
-    zapiszHistorieAgenta("opisy-produktow",`Agent AI poprawił opisy produktów: ${zmienione}`,{limit,zmienione});
-    if(chmuraToken) void chmuraZapiszUstawienia();
+    zapiszHistorieAgenta("opisy-produktow",`Agent AI poprawił i potwierdził zapis opisów: ${operations.length}`,{limit,zmienione:operations.length,storage:"postgresql"});
   }
-  return `Agent sprawdził opisy. Poprawiono: ${zmienione}. Do kontroli po akcji: ${agentAIProduktyZProblememOpisu(500).length}.`;
+  return `Agent sprawdził opisy. Zapisano centralnie: ${operations.length}. Do kontroli po akcji: ${agentAIProduktyZProblememOpisu(500).length}.`;
 }
 function agentAIRozpoznajPolecenie(tekst=""){
   const raw=String(tekst||"").trim(), n=agentAINormalizuj(raw);

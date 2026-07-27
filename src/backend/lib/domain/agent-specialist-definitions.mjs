@@ -1,4 +1,6 @@
-const VERSION = '2026-07-24.1';
+import { SPECIALIST_PLAYBOOK_VERSION } from './agent-specialist-playbooks.mjs';
+
+const VERSION = SPECIALIST_PLAYBOOK_VERSION;
 const scenario = (id) => ({ id, version: VERSION });
 
 export const SPECIALISTS = Object.freeze({

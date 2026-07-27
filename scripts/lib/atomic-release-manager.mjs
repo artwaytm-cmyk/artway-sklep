@@ -75,7 +75,7 @@ async function stampBrowserRelease(releaseDir, releaseId) {
   const indexHtml = await readFile(indexPath, 'utf8');
   const stampedIndex = indexHtml
     .replace(/(<meta\s+name=["']artway-version["']\s+content=["'])[^"']+/i, `$1${releaseId}`)
-    .replace(/(\/assets\/(?:app\.js|styles\.css)\?v=)[^"'&\s>]+/g, `$1${releaseId}`);
+    .replace(/(\/assets\/(?:app\.js|styles\.css)\?v=)[^"'`&\s>]+/g, `$1${releaseId}`);
   if (stampedIndex === indexHtml || releaseVersion(stampedIndex) !== releaseId) {
     throw new Error('Nie udało się nadać unikalnej wersji przeglądarkowej wydaniu.');
   }
@@ -83,8 +83,12 @@ async function stampBrowserRelease(releaseDir, releaseId) {
 
   const worker = await readFile(workerPath, 'utf8');
   const stampedWorker = worker
-    .replace(/const CACHE_NAME=["'][^"']+["'];/, `const CACHE_NAME="artway-admin-${releaseId}";`)
-    .replace(/(\/assets\/(?:app\.js|styles\.css)\?v=)[^"'&\s]+/g, `$1${releaseId}`);
+    .replace(
+      /const SW_V\s*=\s*new URL\(self\.location\.href\)\.searchParams\.get\("v"\)\s*\|\|\s*["'][^"']+["'];?/,
+      `const SW_V = new URL(self.location.href).searchParams.get("v") || "${releaseId}";`
+    )
+    .replace(/const CACHE_NAME\s*=\s*[^;]+;/, `const CACHE_NAME=\`artway-admin-${releaseId}\`;`)
+    .replace(/(\/assets\/(?:app\.js|styles\.css)\?v=)[^"'`&\s]+/g, `$1${releaseId}`);
   if (!stampedWorker.includes(`artway-admin-${releaseId}`)) {
     throw new Error('Nie udało się nadać unikalnego klucza pamięci Service Workera.');
   }

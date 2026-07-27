@@ -1,8 +1,16 @@
 import { createStoreRepository } from './lib/core/store-repository.mjs';
+import { postgresPoolFor } from './lib/core/postgres-store-repository.mjs';
+import { createCentralProductCatalog } from './lib/domain/central-product-catalog.mjs';
 import { mergeCatalogProducts } from './lib/domain/catalog-quality.mjs';
 
 const origin = 'https://artwaytm.pl';
 const repository = createStoreRepository({ name: 'artway-sklep' });
+const centralCatalog = createCentralProductCatalog({
+  pool: String(process.env.ARTWAY_STORE_DRIVER || '').trim().toLowerCase() === 'postgres' && process.env.DATABASE_URL
+    ? postgresPoolFor(process.env.DATABASE_URL)
+    : null,
+  namespace: 'artway-sklep',
+});
 const xml = (value) => String(value ?? '').replace(/[<>&'\"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
 const plain = (value, max = 5000) => String(value ?? '')
   .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -68,15 +76,18 @@ export default async () => {
     ...(Array.isArray(data.artway_kosz_dodane) ? data.artway_kosz_dodane.map((product) => product?.id) : []),
   ].map(String));
 
+  const canonical = centralCatalog.available
+    ? [...(await centralCatalog.listDataMap({ includeTrash: false })).values()]
+    : [];
   let excluded = 0;
-  const items = mergeCatalogProducts(data).products.flatMap((product) => {
+  const items = (canonical.length ? canonical : mergeCatalogProducts(data).products).flatMap((product) => {
     const seo = automaticSeo(product);
     const id = String(valueFor(product, ['externalId', 'external_id', 'sku', 'id'])).trim().slice(0, 50);
     const title = seo.title;
     const description = seo.description;
     const images = productImages(product), image = images[0];
     const price = Number(valueFor(product, ['cena', 'price']));
-    if (hidden.has(String(product.id)) || !id || !title || !description || !image || !(price > 0)) {
+    if (product?._catalog?.availability?.saleAvailable === false || hidden.has(String(product.id)) || !id || !title || !description || !image || !(price > 0)) {
       excluded += 1;
       return [];
     }

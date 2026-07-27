@@ -7,19 +7,23 @@ function domyslneUstawieniaRentownosci(){
 }
 function wartoscKosztuProduktu(p={},pole){const v=p?.[pole];return v!==undefined&&v!==null&&String(v).trim()!==""?Math.max(0,Number(v)||0):domyslneUstawieniaRentownosci()[pole];}
 function domyslneKosztyDoProduktu(p={},wymus=false){const d=domyslneUstawieniaRentownosci(),next={...p};for(const [pole,value] of Object.entries(d))if(wymus||next[pole]===undefined||next[pole]===null||String(next[pole]).trim()==="")next[pole]=value;return next;}
-function zastosujDomyslneKosztyProduktow(wymus=false){
-  const defaults=domyslneUstawieniaRentownosci(),lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));let changed=0;
-  for(const p of lista){const patch={};for(const [pole,value] of Object.entries(defaults))if(wymus||p[pole]===undefined||p[pole]===null||String(p[pole]).trim()==="")patch[pole]=value;if(!Object.keys(patch).length)continue;const key=String(p.id),idx=produktyDodane.findIndex(x=>String(x.id)===key);if(idx>=0)produktyDodane[idx]={...produktyDodane[idx],...patch};else produktyEdytowane={...produktyEdytowane,[key]:{...(produktyEdytowane[key]||{}),...patch}};changed++;}
-  if(changed){zapiszLS("artway_produkty_dodane",produktyDodane);zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();zaplanujZapisUstawien();}
-  return changed;
+async function zastosujDomyslneKosztyProduktow(wymus=false){
+  const defaults=domyslneUstawieniaRentownosci(),lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)),operations=[];
+  for(const p of lista){const patch={};for(const [pole,value] of Object.entries(defaults))if(wymus||p[pole]===undefined||p[pole]===null||String(p[pole]).trim()==="")patch[pole]=value;if(Object.keys(patch).length)operations.push({productId:p.id,fields:patch});}
+  if(operations.length){await chmuraZapiszProduktyCentralnie(operations,"catalog-profit-defaults");zbudujProdukty();}
+  return operations.length;
 }
-function zapiszDomyslneUstawieniaRentownosci(event){
+async function zapiszDomyslneUstawieniaRentownosci(event){
   event.preventDefault();const form=event.currentTarget,mode=String(event.submitter?.value||"defaults");if(mode==="all"&&!confirm("Nadpisać koszty operacyjne we wszystkich aktywnych produktach aktualnymi wartościami domyślnymi? Ceny zakupu i prowizje z API nie zostaną zmienione."))return;
   const n=name=>Math.max(0,Number(String(form.elements[name]?.value||"0").replace(",","."))||0),pct=name=>Math.min(100,n(name));
   const defaults={kosztPakowania:n("kosztPakowania"),sklepAdditionalCost:n("sklepAdditionalCost"),sklepPaymentPercent:pct("sklepPaymentPercent"),allegroAdditionalCost:n("allegroAdditionalCost"),allegroShippingSubsidy:n("allegroShippingSubsidy"),allegroAdsPercent:pct("allegroAdsPercent"),vatRate:pct("vatRate")};
   sklepDocelowaMarza=Math.max(1,Math.min(60,n("celMarzySklep")||20));allegroDocelowaMarza=Math.max(1,Math.min(60,n("celMarzyAllegro")||20));vonHalskyDocelowaMarza=Math.max(1,Math.min(60,n("celMarzyVonHalsky")||allegroDocelowaMarza));allegroJednostkiOplatCyklicznych=Math.max(1,Math.min(1000,Math.floor(n("allegroJednostkiOplatCyklicznych")||10)));
   void zapiszCzescUstawien({celMarzySklep:sklepDocelowaMarza,celMarzyAllegro:allegroDocelowaMarza,celMarzyVonHalsky:vonHalskyDocelowaMarza,allegroJednostkiOplatCyklicznych,domyslneKosztyRentownosci:defaults});zapiszLS("artway_cel_marzy_sklep",sklepDocelowaMarza);zapiszLS("artway_cel_marzy_allegro",allegroDocelowaMarza);
-  const applyAll=mode==="all",applyMissing=applyAll||!!form.elements.applyMissing?.checked,changed=applyMissing?zastosujDomyslneKosztyProduktow(applyAll):0;zaplanujZapisUstawien();toast(`✅ Zapisano domyślne koszty i cele${applyMissing?` • zaktualizowano ${changed} produktów`:""}`);renderuj();
+  const applyAll=mode==="all",applyMissing=applyAll||!!form.elements.applyMissing?.checked;
+  let changed=0;
+  try{changed=applyMissing?await zastosujDomyslneKosztyProduktow(applyAll):0;}
+  catch(error){toast("⛔ Ustawienia zapisano, ale nie zaktualizowano produktów: "+(error.message||error));return;}
+  zaplanujZapisUstawien();toast(`✅ Zapisano domyślne koszty i cele${applyMissing?` • zaktualizowano ${changed} produktów`:""}`);renderuj();
 }
 function domyslneUstawieniaRentownosciHTML(){const d=domyslneUstawieniaRentownosci();return `<details class="profit-defaults-panel" open><summary>⚙️ Domyślne koszty i cele</summary><form onsubmit="zapiszDomyslneUstawieniaRentownosci(event)"><p class="order-detail-lead">Te wartości są używane przy nowych produktach i wszędzie tam, gdzie kartoteka nie ma własnego kosztu. Wartość wpisana bezpośrednio w produkcie ma pierwszeństwo.</p><div class="profit-default-grid"><label>🏪 Cel marży sklepu (%)<input name="celMarzySklep" type="number" min="1" max="60" step="0.1" value="${esc(sklepDocelowaMarza)}"></label><label>🟠 Cel marży Allegro (%)<input name="celMarzyAllegro" type="number" min="1" max="60" step="0.1" value="${esc(allegroDocelowaMarza)}"></label><label>🐕 Cel marży Von Halsky (%)<input name="celMarzyVonHalsky" type="number" min="1" max="60" step="0.1" value="${esc(vonHalskyDocelowaMarza)}"></label><label>📦 Pakowanie / szt. (zł)<input name="kosztPakowania" inputmode="decimal" value="${esc(d.kosztPakowania)}"></label><label>🏪 Inne koszty sklepu / szt. (zł)<input name="sklepAdditionalCost" inputmode="decimal" value="${esc(d.sklepAdditionalCost)}"></label><label>💳 Płatność sklepu (% ceny)<input name="sklepPaymentPercent" inputmode="decimal" value="${esc(d.sklepPaymentPercent)}"></label><label>🟠 Inne koszty Allegro / szt. (zł)<input name="allegroAdditionalCost" inputmode="decimal" value="${esc(d.allegroAdditionalCost)}"></label><label>🚚 Dopłata do wysyłki Allegro (zł)<input name="allegroShippingSubsidy" inputmode="decimal" value="${esc(d.allegroShippingSubsidy)}"></label><label>📣 Reklama Allegro (% ceny)<input name="allegroAdsPercent" inputmode="decimal" value="${esc(d.allegroAdsPercent)}"></label><label>🧾 Domyślny VAT (%)<input name="vatRate" inputmode="decimal" value="${esc(d.vatRate)}"></label><label>🔁 Opłatę cykliczną podziel na (szt.)<input name="allegroJednostkiOplatCyklicznych" type="number" min="1" max="1000" value="${esc(allegroJednostkiOplatCyklicznych)}"></label></div><label class="profit-default-check"><input type="checkbox" name="applyMissing" checked> Uzupełnij teraz tylko puste pola kosztowe w istniejących produktach</label><div class="diag-actions"><button class="btn" type="submit" value="defaults">💾 Zapisz ustawienia</button><button class="btn danger" type="submit" value="all">Zapisz i nadpisz koszty wszystkich produktów</button></div></form></details>`;}
 function allegroRentownoscProduktu(p={},priceOverride=null,targetMargin=allegroDocelowaMarza){
@@ -33,14 +37,14 @@ function sklepRentownoscProduktu(p={},priceOverride=null,targetMargin=sklepDocel
 }
 function vonHalskyRentownoscProduktu(p={},priceOverride=null,targetMargin=vonHalskyDocelowaMarza){const price=kwotaNum(priceOverride)||kwotaNum(p.cenaVonHalsky)||kwotaNum(p.cenaAllegro)||kwotaNum(p.cena);return allegroRentownoscProduktu({...p,cenaAllegro:price},price,targetMargin);}
 function ustawCelMarzy(kanal,value){const v=Math.max(1,Math.min(60,Number(value)||20));if(kanal==="sklep"){sklepDocelowaMarza=v;zapiszLS("artway_cel_marzy_sklep",v);void zapiszCzescUstawien({celMarzySklep:v});}else if(kanal==="vonHalsky"){vonHalskyDocelowaMarza=v;void zapiszCzescUstawien({celMarzyVonHalsky:v});}else{allegroDocelowaMarza=v;zapiszLS("artway_cel_marzy_allegro",v);void zapiszCzescUstawien({celMarzyAllegro:v});}}
-function allegroZapiszProwizjeLokalnie(productId,summary={}){
+async function allegroZapiszProwizjeTrwale(productId,summary={}){
   const patch={allegroCommissionAmount:kwotaNum(summary.commissionAmount),allegroCommissionRate:Number(summary.commissionRate)||0,allegroRecurringFees:kwotaNum(summary.recurringFees),allegroFeeTotal:kwotaNum(summary.totalPreviewFees),allegroFeePrice:kwotaNum(summary.salePrice),allegroFeeCurrency:summary.currency||"PLN",allegroFeeDetails:{commissions:summary.commissions||[],quotes:summary.quotes||[]},allegroFeeCalculatedAt:summary.calculatedAt||new Date().toISOString(),allegroFeeSource:summary.source||"allegro-offer-fee-preview"};
-  zapiszPolaProduktuLokalnie(productId,patch,false);zaplanujZapisUstawien();return patch;
+  await zapiszPolaProduktuTrwale(productId,patch,false,"allegro-fee-preview");return patch;
 }
 async function allegroPobierzProwizjeProduktu(productId,button=null,options={}){
   const form=button?.closest?.("form"),base=pobierzProduktAdmin(productId)||produkty.find(p=>String(p.id)===String(productId))||{},product=form?produktRoboczyAllegroZFormularza(form,productId,base):base,offer=allegroOfertaDlaProduktuSklepu(product),offerId=String(product.allegroOfferId||offer?.id||"").trim(),price=kwotaNum(form?.elements?.cenaAllegro?.value)||kwotaNum(product.cenaAllegro||product.cena);
   if(!price){toast("Uzupełnij cenę Allegro");return null;}if(button)button.disabled=true;
-  try{if(!options.silent)toast("🟠 Pobieram aktualne prowizje i opłaty z Allegro…");const d=await chmura("allegro-fee-preview",{method:"POST",body:{productId:String(productId),product,offerId,price,save:true},timeout:90000});const patch=allegroZapiszProwizjeLokalnie(productId,d.summary||{});if(form){for(const [name,value] of Object.entries({allegroCommissionAmount:patch.allegroCommissionAmount,allegroCommissionRate:patch.allegroCommissionRate,allegroRecurringFees:patch.allegroRecurringFees,allegroFeePrice:patch.allegroFeePrice,allegroFeeCalculatedAt:patch.allegroFeeCalculatedAt}))if(form.elements[name])form.elements[name].value=value;aktualizujKalkulatorCenProduktu(form);}if(!options.silent)toast(`✅ Prowizja ${zl(patch.allegroCommissionAmount)} (${Number(patch.allegroCommissionRate).toFixed(2)}%) • opłaty cykliczne ${zl(patch.allegroRecurringFees)}`);if(!form&&!options.silent)renderuj();return d;}catch(e){if(!options.silent)toast("⚠️ Kalkulator opłat Allegro: "+(e.message||e));return null;}finally{if(button)button.disabled=false;}
+  try{if(!options.silent)toast("🟠 Pobieram aktualne prowizje i opłaty z Allegro…");const d=await chmura("allegro-fee-preview",{method:"POST",body:{productId:String(productId),product,offerId,price,save:true},timeout:90000});const patch=await allegroZapiszProwizjeTrwale(productId,d.summary||{});if(form){for(const [name,value] of Object.entries({allegroCommissionAmount:patch.allegroCommissionAmount,allegroCommissionRate:patch.allegroCommissionRate,allegroRecurringFees:patch.allegroRecurringFees,allegroFeePrice:patch.allegroFeePrice,allegroFeeCalculatedAt:patch.allegroFeeCalculatedAt}))if(form.elements[name])form.elements[name].value=value;aktualizujKalkulatorCenProduktu(form);}if(!options.silent)toast(`✅ Prowizja ${zl(patch.allegroCommissionAmount)} (${Number(patch.allegroCommissionRate).toFixed(2)}%) • opłaty cykliczne ${zl(patch.allegroRecurringFees)}`);if(!form&&!options.silent)renderuj();return d;}catch(e){if(!options.silent)toast("⚠️ Kalkulator opłat Allegro: "+(e.message||e));return null;}finally{if(button)button.disabled=false;}
 }
 async function allegroPobierzProwizjeMasowo(){
   const complete=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)&&kwotaNum(p.cenaZakupu)>0&&kwotaNum(p.cenaAllegro||p.cena)>0&&(p.allegroOfferId||(p.allegroCategoryId&&(p.allegroProductId||p.gtin||p.ean)))).slice(0,25);if(!complete.length){toast("Brak produktów z pełnymi danymi do kalkulacji");return;}
@@ -49,9 +53,9 @@ async function allegroPobierzProwizjeMasowo(){
 async function ustawRekomendowanaCeneProduktu(productId,kanal,price,targetMargin=null){
   const value=kwotaNum(price);if(!value)return;const p=pobierzProduktAdmin(productId);if(!p)return;
   const appliedMargin=Number.isFinite(Number(targetMargin))?+Number(targetMargin).toFixed(2):null;
-  if(kanal==="sklep"){zapiszPolaProduktuLokalnie(productId,{cena:value,sklepPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{sklepPriceTargetMargin:appliedMargin})},false);zaplanujZapisUstawien();toast(`✅ Cena w sklepie została ustawiona na ${zl(value)}${appliedMargin===null?"":` • marża ${appliedMargin.toFixed(2)}%`}`);renderuj();return;}
-  if(kanal==="vonHalsky"){zapiszPolaProduktuLokalnie(productId,{cenaVonHalsky:value,vonHalskyPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{vonHalskyPriceTargetMargin:appliedMargin})},false);zaplanujZapisUstawien();const ok=await chmuraZapiszUstawienia({flush:true});toast(ok?`🐕 Cena Von Halsky została ustawiona na ${zl(value)}`:"⚠️ Cena została zachowana lokalnie i oczekuje na ponowienie zapisu");renderuj();return;}
-  zapiszPolaProduktuLokalnie(productId,{cenaAllegro:value,allegroPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{allegroPriceTargetMargin:appliedMargin}),allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI},false);zaplanujZapisUstawien();toast(`🟠 Ustawiono ${zl(value)}${appliedMargin===null?"":` • marża ${appliedMargin.toFixed(2)}%`} i aktualizuję ofertę Allegro…`);
+  if(kanal==="sklep"){await zapiszPolaProduktuTrwale(productId,{cena:value,sklepPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{sklepPriceTargetMargin:appliedMargin})},false,"store-price-update");toast(`✅ Cena w sklepie została ustawiona na ${zl(value)}${appliedMargin===null?"":` • marża ${appliedMargin.toFixed(2)}%`}`);renderuj();return;}
+  if(kanal==="vonHalsky"){await zapiszPolaProduktuTrwale(productId,{cenaVonHalsky:value,vonHalskyPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{vonHalskyPriceTargetMargin:appliedMargin})},false,"von-halsky-price-update");toast(`🐕 Cena Von Halsky została ustawiona na ${zl(value)}`);renderuj();return;}
+  await zapiszPolaProduktuTrwale(productId,{cenaAllegro:value,allegroPriceRecommendedAt:new Date().toISOString(),...(appliedMargin===null?{}:{allegroPriceTargetMargin:appliedMargin}),allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI},false,"allegro-price-update");toast(`🟠 Ustawiono ${zl(value)}${appliedMargin===null?"":` • marża ${appliedMargin.toFixed(2)}%`} i aktualizuję ofertę Allegro…`);
   const next={...p,cenaAllegro:value,allegroShippingSubsidy:p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI};await allegroSynchronizujPowiazanyProduktPoZapisie(next,{forceFees:true});renderuj();
 }
 function allegroUstawRekomendowanaCene(productId,price){return ustawRekomendowanaCeneProduktu(productId,"allegro",price);}
@@ -339,6 +343,31 @@ function wgrajZdjecieProduktu(input){
     toast("Zdjęcie wgrane — kliknij Zapisz/Dodaj, aby zachować ✅");
   });
 }
+function produktPolaDoCentralnegoZapisu(product={}){
+  return Object.fromEntries(Object.entries(product).filter(([key,value])=>
+    !["id","_catalog","stan","dostepny"].includes(key)&&value!==undefined
+  ));
+}
+async function utworzProduktCentralnie(product={}){
+  const result=await chmura("catalog-product-create",{method:"POST",body:{
+    product,
+    source:product.storageOrigin==="product-link-file-import"?"import":"dodany",
+    mutationId:`product-create:${String(product.id)}:${Date.now().toString(36)}`
+  },timeout:60000});
+  if(!result?.ok||String(result.productId)!==String(product.id))throw new Error(result?.error||"Serwer nie potwierdził utworzenia produktu.");
+  return result.product&&String(result.product.id)===String(product.id)?result.product:product;
+}
+async function zapiszProduktCentralnie(product={}){
+  const productId=String(product.id??"").trim();
+  const result=await chmura("catalog-product-fields-update",{method:"POST",body:{
+    productId,
+    fields:produktPolaDoCentralnegoZapisu(product),
+    mutationId:`product-editor:${productId}:${Date.now().toString(36)}`,
+    area:"admin-product-editor"
+  },timeout:60000});
+  if(result?.confirmed!==true||String(result.productId)!==productId)throw new Error(result?.error||"Serwer nie potwierdził zapisu produktu.");
+  return result.product&&String(result.product.id)===productId?result.product:product;
+}
 async function dodajProdukt(e){
   e.preventDefault();
   const producerInput=e.target.elements.producent;if(!walidujPoleProducenta(producerInput)||!String(producerInput?.value||"").trim()){producerInput?.reportValidity();toast("⚠️ Podaj rzeczywistą nazwę producenta — numer wpisz w polu kodu produktu");return;}
@@ -367,7 +396,15 @@ async function dodajProdukt(e){
   }
   if(e.target.dataset.agentAdd==="1"||e.target.dataset.agentLinkSource){p.agentImportAt=new Date().toISOString();p.agentImportConfidence=Number(e.target.dataset.agentLinkConfidence||0)||0;p.agentImportSource=agentAIImportUrlStan.data?.fromCache?"pamięć Agenta":"link producenta";p.agentImportUrl=e.target.dataset.agentLinkSource||p.sourceUrl||p.producentUrl||"";}
   p.createdAt=p.createdAt||new Date().toISOString();p.createdBy=sesja?.email||"administrator";p.agentOnboardingStatus="processing";p.agentOnboardingStartedAt=new Date().toISOString();
-  produktyDodane.push(p); zapiszLS("artway_produkty_dodane", produktyDodane);
+  try{
+    const saved=await utworzProduktCentralnie(p);
+    Object.assign(p,saved);
+  }catch(error){
+    if(submit)submit.disabled=false;
+    toast("⛔ Produkt nie został dodany: "+(error.message||error));
+    return;
+  }
+  produktyDodane.push(p);
   zapiszStanZFormularza(f, p.id);
   agentAIZakonczLinkProducenta(prefillMeta._agentLinkId||prefillMeta._agentLinkUrl||p.sourceUrl||p.producentUrl,p);
   zapiszHistorieAgenta("opisy-produktow",`Agent AI sprawdził opisy po dodaniu produktu: ${p.nazwa}`,{produktId:p.id,opisKrotki:!!p.opisKrotki,opis:!!p.opis,importConfidence:p.agentImportConfidence||0,zrodlo:p.agentImportSource||"ręczne"});
@@ -378,7 +415,7 @@ async function dodajProdukt(e){
   toast("Produkt dodany ✅");
   toast("Produkt zapisany. Automat dobiera dane, kategorię, opisy i opłaty…");
   const onboardingResult=await allegroSynchronizujPowiazanyProduktPoZapisie(p,{forceFees:true}),onboardingProduct=pobierzProduktAdmin(p.id)||p,onboardingState=agentAIStanWdrozeniaProduktu(onboardingProduct),onboardingStatus=onboardingResult?.ok&&onboardingState.ready?"completed":"needs_attention";
-  zapiszPolaProduktuLokalnie(p.id,{agentOnboardingStatus:onboardingStatus,agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingCompletedAt:onboardingStatus==="completed"?new Date().toISOString():"",agentOnboardingMissing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)},false);
+  await zapiszPolaProduktuTrwale(p.id,{agentOnboardingStatus:onboardingStatus,agentOnboardingCheckedAt:new Date().toISOString(),agentOnboardingCompletedAt:onboardingStatus==="completed"?new Date().toISOString():"",agentOnboardingMissing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)},false,"product-onboarding");
   zapiszHistorieAgenta("wdrozenie-produktu",`${onboardingStatus==="completed"?"Zakończono":"Rozpoczęto"} wdrożenie nowego produktu: ${p.nazwa}`,{produktId:p.id,status:onboardingStatus,missing:onboardingState.checks.filter(x=>!x.ok).map(x=>x.id)});zaplanujZapisUstawien();
   if(submit)submit.disabled=false;
   if(["/admin/produkty/dodaj","/admin/produkty/z-linku"].includes(trasa())) location.hash="#/admin/produkty"; else renderuj();
@@ -386,15 +423,17 @@ async function dodajProdukt(e){
 function zapiszStanZFormularza(f, id){
   ustawStanMagazynowy(id, String(f.get("stan")??"").trim()===""?0:f.get("stan"), {typ:"korekta",powod:"Formularz produktu"});
 }
-async function automatyczniePobierzDaneZrodlaProduktu(p={}){
+async function automatyczniePobierzDaneZrodlaProduktu(p={},options={}){
   const url=String(p.producentUrl||p.sourceUrl||"").trim();if(!/^https?:\/\//i.test(url))return p;
   try{
     const d=await chmura("product-url-inspect",{method:"POST",body:{url},timeout:30000}),s=d.product||{},canonical=allegroProducentKanoniczny({...p,...s,sourceUrl:url,producentUrl:url});
     const sourceCode=String(s.kodProducenta||s.numerReferencyjny||s.mpn||s.externalId||s.sku||"").trim();
     const missing={gtin:s.gtin||s.ean,ean:s.ean||s.gtin,kodProducenta:sourceCode,numerReferencyjny:sourceCode,externalId:sourceCode,sku:sourceCode,mpn:sourceCode,producent:canonical||s.producent||s.marka,marka:s.marka||canonical||s.producent,parametryProducenta:s.parametryProducenta,parametryZrodla:s.parametryZrodla,sourceMaterial:{...(p.sourceMaterial||{}),sourceUrl:s.sourceUrl||s.producentUrl||url,fetchedAt:s.sourceEvidence?.fetchedAt||s.producentSprawdzonoAt||new Date().toISOString(),title:s.nazwa||"",shortDescription:s.opisKrotki||"",longDescription:s.opis||"",producer:s.producent||s.marka||"",brand:s.marka||s.producent||"",category:s.kategoria||"",ean:s.gtin||s.ean||"",producerCode:sourceCode,parameters:s.parametryProducenta||s.parametryZrodla||{}},contentEditorial:{...(p.contentEditorial||{}),status:"queued",queuedReason:"source_updated",queuedAt:new Date().toISOString()}};
-    zapiszPolaProduktuLokalnie(p.id,missing,true);
-    const current=pobierzProduktAdmin(p.id)||p,canonicalUrl=s.sourceUrl||s.producentUrl||url,sourceImages=Number(s.sourceEvidence?.imagePolicyVersion)>=2?[s.zdjecie,...(Array.isArray(s.zdjecia)?s.zdjecia:[])].filter(Boolean):[],force={producentUrl:canonicalUrl,sourceUrl:canonicalUrl,sourceEvidence:s.sourceEvidence||current.sourceEvidence||null,...(sourceImages.length?{zdjecie:sourceImages[0],zdjecia:sourceImages.slice(1,16)}:{}),dostepnoscProducenta:s.dostepnoscProducenta||current.dostepnoscProducenta||"",stanProducenta:s.stanProducenta??current.stanProducenta??"",stanProducentaDokladny:s.stanProducentaDokladny===true,stanProducentaZrodlo:s.stanProducentaZrodlo||current.stanProducentaZrodlo||"",producentStatus:s.producentStatus||current.producentStatus||"",producentSprawdzonoAt:s.producentSprawdzonoAt||current.producentSprawdzonoAt||new Date().toISOString()};
-    zapiszPolaProduktuLokalnie(p.id,force,false);agentAIZakonczLinkProducenta(url,pobierzProduktAdmin(p.id)||p);return pobierzProduktAdmin(p.id)||{...p,...missing,...force};
+    const merged={...p};
+    for(const [field,value] of Object.entries(missing))if(value!==undefined&&value!==null&&value!==""&&(merged[field]===undefined||merged[field]===null||String(merged[field]).trim()===""))merged[field]=value;
+    const canonicalUrl=s.sourceUrl||s.producentUrl||url,sourceImages=Number(s.sourceEvidence?.imagePolicyVersion)>=2?[s.zdjecie,...(Array.isArray(s.zdjecia)?s.zdjecia:[])].filter(Boolean):[],force={producentUrl:canonicalUrl,sourceUrl:canonicalUrl,sourceEvidence:s.sourceEvidence||merged.sourceEvidence||null,...(sourceImages.length?{zdjecie:sourceImages[0],zdjecia:sourceImages.slice(1,16)}:{}),dostepnoscProducenta:s.dostepnoscProducenta||merged.dostepnoscProducenta||"",stanProducenta:s.stanProducenta??merged.stanProducenta??"",stanProducentaDokladny:s.stanProducentaDokladny===true,stanProducentaZrodlo:s.stanProducentaZrodlo||merged.stanProducentaZrodlo||"",producentStatus:s.producentStatus||merged.producentStatus||"",producentSprawdzonoAt:s.producentSprawdzonoAt||merged.producentSprawdzonoAt||new Date().toISOString()},result={...merged,...force};
+    if(options.persist===false){agentAIZakonczLinkProducenta(url,result);return result;}
+    await zapiszPolaProduktuTrwale(p.id,missing,true,"product-source-refresh");await zapiszPolaProduktuTrwale(p.id,force,false,"product-source-refresh");agentAIZakonczLinkProducenta(url,pobierzProduktAdmin(p.id)||result);return pobierzProduktAdmin(p.id)||result;
   }catch(e){agentAIZapiszLinkProducenta(url,"oczekuje","Automatyczne odświeżenie przy zapisie: "+(e.message||e));return p;}
 }
 async function allegroSynchronizujPowiazanyProduktPoZapisie(p,options={}){
@@ -406,7 +445,7 @@ async function allegroSynchronizujPowiazanyProduktPoZapisie(p,options={}){
     let updated=false;
     if(existing||draft.operation==="update"){
       const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:prepared,options:{stock:allegroStanOfertyProduktu(prepared),publicationAction:"keep"}},timeout:120000});
-      allegroZapiszAutoUzupelnienia(prepared,d);allegroZastosujWynikWystawienia(prepared,d);allegroZapiszWynikOperacji(prepared,d);updated=true;
+      await allegroZapiszAutoUzupelnienia(prepared,d);allegroZastosujWynikWystawienia(prepared,d);allegroZapiszWynikOperacji(prepared,d);updated=true;
       prepared=pobierzProduktAdmin(p.id)||prepared;
     }
     const feeReady=kwotaNum(prepared.cenaAllegro||prepared.cena)>0&&!!(prepared.allegroOfferId||existing?.id||(prepared.allegroCategoryId&&(prepared.allegroProductId||prepared.gtin||prepared.ean)));
@@ -424,14 +463,20 @@ async function zapiszProduktAdmin(e,id){
   const poprzedni = pobierzProduktAdmin(id);
   const p = daneProduktuZFormularza(f, id, poprzedni||{});
   if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę i nazwę producenta"); return; }
+  try{
+    const saved=await zapiszProduktCentralnie(p);
+    Object.assign(p,saved);
+  }catch(error){
+    if(submit)submit.disabled=false;
+    toast("⛔ Zmiany nie zostały potwierdzone przez serwer: "+(error.message||error));
+    return;
+  }
   zapiszStanZFormularza(f, id);
   const i = produktyDodane.findIndex(x=>x.id===id);
   if(i>=0){
     produktyDodane[i] = p;
-    zapiszLS("artway_produkty_dodane", produktyDodane);
   }else{
     produktyEdytowane = {...produktyEdytowane, [id]:p};
-    zapiszLS("artway_produkty_edytowane", produktyEdytowane);
   }
   zbudujProdukty(); odswiezMenu();
   zapiszHistorieAgenta("opisy-produktow",`Agent AI sprawdził opisy po edycji produktu: ${p.nazwa}`,{produktId:p.id,opisKrotki:!!p.opisKrotki,opis:!!p.opis});
@@ -441,39 +486,43 @@ async function zapiszProduktAdmin(e,id){
   if(submit)submit.disabled=false;
   location.hash="#/admin/produkty";
 }
-function duplikujProdukt(id){
+async function duplikujProdukt(id){
   const p = pobierzProduktAdmin(id); if(!p) return;
   const maxId = najwyzszeIdProduktu();
   const kopia = seoAutomatyzujDaneProduktu({...p,id:maxId+1,nazwa:p.nazwa+" — kopia",seoMode:"auto",seoTitle:"",seoDescription:"",seoKeywords:"",createdAt:new Date().toISOString(),createdBy:sesja?.email||"administrator",agentOnboardingStatus:"needs_attention",agentOnboardingStartedAt:new Date().toISOString(),agentOnboardingMissing:["identity"]},"automatycznie po utworzeniu kopii",{force:true});
+  try{Object.assign(kopia,await utworzProduktCentralnie(kopia));}
+  catch(error){toast("⛔ Nie utworzono kopii: "+(error.message||error));return;}
   produktyDodane.push(kopia);
-  zapiszLS("artway_produkty_dodane", produktyDodane);
   zbudujProdukty();zapiszHistorieAgenta("wdrozenie-produktu",`Nowa kopia produktu wymaga kontroli Agenta: ${kopia.nazwa}`,{produktId:kopia.id,status:"needs_attention",sourceProductId:id});zaplanujZapisUstawien();loguj("info",`Zduplikowano produkt ${id} jako ${kopia.id}`);
   toast("Utworzono kopię produktu 📄");
   location.hash="#/admin/produkty/edytuj/"+kopia.id;
 }
-function usunProdukt(id){
+async function usunProdukt(id){
+  try{await produktCyklCentralny([id],"trash");}
+  catch(error){toast("⛔ Nie przeniesiono produktu do kosza: "+(error.message||error));return;}
   const p = produktyDodane.find(x=>x.id===id);
   if(p){
     if(!koszDodanych.some(x=>x.id===id)) koszDodanych.push(p);
     oznaczProduktWKoszu(id,"wlasny");
-    zapiszLS("artway_kosz_dodane", koszDodanych);
   }
   produktyDodane = produktyDodane.filter(p=>p.id!==id);
-  zapiszLS("artway_produkty_dodane", produktyDodane); zbudujProdukty();
+  zbudujProdukty();
   loguj("info","Przeniesiono produkt do kosza na 30 dni: id="+id); toast("Produkt w koszu przez 30 dni 🗑️"); renderuj();
 }
-function przywrocZKosza(id){
+async function przywrocZKosza(id){
+  try{await produktCyklCentralny([id],"restore");}
+  catch(error){toast("⛔ Nie przywrócono produktu: "+(error.message||error));return;}
   const p = koszDodanych.find(x=>x.id===id);
-  if(p&&!produktyDodane.some(x=>x.id===id)){ produktyDodane.push(p); zapiszLS("artway_produkty_dodane", produktyDodane); }
+  if(p&&!produktyDodane.some(x=>x.id===id))produktyDodane.push(p);
   koszDodanych = koszDodanych.filter(x=>x.id!==id);
-  zapiszLS("artway_kosz_dodane", koszDodanych);
   usunMetaKosza(id);
   zbudujProdukty(); odswiezMenu();
   toast("Produkt przywrócony z kosza ↩️"); renderuj();
 }
-function usunDefinitywnie(id){
+async function usunDefinitywnie(id){
+  try{await produktCyklCentralny([id],"purge");}
+  catch(error){toast("⛔ Nie usunięto produktu definitywnie: "+(error.message||error));return;}
   koszDodanych = koszDodanych.filter(x=>x.id!==id);
-  zapiszLS("artway_kosz_dodane", koszDodanych);
   usunMetaKosza(id);
   delete stanyProduktow[id];
   delete dostepnoscProduktow[String(id)];
@@ -482,17 +531,16 @@ function usunDefinitywnie(id){
   loguj("info","Usunięto definitywnie produkt id="+id);
   toast("Produkt usunięty definitywnie"); renderuj();
 }
-function usunDefinitywnieBazowy(id){
+async function usunDefinitywnieBazowy(id){
+  try{await produktCyklCentralny([id],"purge");}
+  catch(error){toast("⛔ Nie usunięto produktu definitywnie: "+(error.message||error));return;}
   if(!produktyDefinitywne.includes(id)) produktyDefinitywne.push(id);
   if(!produktyUkryte.includes(id)) produktyUkryte.push(id);
   produktyDefinitywne=[...new Set(produktyDefinitywne)];
-  zapiszLS("artway_produkty_definitywne",produktyDefinitywne);
-  zapiszLS("artway_produkty_ukryte",produktyUkryte);
   usunMetaKosza(id);
   delete produktyEdytowane[id];
   delete stanyProduktow[id];
   delete dostepnoscProduktow[String(id)];
-  zapiszLS("artway_produkty_edytowane",produktyEdytowane);
   zapiszLS("artway_stany",stanyProduktow);
   zapiszLS("artway_dostepnosc",dostepnoscProduktow);
   zaznaczoneProdukty.delete(id);
@@ -500,10 +548,13 @@ function usunDefinitywnieBazowy(id){
   loguj("info","Usunięto definitywnie produkt bazowy id="+id);
   toast("Produkt usunięty definitywnie"); renderuj();
 }
-function wyczyscCalKosz(){
+async function wyczyscCalKosz(){
   const bazowe=bazoweProduktyWKoszu().map(p=>p.id);
   const ile=koszDodanych.length+bazowe.length;
   if(!ile||!confirm(`Definitywnie usunąć ${ile} produktów z kosza? Tej operacji nie można cofnąć.`)) return;
+  const ids=[...new Set([...koszDodanych.map(p=>p.id),...bazowe])];
+  try{await produktCyklCentralny(ids,"purge");}
+  catch(error){toast("⛔ Kosz nie został opróżniony — serwer nie potwierdził usunięcia: "+(error.message||error));return;}
   koszDodanych.forEach(p=>{delete koszMeta[p.id];delete stanyProduktow[p.id];delete dostepnoscProduktow[String(p.id)];});
   bazowe.forEach(id=>{
     if(!produktyDefinitywne.includes(id)) produktyDefinitywne.push(id);
@@ -511,10 +562,6 @@ function wyczyscCalKosz(){
   });
   koszDodanych=[];
   produktyDefinitywne=[...new Set(produktyDefinitywne)];
-  zapiszLS("artway_kosz_dodane",koszDodanych);
-  zapiszLS("artway_kosz_meta",koszMeta);
-  zapiszLS("artway_produkty_definitywne",produktyDefinitywne);
-  zapiszLS("artway_produkty_edytowane",produktyEdytowane);
   zapiszLS("artway_stany",stanyProduktow);
   zapiszLS("artway_dostepnosc",dostepnoscProduktow);
   zbudujProdukty(); odswiezMenu();

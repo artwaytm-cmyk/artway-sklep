@@ -226,20 +226,21 @@ function rentownoscPolaWeryfikacji(p={},approved=true,at=new Date().toISOString(
   const store=sklepRentownoscProduktu(p),allegro=allegroRentownoscProduktu(p),vonHalsky=vonHalskyRentownoscProduktu(p);
   return {profitabilityReviewed:true,profitabilityReviewedAt:at,profitabilityReviewedBy:sesja?.email||"administrator",profitabilityReviewSignature:rentownoscSygnaturaWeryfikacji(p),profitabilityReviewSnapshot:{storePrice:store.price,allegroPrice:allegro.price,vonHalskyPrice:vonHalsky.price,purchasePrice:kwotaNum(p.cenaZakupu),storeMargin:store.margin,allegroMargin:allegro.margin,vonHalskyMargin:vonHalsky.margin,storeTarget:Number(p.sklepPriceTargetMargin||sklepDocelowaMarza)||0,allegroTarget:Number(p.allegroPriceTargetMargin||allegroDocelowaMarza)||0,vonHalskyTarget:Number(p.vonHalskyPriceTargetMargin||vonHalskyDocelowaMarza)||0},profitabilityReviewRevision:2};
 }
-function rentownoscZapiszWeryfikacje(ids=[],approved=true){
+async function rentownoscZapiszWeryfikacje(ids=[],approved=true){
   const unique=[...new Set(ids.map(String))],products=new Map(produktyDoAdministracji().map(p=>[String(p.id),p])),at=new Date().toISOString();let changed=0;
-  for(const id of unique){const p=products.get(id);if(!p||czyProduktAdminWKoszu(p))continue;const patch=rentownoscPolaWeryfikacji(p,approved,at),idx=produktyDodane.findIndex(x=>String(x.id)===id);if(idx>=0)produktyDodane[idx]={...produktyDodane[idx],...patch};else produktyEdytowane={...produktyEdytowane,[id]:{...(produktyEdytowane[id]||{}),...patch}};changed++;}
+  const operations=[];
+  for(const id of unique){const p=products.get(id);if(!p||czyProduktAdminWKoszu(p))continue;operations.push({productId:id,fields:rentownoscPolaWeryfikacji(p,approved,at)});changed++;}
   if(!changed)return 0;
-  zapiszLS("artway_produkty_dodane",produktyDodane);zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();zaplanujZapisUstawien();
+  await chmuraZapiszProduktyCentralnie(operations,"catalog-profit-review");zbudujProdukty();
   zapiszHistorieAgenta("kontrola-rentownosci",`${approved?"Zatwierdzono":"Cofnięto zatwierdzenie"} kalkulacji rentowności: ${changed}`,{productIds:unique.slice(0,500),approved});
   return changed;
 }
 function ustawFiltrAllegroRentownosc(value="wszystkie"){filtrAllegroRentownosc=value;renderuj();}
-function oznaczRentownoscSprawdzona(productId,approved=true){const changed=rentownoscZapiszWeryfikacje([productId],approved);if(changed)toast(approved?"✅ Produkt oznaczony jako sprawdzony według Twojego ustawienia":"Cofnięto oznaczenie produktu jako sprawdzony");renderuj();}
+async function oznaczRentownoscSprawdzona(productId,approved=true){try{const changed=await rentownoscZapiszWeryfikacje([productId],approved);if(changed)toast(approved?"✅ Produkt oznaczony jako sprawdzony według Twojego ustawienia":"Cofnięto oznaczenie produktu jako sprawdzony");renderuj();}catch(error){toast("⛔ Nie zapisano weryfikacji: "+(error.message||error));}}
 function przelaczZaznaczenieRentownosci(productId,checked){const id=String(productId);checked?zaznaczoneRentownosc.add(id):zaznaczoneRentownosc.delete(id);renderuj();}
 function zaznaczWidoczneRentownosc(){for(const {p} of allegroRentownoscLista().slice(0,500))zaznaczoneRentownosc.add(String(p.id));renderuj();}
 function wyczyscZaznaczenieRentownosci(){zaznaczoneRentownosc.clear();renderuj();}
-function oznaczZaznaczoneRentownosc(approved=true){const ids=[...zaznaczoneRentownosc];if(!ids.length){toast("Najpierw zaznacz produkty");return;}const changed=rentownoscZapiszWeryfikacje(ids,approved);zaznaczoneRentownosc.clear();toast(`${approved?"✅ Oznaczono jako sprawdzone":"Cofnięto oznaczenie"}: ${changed} produktów`);renderuj();}
+async function oznaczZaznaczoneRentownosc(approved=true){const ids=[...zaznaczoneRentownosc];if(!ids.length){toast("Najpierw zaznacz produkty");return;}try{const changed=await rentownoscZapiszWeryfikacje(ids,approved);zaznaczoneRentownosc.clear();toast(`${approved?"✅ Oznaczono jako sprawdzone":"Cofnięto oznaczenie"}: ${changed} produktów`);renderuj();}catch(error){toast("⛔ Nie zapisano weryfikacji: "+(error.message||error));}}
 function rentownoscStatusWeryfikacjiHTML(p={}){const status=rentownoscStatusWeryfikacji(p);if(status==="reviewed"){const snapshot=p.profitabilityReviewSnapshot||{};return `<span class="profit-review-status reviewed"><b>✅ Sprawdzone przeze mnie</b><small>${p.profitabilityReviewedAt?esc(new Date(p.profitabilityReviewedAt).toLocaleString("pl-PL")):"zatwierdzone"}${snapshot.storePrice||snapshot.allegroPrice?` • sklep ${snapshot.storePrice?zl(snapshot.storePrice):"—"} • Allegro ${snapshot.allegroPrice?zl(snapshot.allegroPrice):"—"}`:""}</small></span>`;}if(status==="outdated")return `<span class="profit-review-status outdated"><b>⚠️ Sprawdź ponownie</b><small>Od zatwierdzenia zmieniła się cena, koszt, prowizja lub cel marży.</small></span>`;return `<span class="profit-review-status unreviewed"><b>○ Jeszcze niesprawdzone</b><small>Oznacz po ustawieniu właściwej ceny i marży.</small></span>`;}
 function allegroRentownoscLista(){
   const q=String(szukajAllegroRentownosc||"").toLowerCase().trim();let list=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>({p,r:allegroRentownoscProduktu(p),v:vonHalskyRentownoscProduktu(p)})).filter(({p,r,v})=>{const review=rentownoscStatusWeryfikacji(p);if(q&&!`${p.nazwa||""} ${p.sku||""} ${p.externalId||""} ${p.gtin||p.ean||""} ${p.kodProducenta||p.mpn||""} ${p.producent||""} ${p.kategoria||""}`.toLowerCase().includes(q))return false;if(filtrAllegroRentownosc==="niesprawdzone"&&review!=="unreviewed")return false;if(filtrAllegroRentownosc==="sprawdzone"&&review!=="reviewed")return false;if(filtrAllegroRentownosc==="nieaktualne"&&review!=="outdated")return false;if(filtrAllegroRentownosc==="kompletne"&&!r.dataComplete)return false;if(filtrAllegroRentownosc==="brak_prowizji"&&p.allegroFeeCalculatedAt)return false;if(filtrAllegroRentownosc==="strata"&&r.profit>=0)return false;if(filtrAllegroRentownosc==="niska"&&(!r.dataComplete||r.margin>=allegroDocelowaMarza))return false;if(filtrAllegroRentownosc==="oplacalne"&&(!r.dataComplete||r.margin<allegroDocelowaMarza))return false;if(filtrAllegroRentownosc==="vonhalsky_niska"&&(!v.dataComplete||v.margin>=vonHalskyDocelowaMarza))return false;if(filtrAllegroRentownosc==="vonhalsky_oplacalne"&&(!v.dataComplete||v.margin<vonHalskyDocelowaMarza))return false;return true;});
@@ -281,8 +282,11 @@ async function zapiszSzybkaCeneVonHalsky(button,productId){
 async function przywrocDziedziczenieCenyVonHalsky(button,productId){
   const p=produktDlaWyboruMarzy(productId);if(!p)return;
   button.disabled=true;button.textContent="⏳ Zapisuję…";
-  zapiszPolaProduktuLokalnie(productId,{cenaVonHalsky:"",vonHalskyPriceRecommendedAt:new Date().toISOString()},false);zaplanujZapisUstawien();
-  const ok=await chmuraZapiszUstawienia({flush:true});toast(ok?"🐕 Von Halsky ponownie dziedziczy cenę Allegro.":"⚠️ Zmiana została zachowana lokalnie i oczekuje na synchronizację.");renderuj();
+  try{
+    await zapiszPolaProduktuTrwale(productId,{cenaVonHalsky:"",vonHalskyPriceRecommendedAt:new Date().toISOString()},false,"von-halsky-price-inheritance");
+    toast("🐕 Von Halsky ponownie dziedziczy cenę Allegro.");renderuj();
+  }catch(error){toast("⚠️ Nie zapisano zmiany ceny: "+(error.message||error));}
+  finally{button.disabled=false;}
 }
 function rentownoscKanalowaWierszHTML({p,r}={}){
   const s=sklepRentownoscProduktu(p),vonTarget=Math.max(.1,Math.min(75,Number(p.vonHalskyPriceTargetMargin||vonHalskyDocelowaMarza)||vonHalskyDocelowaMarza)),v=vonHalskyRentownoscProduktu(p,null,vonTarget),offerId=String(p.allegroOfferId||allegroOfertaDlaProduktuSklepu(p)?.id||"");

@@ -10,7 +10,7 @@ test('panel pobiera zamówienia gości z dedykowanej lekkiej kolejki', async () 
   ]);
   assert.match(route, /action === 'store-orders-admin'/);
   assert.match(route, /filtrujNieusunieteZamowienia\(ordersVersioned\.value\?\.items \|\| \[\], deletedOrders\)/);
-  assert.doesNotMatch(route.slice(route.indexOf("action === 'store-orders-admin'"), route.indexOf("if (action === 'catalog-product-price-update')")), /email|accountId|sessionOwns/);
+  assert.doesNotMatch(route.slice(route.indexOf("action === 'store-orders-admin'"), route.indexOf("if (action === 'store-users-admin')")), /email|accountId|sessionOwns/);
   assert.match(sync, /chmura\("store-orders-admin"/);
   assert.match(sync, /setInterval\(\(\)=>\{if\(trasa\(\)==="\/admin\/zamowienia"/);
   assert.match(router, /odswiezZamowieniaAdminaPoWejsciu/);

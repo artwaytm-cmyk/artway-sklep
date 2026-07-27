@@ -47,13 +47,19 @@ test('zmiana Allegro kolejkuje tylko Allegro, a zmiana Von Halsky tylko Von Hals
 });
 
 test('synchronizacja zapisuje osobne wersje kanałów i pełny stan redakcji', async () => {
-  const source = await readFile('src/frontend/03-cloud-sync.js', 'utf8');
-  assert.match(source, /contentEditorial:p\.contentEditorial/);
-  assert.match(source, /allegroShortDescription:p\.allegroShortDescription/);
-  assert.match(source, /allegroDescription:p\.allegroDescription/);
-  assert.match(source, /vonHalskyShortDescription:p\.vonHalskyShortDescription/);
-  assert.match(source, /vonHalskyDescription:p\.vonHalskyDescription/);
-  assert.match(source, /allegroDescriptionSource:"agent-independent-allegro-content"/);
+  const [editor, workspace, cloud] = await Promise.all([
+    readFile('src/frontend/12-product-editor.js', 'utf8'),
+    readFile('src/frontend/12-product-editor-workspace.js', 'utf8'),
+    readFile('src/frontend/03-cloud-sync.js', 'utf8'),
+  ]);
+  assert.match(editor, /fields:produktPolaDoCentralnegoZapisu\(product\)/);
+  assert.match(editor, /result\?\.confirmed!==true/);
+  assert.match(workspace, /p\.contentEditorial=\{\.\.\.\(p\.contentEditorial\|\|\{\}\)/);
+  assert.match(editor, /allegroShortDescription/);
+  assert.match(editor, /allegroDescription/);
+  assert.match(editor, /vonHalskyShortDescription/);
+  assert.match(editor, /vonHalskyDescription/);
+  assert.match(cloud, /allegroDescriptionSource:"agent-independent-allegro-content"/);
 });
 
 test('witryna sklepu nie podmienia opisu na wersję Von Halsky ani Allegro', async () => {

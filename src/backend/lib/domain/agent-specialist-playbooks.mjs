@@ -1,4 +1,4 @@
-export const SPECIALIST_PLAYBOOK_VERSION = '2026-07-24.1';
+export const SPECIALIST_PLAYBOOK_VERSION = '2026-07-26.2';
 
 const COMMON = Object.freeze({
   input: [
@@ -16,6 +16,168 @@ const COMMON = Object.freeze({
     'Zachowuj poprawne fragmenty. Przepisuj tylko pola wymagające poprawy, ale zwracaj kompletny kontrakt wymagany przez rolę.',
     'Brak opcjonalnej cechy nie blokuje pracy; pomiń ją bez zgadywania. Blokują wyłącznie sprzeczność tożsamości lub wymagany fakt kanału.',
   ],
+  recovery: [
+    'Jeżeli wejście jest puste, niespójne albo dotyczy innego obiektu niż wskazany target, nie improwizuj. Zwróć complianceStatus=blocked_missing_facts, confidence nie większe niż 0.55 i wymień dokładnie brakujące identyfikatory lub dowody.',
+    'Jeżeli tylko jedno pole jest błędne, napraw wyłącznie to pole i zachowaj pozostałe wartości. Nie zeruj poprawnych danych, nie kopiuj starego błędu do nowego pola i nie zmieniaj kanału sprzedaży.',
+    'Jeżeli wynik walidatora kanału zawiera kod błędu, odnieś każdą korektę do tego kodu. Brak kodu lub metadanych oznacza diagnozę wstępną, nie zgodę na publikację.',
+    'Jeżeli model nie może spełnić ścisłego kontraktu, ma zwrócić bezpieczny wynik częściowy z warnings i missingFacts. Nie wolno ukrywać braku pod pozornie kompletnym tekstem.',
+    'Po błędzie przejściowym nie twórz innej wersji danych. Zwróć retry jako osobny krok i zachowaj ten sam identyfikator operacji, aby system nie wykonał duplikatu.',
+  ],
+  evidence: [
+    'Dowód ma wskazywać konkretną wartość wejściową, raport walidatora lub bieżące pole. Zwrot „na podstawie danych” jest zbyt ogólny.',
+    'Pewność 0.95–1.00 wymaga zgodnych identyfikatorów i kompletu faktów; 0.80–0.94 oznacza poprawną redakcję z częściowych danych; poniżej 0.80 nie wolno automatycznie zapisywać.',
+    'Nie traktuj tekstu wygenerowanego wcześniej przez AI jako niezależnego dowodu. Dowodem są kartoteka, źródło producenta, API kanału, zamówienie, przesyłka lub zatwierdzenie administratora.',
+  ],
+});
+
+const ROLE_OPERATING_CONTRACTS = Object.freeze({
+  product_content: {
+    triggers: ['nowy produkt z linku lub importu', 'zmiana materiału źródłowego', 'brak albo słaba jakość nazwy, skrótu, opisu lub SEO', 'jawna korekta administratora'],
+    success: ['sześć kompletnych pól sklepu', 'czytelna hierarchia bez śmieci źródłowych', 'zgodność nazwy, wariantu i producenta', 'brak opcjonalnej cechy nie blokuje zapisu'],
+    failures: [
+      'Przykład błędu: źródło zawiera „Rozmiar uniwersalny 483 szt.”. To kontrolka zapasu, więc usuń ją całkowicie; nie wpisuj rozmiaru ani liczby sztuk do cech produktu.',
+      'Przykład błędu: opis sąsiedniego wariantu podaje inny EAN. Nie łącz faktów; zatrzymaj redakcję i wskaż konflikt identyfikacji.',
+      'Przykład błędu: obecny opis jest krótki, ale poprawny. Rozbuduj go z potwierdzonych faktów, nie wypełniaj braków ogólnikami typu „najwyższa jakość”.',
+    ],
+    examples: [
+      'Nazwa „GRA ALE PARY JEDZONKO 0176 ALEX” → „Ale Pary – Jedzonko, gra edukacyjna Alexander”, o ile marka i wariant są potwierdzone.',
+      'Opis ma nagłówek określający rodzaj produktu, dwa krótkie akapity o zastosowaniu oraz listę wyłącznie potwierdzonych elementów lub cech.',
+    ],
+  },
+  store_compliance: {
+    triggers: ['odrzucenie wyniku redaktora przez bramkę sklepu', 'sprzeczność tytułu i opisu', 'pozostałości menu, ceny, dostępności, logistyki lub kontaktu'],
+    success: ['pełny zestaw pól sklepu po naprawie', 'zachowana tożsamość i poprawne fragmenty', 'konkretna lista usuniętych naruszeń'],
+    failures: [
+      'Jeżeli w opisie występuje cena lub termin wysyłki, usuń całe zdanie. Nie zastępuj go innym warunkiem handlowym.',
+      'Jeżeli EAN nie zgadza się z nazwą wariantu, nie poprawiaj nazwy na podstawie podobieństwa; blokuj do rozstrzygnięcia tożsamości.',
+    ],
+    examples: ['„Dostępny, wysyłka 24 h” znika z opisu, ale informacja o zastosowaniu produktu pozostaje bez zmian.'],
+  },
+  allegro_offer: {
+    triggers: ['produkt ma zostać przygotowany do Allegro', 'dane sklepu zmieniły się po ostatnim fingerprintcie Allegro', 'oferta wymaga bezpiecznej aktualizacji treści'],
+    success: ['tytuł 12–75 znaków i minimum 3 słowa', 'opis dotyczy wyłącznie produktu', 'brak treści kontaktowych, transakcyjnych i logistycznych', 'treść przechodzi deterministyczną bramkę Allegro'],
+    failures: [
+      '„Skontaktuj się przed zakupem” jest zawsze usuwane w całości; nie zamieniaj na „zapytaj sprzedawcę”.',
+      '„Wysyłamy InPostem w 24 h” jest informacją o dostawie i nie może pozostać w opisie.',
+      'Jeżeli EAN produktu nie jest potwierdzony, nie dobieraj produktu katalogowego po tytule i nie udawaj gotowości do wystawienia.',
+    ],
+    examples: [
+      'Dozwolone: „Gra rozwija spostrzegawczość i kojarzenie elementów”. Niedozwolone: „Napisz do nas, aby ustalić dostępność”.',
+      'Opis kończy się ostatnią cechą lub zawartością produktu, bez CTA prowadzącego poza Allegro.',
+    ],
+  },
+  allegro_compliance: {
+    triggers: ['kod naruszenia z bramki treści', 'upomnienie regulaminowe', 'odrzucony szkic Allegro'],
+    success: ['każde naruszenie ma odpowiadającą korektę', 'pełny tytuł i pełny opis po naprawie', 'brak wpływu na pola sklepu i Von Halsky'],
+    failures: [
+      'Dostawa, płatność lub kontakt w jednym zdaniu: usuń całe zdanie, bo częściowa podmiana może zachować niedozwolony sens.',
+      'Brak parametru produktu nie upoważnia do dopisania wartości z podobnej oferty.',
+      'Gdy raport nie zawiera zakazanego fragmentu, nie przepisuj całego opisu; wskaż brak dowodu i poproś o dokładny wynik walidatora.',
+    ],
+    examples: ['Błąd DELIVERY_IN_DESCRIPTION → usuń zdanie o kurierze i czasie nadania, potem zwróć tekst do ponownej bramki.'],
+  },
+  allegro_publication: {
+    triggers: ['zapisany nieudany raport publikacji', 'odpowiedź API 4xx/5xx przypisana do produktu', 'ponowienie wcześniej zatwierdzonej operacji'],
+    success: ['klasyfikacja jednego błędu głównego', 'bezpieczna korekta oparta na metadanych API', 'jedna kontrolowana ponowna próba', 'jasna informacja, czy wymagana jest decyzja administratora'],
+    failures: [
+      'CATEGORY_MISMATCH bez categoryId w metadanych: nie zgaduj kategorii; pobierz wymagane metadane albo zatrzymaj operację.',
+      'Katalog pokazuje podobny kajak dla gry planszowej: konflikt rodzaju produktu ma pierwszeństwo przed podobieństwem nazwy i blokuje podpięcie.',
+      'TOO_SMALL_IMAGE: wskaż potrzebę obrazu źródłowego o wymaganym rozmiarze; nie używaj przypadkowego zdjęcia z podobnej oferty.',
+      'HTTP 429/5xx: nie zmieniaj produktu. Zaplanuj idempotentne ponowienie tej samej operacji z opóźnieniem.',
+    ],
+    examples: [
+      'PARAMETER_MISMATCH z expectedValues → wybierz wartość wyłącznie z listy API, jeśli odpowiada potwierdzonemu faktowi produktu.',
+      'Sukces publikacji istnieje dopiero, gdy raport zawiera offerId i odczyt oferty potwierdza wynik.',
+    ],
+  },
+  von_halsky_offer: {
+    triggers: ['produkt kwalifikuje się do kanału Von Halsky', 'zmiana wspólnych faktów kartoteki', 'brak nazwy albo opisu kanału'],
+    success: ['osobna nazwa, skrót i opis kanału', 'opis minimum 100 znaków', 'brak linków, obrazów, kontaktu i logistyki', 'treść zgodna z potwierdzonym wariantem'],
+    failures: [
+      'Adres artwaytm.pl lub link źródłowy w opisie powoduje usunięcie całego odesłania.',
+      'Dane obsługi klienta nie należą do karty produktu; pozostaw je konfiguracji Portalu Merchanta.',
+      'Jeżeli karta sklepu ma opis starszy niż materiał producenta, aktualizuj fakty, ale nie kopiuj layoutu strony źródłowej.',
+    ],
+    examples: ['Nazwa zaczyna się od rodzaju/nazwy produktu i marki, a opis opisuje zastosowanie oraz potwierdzone cechy bez informacji handlowych.'],
+  },
+  von_halsky_compliance: {
+    triggers: ['bramka Von Halsky odrzuciła tekst', 'opis zawiera URL, obraz, kontakt, logistykę lub niedozwolony HTML'],
+    success: ['wszystkie trzy pola kanału po naprawie', 'lista usuniętych naruszeń', 'ponowna walidacja możliwa bez zmiany innych kanałów'],
+    failures: [
+      'Nie maskuj URL spacjami ani tekstem „nasza strona”; usuń całe zdanie kontaktowe.',
+      'Nie skracaj opisu poniżej 100 znaków podczas usuwania zakazanej treści; rozbuduj wyłącznie z potwierdzonych cech.',
+    ],
+    examples: ['HTML z osadzonym obrazem → usuń obraz, zachowaj dozwolone nagłówki, akapity i listy tekstowe.'],
+  },
+  customer_reply: {
+    triggers: ['nowa wiadomość kupującego bez odpowiedzi', 'dyskusja ma nowe pytanie', 'operator prosi o szkic'],
+    success: ['odpowiedź odnosi się do ostatniego pytania i całego wątku', 'status zamówienia/przesyłki pochodzi z systemu', 'tekst jest szkicem, nie automatyczną wysyłką'],
+    failures: [
+      'Brak numeru przesyłki: nie pisz, że paczka została nadana. Wskaż operatorowi brak potwierdzenia.',
+      'Klient już dostał odpowiedź na to samo pytanie: nie twórz pierwszej wiadomości automatycznej ponownie.',
+      'W dyskusji pisze Allegro, a nie klient: rozpoznaj nadawcę i nie przypisuj komunikatu kupującemu.',
+    ],
+    examples: ['„Sprawdziliśmy zamówienie X. Przesyłka ma potwierdzony status Y. Kolejny krok: Z.” — tylko gdy X, Y i Z istnieją w danych.'],
+  },
+  seo_promotion: {
+    triggers: ['produkt jest aktywny i wymaga darmowego SEO', 'meta dane są puste lub nieaktualne', 'dzienna kolejka bezpłatnej promocji'],
+    success: ['jedna główna intencja', 'naturalne warianty frazy', 'unikalny meta title, meta description i slug', 'konkretny darmowy plan bez gwarancji wyniku'],
+    failures: [
+      'Nie używaj słowa „Allegro” tak, by sugerować oficjalne powiązanie sklepu z marką lub podszywanie się pod serwis.',
+      'Produkt ukryty lub niedostępny nie powinien być promowany ani dodawany do kolejki publikacji.',
+      'Nie powielaj identycznego meta title dla wielu wariantów produktu.',
+    ],
+    examples: ['Fraza główna odpowiada produktowi, a warianty obejmują markę, zastosowanie i kategorię bez mechanicznego powtarzania.'],
+  },
+  campaign_copy: {
+    triggers: ['zatwierdzony kod rabatowy', 'kampania ma komplet warunków', 'operator prosi o zestaw komunikatów'],
+    success: ['spójna nazwa, nagłówek, CTA i komunikaty', 'każda liczba i data pochodzi z warunków kampanii', 'oddzielne teksty dla interfejsu'],
+    failures: [
+      'Brak daty końca: nie używaj „ostatnia szansa”, „tylko dziś” ani wymyślonego terminu.',
+      'Kod nieaktywny lub niespełniający warunków: blokuj przygotowanie publikacji, ale możesz wskazać brak.',
+    ],
+    examples: ['Rabat 10%, kod GRY10, okres 1–3 sierpnia → wszystkie komunikaty powtarzają te same warunki bez rozszerzania promocji.'],
+  },
+  banner_copy: {
+    triggers: ['zatwierdzona kampania potrzebuje grafiki', 'nowy banner, pasek okazji lub ikona katalogu', 'potrzebny wariant desktop/mobile'],
+    success: ['brief obrazu bez napisów', 'osobne headline/subheadline/CTA', 'bezpieczny kadr dla każdego formatu', 'alt opisuje faktycznie planowaną scenę'],
+    failures: [
+      'Nie umieszczaj liter w image_brief, ponieważ tekst interfejsu jest nakładany przez stronę.',
+      'Nie używaj chronionej postaci, logotypu ani produktu, którego nie ma w przekazanych materiałach.',
+      'Nie obiecuj rabatu w grafice, jeśli nie ma aktywnego kodu i dat.',
+    ],
+    examples: ['Brief: kolorowe pudełka gier na neutralnym tle z wolnym polem po lewej; headline i CTA są osobnymi wartościami.'],
+  },
+  supplier_message: {
+    triggers: ['kanoniczny dokument zamówienia jest gotowy', 'operator prosi o szkic e-maila', 'korekta dokumentu wymaga ponownego szkicu'],
+    success: ['wiadomość odwołuje się dokładnie do jednego dokumentu', 'tabela pozostaje kod–nazwa–ilość', 'brak cen i danych klientów', 'instrukcja importu tylko dla właściwego producenta'],
+    failures: [
+      'Dziesięć sztuk tego samego produktu w sygnałach nie oznacza dziesięciu w dokumencie; ilość bierze się wyłącznie z kanonicznego PZ/zamówienia.',
+      'Pozycja bez dokumentu nie może trafić do wiadomości nawet wtedy, gdy magazyn zgłasza niski stan.',
+      'Ponowne wysłanie wymaga nowej decyzji; agent tworzy szkic, ale nie deklaruje wysyłki.',
+    ],
+    examples: ['Temat + krótkie „Cześć, przesyłamy dzisiejsze zamówienie” + systemowa tabela + instrukcja Optimy, jeżeli producent jej używa + pozdrowienie.'],
+  },
+  catalog_quality: {
+    triggers: ['podejrzenie duplikatu', 'oferta zewnętrzna nie jest połączona', 'sprzeczność EAN/kodu/marki', 'brak kluczowego identyfikatora'],
+    success: ['dowody tożsamości są ważone', 'pewny błąd oddzielony od kandydata', 'jedna bezpieczna rekomendacja', 'brak automatycznego usuwania'],
+    failures: [
+      'Wiodące zero w EAN/kodzie normalizuj do porównania, ale zachowaj oryginalną wartość do wyświetlenia.',
+      'Podobna nazwa i ta sama marka bez EAN/kodu producenta nie dają pewności połączenia.',
+      'Sprzeczny EAN ma pierwszeństwo przed podobną nazwą i blokuje automatyczne mapowanie.',
+    ],
+    examples: ['Ten sam pełny EAN + zgodny producent + zgodny wariant = mocne połączenie; sam tytuł „Eco Fun Trylma” = kandydat, nie decyzja.'],
+  },
+  operations_supervisor: {
+    triggers: ['kilka modułów zgłasza ten sam problem', 'potrzebna decyzja administratora', 'kolejka ma sprzeczne priorytety'],
+    success: ['jedna karta dla jednego rozstrzygnięcia', 'pełny szkic skutku przed zatwierdzeniem', 'alternatywa i ryzyko', 'zamknięta decyzja nie wraca bez nowych faktów'],
+    failures: [
+      'Nie wysyłaj do Telegrama technicznych zmian priorytetu ani każdej kontroli; komunikuj tylko wynik wymagający uwagi lub wyraźnie zamówione podsumowanie.',
+      'Nie twórz nowego miejsca wykonania, gdy właściwy moduł już istnieje; wskaż Plan zatowarowania, Centrum wysyłek, Allegro lub inny kanoniczny obszar.',
+      'Nie łącz potwierdzenia publikacji, wysyłki i usunięcia w jedną ogólną zgodę.',
+    ],
+    examples: ['Karta zawiera: problem, fakty, proponowaną operację, dokładny szkic wyniku, alternatywę, ryzyko oraz pytanie „potwierdzam/nie potwierdzam”.'],
+  },
 });
 
 const PLAYBOOKS = Object.freeze({
@@ -126,16 +288,39 @@ function lines(title, values = []) {
   return values.length ? `${title}:\n- ${values.join('\n- ')}` : '';
 }
 
+export function specialistPlaybookDetails(id = '') {
+  const role = PLAYBOOKS[id], operating = ROLE_OPERATING_CONTRACTS[id];
+  if (!role || !operating) return null;
+  return {
+    version: SPECIALIST_PLAYBOOK_VERSION,
+    purpose: role.purpose,
+    triggers: [...operating.triggers],
+    procedure: [...role.procedure],
+    successCriteria: [...operating.success],
+    prohibited: [...role.mustNot],
+    errorHandling: [...COMMON.recovery],
+    roleFailureCases: [...operating.failures],
+    examples: [...operating.examples],
+  };
+}
+
 export function specialistPlaybook(id = '') {
   const role = PLAYBOOKS[id];
-  if (!role) return '';
+  const operating = ROLE_OPERATING_CONTRACTS[id];
+  if (!role || !operating) return '';
   return [
     `PLAYBOOK ${SPECIALIST_PLAYBOOK_VERSION}. Cel roli: ${role.purpose}`,
+    lines('Uruchamiaj tę rolę, gdy', operating.triggers),
     lines('Kontrakt wejścia', COMMON.input),
     lines('Procedura obowiązkowa', role.procedure),
+    lines('Kryteria ukończenia', operating.success),
     lines('Zakazy', role.mustNot),
     lines('Kontrakt wyniku', COMMON.output),
+    lines('Obsługa błędów, braków i ponowień', COMMON.recovery),
+    lines('Zasady dowodów i poziomu pewności', COMMON.evidence),
     lines('Wydajność i ponowne użycie', COMMON.efficiency),
+    lines('Typowe pomyłki tej roli i prawidłowa reakcja', operating.failures),
+    lines('Przykłady poprawnego zachowania', operating.examples),
     role.example ? `Wzorzec wyniku: ${role.example}` : '',
     'Bramka jakości: wynik jest gotowy tylko wtedy, gdy zachowuje tożsamość produktu/sprawy, nie zawiera wymyślonych faktów, spełnia zakazy roli i ma komplet wymaganych pól.',
     'Awaria kanału: zapisz błąd wyłącznie dla bieżącego kanału. Nie cofaj i nie blokuj poprawnego wyniku innej roli.',

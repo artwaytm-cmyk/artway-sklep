@@ -182,24 +182,43 @@ export async function refreshCentralProductSource({ productId, incoming = {}, re
   throw catalogError('Kartoteka zmieniła się podczas aktualizacji z pliku linków.', 'settings_write_conflict');
 }
 
-export function createImportedProductCatalog({ read, readVersioned, writeIfVersion, shardSize = DEFAULT_SHARD_SIZE } = {}) {
+export function createImportedProductCatalog({
+  read,
+  readVersioned,
+  writeIfVersion,
+  shardSize = DEFAULT_SHARD_SIZE,
+  productStore = null,
+} = {}) {
   if (typeof read !== 'function' || typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function') {
     throw new Error('Katalog importowanych produktów wymaga repozytorium z odczytem i zapisem CAS.');
   }
   const boundedShardSize = Math.max(1, Math.min(100, Number(shardSize) || DEFAULT_SHARD_SIZE));
+  const canonicalStore = productStore
+    && typeof productStore.get === 'function'
+    && typeof productStore.listImported === 'function'
+    && typeof productStore.listImportedPage === 'function'
+    && typeof productStore.upsertImportedProduct === 'function'
+    ? productStore
+    : null;
 
   async function list() {
+    if (canonicalStore) return (await canonicalStore.listImported()).map(clone);
     const manifest = normalizeManifest(await read(IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY, {}), boundedShardSize);
     const shards = await Promise.all(manifest.shards.map((entry) => read(entry.key, { items: [] })));
     return shards.flatMap((record) => asArray(record?.items)).filter((product) => product && typeof product === 'object').map(clone);
   }
 
   async function metadata() {
+    if (canonicalStore) {
+      const page = await canonicalStore.listImportedPage({ offset: 0, limit: 1 });
+      return { count: page.total, revision: String(page.revision || `catalog-${page.total}`).slice(0, 100) };
+    }
     const manifest = normalizeManifest(await read(IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY, {}), boundedShardSize);
     return { count: manifest.count, revision: String(manifest.updatedAt || `catalog-${manifest.count}`).slice(0, 100) };
   }
 
   async function page({ offset = 0, limit = DEFAULT_SHARD_SIZE } = {}) {
+    if (canonicalStore) return canonicalStore.listImportedPage({ offset, limit });
     const manifest = normalizeManifest(await read(IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY, {}), boundedShardSize);
     const safeOffset = Math.max(0, Math.min(manifest.count, Number(offset) || 0));
     const safeLimit = Math.max(1, Math.min(MAX_PAGE_SIZE, Number(limit) || DEFAULT_SHARD_SIZE));
@@ -237,6 +256,13 @@ export function createImportedProductCatalog({ read, readVersioned, writeIfVersi
   }
 
   async function appendReservedProduct(reservation, product) {
+    if (canonicalStore) {
+      const saved = await canonicalStore.upsertImportedProduct(product, {
+        mutationId: `product-link-import:${reservation.importItemKey || reservation.id}`,
+        actor: 'product-link-import',
+      });
+      return clone(saved.product || product);
+    }
     for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
       const version = await readVersioned(reservation.shardKey, { items: [], updatedAt: null });
       const current = asArray(version.value?.items);
@@ -251,6 +277,7 @@ export function createImportedProductCatalog({ read, readVersioned, writeIfVersi
 
   async function findReservedProduct(reservation) {
     if (!reservation?.shardKey || !reservation?.id) return null;
+    if (canonicalStore) return clone(await canonicalStore.get(String(reservation.id), { admin: true }));
     const shard = await read(reservation.shardKey, { items: [] });
     return asArray(shard?.items).find((item) => Number(item?.id) === Number(reservation.id)) || null;
   }
@@ -260,6 +287,63 @@ export function createImportedProductCatalog({ read, readVersioned, writeIfVersi
     const canonicalSourceUrl = importedCatalogCanonicalUrl(sourceUrl || first(product, ['sourceUrl', 'producentUrl', 'agentImportUrl', 'url'], 3000));
     const safeImportItemKey = clean(importItemKey, 240) || `auto:${crypto.createHash('sha256').update(JSON.stringify(productFingerprints(product, canonicalSourceUrl))).digest('hex')}`;
     const fingerprints = productFingerprints(product, canonicalSourceUrl);
+
+    // Produkcyjny import rezerwuje ID i wykrywa duplikat bezpośrednio w
+    // PostgreSQL. Manifest i shardy pozostają wyłącznie czytnikiem migracyjnym
+    // dla starszych instalacji, dzięki czemu katalog nie rośnie już w jednym
+    // wielkim dokumencie JSON.
+    if (canonicalStore
+      && typeof canonicalStore.findImportedProductMatch === 'function'
+      && typeof canonicalStore.nextImportedProductId === 'function') {
+      const duplicate = duplicateInProducts(fingerprints, extraProducts);
+      if (duplicate) {
+        return {
+          added: false, idempotent: false, product: duplicate.product,
+          duplicate, reason: duplicate.reason,
+        };
+      }
+      const existing = await canonicalStore.findImportedProductMatch({
+        importItemKey: safeImportItemKey,
+        product,
+        sourceUrl: canonicalSourceUrl,
+      });
+      if (existing?.product) {
+        const idempotent = existing.reason === 'import_item_key';
+        return {
+          added: false,
+          idempotent,
+          product: clone(existing.product),
+          ...(idempotent ? {} : {
+            duplicate: {
+              product: clone(existing.product),
+              reason: existing.reason,
+              certain: true,
+            },
+          }),
+          reason: existing.reason,
+        };
+      }
+      const id = await canonicalStore.nextImportedProductId();
+      const now = timestamp();
+      const stored = {
+        ...clone(product),
+        id,
+        sourceUrl: canonicalSourceUrl || clean(product.sourceUrl, 3000),
+        producentUrl: canonicalSourceUrl || clean(product.producentUrl, 3000),
+        stan: 0,
+        stock: 0,
+        storageOrigin: 'product-link-file-import',
+        importItemKey: safeImportItemKey,
+        importedAt: now,
+        agentOnboardingStatus: 'needs_attention',
+        agentOnboardingStartedAt: clean(product.agentOnboardingStartedAt, 50) || now,
+      };
+      const saved = await canonicalStore.upsertImportedProduct(stored, {
+        mutationId: `product-link-import:${safeImportItemKey}`,
+        actor: 'product-link-import',
+      });
+      return { added: true, idempotent: false, product: clone(saved.product || stored), reason: null };
+    }
 
     const firstManifest = normalizeManifest(await read(IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY, {}), boundedShardSize);
     let reservation = asObject(firstManifest.importIndex[safeImportItemKey]);
@@ -357,6 +441,20 @@ export function createImportedProductCatalog({ read, readVersioned, writeIfVersi
   async function updateFromSource(productId, incoming = {}) {
     const id = String(productId ?? '').trim();
     if (!id) throw catalogError('Brakuje identyfikatora aktualizowanego produktu.', 'imported_catalog_product_id_required', 422);
+    if (canonicalStore) {
+      const existing = await canonicalStore.get(id, { admin: true });
+      if (!existing) return { updated: false, notFound: true, product: null, changedFields: [] };
+      const next = mergeImportedProductSourceRefresh(existing, incoming);
+      const changedFields = Object.keys(next).filter((field) => field !== 'id' && JSON.stringify(next[field]) !== JSON.stringify(existing[field]));
+      if (!changedFields.length) return { updated: false, product: existing, changedFields: [] };
+      const fields = Object.fromEntries(changedFields.map((field) => [field, next[field]]));
+      await canonicalStore.patchProductFields(id, fields, [], {
+        mutationId: `product-link-refresh:${id}:${Date.now().toString(36)}`,
+        actor: 'product-link-import',
+        area: 'product-source-refresh',
+      });
+      return { updated: true, product: { ...existing, ...fields }, changedFields };
+    }
     const manifest = normalizeManifest(await read(IMPORTED_PRODUCT_CATALOG_MANIFEST_KEY, {}), boundedShardSize);
     for (const descriptor of manifest.shards) {
       let changedFields = [];

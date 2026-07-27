@@ -52,6 +52,10 @@ function restartProductionBackend() {
 
 let releaseLock;
 try {
+  // products.json pozostaje wyłącznie awaryjną, publiczną projekcją. Tuż przed
+  // wydaniem jest odtwarzany z kanonicznych rekordów PostgreSQL, więc nigdy
+  // nie staje się równoległym źródłem edycji ani starą wersją oferty.
+  execFileSync('node', ['scripts/generate-canonical-products-snapshot.mjs'], { cwd: sourceRoot, stdio: 'inherit' });
   execFileSync('npm', ['run', 'build:check'], { cwd: sourceRoot, stdio: 'inherit' });
   releaseLock = await acquireDeploymentLock(releasesRoot);
   // Backend działa z kontrolowanego katalogu roboczego, a statyczny frontend z

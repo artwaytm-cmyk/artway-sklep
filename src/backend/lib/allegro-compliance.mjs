@@ -68,7 +68,9 @@ const RULES = Object.freeze([
   {
     id: 'seller_policy_information',
     label: 'informacja przeznaczona do innej sekcji oferty',
-    pattern: /\b(?:gwarancj(?:a|i|ę)|zwrot(?:y|u|em)?|reklamacj(?:a|i|ę)|urlop|przerwa\s+w\s+sprzedaży|termin\s+przydatności|data\s+ważności|krótki\s+termin|personalizacj(?:a|i|ę))\b/giu,
+    // Sam rdzeń „zwrot” jest zbyt szeroki dla opisów gier („zwrot akcji”).
+    // Blokujemy wyłącznie zwrot w znaczeniu polityki sprzedaży.
+    pattern: /\b(?:gwarancj(?:a|i|ę)|(?:prawo|możliwoś(?:ć|ci|cią)|zasady|warunki|termin)\s+(?:do\s+)?zwrot(?:u|ów)?|zwrot(?:y|u|em)?\s+(?:towaru|produktu|zakupu|pieniędzy)|zwroty?\s+i\s+reklamacj(?:a|e|i|ę)|reklamacj(?:a|i|ę)|urlop|przerwa\s+w\s+sprzedaży|termin\s+przydatności|data\s+ważności|krótki\s+termin|personalizacj(?:a|i|ę))\b/giu,
   },
   {
     id: 'product_acquisition_source',

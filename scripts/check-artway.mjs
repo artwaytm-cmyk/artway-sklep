@@ -40,11 +40,13 @@ const files = [
   'src/backend/lib/core/http.mjs',
   'src/backend/lib/core/store-repository.mjs',
   'src/backend/lib/domain/orders.mjs',
+  'src/backend/lib/domain/agent-operational-center.mjs',
   'src/backend/lib/domain/catalog-quality.mjs',
   'src/backend/lib/domain/product-editorial-pipeline.mjs',
   'src/backend/lib/domain/product-link-package-preparer.mjs',
   'src/backend/lib/domain/product-sale-decisions.mjs',
   'src/backend/lib/domain/product-sale-channel-links.mjs',
+  'src/backend/lib/domain/allegro-publication-agent.mjs',
   'src/backend/lib/domain/allegro-reply-assistant.mjs',
   'src/backend/lib/domain/telegram-communication.mjs',
   'src/backend/lib/telegram-center.mjs',
@@ -95,6 +97,7 @@ const appAdmin = read('assets/admin.js');
 const app = `${appPublic}\n${appAdmin}`;
 const storeEntry = read('src/backend/store.mjs');
 const store = read('src/backend/lib/store-app.mjs');
+const agentOperationalCenter = read('src/backend/lib/domain/agent-operational-center.mjs');
 const agentOperationsRoute = read('src/backend/lib/agent-operations-route.mjs');
 const allegroCommunicationsRoute = read('src/backend/lib/allegro-communications-route.mjs');
 const allegroMappingRoute = read('src/backend/lib/allegro-mapping-route.mjs');
@@ -118,6 +121,7 @@ const storeRuntime = [
   read('src/backend/lib/infakt-service.mjs'),
   read('src/backend/lib/product-source-inspection-service.mjs'),
   read('src/backend/lib/product-source-matching.mjs'),
+  read('src/backend/lib/domain/allegro-publication-agent.mjs'),
 ].join('\n');
 const productEditorial = read('src/backend/lib/domain/product-editorial-pipeline.mjs');
 const productLinkPackage = read('src/backend/lib/domain/product-link-package-preparer.mjs');
@@ -508,9 +512,6 @@ requireMarkers('backend aplikacji po podziale domenowym', storeRuntime, [
   'activeDemand',
   "action === 'agent-operations-summary'",
   "'agent-run-safe-checks'",
-  'function agentPriorytetWykonawczy',
-  'site_function_check',
-  'data_sync',
   'agent_action_runs',
   'agentCentrumOperacyjne',
   'function allegroDopasowanieOferty',
@@ -588,12 +589,18 @@ requireMarkers('backend aplikacji po podziale domenowym', storeRuntime, [
   "accept: 'application/xml, text/xml, application/json'",
   "'api:costs:read'",
   'send_to_ksef',
-  'companyOrdersWithoutInvoice',
   'function allegroOpisPelnyTekst',
   'offersUpdated',
   'feesUpdated',
   'autoUpdateOffers',
   'autoFees',
+]);
+
+requireMarkers('src/backend/lib/domain/agent-operational-center.mjs', agentOperationalCenter, [
+  'function executionPolicy',
+  'site_function_check',
+  'data_sync',
+  'companyOrdersWithoutInvoice',
 ]);
 
 requireMarkers('src/backend/lib/domain/product-sale-decisions.mjs', productSaleDecisions, [

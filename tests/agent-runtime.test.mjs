@@ -100,3 +100,28 @@ test('rejestr rozróżnia fizyczną czynność, zapis oczekujący i publikację 
   assert.equal(state.publication.counts.confirmed, 1);
   assert.equal(state.publication.recent[0].receiptId, 'offer-17');
 });
+
+test('rejestr zachowuje każdy krótki etap pracy produktu wraz z polami', async () => {
+  const store = memoryStore();
+  let current = new Date('2026-07-27T08:00:00.000Z');
+  const runtime = createAgentRuntime({ ...store, now: () => current });
+  const base = {
+    id: 'allegro-preparation:P-25', productId: 'P-25', productName: 'Gra Multigra',
+    channel: 'allegro', action: 'przygotowanie produktu do Allegro',
+  };
+  await runtime.report({ event: 'work_progress', source: 'preparation', work: {
+    ...base, phase: 'parametry', status: 'running', fields: ['ean', 'allegroParameters'],
+    message: 'Dopasowuję parametry.',
+  } });
+  current = new Date('2026-07-27T08:00:01.000Z');
+  await runtime.report({ event: 'work_progress', source: 'preparation', work: {
+    ...base, phase: 'opisy', status: 'running', fields: ['opisKrotki', 'opis'],
+    message: 'Poprawiam opisy.',
+  } });
+  const state = await runtime.status({ workerOnline: true, workerLastSeenAt: current.toISOString() });
+  assert.equal(state.currentWork.phase, 'opisy');
+  assert.deepEqual(state.activity.slice(0, 2).map((item) => item.phase), ['opisy', 'parametry']);
+  assert.deepEqual(state.activity[0].fields, ['opisKrotki', 'opis']);
+  assert.equal(state.activity[0].productId, 'P-25');
+  assert.match(state.activity[0].detail, /Poprawiam opisy/);
+});

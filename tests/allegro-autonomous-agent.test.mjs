@@ -60,11 +60,11 @@ test('cykl autonomiczny mapuje pewne dane, ale zakończenie duplikatu oddaje do 
   const route = createAllegroOfferWithdrawalRoute({
     autoMapOffers: async () => ({ autoMapped: 1, refreshed: 1, quarantined: 0, reassessed: 0 }),
     callAllegro: async (_req, path, options) => { calls.push({ path, options }); return { completedAt: new Date().toISOString(), taskCount: { success: 1, failed: 0, total: 1 } }; },
-    createProductUpdater: () => ({ apply: () => {}, commit: () => false }),
     getMappings: (record) => ({ ...(record.items || {}) }), getOffers: (record) => [...(record.items || [])],
     getProducts: async () => new Map([['P-1', product]]), isAdmin: () => true, read,
     respond: (body, status = 200) => ({ body, status }), text: (value, limit = 1000) => String(value ?? '').slice(0, limit),
     write: async (key, value) => database.set(key, structuredClone(value)),
+    saveProductFields: async () => ({ confirmed: true }),
   });
   const response = await route({ req: { method: 'POST', json: async () => ({ source: 'test' }) }, url: new URL('https://artwaytm.pl/api/store'), action: 'allegro-autonomous-agent-cycle' });
   assert.equal(response.status, 200);

@@ -192,18 +192,6 @@ function wczytajPlikImportuProduktow(input){
   r.onerror=()=>toast("⚠️ Nie udało się odczytać pliku");
   r.readAsText(plik,"UTF-8");
 }
-function zapiszStanProduktowPoOperacji(){
-  zapiszLS("artway_produkty_dodane",produktyDodane);
-  zapiszLS("artway_produkty_ukryte",produktyUkryte);
-  zapiszLS("artway_produkty_edytowane",produktyEdytowane);
-  zapiszLS("artway_produkty_definitywne",produktyDefinitywne);
-  zapiszLS("artway_kosz_dodane",koszDodanych);
-  zapiszLS("artway_kosz_meta",koszMeta);
-  zapiszLS("artway_stany",stanyProduktow);
-  zapiszLS("artway_dostepnosc",dostepnoscProduktow);
-  zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});
-  void chmuraDodajMutacjePolUstawien({mapaProduktow:ustawienia.mapaProduktow||{},menuKategorii:ustawienia.menuKategorii||[]});
-}
 function dodajSciezkiKategoriiZImportuDoMenu(lista){
   const importowane=(Array.isArray(lista)?lista:[]).filter(p=>p?.grupaKategorii&&p?.kategoria);
   if(!importowane.length)return 0;
@@ -225,66 +213,65 @@ function dodajSciezkiKategoriiZImportuDoMenu(lista){
   }
   return dodane;
 }
-function wykonajImportProduktow(){
+async function wykonajImportProduktow(){
   const d=podgladImportuProduktow;if(!d?.produkty?.length){toast("Najpierw przeanalizuj poprawne dane");return;}
   const tryb=$("trybImportuProduktow")?.value||"scal";
-  if(tryb==="zastap"&&!confirm(`Zastąpić obecny katalog ${d.produkty.length} produktami? Przed zmianą zostanie utworzona kopia do cofnięcia.`))return;
-  const kopia={data:new Date().toISOString(),produktyDodane,produktyUkryte,produktyEdytowane,produktyDefinitywne,koszDodanych,koszMeta,stanyProduktow,dostepnoscProduktow,ustawienia};
-  try{localStorage.setItem("artway_ostatnia_kopia_importu",JSON.stringify(kopia));}catch(e){toast("⚠️ Nie udało się utworzyć kopii przed importem");return;}
-  let dodane=0,zaktualizowane=0;const wejscie=d.produkty.map(p=>JSON.parse(JSON.stringify(p)));
-  if(tryb==="zastap"){
-    const zajete=new Set();let nastepne=Math.max(0,...wejscie.map(p=>Number(p.id)||0),...prodBazowe.map(p=>Number(p.id)||0))+1;
-    for(const p of wejscie){if(!p.id||zajete.has(p.id)){while(zajete.has(nastepne))nastepne++;p.id=nastepne++;}zajete.add(p.id);if(!p.ikona)p.ikona="📦";if(!p.kolor)p.kolor="#dbeafe";if(p.opis===undefined)p.opis="";}
-    produktyDodane=wejscie;
-    produktyUkryte=[...new Set(prodBazowe.map(p=>p.id))];
-    produktyEdytowane={};produktyDefinitywne=[...produktyUkryte];koszDodanych=[];koszMeta={};stanyProduktow={};
-    wejscie.forEach(p=>{if(Number.isInteger(p.stan)&&p.stan>=0)stanyProduktow[p.id]=p.stan;});
-    ustawienia={...ustawienia,mapaProduktow:{}};
-    dodane=wejscie.length;
-  }else{
-    const kluczKodu=v=>String(v||"").trim().toLowerCase();
-    const aktywne=produktyDoAdministracji(),poSku=new Map(aktywne.filter(p=>p.sku).map(p=>[kluczKodu(p.sku),p])),poExternal=new Map(aktywne.filter(p=>p.externalId).map(p=>[kluczKodu(p.externalId),p]));
-    const zajete=new Set([...aktywne.map(p=>Number(p.id)),...koszDodanych.map(p=>Number(p.id))].filter(id=>Number.isInteger(id)&&id>0));let nastepne=Math.max(0,...prodBazowe.map(p=>Number(p.id)||0),...zajete,...wejscie.map(p=>Number(p.id)||0))+1;
-    for(const p0 of wejscie){
-      const poExternalId=p0.externalId?poExternal.get(kluczKodu(p0.externalId)):null,poKodzie=p0.sku?poSku.get(kluczKodu(p0.sku)):null,poId=(!p0.externalId&&!p0.sku&&p0.id)?aktywne.find(x=>x.id===p0.id):null,istniejacy=poExternalId||poKodzie||poId;
-      if(istniejacy){
-        const p={...istniejacy,...p0,id:istniejacy.id};
-        const i=produktyDodane.findIndex(x=>x.id===p.id);
-        if(i>=0)produktyDodane[i]=p;else produktyEdytowane={...produktyEdytowane,[p.id]:p};
-        produktyUkryte=produktyUkryte.filter(id=>id!==p.id);produktyDefinitywne=produktyDefinitywne.filter(id=>id!==p.id);
-        koszDodanych=koszDodanych.filter(x=>x.id!==p.id);delete koszMeta[p.id];
-        if(Number.isInteger(p0.stan)&&p0.stan>=0)stanyProduktow[p.id]=p0.stan;
-        if(p.sku)poSku.set(kluczKodu(p.sku),p);
-        if(p.externalId)poExternal.set(kluczKodu(p.externalId),p);
-        zaktualizowane++;
-      }else{
-        if(!p0.id||zajete.has(p0.id)){while(zajete.has(nastepne))nastepne++;p0.id=nastepne++;}
-        if(!p0.ikona)p0.ikona="📦";if(!p0.kolor)p0.kolor="#dbeafe";if(p0.opis===undefined)p0.opis="";
-        zajete.add(p0.id);produktyDodane.push(p0);
-        koszDodanych=koszDodanych.filter(x=>x.id!==p0.id);delete koszMeta[p0.id];
-        if(Number.isInteger(p0.stan)&&p0.stan>=0)stanyProduktow[p0.id]=p0.stan;
-        if(p0.sku)poSku.set(kluczKodu(p0.sku),p0);
-        if(p0.externalId)poExternal.set(kluczKodu(p0.externalId),p0);
-        aktywne.push(p0);dodane++;
+  if(tryb!=="scal"){toast("⛔ Zastępowanie całego katalogu zostało wyłączone. Użyj bezpiecznego scalania z centralną kartoteką.");return;}
+  const kluczKodu=v=>String(v||"").trim().toLowerCase(),aktywne=produktyDoAdministracji();
+  const poSku=new Map(aktywne.filter(p=>p.sku).map(p=>[kluczKodu(p.sku),p]));
+  const poExternal=new Map(aktywne.filter(p=>p.externalId).map(p=>[kluczKodu(p.externalId),p]));
+  const poEan=new Map(aktywne.filter(p=>p.gtin||p.ean).map(p=>[kluczKodu(p.gtin||p.ean),p]));
+  const poId=new Map(aktywne.map(p=>[String(p.id),p]));
+  const zajete=new Set(aktywne.map(p=>Number(p.id)).filter(id=>Number.isInteger(id)&&id>0));
+  let nastepne=Math.max(1000000,...zajete)+1,dodane=0,zaktualizowane=0;
+  const wejscie=d.produkty.map(p=>JSON.parse(JSON.stringify(p))).map(p0=>{
+    const istniejacy=(p0.externalId&&poExternal.get(kluczKodu(p0.externalId)))
+      ||(p0.sku&&poSku.get(kluczKodu(p0.sku)))
+      ||((p0.gtin||p0.ean)&&poEan.get(kluczKodu(p0.gtin||p0.ean)))
+      ||(p0.id&&poId.get(String(p0.id)));
+    if(istniejacy){p0.id=istniejacy.id;zaktualizowane++;}
+    else{
+      if(!Number.isInteger(Number(p0.id))||Number(p0.id)<=0||zajete.has(Number(p0.id))){
+        while(zajete.has(nastepne))nastepne++;p0.id=nastepne++;
       }
+      zajete.add(Number(p0.id));dodane++;
     }
+    if(!p0.ikona)p0.ikona="📦";if(!p0.kolor)p0.kolor="#dbeafe";if(p0.opis===undefined)p0.opis="";
+    return p0;
+  });
+  const importId=`catalog-import:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
+  const zapisane=[];
+  try{
+    for(let offset=0;offset<wejscie.length;offset+=200){
+      const result=await chmura("catalog-products-import",{method:"POST",body:{products:wejscie.slice(offset,offset+200),importId:`${importId}:${offset}`},timeout:180000});
+      if(result?.confirmed!==true)throw new Error(result?.errors?.map(x=>`${x.productId}: ${x.error}`).slice(0,3).join(" • ")||"Serwer nie potwierdził importu.");
+      zapisane.push(...(result.products||[]));
+    }
+  }catch(error){
+    loguj("blad",`Import centralnej kartoteki przerwany: ${error.message||error}`);
+    toast("⛔ Import przerwany — można go bezpiecznie ponowić: "+(error.message||error));return;
+  }
+  for(const product of zapisane){
+    const id=String(product.id),stan=wejscie.find(p=>String(p.id)===id)?.stan;
+    if(Number.isInteger(stan)&&stan>=0)stanyProduktow[id]=stan;
+    podmienProduktAdminBezRenderu(id,product,[]);
+    if(!aktywne.some(p=>String(p.id)===id))produktyDodane.push(product);
   }
   const menuZImportu=dodajSciezkiKategoriiZImportuDoMenu(wejscie);
-  zaznaczoneProdukty.clear();zapiszStanProduktowPoOperacji();zbudujProdukty();odswiezMenu();
+  zaznaczoneProdukty.clear();
+  zapiszLS("artway_stany",stanyProduktow);
+  if(menuZImportu)await chmuraDodajMutacjePolUstawien({menuKategorii:ustawienia.menuKategorii||[],menuPokazNieprzypisane:true});
+  await chmuraZapiszUstawienia({flush:true});
+  if(typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
+  zbudujProdukty();odswiezMenu();
   ostatniRaportImportu={dodane,zaktualizowane,pominiete:d.bledy.length,tryb,plik:d.nazwa,menuZImportu};
   podgladImportuProduktow=null;
   loguj("info",`Import produktów: ${dodane} dodanych, ${zaktualizowane} zaktualizowanych, ${d.bledy.length} pominiętych, ${menuZImportu} dopisań do menu`);
   toast(`Import zakończony: +${dodane}, aktualizacje ${zaktualizowane}${menuZImportu?`, menu +${menuZImportu}`:""} ✅`);renderuj();
 }
 function cofnijOstatniImportProduktow(){
-  const k=wczytajLS("artway_ostatnia_kopia_importu",null);
-  if(!k){toast("Brak kopii ostatniego importu");return;}
-  if(!confirm(`Cofnąć import i przywrócić stan z ${new Date(k.data).toLocaleString("pl-PL")}?`))return;
-  produktyDodane=k.produktyDodane||[];produktyUkryte=k.produktyUkryte||[];produktyEdytowane=k.produktyEdytowane||{};
-  produktyDefinitywne=k.produktyDefinitywne||[];koszDodanych=k.koszDodanych||[];koszMeta=k.koszMeta||{};stanyProduktow=k.stanyProduktow||{};dostepnoscProduktow=k.dostepnoscProduktow||{};ustawienia=k.ustawienia||ustawienia;
-  zapiszStanProduktowPoOperacji();localStorage.removeItem("artway_ostatnia_kopia_importu");
-  podgladImportuProduktow=null;ostatniRaportImportu=null;zbudujProdukty();odswiezMenu();
-  loguj("info","Cofnięto ostatni import produktów");toast("Przywrócono stan sprzed importu ↩️");renderuj();
+  localStorage.removeItem("artway_ostatnia_kopia_importu");
+  toast("Cofanie przez lokalną kopię zostało wyłączone. Centralna kartoteka ma historię mutacji i kopię serwerową.");
 }
 function produktDoEksportu(p,administracyjny=false){
   const o={id:p.id,nazwa:p.nazwa,kategoria:p.kategoria,cena:+Number(p.cena).toFixed(2)};

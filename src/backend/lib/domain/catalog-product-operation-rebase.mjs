@@ -54,3 +54,93 @@ export function createCatalogProductOperationWriter({ mutateLatest, loadProducts
     return { ...result, ...rebase };
   };
 }
+
+/**
+ * Produkcyjny writer kartoteki. Każda operacja trafia bezpośrednio do jednego
+ * rekordu produktu w PostgreSQL. Nie tworzy już kopii w settings ani w
+ * localStorage. Zachowuje dotychczasowy kontrakt odpowiedzi, aby edytor cen,
+ * mapowanie i Agent mogły przejść na nowe źródło bez okresu dwóch zapisów.
+ */
+export function createCentralCatalogProductOperationWriter({ catalog } = {}) {
+  if (!catalog || typeof catalog.get !== 'function' || typeof catalog.patchProductFields !== 'function') {
+    throw new Error('Centralny writer operacji wymaga kanonicznej kartoteki produktów.');
+  }
+  return async function writeCentralOperations(operations = [], updatedAt = null) {
+    const grouped = new Map();
+    for (const operation of Array.isArray(operations) ? operations : []) {
+      const id = String(operation?.id ?? '').trim();
+      if (!id) continue;
+      const current = grouped.get(id) || {
+        id,
+        fields: {},
+        remove: new Set(),
+        expectedProduct: operation.expectedProduct,
+        operationCount: 0,
+      };
+      if (current.expectedProduct === undefined && operation.expectedProduct !== undefined) {
+        current.expectedProduct = operation.expectedProduct;
+      }
+      for (const field of Array.isArray(operation.remove) ? operation.remove : []) {
+        const name = String(field || '').trim();
+        if (!name) continue;
+        current.remove.add(name);
+        delete current.fields[name];
+      }
+      for (const [field, value] of Object.entries(
+        operation.fields && typeof operation.fields === 'object' ? operation.fields : {},
+      )) {
+        current.remove.delete(field);
+        current.fields[field] = value;
+      }
+      current.operationCount += 1;
+      grouped.set(id, current);
+    }
+    const updates = [...grouped.values()];
+    if (!updates.length) {
+      return {
+        modified: false, attempts: 0, changed: false,
+        appliedOperations: 0, skippedProductIds: [],
+      };
+    }
+    const skippedProductIds = [];
+    const publications = [];
+    let appliedOperations = 0;
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < updates.length) {
+        const index = nextIndex++;
+        const operation = updates[index];
+        const current = await catalog.get(operation.id, { admin: true });
+        if (!current || (operation.expectedProduct !== undefined && !sameValue(current, operation.expectedProduct))) {
+          skippedProductIds.push(operation.id);
+          continue;
+        }
+        const mutationId = String(
+          operation.fields?.lastAdminMutationId
+          || `product-operation:${operation.id}:${String(updatedAt || Date.now())}:${index}`,
+        ).slice(0, 200);
+        const result = await catalog.patchProductFields(operation.id, operation.fields, [...operation.remove], {
+          mutationId,
+          actor: operation.fields?.lastAdminMutationBy || 'server',
+          area: operation.fields?.lastAdminMutationArea || 'product',
+        });
+        if (!result?.updated) {
+          skippedProductIds.push(operation.id);
+          continue;
+        }
+        appliedOperations += operation.operationCount;
+        publications.push(result);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, updates.length) }, () => worker()));
+    return {
+      modified: appliedOperations > 0,
+      attempts: 1,
+      changed: appliedOperations > 0,
+      appliedOperations,
+      skippedProductIds,
+      publications,
+      updated_at: updatedAt || new Date().toISOString(),
+    };
+  };
+}

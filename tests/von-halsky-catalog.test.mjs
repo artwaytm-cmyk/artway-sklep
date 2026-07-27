@@ -354,7 +354,7 @@ test('harmonogram respektuje wyłączoną automatyzację ceny i stanu oraz zapis
 });
 
 test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny postęp pracy', async () => {
-  const records = new Map(), revisions = new Map(), progress = [];
+  const records = new Map(), revisions = new Map(), progress = [], products = new Map();
   const env = {
     INPOST_VON_HALSKY_API_BASE_URL: 'https://api.example.test',
     INPOST_VON_HALSKY_AUTH_URL: 'https://auth.example.test/token',
@@ -373,6 +373,7 @@ test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny 
     vonHalskyEditorialSyncPending: true, vonHalskyEditorialSyncRunId: 'run-17',
     contentEditorial: { channelStates: { vonHalsky: { status: 'ready', publicationStatus: 'queued' } } },
   };
+  products.set(product.id, structuredClone(product));
   const route = createVonHalskyRoute({
     respond: (body, status = 200) => ({ body, status }), isAdmin: () => true,
     readVersioned: async (key, fallback) => ({ value: structuredClone(records.get(key) ?? fallback), revision: revisions.get(key) || 0 }),
@@ -382,6 +383,12 @@ test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny 
       ? new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } })
       : new Response(JSON.stringify({ accepted: 1 }), { status: 202, headers: { 'content-type': 'application/json', 'x-request-id': 'vh-receipt-17' } }),
     loadCatalog: async () => [product],
+    saveProductFields: async ({ productId, fields = {}, remove = [] }) => {
+      const next = { ...(products.get(String(productId)) || { id: productId }), ...structuredClone(fields) };
+      for (const field of remove) delete next[field];
+      products.set(String(productId), next);
+      return { confirmed: true, product: structuredClone(next) };
+    },
     reportProgress: async (work) => progress.push(structuredClone(work)),
   });
   const request = new Request('https://artwaytm.pl/api?action=von-halsky-sync-catalog', {
@@ -390,7 +397,7 @@ test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny 
   const result = await route(request, new URL(request.url), 'von-halsky-sync-catalog');
   assert.equal(result.status, 200);
   assert.equal(result.body.sent, 1);
-  const saved = records.get('settings').data.artway_produkty_edytowane['P-17'];
+  const saved = products.get('P-17');
   assert.equal(saved.vonHalskyEditorialSyncState, 'synced');
   assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationStatus, 'confirmed');
   assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationReceipt, 'vh-receipt-17');

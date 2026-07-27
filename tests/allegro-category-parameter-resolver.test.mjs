@@ -4,6 +4,7 @@ import {
   allegroAutomaticCategoryParameters,
   allegroProductParameterCatalog,
   normalizeAllegroParameterName,
+  resolveAllegroCategoryParameter,
 } from '../src/backend/lib/domain/allegro-category-parameter-resolver.mjs';
 
 const dictionary = (id, name, values) => ({
@@ -62,8 +63,58 @@ test('zakres graczy 2-4 ustawia osobno minimum i maksimum', () => {
   ]);
 });
 
+test('liczbę elementów i materiał odczytuje z jednoznacznej nazwy puzzli', () => {
+  const product = { nazwa: 'Drewniane puzzle Galaxies – Jednorożec, 150 elementów' };
+  const parameters = [
+    { id: 'elements', name: 'Liczba elementów', required: true, options: { describesProduct: true }, dictionary: [] },
+    dictionary('material', 'Materiał', [['wood', 'Drewno'], ['cardboard', 'Karton']]),
+  ];
+  assert.deepEqual(allegroAutomaticCategoryParameters(product, parameters), [
+    { id: 'elements', values: ['150'] },
+    { id: 'material', valuesIds: ['wood'] },
+  ]);
+});
+
+test('wymagany parametr Nazwa korzysta z kanonicznej nazwy produktu', () => {
+  const result = resolveAllegroCategoryParameter(
+    { nazwa: 'Drewniane puzzle Buddy Dogs – 50 elementów' },
+    { id: 'name-1', name: 'Nazwa', required: true, options: { describesProduct: true } },
+  );
+  assert.deepEqual(result?.payload, { id: 'name-1', values: ['Drewniane puzzle Buddy Dogs – 50 elementów'] });
+});
+
 test('normalizuje polskie nazwy oraz camelCase do jednego klucza', () => {
   assert.equal(normalizeAllegroParameterName('LiczbaElementów'), 'liczba elementow');
   assert.equal(normalizeAllegroParameterName('Numer Referencyjny'), 'numer referencyjny');
 });
 
+test('wydawcę ustawia z kanonicznego producenta, a materiał odczytuje z pełnego opisu', () => {
+  const product = {
+    producent: 'Alexander',
+    opis: 'Tarcza została wykonana z solidnej tektury, a wskazówki z tworzywa.',
+    allegroParameterEvidence: {
+      language: { value: 'Polska', source: 'polskie źródło', confidence: 0.9 },
+      type: { value: 'gra edukacyjna', source: 'rodzaj produktu', confidence: 0.9 },
+    },
+  };
+  const parameters = [
+    dictionary('publisher', 'Wydawca', [['alexander', 'Alexander'], ['other', 'Inny']]),
+    dictionary('language', 'Wersja językowa gry', [['pl', 'Polska'], ['en', 'Angielska']]),
+    dictionary('type', 'Typ', [['educational', 'gra edukacyjna'], ['family', 'gra rodzinna']]),
+    dictionary('material', 'Materiał', [['cardboard', 'Tektura'], ['plastic', 'Tworzywo sztuczne']]),
+  ];
+  assert.deepEqual(allegroAutomaticCategoryParameters(product, parameters), [
+    { id: 'publisher', valuesIds: ['alexander'] },
+    { id: 'language', valuesIds: ['pl'] },
+    { id: 'type', valuesIds: ['educational'] },
+    { id: 'material', valuesIds: ['cardboard'] },
+  ]);
+});
+
+test('słownik Allegro dopasowuje jednoznaczny wariant znaczeniowy zamiast wymagać identycznej odmiany', () => {
+  const resolved = resolveAllegroCategoryParameter(
+    { allegroParameterEvidence: { type: { value: 'gra edukacyjna', source: 'nazwa i opis', confidence: 0.9 } } },
+    dictionary('type', 'Typ', [['educational', 'Edukacyjna'], ['family', 'Rodzinna']]),
+  );
+  assert.deepEqual(resolved?.payload, { id: 'type', valuesIds: ['educational'] });
+});

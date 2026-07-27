@@ -2,10 +2,85 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  centralAllegroPreparationCurrent,
+  centralAllegroPreparationFingerprint,
+  centralCatalogApplyAuthority,
   centralCatalogBuildRecords,
   centralCatalogMissingFields,
   centralCatalogQueryOptions,
+  createCentralProductCatalog,
 } from '../src/backend/lib/domain/central-product-catalog.mjs';
+
+test('przebudowa katalogu nie cofa pól zapisanych atomową mutacją serwera', () => {
+  const staleBrowserSnapshot = {
+    id: 17,
+    nazwa: 'Stara nazwa z przeglądarki',
+    cena: 20,
+    allegroCategoryId: 'stara-kategoria',
+    _catalog: { inventory: { stock: 2 } },
+  };
+  const currentServerRecord = {
+    data: {
+      id: 17,
+      nazwa: 'Nazwa potwierdzona przez Agenta',
+      cena: 24.9,
+      allegroCategoryId: '257813',
+      allegroAgentPreparationStatus: 'ready',
+      _catalog: { inventory: { stock: 8 } },
+    },
+    fields: ['nazwa', 'cena', 'allegroCategoryId', 'allegroAgentPreparationStatus'],
+  };
+  const merged = centralCatalogApplyAuthority(staleBrowserSnapshot, currentServerRecord);
+  assert.equal(merged.nazwa, 'Nazwa potwierdzona przez Agenta');
+  assert.equal(merged.cena, 24.9);
+  assert.equal(merged.allegroCategoryId, '257813');
+  assert.equal(merged.allegroAgentPreparationStatus, 'ready');
+  assert.equal(merged._catalog.inventory.stock, 2);
+});
+
+test('usunięcie pola pozostaje usunięte po przebudowie starszego snapshotu', () => {
+  const merged = centralCatalogApplyAuthority(
+    { id: 18, rabat: 15, nazwa: 'Produkt' },
+    { data: { id: 18, nazwa: 'Produkt' }, fields: ['rabat'] },
+  );
+  assert.equal(Object.prototype.hasOwnProperty.call(merged, 'rabat'), false);
+});
+
+test('lekka kartoteka zachowuje serwerowe potwierdzenie przygotowania po odświeżeniu', () => {
+  const prepared = {
+    id: 17, nazwa: 'Gra', cena: 20, producent: 'Alexander', marka: 'Alexander',
+    gtin: '5901234567890', ean: '5901234567890', kodProducenta: 'A-17',
+    zdjecie: 'https://example.test/a.jpg', opisKrotki: 'Opis krótki',
+    opis: 'Opis pełny', allegroDescription: 'Opis Allegro',
+    allegroCategoryId: '123', allegroAgentPreparationStatus: 'ready',
+    allegroAgentPreparationMissing: [], allegroAgentPreparationVersion: 4,
+  };
+  prepared.allegroAgentPreparationFingerprint = centralAllegroPreparationFingerprint(prepared);
+  const [record] = centralCatalogBuildRecords({ artway_produkty_katalog: [prepared] });
+  assert.equal(record.adminListData.allegroCategoryId, '123');
+  assert.equal(record.adminListData.allegroAgentPreparationCurrent, true);
+  assert.equal(record.adminListData._catalog.detailLevel, 'list');
+  const reordered = { ...prepared, sourceEvidence: { z: 1, a: 2 } };
+  const reorderedAgain = { ...prepared, sourceEvidence: { a: 2, z: 1 } };
+  assert.equal(centralAllegroPreparationFingerprint(reordered), centralAllegroPreparationFingerprint(reorderedAgain));
+  reordered.allegroAgentPreparationFingerprint = centralAllegroPreparationFingerprint(reordered);
+  reordered.opis = 'Treść zmieniona po przygotowaniu';
+  assert.equal(centralAllegroPreparationCurrent(reordered), false);
+});
+
+test('potwierdzony zapis v3 jest bezpiecznie widoczny do migracji na kanoniczny podpis v4', () => {
+  const product = {
+    allegroAgentPreparationStatus: 'ready',
+    allegroAgentPreparationMissing: [],
+    allegroAgentPreparationVersion: 3,
+    allegroAgentPreparationFingerprint: 'allegro-preparation-v3-deadbeef',
+    lastAdminMutationArea: 'allegro-preparation',
+    lastAdminMutationId: 'allegro-preparation:17:run',
+    lastAdminMutationFields: ['opis', 'allegroAgentPreparationFingerprint'],
+  };
+  assert.equal(centralAllegroPreparationCurrent(product), true);
+  assert.equal(centralAllegroPreparationCurrent({ ...product, lastAdminMutationArea: 'manual-editor' }), false);
+});
 
 test('centralna kartoteka scala produkt, magazyn, dostępność i Allegro pod jednym ID', () => {
   const data = {
@@ -48,6 +123,70 @@ test('kartoteka przechowuje kompletność, źródło i stan sprzedaży bez ujawn
   assert.ok(record.missingFields.includes('koszt') === false);
   assert.equal(record.publicData.cenaZakupu, undefined);
   assert.deepEqual(centralCatalogMissingFields({ nazwa: 'X', cena: 2 }).sort(), ['ean', 'kategoria', 'koszt', 'opis', 'producent', 'zdjecie', 'zrodlo'].sort());
+});
+
+test('pojedyncza cena aktualizuje centralną kartotekę bez pełnej synchronizacji produktów', async () => {
+  const calls = [], current = {
+    data: { id: '17', nazwa: 'Gra', cena: 20, cenaZakupu: 8, opisKrotki: 'Opis krótki', opis: 'Opis pełny', ean: '5901234567890', zdjecie: 'https://example.test/a.jpg', producent: 'Alexander', kategoria: 'Gry', sourceUrl: 'https://example.test/p', _catalog: { availability: { saleAvailable: true } } },
+    public_data: { id: '17', nazwa: 'Gra', cena: 20, dostepny: true, _catalog: { availability: { saleAvailable: true } } },
+  };
+  const client = {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (sql.startsWith('SELECT data')) return { rowCount: 1, rows: [current] };
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const pool = { query: async () => ({ rowCount: 0, rows: [] }), connect: async () => client };
+  const catalog = createCentralProductCatalog({ pool, namespace: 'test' });
+  const result = await catalog.patchProductFields('17', { cena: 24.9, cenaZakupu: 9.5 }, [], { sourceRevision: 'rev-price-2' });
+  assert.equal(result.updated, true);
+  const update = calls.find((entry) => entry.sql.startsWith('UPDATE artway_products SET'));
+  const adminData = JSON.parse(update.params[2]), publicData = JSON.parse(update.params[3]);
+  assert.equal(adminData.cena, 24.9);
+  assert.equal(adminData.cenaZakupu, 9.5);
+  assert.equal(publicData.cena, 24.9);
+  assert.equal(publicData.cenaZakupu, undefined);
+  assert.equal(update.params[16], 24.9);
+  assert.ok(calls.some((entry) => entry.sql.startsWith('UPDATE artway_product_catalog_meta')));
+});
+
+test('wynik publikacji Allegro aktualizuje dane i indeks kanału w centralnej kartotece', async () => {
+  const calls = [], current = {
+    data: {
+      id: '1000390', nazwa: 'Pamięć Farma - Multigra', cena: 22, producent: 'Multigra',
+      kategoria: 'Gry', opisKrotki: 'Gra pamięciowa.', opis: 'Pełny opis.', ean: '5904492130113',
+      zdjecie: 'https://example.test/a.jpg', sourceUrl: 'https://example.test/p',
+      _catalog: { channels: { store: { active: true }, allegro: { offerId: '', status: '' } } },
+    },
+    public_data: { id: '1000390', nazwa: 'Pamięć Farma - Multigra', cena: 22, dostepny: true, _catalog: { channels: { store: { active: true } } } },
+  };
+  const client = {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (sql.startsWith('SELECT data')) return { rowCount: 1, rows: [current] };
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const pool = { query: async () => ({ rowCount: 0, rows: [] }), connect: async () => client };
+  const catalog = createCentralProductCatalog({ pool, namespace: 'test' });
+  const result = await catalog.patchProductFields('1000390', {
+    allegroOfferId: '18793056852',
+    allegroStatus: 'ACTIVE',
+    allegroAgentPreparationStatus: 'published',
+    allegroAgentPreparationMissing: [],
+  }, [], { sourceRevision: 'rev-offer-1' });
+  assert.equal(result.updated, true);
+  const update = calls.find((entry) => entry.sql.startsWith('UPDATE artway_products SET'));
+  const adminData = JSON.parse(update.params[2]), publicData = JSON.parse(update.params[3]);
+  assert.equal(adminData.allegroOfferId, '18793056852');
+  assert.equal(adminData._catalog.channels.allegro.offerId, '18793056852');
+  assert.equal(adminData._catalog.channels.allegro.status, 'ACTIVE');
+  assert.equal(publicData._catalog.channels.allegro.offerId, '18793056852');
+  assert.equal(update.params[14], true);
+  assert.equal(update.params[15], 'ACTIVE');
 });
 
 test('zapytanie centralnego katalogu ogranicza stronę i dopuszcza tylko bezpieczne sortowania', () => {
@@ -97,20 +236,25 @@ test('Asortyment korzysta z paginacji serwerowej i zachowuje tryb awaryjny', asy
   assert.match(index, /chmura\("product-catalog-query"/);
   assert.match(index, /asortymentCentralnyCache/);
   assert.match(index, /asortymentCentralnyWylaczonyDo/);
+  assert.match(index, /ASORTYMENT_CACHE_MAX_MS=60\*60\*1000/);
+  assert.match(index, /ASORTYMENT_CACHE_MAX_PRODUKTOW=6000/);
+  assert.match(index, /asortymentCentralnyPobierz\(true,\{render:false\}\)/);
+  const fetchBlock = index.slice(index.indexOf('async function asortymentCentralnyPobierz'), index.indexOf('function asortymentCentralnyWidok'));
+  assert.doesNotMatch(fetchBlock, /zbudujProdukty\(\)|data\.stale.*renderuj/);
   assert.match(view, /Centralna kartoteka PostgreSQL/);
   assert.match(view, /centralData\?wszystkie:wszystkie\.slice/);
 });
 
 test('sklep publiczny używa tej samej centralnej paginacji i pobiera szczegół dopiero po wejściu', async () => {
-  const [cloud, storefront, route] = await Promise.all([
+  const [cloud, storefront, pull] = await Promise.all([
     readFile('src/frontend/03-cloud-sync.js', 'utf8'),
     readFile('src/frontend/06b-storefront-catalog.js', 'utf8'),
-    readFile('src/backend/lib/store-data-route.mjs', 'utf8'),
+    readFile('src/backend/lib/domain/store-data-pull.mjs', 'utf8'),
   ]);
   assert.match(cloud, /catalogMode:trybAdmina\?"legacy":"central"/);
   assert.match(cloud, /chmuraKatalogCentralnyPubliczny/);
   assert.match(storefront, /sklepKatalogCentralnyPobierz/);
   assert.match(storefront, /product-catalog-item/);
-  assert.match(route, /PUBLIC_CENTRAL_CATALOG_KEYS/);
-  assert.match(route, /catalog_central: centralCatalogMode/);
+  assert.match(pull, /PUBLIC_CENTRAL_CATALOG_KEYS/);
+  assert.match(pull, /catalog_central: centralCatalogMode/);
 });

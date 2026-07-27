@@ -12,8 +12,8 @@ export function createProductLinkImportPreparer({
   }
   return async function prepareProductLinkImport(target = '', options = {}) {
     const settingsRecord = await readSettings(), data = settingsRecord?.data && typeof settingsRecord.data === 'object' ? settingsRecord.data : {};
-    const central = centralProducts(data), deleted = asArray(data.artway_kosz_dodane);
-    const extraProducts = [...central.values(), ...deleted].filter((item) => item && typeof item === 'object');
+    const central = await centralProducts(data);
+    const extraProducts = [...central.values()].filter((item) => item && typeof item === 'object');
     const known = await catalog.findDuplicate({ sourceUrl: target, producentUrl: target }, { sourceUrl: target, extraProducts });
     if (known && options.updateExisting !== true) return { product: {
       sourceUrl: target,

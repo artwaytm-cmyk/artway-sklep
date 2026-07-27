@@ -1,9 +1,17 @@
 import { createStoreRepository } from './lib/core/store-repository.mjs';
+import { postgresPoolFor } from './lib/core/postgres-store-repository.mjs';
+import { createCentralProductCatalog } from './lib/domain/central-product-catalog.mjs';
 import { mergeCatalogProducts } from './lib/domain/catalog-quality.mjs';
 import { seoSlug } from './lib/domain/seo-catalog.mjs';
 
 const origin = 'https://artwaytm.pl';
 const repository = createStoreRepository({ name: 'artway-sklep' });
+const centralCatalog = createCentralProductCatalog({
+  pool: String(process.env.ARTWAY_STORE_DRIVER || '').trim().toLowerCase() === 'postgres' && process.env.DATABASE_URL
+    ? postgresPoolFor(process.env.DATABASE_URL)
+    : null,
+  namespace: 'artway-sklep',
+});
 const xml = (value) => String(value ?? '').replace(/[<>&'\"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
 const imageOf = (product = {}) => String(product.zdjecie || product.image || product.imageUrl || '').trim();
 
@@ -11,8 +19,12 @@ export default async () => {
   let settings = { data: {}, updated_at: null };
   try { settings = await repository.read('settings', settings); } catch (error) { /* pusta mapa nadal jest prawidłowa */ }
   const data = settings.data && typeof settings.data === 'object' ? settings.data : {};
+  const canonical = centralCatalog.available
+    ? [...(await centralCatalog.listDataMap({ includeTrash: false })).values()]
+    : [];
   const hidden = new Set([...(Array.isArray(data.artway_produkty_ukryte) ? data.artway_produkty_ukryte : []), ...(Array.isArray(data.artway_produkty_definitywne) ? data.artway_produkty_definitywne : []), ...(Array.isArray(data.artway_kosz_dodane) ? data.artway_kosz_dodane.map((p) => p?.id) : [])].map(String));
-  const products = mergeCatalogProducts(data).products.filter((p) => !hidden.has(String(p.id)) && Number(p.cena) > 0);
+  const products = (canonical.length ? canonical : mergeCatalogProducts(data).products)
+    .filter((p) => p?._catalog?.availability?.saleAvailable !== false && !hidden.has(String(p.id)) && Number(p.cena) > 0);
   const urls = [
     { loc: `${origin}/`, lastmod: settings.updated_at },
     { loc: `${origin}/promocje`, lastmod: settings.updated_at },

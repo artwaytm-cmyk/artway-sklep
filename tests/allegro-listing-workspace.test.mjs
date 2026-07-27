@@ -34,6 +34,46 @@ test("publikacja działa jednym kliknięciem, ale zachowuje kontrolę Agenta i b
   assert.match(actions,/zaznaczoneAllegroProduktyKatalogu\?\.delete/);
 });
 
+test("wskaźnik 100% wymaga aktualnego, serwerowo potwierdzonego przygotowania",async()=>{
+  const source=await read("src/frontend/11-allegro-operations.js");
+  const start=source.indexOf("function allegroBrakiProduktuDoWystawienia");
+  const end=source.indexOf("\nfunction allegroStanOfertyProduktu",start);
+  assert.ok(start>=0&&end>start);
+  const context={
+    result:null,
+    poprawnaNazwaProducenta:value=>!!String(value||"").trim(),
+    allegroPoprawnyGtin:()=>true,
+    allegroOfertaDlaProduktuSklepu:()=>null,
+    asortymentSygnaturaPrzygotowania:()=>"sig-current",
+  };
+  vm.runInNewContext(`${source.slice(start,end)}
+    const base={id:"17",nazwa:"Gra",cena:20,kodProducenta:"SKU-17",producent:"Multigra",zdjecie:"https://example.test/a.jpg",allegroCategoryId:"123"};
+    const unprepared=allegroBrakiProduktuDoWystawienia(base);
+    const stale=allegroBrakiProduktuDoWystawienia({...base,allegroAgentPreparationStatus:"ready",allegroAgentPreparationVersion:4,allegroAgentPreparationFingerprint:"old"});
+    const ready=allegroBrakiProduktuDoWystawienia({...base,allegroAgentPreparationStatus:"ready",allegroAgentPreparationVersion:4,allegroAgentPreparationFingerprint:"sig-current",allegroAgentPreparationMissing:[]});
+    const leanReady=allegroBrakiProduktuDoWystawienia({...base,allegroAgentPreparationStatus:"ready",allegroAgentPreparationVersion:3,allegroAgentPreparationFingerprint:"legacy",allegroAgentPreparationCurrent:true,allegroAgentPreparationMissing:[]});
+    const serverRejected=allegroBrakiProduktuDoWystawienia({...base,allegroAgentPreparationStatus:"ready",allegroAgentPreparationVersion:4,allegroAgentPreparationFingerprint:"sig-current",allegroAgentPreparationCurrent:false,allegroAgentPreparationMissing:[]});
+    const blocked=allegroBrakiProduktuDoWystawienia({...base,allegroAgentPreparationStatus:"needs_attention",allegroAgentPreparationVersion:4,allegroAgentPreparationFingerprint:"sig-current",allegroAgentPreparationMissing:["odpowiedzialny producent GPSR"]});
+    result={unprepared,stale,ready,leanReady,serverRejected,blocked};`,context);
+  assert.ok(context.result.unprepared.includes("aktualne przygotowanie Agenta Allegro"));
+  assert.ok(context.result.stale.includes("aktualne przygotowanie Agenta Allegro"));
+  assert.deepEqual(Array.from(context.result.ready),[]);
+  assert.deepEqual(Array.from(context.result.leanReady),[]);
+  assert.ok(context.result.serverRejected.includes("aktualne przygotowanie Agenta Allegro"));
+  assert.ok(context.result.blocked.includes("odpowiedzialny producent GPSR"));
+});
+
+test("partia przygotowania zapisuje produkty pojedynczo, a publikacja wymaga odczytu kontrolnego serwera",async()=>{
+  const actions=await read("src/frontend/12a-product-actions.js");
+  assert.match(actions,/await worker\(\)/);
+  assert.doesNotMatch(actions,/Promise\.all\(Array\.from\(\{length:Math\.min\(2,products\.length\)\},worker\)\)/);
+  assert.match(actions,/asortymentPobierzPelnyProdukt\(p\.id,\{force:true\}\)/);
+  assert.match(actions,/allegro_publication_readback_mismatch/);
+  assert.match(actions,/readbackConfirmed:true/);
+  const publicationBlock=actions.slice(actions.indexOf("async function asortymentPotwierdzOperacjeZewnetrzna"),actions.indexOf("function asortymentOperacjaZewnetrznaOpis"));
+  assert.doesNotMatch(publicationBlock,/chmuraZapiszUstawienia\(\{flush:true\}\)/);
+});
+
 test("centrum wystawiania skaluje katalog przez filtry, limit, paginację i eksport",async()=>{
   const source=(await read("src/frontend/12b-allegro-listing-workspace.js"))+(await read("src/frontend/12c-commerce-catalog-actions.js")),styles=(await read("src/styles/27-allegro-listing-workspace.css"))+(await read("src/styles/29-commerce-catalog-actions.css"));
   for(const marker of ["EAN","EXTERNAL_ID","kod producenta","Sortowanie","Na stronie","Wszystkie kategorie","Wszyscy producenci","Gotowość danych","Dokładny stan kolejki","Źródło produktu","Cena Allegro od","Cena Allegro do","Strona <b>"]){

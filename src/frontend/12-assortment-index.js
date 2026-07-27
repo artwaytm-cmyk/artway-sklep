@@ -4,6 +4,10 @@ let asortymentWynikiCache={index:null,signature:"",value:null};
 let asortymentCentralnyStan={status:"idle",signature:"",data:null,error:"",request:null};
 let asortymentCentralnyCache=new Map(),asortymentCentralnyWylaczonyDo=0;
 let asortymentCentralnyOstatni={signature:"",data:null,at:0};
+const ASORTYMENT_CACHE_SWIEZY_MS=10*60*1000;
+const ASORTYMENT_CACHE_MAX_MS=60*60*1000;
+const ASORTYMENT_CACHE_MAX_WPISOW=64;
+const ASORTYMENT_CACHE_MAX_PRODUKTOW=6000;
 
 function asortymentCentralnyParametry(){
   return {q:szukajProduktow,category:filtrProduktow,producer:filtrProducentaProduktow,status:filtrStatusuProduktow,source:filtrZrodlaProduktow,stock:filtrStanuProduktow,allegro:filtrAllegroProduktow,data:filtrDanychProduktow,sale:filtrSprzedazyProduktow,promotion:filtrPromocjiProduktow,link:filtrLinkuProduktow,priceMin:cenaOdAdminProduktow,priceMax:cenaDoAdminProduktow,allegroPriceMin:cenaAllegroOdAdminProduktow,allegroPriceMax:cenaAllegroDoAdminProduktow,sort:sortowanieAdminProduktow,page:stronaAdminProduktow,limit:produktyNaStronieAdmin};
@@ -11,29 +15,59 @@ function asortymentCentralnyParametry(){
 function asortymentCentralnyTrasaAktywna(){return ["/admin/asortyment","/admin/asortyment/produkty"].includes(trasa());}
 function asortymentCentralnySygnatura(){return JSON.stringify(asortymentCentralnyParametry());}
 function asortymentCentralnyWyczyscCache(){asortymentCentralnyCache.clear();asortymentCentralnyStan={status:"idle",signature:"",data:null,error:"",request:null};}
-async function asortymentCentralnyPobierz(force=false){
+function asortymentCentralnyCachePobierz(signature){
+  const cached=asortymentCentralnyCache.get(signature);if(!cached)return null;
+  if(Date.now()-cached.at>ASORTYMENT_CACHE_MAX_MS){asortymentCentralnyCache.delete(signature);return null;}
+  asortymentCentralnyCache.delete(signature);asortymentCentralnyCache.set(signature,cached);return cached;
+}
+function asortymentCentralnyCacheZapisz(signature,data,at=Date.now()){
+  asortymentCentralnyCache.delete(signature);asortymentCentralnyCache.set(signature,{at,data});
+  let products=0;for(const entry of asortymentCentralnyCache.values())products+=Array.isArray(entry?.data?.items)?entry.data.items.length:0;
+  while(asortymentCentralnyCache.size>ASORTYMENT_CACHE_MAX_WPISOW||products>ASORTYMENT_CACHE_MAX_PRODUKTOW){
+    const oldest=asortymentCentralnyCache.keys().next().value,entry=asortymentCentralnyCache.get(oldest);
+    products-=Array.isArray(entry?.data?.items)?entry.data.items.length:0;asortymentCentralnyCache.delete(oldest);
+  }
+}
+function asortymentCentralnyProduktPoId(id){
+  const key=String(id),find=data=>(data?.items||[]).find(item=>String(item?.id)===key)||null;
+  return find(asortymentCentralnyStan.data)||find(asortymentCentralnyOstatni.data)||[...asortymentCentralnyCache.values()].reverse().map(entry=>find(entry.data)).find(Boolean)||null;
+}
+function asortymentCentralnyPodmienProdukt(id,patch={},usun=[]){
+  const key=String(id),seen=new Set(),apply=data=>{
+    if(!data||seen.has(data))return;seen.add(data);
+    const item=(data.items||[]).find(product=>String(product?.id)===key);if(!item)return;
+    Object.assign(item,patch);for(const field of usun)delete item[field];
+  };
+  apply(asortymentCentralnyStan.data);apply(asortymentCentralnyOstatni.data);
+  for(const entry of asortymentCentralnyCache.values())apply(entry.data);
+}
+async function asortymentCentralnyPobierz(force=false,{render=true}={}){
   if(Date.now()<asortymentCentralnyWylaczonyDo)return null;
-  const signature=asortymentCentralnySygnatura(),cached=!force?asortymentCentralnyCache.get(signature):null;
-  if(cached&&Date.now()-cached.at<5*60*1000){asortymentCentralnyStan={status:"ready",signature,data:cached.data,error:"",request:null};return cached.data;}
+  const signature=asortymentCentralnySygnatura(),cached=!force?asortymentCentralnyCachePobierz(signature):null;
+  if(cached){asortymentCentralnyStan={status:"ready",signature,data:cached.data,error:"",request:null};return cached.data;}
   if(asortymentCentralnyStan.status==="loading"&&asortymentCentralnyStan.signature===signature&&asortymentCentralnyStan.request)return asortymentCentralnyStan.request;
+  const hadVisibleData=asortymentCentralnyStan.signature===signature&&!!asortymentCentralnyStan.data||asortymentCentralnyOstatni.signature===signature&&!!asortymentCentralnyOstatni.data;
   const params=asortymentCentralnyParametry(),request=chmura("product-catalog-query",{params,timeout:30000}).then(data=>{
     if(asortymentCentralnySygnatura()!==signature)return data;
-    if(Array.isArray(data.items)&&typeof zapamietajProduktyCentralne==="function"){zapamietajProduktyCentralne(data.items);zbudujProdukty();}
-    const at=Date.now();asortymentCentralnyCache.set(signature,{at,data});asortymentCentralnyOstatni={signature,data,at};while(asortymentCentralnyCache.size>16)asortymentCentralnyCache.delete(asortymentCentralnyCache.keys().next().value);
+    if(Array.isArray(data.items)&&typeof zapamietajProduktyCentralne==="function")zapamietajProduktyCentralne(data.items);
+    const at=Date.now();asortymentCentralnyCacheZapisz(signature,data,at);asortymentCentralnyOstatni={signature,data,at};
     asortymentCentralnyStan={status:"ready",signature,data,error:"",request:null};
-    if(data.stale)setTimeout(()=>{asortymentCentralnyCache.delete(signature);if(asortymentCentralnyTrasaAktywna())void asortymentCentralnyPobierz(true).then(()=>renderuj());},1200);
-    if(asortymentCentralnyTrasaAktywna())renderuj();return data;
+    if(render&&!hadVisibleData&&asortymentCentralnyTrasaAktywna())renderuj();return data;
   }).catch(error=>{
     if(asortymentCentralnySygnatura()!==signature)return null;
     asortymentCentralnyStan={status:"error",signature,data:null,error:String(error?.message||error),request:null};asortymentCentralnyWylaczonyDo=Date.now()+60*1000;
-    loguj("ostrzezenie",`Centralna kartoteka chwilowo niedostępna — użyto bezpiecznego widoku lokalnego: ${error?.message||error}`);if(asortymentCentralnyTrasaAktywna())renderuj();return null;
+    loguj("ostrzezenie",`Centralna kartoteka chwilowo niedostępna — użyto bezpiecznego widoku lokalnego: ${error?.message||error}`);if(render&&!hadVisibleData&&asortymentCentralnyTrasaAktywna())renderuj();return null;
   });
   asortymentCentralnyStan={status:"loading",signature,data:null,error:"",request};return request;
 }
 function asortymentCentralnyWidok(){
   if(Date.now()<asortymentCentralnyWylaczonyDo)return {fallback:true,error:asortymentCentralnyStan.error};
-  const signature=asortymentCentralnySygnatura(),cached=asortymentCentralnyCache.get(signature);
-  if(cached&&Date.now()-cached.at<5*60*1000)return {ready:true,data:cached.data};
+  const signature=asortymentCentralnySygnatura(),cached=asortymentCentralnyCachePobierz(signature);
+  if(cached){
+    const refreshing=Date.now()-cached.at>ASORTYMENT_CACHE_SWIEZY_MS;
+    if(refreshing&&(asortymentCentralnyStan.status!=="loading"||asortymentCentralnyStan.signature!==signature))setTimeout(()=>void asortymentCentralnyPobierz(true,{render:false}),0);
+    return {ready:true,data:cached.data,refreshing,staleAt:cached.at};
+  }
   if(asortymentCentralnyStan.status==="ready"&&asortymentCentralnyStan.signature===signature)return {ready:true,data:asortymentCentralnyStan.data};
   if(asortymentCentralnyStan.status!=="loading"||asortymentCentralnyStan.signature!==signature)setTimeout(()=>void asortymentCentralnyPobierz(),0);
   if(asortymentCentralnyOstatni.signature===signature&&asortymentCentralnyOstatni.data)return {ready:true,data:asortymentCentralnyOstatni.data,refreshing:true,staleAt:asortymentCentralnyOstatni.at};

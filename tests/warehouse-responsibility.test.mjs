@@ -34,9 +34,10 @@ test('magazyn ma osobną, zawężoną kolejkę lokalizacji aktywnych zamówień'
 
 test('backend publikuje osobne zadanie magazynu bez blokowania realizacji', () => {
   const backend = read('src/backend/lib/store-app.mjs');
+  const operationalCenter = read('src/backend/lib/domain/agent-operational-center.mjs');
   assert.match(backend, /classifyWarehousePosition/);
   assert.match(backend, /summarizeWarehousePositions/);
-  assert.match(backend, /warehouse_location/);
-  assert.match(backend, /Towar pozostaje zarezerwowany i nie blokuje realizacji zamówienia/);
-  assert.match(backend, /warehouseLocationTasks:/);
+  assert.match(operationalCenter, /warehouse_location/);
+  assert.match(operationalCenter, /Towar pozostaje zarezerwowany i nie blokuje realizacji zamówienia/);
+  assert.match(operationalCenter, /warehouseLocationTasks:/);
 });

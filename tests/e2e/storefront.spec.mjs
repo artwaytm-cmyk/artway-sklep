@@ -5,8 +5,11 @@ function observeRuntime(page) {
   const criticalRequestFailures = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('requestfailed', (request) => {
-    if (/\.(?:js|css)(?:\?|$)/i.test(request.url())) {
-      criticalRequestFailures.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText || 'błąd'}`);
+    const errorText = request.failure()?.errorText || 'błąd';
+    // Nawigacja po SPA świadomie anuluje moduły poprzedniej trasy. Chromium
+    // raportuje to jako ERR_ABORTED, mimo że nie jest to awaria zasobu.
+    if (/\.(?:js|css)(?:\?|$)/i.test(request.url()) && !/ERR_ABORTED/i.test(errorText)) {
+      criticalRequestFailures.push(`${request.method()} ${request.url()}: ${errorText}`);
     }
   });
   return () => {
@@ -17,6 +20,26 @@ function observeRuntime(page) {
 
 async function waitForCatalog(page) {
   await expect(page.locator('#grid .card').first()).toBeVisible({ timeout: 20_000 });
+}
+
+async function mockAdminSession(page) {
+  const user = { imie: 'Administrator', email: 'artwaytm@gmail.com', rola: 'admin', verified: true, adminIdleTimeoutMinutes: 60 };
+  await page.route('**/api/store**', async (route) => {
+    const action = new URL(route.request().url()).searchParams.get('action');
+    if (['login', 'session-refresh', 'account-session'].includes(action)) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, authenticated: true, user }) });
+      return;
+    }
+    if (action === 'agent-runtime-status') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, runtime: { running: false, queue: [], history: [] } }) });
+      return;
+    }
+    if (action === 'agent-specialists-status') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, specialists: [], decisions: [], history: [] }) });
+      return;
+    }
+    await route.fallback();
+  });
 }
 
 test('@public sklep ładuje katalog i wyszukuje prawdziwym zdarzeniem użytkownika', async ({ page }) => {
@@ -66,7 +89,9 @@ test('@public układ mobilny nie tworzy poziomego przewijania', async ({ page })
 
 test('lokalny administrator loguje się i przechodzi między modułami panelu', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
+  await mockAdminSession(page);
   await page.goto('/#/logowanie');
+  await page.waitForFunction(() => chmuraStan.sprawdzono === true);
   await expect(page.locator('#loginForm')).toBeVisible();
   await page.locator('#loginForm [name="email"]').fill('admin');
   await page.locator('#loginForm [name="haslo"]').fill('admin');
@@ -109,6 +134,7 @@ test('nowe konto klienta działa po rejestracji i ponownym logowaniu na czystym 
   });
 
   await page.goto('/#/rejestracja');
+  await page.waitForFunction(() => chmuraStan.sprawdzono === true);
   await page.locator('form [name="imie"]').fill(user.imie);
   await page.locator('form [name="email"]').fill(user.email);
   await page.locator('form [name="haslo"]').fill('BezpieczneHaslo-2026!');
@@ -132,7 +158,9 @@ test('nowe konto klienta działa po rejestracji i ponownym logowaniu na czystym 
 });
 
 async function loginAdmin(page) {
+  await mockAdminSession(page);
   await page.goto('/#/logowanie');
+  await page.waitForFunction(() => chmuraStan.sprawdzono === true);
   await page.locator('#loginForm [name="email"]').fill('admin');
   await page.locator('#loginForm [name="haslo"]').fill('admin');
   await page.getByRole('button', { name: 'Zaloguj się' }).click();

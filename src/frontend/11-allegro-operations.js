@@ -251,7 +251,22 @@ function allegroBrakiProduktuDoWystawienia(p){
   if(!poprawnaNazwaProducenta(p.producent||p.marka)) braki.push("prawidłowa nazwa producenta");
   if(!(p.zdjecie||(p.zdjecia||[]).length)) braki.push("zdjęcie");
   if(!p.allegroCategoryId) braki.push("ID kategorii Allegro");
-  return braki;
+  const agentStatus=String(p.allegroAgentPreparationStatus||"").toLowerCase();
+  const agentMissing=Array.isArray(p.allegroAgentPreparationMissing)?p.allegroAgentPreparationMissing.map(String).filter(Boolean):[];
+  const hasOffer=!!String(p.allegroOfferId||"").trim()||(typeof allegroOfertaDlaProduktuSklepu==="function"&&!!allegroOfertaDlaProduktuSklepu(p));
+  if(!hasOffer){
+    const currentFingerprint=typeof asortymentSygnaturaPrzygotowania==="function"?asortymentSygnaturaPrzygotowania(p):"";
+    const serverConfirmed=p.allegroAgentPreparationCurrent;
+    const confirmedPreparation=["ready","published"].includes(agentStatus)
+      &&(serverConfirmed===true||(serverConfirmed===undefined
+        &&Number(p.allegroAgentPreparationVersion)>=4
+        &&!!String(p.allegroAgentPreparationFingerprint||"")
+        &&String(p.allegroAgentPreparationFingerprint)===currentFingerprint))
+      &&agentMissing.length===0;
+    if(agentMissing.length)braki.push(...agentMissing);
+    if(!confirmedPreparation)braki.push(agentStatus==="failed"?"ponowne przygotowanie po błędzie":"aktualne przygotowanie Agenta Allegro");
+  }
+  return [...new Set(braki)];
 }
 function allegroStanOfertyProduktu(){
   const n=Number(allegroStan.offerSettings?.defaultStock??5);
@@ -285,13 +300,14 @@ function allegroProceduraAgentaOfertHTML(){
 async function allegroAgentUzupelnijZadanieOferty(taskId){
   const task=(agentAIAllegroZadania||[]).find(x=>String(x.id)===String(taskId));if(!task){toast("Nie znaleziono zadania Agenta AI");return;}
   const p=pobierzProduktAdmin(task.productId);if(!p){toast("Produkt z zadania nie istnieje");return;}
-  const s=task.suggestions||{},next={...(produktyEdytowane[p.id]||{})};
+  const s=task.suggestions||{},next={};
   for(const key of ["producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","allegroCategoryId","allegroProductId"]){
     if(s[key]&&!p[key])next[key]=String(s[key]);
   }
   if(Array.isArray(s.zdjecia)&&s.zdjecia.length&&!(p.zdjecia||[]).length)next.zdjecia=s.zdjecia.slice(0,15);
   if(Array.isArray(s.allegroParameters)&&s.allegroParameters.length&&!Array.isArray(p.allegroParameters))next.allegroParameters=s.allegroParameters;
-  produktyEdytowane[p.id]=next;zapiszLS("artway_produkty_edytowane",produktyEdytowane);zbudujProdukty();
+  if(Object.keys(next).length)await chmuraZapiszProduktyCentralnie([{productId:p.id,fields:next}],"agent-allegro-task");
+  zbudujProdukty();
   toast("Agent uzupełnił dostępne dane i ponownie sprawdza szkic…");
   await allegroPrzygotujSzkicProduktZListy(p.id);
 }
@@ -304,12 +320,12 @@ async function allegroPrzygotujSzkicProduktZListy(id){
   if(!p){ toast("Nie znaleziono produktu"); return; }
   try{
     const d=await chmura("allegro-offer-draft",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p)}},timeout:60000});
-    allegroZapiszAutoUzupelnienia(p,d);
+    await allegroZapiszAutoUzupelnienia(p,d);
     const cat=d.categorySuggestion?.selected;
-    const saved=cat?.id?allegroZapiszKategorieProduktu(p.id,cat.id):false;
+    const saved=cat?.id?await allegroZapiszKategorieProduktu(p.id,cat.id):false;
     toast(d.ready?`🟠 Szkic Allegro gotowy technicznie${cat?` — kategoria: ${cat.name}`:""}`:`🟠 Braki: ${((d.missing||[]).join(", ")||"brak")}${cat?` • dobrano kategorię: ${cat.name}`:""}`);
     if(saved) renderuj();
-  }catch(e){ allegroZapiszAutoUzupelnienia(p,e);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Szkic Allegro: "+(e.message||e)); }
+  }catch(e){ await allegroZapiszAutoUzupelnienia(p,e).catch(()=>false);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Szkic Allegro: "+(e.message||e)); }
 }
 async function allegroWystawProduktZListy(id){
   const p=pobierzProduktAdmin(id);
@@ -320,19 +336,18 @@ async function allegroWystawProduktZListy(id){
     const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p),publishNow:publicationAction==="activate",publicationAction}},timeout:120000});
     allegroOstatniBladWystawienia=null;
     allegroZapiszWynikOperacji(p,d);
-    allegroZapiszAutoUzupelnienia(p,d);
+    await allegroZapiszAutoUzupelnienia(p,d);
     toast(d.operation?.completed===false?`🟠 Oferta ${d.offer?.id||""} jest jeszcze przetwarzana przez Allegro`:d.mode==="updated"?`🟠 Zaktualizowano ofertę ${d.offer?.id||""} bez tworzenia duplikatu`:`🟠 Utworzono nową ofertę ${d.offer?.id||""}`);
     if(d.offer?.id){
       const selectedCat=d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||d.categorySuggestion?.selected?.id||p.allegroCategoryId||"";
-      produktyEdytowane[p.id]={...(produktyEdytowane[p.id]||{}),allegroOfferId:String(d.offer.id),...(selectedCat?{allegroCategoryId:String(selectedCat)}:{}),...(d.catalogMatch?.selected?.id?{allegroProductId:String(d.catalogMatch.selected.id)}:{})};
-      zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+      await chmuraZapiszProduktyCentralnie([{productId:p.id,fields:{allegroOfferId:String(d.offer.id),...(selectedCat?{allegroCategoryId:String(selectedCat)}:{}),...(d.catalogMatch?.selected?.id?{allegroProductId:String(d.catalogMatch.selected.id)}:{})}}],"allegro-publication");
       allegroZastosujWynikWystawienia(p,d);
       await chmuraWczytajStan().catch(()=>{});
       await allegroWczytajDane(true).catch(()=>{});
       zbudujProdukty();
       renderuj();
     }
-  }catch(e){ allegroOstatniBladWystawienia=e;allegroZapiszAutoUzupelnienia(p,e);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Wystawianie Allegro: "+(e.message||e)+" • zadanie przekazano Agentowi AI");renderuj(); }
+  }catch(e){ allegroOstatniBladWystawienia=e;await allegroZapiszAutoUzupelnienia(p,e).catch(()=>false);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Wystawianie Allegro: "+(e.message||e)+" • zadanie przekazano Agentowi AI");renderuj(); }
 }
 async function allegroAktywujProduktZListy(id){
   const p=pobierzProduktAdmin(id);if(!p){toast("Nie znaleziono produktu");return;}
@@ -342,20 +357,19 @@ async function allegroAktywujProduktZListy(id){
     toast(`Aktywuję ofertę ${p.nazwa} ze stanem Allegro ${qty} szt.…`);
     const product={...p,allegroStock:qty};
     const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product,options:{stock:qty,publicationAction:"activate",publishNow:true}},timeout:120000});
-    allegroOstatniBladWystawienia=null;allegroZapiszWynikOperacji(product,d);allegroZapiszAutoUzupelnienia(product,d);allegroZastosujWynikWystawienia(product,d);
+    allegroOstatniBladWystawienia=null;allegroZapiszWynikOperacji(product,d);await allegroZapiszAutoUzupelnienia(product,d);allegroZastosujWynikWystawienia(product,d);
     const categoryId=d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||p.allegroCategoryId||"";
     const productId=d.autoFilled?.allegroProductId||d.catalogMatch?.selected?.id||p.allegroProductId||"";
-    produktyEdytowane[p.id]={...(produktyEdytowane[p.id]||{}),allegroStock:qty,allegroOfferId:String(d.offer?.id||p.allegroOfferId||""),...(categoryId?{allegroCategoryId:String(categoryId)}:{}),...(productId?{allegroProductId:String(productId)}:{})};
-    zapiszLS("artway_produkty_edytowane",produktyEdytowane);
+    await chmuraZapiszProduktyCentralnie([{productId:p.id,fields:{allegroStock:qty,allegroOfferId:String(d.offer?.id||p.allegroOfferId||""),...(categoryId?{allegroCategoryId:String(categoryId)}:{}),...(productId?{allegroProductId:String(productId)}:{})}}],"allegro-activation");
     await chmuraWczytajStan().catch(()=>{});await allegroWczytajDane(true).catch(()=>{});zbudujProdukty();
     toast(`✅ Oferta ${d.offer?.id||""} aktywna • stan Allegro ${qty} szt. • magazyn bez zmian`);renderuj();
-  }catch(e){allegroOstatniBladWystawienia=e;allegroZapiszAutoUzupelnienia(p,e);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Aktywacja Allegro: "+(e.message||e));renderuj();}
+  }catch(e){allegroOstatniBladWystawienia=e;await allegroZapiszAutoUzupelnienia(p,e).catch(()=>false);if(e.agentTask)await chmuraWczytajStan().catch(()=>{});toast("⚠️ Aktywacja Allegro: "+(e.message||e));renderuj();}
 }
 async function allegroAktualizujZaznaczoneOfertyDanymiSklepu(){
   const ids=[...zaznaczoneAllegroOferty].slice(0,100),produkty=[...new Map(ids.map(id=>allegroProduktDlaOferty(id)).filter(Boolean).map(p=>[String(p.id),p])).values()];
   if(!produkty.length){toast("Zaznacz powiązane oferty, które mają zostać zaktualizowane danymi sklepu");return;}
   let ok=0,bledy=0;toast(`Aktualizuję ${produkty.length} ofert nowszymi danymi sklepu…`);
-  for(const p of produkty){try{const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p),publicationAction:"keep"}},timeout:120000});allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);ok++;}catch(e){bledy++;allegroOstatniBladWystawienia=e;}}
+  for(const p of produkty){try{const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p),publicationAction:"keep"}},timeout:120000});await allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);ok++;}catch(e){bledy++;allegroOstatniBladWystawienia=e;}}
   zaznaczoneAllegroOferty.clear();await chmuraWczytajStan().catch(()=>{});await allegroWczytajDane(true).catch(()=>{});
   toast(`Synchronizacja ofert: zaktualizowano ${ok}${bledy?` • do Agenta AI / błędy: ${bledy}`:""}`);renderuj();
 }

@@ -92,6 +92,11 @@ function safeActivity(value = {}) {
     title: clean(value?.title, 140),
     detail: clean(value?.detail, 260),
     source: clean(value?.source, 100),
+    productId: clean(value?.productId, 140),
+    productName: clean(value?.productName, 220),
+    phase: clean(value?.phase, 80),
+    fields: [...new Set((Array.isArray(value?.fields) ? value.fields : [])
+      .map((item) => clean(item, 80)).filter(Boolean))].slice(0, 30),
   };
 }
 
@@ -324,21 +329,34 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
           .sort((left, right) => String(right.updatedAt || right.startedAt).localeCompare(String(left.updatedAt || left.startedAt)))
           .slice(0, MAX_WORK_ITEMS);
         const finished = ['confirmed', 'decision_required', 'skipped'].includes(merged.status);
-        const noteworthy = merged.status !== 'running';
+        const workActivity = {
+          id: `${merged.id}:${merged.phase || merged.status}:${merged.updatedAt || timestamp}`,
+          at: merged.updatedAt || timestamp,
+          type: 'work',
+          status: merged.status === 'confirmed'
+            ? 'success'
+            : merged.status === 'failed'
+              ? 'error'
+              : ['attention', 'decision_required'].includes(merged.status)
+                ? 'warning'
+                : merged.status === 'running'
+                  ? 'running'
+                  : 'info',
+          title: `${merged.productName || 'Zadanie'} • ${merged.phase || merged.action || 'wykonywanie'}`,
+          detail: merged.error || merged.message || (finished ? 'Operacja zakończona i potwierdzona.' : 'Trwa wykonywanie etapu.'),
+          source: clean(input.source, 100) || 'agent-work',
+          productId: merged.productId,
+          productName: merged.productName,
+          phase: merged.phase,
+          fields: merged.fields,
+        };
         return {
           ...record,
           currentWork: merged.status === 'running'
             ? merged
             : record.currentWork?.id === merged.id ? null : record.currentWork,
           workItems,
-          activity: noteworthy ? activity(record, {
-            at: merged.updatedAt || timestamp,
-            type: 'work',
-            status: merged.status === 'confirmed' ? 'success' : merged.status === 'failed' ? 'error' : merged.status === 'pending' ? 'info' : 'warning',
-            title: `${merged.productName || 'Zadanie'} • ${merged.channel === 'vonHalsky' ? 'Von Halsky' : merged.channel === 'allegro' ? 'Allegro' : merged.channel === 'store' ? 'Sklep' : 'System'}`,
-            detail: merged.error || merged.message || (finished ? 'Operacja zakończona i potwierdzona.' : 'Operacja oczekuje na kolejny etap.'),
-            source: clean(input.source, 100) || 'agent-work',
-          }) : record.activity,
+          activity: activity(record, workActivity),
         };
       }
       throw Object.assign(new Error('Nieobsługiwane zdarzenie Agenta.'), { status: 422, code: 'agent_runtime_event_invalid' });

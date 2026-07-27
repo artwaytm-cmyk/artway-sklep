@@ -1,24 +1,18 @@
 import { isValidAccountEmail } from './core/account-validation.mjs';
 import { preserveManualProductPrices } from './domain/catalog-product-price-merge.mjs';
-import { createCatalogProductFieldRoute } from './domain/catalog-product-field-save.mjs';
+import { createCatalogProductAdminRoute } from './domain/catalog-product-admin-route.mjs';
 import { createSettingsFieldMutationHandler } from './domain/settings-field-mutation.mjs';
 import { createStoreDataAccountHelpers } from './domain/store-data-account-helpers.mjs';
+import { createSettingsDomainWriter } from './domain/settings-domain-write.mjs';
+import { createStoreDataPullHandler } from './domain/store-data-pull.mjs';
 
 export function createStoreDataRoute(deps = {}) {
-  const PUBLIC_CENTRAL_CATALOG_KEYS = ['artway_produkty_edytowane', 'artway_produkty_dodane', 'artway_produkty_katalog', 'artway_produkty_ukryte', 'artway_produkty_definitywne', 'artway_stany', 'artway_dostepnosc', 'artway_magazyn_produkty'];
-  const PUBLIC_CENTRAL_ADMIN_KEYS = [
-    'artway_ruchy_magazynowe', 'artway_magazyn_niedobory_wydan', 'artway_magazyn_lokalizacje', 'artway_magazyn_lokalizacje_usuniete',
-    'artway_dokumenty_magazynowe', 'artway_dokumenty_magazynowe_usuniete', 'artway_dokumenty_magazynowe_seq',
-    'artway_faktury_szkice', 'artway_producenci', 'artway_agent_ai_zlecenia', 'artway_agent_ai_plan_cykl',
-    'artway_agent_ai_pamiec', 'artway_agent_ai_historia', 'artway_agent_ai_linki_producentow',
-    'artway_agent_ai_allegro_zadania', 'artway_seo_historia', 'artway_kosz_dodane', 'artway_kosz_meta',
-  ];
-  const PUBLIC_CENTRAL_EXCLUDED_KEYS = [...PUBLIC_CENTRAL_CATALOG_KEYS, ...PUBLIC_CENTRAL_ADMIN_KEYS];
   const {
     odpowiedz, czyAdmin, czytaj, productLinkImport, ustawieniaPubliczneBezDanychPrywatnych,
     czytajUsunieteZamowienia, filtrujNieusunieteZamowienia, oczyscUstawienia, tekst,
     czytajWersjonowane, preserveSupplierPlanOnGenericSettings, LIMIT_USTAWIEN, zapiszJesliWersja,
     ograniczRuch, bezpieczneZamowienieKlienta, requestSession, mapaUsunietych,
+    loadCheckoutProducts = null,
     storeOrderSupplierReconciliation, zwiekszLicznikKoduRabatowego, wyslijEmaileNowegoZamowienia,
     emailKonfiguracja, dopiszHistorieEmaila, createOrderAccess, bezpiecznaOpinia, zapisz,
     normalizujZamowienie, LIMIT_USUNIETYCH_ZAMOWIEN, LIMIT_ZAMOWIEN, normalizujKlienta,
@@ -34,8 +28,25 @@ export function createStoreDataRoute(deps = {}) {
     clearAccountSessionHeaders = () => ({}),
     zapiszOperacjeProduktow = null,
     zapiszPolaProduktuCentralnie = null,
+    publikujPolaProduktuCentralnie = null,
+    createCatalogProduct = null,
+    readCatalogProduct = null,
+    setCatalogProductStatus = null,
+    purgeCatalogProduct = null,
   } = deps;
-  const catalogProductFieldRoute = createCatalogProductFieldRoute({ respond: odpowiedz, isAdmin: czyAdmin, text: tekst, sessionOf: requestSession, saveFields: zapiszPolaProduktuCentralnie });
+  const catalogProductAdminRoute = createCatalogProductAdminRoute({
+    respond: odpowiedz,
+    isAdmin: czyAdmin,
+    text: tekst,
+    sessionOf: requestSession,
+    saveOperations: zapiszOperacjeProduktow,
+    saveFields: zapiszPolaProduktuCentralnie,
+    publishFields: publikujPolaProduktuCentralnie,
+    createProduct: createCatalogProduct,
+    readProduct: readCatalogProduct,
+    setProductStatus: setCatalogProductStatus,
+    purgeProduct: purgeCatalogProduct,
+  });
   const settingsFieldMutationRoute = createSettingsFieldMutationHandler({
     isAdmin: czyAdmin,
     readVersioned: czytajWersjonowane,
@@ -47,47 +58,33 @@ export function createStoreDataRoute(deps = {}) {
     settingsLimit: LIMIT_USTAWIEN,
     text: tekst,
   });
+  const settingsDomainWriter = createSettingsDomainWriter({
+    readVersioned: czytajWersjonowane,
+    writeIfVersion: zapiszJesliWersja,
+    sanitizeSettings: oczyscUstawienia,
+    respond: odpowiedz,
+  });
   const { accessAudit, adminUserRecord, beginAdminMfa } = createStoreDataAccountHelpers({
     read: czytaj, save: zapisz, text: tekst, publicUser, respond: odpowiedz,
     decryptMfaSecret, createMfaEnrollment, createAdminMfaChallenge, mfaProvisioningUri,
   });
+  const storeDataPull = createStoreDataPullHandler({
+    respond: odpowiedz,
+    isAdmin: czyAdmin,
+    read: czytaj,
+    productLinkImport,
+    publicSettings: ustawieniaPubliczneBezDanychPrywatnych,
+    readDeletedOrders: czytajUsunieteZamowienia,
+    filterOrders: filtrujNieusunieteZamowienia,
+    text: tekst,
+    readBaseSettings: czytajUstawieniaBazowe,
+    readSettingsDelta: czytajUstawieniaPrzyrostowo,
+    adminUserRecord,
+  });
   return async function storeDataRoute(req, url, action) {
     // ─── POBRANIE USTAWIEŃ (publiczne) + zamówień/klientów (admin) ───
     if (action === 'pull' || action === 'store-data') {
-      const admin = czyAdmin(req, url);
-      const centralCatalogMode = !admin && url.searchParams.get('catalogMode') === 'central';
-      // Samo przechodzenie między kartami nie uruchamia ciężkich zapisów.
-      const [baseSettings, importedPayload] = await Promise.all([czytajUstawieniaBazowe({ data: {}, rev: 0, updated_at: null }), productLinkImport.payload({ requestedRev: url.searchParams.get('catalogRev'), admin })]);
-      const rev = Number(baseSettings.rev || 0), requestedSettingsRev = Number(url.searchParams.get('settingsRev'));
-      const settingsUnchanged = Number.isSafeInteger(requestedSettingsRev) && requestedSettingsRev > 0 && requestedSettingsRev === rev;
-      // Nie przesyłamy ponownie ciężkiego katalogu ani niezmienionych ustawień.
-      let domainVersions = {}, changedDomainKeys = [];
-      let s = baseSettings;
-      if (!settingsUnchanged) {
-        let requestedDomainVersions = {};
-        try {
-          const parsed = JSON.parse(String(url.searchParams.get('settingsDomains') || '{}'));
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) requestedDomainVersions = Object.fromEntries(Object.entries(parsed).slice(0, 100).map(([key, value]) => [tekst(key, 100), Math.max(0, Number(value) || 0)]));
-        } catch (error) { requestedDomainVersions = {}; }
-        if (typeof czytajUstawieniaPrzyrostowo === 'function') {
-          const delta = await czytajUstawieniaPrzyrostowo({ data: {}, rev: 0, updated_at: null }, { versions: requestedDomainVersions, base: baseSettings, excludeKeys: centralCatalogMode ? PUBLIC_CENTRAL_EXCLUDED_KEYS : [] });
-          s = delta.value || baseSettings; domainVersions = delta.domainVersions || {}; changedDomainKeys = delta.changedKeys || [];
-        } else s = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
-      }
-      const sourceSettings = admin ? (s.data || {}) : ustawieniaPubliczneBezDanychPrywatnych(s.data || {});
-      const browserSettings = Object.fromEntries(Object.entries(sourceSettings).filter(([key]) => key !== 'artway_produkty_katalog'));
-      const visibleDomainVersions = Object.fromEntries(Object.entries(domainVersions).filter(([key]) => Object.prototype.hasOwnProperty.call(sourceSettings, key)));
-      const res = { ok: true, admin, catalog_central: centralCatalogMode, ...(settingsUnchanged ? { settings_unchanged: true } : { settings: browserSettings, settings_domain_versions: visibleDomainVersions, settings_changed_keys: changedDomainKeys.filter((key) => Object.prototype.hasOwnProperty.call(sourceSettings, key)) }), rev, updated_at: s.updated_at || null };
-      Object.assign(res, importedPayload);
-      if (admin && url.searchParams.get('adminData') !== '0') {
-        const o = await czytaj('orders', { items: [] });
-        const u = await czytaj('users', { items: [] });
-        const d = await czytajUsunieteZamowienia();
-        res.deleted_orders = d;
-        res.orders = filtrujNieusunieteZamowienia(o.items || [], d);
-        res.users = (Array.isArray(u.items) ? u.items : []).map(adminUserRecord);
-      }
-      return odpowiedz(res);
+      return storeDataPull(req, url);
     }
 
     // Lekka kolejka zamówień dla panelu. Nie pobiera katalogu produktów ani
@@ -122,33 +119,8 @@ export function createStoreDataRoute(deps = {}) {
       return odpowiedz({ ok: true, users, count: users.length, usersVersion, updated_at: versioned.value?.updated_at || null });
     }
 
-    if (action === 'catalog-product-price-update') {
-      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      if (typeof zapiszOperacjeProduktow !== 'function') return odpowiedz({ ok: false, error: 'Atomowy zapis ceny nie jest dostępny.' }, 503);
-      const body = await req.json().catch(() => ({})), productId = tekst(body.productId, 100), channel = tekst(body.channel, 30), clear = body.clear === true;
-      const config = {
-        store: { field: 'cena', updatedAt: 'cenaZaktualizowanoAt', manual: 'cenaManualna', source: 'cenaZrodlo', clear: false },
-        allegro: { field: 'cenaAllegro', updatedAt: 'cenaAllegroZaktualizowanoAt', manual: 'cenaAllegroManualna', source: 'cenaAllegroZrodlo', clear: true },
-        vonHalsky: { field: 'cenaVonHalsky', updatedAt: 'cenaVonHalskyZaktualizowanoAt', manual: 'cenaVonHalskyManualna', source: 'cenaVonHalskyZrodlo', clear: true },
-        purchase: { field: 'cenaZakupu', updatedAt: 'cenaZakupuZaktualizowanoAt', manual: 'cenaZakupuPrywatna', source: 'cenaZakupuZrodlo', clear: true },
-      }[channel];
-      if (!productId || !config || (clear && !config.clear)) return odpowiedz({ ok: false, error: 'Nieprawidłowy produkt, kanał albo sposób zapisu ceny.' }, 422);
-      const value = Number(String(body.value ?? '').replace(',', '.'));
-      if (!clear && (!Number.isFinite(value) || value < (channel === 'purchase' ? 0 : 0.01))) return odpowiedz({ ok: false, error: 'Nieprawidłowa wartość ceny.' }, 422);
-      const updatedAt = new Date().toISOString(), actor = tekst(requestSession(req)?.email || 'administrator', 200);
-      const fields = { [config.updatedAt]: updatedAt, [config.manual]: !clear, [config.source]: clear ? 'dziedziczenie po kanale nadrzędnym' : `ręczna edycja administratora: ${actor}`, ...(clear ? {} : { [config.field]: +value.toFixed(2) }) };
-      if (channel === 'purchase' && !clear) Object.assign(fields, { cenaZakupuDopasowanie: 'ręcznie' });
-      const purchaseInvoiceFields = ['cenaZakupuNetto', 'cenaZakupuVat', 'cenaZakupuWaluta', 'cenaZakupuDokument', 'cenaZakupuKsef', 'cenaZakupuDostawca', 'cenaZakupuDataDokumentu'];
-      const remove = clear ? [config.field, ...(channel === 'purchase' ? [...purchaseInvoiceFields, 'cenaZakupuDopasowanie'] : [])] : (channel === 'purchase' ? purchaseInvoiceFields : []);
-      const saved = await zapiszOperacjeProduktow([{ id: productId, fields, remove }], updatedAt);
-      if (saved.skippedProductIds?.includes(productId) || (!saved.modified && !saved.appliedOperations)) return odpowiedz({ ok: false, error: 'Produkt nie istnieje w centralnym katalogu albo nie można go bezpiecznie zaktualizować.' }, 404);
-      return odpowiedz({ ok: true, productId, channel, field: config.field, value: clear ? null : +value.toFixed(2), clear, fields, remove, rev: saved.value?.rev, updated_at: updatedAt });
-    }
-
-    if (action === 'catalog-product-fields-update') {
-      return catalogProductFieldRoute(req, url);
-    }
+    const catalogResponse = await catalogProductAdminRoute(req, url, action);
+    if (catalogResponse) return catalogResponse;
 
     if (action === 'settings-field-mutation') {
       return settingsFieldMutationRoute(req, url);
@@ -159,14 +131,18 @@ export function createStoreDataRoute(deps = {}) {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
+      if (body.mode === 'domain') {
+        return settingsDomainWriter(body);
+      }
       if (body.mode === 'patch') {
-        const patch = oczyscUstawienia(body.patch), changedKeys = Object.keys(patch), mutationId = tekst(body.mutationId, 120);
-        if (!changedKeys.length) return odpowiedz({ ok: true, unchanged: true, changedKeys: [] });
-        for (let attempt = 0; attempt < 5; attempt++) {
+      const patch = oczyscUstawienia(body.patch), changedKeys = Object.keys(patch), mutationId = tekst(body.mutationId, 120);
+      if (!changedKeys.length) return odpowiedz({ ok: true, unchanged: true, changedKeys: [] });
+      const patchSize = Buffer.byteLength(JSON.stringify(patch), 'utf8');
+      for (let attempt = 0; attempt < 5; attempt++) {
           const version = await czytajWersjonowane('settings', { data: {}, rev: 0, updated_at: null }), prev = version.value || { data: {}, rev: 0, updated_at: null };
           if (mutationId && prev.last_mutation_id === mutationId) return odpowiedz({ ok: true, duplicatePrevented: true, changedKeys, rev: prev.rev, updated_at: prev.updated_at });
           const dane = preserveSupplierPlanOnGenericSettings(preserveManualProductPrices({ ...(prev.data || {}), ...patch }, prev.data), prev.data), updated_at = new Date().toISOString();
-          if (JSON.stringify(dane).length > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
+          if (Buffer.byteLength(JSON.stringify(dane), 'utf8') > LIMIT_USTAWIEN || patchSize > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
           const rec = { ...prev, data: dane, rev: Number(prev.rev || 0) + 1, updated_at, last_mutation_id: mutationId || undefined };
           const write = await zapiszJesliWersja('settings', rec, version);
           if (write?.modified) return odpowiedz({ ok: true, changedKeys, rev: rec.rev, updated_at, rebased: Number(body.expectedRev) !== Number(prev.rev || 0) });
@@ -184,7 +160,7 @@ export function createStoreDataRoute(deps = {}) {
         return odpowiedz({ ok: false, error: 'Ustawienia zmieniły się na innym urządzeniu. Niczego nie nadpisano.', code: 'settings_write_conflict', rev: Number(prev.rev || 0) }, 409);
       }
       const dane = preserveSupplierPlanOnGenericSettings(preserveManualProductPrices(incoming, prev.data), prev.data);
-      const rozmiar = JSON.stringify(dane).length;
+      const rozmiar = Buffer.byteLength(JSON.stringify(dane), 'utf8');
       if (rozmiar > LIMIT_USTAWIEN) return odpowiedz({ ok: false, error: 'Ustawienia są zbyt duże' }, 413);
       const rec = {
         data: dane,
@@ -207,7 +183,20 @@ export function createStoreDataRoute(deps = {}) {
       if (limited) return limited;
       const body = await req.json().catch(() => ({}));
       const settingsRec = await czytaj('settings', { data: {} });
-      const zam = bezpieczneZamowienieKlienta(body.order, await productLinkImport.mergeSettings(settingsRec.data || {}));
+      const checkoutProducts = typeof loadCheckoutProducts === 'function'
+        ? await loadCheckoutProducts()
+        : null;
+      const checkoutData = checkoutProducts
+        ? {
+            ...(settingsRec.data || {}),
+            artway_produkty_katalog: checkoutProducts,
+            artway_produkty_dodane: [],
+            artway_produkty_edytowane: {},
+            artway_produkty_ukryte: [],
+            artway_produkty_definitywne: [],
+          }
+        : await productLinkImport.mergeSettings(settingsRec.data || {});
+      const zam = bezpieczneZamowienieKlienta(body.order, checkoutData);
       const session = requestSession(req);
       if (session && session.email !== zam.email) return odpowiedz({ ok: false, error: 'Zamówienie musi należeć do zalogowanego konta.', code: 'auth' }, 403);
       zam.status = 'nowe';

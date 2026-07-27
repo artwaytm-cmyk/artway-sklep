@@ -4,8 +4,38 @@ let pwaOdroczoneZaproszenie=null;
 let pwaSprawdzanieWydania=false;
 let pwaWykryteWydanie="";
 let pwaAutomatycznePrzeladowanie=0;
+let pwaPrzeladowanieWTrakcie=false;
+const PWA_CACHE_KEY_VERSION="artway-active-release-v1";
+const PWA_CACHE_KEY_TS="artway-last-release-check";
 
-function pwaBiezaceWydanie(){return document.querySelector('meta[name="artway-version"]')?.content||"dev";}
+function pwaNazwaWersji(){return document.querySelector('meta[name="artway-version"]')?.content||"dev";}
+function pwaZapiszWersjeWPodsumowaniu(releaseId){
+  try{
+    localStorage.setItem(PWA_CACHE_KEY_VERSION,String(releaseId||""));
+    localStorage.setItem(PWA_CACHE_KEY_TS,String(Date.now()));
+  }catch(error){}
+}
+
+async function pwaOczyscCacheKompletny(){
+  const usuniecia=[];
+  if("caches" in window){
+    try{
+      const cacheKeys = await caches.keys();
+      for(const key of cacheKeys.filter((key)=>key.startsWith("artway-"))){
+        usuniecia.push(caches.delete(key));
+      }
+      await Promise.all(usuniecia);
+    }catch(error){}
+  }
+}
+
+function pwaBezpiecznyReloadPoAktualizacji(){
+  if(pwaPrzeladowanieWTrakcie)return;
+  pwaPrzeladowanieWTrakcie=true;
+  setTimeout(()=>{location.reload();},250);
+}
+
+function pwaBiezaceWydanie(){return pwaNazwaWersji();}
 function pwaMoznaBezpieczniePrzeladowac(){
   const active=document.activeElement;
   return document.visibilityState==="visible"
@@ -15,15 +45,21 @@ function pwaMoznaBezpieczniePrzeladowac(){
 async function pwaAktywujNajnowszeWydanie(){
   clearTimeout(pwaAutomatycznePrzeladowanie);
   try{
+    await pwaOczyscCacheKompletny();
     if("serviceWorker" in navigator){
       const registration=await navigator.serviceWorker.getRegistration("/");
       await registration?.update();
       registration?.waiting?.postMessage({type:"SKIP_WAITING"});
       registration?.active?.postMessage({type:"CLEAR_APP_CACHE"});
     }
-    if("caches" in window){const keys=await caches.keys();await Promise.all(keys.filter(key=>key.startsWith("artway-")).map(key=>caches.delete(key)));}
+    pwaZapiszWersjeWPodsumowaniu(pwaBiezaceWydanie());
+    pwaBezpiecznyReloadPoAktualizacji();
   }catch(error){console.warn("Nie udało się wyczyścić starej powłoki aplikacji",error);}
-  location.reload();
+}
+
+async function pwaResetCache(){
+  await pwaOczyscCacheKompletny();
+  pwaBezpiecznyReloadPoAktualizacji();
 }
 function pwaPokazNoweWydanie(releaseId){
   pwaWykryteWydanie=releaseId;
@@ -43,8 +79,19 @@ async function pwaSprawdzNajnowszeWydanie(){
   try{
     const response=await fetch(`/release.json?check=${Date.now()}`,{cache:"no-store",headers:{"Cache-Control":"no-cache"}});
     if(!response.ok)return;
-    const data=await response.json(),releaseId=String(data.releaseId||data.version||"");
+    const contentType=String(response.headers.get("content-type")||"").toLowerCase();
+    let data=null;
+    if(contentType.includes("application/json")||contentType.includes("text/json")){
+      data=await response.json();
+    }else{
+      const raw=await response.text();
+      const match=String(raw).match(/"releaseId"\s*:\s*"([^"]+)"/i);
+      if(match?.[1]) data={ releaseId: match[1] };
+    }
+    if(!data)return;
+    const releaseId=String(data.releaseId||data.version||"");
     if(releaseId&&releaseId!==pwaBiezaceWydanie())pwaPokazNoweWydanie(releaseId);
+    pwaZapiszWersjeWPodsumowaniu(pwaBiezaceWydanie());
   }catch(error){}finally{pwaSprawdzanieWydania=false;}
 }
 
@@ -76,8 +123,33 @@ async function pwaZainstalujPanelAdmina(){
 }
 async function pwaZarejestrujAplikacje(){
   if(!("serviceWorker" in navigator)||!window.isSecureContext)return;
-  try{await navigator.serviceWorker.register("/sw.js",{scope:"/",updateViaCache:"none"});}
+  try{
+    const releaseId=pwaBiezaceWydanie();
+    const swUrl=releaseId?`?v=${encodeURIComponent(releaseId)}`:"";
+    const registration=await navigator.serviceWorker.register("/sw.js"+swUrl,{scope:"/",updateViaCache:"none"});
+    registration.addEventListener("updatefound",()=>{
+      const worker=registration.installing;
+      if(!worker)return;
+      worker.addEventListener("statechange",()=>{if(worker.state==="installed"&&navigator.serviceWorker.controller) pwaPokazNoweWydanie(pwaBiezaceWydanie());});
+    });
+    if(registration.waiting)pwaPokazNoweWydanie(pwaBiezaceWydanie());
+    navigator.serviceWorker.addEventListener("controllerchange",()=>{pwaBezpiecznyReloadPoAktualizacji();});
+  }
   catch(error){console.warn("Nie udało się zarejestrować aplikacji PWA",error);}
+}
+
+async function pwaWeryfikujWersjeServiceWorker(releaseId){
+  if(!("serviceWorker" in navigator))return;
+  const registration=await navigator.serviceWorker.ready;
+  const scriptUrl=registration?.active?.scriptURL||registration?.waiting?.scriptURL||registration?.installing?.scriptURL;
+  if(!scriptUrl)return;
+  const params=new URL(scriptUrl,location.href).searchParams;
+  const workerVer=params.get("v")||"";
+  if(workerVer&&releaseId&&workerVer!==releaseId){
+    pwaZapiszWersjeWPodsumowaniu(releaseId);
+    await pwaAktywujNajnowszeWydanie();
+  }
+  pwaZapiszWersjeWPodsumowaniu(releaseId);
 }
 function pwaUruchomSkrotSkanera(){
   const params=new URLSearchParams(location.search);if(params.get("scanner")!=="1")return;
@@ -88,7 +160,14 @@ window.addEventListener("appinstalled",()=>{pwaOdroczoneZaproszenie=null;pwaUsta
 window.matchMedia?.("(display-mode: standalone)")?.addEventListener?.("change",()=>{pwaUstawTrybWyswietlania();pwaOdswiezPrzyciski();});
 window.addEventListener("DOMContentLoaded",()=>{
   pwaUstawTrybWyswietlania();void pwaZarejestrujAplikacje();pwaUruchomSkrotSkanera();
-  setTimeout(()=>void pwaSprawdzNajnowszeWydanie(),15000);
+  void pwaWeryfikujWersjeServiceWorker(pwaBiezaceWydanie());
+  const lokalnieZapisanaWersja=(() => {
+    try{return localStorage.getItem(PWA_CACHE_KEY_VERSION)||"";}catch(error){return "";}
+  })();
+  if(lokalnieZapisanaWersja&&lokalnieZapisanaWersja!==pwaBiezaceWydanie()) pwaPokazNoweWydanie(lokalnieZapisanaWersja);
+  pwaZapiszWersjeWPodsumowaniu(pwaBiezaceWydanie());
+  window.artwayPurgeCache=()=>void pwaResetCache();
+  setTimeout(()=>void pwaSprawdzNajnowszeWydanie(),800);
   setInterval(()=>void pwaSprawdzNajnowszeWydanie(),2*60*1000);
 });
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")setTimeout(()=>void pwaSprawdzNajnowszeWydanie(),800);});

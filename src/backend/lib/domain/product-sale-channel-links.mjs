@@ -106,7 +106,10 @@ async function synchronizujSprzedazZDostepnosciaProducenta(req, results = [], da
   if (!checked.length) return report;
   const availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? { ...data.artway_dostepnosc } : {};
   const previousAvailabilityMap = options.previousAvailability && typeof options.previousAvailability === 'object' ? options.previousAvailability : { ...availability };
-  const productMap = allegroAgentProduktyCentralne(data);
+  const loadedProducts = await allegroAgentProduktyCentralne(data);
+  const productMap = loadedProducts instanceof Map
+    ? loadedProducts
+    : new Map((Array.isArray(loadedProducts) ? loadedProducts : []).map((product) => [String(product?.id || ''), product]));
   const [mappingsRec, offersRec, auditRec, offerSettings] = await Promise.all([
     czytaj('allegro_mappings', { items: {} }),
     czytaj('allegro_offers', { items: [], updated_at: null }),

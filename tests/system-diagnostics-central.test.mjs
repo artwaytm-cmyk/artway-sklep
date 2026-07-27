@@ -1,0 +1,134 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createSystemDiagnosticsRoute } from '../src/backend/lib/system-diagnostics-route.mjs';
+
+function fixture(overrides = {}) {
+  let value = {}, version = 0;
+  const reports = [];
+  const service = createSystemDiagnosticsRoute({
+    readVersioned: async () => ({ value: structuredClone(value), etag: `"${version}"`, exists: version > 0 }),
+    writeIfVersion: async (_key, next, expected) => {
+      if (String(expected?.etag || '') !== `"${version}"`) return { modified: false };
+      value = structuredClone(next); version += 1;
+      return { modified: true, version };
+    },
+    respond: (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }),
+    isAdmin: (request) => request.headers.get('x-admin') === '1',
+    rateLimit: () => null,
+    sessionOf: () => ({ email: 'administrator@example.test' }),
+    agentRuntime: { report: async (event) => { reports.push(event); } },
+    now: (() => {
+      let tick = 0;
+      return () => new Date(Date.UTC(2026, 6, 26, 1, 0, tick++));
+    })(),
+    ...overrides,
+  });
+  return { service, reports, record: () => structuredClone(value) };
+}
+
+async function json(response) {
+  return JSON.parse(await response.text());
+}
+
+test('centralna diagnostyka grupuje powtórzenia i nie zapisuje sekretów ani danych klienta', async () => {
+  const { service, record, reports } = fixture();
+  const request = new Request('https://artwaytm.pl/api/store?action=diagnostics-ingest', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin': '1' },
+    body: JSON.stringify({ events: [
+      { level: 'blad', message: 'Błąd sk-proj-1234567890123456 dla klient@example.pl', source: 'app.js:10:2', route: '/#/admin/system?token=sekret', release: 'r1' },
+      { level: 'blad', message: 'Błąd sk-proj-1234567890123456 dla klient@example.pl', source: 'app.js:10:2', route: '/#/admin/system?token=sekret', release: 'r1' },
+    ] }),
+  });
+  const response = await service.route(request, new URL(request.url), 'diagnostics-ingest');
+  assert.equal(response.status, 202);
+  assert.deepEqual((await json(response)).summary, { total: 1, open: 1, errors: 1, warnings: 0, occurrences: 2 });
+  assert.equal(record().items.length, 1);
+  assert.equal(record().items[0].count, 2);
+  assert.doesNotMatch(JSON.stringify(record()), /sk-proj-|klient@example|token=sekret/);
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].work.status, 'failed');
+});
+
+test('administrator może uruchomić analizę Agents SDK, a wynik zostaje przy konkretnym błędzie', async () => {
+  const diagnosticAgent = {
+    status: () => ({ configured: true, model: 'gpt-5.6-sol', reasoning: 'max' }),
+    analyze: async () => ({
+      classification: 'application_bug',
+      rootCause: 'Błędna rewizja zapisu.',
+      confidence: 0.96,
+      evidence: ['Powtarzalny konflikt tej samej domeny.'],
+      recommendedActions: [{ action: 'Scalić zapis przez CAS.', risk: 'low', automatic: false }],
+      validationPlan: ['Powtórzyć dwa równoległe zapisy.'],
+      safeAutomaticAction: 'none',
+      requiresHumanApproval: true,
+      summary: 'Konflikt wersji zapisu.',
+      model: 'gpt-5.6-sol',
+      reasoning: 'max',
+      mode: 'standard',
+      analyzedAt: '2026-07-26T01:05:00.000Z',
+    }),
+  };
+  const { service, record } = fixture({ diagnosticAgent });
+  await service.record([{ level: 'blad', message: 'Konflikt zapisu domeny', source: 'cloud-sync' }]);
+  const id = record().items[0].id;
+  const request = new Request('https://artwaytm.pl/api/store?action=diagnostics-central-analyze', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin': '1' },
+    body: JSON.stringify({ ids: [id] }),
+  });
+  const response = await service.route(request, new URL(request.url), 'diagnostics-central-analyze');
+  assert.equal(response.status, 202);
+  assert.equal((await json(response)).queued, 1);
+  for (let attempt = 0; attempt < 20 && record().items[0].analysis.status !== 'completed'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(record().items[0].analysis.status, 'completed');
+  assert.equal(record().items[0].analysis.model, 'gpt-5.6-sol');
+  assert.match(record().items[0].analysis.rootCause, /rewizja/i);
+});
+
+test('rozwiązany problem wraca automatycznie po ponownym wystąpieniu', async () => {
+  const { service, record } = fixture();
+  await service.record([{ level: 'ostrzezenie', message: 'Połączenie chwilowo niedostępne', source: 'backend:test', route: '/api/store' }], { trusted: true });
+  const id = record().items[0].id;
+  const resolveRequest = new Request('https://artwaytm.pl/api/store?action=diagnostics-central-update', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin': '1' },
+    body: JSON.stringify({ ids: [id], status: 'resolved', resolution: 'Naprawiono' }),
+  });
+  const resolved = await service.route(resolveRequest, new URL(resolveRequest.url), 'diagnostics-central-update');
+  assert.equal((await json(resolved)).summary.open, 0);
+  await service.record([{ level: 'ostrzezenie', message: 'Połączenie chwilowo niedostępne', source: 'backend:test', route: '/api/store' }]);
+  assert.equal(record().items[0].status, 'open');
+  assert.equal(record().items[0].count, 2);
+});
+
+test('pełny rejestr centralny jest dostępny wyłącznie administratorowi', async () => {
+  const { service } = fixture();
+  await service.record([{ level: 'blad', message: 'Błąd renderowania', source: 'router', route: '/#/admin' }]);
+  const deniedRequest = new Request('https://artwaytm.pl/api/store?action=diagnostics-central');
+  const denied = await service.route(deniedRequest, new URL(deniedRequest.url), 'diagnostics-central');
+  assert.equal(denied.status, 401);
+  const adminRequest = new Request('https://artwaytm.pl/api/store?action=diagnostics-central&status=open', { headers: { 'x-admin': '1' } });
+  const allowed = await service.route(adminRequest, new URL(adminRequest.url), 'diagnostics-central');
+  const body = await json(allowed);
+  assert.equal(body.ok, true);
+  assert.equal(body.items.length, 1);
+  assert.equal(body.summary.errors, 1);
+});
+
+test('frontend wysyła błędy do VPS i autotest zapisuje nazwę nieudanej kontroli', async () => {
+  const runtime = await import('node:fs/promises').then((fs) => fs.readFile('src/frontend/02-runtime-state.js', 'utf8'));
+  const diagnostics = await import('node:fs/promises').then((fs) => fs.readFile('src/frontend/16-diagnostics.js', 'utf8'));
+  const [backend, operationalCenter] = await Promise.all([
+    import('node:fs/promises').then((fs) => fs.readFile('src/backend/lib/store-app.mjs', 'utf8')),
+    import('node:fs/promises').then((fs) => fs.readFile('src/backend/lib/domain/agent-operational-center.mjs', 'utf8')),
+  ]);
+  assert.match(runtime, /diagnostics-ingest/);
+  assert.match(runtime, /DIAGNOSTYKA_KOLEJKA_KEY/);
+  assert.match(diagnostics, /Centralny rejestr błędów/);
+  assert.match(diagnostics, /item\.nazwa.*item\.szczegoly/s);
+  assert.match(backend, /backend:\$\{action\}/);
+  assert.match(operationalCenter, /Centralna diagnostyka wykryła błędy działania strony/);
+});

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allegroApplyProductSetSafety, allegroBuildContentProductSet, allegroCatalogParametersForPatch, allegroResponsibleProducerDirectory, allegroSelectResponsibleProducer, allegroSyncEditorialOffer } from '../src/backend/lib/domain/allegro-gpsr.mjs';
+import { allegroApplyProductSetSafety, allegroBuildContentProductSet, allegroCatalogParametersForPatch, allegroMergeGpsrMissing, allegroResponsibleProducerDirectory, allegroSelectResponsibleProducer, allegroSyncEditorialOffer } from '../src/backend/lib/domain/allegro-gpsr.mjs';
 
 test('GPSR dobiera wyłącznie jednoznacznego producenta po nazwie lub nazwie handlowej', () => {
   const match = allegroSelectResponsibleProducer({ producent: 'Multigra' }, [
@@ -96,4 +96,26 @@ test('przygotowanie nowej oferty pobiera GPSR z dokładnego produktu katalogoweg
   assert.equal(result.ready, true);
   assert.deepEqual(result.draft.productSet[0].responsibleProducer, { type: 'ID', id: 'producer-1' });
   assert.deepEqual(result.draft.productSet[0].safetyInformation, { type: 'TEXT', description: 'Używać zgodnie z instrukcją.' });
+});
+
+test('przygotowanie korzysta z potwierdzonego producenta GPSR zapisanego w kartotece', () => {
+  const result = allegroApplyProductSetSafety({
+    draft: { productSet: [{ product: { id: 'catalog-1' } }] },
+    product: {
+      producent: 'Alexander',
+      allegroResponsibleProducer: { id: 'producer-confirmed', name: 'Alexander.', score: 100 },
+      allegroSafetyInformation: { type: 'TEXT', description: 'Używać zgodnie z instrukcją.' },
+    },
+    catalog: {},
+    responsibleProducers: [],
+  });
+  assert.equal(result.ready, true);
+  assert.deepEqual(result.draft.productSet[0].responsibleProducer, { type: 'ID', id: 'producer-confirmed' });
+});
+
+test('ponowna kontrola GPSR usuwa stary brak, gdy pole zostało już uzupełnione', () => {
+  assert.deepEqual(allegroMergeGpsrMissing(
+    ['odpowiedzialny producent GPSR', 'informacja o bezpieczeństwie GPSR', 'wymagany parametr: Wysokość produktu'],
+    ['informacja o bezpieczeństwie GPSR'],
+  ), ['wymagany parametr: Wysokość produktu', 'informacja o bezpieczeństwie GPSR']);
 });

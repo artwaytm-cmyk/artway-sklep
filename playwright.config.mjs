@@ -23,6 +23,10 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    // Testy tras API muszą widzieć żądania bez pośrednictwa wcześniej
+    // zarejestrowanego Service Workera. Zachowanie PWA jest kontrolowane
+    // osobnymi testami jednostkowymi i produkcyjną próbą publiczną.
+    serviceWorkers: 'block',
     actionTimeout: 12_000,
     navigationTimeout: 20_000,
   },

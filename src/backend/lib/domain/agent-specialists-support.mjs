@@ -4,6 +4,7 @@ import { allegroContentCompliance, vonHalskyContentCompliance } from './channel-
 import { AGENT_ACTION_POLICY, NEVER_AUTOMATIC } from './agent-action-policy.mjs';
 import { decisionFingerprint, decisionSubjectKey, normalizeDecisionReceipt } from './agent-decision-state.mjs';
 import { SPECIALISTS } from './agent-specialist-definitions.mjs';
+import { SPECIALIST_PLAYBOOK_VERSION } from './agent-specialist-playbooks.mjs';
 
 const STATE_KEY = 'agent_specialists_state';
 const MAX_HISTORY = 240;
@@ -13,10 +14,17 @@ const MAX_WRITE_ATTEMPTS = 8;
 const DEFAULT_CONFIG = Object.freeze({
   enabled: true,
   automaticEnabled: true,
+  // Tymczasowo brak sztucznych limitów liczby uruchomień i tokenów.
+  // Nadal obowiązują blokady duplikatów, cache identycznych wejść oraz
+  // pojedynczy wykonawca cyklu, więc wyłączenie limitu nie powoduje
+  // wielokrotnego wykonywania tego samego zadania.
+  limitsEnabled: false,
   dailyLimit: 240,
-  automaticDailyLimit: 200,
-  automaticBatchSize: 12,
-  cacheHours: 24,
+  automaticDailyLimit: 80,
+  automaticBatchSize: 3,
+  automaticInputTokenLimit: 180_000,
+  automaticOutputTokenLimit: 70_000,
+  cacheHours: 72,
   safeAutoApply: true,
   autoApplyProductEditorial: true,
   autoUpdateLinkedAllegroContent: true,
@@ -29,7 +37,7 @@ const DEFAULT_CONFIG = Object.freeze({
   decisionRetentionDays: 30,
 });
 
-const PROMPT_VERSION = '2026-07-24.1';
+const PROMPT_VERSION = SPECIALIST_PLAYBOOK_VERSION;
 const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription', von_halsky_title: 'vonHalskyTitle', von_halsky_short_description: 'vonHalskyShortDescription', von_halsky_description: 'vonHalskyDescription' });
 
 const RESULT_SCHEMA = Object.freeze({
@@ -80,9 +88,12 @@ function config(value = {}) {
   return {
     enabled: source.enabled !== false,
     automaticEnabled: source.automaticEnabled !== false,
+    limitsEnabled: source.limitsEnabled === true,
     dailyLimit: number(source.dailyLimit, DEFAULT_CONFIG.dailyLimit, 1, 500),
     automaticDailyLimit: number(source.automaticDailyLimit, DEFAULT_CONFIG.automaticDailyLimit, 0, 400),
     automaticBatchSize: number(source.automaticBatchSize, DEFAULT_CONFIG.automaticBatchSize, 1, 12),
+    automaticInputTokenLimit: number(source.automaticInputTokenLimit, DEFAULT_CONFIG.automaticInputTokenLimit, 20_000, 2_000_000),
+    automaticOutputTokenLimit: number(source.automaticOutputTokenLimit, DEFAULT_CONFIG.automaticOutputTokenLimit, 10_000, 800_000),
     cacheHours: number(source.cacheHours, DEFAULT_CONFIG.cacheHours, 1, 168),
     safeAutoApply: source.safeAutoApply !== false,
     autoApplyProductEditorial: source.autoApplyProductEditorial !== false,
@@ -221,7 +232,7 @@ function outputText(payload = {}) {
     }
   }
   if (clean(payload.output_text, 100000)) return String(payload.output_text);
-  throw Object.assign(new Error('GPT-5 nano nie zwrócił treści szkicu.'), { code: 'openai_empty_output', status: 502 });
+  throw Object.assign(new Error('Agent OpenAI nie zwrócił treści szkicu.'), { code: 'openai_empty_output', status: 502 });
 }
 
 function normalizeResult(raw = {}, specialist) {
@@ -263,6 +274,21 @@ function normalizeProductContentEditorialResult(result = {}) {
       { key: 'seo_description', label: 'Opis SEO', value: fallbackSeoDescription, currentValue: '', reason: 'Spójne podsumowanie wspólnej karty produktu.', evidence: 'Podsumowanie zwrócone przez model.' },
       { key: 'seo_keywords', label: 'Frazy SEO', value: fallbackTitle, currentValue: '', reason: 'Bezpieczne frazy z nazwy produktu.', evidence: 'Nazwa produktu zwrócona przez model.' },
     ];
+  }
+  if (editorialFields.length) {
+    const present = new Set(editorialFields.map((field) => clean(field?.key, 80)));
+    const add = (key, label, value, reason, evidence) => {
+      if (!present.has(key) && clean(value, 30_000)) {
+        editorialFields.push({ key, label, value: clean(value, 30_000), currentValue: '', reason, evidence });
+        present.add(key);
+      }
+    };
+    const usableTitle = fallbackTitle && !/(?:szkic|redakcja|opis)\s+(?:produktu|oferty)/i.test(fallbackTitle) ? fallbackTitle : '';
+    // Modele Responses API mogą poprawnie zwrócić nazwę w głównym polu
+    // `title`, a pozostałe wartości w `fields`. To nadal jest kompletny
+    // kontrakt redakcyjny i nie może być odrzucony tylko z powodu miejsca
+    // umieszczenia tej samej wartości.
+    add('title', 'Nazwa', usableTitle, 'Uzupełniono nazwę z głównego wyniku redaktora.', 'Tytuł zwrócony przez model dla bieżącego produktu.');
   }
   const normalized = { ...result, fields: editorialFields };
   const fields = Object.fromEntries(editorialFields.map((field) => [field.key, clean(field.value, 30_000)]));
@@ -390,7 +416,14 @@ function productPatch(result = {}) {
 function editorialIdentityConflict(result = {}) {
   const notes = [...(result.editorialNotes || []), ...(result.warnings || []), ...(result.missingFacts || [])].join(' ')
     .replace(/\b(?:nie\s+wprowadza\S*|bez)\s+sprzeczno[śs]ci\b/gi, '');
-  return /(?:sprzeczn|niejednoznaczn|nie da si[eę].{0,30}rozpozna|tożsamo[śs][ćc].{0,30}(?:niepew|brak|konflikt)|inny produkt|różne produkty)/i.test(notes);
+  const identity = '(?:tożsamo[śs][ćc]|identyfikacj\\w*|EAN|GTIN|kod(?:u)?\\s+producenta|SKU|MPN|model|wariant)';
+  const conflict = '(?:sprzeczn\\w*|niezgodn\\w*|niejednoznaczn\\w*|konflikt\\w*|niepewn\\w*)';
+  return new RegExp([
+    `${identity}.{0,90}${conflict}`,
+    `${conflict}.{0,90}${identity}`,
+    'nie da si[eę].{0,50}(?:rozpozna[ćc]|zidentyfikowa[ćc]).{0,40}produkt',
+    '(?:inny produkt|różne produkty|dotyczy innego produktu)',
+  ].join('|'), 'i').test(notes);
 }
 
 const SOURCE_PAGE_NOISE = Object.freeze([
@@ -488,20 +521,30 @@ function productEditorialTarget(product = {}) {
 
 function productEditorialFingerprint(product = {}, target = productEditorialTarget(product)) {
   const source = product.sourceMaterial && typeof product.sourceMaterial === 'object' ? product.sourceMaterial : {};
+  const hasSourceSnapshot = Object.keys(source).length > 0;
   const facts = {
     promptVersion: PROMPT_VERSION,
     target: { store: target.store === true, vonHalsky: target.vonHalsky === true, allegro: target.allegro === true },
     source: {
       sourceUrl: clean(source.sourceUrl || product.sourceUrl || product.producentUrl, 1000),
-      title: clean(source.title || product.nazwa || product.name, 300),
-      shortDescription: clean(source.shortDescription || product.opisKrotki || product.krotkiOpis, 4000),
-      longDescription: clean(source.longDescription || source.allegroCatalogDescription || source.allegroOfferDescription || product.opis, 30_000),
+      // Treść zapisana przez Agenta nie może być ponownie wejściem odcisku.
+      // Inaczej każda poprawiona nazwa lub opis zmienia fingerprint i kolejny
+      // cykl znów wybiera ten sam produkt. Materiał źródłowy jest stabilnym
+      // wejściem; pola sprzedażowe produktu są wynikiem redakcji.
+      title: clean(hasSourceSnapshot ? source.title : product.nazwa || product.name, 300),
+      shortDescription: clean(hasSourceSnapshot ? source.shortDescription : product.opisKrotki || product.krotkiOpis, 4000),
+      longDescription: clean(
+        source.longDescription || source.allegroCatalogDescription || source.allegroOfferDescription
+        || (!hasSourceSnapshot ? product.opis : ''),
+        30_000,
+      ),
       producer: clean(source.producer || product.producent || product.marka, 160),
       brand: clean(source.brand || product.marka || product.producent, 160),
       category: clean(source.category || product.kategoria, 180),
       ean: clean(source.ean || product.gtin || product.ean, 80),
       producerCode: clean(source.producerCode || product.kodProducenta || product.mpn, 160),
       parameters: source.parameters || product.parametryProducenta || product.parametryZrodla || product.parametry || product.parameters || {},
+      evidence: product.sourceEvidence || null,
     },
     category: clean(product.kategoria, 180), producer: clean(product.producent || product.marka, 160),
     ean: clean(product.gtin || product.ean, 80), producerCode: clean(product.kodProducenta || product.mpn, 160),
@@ -534,6 +577,44 @@ function productEditorialState(product = {}) {
   return { target, fingerprint, current, currentChannels, reviewedSameInput, retryDue, complete, editorial, quality };
 }
 
+function productEditorialAutomaticEligibility(product = {}, editorial = productEditorialState(product)) {
+  const offerId = clean(product.allegroOfferId || product.offerId || product?._catalog?.channels?.allegro?.offerId, 120);
+  const offerStatus = clean(
+    product.allegroStatus || product.allegroPublicationStatus || product?._catalog?.channels?.allegro?.status,
+    80,
+  ).toUpperCase();
+  const activeListing = Boolean(offerId) && !['ENDED', 'INACTIVE', 'ARCHIVED', 'DELETED'].includes(offerStatus);
+  const explicitRequest = product.forceEditorialRefresh === true
+    || product.allegroPublicationIntent === true
+    || ['queued', 'preparing'].includes(clean(product.allegroAgentPreparationStatus || product.allegroPreparationStatus, 40).toLowerCase());
+  const complianceRepair = Boolean(
+    clean(product.allegroComplianceError || product.allegroPublicationLastErrorCode, 300)
+    || ['failed', 'needs_attention'].includes(clean(product.allegroAgentPreparationStatus, 40).toLowerCase()),
+  );
+  const receipt = product.contentEditorial && typeof product.contentEditorial === 'object' ? product.contentEditorial : {};
+  const channelStates = receipt.channelStates && typeof receipt.channelStates === 'object' ? receipt.channelStates : {};
+  const hasEditorialReceipt = Boolean(clean(receipt.inputFingerprint, 160)) || Object.keys(channelStates).length > 0;
+  const sourceChanged = hasEditorialReceipt && clean(receipt.inputFingerprint, 160) !== clean(editorial.fingerprint, 160);
+  if (editorial.current) return { eligible: false, reason: 'editorial_current', activeListing };
+  if (!activeListing) return { eligible: true, reason: explicitRequest ? 'explicit_request' : 'not_listed_or_inactive', activeListing };
+  if (explicitRequest) return { eligible: true, reason: 'explicit_request', activeListing };
+  if (complianceRepair) return { eligible: true, reason: 'compliance_or_publication_repair', activeListing };
+  if (sourceChanged) return { eligible: true, reason: 'source_changed_after_editorial', activeListing };
+  // Aktywne starsze oferty bez pokwitowania redakcji nie są automatycznie
+  // przepisywane. Trafiają do pracy dopiero po zdarzeniu źródłowym, błędzie
+  // zgodności albo jawnym zleceniu administratora.
+  if (!hasEditorialReceipt) return { eligible: false, reason: 'legacy_active_listing_grandfathered', activeListing };
+  return { eligible: true, reason: 'editorial_incomplete', activeListing };
+}
+
+function providerQuotaUnavailable(error) {
+  const message = clean(error?.message || error, 2000).toLowerCase();
+  const code = clean(error?.code || error?.error?.code, 120).toLowerCase();
+  return code === 'insufficient_quota'
+    || code === 'billing_hard_limit_reached'
+    || /(?:exceeded|przekrocz).{0,40}(?:current )?quota|insufficient[_ ]quota|billing.{0,30}(?:limit|quota)|brak.{0,30}(?:środków|kredytów)/i.test(message);
+}
+
 function communicationNeedsReply(item = {}) {
   const resolved = item?.internalResolved === true || item?.internalResolution?.resolved === true;
   return !resolved && !item?.cachedOlder && !!(item?.needsReply || item?.humanReplyNeeded || Number(item?.newIncomingCount || 0) > 0);
@@ -547,4 +628,4 @@ function communicationFacts(item = {}, type = 'thread') {
   return sanitizeContext({ type, subject: item.subject || item.topic, orderId: item.orderId || item.checkoutFormId, status: item.status, chatActive: item.chatActive, messages });
 }
 
-export { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeProductContentEditorialResult, normalizeChannelEditorialResult, normalizeDecision, activeDecision, outputText, normalizeResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, communicationNeedsReply, communicationFacts };
+export { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeProductContentEditorialResult, normalizeChannelEditorialResult, normalizeDecision, activeDecision, outputText, normalizeResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, productEditorialAutomaticEligibility, providerQuotaUnavailable, communicationNeedsReply, communicationFacts };

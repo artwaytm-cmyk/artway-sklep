@@ -27,7 +27,7 @@ test('spóźniona karta nie nadpisuje nowszej potwierdzonej operacji produktu', 
 });
 
 test('dedykowany zapis ceny wykonuje jedną atomową operację na centralnym produkcie', async () => {
-  let operation = null;
+  let operation = null, publication = null;
   const route = createStoreDataRoute({
     odpowiedz: (body, status = 200) => ({ body, status }),
     czyAdmin: () => true,
@@ -36,6 +36,10 @@ test('dedykowany zapis ceny wykonuje jedną atomową operację na centralnym pro
     zapiszOperacjeProduktow: async (operations) => {
       [operation] = operations;
       return { modified: true, appliedOperations: 1, skippedProductIds: [], value: { rev: 41 } };
+    },
+    publikujPolaProduktuCentralnie: async (payload) => {
+      publication = payload;
+      return { published: true, queued: false, revision: 'rev-42' };
     },
   });
   const request = { method: 'POST', json: async () => ({ productId: '1000914', channel: 'store', value: '49,90' }) };
@@ -46,4 +50,7 @@ test('dedykowany zapis ceny wykonuje jedną atomową operację na centralnym pro
   assert.equal(operation.fields.cena, 49.9);
   assert.equal(operation.fields.cenaManualna, true);
   assert.match(operation.fields.cenaZrodlo, /admin@example\.test/);
+  assert.equal(publication.productId, '1000914');
+  assert.equal(publication.fields.cena, 49.9);
+  assert.equal(result.body.publication.published, true);
 });

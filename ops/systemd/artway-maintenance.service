@@ -1,0 +1,17 @@
+[Unit]
+Description=Artway safe server maintenance
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/run-server-maintenance.mjs
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/artway/releases /srv/artway/backups /srv/artway/ops /tmp
+

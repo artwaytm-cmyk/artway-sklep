@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { tekst } from './core/http.mjs';
-import { createCatalogProductUpdater as allegroAktualizatorProduktowCentralnych } from './domain/catalog-product-updater.mjs';
+import { mergeCatalogProducts } from './domain/catalog-quality.mjs';
 import {
   infaktDostawcyDozwoleni,
   infaktCenaZakupuFields,
@@ -27,9 +27,26 @@ export function infaktCredentialLooksMasked(value = '') {
   return raw.length >= 12 && special >= 10 && letters <= 8;
 }
 
-export function createInfaktService({ read, write }) {
+export function createInfaktService({ read, write, loadProducts = null, saveProductFields = null }) {
   const czytaj = read;
   const zapisz = write;
+  const saveCatalogFields = async (input) => {
+    if (typeof saveProductFields !== 'function') {
+      throw Object.assign(new Error('Centralna kartoteka produktów nie jest dostępna.'), {
+        code: 'central_product_catalog_unavailable',
+        status: 503,
+      });
+    }
+    return saveProductFields(input);
+  };
+  async function productMap(data = {}) {
+    if (typeof loadProducts === 'function') {
+      const loaded = await loadProducts(data);
+      if (loaded instanceof Map) return loaded;
+      if (Array.isArray(loaded)) return new Map(loaded.map((product) => [String(product?.id || ''), product]));
+    }
+    return mergeCatalogProducts(data).map;
+  }
   const INFAKT_ENVY = new Set(['production', 'sandbox']);
   function infaktKonfiguracja() {
     const env = INFAKT_ENVY.has(String(process.env.INFAKT_ENV || '').toLowerCase()) ? String(process.env.INFAKT_ENV).toLowerCase() : 'production';
@@ -148,7 +165,10 @@ export function createInfaktService({ read, write }) {
       }
     }
     report.scannedDocuments = selectedCosts.length; report.allowedDocuments = invoices.length;
-    const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null }), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = allegroAgentProduktyCentralne(data), index = infaktIndeksProduktow(products), updater = allegroAktualizatorProduktowCentralnych(data);
+    const settingsRec = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
+    const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
+    const products = await productMap(data), index = infaktIndeksProduktow(products);
+    const productUpdates = [];
     const processedKeys = new Set(), selectedInvoices = invoices.filter((invoice) => force || report.documents[tekst(invoice?.ksef_number, 200)]?.status !== 'processed').reverse();
     for (const invoice of selectedInvoices) {
       const documentKey = tekst(invoice.ksef_number, 200); if (!documentKey) continue;
@@ -166,7 +186,18 @@ export function createInfaktService({ read, write }) {
           if (match.product && validPrice) {
             const product = products.get(String(match.product.id)) || match.product, oldDate = String(product.cenaZakupuDataDokumentu || ''), shouldUpdate = force || !oldDate || String(invoice.invoice_date || '') >= oldDate;
             const beforeFields = shouldUpdate ? infaktMigawkaCenyZakupu(product) : null;
-            if (shouldUpdate) { const fields = infaktCenaZakupuFields(product, line, invoice, supplier, match.method); if (Number(product.cenaZakupu || 0) !== Number(fields.cenaZakupu)) report.priceUpdatedCount++; else report.unchangedCount++; updater.apply(product.id, fields); products.set(String(product.id), { ...product, ...fields }); }
+            if (shouldUpdate) {
+              const fields = infaktCenaZakupuFields(product, line, invoice, supplier, match.method);
+              if (Number(product.cenaZakupu || 0) !== Number(fields.cenaZakupu)) report.priceUpdatedCount++; else report.unchangedCount++;
+              productUpdates.push(saveCatalogFields({
+                productId: String(product.id),
+                fields,
+                mutationId: `infakt-price:${documentKey}:${line.row}:${product.id}`,
+                actor: 'infakt',
+                area: 'purchase-price',
+              }));
+              products.set(String(product.id), { ...product, ...fields });
+            }
             else report.unchangedCount++;
             report.matchedCount++; report.recentMatches = report.recentMatches.filter((entry) => entry.itemKey !== itemKey || entry.status === 'reverted'); report.recentMatches.unshift({ matchId: crypto.createHash('sha256').update(`${itemKey}|${product.id}|${now}`).digest('hex').slice(0, 24), itemKey, lineSignature, productId: String(product.id), productName: tekst(product.nazwa, 200), price: +line.unitGross.toFixed(2), quantity: line.quantity, method: match.method, confidence: match.confidence, invoiceNumber: tekst(invoice.invoice_number, 120), invoiceDate: tekst(invoice.invoice_date, 20), supplier: supplier?.name || invoice.seller_name, updatedAt: now, status: 'active', priceApplied: shouldUpdate, beforeFields, sourceItem });
           } else {
@@ -177,16 +208,17 @@ export function createInfaktService({ read, write }) {
         if (invoice.sourceCostUuid) report.costDocuments[invoice.sourceCostUuid] = { ...(report.costDocuments[invoice.sourceCostUuid] || {}), status: 'processed', lines: lines.length, processedAt: now };
       } catch (error) { report.errors.push(`${tekst(invoice.invoice_number || documentKey, 160)}: ${tekst(error.message, 400)}`); report.documents[documentKey] = { status: 'error', error: tekst(error.message, 400), processedAt: now }; if (invoice.sourceCostUuid) report.costDocuments[invoice.sourceCostUuid] = { ...(report.costDocuments[invoice.sourceCostUuid] || {}), status: 'error', error: tekst(error.message, 400), processedAt: now }; }
     }
-    updater.commit(); if (updater.changed) await zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now });
+    if (productUpdates.length) await Promise.all(productUpdates);
     const oldPending = Array.isArray(previous.pendingItems) ? previous.pendingItems : [], newKeys = new Set(report.pendingItems.map((x) => x.itemKey)); report.pendingItems = [...report.pendingItems, ...oldPending.filter((x) => !newKeys.has(x.itemKey) && !processedKeys.has(x.ksefNumber))].slice(0, 1000); report.pendingCount = report.pendingItems.length; report.lineMappings = { ...(previous.lineMappings || {}) }; report.recentMatches = report.recentMatches.slice(0, 500); report.updated_at = new Date().toISOString();
     await zapisz('infakt_purchase_price_sync', report); return report;
   }
   async function infaktPrzypiszCeneZakupu(itemKey = '', productId = '') {
-    const [sync, settingsRec] = await Promise.all([czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [] }), czytaj('settings', { data: {}, rev: 0 })]), item = (Array.isArray(sync.pendingItems) ? sync.pendingItems : []).find((x) => x.itemKey === itemKey), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = allegroAgentProduktyCentralne(data), product = products.get(String(productId));
+    const [sync, settingsRec] = await Promise.all([czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [] }), czytaj('settings', { data: {}, rev: 0 })]), item = (Array.isArray(sync.pendingItems) ? sync.pendingItems : []).find((x) => x.itemKey === itemKey), data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, products = await productMap(data), product = products.get(String(productId));
     if (!item) { const error = new Error('Nie znaleziono oczekującej pozycji faktury'); error.status = 404; throw error; } if (!product) { const error = new Error('Nie znaleziono produktu'); error.status = 404; throw error; } if (!(Number(item.unitGross) > 0) || item.currency !== 'PLN') { const error = new Error('Pozycja nie ma poprawnej ceny brutto w PLN'); error.status = 422; throw error; }
-    const updater = allegroAktualizatorProduktowCentralnych(data), beforeFields = infaktMigawkaCenyZakupu(product), invoice = { invoice_number: item.invoiceNumber, ksef_number: item.ksefNumber, invoice_date: item.invoiceDate, seller_name: item.supplier }, fields = infaktCenaZakupuFields(product, item, invoice, { name: item.supplier }, 'ręczne zatwierdzenie'); updater.apply(product.id, fields); updater.commit();
+    const beforeFields = infaktMigawkaCenyZakupu(product), invoice = { invoice_number: item.invoiceNumber, ksef_number: item.ksefNumber, invoice_date: item.invoiceDate, seller_name: item.supplier }, fields = infaktCenaZakupuFields(product, item, invoice, { name: item.supplier }, 'ręczne zatwierdzenie');
+    await saveCatalogFields({ productId: String(product.id), fields, mutationId: `infakt-manual:${itemKey}:${product.id}`, actor: 'administrator', area: 'purchase-price' });
     const now = new Date().toISOString(), matchId = crypto.createHash('sha256').update(`${itemKey}|${product.id}|${now}`).digest('hex').slice(0, 24); sync.pendingItems = sync.pendingItems.filter((x) => x.itemKey !== itemKey); sync.pendingCount = sync.pendingItems.length; sync.matchedCount = (Number(sync.matchedCount) || 0) + 1; sync.priceUpdatedCount = (Number(sync.priceUpdatedCount) || 0) + 1; sync.lineMappings = { ...(sync.lineMappings || {}), ...(item.lineSignature ? { [item.lineSignature]: String(product.id) } : {}) }; sync.recentMatches = [{ matchId, itemKey, lineSignature: item.lineSignature || '', productId: String(product.id), productName: tekst(product.nazwa, 200), price: Number(item.unitGross), quantity: Number(item.quantity), method: 'ręczne zatwierdzenie', confidence: 100, invoiceNumber: item.invoiceNumber, invoiceDate: item.invoiceDate, supplier: item.supplier, updatedAt: now, status: 'active', priceApplied: true, beforeFields, sourceItem: item }, ...(Array.isArray(sync.recentMatches) ? sync.recentMatches.filter((entry) => entry.itemKey !== itemKey || entry.status === 'reverted') : [])].slice(0, 500); sync.updated_at = now;
-    await Promise.all([zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now }), zapisz('infakt_purchase_price_sync', sync)]); return { item, product: { id: String(product.id), name: product.nazwa, cenaZakupu: fields.cenaZakupu }, sync };
+    await zapisz('infakt_purchase_price_sync', sync); return { item, product: { id: String(product.id), name: product.nazwa, cenaZakupu: fields.cenaZakupu }, sync };
   }
   async function infaktCofnijDopasowanieCeny(matchId = '') {
     const [sync, settingsRec] = await Promise.all([czytaj('infakt_purchase_price_sync', { pendingItems: [], recentMatches: [] }), czytaj('settings', { data: {}, rev: 0 })]);
@@ -195,11 +227,11 @@ export function createInfaktService({ read, write }) {
     const match = matches[index];
     if (match.status === 'reverted') { const error = new Error('To dopasowanie zostało już cofnięte'); error.status = 409; throw error; }
     if (match.priceApplied === false) { const error = new Error('To dopasowanie nie zmieniło ceny produktu'); error.status = 409; throw error; }
-    const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, product = allegroAgentProduktyCentralne(data).get(String(match.productId));
+    const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {}, product = (await productMap(data)).get(String(match.productId));
     if (!product) { const error = new Error('Produkt z dopasowania już nie istnieje'); error.status = 404; throw error; }
     const rollback = infaktPrzygotujCofniecieDopasowania(product, match);
     if (!rollback.ok) { const error = new Error(rollback.error); error.status = 409; throw error; }
-    const updater = allegroAktualizatorProduktowCentralnych(data); updater.apply(product.id, rollback.fields, rollback.remove); updater.commit();
+    await saveCatalogFields({ productId: String(product.id), fields: rollback.fields, remove: rollback.remove, mutationId: `infakt-rollback:${matchId}:${product.id}`, actor: 'administrator', area: 'purchase-price-rollback' });
     sync.lineMappings = { ...(sync.lineMappings || {}) }; let removedAliases = 0;
     if (match.lineSignature && String(sync.lineMappings[match.lineSignature] || '') === String(product.id)) { delete sync.lineMappings[match.lineSignature]; removedAliases = 1; }
     else if (!match.lineSignature && String(match.method || '').includes('ręczne')) for (const [signature, id] of Object.entries(sync.lineMappings)) if (String(id) === String(product.id)) { delete sync.lineMappings[signature]; removedAliases++; }
@@ -207,7 +239,7 @@ export function createInfaktService({ read, write }) {
     if (sourceItem?.itemKey && !(sync.pendingItems || []).some((entry) => entry.itemKey === sourceItem.itemKey)) sync.pendingItems = [sourceItem, ...(sync.pendingItems || [])].slice(0, 1000);
     matches[index] = { ...match, status: 'reverted', revertedAt: now, removedAliases };
     sync.recentMatches = matches; sync.pendingCount = (sync.pendingItems || []).length; sync.matchedCount = Math.max(0, (Number(sync.matchedCount) || 0) - 1); sync.updated_at = now;
-    await Promise.all([zapisz('settings', { ...settingsRec, data, rev: (Number(settingsRec.rev) || 0) + 1, updated_at: now }), zapisz('infakt_purchase_price_sync', sync)]);
+    await zapisz('infakt_purchase_price_sync', sync);
     return { sync, product: { id: String(product.id), name: product.nazwa }, restored: Object.prototype.hasOwnProperty.call(rollback.fields, 'cenaZakupu') ? rollback.fields.cenaZakupu : null, requiresResync: !sourceItem };
   }
   function infaktErrorText(data, fallback = 'Błąd inFakt') {

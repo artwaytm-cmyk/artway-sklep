@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCatalogProductFieldSaver } from '../src/backend/lib/domain/catalog-product-field-save.mjs';
+import { createCatalogProductFieldSaver, createPublishedCatalogProductFieldSaver, sanitizeCatalogProductFields } from '../src/backend/lib/domain/catalog-product-field-save.mjs';
+import { createCentralProductFieldPublisher } from '../src/backend/lib/domain/central-product-field-publication.mjs';
 import { createStoreDataRoute } from '../src/backend/lib/store-data-route.mjs';
 
 test('zapis pól produktu kończy się dopiero po zgodnym odczycie centralnej kartoteki', async () => {
@@ -23,6 +24,21 @@ test('zapis pól produktu kończy się dopiero po zgodnym odczycie centralnej ka
   assert.equal(result.mutationId, 'agent-17-run-1');
   assert.equal(result.fields.lastAdminMutationAt, '2026-07-24T14:00:00.000Z');
   assert.equal(stored.allegroDescription, 'Potwierdzony opis');
+  assert.equal(result.product.allegroDescription, 'Potwierdzony opis');
+});
+
+test('pełny wynik przygotowania dopuszcza źródło, parametry, SEO i sygnaturę wersji', () => {
+  const fields = sanitizeCatalogProductFields({
+    sourceUrl: 'https://example.test/product',
+    externalId: 'SKU-17',
+    parametryProducenta: { wiek: '8+' },
+    seoTitle: 'Gra edukacyjna',
+    allegroAgentPreparationFingerprint: 'allegro-preparation-v3-a1b2c3d4',
+    allegroAgentPreparationVersion: 3,
+  });
+  assert.equal(fields.sourceUrl, 'https://example.test/product');
+  assert.equal(fields.parametryProducenta.wiek, '8+');
+  assert.equal(fields.allegroAgentPreparationVersion, 3);
 });
 
 test('rozbieżny odczyt nie może zostać zgłoszony jako udany zapis', async () => {
@@ -34,6 +50,103 @@ test('rozbieżny odczyt nie może zostać zgłoszony jako udany zapis', async ()
     () => save({ productId: '17', fields: { nazwa: 'Nowa nazwa' }, mutationId: 'mismatch' }),
     (error) => error.code === 'catalog_product_readback_mismatch' && error.mismatches.includes('nazwa'),
   );
+});
+
+test('serwerowy Agent kończy zapis dopiero po odczycie tej samej wersji z opublikowanej kartoteki', async () => {
+  let published = { id: '17', opis: 'Stary opis' };
+  const save = createPublishedCatalogProductFieldSaver({
+    saveFields: async (input) => ({
+      productId: input.productId,
+      fields: { ...input.fields, lastAdminMutationId: input.mutationId },
+      mutationId: input.mutationId,
+      confirmedAt: '2026-07-26T07:00:00.000Z',
+      product: { id: input.productId, ...input.fields },
+    }),
+    publishFields: async ({ fields }) => {
+      published = { ...published, ...fields };
+      return { published: true, revision: 'catalog-agent-17' };
+    },
+    readPublishedProduct: async () => published,
+  });
+  const result = await save({
+    productId: '17',
+    fields: { opis: 'Opis zapisany przez serwerowego Agenta' },
+    mutationId: 'agent-editorial:gpt-17:store',
+  });
+  assert.equal(result.publication.published, true);
+  assert.equal(result.publication.readbackConfirmed, true);
+  assert.equal(result.product.opis, 'Opis zapisany przez serwerowego Agenta');
+});
+
+test('serwerowy Agent akceptuje obiekt JSONB mimo innej kolejności jego kluczy', async () => {
+  const contentEditorial = {
+    status: 'partial_ready',
+    channelStates: {
+      store: {
+        status: 'ready',
+        compliance: { status: 'passed', violations: [] },
+      },
+    },
+  };
+  const save = createPublishedCatalogProductFieldSaver({
+    saveFields: async () => ({
+      productId: '124',
+      fields: { contentEditorial },
+      confirmedAt: '2026-07-26T06:26:19.347Z',
+    }),
+    publishFields: async () => ({ published: true }),
+    readPublishedProduct: async () => ({
+      id: '124',
+      contentEditorial: {
+        channelStates: {
+          store: {
+            compliance: { violations: [], status: 'passed' },
+            status: 'ready',
+          },
+        },
+        status: 'partial_ready',
+      },
+    }),
+  });
+
+  const result = await save({ productId: '124', fields: { contentEditorial } });
+  assert.equal(result.publication.readbackConfirmed, true);
+});
+
+test('brak zgodnego odczytu po publikacji nie może zostać uznany za wykonaną pracę Agenta', async () => {
+  const save = createPublishedCatalogProductFieldSaver({
+    saveFields: async (input) => ({
+      productId: input.productId, fields: input.fields, mutationId: input.mutationId,
+      confirmedAt: '2026-07-26T07:05:00.000Z',
+    }),
+    publishFields: async () => ({ published: true, revision: 'catalog-stale' }),
+    readPublishedProduct: async () => ({ id: '17', opis: 'Nadal stary opis' }),
+  });
+  await assert.rejects(
+    () => save({ productId: '17', fields: { opis: 'Nowy opis' }, mutationId: 'agent-editorial:gpt-17:store' }),
+    (error) => error.code === 'catalog_product_publication_readback_mismatch' && error.mismatches.includes('opis'),
+  );
+});
+
+test('brak produktu w projekcji uruchamia synchroniczną odbudowę i dopiero potem potwierdza publikację', async () => {
+  let attempts = 0;
+  const publish = createCentralProductFieldPublisher({
+    catalog: {
+      patchProductFields: async () => {
+        attempts += 1;
+        return attempts === 1 ? { updated: false, reason: 'not_found' } : { updated: true, syncedAt: '2026-07-26T07:20:00.000Z' };
+      },
+    },
+    revisionState: async () => ({ sourceRevision: 'rev-agent-20' }),
+    synchronize: async ({ force, revision }) => {
+      assert.equal(force, true);
+      assert.equal(revision.sourceRevision, 'rev-agent-20');
+    },
+  });
+  const result = await publish({ productId: '20', fields: { opis: 'Opis' } });
+  assert.equal(attempts, 2);
+  assert.equal(result.published, true);
+  assert.equal(result.recovered, true);
 });
 
 test('endpoint panelu zwraca confirmed wyłącznie po trwałym zapisie', async () => {
@@ -58,10 +171,48 @@ test('endpoint panelu zwraca confirmed wyłącznie po trwałym zapisie', async (
   assert.equal(response.body.rev, 92);
 });
 
+test('endpoint uznaje przygotowanie za zakończone dopiero po publikacji centralnej kartoteki', async () => {
+  const route = createStoreDataRoute({
+    odpowiedz: (body, status = 200) => ({ body, status }),
+    czyAdmin: () => true,
+    tekst: (value, max = 400) => String(value || '').slice(0, max),
+    requestSession: () => ({ email: 'admin@example.test' }),
+    zapiszPolaProduktuCentralnie: async (input) => ({
+      productId: input.productId, fields: input.fields, product: { id: input.productId, ...input.fields },
+      confirmedFields: Object.keys(input.fields), mutationId: input.mutationId, confirmedAt: '2026-07-24T14:10:00.000Z', rev: 93,
+    }),
+    publikujPolaProduktuCentralnie: async () => ({ published: true, queued: false, revision: 'catalog-rev-93' }),
+  });
+  const request = { method: 'POST', json: async () => ({ productId: '17', fields: { opis: 'Opis opublikowany' }, mutationId: 'agent-17-run-3' }) };
+  const response = await route(request, new URL('https://artwaytm.pl/api/store?action=catalog-product-fields-update'), 'catalog-product-fields-update');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.confirmed, true);
+  assert.equal(response.body.publication.published, true);
+  assert.equal(response.body.product.opis, 'Opis opublikowany');
+});
+
 test('frontend zapisuje każdy przygotowany produkt atomowo i dopiero potem liczy sukces', async () => {
   const source = await import('node:fs/promises').then(({ readFile }) => readFile('src/frontend/12a-product-actions.js', 'utf8'));
   assert.match(source, /catalog-product-fields-update/);
   assert.match(source, /result\?\.confirmed!==true/);
-  assert.match(source, /const persistence=await asortymentZapiszProduktCentralnie/);
-  assert.match(source, /chmuraZapiszUstawienia\(\{flush:true\}\)/);
+  assert.match(source, /result\.publication\?\.published!==true/);
+  assert.match(source, /asortymentPobierzPelnyProdukt/);
+  assert.match(source, /allegroAgentPreparationFingerprint/);
+  const prepare = source.slice(source.indexOf('async function asortymentPrzygotujProduktDoAllegro'), source.indexOf('async function asortymentAgentPrzetworzProdukt'));
+  assert.match(prepare, /allegro-preparation-queue-enqueue/);
+  assert.match(prepare, /allegro-preparation-queue-status/);
+  assert.match(prepare, /asortymentPobierzPelnyProdukt/);
+  assert.doesNotMatch(prepare, /zapiszPolaProduktuLokalnie|allegroZapiszAutoUzupelnienia|allegro-description-improve|automatyczniePobierzDaneZrodlaProduktu/);
+});
+
+test('sukces wystawienia Allegro kończy się dopiero po publikacji w centralnej kartotece', async () => {
+  const source = await import('node:fs/promises').then(({ readFile }) => readFile('src/backend/lib/store-app.mjs', 'utf8'));
+  const start = source.indexOf('async function allegroZapiszPowiazanieProduktu');
+  const end = source.indexOf('\nconst ALLEGRO_AUTO_REPLY_DEFAULT', start);
+  assert.ok(start >= 0 && end > start);
+  const finalization = source.slice(start, end);
+  assert.match(finalization, /buildAllegroPublicationSuccessFields/);
+  assert.match(finalization, /await zapiszIOpublikujPolaProduktuCentralnie/);
+  assert.doesNotMatch(finalization, /await zapiszPolaProduktuCentralnie\(/);
+  assert.match(source, /verifiedOffer,\s*expectedStatus:/);
 });

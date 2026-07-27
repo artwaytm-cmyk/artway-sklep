@@ -19,7 +19,7 @@ const checks = [
   ['Edytor wymaga tekstowej nazwy producenta', /required name="producent"[\s\S]*?walidujPoleProducenta/.test(read('src/frontend/12-product-editor.js'))],
   ['Gotowość Allegro sprawdza nazwę producenta', /poprawnaNazwaProducenta\(p\.producent\|\|p\.marka\)/.test(read('src/frontend/11-allegro-operations.js'))],
   ['Import CSV odrzuca liczbowego producenta', /producent musi być nazwą, a nie samym numerem/.test(read('src/frontend/13a-product-import-export.js'))],
-  ['Backend oczyszcza producenta w ustawieniach', /sanitizeManufacturerFieldsInSettings\(wynik\)/.test(read('src/backend/lib/store-app.mjs'))],
+  ['Backend oczyszcza producenta w ustawieniach', /sanitizeManufacturerFieldsInSettings\(filterKnownSettingsDomains\(obj\)\)/.test(read('src/backend/lib/store-app.mjs'))],
   ['Import linków używa tej samej walidacji', /canonicalManufacturerName/.test(read('src/backend/lib/domain/product-link-import-support.mjs'))],
   ['Pełne przeładowanie występuje tylko po aktualizacji wydania, resecie lub imporcie kopii', maintenanceReloadsOnly],
 ];
