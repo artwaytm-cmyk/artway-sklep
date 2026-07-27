@@ -13411,7 +13411,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Multigra",
-    "nazwa": "Wystrzałowe piłeczki - Gra zręcznościowa - Multigra - gry dla każdego",
+    "nazwa": "Wystrzałowe piłeczki – gra zręcznościowa Multigra",
     "zdjecie": "https://multigra.com.pl/wp-content/uploads/sites/5/2025/07/0590-WystrzPilkiRekw-3D.jpg",
     "_catalog": {
       "channels": {
@@ -13433,22 +13433,21 @@
     "producent": "Multigra",
     "sourceUrl": "https://multigra.com.pl/produkty/wystrzalowe-pileczki-gra-zrecznosciowa/",
     "externalId": "0590",
-    "opisKrotki": "„Wystrzałowe piłeczki” to doskonała gra zręcznościowa w której sprawdzisz swoją celność. Kto z Was wykaże się najbardziej wprawnym okiem i ręką? Za pomocą plastikowych katapult celujemy plastikowymi kulkami do specjalnej tarczy. Trzeba umiejętnie ocenić odległość i precyzyjnie dobrać siłę naprężenia katapulty. Wygra ten, kto trafi w najcelniej w najwyżej punktowane pola. [...]Read More...",
+    "opisKrotki": "„Wystrzałowe piłeczki” to gra zręcznościowa Multigra, w której liczą się celność, ocena odległości i precyzja ruchu. Gracze celują plastikowymi kulkami z katapult do specjalnej tarczy i zdobywają punkty za trafienia w najwyżej punktowane pola.",
     "producentUrl": "https://multigra.com.pl/produkty/wystrzalowe-pileczki-gra-zrecznosciowa/",
     "kodProducenta": "0590",
     "allegroProductId": "07a570f9-f04a-43d5-a718-c6edb07c763a",
     "allegroCategoryId": "123948",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-26T23:42:08.343Z",
-    "allegroAgentPreparationRunId": "2d20fd68-7519-4a00-8589-87ce201cd217",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
+    "allegroAgentPreparedAt": "2026-07-27T08:40:42.072Z",
+    "allegroAgentPreparationRunId": "770173fa-e6c2-413e-be3f-7d5b6cb8408e",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
     "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationConfirmedAt": "2026-07-26T23:42:08.343Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-7aeaf9f2"
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-27T08:40:42.072Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1eb3816c",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000959",
@@ -31458,7 +31457,7 @@
     "ikona": "📦",
     "kolor": "#ffedd5",
     "marka": "Alexander",
-    "nazwa": "Mały Konstruktor / Constructor Pro-Muck",
+    "nazwa": "Mały Konstruktor Pro-Muck – zestaw do samodzielnego montażu, Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/c77458d08b2f9c3b9bfd0376c4f8bdbd/pol_pl_MALY-KONSTRUKTOR-CONSTRUCTOR-PRO-MUCK-1461_5.jpg",
     "_catalog": {
       "channels": {
@@ -31480,7 +31479,7 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-2816-MALY-KONSTRUKTOR-CONSTRUCTOR-PRO-MUCK.html",
     "externalId": "2816",
-    "opisKrotki": "Konstrukcyjna zabawka dla dzieci 8+ z zestawem 732 elementów, narzędziami oraz instrukcją; zabawa rozwija zdolności manualne i wyobraźnię przestrzenną.",
+    "opisKrotki": "Mały Konstruktor / Constructor Pro-Muck to zestaw do samodzielnego montażu marki Alexander. Zabawka rozwija zdolności manualne i wyobraźnię przestrzenną, a po złożeniu może służyć do dalszej zabawy. W zestawie znajdują się metalowe elementy, kolorowe elementy z tworzyw sztucznych, klucze i instrukcja. Produkt przeznaczony jest dla dzieci od 8 lat.",
     "cenaAllegro": 119.3,
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-2816-MALY-KONSTRUKTOR-CONSTRUCTOR-PRO-MUCK.html",
     "kodProducenta": "2816",
@@ -31488,12 +31487,16 @@
     "allegroProductId": "368eee87-5cb4-4f11-848d-331f4c099d10",
     "allegroCategoryId": "66812",
     "agentOnboardingStatus": "completed",
-    "allegroAgentPreparedAt": "2026-07-23T22:11:34.945Z",
+    "allegroAgentPreparedAt": "2026-07-27T08:40:11.386Z",
     "allegroEditorialSyncState": "synced",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "zdjęcia"
-    ]
+    "allegroAgentPreparationRunId": "6e91d664-37ba-4480-8c6c-a872c3d29c28",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 4,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-27T08:40:11.386Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-481c8d7a",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000781",
