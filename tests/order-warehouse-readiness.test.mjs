@@ -7,6 +7,13 @@ import {
   summarizeWarehousePositions,
   warehouseAnalysisNeedsInvestigation,
 } from '../src/backend/lib/domain/order-warehouse-readiness.mjs';
+import { supplierOrderHasActiveContent } from '../src/backend/lib/domain/agent-operational-center.mjs';
+
+test('analiza zamówień rozpoznaje wyłącznie aktywne pozycje szkicu producenta', () => {
+  assert.equal(supplierOrderHasActiveContent({ status: 'szkic', pozycje: [{ ilosc: 1 }] }), true);
+  assert.equal(supplierOrderHasActiveContent({ status: 'zrealizowane', pozycje: [{ ilosc: 1 }] }), false);
+  assert.equal(supplierOrderHasActiveContent({ status: 'szkic', pozycje: [{ ilosc: 0 }] }), false);
+});
 
 test('zamówienie korzysta z aktualnego stanu i lokalizacji kanonicznej kartoteki', () => {
   const inventory = resolveWarehouseInventory({

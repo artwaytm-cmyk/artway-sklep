@@ -78,7 +78,7 @@ import { createProductAvailabilityRoute } from './product-availability-route.mjs
 import { createEmailRoute } from './email-route.mjs';
 import { createAgentSpecialistRoute } from './agent-specialist-route.mjs';
 import { createAgentOperationsRoute } from './agent-operations-route.mjs';
-import { createAgentOperationalCenter } from './domain/agent-operational-center.mjs';
+import { createAgentOperationalCenter, supplierOrderHasActiveContent } from './domain/agent-operational-center.mjs';
 import { createStoreDataInputSanitizers } from './domain/store-data-input-sanitizers.mjs';
 import { createAiBannerGenerator } from './domain/ai-banner-generator.mjs';
 import { createAiBannerRoute } from './ai-banner-route.mjs';

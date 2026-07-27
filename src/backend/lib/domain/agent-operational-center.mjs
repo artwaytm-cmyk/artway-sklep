@@ -3,7 +3,7 @@ function orderIsActive(order = {}) {
     .includes(String(order.status || '').toLowerCase());
 }
 
-function supplierOrderHasActiveContent(draft = {}) {
+export function supplierOrderHasActiveContent(draft = {}) {
   const status = String(draft?.status || '').toLowerCase().normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').trim();
   if (['zrealizowane', 'anulowane', 'wyczyszczone', 'zastapione', 'zamkniete'].includes(status)) return false;
