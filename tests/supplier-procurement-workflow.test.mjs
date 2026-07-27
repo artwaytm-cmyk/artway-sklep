@@ -85,6 +85,21 @@ test('stary niewysłany dokument nie tworzy braku, gdy aktualny stan pokrywa zam
   assert.equal(result.warehouseStage, 'kompletacja');
 });
 
+test('usunięta z planu zbędna pozycja czyści stare oczekiwanie na zamówienie u producenta', () => {
+  const result = applySupplierProcurementToOrder(order({
+    warehouseStage: 'kompletacja',
+    supplierProcurement: { status: 'do_wyslania', taskStatus: 'do_realizacji', relatedDrafts: ['AZ/2026/07/0001'] },
+    agentAnalysis: {
+      positions: [{ productId: 'P-1', shortage: 0, decision: 'kompletuj', location: 'PAK-RA-P02' }],
+      nierozpoznane: 0, bezStanu: 0, bezLokalizacji: 0, braki: 0, gotowe: true,
+    },
+  }), [], { at: new Date('2026-07-27T09:15:00.000Z') });
+  assert.equal(result.supplierProcurement.status, 'pokryte_stanem');
+  assert.equal(result.supplierProcurement.taskStatus, 'zrealizowane');
+  assert.deepEqual(result.supplierProcurement.relatedDrafts, []);
+  assert.equal(result.warehouseStage, 'kompletacja');
+});
+
 test('otwarcie korekty cofa wyłącznie lokalny etap zakupowy do braków', () => {
   const corrected = draft({ status: 'do sprawdzenia', emailSentAt: undefined });
   const result = applySupplierProcurementToOrder(order({

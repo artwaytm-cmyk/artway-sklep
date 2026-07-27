@@ -64,12 +64,15 @@ export function applySupplierProcurementToOrder(order = {}, supplierDrafts = [],
       if (lineBelongsToOrder(line, references)) related.push({ draft, line, ...lineReceiptState(line, references) });
     }
   }
-  if (!related.length) return order;
-
   const shortagePositions = array(order.agentAnalysis?.positions)
     .filter((position) => quantity(position.shortage) > 0 || normalized(position.decision) === 'zamow u producenta');
   const requiredProductIds = new Set(shortagePositions.map(lineProductId).filter(Boolean));
   const currentShortage = requiredProductIds.size > 0;
+  const previous = order.supplierProcurement && typeof order.supplierProcurement === 'object' ? order.supplierProcurement : {};
+  // Po uzgodnieniu Planu zatowarowania zbędna pozycja może już zniknąć ze
+  // szkicu producenta. Wtedy nie wolno pozostawić przy zamówieniu starego
+  // komunikatu „do wysłania”, jeżeli aktualny stan w pełni pokrywa pozycje.
+  if (!related.length && (currentShortage || !Object.keys(previous).length)) return order;
   const sent = related.filter((item) => sentDraft(item.draft));
   const sentProductIds = new Set(sent.map((item) => lineProductId(item.line)).filter(Boolean));
   const everyShortageCovered = requiredProductIds.size
@@ -90,7 +93,6 @@ export function applySupplierProcurementToOrder(order = {}, supplierDrafts = [],
           ? 'czesciowo_wyslane'
           : 'do_wyslania';
   const taskStatus = !currentShortage || allSent ? 'zrealizowane' : sent.length ? 'w_realizacji' : 'do_realizacji';
-  const previous = order.supplierProcurement && typeof order.supplierProcurement === 'object' ? order.supplierProcurement : {};
   const timestamp = at instanceof Date ? at.toISOString() : text(at, 80);
   const supplierProcurement = {
     status: procurementStatus,
