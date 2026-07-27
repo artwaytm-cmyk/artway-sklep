@@ -22,6 +22,7 @@ export function createInventoryStockRoute({
   rateLimit,
   readVersioned,
   reconciliation,
+  refreshOrderReadiness,
   respond,
   sessionOf,
   writeIfVersion,
@@ -62,7 +63,10 @@ export function createInventoryStockRoute({
         const supplierPlan = documentMethod === 'confirm' && result?.confirmed === true && result?.duplicate !== true && typeof reconciliation?.reconcileDraftsSafely === 'function'
           ? await reconciliation.reconcileDraftsSafely({ summary: true })
           : null;
-        return respond({ ...result, ...(supplierPlan ? { supplierPlan } : {}) });
+        const orderReadiness = documentMethod === 'confirm' && result?.confirmed === true && result?.duplicate !== true && typeof refreshOrderReadiness === 'function'
+          ? await refreshOrderReadiness({ document: result.document })
+          : null;
+        return respond({ ...result, ...(supplierPlan ? { supplierPlan } : {}), ...(orderReadiness ? { orderReadiness } : {}) });
       }
       catch (error) { return respond({ ok: false, error: error?.message || 'Nie udało się zapisać dokumentu.', code: error?.code || 'warehouse_document_error', ...(error?.details || {}) }, Number(error?.status || 422)); }
     }

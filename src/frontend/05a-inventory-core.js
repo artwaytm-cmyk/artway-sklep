@@ -198,7 +198,8 @@ function intNieujemny(v, dom=0){
 }
 function magazynMetaProduktu(id){
   const raw=(magazynProdukty||{})[String(id)] || (magazynProdukty||{})[id] || {};
-  return raw && typeof raw==="object" ? raw : {};
+  const produkt=typeof pobierzProduktAdmin==="function"?pobierzProduktAdmin(id):null,catalog=produkt?._catalog?.inventory||{};
+  return {...(catalog&&typeof catalog==="object"?catalog:{}),...(raw&&typeof raw==="object"?raw:{})};
 }
 function zapiszMagazynMeta(id, meta){
   const key=String(id);

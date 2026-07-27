@@ -17,9 +17,17 @@ test('obsługa zamówienia sklepu pokazuje lokalizację każdej pozycji bez blok
 
 test('zamówienia Allegro mają osobną kolumnę lokalizacji magazynowej', () => {
   assert.match(source, /function allegroLokalizacjaPozycjiHTML/);
+  assert.match(source, /p\.location/);
   assert.match(source, /Lokalizacja magazynowa/);
   assert.match(source, /allegroLokalizacjaPozycjiHTML\(p\)/);
   assert.match(source, /Brak lokalizacji/);
+});
+
+test('listy zamówień pokazują szybką kompletację z kodem i lokalizacją bez otwierania szczegółów', () => {
+  assert.match(source, /function adminKompletacjaZamowieniaHTML/);
+  assert.match(source, /function allegroKompletacjaSzybkaHTML/);
+  assert.match(source, /order-picking-strip/);
+  assert.match(styles, /order-picking-strip/);
 });
 
 test('status lokalizacji jest czytelny i neutralny wizualnie', () => {

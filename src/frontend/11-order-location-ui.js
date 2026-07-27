@@ -4,7 +4,8 @@ function magazynLokalizacjaStatusHTML(kod="",brakOpis="Informacja dla magazynu �
   return value?`<span class="warehouse-order-location is-set"><b>📍 ${esc(sciezkaNazwLokalizacjiMagazynu(value)||nazwaLokalizacjiMagazynu(value))}</b><small>${esc(value)}</small></span>`:`<span class="warehouse-order-location is-missing"><b>📍 Brak lokalizacji</b><small>${esc(brakOpis)}</small></span>`;
 }
 function allegroLokalizacjaPozycjiHTML(p={}){
-  const kod=String(p.lokalizacja||p.produkt&&magazynMetaProduktu(p.produkt.id).lokalizacja||"").trim();
+  const produkt=p.produkt||p.product||{},catalog=produkt?._catalog?.inventory||{};
+  const kod=String(p.lokalizacja||p.location||catalog.lokalizacja||catalog.location||produkt&&magazynMetaProduktu(produkt.id).lokalizacja||"").trim();
   return magazynLokalizacjaStatusHTML(kod);
 }
 function adminKluczPozycjiMagazynowej(value=""){
@@ -20,6 +21,6 @@ function adminProduktDlaPozycjiZamowienia(item={}){
   const matches=katalog.filter(p=>String(p.nazwa||"").trim().toLowerCase().replace(/\s+/g," ")===name);return matches.length===1?matches[0]:null;
 }
 function adminLokalizacjaPozycjiZamowieniaHTML(item={}){
-  const produkt=adminProduktDlaPozycjiZamowienia(item),kod=produkt?String(magazynMetaProduktu(produkt.id).lokalizacja||"").trim():"";
+  const produkt=adminProduktDlaPozycjiZamowienia(item),catalog=produkt?._catalog?.inventory||{},kod=produkt?String(catalog.lokalizacja||catalog.location||magazynMetaProduktu(produkt.id).lokalizacja||"").trim():"";
   return magazynLokalizacjaStatusHTML(kod,produkt?"Informacja dla magazynu — nie blokuje obsługi":"Nie rozpoznano kartoteki produktu");
 }

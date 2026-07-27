@@ -35,7 +35,7 @@ test('zatwierdzenie PZ/WZ automatycznie uzgadnia Plan zatowarowania dokładnie r
     rev: 1,
     updated_at: null,
   };
-  let etag = 1, reconciliations = 0;
+  let etag = 1, reconciliations = 0, readinessRefreshes = 0;
   const route = createInventoryStockRoute({
     isAdmin: () => true,
     rateLimit: () => null,
@@ -46,6 +46,11 @@ test('zatwierdzenie PZ/WZ automatycznie uzgadnia Plan zatowarowania dokładnie r
         assert.deepEqual(options, { summary: true });
         return { ok: true, changed: true, updated: ['supplier-draft'] };
       },
+    },
+    refreshOrderReadiness: async ({ document }) => {
+      readinessRefreshes += 1;
+      assert.equal(document.number, 'PZ/2026/07/0001');
+      return { orders: [{ id: 'allegro-order', warehouseStage: 'kompletacja' }] };
     },
     respond: (payload, status = 200) => ({ payload, status }),
     sessionOf: () => ({ email: 'admin@example.test' }),
@@ -74,5 +79,7 @@ test('zatwierdzenie PZ/WZ automatycznie uzgadnia Plan zatowarowania dokładnie r
   assert.equal(confirmed.status, 200);
   assert.equal(confirmed.payload.confirmed, true);
   assert.equal(reconciliations, 1);
+  assert.equal(readinessRefreshes, 1);
   assert.deepEqual(confirmed.payload.supplierPlan, { ok: true, changed: true, updated: ['supplier-draft'] });
+  assert.equal(confirmed.payload.orderReadiness.orders[0].warehouseStage, 'kompletacja');
 });

@@ -3,9 +3,29 @@ import assert from 'node:assert/strict';
 
 import {
   classifyWarehousePosition,
+  resolveWarehouseInventory,
   summarizeWarehousePositions,
   warehouseAnalysisNeedsInvestigation,
 } from '../src/backend/lib/domain/order-warehouse-readiness.mjs';
+
+test('zamówienie korzysta z aktualnego stanu i lokalizacji kanonicznej kartoteki', () => {
+  const inventory = resolveWarehouseInventory({
+    id: '1000366',
+    stan: 2,
+    _catalog: { inventory: { stock: 2, lokalizacja: 'PAK-RA-P02' } },
+  }, {
+    legacyStockKnown: true,
+    legacyStock: 0,
+    legacyMeta: { lokalizacja: '' },
+  });
+  assert.deepEqual(inventory, {
+    stockKnown: true,
+    stock: 2,
+    location: 'PAK-RA-P02',
+    supplier: '',
+    source: 'central_product_catalog',
+  });
+});
 
 test('towar pokryty stanem jest gotowy do kompletacji także bez lokalizacji', () => {
   const position = classifyWarehousePosition({ matched: true, stockKnown: true, shortage: 0, location: '' });

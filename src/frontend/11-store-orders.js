@@ -44,6 +44,15 @@ function adminZaopatrzenieZamowieniaHTML(z={}){
     <div class="backend-note ${braki.length?"":"is-ok"}"><b>${braki.length?"Dalszy etap:":"Wynik kontroli:"}</b> ${esc(statusDoc)}. ${braki.length?"Najpierw sprawdź tabelę i zatwierdź dokładną rewizję; dopiero potem system pozwoli wysłać e-mail do właściwego producenta.":"Produkty można przekazać do kompletacji bez tworzenia zlecenia zakupowego."}</div>
   </section>`;
 }
+function adminKompletacjaZamowieniaHTML(z={}){
+  const items=Array.isArray(z?.pozycjeDane)?z.pozycjeDane:[];
+  const rows=items.map(item=>{
+    const produkt=adminProduktDlaPozycjiZamowienia(item),id=String(produkt?.id??item?.produktId??item?.productId??item?.id??""),meta=produkt?magazynMetaProduktu(id):{},stan=produkt?stanMagazynuId(id):null;
+    return {nazwa:item?.nazwa||item?.produkt||produkt?.nazwa||"Produkt",kod:produkt?.externalId||produkt?.sku||produkt?.kodProducenta||produkt?.mpn||item?.sku||id||"—",ilosc:Math.max(1,Number(item?.ilosc)||1),lokalizacja:String(meta?.lokalizacja||meta?.location||"").trim(),stan,produkt};
+  });
+  if(!rows.length)return "";
+  return `<div class="order-picking-strip"><b>📦 Kompletacja</b><div>${rows.map(row=>`<span class="${row.produkt&&row.stan!==null&&row.stan>=row.ilosc?"is-ready":"needs-check"}"><strong>${esc(row.kod)}</strong> ${esc(row.nazwa)} × ${row.ilosc}${row.lokalizacja?` <em>📍 ${esc(sciezkaNazwLokalizacjiMagazynu(row.lokalizacja)||nazwaLokalizacjiMagazynu(row.lokalizacja))} · ${esc(row.lokalizacja)}</em>`:` <em>📍 brak lokalizacji</em>`}</span>`).join("")}</div></div>`;
+}
 function kartaAdminZamowieniaHTML(z){
   const k=kosztyZamowienia(z), w=daneWysylki(z), klient=klientZamowieniaLabel(z);
   const zaznaczone=zaznaczoneZamowieniaSklepu.has(String(z.nr));
@@ -85,6 +94,7 @@ function kartaAdminZamowieniaHTML(z){
       </div>
     </div>
     ${alertDostepnosciZamowieniaHTML(z)}
+    ${adminKompletacjaZamowieniaHTML(z)}
     <div class="order-pro-bottom">
       <div class="order-pro-costs">
         <span>Produkty <b>${zl(k.poRabacie||k.produkty)}</b></span>

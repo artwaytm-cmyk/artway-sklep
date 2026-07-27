@@ -4857,7 +4857,8 @@ function magazynLokalizacjaStatusHTML(kod="",brakOpis="Informacja dla magazynu �
   return value?`<span class="warehouse-order-location is-set"><b>📍 ${esc(sciezkaNazwLokalizacjiMagazynu(value)||nazwaLokalizacjiMagazynu(value))}</b><small>${esc(value)}</small></span>`:`<span class="warehouse-order-location is-missing"><b>📍 Brak lokalizacji</b><small>${esc(brakOpis)}</small></span>`;
 }
 function allegroLokalizacjaPozycjiHTML(p={}){
-  const kod=String(p.lokalizacja||p.produkt&&magazynMetaProduktu(p.produkt.id).lokalizacja||"").trim();
+  const produkt=p.produkt||p.product||{},catalog=produkt?._catalog?.inventory||{};
+  const kod=String(p.lokalizacja||p.location||catalog.lokalizacja||catalog.location||produkt&&magazynMetaProduktu(produkt.id).lokalizacja||"").trim();
   return magazynLokalizacjaStatusHTML(kod);
 }
 function adminKluczPozycjiMagazynowej(value=""){
@@ -4873,7 +4874,7 @@ function adminProduktDlaPozycjiZamowienia(item={}){
   const matches=katalog.filter(p=>String(p.nazwa||"").trim().toLowerCase().replace(/\s+/g," ")===name);return matches.length===1?matches[0]:null;
 }
 function adminLokalizacjaPozycjiZamowieniaHTML(item={}){
-  const produkt=adminProduktDlaPozycjiZamowienia(item),kod=produkt?String(magazynMetaProduktu(produkt.id).lokalizacja||"").trim():"";
+  const produkt=adminProduktDlaPozycjiZamowienia(item),catalog=produkt?._catalog?.inventory||{},kod=produkt?String(catalog.lokalizacja||catalog.location||magazynMetaProduktu(produkt.id).lokalizacja||"").trim():"";
   return magazynLokalizacjaStatusHTML(kod,produkt?"Informacja dla magazynu — nie blokuje obsługi":"Nie rozpoznano kartoteki produktu");
 }
 
@@ -5903,6 +5904,11 @@ function allegroMapowaniePozycjiHTML(p={}){
   const suggestion=(p.candidates||[])[0];
   return `<div class="allegro-line-mapping ${p.produkt?"is-linked":"needs-link"}">${p.produkt?`<span class="lvl lvl-ok">połączono • ${esc(p.confidence||100)}%</span><b>${esc(p.produkt.nazwa||`Produkt ${p.produkt.id}`)}</b><small>ID ${esc(p.produkt.id)} • ${esc(p.match||"mapowanie")}</small>`:`<span class="lvl lvl-blad">brak powiązania</span>${suggestion?`<small>Najlepsza sugestia: <b>${esc(suggestion.produkt.nazwa)}</b> (${esc(suggestion.score)}%)</small>`:`<small>Brak jednoznacznej sugestii po identyfikatorach.</small>`}`}<button class="btn ${p.produkt?"ghost":""}" type="button" onclick="allegroOtworzMapowaniePozycji(${jsArg(p.offerId)},${jsArg(p.nazwa)})">${p.produkt?"Zmień powiązanie":"🧩 Połącz produkt"}</button></div>`;
 }
+function allegroKompletacjaSzybkaHTML(analiza={}){
+  const rows=Array.isArray(analiza.pozycje)?analiza.pozycje:[];
+  if(!rows.length)return "";
+  return `<div class="order-picking-strip allegro-picking-strip"><b>📦 Kompletacja</b><div>${rows.map(p=>`<span class="${p.decyzja==="kompletuj"?"is-ready":"needs-check"}"><strong>${esc(p.externalId||p.produkt?.externalId||p.produkt?.kodProducenta||"—")}</strong> ${esc(p.nazwa||"Produkt")} × ${esc(p.ilosc||1)}${p.lokalizacja?` <em>📍 ${esc(sciezkaNazwLokalizacjiMagazynu(p.lokalizacja)||nazwaLokalizacjiMagazynu(p.lokalizacja))} · ${esc(p.lokalizacja)}</em>`:` <em>${p.decyzja==="kompletuj"?"📍 brak lokalizacji":"⚠️ wymaga kontroli stanu"}</em>`}</span>`).join("")}</div></div>`;
+}
 function allegroZlecenieHTML(z){
   const meta=allegroStatusKolejkiMeta(z), s=allegroStatusKolejki(z);
   const archiwalne=!!z.archivedAt;
@@ -5923,6 +5929,7 @@ function allegroZlecenieHTML(z){
       <div><b>💳 ${esc(z.paymentStatus||"Płatność")}</b><small>${esc(z.total||"—")}</small></div>
     </div>
     ${allegroPrzeplywZakupowyHTML(z)}
+    ${allegroKompletacjaSzybkaHTML(analiza)}
     <details class="allegro-order-products" ${analiza.braki>0||analiza.nierozpoznane>0||analiza.bezStanu>0?"open":""}>
       <summary>Produkty w zleceniu (${items.length})</summary>
       <div class="warehouse-worktable-wrap"><table class="log-table allegro-order-products-table"><tr><th>Zdjęcie</th><th>Pozycja z Allegro</th><th>Produkt sklepu i dopasowanie</th><th>Ilość</th><th>Stan i rezerwacje</th><th>Lokalizacja magazynowa</th><th>Decyzja agenta</th></tr>
@@ -7051,6 +7058,15 @@ function adminZaopatrzenieZamowieniaHTML(z={}){
     <div class="backend-note ${braki.length?"":"is-ok"}"><b>${braki.length?"Dalszy etap:":"Wynik kontroli:"}</b> ${esc(statusDoc)}. ${braki.length?"Najpierw sprawdź tabelę i zatwierdź dokładną rewizję; dopiero potem system pozwoli wysłać e-mail do właściwego producenta.":"Produkty można przekazać do kompletacji bez tworzenia zlecenia zakupowego."}</div>
   </section>`;
 }
+function adminKompletacjaZamowieniaHTML(z={}){
+  const items=Array.isArray(z?.pozycjeDane)?z.pozycjeDane:[];
+  const rows=items.map(item=>{
+    const produkt=adminProduktDlaPozycjiZamowienia(item),id=String(produkt?.id??item?.produktId??item?.productId??item?.id??""),meta=produkt?magazynMetaProduktu(id):{},stan=produkt?stanMagazynuId(id):null;
+    return {nazwa:item?.nazwa||item?.produkt||produkt?.nazwa||"Produkt",kod:produkt?.externalId||produkt?.sku||produkt?.kodProducenta||produkt?.mpn||item?.sku||id||"—",ilosc:Math.max(1,Number(item?.ilosc)||1),lokalizacja:String(meta?.lokalizacja||meta?.location||"").trim(),stan,produkt};
+  });
+  if(!rows.length)return "";
+  return `<div class="order-picking-strip"><b>📦 Kompletacja</b><div>${rows.map(row=>`<span class="${row.produkt&&row.stan!==null&&row.stan>=row.ilosc?"is-ready":"needs-check"}"><strong>${esc(row.kod)}</strong> ${esc(row.nazwa)} × ${row.ilosc}${row.lokalizacja?` <em>📍 ${esc(sciezkaNazwLokalizacjiMagazynu(row.lokalizacja)||nazwaLokalizacjiMagazynu(row.lokalizacja))} · ${esc(row.lokalizacja)}</em>`:` <em>📍 brak lokalizacji</em>`}</span>`).join("")}</div></div>`;
+}
 function kartaAdminZamowieniaHTML(z){
   const k=kosztyZamowienia(z), w=daneWysylki(z), klient=klientZamowieniaLabel(z);
   const zaznaczone=zaznaczoneZamowieniaSklepu.has(String(z.nr));
@@ -7092,6 +7108,7 @@ function kartaAdminZamowieniaHTML(z){
       </div>
     </div>
     ${alertDostepnosciZamowieniaHTML(z)}
+    ${adminKompletacjaZamowieniaHTML(z)}
     <div class="order-pro-bottom">
       <div class="order-pro-costs">
         <span>Produkty <b>${zl(k.poRabacie||k.produkty)}</b></span>

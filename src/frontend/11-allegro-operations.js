@@ -181,6 +181,11 @@ function allegroMapowaniePozycjiHTML(p={}){
   const suggestion=(p.candidates||[])[0];
   return `<div class="allegro-line-mapping ${p.produkt?"is-linked":"needs-link"}">${p.produkt?`<span class="lvl lvl-ok">połączono • ${esc(p.confidence||100)}%</span><b>${esc(p.produkt.nazwa||`Produkt ${p.produkt.id}`)}</b><small>ID ${esc(p.produkt.id)} • ${esc(p.match||"mapowanie")}</small>`:`<span class="lvl lvl-blad">brak powiązania</span>${suggestion?`<small>Najlepsza sugestia: <b>${esc(suggestion.produkt.nazwa)}</b> (${esc(suggestion.score)}%)</small>`:`<small>Brak jednoznacznej sugestii po identyfikatorach.</small>`}`}<button class="btn ${p.produkt?"ghost":""}" type="button" onclick="allegroOtworzMapowaniePozycji(${jsArg(p.offerId)},${jsArg(p.nazwa)})">${p.produkt?"Zmień powiązanie":"🧩 Połącz produkt"}</button></div>`;
 }
+function allegroKompletacjaSzybkaHTML(analiza={}){
+  const rows=Array.isArray(analiza.pozycje)?analiza.pozycje:[];
+  if(!rows.length)return "";
+  return `<div class="order-picking-strip allegro-picking-strip"><b>📦 Kompletacja</b><div>${rows.map(p=>`<span class="${p.decyzja==="kompletuj"?"is-ready":"needs-check"}"><strong>${esc(p.externalId||p.produkt?.externalId||p.produkt?.kodProducenta||"—")}</strong> ${esc(p.nazwa||"Produkt")} × ${esc(p.ilosc||1)}${p.lokalizacja?` <em>📍 ${esc(sciezkaNazwLokalizacjiMagazynu(p.lokalizacja)||nazwaLokalizacjiMagazynu(p.lokalizacja))} · ${esc(p.lokalizacja)}</em>`:` <em>${p.decyzja==="kompletuj"?"📍 brak lokalizacji":"⚠️ wymaga kontroli stanu"}</em>`}</span>`).join("")}</div></div>`;
+}
 function allegroZlecenieHTML(z){
   const meta=allegroStatusKolejkiMeta(z), s=allegroStatusKolejki(z);
   const archiwalne=!!z.archivedAt;
@@ -201,6 +206,7 @@ function allegroZlecenieHTML(z){
       <div><b>💳 ${esc(z.paymentStatus||"Płatność")}</b><small>${esc(z.total||"—")}</small></div>
     </div>
     ${allegroPrzeplywZakupowyHTML(z)}
+    ${allegroKompletacjaSzybkaHTML(analiza)}
     <details class="allegro-order-products" ${analiza.braki>0||analiza.nierozpoznane>0||analiza.bezStanu>0?"open":""}>
       <summary>Produkty w zleceniu (${items.length})</summary>
       <div class="warehouse-worktable-wrap"><table class="log-table allegro-order-products-table"><tr><th>Zdjęcie</th><th>Pozycja z Allegro</th><th>Produkt sklepu i dopasowanie</th><th>Ilość</th><th>Stan i rezerwacje</th><th>Lokalizacja magazynowa</th><th>Decyzja agenta</th></tr>

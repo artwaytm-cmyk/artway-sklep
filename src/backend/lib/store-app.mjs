@@ -86,7 +86,7 @@ import { normalizeTelegramAccountFields } from './domain/telegram-account-access
 import { allegroOfferTitle } from './domain/allegro-offer-content.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
 import { applySupplierProcurementWorkflow } from './domain/supplier-procurement-workflow.mjs';
-import { classifyWarehousePosition, summarizeWarehousePositions, warehouseAnalysisNeedsInvestigation } from './domain/order-warehouse-readiness.mjs';
+import { classifyWarehousePosition, resolveWarehouseInventory, summarizeWarehousePositions, warehouseAnalysisNeedsInvestigation } from './domain/order-warehouse-readiness.mjs';
 import { createSupplierOrderPlanService, preserveSupplierPlanOnGenericSettings } from './supplier-order-plan-service.mjs';
 import { createSupplierOrderRoute } from './supplier-order-route.mjs';
 import {
@@ -576,7 +576,7 @@ function ograniczRuch(request, name, limit, windowMs) {
   return odpowiedz({ ok: false, error: 'Zbyt wiele prób. Spróbuj ponownie później.', code: 'rate_limit', retryAfter: result.retryAfter }, 429);
 }
 
-const inventoryStockRoute = createInventoryStockRoute({ isAdmin: czyAdmin, rateLimit: ograniczRuch, readVersioned: czytajWersjonowane, reconciliation: storeOrderSupplierReconciliation, respond: odpowiedz, sessionOf: requestSession, settingsLimit: LIMIT_USTAWIEN, writeIfVersion: zapiszJesliWersja, mergeSettings: (data) => productLinkImport.mergeSettings(data) });
+const inventoryStockRoute = createInventoryStockRoute({ isAdmin: czyAdmin, rateLimit: ograniczRuch, readVersioned: czytajWersjonowane, reconciliation: storeOrderSupplierReconciliation, refreshOrderReadiness: () => allegroPrzeliczZamowieniaPoMapowaniu({ reconcile: false, source: 'warehouse-document-confirm' }), respond: odpowiedz, sessionOf: requestSession, settingsLimit: LIMIT_USTAWIEN, writeIfVersion: zapiszJesliWersja, mergeSettings: (data) => productLinkImport.mergeSettings(data) });
 const inventoryDecisionRoute = createInventoryDecisionRoute({ decisions: inventoryDecisions, isAdmin: czyAdmin, rateLimit: ograniczRuch, readVersioned: czytajWersjonowane, reconciliation: storeOrderSupplierReconciliation, respond: odpowiedz, sessionOf: requestSession, text: tekst });
 const {
   customerProfile: profilKlienta,
@@ -1107,11 +1107,12 @@ async function allegroAgentPrzetworzZamowienia(items = [], options = {}) {
     const positions = (lineMatches.get(orderId) || []).map(({ line, offer, match, quantity }) => {
       if (!match?.id) return { offerId: line.offerId, nazwa: line.offerName || offer.name || 'Produkt Allegro', ilosc: quantity, decision: 'nierozpoznany', reason: 'Brak jednoznacznego EAN/SKU lub mapowania oferty' };
       const productId = match.id, meta = kartoteki[productId] && typeof kartoteki[productId] === 'object' ? kartoteki[productId] : {};
-      const known = Object.prototype.hasOwnProperty.call(stany, productId) && stany[productId] !== '' && stany[productId] != null && Number.isFinite(Number(stany[productId]));
-      const stock = known ? Math.max(0, Number(stany[productId]) || 0) : 0, reserved = reservations.get(productId) || 0, available = stock - reserved, shortage = Math.max(0, -available);
+      const legacyStockKnown = Object.prototype.hasOwnProperty.call(stany, productId) && stany[productId] !== '' && stany[productId] != null && Number.isFinite(Number(stany[productId]));
+      const inventory = resolveWarehouseInventory(match.product, { legacyStockKnown, legacyStock: stany[productId], legacyMeta: meta });
+      const known = inventory.stockKnown, stock = inventory.stock, reserved = reservations.get(productId) || 0, available = stock - reserved, shortage = Math.max(0, -available);
       const docs = supplierDocsByProduct.get(productId) || [];
-      const location = tekst(meta.lokalizacja || '', 120), classification = classifyWarehousePosition({ matched: true, stockKnown: known, shortage, location });
-      return { offerId: line.offerId, productId, nazwa: line.offerName || match.product?.nazwa || offer.name || `Produkt ${productId}`, ilosc: quantity, match: match.match, confidence: Number(match.confidence || 0), supplierMatchVerified: match.supplierMatchVerified === true, stock, stockRecordKnown: known, reserved, available, shortage, location, supplier: tekst(meta.dostawca || match.product?.dostawca || match.product?.supplier || '', 120), product: match.product, supplierOrders: docs, decision: classification.decision, locationMissing: classification.locationMissing, fulfillmentReady: classification.fulfillmentReady };
+      const location = tekst(inventory.location, 120), classification = classifyWarehousePosition({ matched: true, stockKnown: known, shortage, location });
+      return { offerId: line.offerId, productId, externalId: tekst(match.product?.externalId || match.product?.sku || match.product?.kodProducenta || match.product?.mpn || line.externalId || '', 160), ean: tekst(match.product?.gtin || match.product?.ean || offer.ean || offer.gtin || '', 80), nazwa: line.offerName || match.product?.nazwa || offer.name || `Produkt ${productId}`, ilosc: quantity, match: match.match, confidence: Number(match.confidence || 0), supplierMatchVerified: match.supplierMatchVerified === true, stock, stockRecordKnown: known, inventorySource: inventory.source, reserved, available, shortage, location, supplier: tekst(inventory.supplier, 120), product: match.product, supplierOrders: docs, decision: classification.decision, locationMissing: classification.locationMissing, fulfillmentReady: classification.fulfillmentReady };
     });
     const analysis = summarizeWarehousePositions(positions);
     let warehouseStage = String(z.warehouseStage || 'do_sprawdzenia').toLowerCase();
@@ -1138,15 +1139,16 @@ async function allegroZapisStanIMozeUzgodnijPlan(items = []) {
   }
   return { inventory, supplierReconciliation, procurementWorkflow: { changed: procurementWorkflow.changed } };
 }
-async function allegroPrzeliczZamowieniaPoMapowaniu() {
+async function allegroPrzeliczZamowieniaPoMapowaniu(options = {}) {
   const rec = await czytaj('allegro_orders', { items: [], updated_at: null });
   const source = Array.isArray(rec.items) ? rec.items : [];
   const result = await allegroAgentPrzetworzZamowienia(source, { newOrderIds: [] });
   const updated_at = new Date().toISOString();
-  const zapis = { ...rec, items: result.items, updated_at, agent: result.report };
+  const zapis = { ...rec, items: result.items, updated_at, agent: { ...result.report, source: tekst(options.source || 'order-recalculation', 100) } };
   await zapisz('allegro_orders', zapis);
+  if (options.reconcile === false) return { orders: result.items, agent: zapis.agent, updated_at };
   const plan = await allegroZapisStanIMozeUzgodnijPlan(result.items);
-  return { orders: result.items, agent: result.report, ...plan, updated_at };
+  return { orders: result.items, agent: zapis.agent, ...plan, updated_at };
 }
 async function synchronizujEtapyZakupoweZlecen(supplierOrders = [], source = 'supplier-plan') {
   const record = await czytaj('allegro_orders', { items: [], updated_at: null });
