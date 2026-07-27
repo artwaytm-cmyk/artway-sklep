@@ -1399,7 +1399,8 @@ function zapiszLS(klucz, dane, opcje={}){
     }
   }
   if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina(klucz);
-  if(zmieniono&&["artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne","artway_stany","artway_dostepnosc","artway_magazyn_produkty","artway_ustawienia"].includes(klucz)&&typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
+  if(zmieniono&&["artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne"].includes(klucz)&&typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
+  else if(zmieniono&&["artway_stany","artway_dostepnosc","artway_magazyn_produkty"].includes(klucz)&&typeof asortymentCentralnyOznaczNieaktualny==="function")asortymentCentralnyOznaczNieaktualny();
   if(zmieniono && opcje.synchronizuj!==false && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
   return zmieniono;
 }
@@ -2542,7 +2543,7 @@ function podmienProduktAdminBezRenderu(id,patch={},usun=[]){
   const key=String(id),baza=pobierzProduktAdmin(id)||{},targets=new Set([baza]);
   const added=(produktyDodane||[]).find(item=>String(item?.id)===key);
   if(added)targets.add(added);
-  else{
+  else if(!baza?._catalog){
     const edit=produktyEdytowane[key]&&typeof produktyEdytowane[key]==="object"?produktyEdytowane[key]:(produktyEdytowane[key]={});
     Object.assign(edit,patch);for(const field of usun)edit[field]=null;
   }

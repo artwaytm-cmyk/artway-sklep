@@ -1,9 +1,10 @@
 const ASORTYMENT_PARTIA_KART=10;
-let asortymentKartyOczekujace=[],asortymentKartyObserwator=null,asortymentKartyGeneracja=0;
+let asortymentKartyOczekujace=[],asortymentKartyObserwator=null,asortymentKartyGeneracja=0,asortymentKartyZaladowane=0,asortymentKartyRazem=0;
 function asortymentRenderujElementKarty(item){return item?.produkt?asortymentKartaProduktuHTML(item.produkt,item.ukrytaKopia===true):String(item||"");}
 function asortymentPrzygotujKartyProgresywnie(lista=[]){
   asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;
   const generation=++asortymentKartyGeneracja,items=Array.isArray(lista)?lista:[];
+  asortymentKartyRazem=items.length;asortymentKartyZaladowane=Math.min(ASORTYMENT_PARTIA_KART,items.length);
   asortymentKartyOczekujace=items.slice(ASORTYMENT_PARTIA_KART);
   const first=items.slice(0,ASORTYMENT_PARTIA_KART).map(asortymentRenderujElementKarty).join("");
   if(!asortymentKartyOczekujace.length)return first;
@@ -14,10 +15,9 @@ function asortymentDoloadujKarty(generation=asortymentKartyGeneracja){
   const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);
   if(!loader||Number(generation)!==asortymentKartyGeneracja)return false;
   const batch=asortymentKartyOczekujace.splice(0,ASORTYMENT_PARTIA_KART);
-  if(batch.length)loader.insertAdjacentHTML("beforebegin",batch.map(asortymentRenderujElementKarty).join(""));
+  if(batch.length){loader.insertAdjacentHTML("beforebegin",batch.map(asortymentRenderujElementKarty).join(""));asortymentKartyZaladowane+=batch.length;}
   if(!asortymentKartyOczekujace.length){asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;loader.remove();return true;}
-  const loaded=document.querySelectorAll(".catalog-product-list .catalog-product-card").length,total=loaded+asortymentKartyOczekujace.length;
-  const label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${loaded} z ${total}`;
+  const label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${asortymentKartyZaladowane} z ${asortymentKartyRazem}`;
   return true;
 }
 function asortymentUruchomDoloadowywanieKart(generation=asortymentKartyGeneracja){

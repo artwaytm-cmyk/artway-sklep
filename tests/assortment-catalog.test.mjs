@@ -81,6 +81,21 @@ test("ceny w katalogu zapisują się w wierszu bez pełnego renderowania strony"
   assert.match(css,/\.catalog-product-edit-value\.has-error/);
 });
 
+test("filtry i paginacja asortymentu aktualizują tylko podstronę bez pełnego renderu",async()=>{
+  const controls=await read("src/frontend/12-customers-and-inventory.js");
+  const refresh=controls.slice(controls.indexOf("async function asortymentOdswiezWyniki"),controls.indexOf("function asortymentSzukajProdukty"));
+  assert.match(refresh,/await asortymentCentralnyPobierz\(force,\{render:false\}\)/);
+  assert.match(controls,/function asortymentPodmienSekcjeStabilnie[\s\S]+aktualizujWezelStabilnie/);
+  assert.match(refresh,/data-assortment-results/);
+  assert.doesNotMatch(refresh,/current\.innerHTML=next\.innerHTML/);
+  for(const name of ["ustawStroneAdminProduktow","ustawProduktyNaStronieAdmin","ustawSortowanieAdminProduktow"]){
+    const start=controls.indexOf(`function ${name}`),end=controls.indexOf("\nfunction ",start+10);
+    assert.match(controls.slice(start,end<0?undefined:end),/asortymentOdswiezWyniki/);
+    assert.doesNotMatch(controls.slice(start,end<0?undefined:end),/renderuj\s*\(/);
+  }
+  assert.match(controls,/window\.__assortmentSearch=setTimeout\(\(\)=>void asortymentOdswiezWyniki\(\),240\)/);
+});
+
 test("układ katalogu przejmuje strukturę wzorca i zachowuje treść asortymentu",async()=>{
   const css=(await read("src/styles/07-admin-domains.css"))+(await read("src/styles/07a-admin-domains.css"))+(await read("src/styles/07b-admin-domains.css"))+(await read("src/styles/29-commerce-catalog-actions.css"))+(await read("src/styles/31-admin-page-pattern.css"));
   for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".catalog-product-list",".catalog-product-card",".catalog-product-classification",".catalog-product-operational-data",".catalog-product-actions",".catalog-product-list.density-zwarta"]){

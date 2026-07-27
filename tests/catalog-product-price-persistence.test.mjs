@@ -26,31 +26,29 @@ test('spóźniona karta nie nadpisuje nowszej potwierdzonej operacji produktu', 
   assert.equal(preserveNewerConfirmedMutation(server, { ...stale, lastAdminMutationAt: '2026-07-24T13:20:00.000Z' }).nazwa, 'Stara nazwa');
 });
 
-test('dedykowany zapis ceny wykonuje jedną atomową operację na centralnym produkcie', async () => {
-  let operation = null, publication = null;
+test('dedykowany zapis ceny wykonuje jeden potwierdzony zapis centralnego produktu bez podwójnej publikacji', async () => {
+  let savedInput = null, publicationCalls = 0;
   const route = createStoreDataRoute({
     odpowiedz: (body, status = 200) => ({ body, status }),
     czyAdmin: () => true,
     tekst: (value, max = 400) => String(value || '').slice(0, max),
     requestSession: () => ({ email: 'admin@example.test' }),
-    zapiszOperacjeProduktow: async (operations) => {
-      [operation] = operations;
-      return { modified: true, appliedOperations: 1, skippedProductIds: [], value: { rev: 41 } };
+    zapiszPolaProduktuCentralnie: async (input) => {
+      savedInput = input;
+      return { ...input, fields: { ...input.fields, lastAdminMutationId: input.mutationId }, confirmedAt: '2026-07-27T10:00:00.000Z', rev: 41 };
     },
-    publikujPolaProduktuCentralnie: async (payload) => {
-      publication = payload;
-      return { published: true, queued: false, revision: 'rev-42' };
-    },
+    publikujPolaProduktuCentralnie: async () => { publicationCalls++; return { published: true }; },
   });
   const request = { method: 'POST', json: async () => ({ productId: '1000914', channel: 'store', value: '49,90' }) };
   const result = await route(request, new URL('https://artwaytm.pl/api/store?action=catalog-product-price-update'), 'catalog-product-price-update');
   assert.equal(result.status, 200);
   assert.equal(result.body.rev, 41);
-  assert.equal(operation.id, '1000914');
-  assert.equal(operation.fields.cena, 49.9);
-  assert.equal(operation.fields.cenaManualna, true);
-  assert.match(operation.fields.cenaZrodlo, /admin@example\.test/);
-  assert.equal(publication.productId, '1000914');
-  assert.equal(publication.fields.cena, 49.9);
+  assert.equal(savedInput.productId, '1000914');
+  assert.equal(savedInput.fields.cena, 49.9);
+  assert.equal(savedInput.fields.cenaManualna, true);
+  assert.match(savedInput.fields.cenaZrodlo, /admin@example\.test/);
+  assert.equal(savedInput.area, 'assortment-inline-price');
+  assert.equal(publicationCalls, 0);
   assert.equal(result.body.publication.published, true);
+  assert.equal(result.body.publication.readbackConfirmed, true);
 });

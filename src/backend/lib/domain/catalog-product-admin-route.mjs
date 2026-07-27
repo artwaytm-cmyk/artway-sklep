@@ -34,7 +34,7 @@ export function createCatalogProductAdminRoute(deps = {}) {
     if (action === 'catalog-product-price-update') {
       if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      if (typeof saveOperations !== 'function') return respond({ ok: false, error: 'Atomowy zapis ceny nie jest dostępny.' }, 503);
+      if (typeof saveFields !== 'function') return respond({ ok: false, error: 'Atomowy zapis ceny nie jest dostępny.' }, 503);
       const body = await req.json().catch(() => ({}));
       const productId = text(body.productId, 100);
       const channel = text(body.channel, 30);
@@ -66,31 +66,36 @@ export function createCatalogProductAdminRoute(deps = {}) {
       const remove = clear
         ? [config.field, ...(channel === 'purchase' ? [...purchaseInvoiceFields, 'cenaZakupuDopasowanie'] : [])]
         : (channel === 'purchase' ? purchaseInvoiceFields : []);
-      const saved = await saveOperations([{ id: productId, fields, remove }], updatedAt);
-      if (saved.skippedProductIds?.includes(productId) || (!saved.modified && !saved.appliedOperations)) {
-        return respond({ ok: false, error: 'Produkt nie istnieje w centralnym katalogu albo nie można go bezpiecznie zaktualizować.' }, 404);
+      try {
+        const saved = await saveFields({
+          productId,
+          fields,
+          remove,
+          mutationId: `inline-price:${productId}:${channel}:${Date.now().toString(36)}`,
+          actor,
+          area: 'assortment-inline-price',
+        });
+        return respond({
+          ok: true,
+          confirmed: true,
+          productId,
+          channel,
+          field: config.field,
+          value: clear ? null : +value.toFixed(2),
+          clear,
+          fields: saved.fields || fields,
+          remove: saved.remove || remove,
+          publication: { published: true, queued: false, readbackConfirmed: true },
+          rev: saved.rev,
+          updated_at: saved.confirmedAt || updatedAt,
+        });
+      } catch (error) {
+        return respond({
+          ok: false,
+          error: text(error?.message || error, 800),
+          code: error?.code || 'catalog_product_price_save_failed',
+        }, error?.status || 500);
       }
-      let publication = { published: false, queued: true };
-      if (typeof publishFields === 'function') {
-        try {
-          publication = await publishFields({ productId, fields, remove, updatedAt });
-        } catch (error) {
-          publication = { published: false, queued: true, error: text(error?.message || error, 500) };
-        }
-      }
-      return respond({
-        ok: true,
-        productId,
-        channel,
-        field: config.field,
-        value: clear ? null : +value.toFixed(2),
-        clear,
-        fields,
-        remove,
-        publication,
-        rev: saved.value?.rev,
-        updated_at: updatedAt,
-      });
     }
 
     if (action === 'catalog-product-fields-update') return fieldRoute(req, url);

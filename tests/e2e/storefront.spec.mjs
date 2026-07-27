@@ -113,6 +113,88 @@ test('lokalny administrator loguje się i przechodzi między modułami panelu', 
   assertRuntime();
 });
 
+test('Asortyment filtruje i zapisuje cenę bez przebudowy całego panelu', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  let queryCount = 0, priceSaveCount = 0, savedPrice = 29.9;
+  const products = [
+    { id: 'E2E-101', nazwa: 'Alpha gra testowa', cena: savedPrice, cenaZakupu: 12, kategoria: 'Gry', producent: 'Alexander', externalId: 'ALPHA-101', sku: 'ALPHA-101', gtin: '5900000000101', zdjecie: '/images/placeholder-product.svg', sourceUrl: 'https://example.test/alpha' },
+    { id: 'E2E-102', nazwa: 'Beta gra testowa', cena: 39.9, cenaZakupu: 16, kategoria: 'Gry', producent: 'Multigra', externalId: 'BETA-102', sku: 'BETA-102', gtin: '5900000000102', zdjecie: '/images/placeholder-product.svg', sourceUrl: 'https://example.test/beta' },
+  ];
+  await page.route('**/api/store**', async (route) => {
+    const url = new URL(route.request().url()), action = url.searchParams.get('action');
+    if (action === 'product-catalog-query') {
+      queryCount++;
+      const query = String(url.searchParams.get('q') || '').toLowerCase();
+      const items = products
+        .filter((product) => !query || `${product.nazwa} ${product.externalId} ${product.gtin}`.toLowerCase().includes(query))
+        .map((product) => ({
+          ...product,
+          ...(product.id === 'E2E-101' ? { cena: savedPrice } : {}),
+          _catalog: {
+            recordStatus: 'active',
+            source: 'bazowy',
+            missingFields: [],
+            availability: { saleAvailable: true },
+            inventory: { stock: 8 },
+            channels: { allegro: { offerId: '', status: '' } },
+          },
+        }));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true, available: true, private: true, items, ids: items.map((item) => item.id),
+          total: items.length, page: 1, limit: 50,
+          summary: { total: 2, active: 2, ready: 2, missing: 0, hidden: 0, connected: 0, promotions: 0, trash: 0, duplicate_store: 0, duplicate_allegro: 0 },
+          facets: { categories: [{ value: 'Gry', count: 2 }], producers: [{ value: 'Alexander', count: 1 }, { value: 'Multigra', count: 1 }] },
+        }),
+      });
+      return;
+    }
+    if (action === 'catalog-product-price-update') {
+      const body = route.request().postDataJSON();
+      priceSaveCount++;savedPrice = Number(body.value);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true, confirmed: true, productId: body.productId, channel: body.channel,
+          value: savedPrice, fields: { cena: savedPrice, cenaManualna: true },
+          remove: [], publication: { published: true, queued: false, readbackConfirmed: true },
+        }),
+      });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.goto('/#/admin/asortyment/produkty');
+  await expect(page.locator('[data-assortment-product-card]')).toHaveCount(2);
+  await page.evaluate(() => { window.__assortmentWorkspaceBefore = document.querySelector('.assortment-catalog-workspace'); });
+  const initialQueries = queryCount;
+  await page.locator('[data-assortment-search]').fill('Beta');
+  await expect(page.locator('[data-assortment-product-card]')).toHaveCount(1);
+  await expect(page.locator('[data-assortment-product-card]')).toContainText('Beta gra testowa');
+  expect(queryCount).toBeGreaterThan(initialQueries);
+  expect(await page.evaluate(() => window.__assortmentWorkspaceBefore === document.querySelector('.assortment-catalog-workspace'))).toBe(true);
+
+  await page.locator('[data-assortment-search]').fill('');
+  const alpha = page.locator('[data-assortment-product-card]').filter({ hasText: 'Alpha gra testowa' });
+  await expect(alpha).toBeVisible();
+  const price = alpha.locator('.catalog-product-edit-value').filter({ hasText: 'Cena sklepu' }).locator('input');
+  await price.fill('42,90');
+  await price.blur();
+  await expect(alpha.getByText('Zapisano i opublikowano')).toBeVisible();
+  expect(priceSaveCount).toBe(1);
+  expect(await page.evaluate(() => window.__assortmentWorkspaceBefore === document.querySelector('.assortment-catalog-workspace'))).toBe(true);
+
+  await page.reload();
+  await expect(page.locator('[data-assortment-product-card]').filter({ hasText: 'Alpha gra testowa' })
+    .locator('.catalog-product-edit-value').filter({ hasText: 'Cena sklepu' }).locator('input')).toHaveValue('42,90');
+  assertRuntime();
+});
+
 test('nowe konto klienta działa po rejestracji i ponownym logowaniu na czystym urządzeniu', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   const user = { imie: 'Test Klienta', email: 'test-klienta@example.test', rola: 'klient' };

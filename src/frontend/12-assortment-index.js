@@ -15,6 +15,12 @@ function asortymentCentralnyParametry(){
 function asortymentCentralnyTrasaAktywna(){return ["/admin/asortyment","/admin/asortyment/produkty"].includes(trasa());}
 function asortymentCentralnySygnatura(){return JSON.stringify(asortymentCentralnyParametry());}
 function asortymentCentralnyWyczyscCache(){asortymentCentralnyCache.clear();asortymentCentralnyStan={status:"idle",signature:"",data:null,error:"",request:null};}
+function asortymentCentralnyOznaczNieaktualny({hard=false}={}){
+  if(hard)return asortymentCentralnyWyczyscCache();
+  const staleAt=Date.now()-ASORTYMENT_CACHE_SWIEZY_MS-1;
+  for(const entry of asortymentCentralnyCache.values())entry.at=Math.min(Number(entry.at)||staleAt,staleAt);
+  if(asortymentCentralnyOstatni.data)asortymentCentralnyOstatni.at=Math.min(Number(asortymentCentralnyOstatni.at)||staleAt,staleAt);
+}
 function asortymentCentralnyCachePobierz(signature){
   const cached=asortymentCentralnyCache.get(signature);if(!cached)return null;
   if(Date.now()-cached.at>ASORTYMENT_CACHE_MAX_MS){asortymentCentralnyCache.delete(signature);return null;}

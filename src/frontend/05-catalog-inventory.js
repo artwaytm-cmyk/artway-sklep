@@ -36,7 +36,7 @@ function podmienProduktAdminBezRenderu(id,patch={},usun=[]){
   const key=String(id),baza=pobierzProduktAdmin(id)||{},targets=new Set([baza]);
   const added=(produktyDodane||[]).find(item=>String(item?.id)===key);
   if(added)targets.add(added);
-  else{
+  else if(!baza?._catalog){
     const edit=produktyEdytowane[key]&&typeof produktyEdytowane[key]==="object"?produktyEdytowane[key]:(produktyEdytowane[key]={});
     Object.assign(edit,patch);for(const field of usun)edit[field]=null;
   }

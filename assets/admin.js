@@ -7988,19 +7988,53 @@ function ustawKafelkowyFiltrAsortymentu(typ="aktywne"){
   else if(typ==="allegro_duplikaty")filtrAllegroProduktow="duplikaty";
   else if(typ==="allegro_brak")filtrAllegroProduktow="brak";
   else if(typ==="duplikaty_sklepu")filtrStatusuProduktow="duplikaty";
-  stronaAdminProduktow=1;renderuj();
-  setTimeout(()=>document.querySelector("[data-assortment-results]")?.scrollIntoView({behavior:"smooth",block:"start"}),30);
+  stronaAdminProduktow=1;void asortymentOdswiezWyniki({pelnyInterfejs:true,przewin:true});
 }
 function dokumentTymczasowyHTML(html){const tpl=document.createElement("template");tpl.innerHTML=String(html||"").trim();return tpl.content;}
-function asortymentOdswiezWyniki(){
-  const source=dokumentTymczasowyHTML(widokAdminProdukty());
-  for(const selector of ["[data-assortment-results]","[data-assortment-filter-summary]","[data-assortment-active-filters]","[data-assortment-operations]"]){
-    const current=document.querySelector(selector),next=source.querySelector(selector);if(current&&next)current.innerHTML=next.innerHTML;
+let asortymentOdswiezanieNumer=0;
+function asortymentUstawStanOdswiezania(root,aktywny){
+  if(!root)return;
+  root.classList.toggle("is-querying",aktywny);root.setAttribute("aria-busy",aktywny?"true":"false");
+}
+function asortymentPodmienSekcjeStabilnie(source,selector){
+  const current=document.querySelector(selector),next=source.querySelector(selector);if(!current||!next)return false;
+  const active=document.activeElement,scrollY=window.scrollY||0,selection=active&&typeof active.selectionStart==="number"?{start:active.selectionStart,end:active.selectionEnd}:null;
+  // Wyniki zawierają progresywnie dokładane karty. Ich kolejność może zmienić
+  // się całkowicie po filtrze, więc podmieniamy tylko ten jeden lekki blok
+  // zamiast wykonywać kosztowną i podatną na przesunięcia rekursję całej strony.
+  if(selector==="[data-assortment-results]")current.replaceWith(next.cloneNode(true));
+  else if(typeof aktualizujWezelStabilnie==="function")aktualizujWezelStabilnie(current,next,active);
+  else current.replaceWith(next.cloneNode(true));
+  if(active?.isConnected&&selection&&typeof active.setSelectionRange==="function")try{active.setSelectionRange(selection.start,selection.end);}catch(e){}
+  if(Math.abs((window.scrollY||0)-scrollY)>1)window.scrollTo({top:scrollY,behavior:"instant"});
+  return true;
+}
+async function asortymentOdswiezWyniki({pelnyInterfejs=false,przewin=false,force=false}={}){
+  const requestId=++asortymentOdswiezanieNumer,root=document.querySelector(".assortment-catalog-workspace");
+  if(!root||!asortymentCentralnyTrasaAktywna()){renderuj();return false;}
+  asortymentUstawStanOdswiezania(root,true);
+  try{
+    await asortymentCentralnyPobierz(force,{render:false});
+    if(requestId!==asortymentOdswiezanieNumer||!asortymentCentralnyTrasaAktywna())return false;
+    const source=dokumentTymczasowyHTML(widokAdminProdukty());
+    const selectors=pelnyInterfejs
+      ?[".assortment-saved-views",".assortment-audit-grid",".assortment-maintenance",".assortment-filter-panel","[data-assortment-results]"]
+      :["[data-assortment-filter-summary]","[data-assortment-active-filters]","[data-assortment-operations]","[data-assortment-results]"];
+    let updated=false;for(const selector of selectors)updated=asortymentPodmienSekcjeStabilnie(source,selector)||updated;
+    if(!updated){renderuj();return false;}
+    if(przewin)setTimeout(()=>document.querySelector("[data-assortment-results]")?.scrollIntoView({behavior:"smooth",block:"start"}),20);
+    return true;
+  }catch(error){
+    loguj("ostrzezenie",`Nie odświeżono wyników asortymentu: ${error?.message||error}`);
+    toast("⚠️ Nie udało się odświeżyć katalogu. Obecny widok pozostał bez zmian.");
+    return false;
+  }finally{
+    if(requestId===asortymentOdswiezanieNumer)asortymentUstawStanOdswiezania(document.querySelector(".assortment-catalog-workspace"),false);
   }
 }
 function asortymentSzukajProdukty(input){
   szukajProduktow=String(input?.value||"");stronaAdminProduktow=1;clearTimeout(window.__assortmentSearch);
-  window.__assortmentSearch=setTimeout(asortymentOdswiezWyniki,160);
+  window.__assortmentSearch=setTimeout(()=>void asortymentOdswiezWyniki(),240);
 }
 function asortymentBrakiDanych(p={}){
   if(Array.isArray(p?._catalog?.missingFields)){
@@ -8020,7 +8054,7 @@ function asortymentBrakiDanych(p={}){
 }
 function asortymentResetujFiltry(render=true){
   szukajProduktow="";filtrProduktow="Wszystkie";filtrStatusuProduktow="aktywne";filtrZrodlaProduktow="wszystkie";filtrStanuProduktow="wszystkie";filtrAllegroProduktow="wszystkie";filtrProducentaProduktow="wszyscy";filtrDanychProduktow="wszystkie";filtrSprzedazyProduktow="wszystkie";filtrPromocjiProduktow="wszystkie";filtrLinkuProduktow="wszystkie";cenaOdAdminProduktow="";cenaDoAdminProduktow="";cenaAllegroOdAdminProduktow="";cenaAllegroDoAdminProduktow="";stronaAdminProduktow=1;
-  if(render)renderuj();
+  if(render)void asortymentOdswiezWyniki({pelnyInterfejs:true});
 }
 function asortymentUstawFiltr(nazwa,value){
   const v=String(value??"");
@@ -8038,7 +8072,7 @@ function asortymentUstawFiltr(nazwa,value){
   else if(nazwa==="cenaDo")cenaDoAdminProduktow=v;
   else if(nazwa==="cenaAllegroOd")cenaAllegroOdAdminProduktow=v;
   else if(nazwa==="cenaAllegroDo")cenaAllegroDoAdminProduktow=v;
-  stronaAdminProduktow=1;renderuj();
+  stronaAdminProduktow=1;void asortymentOdswiezWyniki({pelnyInterfejs:true});
 }
 function asortymentUstawWidok(widok="aktywne"){
   asortymentResetujFiltry(false);
@@ -8048,7 +8082,7 @@ function asortymentUstawWidok(widok="aktywne"){
   else if(widok==="ukryte")filtrSprzedazyProduktow="niedostepne";
   else if(widok==="promocje")filtrPromocjiProduktow="promocje";
   else if(widok==="kosz")filtrStatusuProduktow="kosz";
-  renderuj();
+  void asortymentOdswiezWyniki({pelnyInterfejs:true});
 }
 function asortymentWyczyscFiltr(nazwa){
   if(nazwa==="szukaj")szukajProduktow="";
@@ -8064,9 +8098,12 @@ function asortymentWyczyscFiltr(nazwa){
   else if(nazwa==="link")filtrLinkuProduktow="wszystkie";
   else if(nazwa==="cena"){cenaOdAdminProduktow="";cenaDoAdminProduktow="";}
   else if(nazwa==="cenaAllegro"){cenaAllegroOdAdminProduktow="";cenaAllegroDoAdminProduktow="";}
-  stronaAdminProduktow=1;renderuj();
+  stronaAdminProduktow=1;void asortymentOdswiezWyniki({pelnyInterfejs:true});
 }
-function ustawGestoscAdminProduktow(v){gestoscAdminProduktow=v==="wygodna"?"wygodna":"zwarta";zapiszLS("artway_produkty_gestosc_admin",gestoscAdminProduktow);renderuj();}
+function ustawGestoscAdminProduktow(v){
+  gestoscAdminProduktow=v==="wygodna"?"wygodna":"zwarta";zapiszLS("artway_produkty_gestosc_admin",gestoscAdminProduktow);
+  const list=document.querySelector(".catalog-product-list");if(list){list.classList.remove("density-zwarta","density-wygodna");list.classList.add(`density-${gestoscAdminProduktow}`);}
+}
 function magazynSzukajProdukty(input){
   frazaMagazynu=String(input?.value||"");stronaMagazynu=1;clearTimeout(window.__warehouseSearch);
   window.__warehouseSearch=setTimeout(()=>{
@@ -8097,14 +8134,14 @@ function eksportujDostepnoscProducentow(zakres="filtr"){
   const rows=ids.map(produktMagazynowy).filter(Boolean).map(p=>{const id=String(p.id),i=producentDostepnoscInfo(p),stan=stanMagazynuId(p.id),plan=sugestiaZatowarowania(p,rez,spr),meta=magazynMetaProduktu(p.id);return [p.id,p.sku||"",p.gtin||p.ean||meta.kod||"",p.nazwa||"",p.producent||p.marka||meta.dostawca||"",i.status,i.quantity??"",i.checked||"",stan===null?"":stan,rez[id]||0,plan.dostepne===null?"":plan.dostepne,kanaly.sklep[id]||0,kanaly.allegro[id]||0,plan.ilosc||0,meta.lokalizacja||"",produktOznaczonyNiedostepny(p)?"wstrzymana":"aktywna",i.url||""];});
   adminEksportujCSV(`dostepnosc-${zakres}-${new Date().toISOString().slice(0,10)}.csv`,["ID","SKU","EAN","Produkt","Producent","Status producenta","Stan producenta","Ostatnia kontrola","Stan fizyczny","Rezerwacje","Dostępne lokalnie","Sprzedaż sklep 30 dni","Sprzedaż Allegro 30 dni","Do zamówienia","Lokalizacja","Sprzedaż","Źródło"],rows);
 }
-function ustawStroneAdminProduktow(n){ stronaAdminProduktow=Math.max(1,Number(n)||1); renderuj(); }
+function ustawStroneAdminProduktow(n){stronaAdminProduktow=Math.max(1,Number(n)||1);void asortymentOdswiezWyniki({przewin:true});}
 function ustawProduktyNaStronieAdmin(n){
   produktyNaStronieAdmin=[25,50,100,200,500,1000].includes(Number(n))?Number(n):50;
   stronaAdminProduktow=1;
   zapiszLS("artway_produkty_na_stronie_admin",produktyNaStronieAdmin);
-  renderuj();
+  void asortymentOdswiezWyniki();
 }
-function ustawSortowanieAdminProduktow(v){sortowanieAdminProduktow=String(v||"external");stronaAdminProduktow=1;zapiszLS("artway_produkty_sortowanie_admin",sortowanieAdminProduktow);renderuj();}
+function ustawSortowanieAdminProduktow(v){sortowanieAdminProduktow=String(v||"external");stronaAdminProduktow=1;zapiszLS("artway_produkty_sortowanie_admin",sortowanieAdminProduktow);void asortymentOdswiezWyniki();}
 function sortujProduktyAdmin(lista){
   return [...lista].sort((a,b)=>{
     if(sortowanieAdminProduktow==="external"){
@@ -8464,6 +8501,12 @@ function asortymentCentralnyParametry(){
 function asortymentCentralnyTrasaAktywna(){return ["/admin/asortyment","/admin/asortyment/produkty"].includes(trasa());}
 function asortymentCentralnySygnatura(){return JSON.stringify(asortymentCentralnyParametry());}
 function asortymentCentralnyWyczyscCache(){asortymentCentralnyCache.clear();asortymentCentralnyStan={status:"idle",signature:"",data:null,error:"",request:null};}
+function asortymentCentralnyOznaczNieaktualny({hard=false}={}){
+  if(hard)return asortymentCentralnyWyczyscCache();
+  const staleAt=Date.now()-ASORTYMENT_CACHE_SWIEZY_MS-1;
+  for(const entry of asortymentCentralnyCache.values())entry.at=Math.min(Number(entry.at)||staleAt,staleAt);
+  if(asortymentCentralnyOstatni.data)asortymentCentralnyOstatni.at=Math.min(Number(asortymentCentralnyOstatni.at)||staleAt,staleAt);
+}
 function asortymentCentralnyCachePobierz(signature){
   const cached=asortymentCentralnyCache.get(signature);if(!cached)return null;
   if(Date.now()-cached.at>ASORTYMENT_CACHE_MAX_MS){asortymentCentralnyCache.delete(signature);return null;}
@@ -9216,7 +9259,7 @@ function asortymentKartaProduktuHTML(p={},ukrytaKopia=false){
   const braki=asortymentBrakiDanych(p),sourceUrl=String(p.sourceUrl||p.producentUrl||p.urlProducenta||"").trim(),image=p.zdjecie||(Array.isArray(p.zdjecia)?p.zdjecia[0]:"")||"";
   const cena=kwotaNum(p.cena),cenaAllegro=kwotaNum(p.cenaAllegro||p.cena),cenaVonHalsky=kwotaNum(p.cenaVonHalsky)||cenaAllegro,promocja=Number(p.staraCena)>cena?Math.max(0,Math.round((1-cena/Number(p.staraCena))*100)):0,stan=stanyProduktow[p.id]!==undefined?stanyProduktow[p.id]:(p.stan??p?._catalog?.inventory?.stock);
   const availabilityLabel=produktAutomatycznieNiedostepny(p)?"Sprawdź oba kanały":produktOznaczonyNiedostepny(p)?"Wznów sklep + Allegro":"Wstrzymaj sklep + Allegro";
-  return `<article class="allegro-publication-card catalog-product-card ${selected?"selected is-selected":""} ${ukryty?"deleted":""}" data-assortment-product-card data-assortment-product-key="${esc(p.id)}">
+  return `<article class="allegro-publication-card catalog-product-card ${selected?"selected is-selected":""} ${ukryty?"deleted":""}" data-assortment-product-card data-product-id="${esc(p.id)}" data-assortment-product-key="${esc(p.id)}">
     <label class="allegro-publication-check"><input class="assortment-check" type="checkbox" aria-label="Zaznacz ${esc(p.nazwa||"produkt")}" data-assortment-product-id="${esc(p.id)}" ${selected?"checked":""} onchange="przelaczZaznProd(${jsArg(p.id)})"><span>Zaznacz produkt</span></label>
     <div class="allegro-publication-product catalog-product-identity">${image?`<img src="${esc(image)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="empty-image" style="display:none">${esc(p.ikona||"📦")}</span>`:`<span class="empty-image">${esc(p.ikona||"📦")}</span>`}<div><small class="catalog-column-label">Produkt</small><h3>${esc(p.nazwa||"Produkt bez nazwy")}</h3><p>ID ${esc(p.id)}${dodany?" • dodany":""}${edytowany?" • edytowany":""}${ukryty?" • w koszu":""}${promocja?` • promocja −${promocja}%`:""}</p><div class="allegro-publication-codes"><code>EXTERNAL_ID ${esc(p.externalId||"—")}</code><code>SKU ${esc(p.sku||"—")}</code><code>EAN ${esc(p.gtin||p.ean||"—")}</code></div>${braki.length?`<span class="catalog-product-data-note missing">⚠️ Braki: ${esc(braki.slice(0,3).join(", "))}${braki.length>3?` +${braki.length-3}`:""}</span>`:`<span class="catalog-product-data-note complete">✓ Dane kompletne</span>`}${asortymentAgentMetaHTML(p)}</div></div>
     <div class="catalog-product-classification"><small class="catalog-column-label">Klasyfikacja i źródło</small><b>${esc(p.producent||p.marka||"Bez producenta")}</b><span>${esc(p.kategoria||"Bez kategorii")}</span>${sourceUrl?`<a href="${esc(sourceUrl)}" target="_blank" rel="noopener">Źródło produktu ↗</a>`:`<small>Brak linku źródłowego</small>`}${ukrytaKopia?`<em>Ukryta kopia katalogowa</em>`:""}</div>
@@ -9226,11 +9269,12 @@ function asortymentKartaProduktuHTML(p={},ukrytaKopia=false){
 }
 
 const ASORTYMENT_PARTIA_KART=10;
-let asortymentKartyOczekujace=[],asortymentKartyObserwator=null,asortymentKartyGeneracja=0;
+let asortymentKartyOczekujace=[],asortymentKartyObserwator=null,asortymentKartyGeneracja=0,asortymentKartyZaladowane=0,asortymentKartyRazem=0;
 function asortymentRenderujElementKarty(item){return item?.produkt?asortymentKartaProduktuHTML(item.produkt,item.ukrytaKopia===true):String(item||"");}
 function asortymentPrzygotujKartyProgresywnie(lista=[]){
   asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;
   const generation=++asortymentKartyGeneracja,items=Array.isArray(lista)?lista:[];
+  asortymentKartyRazem=items.length;asortymentKartyZaladowane=Math.min(ASORTYMENT_PARTIA_KART,items.length);
   asortymentKartyOczekujace=items.slice(ASORTYMENT_PARTIA_KART);
   const first=items.slice(0,ASORTYMENT_PARTIA_KART).map(asortymentRenderujElementKarty).join("");
   if(!asortymentKartyOczekujace.length)return first;
@@ -9241,10 +9285,9 @@ function asortymentDoloadujKarty(generation=asortymentKartyGeneracja){
   const loader=document.querySelector(`[data-assortment-card-loader][data-generation="${Number(generation)}"]`);
   if(!loader||Number(generation)!==asortymentKartyGeneracja)return false;
   const batch=asortymentKartyOczekujace.splice(0,ASORTYMENT_PARTIA_KART);
-  if(batch.length)loader.insertAdjacentHTML("beforebegin",batch.map(asortymentRenderujElementKarty).join(""));
+  if(batch.length){loader.insertAdjacentHTML("beforebegin",batch.map(asortymentRenderujElementKarty).join(""));asortymentKartyZaladowane+=batch.length;}
   if(!asortymentKartyOczekujace.length){asortymentKartyObserwator?.disconnect();asortymentKartyObserwator=null;loader.remove();return true;}
-  const loaded=document.querySelectorAll(".catalog-product-list .catalog-product-card").length,total=loaded+asortymentKartyOczekujace.length;
-  const label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${loaded} z ${total}`;
+  const label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${asortymentKartyZaladowane} z ${asortymentKartyRazem}`;
   return true;
 }
 function asortymentUruchomDoloadowywanieKart(generation=asortymentKartyGeneracja){
