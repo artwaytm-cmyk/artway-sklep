@@ -1346,6 +1346,18 @@ body.admin-mode .admin-page-pattern details[open]>summary{border-bottom:1px soli
 body.admin-mode .admin-page-pattern details>*:not(summary){margin-left:14px;margin-right:14px}
 body.admin-mode .admin-page-pattern details>:last-child{margin-bottom:14px}
 
+/* Rejestr problemów aktualizuje się wewnątrz własnego, stabilnego obszaru.
+   Filtry nie zmieniają wysokości nagłówka i nie przesuwają całej podstrony. */
+body.admin-mode .admin-page-pattern .system-central-workspace{display:grid;gap:14px;min-width:0;overflow-anchor:none}
+body.admin-mode .admin-page-pattern .system-central-workspace>.panel{min-width:0;margin:0}
+body.admin-mode .admin-page-pattern .system-central-tabs{display:flex;align-items:center;gap:7px;min-height:52px;margin:14px 0;padding:7px;border:1px solid var(--line);border-radius:13px;background:var(--bg);flex-wrap:wrap}
+body.admin-mode .admin-page-pattern .system-central-tabs button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:8px 12px;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--text);font:inherit;font-weight:800;cursor:pointer}
+body.admin-mode .admin-page-pattern .system-central-tabs button:hover{border-color:var(--line);background:var(--panel)}
+body.admin-mode .admin-page-pattern .system-central-tabs button.active{border-color:var(--admin-pattern-accent);background:var(--admin-pattern-soft);color:var(--admin-pattern-accent)}
+body.admin-mode .admin-page-pattern .system-central-tabs button b{display:inline-grid;place-items:center;min-width:24px;height:24px;padding:0 6px;border-radius:999px;background:var(--panel);font-size:.72rem}
+body.admin-mode .admin-page-pattern .system-central-tabs>span{margin-left:auto;color:var(--muted2);font-size:.72rem;font-weight:750}
+body.admin-mode .admin-page-pattern .system-central-workspace .system-log-table{min-height:120px}
+
 /* Katalog produktów korzysta dokładnie z kolejności wzorcowego centrum:
    filtr → podsumowanie → operacje → karty wyników → jedna paginacja. */
 body.admin-mode .admin-page-pattern .catalog-product-card-center>[data-assortment-results]{display:grid;gap:0;padding:0}
@@ -1378,6 +1390,8 @@ body.admin-mode .admin-page-pattern .catalog-product-card-center .allegro-listin
   body.admin-mode .admin-page-pattern :is(.admin-pattern-toolbar,.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection,.results-bar,.assortment-results-toolbar,.assortment-bulk-editor,.allegro-listing-selection,.warehouse-worktable-actions,.allegro-toolbar,.toolbar)>:is(.btn,button,input,select){width:100%;flex:1 1 100%}
   body.admin-mode .admin-page-pattern :is(.admin-pattern-empty,.empty,.catalog-empty,.assortment-empty,.allegro-listing-empty,.agent-ops-empty,.warehouse-document-empty,.ai-library-empty,.agent-runtime-loading){min-height:100px;padding:18px 12px}
   body.admin-mode .admin-page-pattern .catalog-product-card-center .allegro-listing-results-head>span{margin-left:0}
+  body.admin-mode .admin-page-pattern .system-central-tabs button{flex:1 1 120px}
+  body.admin-mode .admin-page-pattern .system-central-tabs>span{width:100%;margin-left:0;text-align:center}
 }
 @media(max-width:420px){
   body.admin-mode .admin-page-pattern :is(.allegro-listing-metrics,.admin-pattern-metrics){grid-template-columns:minmax(0,1fr)}

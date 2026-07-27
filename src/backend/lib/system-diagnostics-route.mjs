@@ -256,7 +256,12 @@ export function createSystemDiagnosticsRoute({
     const recordValue = await change((record) => {
       const byFingerprint = new Map(record.items.map((item) => [item.fingerprint, item]));
       for (const event of events) {
-        const previous = byFingerprint.get(event.fingerprint), reopened = previous && !OPEN_STATUSES.has(previous.status);
+        const previous = byFingerprint.get(event.fingerprint);
+        const closed = previous && !OPEN_STATUSES.has(previous.status);
+        const eventAt = Date.parse(event.at), resolvedAt = Date.parse(previous?.resolvedAt || '');
+        const staleClosedReplay = closed && Number.isFinite(resolvedAt) && (!Number.isFinite(eventAt) || eventAt <= resolvedAt);
+        if (staleClosedReplay) continue;
+        const reopened = closed;
         const item = safeItem({
           ...previous,
           id: previous?.id || `diag-${event.fingerprint}`,

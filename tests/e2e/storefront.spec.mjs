@@ -388,6 +388,47 @@ test('Centrum systemu pokazuje wersję i bezpieczny przycisk aktualizacji przegl
   assertRuntime();
 });
 
+test('Centralny rejestr pokazuje tylko aktywne problemy i odświeża się bez skakania strony', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  let diagnosticsReads = 0;
+  await page.route('**/api/store**', async (route) => {
+    const action = new URL(route.request().url()).searchParams.get('action');
+    if (action !== 'diagnostics-central') return route.fallback();
+    diagnosticsReads += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        updatedAt: '2026-07-25T23:28:56.719Z',
+        summary: { total: 2, open: 0, errors: 0, warnings: 0, occurrences: 0 },
+        agent: { configured: true, model: 'gpt-5-mini', reasoning: 'medium' },
+        items: [
+          { id: 'diag-1', fingerprint: 'one', level: 'blad', message: 'Historyczny błąd zapisu', source: 'przeglądarka', route: '/#/admin/system/logi', release: 'r1', status: 'resolved', count: 1, firstSeenAt: '2026-07-25T22:00:00.000Z', lastSeenAt: '2026-07-25T22:00:00.000Z', resolvedAt: '2026-07-25T23:00:00.000Z' },
+          { id: 'diag-2', fingerprint: 'two', level: 'blad', message: 'Historyczny błąd renderowania', source: 'autotest', route: '/#/admin/system/diagnostyka', release: 'r1', status: 'resolved', count: 1, firstSeenAt: '2026-07-25T22:05:00.000Z', lastSeenAt: '2026-07-25T22:05:00.000Z', resolvedAt: '2026-07-25T23:05:00.000Z' },
+        ],
+      }),
+    });
+  });
+  await loginAdmin(page);
+  await page.goto('/#/admin/system/logi');
+  const workspace = page.locator('[data-system-central-workspace]');
+  await expect(workspace).toBeVisible();
+  await expect(workspace.getByText('Aktywne problemy').locator('..').locator('b')).toHaveText('0');
+  await expect(workspace.getByText('Brak aktywnych problemów')).toBeVisible();
+  await page.evaluate(() => { window.__centralWorkspaceBefore = document.querySelector('[data-system-central-workspace]'); });
+
+  await workspace.getByRole('button', { name: /Odśwież/ }).click();
+  await expect.poll(() => diagnosticsReads).toBeGreaterThanOrEqual(2);
+  expect(await page.evaluate(() => window.__centralWorkspaceBefore === document.querySelector('[data-system-central-workspace]'))).toBe(true);
+  await workspace.getByRole('button', { name: /Archiwum 2/ }).click();
+  await expect(workspace.getByText('Historyczny błąd zapisu')).toBeVisible();
+  await expect(workspace.getByText('Historyczny błąd renderowania')).toBeVisible();
+  await page.waitForTimeout(800);
+  expect(diagnosticsReads).toBeLessThanOrEqual(2);
+  assertRuntime();
+});
+
 test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed nadaniem', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);

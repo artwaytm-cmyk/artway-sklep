@@ -104,6 +104,28 @@ test('rozwiązany problem wraca automatycznie po ponownym wystąpieniu', async (
   assert.equal(record().items[0].count, 2);
 });
 
+test('powtórne wysłanie starego zdarzenia nie otwiera ponownie rozwiązanego problemu', async () => {
+  const { service, record } = fixture();
+  const event = {
+    level: 'blad',
+    message: 'Historyczny błąd zapisu ustawień',
+    source: 'przeglądarka',
+    route: '/#/admin/system/logi',
+    at: '2026-07-26T00:55:00.000Z',
+  };
+  await service.record([event], { trusted: true });
+  const id = record().items[0].id;
+  const resolveRequest = new Request('https://artwaytm.pl/api/store?action=diagnostics-central-update', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin': '1' },
+    body: JSON.stringify({ ids: [id], status: 'resolved', resolution: 'Naprawiono' }),
+  });
+  await service.route(resolveRequest, new URL(resolveRequest.url), 'diagnostics-central-update');
+  await service.record([event], { trusted: true });
+  assert.equal(record().items[0].status, 'resolved');
+  assert.equal(record().items[0].count, 1);
+});
+
 test('pełny rejestr centralny jest dostępny wyłącznie administratorowi', async () => {
   const { service } = fixture();
   await service.record([{ level: 'blad', message: 'Błąd renderowania', source: 'router', route: '/#/admin' }]);
@@ -128,6 +150,8 @@ test('frontend wysyła błędy do VPS i autotest zapisuje nazwę nieudanej kontr
   assert.match(runtime, /diagnostics-ingest/);
   assert.match(runtime, /DIAGNOSTYKA_KOLEJKA_KEY/);
   assert.match(diagnostics, /Centralny rejestr błędów/);
+  assert.match(diagnostics, /fetchedAt/);
+  assert.doesNotMatch(diagnostics, /systemPobierzCentralneBledy\(true\)\.then\(renderuj\)/);
   assert.match(diagnostics, /item\.nazwa.*item\.szczegoly/s);
   assert.match(backend, /backend:\$\{action\}/);
   assert.match(operationalCenter, /Centralna diagnostyka wykryła błędy działania strony/);

@@ -4088,7 +4088,7 @@ function renderuj(){
     if(typeof seoSledzTrase==="function")seoSledzTrase(t);
     if((t==="/admin/system"||t==="/admin/aktualizacja"||t==="/admin/publikacja")&&!systemWersjaStan.sprawdzono&&!systemWersjaStan.ladowanie)setTimeout(()=>systemSprawdzWersje(true),0);
     if((t==="/admin/system/diagnostyka"||t==="/diagnostyka")&&!systemDiagStan.ladowanie&&(!systemDiagStan.sprawdzono||Date.now()-Date.parse(systemDiagStan.sprawdzonoAt||0)>5*60*1000))setTimeout(()=>systemOdswiezDiagnostyke(true),0);
-    if(t==="/admin/system/logi"&&!systemCentralDiag.loading&&(!systemCentralDiag.loaded||Date.now()-Date.parse(systemCentralDiag.updatedAt||0)>60*1000))setTimeout(()=>systemPobierzCentralneBledy(true).then(renderuj),0);
+    if(t==="/admin/system/logi"&&!systemCentralDiag.loading&&(!systemCentralDiag.loaded||Date.now()-Date.parse(systemCentralDiag.fetchedAt||0)>60*1000))setTimeout(()=>systemOdswiezCentralneBledy(false),0);
     if(t==="/admin/system/serwer"&&!systemSerwerStan.loading&&(!systemSerwerStan.loaded||!systemSerwerStan.status))setTimeout(()=>systemPobierzSerwer(false),0);
     ostatniaRenderowanaTrasa=t;
   }catch(e){

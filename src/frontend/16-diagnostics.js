@@ -9,19 +9,49 @@ function widokBrakDostepu(){
   </div></div>`;
 }
 let filtrLogowDiag="wszystkie", szukajLogowDiag="", ostatniAutotest=[], diagSearchT;
+let filtrStatusuCentralnegoDiag="otwarte",systemCentralDiagPollT=0,systemCentralDiagPollProby=0;
 let systemDiagTylkoProblemy=true;
 let systemWersjaStan={sprawdzono:false,ladowanie:false,wdrazanie:false,release:null,backendOnline:false,error:""};
 let systemDiagStan={ladowanie:false,sprawdzono:false,sprawdzonoAt:"",error:"",zwolniono:0};
-let systemCentralDiag={loaded:false,loading:false,items:[],summary:{total:0,open:0,errors:0,warnings:0,occurrences:0},agent:{configured:false},updatedAt:"",error:""};
+let systemCentralDiag={loaded:false,loading:false,items:[],summary:{total:0,open:0,errors:0,warnings:0,occurrences:0},agent:{configured:false},updatedAt:"",fetchedAt:"",error:""};
 async function systemPobierzCentralneBledy(force=false){
-  if(systemCentralDiag.loading||(!force&&systemCentralDiag.loaded&&Date.now()-Date.parse(systemCentralDiag.updatedAt||0)<60000))return systemCentralDiag;
+  if(systemCentralDiag.loading||(!force&&systemCentralDiag.loaded&&Date.now()-Date.parse(systemCentralDiag.fetchedAt||0)<60000))return systemCentralDiag;
   if(!maUprawnieniaZapisuChmury())return systemCentralDiag;
   systemCentralDiag={...systemCentralDiag,loading:true,error:""};
   try{
     const data=await chmura("diagnostics-central",{params:{status:"all",limit:500},timeout:15000});
-    systemCentralDiag={loaded:true,loading:false,items:Array.isArray(data.items)?data.items:[],summary:data.summary||{total:0,open:0,errors:0,warnings:0,occurrences:0},agent:data.agent||{configured:false},updatedAt:data.updatedAt||new Date().toISOString(),error:""};
-  }catch(error){systemCentralDiag={...systemCentralDiag,loaded:true,loading:false,error:error.message||String(error)};}
+    systemCentralDiag={loaded:true,loading:false,items:Array.isArray(data.items)?data.items:[],summary:data.summary||{total:0,open:0,errors:0,warnings:0,occurrences:0},agent:data.agent||{configured:false},updatedAt:data.updatedAt||"",fetchedAt:new Date().toISOString(),error:""};
+  }catch(error){systemCentralDiag={...systemCentralDiag,loaded:true,loading:false,fetchedAt:new Date().toISOString(),error:error.message||String(error)};}
   return systemCentralDiag;
+}
+function systemOdswiezCentralnyWidok(){
+  if(trasa()!=="/admin/system/logi")return;
+  const current=document.querySelector("[data-system-central-workspace]");
+  const next=dokumentTymczasowyHTML(systemCentralnyRejestrHTML()).querySelector("[data-system-central-workspace]");
+  if(!current||!next)return;
+  aktualizujWezelStabilnie(current,next,document.activeElement);
+}
+async function systemOdswiezCentralneBledy(force=true){
+  const pobieranie=systemPobierzCentralneBledy(force);
+  systemOdswiezCentralnyWidok();
+  await pobieranie;
+  systemOdswiezCentralnyWidok();
+  return systemCentralDiag;
+}
+function systemUstawFiltrCentralny(status){
+  filtrStatusuCentralnegoDiag=["otwarte","zakonczone","wszystkie"].includes(status)?status:"otwarte";
+  systemOdswiezCentralnyWidok();
+}
+function systemZaplanowKontroleAnalizy(){
+  clearTimeout(systemCentralDiagPollT);
+  if(systemCentralDiagPollProby>=12)return;
+  systemCentralDiagPollT=setTimeout(async()=>{
+    if(trasa()!=="/admin/system/logi")return;
+    systemCentralDiagPollProby+=1;
+    await systemOdswiezCentralneBledy(true);
+    if((systemCentralDiag.items||[]).some(item=>["queued","running"].includes(item.analysis?.status)))systemZaplanowKontroleAnalizy();
+    else systemCentralDiagPollProby=0;
+  },5000);
 }
 async function systemAnalizujBledy(ids=[]){
   const wybrane=[...new Set((Array.isArray(ids)?ids:[ids]).filter(Boolean))];
@@ -29,16 +59,16 @@ async function systemAnalizujBledy(ids=[]){
   try{
     const data=await chmura("diagnostics-central-analyze",{method:"POST",body:{ids:wybrane},timeout:15000});
     toast(`Agent rozpoczął analizę ${data.queued||wybrane.length} problemów`);
-    await systemPobierzCentralneBledy(true);renderuj();
-    setTimeout(()=>systemPobierzCentralneBledy(true).then(renderuj),5000);
+    await systemOdswiezCentralneBledy(true);
+    systemCentralDiagPollProby=0;
+    systemZaplanowKontroleAnalizy();
   }catch(error){toast("Nie udało się uruchomić analizy: "+error.message);}
 }
 async function systemUstawStatusBledu(id,status){
   try{
     await chmura("diagnostics-central-update",{method:"POST",body:{ids:[id],status,resolution:status==="resolved"?"Sprawdzone i rozwiązane przez administratora":status==="ignored"?"Świadomie pominięte przez administratora":""},timeout:15000});
-    await systemPobierzCentralneBledy(true);
+    await systemOdswiezCentralneBledy(true);
     toast(status==="resolved"?"Problem oznaczony jako rozwiązany ✅":status==="ignored"?"Wpis pominięty":"Problem ponownie otwarty");
-    renderuj();
   }catch(error){toast("Nie udało się zmienić statusu: "+error.message);}
 }
 function systemWersjaPrzegladarki(){return document.querySelector('meta[name="artway-version"]')?.content||"nieznana";}
@@ -293,13 +323,19 @@ function systemDiagnostykaHTML(){
   </section>
   <section class="panel system-repair sug"><span>🧹</span><div><b>Bezpieczna naprawa spójności</b><small>Usuwa wyłącznie osierocone odwołania i duplikaty techniczne. Nie usuwa prawidłowych produktów ani zamówień.</small></div><button class="btn ghost" onclick="naprawDaneSklepu()">Sprawdź i napraw dane</button></section>`;
 }
+function systemCentralnyRejestrHTML(){
+  const poziom={blad:"BŁĄD",ostrzezenie:"UWAGA"},wszystkie=systemCentralDiag.items||[],statusPasuje=item=>filtrStatusuCentralnegoDiag==="wszystkie"||(filtrStatusuCentralnegoDiag==="otwarte"?["open","investigating"].includes(item.status):["resolved","ignored"].includes(item.status));
+  const centralne=wszystkie.filter(statusPasuje).filter(item=>filtrLogowDiag==="wszystkie"||item.level===filtrLogowDiag).filter(item=>!szukajLogowDiag||(`${item.message} ${item.source} ${item.route}`).toLowerCase().includes(szukajLogowDiag)),summary=systemCentralDiag.summary||{},agent=systemCentralDiag.agent||{},otwarteBledy=wszystkie.filter(item=>item.level==="blad"&&["open","investigating"].includes(item.status)).map(item=>item.id),archiwum=Math.max(0,Number(summary.total||wszystkie.length)-Number(summary.open||0));
+  const analizaHTML=item=>{const a=item.analysis||{},status=a.status||"idle";if(status==="idle")return"";if(["queued","running"].includes(status))return`<div class="backend-note"><b>Najmocniejszy agent:</b> ${status==="queued"?"oczekuje w kolejce":"analizuje dowody"} • ${esc(a.model||agent.model||"OpenAI")}</div>`;if(status==="failed")return`<div class="backend-note warn"><b>Analiza nieudana:</b> ${esc(a.error||"brak wyniku")}</div>`;return`<details class="backend-note"><summary><b>Analiza AI:</b> ${esc(a.summary||a.classification||"gotowa")} • pewność ${Math.round(Number(a.confidence||0)*100)}%</summary><p><b>Przyczyna:</b> ${esc(a.rootCause||"—")}</p>${a.evidence?.length?`<p><b>Dowody:</b> ${a.evidence.map(esc).join(" • ")}</p>`:""}${a.recommendedActions?.length?`<p><b>Zalecane działania:</b> ${a.recommendedActions.map(x=>esc(x.action)).join(" • ")}</p>`:""}${a.validationPlan?.length?`<p><b>Weryfikacja:</b> ${a.validationPlan.map(esc).join(" • ")}</p>`:""}<small>${esc(a.model||"")} • reasoning ${esc(a.reasoning||"")} • ${esc(systemDataCzas(a.analyzedAt))}</small></details>`};
+  return `<div class="system-central-workspace" data-system-central-workspace><section class="system-summary-grid info-grid"><article class="info-card"><small>Aktywne problemy</small><b>${summary.open||0}</b><span>${summary.open?"wymagają działania":"system nie zgłasza problemów"}</span></article><article class="info-card"><small>Błędy</small><b>${summary.errors||0}</b><span>otwarte ze wszystkich urządzeń</span></article><article class="info-card"><small>Ostrzeżenia</small><b>${summary.warnings||0}</b><span>otwarte i zgrupowane</span></article><article class="info-card"><small>Archiwum</small><b>${archiwum}</b><span>rozwiązanych lub pominiętych</span></article></section>
+  <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Monitoring VPS + OpenAI Agents SDK</span><h1>🛰️ Centralny rejestr problemów</h1><p>Błędy są grupowane według przyczyny. Aktywne sprawy są oddzielone od rozwiązanych, aby licznik pokazywał wyłącznie rzeczy wymagające działania.</p></div><div><button class="btn" onclick='systemAnalizujBledy(${JSON.stringify(otwarteBledy)})' ${!agent.configured||!otwarteBledy.length?"disabled":""}>🧠 Analizuj błędy</button><button class="btn ghost" onclick="systemOdswiezCentralneBledy(true)" ${systemCentralDiag.loading?"disabled":""}>${systemCentralDiag.loading?"⏳ Pobieram…":"↻ Odśwież"}</button></div></div>
+  <nav class="system-central-tabs" aria-label="Status problemów"><button class="${filtrStatusuCentralnegoDiag==="otwarte"?"active":""}" onclick="systemUstawFiltrCentralny('otwarte')">Aktywne <b>${summary.open||0}</b></button><button class="${filtrStatusuCentralnegoDiag==="zakonczone"?"active":""}" onclick="systemUstawFiltrCentralny('zakonczone')">Archiwum <b>${archiwum}</b></button><button class="${filtrStatusuCentralnegoDiag==="wszystkie"?"active":""}" onclick="systemUstawFiltrCentralny('wszystkie')">Wszystkie <b>${summary.total||wszystkie.length}</b></button><span>${systemCentralDiag.fetchedAt?`Sprawdzono ${esc(systemDataCzas(systemCentralDiag.fetchedAt))}`:"Jeszcze nie sprawdzono"}</span></nav>
+  ${centralne.length?`<div class="system-log-table log-table-wrap"><table class="log-table"><thead><tr><th>Ostatnio</th><th>Poziom</th><th>Problem i analiza</th><th>Wystąpienia</th><th>Status</th><th>Działanie</th></tr></thead><tbody>${centralne.map(item=>`<tr><td>${esc(systemDataCzas(item.lastSeenAt))}<small>${esc(item.release||"wydanie nieznane")}</small></td><td><span class="lvl lvl-${item.level}">${poziom[item.level]||esc(item.level)}</span></td><td><b>${esc(item.message)}</b><small>${esc([item.source,item.route].filter(Boolean).join(" • "))}</small>${analizaHTML(item)}</td><td>${esc(item.count||1)}</td><td>${esc(item.status==="open"?"otwarty":item.status==="investigating"?"w analizie":item.status==="resolved"?"rozwiązany":"pominięty")}</td><td>${["resolved","ignored"].includes(item.status)?`<button class="btn ghost" onclick="systemUstawStatusBledu('${esc(item.id)}','open')">Otwórz ponownie</button>`:`<button class="btn ghost" onclick="systemAnalizujBledy('${esc(item.id)}')" ${!agent.configured?"disabled":""}>Analizuj</button><button class="btn" onclick="systemUstawStatusBledu('${esc(item.id)}','resolved')">Rozwiązane</button><button class="btn ghost" onclick="systemUstawStatusBledu('${esc(item.id)}','ignored')">Pomiń</button>`}</td></tr>`).join("")}</tbody></table></div>`:`<div class="system-empty order-empty"><span>${systemCentralDiag.loading?"⏳":"✅"}</span><b>${systemCentralDiag.loading?"Pobieram wspólny rejestr":filtrStatusuCentralnegoDiag==="otwarte"?"Brak aktywnych problemów":filtrStatusuCentralnegoDiag==="zakonczone"?"Archiwum jest puste":"Brak centralnie zarejestrowanych problemów"}</b><p>${systemCentralDiag.error?esc(systemCentralDiag.error):filtrStatusuCentralnegoDiag==="otwarte"?"Rozwiązane zdarzenia są dostępne w archiwum.":"Nowe błędy pojawią się tu automatycznie, niezależnie od urządzenia."}</p></div>`}</section></div>`;
+}
 function systemLogiHTML(){
   const wszystkie=pobierzLogi();let logi=wszystkie;if(filtrLogowDiag!=="wszystkie")logi=logi.filter(l=>l.poziom===filtrLogowDiag);if(szukajLogowDiag)logi=logi.filter(l=>(`${l.tresc} ${l.zrodlo}`).toLowerCase().includes(szukajLogowDiag));
-  const poziom={blad:"BŁĄD",ostrzezenie:"UWAGA",info:"INFO"},centralne=(systemCentralDiag.items||[]).filter(item=>filtrLogowDiag==="wszystkie"||item.level===filtrLogowDiag).filter(item=>!szukajLogowDiag||(`${item.message} ${item.source} ${item.route}`).toLowerCase().includes(szukajLogowDiag)),summary=systemCentralDiag.summary||{},agent=systemCentralDiag.agent||{},otwarteBledy=centralne.filter(item=>item.level==="blad"&&!["resolved","ignored"].includes(item.status)).map(item=>item.id);
-  const analizaHTML=item=>{const a=item.analysis||{},status=a.status||"idle";if(status==="idle")return"";if(["queued","running"].includes(status))return`<div class="backend-note"><b>Najmocniejszy agent:</b> ${status==="queued"?"oczekuje w kolejce":"analizuje dowody"} • ${esc(a.model||agent.model||"OpenAI")}</div>`;if(status==="failed")return`<div class="backend-note warn"><b>Analiza nieudana:</b> ${esc(a.error||"brak wyniku")}</div>`;return`<details class="backend-note"><summary><b>Analiza AI:</b> ${esc(a.summary||a.classification||"gotowa")} • pewność ${Math.round(Number(a.confidence||0)*100)}%</summary><p><b>Przyczyna:</b> ${esc(a.rootCause||"—")}</p>${a.evidence?.length?`<p><b>Dowody:</b> ${a.evidence.map(esc).join(" • ")}</p>`:""}${a.recommendedActions?.length?`<p><b>Zalecane działania:</b> ${a.recommendedActions.map(x=>esc(x.action)).join(" • ")}</p>`:""}${a.validationPlan?.length?`<p><b>Weryfikacja:</b> ${a.validationPlan.map(esc).join(" • ")}</p>`:""}<small>${esc(a.model||"")} • reasoning ${esc(a.reasoning||"")} • ${esc(systemDataCzas(a.analyzedAt))}</small></details>`};
-  return `<section class="system-summary-grid info-grid"><article class="info-card"><small>Wspólny rejestr</small><b>${summary.open||0}</b><span>otwartych grup problemów</span></article><article class="info-card"><small>Błędy</small><b>${summary.errors||0}</b><span>z wszystkich urządzeń</span></article><article class="info-card"><small>Ostrzeżenia</small><b>${summary.warnings||0}</b><span>zgrupowane bez duplikatów</span></article><article class="info-card"><small>Agent diagnostyczny</small><b>${agent.configured?"Aktywny":"Nieaktywny"}</b><span>${agent.configured?`${esc(agent.model)} • ${esc(agent.reasoning)}`:esc(systemCentralDiag.error||"sprawdź konfigurację OpenAI")}</span></article></section>
-  <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Monitoring VPS + OpenAI Agents SDK</span><h1>🛰️ Centralny rejestr problemów</h1><p>Błędy są grupowane według przyczyny. Agent zapisuje dowody i plan weryfikacji; nie oznacza błędu jako naprawionego bez potwierdzenia.</p></div><div><button class="btn" onclick='systemAnalizujBledy(${JSON.stringify(otwarteBledy)})' ${!agent.configured||!otwarteBledy.length?"disabled":""}>🧠 Analizuj błędy</button><button class="btn ghost" onclick="systemPobierzCentralneBledy(true).then(renderuj)" ${systemCentralDiag.loading?"disabled":""}>${systemCentralDiag.loading?"⏳ Pobieram…":"↻ Odśwież"}</button></div></div>
-  ${centralne.length?`<div class="system-log-table log-table-wrap"><table class="log-table"><thead><tr><th>Ostatnio</th><th>Poziom</th><th>Problem i analiza</th><th>Wystąpienia</th><th>Status</th><th>Działanie</th></tr></thead><tbody>${centralne.map(item=>`<tr><td>${esc(systemDataCzas(item.lastSeenAt))}<small>${esc(item.release||"wydanie nieznane")}</small></td><td><span class="lvl lvl-${item.level}">${poziom[item.level]||esc(item.level)}</span></td><td><b>${esc(item.message)}</b><small>${esc([item.source,item.route].filter(Boolean).join(" • "))}</small>${analizaHTML(item)}</td><td>${esc(item.count||1)}</td><td>${esc(item.status==="open"?"otwarty":item.status==="investigating"?"w analizie":item.status==="resolved"?"rozwiązany":"pominięty")}</td><td>${["resolved","ignored"].includes(item.status)?`<button class="btn ghost" onclick="systemUstawStatusBledu('${esc(item.id)}','open')">Otwórz ponownie</button>`:`<button class="btn ghost" onclick="systemAnalizujBledy('${esc(item.id)}')" ${!agent.configured?"disabled":""}>Analizuj</button><button class="btn" onclick="systemUstawStatusBledu('${esc(item.id)}','resolved')">Rozwiązane</button><button class="btn ghost" onclick="systemUstawStatusBledu('${esc(item.id)}','ignored')">Pomiń</button>`}</td></tr>`).join("")}</tbody></table></div>`:`<div class="system-empty order-empty"><span>${systemCentralDiag.loading?"⏳":"✅"}</span><b>${systemCentralDiag.loading?"Pobieram wspólny rejestr":"Brak centralnie zarejestrowanych problemów"}</b><p>${systemCentralDiag.error?esc(systemCentralDiag.error):"Nowe błędy pojawią się tu automatycznie, niezależnie od urządzenia."}</p></div>`}</section>
+  const poziom={blad:"BŁĄD",ostrzezenie:"UWAGA",info:"INFO"};
+  return `${systemCentralnyRejestrHTML()}
   <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Ta przeglądarka</span><h1>📋 Lokalny dziennik zdarzeń</h1><p>${logi.length} z ${wszystkie.length} wpisów pasuje do bieżącego filtra.</p></div><div><button class="btn ghost" onclick="pobierzPlikLogu()">⬇️ Pobierz TXT</button><button class="btn danger" onclick="wyczyscLogi()">🗑️ Wyczyść lokalny</button></div></div>
   ${adminWyszukiwaniePanelHTML({id:"system-logi",title:"Filtry dziennika",description:"Znajdź błąd, ostrzeżenie albo zdarzenie z konkretnego modułu.",results:logi.length,active:filtrLogowDiag!=="wszystkie"||!!szukajLogowDiag,fields:`<div class="admin-filter-grid"><label><span>Szukaj</span><input placeholder="Treść lub źródło…" value="${esc(szukajLogowDiag)}" oninput="szukajLogowDiag=this.value.toLowerCase();clearTimeout(diagSearchT);diagSearchT=setTimeout(renderuj,300)"></label><label><span>Poziom</span><select onchange="filtrLogowDiag=this.value;renderuj()"><option value="wszystkie">Wszystkie</option><option value="blad" ${filtrLogowDiag==="blad"?"selected":""}>Błędy</option><option value="ostrzezenie" ${filtrLogowDiag==="ostrzezenie"?"selected":""}>Ostrzeżenia</option><option value="info" ${filtrLogowDiag==="info"?"selected":""}>Informacje</option></select></label></div>`})}
   ${logi.length?`<div class="system-log-table log-table-wrap"><table class="log-table"><thead><tr><th>Czas</th><th>Poziom</th><th>Zdarzenie</th><th>Źródło</th></tr></thead><tbody>${logi.slice(0,200).map(l=>`<tr><td>${esc(l.czas)}</td><td><span class="lvl lvl-${l.poziom}">${poziom[l.poziom]||esc(l.poziom)}</span></td><td>${esc(l.tresc)}${Number(l.powtorzenia||1)>1?` <small>× ${esc(l.powtorzenia)}</small>`:""}</td><td>${esc(l.zrodlo)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="system-empty order-empty"><span>📭</span><b>Brak zdarzeń</b><p>Zmień filtry lub wróć tu po wykonaniu kontroli.</p></div>`}</section>`;
