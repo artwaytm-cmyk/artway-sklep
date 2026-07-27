@@ -1,5 +1,5 @@
-import { canonicalManufacturerName } from './product-field-validation.mjs';
 import { normalizeAllegroParameterName } from './allegro-category-parameter-resolver.mjs';
+import { allegroProductCommercialIdentity } from './allegro-commercial-identity.mjs';
 
 const asObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 const asArray = (value) => Array.isArray(value) ? value : [];
@@ -90,9 +90,7 @@ function productText(product = {}) {
 }
 
 function manufacturerKey(product = {}) {
-  return normalizeAllegroParameterName(canonicalManufacturerName(
-    product.producent || product.marka || product.manufacturer || product.brand || '',
-  ));
+  return normalizeAllegroParameterName(allegroProductCommercialIdentity(product).manufacturer);
 }
 
 function seriesValue(product = {}) {
@@ -161,7 +159,7 @@ function peerScore(product, candidate, profile = {}, target = {}) {
 function candidateEvidence(peer, field) {
   const candidate = peer.candidate;
   if (field === 'publisher') {
-    const publisher = canonicalManufacturerName(candidate.producent || candidate.marka || '');
+    const publisher = allegroProductCommercialIdentity(candidate).publisher;
     return publisher ? { value: publisher, source: 'producent podobnego produktu' } : null;
   }
   if (field === 'safety' && candidate.allegroSafetyInformation?.type === 'TEXT') {
@@ -324,7 +322,7 @@ export function enrichAllegroProductEvidence(product = {}, relatedProducts = [])
     };
   };
 
-  const publisher = canonicalManufacturerName(product.producent || product.marka || '');
+  const publisher = allegroProductCommercialIdentity(product).publisher;
   if (publisher) assign('publisher', {
     value: publisher,
     source: 'kanoniczny producent produktu',

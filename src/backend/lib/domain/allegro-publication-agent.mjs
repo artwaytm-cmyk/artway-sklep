@@ -1,9 +1,11 @@
 export const ALLEGRO_AGENT_OFFER_PROCEDURE = Object.freeze([
   'Najpierw sprawdź poprawność cyfry kontrolnej EAN/GTIN, a następnie zgodność GTIN, nazwy, producenta i parametrów.',
+  'Traktuj producenta, markę i wydawcę jako trzy osobne fakty. Przykład: producent Alexander, marka MilliWOOD. Jeśli słownik Allegro nie zawiera marki, użyj dopuszczalnej wartości właściciela marki wyłącznie w parametrze kanału i nie nadpisuj marki w sklepie.',
+  'Każdy parametr dopasuj do aktualnego ID kategorii, typu, słownika i ograniczeń zwróconych przez API Allegro. Zapisz źródło wartości oraz ewentualny fallback słownikowy.',
   'Jeżeli oferta istnieje, połącz ją z produktem i aktualizuj zamiast tworzyć duplikat.',
   'Nigdy nie wybieraj produktu katalogowego po samej nazwie ani samym MPN. UUID katalogu wolno zapisać tylko po dokładnej weryfikacji lub ręcznej decyzji administratora.',
   'Jeżeli produktu nie ma EAN, przygotuj nową kartotekę z kategorią i kompletem parametrów, bez podpinania istniejącego UUID katalogowego.',
-  'Uzupełnij producenta, markę, EAN, MPN, kategorię, UUID i parametry. Zdjęcia pobieraj wyłącznie z konkretnego linku źródłowego produktu; nigdy z podobnej oferty ani katalogu Allegro.',
+  'Uzupełnij producenta, markę, wydawcę, EAN, MPN, kategorię, UUID i wszystkie wymagane parametry. Zdjęcia pobieraj wyłącznie z konkretnego linku źródłowego produktu; nigdy z podobnej oferty ani katalogu Allegro.',
   'Nową ofertę zapisz jako INACTIVE; brak stanu magazynowego oznacza 0.',
   'Po sukcesie zapisz powiązanie produkt sklepu–produkt katalogowy–oferta i zamknij zadanie.',
   'Jeżeli brakuje danych, nie zgaduj: zapisz dokładne braki i błąd API do jednej kolejki ponowienia.',

@@ -33,7 +33,7 @@ export const CATALOG_PRODUCT_PREPARATION_FIELDS = new Set([
   'parametryProducenta', 'parametryZrodla', 'dostepnoscProducenta',
   'stanProducenta', 'stanProducentaDokladny', 'stanProducentaZrodlo',
   'producentStatus', 'producentSprawdzonoAt',
-  'allegroCategoryId', 'allegroProductId', 'allegroParameters',
+  'allegroCategoryId', 'allegroProductId', 'allegroParameters', 'allegroParameterResolution',
   'allegroDescriptionSections', 'allegroSafetyInformation',
   'allegroResponsibleProducer', 'allegroShippingSubsidy', 'contentEditorial',
   'contentEditorialPreparedAt', 'contentEditorialSource',

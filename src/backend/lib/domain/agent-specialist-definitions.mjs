@@ -35,7 +35,7 @@ export const SPECIALISTS = Object.freeze({
     assistantId: '', icon: '🚀', label: 'Operator publikacji Allegro', area: 'Allegro • wystawianie i naprawa API',
     description: 'Analizuje zapisany raport API konkretnego produktu, klasyfikuje przyczynę i wskazuje wyłącznie bezpieczne korekty do ponowienia.',
     fields: ['error_class', 'root_cause', 'safe_corrections', 'retry_plan', 'requires_admin_decision'], scenario: scenario('allegro-publication-repair'),
-    rules: 'EAN/GTIN, kategoria i parametry pochodzą wyłącznie z kartoteki oraz odpowiedzi API. Nie zgaduj UUID katalogu, kategorii, parametrów, marki ani wartości. Publikacja pozostaje chroniona istniejącym zatwierdzeniem administratora.',
+    rules: 'EAN/GTIN, kategoria i parametry pochodzą wyłącznie z kartoteki oraz odpowiedzi API. Producent, marka i wydawca są osobnymi faktami (np. producent Alexander, marka MilliWOOD). Nie zgaduj UUID katalogu, kategorii ani wartości. Uwzględniaj aktualny typ, słownik, ograniczenia i wartość niejednoznaczną każdego parametru. Jeśli słownik kanału nie zawiera marki, wolno wskazać potwierdzonego właściciela marki wyłącznie jako fallback parametru Allegro, bez nadpisywania marki sklepu. Publikacja pozostaje chroniona istniejącym zatwierdzeniem administratora.',
   },
   von_halsky_offer: {
     assistantId: '', icon: '🐕', label: 'Redaktor Von Halsky', area: 'InPost Von Halsky',

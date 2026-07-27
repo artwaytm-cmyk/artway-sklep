@@ -38,22 +38,22 @@ export function recognizeProductManufacturer(product = {}, evidence = {}, knownN
       ? product.sourceParameters
       : {};
   const structured = [
-    evidence?.brand,
     evidence?.producent,
     evidence?.manufacturer,
     evidence?.publisher,
-    sourceParameters.marka,
-    sourceParameters.brand,
     sourceParameters.producent,
     sourceParameters.manufacturer,
     sourceParameters.wydawca,
     sourceParameters.publisher,
     product?.producent,
-    product?.marka,
     product?.manufacturer,
-    product?.brand,
     product?.wydawca,
     product?.publisher,
+    evidence?.brand,
+    sourceParameters.marka,
+    sourceParameters.brand,
+    product?.marka,
+    product?.brand,
   ];
   for (const candidate of structured) {
     const name = canonicalManufacturerName(candidate);

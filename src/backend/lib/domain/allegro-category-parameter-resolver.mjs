@@ -1,4 +1,5 @@
 import { canonicalManufacturerName } from './product-field-validation.mjs';
+import { allegroProductCommercialIdentity } from './allegro-commercial-identity.mjs';
 
 const EMPTY = new Set(['', '-', '—', 'brak', 'nie dotyczy', 'n/d', 'null', 'undefined']);
 
@@ -20,12 +21,45 @@ function cleanValue(value) {
   return EMPTY.has(normalizeAllegroParameterName(text)) ? '' : text;
 }
 
-function addValue(catalog, name, value, source, priority = 0) {
+function semanticSourceAliases(name = '') {
+  const key = normalizeAllegroParameterName(name);
+  if (/\b(ean|gtin|kod kreskowy)\b/.test(key)) return ['ean', 'gtin', 'kod kreskowy'];
+  if (/kod producenta|\bmpn\b|numer referencyjny|\bnr ref\b|symbol producenta|^symbol$/.test(key)) {
+    return ['kod producenta', 'mpn', 'numer referencyjny', 'symbol producenta'];
+  }
+  if (/^(marka|brand)$/.test(key)) return ['marka', 'brand'];
+  if (/^(producent|manufacturer)$/.test(key)) return ['producent', 'manufacturer'];
+  if (/^(wydawca|publisher)$/.test(key)) return ['wydawca', 'publisher'];
+  if (/wiek/.test(key)) return ['wiek', 'wiek dziecka', 'minimalny wiek dziecka', 'wiek graczy od'];
+  if (/liczba graczy|ilosc graczy|gracze/.test(key)) return ['liczba graczy', 'gracze'];
+  if (/(liczba|ilosc).*(element|puzzl|czesc)|^(elementy|puzzle)$/.test(key)) {
+    return ['liczba elementow', 'ilosc elementow', 'liczba puzzli', 'ilosc puzzli'];
+  }
+  if (/material|tworzywo|wykonanie/.test(key)) return ['material', 'material wykonania'];
+  if (/wersja jezykowa|jezyk/.test(key)) return ['wersja jezykowa', 'wersja jezykowa gry', 'jezyk'];
+  if (/^(typ|rodzaj)( produktu| gry)?$/.test(key)) return ['typ', 'rodzaj produktu'];
+  if (/^(seria|linia|kolekcja|model)$/.test(key)) return ['seria', 'linia', 'kolekcja', 'model'];
+  if (/kolor/.test(key)) return ['kolor', 'kolor produktu'];
+  if (/rozmiar|wielkosc/.test(key)) return ['rozmiar', 'wielkosc'];
+  if (/waga/.test(key)) return ['waga', 'waga produktu', 'waga opakowania'];
+  if (/wymiar/.test(key)) return ['wymiary', 'wymiary produktu', 'wymiary opakowania'];
+  if (/ostrze|bezpieczen|gpsr/.test(key)) return ['ostrzezenia', 'informacje o bezpieczenstwie', 'gpsr'];
+  return [];
+}
+
+function setCatalogValue(catalog, name, value, source, priority = 0) {
   const key = normalizeAllegroParameterName(name);
   const cleaned = cleanValue(value);
   if (!key || !cleaned) return;
   const previous = catalog.get(key);
   if (!previous || priority > previous.priority) catalog.set(key, { value: cleaned, source, priority });
+}
+
+function addValue(catalog, name, value, source, priority = 0) {
+  setCatalogValue(catalog, name, value, source, priority);
+  for (const alias of semanticSourceAliases(name)) {
+    setCatalogValue(catalog, alias, value, source, Math.max(0, priority - 1));
+  }
 }
 
 function addObject(catalog, object, source, priority = 10) {
@@ -52,6 +86,7 @@ function addEvidenceObject(catalog, object, priority = 60) {
 
 export function allegroProductParameterCatalog(product = {}) {
   const catalog = new Map();
+  const commercial = allegroProductCommercialIdentity(product);
   const sourceMaterial = product?.sourceMaterial && typeof product.sourceMaterial === 'object' ? product.sourceMaterial : {};
   for (const [object, source, priority] of [
     [sourceMaterial.parameters, 'materiał źródłowy', 20],
@@ -67,7 +102,8 @@ export function allegroProductParameterCatalog(product = {}) {
     [['nazwa', 'nazwa produktu'], product.nazwa || product.name || product.allegroTitle],
     [['ean', 'gtin', 'kod kreskowy'], product.gtin || product.ean],
     [['kod producenta', 'mpn', 'numer referencyjny', 'symbol producenta', 'sku', 'external id'], product.kodProducenta || product.mpn || product.numerReferencyjny || product.externalId || product.sku],
-    [['marka', 'producent'], canonicalManufacturerName(product.producent || product.marka)],
+    [['marka', 'brand'], commercial.brand],
+    [['producent', 'manufacturer'], commercial.manufacturer],
     [['wiek', 'wiek dziecka', 'minimalny wiek dziecka', 'wiek graczy od'], product.wiek || product.wiekDziecka || product.minimalnyWiekDziecka || product.wiekGraczyOd],
     [['liczba graczy'], product.liczbaGraczy || product.gracze],
     [['liczba elementow'], product.liczbaElementow],
@@ -76,7 +112,7 @@ export function allegroProductParameterCatalog(product = {}) {
     [['rozmiar'], product.rozmiar || product.size],
     [['waga opakowania', 'waga'], product.wagaOpakowania || product.waga],
     [['wymiary opakowania'], product.wymiaryOpakowania],
-    [['wydawca'], product.wydawca || canonicalManufacturerName(product.producent || product.marka)],
+    [['wydawca', 'publisher'], commercial.publisher],
     [['wersja językowa', 'wersja językowa gry', 'język'], product.wersjaJezykowa || product.jezyk || product.language],
     [['typ', 'rodzaj produktu'], product.typ || product.rodzaj],
   ];
@@ -98,16 +134,18 @@ export function allegroProductParameterCatalog(product = {}) {
 const ALIASES = Object.freeze({
   ean: ['ean', 'gtin', 'kod kreskowy'],
   code: ['kod producenta', 'mpn', 'numer referencyjny', 'numer referencyjny produktu', 'symbol producenta', 'kod produktu sku', 'sku', 'external id'],
-  brand: ['marka', 'producent', 'manufacturer'],
+  brand: ['marka', 'brand'],
+  manufacturer: ['producent', 'manufacturer'],
   age: ['wiek dziecka', 'minimalny wiek dziecka', 'wiek graczy od', 'wiek', 'wiek od'],
   players: ['liczba graczy', 'gracze', 'ilosc graczy'],
-  elements: ['liczba elementow', 'ilosc elementow', 'elementy'],
+  elements: ['liczba elementow', 'ilosc elementow', 'elementy', 'liczba puzzli', 'ilosc puzzli'],
   material: ['material', 'material wykonania'],
   color: ['kolor', 'kolor produktu'],
   size: ['rozmiar', 'wielkosc'],
   packageWeight: ['waga opakowania', 'waga produktu', 'waga'],
   packageDimensions: ['wymiary opakowania', 'wymiary produktu', 'wymiary'],
-  publisher: ['wydawca', 'producent', 'marka', 'publisher'],
+  publisher: ['wydawca', 'publisher'],
+  series: ['seria', 'linia', 'kolekcja', 'model'],
   language: ['wersja jezykowa', 'wersja jezykowa gry', 'jezyk', 'jezyk gry', 'jezyk instrukcji'],
   type: ['typ', 'typ produktu', 'rodzaj', 'rodzaj produktu', 'rodzaj gry'],
 });
@@ -178,8 +216,37 @@ function parameterPayload(parameter, value, candidates = []) {
   const entry = dictionaryEntry(parameter, candidates.length ? candidates : [value]);
   const valueId = dictionaryId(entry);
   if (valueId) return { id, valuesIds: [valueId] };
-  if (dictionaryValues(parameter).length) return null;
-  return { id, values: [String(value).trim().slice(0, 500)] };
+  if (dictionaryValues(parameter).length) {
+    const ambiguousValueId = String(parameter?.options?.ambiguousValueId || '').trim();
+    if (parameter?.options?.customValuesEnabled === true && ambiguousValueId) {
+      return { id, valuesIds: [ambiguousValueId], values: [String(value).trim().slice(0, 500)] };
+    }
+    return null;
+  }
+  const type = String(parameter?.type || '').toLowerCase();
+  const restrictions = parameter?.restrictions && typeof parameter.restrictions === 'object' ? parameter.restrictions : {};
+  let output = String(value).trim();
+  if (type === 'integer' || type === 'float') {
+    const number = parseNumbers(output)[0];
+    if (!Number.isFinite(number)) return null;
+    if (Number.isFinite(Number(restrictions.min)) && number < Number(restrictions.min)) return null;
+    if (Number.isFinite(Number(restrictions.max)) && number > Number(restrictions.max)) return null;
+    output = type === 'integer' ? String(Math.round(number)) : String(number);
+  }
+  const maxLength = Math.min(500, Math.max(1, Number(restrictions.maxLength) || 500));
+  output = output.slice(0, maxLength);
+  return output ? { id, values: [output] } : null;
+}
+
+function channelValueForPayload(parameter = {}, payload = {}) {
+  if (Array.isArray(payload.values) && payload.values.length) return payload.values.join(', ');
+  const ids = new Set(Array.isArray(payload.valuesIds) ? payload.valuesIds.map(String) : []);
+  if (!ids.size) return '';
+  return dictionaryValues(parameter)
+    .filter((entry) => ids.has(dictionaryId(entry)))
+    .map((entry) => String(entry?.value ?? entry?.name ?? entry?.label ?? '').trim())
+    .filter(Boolean)
+    .join(', ');
 }
 
 function parseNumbers(value = '') {
@@ -219,22 +286,42 @@ function genericCatalogValue(catalog, parameterName) {
   if (withoutUnits.length >= 4) {
     for (const [key, record] of catalog) if (key === withoutUnits || key.includes(withoutUnits) || withoutUnits.includes(key)) return record;
   }
+  const wanted = new Set(withoutUnits.split(' ').filter((token) => token.length >= 4));
+  if (wanted.size >= 2) {
+    let best = null;
+    for (const [key, record] of catalog) {
+      const available = new Set(key.split(' ').filter((token) => token.length >= 4));
+      let common = 0;
+      for (const token of wanted) if (available.has(token)) common += 1;
+      const score = common / Math.max(wanted.size, available.size);
+      if (common >= 2 && score >= 0.67 && (!best || score > best.score)) best = { record, score };
+    }
+    if (best) return best.record;
+  }
   return null;
 }
 
 export function resolveAllegroCategoryParameter(product = {}, parameter = {}) {
   const name = normalizeAllegroParameterName(parameter?.name || parameter?.id || '');
   const catalog = allegroProductParameterCatalog(product);
+  const commercial = allegroProductCommercialIdentity(product);
   let record = null;
   let payload = null;
 
   if (/^nazwa(?: produktu)?$/.test(name)) record = firstCatalogValue(catalog, ['nazwa', 'nazwa produktu']);
   else if (/\b(ean|gtin)\b|kod kreskowy/.test(name)) record = firstCatalogValue(catalog, ALIASES.ean);
   else if (/kod producenta|\bmpn\b|symbol producenta|numer referencyjny/.test(name)) record = firstCatalogValue(catalog, ALIASES.code);
-  else if (/^(marka|producent|manufacturer)$/.test(name)) {
+  else if (/^(marka|brand)$/.test(name)) {
     record = firstCatalogValue(catalog, ALIASES.brand);
+    const brand = canonicalManufacturerName(record?.value);
+    record = brand && record ? { ...record, value: brand } : null;
+    if (record) payload = parameterPayload(parameter, record.value, commercial.brandCandidates);
+  }
+  else if (/^(producent|manufacturer)$/.test(name)) {
+    record = firstCatalogValue(catalog, ALIASES.manufacturer);
     const manufacturer = canonicalManufacturerName(record?.value);
     record = manufacturer && record ? { ...record, value: manufacturer } : null;
+    if (record) payload = parameterPayload(parameter, record.value, commercial.manufacturerCandidates);
   }
   else if (/^stan$|stan produktu|condition/.test(name)) {
     payload = parameterPayload(parameter, 'Nowy', ['Nowy', 'new']);
@@ -257,13 +344,15 @@ export function resolveAllegroCategoryParameter(product = {}, parameter = {}) {
     record = firstCatalogValue(catalog, ALIASES.age);
     const age = parseAge(record?.value);
     if (age) payload = parameterPayload(parameter, record.value, ageCandidates(age));
-  } else if (/liczba|ilosc/.test(name) && /element/.test(name)) record = firstCatalogValue(catalog, ALIASES.elements);
+  } else if (/liczba|ilosc/.test(name) && /element|puzzl|czesc/.test(name)) record = firstCatalogValue(catalog, ALIASES.elements);
   else if (/material/.test(name)) record = firstCatalogValue(catalog, ALIASES.material);
   else if (/wydawca|publisher/.test(name)) {
     record = firstCatalogValue(catalog, ALIASES.publisher);
     const publisher = canonicalManufacturerName(record?.value);
     record = publisher && record ? { ...record, value: publisher } : null;
+    if (record) payload = parameterPayload(parameter, record.value, commercial.publisherCandidates);
   }
+  else if (/^(seria|linia|kolekcja|model)$/.test(name)) record = firstCatalogValue(catalog, ALIASES.series);
   else if (/wersja jezykowa|jezyk(?: gry| instrukcji)?/.test(name)) record = firstCatalogValue(catalog, ALIASES.language);
   else if (/^(?:typ|rodzaj)(?: produktu| gry)?$/.test(name)) record = firstCatalogValue(catalog, ALIASES.type);
   else if (/kolor|color/.test(name)) record = firstCatalogValue(catalog, ALIASES.color);
@@ -273,13 +362,24 @@ export function resolveAllegroCategoryParameter(product = {}, parameter = {}) {
   else record = genericCatalogValue(catalog, name);
 
   if (!payload && record?.value) payload = parameterPayload(parameter, record.value, [record.value]);
-  if (!payload && parameter?.required === true && dictionaryValues(parameter).length === 1) {
+  if (!payload && (parameter?.required === true || parameter?.requiredForProduct === true) && dictionaryValues(parameter).length === 1) {
     const only = dictionaryValues(parameter)[0];
     const onlyId = dictionaryId(only);
     payload = onlyId ? { id: String(parameter.id), valuesIds: [onlyId] } : parameterPayload(parameter, only?.value ?? only?.name ?? '');
     record = record || { value: only?.value ?? only?.name ?? '', source: 'jedyna wartość kategorii' };
   }
-  return payload ? { payload, source: record?.source || 'kartoteka produktu', sourceValue: record?.value || '' } : null;
+  if (!payload) return null;
+  const sourceValue = record?.value || '';
+  const channelValue = channelValueForPayload(parameter, payload) || sourceValue;
+  return {
+    payload,
+    source: record?.source || 'kartoteka produktu',
+    sourceValue,
+    channelValue,
+    strategy: normalizeAllegroParameterName(sourceValue) === normalizeAllegroParameterName(channelValue)
+      ? 'direct'
+      : 'allegro_dictionary_fallback',
+  };
 }
 
 export function allegroAutomaticCategoryParameters(product = {}, categoryParameters = []) {
@@ -294,4 +394,21 @@ export function allegroAutomaticCategoryParameters(product = {}, categoryParamet
     parameters.push(resolved.payload);
   }
   return parameters;
+}
+
+export function allegroCategoryParameterResolutionReport(product = {}, categoryParameters = []) {
+  return (Array.isArray(categoryParameters) ? categoryParameters : []).map((parameter) => {
+    const resolved = resolveAllegroCategoryParameter(product, parameter);
+    return {
+      id: String(parameter?.id || ''),
+      name: String(parameter?.name || ''),
+      required: parameter?.required === true || parameter?.requiredForProduct === true,
+      resolved: !!resolved?.payload,
+      source: resolved?.source || '',
+      sourceValue: resolved?.sourceValue || '',
+      channelValue: resolved?.channelValue || '',
+      strategy: resolved?.strategy || 'missing',
+      payload: resolved?.payload || null,
+    };
+  });
 }

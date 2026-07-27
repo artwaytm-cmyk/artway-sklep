@@ -287,6 +287,7 @@ export function createAllegroPreparationWorker({
       allegroCategoryId: auto.allegroCategoryId || product.allegroCategoryId,
       allegroProductId: auto.allegroProductId || product.allegroProductId,
       allegroParameters: auto.allegroParameters || product.allegroParameters,
+      allegroParameterResolution: auto.allegroParameterResolution || product.allegroParameterResolution,
       allegroSafetyInformation: auto.allegroSafetyInformation || product.allegroSafetyInformation,
       allegroResponsibleProducer: auto.allegroResponsibleProducer || product.allegroResponsibleProducer,
       allegroParameterEvidence: product.allegroParameterEvidence,

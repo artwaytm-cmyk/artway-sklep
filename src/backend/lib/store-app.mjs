@@ -108,6 +108,7 @@ import { canonicalGtin, gtinEquivalent } from './domain/product-identifiers.mjs'
 import { evaluateAllegroCatalogIdentitySignals, selectAllegroCatalogCandidate } from './domain/allegro-catalog-identity.mjs';
 import { ALLEGRO_AGENT_OFFER_PROCEDURE, buildAllegroPublicationSuccessFields, createAllegroPublicationAgent } from './domain/allegro-publication-agent.mjs';
 import { canonicalManufacturerName, recognizeProductManufacturer, sanitizeManufacturerFieldsInSettings } from './domain/product-field-validation.mjs';
+import { allegroProductCommercialIdentity } from './domain/allegro-commercial-identity.mjs';
 import { findBestAllegroOffer, mappedProductFallback, mappingProductSnapshot, mappingVerifiedForSupplier, reassessBlockedAllegroMapping, scoreAllegroProductMapping } from './domain/allegro-product-mapping.mjs';
 import { allegroMappingIsCanonical, allegroProductSyncFingerprint, canonicalizeAllegroMappings, linkCanonicalAllegroMapping, markAllegroMappingSynced } from './domain/allegro-canonical-mappings.mjs';
 import { allegroMappingRecordsEqual, createAllegroMappingStore } from './domain/allegro-mapping-store.mjs';
@@ -131,7 +132,7 @@ import {
   mergeImportedProductSourceRefresh,
 } from './domain/imported-product-catalog.mjs';
 import { createAllegroOfferWithdrawalRoute } from './allegro-offer-withdrawal-route.mjs';
-import { allegroAutomaticCategoryParameters } from './domain/allegro-category-parameter-resolver.mjs';
+import { allegroAutomaticCategoryParameters, allegroCategoryParameterResolutionReport } from './domain/allegro-category-parameter-resolver.mjs';
 import { enrichAllegroProductEvidence } from './domain/allegro-parameter-enrichment.mjs';
 import { allegroCategoryIntentPhrases, allegroCategoryParentPath, allegroCategorySpecificScore, allegroCorrectCategorySelection } from './domain/allegro-category-classifier.mjs';
 import {
@@ -1602,15 +1603,22 @@ function allegroOcenaTozsamosciKatalogu(product = {}, candidate = {}) {
   const gtin = canonicalGtin(product.gtin || product.ean || '');
   const candidateGtins = allegroGtinsProduktuKatalogowego(candidate);
   const nameScore = allegroPodobienstwoNazw(product.nazwa || product.name, candidate.name);
-  const productBrand = allegroNormalizujKlucz(product.producent || product.marka || product.brand || '');
+  const commercial = allegroProductCommercialIdentity(product);
+  const productBrands = commercial.identityCandidates.map(allegroNormalizujKlucz).filter(Boolean);
+  const productBrand = productBrands[0] || '';
   const candidateBrand = allegroNormalizujKlucz(candidate.brand || allegroWartoscParametru(candidate, ['producent', 'marka', 'brand']));
+  const productCode = tekst(product.kodProducenta || product.mpn || product.numerReferencyjny || product.externalId || product.sku, 160).trim();
+  const candidateCodes = [
+    allegroWartoscParametru(candidate, ['kod producenta', 'mpn', 'symbol producenta', 'numer referencyjny']),
+    candidate.manufacturerCode, candidate.producerCode,
+  ].filter(Boolean);
   const productName = allegroNormalizujKlucz(product.nazwa || product.name || '');
   const candidateBrandCorroborated = !!(candidateBrand && productName && (
     productName === candidateBrand
     || productName.includes(candidateBrand)
     || candidateBrand.includes(productName)
   ));
-  return evaluateAllegroCatalogIdentitySignals({ gtin, candidateGtins, nameScore, productBrand, candidateBrand, candidateBrandCorroborated });
+  return evaluateAllegroCatalogIdentitySignals({ gtin, candidateGtins, nameScore, productBrand, productBrands, candidateBrand, productCode, candidateCodes, candidateBrandCorroborated });
 }
 function allegroNormalizujProduktKatalogu(product = {}, raw = {}) {
   const candidate = {
@@ -1662,7 +1670,7 @@ function allegroBrakujaceParametryWymagane(product = {}, categoryParameters = []
   const auto = allegroParametryAutomatyczne(product, categoryParameters);
   const custom = Array.isArray(product.allegroParameters) ? product.allegroParameters : [];
   const present = new Set([...auto, ...custom].map((x) => String(x?.id || '')).filter(Boolean));
-  return (Array.isArray(categoryParameters) ? categoryParameters : []).filter((p) => p?.required === true && p?.options?.describesProduct === true && !present.has(String(p.id))).map((p) => ({
+  return (Array.isArray(categoryParameters) ? categoryParameters : []).filter((p) => (p?.required === true || p?.requiredForProduct === true) && p?.options?.describesProduct === true && !present.has(String(p.id))).map((p) => ({
     id: tekst(p.id, 80), name: tekst(p.name, 180), type: tekst(p.type, 40), unit: tekst(p.unit, 40), dictionary: Array.isArray(p.dictionary) ? p.dictionary.slice(0, 200) : [], restrictions: p.restrictions || {},
   }));
 }
@@ -1763,10 +1771,12 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
         const sourceImageResult = inspectedSourceImages(product, sourceInspection || {});
         if (sourceImageResult.ok) Object.assign(fields, sourceImageResult.patch);
       }
-      const producer = allegroRozpoznajProducenta(product, {}, offerSettings);
-      if (producer && (product.producent !== producer || product.marka !== producer)) {
-        fields.producent = producer; fields.marka = producer; report.producers++;
+      const commercial = allegroProductCommercialIdentity(product);
+      if (commercial.manufacturer && product.producent !== commercial.manufacturer) {
+        fields.producent = commercial.manufacturer;
+        report.producers++;
       }
+      if (commercial.brand && product.marka !== commercial.brand) fields.marka = commercial.brand;
       let catalog = null;
       if (offerSettings.autoCatalog !== false && (!product.allegroProductId || !product.allegroCategoryId || (offerSettings.syncDescriptions !== false && !tekst(product.opis, 20000).trim()))) {
         const found = await allegroZnajdzProduktKatalogu(req, { ...product, ...fields });
@@ -1775,8 +1785,9 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
           fields.allegroProductId = catalog.id;
           if (catalog.categoryId) fields.allegroCategoryId = catalog.categoryId;
           report.matched++;
-          const catalogProducer = allegroRozpoznajProducenta({ ...product, ...fields }, catalog, offerSettings);
-          if (catalogProducer) { fields.producent = catalogProducer; fields.marka = catalogProducer; }
+          // Marka katalogu służy kanałowi Allegro i nie nadpisuje producenta ani pewniejszej marki źródłowej.
+          const catalogBrand = canonicalManufacturerName(catalog.brand || allegroWartoscParametru(catalog, ['marka', 'brand']));
+          if (catalogBrand && !commercial.brand) fields.marka = catalogBrand;
           if (offerSettings.syncDescriptions !== false && !tekst(product.opis, 20000).trim() && catalog.descriptionText) fields.sourceMaterial = { ...(product.sourceMaterial || {}), allegroCatalogDescription: tekst(catalog.descriptionText, 20000).trim(), fetchedAt: report.lastRun };
         }
       }
@@ -1914,7 +1925,11 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   }
   const catalog = catalogMatch?.selected || {};
   const safeOffer = existingOffer?.offer || {};
-  const catalogProducer = allegroRozpoznajProducenta(product, { ...catalog, producent: allegroWartoscParametru(catalog, ['producent', 'marka', 'brand']) || catalog.brand || safeOffer.brand }, offerSettings);
+  const commercial = allegroProductCommercialIdentity(product);
+  const catalogBrand = canonicalManufacturerName(allegroWartoscParametru(catalog, ['marka', 'brand']) || catalog.brand || safeOffer.brand);
+  const catalogManufacturer = canonicalManufacturerName(allegroWartoscParametru(catalog, ['producent', 'manufacturer', 'wydawca']));
+  const preparedManufacturer = commercial.manufacturer || catalogManufacturer;
+  const preparedBrand = commercial.brand || catalogBrand || preparedManufacturer;
   const catalogCode = allegroWartoscParametru(catalog, ['kod producenta', 'mpn', 'symbol producenta']) || tekst(safeOffer.manufacturerCode || safeOffer.producerCode || '', 160).trim();
   const catalogGtin = tekst((catalog.eans || [])[0] || safeOffer.ean || safeOffer.gtin || '', 80).trim();
   const productSourceUrl = sourcePageUrl(product);
@@ -1927,7 +1942,8 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   const productWithSafeImages = productSourceUrl ? { ...product, zdjecie: '', zdjecia: [], ...sourceImagePatch } : product;
   const preparedProduct = {
     ...productWithSafeImages,
-    ...(!catalogProducer ? {} : { producent: catalogProducer, marka: catalogProducer }),
+    ...(!preparedManufacturer ? {} : { producent: preparedManufacturer }),
+    ...(!preparedBrand ? {} : { marka: preparedBrand }),
     ...(product.gtin || product.ean || !catalogGtin ? {} : { gtin: catalogGtin, ean: catalogGtin }),
     ...(product.kodProducenta || product.mpn || !catalogCode ? {} : { kodProducenta: catalogCode, mpn: catalogCode }),
   };
@@ -1965,6 +1981,7 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   }
   draft.missing = applyRequiredAllegroSalesConditions(draft.missing, draft.payload, { existingOffer: !!existingOffer });
   const autoParameters = allegroParametryAutomatyczne(preparedProduct, categoryParameters.parameters);
+  const parameterResolution = allegroCategoryParameterResolutionReport(preparedProduct, categoryParameters.parameters);
   return {
     ...draft,
     categorySuggestion,
@@ -1995,6 +2012,7 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
       zdjecia: Array.isArray(preparedProduct.zdjecia) ? preparedProduct.zdjecia.slice(0, 15) : [],
       sourceEvidence: preparedProduct.sourceEvidence || null,
       allegroParameters: autoParameters,
+      allegroParameterResolution: parameterResolution,
       allegroProductId: options.catalogProductId || '',
       allegroCategoryId: effectiveCategoryId || '',
       allegroSafetyInformation: gpsr.safetyInformation,
@@ -2167,7 +2185,7 @@ function allegroDanePowiazaniaZPrzygotowania(product = {}, prepared = {}, draft 
   const draftCatalogId = draftProduct.idType ? '' : tekst(draftProduct.id, 120).trim();
   const catalogProductId = tekst(verifiedCatalogId || (safeExisting && draftCatalogId === existingCatalogId ? draftCatalogId : '') || confirmedProductId, 120).trim();
   const categoryId = tekst(katalog.categoryId || prepared?.autoFilled?.allegroCategoryId || prepared?.categorySuggestion?.selected?.id || product.allegroCategoryId || draftProduct.category?.id || '', 80).trim();
-  const producent = tekst(product.producent || product.marka || allegroWartoscParametru(katalog, ['producent', 'marka', 'brand']) || '', 160).trim();
+  const producent = tekst(allegroProductCommercialIdentity(product).manufacturer || allegroWartoscParametru(katalog, ['producent', 'manufacturer']) || '', 160).trim();
   return { catalogProductId, categoryId, producent };
 }
 async function allegroZapiszPowiazanieProduktu(product = {}, details = {}) {
@@ -2986,8 +3004,6 @@ const emailRoute = createEmailRoute({
   syncProcurement: synchronizujEtapyZakupoweZlecen, orderNumber: numerZamowienia, emailConfig: emailKonfiguracja,
   orderConfirmation: wiadomoscKlientaZamowienie, appendHistory: dopiszHistorieEmaila, sendStatus: wyslijEmailStatusowy,
 });
-
-
 export default async (req) => {
   const url = new URL(req.url);
   const action = url.searchParams.get('action') || 'health';

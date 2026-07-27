@@ -41,6 +41,37 @@ test('marka katalogowa potwierdzona w nazwie pozwala poprawić błędne pole mar
   assert.equal(identity.brandCorroborated, true);
 });
 
+test('tożsamość katalogu uwzględnia osobno markę i producenta produktu', () => {
+  const identity = evaluateAllegroCatalogIdentitySignals({
+    gtin: '5906018050066',
+    candidateGtins: ['5906018050066'],
+    nameScore: 0.7,
+    productBrand: 'MilliWOOD',
+    productBrands: ['MilliWOOD', 'Alexander'],
+    candidateBrand: 'Aleksander',
+  });
+  assert.equal(identity.verified, true);
+  assert.equal(identity.brandMatch, true);
+  assert.equal(identity.brandConflict, false);
+});
+
+test('zgodny EAN, kod producenta i alias marki naprawiają kategorię mimo skróconej nazwy katalogowej', () => {
+  const identity = evaluateAllegroCatalogIdentitySignals({
+    gtin: '5906018027532',
+    candidateGtins: ['5906018027532'],
+    nameScore: 0.429,
+    productBrand: 'Alexander',
+    productBrands: ['Alexander'],
+    candidateBrand: 'Aleksander',
+    productCode: '2753',
+    candidateCodes: ['2753'],
+  });
+  assert.equal(identity.verified, true);
+  assert.equal(identity.codeMatch, true);
+  assert.equal(identity.brandConflict, false);
+  assert.equal(identity.nameConsistent, true);
+});
+
 test('podobna nazwa nigdy nie zastępuje brakującej zgodności GTIN', () => {
   const identity = evaluateAllegroCatalogIdentitySignals({
     gtin: '5906018027204',

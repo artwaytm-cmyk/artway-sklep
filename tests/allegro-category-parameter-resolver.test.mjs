@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   allegroAutomaticCategoryParameters,
+  allegroCategoryParameterResolutionReport,
   allegroProductParameterCatalog,
   normalizeAllegroParameterName,
   resolveAllegroCategoryParameter,
@@ -117,4 +118,81 @@ test('słownik Allegro dopasowuje jednoznaczny wariant znaczeniowy zamiast wymag
     dictionary('type', 'Typ', [['educational', 'Edukacyjna'], ['family', 'Rodzinna']]),
   );
   assert.deepEqual(resolved?.payload, { id: 'type', valuesIds: ['educational'] });
+});
+
+test('marka i producent pozostają osobnymi faktami, a słownik kanału dostaje bezpieczny fallback właściciela marki', () => {
+  const product = {
+    producent: 'Alexander',
+    marka: 'MilliWOOD',
+    parametryZrodla: { marka: 'MilliWOOD' },
+  };
+  const brand = dictionary('brand', 'Marka', [
+    ['alexander', 'Alexander'],
+    ['multigra', 'Multigra'],
+  ]);
+  const manufacturer = dictionary('manufacturer', 'Producent', [
+    ['aleksander', 'Aleksander'],
+    ['multigra', 'Multigra'],
+  ]);
+  assert.deepEqual(resolveAllegroCategoryParameter(product, brand)?.payload, {
+    id: 'brand',
+    valuesIds: ['alexander'],
+  });
+  assert.deepEqual(resolveAllegroCategoryParameter(product, manufacturer)?.payload, {
+    id: 'manufacturer',
+    valuesIds: ['aleksander'],
+  });
+  assert.equal(product.marka, 'MilliWOOD');
+  assert.equal(product.producent, 'Alexander');
+  const report = allegroCategoryParameterResolutionReport(product, [brand]);
+  assert.equal(report[0].sourceValue, 'MilliWOOD');
+  assert.equal(report[0].channelValue, 'Alexander');
+  assert.equal(report[0].strategy, 'allegro_dictionary_fallback');
+});
+
+test('gdy słownik zawiera MilliWOOD, marka ma pierwszeństwo przed producentem', () => {
+  const parameter = dictionary('brand', 'Marka', [
+    ['milliwood', 'MilliWOOD'],
+    ['alexander', 'Alexander'],
+  ]);
+  assert.deepEqual(resolveAllegroCategoryParameter({
+    producent: 'Alexander',
+    marka: 'MilliWOOD',
+  }, parameter)?.payload, {
+    id: 'brand',
+    valuesIds: ['milliwood'],
+  });
+});
+
+test('własna wartość słownikowa używa wartości niejednoznacznej tylko gdy API na to pozwala', () => {
+  const parameter = {
+    ...dictionary('brand', 'Marka', [['other', 'Inna']]),
+    options: {
+      describesProduct: true,
+      customValuesEnabled: true,
+      ambiguousValueId: 'other',
+    },
+  };
+  assert.deepEqual(resolveAllegroCategoryParameter({ marka: 'Nowa Marka' }, parameter)?.payload, {
+    id: 'brand',
+    valuesIds: ['other'],
+    values: ['Nowa Marka'],
+  });
+});
+
+test('semantycznie mapuje parametry źródłowe oraz respektuje typ i ograniczenia API', () => {
+  const product = {
+    parametryZrodla: {
+      'Ilość puzzli': '200 szt.',
+      'Nr ref': '5099',
+    },
+  };
+  const parameters = [
+    { id: 'elements', name: 'Liczba elementów', type: 'integer', required: true, restrictions: { min: 0, max: 50000 } },
+    { id: 'code', name: 'Kod producenta', type: 'string', required: true, restrictions: { minLength: 1, maxLength: 45 } },
+  ];
+  assert.deepEqual(allegroAutomaticCategoryParameters(product, parameters), [
+    { id: 'elements', values: ['200'] },
+    { id: 'code', values: ['5099'] },
+  ]);
 });

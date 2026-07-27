@@ -28,6 +28,11 @@ test('wydawca nie jest ograniczony do Alexander i rozpoznaje dowolną nazwę z k
   assert.equal(recognizeProductManufacturer({
     nazwa: 'Nowa gra Gabo',
   }, {}, ['Alexander', 'Gabo']), 'Gabo');
+  assert.equal(recognizeProductManufacturer(
+    { producent: 'Alexander', marka: 'MilliWOOD' },
+    { brand: 'MilliWOOD', manufacturer: 'Alexander' },
+    [],
+  ), 'Alexander');
 });
 
 test('kartoteka usuwa liczbowy producent i korzysta z prawidłowej marki', () => {
