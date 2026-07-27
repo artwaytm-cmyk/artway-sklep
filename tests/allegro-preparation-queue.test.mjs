@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  allegroAutomaticPreparationDisposition,
   allegroPreparationRetryState,
   createAllegroPreparationQueue,
   selectAllegroPreparationCandidates,
@@ -224,6 +225,78 @@ test('automatyczna kolejka najpierw wybiera braki, potem nowe produkty, a gotowe
     'nieprzygotowany',
     'weryfikacja_okresowa',
   ]);
+});
+
+test('aktywna powiązana oferta trafia tylko do lekkiej weryfikacji, a nie do ponownej redakcji', () => {
+  const active = {
+    id: 'active',
+    allegroOfferId: '123456789',
+    _catalog: { channels: { allegro: { offerId: '123456789', status: 'ACTIVE' } } },
+  };
+  assert.deepEqual(allegroAutomaticPreparationDisposition(active), {
+    offerId: '123456789',
+    status: 'ACTIVE',
+    active: true,
+    repairRequired: false,
+    verificationOnly: true,
+    reason: 'active_listing_verification_only',
+  });
+  assert.deepEqual(selectAllegroPreparationCandidates([active]), []);
+});
+
+test('rzeczywisty sygnał naprawy może ponownie otworzyć aktywną ofertę', () => {
+  const active = {
+    id: 'active',
+    allegroOfferId: '123456789',
+    allegroComplianceError: 'Treść wymaga usunięcia informacji o dostawie',
+    _catalog: { channels: { allegro: { offerId: '123456789', status: 'ACTIVE' } } },
+  };
+  const selected = selectAllegroPreparationCandidates([active]);
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].id, 'active');
+});
+
+test('zadanie już obecne w kolejce nie przepisuje aktywnej oferty po wdrożeniu blokady', async () => {
+  const product = {
+    id: 'active',
+    nazwa: 'Gotowa oferta',
+    allegroOfferId: '123456789',
+    _catalog: { channels: { allegro: { offerId: '123456789', status: 'ACTIVE' } } },
+  };
+  let editorialCalls = 0, saveCalls = 0;
+  const worker = createAllegroPreparationWorker({
+    text: (value) => String(value ?? ''),
+    readSettings: async () => ({ data: {} }),
+    loadProducts: async () => new Map([['active', product]]),
+    getCatalogProduct: async () => product,
+    sourceUrlOf: () => '',
+    inspectSource: async () => ({}),
+    sourceImages: () => ({ ok: false }),
+    editorialize: async (value) => { editorialCalls += 1; return { product: value, warnings: [] }; },
+    prepareDraft: async () => ({ missing: [], payload: {}, autoFilled: {} }),
+    enforceDraft: (draft) => ({ draft, compliance: { ok: true } }),
+    verifyIdentity: async () => ({ ok: true }),
+    preparationCurrent: () => false,
+    preparationFingerprint: () => 'fingerprint',
+    saveProduct: async () => { saveCalls += 1; return { product }; },
+    requestFactory: () => new Request('https://artwaytm.pl/api/store'),
+  });
+  const result = await worker({
+    id: 'task-active',
+    productId: 'active',
+    operation: 'allegro-auto-remediation',
+  });
+  assert.equal(result.verificationOnly, true);
+  assert.equal(result.ready, true);
+  assert.equal(editorialCalls, 0);
+  assert.equal(saveCalls, 0);
+});
+
+test('rotacyjna konserwacja katalogu używa tej samej blokady aktywnych ofert', async () => {
+  const source = await readFile('src/backend/lib/store-app.mjs', 'utf8');
+  assert.match(source, /allegroAutomaticPreparationDisposition\(product\)/);
+  assert.match(source, /automaticDisposition\.verificationOnly && !trackPublication/);
+  assert.match(source, /report\.verified/);
 });
 
 test('nieudane uzupełnienia są ponawiane bez końcowego limitu, ale z bezpiecznym odstępem', () => {

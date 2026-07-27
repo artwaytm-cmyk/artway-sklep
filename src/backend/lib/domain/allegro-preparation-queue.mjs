@@ -166,6 +166,55 @@ function salePriority(product = {}) {
   return active ? 20 : 0;
 }
 
+function activeAllegroOffer(product = {}) {
+  const catalogChannel = asObject(asObject(product?._catalog).channels).allegro;
+  const offerId = clean(
+    product?.allegroOfferId || product?.offerId || catalogChannel?.offerId,
+    120,
+  );
+  const status = clean(
+    product?.allegroStatus || product?.allegroPublicationStatus || catalogChannel?.status,
+    80,
+  ).toUpperCase();
+  return {
+    offerId,
+    status,
+    active: Boolean(offerId) && !['ENDED', 'INACTIVE', 'ARCHIVED', 'DELETED'].includes(status),
+  };
+}
+
+function explicitAllegroRepairSignal(product = {}) {
+  const editorial = asObject(product?.contentEditorial);
+  const queuedSourceUpdate = clean(editorial.status, 60).toLowerCase() === 'queued'
+    && clean(editorial.queuedReason, 100).toLowerCase() === 'source_updated';
+  return product?.forceEditorialRefresh === true
+    || product?.allegroPublicationIntent === true
+    || product?.allegroPreparationForce === true
+    || queuedSourceUpdate
+    || Boolean(clean(product?.allegroComplianceError, 1000))
+    || Boolean(clean(product?.allegroPublicationLastErrorCode, 300));
+}
+
+/**
+ * Aktywna, powiązana oferta jest już produktem sprzedażowym, a nie kandydatem
+ * do ciągłej redakcji. Jej status i obecność kontroluje lekka synchronizacja
+ * Allegro. Do ciężkiej kolejki wraca wyłącznie po jawnym sygnale naprawy.
+ */
+export function allegroAutomaticPreparationDisposition(product = {}) {
+  const offer = activeAllegroOffer(product);
+  const repairRequired = explicitAllegroRepairSignal(product);
+  return {
+    ...offer,
+    repairRequired,
+    verificationOnly: offer.active && !repairRequired,
+    reason: offer.active && !repairRequired
+      ? 'active_listing_verification_only'
+      : repairRequired
+        ? 'explicit_repair_signal'
+        : 'not_active_on_allegro',
+  };
+}
+
 /**
  * Wybiera pracę dla serwerowego Agenta bez dziennego limitu. Limit parametru
  * to wyłącznie rozmiar jednej bezpiecznej partii; następny cykl kontynuuje
@@ -183,12 +232,14 @@ export function selectAllegroPreparationCandidates(products = [], {
   for (const product of rows) {
     const id = clean(product?.id ?? product?.productId, 100);
     if (!id || asObject(product?._catalog).recordStatus === 'trash') continue;
+    // Aktywne, kanonicznie powiązane oferty są weryfikowane przez okresową
+    // synchronizację ofert. Nie wolno przepisywać ich opisów tylko dlatego,
+    // że pochodzą sprzed wprowadzenia technicznego pokwitowania Agenta.
+    if (allegroAutomaticPreparationDisposition(product).verificationOnly) continue;
     const status = clean(product?.allegroAgentPreparationStatus, 40).toLowerCase();
     const preparedAt = parsedDate(product?.allegroAgentPreparedAt || product?.allegroAgentPreparationConfirmedAt);
     const sourceChangedAt = Math.max(
       parsedDate(product?.sourceRefreshedAt),
-      parsedDate(product?.producentSprawdzonoAt),
-      parsedDate(product?.contentVerifiedAt),
     );
     const nextRetryAt = parsedDate(product?.allegroAgentPreparationNextRetryAt);
     const retryDue = !nextRetryAt || nextRetryAt <= timestamp || sourceChangedAt > preparedAt;

@@ -30,7 +30,7 @@ function sourceMaterial(effective = {}, timestamp = '') {
 
 export function buildEditorialPersistencePatch({
   effective = {}, patch = {}, run = {}, channel = editorialChannelForSpecialist(run.specialist),
-  target = {}, fingerprint = '', promptVersion = '', timestamp = '', automatic = false,
+  target = {}, fingerprint = '', sourceFingerprint = '', promptVersion = '', timestamp = '', automatic = false,
   channelCompliance = {}, autoUpdateLinkedAllegroContent = true,
 } = {}) {
   const merged = { ...effective, ...patch }, previousEditorial = effective.contentEditorial || {};
@@ -52,6 +52,7 @@ export function buildEditorialPersistencePatch({
       ...previousEditorial, status: aggregateStatus(channelStates, target), sourceRole: effective.sourceMaterial ? 'facts_only' : 'catalog_facts',
       channels: target.channels, targets: { store: true, vonHalsky: true, allegro: target.allegro === true },
       layoutPolicy: 'independent_channel_versions', promptVersion, inputFingerprint: fingerprint,
+      sourceFingerprint,
       preparedAt: timestamp, channelStates, warnings: [],
     },
     contentEditorialPreparedAt: timestamp,

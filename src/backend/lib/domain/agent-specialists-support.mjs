@@ -519,11 +519,10 @@ function productEditorialTarget(product = {}) {
   return { store: true, vonHalsky: true, allegro, channels: allegro ? 'independent_store_allegro_von_halsky' : 'independent_store_von_halsky' };
 }
 
-function productEditorialFingerprint(product = {}, target = productEditorialTarget(product)) {
+function productEditorialFingerprintFacts(product = {}, target = productEditorialTarget(product)) {
   const source = product.sourceMaterial && typeof product.sourceMaterial === 'object' ? product.sourceMaterial : {};
   const hasSourceSnapshot = Object.keys(source).length > 0;
-  const facts = {
-    promptVersion: PROMPT_VERSION,
+  return {
     target: { store: target.store === true, vonHalsky: target.vonHalsky === true, allegro: target.allegro === true },
     source: {
       sourceUrl: clean(source.sourceUrl || product.sourceUrl || product.producentUrl, 1000),
@@ -550,11 +549,24 @@ function productEditorialFingerprint(product = {}, target = productEditorialTarg
     ean: clean(product.gtin || product.ean, 80), producerCode: clean(product.kodProducenta || product.mpn, 160),
     parameters: product.parametryProducenta || product.parametryZrodla || product.parametry || product.parameters || {},
   };
+}
+
+function productEditorialSourceFingerprint(product = {}, target = productEditorialTarget(product)) {
+  return crypto.createHash('sha256')
+    .update(JSON.stringify(sanitizeContext(productEditorialFingerprintFacts(product, target))))
+    .digest('hex');
+}
+
+function productEditorialFingerprint(product = {}, target = productEditorialTarget(product)) {
+  const facts = {
+    promptVersion: PROMPT_VERSION,
+    ...productEditorialFingerprintFacts(product, target),
+  };
   return crypto.createHash('sha256').update(JSON.stringify(sanitizeContext(facts))).digest('hex');
 }
 
 function productEditorialState(product = {}) {
-  const target = productEditorialTarget(product), fingerprint = productEditorialFingerprint(product, target), editorial = product.contentEditorial || {}, quality = productEditorialQuality(product);
+  const target = productEditorialTarget(product), fingerprint = productEditorialFingerprint(product, target), sourceFingerprint = productEditorialSourceFingerprint(product, target), editorial = product.contentEditorial || {}, quality = productEditorialQuality(product);
   const storeComplete = clean(product.nazwa || product.name, 300)
     && clean(product.opisKrotki || product.krotkiOpis, 500)
     && clean(product.opis, 30_000).length >= 150
@@ -574,7 +586,7 @@ function productEditorialState(product = {}) {
   const current = currentChannels.store && currentChannels.allegro && currentChannels.vonHalsky && quality.ready;
   const reviewedSameInput = Object.values(channelStates).some((entry) => entry?.status === 'needs_review' && entry?.promptVersion === PROMPT_VERSION && entry?.inputFingerprint === fingerprint);
   const retryRows = Object.values(channelStates).filter(Boolean), retryDue = retryRows.every((entry) => entry.status !== 'retry_pending' || !Number.isFinite(Date.parse(entry.retryAt || '')) || Date.parse(entry.retryAt || '') <= Date.now());
-  return { target, fingerprint, current, currentChannels, reviewedSameInput, retryDue, complete, editorial, quality };
+  return { target, fingerprint, sourceFingerprint, current, currentChannels, reviewedSameInput, retryDue, complete, editorial, quality };
 }
 
 function productEditorialAutomaticEligibility(product = {}, editorial = productEditorialState(product)) {
@@ -589,22 +601,41 @@ function productEditorialAutomaticEligibility(product = {}, editorial = productE
     || ['queued', 'preparing'].includes(clean(product.allegroAgentPreparationStatus || product.allegroPreparationStatus, 40).toLowerCase());
   const complianceRepair = Boolean(
     clean(product.allegroComplianceError || product.allegroPublicationLastErrorCode, 300)
-    || ['failed', 'needs_attention'].includes(clean(product.allegroAgentPreparationStatus, 40).toLowerCase()),
+    || (!activeListing && ['failed', 'needs_attention'].includes(clean(product.allegroAgentPreparationStatus, 40).toLowerCase())),
   );
   const receipt = product.contentEditorial && typeof product.contentEditorial === 'object' ? product.contentEditorial : {};
   const channelStates = receipt.channelStates && typeof receipt.channelStates === 'object' ? receipt.channelStates : {};
   const hasEditorialReceipt = Boolean(clean(receipt.inputFingerprint, 160)) || Object.keys(channelStates).length > 0;
-  const sourceChanged = hasEditorialReceipt && clean(receipt.inputFingerprint, 160) !== clean(editorial.fingerprint, 160);
+  // Zmiana wersji promptu nie jest zmianą produktu. Osobny odcisk materiału
+  // źródłowego zapobiega przepisywaniu poprawnych ofert po aktualizacji Agenta.
+  const savedSourceFingerprint = clean(receipt.sourceFingerprint, 160);
+  const sourceChanged = Boolean(savedSourceFingerprint)
+    && savedSourceFingerprint !== clean(editorial.sourceFingerprint, 160);
+  const sourceUpdateQueued = clean(receipt.status, 60).toLowerCase() === 'queued'
+    && clean(receipt.queuedReason, 100).toLowerCase() === 'source_updated';
+  const hasStoredAllegroContent = Boolean(
+    clean(product.allegroTitle, 300)
+    && clean(product.allegroDescription, 30_000),
+  );
+  const unsafeExistingContent = hasStoredAllegroContent
+    && !allegroContentCompliance({
+      allegroTitle: product.allegroTitle,
+      allegroDescription: product.allegroDescription,
+    }).ok;
   if (editorial.current) return { eligible: false, reason: 'editorial_current', activeListing };
   if (!activeListing) return { eligible: true, reason: explicitRequest ? 'explicit_request' : 'not_listed_or_inactive', activeListing };
   if (explicitRequest) return { eligible: true, reason: 'explicit_request', activeListing };
   if (complianceRepair) return { eligible: true, reason: 'compliance_or_publication_repair', activeListing };
-  if (sourceChanged) return { eligible: true, reason: 'source_changed_after_editorial', activeListing };
-  // Aktywne starsze oferty bez pokwitowania redakcji nie są automatycznie
-  // przepisywane. Trafiają do pracy dopiero po zdarzeniu źródłowym, błędzie
-  // zgodności albo jawnym zleceniu administratora.
-  if (!hasEditorialReceipt) return { eligible: false, reason: 'legacy_active_listing_grandfathered', activeListing };
-  return { eligible: true, reason: 'editorial_incomplete', activeListing };
+  if (unsafeExistingContent) return { eligible: true, reason: 'unsafe_existing_content', activeListing };
+  if (sourceUpdateQueued || sourceChanged) return { eligible: true, reason: 'source_changed_after_editorial', activeListing };
+  // Aktywne, poprawnie powiązane oferty pozostają w lekkiej kontroli statusu.
+  // Brak nowego technicznego pokwitowania albo sama zmiana promptu nie może
+  // ponownie uruchamiać kosztownej redakcji treści.
+  return {
+    eligible: false,
+    reason: hasEditorialReceipt ? 'active_listing_verification_only' : 'legacy_active_listing_grandfathered',
+    activeListing,
+  };
 }
 
 function providerQuotaUnavailable(error) {
@@ -628,4 +659,4 @@ function communicationFacts(item = {}, type = 'thread') {
   return sanitizeContext({ type, subject: item.subject || item.topic, orderId: item.orderId || item.checkoutFormId, status: item.status, chatActive: item.chatActive, messages });
 }
 
-export { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeProductContentEditorialResult, normalizeChannelEditorialResult, normalizeDecision, activeDecision, outputText, normalizeResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprint, productEditorialState, productEditorialAutomaticEligibility, providerQuotaUnavailable, communicationNeedsReply, communicationFacts };
+export { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeProductContentEditorialResult, normalizeChannelEditorialResult, normalizeDecision, activeDecision, outputText, normalizeResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprintFacts, productEditorialSourceFingerprint, productEditorialFingerprint, productEditorialState, productEditorialAutomaticEligibility, providerQuotaUnavailable, communicationNeedsReply, communicationFacts };

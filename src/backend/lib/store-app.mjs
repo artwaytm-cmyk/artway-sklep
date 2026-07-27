@@ -62,6 +62,7 @@ import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createAgentRuntime } from './domain/agent-runtime.mjs';
 import { createAgentSpecialists } from './domain/agent-specialists.mjs';
 import { createAllegroPreparationRoute } from './allegro-preparation-route.mjs';
+import { allegroAutomaticPreparationDisposition } from './domain/allegro-preparation-queue.mjs';
 import { createOpenAiPlatformControl } from './domain/openai-platform-control.mjs';
 import { createOpenAiPlatformRoute } from './openai-platform-route.mjs';
 import { buildEditorialPublicationPatch } from './domain/agent-product-editorial-state.mjs';
@@ -1732,10 +1733,19 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
   const updater = allegroAktualizatorProduktowCentralnych(data, completeProducts.keys()), pendingUpdates = [];
   const applyUpdate = (id, fields = {}, remove = []) => { const changed = updater.apply(id, fields, remove); if (changed) pendingUpdates.push({ id: String(id), fields, remove, expectedProduct: completeProducts.get(String(id)) }); return changed; };
   const baseMappings = { ...allegroMapowaniaItems(mappingsRec) }, mappings = { ...baseMappings }, syncedMappingIds = new Set();
-  const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, updated: 0, matched: 0, categories: 0, producers: 0, titles: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, gpsrMatched: 0, categoriesRepaired: 0, unresolved: 0, errors: [] };
+  const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, verified: 0, updated: 0, matched: 0, categories: 0, producers: 0, titles: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, gpsrMatched: 0, categoriesRepaired: 0, unresolved: 0, errors: [] };
   let responsibleProducers = null;
   for (const product of selected) {
     const trackPublication = product.allegroEditorialSyncPending === true || requestedProductIds.has(String(product.id));
+    const automaticDisposition = allegroAutomaticPreparationDisposition(product);
+    // Zwykła rotacja konserwacyjna nie jest zgodą na ponowne przepisywanie
+    // aktywnej oferty. Taką ofertę kontroluje lekka synchronizacja statusów.
+    // Pełna aktualizacja wraca dopiero dla jawnej kolejki publikacji lub
+    // konkretnego produktu wskazanego przez administratora.
+    if (automaticDisposition.verificationOnly && !trackPublication) {
+      report.verified = Math.max(0, Number(report.verified) || 0) + 1;
+      continue;
+    }
     const workId = `editorial:${product.id}:allegro:${tekst(product.allegroEditorialSyncRunId || product.allegroEditorialSyncPendingAt || report.lastRun, 64)}`;
     const reportWork = async (work = {}) => {
       if (!trackPublication) return;

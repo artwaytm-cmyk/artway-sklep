@@ -1,4 +1,4 @@
-import { automaticEditorialAssessment, normalizeChannelEditorialResult, PROMPT_VERSION, productEditorialFingerprint, productPatch } from './agent-specialists.mjs';
+import { automaticEditorialAssessment, normalizeChannelEditorialResult, PROMPT_VERSION, productEditorialFingerprint, productEditorialSourceFingerprint, productPatch } from './agent-specialists.mjs';
 import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
 
 const clean = (value = '', limit = 30_000) => String(value ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, limit);
@@ -159,7 +159,7 @@ export async function prepareLinkedProductEditorial(product = {}, {
     product: {
       ...channelProduct,
       sourceMaterial,
-      contentEditorial: { status, sourceRole: 'facts_only', channels: editorialTarget.channels, targets: { store: true, vonHalsky: true, allegro: true }, layoutPolicy: 'independent_channel_versions', promptVersion: PROMPT_VERSION, inputFingerprint: editorialFingerprint, preparedAt, channelStates, warnings },
+      contentEditorial: { status, sourceRole: 'facts_only', channels: editorialTarget.channels, targets: { store: true, vonHalsky: true, allegro: true }, layoutPolicy: 'independent_channel_versions', promptVersion: PROMPT_VERSION, inputFingerprint: editorialFingerprint, sourceFingerprint: productEditorialSourceFingerprint({ ...storeProduct, sourceMaterial }, editorialTarget), preparedAt, channelStates, warnings },
       contentEditorialPreparedAt: preparedAt,
       contentEditorialSource: 'agent-specialists-independent-channel-content',
     },

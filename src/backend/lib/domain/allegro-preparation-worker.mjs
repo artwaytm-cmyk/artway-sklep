@@ -1,6 +1,9 @@
 import { providerQuotaUnavailable } from './agent-specialists-support.mjs';
 import { enrichAllegroProductEvidence } from './allegro-parameter-enrichment.mjs';
-import { allegroPreparationRetryState } from './allegro-preparation-queue.mjs';
+import {
+  allegroAutomaticPreparationDisposition,
+  allegroPreparationRetryState,
+} from './allegro-preparation-queue.mjs';
 
 const asArray = (value) => Array.isArray(value) ? value : [];
 const asObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -82,6 +85,29 @@ export function createAllegroPreparationWorker({
       status: 'running',
       message: 'Pobrano najnowszą wersję produktu z centralnej kartoteki. Sprawdzam, które pola rzeczywiście wymagają zmiany.',
     });
+
+    const automaticDisposition = allegroAutomaticPreparationDisposition(stored);
+    if (task.operation === 'allegro-auto-remediation' && automaticDisposition.verificationOnly) {
+      await progress({
+        productName,
+        phase: 'weryfikacja_oferty',
+        status: 'confirmed',
+        fields: [],
+        target: automaticDisposition.offerId,
+        message: 'Oferta jest aktywna i prawidłowo powiązana. Kontrola zakończona bez ponownej redakcji i bez zapisu produktu.',
+      });
+      return {
+        status: 'completed',
+        ready: true,
+        name: productName,
+        missing: [],
+        savedFields: [],
+        mutationId: '',
+        reused: true,
+        verificationOnly: true,
+        offerId: automaticDisposition.offerId,
+      };
+    }
 
     if (preparationCurrent(stored) && editorialReady(stored)) {
       await progress({

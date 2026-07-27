@@ -17,6 +17,29 @@ test('automatyczny Agent nie przepisuje aktywnej starszej oferty bez nowego zdar
   assert.equal(productEditorialAutomaticEligibility({ ...product, forceEditorialRefresh: true }, productEditorialState({ ...product, forceEditorialRefresh: true })).eligible, true);
 });
 
+test('zmiana promptu nie uruchamia ponownej redakcji czystej aktywnej oferty', () => {
+  const product = {
+    id: 18,
+    allegroOfferId: '987654321',
+    allegroStatus: 'ACTIVE',
+    nazwa: 'Gotowa gra edukacyjna',
+    opisKrotki: 'Gra edukacyjna wspierająca koncentrację i logiczne myślenie.',
+    opis: 'Gra edukacyjna przeznaczona do wspólnej zabawy, ćwiczenia koncentracji oraz logicznego myślenia podczas czytelnej rozgrywki.'.repeat(2),
+    contentEditorial: {
+      status: 'ready',
+      inputFingerprint: 'odcisk-starszej-wersji-promptu',
+      sourceFingerprint: '',
+      channelStates: {
+        store: { status: 'ready', promptVersion: 'starszy-prompt', inputFingerprint: 'stary' },
+        allegro: { status: 'ready', promptVersion: 'starszy-prompt', inputFingerprint: 'stary' },
+      },
+    },
+  };
+  const eligibility = productEditorialAutomaticEligibility(product, productEditorialState(product));
+  assert.equal(eligibility.eligible, false);
+  assert.equal(eligibility.reason, 'active_listing_verification_only');
+});
+
 test('blokada limitu dostawcy rozpoznaje błędy quota i nie myli zwykłego błędu treści', () => {
   assert.equal(providerQuotaUnavailable(Object.assign(new Error('You exceeded your current quota'), { code: 'insufficient_quota' })), true);
   assert.equal(providerQuotaUnavailable(new Error('Opis nie przeszedł kontroli jakości')), false);
@@ -634,6 +657,8 @@ test('stare oznaczenie ready nie ukrywa surowego opisu dostawcy i Agent nadpisuj
     id: 100, nazwa: 'Loteryjka obrazkowa', producent: 'Alexander', kategoria: 'Gry edukacyjne', gtin: '5906018000108',
     opisKrotki: 'Dodaj do porównania. Produkt dostępny.',
     opis: '<p>Dodaj do listy zakupowej. Rozmiar uniwersalny 810 szt. Produkt dostępny. Wysyłka w czwartek. Sprawdź czasy i koszty wysyłki. Skontaktuj się z nami.</p><p>Gra obrazkowa przeznaczona do wspólnej zabawy.</p>',
+    allegroTitle: 'Loteryjka obrazkowa Alexander',
+    allegroDescription: '<p>Produkt dostępny. Skontaktuj się z nami przed zakupem i sprawdź koszt wysyłki.</p>',
     seoTitle: 'Loteryjka obrazkowa – Alexander', seoDescription: 'Gra obrazkowa Alexander dla dzieci.',
   };
   const fingerprint = productEditorialFingerprint(legacy);
