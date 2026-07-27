@@ -309,6 +309,40 @@ async function bumpSettingsRevision(client, namespace) {
   return rev;
 }
 
+async function migrateLateDirectDomains(client, namespace) {
+  const keys = Object.keys(DIRECT_DOMAIN_CONFIGS);
+  if (!keys.length) return 0;
+  const legacyRows = await client.query(
+    'SELECT key,value,version,updated_at FROM artway_kv_store WHERE namespace=$1 AND key=ANY($2::text[]) ORDER BY key FOR UPDATE',
+    [namespace, keys],
+  );
+  let migrated = 0;
+  for (const row of legacyRows.rows) {
+    const config = DIRECT_DOMAIN_CONFIGS[row.key];
+    if (!config) continue;
+    const domain = domainForDirectKey(row.key), migrationId = 'domain-records-incremental-v1';
+    await client.query(
+      `INSERT INTO artway_domain_legacy_backup(namespace,key,migration_id,value,version,updated_at)
+       VALUES($1,$2,$3,$4::jsonb,$5,$6) ON CONFLICT DO NOTHING`,
+      [namespace, row.key, migrationId, JSON.stringify(row.value), Number(row.version), row.updated_at],
+    );
+    const existing = await client.query(
+      'SELECT 1 FROM artway_domain_snapshots WHERE namespace=$1 AND domain=$2',
+      [namespace, domain],
+    );
+    if (!existing.rowCount) {
+      const result = await replaceDomain(client, namespace, domain, row.value, config, {
+        initialVersion: Number(row.version),
+        updatedAt: row.updated_at,
+      });
+      if (!result.modified) throw new Error(`Nie udało się przyrostowo przenieść domeny ${row.key}`);
+    }
+    await client.query('DELETE FROM artway_kv_store WHERE namespace=$1 AND key=$2', [namespace, row.key]);
+    migrated += 1;
+  }
+  return migrated;
+}
+
 async function ensureNormalizedSchema(pool, namespace) {
   const client = await pool.connect();
   try {
@@ -360,6 +394,7 @@ async function ensureNormalizedSchema(pool, namespace) {
       }
       await client.query('INSERT INTO artway_domain_migrations(namespace,migration_id,details) VALUES($1,$2,$3::jsonb)', [namespace, migrationId, JSON.stringify({ migratedDomains, migratedRecords })]);
     }
+    await migrateLateDirectDomains(client, namespace);
     await migrateDedicatedDomainRecords(client, namespace);
     await client.query('COMMIT');
   } catch (error) { await client.query('ROLLBACK'); throw error; }

@@ -94,6 +94,8 @@ test('repozytorium udostępnia przyrostowy odczyt ustawień zamiast obowiązkowe
   assert.match(source, /const readSettingsDelta = async/);
   assert.match(source, /settings_domain|domainVersions/);
   assert.match(source, /Object\.prototype\.hasOwnProperty\.call\(versions/);
+  assert.match(source, /migrateLateDirectDomains/);
+  assert.match(source, /domain-records-incremental-v1/);
 });
 
 test('największe domeny operacyjne mają własne tabele zamiast wspólnej tabeli JSONB', () => {

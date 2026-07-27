@@ -41,7 +41,8 @@ try {
     PRIMARY KEY(namespace,key,migration_id))`);
   await seed.query("INSERT INTO artway_domain_migrations(namespace,migration_id) VALUES('artway-sklep','domain-records-v1')");
   await seed.query(`INSERT INTO artway_kv_store(namespace,key,value) VALUES
-    ('artway-sklep','settings','{"data":{},"rev":1}'::jsonb)`);
+    ('artway-sklep','settings','{"data":{},"rev":1}'::jsonb),
+    ('artway-sklep','system_diagnostics','{"items":[{"id":"DIAG-1","fingerprint":"one","status":"resolved","level":"blad","message":"stary wpis"}]}'::jsonb)`);
   await seed.query(`INSERT INTO artway_domain_snapshots(namespace,domain,metadata,content_hash,version) VALUES
     ('artway-sklep','kv:orders','{"updated_at":"2026-07-22T08:00:00Z"}'::jsonb,'seed-orders',4),
     ('artway-sklep','kv:allegro_offers','{}'::jsonb,'seed-offers',7),
@@ -65,6 +66,8 @@ try {
   assert.equal(offers.value.items[0]?.productId, 'P-1');
   const settings = await repository.read('settings', { data: {} });
   assert.equal(settings.data.artway_agent_ai_historia[0]?.id, 'RUN-1');
+  const diagnostics = await repository.read('system_diagnostics', { items: [] });
+  assert.equal(diagnostics.items[0]?.id, 'DIAG-1');
 
   const changed = structuredClone(offers.value);
   changed.items[0].status = 'ENDED';
@@ -78,6 +81,8 @@ try {
   assert.equal(status.activeGenericDedicatedRecords, 0);
   assert.equal(status.activeLegacyDomains, 0);
   assert.equal(status.dedicatedRecords, 4);
+  const incrementalBackup = await pool.query("SELECT count(*)::int AS count FROM artway_domain_legacy_backup WHERE namespace='artway-sklep' AND key='system_diagnostics' AND migration_id='domain-records-incremental-v1'");
+  assert.equal(Number(incrementalBackup.rows[0]?.count), 1);
   const archive = await pool.query("SELECT count(*)::int AS count FROM artway_domain_records_archive_v2 WHERE namespace='artway-sklep'");
   assert.equal(Number(archive.rows[0]?.count), 4);
   process.stdout.write(`${JSON.stringify({ ok: true, ...status })}\n`);
