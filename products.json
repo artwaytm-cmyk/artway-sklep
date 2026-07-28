@@ -231,19 +231,19 @@
     "kodProducenta": "0009",
     "allegroCategoryId": "93663",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:21:55.714Z",
-    "allegroAgentPreparationRunId": "059e3815-2e90-426f-8df8-1395c95e339e",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:35:12.404Z",
+    "allegroAgentPreparationRunId": "c32a3a56-8039-4b1e-9fa6-327a31dd8d69",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)",
       "informacja o bezpieczeństwie GPSR",
       "EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną."
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:21:55.714Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ec71be79",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:21:55.714Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-b50636a9",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1001019",
@@ -386,19 +386,17 @@
     "allegroProductId": "e772a4ad-d7d5-4c86-a0a5-c0848887042b",
     "allegroCategoryId": "93663",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:41:06.227Z",
-    "allegroAgentPreparationRunId": "abba84e1-9d7a-420a-bb3d-4030657c3372",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:29:32.243Z",
+    "allegroAgentPreparationRunId": "0e44e6cd-dcb6-4dc6-860a-e829e52df551",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
-      "zdjęcia",
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
+      "zdjęcia"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:41:06.227Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5a72ebcc",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:41:06.227Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 6,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-53aa8f70",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000994",
@@ -440,18 +438,15 @@
     "allegroProductId": "266673ea-90f5-4c0c-9606-aeda494f49d7",
     "allegroCategoryId": "66781",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:41:10.021Z",
-    "allegroAgentPreparationRunId": "b01e535c-10c1-48cd-a868-3ef68b4443df",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:41:10.021Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ee5592e0",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:41:10.021Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:39:45.776Z",
+    "allegroAgentPreparationRunId": "ed8fea29-d434-4e35-bfa4-ba78f80fb4aa",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:39:45.776Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-66d68131",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000436",
@@ -533,18 +528,15 @@
     "allegroProductId": "52b832ad-2e81-43d8-ac72-3d643fb1331f",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:32:11.839Z",
-    "allegroAgentPreparationRunId": "5732afa2-a941-4896-9292-b01f3d21f681",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:32:11.839Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-0e408d14",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:32:11.839Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:38:22.380Z",
+    "allegroAgentPreparationRunId": "d273123e-c9f2-4dec-baaa-339f640d1c38",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:38:22.380Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-71661ace",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000976",
@@ -1159,18 +1151,15 @@
     "allegroProductId": "23a48ec1-19ae-42d7-8b70-899824bae18e",
     "allegroCategoryId": "319045",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:41:01.670Z",
-    "allegroAgentPreparationRunId": "ab5d43ef-723c-4d0f-94a4-3c647a633642",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:41:01.670Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-732da143",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:41:01.670Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:34:49.819Z",
+    "allegroAgentPreparationRunId": "b31693d5-b04c-4e36-9fc3-300faef5a6c0",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:34:49.819Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-c5f2baeb",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000995",
@@ -1628,7 +1617,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Multigra",
-    "nazwa": "Lottografia - Multigra - gry dla każdego",
+    "nazwa": "Lottografia – gra edukacyjna do nauki ortografii",
     "zdjecie": "https://multigra.com.pl/wp-content/uploads/sites/5/2025/07/0067-Lottografia.jpg",
     "_catalog": {
       "channels": {
@@ -1650,27 +1639,24 @@
     "producent": "Multigra",
     "sourceUrl": "https://multigra.com.pl/produkty/lottografia/",
     "externalId": "0067",
-    "opisKrotki": "Jak poprawnie zapisać to słowo, z „ch” czy „h”? Zapamiętywanie reguł pisowni może być naprawdę trudne. Czy tę naukę można jakoś uatrakcyjnić? Ależ tak! Zagraj w „Lottografię” i poznaj nowy, zabawny sposób utrwalania zasad ortograficznych! Dzięki przyjemnej i emocjonującej rozgrywce wiedza ortograficzna szybko się utrwala, a wszyscy gracze mają zapewnione mnóstwo dobrej zabawy. [...]Read More...",
+    "opisKrotki": "Gra edukacyjna Multigra, która w atrakcyjny sposób pomaga utrwalać zasady ortograficzne. Rozgrywka łączy naukę z zabawą, wspierając zapamiętywanie poprawnej pisowni.",
     "producentUrl": "https://multigra.com.pl/produkty/lottografia/",
     "kodProducenta": "0067",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:33:16.303Z",
-    "allegroAgentPreparationRunId": "6707041d-484a-4cae-8486-97142ae1a85c",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T08:24:06.327Z",
+    "allegroAgentPreparationRunId": "7c3b1b1a-6ed4-493f-bbb2-c8e92a734626",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Typ",
-      "parametr Allegro: Wersja językowa gry",
       "parametr Allegro: Wiek gracza",
-      "informacja o bezpieczeństwie GPSR",
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
+      "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:33:16.303Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-c80476d0",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:33:16.303Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 3,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-40647580",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000935",
@@ -1880,18 +1866,15 @@
     "allegroProductId": "f3ce850e-8400-424a-9eb3-961d869a4db2",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:37:31.635Z",
-    "allegroAgentPreparationRunId": "875f043f-17e2-40d9-8ff0-bf34fcb8e739",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:37:31.635Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-c25132c6",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:37:31.635Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:25:53.707Z",
+    "allegroAgentPreparationRunId": "0f50ca08-9482-44ab-bd58-76bf236b3812",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:25:53.707Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-9bc49d33",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1001008",
@@ -2402,18 +2385,15 @@
     "allegroProductId": "65dfa1ad-0902-476c-b3ac-65c551775d94",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:35:02.754Z",
-    "allegroAgentPreparationRunId": "7747dbcb-e0c3-4951-89f3-c7ee36c17b7e",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:35:02.754Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-18c50e3e",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:35:02.754Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:34:43.764Z",
+    "allegroAgentPreparationRunId": "a2146ca0-d87e-49f6-8a32-63d0c0b4e8e9",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:34:43.764Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-35a10aa9",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000929",
@@ -2582,18 +2562,15 @@
     "allegroProductId": "45ad0865-ace5-4f1a-b132-e57896c29983",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:48:44.438Z",
-    "allegroAgentPreparationRunId": "f0fd1870-1ada-4cee-bbd3-6318aac452b5",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:48:44.438Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1343d994",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:48:44.438Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:56:50.111Z",
+    "allegroAgentPreparationRunId": "6bc28372-bfe3-43a0-8881-78aad7781865",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:56:50.111Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-4ed623d5",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000908",
@@ -2940,18 +2917,15 @@
     "allegroProductId": "8d13a761-4aab-40e7-ba38-5551c18de315",
     "allegroCategoryId": "93715",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:31:58.504Z",
-    "allegroAgentPreparationRunId": "4f01702b-eb6b-4828-9a14-2819880750d2",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:31:58.504Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-939218e1",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:31:58.504Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:26:06.881Z",
+    "allegroAgentPreparationRunId": "1ae1ea56-55e1-43c8-b38a-e095edd541f1",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:26:06.881Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5f1fe052",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000861",
@@ -3237,24 +3211,22 @@
     "producent": "Multigra",
     "sourceUrl": "https://multigra.com.pl/produkty/zwierzeta-male-i-duze-puzzle/",
     "externalId": "0122",
-    "opisKrotki": "Puzzle edukacyjne dla najmłodszych z dużymi elementami z grubej tektury, które ułatwiają chwytanie i wspierają ćwiczenie małej motoryki. Kolorowe ilustracje zachęcają do zabawy i pobudzają wyobraźnię.",
+    "opisKrotki": "Słonik Balonik wychodzi naprzeciw potrzebom najmłodszych. Dzięki zastosowaniu dużych elementów z wysokiej jakości grubej tektury, dzieci z łatwością je chwytają, ćwicząc małą motorykę. Kolorowe obrazki rozbudzają w maluchach wyobraźnię, a zróżnicowane zadania świetnie wpływają na ich rozwój. “Zwierzęta małe i duże” to początek wspaniałej przygody z puzzlami. Każdy z 6 zestawów składa się z dwóch [...]Read More...",
     "producentUrl": "https://multigra.com.pl/produkty/zwierzeta-male-i-duze-puzzle/",
     "kodProducenta": "0122",
     "allegroProductId": "2fae9150-124a-4a77-a97e-7342f9425134",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:29:42.983Z",
+    "allegroAgentPreparedAt": "2026-07-28T05:30:34.997Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "45c68323-5c30-45df-9bf8-79db8338e65d",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 3,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:29:42.983Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-23120793",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T10:29:42.983Z"
+    "allegroAgentPreparationRunId": "50337387-a4f9-4d18-833c-5ee967e3a3c5",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:30:34.997Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-26e7626e",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1001014",
@@ -3354,7 +3326,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Multigra",
-    "nazwa": "Szablony zwierzęta - zestaw kreatywny do rysowania, Multigra",
+    "nazwa": "Szablony zwierzęta – zestaw kreatywny do rysowania, Multigra",
     "zdjecie": "https://multigra.com.pl/wp-content/uploads/sites/5/2025/07/0124-Szablony-Zwierzeta-rekwizyty.jpg",
     "_catalog": {
       "channels": {
@@ -3376,23 +3348,23 @@
     "producent": "Multigra",
     "sourceUrl": "https://multigra.com.pl/produkty/szablony-zwierzeta/",
     "externalId": "0124",
-    "opisKrotki": "Zestaw kreatywny Multigra do rysowania 8 różnych zwierząt za pomocą szablonów; kontury można pokolorować i uzupełnić własnym tłem.",
+    "opisKrotki": "Zestaw kreatywny Multigra do odrysowywania konturów 8 różnych zwierząt. Dziecko rysuje według szablonu, koloruje sylwetki kredkami i może samodzielnie uzupełnić tło oraz szczegóły.",
     "producentUrl": "https://multigra.com.pl/produkty/szablony-zwierzeta/",
     "kodProducenta": "0124",
     "allegroProductId": "35e07543-b10b-4842-ac8d-47e363131322",
     "allegroCategoryId": "19417",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T02:15:25.753Z",
-    "allegroAgentPreparationRunId": "de79e1e0-03e9-4660-abdb-f213dcfe5a6b",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T08:37:38.313Z",
+    "allegroAgentPreparationRunId": "8d23d1a8-b381-44ea-8723-3c0202585234",
+    "allegroAgentPreparationStatus": "retrying",
     "allegroAgentPreparationMissing": [
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 4,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T02:15:25.753Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-b679caa2",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T02:15:25.753Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-3ae4542a",
+    "allegroAgentPreparationNextRetryAt": "2026-07-28T08:42:38.313Z"
   },
   {
     "id": "1000589",
@@ -3811,18 +3783,15 @@
     "allegroProductId": "50eab4eb-bf67-48c6-9af4-c24e84db31c8",
     "allegroCategoryId": "93663",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:22:58.723Z",
-    "allegroAgentPreparationRunId": "156baf43-058b-4931-bc40-2fe2d9650ed8",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:22:58.723Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ef123236",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:22:58.723Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:26:37.274Z",
+    "allegroAgentPreparationRunId": "24a46c71-f9e2-41e1-817e-522fd1754815",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:26:37.274Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5cecbb9f",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000968",
@@ -4114,18 +4083,15 @@
     "allegroProductId": "61c0c9e3-cdea-4567-b3c9-9b80016d0b12",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:32:15.641Z",
-    "allegroAgentPreparationRunId": "5ebf86f4-a0b7-4e8c-a1bb-3aa6679dbd88",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:32:15.641Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-bbdc3de7",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:32:15.641Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:26:33.412Z",
+    "allegroAgentPreparationRunId": "1cef293f-7c09-42cb-8fb7-06dac19e80c5",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:26:33.412Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-61ffe1d4",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000042",
@@ -4294,18 +4260,15 @@
     "allegroProductId": "a3084d20-2a17-4466-a5e6-7523670bb8c4",
     "allegroCategoryId": "319045",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:36:04.102Z",
-    "allegroAgentPreparationRunId": "816cadf2-5cee-4f5f-b45f-12a5a99c7076",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:36:04.102Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-c5323e46",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:36:04.102Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:34:12.111Z",
+    "allegroAgentPreparationRunId": "83c53587-f719-4684-a14e-dcb5fd26a3e3",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:34:12.111Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-86075ff9",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1001000",
@@ -4887,17 +4850,15 @@
     "allegroProductId": "b5bb3b52-3da6-448e-a472-d59a9f39238f",
     "allegroCategoryId": "93663",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:44:39.398Z",
-    "allegroAgentPreparationRunId": "c60f1ab6-bfe6-4bdd-ab7b-17507aa46f73",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:44:39.398Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-9bb420b3",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:44:39.398Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:47:30.942Z",
+    "allegroAgentPreparationRunId": "fffaa192-290e-4a79-b1e9-fd34c83c3c9d",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:47:30.942Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-b1059f5c",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000932",
@@ -5909,18 +5870,18 @@
     "kodProducenta": "0185",
     "allegroCategoryId": "123958",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:02:42.924Z",
+    "allegroAgentPreparedAt": "2026-07-28T05:40:57.384Z",
     "allegroAgentPreparationRunId": "1a3813f3-6fe3-4624-a915-ae975ae9ffcb",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Typ",
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 2,
+    "allegroAgentPreparationRetryCount": 4,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-73e1178a",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:03:42.924Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ffdfda52",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000907",
@@ -6390,18 +6351,15 @@
     "allegroProductId": "64284781-a505-4c33-85aa-b3b0269e3fe8",
     "allegroCategoryId": "317246",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:45:08.778Z",
-    "allegroAgentPreparationRunId": "c8819c2f-7c87-4925-80d7-df3cdd41162e",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:45:08.778Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-8433fe3e",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:45:08.778Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:49:04.739Z",
+    "allegroAgentPreparationRunId": "28c326d7-3077-419f-8997-e81467905e58",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:49:04.739Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-6eeb4c39",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000941",
@@ -6441,18 +6399,15 @@
     "allegroProductId": "73ea7cc7-b782-4911-8a42-e4d366fe3daa",
     "allegroCategoryId": "312709",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:44:05.914Z",
-    "allegroAgentPreparationRunId": "c3644640-acaf-4da3-8815-5557c11b39eb",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:44:05.914Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-6ab4ef5c",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:44:05.914Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:47:22.191Z",
+    "allegroAgentPreparationRunId": "573fc144-803d-4702-b4e5-705a48ecc5ad",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:47:22.191Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-84667e78",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000035",
@@ -7816,17 +7771,17 @@
     "allegroProductId": "341ac741-5f36-4e7a-8731-9a58ab300c14",
     "allegroCategoryId": "86274",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:33:42.437Z",
-    "allegroAgentPreparationRunId": "6efc0bcf-e0b4-423b-99da-fd82d02b0a5c",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:29:35.989Z",
+    "allegroAgentPreparationRunId": "39dbadab-cf7e-4dbc-9662-1ef4829d2e0d",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 7,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:33:42.437Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5ad3c6e6",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:33:42.437Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 10,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-43fb56e4",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000668",
@@ -8890,29 +8845,27 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-6740-Balon-foliowy-Dalmatynczyki-serce-46-cm.html",
     "externalId": "041R",
-    "opisKrotki": "Zamów Balon foliowy - Dalmatyńczyki serce 46 cm za 4,90 zł | Okazje \\ Festyny Balony Foliowe \\ Zwierzęta |",
+    "opisKrotki": "Balon foliowy - Dalmatyńczyki serce 46 cm Dodaj do listy zakupowej Rozmiar uniwersalny 4,90 zł brutto / 1 szt. Najniższa cena produktu w okresie 30 dni przed wprowadzeniem obniżki: 0,00 zł / 1 szt.+Infinity% Cena regularna: / 1 szt.Infinity% Cena katalogowa: Możesz kupić za pkt.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-6740-Balon-foliowy-Dalmatynczyki-serce-46-cm.html",
     "kodProducenta": "041R",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:48:12.692Z",
-    "allegroAgentPreparationRunId": "e8922397-a317-4e36-935e-febab1b0d723",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:56:45.186Z",
+    "allegroAgentPreparationRunId": "662d0008-e1f1-456d-93f9-2426e1697d02",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
       "parametr Allegro: Wypełnienie",
       "parametr Allegro: Kolor",
       "parametr Allegro: Liczba sztuk",
       "zdjęcie Allegro min. 500px",
-      "informacja o bezpieczeństwie GPSR",
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
+      "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:48:12.692Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-d93fd05c",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:03:12.692Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 3,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-4a9027e0",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000636",
@@ -10025,18 +9978,15 @@
     "allegroProductId": "e84f0848-85b2-4a3f-a54a-495afe67fa9e",
     "allegroCategoryId": "319045",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:32:02.558Z",
-    "allegroAgentPreparationRunId": "50ea611b-b584-49f3-a7f9-f2f5e0d92e2b",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:32:02.558Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-6f2185b9",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:32:02.558Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:34:39.659Z",
+    "allegroAgentPreparationRunId": "a11cde32-af30-4f1a-a777-ef99d369e374",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:34:39.659Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-0f8552b0",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000955",
@@ -10075,21 +10025,19 @@
     "kodProducenta": "0509",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:47:45.434Z",
-    "allegroAgentPreparationRunId": "e686c274-9168-48e8-8f98-0e823a112b0f",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:36:19.057Z",
+    "allegroAgentPreparationRunId": "20093689-a7f4-41ec-a10d-8676c6d96b05",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)",
       "informacja o bezpieczeństwie GPSR",
-      "EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną.",
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
+      "EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną."
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:47:45.434Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-87cdc035",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:47:45.434Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 6,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-c1ed50c9",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000079",
@@ -10168,17 +10116,17 @@
     "kodProducenta": "0510",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-27T17:48:29.886Z",
-    "allegroAgentPreparationRunId": "3b6651ea-d6ff-452a-876c-1aa81c373fe7",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:32:43.829Z",
+    "allegroAgentPreparationRunId": "7d530bac-56a0-4a7b-b8d0-e9864a626c71",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 4,
-    "allegroAgentPreparationConfirmedAt": "2026-07-27T17:48:29.886Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-40d43b05",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T17:48:29.886Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-79ee3c9b",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000881",
@@ -10300,18 +10248,15 @@
     "allegroProductId": "eb358d35-9ee9-406d-bc3b-c50f439c095c",
     "allegroCategoryId": "123958",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:29:10.024Z",
-    "allegroAgentPreparationRunId": "42f211dc-7779-4b98-bd85-493463f7cbc0",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:29:10.024Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-f1d0bbdd",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:29:10.024Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:26:40.748Z",
+    "allegroAgentPreparationRunId": "26e670b3-c814-4623-b4eb-3efc09e930b2",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:26:40.748Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-25e6e4dd",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000877",
@@ -10440,18 +10385,15 @@
     "allegroProductId": "bc53e016-861f-4f2a-b510-636e2119074d",
     "allegroCategoryId": "66781",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:49:28.933Z",
-    "allegroAgentPreparationRunId": "f65a5e83-98e9-4b8e-8b50-3300b1ba3b57",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:49:28.933Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-f98ec1d0",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:49:28.933Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:56:54.196Z",
+    "allegroAgentPreparationRunId": "a35f2677-e548-4e32-9da2-65a90f662960",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:56:54.196Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5d998495",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1001011",
@@ -12221,17 +12163,17 @@
     "kodProducenta": "0564",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-27T17:33:52.866Z",
-    "allegroAgentPreparationRunId": "b7286e41-ca43-4a0b-bcf5-07ff76a22d48",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:39:56.557Z",
+    "allegroAgentPreparationRunId": "fc5cb985-8cc1-4f03-b22e-42039b9774f3",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 4,
-    "allegroAgentPreparationConfirmedAt": "2026-07-27T17:33:52.866Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-b92bdd92",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T17:33:52.866Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-146028e8",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000381",
@@ -12434,18 +12376,15 @@
     "allegroProductId": "1226233f-db67-46db-8029-88d8799bf242",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:47:41.433Z",
-    "allegroAgentPreparationRunId": "e527acae-0cb8-480c-a5b2-cb2d7d6fed62",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:47:41.433Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-da131e90",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:47:41.433Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:54:07.135Z",
+    "allegroAgentPreparationRunId": "b12b0c8d-4696-456f-92b6-058dd831eea7",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:54:07.135Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-394e1603",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000889",
@@ -12574,18 +12513,15 @@
     "allegroProductId": "8d7f19e0-5ff0-4dbb-bf6b-b2d78f5b4cf0",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:33:46.501Z",
-    "allegroAgentPreparationRunId": "71b51bdb-930f-4cd1-977c-dc52a6851560",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:33:46.501Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-4e4ce0df",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:33:46.501Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:30:28.801Z",
+    "allegroAgentPreparationRunId": "429a8304-1f70-4e6f-bafe-9acaa2dc1b73",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:30:28.801Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-bf2ee4bd",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000946",
@@ -13163,18 +13099,15 @@
     "allegroProductId": "ffb9c718-8da4-4a89-80a7-f904c2ac27d6",
     "allegroCategoryId": "93715",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:43:38.122Z",
-    "allegroAgentPreparationRunId": "bc65c54f-da2e-414f-8ca5-4579ef0c69ba",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:43:38.122Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1ce65f5d",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:43:38.122Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:45:42.117Z",
+    "allegroAgentPreparationRunId": "9bab0f4e-1c3a-4fb7-8c5e-689a41397482",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:45:42.117Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5cea5bee",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000551",
@@ -13302,18 +13235,15 @@
     "allegroProductId": "e632b3e5-d8f4-4ef2-b33d-1370d1d6b57d",
     "allegroCategoryId": "93715",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:44:35.633Z",
-    "allegroAgentPreparationRunId": "c5c29bb6-b958-4df4-b9c3-2b7e95bfc925",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:44:35.633Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ff02533c",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:44:35.633Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:47:26.062Z",
+    "allegroAgentPreparationRunId": "c6671577-3a91-4026-9167-ba76e1a9c5e0",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:47:26.062Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-04a13b59",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1001002",
@@ -13353,18 +13283,15 @@
     "allegroProductId": "36d19f36-6d84-487f-9f42-500be46b7795",
     "allegroCategoryId": "93715",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:47:12.200Z",
-    "allegroAgentPreparationRunId": "dffaa5f5-9fce-45ce-bd23-b7a33b9dfafc",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:47:12.200Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ae3fcfcc",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:47:12.200Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:52:41.863Z",
+    "allegroAgentPreparationRunId": "3f58aaa0-986e-42f7-a86f-283161c60892",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:52:41.863Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-2a5c1c53",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000957",
@@ -13541,18 +13468,15 @@
     "allegroProductId": "6e4746cd-c437-4c0e-a68e-8073c9889509",
     "allegroCategoryId": "123948",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:33:20.335Z",
-    "allegroAgentPreparationRunId": "6b9fe091-6003-4a4b-a5ce-f12099a3d971",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:33:20.335Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-467aed28",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:33:20.335Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:38:25.948Z",
+    "allegroAgentPreparationRunId": "d3fb507e-0086-4739-bd0f-e4d08b294d80",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:38:25.948Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-0664438b",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000909",
@@ -13737,18 +13661,15 @@
     "allegroProductId": "f80d2391-c2c5-428b-a5ce-bbb2756c041a",
     "allegroCategoryId": "320131",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:25:42.962Z",
-    "allegroAgentPreparationRunId": "2974c17e-469a-4cec-b3ce-3778bab7aa58",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:25:42.962Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-4bd4144b",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:25:42.962Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:25:26.373Z",
+    "allegroAgentPreparationRunId": "0d1d3bb7-ef5c-4312-b363-aa581e0a6391",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:25:26.373Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-a4c0955c",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000897",
@@ -16813,24 +16734,21 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-4731-Balon-foliowy-Bialy-Dalmatynczyk-Grabo.html",
     "externalId": "173",
-    "opisKrotki": "Zamów Balon foliowy - Biały Dalmatyńczyk, Grabo za 7,59 zł | Okazje \\ Festyny Balony Foliowe \\ Zwierzęta |",
+    "opisKrotki": "Balon foliowy - Biały Dalmatyńczyk, Grabo Dodaj do listy zakupowej Rozmiar uniwersalny 7,59 zł brutto / 1 szt. Najniższa cena produktu w okresie 30 dni przed wprowadzeniem obniżki: 0,00 zł / 1 szt.+Infinity% Cena regularna: / 1 szt.Infinity% Cena katalogowa: Możesz kupić za pkt.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-4731-Balon-foliowy-Bialy-Dalmatynczyk-Grabo.html",
     "kodProducenta": "173",
     "allegroProductId": "fd57ab5e-8580-4120-9229-a44a0e521514",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:45:47.639Z",
-    "allegroAgentPreparationRunId": "d5fdad3e-b1d3-4faf-bcf6-e153f47eed37",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:45:47.639Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-968dea1e",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:45:47.639Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:49:32.123Z",
+    "allegroAgentPreparationRunId": "24044312-aac5-4f05-beab-a3005a6a741e",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:49:32.123Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-546e6f87",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000469",
@@ -17766,28 +17684,26 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-6245-Balon-Foliowy-Kon-w-Galopie-Ciemny-braz-56cm.html",
     "externalId": "180DBR",
-    "opisKrotki": "Zamów Balon Foliowy - Koń w Galopie, Ciemny brąz, 56cm za 8,90 zł | Okazje \\ Festyny Balony Foliowe \\ Zwierzęta Kolekcje \\ Konie |",
+    "opisKrotki": "Balon Foliowy - Koń w Galopie, Ciemny brąz, 56cm Dodaj do listy zakupowej Rozmiar uniwersalny 8,91 zł brutto / 1 szt. Najniższa cena produktu w okresie 30 dni przed wprowadzeniem obniżki: 0,00 zł / 1 szt.+Infinity% Cena regularna: / 1 szt.Infinity% Cena katalogowa: Możesz kupić za pkt.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-6245-Balon-Foliowy-Kon-w-Galopie-Ciemny-braz-56cm.html",
     "kodProducenta": "180DBR",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:57:38.703Z",
-    "allegroAgentPreparationRunId": "c7e0e3e8-a51d-4f5e-8b1a-435e5837f7d2",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T06:17:24.083Z",
+    "allegroAgentPreparationRunId": "d1489b5f-d859-4706-a910-447840c45906",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
       "parametr Allegro: Wypełnienie",
       "parametr Allegro: Liczba sztuk",
       "zdjęcie Allegro min. 500px",
-      "informacja o bezpieczeństwie GPSR",
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
+      "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:57:38.703Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5f03ced4",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:57:38.703Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 3,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-45ba2513",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000818",
@@ -17826,9 +17742,9 @@
     "kodProducenta": "180LBR",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:46:41.797Z",
-    "allegroAgentPreparationRunId": "d810b3e6-510e-44bb-9992-711717f122c0",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:51:36.724Z",
+    "allegroAgentPreparationRunId": "e2dcfe2e-1fa2-49bf-ba1a-6637ea9a162b",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
       "parametr Allegro: Wypełnienie",
@@ -17836,11 +17752,11 @@
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:46:41.797Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-6cb89486",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:01:41.797Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-8bd60dfc",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000799",
@@ -17874,24 +17790,21 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-9329-Balon-Foliowy-Granatowe-Satynowe-Serce-46-cm-Grabo.html",
     "externalId": "180S02BN-P",
-    "opisKrotki": "Zamów Balon Foliowy - Granatowe Satynowe Serce 46 cm, Grabo za 5,99 zł | Okazje \\ Walentynki Balony Foliowe \\ Kształty i Wzory \\ Serca |",
+    "opisKrotki": "Balon Foliowy - Granatowe Satynowe Serce 46 cm, Grabo Dodaj do listy zakupowej Rozmiar uniwersalny 5,99 zł brutto / 1 szt. Najniższa cena produktu w okresie 30 dni przed wprowadzeniem obniżki: 0,00 zł / 1 szt.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-9329-Balon-Foliowy-Granatowe-Satynowe-Serce-46-cm-Grabo.html",
     "kodProducenta": "180S02BN-P",
     "allegroProductId": "ead1cd14-3160-45c8-82e1-89333282c472",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:39:29.479Z",
-    "allegroAgentPreparationRunId": "a04c3e68-1495-4295-9156-c7703b18a4b3",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:39:29.479Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-43b1f101",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:39:29.479Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:26:29.436Z",
+    "allegroAgentPreparationRunId": "1b2ca4d8-0a34-4a8e-8d69-15ed7a46c949",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:26:29.436Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-90eadb58",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000755",
@@ -19181,24 +19094,21 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-3959-Balon-Foliowy-Gwiazda-Zlota-46-cm-Grabo.html",
     "externalId": "19212G5-P",
-    "opisKrotki": "Zamów Balon Foliowy - Gwiazda Złota 46 cm Grabo za 5,99 zł | Okazje \\ Sylwester / Nowy Rok Balony Foliowe \\ Kształty i Wzory \\ Gwiazdy |",
+    "opisKrotki": "Balon Foliowy - Gwiazda Złota 46 cm Grabo Dodaj do listy zakupowej Rozmiar uniwersalny 5,99 zł brutto / 1 szt. Najniższa cena produktu w okresie 30 dni przed wprowadzeniem obniżki: 0,00 zł / 1 szt.+Infinity% Cena regularna: / 1 szt.Infinity% Cena katalogowa: Możesz kupić za pkt.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-3959-Balon-Foliowy-Gwiazda-Zlota-46-cm-Grabo.html",
     "kodProducenta": "19212G5-P",
     "allegroProductId": "8edb410e-8d44-46cd-9234-bcf28b367601",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:49:23.249Z",
-    "allegroAgentPreparationRunId": "f403663f-3781-4717-be88-15f18165ef22",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:49:23.249Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-cbba83de",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:49:23.249Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:58:19.105Z",
+    "allegroAgentPreparationRunId": "dd64b99e-d5a5-4809-a271-b0666e29b816",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:58:19.105Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-f213361a",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000802",
@@ -19520,24 +19430,21 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-11146-Balon-Foliowy-Mis-Panda-68cm-Grabo.html",
     "externalId": "208L",
-    "opisKrotki": "Zamów Balon Foliowy - Miś Panda, 68cm, Grabo za 8,89 zł | Okazje \\ Festyny Balony Foliowe \\ Zwierzęta |",
+    "opisKrotki": "Balon Foliowy - Miś Panda, 68cm, Grabo Dodaj do listy zakupowej Rozmiar uniwersalny 8,89 zł brutto / 1 szt. Najniższa cena produktu w okresie 30 dni przed wprowadzeniem obniżki: 0,00 zł / 1 szt.+Infinity% Cena regularna: / 1 szt.Infinity% Cena katalogowa: Możesz kupić za pkt.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-11146-Balon-Foliowy-Mis-Panda-68cm-Grabo.html",
     "kodProducenta": "208L",
     "allegroProductId": "91de74b2-c57f-401b-aab2-f0aa0848c19e",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:27:33.887Z",
-    "allegroAgentPreparationRunId": "33920a64-8cbe-4c87-81b7-6acb5c6c54df",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:27:33.887Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-63c5b7d8",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:27:33.887Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:30:14.683Z",
+    "allegroAgentPreparationRunId": "3d6713cf-9152-405f-a635-6cc71e11cd35",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:30:14.683Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-db0751ed",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000423",
@@ -20577,19 +20484,19 @@
     "kodProducenta": "2233",
     "allegroCategoryId": "319045",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:56:33.412Z",
-    "allegroAgentPreparationRunId": "ff9ecb88-4459-40b8-b57a-4f201c2166f8",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T06:14:07.296Z",
+    "allegroAgentPreparationRunId": "d03dd94d-8483-401d-87fb-803672afb435",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)",
       "zdjęcie Allegro min. 500px",
       "EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną."
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:56:33.412Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-c6b40ce6",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:56:33.412Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 5,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-d22971b8",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000391",
@@ -20828,9 +20735,9 @@
     "kodProducenta": "223F",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:51:36.579Z",
-    "allegroAgentPreparationRunId": "1cd0edd6-a331-449f-a120-5b3d00f26624",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T06:00:35.617Z",
+    "allegroAgentPreparationRunId": "d93e9c76-311e-42df-9fe9-24e83eaf824e",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
       "parametr Allegro: Wypełnienie",
@@ -20838,11 +20745,11 @@
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:51:36.579Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1ac7eca1",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:51:36.579Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 5,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-565c5b2d",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000450",
@@ -21326,19 +21233,18 @@
     "allegroProductId": "cf5c5d57-8f75-40b8-883c-c55eefe2448f",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:50:17.364Z",
+    "allegroAgentPreparedAt": "2026-07-28T05:55:38.263Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "f9108720-36f1-4c8a-aa47-99d618d0a39c",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparationRunId": "5c04082f-c1de-4699-b9bc-add4c6593882",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
-      "zdjęcia",
-      "redakcja opisu Allegro przez Agenta"
+      "zdjęcia"
     ],
-    "allegroAgentPreparationVersion": 4,
+    "allegroAgentPreparationVersion": 5,
     "allegroAgentPreparationRetryCount": 3,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:50:17.364Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-cc3e5e74",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T10:50:17.364Z"
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-995fe9b2",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000354",
@@ -23618,19 +23524,19 @@
     "kodProducenta": "2464",
     "allegroCategoryId": "93663",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T03:27:15.161Z",
-    "allegroAgentPreparationRunId": "5f572bb0-b599-4d33-911b-a672ed74aca8",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:39:02.674Z",
+    "allegroAgentPreparationRunId": "39745348-b4a6-4287-83f9-bbb09430aead",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)",
-      "zdjęcie Allegro min. 400px",
+      "zdjęcie Allegro min. 500px",
       "EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną."
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 3,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T03:27:15.161Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-9c4e7517",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T09:27:15.161Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 6,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-0dcb0901",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000419",
@@ -25367,15 +25273,15 @@
     "allegroOfferId": "18755920632",
     "allegroProductId": "31e885c4-8040-4f3d-9bf2-54c16e5e8be6",
     "allegroCategoryId": "46097",
-    "allegroAgentPreparedAt": "2026-07-28T04:04:05.948Z",
+    "allegroAgentPreparedAt": "2026-07-28T06:49:54.191Z",
     "allegroEditorialSyncState": "pending",
-    "allegroAgentPreparationRunId": "cbebb60d-51c0-44dc-81c1-5292078a5ceb",
+    "allegroAgentPreparationRunId": "0b5846ac-74ed-4a49-8334-38947406ec85",
     "allegroAgentPreparationStatus": "ready",
     "allegroAgentPreparationMissing": [],
-    "allegroAgentPreparationVersion": 4,
+    "allegroAgentPreparationVersion": 5,
     "allegroAgentPreparationRetryCount": 0,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:04:05.948Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-73c5e9a4",
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T06:49:54.191Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-dfc0695c",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -25388,7 +25294,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Constructor",
-    "nazwa": "Mały Konstruktor Junior 150 elementów - Alexander",
+    "nazwa": "Mały Konstruktor Junior 150 elementów – Constructor",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/c0759fbf7a79d9feb25fa315fe1262e7/pol_pm_MALY-KONSTRUKTOR-JUNIOR-150-ELEMENTOW-1451_1.jpg",
     "_catalog": {
       "channels": {
@@ -25410,23 +25316,23 @@
     "producent": "Constructor",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1451-MALY-KONSTRUKTOR-JUNIOR-150-ELEMENTOW.html",
     "externalId": "2564",
-    "opisKrotki": "Mały Konstruktor Junior to zestaw do samodzielnego montażu od Alexander. Zawiera drewniane deseczki z dziurkami, kolorowe śrubki i łączniki z tworzywa oraz narzędzia dopasowane do małych rączek.",
+    "opisKrotki": "Mały Konstruktor Junior to zestaw do samodzielnego montażu z 150 elementów. Zawiera drewniane deseczki z dziurkami, kolorowe śrubki, łączniki z tworzywa oraz narzędzia dopasowane do małych rączek. Z elementów można zbudować trzy różne pojazdy, a gotowa konstrukcja może służyć także do dalszej zabawy.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1451-MALY-KONSTRUKTOR-JUNIOR-150-ELEMENTOW.html",
     "kodProducenta": "2564",
     "allegroCategoryId": "46097",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:37:27.351Z",
-    "allegroAgentPreparationRunId": "82befafb-3040-4eaf-8216-534a8bf97bf7",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T08:00:39.650Z",
+    "allegroAgentPreparationRunId": "5a24982a-6851-4021-b616-9febbd8e517e",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Marka",
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:37:27.351Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-80297a3f",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:37:27.351Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-d909dfe2",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000374",
@@ -30665,7 +30571,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "Zegar edukacyjny Jeżyk - zabawka edukacyjna Alexander",
+    "nazwa": "Zegar edukacyjny Jeżyk – Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/af4404da1691e9d222f5c28479abd3c9/pol_pm_ZEGAR-EDUKACYJNY-JEZYK-1518_1.jpg",
     "_catalog": {
       "channels": {
@@ -30687,24 +30593,24 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1518-ZEGAR-EDUKACYJNY-JEZYK.html",
     "externalId": "2793",
-    "opisKrotki": "Zabawka edukacyjna w formie zegara z ilustracją jeżyka. Ruchome wskazówki pozwalają ćwiczyć ustawianie godzin, minut i sekund, a tarcza zawiera oznaczenia dla zapisu 12- i 24-godzinnego oraz ułatwienia „kwadrans do”, „wpół do” i „00”.",
+    "opisKrotki": "Edukacyjny zegar z ilustracją jeżyka do nauki godzin, minut i sekund. Tarcza na solidnej tekturze ma ruchome wskazówki oraz oznaczenia w systemie 12- i 24-godzinnym.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1518-ZEGAR-EDUKACYJNY-JEZYK.html",
     "kodProducenta": "2793",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:34:08.719Z",
+    "allegroAgentPreparedAt": "2026-07-28T07:50:19.534Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "72a13b58-0474-4c3e-bfe1-c1807e580719",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparationRunId": "5147043a-bee3-42a7-9793-dd4982ed5e97",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Liczba elementów",
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:34:08.719Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-9ba4927f",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T04:49:08.719Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-279fb020",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000774",
@@ -30743,18 +30649,18 @@
     "kodProducenta": "2794",
     "allegroCategoryId": "320131",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:57:23.810Z",
-    "allegroAgentPreparationRunId": "4e4363b3-8fe9-4a42-b167-f445d6614c11",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:44:04.991Z",
+    "allegroAgentPreparationRunId": "4edee495-b04a-463f-8c7d-32370c3ab168",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:57:23.810Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-546ee0b0",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:57:23.810Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-97fc1f62",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000694",
@@ -33287,18 +33193,18 @@
     "kodProducenta": "2933",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:40:56.409Z",
-    "allegroAgentPreparationRunId": "a958eb6e-21d9-49b6-8039-70be91282808",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:25:21.631Z",
+    "allegroAgentPreparationRunId": "ffbbd9a3-6dfa-413e-9cd8-cf2f6f5b1394",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:40:56.409Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-df80a82c",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T04:55:56.409Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-07bed680",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000747",
@@ -33337,18 +33243,18 @@
     "kodProducenta": "2934",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:05:33.320Z",
+    "allegroAgentPreparedAt": "2026-07-28T05:45:36.982Z",
     "allegroAgentPreparationRunId": "5cc2c60d-5e76-4186-bc7d-a6746193fd9c",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 2,
+    "allegroAgentPreparationRetryCount": 4,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-82191618",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:06:33.320Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-7707e4c4",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000748",
@@ -33387,18 +33293,18 @@
     "kodProducenta": "2935",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:52:23.829Z",
-    "allegroAgentPreparationRunId": "83af23f9-00cf-4261-a72e-208a7f663972",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:36:06.926Z",
+    "allegroAgentPreparationRunId": "1ff865b3-988a-4042-ab42-48a59ee4c6e2",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:52:23.829Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-4364c777",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:52:23.829Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ccf064ff",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000750",
@@ -33410,7 +33316,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "X-Press Me - Brelok DIY Trąbka, 76 elementów, Alexander",
+    "nazwa": "X-Press Me – Brelok DIY Trąbka, 76 elementów, Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/7111a112a6c2c5da55854b2bb2a6f00c/pol_pm_-X-PRESS-ME-BRELOK-DIY-Trabka-76-El-1576_1.jpg",
     "_catalog": {
       "channels": {
@@ -33432,25 +33338,24 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1576--X-PRESS-ME-BRELOK-DIY-Trabka-76-El.html",
     "externalId": "2936",
-    "opisKrotki": "Kreatywny brelok DIY z serii X-Press Me marki Alexander. Zestaw zawiera 76 elementów i pozwala złożyć ozdobę według wzoru lub stworzyć własny projekt.",
+    "opisKrotki": "Brelok DIY z serii X-Press Me marki Alexander w wariancie Trąbka. Zestaw zawiera 76 elementów do samodzielnego złożenia ozdoby, którą można przyczepić do plecaka lub innego przedmiotu.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1576--X-PRESS-ME-BRELOK-DIY-Trabka-76-El.html",
     "kodProducenta": "2936",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:56:11.717Z",
+    "allegroAgentPreparedAt": "2026-07-28T08:17:54.310Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "e3f1be8a-d24b-4b43-aea9-f018bf81ea23",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparationRunId": "76932e99-3e94-408a-a717-67fbf20e2c58",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
-      "informacja o bezpieczeństwie GPSR",
-      "redakcja opisu Allegro przez Agenta"
+      "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:56:11.717Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-e1545fa5",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:56:11.717Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 6,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-09f30a48",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000743",
@@ -33489,19 +33394,19 @@
     "kodProducenta": "2937",
     "allegroCategoryId": "93707",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:37:05.434Z",
-    "allegroAgentPreparationRunId": "8208f2f9-bf99-406c-a008-6ecd5ed0d779",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:08:23.291Z",
+    "allegroAgentPreparationRunId": "7a2f7817-7e98-4e66-a580-6d7f163cd7c4",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:37:05.434Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-a3cc898d",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T04:52:05.434Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-6173dd3f",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000745",
@@ -33540,18 +33445,18 @@
     "kodProducenta": "2938",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:54:01.076Z",
-    "allegroAgentPreparationRunId": "b57278ed-f716-4c9b-8209-027aabfbb29a",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T06:06:29.501Z",
+    "allegroAgentPreparationRunId": "52b04046-91e2-47ae-8f11-ca4fdefb05ec",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:54:01.076Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-a5934960",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:54:01.076Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 5,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-6132827c",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000749",
@@ -33563,7 +33468,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "X-Press Me - Brelok DIY Słoń, 60 elementów - Alexander",
+    "nazwa": "X-Press Me – Brelok DIY Słoń, 60 elementów",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/406749f01727789ad5d081f8e20c4ec0/pol_pm_-X-PRESS-ME-BRELOK-DIY-Slon-60-El-1570_2.jpg",
     "_catalog": {
       "channels": {
@@ -33585,23 +33490,23 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1570--X-PRESS-ME-BRELOK-DIY-Slon-60-El.html",
     "externalId": "2939",
-    "opisKrotki": "Kreatywny brelok DIY z serii X-Press Me, który pozwala złożyć własny wzór z dołączonych elementów. Zestaw można przebudowywać i dopasowywać do aktualnego nastroju.",
+    "opisKrotki": "X-Press Me – Brelok DIY Słoń to zestaw kreatywny marki Alexander z serii X-Press Me, zawierający 60 elementów do samodzielnego złożenia breloka i zmiany jego formy.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1570--X-PRESS-ME-BRELOK-DIY-Slon-60-El.html",
     "kodProducenta": "2939",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:42:19.737Z",
-    "allegroAgentPreparationRunId": "b3dda636-1050-4f20-86b7-2a6735fbf38b",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:53:36.388Z",
+    "allegroAgentPreparationRunId": "53016716-6c4c-4cbc-86fc-60388d853283",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:42:19.737Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5886df19",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T04:57:19.737Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-88087dfa",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000746",
@@ -33640,18 +33545,18 @@
     "kodProducenta": "2940",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:38:24.311Z",
-    "allegroAgentPreparationRunId": "96ad08f6-3351-47d7-9520-7ee080505df8",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:16:59.880Z",
+    "allegroAgentPreparationRunId": "9d160140-3212-49ca-b796-f24a13f3dcc8",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:38:24.311Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-d3bcb6d5",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T04:53:24.311Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-e9f3712d",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000187",
@@ -33725,25 +33630,24 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-2942-Metalcraft-Gitara-FS-Czerwona.html",
     "externalId": "2942",
-    "opisKrotki": "Dekoracyjna replika gitary elektrycznej w skali 1:1, przeznaczona do samodzielnego montażu. Czerwony model Metalcraft od Alexander zawiera ponad 2000 metalowych elementów i wyróżnia się rękodzielniczym charakterem.",
+    "opisKrotki": "Nostalgia i fascynujące hobby Metalcraftto wciągający proces tworzenia, który pochłonie cię na wiele godzin. To produkt dla dorosłych, którzy nie utracili wewnętrznej fantazji, energii i młodości ducha.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-2942-Metalcraft-Gitara-FS-Czerwona.html",
     "kodProducenta": "2942",
     "allegroProductId": "918c25b2-9b9c-49eb-8ca5-460605efcdc8",
     "allegroCategoryId": "15997",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:38:50.857Z",
-    "allegroAgentPreparationRunId": "986449b4-0e39-437c-8582-9e4e438900e1",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:31:00.911Z",
+    "allegroAgentPreparationRunId": "12386cef-7c29-46ae-a3d1-309f59ad3910",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
-      "informacja o bezpieczeństwie GPSR",
-      "redakcja opisu Allegro przez Agenta"
+      "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 3,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:38:50.857Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-4feb165e",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T10:38:50.857Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 6,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-3c90eff0",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000147",
@@ -36077,18 +35981,18 @@
     "kodProducenta": "5001",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:05:58.699Z",
-    "allegroAgentPreparationRunId": "72f9842a-f059-4c46-90e5-1ba544cac5aa",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparedAt": "2026-07-28T07:34:44.172Z",
+    "allegroAgentPreparationRunId": "1c46abcb-3ed3-4dba-aa80-d12cdf11413d",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 2,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5de5b82a",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:06:58.699Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-a254a7ca",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000494",
@@ -36127,18 +36031,18 @@
     "kodProducenta": "5002",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:43:07.358Z",
-    "allegroAgentPreparationRunId": "b71e8dc2-e74c-40af-b5dd-e63cf6f0a4cb",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:15:05.833Z",
+    "allegroAgentPreparationRunId": "9072b4eb-b400-4846-885f-6fef8591d31c",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:43:07.358Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5e04d40a",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T04:58:07.358Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ebd633fa",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000496",
@@ -36177,18 +36081,18 @@
     "kodProducenta": "5003",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:01:36.831Z",
-    "allegroAgentPreparationRunId": "09c1608a-c9b4-40b5-89ad-08f22e125971",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:29:18.131Z",
+    "allegroAgentPreparationRunId": "00ce08d6-3a60-49ea-9940-a79541b91684",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:01:36.831Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-8e7296fe",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T06:01:36.831Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-0edf8f9e",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000495",
@@ -36200,7 +36104,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane - Hi, I’m little - Leniwiec Simon - Alexander",
+    "nazwa": "Puzzle drewniane Hi, I’m little – Leniwiec Simon, 46 elementów",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/b557df7ef853cbe133b8df56a8128bfa/pol_pl_Puzzle-drewniane-Hi-Im-little-Leniwiec-Simon-46-el-1619_4.jpg",
     "_catalog": {
       "channels": {
@@ -36222,23 +36126,23 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-5004-Puzzle-drewniane-Hi-Im-little-Leniwiec-Simon-46-el.html",
     "externalId": "5004",
-    "opisKrotki": "Drewniane puzzle dla dzieci z leniwcem Simonem w serii Hi, I’m little. Układanka ma 46 elementów, nieregularne kształty i puzzle specjalne ukryte w obrazku, a gotowy motyw tworzy oktagon.",
+    "opisKrotki": "Drewniane puzzle z leniwcem Simonem z serii Hi, I’m little. Układanka ma 46 elementów, nieregularne kształty i gotowy obrazek w formie oktagonu.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-5004-Puzzle-drewniane-Hi-Im-little-Leniwiec-Simon-46-el.html",
     "kodProducenta": "5004",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:02:15.310Z",
-    "allegroAgentPreparationRunId": "134b13e5-7ad6-46e4-8d18-098db0a3cd49",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparedAt": "2026-07-28T08:21:38.420Z",
+    "allegroAgentPreparationRunId": "7a8caca8-3c53-4680-82fe-e87b61d00711",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 2,
+    "allegroAgentPreparationRetryCount": 6,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-71b1ea1b",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:03:15.310Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1b9bbba4",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000059",
@@ -36277,19 +36181,19 @@
     "kodProducenta": "5005",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:53:15.413Z",
+    "allegroAgentPreparedAt": "2026-07-28T07:42:33.872Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "a6e79003-2d56-4cef-87de-0445bbdcbd17",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparationRunId": "4c2f7589-92cb-4e3e-90c3-6d279e96299a",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:53:15.413Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-143c2806",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:53:15.413Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-9bf8fdda",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000493",
@@ -36368,19 +36272,19 @@
     "kodProducenta": "5013",
     "allegroCategoryId": "46097",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:54:40.999Z",
+    "allegroAgentPreparedAt": "2026-07-28T07:40:00.981Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "b9a1e5e1-fdbb-4275-a616-03a6ac746b0c",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparationRunId": "40c431b1-78e2-488d-a559-a9f6011929ff",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:54:40.999Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-2e75cd60",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:54:40.999Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-18087224",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000483",
@@ -36499,17 +36403,17 @@
     "kodProducenta": "5016",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:55:03.208Z",
-    "allegroAgentPreparationRunId": "bda8ee85-2765-4288-b0a6-0331a6a427e6",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:43:17.533Z",
+    "allegroAgentPreparationRunId": "4ebf5e0c-5d55-451e-8e81-b9f359d764ad",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:55:03.208Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-03e3bca7",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:55:03.208Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-12e4b773",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000484",
@@ -36598,19 +36502,19 @@
     "kodProducenta": "5018",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:55:47.865Z",
-    "allegroAgentPreparationRunId": "d9d1a358-9116-43d0-b7fc-66b0520561ba",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T06:10:14.948Z",
+    "allegroAgentPreparationRunId": "895f554f-633e-44cd-9c52-44ae8db8df12",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)",
       "zdjęcie Allegro min. 500px",
       "EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną."
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:55:47.865Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-313ea380",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:55:47.865Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 5,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-2588490a",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000489",
@@ -36622,7 +36526,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane Galaxies - Astronauta, 150 elementów, Alexander",
+    "nazwa": "Puzzle drewniane Galaxies – Astronauta, 50 elementów, MilliWOOD",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/3849cc103ed2ddf3ddb5cc18260097d5/pol_pm_Puzzle-drewniane-Galaxies-Astronauta-150-el-1611_9.jpg",
     "_catalog": {
       "channels": {
@@ -36644,22 +36548,22 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1611-Puzzle-drewniane-Galaxies-Astronauta-150-el.html",
     "externalId": "5019",
-    "opisKrotki": "Puzzle drewniane z serii Galaxies przedstawiają astronautę w kosmicznej scenie z tajemniczymi planetami i kolorową bańką. Zestaw zawiera 150 elementów o nieregularnych kształtach i jest przeznaczony dla dzieci od 8 lat.",
+    "opisKrotki": "Drewniane puzzle z serii Galaxies przedstawiają astronautę w kosmicznej scenerii. Zestaw zawiera 50 elementów o regularnych i nieregularnych kształtach, a po ułożeniu tworzy obraz o wymiarach 34 cm x 22,5 cm. Produkt przeznaczony jest dla dzieci od 8 lat.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1611-Puzzle-drewniane-Galaxies-Astronauta-150-el.html",
     "kodProducenta": "5019",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:48:40.446Z",
-    "allegroAgentPreparationRunId": "eee7c6ce-3e9c-4314-800b-72b18dda8390",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T08:14:41.885Z",
+    "allegroAgentPreparationRunId": "76618448-c60d-4e71-9a39-3c3c1cc51a00",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:48:40.446Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-d6530ce3",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:03:40.446Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1fe8005c",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000491",
@@ -36698,17 +36602,17 @@
     "kodProducenta": "5021",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:46:13.959Z",
-    "allegroAgentPreparationRunId": "d7eb89f7-b8a0-42f9-a128-b3e0bdad8e09",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:50:29.535Z",
+    "allegroAgentPreparationRunId": "2d26921b-2122-4553-808f-183aa0a709eb",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:46:13.959Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-e3ba4150",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:01:13.959Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-83b91f74",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000492",
@@ -36747,17 +36651,17 @@
     "kodProducenta": "5022",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:03:05.041Z",
+    "allegroAgentPreparedAt": "2026-07-28T05:41:33.065Z",
     "allegroAgentPreparationRunId": "1fd24941-74e4-4b18-bfdf-c17a6cc45e23",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 2,
+    "allegroAgentPreparationRetryCount": 4,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-f3e8e2dc",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:04:05.041Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-69135688",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000487",
@@ -36916,17 +36820,17 @@
     "kodProducenta": "5032",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:55:25.654Z",
-    "allegroAgentPreparationRunId": "d70e0844-2522-42e3-b4a9-3afae5f14f71",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T06:09:22.535Z",
+    "allegroAgentPreparationRunId": "df2cf24e-799e-4293-a77c-eaf593128207",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:55:25.654Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-a651e4aa",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:55:25.654Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 5,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-42589224",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000500",
@@ -36938,7 +36842,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane - Wrzosowa Chata - Alexander",
+    "nazwa": "Puzzle drewniane Landscapes – Wrzosowa Chata, 580 elementów",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/4bc96dd345d692e7baf2babccd89fe95/pol_pm_Puzzle-drewniane-Landscapes-Wrzosowa-Chata-580-el-1616_1.jpg",
     "_catalog": {
       "channels": {
@@ -36960,22 +36864,22 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1616-Puzzle-drewniane-Landscapes-Wrzosowa-Chata-580-el.html",
     "externalId": "5033",
-    "opisKrotki": "Drewniane puzzle z motywem chatki otoczonej wrzosami i kwiatami, z zachodzącym słońcem w tle. Nastrojowa scena z serii Landscapes od Alexander, odpowiednia dla osób od 12 lat.",
+    "opisKrotki": "Drewniane puzzle z serii MilliWOOD – Landscapes przedstawiają chatkę otoczoną wrzosami i kwiatami oraz zachodzącym słońcem. Układanka ma 580 elementów, regularny kształt i po złożeniu wymiary 51 x 34 cm. Przeznaczona dla osób od 12 roku życia.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1616-Puzzle-drewniane-Landscapes-Wrzosowa-Chata-580-el.html",
     "kodProducenta": "5033",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:56:47.317Z",
-    "allegroAgentPreparationRunId": "391ed939-d585-4a2b-a21a-458bb4619b1d",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T08:27:12.337Z",
+    "allegroAgentPreparationRunId": "7e5974fb-0107-4369-84c7-0029d8b2711e",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:56:47.317Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-9f220154",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:56:47.317Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-32255584",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000514",
@@ -37075,7 +36979,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Podmiot odpowiedzialny za ten produkt na terenie UE",
-    "nazwa": "Drewniane Puzzle Friendly Dinosaurs - Milliwood Dream Team, 50 elementów",
+    "nazwa": "Drewniane puzzle Friendly Dinosaurs – Milliwood, Dream Team",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/c338178fb505a904cc8277ec0de126ed/pol_pl_Drewniane-Puzzle-Milliwood-Dream-Team-Friendly-Dinosaurs-50-Elementow-1609_1.jpg",
     "_catalog": {
       "channels": {
@@ -37097,24 +37001,24 @@
     "producent": "Podmiot odpowiedzialny za ten produkt na terenie UE",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1609-Drewniane-Puzzle-Milliwood-Dream-Team-Friendly-Dinosaurs-50-Elementow.html",
     "externalId": "5052",
-    "opisKrotki": "Drewniane puzzle marki Milliwood z serii Dream Team przedstawiają przyjazne dinozaury. Układanka ma 50 elementów i jest przeznaczona dla dzieci od 5 lat.",
+    "opisKrotki": "Drewniane puzzle Milliwood z serii Dream Team przedstawiają wesołe dinozaury w przyjaznej, kolorowej grafice. To układanka z drewna dla osób szukających spokojnej, relaksującej zabawy i estetycznego motywu.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1609-Drewniane-Puzzle-Milliwood-Dream-Team-Friendly-Dinosaurs-50-Elementow.html",
     "kodProducenta": "5052",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:52:49.801Z",
-    "allegroAgentPreparationRunId": "9d3fdd6b-061e-4f8a-ba74-f20de8871857",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:57:19.104Z",
+    "allegroAgentPreparationRunId": "581209b8-4f8e-4a74-895d-623b17ae9e34",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:52:49.801Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-323388f8",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:52:49.801Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1d7552bb",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000055",
@@ -37153,19 +37057,19 @@
     "kodProducenta": "5053",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:57:01.994Z",
+    "allegroAgentPreparedAt": "2026-07-28T06:12:14.327Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "3c8148c1-6f65-4f0a-8a52-abed4bb44441",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparationRunId": "71d50878-8fc5-458c-87fb-afcfc347f10c",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:57:01.994Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-9b9f222e",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:57:01.994Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 5,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-483d2ce2",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000512",
@@ -37177,7 +37081,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane Yippee Cutie - Tygrysek - Alexander",
+    "nazwa": "Puzzle drewniane Yippee Cutie – Tygrysek, 70 elementów, MilliWOOD",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/888d956f32b205f7754eae15f3f162c1/pol_pm_Puzzle-drewniane-Yippee-cutie-Tygrysek-70-el-1603_1.jpg",
     "_catalog": {
       "channels": {
@@ -37199,22 +37103,22 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1603-Puzzle-drewniane-Yippee-cutie-Tygrysek-70-el.html",
     "externalId": "5054",
-    "opisKrotki": "Drewniane puzzle dla dzieci lubiących tygryski z serii Yippee Cutie. Układanka jest gruba i dostosowana rozmiarem do wieku dziecka, a jej układanie sprzyja spokojnej, relaksacyjnej zabawie.",
+    "opisKrotki": "Drewniane puzzle z serii Yippee Cutie z motywem tygryska. Zestaw zawiera 70 elementów i po złożeniu ma wymiary 28,5 cm x 21 cm.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1603-Puzzle-drewniane-Yippee-cutie-Tygrysek-70-el.html",
     "kodProducenta": "5054",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:04:38.057Z",
-    "allegroAgentPreparationRunId": "50d945c1-eefe-4ece-b697-1e1c7509b2a6",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparedAt": "2026-07-28T08:11:12.544Z",
+    "allegroAgentPreparationRunId": "721c27d5-ea32-4f74-88da-88b0566fb9a8",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 2,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-048df040",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:05:38.057Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-9025a6fe",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000510",
@@ -37253,17 +37157,17 @@
     "kodProducenta": "5055",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:34:57.595Z",
-    "allegroAgentPreparationRunId": "75e0087c-5bf7-4a95-84f1-5f3ff3d3d9e1",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:16:07.784Z",
+    "allegroAgentPreparationRunId": "9ac08b08-aafb-4be4-8f2d-ea24ec62bd9b",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:34:57.595Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-f3080730",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T04:49:57.595Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-a45e8000",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000490",
@@ -37302,17 +37206,17 @@
     "kodProducenta": "5056",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:53:37.732Z",
-    "allegroAgentPreparationRunId": "a82cdfa2-488b-4209-8bc4-ce5c4a03f72f",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:28:02.083Z",
+    "allegroAgentPreparationRunId": "00ad23ec-81b1-4e40-a0ea-056913849ff7",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:53:37.732Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-97017e86",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:53:37.732Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1545219e",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000498",
@@ -37324,7 +37228,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane „Hi, I’m little - Żółwik Theo” - 46 el.",
+    "nazwa": "Puzzle drewniane Hi, I’m little – Żółwik Theo, 46 el. | Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/acba5d0d8775f3572591517c728e3eed/pol_pl_Puzzle-drewniane-Hi-Im-little-Zolwik-Theo-46-el-1796_9.jpg",
     "_catalog": {
       "channels": {
@@ -37346,23 +37250,23 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-5058-Puzzle-drewniane-Hi-Im-little-Zolwik-Theo-46-el.html",
     "externalId": "5058",
-    "opisKrotki": "Drewniane puzzle dla dzieci z motywem Żółwika Theo z serii Hi, I’m little. Zestaw zawiera 46 elementów i został zaprojektowany jako układanka z nieregularnymi kształtami.",
+    "opisKrotki": "Drewniane puzzle marki MilliWOOD od Alexander z serii Hi I’m little. Motyw Żółwika Theo, 46 elementów, wiek 4+. Zestaw można po ułożeniu powiesić na ścianie.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-5058-Puzzle-drewniane-Hi-Im-little-Zolwik-Theo-46-el.html",
     "kodProducenta": "5058",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:51:11.521Z",
-    "allegroAgentPreparationRunId": "162868e3-52e7-4bf5-afaf-31336a9b5326",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T08:08:10.618Z",
+    "allegroAgentPreparationRunId": "5e52a93d-5bd8-4f82-8136-4c479943559c",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:51:11.521Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-9adeb524",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:51:11.521Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-e36691f0",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000506",
@@ -37402,18 +37306,15 @@
     "allegroProductId": "3571ebfd-3933-46fc-95d7-e6178b60b7ed",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:22:53.773Z",
-    "allegroAgentPreparationRunId": "148943cc-6c73-47de-9689-b185446badd2",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:22:53.773Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-896318ff",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:22:53.773Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:34:35.936Z",
+    "allegroAgentPreparationRunId": "91c0d1b5-6072-4942-8a5d-40ab842cbc30",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:34:35.936Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-abb1a5bb",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000504",
@@ -37475,7 +37376,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane Słoń - Peace & Harmony, Alexander",
+    "nazwa": "Puzzle drewniane Peace and Harmony – Słoń, 400 elementów",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/f31f5e4f1daa834494ca37ee3a291b3f/pol_pm_Puzzle-drewniane-Peace-and-harmony-Slon-400-el-1590_3.jpg",
     "_catalog": {
       "channels": {
@@ -37497,22 +37398,22 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1590-Puzzle-drewniane-Peace-and-harmony-Slon-400-el.html",
     "externalId": "5062",
-    "opisKrotki": "Drewniane puzzle z motywem słonia o nieregularnych kształtach. Układanka zawiera 400 elementów oraz 25 specjalnych puzzli w kształcie zwierząt, roślin, przedmiotów i zjawisk.",
+    "opisKrotki": "Drewniane puzzle z motywem słonia z serii Peace and Harmony. Układanka ma 400 elementów, nieregularne kształty i 25 specjalnych puzzli o tematycznych formach.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1590-Puzzle-drewniane-Peace-and-harmony-Slon-400-el.html",
     "kodProducenta": "5062",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:06:21.523Z",
-    "allegroAgentPreparationRunId": "76ec0db9-7311-4848-b952-abe807f86f83",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparedAt": "2026-07-28T08:30:25.278Z",
+    "allegroAgentPreparationRunId": "82d68ea6-bebe-4d96-abe7-9032d1f9d4fd",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 2,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1d4f7b8a",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:07:21.523Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-3315262b",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000501",
@@ -37551,19 +37452,18 @@
     "kodProducenta": "5063",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:47:06.670Z",
+    "allegroAgentPreparedAt": "2026-07-28T05:52:35.655Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "d86580bd-e251-4c66-b5be-f6296e4b34b8",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparationRunId": "8472ad55-a513-4d7d-8e94-c8bf5fcf5848",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
-      "zdjęcie Allegro min. 500px",
-      "redakcja opisu Allegro przez Agenta"
+      "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:47:06.670Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-3b3753d8",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:02:06.670Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 3,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-2fdd1a92",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000503",
@@ -37721,7 +37621,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane Smok - Alexander, seria Peace & Harmony",
+    "nazwa": "Puzzle drewniane Peace and Harmony – Smok – 206 elementów",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/b1e5b7f61666c4a466e9a24484e19d36/pol_pm_Puzzle-drewniane-Peace-and-harmony-Smok-206-el-1586_2.jpg",
     "_catalog": {
       "channels": {
@@ -37743,22 +37643,22 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1586-Puzzle-drewniane-Peace-and-harmony-Smok-206-el.html",
     "externalId": "5071",
-    "opisKrotki": "Drewniane puzzle z motywem mandali i niebieskiego smoka od Alexander. Naturalna estetyka, specjalne kształty elementów i folia samoprzylepna do wyeksponowania gotowej pracy.",
+    "opisKrotki": "Drewniane puzzle z serii Peace & Harmony z motywem mandali i niebieskim smokiem. Zestaw zawiera 206 elementów, w tym 20 puzzli specjalnych, i jest przeznaczony dla osób od 8. roku życia.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1586-Puzzle-drewniane-Peace-and-harmony-Smok-206-el.html",
     "kodProducenta": "5071",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:47:35.748Z",
-    "allegroAgentPreparationRunId": "e4083f30-ba6b-4b0e-a121-a55f6d0fcbbb",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T08:04:34.141Z",
+    "allegroAgentPreparationRunId": "5b94f55e-631f-40a1-9229-5098a4c415bd",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:47:35.748Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-04e6db16",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:02:35.748Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1df7c5d7",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000519",
@@ -38547,18 +38447,18 @@
     "kodProducenta": "5092",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:44:31.437Z",
-    "allegroAgentPreparationRunId": "c3ab50e2-567b-4b38-8cf3-1d19e3628d7a",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:09:44.986Z",
+    "allegroAgentPreparationRunId": "7df119cf-3f1f-44f6-9f70-00f5d0796862",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:44:31.437Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-f23033ca",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T04:59:31.437Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-21a71db2",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000481",
@@ -38810,7 +38710,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Świąteczny pociąg - puzzle drewniane Christmas, 200 elementów",
+    "nazwa": "Puzzle drewniane Świąteczny pociąg 200 elementów MilliWOOD",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/2f91731c80751036f443545c56e157bf/pol_pl_Puzzle-drewniane-Christmas-Swiateczny-pociag-200-el-1593_2.jpg",
     "_catalog": {
       "channels": {
@@ -38832,23 +38732,23 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-5099-Swiateczny-pociag-200-el.html",
     "externalId": "5099",
-    "opisKrotki": "Drewniane puzzle z serii Christmas przedstawiają świąteczny czerwony pociąg w zimowej scenerii. Układanka zawiera 20 specjalnych elementów związanych z Bożym Narodzeniem i pozwala stworzyć dekoracyjny obrazek do wyeksponowania po ułożeniu.",
+    "opisKrotki": "Drewniane puzzle z serii Christmas przedstawiają świąteczny pociąg i zawierają 200 elementów, w tym 20 puzzli specjalnych. Zestaw przeznaczony jest dla dzieci od 8 lat i po ułożeniu tworzy obrazek o wymiarach 27,5 cm × 37 cm.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-5099-Swiateczny-pociag-200-el.html",
     "kodProducenta": "5099",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:43:33.059Z",
-    "allegroAgentPreparationRunId": "ba2abbc5-2f1d-4004-a6f9-e2e6da77f303",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T08:34:03.933Z",
+    "allegroAgentPreparationRunId": "8ab791c0-e60d-4613-8e5a-e43c9155761b",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
       "zdjęcie Allegro min. 500px"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:43:33.059Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-26dac983",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T04:58:33.059Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-24e6f9ea",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000931",
@@ -38882,26 +38782,25 @@
     "producent": "Multigra",
     "sourceUrl": "https://multigra.com.pl/produkty/pluszaki-na-start-westernowy-wyscig-rodzinna-gra-planszowa/",
     "externalId": "5903796605273",
-    "opisKrotki": "Rodzinna gra planszowa Multigra z dwiema prostymi grami dla młodszych i nieco starszych graczy. W „Pluszakach na Start” uczestnicy rywalizują o ukryte słodycze, omijając przeszkody i wykorzystując skróty.",
+    "opisKrotki": "Poznaj świat zabawy i rywalizacji w dwóch prostych grach, które zapewnią rozrywkę zarówno małym jak i nieco większym. Gra „Pluszaki na Start” zabierze Cię w magiczną podróż po pokoju pełnym kolorowych zabawek. Stań do słodkiej rywalizacji wraz z innymi pluszakami, aby przekonać się kto z Was pierwszy sięgnie po ukryte słodycze! Unikaj przeszkód, wykorzystaj skróty [...]Read More...",
     "producentUrl": "https://multigra.com.pl/produkty/pluszaki-na-start-westernowy-wyscig-rodzinna-gra-planszowa/",
     "kodProducenta": "5903796605273",
     "allegroCategoryId": "6105",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:48:16.847Z",
-    "allegroEditorialSyncState": "queued",
-    "allegroAgentPreparationRunId": "ebf5c3bc-a028-4f49-87ed-5969d0351501",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:34:56.752Z",
+    "allegroEditorialSyncState": "requires_publication_decision",
+    "allegroAgentPreparationRunId": "1c4ac10c-2242-47d8-910e-9e6c2e42b616",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Typ",
       "parametr Allegro: Wiek gracza",
-      "informacja o bezpieczeństwie GPSR",
-      "redakcja opisu Allegro przez Agenta"
+      "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 2,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:48:16.847Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-e15febf1",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:48:16.847Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 6,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-8d0b677b",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000837",
@@ -38940,19 +38839,19 @@
     "kodProducenta": "5906395300457",
     "allegroCategoryId": "123958",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T01:45:32.678Z",
-    "allegroAgentPreparationRunId": "28295ea0-e0c4-4ad9-8aa3-f0cf6db08cd4",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:38:19.023Z",
+    "allegroAgentPreparationRunId": "c9114df4-6b06-4425-a1a0-4d648b858846",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Typ",
       "parametr Allegro: Wersja językowa gry",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 4,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T01:45:32.678Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ee22b0ba",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T01:45:32.678Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-871abd92",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000939",
@@ -39005,7 +38904,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Multigra",
-    "nazwa": "Kotek i Klitek: Myszek Psotek - gra planszowa dla dzieci, Multigra",
+    "nazwa": "Kotek i Klitek Myszek Psotek – 2 gry planszowe dla najmłodszych, Multigra",
     "zdjecie": "https://multigra.com.pl/wp-content/uploads/sites/5/2025/07/0190-Kotek-i-Kilka-Myszek-Psotek-rekwizyty-scaled.jpg",
     "_catalog": {
       "channels": {
@@ -39027,24 +38926,23 @@
     "producent": "Multigra",
     "sourceUrl": "https://multigra.com.pl/produkty/kotek-i-klitek-myszek-psotek/",
     "externalId": "5906395301904",
-    "opisKrotki": "Zestaw 2 prostych gier planszowych dla najmłodszych graczy od Multigra. W obu grach uczestnicy zbierają żetony, które pomagają myszkom i kotu wrócić do domu, a sama rozgrywka nie jest typowym wyścigiem.",
+    "opisKrotki": "Zestaw dwóch prostych gier planszowych Multigra dla najmłodszych. Zabawa opiera się na zbieraniu żetonów, które pomagają myszkom i kotu wrócić do domu. Gra przeznaczona jest dla 2–4 graczy od 5 lat.",
     "producentUrl": "https://multigra.com.pl/produkty/kotek-i-klitek-myszek-psotek/",
     "kodProducenta": "5906395301904",
     "allegroCategoryId": "123958",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-27T17:32:07.662Z",
-    "allegroAgentPreparationRunId": "906d2050-2593-49f1-bd3e-8684db8f30ce",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T08:36:52.964Z",
+    "allegroAgentPreparationRunId": "8acc26aa-df98-48ca-a013-3bfb0b56f1c1",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Typ",
-      "parametr Allegro: Wersja językowa gry",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 4,
-    "allegroAgentPreparationConfirmedAt": "2026-07-27T17:32:07.662Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-884eecf1",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T17:32:07.662Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 1,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-dbe1e1df",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000813",
@@ -39222,24 +39120,21 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-10632-Balon-Foliowy-Konik-Morski-91-cm.html",
     "externalId": "G72196-P",
-    "opisKrotki": "Zamów Balon Foliowy - Konik Morski, 91 cm za 21,99 zł | Balony Foliowe \\ Zwierzęta Kolekcje \\ Morskie klimaty |",
+    "opisKrotki": "Balon Foliowy - Konik Morski, 91 cm Dodaj do listy zakupowej Rozmiar uniwersalny 21,99 zł brutto / 1 szt. Najniższa cena produktu w okresie 30 dni przed wprowadzeniem obniżki: 0,00 zł / 1 szt.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-10632-Balon-Foliowy-Konik-Morski-91-cm.html",
     "kodProducenta": "G72196-P",
     "allegroProductId": "dcdb37d4-ce6e-45cf-8260-be6e6a911ae9",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:23:37.658Z",
-    "allegroAgentPreparationRunId": "169aea7d-8a66-4c32-ba7e-19afb8ff7b46",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:23:37.658Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ea9fb422",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:23:37.658Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:27:19.425Z",
+    "allegroAgentPreparationRunId": "3057daa6-3b13-449d-abfc-ff09e0e76d75",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:27:19.425Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-b50a4c75",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000816",
@@ -39278,9 +39173,9 @@
     "kodProducenta": "G72200-P",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:05:09.295Z",
-    "allegroAgentPreparationRunId": "57e4b015-f2fc-4d8f-a7e9-d575965f9bc2",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparedAt": "2026-07-28T07:33:27.016Z",
+    "allegroAgentPreparationRunId": "198cbc28-5de1-41a3-862d-df456c1df5fe",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
       "parametr Allegro: Wypełnienie",
@@ -39289,10 +39184,10 @@
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 1,
+    "allegroAgentPreparationRetryCount": 5,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-0ae5daba",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:05:24.295Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-50500f63",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000788",
@@ -39374,24 +39269,21 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-2357-Balon-Foliowy-Hello-Kitty-samolot-100-cm-Grabo.html",
     "externalId": "L150",
-    "opisKrotki": "Zamów Balon Foliowy - Hello Kitty samolot 100 cm Grabo za 9,99 zł | Okazje \\ Festyny Balony Foliowe \\ Bohaterowie z Bajek Kolekcje \\ Hello Kitty |",
+    "opisKrotki": "Balon Foliowy - Hello Kitty samolot 100 cm Grabo Dodaj do listy zakupowej Rozmiar uniwersalny 9,99 zł brutto / 1 szt. Najniższa cena produktu w okresie 30 dni przed wprowadzeniem obniżki: 0,00 zł / 1 szt.+Infinity% Cena regularna: / 1 szt.Infinity% Cena katalogowa: Możesz kupić za pkt.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-2357-Balon-Foliowy-Hello-Kitty-samolot-100-cm-Grabo.html",
     "kodProducenta": "L150",
     "allegroProductId": "c2a84b83-4af4-45a9-82bc-c7d358f0c5d7",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:33:11.346Z",
-    "allegroAgentPreparationRunId": "666d667e-820d-4bd2-ac0a-2c4b85e97853",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:33:11.346Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-511eaba3",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:33:11.346Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:38:05.717Z",
+    "allegroAgentPreparationRunId": "c8294ad7-37fb-4325-b7ca-13e0d2469f33",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:38:05.717Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-4f66bd93",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000786",
@@ -39425,24 +39317,21 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-2803-Balon-Foliowy-Alwin-Grabo.html",
     "externalId": "L169",
-    "opisKrotki": "Zamów Balon Foliowy - Alwin, Grabo za 9,50 zł | Okazje \\ Festyny Balony Foliowe \\ Bohaterowie z Bajek |",
+    "opisKrotki": "Balon Foliowy - Alwin, Grabo Dodaj do listy zakupowej Rozmiar uniwersalny 9,50 zł brutto / 1 szt. Najniższa cena produktu w okresie 30 dni przed wprowadzeniem obniżki: 0,00 zł / 1 szt.+Infinity% Cena regularna: / 1 szt.Infinity% Cena katalogowa: Możesz kupić za pkt.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-2803-Balon-Foliowy-Alwin-Grabo.html",
     "kodProducenta": "L169",
     "allegroProductId": "af9c71d0-b591-4195-b2be-d09ba2b154a3",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:40:33.626Z",
-    "allegroAgentPreparationRunId": "a68b4bf8-6e07-4dbb-a7f4-a481951a7a0d",
-    "allegroAgentPreparationStatus": "needs_attention",
-    "allegroAgentPreparationMissing": [
-      "redakcja opisu sklepu przez Agenta",
-      "redakcja opisu Allegro przez Agenta"
-    ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:40:33.626Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-aa046b41",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:40:33.626Z"
+    "allegroAgentPreparedAt": "2026-07-28T05:25:49.975Z",
+    "allegroAgentPreparationRunId": "0d30fe0f-f280-4bfb-ad97-0a572efe930d",
+    "allegroAgentPreparationStatus": "ready",
+    "allegroAgentPreparationMissing": [],
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 0,
+    "allegroAgentPreparationConfirmedAt": "2026-07-28T05:25:49.975Z",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-19589f32",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000822",
@@ -39502,7 +39391,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Grabo",
-    "nazwa": "Balon Barbie w kształcie serca 46 cm Grabo",
+    "nazwa": "Balon Barbie serce 46 cm – Grabo",
     "zdjecie": "https://hurtowniabalonow.pl/hpeciai/fd35ac32e90b061077959581455ea362/pol_pm_Balon-Barbie-Grabo-serce-46cm-10462_2.jpg",
     "_catalog": {
       "channels": {
@@ -39524,14 +39413,14 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-10462-Balon-Barbie-Grabo-serce-46cm.html",
     "externalId": "L18018",
-    "opisKrotki": "Foliowy balon Barbie w kształcie serca, ok. 46 cm, marki Grabo. Przeznaczony do samodzielnego napełnienia helem; po napełnieniu powietrzem nie unosi się.",
+    "opisKrotki": "Balon foliowy w kształcie serca z motywem Barbie marki Grabo. Produkt ma ok. 46 cm, nadaje się do napełnienia helem lub powietrzem i jest przeznaczony do samodzielnego napełnienia.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-10462-Balon-Barbie-Grabo-serce-46cm.html",
     "kodProducenta": "L18018",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:04:15.630Z",
-    "allegroAgentPreparationRunId": "489e3cb1-7680-4b5f-a406-a0a345076f71",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparedAt": "2026-07-28T07:46:51.976Z",
+    "allegroAgentPreparationRunId": "50987809-89fc-4b85-9df5-5b5588c95d60",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
       "parametr Allegro: Wypełnienie",
@@ -39540,10 +39429,10 @@
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 2,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-97ac9a87",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T05:05:15.630Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-5c51823a",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000784",
@@ -40161,25 +40050,24 @@
     "producent": "Multigra",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-0521-Gry-karciane-Multigra-Piotrus-Pamiec-Swieta.html",
     "externalId": "M0521",
-    "opisKrotki": "Świąteczny zestaw kart Multigra z dwiema klasycznymi grami: „Piotruś” i „Pamięć”. Pomaga ćwiczyć spostrzegawczość, skojarzenia i zachowania społeczne.",
+    "opisKrotki": "Poczuj magię Świąt, odnajdźcie razem Piotrusia! ✳️ Zestaw 25 kart z grafikami w Świątecznym klimacie, dzięki którym można zagrać z dziećmi w dwie podstawowe gry karciane – „Piotruś” i „Pamięć”.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-0521-Gry-karciane-Multigra-Piotrus-Pamiec-Swieta.html",
     "kodProducenta": "M0521",
     "allegroProductId": "03da7507-c928-4619-9587-edf9dcd5e049",
     "allegroCategoryId": "319045",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:35:59.952Z",
+    "allegroAgentPreparedAt": "2026-07-28T05:12:51.456Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "7d66b3de-19d0-4af1-813b-d6058e58f983",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparationRunId": "8830edb3-cb0a-456a-af9d-96c62e70d933",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
-      "zdjęcia",
-      "redakcja opisu Allegro przez Agenta"
+      "zdjęcia"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 1,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:35:59.952Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-369fe121",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T04:50:59.952Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 3,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-52d1b206",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000114",
@@ -40259,17 +40147,17 @@
     "allegroProductId": "8ed3688f-177e-42ce-b159-d4d0ebd6740d",
     "allegroCategoryId": "6105",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:16:37.303Z",
-    "allegroAgentPreparationRunId": "ffcd3749-b528-4724-92e8-39e3c93e806d",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:32:30.274Z",
+    "allegroAgentPreparationRunId": "126c5856-de7e-4478-bb27-64c26e7c47fa",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 3,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:16:37.303Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-f91bb9ba",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T10:16:37.303Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 9,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-d3ba5a92",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000135",
@@ -40733,17 +40621,17 @@
     "allegroProductId": "2a9f556e-8724-43c1-969b-7bfbc003e55e",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:25:38.609Z",
-    "allegroAgentPreparationRunId": "217d2ef9-93a9-40fb-883e-8fa8f2ccba30",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:37:54.468Z",
+    "allegroAgentPreparationRunId": "2b511670-281d-4972-a9ac-1af5896aad19",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 4,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:25:38.609Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-a22137f7",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:25:38.609Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 10,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-6175d7c3",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000145",
@@ -40943,17 +40831,17 @@
     "allegroProductId": "b8bdbb20-d2ad-43ac-beba-19db57877004",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:24:03.009Z",
-    "allegroAgentPreparationRunId": "18313bb0-a018-40f4-8e52-7bf2fd49061f",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:32:08.147Z",
+    "allegroAgentPreparationRunId": "5298589e-8d13-4e72-a688-ef4065df7d6f",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 3,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:24:03.009Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-fd7a3f59",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T10:24:03.009Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 6,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ca57ee59",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000603",
@@ -41073,17 +40961,17 @@
     "allegroProductId": "f57f7c9e-790d-44f6-8b12-abbf36de57e1",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:45:04.669Z",
-    "allegroAgentPreparationRunId": "c6e929c1-742a-4e0b-b576-6277cdc7a1c0",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:41:17.455Z",
+    "allegroAgentPreparationRunId": "4616fe92-f501-4046-80c4-38a4ef2115c5",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 3,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:45:04.669Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-2daec438",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T10:45:04.669Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 9,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-823f122a",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000604",
@@ -42014,9 +41902,9 @@
     "kodProducenta": "",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:27:06.697Z",
-    "allegroAgentPreparationRunId": "3322c0da-decc-485b-afd2-2cd5cd70a805",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T07:39:13.782Z",
+    "allegroAgentPreparationRunId": "3b8e6a31-b991-4b09-8618-544edcbe881f",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Typ",
       "parametr Allegro: Minimalna liczba graczy",
@@ -42026,11 +41914,11 @@
       "parametr Allegro: EAN (GTIN)",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:27:06.697Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-7c05c689",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:27:06.697Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 11,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-021c39b1",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000899",
@@ -42069,9 +41957,9 @@
     "kodProducenta": "",
     "allegroCategoryId": "123948",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T04:35:29.553Z",
-    "allegroAgentPreparationRunId": "7afd3cf0-cfee-4360-8405-877f4f9fb1a1",
-    "allegroAgentPreparationStatus": "needs_attention",
+    "allegroAgentPreparedAt": "2026-07-28T05:38:45.686Z",
+    "allegroAgentPreparationRunId": "d83668c6-f032-4c53-9f0c-609d84269035",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Wiek dziecka",
       "parametr Allegro: Minimalna liczba graczy",
@@ -42080,10 +41968,10 @@
       "parametr Allegro: Minimalny wiek dziecka",
       "informacja o bezpieczeństwie GPSR"
     ],
-    "allegroAgentPreparationVersion": 4,
-    "allegroAgentPreparationRetryCount": 5,
-    "allegroAgentPreparationConfirmedAt": "2026-07-28T04:35:29.553Z",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-6ec8f890",
-    "allegroAgentPreparationNextRetryAt": "2026-07-29T04:35:29.553Z"
+    "allegroAgentPreparationVersion": 5,
+    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationConfirmedAt": "",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-0ccb7628",
+    "allegroAgentPreparationNextRetryAt": ""
   }
 ]
