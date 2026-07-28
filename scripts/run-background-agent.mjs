@@ -150,12 +150,14 @@ await report('cycle_start', { steps: [
 
 // Te dwa wywołania są detektorami zmian i działają równolegle. Nie uruchamiają
 // automatycznie pełnej kontroli 10 000 ofert ani całego katalogu.
-const [ordersResult, communicationResult, preparationResult, siteQualityResult, vonHalskyOrdersResult] = await Promise.all([
+const [ordersResult, communicationResult, preparationResult, siteQualityResult, vonHalskyOrdersResult, vonHalskyPostSalesResult, vonHalskyEventsResult] = await Promise.all([
   run('zamowienia', 'allegro-sync-orders', { limit: 200, source: 'event-detector' }, 90_000),
   run('komunikacja', 'allegro-sync-communications', { limit: 20, autoReply: true, source: 'event-detector' }, 90_000),
   run('przygotowanie-produktow', 'allegro-preparation-queue-auto', { batchSize: 50, source: 'server-cycle' }, 90_000),
   run('jakosc-strony', 'agent-run-safe-checks', { areas: ['site-health'], source: 'server-cycle' }, 60_000),
   run('von-halsky-zamowienia', 'von-halsky-sync-orders', { limit: 30, source: 'server-cycle' }, 60_000),
+  run('von-halsky-posprzedaz', 'von-halsky-post-sales-sync', { limit: 30, source: 'server-cycle' }, 60_000),
+  run('von-halsky-zdarzenia', 'von-halsky-events-sync', { limit: 30, source: 'server-cycle' }, 60_000),
 ]);
 const detectorResults = [ordersResult, communicationResult];
 
@@ -167,7 +169,7 @@ await report('cycle_step', { step: {
   count: planned.queue.length, detail: planned.queue.length ? `Wybrano: ${planned.queue.map((item) => taskLabels[item.id]).join(' → ')}. Odłożono: ${planned.deferred.length}.` : 'Brak konkretnego zadania do wykonania. Ciężkie kontrole pominięto.',
 } });
 
-const results = [...detectorResults, preparationResult, siteQualityResult, vonHalskyOrdersResult];
+const results = [...detectorResults, preparationResult, siteQualityResult, vonHalskyOrdersResult, vonHalskyPostSalesResult, vonHalskyEventsResult];
 let coordinator = null;
 if (planned.queue.some((item) => item.id === 'tresci-gpt-nano')) {
   coordinator = await coordinatorCycle({ specialists, operations });

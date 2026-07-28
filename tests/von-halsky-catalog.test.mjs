@@ -350,6 +350,44 @@ test('klient API zachowuje prefiks ścieżki produkcyjnego adresu bazowego', asy
   assert.equal(new URL(calls[1]).pathname, '/inpsa/v1/offers');
 });
 
+test('klient API obsługuje statusy poleceń, zwroty, reklamacje i refundacje kontraktu 1.5.8', async () => {
+  const calls = [];
+  const env = {
+    INPOST_VON_HALSKY_API_BASE_URL: 'https://api.inpost-group.com/inpsa/',
+    INPOST_VON_HALSKY_AUTH_URL: 'https://auth.example.test/token',
+    INPOST_VON_HALSKY_CLIENT_ID: 'client',
+    INPOST_VON_HALSKY_CLIENT_SECRET: 'secret',
+    INPOST_VON_HALSKY_MERCHANT_ID: 'org-123',
+    INPOST_VON_HALSKY_HEALTH_PATH: '/v1/organizations/org-123/offers',
+    INPOST_VON_HALSKY_CATALOG_PATH: '/v1/organizations/org-123/offers/batch',
+    INPOST_VON_HALSKY_ORDERS_PATH: '/v1/organizations/org-123/orders',
+    INPOST_VON_HALSKY_CONTRACT_VERSION: '1.5.8',
+  };
+  const client = createVonHalskyApiClient({
+    env,
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      if (String(url).includes('/token')) return new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ status: 'SUCCESS', data: [], items: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  await client.getOfferCommand('command-1');
+  await client.fetchReturns({ limit: 12 });
+  await client.fetchClaims({ state: ['RESOLUTION_IN_PROGRESS'] });
+  await client.refundOrder('order-1', 19.99);
+  await client.resolveClaim('order-1', 'claim-1', 'partial-refund', 'Uznana część roszczenia');
+  const requests = calls.slice(1);
+  assert.equal(new URL(requests[0].url).pathname, '/inpsa/v1/organizations/org-123/offers/commands/command-1');
+  assert.equal(new URL(requests[1].url).pathname, '/inpsa/v1/organizations/org-123/returns');
+  assert.equal(new URL(requests[1].url).searchParams.get('limit'), '12');
+  assert.equal(new URL(requests[2].url).searchParams.get('state'), 'RESOLUTION_IN_PROGRESS');
+  assert.equal(new URL(requests[3].url).pathname, '/inpsa/v1/organizations/org-123/orders/order-1/refund');
+  assert.deepEqual(JSON.parse(requests[3].options.body), { amount: { amount: 19.99, currency: 'PLN' } });
+  assert.equal(new URL(requests[4].url).pathname, '/inpsa/v1/organizations/org-123/orders/order-1/claims/claim-1/partial-refund');
+  assert.deepEqual(JSON.parse(requests[4].options.body), { description: 'Uznana część roszczenia' });
+  assert.ok(requests.slice(3).every((request) => request.options.headers['idempotency-key']));
+});
+
 test('route zapisuje konfigurację i uczciwie zgłasza brak danych prywatnego API', async () => {
   let state;
   let revision = 0;

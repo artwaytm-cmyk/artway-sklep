@@ -57,6 +57,16 @@ function relatedEndpoint(url, suffix = '') {
   return result;
 }
 
+function childEndpoint(url, ...segments) {
+  const result = new URL(url);
+  result.pathname = [
+    result.pathname.replace(/\/$/, ''),
+    ...segments.map((segment) => encodeURIComponent(text(segment, 240))),
+  ].join('/');
+  result.search = '';
+  return result;
+}
+
 function publicMissing(env = {}) {
   const missingCredentials = REQUIRED_CREDENTIAL_ENV.filter((key) => !text(env?.[key]));
   const missingContract = REQUIRED_CONTRACT_ENV.filter((key) => !text(env?.[key]));
@@ -101,6 +111,11 @@ export function vonHalskyPrivateApiConfig(env = process.env) {
     throw error;
   }
   const catalogUrl = endpoint(apiBaseUrl, env.INPOST_VON_HALSKY_CATALOG_PATH, 'katalogu');
+  const organizationUrl = endpoint(
+    apiBaseUrl,
+    `/v1/organizations/${encodeURIComponent(text(env.INPOST_VON_HALSKY_MERCHANT_ID, 500))}`,
+    'organizacji',
+  );
   return {
     ...publicConfig,
     apiBaseUrl,
@@ -118,6 +133,9 @@ export function vonHalskyPrivateApiConfig(env = process.env) {
     offerStocksUrl: relatedEndpoint(catalogUrl, '/stocks'),
     categoriesUrl: endpoint(apiBaseUrl, '/v1/categories', 'kategorii'),
     ordersUrl: endpoint(apiBaseUrl, env.INPOST_VON_HALSKY_ORDERS_PATH, 'zamówień'),
+    organizationUrl,
+    returnsUrl: childEndpoint(organizationUrl, 'returns'),
+    claimsUrl: childEndpoint(organizationUrl, 'claims'),
   };
 }
 
@@ -282,6 +300,16 @@ export function createVonHalskyApiClient({
       const url = new URL(`${config.offersUrl.pathname.replace(/\/$/, '')}/${encodeURIComponent(text(offerId, 80))}`, config.offersUrl);
       return request(url, { method: 'PATCH', body: patch, idempotent: true, timeoutMs: 30_000 });
     },
+    async getOffer(offerId) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.offersUrl, offerId));
+    },
+    async updateOfferAttributes(offerId, attributes = {}) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.offersUrl, offerId, 'attributes'), {
+        method: 'PATCH', body: attributes, idempotent: true, timeoutMs: 30_000,
+      });
+    },
     async updatePrices(items = []) {
       const config = vonHalskyPrivateApiConfig(env);
       return request(config.offerPricesUrl, { method: 'PATCH', body: items, idempotent: true });
@@ -295,6 +323,36 @@ export function createVonHalskyApiClient({
       const url = new URL(`${config.offersUrl.pathname.replace(/\/$/, '')}/${encodeURIComponent(text(offerId, 80))}/${open ? 'reopen' : 'close'}`, config.offersUrl);
       return request(url, { method: 'POST', idempotent: true });
     },
+    async getOfferCommand(commandId) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.offersUrl, 'commands', commandId));
+    },
+    async fetchOfferEvents({ offset = 0, limit = 30, occurredAtGte = '' } = {}) {
+      const config = vonHalskyPrivateApiConfig(env);
+      const url = childEndpoint(config.offersUrl, 'events');
+      url.searchParams.set('limit', String(Math.max(1, Math.min(30, Number(limit) || 30))));
+      url.searchParams.set('offset', String(Math.max(0, Number(offset) || 0)));
+      if (occurredAtGte) url.searchParams.set('occurredAtGte', text(occurredAtGte, 100));
+      return request(url);
+    },
+    async getOfferHint(query = {}) {
+      const config = vonHalskyPrivateApiConfig(env);
+      const url = childEndpoint(config.offersUrl, 'hint');
+      for (const [key, value] of Object.entries(query || {})) {
+        if (value !== undefined && value !== null && text(value, 1000)) url.searchParams.set(text(key, 80), text(value, 1000));
+      }
+      return request(url);
+    },
+    async listOfferAttachments(offerId) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.offersUrl, offerId, 'attachments'));
+    },
+    async deleteOfferAttachment(offerId, attachmentId) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.offersUrl, offerId, 'attachments', attachmentId), {
+        method: 'DELETE', idempotent: true,
+      });
+    },
     async fetchOrders({ offset = 0, limit = 30, updatedSince = '', orderStatus = [], paymentStatus = [] } = {}) {
       const config = vonHalskyPrivateApiConfig(env);
       const url = new URL(config.ordersUrl);
@@ -306,10 +364,88 @@ export function createVonHalskyApiClient({
       for (const status of Array.isArray(paymentStatus) ? paymentStatus : []) url.searchParams.append('paymentStatus', text(status, 30));
       return request(url);
     },
+    async getOrder(orderId) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.ordersUrl, orderId));
+    },
     async setOrderAccepted(orderId, accepted) {
       const config = vonHalskyPrivateApiConfig(env);
       const url = new URL(`${config.ordersUrl.pathname.replace(/\/$/, '')}/${encodeURIComponent(text(orderId, 160))}/${accepted ? 'accept' : 'refuse'}`, config.ordersUrl);
       return request(url, { method: 'POST', idempotent: true });
+    },
+    async getOrderCommand(commandId) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.ordersUrl, 'commands', commandId));
+    },
+    async fetchOrderEvents({ offset = 0, limit = 30, occurredAtGte = '' } = {}) {
+      const config = vonHalskyPrivateApiConfig(env);
+      const url = childEndpoint(config.ordersUrl, 'events');
+      url.searchParams.set('limit', String(Math.max(1, Math.min(30, Number(limit) || 30))));
+      url.searchParams.set('offset', String(Math.max(0, Number(offset) || 0)));
+      if (occurredAtGte) url.searchParams.set('occurredAtGte', text(occurredAtGte, 100));
+      return request(url);
+    },
+    async fetchReturns({ offset = 0, limit = 30 } = {}) {
+      const config = vonHalskyPrivateApiConfig(env);
+      const url = new URL(config.returnsUrl);
+      url.searchParams.set('limit', String(Math.max(1, Math.min(30, Number(limit) || 30))));
+      url.searchParams.set('offset', String(Math.max(0, Number(offset) || 0)));
+      return request(url);
+    },
+    async getReturn(returnId) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.returnsUrl, returnId));
+    },
+    async decideReturn(returnId, accepted) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.returnsUrl, returnId, accepted ? 'accept' : 'reject'), {
+        method: 'POST', idempotent: true,
+      });
+    },
+    async fetchOrderReturns(orderId) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.ordersUrl, orderId, 'returns'));
+    },
+    async refundOrder(orderId, amount) {
+      const config = vonHalskyPrivateApiConfig(env);
+      const numeric = Number(amount);
+      if (!Number.isFinite(numeric) || numeric <= 0) throw apiError('Kwota refundacji musi być większa od zera.', {
+        status: 422, code: 'von_halsky_invalid_refund_amount',
+      });
+      return request(childEndpoint(config.ordersUrl, orderId, 'refund'), {
+        method: 'POST',
+        body: { amount: { amount: Math.round(numeric * 100) / 100, currency: 'PLN' } },
+        idempotent: true,
+      });
+    },
+    async fetchClaims({ offset = 0, limit = 30, state = [] } = {}) {
+      const config = vonHalskyPrivateApiConfig(env);
+      const url = new URL(config.claimsUrl);
+      url.searchParams.set('limit', String(Math.max(1, Math.min(30, Number(limit) || 30))));
+      url.searchParams.set('offset', String(Math.max(0, Number(offset) || 0)));
+      for (const value of Array.isArray(state) ? state : []) url.searchParams.append('state', text(value, 60));
+      return request(url);
+    },
+    async getClaim(orderId, claimId) {
+      const config = vonHalskyPrivateApiConfig(env);
+      return request(childEndpoint(config.ordersUrl, orderId, 'claims', claimId));
+    },
+    async resolveClaim(orderId, claimId, resolution, description = '') {
+      const config = vonHalskyPrivateApiConfig(env);
+      const allowed = new Map([
+        ['reject', 'reject'],
+        ['partial-refund', 'partial-refund'],
+        ['refund', 'refund'],
+      ]);
+      const action = allowed.get(text(resolution, 40));
+      if (!action) throw apiError('Nieobsługiwany sposób rozstrzygnięcia reklamacji.', {
+        status: 422, code: 'von_halsky_invalid_claim_resolution',
+      });
+      return request(childEndpoint(config.ordersUrl, orderId, 'claims', claimId, action), {
+        method: 'POST',
+        body: { description: text(description, 1000) },
+        idempotent: true,
+      });
     },
   };
 }
