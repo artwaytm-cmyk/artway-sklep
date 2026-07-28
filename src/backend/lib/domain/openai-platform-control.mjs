@@ -175,15 +175,15 @@ export function createOpenAiPlatformControl({
   function capabilities(conn = {}) {
     const endpoint = (key) => conn.endpoints?.[key]?.available === true;
     return [
-      { id: 'responses', label: 'Odpowiedzi i prompty', state: endpoint('models') ? 'active' : 'error', detail: `${diagnosticModel} / ${balancedModel} / ${efficientModel}` },
+      { id: 'responses', label: 'Odpowiedzi i instrukcje kodowe', state: endpoint('models') ? 'active' : 'error', detail: `${diagnosticModel} / ${balancedModel} / ${efficientModel}` },
       { id: 'ui', label: 'Interfejs aplikacji', state: 'active', detail: 'własny panel administratora + Responses API' },
-      { id: 'agents', label: 'Agents SDK', state: endpoint('models') ? 'active' : 'error', detail: '@openai/agents • diagnostyka, trace i bramki zatwierdzeń' },
+      { id: 'agents', label: 'Agents SDK', state: endpoint('models') ? 'active' : 'error', detail: '@openai/agents • nazwane trace wszystkich specjalistów, diagnostyka i bramki zatwierdzeń' },
       { id: 'realtime', label: 'Audio w czasie rzeczywistym', state: 'available', detail: 'nieaktywne celowo • głosówki są plikami, więc tańsza jest transkrypcja żądaniowa' },
       { id: 'audio', label: 'Transkrypcja audio', state: endpoint('models') ? 'available' : 'error', detail: `${audioModel} • funkcja dostępna dla przyszłych narzędzi panelu` },
       { id: 'images', label: 'Obrazy', state: endpoint('models') ? 'active' : 'error', detail: `${imageModel} • bannery i ikony` },
-      { id: 'logs', label: 'Dzienniki i trace', state: endpoint('models') ? 'active' : 'error', detail: 'ślady Agents SDK bez sekretów' },
+      { id: 'logs', label: 'Dzienniki i trace', state: endpoint('models') ? 'active' : 'error', detail: 'platform.openai.com/traces • role, handoff i odpowiedzi bez treści produktów oraz sekretów' },
       { id: 'batches', label: 'Partie', state: endpoint('batches') ? 'active' : 'error', detail: 'dobowa ewaluacja asynchroniczna' },
-      { id: 'evals', label: 'Ewaluacje', state: endpoint('evals') ? 'active' : 'error', detail: 'zestaw regresji + trace grading' },
+      { id: 'evals', label: 'Ewaluacje legacy', state: endpoint('evals') ? 'available' : 'unavailable', detail: 'nie są zależnością wykonawczą; regresje działają lokalnie i przez Batch' },
       { id: 'fineTuning', label: 'Dostrajanie', state: endpoint('fineTuning') ? 'available' : 'unavailable', detail: 'tylko po ewaluacji i z zatwierdzonych przykładów' },
       { id: 'modelUpgrade', label: 'Ekonomiczna rodzina modeli', state: 'active', detail: 'GPT-5 nano na co dzień • GPT-5.4 nano tylko po niepoprawnym wyniku • lokalny fallback bez opłat' },
       { id: 'optimization', label: 'Optymalizacja API', state: 'active', detail: 'cache promptów, limity wyniku, fingerprinty i Batch -50%' },
@@ -220,6 +220,8 @@ export function createOpenAiPlatformControl({
         traceSensitiveData: false,
         fineTuning: 'evals-first-approved-dataset-only',
         deprecatedEvalsDependency: false,
+        deprecatedPromptObjectsDependency: false,
+        agentVisibility: 'platform-traces',
         localFallback: conn.local || { enabled: false, available: false },
       },
       updatedAt: state.updatedAt || conn.checkedAt || null,

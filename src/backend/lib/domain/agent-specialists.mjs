@@ -1,4 +1,4 @@
-import crypto from 'node:crypto'; import { buildEditorialPersistencePatch, buildEditorialRetryPatch, editorialChannelForSpecialist } from './agent-product-editorial-state.mjs';
+import crypto from 'node:crypto'; import { withAgentSpan, withHandoffSpan, withResponseSpan, withTrace } from '@openai/agents'; import { buildEditorialPersistencePatch, buildEditorialRetryPatch, editorialChannelForSpecialist } from './agent-product-editorial-state.mjs';
 import { validManufacturerName } from './product-field-validation.mjs'; import { createPlatformPromptProfile, requestSpecialistResponse } from './agent-specialist-openai.mjs';
 import { enforceProductEditorialCompliance } from './agent-specialist-compliance.mjs'; import { specialistPlaybook, specialistPlaybookDetails } from './agent-specialist-playbooks.mjs';
 import { buildSpecialistInstructions } from './agent-specialist-instructions.mjs';
@@ -9,6 +9,7 @@ export function createAgentSpecialists({
   readVersioned, writeIfVersion, fetchImpl = globalThis.fetch, apiKey = process.env.OPENAI_API_KEY,
   model = process.env.OPENAI_AGENT_MODEL_OVERRIDE || '', now = () => new Date(),
   platformAgentsEnabled = process.env.OPENAI_PLATFORM_AGENTS !== 'false' && !String(apiKey || '').startsWith('test-'),
+  platformTracingEnabled = process.env.OPENAI_PLATFORM_TRACING !== 'false' && fetchImpl === globalThis.fetch,
   platformStatus = async () => null,
   reportProgress = async () => {},
   saveProductFields = null,
@@ -353,7 +354,7 @@ export function createAgentSpecialists({
       fakty: context,
       ...(learnedGuidance ? { zatwierdzonePreferencjeAdministratora: learnedGuidance } : {}),
     };
-    const request = await requestSpecialistResponse({
+    const executeRequest = () => requestSpecialistResponse({
       fetchImpl,
       apiKey,
       model: executionPolicy.model,
@@ -367,6 +368,43 @@ export function createAgentSpecialists({
       input: JSON.stringify(dynamicInput),
       resultSchema: RESULT_SCHEMA,
     });
+    const request = platformAgentsEnabled && platformTracingEnabled ? await withTrace(
+      `Artway — ${definition.label}`,
+      async () => withHandoffSpan(
+        async () => withAgentSpan(
+          async () => withResponseSpan(async (span) => {
+            const result = await executeRequest();
+            span.spanData.response_id = clean(result?.payload?.id, 120) || undefined;
+            return result;
+          }),
+          {
+            data: {
+              name: definition.label,
+              output_type: 'artway_specialist_result',
+              tools: [],
+              handoffs: [],
+            },
+          },
+        ),
+        {
+          data: {
+            from_agent: scenario.assignedBy === 'codex' ? 'Artway — Koordynator Codex' : 'Artway — Administrator',
+            to_agent: definition.label,
+          },
+        },
+      ),
+      {
+        groupId: clean(target?.productId || scenario.coordinatorRunId || runId, 120),
+        metadata: {
+          project: 'artway-sklep',
+          specialist,
+          scenario: scenario.id,
+          source,
+          product_id: clean(target?.productId, 120),
+        },
+        tracingApiKey: apiKey,
+      },
+    ) : await executeRequest();
     const { response, payload } = request;
     if (!response.ok) throw responseError(response, payload);
     let parsed;

@@ -4,15 +4,18 @@ Wersja kanonicznych playbooków: `2026-07-28.1`. Ten plik jest generowany przez 
 
 ## Co jest faktycznie podłączone
 
-- Specjaliści produktowi i operacyjni działają na VPS przez **Responses API**. Kanoniczny prompt jest wersjonowany w kodzie; zapisany prompt OpenAI Platform jest dodatkową referencją tam, gdzie istnieje.
-- Diagnostyka działa przez **OpenAI Agents SDK** i zapisuje bezpieczny trace bez sekretów.
+- Specjaliści produktowi i operacyjni działają na VPS przez **Responses API**, a każde ich uruchomienie jest opakowane nazwanym śladem **OpenAI Agents SDK**. W Platformie widać koordynatora, przekazanie do specjalisty i identyfikator odpowiedzi, ale nie treść produktu ani sekrety.
+- Diagnostyka działa w pełnej pętli **OpenAI Agents SDK** i również zapisuje bezpieczny trace bez sekretów.
 - Dawne identyfikatory `asst_*` są metadanymi zgodności i linkami do starszej powierzchni Assistants. Nie są procesem wykonawczym sklepu.
-- Agent Builder służy do graficznych workflow. Obecny system sklepu pozostaje kodowym workflow z wersjonowaniem, testami i trwałym zapisem.
+- Reusable Prompts oraz Agent Builder zostały przez OpenAI oznaczone jako wycofywane i mają zostać zamknięte 30 listopada 2026 r. Nie tworzymy na nich nowych zależności. Obecne identyfikatory `pmpt_*` są tylko przejściową referencją zgodności.
+- Kanoniczne role, prompty, narzędzia, bramki zatwierdzeń i miejsca zapisu pozostają w kodzie serwera: są wersjonowane, testowane i nie znikną wraz z wyłączeniem panelu legacy.
 - Wszystkie codzienne zadania używają `gpt-5-nano`. Jedna próba `gpt-5.4-nano` jest dozwolona wyłącznie po niepoprawnym kontrakcie strukturalnym; `gpt-5.4-mini` nie działa automatycznie.
 - Bezpłatny tryb awaryjny: lokalny `qwen3.5:4b` przez Ollama, uruchamiany tylko przy braku środków/niedostępności API albo po nieskutecznej walidacji odpowiedzi.
 - Brak AI nigdy nie jest udawanym sukcesem: deterministyczne reguły mogą zachować działanie strony, ale zapis/publikacja wymagają właściwego potwierdzenia backendu.
 
-Agent Builder: https://platform.openai.com/agent-builder
+Ślady rzeczywistych uruchomień: https://platform.openai.com/traces
+
+Oficjalny harmonogram wycofania: https://developers.openai.com/api/docs/deprecations
 
 ## Routing
 
@@ -43,7 +46,7 @@ Zapis: Po walidacji backend zapisuje pola do kanonicznego rekordu artway_product
 
 Model: `gpt-5-nano` (medium); fallback jakości: `gpt-5.4-nano`.
 
-Zapisany prompt: [pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108&version=1).
+Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
 Dawny profil Assistants: [asst_bi27lcqG4p4pGx5TouNEE94J](https://platform.openai.com/assistants/asst_bi27lcqG4p4pGx5TouNEE94J).
 
@@ -123,7 +126,7 @@ Zapis: Po ponownej bramce zgodności backend aktualizuje ten sam rekord artway_p
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Ta rola nie ma osobnego zapisanego promptu w Platformie; obowiązuje wersja serwerowa poniżej.
+Ta rola świadomie nie ma nowego obiektu promptu legacy w Platformie; obowiązuje wersja serwerowa poniżej.
 
 Brak dawnego profilu Assistants.
 
@@ -196,7 +199,7 @@ Zapis: Po bramce zgodności backend zapisuje pola allegro_* i stan kanału w tym
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Zapisany prompt: [pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7&version=1).
+Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
 Dawny profil Assistants: [asst_16UEvdbo3boUso6xyYeANYnQ](https://platform.openai.com/assistants/asst_16UEvdbo3boUso6xyYeANYnQ).
 
@@ -273,7 +276,7 @@ Zapis: Wynik wraca do bramki Allegro, a dopiero jej wynik może zaktualizować p
 
 Model: `gpt-5-nano` (medium); fallback jakości: `gpt-5.4-nano`.
 
-Zapisany prompt: [pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7&version=1).
+Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
 Dawny profil Assistants: [asst_16UEvdbo3boUso6xyYeANYnQ](https://platform.openai.com/assistants/asst_16UEvdbo3boUso6xyYeANYnQ).
 
@@ -349,7 +352,7 @@ Zapis: Diagnoza zostaje przy zadaniu publikacji konkretnego productId; korekta p
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Ta rola nie ma osobnego zapisanego promptu w Platformie; obowiązuje wersja serwerowa poniżej.
+Ta rola świadomie nie ma nowego obiektu promptu legacy w Platformie; obowiązuje wersja serwerowa poniżej.
 
 Brak dawnego profilu Assistants.
 
@@ -435,7 +438,7 @@ Zapis: Po bramce kanału backend zapisuje pola von_halsky_* w tym samym rekordzi
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Ta rola nie ma osobnego zapisanego promptu w Platformie; obowiązuje wersja serwerowa poniżej.
+Ta rola świadomie nie ma nowego obiektu promptu legacy w Platformie; obowiązuje wersja serwerowa poniżej.
 
 Brak dawnego profilu Assistants.
 
@@ -512,7 +515,7 @@ Zapis: Wynik wraca do bramki Von Halsky, a zapis dotyczy tylko pól von_halsky_*
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Ta rola nie ma osobnego zapisanego promptu w Platformie; obowiązuje wersja serwerowa poniżej.
+Ta rola świadomie nie ma nowego obiektu promptu legacy w Platformie; obowiązuje wersja serwerowa poniżej.
 
 Brak dawnego profilu Assistants.
 
@@ -584,7 +587,7 @@ Zapis: Szkic zapisuje się przy identyfikatorze rozmowy/dyskusji. Agent nigdy ni
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Zapisany prompt: [pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421&version=1).
+Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
 Dawny profil Assistants: [asst_M2ZRdoHVzQ0jIzYZ3TCLwcoI](https://platform.openai.com/assistants/asst_M2ZRdoHVzQ0jIzYZ3TCLwcoI).
 
@@ -659,7 +662,7 @@ Zapis: Pola produktu przechodzą przez saveProductFields do artway_products; pla
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Zapisany prompt: [pmpt_6a5f6e84122c81909f9ee773bebf35ea0a46ed1276dedcea, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e84122c81909f9ee773bebf35ea0a46ed1276dedcea&version=1).
+Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6e84122c81909f9ee773bebf35ea0a46ed1276dedcea, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e84122c81909f9ee773bebf35ea0a46ed1276dedcea&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
 Dawny profil Assistants: [asst_LM0aFCDpHHXGgWI28ZdLHjJw](https://platform.openai.com/assistants/asst_LM0aFCDpHHXGgWI28ZdLHjJw).
 
@@ -734,7 +737,7 @@ Zapis: Wynik jest wersjonowanym szkicem kampanii powiązanym z istniejącym kode
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Zapisany prompt: [pmpt_6a5f6da900b48190b6e0833bd6d2582709f2081088e2ce3d, wersja 2](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6da900b48190b6e0833bd6d2582709f2081088e2ce3d&version=2).
+Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6da900b48190b6e0833bd6d2582709f2081088e2ce3d, wersja 2](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6da900b48190b6e0833bd6d2582709f2081088e2ce3d&version=2). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
 Dawny profil Assistants: [asst_yr8O2brC4yJ9KFmDFpmWQNPB](https://platform.openai.com/assistants/asst_yr8O2brC4yJ9KFmDFpmWQNPB).
 
@@ -806,7 +809,7 @@ Zapis: Brief i teksty zapisują się w projekcie grafiki; wygenerowany plik obra
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Zapisany prompt: [pmpt_6a5f6e92eed48196b1689d1a1e2d39f60555a437e19e5b3a, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e92eed48196b1689d1a1e2d39f60555a437e19e5b3a&version=1).
+Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6e92eed48196b1689d1a1e2d39f60555a437e19e5b3a, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e92eed48196b1689d1a1e2d39f60555a437e19e5b3a&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
 Dawny profil Assistants: [asst_4dPRadSuHeusSVkuzvFe9TKg](https://platform.openai.com/assistants/asst_4dPRadSuHeusSVkuzvFe9TKg).
 
@@ -881,7 +884,7 @@ Zapis: Szkic jest przypisany do jednego kanonicznego dokumentu Planu zatowarowan
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Zapisany prompt: [pmpt_6a5f6eccb4348193bc09427beb9d849b0d483c3686838266, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6eccb4348193bc09427beb9d849b0d483c3686838266&version=1).
+Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6eccb4348193bc09427beb9d849b0d483c3686838266, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6eccb4348193bc09427beb9d849b0d483c3686838266&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
 Dawny profil Assistants: [asst_63UuzQm4UNsjileYU7Wue7pd](https://platform.openai.com/assistants/asst_63UuzQm4UNsjileYU7Wue7pd).
 
@@ -956,7 +959,7 @@ Zapis: Ocena zapisuje się przy konkretnych productId jako wynik kontroli; nie u
 
 Model: `gpt-5-nano` (medium); fallback jakości: `gpt-5.4-nano`.
 
-Zapisany prompt: [pmpt_6a5f6edf45508193ad0be5b8e3313dd307ca7bb991527083, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6edf45508193ad0be5b8e3313dd307ca7bb991527083&version=1).
+Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6edf45508193ad0be5b8e3313dd307ca7bb991527083, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6edf45508193ad0be5b8e3313dd307ca7bb991527083&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
 Dawny profil Assistants: [asst_0iw94LI9kTcnLpiOUzr8VnPj](https://platform.openai.com/assistants/asst_0iw94LI9kTcnLpiOUzr8VnPj).
 
@@ -1031,7 +1034,7 @@ Zapis: Wynik trafia do wersjonowanej kolejki decyzji Agenta. Rozstrzygnięcie ma
 
 Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
 
-Zapisany prompt: [pmpt_6a5f6ef1e3ec8193911f0926497d78850dbce1efdf710076, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6ef1e3ec8193911f0926497d78850dbce1efdf710076&version=1).
+Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6ef1e3ec8193911f0926497d78850dbce1efdf710076, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6ef1e3ec8193911f0926497d78850dbce1efdf710076&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
 Dawny profil Assistants: [asst_fgnFEmmPmCSsqEiO9uIgO3Kh](https://platform.openai.com/assistants/asst_fgnFEmmPmCSsqEiO9uIgO3Kh).
 
@@ -1179,6 +1182,7 @@ Każdy zakończony krok musi wskazać dowód: identyfikator rekordu, operacji, m
 - Dokładny skład promptu wysyłanego do modelu: `src/backend/lib/domain/agent-specialist-instructions.mjs`.
 - Routing i ceny: `src/backend/lib/domain/agent-model-policy.mjs`.
 - Wywołanie Responses API i bezpłatny fallback: `src/backend/lib/domain/agent-specialist-openai.mjs`.
+- Nazwane ślady wszystkich specjalistów: `src/backend/lib/domain/agent-specialists.mjs` (`withTrace`, handoff, agent span i response span).
 - Trwałe zapisy produktów: tabela PostgreSQL `artway_products` przez `saveProductFields`; model nigdy nie zapisuje jej bezpośrednio.
 
 ## Zasada aktualizacji
