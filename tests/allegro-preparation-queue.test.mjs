@@ -39,7 +39,7 @@ test('kolejka przygotowania kończy produkt albo po trzech próbach tworzy konkr
     ...repository,
     prepare: async (task) => {
       calls.push(task.productId);
-      return { ready: task.productId !== '2', status: task.productId === '2' ? 'attention' : 'completed', name: `P${task.productId}`, missing: task.productId === '2' ? ['GPSR'] : [], mutationId: `m-${task.productId}` };
+      return { ready: task.productId !== '1', status: task.productId === '1' ? 'attention' : 'completed', name: `P${task.productId}`, missing: task.productId === '1' ? ['GPSR'] : [], mutationId: `m-${task.productId}` };
     },
   });
   const created = await queue.enqueue(['1', '2', '1'], { requestedBy: 'admin@example.test' });
@@ -50,7 +50,7 @@ test('kolejka przygotowania kończy produkt albo po trzech próbach tworzy konkr
     const status = await queue.status();
     return !status.running && status.recent.length === 2 ? status : null;
   });
-  assert.deepEqual(calls, ['1', '2', '2', '2']);
+  assert.deepEqual(calls, ['1', '1', '1', '2']);
   assert.equal(finished.batches[0].completed, 1);
   assert.equal(finished.batches[0].attention, 0);
   assert.equal(finished.batches[0].decisionRequired, 1);

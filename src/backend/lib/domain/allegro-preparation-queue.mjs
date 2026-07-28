@@ -649,7 +649,7 @@ function createPostgresAllegroPreparationQueue({
     };
     await pool.query(`
       UPDATE artway_allegro_preparation_tasks
-      SET status='pending',result=$3::jsonb,requested_at=NOW(),started_at=NULL,completed_at=NULL,updated_at=NOW()
+      SET status='pending',result=$3::jsonb,started_at=NULL,completed_at=NULL,updated_at=NOW()
       WHERE namespace=$1 AND task_id=$2
     `, [ns, task.id, JSON.stringify(item)]);
   };
@@ -890,10 +890,7 @@ export function createAllegroPreparationQueue({
     return mutate((state) => ({
       ...state,
       active: state.active?.id === task.id ? null : state.active,
-      pending: [...state.pending, normalizeTask({
-        ...task,
-        requestedAt: now().toISOString(),
-      })].slice(0, MAX_PENDING),
+      pending: [normalizeTask(task), ...state.pending].slice(0, MAX_PENDING),
     }));
   }
 
