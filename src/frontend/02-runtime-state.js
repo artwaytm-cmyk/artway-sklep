@@ -172,6 +172,10 @@ let allegroOferty = [];
 let allegroMapowania = {};
 try{["artway_allegro_zamowienia_cache","artway_allegro_oferty_cache","artway_allegro_mapowania_cache","artway_allegro_komunikacja_cache"].forEach(k=>localStorage.removeItem(k));}catch(e){}
 let allegroKomunikacja = {threads:[],issues:[],settings:null,autoReplies:{},errors:[],requiresReauth:false,updated_at:null,lastSyncSummary:null,sprawdzono:false};
+// Filtry zamówień należą do wspólnego stanu panelu, ponieważ odwołują się do
+// nich moduł zamówień, pulpit i karta klienta. Muszą istnieć przed
+// doładowaniem któregokolwiek z tych pakietów.
+let szukajZamowien = "", filtrZamowien = "wszystkie";
 let zaznaczoneZamowieniaSklepu = new Set();
 let zaznaczoneAllegroZamowienia = new Set();
 let zaznaczoneAllegroOferty = new Set();

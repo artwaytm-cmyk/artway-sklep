@@ -201,7 +201,7 @@ test('pozytywny autotest zamyka odpowiadające mu stare zdarzenia przeglądarki,
       checks: [],
       passedChecks: [
         { name: 'Dostęp do products.json', group: 'Autotest techniczny', details: '1114 rekordów' },
-        { name: 'Renderowanie głównych widoków', group: 'Autotest techniczny', details: 'Sprawdzono 5 kluczowych ekranów' },
+        { name: 'Renderowanie głównych widoków', group: 'Autotest techniczny', details: 'Sprawdzono 6 kluczowych ekranów' },
       ],
     }),
   });

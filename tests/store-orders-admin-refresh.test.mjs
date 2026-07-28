@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 test('panel pobiera zamówienia gości z dedykowanej lekkiej kolejki', async () => {
-  const [route, sync, router] = await Promise.all([
+  const [route, sync, router, runtime] = await Promise.all([
     readFile('src/backend/lib/store-data-route.mjs', 'utf8'),
     readFile('src/frontend/07b-shipping-integrations.js', 'utf8'),
     readFile('src/frontend/06-router-and-storefront.js', 'utf8'),
+    readFile('src/frontend/02-runtime-state.js', 'utf8'),
   ]);
   assert.match(route, /action === 'store-orders-admin'/);
   assert.match(route, /filtrujNieusunieteZamowienia\(ordersVersioned\.value\?\.items \|\| \[\], deletedOrders\)/);
@@ -14,6 +15,7 @@ test('panel pobiera zamówienia gości z dedykowanej lekkiej kolejki', async () 
   assert.match(sync, /chmura\("store-orders-admin"/);
   assert.match(sync, /setInterval\(\(\)=>\{if\(trasa\(\)==="\/admin\/zamowienia"/);
   assert.match(router, /odswiezZamowieniaAdminaPoWejsciu/);
+  assert.match(runtime, /let szukajZamowien = "", filtrZamowien = "wszystkie"/);
 });
 
 test('automatyczna synchronizacja nie scala localStorage z serwerem', async () => {

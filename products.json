@@ -36475,7 +36475,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane Yippee Cutie – Rybka, 70 elementów, MilliWOOD",
+    "nazwa": "Puzzle drewniane Yippee Cutie – Rybka, 70 elementów",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/25fff90b8da6b6c9d46c80219f0ff382/pol_pm_Puzzle-drewniane-Yippee-Cutie-Rybka-70-el-1605_1.jpg",
     "_catalog": {
       "channels": {
@@ -36497,24 +36497,24 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1605-Puzzle-drewniane-Yippee-Cutie-Rybka-70-el.html",
     "externalId": "5018",
-    "opisKrotki": "Drewniane puzzle Yippee Cutie z motywem rybki z serii MilliWOOD. Zestaw zawiera 70 elementów o regularnych kształtach, przeznaczonych do układania i zabawy edukacyjnej.",
+    "opisKrotki": "Drewniane puzzle z serii Yippee Cutie przedstawiają rybkę błazenka w podwodnym świecie. Zestaw składa się z 70 elementów o regularnych kształtach i ma wymiary po złożeniu 28,5 cm x 21 cm.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1605-Puzzle-drewniane-Yippee-Cutie-Rybka-70-el.html",
     "kodProducenta": "5018",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T09:00:49.765Z",
+    "allegroAgentPreparedAt": "2026-07-28T09:01:49.011Z",
     "allegroAgentPreparationRunId": "9b8e2ddc-0580-44a9-8812-e58fd0437b9e",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)",
       "zdjęcie Allegro min. 500px",
       "EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną."
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationRetryCount": 8,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-01352bae",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T09:05:49.765Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-f721872b",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000489",
