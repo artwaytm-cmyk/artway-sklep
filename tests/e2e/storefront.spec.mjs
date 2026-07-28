@@ -283,6 +283,10 @@ test('administrator tworzy PZ i WZ jednym kliknięciem bez dublowania żądania'
   });
   await loginAdmin(page);
   await page.goto('/#/admin/magazyn/plan');
+  await expect(page.locator('[data-restock-mode="braki"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('[data-restock-mode="pz-wz"]').click();
+  await expect(page.locator('[data-restock-mode="pz-wz"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.ops-control-center')).toHaveCount(0);
   await expect(page.locator('[data-create-warehouse-document="PZ"]')).toBeVisible();
   await page.locator('[data-create-warehouse-document="PZ"]').click();
   await expect(page.getByRole('heading', { name: 'PZ/2026/07/0001' })).toBeVisible();
@@ -291,6 +295,18 @@ test('administrator tworzy PZ i WZ jednym kliknięciem bez dublowania żądania'
   await expect(page.getByRole('heading', { name: 'WZ/2026/07/0001' })).toBeVisible();
   expect(createRequests.map((request) => request.type)).toEqual(['PZ', 'WZ']);
   expect(createRequests.every((request) => /^create-(?:pz|wz)-/.test(request.requestId))).toBe(true);
+  assertRuntime();
+});
+
+test('stany magazynowe wyszukują po kodzie i przełączają układ na regały', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  await page.goto('/#/admin/magazyn/stany');
+  await expect(page.locator('[data-warehouse-code-search]')).toBeVisible();
+  await page.locator('[data-warehouse-code-search]').fill('1523');
+  await expect(page.locator('.warehouse-stock-results')).toContainText(/Pokazano/);
+  await page.locator('[data-warehouse-grouping]').selectOption('regaly');
+  await expect(page.locator('[data-warehouse-grouping]')).toHaveValue('regaly');
   assertRuntime();
 });
 

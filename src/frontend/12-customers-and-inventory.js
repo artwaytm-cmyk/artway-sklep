@@ -162,7 +162,7 @@ let sortowanieAdminProduktow = ["external","id","nazwa","producent","kategoria",
 let gestoscAdminProduktow=["zwarta","wygodna"].includes(wczytajLS("artway_produkty_gestosc_admin","zwarta"))?wczytajLS("artway_produkty_gestosc_admin","zwarta"):"zwarta";
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
-let frazaMagazynu="", filtrMagazynu="na-stanie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="stan-malejaco", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="wszystkie", sortowanieProducentowMagazynu="priorytet", stronaDostepnosciProducentow=1;
+let frazaMagazynu="",kodMagazynu="",typKoduMagazynu="wszystkie",grupowanieStanowMagazynu="lista",filtrMagazynu="na-stanie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="stan-malejaco", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="wszystkie", sortowanieProducentowMagazynu="priorytet", stronaDostepnosciProducentow=1;
 let szukajRuchowMagazynu="",filtrRuchowMagazynu="wszystkie",limitRuchowMagazynu=100;
 let magazynLokalizacjeZamowienIds=new Set();
 let magazynNaStronie=[25,50,100,200,500].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
@@ -289,8 +289,8 @@ function ustawGestoscAdminProduktow(v){
   gestoscAdminProduktow=v==="wygodna"?"wygodna":"zwarta";zapiszLS("artway_produkty_gestosc_admin",gestoscAdminProduktow);
   const list=document.querySelector(".catalog-product-list");if(list){list.classList.remove("density-zwarta","density-wygodna");list.classList.add(`density-${gestoscAdminProduktow}`);}
 }
-function magazynSzukajProdukty(input){
-  frazaMagazynu=String(input?.value||"");stronaMagazynu=1;clearTimeout(window.__warehouseSearch);
+function magazynOdswiezWynikiStanow(){
+  clearTimeout(window.__warehouseSearch);
   window.__warehouseSearch=setTimeout(()=>{
     const current=document.querySelector(".warehouse-stock-page"),source=dokumentTymczasowyHTML(widokAdminMagazyn("stany")).querySelector(".warehouse-stock-page");if(!current||!source)return;
     for(const selector of [".warehouse-stock-results",".warehouse-stock-list"]){const a=current.querySelector(selector),b=source.querySelector(selector);if(a&&b)a.innerHTML=b.innerHTML;}
@@ -298,6 +298,8 @@ function magazynSzukajProdukty(input){
     const aConfirm=current.querySelector("[data-stock-confirm-visible]"),bConfirm=source.querySelector("[data-stock-confirm-visible]");if(aConfirm&&bConfirm)aConfirm.replaceWith(bConfirm);
   },140);
 }
+function magazynSzukajProdukty(input){frazaMagazynu=String(input?.value||"");stronaMagazynu=1;magazynOdswiezWynikiStanow();}
+function magazynSzukajKod(input){kodMagazynu=String(input?.value||"");stronaMagazynu=1;magazynOdswiezWynikiStanow();}
 function odswiezMonitoringProducentow(){
   if(trasa()!=="/admin/magazyn/dostawcy")return false;
   const current=document.querySelector(".supplier-monitor-panel"),source=dokumentTymczasowyHTML(widokAdminMagazyn("dostawcy")).querySelector(".supplier-monitor-panel");

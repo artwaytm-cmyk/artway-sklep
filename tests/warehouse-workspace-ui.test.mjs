@@ -56,9 +56,12 @@ test('Plan zatowarowania prowadzi po procesie i renderuje tabele w jednym schema
   const plan = inventory.slice(inventory.indexOf('function magazynPlanEtykietaKolumny'), inventory.indexOf('function magazynDostawcaWierszHTML'));
   assert.match(plan, /restock-workflow-nav/);
   assert.match(plan, /Braki i zakupy/);
-  assert.match(plan, /Dokumenty producentów/);
+  assert.match(plan, /Zamówienia i e-maile/);
   assert.match(plan, /Operacje PZ \/ WZ/);
-  assert.ok(plan.indexOf('${magazynTabelaOperacyjnaHTML()}') < plan.indexOf('${magazynDokumentyPanelHTML()}'));
+  assert.match(plan, /function magazynPlanUstawTryb/);
+  assert.match(plan, /data-restock-mode/);
+  assert.match(plan, /magazynPlanTryb==="pz-wz"/);
+  assert.match(plan, /restock-plan-domain mode-\$\{esc\(magazynPlanTryb\)\}/);
   assert.match(plan, /admin-responsive-table/);
   assert.match(plan, /admin-standard-table/);
   assert.match(plan, /data-label/);
@@ -90,11 +93,18 @@ test('Stany pokazują fizyczny magazyn w tabeli, renderują katalog partiami i n
   assert.match(inventory, /function magazynStanWierszHTML/);
   assert.match(inventory, /IntersectionObserver/);
   assert.match(inventory, /magazynStanyPrzygotujKartyProgresywnie\(fragment,\{rez,prog\}\)/);
+  assert.match(inventory, /data-warehouse-code-search/);
+  assert.match(inventory, /SKU \/ EXTERNAL_ID/);
+  assert.match(inventory, /data-warehouse-grouping/);
+  assert.match(inventory, /Według regałów/);
+  assert.match(inventory, /function magazynStanyElementyWidoku/);
+  assert.match(inventory, /warehouse-stock-group-row/);
   assert.match(inventory, /class="log-table warehouse-current-stock-table"/);
   assert.match(inventory, /Co mamy obecnie na magazynie/);
   assert.match(inventory, /Stan fizyczny<\/th><th>Rezerwacje<\/th><th>Wolne/);
   assert.match(styles, /warehouse-stock-progressive-loader/);
   assert.match(styles, /warehouse-current-stock-table/);
+  assert.match(styles, /warehouse-stock-group-row/);
 });
 
 test('Dostępność przejmuje producenta, sprzedaż, pokrycie i wspólny schemat wyszukiwania oraz tabel', () => {

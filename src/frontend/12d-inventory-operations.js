@@ -106,14 +106,47 @@ function priorytetDostepnosciProduktu(p={},kanaly=sprzedazKanalyMagazynowe(30),r
 function rankingDostepnosciProducentow(lista=produktyMonitorowaneUProducentow()){
   const kanaly=sprzedazKanalyMagazynowe(30),rez=rezerwacjeMagazynowe();return lista.map(p=>({p,priority:priorytetDostepnosciProduktu(p,kanaly,rez),availability:producentDostepnoscInfo(p)})).sort((a,b)=>b.priority.score-a.priority.score||b.availability.ageHours-a.availability.ageHours||String(a.p.nazwa||"").localeCompare(String(b.p.nazwa||""),"pl")).map((x,index)=>({...x,rank:index+1}));
 }
+function magazynKodDoPorownania(value=""){return String(value??"").trim().toLowerCase().replace(/[\s_-]+/g,"");}
+function magazynKodyProduktu(p={},meta=magazynMetaProduktu(p.id),typ="wszystkie"){
+  const grupy={
+    ean:[p.gtin,p.ean,p.gtin13,p.barcode,meta.kod],
+    sku:[p.externalId,p.external_id,p.EXTERNAL_ID,p.sku,p.SKU,p.kodProduktu,p.productCode],
+    producent:[p.kodProducenta,p.mpn,p.MPN,p.manufacturerCode],
+    optima:[meta.optimaCode,p.optimaCode],
+    dostawca:[meta.kodDostawcy,p.kodDostawcy,p.supplierCode],
+    id:[p.id]
+  };
+  const values=typ==="wszystkie"?Object.values(grupy).flat():(grupy[typ]||[]);
+  return [...new Set(values.map(value=>String(value??"").trim()).filter(Boolean))];
+}
+function magazynProduktPasujeDoKodu(p={},query="",typ="wszystkie"){
+  const wanted=magazynKodDoPorownania(query);if(!wanted)return true;
+  const wantedDigits=/^\d+$/.test(wanted)?(wanted.replace(/^0+/,"")||"0"):"";
+  return magazynKodyProduktu(p,magazynMetaProduktu(p.id),typ).some(value=>{
+    const candidate=magazynKodDoPorownania(value);
+    if(candidate.includes(wanted))return true;
+    return !!wantedDigits&&/^\d+$/.test(candidate)&&(candidate.replace(/^0+/,"")||"0")===wantedDigits;
+  });
+}
+function magazynLokalizacjaWZakresie(code="",wanted="wszystkie"){
+  const target=String(wanted||"wszystkie");if(target==="wszystkie")return true;
+  const key=String(code||"").trim();if(target==="BRAK")return !key;
+  let current=typeof magazynLokalizacjaPoKodzie==="function"?magazynLokalizacjaPoKodzie(key):null,guard=0;
+  while(current&&guard++<12){
+    if(String(current.kod)===target)return true;
+    current=current.parentKod&&typeof magazynLokalizacjaPoKodzie==="function"?magazynLokalizacjaPoKodzie(current.parentKod):null;
+  }
+  return key===target||key.startsWith(`${target}-`);
+}
 function filtrujProduktyMagazynu(lista, rez, sprzedaz){
   const u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
   let out=lista.filter(p=>!czyProduktAdminWKoszu(p));
   if(frazaMagazynu) out=out.filter(p=>{
     const meta=magazynMetaProduktu(p.id);
-    const kartoteka=[meta.lokalizacja,nazwaLokalizacjiMagazynu(meta.lokalizacja),meta.dostawca,meta.kod,meta.uwagi].filter(Boolean).join(" ");
-    return produktPasujeFrazie(p,frazaMagazynu)||String(p.sku||"").toLowerCase().includes(frazaMagazynu.toLowerCase())||kartoteka.toLowerCase().includes(frazaMagazynu.toLowerCase());
+    const kartoteka=[...magazynKodyProduktu(p,meta),meta.lokalizacja,nazwaLokalizacjiMagazynu(meta.lokalizacja),sciezkaNazwLokalizacjiMagazynu(meta.lokalizacja),meta.dostawca,meta.uwagi].filter(Boolean).join(" ");
+    return produktPasujeFrazie(p,frazaMagazynu)||kartoteka.toLowerCase().includes(frazaMagazynu.toLowerCase());
   });
+  if(kodMagazynu)out=out.filter(p=>magazynProduktPasujeDoKodu(p,kodMagazynu,typKoduMagazynu));
   if(filtrMagazynu==="na-stanie") out=out.filter(p=>Number(stanMagazynuId(p.id)||0)>0);
   if(filtrMagazynu==="monitorowane") out=out.filter(p=>stanMagazynuId(p.id)!==null);
   if(filtrMagazynu==="bezlimitu") out=out.filter(p=>stanMagazynuId(p.id)===null);
@@ -132,7 +165,7 @@ function filtrujProduktyMagazynu(lista, rez, sprzedaz){
   if(filtrMagazynu==="lokalizacje-zamowien") out=out.filter(p=>magazynLokalizacjeZamowienIds.has(String(p.id)));
   if(filtrMagazynu==="bezdostawcy") out=out.filter(p=>!magazynMetaProduktu(p.id).dostawca);
   if(filtrDostawcyMagazynu!=="wszyscy") out=out.filter(p=>String(magazynMetaProduktu(p.id).dostawca||"")===filtrDostawcyMagazynu);
-  if(filtrLokalizacjiMagazynu!=="wszystkie") out=out.filter(p=>String(magazynMetaProduktu(p.id).lokalizacja||"BRAK")===filtrLokalizacjiMagazynu);
+  if(filtrLokalizacjiMagazynu!=="wszystkie") out=out.filter(p=>magazynLokalizacjaWZakresie(magazynMetaProduktu(p.id).lokalizacja,filtrLokalizacjiMagazynu));
   if(filtrInwentaryzacjiMagazynu!=="wszystkie") out=out.filter(p=>{const d=magazynMetaProduktu(p.id).ostatniaInwentaryzacja,t=d?Date.parse(d):0,stara=!t||(Date.now()-t)>90*86400000;return filtrInwentaryzacjiMagazynu==="aktualna"?!stara:stara;});
   return sortujProduktyMagazynu(out, rez, sprzedaz, prog);
 }
@@ -173,14 +206,19 @@ function stanBadgeMagazynu(stan, prog){
   return `<span class="lvl lvl-ok">OK</span>`;
 }
 function ustawFiltrMagazynu(filtr, sort="stan-malejaco"){
-  frazaMagazynu="";
+  frazaMagazynu="";kodMagazynu="";
   filtrMagazynu=filtr||"wszystkie";
   sortowanieMagazynu=sort||"stan-malejaco";
   stronaMagazynu=1;
   renderuj();
 }
 function wyczyscFiltryStanowMagazynu(){
-  frazaMagazynu="";filtrMagazynu="na-stanie";filtrDostawcyMagazynu="wszyscy";filtrLokalizacjiMagazynu="wszystkie";filtrInwentaryzacjiMagazynu="wszystkie";sortowanieMagazynu="stan-malejaco";stronaMagazynu=1;renderuj();
+  frazaMagazynu="";kodMagazynu="";typKoduMagazynu="wszystkie";grupowanieStanowMagazynu="lista";filtrMagazynu="na-stanie";filtrDostawcyMagazynu="wszyscy";filtrLokalizacjiMagazynu="wszystkie";filtrInwentaryzacjiMagazynu="wszystkie";sortowanieMagazynu="stan-malejaco";stronaMagazynu=1;renderuj();
+}
+function magazynUstawGrupowanieStanow(value="lista"){
+  grupowanieStanowMagazynu=["lista","strefy","regaly","polki"].includes(value)?value:"lista";
+  if(grupowanieStanowMagazynu!=="lista")sortowanieMagazynu="lokalizacja";
+  stronaMagazynu=1;renderuj();
 }
 function ustawStroneMagazynu(n){ stronaMagazynu=Math.max(1,Number(n)||1); renderuj(); }
 function ustawMagazynNaStronie(n){

@@ -7683,7 +7683,7 @@ let sortowanieAdminProduktow = ["external","id","nazwa","producent","kategoria",
 let gestoscAdminProduktow=["zwarta","wygodna"].includes(wczytajLS("artway_produkty_gestosc_admin","zwarta"))?wczytajLS("artway_produkty_gestosc_admin","zwarta"):"zwarta";
 let stronaAdminProduktow = 1;
 let produktyNaStronieAdmin = [25,50,100,200,500,1000].includes(Number(wczytajLS("artway_produkty_na_stronie_admin",50)))?Number(wczytajLS("artway_produkty_na_stronie_admin",50)):50;
-let frazaMagazynu="", filtrMagazynu="na-stanie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="stan-malejaco", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="wszystkie", sortowanieProducentowMagazynu="priorytet", stronaDostepnosciProducentow=1;
+let frazaMagazynu="",kodMagazynu="",typKoduMagazynu="wszystkie",grupowanieStanowMagazynu="lista",filtrMagazynu="na-stanie", filtrDostawcyMagazynu="wszyscy", filtrLokalizacjiMagazynu="wszystkie", filtrInwentaryzacjiMagazynu="wszystkie", sortowanieMagazynu="stan-malejaco", stronaMagazynu=1, szukajProducentowMagazynu="", filtrProducentowMagazynu="wszystkie", sortowanieProducentowMagazynu="priorytet", stronaDostepnosciProducentow=1;
 let szukajRuchowMagazynu="",filtrRuchowMagazynu="wszystkie",limitRuchowMagazynu=100;
 let magazynLokalizacjeZamowienIds=new Set();
 let magazynNaStronie=[25,50,100,200,500].includes(Number(wczytajLS("artway_magazyn_na_stronie",50)))?Number(wczytajLS("artway_magazyn_na_stronie",50)):50;
@@ -7810,8 +7810,8 @@ function ustawGestoscAdminProduktow(v){
   gestoscAdminProduktow=v==="wygodna"?"wygodna":"zwarta";zapiszLS("artway_produkty_gestosc_admin",gestoscAdminProduktow);
   const list=document.querySelector(".catalog-product-list");if(list){list.classList.remove("density-zwarta","density-wygodna");list.classList.add(`density-${gestoscAdminProduktow}`);}
 }
-function magazynSzukajProdukty(input){
-  frazaMagazynu=String(input?.value||"");stronaMagazynu=1;clearTimeout(window.__warehouseSearch);
+function magazynOdswiezWynikiStanow(){
+  clearTimeout(window.__warehouseSearch);
   window.__warehouseSearch=setTimeout(()=>{
     const current=document.querySelector(".warehouse-stock-page"),source=dokumentTymczasowyHTML(widokAdminMagazyn("stany")).querySelector(".warehouse-stock-page");if(!current||!source)return;
     for(const selector of [".warehouse-stock-results",".warehouse-stock-list"]){const a=current.querySelector(selector),b=source.querySelector(selector);if(a&&b)a.innerHTML=b.innerHTML;}
@@ -7819,6 +7819,8 @@ function magazynSzukajProdukty(input){
     const aConfirm=current.querySelector("[data-stock-confirm-visible]"),bConfirm=source.querySelector("[data-stock-confirm-visible]");if(aConfirm&&bConfirm)aConfirm.replaceWith(bConfirm);
   },140);
 }
+function magazynSzukajProdukty(input){frazaMagazynu=String(input?.value||"");stronaMagazynu=1;magazynOdswiezWynikiStanow();}
+function magazynSzukajKod(input){kodMagazynu=String(input?.value||"");stronaMagazynu=1;magazynOdswiezWynikiStanow();}
 function odswiezMonitoringProducentow(){
   if(trasa()!=="/admin/magazyn/dostawcy")return false;
   const current=document.querySelector(".supplier-monitor-panel"),source=dokumentTymczasowyHTML(widokAdminMagazyn("dostawcy")).querySelector(".supplier-monitor-panel");
@@ -7981,14 +7983,47 @@ function priorytetDostepnosciProduktu(p={},kanaly=sprzedazKanalyMagazynowe(30),r
 function rankingDostepnosciProducentow(lista=produktyMonitorowaneUProducentow()){
   const kanaly=sprzedazKanalyMagazynowe(30),rez=rezerwacjeMagazynowe();return lista.map(p=>({p,priority:priorytetDostepnosciProduktu(p,kanaly,rez),availability:producentDostepnoscInfo(p)})).sort((a,b)=>b.priority.score-a.priority.score||b.availability.ageHours-a.availability.ageHours||String(a.p.nazwa||"").localeCompare(String(b.p.nazwa||""),"pl")).map((x,index)=>({...x,rank:index+1}));
 }
+function magazynKodDoPorownania(value=""){return String(value??"").trim().toLowerCase().replace(/[\s_-]+/g,"");}
+function magazynKodyProduktu(p={},meta=magazynMetaProduktu(p.id),typ="wszystkie"){
+  const grupy={
+    ean:[p.gtin,p.ean,p.gtin13,p.barcode,meta.kod],
+    sku:[p.externalId,p.external_id,p.EXTERNAL_ID,p.sku,p.SKU,p.kodProduktu,p.productCode],
+    producent:[p.kodProducenta,p.mpn,p.MPN,p.manufacturerCode],
+    optima:[meta.optimaCode,p.optimaCode],
+    dostawca:[meta.kodDostawcy,p.kodDostawcy,p.supplierCode],
+    id:[p.id]
+  };
+  const values=typ==="wszystkie"?Object.values(grupy).flat():(grupy[typ]||[]);
+  return [...new Set(values.map(value=>String(value??"").trim()).filter(Boolean))];
+}
+function magazynProduktPasujeDoKodu(p={},query="",typ="wszystkie"){
+  const wanted=magazynKodDoPorownania(query);if(!wanted)return true;
+  const wantedDigits=/^\d+$/.test(wanted)?(wanted.replace(/^0+/,"")||"0"):"";
+  return magazynKodyProduktu(p,magazynMetaProduktu(p.id),typ).some(value=>{
+    const candidate=magazynKodDoPorownania(value);
+    if(candidate.includes(wanted))return true;
+    return !!wantedDigits&&/^\d+$/.test(candidate)&&(candidate.replace(/^0+/,"")||"0")===wantedDigits;
+  });
+}
+function magazynLokalizacjaWZakresie(code="",wanted="wszystkie"){
+  const target=String(wanted||"wszystkie");if(target==="wszystkie")return true;
+  const key=String(code||"").trim();if(target==="BRAK")return !key;
+  let current=typeof magazynLokalizacjaPoKodzie==="function"?magazynLokalizacjaPoKodzie(key):null,guard=0;
+  while(current&&guard++<12){
+    if(String(current.kod)===target)return true;
+    current=current.parentKod&&typeof magazynLokalizacjaPoKodzie==="function"?magazynLokalizacjaPoKodzie(current.parentKod):null;
+  }
+  return key===target||key.startsWith(`${target}-`);
+}
 function filtrujProduktyMagazynu(lista, rez, sprzedaz){
   const u=ustawieniaMagazynuPelne(), prog=Math.max(0,Number(u.progNiski)||5);
   let out=lista.filter(p=>!czyProduktAdminWKoszu(p));
   if(frazaMagazynu) out=out.filter(p=>{
     const meta=magazynMetaProduktu(p.id);
-    const kartoteka=[meta.lokalizacja,nazwaLokalizacjiMagazynu(meta.lokalizacja),meta.dostawca,meta.kod,meta.uwagi].filter(Boolean).join(" ");
-    return produktPasujeFrazie(p,frazaMagazynu)||String(p.sku||"").toLowerCase().includes(frazaMagazynu.toLowerCase())||kartoteka.toLowerCase().includes(frazaMagazynu.toLowerCase());
+    const kartoteka=[...magazynKodyProduktu(p,meta),meta.lokalizacja,nazwaLokalizacjiMagazynu(meta.lokalizacja),sciezkaNazwLokalizacjiMagazynu(meta.lokalizacja),meta.dostawca,meta.uwagi].filter(Boolean).join(" ");
+    return produktPasujeFrazie(p,frazaMagazynu)||kartoteka.toLowerCase().includes(frazaMagazynu.toLowerCase());
   });
+  if(kodMagazynu)out=out.filter(p=>magazynProduktPasujeDoKodu(p,kodMagazynu,typKoduMagazynu));
   if(filtrMagazynu==="na-stanie") out=out.filter(p=>Number(stanMagazynuId(p.id)||0)>0);
   if(filtrMagazynu==="monitorowane") out=out.filter(p=>stanMagazynuId(p.id)!==null);
   if(filtrMagazynu==="bezlimitu") out=out.filter(p=>stanMagazynuId(p.id)===null);
@@ -8007,7 +8042,7 @@ function filtrujProduktyMagazynu(lista, rez, sprzedaz){
   if(filtrMagazynu==="lokalizacje-zamowien") out=out.filter(p=>magazynLokalizacjeZamowienIds.has(String(p.id)));
   if(filtrMagazynu==="bezdostawcy") out=out.filter(p=>!magazynMetaProduktu(p.id).dostawca);
   if(filtrDostawcyMagazynu!=="wszyscy") out=out.filter(p=>String(magazynMetaProduktu(p.id).dostawca||"")===filtrDostawcyMagazynu);
-  if(filtrLokalizacjiMagazynu!=="wszystkie") out=out.filter(p=>String(magazynMetaProduktu(p.id).lokalizacja||"BRAK")===filtrLokalizacjiMagazynu);
+  if(filtrLokalizacjiMagazynu!=="wszystkie") out=out.filter(p=>magazynLokalizacjaWZakresie(magazynMetaProduktu(p.id).lokalizacja,filtrLokalizacjiMagazynu));
   if(filtrInwentaryzacjiMagazynu!=="wszystkie") out=out.filter(p=>{const d=magazynMetaProduktu(p.id).ostatniaInwentaryzacja,t=d?Date.parse(d):0,stara=!t||(Date.now()-t)>90*86400000;return filtrInwentaryzacjiMagazynu==="aktualna"?!stara:stara;});
   return sortujProduktyMagazynu(out, rez, sprzedaz, prog);
 }
@@ -8048,14 +8083,19 @@ function stanBadgeMagazynu(stan, prog){
   return `<span class="lvl lvl-ok">OK</span>`;
 }
 function ustawFiltrMagazynu(filtr, sort="stan-malejaco"){
-  frazaMagazynu="";
+  frazaMagazynu="";kodMagazynu="";
   filtrMagazynu=filtr||"wszystkie";
   sortowanieMagazynu=sort||"stan-malejaco";
   stronaMagazynu=1;
   renderuj();
 }
 function wyczyscFiltryStanowMagazynu(){
-  frazaMagazynu="";filtrMagazynu="na-stanie";filtrDostawcyMagazynu="wszyscy";filtrLokalizacjiMagazynu="wszystkie";filtrInwentaryzacjiMagazynu="wszystkie";sortowanieMagazynu="stan-malejaco";stronaMagazynu=1;renderuj();
+  frazaMagazynu="";kodMagazynu="";typKoduMagazynu="wszystkie";grupowanieStanowMagazynu="lista";filtrMagazynu="na-stanie";filtrDostawcyMagazynu="wszyscy";filtrLokalizacjiMagazynu="wszystkie";filtrInwentaryzacjiMagazynu="wszystkie";sortowanieMagazynu="stan-malejaco";stronaMagazynu=1;renderuj();
+}
+function magazynUstawGrupowanieStanow(value="lista"){
+  grupowanieStanowMagazynu=["lista","strefy","regaly","polki"].includes(value)?value:"lista";
+  if(grupowanieStanowMagazynu!=="lista")sortowanieMagazynu="lokalizacja";
+  stronaMagazynu=1;renderuj();
 }
 function ustawStroneMagazynu(n){ stronaMagazynu=Math.max(1,Number(n)||1); renderuj(); }
 function ustawMagazynNaStronie(n){
@@ -8705,13 +8745,26 @@ function magazynPlanUstandaryzujTabeleDOM(root=document){
   return root;
 }
 function magazynPlanPrzewinDo(selector){const target=document.querySelector(selector);if(!target)return false;target.scrollIntoView({behavior:"smooth",block:"start"});return true;}
+let magazynPlanTryb="braki";
+function magazynPlanUstawTryb(tryb="braki"){
+  magazynPlanTryb=["braki","producenci","pz-wz","caly"].includes(tryb)?tryb:"braki";
+  odswiezPlanZatowarowaniaWidoku();
+  requestAnimationFrame(()=>document.querySelector(`[data-restock-mode="${magazynPlanTryb}"]`)?.focus({preventScroll:true}));
+}
 function magazynPlanCentrumStatusuHTML(){
   const shortageResult=typeof agentAIBrakiOperacyjne==="function"?agentAIBrakiOperacyjne():[],shortages=Array.isArray(shortageResult)?shortageResult:[],orders=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]),activeOrders=orders.filter(order=>typeof agentAIPlanDokumentAktywny==="function"&&agentAIPlanDokumentAktywny(order)),supplierReady=activeOrders.filter(order=>order.approvedAt&&Number(order.approvalRevision||0)===Math.max(1,Number(order.revision)||1)&&!order.emailSentAt),awaitingDelivery=activeOrders.filter(order=>(order.emailSentAt||String(order.status||"").toLowerCase().includes("wysłane"))&&(order.pozycje||[]).some(line=>Number(line.przyjeto||0)<Number(line.ilosc||0))),docs=magazynDokumentyStan.items||[],draftDocs=docs.filter(doc=>doc.status==="draft"),readyDocs=draftDocs.filter(doc=>magazynDokumentWalidacja(doc).ready);
-  return `<div class="restock-command-status"><button type="button" onclick="magazynPlanPrzewinDo('.ops-control-center')"><span>⚠️</span><div><b>${shortages.length}</b><small>realnych braków</small><em>do pokrycia zamówieniem</em></div></button><button type="button" onclick="magazynPlanPrzewinDo('.supplier-restock-plan')"><span>✅</span><div><b>${supplierReady.length}</b><small>gotowych do wysłania</small><em>${activeOrders.length} aktywnych dokumentów</em></div></button><button type="button" onclick="magazynPlanPrzewinDo('.supplier-restock-plan')"><span>🚚</span><div><b>${awaitingDelivery.length}</b><small>dostaw do przyjęcia</small><em>po wysłaniu do producenta</em></div></button><button type="button" onclick="magazynPlanPrzewinDo('#warehouseDocumentsCenter')"><span>📑</span><div><b>${readyDocs.length}/${draftDocs.length}</b><small>gotowych PZ/WZ</small><em>kontrola przed księgowaniem</em></div></button></div>`;
+  return `<div class="restock-command-status"><button type="button" onclick="magazynPlanUstawTryb('braki')"><span>⚠️</span><div><b>${shortages.length}</b><small>realnych braków</small><em>do pokrycia zamówieniem</em></div></button><button type="button" onclick="magazynPlanUstawTryb('producenci')"><span>✅</span><div><b>${supplierReady.length}</b><small>gotowych do wysłania</small><em>${activeOrders.length} aktywnych dokumentów</em></div></button><button type="button" onclick="magazynPlanUstawTryb('producenci')"><span>🚚</span><div><b>${awaitingDelivery.length}</b><small>dostaw do przyjęcia</small><em>po wysłaniu do producenta</em></div></button><button type="button" onclick="magazynPlanUstawTryb('pz-wz')"><span>📑</span><div><b>${readyDocs.length}/${draftDocs.length}</b><small>gotowych PZ/WZ</small><em>kontrola przed księgowaniem</em></div></button></div>`;
 }
 function magazynPlanZatowarowaniaHTML(){
-  const intro=`<section class="panel restock-plan-intro"><div class="restock-plan-automation"><span class="restock-plan-automation-icon">⚡</span><div><span class="order-pro-label">Automatyczny plan zakupowy</span><b>Braki trafiają do właściwego szkicu bez ręcznego przepisywania</b><small>Każde nowe zamówienie i każda zatwierdzona zmiana stanu ponownie przelicza stan, rezerwacje oraz ilości już zamówione. „Aktualizuj plan” w nagłówku jest bezpieczną kontrolą na żądanie.</small></div><details class="restock-plan-tools"><summary>Narzędzia dodatkowe</summary><div><button type="button" onclick="eksportujTabeleOperacyjnaMagazynuCSV()">📤 Eksport CSV bez cen</button><a href="#/admin/agent-ai/producenci">🏭 Kartoteka producentów</a><a href="#/admin/magazyn/etykiety-qr">🏷️ Etykiety QR</a></div></details></div>${magazynPlanCentrumStatusuHTML()}<nav class="restock-workflow-nav" aria-label="Etapy planu zatowarowania"><button type="button" onclick="magazynPlanPrzewinDo('.ops-control-center')"><span>1</span><div><b>Braki i zakupy</b><small>stan, rezerwacje i pokrycie</small></div></button><button type="button" onclick="magazynPlanPrzewinDo('.supplier-restock-plan')"><span>2</span><div><b>Dokumenty producentów</b><small>zatwierdź, wyślij i przyjmij</small></div></button><button type="button" onclick="magazynPlanPrzewinDo('#warehouseDocumentsCenter')"><span>3</span><div><b>Operacje PZ / WZ</b><small>skanuj, koryguj i zaksięguj</small></div></button></nav></section>`;
-  return magazynPlanUstandaryzujTabeleHTML(`${intro}${magazynTabelaOperacyjnaHTML()}${magazynDokumentyPanelHTML()}`);
+  const modes=[["braki","1","Braki i zakupy","stan, rezerwacje i pokrycie"],["producenci","2","Zamówienia i e-maile","zatwierdź, wyślij i przyjmij"],["pz-wz","3","Operacje PZ / WZ","skanuj, koryguj i zaksięguj"],["caly","☰","Cały proces","pełny przebieg na jednym ekranie"]];
+  const intro=`<section class="panel restock-plan-intro"><div class="restock-plan-automation"><span class="restock-plan-automation-icon">⚡</span><div><span class="order-pro-label">Automatyczny plan zakupowy</span><b>Braki trafiają do właściwego szkicu bez ręcznego przepisywania</b><small>Każde nowe zamówienie i każda zatwierdzona zmiana stanu ponownie przelicza stan, rezerwacje oraz ilości już zamówione. „Aktualizuj plan” w nagłówku jest bezpieczną kontrolą na żądanie.</small></div><details class="restock-plan-tools"><summary>Narzędzia dodatkowe</summary><div><button type="button" onclick="eksportujTabeleOperacyjnaMagazynuCSV()">📤 Eksport CSV bez cen</button><a href="#/admin/agent-ai/producenci">🏭 Kartoteka producentów</a><a href="#/admin/magazyn/etykiety-qr">🏷️ Etykiety QR</a></div></details></div>${magazynPlanCentrumStatusuHTML()}<div class="restock-workspace-switch"><div><span class="order-pro-label">Obszar roboczy</span><b>Pokazujemy tylko proces, nad którym teraz pracujesz</b></div><nav class="restock-workflow-nav" aria-label="Obszar pracy planu zatowarowania">${modes.map(([id,step,label,description])=>`<button type="button" data-restock-mode="${id}" class="${magazynPlanTryb===id?"active":""}" aria-pressed="${magazynPlanTryb===id}" onclick="magazynPlanUstawTryb(${jsArg(id)})"><span>${step}</span><div><b>${label}</b><small>${description}</small></div></button>`).join("")}</nav></div></section>`;
+  let body="";
+  if(magazynPlanTryb==="pz-wz")body=magazynDokumentyPanelHTML();
+  else{
+    body=`<div class="restock-plan-domain mode-${esc(magazynPlanTryb)}">${magazynTabelaOperacyjnaHTML()}</div>`;
+    if(magazynPlanTryb==="caly")body+=magazynDokumentyPanelHTML();
+  }
+  return magazynPlanUstandaryzujTabeleHTML(`${intro}${body}`);
 }
 function odswiezPlanZatowarowaniaWidoku(){
   const root=document.getElementById("warehouseRestockWorkspace");if(!root||typeof magazynTabelaOperacyjnaHTML!=="function")return false;
@@ -8747,18 +8800,38 @@ function magazynStanWierszHTML(p={},kontekst={}){
 }
 function magazynStanyPrzygotujKartyProgresywnie(lista=[],kontekst={}){
   magazynStanyKartyObserwator?.disconnect();magazynStanyKartyObserwator=null;
-  const items=Array.isArray(lista)?lista:[],generation=++magazynStanyKartyGeneracja;
+  const source=Array.isArray(lista)?lista:[],items=magazynStanyElementyWidoku(source,kontekst),generation=++magazynStanyKartyGeneracja;
   magazynStanyKartyKontekst=kontekst;magazynStanyKartyOczekujace=items.slice(MAGAZYN_STANY_PARTIA_KART);
-  const first=items.slice(0,MAGAZYN_STANY_PARTIA_KART).map(p=>magazynStanWierszHTML(p,kontekst)).join("");
+  const first=items.slice(0,MAGAZYN_STANY_PARTIA_KART).map(item=>magazynStanElementHTML(item,kontekst)).join("");
   if(!magazynStanyKartyOczekujace.length)return first;
   setTimeout(()=>magazynStanyUruchomDoloadowywanie(generation),0);
-  return `${first}<tr data-warehouse-stock-loader data-generation="${generation}"><td colspan="7" data-label=""><div class="warehouse-stock-progressive-loader"><span><b>Załadowano ${Math.min(MAGAZYN_STANY_PARTIA_KART,items.length)} z ${items.length}</b><small>Kolejne pozycje pojawią się podczas przewijania.</small></span><button class="btn ghost" type="button" onclick="magazynStanyDoloadujKarty(${generation})">Pokaż kolejne</button></div></td></tr>`;
+  return `${first}<tr data-warehouse-stock-loader data-generation="${generation}"><td colspan="7" data-label=""><div class="warehouse-stock-progressive-loader"><span><b>Załadowano ${Math.min(MAGAZYN_STANY_PARTIA_KART,items.length)} z ${items.length} wierszy</b><small>Kolejne pozycje pojawią się podczas przewijania.</small></span><button class="btn ghost" type="button" onclick="magazynStanyDoloadujKarty(${generation})">Pokaż kolejne</button></div></td></tr>`;
+}
+function magazynStanGrupaProduktu(p={},mode=grupowanieStanowMagazynu){
+  const code=String(magazynMetaProduktu(p.id).lokalizacja||""),wanted=mode==="strefy"?"strefa":mode==="regaly"?"regał":mode==="polki"?"półka":"";
+  let current=typeof magazynLokalizacjaPoKodzie==="function"?magazynLokalizacjaPoKodzie(code):null,guard=0;
+  while(current&&guard++<12){if(current.typ===wanted)return current;current=current.parentKod?magazynLokalizacjaPoKodzie(current.parentKod):null;}
+  return {kod:`BRAK-${wanted||"LOKALIZACJI"}`,nazwa:wanted==="regał"?"Bez przypisanego regału":wanted==="półka"?"Bez przypisanej półki":wanted==="strefa"?"Bez przypisanego obszaru":"Bez lokalizacji",typ:wanted};
+}
+function magazynStanyElementyWidoku(lista=[],kontekst={}){
+  if(grupowanieStanowMagazynu==="lista")return lista;
+  const rez=kontekst.rez||{},groups=new Map();
+  lista.forEach(p=>{const location=magazynStanGrupaProduktu(p),key=String(location.kod);if(!groups.has(key))groups.set(key,{location,products:[]});groups.get(key).products.push(p);});
+  return [...groups.values()].sort((a,b)=>String(a.location.kod).localeCompare(String(b.location.kod),"pl",{numeric:true,sensitivity:"base"})).flatMap(group=>{
+    const pieces=group.products.reduce((sum,p)=>sum+Number(stanMagazynuId(p.id)||0),0),reserved=group.products.reduce((sum,p)=>sum+Number(rez[p.id]||0),0);
+    return [{__warehouseGroup:true,location:group.location,count:group.products.length,pieces,reserved},...group.products];
+  });
+}
+function magazynStanElementHTML(item={},kontekst={}){
+  if(!item.__warehouseGroup)return magazynStanWierszHTML(item,kontekst);
+  const location=item.location||{},path=location.kod?.startsWith("BRAK-")?location.nazwa:sciezkaNazwLokalizacjiMagazynu(location.kod);
+  return `<tr class="warehouse-stock-group-row" data-warehouse-stock-group><td colspan="7" data-label=""><div><span>${magazynIkonaTypuLokalizacji(location.typ)}</span><span><b>${esc(path||location.nazwa||"Bez lokalizacji")}</b><small>${esc(location.kod?.startsWith("BRAK-")?"Do uporządkowania":location.kod||"")}</small></span><span><strong>${item.count}</strong><small>produktów</small></span><span><strong>${item.pieces}</strong><small>sztuk</small></span><span><strong>${item.reserved}</strong><small>rezerwacji</small></span></div></td></tr>`;
 }
 function magazynStanyDoloadujKarty(generation=magazynStanyKartyGeneracja){
   const loader=document.querySelector(`[data-warehouse-stock-loader][data-generation="${Number(generation)}"]`);if(!loader||Number(generation)!==magazynStanyKartyGeneracja)return false;
-  const batch=magazynStanyKartyOczekujace.splice(0,MAGAZYN_STANY_PARTIA_KART);if(batch.length){loader.insertAdjacentHTML("beforebegin",batch.map(p=>magazynStanWierszHTML(p,magazynStanyKartyKontekst||{})).join(""));magazynPlanUstandaryzujTabeleDOM(loader.closest(".warehouse-stock-list")||document);}
+  const batch=magazynStanyKartyOczekujace.splice(0,MAGAZYN_STANY_PARTIA_KART);if(batch.length){loader.insertAdjacentHTML("beforebegin",batch.map(item=>magazynStanElementHTML(item,magazynStanyKartyKontekst||{})).join(""));magazynPlanUstandaryzujTabeleDOM(loader.closest(".warehouse-stock-list")||document);}
   if(!magazynStanyKartyOczekujace.length){magazynStanyKartyObserwator?.disconnect();magazynStanyKartyObserwator=null;loader.remove();return true;}
-  const loaded=document.querySelectorAll(".warehouse-stock-list [data-warehouse-stock-row]").length,total=loaded+magazynStanyKartyOczekujace.length,label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${loaded} z ${total}`;return true;
+  const loaded=document.querySelectorAll(".warehouse-stock-list :is([data-warehouse-stock-row],[data-warehouse-stock-group])").length,total=loaded+magazynStanyKartyOczekujace.length,label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${loaded} z ${total} wierszy`;return true;
 }
 function magazynStanyUruchomDoloadowywanie(generation=magazynStanyKartyGeneracja){
   const loader=document.querySelector(`[data-warehouse-stock-loader][data-generation="${Number(generation)}"]`);if(!loader||typeof IntersectionObserver!=="function")return;
@@ -8904,11 +8977,14 @@ function widokAdminMagazyn(sekcja="pulpit"){
     <div class="warehouse-stock-quickfilters" aria-label="Szybkie filtry">
       ${[["na-stanie","📦 Fizycznie na stanie"],["rezerwacje","🧾 Z rezerwacją"],["niskie","🟡 Niski stan"],["bezlokalizacji","🗺️ Bez lokalizacji"],["brak","0️⃣ Stan zerowy"],["monitorowane","📋 Wszystkie policzone"],["bezlimitu","∞ Bez ustalonego stanu"]].map(([v,t])=>`<button type="button" class="${filtrMagazynu===v?"active":""}" onclick="ustawFiltrMagazynu(${jsArg(v)},${jsArg(v==="rezerwacje"?"rezerwacje":v==="bezlokalizacji"?"lokalizacja":"stan-malejaco")})">${t}</button>`).join("")}
     </div>
-    ${adminWyszukiwaniePanelHTML({id:"warehouse-stock",description:"Nazwa, SKU, EAN, ID, fizyczna lokalizacja, bieżący stan, rezerwacje i data inwentaryzacji.",results:lista.length,active:!!(frazaMagazynu||filtrMagazynu!=="na-stanie"||filtrLokalizacjiMagazynu!=="wszystkie"||filtrInwentaryzacjiMagazynu!=="wszystkie"||sortowanieMagazynu!=="stan-malejaco"),open:true,fields:`<div class="warehouse-stock-toolbar admin-search-full">
-      <label class="warehouse-stock-search"><span>Wyszukaj produkt</span><input data-warehouse-stock-search placeholder="Nazwa, SKU, EAN, ID lub lokalizacja…" value="${esc(frazaMagazynu)}" oninput="magazynSzukajProdukty(this)" autocomplete="off"></label>
+    ${adminWyszukiwaniePanelHTML({id:"warehouse-stock",description:"Nazwa, wszystkie identyfikatory produktu, fizyczna lokalizacja, stan, rezerwacje i data inwentaryzacji.",results:lista.length,active:!!(frazaMagazynu||kodMagazynu||filtrMagazynu!=="na-stanie"||filtrLokalizacjiMagazynu!=="wszystkie"||filtrInwentaryzacjiMagazynu!=="wszystkie"||sortowanieMagazynu!=="stan-malejaco"||grupowanieStanowMagazynu!=="lista"),open:true,fields:`<div class="warehouse-stock-toolbar admin-search-full">
+      <label class="warehouse-stock-search"><span>Nazwa lub dane produktu</span><input data-warehouse-stock-search placeholder="Nazwa, kategoria, producent lub lokalizacja…" value="${esc(frazaMagazynu)}" oninput="magazynSzukajProdukty(this)" autocomplete="off"></label>
+      <label class="warehouse-stock-code-search"><span>Kod produktu</span><input data-warehouse-code-search placeholder="EAN, SKU, EXTERNAL_ID, MPN, ID…" value="${esc(kodMagazynu)}" oninput="magazynSzukajKod(this)" autocomplete="off" spellcheck="false"></label>
+      <label><span>Rodzaj kodu</span><select onchange="typKoduMagazynu=this.value;stronaMagazynu=1;renderuj()">${[["wszystkie","Każdy identyfikator"],["ean","EAN / GTIN"],["sku","SKU / EXTERNAL_ID"],["producent","Kod producenta / MPN"],["optima","Kod Optimy"],["dostawca","Kod dostawcy"],["id","ID systemowe"]].map(([v,t])=>`<option value="${v}" ${typKoduMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
       <label><span>Stan fizyczny</span><select onchange="filtrMagazynu=this.value;stronaMagazynu=1;renderuj()">${[["na-stanie","Fizycznie na stanie (> 0)"],["monitorowane","Wszystkie policzone"],["niskie","Niski stan"],["brak","Stan zerowy"],["rezerwacje","Z rezerwacją"],["bezlokalizacji","Bez lokalizacji"],["bezlimitu","Bez ustalonego stanu"]].map(([v,t])=>`<option value="${v}" ${filtrMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
       <label><span>Sortowanie</span><select onchange="sortowanieMagazynu=this.value;stronaMagazynu=1;renderuj()">${[["stan-malejaco","Największy stan"],["stan","Najmniejszy stan"],["lokalizacja","Lokalizacja magazynowa"],["rezerwacje","Najwięcej rezerwacji"],["dostepne","Najmniej wolnych"],["inwentaryzacja","Najdawniej potwierdzone"],["wartosc","Najwyższa wartość"],["nazwa","Nazwa A–Z"]].map(([v,t])=>`<option value="${v}" ${sortowanieMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
-      <label><span>Lokalizacja</span><select onchange="filtrLokalizacjiMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszystkie">Każda lokalizacja</option><option value="BRAK" ${filtrLokalizacjiMagazynu==="BRAK"?"selected":""}>Bez lokalizacji</option>${lokalizacje.map(l=>`<option value="${esc(l.kod)}" ${filtrLokalizacjiMagazynu===l.kod?"selected":""}>${esc(l.kod)} — ${esc(l.nazwa||l.typ)}</option>`).join("")}</select></label>
+      <label><span>Zakres lokalizacji</span><select onchange="filtrLokalizacjiMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszystkie">Cały magazyn</option><option value="BRAK" ${filtrLokalizacjiMagazynu==="BRAK"?"selected":""}>Bez lokalizacji</option>${lokalizacje.map(l=>`<option value="${esc(l.kod)}" ${filtrLokalizacjiMagazynu===l.kod?"selected":""}>${l.typ==="strefa"?"🏭":l.typ==="regał"?"🗄️":"📚"} ${esc(sciezkaNazwLokalizacjiMagazynu(l.kod))}</option>`).join("")}</select></label>
+      <label><span>Układ towaru</span><select data-warehouse-grouping onchange="magazynUstawGrupowanieStanow(this.value)">${[["lista","Zwykła lista"],["strefy","Według obszarów"],["regaly","Według regałów"],["polki","Według półek"]].map(([v,t])=>`<option value="${v}" ${grupowanieStanowMagazynu===v?"selected":""}>${t}</option>`).join("")}</select></label>
       <label><span>Inwentaryzacja</span><select onchange="filtrInwentaryzacjiMagazynu=this.value;stronaMagazynu=1;renderuj()"><option value="wszystkie">Każda data</option><option value="aktualna" ${filtrInwentaryzacjiMagazynu==="aktualna"?"selected":""}>Aktualna ≤ 90 dni</option><option value="stara" ${filtrInwentaryzacjiMagazynu==="stara"?"selected":""}>Brak / starsza niż 90 dni</option></select></label>
       <label><span>Na stronie</span><select onchange="ustawMagazynNaStronie(this.value)">${[25,50,100,200,500].map(n=>`<option value="${n}" ${magazynNaStronie===n?"selected":""}>${n} produktów</option>`).join("")}</select></label>
     </div>`,actions:adminOperacjeWynikowHTML({id:"warehouse-stock",selected:zaznaczoneMagazynProdukty.size,pageCount:fragment.length,resultCount:lista.length,selectPage:"magazynUstawZaznaczenie('strona')",selectAll:"magazynUstawZaznaczenie('filtr')",clear:"magazynWyczyscZaznaczenie()",exportSelected:"magazynEksportuj('zaznaczone')",exportAll:"magazynEksportuj('filtr')"})})}
