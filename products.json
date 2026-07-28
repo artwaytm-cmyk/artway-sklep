@@ -7743,7 +7743,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "Wiatraczek B 25 cm - Alexander",
+    "nazwa": "Wiatrak B – wiatraczek Alexander, 3+",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/9ed67d191083751112f71f2f95a8a7b5/pol_pm_Wiatrak-B-130_1.jpg",
     "_catalog": {
       "channels": {
@@ -7765,22 +7765,22 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-130-Wiatrak-B.html",
     "externalId": "0360",
-    "opisKrotki": "Wiatraczek B marki Alexander z kategorii wiatraczków. Ma średnicę 25 cm w rozmiarze główki i jest przeznaczony dla dzieci od 3 lat.",
+    "opisKrotki": "Wiatraczek marki Alexander z kategorią zabawki dla dzieci od 3 lat. Model Wiatrak B ma główkę o średnicy 25 cm i jest przeznaczony do zabawy dla 1 gracza.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-130-Wiatrak-B.html",
     "kodProducenta": "0360",
     "allegroProductId": "341ac741-5f36-4e7a-8731-9a58ab300c14",
     "allegroCategoryId": "86274",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:29:35.989Z",
-    "allegroAgentPreparationRunId": "39dbadab-cf7e-4dbc-9662-1ef4829d2e0d",
+    "allegroAgentPreparedAt": "2026-07-28T09:03:57.520Z",
+    "allegroAgentPreparationRunId": "9cfb31e9-ef9f-4cf7-bcd7-2f484293966b",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 10,
+    "allegroAgentPreparationRetryCount": 12,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-43fb56e4",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-753a06c8",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -33418,7 +33418,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "X-Press Me - Brelok DIY Kot, 62 elementy, Alexander",
+    "nazwa": "X-Press Me – brelok DIY Kot, 62 elementy, Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/27c36f87b051cc20a6d184dcb19b72ec/pol_pm_-X-PRESS-ME-BRELOK-DIY-Kot-62-El-1577_1.jpg",
     "_catalog": {
       "channels": {
@@ -33440,23 +33440,23 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1577--X-PRESS-ME-BRELOK-DIY-Kot-62-El.html",
     "externalId": "2938",
-    "opisKrotki": "Kreatywny brelok DIY z serii X-Press Me w wersji Kot. Zestaw zawiera 62 elementy i pozwala złożyć ozdobę, a następnie zmieniać jej wygląd zgodnie z własnym pomysłem.",
+    "opisKrotki": "X-Press Me – brelok DIY Kot to kreatywny zestaw marki Alexander z serii X-Press Me. Zawiera 62 elementy i pozwala samodzielnie złożyć personalizowaną ozdobę w formie breloka.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1577--X-PRESS-ME-BRELOK-DIY-Kot-62-El.html",
     "kodProducenta": "2938",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T06:06:29.501Z",
-    "allegroAgentPreparationRunId": "52b04046-91e2-47ae-8f11-ca4fdefb05ec",
-    "allegroAgentPreparationStatus": "decision_required",
+    "allegroAgentPreparedAt": "2026-07-28T09:08:31.072Z",
+    "allegroAgentPreparationRunId": "9dd795b1-b59e-41bd-8ee1-26439d4f1def",
+    "allegroAgentPreparationStatus": "retrying",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 5,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-6132827c",
-    "allegroAgentPreparationNextRetryAt": ""
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-4310c883",
+    "allegroAgentPreparationNextRetryAt": "2026-07-28T09:13:31.072Z"
   },
   {
     "id": "1000749",
@@ -41930,7 +41930,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Multigra",
-    "nazwa": "Śrubka po śrubce - gra i zabawka edukacyjna Montessori, Multigra",
+    "nazwa": "Śrubka Po Śrubce – Montessori gra i zabawka edukacyjna, Multigra",
     "zdjecie": "https://multigra.com.pl/wp-content/uploads/sites/5/2026/05/3002.jpg",
     "_catalog": {
       "channels": {
@@ -41952,13 +41952,13 @@
     "producent": "Multigra",
     "sourceUrl": "https://multigra.com.pl/produkty/srubka-po-srubce/",
     "externalId": "",
-    "opisKrotki": "„Śrubka po śrubce” to kolorowa gra i zabawka edukacyjna inspirowana metodą Montessori. Zabawa wspiera rozwój dziecka przez działanie, samodzielne odkrywanie, ćwiczenie zręczności i pamięci.",
+    "opisKrotki": "Kolorowa gra i zabawka edukacyjna inspirowana Montessori, która rozwija zręczność i pamięć. Zadaniem graczy jest nakręcanie kolorowych nakrętek na śrubę zgodnie ze wzorem z kart.",
     "producentUrl": "https://multigra.com.pl/produkty/srubka-po-srubce/",
     "kodProducenta": "",
     "allegroCategoryId": "123948",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:38:45.686Z",
-    "allegroAgentPreparationRunId": "d83668c6-f032-4c53-9f0c-609d84269035",
+    "allegroAgentPreparedAt": "2026-07-28T09:06:17.741Z",
+    "allegroAgentPreparationRunId": "9dc73442-ba6a-4dae-b966-c9168b325c64",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Wiek dziecka",
@@ -41969,9 +41969,9 @@
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationRetryCount": 11,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-0ccb7628",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-22b61dac",
     "allegroAgentPreparationNextRetryAt": ""
   }
 ]
