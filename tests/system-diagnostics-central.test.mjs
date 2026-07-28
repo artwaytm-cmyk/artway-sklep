@@ -199,6 +199,7 @@ test('frontend wysyła błędy do VPS i autotest zapisuje nazwę nieudanej kontr
   assert.match(diagnostics, /Centralny rejestr błędów/);
   assert.match(diagnostics, /diagnostics-checks-sync/);
   assert.match(diagnostics, /systemDokumentTymczasowyHTML/);
+  assert.match(diagnostics, /systemOdswiezDiagnostyke.*diagnostykaSynchronizujProblemy/s);
   assert.match(diagnostics, /fetchedAt/);
   assert.doesNotMatch(diagnostics, /systemPobierzCentralneBledy\(true\)\.then\(renderuj\)/);
   assert.match(diagnostics, /item\.nazwa.*item\.szczegoly/s);

@@ -146,8 +146,10 @@ async function systemOdswiezDiagnostyke(cicho=false){
     const serwerowe=chmuraCzyscSerweroweKopieLS();
     const po=rozmiarDanychLokalnych();
     await diagnostykaWyslijKolejke();
-    await systemPobierzCentralneBledy(true);
     systemDiagStan={ladowanie:false,sprawdzono:true,sprawdzonoAt:new Date().toISOString(),error:"",zwolniono:Math.max(0,przed-po)};
+    const bezpieczneProblemy=testyDiagnostyczne().filter(item=>["Spójność koszyka","Spójność ulubionych","Spójność mapowania"].includes(item.nazwa)&&["bad","warn"].includes(item.status));
+    if(bezpieczneProblemy.length)await naprawDaneSklepu({cicho:true,renderujPo:false});
+    await diagnostykaSynchronizujProblemy(testyDiagnostyczne());
     if((stare.usunieto.length||serwerowe.length)&&!cicho)toast(`Odciążono pamięć przeglądarki o ${Math.round((przed-po)/1024)} KB ✅`);
     return true;
   }catch(error){
