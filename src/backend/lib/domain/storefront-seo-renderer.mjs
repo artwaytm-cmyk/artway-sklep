@@ -1,12 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import { createStoreRepository } from '../core/store-repository.mjs';
-import { catalogPlainText, mergeCatalogProducts } from './catalog-quality.mjs';
+import { catalogPlainText } from './catalog-quality.mjs';
 import { seoProductUnavailable, seoSlug } from './seo-catalog.mjs';
+import { loadStorefrontSeoCatalog } from './storefront-seo-catalog.mjs';
 export { seoProductUnavailable, seoSlug } from './seo-catalog.mjs';
 
 const ORIGIN = 'https://artwaytm.pl';
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const repository = createStoreRepository({ name: 'artway-sklep' });
 const templatePromise = readFile(new URL('../../../../index.html', import.meta.url), 'utf8');
 let catalogCache = null;
 
@@ -25,23 +24,25 @@ const absoluteUrl = (value) => {
   try { return new URL(raw, ORIGIN).toString(); } catch { return ''; }
 };
 
-function activeCatalog(data = {}) {
-  return mergeCatalogProducts(data).activeProducts
-    .filter((product) => Number(product.cena) > 0)
-    .map((product) => ({ ...product, __saleUnavailable: seoProductUnavailable(data, product) }));
-}
-
 async function catalogSnapshot() {
   if (catalogCache && Date.now() - catalogCache.loadedAt < CACHE_TTL_MS) return catalogCache;
-  const record = await repository.read('settings', { data: {}, updated_at: null });
-  const data = record?.data && typeof record.data === 'object' ? record.data : {};
-  const products = activeCatalog(data), productById = new Map(), productsByCategory = new Map();
-  for (const product of products) {
-    productById.set(String(product.id), product);
+  const shared = await loadStorefrontSeoCatalog();
+  const products = shared.pageProducts, indexableProducts = shared.indexableProducts;
+  const productById = new Map(), productsByCategory = new Map();
+  for (const product of products) productById.set(String(product.id), product);
+  for (const product of indexableProducts) {
     const category = cleanText(product.kategoria, 150);
     if (category) productsByCategory.set(category, [...(productsByCategory.get(category) || []), product]);
   }
-  catalogCache = { data, products, productById, productsByCategory, updatedAt: record?.updated_at || null, loadedAt: Date.now() };
+  catalogCache = {
+    data: shared.data,
+    products,
+    indexableProducts,
+    productById,
+    productsByCategory,
+    updatedAt: shared.updatedAt,
+    loadedAt: Date.now(),
+  };
   return catalogCache;
 }
 
@@ -70,6 +71,47 @@ function productIdentifiers(product = {}) {
   return { gtin, sku, mpn };
 }
 
+function productAggregateRating(product = {}) {
+  const ratingValue = Number(product.rating ?? product.ocena ?? product.sredniaOcen);
+  const ratingCount = Math.floor(Number(product.ratingCount ?? product.rating_count ?? product.liczbaOcen));
+  if (!Number.isFinite(ratingValue) || ratingValue < 1 || ratingValue > 5 || ratingCount < 1) return null;
+  return { '@type': 'AggregateRating', ratingValue: ratingValue.toFixed(1), ratingCount };
+}
+
+const merchantReturnPolicy = Object.freeze({
+  '@type': 'MerchantReturnPolicy',
+  applicableCountry: 'PL',
+  returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
+  merchantReturnDays: 14,
+  returnMethod: 'https://schema.org/ReturnByMail',
+  returnFees: 'https://schema.org/ReturnFeesCustomerResponsibility',
+});
+
+const shippingDetails = Object.freeze([
+  {
+    '@type': 'OfferShippingDetails',
+    name: 'Paczkomat lub PaczkoPunkt InPost',
+    shippingRate: { '@type': 'MonetaryAmount', value: '18.00', currency: 'PLN' },
+    shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'PL' },
+    deliveryTime: {
+      '@type': 'ShippingDeliveryTime',
+      handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 2, unitCode: 'DAY' },
+      transitTime: { '@type': 'QuantitativeValue', minValue: 1, maxValue: 3, unitCode: 'DAY' },
+    },
+  },
+  {
+    '@type': 'OfferShippingDetails',
+    name: 'Kurier InPost',
+    shippingRate: { '@type': 'MonetaryAmount', value: '24.00', currency: 'PLN' },
+    shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'PL' },
+    deliveryTime: {
+      '@type': 'ShippingDeliveryTime',
+      handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 2, unitCode: 'DAY' },
+      transitTime: { '@type': 'QuantitativeValue', minValue: 1, maxValue: 3, unitCode: 'DAY' },
+    },
+  },
+]);
+
 function productCard(product) {
   const seo = productSeo(product), image = productImages(product)[0], url = `/produkt/${encodeURIComponent(product.id)}`;
   return `<article class="seo-ssr-card">${image ? `<a href="${url}"><img src="${escapeHtml(image)}" alt="${escapeHtml(seo.name)}" loading="lazy" width="320" height="240"></a>` : ''}<div><small>${escapeHtml(seo.category || 'Produkty')}</small><h2><a href="${url}">${escapeHtml(seo.name)}</a></h2><p>${escapeHtml(seo.description)}</p><b>${Number(product.cena).toFixed(2).replace('.', ',')} zł</b>${product.__saleUnavailable?'<span>Chwilowo niedostępny</span>':''}</div></article>`;
@@ -78,6 +120,7 @@ function productCard(product) {
 function productPage(product, products) {
   product = canonicalStoreContent(product);
   const seo = productSeo(product), images = productImages(product), ids = productIdentifiers(product);
+  const aggregateRating = productAggregateRating(product);
   const unavailable = product.__saleUnavailable === true;
   const canonical = `${ORIGIN}/produkt/${encodeURIComponent(product.id)}`;
   const categoryUrl = seo.category ? `${ORIGIN}/kategoria/${seoSlug(seo.category)}` : ORIGIN;
@@ -87,7 +130,17 @@ function productPage(product, products) {
         '@type': 'Product', '@id': `${canonical}#product`, name: seo.name, description: cleanText(product.opis || product.description || seo.description, 5000),
         image: images, sku: ids.sku, ...(ids.gtin ? { [`gtin${ids.gtin.length}`]: ids.gtin } : {}), ...(ids.mpn ? { mpn: ids.mpn } : {}),
         ...(seo.brand ? { brand: { '@type': 'Brand', name: seo.brand } } : {}),
-        offers: { '@type': 'Offer', url: canonical, priceCurrency: 'PLN', price: Number(product.cena).toFixed(2), availability: unavailable ? 'https://schema.org/OutOfStock' : 'https://schema.org/InStock', itemCondition: 'https://schema.org/NewCondition' },
+        ...(aggregateRating ? { aggregateRating } : {}),
+        offers: {
+          '@type': 'Offer',
+          url: canonical,
+          priceCurrency: 'PLN',
+          price: Number(product.cena).toFixed(2),
+          availability: unavailable ? 'https://schema.org/OutOfStock' : 'https://schema.org/InStock',
+          itemCondition: 'https://schema.org/NewCondition',
+          shippingDetails,
+          hasMerchantReturnPolicy: merchantReturnPolicy,
+        },
       },
       { '@type': 'BreadcrumbList', itemListElement: [
         { '@type': 'ListItem', position: 1, name: 'Strona główna', item: `${ORIGIN}/` },
@@ -124,7 +177,11 @@ function replaceMeta(html, { title, description, canonical, image, type, schema,
     .replace(/<meta name="twitter:description" content="[^"]*">/i, `<meta name="twitter:description" content="${escapeHtml(description)}">`)
     .replace(/<script id="artway-seo-schema" type="application\/ld\+json">[\s\S]*?<\/script>/i, `<script id="artway-seo-schema" type="application/ld+json">${jsonLd(schema)}</script>`)
     .replace(/<main id="widok" tabindex="-1"[^>]*>[\s\S]*?<\/main>/i, `<main id="widok" tabindex="-1" data-server-rendered="true">${content}</main>`);
-  const social = `<link rel="canonical" href="${escapeHtml(canonical)}">${image ? `<meta property="og:image" content="${escapeHtml(image)}"><meta property="og:image:alt" content="${escapeHtml(title)}"><meta name="twitter:image" content="${escapeHtml(image)}">` : ''}`;
+  const canonicalTag = `<link rel="canonical" href="${escapeHtml(canonical)}">`;
+  output = /<link\b[^>]*rel=["']canonical["'][^>]*>/i.test(output)
+    ? output.replace(/<link\b[^>]*rel=["']canonical["'][^>]*>/i, canonicalTag)
+    : output.replace('</head>', `${canonicalTag}</head>`);
+  const social = image ? `<meta property="og:image" content="${escapeHtml(image)}"><meta property="og:image:alt" content="${escapeHtml(title)}"><meta name="twitter:image" content="${escapeHtml(image)}">` : '';
   output = output.replace('</head>', `${social}</head>`);
   return output;
 }
@@ -135,7 +192,7 @@ export function seoRouteMatches(pathname = '') {
 
 export async function renderStorefrontSeoPage(request) {
   const url = new URL(request.url), pathname = decodeURIComponent(url.pathname.replace(/\/+$/, '') || '/');
-  const { products, productById, productsByCategory } = await catalogSnapshot();
+  const { products, indexableProducts, productById, productsByCategory } = await catalogSnapshot();
   let page = null;
   if (pathname.startsWith('/produkt/')) {
     const id = pathname.slice('/produkt/'.length);
@@ -147,9 +204,9 @@ export async function renderStorefrontSeoPage(request) {
     const category = categories.find((entry) => entry === key || seoSlug(entry) === seoSlug(key));
     if (category) page = collectionPage({ name: category, description: `Produkty z kategorii ${category}. Sprawdź aktualną ofertę, ceny i wygodną dostawę InPost.`, canonical: `${ORIGIN}/kategoria/${seoSlug(category)}`, products: productsByCategory.get(category) || [] });
   } else if (pathname === '/promocje') {
-    page = collectionPage({ name: 'Promocje', description: 'Aktualne promocje na gry, zabawki kreatywne, balony i artykuły imprezowe w Artway-TM.', canonical: `${ORIGIN}/promocje`, products: products.filter((product) => Number(product.staraCena) > Number(product.cena)) });
+    page = collectionPage({ name: 'Promocje', description: 'Aktualne promocje na gry, zabawki kreatywne, balony i artykuły imprezowe w Artway-TM.', canonical: `${ORIGIN}/promocje`, products: indexableProducts.filter((product) => Number(product.staraCena) > Number(product.cena)) });
   } else if (pathname === '/nowosci') {
-    page = collectionPage({ name: 'Nowości', description: 'Nowe gry, zabawki kreatywne, balony i artykuły imprezowe dostępne w Artway-TM.', canonical: `${ORIGIN}/nowosci`, products: products.filter((product) => String(product.badge || '').toLocaleLowerCase('pl-PL') === 'nowość') });
+    page = collectionPage({ name: 'Nowości', description: 'Nowe gry, zabawki kreatywne, balony i artykuły imprezowe dostępne w Artway-TM.', canonical: `${ORIGIN}/nowosci`, products: indexableProducts.filter((product) => String(product.badge || '').toLocaleLowerCase('pl-PL') === 'nowość') });
   }
   const template = await templatePromise;
   if (!page) {

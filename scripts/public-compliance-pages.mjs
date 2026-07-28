@@ -60,12 +60,15 @@ function pageMain(page) {
 
 export function renderPublicCompliancePage(indexHtml, page) {
   let html = String(indexHtml);
+  const canonical = `<link rel="canonical" href="https://artwaytm.pl/${page.route}/">`;
   html = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${page.title}</title>`);
   html = html.replace(/<meta name="description" content="[^"]*">/i, `<meta name="description" content="${page.description}">`);
   html = html.replace(/<meta property="og:title" content="[^"]*">/i, `<meta property="og:title" content="${page.title}">`);
   html = html.replace(/<meta property="og:description" content="[^"]*">/i, `<meta property="og:description" content="${page.description}">`);
   html = html.replace(/<meta property="og:url" content="[^"]*">/i, `<meta property="og:url" content="https://artwaytm.pl/${page.route}/">`);
-  html = html.replace('</head>', `<link rel="canonical" href="https://artwaytm.pl/${page.route}/">\n</head>`);
+  html = /<link\b[^>]*rel=["']canonical["'][^>]*>/i.test(html)
+    ? html.replace(/<link\b[^>]*rel=["']canonical["'][^>]*>/i, canonical)
+    : html.replace('</head>', `${canonical}\n</head>`);
   html = html.replace(/<main id="widok"[\s\S]*?<\/main>/i, pageMain(page));
   return html;
 }

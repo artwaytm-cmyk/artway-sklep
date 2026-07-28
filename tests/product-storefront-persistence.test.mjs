@@ -3,16 +3,17 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 test('aktualizacja lub brak u producenta nie usuwa karty produktu ze sklepu', async () => {
-  const [catalog, view, seoRenderer] = await Promise.all([
+  const [catalog, view, seoRenderer, seoCatalog] = await Promise.all([
     readFile('src/frontend/05-catalog-inventory.js', 'utf8'),
     readFile('src/frontend/06b-storefront-catalog.js', 'utf8'),
     readFile('src/backend/lib/domain/storefront-seo-renderer.mjs', 'utf8'),
+    readFile('src/backend/lib/domain/storefront-seo-catalog.mjs', 'utf8'),
   ]);
   const builder = catalog.slice(catalog.indexOf('function zbudujProdukty()'), catalog.indexOf('function podpisPublikacjiProduktu'));
   assert.doesNotMatch(builder, /filter\s*\(\s*p\s*=>\s*!produktOznaczonyNiedostepny/);
   assert.match(builder, /Brak u producenta wstrzymuje zakup, ale nie usuwa karty/);
   assert.match(view, /const p = produktSklepuPoId\(id\)/);
-  assert.match(seoRenderer, /__saleUnavailable: seoProductUnavailable/);
+  assert.match(seoCatalog, /__saleUnavailable:[\s\S]*seoProductUnavailable/);
   assert.match(seoRenderer, /OutOfStock/);
   assert.match(seoRenderer, /karta i adres pozostają aktywne/);
 });
@@ -37,12 +38,15 @@ test('stary adres po połączeniu duplikatów prowadzi do zachowanej kartoteki',
   assert.match(lookup, /grupa\.canonical\.id/);
 });
 
-test('mapa strony zachowuje adres, a feed oznacza brak zamiast usuwać produkt', async () => {
-  const [sitemap, feed] = await Promise.all([
+test('adres niedostępnego produktu pozostaje aktywny, ale sitemap nie proponuje go do indeksowania', async () => {
+  const [sitemap, seoCatalog, feed] = await Promise.all([
     readFile('src/backend/sitemap.mjs', 'utf8'),
+    readFile('src/backend/lib/domain/storefront-seo-catalog.mjs', 'utf8'),
     readFile('src/backend/google-products.mjs', 'utf8'),
   ]);
-  assert.doesNotMatch(sitemap, /!seoProductUnavailable/);
+  assert.match(sitemap, /indexableProducts/);
+  assert.match(seoCatalog, /pageProducts/);
+  assert.match(seoCatalog, /indexableProducts = pageProducts\.filter/);
   assert.match(feed, /productIsUnavailable\(product, availability\) \? 'out_of_stock' : 'in_stock'/);
   const eligibility = feed.slice(feed.indexOf('if (hidden.has'), feed.indexOf('const brand'));
   assert.doesNotMatch(eligibility, /productIsUnavailable/);

@@ -64,6 +64,7 @@ const files = [
   'src/backend/cron-telegram-center.mjs',
   'src/backend/telegram-webhook.mjs',
   'src/backend/sitemap.mjs',
+  'src/backend/lib/domain/storefront-seo-catalog.mjs',
   'src/backend/google-products.mjs',
   'robots.txt',
 ];
@@ -891,8 +892,8 @@ requireMarkers('src/backend/cron-seo-daily.mjs', cronSeoDaily, [
 
 requireMarkers('src/backend/sitemap.mjs', sitemap, [
   'sitemaps.org/schemas/sitemap',
-  'mergeCatalogProducts',
-  'artway_produkty_ukryte',
+  'loadStorefrontSeoCatalog',
+  'indexableProducts',
   '/produkt/',
 ]);
 
