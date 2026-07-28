@@ -202,7 +202,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Multigra",
-    "nazwa": "Dinozaury - zestaw kreatywny Multigra",
+    "nazwa": "Dinozaury – kreatywny zestaw Multigra",
     "zdjecie": "https://multigra.com.pl/wp-content/uploads/sites/5/2025/07/0009-Piaskowe-Malowanki-Dinozaury-scaled.jpg",
     "_catalog": {
       "channels": {
@@ -224,15 +224,15 @@
     "producent": "Multigra",
     "sourceUrl": "https://multigra.com.pl/produkty/dinozaury/",
     "externalId": "0009",
-    "opisKrotki": "Dinozaury to zestaw kreatywny marki Multigra do twórczej zabawy z piaskiem. Produkt przeznaczony jest dla dzieci od 6 lat i wspiera samodzielną, manualną aktywność.",
+    "opisKrotki": "Dinozaury to kreatywny zestaw marki Multigra dla dzieci od 6 lat. Zabawa polega na tworzeniu kolorowych obrazków przy użyciu przyjemnego w dotyku piasku, co sprzyja cierpliwości i rozwijaniu wyobraźni.",
     "cenaAllegro": 16,
     "producentUrl": "https://multigra.com.pl/produkty/dinozaury/",
     "cenaVonHalsky": 14,
     "kodProducenta": "0009",
     "allegroCategoryId": "93663",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:35:12.404Z",
-    "allegroAgentPreparationRunId": "c32a3a56-8039-4b1e-9fa6-327a31dd8d69",
+    "allegroAgentPreparedAt": "2026-07-28T09:42:44.507Z",
+    "allegroAgentPreparationRunId": "dbe18668-43a0-4bf8-a403-1b2152453db7",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)",
@@ -240,9 +240,9 @@
       "EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną."
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationRetryCount": 11,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-b50636a9",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-c4288306",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -286,7 +286,7 @@
     "allegroCategoryId": "66781",
     "agentOnboardingStatus": "needs_attention",
     "allegroAgentPreparedAt": "2026-07-28T04:26:35.112Z",
-    "allegroEditorialSyncState": "requires_publication_decision",
+    "allegroEditorialSyncState": "queued",
     "allegroAgentPreparationRunId": "2b5a2b03-9a20-4a15-89a3-1341ca54011b",
     "allegroAgentPreparationStatus": "ready",
     "allegroAgentPreparationMissing": [],
@@ -8661,7 +8661,7 @@
           "active": true
         },
         "allegro": {
-          "status": "ACTIVE",
+          "status": "INACTIVE",
           "offerId": "18795912288"
         }
       },
@@ -8823,7 +8823,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Grabo",
-    "nazwa": "Balon foliowy - Dalmatyńczyki serce 46 cm",
+    "nazwa": "Balon foliowy Dalmatyńczyki serce 46 cm Grabo",
     "zdjecie": "https://hurtowniabalonow.pl/hpeciai/5b4ba599e2a96cd89039e5174a1fb736/pol_pm_Balon-foliowy-Dalmatynczyki-serce-46-cm-6740_2.jpg",
     "_catalog": {
       "channels": {
@@ -8845,13 +8845,13 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-6740-Balon-foliowy-Dalmatynczyki-serce-46-cm.html",
     "externalId": "041R",
-    "opisKrotki": "Balon foliowy - Dalmatyńczyki serce 46 cm Dodaj do listy zakupowej Rozmiar uniwersalny 4,90 zł brutto / 1 szt. Najniższa cena produktu w okresie 30 dni przed wprowadzeniem obniżki: 0,00 zł / 1 szt.+Infinity% Cena regularna: / 1 szt.Infinity% Cena katalogowa: Możesz kupić za pkt.",
+    "opisKrotki": "Balon foliowy w kształcie serca z nadrukiem piesków dalmatyńczyków. Produkt marki Grabo, o wymiarze ok. 46 cm, przeznaczony do napełnienia helem lub powietrzem.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-6740-Balon-foliowy-Dalmatynczyki-serce-46-cm.html",
     "kodProducenta": "041R",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:56:45.186Z",
-    "allegroAgentPreparationRunId": "662d0008-e1f1-456d-93f9-2426e1697d02",
+    "allegroAgentPreparedAt": "2026-07-28T09:30:33.628Z",
+    "allegroAgentPreparationRunId": "cedfa8b4-7142-40cd-9734-e6530199a3e6",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
@@ -8862,9 +8862,9 @@
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 3,
+    "allegroAgentPreparationRetryCount": 6,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-4a9027e0",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-05e34bd3",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -10686,7 +10686,7 @@
           "active": true
         },
         "allegro": {
-          "status": "ACTIVE",
+          "status": "INACTIVE",
           "offerId": "18795896734"
         }
       },
@@ -14825,7 +14825,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "12463007531"
+          "offerId": "18789468709"
         }
       },
       "detailLevel": "list",
@@ -16480,7 +16480,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "14148248256"
+          "offerId": "18789493868"
         }
       },
       "detailLevel": "list",
@@ -17715,7 +17715,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Grabo",
-    "nazwa": "Balon foliowy Koń w Galopie 91 cm Grabo",
+    "nazwa": "Balon Foliowy Koń w Galopie – Grabo, 91 cm",
     "zdjecie": "https://hurtowniabalonow.pl/hpeciai/9c119019dc26e1ee842f94f50c3635b4/pol_pm_Balon-Foliowy-Kon-w-Galopie-91cm-Grabo-11152_1.jpg",
     "_catalog": {
       "channels": {
@@ -17737,13 +17737,13 @@
     "producent": "Grabo",
     "sourceUrl": "https://hurtowniabalonow.pl/product-pol-11152-Balon-Foliowy-Kon-w-Galopie-91cm-Grabo.html",
     "externalId": "180LBR",
-    "opisKrotki": "Balon foliowy w kształcie konia w galopie, w kolorze brązowym. Model marki Grabo ma 91 cm i nadaje się do samodzielnego napełnienia. Można napełnić go helem.",
+    "opisKrotki": "Balon foliowy w kształcie konia w galopie w kolorze brązowym. Model marki Grabo, do samodzielnego napełnienia helem lub powietrzem.",
     "producentUrl": "https://hurtowniabalonow.pl/product-pol-11152-Balon-Foliowy-Kon-w-Galopie-91cm-Grabo.html",
     "kodProducenta": "180LBR",
     "allegroCategoryId": "88350",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:51:36.724Z",
-    "allegroAgentPreparationRunId": "e2dcfe2e-1fa2-49bf-ba1a-6637ea9a162b",
+    "allegroAgentPreparedAt": "2026-07-28T09:40:17.552Z",
+    "allegroAgentPreparationRunId": "daa1a202-3c85-4ab8-8090-05457f9a66b8",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
@@ -17753,9 +17753,9 @@
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-8bd60dfc",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-a850216f",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -17912,7 +17912,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "15630524272"
+          "offerId": "18789503159"
         }
       },
       "detailLevel": "list",
@@ -20195,7 +20195,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "12706537100"
+          "offerId": "18774888597"
         }
       },
       "detailLevel": "list",
@@ -20889,7 +20889,7 @@
         },
         "allegro": {
           "status": "ACTIVE",
-          "offerId": "16043336582"
+          "offerId": "18790398410"
         }
       },
       "detailLevel": "list",
@@ -21205,7 +21205,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "Język Ciała - karciana gra rodzinna Alexander",
+    "nazwa": "Język Ciała – gra karciana Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/3a4edb632eb809c0ca4be1de5e1cc3b7/pol_pl_Jezyk-Ciala-699_1.jpg",
     "_catalog": {
       "channels": {
@@ -21227,23 +21227,23 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-2276-Jezyk-Ciala.html",
     "externalId": "2276",
-    "opisKrotki": "Język Ciała to szybka gra karciana dla 2–6 graczy od 8 lat. Łączy gesty i dźwięki, a liczą się spostrzegawczość, refleks oraz szybka reakcja.",
+    "opisKrotki": "Język Ciała to karciana gra rodzinno-towarzyska marki Alexander, w której trzeba łączyć gesty z dźwiękami. Gra rozwija spostrzegawczość i refleks, a rozgrywka opiera się na szybkiej reakcji na powtarzające się pozy i czynności.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-2276-Jezyk-Ciala.html",
     "kodProducenta": "2276",
     "allegroProductId": "cf5c5d57-8f75-40b8-883c-c55eefe2448f",
     "allegroCategoryId": "6106",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:55:38.263Z",
+    "allegroAgentPreparedAt": "2026-07-28T09:13:10.548Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "5c04082f-c1de-4699-b9bc-add4c6593882",
+    "allegroAgentPreparationRunId": "a024319e-67de-4296-afb3-8a3d7d38974c",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 3,
+    "allegroAgentPreparationRetryCount": 6,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-995fe9b2",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-8aa6052b",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -21905,7 +21905,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18086329109"
+          "offerId": "18774895552"
         }
       },
       "detailLevel": "list",
@@ -22035,7 +22035,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "12212218115"
+          "offerId": "18774896917"
         }
       },
       "detailLevel": "list",
@@ -22080,7 +22080,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "12212255021"
+          "offerId": "18774896212"
         }
       },
       "detailLevel": "list",
@@ -22125,7 +22125,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "12214277613"
+          "offerId": "18774897376"
         }
       },
       "detailLevel": "list",
@@ -24863,7 +24863,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "12224599546"
+          "offerId": "18774405085"
         }
       },
       "detailLevel": "list",
@@ -24908,7 +24908,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18086356346"
+          "offerId": "18774894276"
         }
       },
       "detailLevel": "list",
@@ -25566,7 +25566,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "12963225823"
+          "offerId": "18774894939"
         }
       },
       "detailLevel": "list",
@@ -25610,7 +25610,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "12966386650"
+          "offerId": "18774894777"
         }
       },
       "detailLevel": "list",
@@ -25696,7 +25696,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "15084034781"
+          "offerId": "18774898513"
         }
       },
       "detailLevel": "list",
@@ -25742,7 +25742,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "12966828794"
+          "offerId": "18774898969"
         }
       },
       "detailLevel": "list",
@@ -25996,7 +25996,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "14201688983"
+          "offerId": "16218627000"
         }
       },
       "detailLevel": "list",
@@ -31783,7 +31783,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "14764728297"
+          "offerId": "18774893720"
         }
       },
       "detailLevel": "list",
@@ -32038,7 +32038,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "14764669900"
+          "offerId": "18753887741"
         }
       },
       "detailLevel": "list",
@@ -32287,7 +32287,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18248128587"
+          "offerId": "18753863763"
         }
       },
       "detailLevel": "list",
@@ -33166,7 +33166,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "X-Press Me - Brelok DIY Garbus, 72 elementy - Alexander",
+    "nazwa": "X-Press Me – Garbus, brelok DIY – Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/e285ecae0c2f923da5ba6ce0e8af3847/pol_pm_-X-PRESS-ME-BRELOK-DIY-Garbus-72-El-1579_1.jpg",
     "_catalog": {
       "channels": {
@@ -33188,22 +33188,22 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1579--X-PRESS-ME-BRELOK-DIY-Garbus-72-El.html",
     "externalId": "2933",
-    "opisKrotki": "Brelok DIY z serii X-Press Me marki Alexander w motywie Garbusa. Zestaw zawiera 72 elementy i pozwala samodzielnie złożyć ozdobny brelok z dołączonych części.",
+    "opisKrotki": "Brelok DIY z serii X-Press Me marki Alexander. Model Garbus składa się z 72 elementów i pozwala stworzyć ozdobę do przypięcia według instrukcji lub własnego pomysłu.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1579--X-PRESS-ME-BRELOK-DIY-Garbus-72-El.html",
     "kodProducenta": "2933",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:25:21.631Z",
-    "allegroAgentPreparationRunId": "ffbbd9a3-6dfa-413e-9cd8-cf2f6f5b1394",
+    "allegroAgentPreparedAt": "2026-07-28T09:27:06.159Z",
+    "allegroAgentPreparationRunId": "c1658dc8-208e-49e0-9d62-c430670892b5",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-07bed680",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-e41c567f",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -33216,7 +33216,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "X-Press Me - Brelok DIY Pszczoła, 61 elementów - Alexander",
+    "nazwa": "X-Press Me – Brelok DIY Pszczoła, 61 elementów – Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/00ba19ab14fe79c38a306d60f8764880/pol_pm_-X-PRESS-ME-BRELOK-DIY-Pszczola-61-El-1571_2.jpg",
     "_catalog": {
       "channels": {
@@ -33238,22 +33238,22 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1571--X-PRESS-ME-BRELOK-DIY-Pszczola-61-El.html",
     "externalId": "2934",
-    "opisKrotki": "Kreatywny brelok DIY z serii X-Press Me marki Alexander. Zestaw z motywem pszczoły zawiera 61 elementów i pozwala złożyć własną ozdobę do przypięcia.",
+    "opisKrotki": "Brelok DIY z serii X-Press Me marki Alexander w wariancie Pszczoła. Zestaw zawiera 61 elementów i należy do kategorii zabawek konstrukcyjnych.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1571--X-PRESS-ME-BRELOK-DIY-Pszczola-61-El.html",
     "kodProducenta": "2934",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:45:36.982Z",
-    "allegroAgentPreparationRunId": "5cc2c60d-5e76-4186-bc7d-a6746193fd9c",
+    "allegroAgentPreparedAt": "2026-07-28T09:16:32.359Z",
+    "allegroAgentPreparationRunId": "a17048da-5843-4c68-9f32-db64ef05a408",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-7707e4c4",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-30f2b369",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -33418,7 +33418,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "X-Press Me – brelok DIY Kot, 62 elementy, Alexander",
+    "nazwa": "X-Press Me – Brelok DIY Kot, 62 elementy, Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/27c36f87b051cc20a6d184dcb19b72ec/pol_pm_-X-PRESS-ME-BRELOK-DIY-Kot-62-El-1577_1.jpg",
     "_catalog": {
       "channels": {
@@ -33440,23 +33440,23 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1577--X-PRESS-ME-BRELOK-DIY-Kot-62-El.html",
     "externalId": "2938",
-    "opisKrotki": "X-Press Me – brelok DIY Kot to kreatywny zestaw marki Alexander z serii X-Press Me. Zawiera 62 elementy i pozwala samodzielnie złożyć personalizowaną ozdobę w formie breloka.",
+    "opisKrotki": "Brelok DIY z serii X-Press Me w wariancie Kot. Zestaw pozwala stworzyć własną ozdobę i zmieniać jej wygląd zgodnie z pomysłem.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1577--X-PRESS-ME-BRELOK-DIY-Kot-62-El.html",
     "kodProducenta": "2938",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T09:08:31.072Z",
+    "allegroAgentPreparedAt": "2026-07-28T09:09:30.207Z",
     "allegroAgentPreparationRunId": "9dd795b1-b59e-41bd-8ee1-26439d4f1def",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationRetryCount": 8,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-4310c883",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T09:13:31.072Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-a96c08b2",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000749",
@@ -35157,7 +35157,7 @@
           "active": true
         },
         "allegro": {
-          "status": "ACTIVE",
+          "status": "INACTIVE",
           "offerId": "18795893038"
         }
       },
@@ -35357,7 +35357,7 @@
           "active": true
         },
         "allegro": {
-          "status": "ACTIVE",
+          "status": "INACTIVE",
           "offerId": "18795617607"
         }
       },
@@ -36004,7 +36004,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane Kylo Koala - 46 elementów, Alexander",
+    "nazwa": "Puzzle drewniane Hi, I’m little – Kylo Koala, 46 elementów",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/6f5946b37c88c0fc49da33422f9ed510/pol_pl_Puzzle-drewniane-Hi-Im-little-Kylo-Koala-46-el-1798_1.jpg",
     "_catalog": {
       "channels": {
@@ -36026,22 +36026,22 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-5002-Puzzle-drewniane-Hi-Im-little-Kylo-Koala-46-el.html",
     "externalId": "5002",
-    "opisKrotki": "Drewniane puzzle z serii Hi, I'm little przedstawiają Kylo Koalę z mamą. Zestaw zawiera 46 elementów i jest przeznaczony dla dzieci 4+.",
+    "opisKrotki": "Drewniane puzzle MilliWOOD z serii Hi, I’m little w motywie Kylo Koala. Zestaw zawiera 46 elementów i po ułożeniu można go powiesić na ścianie.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-5002-Puzzle-drewniane-Hi-Im-little-Kylo-Koala-46-el.html",
     "kodProducenta": "5002",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:15:05.833Z",
-    "allegroAgentPreparationRunId": "9072b4eb-b400-4846-885f-6fef8591d31c",
+    "allegroAgentPreparedAt": "2026-07-28T09:36:56.210Z",
+    "allegroAgentPreparationRunId": "da078862-59e0-4bae-ae1b-abd059d42c89",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcia",
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ebd633fa",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-202c93be",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -36575,7 +36575,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane Galaxies - Kameleon - Alexander, 150 elementów",
+    "nazwa": "Puzzle drewniane Galaxies – Kameleon, 150 elementów – MilliWOOD",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/ba32588b620054a294c6a631be52d8f8/pol_pm_Puzzle-drewniane-Galaxies-Kameleon-150-el-1613_1.jpg",
     "_catalog": {
       "channels": {
@@ -36597,21 +36597,21 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1613-Puzzle-drewniane-Galaxies-Kameleon-150-el.html",
     "externalId": "5021",
-    "opisKrotki": "Drewniane puzzle z motywem kolorowego kameleona na tle kosmicznego pejzażu z planetami i meteorytami. Układanka rozwija spostrzegawczość, koncentrację i sprawność manualną. Produkt dla dzieci od 8 lat.",
+    "opisKrotki": "Drewniane puzzle z motywem kolorowego kameleona na tle kosmicznego pejzażu z planetami i meteorytami. Nieregularne kształty elementów sprawiają, że układanie jest ciekawą zabawą rozwijającą spostrzegawczość i koncentrację. Produkt przeznaczony dla osób od 8 lat.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1613-Puzzle-drewniane-Galaxies-Kameleon-150-el.html",
     "kodProducenta": "5021",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:50:29.535Z",
-    "allegroAgentPreparationRunId": "2d26921b-2122-4553-808f-183aa0a709eb",
+    "allegroAgentPreparedAt": "2026-07-28T09:23:24.629Z",
+    "allegroAgentPreparationRunId": "b491d6aa-64dc-41b4-ba8c-61e2fcb0bf8b",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-83b91f74",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-e2253a96",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -37130,7 +37130,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane Yippee Cutie - Panda, 70 elementów, Alexander",
+    "nazwa": "Puzzle drewniane Yippee cutie – Panda, 70 elementów, MilliWOOD",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/8e49e125b30d4f2023bb569ed2dd9483/pol_pm_Puzzle-drewniane-Yippee-cutie-Panda-70-el-1604_1.jpg",
     "_catalog": {
       "channels": {
@@ -37152,21 +37152,21 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1604-Puzzle-drewniane-Yippee-cutie-Panda-70-el.html",
     "externalId": "5055",
-    "opisKrotki": "Drewniane puzzle z serii Yippee Cutie z motywem pandy. Regularne kształty, grubsze elementy i spokojna, dziecięca stylistyka wspierają relaksującą zabawę oraz rozwój koncentracji, koordynacji wzrokowo-ruchowej i zdolności manualnych.",
+    "opisKrotki": "Drewniane puzzle z pandą z serii Yippee cutie. Regularne kształty, 70 elementów i format sprzyjający spokojnej, rozwijającej zabawie.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1604-Puzzle-drewniane-Yippee-cutie-Panda-70-el.html",
     "kodProducenta": "5055",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:16:07.784Z",
-    "allegroAgentPreparationRunId": "9ac08b08-aafb-4be4-8f2d-ea24ec62bd9b",
+    "allegroAgentPreparedAt": "2026-07-28T09:19:58.885Z",
+    "allegroAgentPreparationRunId": "a8b3089d-261b-4333-bded-33166fbcf51b",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-a45e8000",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-dfe102a8",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -38118,7 +38118,7 @@
           "active": true
         },
         "allegro": {
-          "status": "ACTIVE",
+          "status": "INACTIVE",
           "offerId": "18795915525"
         }
       },
@@ -38812,7 +38812,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Multigra",
-    "nazwa": "Butik/Bal - zestaw 2 gier planszowych dla dzieci, Multigra",
+    "nazwa": "Butik/Bal – Multigra",
     "zdjecie": "https://multigra.com.pl/wp-content/uploads/sites/5/2025/07/0045-Bal-Butik-Rekwizyty-scaled.jpg",
     "_catalog": {
       "channels": {
@@ -38834,23 +38834,22 @@
     "producent": "Multigra",
     "sourceUrl": "https://multigra.com.pl/produkty/butik-bal/",
     "externalId": "5906395300457",
-    "opisKrotki": "Butik/Bal to zestaw 2 prostych gier planszowych Multigra dla najmłodszych. Zamiast typowego wyścigu gracze zbierają żetony, które pomagają myszkom i kotu wrócić do domu.",
+    "opisKrotki": "Butik/Bal – Multigra to zestaw 2 prostych gier planszowych dla najmłodszych graczy. To dobre wprowadzenie w świat planszówek, z rozgrywką opartą na zbieraniu żetonów i nietypowym przebiegiem zabawy, który odróżnia te gry od klasycznego wyścigu.",
     "producentUrl": "https://multigra.com.pl/produkty/butik-bal/",
     "kodProducenta": "5906395300457",
     "allegroCategoryId": "123958",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:38:19.023Z",
-    "allegroAgentPreparationRunId": "c9114df4-6b06-4425-a1a0-4d648b858846",
+    "allegroAgentPreparedAt": "2026-07-28T09:33:14.127Z",
+    "allegroAgentPreparationRunId": "d66d2253-6841-4261-a385-e295bb9ecd92",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Typ",
-      "parametr Allegro: Wersja językowa gry",
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationRetryCount": 3,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-871abd92",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-15ae916d",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -41551,7 +41550,7 @@
           "active": true
         },
         "allegro": {
-          "status": "ACTIVE",
+          "status": "INACTIVE",
           "offerId": "18795906954"
         }
       },
