@@ -1,0 +1,76 @@
+const ACTIONS = new Set([
+  'codex-agent-claim',
+  'codex-agent-complete',
+  'codex-agent-fail',
+  'codex-agent-heartbeat',
+  'codex-agent-panel-enqueue',
+  'codex-agent-result',
+  'agent-runtime-status',
+  'agent-runtime-report',
+]);
+
+export function createAgentRuntimeRoute({
+  queue,
+  runtime,
+  isAdmin,
+  respond,
+  sessionOf,
+  text,
+}) {
+  return async function agentRuntimeRoute(req, url, action) {
+    if (!ACTIONS.has(action)) return null;
+    if (!isAdmin(req, url)) {
+      return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+    }
+    if (action === 'agent-runtime-status') {
+      const queueStatus = queue && typeof queue.status === 'function'
+        ? await queue.status()
+        : { workerOnline: false, workerLastSeenAt: '', counts: {}, active: 0 };
+      return respond({ ok: true, runtime: await runtime.status(queueStatus) });
+    }
+    if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+    const body = await req.json().catch(() => ({}));
+    if (action === 'agent-runtime-report') {
+      const updated = await runtime.report(body);
+      return respond({ ok: true, updatedAt: updated.updatedAt });
+    }
+    if (action === 'codex-agent-claim') {
+      return respond({ ok: true, ...(await queue.claim(text(body.workerId || '', 160))) });
+    }
+    if (action === 'codex-agent-panel-enqueue') {
+      const session = sessionOf(req);
+      const queued = await queue.enqueue({
+        requestId: body.requestId,
+        text: body.text,
+        context: body.context,
+        channel: 'panel',
+        user: session?.email || 'administrator',
+      });
+      return respond({
+        ok: true,
+        deferred: ['queued', 'processing', 'delivering'].includes(queued.status),
+        status: queued.status,
+        workerOnline: queued.workerOnline === true,
+        jobId: queued.job?.id || null,
+        duplicate: queued.duplicate === true,
+      });
+    }
+    if (action === 'codex-agent-heartbeat') {
+      return respond({ ok: true, ...(await queue.heartbeat(body)) });
+    }
+    if (action === 'codex-agent-result') {
+      return respond({ ok: true, ...(await queue.result(body.id)) });
+    }
+    if (action === 'codex-agent-complete') {
+      const prepared = await queue.prepareDelivery(body);
+      if (prepared.alreadyDelivered) return respond({ ok: true, delivered: true, duplicate: true });
+      if (prepared.alreadyDelivering) return respond({ ok: true, delivered: false, pending: true });
+      const completed = await queue.markDelivered({ id: body.id, claimToken: body.claimToken });
+      return respond({ ok: true, ...completed, panel: true });
+    }
+    if (action === 'codex-agent-fail') {
+      return respond({ ok: true, ...(await queue.fail(body)) });
+    }
+    return null;
+  };
+}

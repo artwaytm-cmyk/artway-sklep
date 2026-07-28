@@ -13,7 +13,7 @@ test('bezpośredni endpoint zawsze wymaga trwałej decyzji, niezależnie od dekl
     text: (value, limit = 500) => String(value || '').slice(0, limit),
     writeIfVersion: async () => ({ modified: true }),
   });
-  for (const source of ['', 'manual-admin', 'admin-agent-panel', 'telegram-webhook', 'codex-worker', 'dowolne-zrodlo']) {
+  for (const source of ['', 'manual-admin', 'admin-agent-panel', 'codex-worker', 'dowolne-zrodlo']) {
     const request = new Request('https://artwaytm.pl/api/store?action=inventory-stock-set', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source }),
     });

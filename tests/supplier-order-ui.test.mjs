@@ -188,7 +188,7 @@ test('panel pokazuje cały proces aż do przyjęcia dostawy', () => {
 
 test('plan używa serwerowych akcji rewizji i nie wysyła bez osobnego potwierdzenia', () => {
   const manual = fragment('function agentAIPlanZapiszOdpowiedzSerwera', 'function agentAIZlecenieTabelaDostawcyHTML');
-  const quantity = fragment('function agentAIPowiekszPozycjeZlecenia', 'async function agentAIWyslijZlecenieTelegram');
+  const quantity = fragment('function agentAIPowiekszPozycjeZlecenia', 'function agentAIDaneProducentaDoEmaila');
   const receive = fragment('async function agentAIPrzyjmijPozycjeZlecenia', 'function agentAINadwyzkiDoPrzyjecia');
   assert.match(manual, /supplier-order-line-upsert/);
   assert.match(quantity, /supplier-order-line-upsert/);

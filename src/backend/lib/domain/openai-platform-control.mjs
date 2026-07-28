@@ -165,7 +165,7 @@ export function createOpenAiPlatformControl({
       { id: 'ui', label: 'Interfejs aplikacji', state: 'active', detail: 'własny panel administratora + Responses API' },
       { id: 'agents', label: 'Agents SDK', state: endpoint('models') ? 'active' : 'error', detail: '@openai/agents • diagnostyka, trace i bramki zatwierdzeń' },
       { id: 'realtime', label: 'Audio w czasie rzeczywistym', state: 'available', detail: 'nieaktywne celowo • głosówki są plikami, więc tańsza jest transkrypcja żądaniowa' },
-      { id: 'audio', label: 'Transkrypcja audio', state: endpoint('models') ? 'active' : 'error', detail: `${audioModel} • głosówki Telegram` },
+      { id: 'audio', label: 'Transkrypcja audio', state: endpoint('models') ? 'available' : 'error', detail: `${audioModel} • funkcja dostępna dla przyszłych narzędzi panelu` },
       { id: 'images', label: 'Obrazy', state: endpoint('models') ? 'active' : 'error', detail: `${imageModel} • bannery i ikony` },
       { id: 'logs', label: 'Dzienniki i trace', state: endpoint('models') ? 'active' : 'error', detail: 'ślady Agents SDK bez sekretów' },
       { id: 'batches', label: 'Partie', state: endpoint('batches') ? 'active' : 'error', detail: 'dobowa ewaluacja asynchroniczna' },

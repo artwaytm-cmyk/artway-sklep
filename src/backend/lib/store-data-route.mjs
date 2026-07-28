@@ -17,7 +17,7 @@ export function createStoreDataRoute(deps = {}) {
     emailKonfiguracja, dopiszHistorieEmaila, createOrderAccess, bezpiecznaOpinia, zapisz,
     normalizujZamowienie, LIMIT_USUNIETYCH_ZAMOWIEN, LIMIT_ZAMOWIEN, normalizujKlienta,
     LIMIT_KLIENTOW, polaczPowiadomienia, obsluzEmailePrzejsciaStatusu, numerZamowienia,
-    dopiszUsunieteZamowienie, verifyOrderAccess, normalizeTelegramAccountFields, profilKlienta,
+    dopiszUsunieteZamowienie, verifyOrderAccess, profilKlienta,
     publicUser, hashPassword, createAccountSession, verifyPassword, bezpiecznePorownanie,
     legacyPasswordHash, czytajUstawieniaBazowe = (fallback) => czytaj('settings', fallback),
     czytajUstawieniaPrzyrostowo = null, accountSessionHeaders, createAdminMfaChallenge,
@@ -346,17 +346,8 @@ export function createStoreDataRoute(deps = {}) {
       const session = requestSession(req);
       if (action === 'store-user-save' && !czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       if (action === 'account-profile-save' && !session) return odpowiedz({ ok: false, error: 'Zaloguj się ponownie.', code: 'auth' }, 401);
-      const ownerEmail = tekst(primaryAdminEmail(), 200).trim().toLowerCase();
-      const telegramFields = action === 'store-user-save' && session?.email === ownerEmail ? normalizeTelegramAccountFields(body.user) : {};
       const u = action === 'store-user-save' ? normalizujKlienta(body.user) : profilKlienta(body.user, session.email);
       if (!u) return odpowiedz({ ok: false, error: 'Brak danych klienta' }, 422);
-      if (action === 'store-user-save') {
-        delete u.telegramChatId;
-        delete u.telegramUserId;
-        delete u.telegramAccess;
-        delete u.telegramApprover;
-        Object.assign(u, telegramFields);
-      }
       const rec = await czytaj('users', { items: [] });
       const items = Array.isArray(rec.items) ? rec.items : [];
       const i = items.findIndex((x) => (x.email || '').toLowerCase() === u.email);
@@ -507,10 +498,6 @@ export function createStoreDataRoute(deps = {}) {
         items[index].authVersion = Math.max(0, Number(items[index].authVersion) || 0) + 1;
         items[index].roleUpdatedAt = now;
         items[index].roleUpdatedBy = session.email;
-        if (role === 'klient') {
-          items[index].telegramAccess = false;
-          items[index].telegramApprover = false;
-        }
         const write = await zapiszJesliWersja('users', { ...previous, items, updated_at: now }, version);
         if (!write?.modified) continue;
         await accessAudit({ action: role === 'admin' ? 'role_granted' : 'role_revoked', actor: session.email, target: email, before, after: role }).catch(() => {});

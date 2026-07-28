@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string", "maxLength": 240 },
+    "assignments": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "properties": {
+          "scenarioId": {
+            "type": "string",
+            "enum": [
+              "catalog-editorial",
+              "customer-reply-draft",
+              "catalog-identity-control",
+              "supplier-order-draft",
+              "seo-free-promotion"
+            ]
+          },
+          "priority": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "reason": { "type": "string", "maxLength": 180 }
+        },
+        "required": ["scenarioId", "priority", "reason"],
+        "additionalProperties": false
+      }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "required": ["summary", "assignments", "confidence"],
+  "additionalProperties": false
+}

@@ -7,7 +7,7 @@ const ACTIONS = new Set(['product-url-inspect', 'product-url-prepare', 'product-
 export function createProductAvailabilityRoute(deps) {
   const {
     respond, isAdmin, text, read, write, inspectProduct, prepareProduct,
-    syncSaleChannels, mappingItems, isAllegroOrderActive, fetchProduct, notify,
+    syncSaleChannels, mappingItems, isAllegroOrderActive, fetchProduct,
     loadProducts = null, saveProductFields = null, mutateSettings = null,
   } = deps;
   return async function productAvailabilityRoute(req, url, action) {
@@ -224,13 +224,6 @@ export function createProductAvailabilityRoute(deps) {
     const auditRec = await read('supplier_availability_audit', { items: [], updated_at: null }), audit = Array.isArray(auditRec.items) ? [...auditRec.items] : [];
     audit.unshift(...results.map((result) => ({ id: crypto.randomUUID(), ...result, threshold, runSource: text(body.source || 'manual', 100) })));
     await write('supplier_availability_audit', { items: audit.slice(0, 5000), updated_at: checkedAt });
-    let telegram = { sent: false };
-    if (changedAlerts.length) {
-      const alertFingerprint = changedAlerts.map((result) => `${result.productId}:${result.status}`).sort().join('|');
-      const automation = [saleAutomation.siteHidden ? `ukryto w sklepie: ${saleAutomation.siteHidden}` : '', saleAutomation.siteRestored ? `przywrócono w sklepie: ${saleAutomation.siteRestored}` : '', saleAutomation.allegroHidden ? `wstrzymano na Allegro: ${saleAutomation.allegroHidden}` : '', saleAutomation.allegroRestored ? `wznowiono na Allegro: ${saleAutomation.allegroRestored}` : '', saleAutomation.errors?.length ? `błędy automatyki: ${saleAutomation.errors.length}` : ''].filter(Boolean).join(' · ');
-      try { telegram = await notify({ key: 'supplier-availability', legacyPrefix: 'supplier-availability:', fingerprint: alertFingerprint, category: 'supplier', severity: 'warning', count: changedAlerts.length, title: 'Dostępność u producentów', description: automation, doneWhen: 'Każda zmiana dostępności ma zapisaną decyzję sprzedażową.', items: changedAlerts.slice(0, 8).map((result) => `${result.name} · ${result.status === 'brak' ? 'brak' : `${result.quantity} szt.`}`), href: 'https://artwaytm.pl/#/admin/magazyn/dostawcy' }, '', { source: 'supplier-availability' }); }
-      catch (error) { telegram = { sent: false, error: text(error.message || error, 300) }; }
-    }
-    return respond({ ok: true, summary, results, checkedAt, saleAutomation, telegram });
+    return respond({ ok: true, summary, results, checkedAt, saleAutomation });
   };
 }

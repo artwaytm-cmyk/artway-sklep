@@ -101,7 +101,6 @@ tar --zstd --create --file="$TMP_DIR/application.tar.zst" \
   --exclude='srv/artway/backups' \
   --exclude='srv/artway/shop/.git' \
   --exclude='srv/artway/shop/node_modules' \
-  --exclude='srv/artway/agent/node_modules' \
   -C / \
   srv/artway/shop \
   srv/artway/agent \

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { CODEX_SCENARIOS, planBackgroundCycleWithCodex } from '../../agent/codex-cycle-coordinator.js';
+import { CODEX_SCENARIOS, planBackgroundCycleWithCodex } from '../src/backend/lib/domain/codex-cycle-coordinator.mjs';
 import { buildBackgroundTaskQueue } from './lib/background-agent-scheduler.mjs';
 
 const origin = String(process.env.ARTWAY_LOCAL_API_ORIGIN || 'http://127.0.0.1:3000').replace(/\/$/, '');
@@ -18,6 +18,7 @@ const taskLabels = {
   'tresci-gpt-nano': 'Redakcja małej porcji treści przez routing OpenAI',
   'platforma-openai': 'Kontrola OpenAI Platform, trace i Batch',
   'przygotowanie-produktow': 'Sukcesywne przygotowanie produktów do Allegro',
+  'jakosc-strony': 'Kontrola funkcjonalności i trwałości strony',
   'tresci-allegro': 'Aktualizacja zmienionych opisów Allegro',
   'tresci-von-halsky': 'Publikacja zmienionych kart Von Halsky',
   zamowienia: 'Nowe lub zmienione zamówienia Allegro',
@@ -138,12 +139,11 @@ await report('cycle_start', { steps: [
 
 // Te dwa wywołania są detektorami zmian i działają równolegle. Nie uruchamiają
 // automatycznie pełnej kontroli 10 000 ofert ani całego katalogu.
-const [ordersResult, communicationResult, vonHalskyResult, openAiPlatformResult] = await Promise.all([
+const [ordersResult, communicationResult, preparationResult, siteQualityResult] = await Promise.all([
   run('zamowienia', 'allegro-sync-orders', { limit: 200, source: 'event-detector' }, 90_000),
   run('komunikacja', 'allegro-sync-communications', { limit: 20, autoReply: true, source: 'event-detector' }, 90_000),
-  run('von-halsky-katalog', 'von-halsky-sync-catalog', { publish: true, scheduled: true, batchSize: 50 }, 120_000),
-  run('platforma-openai', 'openai-platform-cycle', { source: 'scheduled' }, 90_000),
   run('przygotowanie-produktow', 'allegro-preparation-queue-auto', { batchSize: 50, source: 'server-cycle' }, 90_000),
+  run('jakosc-strony', 'agent-run-safe-checks', { areas: ['site-health'], source: 'server-cycle' }, 60_000),
 ]);
 const detectorResults = [ordersResult, communicationResult];
 
@@ -155,7 +155,7 @@ await report('cycle_step', { step: {
   count: planned.queue.length, detail: planned.queue.length ? `Wybrano: ${planned.queue.map((item) => taskLabels[item.id]).join(' → ')}. Odłożono: ${planned.deferred.length}.` : 'Brak konkretnego zadania do wykonania. Ciężkie kontrole pominięto.',
 } });
 
-const results = [...detectorResults, vonHalskyResult, openAiPlatformResult];
+const results = [...detectorResults, preparationResult, siteQualityResult];
 let coordinator = null;
 if (planned.queue.some((item) => item.id === 'tresci-gpt-nano')) {
   coordinator = await coordinatorCycle({ specialists, operations });
@@ -172,25 +172,32 @@ for (const job of planned.queue) {
 // restart procesu lub chwilowy błąd API nie pozostawia zmiany bez ponowienia.
 const previousPending = Array.isArray(previousRuntime?.publication?.pending) ? previousRuntime.publication.pending : [];
 const newlyApplied = results.flatMap((result) => Array.isArray(result.items) ? result.items : []);
+const publicationRetryDue = (item) => {
+  if (!item || item.status === 'decision_required') return false;
+  const nowMs = Date.now(), nextRetryMs = Date.parse(item.nextRetryAt || '');
+  if (Number.isFinite(nextRetryMs)) return nextRetryMs <= nowMs;
+  const lastAttemptMs = Date.parse(item.updatedAt || item.startedAt || '');
+  return !Number.isFinite(lastAttemptMs) || nowMs - lastAttemptMs >= 60 * 60_000;
+};
 const pendingIds = (channel) => [...new Set([
-  ...previousPending.filter((item) => item.channel === channel && item.productId).map((item) => String(item.productId)),
+  ...previousPending.filter((item) => item.channel === channel && item.productId && publicationRetryDue(item)).map((item) => String(item.productId)),
   ...newlyApplied.filter((item) => item.channel === channel && item.productId).map((item) => String(item.productId)),
-])].slice(0, 50);
+])].slice(0, 5);
 const allegroPublicationIds = pendingIds('allegro');
 const vonHalskyPublicationIds = pendingIds('vonHalsky');
 if (allegroPublicationIds.length) {
   results.push(await run('tresci-allegro', 'allegro-auto-maintenance', {
-    limit: Math.min(50, allegroPublicationIds.length), pendingOnly: true, productIds: allegroPublicationIds, source: 'publication-queue',
+    limit: allegroPublicationIds.length, pendingOnly: true, productIds: allegroPublicationIds, source: 'publication-queue',
   }, 240_000));
 }
 if (vonHalskyPublicationIds.length) {
   results.push(await run('tresci-von-halsky', 'von-halsky-sync-catalog', {
-    publish: true, scheduled: false, batchSize: 50, productIds: vonHalskyPublicationIds, source: 'publication-queue',
+    publish: true, scheduled: false, batchSize: vonHalskyPublicationIds.length, productIds: vonHalskyPublicationIds, source: 'publication-queue',
   }, 120_000));
 }
 
 const failed = results.filter((result) => !result.ok);
-const hardFailure = failed.length >= 3;
+const hardFailure = failed.some((result) => !result.warning);
 const status = hardFailure ? 'failed' : failed.length ? 'degraded' : 'completed';
 const summary = planned.queue.length
   ? `Detektory wykryły ${planned.changes} zmian; wykonano ${planned.queue.length} zadań z ograniczonej kolejki${planned.deferred.length ? `, ${planned.deferred.length} odłożono` : ''}.`

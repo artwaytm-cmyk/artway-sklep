@@ -203,4 +203,3 @@ let agentAIPlanStan={busy:false,current:"",startedAt:null,completedAt:null,resul
 let agentAIRuntime={loading:false,loaded:false,error:"",runtime:null,updatedAt:0,pollTimer:null};
 let agentAISpecjalisci={loading:false,loaded:false,saving:false,running:false,error:"",data:null,activeRun:null};
 let agentAISpecjalistaDecyzjeWToku=new Set();
-let agentAITelegram={loading:false,loaded:false,saving:false,error:"",settings:null,status:null,stats:{},state:{},events:[],history:[],quietNow:false};

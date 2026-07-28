@@ -15,7 +15,6 @@ function agentAISubnavHTML(aktywny="pulpit"){
     {id:"produkty",href:"#/admin/agent-ai/produkty",label:"✨ Nowe produkty",badge:produktyWdrozenie||""},
     {id:"zakupy",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:zlecenia||""},
     {id:"producenci",href:"#/admin/agent-ai/producenci",label:"🏭 Producenci i kontakt",badge:producenciGotowi||""},
-    {id:"telegram",href:"#/admin/agent-ai/telegram",label:"✈️ Telegram",badge:agentAITelegram.stats?.critical||""},
     {id:"pamiec",href:"#/admin/agent-ai/pamiec",label:"🧠 Pamięć",badge:pamiec||""},
     {id:"historia",href:"#/admin/agent-ai/historia",label:"🕓 Historia",badge:Object.values(agentAIPlanCykl||{}).filter(x=>["done","resolved"].includes(x.state)).length||""}
   ],aktywny);

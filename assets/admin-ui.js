@@ -9,20 +9,20 @@
     '.supplier-monitor-toolbar','.supplier-plan-filters','.warehouse-stock-toolbar',
     '.warehouse-document-filters','.warehouse-movement-toolbar','.warehouse-tree-filters',
     '.warehouse-qr-toolbar','.catalog-quality-toolbar','.product-link-import-filters',
-    '.telegram-conversation-filters','.telegram-incident-toolbar','.dashboard-alert-filters',
+    '.dashboard-alert-filters',
     '.seo-advanced-toolbar','.profitability-review-toolbar','.diag-toolbar',
   ].map((item)=>`.admin-tresc ${item}`).join(',');
   const selektorHero=[
     '.allegro-listing-hero','.assortment-catalog-hero','.warehouse-page-context',
     '.orders-hero','.shipping-page-context','.ai-agent-hero','.home-editor-head',
     '.banner-workspace-head','.discount-workspace-head','.catalog-quality-hero',
-    '.telegram-hub-hero','.dashboard-hero','.agent-command-hero','.warehouse-qr-hero',
+    '.dashboard-hero','.agent-command-hero','.warehouse-qr-hero',
     '.product-link-import-hero','.product-editor-hero','.seo-control-hero',
     '.system-release-hero',
   ].join(',');
   const selektorMetryk=[
     '.allegro-listing-metrics','.orders-stat-grid','.stat-grid','.info-grid',
-    '.supplier-monitor-stats','.telegram-hub-kpis','.product-link-import-stats',
+    '.supplier-monitor-stats','.product-link-import-stats',
     '.agent-command-metrics','.warehouse-stock-summary','.home-editor-stats',
     '.dashboard-kpi-grid','.warehouse-dashboard-metrics','.profitability-review-metrics',
     '.system-release-grid','.system-summary-grid',

@@ -21,11 +21,9 @@ export function createStoreDataAccountHelpers(deps = {}) {
     for (const [key, max] of [
       ['telefon', 80], ['ulica', 200], ['nrDomu', 40], ['nrLokalu', 40], ['kod', 20],
       ['miasto', 160], ['nip', 20], ['firma', 240], ['notatka', 1000], ['data', 80],
-      ['telegramUserId', 100], ['roleUpdatedBy', 200], ['passwordChangedAt', 80],
+      ['roleUpdatedBy', 200], ['passwordChangedAt', 80],
     ]) copyText(key, max);
     if (user.account === true) optional.account = true;
-    if (user.telegramAccess === true) optional.telegramAccess = true;
-    if (user.telegramApprover === true) optional.telegramApprover = true;
     if (user.passwordHash) optional.hasPassword = true;
     return { ...publicUser(user), ...optional };
   };

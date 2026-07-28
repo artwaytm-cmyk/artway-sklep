@@ -79,7 +79,7 @@ function service(repo, clock = new Date('2026-07-15T14:05:00.000Z')) {
   });
 }
 
-async function draft(agent, requestId = 'telegram-100', quantity = 8) {
+async function draft(agent, requestId = 'panel-100', quantity = 8) {
   return agent.createDraft({
     requestId,
     productId: '31',
@@ -87,9 +87,8 @@ async function draft(agent, requestId = 'telegram-100', quantity = 8) {
     mode: 'set',
     quantity,
     confirmed: true,
-    source: 'telegram-agent',
+    source: 'admin-agent-panel',
     actor: { id: '77', name: 'Tomasz' },
-    chatId: '-100123',
   });
 }
 
@@ -117,7 +116,7 @@ test('ponowne użycie requestId dla innej korekty jest blokowane', async () => {
   await assert.rejects(draft(agent, 'same-request', 9), (error) => error.code === 'inventory_decision_request_id_conflict');
   await assert.rejects(agent.createDraft({
     requestId: 'same-request', productId: '99', product: { id: '99', name: 'Inny produkt' },
-    mode: 'set', quantity: 8, source: 'telegram-agent', actor: { name: 'Tomasz' },
+    mode: 'set', quantity: 8, source: 'admin-agent-panel', actor: { name: 'Tomasz' },
   }), (error) => error.code === 'inventory_decision_request_id_conflict');
   assert.equal(repo.read(INVENTORY_DECISIONS_KEY).items.length, 1);
   assert.equal(repo.writeCount('settings'), 0);
@@ -338,7 +337,7 @@ test('wygasła krótka dzierżawa może zostać bezpiecznie przejęta przez kole
   assert.equal(repo.read(INVENTORY_DECISIONS_KEY).reminderClaim.token, second.claimToken);
 });
 
-test('długie nazwy tworzą wieloczęściowe wiadomości poniżej bezpiecznego limitu Telegrama', () => {
+test('długie nazwy tworzą wieloczęściowe komunikaty poniżej bezpiecznego limitu panelu', () => {
   const decisions = Array.from({ length: 25 }, (_, index) => ({
     id: `IV${index.toString(16).padStart(14, '0')}`,
     requestId: `long-${index}`,
@@ -361,7 +360,7 @@ test('długie nazwy tworzą wieloczęściowe wiadomości poniżej bezpiecznego l
   assert.equal(new Set(callbacks).size, decisions.length * 2);
 });
 
-test('callbacki Telegram są krótkie i jednoznacznie parsowane', async () => {
+test('identyfikatory przycisków decyzji są krótkie i jednoznacznie parsowane', async () => {
   const repo = repository(), agent = service(repo);
   const created = await draft(agent);
   const confirm = inventoryDecisionCallback('confirm', created.decision.id);
@@ -370,7 +369,7 @@ test('callbacki Telegram są krótkie i jednoznacznie parsowane', async () => {
   assert.deepEqual(parseInventoryDecisionCallback(confirm), { action: 'confirm', id: created.decision.id });
   assert.deepEqual(parseInventoryDecisionCallback(reject), { action: 'reject', id: created.decision.id });
   assert.deepEqual(parseInventoryDecisionCallback(location), { action: 'location', id: created.decision.id, location: 'A-R01-P01' });
-  assert.equal(parseInventoryDecisionCallback('tg:resolve:123'), null);
+  assert.equal(parseInventoryDecisionCallback('external:resolve:123'), null);
   assert.ok(Buffer.byteLength(location, 'utf8') <= 64);
 });
 

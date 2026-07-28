@@ -47,20 +47,10 @@ test('duże domeny operacyjne są jawnie wyjęte z settings i KV', () => {
   for (const key of ['orders', 'allegro_offers', 'allegro_mappings', 'allegro_communications', 'agent_specialists_state', 'inpost_service_shipments']) assert.ok(DIRECT_DOMAIN_CONFIGS[key]);
 });
 
-test('aktywny stan Agenta, Telegrama i inFaktu jest dzielony na rekordy', () => {
-  for (const key of ['agent_runtime', 'telegram_communication_state', 'infakt_purchase_price_sync', 'catalog_quality_audit']) {
+test('aktywny stan Agenta i inFaktu jest dzielony na rekordy', () => {
+  for (const key of ['agent_runtime', 'infakt_purchase_price_sync', 'catalog_quality_audit']) {
     assert.ok(DIRECT_DOMAIN_CONFIGS[key], `Brak konfiguracji ${key}`);
   }
-  const value = {
-    events: { order: { id: 'ATM-1', status: 'open' } },
-    history: [{ id: 'H1', at: '2026-07-21T10:00:00Z' }],
-    outbox: [{ id: 'O1', at: '2026-07-21T10:01:00Z' }],
-    health: { ok: true },
-  };
-  const config = DIRECT_DOMAIN_CONFIGS.telegram_communication_state;
-  const split = splitNormalizedValue(value, config);
-  assert.equal(split.records.length, 3);
-  assert.deepEqual(hydrateNormalizedValue(split.metadata, split.records, config), value);
 });
 
 test('rejestr InPost rozdziela nadania, adresy i ustawienia z wartościami null bez utraty danych', () => {
@@ -110,7 +100,6 @@ test('największe domeny operacyjne mają własne tabele zamiast wspólnej tabel
     'settings:artway_agent_ai_pamiec': 'artway_agent_records',
     'settings:artway_agent_ai_zlecenia': 'artway_agent_records',
     'kv:agent_runtime': 'artway_agent_records',
-    'kv:telegram_communication_state': 'artway_agent_records',
   };
   for (const [domain, table] of Object.entries(expected)) {
     assert.equal(dedicatedTableForDomain(domain), table, `Domena ${domain} nie ma właściwej tabeli`);

@@ -2,8 +2,8 @@ import crypto from 'node:crypto';
 
 const MAX_QUANTITY = 1_000_000;
 const EDITABLE_STATUSES = new Set([
-  '', 'szkic', 'do sprawdzenia', 'zaakceptowane', 'wyslane na telegram',
-  'draft', 'review', 'approved', 'telegram preview',
+  '', 'szkic', 'do sprawdzenia', 'zaakceptowane',
+  'draft', 'review', 'approved',
 ]);
 const RECEIVABLE_STATUSES = new Set([
   'wyslane do producenta', 'wyslane do dostawcy', 'czesciowo wyslane e mailem',

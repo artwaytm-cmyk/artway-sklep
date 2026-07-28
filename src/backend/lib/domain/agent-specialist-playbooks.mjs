@@ -174,7 +174,7 @@ const ROLE_OPERATING_CONTRACTS = Object.freeze({
     triggers: ['kilka modułów zgłasza ten sam problem', 'potrzebna decyzja administratora', 'kolejka ma sprzeczne priorytety'],
     success: ['jedna karta dla jednego rozstrzygnięcia', 'pełny szkic skutku przed zatwierdzeniem', 'alternatywa i ryzyko', 'zamknięta decyzja nie wraca bez nowych faktów'],
     failures: [
-      'Nie wysyłaj do Telegrama technicznych zmian priorytetu ani każdej kontroli; komunikuj tylko wynik wymagający uwagi lub wyraźnie zamówione podsumowanie.',
+      'Nie generuj zewnętrznych powiadomień o technicznych zmianach priorytetu ani każdej kontroli; zapisuj w panelu tylko wynik wymagający uwagi lub wyraźnie zamówione podsumowanie.',
       'Nie twórz nowego miejsca wykonania, gdy właściwy moduł już istnieje; wskaż Plan zatowarowania, Centrum wysyłek, Allegro lub inny kanoniczny obszar.',
       'Nie łącz potwierdzenia publikacji, wysyłki i usunięcia w jedną ogólną zgodę.',
     ],

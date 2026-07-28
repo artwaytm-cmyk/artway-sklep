@@ -333,32 +333,6 @@ async function allegroMapujOferte(offerId,productId,options={}){
   }catch(e){allegroMapowaniePozycjiCel={...allegroMapowaniePozycjiCel,error:e};toast("⚠️ Mapowanie Allegro: "+(e.message||e));return {ok:false,error:e};}
 }
 
-async function zapiszTelegramDostepKonta(email,button){
-  if(!jestGlownymAdminem(sesja?.email))return toast("Tylko główny administrator może nadawać uprawnienia Telegram");
-  const e=String(email||"").trim().toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>String(x.email||"").toLowerCase()===e),row=button?.closest("tr");
-  if(!k||!row)return toast("Nie znaleziono konta");
-  if(!kontoMaRoleAdmin(k.email))return toast("Dostęp do czatu można przypisać tylko kontu administratora");
-  const id=String(row.querySelector("[data-telegram-user-id]")?.value||"").trim();
-  const access=!!row.querySelector("[data-telegram-access]")?.checked;
-  const approver=!!row.querySelector("[data-telegram-approver]")?.checked;
-  if(id&&!/^[1-9]\d*$/.test(id))return toast("ID użytkownika Telegram musi składać się wyłącznie z cyfr i nie może zaczynać się od zera");
-  if((access||approver)&&!id)return toast("Najpierw wpisz ID użytkownika Telegram");
-  const previous={telegramUserId:k.telegramUserId||"",telegramAccess:k.telegramAccess===true,telegramApprover:k.telegramApprover===true};
-  k.telegramUserId=id;k.telegramAccess=access&&!!id;k.telegramApprover=approver&&k.telegramAccess;
-  zapiszLS("artway_uzytkownicy",u);button.disabled=true;
-  const saved=await zapiszUzytkownikaCentralnie(k);
-  if(!saved){Object.assign(k,previous);zapiszLS("artway_uzytkownicy",u);toast("Nie udało się zapisać dostępu Telegram na serwerze");renderuj();return;}
-  loguj("info",`${k.telegramAccess?"Nadano":"Odebrano"} dostęp do wspólnego czatu: ${e}`);
-  toast(k.telegramAccess?"Dostęp do wspólnego czatu został przypisany automatycznie":"Dostęp do wspólnego czatu został odebrany");
-  renderuj();
-}
-
-function telegramDostepKontaHTML(k,admin){
-  if(!admin)return `<small>Najpierw nadaj rolę administratora</small>`;
-  if(!jestGlownymAdminem(sesja?.email))return `<small>${k.telegramAccess?"✅ wspólny czat":"bez dostępu do czatu"}${k.telegramApprover?" • zatwierdzanie":""}</small>`;
-  return `<div class="account-telegram-access"><input data-telegram-user-id inputmode="numeric" autocomplete="off" placeholder="ID użytkownika" aria-label="ID użytkownika Telegram" value="${esc(k.telegramUserId||"")}"><label><input data-telegram-access type="checkbox" ${k.telegramAccess===true?"checked":""}> wspólny czat</label><label><input data-telegram-approver type="checkbox" ${k.telegramApprover===true?"checked":""}> zatwierdzanie</label><button class="btn ghost" type="button" onclick="zapiszTelegramDostepKonta(${jsArg(k.email)},this)">Zapisz</button></div>`;
-}
-
 function panelUstawienBramki(){
   const u=ustawieniaWysylki(),ip=stanBramki.inpost||{},ipGotowy=!!ip.configured,ipPolaczony=!!ip.authenticated,ipMapa=!!ip.geowidgetConfigured,ipWebhook=!!ip.webhookConfigured,av=ip.serviceAvailability||{};
   const braki=Array.isArray(ip.missingEnv)&&ip.missingEnv.length?ip.missingEnv:[...(ipGotowy?[]:["INPOST_TOKEN","INPOST_ORG_ID"])],orgInfo=ip.organization?.id?`Organizacja: <b>${esc(ip.organization.id)}</b>${ip.organization.name?` • ${esc(ip.organization.name)}`:""}`:"Organizacja pojawi się po teście API.";
@@ -718,7 +692,6 @@ async function allegroZapiszUstawieniaKomunikacji(form){
     enabled:fd.get("enabled")==="on",
     messageCenter:fd.get("messageCenter")==="on",
     issues:fd.get("issues")==="on",
-    telegramReminders:fd.get("telegramReminders")==="on",
     freshHours:Number(fd.get("freshHours")||48),
     template:String(fd.get("template")||"").trim()
   };
@@ -1648,7 +1621,6 @@ function agentAISubnavHTML(aktywny="pulpit"){
     {id:"produkty",href:"#/admin/agent-ai/produkty",label:"✨ Nowe produkty",badge:produktyWdrozenie||""},
     {id:"zakupy",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:zlecenia||""},
     {id:"producenci",href:"#/admin/agent-ai/producenci",label:"🏭 Producenci i kontakt",badge:producenciGotowi||""},
-    {id:"telegram",href:"#/admin/agent-ai/telegram",label:"✈️ Telegram",badge:agentAITelegram.stats?.critical||""},
     {id:"pamiec",href:"#/admin/agent-ai/pamiec",label:"🧠 Pamięć",badge:pamiec||""},
     {id:"historia",href:"#/admin/agent-ai/historia",label:"🕓 Historia",badge:Object.values(agentAIPlanCykl||{}).filter(x=>["done","resolved"].includes(x.state)).length||""}
   ],aktywny);
@@ -2551,7 +2523,6 @@ async function zmienRoleUzytkownika(email){
   try{
     const d=await chmura("store-user-role",{method:"POST",body:{email:e,role:maRole?"klient":"admin"},timeout:15000});
     Object.assign(k,d.user||{rola:maRole?"klient":"admin"});
-    if(k.rola!=="admin"){k.telegramAccess=false;k.telegramApprover=false;}
     zapiszLS("artway_uzytkownicy",u);
     loguj("info",`${maRole?"Odebrano":"Nadano"} rolę administratora: ${e}`);
     toast(maRole?"Odebrano uprawnienia i unieważniono stare sesje":"Nadano rolę — przy logowaniu wymagane będzie MFA 🛡️");
@@ -2588,7 +2559,7 @@ function widokAdminKlienci(sekcja="lista"){
     ${aktywna==="uprawnienia"?`<div class="admin-account-status-grid user-access-summary"><article><span>Wszystkie konta</span><b>${pobierzUzytkownikow().length}</b><small>aktywne kartoteki</small></article><article><span>Administratorzy</span><b>${pobierzUzytkownikow().filter(k=>kontoMaRoleAdmin(k.email)).length}</b><small>w tym konto właściciela</small></article><article><span>Klienci</span><b>${pobierzUzytkownikow().filter(k=>!kontoMaRoleAdmin(k.email)).length}</b><small>bez dostępu do panelu</small></article><article><span>MFA</span><b>${pobierzUzytkownikow().filter(k=>kontoMaRoleAdmin(k.email)&&k.mfaEnabled).length}</b><small>kont z aktywnym Authenticator</small></article></div>`:""}
     ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko, adres e-mail albo rola użytkownika.",results:kl.length,active:!!szukajKlientow||filtrRoliKlientow!=="wszyscy",open:true,fields:`<label class="search-wide">Użytkownik<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();zaplanujRenderPoWpisaniu()"></label><label>Rola<select onchange="filtrRoliKlientow=this.value;renderuj()"><option value="wszyscy" ${filtrRoliKlientow==="wszyscy"?"selected":""}>Wszystkie role</option><option value="admin" ${filtrRoliKlientow==="admin"?"selected":""}>Administratorzy</option><option value="klient" ${filtrRoliKlientow==="klient"?"selected":""}>Klienci</option></select></label>${szukajKlientow||filtrRoliKlientow!=="wszyscy"?`<button class="btn ghost" onclick="szukajKlientow='';filtrRoliKlientow='wszyscy';renderuj()">Wyczyść filtry</button>`:""}`,actions:adminOperacjeWynikowHTML({id:"customers",selected:zaznaczeniKlienci.size,pageCount:kl.length,resultCount:kl.length,selectPage:"klienciUstawZaznaczenie('strona')",selectAll:"klienciUstawZaznaczenie('filtr')",clear:"klienciWyczyscZaznaczenie()",exportSelected:"klienciEksportujZakres('zaznaczone')",exportAll:"klienciEksportujZakres('filtr')"})})}
     <div class="table-scroll"><table class="log-table">
-      <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Telegram</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
+      <tr><th>Wybór</th><th>Imię i nazwisko</th><th>E-mail</th><th>Rola</th><th>Rejestracja</th><th>Zamówień</th><th>Akcje</th></tr>
       ${kl.map(k=>{
         const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
         const accessBusy=zmianyDostepuUzytkownikowWToku.has(String(k.email||"").toLowerCase())||resetMfaUzytkownikowWToku.has(String(k.email||"").toLowerCase())||usunieciaUzytkownikowWToku.has(String(k.email||"").toLowerCase());
@@ -2598,7 +2569,6 @@ function widokAdminKlienci(sekcja="lista"){
         <td><a href="#/admin/klient/${encodeURIComponent(k.email)}"><b>${esc(k.imie)}</b></a>${admin?' <span class="lvl lvl-info">ADMIN</span>':""}${k.nip?' <span class="lvl lvl-info">firma</span>':""}</td>
         <td>${esc(k.email)}${k.telefon?`<br><small style="color:var(--muted2)">📞 ${esc(k.telefon)}</small>`:""}</td>
         <td><span class="lvl ${admin?"lvl-info":""}">${admin?"administrator":"klient"}</span>${glowny?"<br><small>właściciel</small>":""}${admin?`<br><small>${k.mfaEnabled?"🛡️ MFA aktywne":"⚠️ MFA przy następnym logowaniu"}</small>`:""}</td>
-        <td>${telegramDostepKontaHTML(k,admin)}</td>
         <td>${new Date(k.data).toLocaleDateString("pl-PL")}</td>
         <td>${nZam ? `<a href="#/admin/zamowienia" onclick="szukajZamowien='${esc(k.email)}';filtrZamowien='wszystkie'" title="Zamówienia klienta">${nZam} →</a>` : "0"}</td>
         <td style="white-space:nowrap">
@@ -2609,7 +2579,7 @@ function widokAdminKlienci(sekcja="lista"){
         </td>
       </tr>`;}).join("")}
     </table></div>
-    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę. Zwykłe konto klienta nigdy nie dziedziczy dostępu administracyjnego. Uprawnienia Telegram są odrębne i nie zastępują roli administratora sklepu.</p>
+    <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">📇 otwiera pełną kartotekę. Zwykłe konto klienta nigdy nie dziedziczy dostępu administracyjnego.</p>
   </div>
   <div class="panel" style="${aktywna==="zamowienia"?"":"display:none"}">
     <div class="order-section-head">
@@ -2637,7 +2607,7 @@ const AGENT_AI_SEKCJE_KANONICZNE=Object.freeze({
   praca:"praca",status:"praca",runtime:"praca",
   zadania:"zadania",plan:"zadania",produkty:"zadania",zlecenia:"zadania",producenci:"zadania",
   automatyzacje:"automatyzacje",specjalisci:"automatyzacje",uprawnienia:"automatyzacje",pamiec:"automatyzacje",
-  komunikacja:"komunikacja",telegram:"komunikacja",
+  jakosc:"jakosc",diagnostyka:"jakosc",
   audyt:"audyt",historia:"audyt"
 });
 function agentAISekcjaKanoniczna(value="pulpit"){return AGENT_AI_SEKCJE_KANONICZNE[String(value||"").toLowerCase()]||"pulpit";}
@@ -2652,8 +2622,8 @@ function agentAINawigacjaScalonaHTML(active="pulpit"){
   const m=agentAIMetrykiScalone(),groups=[
     {label:"Sterowanie",items:[{id:"pulpit",href:"#/admin/agent-ai",icon:"⌂",label:"Centrum"},{id:"rozmowa",href:"#/admin/agent-ai/rozmowa",icon:"💬",label:"Rozmowa"}]},
     {label:"Praca",items:[{id:"praca",href:"#/admin/agent-ai/praca",icon:"◉",label:"Praca na żywo",badge:m.working||m.queued||""},{id:"zadania",href:"#/admin/agent-ai/zadania",icon:"✓",label:"Zadania i decyzje",badge:m.tasks||m.decisions||""}]},
+    {label:"Ulepszanie strony",items:[{id:"jakosc",href:"#/admin/agent-ai/jakosc",icon:"🛠",label:"Jakość strony",badge:m.bad||m.warn||""}]},
     {label:"System",items:[{id:"automatyzacje",href:"#/admin/agent-ai/automatyzacje",icon:"⚙",label:"Automatyzacje",badge:m.specialistDecisions||""}]},
-    {label:"Zespół",items:[{id:"komunikacja",href:"#/admin/agent-ai/komunikacja",icon:"✈",label:"Telegram",badge:agentAITelegram.stats?.critical||""}]},
     {label:"Kontrola",items:[{id:"audyt",href:"#/admin/agent-ai/audyt",icon:"▤",label:"Audyt"}]}
   ];
   return `<nav class="panel agent-module-nav" aria-label="Podsekcje Agenta AI"><div class="agent-module-brand"><span>🤖</span><div><small>Centrum wykonawcze</small><b>Agent AI</b></div></div><div class="agent-module-groups">${groups.map(group=>`<section><small>${esc(group.label)}</small><div>${group.items.map(item=>`<a class="${item.id===active?"active":""}" href="${item.href}" ${item.id===active?'aria-current="page"':""}><span>${item.icon}</span><b>${esc(item.label)}</b>${item.badge?`<em>${esc(item.badge)}</em>`:""}</a>`).join("")}</div></section>`).join("")}</div></nav>`;
@@ -2670,7 +2640,7 @@ function agentAIPodstronaScalonyNaglowekHTML(active="pulpit"){
     praca:["◉","Praca Agenta na żywo","Rzeczywisty stan procesu z serwera: aktualnie wykonywane zadanie, kolejne etapy, kolejka, wynik i ewentualny błąd. Gdy Agent czeka, widok mówi o tym wprost.","odświeżanie co 15 s"],
     zadania:["✓","Zadania i decyzje","Wspólna kolejka aktywnych problemów, decyzji administratora, nowych produktów i źródeł producentów — bez powielania tych samych braków.",`${m.tasks+m.decisions} otwartych`],
     automatyzacje:["⚙","Automatyzacje i zasady","Specjaliści GPT, granice autonomii i pamięć procedur w jednym miejscu konfiguracji.",`${m.specialistDecisions} wyjątków`],
-    komunikacja:["✈","Komunikacja zespołu","Jeden bot Telegram, wspólna kolejka spraw, dostarczenia i ręczne notatki do zespołu.",`${agentAITelegram.stats?.critical||0} pilnych`],
+    jakosc:["🛠","Jakość i rozwój strony","Diagnostyka, trwałość zapisów, wydajność i błędy funkcjonalne w jednym miejscu. Agent ma kończyć realne naprawy, a nie tworzyć pozorne zadania.",`${m.bad+m.warn} spraw`],
     audyt:["▤","Audyt i historia","Rozliczalny rejestr zakończonych zadań, wykonań planów i działań administratora oraz Agenta.",`${m.history} zakończonych`]
   },p=pages[active]||pages.zadania;
   return `<section class="panel agent-workspace-header"><div><span>${p[0]}</span><div><small>AGENT AI • ${esc(p[1].toUpperCase())}</small><h1>${esc(p[1])}</h1><p>${esc(p[2])}</p></div></div><strong>${esc(p[3])}</strong></section>`;
@@ -2707,12 +2677,16 @@ function agentAIAutomatyzacjeScaloneHTML(requested="automatyzacje"){
   const decisions=(agentAISpecjalisci.data?.decisions||[]).length,memory=(agentAIPamiec||[]).length;
   return `<section class="agent-automation-overview"><article><span>✦</span><div><b>Specjaliści GPT‑5 nano</b><small>Role do opisów, SEO, Allegro, komunikacji i kontroli jakości.</small></div><em>${decisions} wyjątków</em></article><article><span>🛡️</span><div><b>Granice autonomii</b><small>Wyraźny podział: wykonaj automatycznie, przygotuj albo zapytaj.</small></div><em>ochrona aktywna</em></article><article><span>🧠</span><div><b>Pamięć procedur</b><small>Reguły synchronizowane między urządzeniami administratorów.</small></div><em>${memory} reguł</em></article></section>${agentAIObszarHTML("agent-auto-specialists","Specjaliści i wykonania","Uruchamianie konkretnych ról oraz podgląd ich wyników.",agentAISpecjalisciPanelHTML(),requested!=="uprawnienia"&&requested!=="pamiec",`${decisions} wyjątków`)}${agentAIObszarHTML("agent-auto-permissions","Uprawnienia i potwierdzenia","Jedno źródło zasad określających, co Agent może zapisać sam.",agentAIUprawnieniaPanelHTML(),requested==="uprawnienia","chronione")}${agentAIObszarHTML("agent-auto-memory","Pamięć i procedury","Trwałe reguły pracy używane przy kolejnych analizach.",agentAIPamiecPanelHTML(),requested==="pamiec",`${memory} reguł`)}`;
 }
+function agentAIJakoscStronyHTML(){
+  const m=agentAIMetrykiScalone(),runtime=agentAIRuntime.runtime||{},warnings=Array.isArray(runtime.integrationWarnings)?runtime.integrationWarnings:[];
+  return `<section class="agent-observer-metrics"><article class="${m.bad?"warning":"safe"}"><span>×</span><div><b>${esc(m.bad)}</b><small>błędów wymagających naprawy</small></div></article><article class="${m.warn?"warning":"safe"}"><span>!</span><div><b>${esc(m.warn)}</b><small>ostrzeżeń do sprawdzenia</small></div></article><article class="${warnings.length?"warning":"safe"}"><span>⚙</span><div><b>${esc(warnings.length)}</b><small>błędów ostatniego cyklu</small></div></article></section><section class="panel agent-live-work"><div class="order-section-head"><div><span class="order-pro-label">Rzeczywista kontrola serwera</span><h2>Funkcjonalność i trwałość strony</h2><p class="order-detail-lead">Kontrola odczytuje stan serwera, zapisów i integracji. Zakończenie jest raportowane dopiero po otrzymaniu odpowiedzi i trwałym zapisie wyniku.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIWykonaj('plan-bezpieczny')">▶ Uruchom kontrolę</button><a class="btn ghost" href="#/admin/system/diagnostyka">Pełna diagnostyka</a></div></div>${warnings.length?`<div class="agent-now-steps">${warnings.map(item=>`<article class="warning"><span>!</span><div><b>${esc(item.label||item.id)}</b><small>${esc(item.error||"Wymaga sprawdzenia")}</small></div></article>`).join("")}</div>`:`<div class="agent-decision-empty"><span>✓</span><div><b>Ostatni cykl bez błędów wykonania</b><small>Agent pozostaje gotowy na nowe zdarzenie lub ręczne polecenie.</small></div></div>`}</section>`;
+}
 function agentAIScalonaTrescSekcji(active,analysis,requested,score){
   if(active==="rozmowa")return agentAIRozmowaScalonaHTML();
   if(active==="praca")return agentAIPracaNaZywoHTML();
   if(active==="zadania")return agentAIZadaniaScaloneHTML(analysis,requested);
   if(active==="automatyzacje")return agentAIAutomatyzacjeScaloneHTML(requested);
-  if(active==="komunikacja")return agentAITelegramPanelHTML();
+  if(active==="jakosc")return agentAIJakoscStronyHTML();
   if(active==="audyt")return agentAIHistoriaPanelHTML();
   return typeof agentAIPulpitObserwowalnoscHTML==="function"?agentAIPulpitObserwowalnoscHTML(score):agentAIPulpitScalonyHTML(score);
 }
@@ -2720,7 +2694,6 @@ widokAdminAgentAI=function(section="pulpit"){
   allegroLadujJesliTrzeba("orders");const requested=String(section||"pulpit").toLowerCase(),active=agentAISekcjaKanoniczna(requested),analysis=agentAIAnaliza(),tasks=agentAIAnalizaAktywna(analysis),score=Math.max(0,Math.round(100-(tasks.filter(x=>x.poziom==="bad").length*18)-(tasks.filter(x=>x.poziom==="warn").length*8))),runtimeAge=Date.now()-Number(agentAIRuntime.updatedAt||0);
   if((!agentAIRuntime.loaded||runtimeAge>60_000)&&!agentAIRuntime.loading)setTimeout(()=>agentAIRuntimePobierz(true),0);
   if(["pulpit","praca"].includes(active))setTimeout(()=>agentAIRuntimePolling(),0);
-  if(active==="komunikacja"&&!agentAITelegram.loaded&&!agentAITelegram.loading)setTimeout(()=>agentAITelegramPobierz(true,true),0);
   if(["pulpit","automatyzacje"].includes(active)&&!agentAISpecjalisci.loaded&&!agentAISpecjalisci.loading)setTimeout(()=>agentAISpecjalisciPobierz(false),0);
   if(["pulpit","automatyzacje"].includes(active))setTimeout(()=>agentAISpecjalisciPolling(),0);
   const decisionAge=Date.now()-(Date.parse(agentAIDecyzjeMagazynowe.updatedAt)||0);if(["rozmowa","zadania"].includes(active)&&(!agentAIDecyzjeMagazynowe.loaded||decisionAge>60_000)&&!agentAIDecyzjeMagazynowe.loading)setTimeout(()=>agentAIDecyzjeMagazynowePobierz(true),0);

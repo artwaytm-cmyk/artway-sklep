@@ -561,14 +561,9 @@ export function createAgentSpecialists({
 
   async function automaticCycleUnlocked(options = {}) {
     const current = await readState();
-    if (!current.config.enabled || !current.config.automaticEnabled || current.config.automaticDailyLimit < 1) return { skipped: true, reason: 'disabled', prepared: [], applied: [], decisions: [] };
+    if (!current.config.enabled || !current.config.automaticEnabled || (current.config.limitsEnabled === true && current.config.automaticDailyLimit < 1)) return { skipped: true, reason: 'disabled', prepared: [], applied: [], decisions: [] };
     const providerCooldownUntil = Date.parse(current.lastCycle?.providerCooldownUntil || '');
-    if (Number.isFinite(providerCooldownUntil) && providerCooldownUntil > now().getTime()) {
-      return {
-        skipped: true, reason: 'provider_cooldown', prepared: [], applied: [], decisions: [],
-        retryAt: new Date(providerCooldownUntil).toISOString(),
-      };
-    }
+    const providerCooldownActive = Number.isFinite(providerCooldownUntil) && providerCooldownUntil > now().getTime();
     const cycleStartedAt = now().toISOString();
     const coordinatorPlan = options?.coordinatorPlan && typeof options.coordinatorPlan === 'object' ? sanitizeContext(options.coordinatorPlan) : null;
     const coordinatorAssignments = Array.isArray(coordinatorPlan?.assignments) ? coordinatorPlan.assignments : [];
@@ -613,7 +608,7 @@ export function createAgentSpecialists({
     }).filter((item) => item.eligibility.eligible && !item.editorial.reviewedSameInput && item.editorial.retryDue !== false)
       .sort((a, b) => b.priority - a.priority || String(b.product.createdAt || b.product.dataDodania || '').localeCompare(String(a.product.createdAt || a.product.dataDodania || ''))) : [];
     const prepared = [], applied = [], decisionResults = [], activeFingerprints = new Set(), autoResolvedDecisionIds = new Set(), handledProductIds = new Set(), autonomy = learningAutonomy(current.learning, current.config);
-    let limitReached = false, providerBlocked = false, providerCooldownAt = '';
+    let limitReached = false, providerBlocked = providerCooldownActive, providerCooldownAt = providerCooldownActive ? new Date(providerCooldownUntil).toISOString() : '';
 
     const productsById = new Map(products.map((product) => [String(product.id), product]));
     for (const decision of (scenarioEnabled('catalog-editorial') ? current.decisions : []).filter((item) => item.kind === 'product_content_review' && activeDecision(item, now()))) {
@@ -640,7 +635,7 @@ export function createAgentSpecialists({
 
     const unresolvedCommunication = communicationScanDue ? communicationRows.sort((a, b) => String(b.item?.latestNewIncoming?.createdAt || b.item?.lastMessage?.createdAt || '').localeCompare(String(a.item?.latestNewIncoming?.createdAt || a.item?.lastMessage?.createdAt || ''))) : [];
 
-    let availableRuns = automaticBatchLimit(current.config.automaticBatchSize, options?.maxItems);
+    let availableRuns = providerCooldownActive ? 0 : automaticBatchLimit(current.config.automaticBatchSize, options?.maxItems);
     // Komunikacja może zająć najwyżej dwa miejsca. Pozostała przepustowość jest
     // przeznaczona na sukcesywne przygotowanie całego katalogu produktów.
     let communicationRuns = Math.min(2, Math.max(0, availableRuns - Math.min(2, candidates.length)));
@@ -658,7 +653,7 @@ export function createAgentSpecialists({
         } catch (error) {
           if (providerQuotaUnavailable(error)) {
             availableRuns = 0; providerBlocked = true;
-            providerCooldownAt = new Date(now().getTime() + 6 * 60 * 60_000).toISOString();
+            providerCooldownAt = new Date(now().getTime() + 30 * 60_000).toISOString();
           } else if (error?.code === 'agent_specialist_daily_limit') { availableRuns = 0; limitReached = true; }
           else prepared.push({ type: 'communication', targetId: target.communicationId, status: 'error', error: safeError(error?.message || error) });
         }
@@ -715,11 +710,11 @@ export function createAgentSpecialists({
           const quotaBlocked = providerQuotaUnavailable(error);
           if (quotaBlocked) {
             providerBlocked = true; availableRuns = 0;
-            providerCooldownAt = new Date(now().getTime() + 6 * 60 * 60_000).toISOString();
+            providerCooldownAt = new Date(now().getTime() + 30 * 60_000).toISOString();
           }
           await markProductEditorialRetry(
             item.product, null, item.editorial, safeError(error?.message || error), job.channel,
-            quotaBlocked ? 6 * 60 * 60_000 : 15 * 60_000,
+            quotaBlocked ? 30 * 60_000 : 15 * 60_000,
           );
           await progress({
             id: workId, productId: target.productId, productName: target.name, channel: job.channel,
@@ -780,7 +775,7 @@ export function createAgentSpecialists({
     return { skipped: !meaningful, reason: meaningful ? '' : limitReached ? 'daily_limit' : 'no_candidates', prepared, applied, decisions: decisionResults.map((item) => ({ id: item.id, kind: item.kind, risk: item.risk })), lastCycle };
   }
 
-  // Timer, panel i Telegram mogą zażądać cyklu w tej samej chwili. Tylko jeden
+  // Timer i panel mogą zażądać cyklu w tej samej chwili. Tylko jeden
   // wykonawca może wybierać produkty; pozostałe wywołania dostają jawny status
   // zamiast tworzyć drugi szkic dla tego samego odcisku danych.
   let automaticCyclePromise = null;

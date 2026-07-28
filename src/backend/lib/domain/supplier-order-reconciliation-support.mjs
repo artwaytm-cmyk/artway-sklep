@@ -5,8 +5,8 @@ const DEFAULT_SUPPLIER = 'Bez przypisanego dostawcy';
 const MAX_QUANTITY = 1_000_000;
 
 const EDITABLE_DRAFT_STATUSES = new Set([
-  '', 'szkic', 'do sprawdzenia', 'zaakceptowane', 'wyslane na telegram',
-  'draft', 'review', 'approved', 'telegram preview',
+  '', 'szkic', 'do sprawdzenia', 'zaakceptowane',
+  'draft', 'review', 'approved',
 ]);
 const COMMITTED_DRAFT_STATUSES = new Set([
   'wyslane do producenta', 'wyslane do dostawcy', 'czesciowo wyslane e-mailem',
@@ -307,10 +307,6 @@ function sameContent(left, right) {
 
 function clearApproval(draft) {
   for (const key of ['approval', 'approvedAt', 'approvedBy', 'approvalRevision', 'approvalStatus']) delete draft[key];
-  if (draft.telegramSentAt) {
-    draft.telegramLastSentAt = draft.telegramSentAt;
-    delete draft.telegramSentAt;
-  }
 }
 
 function draftKey(supplier = '') {
@@ -329,7 +325,7 @@ function newDraftNumber(now, sequence) {
 function statusAfterChange(previousStatus, empty) {
   if (empty) return 'wyczyszczone';
   const status = normalized(previousStatus);
-  if (['zaakceptowane', 'approved', 'wyslane na telegram', 'telegram preview'].includes(status)) return 'do sprawdzenia';
+  if (['zaakceptowane', 'approved'].includes(status)) return 'do sprawdzenia';
   return EDITABLE_DRAFT_STATUSES.has(status) ? (text(previousStatus, 80) || 'szkic') : 'szkic';
 }
 
@@ -395,4 +391,3 @@ function makeLine({ productId, product, raw, settings, supplier, required, manua
 
 
 export { DEFAULT_SUPPLIER, MAX_QUANTITY, EDITABLE_DRAFT_STATUSES, COMMITTED_DRAFT_STATUSES, CLOSED_ORDER_STATUSES, text, normalized, quantity, firstValue, array, object, clone, productIdOf, orderIdOf, orderStatusOf, isActiveOrder, inventoryModeOf, orderItemsOf, catalogArray, productMap, stockOf, warehouseMeta, sourceUrls, productCode, productEan, productName, movementIndex, movementBefore, draftStatus, supplierDraftIsCommitted, supplierOfDraft, draftItems, draftItemQuantity, draftItemReceived, manualExtraOf, contentView, sameContent, clearApproval, draftKey, newDraftId, newDraftNumber, statusAfterChange, summarizeDraft, makeLine };
-

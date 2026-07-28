@@ -11,7 +11,7 @@ export function createAllegroCommunicationsRoute(deps) {
     respond, isAdmin, read, write, text, allegroStatus, applyInternalStatuses, normalizeSettings,
     caseKey, latestCustomerMessage, messageKey, learnedReplyStyle, fullReplyCase, previousCustomerCases,
     checkReplyContext, callAllegro, betaJson, normalizeIssueMessage, normalizeThreadMessage,
-    rememberManualReplyStyle, fetchCommunications, markNewCommunications, sendTelegramReminders, sendAutoReplies,
+    rememberManualReplyStyle, fetchCommunications, markNewCommunications, sendAutoReplies,
   } = deps;
   return async function allegroCommunicationsRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
@@ -137,11 +137,10 @@ export function createAllegroCommunicationsRoute(deps) {
       allegroSystemMessages: freshCommunication.reduce((sum, item) => sum + Math.max(0, Number(item?.systemCount || 0)), 0),
     };
     if (internalApplied.changed) await write('allegro_communication_internal', { items: internalApplied.items, updated_at: new Date().toISOString() });
-    const telegramReminders = await sendTelegramReminders(data, settings);
     let autoReply = { sent: [], skipped: [], items: {} };
     if (body.autoReply !== false && settings.enabled) autoReply = await sendAutoReplies(req, data, settings);
     const rec = { threads: data.threads, issues: data.issues, errors: data.errors || [], requiresReauth: !!data.requiresReauth, updated_at: new Date().toISOString(), autoReplyLastRun: autoReply.sent?.length || 0, lastSyncSummary: syncSummary };
     await write('allegro_communications', rec);
-    return respond({ ok: true, allegro: await allegroStatus(req), ...rec, settings, autoReply, telegramReminders, syncSummary });
+    return respond({ ok: true, allegro: await allegroStatus(req), ...rec, settings, autoReply, syncSummary });
   };
 }

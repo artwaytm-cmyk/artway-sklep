@@ -8,7 +8,6 @@ const DOMAIN_TABLES = Object.freeze({
   'kv:allegro_communication_internal_history': 'artway_allegro_communications',
   'kv:allegro_communication_internal': 'artway_allegro_communications',
   'kv:allegro_auto_replies': 'artway_allegro_communications',
-  'kv:allegro_communication_telegram_alerts': 'artway_allegro_communications',
   'settings:artway_agent_ai_historia': 'artway_agent_records',
   'settings:artway_agent_ai_pamiec': 'artway_agent_records',
   'settings:artway_agent_ai_zlecenia': 'artway_agent_records',
@@ -17,7 +16,6 @@ const DOMAIN_TABLES = Object.freeze({
   'kv:agent_action_runs': 'artway_agent_records',
   'kv:agent_runtime': 'artway_agent_records',
   'kv:codex_agent_jobs': 'artway_agent_records',
-  'kv:telegram_communication_state': 'artway_agent_records',
 });
 
 export const DEDICATED_DOMAIN_MIGRATION = 'dedicated-domain-tables-v2';

@@ -32,7 +32,7 @@ const DEFAULT_CONFIG = Object.freeze({
   autoAuditCatalogIdentity: true,
   confidenceThreshold: 0.92,
   learningEnabled: true,
-  approvalWarmupCount: 3,
+  approvalWarmupCount: 0,
   learnedAutoApplyThreshold: 0.86,
   decisionRetentionDays: 30,
 });
@@ -102,7 +102,9 @@ function config(value = {}) {
     autoAuditCatalogIdentity: source.autoAuditCatalogIdentity !== false,
     confidenceThreshold: number(source.confidenceThreshold, DEFAULT_CONFIG.confidenceThreshold, 0.75, 1),
     learningEnabled: source.learningEnabled !== false,
-    approvalWarmupCount: number(source.approvalWarmupCount, DEFAULT_CONFIG.approvalWarmupCount, 0, 20),
+    // Bezpieczne redakcje przechodzą własne bramki jakości i zgodności.
+    // Historyczny licznik „rozgrzewki” nie może już blokować ich zapisu.
+    approvalWarmupCount: 0,
     learnedAutoApplyThreshold: number(source.learnedAutoApplyThreshold, DEFAULT_CONFIG.learnedAutoApplyThreshold, 0.6, 1),
     decisionRetentionDays: number(source.decisionRetentionDays, DEFAULT_CONFIG.decisionRetentionDays, 7, 90),
   };

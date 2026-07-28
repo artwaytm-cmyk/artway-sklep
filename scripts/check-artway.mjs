@@ -49,9 +49,6 @@ const files = [
   'src/backend/lib/domain/store-data-pull.mjs',
   'src/backend/lib/domain/allegro-publication-agent.mjs',
   'src/backend/lib/domain/allegro-reply-assistant.mjs',
-  'src/backend/lib/domain/telegram-communication.mjs',
-  'src/backend/lib/telegram-center.mjs',
-  'src/backend/lib/telegram-router.mjs',
   'src/backend/lib/allegro-compliance.mjs',
   'src/backend/lib/infakt-purchase.mjs',
   'src/backend/cron-inpost-sync.mjs',
@@ -61,8 +58,6 @@ const files = [
   'src/backend/cron-supplier-availability.mjs',
   'src/backend/cron-infakt-sync.mjs',
   'src/backend/cron-seo-daily.mjs',
-  'src/backend/cron-telegram-center.mjs',
-  'src/backend/telegram-webhook.mjs',
   'src/backend/sitemap.mjs',
   'src/backend/lib/domain/storefront-seo-catalog.mjs',
   'src/backend/google-products.mjs',
@@ -133,9 +128,6 @@ const productSaleChannelLinks = read('src/backend/lib/domain/product-sale-channe
 const allegroOfferWithdrawal = read('src/backend/lib/allegro-offer-withdrawal-route.mjs');
 const allegroCompliance = read('src/backend/lib/allegro-compliance.mjs');
 const infaktPurchase = read('src/backend/lib/infakt-purchase.mjs');
-const telegramCommunication = read('src/backend/lib/domain/telegram-communication.mjs');
-const telegramCenter = read('src/backend/lib/telegram-center.mjs');
-const telegramRouter = read('src/backend/lib/telegram-router.mjs');
 const cron = read('src/backend/cron-inpost-sync.mjs');
 const cronAllegroOrders = read('src/backend/cron-allegro-orders.mjs');
 const cronAllegroCommunications = read('src/backend/cron-allegro-communications.mjs');
@@ -143,8 +135,6 @@ const cronAllegroOffers = read('src/backend/cron-allegro-offers.mjs');
 const cronSupplierAvailability = read('src/backend/cron-supplier-availability.mjs');
 const cronInfaktSync = read('src/backend/cron-infakt-sync.mjs');
 const cronSeoDaily = read('src/backend/cron-seo-daily.mjs');
-const cronTelegramCenter = read('src/backend/cron-telegram-center.mjs');
-const telegramWebhook = read('src/backend/telegram-webhook.mjs');
 const sitemap = read('src/backend/sitemap.mjs');
 const googleProducts = read('src/backend/google-products.mjs');
 const robots = read('robots.txt');
@@ -249,7 +239,7 @@ requireMarkers('połączonych assets JS', app, [
   'seoMode',
   'artway_seo_ustawienia',
   'product-seo-editor',
-  'function widokAdminAgentAI',
+  'widokAdminAgentAI=function',
   'artway_dostepnosc',
   'LIMIT_POTWIERDZENIA_DOSTEPNOSCI',
   'artway_magazyn_produkty',
@@ -312,7 +302,7 @@ requireMarkers('połączonych assets JS', app, [
   'ALLEGRO_PROCEDURA_AGENTA_OFERT',
   'Agent: aktualizuj ofertę',
   'function agentAIWykonajOferteAllegro',
-  'wystaw Origami Kot na Allegro',
+  'Przygotuj i wystaw produkt',
   'function allegroStanOfertyProduktu',
   'offerDefaultsAudit',
   'function allegroZapiszUstawieniaOfert',
@@ -367,7 +357,6 @@ requireMarkers('połączonych assets JS', app, [
   'Co mamy obecnie na magazynie',
   'Priorytet sprzedaży',
   'function agentAICentrumTekst',
-  'function agentAIWyslijRaportTelegram',
   'function agentAIWykonajPlanBezpieczny',
   'function agentAIKonkretneDzialanie',
   'artway_agent_ai_plan_cykl',
@@ -379,7 +368,7 @@ requireMarkers('połączonych assets JS', app, [
   'Wykonaj bezpieczne działania',
   'Funkcjonalność strony — priorytet 1',
   'Pobieranie i świeżość danych — priorytet 2',
-  'Kontekst całej strony',
+  'function agentAIKontekstHTML',
   '#/admin/magazyn/dostawcy',
   'Próg ostrzeżenia u producenta',
   'stan_u_producenta',
@@ -389,7 +378,6 @@ requireMarkers('połączonych assets JS', app, [
   'Opłacalność i wyliczenie marżowe',
   '#/admin/allegro/wiadomosci',
   '#/admin/allegro/dyskusje',
-  'telegramReminders',
   '"producent"',
   'Zrealizowane lokalnie',
   'function potwierdzWidoczneStanyMagazynu',
@@ -568,9 +556,7 @@ requireMarkers('backend aplikacji po podziale domenowym', storeRuntime, [
   'function allegroZastosujStatusyWewnetrzne',
   'allegro_communication_internal_history',
   'allegro_orders_baseline_v2',
-  'function allegroWyslijPrzypomnieniaTelegram',
   'humanReplyNeeded',
-  'telegramCenter.managedEvent',
   "'zrealizowane'",
   'function infaktKonfiguracja',
   "'X-inFakt-ApiKey'",
@@ -642,41 +628,6 @@ requireMarkers('src/backend/lib/infakt-purchase.mjs', infaktPurchase, [
   'wartość wiersza po rabatach',
 ]);
 
-requireMarkers('src/backend/lib/domain/telegram-communication.mjs', telegramCommunication, [
-  'function telegramEventDecision',
-  'function telegramDigestSlot',
-  '<b>NAZWA PRODUKTU · KOD · ZAMAWIANA ILOŚĆ</b>',
-  'function telegramSupplierQuantity',
-  "kind: 'editable-order'",
-  'function telegramNaturalIntent',
-  'function telegramIncidentId',
-  'function editTelegramHtml',
-]);
-
-requireMarkers('src/backend/lib/telegram-center.mjs', telegramCenter, [
-  'function createTelegramCenter',
-  'async function managedEvent',
-  'async function dispatch',
-  'async function incidentAction',
-  'async function refreshDashboard',
-  'async function registerWebhook',
-  'async function inbound',
-]);
-
-requireMarkers('src/backend/lib/telegram-router.mjs', telegramRouter, [
-  "'telegram-center-status'",
-  "'telegram-settings-save'",
-  "'telegram-register-webhook'",
-  "'telegram-dispatch'",
-  "'telegram-incident-action'",
-  "'telegram-delivery-action'",
-  "'telegram-dashboard-refresh'",
-  "'telegram-send-agent-report'",
-]);
-
-requireMarkers('src/backend/cron-telegram-center.mjs', cronTelegramCenter, ["schedule: '*/15 * * * *'", "action=telegram-dispatch"]);
-requireMarkers('src/backend/telegram-webhook.mjs', telegramWebhook, ['x-telegram-bot-api-secret-token', 'telegram-inbound-command', 'telegram-incident-action', 'allowedChatIds']);
-
 const ksefTestRows = infaktKsefPozycje(`<?xml version="1.0"?><Faktura><KodWaluty>PLN</KodWaluty><FaWiersz><P_7>Gra testowa 5901234123457</P_7><P_8A>szt.</P_8A><P_8B>2</P_8B><P_9A>100.00</P_9A><P_11>180.00</P_11><P_11A>221.40</P_11A><P_12>23</P_12><Indeks>ABC-123</Indeks></FaWiersz></Faktura>`);
 if (ksefTestRows.length !== 1 || ksefTestRows[0].unitNet !== 90 || ksefTestRows[0].unitGross !== 110.7 || ksefTestRows[0].ean !== '5901234123457') {
   fail('inFakt/KSeF: cena jednej sztuki musi uwzględniać rzeczywistą wartość wiersza po rabacie oraz rozpoznawać EAN');
@@ -714,10 +665,6 @@ if (/stock:\s*\{\s*available:\s*Math\.max\(0,\s*Number\(opt\.stock\s*\?\?\s*p\.s
 if (app.includes('badge:produktyBezOferty')) {
   fail('assets/app.js: licznik Allegro nie może zliczać całego katalogu produktów bez oferty');
 }
-const telegramSupplierFlow = app.slice(app.indexOf('async function agentAIWyslijZlecenieTelegram'), app.indexOf('async function agentAIWyslijZlecenieEmail'));
-if (/status\s*:\s*["'`]wysłane na Telegram/.test(telegramSupplierFlow)) {
-  fail('assets/app.js: wysyłka podglądu Telegram nie może zamykać ani zmieniać statusu dokumentu producenta');
-}
 if (!app.includes('async function agentAIUzgodnijPlanZSerwerem') || !app.includes('supplier-order-reconcile') || app.includes('function agentAIUtworzZlecenieProducenta(')) {
   fail('assets/app.js: Plan zatowarowania musi używać kanonicznego uzgadniania serwerowego bez lokalnego generatora szkiców');
 }
@@ -728,7 +675,7 @@ if (!app.includes('została bezpiecznie dezaktywowana') || !app.includes('...(pr
   fail('assets/app.js: kartoteka producentów musi chronić aktywne zamówienia i zasilać listę producentów produktów');
 }
 const internalResolveFlow = allegroCommunicationsRoute.slice(allegroCommunicationsRoute.indexOf("if (action === 'allegro-communication-resolve')"), allegroCommunicationsRoute.indexOf("if (action === 'allegro-communications-settings')"));
-if (!internalResolveFlow.includes('sentExternally: false') || /callAllegro|sendTelegram|sendSmtp/.test(internalResolveFlow)) {
+if (!internalResolveFlow.includes('sentExternally: false') || /callAllegro|sendSmtp/.test(internalResolveFlow)) {
   fail('store-app.mjs: wewnętrzne zamknięcie komunikacji nie może wysyłać wiadomości ani wywoływać API Allegro');
 }
 const duplicateResolutionFlow = allegroOfferWithdrawal;
@@ -736,7 +683,7 @@ if (!duplicateResolutionFlow.includes("status: 'ENDED'") || !duplicateResolution
   fail('store-app.mjs: centrum duplikatów musi wymagać wyboru oferty pozostawianej i kontrolowanie kończyć wycofywane oferty');
 }
 if (!store.includes('function allegroKomunikacjaWewnetrznieZalatwiona') || !store.includes('function allegroKomunikacjaWymagaOdpowiedzi') || !store.includes('allegroKomunikacjaWewnetrznieZalatwiona(thread)') || !store.includes('allegroKomunikacjaWewnetrznieZalatwiona(issue)') || !store.includes('allegroKomunikacjaWewnetrznieZalatwiona(item)')) {
-  fail('store-app.mjs: Agent, autoresponder i Telegram muszą pomijać sprawy załatwione wewnętrznie');
+  fail('store-app.mjs: Agent i autoresponder muszą pomijać sprawy załatwione wewnętrznie');
 }
 const communicationFilterFlow = app.slice(app.indexOf('function allegroKomunikacjaPasujaca'), app.indexOf('function allegroZaznaczWidocznaKomunikacje'));
 if (!communicationFilterFlow.includes('allegroKomunikacjaWymagaOdpowiedzi(item)') || !communicationFilterFlow.includes('allegroKomunikacjaZalatwiona(item)') || !app.includes('wymaga odpowiedzi • bez załatwionych')) {

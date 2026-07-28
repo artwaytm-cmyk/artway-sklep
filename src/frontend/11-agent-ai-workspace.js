@@ -5,7 +5,7 @@ const AGENT_AI_SEKCJE_KANONICZNE=Object.freeze({
   praca:"praca",status:"praca",runtime:"praca",
   zadania:"zadania",plan:"zadania",produkty:"zadania",zlecenia:"zadania",producenci:"zadania",
   automatyzacje:"automatyzacje",specjalisci:"automatyzacje",uprawnienia:"automatyzacje",pamiec:"automatyzacje",
-  komunikacja:"komunikacja",telegram:"komunikacja",
+  jakosc:"jakosc",diagnostyka:"jakosc",
   audyt:"audyt",historia:"audyt"
 });
 function agentAISekcjaKanoniczna(value="pulpit"){return AGENT_AI_SEKCJE_KANONICZNE[String(value||"").toLowerCase()]||"pulpit";}
@@ -20,8 +20,8 @@ function agentAINawigacjaScalonaHTML(active="pulpit"){
   const m=agentAIMetrykiScalone(),groups=[
     {label:"Sterowanie",items:[{id:"pulpit",href:"#/admin/agent-ai",icon:"⌂",label:"Centrum"},{id:"rozmowa",href:"#/admin/agent-ai/rozmowa",icon:"💬",label:"Rozmowa"}]},
     {label:"Praca",items:[{id:"praca",href:"#/admin/agent-ai/praca",icon:"◉",label:"Praca na żywo",badge:m.working||m.queued||""},{id:"zadania",href:"#/admin/agent-ai/zadania",icon:"✓",label:"Zadania i decyzje",badge:m.tasks||m.decisions||""}]},
+    {label:"Ulepszanie strony",items:[{id:"jakosc",href:"#/admin/agent-ai/jakosc",icon:"🛠",label:"Jakość strony",badge:m.bad||m.warn||""}]},
     {label:"System",items:[{id:"automatyzacje",href:"#/admin/agent-ai/automatyzacje",icon:"⚙",label:"Automatyzacje",badge:m.specialistDecisions||""}]},
-    {label:"Zespół",items:[{id:"komunikacja",href:"#/admin/agent-ai/komunikacja",icon:"✈",label:"Telegram",badge:agentAITelegram.stats?.critical||""}]},
     {label:"Kontrola",items:[{id:"audyt",href:"#/admin/agent-ai/audyt",icon:"▤",label:"Audyt"}]}
   ];
   return `<nav class="panel agent-module-nav" aria-label="Podsekcje Agenta AI"><div class="agent-module-brand"><span>🤖</span><div><small>Centrum wykonawcze</small><b>Agent AI</b></div></div><div class="agent-module-groups">${groups.map(group=>`<section><small>${esc(group.label)}</small><div>${group.items.map(item=>`<a class="${item.id===active?"active":""}" href="${item.href}" ${item.id===active?'aria-current="page"':""}><span>${item.icon}</span><b>${esc(item.label)}</b>${item.badge?`<em>${esc(item.badge)}</em>`:""}</a>`).join("")}</div></section>`).join("")}</div></nav>`;
@@ -38,7 +38,7 @@ function agentAIPodstronaScalonyNaglowekHTML(active="pulpit"){
     praca:["◉","Praca Agenta na żywo","Rzeczywisty stan procesu z serwera: aktualnie wykonywane zadanie, kolejne etapy, kolejka, wynik i ewentualny błąd. Gdy Agent czeka, widok mówi o tym wprost.","odświeżanie co 15 s"],
     zadania:["✓","Zadania i decyzje","Wspólna kolejka aktywnych problemów, decyzji administratora, nowych produktów i źródeł producentów — bez powielania tych samych braków.",`${m.tasks+m.decisions} otwartych`],
     automatyzacje:["⚙","Automatyzacje i zasady","Specjaliści GPT, granice autonomii i pamięć procedur w jednym miejscu konfiguracji.",`${m.specialistDecisions} wyjątków`],
-    komunikacja:["✈","Komunikacja zespołu","Jeden bot Telegram, wspólna kolejka spraw, dostarczenia i ręczne notatki do zespołu.",`${agentAITelegram.stats?.critical||0} pilnych`],
+    jakosc:["🛠","Jakość i rozwój strony","Diagnostyka, trwałość zapisów, wydajność i błędy funkcjonalne w jednym miejscu. Agent ma kończyć realne naprawy, a nie tworzyć pozorne zadania.",`${m.bad+m.warn} spraw`],
     audyt:["▤","Audyt i historia","Rozliczalny rejestr zakończonych zadań, wykonań planów i działań administratora oraz Agenta.",`${m.history} zakończonych`]
   },p=pages[active]||pages.zadania;
   return `<section class="panel agent-workspace-header"><div><span>${p[0]}</span><div><small>AGENT AI • ${esc(p[1].toUpperCase())}</small><h1>${esc(p[1])}</h1><p>${esc(p[2])}</p></div></div><strong>${esc(p[3])}</strong></section>`;
@@ -75,12 +75,16 @@ function agentAIAutomatyzacjeScaloneHTML(requested="automatyzacje"){
   const decisions=(agentAISpecjalisci.data?.decisions||[]).length,memory=(agentAIPamiec||[]).length;
   return `<section class="agent-automation-overview"><article><span>✦</span><div><b>Specjaliści GPT‑5 nano</b><small>Role do opisów, SEO, Allegro, komunikacji i kontroli jakości.</small></div><em>${decisions} wyjątków</em></article><article><span>🛡️</span><div><b>Granice autonomii</b><small>Wyraźny podział: wykonaj automatycznie, przygotuj albo zapytaj.</small></div><em>ochrona aktywna</em></article><article><span>🧠</span><div><b>Pamięć procedur</b><small>Reguły synchronizowane między urządzeniami administratorów.</small></div><em>${memory} reguł</em></article></section>${agentAIObszarHTML("agent-auto-specialists","Specjaliści i wykonania","Uruchamianie konkretnych ról oraz podgląd ich wyników.",agentAISpecjalisciPanelHTML(),requested!=="uprawnienia"&&requested!=="pamiec",`${decisions} wyjątków`)}${agentAIObszarHTML("agent-auto-permissions","Uprawnienia i potwierdzenia","Jedno źródło zasad określających, co Agent może zapisać sam.",agentAIUprawnieniaPanelHTML(),requested==="uprawnienia","chronione")}${agentAIObszarHTML("agent-auto-memory","Pamięć i procedury","Trwałe reguły pracy używane przy kolejnych analizach.",agentAIPamiecPanelHTML(),requested==="pamiec",`${memory} reguł`)}`;
 }
+function agentAIJakoscStronyHTML(){
+  const m=agentAIMetrykiScalone(),runtime=agentAIRuntime.runtime||{},warnings=Array.isArray(runtime.integrationWarnings)?runtime.integrationWarnings:[];
+  return `<section class="agent-observer-metrics"><article class="${m.bad?"warning":"safe"}"><span>×</span><div><b>${esc(m.bad)}</b><small>błędów wymagających naprawy</small></div></article><article class="${m.warn?"warning":"safe"}"><span>!</span><div><b>${esc(m.warn)}</b><small>ostrzeżeń do sprawdzenia</small></div></article><article class="${warnings.length?"warning":"safe"}"><span>⚙</span><div><b>${esc(warnings.length)}</b><small>błędów ostatniego cyklu</small></div></article></section><section class="panel agent-live-work"><div class="order-section-head"><div><span class="order-pro-label">Rzeczywista kontrola serwera</span><h2>Funkcjonalność i trwałość strony</h2><p class="order-detail-lead">Kontrola odczytuje stan serwera, zapisów i integracji. Zakończenie jest raportowane dopiero po otrzymaniu odpowiedzi i trwałym zapisie wyniku.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIWykonaj('plan-bezpieczny')">▶ Uruchom kontrolę</button><a class="btn ghost" href="#/admin/system/diagnostyka">Pełna diagnostyka</a></div></div>${warnings.length?`<div class="agent-now-steps">${warnings.map(item=>`<article class="warning"><span>!</span><div><b>${esc(item.label||item.id)}</b><small>${esc(item.error||"Wymaga sprawdzenia")}</small></div></article>`).join("")}</div>`:`<div class="agent-decision-empty"><span>✓</span><div><b>Ostatni cykl bez błędów wykonania</b><small>Agent pozostaje gotowy na nowe zdarzenie lub ręczne polecenie.</small></div></div>`}</section>`;
+}
 function agentAIScalonaTrescSekcji(active,analysis,requested,score){
   if(active==="rozmowa")return agentAIRozmowaScalonaHTML();
   if(active==="praca")return agentAIPracaNaZywoHTML();
   if(active==="zadania")return agentAIZadaniaScaloneHTML(analysis,requested);
   if(active==="automatyzacje")return agentAIAutomatyzacjeScaloneHTML(requested);
-  if(active==="komunikacja")return agentAITelegramPanelHTML();
+  if(active==="jakosc")return agentAIJakoscStronyHTML();
   if(active==="audyt")return agentAIHistoriaPanelHTML();
   return typeof agentAIPulpitObserwowalnoscHTML==="function"?agentAIPulpitObserwowalnoscHTML(score):agentAIPulpitScalonyHTML(score);
 }
@@ -88,7 +92,6 @@ widokAdminAgentAI=function(section="pulpit"){
   allegroLadujJesliTrzeba("orders");const requested=String(section||"pulpit").toLowerCase(),active=agentAISekcjaKanoniczna(requested),analysis=agentAIAnaliza(),tasks=agentAIAnalizaAktywna(analysis),score=Math.max(0,Math.round(100-(tasks.filter(x=>x.poziom==="bad").length*18)-(tasks.filter(x=>x.poziom==="warn").length*8))),runtimeAge=Date.now()-Number(agentAIRuntime.updatedAt||0);
   if((!agentAIRuntime.loaded||runtimeAge>60_000)&&!agentAIRuntime.loading)setTimeout(()=>agentAIRuntimePobierz(true),0);
   if(["pulpit","praca"].includes(active))setTimeout(()=>agentAIRuntimePolling(),0);
-  if(active==="komunikacja"&&!agentAITelegram.loaded&&!agentAITelegram.loading)setTimeout(()=>agentAITelegramPobierz(true,true),0);
   if(["pulpit","automatyzacje"].includes(active)&&!agentAISpecjalisci.loaded&&!agentAISpecjalisci.loading)setTimeout(()=>agentAISpecjalisciPobierz(false),0);
   if(["pulpit","automatyzacje"].includes(active))setTimeout(()=>agentAISpecjalisciPolling(),0);
   const decisionAge=Date.now()-(Date.parse(agentAIDecyzjeMagazynowe.updatedAt)||0);if(["rozmowa","zadania"].includes(active)&&(!agentAIDecyzjeMagazynowe.loaded||decisionAge>60_000)&&!agentAIDecyzjeMagazynowe.loading)setTimeout(()=>agentAIDecyzjeMagazynowePobierz(true),0);

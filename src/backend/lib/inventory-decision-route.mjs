@@ -1,5 +1,5 @@
 import { mergeCatalogProducts } from './domain/catalog-quality.mjs';
-import { matchInventoryProduct } from './domain/inventory-command.mjs';
+import { matchInventoryProduct } from './domain/inventory-product-match.mjs';
 import {
   activeInventoryLocations,
   renderInventoryDecisionConfirmation,
@@ -97,9 +97,7 @@ export function createInventoryDecisionRoute({ decisions, isAdmin, rateLimit, re
           mode: body.mode,
           quantity: body.quantity,
           source: text(body.source || 'admin-agent-panel', 80),
-          channel: body.channel === 'telegram' ? 'telegram' : 'panel',
-          chatId: body.chatId,
-          messageThreadId: body.messageThreadId,
+          channel: 'panel',
           actor: decisionActor,
           reason: text(body.reason || 'Zmiana przygotowana przez Agenta', 300),
         });

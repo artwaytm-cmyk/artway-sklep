@@ -326,7 +326,6 @@ function agentAIRozpoznajPolecenie(tekst=""){
   if(agentAIMa(n,["pobierz swieze dane","pobierz świeże dane","odswiez wszystkie dane","odśwież wszystkie dane","wykonaj samo pobieranie","sprawdz zrodla danych","sprawdź źródła danych"])) return {typ:"plan-data",raw,confidence:.99};
   if(agentAIMa(n,["sprawdz sama strone","sprawdź samą stronę","kontrola funkcjonalnosci","kontrola funkcjonalności","sprawdz funkcjonalnosc strony","sprawdź funkcjonalność strony"])) return {typ:"plan-health",raw,confidence:.99};
   if(agentAIMa(n,["wykonaj bezpieczny plan","wykonaj plan agenta","wykonaj konkretne dzialania","wykonaj konkretne działania","zrob bezpieczne dzialania","zrób bezpieczne działania","sprawdz funkcjonalnosc i pobierz dane","sprawdź funkcjonalność i pobierz dane"])) return {typ:"plan-wykonaj",raw,confidence:.99};
-  if(agentAIMa(n,["wyslij raport na telegram","wyślij raport na telegram","raport telegram","telegram raport","podsumowanie na telegram"])) return {typ:"raport-telegram",raw,confidence:.98};
   if(agentAIMa(n,["centrum operacyjne","plan dnia","co mam zrobic","co mam zrobić","co mam dzisiaj zrobic","co mam dzisiaj zrobić","najwazniejsze zadania","najważniejsze zadania","pokaz priorytety","pokaż priorytety","co jest pilne","co wymaga decyzji","pokaż decyzje","pokaz decyzje","raport calej strony","raport całej strony"])) return {typ:"centrum",raw,confidence:.96};
   if(agentAIMa(n,["wiadomosci allegro","wiadomości allegro","dyskusje allegro","komunikacja z klientami","pokaz komunikacje","pokaż komunikację","komunikacja allegro","komu odpisac","komu odpisać","sprawy do odpowiedzi"])) return {typ:"komunikacja",raw,confidence:.95};
   if(agentAIMa(n,["wysylki","wysyłki","etykiety inpost","przesylki bez numeru","przesyłki bez numeru","status inpost","co wyslac","co wysłać"])) return {typ:"wysylki",raw,confidence:.93};
@@ -423,7 +422,7 @@ function agentAIStatusTekst(){
 }
 function agentAICentrumTekst(limit=10){
   const analiza=agentAIAnaliza(),zadania=analiza.filter(x=>x.poziom!=="ok").sort((a,b)=>agentAIPriorytet(a)-agentAIPriorytet(b)).slice(0,limit),bad=analiza.filter(x=>x.poziom==="bad").length,warn=analiza.filter(x=>x.poziom==="warn").length,score=Math.max(0,Math.round(100-bad*18-warn*8));
-  return [`🤖 Centrum operacyjne Artway-TM — ${score}%`,`Pilne: ${bad} • wymagające uwagi: ${warn} • kontrole OK: ${analiza.length-bad-warn}.`,zadania.length?`\nKolejność pracy:\n${zadania.map((x,i)=>`${i+1}. ${x.poziom==="bad"?"🔴":"🟡"} ${x.tytul}\n   ${x.opis}\n   Następny krok: ${agentAIOpisKroku(x)}`).join("\n")}`:"\n✅ Brak aktywnych tematów wymagających reakcji.","\nPolecenia szczegółowe: „pokaż komunikację”, „sprawdź wysyłki”, „audyt produktów”, „status producentów” albo „wyślij raport na Telegram”."].join("\n");
+  return [`🤖 Centrum operacyjne Artway-TM — ${score}%`,`Pilne: ${bad} • wymagające uwagi: ${warn} • kontrole OK: ${analiza.length-bad-warn}.`,zadania.length?`\nKolejność pracy:\n${zadania.map((x,i)=>`${i+1}. ${x.poziom==="bad"?"🔴":"🟡"} ${x.tytul}\n   ${x.opis}\n   Następny krok: ${agentAIOpisKroku(x)}`).join("\n")}`:"\n✅ Brak aktywnych tematów wymagających reakcji.","\nPolecenia szczegółowe: „sprawdź funkcjonalność strony”, „audyt produktów”, „sprawdź wydajność” albo „diagnostyka integracji”."].join("\n");
 }
 function agentAIKomunikacjaTekst(){
   const st=allegroKomunikacjaStaty(),threads=st.threads||[],issues=st.issues||[],threadNeed=threads.filter(allegroKomunikacjaWymagaOdpowiedzi).length,issueNeed=issues.filter(allegroKomunikacjaWymagaOdpowiedzi).length;
@@ -439,14 +438,10 @@ function agentAIProduktyAudytTekst(){
 }
 function agentAIProducenciTekst(){
   const stats=statystykiDostepnosciProducentow(),docs=(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny),producenci=(producenciKartoteka||[]).filter(p=>p.active!==false);
-  return [`🏭 Producenci i zakupy`,`Kartoteki producentów: ${producenci.length}. Otwarte dokumenty zakupowe: ${docs.length}.`,`Dostępność: ${stats.braki.length} braków • ${stats.niskie.length} niskich stanów • ${stats.nieznane.length} niepotwierdzonych.`,`Linki oczekujące na pobranie: ${agentAILinkiOczekujace().length}.`,docs.length?"Sprawdź bieżące rewizje dokumentów. Telegram jest podglądem; e-mail do producenta wymaga zatwierdzenia aktualnej wersji.":"✅ Brak otwartych dokumentów producentów."].join("\n");
+  return [`🏭 Producenci i zakupy`,`Kartoteki producentów: ${producenci.length}. Otwarte dokumenty zakupowe: ${docs.length}.`,`Dostępność: ${stats.braki.length} braków • ${stats.niskie.length} niskich stanów • ${stats.nieznane.length} niepotwierdzonych.`,`Linki oczekujące na pobranie: ${agentAILinkiOczekujace().length}.`,docs.length?"Sprawdź bieżące rewizje dokumentów; e-mail do producenta wymaga zatwierdzenia aktualnej wersji.":"✅ Brak otwartych dokumentów producentów."].join("\n");
 }
 function agentAIDiagnostykaTekst(){
-  return [`🛠️ Diagnostyka całej strony`,`Wspólna baza: ${chmuraStan.admin?"OK":"wymaga połączenia"}.`,`E-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"} • Allegro: ${allegroStan.connected?"OK":"sprawdź połączenie"}.`,`Paynow: ${stanBramki.paynow?.configured?"OK":"sprawdź konfigurację"} • Telegram: raport serwerowy dostępny po poprawnej konfiguracji bota.`,`Następny krok: otwórz Diagnostykę, jeżeli którakolwiek integracja nie ma statusu OK.`].join("\n");
-}
-async function agentAIWyslijRaportTelegram(){
-  toast("Agent przygotowuje raport całej strony dla Telegramu…");
-  try{const d=await chmura("telegram-send-agent-report",{method:"POST",body:{source:"admin-panel"},timeout:30000});zapiszHistorieAgenta("telegram","Wysłano raport centrum operacyjnego na Telegram",{messageId:d.messageId||"",score:d.center?.score||0,summary:d.center?.summary||{}});toast(`✅ Raport Agenta wysłany na Telegram • kondycja ${d.center?.score??"—"}%`);renderuj();return d;}catch(e){toast("⚠️ Telegram: "+(e.message||e));return null;}
+  return [`🛠️ Diagnostyka całej strony`,`Wspólna baza: ${chmuraStan.admin?"OK":"wymaga połączenia"}.`,`E-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"} • Allegro: ${allegroStan.connected?"OK":"sprawdź połączenie"}.`,`Paynow: ${stanBramki.paynow?.configured?"OK":"sprawdź konfigurację"}.`,`Następny krok: otwórz Diagnostykę, jeżeli którakolwiek integracja nie ma statusu OK.`].join("\n");
 }
 function agentAIMagazynTekst(){
   const produktyAdmin=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));

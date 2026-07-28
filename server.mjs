@@ -1,7 +1,6 @@
 import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import storeHandler from './src/backend/store.mjs';
-import telegramWebhookHandler from './src/backend/telegram-webhook.mjs';
 import sitemapHandler from './src/backend/sitemap.mjs';
 import googleProductsHandler from './src/backend/google-products.mjs';
 import { renderStorefrontSeoPage, seoRouteMatches } from './src/backend/lib/domain/storefront-seo-renderer.mjs';
@@ -49,7 +48,6 @@ async function sendFetchResponse(response, nodeResponse) {
 
 function routeHandler(pathname) {
   if (pathname === '/api/store') return storeHandler;
-  if (pathname === '/api/telegram/webhook') return telegramWebhookHandler;
   if (pathname === '/sitemap.xml') return sitemapHandler;
   if (pathname === '/google-products.xml') return googleProductsHandler;
   if (pathname === '/api/seo/performance' || pathname === '/api/seo/event') return handleSeoAnalytics;

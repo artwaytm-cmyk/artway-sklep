@@ -7,9 +7,10 @@ const root=new URL("../",import.meta.url),read=path=>readFile(new URL(path,root)
 
 test("Agent AI ma siedem kanonicznych obszarów zamiast powielonych kart",async()=>{
   const source=await read("src/frontend/11-agent-ai-workspace.js");
-  for(const route of ["rozmowa","praca","zadania","automatyzacje","komunikacja","audyt"])assert.match(source,new RegExp(`#/admin/agent-ai/${route}`));
-  for(const label of ["Centrum","Rozmowa","Praca na żywo","Zadania i decyzje","Automatyzacje","Telegram","Audyt"])assert.match(source,new RegExp(label));
+  for(const route of ["rozmowa","praca","zadania","jakosc","automatyzacje","audyt"])assert.match(source,new RegExp(`#/admin/agent-ai/${route}`));
+  for(const label of ["Centrum","Rozmowa","Praca na żywo","Zadania i decyzje","Jakość strony","Automatyzacje","Audyt"])assert.match(source,new RegExp(label));
   assert.match(source,/const AGENT_AI_SEKCJE_KANONICZNE/);
+  assert.doesNotMatch(source,/telegram|Telegram/);
 });
 
 test("stare adresy Agenta zachowują zgodność i prowadzą do scalonych obszarów",async()=>{
@@ -18,7 +19,7 @@ test("stare adresy Agenta zachowują zgodność i prowadzą do scalonych obszar�
   assert.match(source,/praca:"praca",status:"praca",runtime:"praca"/);
   assert.match(source,/plan:"zadania",produkty:"zadania",zlecenia:"zadania",producenci:"zadania"/);
   assert.match(source,/specjalisci:"automatyzacje",uprawnienia:"automatyzacje",pamiec:"automatyzacje"/);
-  assert.match(source,/telegram:"komunikacja"/);
+  assert.match(source,/diagnostyka:"jakosc"/);
   assert.match(source,/historia:"audyt"/);
 });
 
@@ -29,7 +30,7 @@ test("każda podstrona renderuje tylko własny zestaw narzędzi",async()=>{
   assert.match(source,/if\(active==="praca"\)return agentAIPracaNaZywoHTML\(\)/);
   assert.match(source,/if\(active==="zadania"\)return agentAIZadaniaScaloneHTML/);
   assert.match(source,/if\(active==="automatyzacje"\)return agentAIAutomatyzacjeScaloneHTML/);
-  assert.match(source,/if\(active==="komunikacja"\)return agentAITelegramPanelHTML\(\)/);
+  assert.match(source,/if\(active==="jakosc"\)return agentAIJakoscStronyHTML\(\)/);
   assert.match(source,/if\(active==="audyt"\)return agentAIHistoriaPanelHTML\(\)/);
   assert.doesNotMatch(source,/style="\$\{aktywna===/);
   assert.doesNotMatch(source,/href="#agent-work-/);

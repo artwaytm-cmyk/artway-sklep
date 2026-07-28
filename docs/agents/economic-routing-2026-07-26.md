@@ -34,8 +34,8 @@ Każdy playbook zawiera: dokładne wyzwalacze, kontrakt wejścia, procedurę, kr
 
 - Interfejs aplikacji i Responses API: aktywne w panelu administratora.
 - Agents SDK: aktywny dla diagnostyki, śladów wykonania, narzędzi i bramek zatwierdzeń.
-- Audio czasu rzeczywistego: dostępne, ale celowo niewłączone. Telegram dostarcza wiadomości głosowe jako pliki, więc transkrypcja żądaniowa jest prostsza i tańsza.
-- Transkrypcja audio: aktywna dla głosówek Telegram.
+- Audio czasu rzeczywistego: dostępne, ale celowo niewłączone, ponieważ panel administracyjny korzysta z tańszej komunikacji tekstowej.
+- Transkrypcja audio: wyłączona do czasu dodania kontrolowanego wejścia audio bezpośrednio w panelu administratora.
 - Obrazy: aktywne dla bannerów i ikon.
 - Dzienniki i trace: aktywne bez zapisywania sekretów.
 - Batch: aktywny dla dobowej ewaluacji asynchronicznej.

@@ -343,7 +343,6 @@ async function allegroZapiszUstawieniaKomunikacji(form){
     enabled:fd.get("enabled")==="on",
     messageCenter:fd.get("messageCenter")==="on",
     issues:fd.get("issues")==="on",
-    telegramReminders:fd.get("telegramReminders")==="on",
     freshHours:Number(fd.get("freshHours")||48),
     template:String(fd.get("template")||"").trim()
   };

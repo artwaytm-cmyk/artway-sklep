@@ -79,7 +79,6 @@ const DIRECT_DOMAIN_CONFIGS = Object.freeze({
     settings: valueConfig(),
   }),
   allegro_mapping_audit: containerConfig({ items: arrayConfig(['id', 'at']) }),
-  allegro_communication_telegram_alerts: containerConfig({ items: objectConfig() }),
   allegro_catalog_maintenance: containerConfig({ errors: arrayConfig(['id', 'at']) }),
   allegro_autonomous_agent_state: containerConfig({ recentActions: arrayConfig(['id', 'at']) }),
   ai_banner_assets: containerConfig({ items: arrayConfig(['id']) }),
@@ -94,9 +93,6 @@ const DIRECT_DOMAIN_CONFIGS = Object.freeze({
   }),
   catalog_quality_audit: containerConfig({
     history: arrayConfig(['id', 'at']), orphanArchive: arrayConfig(['id', 'externalId', 'sku', 'ean']),
-  }),
-  telegram_communication_state: containerConfig({
-    events: objectConfig(), history: arrayConfig(['id', 'at']), outbox: arrayConfig(['id', 'at']),
   }),
 });
 

@@ -9,7 +9,7 @@ User=artway
 Group=artway
 WorkingDirectory=/srv/artway/shop
 EnvironmentFile=/srv/artway/shop/.env.server
-EnvironmentFile=-/srv/artway/agent/.env
+EnvironmentFile=-/srv/artway/ops/secrets/ai.env
 EnvironmentFile=-/srv/artway/ops/secrets/allegro.env
 EnvironmentFile=-/srv/artway/ops/secrets/von-halsky.env
 Environment=ARTWAY_LOCAL_API_ORIGIN=http://127.0.0.1:3000

@@ -6,7 +6,6 @@ export function createSystemRoute({
   emailPublicConfig,
   inpostPublicConfig,
   paynowKonfiguracja,
-  telegramKonfiguracja,
   allegroStatus,
   infaktPublicConfig,
   requestSession,
@@ -34,7 +33,6 @@ export function createSystemRoute({
       const inpostSavedHealth = integrationHealth?.inpost && typeof integrationHealth.inpost === 'object' ? integrationHealth.inpost : {};
       const healthFresh = (value) => !!value?.checkedAt && Date.now() - Date.parse(value.checkedAt) < 24 * 60 * 60 * 1000;
       const paynowConfig = paynowKonfiguracja(req);
-      const telegramConfig = telegramKonfiguracja();
       const storage = admin && typeof repository?.storageStatus === 'function'
         ? await repository.storageStatus().catch(() => ({ engine: 'postgres-normalized-v1', migrated: false, statusUnavailable: true }))
         : null;
@@ -56,7 +54,6 @@ export function createSystemRoute({
           notificationUrl: paynowConfig.notificationUrl,
         },
         email: { ...emailConfig, ...(admin && healthFresh(emailSavedHealth) ? { authenticated: emailConfig.configured && emailSavedHealth.authenticated === true, lastCheckedAt: emailSavedHealth.checkedAt, lastError: emailSavedHealth.error || '', lastErrorCode: emailSavedHealth.code || '' } : {}) },
-        telegram: { configured: !!(telegramConfig.token && telegramConfig.chatId) },
         inpost: { ...inpostConfig, ...(admin && healthFresh(inpostSavedHealth) ? { authenticated: inpostConfig.configured && inpostSavedHealth.authenticated === true, lastCheckedAt: inpostSavedHealth.checkedAt, serviceAvailability: { locker: inpostSavedHealth.locker === true, courier: inpostSavedHealth.courier === true } } : {}) },
         allegro: await allegroStatus(req),
         infakt: infaktPublicConfig(),

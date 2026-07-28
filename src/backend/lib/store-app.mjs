@@ -56,10 +56,10 @@ import {
   scheduledSeoRunForDay,
   seoAutomationDay,
 } from './domain/seo-daily-automation.mjs';
-import { createInventoryNaturalCommandHandler } from './domain/inventory-command.mjs';
 import { createInventoryDecisionService } from './domain/inventory-decisions.mjs';
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createAgentRuntime } from './domain/agent-runtime.mjs';
+import { createAgentRuntimeRoute } from './agent-runtime-route.mjs';
 import { createAgentSpecialists } from './domain/agent-specialists.mjs';
 import { createAllegroPreparationRoute } from './allegro-preparation-route.mjs';
 import { allegroAutomaticPreparationDisposition } from './domain/allegro-preparation-queue.mjs';
@@ -82,7 +82,6 @@ import { createAgentOperationalCenter, supplierOrderHasActiveContent } from './d
 import { createStoreDataInputSanitizers } from './domain/store-data-input-sanitizers.mjs';
 import { createAiBannerGenerator } from './domain/ai-banner-generator.mjs';
 import { createAiBannerRoute } from './ai-banner-route.mjs';
-import { normalizeTelegramAccountFields } from './domain/telegram-account-access.mjs';
 import { allegroOfferTitle } from './domain/allegro-offer-content.mjs';
 import { renderSupplierOrderEmail } from './domain/supplier-order-email.mjs';
 import { applySupplierProcurementWorkflow } from './domain/supplier-procurement-workflow.mjs';
@@ -137,12 +136,6 @@ import { createAllegroOfferWithdrawalRoute } from './allegro-offer-withdrawal-ro
 import { allegroAutomaticCategoryParameters, allegroCategoryParameterResolutionReport } from './domain/allegro-category-parameter-resolver.mjs';
 import { enrichAllegroProductEvidence } from './domain/allegro-parameter-enrichment.mjs';
 import { allegroCategoryIntentPhrases, allegroCategoryParentPath, allegroCategorySpecificScore, allegroCorrectCategorySelection } from './domain/allegro-category-classifier.mjs';
-import {
-  telegramConfig as telegramKonfiguracja,
-  telegramCanonicalSupplierPreviews,
-} from './domain/telegram-communication.mjs';
-import { createTelegramCenter } from './telegram-center.mjs';
-import { createTelegramRouter } from './telegram-router.mjs';
 import {
   ALLEGRO_COMPLIANCE_POLICY,
   allegroCheckText,
@@ -357,8 +350,6 @@ async function zwiekszLicznikKoduRabatowego(kod = '') {
   return false;
 }
 const inventoryDecisions = createInventoryDecisionService({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
-const telegramCenter = createTelegramCenter({ read: czytaj, write: zapisz });
-const inventoryNaturalCommand = createInventoryNaturalCommandHandler({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, decisions: inventoryDecisions });
 const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const openAiPlatform = createOpenAiPlatformControl({ read: czytaj, write: zapisz });
 const agentSpecialists = createAgentSpecialists({
@@ -521,13 +512,19 @@ const agentCentrumOperacyjne = createAgentOperationalCenter({
   orderNumber: numerZamowienia,
   integrationStatus: () => ({
     email: !!emailPublicConfig().configured,
-    telegram: !!(telegramKonfiguracja().token && telegramKonfiguracja().chatId),
     inpost: !!inpostPublicConfig().configured,
     allegro: !!(process.env.ALLEGRO_CLIENT_ID && process.env.ALLEGRO_CLIENT_SECRET),
     infakt: !!infaktPublicConfig().configured,
   }),
 });
-const telegramRoute = createTelegramRouter({ center: telegramCenter, codexQueue: codexAgentQueue, agentRuntime, getOperationalCenter: agentCentrumOperacyjne, inventoryCommand: inventoryNaturalCommand, inventoryDecisions, isAdmin: czyAdmin, read: czytaj, respond: odpowiedz, sessionOf: requestSession, publicOrigin: publicznyOrigin, supplierPreviews: telegramCanonicalSupplierPreviews, text: tekst });
+const agentRuntimeRoute = createAgentRuntimeRoute({
+  queue: codexAgentQueue,
+  runtime: agentRuntime,
+  isAdmin: czyAdmin,
+  respond: odpowiedz,
+  sessionOf: requestSession,
+  text: tekst,
+});
 const agentOperationsRoute = createAgentOperationsRoute({ respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz, getOperationalCenter: agentCentrumOperacyjne, publicOrigin: publicznyOrigin });
 const LIMIT_USTAWIEN = 10 * 1024 * 1024; // 10 MB na komplet ustawień
 const MAX_PAYLOAD_BYTES = 12 * 1024 * 1024; // 12 MB dla pojedynczego żądania do /api/store
@@ -2237,7 +2234,6 @@ function allegroUstawieniaKomunikacji(raw = {}) {
     enabled: raw.enabled !== false,
     messageCenter: raw.messageCenter !== false,
     issues: raw.issues !== false,
-    telegramReminders: raw.telegramReminders !== false,
     freshHours: Math.max(1, Math.min(168, Number(raw.freshHours || 48))),
     template: tekst(raw.template || ALLEGRO_AUTO_REPLY_DEFAULT, 2000).trim() || ALLEGRO_AUTO_REPLY_DEFAULT,
   };
@@ -2650,44 +2646,6 @@ async function allegroZapamietajStylRecznejOdpowiedzi({ type = 'thread', id = ''
   await zapisz('allegro_reply_style_memory', { items: items.slice(-200), updated_at: new Date().toISOString() });
   return buildAllegroReplyStyleProfile(items.map((item) => item.normalizedText || item.text));
 }
-async function allegroWyslijPrzypomnieniaTelegram(data = {}, settings = {}) {
-  const s = allegroUstawieniaKomunikacji(settings);
-  if (!s.telegramReminders) return { sent: [], skipped: [], disabled: true };
-  const rec = await czytaj('allegro_communication_telegram_alerts', { items: {}, updated_at: null });
-  const items = rec.items && typeof rec.items === 'object' ? rec.items : {};
-  const sent = [], skipped = [];
-  const candidates = [
-    ...(data.threads || []).map((item) => ({ type: 'thread', item })),
-    ...(data.issues || []).map((item) => ({ type: 'issue', item })),
-  ];
-  for (const { type, item } of candidates) {
-    const incoming = item.latestNewIncoming || null;
-    const sourceKey = allegroKluczWiadomosci(incoming);
-    const alertKey = `${type}:${item.id}:${sourceKey}`, incidentKey = `allegro:${type}:${item.id}`;
-    if (item.cachedOlder) { skipped.push({ key: alertKey, reason: 'starszy wpis zachowany wyłącznie do wyszukiwania' }); continue; }
-    if (allegroKomunikacjaWewnetrznieZalatwiona(item)) { skipped.push({ key: alertKey, reason: 'sprawa zamknięta wewnętrznie' }); continue; }
-    if (!incoming || !item.humanReplyNeeded) { skipped.push({ key: alertKey, reason: 'brak nowej nieobsłużonej wiadomości' }); continue; }
-    if (items[alertKey]) { skipped.push({ key: alertKey, reason: 'przypomnienie już wysłane' }); continue; }
-    const kind = type === 'issue' ? (item.type === 'CLAIM' ? 'reklamacja' : 'dyskusja') : 'wiadomość';
-    const orderId = allegroOrderIdKomunikacji(item);
-    const target = type === 'issue' ? 'dyskusje' : 'wiadomosci';
-    try {
-      const delivery = await telegramCenter.managedEvent({
-        key: incidentKey, legacyPrefix: `${type}:${item.id}:`, fingerprint: sourceKey, category: 'customer', severity: 'critical', count: 1,
-        title: `Nowa ${kind} Allegro`, description: tekst(incoming.text || item.subject || '', 180),
-        doneWhen: 'Odpowiedź została wysłana po sprawdzeniu zamówienia i przesyłki albo sprawę zamknięto wewnętrznie.',
-        facts: [`Klient: ${item.buyerLogin || '—'}`, orderId ? `Zam. ${orderId}` : ''].filter(Boolean), href: `https://artwaytm.pl/#/admin/allegro/${target}`,
-      }, '', { source: 'allegro-communication' });
-      if (delivery.sent || delivery.queued) {
-        items[alertKey] = { key: alertKey, incidentKey, type, id: item.id, sourceMessageId: incoming.id || '', sent_at: delivery.sent ? new Date().toISOString() : null, queued_at: delivery.queued ? new Date().toISOString() : null, telegramMessageId: delivery.messageId || '', policyReason: delivery.reason || '' };
-      }
-      if (delivery.sent) sent.push(items[alertKey]); else skipped.push({ key: alertKey, retryable: !delivery.queued, reason: delivery.queued ? 'alert zapisano do ponowienia' : (delivery.reason || 'pominięto zgodnie z polityką Telegram') });
-    } catch (e) { skipped.push({ key: alertKey, reason: tekst(e.message || String(e), 300) }); }
-  }
-  await zapisz('allegro_communication_telegram_alerts', { items, updated_at: new Date().toISOString() });
-  return { sent, skipped, items };
-}
-
 function seoBezHtml(value = '') {
   return tekst(value, 30000).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -2899,7 +2857,6 @@ const storeDataRoute = createStoreDataRoute({
   numerZamowienia,
   dopiszUsunieteZamowienie,
   verifyOrderAccess,
-  normalizeTelegramAccountFields,
   profilKlienta,
   publicUser,
   hashPassword,
@@ -2932,7 +2889,6 @@ const systemRoute = createSystemRoute({
   emailPublicConfig,
   inpostPublicConfig,
   paynowKonfiguracja,
-  telegramKonfiguracja,
   allegroStatus,
   infaktPublicConfig,
   requestSession,
@@ -2970,7 +2926,7 @@ const allegroCommunicationsRoute = createAllegroCommunicationsRoute({
   checkReplyContext: allegroSprawdzKontekstOdpowiedzi, callAllegro: allegroWywolaj, betaJson: ALLEGRO_BETA_JSON,
   normalizeIssueMessage: allegroNormalizujIssueChatMessage, normalizeThreadMessage: allegroNormalizujWiadomosc,
   rememberManualReplyStyle: allegroZapamietajStylRecznejOdpowiedzi, fetchCommunications: allegroPobierzKomunikacje,
-  markNewCommunications: allegroOznaczNowaKomunikacje, sendTelegramReminders: allegroWyslijPrzypomnieniaTelegram,
+  markNewCommunications: allegroOznaczNowaKomunikacje,
   sendAutoReplies: allegroWyslijAutoOdpowiedzi,
 });
 const allegroMappingRoute = createAllegroMappingRoute({
@@ -2989,7 +2945,6 @@ const productAvailabilityRoute = createProductAvailabilityRoute({
   loadProducts: allegroAgentProduktyKompletne,
   saveProductFields: zapiszIOpublikujPolaProduktuCentralnie,
   mutateSettings: mutateSettingsSafely,
-  notify: (...args) => telegramCenter.managedEvent(...args),
 });
 const emailRoute = createEmailRoute({
   respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz,
@@ -3008,8 +2963,8 @@ export default async (req) => {
 
   try {
     await przygotujZweryfikowanaSesje(req);
-    const telegramResponse = await telegramRoute(req, url, action);
-    if (telegramResponse) return telegramResponse;
+    const agentRuntimeResponse = await agentRuntimeRoute(req, url, action);
+    if (agentRuntimeResponse) return agentRuntimeResponse;
     const allegroCredentialsResponse = await allegroCredentialsRoute(req, url, action);
     if (allegroCredentialsResponse) return allegroCredentialsResponse;
     const inventoryDecisionResponse = await inventoryDecisionRoute(req, url, action);

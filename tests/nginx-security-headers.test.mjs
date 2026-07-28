@@ -66,7 +66,7 @@ test('produkcja korzysta wyłącznie z backendu VPS i kanonicznych tras API', as
     readFile('src/frontend/03-cloud-sync.js', 'utf8'),
   ]);
   assert.match(nginx, /proxy_pass http:\/\/127\.0\.0\.1:3000\/api\/store;/);
-  assert.match(nginx, /location = \/api\/telegram\/webhook/);
+  assert.doesNotMatch(nginx, /\/api\/telegram\/webhook/);
   assert.match(server, /pathname === '\/api\/store'/);
   assert.match(frontend, /const CHMURA_URL = "\/api\/store"/);
 });

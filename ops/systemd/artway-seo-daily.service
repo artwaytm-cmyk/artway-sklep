@@ -9,7 +9,7 @@ User=artway
 Group=artway
 WorkingDirectory=/srv/artway/shop
 EnvironmentFile=/srv/artway/shop/.env.server
-EnvironmentFile=/srv/artway/agent/.env
+EnvironmentFile=-/srv/artway/ops/secrets/ai.env
 Environment=NODE_ENV=production
 Environment=ARTWAY_STORE_DRIVER=postgres
 Environment=DATABASE_URL=postgresql:///artway?host=/var/run/postgresql

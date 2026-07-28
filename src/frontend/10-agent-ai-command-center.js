@@ -51,7 +51,7 @@ async function agentAIWykonajPolecenie(tekst=""){
   let odpowiedz="";
   try{
     if(intent.typ==="pomoc"){
-      odpowiedz=["Możesz pisać normalnie, np.:","• mam obecnie na stanie Ziemniaka 1410 8 szt — Agent utworzy decyzję i zapyta o lokalizację","• przyjmij 8 szt produktu EAN 590... — po lokalizacji pojawi się osobne Potwierdzam / Nie potwierdzam","• lokalizacja IV… A-R01-P01 — przypisz miejsce do konkretnej decyzji","• potwierdzam IV… — potwierdź tylko wskazaną decyzję","• sprawdź link https://... i znajdź dane produktu","• wykonaj bezpieczny plan agenta","• sprawdź samą funkcjonalność strony","• pobierz świeże dane ze wszystkich źródeł","• ponów błędne kroki","• pokaż centrum operacyjne / co mam dziś zrobić?","• wyślij raport na Telegram","• pokaż komunikację z klientami","• sprawdź wysyłki i etykiety InPost","• audyt produktów i katalogu","• status producentów i otwartych zamówień","• diagnostyka integracji","• wystaw Origami Kot na Allegro","• sprawdź zlecenia Allegro i braki do pakowania","• przygotuj zamówienie do producenta","• czego brakuje do zamówień?","• pokaż stan magazynu","• sprawdź dostępność u producentów","• popraw opisy produktów","• ile mamy szachy?","• zapamiętaj: przy brakach najpierw sprawdź dostawcę","• synchronizuj bazę"].join("\n");
+      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź samą funkcjonalność strony","• przeanalizuj błędy diagnostyczne","• sprawdź wydajność panelu administratora","• audyt produktów i katalogu","• sprawdź zapis i publikację zmian","• ponów błędne kroki","• pobierz świeże dane ze wszystkich źródeł","• popraw opisy produktów","• sprawdź integracje","• pokaż centrum operacyjne / co jest dziś do poprawy?"].join("\n");
     }else if(intent.typ==="magazyn-decyzja"){
       odpowiedz=await agentAIWykonajDecyzjeMagazynowa(intent);
     }else if(intent.typ==="magazyn-stan-zmiana"){
@@ -80,8 +80,6 @@ async function agentAIWykonajPolecenie(tekst=""){
       odpowiedz=agentAIProducenciTekst();
     }else if(intent.typ==="diagnostyka"){
       odpowiedz=agentAIDiagnostykaTekst();
-    }else if(intent.typ==="raport-telegram"){
-      const d=await agentAIWyslijRaportTelegram();odpowiedz=d?`Raport centrum operacyjnego został wysłany na Telegram. Kondycja strony: ${d.center?.score??"—"}%. Wiadomość zawiera przyciski do Agenta, zamówień, magazynu, Allegro i wysyłek.`:"Nie udało się wysłać raportu na Telegram.";
     }else if(intent.typ==="pamiec-zapis"){
       const rec=agentAIZapiszPamiec(intent.tresc||"");
       odpowiedz=rec?`Zapamiętałem na przyszłość: ${rec.wyzwalacz?`gdy „${rec.wyzwalacz}” → `:""}${rec.akcja}`:"Nie podałeś treści do zapamiętania. Napisz np. „zapamiętaj: przy brakach najpierw sprawdź dostawcę”.";
@@ -423,7 +421,6 @@ async function agentAIWykonaj(akcja){
   if(akcja==="popraw-opisy"){ const t=await agentAIPoprawOpisyProduktow(40); toast(t); renderuj(); return t; }
   if(akcja==="kartoteka-domyslna") return wypelnijDomyslnaKartotekeMagazynu();
   if(akcja==="audyt-magazynu") return audytMagazynuAI();
-  if(akcja==="raport-telegram") return agentAIWyslijRaportTelegram();
 }
 async function agentAIWykonajZadaniePlanu(id,akcja){
   try{

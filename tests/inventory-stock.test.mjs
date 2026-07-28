@@ -28,7 +28,7 @@ test('ustawia dokładny stan, zachowuje pozostałe dane i zapisuje inwentaryzacj
   const result = applyInventoryStockSet(record(), {
     productId: '31', mode: 'set', quantity: 8, expectedStock: 1, expectedRev: 2782,
     confirmed: true, confirmInventory: true, product, source: 'codex-agent', reason: 'Sprawdzono i zatwierdzono 8 szt.',
-    requestId: 'telegram-update-123',
+    requestId: 'panel-update-123',
   }, NOW);
 
   assert.equal(result.record.rev, 2783);
@@ -42,7 +42,7 @@ test('ustawia dokładny stan, zachowuje pozostałe dane i zapisuje inwentaryzacj
   assert.equal(result.result.delta, 7);
   assert.equal(result.record.data.artway_ruchy_magazynowe[0].typ, 'inwentaryzacja');
   assert.equal(result.record.data.artway_ruchy_magazynowe[0].produktNazwa, product.name);
-  assert.equal(result.record.data.artway_ruchy_magazynowe[0].sourceRequestId, 'telegram-update-123');
+  assert.equal(result.record.data.artway_ruchy_magazynowe[0].sourceRequestId, 'panel-update-123');
 });
 
 test('przyrost jest odróżniony od ustawienia wartości bezwzględnej', () => {

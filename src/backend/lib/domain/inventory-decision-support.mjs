@@ -142,9 +142,7 @@ function publicDecision(item = {}) {
     product: productIdentity(item.product, clean(item.productId, 120)),
     productId: clean(item.productId, 120),
     source: clean(item.source, 80),
-    channel: item.channel === 'panel' ? 'panel' : 'telegram',
-    chatId: clean(item.chatId, 100),
-    messageThreadId: Number(item.messageThreadId) > 0 ? Number(item.messageThreadId) : null,
+    channel: 'panel',
     createdAt: clean(item.createdAt, 40),
     locationAssignedAt: clean(item.locationAssignedAt, 40),
     confirmedAt: clean(item.confirmedAt, 40),
@@ -225,7 +223,7 @@ function defaultDecisionId(requestId = '') {
 
 function callback(value) {
   const data = clean(value, 80);
-  if (Buffer.byteLength(data, 'utf8') > 64) throw decisionError('Dane przycisku Telegram są za długie.', 'inventory_decision_callback_too_long', 500);
+  if (Buffer.byteLength(data, 'utf8') > 64) throw decisionError('Dane przycisku decyzji są za długie.', 'inventory_decision_callback_too_long', 500);
   return data;
 }
 

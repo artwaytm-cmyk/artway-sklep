@@ -616,7 +616,7 @@ test('automatyczny cykl zapisuje trzy niezależne i bezpieczne wersje kanałów'
   assert.equal(status.policy.linkedAllegroContentAutonomy, true);
   assert.equal(status.learning.productContent.approvals, 0);
   assert.equal(status.learning.productContent.ready, false);
-  assert.equal(status.learning.productContent.remainingApprovals, 3);
+  assert.equal(status.learning.productContent.remainingApprovals, 0);
   assert.equal(status.lastCycle.editorialProgress.ready, 1);
   assert.equal(status.lastCycle.editorialProgress.pending, 0);
   assert.match(status.policy.neverAutomatic.join(' '), /Wiadomość do klienta/i);
