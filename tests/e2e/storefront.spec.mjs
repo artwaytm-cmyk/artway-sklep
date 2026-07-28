@@ -249,6 +249,51 @@ async function loginAdmin(page) {
   await expect(page).toHaveURL(/#\/admin(?:\/|$)/, { timeout: 20_000 });
 }
 
+test('administrator tworzy PZ i WZ jednym kliknięciem bez dublowania żądania', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  const documents = [];
+  const createRequests = [];
+  await page.route('**/api/store**', async (route) => {
+    const url = new URL(route.request().url()), action = url.searchParams.get('action');
+    if (action === 'warehouse-documents-list') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, documents, rev: documents.length }) });
+      return;
+    }
+    if (action === 'warehouse-document-create') {
+      const body = route.request().postDataJSON();
+      createRequests.push(body);
+      const document = {
+        id: `WD-E2E-${body.type}`,
+        number: `${body.type}/2026/07/0001`,
+        type: body.type,
+        status: 'draft',
+        warehouse: body.warehouse,
+        reference: '',
+        note: '',
+        lines: [],
+        revision: 1,
+        createdAt: '2026-07-28T12:00:00.000Z',
+        updatedAt: '2026-07-28T12:00:00.000Z',
+      };
+      documents.unshift(document);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, created: true, document, documents, rev: documents.length }) });
+      return;
+    }
+    await route.fallback();
+  });
+  await loginAdmin(page);
+  await page.goto('/#/admin/magazyn/plan');
+  await expect(page.locator('[data-create-warehouse-document="PZ"]')).toBeVisible();
+  await page.locator('[data-create-warehouse-document="PZ"]').click();
+  await expect(page.getByRole('heading', { name: 'PZ/2026/07/0001' })).toBeVisible();
+  await page.getByRole('button', { name: /Wszystkie dokumenty/ }).click();
+  await page.locator('[data-create-warehouse-document="WZ"]').click();
+  await expect(page.getByRole('heading', { name: 'WZ/2026/07/0001' })).toBeVisible();
+  expect(createRequests.map((request) => request.type)).toEqual(['PZ', 'WZ']);
+  expect(createRequests.every((request) => /^create-(?:pz|wz)-/.test(request.requestId))).toBe(true);
+  assertRuntime();
+});
+
 test('Moje konto administratora pokazuje zabezpieczenia i zarządzanie dostępem właściciela', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);

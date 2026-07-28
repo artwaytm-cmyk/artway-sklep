@@ -25,6 +25,10 @@ test('Plan zawiera ręczne dokumenty PZ i WZ z jednym końcowym księgowaniem', 
   assert.match(source, /warehouseDocumentWorkspace/);
   assert.doesNotMatch(source, /const drawer=selected/);
   assert.match(source, /Kontrolowany przebieg/i);
+  assert.match(source, /data-create-warehouse-document="PZ"/);
+  assert.match(source, /data-create-warehouse-document="WZ"/);
+  assert.match(source, /magazynDokumentUtworzTyp/);
+  assert.match(source, /requestId:magazynDokumentRequestId\(`create-/);
 });
 
 test('PZ i WZ mają blokadę księgowania do czasu pełnej kontroli dokumentu', () => {

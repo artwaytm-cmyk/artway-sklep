@@ -201,12 +201,16 @@ export function createWarehouseDocumentService({
 
   async function create(body = {}, actor = 'administrator') {
     return mutate(async ({ data, timestamp }) => {
-      const type = documentType(body.type), generated = nextDocumentNumber(data, type, now());
+      const type = documentType(body.type), requestId = text(body.requestId, 160);
+      const existing = requestId ? documentRegistry(data).find((document) => document.createRequestId === requestId) : null;
+      if (existing) return { changed: false, document: existing, extra: { created: false, idempotent: true } };
+      const generated = nextDocumentNumber(data, type, now());
       const document = {
         id: `WD-${crypto.randomUUID()}`,
         number: generated.number,
         type,
         status: 'draft',
+        ...(requestId ? { createRequestId: requestId } : {}),
         warehouse: text(body.warehouse || data?.artway_magazyn_ustawienia?.nazwa || 'Magazyn główny', 160),
         reference: text(body.reference, 160),
         note: text(body.note, 500),

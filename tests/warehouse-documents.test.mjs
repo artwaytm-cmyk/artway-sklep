@@ -37,6 +37,19 @@ test('duży katalog nie blokuje zatwierdzenia ani usunięcia małego dokumentu',
   assert.equal(deleted.deleted, true);
 });
 
+test('ponowienie utworzenia z tym samym requestId nie dubluje PZ ani WZ', async () => {
+  const { service } = harness();
+  for (const type of ['PZ', 'WZ']) {
+    const requestId = `create-${type.toLowerCase()}-test`;
+    const first = await service.create({ type, requestId }, 'administrator');
+    const repeated = await service.create({ type, requestId }, 'administrator');
+    assert.equal(repeated.duplicate, true);
+    assert.equal(repeated.idempotent, true);
+    assert.equal(repeated.document.id, first.document.id);
+    assert.equal((await service.list()).documents.filter((document) => document.createRequestId === requestId).length, 1);
+  }
+});
+
 test('PZ rozpoznaje EAN-13 także po skanie GTIN-14 z zerem i sumuje kolejne skany', async () => {
   const { service } = harness();
   const created = await service.create({ type: 'PZ', reference: 'Spis własny' }, 'admin@artway.pl');
