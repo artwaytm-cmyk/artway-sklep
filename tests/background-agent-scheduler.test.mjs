@@ -53,3 +53,10 @@ test('cykl serwerowy zasila sukcesywne przygotowanie produktów niezależnie od 
   assert.match(source, /'przygotowanie-produktow',\s*'allegro-preparation-queue-auto'/);
   assert.match(source, /batchSize:\s*50/);
 });
+
+test('brak opcjonalnego kontraktu Von Halsky obniża cykl do ostrzeżenia zamiast zatrzymywać timer', async () => {
+  const source = await readFile('scripts/run-background-agent.mjs', 'utf8');
+  assert.match(source, /label === 'tresci-von-halsky'/);
+  assert.match(source, /result\.warning = recoverable/);
+  assert.ok(source.includes('const hardFailure = failed.some((result) => !result.warning);'));
+});

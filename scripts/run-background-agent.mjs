@@ -97,7 +97,9 @@ async function run(label, action, body, timeoutMs = 120_000) {
     return result;
   } catch (error) {
     const result = { label, ok: false, durationMs: Date.now() - started, changes: 0, error: publicError(error?.message || error) };
-    const recoverable = /Autoryzacja Allegro wygasła/i.test(result.error);
+    const recoverable = /Autoryzacja Allegro wygasła/i.test(result.error)
+      || (label === 'tresci-von-halsky' && /uzupełnij prywatny kontrakt API Von Halsky/i.test(result.error));
+    result.warning = recoverable;
     await report('cycle_step', { step: { id: label, label: taskLabels[label] || label, status: recoverable ? 'warning' : 'failed', startedAt: new Date(started).toISOString(), completedAt: new Date().toISOString(), durationMs: result.durationMs, error: result.error } });
     return result;
   }
