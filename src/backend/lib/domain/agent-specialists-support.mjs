@@ -237,6 +237,13 @@ function outputText(payload = {}) {
   throw Object.assign(new Error('Agent OpenAI nie zwrócił treści szkicu.'), { code: 'openai_empty_output', status: 502 });
 }
 
+function technicalSentinel(value = '') {
+  const text = clean(value, 30_000);
+  return !text
+    || /^(?:undefined|null|nan|infinity|\[object object\])$/i.test(text)
+    || /^\s*```(?:json)?/i.test(text);
+}
+
 function normalizeResult(raw = {}, specialist) {
   const allowed = new Set(SPECIALISTS[specialist]?.fields || []), seen = new Set();
   const fields = (Array.isArray(raw.fields) ? raw.fields : []).map((field) => ({
@@ -246,7 +253,7 @@ function normalizeResult(raw = {}, specialist) {
     currentValue: clean(field?.current_value ?? field?.currentValue, 30000),
     reason: clean(field?.reason, 700),
     evidence: clean(field?.evidence, 700),
-  })).filter((field) => field.key && field.value && allowed.has(field.key) && !seen.has(field.key) && seen.add(field.key));
+  })).filter((field) => field.key && !technicalSentinel(field.value) && allowed.has(field.key) && !seen.has(field.key) && seen.add(field.key));
   const list = (value, limit = 20) => (Array.isArray(value) ? value : []).map((item) => clean(item, 500)).filter(Boolean).slice(0, limit);
   const missingFacts = list(raw.missingFacts);
   const result = {
@@ -661,4 +668,4 @@ function communicationFacts(item = {}, type = 'thread') {
   return sanitizeContext({ type, subject: item.subject || item.topic, orderId: item.orderId || item.checkoutFormId, status: item.status, chatActive: item.chatActive, messages });
 }
 
-export { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeProductContentEditorialResult, normalizeChannelEditorialResult, normalizeDecision, activeDecision, outputText, normalizeResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprintFacts, productEditorialSourceFingerprint, productEditorialFingerprint, productEditorialState, productEditorialAutomaticEligibility, providerQuotaUnavailable, communicationNeedsReply, communicationFacts };
+export { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeProductContentEditorialResult, normalizeChannelEditorialResult, normalizeDecision, activeDecision, outputText, technicalSentinel, normalizeResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialFingerprintFacts, productEditorialSourceFingerprint, productEditorialFingerprint, productEditorialState, productEditorialAutomaticEligibility, providerQuotaUnavailable, communicationNeedsReply, communicationFacts };

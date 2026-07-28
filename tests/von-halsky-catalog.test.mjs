@@ -4,6 +4,7 @@ import {
   deduplicateVonHalskyOffers,
   normalizeVonHalskySettings,
   summarizeVonHalskyCatalog,
+  vonHalskyDefaultSettings,
   vonHalskyEffectivePrice,
   vonHalskyOfferProjection,
   vonHalskyProductPresentation,
@@ -18,6 +19,10 @@ import {
   suggestVonHalskyCategory,
   vonHalskyAgentPreparationPatch,
 } from '../src/backend/lib/domain/von-halsky-agent-preparation.mjs';
+import {
+  resolveVonHalskyResponsibleProducer,
+  responsibleProducerFromSourceText,
+} from '../src/backend/lib/domain/von-halsky-responsible-producer.mjs';
 
 test('osobna bramka Von Halsky blokuje logistykę, linki i nieobsługiwany HTML', () => {
   const safe = vonHalskyCheckEditorial({
@@ -122,6 +127,71 @@ test('Agent Von Halsky automatycznie wybiera tylko jednoznaczną kategorię koń
     ],
   );
   assert.equal(ambiguous.autoApplicable, false);
+});
+
+test('gra rodzinna nie może zostać dopasowana do akcesoriów dla mamy', () => {
+  const result = suggestVonHalskyCategory(
+    {
+      nazwa: '100 Gier - zestaw gier rodzinnych Alexander',
+      kategoria: 'Gry familijne i dla dzieci',
+      producent: 'Alexander',
+      opisKrotki: 'Zestaw klasycznych gier planszowych dla całej rodziny.',
+    },
+    [
+      { id: 'wrong', name: 'Adaptery do pasów', path: 'Dla dzieci › Akcesoria dla mamy i dziecka › Akcesoria dla mamy › Adaptery do pasów', leaf: true },
+      { id: 'right', name: 'Rodzinne', path: 'Kultura i rozrywka › Gry › Planszowe › Rodzinne', leaf: true },
+      { id: 'digital', name: 'Gry na PC', path: 'Kultura i rozrywka › Gry › Gry na PC', leaf: true },
+    ],
+  );
+  assert.equal(result.selected.id, 'right');
+  assert.equal(result.autoApplicable, true);
+  assert.equal(result.intent.type, 'board_game');
+  assert.equal(result.intent.subtype, 'family');
+});
+
+test('znany producent Alexander otrzymuje kompletną, źródłową kartotekę GPSR', () => {
+  const result = resolveVonHalskyResponsibleProducer({
+    producent: 'Alexander',
+    marka: 'MilliWOOD',
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.value.legalName, 'Zakład Produkcyjny "Alexander" Piotr Pundzis');
+  assert.match(result.value.address, /Telewizyjna 19/);
+  assert.equal(result.value.email, 'alexander@alexander.com.pl');
+  assert.match(result.value.phone, /58 552 83 70/);
+  assert.equal(result.evidence.method, 'verified-producer-alias');
+});
+
+test('blok Podmiot odpowiedzialny ze źródła jest zamieniany na dane strukturalne', () => {
+  const value = responsibleProducerFromSourceText(
+    'Podmiot odpowiedzialny Producent: Firma Testowa Sp. z o.o. Adres: ul. Dobra 1 Kod pocztowy: 00-001 Miasto: Warszawa Kraj: Polska Adres email: gpsr@example.test Numer telefonu: +48 500 600 700',
+    { sourceUrl: 'https://producent.example.test/produkt' },
+  );
+  assert.equal(value.legalName, 'Firma Testowa Sp. z o.o.');
+  assert.equal(value.postalCode, '00-001');
+  assert.equal(value.city, 'Warszawa');
+  assert.equal(value.email, 'gpsr@example.test');
+  assert.equal(value.phone, '+48 500 600 700');
+});
+
+test('gotowość kanału wymaga kompletnego GPSR po włączeniu tej kontroli', () => {
+  const base = {
+    nazwa: 'Gra rodzinna Alexander',
+    opis: 'Pełny opis produktu zawiera wszystkie najważniejsze cechy, przeznaczenie, zawartość zestawu i informacje potrzebne klientowi.',
+    ean: '5906018000030',
+    zdjecie: '/produkt.webp',
+    cena: 39.9,
+    producent: 'Alexander',
+    vonHalskyCategoryId: '33333333-3333-4333-8333-333333333333',
+    vonHalskyGpsrRequired: true,
+  };
+  const blocked = vonHalskyProductReadiness(base);
+  assert.equal(blocked.publishable, false);
+  assert.ok(blocked.issues.some((issue) => issue.includes('GPSR')));
+  const producer = resolveVonHalskyResponsibleProducer(base).value;
+  const ready = vonHalskyProductReadiness({ ...base, vonHalskyResponsibleProducer: producer });
+  assert.equal(ready.publishable, true);
+  assert.deepEqual(ready.gpsrMissing, []);
 });
 
 test('Agent Von Halsky mapuje parametry wyłącznie po dokładnej nazwie i wartości słownika', () => {
@@ -474,6 +544,73 @@ test('route Agenta Von Halsky zapisuje wynik w centralnej kartotece bez publikac
   assert.equal(product.vonHalskyAgentError, '');
   assert.ok(savedAreas.includes('von-halsky-agent-preparation'));
   assert.deepEqual(progress.map((entry) => entry.phase), ['matching', 'editorial', 'ready']);
+});
+
+test('Agent usuwa odrzuconą kategorię, dobiera grę rodzinną i zapisuje GPSR Alexandra', async () => {
+  const wrongCategory = '03cd5874-e280-5d71-abef-2e5d6885c5a1';
+  const rightCategory = 'd623476e-ea17-557d-8502-754a476d4c8e';
+  const product = {
+    id: '84',
+    externalId: '0376',
+    nazwa: '100 Gier - zestaw gier rodzinnych Alexander',
+    opisKrotki: 'Zestaw klasycznych gier planszowych dla całej rodziny.',
+    opis: 'Rozbudowany zestaw gier rodzinnych zawiera różnorodne warianty rozgrywki i elementy potrzebne do wspólnej zabawy dzieci oraz dorosłych.',
+    ean: '5906018003765',
+    producent: 'Alexander',
+    marka: 'Alexander',
+    zdjecie: '/produkt.webp',
+    cena: 89.9,
+    kategoria: 'Gry familijne i dla dzieci',
+    vonHalskyCategoryId: wrongCategory,
+  };
+  const state = {
+    settings: vonHalskyDefaultSettings(),
+    offers: [{
+      offer: { id: 'offer-84', externalId: '0376', status: 'PENDING' },
+      metadata: { validationErrors: [{ validationCode: 'CATEGORY_INCORRECT', validationMessage: 'Nieprawidłowa kategoria' }] },
+    }],
+    categories: [
+      { id: wrongCategory, name: 'Adaptery do pasów', path: 'Dla dzieci › Akcesoria dla mamy i dziecka › Akcesoria dla mamy › Adaptery do pasów', leaf: true },
+      { id: rightCategory, name: 'Rodzinne', path: 'Kultura i rozrywka › Gry › Planszowe › Rodzinne', leaf: true },
+    ],
+  };
+  const saves = [];
+  const route = createVonHalskyRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    readVersioned: async (_key, fallback) => ({ value: state || fallback, revision: 1 }),
+    writeIfVersion: async () => ({ modified: true }),
+    loadCatalog: async () => [product],
+    saveProductFields: async ({ fields, area }) => {
+      Object.assign(product, structuredClone(fields));
+      saves.push({ area, fields: structuredClone(fields) });
+      return { confirmed: true, product: structuredClone(product) };
+    },
+    prepareProductWithAgent: async () => ({
+      run: { id: 'run-vh-84' },
+      applied: {
+        patch: {
+          vonHalskyContentMode: 'custom',
+          vonHalskyTitle: '100 gier Alexander – rodzinny zestaw planszowy',
+          vonHalskyShortDescription: 'Zestaw klasycznych gier planszowych przeznaczony do wspólnej zabawy dzieci i dorosłych.',
+          vonHalskyDescription: 'Rozbudowany zestaw gier rodzinnych zawiera różnorodne warianty rozgrywki oraz elementy potrzebne do wspólnej zabawy dzieci i dorosłych. Poszczególne warianty wspierają logiczne myślenie i zapewniają urozmaiconą rozgrywkę.',
+        },
+      },
+      retryScheduled: false,
+    }),
+  });
+  const request = new Request('https://artwaytm.pl/api?action=von-halsky-agent-prepare', {
+    method: 'POST',
+    body: JSON.stringify({ productId: '84' }),
+  });
+  const response = await route(request, new URL(request.url), 'von-halsky-agent-prepare');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ready, 1);
+  assert.equal(product.vonHalskyCategoryId, rightCategory);
+  assert.match(product.vonHalskyCategoryPath, /Planszowe › Rodzinne/);
+  assert.equal(product.vonHalskyResponsibleProducerStatus, 'ready');
+  assert.equal(product.vonHalskyResponsibleProducer.legalName, 'Zakład Produkcyjny "Alexander" Piotr Pundzis');
+  assert.ok(saves.some((entry) => entry.area === 'von-halsky-agent-evidence'));
 });
 
 test('ręczna publikacja tworzy wyłącznie zaznaczoną ofertę i zapisuje request ID', async () => {

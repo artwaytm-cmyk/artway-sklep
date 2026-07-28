@@ -2,6 +2,7 @@ import { tekst } from './core/http.mjs';
 import { createProductSourceMatching } from './product-source-matching.mjs';
 import { synchronizeProductIdentifierAliases } from './domain/product-identifiers.mjs';
 import { SOURCE_IMAGE_POLICY_VERSION } from './domain/source-product-images.mjs';
+import { responsibleProducerFromSourceText } from './domain/von-halsky-responsible-producer.mjs';
 
 export function createProductSourceInspectionService({ read, write, normalizeKey, nameSimilarity }) {
   const czytaj = read;
@@ -66,7 +67,12 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
       const end = starts[i + 1] || source.indexOf('</section>', start);
       const seg = source.slice(start, end > start ? end : start + 3500);
       const label = stripHtml((seg.match(/<span\b[^>]*class=["'][^"']*\bdictionary__name_txt\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i) || [])[1] || '');
-      if (!label || /podmiot odpowiedzialny/i.test(label)) continue;
+      if (!label) continue;
+      if (/podmiot odpowiedzialny/i.test(label)) {
+        const val = stripHtmlZPodzialem(seg);
+        if (val) out[normalizujKluczParametru(label)] = tekst(val, 4000);
+        continue;
+      }
       const values = [...seg.matchAll(/<[^>]*class=["'][^"']*\bdictionary__value_txt\b[^"']*["'][^>]*>([\s\S]*?)(?:<\/a>|<\/span>)/gi)]
         .map((m) => stripHtml(m[1]))
         .filter(Boolean);
@@ -261,6 +267,10 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
     const opis = opisProduktuZHtml(html, title);
     const opisKrotki = opisKrotkiProduktuZHtml(html, opis);
     const kategoria = kategoriaZBreadcrumbJsonLd(html);
+    const responsibleProducer = responsibleProducerFromSourceText(
+      parametr(dict, ['Podmiot odpowiedzialny']),
+      { sourceUrl: url, verifiedAt: checkedAt },
+    );
     const parametry = {
       symbol,
       kodProducenta: kodProducentaRaw,
@@ -316,6 +326,7 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
         producentSprawdzonoAt: checkedAt,
         parametryProducenta: parametry,
         parametryZrodla: dict,
+        ...(responsibleProducer ? { gpsrResponsibleProducer: responsibleProducer } : {}),
         sourceEvidence: {
           url,
           host: (() => { try { return new URL(url).hostname; } catch { return ''; } })(),
@@ -327,6 +338,7 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
           imageSourceUrl: url,
           imageUrls: zdjecia,
           imagesFetchedAt: checkedAt,
+          ...(responsibleProducer ? { responsibleProducer } : {}),
         },
       }, { code: kodProducenta || symbol, overwrite: true }),
       availability: { available: dostepny, text: statusHtml || (dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia')), quantity: stanProducenta.quantity, exact: stanProducenta.exact, source: stanProducenta.source, checkedAt },
@@ -425,6 +437,11 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
     const beforeTitle = body.slice(0, productStart), crumbs = [...beforeTitle.matchAll(/^\s*\d+\.\s+\[([^\]]+)\]/gm)].map((m) => markdownInlineTekst(m[1])).filter((x) => x && !/strona główna/i.test(x));
     const kategoria = crumbs.at(-1) || markdownWartoscPoEtykiecie(segment, ['Seria']) || marka;
     const checkedAt = new Date().toISOString();
+    const responsibleProducer = responsibleProducerFromSourceText(segment, {
+      sourceUrl: url,
+      source: 'manufacturer-product-page-reader',
+      verifiedAt: checkedAt,
+    });
     const dict = {
       marka,
       symbol,
@@ -461,7 +478,8 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
         producentSprawdzonoAt: checkedAt,
         parametryProducenta: { symbol, kodProducenta: kodProducentaRaw, ean, seria: dict.seria, wiek: dict.wiek, liczbaGraczy: dict['liczba graczy'], wymiaryOpakowania: dict['wymiary opakowania'], wagaOpakowania: dict['waga opakowania'], ostrzezenie: dict.ostrzezenie },
         parametryZrodla: Object.fromEntries(Object.entries(dict).filter(([, value]) => value)),
-        sourceEvidence: { url, host, fetchedAt: checkedAt, title, retrieval: 'reader-fallback', fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict).filter((key) => dict[key])].slice(0, 80), imagePolicyVersion: SOURCE_IMAGE_POLICY_VERSION, imageSourceType: 'product_source_page', imageSourceUrl: url, imageUrls: zdjecia, imagesFetchedAt: checkedAt },
+        ...(responsibleProducer ? { gpsrResponsibleProducer: responsibleProducer } : {}),
+        sourceEvidence: { url, host, fetchedAt: checkedAt, title, retrieval: 'reader-fallback', fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict).filter((key) => dict[key])].slice(0, 80), imagePolicyVersion: SOURCE_IMAGE_POLICY_VERSION, imageSourceType: 'product_source_page', imageSourceUrl: url, imageUrls: zdjecia, imagesFetchedAt: checkedAt, ...(responsibleProducer ? { responsibleProducer } : {}) },
       }, { code: kodProducenta || symbol, overwrite: true }),
       availability: { available: dostepny, text: dostepny ? 'Produkt dostępny' : (niedostepny ? 'Niedostępny' : 'Do sprawdzenia'), quantity, exact: quantity !== null, source: quantity !== null ? 'ilość pokazana przez producenta' : 'status strony producenta', checkedAt },
     };

@@ -15,6 +15,7 @@ import {
   suggestVonHalskyCategory,
   vonHalskyAgentPreparationPatch,
 } from './domain/von-halsky-agent-preparation.mjs';
+import { resolveVonHalskyResponsibleProducer } from './domain/von-halsky-responsible-producer.mjs';
 
 const STORE_KEY = 'inpost_von_halsky_channel';
 
@@ -97,6 +98,37 @@ function matchingGtin(value) {
   const payload = digits.slice(0, -1).split('').reverse();
   const sum = payload.reduce((total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 3 : 1), 0);
   return (10 - (sum % 10)) % 10 === Number(digits.at(-1)) ? digits : null;
+}
+
+function validationRows(item = {}) {
+  return [
+    ...(Array.isArray(item?.metadata?.validationErrors) ? item.metadata.validationErrors : []),
+    ...(Array.isArray(item?.validationErrors) ? item.validationErrors : []),
+    ...(Array.isArray(item?.metadata?.rejectionReasons) ? item.metadata.rejectionReasons : []),
+    ...(Array.isArray(item?.rejectionReasons) ? item.rejectionReasons : []),
+  ];
+}
+
+function categoryRejectionForProduct(state = {}, product = {}) {
+  const externalId = matchingText(product.externalId || product.sku || product.id, 200);
+  const offerId = matchingText(product.vonHalskyOfferId || product.inpostVonHalskyOfferId, 200);
+  for (const item of Array.isArray(state.offers) ? state.offers : []) {
+    const offer = item?.offer || item || {};
+    const sameOffer = offerId && matchingText(offer.id || offer.offerId, 200) === offerId;
+    const sameExternal = externalId && matchingText(offer.externalId, 200) === externalId;
+    if (!sameOffer && !sameExternal) continue;
+    const rejection = validationRows(item).find((row) => (
+      matchingText(row?.validationCode || row?.code, 160).toUpperCase() === 'CATEGORY_INCORRECT'
+      || /kategor(?:ia|ii).{0,80}(?:nieprawid|błęd|odrzu)/i.test(matchingText(row?.validationMessage || row?.message, 600))
+    ));
+    if (rejection) return {
+      rejected: true,
+      offerId: matchingText(offer.id || offer.offerId, 200),
+      code: matchingText(rejection.validationCode || rejection.code, 160),
+      message: matchingText(rejection.validationMessage || rejection.message, 600),
+    };
+  }
+  return { rejected: false, offerId: '', code: '', message: '' };
 }
 
 export function createVonHalskyRoute({
@@ -348,16 +380,32 @@ export function createVonHalskyRoute({
             target: 'katalog InPost Von Halsky',
             message: 'Sprawdzam tożsamość, kategorię i fakty produktu według dokumentacji InPost.',
           });
-          const existingCategoryId = matchingText(product.vonHalskyCategoryId || product.inpostVonHalskyCategoryId, 100);
+          const categoryRejection = categoryRejectionForProduct(state, product);
+          const responsibleProducer = resolveVonHalskyResponsibleProducer(product);
+          deterministicFields.vonHalskyGpsrRequired = true;
+          deterministicFields.vonHalskyResponsibleProducerStatus = responsibleProducer.ready ? 'ready' : 'requires_data';
+          deterministicFields.vonHalskyResponsibleProducerMissing = responsibleProducer.missing;
+          deterministicFields.vonHalskyResponsibleProducerEvidence = responsibleProducer.evidence;
+          if (responsibleProducer.ready) deterministicFields.vonHalskyResponsibleProducer = responsibleProducer.value;
+          const existingCategoryId = categoryRejection.rejected
+            ? ''
+            : matchingText(product.vonHalskyCategoryId || product.inpostVonHalskyCategoryId, 100);
           categoryMatch = suggestVonHalskyCategory(product, state.categories, {
             minimumConfidence: state.settings.agentMinimumConfidence,
           });
           let categoryId = existingCategoryId;
+          if (categoryRejection.rejected) {
+            deterministicFields.vonHalskyCategoryId = '';
+            deterministicFields.vonHalskyCategoryRejectedAt = timestamp;
+            deterministicFields.vonHalskyCategoryRejection = categoryRejection;
+          }
           if (!categoryId && categoryMatch.autoApplicable && state.settings.agentCategoryAutoMatchEnabled !== false) {
             categoryId = categoryMatch.selected.id;
             deterministicFields.vonHalskyCategoryId = categoryId;
             deterministicFields.vonHalskyCategoryMatchedBy = 'agent-evidence';
             deterministicFields.vonHalskyCategoryMatchedAt = timestamp;
+            deterministicFields.vonHalskyCategoryPath = categoryMatch.selected.path;
+            deterministicFields.vonHalskyCategoryRejection = null;
           }
           if (categoryId && config.configured && state.settings.agentAttributeAutoMatchEnabled !== false) {
             try {
@@ -439,6 +487,15 @@ export function createVonHalskyRoute({
             warnings: finalPatch.vonHalskyAgentWarnings,
             category: deterministicFields.vonHalskyCategoryId ? categoryMatch?.selected : null,
             categorySuggestion: !deterministicFields.vonHalskyCategoryId ? categoryMatch?.selected : null,
+            responsibleProducer: responsibleProducer.ready ? {
+              name: responsibleProducer.value.legalName,
+              status: 'ready',
+              source: responsibleProducer.value.source,
+            } : {
+              name: matchingText(product.producent || product.marka, 180),
+              status: 'requires_data',
+              missing: responsibleProducer.missing,
+            },
             attributeCoverage: attributeMatch?.coverage ?? null,
             saved: true,
             runId: agent?.run?.id || '',

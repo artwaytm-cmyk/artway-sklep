@@ -1,4 +1,4 @@
-export const VON_HALSKY_AGENT_RULES_VERSION = '2026-07-29.1';
+export const VON_HALSKY_AGENT_RULES_VERSION = '2026-07-29.2';
 
 const PUBLIC_GUIDE = 'https://inpost.pl/aktualnosci-inpost-von-halsky-jak-stworzyc-dobra-oferte';
 
@@ -11,6 +11,7 @@ function normalized(value = '') {
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
     .toLowerCase()
+    .replace(/ł/g, 'l')
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -32,11 +33,72 @@ function overlap(left = [], right = []) {
 }
 
 function productCategoryCorpus(product = {}) {
+  const parameters = product.parametryZrodla || product.parametryProducenta || product.parametry || product.parameters || {};
   return [
     product.nazwa, product.name, product.kategoria, product.category, product.podkategoria,
     product.subcategory, product.typ, product.type,
-    ...Object.keys(product.parametryZrodla || product.parametryProducenta || product.parametry || product.parameters || {}),
+    product.opisKrotki, product.krotkiOpis, product.opis,
+    ...Object.keys(parameters),
+    ...Object.values(parameters).flatMap((value) => Array.isArray(value) ? value : [value]),
   ].filter(Boolean).join(' ');
+}
+
+function categoryIntent(product = {}) {
+  const corpus = normalized(productCategoryCorpus(product));
+  const boardGame = /\b(?:gra|gry|planszow|zestaw gier|familijn|rodzinn)\w*\b/.test(corpus)
+    && !/\b(?:gra na pc|gry na pc|xbox|playstation|nintendo|rpg)\b/.test(corpus);
+  const balloon = /\b(?:balon|balony|foliow|lateksow|hel)\w*\b/.test(corpus);
+  const creative = /\b(?:origami|malowan|plastycz|kreatywn|piaskow)\w*\b/.test(corpus);
+  const subtype = boardGame
+    ? /\b(?:familijn|rodzinn)\w*\b/.test(corpus) ? 'family'
+      : /\b(?:edukacyjn|logicz)\w*\b/.test(corpus) ? 'educational'
+        : /\b(?:imprezow|towarzysk)\w*\b/.test(corpus) ? 'party'
+          : /\b(?:slow|slown|liter|liczb)\w*\b/.test(corpus) ? 'word_number'
+            : 'generic'
+    : '';
+  return { corpus, boardGame, balloon, creative, subtype };
+}
+
+function categoryIntentScore(intent = {}, path = '') {
+  const normalizedPath = normalized(path);
+  let score = 0;
+  const evidence = [];
+  if (intent.boardGame) {
+    const boardPath = /\bkultura i rozrywka gry planszowe\b/.test(normalizedPath);
+    const wrongDigital = /\bgry na (?:pc|konsole)\b/.test(normalizedPath);
+    const wrongAccessory = /\bakcesoria do gier\b/.test(normalizedPath);
+    if (boardPath) {
+      score += 0.52;
+      evidence.push('rozpoznano produkt jako grę planszową');
+    } else if (wrongDigital || wrongAccessory || !/\bkultura i rozrywka gry\b/.test(normalizedPath)) {
+      score -= 0.75;
+    }
+    const subtypeRules = {
+      family: [/\bplanszowe rodzinne\b/, 0.34, 'rodzinna/familijna → Planszowe › Rodzinne'],
+      educational: [/\bplanszowe logiczne i edukacyjne\b/, 0.30, 'logiczna/edukacyjna → Planszowe › Logiczne i edukacyjne'],
+      party: [/\bplanszowe imprezowe\b/, 0.30, 'imprezowa → Planszowe › Imprezowe'],
+      word_number: [/\bplanszowe slowne i liczbowe\b/, 0.30, 'słowna/liczbowa → Planszowe › Słowne i liczbowe'],
+      generic: [/\bplanszowe pozostale gry planszowe\b/, 0.12, 'ogólna gra → pozostałe gry planszowe'],
+    };
+    const [pattern, bonus, label] = subtypeRules[intent.subtype] || subtypeRules.generic;
+    if (pattern.test(normalizedPath)) {
+      score += bonus;
+      evidence.push(label);
+    }
+  }
+  if (intent.balloon) {
+    if (/\bokazje i przyjecia dekoracje i gadzety balony\b/.test(normalizedPath)) {
+      score += 0.72;
+      evidence.push('balon → Dekoracje i gadżety › Balony');
+    } else if (!/\bbalony\b/.test(normalizedPath)) score -= 0.65;
+  }
+  if (intent.creative) {
+    if (/\b(?:artykuly plastyczne|zestawy kreatywne|origami)\b/.test(normalizedPath)) {
+      score += 0.38;
+      evidence.push('produkt kreatywny/plastyczny');
+    }
+  }
+  return { score, evidence };
 }
 
 export function suggestVonHalskyCategory(product = {}, categories = [], {
@@ -46,6 +108,7 @@ export function suggestVonHalskyCategory(product = {}, categories = [], {
   const corpus = productCategoryCorpus(product), corpusNormalized = normalized(corpus);
   const productTokens = tokens(corpus);
   const categoryTokens = tokens([product.kategoria, product.category, product.podkategoria, product.subcategory].filter(Boolean).join(' '));
+  const intent = categoryIntent(product);
   const candidates = (Array.isArray(categories) ? categories : [])
     .filter((item) => item?.leaf === true && text(item?.id, 100))
     .map((item) => {
@@ -55,11 +118,13 @@ export function suggestVonHalskyCategory(product = {}, categories = [], {
       const pathCoverage = overlap(pathTokens, productTokens);
       const catalogAgreement = overlap(categoryTokens, pathTokens);
       const exactPhrase = nameNormalized.length >= 4 && corpusNormalized.includes(nameNormalized);
+      const intentMatch = categoryIntentScore(intent, path);
       const score = Math.min(1, (
         (exactPhrase ? 0.48 : 0)
         + nameCoverage * 0.34
         + pathCoverage * 0.08
         + catalogAgreement * 0.30
+        + intentMatch.score
       ));
       return {
         id: text(item.id, 100),
@@ -70,6 +135,7 @@ export function suggestVonHalskyCategory(product = {}, categories = [], {
           exactPhrase && `pełna nazwa kategorii występuje w kartotece: ${name}`,
           nameCoverage > 0 && `zgodność słów kategorii: ${Math.round(nameCoverage * 100)}%`,
           catalogAgreement > 0 && `zgodność z kategorią sklepu: ${Math.round(catalogAgreement * 100)}%`,
+          ...intentMatch.evidence,
         ].filter(Boolean),
       };
     })
@@ -88,6 +154,10 @@ export function suggestVonHalskyCategory(product = {}, categories = [], {
       && selected.score >= Number(minimumConfidence || 0.82)
       && margin >= Number(minimumMargin || 0.08)
     ),
+    intent: {
+      type: intent.boardGame ? 'board_game' : intent.balloon ? 'balloon' : intent.creative ? 'creative' : 'general',
+      subtype: intent.subtype || '',
+    },
     rulesVersion: VON_HALSKY_AGENT_RULES_VERSION,
   };
 }

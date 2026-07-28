@@ -1,4 +1,4 @@
-export const SPECIALIST_PLAYBOOK_VERSION = '2026-07-29.1';
+export const SPECIALIST_PLAYBOOK_VERSION = '2026-07-29.2';
 
 const COMMON = Object.freeze({
   input: [

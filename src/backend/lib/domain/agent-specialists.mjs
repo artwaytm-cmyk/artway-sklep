@@ -2,6 +2,7 @@ import crypto from 'node:crypto'; import { withAgentSpan, withHandoffSpan, withR
 import { validManufacturerName } from './product-field-validation.mjs'; import { createPlatformPromptProfile, requestSpecialistResponse } from './agent-specialist-openai.mjs';
 import { enforceProductEditorialCompliance } from './agent-specialist-compliance.mjs'; import { specialistPlaybook, specialistPlaybookDetails } from './agent-specialist-playbooks.mjs';
 import { buildSpecialistInstructions } from './agent-specialist-instructions.mjs';
+import { requestVonHalskyAgentResponse } from './von-halsky-specialist-agent.mjs';
 import { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, normalizeChannelEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialSourceFingerprint, productEditorialFingerprint, productEditorialState, productEditorialAutomaticEligibility, providerQuotaUnavailable, communicationNeedsReply, communicationFacts } from './agent-specialists-support.mjs';
 import { automaticBatchLimit, statusDecisionData } from './agent-specialists-status-support.mjs';
 import { estimateModelUsageCost, modelPolicySummary, OPENAI_MODEL_PRICE_SNAPSHOT, specialistModelPolicy } from './agent-model-policy.mjs';
@@ -255,7 +256,10 @@ export function createAgentSpecialists({
       specialists: Object.entries(SPECIALISTS).map(([id, value]) => {
         const fullInstruction = specialistPlaybook(id), details = specialistPlaybookDetails(id);
         return {
-          id, ...value, promptVersion: PROMPT_VERSION, deployment: 'responses-api+versioned-server-playbook',
+          id, ...value, promptVersion: PROMPT_VERSION,
+          deployment: id.startsWith('von_halsky')
+            ? 'openai-agents-sdk+typed-output+deterministic-tools'
+            : 'responses-api+versioned-server-playbook',
           modelPolicy: specialistModelPolicy(id, { override: model }),
           platformAvailable: !!value.platformPrompt?.id, platformName: value.label,
           platformUrl: value.platformPrompt?.id ? `https://platform.openai.com/chat/edit?prompt=${encodeURIComponent(value.platformPrompt.id)}&version=${encodeURIComponent(value.platformPrompt.version || '1')}` : '',
@@ -354,20 +358,34 @@ export function createAgentSpecialists({
       fakty: context,
       ...(learnedGuidance ? { zatwierdzonePreferencjeAdministratora: learnedGuidance } : {}),
     };
-    const executeRequest = () => requestSpecialistResponse({
-      fetchImpl,
-      apiKey,
-      model: executionPolicy.model,
-      qualityFallbackModel: qualityFallbackPolicy.model,
-      localFallback,
-      reasoning: executionPolicy.reasoning,
-      maxOutputTokens: executionPolicy.maxOutputTokens,
-      promptCacheKey: `artway:${specialist}:${PROMPT_VERSION}`,
-      promptProfile: platformProfile,
-      instructions,
-      input: JSON.stringify(dynamicInput),
-      resultSchema: RESULT_SCHEMA,
-    });
+    // W produkcji Von Halsky korzysta z pełnego Agents SDK. Wstrzyknięty
+    // transport jest kontraktem testów/integracji offline i pozostaje na
+    // przewidywalnym adapterze Responses API, dzięki czemu nie omija atrap
+    // sieci ani nie próbuje użyć prawdziwego klucza.
+    const dedicatedVonHalskyRuntime = ['von_halsky_offer', 'von_halsky_compliance'].includes(specialist)
+      && fetchImpl === globalThis.fetch;
+    const executeRequest = () => dedicatedVonHalskyRuntime
+      ? requestVonHalskyAgentResponse({
+        model: executionPolicy.model,
+        qualityFallbackModel: qualityFallbackPolicy.model,
+        reasoning: executionPolicy.reasoning,
+        maxOutputTokens: executionPolicy.maxOutputTokens,
+        input: JSON.stringify(dynamicInput),
+      })
+      : requestSpecialistResponse({
+        fetchImpl,
+        apiKey,
+        model: executionPolicy.model,
+        qualityFallbackModel: qualityFallbackPolicy.model,
+        localFallback,
+        reasoning: executionPolicy.reasoning,
+        maxOutputTokens: executionPolicy.maxOutputTokens,
+        promptCacheKey: `artway:${specialist}:${PROMPT_VERSION}`,
+        promptProfile: platformProfile,
+        instructions,
+        input: JSON.stringify(dynamicInput),
+        resultSchema: RESULT_SCHEMA,
+      });
     const request = platformAgentsEnabled && platformTracingEnabled ? await withTrace(
       `Artway — ${definition.label}`,
       async () => withHandoffSpan(
@@ -437,6 +455,11 @@ export function createAgentSpecialists({
         id: platformProfile.id, name: platformProfile.name, version: platformProfile.version,
         available: request.promptApplied, fallback: request.promptFallback, error: request.promptError || '',
       } : null,
+      agentRuntime: request.agentRuntime || {
+        sdk: 'responses-api',
+        workflow: 'artway-versioned-specialist',
+        promptVersion: PROMPT_VERSION,
+      },
       actor: clean(actor?.email || actor?.name || actor?.source || 'administrator', 120),
     };
     await appendHistory(entry);

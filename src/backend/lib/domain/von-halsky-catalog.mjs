@@ -1,5 +1,6 @@
 import { vonHalskyPublicApiConfig } from './von-halsky-api-client.mjs';
 import { sourcePageUrl, verifiedSourceImages } from './source-product-images.mjs';
+import { vonHalskyResponsibleProducerMissing } from './von-halsky-responsible-producer.mjs';
 
 function text(value, max = 240) {
   return String(value ?? '').replace(/\u0000/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -195,6 +196,11 @@ export function vonHalskyProductReadiness(product = {}) {
   const images = productImages(product);
   const price = vonHalskyEffectivePrice(product);
   const categoryId = uuid(product.vonHalskyCategoryId || product.inpostVonHalskyCategoryId);
+  const gpsrRequired = product.vonHalskyGpsrRequired === true;
+  const responsibleProducer = product.vonHalskyResponsibleProducer && typeof product.vonHalskyResponsibleProducer === 'object'
+    ? product.vonHalskyResponsibleProducer
+    : null;
+  const gpsrMissing = gpsrRequired ? vonHalskyResponsibleProducerMissing(responsibleProducer) : [];
   const issues = [];
   const warnings = [];
   if (name.length < 7 || name.length > 150) issues.push('Nazwa musi mieć 7–150 znaków');
@@ -205,6 +211,7 @@ export function vonHalskyProductReadiness(product = {}) {
   if (!images.length) issues.push('Brak zdjęcia produktu');
   if (!Number.isFinite(price) || price <= 0) issues.push('Brak poprawnej ceny');
   if (!categoryId) warnings.push('Brak kategorii Von Halsky');
+  if (gpsrMissing.length) issues.push(`Niekompletne dane GPSR: ${gpsrMissing.join(', ')}`);
   if (!text(product.externalId || product.sku || product.id, 160)) warnings.push('Brak stabilnego EXTERNAL_ID');
   if (images.length === 1) warnings.push('Warto dodać więcej niż jedno zdjęcie');
   if (!Object.keys(product.parametry || product.parameters || {}).length) warnings.push('Brak parametrów kategorii');
@@ -215,6 +222,9 @@ export function vonHalskyProductReadiness(product = {}) {
     issues,
     warnings,
     identifiers: { ean, manufacturerCode, brand, categoryId },
+    responsibleProducer,
+    gpsrRequired,
+    gpsrMissing,
     publishable: issues.length === 0 && Boolean(categoryId) && Boolean(brand),
     publicationIssues: [
       ...(!categoryId ? ['Brak kategorii Von Halsky'] : []),
@@ -248,6 +258,7 @@ export function vonHalskyOfferProjection(product = {}, settings = {}) {
     categoryId: readiness.identifiers.categoryId,
     attributes: vonHalskyAttributeValues(product),
     parameters: product.parametry || product.parameters || {},
+    responsibleProducer: readiness.responsibleProducer,
     images: productImages(product),
     price: readiness.price,
     currency: 'PLN',
