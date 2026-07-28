@@ -255,7 +255,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Multigra",
-    "nazwa": "Żaba i jeż - kreatywna gra dla 1 osoby, 6+, Multigra",
+    "nazwa": "Żaba i jeż – kreatywna gra dla 1 osoby, 6+, Multigra",
     "zdjecie": "https://multigra.com.pl/wp-content/uploads/sites/5/2025/07/0010-Piaskowe-Malowanki-Zaba-i-jez-2-scaled.jpg",
     "_catalog": {
       "channels": {
@@ -3326,7 +3326,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Multigra",
-    "nazwa": "Szablony zwierzęta – zestaw kreatywny do rysowania, Multigra",
+    "nazwa": "Szablony zwierzęta – zestaw do rysowania konturów, Multigra",
     "zdjecie": "https://multigra.com.pl/wp-content/uploads/sites/5/2025/07/0124-Szablony-Zwierzeta-rekwizyty.jpg",
     "_catalog": {
       "channels": {
@@ -3348,23 +3348,23 @@
     "producent": "Multigra",
     "sourceUrl": "https://multigra.com.pl/produkty/szablony-zwierzeta/",
     "externalId": "0124",
-    "opisKrotki": "Zestaw kreatywny Multigra do odrysowywania konturów 8 różnych zwierząt. Dziecko rysuje według szablonu, koloruje sylwetki kredkami i może samodzielnie uzupełnić tło oraz szczegóły.",
+    "opisKrotki": "Szablony zwierzęta to zestaw marki Multigra do łatwego rysowania konturów 8 różnych zwierząt. Dziecko może dokończyć obrazek, kolorując sylwetki kredkami i dodając własne tło oraz szczegóły.",
     "producentUrl": "https://multigra.com.pl/produkty/szablony-zwierzeta/",
     "kodProducenta": "0124",
     "allegroProductId": "35e07543-b10b-4842-ac8d-47e363131322",
     "allegroCategoryId": "19417",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T08:37:38.313Z",
+    "allegroAgentPreparedAt": "2026-07-28T08:38:35.663Z",
     "allegroAgentPreparationRunId": "8d23d1a8-b381-44ea-8723-3c0202585234",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 8,
+    "allegroAgentPreparationRetryCount": 9,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-3ae4542a",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T08:42:38.313Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-66a55f0a",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000589",
@@ -20457,7 +20457,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "Pamięć Pojazdy - gra pamięciowa Alexander",
+    "nazwa": "Pamięć Pojazdy – gra pamięciowa Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/7079ca71027bfec4ce4727fcb1c44f00/pol_pm_Pamiec-Pojazdy-748_2.jpg",
     "_catalog": {
       "channels": {
@@ -20479,13 +20479,13 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-748-Pamiec-Pojazdy.html",
     "externalId": "2233",
-    "opisKrotki": "Klasyczna gra pamięciowa dla najmłodszych graczy z motywem pojazdów. Zadaniem jest odnajdywanie par identycznych obrazków i zdobycie jak największej liczby kart.",
+    "opisKrotki": "Pamięć Pojazdy to gra karciana typu memory z motywem pojazdów. Zadaniem graczy jest odkrywanie par identycznych obrazków i zapamiętywanie ich położenia.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-748-Pamiec-Pojazdy.html",
     "kodProducenta": "2233",
     "allegroCategoryId": "319045",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T06:14:07.296Z",
-    "allegroAgentPreparationRunId": "d03dd94d-8483-401d-87fb-803672afb435",
+    "allegroAgentPreparedAt": "2026-07-28T08:42:45.981Z",
+    "allegroAgentPreparationRunId": "94c2188a-10d6-409b-8351-3a080e2b819e",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)",
@@ -20493,9 +20493,9 @@
       "EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną."
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 5,
+    "allegroAgentPreparationRetryCount": 8,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-d22971b8",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-1cbea82f",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -37030,7 +37030,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Buddy Dogs - drewniane puzzle Milliwood, seria Dream Team, 50 elementów",
+    "nazwa": "Drewniane Puzzle Milliwood – Dream Team Buddy Dogs, 50 elementów",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/6986a6712614801703d70c9fa14dd1e1/pol_pm_Drewniane-Puzzle-Milliwood-Dream-Team-Buddy-Dogs-50-Elementow-1610_1.jpg",
     "_catalog": {
       "channels": {
@@ -37052,24 +37052,24 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1610-Drewniane-Puzzle-Milliwood-Dream-Team-Buddy-Dogs-50-Elementow.html",
     "externalId": "5053",
-    "opisKrotki": "Drewniane puzzle Buddy Dogs z serii Dream Team marki Milliwood. Układanka zawiera 50 elementów i jest przeznaczona dla dzieci od 5 lat.",
+    "opisKrotki": "Drewniane puzzle Milliwood z serii Dream Team przedstawiają wesołe pieski o przyjaznych twarzach. Zestaw zawiera 50 elementów i jest przeznaczony dla dzieci od 5 lat.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1610-Drewniane-Puzzle-Milliwood-Dream-Team-Buddy-Dogs-50-Elementow.html",
     "kodProducenta": "5053",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T06:12:14.327Z",
+    "allegroAgentPreparedAt": "2026-07-28T08:45:51.173Z",
     "allegroEditorialSyncState": "requires_publication_decision",
-    "allegroAgentPreparationRunId": "71d50878-8fc5-458c-87fb-afcfc347f10c",
-    "allegroAgentPreparationStatus": "decision_required",
+    "allegroAgentPreparationRunId": "980f03b4-96f0-4781-8ca0-7025461b87ba",
+    "allegroAgentPreparationStatus": "retrying",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 5,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-483d2ce2",
-    "allegroAgentPreparationNextRetryAt": ""
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ede39c7b",
+    "allegroAgentPreparationNextRetryAt": "2026-07-28T08:50:51.173Z"
   },
   {
     "id": "1000512",
