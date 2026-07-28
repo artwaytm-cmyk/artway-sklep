@@ -13754,8 +13754,12 @@ function diagnostykaProblemyDoAgenta(testy=testyDiagnostyczne()){
 async function diagnostykaSynchronizujProblemy(testy=testyDiagnostyczne()){
   if(!maUprawnieniaZapisuChmury())return false;
   const checks=diagnostykaProblemyDoAgenta(testy);
+  const checkedAt=new Date().toISOString(),release=diagnostykaWersja();
+  const passedChecks=testy
+    .filter(item=>item.status==="ok"&&item.nazwa!=="Centralny rejestr błędów")
+    .map(item=>({name:item.nazwa,group:item.grupa,details:item.szczegoly,release,checkedAt}));
   try{
-    await chmura("diagnostics-checks-sync",{method:"POST",body:{checks},timeout:20000});
+    await chmura("diagnostics-checks-sync",{method:"POST",body:{checks,passedChecks},timeout:20000});
     await systemPobierzCentralneBledy(true);
     return true;
   }catch(error){

@@ -99,7 +99,7 @@ export function diagnosticsModelPolicy(env = process.env, { escalation = false }
       tier: 'professional-escalation',
       reasoning: 'high',
       mode: clean(env.OPENAI_DIAGNOSTICS_MODE) === 'pro' ? 'pro' : 'standard',
-      maxOutputTokens: 2200,
+      maxOutputTokens: 3200,
       escalation: true,
     };
   }
@@ -108,7 +108,7 @@ export function diagnosticsModelPolicy(env = process.env, { escalation = false }
     tier: 'standard-routine',
     reasoning: 'low',
     mode: 'standard',
-    maxOutputTokens: 1400,
+    maxOutputTokens: 2200,
     escalation: false,
   };
 }

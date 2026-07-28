@@ -357,7 +357,7 @@
     "kolor": "#dbeafe",
     "marka": "Multigra",
     "nazwa": "Motyl i papuga - Multigra - gry dla każdego",
-    "zdjecie": "",
+    "zdjecie": "https://a.allegroimg.com/original/11f321/0422569d4a44a13891c41a5d905b/Piaskowe-malowanki-Motyl-i-papuga-30012",
     "_catalog": {
       "channels": {
         "store": {
@@ -5843,7 +5843,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "Moda i Modelki 2 - gra kreatywna Alexander",
+    "nazwa": "Moda i Modelki 2 – gra kreatywna Alexander",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/18f39c6ec77adfc26138efb9855ae416/pol_pm_Moda-i-Modelki-2-60_1.jpg",
     "_catalog": {
       "channels": {
@@ -5865,22 +5865,22 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-60-Moda-i-Modelki-2.html",
     "externalId": "0185",
-    "opisKrotki": "„Moda i Modelki 2” to kreatywna zabawa w projektantkę mody od Alexander, z serii Top Fashion. Zestaw zawiera 96 elementów do tworzenia fantazyjnie ubranych modelek i rozwija wyobraźnię oraz wrażliwość plastyczną.",
+    "opisKrotki": "„Moda i Modelki 2” to kreatywna zabawa w projektantkę mody marki Alexander. Zestaw zawiera 96 elementów tworzących 24 modelki, kostkę do gry i instrukcję.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-60-Moda-i-Modelki-2.html",
     "kodProducenta": "0185",
     "allegroCategoryId": "123958",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:40:57.384Z",
-    "allegroAgentPreparationRunId": "1a3813f3-6fe3-4624-a915-ae975ae9ffcb",
+    "allegroAgentPreparedAt": "2026-07-28T08:58:40.959Z",
+    "allegroAgentPreparationRunId": "9a2077e9-0a30-454b-9a53-a419f45872ba",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Typ",
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ffdfda52",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-7803559d",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -8661,7 +8661,7 @@
           "active": true
         },
         "allegro": {
-          "status": "INACTIVE",
+          "status": "ACTIVE",
           "offerId": "18795912288"
         }
       },
@@ -10686,7 +10686,7 @@
           "active": true
         },
         "allegro": {
-          "status": "INACTIVE",
+          "status": "ACTIVE",
           "offerId": "18795896734"
         }
       },
@@ -14825,7 +14825,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18789468709"
+          "offerId": "12463007531"
         }
       },
       "detailLevel": "list",
@@ -16480,7 +16480,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18789493868"
+          "offerId": "14148248256"
         }
       },
       "detailLevel": "list",
@@ -17912,7 +17912,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18789503159"
+          "offerId": "15630524272"
         }
       },
       "detailLevel": "list",
@@ -20195,7 +20195,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774888597"
+          "offerId": "12706537100"
         }
       },
       "detailLevel": "list",
@@ -20889,7 +20889,7 @@
         },
         "allegro": {
           "status": "ACTIVE",
-          "offerId": "18790398410"
+          "offerId": "16043336582"
         }
       },
       "detailLevel": "list",
@@ -21905,7 +21905,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774895552"
+          "offerId": "18086329109"
         }
       },
       "detailLevel": "list",
@@ -22035,7 +22035,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774896917"
+          "offerId": "12212218115"
         }
       },
       "detailLevel": "list",
@@ -22080,7 +22080,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774896212"
+          "offerId": "12212255021"
         }
       },
       "detailLevel": "list",
@@ -22125,7 +22125,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774897376"
+          "offerId": "12214277613"
         }
       },
       "detailLevel": "list",
@@ -24863,7 +24863,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774405085"
+          "offerId": "12224599546"
         }
       },
       "detailLevel": "list",
@@ -24908,7 +24908,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774894276"
+          "offerId": "18086356346"
         }
       },
       "detailLevel": "list",
@@ -25566,7 +25566,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774894939"
+          "offerId": "12963225823"
         }
       },
       "detailLevel": "list",
@@ -25610,7 +25610,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774894777"
+          "offerId": "12966386650"
         }
       },
       "detailLevel": "list",
@@ -25696,7 +25696,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774898513"
+          "offerId": "15084034781"
         }
       },
       "detailLevel": "list",
@@ -25742,7 +25742,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774898969"
+          "offerId": "12966828794"
         }
       },
       "detailLevel": "list",
@@ -25996,7 +25996,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "16218627000"
+          "offerId": "14201688983"
         }
       },
       "detailLevel": "list",
@@ -31783,7 +31783,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18774893720"
+          "offerId": "14764728297"
         }
       },
       "detailLevel": "list",
@@ -32038,7 +32038,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18753887741"
+          "offerId": "14764669900"
         }
       },
       "detailLevel": "list",
@@ -32287,7 +32287,7 @@
         },
         "allegro": {
           "status": "",
-          "offerId": "18753863763"
+          "offerId": "18248128587"
         }
       },
       "detailLevel": "list",
@@ -33367,7 +33367,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "Alexander",
-    "nazwa": "Brelok DIY X-Press Me - Biedronka, Alexander",
+    "nazwa": "X-PRESS ME Brelok DIY Biedronka – Alexander, 71 elementów",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/3d45736446901ee7605bb491a5c59a80/pol_pm_-X-PRESS-ME-BRELOK-DIY-Biedronka-71-El-1569_1.jpg",
     "_catalog": {
       "channels": {
@@ -33389,13 +33389,13 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1569--X-PRESS-ME-BRELOK-DIY-Biedronka-71-El.html",
     "externalId": "2937",
-    "opisKrotki": "Kreatywny brelok DIY z serii X-Press Me marki Alexander. Zestaw pozwala złożyć ozdobę z 71 elementów, przypiąć ją zawieszką i tworzyć własne wzory.",
+    "opisKrotki": "Kreatywny brelok DIY z serii X-Press Me marki Alexander. Model Biedronka zawiera 71 elementów i pozwala złożyć własną ozdobę.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1569--X-PRESS-ME-BRELOK-DIY-Biedronka-71-El.html",
     "kodProducenta": "2937",
     "allegroCategoryId": "93707",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:08:23.291Z",
-    "allegroAgentPreparationRunId": "7a2f7817-7e98-4e66-a580-6d7f163cd7c4",
+    "allegroAgentPreparedAt": "2026-07-28T08:51:48.069Z",
+    "allegroAgentPreparationRunId": "99535874-6a45-45f9-8ed1-e503cb49a013",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "parametr Allegro: Materiał",
@@ -33403,9 +33403,9 @@
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-6173dd3f",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-2c5d0003",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -35157,7 +35157,7 @@
           "active": true
         },
         "allegro": {
-          "status": "INACTIVE",
+          "status": "ACTIVE",
           "offerId": "18795893038"
         }
       },
@@ -35357,7 +35357,7 @@
           "active": true
         },
         "allegro": {
-          "status": "INACTIVE",
+          "status": "ACTIVE",
           "offerId": "18795617607"
         }
       },
@@ -36475,7 +36475,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane Yippee Cutie - Rybka, 70 elementów - Alexander",
+    "nazwa": "Puzzle drewniane Yippee Cutie – Rybka, 70 elementów, MilliWOOD",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/25fff90b8da6b6c9d46c80219f0ff382/pol_pm_Puzzle-drewniane-Yippee-Cutie-Rybka-70-el-1605_1.jpg",
     "_catalog": {
       "channels": {
@@ -36497,24 +36497,24 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1605-Puzzle-drewniane-Yippee-Cutie-Rybka-70-el.html",
     "externalId": "5018",
-    "opisKrotki": "Drewniane puzzle Alexander z serii Milliwood - Yippee cutie z motywem rybki – błazenka. Zestaw zawiera 70 elementów.",
+    "opisKrotki": "Drewniane puzzle Yippee Cutie z motywem rybki z serii MilliWOOD. Zestaw zawiera 70 elementów o regularnych kształtach, przeznaczonych do układania i zabawy edukacyjnej.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1605-Puzzle-drewniane-Yippee-Cutie-Rybka-70-el.html",
     "kodProducenta": "5018",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T06:10:14.948Z",
-    "allegroAgentPreparationRunId": "895f554f-633e-44cd-9c52-44ae8db8df12",
-    "allegroAgentPreparationStatus": "decision_required",
+    "allegroAgentPreparedAt": "2026-07-28T09:00:49.765Z",
+    "allegroAgentPreparationRunId": "9b8e2ddc-0580-44a9-8812-e58fd0437b9e",
+    "allegroAgentPreparationStatus": "retrying",
     "allegroAgentPreparationMissing": [
       "poprawny EAN/GTIN (błędna długość lub cyfra kontrolna)",
       "zdjęcie Allegro min. 500px",
       "EAN/GTIN ma niepoprawną długość lub cyfrę kontrolną."
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 5,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-2588490a",
-    "allegroAgentPreparationNextRetryAt": ""
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-01352bae",
+    "allegroAgentPreparationNextRetryAt": "2026-07-28T09:05:49.765Z"
   },
   {
     "id": "1000489",
@@ -36624,7 +36624,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Puzzle drewniane Galaxies - Zamek, 8+ - Alexander",
+    "nazwa": "Puzzle drewniane – Galaxies – Zamek",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/08296d951f88154bb3d13e34a50dc67e/pol_pm_Puzzle-drewniane-Galaxies-Zamek-150-el-1614_1.jpg",
     "_catalog": {
       "channels": {
@@ -36646,21 +36646,21 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1614-Puzzle-drewniane-Galaxies-Zamek-150-el.html",
     "externalId": "5022",
-    "opisKrotki": "Drewniane puzzle Galaxies z ilustracją tajemniczego zamku w barwnej krainie pełnej kwiatów, drzew, tęczy i motyli. Spokojna, kolorowa sceneria zachęca do uważnego układania i odkrywania szczegółów.",
+    "opisKrotki": "Drewniane puzzle z motywem tajemniczego zamku w barwnej krainie pełnej kwiatów, drzew, tęczy i potoku.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1614-Puzzle-drewniane-Galaxies-Zamek-150-el.html",
     "kodProducenta": "5022",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T05:41:33.065Z",
-    "allegroAgentPreparationRunId": "1fd24941-74e4-4b18-bfdf-c17a6cc45e23",
+    "allegroAgentPreparedAt": "2026-07-28T08:55:25.180Z",
+    "allegroAgentPreparationRunId": "9999e38b-5054-441a-ab78-9f97d014699f",
     "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 4,
+    "allegroAgentPreparationRetryCount": 7,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-69135688",
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-9b19fa9f",
     "allegroAgentPreparationNextRetryAt": ""
   },
   {
@@ -37030,7 +37030,7 @@
     "ikona": "🎲",
     "kolor": "#dbeafe",
     "marka": "MilliWOOD",
-    "nazwa": "Drewniane Puzzle Milliwood – Dream Team Buddy Dogs, 50 elementów",
+    "nazwa": "Drewniane Puzzle Milliwood – Dream Team – Buddy Dogs, 50 elementów",
     "zdjecie": "https://www.sklep.alexander.com.pl/hpeciai/6986a6712614801703d70c9fa14dd1e1/pol_pm_Drewniane-Puzzle-Milliwood-Dream-Team-Buddy-Dogs-50-Elementow-1610_1.jpg",
     "_catalog": {
       "channels": {
@@ -37052,24 +37052,24 @@
     "producent": "Alexander",
     "sourceUrl": "https://www.sklep.alexander.com.pl/product-pol-1610-Drewniane-Puzzle-Milliwood-Dream-Team-Buddy-Dogs-50-Elementow.html",
     "externalId": "5053",
-    "opisKrotki": "Drewniane puzzle Milliwood z serii Dream Team przedstawiają wesołe pieski o przyjaznych twarzach. Zestaw zawiera 50 elementów i jest przeznaczony dla dzieci od 5 lat.",
+    "opisKrotki": "Drewniane puzzle Milliwood z serii Dream Team w wzorze Buddy Dogs. Wesoła grafika przedstawia grupę przyjaznych piesków, a 50 elementów tworzy kreatywną i spokojną zabawę dla dzieci od 5 lat.",
     "producentUrl": "https://www.sklep.alexander.com.pl/product-pol-1610-Drewniane-Puzzle-Milliwood-Dream-Team-Buddy-Dogs-50-Elementow.html",
     "kodProducenta": "5053",
     "allegroCategoryId": "257813",
     "agentOnboardingStatus": "needs_attention",
-    "allegroAgentPreparedAt": "2026-07-28T08:45:51.173Z",
+    "allegroAgentPreparedAt": "2026-07-28T08:48:16.761Z",
     "allegroEditorialSyncState": "requires_publication_decision",
     "allegroAgentPreparationRunId": "980f03b4-96f0-4781-8ca0-7025461b87ba",
-    "allegroAgentPreparationStatus": "retrying",
+    "allegroAgentPreparationStatus": "decision_required",
     "allegroAgentPreparationMissing": [
       "zdjęcie Allegro min. 500px",
       "informacja o bezpieczeństwie GPSR"
     ],
     "allegroAgentPreparationVersion": 5,
-    "allegroAgentPreparationRetryCount": 7,
+    "allegroAgentPreparationRetryCount": 8,
     "allegroAgentPreparationConfirmedAt": "",
-    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-ede39c7b",
-    "allegroAgentPreparationNextRetryAt": "2026-07-28T08:50:51.173Z"
+    "allegroAgentPreparationFingerprint": "allegro-preparation-v4-c6c82c03",
+    "allegroAgentPreparationNextRetryAt": ""
   },
   {
     "id": "1000512",
@@ -38118,7 +38118,7 @@
           "active": true
         },
         "allegro": {
-          "status": "INACTIVE",
+          "status": "ACTIVE",
           "offerId": "18795915525"
         }
       },
@@ -41551,7 +41551,7 @@
           "active": true
         },
         "allegro": {
-          "status": "INACTIVE",
+          "status": "ACTIVE",
           "offerId": "18795906954"
         }
       },

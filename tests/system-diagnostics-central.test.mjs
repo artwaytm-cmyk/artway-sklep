@@ -187,6 +187,34 @@ test('pełny autotest przekazuje Agentowi błędy i ostrzeżenia oraz zamyka ust
   assert.ok(record().items.every((item) => /autotest/i.test(item.resolution)));
 });
 
+test('pozytywny autotest zamyka odpowiadające mu stare zdarzenia przeglądarki, ale nie inne błędy', async () => {
+  const { service, record } = fixture();
+  await service.record([
+    { level: 'blad', message: 'products.json niedostępny: Failed to fetch', source: 'przeglądarka', kind: 'browser', route: '/' },
+    { level: 'blad', message: 'Kontakt/FAQ/Dostawa nie mogą zostać wyrenderowane', source: 'pełny autotest', kind: 'browser', route: '/admin/system' },
+    { level: 'blad', message: 'Nie udało się zapisać zamówienia', source: 'przeglądarka', kind: 'browser', route: '/zamowienie' },
+  ], { trusted: true });
+  const request = new Request('https://artwaytm.pl/api/store?action=diagnostics-checks-sync', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin': '1' },
+    body: JSON.stringify({
+      checks: [],
+      passedChecks: [
+        { name: 'Dostęp do products.json', group: 'Autotest techniczny', details: '1114 rekordów' },
+        { name: 'Renderowanie głównych widoków', group: 'Autotest techniczny', details: 'Sprawdzono 5 kluczowych ekranów' },
+      ],
+    }),
+  });
+  const response = await service.route(request, new URL(request.url), 'diagnostics-checks-sync');
+  const body = await json(response);
+  assert.equal(response.status, 202);
+  assert.equal(body.passed, 2);
+  assert.equal(body.summary.open, 1);
+  assert.equal(record().items.find((item) => /products\.json/.test(item.message)).status, 'resolved');
+  assert.equal(record().items.find((item) => /Kontakt/.test(item.message)).status, 'resolved');
+  assert.equal(record().items.find((item) => /zamówienia/.test(item.message)).status, 'open');
+});
+
 test('frontend wysyła błędy do VPS i autotest zapisuje nazwę nieudanej kontroli', async () => {
   const runtime = await import('node:fs/promises').then((fs) => fs.readFile('src/frontend/02-runtime-state.js', 'utf8'));
   const diagnostics = await import('node:fs/promises').then((fs) => fs.readFile('src/frontend/16-diagnostics.js', 'utf8'));
@@ -198,6 +226,7 @@ test('frontend wysyła błędy do VPS i autotest zapisuje nazwę nieudanej kontr
   assert.match(runtime, /DIAGNOSTYKA_KOLEJKA_KEY/);
   assert.match(diagnostics, /Centralny rejestr błędów/);
   assert.match(diagnostics, /diagnostics-checks-sync/);
+  assert.match(diagnostics, /passedChecks/);
   assert.match(diagnostics, /systemDokumentTymczasowyHTML/);
   assert.match(diagnostics, /systemOdswiezDiagnostyke.*diagnostykaSynchronizujProblemy/s);
   assert.match(diagnostics, /fetchedAt/);

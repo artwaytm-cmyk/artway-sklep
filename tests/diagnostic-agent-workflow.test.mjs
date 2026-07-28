@@ -9,7 +9,7 @@ test('diagnostyka rutynowa używa GPT-5.4 mini, a pełny GPT-5.4 jest zarezerwow
     tier: 'standard-routine',
     reasoning: 'low',
     mode: 'standard',
-    maxOutputTokens: 1400,
+    maxOutputTokens: 2200,
     escalation: false,
   });
   assert.equal(diagnosticsModelPolicy({}, { escalation: true }).model, 'gpt-5.4');

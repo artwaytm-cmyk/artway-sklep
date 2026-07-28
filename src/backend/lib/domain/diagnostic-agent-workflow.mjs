@@ -145,7 +145,10 @@ export function createDiagnosticAgentWorkflow({
       model: policy.model,
       modelSettings: {
         reasoning: { effort: policy.reasoning, mode: policy.mode, summary: 'detailed' },
-        text: { verbosity: 'medium' },
+        // Wynik jest strukturalny i ma być krótki. Większy limit chroni JSON
+        // przed ucięciem po tokenach rozumowania, a niska rozwlekłość nie
+        // zwiększa rzeczywistego kosztu rutynowej analizy.
+        text: { verbosity: 'low' },
         maxTokens: policy.maxOutputTokens,
         store: false,
         retry: { maxRetries: 2 },

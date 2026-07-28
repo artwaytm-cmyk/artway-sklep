@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 const RECORD_KEY = 'system_diagnostics';
 const MAX_GROUPS = 500;
 const MAX_EVENTS_PER_REQUEST = 25;
+const MAX_PASSED_CHECKS_PER_REQUEST = 100;
 const MAX_WRITE_ATTEMPTS = 8;
 const OPEN_STATUSES = new Set(['open', 'investigating']);
 const ANALYSIS_STATUSES = new Set(['idle', 'queued', 'running', 'completed', 'failed']);
@@ -71,6 +72,34 @@ function safeEvent(value = {}, now = new Date()) {
     at: iso(value?.at, now.toISOString()),
   };
   return { ...event, fingerprint: eventFingerprint(event) };
+}
+
+function safePassedCheck(value = {}, now = new Date()) {
+  const name = clean(value?.name || value?.nazwa, 220);
+  if (!name) return null;
+  return {
+    name,
+    group: clean(value?.group || value?.grupa, 180),
+    details: clean(value?.details || value?.szczegoly, 500),
+    release: clean(value?.release, 100),
+    checkedAt: iso(value?.checkedAt || value?.at, now.toISOString()),
+  };
+}
+
+const LEGACY_BROWSER_CHECK_PATTERNS = Object.freeze({
+  'Dostęp do products.json': /\bproducts\.json\b/i,
+  'Renderowanie głównych widoków': /(?:renderowanie głównych widoków|kontakt.{0,80}faq.{0,80}dostawa|blokPrzydatneLinkiHTML|widok(?:Kontakt|FAQ|Dostawa))/i,
+});
+
+function passedCheckResolvesLegacyBrowserItem(item = {}, passedChecks = [], checkedAt = '') {
+  if (!OPEN_STATUSES.has(item.status) || item.kind === 'autotest' || String(item.source || '').startsWith('autotest:')) return false;
+  const seenAt = Date.parse(item.lastSeenAt || '');
+  const validationAt = Date.parse(checkedAt || '');
+  if (Number.isFinite(seenAt) && Number.isFinite(validationAt) && seenAt > validationAt) return false;
+  return passedChecks.some((check) => {
+    const pattern = LEGACY_BROWSER_CHECK_PATTERNS[check.name];
+    return pattern?.test(`${item.message || ''} ${item.source || ''} ${item.route || ''}`) === true;
+  });
 }
 
 function safeItem(value = {}) {
@@ -328,28 +357,38 @@ export function createSystemDiagnosticsRoute({
         .slice(0, MAX_EVENTS_PER_REQUEST)
         .map((event) => safeEvent({ ...event, kind: 'autotest' }, now()))
         .filter(Boolean);
+      const passedChecks = (Array.isArray(body.passedChecks) ? body.passedChecks : [])
+        .slice(0, MAX_PASSED_CHECKS_PER_REQUEST)
+        .map((check) => safePassedCheck(check, now()))
+        .filter(Boolean);
       const result = await record(checks, { trusted: true });
       const activeFingerprints = new Set(checks.map((event) => event.fingerprint));
       const at = now().toISOString();
       const synchronized = await change((recordValue) => ({
         ...recordValue,
-        items: recordValue.items.map((item) => (
-          item.kind === 'autotest'
-          && String(item.source || '').startsWith('autotest:')
-          && OPEN_STATUSES.has(item.status)
-          && !activeFingerprints.has(item.fingerprint)
-        ) ? safeItem({
-          ...item,
-          status: 'resolved',
-          resolvedAt: at,
-          resolvedBy: clean(sessionOf(req)?.email || 'pełny autotest', 180),
-          resolution: 'Ponowny pełny autotest potwierdził usunięcie problemu.',
-        }) : item),
+        items: recordValue.items.map((item) => {
+          const resolvedAutotest = item.kind === 'autotest'
+            && String(item.source || '').startsWith('autotest:')
+            && OPEN_STATUSES.has(item.status)
+            && !activeFingerprints.has(item.fingerprint);
+          const resolvedLegacyBrowser = passedCheckResolvesLegacyBrowserItem(item, passedChecks, at);
+          if (!resolvedAutotest && !resolvedLegacyBrowser) return item;
+          return safeItem({
+            ...item,
+            status: 'resolved',
+            resolvedAt: at,
+            resolvedBy: clean(sessionOf(req)?.email || 'pełny autotest', 180),
+            resolution: resolvedLegacyBrowser
+              ? `Aktualny pełny autotest zaliczył kontrolę: ${passedChecks.find((check) => LEGACY_BROWSER_CHECK_PATTERNS[check.name]?.test(`${item.message || ''} ${item.source || ''} ${item.route || ''}`))?.name || 'kontrola przeglądarki'}.`
+              : 'Ponowny pełny autotest potwierdził usunięcie problemu.',
+          });
+        }),
         updatedAt: at,
       }));
       return respond({
         ok: true,
         accepted: result.accepted,
+        passed: passedChecks.length,
         opened: result.opened.length,
         summary: summary(synchronized.items),
         agent: diagnosticAgent?.status?.() || { configured: false },
